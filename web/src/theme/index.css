@@ -1,0 +1,859 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   Tema Claude — escuro
+   ==========================================================================
+   Paleta da identidade visual da Anthropic (o sistema roda sobre o Claude):
+   escuro #141413, claro #faf9f5, cinzas #b0aea5 / #e8e6dc e os acentos
+   laranja #d97757, azul #6a9bcc e verde #788c5d. Títulos em Poppins,
+   respostas do Claude em Lora (serifada, como no claude.ai) e dados técnicos
+   em JetBrains Mono.
+
+   Diverge de propósito do Design System Vaccinar (ConexaoVaccinarv2): é a
+   única tela da empresa que é, ela mesma, um console do Claude. Os nomes dos
+   tokens semânticos (--primary, --surface, --border…) foram mantidos para
+   que a convenção "sempre var(--token)" continue valendo.
+   ========================================================================== */
+
+:root {
+  /* Paleta Anthropic */
+  --claude-escuro: #141413;
+  --claude-claro: #faf9f5;
+  --claude-cinza-medio: #b0aea5;
+  --claude-cinza-claro: #e8e6dc;
+  --claude-laranja: #d97757;
+  --claude-azul: #6a9bcc;
+  --claude-verde: #788c5d;
+  --claude-vermelho: #bf4d43;
+  --claude-kraft: #d4a27f;
+
+  /* Superfícies (do fundo para cima) */
+  --screen-bg: var(--claude-escuro);
+  --surface: #1c1c1a;
+  --surface-2: #232321;
+  --surface-3: #2c2c29;
+  --border: color-mix(in srgb, var(--claude-claro) 10%, transparent);
+  --border-forte: color-mix(in srgb, var(--claude-claro) 18%, transparent);
+
+  /* Texto */
+  --primary: var(--claude-claro);
+  --secondary: var(--claude-cinza-medio);
+  --muted: color-mix(in srgb, var(--claude-cinza-medio) 70%, var(--claude-escuro));
+  --caption: var(--claude-cinza-claro);
+  --placeholder: color-mix(in srgb, var(--claude-cinza-medio) 55%, var(--claude-escuro));
+
+  /* Ação e estado — clareados para contraste sobre fundo escuro */
+  --active: var(--claude-laranja);
+  --active-forte: color-mix(in srgb, var(--claude-laranja) 82%, black);
+  --brand: var(--claude-laranja);
+  --info: var(--claude-azul);
+  --success: color-mix(in srgb, var(--claude-verde) 78%, var(--claude-claro));
+  --warning: var(--claude-kraft);
+  --error: color-mix(in srgb, var(--claude-vermelho) 85%, var(--claude-claro));
+
+  /* Raios e sombras */
+  --radius-card: 10px;
+  --radius-input: 8px;
+  --radius-button: 8px;
+  --shadow-card: 0 1px 0 color-mix(in srgb, var(--claude-claro) 4%, transparent) inset,
+    0 12px 32px -16px rgba(0, 0, 0, .6);
+
+  /* Tipografia */
+  --fonte-titulo: "Poppins", system-ui, "Segoe UI", sans-serif;
+  --fonte-texto: system-ui, "Segoe UI", Roboto, sans-serif;
+  --fonte-resposta: "Lora", Georgia, serif;
+  --fonte-mono: "JetBrains Mono", Consolas, "Courier New", monospace;
+
+  color-scheme: dark;
+  line-height: 1.5;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Expõe os tokens ao Tailwind (`text-primary`, `bg-surface-2`, `border-border`…). */
+@theme inline {
+  --color-primary: var(--primary);
+  --color-secondary: var(--secondary);
+  --color-muted: var(--muted);
+  --color-caption: var(--caption);
+  --color-active: var(--active);
+  --color-brand: var(--brand);
+  --color-info: var(--info);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-error: var(--error);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-screen-bg: var(--screen-bg);
+  --color-border: var(--border);
+  --color-border-forte: var(--border-forte);
+
+  --font-sans: var(--fonte-texto);
+  --font-titulo: var(--fonte-titulo);
+  --font-resposta: var(--fonte-resposta);
+  --font-mono: var(--fonte-mono);
+  --radius-card: var(--radius-card);
+}
+
+/* --------------------------------------------------------------------------
+   Base
+   -------------------------------------------------------------------------- */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--fonte-texto);
+  font-size: 13px;
+  color: var(--primary);
+  background-color: var(--screen-bg);
+}
+
+h1, h2, h3 { font-family: var(--fonte-titulo); margin: 0; letter-spacing: -.01em; }
+h1 { font-size: 16px; font-weight: 600; }
+h2 { font-size: 15px; font-weight: 600; }
+h3 { font-size: 12px; font-weight: 600; }
+
+::selection { background: color-mix(in srgb, var(--active) 40%, transparent); }
+
+.text-caption { font-size: 12px; color: var(--caption); }
+.text-support { font-size: 11px; color: var(--muted); }
+.mono { font-family: var(--fonte-mono); font-size: 11px; letter-spacing: -.01em; }
+
+/* Rótulo técnico em caixa alta, usado em cabeçalhos de seção. */
+.rotulo-tecnico {
+  font-family: var(--fonte-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* --------------------------------------------------------------------------
+   Botões
+   -------------------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: var(--radius-button);
+  border: 1px solid transparent;
+  font-family: var(--fonte-titulo);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s;
+  white-space: nowrap;
+}
+
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
+
+.btn-cta {
+  background: var(--active);
+  color: var(--claude-escuro);
+  box-shadow: 0 0 0 0 transparent;
+}
+.btn-cta:not(:disabled):hover {
+  background: color-mix(in srgb, var(--active) 88%, var(--claude-claro));
+  box-shadow: 0 0 18px -4px color-mix(in srgb, var(--active) 70%, transparent);
+}
+
+.btn-outline {
+  background: var(--surface-2);
+  color: var(--primary);
+  border-color: var(--border-forte);
+}
+.btn-outline:not(:disabled):hover { background: var(--surface-3); border-color: var(--secondary); }
+
+.btn-ghost { background: transparent; color: var(--secondary); }
+.btn-ghost:not(:disabled):hover { background: var(--surface-3); color: var(--primary); }
+
+.btn-danger {
+  background: transparent;
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 55%, transparent);
+}
+.btn-danger:not(:disabled):hover { background: color-mix(in srgb, var(--error) 16%, transparent); }
+
+.btn-sm { height: 28px; padding: 0 10px; font-size: 11.5px; }
+
+/* --------------------------------------------------------------------------
+   Cards e superfícies
+   -------------------------------------------------------------------------- */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: 16px 18px 20px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+/* --------------------------------------------------------------------------
+   Formulários
+   -------------------------------------------------------------------------- */
+
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+.label {
+  font-family: var(--fonte-titulo);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--caption);
+}
+
+.input, .select, .textarea {
+  width: 100%;
+  padding: 9px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--primary);
+  background: var(--surface-2);
+  border: 1px solid var(--border-forte);
+  border-radius: var(--radius-input);
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+
+.input::placeholder, .textarea::placeholder { color: var(--placeholder); }
+
+.input:focus, .select:focus, .textarea:focus {
+  border-color: var(--active);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--active) 22%, transparent);
+}
+
+.select option { background: var(--surface-2); color: var(--primary); }
+
+.hint { font-size: 11px; color: var(--muted); }
+.hint-error { font-size: 11px; color: var(--error); }
+
+input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
+
+/* Controle segmentado: um grupo de opções lado a lado, com a escolhida acesa.
+ * Colunas iguais numa linha só — quebrando, a terceira opção ficava sozinha. */
+.segmentado {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-input);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.segmentado label {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--secondary);
+  transition: background-color .15s, color .15s;
+}
+
+.segmentado input { position: absolute; opacity: 0; pointer-events: none; }
+.segmentado label:hover { color: var(--primary); }
+.segmentado label:has(input:checked) {
+  background: color-mix(in srgb, var(--active) 16%, var(--surface-3));
+  color: var(--primary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--active) 55%, transparent);
+}
+.segmentado label:has(input:focus-visible) { outline: 2px solid var(--active); outline-offset: 1px; }
+
+/* --------------------------------------------------------------------------
+   Alertas
+   -------------------------------------------------------------------------- */
+
+.alert {
+  padding: 9px 12px;
+  border-radius: var(--radius-input);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--secondary);
+  font-size: 12.5px;
+  color: var(--caption);
+}
+
+.alert-success { border-left-color: var(--success); }
+.alert-error   { border-left-color: var(--error); background: color-mix(in srgb, var(--error) 8%, var(--surface-2)); }
+.alert-info    { border-left-color: var(--info); }
+.alert-warning { border-left-color: var(--warning); background: color-mix(in srgb, var(--warning) 7%, var(--surface-2)); }
+
+/* --------------------------------------------------------------------------
+   Barras de rolagem
+   -------------------------------------------------------------------------- */
+
+.custom-scrollbar { scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+.custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 9px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+
+/* ==========================================================================
+   Orquestrador de agentes — canvas, terminais e bixinhos
+   ========================================================================== */
+
+/* Etiqueta de situação: ponto colorido + texto técnico. */
+.etiqueta {
+  --cor-da-etiqueta: var(--secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--fonte-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--cor-da-etiqueta) 85%, var(--claude-claro));
+  background: color-mix(in srgb, var(--cor-da-etiqueta) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--cor-da-etiqueta) 35%, transparent);
+}
+.etiqueta::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--cor-da-etiqueta); }
+.etiqueta-ativa   { --cor-da-etiqueta: var(--active); }
+.etiqueta-info    { --cor-da-etiqueta: var(--info); }
+.etiqueta-success { --cor-da-etiqueta: var(--success); }
+.etiqueta-error   { --cor-da-etiqueta: var(--error); }
+.etiqueta-warning { --cor-da-etiqueta: var(--warning); }
+.etiqueta-pulso::before { animation: pulso-ponto 1.4s ease-out infinite; }
+
+@keyframes pulso-ponto {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--cor-da-etiqueta, var(--active)) 70%, transparent); }
+  100% { box-shadow: 0 0 0 7px transparent; }
+}
+
+.ponto-de-status { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--muted); }
+.ponto-de-status-ativo { background: var(--active); animation: pulso-ponto 1.4s ease-out infinite; }
+.ponto-de-status-erro { --cor-da-etiqueta: var(--error); width: 10px; height: 10px; background: var(--error); animation: pulso-ponto 1.2s ease-out infinite; }
+.ponto-de-status-ok { width: 10px; height: 10px; background: var(--success); }
+
+/* Faixa de conexão no topo do canvas: grande de propósito. Com o servidor
+ * fora, a tela congela no último estado e parece travada. */
+.aviso-de-conexao {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: min(720px, calc(100vw - 32px));
+  /* Abaixo da barra superior, para não cobrir o botão de novo orquestrador. */
+  margin-top: 64px;
+  padding: 12px 16px;
+  border-radius: var(--radius-card);
+  font-size: 12.5px;
+  color: var(--primary);
+  box-shadow: 0 18px 50px -12px rgba(0, 0, 0, .85);
+  animation: descer .3s ease-out both;
+}
+.aviso-de-conexao .ponto-de-status { margin-top: 4px; }
+.aviso-desconectado {
+  background: color-mix(in srgb, var(--error) 22%, var(--surface));
+  border: 1px solid var(--error);
+}
+.aviso-reconectado {
+  background: color-mix(in srgb, var(--success) 18%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--success) 70%, transparent);
+}
+@keyframes descer { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: none; } }
+
+/* Servidor fora: tudo o que é "ao vivo" congela e perde a cor, para ninguém
+ * achar que os agentes continuam trabalhando. */
+.canvas-desconectado .react-flow__node,
+.canvas-desconectado .react-flow__edges { filter: grayscale(.85) brightness(.75); transition: filter .4s; }
+.canvas-desconectado .react-flow__node *,
+.canvas-desconectado .react-flow__edge-path { animation-play-state: paused !important; }
+
+.texto-longo { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Chip técnico (ex.: memória do processo na barra do terminal). */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 6px;
+  font-family: var(--fonte-mono);
+  font-size: 10.5px;
+  color: var(--secondary);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Medidor da cota da assinatura (5 horas / 7 dias). */
+.medidor { width: 64px; height: 4px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.medidor > span { display: block; height: 100%; border-radius: 99px; background: var(--active); }
+.medidor-alto > span { background: var(--error); }
+
+/* Ladrilho com o ícone do Orquestrador (logo da barra, tela vazia). */
+.no-orquestrador-icone {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  color: var(--active);
+  background: color-mix(in srgb, var(--active) 14%, var(--surface-3));
+}
+
+/* Cursor piscando, estilo terminal. */
+.cursor::after { content: "▍"; margin-left: 2px; color: var(--active); animation: piscar 1s steps(1) infinite; }
+@keyframes piscar { 50% { opacity: 0; } }
+
+/* Faixa indeterminada de "trabalhando". */
+.faixa-de-progresso { position: relative; height: 2px; overflow: hidden; background: var(--surface-3); }
+.faixa-de-progresso::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 35%;
+  background: linear-gradient(90deg, transparent, var(--active), transparent);
+  animation: varrer 1.4s ease-in-out infinite;
+}
+@keyframes varrer { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+
+/* ---------------- Canvas (React Flow com as cores do tema) ---------------- */
+
+.react-flow {
+  --xy-background-color: var(--screen-bg);
+  --xy-background-pattern-dots-color-default: color-mix(in srgb, var(--claude-claro) 13%, transparent);
+  --xy-edge-stroke: var(--border-forte);
+  --xy-edge-stroke-width: 1.6;
+  --xy-node-border-radius: 12px;
+  --xy-minimap-background-color: var(--surface);
+  --xy-minimap-mask-background-color: color-mix(in srgb, black 55%, transparent);
+  --xy-minimap-mask-stroke-color: var(--border-forte);
+  --xy-controls-button-background-color: var(--surface-2);
+  --xy-controls-button-background-color-hover: var(--surface-3);
+  --xy-controls-button-color: var(--secondary);
+  --xy-controls-button-color-hover: var(--primary);
+  --xy-controls-button-border-color: var(--border);
+  --xy-controls-box-shadow: var(--shadow-card);
+  --xy-resize-background-color: var(--active);
+  --xy-attribution-background-color: transparent;
+}
+
+.react-flow__attribution a { color: var(--muted); }
+.react-flow__minimap { border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; }
+.react-flow__minimap-node.minimapa-terminal { fill: var(--surface-3); stroke: var(--border-forte); }
+.react-flow__minimap-node.minimapa-bixinho { fill: var(--active); }
+.react-flow__controls { border-radius: var(--radius-input); overflow: hidden; border: 1px solid var(--border); }
+
+/* Nós sem a moldura padrão do React Flow: cada tipo desenha a própria. */
+.react-flow__node-terminal,
+.react-flow__node-rascunho,
+.react-flow__node-bixinho { background: transparent; border: 0; padding: 0; }
+
+/* Âncoras das linhas: existem para o React Flow, não para o usuário. */
+.ancora { opacity: 0; pointer-events: none; width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; }
+/* A linha chega no topo do desenho do bixinho, abaixo do balão de fala. */
+.ancora-bixinho { top: 34px !important; }
+
+/* Linhas terminal → bixinho, coloridas pela situação do Subagente. */
+.react-flow__edge.aresta-executando .react-flow__edge-path { stroke: var(--active); stroke-width: 2; }
+.react-flow__edge.aresta-concluido .react-flow__edge-path { stroke: color-mix(in srgb, var(--success) 75%, transparent); }
+.react-flow__edge.aresta-falhou .react-flow__edge-path { stroke: color-mix(in srgb, var(--error) 80%, transparent); }
+.react-flow__edge.aresta-cancelado .react-flow__edge-path { stroke: var(--muted); stroke-dasharray: 3 6; }
+
+/* Redimensionamento dos terminais (só aparece no terminal selecionado). */
+.redimensionador-linha { border-color: color-mix(in srgb, var(--active) 55%, transparent) !important; }
+.redimensionador-alca {
+  width: 9px !important;
+  height: 9px !important;
+  border-radius: 2px !important;
+  background: var(--active) !important;
+  border: 1px solid var(--claude-escuro) !important;
+}
+
+/* Painéis que flutuam sobre o canvas. */
+.painel-flutuante {
+  border-radius: var(--radius-card);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  border: 1px solid var(--border);
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7);
+  backdrop-filter: blur(6px);
+}
+
+/* ---------------- Janela de terminal (Orquestrador) ---------------- */
+
+.janela-terminal {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--claude-escuro) 70%, black);
+  border: 1px solid var(--border-forte);
+  box-shadow: 0 24px 60px -24px rgba(0, 0, 0, .85), 0 0 0 1px rgba(0, 0, 0, .4);
+  transition: border-color .2s, box-shadow .2s;
+}
+.janela-terminal-ativa {
+  border-color: color-mix(in srgb, var(--active) 55%, var(--border-forte));
+  box-shadow: 0 24px 60px -24px rgba(0, 0, 0, .85), 0 0 34px -10px color-mix(in srgb, var(--active) 55%, transparent);
+}
+.react-flow__node.selected .janela-terminal { border-color: var(--active); }
+
+.barra-do-terminal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 8px 0 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  cursor: grab;
+}
+.barra-do-terminal:active { cursor: grabbing; }
+
+.semaforo { display: inline-flex; gap: 6px; margin-right: 4px; }
+.semaforo i { width: 10px; height: 10px; border-radius: 50%; background: var(--surface-3); }
+.semaforo i:nth-child(1) { background: color-mix(in srgb, var(--error) 80%, var(--surface-3)); }
+.semaforo i:nth-child(2) { background: color-mix(in srgb, var(--warning) 80%, var(--surface-3)); }
+.semaforo i:nth-child(3) { background: color-mix(in srgb, var(--success) 80%, var(--surface-3)); }
+
+.botao-icone {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  color: var(--secondary);
+  cursor: pointer;
+  font-size: 13px;
+}
+.botao-icone:hover, .botao-icone[aria-pressed="true"] { background: var(--surface-3); color: var(--primary); }
+
+.corpo-do-terminal {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px;
+  font-family: var(--fonte-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--caption);
+  user-select: text;
+  cursor: text;
+}
+
+.banner-do-terminal {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--active) 35%, var(--border));
+  background: color-mix(in srgb, var(--active) 5%, transparent);
+  overflow-wrap: anywhere;
+}
+
+.prompt-registrado { display: flex; gap: 8px; color: var(--primary); font-weight: 500; }
+
+.linha-do-terminal {
+  display: grid;
+  grid-template-columns: 62px 14px minmax(70px, auto) 1fr;
+  column-gap: 8px;
+  align-items: baseline;
+  font-size: 11px;
+}
+.linha-simbolo { text-align: center; color: var(--muted); }
+.linha-origem-orquestrador { color: var(--active); }
+.linha-origem-bixinho { color: var(--info); white-space: nowrap; }
+.linha-texto { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--caption); }
+.linha-spawn .linha-simbolo, .linha-spawn .linha-texto { color: var(--active); }
+.linha-fim .linha-simbolo, .linha-fim .linha-texto { color: var(--success); }
+.linha-erro .linha-simbolo, .linha-erro .linha-texto { color: var(--error); }
+.linha-sistema .linha-texto { color: var(--muted); }
+
+.resposta-no-terminal {
+  margin-top: 4px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--active);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  border-radius: 0 8px 8px 0;
+}
+
+.prompt-do-terminal {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  font-family: var(--fonte-mono);
+  font-size: 13px;
+}
+.prompt-do-terminal > span { line-height: 28px; }
+.prompt-do-terminal textarea {
+  flex: 1;
+  min-height: 28px;
+  max-height: 140px;
+  resize: none;
+  padding: 4px 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.prompt-do-terminal textarea::placeholder { color: var(--placeholder); }
+
+/* Prompt com imagens: a borda e o fundo passam para a área inteira. */
+.area-do-prompt { border-top: 1px solid var(--border); background: var(--surface); }
+.area-do-prompt .prompt-do-terminal { border-top: 0; background: transparent; }
+
+.miniaturas-do-prompt { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 12px 0; }
+.miniatura {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  margin: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border-forte);
+  background: var(--surface-2);
+}
+.miniatura img { width: 100%; height: 100%; object-fit: cover; }
+.miniatura-remover {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 10px;
+  color: var(--claude-claro);
+  background: color-mix(in srgb, black 70%, transparent);
+  cursor: pointer;
+}
+.miniatura-remover:hover { background: var(--error); }
+
+/* Imagens já enviadas, abaixo da mensagem no histórico do terminal. */
+.anexos-do-turno { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 18px; }
+.anexos-do-turno a {
+  display: block;
+  width: 88px;
+  height: 60px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-forte);
+}
+.anexos-do-turno a:hover { border-color: var(--active); }
+.anexos-do-turno img { width: 100%; height: 100%; object-fit: cover; }
+
+/* Arrastando imagens sobre o terminal. */
+.janela-terminal { position: relative; }
+.soltar-imagens {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--active);
+  border-radius: 12px;
+  font-family: var(--fonte-mono);
+  font-size: 13px;
+  color: var(--active);
+  background: color-mix(in srgb, var(--claude-escuro) 80%, transparent);
+  pointer-events: none;
+}
+
+/* O coração do sinal de vida pulsa a cada notícia do Claude. */
+.batimento { display: inline-block; animation: bater .6s ease-out 1; }
+@keyframes bater {
+  0% { transform: scale(1.6); color: var(--active); }
+  100% { transform: scale(1); }
+}
+
+/* Alerta de memória, abaixo do painel de status. */
+.aviso-de-memoria {
+  max-width: 460px;
+  padding: 8px 12px;
+  border-radius: var(--radius-input);
+  font-size: 12px;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--warning) 18%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--warning) 70%, transparent);
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7);
+}
+.aviso-de-memoria-critica {
+  background: color-mix(in srgb, var(--error) 20%, var(--surface));
+  border-color: var(--error);
+}
+
+/* ---------------- Bixinhos (Subagentes) ---------------- */
+
+.no-bixinho {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  height: 100%;
+  padding-top: 34px;
+  cursor: pointer;
+  animation: nascer .55s cubic-bezier(.2, 1.5, .4, 1) both;
+}
+
+@keyframes nascer {
+  0% { opacity: 0; transform: scale(.2) translateY(-30px); }
+  100% { opacity: 1; transform: none; }
+}
+
+/* Anel que se expande quando o bixinho nasce. */
+.no-bixinho::after {
+  content: "";
+  position: absolute;
+  top: 39px;
+  left: 50%;
+  width: 70px;
+  height: 70px;
+  margin-left: -35px;
+  border-radius: 50%;
+  border: 2px solid var(--active);
+  opacity: 0;
+  pointer-events: none;
+  animation: puf .7s ease-out .1s 1;
+}
+@keyframes puf {
+  0% { opacity: .9; transform: scale(.3); }
+  100% { opacity: 0; transform: scale(1.5); }
+}
+
+.no-bixinho-selecionado .bixinho-sprite { filter: drop-shadow(0 0 10px color-mix(in srgb, var(--active) 80%, transparent)); }
+
+/* Balão de fala acima do bixinho: o que ele está fazendo agora. */
+.balao-do-bixinho {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  max-width: 170px;
+  transform: translateX(-50%);
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-forte);
+  font-family: var(--fonte-mono);
+  font-size: 10px;
+  color: var(--caption);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.no-bixinho-executando .balao-do-bixinho { border-color: color-mix(in srgb, var(--active) 55%, var(--border)); color: var(--primary); }
+.no-bixinho-concluido .balao-do-bixinho { color: var(--success); }
+.no-bixinho-falhou .balao-do-bixinho { color: var(--error); }
+.no-bixinho-cancelado .balao-do-bixinho { color: var(--muted); }
+
+/* Cores dos bixinhos: tokens da paleta da Anthropic. */
+.bixinho-sprite { overflow: visible; }
+.bixinho-cor-laranja { --cor-do-bixinho: var(--claude-laranja); }
+.bixinho-cor-kraft   { --cor-do-bixinho: var(--claude-kraft); }
+.bixinho-cor-azul    { --cor-do-bixinho: var(--claude-azul); }
+.bixinho-cor-verde   { --cor-do-bixinho: var(--success); }
+.bixinho-cor-creme   { --cor-do-bixinho: var(--claude-cinza-claro); }
+
+.bixinho-corpo { fill: var(--cor-do-bixinho); }
+.bixinho-escuro { fill: var(--claude-escuro); }
+.bixinho-brilho { fill: var(--claude-claro); }
+.bixinho-destaque { fill: color-mix(in srgb, var(--cor-do-bixinho) 45%, var(--claude-claro)); }
+.bixinho-bochecha { fill: color-mix(in srgb, var(--claude-laranja) 60%, var(--claude-claro)); }
+.bixinho-sombra { fill: rgba(0, 0, 0, .45); }
+
+.bixinho-corpo-animado { transform-box: fill-box; transform-origin: 50% 100%; }
+
+/* Trabalhando: pula no lugar e pisca. */
+.no-bixinho-executando .bixinho-corpo-animado { animation: saltitar .55s ease-in-out infinite alternate; }
+.no-bixinho-executando .bixinho-olhos { transform-box: fill-box; transform-origin: 50% 50%; animation: piscar-olhos 3.4s infinite; }
+@keyframes saltitar { from { transform: translateY(0); } to { transform: translateY(-5px); } }
+@keyframes piscar-olhos { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.1); } }
+
+/* Concluído: um pulinho de comemoração. */
+.no-bixinho-concluido .bixinho-corpo-animado { animation: comemorar .7s ease-out 1; }
+@keyframes comemorar {
+  0%, 100% { transform: translateY(0) rotate(0); }
+  30% { transform: translateY(-12px) rotate(-6deg); }
+  60% { transform: translateY(-4px) rotate(5deg); }
+}
+
+/* Falhou: balança. Cancelado: dorme, sem cor. */
+.no-bixinho-falhou .bixinho-corpo-animado { animation: tremer .45s ease-in-out 2; }
+@keyframes tremer { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+.no-bixinho-cancelado .bixinho-sprite { filter: grayscale(1) brightness(.7); }
+
+/* Ficha do bixinho (ao clicar). */
+.ficha-do-bixinho {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 360px;
+  padding: 14px 16px;
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  border: 1px solid var(--border-forte);
+  box-shadow: 0 18px 50px -18px rgba(0, 0, 0, .85);
+  cursor: auto;
+  user-select: text;
+}
+
+/* Respostas do Claude em Markdown. */
+.markdown { font-family: var(--fonte-resposta); font-size: 14px; line-height: 1.65; color: var(--primary); overflow-wrap: anywhere; }
+.markdown-compacto { font-size: 13px; }
+/* Dentro do terminal, a resposta segue a fonte monoespaçada da janela. */
+.markdown-terminal { font-family: var(--fonte-mono); font-size: 12px; line-height: 1.65; }
+.markdown > * + * { margin-top: 9px; }
+.markdown h1, .markdown h2, .markdown h3, .markdown h4 { font-family: var(--fonte-titulo); font-size: 13px; font-weight: 600; margin-top: 14px; }
+.markdown strong { font-weight: 600; color: var(--claude-claro); }
+.markdown ul { list-style: disc; padding-left: 22px; }
+.markdown ol { list-style: decimal; padding-left: 22px; }
+.markdown li + li { margin-top: 3px; }
+.markdown li::marker { color: var(--active); }
+.markdown code {
+  font-family: var(--fonte-mono);
+  font-size: .92em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--claude-cinza-claro);
+  background: var(--surface-3);
+}
+.markdown pre {
+  padding: 10px 12px;
+  border-radius: var(--radius-input);
+  background: color-mix(in srgb, var(--claude-escuro) 70%, black);
+  border: 1px solid var(--border);
+  overflow-x: auto;
+}
+.markdown pre code { padding: 0; background: none; }
+.markdown a { color: var(--active); text-decoration: underline; text-underline-offset: 2px; }
+.markdown blockquote { border-left: 2px solid var(--border-forte); padding-left: 12px; color: var(--secondary); }
+.markdown hr { border-color: var(--border); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
+}
