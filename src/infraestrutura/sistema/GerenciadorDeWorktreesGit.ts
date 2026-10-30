@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readdir, rm } from "node:fs/promises";
 import path from "node:path";
 
@@ -56,8 +57,17 @@ export class GerenciadorDeWorktreesGit implements GerenciadorDeWorktrees {
         return false;
       }
       await this.worktrees.remover(pastaDeTrabalho, caminho);
-      await this.worktrees.apagarBranch(pastaDeTrabalho, branch);
       await this.worktrees.prune(pastaDeTrabalho);
+      // Com commit liberado, um commit feito direto nesta branch deixa o
+      // worktree "limpo": apagar a branch o perderia.
+      if (await this.worktrees.temCommitsSoDela(pastaDeTrabalho, branch)) {
+        console.warn(
+          `[worktrees] A branch "${branch}" tem commits que não estão em nenhuma outra branch; ` +
+            "mantida para não perder trabalho. Mescle ou apague-a à mão quando não precisar mais.",
+        );
+      } else {
+        await this.worktrees.apagarBranch(pastaDeTrabalho, branch);
+      }
       return true;
     } catch (erro) {
       console.warn(`[worktrees] Falha ao limpar o worktree de ${orquestradorId}.`, erro);
@@ -67,9 +77,10 @@ export class GerenciadorDeWorktreesGit implements GerenciadorDeWorktrees {
 
   /**
    * Remove worktrees deixados para trás pela queda do servidor. Chamado no
-   * desligamento/arranque, análogo ao `encerrarAgentesOrfaos`. Só mexe nas
-   * árvores registradas que estiverem vazias (sem alterações); as com trabalho
-   * ficam. Devolve quantas foram removidas.
+   * arranque, análogo ao `encerrarAgentesOrfaos`. Só mexe nas árvores
+   * registradas que estiverem vazias (sem alterações); as com trabalho ficam.
+   * Também apaga pastas em `worktrees/` sem `.git` (não são worktree). Devolve
+   * quantos worktrees foram removidos pelo git.
    */
   async limparOrfaos(pastasDeTrabalho: Iterable<string>): Promise<number> {
     let removidos = 0;
@@ -97,7 +108,7 @@ export class GerenciadorDeWorktreesGit implements GerenciadorDeWorktrees {
         console.warn(`[worktrees] Falha ao limpar worktrees órfãos em "${pasta}".`, erro);
       }
     }
-    // Pastas nossas que sobraram sem registro (ex.: repo sumiu): apaga na marra.
+    // Pastas nossas que não são worktree (sem `.git`): apaga. As com `.git` ficam.
     await this.removerPastasOrfas().catch(() => undefined);
     return removidos;
   }
@@ -107,12 +118,30 @@ export class GerenciadorDeWorktreesGit implements GerenciadorDeWorktrees {
     return path.resolve(caminho).replace(/\\/g, "/").toLowerCase().startsWith(`${base}/`);
   }
 
+  /**
+   * Apaga só o que não é worktree: pasta sem `.git` (ex.: `worktree add` pela
+   * metade). Pasta com `.git` pode guardar trabalho não commitado e nunca é
+   * apagada aqui — quem decide é a limpeza pelo git em `limparOrfaos`, que só
+   * tira as limpas. Se o repositório de origem sumiu ou foi movido, o git não
+   * consegue dizer se há alterações: a pasta fica e o caso vai para o log.
+   */
   private async removerPastasOrfas(): Promise<void> {
     const entradas = await readdir(this.pastaBase, { withFileTypes: true }).catch(() => []);
     for (const entrada of entradas) {
-      if (entrada.isDirectory()) {
-        await rm(path.join(this.pastaBase, entrada.name), { recursive: true, force: true }).catch(() => undefined);
+      if (!entrada.isDirectory()) {
+        continue;
       }
+      const caminho = path.join(this.pastaBase, entrada.name);
+      if (existsSync(path.join(caminho, ".git"))) {
+        if (!(await this.worktrees.ehRepoGit(caminho))) {
+          console.warn(
+            `[worktrees] "${caminho}" perdeu o vínculo com o repositório de origem (movido ou apagado?). ` +
+              `Mantido para não perder trabalho: rode "git worktree repair" no repositório ou apague a pasta à mão.`,
+          );
+        }
+        continue;
+      }
+      await rm(caminho, { recursive: true, force: true }).catch(() => undefined);
     }
   }
 

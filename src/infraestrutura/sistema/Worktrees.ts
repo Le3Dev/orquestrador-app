@@ -140,6 +140,24 @@ export class Worktrees {
     return caminhos;
   }
 
+  /**
+   * Se a branch tem commits que nenhuma outra referência alcança (outras
+   * branches, tags, remotas, stash e os HEADs): apagá-la os perderia. Chame
+   * depois de remover o worktree e rodar o `prune` — o HEAD de um worktree
+   * ainda registrado na própria branch esconderia os commits dela.
+   *
+   * Na dúvida (o git falhou ou respondeu algo inesperado), diz que sim:
+   * manter uma branch sobrando é melhor que perder trabalho.
+   */
+  async temCommitsSoDela(pastaRepo: string, branch: string): Promise<boolean> {
+    const referencia = `refs/heads/${branch}`;
+    const { codigo, saida } = await this.executar(
+      ["rev-list", "--count", referencia, "--not", `--exclude=${referencia}`, "--all"],
+      pastaRepo,
+    );
+    return codigo !== 0 || saida.trim() !== "0";
+  }
+
   /** Apaga a branch local; `-D` porque ela pode não estar mesclada. */
   async apagarBranch(pastaRepo: string, branch: string): Promise<void> {
     const { codigo, erro } = await this.executar(["branch", "-D", branch], pastaRepo);
