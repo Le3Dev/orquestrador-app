@@ -457,12 +457,14 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .react-flow__minimap { border: 1px solid var(--border); border-radius: var(--radius-card); overflow: hidden; }
 .react-flow__minimap-node.minimapa-terminal { fill: var(--surface-3); stroke: var(--border-forte); }
 .react-flow__minimap-node.minimapa-bixinho { fill: var(--active); }
+.react-flow__minimap-node.minimapa-nota { fill: color-mix(in srgb, var(--warning) 60%, var(--surface)); }
 .react-flow__controls { border-radius: var(--radius-input); overflow: hidden; border: 1px solid var(--border); }
 
 /* Nós sem a moldura padrão do React Flow: cada tipo desenha a própria. */
 .react-flow__node-terminal,
 .react-flow__node-rascunho,
-.react-flow__node-bixinho { background: transparent; border: 0; padding: 0; }
+.react-flow__node-bixinho,
+.react-flow__node-nota { background: transparent; border: 0; padding: 0; }
 
 /* Âncoras das linhas: existem para o React Flow, não para o usuário. */
 .ancora { opacity: 0; pointer-events: none; width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; }
@@ -474,6 +476,23 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .react-flow__edge.aresta-concluido .react-flow__edge-path { stroke: color-mix(in srgb, var(--success) 75%, transparent); }
 .react-flow__edge.aresta-falhou .react-flow__edge-path { stroke: color-mix(in srgb, var(--error) 80%, transparent); }
 .react-flow__edge.aresta-cancelado .react-flow__edge-path { stroke: var(--muted); stroke-dasharray: 3 6; }
+/* Executando: a linha segue tracejada (o `stroke-dasharray` do React Flow),
+ * mas parada. A bolinha já mostra a troca, e o tracejado correndo
+ * (`dashdraw`) repintava todas as linhas ativas a cada quadro. */
+.react-flow__edge.aresta-executando.animated path { animation: none; }
+
+/* Bolinha que vai e volta na linha enquanto o bixinho trabalha. Núcleo claro
+ * para destacar sobre a linha laranja; o halo é o próprio contorno, por baixo
+ * do preenchimento (sem `filter`, que pesa com muitas linhas animadas). */
+.bolinha-da-troca {
+  fill: color-mix(in srgb, var(--active) 45%, var(--claude-claro));
+  stroke: color-mix(in srgb, var(--active) 40%, transparent);
+  stroke-width: 5;
+  paint-order: stroke;
+  pointer-events: none;
+}
+/* SMIL não pausa com `animation-play-state`: sem servidor, a bolinha some. */
+.canvas-desconectado .bolinha-da-troca { display: none; }
 
 /* Redimensionamento dos terminais (só aparece no terminal selecionado). */
 .redimensionador-linha { border-color: color-mix(in srgb, var(--active) 55%, transparent) !important; }
@@ -485,13 +504,14 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   border: 1px solid var(--claude-escuro) !important;
 }
 
-/* Painéis que flutuam sobre o canvas. */
+/* Painéis que flutuam sobre o canvas. Fundo quase opaco no lugar de
+ * `backdrop-filter`: o desfoque do que passa por baixo era refeito a cada
+ * quadro de pan/zoom. */
 .painel-flutuante {
   border-radius: var(--radius-card);
-  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
   border: 1px solid var(--border);
   box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7);
-  backdrop-filter: blur(6px);
 }
 
 /* ---------------- Janela de terminal (Orquestrador) ---------------- */
@@ -508,6 +528,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   box-shadow: 0 24px 60px -24px rgba(0, 0, 0, .85), 0 0 0 1px rgba(0, 0, 0, .4);
   transition: border-color .2s, box-shadow .2s;
 }
+/* Plan Mode ligado. Vem antes da ativa: trabalhando, o laranja prevalece. */
+.janela-terminal-planejando { border-color: color-mix(in srgb, var(--info) 55%, transparent); }
 .janela-terminal-ativa {
   border-color: color-mix(in srgb, var(--active) 55%, var(--border-forte));
   box-shadow: 0 24px 60px -24px rgba(0, 0, 0, .85), 0 0 34px -10px color-mix(in srgb, var(--active) 55%, transparent);
@@ -594,6 +616,17 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   border-radius: 0 8px 8px 0;
 }
 
+/* Plano proposto pelo Orquestrador no Plan Mode, aguardando aprovação. */
+.cartao-do-plano {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-card);
+  border: 1px solid color-mix(in srgb, var(--info) 45%, transparent);
+  background: color-mix(in srgb, var(--info) 6%, var(--surface));
+}
+
 .prompt-do-terminal {
   display: flex;
   align-items: flex-end;
@@ -620,6 +653,25 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   line-height: 1.6;
 }
 .prompt-do-terminal textarea::placeholder { color: var(--placeholder); }
+
+/* Selo do modo (ex.: Plan Mode), discreto, logo abaixo da caixa de prompt. */
+.selo-de-modo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 14px 6px;
+  border: 0;
+  background: transparent;
+  font-family: var(--fonte-mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color .15s;
+}
+.selo-de-modo:hover { color: var(--secondary); }
+/* Contorno para dentro: no rodapé da janela, o `overflow: hidden` o cortaria. */
+.selo-de-modo:focus-visible { outline: 2px solid var(--active); outline-offset: -2px; border-radius: 4px; }
+.selo-de-modo-ativo, .selo-de-modo-ativo:hover { color: var(--info); }
 
 /* Prompt com imagens: a borda e o fundo passam para a área inteira. */
 .area-do-prompt { border-top: 1px solid var(--border); background: var(--surface); }
@@ -706,6 +758,126 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   border-color: var(--error);
 }
 
+.botao-icone:disabled { opacity: .45; cursor: not-allowed; }
+.botao-icone-perigo:not(:disabled):hover { color: var(--error); }
+
+/* Botão com cara de link (ex.: "tentar de novo"). */
+.botao-de-texto {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+/* ---------------- Notas (bloco de notas no canvas) ----------------
+ * A moldura do terminal (fonte, raio, bordas) num tom de papel de anotação.
+ * Nada anima: a nota é estática enquanto não é arrastada. */
+
+.janela-nota {
+  --cor-da-nota: var(--warning);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--cor-da-nota) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--cor-da-nota) 35%, var(--border-forte));
+  box-shadow: 0 18px 44px -22px rgba(0, 0, 0, .85);
+  transition: border-color .2s;
+}
+.react-flow__node.selected .janela-nota { border-color: color-mix(in srgb, var(--cor-da-nota) 80%, transparent); }
+
+/* A barra tem 38px: minimizada, a nota é só ela e a borda (ALTURA_DA_NOTA_MINIMIZADA). */
+.barra-da-nota {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 38px;
+  padding: 0 6px 0 12px;
+  background: color-mix(in srgb, var(--cor-da-nota) 16%, var(--surface-2));
+  border-bottom: 1px solid color-mix(in srgb, var(--cor-da-nota) 25%, var(--border));
+  cursor: grab;
+}
+.barra-da-nota:active { cursor: grabbing; }
+.janela-nota-minimizada .barra-da-nota { border-bottom: 0; }
+
+.titulo-da-nota {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--fonte-titulo);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--primary);
+}
+.janela-nota-minimizada .titulo-da-nota { flex-shrink: 0; max-width: 55%; }
+
+.campo-do-titulo-da-nota {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--active);
+  background: var(--surface-2);
+  color: var(--primary);
+  font-family: var(--fonte-titulo);
+  font-size: 12.5px;
+  font-weight: 600;
+  outline: none;
+  cursor: text;
+}
+.campo-do-titulo-da-nota::placeholder { color: var(--placeholder); font-weight: 400; }
+
+/* Minimizada: a primeira linha do texto, ao lado do título. */
+.previa-da-nota {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--fonte-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.texto-da-nota {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  resize: none;
+  padding: 12px 14px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--primary);
+  font-family: var(--fonte-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  cursor: text;
+  user-select: text;
+}
+.texto-da-nota::placeholder { color: var(--placeholder); }
+
+.rodape-da-nota {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  flex-shrink: 0;
+  padding: 4px 12px 6px;
+  border-top: 1px solid color-mix(in srgb, var(--cor-da-nota) 18%, var(--border));
+  font-family: var(--fonte-mono);
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+
 /* ---------------- Bixinhos (Subagentes) ---------------- */
 
 .no-bixinho {
@@ -771,8 +943,11 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .no-bixinho-falhou .balao-do-bixinho { color: var(--error); }
 .no-bixinho-cancelado .balao-do-bixinho { color: var(--muted); }
 
+/* Caixa do desenho: a sombra e o bixinho, dois SVGs empilhados (ver `Bixinho.tsx`). */
+.bixinho-sprite { display: grid; flex-shrink: 0; }
+.bixinho-sprite > svg { grid-area: 1 / 1; overflow: visible; }
+
 /* Cores dos bixinhos: tokens da paleta da Anthropic. */
-.bixinho-sprite { overflow: visible; }
 .bixinho-cor-laranja { --cor-do-bixinho: var(--claude-laranja); }
 .bixinho-cor-kraft   { --cor-do-bixinho: var(--claude-kraft); }
 .bixinho-cor-azul    { --cor-do-bixinho: var(--claude-azul); }
@@ -788,10 +963,14 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 
 .bixinho-corpo-animado { transform-box: fill-box; transform-origin: 50% 100%; }
 
-/* Trabalhando: pula no lugar e pisca. */
-.no-bixinho-executando .bixinho-corpo-animado { animation: saltitar .55s ease-in-out infinite alternate; }
+/* Trabalhando: pula no lugar e pisca. O pulo anima o `<svg>` do desenho, e
+ * não um `<g>` dentro dele: assim vai para o compositor, numa camada própria,
+ * sem repintar as células a cada quadro. A sombra, em outro SVG, fica no chão.
+ * São 6.25px na tela: as 5 unidades do viewBox de antes × a escala do desenho (80px / 64). */
+.no-bixinho-executando .bixinho-desenho { animation: saltitar .55s ease-in-out infinite alternate; will-change: transform; }
+/* A piscada fica: dura ~0,27s a cada 3,4s e só repinta a camada do próprio desenho (80 × 80). */
 .no-bixinho-executando .bixinho-olhos { transform-box: fill-box; transform-origin: 50% 50%; animation: piscar-olhos 3.4s infinite; }
-@keyframes saltitar { from { transform: translateY(0); } to { transform: translateY(-5px); } }
+@keyframes saltitar { from { transform: translateY(0); } to { transform: translateY(-6.25px); } }
 @keyframes piscar-olhos { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.1); } }
 
 /* Concluído: um pulinho de comemoração. */
@@ -806,6 +985,25 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .no-bixinho-falhou .bixinho-corpo-animado { animation: tremer .45s ease-in-out 2; }
 @keyframes tremer { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
 .no-bixinho-cancelado .bixinho-sprite { filter: grayscale(1) brightness(.7); }
+
+/* ---------------- Canvas em movimento ----------------
+ * `canvas-movendo` fica no contêiner do canvas enquanto o usuário arrasta um
+ * nó ou move/aproxima o canvas. */
+
+/* O viewport vira uma camada só, que o navegador desloca e escala sem repintar. */
+.canvas-movendo .react-flow__viewport { will-change: transform; }
+/* O nó arrastado (o terminal, com as sombras grandes, ou um bixinho) e os
+ * bixinhos, que andam junto com o terminal, viram camadas prontas: a cada
+ * quadro são só movidos, sem repintar sombra, texto e células. */
+.canvas-movendo .react-flow__node.dragging,
+.canvas-movendo .react-flow__node-bixinho { will-change: transform; }
+/* Tudo o que anima dentro dos nós para enquanto o canvas se move: cada
+ * quadro animado repintaria a camada que o navegador está só deslocando. */
+.canvas-movendo .react-flow__node *,
+.canvas-movendo .react-flow__node *::before,
+.canvas-movendo .react-flow__node *::after { animation-play-state: paused !important; }
+/* A bolinha é SMIL, que não obedece `animation-play-state`: some até o movimento acabar. */
+.canvas-movendo .bolinha-da-troca { display: none; }
 
 /* Ficha do bixinho (ao clicar). */
 .ficha-do-bixinho {
@@ -853,7 +1051,24 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .markdown a { color: var(--active); text-decoration: underline; text-underline-offset: 2px; }
 .markdown blockquote { border-left: 2px solid var(--border-forte); padding-left: 12px; color: var(--secondary); }
 .markdown hr { border-color: var(--border); }
+/* Tabelas (GFM). O contêiner rola na horizontal quando a tabela não cabe; as
+   células só quebram entre palavras, para não picotar URLs e código. */
+.markdown-tabela { max-width: 100%; overflow-x: auto; }
+.markdown table { border-collapse: collapse; font-size: .95em; line-height: 1.5; }
+.markdown th, .markdown td {
+  padding: 4px 10px;
+  border: 1px solid var(--border-forte);
+  text-align: start;
+  vertical-align: top;
+  overflow-wrap: normal;
+}
+.markdown th { font-weight: 600; color: var(--primary); background: var(--surface-2); }
+.markdown tbody tr:nth-child(even) { background: color-mix(in srgb, var(--claude-claro) 3%, transparent); }
+.markdown .task-list-item { list-style: none; }
+.markdown .task-list-item input { margin-right: 6px; accent-color: var(--active); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
+  /* A bolinha é SMIL, que ignora as regras de animação do CSS acima. */
+  .bolinha-da-troca { display: none; }
 }

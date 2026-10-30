@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api } from "../api/cliente";
 import type { LeituraDeMemoria } from "../api/tipos";
+import { mesmoConteudo } from "./useReaproveitado";
 
 export const INTERVALO_DA_VERIFICACAO_MS = 3_000;
 
@@ -55,9 +56,13 @@ export function useServidor(): EstadoDoServidor {
         const reiniciou = iniciadoEm.current !== null && iniciadoEm.current !== saude.iniciadoEm;
         iniciadoEm.current = saude.iniciadoEm;
         const memoria = saude.memoria ?? null;
+        // A memória é medida a cada poucos segundos no servidor: entre uma
+        // medição e outra a resposta é a mesma, e o estado não deve mudar.
         setEstado((atual) =>
           atual.conectado && !reiniciou
-            ? { ...atual, memoria }
+            ? mesmoConteudo(atual.memoria, memoria)
+              ? atual
+              : { ...atual, memoria }
             : {
                 conectado: true,
                 caiuEm: null,

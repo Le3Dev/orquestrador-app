@@ -1,7 +1,13 @@
 import { useId } from "react";
 
-import type { DadosDaConfiguracao, DadosDaQuantidade, ModeloClaude, NivelDePermissao } from "../shared/api/tipos";
-import { ROTULOS_DAS_PERMISSOES, ROTULOS_DOS_MODELOS } from "../shared/formatacao";
+import type {
+  DadosDaConfiguracao,
+  DadosDaQuantidade,
+  EsforcoDeRaciocinio,
+  ModeloClaude,
+  NivelDePermissao,
+} from "../shared/api/tipos";
+import { ROTULOS_DAS_PERMISSOES, ROTULOS_DOS_ESFORCOS, ROTULOS_DOS_MODELOS } from "../shared/formatacao";
 
 const LIMITE_DE_SUBAGENTES = 10;
 
@@ -17,7 +23,11 @@ const MODELOS: readonly Opcao<ModeloClaude>[] = (["opus", "sonnet", "haiku"] as 
   descricao: ROTULOS_DOS_MODELOS[modelo].descricao,
 }));
 
-const PERMISSOES: readonly Opcao<NivelDePermissao>[] = (["leitura", "edicao", "edicao_e_comandos"] as const).map(
+const ESFORCOS: readonly Opcao<EsforcoDeRaciocinio>[] = (
+  ["padrao", "baixo", "medio", "alto", "extra_alto", "maximo"] as const
+).map((esforco) => ({ valor: esforco, titulo: ROTULOS_DOS_ESFORCOS[esforco] }));
+
+const PERMISSOES: readonly Opcao<NivelDePermissao>[] =(["leitura", "edicao", "edicao_e_comandos"] as const).map(
   (nivel) => ({ valor: nivel, titulo: ROTULOS_DAS_PERMISSOES[nivel].nome }),
 );
 
@@ -58,15 +68,56 @@ function Segmentado<Valor extends string>({ rotulo, opcoes, valor, aoEscolher }:
   );
 }
 
+interface PropsDoSeletorDeEsforco {
+  rotulo: string;
+  valor: EsforcoDeRaciocinio;
+  idDaAjuda: string;
+  aoEscolher: (esforco: EsforcoDeRaciocinio) => void;
+}
+
+/** Lista suspensa, e não segmentado: seis níveis não cabem lado a lado na coluna do modelo. */
+function SeletorDeEsforco({ rotulo, valor, idDaAjuda, aoEscolher }: PropsDoSeletorDeEsforco) {
+  const id = useId();
+  return (
+    <div className="field">
+      <label className="label" htmlFor={id}>
+        {rotulo}
+      </label>
+      <select
+        id={id}
+        className="select text-[12px]"
+        value={valor}
+        aria-describedby={idDaAjuda}
+        onChange={(evento) => {
+          const escolhido = ESFORCOS.find((opcao) => opcao.valor === evento.target.value);
+          if (escolhido !== undefined) {
+            aoEscolher(escolhido.valor);
+          }
+        }}
+      >
+        {ESFORCOS.map((opcao) => (
+          <option key={opcao.valor} value={opcao.valor}>
+            {opcao.titulo}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 interface Props {
   valor: DadosDaConfiguracao;
   aoMudar: (configuracao: DadosDaConfiguracao) => void;
 }
 
-/** Modelos, quantidade de subagentes e permissões — usado ao criar e ao reconfigurar. */
+/** Modelos e esforço, quantidade de subagentes e permissões — usado ao criar e ao reconfigurar. */
 export function CamposDaConfiguracao({ valor, aoMudar }: Props) {
   const idDoLimite = useId();
+  const idDaAjudaDoEsforco = useId();
+  const idDaAjudaDoCommit = useId();
   const quantidade = valor.quantidadeDeSubagentes;
+  // Commit e push são comandos git: sem permissão de rodar comandos, a opção não tem efeito.
+  const commitSemComandos = valor.permitirCommitEPush && valor.nivelDePermissao !== "edicao_e_comandos";
 
   function mudar<Campo extends keyof DadosDaConfiguracao>(campo: Campo, novo: DadosDaConfiguracao[Campo]): void {
     aoMudar({ ...valor, [campo]: novo });
@@ -82,19 +133,41 @@ export function CamposDaConfiguracao({ valor, aoMudar }: Props) {
   // que o usuário redimensiona no canvas.
   return (
     <div className="flex flex-col gap-4 @container">
-      <div className="grid gap-4 @xl:grid-cols-2">
-        <Segmentado
-          rotulo="Modelo do orquestrador"
-          opcoes={MODELOS}
-          valor={valor.modeloDoOrquestrador}
-          aoEscolher={(modelo) => mudar("modeloDoOrquestrador", modelo)}
-        />
-        <Segmentado
-          rotulo="Modelo dos subagentes"
-          opcoes={MODELOS}
-          valor={valor.modeloDosSubagentes}
-          aoEscolher={(modelo) => mudar("modeloDosSubagentes", modelo)}
-        />
+      <div className="flex flex-col gap-1.5">
+        <div className="grid gap-4 @xl:grid-cols-2">
+          <div className="flex flex-col gap-2">
+            <Segmentado
+              rotulo="Modelo do orquestrador"
+              opcoes={MODELOS}
+              valor={valor.modeloDoOrquestrador}
+              aoEscolher={(modelo) => mudar("modeloDoOrquestrador", modelo)}
+            />
+            <SeletorDeEsforco
+              rotulo="Esforço do orquestrador"
+              valor={valor.esforcoDoOrquestrador}
+              idDaAjuda={idDaAjudaDoEsforco}
+              aoEscolher={(esforco) => mudar("esforcoDoOrquestrador", esforco)}
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Segmentado
+              rotulo="Modelo dos subagentes"
+              opcoes={MODELOS}
+              valor={valor.modeloDosSubagentes}
+              aoEscolher={(modelo) => mudar("modeloDosSubagentes", modelo)}
+            />
+            <SeletorDeEsforco
+              rotulo="Esforço dos subagentes"
+              valor={valor.esforcoDosSubagentes}
+              idDaAjuda={idDaAjudaDoEsforco}
+              aoEscolher={(esforco) => mudar("esforcoDosSubagentes", esforco)}
+            />
+          </div>
+        </div>
+        <span id={idDaAjudaDoEsforco} className="hint">
+          Padrão: o app não força nada — vale o settings.json do Claude Code desta máquina ou, sem ele, o padrão do
+          modelo. Mais esforço = respostas mais cuidadosas, porém mais lentas e com mais uso de cota.
+        </span>
       </div>
 
       <div className="flex flex-wrap items-end gap-4">
@@ -148,6 +221,26 @@ export function CamposDaConfiguracao({ valor, aoMudar }: Props) {
           aoEscolher={(nivel) => mudar("nivelDePermissao", nivel)}
         />
         <span className="hint">{ROTULOS_DAS_PERMISSOES[valor.nivelDePermissao].descricao}</span>
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <label className="flex w-fit cursor-pointer items-center gap-2">
+          <input
+            type="checkbox"
+            checked={valor.permitirCommitEPush}
+            aria-describedby={idDaAjudaDoCommit}
+            onChange={(evento) => mudar("permitirCommitEPush", evento.target.checked)}
+          />
+          <span className="label">Permitir commit e push quando eu pedir</span>
+        </label>
+        <span id={idDaAjudaDoCommit} className="hint">
+          Commit e push só quando você pedir explicitamente na mensagem; nunca na main e sem Co-authored-by.
+        </span>
+        {commitSemComandos && (
+          <span className="text-[11px] text-warning">
+            Commit e push exigem a permissão de rodar comandos ({ROTULOS_DAS_PERMISSOES.edicao_e_comandos.nome}).
+          </span>
+        )}
       </div>
 
       <p className="hint">

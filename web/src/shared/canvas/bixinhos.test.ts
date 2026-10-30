@@ -6,6 +6,13 @@ describe("aparenciaDoBixinho", () => {
     expect(aparenciaDoBixinho("a41787646eec07830")).toEqual(aparenciaDoBixinho("a41787646eec07830"));
   });
 
+  it("devolve o mesmo objeto, imutável, para o mesmo subagente (o desenho não é refeito à toa)", () => {
+    const aparencia = aparenciaDoBixinho("a41787646eec07831");
+
+    expect(aparenciaDoBixinho("a41787646eec07831")).toBe(aparencia);
+    expect(Object.isFrozen(aparencia)).toBe(true);
+  });
+
   it("varia entre subagentes com ids parecidos", () => {
     const ids = Array.from({ length: 40 }, (_, indice) => `a41787646eec0${String(7800 + indice)}`);
     const aparencias = ids.map(aparenciaDoBixinho);

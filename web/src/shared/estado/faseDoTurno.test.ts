@@ -1,4 +1,4 @@
-import type { SituacaoDoSubagente, SituacaoDoTurno } from "../api/tipos";
+import type { ModoDoTurno, SituacaoDoSubagente, SituacaoDoTurno } from "../api/tipos";
 import type { SubagenteNaTela, TurnoNaTela } from "./aplicarEvento";
 import { faseDoTurno } from "./faseDoTurno";
 
@@ -21,7 +21,11 @@ function subagente(situacao: SituacaoDoSubagente): SubagenteNaTela {
   };
 }
 
-function turno(situacao: SituacaoDoTurno, subagentes: SituacaoDoSubagente[]): TurnoNaTela {
+function turno(
+  situacao: SituacaoDoTurno,
+  subagentes: SituacaoDoSubagente[],
+  modo: ModoDoTurno = "execucao",
+): TurnoNaTela {
   return {
     id: "t1",
     texto: "",
@@ -32,10 +36,15 @@ function turno(situacao: SituacaoDoTurno, subagentes: SituacaoDoSubagente[]): Tu
     situacao,
     configuracao: {
       modeloDoOrquestrador: "opus",
+      esforcoDoOrquestrador: "padrao",
       modeloDosSubagentes: "opus",
+      esforcoDosSubagentes: "padrao",
       quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
       nivelDePermissao: "leitura",
+      permitirCommitEPush: false,
     },
+    modo,
+    decisaoDoPlano: null,
     textosDoOrquestrador: [],
     resposta: null,
     motivoDaFalha: null,
@@ -72,5 +81,21 @@ describe("faseDoTurno", () => {
     expect(faseDoTurno(turno("cancelado", ["concluido", "cancelado"]))).toMatchObject({ atual: "executar", parado: true });
     expect(faseDoTurno(turno("interrompido", ["concluido"]))).toMatchObject({ atual: "sintetizar", parado: true });
     expect(faseDoTurno(turno("falhou", []))).toMatchObject({ atual: "planejar", parado: true });
+  });
+
+  it("no plan mode investiga para montar o plano e, ao concluir, entrega o plano", () => {
+    expect(faseDoTurno(turno("em_andamento", [], "planejamento"))).toMatchObject({
+      atual: "planejar",
+      descricao: "Investigando para montar o plano…",
+    });
+    expect(faseDoTurno(turno("concluido", ["concluido"], "planejamento"))).toMatchObject({
+      atual: null,
+      descricao: "Plano entregue",
+    });
+  });
+
+  it("no plan mode mantém as demais frases", () => {
+    expect(faseDoTurno(turno("em_andamento", ["executando"], "planejamento")).descricao).toBe("1 de 1 agente em execução");
+    expect(faseDoTurno(turno("cancelado", [], "planejamento")).descricao).toBe("Cancelado");
   });
 });

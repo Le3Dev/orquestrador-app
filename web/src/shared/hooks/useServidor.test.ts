@@ -52,6 +52,34 @@ describe("useServidor", () => {
     expect(result.current).toMatchObject({ conectado: true, reiniciou: false });
   });
 
+  it("mantém o mesmo estado quando a resposta não muda, e troca quando a memória muda", async () => {
+    const leitura = (livreBytes: number) => ({
+      totalBytes: 16,
+      livreBytes,
+      servidorBytes: 1,
+      agentesBytes: 0,
+      porOrquestrador: {},
+      lidaEm: `leitura-${livreBytes}`,
+    });
+    vi.spyOn(api, "saude")
+      .mockResolvedValueOnce({ ok: true, iniciadoEm: "processo-1", memoria: leitura(8) })
+      .mockResolvedValueOnce({ ok: true, iniciadoEm: "processo-1", memoria: leitura(8) })
+      .mockResolvedValue({ ok: true, iniciadoEm: "processo-1", memoria: leitura(7) });
+
+    const { result } = renderHook(() => useServidor());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const primeiro = result.current;
+
+    await avancar();
+    expect(result.current).toBe(primeiro);
+
+    await avancar();
+    expect(result.current).not.toBe(primeiro);
+    expect(result.current.memoria?.livreBytes).toBe(7);
+  });
+
   it("não dispara outra consulta enquanto a anterior está pendente", async () => {
     const saude = vi.spyOn(api, "saude").mockReturnValue(new Promise(() => undefined));
 

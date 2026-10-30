@@ -83,12 +83,13 @@ const COTA_ALTA = 0.8;
 
 interface PropsDaBarra {
   aoCriar: () => void;
+  aoCriarNota: () => void;
   aoOrganizar: () => void;
   podeOrganizar: boolean;
 }
 
 /** Canto superior esquerdo: identidade do app e as ações do canvas. */
-export function BarraDoCanvas({ aoCriar, aoOrganizar, podeOrganizar }: PropsDaBarra) {
+export function BarraDoCanvas({ aoCriar, aoCriarNota, aoOrganizar, podeOrganizar }: PropsDaBarra) {
   return (
     <div className="painel-flutuante flex items-center gap-3 px-3 py-2">
       <div className="no-orquestrador-icone h-8 w-8">
@@ -104,12 +105,32 @@ export function BarraDoCanvas({ aoCriar, aoOrganizar, podeOrganizar }: PropsDaBa
       </button>
       <button
         type="button"
+        className="btn btn-sm btn-cta"
+        onClick={aoCriarNota}
+        title="Cria uma nota no centro da tela (bloco de notas, salvo automaticamente)"
+      >
+        + notas
+      </button>
+      <button
+        type="button"
         className="btn btn-sm btn-outline"
         onClick={aoOrganizar}
         disabled={!podeOrganizar}
-        title="Coloca os terminais lado a lado"
+        title="Coloca os terminais lado a lado, e as notas em colunas à direita deles"
       >
         Organizar
+      </button>
+    </div>
+  );
+}
+
+/** Falha numa ação do canvas (ex.: criar uma nota), logo abaixo da barra. */
+export function ErroDoCanvas({ erro, aoFechar }: { erro: string; aoFechar: () => void }) {
+  return (
+    <div className="alert alert-error mt-2 flex max-w-md items-start gap-2" role="alert">
+      <span className="flex-1">{erro}</span>
+      <button type="button" className="botao-icone shrink-0" title="Fechar aviso" onClick={aoFechar}>
+        ✕
       </button>
     </div>
   );

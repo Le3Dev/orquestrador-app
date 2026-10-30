@@ -1,4 +1,5 @@
 import { Handle, type NodeProps, NodeToolbar, Position } from "@xyflow/react";
+import { memo } from "react";
 
 import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
 import { useCanvas } from "../../shared/canvas/contexto";
@@ -41,23 +42,20 @@ function Ficha({ subagente, nome, agora }: { subagente: SubagenteNaTela; nome: s
   );
 }
 
+interface PropsDoConteudo {
+  subagente: SubagenteNaTela;
+  selecionado: boolean;
+}
+
 /**
- * Um Subagente no canvas. Fica preso ao terminal do Orquestrador (move junto
- * com ele), mas pode ser arrastado; clicando, abre a ficha com a tarefa e o
- * relatório.
+ * O que o bixinho mostra. Só re-renderiza quando o próprio Subagente muda (a
+ * conversa preserva o objeto dos Subagentes que um evento não tocou) ou
+ * quando é selecionado — e não a cada evento de outro Subagente nem a cada
+ * quadro em que o terminal é arrastado. O relógio só corre executando.
  */
-export function NoBixinho({ data, selected }: NodeProps<TipoDoNo>) {
-  const { conversas } = useCanvas();
-  const subagente = subagentesVisiveis(conversas.get(data.orquestradorId)).find(
-    (candidato) => candidato.id === data.subagenteId,
-  );
-  const executando = subagente?.situacao === "executando";
+export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({ subagente, selecionado }: PropsDoConteudo) {
+  const executando = subagente.situacao === "executando";
   const agora = useRelogio(executando);
-
-  if (subagente === undefined) {
-    return null;
-  }
-
   const aparencia = aparenciaDoBixinho(subagente.id);
   const fala = executando
     ? subagente.atividade || "pensando…"
@@ -71,12 +69,16 @@ export function NoBixinho({ data, selected }: NodeProps<TipoDoNo>) {
     <>
       {/* A linha do terminal chega no topo do desenho, não no balão. */}
       <Handle type="target" position={Position.Top} className="ancora ancora-bixinho" isConnectable={false} />
-      <NodeToolbar isVisible={selected} position={Position.Right} offset={14}>
-        <Ficha subagente={subagente} nome={aparencia.nome} agora={agora} />
-      </NodeToolbar>
+      {/* Montada só com o bixinho selecionado: a barra do React Flow acompanha
+          cada quadro de pan/zoom e varre todos os nós a cada atualização. */}
+      {selecionado && (
+        <NodeToolbar isVisible position={Position.Right} offset={14}>
+          <Ficha subagente={subagente} nome={aparencia.nome} agora={agora} />
+        </NodeToolbar>
+      )}
 
       <div
-        className={`no-bixinho no-bixinho-${subagente.situacao} ${selected ? "no-bixinho-selecionado" : ""}`}
+        className={`no-bixinho no-bixinho-${subagente.situacao} ${selecionado ? "no-bixinho-selecionado" : ""}`}
         title="Clique para ver a tarefa e o relatório"
       >
         <div className="balao-do-bixinho">
@@ -93,4 +95,26 @@ export function NoBixinho({ data, selected }: NodeProps<TipoDoNo>) {
       </div>
     </>
   );
+});
+
+/**
+ * Um Subagente no canvas. Fica preso ao terminal do Orquestrador (move junto
+ * com ele), mas pode ser arrastado; clicando, abre a ficha com a tarefa e o
+ * relatório.
+ *
+ * Esta é só a casca: lê o contexto do canvas, que muda a cada evento de
+ * qualquer conversa, e acha o próprio Subagente. O desenho fica no
+ * `ConteudoDoBixinho`.
+ */
+export function NoBixinho({ data, selected }: NodeProps<TipoDoNo>) {
+  const { conversas } = useCanvas();
+  const subagente = subagentesVisiveis(conversas.get(data.orquestradorId)).find(
+    (candidato) => candidato.id === data.subagenteId,
+  );
+
+  if (subagente === undefined) {
+    return null;
+  }
+
+  return <ConteudoDoBixinho subagente={subagente} selecionado={selected} />;
 }

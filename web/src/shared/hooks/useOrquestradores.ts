@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { api, mensagemDeErro } from "../api/cliente";
 import type { ResumoDoOrquestrador } from "../api/tipos";
+import { reaproveitarLista } from "./useReaproveitado";
 
 const INTERVALO_DE_ATUALIZACAO_MS = 4_000;
 
@@ -22,7 +23,10 @@ export function useOrquestradores(): {
 
   const recarregar = useCallback(async () => {
     try {
-      setOrquestradores(await api.listarOrquestradores());
+      const lista = await api.listarOrquestradores();
+      // A lista chega nova a cada consulta, quase sempre igual à anterior:
+      // reaproveitar evita re-renderizar o canvas inteiro a cada poucos segundos.
+      setOrquestradores((anteriores) => reaproveitarLista(anteriores, lista));
       setErro(null);
     } catch (falha) {
       setErro(mensagemDeErro(falha));
