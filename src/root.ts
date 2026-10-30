@@ -4,9 +4,11 @@ import path from "node:path";
 
 import express from "express";
 
+import { criarNotasRoutes } from "./controllers/notasRoutes";
 import { criarOrquestradoresRoutes } from "./controllers/orquestradoresRoutes";
 import { ArmazemDeAnexosEmArquivo } from "./infraestrutura/arquivos/ArmazemDeAnexosEmArquivo";
 import { ExploradorDePastas } from "./infraestrutura/arquivos/ExploradorDePastas";
+import { RepositorioDeNotasEmArquivo } from "./infraestrutura/arquivos/RepositorioDeNotasEmArquivo";
 import { RepositorioDeOrquestradoresEmArquivo } from "./infraestrutura/arquivos/RepositorioDeOrquestradoresEmArquivo";
 import { FachadaClaudeCodeCli } from "./infraestrutura/claudecode/FachadaClaudeCodeCli";
 import { MotorClaudeCodeCli } from "./infraestrutura/claudecode/MotorClaudeCodeCli";
@@ -16,6 +18,7 @@ import { GerenciadorDeWorktreesGit } from "./infraestrutura/sistema/GerenciadorD
 import { MonitorDeMemoria } from "./infraestrutura/sistema/MonitorDeMemoria";
 import { encerrarAgentesOrfaos, RegistroDeProcessos } from "./infraestrutura/sistema/RegistroDeProcessos";
 import { CanalDeEventos } from "./infraestrutura/sse/CanalDeEventos";
+import { ServicoDeNotas } from "./notas/ServicoDeNotas";
 import { ServicoDeOrquestracao } from "./orquestracao/ServicoDeOrquestracao";
 
 async function iniciar(): Promise<void> {
@@ -28,6 +31,7 @@ async function iniciar(): Promise<void> {
   }
 
   const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(configuracao.pastaDeDados);
+  const notas = await RepositorioDeNotasEmArquivo.abrir(configuracao.pastaDeDados);
 
   // Antes de registrar processos novos: se o servidor anterior caiu, os
   // agentes dele podem ter ficado rodando sozinhos.
@@ -92,6 +96,12 @@ async function iniciar(): Promise<void> {
       explorador: new ExploradorDePastas(configuracao.pastaRaizDosProjetos),
       anexos,
       pastaRaiz: configuracao.pastaRaizDosProjetos,
+    }),
+  );
+  aplicacao.use(
+    "/api",
+    criarNotasRoutes({
+      servico: new ServicoDeNotas({ repositorio: notas, gerarId: randomUUID, agora: () => new Date() }),
     }),
   );
 
