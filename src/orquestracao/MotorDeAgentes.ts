@@ -1,6 +1,7 @@
 import { TipoDeImagem } from "./Anexo";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
+import { ModoDoTurno } from "./ModoDoTurno";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 
 /** Imagem anexada ao pedido, já guardada em disco. */
@@ -16,6 +17,8 @@ export interface PedidoDeTurno {
   sessaoIniciada: boolean;
   texto: string;
   configuracao: ConfiguracaoDoOrquestrador;
+  /** No planejamento, os agentes só leem, seja qual for o nível da configuração. */
+  modo: ModoDoTurno;
   pastaDeTrabalho: PastaDeTrabalho;
   imagens: readonly ImagemDoPedido[];
   /** Pasta das imagens, liberada para leitura dos Subagentes; nula sem imagens. */

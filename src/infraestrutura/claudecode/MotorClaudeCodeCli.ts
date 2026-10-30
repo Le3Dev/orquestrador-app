@@ -7,7 +7,13 @@ import { EventoDoMotor } from "../../orquestracao/EventoDeOrquestracao";
 import { instrucoesDoOrquestrador, mensagemParaOOrquestrador } from "../../orquestracao/InstrucoesDoOrquestrador";
 import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "../../orquestracao/MotorDeAgentes";
 import { AdaptadorDeEventosDoClaudeCode } from "./AdaptadorDeEventosDoClaudeCode";
-import { definicaoDosAgentes, linhaDeEntrada, montarAmbiente, montarArgumentos } from "./ArgumentosDoClaudeCode";
+import {
+  configuracoesDaSessao,
+  definicaoDosAgentes,
+  linhaDeEntrada,
+  montarAmbiente,
+  montarArgumentos,
+} from "./ArgumentosDoClaudeCode";
 import { FachadaClaudeCodeCli, SaidaDoClaudeCode } from "./FachadaClaudeCodeCli";
 
 function descreverSaidaSemResultado(saida: SaidaDoClaudeCode): string {
@@ -38,12 +44,17 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
     const arquivos = {
       agentes: path.join(pastaTemporaria, "agentes.json"),
       instrucoes: path.join(pastaTemporaria, "instrucoes.txt"),
+      configuracoes: path.join(pastaTemporaria, "configuracoes.json"),
     };
 
     try {
       await mkdir(pastaTemporaria, { recursive: true });
       await writeFile(arquivos.agentes, JSON.stringify(definicaoDosAgentes(pedido)), "utf8");
       await writeFile(arquivos.instrucoes, instrucoesDoOrquestrador(pedido.pastaDeTrabalho), "utf8");
+      const configuracoes = configuracoesDaSessao(pedido);
+      if (configuracoes !== null) {
+        await writeFile(arquivos.configuracoes, JSON.stringify(configuracoes), "utf8");
+      }
 
       const imagens = await Promise.all(
         pedido.imagens.map(async (imagem) => ({
@@ -55,6 +66,7 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
         pedido.texto,
         pedido.configuracao,
         pedido.imagens.map((imagem) => imagem.caminho),
+        pedido.modo,
       );
 
       const adaptador = new AdaptadorDeEventosDoClaudeCode();

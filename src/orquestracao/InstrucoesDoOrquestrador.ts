@@ -1,4 +1,5 @@
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
+import { ModoDoTurno } from "./ModoDoTurno";
 import { DESCRICAO_DO_NIVEL } from "./NivelDePermissao";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { QuantidadeDeSubagentes } from "./QuantidadeDeSubagentes";
@@ -7,6 +8,13 @@ import { QuantidadeDeSubagentes } from "./QuantidadeDeSubagentes";
 export const NOME_DO_SUBAGENTE = "executor";
 
 const MARCA_DA_CONFIGURACAO = "configuracao-do-pedido";
+
+/** Regra de commit e push no bloco do pedido, com a opção desligada ou no planejamento. */
+const COMMIT_E_PUSH_PROIBIDOS = "Commits e push são sempre proibidos.";
+
+/** Regra de commit e push no bloco do pedido, com a opção ligada num turno de execução. */
+const COMMIT_E_PUSH_QUANDO_PEDIDOS =
+  "Commits e push: permitidos somente quando o usuário pedir explicitamente nesta mensagem. Nunca commitar direto na main; usar branch conforme a política (feature/, fix/, hotfix/, refactor/). Nunca adicionar a linha Co-authored-by.";
 
 function regraDaQuantidade(quantidade: QuantidadeDeSubagentes): string {
   if (quantidade.modo === "fixa") {
@@ -37,7 +45,7 @@ export function instrucoesDoOrquestrador(pasta: PastaDeTrabalho): string {
     "7. Perguntas simples sobre o que já foi feito nesta conversa podem ser respondidas diretamente, sem subagentes.",
     "",
     `Pasta de trabalho: ${pasta.caminho}`,
-    "Commits e push são sempre proibidos. Responda sempre em português.",
+    `Commits e push seguem a permissão do bloco <${MARCA_DA_CONFIGURACAO}> mais recente; sem o bloco, são proibidos. Responda sempre em português.`,
   ].join("\n");
 }
 
@@ -54,7 +62,23 @@ export function mensagemParaOOrquestrador(
   texto: string,
   configuracao: ConfiguracaoDoOrquestrador,
   caminhosDasImagens: readonly string[] = [],
+  modo: ModoDoTurno = "execucao",
 ): string {
+  const planejamento = modo === "planejamento";
+  // No planejamento os subagentes só leem (as ferramentas já vêm travadas
+  // assim); o nível configurado é o que valerá quando o Plano for executado.
+  const nivelDoPedido = planejamento ? "leitura" : configuracao.nivelDePermissao;
+  const regraDeCommitEPush = configuracao.permiteCommitEPush(modo)
+    ? COMMIT_E_PUSH_QUANDO_PEDIDOS
+    : COMMIT_E_PUSH_PROIBIDOS;
+  const regrasDoPlanejamento = planejamento
+    ? [
+        "- Modo: PLANEJAMENTO. Neste pedido nada pode ser alterado: os subagentes só leem e pesquisam, seja qual for a permissão de execução.",
+        "  Delegue a investigação e responda com um PLANO, sem executá-lo: objetivo; subtarefas (uma por subagente, com os arquivos que cada uma vai alterar, sem dois subagentes no mesmo arquivo); ordem; riscos; perguntas em aberto.",
+        `  Na execução valerá: ${DESCRICAO_DO_NIVEL[configuracao.nivelDePermissao]}. Planeje dentro disso.`,
+        "  O usuário vai aprovar, ajustar ou descartar o plano antes de qualquer execução.",
+      ]
+    : [];
   // As imagens chegam junto com a mensagem para o Orquestrador; os
   // Subagentes não as recebem, então precisam dos caminhos para abri-las.
   const imagens =
@@ -69,7 +93,8 @@ export function mensagemParaOOrquestrador(
     `<${MARCA_DA_CONFIGURACAO}>`,
     "Configuração vigente para este pedido, definida pelo usuário na tela. Ela substitui qualquer quantidade de subagentes ou permissão mencionada antes nesta conversa, inclusive nas suas instruções iniciais.",
     `- Subagentes: ${regraDaQuantidade(configuracao.quantidadeDeSubagentes)}`,
-    `- Permissões: ${DESCRICAO_DO_NIVEL[configuracao.nivelDePermissao]}. Commits e push são sempre proibidos.`,
+    `- Permissões: ${DESCRICAO_DO_NIVEL[nivelDoPedido]}. ${regraDeCommitEPush}`,
+    ...regrasDoPlanejamento,
     ...imagens,
     `</${MARCA_DA_CONFIGURACAO}>`,
     "",
@@ -77,12 +102,32 @@ export function mensagemParaOOrquestrador(
   ].join("\n");
 }
 
-/** As regras de cada Subagente: fazer só a subtarefa recebida e prestar contas. */
-export function instrucoesDoSubagente(pasta: PastaDeTrabalho): string {
+/**
+ * O pedido que abre o turno de execução de um Plano aprovado. Vai como
+ * mensagem, e não nas instruções: ao retomar a sessão (`--resume`), o Claude
+ * Code ignora instruções novas.
+ */
+export function mensagemDeAprovacaoDoPlano(observacoes: string): string {
+  const aprovacao =
+    "Plano aprovado. Execute agora o plano da sua resposta anterior, delegando as subtarefas como planejado.";
+  const extras = observacoes.trim();
+  return extras === "" ? aprovacao : `${aprovacao}\n\nObservações do usuário: ${extras}`;
+}
+
+/**
+ * As regras de cada Subagente: fazer só a subtarefa recebida e prestar contas.
+ *
+ * Vai na definição dos agentes, refeita a cada turno: por isso pode levar a
+ * regra de commit e push do pedido (`ConfiguracaoDoOrquestrador.permiteCommitEPush`).
+ */
+export function instrucoesDoSubagente(pasta: PastaDeTrabalho, permiteCommitEPush = false): string {
+  const regraDeCommitEPush = permiteCommitEPush
+    ? "Commit e push: faça somente se a subtarefa recebida pedir explicitamente — o orquestrador só pede quando o usuário pediu. Nunca na main; use branch conforme a política (feature/, fix/, hotfix/, refactor/). Nunca adicione a linha Co-authored-by."
+    : "Nunca faça commit nem push.";
   return [
     "Você é um subagente executor, coordenado por um orquestrador.",
     `Faça somente a subtarefa recebida, dentro da pasta ${pasta.caminho}. Seja objetivo.`,
     "Ao terminar, devolva: o que fez, os arquivos que alterou (se houver) e o resultado.",
-    "Nunca faça commit nem push. Responda em português.",
+    `${regraDeCommitEPush} Responda em português.`,
   ].join("\n");
 }

@@ -8,8 +8,10 @@ import {
 import { ControleDeExecucoes, PublicadorDeEventos } from "./ControleDeExecucoes";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { EventoDeOrquestracao, EventoDoMotor } from "./EventoDeOrquestracao";
+import { mensagemDeAprovacaoDoPlano } from "./InstrucoesDoOrquestrador";
+import { ModoDoTurno } from "./ModoDoTurno";
 import { MotorDeAgentes, ResultadoDoTurno } from "./MotorDeAgentes";
-import { Orquestrador } from "./Orquestrador";
+import { Orquestrador, TAMANHO_MAXIMO_DA_MENSAGEM } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { GerenciadorDeWorktrees } from "./PreparoDeWorktree";
 import { RepositorioDeOrquestradores } from "./RepositorioDeOrquestradores";
@@ -49,8 +51,8 @@ function descreverErro(erro: unknown): string {
 }
 
 /**
- * Casos de uso da orquestração: criar Orquestradores, conversar com eles e
- * cancelar o que estiverem fazendo.
+ * Casos de uso da orquestração: criar Orquestradores, conversar com eles,
+ * decidir os Planos que entregarem e cancelar o que estiverem fazendo.
  *
  * Não guarda estado: os Orquestradores vêm do repositório, e os turnos em
  * execução ficam no `ControleDeExecucoes`.
@@ -83,8 +85,16 @@ export class ServicoDeOrquestracao {
   /**
    * Inicia um turno e devolve assim que ele começa; o trabalho segue em
    * segundo plano e é acompanhado pelos eventos.
+   *
+   * No modo `planejamento` o turno só investiga e responde com um Plano, que
+   * fica pendente até `aprovarPlano` ou `descartarPlano`.
    */
-  async enviarMensagem(id: string, texto: string, imagens: readonly ImagemRecebida[] = []): Promise<MensagemEnviada> {
+  async enviarMensagem(
+    id: string,
+    texto: string,
+    imagens: readonly ImagemRecebida[] = [],
+    modo: ModoDoTurno = "execucao",
+  ): Promise<MensagemEnviada> {
     const { repositorio, execucoes, anexos, gerarId, agora } = this.dependencias;
     const orquestrador = this.buscar(id);
     const turnoId = gerarId();
@@ -97,7 +107,7 @@ export class ServicoDeOrquestracao {
         tamanhoEmBytes: imagem.conteudo.byteLength,
       }),
     );
-    const inicio = orquestrador.iniciarTurno(turnoId, texto, agora(), anexosDoTurno);
+    const inicio = orquestrador.iniciarTurno(turnoId, texto, agora(), anexosDoTurno, modo);
     // O sinal nasce antes de qualquer espera: um cancelamento que chegue
     // enquanto o turno é gravado já encontra a execução registrada.
     const sinal = execucoes.iniciar(orquestrador.id);
@@ -118,6 +128,33 @@ export class ServicoDeOrquestracao {
       execucoes.encerrar(orquestrador.id),
     );
     return { turnoId, conclusao };
+  }
+
+  /**
+   * Aprova o Plano pendente e já abre o turno que o executa, na mesma sessão
+   * do Claude Code — é ela que guarda o Plano da resposta anterior.
+   */
+  async aprovarPlano(id: string, observacoes = ""): Promise<MensagemEnviada> {
+    const orquestrador = this.buscar(id);
+    const texto = mensagemDeAprovacaoDoPlano(observacoes);
+    // Conferido antes de aprovar: se o pedido de execução fosse recusado
+    // depois, o Plano ficaria aprovado sem nada rodando.
+    if (texto.length > TAMANHO_MAXIMO_DA_MENSAGEM) {
+      throw new ErroDeOrquestracao(
+        "dados_invalidos",
+        `As observações ficaram longas demais: a mensagem de aprovação deve ter até ${TAMANHO_MAXIMO_DA_MENSAGEM} caracteres.`,
+      );
+    }
+
+    this.publicar(orquestrador, orquestrador.aprovarPlano());
+    // `enviarMensagem` grava o Orquestrador, já com a decisão registrada.
+    return this.enviarMensagem(id, texto, [], "execucao");
+  }
+
+  async descartarPlano(id: string): Promise<void> {
+    const orquestrador = this.buscar(id);
+    this.publicar(orquestrador, orquestrador.descartarPlano());
+    await this.dependencias.repositorio.salvar(orquestrador);
   }
 
   async cancelar(id: string): Promise<void> {
@@ -206,6 +243,7 @@ export class ServicoDeOrquestracao {
           sessaoIniciada: orquestrador.sessaoIniciada,
           texto: turno?.texto ?? "",
           configuracao: orquestrador.configuracao,
+          modo: turno?.modo ?? "execucao",
           pastaDeTrabalho: pastaDoTurno,
           imagens: anexosDoTurno.map((anexo) => ({
             caminho: anexos.caminhoDe(orquestrador.id, anexo.arquivo),

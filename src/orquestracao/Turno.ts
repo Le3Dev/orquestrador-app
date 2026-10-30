@@ -1,5 +1,7 @@
 import { DadosDoAnexo } from "./Anexo";
+import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
+import { DecisaoDoPlano, ModoDoTurno } from "./ModoDoTurno";
 import { DadosDoSubagente, Subagente } from "./Subagente";
 
 export type SituacaoDoTurno = "em_andamento" | "concluido" | "cancelado" | "falhou" | "interrompido";
@@ -15,12 +17,18 @@ export interface DadosDoTurno {
   uso: UsoDoTurno | null;
   subagentes: DadosDoSubagente[];
   anexos: DadosDoAnexo[];
+  /** Ausente em turnos gravados antes do modo de planejamento: valem como execução. */
+  modo?: ModoDoTurno;
+  decisaoDoPlano?: DecisaoDoPlano | null;
 }
 
 /**
  * Uma mensagem do usuário ao Orquestrador e tudo o que ela desencadeou: os
  * Subagentes lançados e a resposta final. Objeto interno do agregado
  * `Orquestrador`.
+ *
+ * Num turno de planejamento, a resposta final é um Plano: ao concluir, ele
+ * fica pendente até o usuário aprová-lo ou descartá-lo.
  */
 export class Turno {
   private constructor(
@@ -34,10 +42,18 @@ export class Turno {
     private usoFinal: UsoDoTurno | null,
     private readonly subagentes: Subagente[],
     public readonly anexos: readonly DadosDoAnexo[],
+    public readonly modo: ModoDoTurno,
+    private decisao: DecisaoDoPlano | null,
   ) {}
 
-  static iniciar(id: string, texto: string, agora: Date, anexos: readonly DadosDoAnexo[] = []): Turno {
-    return new Turno(id, texto, agora.getTime(), null, "em_andamento", "", null, null, [], anexos);
+  static iniciar(
+    id: string,
+    texto: string,
+    agora: Date,
+    anexos: readonly DadosDoAnexo[] = [],
+    modo: ModoDoTurno = "execucao",
+  ): Turno {
+    return new Turno(id, texto, agora.getTime(), null, "em_andamento", "", null, null, [], anexos, modo, null);
   }
 
   static reconstituir(dados: DadosDoTurno): Turno {
@@ -53,6 +69,9 @@ export class Turno {
       dados.subagentes.map((subagente) => Subagente.reconstituir(subagente)),
       // Turnos gravados antes de existirem anexos não têm o campo.
       dados.anexos ?? [],
+      // Nem os gravados antes do modo de planejamento: eram todos de execução.
+      dados.modo ?? "execucao",
+      dados.decisaoDoPlano ?? null,
     );
   }
 
@@ -78,6 +97,16 @@ export class Turno {
 
   get subagentesAtivos(): number {
     return this.subagentes.filter((subagente) => subagente.ativo).length;
+  }
+
+  /** `null` em turnos de execução e em planejamentos que não chegaram a entregar o Plano. */
+  get decisaoDoPlano(): DecisaoDoPlano | null {
+    return this.decisao;
+  }
+
+  /** O Plano deste turno aguarda o usuário aprovar ou descartar. */
+  get planoPendente(): boolean {
+    return this.decisao === "pendente";
   }
 
   /** Aplica o que o motor observou. Eventos que não mudam o resumo do turno são ignorados. */
@@ -107,7 +136,18 @@ export class Turno {
   concluir(resposta: string, uso: UsoDoTurno, agora: Date): void {
     this.respostaFinal = resposta;
     this.usoFinal = uso;
+    if (this.modo === "planejamento") {
+      // A resposta é o Plano: nada foi executado ainda, o usuário decide.
+      this.decisao = "pendente";
+    }
     this.encerrar("concluido", agora);
+  }
+
+  decidirPlano(decisao: Exclude<DecisaoDoPlano, "pendente">): void {
+    if (!this.planoPendente) {
+      throw new ErroDeOrquestracao("sem_plano_pendente", "Este pedido não tem plano aguardando aprovação.");
+    }
+    this.decisao = decisao;
   }
 
   cancelar(agora: Date): void {
@@ -136,6 +176,8 @@ export class Turno {
       uso: this.usoFinal,
       subagentes: this.subagentes.map((subagente) => subagente.paraDados()),
       anexos: [...this.anexos],
+      modo: this.modo,
+      decisaoDoPlano: this.decisao,
     };
   }
 

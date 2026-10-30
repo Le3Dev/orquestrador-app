@@ -150,3 +150,170 @@ describe("Orquestrador", () => {
     expect(reaberto.interromperTurnoEmAndamento(agora)).toBeNull();
   });
 });
+
+describe("Orquestrador no modo de planejamento", () => {
+  function comPlanoPendente(): Orquestrador {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "planeje a migração", agora, [], "planejamento");
+    orquestrador.concluirTurno("t1", "1. ... 2. ...", uso, agora);
+    return orquestrador;
+  }
+
+  it("um turno começa em execução por padrão e o evento leva o modo", () => {
+    const orquestrador = novoOrquestrador();
+
+    expect(orquestrador.iniciarTurno("t1", "analise", agora)).toMatchObject({ tipo: "turno_iniciado", modo: "execucao" });
+    expect(orquestrador.paraDados().turnos[0]).toMatchObject({ modo: "execucao", decisaoDoPlano: null });
+  });
+
+  it("recusa aprovar ou descartar sem plano pendente", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "analise", agora);
+    orquestrador.concluirTurno("t1", "pronto", uso, agora);
+
+    const erro = capturarErro(() => orquestrador.aprovarPlano());
+
+    expect(erro.motivo).toBe("sem_plano_pendente");
+    expect(erro.message).toBe('"Painel" não tem plano aguardando aprovação.');
+    expect(capturarErro(() => orquestrador.descartarPlano()).motivo).toBe("sem_plano_pendente");
+  });
+
+  it("o plano só fica pendente quando o turno de planejamento conclui", () => {
+    const orquestrador = novoOrquestrador();
+    const inicio = orquestrador.iniciarTurno("t1", "planeje", agora, [], "planejamento");
+
+    expect(inicio).toMatchObject({ tipo: "turno_iniciado", turnoId: "t1", modo: "planejamento" });
+    expect(orquestrador.turnoComPlanoPendente).toBeNull();
+
+    orquestrador.concluirTurno("t1", "o plano", uso, agora);
+
+    expect(orquestrador.turnoComPlanoPendente?.id).toBe("t1");
+    expect(orquestrador.paraDados().turnos[0]).toMatchObject({ modo: "planejamento", decisaoDoPlano: "pendente" });
+  });
+
+  it("um planejamento que falha não deixa plano pendente", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "planeje", agora, [], "planejamento");
+    orquestrador.falharTurno("t1", "sem cota", agora);
+
+    expect(orquestrador.turnoComPlanoPendente).toBeNull();
+  });
+
+  it("aprova o plano uma única vez", () => {
+    const orquestrador = comPlanoPendente();
+
+    expect(orquestrador.aprovarPlano()).toEqual({ tipo: "plano_aprovado", turnoId: "t1" });
+    expect(orquestrador.paraDados().turnos[0]?.decisaoDoPlano).toBe("aprovado");
+    expect(orquestrador.turnoComPlanoPendente).toBeNull();
+    expect(capturarErro(() => orquestrador.aprovarPlano()).motivo).toBe("sem_plano_pendente");
+    expect(capturarErro(() => orquestrador.descartarPlano()).motivo).toBe("sem_plano_pendente");
+  });
+
+  it("descarta o plano", () => {
+    const orquestrador = comPlanoPendente();
+
+    expect(orquestrador.descartarPlano()).toEqual({ tipo: "plano_descartado", turnoId: "t1" });
+    expect(orquestrador.paraDados().turnos[0]?.decisaoDoPlano).toBe("descartado");
+    expect(capturarErro(() => orquestrador.aprovarPlano()).motivo).toBe("sem_plano_pendente");
+  });
+
+  it("um pedido novo deixa o plano anterior para trás", () => {
+    const orquestrador = comPlanoPendente();
+
+    orquestrador.iniciarTurno("t2", "planeje de outro jeito", agora, [], "planejamento");
+
+    expect(orquestrador.turnoComPlanoPendente).toBeNull();
+    expect(capturarErro(() => orquestrador.aprovarPlano()).motivo).toBe("sem_plano_pendente");
+
+    orquestrador.concluirTurno("t2", "plano novo", uso, agora);
+
+    expect(orquestrador.aprovarPlano()).toEqual({ tipo: "plano_aprovado", turnoId: "t2" });
+  });
+
+  it("mantém o plano pendente ao reabrir o histórico", () => {
+    const reaberto = Orquestrador.reconstituir(comPlanoPendente().paraDados());
+
+    expect(reaberto.turnoComPlanoPendente?.id).toBe("t1");
+  });
+
+  it("reabre turnos gravados antes do modo de planejamento como execução", () => {
+    const dados = novoOrquestrador().paraDados();
+    const turnoAntigo = {
+      id: "t0",
+      texto: "antigo",
+      iniciadoEm: "2026-10-28T10:00:00.000Z",
+      encerradoEm: "2026-10-28T10:01:00.000Z",
+      situacao: "concluido" as const,
+      resposta: "ok",
+      motivoDaFalha: null,
+      uso: null,
+      subagentes: [],
+      anexos: [],
+    };
+
+    const reaberto = Orquestrador.reconstituir({ ...dados, turnos: [turnoAntigo] });
+
+    expect(reaberto.paraDados().turnos[0]).toMatchObject({ modo: "execucao", decisaoDoPlano: null });
+    expect(reaberto.ultimoTurno?.modo).toBe("execucao");
+    expect(reaberto.turnoComPlanoPendente).toBeNull();
+  });
+});
+
+describe("Orquestrador e a opção de commit e push", () => {
+  it("reabre a configuração gravada antes da opção de commit e push como desligada", () => {
+    const dados = novoOrquestrador().paraDados();
+    const { permitirCommitEPush: _semOCampo, ...configuracaoAntiga } = dados.configuracao;
+
+    const reaberto = Orquestrador.reconstituir({ ...dados, configuracao: configuracaoAntiga });
+
+    expect(reaberto.configuracao.permitirCommitEPush).toBe(false);
+    expect(reaberto.paraDados().configuracao.permitirCommitEPush).toBe(false);
+  });
+
+  it("o turno iniciado leva a cópia da configuração com a opção de commit e push", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.alterarConfiguracao({ permitirCommitEPush: true });
+
+    const evento = orquestrador.iniciarTurno("t1", "commite", agora);
+
+    expect(evento).toMatchObject({ tipo: "turno_iniciado", configuracao: { permitirCommitEPush: true } });
+  });
+
+  it("a alteração de configuração publica a opção de commit e push", () => {
+    expect(novoOrquestrador().alterarConfiguracao({ nivelDePermissao: "edicao" })).toMatchObject({
+      tipo: "configuracao_alterada",
+      configuracao: { nivelDePermissao: "edicao", permitirCommitEPush: false },
+    });
+  });
+});
+
+describe("Orquestrador e o esforço de raciocínio", () => {
+  it("reabre a configuração gravada antes do esforço existir com o esforço padrão", () => {
+    const dados = novoOrquestrador().paraDados();
+    const {
+      esforcoDoOrquestrador: _semOrquestrador,
+      esforcoDosSubagentes: _semSubagentes,
+      ...configuracaoAntiga
+    } = dados.configuracao;
+
+    const reaberto = Orquestrador.reconstituir({ ...dados, configuracao: configuracaoAntiga });
+
+    expect(reaberto.paraDados().configuracao).toMatchObject({
+      esforcoDoOrquestrador: "padrao",
+      esforcoDosSubagentes: "padrao",
+    });
+  });
+
+  it("o turno iniciado e a alteração de configuração levam os dois esforços", () => {
+    const orquestrador = novoOrquestrador();
+
+    expect(orquestrador.alterarConfiguracao({ esforcoDoOrquestrador: "extra_alto" })).toMatchObject({
+      tipo: "configuracao_alterada",
+      configuracao: { esforcoDoOrquestrador: "extra_alto", esforcoDosSubagentes: "padrao" },
+    });
+    expect(orquestrador.iniciarTurno("t1", "analise", agora)).toMatchObject({
+      tipo: "turno_iniciado",
+      configuracao: { esforcoDoOrquestrador: "extra_alto", esforcoDosSubagentes: "padrao" },
+    });
+  });
+});

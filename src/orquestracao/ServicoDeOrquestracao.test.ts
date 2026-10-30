@@ -344,4 +344,113 @@ describe("ServicoDeOrquestracao", () => {
 
     expect(motor.pedidos[0]).toMatchObject({ imagens: [], pastaDasImagens: null, orquestradorId: orquestrador.id });
   });
+
+  describe("modo de planejamento", () => {
+    async function planejar(orquestrador: Orquestrador): Promise<string> {
+      motor.eventos = [{ tipo: "sessao_iniciada" }];
+      const { turnoId, conclusao } = await servico.enviarMensagem(orquestrador.id, "planeje", [], "planejamento");
+      motor.terminar();
+      await conclusao;
+      motor.eventos = [];
+      return turnoId;
+    }
+
+    it("o pedido chega ao motor em planejamento e o plano fica pendente", async () => {
+      const orquestrador = await criar();
+
+      const turnoId = await planejar(orquestrador);
+
+      expect(motor.pedidos[0]?.modo).toBe("planejamento");
+      expect(repositorio.eventos[0]).toMatchObject({ tipo: "turno_iniciado", turnoId, modo: "planejamento" });
+      expect(orquestrador.turnoComPlanoPendente?.id).toBe(turnoId);
+    });
+
+    it("sem modo informado, o pedido é de execução", async () => {
+      const orquestrador = await criar();
+
+      const { conclusao } = await servico.enviarMensagem(orquestrador.id, "analise");
+      motor.terminar();
+      await conclusao;
+
+      expect(motor.pedidos[0]?.modo).toBe("execucao");
+      expect(orquestrador.turnoComPlanoPendente).toBeNull();
+    });
+
+    it("aprovar publica a decisão e abre um turno de execução que retoma a sessão", async () => {
+      const orquestrador = await criar();
+      const turnoDoPlano = await planejar(orquestrador);
+
+      const { turnoId, conclusao } = await servico.aprovarPlano(orquestrador.id, "sem mexer nos testes");
+      motor.terminar();
+      await conclusao;
+
+      expect(turnoId).not.toBe(turnoDoPlano);
+      expect(repositorio.eventos.map((evento) => evento.tipo)).toEqual([
+        "turno_iniciado",
+        "sessao_iniciada",
+        "turno_concluido",
+        "plano_aprovado",
+        "turno_iniciado",
+        "turno_concluido",
+      ]);
+      expect(repositorio.eventos[3]).toMatchObject({ tipo: "plano_aprovado", turnoId: turnoDoPlano });
+      expect(repositorio.eventos[4]).toMatchObject({ tipo: "turno_iniciado", turnoId, modo: "execucao" });
+
+      const execucao = motor.pedidos[1];
+      expect(execucao).toMatchObject({ modo: "execucao", sessaoIniciada: true, sessaoId: orquestrador.sessaoId });
+      expect(execucao?.texto).toMatch(/^Plano aprovado\. Execute agora o plano/);
+      expect(execucao?.texto).toContain("Observações do usuário: sem mexer nos testes");
+
+      const turnos = repositorio.buscarPorId(orquestrador.id)?.paraDados().turnos;
+      expect(turnos?.map((turno) => [turno.modo, turno.decisaoDoPlano])).toEqual([
+        ["planejamento", "aprovado"],
+        ["execucao", null],
+      ]);
+    });
+
+    it("o planejamento e a execução rodam no mesmo worktree, onde está a sessão", async () => {
+      const orquestrador = await criar();
+      const caminho = path.resolve("/dados/worktrees/abc");
+      worktrees.preparo = { cwd: caminho, worktree: { branch: "orquestrador/id1", caminho } };
+      worktrees.removerAoConcluir = true;
+
+      await planejar(orquestrador);
+      const { conclusao } = await servico.aprovarPlano(orquestrador.id);
+      motor.terminar();
+      await conclusao;
+
+      expect(motor.pedidos.map((pedido) => [pedido.modo, pedido.pastaDeTrabalho.caminho])).toEqual([
+        ["planejamento", caminho],
+        ["execucao", caminho],
+      ]);
+      expect(worktrees.concluidos).toEqual([orquestrador.id, orquestrador.id]);
+    });
+
+    it("descartar publica a decisão e não inicia turno", async () => {
+      const orquestrador = await criar();
+      const turnoDoPlano = await planejar(orquestrador);
+
+      await servico.descartarPlano(orquestrador.id);
+
+      expect(repositorio.eventos.at(-1)).toEqual(
+        expect.objectContaining({ tipo: "plano_descartado", turnoId: turnoDoPlano }),
+      );
+      expect(motor.pedidos).toHaveLength(1);
+      expect(orquestrador.situacao).toBe("ocioso");
+      expect(repositorio.buscarPorId(orquestrador.id)?.paraDados().turnos[0]?.decisaoDoPlano).toBe("descartado");
+    });
+
+    it("não aprova sem plano pendente nem duas vezes", async () => {
+      const orquestrador = await criar();
+
+      await expect(servico.aprovarPlano(orquestrador.id)).rejects.toMatchObject({ motivo: "sem_plano_pendente" });
+
+      await planejar(orquestrador);
+      const { conclusao } = await servico.aprovarPlano(orquestrador.id);
+      await expect(servico.aprovarPlano(orquestrador.id)).rejects.toMatchObject({ motivo: "sem_plano_pendente" });
+      await expect(servico.descartarPlano(orquestrador.id)).rejects.toMatchObject({ motivo: "sem_plano_pendente" });
+      motor.terminar();
+      await conclusao;
+    });
+  });
 });

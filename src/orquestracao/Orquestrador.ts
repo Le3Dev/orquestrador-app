@@ -6,6 +6,7 @@ import {
 } from "./ConfiguracaoDoOrquestrador";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { EventoDeOrquestracao, EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
+import { ModoDoTurno } from "./ModoDoTurno";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { DadosDoTurno, Turno } from "./Turno";
 
@@ -165,13 +166,28 @@ export class Orquestrador {
     return this.turnos.length;
   }
 
+  /**
+   * O turno cujo Plano aguarda a decisão do usuário. Só o último turno conta:
+   * um pedido novo deixa para trás o Plano anterior.
+   */
+  get turnoComPlanoPendente(): Turno | null {
+    const ultimo = this.ultimoTurno;
+    return ultimo !== null && ultimo.planoPendente ? ultimo : null;
+  }
+
   /** Vale a partir do próximo turno; um turno em andamento segue com a configuração com que começou. */
   alterarConfiguracao(alteracoes: AlteracoesDaConfiguracao): EventoDeOrquestracao {
     this.configuracaoAtual = this.configuracaoAtual.com(alteracoes);
     return { tipo: "configuracao_alterada", configuracao: this.configuracaoAtual.paraDados() };
   }
 
-  iniciarTurno(turnoId: string, texto: string, agora: Date, anexos: readonly Anexo[] = []): EventoDeOrquestracao {
+  iniciarTurno(
+    turnoId: string,
+    texto: string,
+    agora: Date,
+    anexos: readonly Anexo[] = [],
+    modo: ModoDoTurno = "execucao",
+  ): EventoDeOrquestracao {
     const mensagem = texto.trim();
     if (mensagem === "") {
       throw new ErroDeOrquestracao("dados_invalidos", "Escreva uma mensagem para o orquestrador.");
@@ -196,14 +212,28 @@ export class Orquestrador {
     }
 
     const dadosDosAnexos = anexos.map((anexo) => anexo.paraDados());
-    this.turnos.push(Turno.iniciar(turnoId, mensagem, agora, dadosDosAnexos));
+    this.turnos.push(Turno.iniciar(turnoId, mensagem, agora, dadosDosAnexos, modo));
     return {
       tipo: "turno_iniciado",
       turnoId,
       texto: mensagem,
       configuracao: this.configuracaoAtual.paraDados(),
       anexos: dadosDosAnexos,
+      modo,
     };
+  }
+
+  /** O usuário aprovou o Plano: a execução vem num turno novo, na mesma sessão. */
+  aprovarPlano(): EventoDeOrquestracao {
+    const turno = this.turnoDoPlanoPendente();
+    turno.decidirPlano("aprovado");
+    return { tipo: "plano_aprovado", turnoId: turno.id };
+  }
+
+  descartarPlano(): EventoDeOrquestracao {
+    const turno = this.turnoDoPlanoPendente();
+    turno.decidirPlano("descartado");
+    return { tipo: "plano_descartado", turnoId: turno.id };
   }
 
   registrarDoMotor(turnoId: string, evento: EventoDoMotor): EventoDeOrquestracao {
@@ -251,6 +281,14 @@ export class Orquestrador {
       turnos: this.turnos.map((turno) => turno.paraDados()),
       worktree: this.worktreeAtual === null ? null : { ...this.worktreeAtual },
     };
+  }
+
+  private turnoDoPlanoPendente(): Turno {
+    const turno = this.turnoComPlanoPendente;
+    if (turno === null) {
+      throw new ErroDeOrquestracao("sem_plano_pendente", `"${this.nome}" não tem plano aguardando aprovação.`);
+    }
+    return turno;
   }
 
   private turnoAtivo(turnoId: string): Turno {
