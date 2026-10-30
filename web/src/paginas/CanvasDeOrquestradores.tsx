@@ -8,45 +8,90 @@ import {
   ReactFlowProvider,
   useNodesState,
   useReactFlow,
+  type EdgeTypes,
+  type FitViewOptions,
   type NodeTypes,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { IconeOrquestrador } from "../componentes/Icones";
+import { ArestaDoBixinho } from "../componentes/canvas/ArestaDoBixinho";
 import { NoBixinho } from "../componentes/canvas/NoBixinho";
+import { NoNota } from "../componentes/canvas/NoNota";
 import { NoRascunho } from "../componentes/canvas/NoRascunho";
 import { NoTerminal } from "../componentes/canvas/NoTerminal";
-import { AvisoDeConexao, BarraDoCanvas, Doca, StatusDoCanvas } from "../componentes/canvas/PaineisDoCanvas";
-import type { ResumoDoOrquestrador } from "../shared/api/tipos";
-import { type AcoesDoCanvas, ContextoDoCanvas, type ValorDoCanvas } from "../shared/canvas/contexto";
 import {
+  AvisoDeConexao,
+  BarraDoCanvas,
+  Doca,
+  ErroDoCanvas,
+  StatusDoCanvas,
+} from "../componentes/canvas/PaineisDoCanvas";
+import type { ResumoDoOrquestrador } from "../shared/api/tipos";
+import { type AcoesDoCanvas, ProvedorDoCanvas, servidorParaOsNos, type ValorDoCanvas } from "../shared/canvas/contexto";
+import {
+  type JanelaParaOrganizar,
+  lerBixinhosLimpos,
   lerLayout,
-  organizarEmGrade,
+  organizarComNotas,
   posicaoParaNovoTerminal,
-  salvarLayout,
+  salvarBixinhosLimpos,
+  TAMANHO_DA_NOTA,
   TAMANHO_DO_RASCUNHO,
   TAMANHO_DO_TERMINAL,
   type Viewport,
 } from "../shared/canvas/layout";
 import {
   ALCA_DO_TERMINAL,
+  type ArestaDoCanvas,
   arestasDosBixinhos,
   ehBixinho,
+  ehNota,
   ehTerminal,
-  layoutDosNos,
+  limparBixinhos,
+  mesmasLigacoes,
   type NoDoCanvas,
   type NoRascunho as TipoDoRascunho,
   nosDoLayout,
   novoTerminal,
+  reaproveitarArestas,
   semTerminal,
   sincronizarBixinhos,
   subagentesVisiveis,
 } from "../shared/canvas/nos";
+import { ProvedorDasNotas } from "../shared/canvas/notas";
 import { useConversas } from "../shared/hooks/useConversas";
+import { useMovimentoDoCanvas } from "../shared/hooks/useMovimentoDoCanvas";
+import { useNotas } from "../shared/hooks/useNotas";
 import { useOrquestradores } from "../shared/hooks/useOrquestradores";
+import { useReaproveitado } from "../shared/hooks/useReaproveitado";
 import { useServidor } from "../shared/hooks/useServidor";
 
-const TIPOS_DE_NO = { terminal: NoTerminal, rascunho: NoRascunho, bixinho: NoBixinho } satisfies NodeTypes;
+// Tudo o que vai ao <ReactFlow> é constante ou estável: uma prop nova a cada
+// renderização (e o canvas renderiza a cada quadro do arraste) faz o React
+// Flow atualizar o estado interno e re-renderizar por dentro.
+const TIPOS_DE_NO = { terminal: NoTerminal, rascunho: NoRascunho, bixinho: NoBixinho, nota: NoNota } satisfies NodeTypes;
+const TIPOS_DE_ARESTA = { bixinho: ArestaDoBixinho } satisfies EdgeTypes;
+const ENQUADRAMENTO_AO_ABRIR: FitViewOptions<NoDoCanvas> = { maxZoom: 1, padding: 0.15 };
+const VIEWPORT_PADRAO: Viewport = { x: 0, y: 0, zoom: 1 };
+
+function classeNoMinimapa(no: { type?: string }): string {
+  return no.type === "bixinho" ? "minimapa-bixinho" : no.type === "nota" ? "minimapa-nota" : "minimapa-terminal";
+}
+
+/** O tamanho de uma janela do canvas para organizar: o do nó, o medido ou o padrão. */
+function tamanhoParaOrganizar(no: NoDoCanvas, padrao: { largura: number; altura: number }): JanelaParaOrganizar {
+  return {
+    id: no.id,
+    largura: no.width ?? no.measured?.width ?? padrao.largura,
+    altura: no.height ?? no.measured?.height ?? padrao.altura,
+  };
+}
+
+/** O mesmo array enquanto os ids e a ordem não mudam. */
+function mesmosIds(anteriores: string[], novos: string[]): string[] {
+  return anteriores.length === novos.length && anteriores.every((id, indice) => id === novos[indice]) ? anteriores : novos;
+}
 
 /** Atraso para o React Flow medir um nó recém-criado antes de enquadrá-lo. */
 const ESPERA_PARA_MEDIR_MS = 80;
@@ -77,22 +122,38 @@ function CanvasVazio({ aoCriar }: { aoCriar: () => void }) {
 function Canvas() {
   const { orquestradores, erro, recarregar } = useOrquestradores();
   const [layoutInicial] = useState(lerLayout);
-  // Enquadra só ao abrir com terminais salvos e sem posição de câmera salva.
-  // Com o canvas vazio, o React Flow enquadraria o primeiro terminal criado
-  // depois, com zoom exagerado.
+  // Enquadra só ao abrir com terminais (ou notas) salvos e sem posição de
+  // câmera salva. Com o canvas vazio, o React Flow enquadraria o primeiro
+  // terminal criado depois, com zoom exagerado.
   const [enquadrarAoAbrir] = useState(
-    () => layoutInicial.viewport === null && Object.keys(layoutInicial.terminais).length > 0,
+    () =>
+      layoutInicial.viewport === null &&
+      Object.keys(layoutInicial.terminais).length + Object.keys(layoutInicial.notas).length > 0,
   );
-  const [nos, setNos, aoMudarNos] = useNodesState<NoDoCanvas>(nosDoLayout(layoutInicial));
+  const [nosIniciais] = useState(() => nosDoLayout(layoutInicial));
+  const [nos, setNos, aoMudarNos] = useNodesState<NoDoCanvas>(nosIniciais);
+  const [bixinhosLimpos, setBixinhosLimpos] = useState(lerBixinhosLimpos);
   const fluxo = useReactFlow<NoDoCanvas>();
-  const viewport = useRef<Viewport | null>(layoutInicial.viewport);
+  // Grava o layout (só depois de soltar um arraste) e marca quando algo se move.
+  const movimento = useMovimentoDoCanvas(nos, layoutInicial.viewport);
   // Criados nesta sessão e ainda ausentes da lista: uma consulta que saiu
   // antes da criação não pode tirá-los do canvas ao voltar.
   const criadosAgora = useRef(new Set<string>());
 
   const servidor = useServidor();
-  const idsNoCanvas = nos.filter(ehTerminal).map((no) => no.data.orquestradorId);
+  // O mesmo array enquanto os terminais abertos não mudam: arrastar não o troca.
+  const idsNoCanvas = useReaproveitado(
+    nos.filter(ehTerminal).map((no) => no.data.orquestradorId),
+    mesmosIds,
+  );
+  const noCanvas = useMemo(() => new Set(idsNoCanvas), [idsNoCanvas]);
   const { conversas, conexoes, sinais } = useConversas(idsNoCanvas, servidor.conectado);
+  // Limpar lê as conversas por aqui, para as ações do canvas não mudarem a cada evento.
+  const conversasAtuais = useRef(conversas);
+
+  useEffect(() => {
+    conversasAtuais.current = conversas;
+  }, [conversas]);
 
   // A aba do navegador também avisa: o canvas pode estar atrás de outra janela.
   useEffect(() => {
@@ -121,24 +182,38 @@ function Canvas() {
         .filter((terminal) => !existentes.has(terminal.id) && !criadosAgora.current.has(terminal.id));
       return orfaos.length === 0 ? atuais : orfaos.reduce((restantes, terminal) => semTerminal(restantes, terminal.id), atuais);
     });
+    // A limpeza de um orquestrador excluído não serve mais: sai do armazenamento.
+    setBixinhosLimpos((atuais) => {
+      const restantes = [...atuais].filter(([id]) => existentes.has(id) || criadosAgora.current.has(id));
+      return restantes.length === atuais.size ? atuais : new Map(restantes);
+    });
   }, [orquestradores, setNos]);
 
-  // Bixinhos nascem e somem conforme os Subagentes de cada conversa.
+  // Bixinhos nascem e somem conforme os Subagentes de cada conversa e o que o usuário limpou.
   useEffect(() => {
-    setNos((atuais) => sincronizarBixinhos(atuais, conversas));
-  }, [conversas, setNos]);
+    setNos((atuais) => sincronizarBixinhos(atuais, conversas, bixinhosLimpos));
+  }, [conversas, bixinhosLimpos, setNos]);
 
   useEffect(() => {
-    const espera = setTimeout(() => salvarLayout(layoutDosNos(nos, viewport.current)), 300);
-    return () => clearTimeout(espera);
-  }, [nos]);
+    salvarBixinhosLimpos(bixinhosLimpos);
+  }, [bixinhosLimpos]);
 
-  const arestas = useMemo(() => arestasDosBixinhos(nos, conversas), [nos, conversas]);
+  // As linhas só são recalculadas quando um bixinho nasce, some ou muda de
+  // terminal, ou quando chega um evento; e o React Flow só recebe um array
+  // novo quando alguma linha mudou de fato. Arrastar não muda nenhuma.
+  const bixinhos = useReaproveitado(nos.filter(ehBixinho), mesmasLigacoes);
+  const arestasCalculadas = useMemo(() => arestasDosBixinhos(bixinhos, conversas), [bixinhos, conversas]);
+  const arestas = useReaproveitado(arestasCalculadas, reaproveitarArestas);
 
   const centroDaTela = useCallback(
     () => fluxo.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }),
     [fluxo],
   );
+
+  // O conteúdo das notas fica numa loja própria: digitar ou salvar uma nota não re-renderiza o canvas.
+  const notas = useNotas(setNos, centroDaTela, servidor.conectado);
+  const { criarNota, erro: erroDasNotas, descartarErro: descartarErroDasNotas } = notas;
+  const novaNota = useCallback(() => void criarNota(), [criarNota]);
 
   const focar = useCallback(
     (id: string) => {
@@ -192,6 +267,15 @@ function Canvas() {
     [setNos],
   );
 
+  const limparBixinhosDoTerminal = useCallback(
+    (orquestradorId: string) =>
+      setBixinhosLimpos((atuais) => {
+        const limpos = limparBixinhos(conversasAtuais.current.get(orquestradorId), atuais.get(orquestradorId));
+        return limpos === null ? atuais : new Map(atuais).set(orquestradorId, limpos);
+      }),
+    [],
+  );
+
   const orquestradorCriado = useCallback(
     (rascunhoId: string, orquestrador: ResumoDoOrquestrador) => {
       criadosAgora.current.add(orquestrador.id);
@@ -218,13 +302,10 @@ function Canvas() {
   const organizar = useCallback(() => {
     setNos((atuais) => {
       const janelas = atuais
-        .filter((no) => !ehBixinho(no))
-        .map((no) => ({
-          id: no.id,
-          largura: no.width ?? no.measured?.width ?? TAMANHO_DO_TERMINAL.largura,
-          altura: no.height ?? no.measured?.height ?? TAMANHO_DO_TERMINAL.altura,
-        }));
-      const posicoes = organizarEmGrade(janelas);
+        .filter((no) => !ehBixinho(no) && !ehNota(no))
+        .map((no) => tamanhoParaOrganizar(no, TAMANHO_DO_TERMINAL));
+      const notasNoCanvas = atuais.filter(ehNota).map((no) => tamanhoParaOrganizar(no, TAMANHO_DA_NOTA));
+      const posicoes = organizarComNotas(janelas, notasNoCanvas);
       return atuais.map((no) => {
         const posicao = posicoes[no.id];
         return posicao === undefined ? no : { ...no, position: posicao };
@@ -234,78 +315,133 @@ function Canvas() {
   }, [fluxo, setNos]);
 
   const acoes = useMemo<AcoesDoCanvas>(
-    () => ({ abrirTerminal, fecharTerminal, orquestradorCriado, descartarRascunho, recarregar }),
-    [abrirTerminal, fecharTerminal, orquestradorCriado, descartarRascunho, recarregar],
+    () => ({
+      abrirTerminal,
+      fecharTerminal,
+      limparBixinhos: limparBixinhosDoTerminal,
+      orquestradorCriado,
+      descartarRascunho,
+      recarregar,
+    }),
+    [abrirTerminal, fecharTerminal, limparBixinhosDoTerminal, orquestradorCriado, descartarRascunho, recarregar],
   );
+  // Os nós só leem do servidor a conexão e a memória por Orquestrador: a
+  // memória livre do computador, que muda a cada leitura, não os re-renderiza.
+  const servidorDosNos = useReaproveitado(servidor, servidorParaOsNos);
+  // Não depende de `nos`: arrastar e mover o canvas não trocam o valor.
   const valor = useMemo<ValorDoCanvas>(
-    () => ({ orquestradores: porId, conversas, conexoes, sinais, servidor, acoes }),
-    [porId, conversas, conexoes, sinais, servidor, acoes],
+    () => ({ orquestradores: porId, conversas, conexoes, sinais, bixinhosLimpos, servidor: servidorDosNos, acoes }),
+    [porId, conversas, conexoes, sinais, bixinhosLimpos, servidorDosNos, acoes],
   );
 
-  const trabalhando = (orquestradores ?? []).filter((orquestrador) => orquestrador.situacao === "trabalhando").length;
-  const bixinhosAtivos = [...conversas.values()].reduce(
-    (total, conversa) =>
-      total + subagentesVisiveis(conversa).filter((subagente) => subagente.situacao === "executando").length,
-    0,
+  const trabalhando = useMemo(
+    () => (orquestradores ?? []).filter((orquestrador) => orquestrador.situacao === "trabalhando").length,
+    [orquestradores],
   );
-  const cota = [...conversas.values()].find((conversa) => conversa.cota !== null)?.cota ?? null;
-  const janelas = nos.filter((no) => !ehBixinho(no));
+  const bixinhosAtivos = useMemo(
+    () =>
+      [...conversas.values()].reduce(
+        (total, conversa) =>
+          total + subagentesVisiveis(conversa).filter((subagente) => subagente.situacao === "executando").length,
+        0,
+      ),
+    [conversas],
+  );
+  const cota = useMemo(
+    () => [...conversas.values()].find((conversa) => conversa.cota !== null)?.cota ?? null,
+    [conversas],
+  );
+  const quantidadeDeJanelas = nos.filter((no) => !ehBixinho(no)).length;
+  const podeOrganizar = quantidadeDeJanelas > 1;
+
+  // Os painéis não dependem da posição dos nós: memorizados, não re-renderizam
+  // a cada quadro do arraste.
+  const painelDaEsquerda = useMemo(
+    () => (
+      <Panel position="top-left">
+        <BarraDoCanvas
+          aoCriar={novoOrquestrador}
+          aoCriarNota={novaNota}
+          aoOrganizar={organizar}
+          podeOrganizar={podeOrganizar}
+        />
+        {erroDasNotas !== null && <ErroDoCanvas erro={erroDasNotas} aoFechar={descartarErroDasNotas} />}
+        <Doca orquestradores={orquestradores} noCanvas={noCanvas} erro={erro} aoAbrir={abrirTerminal} />
+      </Panel>
+    ),
+    [
+      novoOrquestrador,
+      novaNota,
+      organizar,
+      podeOrganizar,
+      erroDasNotas,
+      descartarErroDasNotas,
+      orquestradores,
+      noCanvas,
+      erro,
+      abrirTerminal,
+    ],
+  );
+  const painelDoCentro = useMemo(
+    () => (
+      <Panel position="top-center">
+        <AvisoDeConexao servidor={servidor} />
+      </Panel>
+    ),
+    [servidor],
+  );
+  const painelDaDireita = useMemo(
+    () => (
+      <Panel position="top-right">
+        <StatusDoCanvas
+          trabalhando={trabalhando}
+          bixinhosAtivos={bixinhosAtivos}
+          cota={cota}
+          memoria={servidor.memoria}
+        />
+      </Panel>
+    ),
+    [trabalhando, bixinhosAtivos, cota, servidor.memoria],
+  );
 
   return (
-    <ContextoDoCanvas.Provider value={valor}>
-      <div className={`relative h-screen w-screen ${servidor.conectado ? "" : "canvas-desconectado"}`}>
-        <ReactFlow<NoDoCanvas>
-          nodes={nos}
-          edges={arestas}
-          nodeTypes={TIPOS_DE_NO}
-          onNodesChange={aoMudarNos}
-          onMoveEnd={(_evento, novo) => {
-            viewport.current = novo;
-            salvarLayout(layoutDosNos(nos, novo));
-          }}
-          colorMode="dark"
-          defaultViewport={layoutInicial.viewport ?? { x: 0, y: 0, zoom: 1 }}
-          fitView={enquadrarAoAbrir}
-          fitViewOptions={{ maxZoom: 1, padding: 0.15 }}
-          minZoom={0.1}
-          maxZoom={2}
-          // Como no Excalidraw: a roda do mouse rola o canvas; com Ctrl, dá zoom.
-          panOnScroll
-          zoomActivationKeyCode="Control"
-          deleteKeyCode={null}
+    <ProvedorDoCanvas valor={valor}>
+      <ProvedorDasNotas valor={notas.valor}>
+        <div
+          className={`relative h-screen w-screen ${servidor.conectado ? "" : "canvas-desconectado"} ${movimento.movendo ? "canvas-movendo" : ""}`}
         >
-          <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} />
-          <Controls position="bottom-left" showInteractive={false} />
-          <MiniMap
-            position="bottom-right"
-            pannable
-            zoomable
-            nodeClassName={(no) => (no.type === "bixinho" ? "minimapa-bixinho" : "minimapa-terminal")}
-          />
-          <Panel position="top-left">
-            <BarraDoCanvas aoCriar={novoOrquestrador} aoOrganizar={organizar} podeOrganizar={janelas.length > 1} />
-            <Doca
-              orquestradores={orquestradores}
-              noCanvas={new Set(idsNoCanvas)}
-              erro={erro}
-              aoAbrir={abrirTerminal}
-            />
-          </Panel>
-          <Panel position="top-center">
-            <AvisoDeConexao servidor={servidor} />
-          </Panel>
-          <Panel position="top-right">
-            <StatusDoCanvas
-              trabalhando={trabalhando}
-              bixinhosAtivos={bixinhosAtivos}
-              cota={cota}
-              memoria={servidor.memoria}
-            />
-          </Panel>
-        </ReactFlow>
-        {janelas.length === 0 && <CanvasVazio aoCriar={novoOrquestrador} />}
-      </div>
-    </ContextoDoCanvas.Provider>
+          <ReactFlow<NoDoCanvas, ArestaDoCanvas>
+            nodes={nos}
+            edges={arestas}
+            nodeTypes={TIPOS_DE_NO}
+            edgeTypes={TIPOS_DE_ARESTA}
+            onNodesChange={aoMudarNos}
+            onNodeDragStart={movimento.aoComecarArraste}
+            onNodeDragStop={movimento.aoTerminarArraste}
+            onMoveStart={movimento.aoComecarMovimento}
+            onMoveEnd={movimento.aoTerminarMovimento}
+            colorMode="dark"
+            defaultViewport={layoutInicial.viewport ?? VIEWPORT_PADRAO}
+            fitView={enquadrarAoAbrir}
+            fitViewOptions={ENQUADRAMENTO_AO_ABRIR}
+            minZoom={0.1}
+            maxZoom={2}
+            // Como no Excalidraw: a roda do mouse rola o canvas; com Ctrl, dá zoom.
+            panOnScroll
+            zoomActivationKeyCode="Control"
+            deleteKeyCode={null}
+          >
+            <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} />
+            <Controls position="bottom-left" showInteractive={false} />
+            <MiniMap position="bottom-right" pannable zoomable nodeClassName={classeNoMinimapa} />
+            {painelDaEsquerda}
+            {painelDoCentro}
+            {painelDaDireita}
+          </ReactFlow>
+          {quantidadeDeJanelas === 0 && <CanvasVazio aoCriar={novoOrquestrador} />}
+        </div>
+      </ProvedorDasNotas>
+    </ProvedorDoCanvas>
   );
 }
 

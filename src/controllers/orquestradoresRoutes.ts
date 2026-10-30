@@ -6,8 +6,10 @@ import { ExploradorDePastas } from "../infraestrutura/arquivos/ExploradorDePasta
 import { CanalDeEventos } from "../infraestrutura/sse/CanalDeEventos";
 import { MAXIMO_DE_IMAGENS_POR_MENSAGEM, TAMANHO_MAXIMO_DA_IMAGEM, TIPOS_DE_IMAGEM } from "../orquestracao/Anexo";
 import { ErroDeOrquestracao, MotivoDoErro } from "../orquestracao/ErroDeOrquestracao";
+import { ESFORCOS_DE_RACIOCINIO } from "../orquestracao/EsforcoDeRaciocinio";
 import { EventoRegistrado } from "../orquestracao/EventoDeOrquestracao";
 import { MODELOS_CLAUDE } from "../orquestracao/ModeloClaude";
+import { MODOS_DO_TURNO } from "../orquestracao/ModoDoTurno";
 import { NIVEIS_DE_PERMISSAO } from "../orquestracao/NivelDePermissao";
 import {
   Orquestrador,
@@ -40,6 +42,17 @@ const esquemaDaConfiguracao = z.object({
       .max(LIMITE_DE_SUBAGENTES, { error: `Use no máximo ${LIMITE_DE_SUBAGENTES} subagentes.` }),
   }),
   nivelDePermissao: z.enum(NIVEIS_DE_PERMISSAO, { error: "Nível de permissão inválido." }),
+  // Opcional também na criação: ausente vale `false` (desligada).
+  permitirCommitEPush: z
+    .boolean({ error: 'A opção "Permitir commit e push" deve ser verdadeira ou falsa.' })
+    .optional(),
+  // Opcionais também na criação: ausentes valem "padrao".
+  esforcoDoOrquestrador: z
+    .enum(ESFORCOS_DE_RACIOCINIO, { error: "Esforço do orquestrador inválido." })
+    .optional(),
+  esforcoDosSubagentes: z
+    .enum(ESFORCOS_DE_RACIOCINIO, { error: "Esforço dos subagentes inválido." })
+    .optional(),
 });
 
 const esquemaDeCriacao = esquemaDaConfiguracao.extend({
@@ -74,6 +87,17 @@ const esquemaDeMensagem = z.object({
     )
     .max(MAXIMO_DE_IMAGENS_POR_MENSAGEM, { error: `Anexe até ${MAXIMO_DE_IMAGENS_POR_MENSAGEM} imagens por mensagem.` })
     .default([]),
+  modo: z.enum(MODOS_DO_TURNO, { error: "Modo do pedido inválido." }).default("execucao"),
+});
+
+const esquemaDeAprovacaoDoPlano = z.object({
+  observacoes: z
+    .string({ error: "As observações devem ser um texto." })
+    .trim()
+    .max(TAMANHO_MAXIMO_DA_MENSAGEM, {
+      error: `As observações devem ter até ${TAMANHO_MAXIMO_DA_MENSAGEM} caracteres.`,
+    })
+    .default(""),
 });
 
 const STATUS_POR_MOTIVO: Readonly<Record<MotivoDoErro, number>> = {
@@ -81,6 +105,7 @@ const STATUS_POR_MOTIVO: Readonly<Record<MotivoDoErro, number>> = {
   nao_encontrado: 404,
   turno_em_andamento: 409,
   sem_turno_em_andamento: 409,
+  sem_plano_pendente: 409,
 };
 
 function responderErro(resposta: Response, erro: unknown): void {
@@ -203,7 +228,7 @@ export function criarOrquestradoresRoutes({
   rotas.post(
     "/orquestradores/:id/mensagens",
     rota(async (requisicao, resposta) => {
-      const { texto, imagens } = esquemaDeMensagem.parse(requisicao.body);
+      const { texto, imagens, modo } = esquemaDeMensagem.parse(requisicao.body);
       const { turnoId } = await servico.enviarMensagem(
         requisicao.params.id,
         texto,
@@ -212,8 +237,27 @@ export function criarOrquestradoresRoutes({
           tipoDeMidia: imagem.tipoDeMidia,
           conteudo: Buffer.from(imagem.base64, "base64"),
         })),
+        modo,
       );
       resposta.status(202).json({ turnoId });
+    }),
+  );
+
+  /** Aprova o Plano pendente e já inicia o turno que o executa. */
+  rotas.post(
+    "/orquestradores/:id/plano/aprovar",
+    rota(async (requisicao, resposta) => {
+      const { observacoes } = esquemaDeAprovacaoDoPlano.parse(requisicao.body ?? {});
+      const { turnoId } = await servico.aprovarPlano(requisicao.params.id, observacoes);
+      resposta.status(202).json({ turnoId });
+    }),
+  );
+
+  rotas.post(
+    "/orquestradores/:id/plano/descartar",
+    rota(async (requisicao, resposta) => {
+      await servico.descartarPlano(requisicao.params.id);
+      resposta.status(204).end();
     }),
   );
 

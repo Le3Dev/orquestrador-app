@@ -8,6 +8,9 @@ export type ModeloClaude = "opus" | "sonnet" | "haiku";
 
 export type NivelDePermissao = "leitura" | "edicao" | "edicao_e_comandos";
 
+/** Esforço de raciocínio do modelo. "padrao" não força nada: vale o padrão do modelo no Claude Code. */
+export type EsforcoDeRaciocinio = "padrao" | "baixo" | "medio" | "alto" | "extra_alto" | "maximo";
+
 export interface DadosDaQuantidade {
   modo: "fixa" | "automatica";
   limite: number;
@@ -15,10 +18,26 @@ export interface DadosDaQuantidade {
 
 export interface DadosDaConfiguracao {
   modeloDoOrquestrador: ModeloClaude;
+  /** "padrao" por padrão. */
+  esforcoDoOrquestrador: EsforcoDeRaciocinio;
   modeloDosSubagentes: ModeloClaude;
+  /** "padrao" por padrão. */
+  esforcoDosSubagentes: EsforcoDeRaciocinio;
   quantidadeDeSubagentes: DadosDaQuantidade;
   nivelDePermissao: NivelDePermissao;
+  /** Libera `git commit`/`git push` só quando o usuário pede na mensagem. Desligado por padrão. */
+  permitirCommitEPush: boolean;
 }
+
+/** Campos que faltam nos eventos gravados antes de existirem. */
+type CamposPosterioresDaConfiguracao = "permitirCommitEPush" | "esforcoDoOrquestrador" | "esforcoDosSubagentes";
+
+/**
+ * A configuração como os eventos a gravaram: os anteriores à opção de commit e
+ * push e à escolha do esforço não têm esses campos.
+ */
+export type DadosDaConfiguracaoGravada = Omit<DadosDaConfiguracao, CamposPosterioresDaConfiguracao> &
+  Partial<Pick<DadosDaConfiguracao, CamposPosterioresDaConfiguracao>>;
 
 export type TipoDeImagem = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
@@ -54,6 +73,13 @@ export interface SaudeDoServidor {
 
 export type SituacaoDoOrquestrador = "ocioso" | "trabalhando";
 export type SituacaoDoTurno = "em_andamento" | "concluido" | "cancelado" | "falhou" | "interrompido";
+
+/**
+ * "planejamento" é o Plan Mode: o pedido só investiga e a resposta é um plano,
+ * que espera a aprovação do usuário antes de qualquer alteração.
+ */
+export type ModoDoTurno = "execucao" | "planejamento";
+export type DecisaoDoPlano = "pendente" | "aprovado" | "descartado";
 export type SituacaoDoSubagente = "executando" | "concluido" | "falhou" | "cancelado";
 
 /**
@@ -82,6 +108,20 @@ export interface ResumoDoOrquestrador {
 export interface PastaDeProjeto {
   nome: string;
   caminho: string;
+}
+
+/**
+ * Nota livre do canvas (bloco de notas). O conteúdo fica no servidor; a
+ * posição, o tamanho e se está minimizada ficam no layout do navegador.
+ */
+export interface DadosDaNota {
+  id: string;
+  /** De 1 a 120 caracteres. */
+  titulo: string;
+  /** Texto puro, até 100.000 caracteres. */
+  texto: string;
+  criadaEm: string;
+  atualizadaEm: string;
 }
 
 export interface UsoDoTurno {
@@ -124,15 +164,24 @@ type EventoDeTurno =
   | { tipo: "resultado_do_subagente"; subagenteId: string; resultado: string }
   | { tipo: "permissao_negada"; ferramenta: string; detalhe: string }
   | { tipo: "uso_da_cota"; janelas: JanelaDaCota[] }
-  // `anexos` falta nos eventos gravados antes de existirem imagens.
-  | { tipo: "turno_iniciado"; texto: string; configuracao: DadosDaConfiguracao; anexos?: DadosDoAnexo[] }
+  // `anexos` e `modo` faltam nos eventos gravados antes de existirem imagens e o Plan Mode.
+  | {
+      tipo: "turno_iniciado";
+      texto: string;
+      configuracao: DadosDaConfiguracaoGravada;
+      anexos?: DadosDoAnexo[];
+      modo?: ModoDoTurno;
+    }
   | { tipo: "turno_concluido"; resposta: string; uso: UsoDoTurno }
   | { tipo: "turno_cancelado" }
   | { tipo: "turno_falhou"; motivo: string }
-  | { tipo: "turno_interrompido" };
+  | { tipo: "turno_interrompido" }
+  // Decisão sobre o plano de um turno de planejamento; ao aprovar, segue o `turno_iniciado` da execução.
+  | { tipo: "plano_aprovado" }
+  | { tipo: "plano_descartado" };
 
 export type EventoDeOrquestracao =
   | (EventoDeTurno & { turnoId: string })
-  | { tipo: "configuracao_alterada"; configuracao: DadosDaConfiguracao };
+  | { tipo: "configuracao_alterada"; configuracao: DadosDaConfiguracaoGravada };
 
 export type EventoRegistrado = EventoDeOrquestracao & { sequencia: number; em: string };

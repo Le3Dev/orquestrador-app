@@ -1,11 +1,19 @@
-import type { DadosDaConfiguracao, EventoDeOrquestracao, EventoRegistrado } from "../api/tipos";
+import type {
+  DadosDaConfiguracao,
+  DadosDaConfiguracaoGravada,
+  EventoDeOrquestracao,
+  EventoRegistrado,
+} from "../api/tipos";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "./aplicarEvento";
 
 const configuracao: DadosDaConfiguracao = {
   modeloDoOrquestrador: "opus",
+  esforcoDoOrquestrador: "padrao",
   modeloDosSubagentes: "sonnet",
+  esforcoDosSubagentes: "padrao",
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "leitura",
+  permitirCommitEPush: false,
 };
 
 function registrar(eventos: EventoDeOrquestracao[]): EventoRegistrado[] {
@@ -160,5 +168,120 @@ describe("aplicarEvento", () => {
       ["um", "cancelado"],
       ["dois", "interrompido"],
     ]);
+  });
+
+  it("lê como execução os pedidos gravados antes do plan mode", () => {
+    const estado = reproduzir(
+      registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "antigo", configuracao },
+        {
+          tipo: "turno_concluido",
+          turnoId: "t1",
+          resposta: "feito",
+          uso: { duracaoMs: 1000, tokensDeEntrada: 1, tokensDeSaida: 1, subagentesLancados: 0 },
+        },
+      ]),
+    );
+    const [turno] = estado.turnos;
+
+    expect(turno).toMatchObject({ modo: "execucao", decisaoDoPlano: null });
+    expect(turno?.log[0]?.texto).toMatch(/^turno iniciado/);
+  });
+
+  it("lê com commit e push bloqueados os eventos gravados antes da opção existir", () => {
+    const configuracaoAntiga: DadosDaConfiguracaoGravada = {
+      modeloDoOrquestrador: "opus",
+      modeloDosSubagentes: "sonnet",
+      quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
+      nivelDePermissao: "edicao_e_comandos",
+    };
+    const [antigo, novo] = reproduzir(
+      registrar([
+        { tipo: "configuracao_alterada", configuracao: configuracaoAntiga },
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "antigo", configuracao: configuracaoAntiga },
+        { tipo: "turno_cancelado", turnoId: "t1" },
+        { tipo: "turno_iniciado", turnoId: "t2", texto: "novo", configuracao: { ...configuracao, permitirCommitEPush: true } },
+      ]),
+    ).turnos;
+
+    expect(antigo?.configuracao).toEqual({
+      ...configuracaoAntiga,
+      permitirCommitEPush: false,
+      esforcoDoOrquestrador: "padrao",
+      esforcoDosSubagentes: "padrao",
+    });
+    expect(novo?.configuracao.permitirCommitEPush).toBe(true);
+  });
+
+  it("lê com o esforço padrão do modelo os eventos gravados antes da escolha do esforço", () => {
+    const configuracaoAntiga: DadosDaConfiguracaoGravada = {
+      modeloDoOrquestrador: "opus",
+      modeloDosSubagentes: "sonnet",
+      quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
+      nivelDePermissao: "leitura",
+      permitirCommitEPush: false,
+    };
+    const [antigo, novo] = reproduzir(
+      registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "antigo", configuracao: configuracaoAntiga },
+        { tipo: "turno_cancelado", turnoId: "t1" },
+        {
+          tipo: "turno_iniciado",
+          turnoId: "t2",
+          texto: "novo",
+          configuracao: { ...configuracao, esforcoDoOrquestrador: "alto", esforcoDosSubagentes: "baixo" },
+        },
+      ]),
+    ).turnos;
+
+    expect(antigo?.configuracao).toMatchObject({ esforcoDoOrquestrador: "padrao", esforcoDosSubagentes: "padrao" });
+    expect(novo?.configuracao).toMatchObject({ esforcoDoOrquestrador: "alto", esforcoDosSubagentes: "baixo" });
+  });
+
+  describe("plan mode", () => {
+    const uso = { duracaoMs: 3000, tokensDeEntrada: 10, tokensDeSaida: 5, subagentesLancados: 0 };
+    const planoEntregue: EventoDeOrquestracao[] = [
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "planeje a migração", configuracao, modo: "planejamento" },
+      { tipo: "turno_concluido", turnoId: "t1", resposta: "1. Ler o domínio\n2. Migrar", uso },
+    ];
+
+    it("o plano entregue fica pendente de decisão", () => {
+      const em = reproduzir(registrar(planoEntregue.slice(0, 1))).turnos[0];
+      const [turno] = reproduzir(registrar(planoEntregue)).turnos;
+
+      expect(em).toMatchObject({ modo: "planejamento", decisaoDoPlano: null });
+      expect(turno).toMatchObject({ situacao: "concluido", decisaoDoPlano: "pendente", resposta: "1. Ler o domínio\n2. Migrar" });
+      expect(turno?.log[0]?.texto).toMatch(/^plan mode · turno iniciado/);
+    });
+
+    it("ao aprovar, marca o plano e o novo turno de execução segue separado", () => {
+      const estado = reproduzir(
+        registrar([
+          ...planoEntregue,
+          { tipo: "plano_aprovado", turnoId: "t1" },
+          { tipo: "turno_iniciado", turnoId: "t2", texto: "Execute o plano aprovado.", configuracao, modo: "execucao" },
+        ]),
+      );
+      const [plano, execucao] = estado.turnos;
+
+      expect(plano?.decisaoDoPlano).toBe("aprovado");
+      expect(plano?.log.at(-1)).toMatchObject({ tipo: "fim", texto: "plano aprovado · execução iniciada" });
+      expect(execucao).toMatchObject({ modo: "execucao", situacao: "em_andamento", decisaoDoPlano: null });
+    });
+
+    it("ao descartar, marca o plano como descartado", () => {
+      const [turno] = reproduzir(registrar([...planoEntregue, { tipo: "plano_descartado", turnoId: "t1" }])).turnos;
+
+      expect(turno?.decisaoDoPlano).toBe("descartado");
+      expect(turno?.log.at(-1)).toMatchObject({ tipo: "sistema", texto: "plano descartado" });
+    });
+
+    it("plano que não chegou ao fim não fica pendente", () => {
+      const [turno] = reproduzir(
+        registrar([...planoEntregue.slice(0, 1), { tipo: "turno_cancelado", turnoId: "t1" }]),
+      ).turnos;
+
+      expect(turno).toMatchObject({ situacao: "cancelado", decisaoDoPlano: null });
+    });
   });
 });

@@ -1,5 +1,6 @@
-import { type ClipboardEvent, type KeyboardEvent, useRef, useState } from "react";
+import { type ClipboardEvent, type KeyboardEvent, memo, type RefObject, useRef, useState } from "react";
 
+import type { ModoDoTurno } from "../../shared/api/tipos";
 import { formatarBytes } from "../../shared/formatacao";
 import { type ImagemAnexada, TIPOS_DE_IMAGEM } from "../../shared/imagens";
 
@@ -10,6 +11,11 @@ interface Props {
   desconectado: boolean;
   trabalhando: boolean;
   cancelando: boolean;
+  /** Modo do próximo pedido: "planejamento" é o Plan Mode. */
+  modo: ModoDoTurno;
+  aoAlternarModo: () => void;
+  /** O campo de texto, para quem está fora poder focá-lo (ex.: "Ajustar plano"). */
+  campo: RefObject<HTMLTextAreaElement | null>;
   imagens: readonly ImagemAnexada[];
   aoAnexar: (arquivos: File[]) => void;
   aoRemoverImagem: (id: string) => void;
@@ -19,15 +25,21 @@ interface Props {
 }
 
 /**
- * Linha de comando do terminal: Enter envia, Shift+Enter quebra linha e Esc
- * cancela o pedido em andamento. Imagens entram colando (Ctrl+V), pelo botão
- * de anexo ou arrastando para o terminal. Continua editável durante o
- * trabalho, para já ir escrevendo o próximo pedido.
+ * Linha de comando do terminal: Enter envia, Shift+Enter quebra linha, Esc
+ * cancela o pedido em andamento e Shift+Tab liga/desliga o Plan Mode. Imagens
+ * entram colando (Ctrl+V), pelo botão de anexo ou arrastando para o terminal.
+ * Continua editável durante o trabalho, para já ir escrevendo o próximo pedido.
+ *
+ * Memorizado: novidades de outros terminais não o re-renderizam (o terminal
+ * passa as funções estáveis).
  */
-export function PromptDoTerminal({
+export const PromptDoTerminal = memo(function PromptDoTerminal({
   desconectado,
   trabalhando,
   cancelando,
+  modo,
+  aoAlternarModo,
+  campo,
   imagens,
   aoAnexar,
   aoRemoverImagem,
@@ -36,9 +48,9 @@ export function PromptDoTerminal({
 }: Props) {
   const [texto, setTexto] = useState("");
   const [enviando, setEnviando] = useState(false);
-  const campo = useRef<HTMLTextAreaElement>(null);
   const seletor = useRef<HTMLInputElement>(null);
   const temConteudo = texto.trim() !== "" || imagens.length > 0;
+  const planejando = modo === "planejamento";
 
   function ajustarAltura(): void {
     const elemento = campo.current;
@@ -64,6 +76,12 @@ export function PromptDoTerminal({
   }
 
   function aoTeclar(evento: KeyboardEvent<HTMLTextAreaElement>): void {
+    // Como no Claude Code. Sem o preventDefault, o foco sairia do campo.
+    if (evento.key === "Tab" && evento.shiftKey) {
+      evento.preventDefault();
+      aoAlternarModo();
+      return;
+    }
     if (evento.key === "Enter" && !evento.shiftKey) {
       evento.preventDefault();
       void enviar();
@@ -102,7 +120,7 @@ export function PromptDoTerminal({
         </div>
       )}
       <div className="prompt-do-terminal">
-        <span className="text-active">❯</span>
+        <span className={planejando ? "text-info" : "text-active"}>❯</span>
         <textarea
           ref={campo}
           rows={1}
@@ -118,7 +136,9 @@ export function PromptDoTerminal({
               ? "servidor desconectado — dá para escrever, o envio volta quando ele voltar"
               : trabalhando
                 ? "trabalhando… (esc cancela) — já pode escrever o próximo"
-                : "peça algo e pressione enter · cole ou arraste imagens"
+                : planejando
+                  ? "descreva o que planejar — nada é alterado até você aprovar"
+                  : "peça algo e pressione enter · cole ou arraste imagens"
           }
           aria-label="Mensagem para o orquestrador"
         />
@@ -161,6 +181,16 @@ export function PromptDoTerminal({
           </button>
         )}
       </div>
+      <button
+        type="button"
+        className={`selo-de-modo ${planejando ? "selo-de-modo-ativo" : ""}`}
+        aria-pressed={planejando}
+        title="Alterna o modo do próximo pedido (Shift+Tab)"
+        onClick={aoAlternarModo}
+      >
+        {planejando ? "‖ plan mode ligado · só investiga e propõe um plano" : "› execução"}
+        <span className="text-muted"> · shift+tab alterna</span>
+      </button>
     </div>
   );
-}
+});

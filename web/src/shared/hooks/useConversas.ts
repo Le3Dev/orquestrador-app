@@ -3,6 +3,7 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import { ConexoesDeEventos, type SituacaoDaConexao } from "../api/ConexoesDeEventos";
 import type { EventoRegistrado, SinalDeVida } from "../api/tipos";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../estado/aplicarEvento";
+import { mesmoConteudo } from "./useReaproveitado";
 
 export type { SituacaoDaConexao };
 
@@ -60,12 +61,17 @@ export function useConversas(
   useEffect(() => {
     const conexoesDeEventos = new ConexoesDeEventos({
       aoReceber: (id, evento) => despachar({ tipo: "evento", id, evento }),
-      aoSinal: (id, sinal) => setSinais((atuais) => new Map(atuais).set(id, sinal)),
+      aoSinal: (id, sinal) =>
+        setSinais((atuais) => (mesmoConteudo(atuais.get(id), sinal) ? atuais : new Map(atuais).set(id, sinal))),
       aoMudarSituacao: (id, situacao) => {
         if (situacao === null) {
           despachar({ tipo: "esquecer", id });
         }
         setConexoes((atuais) => {
+          // Sem mudança (ex.: "reconectando" a cada nova tentativa), sem mapa novo.
+          if ((atuais.get(id) ?? null) === situacao) {
+            return atuais;
+          }
           const proximas = new Map(atuais);
           if (situacao === null) {
             proximas.delete(id);

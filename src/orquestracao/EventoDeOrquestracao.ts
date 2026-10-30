@@ -1,5 +1,6 @@
 import { DadosDoAnexo } from "./Anexo";
 import { DadosDaConfiguracao } from "./ConfiguracaoDoOrquestrador";
+import { ModoDoTurno } from "./ModoDoTurno";
 
 export interface UsoDoTurno {
   /** Tempo de relógio do turno inteiro, incluindo a espera pelos Subagentes. */
@@ -52,11 +53,20 @@ export type EventoDoMotor =
 
 /** Marcos do ciclo de vida de um turno, decididos pelo domínio. */
 export type EventoDeTurno =
-  | { tipo: "turno_iniciado"; texto: string; configuracao: DadosDaConfiguracao; anexos: DadosDoAnexo[] }
+  | {
+      tipo: "turno_iniciado";
+      texto: string;
+      configuracao: DadosDaConfiguracao;
+      anexos: DadosDoAnexo[];
+      modo: ModoDoTurno;
+    }
   | { tipo: "turno_concluido"; resposta: string; uso: UsoDoTurno }
   | { tipo: "turno_cancelado" }
   | { tipo: "turno_falhou"; motivo: string }
-  | { tipo: "turno_interrompido" };
+  | { tipo: "turno_interrompido" }
+  /** A decisão do usuário sobre o Plano de um turno de planejamento já concluído. */
+  | { tipo: "plano_aprovado" }
+  | { tipo: "plano_descartado" };
 
 /**
  * Tudo o que acontece com um Orquestrador. É o que vai para o histórico

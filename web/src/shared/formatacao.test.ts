@@ -1,4 +1,15 @@
+import type { DadosDaConfiguracao } from "./api/tipos";
 import { descreverConfiguracao, formatarDuracao, formatarMomento, formatarPercentual } from "./formatacao";
+
+const configuracao: DadosDaConfiguracao = {
+  modeloDoOrquestrador: "opus",
+  esforcoDoOrquestrador: "padrao",
+  modeloDosSubagentes: "sonnet",
+  esforcoDosSubagentes: "padrao",
+  quantidadeDeSubagentes: { modo: "fixa", limite: 2 },
+  nivelDePermissao: "edicao_e_comandos",
+  permitirCommitEPush: false,
+};
 
 describe("formatacao", () => {
   it("formata durações curtas e longas", () => {
@@ -21,7 +32,7 @@ describe("formatacao", () => {
   it("descreve a configuração em uma linha", () => {
     expect(
       descreverConfiguracao({
-        modeloDoOrquestrador: "opus",
+        ...configuracao,
         modeloDosSubagentes: "haiku",
         quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
         nivelDePermissao: "edicao",
@@ -30,11 +41,29 @@ describe("formatacao", () => {
 
     expect(
       descreverConfiguracao({
+        ...configuracao,
         modeloDoOrquestrador: "sonnet",
-        modeloDosSubagentes: "sonnet",
         quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
         nivelDePermissao: "leitura",
       }),
     ).toBe("Sonnet → Sonnet · 1 subagente · Somente leitura");
+  });
+
+  it("acrescenta o commit e push à descrição só quando liberados", () => {
+    expect(descreverConfiguracao({ ...configuracao, permitirCommitEPush: true })).toBe(
+      "Opus → Sonnet · 2 subagentes · Editar e rodar comandos · commit/push quando pedir",
+    );
+  });
+
+  it("acrescenta o esforço junto do modelo só quando não é o padrão (Claude Code)", () => {
+    expect(descreverConfiguracao({ ...configuracao, esforcoDoOrquestrador: "alto" })).toBe(
+      "Opus (esforço alto) → Sonnet · 2 subagentes · Editar e rodar comandos",
+    );
+    expect(descreverConfiguracao({ ...configuracao, esforcoDosSubagentes: "medio" })).toBe(
+      "Opus → Sonnet (esforço médio) · 2 subagentes · Editar e rodar comandos",
+    );
+    expect(
+      descreverConfiguracao({ ...configuracao, esforcoDoOrquestrador: "maximo", esforcoDosSubagentes: "extra_alto" }),
+    ).toBe("Opus (esforço máximo) → Sonnet (esforço extra alto) · 2 subagentes · Editar e rodar comandos");
   });
 });

@@ -2,7 +2,8 @@ export type MotivoDoErro =
   | "dados_invalidos"
   | "nao_encontrado"
   | "turno_em_andamento"
-  | "sem_turno_em_andamento";
+  | "sem_turno_em_andamento"
+  | "sem_plano_pendente";
 
 /**
  * Violação de uma regra do domínio. O `motivo` é o que a camada HTTP usa para

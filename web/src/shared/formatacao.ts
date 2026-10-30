@@ -1,9 +1,19 @@
-import type { DadosDaConfiguracao, ModeloClaude, NivelDePermissao } from "./api/tipos";
+import type { DadosDaConfiguracao, EsforcoDeRaciocinio, ModeloClaude, NivelDePermissao } from "./api/tipos";
 
 export const ROTULOS_DOS_MODELOS: Readonly<Record<ModeloClaude, { nome: string; descricao: string }>> = {
   opus: { nome: "Opus", descricao: "Mais capaz" },
   sonnet: { nome: "Sonnet", descricao: "Equilibrado" },
   haiku: { nome: "Haiku", descricao: "Rápido, menos cota" },
+};
+
+export const ROTULOS_DOS_ESFORCOS: Readonly<Record<EsforcoDeRaciocinio, string>> = {
+  // "padrao" não força nada: vale o settings.json do Claude Code da máquina ou, sem ele, o padrão do modelo.
+  padrao: "Padrão (Claude Code)",
+  baixo: "Baixo",
+  medio: "Médio",
+  alto: "Alto",
+  extra_alto: "Extra alto",
+  maximo: "Máximo",
 };
 
 /** Identificador curto de um Subagente, para caber em chips e no terminal. */
@@ -34,19 +44,31 @@ export const ROTULOS_DAS_PERMISSOES: Readonly<Record<NivelDePermissao, { nome: s
   },
   edicao_e_comandos: {
     nome: "Editar e rodar comandos",
-    descricao: "Também executa comandos no terminal (testes, builds). Commit e push continuam bloqueados.",
+    descricao: "Também executa comandos no terminal (testes, builds). Commit e push só com a opção abaixo ligada.",
   },
 };
 
-/** Ex.: "Opus → Sonnet · até 3 subagentes · Somente leitura". */
+/** Ex.: "Opus" ou, com um esforço escolhido, "Opus (esforço alto)". */
+function descreverModelo(modelo: ModeloClaude, esforco: EsforcoDeRaciocinio): string {
+  const nome = ROTULOS_DOS_MODELOS[modelo].nome;
+  return esforco === "padrao" ? nome : `${nome} (esforço ${ROTULOS_DOS_ESFORCOS[esforco].toLowerCase()})`;
+}
+
+/**
+ * Ex.: "Opus → Sonnet · até 3 subagentes · Somente leitura" (+ " · commit/push quando pedir", se liberado).
+ * Com esforço escolhido (diferente de "padrao"): "Opus (esforço alto) → Sonnet (esforço médio) · …".
+ */
 export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string {
   const { modo, limite } = configuracao.quantidadeDeSubagentes;
   const plural = limite === 1 ? "subagente" : "subagentes";
   const quantidade = modo === "fixa" ? `${limite} ${plural}` : `até ${limite} ${plural}`;
+  const orquestrador = descreverModelo(configuracao.modeloDoOrquestrador, configuracao.esforcoDoOrquestrador);
+  const subagentes = descreverModelo(configuracao.modeloDosSubagentes, configuracao.esforcoDosSubagentes);
   return [
-    `${ROTULOS_DOS_MODELOS[configuracao.modeloDoOrquestrador].nome} → ${ROTULOS_DOS_MODELOS[configuracao.modeloDosSubagentes].nome}`,
+    `${orquestrador} → ${subagentes}`,
     quantidade,
     ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome,
+    ...(configuracao.permitirCommitEPush ? ["commit/push quando pedir"] : []),
   ].join(" · ");
 }
 

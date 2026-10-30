@@ -17,10 +17,10 @@ export type AcessorioDoBixinho = (typeof ACESSORIOS)[number];
 export type CorDoBixinho = (typeof CORES)[number];
 
 export interface AparenciaDoBixinho {
-  nome: string;
-  forma: FormaDoBixinho;
-  acessorio: AcessorioDoBixinho;
-  cor: CorDoBixinho;
+  readonly nome: string;
+  readonly forma: FormaDoBixinho;
+  readonly acessorio: AcessorioDoBixinho;
+  readonly cor: CorDoBixinho;
 }
 
 const NOMES = [
@@ -42,12 +42,34 @@ function escolher<Item>(opcoes: readonly [Item, ...Item[]], semente: number): It
   return opcoes[semente % opcoes.length] ?? opcoes[0];
 }
 
+/**
+ * Aparências já calculadas, por id do Subagente. Devolver sempre o mesmo
+ * objeto deixa o `memo` do desenho funcionar: com um objeto novo a cada
+ * chamada, cada evento redesenhava as ~150 células de cada bixinho. Tem teto
+ * para não crescer sem fim numa aba aberta por dias.
+ */
+const APARENCIAS = new Map<string, AparenciaDoBixinho>();
+const LIMITE_DE_APARENCIAS = 1_000;
+
 export function aparenciaDoBixinho(subagenteId: string): AparenciaDoBixinho {
+  const guardada = APARENCIAS.get(subagenteId);
+  if (guardada !== undefined) {
+    return guardada;
+  }
   const semente = espalhar(subagenteId);
-  return {
+  const aparencia: AparenciaDoBixinho = Object.freeze({
     nome: escolher(NOMES, semente),
     forma: escolher(FORMAS, semente >>> 5),
     acessorio: escolher(ACESSORIOS, semente >>> 10),
     cor: escolher(PALETA, semente >>> 15),
-  };
+  });
+  if (APARENCIAS.size >= LIMITE_DE_APARENCIAS) {
+    // Sai a mais antiga (o Map guarda a ordem de inserção).
+    const maisAntiga = APARENCIAS.keys().next();
+    if (maisAntiga.done !== true) {
+      APARENCIAS.delete(maisAntiga.value);
+    }
+  }
+  APARENCIAS.set(subagenteId, aparencia);
+  return aparencia;
 }

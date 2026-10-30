@@ -43,13 +43,17 @@ export function faseDoTurno(turno: TurnoNaTela): SituacaoDaFase {
   const total = turno.subagentes.length;
   const rodando = turno.subagentes.filter((subagente) => subagente.situacao === "executando").length;
   const plural = total === 1 ? "agente" : "agentes";
+  // No Plan Mode o pedido só investiga: o que sai dele é um plano, não o trabalho feito.
+  const planejamento = turno.modo === "planejamento";
 
   switch (turno.situacao) {
     case "em_andamento": {
       const atual = fasePeloAndamento(turno);
       const descricao =
         atual === "planejar"
-          ? "Planejando as subtarefas…"
+          ? planejamento
+            ? "Investigando para montar o plano…"
+            : "Planejando as subtarefas…"
           : atual === "executar"
             ? `${rodando} de ${total} ${plural} em execução`
             : "Sintetizando a resposta…";
@@ -59,7 +63,11 @@ export function faseDoTurno(turno: TurnoNaTela): SituacaoDaFase {
       return {
         atual: null,
         parado: false,
-        descricao: total === 0 ? "Respondeu diretamente" : `Concluído com ${total} ${plural}`,
+        descricao: planejamento
+          ? "Plano entregue"
+          : total === 0
+            ? "Respondeu diretamente"
+            : `Concluído com ${total} ${plural}`,
         direto: total === 0,
       };
     case "cancelado":

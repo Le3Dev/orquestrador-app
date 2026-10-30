@@ -1,15 +1,16 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 
 import { api } from "../../shared/api/cliente";
-import type { ResumoDoOrquestrador, SinalDeVida } from "../../shared/api/tipos";
+import type { DadosDaConfiguracao, SinalDeVida } from "../../shared/api/tipos";
 import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
-import type { EstadoDaConversa, LinhaDoLog, TipoDeLinhaDoLog, TurnoNaTela } from "../../shared/estado/aplicarEvento";
+import type { LinhaDoLog, TipoDeLinhaDoLog, TurnoNaTela } from "../../shared/estado/aplicarEvento";
 import { faseDoTurno } from "../../shared/estado/faseDoTurno";
 import { estadoDeVida } from "../../shared/estado/sinalDeVida";
 import { descreverConfiguracao, formatarDuracao, formatarHora, formatarTokens, idCurto } from "../../shared/formatacao";
 import { useRelogio } from "../../shared/hooks/useRelogio";
 import { IconeOrquestrador } from "../Icones";
 import { TextoFormatado } from "../TextoFormatado";
+import { type AcoesDoPlano, CartaoDoPlano } from "./CartaoDoPlano";
 
 const SIMBOLOS: Readonly<Record<TipoDeLinhaDoLog, string>> = {
   sistema: "○",
@@ -32,7 +33,8 @@ function Girador() {
   return <span className="text-active">{QUADROS_DO_GIRADOR[quadro]}</span>;
 }
 
-function LinhaDoTerminal({ linha }: { linha: LinhaDoLog }) {
+/** Memorizada: as linhas do log não mudam depois de criadas, só chegam novas. */
+const LinhaDoTerminal = memo(function LinhaDoTerminal({ linha }: { linha: LinhaDoLog }) {
   const doOrquestrador = linha.origem === "orquestrador";
   const origem = doOrquestrador ? "orquestrador" : `${aparenciaDoBixinho(linha.origem).nome}#${idCurto(linha.origem)}`;
   return (
@@ -45,7 +47,7 @@ function LinhaDoTerminal({ linha }: { linha: LinhaDoLog }) {
       </span>
     </div>
   );
-}
+});
 
 /**
  * O que mostra que o turno está vivo: a fase, o tempo total, o último sinal
@@ -81,17 +83,30 @@ function SinalDoTurno({ turno, sinal }: { turno: TurnoNaTela; sinal: SinalDeVida
   );
 }
 
-function Turno({
-  turno,
-  orquestradorId,
-  sinal,
-  desconectado,
-}: {
+interface PropsDoTurno {
   turno: TurnoNaTela;
   orquestradorId: string;
+  configuracao: DadosDaConfiguracao;
+  ultimo: boolean;
   sinal: SinalDeVida | undefined;
   desconectado: boolean;
-}) {
+  acoesDoPlano: AcoesDoPlano;
+}
+
+/**
+ * Um pedido com seu log e sua resposta. Memorizado: um evento só troca o
+ * objeto do turno a que pertence, então os pedidos antigos não re-renderizam
+ * (nem re-analisam o Markdown da resposta) a cada novidade do atual.
+ */
+const Turno = memo(function Turno({
+  turno,
+  orquestradorId,
+  configuracao,
+  ultimo,
+  sinal,
+  desconectado,
+  acoesDoPlano,
+}: PropsDoTurno) {
   const emAndamento = turno.situacao === "em_andamento";
   // Pedidos já encerrados mostram só os marcos: as centenas de ações dos
   // agentes interessam enquanto acontecem, não no histórico.
@@ -135,51 +150,94 @@ function Turno({
         ) : (
           <SinalDoTurno turno={turno} sinal={sinal} />
         ))}
-      {turno.resposta !== null && turno.resposta !== "" && (
-        <div className="resposta-no-terminal">
-          <TextoFormatado texto={turno.resposta} className="markdown-terminal" />
-        </div>
-      )}
+      {turno.resposta !== null &&
+        turno.resposta !== "" &&
+        (turno.modo === "planejamento" ? (
+          <CartaoDoPlano
+            turno={turno}
+            configuracao={configuracao}
+            ultimo={ultimo}
+            desconectado={desconectado}
+            acoes={acoesDoPlano}
+          />
+        ) : (
+          <div className="resposta-no-terminal">
+            <TextoFormatado texto={turno.resposta} className="markdown-terminal" />
+          </div>
+        ))}
       {turno.situacao === "falhou" && turno.motivoDaFalha !== null && (
         <p className="mono texto-longo text-error">{turno.motivoDaFalha}</p>
       )}
     </div>
   );
-}
+});
 
 interface Props {
-  orquestrador: ResumoDoOrquestrador;
-  conversa: EstadoDaConversa;
+  orquestradorId: string;
+  nome: string;
+  pastaDeTrabalho: string;
+  /** Configuração atual do Orquestrador; a mesma referência enquanto o conteúdo não muda. */
+  configuracao: DadosDaConfiguracao;
+  /** Os pedidos da conversa deste Orquestrador (`EstadoDaConversa.turnos`). */
+  turnos: readonly TurnoNaTela[];
   sinal: SinalDeVida | undefined;
   desconectado: boolean;
+  /** Aprovar, ajustar ou descartar o plano pendente do último pedido (Plan Mode). */
+  acoesDoPlano: AcoesDoPlano;
 }
 
-/** O que aparece dentro do terminal: a apresentação e cada pedido com seu log. */
-export function TranscricaoDoTerminal({ orquestrador, conversa, sinal, desconectado }: Props) {
+/**
+ * O que aparece dentro do terminal: a apresentação e cada pedido com seu log.
+ *
+ * Memorizada e com props primitivas ou de identidade estável: só re-renderiza
+ * quando a conversa, o sinal de vida ou os dados deste Orquestrador mudam —
+ * não no arraste do terminal nem com eventos de outros Orquestradores.
+ */
+export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
+  orquestradorId,
+  nome,
+  pastaDeTrabalho,
+  configuracao,
+  turnos,
+  sinal,
+  desconectado,
+  acoesDoPlano,
+}: Props) {
   return (
     <div className="flex flex-col gap-5">
       <div className="banner-do-terminal">
         <div className="flex items-center gap-2 text-active">
           <IconeOrquestrador tamanho={15} />
-          <span className="font-titulo text-[13px] font-semibold text-primary">{orquestrador.nome}</span>
+          <span className="font-titulo text-[13px] font-semibold text-primary">{nome}</span>
         </div>
         <p>
           <span className="text-muted">pasta </span>
-          {orquestrador.pastaDeTrabalho}
+          {pastaDeTrabalho}
         </p>
         <p>
           <span className="text-muted">config </span>
-          {descreverConfiguracao(orquestrador.configuracao).toLowerCase()}
+          {descreverConfiguracao(configuracao).toLowerCase()}
         </p>
         <p className="text-muted">
-          {conversa.turnos.length === 0
+          {turnos.length === 0
             ? "digite um pedido e pressione enter — o orquestrador divide o trabalho e instancia os agentes."
-            : `${conversa.turnos.length} ${conversa.turnos.length === 1 ? "pedido" : "pedidos"} nesta conversa`}
+            : `${turnos.length} ${turnos.length === 1 ? "pedido" : "pedidos"} nesta conversa`}
         </p>
       </div>
-      {conversa.turnos.map((turno) => (
-        <Turno key={turno.id} turno={turno} orquestradorId={orquestrador.id} sinal={sinal} desconectado={desconectado} />
+      {turnos.map((turno, indice) => (
+        <Turno
+          key={turno.id}
+          turno={turno}
+          orquestradorId={orquestradorId}
+          configuracao={configuracao}
+          ultimo={indice === turnos.length - 1}
+          // Só o pedido em andamento mostra o sinal de vida: os outros não
+          // precisam re-renderizar a cada sinal que chega.
+          sinal={turno.situacao === "em_andamento" ? sinal : undefined}
+          desconectado={desconectado}
+          acoesDoPlano={acoesDoPlano}
+        />
       ))}
     </div>
   );
-}
+});

@@ -10,9 +10,12 @@ import { CamposDaConfiguracao } from "../CamposDaConfiguracao";
 
 const CONFIGURACAO_PADRAO: DadosDaConfiguracao = {
   modeloDoOrquestrador: "opus",
+  esforcoDoOrquestrador: "padrao",
   modeloDosSubagentes: "opus",
+  esforcoDosSubagentes: "padrao",
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "leitura",
+  permitirCommitEPush: false,
 };
 
 /**

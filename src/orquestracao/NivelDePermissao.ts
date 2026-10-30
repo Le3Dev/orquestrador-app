@@ -5,7 +5,10 @@
  * - `edicao`: também criam e alteram arquivos;
  * - `edicao_e_comandos`: também executam comandos no terminal.
  *
- * Em nenhum nível há commit ou push — essa decisão é sempre do usuário.
+ * Commit e push não dependem do nível: ficam proibidos, a menos que o usuário
+ * ligue a opção `permitirCommitEPush` da configuração — e, mesmo assim, só
+ * acontecem quando ele pede, num turno de execução, e só no nível
+ * `edicao_e_comandos`, o único com terminal.
  */
 export const NIVEIS_DE_PERMISSAO = ["leitura", "edicao", "edicao_e_comandos"] as const;
 

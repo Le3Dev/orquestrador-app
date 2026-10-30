@@ -1,8 +1,10 @@
 import type {
   DadosDaConfiguracao,
   DadosDoAnexo,
+  DecisaoDoPlano,
   EventoRegistrado,
   JanelaDaCota,
+  ModoDoTurno,
   SituacaoDoSubagente,
   SituacaoDoTurno,
   UsoDoTurno,
@@ -55,6 +57,10 @@ export interface TurnoNaTela {
   encerradoEm: string | null;
   situacao: SituacaoDoTurno;
   configuracao: DadosDaConfiguracao;
+  /** Em "planejamento" (Plan Mode), a resposta é um plano à espera de decisão. */
+  modo: ModoDoTurno;
+  /** Nulo fora do planejamento e enquanto o plano não fica pronto. */
+  decisaoDoPlano: DecisaoDoPlano | null;
   textosDoOrquestrador: string[];
   resposta: string | null;
   motivoDaFalha: string | null;
@@ -183,10 +189,18 @@ function alteracaoDoTurno(evento: EventoRegistrado): AlteracaoDeTurno | null {
         ...encerrar(turno, "concluido", evento.em),
         resposta: evento.resposta,
         uso: evento.uso,
+        // O plano entregue fica esperando o usuário aprovar ou descartar.
+        decisaoDoPlano: turno.modo === "planejamento" ? "pendente" : turno.decisaoDoPlano,
         // A resposta final também chega como último texto do orquestrador;
         // sem este filtro ela apareceria duas vezes.
         textosDoOrquestrador: turno.textosDoOrquestrador.filter((texto) => texto.trim() !== evento.resposta.trim()),
       });
+
+    case "plano_aprovado":
+      return (turno) => ({ ...turno, decisaoDoPlano: "aprovado" });
+
+    case "plano_descartado":
+      return (turno) => ({ ...turno, decisaoDoPlano: "descartado" });
 
     case "turno_cancelado":
       return (turno) => encerrar(turno, "cancelado", evento.em);
@@ -212,10 +226,11 @@ export function linhaDoLog(evento: EventoRegistrado): Omit<LinhaDoLog, "sequenci
       const { modeloDoOrquestrador, modeloDosSubagentes, quantidadeDeSubagentes } = evento.configuracao;
       const quantidade =
         quantidadeDeSubagentes.modo === "fixa" ? `${quantidadeDeSubagentes.limite}` : `≤${quantidadeDeSubagentes.limite}`;
+      const modo = evento.modo === "planejamento" ? "plan mode · " : "";
       return {
         origem: "orquestrador",
         tipo: "sistema",
-        texto: `turno iniciado · ${modeloDoOrquestrador} → ${modeloDosSubagentes} · ${quantidade} agentes`,
+        texto: `${modo}turno iniciado · ${modeloDoOrquestrador} → ${modeloDosSubagentes} · ${quantidade} agentes`,
       };
     }
     case "sessao_iniciada":
@@ -256,6 +271,10 @@ export function linhaDoLog(evento: EventoRegistrado): Omit<LinhaDoLog, "sequenci
       return { origem: "orquestrador", tipo: "erro", texto: "turno interrompido (servidor reiniciado)" };
     case "turno_falhou":
       return { origem: "orquestrador", tipo: "erro", texto: `falhou · ${primeiraLinha(evento.motivo)}` };
+    case "plano_aprovado":
+      return { origem: "orquestrador", tipo: "fim", texto: "plano aprovado · execução iniciada" };
+    case "plano_descartado":
+      return { origem: "orquestrador", tipo: "sistema", texto: "plano descartado" };
     default:
       return null;
   }
@@ -270,7 +289,17 @@ function novoTurno(evento: Extract<EventoRegistrado, { tipo: "turno_iniciado" }>
     iniciadoEm: evento.em,
     encerradoEm: null,
     situacao: "em_andamento",
-    configuracao: evento.configuracao,
+    configuracao: {
+      ...evento.configuracao,
+      // Pedidos gravados antes da opção de commit e push rodaram com eles bloqueados;
+      // e os anteriores à escolha do esforço, com o padrão do modelo.
+      permitirCommitEPush: evento.configuracao.permitirCommitEPush ?? false,
+      esforcoDoOrquestrador: evento.configuracao.esforcoDoOrquestrador ?? "padrao",
+      esforcoDosSubagentes: evento.configuracao.esforcoDosSubagentes ?? "padrao",
+    },
+    // Pedidos gravados antes do Plan Mode foram todos de execução.
+    modo: evento.modo ?? "execucao",
+    decisaoDoPlano: null,
     textosDoOrquestrador: [],
     resposta: null,
     motivoDaFalha: null,
