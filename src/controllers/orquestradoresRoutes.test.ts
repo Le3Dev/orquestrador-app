@@ -15,7 +15,7 @@ import { EventoDeOrquestracao, EventoDoMotor, EventoRegistrado } from "../orques
 import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "../orquestracao/MotorDeAgentes";
 import { Orquestrador } from "../orquestracao/Orquestrador";
 import { PastaDeTrabalho } from "../orquestracao/PastaDeTrabalho";
-import { RepositorioDeOrquestradores } from "../orquestracao/RepositorioDeOrquestradores";
+import { ConversaArquivada, RepositorioDeOrquestradores } from "../orquestracao/RepositorioDeOrquestradores";
 import { ServicoDeOrquestracao } from "../orquestracao/ServicoDeOrquestracao";
 import { criarOrquestradoresRoutes } from "./orquestradoresRoutes";
 
@@ -39,6 +39,10 @@ class RepositorioEmMemoria implements RepositorioDeOrquestradores {
     const registrado = { ...evento, sequencia: this.eventos.length + 1, em: "agora" };
     this.eventos.push(registrado);
     return registrado;
+  }
+  arquivarConversa(orquestrador: Orquestrador, evento: EventoDeOrquestracao): ConversaArquivada {
+    this.orquestradores.set(orquestrador.id, orquestrador);
+    return { registrado: this.anexarEvento(orquestrador.id, evento), gravacao: Promise.resolve() };
   }
   lerEventos(): readonly EventoRegistrado[] {
     return this.eventos;
@@ -339,6 +343,122 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(await resposta.json()).toEqual({ erro: mensagem });
       expect(orquestrador.configuracao.esforcoDoOrquestrador).toBe("padrao");
       expect(orquestrador.configuracao.esforcoDosSubagentes).toBe("padrao");
+    });
+  });
+
+  describe("limpar a conversa", () => {
+    it("responde 200 com o resumo da conversa nova, sem turnos", async () => {
+      const mensagem = await postar(`/orquestradores/${orquestrador.id}/mensagens`, { texto: "analise" });
+      expect(mensagem.status).toBe(202);
+      await aguardarOcioso();
+      const sessaoAnterior = orquestrador.sessaoId;
+
+      const resposta = await postar(`/orquestradores/${orquestrador.id}/conversa/limpar`);
+
+      expect(resposta.status).toBe(200);
+      const corpo = (await resposta.json()) as Record<string, unknown>;
+      expect(corpo).toMatchObject({ id: orquestrador.id, situacao: "ocioso", totalDeTurnos: 0, ultimoTurno: null });
+      expect(corpo).not.toHaveProperty("sessaoId");
+      expect(orquestrador.sessaoId).not.toBe(sessaoAnterior);
+      expect(orquestrador.sessaoIniciada).toBe(false);
+      expect(repositorio.eventos.at(-1)).toMatchObject({ tipo: "conversa_limpa", turnosAnteriores: 1 });
+    });
+
+    it("responde 409 com um pedido em andamento", async () => {
+      orquestrador.iniciarTurno("em-andamento", "analise", new Date("2026-10-28T12:00:00Z"));
+
+      const resposta = await postar(`/orquestradores/${orquestrador.id}/conversa/limpar`);
+
+      expect(resposta.status).toBe(409);
+      expect(await resposta.json()).toEqual({
+        erro: 'Cancele o pedido em andamento de "Painel" antes de limpar a conversa.',
+      });
+      expect(orquestrador.totalDeTurnos).toBe(1);
+      orquestrador.cancelarTurno("em-andamento", new Date("2026-10-28T12:00:00Z"));
+    });
+
+    it("responde 404 para orquestrador inexistente", async () => {
+      const resposta = await postar("/orquestradores/nao-existe/conversa/limpar");
+
+      expect(resposta.status).toBe(404);
+      expect(await resposta.json()).toEqual({ erro: "Orquestrador não encontrado." });
+    });
+  });
+
+  describe("opções de trabalho direto e de propor plano", () => {
+    async function alterarConfiguracao(corpo: unknown): Promise<Response> {
+      return fetch(`${base}/orquestradores/${orquestrador.id}/configuracao`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(corpo),
+      });
+    }
+
+    beforeEach(() => {
+      vi.spyOn(explorador, "existe").mockResolvedValue(true);
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    const mensagemDoTrabalhoDireto =
+      'A opção "Deixar o orquestrador fazer o trivial sozinho" deve ser verdadeira ou falsa.';
+    const mensagemDoPlano = 'A opção "Propor plano antes de mudanças grandes" deve ser verdadeira ou falsa.';
+
+    it("o PATCH aceita as duas opções", async () => {
+      const resposta = await alterarConfiguracao({ permitirTrabalhoDireto: false, proporPlanoEmPedidosGrandes: false });
+
+      expect(resposta.status).toBe(200);
+      expect(((await resposta.json()) as { configuracao: unknown }).configuracao).toMatchObject({
+        permitirTrabalhoDireto: false,
+        proporPlanoEmPedidosGrandes: false,
+      });
+    });
+
+    it("o POST aceita as duas opções", async () => {
+      const resposta = await postar("/orquestradores", {
+        nome: "Novo",
+        pastaDeTrabalho: raiz,
+        modeloDoOrquestrador: "opus",
+        modeloDosSubagentes: "haiku",
+        quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
+        nivelDePermissao: "leitura",
+        permitirTrabalhoDireto: false,
+        proporPlanoEmPedidosGrandes: true,
+      });
+
+      expect(resposta.status).toBe(201);
+      expect(((await resposta.json()) as { configuracao: unknown }).configuracao).toMatchObject({
+        permitirTrabalhoDireto: false,
+        proporPlanoEmPedidosGrandes: true,
+      });
+    });
+
+    it.each<[string, unknown, string]>([
+      ["permitirTrabalhoDireto", "sim", mensagemDoTrabalhoDireto],
+      ["permitirTrabalhoDireto", null, mensagemDoTrabalhoDireto],
+      ["proporPlanoEmPedidosGrandes", 1, mensagemDoPlano],
+      ["proporPlanoEmPedidosGrandes", "nao", mensagemDoPlano],
+    ])("o PATCH recusa %s = %j com 400 e mensagem clara", async (campo, valor, mensagem) => {
+      const resposta = await alterarConfiguracao({ [campo]: valor });
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: mensagem });
+    });
+
+    it("o POST recusa opção inválida com 400", async () => {
+      const resposta = await postar("/orquestradores", {
+        nome: "Novo",
+        pastaDeTrabalho: raiz,
+        modeloDoOrquestrador: "opus",
+        modeloDosSubagentes: "haiku",
+        quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
+        nivelDePermissao: "leitura",
+        proporPlanoEmPedidosGrandes: "sim",
+      });
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: mensagemDoPlano });
     });
   });
 });

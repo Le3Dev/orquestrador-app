@@ -28,7 +28,8 @@ export interface DadosDoTurno {
  * `Orquestrador`.
  *
  * Num turno de planejamento, a resposta final é um Plano: ao concluir, ele
- * fica pendente até o usuário aprová-lo ou descartá-lo.
+ * fica pendente até o usuário aprová-lo ou descartá-lo. O mesmo vale para um
+ * turno de execução em que o Orquestrador propôs um Plano antes de mexer.
  */
 export class Turno {
   private constructor(
@@ -99,7 +100,10 @@ export class Turno {
     return this.subagentes.filter((subagente) => subagente.ativo).length;
   }
 
-  /** `null` em turnos de execução e em planejamentos que não chegaram a entregar o Plano. */
+  /**
+   * `null` em turnos de execução que não propuseram Plano e em planejamentos
+   * que não chegaram a entregá-lo.
+   */
   get decisaoDoPlano(): DecisaoDoPlano | null {
     return this.decisao;
   }
@@ -133,10 +137,14 @@ export class Turno {
     }
   }
 
-  concluir(resposta: string, uso: UsoDoTurno, agora: Date): void {
+  /**
+   * `planoProposto`: num turno de execução, o Orquestrador achou o pedido
+   * grande e respondeu com um Plano em vez de executar.
+   */
+  concluir(resposta: string, uso: UsoDoTurno, agora: Date, planoProposto = false): void {
     this.respostaFinal = resposta;
     this.usoFinal = uso;
-    if (this.modo === "planejamento") {
+    if (this.modo === "planejamento" || planoProposto) {
       // A resposta é o Plano: nada foi executado ainda, o usuário decide.
       this.decisao = "pendente";
     }

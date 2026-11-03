@@ -53,6 +53,13 @@ const esquemaDaConfiguracao = z.object({
   esforcoDosSubagentes: z
     .enum(ESFORCOS_DE_RACIOCINIO, { error: "Esforço dos subagentes inválido." })
     .optional(),
+  // Opcionais também na criação: ausentes valem `true` (ligadas).
+  permitirTrabalhoDireto: z
+    .boolean({ error: 'A opção "Deixar o orquestrador fazer o trivial sozinho" deve ser verdadeira ou falsa.' })
+    .optional(),
+  proporPlanoEmPedidosGrandes: z
+    .boolean({ error: 'A opção "Propor plano antes de mudanças grandes" deve ser verdadeira ou falsa.' })
+    .optional(),
 });
 
 const esquemaDeCriacao = esquemaDaConfiguracao.extend({
@@ -258,6 +265,18 @@ export function criarOrquestradoresRoutes({
     rota(async (requisicao, resposta) => {
       await servico.descartarPlano(requisicao.params.id);
       resposta.status(204).end();
+    }),
+  );
+
+  /**
+   * Conversa nova no mesmo orquestrador ("/clear"): arquiva o histórico e o
+   * próximo pedido abre outra sessão do Claude Code. Sem corpo.
+   */
+  rotas.post(
+    "/orquestradores/:id/conversa/limpar",
+    rota(async (requisicao, resposta) => {
+      const orquestrador = await servico.limparConversa(requisicao.params.id);
+      resposta.json(apresentarResumo(orquestrador));
     }),
   );
 

@@ -8,7 +8,7 @@ import {
 import { ControleDeExecucoes, PublicadorDeEventos } from "./ControleDeExecucoes";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { EventoDeOrquestracao, EventoDoMotor } from "./EventoDeOrquestracao";
-import { mensagemDeAprovacaoDoPlano } from "./InstrucoesDoOrquestrador";
+import { mensagemDeAprovacaoDoPlano, separarPropostaDePlano } from "./InstrucoesDoOrquestrador";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { MotorDeAgentes, ResultadoDoTurno } from "./MotorDeAgentes";
 import { Orquestrador, TAMANHO_MAXIMO_DA_MENSAGEM } from "./Orquestrador";
@@ -52,7 +52,8 @@ function descreverErro(erro: unknown): string {
 
 /**
  * Casos de uso da orquestração: criar Orquestradores, conversar com eles,
- * decidir os Planos que entregarem e cancelar o que estiverem fazendo.
+ * decidir os Planos que entregarem, limpar a conversa e cancelar o que
+ * estiverem fazendo.
  *
  * Não guarda estado: os Orquestradores vêm do repositório, e os turnos em
  * execução ficam no `ControleDeExecucoes`.
@@ -87,7 +88,9 @@ export class ServicoDeOrquestracao {
    * segundo plano e é acompanhado pelos eventos.
    *
    * No modo `planejamento` o turno só investiga e responde com um Plano, que
-   * fica pendente até `aprovarPlano` ou `descartarPlano`.
+   * fica pendente até `aprovarPlano` ou `descartarPlano`. Na `execucao`, com
+   * a opção de propor plano em pedidos grandes ligada, o Orquestrador pode
+   * responder com um Plano em vez de executar — ele fica pendente do mesmo jeito.
    */
   async enviarMensagem(
     id: string,
@@ -108,6 +111,9 @@ export class ServicoDeOrquestracao {
       }),
     );
     const inicio = orquestrador.iniciarTurno(turnoId, texto, agora(), anexosDoTurno, modo);
+    // A mesma do evento `turno_iniciado`: o turno segue com ela até o fim,
+    // mesmo que o usuário altere a configuração enquanto ele roda.
+    const configuracaoDoTurno = orquestrador.configuracao;
     // O sinal nasce antes de qualquer espera: um cancelamento que chegue
     // enquanto o turno é gravado já encontra a execução registrada.
     const sinal = execucoes.iniciar(orquestrador.id);
@@ -124,10 +130,30 @@ export class ServicoDeOrquestracao {
       throw erro;
     }
 
-    const conclusao = this.executar(orquestrador, turnoId, sinal).finally(() =>
+    const conclusao = this.executar(orquestrador, turnoId, sinal, configuracaoDoTurno).finally(() =>
       execucoes.encerrar(orquestrador.id),
     );
     return { turnoId, conclusao };
+  }
+
+  /**
+   * Começa uma conversa nova no mesmo Orquestrador ("/clear"): arquiva o
+   * histórico atual, descarta um Plano pendente e faz o próximo turno abrir
+   * outra sessão do Claude Code. Sem conversa para limpar, não faz nada.
+   */
+  async limparConversa(id: string): Promise<Orquestrador> {
+    const { repositorio, publicador, gerarId } = this.dependencias;
+    const orquestrador = this.buscar(id);
+    if (orquestrador.totalDeTurnos === 0 && !orquestrador.sessaoIniciada) {
+      return orquestrador;
+    }
+
+    // Sem espera entre limpar e arquivar: nenhum evento pode cair no meio.
+    const evento = orquestrador.limparConversa(gerarId());
+    const { registrado, gravacao } = repositorio.arquivarConversa(orquestrador, evento);
+    publicador.publicar(orquestrador.id, registrado);
+    await gravacao;
+    return orquestrador;
   }
 
   /**
@@ -211,10 +237,16 @@ export class ServicoDeOrquestracao {
     return interrompidos;
   }
 
-  private async executar(orquestrador: Orquestrador, turnoId: string, sinal: AbortSignal): Promise<void> {
+  private async executar(
+    orquestrador: Orquestrador,
+    turnoId: string,
+    sinal: AbortSignal,
+    configuracaoDoTurno: ConfiguracaoDoOrquestrador,
+  ): Promise<void> {
     const { motor, repositorio, anexos, worktrees, agora } = this.dependencias;
     const turno = orquestrador.turnoEmAndamento;
     const anexosDoTurno = turno?.anexos ?? [];
+    const modo = turno?.modo ?? "execucao";
 
     // Worktree isolado por turno: se a pasta for repo git com HEAD, o turno
     // roda numa árvore própria; senão, na própria pasta (degradação graciosa).
@@ -242,8 +274,8 @@ export class ServicoDeOrquestracao {
           sessaoId: orquestrador.sessaoId,
           sessaoIniciada: orquestrador.sessaoIniciada,
           texto: turno?.texto ?? "",
-          configuracao: orquestrador.configuracao,
-          modo: turno?.modo ?? "execucao",
+          configuracao: configuracaoDoTurno,
+          modo,
           pastaDeTrabalho: pastaDoTurno,
           imagens: anexosDoTurno.map((anexo) => ({
             caminho: anexos.caminhoDe(orquestrador.id, anexo.arquivo),
@@ -273,9 +305,13 @@ export class ServicoDeOrquestracao {
       if (sinal.aborted) {
         this.publicar(orquestrador, orquestrador.cancelarTurno(turnoId, agora()));
       } else if (resultado !== null && resultado.sucesso) {
+        // O marcador sai sempre da resposta; só vira Plano pendente se a
+        // opção estava ligada quando o turno começou e o turno é de execução.
+        const { resposta, planoProposto } = separarPropostaDePlano(resultado.resposta);
+        const planoPendente = planoProposto && configuracaoDoTurno.propoePlanoEmPedidosGrandes(modo);
         this.publicar(
           orquestrador,
-          orquestrador.concluirTurno(turnoId, resultado.resposta, resultado.uso, agora()),
+          orquestrador.concluirTurno(turnoId, resposta, resultado.uso, agora(), planoPendente),
         );
       } else {
         const motivo = resultado !== null && !resultado.sucesso ? resultado.motivo : descreverErro(erro);
