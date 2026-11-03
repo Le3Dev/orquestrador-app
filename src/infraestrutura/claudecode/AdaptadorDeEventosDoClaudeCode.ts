@@ -4,6 +4,7 @@ import {
   SituacaoFinalDoSubagente,
   UsoDoTurno,
 } from "../../orquestracao/EventoDeOrquestracao";
+import { NOME_DO_SUBAGENTE } from "../../orquestracao/InstrucoesDoOrquestrador";
 import { ResultadoDoTurno } from "../../orquestracao/MotorDeAgentes";
 
 type Objeto = Record<string, unknown>;
@@ -159,6 +160,7 @@ export class AdaptadorDeEventosDoClaudeCode {
             subagenteId,
             descricao: texto(mensagem, "description"),
             tarefa: texto(mensagem, "prompt"),
+            papel: texto(mensagem, "subagent_type") || NOME_DO_SUBAGENTE,
           },
         ];
       case "task_progress": {

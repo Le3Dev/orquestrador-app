@@ -26,7 +26,17 @@ export type EventoDoMotor =
   | { tipo: "sessao_iniciada" }
   | { tipo: "texto_do_orquestrador"; texto: string }
   | { tipo: "ferramenta_do_orquestrador"; ferramenta: string; detalhe: string }
-  | { tipo: "subagente_iniciado"; subagenteId: string; descricao: string; tarefa: string }
+  | {
+      tipo: "subagente_iniciado";
+      subagenteId: string;
+      descricao: string;
+      tarefa: string;
+      /**
+       * Tipo do subagente: o "executor" ou o nome de um subagente pronto.
+       * Ausente nos eventos gravados antes dos subagentes prontos.
+       */
+      papel?: string | undefined;
+    }
   | {
       tipo: "progresso_do_subagente";
       subagenteId: string;

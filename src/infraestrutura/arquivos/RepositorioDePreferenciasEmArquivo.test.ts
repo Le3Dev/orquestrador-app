@@ -23,19 +23,26 @@ describe("RepositorioDePreferenciasEmArquivo", () => {
   it("sem arquivo, abre com as preferências vazias e não cria nada", async () => {
     const repositorio = await RepositorioDePreferenciasEmArquivo.abrir(pasta);
 
-    expect(repositorio.atuais().paraDados()).toEqual({ instrucoesPadrao: "" });
+    expect(repositorio.atuais().paraDados()).toEqual({ instrucoesPadrao: "", subagentesProntos: [] });
     expect(existsSync(path.join(pasta, "preferencias.json"))).toBe(false);
   });
 
   it("salva, vale na hora e reabre igual", async () => {
     const repositorio = await RepositorioDePreferenciasEmArquivo.abrir(pasta);
-    await repositorio.salvar(PreferenciasGlobais.de({ instrucoesPadrao: "Linha 1\nLinha 2 com \"aspas\" e {{x}}" }));
+    const revisor = { nome: "revisor", descricao: "Revisa código.", prompt: "Aponte bugs.", modelo: "sonnet" as const };
+    await repositorio.salvar(
+      PreferenciasGlobais.de({
+        instrucoesPadrao: "Linha 1\nLinha 2 com \"aspas\" e {{x}}",
+        subagentesProntos: [revisor],
+      }),
+    );
 
     expect(repositorio.atuais().instrucoesPadrao).toBe('Linha 1\nLinha 2 com "aspas" e {{x}}');
     const reaberto = await RepositorioDePreferenciasEmArquivo.abrir(pasta);
     expect(reaberto.atuais().paraDados()).toEqual(repositorio.atuais().paraDados());
     expect(JSON.parse(await readFile(path.join(pasta, "preferencias.json"), "utf8"))).toEqual({
       instrucoesPadrao: 'Linha 1\nLinha 2 com "aspas" e {{x}}',
+      subagentesProntos: [revisor],
     });
   });
 

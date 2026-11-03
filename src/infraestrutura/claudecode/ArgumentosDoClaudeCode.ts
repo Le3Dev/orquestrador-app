@@ -1,5 +1,6 @@
 import { EsforcoDeRaciocinio } from "../../orquestracao/EsforcoDeRaciocinio";
 import { instrucoesDoSubagente, NOME_DO_SUBAGENTE } from "../../orquestracao/InstrucoesDoOrquestrador";
+import { modeloDoSubagentePronto } from "../../orquestracao/SubagentesProntos";
 import { PedidoDeTurno } from "../../orquestracao/MotorDeAgentes";
 import { NivelDePermissao } from "../../orquestracao/NivelDePermissao";
 
@@ -170,13 +171,32 @@ export function ferramentasDoTurno(pedido: PedidoDeTurno): readonly string[] {
     : FERRAMENTAS_POR_NIVEL[pedido.configuracao.nivelDePermissao];
 }
 
+/**
+ * O executor e os subagentes prontos do usuário. Os prontos têm as mesmas
+ * ferramentas, esforço e regra de commit do executor: nunca mais permissão
+ * que o turno; só mudam a descrição, a especialidade e, se escolhido, o modelo.
+ */
 export function definicaoDosAgentes(pedido: PedidoDeTurno): Record<string, DefinicaoDeAgente> {
   const esforco = nivelDeEsforcoDoClaudeCode(pedido.configuracao.esforcoDosSubagentes);
+  const permiteCommitEPush = pedido.configuracao.permiteCommitEPush(pedido.modo);
+  const prontos = Object.fromEntries(
+    pedido.subagentesProntos.map((subagente): [string, DefinicaoDeAgente] => [
+      subagente.nome,
+      {
+        description: subagente.descricao,
+        prompt: instrucoesDoSubagente(pedido.pastaDeTrabalho, permiteCommitEPush, subagente),
+        tools: [...ferramentasDoTurno(pedido)],
+        model: modeloDoSubagentePronto(subagente, pedido.configuracao.modeloDosSubagentes),
+        ...(esforco === null ? {} : { effort: esforco }),
+      },
+    ]),
+  );
   return {
+    ...prontos,
     [NOME_DO_SUBAGENTE]: {
       description:
         "Executa uma subtarefa delegada pelo orquestrador e devolve um resultado objetivo.",
-      prompt: instrucoesDoSubagente(pedido.pastaDeTrabalho, pedido.configuracao.permiteCommitEPush(pedido.modo)),
+      prompt: instrucoesDoSubagente(pedido.pastaDeTrabalho, permiteCommitEPush),
       tools: [...ferramentasDoTurno(pedido)],
       model: pedido.configuracao.modeloDosSubagentes,
       ...(esforco === null ? {} : { effort: esforco }),

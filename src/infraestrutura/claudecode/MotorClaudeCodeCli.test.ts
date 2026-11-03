@@ -53,6 +53,7 @@ function pedido(instrucoes: InstrucoesAplicadas | null, revogarInstrucoesAnterio
     pastaDasImagens: null,
     instrucoes,
     revogarInstrucoesAnteriores,
+    subagentesProntos: [],
   };
 }
 

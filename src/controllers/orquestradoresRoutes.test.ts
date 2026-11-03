@@ -553,17 +553,41 @@ describe("rotas de orquestradores — modo de planejamento", () => {
     });
 
     it("GET e PATCH /preferencias leem e gravam as instruções padrão", async () => {
-      expect(await (await requisitar("GET", "/preferencias")).json()).toEqual({ instrucoesPadrao: "" });
+      expect(await (await requisitar("GET", "/preferencias")).json()).toEqual({ instrucoesPadrao: "", subagentesProntos: [] });
 
       const resposta = await requisitar("PATCH", "/preferencias", { instrucoesPadrao: " Responda curto. " });
       expect(resposta.status).toBe(200);
-      expect(await resposta.json()).toEqual({ instrucoesPadrao: "Responda curto." });
+      expect(await resposta.json()).toEqual({ instrucoesPadrao: "Responda curto.", subagentesProntos: [] });
       expect(preferencias.atuais().instrucoesPadrao).toBe("Responda curto.");
 
       const resumo = (await (await requisitar("GET", `/orquestradores/${orquestrador.id}`)).json()) as {
         instrucoesAtivas: string;
       };
       expect(resumo.instrucoesAtivas).toBe("padrao");
+    });
+
+    it("PATCH /preferencias grava subagentes prontos, que aparecem na prévia", async () => {
+      const revisor = { nome: "revisor", descricao: "Revisa código.", prompt: "Aponte bugs." };
+      const resposta = await requisitar("PATCH", "/preferencias", { subagentesProntos: [revisor] });
+      expect(resposta.status).toBe(200);
+      expect(await resposta.json()).toEqual({ instrucoesPadrao: "", subagentesProntos: [{ ...revisor, modelo: "herdar" }] });
+
+      const previa = (await (
+        await requisitar("POST", "/previa-do-prompt", { configuracao: orquestrador.configuracao.paraDados() })
+      ).json()) as { mensagem: string };
+      expect(previa.mensagem).toContain('  - "revisor": Revisa código.');
+    });
+
+    it.each([
+      [[{ nome: "executor", descricao: "a", prompt: "b" }], 'O nome "executor" é reservado; escolha outro.'],
+      [[{ nome: "a-b", descricao: "a" }], "O prompt do subagente pronto deve ser um texto."],
+      ["revisor", "Os subagentes prontos devem ser uma lista."],
+    ])("PATCH /preferencias recusa subagentes prontos inválidos (%j) com 400", async (subagentesProntos, mensagem) => {
+      const resposta = await requisitar("PATCH", "/preferencias", { subagentesProntos });
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: mensagem });
+      expect(preferencias.atuais().subagentesProntos).toEqual([]);
     });
 
     it("PATCH /preferencias recusa valor inválido com 400", async () => {

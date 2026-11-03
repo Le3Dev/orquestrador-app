@@ -41,6 +41,7 @@ function pedido(
     pastaDasImagens: null,
     instrucoes: null,
     revogarInstrucoesAnteriores: false,
+    subagentesProntos: [],
     sessaoId: "sessao-1",
     sessaoIniciada,
     texto: "analise",
@@ -233,6 +234,44 @@ describe("definicaoDosAgentes", () => {
     expect(executor?.model).toBe("haiku");
     expect(executor?.tools).toContain("Edit");
     expect(executor?.tools).not.toContain("Agent");
+  });
+
+  describe("subagentes prontos", () => {
+    const revisor = { nome: "revisor", descricao: "Revisa código.", prompt: "Aponte bugs.", modelo: "herdar" as const };
+    const comProntos = (base: PedidoDeTurno, subagentesProntos = [revisor, { ...revisor, nome: "testador", modelo: "opus" as const }]) => ({
+      ...base,
+      subagentesProntos,
+    });
+
+    it("sem prontos, só o executor", () => {
+      expect(Object.keys(definicaoDosAgentes(pedido(false, "edicao")))).toEqual(["executor"]);
+    });
+
+    it("cada pronto tem as ferramentas e o esforço do executor, sem poder lançar outros agentes", () => {
+      const agentes = definicaoDosAgentes(comProntos(pedido(false, "edicao", "execucao", false, { esforcoDosSubagentes: "baixo" })));
+
+      expect(Object.keys(agentes).sort()).toEqual(["executor", "revisor", "testador"]);
+      expect(agentes.revisor?.tools).toEqual(agentes.executor?.tools);
+      expect(agentes.revisor?.tools).not.toContain("Agent");
+      expect(agentes.revisor?.effort).toBe("low");
+      expect(agentes.revisor?.description).toBe("Revisa código.");
+      expect(agentes.revisor?.model).toBe("haiku");
+      expect(agentes.testador?.model).toBe("opus");
+      expect(agentes.revisor?.prompt).toContain("Aponte bugs.");
+    });
+
+    it("no planejamento, os prontos também só leem", () => {
+      const agentes = definicaoDosAgentes(comProntos(pedido(true, "edicao_e_comandos", "planejamento")));
+
+      expect(agentes.revisor?.tools).toEqual(ferramentasDoTurno(pedido(true, "edicao_e_comandos", "planejamento")));
+      expect(agentes.revisor?.tools).not.toContain("Edit");
+      expect(agentes.revisor?.prompt).toContain("Nunca faça commit nem push.");
+    });
+
+    it("seguem a regra de commit e push do turno", () => {
+      const agentes = definicaoDosAgentes(comProntos(pedido(true, "edicao_e_comandos", "execucao", true)));
+      expect(agentes.revisor?.prompt).toContain("Commit e push: faça somente se a subtarefa recebida pedir explicitamente");
+    });
   });
 });
 

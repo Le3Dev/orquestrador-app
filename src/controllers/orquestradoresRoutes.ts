@@ -93,8 +93,23 @@ const esquemaDeCriacao = esquemaDaConfiguracao.extend({
   }),
 });
 
+/**
+ * Forma de cada subagente pronto. Nome, tamanhos, nomes repetidos e modelo
+ * são conferidos pelo domínio (`subagentesProntosValidos`), com as mensagens
+ * para o usuário.
+ */
+const esquemaDoSubagentePronto = z.object({
+  nome: z.string({ error: "O nome do subagente pronto deve ser um texto." }),
+  descricao: z.string({ error: "A descrição do subagente pronto deve ser um texto." }),
+  prompt: z.string({ error: "O prompt do subagente pronto deve ser um texto." }),
+  modelo: z.string({ error: "Modelo do subagente pronto inválido." }).optional(),
+});
+
 const esquemaDasPreferencias = z.object({
   instrucoesPadrao: esquemaDeInstrucoes("As instruções padrão").optional(),
+  subagentesProntos: z
+    .array(esquemaDoSubagentePronto, { error: "Os subagentes prontos devem ser uma lista." })
+    .optional(),
 });
 
 /**
@@ -315,7 +330,15 @@ export function criarOrquestradoresRoutes({
       const instrucoes = servico.instrucoesPara(configuracao);
       resposta.json({
         instrucoesIniciais: instrucoesDoOrquestrador(pasta),
-        mensagem: mensagemParaOOrquestrador(PEDIDO_DE_EXEMPLO, configuracao, [], modo, instrucoes),
+        mensagem: mensagemParaOOrquestrador(
+          PEDIDO_DE_EXEMPLO,
+          configuracao,
+          [],
+          modo,
+          instrucoes,
+          false,
+          servico.subagentesProntos(),
+        ),
         origemDasInstrucoes: instrucoes?.origem ?? null,
       });
     }),

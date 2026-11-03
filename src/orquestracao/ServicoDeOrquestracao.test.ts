@@ -734,6 +734,20 @@ describe("ServicoDeOrquestracao", () => {
       expect((await pedidoDoTurno(orquestrador.id)).revogarInstrucoesAnteriores).toBe(false);
     });
 
+    it("o pedido leva os subagentes prontos capturados quando o turno começou", async () => {
+      const revisor = { nome: "revisor", descricao: "Revisa.", prompt: "Aponte bugs.", modelo: "herdar" as const };
+      const orquestrador = await criar();
+      expect((await pedidoDoTurno(orquestrador.id)).subagentesProntos).toEqual([]);
+
+      preferencias.preferencias = PreferenciasGlobais.de({ subagentesProntos: [revisor] });
+      const { conclusao } = await servico.enviarMensagem(orquestrador.id, "analise");
+      preferencias.preferencias = PreferenciasGlobais.vazias();
+      motor.terminar();
+      await conclusao;
+
+      expect(motor.pedidos.at(-1)?.subagentesProntos).toEqual([revisor]);
+    });
+
     it("instrucoesPara diz o que o próximo pedido receberia", async () => {
       const orquestrador = await criar();
       expect(servico.instrucoesPara(orquestrador.configuracao)).toBeNull();

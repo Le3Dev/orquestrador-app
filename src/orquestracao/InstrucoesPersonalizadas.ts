@@ -71,7 +71,7 @@ export function resolverInstrucoes(doOrquestrador: string, padrao: string): Inst
  * fechando o bloco do pedido ou o das instruções) é desarmada trocando o `<`
  * por `‹`, para ele não conseguir fechar o bloco antes da hora.
  */
-function desarmarMarcas(texto: string, marcas: readonly string[]): string {
+export function desarmarMarcas(texto: string, marcas: readonly string[]): string {
   // As marcas são nossas e só têm letras e hífen: entram na expressão sem escape.
   return texto.replace(new RegExp(`<(\\s*\\/?\\s*(?:${marcas.join("|")}))`, "gi"), "‹$1");
 }

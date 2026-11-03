@@ -152,6 +152,22 @@ describe("AdaptadorDeEventosDoClaudeCode — subagente em segundo plano", () => 
     resultado(50, 500, "Síntese final"),
   ]);
 
+  it("o subagente iniciado leva o tipo; sem tipo no evento, vale o executor", () => {
+    expect(doTipo(eventos, "subagente_iniciado")[0]?.papel).toBe("executor");
+    const pronto = new AdaptadorDeEventosDoClaudeCode().traduzir({
+      type: "system",
+      subtype: "task_started",
+      task_id: "t2",
+      tool_use_id: "chamada-2",
+      description: "Contar",
+      subagent_type: "contador-de-linhas",
+      prompt: "conte",
+    });
+    expect(pronto).toEqual([
+      { tipo: "subagente_iniciado", subagenteId: "t2", descricao: "Contar", tarefa: "conte", papel: "contador-de-linhas" },
+    ]);
+  });
+
   it("não toma o retorno imediato do lançamento como resultado", () => {
     expect(doTipo(eventos, "resultado_do_subagente")).toEqual([]);
     expect(doTipo(eventos, "subagente_concluido")[0]?.resumo).toBe("Relatório do subagente");

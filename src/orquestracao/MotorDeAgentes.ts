@@ -4,6 +4,7 @@ import { EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
 import { InstrucoesAplicadas } from "./InstrucoesPersonalizadas";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
+import { DadosDoSubagentePronto } from "./SubagentesProntos";
 
 /** Imagem anexada ao pedido, já guardada em disco. */
 export interface ImagemDoPedido {
@@ -34,6 +35,12 @@ export interface PedidoDeTurno {
    * pedidos anteriores (que seguem no histórico): avisar que deixaram de valer.
    */
   revogarInstrucoesAnteriores: boolean;
+  /**
+   * Subagentes prontos da biblioteca do usuário, capturados quando o turno
+   * começou: vão no `agentes.json` ao lado do executor e são listados no bloco
+   * do pedido. Lista vazia: tudo como antes.
+   */
+  subagentesProntos: readonly DadosDoSubagentePronto[];
 }
 
 export type ResultadoDoTurno =

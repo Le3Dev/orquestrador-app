@@ -210,7 +210,7 @@ describe("ConfiguracaoDoOrquestrador.instrucoesPersonalizadas", () => {
 
 describe("PreferenciasGlobais", () => {
   it("vazias não têm instruções padrão", () => {
-    expect(PreferenciasGlobais.vazias().paraDados()).toEqual({ instrucoesPadrao: "" });
+    expect(PreferenciasGlobais.vazias().paraDados()).toEqual({ instrucoesPadrao: "", subagentesProntos: [] });
     expect(PreferenciasGlobais.de({}).instrucoesPadrao).toBe("");
   });
 

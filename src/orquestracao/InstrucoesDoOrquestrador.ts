@@ -4,6 +4,7 @@ import { ModoDoTurno } from "./ModoDoTurno";
 import { DESCRICAO_DO_NIVEL, NivelDePermissao, TRABALHO_DIRETO_NO_NIVEL } from "./NivelDePermissao";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { QuantidadeDeSubagentes } from "./QuantidadeDeSubagentes";
+import { DadosDoSubagentePronto, linhasDaEspecialidade, linhasDosSubagentesProntos } from "./SubagentesProntos";
 
 /** Nome do papel de quem executa as subtarefas. */
 export const NOME_DO_SUBAGENTE = "executor";
@@ -123,6 +124,7 @@ export function mensagemParaOOrquestrador(
   modo: ModoDoTurno = "execucao",
   instrucoes: InstrucoesAplicadas | null = null,
   revogarInstrucoesAnteriores = false,
+  subagentesProntos: readonly DadosDoSubagentePronto[] = [],
 ): string {
   const planejamento = modo === "planejamento";
   // No planejamento os agentes só leem (as ferramentas já vêm travadas
@@ -160,6 +162,7 @@ export function mensagemParaOOrquestrador(
     "Configuração vigente para este pedido, definida pelo usuário na tela. Ela substitui qualquer regra de delegação, quantidade de subagentes ou permissão mencionada antes nesta conversa, inclusive nas suas instruções iniciais.",
     ...regrasDeDelegacao(configuracao.permitirTrabalhoDireto, nivelDoPedido),
     `- Subagentes: ${regraDaQuantidade(configuracao.quantidadeDeSubagentes)}`,
+    ...linhasDosSubagentesProntos(subagentesProntos, NOME_DO_SUBAGENTE, MARCA_DA_CONFIGURACAO),
     `- Permissões: ${DESCRICAO_DO_NIVEL[nivelDoPedido]}. ${regraDeCommitEPush}`,
     ...regrasDoPlanejamento,
     ...regrasDoTamanho,
@@ -202,15 +205,24 @@ export function mensagemDeAprovacaoDoPlano(observacoes: string): string {
  *
  * Vai na definição dos agentes, refeita a cada turno: por isso pode levar a
  * regra de commit e push do pedido (`ConfiguracaoDoOrquestrador.permiteCommitEPush`).
+ *
+ * Um subagente pronto (`especialidade`) recebe as mesmas regras, com o nome
+ * dele, e a especialidade definida pelo usuário no fim.
  */
-export function instrucoesDoSubagente(pasta: PastaDeTrabalho, permiteCommitEPush = false): string {
+export function instrucoesDoSubagente(
+  pasta: PastaDeTrabalho,
+  permiteCommitEPush = false,
+  especialidade: DadosDoSubagentePronto | null = null,
+): string {
   const regraDeCommitEPush = permiteCommitEPush
     ? "Commit e push: faça somente se a subtarefa recebida pedir explicitamente — o orquestrador só pede quando o usuário pediu. Nunca na main; use branch conforme a política (feature/, fix/, hotfix/, refactor/). Nunca adicione a linha Co-authored-by."
     : "Nunca faça commit nem push.";
+  const papel = especialidade === null ? NOME_DO_SUBAGENTE : `"${especialidade.nome}"`;
   return [
-    "Você é um subagente executor, coordenado por um orquestrador.",
+    `Você é um subagente ${papel}, coordenado por um orquestrador.`,
     `Faça somente a subtarefa recebida, dentro da pasta ${pasta.caminho}. Seja objetivo.`,
     "Ao terminar, devolva: o que fez, os arquivos que alterou (se houver) e o resultado.",
     `${regraDeCommitEPush} Responda em português.`,
+    ...(especialidade === null ? [] : linhasDaEspecialidade(especialidade)),
   ].join("\n");
 }

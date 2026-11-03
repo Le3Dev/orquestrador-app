@@ -12,6 +12,7 @@ import { mensagemDeAprovacaoDoPlano, separarPropostaDePlano } from "./Instrucoes
 import { InstrucoesAplicadas, resolverInstrucoes } from "./InstrucoesPersonalizadas";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "./MotorDeAgentes";
+import { DadosDoSubagentePronto } from "./SubagentesProntos";
 import { Orquestrador, TAMANHO_MAXIMO_DA_MENSAGEM } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { GerenciadorDeWorktrees } from "./PreparoDeWorktree";
@@ -91,6 +92,11 @@ export class ServicoDeOrquestracao {
     );
   }
 
+  /** A biblioteca de subagentes prontos que um pedido receberia agora. */
+  subagentesProntos(): readonly DadosDoSubagentePronto[] {
+    return this.dependencias.preferencias.atuais().subagentesProntos;
+  }
+
   async alterarConfiguracao(id: string, alteracoes: AlteracoesDaConfiguracao): Promise<Orquestrador> {
     const orquestrador = this.buscar(id);
     this.publicar(orquestrador, orquestrador.alterarConfiguracao(alteracoes));
@@ -152,6 +158,7 @@ export class ServicoDeOrquestracao {
     const conclusao = this.executar(orquestrador, turnoId, sinal, configuracaoDoTurno, {
       instrucoes: instrucoesDoTurno,
       revogarInstrucoesAnteriores: revogarAnteriores,
+      subagentesProntos: this.dependencias.preferencias.atuais().subagentesProntos,
     }).finally(() =>
       execucoes.encerrar(orquestrador.id),
     );
@@ -264,7 +271,7 @@ export class ServicoDeOrquestracao {
     turnoId: string,
     sinal: AbortSignal,
     configuracaoDoTurno: ConfiguracaoDoOrquestrador,
-    instrucoesDoTurno: Pick<PedidoDeTurno, "instrucoes" | "revogarInstrucoesAnteriores">,
+    instrucoesDoTurno: Pick<PedidoDeTurno, "instrucoes" | "revogarInstrucoesAnteriores" | "subagentesProntos">,
   ): Promise<void> {
     const { motor, repositorio, anexos, worktrees, agora } = this.dependencias;
     const turno = orquestrador.turnoEmAndamento;
