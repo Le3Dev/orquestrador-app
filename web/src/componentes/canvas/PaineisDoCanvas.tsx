@@ -14,6 +14,7 @@ import type { EstadoDoServidor } from "../../shared/hooks/useServidor";
 import { nivelDaMemoria } from "../../shared/memoria";
 import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
 import { IconeOrquestrador, IconePasta } from "../Icones";
+import { ControlesDaJanela, rodandoNoDesktop } from "./ControlesDaJanela";
 
 /** Por quanto tempo o aviso de "reconectado" fica na tela. */
 const DURACAO_DO_AVISO_DE_VOLTA_MS = 10_000;
@@ -90,8 +91,14 @@ interface PropsDaBarra {
 
 /** Canto superior esquerdo: identidade do app e as ações do canvas. */
 export function BarraDoCanvas({ aoCriar, aoCriarNota, aoOrganizar, podeOrganizar }: PropsDaBarra) {
+  // Dentro do app desktop (Electron), a própria barra vira a área de arraste da
+  // janela (-webkit-app-region: drag) e ganha os botões min/max/fechar. No
+  // navegador puro, `desktop` é false e nada muda.
+  const desktop = rodandoNoDesktop();
   return (
-    <div className="painel-flutuante flex items-center gap-3 px-3 py-2">
+    <div
+      className={`painel-flutuante flex items-center gap-3 px-3 py-2${desktop ? " barra-arrastavel" : ""}`}
+    >
       <div className="no-orquestrador-icone h-8 w-8">
         <IconeOrquestrador tamanho={18} />
       </div>
@@ -100,12 +107,12 @@ export function BarraDoCanvas({ aoCriar, aoCriarNota, aoOrganizar, podeOrganizar
         <span className="mono text-muted">claude code · canvas · local</span>
       </div>
       <span className="mx-1 h-8 w-px bg-border" />
-      <button type="button" className="btn btn-sm btn-cta" onClick={aoCriar}>
+      <button type="button" className="btn btn-sm btn-cta no-drag" onClick={aoCriar}>
         + Novo orquestrador
       </button>
       <button
         type="button"
-        className="btn btn-sm btn-cta"
+        className="btn btn-sm btn-cta no-drag"
         onClick={aoCriarNota}
         title="Cria uma nota no centro da tela (bloco de notas, salvo automaticamente)"
       >
@@ -113,13 +120,14 @@ export function BarraDoCanvas({ aoCriar, aoCriarNota, aoOrganizar, podeOrganizar
       </button>
       <button
         type="button"
-        className="btn btn-sm btn-outline"
+        className="btn btn-sm btn-outline no-drag"
         onClick={aoOrganizar}
         disabled={!podeOrganizar}
         title="Coloca os terminais lado a lado, e as notas em colunas à direita deles"
       >
         Organizar
       </button>
+      {desktop && <ControlesDaJanela />}
     </div>
   );
 }

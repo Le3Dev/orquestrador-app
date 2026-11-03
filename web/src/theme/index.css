@@ -1075,3 +1075,27 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   /* A bolinha é SMIL, que ignora as regras de animação do CSS acima. */
   .bolinha-da-troca { display: none; }
 }
+
+/* ---------------- App desktop (Electron): arraste e botões da janela -------- */
+
+/* Só tem efeito dentro do Electron; no navegador o `-webkit-app-region` é
+ * ignorado. Arrasta a janela pegando na barra do cabeçalho. */
+.barra-arrastavel { -webkit-app-region: drag; }
+/* Elementos interativos dentro da barra não podem arrastar a janela. */
+.no-drag, .barra-arrastavel .btn, .barra-arrastavel button { -webkit-app-region: no-drag; }
+
+.controles-da-janela { display: flex; align-items: center; gap: 2px; margin-left: 6px; }
+.botao-janela {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--secondary);
+  cursor: pointer;
+  transition: background-color .15s, color .15s;
+}
+.botao-janela:hover { background: var(--surface-3); color: var(--primary); }
+.botao-janela-fechar:hover { background: var(--error); color: var(--claude-claro); }
