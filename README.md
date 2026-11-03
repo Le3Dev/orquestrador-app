@@ -112,6 +112,13 @@ Casos de teste das **instruções personalizadas** (ver ADR-17):
 - **Rotas:** POST/PATCH aceitam e devolvem o campo; acima do limite → 400; `GET/PATCH /preferencias`; `POST /previa-do-prompt` mostra o bloco e recusa pasta fora da raiz.
 - **Tela:** contador e aviso de limite; prévia do prompt final; painel *Preferências* (Salvar só com mudança, Cancelar descarta); chip *instruções* no terminal; resumo com *instruções próprias*.
 
+Casos de teste dos **subagentes prontos** (ver ADR-18):
+- **Validação (`subagentesProntosValidos`):** ausente vale lista vazia; descrição vira uma linha e o prompt é normalizado; modelo ausente vale `herdar`; recusa nome fora do formato (maiúscula, começando por número), nomes reservados (`executor`, `general-purpose`…), campos vazios, modelo inválido, prompt acima de 4.000, nomes repetidos e mais de 10.
+- **Bloco do pedido:** sem prontos, a mensagem é idêntica à de antes; com prontos, lista nome e descrição depois da regra de quantidade, sem o prompt deles; tags na descrição são desarmadas.
+- **`agentes.json`:** sem prontos, só o `executor`; cada pronto tem as ferramentas e o esforço do `executor` e não lança outros agentes; `herdar` usa o modelo dos subagentes; no planejamento só leem; seguem a regra de commit e push do turno; o prompt traz as regras do executor com o nome do pronto e a especialidade no fim.
+- **Serviço e rotas:** o turno captura a lista no início; `PATCH /preferencias` grava e a prévia lista; inválidos → 400 sem gravar nada.
+- **Adaptador e tela:** `subagente_iniciado.papel` vem do `subagent_type` (sem ele, `executor`); o log mostra *instanciou <nome>#…*; o painel lista, adiciona (nome ajustado para minúsculas e hífen), remove e trava em 10.
+
 ## Tecnologias
 
 - **Node 22+ / TypeScript 6** (estrito, `exactOptionalPropertyTypes`), **Express 5**, **zod 4** (validação da API), **vitest**.
@@ -218,7 +225,7 @@ dados/
         eventos.jsonl
   anexos/<id>/                 imagens enviadas nos pedidos
   notas/<id>.json              uma nota por arquivo
-  preferencias.json            preferências globais (hoje, as instruções padrão; ver ADR-17)
+  preferencias.json            preferências globais: instruções padrão e subagentes prontos (ver ADR-17 e ADR-18)
   worktrees/<8 caracteres>/    worktrees git dos Orquestradores
 ```
 
@@ -231,6 +238,7 @@ dados/
    - Em `planejamento`, o Orquestrador e o `executor` recebem só as ferramentas de leitura, qualquer que seja o nível configurado, e o bloco pede um **plano** em vez da execução (ver ADR-9).
    - Com **Permitir commit e push quando eu pedir** ligada, num turno de `execucao`, o bloco libera commit e push só quando o usuário pedir explicitamente naquela mensagem, e o `claude -p` sai sem o bloqueio de `git commit`/`git push` (ver ADR-10). Desligada, ou em `planejamento`, continua tudo proibido.
    - **Instruções personalizadas** (ver ADR-17): se o Orquestrador tiver instruções próprias, ou, sem elas, houver instruções padrão nas *Preferências*, o bloco termina com elas dentro de `<instrucoes-do-usuario>`. Sem nenhuma, o bloco sai exatamente como antes.
+   - **Subagentes prontos** (ver ADR-18): com subagentes prontos nas *Preferências*, o bloco os lista (nome e quando usar) e o `agentes.json` os define ao lado do `executor`, com as mesmas ferramentas e esforço. Sem nenhum, nada muda.
    - **Esforço** (ver ADR-12): com esforço escolhido para o Orquestrador, o `claude -p` recebe `--effort <low|medium|high|xhigh|max>` logo depois do `--model`; com esforço escolhido para os Subagentes, a definição do `executor` no `agentes.json` ganha o campo `"effort"`. Em `"padrao"` nada disso é enviado. Se algum dos dois papéis tiver esforço escolhido, a variável `CLAUDE_CODE_EFFORT_LEVEL` herdada do servidor é removida do ambiente do processo, porque ela venceria a escolha.
 4. Cada linha `stream-json` vira evento do domínio (`subagente_iniciado`, `progresso_do_subagente`…), gravado em `eventos.jsonl` e publicado por SSE.
 5. No `result` final, o Turno é concluído com a resposta e o consumo. O servidor sempre tira da resposta o marcador `<plano-para-aprovacao/>` (`separarPropostaDePlano`). Num turno de `planejamento`, ou num de `execucao` em que o marcador veio e a opção de propor plano estava ligada no início do turno, a resposta é um plano, que fica **pendente** (`turno_concluido.planoPendente: true`; só o último turno pode ter plano pendente) até o usuário:
@@ -503,6 +511,22 @@ flowchart TD
   - **regras do usuário x regras do app:** o bloco vem antes do pedido e as instruções vêm por último no bloco. Em conflito com as regras do app, o cabeçalho manda seguir as duas, e as permissões continuam valendo;
   - perfis de instruções reutilizáveis e variáveis (`{{pasta}}`) ficaram de fora desta versão.
 
+**ADR-18 — Subagentes prontos: biblioteca global no `agentes.json`.**
+- *Contexto:*
+  - o usuário quer subagentes fixos, com prompts já prontos (ex.: revisor, testador), que o Orquestrador decida usar quando fizer sentido, em vez de reescrever a especialidade em cada pedido;
+  - o `executor` é o único tipo definido no `agentes.json`, e o `agentes.json` é refeito a cada turno (`--agents`): ao contrário do prompt de sistema (ADR-2), um agente novo vale já no pedido seguinte.
+- *Decisão:*
+  - **biblioteca global** em `dados/preferencias.json` (`subagentesProntos`), editada no painel *Preferências*. Cada um tem `nome` (letras minúsculas, números e hífen; vira o `subagent_type`), `descricao` (quando usar, uma linha), `prompt` (a especialidade, até 4.000) e `modelo` (`herdar`, que usa o modelo dos subagentes do Orquestrador, ou `opus`, `sonnet`, `haiku`). Até 10; nomes do Claude Code e o `executor` são reservados;
+  - **mesmas permissões do executor:** cada pronto vai no `agentes.json` com as ferramentas do turno (só leitura no planejamento), o esforço dos subagentes e as regras do `executor` (pasta, prestação de contas, commit e push do turno), com o nome dele e a especialidade no fim, dentro de `<especialidade-do-usuario>`. Nunca mais permissão que o turno;
+  - **quem decide é o Orquestrador:** o bloco do pedido lista nome e descrição (o prompt não vai para ele) e manda preferir o pronto quando a subtarefa combinar; a quantidade de subagentes conta todos juntos. Lista vazia: o bloco e o `agentes.json` ficam exatamente como antes;
+  - a lista é capturada no início do turno, como a configuração;
+  - o evento `subagente_iniciado` ganha `papel` (o `subagent_type`), e o log do terminal mostra *instanciou contador-de-linhas#…* em vez de sempre *executor*.
+- *Consequências:*
+  - **todos os Orquestradores** recebem todos os prontos. Escolher quais valem em cada Orquestrador ficou para depois;
+  - **sem trava técnica para a escolha:** usar ou não um pronto é julgamento do modelo, guiado pela descrição. Descrições claras ("revisar código alterado procurando bugs") funcionam melhor que genéricas;
+  - o prompt do pronto vai como prompt de sistema do subagente, renovado a cada lançamento: editar vale no próximo pedido;
+  - o bixinho continua com nome de bicho; só o log mostra o tipo.
+
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
 - `modelUsage` acumula a sessão, então o consumo do turno vem de `model_usage_since_last_result`;
@@ -538,8 +562,8 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | POST | `/orquestradores/:id/cancelar` | — | 202 `{ cancelando: true }` |
 | DELETE | `/orquestradores/:id` | — | 204 (409 se houver pedido em andamento) |
 | GET | `/orquestradores/:id/eventos` | cabeçalho opcional `Last-Event-ID` ou `?desde=` (última sequência recebida) | `text/event-stream`: histórico desde a sequência informada + eventos novos |
-| GET | `/preferencias` | — | `{ instrucoesPadrao }` (`""` sem preferências gravadas; ver ADR-17) |
-| PATCH | `/preferencias` | `{ instrucoesPadrao?: string }` (`""` apaga) | 200 + `{ instrucoesPadrao }`. Vale a partir do próximo pedido de cada Orquestrador sem instruções próprias. 400 `As instruções padrão devem ter até 4000 caracteres (hoje têm N).` |
+| GET | `/preferencias` | — | `{ instrucoesPadrao, subagentesProntos }` (`""` e `[]` sem preferências gravadas; ver ADR-17 e ADR-18) |
+| PATCH | `/preferencias` | `{ instrucoesPadrao?: string, subagentesProntos?: [{ nome, descricao, prompt, modelo?: "herdar" \| "opus" \| "sonnet" \| "haiku" }] }` (`""` apaga as instruções; a lista troca inteira, `[]` apaga) | 200 + `{ instrucoesPadrao, subagentesProntos }`. Vale a partir do próximo pedido de cada Orquestrador. 400 com a mensagem do campo, ex.: `As instruções padrão devem ter até 4000 caracteres (hoje têm N).`, `O nome "executor" é reservado; escolha outro.`, `Já existe um subagente pronto chamado "revisor".` |
 | POST | `/previa-do-prompt` | `{ configuracao, pastaDeTrabalho?, modo?: "execucao" \| "planejamento" }` (`configuracao` no esquema do POST, sem nome nem pasta) | `{ instrucoesIniciais, mensagem, origemDasInstrucoes }`: o prompt de sistema da conversa e a mensagem de um pedido de exemplo, com o bloco e as instruções que valeriam. Não salva nada. 400 com pasta fora da raiz |
 | GET | `/notas` | — | 200 `[DadosDaNota]`, por `criadaEm` crescente |
 | POST | `/notas` | `{ titulo?: string, texto?: string }` (corpo vazio vale; ausentes: `"Nova nota"` e `""`) | 201 + `DadosDaNota` (400 com as mensagens abaixo) |
@@ -600,7 +624,7 @@ Erros 400 das notas:
 | `sessao_iniciada` | — | o Claude Code abriu (ou retomou) a sessão |
 | `texto_do_orquestrador` | `texto` | o Orquestrador escreveu algo |
 | `ferramenta_do_orquestrador` | `ferramenta`, `detalhe` | o Orquestrador usou uma ferramenta ele mesmo (o trivial, ver ADR-14); a tela mostra como atividade, ex.: "orquestrador lendo package.json" |
-| `subagente_iniciado` | `subagenteId`, `descricao`, `tarefa` | um Subagente foi lançado |
+| `subagente_iniciado` | `subagenteId`, `descricao`, `tarefa`, `papel?` | um Subagente foi lançado; `papel` é o tipo (`executor` ou o nome de um subagente pronto, ver ADR-18), ausente nos eventos antigos |
 | `progresso_do_subagente` | `subagenteId`, `atividade`, `ultimaFerramenta`, `tokens`, `ferramentasUsadas`, `duracaoMs` | a cada ferramenta usada pelo Subagente |
 | `texto_do_subagente` | `subagenteId`, `texto` | o Subagente escreveu algo |
 | `subagente_concluido` | `subagenteId`, `situacao` (`concluido` · `falhou` · `cancelado`), `resumo`, `tokens`, `duracaoMs` | o Subagente terminou |
@@ -714,6 +738,10 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
     - **Organizar:** com notas no canvas, o *Organizar* mantém os terminais na grade de sempre e põe as notas em colunas de até 4, à direita deles.
 
     O texto das notas fica salvo no servidor (em `dados/notas/`), então volta ao recarregar a página. Posição, tamanho e se está minimizada são lembrados neste navegador, como os terminais. Notas abertas em duas abas não se sincronizam: vale o último salvamento, e a outra aba só vê a mudança ao recarregar.
+12. **Preferências e subagentes prontos:** o botão *Preferências*, na barra do canvas, abre o que vale para todos os orquestradores.
+    - **Instruções padrão:** usadas por quem não tem instruções próprias (item 1).
+    - **Subagentes prontos:** *+ Adicionar subagente pronto* cria um especialista com **Nome** (vira minúsculas com hífen, ex.: *Revisor de Código* → `revisor-de-codigo`), **Modelo** (*Herdar do orquestrador* usa o modelo dos subagentes de cada um), **Quando usar** (uma linha; é por ela que o Orquestrador decide) e **Prompt** (a especialidade). Até 10. *Remover* tira da lista; nada muda até *Salvar*.
+    - Todo Orquestrador recebe a lista a partir do próximo pedido e usa um pronto quando a subtarefa combinar com a descrição; senão, usa o executor. O log mostra quem foi lançado, ex.: *instanciou revisor-de-codigo#c204*. Os prontos têm as mesmas permissões, ferramentas e esforço do executor no pedido e contam na quantidade de subagentes (ver ADR-18).
 
 **Avisos que podem aparecer:**
 - *"orquestrador lendo …"*, *"orquestrador executando …"* (no log do terminal): não é erro. O Orquestrador está fazendo um trivial ele mesmo (ver ADR-14). Se preferir que ele delegue tudo, desligue **Deixar o orquestrador fazer o trivial sozinho** no *⚙*.
