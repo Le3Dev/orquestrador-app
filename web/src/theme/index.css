@@ -1107,3 +1107,11 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   border: 1px solid var(--border);
   border-radius: var(--radius-input);
 }
+
+/* Subagente pronto na lista das Preferências. */
+.cartao-subagente-pronto {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface-2);
+}

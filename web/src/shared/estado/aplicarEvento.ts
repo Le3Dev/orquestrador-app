@@ -284,7 +284,7 @@ export function linhaDoLog(evento: EventoRegistrado, turno: TurnoNaTela): Omit<L
       return {
         origem: "orquestrador",
         tipo: "spawn",
-        texto: `instanciou executor#${idCurto(evento.subagenteId)} · ${evento.descricao}`,
+        texto: `instanciou ${evento.papel ?? "executor"}#${idCurto(evento.subagenteId)} · ${evento.descricao}`,
       };
     case "progresso_do_subagente":
       return {

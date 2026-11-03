@@ -47,10 +47,30 @@ export const TAMANHO_MAXIMO_DAS_INSTRUCOES = 4_000;
 /** De onde vêm as instruções personalizadas de um pedido: as do orquestrador ou o padrão global. */
 export type OrigemDasInstrucoes = "orquestrador" | "padrao";
 
+/** `herdar` usa o modelo dos subagentes do orquestrador que o lançar. */
+export type ModeloDoSubagentePronto = "herdar" | ModeloClaude;
+
+/** Subagente com prompt pronto, que qualquer orquestrador pode decidir usar. */
+export interface DadosDoSubagentePronto {
+  /** Como o orquestrador o chama: letras minúsculas, números e hífen. */
+  nome: string;
+  /** Quando usar (uma linha): o orquestrador decide por ela. */
+  descricao: string;
+  /** A especialidade, somada às regras de todo subagente. */
+  prompt: string;
+  modelo: ModeloDoSubagentePronto;
+}
+
+/** Limites dos subagentes prontos, como o servidor confere. */
+export const MAXIMO_DE_SUBAGENTES_PRONTOS = 10;
+export const TAMANHO_MAXIMO_DA_DESCRICAO_DO_SUBAGENTE = 300;
+export const TAMANHO_MAXIMO_DO_PROMPT_DO_SUBAGENTE = 4_000;
+
 /** Preferências que valem para todos os orquestradores. */
 export interface DadosDasPreferencias {
   /** Instruções para os orquestradores sem instruções próprias. */
   instrucoesPadrao: string;
+  subagentesProntos: DadosDoSubagentePronto[];
 }
 
 /** O que o orquestrador receberia num pedido com uma configuração (`POST /previa-do-prompt`). */
@@ -184,7 +204,14 @@ type EventoDeTurno =
   | { tipo: "sessao_iniciada" }
   | { tipo: "texto_do_orquestrador"; texto: string }
   | { tipo: "ferramenta_do_orquestrador"; ferramenta: string; detalhe: string }
-  | { tipo: "subagente_iniciado"; subagenteId: string; descricao: string; tarefa: string }
+  | {
+      tipo: "subagente_iniciado";
+      subagenteId: string;
+      descricao: string;
+      tarefa: string;
+      /** "executor" ou o nome de um subagente pronto; ausente nos eventos antigos. */
+      papel?: string;
+    }
   | {
       tipo: "progresso_do_subagente";
       subagenteId: string;

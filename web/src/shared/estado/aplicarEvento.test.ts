@@ -137,6 +137,20 @@ describe("aplicarEvento", () => {
     expect(turno?.log[5]?.texto).toBe("Read · Lendo Periodo.ts");
   });
 
+  it("no log, o subagente aparece pelo tipo; eventos antigos sem tipo valem executor", () => {
+    const [turno] = reproduzir(
+      registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "conte", configuracao },
+        { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "abcd1234", descricao: "Contar", tarefa: "x", papel: "contador-de-linhas" },
+        { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "efgh5678", descricao: "Ler", tarefa: "y" },
+      ]),
+    ).turnos;
+
+    const spawns = turno?.log.filter((linha) => linha.tipo === "spawn").map((linha) => linha.texto) ?? [];
+    expect(spawns[0]).toMatch(/^instanciou contador-de-linhas#/);
+    expect(spawns[1]).toMatch(/^instanciou executor#/);
+  });
+
   it("guarda as imagens do pedido e a hora da última atividade", () => {
     const anexo = { id: "a1", nome: "tela.png", tipoDeMidia: "image/png" as const, tamanhoEmBytes: 10, arquivo: "a1.png" };
     const estado = reproduzir(
