@@ -25,9 +25,11 @@ interface PropsDaConfiguracao {
   orquestrador: ResumoDoOrquestrador;
   trabalhando: boolean;
   aoFechar: () => void;
+  /** Começa uma conversa nova (o mesmo que "/clear"); lança o erro do servidor, se houver. */
+  aoLimparConversa: () => Promise<void>;
 }
 
-export function PainelDeConfiguracao({ orquestrador, trabalhando, aoFechar }: PropsDaConfiguracao) {
+export function PainelDeConfiguracao({ orquestrador, trabalhando, aoFechar, aoLimparConversa }: PropsDaConfiguracao) {
   const { acoes } = useCanvas();
   const [configuracao, setConfiguracao] = useState(orquestrador.configuracao);
   const [erro, setErro] = useState<string | null>(null);
@@ -60,21 +62,49 @@ export function PainelDeConfiguracao({ orquestrador, trabalhando, aoFechar }: Pr
     }
   }
 
+  async function novaConversa(): Promise<void> {
+    if (!window.confirm("Começar uma conversa nova? A conversa atual será arquivada.")) {
+      return;
+    }
+    setErro(null);
+    try {
+      await aoLimparConversa();
+      aoFechar();
+    } catch (falha) {
+      setErro(mensagemDeErro(falha));
+    }
+  }
+
   return (
     <div className="custom-scrollbar flex max-h-[70%] flex-col gap-4 overflow-y-auto border-b border-border bg-surface-2 px-4 py-3 nodrag nowheel">
       <span className="rotulo-tecnico">configuração · vale a partir do próximo pedido</span>
       <CamposDaConfiguracao valor={configuracao} aoMudar={setConfiguracao} />
       {erro !== null && <div className="alert alert-error">{erro}</div>}
       <div className="flex justify-between gap-2">
-        <button
-          type="button"
-          className="btn btn-sm btn-danger"
-          onClick={() => void excluir()}
-          disabled={trabalhando}
-          title={trabalhando ? "Cancele o pedido em andamento antes de excluir." : undefined}
-        >
-          Excluir orquestrador
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="btn btn-sm btn-danger"
+            onClick={() => void excluir()}
+            disabled={trabalhando}
+            title={trabalhando ? "Cancele o pedido em andamento antes de excluir." : undefined}
+          >
+            Excluir orquestrador
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline"
+            onClick={() => void novaConversa()}
+            disabled={trabalhando}
+            title={
+              trabalhando
+                ? "Cancele o pedido em andamento antes de começar uma conversa nova."
+                : "Arquiva a conversa atual e começa outra do zero (o mesmo que /clear no prompt)."
+            }
+          >
+            Nova conversa
+          </button>
+        </div>
         <div className="flex gap-2">
           <button type="button" className="btn btn-sm btn-ghost" onClick={aoFechar}>
             Voltar
@@ -101,6 +131,8 @@ function useConfiguracaoEstavel(atual: DadosDaConfiguracao): DadosDaConfiguracao
     esforcoDosSubagentes,
     nivelDePermissao,
     permitirCommitEPush,
+    permitirTrabalhoDireto,
+    proporPlanoEmPedidosGrandes,
   } = atual;
   const { modo, limite } = atual.quantidadeDeSubagentes;
   return useMemo<DadosDaConfiguracao>(
@@ -112,6 +144,8 @@ function useConfiguracaoEstavel(atual: DadosDaConfiguracao): DadosDaConfiguracao
       quantidadeDeSubagentes: { modo, limite },
       nivelDePermissao,
       permitirCommitEPush,
+      permitirTrabalhoDireto,
+      proporPlanoEmPedidosGrandes,
     }),
     [
       modeloDoOrquestrador,
@@ -122,6 +156,8 @@ function useConfiguracaoEstavel(atual: DadosDaConfiguracao): DadosDaConfiguracao
       limite,
       nivelDePermissao,
       permitirCommitEPush,
+      permitirTrabalhoDireto,
+      proporPlanoEmPedidosGrandes,
     ],
   );
 }
@@ -286,6 +322,31 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
 
   const aoCancelar = useCallback(() => void cancelar(), [cancelar]);
 
+  /**
+   * Conversa nova: a atual fica arquivada no servidor, que avisa pelo evento
+   * `conversa_limpa` (é ele que esvazia a transcrição). Lança o erro do servidor
+   * — ex.: 409 durante um pedido. Sem `trabalhando` nas dependências: o prompt
+   * e o painel já bloqueiam durante o pedido, e a função segue estável.
+   */
+  const iniciarConversaNova = useCallback(async (): Promise<void> => {
+    await api.limparConversa(orquestradorId);
+    acompanhando.current = true;
+    setCancelamentoPedido(false);
+    void recarregar();
+  }, [orquestradorId, recarregar]);
+
+  /** "/clear" no prompt: o erro aparece no terminal e o comando fica no campo. */
+  const limparConversa = useCallback(async (): Promise<boolean> => {
+    setErro(null);
+    try {
+      await iniciarConversaNova();
+      return true;
+    } catch (falha) {
+      setErro(mensagemDeErro(falha));
+      return false;
+    }
+  }, [iniciarConversaNova]);
+
   const aprovarPlano = useCallback(async (): Promise<void> => {
     setErro(null);
     try {
@@ -391,6 +452,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
           orquestrador={orquestrador}
           trabalhando={trabalhando}
           aoFechar={() => setConfigurando(false)}
+          aoLimparConversa={iniciarConversaNova}
         />
       )}
 
@@ -411,6 +473,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
           pastaDeTrabalho={orquestrador.pastaDeTrabalho}
           configuracao={configuracao}
           turnos={conversa.turnos}
+          conversaIniciadaEm={conversa.conversaIniciadaEm}
           sinal={sinais.get(orquestradorId)}
           desconectado={!servidor.conectado}
           acoesDoPlano={acoesDoPlano}
@@ -429,6 +492,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
         aoAnexar={aoAnexar}
         aoRemoverImagem={aoRemoverImagem}
         aoEnviar={enviar}
+        aoLimparConversa={limparConversa}
         aoCancelar={aoCancelar}
       />
       {trabalhando && servidor.conectado && <div className="faixa-de-progresso" />}

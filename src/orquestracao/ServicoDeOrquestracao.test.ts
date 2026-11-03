@@ -7,11 +7,12 @@ import { Anexo } from "./Anexo";
 import { ArmazemDeAnexos } from "./ArmazemDeAnexos";
 import { DadosDaConfiguracao } from "./ConfiguracaoDoOrquestrador";
 import { EventoDeOrquestracao, EventoDoMotor, EventoRegistrado, SinalDeVida } from "./EventoDeOrquestracao";
+import { MARCADOR_DE_PLANO } from "./InstrucoesDoOrquestrador";
 import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "./MotorDeAgentes";
 import { Orquestrador } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { GerenciadorDeWorktrees, PreparoDeWorktree } from "./PreparoDeWorktree";
-import { RepositorioDeOrquestradores } from "./RepositorioDeOrquestradores";
+import { ConversaArquivada, RepositorioDeOrquestradores } from "./RepositorioDeOrquestradores";
 import { ServicoDeOrquestracao } from "./ServicoDeOrquestracao";
 
 class RepositorioEmMemoria implements RepositorioDeOrquestradores {
@@ -35,9 +36,24 @@ class RepositorioEmMemoria implements RepositorioDeOrquestradores {
     this.eventos.push(registrado);
     return registrado;
   }
+  /** Ids dos Orquestradores cujas conversas foram arquivadas, na ordem. */
+  readonly arquivamentos: string[] = [];
+  arquivarConversa(orquestrador: Orquestrador, evento: EventoDeOrquestracao): ConversaArquivada {
+    this.orquestradores.set(orquestrador.id, orquestrador);
+    this.arquivamentos.push(orquestrador.id);
+    return { registrado: this.anexarEvento(orquestrador.id, evento), gravacao: Promise.resolve() };
+  }
   lerEventos(): readonly EventoRegistrado[] {
     return this.eventos;
   }
+}
+
+function resultadoComResposta(resposta: string): ResultadoDoTurno {
+  return {
+    sucesso: true,
+    resposta,
+    uso: { duracaoMs: 10, tokensDeEntrada: 1, tokensDeSaida: 1, subagentesLancados: 0 },
+  };
 }
 
 /** Motor que emite os eventos combinados e só termina quando liberado ou abortado. */
@@ -134,6 +150,7 @@ describe("ServicoDeOrquestracao", () => {
   let motor: MotorFalso;
   let armazem: ArmazemEmMemoria;
   let sinais: SinalDeVida[];
+  let publicados: EventoRegistrado[];
   let worktrees: GerenciadorDeWorktreesFalso;
   let servico: ServicoDeOrquestracao;
   let ids: number;
@@ -143,13 +160,17 @@ describe("ServicoDeOrquestracao", () => {
     motor = new MotorFalso();
     armazem = new ArmazemEmMemoria();
     sinais = [];
+    publicados = [];
     worktrees = new GerenciadorDeWorktreesFalso();
     ids = 0;
     servico = new ServicoDeOrquestracao({
       repositorio,
       motor,
       execucoes: new ControleDeExecucoesEmMemoria(),
-      publicador: { publicar: () => undefined, sinalizar: (_id, sinal) => sinais.push(sinal) },
+      publicador: {
+        publicar: (_id, evento) => publicados.push(evento),
+        sinalizar: (_id, sinal) => sinais.push(sinal),
+      },
       anexos: armazem,
       worktrees,
       gerarId: () => `id${++ids}`,
@@ -451,6 +472,176 @@ describe("ServicoDeOrquestracao", () => {
       await expect(servico.descartarPlano(orquestrador.id)).rejects.toMatchObject({ motivo: "sem_plano_pendente" });
       motor.terminar();
       await conclusao;
+    });
+
+    it("o marcador sai da resposta de um planejamento, que fica pendente como sempre", async () => {
+      const orquestrador = await criar();
+      motor.resultado = resultadoComResposta(`O plano.\n${MARCADOR_DE_PLANO}`);
+
+      await planejar(orquestrador);
+
+      expect(orquestrador.ultimoTurno?.resposta).not.toContain(MARCADOR_DE_PLANO);
+      expect(orquestrador.turnoComPlanoPendente).not.toBeNull();
+      expect(publicados.at(-1)).toMatchObject({ tipo: "turno_concluido", planoPendente: true });
+    });
+  });
+
+  describe("plano proposto num turno de execução", () => {
+    const respostaComPlano = `Proponho:\n1. separar o módulo\n2. migrar os testes\n${MARCADOR_DE_PLANO}`;
+
+    async function executar(orquestrador: Orquestrador, antesDeTerminar?: () => Promise<unknown>): Promise<void> {
+      const { conclusao } = await servico.enviarMensagem(orquestrador.id, "refatore o projeto inteiro");
+      await antesDeTerminar?.();
+      motor.terminar();
+      await conclusao;
+    }
+
+    beforeEach(() => {
+      motor.resultado = resultadoComResposta(respostaComPlano);
+    });
+
+    it("com a opção ligada, o plano fica pendente e o marcador sai da resposta", async () => {
+      const orquestrador = await criar();
+
+      await executar(orquestrador);
+
+      const turno = orquestrador.ultimoTurno;
+      expect(turno?.modo).toBe("execucao");
+      expect(orquestrador.turnoComPlanoPendente?.id).toBe(turno?.id);
+      expect(turno?.resposta).toContain("Proponho:");
+      expect(turno?.resposta).not.toContain(MARCADOR_DE_PLANO);
+      const concluido = publicados.at(-1);
+      expect(concluido).toMatchObject({ tipo: "turno_concluido", planoPendente: true });
+      expect(concluido?.tipo === "turno_concluido" ? concluido.resposta : "").not.toContain(MARCADOR_DE_PLANO);
+    });
+
+    it("o plano proposto é aprovado como o de um planejamento", async () => {
+      const orquestrador = await criar();
+      await executar(orquestrador);
+      motor.resultado = resultadoComResposta("feito");
+
+      const { conclusao } = await servico.aprovarPlano(orquestrador.id);
+      motor.terminar();
+      await conclusao;
+
+      expect(motor.pedidos[1]?.texto).toMatch(/^Plano aprovado\./);
+      expect(orquestrador.turnoComPlanoPendente).toBeNull();
+    });
+
+    it("com a opção desligada, a resposta sai limpa e sem plano pendente", async () => {
+      const orquestrador = await criar();
+      await servico.alterarConfiguracao(orquestrador.id, { proporPlanoEmPedidosGrandes: false });
+
+      await executar(orquestrador);
+
+      expect(orquestrador.ultimoTurno?.resposta).toContain("Proponho:");
+      expect(orquestrador.ultimoTurno?.resposta).not.toContain(MARCADOR_DE_PLANO);
+      expect(orquestrador.turnoComPlanoPendente).toBeNull();
+      expect(publicados.at(-1)).toMatchObject({ tipo: "turno_concluido", planoPendente: false });
+    });
+
+    it("vale a configuração do início do turno, não a alterada enquanto ele roda", async () => {
+      const orquestrador = await criar();
+
+      await executar(orquestrador, () =>
+        servico.alterarConfiguracao(orquestrador.id, { proporPlanoEmPedidosGrandes: false }),
+      );
+
+      expect(orquestrador.turnoComPlanoPendente).not.toBeNull();
+      expect(motor.pedidos[0]?.configuracao.propoePlanoEmPedidosGrandes("execucao")).toBe(true);
+      expect(orquestrador.configuracao.propoePlanoEmPedidosGrandes("execucao")).toBe(false);
+    });
+
+    it("sem o marcador, o turno de execução conclui sem plano pendente", async () => {
+      const orquestrador = await criar();
+      motor.resultado = resultadoComResposta("feito");
+
+      await executar(orquestrador);
+
+      expect(orquestrador.ultimoTurno?.resposta).toBe("feito");
+      expect(orquestrador.turnoComPlanoPendente).toBeNull();
+    });
+  });
+
+  describe("limpar a conversa", () => {
+    async function conversar(orquestrador: Orquestrador, texto: string): Promise<void> {
+      const { conclusao } = await servico.enviarMensagem(orquestrador.id, texto);
+      motor.terminar();
+      await conclusao;
+    }
+
+    it("o pedido seguinte abre uma sessão nova, com outro id, que os próximos retomam", async () => {
+      const orquestrador = await criar();
+      motor.eventos = [{ tipo: "sessao_iniciada" }];
+      await conversar(orquestrador, "um");
+      const sessaoAnterior = orquestrador.sessaoId;
+
+      await servico.limparConversa(orquestrador.id);
+      await conversar(orquestrador, "dois");
+      await conversar(orquestrador, "três");
+
+      expect(orquestrador.sessaoId).not.toBe(sessaoAnterior);
+      expect(motor.pedidos.map((pedido) => [pedido.sessaoIniciada, pedido.sessaoId])).toEqual([
+        [false, sessaoAnterior],
+        [false, orquestrador.sessaoId],
+        [true, orquestrador.sessaoId],
+      ]);
+      expect(orquestrador.totalDeTurnos).toBe(2);
+    });
+
+    it("arquiva, publica conversa_limpa e descarta o plano pendente", async () => {
+      const orquestrador = await criar();
+      motor.eventos = [{ tipo: "sessao_iniciada" }];
+      const { conclusao } = await servico.enviarMensagem(orquestrador.id, "planeje", [], "planejamento");
+      motor.terminar();
+      await conclusao;
+
+      const limpo = await servico.limparConversa(orquestrador.id);
+
+      expect(limpo).toBe(orquestrador);
+      expect(limpo.totalDeTurnos).toBe(0);
+      expect(limpo.sessaoIniciada).toBe(false);
+      expect(repositorio.arquivamentos).toEqual([orquestrador.id]);
+      expect(publicados.at(-1)).toEqual({
+        tipo: "conversa_limpa",
+        turnosAnteriores: 1,
+        planoDescartado: true,
+        worktreeComAlteracoes: false,
+        sequencia: repositorio.eventos.length,
+        em: "agora",
+      });
+      await expect(servico.aprovarPlano(orquestrador.id)).rejects.toMatchObject({ motivo: "sem_plano_pendente" });
+    });
+
+    it("sem conversa para limpar, não arquiva nem publica nada", async () => {
+      const orquestrador = await criar();
+      const sessao = orquestrador.sessaoId;
+
+      await servico.limparConversa(orquestrador.id);
+      await conversar(orquestrador, "um");
+      await servico.limparConversa(orquestrador.id);
+      const depoisDaPrimeira = repositorio.eventos.length;
+      await servico.limparConversa(orquestrador.id);
+
+      expect(repositorio.arquivamentos).toEqual([orquestrador.id]);
+      expect(repositorio.eventos).toHaveLength(depoisDaPrimeira);
+      expect(motor.pedidos[0]?.sessaoId).toBe(sessao);
+    });
+
+    it("recusa limpar com um pedido em andamento", async () => {
+      const orquestrador = await criar();
+      const { conclusao } = await servico.enviarMensagem(orquestrador.id, "analise");
+
+      await expect(servico.limparConversa(orquestrador.id)).rejects.toMatchObject({ motivo: "turno_em_andamento" });
+      expect(repositorio.arquivamentos).toEqual([]);
+
+      motor.terminar();
+      await conclusao;
+      expect(orquestrador.totalDeTurnos).toBe(1);
+    });
+
+    it("recusa orquestrador inexistente", async () => {
+      await expect(servico.limparConversa("nao-existe")).rejects.toMatchObject({ motivo: "nao_encontrado" });
     });
   });
 });

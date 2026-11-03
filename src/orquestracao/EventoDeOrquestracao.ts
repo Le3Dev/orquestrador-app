@@ -60,11 +60,21 @@ export type EventoDeTurno =
       anexos: DadosDoAnexo[];
       modo: ModoDoTurno;
     }
-  | { tipo: "turno_concluido"; resposta: string; uso: UsoDoTurno }
+  | {
+      tipo: "turno_concluido";
+      resposta: string;
+      uso: UsoDoTurno;
+      /**
+       * O turno terminou com um Plano aguardando a decisão do usuário: sempre
+       * num planejamento, e numa execução em que o Orquestrador propôs um
+       * Plano antes de mexer. Ausente nos eventos gravados antes do campo.
+       */
+      planoPendente: boolean;
+    }
   | { tipo: "turno_cancelado" }
   | { tipo: "turno_falhou"; motivo: string }
   | { tipo: "turno_interrompido" }
-  /** A decisão do usuário sobre o Plano de um turno de planejamento já concluído. */
+  /** A decisão do usuário sobre o Plano pendente de um turno já concluído. */
   | { tipo: "plano_aprovado" }
   | { tipo: "plano_descartado" };
 
@@ -74,7 +84,20 @@ export type EventoDeTurno =
  */
 export type EventoDeOrquestracao =
   | ((EventoDoMotor | EventoDeTurno) & { turnoId: string })
-  | { tipo: "configuracao_alterada"; configuracao: DadosDaConfiguracao };
+  | { tipo: "configuracao_alterada"; configuracao: DadosDaConfiguracao }
+  /**
+   * A conversa foi limpa ("/clear"): o histórico anterior foi arquivado e o
+   * próximo turno começa uma sessão nova. É o primeiro evento da conversa
+   * nova; a sequência continua a da anterior.
+   */
+  | {
+      tipo: "conversa_limpa";
+      turnosAnteriores: number;
+      /** Havia um Plano aguardando decisão, que deixou de valer. */
+      planoDescartado: boolean;
+      /** O worktree do Orquestrador continua com alterações da conversa anterior. */
+      worktreeComAlteracoes: boolean;
+    };
 
 /** Evento já gravado no histórico, com a posição na sequência e o instante. */
 export type EventoRegistrado = EventoDeOrquestracao & { sequencia: number; em: string };

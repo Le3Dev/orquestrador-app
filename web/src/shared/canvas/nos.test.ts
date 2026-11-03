@@ -14,13 +14,14 @@ import {
   type NoDoCanvas,
   novaNota,
   novoTerminal,
+  reacomodarBixinhos,
   reaproveitarArestas,
   semTerminal,
   sincronizarBixinhos,
   sincronizarNotas,
   subagentesVisiveis,
 } from "./nos";
-import { ALTURA_DA_NOTA_MINIMIZADA, type BixinhosLimpos, TAMANHO_DO_BIXINHO } from "./layout";
+import { ALTURA_DA_NOTA_MINIMIZADA, type BixinhosLimpos, type Retangulo, sobrepoe, TAMANHO_DO_BIXINHO } from "./layout";
 
 const configuracao: DadosDaConfiguracao = {
   modeloDoOrquestrador: "opus",
@@ -30,6 +31,8 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "fixa", limite: 2 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
+  permitirTrabalhoDireto: true,
+  proporPlanoEmPedidosGrandes: true,
 };
 
 function conversa(eventos: EventoDeOrquestracao[]): EstadoDaConversa {
@@ -46,6 +49,26 @@ const doisSubagentes = conversa([
 ]);
 
 const terminal = novoTerminal("o1", { x: 100, y: 100 }, 600, 500);
+
+/** Onde estão os bixinhos (de um terminal, ou de todos) no canvas, em coordenadas absolutas. */
+function bixinhosNoCanvas(nos: readonly NoDoCanvas[], terminalId?: string): Retangulo[] {
+  const origens = new Map(nos.filter((no) => no.type !== "bixinho").map((no) => [no.id, no.position]));
+  return nos
+    .filter((no) => no.type === "bixinho" && (terminalId === undefined || no.parentId === terminalId))
+    .map((no) => {
+      const origem = origens.get(no.parentId ?? "") ?? { x: 0, y: 0 };
+      return { x: origem.x + no.position.x, y: origem.y + no.position.y, ...TAMANHO_DO_BIXINHO };
+    });
+}
+
+function retanguloDe(no: NoDoCanvas): Retangulo {
+  return { x: no.position.x, y: no.position.y, largura: no.width ?? 0, altura: no.height ?? 0 };
+}
+
+/** Se algum dos bixinhos está por cima de algum dos retângulos. */
+function algumPorCima(bixinhos: readonly Retangulo[], retangulos: readonly Retangulo[]): boolean {
+  return bixinhos.some((bixinho) => retangulos.some((retangulo) => sobrepoe(bixinho, retangulo)));
+}
 
 describe("sincronizarBixinhos", () => {
   it("cria um bixinho por subagente, filho do terminal e abaixo dele", () => {
@@ -93,6 +116,104 @@ describe("sincronizarBixinhos", () => {
     });
 
     expect(sincronizarBixinhos(comBixinhos, new Map([["o1", novoPedido]]))).toEqual([terminal]);
+  });
+
+  // Outro terminal logo abaixo de o1 (onde o grupo nasceria) e uma nota alta à direita.
+  const abaixo = novoTerminal("o2", { x: 100, y: 650 }, 600, 500);
+  const aDireita = novaNota("n1", { x: 750, y: 100 }, 320, 900);
+
+  it("um grupo novo não nasce em cima de outro terminal nem de uma nota", () => {
+    const nos = sincronizarBixinhos([terminal, abaixo, aDireita], new Map([["o1", doisSubagentes]]));
+    const bixinhos = bixinhosNoCanvas(nos);
+
+    expect(bixinhos).toHaveLength(2);
+    expect(algumPorCima(bixinhos, [abaixo, aDireita].map(retanguloDe))).toBe(false);
+    // Nem embaixo nem à direita: à esquerda do terminal.
+    expect(bixinhos.every((bixinho) => bixinho.x + bixinho.largura <= terminal.position.x)).toBe(true);
+  });
+
+  it("um grupo novo também não nasce em cima dos bixinhos de outro terminal", () => {
+    const conversas = new Map([
+      ["o1", doisSubagentes],
+      ["o2", doisSubagentes],
+    ]);
+    const longe = novoTerminal("o2", { x: 2000, y: 100 }, 600, 500);
+    // Os bixinhos de o2, arrastados para onde o grupo de o1 nasceria.
+    const deO2 = sincronizarBixinhos([longe], conversas).map(
+      (no, indice): NoDoCanvas => (no.type === "bixinho" ? { ...no, position: { x: -1800 + indice * 170, y: 580 } } : no),
+    );
+
+    const nos = sincronizarBixinhos([terminal, ...deO2], conversas);
+
+    expect(algumPorCima(bixinhosNoCanvas(nos, "o1"), bixinhosNoCanvas(nos, "o2"))).toBe(false);
+    expect(nos.filter((no) => no.parentId === "o2")).toEqual(deO2.filter((no) => no.parentId === "o2"));
+  });
+
+  it("com outras janelas por perto, continua devolvendo o mesmo array quando nada muda", () => {
+    const conversas = new Map([["o1", doisSubagentes]]);
+    const primeira = sincronizarBixinhos([terminal, abaixo, aDireita], conversas);
+
+    expect(sincronizarBixinhos(primeira, conversas)).toBe(primeira);
+  });
+});
+
+describe("reacomodarBixinhos", () => {
+  const comBixinhos = sincronizarBixinhos([terminal], new Map([["o1", doisSubagentes]]));
+
+  function posicoesDosBixinhos(nos: readonly NoDoCanvas[], terminalId: string) {
+    return nos.filter((no) => no.type === "bixinho" && no.parentId === terminalId).map((no) => no.position);
+  }
+
+  it("tira de baixo de um terminal solto por cima o grupo inteiro, no mesmo arranjo", () => {
+    const solto = novoTerminal("o2", { x: 100, y: 650 }, 600, 500);
+    const nos = [...comBixinhos, solto];
+
+    const reacomodados = reacomodarBixinhos(nos);
+
+    expect(reacomodados).not.toBe(nos);
+    expect(algumPorCima(bixinhosNoCanvas(reacomodados, "o1"), [retanguloDe(solto)])).toBe(false);
+    const [antes1, antes2] = posicoesDosBixinhos(nos, "o1");
+    const [depois1, depois2] = posicoesDosBixinhos(reacomodados, "o1");
+    expect(depois1).not.toEqual(antes1);
+    expect(depois2).not.toEqual(antes2);
+    expect((depois2?.x ?? 0) - (depois1?.x ?? 0)).toBe((antes2?.x ?? 0) - (antes1?.x ?? 0));
+    // Já reacomodado, não há mais o que mudar.
+    expect(reacomodarBixinhos(reacomodados)).toBe(reacomodados);
+  });
+
+  it("também sai de baixo de uma nota", () => {
+    const nota = novaNota("n1", { x: 300, y: 700 });
+    const reacomodados = reacomodarBixinhos([...comBixinhos, nota]);
+
+    expect(algumPorCima(bixinhosNoCanvas(reacomodados, "o1"), [retanguloDe(nota)])).toBe(false);
+  });
+
+  it("um grupo sem conflito fica onde está, mesmo arrastado à mão, e o array é o mesmo", () => {
+    const arrastado = comBixinhos.map(
+      (no): NoDoCanvas => (no.id === idDoBixinho("o1", "s1") ? { ...no, position: { x: -400, y: 20 } } : no),
+    );
+    const nos = [...arrastado, novaNota("n1", { x: 2000, y: 2000 }), novoTerminal("o2", { x: 1500, y: 100 }, 600, 500)];
+
+    expect(reacomodarBixinhos(nos)).toBe(nos);
+    expect(reacomodarBixinhos(comBixinhos)).toBe(comBixinhos);
+  });
+
+  it("só o grupo em conflito muda: o do terminal que foi solto fica igual", () => {
+    const conversas = new Map([
+      ["o1", doisSubagentes],
+      ["o2", doisSubagentes],
+    ]);
+    const doisGrupos = sincronizarBixinhos([terminal, novoTerminal("o2", { x: 1500, y: 100 }, 600, 500)], conversas);
+    // o2 (com os bixinhos dele, que o acompanham) solto sobre os bixinhos de o1.
+    const soltoPorCima = doisGrupos.map((no): NoDoCanvas => (no.id === "o2" ? { ...no, position: { x: 100, y: 650 } } : no));
+
+    const reacomodados = reacomodarBixinhos(soltoPorCima);
+
+    const o2 = reacomodados.find((no) => no.id === "o2");
+    expect(o2 === undefined ? true : algumPorCima(bixinhosNoCanvas(reacomodados, "o1"), [retanguloDe(o2)])).toBe(false);
+    expect(algumPorCima(bixinhosNoCanvas(reacomodados, "o1"), bixinhosNoCanvas(reacomodados, "o2"))).toBe(false);
+    const deO2 = soltoPorCima.filter((no) => no.parentId === "o2");
+    expect(reacomodados.filter((no) => no.parentId === "o2").every((no, indice) => no === deO2[indice])).toBe(true);
   });
 });
 

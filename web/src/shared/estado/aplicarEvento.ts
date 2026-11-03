@@ -59,14 +59,18 @@ export interface TurnoNaTela {
   configuracao: DadosDaConfiguracao;
   /** Em "planejamento" (Plan Mode), a resposta é um plano à espera de decisão. */
   modo: ModoDoTurno;
-  /** Nulo fora do planejamento e enquanto o plano não fica pronto. */
+  /**
+   * Nulo enquanto não há plano entregue. Além do Plan Mode, um pedido de
+   * execução também pode terminar com um plano: o Orquestrador o propõe antes
+   * de uma mudança grande.
+   */
   decisaoDoPlano: DecisaoDoPlano | null;
   textosDoOrquestrador: string[];
   resposta: string | null;
   motivoDaFalha: string | null;
   uso: UsoDoTurno | null;
   subagentes: SubagenteNaTela[];
-  /** Ferramentas que o Orquestrador usou ele mesmo, em vez de delegar. */
+  /** Ferramentas que o Orquestrador usou ele mesmo, sem Subagente (leituras, checagens, comandos curtos). */
   ferramentasDiretas: AcaoRegistrada[];
   permissoesNegadas: AcaoRegistrada[];
   log: LinhaDoLog[];
@@ -76,9 +80,11 @@ export interface EstadoDaConversa {
   ultimaSequencia: number;
   turnos: TurnoNaTela[];
   cota: JanelaDaCota[] | null;
+  /** Quando o usuário começou a conversa atual (/clear); nulo enquanto é a primeira. */
+  conversaIniciadaEm: string | null;
 }
 
-export const ESTADO_INICIAL: EstadoDaConversa = { ultimaSequencia: 0, turnos: [], cota: null };
+export const ESTADO_INICIAL: EstadoDaConversa = { ultimaSequencia: 0, turnos: [], cota: null, conversaIniciadaEm: null };
 
 type AlteracaoDeTurno = (turno: TurnoNaTela) => TurnoNaTela;
 
@@ -107,6 +113,34 @@ function encerrar(turno: TurnoNaTela, situacao: SituacaoDoTurno, em: string): Tu
 function primeiraLinha(texto: string, limite = 110): string {
   const linha = texto.trim().split("\n")[0] ?? "";
   return linha.length > limite ? `${linha.slice(0, limite)}…` : linha;
+}
+
+/**
+ * O turno terminou com um plano à espera de decisão? O servidor informa —
+ * inclusive quando, num pedido de execução, o Orquestrador propôs um plano
+ * antes de alterar. Eventos gravados antes do campo seguem a regra antiga: só
+ * o Plan Mode entrega plano.
+ */
+function ficouComPlanoPendente(turno: TurnoNaTela, planoPendente: boolean | undefined): boolean {
+  return planoPendente ?? turno.modo === "planejamento";
+}
+
+/** O que o Orquestrador faz com cada ferramenta, no gerúndio, para o terminal. */
+const VERBOS_DAS_FERRAMENTAS: Readonly<Record<string, string>> = {
+  Read: "lendo",
+  Grep: "buscando",
+  Glob: "listando",
+  PowerShell: "executando",
+  Bash: "executando",
+  WebFetch: "abrindo",
+  WebSearch: "pesquisando",
+};
+
+/** Ex.: "lendo src/app.ts", "executando npm test", "usando TodoWrite". */
+function atividadeDoOrquestrador(ferramenta: string, detalhe: string): string {
+  const verbo = VERBOS_DAS_FERRAMENTAS[ferramenta] ?? `usando ${ferramenta}`;
+  const alvo = primeiraLinha(detalhe);
+  return alvo === "" ? verbo : `${verbo} ${alvo}`;
 }
 
 /** O que cada evento muda no turno a que pertence. */
@@ -190,7 +224,7 @@ function alteracaoDoTurno(evento: EventoRegistrado): AlteracaoDeTurno | null {
         resposta: evento.resposta,
         uso: evento.uso,
         // O plano entregue fica esperando o usuário aprovar ou descartar.
-        decisaoDoPlano: turno.modo === "planejamento" ? "pendente" : turno.decisaoDoPlano,
+        decisaoDoPlano: ficouComPlanoPendente(turno, evento.planoPendente) ? "pendente" : turno.decisaoDoPlano,
         // A resposta final também chega como último texto do orquestrador;
         // sem este filtro ela apareceria duas vezes.
         textosDoOrquestrador: turno.textosDoOrquestrador.filter((texto) => texto.trim() !== evento.resposta.trim()),
@@ -217,10 +251,11 @@ function alteracaoDoTurno(evento: EventoRegistrado): AlteracaoDeTurno | null {
 }
 
 /**
- * A linha que o evento deixa no terminal do turno. Eventos sem interesse
- * para quem acompanha (textos parciais, cota) não deixam linha.
+ * A linha que o evento deixa no terminal do turno (`turno`, antes do evento).
+ * Eventos sem interesse para quem acompanha (textos parciais, cota) não
+ * deixam linha.
  */
-export function linhaDoLog(evento: EventoRegistrado): Omit<LinhaDoLog, "sequencia" | "em"> | null {
+export function linhaDoLog(evento: EventoRegistrado, turno: TurnoNaTela): Omit<LinhaDoLog, "sequencia" | "em"> | null {
   switch (evento.tipo) {
     case "turno_iniciado": {
       const { modeloDoOrquestrador, modeloDosSubagentes, quantidadeDeSubagentes } = evento.configuracao;
@@ -237,8 +272,14 @@ export function linhaDoLog(evento: EventoRegistrado): Omit<LinhaDoLog, "sequenci
       return { origem: "orquestrador", tipo: "sistema", texto: "sessão do claude code conectada" };
     case "texto_do_orquestrador":
       return { origem: "orquestrador", tipo: "texto", texto: primeiraLinha(evento.texto) };
+    // Atividade normal: o Orquestrador pode ler e rodar comandos curtos sozinho.
+    // Como as ações dos Subagentes, some do histórico quando o pedido termina.
     case "ferramenta_do_orquestrador":
-      return { origem: "orquestrador", tipo: "erro", texto: `usou ${evento.ferramenta} sem delegar · ${evento.detalhe}` };
+      return {
+        origem: "orquestrador",
+        tipo: "ferramenta",
+        texto: atividadeDoOrquestrador(evento.ferramenta, evento.detalhe),
+      };
     case "subagente_iniciado":
       return {
         origem: "orquestrador",
@@ -259,12 +300,16 @@ export function linhaDoLog(evento: EventoRegistrado): Omit<LinhaDoLog, "sequenci
       };
     case "permissao_negada":
       return { origem: "orquestrador", tipo: "erro", texto: `bloqueado: ${evento.ferramenta} · ${evento.detalhe}` };
-    case "turno_concluido":
+    case "turno_concluido": {
+      const uso = `${formatarDuracao(evento.uso.duracaoMs)} · ${formatarTokens(evento.uso.tokensDeEntrada + evento.uso.tokensDeSaida)} tokens`;
+      // Pedido de execução em que o Orquestrador preferiu propor um plano antes de alterar.
+      const planoProposto = evento.planoPendente === true && turno.modo === "execucao";
       return {
         origem: "orquestrador",
         tipo: "fim",
-        texto: `síntese entregue · ${formatarDuracao(evento.uso.duracaoMs)} · ${formatarTokens(evento.uso.tokensDeEntrada + evento.uso.tokensDeSaida)} tokens`,
+        texto: planoProposto ? `plano proposto · aguardando aprovação · ${uso}` : `síntese entregue · ${uso}`,
       };
+    }
     case "turno_cancelado":
       return { origem: "orquestrador", tipo: "erro", texto: "turno cancelado pelo usuário" };
     case "turno_interrompido":
@@ -296,6 +341,9 @@ function novoTurno(evento: Extract<EventoRegistrado, { tipo: "turno_iniciado" }>
       permitirCommitEPush: evento.configuracao.permitirCommitEPush ?? false,
       esforcoDoOrquestrador: evento.configuracao.esforcoDoOrquestrador ?? "padrao",
       esforcoDosSubagentes: evento.configuracao.esforcoDosSubagentes ?? "padrao",
+      // Os anteriores às opções de trabalho direto e de plano automático ficam com o padrão (ligadas).
+      permitirTrabalhoDireto: evento.configuracao.permitirTrabalhoDireto ?? true,
+      proporPlanoEmPedidosGrandes: evento.configuracao.proporPlanoEmPedidosGrandes ?? true,
     },
     // Pedidos gravados antes do Plan Mode foram todos de execução.
     modo: evento.modo ?? "execucao",
@@ -328,13 +376,17 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
   if (evento.tipo === "configuracao_alterada") {
     return proximo;
   }
+  if (evento.tipo === "conversa_limpa") {
+    // Conversa nova (/clear): os pedidos anteriores ficam arquivados no servidor
+    // e saem da tela. A cota fica: é da assinatura, não da conversa.
+    return { ...proximo, turnos: [], conversaIniciadaEm: evento.em };
+  }
   if (evento.tipo === "uso_da_cota") {
     return { ...proximo, cota: evento.janelas };
   }
 
   const turnos = evento.tipo === "turno_iniciado" ? [...estado.turnos, novoTurno(evento)] : estado.turnos;
   const alteracao = alteracaoDoTurno(evento);
-  const linha = linhaDoLog(evento);
 
   return {
     ...proximo,
@@ -343,6 +395,7 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
         return turno;
       }
       const alterado = { ...(alteracao === null ? turno : alteracao(turno)), ultimaAtividadeEm: evento.em };
+      const linha = linhaDoLog(evento, turno);
       if (linha === null) {
         return alterado;
       }

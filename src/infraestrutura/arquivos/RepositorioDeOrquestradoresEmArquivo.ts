@@ -1,12 +1,16 @@
-import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { EventoDeOrquestracao, EventoRegistrado } from "../../orquestracao/EventoDeOrquestracao";
 import { DadosDoOrquestrador, Orquestrador } from "../../orquestracao/Orquestrador";
-import { RepositorioDeOrquestradores } from "../../orquestracao/RepositorioDeOrquestradores";
+import {
+  ConversaArquivada,
+  RepositorioDeOrquestradores,
+} from "../../orquestracao/RepositorioDeOrquestradores";
 
 const ARQUIVO_DO_ORQUESTRADOR = "orquestrador.json";
 const ARQUIVO_DE_EVENTOS = "eventos.jsonl";
+const PASTA_DO_HISTORICO = "historico";
 
 async function lerSeExistir(caminho: string): Promise<string | null> {
   try {
@@ -16,6 +20,16 @@ async function lerSeExistir(caminho: string): Promise<string | null> {
       return null;
     }
     throw erro;
+  }
+}
+
+async function copiarSeExistir(origem: string, destino: string): Promise<void> {
+  try {
+    await copyFile(origem, destino);
+  } catch (erro) {
+    if ((erro as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw erro;
+    }
   }
 }
 
@@ -30,10 +44,14 @@ async function gravarAtomicamente(caminho: string, conteudo: string): Promise<vo
  * Repositório em arquivos, para uso local de uma pessoa só:
  *
  * dados/orquestradores/<id>/orquestrador.json  — estado atual do agregado
- * dados/orquestradores/<id>/eventos.jsonl      — histórico, um evento por linha
+ * dados/orquestradores/<id>/eventos.jsonl      — histórico da conversa atual, um evento por linha
+ * dados/orquestradores/<id>/historico/conversa-<N>/{orquestrador.json,eventos.jsonl}
+ *                                              — conversas anteriores, arquivadas ao limpar a
+ *                                                conversa; <N> é a sequência do evento de limpeza
  *
  * Tudo é carregado na abertura e mantido em memória; o disco recebe as
- * gravações numa fila única, na ordem em que foram pedidas.
+ * gravações numa fila única, na ordem em que foram pedidas. O `historico`
+ * não é carregado: fica só no disco, para consulta.
  */
 export class RepositorioDeOrquestradoresEmArquivo implements RepositorioDeOrquestradores {
   private readonly orquestradores = new Map<string, Orquestrador>();
@@ -75,10 +93,46 @@ export class RepositorioDeOrquestradoresEmArquivo implements RepositorioDeOrques
     });
   }
 
+  /** Apaga a pasta inteira do Orquestrador, inclusive as conversas arquivadas em `historico`. */
   remover(id: string): Promise<void> {
     this.orquestradores.delete(id);
     this.eventos.delete(id);
     return this.enfileirar(() => rm(this.pastaDo(id), { recursive: true, force: true }));
+  }
+
+  /**
+   * A sequência do evento de limpeza (N+1) e o histórico em memória (só ele)
+   * mudam na hora. No disco, numa única tarefa da fila: copia os arquivos da
+   * conversa atual para `historico/conversa-<N+1>/` e só então troca, de forma
+   * atômica, o `orquestrador.json` e o `eventos.jsonl` pelos da conversa nova.
+   * Copiar em vez de mover garante que o `eventos.jsonl` nunca some antes de o
+   * novo estar gravado; uma queda no meio deixa no máximo uma cópia a mais.
+   */
+  arquivarConversa(orquestrador: Orquestrador, evento: EventoDeOrquestracao): ConversaArquivada {
+    const id = orquestrador.id;
+    const anterior = this.eventos.get(id) ?? [];
+    const registrado: EventoRegistrado = {
+      ...evento,
+      sequencia: (anterior.at(-1)?.sequencia ?? 0) + 1,
+      em: new Date().toISOString(),
+    };
+    this.orquestradores.set(id, orquestrador);
+    this.eventos.set(id, [registrado]);
+
+    const estado = JSON.stringify(orquestrador.paraDados(), null, 2);
+    const linha = `${JSON.stringify(registrado)}\n`;
+    const pasta = this.pastaDo(id);
+    // Só dígitos e hífen no nome: vale em qualquer sistema de arquivos.
+    const arquivada = path.join(pasta, PASTA_DO_HISTORICO, `conversa-${registrado.sequencia}`);
+
+    const gravacao = this.enfileirar(async () => {
+      await mkdir(arquivada, { recursive: true });
+      await copiarSeExistir(path.join(pasta, ARQUIVO_DE_EVENTOS), path.join(arquivada, ARQUIVO_DE_EVENTOS));
+      await copiarSeExistir(path.join(pasta, ARQUIVO_DO_ORQUESTRADOR), path.join(arquivada, ARQUIVO_DO_ORQUESTRADOR));
+      await gravarAtomicamente(path.join(pasta, ARQUIVO_DO_ORQUESTRADOR), estado);
+      await gravarAtomicamente(path.join(pasta, ARQUIVO_DE_EVENTOS), linha);
+    });
+    return { registrado, gravacao };
   }
 
   anexarEvento(orquestradorId: string, evento: EventoDeOrquestracao): EventoRegistrado {
@@ -123,7 +177,11 @@ export class RepositorioDeOrquestradoresEmArquivo implements RepositorioDeOrques
     return path.join(this.pasta, id);
   }
 
-  /** Um orquestrador com arquivo corrompido é pulado, para não impedir que os outros abram. */
+  /**
+   * Um orquestrador com arquivo corrompido é pulado, para não impedir que os
+   * outros abram. Lê só os dois arquivos da conversa atual: a subpasta
+   * `historico` (conversas arquivadas) é ignorada.
+   */
   private async carregar(id: string): Promise<void> {
     try {
       const estado = await lerSeExistir(path.join(this.pastaDo(id), ARQUIVO_DO_ORQUESTRADOR));

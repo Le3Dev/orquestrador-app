@@ -19,6 +19,8 @@ function orquestrador(id: string, situacao: ResumoDoOrquestrador["situacao"] = "
       quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
       nivelDePermissao: "leitura",
       permitirCommitEPush: false,
+      permitirTrabalhoDireto: true,
+      proporPlanoEmPedidosGrandes: true,
     },
     criadoEm: "2026-10-30T10:00:00Z",
     totalDeTurnos: 0,

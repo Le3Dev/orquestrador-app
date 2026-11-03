@@ -32,7 +32,12 @@ function objetos(origem: Objeto, campo: string): Objeto[] {
   return Array.isArray(valor) ? valor.filter(ehObjeto) : [];
 }
 
-/** Ferramentas com que o Orquestrador lança Subagentes; usá-las é o trabalho dele. */
+/**
+ * Ferramentas com que o Orquestrador lança Subagentes: viram eventos de
+ * Subagente. As demais (ler, buscar, rodar um comando curto) também são
+ * atividade normal dele — o trivial que ele faz sem delegar — e viram
+ * `ferramenta_do_orquestrador`.
+ */
 const FERRAMENTAS_DE_SUBAGENTE = new Set(["Agent", "Task"]);
 
 /** Bloco que o Claude Code acrescenta ao resultado de um subagente; não é texto do subagente. */

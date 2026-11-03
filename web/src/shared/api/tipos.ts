@@ -27,14 +27,27 @@ export interface DadosDaConfiguracao {
   nivelDePermissao: NivelDePermissao;
   /** Libera `git commit`/`git push` só quando o usuário pede na mensagem. Desligado por padrão. */
   permitirCommitEPush: boolean;
+  /**
+   * O Orquestrador faz o trivial sozinho (leituras rápidas, uma checagem, um
+   * comando curto), sem Subagente; alterações continuam delegadas. Ligado por padrão.
+   */
+  permitirTrabalhoDireto: boolean;
+  /** Em pedidos grandes, o Orquestrador responde com um plano para aprovar antes de alterar. Ligado por padrão. */
+  proporPlanoEmPedidosGrandes: boolean;
 }
 
 /** Campos que faltam nos eventos gravados antes de existirem. */
-type CamposPosterioresDaConfiguracao = "permitirCommitEPush" | "esforcoDoOrquestrador" | "esforcoDosSubagentes";
+type CamposPosterioresDaConfiguracao =
+  | "permitirCommitEPush"
+  | "esforcoDoOrquestrador"
+  | "esforcoDosSubagentes"
+  | "permitirTrabalhoDireto"
+  | "proporPlanoEmPedidosGrandes";
 
 /**
  * A configuração como os eventos a gravaram: os anteriores à opção de commit e
- * push e à escolha do esforço não têm esses campos.
+ * push, à escolha do esforço e às opções de trabalho direto e de plano
+ * automático não têm esses campos.
  */
 export type DadosDaConfiguracaoGravada = Omit<DadosDaConfiguracao, CamposPosterioresDaConfiguracao> &
   Partial<Pick<DadosDaConfiguracao, CamposPosterioresDaConfiguracao>>;
@@ -172,16 +185,25 @@ type EventoDeTurno =
       anexos?: DadosDoAnexo[];
       modo?: ModoDoTurno;
     }
-  | { tipo: "turno_concluido"; resposta: string; uso: UsoDoTurno }
+  // `planoPendente`: o turno terminou com um plano à espera de decisão — no Plan Mode ou num pedido
+  // de execução em que o Orquestrador propôs um plano antes de alterar. Falta nos eventos gravados antes.
+  | { tipo: "turno_concluido"; resposta: string; uso: UsoDoTurno; planoPendente?: boolean }
   | { tipo: "turno_cancelado" }
   | { tipo: "turno_falhou"; motivo: string }
   | { tipo: "turno_interrompido" }
-  // Decisão sobre o plano de um turno de planejamento; ao aprovar, segue o `turno_iniciado` da execução.
+  // Decisão sobre o plano pendente; ao aprovar, segue o `turno_iniciado` da execução.
   | { tipo: "plano_aprovado" }
   | { tipo: "plano_descartado" };
 
 export type EventoDeOrquestracao =
   | (EventoDeTurno & { turnoId: string })
-  | { tipo: "configuracao_alterada"; configuracao: DadosDaConfiguracaoGravada };
+  | { tipo: "configuracao_alterada"; configuracao: DadosDaConfiguracaoGravada }
+  // O usuário começou uma conversa nova (/clear): os pedidos anteriores ficam arquivados no servidor.
+  | {
+      tipo: "conversa_limpa";
+      turnosAnteriores: number;
+      planoDescartado: boolean;
+      worktreeComAlteracoes: boolean;
+    };
 
 export type EventoRegistrado = EventoDeOrquestracao & { sequencia: number; em: string };

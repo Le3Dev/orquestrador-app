@@ -59,17 +59,20 @@ export function faseDoTurno(turno: TurnoNaTela): SituacaoDaFase {
             : "Sintetizando a resposta…";
       return { atual, parado: false, descricao, direto: false };
     }
-    case "concluido":
+    case "concluido": {
+      // Plano também sai de um pedido de execução, quando o Orquestrador o propõe antes de uma mudança grande.
+      const entregouPlano = planejamento || turno.decisaoDoPlano !== null;
       return {
         atual: null,
         parado: false,
-        descricao: planejamento
+        descricao: entregouPlano
           ? "Plano entregue"
           : total === 0
             ? "Respondeu diretamente"
             : `Concluído com ${total} ${plural}`,
         direto: total === 0,
       };
+    }
     case "cancelado":
       return { atual: faseOndeParou(turno), parado: true, descricao: "Cancelado", direto: false };
     case "falhou":

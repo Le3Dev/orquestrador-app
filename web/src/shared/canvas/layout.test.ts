@@ -4,12 +4,17 @@ import {
   interpretarLayout,
   lerBixinhosLimpos,
   lerLayout,
+  MARGEM_DOS_BIXINHOS,
   organizarComNotas,
   organizarEmGrade,
+  type Ponto,
   posicaoParaNovoTerminal,
   posicoesDosBixinhos,
+  posicoesLivresDosBixinhos,
+  type Retangulo,
   salvarBixinhosLimpos,
   salvarLayout,
+  sobrepoe,
   TAMANHO_DO_BIXINHO,
 } from "./layout";
 import {
@@ -42,6 +47,98 @@ describe("posicoesDosBixinhos", () => {
     // A fileira de cinco fica centralizada no meio do terminal.
     const centro = ((primeiraFileira[0]?.x ?? 0) + (primeiraFileira[4]?.x ?? 0) + TAMANHO_DO_BIXINHO.largura) / 2;
     expect(centro).toBeCloseTo(300);
+  });
+});
+
+describe("posicoesLivresDosBixinhos", () => {
+  // Na origem: as posições relativas ao terminal já são as absolutas.
+  const terminal: Retangulo = { x: 0, y: 0, largura: 600, altura: 500 };
+  const padrao = posicoesDosBixinhos(3, terminal.largura, terminal.altura);
+
+  function bixinhosEm(posicoes: readonly Ponto[]): Retangulo[] {
+    return posicoes.map((posicao) => ({ ...posicao, ...TAMANHO_DO_BIXINHO }));
+  }
+
+  function livres(posicoes: readonly Ponto[], obstaculos: readonly Retangulo[]): boolean {
+    return bixinhosEm(posicoes).every((bixinho) => obstaculos.every((obstaculo) => !sobrepoe(bixinho, obstaculo)));
+  }
+
+  it("sem obstáculos, ou sem conflito, é exatamente o padrão abaixo do terminal", () => {
+    expect(posicoesLivresDosBixinhos(7, terminal, [])).toEqual(posicoesDosBixinhos(7, 600, 500));
+    expect(posicoesLivresDosBixinhos(7, terminal, [{ x: 5000, y: 5000, largura: 600, altura: 500 }])).toEqual(
+      posicoesDosBixinhos(7, 600, 500),
+    );
+  });
+
+  it("com um terminal logo abaixo, vai para a direita, no mesmo arranjo", () => {
+    const abaixo: Retangulo = { x: 0, y: 600, largura: 600, altura: 500 };
+
+    const posicoes = posicoesLivresDosBixinhos(3, terminal, [abaixo]);
+
+    expect(livres(posicoes, [abaixo, terminal])).toBe(true);
+    expect(Math.min(...posicoes.map((posicao) => posicao.x))).toBeGreaterThanOrEqual(terminal.largura);
+    // O mesmo leque: só deslocado.
+    const deslocamento = { x: (posicoes[0]?.x ?? 0) - (padrao[0]?.x ?? 0), y: (posicoes[0]?.y ?? 0) - (padrao[0]?.y ?? 0) };
+    expect(posicoes).toEqual(padrao.map((posicao) => ({ x: posicao.x + deslocamento.x, y: posicao.y + deslocamento.y })));
+  });
+
+  it("com a direita e embaixo ocupados, vai para a esquerda", () => {
+    const obstaculos: Retangulo[] = [
+      { x: 0, y: 600, largura: 600, altura: 500 },
+      { x: 650, y: -200, largura: 600, altura: 1200 },
+    ];
+
+    const posicoes = posicoesLivresDosBixinhos(3, terminal, obstaculos);
+
+    expect(livres(posicoes, [...obstaculos, terminal])).toBe(true);
+    expect(Math.max(...posicoes.map((posicao) => posicao.x + TAMANHO_DO_BIXINHO.largura))).toBeLessThanOrEqual(0);
+  });
+
+  it("com embaixo e os dois lados ocupados, vai para cima", () => {
+    const obstaculos: Retangulo[] = [
+      { x: 0, y: 600, largura: 600, altura: 500 },
+      { x: 650, y: -200, largura: 600, altura: 1200 },
+      { x: -1250, y: -200, largura: 1200, altura: 1200 },
+    ];
+
+    const posicoes = posicoesLivresDosBixinhos(3, terminal, obstaculos);
+
+    expect(livres(posicoes, [...obstaculos, terminal])).toBe(true);
+    expect(Math.max(...posicoes.map((posicao) => posicao.y + TAMANHO_DO_BIXINHO.altura))).toBeLessThanOrEqual(0);
+  });
+
+  it("com tudo ocupado ao redor, desce até ficar livre, centralizado abaixo do terminal", () => {
+    const obstaculos: Retangulo[] = [
+      { x: 0, y: 600, largura: 600, altura: 500 },
+      { x: 650, y: -1000, largura: 600, altura: 2000 },
+      { x: -1250, y: -1000, largura: 1200, altura: 2000 },
+      { x: -100, y: -1000, largura: 800, altura: 900 },
+    ];
+
+    const posicoes = posicoesLivresDosBixinhos(3, terminal, obstaculos);
+
+    expect(livres(posicoes, [...obstaculos, terminal])).toBe(true);
+    expect(posicoes.map((posicao) => posicao.x)).toEqual(padrao.map((posicao) => posicao.x));
+    expect(Math.min(...posicoes.map((posicao) => posicao.y))).toBe(600 + 500 + MARGEM_DOS_BIXINHOS);
+  });
+
+  it("respeita a folga: um obstáculo a menos da margem do grupo já o tira do padrão", () => {
+    const baseDoPadrao = Math.max(...padrao.map((posicao) => posicao.y)) + TAMANHO_DO_BIXINHO.altura;
+    const colado: Retangulo = { x: 0, y: baseDoPadrao + MARGEM_DOS_BIXINHOS - 1, largura: 600, altura: 100 };
+    const naMargem: Retangulo = { ...colado, y: baseDoPadrao + MARGEM_DOS_BIXINHOS };
+
+    expect(posicoesLivresDosBixinhos(3, terminal, [colado])).not.toEqual(padrao);
+    expect(posicoesLivresDosBixinhos(3, terminal, [naMargem])).toEqual(padrao);
+  });
+
+  it("funciona com o terminal em qualquer lugar do canvas (posições sempre relativas a ele)", () => {
+    const longe: Retangulo = { x: 3000, y: -2000, largura: 600, altura: 500 };
+    const abaixo: Retangulo = { x: 3000, y: -1400, largura: 600, altura: 500 };
+
+    const naOrigem = posicoesLivresDosBixinhos(3, terminal, [{ x: 0, y: 600, largura: 600, altura: 500 }]);
+
+    expect(posicoesLivresDosBixinhos(3, longe, [abaixo])).toEqual(naOrigem);
+    expect(naOrigem).not.toEqual(padrao);
   });
 });
 

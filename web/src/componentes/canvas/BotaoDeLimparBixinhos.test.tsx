@@ -14,6 +14,8 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "fixa", limite: 2 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
+  permitirTrabalhoDireto: true,
+  proporPlanoEmPedidosGrandes: true,
 };
 
 function conversa(eventos: EventoDeOrquestracao[]): EstadoDaConversa {

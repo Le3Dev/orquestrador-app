@@ -107,6 +107,10 @@ export const api = {
   descartarPlano: (id: string) =>
     requisitar<null>(`/orquestradores/${encodeURIComponent(id)}/plano/descartar`, { method: "POST" }),
 
+  /** Começa uma conversa nova (/clear): a atual fica arquivada. Recusado (409) durante um pedido. */
+  limparConversa: (id: string) =>
+    requisitar<ResumoDoOrquestrador>(`/orquestradores/${encodeURIComponent(id)}/conversa/limpar`, { method: "POST" }),
+
   cancelar: (id: string) =>
     requisitar<{ cancelando: boolean }>(`/orquestradores/${encodeURIComponent(id)}/cancelar`, { method: "POST" }),
 
