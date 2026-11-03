@@ -16,6 +16,10 @@ Você cria **Orquestradores** — um por projeto, por exemplo — e conversa com
 
 O motor é o próprio **Claude Code em modo headless**, usando o login da sua assinatura — não precisa de API key.
 
+Há dois jeitos de usar:
+- **Navegador** (padrão de desenvolvimento): o servidor Express local sobe e você abre a tela em `http://localhost:3200` (ver *Como rodar*).
+- **Desktop (Electron):** uma janela única que sobe o mesmo servidor em segundo plano e carrega a tela dentro dela, sem abas nem menu nativo do navegador, com os controles de janela integrados ao cabeçalho (ver *Modo desktop (Electron)* e ADR-14). É também o formato de distribuição do produto: um instalador Windows com **ativação de licença** (ADR-15) vendido por uma **página de venda** estática (ADR-16 e `docs/plano-comercializacao.md`).
+
 ## Como rodar
 
 **Pré-requisitos:** Node 22+ e o Claude Code instalado e logado (`claude` funcionando no terminal).
@@ -59,6 +63,22 @@ npm start         # http://localhost:3200
 ```
 
 > **Não suba o servidor pedindo a uma sessão do Claude Code.** Lá ele roda em segundo plano, e o Claude Code encerra processos em segundo plano quando a memória do computador fica baixa. Foi o que derrubou três orquestradores ao mesmo tempo em 28/10. Use o `.cmd` ou um terminal próprio. Se o servidor cair mesmo assim, a tela mostra o aviso **Servidor desconectado** e reconecta sozinha quando ele voltar.
+
+**Modo desktop (Electron):** além do navegador, o app roda como uma **janela única** (ver ADR-14). Dê dois cliques em **`iniciar-desktop.cmd`**: na primeira vez ele instala as dependências e gera o build, e depois abre a janela do Electron, que sobe o servidor local em segundo plano (pelo mesmo vigia) e carrega a tela dentro de si. Fechar a janela desliga o servidor e cancela os pedidos em andamento; o histórico continua em `dados/`.
+
+O equivalente manual, com o build já pronto:
+
+```bash
+npm run desktop        # abre a janela do Electron (o main.js sobe o servidor)
+```
+
+Para gerar o **instalador Windows** (NSIS, via `electron-builder`), que inclui a **ativação de licença** (ver ADR-15):
+
+```bash
+npm run dist:win       # build + electron-builder --win → dist_electron/
+```
+
+(`npm run desktop:build` é só o `npm run build`, útil antes do `npm run desktop`.) O código do app desktop fica em `electron/` (`main.js`, `preload.js`, `licenca.js`, `config.js`, `ativacao.html`); os controles próprios de janela (minimizar/maximizar/fechar) e a região de arrasto estão no cabeçalho React (`web/src/componentes/canvas/ControlesDaJanela.tsx`). Antes de empacotar para vender, preencha os placeholders de `electron/config.js` (Lemon Squeezy; ver ADR-15) e da página de venda em `site/` (ver `site/README.md` e ADR-16).
 
 **Testes e verificações:**
 
@@ -166,6 +186,16 @@ src/
                                memória e processos do Claude
   controllers/                 REST + SSE, validação (zod), erros → HTTP
                                (orquestradoresRoutes.ts, notasRoutes.ts)
+electron/                      app desktop (ver ADR-14 e ADR-15): main.js (startup,
+                               sobe o servidor pelo vigia, janela e IPC), preload.js
+                               (ponte dos controles de janela e da licença), licenca.js
+                               (ativação Lemon Squeezy + fingerprint + grace period),
+                               config.js (placeholders), ativacao.html (tela de ativação)
+site/                          página de venda estática do MVP (ver ADR-16): index.html,
+                               sucesso.html, css/, js/ e README.md (checkout + download
+                               pelo Lemon Squeezy; sem backend)
+docs/
+  plano-comercializacao.md     plano completo de comercialização (desktop + licenciamento)
 web/src/
   paginas/CanvasDeOrquestradores.tsx   canvas (React Flow): nós, linhas, painéis, layout salvo
   componentes/canvas/                  NoTerminal (terminal do Orquestrador), NoRascunho (configuração),
@@ -384,6 +414,53 @@ flowchart TD
   - não há sincronização entre abas: vale o último salvamento, e outra aba só vê a mudança ao recarregar. Uma nota apagada em outra aba continua nesta até recarregar: editar dá *erro ao salvar* (`Nota não encontrada.`), e apagar só a tira do canvas;
   - o layout é por navegador: em outro navegador as notas aparecem, mas em posições novas;
   - as funções `rota` e `responderErro` foram duplicadas em `notasRoutes.ts` (já existem em `orquestradoresRoutes.ts`): candidatas a extração para um módulo comum dos controllers.
+
+**ADR-14 — App desktop com Electron (Opção A), reutilizando o servidor Express.**
+- *Contexto:*
+  - para vender o app como produto, a experiência precisa ser a de um programa de desktop (janela própria, sem abas nem menu File/Edit/View/Window do navegador), não a de uma aba aberta em `http://localhost:3200`;
+  - o servidor Express local e a SPA React já existem e funcionam (ADR-1 a ADR-8); reescrever tudo como app nativo seria desperdício;
+  - o `docs/plano-comercializacao.md` levantou duas opções: a Opção B (abrir o navegador em `--app=` no `.cmd`, zero código) e a Opção A (empacotar com Electron, produto desktop real).
+- *Decisão:*
+  - empacotar como **Electron** (Opção A), numa pasta `electron/` à parte do domínio. O `main.js` **reutiliza o servidor**: sobe `scripts/manter-no-ar.cjs` (o mesmo vigia do modo navegador, ADR em *Como rodar*) em segundo plano, espera `GET /api/saude` responder e faz `loadURL('http://localhost:3200')`. Fechar a janela encerra o servidor (`taskkill /T /F` no Windows);
+  - a janela usa **`titleBarStyle: 'hidden'` + `titleBarOverlay`** (cor do tema, `#141413`/`#faf9f5`) em vez de `frame: false` puro, porque no Windows o `titleBarOverlay` preserva o snap e o arraste nativos e ainda deixa o cabeçalho integrado ao tema. O menu nativo é removido (`Menu.setApplicationMenu(null)`), e o cabeçalho React ganha a região de arrasto (`-webkit-app-region: drag`) e os controles próprios de janela (minimizar/maximizar/fechar) via IPC (`ControlesDaJanela.tsx`, `preload.js`);
+  - **instância única** (`requestSingleInstanceLock`): um segundo lançamento foca a janela já aberta. Links externos abrem no navegador do sistema (`setWindowOpenHandler` → `shell.openExternal`);
+  - empacotamento com **`electron-builder`** (`npm run dist:win`, alvo NSIS x64, instalador por usuário com escolha de pasta); o `build` do `package.json` empacota `electron/`, `dist/`, `web/dist/` e o vigia.
+- *Consequências:*
+  - uma base de código serve aos dois modos: o navegador para desenvolvimento, o desktop para distribuir;
+  - a trava técnica das permissões (ADR-3) e todo o domínio continuam iguais — o Electron é só a casca da janela;
+  - como o servidor sobe em segundo plano dentro do app, vale o mesmo cuidado de memória dos outros modos; se o servidor não responder a tempo, a janela mostra uma mensagem de erro em vez da tela;
+  - a Opção B foi descartada para o produto final (perde a cara de app nativo), mas segue válida como atalho de validação rápida.
+
+**ADR-15 — Licenciamento: ativação online (Lemon Squeezy) + fingerprint + grace period, não blindagem do binário.**
+- *Contexto:*
+  - um `.exe` distribuído é código client-side: é **impossível impedir 100%** a cópia ou a engenharia reversa (registrado em `docs/plano-comercializacao.md`). Tentar "blindar" o binário dá trabalho e não resolve;
+  - o app roda com o login da assinatura do próprio usuário (ADR-1), então o valor real está em vincular cada licença a uma máquina e revalidar online, não em ofuscar código.
+- *Decisão:*
+  - usar a **API pública de licenças do Lemon Squeezy** (endpoints `activate`/`validate`/`deactivate`), que se autentica apenas com a `license_key` que o cliente digita: **sem backend próprio e sem API key secreta** — nada secreto fica em `electron/config.js`;
+  - **ativação presa à máquina:** no startup, `electron/licenca.js` calcula um **fingerprint de hardware** (hash SHA-256 de hostname + primeiro MAC físico + MachineGuid do registro no Windows) e o envia como `instance_name`. Com o máximo de ativações por chave definido como **1** no painel do Lemon Squeezy, cada licença vale para uma máquina (migrar exige desativar antes);
+  - **grace period offline** de 14 dias (`gracePeriodDays`): depois de ativar, o app revalida online e continua abrindo offline por esse prazo a partir da última validação bem-sucedida; passado o prazo sem conseguir validar, bloqueia. O estado fica num `licenca.json` em `app.getPath('userData')`;
+  - sem licença válida (nem online nem dentro do grace), o `main.js` abre a **tela de ativação** (`ativacao.html`) antes do app; ao ativar com sucesso, troca para a janela principal;
+  - conferência opcional de loja/produto (`expectedStoreId`/`expectedProductId`): preenchidos, a ativação exige que a chave pertença àquela loja/produto; nulos, qualquer chave válida é aceita.
+- *Consequências:*
+  - zero infraestrutura de licenciamento própria no MVP; o Lemon Squeezy é o Merchant of Record (resolve checkout, impostos e entrega);
+  - a ativação depende de rede no primeiro uso e nas revalidações; o grace period cobre quedas e uso offline curto;
+  - a proteção é dissuasória, não absoluta (coerente com a "verdade fundamental" do plano): quem quiser, contorna; o objetivo é que a via honesta seja a mais fácil;
+  - o fingerprint combina vários sinais estáveis de propósito, para não quebrar com a troca de um único componente; ainda assim, trocas grandes de hardware podem exigir reativação.
+
+**ADR-16 — Comercialização do MVP: Lemon Squeezy + landing estática, sem backend nem conta próprios.**
+- *Contexto:*
+  - o objetivo imediato é **validar a venda**, não construir uma plataforma. Montar backend de pagamento, contas de usuário, emissão de nota e entrega de arquivo adiaria o lançamento e traria custo e manutenção;
+  - o licenciamento (ADR-15) já dispensa backend, então a venda pode seguir a mesma linha.
+- *Decisão:*
+  - usar o **Lemon Squeezy** como provedor externo completo do MVP: checkout, impostos globais, e-mail com a **license key** e **download** do instalador. O app só consome a API pública de licenças (ADR-15);
+  - a divulgação é uma **página de venda estática** em `site/` (HTML + CSS + JS vanilla, sem build nem dependências), hospedável de graça (GitHub Pages, Netlify ou Vercel): `index.html` (landing) e `sucesso.html` (pós-compra com download e passo a passo de ativação). O fluxo é: a pessoa vê a página → paga no Lemon Squeezy → recebe a chave e baixa o instalador → ativa no app;
+  - os valores a preencher (URL do checkout, preço, link de download, contato, links legais) ficam como **placeholders** documentados em `site/README.md`; o tema espelha o do app (fundo `#141413`, acento `#d97757`);
+  - o plano completo, com alternativas (Stripe, Keygen, backend próprio) e os próximos passos além do MVP, fica em `docs/plano-comercializacao.md`.
+- *Consequências:*
+  - lançamento rápido e barato, sem servidor para manter nem dados de pagamento sob nossa guarda;
+  - fica-se preso às regras e à taxa (~5%) do Lemon Squeezy; trocar de provedor depois significa refazer a integração da ativação (a API pública de licenças é específica dele);
+  - o MVP não tem área do cliente nem revogação sofisticada: o que o painel do Lemon Squeezy oferece (gerar, desativar, limitar ativações) é o teto por enquanto;
+  - a evolução natural (backend leve + banco de licenças, atualização assinada) está descrita no plano e pode entrar depois sem mudar o domínio do app.
 
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
