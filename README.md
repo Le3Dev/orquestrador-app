@@ -105,6 +105,13 @@ Casos de teste do **`/clear`** (ver ADR-16):
 - **Rota:** 200 com `totalDeTurnos: 0`; 409 durante um pedido; 404 sem orquestrador; sem conversa → 200 sem gravar nada.
 - **Tela:** `/clear` (maiúsculas e espaços tolerados) não vira pedido; "/clear algo" vira; Tab completa "/cl"; durante um pedido aparece a dica de indisponível; imagens e Plan Mode continuam no prompt; o separador "— conversa nova iniciada às HH:MM —" aparece; *Nova conversa* no *⚙* pede confirmação e fica desabilitado durante um pedido.
 
+Casos de teste das **instruções personalizadas** (ver ADR-17):
+- **Montagem (`InstrucoesPersonalizadas`):** vazio ou só espaços → nenhuma linha no bloco (mensagem idêntica à de antes); só o padrão global → cabeçalho "padrão do usuário"; só as do Orquestrador → "deste orquestrador"; as duas → valem as do Orquestrador, sem somar; texto longo (4.000 passa, 4.001 é recusado com a contagem); quebras de linha, `{{x}}`, `$&`, crases, aspas e emoji chegam intactos; tags `</configuracao-do-pedido>` e `</instrucoes-do-usuario>` escritas no texto são desarmadas (`‹`); apagar as instruções no meio da conversa manda a linha de revogação; o prompt de sistema e o argv nunca levam o texto.
+- **Persistência:** o campo reabre igual por Orquestrador, sem misturar; orquestradores salvos antes do campo valem `""`; `preferencias.json` ausente vale vazio e ilegível é renomeado para `preferencias.ilegivel.json`.
+- **Serviço:** editar vale no pedido seguinte; um pedido em andamento segue com as instruções com que começou; não vazam entre Orquestradores; `/clear` zera a revogação.
+- **Rotas:** POST/PATCH aceitam e devolvem o campo; acima do limite → 400; `GET/PATCH /preferencias`; `POST /previa-do-prompt` mostra o bloco e recusa pasta fora da raiz.
+- **Tela:** contador e aviso de limite; prévia do prompt final; painel *Preferências* (Salvar só com mudança, Cancelar descarta); chip *instruções* no terminal; resumo com *instruções próprias*.
+
 ## Tecnologias
 
 - **Node 22+ / TypeScript 6** (estrito, `exactOptionalPropertyTypes`), **Express 5**, **zod 4** (validação da API), **vitest**.
@@ -198,7 +205,7 @@ web/src/
 
 **Bloco de notas** (contexto `notas`, ver ADR-13): o conteúdo de cada nota (título e texto) fica no servidor, um arquivo por nota em `<PASTA_DADOS>/notas/<id>.json` (padrão `dados/notas/`). Posição, tamanho e se está minimizada ficam no layout do navegador, como os terminais (ver ADR-8). O contexto não conversa com a orquestração: tem entidade, serviço, porta e rotas próprias.
 
-**Pasta de dados** (`<PASTA_DADOS>`, padrão `dados/`; ver ADR-5, ADR-13 e ADR-16):
+**Pasta de dados** (`<PASTA_DADOS>`, padrão `dados/`; ver ADR-5, ADR-13, ADR-16 e ADR-17):
 
 ```
 dados/
@@ -211,6 +218,7 @@ dados/
         eventos.jsonl
   anexos/<id>/                 imagens enviadas nos pedidos
   notas/<id>.json              uma nota por arquivo
+  preferencias.json            preferências globais (hoje, as instruções padrão; ver ADR-17)
   worktrees/<8 caracteres>/    worktrees git dos Orquestradores
 ```
 
@@ -222,6 +230,7 @@ dados/
    - **Pedidos grandes** (ver ADR-15): com **Propor plano antes de mudanças grandes** ligada (padrão), num turno de `execucao`, o bloco manda o Orquestrador medir o pedido. Grande (mais de cerca de 3 arquivos, contratos, dados ou arquitetura, ambiguidade relevante) → não executa, investiga só lendo, responde com um PLANO e termina com a linha `<plano-para-aprovacao/>`. Pequeno, ou mensagem que começa com "Plano aprovado." → executa direto.
    - Em `planejamento`, o Orquestrador e o `executor` recebem só as ferramentas de leitura, qualquer que seja o nível configurado, e o bloco pede um **plano** em vez da execução (ver ADR-9).
    - Com **Permitir commit e push quando eu pedir** ligada, num turno de `execucao`, o bloco libera commit e push só quando o usuário pedir explicitamente naquela mensagem, e o `claude -p` sai sem o bloqueio de `git commit`/`git push` (ver ADR-10). Desligada, ou em `planejamento`, continua tudo proibido.
+   - **Instruções personalizadas** (ver ADR-17): se o Orquestrador tiver instruções próprias, ou, sem elas, houver instruções padrão nas *Preferências*, o bloco termina com elas dentro de `<instrucoes-do-usuario>`. Sem nenhuma, o bloco sai exatamente como antes.
    - **Esforço** (ver ADR-12): com esforço escolhido para o Orquestrador, o `claude -p` recebe `--effort <low|medium|high|xhigh|max>` logo depois do `--model`; com esforço escolhido para os Subagentes, a definição do `executor` no `agentes.json` ganha o campo `"effort"`. Em `"padrao"` nada disso é enviado. Se algum dos dois papéis tiver esforço escolhido, a variável `CLAUDE_CODE_EFFORT_LEVEL` herdada do servidor é removida do ambiente do processo, porque ela venceria a escolha.
 4. Cada linha `stream-json` vira evento do domínio (`subagente_iniciado`, `progresso_do_subagente`…), gravado em `eventos.jsonl` e publicado por SSE.
 5. No `result` final, o Turno é concluído com a resposta e o consumo. O servidor sempre tira da resposta o marcador `<plano-para-aprovacao/>` (`separarPropostaDePlano`). Num turno de `planejamento`, ou num de `execucao` em que o marcador veio e a opção de propor plano estava ligada no início do turno, a resposta é um plano, que fica **pendente** (`turno_concluido.planoPendente: true`; só o último turno pode ter plano pendente) até o usuário:
@@ -476,6 +485,24 @@ flowchart TD
   - o worktree não é tocado: as alterações da conversa anterior continuam lá, e a conversa nova parte delas sem saber de onde vieram. O evento avisa (`worktreeComAlteracoes`), mas a tela ainda não mostra esse aviso nem o `planoDescartado`;
   - a cota exibida no terminal continua: é da assinatura, não da conversa.
 
+**ADR-17 — Instruções personalizadas no bloco do pedido, com padrão global.**
+- *Contexto:*
+  - o usuário quer dar regras próprias ao Orquestrador (tom, idioma, convenções do projeto) sem mexer no código, ao criar e depois;
+  - o lugar óbvio seria o prompt de sistema, mas o `--resume` ignora um prompt de sistema novo (ADR-2): editar as instruções não teria efeito na conversa em curso. Conferido no Claude Code: com a sessão retomada, a troca no `--append-system-prompt-file` não chega ao modelo.
+- *Decisão:*
+  - **campo opcional** `instrucoesPersonalizadas` na configuração do Orquestrador (criação e *⚙*), padrão `""`, até **4.000 caracteres** depois de normalizado (quebras `\r\n` viram `\n`, espaços no fim das linhas e linhas em branco repetidas saem, pontas aparadas);
+  - **padrão global** `instrucoesPadrao` em `dados/preferencias.json` (painel *Preferências* do canvas). Precedência: as do Orquestrador, se preenchidas, **substituem** o padrão; não somam;
+  - **onde entram:** no fim do bloco `<configuracao-do-pedido>` de cada mensagem, dentro de `<instrucoes-do-usuario>`, com um cabeçalho que diz a origem e que elas não ampliam as permissões nem liberam commit e push. São resolvidas no início do turno, como o resto da configuração (ver *Ciclo de um pedido*). O prompt de sistema e o `agentes.json` não mudam;
+  - **texto como dado:** as tags do bloco escritas no texto são desarmadas (`<` vira `‹`), para ele não fechar o bloco antes da hora. O texto nunca vai no argv;
+  - **só o Orquestrador** recebe: o `executor` segue com as instruções dele;
+  - **apagar no meio da conversa:** as instruções antigas continuam no histórico da sessão. O agregado guarda `instrucoesNaConversa`, e o próximo pedido sem instruções leva uma linha dizendo que as anteriores deixaram de valer. Quem nunca usou instruções não recebe essa linha; o `/clear` zera a marca;
+  - rotas `GET/PATCH /preferencias` e `POST /previa-do-prompt` (a prévia mostra o prompt de sistema e a mensagem que iriam, sem salvar nada). O resumo ganha `instrucoesAtivas` (`"orquestrador" | "padrao" | null`), que a tela mostra como o chip *instruções* no terminal.
+- *Consequências:*
+  - **custo:** o texto vai em **toda** mensagem e fica acumulado no histórico da sessão retomada; por isso o limite é bem menor que o de uma mensagem;
+  - **sem trava técnica:** seguir as instruções depende do modelo, como as demais regras do bloco. Uma instrução que contrarie as regras do app (ex.: "faça commit") não muda as ferramentas liberadas (ADR-3), e o cabeçalho diz isso ao modelo;
+  - **regras do usuário x regras do app:** o bloco vem antes do pedido e as instruções vêm por último no bloco. Em conflito com as regras do app, o cabeçalho manda seguir as duas, e as permissões continuam valendo;
+  - perfis de instruções reutilizáveis e variáveis (`{{pasta}}`) ficaram de fora desta versão.
+
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
 - `modelUsage` acumula a sessão, então o consumo do turno vem de `model_usage_since_last_result`;
@@ -500,9 +527,9 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | GET | `/saude` | — | `{ ok: true, iniciadoEm, memoria: { totalBytes, livreBytes, servidorBytes, agentesBytes, porOrquestrador } }`. A tela consulta a cada 3 s; um `iniciadoEm` diferente indica que o servidor reiniciou. A memória é medida a cada 5 s. |
 | GET | `/pastas` | — | `{ raiz, pastas: [{ nome, caminho }] }` |
 | GET | `/orquestradores` | — | `[ResumoDoOrquestrador]` |
-| POST | `/orquestradores` | `{ nome, pastaDeTrabalho, modeloDoOrquestrador, modeloDosSubagentes, quantidadeDeSubagentes: { modo: "fixa" \| "automatica", limite: 1–10 }, nivelDePermissao, permitirCommitEPush?: boolean, esforcoDoOrquestrador?, esforcoDosSubagentes?, permitirTrabalhoDireto?: boolean, proporPlanoEmPedidosGrandes?: boolean }` (mesmo esquema de configuração do PATCH; `permitirCommitEPush` ausente vale `false`; esforços ausentes valem `"padrao"`; `permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes` ausentes valem `true`) | 201 + orquestrador com `turnos` (400 se algum campo for inválido, ex.: `permitirCommitEPush` não booleano, esforço fora da lista: `Esforço do orquestrador inválido.` / `Esforço dos subagentes inválido.`, ou as opções novas não booleanas: `A opção "Deixar o orquestrador fazer o trivial sozinho" deve ser verdadeira ou falsa.` / `A opção "Propor plano antes de mudanças grandes" deve ser verdadeira ou falsa.`) |
+| POST | `/orquestradores` | `{ nome, pastaDeTrabalho, modeloDoOrquestrador, modeloDosSubagentes, quantidadeDeSubagentes: { modo: "fixa" \| "automatica", limite: 1–10 }, nivelDePermissao, permitirCommitEPush?: boolean, esforcoDoOrquestrador?, esforcoDosSubagentes?, permitirTrabalhoDireto?: boolean, proporPlanoEmPedidosGrandes?: boolean, instrucoesPersonalizadas?: string }` (mesmo esquema de configuração do PATCH; `permitirCommitEPush` ausente vale `false`; esforços ausentes valem `"padrao"`; `permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes` ausentes valem `true`; `instrucoesPersonalizadas` ausente vale `""`) | 201 + orquestrador com `turnos` (400 se algum campo for inválido, ex.: `permitirCommitEPush` não booleano, esforço fora da lista: `Esforço do orquestrador inválido.` / `Esforço dos subagentes inválido.`, ou as opções novas não booleanas: `A opção "Deixar o orquestrador fazer o trivial sozinho" deve ser verdadeira ou falsa.` / `A opção "Propor plano antes de mudanças grandes" deve ser verdadeira ou falsa.`) |
 | GET | `/orquestradores/:id` | — | orquestrador com `turnos` (resumo de cada Turno e seus Subagentes) |
-| PATCH | `/orquestradores/:id/configuracao` | qualquer subconjunto dos campos de configuração, incluindo `permitirCommitEPush?: boolean`, `esforcoDoOrquestrador?`, `esforcoDosSubagentes?`, `permitirTrabalhoDireto?: boolean` e `proporPlanoEmPedidosGrandes?: boolean` | 200 + resumo (vale a partir do próximo pedido; um pedido em andamento segue com a configuração com que começou; 400 se algum campo for inválido, com as mesmas mensagens do POST) |
+| PATCH | `/orquestradores/:id/configuracao` | qualquer subconjunto dos campos de configuração, incluindo `permitirCommitEPush?: boolean`, `esforcoDoOrquestrador?`, `esforcoDosSubagentes?`, `permitirTrabalhoDireto?: boolean`, `proporPlanoEmPedidosGrandes?: boolean` e `instrucoesPersonalizadas?: string` (`""` apaga) | 200 + resumo (vale a partir do próximo pedido; um pedido em andamento segue com a configuração com que começou; 400 se algum campo for inválido, com as mesmas mensagens do POST) |
 | POST | `/orquestradores/:id/mensagens` | `{ texto, imagens?: [{ nome, tipoDeMidia: image/png\|jpeg\|gif\|webp, base64 }], modo?: "execucao" \| "planejamento" }` (até 5 imagens de 5 MB; `modo` padrão `"execucao"`) | 202 `{ turnoId }` (400 se `modo` for inválido) |
 | POST | `/orquestradores/:id/plano/aprovar` | `{ observacoes?: string }` | 202 `{ turnoId }` do novo turno de execução (409 `sem_plano_pendente`) |
 | POST | `/orquestradores/:id/plano/descartar` | — | 204 (409 `sem_plano_pendente`) |
@@ -511,6 +538,9 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | POST | `/orquestradores/:id/cancelar` | — | 202 `{ cancelando: true }` |
 | DELETE | `/orquestradores/:id` | — | 204 (409 se houver pedido em andamento) |
 | GET | `/orquestradores/:id/eventos` | cabeçalho opcional `Last-Event-ID` ou `?desde=` (última sequência recebida) | `text/event-stream`: histórico desde a sequência informada + eventos novos |
+| GET | `/preferencias` | — | `{ instrucoesPadrao }` (`""` sem preferências gravadas; ver ADR-17) |
+| PATCH | `/preferencias` | `{ instrucoesPadrao?: string }` (`""` apaga) | 200 + `{ instrucoesPadrao }`. Vale a partir do próximo pedido de cada Orquestrador sem instruções próprias. 400 `As instruções padrão devem ter até 4000 caracteres (hoje têm N).` |
+| POST | `/previa-do-prompt` | `{ configuracao, pastaDeTrabalho?, modo?: "execucao" \| "planejamento" }` (`configuracao` no esquema do POST, sem nome nem pasta) | `{ instrucoesIniciais, mensagem, origemDasInstrucoes }`: o prompt de sistema da conversa e a mensagem de um pedido de exemplo, com o bloco e as instruções que valeriam. Não salva nada. 400 com pasta fora da raiz |
 | GET | `/notas` | — | 200 `[DadosDaNota]`, por `criadaEm` crescente |
 | POST | `/notas` | `{ titulo?: string, texto?: string }` (corpo vazio vale; ausentes: `"Nova nota"` e `""`) | 201 + `DadosDaNota` (400 com as mensagens abaixo) |
 | PATCH | `/notas/:id` | `{ titulo?: string, texto?: string }` (só o enviado muda) | 200 + `DadosDaNota`; `atualizadaEm` só muda se o conteúdo mudar. Com algum campo inválido, 400 e nada é gravado (404 `Nota não encontrada.`) |
@@ -523,6 +553,7 @@ Valores aceitos:
 - **`esforcoDoOrquestrador` e `esforcoDosSubagentes`:** `padrao`, `baixo`, `medio`, `alto`, `extra_alto` ou `maximo` (padrão `"padrao"`; orquestradores salvos antes da opção valem `"padrao"`). `"padrao"` não envia nada ao Claude Code: vale o `settings.json` do Claude Code da máquina ou, sem ele, o padrão do modelo. Os outros viram `low`, `medium`, `high`, `xhigh` e `max` (ver ADR-12).
 - **`permitirTrabalhoDireto`:** `true` ou `false` (padrão `true`; orquestradores salvos antes da opção valem `true`). Ligada, o Orquestrador faz o trivial sozinho e delega o resto; desligada, delega tudo. Em nenhum caso ele edita arquivos (ver ADR-14).
 - **`proporPlanoEmPedidosGrandes`:** `true` ou `false` (padrão `true`; orquestradores salvos antes da opção valem `true`). Só tem efeito em turnos de execução (ver ADR-15).
+- **`instrucoesPersonalizadas`:** texto livre de até 4.000 caracteres depois de normalizado (padrão `""`; orquestradores salvos antes do campo valem `""`). 400 `As instruções personalizadas devem ter até 4000 caracteres (hoje têm N).` Vazio usa as instruções padrão das *Preferências*, se houver (ver ADR-17).
 
 `ResumoDoOrquestrador`:
 
@@ -535,14 +566,16 @@ Valores aceitos:
                     "quantidadeDeSubagentes": { "modo": "automatica", "limite": 3 }, "nivelDePermissao": "leitura",
                     "permitirCommitEPush": false,
                     "esforcoDoOrquestrador": "alto", "esforcoDosSubagentes": "padrao",
-                    "permitirTrabalhoDireto": true, "proporPlanoEmPedidosGrandes": true },
+                    "permitirTrabalhoDireto": true, "proporPlanoEmPedidosGrandes": true,
+                    "instrucoesPersonalizadas": "" },
+  "instrucoesAtivas": "padrao",
   "worktree": { "branch": "orquestrador/…", "caminho": "…\\dados\\worktrees\\1a2b3c4d", "ativo": false },
   "criadoEm": "…", "totalDeTurnos": 2,
   "ultimoTurno": { "texto": "…", "situacao": "concluido", "iniciadoEm": "…" }
 }
 ```
 
-O GET de `/orquestradores/:id` traz a mesma `configuracao`. O servidor sempre devolve todos os campos da configuração, inclusive `permitirCommitEPush`, `esforcoDoOrquestrador`, `esforcoDosSubagentes`, `permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes`, já com o padrão aplicado nos orquestradores salvos antes de cada opção. `totalDeTurnos` conta só a conversa atual (zera no `/clear`).
+O GET de `/orquestradores/:id` traz a mesma `configuracao`. O servidor sempre devolve todos os campos da configuração, inclusive `permitirCommitEPush`, `esforcoDoOrquestrador`, `esforcoDosSubagentes`, `permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes`, já com o padrão aplicado nos orquestradores salvos antes de cada opção. `totalDeTurnos` conta só a conversa atual (zera no `/clear`). `instrucoesAtivas` diz de onde viriam as instruções personalizadas no próximo pedido: `"orquestrador"`, `"padrao"` (as das *Preferências*) ou `null` (nenhuma; ver ADR-17).
 
 `worktree` é `null` quando não há worktree (pasta sem git ou sem commit, ou o último turno terminou sem alterações); `ativo` é `true` enquanto um turno roda nele.
 
@@ -603,6 +636,8 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
    - **Permissões:** *Somente leitura*, *Ler e editar arquivos* ou *Editar e rodar comandos*. Commit e push ficam bloqueados, a menos que você ligue **Permitir commit e push quando eu pedir** (desligada por padrão). O toggle aparece aqui, na criação, e depois no *⚙* do terminal; o funcionamento está no item 8.
    - **Deixar o orquestrador fazer o trivial sozinho** (ligada por padrão): leituras rápidas, uma checagem ou um comando curto (este só com *Editar e rodar comandos*) ele faz sem lançar Subagente, o que economiza tempo e cota. Alterações de arquivos continuam sempre delegadas. Desligada, ele delega tudo, como antes; o resumo da configuração mostra *delegação total* (ver ADR-14).
    - **Propor plano antes de mudanças grandes** (ligada por padrão): fora do Plan Mode, se o pedido for grande (vários arquivos, contratos, dados, arquitetura ou algo ambíguo), o Orquestrador responde com um plano para você aprovar antes de alterar (item 4). Desligada, ele executa direto; o resumo mostra *sem plano automático* (ver ADR-15).
+
+   - **Instruções personalizadas (opcional):** regras suas que este Orquestrador segue em todo pedido, ex.: *Responda sempre em português, com tópicos curtos*. Até 4.000 caracteres, com contador. Dá para editar depois no *⚙*, e a mudança vale já no próximo pedido, inclusive na conversa em curso. Vazio, valem as **instruções padrão** do botão *Preferências* (barra do canvas), se houver; as próprias substituem as padrão, não somam. *Pré-visualizar prompt final* mostra o texto que o Orquestrador receberia. Com instruções valendo, o terminal mostra o chip *instruções* (ou *instruções padrão*). Elas não ampliam as permissões (ver ADR-17).
 
    Em *iniciar orquestrador*, o terminal de configuração vira o terminal do Orquestrador, no mesmo lugar.
 2. **Mexer nos terminais:**
