@@ -32,6 +32,8 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "edicao_e_comandos",
   permitirCommitEPush: false,
+  permitirTrabalhoDireto: true,
+  proporPlanoEmPedidosGrandes: true,
 };
 
 const USO = { duracaoMs: 1000, tokensDeEntrada: 1, tokensDeSaida: 1, subagentesLancados: 0 };
@@ -63,6 +65,7 @@ function Transcricao({ conversa, sinal }: { conversa: EstadoDaConversa; sinal?: 
       pastaDeTrabalho="C:\projetos\painel"
       configuracao={configuracao}
       turnos={conversa.turnos}
+      conversaIniciadaEm={conversa.conversaIniciadaEm}
       sinal={sinal}
       desconectado={false}
       acoesDoPlano={acoesDoPlano}
@@ -122,5 +125,53 @@ describe("TranscricaoDoTerminal", () => {
     expect(screen.getByText("plano proposto · aprovado")).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
     expect(analises.total).toBe(1);
+  });
+
+  it("plano proposto num pedido de execução aparece no cartão, com as ações", () => {
+    const conversa = aplicar(
+      ESTADO_INICIAL,
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "migre o projeto inteiro", configuracao },
+      { tipo: "turno_concluido", turnoId: "t1", resposta: "1. Ler o domínio", uso: USO, planoPendente: true },
+    );
+    render(<Transcricao conversa={conversa} />);
+
+    expect(screen.getByText("plano proposto")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Aprovar e executar" })).toBeInTheDocument();
+    expect(screen.getByText(/plano proposto · aguardando aprovação/)).toBeInTheDocument();
+  });
+
+  it("resposta comum de execução não vira cartão de plano", () => {
+    const conversa = aplicar(
+      ESTADO_INICIAL,
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija o bug", configuracao },
+      { tipo: "turno_concluido", turnoId: "t1", resposta: "Corrigido.", uso: USO, planoPendente: false },
+    );
+    render(<Transcricao conversa={conversa} />);
+
+    expect(screen.getByText("Corrigido.")).toBeInTheDocument();
+    expect(screen.queryByText("plano proposto")).not.toBeInTheDocument();
+  });
+
+  it("depois do /clear, mostra o separador da conversa nova e só os pedidos dela", () => {
+    const anterior = aplicar(
+      ESTADO_INICIAL,
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "resuma o projeto", configuracao },
+      { tipo: "turno_concluido", turnoId: "t1", resposta: "Resumo", uso: USO },
+    );
+    const { rerender } = render(<Transcricao conversa={anterior} />);
+    expect(screen.queryByText(/conversa nova iniciada/)).not.toBeInTheDocument();
+    expect(screen.getByText(/1 pedido nesta conversa · \/clear começa uma nova/)).toBeInTheDocument();
+
+    const limpa = aplicar(anterior, {
+      tipo: "conversa_limpa",
+      turnosAnteriores: 1,
+      planoDescartado: false,
+      worktreeComAlteracoes: false,
+    });
+    rerender(<Transcricao conversa={limpa} />);
+
+    expect(screen.getByText(/^— conversa nova iniciada às \d{2}:\d{2} —$/)).toBeInTheDocument();
+    expect(screen.queryByText("resuma o projeto")).not.toBeInTheDocument();
+    expect(screen.getByText(/digite um pedido e pressione enter/)).toBeInTheDocument();
   });
 });

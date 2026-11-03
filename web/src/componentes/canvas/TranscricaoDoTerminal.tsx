@@ -6,7 +6,14 @@ import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
 import type { LinhaDoLog, TipoDeLinhaDoLog, TurnoNaTela } from "../../shared/estado/aplicarEvento";
 import { faseDoTurno } from "../../shared/estado/faseDoTurno";
 import { estadoDeVida } from "../../shared/estado/sinalDeVida";
-import { descreverConfiguracao, formatarDuracao, formatarHora, formatarTokens, idCurto } from "../../shared/formatacao";
+import {
+  descreverConfiguracao,
+  formatarDuracao,
+  formatarHora,
+  formatarMomento,
+  formatarTokens,
+  idCurto,
+} from "../../shared/formatacao";
 import { useRelogio } from "../../shared/hooks/useRelogio";
 import { IconeOrquestrador } from "../Icones";
 import { TextoFormatado } from "../TextoFormatado";
@@ -152,7 +159,8 @@ const Turno = memo(function Turno({
         ))}
       {turno.resposta !== null &&
         turno.resposta !== "" &&
-        (turno.modo === "planejamento" ? (
+        // Plano também sai de um pedido de execução, quando o Orquestrador o propõe antes de uma mudança grande.
+        (turno.modo === "planejamento" || turno.decisaoDoPlano !== null ? (
           <CartaoDoPlano
             turno={turno}
             configuracao={configuracao}
@@ -180,6 +188,8 @@ interface Props {
   configuracao: DadosDaConfiguracao;
   /** Os pedidos da conversa deste Orquestrador (`EstadoDaConversa.turnos`). */
   turnos: readonly TurnoNaTela[];
+  /** Quando a conversa atual começou (/clear); nulo enquanto é a primeira. */
+  conversaIniciadaEm: string | null;
   sinal: SinalDeVida | undefined;
   desconectado: boolean;
   /** Aprovar, ajustar ou descartar o plano pendente do último pedido (Plan Mode). */
@@ -199,6 +209,7 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
   pastaDeTrabalho,
   configuracao,
   turnos,
+  conversaIniciadaEm,
   sinal,
   desconectado,
   acoesDoPlano,
@@ -221,9 +232,12 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
         <p className="text-muted">
           {turnos.length === 0
             ? "digite um pedido e pressione enter — o orquestrador divide o trabalho e instancia os agentes."
-            : `${turnos.length} ${turnos.length === 1 ? "pedido" : "pedidos"} nesta conversa`}
+            : `${turnos.length} ${turnos.length === 1 ? "pedido" : "pedidos"} nesta conversa · /clear começa uma nova`}
         </p>
       </div>
+      {conversaIniciadaEm !== null && (
+        <p className="mono hint text-center">{`— conversa nova iniciada às ${formatarMomento(conversaIniciadaEm)} —`}</p>
+      )}
       {turnos.map((turno, indice) => (
         <Turno
           key={turno.id}

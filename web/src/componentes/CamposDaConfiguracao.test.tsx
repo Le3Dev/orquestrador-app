@@ -11,6 +11,8 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "edicao_e_comandos",
   permitirCommitEPush: false,
+  permitirTrabalhoDireto: true,
+  proporPlanoEmPedidosGrandes: true,
 };
 
 function renderizar(alteracoes: Partial<DadosDaConfiguracao> = {}) {
@@ -45,6 +47,48 @@ describe("CamposDaConfiguracao", () => {
     renderizar({ permitirCommitEPush: true });
 
     expect(screen.queryByText(/exigem a permissão de rodar comandos/)).not.toBeInTheDocument();
+  });
+
+  describe("trabalho direto e plano automático", () => {
+    function opcoes() {
+      return {
+        trabalhoDireto: screen.getByRole("checkbox", { name: "Deixar o orquestrador fazer o trivial sozinho" }),
+        plano: screen.getByRole("checkbox", { name: "Propor plano antes de mudanças grandes" }),
+      };
+    }
+
+    it("começam ligadas, com a ajuda de cada uma", () => {
+      renderizar();
+      const { trabalhoDireto, plano } = opcoes();
+
+      expect(trabalhoDireto).toBeChecked();
+      expect(trabalhoDireto).toHaveAccessibleDescription(
+        "Leituras rápidas, uma checagem ou um comando curto, sem subagente. Alterações continuam delegadas.",
+      );
+      expect(plano).toBeChecked();
+      expect(plano).toHaveAccessibleDescription(
+        "Em pedidos grandes, o orquestrador responde com um plano para você aprovar antes de alterar.",
+      );
+    });
+
+    it("refletem as opções desligadas", () => {
+      renderizar({ permitirTrabalhoDireto: false, proporPlanoEmPedidosGrandes: false });
+      const { trabalhoDireto, plano } = opcoes();
+
+      expect(trabalhoDireto).not.toBeChecked();
+      expect(plano).not.toBeChecked();
+    });
+
+    it("ao desligar, mudam só a opção correspondente", () => {
+      const { aoMudar } = renderizar();
+      const { trabalhoDireto, plano } = opcoes();
+
+      fireEvent.click(trabalhoDireto);
+      expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, permitirTrabalhoDireto: false });
+
+      fireEvent.click(plano);
+      expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, proporPlanoEmPedidosGrandes: false });
+    });
   });
 
   describe("esforço", () => {

@@ -9,10 +9,13 @@ export interface Ponto {
   y: number;
 }
 
-export interface RetanguloDoTerminal extends Ponto {
+/** Um retângulo no canvas: o canto superior esquerdo e o tamanho. */
+export interface Retangulo extends Ponto {
   largura: number;
   altura: number;
 }
+
+export type RetanguloDoTerminal = Retangulo;
 
 export interface Viewport extends Ponto {
   zoom: number;
@@ -62,6 +65,10 @@ const DESLOCAMENTO_EM_CASCATA = 36;
 const ESPACO_ENTRE_TERMINAIS = 120;
 const ESPACO_ENTRE_NOTAS = 24;
 const NOTAS_POR_COLUNA = 4;
+/** Folga mínima entre o grupo de bixinhos e as outras janelas (e bixinhos) do canvas. */
+export const MARGEM_DOS_BIXINHOS = 24;
+/** Quantas vezes, no máximo, o grupo desce procurando um lugar livre abaixo do terminal. */
+const TENTATIVAS_DESCENDO = 50;
 
 const CHAVE = "orquestrador-agentes:canvas:v1";
 const CHAVE_DOS_BIXINHOS_LIMPOS = `${CHAVE}:bixinhos-limpos`;
@@ -210,6 +217,85 @@ export function posicoesDosBixinhos(quantidade: number, larguraDoTerminal: numbe
     });
   }
   return posicoes;
+}
+
+/** Se dois retângulos se sobrepõem; só encostar não conta. */
+export function sobrepoe(a: Retangulo, b: Retangulo): boolean {
+  return a.x < b.x + b.largura && b.x < a.x + a.largura && a.y < b.y + b.altura && b.y < a.y + a.altura;
+}
+
+/** O retângulo que envolve os bixinhos nas posições dadas. */
+function contornoDosBixinhos(posicoes: readonly Ponto[]): Retangulo {
+  const xs = posicoes.map((posicao) => posicao.x);
+  const ys = posicoes.map((posicao) => posicao.y);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return {
+    x,
+    y,
+    largura: Math.max(...xs) + TAMANHO_DO_BIXINHO.largura - x,
+    altura: Math.max(...ys) + TAMANHO_DO_BIXINHO.altura - y,
+  };
+}
+
+/**
+ * As posições dos bixinhos em relação ao terminal, no mesmo arranjo em
+ * fileiras de `posicoesDosBixinhos`, mas num lugar em que o grupo (com a
+ * folga de `MARGEM_DOS_BIXINHOS`) não fique por cima de nenhum obstáculo
+ * (`terminal` e `obstaculos` em coordenadas absolutas). Tenta, nesta ordem:
+ * abaixo e centralizado (o padrão); à direita do terminal; à esquerda; acima;
+ * e abaixo, descendo em passos até passar dos obstáculos. Se nada servir,
+ * fica o padrão. Sem conflito, o resultado é exatamente o padrão.
+ */
+export function posicoesLivresDosBixinhos(
+  quantidade: number,
+  terminal: Retangulo,
+  obstaculos: readonly Retangulo[],
+): Ponto[] {
+  const padrao = posicoesDosBixinhos(quantidade, terminal.largura, terminal.altura);
+  if (padrao.length === 0 || obstaculos.length === 0) {
+    return padrao;
+  }
+  const bloco = contornoDosBixinhos(padrao);
+  // O lugar que o grupo ocupa, com a folga ao redor, deslocado do padrão.
+  const ocupado = (deslocamento: Ponto): Retangulo => ({
+    x: terminal.x + bloco.x + deslocamento.x - MARGEM_DOS_BIXINHOS,
+    y: terminal.y + bloco.y + deslocamento.y - MARGEM_DOS_BIXINHOS,
+    largura: bloco.largura + 2 * MARGEM_DOS_BIXINHOS,
+    altura: bloco.altura + 2 * MARGEM_DOS_BIXINHOS,
+  });
+  const noCaminho = (deslocamento: Ponto): Retangulo[] =>
+    obstaculos.filter((obstaculo) => sobrepoe(ocupado(deslocamento), obstaculo));
+
+  const candidatos: Ponto[] = [
+    // Abaixo, centralizado: o padrão.
+    { x: 0, y: 0 },
+    // À direita, com o topo do grupo alinhado ao do terminal.
+    { x: terminal.largura + DISTANCIA_DO_TERMINAL - bloco.x, y: -bloco.y },
+    // À esquerda, idem.
+    { x: -DISTANCIA_DO_TERMINAL - bloco.largura - bloco.x, y: -bloco.y },
+    // Acima, centralizado.
+    { x: 0, y: -DISTANCIA_DO_TERMINAL - bloco.altura - bloco.y },
+  ];
+  let escolhido = candidatos.find((candidato) => noCaminho(candidato).length === 0);
+
+  // Abaixo, descendo: cada passo leva o grupo até logo abaixo do obstáculo mais baixo no caminho.
+  let descendo: Ponto = { x: 0, y: 0 };
+  for (let tentativa = 0; escolhido === undefined && tentativa < TENTATIVAS_DESCENDO; tentativa++) {
+    const bloqueios = noCaminho(descendo);
+    if (bloqueios.length === 0) {
+      escolhido = descendo;
+    } else {
+      const base = Math.max(...bloqueios.map((obstaculo) => obstaculo.y + obstaculo.altura));
+      descendo = { x: 0, y: descendo.y + base - ocupado(descendo).y };
+    }
+  }
+
+  if (escolhido === undefined || (escolhido.x === 0 && escolhido.y === 0)) {
+    return padrao;
+  }
+  const { x, y } = escolhido;
+  return padrao.map((posicao) => ({ x: posicao.x + x, y: posicao.y + y }));
 }
 
 /**

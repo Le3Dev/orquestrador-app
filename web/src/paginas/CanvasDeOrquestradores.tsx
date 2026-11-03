@@ -10,9 +10,10 @@ import {
   useReactFlow,
   type EdgeTypes,
   type FitViewOptions,
+  type NodeChange,
   type NodeTypes,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { IconeOrquestrador } from "../componentes/Icones";
 import { ArestaDoBixinho } from "../componentes/canvas/ArestaDoBixinho";
@@ -54,6 +55,7 @@ import {
   type NoRascunho as TipoDoRascunho,
   nosDoLayout,
   novoTerminal,
+  reacomodarBixinhos,
   reaproveitarArestas,
   semTerminal,
   sincronizarBixinhos,
@@ -136,6 +138,37 @@ function Canvas() {
   const fluxo = useReactFlow<NoDoCanvas>();
   // Grava o layout (só depois de soltar um arraste) e marca quando algo se move.
   const movimento = useMovimentoDoCanvas(nos, layoutInicial.viewport);
+  const { aoTerminarArraste } = movimento;
+
+  // Bixinhos que ficaram por cima de outra janela se reacomodam ao soltar um
+  // arraste, ao terminar de redimensionar, ao abrir uma janela e ao organizar
+  // — nunca a cada quadro do arraste. Sem conflito, o array não muda.
+  const reacomodar = useCallback(() => setNos(reacomodarBixinhos), [setNos]);
+
+  // O React Flow aplica a posição final do arraste antes de avisar o fim dele.
+  const aoSoltarNo = useCallback(() => {
+    aoTerminarArraste();
+    reacomodar();
+  }, [aoTerminarArraste, reacomodar]);
+
+  const aoMudarNosEReacomodar = useCallback(
+    (mudancas: NodeChange<NoDoCanvas>[]) => {
+      aoMudarNos(mudancas);
+      // Fim de um redimensionamento (o React Flow manda `resizing: false` só ao soltar a alça).
+      if (mudancas.some((mudanca) => mudanca.type === "dimensions" && mudanca.resizing === false)) {
+        reacomodar();
+      }
+    },
+    [aoMudarNos, reacomodar],
+  );
+
+  // As notas criadas, restauradas ou trazidas do servidor também tiram os
+  // bixinhos de baixo delas. Digitar numa nota não passa por aqui.
+  const setNosDasNotas = useCallback<Dispatch<SetStateAction<NoDoCanvas[]>>>(
+    (atualizacao) =>
+      setNos((atuais) => reacomodarBixinhos(typeof atualizacao === "function" ? atualizacao(atuais) : atualizacao)),
+    [setNos],
+  );
   // Criados nesta sessão e ainda ausentes da lista: uma consulta que saiu
   // antes da criação não pode tirá-los do canvas ao voltar.
   const criadosAgora = useRef(new Set<string>());
@@ -211,7 +244,7 @@ function Canvas() {
   );
 
   // O conteúdo das notas fica numa loja própria: digitar ou salvar uma nota não re-renderiza o canvas.
-  const notas = useNotas(setNos, centroDaTela, servidor.conectado);
+  const notas = useNotas(setNosDasNotas, centroDaTela, servidor.conectado);
   const { criarNota, erro: erroDasNotas, descartarErro: descartarErroDasNotas } = notas;
   const novaNota = useCallback(() => void criarNota(), [criarNota]);
 
@@ -240,7 +273,7 @@ function Canvas() {
         data: {},
         selected: true,
       };
-      return [...atuais.map((no) => ({ ...no, selected: false })), rascunho];
+      return reacomodarBixinhos([...atuais.map((no) => ({ ...no, selected: false })), rascunho]);
     });
   }, [centroDaTela, setNos]);
 
@@ -255,7 +288,10 @@ function Canvas() {
           TAMANHO_DO_TERMINAL,
           atuais.filter(ehTerminal).map((no) => no.position),
         );
-        return [...atuais, novoTerminal(orquestradorId, posicao, TAMANHO_DO_TERMINAL.largura, TAMANHO_DO_TERMINAL.altura)];
+        return reacomodarBixinhos([
+          ...atuais,
+          novoTerminal(orquestradorId, posicao, TAMANHO_DO_TERMINAL.largura, TAMANHO_DO_TERMINAL.altura),
+        ]);
       });
       focar(orquestradorId);
     },
@@ -287,7 +323,7 @@ function Canvas() {
           rascunho?.width ?? TAMANHO_DO_TERMINAL.largura,
           TAMANHO_DO_TERMINAL.altura,
         );
-        return [...atuais.filter((no) => no.id !== rascunhoId), { ...terminal, selected: true }];
+        return reacomodarBixinhos([...atuais.filter((no) => no.id !== rascunhoId), { ...terminal, selected: true }]);
       });
       void recarregar();
     },
@@ -306,10 +342,12 @@ function Canvas() {
         .map((no) => tamanhoParaOrganizar(no, TAMANHO_DO_TERMINAL));
       const notasNoCanvas = atuais.filter(ehNota).map((no) => tamanhoParaOrganizar(no, TAMANHO_DA_NOTA));
       const posicoes = organizarComNotas(janelas, notasNoCanvas);
-      return atuais.map((no) => {
-        const posicao = posicoes[no.id];
-        return posicao === undefined ? no : { ...no, position: posicao };
-      });
+      return reacomodarBixinhos(
+        atuais.map((no) => {
+          const posicao = posicoes[no.id];
+          return posicao === undefined ? no : { ...no, position: posicao };
+        }),
+      );
     });
     setTimeout(() => void fluxo.fitView({ duration: 600, padding: 0.12 }), ESPERA_PARA_MEDIR_MS);
   }, [fluxo, setNos]);
@@ -415,9 +453,9 @@ function Canvas() {
             edges={arestas}
             nodeTypes={TIPOS_DE_NO}
             edgeTypes={TIPOS_DE_ARESTA}
-            onNodesChange={aoMudarNos}
+            onNodesChange={aoMudarNosEReacomodar}
             onNodeDragStart={movimento.aoComecarArraste}
-            onNodeDragStop={movimento.aoTerminarArraste}
+            onNodeDragStop={aoSoltarNo}
             onMoveStart={movimento.aoComecarMovimento}
             onMoveEnd={movimento.aoTerminarMovimento}
             colorMode="dark"
