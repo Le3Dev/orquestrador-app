@@ -40,6 +40,19 @@ export type NoDoCanvas = NoTerminal | NoRascunho | NoBixinho | NoNota;
 export type ArestaDoBixinho = Edge<Record<string, never>, "bixinho">;
 export type ArestaDoCanvas = ArestaDoBixinho;
 
+/** O `id` de cada âncora das linhas: o lado do nó, no terminal e no bixinho. */
+export type Ancora = "cima" | "baixo" | "esquerda" | "direita";
+/** Onde o bixinho está em relação ao terminal dele. */
+export type LadoDoBixinho = "abaixo" | "acima" | "direita" | "esquerda";
+
+/** De que âncora a linha sai no terminal e em qual chega no bixinho: os lados voltados um para o outro. */
+const ANCORAS_DO_LADO: Readonly<Record<LadoDoBixinho, { terminal: Ancora; bixinho: Ancora }>> = {
+  abaixo: { terminal: "baixo", bixinho: "cima" },
+  acima: { terminal: "cima", bixinho: "baixo" },
+  direita: { terminal: "direita", bixinho: "esquerda" },
+  esquerda: { terminal: "esquerda", bixinho: "direita" },
+};
+
 /** Só a barra de título arrasta o terminal: no corpo, o mouse seleciona texto e rola. */
 export const ALCA_DO_TERMINAL = "alca-do-terminal";
 /** Idem para a nota: no corpo, o mouse escreve e seleciona texto. */
@@ -401,11 +414,51 @@ const CLASSE_DA_ARESTA: Readonly<Record<SituacaoDoSubagente, string>> = {
   cancelado: "aresta-cancelado",
 };
 
-/** Uma linha do terminal a cada bixinho; animada enquanto ele trabalha. */
+/**
+ * De que lado do terminal o bixinho está, pela posição dele (relativa ao
+ * terminal, de quem é filho) e pelos tamanhos dos dois: acima, se a base do
+ * bixinho não passa do topo do terminal; à direita, se ele começa depois da
+ * borda direita; à esquerda, se termina antes da borda esquerda; senão,
+ * abaixo (o padrão — também quando está por cima do terminal). Encostar
+ * conta como estar do lado, como em `sobrepoe`.
+ */
+export function ladoDoBixinho(bixinho: NoBixinho, terminal: NoTerminal): LadoDoBixinho {
+  const { x, y } = bixinho.position;
+  const doBixinho = tamanhoDoNo(bixinho);
+  const doTerminal = tamanhoDoNo(terminal);
+  if (y + doBixinho.altura <= 0) {
+    return "acima";
+  }
+  if (x >= doTerminal.largura) {
+    return "direita";
+  }
+  if (x + doBixinho.largura <= 0) {
+    return "esquerda";
+  }
+  return "abaixo";
+}
+
+/** O lado do bixinho em relação ao terminal dele; sem o terminal na lista, o padrão (abaixo). */
+function ladoNoTerminal(bixinho: NoBixinho, terminais: ReadonlyMap<string, NoTerminal>): LadoDoBixinho {
+  const terminal = terminais.get(bixinho.parentId ?? "");
+  return terminal === undefined ? "abaixo" : ladoDoBixinho(bixinho, terminal);
+}
+
+function terminaisPorId(nos: readonly NoDoCanvas[]): Map<string, NoTerminal> {
+  return new Map(nos.filter(ehTerminal).map((terminal) => [terminal.id, terminal]));
+}
+
+/**
+ * Uma linha do terminal a cada bixinho; animada enquanto ele trabalha. Sai do
+ * lado do terminal voltado para o bixinho e chega no lado do bixinho voltado
+ * para o terminal (`ladoDoBixinho`), por isso `nos` precisa trazer também os
+ * terminais.
+ */
 export function arestasDosBixinhos(
   nos: readonly NoDoCanvas[],
   conversas: ReadonlyMap<string, EstadoDaConversa>,
 ): ArestaDoCanvas[] {
+  const terminais = terminaisPorId(nos);
   return nos.filter(ehBixinho).flatMap((bixinho): ArestaDoBixinho[] => {
     const subagente = subagentesVisiveis(conversas.get(bixinho.data.orquestradorId)).find(
       (candidato) => candidato.id === bixinho.data.subagenteId,
@@ -413,12 +466,15 @@ export function arestasDosBixinhos(
     if (subagente === undefined || bixinho.parentId === undefined) {
       return [];
     }
+    const ancoras = ANCORAS_DO_LADO[ladoNoTerminal(bixinho, terminais)];
     return [
       {
         id: `aresta:${bixinho.id}`,
         type: "bixinho",
         source: bixinho.parentId,
+        sourceHandle: ancoras.terminal,
         target: bixinho.id,
+        targetHandle: ancoras.bixinho,
         animated: subagente.situacao === "executando",
         className: CLASSE_DA_ARESTA[subagente.situacao],
         selectable: false,
@@ -429,22 +485,34 @@ export function arestasDosBixinhos(
 }
 
 /**
- * Os bixinhos anteriores enquanto nenhum nasce, some ou troca de terminal: as
- * linhas só dependem disso, não da posição — arrastar não as recalcula.
+ * Os nós anteriores (terminais e bixinhos) enquanto as linhas não mudam: nenhum
+ * bixinho nasce, some ou troca de terminal, e nenhum passa para outro lado do
+ * terminal. Fora isso, a posição e o tamanho não importam — arrastar ou
+ * redimensionar sem trocar de lado não recalcula as linhas.
  */
-export function mesmasLigacoes(anteriores: NoBixinho[], novos: NoBixinho[]): NoBixinho[] {
-  const iguais =
-    anteriores.length === novos.length &&
-    anteriores.every((anterior, indice) => {
-      const novo = novos[indice];
-      return (
-        novo !== undefined &&
-        anterior.id === novo.id &&
-        anterior.parentId === novo.parentId &&
-        anterior.data.orquestradorId === novo.data.orquestradorId &&
-        anterior.data.subagenteId === novo.data.subagenteId
-      );
-    });
+export function mesmasLigacoes<T extends NoDoCanvas>(anteriores: T[], novos: T[]): T[] {
+  if (anteriores === novos) {
+    return anteriores;
+  }
+  if (anteriores.length !== novos.length) {
+    return novos;
+  }
+  const terminaisAnteriores = terminaisPorId(anteriores);
+  const terminaisNovos = terminaisPorId(novos);
+  const iguais = anteriores.every((anterior, indice) => {
+    const novo = novos[indice];
+    if (novo === undefined || anterior.id !== novo.id || anterior.type !== novo.type || anterior.parentId !== novo.parentId) {
+      return false;
+    }
+    if (!ehBixinho(anterior) || !ehBixinho(novo)) {
+      return true;
+    }
+    return (
+      anterior.data.orquestradorId === novo.data.orquestradorId &&
+      anterior.data.subagenteId === novo.data.subagenteId &&
+      ladoNoTerminal(anterior, terminaisAnteriores) === ladoNoTerminal(novo, terminaisNovos)
+    );
+  });
   return iguais ? anteriores : novos;
 }
 
@@ -453,7 +521,9 @@ function mesmaAresta(anterior: ArestaDoCanvas, nova: ArestaDoCanvas): boolean {
   return (
     anterior.id === nova.id &&
     anterior.source === nova.source &&
+    anterior.sourceHandle === nova.sourceHandle &&
     anterior.target === nova.target &&
+    anterior.targetHandle === nova.targetHandle &&
     anterior.type === nova.type &&
     anterior.animated === nova.animated &&
     anterior.className === nova.className
@@ -462,9 +532,9 @@ function mesmaAresta(anterior: ArestaDoCanvas, nova: ArestaDoCanvas): boolean {
 
 /**
  * As linhas novas, reaproveitando o objeto anterior de cada uma que não mudou
- * — e o próprio array anterior quando nenhuma mudou. Arrastar um nó ou um
- * evento que não mexe na situação dos Subagentes não troca nada, e o React
- * Flow não redesenha as linhas à toa.
+ * — e o próprio array anterior quando nenhuma mudou. Arrastar um nó sem que
+ * um bixinho troque de lado, ou um evento que não mexe na situação dos
+ * Subagentes, não troca nada, e o React Flow não redesenha as linhas à toa.
  */
 export function reaproveitarArestas(anteriores: ArestaDoCanvas[], novas: ArestaDoCanvas[]): ArestaDoCanvas[] {
   const porId = new Map(anteriores.map((aresta) => [aresta.id, aresta]));

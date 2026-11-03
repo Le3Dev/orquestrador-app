@@ -6,6 +6,7 @@ import {
   ehNota,
   idDoBixinho,
   idDoNoDaNota,
+  ladoDoBixinho,
   layoutDosNos,
   limparBixinhos,
   mesmasLigacoes,
@@ -68,6 +69,29 @@ function retanguloDe(no: NoDoCanvas): Retangulo {
 /** Se algum dos bixinhos está por cima de algum dos retângulos. */
 function algumPorCima(bixinhos: readonly Retangulo[], retangulos: readonly Retangulo[]): boolean {
   return bixinhos.some((bixinho) => retangulos.some((retangulo) => sobrepoe(bixinho, retangulo)));
+}
+
+/** Um bixinho de o1 na posição dada, relativa ao terminal. */
+function bixinhoEm(x: number, y: number, subagenteId = "s1"): NoBixinho {
+  return {
+    id: idDoBixinho("o1", subagenteId),
+    type: "bixinho",
+    parentId: "o1",
+    position: { x, y },
+    width: TAMANHO_DO_BIXINHO.largura,
+    height: TAMANHO_DO_BIXINHO.altura,
+    data: { orquestradorId: "o1", subagenteId },
+  };
+}
+
+/** Os mesmos nós, com o bixinho dado em outra posição. */
+function comBixinhoEm(nos: readonly NoDoCanvas[], subagenteId: string, x: number, y: number): NoDoCanvas[] {
+  return nos.map((no): NoDoCanvas => (no.id === idDoBixinho("o1", subagenteId) ? { ...no, position: { x, y } } : no));
+}
+
+/** De que âncora sai e em qual chega cada linha. */
+function ancorasDasArestas(arestas: readonly { sourceHandle?: string | null; targetHandle?: string | null }[]) {
+  return arestas.map((aresta) => [aresta.sourceHandle, aresta.targetHandle]);
 }
 
 describe("sincronizarBixinhos", () => {
@@ -217,7 +241,100 @@ describe("reacomodarBixinhos", () => {
   });
 });
 
+describe("ladoDoBixinho", () => {
+  // O terminal o1 tem 600 × 500; o bixinho, 150 × 170, em posição relativa ao terminal.
+  it("abaixo, acima, à direita e à esquerda do terminal", () => {
+    expect(ladoDoBixinho(bixinhoEm(225, 580), terminal)).toBe("abaixo");
+    expect(ladoDoBixinho(bixinhoEm(225, -250), terminal)).toBe("acima");
+    expect(ladoDoBixinho(bixinhoEm(680, 0), terminal)).toBe("direita");
+    expect(ladoDoBixinho(bixinhoEm(-230, 0), terminal)).toBe("esquerda");
+  });
+
+  it("encostado conta como do lado; um pixel por cima do terminal já é o padrão (abaixo)", () => {
+    expect(ladoDoBixinho(bixinhoEm(225, -170), terminal)).toBe("acima");
+    expect(ladoDoBixinho(bixinhoEm(600, 0), terminal)).toBe("direita");
+    expect(ladoDoBixinho(bixinhoEm(-150, 0), terminal)).toBe("esquerda");
+    expect(ladoDoBixinho(bixinhoEm(225, 500), terminal)).toBe("abaixo");
+
+    expect(ladoDoBixinho(bixinhoEm(225, -169), terminal)).toBe("abaixo");
+    expect(ladoDoBixinho(bixinhoEm(599, 0), terminal)).toBe("abaixo");
+    expect(ladoDoBixinho(bixinhoEm(-149, 0), terminal)).toBe("abaixo");
+  });
+
+  it("na diagonal, acima vem antes dos lados, e os lados antes de abaixo", () => {
+    expect(ladoDoBixinho(bixinhoEm(700, -300), terminal)).toBe("acima");
+    expect(ladoDoBixinho(bixinhoEm(-300, -300), terminal)).toBe("acima");
+    expect(ladoDoBixinho(bixinhoEm(700, 600), terminal)).toBe("direita");
+    expect(ladoDoBixinho(bixinhoEm(-300, 600), terminal)).toBe("esquerda");
+  });
+
+  it("usa o tamanho medido, e o padrão quando não há nenhum", () => {
+    const semTamanho: NoBixinho = { ...bixinhoEm(225, -170), width: undefined, height: undefined };
+    expect(ladoDoBixinho(semTamanho, terminal)).toBe("acima");
+    expect(ladoDoBixinho({ ...semTamanho, measured: { width: 150, height: 200 } }, terminal)).toBe("abaixo");
+
+    const terminalMedido = { ...terminal, width: undefined, measured: { width: 800, height: 500 } };
+    expect(ladoDoBixinho(bixinhoEm(680, 0), terminalMedido)).toBe("abaixo");
+    expect(ladoDoBixinho(bixinhoEm(800, 0), terminalMedido)).toBe("direita");
+  });
+});
+
 describe("arestasDosBixinhos", () => {
+  const conversas = new Map([["o1", doisSubagentes]]);
+
+  it("no caso padrão (abaixo), sai de baixo do terminal e chega em cima do bixinho", () => {
+    const arestas = arestasDosBixinhos(sincronizarBixinhos([terminal], conversas), conversas);
+
+    expect(ancorasDasArestas(arestas)).toEqual([
+      ["baixo", "cima"],
+      ["baixo", "cima"],
+    ]);
+  });
+
+  it("liga os lados voltados um para o outro, bixinho a bixinho", () => {
+    const nos = comBixinhoEm(comBixinhoEm(sincronizarBixinhos([terminal], conversas), "s1", 225, -250), "s2", 680, 0);
+
+    expect(ancorasDasArestas(arestasDosBixinhos(nos, conversas))).toEqual([
+      ["cima", "baixo"],
+      ["direita", "esquerda"],
+    ]);
+    expect(ancorasDasArestas(arestasDosBixinhos(comBixinhoEm(nos, "s1", -230, 0), conversas))[0]).toEqual([
+      "esquerda",
+      "direita",
+    ]);
+  });
+
+  it("segue o lugar que a reacomodação escolheu: à direita, à esquerda ou acima", () => {
+    const abaixo = novoTerminal("o2", { x: 100, y: 650 }, 600, 500);
+    const aDireita = novaNota("n1", { x: 750, y: 100 }, 320, 900);
+    const aEsquerda = novaNota("n2", { x: -400, y: 100 }, 420, 900);
+    const ancoras = (janelas: NoDoCanvas[]) =>
+      ancorasDasArestas(arestasDosBixinhos(sincronizarBixinhos([terminal, ...janelas], conversas), conversas));
+
+    expect(ancoras([abaixo])).toEqual([
+      ["direita", "esquerda"],
+      ["direita", "esquerda"],
+    ]);
+    expect(ancoras([abaixo, aDireita])).toEqual([
+      ["esquerda", "direita"],
+      ["esquerda", "direita"],
+    ]);
+    const acima = sincronizarBixinhos([terminal, abaixo, aDireita, aEsquerda], conversas);
+    expect(bixinhosNoCanvas(acima).every((bixinho) => bixinho.y + bixinho.altura <= terminal.position.y)).toBe(true);
+    expect(ancorasDasArestas(arestasDosBixinhos(acima, conversas))).toEqual([
+      ["cima", "baixo"],
+      ["cima", "baixo"],
+    ]);
+  });
+
+  it("sem o terminal na lista, fica o padrão (abaixo)", () => {
+    const soBixinhos = comBixinhoEm(sincronizarBixinhos([terminal], conversas), "s1", 225, -250).filter(
+      (no) => no.type === "bixinho",
+    );
+
+    expect(ancorasDasArestas(arestasDosBixinhos(soBixinhos, conversas))[0]).toEqual(["baixo", "cima"]);
+  });
+
   it("liga o terminal a cada bixinho, animando só quem trabalha", () => {
     const conversas = new Map([["o1", doisSubagentes]]);
     const arestas = arestasDosBixinhos(sincronizarBixinhos([terminal], conversas), conversas);
@@ -278,12 +395,25 @@ describe("reaproveitarArestas", () => {
     expect(novas.map((aresta) => aresta.target)).toEqual([idDoBixinho("o1", "s2")]);
     expect(novas[0]).toBe(anteriores[1]);
   });
+
+  it("recria a linha do bixinho que troca de lado, e mantém tudo quando ele se move sem trocar", () => {
+    const anteriores = arestasDosBixinhos(nos, conversas);
+    const s1 = nos.find((no) => no.id === idDoBixinho("o1", "s1"));
+    const umPoucoAoLado = comBixinhoEm(nos, "s1", (s1?.position.x ?? 0) + 40, (s1?.position.y ?? 0) + 30);
+
+    expect(reaproveitarArestas(anteriores, arestasDosBixinhos(umPoucoAoLado, conversas))).toBe(anteriores);
+
+    const novas = reaproveitarArestas(anteriores, arestasDosBixinhos(comBixinhoEm(nos, "s1", 225, -250), conversas));
+    expect(novas).not.toBe(anteriores);
+    expect(novas[0]).not.toBe(anteriores[0]);
+    expect(novas[0]).toMatchObject({ sourceHandle: "cima", targetHandle: "baixo" });
+    expect(novas[1]).toBe(anteriores[1]);
+  });
 });
 
 describe("mesmasLigacoes", () => {
-  const bixinhos = sincronizarBixinhos([terminal], new Map([["o1", doisSubagentes]])).filter(
-    (no): no is NoBixinho => no.type === "bixinho",
-  );
+  const nos = sincronizarBixinhos([terminal], new Map([["o1", doisSubagentes]]));
+  const bixinhos = nos.filter((no): no is NoBixinho => no.type === "bixinho");
 
   it("arrastar um bixinho não muda as ligações", () => {
     const arrastados = bixinhos.map((bixinho) => ({ ...bixinho, position: { x: 1, y: 2 } }));
@@ -295,6 +425,34 @@ describe("mesmasLigacoes", () => {
     const menos = bixinhos.slice(1);
 
     expect(mesmasLigacoes(bixinhos, menos)).toBe(menos);
+  });
+
+  it("com os terminais: arrastar o terminal ou um bixinho sem trocar de lado não muda", () => {
+    const terminalArrastado = nos.map((no): NoDoCanvas => (no.id === "o1" ? { ...no, position: { x: 900, y: 40 } } : no));
+    const s1 = bixinhos[0];
+    const bixinhoArrastado = comBixinhoEm(nos, "s1", (s1?.position.x ?? 0) - 60, (s1?.position.y ?? 0) + 200);
+
+    expect(mesmasLigacoes(nos, terminalArrastado)).toBe(nos);
+    expect(mesmasLigacoes(nos, bixinhoArrastado)).toBe(nos);
+  });
+
+  it("um bixinho que passa para outro lado do terminal muda", () => {
+    const acima = comBixinhoEm(nos, "s2", 225, -250);
+
+    expect(mesmasLigacoes(nos, acima)).toBe(acima);
+    // E, já acima, subir mais um pouco não muda de novo.
+    expect(mesmasLigacoes(acima, comBixinhoEm(acima, "s2", 225, -400))).toBe(acima);
+  });
+
+  it("redimensionar o terminal muda só quando a borda passa do bixinho", () => {
+    const aDireita = comBixinhoEm(nos, "s1", 620, 0);
+    const redimensionado = (largura: number) =>
+      aDireita.map((no): NoDoCanvas => (no.id === "o1" ? { ...no, width: largura } : no));
+
+    const umPoucoMaior = redimensionado(610);
+    expect(mesmasLigacoes(aDireita, umPoucoMaior)).toBe(aDireita);
+    const largo = redimensionado(700);
+    expect(mesmasLigacoes(aDireita, largo)).toBe(largo);
   });
 });
 

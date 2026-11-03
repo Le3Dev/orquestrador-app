@@ -231,11 +231,15 @@ function Canvas() {
     salvarBixinhosLimpos(bixinhosLimpos);
   }, [bixinhosLimpos]);
 
-  // As linhas só são recalculadas quando um bixinho nasce, some ou muda de
-  // terminal, ou quando chega um evento; e o React Flow só recebe um array
-  // novo quando alguma linha mudou de fato. Arrastar não muda nenhuma.
-  const bixinhos = useReaproveitado(nos.filter(ehBixinho), mesmasLigacoes);
-  const arestasCalculadas = useMemo(() => arestasDosBixinhos(bixinhos, conversas), [bixinhos, conversas]);
+  // As linhas só são recalculadas quando um bixinho nasce, some, muda de
+  // terminal ou passa para outro lado dele (as pontas seguem o lado), ou
+  // quando chega um evento; e o React Flow só recebe um array novo quando
+  // alguma linha mudou de fato. Arrastar sem trocar de lado não muda nenhuma.
+  const ligados = useReaproveitado(
+    nos.filter((no) => ehTerminal(no) || ehBixinho(no)),
+    mesmasLigacoes,
+  );
+  const arestasCalculadas = useMemo(() => arestasDosBixinhos(ligados, conversas), [ligados, conversas]);
   const arestas = useReaproveitado(arestasCalculadas, reaproveitarArestas);
 
   const centroDaTela = useCallback(

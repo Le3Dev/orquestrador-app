@@ -5,7 +5,7 @@ import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { DadosDaConfiguracao, ModoDoTurno, ResumoDoOrquestrador } from "../../shared/api/tipos";
 import { useCanvas } from "../../shared/canvas/contexto";
 import { TAMANHO_MINIMO_DO_TERMINAL } from "../../shared/canvas/layout";
-import { ALCA_DO_TERMINAL, type NoTerminal as TipoDoNo } from "../../shared/canvas/nos";
+import { ALCA_DO_TERMINAL, type Ancora, type NoTerminal as TipoDoNo } from "../../shared/canvas/nos";
 import { ESTADO_INICIAL } from "../../shared/estado/aplicarEvento";
 import { formatarBytes } from "../../shared/formatacao";
 import { type ImagemAnexada, lerImagem, problemaDaImagem } from "../../shared/imagens";
@@ -162,6 +162,30 @@ function useConfiguracaoEstavel(atual: DadosDaConfiguracao): DadosDaConfiguracao
   );
 }
 
+/** De onde as linhas podem sair: o meio de cada lado. A de baixo vem primeiro, a padrão. */
+const ANCORAS_DO_TERMINAL: readonly { id: Ancora; posicao: Position }[] = [
+  { id: "baixo", posicao: Position.Bottom },
+  { id: "cima", posicao: Position.Top },
+  { id: "direita", posicao: Position.Right },
+  { id: "esquerda", posicao: Position.Left },
+];
+
+/**
+ * As âncoras das linhas: cada linha sai do lado voltado para o bixinho dela
+ * (`ladoDoBixinho`). Existem desde a primeira medida: o React Flow só mede as
+ * âncoras quando o nó muda de tamanho. Memorizadas: o arraste não as
+ * re-renderiza a cada quadro.
+ */
+const AncorasDoTerminal = memo(function AncorasDoTerminal() {
+  return (
+    <>
+      {ANCORAS_DO_TERMINAL.map(({ id, posicao }) => (
+        <Handle key={id} id={id} type="source" position={posicao} className="ancora" isConnectable={false} />
+      ))}
+    </>
+  );
+});
+
 /** As alças de redimensionar. Memorizadas: o arraste não as re-renderiza a cada quadro. */
 const Redimensionador = memo(function Redimensionador({ visivel }: { visivel: boolean }) {
   return (
@@ -188,14 +212,11 @@ export function NoTerminal({ data, selected }: NodeProps<TipoDoNo>) {
   const { orquestradores } = useCanvas();
   const orquestrador = orquestradores.get(data.orquestradorId);
 
-  // A âncora das linhas existe desde a primeira medida: o React Flow só mede
-  // as âncoras quando o nó muda de tamanho, e o terminal tem tamanho fixo.
-  const ancora = <Handle type="source" position={Position.Bottom} className="ancora" isConnectable={false} />;
-
+  // As âncoras das linhas existem desde a primeira medida, até carregando.
   if (orquestrador === undefined) {
     return (
       <>
-        {ancora}
+        <AncorasDoTerminal />
         <div className="janela-terminal grid place-items-center mono text-muted">carregando orquestrador…</div>
       </>
     );
@@ -204,7 +225,7 @@ export function NoTerminal({ data, selected }: NodeProps<TipoDoNo>) {
   return (
     <>
       <Redimensionador visivel={selected} />
-      {ancora}
+      <AncorasDoTerminal />
       <JanelaDoTerminal orquestrador={orquestrador} />
     </>
   );
