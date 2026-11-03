@@ -2,6 +2,7 @@ import type {
   DadosDaConfiguracao,
   DadosDaNota,
   ModoDoTurno,
+  NavegacaoDePastas,
   PastaDeProjeto,
   ResumoDoOrquestrador,
   SaudeDoServidor,
@@ -74,6 +75,12 @@ export interface AlteracaoDaNota {
 
 export const api = {
   listarPastas: () => requisitar<{ raiz: string; pastas: PastaDeProjeto[] }>("/pastas"),
+
+  /** Navega pelo computador para escolher uma pasta qualquer; sem `caminho`, parte da raiz dos projetos. */
+  navegarPastas: (caminho?: string) =>
+    requisitar<NavegacaoDePastas>(
+      `/pastas/navegar${caminho !== undefined ? `?caminho=${encodeURIComponent(caminho)}` : ""}`,
+    ),
 
   listarOrquestradores: () => requisitar<ResumoDoOrquestrador[]>("/orquestradores"),
 

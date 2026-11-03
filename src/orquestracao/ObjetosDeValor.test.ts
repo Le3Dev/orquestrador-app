@@ -54,6 +54,23 @@ describe("PastaDeTrabalho", () => {
   it("recusa pasta vazia", () => {
     expect(() => PastaDeTrabalho.dentroDe(raiz, "  ")).toThrow(/Informe/);
   });
+
+  describe("qualquer", () => {
+    it("aceita um caminho absoluto fora da raiz, escolhido à mão", () => {
+      const fora = path.resolve("/outro", "projeto");
+
+      expect(PastaDeTrabalho.qualquer(fora).caminho).toBe(fora);
+      expect(PastaDeTrabalho.qualquer(fora).nome).toBe("projeto");
+    });
+
+    it("recusa caminho relativo, que só o seletor de projetos usa", () => {
+      expect(() => PastaDeTrabalho.qualquer("projeto")).toThrow(/caminho completo/);
+    });
+
+    it("recusa pasta vazia", () => {
+      expect(() => PastaDeTrabalho.qualquer("  ")).toThrow(/Informe/);
+    });
+  });
 });
 
 describe("ConfiguracaoDoOrquestrador", () => {
