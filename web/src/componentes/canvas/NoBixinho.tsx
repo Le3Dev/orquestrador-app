@@ -3,7 +3,7 @@ import { memo } from "react";
 
 import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
 import { useCanvas } from "../../shared/canvas/contexto";
-import { type NoBixinho as TipoDoNo, subagentesVisiveis } from "../../shared/canvas/nos";
+import { type Ancora, type NoBixinho as TipoDoNo, subagentesVisiveis } from "../../shared/canvas/nos";
 import type { SubagenteNaTela } from "../../shared/estado/aplicarEvento";
 import { formatarDecorrido, formatarTokens, idCurto } from "../../shared/formatacao";
 import { useRelogio } from "../../shared/hooks/useRelogio";
@@ -42,6 +42,18 @@ function Ficha({ subagente, nome, agora }: { subagente: SubagenteNaTela; nome: s
   );
 }
 
+/**
+ * Onde a linha do terminal pode chegar: no lado do bixinho voltado para o
+ * terminal (`ladoDoBixinho`). Em cima, no topo do desenho, não no balão; dos
+ * lados, na borda do desenho, na altura do corpo; embaixo, na base do nó.
+ */
+const ANCORAS_DO_BIXINHO: readonly { id: Ancora; posicao: Position; classe: string }[] = [
+  { id: "cima", posicao: Position.Top, classe: "ancora ancora-bixinho" },
+  { id: "baixo", posicao: Position.Bottom, classe: "ancora" },
+  { id: "esquerda", posicao: Position.Left, classe: "ancora ancora-bixinho-esquerda" },
+  { id: "direita", posicao: Position.Right, classe: "ancora ancora-bixinho-direita" },
+];
+
 interface PropsDoConteudo {
   subagente: SubagenteNaTela;
   selecionado: boolean;
@@ -67,8 +79,9 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({ subagente, se
 
   return (
     <>
-      {/* A linha do terminal chega no topo do desenho, não no balão. */}
-      <Handle type="target" position={Position.Top} className="ancora ancora-bixinho" isConnectable={false} />
+      {ANCORAS_DO_BIXINHO.map(({ id, posicao, classe }) => (
+        <Handle key={id} id={id} type="target" position={posicao} className={classe} isConnectable={false} />
+      ))}
       {/* Montada só com o bixinho selecionado: a barra do React Flow acompanha
           cada quadro de pan/zoom e varre todos os nós a cada atualização. */}
       {selecionado && (

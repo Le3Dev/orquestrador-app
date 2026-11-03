@@ -370,6 +370,31 @@ describe("NoTerminal", () => {
     expect(screen.getByText("resuma o projeto")).toBeInTheDocument();
   });
 
+  it("tem uma âncora de saída no meio de cada lado, também enquanto carrega", () => {
+    const ancoras = (container: HTMLElement) =>
+      [...container.querySelectorAll<HTMLElement>(".react-flow__handle")].map((ancora) => [
+        ancora.dataset.handleid,
+        ancora.dataset.handlepos,
+        ancora.classList.contains("source"),
+      ]);
+    const esperadas = [
+      ["baixo", "bottom", true],
+      ["cima", "top", true],
+      ["direita", "right", true],
+      ["esquerda", "left", true],
+    ];
+
+    const { container, unmount } = render(<Terminal canvas={canvasDoTerminal(conversaDoTerminal())} no={propsDoNo()} />);
+    expect(ancoras(container)).toEqual(esperadas);
+    unmount();
+
+    const carregando = render(
+      <Terminal canvas={{ ...canvasDoTerminal(conversaDoTerminal()), orquestradores: new Map() }} no={propsDoNo()} />,
+    );
+    expect(screen.getByText("carregando orquestrador…")).toBeInTheDocument();
+    expect(ancoras(carregando.container)).toEqual(esperadas);
+  });
+
   it("'Nova conversa' no ⚙ fica desabilitado durante um pedido", () => {
     render(<Terminal canvas={canvasDoTerminal(conversaDoTerminal())} no={propsDoNo()} />);
 
