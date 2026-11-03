@@ -344,6 +344,8 @@ function novoTurno(evento: Extract<EventoRegistrado, { tipo: "turno_iniciado" }>
       // Os anteriores às opções de trabalho direto e de plano automático ficam com o padrão (ligadas).
       permitirTrabalhoDireto: evento.configuracao.permitirTrabalhoDireto ?? true,
       proporPlanoEmPedidosGrandes: evento.configuracao.proporPlanoEmPedidosGrandes ?? true,
+      // Os anteriores às instruções personalizadas rodaram sem elas.
+      instrucoesPersonalizadas: evento.configuracao.instrucoesPersonalizadas ?? "",
     },
     // Pedidos gravados antes do Plan Mode foram todos de execução.
     modo: evento.modo ?? "execucao",

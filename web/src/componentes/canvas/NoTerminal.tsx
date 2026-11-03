@@ -78,7 +78,11 @@ export function PainelDeConfiguracao({ orquestrador, trabalhando, aoFechar, aoLi
   return (
     <div className="custom-scrollbar flex max-h-[70%] flex-col gap-4 overflow-y-auto border-b border-border bg-surface-2 px-4 py-3 nodrag nowheel">
       <span className="rotulo-tecnico">configuração · vale a partir do próximo pedido</span>
-      <CamposDaConfiguracao valor={configuracao} aoMudar={setConfiguracao} />
+      <CamposDaConfiguracao
+        valor={configuracao}
+        aoMudar={setConfiguracao}
+        pastaDeTrabalho={orquestrador.pastaDeTrabalho}
+      />
       {erro !== null && <div className="alert alert-error">{erro}</div>}
       <div className="flex justify-between gap-2">
         <div className="flex gap-2">
@@ -133,6 +137,7 @@ function useConfiguracaoEstavel(atual: DadosDaConfiguracao): DadosDaConfiguracao
     permitirCommitEPush,
     permitirTrabalhoDireto,
     proporPlanoEmPedidosGrandes,
+    instrucoesPersonalizadas,
   } = atual;
   const { modo, limite } = atual.quantidadeDeSubagentes;
   return useMemo<DadosDaConfiguracao>(
@@ -146,6 +151,7 @@ function useConfiguracaoEstavel(atual: DadosDaConfiguracao): DadosDaConfiguracao
       permitirCommitEPush,
       permitirTrabalhoDireto,
       proporPlanoEmPedidosGrandes,
+      instrucoesPersonalizadas,
     }),
     [
       modeloDoOrquestrador,
@@ -158,6 +164,7 @@ function useConfiguracaoEstavel(atual: DadosDaConfiguracao): DadosDaConfiguracao
       permitirCommitEPush,
       permitirTrabalhoDireto,
       proporPlanoEmPedidosGrandes,
+      instrucoesPersonalizadas,
     ],
   );
 }
@@ -438,6 +445,18 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
         </span>
         <EtiquetaDeWorktree worktree={orquestrador.worktree} className="max-w-[9rem]" />
         <span className="flex-1" />
+        {orquestrador.instrucoesAtivas !== null && (
+          <span
+            className="chip chip-instrucoes"
+            title={
+              orquestrador.instrucoesAtivas === "orquestrador"
+                ? "Instruções personalizadas deste orquestrador ativas (⚙ para ver ou editar)"
+                : "Instruções padrão ativas (Preferências, na barra do canvas)"
+            }
+          >
+            {orquestrador.instrucoesAtivas === "orquestrador" ? "instruções" : "instruções padrão"}
+          </span>
+        )}
         {servidor.conectado && conexoes.get(orquestradorId) === "reconectando" && (
           <span className="mono text-error">reconectando…</span>
         )}

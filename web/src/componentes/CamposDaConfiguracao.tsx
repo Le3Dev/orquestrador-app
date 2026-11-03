@@ -8,6 +8,8 @@ import type {
   NivelDePermissao,
 } from "../shared/api/tipos";
 import { ROTULOS_DAS_PERMISSOES, ROTULOS_DOS_ESFORCOS, ROTULOS_DOS_MODELOS } from "../shared/formatacao";
+import { CampoDeInstrucoes } from "./CampoDeInstrucoes";
+import { PreviaDoPromptFinal } from "./PreviaDoPromptFinal";
 
 const LIMITE_DE_SUBAGENTES = 10;
 
@@ -108,13 +110,16 @@ function SeletorDeEsforco({ rotulo, valor, idDaAjuda, aoEscolher }: PropsDoSelet
 interface Props {
   valor: DadosDaConfiguracao;
   aoMudar: (configuracao: DadosDaConfiguracao) => void;
+  /** A pasta do orquestrador (ou a escolhida no rascunho), para a pré-visualização do prompt. */
+  pastaDeTrabalho?: string | undefined;
 }
 
 /**
  * Modelos e esforço, quantidade de subagentes, permissões e o quanto o
- * orquestrador faz sozinho ou planeja antes — usado ao criar e ao reconfigurar.
+ * orquestrador faz sozinho ou planeja antes, e as instruções personalizadas.
+ * Usado ao criar e ao reconfigurar.
  */
-export function CamposDaConfiguracao({ valor, aoMudar }: Props) {
+export function CamposDaConfiguracao({ valor, aoMudar, pastaDeTrabalho }: Props) {
   const idDoLimite = useId();
   const idDaAjudaDoEsforco = useId();
   const idDaAjudaDoCommit = useId();
@@ -276,6 +281,17 @@ export function CamposDaConfiguracao({ valor, aoMudar }: Props) {
         <span id={idDaAjudaDoPlano} className="hint">
           Em pedidos grandes, o orquestrador responde com um plano para você aprovar antes de alterar.
         </span>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <CampoDeInstrucoes
+          rotulo="Instruções personalizadas (opcional)"
+          ajuda="Regras suas que este orquestrador segue em todo pedido, além das dele. Valem já no próximo pedido, inclusive nesta conversa. Vazio: valem as instruções padrão (Preferências), se houver. Não ampliam as permissões acima."
+          placeholder="Ex.: Responda em tópicos curtos. Rode os testes antes de concluir."
+          valor={valor.instrucoesPersonalizadas}
+          aoMudar={(texto) => mudar("instrucoesPersonalizadas", texto)}
+        />
+        <PreviaDoPromptFinal configuracao={valor} pastaDeTrabalho={pastaDeTrabalho} />
       </div>
 
       <p className="hint">

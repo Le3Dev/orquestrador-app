@@ -1,8 +1,10 @@
 import type {
   DadosDaConfiguracao,
   DadosDaNota,
+  DadosDasPreferencias,
   ModoDoTurno,
   PastaDeProjeto,
+  PreviaDoPrompt,
   ResumoDoOrquestrador,
   SaudeDoServidor,
   TipoDeImagem,
@@ -128,6 +130,19 @@ export const api = {
   removerNota: (id: string) => requisitar<null>(`/notas/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   saude: () => requisitar<SaudeDoServidor>("/saude"),
+
+  lerPreferencias: () => requisitar<DadosDasPreferencias>("/preferencias"),
+
+  /** Só os campos enviados mudam; vale a partir do próximo pedido de cada orquestrador. */
+  alterarPreferencias: (alteracao: Partial<DadosDasPreferencias>) =>
+    requisitar<DadosDasPreferencias>("/preferencias", { method: "PATCH", body: JSON.stringify(alteracao) }),
+
+  /** O que o orquestrador receberia com esta configuração (ainda não salva). Não grava nada. */
+  previaDoPrompt: (configuracao: DadosDaConfiguracao, pastaDeTrabalho?: string, modo: ModoDoTurno = "execucao") =>
+    requisitar<PreviaDoPrompt>("/previa-do-prompt", {
+      method: "POST",
+      body: JSON.stringify({ configuracao, modo, ...(pastaDeTrabalho ? { pastaDeTrabalho } : {}) }),
+    }),
 
   enderecoDoAnexo: (id: string, arquivo: string) =>
     `/api/orquestradores/${encodeURIComponent(id)}/anexos/${encodeURIComponent(arquivo)}`,

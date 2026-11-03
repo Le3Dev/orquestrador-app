@@ -13,6 +13,7 @@ const configuracao: DadosDaConfiguracao = {
   permitirCommitEPush: false,
   permitirTrabalhoDireto: true,
   proporPlanoEmPedidosGrandes: true,
+  instrucoesPersonalizadas: "",
 };
 
 function renderizar(alteracoes: Partial<DadosDaConfiguracao> = {}) {
@@ -139,6 +140,50 @@ describe("CamposDaConfiguracao", () => {
 
       fireEvent.change(dosSubagentes, { target: { value: "medio" } });
       expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, esforcoDosSubagentes: "medio" });
+    });
+  });
+
+  describe("instruções personalizadas", () => {
+    function campo() {
+      return screen.getByRole("textbox", { name: "Instruções personalizadas (opcional)" });
+    }
+
+    it("começa vazio, com ajuda e contador, e muda só esse campo ao digitar", () => {
+      const { aoMudar } = renderizar();
+
+      expect(campo()).toHaveValue("");
+      expect(campo()).toHaveAccessibleDescription(/Vazio: valem as instruções padrão/);
+      expect(screen.getByText("0 / 4.000")).toBeInTheDocument();
+
+      fireEvent.change(campo(), { target: { value: "Comece com PIRULITO.\nDepois o resto." } });
+      expect(aoMudar).toHaveBeenLastCalledWith({
+        ...configuracao,
+        instrucoesPersonalizadas: "Comece com PIRULITO.\nDepois o resto.",
+      });
+    });
+
+    it("o contador ignora espaço sobrando, como o servidor", () => {
+      renderizar({ instrucoesPersonalizadas: "  abc  \n\n\n\n" });
+
+      expect(screen.getByText("3 / 4.000")).toBeInTheDocument();
+    });
+
+    it("acima do limite, avisa sem cortar o texto", () => {
+      const longo = "x".repeat(4_001);
+      renderizar({ instrucoesPersonalizadas: longo });
+
+      expect(campo()).toHaveValue(longo);
+      expect(campo()).toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByRole("alert")).toHaveTextContent(/Passou do limite de 4.000 caracteres/);
+    });
+
+    it("tem o botão de pré-visualizar o prompt final", () => {
+      renderizar();
+
+      expect(screen.getByRole("button", { name: "Pré-visualizar prompt final" })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
     });
   });
 });

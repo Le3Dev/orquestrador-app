@@ -18,6 +18,7 @@ const CONFIGURACAO_PADRAO: DadosDaConfiguracao = {
   permitirCommitEPush: false,
   permitirTrabalhoDireto: true,
   proporPlanoEmPedidosGrandes: true,
+  instrucoesPersonalizadas: "",
 };
 
 /**
@@ -149,7 +150,7 @@ export function NoRascunho({ id, selected }: NodeProps<TipoDoNo>) {
             </div>
           </div>
 
-          <CamposDaConfiguracao valor={configuracao} aoMudar={setConfiguracao} />
+          <CamposDaConfiguracao valor={configuracao} aoMudar={setConfiguracao} pastaDeTrabalho={pasta} />
 
           {erro !== null && <p className="mono texto-longo text-error">✗ {erro}</p>}
         </div>

@@ -106,6 +106,7 @@ const configuracao: DadosDaConfiguracao = {
   permitirCommitEPush: false,
   permitirTrabalhoDireto: true,
   proporPlanoEmPedidosGrandes: true,
+  instrucoesPersonalizadas: "",
 };
 
 function orquestrador(id: string): ResumoDoOrquestrador {
@@ -116,6 +117,7 @@ function orquestrador(id: string): ResumoDoOrquestrador {
     nomeDaPasta: id,
     situacao: "trabalhando",
     configuracao,
+    instrucoesAtivas: null,
     criadoEm: "2026-10-28T12:00:00Z",
     totalDeTurnos: 1,
     ultimoTurno: null,

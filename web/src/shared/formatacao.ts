@@ -59,6 +59,7 @@ function descreverModelo(modelo: ModeloClaude, esforco: EsforcoDeRaciocinio): st
  * Com esforço escolhido (diferente de "padrao"): "Opus (esforço alto) → Sonnet (esforço médio) · …".
  * O trabalho direto e o plano automático vêm ligados: só aparecem quando desligados
  * (" · delegação total", " · sem plano automático").
+ * Com instruções personalizadas próprias, termina com " · instruções próprias".
  */
 export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string {
   const { modo, limite } = configuracao.quantidadeDeSubagentes;
@@ -73,6 +74,7 @@ export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string
     ...(configuracao.permitirCommitEPush ? ["commit/push quando pedir"] : []),
     ...(configuracao.permitirTrabalhoDireto ? [] : ["delegação total"]),
     ...(configuracao.proporPlanoEmPedidosGrandes ? [] : ["sem plano automático"]),
+    ...(configuracao.instrucoesPersonalizadas.trim() === "" ? [] : ["instruções próprias"]),
   ].join(" · ");
 }
 

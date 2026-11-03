@@ -50,6 +50,7 @@ const configuracao: DadosDaConfiguracao = {
   permitirCommitEPush: false,
   permitirTrabalhoDireto: true,
   proporPlanoEmPedidosGrandes: true,
+  instrucoesPersonalizadas: "",
 };
 
 function orquestrador(alteracoes: Partial<DadosDaConfiguracao> = {}): ResumoDoOrquestrador {
@@ -60,6 +61,7 @@ function orquestrador(alteracoes: Partial<DadosDaConfiguracao> = {}): ResumoDoOr
     nomeDaPasta: "painel",
     situacao: "ocioso",
     configuracao: { ...configuracao, ...alteracoes },
+    instrucoesAtivas: null,
     criadoEm: "2026-10-28T12:00:00Z",
     totalDeTurnos: 0,
     ultimoTurno: null,
@@ -157,6 +159,35 @@ describe("PainelDeConfiguracao", () => {
       permitirTrabalhoDireto: false,
       proporPlanoEmPedidosGrandes: false,
     });
+  });
+
+  it("carrega as instruções salvas e envia as editadas no PATCH junto com o resto da configuração", async () => {
+    const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+    const { aoFechar } = renderizar(orquestrador({ instrucoesPersonalizadas: "Use Jest." }));
+    const campo = screen.getByRole("textbox", { name: "Instruções personalizadas (opcional)" });
+
+    expect(campo).toHaveValue("Use Jest.");
+    fireEvent.change(campo, { target: { value: "Sempre comece a resposta com a palavra PIRULITO." } });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+    await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+    expect(alterar).toHaveBeenCalledWith("o1", {
+      ...configuracao,
+      instrucoesPersonalizadas: "Sempre comece a resposta com a palavra PIRULITO.",
+    });
+  });
+
+  it("\"Voltar\" descarta a edição das instruções sem PATCH", () => {
+    const alterar = vi.spyOn(api, "alterarConfiguracao");
+    const { aoFechar } = renderizar(orquestrador());
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Instruções personalizadas (opcional)" }), {
+      target: { value: "rascunho" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Voltar" }));
+
+    expect(aoFechar).toHaveBeenCalledTimes(1);
+    expect(alterar).not.toHaveBeenCalled();
   });
 
   it("se o servidor recusar, mostra o erro e o painel continua aberto", async () => {

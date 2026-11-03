@@ -1075,3 +1075,35 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   /* A bolinha é SMIL, que ignora as regras de animação do CSS acima. */
   .bolinha-da-troca { display: none; }
 }
+
+/* Instruções personalizadas: texto livre com altura contida (o painel ⚙
+   divide a altura com a transcrição) e a prévia do prompt montado. */
+.textarea-instrucoes {
+  min-height: 5.5rem;
+  max-height: 16rem;
+  resize: vertical;
+  line-height: 1.45;
+  font-family: var(--fonte-mono);
+  font-size: 12px;
+}
+
+.chip-instrucoes {
+  color: var(--active);
+  background: color-mix(in srgb, var(--active) 14%, transparent);
+}
+
+.previa-do-prompt-texto {
+  max-height: 18rem;
+  overflow: auto;
+  margin: 0;
+  padding: 10px 12px;
+  font-family: var(--fonte-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--secondary);
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-input);
+}

@@ -86,10 +86,20 @@ interface PropsDaBarra {
   aoCriarNota: () => void;
   aoOrganizar: () => void;
   podeOrganizar: boolean;
+  /** Abre ou fecha o painel de Preferências (instruções padrão). */
+  aoAlternarPreferencias: () => void;
+  preferenciasAbertas: boolean;
 }
 
 /** Canto superior esquerdo: identidade do app e as ações do canvas. */
-export function BarraDoCanvas({ aoCriar, aoCriarNota, aoOrganizar, podeOrganizar }: PropsDaBarra) {
+export function BarraDoCanvas({
+  aoCriar,
+  aoCriarNota,
+  aoOrganizar,
+  podeOrganizar,
+  aoAlternarPreferencias,
+  preferenciasAbertas,
+}: PropsDaBarra) {
   return (
     <div className="painel-flutuante flex items-center gap-3 px-3 py-2">
       <div className="no-orquestrador-icone h-8 w-8">
@@ -119,6 +129,15 @@ export function BarraDoCanvas({ aoCriar, aoCriarNota, aoOrganizar, podeOrganizar
         title="Coloca os terminais lado a lado, e as notas em colunas à direita deles"
       >
         Organizar
+      </button>
+      <button
+        type="button"
+        className="btn btn-sm btn-outline"
+        onClick={aoAlternarPreferencias}
+        aria-expanded={preferenciasAbertas}
+        title="Instruções padrão para todos os orquestradores"
+      >
+        Preferências
       </button>
     </div>
   );

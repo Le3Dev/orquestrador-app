@@ -44,6 +44,7 @@ function turno(
       permitirCommitEPush: false,
       permitirTrabalhoDireto: true,
       proporPlanoEmPedidosGrandes: true,
+      instrucoesPersonalizadas: "",
     },
     modo,
     decisaoDoPlano: null,

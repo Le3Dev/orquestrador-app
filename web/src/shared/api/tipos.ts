@@ -34,6 +34,32 @@ export interface DadosDaConfiguracao {
   permitirTrabalhoDireto: boolean;
   /** Em pedidos grandes, o Orquestrador responde com um plano para aprovar antes de alterar. Ligado por padrão. */
   proporPlanoEmPedidosGrandes: boolean;
+  /**
+   * Instruções do usuário acrescentadas ao fim do bloco de cada pedido. Vazias
+   * por padrão: aí vale o padrão global (`DadosDasPreferencias.instrucoesPadrao`), se houver.
+   */
+  instrucoesPersonalizadas: string;
+}
+
+/** Limite das instruções personalizadas e das padrão, como o servidor confere (já sem espaço sobrando). */
+export const TAMANHO_MAXIMO_DAS_INSTRUCOES = 4_000;
+
+/** De onde vêm as instruções personalizadas de um pedido: as do orquestrador ou o padrão global. */
+export type OrigemDasInstrucoes = "orquestrador" | "padrao";
+
+/** Preferências que valem para todos os orquestradores. */
+export interface DadosDasPreferencias {
+  /** Instruções para os orquestradores sem instruções próprias. */
+  instrucoesPadrao: string;
+}
+
+/** O que o orquestrador receberia num pedido com uma configuração (`POST /previa-do-prompt`). */
+export interface PreviaDoPrompt {
+  /** System prompt da conversa (fixo desde o primeiro pedido). */
+  instrucoesIniciais: string;
+  /** A mensagem de um pedido: bloco da configuração, instruções personalizadas e o pedido. */
+  mensagem: string;
+  origemDasInstrucoes: OrigemDasInstrucoes | null;
 }
 
 /** Campos que faltam nos eventos gravados antes de existirem. */
@@ -42,12 +68,13 @@ type CamposPosterioresDaConfiguracao =
   | "esforcoDoOrquestrador"
   | "esforcoDosSubagentes"
   | "permitirTrabalhoDireto"
-  | "proporPlanoEmPedidosGrandes";
+  | "proporPlanoEmPedidosGrandes"
+  | "instrucoesPersonalizadas";
 
 /**
  * A configuração como os eventos a gravaram: os anteriores à opção de commit e
- * push, à escolha do esforço e às opções de trabalho direto e de plano
- * automático não têm esses campos.
+ * push, à escolha do esforço, às opções de trabalho direto e de plano
+ * automático e às instruções personalizadas não têm esses campos.
  */
 export type DadosDaConfiguracaoGravada = Omit<DadosDaConfiguracao, CamposPosterioresDaConfiguracao> &
   Partial<Pick<DadosDaConfiguracao, CamposPosterioresDaConfiguracao>>;
@@ -112,6 +139,8 @@ export interface ResumoDoOrquestrador {
   nomeDaPasta: string;
   situacao: SituacaoDoOrquestrador;
   configuracao: DadosDaConfiguracao;
+  /** De onde viriam as instruções personalizadas no próximo pedido; nulo sem nenhuma. */
+  instrucoesAtivas: OrigemDasInstrucoes | null;
   criadoEm: string;
   totalDeTurnos: number;
   ultimoTurno: { texto: string; situacao: SituacaoDoTurno; iniciadoEm: string } | null;

@@ -6,7 +6,16 @@ describe("BarraDoCanvas", () => {
   it("o \"+ notas\" fica ao lado do \"novo orquestrador\" e cria uma nota a cada clique", () => {
     const aoCriar = vi.fn();
     const aoCriarNota = vi.fn();
-    render(<BarraDoCanvas aoCriar={aoCriar} aoCriarNota={aoCriarNota} aoOrganizar={vi.fn()} podeOrganizar={false} />);
+    render(
+      <BarraDoCanvas
+        aoCriar={aoCriar}
+        aoCriarNota={aoCriarNota}
+        aoOrganizar={vi.fn()}
+        podeOrganizar={false}
+        aoAlternarPreferencias={vi.fn()}
+        preferenciasAbertas={false}
+      />,
+    );
     const botao = screen.getByRole("button", { name: "+ notas" });
 
     expect(botao).toHaveClass("btn", "btn-sm", "btn-cta");

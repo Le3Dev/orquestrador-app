@@ -34,6 +34,7 @@ const configuracao: DadosDaConfiguracao = {
   permitirCommitEPush: false,
   permitirTrabalhoDireto: true,
   proporPlanoEmPedidosGrandes: true,
+  instrucoesPersonalizadas: "",
 };
 
 function conversa(eventos: EventoDeOrquestracao[]): EstadoDaConversa {

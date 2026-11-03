@@ -24,6 +24,7 @@ function turno(ultimaAtividadeEm: string, subagentes: SituacaoDoSubagente[] = []
       permitirCommitEPush: false,
       permitirTrabalhoDireto: true,
       proporPlanoEmPedidosGrandes: true,
+      instrucoesPersonalizadas: "",
     },
     modo: "execucao",
     decisaoDoPlano: null,

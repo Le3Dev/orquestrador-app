@@ -16,6 +16,7 @@ const configuracao: DadosDaConfiguracao = {
   permitirCommitEPush: false,
   permitirTrabalhoDireto: true,
   proporPlanoEmPedidosGrandes: true,
+  instrucoesPersonalizadas: "",
 };
 
 function registrar(eventos: EventoDeOrquestracao[]): EventoRegistrado[] {
@@ -213,8 +214,33 @@ describe("aplicarEvento", () => {
       esforcoDosSubagentes: "padrao",
       permitirTrabalhoDireto: true,
       proporPlanoEmPedidosGrandes: true,
+      instrucoesPersonalizadas: "",
     });
     expect(novo?.configuracao.permitirCommitEPush).toBe(true);
+  });
+
+  it("lê sem instruções personalizadas os eventos gravados antes delas e mantém as dos novos", () => {
+    const configuracaoAntiga: DadosDaConfiguracaoGravada = {
+      modeloDoOrquestrador: "opus",
+      modeloDosSubagentes: "sonnet",
+      quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
+      nivelDePermissao: "leitura",
+    };
+    const [antigo, novo] = reproduzir(
+      registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "antigo", configuracao: configuracaoAntiga },
+        { tipo: "turno_cancelado", turnoId: "t1" },
+        {
+          tipo: "turno_iniciado",
+          turnoId: "t2",
+          texto: "novo",
+          configuracao: { ...configuracao, instrucoesPersonalizadas: "Comece com PIRULITO." },
+        },
+      ]),
+    ).turnos;
+
+    expect(antigo?.configuracao.instrucoesPersonalizadas).toBe("");
+    expect(novo?.configuracao.instrucoesPersonalizadas).toBe("Comece com PIRULITO.");
   });
 
   it("lê com o trabalho direto e o plano automático ligados os eventos gravados antes das opções", () => {

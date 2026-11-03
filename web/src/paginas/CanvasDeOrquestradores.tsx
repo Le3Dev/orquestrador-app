@@ -28,6 +28,7 @@ import {
   ErroDoCanvas,
   StatusDoCanvas,
 } from "../componentes/canvas/PaineisDoCanvas";
+import { PainelDePreferencias } from "../componentes/canvas/PainelDePreferencias";
 import type { ResumoDoOrquestrador } from "../shared/api/tipos";
 import { type AcoesDoCanvas, ProvedorDoCanvas, servidorParaOsNos, type ValorDoCanvas } from "../shared/canvas/contexto";
 import {
@@ -393,6 +394,9 @@ function Canvas() {
     () => [...conversas.values()].find((conversa) => conversa.cota !== null)?.cota ?? null,
     [conversas],
   );
+  const [preferenciasAbertas, setPreferenciasAbertas] = useState(false);
+  const alternarPreferencias = useCallback(() => setPreferenciasAbertas((abertas) => !abertas), []);
+  const fecharPreferencias = useCallback(() => setPreferenciasAbertas(false), []);
   const quantidadeDeJanelas = nos.filter((no) => !ehBixinho(no)).length;
   const podeOrganizar = quantidadeDeJanelas > 1;
 
@@ -406,7 +410,12 @@ function Canvas() {
           aoCriarNota={novaNota}
           aoOrganizar={organizar}
           podeOrganizar={podeOrganizar}
+          aoAlternarPreferencias={alternarPreferencias}
+          preferenciasAbertas={preferenciasAbertas}
         />
+        {preferenciasAbertas && (
+          <PainelDePreferencias aoFechar={fecharPreferencias} aoSalvar={() => void recarregar()} />
+        )}
         {erroDasNotas !== null && <ErroDoCanvas erro={erroDasNotas} aoFechar={descartarErroDasNotas} />}
         <Doca orquestradores={orquestradores} noCanvas={noCanvas} erro={erro} aoAbrir={abrirTerminal} />
       </Panel>
@@ -416,6 +425,10 @@ function Canvas() {
       novaNota,
       organizar,
       podeOrganizar,
+      preferenciasAbertas,
+      alternarPreferencias,
+      fecharPreferencias,
+      recarregar,
       erroDasNotas,
       descartarErroDasNotas,
       orquestradores,
