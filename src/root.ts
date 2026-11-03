@@ -10,6 +10,7 @@ import { ArmazemDeAnexosEmArquivo } from "./infraestrutura/arquivos/ArmazemDeAne
 import { ExploradorDePastas } from "./infraestrutura/arquivos/ExploradorDePastas";
 import { RepositorioDeNotasEmArquivo } from "./infraestrutura/arquivos/RepositorioDeNotasEmArquivo";
 import { RepositorioDeOrquestradoresEmArquivo } from "./infraestrutura/arquivos/RepositorioDeOrquestradoresEmArquivo";
+import { RepositorioDePreferenciasEmArquivo } from "./infraestrutura/arquivos/RepositorioDePreferenciasEmArquivo";
 import { FachadaClaudeCodeCli } from "./infraestrutura/claudecode/FachadaClaudeCodeCli";
 import { MotorClaudeCodeCli } from "./infraestrutura/claudecode/MotorClaudeCodeCli";
 import { lerConfiguracao } from "./infraestrutura/Configuracao";
@@ -32,6 +33,7 @@ async function iniciar(): Promise<void> {
 
   const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(configuracao.pastaDeDados);
   const notas = await RepositorioDeNotasEmArquivo.abrir(configuracao.pastaDeDados);
+  const preferencias = await RepositorioDePreferenciasEmArquivo.abrir(configuracao.pastaDeDados);
 
   // Antes de registrar processos novos: se o servidor anterior caiu, os
   // agentes dele podem ter ficado rodando sozinhos.
@@ -65,6 +67,7 @@ async function iniciar(): Promise<void> {
     publicador: canal,
     anexos,
     worktrees,
+    preferencias,
     gerarId: randomUUID,
     agora: () => new Date(),
   });
@@ -95,6 +98,7 @@ async function iniciar(): Promise<void> {
       canal,
       explorador: new ExploradorDePastas(configuracao.pastaRaizDosProjetos),
       anexos,
+      preferencias,
       pastaRaiz: configuracao.pastaRaizDosProjetos,
     }),
   );

@@ -1,4 +1,5 @@
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
+import { InstrucoesAplicadas, linhasDasInstrucoes } from "./InstrucoesPersonalizadas";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { DESCRICAO_DO_NIVEL, NivelDePermissao, TRABALHO_DIRETO_NO_NIVEL } from "./NivelDePermissao";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
@@ -110,12 +111,18 @@ export function instrucoesDoOrquestrador(pasta: PastaDeTrabalho): string {
  * foi escolhida — inclusive em conversas já começadas, cujas instruções
  * iniciais ainda falam da configuração antiga; por isso o bloco declara que
  * as substitui.
+ *
+ * As instruções personalizadas do usuário (`resolverInstrucoes`) vão no fim
+ * do bloco pelo mesmo motivo: editadas no meio da conversa, valem já no
+ * pedido seguinte. Sem elas, o bloco fica exatamente como antes.
  */
 export function mensagemParaOOrquestrador(
   texto: string,
   configuracao: ConfiguracaoDoOrquestrador,
   caminhosDasImagens: readonly string[] = [],
   modo: ModoDoTurno = "execucao",
+  instrucoes: InstrucoesAplicadas | null = null,
+  revogarInstrucoesAnteriores = false,
 ): string {
   const planejamento = modo === "planejamento";
   // No planejamento os agentes só leem (as ferramentas já vêm travadas
@@ -157,6 +164,7 @@ export function mensagemParaOOrquestrador(
     ...regrasDoPlanejamento,
     ...regrasDoTamanho,
     ...imagens,
+    ...linhasDasInstrucoes(instrucoes, MARCA_DA_CONFIGURACAO, revogarInstrucoesAnteriores),
     `</${MARCA_DA_CONFIGURACAO}>`,
     "",
     texto,

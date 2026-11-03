@@ -1,6 +1,7 @@
 import { TipoDeImagem } from "./Anexo";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
+import { InstrucoesAplicadas } from "./InstrucoesPersonalizadas";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 
@@ -23,6 +24,16 @@ export interface PedidoDeTurno {
   imagens: readonly ImagemDoPedido[];
   /** Pasta das imagens, liberada para leitura dos Subagentes; nula sem imagens. */
   pastaDasImagens: string | null;
+  /**
+   * Instruções personalizadas que valem neste pedido (as do Orquestrador ou o
+   * padrão global), resolvidas quando o turno começou; nulas sem nenhuma.
+   */
+  instrucoes: InstrucoesAplicadas | null;
+  /**
+   * Sem instruções neste pedido, mas a conversa já recebeu instruções em
+   * pedidos anteriores (que seguem no histórico): avisar que deixaram de valer.
+   */
+  revogarInstrucoesAnteriores: boolean;
 }
 
 export type ResultadoDoTurno =

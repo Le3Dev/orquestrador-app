@@ -39,6 +39,8 @@ function pedido(
     orquestradorId: "o1",
     imagens: [],
     pastaDasImagens: null,
+    instrucoes: null,
+    revogarInstrucoesAnteriores: false,
     sessaoId: "sessao-1",
     sessaoIniciada,
     texto: "analise",

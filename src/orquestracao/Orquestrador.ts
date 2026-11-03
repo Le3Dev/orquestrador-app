@@ -36,6 +36,11 @@ export interface DadosDoOrquestrador {
   configuracao: DadosDaConfiguracao;
   turnos: DadosDoTurno[];
   worktree?: DadosDoWorktree | null;
+  /**
+   * Se algum pedido da conversa atual já levou instruções personalizadas.
+   * Ausente nos dados gravados antes de elas existirem: vale `false`.
+   */
+  instrucoesNaConversa?: boolean | undefined;
 }
 
 export interface NovoOrquestrador {
@@ -70,6 +75,7 @@ export class Orquestrador {
     private configuracaoAtual: ConfiguracaoDoOrquestrador,
     private turnos: Turno[],
     private worktreeAtual: DadosDoWorktree | null,
+    private instrucoesJaEnviadas: boolean,
   ) {}
 
   static criar(novo: NovoOrquestrador): Orquestrador {
@@ -93,6 +99,7 @@ export class Orquestrador {
       novo.configuracao,
       [],
       null,
+      false,
     );
   }
 
@@ -109,6 +116,7 @@ export class Orquestrador {
       // Ao reabrir, nenhum turno está de fato rodando: um worktree salvo como
       // "ativo" era de um turno interrompido pela queda do servidor.
       dados.worktree === undefined || dados.worktree === null ? null : { ...dados.worktree, ativo: false },
+      dados.instrucoesNaConversa ?? false,
     );
   }
 
@@ -211,6 +219,7 @@ export class Orquestrador {
     this.turnos = [];
     this.sessaoAtual = novaSessaoId;
     this.sessaoJaIniciada = false;
+    this.instrucoesJaEnviadas = false;
     return { tipo: "conversa_limpa", turnosAnteriores, planoDescartado, worktreeComAlteracoes };
   }
 
@@ -254,6 +263,20 @@ export class Orquestrador {
       anexos: dadosDosAnexos,
       modo,
     };
+  }
+
+  /**
+   * Registra se o pedido que começa leva instruções personalizadas e diz se
+   * ele precisa revogar as anteriores: sem instruções agora, mas com
+   * instruções já enviadas nesta conversa (que seguem no histórico da sessão).
+   * Quem nunca usou instruções nunca recebe a revogação.
+   */
+  registrarInstrucoesDoPedido(comInstrucoes: boolean): { revogarAnteriores: boolean } {
+    const revogarAnteriores = !comInstrucoes && this.instrucoesJaEnviadas;
+    if (comInstrucoes) {
+      this.instrucoesJaEnviadas = true;
+    }
+    return { revogarAnteriores };
   }
 
   /** O usuário aprovou o Plano: a execução vem num turno novo, na mesma sessão. */
@@ -325,6 +348,7 @@ export class Orquestrador {
       configuracao: this.configuracaoAtual.paraDados(),
       turnos: this.turnos.map((turno) => turno.paraDados()),
       worktree: this.worktreeAtual === null ? null : { ...this.worktreeAtual },
+      instrucoesNaConversa: this.instrucoesJaEnviadas,
     };
   }
 

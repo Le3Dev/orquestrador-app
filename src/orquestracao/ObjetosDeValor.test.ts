@@ -68,6 +68,8 @@ describe("ConfiguracaoDoOrquestrador", () => {
   } as const;
   const esforcosPadrao = { esforcoDoOrquestrador: "padrao", esforcoDosSubagentes: "padrao" } as const;
   const opcoesDeTrabalhoPadrao = { permitirTrabalhoDireto: true, proporPlanoEmPedidosGrandes: true } as const;
+  // Sem instruções personalizadas, o campo existe e fica vazio.
+  const semInstrucoes = { instrucoesPersonalizadas: "" } as const;
 
   it("nasce com commit e push desligados quando a opção não é informada", () => {
     const configuracao = ConfiguracaoDoOrquestrador.de(dados);
@@ -78,6 +80,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
       permitirCommitEPush: false,
       ...esforcosPadrao,
       ...opcoesDeTrabalhoPadrao,
+      ...semInstrucoes,
     });
   });
 
@@ -95,6 +98,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
       permitirCommitEPush: true,
       ...esforcosPadrao,
       ...opcoesDeTrabalhoPadrao,
+      ...semInstrucoes,
     });
     expect(ligada.com({ nivelDePermissao: "edicao" }).permitirCommitEPush).toBe(true);
     expect(ligada.com({ permitirCommitEPush: undefined }).permitirCommitEPush).toBe(true);

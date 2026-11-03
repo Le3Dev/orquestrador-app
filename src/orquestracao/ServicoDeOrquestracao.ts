@@ -9,12 +9,14 @@ import { ControleDeExecucoes, PublicadorDeEventos } from "./ControleDeExecucoes"
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { EventoDeOrquestracao, EventoDoMotor } from "./EventoDeOrquestracao";
 import { mensagemDeAprovacaoDoPlano, separarPropostaDePlano } from "./InstrucoesDoOrquestrador";
+import { InstrucoesAplicadas, resolverInstrucoes } from "./InstrucoesPersonalizadas";
 import { ModoDoTurno } from "./ModoDoTurno";
-import { MotorDeAgentes, ResultadoDoTurno } from "./MotorDeAgentes";
+import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "./MotorDeAgentes";
 import { Orquestrador, TAMANHO_MAXIMO_DA_MENSAGEM } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { GerenciadorDeWorktrees } from "./PreparoDeWorktree";
 import { RepositorioDeOrquestradores } from "./RepositorioDeOrquestradores";
+import { RepositorioDePreferencias } from "./RepositorioDePreferencias";
 
 export interface DependenciasDoServico {
   repositorio: RepositorioDeOrquestradores;
@@ -23,6 +25,8 @@ export interface DependenciasDoServico {
   publicador: PublicadorDeEventos;
   anexos: ArmazemDeAnexos;
   worktrees: GerenciadorDeWorktrees;
+  /** De onde vêm as instruções padrão, para Orquestradores sem instruções próprias. */
+  preferencias: RepositorioDePreferencias;
   gerarId: () => string;
   agora: () => Date;
 }
@@ -76,6 +80,17 @@ export class ServicoDeOrquestracao {
     return orquestrador;
   }
 
+  /**
+   * As instruções personalizadas que um pedido com esta configuração
+   * receberia agora: as próprias, se houver; senão o padrão global.
+   */
+  instrucoesPara(configuracao: ConfiguracaoDoOrquestrador): InstrucoesAplicadas | null {
+    return resolverInstrucoes(
+      configuracao.instrucoesPersonalizadas,
+      this.dependencias.preferencias.atuais().instrucoesPadrao,
+    );
+  }
+
   async alterarConfiguracao(id: string, alteracoes: AlteracoesDaConfiguracao): Promise<Orquestrador> {
     const orquestrador = this.buscar(id);
     this.publicar(orquestrador, orquestrador.alterarConfiguracao(alteracoes));
@@ -114,6 +129,10 @@ export class ServicoDeOrquestracao {
     // A mesma do evento `turno_iniciado`: o turno segue com ela até o fim,
     // mesmo que o usuário altere a configuração enquanto ele roda.
     const configuracaoDoTurno = orquestrador.configuracao;
+    // Resolvidas agora, junto com a configuração: mudar o padrão global com o
+    // turno rodando também só vale a partir do próximo.
+    const instrucoesDoTurno = this.instrucoesPara(configuracaoDoTurno);
+    const { revogarAnteriores } = orquestrador.registrarInstrucoesDoPedido(instrucoesDoTurno !== null);
     // O sinal nasce antes de qualquer espera: um cancelamento que chegue
     // enquanto o turno é gravado já encontra a execução registrada.
     const sinal = execucoes.iniciar(orquestrador.id);
@@ -130,7 +149,10 @@ export class ServicoDeOrquestracao {
       throw erro;
     }
 
-    const conclusao = this.executar(orquestrador, turnoId, sinal, configuracaoDoTurno).finally(() =>
+    const conclusao = this.executar(orquestrador, turnoId, sinal, configuracaoDoTurno, {
+      instrucoes: instrucoesDoTurno,
+      revogarInstrucoesAnteriores: revogarAnteriores,
+    }).finally(() =>
       execucoes.encerrar(orquestrador.id),
     );
     return { turnoId, conclusao };
@@ -242,6 +264,7 @@ export class ServicoDeOrquestracao {
     turnoId: string,
     sinal: AbortSignal,
     configuracaoDoTurno: ConfiguracaoDoOrquestrador,
+    instrucoesDoTurno: Pick<PedidoDeTurno, "instrucoes" | "revogarInstrucoesAnteriores">,
   ): Promise<void> {
     const { motor, repositorio, anexos, worktrees, agora } = this.dependencias;
     const turno = orquestrador.turnoEmAndamento;
@@ -282,6 +305,7 @@ export class ServicoDeOrquestracao {
             tipoDeMidia: anexo.tipoDeMidia,
           })),
           pastaDasImagens: anexosDoTurno.length > 0 ? anexos.pastaDe(orquestrador.id) : null,
+          ...instrucoesDoTurno,
         },
         (evento) => this.registrarDoMotor(orquestrador, turnoId, evento),
         sinal,

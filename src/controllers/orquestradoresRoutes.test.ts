@@ -15,9 +15,22 @@ import { EventoDeOrquestracao, EventoDoMotor, EventoRegistrado } from "../orques
 import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "../orquestracao/MotorDeAgentes";
 import { Orquestrador } from "../orquestracao/Orquestrador";
 import { PastaDeTrabalho } from "../orquestracao/PastaDeTrabalho";
+import { PreferenciasGlobais } from "../orquestracao/PreferenciasGlobais";
 import { ConversaArquivada, RepositorioDeOrquestradores } from "../orquestracao/RepositorioDeOrquestradores";
+import { RepositorioDePreferencias } from "../orquestracao/RepositorioDePreferencias";
 import { ServicoDeOrquestracao } from "../orquestracao/ServicoDeOrquestracao";
 import { criarOrquestradoresRoutes } from "./orquestradoresRoutes";
+
+/** Preferências globais em memória: `atuais` devolve o que o teste definiu. */
+class PreferenciasEmMemoria implements RepositorioDePreferencias {
+  preferencias = PreferenciasGlobais.vazias();
+  atuais(): PreferenciasGlobais {
+    return this.preferencias;
+  }
+  async salvar(preferencias: PreferenciasGlobais): Promise<void> {
+    this.preferencias = preferencias;
+  }
+}
 
 class RepositorioEmMemoria implements RepositorioDeOrquestradores {
   readonly orquestradores = new Map<string, Orquestrador>();
@@ -71,6 +84,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
   let repositorio: RepositorioEmMemoria;
   let motor: MotorImediato;
   let servico: ServicoDeOrquestracao;
+  let preferencias: PreferenciasEmMemoria;
   let explorador: ExploradorDePastas;
   let ids = 0;
 
@@ -79,6 +93,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
     motor = new MotorImediato();
     explorador = new ExploradorDePastas(raiz);
     const anexos = new ArmazemDeAnexosEmArquivo(path.join(tmpdir(), "orquestrador-rotas-teste"));
+    preferencias = new PreferenciasEmMemoria();
     servico = new ServicoDeOrquestracao({
       repositorio,
       motor,
@@ -89,6 +104,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
         preparar: async (_id, pastaDeTrabalho) => ({ cwd: pastaDeTrabalho, worktree: null }),
         concluir: async () => false,
       },
+      preferencias,
       gerarId: () => `id${++ids}`,
       agora: () => new Date("2026-10-28T12:00:00Z"),
     });
@@ -103,6 +119,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
         canal: new CanalDeEventos(),
         explorador,
         anexos,
+        preferencias,
         pastaRaiz: raiz,
       }),
     );
@@ -459,6 +476,134 @@ describe("rotas de orquestradores — modo de planejamento", () => {
 
       expect(resposta.status).toBe(400);
       expect(await resposta.json()).toEqual({ erro: mensagemDoPlano });
+    });
+  });
+
+  describe("instruções personalizadas e preferências globais", () => {
+    async function requisitar(metodo: string, caminho: string, corpo?: unknown): Promise<Response> {
+      return fetch(`${base}${caminho}`, {
+        method: metodo,
+        headers: { "Content-Type": "application/json" },
+        ...(corpo === undefined ? {} : { body: JSON.stringify(corpo) }),
+      });
+    }
+    const configuracaoBasica = {
+      modeloDoOrquestrador: "opus",
+      modeloDosSubagentes: "haiku",
+      quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
+      nivelDePermissao: "leitura",
+    } as const;
+
+    beforeEach(() => {
+      vi.spyOn(explorador, "existe").mockResolvedValue(true);
+      preferencias.preferencias = PreferenciasGlobais.vazias();
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("o POST aceita as instruções como campo opcional e o resumo indica que estão ativas", async () => {
+      const resposta = await postar("/orquestradores", {
+        nome: "Novo",
+        pastaDeTrabalho: raiz,
+        ...configuracaoBasica,
+        instrucoesPersonalizadas: "  Comece com PIRULITO.  \n",
+      });
+
+      expect(resposta.status).toBe(201);
+      const corpo = (await resposta.json()) as { configuracao: { instrucoesPersonalizadas: string }; instrucoesAtivas: string };
+      expect(corpo.configuracao.instrucoesPersonalizadas).toBe("Comece com PIRULITO.");
+      expect(corpo.instrucoesAtivas).toBe("orquestrador");
+    });
+
+    it("sem o campo, cria sem instruções e o resumo diz que não há nenhuma ativa", async () => {
+      const resposta = await postar("/orquestradores", { nome: "Novo", pastaDeTrabalho: raiz, ...configuracaoBasica });
+
+      const corpo = (await resposta.json()) as { configuracao: { instrucoesPersonalizadas: string }; instrucoesAtivas: unknown };
+      expect(corpo.configuracao.instrucoesPersonalizadas).toBe("");
+      expect(corpo.instrucoesAtivas).toBeNull();
+    });
+
+    it("o PATCH edita e limpa as instruções; o pedido seguinte já as recebe", async () => {
+      const editada = await requisitar("PATCH", `/orquestradores/${orquestrador.id}/configuracao`, {
+        instrucoesPersonalizadas: "Use tabelas.",
+      });
+      expect(editada.status).toBe(200);
+      expect(await postar(`/orquestradores/${orquestrador.id}/mensagens`, { texto: "oi" })).toHaveProperty("status", 202);
+      await aguardarOcioso();
+      expect(motor.pedidos.at(-1)?.instrucoes).toEqual({ texto: "Use tabelas.", origem: "orquestrador" });
+
+      const limpa = await requisitar("PATCH", `/orquestradores/${orquestrador.id}/configuracao`, {
+        instrucoesPersonalizadas: "",
+      });
+      expect(((await limpa.json()) as { instrucoesAtivas: unknown }).instrucoesAtivas).toBeNull();
+    });
+
+    it.each<[unknown, string]>([
+      [42, "As instruções personalizadas devem ser um texto."],
+      ["x".repeat(8_001), "As instruções personalizadas devem ter até 4000 caracteres."],
+      ["x".repeat(4_001), "As instruções personalizadas devem ter até 4000 caracteres (hoje têm 4001)."],
+    ])("o PATCH recusa instruções inválidas com 400 (%#)", async (valor, mensagem) => {
+      const resposta = await requisitar("PATCH", `/orquestradores/${orquestrador.id}/configuracao`, {
+        instrucoesPersonalizadas: valor,
+      });
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: mensagem });
+    });
+
+    it("GET e PATCH /preferencias leem e gravam as instruções padrão", async () => {
+      expect(await (await requisitar("GET", "/preferencias")).json()).toEqual({ instrucoesPadrao: "" });
+
+      const resposta = await requisitar("PATCH", "/preferencias", { instrucoesPadrao: " Responda curto. " });
+      expect(resposta.status).toBe(200);
+      expect(await resposta.json()).toEqual({ instrucoesPadrao: "Responda curto." });
+      expect(preferencias.atuais().instrucoesPadrao).toBe("Responda curto.");
+
+      const resumo = (await (await requisitar("GET", `/orquestradores/${orquestrador.id}`)).json()) as {
+        instrucoesAtivas: string;
+      };
+      expect(resumo.instrucoesAtivas).toBe("padrao");
+    });
+
+    it("PATCH /preferencias recusa valor inválido com 400", async () => {
+      const resposta = await requisitar("PATCH", "/preferencias", { instrucoesPadrao: ["a"] });
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: "As instruções padrão devem ser um texto." });
+    });
+
+    it("a prévia mostra o system prompt e a mensagem com as instruções que valeriam, sem salvar nada", async () => {
+      preferencias.preferencias = PreferenciasGlobais.de({ instrucoesPadrao: "Global." });
+      const resposta = await postar("/previa-do-prompt", {
+        configuracao: { ...configuracaoBasica, instrucoesPersonalizadas: "Comece com PIRULITO." },
+        pastaDeTrabalho: "painel",
+      });
+
+      expect(resposta.status).toBe(200);
+      const previa = (await resposta.json()) as { instrucoesIniciais: string; mensagem: string; origemDasInstrucoes: string };
+      expect(previa.origemDasInstrucoes).toBe("orquestrador");
+      expect(previa.instrucoesIniciais).toContain(`Pasta de trabalho: ${path.join(raiz, "painel")}`);
+      expect(previa.instrucoesIniciais).not.toContain("PIRULITO");
+      expect(previa.mensagem).toContain("<instrucoes-do-usuario>\nComece com PIRULITO.\n</instrucoes-do-usuario>\n</configuracao-do-pedido>");
+      expect(previa.mensagem).not.toContain("Global.");
+      expect(previa.mensagem.endsWith("(aqui entra a sua mensagem)")).toBe(true);
+      expect(orquestrador.configuracao.instrucoesPersonalizadas).toBe("");
+    });
+
+    it("a prévia sem instruções nem padrão não tem o bloco, e sem pasta usa um marcador", async () => {
+      const resposta = await postar("/previa-do-prompt", { configuracao: configuracaoBasica });
+
+      const previa = (await resposta.json()) as { instrucoesIniciais: string; mensagem: string; origemDasInstrucoes: unknown };
+      expect(previa.origemDasInstrucoes).toBeNull();
+      expect(previa.mensagem).not.toContain("instrucoes-do-usuario");
+      expect(previa.instrucoesIniciais).toContain("Pasta de trabalho: <pasta de trabalho>");
+    });
+
+    it("a prévia recusa pasta fora da raiz", async () => {
+      const resposta = await postar("/previa-do-prompt", { configuracao: configuracaoBasica, pastaDeTrabalho: "/etc" });
+
+      expect(resposta.status).toBe(400);
     });
   });
 });

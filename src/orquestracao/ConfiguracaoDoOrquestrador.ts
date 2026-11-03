@@ -1,5 +1,6 @@
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { ehEsforcoDeRaciocinio, ESFORCO_PADRAO, EsforcoDeRaciocinio } from "./EsforcoDeRaciocinio";
+import { instrucoesValidas } from "./InstrucoesPersonalizadas";
 import { ehModeloClaude, ModeloClaude } from "./ModeloClaude";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { ehNivelDePermissao, NivelDePermissao } from "./NivelDePermissao";
@@ -36,6 +37,13 @@ export interface DadosDaConfiguracao {
    * sempre o preenche.
    */
   proporPlanoEmPedidosGrandes?: boolean | undefined;
+  /**
+   * Instruções personalizadas do usuário para este Orquestrador, acrescentadas
+   * ao fim do bloco de cada pedido. Vazias, vale o padrão global (se houver).
+   * Ausentes nas configurações gravadas antes de a opção existir: vale `""`.
+   * `paraDados` sempre as preenche, já normalizadas.
+   */
+  instrucoesPersonalizadas?: string | undefined;
 }
 
 /** Só os campos informados mudam; os ausentes mantêm o valor atual. */
@@ -46,7 +54,8 @@ export type AlteracoesDaConfiguracao = {
 /**
  * Como um Orquestrador trabalha: modelos, esforço de raciocínio, quantos
  * Subagentes, o que eles podem fazer, se o Orquestrador faz o trivial ele
- * mesmo e se propõe um Plano antes de mudanças grandes. Objeto de valor —
+ * mesmo, se propõe um Plano antes de mudanças grandes e as instruções
+ * personalizadas do usuário. Objeto de valor —
  * alterar a configuração produz outra.
  */
 export class ConfiguracaoDoOrquestrador {
@@ -60,6 +69,7 @@ export class ConfiguracaoDoOrquestrador {
     public readonly esforcoDosSubagentes: EsforcoDeRaciocinio,
     public readonly permitirTrabalhoDireto: boolean,
     public readonly proporPlanoEmPedidosGrandes: boolean,
+    public readonly instrucoesPersonalizadas: string,
   ) {}
 
   static de(dados: DadosDaConfiguracao): ConfiguracaoDoOrquestrador {
@@ -98,6 +108,10 @@ export class ConfiguracaoDoOrquestrador {
         'A opção "Propor plano antes de mudanças grandes" deve ser verdadeira ou falsa.',
       );
     }
+    const instrucoesPersonalizadas = instrucoesValidas(
+      dados.instrucoesPersonalizadas,
+      "As instruções personalizadas",
+    );
     return new ConfiguracaoDoOrquestrador(
       dados.modeloDoOrquestrador,
       dados.modeloDosSubagentes,
@@ -108,6 +122,7 @@ export class ConfiguracaoDoOrquestrador {
       esforcoDosSubagentes,
       permitirTrabalhoDireto,
       proporPlanoEmPedidosGrandes,
+      instrucoesPersonalizadas,
     );
   }
 
@@ -142,6 +157,8 @@ export class ConfiguracaoDoOrquestrador {
       esforcoDosSubagentes: alteracoes.esforcoDosSubagentes ?? atual.esforcoDosSubagentes,
       permitirTrabalhoDireto: alteracoes.permitirTrabalhoDireto ?? atual.permitirTrabalhoDireto,
       proporPlanoEmPedidosGrandes: alteracoes.proporPlanoEmPedidosGrandes ?? atual.proporPlanoEmPedidosGrandes,
+      // `""` limpa as instruções: só a ausência mantém as atuais.
+      instrucoesPersonalizadas: alteracoes.instrucoesPersonalizadas ?? atual.instrucoesPersonalizadas,
     });
   }
 
@@ -156,6 +173,7 @@ export class ConfiguracaoDoOrquestrador {
       esforcoDosSubagentes: this.esforcoDosSubagentes,
       permitirTrabalhoDireto: this.permitirTrabalhoDireto,
       proporPlanoEmPedidosGrandes: this.proporPlanoEmPedidosGrandes,
+      instrucoesPersonalizadas: this.instrucoesPersonalizadas,
     };
   }
 }

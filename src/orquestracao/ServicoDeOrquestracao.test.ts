@@ -12,8 +12,21 @@ import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "./MotorDeAgente
 import { Orquestrador } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { GerenciadorDeWorktrees, PreparoDeWorktree } from "./PreparoDeWorktree";
+import { PreferenciasGlobais } from "./PreferenciasGlobais";
 import { ConversaArquivada, RepositorioDeOrquestradores } from "./RepositorioDeOrquestradores";
+import { RepositorioDePreferencias } from "./RepositorioDePreferencias";
 import { ServicoDeOrquestracao } from "./ServicoDeOrquestracao";
+
+/** Preferências globais em memória: `atuais` devolve o que o teste definiu. */
+class PreferenciasEmMemoria implements RepositorioDePreferencias {
+  preferencias = PreferenciasGlobais.vazias();
+  atuais(): PreferenciasGlobais {
+    return this.preferencias;
+  }
+  async salvar(preferencias: PreferenciasGlobais): Promise<void> {
+    this.preferencias = preferencias;
+  }
+}
 
 class RepositorioEmMemoria implements RepositorioDeOrquestradores {
   readonly orquestradores = new Map<string, Orquestrador>();
@@ -153,6 +166,7 @@ describe("ServicoDeOrquestracao", () => {
   let publicados: EventoRegistrado[];
   let worktrees: GerenciadorDeWorktreesFalso;
   let servico: ServicoDeOrquestracao;
+  let preferencias: PreferenciasEmMemoria;
   let ids: number;
 
   beforeEach(() => {
@@ -162,6 +176,7 @@ describe("ServicoDeOrquestracao", () => {
     sinais = [];
     publicados = [];
     worktrees = new GerenciadorDeWorktreesFalso();
+    preferencias = new PreferenciasEmMemoria();
     ids = 0;
     servico = new ServicoDeOrquestracao({
       repositorio,
@@ -173,6 +188,7 @@ describe("ServicoDeOrquestracao", () => {
       },
       anexos: armazem,
       worktrees,
+      preferencias,
       gerarId: () => `id${++ids}`,
       agora: () => new Date("2026-10-28T12:00:00Z"),
     });
@@ -642,6 +658,87 @@ describe("ServicoDeOrquestracao", () => {
 
     it("recusa orquestrador inexistente", async () => {
       await expect(servico.limparConversa("nao-existe")).rejects.toMatchObject({ motivo: "nao_encontrado" });
+    });
+  });
+
+  describe("instruções personalizadas", () => {
+    async function pedidoDoTurno(id: string, texto = "analise"): Promise<PedidoDeTurno> {
+      const { conclusao } = await servico.enviarMensagem(id, texto);
+      motor.terminar();
+      await conclusao;
+      const pedido = motor.pedidos.at(-1);
+      if (pedido === undefined) {
+        throw new Error("o motor não recebeu o pedido");
+      }
+      return pedido;
+    }
+
+    it("sem instruções próprias nem padrão, o pedido vai sem instruções", async () => {
+      const orquestrador = await criar();
+      expect((await pedidoDoTurno(orquestrador.id)).instrucoes).toBeNull();
+    });
+
+    it("sem instruções próprias, vale o padrão global", async () => {
+      preferencias.preferencias = PreferenciasGlobais.de({ instrucoesPadrao: "Responda curto." });
+      const orquestrador = await criar();
+      expect((await pedidoDoTurno(orquestrador.id)).instrucoes).toEqual({ texto: "Responda curto.", origem: "padrao" });
+    });
+
+    it("as próprias vencem o padrão global, e editá-las vale no pedido seguinte", async () => {
+      preferencias.preferencias = PreferenciasGlobais.de({ instrucoesPadrao: "Responda curto." });
+      const orquestrador = await criar();
+      await servico.alterarConfiguracao(orquestrador.id, { instrucoesPersonalizadas: "Comece com PIRULITO." });
+      expect((await pedidoDoTurno(orquestrador.id)).instrucoes).toEqual({
+        texto: "Comece com PIRULITO.",
+        origem: "orquestrador",
+      });
+
+      await servico.alterarConfiguracao(orquestrador.id, { instrucoesPersonalizadas: "" });
+      expect((await pedidoDoTurno(orquestrador.id)).instrucoes?.origem).toBe("padrao");
+    });
+
+    it("não vazam de um orquestrador para outro", async () => {
+      const comInstrucoes = await criar();
+      await servico.alterarConfiguracao(comInstrucoes.id, { instrucoesPersonalizadas: "Só deste." });
+      const outro = await criar();
+
+      expect((await pedidoDoTurno(comInstrucoes.id)).instrucoes?.texto).toBe("Só deste.");
+      expect((await pedidoDoTurno(outro.id)).instrucoes).toBeNull();
+    });
+
+    it("um turno em andamento segue com as instruções com que começou", async () => {
+      preferencias.preferencias = PreferenciasGlobais.de({ instrucoesPadrao: "Antes." });
+      const orquestrador = await criar();
+      const { conclusao } = await servico.enviarMensagem(orquestrador.id, "analise");
+      preferencias.preferencias = PreferenciasGlobais.de({ instrucoesPadrao: "Depois." });
+      motor.terminar();
+      await conclusao;
+
+      expect(motor.pedidos.at(-1)?.instrucoes?.texto).toBe("Antes.");
+    });
+
+    it("apagá-las no meio da conversa revoga as anteriores, só uma vez por conversa nova", async () => {
+      const orquestrador = await criar();
+      expect((await pedidoDoTurno(orquestrador.id)).revogarInstrucoesAnteriores).toBe(false);
+
+      await servico.alterarConfiguracao(orquestrador.id, { instrucoesPersonalizadas: "Comece com PIRULITO." });
+      expect((await pedidoDoTurno(orquestrador.id)).revogarInstrucoesAnteriores).toBe(false);
+
+      await servico.alterarConfiguracao(orquestrador.id, { instrucoesPersonalizadas: "" });
+      const semInstrucoes = await pedidoDoTurno(orquestrador.id);
+      expect(semInstrucoes).toMatchObject({ instrucoes: null, revogarInstrucoesAnteriores: true });
+      // O histórico ainda tem as instruções antigas: o aviso segue em todo pedido sem instruções.
+      expect((await pedidoDoTurno(orquestrador.id)).revogarInstrucoesAnteriores).toBe(true);
+
+      await servico.limparConversa(orquestrador.id);
+      expect((await pedidoDoTurno(orquestrador.id)).revogarInstrucoesAnteriores).toBe(false);
+    });
+
+    it("instrucoesPara diz o que o próximo pedido receberia", async () => {
+      const orquestrador = await criar();
+      expect(servico.instrucoesPara(orquestrador.configuracao)).toBeNull();
+      preferencias.preferencias = PreferenciasGlobais.de({ instrucoesPadrao: "Global." });
+      expect(servico.instrucoesPara(orquestrador.configuracao)?.origem).toBe("padrao");
     });
   });
 });

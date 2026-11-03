@@ -8,6 +8,9 @@ import { MAXIMO_DE_IMAGENS_POR_MENSAGEM, TAMANHO_MAXIMO_DA_IMAGEM, TIPOS_DE_IMAG
 import { ErroDeOrquestracao, MotivoDoErro } from "../orquestracao/ErroDeOrquestracao";
 import { ESFORCOS_DE_RACIOCINIO } from "../orquestracao/EsforcoDeRaciocinio";
 import { EventoRegistrado } from "../orquestracao/EventoDeOrquestracao";
+import { instrucoesDoOrquestrador, mensagemParaOOrquestrador } from "../orquestracao/InstrucoesDoOrquestrador";
+import { ConfiguracaoDoOrquestrador } from "../orquestracao/ConfiguracaoDoOrquestrador";
+import { InstrucoesAplicadas, TAMANHO_MAXIMO_DAS_INSTRUCOES } from "../orquestracao/InstrucoesPersonalizadas";
 import { MODELOS_CLAUDE } from "../orquestracao/ModeloClaude";
 import { MODOS_DO_TURNO } from "../orquestracao/ModoDoTurno";
 import { NIVEIS_DE_PERMISSAO } from "../orquestracao/NivelDePermissao";
@@ -19,6 +22,7 @@ import {
 import { PastaDeTrabalho } from "../orquestracao/PastaDeTrabalho";
 import { LIMITE_DE_SUBAGENTES } from "../orquestracao/QuantidadeDeSubagentes";
 import { RepositorioDeOrquestradores } from "../orquestracao/RepositorioDeOrquestradores";
+import { RepositorioDePreferencias } from "../orquestracao/RepositorioDePreferencias";
 import { ServicoDeOrquestracao } from "../orquestracao/ServicoDeOrquestracao";
 
 interface Dependencias {
@@ -27,7 +31,21 @@ interface Dependencias {
   canal: CanalDeEventos;
   explorador: ExploradorDePastas;
   anexos: ArmazemDeAnexosEmArquivo;
+  preferencias: RepositorioDePreferencias;
   pastaRaiz: string;
+}
+
+/**
+ * Texto livre do usuário: aqui só se confere que é texto e o tamanho bruto
+ * (folgado, para o espaço sobrando que a normalização tira). O limite de fato,
+ * já normalizado, é conferido pelo domínio (`instrucoesValidas`).
+ */
+function esquemaDeInstrucoes(rotulo: string) {
+  return z
+    .string({ error: `${rotulo} devem ser um texto.` })
+    .max(TAMANHO_MAXIMO_DAS_INSTRUCOES * 2, {
+      error: `${rotulo} devem ter até ${TAMANHO_MAXIMO_DAS_INSTRUCOES} caracteres.`,
+    });
 }
 
 const esquemaDaConfiguracao = z.object({
@@ -60,6 +78,8 @@ const esquemaDaConfiguracao = z.object({
   proporPlanoEmPedidosGrandes: z
     .boolean({ error: 'A opção "Propor plano antes de mudanças grandes" deve ser verdadeira ou falsa.' })
     .optional(),
+  // Opcional também na criação: ausente vale "" (sem instruções próprias).
+  instrucoesPersonalizadas: esquemaDeInstrucoes("As instruções personalizadas").optional(),
 });
 
 const esquemaDeCriacao = esquemaDaConfiguracao.extend({
@@ -72,6 +92,24 @@ const esquemaDeCriacao = esquemaDaConfiguracao.extend({
     error: "Escolha a pasta de trabalho.",
   }),
 });
+
+const esquemaDasPreferencias = z.object({
+  instrucoesPadrao: esquemaDeInstrucoes("As instruções padrão").optional(),
+});
+
+/**
+ * Pré-visualização do que o Orquestrador recebe num pedido com esta
+ * configuração (ainda não salva). Sem pasta, o texto mostra um marcador no
+ * lugar do caminho.
+ */
+const esquemaDaPrevia = z.object({
+  configuracao: esquemaDaConfiguracao,
+  pastaDeTrabalho: z.string().optional(),
+  modo: z.enum(MODOS_DO_TURNO, { error: "Modo do pedido inválido." }).default("execucao"),
+});
+
+/** O que a pré-visualização põe no lugar do pedido do usuário. */
+export const PEDIDO_DE_EXEMPLO = "(aqui entra a sua mensagem)";
 
 const esquemaDeMensagem = z.object({
   texto: z
@@ -145,8 +183,11 @@ function rota<Parametros = { id: string }>(tratador: Tratador<Parametros>): Trat
 /**
  * Traduz o domínio para o JSON da tela. A sessão do Claude Code (`sessaoId`)
  * não sai daqui: é detalhe do motor, não interessa a quem usa a tela.
+ *
+ * `instrucoesAtivas` diz de onde viriam as instruções personalizadas no
+ * próximo pedido (próprias, padrão global ou nenhuma), sem repetir o texto.
  */
-function apresentarResumo(orquestrador: Orquestrador) {
+function apresentarResumo(orquestrador: Orquestrador, instrucoes: InstrucoesAplicadas | null) {
   const ultimo = orquestrador.ultimoTurno;
   return {
     id: orquestrador.id,
@@ -155,6 +196,7 @@ function apresentarResumo(orquestrador: Orquestrador) {
     nomeDaPasta: orquestrador.pastaDeTrabalho.nome,
     situacao: orquestrador.situacao,
     configuracao: orquestrador.configuracao.paraDados(),
+    instrucoesAtivas: instrucoes?.origem ?? null,
     worktree: orquestrador.worktree,
     criadoEm: orquestrador.criadoEm.toISOString(),
     totalDeTurnos: orquestrador.totalDeTurnos,
@@ -169,8 +211,8 @@ function apresentarResumo(orquestrador: Orquestrador) {
   };
 }
 
-function apresentarDetalhe(orquestrador: Orquestrador) {
-  return { ...apresentarResumo(orquestrador), turnos: orquestrador.paraDados().turnos };
+function apresentarDetalhe(orquestrador: Orquestrador, instrucoes: InstrucoesAplicadas | null) {
+  return { ...apresentarResumo(orquestrador, instrucoes), turnos: orquestrador.paraDados().turnos };
 }
 
 export function criarOrquestradoresRoutes({
@@ -179,9 +221,14 @@ export function criarOrquestradoresRoutes({
   canal,
   explorador,
   anexos,
+  preferencias,
   pastaRaiz,
 }: Dependencias): Router {
   const rotas = Router();
+  const resumo = (orquestrador: Orquestrador) =>
+    apresentarResumo(orquestrador, servico.instrucoesPara(orquestrador.configuracao));
+  const detalhe = (orquestrador: Orquestrador) =>
+    apresentarDetalhe(orquestrador, servico.instrucoesPara(orquestrador.configuracao));
 
   rotas.get(
     "/pastas",
@@ -193,7 +240,7 @@ export function criarOrquestradoresRoutes({
   rotas.get(
     "/orquestradores",
     rota((_requisicao, resposta) => {
-      resposta.json(repositorio.listar().map(apresentarResumo));
+      resposta.json(repositorio.listar().map(resumo));
     }),
   );
 
@@ -208,7 +255,7 @@ export function criarOrquestradoresRoutes({
       }
 
       const orquestrador = await servico.criarOrquestrador({ nome, pastaDeTrabalho: pasta, configuracao });
-      resposta.status(201).json(apresentarDetalhe(orquestrador));
+      resposta.status(201).json(detalhe(orquestrador));
     }),
   );
 
@@ -219,7 +266,7 @@ export function criarOrquestradoresRoutes({
       if (orquestrador === null) {
         throw new ErroDeOrquestracao("nao_encontrado", "Orquestrador não encontrado.");
       }
-      resposta.json(apresentarDetalhe(orquestrador));
+      resposta.json(detalhe(orquestrador));
     }),
   );
 
@@ -228,7 +275,49 @@ export function criarOrquestradoresRoutes({
     rota(async (requisicao, resposta) => {
       const alteracoes = esquemaDaConfiguracao.partial().parse(requisicao.body);
       const orquestrador = await servico.alterarConfiguracao(requisicao.params.id, alteracoes);
-      resposta.json(apresentarResumo(orquestrador));
+      resposta.json(resumo(orquestrador));
+    }),
+  );
+
+  /** Preferências que valem para todos os Orquestradores (hoje, as instruções padrão). */
+  rotas.get(
+    "/preferencias",
+    rota((_requisicao, resposta) => {
+      resposta.json(preferencias.atuais().paraDados());
+    }),
+  );
+
+  /** Só os campos enviados mudam. Vale a partir do próximo pedido de cada Orquestrador. */
+  rotas.patch(
+    "/preferencias",
+    rota(async (requisicao, resposta) => {
+      const alteracoes = esquemaDasPreferencias.parse(requisicao.body ?? {});
+      const novas = preferencias.atuais().com(alteracoes);
+      await preferencias.salvar(novas);
+      resposta.json(novas.paraDados());
+    }),
+  );
+
+  /**
+   * O texto que o Orquestrador receberia: as instruções iniciais (system
+   * prompt da conversa) e a mensagem de um pedido, com o bloco da
+   * configuração e as instruções personalizadas que valeriam. Não salva nada.
+   */
+  rotas.post(
+    "/previa-do-prompt",
+    rota((requisicao, resposta) => {
+      const { configuracao: dados, pastaDeTrabalho, modo } = esquemaDaPrevia.parse(requisicao.body ?? {});
+      const configuracao = ConfiguracaoDoOrquestrador.de(dados);
+      const pasta =
+        pastaDeTrabalho === undefined || pastaDeTrabalho.trim() === ""
+          ? PastaDeTrabalho.reconstituir("<pasta de trabalho>")
+          : PastaDeTrabalho.dentroDe(pastaRaiz, pastaDeTrabalho);
+      const instrucoes = servico.instrucoesPara(configuracao);
+      resposta.json({
+        instrucoesIniciais: instrucoesDoOrquestrador(pasta),
+        mensagem: mensagemParaOOrquestrador(PEDIDO_DE_EXEMPLO, configuracao, [], modo, instrucoes),
+        origemDasInstrucoes: instrucoes?.origem ?? null,
+      });
     }),
   );
 
@@ -276,7 +365,7 @@ export function criarOrquestradoresRoutes({
     "/orquestradores/:id/conversa/limpar",
     rota(async (requisicao, resposta) => {
       const orquestrador = await servico.limparConversa(requisicao.params.id);
-      resposta.json(apresentarResumo(orquestrador));
+      resposta.json(resumo(orquestrador));
     }),
   );
 

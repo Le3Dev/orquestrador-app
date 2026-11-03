@@ -40,7 +40,7 @@ async function renomearComNovasTentativas(origem: string, destino: string): Prom
 }
 
 /** Grava num arquivo temporário e renomeia: um desligamento no meio não deixa JSON pela metade. */
-async function gravarAtomicamente(caminho: string, conteudo: string): Promise<void> {
+export async function gravarAtomicamente(caminho: string, conteudo: string): Promise<void> {
   const temporario = `${caminho}.tmp`;
   await writeFile(temporario, conteudo, "utf8");
   await renomearComNovasTentativas(temporario, caminho);

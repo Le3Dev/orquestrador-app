@@ -67,6 +67,8 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
         pedido.configuracao,
         pedido.imagens.map((imagem) => imagem.caminho),
         pedido.modo,
+        pedido.instrucoes,
+        pedido.revogarInstrucoesAnteriores,
       );
 
       const adaptador = new AdaptadorDeEventosDoClaudeCode();
