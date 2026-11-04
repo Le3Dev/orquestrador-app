@@ -20,17 +20,18 @@ function orquestrador(id: string, pasta: string): ResumoDoOrquestrador {
   };
 }
 
-function renderizar(acao: Partial<AcaoDoApp> = {}) {
+function renderizar(acao: Partial<AcaoDoApp> = {}, temVagaPara = vi.fn<(id: string | null) => boolean>(() => true)) {
   const aoAbrirTerminal = vi.fn();
   const aoAtualizarOrquestradores = vi.fn().mockResolvedValue(undefined);
   render(
     <CartaoDeAcao
       acao={{ tipo: "abrir_orquestrador", projeto: "painel", pasta: "C:\\Projetos\\Painel", pedido: null, ...acao }}
       aoAbrirTerminal={aoAbrirTerminal}
+      temVagaPara={temVagaPara}
       aoAtualizarOrquestradores={aoAtualizarOrquestradores}
     />,
   );
-  return { aoAbrirTerminal, aoAtualizarOrquestradores };
+  return { aoAbrirTerminal, aoAtualizarOrquestradores, temVagaPara };
 }
 
 describe("CartaoDeAcao", () => {
@@ -105,6 +106,42 @@ describe("CartaoDeAcao", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "tentar de novo" }));
     await waitFor(() => expect(aoAbrirTerminal).toHaveBeenCalledWith("o1"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("sem vaga no canvas, não cria nem envia o pedido e mostra o aviso do limite", async () => {
+    vi.spyOn(api, "listarOrquestradores").mockResolvedValue([]);
+    const criar = vi.spyOn(api, "criarOrquestrador");
+    const enviar = vi.spyOn(api, "enviarMensagem");
+    const { aoAbrirTerminal, temVagaPara } = renderizar(
+      { pedido: "rode os testes" },
+      vi.fn<(id: string | null) => boolean>(() => false),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "abrir" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Limite de 4 orquestradores abertos. Feche um dos orquestradores (✕ na barra do terminal) antes de iniciar outro.",
+    );
+    expect(temVagaPara).toHaveBeenCalledWith(null);
+    expect(criar).not.toHaveBeenCalled();
+    expect(enviar).not.toHaveBeenCalled();
+    expect(aoAbrirTerminal).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "tentar de novo" })).toBeInTheDocument();
+  });
+
+  it("com o orquestrador da pasta já aberto (canvas cheio), só foca nele", async () => {
+    vi.spyOn(api, "listarOrquestradores").mockResolvedValue([orquestrador("o1", "C:\\Projetos\\Painel")]);
+    const criar = vi.spyOn(api, "criarOrquestrador");
+    // Canvas cheio: só o que já está aberto cabe.
+    const { aoAbrirTerminal, temVagaPara } = renderizar({}, vi.fn<(id: string | null) => boolean>((id) => id === "o1"));
+
+    fireEvent.click(screen.getByRole("button", { name: "abrir" }));
+
+    await screen.findByRole("button", { name: "aberto ✓" });
+    expect(temVagaPara).toHaveBeenCalledWith("o1");
+    expect(aoAbrirTerminal).toHaveBeenCalledWith("o1");
+    expect(criar).not.toHaveBeenCalled();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

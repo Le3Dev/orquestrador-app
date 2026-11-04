@@ -65,6 +65,7 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
   mensagem,
   atividade,
   aoAbrirTerminal,
+  temVagaPara,
   aoAtualizarOrquestradores,
 }: PropsDaMensagem) {
   if (mensagem.papel === "usuario") {
@@ -125,6 +126,7 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
           key={`${acao.pasta}:${indice}`}
           acao={acao}
           aoAbrirTerminal={aoAbrirTerminal}
+          temVagaPara={temVagaPara}
           aoAtualizarOrquestradores={aoAtualizarOrquestradores}
         />
       ))}
@@ -156,6 +158,7 @@ export function ChatRapido({
   erroAoCarregar,
   aoMudarPreferencias,
   aoAbrirTerminal,
+  temVagaPara,
   aoAtualizarOrquestradores,
 }: Props) {
   const [texto, setTexto] = useState("");
@@ -401,6 +404,7 @@ export function ChatRapido({
                 mensagem={mensagem}
                 atividade={mensagem.situacao === "respondendo" ? chat.atividade : null}
                 aoAbrirTerminal={aoAbrirTerminal}
+                temVagaPara={temVagaPara}
                 aoAtualizarOrquestradores={aoAtualizarOrquestradores}
               />
             ))}

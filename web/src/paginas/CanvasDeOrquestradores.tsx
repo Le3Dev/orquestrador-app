@@ -13,7 +13,16 @@ import {
   type NodeChange,
   type NodeTypes,
 } from "@xyflow/react";
-import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { IconeOrquestrador } from "../componentes/Icones";
 import { ChatRapido } from "../componentes/chat/ChatRapido";
@@ -43,6 +52,7 @@ import {
   TAMANHO_DO_TERMINAL,
   type Viewport,
 } from "../shared/canvas/layout";
+import { AVISO_DO_LIMITE_DE_ORQUESTRADORES, cabeOutroTerminal } from "../shared/canvas/limiteDeTerminais";
 import {
   ALCA_DO_TERMINAL,
   type ArestaDoCanvas,
@@ -278,7 +288,37 @@ function Canvas() {
     [fluxo],
   );
 
+  // Trava de terminais abertos: lê os nós por aqui, para as ações não mudarem a cada arraste.
+  const nosAtuais = useRef(nos);
+  useLayoutEffect(() => {
+    nosAtuais.current = nos;
+  }, [nos]);
+  const [avisoDoLimite, setAvisoDoLimite] = useState(false);
+
+  /** Se cabe abrir o terminal pedido (nulo: um terminal novo). Ponto único da trava. */
+  const temVagaPara = useCallback((orquestradorId: string | null) => {
+    const atuais = nosAtuais.current;
+    return cabeOutroTerminal(
+      atuais.filter(ehTerminal).map((no) => no.data.orquestradorId),
+      atuais.filter((no) => no.type === "rascunho").map((no) => no.id),
+      orquestradorId,
+    );
+  }, []);
+
+  /** Confere a vaga e, sem ela, mostra o aviso abaixo da barra do canvas. */
+  const reservarVaga = useCallback(
+    (orquestradorId: string | null) => {
+      const cabe = temVagaPara(orquestradorId);
+      setAvisoDoLimite(!cabe);
+      return cabe;
+    },
+    [temVagaPara],
+  );
+
   const novoOrquestrador = useCallback(() => {
+    if (!reservarVaga(null)) {
+      return;
+    }
     const id = `rascunho:${crypto.randomUUID()}`;
     setNos((atuais) => {
       const posicao = posicaoParaNovoTerminal(
@@ -298,10 +338,14 @@ function Canvas() {
       };
       return reacomodarBixinhos([...atuais.map((no) => ({ ...no, selected: false })), rascunho]);
     });
-  }, [centroDaTela, setNos]);
+  }, [centroDaTela, reservarVaga, setNos]);
 
   const abrirTerminal = useCallback(
     (orquestradorId: string) => {
+      // Já aberto sempre cabe: só ganha o foco.
+      if (!reservarVaga(orquestradorId)) {
+        return;
+      }
       setNos((atuais) => {
         if (atuais.some((no) => no.id === orquestradorId)) {
           return atuais;
@@ -318,7 +362,7 @@ function Canvas() {
       });
       focar(orquestradorId);
     },
-    [centroDaTela, focar, setNos],
+    [centroDaTela, focar, reservarVaga, setNos],
   );
 
   const fecharTerminal = useCallback(
@@ -427,6 +471,17 @@ function Canvas() {
   );
   const quantidadeDeJanelas = nos.filter((no) => !ehBixinho(no)).length;
   const podeOrganizar = quantidadeDeJanelas > 1;
+  // O aviso do limite some sozinho quando uma vaga é liberada (fechar um terminal ou descartar o rascunho).
+  const temVaga = cabeOutroTerminal(
+    idsNoCanvas,
+    nos.filter((no) => no.type === "rascunho").map((no) => no.id),
+    null,
+  );
+  if (avisoDoLimite && temVaga) {
+    // Ajuste durante o render (padrão do React para estado derivado).
+    setAvisoDoLimite(false);
+  }
+  const fecharAvisoDoLimite = useCallback(() => setAvisoDoLimite(false), []);
 
   // Os painéis não dependem da posição dos nós: memorizados, não re-renderizam
   // a cada quadro do arraste.
@@ -439,6 +494,9 @@ function Canvas() {
           aoOrganizar={organizar}
           podeOrganizar={podeOrganizar}
         />
+        {avisoDoLimite && (
+          <ErroDoCanvas erro={AVISO_DO_LIMITE_DE_ORQUESTRADORES} aoFechar={fecharAvisoDoLimite} nivel="aviso" />
+        )}
         {erroDasNotas !== null && <ErroDoCanvas erro={erroDasNotas} aoFechar={descartarErroDasNotas} />}
         <Doca orquestradores={orquestradores} noCanvas={noCanvas} erro={erro} aoAbrir={abrirTerminal} />
       </Panel>
@@ -448,6 +506,8 @@ function Canvas() {
       novaNota,
       organizar,
       podeOrganizar,
+      avisoDoLimite,
+      fecharAvisoDoLimite,
       erroDasNotas,
       descartarErroDasNotas,
       orquestradores,
@@ -487,6 +547,7 @@ function Canvas() {
           erroAoCarregar={chatAoVivo.erro}
           aoMudarPreferencias={aplicarPreferencias}
           aoAbrirTerminal={abrirTerminal}
+          temVagaPara={temVagaPara}
           aoAtualizarOrquestradores={atualizarOrquestradoresDoChat}
         />
       </Panel>
@@ -497,6 +558,7 @@ function Canvas() {
       chatAoVivo.erro,
       aplicarPreferencias,
       abrirTerminal,
+      temVagaPara,
       atualizarOrquestradoresDoChat,
     ],
   );
