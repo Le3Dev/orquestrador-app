@@ -18,6 +18,7 @@ import { ControleDeExecucoesEmMemoria } from "./infraestrutura/execucoes/Control
 import { GerenciadorDeWorktreesGit } from "./infraestrutura/sistema/GerenciadorDeWorktreesGit";
 import { MonitorDeMemoria } from "./infraestrutura/sistema/MonitorDeMemoria";
 import { encerrarAgentesOrfaos, RegistroDeProcessos } from "./infraestrutura/sistema/RegistroDeProcessos";
+import { SeletorDePastaNativo } from "./infraestrutura/sistema/SeletorDePastaNativo";
 import { CanalDeEventos } from "./infraestrutura/sse/CanalDeEventos";
 import { ServicoDeNotas } from "./notas/ServicoDeNotas";
 import { ServicoDeOrquestracao } from "./orquestracao/ServicoDeOrquestracao";
@@ -100,6 +101,7 @@ async function iniciar(): Promise<void> {
       anexos,
       preferencias,
       pastaRaiz: configuracao.pastaRaizDosProjetos,
+      seletorDePasta: new SeletorDePastaNativo(),
     }),
   );
   aplicacao.use(

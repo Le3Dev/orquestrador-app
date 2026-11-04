@@ -11,6 +11,7 @@ import { ArmazemDeAnexosEmArquivo } from "../infraestrutura/arquivos/ArmazemDeAn
 import { ExploradorDePastas } from "../infraestrutura/arquivos/ExploradorDePastas";
 import { ControleDeExecucoesEmMemoria } from "../infraestrutura/execucoes/ControleDeExecucoesEmMemoria";
 import { CanalDeEventos } from "../infraestrutura/sse/CanalDeEventos";
+import { SeletorDePasta, SeletorDePastaIndisponivel } from "../infraestrutura/sistema/SeletorDePastaNativo";
 import { EventoDeOrquestracao, EventoDoMotor, EventoRegistrado } from "../orquestracao/EventoDeOrquestracao";
 import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "../orquestracao/MotorDeAgentes";
 import { Orquestrador } from "../orquestracao/Orquestrador";
@@ -86,6 +87,8 @@ describe("rotas de orquestradores — modo de planejamento", () => {
   let servico: ServicoDeOrquestracao;
   let preferencias: PreferenciasEmMemoria;
   let explorador: ExploradorDePastas;
+  /** Dublê da janela do sistema: cada teste diz o que ela devolve. */
+  const seletorDePasta: SeletorDePasta = { escolher: async () => null };
   let ids = 0;
 
   beforeAll(async () => {
@@ -121,6 +124,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
         anexos,
         preferencias,
         pastaRaiz: raiz,
+        seletorDePasta,
       }),
     );
     servidor = aplicacao.listen(0, "127.0.0.1");
@@ -706,6 +710,96 @@ describe("rotas de orquestradores — modo de planejamento", () => {
 
       expect(resposta.status).toBe(400);
       expect(await resposta.json()).toEqual({ erro: `A pasta "${inexistente}" não existe.` });
+    });
+  });
+  describe("POST /pastas/escolher: a janela de escolher pasta do sistema", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("devolve a pasta escolhida na janela, que abre na pasta dos projetos", async () => {
+      const escolhida = path.resolve("/outro/meu-app");
+      vi.spyOn(explorador, "existe").mockResolvedValue(true);
+      const escolher = vi.spyOn(seletorDePasta, "escolher").mockResolvedValue(escolhida);
+
+      const resposta = await postar("/pastas/escolher", {});
+
+      expect(resposta.status).toBe(200);
+      expect(await resposta.json()).toEqual({ caminho: escolhida });
+      expect(escolher).toHaveBeenCalledWith(raiz, expect.any(AbortSignal));
+    });
+
+    it("abre na pasta inicial pedida, se ela existir", async () => {
+      const inicial = path.resolve("/outro");
+      vi.spyOn(explorador, "existe").mockResolvedValue(true);
+      const escolher = vi.spyOn(seletorDePasta, "escolher").mockResolvedValue(null);
+
+      await postar("/pastas/escolher", { inicial });
+
+      expect(escolher).toHaveBeenCalledWith(inicial, expect.any(AbortSignal));
+    });
+
+    it("cancelar na janela devolve caminho nulo", async () => {
+      vi.spyOn(explorador, "existe").mockResolvedValue(true);
+      vi.spyOn(seletorDePasta, "escolher").mockResolvedValue(null);
+
+      const resposta = await postar("/pastas/escolher", {});
+
+      expect(resposta.status).toBe(200);
+      expect(await resposta.json()).toEqual({ caminho: null });
+    });
+
+    it("sem janela no sistema, responde 503 para a tela usar o navegador interno", async () => {
+      vi.spyOn(explorador, "existe").mockResolvedValue(true);
+      vi.spyOn(seletorDePasta, "escolher").mockRejectedValue(new SeletorDePastaIndisponivel("zenity não está instalado."));
+      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+      const resposta = await postar("/pastas/escolher", {});
+
+      expect(resposta.status).toBe(503);
+      expect(await resposta.json()).toEqual({
+        erro: "Não deu para abrir a janela do sistema. Escolha a pasta aqui mesmo.",
+        indisponivel: true,
+      });
+    });
+
+    it("uma janela por vez: a segunda responde 409 enquanto a primeira está aberta", async () => {
+      vi.spyOn(explorador, "existe").mockResolvedValue(true);
+      let responder: (caminho: string | null) => void = () => undefined;
+      vi.spyOn(seletorDePasta, "escolher").mockReturnValue(new Promise((resolver) => (responder = resolver)));
+
+      const primeira = postar("/pastas/escolher", {});
+      await vi.waitFor(() => expect(seletorDePasta.escolher).toHaveBeenCalled());
+      const segunda = await postar("/pastas/escolher", {});
+      responder(null);
+
+      expect(segunda.status).toBe(409);
+      expect((await primeira).status).toBe(200);
+    });
+
+    it("se a tela desiste (fecha a conexão), a janela recebe o cancelamento", async () => {
+      vi.spyOn(explorador, "existe").mockResolvedValue(true);
+      let sinalRecebido: AbortSignal | undefined;
+      vi.spyOn(seletorDePasta, "escolher").mockImplementation(
+        (_inicial, sinal) =>
+          new Promise((resolver) => {
+            sinalRecebido = sinal;
+            sinal.addEventListener("abort", () => resolver(null));
+          }),
+      );
+      const desistir = new AbortController();
+
+      const pedido = fetch(`${base}/pastas/escolher`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+        signal: desistir.signal,
+      }).catch(() => null);
+      await vi.waitFor(() => expect(sinalRecebido).toBeDefined());
+      desistir.abort();
+      await pedido;
+
+      await vi.waitFor(() => expect(sinalRecebido?.aborted).toBe(true));
     });
   });
 });

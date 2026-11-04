@@ -4,6 +4,7 @@ import { z, ZodError } from "zod";
 import { ArmazemDeAnexosEmArquivo, ehNomeDeAnexoValido } from "../infraestrutura/arquivos/ArmazemDeAnexosEmArquivo";
 import { ExploradorDePastas } from "../infraestrutura/arquivos/ExploradorDePastas";
 import { CanalDeEventos } from "../infraestrutura/sse/CanalDeEventos";
+import { SeletorDePasta, SeletorDePastaIndisponivel } from "../infraestrutura/sistema/SeletorDePastaNativo";
 import { MAXIMO_DE_IMAGENS_POR_MENSAGEM, TAMANHO_MAXIMO_DA_IMAGEM, TIPOS_DE_IMAGEM } from "../orquestracao/Anexo";
 import { ErroDeOrquestracao, MotivoDoErro } from "../orquestracao/ErroDeOrquestracao";
 import { ESFORCOS_DE_RACIOCINIO } from "../orquestracao/EsforcoDeRaciocinio";
@@ -33,6 +34,13 @@ interface Dependencias {
   anexos: ArmazemDeAnexosEmArquivo;
   preferencias: RepositorioDePreferencias;
   pastaRaiz: string;
+  /** A janela de escolher pasta do sistema (Windows, macOS, Linux com zenity). */
+  seletorDePasta: SeletorDePasta;
+}
+
+/** A janela abre no computador do servidor: só faz sentido para quem está nele. */
+function ehDaPropriaMaquina(endereco: string | undefined): boolean {
+  return endereco === "127.0.0.1" || endereco === "::1" || endereco === "::ffff:127.0.0.1";
 }
 
 /**
@@ -47,6 +55,10 @@ function esquemaDeInstrucoes(rotulo: string) {
       error: `${rotulo} devem ter até ${TAMANHO_MAXIMO_DAS_INSTRUCOES} caracteres.`,
     });
 }
+
+const esquemaDaEscolhaDePasta = z.object({
+  inicial: z.string({ error: "A pasta inicial deve ser um texto." }).optional(),
+});
 
 const esquemaDaConsultaDePastas = z.object({
   caminho: z.string({ error: "Informe um único caminho." }).optional(),
@@ -242,6 +254,7 @@ export function criarOrquestradoresRoutes({
   anexos,
   preferencias,
   pastaRaiz,
+  seletorDePasta,
 }: Dependencias): Router {
   const rotas = Router();
   const resumo = (orquestrador: Orquestrador) =>
@@ -259,6 +272,52 @@ export function criarOrquestradoresRoutes({
       const { caminho } = esquemaDaConsultaDePastas.parse(requisicao.query);
       const [conteudo, atalhos] = await Promise.all([explorador.listar(caminho), explorador.atalhos()]);
       resposta.json({ raiz: pastaRaiz, ...conteudo, atalhos });
+    }),
+  );
+
+  /**
+   * Abre a janela de escolher pasta do sistema e espera a pessoa escolher.
+   * `{ caminho }`, nulo quando ela cancela. Uma janela por vez; se a tela
+   * desistir (fechou a aba ou clicou em cancelar), a janela é fechada.
+   */
+  let janelaAberta = false;
+  rotas.post(
+    "/pastas/escolher",
+    rota(async (requisicao, resposta) => {
+      if (!ehDaPropriaMaquina(requisicao.socket.remoteAddress)) {
+        resposta.status(403).json({ erro: "A janela de escolher pasta só abre para quem usa o app neste computador." });
+        return;
+      }
+      if (janelaAberta) {
+        resposta.status(409).json({ erro: "A janela de escolher pasta já está aberta. Escolha ou cancele nela." });
+        return;
+      }
+      const { inicial } = esquemaDaEscolhaDePasta.parse(requisicao.body ?? {});
+      const candidata = inicial === undefined || inicial.trim() === "" ? pastaRaiz : PastaDeTrabalho.resolver(pastaRaiz, inicial).caminho;
+      const pastaInicial = (await explorador.existe(candidata)) ? candidata : undefined;
+
+      const desistencia = new AbortController();
+      resposta.on("close", () => {
+        if (!resposta.writableEnded) {
+          desistencia.abort();
+        }
+      });
+      janelaAberta = true;
+      try {
+        const caminho = await seletorDePasta.escolher(pastaInicial, desistencia.signal);
+        if (caminho !== null && !(await explorador.existe(caminho))) {
+          throw new ErroDeOrquestracao("dados_invalidos", `A pasta "${caminho}" não existe.`);
+        }
+        resposta.json({ caminho });
+      } catch (erro) {
+        if (!(erro instanceof SeletorDePastaIndisponivel)) {
+          throw erro;
+        }
+        console.warn("[pastas] Janela de escolher pasta indisponível:", erro.message);
+        resposta.status(503).json({ erro: "Não deu para abrir a janela do sistema. Escolha a pasta aqui mesmo.", indisponivel: true });
+      } finally {
+        janelaAberta = false;
+      }
     }),
   );
 
