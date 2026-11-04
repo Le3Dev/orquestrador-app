@@ -4,14 +4,19 @@ import path from "node:path";
 
 import express from "express";
 
+import { ProjetosDoChat } from "./chat/ProjetosDoChat";
+import { ServicoDeChat } from "./chat/ServicoDeChat";
+import { CanalDoChat, criarChatRoutes } from "./controllers/chatRoutes";
 import { criarNotasRoutes } from "./controllers/notasRoutes";
 import { criarOrquestradoresRoutes } from "./controllers/orquestradoresRoutes";
 import { ArmazemDeAnexosEmArquivo } from "./infraestrutura/arquivos/ArmazemDeAnexosEmArquivo";
 import { ExploradorDePastas } from "./infraestrutura/arquivos/ExploradorDePastas";
 import { RepositorioDeNotasEmArquivo } from "./infraestrutura/arquivos/RepositorioDeNotasEmArquivo";
 import { RepositorioDeOrquestradoresEmArquivo } from "./infraestrutura/arquivos/RepositorioDeOrquestradoresEmArquivo";
+import { RepositorioDoChatEmArquivo } from "./infraestrutura/arquivos/RepositorioDoChatEmArquivo";
 import { FachadaClaudeCodeCli } from "./infraestrutura/claudecode/FachadaClaudeCodeCli";
 import { MotorClaudeCodeCli } from "./infraestrutura/claudecode/MotorClaudeCodeCli";
+import { MotorDeChatClaudeCodeCli } from "./infraestrutura/claudecode/MotorDeChatClaudeCodeCli";
 import { lerConfiguracao } from "./infraestrutura/Configuracao";
 import { ControleDeExecucoesEmMemoria } from "./infraestrutura/execucoes/ControleDeExecucoesEmMemoria";
 import { GerenciadorDeWorktreesGit } from "./infraestrutura/sistema/GerenciadorDeWorktreesGit";
@@ -32,6 +37,7 @@ async function iniciar(): Promise<void> {
 
   const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(configuracao.pastaDeDados);
   const notas = await RepositorioDeNotasEmArquivo.abrir(configuracao.pastaDeDados);
+  const repositorioDoChat = await RepositorioDoChatEmArquivo.abrir(configuracao.pastaDeDados, randomUUID);
 
   // Antes de registrar processos novos: se o servidor anterior caiu, os
   // agentes dele podem ter ficado rodando sozinhos.
@@ -74,6 +80,35 @@ async function iniciar(): Promise<void> {
     console.warn(`[orquestracao] ${interrompidos} turno(s) marcado(s) como interrompido(s) pelo reinício.`);
   }
 
+  // Adaptador: o chat enxerga projetos e Orquestradores só como nome e pasta.
+  const explorador = new ExploradorDePastas(configuracao.pastaRaizDosProjetos);
+  const projetosDoChat: ProjetosDoChat = {
+    listarProjetos: () => explorador.listarProjetos(),
+    listarOrquestradores: async () =>
+      repositorio.listar().map((orquestrador) => ({
+        nome: orquestrador.nome,
+        pasta: orquestrador.pastaDeTrabalho.caminho,
+      })),
+  };
+  const canalDoChat = new CanalDoChat();
+  const servicoDeChat = new ServicoDeChat({
+    repositorio: repositorioDoChat,
+    motor: new MotorDeChatClaudeCodeCli(new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro)),
+    projetos: projetosDoChat,
+    // dados/anexos/chat/: o mesmo armazém dos Orquestradores, com a chave "chat".
+    anexos,
+    publicador: canalDoChat,
+    // O mesmo controle dos turnos: ao desligar, a resposta do chat também é cancelada.
+    execucoes,
+    pastaDaSessao: repositorioDoChat.pastaDaSessao,
+    pastaDosProjetos: configuracao.pastaRaizDosProjetos,
+    gerarId: randomUUID,
+    agora: () => new Date(),
+  });
+  if (await servicoDeChat.interromperRespostaPendente()) {
+    console.warn("[chat] A resposta em andamento foi marcada como interrompida pelo reinício.");
+  }
+
   const aplicacao = express();
   aplicacao.disable("x-powered-by");
   // Mensagens podem levar até 5 imagens de 5 MB, em base64.
@@ -93,11 +128,12 @@ async function iniciar(): Promise<void> {
       servico,
       repositorio,
       canal,
-      explorador: new ExploradorDePastas(configuracao.pastaRaizDosProjetos),
+      explorador,
       anexos,
       pastaRaiz: configuracao.pastaRaizDosProjetos,
     }),
   );
+  aplicacao.use("/api", criarChatRoutes({ servico: servicoDeChat, canal: canalDoChat, anexos }));
   aplicacao.use(
     "/api",
     criarNotasRoutes({

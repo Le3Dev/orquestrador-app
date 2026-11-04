@@ -2,23 +2,12 @@ import { type NodeProps, NodeResizer } from "@xyflow/react";
 import { type FormEvent, useEffect, useId, useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
-import type { DadosDaConfiguracao, PastaDeProjeto } from "../../shared/api/tipos";
+import type { PastaDeProjeto } from "../../shared/api/tipos";
 import { useCanvas } from "../../shared/canvas/contexto";
 import { TAMANHO_MINIMO_DO_TERMINAL } from "../../shared/canvas/layout";
 import { ALCA_DO_TERMINAL, type NoRascunho as TipoDoNo } from "../../shared/canvas/nos";
+import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
 import { CamposDaConfiguracao } from "../CamposDaConfiguracao";
-
-const CONFIGURACAO_PADRAO: DadosDaConfiguracao = {
-  modeloDoOrquestrador: "opus",
-  esforcoDoOrquestrador: "padrao",
-  modeloDosSubagentes: "opus",
-  esforcoDosSubagentes: "padrao",
-  quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
-  nivelDePermissao: "leitura",
-  permitirCommitEPush: false,
-  permitirTrabalhoDireto: true,
-  proporPlanoEmPedidosGrandes: true,
-};
 
 /**
  * O terminal que abre ao clicar em "Novo orquestrador": pede a pasta, o nome
@@ -30,7 +19,7 @@ export function NoRascunho({ id, selected }: NodeProps<TipoDoNo>) {
   const idDoCampo = useId();
   const [nome, setNome] = useState("");
   const [pasta, setPasta] = useState("");
-  const [configuracao, setConfiguracao] = useState(CONFIGURACAO_PADRAO);
+  const [configuracao, setConfiguracao] = useState(CONFIGURACAO_PADRAO_DO_ORQUESTRADOR);
   const [opcoes, setOpcoes] = useState<{ raiz: string; pastas: PastaDeProjeto[] } | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [criando, setCriando] = useState(false);

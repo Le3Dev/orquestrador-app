@@ -91,6 +91,38 @@ describe("CamposDaConfiguracao", () => {
     });
   });
 
+  describe("modelo", () => {
+    it("oferece Fable, Opus, Sonnet e Haiku nos dois seletores, e escolher Fable muda só aquele modelo", () => {
+      const { aoMudar } = renderizar();
+      const grupos = [
+        screen.getByRole("group", { name: "Modelo do orquestrador" }),
+        screen.getByRole("group", { name: "Modelo dos subagentes" }),
+      ];
+
+      for (const grupo of grupos) {
+        expect(
+          within(grupo)
+            .getAllByRole("radio")
+            .map((opcao) => (opcao as HTMLInputElement).value),
+        ).toEqual(["fable", "opus", "sonnet", "haiku"]);
+      }
+
+      fireEvent.click(within(grupos[0]!).getByRole("radio", { name: /Fable/ }));
+      expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, modeloDoOrquestrador: "fable" });
+
+      fireEvent.click(within(grupos[1]!).getByRole("radio", { name: /Fable/ }));
+      expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, modeloDosSubagentes: "fable" });
+    });
+
+    it("mostra Fable já escolhido", () => {
+      renderizar({ modeloDoOrquestrador: "fable" });
+
+      expect(
+        within(screen.getByRole("group", { name: "Modelo do orquestrador" })).getByRole("radio", { name: /Fable/ }),
+      ).toBeChecked();
+    });
+  });
+
   describe("esforço", () => {
     function seletores() {
       return {

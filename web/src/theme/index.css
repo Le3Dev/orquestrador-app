@@ -1070,10 +1070,287 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .markdown .task-list-item { list-style: none; }
 .markdown .task-list-item input { margin-right: 6px; accent-color: var(--active); }
 
+/* ---------------- Chat rápido (centro de baixo do canvas) ----------------
+ * Fora do viewport do React Flow: não se move com o canvas. A largura deixa
+ * livres o minimapa (200 × 150 + 15px de margem, à direita) e os controles
+ * (à esquerda): como o painel é centralizado, a folga vale para os dois lados. */
+
+/* Ângulo registrado para poder ser animado; sem suporte a @property, a borda fica parada. */
+@property --angulo-da-borda {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.painel-do-chat {
+  --folga-lateral-do-chat: 231px; /* minimapa (200) + margem (15) + respiro (16) */
+  width: min(680px, calc(100vw - 2 * var(--folga-lateral-do-chat)));
+}
+
+/* Tela estreita: o chat sobe acima do minimapa e dos controles e usa a largura toda. */
+@media (max-width: 820px) {
+  .painel-do-chat { width: calc(100vw - 32px); margin-bottom: 182px; }
+}
+
+.chat-rapido {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  cursor: auto;
+}
+
+.conversa-do-chat {
+  display: flex;
+  flex-direction: column;
+  max-height: 45vh;
+  overflow: hidden;
+  animation: subir .2s ease-out both;
+}
+.conversa-do-chat[hidden] { display: none; }
+@keyframes subir { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.cabecalho-do-chat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mensagens-do-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px 14px;
+  user-select: text;
+}
+
+/* Pergunta do usuário: à direita e discreta. */
+.mensagem-do-usuario {
+  align-self: flex-end;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: 85%;
+  padding: 7px 11px;
+  border-radius: 12px 12px 4px 12px;
+  background: var(--surface-3);
+  color: var(--caption);
+  font-size: 13px;
+}
+
+.anexos-do-chat { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.anexos-do-chat a {
+  display: block;
+  width: 72px;
+  height: 52px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-forte);
+}
+.anexos-do-chat a:hover { border-color: var(--active); }
+.anexos-do-chat img { width: 100%; height: 100%; object-fit: cover; }
+
+/* Resposta do Claude: Markdown em Lora, com o cursor no fim enquanto chega texto. */
+.mensagem-do-claude { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.texto-respondendo > .markdown > :last-child::after {
+  content: "▍";
+  margin-left: 2px;
+  color: var(--active);
+  font-family: var(--fonte-mono);
+  animation: piscar 1s steps(1) infinite;
+}
+
+.cartao-de-acao {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+  border: 1px solid color-mix(in srgb, var(--active) 40%, var(--border));
+  background: color-mix(in srgb, var(--active) 6%, var(--surface-2));
+}
+
+.mostrar-conversa { align-self: center; gap: 6px; cursor: pointer; }
+.mostrar-conversa:hover { color: var(--primary); border-color: var(--border-forte); }
+
+/* Borda laranja que gira devagar em volta do composer (a moldura é o gradiente;
+ * o composer, por cima, deixa só 1px dele à mostra). Respondendo, gira mais
+ * rápido e acende. */
+.moldura-do-composer {
+  position: relative;
+  padding: 1px;
+  border-radius: 14px;
+  background: conic-gradient(
+    from var(--angulo-da-borda, 0deg),
+    var(--border-forte) 0%,
+    color-mix(in srgb, var(--active) 45%, var(--border-forte)) 10%,
+    var(--border-forte) 22%,
+    var(--border-forte) 50%,
+    color-mix(in srgb, var(--active) 30%, var(--border-forte)) 62%,
+    var(--border-forte) 74%,
+    var(--border-forte) 100%
+  );
+  box-shadow: 0 18px 44px -18px rgba(0, 0, 0, .85);
+  animation: girar-a-borda 8s linear infinite;
+}
+.chat-rapido-respondendo .moldura-do-composer {
+  background: conic-gradient(
+    from var(--angulo-da-borda, 0deg),
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 0%,
+    var(--active) 12%,
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 28%,
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 50%,
+    color-mix(in srgb, var(--active) 80%, var(--border-forte)) 62%,
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 78%,
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 100%
+  );
+  box-shadow: 0 18px 44px -18px rgba(0, 0, 0, .85), 0 0 28px -10px color-mix(in srgb, var(--active) 60%, transparent);
+  animation-duration: 2s;
+}
+@keyframes girar-a-borda { to { --angulo-da-borda: 360deg; } }
+
+.composer-do-chat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-radius: 13px;
+  background: var(--surface);
+}
+/* Sem `overflow: hidden` no composer: o menu do modelo sai por cima dele. */
+.composer-do-chat > .faixa-de-progresso { position: absolute; inset: 0 12px auto; }
+.composer-do-chat .miniaturas-do-prompt { padding: 10px 12px 0; }
+
+.campo-do-chat {
+  width: 100%;
+  min-height: 44px;
+  max-height: 140px;
+  resize: none;
+  padding: 12px 14px 4px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--primary);
+  font-family: var(--fonte-texto);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.campo-do-chat::placeholder { color: var(--placeholder); }
+
+.linha-do-composer { display: flex; align-items: center; gap: 8px; padding: 4px 8px 8px; }
+.botao-de-anexar { width: 30px; height: 30px; font-size: 18px; line-height: 1; }
+
+/* Compacto (padrão): tudo numa linha só — "+" · campo · modelo · enviar. Ao
+ * usar, expande: o campo sobe e os botões descem para a linha de baixo. */
+.campo-do-chat { transition: min-height .18s ease-out, padding .18s ease-out; }
+.composer-compacto {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  cursor: text;
+}
+.composer-compacto .linha-do-composer { display: contents; }
+.composer-compacto .botao-de-anexar { order: -1; }
+.composer-compacto .linha-do-composer > .flex-1,
+.composer-compacto .linha-do-composer > .etiqueta { display: none; }
+.composer-compacto > .hint,
+.composer-compacto > .hint-error { order: 1; flex-basis: 100%; }
+.composer-compacto .campo-do-chat {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.composer-compacto .campo-do-chat::placeholder { white-space: nowrap; text-overflow: ellipsis; }
+.composer-expandido .linha-do-composer { animation: subir .18s ease-out both; }
+
+/* Seletor de modelo e esforço: o menu abre para cima. */
+.seletor-de-modelo { position: relative; }
+.botao-do-seletor {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-button);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.botao-do-seletor:not(:disabled):hover, .botao-do-seletor[aria-expanded="true"] { background: var(--surface-3); }
+.botao-do-seletor:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.botao-do-seletor:disabled { opacity: .45; cursor: not-allowed; }
+
+.menu-do-seletor {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  padding: 6px;
+  background: var(--surface-2);
+  border-color: var(--border-forte);
+}
+.submenu-do-seletor {
+  position: absolute;
+  left: calc(100% + 10px);
+  bottom: -6px;
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  width: 180px;
+  padding: 6px;
+  background: var(--surface-2);
+  border-color: var(--border-forte);
+}
+/* Sem espaço ao lado: o submenu sobe por cima do menu. */
+@media (max-width: 1100px) {
+  .submenu-do-seletor { left: auto; right: 0; bottom: calc(100% + 6px); }
+}
+
+.item-do-menu {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 6px;
+  text-align: left;
+  cursor: pointer;
+}
+.item-do-menu:hover, .item-do-menu:focus-visible, .item-do-menu[aria-expanded="true"] { background: var(--surface-3); outline: none; }
+.marca-do-item { width: 14px; flex-shrink: 0; color: var(--info); text-align: center; }
+.separador-do-menu { margin: 4px 6px; border: 0; border-top: 1px solid var(--border); }
+
+/* Servidor fora: o chat congela e a borda perde a cor, como o resto do canvas. */
+.canvas-desconectado .chat-rapido *,
+.canvas-desconectado .chat-rapido *::before,
+.canvas-desconectado .chat-rapido *::after { animation-play-state: paused !important; }
+.canvas-desconectado .moldura-do-composer { filter: grayscale(.85); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
   /* A bolinha é SMIL, que ignora as regras de animação do CSS acima. */
   .bolinha-da-troca { display: none; }
+  /* A borda do chat fica parada (a cor de "respondendo" continua). */
+  .moldura-do-composer { animation: none !important; }
+  /* O composer troca de compacto para expandido sem transição. */
+  .campo-do-chat { transition: none; }
+  .composer-expandido .linha-do-composer { animation: none; }
 }
 
 /* ---------------- App desktop (Electron): arraste e botões da janela -------- */

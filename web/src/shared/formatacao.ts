@@ -1,6 +1,7 @@
 import type { DadosDaConfiguracao, EsforcoDeRaciocinio, ModeloClaude, NivelDePermissao } from "./api/tipos";
 
 export const ROTULOS_DOS_MODELOS: Readonly<Record<ModeloClaude, { nome: string; descricao: string }>> = {
+  fable: { nome: "Fable", descricao: "Desafios mais difíceis" },
   opus: { nome: "Opus", descricao: "Mais capaz" },
   sonnet: { nome: "Sonnet", descricao: "Equilibrado" },
   haiku: { nome: "Haiku", descricao: "Rápido, menos cota" },

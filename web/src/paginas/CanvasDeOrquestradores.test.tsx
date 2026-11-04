@@ -27,6 +27,12 @@ const simulados = vi.hoisted(() => ({
 vi.mock("../shared/hooks/useOrquestradores", () => ({ useOrquestradores: () => simulados.orquestradores }));
 vi.mock("../shared/hooks/useServidor", () => ({ useServidor: () => simulados.servidor }));
 vi.mock("../shared/hooks/useConversas", () => ({ useConversas: () => simulados.conversas }));
+vi.mock("../shared/hooks/useChat", async () => {
+  const { ESTADO_INICIAL_DO_CHAT } = await import("../shared/estado/aplicarEventoDoChat");
+  const chat = { ...ESTADO_INICIAL_DO_CHAT, carregado: true };
+  const aplicarPreferencias = () => undefined;
+  return { useChat: () => ({ chat, conexao: "conectado", erro: null, aplicarPreferencias }) };
+});
 
 /** O jsdom não mede nada: o React Flow só precisa que o observador exista. */
 class ObservadorDeTamanhoFalso {
@@ -45,6 +51,31 @@ function nota(id: string, alteracoes: Partial<DadosDaNota> = {}): DadosDaNota {
     ...alteracoes,
   };
 }
+
+describe("CanvasDeOrquestradores · chat rápido", () => {
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoFalso);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it("mostra o chat no painel do centro de baixo, sem arrastar nem rolar o canvas", async () => {
+    render(<CanvasDeOrquestradores />);
+
+    const campo = await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+    expect(campo).toHaveAttribute("placeholder", "Pergunte qualquer coisa ao Claude · / para comandos");
+    const painel = campo.closest(".react-flow__panel");
+    expect(painel).toHaveClass("bottom", "center", "painel-do-chat");
+    expect(screen.getByTestId("chat-rapido")).toHaveClass("nodrag", "nowheel", "nopan");
+    expect(screen.getByRole("button", { name: /Modelo: Opus 5\.5, esforço alto/ })).toBeInTheDocument();
+  });
+});
 
 describe("CanvasDeOrquestradores · notas", () => {
   beforeEach(() => {

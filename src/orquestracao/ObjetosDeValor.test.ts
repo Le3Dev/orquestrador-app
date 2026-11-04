@@ -12,12 +12,36 @@ import {
   mensagemParaOOrquestrador,
   separarPropostaDePlano,
 } from "./InstrucoesDoOrquestrador";
+import { ehModeloClaude, MODELOS_CLAUDE } from "./ModeloClaude";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { DESCRICAO_DO_NIVEL, NivelDePermissao, TRABALHO_DIRETO_NO_NIVEL } from "./NivelDePermissao";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { LIMITE_DE_SUBAGENTES, QuantidadeDeSubagentes } from "./QuantidadeDeSubagentes";
 
 const raiz = path.resolve("/projetos");
+
+describe("ModeloClaude", () => {
+  it("aceita fable, opus, sonnet e haiku", () => {
+    expect(MODELOS_CLAUDE).toEqual(["fable", "opus", "sonnet", "haiku"]);
+    for (const modelo of MODELOS_CLAUDE) {
+      expect(ehModeloClaude(modelo)).toBe(true);
+    }
+  });
+
+  it.each(["claude-opus-4", "Opus", "", null, 3])("recusa %s", (valor) => {
+    expect(ehModeloClaude(valor)).toBe(false);
+  });
+
+  it("vale para os orquestradores: aceita fable na configuração", () => {
+    const configuracao = ConfiguracaoDoOrquestrador.de({
+      modeloDoOrquestrador: "fable",
+      modeloDosSubagentes: "fable",
+      quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
+      nivelDePermissao: "leitura",
+    });
+    expect(configuracao.paraDados().modeloDoOrquestrador).toBe("fable");
+  });
+});
 
 describe("QuantidadeDeSubagentes", () => {
   it("aceita de 1 até o limite, nos dois modos", () => {

@@ -1,8 +1,10 @@
 import type {
   DadosDaConfiguracao,
   DadosDaNota,
+  EstadoDoChat,
   ModoDoTurno,
   PastaDeProjeto,
+  PreferenciasDoChat,
   ResumoDoOrquestrador,
   SaudeDoServidor,
   TipoDeImagem,
@@ -135,4 +137,29 @@ export const api = {
   /** `desde`: última sequência já recebida, para o servidor reenviar só o que faltou. */
   enderecoDosEventos: (id: string, desde = 0) =>
     `/api/orquestradores/${encodeURIComponent(id)}/eventos${desde > 0 ? `?desde=${desde}` : ""}`,
+
+  // ---------------- Chat rápido ----------------
+
+  /** O chat inteiro; a resposta em andamento já vem com o texto acumulado. */
+  lerChat: () => requisitar<EstadoDoChat>("/chat"),
+
+  /** Pergunta nova; a resposta chega pelos eventos. Recusada (409) durante outra resposta. */
+  perguntarNoChat: (texto: string, imagens: readonly ImagemParaEnvio[] = []) =>
+    requisitar<{ mensagemId: string }>("/chat/mensagens", {
+      method: "POST",
+      body: JSON.stringify(imagens.length > 0 ? { texto, imagens } : { texto }),
+    }),
+
+  /** Modelo e/ou esforço do chat; a escolha vira o padrão das próximas perguntas. */
+  alterarPreferenciasDoChat: (alteracao: Partial<PreferenciasDoChat>) =>
+    requisitar<PreferenciasDoChat>("/chat/preferencias", { method: "PATCH", body: JSON.stringify(alteracao) }),
+
+  cancelarRespostaDoChat: () => requisitar<{ cancelando: boolean }>("/chat/cancelar", { method: "POST" }),
+
+  /** Conversa nova ("/clear"): o servidor confirma com o evento `conversa_limpa`. Recusado (409) durante a resposta. */
+  limparChat: () => requisitar<unknown>("/chat/limpar", { method: "POST" }),
+
+  enderecoDoAnexoDoChat: (arquivo: string) => `/api/chat/anexos/${encodeURIComponent(arquivo)}`,
+
+  enderecoDosEventosDoChat: (desde = 0) => `/api/chat/eventos${desde > 0 ? `?desde=${desde}` : ""}`,
 };

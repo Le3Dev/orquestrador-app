@@ -1,0 +1,177 @@
+import type { EventoDoChat, EventoDoChatRegistrado, MensagemDoChat } from "../api/tipos";
+import {
+  aplicarAtividadeDoChat,
+  aplicarEventoDoChat,
+  aplicarTrechoDoChat,
+  carregarEstadoDoChat,
+  ESTADO_INICIAL_DO_CHAT,
+  type EstadoDoChatNaTela,
+  textoParaMostrar,
+  ultimoModeloUsado,
+} from "./aplicarEventoDoChat";
+
+const EM = "2026-11-04T12:00:00Z";
+
+function mensagem(id: string, papel: MensagemDoChat["papel"], alteracoes: Partial<MensagemDoChat> = {}): MensagemDoChat {
+  return {
+    id,
+    papel,
+    texto: "",
+    imagens: [],
+    criadaEm: EM,
+    situacao: papel === "usuario" ? "concluida" : "respondendo",
+    acoes: [],
+    avisos: [],
+    uso: null,
+    ...alteracoes,
+  };
+}
+
+function registrado(evento: EventoDoChat, sequencia: number): EventoDoChatRegistrado {
+  return { ...evento, sequencia, em: EM };
+}
+
+/** Aplica os eventos em ordem, numerando as sequências a partir de 1. */
+function aplicar(eventos: EventoDoChat[], inicial: EstadoDoChatNaTela = ESTADO_INICIAL_DO_CHAT): EstadoDoChatNaTela {
+  return eventos.reduce(
+    (estado, evento, indice) => aplicarEventoDoChat(estado, registrado(evento, indice + 1)),
+    inicial,
+  );
+}
+
+const pergunta: EventoDoChat = {
+  tipo: "pergunta_enviada",
+  mensagemDoUsuario: mensagem("u1", "usuario", { texto: "oi" }),
+  mensagemDoClaude: mensagem("c1", "claude"),
+};
+
+describe("aplicarEventoDoChat", () => {
+  it("pergunta enviada: as duas mensagens entram e o chat fica respondendo", () => {
+    const estado = aplicar([pergunta]);
+
+    expect(estado.situacao).toBe("respondendo");
+    expect(estado.mensagens.map((item) => item.id)).toEqual(["u1", "c1"]);
+    expect(estado.ultimaSequencia).toBe(1);
+  });
+
+  it("trechos se concatenam na resposta em andamento; a atividade guarda só a mais recente", () => {
+    let estado = aplicar([pergunta]);
+    estado = aplicarTrechoDoChat(estado, { mensagemId: "c1", texto: "Olá, " });
+    estado = aplicarTrechoDoChat(estado, { mensagemId: "c1", texto: "tudo bem?" });
+    estado = aplicarAtividadeDoChat(estado, { mensagemId: "c1", ferramenta: "WebSearch", detalhe: "clima" });
+    estado = aplicarAtividadeDoChat(estado, { mensagemId: "c1", ferramenta: "Read", detalhe: "README.md" });
+
+    expect(estado.mensagens[1]?.texto).toBe("Olá, tudo bem?");
+    expect(estado.atividade).toEqual({ mensagemId: "c1", ferramenta: "Read", detalhe: "README.md" });
+    // Trecho de uma mensagem desconhecida não muda nada.
+    expect(aplicarTrechoDoChat(estado, { mensagemId: "x", texto: "?" })).toBe(estado);
+  });
+
+  it("a conclusão substitui o texto dos trechos e traz ações, avisos e uso", () => {
+    let estado = aplicar([pergunta]);
+    estado = aplicarTrechoDoChat(estado, { mensagemId: "c1", texto: "parcial ```acao-do-app\n{" });
+    estado = aplicarEventoDoChat(
+      estado,
+      registrado(
+        {
+          tipo: "resposta_concluida",
+          mensagemId: "c1",
+          texto: "Final.",
+          acoes: [{ tipo: "abrir_orquestrador", projeto: "app", pasta: "C:\\p\\app", pedido: null }],
+          avisos: ["cuidado"],
+          uso: { duracaoMs: 10, tokensDeEntrada: 1, tokensDeSaida: 2, modeloUsado: "claude-opus-5-5" },
+        },
+        2,
+      ),
+    );
+
+    const resposta = estado.mensagens[1];
+    expect(resposta).toMatchObject({ situacao: "concluida", texto: "Final.", avisos: ["cuidado"] });
+    expect(resposta?.acoes).toHaveLength(1);
+    expect(estado.situacao).toBe("ocioso");
+    expect(estado.atividade).toBeNull();
+    expect(ultimoModeloUsado(estado)).toBe("claude-opus-5-5");
+    // Depois de concluída, trechos atrasados não mexem no texto.
+    expect(aplicarTrechoDoChat(estado, { mensagemId: "c1", texto: "!" })).toBe(estado);
+  });
+
+  it("falha guarda o motivo; cancelamento marca a resposta", () => {
+    const falhou = aplicar([pergunta, { tipo: "resposta_falhou", mensagemId: "c1", motivo: "sem cota", uso: null }]);
+    expect(falhou.mensagens[1]).toMatchObject({ situacao: "falhou", motivoDaFalha: "sem cota" });
+    expect(falhou.situacao).toBe("ocioso");
+
+    const cancelada = aplicar([pergunta, { tipo: "resposta_cancelada", mensagemId: "c1" }]);
+    expect(cancelada.mensagens[1]?.situacao).toBe("cancelada");
+    expect(cancelada.situacao).toBe("ocioso");
+  });
+
+  it("limpar esvazia a conversa; preferências e cota são atualizadas", () => {
+    const estado = aplicar([
+      pergunta,
+      { tipo: "resposta_cancelada", mensagemId: "c1" },
+      { tipo: "conversa_limpa" },
+      { tipo: "preferencias_alteradas", preferencias: { modelo: "haiku", esforco: "baixo" } },
+      { tipo: "uso_da_cota", janelas: [{ nome: "5 horas", utilizacao: 0.4, renovaEm: null, situacao: "ok" }] },
+    ]);
+
+    expect(estado.mensagens).toEqual([]);
+    expect(estado.preferencias).toEqual({ modelo: "haiku", esforco: "baixo" });
+    expect(estado.cota?.[0]?.utilizacao).toBe(0.4);
+    expect(estado.ultimaSequencia).toBe(5);
+  });
+
+  it("ignora eventos repetidos ou fora de ordem pela sequência", () => {
+    const estado = aplicar([pergunta, { tipo: "conversa_limpa" }]);
+
+    expect(aplicarEventoDoChat(estado, registrado(pergunta, 1))).toBe(estado);
+    expect(aplicarEventoDoChat(estado, registrado(pergunta, 2))).toBe(estado);
+    expect(estado.mensagens).toEqual([]);
+  });
+
+  it("o estado carregado do servidor substitui o da tela", () => {
+    const estado = carregarEstadoDoChat({
+      sessaoId: "s",
+      situacao: "respondendo",
+      preferencias: { modelo: "fable", esforco: "maximo" },
+      mensagens: [mensagem("c9", "claude", { texto: "já veio" })],
+      ultimaSequencia: 42,
+      cota: null,
+    });
+
+    expect(estado).toMatchObject({ carregado: true, situacao: "respondendo", ultimaSequencia: 42 });
+    expect(estado.mensagens[0]).toMatchObject({ texto: "já veio", motivoDaFalha: null });
+  });
+
+  it("no estado carregado, o motivo de uma falha (último aviso) volta a ser o motivo", () => {
+    const estado = carregarEstadoDoChat({
+      sessaoId: "s",
+      situacao: "ocioso",
+      preferencias: { modelo: "opus", esforco: "alto" },
+      mensagens: [mensagem("c1", "claude", { situacao: "falhou", avisos: ["ação ignorada", "sem cota"] })],
+      ultimaSequencia: 3,
+      cota: null,
+    });
+
+    expect(estado.mensagens[0]).toMatchObject({ avisos: ["ação ignorada"], motivoDaFalha: "sem cota" });
+  });
+});
+
+describe("textoParaMostrar", () => {
+  it("esconde o bloco de ação ainda aberto durante a resposta", () => {
+    expect(textoParaMostrar("Vou abrir.\n\n```acao-do-app\n{\"tipo\":", true)).toBe("Vou abrir.");
+  });
+
+  it("esconde o bloco fechado e mantém o que vem depois", () => {
+    expect(textoParaMostrar("Antes\n```acao-do-app\n{}\n```\nDepois", false)).toBe("Antes\nDepois");
+  });
+
+  it("esconde a cerca ainda pela metade no fim só durante a resposta", () => {
+    expect(textoParaMostrar("Texto\n```aca", true)).toBe("Texto");
+    expect(textoParaMostrar("Texto\n```aca", false)).toBe("Texto\n```aca");
+  });
+
+  it("não mexe em outros blocos de código", () => {
+    const texto = "```ts\nconst a = 1;\n```";
+    expect(textoParaMostrar(texto, false)).toBe(texto);
+  });
+});
