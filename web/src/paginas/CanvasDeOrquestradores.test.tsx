@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { api } from "../shared/api/cliente";
 import type {
@@ -249,5 +249,115 @@ describe("CanvasDeOrquestradores · bixinhos", () => {
     for (const id of [bixinho, idDoBixinho("o1", "s2")]) {
       expect(sobrepoe({ ...posicaoNaTela(id), ...TAMANHO_DO_BIXINHO }, terminalSolto)).toBe(false);
     }
+  });
+});
+
+// Vários terminais no jsdom: sob a carga da suíte inteira, passam dos 5 s padrão.
+describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout: 20_000 }, () => {
+  const AVISO =
+    "Limite de 4 orquestradores abertos. Feche um dos orquestradores (✕ na barra do terminal) antes de iniciar outro.";
+
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoFalso);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+    localStorage.setItem(
+      "orquestrador-agentes:canvas:v1",
+      JSON.stringify({
+        terminais: Object.fromEntries(
+          ["o1", "o2", "o3", "o4"].map((id, indice) => [id, { x: indice * 700, y: 0, largura: 600, altura: 520 }]),
+        ),
+        notas: {},
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }),
+    );
+    simulados.orquestradores.orquestradores = ["o1", "o2", "o3", "o4", "o5"].map(orquestrador);
+  });
+
+  afterEach(() => {
+    simulados.orquestradores.orquestradores = [];
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  const rascunhosNaTela = () => document.querySelectorAll(".react-flow__node-rascunho").length;
+
+  /** O item do Orquestrador na lista da esquerda (Doca). */
+  function itemDaDoca(id: string): HTMLElement {
+    const item = screen
+      .getAllByRole("button")
+      .find(
+        (botao) =>
+          ["Ir até o terminal", "Abrir o terminal no canvas"].includes(botao.title) &&
+          botao.textContent?.startsWith(`Orquestrador ${id}`) === true,
+      );
+    if (item === undefined) {
+      throw new Error(`${id} não está na lista`);
+    }
+    return item;
+  }
+
+  const fecharAviso = () => fireEvent.click(within(screen.getByText(AVISO).parentElement as HTMLElement).getByTitle("Fechar aviso"));
+
+  it("com 4 abertos, \"+ Novo orquestrador\" mostra o aviso e não abre o formulário", async () => {
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o4")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Novo orquestrador" }));
+
+    expect(await screen.findByText(AVISO)).toBeInTheDocument();
+    expect(screen.getByText(AVISO).closest(".alert")).toHaveClass("alert-warning");
+    expect(rascunhosNaTela()).toBe(0);
+
+    // Fechável no ✕ do próprio aviso.
+    fecharAviso();
+    expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
+  });
+
+  it("com 4 abertos, reabrir pela lista mostra o aviso; um já aberto só foca; fechar um libera a vaga", async () => {
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o4")).toBeInTheDocument());
+
+    fireEvent.click(itemDaDoca("o5"));
+    expect(await screen.findByText(AVISO)).toBeInTheDocument();
+    expect(document.querySelector('.react-flow__node[data-id="o5"]')).toBeNull();
+
+    // Já aberto não conta: não recusa (e não deixa aviso).
+    fireEvent.click(itemDaDoca("o2"));
+    expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
+
+    // Recusa de novo e fecha o terminal o1 no ✕: o aviso some sozinho e a vaga volta.
+    fireEvent.click(itemDaDoca("o5"));
+    expect(await screen.findByText(AVISO)).toBeInTheDocument();
+    fireEvent.click(within(noNaTela("o1")).getByTitle("Fechar o terminal (o orquestrador e o histórico continuam salvos)"));
+    await waitFor(() => expect(screen.queryByText(AVISO)).not.toBeInTheDocument());
+    // O1 continua na lista: nada foi excluído.
+    expect(itemDaDoca("o1")).toHaveAttribute("title", "Abrir o terminal no canvas");
+
+    fireEvent.click(itemDaDoca("o5"));
+    await waitFor(() => expect(noNaTela("o5")).toBeInTheDocument());
+    expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
+  });
+
+  it("o rascunho conta: com 3 abertos e o formulário aberto, não abre outro", async () => {
+    localStorage.setItem(
+      "orquestrador-agentes:canvas:v1",
+      JSON.stringify({
+        terminais: { o1: { x: 0, y: 0, largura: 600, altura: 520 }, o2: { x: 700, y: 0, largura: 600, altura: 520 }, o3: { x: 1400, y: 0, largura: 600, altura: 520 } },
+        notas: {},
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }),
+    );
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o3")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Novo orquestrador" }));
+    await waitFor(() => expect(rascunhosNaTela()).toBe(1));
+    expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
+
+    fireEvent.click(itemDaDoca("o5"));
+    expect(await screen.findByText(AVISO)).toBeInTheDocument();
+    expect(document.querySelector('.react-flow__node[data-id="o5"]')).toBeNull();
   });
 });
