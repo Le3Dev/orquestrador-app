@@ -14,7 +14,7 @@ import { useRelogio } from "../../shared/hooks/useRelogio";
 import type { EstadoDoServidor } from "../../shared/hooks/useServidor";
 import { nivelDaMemoria, type NivelDaMemoria } from "../../shared/memoria";
 import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
-import { IconeOrquestrador, IconePasta, IconePessoas } from "../Icones";
+import { IconeAlerta, IconeFechar, IconeOrquestrador, IconePasta, IconePessoas } from "../Icones";
 import { ControlesDaJanela, rodandoNoDesktop } from "./ControlesDaJanela";
 
 /** Por quanto tempo o aviso de "reconectado" fica na tela. */
@@ -71,7 +71,7 @@ export function AvisoDeConexao({ servidor }: { servidor: EstadoDoServidor }) {
           )}
         </div>
         <button type="button" className="botao-icone" title="Fechar aviso" onClick={() => setMostrarVolta(false)}>
-          ✕
+          <IconeFechar tamanho={14} />
         </button>
       </div>
     );
@@ -177,7 +177,7 @@ export function ErroDoCanvas({ erro, aoFechar }: { erro: string; aoFechar: () =>
     <div className="alert alert-error mt-2 flex max-w-md items-start gap-2" role="alert">
       <span className="flex-1">{erro}</span>
       <button type="button" className="botao-icone shrink-0" title="Fechar aviso" onClick={aoFechar}>
-        ✕
+        <IconeFechar tamanho={14} />
       </button>
     </div>
   );
@@ -326,7 +326,8 @@ export function StatusDoCanvas({ trabalhando, bixinhosAtivos, cota, memoria }: P
         className={`aviso-de-memoria flex items-start gap-2 ${aviso === "critica" ? "aviso-de-memoria-critica" : ""}`}
         role="status"
       >
-        <span className="flex-1">⚠ {AVISO_DA_MEMORIA[aviso]}</span>
+        <IconeAlerta className="mt-0.5 shrink-0" />
+        <span className="flex-1">{AVISO_DA_MEMORIA[aviso]}</span>
         <button
           type="button"
           className="botao-icone shrink-0"
@@ -334,7 +335,7 @@ export function StatusDoCanvas({ trabalhando, bixinhosAtivos, cota, memoria }: P
           aria-label="Fechar aviso de memória"
           onClick={() => setDispensado(aviso)}
         >
-          ✕
+          <IconeFechar tamanho={14} />
         </button>
       </div>
     )}

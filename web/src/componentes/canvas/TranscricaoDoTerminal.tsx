@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { memo, type ReactNode, useEffect, useState } from "react";
 
 import { api } from "../../shared/api/cliente";
 import type { DadosDaConfiguracao, SinalDeVida } from "../../shared/api/tipos";
@@ -15,13 +15,13 @@ import {
   idCurto,
 } from "../../shared/formatacao";
 import { useRelogio } from "../../shared/hooks/useRelogio";
-import { IconeOrquestrador } from "../Icones";
+import { IconeAlerta, IconeCoracao, IconeOrquestrador, IconeRaio } from "../Icones";
 import { TextoFormatado } from "../TextoFormatado";
 import { type AcoesDoPlano, CartaoDoPlano } from "./CartaoDoPlano";
 
-const SIMBOLOS: Readonly<Record<TipoDeLinhaDoLog, string>> = {
+const SIMBOLOS: Readonly<Record<TipoDeLinhaDoLog, ReactNode>> = {
   sistema: "○",
-  spawn: "⚡",
+  spawn: <IconeRaio className="inline-block align-[-1px]" />,
   ferramenta: "·",
   texto: "◆",
   fim: "✓",
@@ -78,7 +78,7 @@ function SinalDoTurno({ turno, sinal }: { turno: TurnoNaTela; sinal: SinalDeVida
         <span />
         {/* A chave muda a cada sinal: o coração pulsa de novo cada vez que o Claude dá notícia. */}
         <span key={sinal?.em ?? turno.ultimaAtividadeEm} className="linha-simbolo batimento">
-          {vida.preocupante ? "⚠" : "♥"}
+          {vida.preocupante ? <IconeAlerta tamanho={12} className="inline-block align-[-1px]" /> : <IconeCoracao className="inline-block align-[-1px]" />}
         </span>
         <span className="linha-texto col-span-2">
           {vida.preocupante
@@ -151,7 +151,9 @@ const Turno = memo(function Turno({
           // impressão de que o trabalho segue normalmente.
           <div className="linha-do-terminal linha-erro">
             <span />
-            <span className="linha-simbolo">⚠</span>
+            <span className="linha-simbolo">
+              <IconeAlerta tamanho={12} className="inline-block align-[-1px]" />
+            </span>
             <span className="linha-texto col-span-2">sem conexão com o servidor — aguardando ele voltar</span>
           </div>
         ) : (

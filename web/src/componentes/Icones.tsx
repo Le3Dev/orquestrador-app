@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 /**
  * Ícones próprios da tela, desenhados aqui (não são marcas da Anthropic).
  * Usam `currentColor`, então a cor vem do token aplicado no elemento pai.
@@ -71,5 +73,111 @@ export function IconePessoas({ tamanho = 14, className = "" }: PropsDoIcone) {
         strokeLinecap="round"
       />
     </svg>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Ícones de ação e de situação. Traço de 1.8 num quadro de 24, para ficarem
+// nítidos de 12 a 18 px. No lugar de emojis, que cada sistema desenha de um
+// jeito (e colorido).
+// ──────────────────────────────────────────────────────────────────────────
+
+const TRACO = {
+  stroke: "currentColor",
+  strokeWidth: 1.8,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+} as const;
+
+function Quadro({ tamanho, className, children }: PropsDoIcone & { tamanho: number; children: ReactNode }) {
+  return (
+    <svg width={tamanho} height={tamanho} viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      {children}
+    </svg>
+  );
+}
+
+/** X de fechar ou descartar. */
+export function IconeFechar({ tamanho = 16, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path d="M6.5 6.5l11 11M17.5 6.5l-11 11" {...TRACO} strokeWidth={2} />
+    </Quadro>
+  );
+}
+
+/** Engrenagem: configurações. */
+export function IconeEngrenagem({ tamanho = 18, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path
+        d="M10.3 3.6a1.7 1.7 0 0 1 3.4 0l.1.6a1.7 1.7 0 0 0 2.5 1l.5-.3a1.7 1.7 0 0 1 2.4 2.4l-.3.5a1.7 1.7 0 0 0 1 2.5l.6.1a1.7 1.7 0 0 1 0 3.4l-.6.1a1.7 1.7 0 0 0-1 2.5l.3.5a1.7 1.7 0 0 1-2.4 2.4l-.5-.3a1.7 1.7 0 0 0-2.5 1l-.1.6a1.7 1.7 0 0 1-3.4 0l-.1-.6a1.7 1.7 0 0 0-2.5-1l-.5.3a1.7 1.7 0 0 1-2.4-2.4l.3-.5a1.7 1.7 0 0 0-1-2.5l-.6-.1a1.7 1.7 0 0 1 0-3.4l.6-.1a1.7 1.7 0 0 0 1-2.5l-.3-.5a1.7 1.7 0 0 1 2.4-2.4l.5.3a1.7 1.7 0 0 0 2.5-1l.1-.6Z"
+        {...TRACO}
+      />
+      <circle cx="12" cy="12" r="3" {...TRACO} />
+    </Quadro>
+  );
+}
+
+/** Clipe de anexo. */
+export function IconeAnexo({ tamanho = 18, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path
+        d="M20 11.5l-7.6 7.6a5 5 0 0 1-7.1-7.1l7.9-7.9a3.3 3.3 0 0 1 4.7 4.7l-7.9 7.9a1.7 1.7 0 0 1-2.4-2.4l7.3-7.3"
+        {...TRACO}
+      />
+    </Quadro>
+  );
+}
+
+/** Microfone: ditar por voz. */
+export function IconeMicrofone({ tamanho = 18, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <rect x="9" y="3" width="6" height="11" rx="3" {...TRACO} />
+      <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" {...TRACO} />
+    </Quadro>
+  );
+}
+
+/** Triângulo de alerta. */
+export function IconeAlerta({ tamanho = 14, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path d="M10.3 4.3a2 2 0 0 1 3.4 0l7.4 12.8a2 2 0 0 1-1.7 3H4.6a2 2 0 0 1-1.7-3l7.4-12.8Z" {...TRACO} />
+      <path d="M12 9.5v4" {...TRACO} strokeWidth={2} />
+      <circle cx="12" cy="16.8" r="1.1" fill="currentColor" />
+    </Quadro>
+  );
+}
+
+/** Coração: sinal de vida do Claude durante o turno. */
+export function IconeCoracao({ tamanho = 12, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path
+        d="M12 20s-7.5-4.6-7.5-10.2A4.3 4.3 0 0 1 12 7.3a4.3 4.3 0 0 1 7.5 2.5C19.5 15.4 12 20 12 20Z"
+        fill="currentColor"
+      />
+    </Quadro>
+  );
+}
+
+/** Raio: um subagente acabou de ser criado. */
+export function IconeRaio({ tamanho = 12, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path d="M13.5 2.5 5 13.5h6l-1 8 8.5-11h-6l1-8Z" fill="currentColor" />
+    </Quadro>
+  );
+}
+
+/** Seta para cima: pasta acima. */
+export function IconeSetaAcima({ tamanho = 16, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path d="M12 19V5M6 11l6-6 6 6" {...TRACO} strokeWidth={2} />
+    </Quadro>
   );
 }

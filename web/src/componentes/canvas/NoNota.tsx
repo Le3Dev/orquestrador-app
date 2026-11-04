@@ -7,6 +7,7 @@ import { TAMANHO_MINIMO_DA_NOTA } from "../../shared/canvas/layout";
 import { ALCA_DA_NOTA, type NoNota as TipoDoNo } from "../../shared/canvas/nos";
 import { useAcoesDasNotas, useErroAoCarregarNotas, useLojaDasNotas, useNota } from "../../shared/canvas/notas";
 import { type SituacaoDoSalvamento, useEdicaoDaNota } from "../../shared/hooks/useEdicaoDaNota";
+import { IconeAlerta } from "../Icones";
 
 export const CONFIRMACAO_PARA_APAGAR = "Apagar esta nota? Isso não pode ser desfeito.";
 const TAMANHO_MAXIMO_DO_TITULO = 120;
@@ -243,7 +244,7 @@ function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
             aria-label="Ver o problema da nota"
             onClick={() => acoes.minimizarOuRestaurar(notaId)}
           >
-            ⚠
+            <IconeAlerta tamanho={16} />
           </button>
         )}
         <button

@@ -3,6 +3,7 @@ import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { ConteudoDaPasta } from "../../shared/api/tipos";
 import { nomeDaPasta } from "../../shared/pastas";
+import { IconePasta, IconeSetaAcima } from "../Icones";
 
 interface Props {
   aoEscolher: (caminho: string) => void;
@@ -88,7 +89,7 @@ export function NavegadorDePastas({ aoEscolher, conectado }: Props) {
           disabled={abrindo || conteudo?.acima == null}
           onClick={() => conteudo?.acima != null && abrir(conteudo.acima)}
         >
-          ↑
+          <IconeSetaAcima />
         </button>
         <input
           ref={campo}
@@ -135,7 +136,7 @@ export function NavegadorDePastas({ aoEscolher, conectado }: Props) {
                   disabled={abrindo}
                   onClick={() => abrir(subpasta.caminho)}
                 >
-                  <span aria-hidden="true">📁</span>
+                  <IconePasta tamanho={14} className="shrink-0" />
                   <span className="truncate">{subpasta.nome}</span>
                   <span className="ml-auto" aria-hidden="true">
                     ›

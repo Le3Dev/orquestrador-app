@@ -4,6 +4,7 @@ import type { ModoDoTurno } from "../../shared/api/tipos";
 import { comandoDoPrompt, completarComando, dicaDeComando, dicaDePedidoGrande } from "../../shared/comandosDoPrompt";
 import { formatarBytes } from "../../shared/formatacao";
 import { type ImagemAnexada, TIPOS_DE_IMAGEM } from "../../shared/imagens";
+import { IconeAnexo, IconeFechar } from "../Icones";
 
 const ALTURA_MAXIMA = 140;
 
@@ -148,7 +149,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
                 aria-label={`Remover ${imagem.nome}`}
                 onClick={() => aoRemoverImagem(imagem.id)}
               >
-                ✕
+                <IconeFechar tamanho={11} />
               </button>
             </figure>
           ))}
@@ -192,9 +193,10 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
           type="button"
           className="botao-icone"
           title="Anexar imagens (também dá para colar com Ctrl+V ou arrastar para o terminal)"
+          aria-label="Anexar imagens"
           onClick={() => seletor.current?.click()}
         >
-          📎
+          <IconeAnexo />
         </button>
         {trabalhando ? (
           <button

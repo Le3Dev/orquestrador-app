@@ -144,7 +144,7 @@ describe("ErroDoCanvas", () => {
     render(<ErroDoCanvas erro="Não foi possível criar a nota: servidor fora." aoFechar={aoFechar} />);
 
     expect(screen.getByRole("alert")).toHaveTextContent("Não foi possível criar a nota: servidor fora.");
-    fireEvent.click(screen.getByRole("button", { name: "✕" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fechar aviso" }));
     expect(aoFechar).toHaveBeenCalledTimes(1);
   });
 });

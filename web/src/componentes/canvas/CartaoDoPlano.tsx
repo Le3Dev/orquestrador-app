@@ -61,7 +61,7 @@ export const CartaoDoPlano = memo(function CartaoDoPlano({ turno, configuracao, 
           <p className="hint">Será executado com: {descreverConfiguracao(configuracao)}</p>
           {configuracao.nivelDePermissao === "leitura" && (
             <div className="alert alert-warning">
-              As permissões estão em somente leitura: a execução não poderá alterar arquivos. Ajuste no ⚙ antes de
+              As permissões estão em somente leitura: a execução não poderá alterar arquivos. Ajuste na engrenagem do terminal antes de
               aprovar.
             </div>
           )}

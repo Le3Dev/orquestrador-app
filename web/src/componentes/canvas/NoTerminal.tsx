@@ -12,7 +12,7 @@ import { type ImagemAnexada, lerImagem, problemaDaImagem } from "../../shared/im
 import { CamposDaConfiguracao } from "../CamposDaConfiguracao";
 import { Etiqueta } from "../Etiqueta";
 import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
-import { IconeOrquestrador, IconePasta } from "../Icones";
+import { IconeEngrenagem, IconeFechar, IconeOrquestrador, IconePasta } from "../Icones";
 import { BotaoDeLimparBixinhos } from "./BotaoDeLimparBixinhos";
 import type { AcoesDoPlano } from "./CartaoDoPlano";
 import { PromptDoTerminal } from "./PromptDoTerminal";
@@ -450,7 +450,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
             className="chip chip-instrucoes"
             title={
               orquestrador.instrucoesAtivas === "orquestrador"
-                ? "Instruções personalizadas deste orquestrador ativas (⚙ para ver ou editar)"
+                ? "Instruções personalizadas deste orquestrador ativas (na engrenagem, para ver ou editar)"
                 : "Instruções gerais ativas (botão Instruções gerais, na barra do canvas)"
             }
           >
@@ -473,17 +473,19 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
           className="botao-icone nodrag"
           title="Configurar"
           aria-pressed={configurando}
+          aria-label="Configurar"
           onClick={() => setConfigurando((atual) => !atual)}
         >
-          ⚙
+          <IconeEngrenagem />
         </button>
         <button
           type="button"
           className="botao-icone nodrag"
           title="Fechar o terminal (o orquestrador e o histórico continuam salvos)"
+          aria-label="Fechar o terminal"
           onClick={() => acoes.fecharTerminal(orquestradorId)}
         >
-          ✕
+          <IconeFechar />
         </button>
       </div>
 

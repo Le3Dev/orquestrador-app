@@ -11,7 +11,7 @@ import {
 import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
 import { nomeDeSubagente } from "../../shared/subagentesProntos";
 import { Dica } from "../Dica";
-import { IconePessoas } from "../Icones";
+import { IconeFechar, IconePessoas } from "../Icones";
 
 /** Como o servidor confere (`TAMANHO_MAXIMO_DO_NOME_DO_SUBAGENTE`). */
 const TAMANHO_MAXIMO_DO_NOME = 40;
@@ -285,7 +285,7 @@ export function PainelDeSubagentes({ aoFechar, aoSalvar }: Props) {
           </span>
         </div>
         <button type="button" className="botao-icone shrink-0" aria-label="Fechar subagentes" onClick={aoFechar}>
-          ✕
+          <IconeFechar tamanho={16} />
         </button>
       </header>
 

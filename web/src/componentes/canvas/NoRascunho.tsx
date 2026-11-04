@@ -19,6 +19,7 @@ import { Dica } from "../Dica";
 import { PreviaDoPromptFinal } from "../PreviaDoPromptFinal";
 import { ChipDeEsforco, ChipDeQuantidade } from "./ChipsDaCriacao";
 import { EscolhaDePasta, TAMANHO_MAXIMO_DO_NOME } from "./EscolhaDePasta";
+import { IconeFechar } from "../Icones";
 
 // "Fazer o trivial sozinho" e "propor plano" não aparecem na criação: vão sempre ligados.
 const CONFIGURACAO_PADRAO: DadosDaConfiguracao = {
@@ -153,7 +154,7 @@ export function NoRascunho({ id, selected }: NodeProps<TipoDoNo>) {
             aria-label="Descartar rascunho"
             onClick={() => acoes.descartarRascunho(id)}
           >
-            ✕
+            <IconeFechar tamanho={16} />
           </button>
         </div>
 
@@ -188,7 +189,7 @@ export function NoRascunho({ id, selected }: NodeProps<TipoDoNo>) {
               id={idDaPermissao}
               titulo="Permissão"
               dica="O que ele pode fazer na pasta."
-              explicacao="Vale para o orquestrador e para os subagentes. Comece em Só olhar e libere mais quando precisar: dá para mudar depois, no ⚙ do terminal."
+              explicacao="Vale para o orquestrador e para os subagentes. Comece em Só olhar e libere mais quando precisar: dá para mudar depois, na engrenagem do terminal."
               alinharAoTopo
             />
             <div className="flex min-w-0 flex-col gap-1.5">
