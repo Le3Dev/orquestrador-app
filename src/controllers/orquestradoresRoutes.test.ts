@@ -138,7 +138,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
   beforeEach(async () => {
     orquestrador = await servico.criarOrquestrador({
       nome: "Painel",
-      pastaDeTrabalho: PastaDeTrabalho.dentroDe(raiz, "painel"),
+      pastaDeTrabalho: PastaDeTrabalho.resolver(raiz, "painel"),
       configuracao: {
         modeloDoOrquestrador: "opus",
         modeloDosSubagentes: "sonnet",
@@ -624,10 +624,88 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(previa.instrucoesIniciais).toContain("Pasta de trabalho: <pasta de trabalho>");
     });
 
-    it("a prévia recusa pasta fora da raiz", async () => {
-      const resposta = await postar("/previa-do-prompt", { configuracao: configuracaoBasica, pastaDeTrabalho: "/etc" });
+    it("a prévia aceita pasta fora da pasta dos projetos", async () => {
+      const fora = path.resolve("/outro/lugar");
+      const resposta = await postar("/previa-do-prompt", { configuracao: configuracaoBasica, pastaDeTrabalho: fora });
+
+      expect(resposta.status).toBe(200);
+      const previa = (await resposta.json()) as { instrucoesIniciais: string };
+      expect(previa.instrucoesIniciais).toContain(`Pasta de trabalho: ${fora}`);
+    });
+  });
+  describe("pastas: qualquer pasta do computador", () => {
+    const configuracaoBasica = {
+      modeloDoOrquestrador: "opus",
+      modeloDosSubagentes: "haiku",
+      quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
+      nivelDePermissao: "leitura",
+    } as const;
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("GET /pastas sem caminho abre a pasta dos projetos e traz os atalhos", async () => {
+      const listar = vi
+        .spyOn(explorador, "listar")
+        .mockResolvedValue({ atual: raiz, acima: path.dirname(raiz), pastas: [{ nome: "painel", caminho: path.join(raiz, "painel") }] });
+      vi.spyOn(explorador, "atalhos").mockResolvedValue([{ nome: "Projetos", caminho: raiz }]);
+
+      const resposta = await fetch(`${base}/pastas`);
+
+      expect(resposta.status).toBe(200);
+      expect(listar).toHaveBeenCalledWith(undefined);
+      expect(await resposta.json()).toEqual({
+        raiz,
+        atual: raiz,
+        acima: path.dirname(raiz),
+        pastas: [{ nome: "painel", caminho: path.join(raiz, "painel") }],
+        atalhos: [{ nome: "Projetos", caminho: raiz }],
+      });
+    });
+
+    it("GET /pastas?caminho= abre a pasta pedida, mesmo fora da pasta dos projetos", async () => {
+      const fora = path.resolve("/outro/lugar");
+      const listar = vi.spyOn(explorador, "listar").mockResolvedValue({ atual: fora, acima: null, pastas: [] });
+      vi.spyOn(explorador, "atalhos").mockResolvedValue([]);
+
+      const resposta = await fetch(`${base}/pastas?caminho=${encodeURIComponent(fora)}`);
+
+      expect(resposta.status).toBe(200);
+      expect(listar).toHaveBeenCalledWith(fora);
+    });
+
+    it("GET /pastas com pasta que não existe responde 400 com a mensagem", async () => {
+      const resposta = await fetch(`${base}/pastas?caminho=${encodeURIComponent(path.join(raiz, "nao-existe"))}`);
 
       expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: `A pasta "${path.join(raiz, "nao-existe")}" não existe.` });
+    });
+
+    it("GET /pastas com dois caminhos responde 400", async () => {
+      const resposta = await fetch(`${base}/pastas?caminho=a&caminho=b`);
+
+      expect(resposta.status).toBe(400);
+    });
+
+    it("o POST cria um orquestrador numa pasta fora da pasta dos projetos", async () => {
+      const fora = path.resolve("/outro/lugar");
+      vi.spyOn(explorador, "existe").mockResolvedValue(true);
+
+      const resposta = await postar("/orquestradores", { nome: "Fora", pastaDeTrabalho: fora, ...configuracaoBasica });
+
+      expect(resposta.status).toBe(201);
+      expect(((await resposta.json()) as { pastaDeTrabalho: string }).pastaDeTrabalho).toBe(fora);
+    });
+
+    it("o POST continua recusando uma pasta que não existe", async () => {
+      const inexistente = path.resolve("/outro/nao-existe");
+      vi.spyOn(explorador, "existe").mockResolvedValue(false);
+
+      const resposta = await postar("/orquestradores", { nome: "X", pastaDeTrabalho: inexistente, ...configuracaoBasica });
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: `A pasta "${inexistente}" não existe.` });
     });
   });
 });

@@ -1,9 +1,9 @@
 import type {
+  ConteudoDaPasta,
   DadosDaConfiguracao,
   DadosDaNota,
   DadosDasPreferencias,
   ModoDoTurno,
-  PastaDeProjeto,
   PreviaDoPrompt,
   ResumoDoOrquestrador,
   SaudeDoServidor,
@@ -75,7 +75,9 @@ export interface AlteracaoDaNota {
 }
 
 export const api = {
-  listarPastas: () => requisitar<{ raiz: string; pastas: PastaDeProjeto[] }>("/pastas"),
+  /** Sem caminho, abre a pasta dos projetos. */
+  listarPastas: (caminho?: string) =>
+    requisitar<ConteudoDaPasta>(caminho === undefined ? "/pastas" : `/pastas?caminho=${encodeURIComponent(caminho)}`),
 
   listarOrquestradores: () => requisitar<ResumoDoOrquestrador[]>("/orquestradores"),
 

@@ -15,7 +15,7 @@ function novoOrquestrador(): Orquestrador {
   return Orquestrador.criar({
     id: "o1",
     nome: "  Painel  ",
-    pastaDeTrabalho: PastaDeTrabalho.dentroDe(raiz, "painel"),
+    pastaDeTrabalho: PastaDeTrabalho.resolver(raiz, "painel"),
     sessaoId: "s1",
     configuracao: ConfiguracaoDoOrquestrador.de({
       modeloDoOrquestrador: "opus",
@@ -52,7 +52,7 @@ describe("Orquestrador", () => {
       Orquestrador.criar({
         id: "o1",
         nome: "   ",
-        pastaDeTrabalho: PastaDeTrabalho.dentroDe(raiz, "painel"),
+        pastaDeTrabalho: PastaDeTrabalho.resolver(raiz, "painel"),
         sessaoId: "s1",
         configuracao: novoOrquestrador().configuracao,
         agora,

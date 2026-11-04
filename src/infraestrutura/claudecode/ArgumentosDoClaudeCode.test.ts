@@ -46,7 +46,7 @@ function pedido(
     sessaoIniciada,
     texto: "analise",
     modo,
-    pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
+    pastaDeTrabalho: PastaDeTrabalho.resolver(path.resolve("/projetos"), "painel"),
     configuracao: ConfiguracaoDoOrquestrador.de({
       modeloDoOrquestrador: "opus",
       modeloDosSubagentes: "haiku",

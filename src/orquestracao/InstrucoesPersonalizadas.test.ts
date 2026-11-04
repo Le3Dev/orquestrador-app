@@ -169,7 +169,7 @@ describe("mensagemParaOOrquestrador com instruções personalizadas", () => {
   });
 
   it("não mexe nas instruções iniciais (system prompt) da conversa", () => {
-    const pasta = PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel");
+    const pasta = PastaDeTrabalho.resolver(path.resolve("/projetos"), "painel");
     expect(instrucoesDoOrquestrador(pasta)).not.toContain("instrucoes-do-usuario");
   });
 });

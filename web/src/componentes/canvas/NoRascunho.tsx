@@ -1,12 +1,14 @@
 import { type NodeProps, NodeResizer } from "@xyflow/react";
-import { type FormEvent, useEffect, useId, useState } from "react";
+import { type FormEvent, useId, useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
-import type { DadosDaConfiguracao, PastaDeProjeto } from "../../shared/api/tipos";
+import type { DadosDaConfiguracao } from "../../shared/api/tipos";
 import { useCanvas } from "../../shared/canvas/contexto";
 import { TAMANHO_MINIMO_DO_TERMINAL } from "../../shared/canvas/layout";
 import { ALCA_DO_TERMINAL, type NoRascunho as TipoDoNo } from "../../shared/canvas/nos";
+import { nomeDaPasta } from "../../shared/pastas";
 import { CamposDaConfiguracao } from "../CamposDaConfiguracao";
+import { NavegadorDePastas } from "./NavegadorDePastas";
 
 const CONFIGURACAO_PADRAO: DadosDaConfiguracao = {
   modeloDoOrquestrador: "opus",
@@ -32,38 +34,24 @@ export function NoRascunho({ id, selected }: NodeProps<TipoDoNo>) {
   const [nome, setNome] = useState("");
   const [pasta, setPasta] = useState("");
   const [configuracao, setConfiguracao] = useState(CONFIGURACAO_PADRAO);
-  const [opcoes, setOpcoes] = useState<{ raiz: string; pastas: PastaDeProjeto[] } | null>(null);
+  const [pastaPendente, setPastaPendente] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [criando, setCriando] = useState(false);
 
-  // Tenta de novo quando o servidor volta: aberto com ele fora, o terminal
-  // ficaria preso em "carregando pastas…".
-  const carregou = opcoes !== null;
-  useEffect(() => {
-    if (carregou || !servidor.conectado) {
-      return;
-    }
-    api
-      .listarPastas()
-      .then((resposta) => {
-        setOpcoes(resposta);
-        setErro(null);
-      })
-      .catch((falha: unknown) => setErro(mensagemDeErro(falha)));
-  }, [carregou, servidor.conectado]);
-
   /** Sugere o nome da pasta como nome do orquestrador, sem apagar um nome digitado. */
   function escolherPasta(caminho: string): void {
-    const anterior = opcoes?.pastas.find((opcao) => opcao.caminho === pasta)?.nome ?? "";
-    const escolhida = opcoes?.pastas.find((opcao) => opcao.caminho === caminho)?.nome ?? "";
+    const anterior = pasta === "" ? "" : nomeDaPasta(pasta).slice(0, 60);
     if (nome.trim() === "" || nome === anterior) {
-      setNome(escolhida);
+      setNome(nomeDaPasta(caminho).slice(0, 60));
     }
     setPasta(caminho);
   }
 
   async function iniciar(evento: FormEvent): Promise<void> {
     evento.preventDefault();
+    if (pastaPendente) {
+      return;
+    }
     setErro(null);
     setCriando(true);
     try {
@@ -109,29 +97,21 @@ export function NoRascunho({ id, selected }: NodeProps<TipoDoNo>) {
           </p>
 
           <div className="grid gap-4 @container">
-            <div className="grid gap-4 @lg:grid-cols-2">
+            <div className="grid gap-4">
               <div className="field">
                 <label className="label" htmlFor={`${idDoCampo}-pasta`}>
                   Pasta de trabalho
                 </label>
-                <select
+                <NavegadorDePastas
                   id={`${idDoCampo}-pasta`}
-                  className="select font-mono text-[12px]"
-                  value={pasta}
-                  onChange={(evento) => escolherPasta(evento.target.value)}
-                  required
-                >
-                  <option value="" disabled>
-                    {opcoes === null ? "carregando pastas…" : "escolha um projeto"}
-                  </option>
-                  {opcoes?.pastas.map((opcao) => (
-                    <option key={opcao.caminho} value={opcao.caminho}>
-                      {opcao.nome}
-                    </option>
-                  ))}
-                  {opcoes !== null && <option value={opcoes.raiz}>todos os projetos (pasta raiz)</option>}
-                </select>
-                <span className="hint">Os agentes só trabalham dentro desta pasta.</span>
+                  valor={pasta}
+                  aoEscolher={escolherPasta}
+                  aoMudarPendencia={setPastaPendente}
+                  conectado={servidor.conectado}
+                />
+                <span className="hint">
+                  Qualquer pasta do computador. Os agentes só trabalham dentro dela.
+                </span>
               </div>
               <div className="field">
                 <label className="label" htmlFor={`${idDoCampo}-nome`}>
@@ -162,7 +142,7 @@ export function NoRascunho({ id, selected }: NodeProps<TipoDoNo>) {
           <button
             type="submit"
             className="btn btn-sm btn-cta"
-            disabled={criando || pasta === "" || nome.trim() === "" || !servidor.conectado}
+            disabled={criando || pasta === "" || pastaPendente || nome.trim() === "" || !servidor.conectado}
           >
             {criando ? "iniciando…" : "iniciar orquestrador ⏎"}
           </button>

@@ -38,7 +38,7 @@ describe("Orquestrador com imagens", () => {
     return Orquestrador.criar({
       id: "o1",
       nome: "Painel",
-      pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
+      pastaDeTrabalho: PastaDeTrabalho.resolver(path.resolve("/projetos"), "painel"),
       sessaoId: "s1",
       configuracao: ConfiguracaoDoOrquestrador.de({
         modeloDoOrquestrador: "opus",

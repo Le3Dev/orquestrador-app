@@ -17,7 +17,7 @@ function novoOrquestrador(id: string): Orquestrador {
   return Orquestrador.criar({
     id,
     nome: `Orquestrador ${id}`,
-    pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), id),
+    pastaDeTrabalho: PastaDeTrabalho.resolver(path.resolve("/projetos"), id),
     sessaoId: `sessao-${id}`,
     configuracao: ConfiguracaoDoOrquestrador.de({
       modeloDoOrquestrador: "sonnet",

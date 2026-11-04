@@ -1115,3 +1115,29 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   padding: 10px;
   background: var(--surface-2);
 }
+
+/* Navegador de pastas da criação do orquestrador. */
+.lista-de-pastas {
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-input);
+  background: var(--surface-2);
+  padding: 4px;
+}
+.item-de-pasta {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--caption);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.item-de-pasta:not(:disabled):hover { background: var(--surface-3); color: var(--primary); }
+.item-de-pasta:focus-visible { outline: 1px solid var(--active); outline-offset: -1px; }
+.item-de-pasta span { color: var(--muted); }

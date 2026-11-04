@@ -31,31 +31,35 @@ describe("QuantidadeDeSubagentes", () => {
 });
 
 describe("PastaDeTrabalho", () => {
-  it("resolve caminhos relativos a partir da raiz", () => {
-    const pasta = PastaDeTrabalho.dentroDe(raiz, "salasdereuniao-painel-app");
+  it("resolve caminhos relativos a partir da pasta dos projetos", () => {
+    const pasta = PastaDeTrabalho.resolver(raiz, "salasdereuniao-painel-app");
 
     expect(pasta.caminho).toBe(path.join(raiz, "salasdereuniao-painel-app"));
     expect(pasta.nome).toBe("salasdereuniao-painel-app");
   });
 
-  it("aceita caminho absoluto dentro da raiz e a própria raiz", () => {
-    expect(PastaDeTrabalho.dentroDe(raiz, path.join(raiz, "a", "b")).caminho).toBe(path.join(raiz, "a", "b"));
-    expect(PastaDeTrabalho.dentroDe(raiz, raiz).caminho).toBe(raiz);
+  it("aceita qualquer caminho absoluto, dentro ou fora da pasta dos projetos", () => {
+    expect(PastaDeTrabalho.resolver(raiz, path.join(raiz, "a", "b")).caminho).toBe(path.join(raiz, "a", "b"));
+    expect(PastaDeTrabalho.resolver(raiz, raiz).caminho).toBe(raiz);
+    expect(PastaDeTrabalho.resolver(raiz, path.resolve("/outro/lugar")).caminho).toBe(path.resolve("/outro/lugar"));
   });
 
-  it.each(["..", path.join("..", "Windows"), path.join("app", "..", "..", "outro"), path.resolve("/fora")])(
-    "recusa %s, que sai da raiz",
-    (caminho) => {
-      expect(() => PastaDeTrabalho.dentroDe(raiz, caminho)).toThrow(/fora de/);
-    },
-  );
-
-  it("não confunde uma pasta cujo nome começa com '..' com sair da raiz", () => {
-    expect(PastaDeTrabalho.dentroDe(raiz, "..rascunho").nome).toBe("..rascunho");
+  it("normaliza '..' e espaços nas pontas", () => {
+    expect(PastaDeTrabalho.resolver(raiz, ` ${path.join("..", "irmao")} `).caminho).toBe(
+      path.resolve(raiz, "..", "irmao"),
+    );
   });
 
   it("recusa pasta vazia", () => {
-    expect(() => PastaDeTrabalho.dentroDe(raiz, "  ")).toThrow(/Informe/);
+    expect(() => PastaDeTrabalho.resolver(raiz, "  ")).toThrow(/Informe/);
+  });
+
+  it.runIf(path.sep === "\\")("no Windows, a letra da unidade sozinha vira a raiz da unidade", () => {
+    expect(PastaDeTrabalho.resolver(raiz, "D:").caminho).toBe("D:\\");
+  });
+
+  it.skipIf(path.sep === "\\")("fora do Windows, 'D:' é só um nome de pasta relativo", () => {
+    expect(PastaDeTrabalho.resolver(raiz, "D:").caminho).toBe(path.join(raiz, "D:"));
   });
 });
 
@@ -237,7 +241,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
 });
 
 describe("instrucoesDoOrquestrador", () => {
-  const pasta = PastaDeTrabalho.dentroDe(raiz, "painel");
+  const pasta = PastaDeTrabalho.resolver(raiz, "painel");
 
   it("traz as regras fixas e a pasta, sem a configuração — que muda entre pedidos", () => {
     const texto = instrucoesDoOrquestrador(pasta);
@@ -268,7 +272,7 @@ describe("instrucoesDoOrquestrador", () => {
 });
 
 describe("mensagemParaOOrquestrador", () => {
-  const pasta = PastaDeTrabalho.dentroDe(raiz, "painel");
+  const pasta = PastaDeTrabalho.resolver(raiz, "painel");
   const base = {
     modeloDoOrquestrador: "opus",
     modeloDosSubagentes: "opus",

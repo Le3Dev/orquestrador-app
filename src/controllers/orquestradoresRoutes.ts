@@ -48,6 +48,10 @@ function esquemaDeInstrucoes(rotulo: string) {
     });
 }
 
+const esquemaDaConsultaDePastas = z.object({
+  caminho: z.string({ error: "Informe um único caminho." }).optional(),
+});
+
 const esquemaDaConfiguracao = z.object({
   modeloDoOrquestrador: z.enum(MODELOS_CLAUDE, { error: "Modelo do orquestrador inválido." }),
   modeloDosSubagentes: z.enum(MODELOS_CLAUDE, { error: "Modelo dos subagentes inválido." }),
@@ -245,10 +249,16 @@ export function criarOrquestradoresRoutes({
   const detalhe = (orquestrador: Orquestrador) =>
     apresentarDetalhe(orquestrador, servico.instrucoesPara(orquestrador.configuracao));
 
+  /**
+   * Navegador de pastas da criação: as subpastas de `?caminho=` (qualquer
+   * pasta do computador; sem ele, a pasta dos projetos) e os atalhos.
+   */
   rotas.get(
     "/pastas",
-    rota(async (_requisicao, resposta) => {
-      resposta.json({ raiz: pastaRaiz, pastas: await explorador.listarProjetos() });
+    rota(async (requisicao, resposta) => {
+      const { caminho } = esquemaDaConsultaDePastas.parse(requisicao.query);
+      const [conteudo, atalhos] = await Promise.all([explorador.listar(caminho), explorador.atalhos()]);
+      resposta.json({ raiz: pastaRaiz, ...conteudo, atalhos });
     }),
   );
 
@@ -264,7 +274,7 @@ export function criarOrquestradoresRoutes({
     rota(async (requisicao, resposta) => {
       const { nome, pastaDeTrabalho, ...configuracao } = esquemaDeCriacao.parse(requisicao.body);
 
-      const pasta = PastaDeTrabalho.dentroDe(pastaRaiz, pastaDeTrabalho);
+      const pasta = PastaDeTrabalho.resolver(pastaRaiz, pastaDeTrabalho);
       if (!(await explorador.existe(pasta.caminho))) {
         throw new ErroDeOrquestracao("dados_invalidos", `A pasta "${pasta.caminho}" não existe.`);
       }
@@ -326,7 +336,7 @@ export function criarOrquestradoresRoutes({
       const pasta =
         pastaDeTrabalho === undefined || pastaDeTrabalho.trim() === ""
           ? PastaDeTrabalho.reconstituir("<pasta de trabalho>")
-          : PastaDeTrabalho.dentroDe(pastaRaiz, pastaDeTrabalho);
+          : PastaDeTrabalho.resolver(pastaRaiz, pastaDeTrabalho);
       const instrucoes = servico.instrucoesPara(configuracao);
       resposta.json({
         instrucoesIniciais: instrucoesDoOrquestrador(pasta),

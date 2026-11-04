@@ -197,7 +197,7 @@ describe("ServicoDeOrquestracao", () => {
   async function criar(): Promise<Orquestrador> {
     return servico.criarOrquestrador({
       nome: "Painel",
-      pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
+      pastaDeTrabalho: PastaDeTrabalho.resolver(path.resolve("/projetos"), "painel"),
       configuracao,
     });
   }

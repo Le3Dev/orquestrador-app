@@ -172,6 +172,18 @@ export interface PastaDeProjeto {
   caminho: string;
 }
 
+/** Uma pasta aberta no navegador de pastas da criação (`GET /pastas?caminho=`). */
+export interface ConteudoDaPasta {
+  /** A pasta dos projetos, ponto de partida do navegador. */
+  raiz: string;
+  atual: string;
+  /** Nula na raiz do disco. */
+  acima: string | null;
+  pastas: PastaDeProjeto[];
+  /** Pasta dos projetos, pasta pessoal e, no Windows, as unidades. */
+  atalhos: PastaDeProjeto[];
+}
+
 /**
  * Nota livre do canvas (bloco de notas). O conteúdo fica no servidor; a
  * posição, o tamanho e se está minimizada ficam no layout do navegador.

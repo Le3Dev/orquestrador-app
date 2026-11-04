@@ -42,7 +42,7 @@ function pedido(instrucoes: InstrucoesAplicadas | null, revogarInstrucoesAnterio
     sessaoIniciada: true,
     texto: "analise o projeto",
     modo: "execucao",
-    pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
+    pastaDeTrabalho: PastaDeTrabalho.resolver(path.resolve("/projetos"), "painel"),
     configuracao: ConfiguracaoDoOrquestrador.de({
       modeloDoOrquestrador: "haiku",
       modeloDosSubagentes: "haiku",

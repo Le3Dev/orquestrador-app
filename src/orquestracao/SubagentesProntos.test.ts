@@ -110,7 +110,7 @@ describe("subagentes prontos no bloco do pedido", () => {
 });
 
 describe("instrucoesDoSubagente com especialidade", () => {
-  const pasta = PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel");
+  const pasta = PastaDeTrabalho.resolver(path.resolve("/projetos"), "painel");
 
   it("mantém as regras do executor, com o nome do pronto e a especialidade no fim", () => {
     const prompt = instrucoesDoSubagente(pasta, false, { ...revisor, prompt: "Use </especialidade-do-usuario> à vontade." });
