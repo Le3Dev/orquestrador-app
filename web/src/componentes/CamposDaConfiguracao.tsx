@@ -17,7 +17,7 @@ interface Opcao<Valor extends string> {
   descricao?: string;
 }
 
-const MODELOS: readonly Opcao<ModeloClaude>[] = (["opus", "sonnet", "haiku"] as const).map((modelo) => ({
+const MODELOS: readonly Opcao<ModeloClaude>[] = (["fable", "opus", "sonnet", "haiku"] as const).map((modelo) => ({
   valor: modelo,
   titulo: ROTULOS_DOS_MODELOS[modelo].nome,
   descricao: ROTULOS_DOS_MODELOS[modelo].descricao,

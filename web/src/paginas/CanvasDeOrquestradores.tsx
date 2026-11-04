@@ -16,6 +16,7 @@ import {
 import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { IconeOrquestrador } from "../componentes/Icones";
+import { ChatRapido } from "../componentes/chat/ChatRapido";
 import { ArestaDoBixinho } from "../componentes/canvas/ArestaDoBixinho";
 import { NoBixinho } from "../componentes/canvas/NoBixinho";
 import { NoNota } from "../componentes/canvas/NoNota";
@@ -62,6 +63,7 @@ import {
   subagentesVisiveis,
 } from "../shared/canvas/nos";
 import { ProvedorDasNotas } from "../shared/canvas/notas";
+import { useChat } from "../shared/hooks/useChat";
 import { useConversas } from "../shared/hooks/useConversas";
 import { useMovimentoDoCanvas } from "../shared/hooks/useMovimentoDoCanvas";
 import { useNotas } from "../shared/hooks/useNotas";
@@ -93,6 +95,21 @@ function tamanhoParaOrganizar(no: NoDoCanvas, padrao: { largura: number; altura:
 /** O mesmo array enquanto os ids e a ordem não mudam. */
 function mesmosIds(anteriores: string[], novos: string[]): string[] {
   return anteriores.length === novos.length && anteriores.every((id, indice) => id === novos[indice]) ? anteriores : novos;
+}
+
+/**
+ * O valor que mudou por último entre dois (nulo não conta como leitura). Ao
+ * começar, vale o primeiro não nulo.
+ */
+function useMaisRecente<Valor>(a: Valor | null, b: Valor | null): Valor | null {
+  const [registro, setRegistro] = useState({ a, b, atual: b ?? a });
+  if (registro.a !== a || registro.b !== b) {
+    // Ajuste durante o render (padrão do React para estado derivado de props).
+    const atual = registro.b !== b && b !== null ? b : registro.a !== a && a !== null ? a : registro.atual;
+    setRegistro({ a, b, atual });
+    return atual;
+  }
+  return registro.atual;
 }
 
 /** Atraso para o React Flow medir um nó recém-criado antes de enquadrá-lo. */
@@ -181,6 +198,8 @@ function Canvas() {
   );
   const noCanvas = useMemo(() => new Set(idsNoCanvas), [idsNoCanvas]);
   const { conversas, conexoes, sinais } = useConversas(idsNoCanvas, servidor.conectado);
+  const chatAoVivo = useChat(servidor.conectado);
+  const { chat } = chatAoVivo;
   // Limpar lê as conversas por aqui, para as ações do canvas não mudarem a cada evento.
   const conversasAtuais = useRef(conversas);
 
@@ -389,9 +408,22 @@ function Canvas() {
       ),
     [conversas],
   );
-  const cota = useMemo(
+  const cotaDosTerminais = useMemo(
     () => [...conversas.values()].find((conversa) => conversa.cota !== null)?.cota ?? null,
     [conversas],
+  );
+  // Os medidores mostram a leitura mais recente, venha do chat ou dos terminais.
+  const cota = useMaisRecente(cotaDosTerminais, chat.cota);
+  const { aplicarPreferencias } = chatAoVivo;
+  const atualizarOrquestradoresDoChat = useCallback(
+    async (criado?: ResumoDoOrquestrador) => {
+      // Como no formulário de criação: uma consulta que saiu antes não tira o terminal novo do canvas.
+      if (criado !== undefined) {
+        criadosAgora.current.add(criado.id);
+      }
+      await recarregar();
+    },
+    [recarregar],
   );
   const quantidadeDeJanelas = nos.filter((no) => !ehBixinho(no)).length;
   const podeOrganizar = quantidadeDeJanelas > 1;
@@ -445,6 +477,29 @@ function Canvas() {
     ),
     [trabalhando, bixinhosAtivos, cota, servidor.memoria],
   );
+  // Fora do viewport: o chat não se move com o canvas e só re-renderiza com novidades dele.
+  const painelDoChat = useMemo(
+    () => (
+      <Panel position="bottom-center" className="painel-do-chat">
+        <ChatRapido
+          chat={chat}
+          desconectado={!servidor.conectado}
+          erroAoCarregar={chatAoVivo.erro}
+          aoMudarPreferencias={aplicarPreferencias}
+          aoAbrirTerminal={abrirTerminal}
+          aoAtualizarOrquestradores={atualizarOrquestradoresDoChat}
+        />
+      </Panel>
+    ),
+    [
+      chat,
+      servidor.conectado,
+      chatAoVivo.erro,
+      aplicarPreferencias,
+      abrirTerminal,
+      atualizarOrquestradoresDoChat,
+    ],
+  );
 
   return (
     <ProvedorDoCanvas valor={valor}>
@@ -479,6 +534,7 @@ function Canvas() {
             {painelDaEsquerda}
             {painelDoCentro}
             {painelDaDireita}
+            {painelDoChat}
           </ReactFlow>
           {quantidadeDeJanelas === 0 && <CanvasVazio aoCriar={novoOrquestrador} />}
         </div>

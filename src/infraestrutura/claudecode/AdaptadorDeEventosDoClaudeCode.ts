@@ -68,7 +68,8 @@ function somarUso(anterior: UsoDoTurno | null, atual: UsoDoTurno): UsoDoTurno {
   };
 }
 
-function resumirEntrada(entrada: Objeto): string {
+/** Resumo curto da entrada de uma ferramenta (o comando, o caminho, a URL…), para a tela. */
+export function resumirEntrada(entrada: Objeto): string {
   for (const campo of ["command", "file_path", "path", "pattern", "url", "query"]) {
     const valor = texto(entrada, campo);
     if (valor !== "") {
@@ -92,6 +93,30 @@ const MOTIVOS_POR_SUBTIPO: Readonly<Record<string, string>> = {
   error_max_turns: "O orquestrador atingiu o limite de passos sem terminar.",
   error_during_execution: "O Claude Code encontrou um erro durante a execução.",
 };
+
+/** As janelas de cota da assinatura de um `rate_limit_event`; vazio se não vierem. */
+export function janelasDaCota(mensagem: Objeto): JanelaDaCota[] {
+  return Object.entries(objeto(objeto(mensagem, "rate_limit_info"), "unifiedWindows"))
+    .filter((entrada): entrada is [string, Objeto] => ehObjeto(entrada[1]))
+    .map(([chave, janela]) => {
+      const renovaEm = numero(janela, "resetsAt");
+      return {
+        nome: NOMES_DAS_JANELAS[chave] ?? chave,
+        utilizacao: numero(janela, "utilization"),
+        renovaEm: renovaEm > 0 ? new Date(renovaEm * 1000).toISOString() : null,
+        situacao: texto(janela, "status"),
+      };
+    });
+}
+
+/** Motivo de um `result` com erro: o texto do Claude Code ou, sem texto, a explicação do subtipo. */
+export function descreverFalha(mensagem: Objeto, resposta: string): string {
+  if (resposta.trim() !== "") {
+    return resposta;
+  }
+  const subtipo = texto(mensagem, "subtype");
+  return MOTIVOS_POR_SUBTIPO[subtipo] ?? `O Claude Code terminou com erro (${subtipo || "sem detalhes"}).`;
+}
 
 /**
  * Camada anticorrupção: traduz as mensagens `stream-json` do Claude Code para
@@ -259,17 +284,7 @@ export class AdaptadorDeEventosDoClaudeCode {
   }
 
   private traduzirCota(mensagem: Objeto): EventoDoMotor[] {
-    const janelas: JanelaDaCota[] = Object.entries(objeto(objeto(mensagem, "rate_limit_info"), "unifiedWindows"))
-      .filter((entrada): entrada is [string, Objeto] => ehObjeto(entrada[1]))
-      .map(([chave, janela]) => {
-        const renovaEm = numero(janela, "resetsAt");
-        return {
-          nome: NOMES_DAS_JANELAS[chave] ?? chave,
-          utilizacao: numero(janela, "utilization"),
-          renovaEm: renovaEm > 0 ? new Date(renovaEm * 1000).toISOString() : null,
-          situacao: texto(janela, "status"),
-        };
-      });
+    const janelas = janelasDaCota(mensagem);
     return janelas.length === 0 ? [] : [{ tipo: "uso_da_cota", janelas }];
   }
 
@@ -286,7 +301,7 @@ export class AdaptadorDeEventosDoClaudeCode {
 
     this.resultadoDoTurno = sucesso
       ? { sucesso: true, resposta, uso }
-      : { sucesso: false, motivo: this.descreverFalha(mensagem, resposta), uso };
+      : { sucesso: false, motivo: descreverFalha(mensagem, resposta), uso };
 
     return objetos(mensagem, "permission_denials").map((negacao) => ({
       tipo: "permissao_negada",
@@ -318,13 +333,5 @@ export class AdaptadorDeEventosDoClaudeCode {
       tokensDeSaida: porModelo.reduce((soma, modelo) => soma + numero(modelo, "outputTokens"), 0),
       subagentesLancados: numero(objeto(mensagem, "subagent_stats"), "spawned"),
     };
-  }
-
-  private descreverFalha(mensagem: Objeto, resposta: string): string {
-    if (resposta.trim() !== "") {
-      return resposta;
-    }
-    const subtipo = texto(mensagem, "subtype");
-    return MOTIVOS_POR_SUBTIPO[subtipo] ?? `O Claude Code terminou com erro (${subtipo || "sem detalhes"}).`;
   }
 }

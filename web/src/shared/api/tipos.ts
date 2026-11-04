@@ -4,7 +4,7 @@
  * apresentadores de `src/controllers/orquestradoresRoutes.ts`.
  */
 
-export type ModeloClaude = "opus" | "sonnet" | "haiku";
+export type ModeloClaude = "fable" | "opus" | "sonnet" | "haiku";
 
 export type NivelDePermissao = "leitura" | "edicao" | "edicao_e_comandos";
 
@@ -207,3 +207,95 @@ export type EventoDeOrquestracao =
     };
 
 export type EventoRegistrado = EventoDeOrquestracao & { sequencia: number; em: string };
+
+/* --------------------------------------------------------------------------
+   Chat rápido (`/api/chat`): perguntas avulsas ao Claude, fora dos Orquestradores.
+   Mantenha em sincronia com as rotas e os eventos do chat no servidor.
+   -------------------------------------------------------------------------- */
+
+/** Modelo e esforço do chat; a última escolha vira o padrão (opus/alto no começo). */
+export interface PreferenciasDoChat {
+  modelo: ModeloClaude;
+  esforco: EsforcoDeRaciocinio;
+}
+
+/** Ação que o Claude sugere no app; só é executada quando o usuário clica. */
+export interface AcaoDoApp {
+  tipo: "abrir_orquestrador";
+  projeto: string;
+  pasta: string;
+  pedido: string | null;
+}
+
+export interface UsoDaResposta {
+  duracaoMs: number;
+  tokensDeEntrada: number;
+  tokensDeSaida: number;
+  /** Ex.: "claude-opus-5-5"; nulo quando o servidor não soube. */
+  modeloUsado: string | null;
+}
+
+export interface ImagemDaMensagemDoChat {
+  arquivo: string;
+  nome: string;
+  tipoDeMidia: string;
+}
+
+export type PapelNoChat = "usuario" | "claude";
+export type SituacaoDaMensagemDoChat = "respondendo" | "concluida" | "falhou" | "cancelada";
+
+export interface MensagemDoChat {
+  id: string;
+  papel: PapelNoChat;
+  texto: string;
+  imagens: ImagemDaMensagemDoChat[];
+  criadaEm: string;
+  situacao: SituacaoDaMensagemDoChat;
+  acoes: AcaoDoApp[];
+  avisos: string[];
+  uso: UsoDaResposta | null;
+}
+
+export type SituacaoDoChat = "ocioso" | "respondendo";
+
+export interface EstadoDoChat {
+  sessaoId: string;
+  situacao: SituacaoDoChat;
+  preferencias: PreferenciasDoChat;
+  /** A mensagem "respondendo" já traz o texto parcial acumulado. */
+  mensagens: MensagemDoChat[];
+  ultimaSequencia: number;
+  cota: JanelaDaCota[] | null;
+}
+
+export type EventoDoChat =
+  | { tipo: "pergunta_enviada"; mensagemDoUsuario: MensagemDoChat; mensagemDoClaude: MensagemDoChat }
+  // O `texto` final substitui o que veio nos trechos.
+  | {
+      tipo: "resposta_concluida";
+      mensagemId: string;
+      texto: string;
+      acoes: AcaoDoApp[];
+      avisos: string[];
+      uso: UsoDaResposta | null;
+    }
+  | { tipo: "resposta_falhou"; mensagemId: string; motivo: string; uso: UsoDaResposta | null }
+  | { tipo: "resposta_cancelada"; mensagemId: string }
+  | { tipo: "conversa_limpa" }
+  | { tipo: "preferencias_alteradas"; preferencias: PreferenciasDoChat }
+  | { tipo: "uso_da_cota"; janelas: JanelaDaCota[] };
+
+export type EventoDoChatRegistrado = EventoDoChat & { sequencia: number; em: string };
+
+/** Evento SSE passageiro "trecho" (sem id): pedaço novo do texto da resposta, para concatenar. */
+export interface TrechoDaResposta {
+  mensagemId: string;
+  texto: string;
+}
+
+/** Evento SSE passageiro "atividade" (sem id): a ferramenta que o Claude está usando agora. */
+export interface AtividadeDaResposta {
+  mensagemId: string;
+  ferramenta: string;
+  detalhe: string;
+}
