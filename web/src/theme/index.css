@@ -1307,3 +1307,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 }
 .botao-janela:hover { background: var(--surface-3); color: var(--primary); }
 .botao-janela-fechar:hover { background: var(--error); color: var(--claude-claro); }
+
+/* macOS: as 3 bolinhas nativas da janela ficam dentro da barra do canvas, à
+ * esquerda (posição em electron/mac.js); a barra abre espaço para elas. */
+.barra-com-semaforo { padding-left: 84px; }

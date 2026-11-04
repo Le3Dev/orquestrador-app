@@ -20,6 +20,8 @@ const path = require("node:path");
 
 const config = require("./config");
 const licenca = require("./licenca");
+// Ajustes só do macOS; fora dele cada função devolve o comportamento de antes.
+const mac = require("./mac");
 
 const PASTA_DO_APP = path.resolve(__dirname, "..");
 const PORTA = Number(process.env.PORTA || config.porta || 3200);
@@ -32,13 +34,17 @@ const COR_SIMBOLOS = "#faf9f5";
 let janelaPrincipal = null;
 let janelaAtivacao = null;
 let processoServidor = null;
+// Mac: vigia ainda saindo depois de fechar a janela (o app segue vivo no Dock).
+let servidorSaindo = null;
+// Abertura de janela em andamento (a licença pode levar até 15s validando).
+let abrindo = null;
 
 // ──────────────────────────────────────────────────────────────────────────
 // Servidor Express local via vigia (religa sozinho se cair).
 // ──────────────────────────────────────────────────────────────────────────
 function subirServidor() {
   if (processoServidor) return;
-  processoServidor = spawn(process.execPath, ["scripts/manter-no-ar.cjs"], {
+  processoServidor = spawn(mac.executavelDoServidor() ?? process.execPath, ["scripts/manter-no-ar.cjs"], {
     cwd: PASTA_DO_APP,
     stdio: "inherit",
     env: { ...process.env, PORTA: String(PORTA) },
@@ -57,6 +63,8 @@ function encerrarServidor() {
     } else {
       processoServidor.kill("SIGTERM");
     }
+    // Mac: reabrir pelo Dock espera este vigia sair antes de subir outro.
+    servidorSaindo = mac.esperarSaida(processoServidor);
   } catch {
     /* já encerrando */
   }
@@ -89,8 +97,8 @@ function esperarServidor(tentativas = 60, intervaloMs = 500) {
 // ──────────────────────────────────────────────────────────────────────────
 // Janelas.
 // ──────────────────────────────────────────────────────────────────────────
-function opcoesComuns() {
-  return {
+function opcoesComuns(tipo) {
+  return mac.ajustarOpcoesDaJanela({
     backgroundColor: COR_BARRA,
     autoHideMenuBar: true,
     titleBarStyle: "hidden",
@@ -105,7 +113,7 @@ function opcoesComuns() {
       nodeIntegration: false,
       sandbox: true,
     },
-  };
+  }, tipo);
 }
 
 function abrirJanelaAtivacao() {
@@ -114,7 +122,7 @@ function abrirJanelaAtivacao() {
     height: 560,
     resizable: false,
     title: config.productName,
-    ...opcoesComuns(),
+    ...opcoesComuns("ativacao"),
   });
   janelaAtivacao.loadFile(path.join(__dirname, "ativacao.html"));
   janelaAtivacao.on("closed", () => {
@@ -130,7 +138,7 @@ async function abrirJanelaPrincipal() {
     minHeight: 600,
     title: config.productName,
     show: false,
-    ...opcoesComuns(),
+    ...opcoesComuns("principal"),
   });
 
   // Links externos abrem no navegador do sistema, não dentro do app.
@@ -139,7 +147,12 @@ async function abrirJanelaPrincipal() {
     return { action: "deny" };
   });
 
-  subirServidor();
+  if (servidorSaindo) {
+    await servidorSaindo;
+    servidorSaindo = null;
+  }
+  // No Mac, um servidor do Orquestrador já no ar (versão no navegador) é reaproveitado.
+  if (!(await mac.servidorJaNoAr(URL_DO_APP))) subirServidor();
   try {
     await esperarServidor();
     await janelaPrincipal.loadURL(URL_DO_APP);
@@ -159,9 +172,18 @@ async function abrirJanelaPrincipal() {
   });
 }
 
+// Mac: abre de novo quando o app está vivo sem janelas (Dock ou novo
+// lançamento), sem abrir duas enquanto a licença ainda valida.
+function abrirSeNaoHouverJanela() {
+  if (abrindo || BrowserWindow.getAllWindows().length > 0) return;
+  abrindo = abrirConformeLicenca().finally(() => {
+    abrindo = null;
+  });
+}
+
 // Decide qual janela abrir conforme o estado da licença.
 async function abrirConformeLicenca() {
-  const { liberado } = await licenca.liberadoParaAbrir();
+  const liberado = mac.liberadoSemLicenca(app) || (await licenca.liberadoParaAbrir()).liberado;
   if (liberado) {
     await abrirJanelaPrincipal();
   } else {
@@ -214,17 +236,22 @@ if (!conseguiuLock) {
     if (j) {
       if (j.isMinimized()) j.restore();
       j.focus();
+    } else if (mac.ehMac) {
+      abrirSeNaoHouverJanela();
     }
   });
 
   app.whenReady().then(() => {
     Menu.setApplicationMenu(null); // remove File/Edit/View/Window
+    // No Mac o menu é quem faz Cmd+C/Cmd+V funcionarem: volta só com o essencial.
+    if (mac.ehMac) Menu.setApplicationMenu(mac.menuDoApp(Menu, config.productName));
+    mac.carregarPathDoShell();
     licenca.iniciar(app.getPath("userData"));
-    abrirConformeLicenca();
-
-    app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) abrirConformeLicenca();
+    abrindo = abrirConformeLicenca().finally(() => {
+      abrindo = null;
     });
+
+    app.on("activate", abrirSeNaoHouverJanela);
   });
 
   app.on("window-all-closed", () => {

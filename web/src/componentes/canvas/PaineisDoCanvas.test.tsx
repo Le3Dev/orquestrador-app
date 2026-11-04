@@ -29,6 +29,47 @@ describe("BarraDoCanvas", () => {
   });
 });
 
+describe("BarraDoCanvas no app desktop", () => {
+  const janela = {
+    minimizar: vi.fn(),
+    maximizar: vi.fn(),
+    fechar: vi.fn(),
+    estaMaximizada: vi.fn().mockResolvedValue(false),
+  };
+
+  afterEach(() => {
+    delete (window as unknown as { electron?: unknown }).electron;
+  });
+
+  function abrirNo(plataforma: string) {
+    (window as unknown as { electron: unknown }).electron = { desktop: true, plataforma, janela };
+    return render(
+      <BarraDoCanvas
+        aoCriar={vi.fn()}
+        aoCriarNota={vi.fn()}
+        aoOrganizar={vi.fn()}
+        podeOrganizar={false}
+        aoAlternarPreferencias={vi.fn()}
+        preferenciasAbertas={false}
+      />,
+    );
+  }
+
+  it("no Mac, deixa as bolinhas nativas e não desenha os botões de janela", async () => {
+    const { container } = abrirNo("darwin");
+
+    expect(container.firstChild).toHaveClass("barra-arrastavel", "barra-com-semaforo");
+    expect(screen.queryByRole("button", { name: "Minimizar" })).not.toBeInTheDocument();
+  });
+
+  it("no Windows, segue com os botões de janela desenhados", async () => {
+    const { container } = abrirNo("win32");
+
+    expect(container.firstChild).not.toHaveClass("barra-com-semaforo");
+    expect(await screen.findByRole("button", { name: "Minimizar" })).toBeInTheDocument();
+  });
+});
+
 describe("ErroDoCanvas", () => {
   it("mostra o erro e fecha", () => {
     const aoFechar = vi.fn();

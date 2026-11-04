@@ -9,6 +9,7 @@ import {
   formatarPercentual,
   ROTULOS_DOS_MODELOS,
 } from "../../shared/formatacao";
+import { rodandoNoDesktopDoMac } from "../../shared/desktop";
 import { useRelogio } from "../../shared/hooks/useRelogio";
 import type { EstadoDoServidor } from "../../shared/hooks/useServidor";
 import { nivelDaMemoria, type NivelDaMemoria } from "../../shared/memoria";
@@ -105,9 +106,11 @@ export function BarraDoCanvas({
   // janela (-webkit-app-region: drag) e ganha os botões min/max/fechar. No
   // navegador puro, `desktop` é false e nada muda.
   const desktop = rodandoNoDesktop();
+  // No Mac as bolinhas nativas da janela ficam dentro da barra, à esquerda.
+  const mac = rodandoNoDesktopDoMac();
   return (
     <div
-      className={`painel-flutuante flex items-center gap-3 px-3 py-2${desktop ? " barra-arrastavel" : ""}`}
+      className={`painel-flutuante flex items-center gap-3 px-3 py-2${desktop ? " barra-arrastavel" : ""}${mac ? " barra-com-semaforo" : ""}`}
     >
       <div className="no-orquestrador-icone h-8 w-8">
         <IconeOrquestrador tamanho={18} />
@@ -146,7 +149,7 @@ export function BarraDoCanvas({
       >
         Preferências
       </button>
-      {desktop && <ControlesDaJanela />}
+      {desktop && !mac && <ControlesDaJanela />}
     </div>
   );
 }

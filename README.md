@@ -51,6 +51,12 @@ O `.cmd` sobe o servidor por um **vigia** (`scripts/manter-no-ar.cjs`, também e
 
 Ao subir, o servidor encerra os processos do Claude que tenham sobrado da queda anterior. Antes de encerrar, confere a linha de comando de cada um, para nunca derrubar uma sessão do Claude Code sua.
 
+**App desktop no Mac:** dê dois cliques em **`iniciar-desktop.command`** (par do `iniciar-desktop.cmd` do Windows). Ele carrega o PATH do seu shell (nvm, Homebrew), refaz o build só do que mudou e abre o app em Electron sem pedir licença, porque roda pelo código (`ORQUESTRADOR_SEM_LICENCA=1`; o app empacotado continua pedindo a chave). Fechar a janela do Terminal fecha o app. Os ajustes do Mac ficam em `electron/mac.js` e não mudam nada no Windows:
+- menu do app com copiar, colar, desfazer, zoom, Cmd+W e Cmd+Q;
+- as 3 bolinhas nativas dentro da barra do canvas, no lugar dos botões de janela desenhados;
+- o servidor roda no Node do sistema (22+), não no Node 20 do Electron;
+- se já houver um servidor do Orquestrador na porta (a versão no navegador), o app usa esse e não o desliga ao fechar.
+
 O equivalente manual, num terminal na pasta do app:
 
 ```bash
