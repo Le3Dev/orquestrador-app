@@ -1,7 +1,9 @@
 import { type ReactNode, useId } from "react";
 
 import { TAMANHO_MAXIMO_DAS_INSTRUCOES } from "../shared/api/tipos";
+import { juntarDitado } from "../shared/ditado/texto";
 import { tamanhoDasInstrucoes } from "../shared/instrucoes";
+import { BotaoDeDitado } from "./BotaoDeDitado";
 
 interface Props {
   rotulo: string;
@@ -28,15 +30,22 @@ export function CampoDeInstrucoes({ rotulo, ajuda, valor, aoMudar, placeholder, 
 
   return (
     <div className="field">
-      <div className="flex items-baseline justify-between gap-2">
+      <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-1.5">
           <label className="label" htmlFor={id}>
             {rotulo}
           </label>
           {dica}
         </span>
-        <span className={`mono text-[10.5px] ${passou ? "text-error" : "text-muted"}`} aria-live="polite">
-          {tamanho.toLocaleString("pt-BR")} / {TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString("pt-BR")}
+        <span className="flex items-center gap-1.5">
+          <span className={`mono text-[10.5px] ${passou ? "text-error" : "text-muted"}`} aria-live="polite">
+            {tamanho.toLocaleString("pt-BR")} / {TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString("pt-BR")}
+          </span>
+          <BotaoDeDitado
+            destino="as instruções"
+            className="ditado-abaixo"
+            aoTranscrever={(ditado) => aoMudar(juntarDitado(valor, ditado))}
+          />
         </span>
       </div>
       <textarea

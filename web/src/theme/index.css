@@ -1713,3 +1713,46 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   background: var(--surface-2);
 }
 .botao-de-comecar { flex: 0 1 auto; min-width: 0; height: 40px; padding: 0 18px; font-size: 13.5px; font-weight: 600; max-width: 55%; }
+
+/* ── Ditado por voz (BotaoDeDitado) ─────────────────────────────────────── */
+.ditado { position: relative; display: inline-flex; }
+.botao-icone.botao-ditado-gravando {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 16%, transparent);
+  animation: gravando 1.4s ease-in-out infinite;
+}
+@keyframes gravando {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--error) 45%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--error) 0%, transparent); }
+}
+.girador-do-ditado {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--surface-3);
+  border-top-color: var(--active);
+  animation: girar-ditado .8s linear infinite;
+}
+@keyframes girar-ditado { to { transform: rotate(360deg); } }
+.balao-do-ditado {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: max-content;
+  max-width: 300px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-forte);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--caption);
+  font-size: 11.5px;
+  line-height: 1.4;
+  white-space: normal;
+}
+.balao-do-ditado-erro { border-color: var(--error); color: var(--error); padding-right: 4px; }
+/* Dentro de caixas com rolagem (instruções), o balão abre para baixo. */
+.ditado-abaixo .balao-do-ditado { top: calc(100% + 6px); bottom: auto; }

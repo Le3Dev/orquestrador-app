@@ -2,8 +2,10 @@ import { type ClipboardEvent, type KeyboardEvent, memo, type RefObject, useRef, 
 
 import type { ModoDoTurno } from "../../shared/api/tipos";
 import { comandoDoPrompt, completarComando, dicaDeComando, dicaDePedidoGrande } from "../../shared/comandosDoPrompt";
+import { juntarDitado } from "../../shared/ditado/texto";
 import { formatarBytes } from "../../shared/formatacao";
 import { type ImagemAnexada, TIPOS_DE_IMAGEM } from "../../shared/imagens";
+import { BotaoDeDitado } from "../BotaoDeDitado";
 import { IconeAnexo, IconeFechar } from "../Icones";
 
 const ALTURA_MAXIMA = 140;
@@ -33,7 +35,8 @@ interface Props {
  * cancela o pedido em andamento e Shift+Tab liga/desliga o Plan Mode. Imagens
  * entram colando (Ctrl+V), pelo botão de anexo ou arrastando para o terminal.
  * Continua editável durante o trabalho, para já ir escrevendo o próximo pedido.
- * "/clear" sozinho começa uma conversa nova (Tab completa o comando).
+ * "/clear" sozinho começa uma conversa nova (Tab completa o comando). O
+ * microfone dita o pedido por voz.
  *
  * Memorizado: novidades de outros terminais não o re-renderizam (o terminal
  * passa as funções estáveis).
@@ -128,6 +131,12 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
     }
   }
 
+  function receberDitado(ditado: string): void {
+    setTexto((atual) => juntarDitado(atual, ditado));
+    requestAnimationFrame(ajustarAltura);
+    campo.current?.focus();
+  }
+
   function aoColar(evento: ClipboardEvent<HTMLTextAreaElement>): void {
     const arquivos = [...evento.clipboardData.files].filter((arquivo) => arquivo.type.startsWith("image/"));
     if (arquivos.length > 0) {
@@ -189,6 +198,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
             evento.target.value = "";
           }}
         />
+        <BotaoDeDitado destino="a mensagem" aoTranscrever={receberDitado} />
         <button
           type="button"
           className="botao-icone"

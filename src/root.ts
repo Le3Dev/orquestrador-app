@@ -115,6 +115,7 @@ async function iniciar(): Promise<void> {
   // quem serve é o Vite, que repassa /api para cá.
   const pastaDaTela = path.resolve(__dirname, "..", "web", "dist");
   if (existsSync(pastaDaTela)) {
+    aplicacao.use(isolarOrigem);
     aplicacao.use(express.static(pastaDaTela));
     aplicacao.use((requisicao, resposta, proximo) => {
       if (requisicao.method !== "GET" || requisicao.path.startsWith("/api")) {
@@ -158,3 +159,15 @@ iniciar().catch((erro: unknown) => {
   console.error("Falha ao iniciar o servidor:", erro);
   process.exit(1);
 });
+
+/**
+ * Isolamento de origem (COOP + COEP): sem ele o navegador não libera threads
+ * no WebAssembly, e o ditado por voz (Whisper, rodando na tela) usa um núcleo
+ * só, umas 3 vezes mais lento. "credentialless" deixa a tela continuar
+ * carregando recursos de fora (o modelo do Hugging Face, imagens de links).
+ */
+function isolarOrigem(_requisicao: express.Request, resposta: express.Response, proximo: express.NextFunction): void {
+  resposta.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  resposta.setHeader("Cross-Origin-Embedder-Policy", "credentialless");
+  proximo();
+}
