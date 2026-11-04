@@ -2,7 +2,12 @@ import { Handle, type NodeProps, NodeResizer, Position } from "@xyflow/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
-import type { DadosDaConfiguracao, ModoDoTurno, ResumoDoOrquestrador } from "../../shared/api/tipos";
+import type {
+  DadosDaConfiguracao,
+  ModoDoTurno,
+  NomeDaPredefinicao,
+  ResumoDoOrquestrador,
+} from "../../shared/api/tipos";
 import { useCanvas } from "../../shared/canvas/contexto";
 import { TAMANHO_MINIMO_DO_TERMINAL } from "../../shared/canvas/layout";
 import { ALCA_DO_TERMINAL, type Ancora, type NoTerminal as TipoDoNo } from "../../shared/canvas/nos";
@@ -34,6 +39,32 @@ export function PainelDeConfiguracao({ orquestrador, trabalhando, aoFechar, aoLi
   const [configuracao, setConfiguracao] = useState(orquestrador.configuracao);
   const [erro, setErro] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
+  const { id: orquestradorId, pastaDeTrabalho } = orquestrador;
+  const { recarregar } = acoes;
+  const salvos = orquestrador.configuracao;
+
+  // O aviso de esforço segue os modelos do formulário: com os salvos, o servidor
+  // resolve pelo Orquestrador; com outros ainda não salvos, pela pasta de trabalho.
+  const { modeloDoOrquestrador, modeloDosSubagentes } = configuracao;
+  const modelosSalvos =
+    modeloDoOrquestrador === salvos.modeloDoOrquestrador && modeloDosSubagentes === salvos.modeloDosSubagentes;
+  const buscarEsforcoHerdado = useCallback(
+    () =>
+      modelosSalvos
+        ? api.lerEsforcoHerdadoDoOrquestrador(orquestradorId)
+        : api.lerEsforcoHerdado(modeloDoOrquestrador, modeloDosSubagentes, pastaDeTrabalho),
+    [modelosSalvos, orquestradorId, modeloDoOrquestrador, modeloDosSubagentes, pastaDeTrabalho],
+  );
+
+  /** O modo econômico vale na hora (no servidor); o formulário passa a mostrar a configuração devolvida. */
+  const aplicarPredefinicao = useCallback(
+    async (predefinicao: NomeDaPredefinicao): Promise<DadosDaConfiguracao> => {
+      const resumo = await api.aplicarPredefinicao(orquestradorId, predefinicao);
+      void recarregar();
+      return resumo.configuracao;
+    },
+    [orquestradorId, recarregar],
+  );
 
   async function salvar(): Promise<void> {
     setErro(null);
@@ -78,7 +109,12 @@ export function PainelDeConfiguracao({ orquestrador, trabalhando, aoFechar, aoLi
   return (
     <div className="custom-scrollbar flex max-h-[70%] flex-col gap-4 overflow-y-auto border-b border-border bg-surface-2 px-4 py-3 nodrag nowheel">
       <span className="rotulo-tecnico">configuração · vale a partir do próximo pedido</span>
-      <CamposDaConfiguracao valor={configuracao} aoMudar={setConfiguracao} />
+      <CamposDaConfiguracao
+        valor={configuracao}
+        aoMudar={setConfiguracao}
+        buscarEsforcoHerdado={buscarEsforcoHerdado}
+        aplicarPredefinicao={aplicarPredefinicao}
+      />
       {erro !== null && <div className="alert alert-error">{erro}</div>}
       <div className="flex justify-between gap-2">
         <div className="flex gap-2">
@@ -493,6 +529,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
           nome={orquestrador.nome}
           pastaDeTrabalho={orquestrador.pastaDeTrabalho}
           configuracao={configuracao}
+          predefinicao={orquestrador.predefinicaoCorrespondente ?? null}
           turnos={conversa.turnos}
           conversaIniciadaEm={conversa.conversaIniciadaEm}
           sinal={sinais.get(orquestradorId)}

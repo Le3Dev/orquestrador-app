@@ -77,6 +77,47 @@ export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string
   ].join(" · ");
 }
 
+function ligado(valor: boolean): string {
+  return valor ? "ligado" : "desligado";
+}
+
+/**
+ * O que uma configuração parcial (ex.: a de uma predefinição) muda, um item
+ * por campo presente — ex.: ["Modelo do orquestrador: Opus", "Esforço do orquestrador: Médio"].
+ */
+export function descreverAlteracoesDaConfiguracao(alteracoes: Partial<DadosDaConfiguracao>): string[] {
+  const itens: string[] = [];
+  if (alteracoes.modeloDoOrquestrador !== undefined) {
+    itens.push(`Modelo do orquestrador: ${ROTULOS_DOS_MODELOS[alteracoes.modeloDoOrquestrador].nome}`);
+  }
+  if (alteracoes.esforcoDoOrquestrador !== undefined) {
+    itens.push(`Esforço do orquestrador: ${ROTULOS_DOS_ESFORCOS[alteracoes.esforcoDoOrquestrador]}`);
+  }
+  if (alteracoes.modeloDosSubagentes !== undefined) {
+    itens.push(`Modelo dos subagentes: ${ROTULOS_DOS_MODELOS[alteracoes.modeloDosSubagentes].nome}`);
+  }
+  if (alteracoes.esforcoDosSubagentes !== undefined) {
+    itens.push(`Esforço dos subagentes: ${ROTULOS_DOS_ESFORCOS[alteracoes.esforcoDosSubagentes]}`);
+  }
+  if (alteracoes.quantidadeDeSubagentes !== undefined) {
+    const { modo, limite } = alteracoes.quantidadeDeSubagentes;
+    itens.push(`Quantidade de subagentes: ${modo === "fixa" ? "fixa" : "automática"}, ${descreverQuantidade({ modo, limite })}`);
+  }
+  if (alteracoes.nivelDePermissao !== undefined) {
+    itens.push(`Permissões: ${ROTULOS_DAS_PERMISSOES[alteracoes.nivelDePermissao].nome}`);
+  }
+  if (alteracoes.permitirCommitEPush !== undefined) {
+    itens.push(`Commit e push quando pedir: ${ligado(alteracoes.permitirCommitEPush)}`);
+  }
+  if (alteracoes.permitirTrabalhoDireto !== undefined) {
+    itens.push(`Fazer o trivial sozinho: ${ligado(alteracoes.permitirTrabalhoDireto)}`);
+  }
+  if (alteracoes.proporPlanoEmPedidosGrandes !== undefined) {
+    itens.push(`Propor plano antes de mudanças grandes: ${ligado(alteracoes.proporPlanoEmPedidosGrandes)}`);
+  }
+  return itens;
+}
+
 export function formatarDuracao(milissegundos: number): string {
   const segundos = Math.round(milissegundos / 1000);
   if (segundos < 60) {

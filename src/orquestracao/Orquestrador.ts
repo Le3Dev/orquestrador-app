@@ -4,10 +4,16 @@ import {
   ConfiguracaoDoOrquestrador,
   DadosDaConfiguracao,
 } from "./ConfiguracaoDoOrquestrador";
+import { ConsumoDoTurno } from "./ConsumoDoTurno";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { EventoDeOrquestracao, EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
+import {
+  NomeDaPredefinicao,
+  PredefinicaoDeConfiguracao,
+  predefinicaoCorrespondente,
+} from "./PredefinicaoDeConfiguracao";
 import { DadosDoTurno, Turno } from "./Turno";
 
 export const TAMANHO_MAXIMO_DO_NOME = 60;
@@ -184,6 +190,41 @@ export class Orquestrador {
   alterarConfiguracao(alteracoes: AlteracoesDaConfiguracao): EventoDeOrquestracao {
     this.configuracaoAtual = this.configuracaoAtual.com(alteracoes);
     return { tipo: "configuracao_alterada", configuracao: this.configuracaoAtual.paraDados() };
+  }
+
+  /**
+   * Aplica uma predefinição (ex.: "Modo econômico"): só os campos dela mudam,
+   * e a configuração segue editável depois. Vale a partir do próximo turno.
+   */
+  aplicarPredefinicao(predefinicao: PredefinicaoDeConfiguracao): EventoDeOrquestracao {
+    this.configuracaoAtual = predefinicao.aplicarEm(this.configuracaoAtual);
+    return {
+      tipo: "configuracao_alterada",
+      configuracao: this.configuracaoAtual.paraDados(),
+      predefinicao: predefinicao.nome,
+    };
+  }
+
+  /** A predefinição cujos campos batem com a configuração atual, ou `null`. */
+  get predefinicaoCorrespondente(): NomeDaPredefinicao | null {
+    return predefinicaoCorrespondente(this.configuracaoAtual);
+  }
+
+  /**
+   * Registra quanto um turno já encerrado gastou. Um turno que não terminou
+   * com sucesso (cancelado, com falha, interrompido) pode ter parado antes de
+   * gastar tudo o que gastaria: o consumo fica marcado como parcial.
+   */
+  registrarConsumoDoTurno(turnoId: string, consumo: ConsumoDoTurno): EventoDeOrquestracao {
+    const turno = this.turnos.find((candidato) => candidato.id === turnoId);
+    if (turno === undefined || turno.emAndamento) {
+      throw new ErroDeOrquestracao(
+        "sem_turno_em_andamento",
+        `O turno ${turnoId} não está encerrado em "${this.nome}" para registrar o consumo.`,
+      );
+    }
+    const medido = turno.situacao === "concluido" ? consumo : consumo.comoParcial();
+    return { tipo: "consumo_do_turno_medido", turnoId, consumo: medido.paraDados() };
   }
 
   /**

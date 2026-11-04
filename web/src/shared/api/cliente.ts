@@ -1,8 +1,12 @@
 import type {
   DadosDaConfiguracao,
   DadosDaNota,
+  DadosDaPredefinicao,
+  EsforcosHerdados,
   EstadoDoChat,
+  ModeloClaude,
   ModoDoTurno,
+  NomeDaPredefinicao,
   PastaDeProjeto,
   PreferenciasDoChat,
   ResumoDoOrquestrador,
@@ -85,6 +89,28 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(configuracao),
     }),
+
+  listarPredefinicoes: () => requisitar<DadosDaPredefinicao[]>("/predefinicoes"),
+
+  /** Aplica uma predefinição (ex.: modo econômico) à configuração; devolve o resumo atualizado. */
+  aplicarPredefinicao: (id: string, predefinicao: NomeDaPredefinicao) =>
+    requisitar<ResumoDoOrquestrador>(`/orquestradores/${encodeURIComponent(id)}/configuracao/predefinicao`, {
+      method: "POST",
+      body: JSON.stringify({ predefinicao }),
+    }),
+
+  /** O esforço que o Claude Code usaria em "padrao" para os modelos salvos deste Orquestrador. */
+  lerEsforcoHerdadoDoOrquestrador: (id: string) =>
+    requisitar<EsforcosHerdados>(`/orquestradores/${encodeURIComponent(id)}/esforco-herdado`),
+
+  /** O esforço que o Claude Code usaria em "padrao" para estes modelos, nesta pasta (formulário de criação). */
+  lerEsforcoHerdado: (modeloDoOrquestrador: ModeloClaude, modeloDosSubagentes: ModeloClaude, pasta: string) => {
+    const parametros = new URLSearchParams({ modeloDoOrquestrador, modeloDosSubagentes });
+    if (pasta !== "") {
+      parametros.set("pasta", pasta);
+    }
+    return requisitar<EsforcosHerdados>(`/esforco-herdado?${parametros.toString()}`);
+  },
 
   enviarMensagem: (
     id: string,

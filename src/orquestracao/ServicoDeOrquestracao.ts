@@ -7,12 +7,17 @@ import {
 } from "./ConfiguracaoDoOrquestrador";
 import { ControleDeExecucoes, PublicadorDeEventos } from "./ControleDeExecucoes";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
+import { EsforcoDaMaquina } from "./EsforcoDaMaquina";
+import { EsforcoHerdado } from "./EsforcoHerdado";
 import { EventoDeOrquestracao, EventoDoMotor } from "./EventoDeOrquestracao";
 import { mensagemDeAprovacaoDoPlano, separarPropostaDePlano } from "./InstrucoesDoOrquestrador";
+import { MedidorDeConsumo, PeriodoDoTurno } from "./MedidorDeConsumo";
+import { ModeloClaude } from "./ModeloClaude";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { MotorDeAgentes, ResultadoDoTurno } from "./MotorDeAgentes";
 import { Orquestrador, TAMANHO_MAXIMO_DA_MENSAGEM } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
+import { predefinicaoPorNome } from "./PredefinicaoDeConfiguracao";
 import { GerenciadorDeWorktrees } from "./PreparoDeWorktree";
 import { RepositorioDeOrquestradores } from "./RepositorioDeOrquestradores";
 
@@ -25,6 +30,29 @@ export interface DependenciasDoServico {
   worktrees: GerenciadorDeWorktrees;
   gerarId: () => string;
   agora: () => Date;
+  /** Mede o gasto de cada turno ao fim dele. Sem medidor, nenhum consumo é registrado. */
+  medidor?: MedidorDeConsumo | undefined;
+  /** Lê o esforço que o Claude Code da máquina usa no "Padrão". Sem ele, nada é herdado. */
+  esforcoDaMaquina?: EsforcoDaMaquina | undefined;
+}
+
+/** O esforço que cada papel herda da máquina quando a configuração está em "Padrão". */
+export interface EsforcoHerdadoDosPapeis {
+  orquestrador: EsforcoHerdado | null;
+  subagentes: EsforcoHerdado | null;
+}
+
+/** Os modelos e a pasta de um Orquestrador ainda não criado (formulário de criação). */
+export interface ConsultaDeEsforcoDosPapeis {
+  modeloDoOrquestrador: ModeloClaude;
+  modeloDosSubagentes: ModeloClaude;
+  pastaDoProjeto: string;
+}
+
+/** O que a medição precisa saber do turno que acabou de terminar. */
+interface TurnoEncerrado {
+  turnoId: string;
+  periodo: PeriodoDoTurno;
 }
 
 /** Imagem como chega do usuário, antes de virar Anexo. */
@@ -44,6 +72,11 @@ export interface MensagemEnviada {
   turnoId: string;
   /** Resolve quando o turno termina (concluído, cancelado ou com falha). Nunca rejeita. */
   conclusao: Promise<void>;
+  /**
+   * Resolve depois da `conclusao`, quando a medição do consumo do turno
+   * termina (com ou sem evento). Nunca rejeita. Ninguém precisa esperá-la.
+   */
+  medicao: Promise<void>;
 }
 
 function descreverErro(erro: unknown): string {
@@ -81,6 +114,59 @@ export class ServicoDeOrquestracao {
     this.publicar(orquestrador, orquestrador.alterarConfiguracao(alteracoes));
     await this.dependencias.repositorio.salvar(orquestrador);
     return orquestrador;
+  }
+
+  /**
+   * Aplica uma predefinição de configuração (ex.: "economico"). Como uma
+   * alteração de configuração: vale a partir do próximo turno e continua
+   * editável campo a campo depois.
+   */
+  async aplicarPredefinicao(id: string, nome: string): Promise<Orquestrador> {
+    const predefinicao = predefinicaoPorNome(nome);
+    if (predefinicao === null) {
+      throw new ErroDeOrquestracao("dados_invalidos", "Predefinição desconhecida.");
+    }
+    const orquestrador = this.buscar(id);
+    this.publicar(orquestrador, orquestrador.aplicarPredefinicao(predefinicao));
+    await this.dependencias.repositorio.salvar(orquestrador);
+    return orquestrador;
+  }
+
+  /**
+   * O esforço que cada papel herda da máquina quando está em "Padrão", com
+   * os modelos da configuração atual. O modelo real do Orquestrador é o do
+   * último consumo medido na conversa, se houver.
+   */
+  async esforcoHerdadoDe(id: string): Promise<EsforcoHerdadoDosPapeis> {
+    const orquestrador = this.buscar(id);
+    const configuracao = orquestrador.configuracao;
+    const pastaDoProjeto = orquestrador.pastaDeTrabalho.caminho;
+    const [doOrquestrador, dosSubagentes] = await Promise.all([
+      this.esforcoHerdado({
+        modelo: configuracao.modeloDoOrquestrador,
+        pastaDoProjeto,
+        modeloReal: this.ultimoModeloMedido(orquestrador.id),
+      }),
+      this.esforcoHerdado({ modelo: configuracao.modeloDosSubagentes, pastaDoProjeto, modeloReal: null }),
+    ]);
+    return { orquestrador: doOrquestrador, subagentes: dosSubagentes };
+  }
+
+  /** O mesmo, para um Orquestrador ainda no formulário de criação. */
+  async esforcoHerdadoPara(consulta: ConsultaDeEsforcoDosPapeis): Promise<EsforcoHerdadoDosPapeis> {
+    const [doOrquestrador, dosSubagentes] = await Promise.all([
+      this.esforcoHerdado({
+        modelo: consulta.modeloDoOrquestrador,
+        pastaDoProjeto: consulta.pastaDoProjeto,
+        modeloReal: null,
+      }),
+      this.esforcoHerdado({
+        modelo: consulta.modeloDosSubagentes,
+        pastaDoProjeto: consulta.pastaDoProjeto,
+        modeloReal: null,
+      }),
+    ]);
+    return { orquestrador: doOrquestrador, subagentes: dosSubagentes };
   }
 
   /**
@@ -130,10 +216,18 @@ export class ServicoDeOrquestracao {
       throw erro;
     }
 
-    const conclusao = this.executar(orquestrador, turnoId, sinal, configuracaoDoTurno).finally(() =>
+    const execucao = this.executar(orquestrador, turnoId, sinal, configuracaoDoTurno).finally(() =>
       execucoes.encerrar(orquestrador.id),
     );
-    return { turnoId, conclusao };
+    const conclusao = execucao.then(() => undefined);
+    // Em segundo plano, depois do fim do turno: não segura a resposta nem o
+    // próximo pedido, e o evento do consumo sempre vem depois do de fim.
+    const medicao = execucao
+      .then((encerrado) => (encerrado === null ? undefined : this.medirConsumo(orquestrador, encerrado)))
+      .catch((falha: unknown) =>
+        console.warn(`[orquestracao] Não foi possível medir o consumo do turno ${turnoId}:`, descreverErro(falha)),
+      );
+    return { turnoId, conclusao, medicao };
   }
 
   /**
@@ -242,11 +336,14 @@ export class ServicoDeOrquestracao {
     turnoId: string,
     sinal: AbortSignal,
     configuracaoDoTurno: ConfiguracaoDoOrquestrador,
-  ): Promise<void> {
+  ): Promise<TurnoEncerrado | null> {
     const { motor, repositorio, anexos, worktrees, agora } = this.dependencias;
     const turno = orquestrador.turnoEmAndamento;
     const anexosDoTurno = turno?.anexos ?? [];
     const modo = turno?.modo ?? "execucao";
+    // Capturados no início: a conversa pode ser limpa (outra sessão) antes de a medição rodar.
+    const sessaoDoTurno = orquestrador.sessaoId;
+    const inicioDoTurno = turno?.iniciadoEm ?? agora();
 
     // Worktree isolado por turno: se a pasta for repo git com HEAD, o turno
     // roda numa árvore própria; senão, na própria pasta (degradação graciosa).
@@ -301,6 +398,18 @@ export class ServicoDeOrquestracao {
       }
     }
 
+    const fimDoTurno = agora();
+    const encerrado: TurnoEncerrado = {
+      turnoId,
+      periodo: {
+        sessaoId: sessaoDoTurno,
+        // Onde o processo do Claude Code rodou: é por ela que ele organiza as transcrições.
+        pastaDeTrabalho: pastaDoTurno.caminho,
+        inicio: inicioDoTurno,
+        fim: fimDoTurno,
+      },
+    };
+
     try {
       if (sinal.aborted) {
         this.publicar(orquestrador, orquestrador.cancelarTurno(turnoId, agora()));
@@ -320,7 +429,67 @@ export class ServicoDeOrquestracao {
       await repositorio.salvar(orquestrador);
     } catch (falha) {
       console.error(`[orquestracao] Não foi possível encerrar o turno ${turnoId}:`, falha);
+      return null;
     }
+    return encerrado;
+  }
+
+  /**
+   * Lê quanto o turno gastou e registra o consumo. Nunca afeta o turno: sem
+   * medidor, sem transcrição ou com erro na leitura, não há evento.
+   */
+  private async medirConsumo(orquestrador: Orquestrador, encerrado: TurnoEncerrado): Promise<void> {
+    const { medidor, repositorio } = this.dependencias;
+    if (medidor === undefined) {
+      return;
+    }
+    try {
+      const consumo = await medidor.medirTurno(encerrado.periodo);
+      // Excluído enquanto a medição rodava: nada a registrar.
+      if (consumo === null || repositorio.buscarPorId(orquestrador.id) === null) {
+        return;
+      }
+      // Falha se a conversa foi limpa no meio (o turno já não é desta conversa).
+      this.publicar(orquestrador, orquestrador.registrarConsumoDoTurno(encerrado.turnoId, consumo));
+    } catch (falha) {
+      console.warn(
+        `[orquestracao] Não foi possível medir o consumo do turno ${encerrado.turnoId}:`,
+        descreverErro(falha),
+      );
+    }
+  }
+
+  private async esforcoHerdado(consulta: {
+    modelo: ModeloClaude;
+    pastaDoProjeto: string;
+    modeloReal: string | null;
+  }): Promise<EsforcoHerdado | null> {
+    const { esforcoDaMaquina } = this.dependencias;
+    if (esforcoDaMaquina === undefined) {
+      return null;
+    }
+    try {
+      return await esforcoDaMaquina.herdadoPara(consulta);
+    } catch (falha) {
+      // Só um aviso na tela depende disso: melhor não avisar do que quebrar.
+      console.warn(
+        `[orquestracao] Não foi possível ler o esforço herdado do Claude Code para "${consulta.modelo}":`,
+        descreverErro(falha),
+      );
+      return null;
+    }
+  }
+
+  /** O modelo que o Orquestrador usou de fato no último turno medido desta conversa. */
+  private ultimoModeloMedido(orquestradorId: string): string | null {
+    const eventos = this.dependencias.repositorio.lerEventos(orquestradorId, 0);
+    for (let indice = eventos.length - 1; indice >= 0; indice -= 1) {
+      const evento = eventos[indice];
+      if (evento?.tipo === "consumo_do_turno_medido") {
+        return evento.consumo.modeloDoPrincipal;
+      }
+    }
+    return null;
   }
 
   private registrarDoMotor(orquestrador: Orquestrador, turnoId: string, evento: EventoDoMotor): void {

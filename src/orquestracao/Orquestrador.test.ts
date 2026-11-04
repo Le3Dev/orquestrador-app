@@ -3,9 +3,12 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
+import { ConsumoDoTurno } from "./ConsumoDoTurno";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { Orquestrador } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
+import { PredefinicaoDeConfiguracao, predefinicaoPorNome } from "./PredefinicaoDeConfiguracao";
+import { UsoDeTokens } from "./UsoDeTokens";
 
 const raiz = path.resolve("/projetos");
 const agora = new Date("2026-10-28T12:00:00Z");
@@ -429,5 +432,80 @@ describe("Orquestrador e o esforço de raciocínio", () => {
       tipo: "turno_iniciado",
       configuracao: { esforcoDoOrquestrador: "extra_alto", esforcoDosSubagentes: "padrao" },
     });
+  });
+});
+
+describe("Orquestrador e a economia de tokens", () => {
+  const consumo = ConsumoDoTurno.criar({
+    principal: UsoDeTokens.criar({ entrada: 6, criacaoDeCache: 33062, leituraDeCache: 62885, saida: 383 }),
+    subagentes: UsoDeTokens.vazio,
+    subagentesMedidos: 0,
+    parcial: false,
+    modeloDoPrincipal: "claude-opus-5-5",
+  });
+
+  function economico(): PredefinicaoDeConfiguracao {
+    const predefinicao = predefinicaoPorNome("economico");
+    if (predefinicao === null) {
+      throw new Error("predefinição econômica ausente");
+    }
+    return predefinicao;
+  }
+
+  it("aplicar a predefinição registra configuracao_alterada com o nome dela", () => {
+    const orquestrador = novoOrquestrador();
+    expect(orquestrador.predefinicaoCorrespondente).toBeNull();
+
+    const evento = orquestrador.aplicarPredefinicao(economico());
+
+    expect(evento).toEqual({
+      tipo: "configuracao_alterada",
+      configuracao: orquestrador.configuracao.paraDados(),
+      predefinicao: "economico",
+    });
+    expect(orquestrador.configuracao.paraDados()).toMatchObject({
+      modeloDosSubagentes: "sonnet",
+      esforcoDoOrquestrador: "medio",
+      nivelDePermissao: "leitura",
+    });
+    expect(orquestrador.predefinicaoCorrespondente).toBe("economico");
+
+    orquestrador.alterarConfiguracao({ esforcoDoOrquestrador: "alto" });
+    expect(orquestrador.predefinicaoCorrespondente).toBeNull();
+  });
+
+  it("registra o consumo de um turno concluído como veio", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "analise", agora);
+    orquestrador.concluirTurno("t1", "ok", uso, agora);
+
+    expect(orquestrador.registrarConsumoDoTurno("t1", consumo)).toEqual({
+      tipo: "consumo_do_turno_medido",
+      turnoId: "t1",
+      consumo: consumo.paraDados(),
+    });
+  });
+
+  it("marca como parcial o consumo de um turno cancelado ou com falha", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "analise", agora);
+    orquestrador.cancelarTurno("t1", agora);
+    orquestrador.iniciarTurno("t2", "de novo", agora);
+    orquestrador.falharTurno("t2", "caiu", agora);
+
+    expect(orquestrador.registrarConsumoDoTurno("t1", consumo)).toMatchObject({ consumo: { parcial: true } });
+    expect(orquestrador.registrarConsumoDoTurno("t2", consumo)).toMatchObject({ consumo: { parcial: true } });
+  });
+
+  it("recusa registrar consumo de turno em andamento ou desconhecido", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "analise", agora);
+
+    expect(capturarErro(() => orquestrador.registrarConsumoDoTurno("t1", consumo)).motivo).toBe(
+      "sem_turno_em_andamento",
+    );
+    expect(capturarErro(() => orquestrador.registrarConsumoDoTurno("t9", consumo)).motivo).toBe(
+      "sem_turno_em_andamento",
+    );
   });
 });

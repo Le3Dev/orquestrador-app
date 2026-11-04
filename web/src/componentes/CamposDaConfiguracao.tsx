@@ -1,13 +1,23 @@
-import { useId } from "react";
+import { useEffect, useId, useState } from "react";
 
+import { api, mensagemDeErro } from "../shared/api/cliente";
 import type {
   DadosDaConfiguracao,
+  DadosDaPredefinicao,
   DadosDaQuantidade,
+  DadosDoEsforcoHerdado,
   EsforcoDeRaciocinio,
+  EsforcosHerdados,
   ModeloClaude,
   NivelDePermissao,
+  NomeDaPredefinicao,
 } from "../shared/api/tipos";
-import { ROTULOS_DAS_PERMISSOES, ROTULOS_DOS_ESFORCOS, ROTULOS_DOS_MODELOS } from "../shared/formatacao";
+import {
+  descreverAlteracoesDaConfiguracao,
+  ROTULOS_DAS_PERMISSOES,
+  ROTULOS_DOS_ESFORCOS,
+  ROTULOS_DOS_MODELOS,
+} from "../shared/formatacao";
 
 const LIMITE_DE_SUBAGENTES = 10;
 
@@ -72,12 +82,17 @@ interface PropsDoSeletorDeEsforco {
   rotulo: string;
   valor: EsforcoDeRaciocinio;
   idDaAjuda: string;
+  /** O que o Claude Code usa quando fica em "padrao"; nulo quando não se sabe. */
+  herdado: DadosDoEsforcoHerdado | null;
   aoEscolher: (esforco: EsforcoDeRaciocinio) => void;
 }
 
 /** Lista suspensa, e não segmentado: seis níveis não cabem lado a lado na coluna do modelo. */
-function SeletorDeEsforco({ rotulo, valor, idDaAjuda, aoEscolher }: PropsDoSeletorDeEsforco) {
+function SeletorDeEsforco({ rotulo, valor, idDaAjuda, herdado, aoEscolher }: PropsDoSeletorDeEsforco) {
   const id = useId();
+  const idDoAviso = useId();
+  // Em "padrao" o app não força nada: avisa quando o que o Claude Code herda gasta tokens demais.
+  const avisar = valor === "padrao" && herdado !== null && herdado.deveAvisar;
   return (
     <div className="field">
       <label className="label" htmlFor={id}>
@@ -87,7 +102,7 @@ function SeletorDeEsforco({ rotulo, valor, idDaAjuda, aoEscolher }: PropsDoSelet
         id={id}
         className="select text-[12px]"
         value={valor}
-        aria-describedby={idDaAjuda}
+        aria-describedby={avisar ? `${idDaAjuda} ${idDoAviso}` : idDaAjuda}
         onChange={(evento) => {
           const escolhido = ESFORCOS.find((opcao) => opcao.valor === evento.target.value);
           if (escolhido !== undefined) {
@@ -101,31 +116,128 @@ function SeletorDeEsforco({ rotulo, valor, idDaAjuda, aoEscolher }: PropsDoSelet
           </option>
         ))}
       </select>
+      {avisar && (
+        <span id={idDoAviso} className="hint-warning">
+          Em Padrão, o Claude Code usa <strong>{ROTULOS_DOS_ESFORCOS[herdado.nivel]}</strong> para este modelo
+          (definido em <span className="mono">{herdado.origem}</span>). Isso gasta mais tokens; escolha um nível aqui
+          para controlar.
+        </span>
+      )}
     </div>
   );
+}
+
+/** O texto de ajuda do botão de uma predefinição: a descrição e o que ela muda, um item por linha. */
+function ajudaDaPredefinicao(predefinicao: DadosDaPredefinicao): string {
+  const itens = descreverAlteracoesDaConfiguracao(predefinicao.configuracao).map((item) => `• ${item}`);
+  return [predefinicao.descricao, ...(itens.length > 0 ? ["", ...itens] : [])].join("\n");
+}
+
+/** As predefinições do servidor; sem elas (servidor antigo ou fora do ar), o botão simplesmente não aparece. */
+function usePredefinicoes(): DadosDaPredefinicao[] {
+  const [predefinicoes, setPredefinicoes] = useState<DadosDaPredefinicao[]>([]);
+  useEffect(() => {
+    let ativo = true;
+    api
+      .listarPredefinicoes()
+      .then((lista) => {
+        if (ativo) {
+          setPredefinicoes(lista);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      ativo = false;
+    };
+  }, []);
+  return predefinicoes;
+}
+
+/**
+ * O esforço herdado do Claude Code, buscado de novo sempre que `buscar` muda
+ * (o formulário passa uma função nova quando os modelos ou a pasta mudam).
+ * Falha na busca → nulo: o formulário segue sem aviso.
+ */
+function useEsforcosHerdados(buscar: (() => Promise<EsforcosHerdados>) | undefined): EsforcosHerdados | null {
+  const [herdados, setHerdados] = useState<EsforcosHerdados | null>(null);
+  useEffect(() => {
+    if (buscar === undefined) {
+      setHerdados(null);
+      return;
+    }
+    let ativo = true;
+    buscar()
+      .then((resposta) => {
+        if (ativo) {
+          setHerdados(resposta);
+        }
+      })
+      .catch(() => {
+        if (ativo) {
+          setHerdados(null);
+        }
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [buscar]);
+  return herdados;
 }
 
 interface Props {
   valor: DadosDaConfiguracao;
   aoMudar: (configuracao: DadosDaConfiguracao) => void;
+  /**
+   * Busca o esforço que o Claude Code usaria em "padrao", para avisar quando
+   * ele gasta tokens demais. Deve mudar de identidade quando os modelos ou a
+   * pasta mudam. Sem ela, não há aviso.
+   */
+  buscarEsforcoHerdado?: () => Promise<EsforcosHerdados>;
+  /**
+   * Aplica a predefinição no servidor e devolve a configuração resultante (⚙ de
+   * um Orquestrador existente). Sem ela (formulário de criação), o botão só
+   * preenche os campos, que continuam editáveis.
+   */
+  aplicarPredefinicao?: (predefinicao: NomeDaPredefinicao) => Promise<DadosDaConfiguracao>;
 }
 
 /**
  * Modelos e esforço, quantidade de subagentes, permissões e o quanto o
  * orquestrador faz sozinho ou planeja antes — usado ao criar e ao reconfigurar.
  */
-export function CamposDaConfiguracao({ valor, aoMudar }: Props) {
+export function CamposDaConfiguracao({ valor, aoMudar, buscarEsforcoHerdado, aplicarPredefinicao }: Props) {
   const idDoLimite = useId();
   const idDaAjudaDoEsforco = useId();
   const idDaAjudaDoCommit = useId();
   const idDaAjudaDoTrabalhoDireto = useId();
   const idDaAjudaDoPlano = useId();
+  const predefinicoes = usePredefinicoes();
+  const herdados = useEsforcosHerdados(buscarEsforcoHerdado);
+  const [aplicando, setAplicando] = useState(false);
+  const [erroDaPredefinicao, setErroDaPredefinicao] = useState<string | null>(null);
+  const economico = predefinicoes.find((predefinicao) => predefinicao.nome === "economico");
   const quantidade = valor.quantidadeDeSubagentes;
   // Commit e push são comandos git: sem permissão de rodar comandos, a opção não tem efeito.
   const commitSemComandos = valor.permitirCommitEPush && valor.nivelDePermissao !== "edicao_e_comandos";
 
   function mudar<Campo extends keyof DadosDaConfiguracao>(campo: Campo, novo: DadosDaConfiguracao[Campo]): void {
     aoMudar({ ...valor, [campo]: novo });
+  }
+
+  async function usarPredefinicao(predefinicao: DadosDaPredefinicao): Promise<void> {
+    setErroDaPredefinicao(null);
+    if (aplicarPredefinicao === undefined) {
+      aoMudar({ ...valor, ...predefinicao.configuracao });
+      return;
+    }
+    setAplicando(true);
+    try {
+      aoMudar(await aplicarPredefinicao(predefinicao.nome));
+    } catch (falha) {
+      setErroDaPredefinicao(`Não foi possível aplicar o ${predefinicao.rotulo.toLowerCase()}: ${mensagemDeErro(falha)}`);
+    } finally {
+      setAplicando(false);
+    }
   }
 
   function mudarLimite(limite: number): void {
@@ -138,6 +250,25 @@ export function CamposDaConfiguracao({ valor, aoMudar }: Props) {
   // que o usuário redimensiona no canvas.
   return (
     <div className="flex flex-col gap-4 @container">
+      {economico !== undefined && (
+        <div className="flex flex-col items-end gap-1">
+          <button
+            type="button"
+            className="btn btn-sm btn-outline"
+            title={ajudaDaPredefinicao(economico)}
+            disabled={aplicando}
+            aria-busy={aplicando}
+            onClick={() => void usarPredefinicao(economico)}
+          >
+            {aplicando ? "Aplicando…" : "Modo econômico"}
+          </button>
+          {erroDaPredefinicao !== null && (
+            <span role="alert" className="hint-error">
+              {erroDaPredefinicao}
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex flex-col gap-1.5">
         <div className="grid gap-4 @xl:grid-cols-2">
           <div className="flex flex-col gap-2">
@@ -151,6 +282,7 @@ export function CamposDaConfiguracao({ valor, aoMudar }: Props) {
               rotulo="Esforço do orquestrador"
               valor={valor.esforcoDoOrquestrador}
               idDaAjuda={idDaAjudaDoEsforco}
+              herdado={herdados?.orquestrador ?? null}
               aoEscolher={(esforco) => mudar("esforcoDoOrquestrador", esforco)}
             />
           </div>
@@ -165,6 +297,7 @@ export function CamposDaConfiguracao({ valor, aoMudar }: Props) {
               rotulo="Esforço dos subagentes"
               valor={valor.esforcoDosSubagentes}
               idDaAjuda={idDaAjudaDoEsforco}
+              herdado={herdados?.subagentes ?? null}
               aoEscolher={(esforco) => mudar("esforcoDosSubagentes", esforco)}
             />
           </div>

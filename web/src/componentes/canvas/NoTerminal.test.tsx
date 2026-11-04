@@ -170,6 +170,35 @@ describe("PainelDeConfiguracao", () => {
     expect(aoFechar).not.toHaveBeenCalled();
     expect(opcao).toBeChecked();
   });
+
+  it("o modo econômico é aplicado no servidor e o formulário mostra a configuração devolvida", async () => {
+    vi.spyOn(api, "listarPredefinicoes").mockResolvedValue([
+      {
+        nome: "economico",
+        rotulo: "Modo econômico",
+        descricao: "Gasta menos tokens.",
+        configuracao: { esforcoDoOrquestrador: "medio", esforcoDosSubagentes: "medio" },
+      },
+    ]);
+    const herdado = vi.spyOn(api, "lerEsforcoHerdadoDoOrquestrador").mockResolvedValue({
+      orquestrador: null,
+      subagentes: null,
+    });
+    const aplicarPredefinicao = vi.spyOn(api, "aplicarPredefinicao").mockResolvedValue({
+      ...orquestrador({ esforcoDoOrquestrador: "medio", esforcoDosSubagentes: "medio" }),
+      predefinicaoCorrespondente: "economico",
+    });
+    renderizar(orquestrador());
+
+    fireEvent.click(await screen.findByRole("button", { name: "Modo econômico" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Esforço do orquestrador" })).toHaveValue("medio"),
+    );
+    expect(aplicarPredefinicao).toHaveBeenCalledWith("o1", "economico");
+    expect(herdado).toHaveBeenCalledWith("o1");
+    expect(screen.getByRole("combobox", { name: "Esforço dos subagentes" })).toHaveValue("medio");
+  });
 });
 
 const USO = { duracaoMs: 1000, tokensDeEntrada: 1, tokensDeSaida: 1, subagentesLancados: 0 };

@@ -1,13 +1,18 @@
 import path from "node:path";
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ControleDeExecucoesEmMemoria } from "../infraestrutura/execucoes/ControleDeExecucoesEmMemoria";
 import { Anexo } from "./Anexo";
 import { ArmazemDeAnexos } from "./ArmazemDeAnexos";
 import { DadosDaConfiguracao } from "./ConfiguracaoDoOrquestrador";
+import { ConsumoDoTurno } from "./ConsumoDoTurno";
+import { ConsultaDeEsforcoHerdado, EsforcoDaMaquina } from "./EsforcoDaMaquina";
+import { EsforcoHerdado } from "./EsforcoHerdado";
 import { EventoDeOrquestracao, EventoDoMotor, EventoRegistrado, SinalDeVida } from "./EventoDeOrquestracao";
 import { MARCADOR_DE_PLANO } from "./InstrucoesDoOrquestrador";
+import { MedidorDeConsumo, PeriodoDoTurno } from "./MedidorDeConsumo";
+import { UsoDeTokens } from "./UsoDeTokens";
 import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "./MotorDeAgentes";
 import { Orquestrador } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
@@ -643,5 +648,240 @@ describe("ServicoDeOrquestracao", () => {
     it("recusa orquestrador inexistente", async () => {
       await expect(servico.limparConversa("nao-existe")).rejects.toMatchObject({ motivo: "nao_encontrado" });
     });
+  });
+});
+
+/** Medidor que devolve o consumo combinado (ou falha) e guarda os períodos pedidos. */
+class MedidorFalso implements MedidorDeConsumo {
+  periodos: PeriodoDoTurno[] = [];
+  consumo: ConsumoDoTurno | null = ConsumoDoTurno.criar({
+    principal: UsoDeTokens.criar({ entrada: 6, criacaoDeCache: 33062, leituraDeCache: 62885, saida: 383 }),
+    subagentes: UsoDeTokens.criar({ entrada: 1, criacaoDeCache: 0, leituraDeCache: 0, saida: 1 }),
+    subagentesMedidos: 1,
+    parcial: false,
+    modeloDoPrincipal: "claude-opus-5-5",
+  });
+  falha: Error | null = null;
+
+  async medirTurno(periodo: PeriodoDoTurno): Promise<ConsumoDoTurno | null> {
+    this.periodos.push(periodo);
+    if (this.falha !== null) {
+      throw this.falha;
+    }
+    return this.consumo;
+  }
+}
+
+class EsforcoDaMaquinaFalso implements EsforcoDaMaquina {
+  consultas: ConsultaDeEsforcoHerdado[] = [];
+  falha: Error | null = null;
+
+  async herdadoPara(consulta: ConsultaDeEsforcoHerdado): Promise<EsforcoHerdado | null> {
+    this.consultas.push(consulta);
+    if (this.falha !== null) {
+      throw this.falha;
+    }
+    return consulta.modelo === "opus"
+      ? EsforcoHerdado.criar({ nivel: "extra_alto", origem: "CLAUDE_CODE_EFFORT_LEVEL", modelo: consulta.modeloReal })
+      : null;
+  }
+}
+
+describe("ServicoDeOrquestracao e a economia de tokens", () => {
+  let repositorio: RepositorioEmMemoria;
+  let motor: MotorFalso;
+  let medidor: MedidorFalso;
+  let esforco: EsforcoDaMaquinaFalso;
+  let worktrees: GerenciadorDeWorktreesFalso;
+  let servico: ServicoDeOrquestracao;
+  let ids: number;
+  const inicio = new Date("2026-10-28T12:00:00Z");
+  const fim = new Date("2026-10-28T12:05:00Z");
+  let relogio: Date;
+
+  beforeEach(() => {
+    repositorio = new RepositorioEmMemoria();
+    motor = new MotorFalso();
+    medidor = new MedidorFalso();
+    esforco = new EsforcoDaMaquinaFalso();
+    worktrees = new GerenciadorDeWorktreesFalso();
+    ids = 0;
+    relogio = inicio;
+    servico = new ServicoDeOrquestracao({
+      repositorio,
+      motor,
+      execucoes: new ControleDeExecucoesEmMemoria(),
+      publicador: { publicar: () => undefined, sinalizar: () => undefined },
+      anexos: new ArmazemEmMemoria(),
+      worktrees,
+      gerarId: () => `id${++ids}`,
+      agora: () => relogio,
+      medidor,
+      esforcoDaMaquina: esforco,
+    });
+  });
+
+  async function criar(): Promise<Orquestrador> {
+    return servico.criarOrquestrador({
+      nome: "Painel",
+      pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
+      configuracao,
+    });
+  }
+
+  it("mede o turno concluído depois do fim, com sessão, pasta e horário do turno", async () => {
+    const orquestrador = await criar();
+    worktrees.preparo = {
+      cwd: path.resolve("/dados/worktrees/abc"),
+      worktree: { branch: "orquestrador/id1", caminho: path.resolve("/dados/worktrees/abc") },
+    };
+
+    const { turnoId, conclusao, medicao } = await servico.enviarMensagem(orquestrador.id, "analise");
+    relogio = fim;
+    motor.terminar();
+    await conclusao;
+    await medicao;
+
+    expect(medidor.periodos).toEqual([
+      { sessaoId: orquestrador.sessaoId, pastaDeTrabalho: path.resolve("/dados/worktrees/abc"), inicio, fim },
+    ]);
+    expect(repositorio.eventos.map((evento) => evento.tipo)).toEqual([
+      "turno_iniciado",
+      "turno_concluido",
+      "consumo_do_turno_medido",
+    ]);
+    expect(repositorio.eventos.at(-1)).toMatchObject({
+      tipo: "consumo_do_turno_medido",
+      turnoId,
+      consumo: { parcial: false, indiceDeCusto: 49543, subagentesMedidos: 1, modeloDoPrincipal: "claude-opus-5-5" },
+    });
+  });
+
+  it("sem worktree, mede na pasta do projeto", async () => {
+    const orquestrador = await criar();
+
+    const { medicao } = await servico.enviarMensagem(orquestrador.id, "analise");
+    motor.terminar();
+    await medicao;
+
+    expect(medidor.periodos[0]?.pastaDeTrabalho).toBe(orquestrador.pastaDeTrabalho.caminho);
+  });
+
+  it("marca como parcial o consumo de um turno com falha", async () => {
+    const orquestrador = await criar();
+    motor.resultado = { sucesso: false, motivo: "Limite de uso atingido.", uso: null };
+
+    const { medicao } = await servico.enviarMensagem(orquestrador.id, "analise");
+    motor.terminar();
+    await medicao;
+
+    expect(repositorio.eventos.map((evento) => evento.tipo).slice(-2)).toEqual([
+      "turno_falhou",
+      "consumo_do_turno_medido",
+    ]);
+    expect(repositorio.eventos.at(-1)).toMatchObject({ consumo: { parcial: true } });
+  });
+
+  it("marca como parcial o consumo de um turno cancelado", async () => {
+    const orquestrador = await criar();
+
+    const { medicao } = await servico.enviarMensagem(orquestrador.id, "analise");
+    await servico.cancelar(orquestrador.id);
+    await medicao;
+
+    expect(repositorio.eventos.map((evento) => evento.tipo).slice(-2)).toEqual([
+      "turno_cancelado",
+      "consumo_do_turno_medido",
+    ]);
+    expect(repositorio.eventos.at(-1)).toMatchObject({ consumo: { parcial: true } });
+  });
+
+  it("sem transcrição, não registra consumo", async () => {
+    const orquestrador = await criar();
+    medidor.consumo = null;
+
+    const { medicao } = await servico.enviarMensagem(orquestrador.id, "analise");
+    motor.terminar();
+    await medicao;
+
+    expect(medidor.periodos).toHaveLength(1);
+    expect(repositorio.eventos.map((evento) => evento.tipo)).toEqual(["turno_iniciado", "turno_concluido"]);
+  });
+
+  it("um erro do medidor não quebra o turno nem o próximo pedido", async () => {
+    const orquestrador = await criar();
+    medidor.falha = new Error("transcrição corrompida");
+    const avisos = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const primeiro = await servico.enviarMensagem(orquestrador.id, "analise");
+    motor.terminar();
+    await primeiro.conclusao;
+    await primeiro.medicao;
+    const segundo = await servico.enviarMensagem(orquestrador.id, "de novo");
+    motor.terminar();
+    await segundo.conclusao;
+
+    expect(orquestrador.ultimoTurno?.situacao).toBe("concluido");
+    expect(repositorio.eventos.some((evento) => evento.tipo === "consumo_do_turno_medido")).toBe(false);
+    expect(avisos).toHaveBeenCalled();
+    avisos.mockRestore();
+  });
+
+  it("aplica a predefinição, publica configuracao_alterada e mantém a configuração editável", async () => {
+    const orquestrador = await criar();
+
+    await servico.aplicarPredefinicao(orquestrador.id, "economico");
+
+    expect(repositorio.eventos.at(-1)).toMatchObject({ tipo: "configuracao_alterada", predefinicao: "economico" });
+    expect(orquestrador.predefinicaoCorrespondente).toBe("economico");
+    expect(orquestrador.configuracao.nivelDePermissao).toBe("edicao");
+
+    await servico.alterarConfiguracao(orquestrador.id, { modeloDosSubagentes: "haiku" });
+    expect(orquestrador.predefinicaoCorrespondente).toBeNull();
+  });
+
+  it("recusa predefinição desconhecida e orquestrador inexistente", async () => {
+    const orquestrador = await criar();
+
+    await expect(servico.aplicarPredefinicao(orquestrador.id, "turbo")).rejects.toMatchObject({
+      motivo: "dados_invalidos",
+      message: "Predefinição desconhecida.",
+    });
+    await expect(servico.aplicarPredefinicao("nao-existe", "economico")).rejects.toMatchObject({
+      motivo: "nao_encontrado",
+    });
+  });
+
+  it("o esforço herdado usa os modelos atuais e o modelo real do último consumo medido", async () => {
+    const orquestrador = await criar();
+    const antes = await servico.esforcoHerdadoDe(orquestrador.id);
+
+    const { medicao } = await servico.enviarMensagem(orquestrador.id, "analise");
+    motor.terminar();
+    await medicao;
+    const depois = await servico.esforcoHerdadoDe(orquestrador.id);
+
+    expect(antes.orquestrador?.modelo).toBeNull();
+    expect(antes.subagentes).toBeNull();
+    expect(depois.orquestrador?.paraDados()).toEqual({
+      nivel: "extra_alto",
+      origem: "CLAUDE_CODE_EFFORT_LEVEL",
+      modelo: "claude-opus-5-5",
+      deveAvisar: true,
+    });
+    expect(esforco.consultas.at(-1)).toEqual({
+      modelo: "haiku",
+      pastaDoProjeto: orquestrador.pastaDeTrabalho.caminho,
+      modeloReal: null,
+    });
+  });
+
+  it("um erro ao ler o esforço herdado vira null", async () => {
+    const orquestrador = await criar();
+    esforco.falha = new Error("settings.json inválido");
+    const avisos = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    expect(await servico.esforcoHerdadoDe(orquestrador.id)).toEqual({ orquestrador: null, subagentes: null });
+    avisos.mockRestore();
   });
 });

@@ -105,6 +105,54 @@ export interface DadosDoWorktree {
   ativo: boolean;
 }
 
+/** Predefinições de configuração que o servidor oferece; hoje só o modo econômico. */
+export type NomeDaPredefinicao = "economico";
+
+export interface DadosDaPredefinicao {
+  nome: NomeDaPredefinicao;
+  rotulo: string;
+  descricao: string;
+  /** Os campos que a predefinição muda; os demais ficam como estão. */
+  configuracao: Partial<DadosDaConfiguracao>;
+}
+
+/** Tokens de um trecho do turno, como o Claude Code os conta. */
+export interface DadosDoUso {
+  entrada: number;
+  criacaoDeCache: number;
+  leituraDeCache: number;
+  saida: number;
+}
+
+/**
+ * Consumo medido de um turno, separado entre o Orquestrador (principal) e os
+ * Subagentes. `indiceDeCusto` = entrada + 1,25 × criação de cache + 0,1 ×
+ * leitura de cache + 5 × saída, em tokens de entrada equivalentes: serve para
+ * comparar turnos, não é preço. `parcial`: o turno foi cancelado ou falhou.
+ */
+export interface DadosDoConsumoDoTurno {
+  principal: DadosDoUso;
+  subagentes: DadosDoUso;
+  subagentesMedidos: number;
+  parcial: boolean;
+  indiceDeCusto: number;
+  modeloDoPrincipal: string | null;
+}
+
+/** O esforço que o Claude Code usa quando o app deixa em "padrao", e de onde ele vem. */
+export interface DadosDoEsforcoHerdado {
+  nivel: EsforcoDeRaciocinio;
+  origem: string;
+  modelo: string | null;
+  /** O nível herdado gasta mais tokens que o razoável: vale avisar o usuário. */
+  deveAvisar: boolean;
+}
+
+export interface EsforcosHerdados {
+  orquestrador: DadosDoEsforcoHerdado | null;
+  subagentes: DadosDoEsforcoHerdado | null;
+}
+
 export interface ResumoDoOrquestrador {
   id: string;
   nome: string;
@@ -116,6 +164,8 @@ export interface ResumoDoOrquestrador {
   totalDeTurnos: number;
   ultimoTurno: { texto: string; situacao: SituacaoDoTurno; iniciadoEm: string } | null;
   worktree: DadosDoWorktree | null;
+  /** A predefinição que a configuração atual reproduz por inteiro, se houver. Falta em servidores anteriores. */
+  predefinicaoCorrespondente?: NomeDaPredefinicao | null;
 }
 
 export interface PastaDeProjeto {
@@ -193,7 +243,9 @@ type EventoDeTurno =
   | { tipo: "turno_interrompido" }
   // Decisão sobre o plano pendente; ao aprovar, segue o `turno_iniciado` da execução.
   | { tipo: "plano_aprovado" }
-  | { tipo: "plano_descartado" };
+  | { tipo: "plano_descartado" }
+  // Medido depois do fim do turno, a partir dos registros do Claude Code.
+  | { tipo: "consumo_do_turno_medido"; consumo: DadosDoConsumoDoTurno };
 
 export type EventoDeOrquestracao =
   | (EventoDeTurno & { turnoId: string })
