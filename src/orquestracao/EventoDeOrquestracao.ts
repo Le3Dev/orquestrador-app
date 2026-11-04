@@ -58,6 +58,13 @@ export type EventoDoMotor =
   | { tipo: "resultado_do_subagente"; subagenteId: string; resultado: string }
   | { tipo: "permissao_negada"; ferramenta: string; detalhe: string }
   | { tipo: "uso_da_cota"; janelas: JanelaDaCota[] }
+  /**
+   * Um endereço local (ex.: `http://localhost:5173`) apareceu na saída de uma
+   * ferramenta, do Orquestrador ou de um Subagente: em geral, um servidor de
+   * desenvolvimento que acabou de subir. A tela o mostra numa prévia ao vivo.
+   * Chega uma vez por endereço em cada turno, já normalizado.
+   */
+  | { tipo: "endereco_local_detectado"; url: string }
   /** O Claude está raciocinando: não muda o turno, só mostra que há vida. */
   | { tipo: "sinal_de_vida"; tokensPensando: number };
 

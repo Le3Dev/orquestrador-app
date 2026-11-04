@@ -7,7 +7,7 @@ import { TAMANHO_MINIMO_DA_NOTA } from "../../shared/canvas/layout";
 import { ALCA_DA_NOTA, type NoNota as TipoDoNo } from "../../shared/canvas/nos";
 import { useAcoesDasNotas, useErroAoCarregarNotas, useLojaDasNotas, useNota } from "../../shared/canvas/notas";
 import { type SituacaoDoSalvamento, useEdicaoDaNota } from "../../shared/hooks/useEdicaoDaNota";
-import { IconeAlerta } from "../Icones";
+import { IconeAlerta, IconeMinimizar, IconeRestaurar } from "../Icones";
 
 export const CONFIRMACAO_PARA_APAGAR = "Apagar esta nota? Isso não pode ser desfeito.";
 const TAMANHO_MAXIMO_DO_TITULO = 120;
@@ -20,22 +20,6 @@ function primeiraLinha(texto: string): string {
       .split("\n")
       .map((linha) => linha.trim())
       .find((linha) => linha !== "") ?? ""
-  );
-}
-
-function IconeMinimizar() {
-  return (
-    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M5 17h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function IconeRestaurar() {
-  return (
-    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="5" y="5" width="14" height="14" rx="2" stroke="currentColor" strokeWidth="2" />
-    </svg>
   );
 }
 

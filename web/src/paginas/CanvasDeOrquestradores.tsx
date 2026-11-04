@@ -19,6 +19,7 @@ import { IconeOrquestrador } from "../componentes/Icones";
 import { ArestaDoBixinho } from "../componentes/canvas/ArestaDoBixinho";
 import { NoBixinho } from "../componentes/canvas/NoBixinho";
 import { NoNota } from "../componentes/canvas/NoNota";
+import { NoPrevia } from "../componentes/canvas/NoPrevia";
 import { NoRascunho } from "../componentes/canvas/NoRascunho";
 import { NoTerminal } from "../componentes/canvas/NoTerminal";
 import {
@@ -39,9 +40,11 @@ import {
   lerBixinhosLimpos,
   lerLayout,
   organizarComNotas,
+  type Ponto,
   posicaoParaNovoTerminal,
   salvarBixinhosLimpos,
   TAMANHO_DA_NOTA,
+  TAMANHO_DA_PREVIA,
   TAMANHO_DO_RASCUNHO,
   TAMANHO_DO_TERMINAL,
   type Viewport,
@@ -49,16 +52,23 @@ import {
 import {
   ALCA_DO_TERMINAL,
   type ArestaDoCanvas,
+  arestasDasPrevias,
   arestasDosBixinhos,
   ehBixinho,
   ehNota,
+  ehPrevia,
   ehTerminal,
+  idDoNoDaPrevia,
   limparBixinhos,
   mesmasLigacoes,
+  minimizarOuRestaurar,
   type NoDoCanvas,
+  type NoPrevia as TipoDaPrevia,
   type NoRascunho as TipoDoRascunho,
   nosDoLayout,
+  novaPrevia,
   novoTerminal,
+  posicaoDaPreviaDoTerminal,
   reacomodarBixinhos,
   reaproveitarArestas,
   semTerminal,
@@ -79,13 +89,30 @@ const TOPO_LIVRE_DA_TELA_PX = 84;
 // Tudo o que vai ao <ReactFlow> é constante ou estável: uma prop nova a cada
 // renderização (e o canvas renderiza a cada quadro do arraste) faz o React
 // Flow atualizar o estado interno e re-renderizar por dentro.
-const TIPOS_DE_NO = { terminal: NoTerminal, rascunho: NoRascunho, bixinho: NoBixinho, nota: NoNota } satisfies NodeTypes;
+const TIPOS_DE_NO = {
+  terminal: NoTerminal,
+  rascunho: NoRascunho,
+  bixinho: NoBixinho,
+  nota: NoNota,
+  previa: NoPrevia,
+} satisfies NodeTypes;
 const TIPOS_DE_ARESTA = { bixinho: ArestaDoBixinho } satisfies EdgeTypes;
 const ENQUADRAMENTO_AO_ABRIR: FitViewOptions<NoDoCanvas> = { maxZoom: 1, padding: 0.15 };
 const VIEWPORT_PADRAO: Viewport = { x: 0, y: 0, zoom: 1 };
 
+const CLASSES_NO_MINIMAPA: Readonly<Record<string, string>> = {
+  bixinho: "minimapa-bixinho",
+  nota: "minimapa-nota",
+  previa: "minimapa-previa",
+};
+
 function classeNoMinimapa(no: { type?: string }): string {
-  return no.type === "bixinho" ? "minimapa-bixinho" : no.type === "nota" ? "minimapa-nota" : "minimapa-terminal";
+  return CLASSES_NO_MINIMAPA[no.type ?? ""] ?? "minimapa-terminal";
+}
+
+/** Os nós com os selecionados desmarcados; os outros continuam o mesmo objeto e não re-renderizam. */
+function semSelecao(nos: readonly NoDoCanvas[]): NoDoCanvas[] {
+  return nos.map((no) => (no.selected === true ? { ...no, selected: false } : no));
 }
 
 /** O tamanho de uma janela do canvas para organizar: o do nó, o medido ou o padrão. */
@@ -131,13 +158,16 @@ function CanvasVazio({ aoCriar }: { aoCriar: () => void }) {
 function Canvas() {
   const { orquestradores, erro, recarregar } = useOrquestradores();
   const [layoutInicial] = useState(lerLayout);
-  // Enquadra só ao abrir com terminais (ou notas) salvos e sem posição de
+  // Enquadra só ao abrir com terminais (notas ou prévias) salvos e sem posição de
   // câmera salva. Com o canvas vazio, o React Flow enquadraria o primeiro
   // terminal criado depois, com zoom exagerado.
   const [enquadrarAoAbrir] = useState(
     () =>
       layoutInicial.viewport === null &&
-      Object.keys(layoutInicial.terminais).length + Object.keys(layoutInicial.notas).length > 0,
+      Object.keys(layoutInicial.terminais).length +
+        Object.keys(layoutInicial.notas).length +
+        Object.keys(layoutInicial.previas).length >
+        0,
   );
   const [nosIniciais] = useState(() => nosDoLayout(layoutInicial));
   const [nos, setNos, aoMudarNos] = useNodesState<NoDoCanvas>(nosIniciais);
@@ -158,11 +188,19 @@ function Canvas() {
     reacomodar();
   }, [aoTerminarArraste, reacomodar]);
 
+  // Enquanto uma janela é redimensionada, os sites das prévias não podem
+  // capturar o mouse (classe `canvas-redimensionando`, como `canvas-movendo`).
+  const [redimensionando, setRedimensionando] = useState(false);
+
   const aoMudarNosEReacomodar = useCallback(
     (mudancas: NodeChange<NoDoCanvas>[]) => {
       aoMudarNos(mudancas);
+      if (mudancas.some((mudanca) => mudanca.type === "dimensions" && mudanca.resizing === true)) {
+        setRedimensionando(true);
+      }
       // Fim de um redimensionamento (o React Flow manda `resizing: false` só ao soltar a alça).
       if (mudancas.some((mudanca) => mudanca.type === "dimensions" && mudanca.resizing === false)) {
+        setRedimensionando(false);
         reacomodar();
       }
     },
@@ -242,11 +280,15 @@ function Canvas() {
   // terminal ou passa para outro lado dele (as pontas seguem o lado), ou
   // quando chega um evento; e o React Flow só recebe um array novo quando
   // alguma linha mudou de fato. Arrastar sem trocar de lado não muda nenhuma.
+  // As prévias entram também: a linha tracejada do terminal até a prévia que saiu dele.
   const ligados = useReaproveitado(
-    nos.filter((no) => ehTerminal(no) || ehBixinho(no)),
+    nos.filter((no) => ehTerminal(no) || ehBixinho(no) || ehPrevia(no)),
     mesmasLigacoes,
   );
-  const arestasCalculadas = useMemo(() => arestasDosBixinhos(ligados, conversas), [ligados, conversas]);
+  const arestasCalculadas = useMemo(
+    () => [...arestasDosBixinhos(ligados, conversas), ...arestasDasPrevias(ligados)],
+    [ligados, conversas],
+  );
   const arestas = useReaproveitado(arestasCalculadas, reaproveitarArestas);
 
   const centroDaTela = useCallback(
@@ -266,18 +308,26 @@ function Canvas() {
     [fluxo],
   );
 
-  const novoOrquestrador = useCallback(() => {
-    const id = `rascunho:${crypto.randomUUID()}`;
-    setNos((atuais) => {
+  /** Onde abrir uma janela nova no centro da área visível, sem cobrir as que já estão ali. */
+  const posicaoNoCentroVisivel = useCallback(
+    (atuais: readonly NoDoCanvas[], tamanho: { largura: number; altura: number }): Ponto => {
       const centralizada = posicaoParaNovoTerminal(
         centroDaTela(),
-        TAMANHO_DO_RASCUNHO,
+        tamanho,
         atuais.filter((no) => !ehBixinho(no)).map((no) => no.position),
       );
       // Em telas baixas, centralizar esconderia a barra de título atrás da barra
       // do canvas: o topo da janela começa sempre abaixo dela.
       const topoLivre = fluxo.screenToFlowPosition({ x: 0, y: TOPO_LIVRE_DA_TELA_PX }).y;
-      const posicao = { ...centralizada, y: Math.max(centralizada.y, Math.round(topoLivre)) };
+      return { ...centralizada, y: Math.max(centralizada.y, Math.round(topoLivre)) };
+    },
+    [centroDaTela, fluxo],
+  );
+
+  const novoOrquestrador = useCallback(() => {
+    const id = `rascunho:${crypto.randomUUID()}`;
+    setNos((atuais) => {
+      const posicao = posicaoNoCentroVisivel(atuais, TAMANHO_DO_RASCUNHO);
       const rascunho: TipoDoRascunho = {
         id,
         type: "rascunho",
@@ -290,7 +340,67 @@ function Canvas() {
       };
       return reacomodarBixinhos([...atuais.map((no) => ({ ...no, selected: false })), rascunho]);
     });
-  }, [centroDaTela, fluxo, setNos]);
+  }, [posicaoNoCentroVisivel, setNos]);
+
+  /** O botão Prévia da barra: uma prévia vazia no centro da tela, com o campo de endereço focado. */
+  const novaPreviaVazia = useCallback(() => {
+    const previaId = crypto.randomUUID();
+    setNos((atuais) => {
+      const previa = novaPrevia(previaId, posicaoNoCentroVisivel(atuais, TAMANHO_DA_PREVIA), {
+        url: "",
+        orquestradorId: null,
+      });
+      return reacomodarBixinhos([...semSelecao(atuais), { ...previa, selected: true }]);
+    });
+  }, [posicaoNoCentroVisivel, setNos]);
+
+  const abrirPrevia = useCallback(
+    (orquestradorId: string, url: string) => {
+      const mesma = (no: NoDoCanvas): no is TipoDaPrevia =>
+        ehPrevia(no) && no.data.orquestradorId === orquestradorId && no.data.url === url;
+      const previaId = crypto.randomUUID();
+      const existente = fluxo.getNodes().find(mesma);
+      setNos((atuais) => {
+        const aberta = atuais.find(mesma);
+        if (aberta !== undefined) {
+          return aberta.data.minimizada
+            ? reacomodarBixinhos(atuais.map((no) => (no === aberta ? minimizarOuRestaurar(aberta) : no)))
+            : atuais;
+        }
+        // Ao lado do terminal, longe das outras janelas; sem o terminal no canvas, no centro da tela.
+        const posicao =
+          posicaoDaPreviaDoTerminal(atuais, orquestradorId, TAMANHO_DA_PREVIA) ??
+          posicaoNoCentroVisivel(atuais, TAMANHO_DA_PREVIA);
+        const previa = novaPrevia(previaId, posicao, { url, orquestradorId });
+        return reacomodarBixinhos([...semSelecao(atuais), { ...previa, selected: true }]);
+      });
+      focar(existente?.id ?? idDoNoDaPrevia(previaId));
+    },
+    [fluxo, focar, posicaoNoCentroVisivel, setNos],
+  );
+
+  const navegarPrevia = useCallback(
+    (previaId: string, url: string) =>
+      setNos((atuais) =>
+        atuais.map((no) => (ehPrevia(no) && no.data.previaId === previaId ? { ...no, data: { ...no.data, url } } : no)),
+      ),
+    [setNos],
+  );
+
+  const minimizarOuRestaurarPrevia = useCallback(
+    (previaId: string) =>
+      setNos((atuais) =>
+        reacomodarBixinhos(
+          atuais.map((no) => (ehPrevia(no) && no.data.previaId === previaId ? minimizarOuRestaurar(no) : no)),
+        ),
+      ),
+    [setNos],
+  );
+
+  const fecharPrevia = useCallback(
+    (previaId: string) => setNos((atuais) => atuais.filter((no) => !ehPrevia(no) || no.data.previaId !== previaId)),
+    [setNos],
+  );
 
   const abrirTerminal = useCallback(
     (orquestradorId: string) => {
@@ -354,9 +464,12 @@ function Canvas() {
   const organizar = useCallback(() => {
     setNos((atuais) => {
       const janelas = atuais
-        .filter((no) => !ehBixinho(no) && !ehNota(no))
+        .filter((no) => !ehBixinho(no) && !ehNota(no) && !ehPrevia(no))
         .map((no) => tamanhoParaOrganizar(no, TAMANHO_DO_TERMINAL));
-      const notasNoCanvas = atuais.filter(ehNota).map((no) => tamanhoParaOrganizar(no, TAMANHO_DA_NOTA));
+      // As prévias vão para as colunas das notas: também não têm bixinhos.
+      const notasNoCanvas = atuais
+        .filter((no) => ehNota(no) || ehPrevia(no))
+        .map((no) => tamanhoParaOrganizar(no, ehNota(no) ? TAMANHO_DA_NOTA : TAMANHO_DA_PREVIA));
       const posicoes = organizarComNotas(janelas, notasNoCanvas);
       return reacomodarBixinhos(
         atuais.map((no) => {
@@ -376,8 +489,23 @@ function Canvas() {
       orquestradorCriado,
       descartarRascunho,
       recarregar,
+      abrirPrevia,
+      navegarPrevia,
+      minimizarOuRestaurarPrevia,
+      fecharPrevia,
     }),
-    [abrirTerminal, fecharTerminal, limparBixinhosDoTerminal, orquestradorCriado, descartarRascunho, recarregar],
+    [
+      abrirTerminal,
+      fecharTerminal,
+      limparBixinhosDoTerminal,
+      orquestradorCriado,
+      descartarRascunho,
+      recarregar,
+      abrirPrevia,
+      navegarPrevia,
+      minimizarOuRestaurarPrevia,
+      fecharPrevia,
+    ],
   );
   // Os nós só leem do servidor a conexão e a memória por Orquestrador: a
   // memória livre do computador, que muda a cada leitura, não os re-renderiza.
@@ -444,6 +572,7 @@ function Canvas() {
         <BarraDoCanvas
           aoCriar={novoOrquestrador}
           aoCriarNota={novaNota}
+          aoCriarPrevia={novaPreviaVazia}
           aoOrganizar={organizar}
           podeOrganizar={podeOrganizar}
           aoAlternarPainel={alternarPainel}
@@ -461,6 +590,7 @@ function Canvas() {
     [
       novoOrquestrador,
       novaNota,
+      novaPreviaVazia,
       organizar,
       podeOrganizar,
       painelAberto,
@@ -502,7 +632,7 @@ function Canvas() {
     <ProvedorDoCanvas valor={valor}>
       <ProvedorDasNotas valor={notas.valor}>
         <div
-          className={`relative h-screen w-screen ${servidor.conectado ? "" : "canvas-desconectado"} ${movimento.movendo ? "canvas-movendo" : ""}`}
+          className={`relative h-screen w-screen ${servidor.conectado ? "" : "canvas-desconectado"} ${movimento.movendo ? "canvas-movendo" : ""} ${redimensionando ? "canvas-redimensionando" : ""}`}
         >
           <ReactFlow<NoDoCanvas, ArestaDoCanvas>
             nodes={nos}

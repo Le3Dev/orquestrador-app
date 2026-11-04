@@ -7,10 +7,12 @@ import {
   type BixinhosLimpos,
   type LayoutDoCanvas,
   type Ponto,
+  posicaoAoLado,
   posicoesLivresDosBixinhos,
   type Retangulo,
   sobrepoe,
   TAMANHO_DA_NOTA,
+  TAMANHO_DA_PREVIA,
   TAMANHO_DO_BIXINHO,
   TAMANHO_DO_RASCUNHO,
   TAMANHO_DO_TERMINAL,
@@ -30,15 +32,33 @@ export type DadosDoNoDaNota = {
   alturaAberta: number;
 };
 
+/**
+ * A prévia ao vivo (um navegador no canvas). O endereço fica aqui, e não numa
+ * loja: só muda quando o usuário navega, e precisa ir para o layout.
+ */
+export type DadosDaPrevia = {
+  previaId: string;
+  /** Vazio enquanto o usuário não digita um endereço. */
+  url: string;
+  /** O Orquestrador de cujo terminal a prévia saiu; nulo quando aberta pela barra do canvas. */
+  orquestradorId: string | null;
+  minimizada: boolean;
+  /** A altura da prévia aberta, como na nota. */
+  alturaAberta: number;
+};
+
 export type NoTerminal = Node<DadosDoTerminal, "terminal">;
 export type NoRascunho = Node<DadosDoRascunho, "rascunho">;
 export type NoBixinho = Node<DadosDoBixinho, "bixinho">;
 export type NoNota = Node<DadosDoNoDaNota, "nota">;
-export type NoDoCanvas = NoTerminal | NoRascunho | NoBixinho | NoNota;
+export type NoPrevia = Node<DadosDaPrevia, "previa">;
+export type NoDoCanvas = NoTerminal | NoRascunho | NoBixinho | NoNota | NoPrevia;
 
 /** A linha do terminal a um bixinho; `animated` já diz se o Subagente trabalha. */
 export type ArestaDoBixinho = Edge<Record<string, never>, "bixinho">;
-export type ArestaDoCanvas = ArestaDoBixinho;
+/** A linha discreta (tracejada) do terminal à prévia que saiu dele: a curva padrão do React Flow. */
+export type ArestaDaPrevia = Edge<Record<string, never>, "default">;
+export type ArestaDoCanvas = ArestaDoBixinho | ArestaDaPrevia;
 
 /** O `id` de cada âncora das linhas: o lado do nó, no terminal e no bixinho. */
 export type Ancora = "cima" | "baixo" | "esquerda" | "direita";
@@ -57,6 +77,8 @@ const ANCORAS_DO_LADO: Readonly<Record<LadoDoBixinho, { terminal: Ancora; bixinh
 export const ALCA_DO_TERMINAL = "alca-do-terminal";
 /** Idem para a nota: no corpo, o mouse escreve e seleciona texto. */
 export const ALCA_DA_NOTA = "alca-da-nota";
+/** Idem para a prévia: no corpo, o mouse é do site aberto. */
+export const ALCA_DA_PREVIA = "alca-da-previa";
 
 export function ehTerminal(no: NoDoCanvas): no is NoTerminal {
   return no.type === "terminal";
@@ -70,9 +92,18 @@ export function ehNota(no: NoDoCanvas): no is NoNota {
   return no.type === "nota";
 }
 
+export function ehPrevia(no: NoDoCanvas): no is NoPrevia {
+  return no.type === "previa";
+}
+
 /** O id do nó de uma nota; com prefixo, para nunca coincidir com o de um terminal. */
 export function idDoNoDaNota(notaId: string): string {
   return `nota:${notaId}`;
+}
+
+/** O id do nó de uma prévia; com prefixo, como o da nota. */
+export function idDoNoDaPrevia(previaId: string): string {
+  return `previa:${previaId}`;
 }
 
 export function idDoBixinho(orquestradorId: string, subagenteId: string): string {
@@ -109,13 +140,36 @@ export function novaNota(
   };
 }
 
-/** A altura da nota aberta, esteja ela minimizada ou não. */
-function alturaAbertaDaNota(no: NoNota): number {
-  return no.data.minimizada ? no.data.alturaAberta : (no.height ?? no.measured?.height ?? TAMANHO_DA_NOTA.altura);
+export function novaPrevia(
+  previaId: string,
+  posicao: Ponto,
+  { url, orquestradorId }: { url: string; orquestradorId: string | null },
+  largura: number = TAMANHO_DA_PREVIA.largura,
+  altura: number = TAMANHO_DA_PREVIA.altura,
+  minimizada = false,
+): NoPrevia {
+  return {
+    id: idDoNoDaPrevia(previaId),
+    type: "previa",
+    position: posicao,
+    width: largura,
+    height: minimizada ? ALTURA_DA_NOTA_MINIMIZADA : altura,
+    dragHandle: `.${ALCA_DA_PREVIA}`,
+    data: { previaId, url, orquestradorId, minimizada, alturaAberta: altura },
+  };
 }
 
-/** Minimiza a nota (fica só a barra de título, no mesmo lugar) ou a restaura ao tamanho de antes. */
-export function minimizarOuRestaurar(no: NoNota): NoNota {
+/** As janelas que se minimizam à barra de título. */
+type NoMinimizavel = NoNota | NoPrevia;
+
+/** A altura da nota (ou prévia) aberta, esteja ela minimizada ou não. */
+function alturaAbertaDaNota(no: NoMinimizavel): number {
+  const padrao = ehNota(no) ? TAMANHO_DA_NOTA.altura : TAMANHO_DA_PREVIA.altura;
+  return no.data.minimizada ? no.data.alturaAberta : (no.height ?? no.measured?.height ?? padrao);
+}
+
+/** Minimiza a nota ou a prévia (fica só a barra de título, no mesmo lugar) ou a restaura ao tamanho de antes. */
+export function minimizarOuRestaurar<T extends NoMinimizavel>(no: T): T {
   const alturaAberta = Math.round(alturaAbertaDaNota(no));
   const minimizada = !no.data.minimizada;
   return {
@@ -161,7 +215,17 @@ export function nosDoLayout(layout: LayoutDoCanvas): NoDoCanvas[] {
   const notas = Object.entries(layout.notas).map(([notaId, retangulo]) =>
     novaNota(notaId, { x: retangulo.x, y: retangulo.y }, retangulo.largura, retangulo.altura, retangulo.minimizada),
   );
-  return [...terminais, ...notas];
+  const previas = Object.entries(layout.previas).map(([previaId, retangulo]) =>
+    novaPrevia(
+      previaId,
+      { x: retangulo.x, y: retangulo.y },
+      { url: retangulo.url, orquestradorId: retangulo.orquestradorId },
+      retangulo.largura,
+      retangulo.altura,
+      retangulo.minimizada,
+    ),
+  );
+  return [...terminais, ...notas, ...previas];
 }
 
 export function layoutDosNos(nos: readonly NoDoCanvas[], viewport: LayoutDoCanvas["viewport"]): LayoutDoCanvas {
@@ -184,7 +248,19 @@ export function layoutDosNos(nos: readonly NoDoCanvas[], viewport: LayoutDoCanva
       minimizada: no.data.minimizada,
     };
   }
-  return { terminais, notas, viewport };
+  const previas: LayoutDoCanvas["previas"] = {};
+  for (const no of nos.filter(ehPrevia)) {
+    previas[no.data.previaId] = {
+      x: Math.round(no.position.x),
+      y: Math.round(no.position.y),
+      largura: Math.round(no.width ?? no.measured?.width ?? TAMANHO_DA_PREVIA.largura),
+      altura: Math.round(alturaAbertaDaNota(no)),
+      minimizada: no.data.minimizada,
+      url: no.data.url,
+      orquestradorId: no.data.orquestradorId,
+    };
+  }
+  return { terminais, notas, previas, viewport };
 }
 
 /** Remove um terminal e os bixinhos dele (filhos não podem ficar sem o pai no React Flow). */
@@ -241,9 +317,11 @@ function tamanhoDoNo(no: NoDoCanvas): { largura: number; altura: number } {
     ? TAMANHO_DO_BIXINHO
     : ehNota(no)
       ? TAMANHO_DA_NOTA
-      : no.type === "rascunho"
-        ? TAMANHO_DO_RASCUNHO
-        : TAMANHO_DO_TERMINAL;
+      : ehPrevia(no)
+        ? TAMANHO_DA_PREVIA
+        : no.type === "rascunho"
+          ? TAMANHO_DO_RASCUNHO
+          : TAMANHO_DO_TERMINAL;
   return {
     largura: no.width ?? no.measured?.width ?? padrao.largura,
     altura: no.height ?? no.measured?.height ?? padrao.altura,
@@ -255,7 +333,7 @@ function retanguloNoCanvas(no: NoDoCanvas, origem: Ponto = { x: 0, y: 0 }): Reta
   return { x: origem.x + no.position.x, y: origem.y + no.position.y, ...tamanhoDoNo(no) };
 }
 
-/** As janelas do canvas (terminais, rascunhos e notas), com o retângulo de cada uma. */
+/** As janelas do canvas (terminais, rascunhos, notas e prévias), com o retângulo de cada uma. */
 function janelasNoCanvas(nos: readonly NoDoCanvas[]): { id: string; retangulo: Retangulo }[] {
   return nos.filter((no) => !ehBixinho(no)).map((no) => ({ id: no.id, retangulo: retanguloNoCanvas(no) }));
 }
@@ -423,19 +501,66 @@ const CLASSE_DA_ARESTA: Readonly<Record<SituacaoDoSubagente, string>> = {
  * conta como estar do lado, como em `sobrepoe`.
  */
 export function ladoDoBixinho(bixinho: NoBixinho, terminal: NoTerminal): LadoDoBixinho {
-  const { x, y } = bixinho.position;
-  const doBixinho = tamanhoDoNo(bixinho);
-  const doTerminal = tamanhoDoNo(terminal);
-  if (y + doBixinho.altura <= 0) {
+  return ladoEmRelacaoAoTerminal(bixinho.position, tamanhoDoNo(bixinho), tamanhoDoNo(terminal));
+}
+
+/** A regra de `ladoDoBixinho`, para um nó na posição `{ x, y }` relativa ao terminal. */
+function ladoEmRelacaoAoTerminal(
+  { x, y }: Ponto,
+  tamanho: { largura: number; altura: number },
+  doTerminal: { largura: number; altura: number },
+): LadoDoBixinho {
+  if (y + tamanho.altura <= 0) {
     return "acima";
   }
   if (x >= doTerminal.largura) {
     return "direita";
   }
-  if (x + doBixinho.largura <= 0) {
+  if (x + tamanho.largura <= 0) {
     return "esquerda";
   }
   return "abaixo";
+}
+
+/**
+ * De que lado do terminal a prévia está, com a mesma regra dos bixinhos. A
+ * prévia não é filha do terminal: a posição dela é absoluta.
+ */
+export function ladoDaPrevia(previa: NoPrevia, terminal: NoTerminal): LadoDoBixinho {
+  const relativa = { x: previa.position.x - terminal.position.x, y: previa.position.y - terminal.position.y };
+  return ladoEmRelacaoAoTerminal(relativa, tamanhoDoNo(previa), tamanhoDoNo(terminal));
+}
+
+/** O terminal de que a prévia saiu, se ele estiver no canvas. */
+function terminalDaPrevia(previa: NoPrevia, terminais: ReadonlyMap<string, NoTerminal>): NoTerminal | undefined {
+  return previa.data.orquestradorId === null ? undefined : terminais.get(previa.data.orquestradorId);
+}
+
+/** O lado da prévia em relação ao terminal dela; nulo sem o terminal no canvas (não há linha). */
+function ladoDaPreviaNoTerminal(previa: NoPrevia, terminais: ReadonlyMap<string, NoTerminal>): LadoDoBixinho | null {
+  const terminal = terminalDaPrevia(previa, terminais);
+  return terminal === undefined ? null : ladoDaPrevia(previa, terminal);
+}
+
+/**
+ * Onde abrir a prévia do terminal dado: ao lado dele, longe das outras
+ * janelas e dos bixinhos (`posicaoAoLado`). Nulo sem o terminal no canvas.
+ */
+export function posicaoDaPreviaDoTerminal(
+  nos: readonly NoDoCanvas[],
+  terminalId: string,
+  tamanho: { largura: number; altura: number },
+): Ponto | null {
+  const terminal = nos.find((no) => ehTerminal(no) && no.id === terminalId);
+  if (terminal === undefined) {
+    return null;
+  }
+  const origens = new Map(nos.filter((no) => !ehBixinho(no)).map((no) => [no.id, no.position]));
+  const obstaculos = [
+    ...outrasJanelas(janelasNoCanvas(nos), terminalId),
+    ...nos.filter(ehBixinho).map((bixinho) => retanguloNoCanvas(bixinho, origens.get(bixinho.parentId ?? ""))),
+  ];
+  return posicaoAoLado(retanguloNoCanvas(terminal), tamanho, obstaculos);
 }
 
 /** O lado do bixinho em relação ao terminal dele; sem o terminal na lista, o padrão (abaixo). */
@@ -485,7 +610,37 @@ export function arestasDosBixinhos(
 }
 
 /**
- * Os nós anteriores (terminais e bixinhos) enquanto as linhas não mudam: nenhum
+ * Uma linha discreta do terminal a cada prévia que saiu dele, do lado voltado
+ * para ela (`ladoDaPrevia`). Prévias soltas, ou com o terminal fechado, ficam
+ * sem linha. `nos` precisa trazer também os terminais.
+ */
+export function arestasDasPrevias(nos: readonly NoDoCanvas[]): ArestaDoCanvas[] {
+  const terminais = terminaisPorId(nos);
+  return nos.filter(ehPrevia).flatMap((previa): ArestaDaPrevia[] => {
+    const terminal = terminalDaPrevia(previa, terminais);
+    if (terminal === undefined) {
+      return [];
+    }
+    // As âncoras do lado: a do "bixinho" é a ponta que chega, aqui na prévia.
+    const ancoras = ANCORAS_DO_LADO[ladoDaPrevia(previa, terminal)];
+    return [
+      {
+        id: `aresta:${previa.id}`,
+        type: "default",
+        source: terminal.id,
+        sourceHandle: ancoras.terminal,
+        target: previa.id,
+        targetHandle: ancoras.bixinho,
+        className: "aresta-previa",
+        selectable: false,
+        focusable: false,
+      },
+    ];
+  });
+}
+
+/**
+ * Os nós anteriores (terminais, bixinhos e prévias) enquanto as linhas não mudam: nenhum
  * bixinho nasce, some ou troca de terminal, e nenhum passa para outro lado do
  * terminal. Fora isso, a posição e o tamanho não importam — arrastar ou
  * redimensionar sem trocar de lado não recalcula as linhas.
@@ -503,6 +658,12 @@ export function mesmasLigacoes<T extends NoDoCanvas>(anteriores: T[], novos: T[]
     const novo = novos[indice];
     if (novo === undefined || anterior.id !== novo.id || anterior.type !== novo.type || anterior.parentId !== novo.parentId) {
       return false;
+    }
+    if (ehPrevia(anterior) && ehPrevia(novo)) {
+      return (
+        anterior.data.orquestradorId === novo.data.orquestradorId &&
+        ladoDaPreviaNoTerminal(anterior, terminaisAnteriores) === ladoDaPreviaNoTerminal(novo, terminaisNovos)
+      );
     }
     if (!ehBixinho(anterior) || !ehBixinho(novo)) {
       return true;

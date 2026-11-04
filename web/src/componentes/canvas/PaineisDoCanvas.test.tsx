@@ -11,6 +11,7 @@ describe("BarraDoCanvas", () => {
       <BarraDoCanvas
         aoCriar={aoCriar}
         aoCriarNota={aoCriarNota}
+        aoCriarPrevia={vi.fn()}
         aoOrganizar={vi.fn()}
         podeOrganizar={false}
         aoAlternarPainel={vi.fn()}
@@ -28,6 +29,26 @@ describe("BarraDoCanvas", () => {
     expect(aoCriarNota).toHaveBeenCalledTimes(2);
     expect(aoCriar).not.toHaveBeenCalled();
   });
+
+  it("o botão Prévia abre uma prévia ao vivo", () => {
+    const aoCriarPrevia = vi.fn();
+    render(
+      <BarraDoCanvas
+        aoCriar={vi.fn()}
+        aoCriarNota={vi.fn()}
+        aoCriarPrevia={aoCriarPrevia}
+        aoOrganizar={vi.fn()}
+        podeOrganizar={false}
+        aoAlternarPainel={vi.fn()}
+        painelAberto={null}
+        quantidadeDeSubagentes={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "+ prévia" }));
+
+    expect(aoCriarPrevia).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("BarraDoCanvas: Subagentes e Instruções gerais", () => {
@@ -37,6 +58,7 @@ describe("BarraDoCanvas: Subagentes e Instruções gerais", () => {
       <BarraDoCanvas
         aoCriar={vi.fn()}
         aoCriarNota={vi.fn()}
+        aoCriarPrevia={vi.fn()}
         aoOrganizar={vi.fn()}
         podeOrganizar={false}
         aoAlternarPainel={aoAlternarPainel}
@@ -83,6 +105,7 @@ describe("BarraDoCanvas: Subagentes e Instruções gerais", () => {
       <BarraDoCanvas
         aoCriar={vi.fn()}
         aoCriarNota={vi.fn()}
+        aoCriarPrevia={vi.fn()}
         aoOrganizar={vi.fn()}
         podeOrganizar={false}
         aoAlternarPainel={vi.fn()}
@@ -114,6 +137,7 @@ describe("BarraDoCanvas no app desktop", () => {
       <BarraDoCanvas
         aoCriar={vi.fn()}
         aoCriarNota={vi.fn()}
+        aoCriarPrevia={vi.fn()}
         aoOrganizar={vi.fn()}
         podeOrganizar={false}
         aoAlternarPainel={vi.fn()}

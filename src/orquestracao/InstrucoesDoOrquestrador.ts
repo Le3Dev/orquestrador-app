@@ -31,6 +31,16 @@ const COMMIT_E_PUSH_QUANDO_PEDIDOS =
  * O marcador como o Orquestrador pode escrevê-lo: com espaços em volta, um
  * espaço antes da barra ou entre crases.
  */
+/**
+ * Servidor de desenvolvimento (npm run dev, vite...) não pode ir para o
+ * segundo plano do Claude Code: o processo do pedido só termina quando ele
+ * para, e o pedido ficaria "trabalhando" para sempre. Desacoplado, ele segue
+ * no ar depois do pedido, e o endereço impresso no log aparece na saída do
+ * comando, onde a tela o detecta para a prévia ao vivo.
+ */
+export const REGRA_DOS_SERVIDORES =
+  "Servidor que deve continuar no ar (npm run dev, vite, next dev e afins): não use a execução em segundo plano da ferramenta (run_in_background), que prende o pedido até o servidor parar. Suba desacoplado, com a saída num log fora do projeto, e mostre o começo do log para o endereço aparecer, por exemplo: `nohup npm run dev > /tmp/servidor-<nome>.log 2>&1 & sleep 4; tail -n 20 /tmp/servidor-<nome>.log`. Ele continua rodando depois do pedido; para parar, use kill no processo.";
+
 const MARCADOR_ESCRITO = String.raw`(?:\x60[ \t]*)?<plano-para-aprovacao[ \t]*\/>(?:[ \t]*\x60)?`;
 /** Linha que só tem o marcador: sai inteira, com a quebra. */
 const LINHA_DO_MARCADOR = new RegExp(String.raw`^[ \t]*${MARCADOR_ESCRITO}[ \t]*(?:\r?\n|$)`, "gm");
@@ -166,6 +176,7 @@ export function mensagemParaOOrquestrador(
     `- Permissões: ${DESCRICAO_DO_NIVEL[nivelDoPedido]}. ${regraDeCommitEPush}`,
     ...regrasDoPlanejamento,
     ...regrasDoTamanho,
+    ...(nivelDoPedido === "edicao_e_comandos" ? [`- ${REGRA_DOS_SERVIDORES}`] : []),
     ...imagens,
     ...linhasDasInstrucoes(instrucoes, MARCA_DA_CONFIGURACAO, revogarInstrucoesAnteriores),
     `</${MARCA_DA_CONFIGURACAO}>`,
@@ -222,6 +233,7 @@ export function instrucoesDoSubagente(
     `Você é um subagente ${papel}, coordenado por um orquestrador.`,
     `Faça somente a subtarefa recebida, dentro da pasta ${pasta.caminho}. Seja objetivo.`,
     "Ao terminar, devolva: o que fez, os arquivos que alterou (se houver) e o resultado.",
+    REGRA_DOS_SERVIDORES,
     `${regraDeCommitEPush} Responda em português.`,
     ...(especialidade === null ? [] : linhasDaEspecialidade(especialidade)),
   ].join("\n");

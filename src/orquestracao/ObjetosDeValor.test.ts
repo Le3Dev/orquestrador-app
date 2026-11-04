@@ -10,6 +10,7 @@ import {
   MARCADOR_DE_PLANO,
   mensagemDeAprovacaoDoPlano,
   mensagemParaOOrquestrador,
+  REGRA_DOS_SERVIDORES,
   separarPropostaDePlano,
 } from "./InstrucoesDoOrquestrador";
 import { ModoDoTurno } from "./ModoDoTurno";
@@ -285,6 +286,22 @@ describe("mensagemParaOOrquestrador", () => {
 
     expect(texto).toContain('- Subagentes: quando delegar, use exatamente 4 subagentes "executor"');
     expect(texto).not.toContain("Se o pedido for pequeno, divida-o");
+  });
+
+  it("só com comandos liberados explica como subir servidor sem prender o pedido", () => {
+    const quantidadeDeSubagentes = { modo: "fixa", limite: 1 } as const;
+    const comComandos = ConfiguracaoDoOrquestrador.de({
+      ...base,
+      quantidadeDeSubagentes,
+      nivelDePermissao: "edicao_e_comandos",
+    });
+    const soLeitura = ConfiguracaoDoOrquestrador.de({ ...base, quantidadeDeSubagentes });
+
+    expect(mensagemParaOOrquestrador("suba o site", comComandos)).toContain(`- ${REGRA_DOS_SERVIDORES}`);
+    expect(mensagemParaOOrquestrador("suba o site", comComandos, [], "planejamento")).not.toContain(
+      REGRA_DOS_SERVIDORES,
+    );
+    expect(mensagemParaOOrquestrador("suba o site", soLeitura)).not.toContain(REGRA_DOS_SERVIDORES);
   });
 
   it("no modo automático informa o máximo", () => {

@@ -8,6 +8,7 @@ import {
   organizarComNotas,
   organizarEmGrade,
   type Ponto,
+  posicaoAoLado,
   posicaoParaNovoTerminal,
   posicoesDosBixinhos,
   posicoesLivresDosBixinhos,
@@ -15,16 +16,20 @@ import {
   salvarBixinhosLimpos,
   salvarLayout,
   sobrepoe,
+  TAMANHO_DA_PREVIA,
   TAMANHO_DO_BIXINHO,
 } from "./layout";
 import {
   ehNota,
+  ehPrevia,
   idDoNoDaNota,
+  idDoNoDaPrevia,
   layoutDosNos,
   minimizarOuRestaurar,
   type NoNota,
   nosDoLayout,
   novaNota,
+  novaPrevia,
   novoTerminal,
   sincronizarNotas,
 } from "./nos";
@@ -183,6 +188,7 @@ describe("interpretarLayout", () => {
     expect(interpretarLayout(texto)).toEqual({
       terminais: { o1: { x: 10, y: 20, largura: 600, altura: 500 } },
       notas: {},
+      previas: {},
       viewport: { x: 1, y: 2, zoom: 0.8 },
     });
   });
@@ -190,7 +196,7 @@ describe("interpretarLayout", () => {
   it.each([null, "", "não é json", "[]", JSON.stringify({ terminais: 5, viewport: { zoom: 0 } })])(
     "não quebra com conteúdo inválido: %s",
     (texto) => {
-      expect(interpretarLayout(texto)).toEqual({ terminais: {}, notas: {}, viewport: null });
+      expect(interpretarLayout(texto)).toEqual({ terminais: {}, notas: {}, previas: {}, viewport: null });
     },
   );
 
@@ -239,6 +245,7 @@ describe("notas no layout", () => {
     expect(interpretarLayout(antigo)).toEqual({
       terminais: { o1: { x: 10, y: 20, largura: 600, altura: 500 } },
       notas: {},
+      previas: {},
       viewport: { x: 1, y: 2, zoom: 0.8 },
     });
   });
@@ -259,6 +266,84 @@ describe("notas no layout", () => {
     salvarLayout(layoutDosNos(nos, null));
 
     expect(Object.keys(lerLayout().notas)).toEqual(["n1"]);
+  });
+});
+
+describe("prévias no layout", () => {
+  afterEach(() => localStorage.clear());
+
+  it("grava e lê de volta posição, tamanho, minimizada, endereço e orquestrador", () => {
+    const daBarra = novaPrevia("p1", { x: 10.4, y: 20.6 }, { url: "", orquestradorId: null }, 700, 500);
+    const doTerminal = minimizarOuRestaurar(
+      novaPrevia("p2", { x: 800, y: 0 }, { url: "http://localhost:5173", orquestradorId: "o1" }),
+    );
+
+    salvarLayout(layoutDosNos([novoTerminal("o1", { x: 0, y: 0 }, 600, 500), daBarra, doTerminal], null));
+    const lido = lerLayout();
+
+    expect(lido.previas).toEqual({
+      p1: { x: 10, y: 21, largura: 700, altura: 500, minimizada: false, url: "", orquestradorId: null },
+      p2: {
+        x: 800,
+        y: 0,
+        largura: TAMANHO_DA_PREVIA.largura,
+        altura: TAMANHO_DA_PREVIA.altura,
+        minimizada: true,
+        url: "http://localhost:5173",
+        orquestradorId: "o1",
+      },
+    });
+
+    // De volta ao canvas: o endereço vai no data do nó, e a minimizada tem só a barra.
+    const p2 = nosDoLayout(lido).filter(ehPrevia).find((no) => no.id === idDoNoDaPrevia("p2"));
+    expect(p2?.data).toMatchObject({ previaId: "p2", url: "http://localhost:5173", orquestradorId: "o1", minimizada: true });
+    expect(p2?.height).toBe(ALTURA_DA_NOTA_MINIMIZADA);
+    expect(p2 === undefined ? null : minimizarOuRestaurar(p2).height).toBe(TAMANHO_DA_PREVIA.altura);
+  });
+
+  it("um layout antigo, sem prévias, vale como sem prévias", () => {
+    const antigo = JSON.stringify({ terminais: {}, notas: { n1: { x: 0, y: 0, largura: 300, altura: 200 } } });
+
+    expect(interpretarLayout(antigo).previas).toEqual({});
+  });
+
+  it("descarta só as prévias corrompidas e limpa endereço e orquestrador inválidos", () => {
+    const texto = JSON.stringify({
+      previas: {
+        boa: { x: 0, y: 0, largura: 720, altura: 520, url: "javascript:alert(1)", orquestradorId: 5 },
+        ruim: { x: 0, y: "a", largura: 720, altura: 520 },
+      },
+    });
+
+    expect(interpretarLayout(texto).previas).toEqual({
+      boa: { x: 0, y: 0, largura: 720, altura: 520, minimizada: false, url: "", orquestradorId: null },
+    });
+  });
+});
+
+describe("posicaoAoLado", () => {
+  const terminal: Retangulo = { x: 0, y: 0, largura: 600, altura: 500 };
+  const tamanho = { largura: 720, altura: 520 };
+
+  it("abre à direita do terminal, com o topo alinhado", () => {
+    const posicao = posicaoAoLado(terminal, tamanho, []);
+
+    expect(posicao.y).toBe(0);
+    expect(posicao.x).toBeGreaterThan(600);
+  });
+
+  it("com algo à direita, vai para a esquerda sem sobrepor", () => {
+    const aDireita: Retangulo = { x: 650, y: 0, largura: 600, altura: 500 };
+    const posicao = posicaoAoLado(terminal, tamanho, [aDireita]);
+
+    expect(posicao.x + tamanho.largura).toBeLessThanOrEqual(0);
+    expect(sobrepoe({ ...posicao, ...tamanho }, aDireita)).toBe(false);
+  });
+
+  it("sem lugar livre, fica à direita mesmo", () => {
+    const tudo: Retangulo = { x: -5000, y: -5000, largura: 10_000, altura: 10_000 };
+
+    expect(posicaoAoLado(terminal, tamanho, [tudo])).toEqual(posicaoAoLado(terminal, tamanho, []));
   });
 });
 

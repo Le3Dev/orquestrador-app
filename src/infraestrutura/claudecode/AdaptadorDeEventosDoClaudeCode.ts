@@ -1,3 +1,4 @@
+import { extrairEnderecosLocais } from "../../orquestracao/EnderecoLocal";
 import {
   EventoDoMotor,
   JanelaDaCota,
@@ -40,6 +41,29 @@ function objetos(origem: Objeto, campo: string): Objeto[] {
  * `ferramenta_do_orquestrador`.
  */
 const FERRAMENTAS_DE_SUBAGENTE = new Set(["Agent", "Task"]);
+
+/**
+ * Ferramentas que leem ou escrevem arquivos e páginas: um endereço local no
+ * retorno delas é só texto citado (um README, um vite.config), não um
+ * servidor que acabou de subir. Não anunciam endereço.
+ */
+const FERRAMENTAS_SEM_SERVIDOR = new Set([
+  "Read",
+  "Grep",
+  "Glob",
+  "Edit",
+  "MultiEdit",
+  "Write",
+  "NotebookEdit",
+  "WebFetch",
+  "WebSearch",
+]);
+
+/**
+ * Arquivo onde o Claude Code guarda a saída de um comando em segundo plano
+ * (`.../tasks/<id>.output`). Ler este arquivo é ler a saída do comando.
+ */
+const SAIDA_DE_COMANDO = /[\\/]tasks[\\/][^\\/]+\.output$/;
 
 /** Bloco que o Claude Code acrescenta ao resultado de um subagente; não é texto do subagente. */
 const MARCA_DO_CLAUDE_CODE = "<tools-used-before-summary>";
@@ -111,6 +135,9 @@ export class AdaptadorDeEventosDoClaudeCode {
   private resultadoDoTurno: ResultadoDoTurno | null = null;
   private usoAcumulado: UsoDoTurno | null = null;
   private sessaoAnunciada = false;
+  private readonly enderecosAnunciados = new Set<string>();
+  /** Nome da ferramenta de cada chamada (`tool_use_id`), do Orquestrador e dos Subagentes. */
+  private readonly ferramentaPorChamada = new Map<string, string>();
 
   /** Preenchido quando chega a mensagem final (`result`); nulo se o processo parou antes. */
   get resultado(): ResultadoDoTurno | null {
@@ -199,6 +226,14 @@ export class AdaptadorDeEventosDoClaudeCode {
   private traduzirAssistente(mensagem: Objeto): EventoDoMotor[] {
     const blocos = objetos(objeto(mensagem, "message"), "content");
     const chamadaDeOrigem = mensagem["parent_tool_use_id"];
+    for (const bloco of blocos) {
+      if (texto(bloco, "type") === "tool_use") {
+        const nome = texto(bloco, "name");
+        const lendoSaida = nome === "Read" && SAIDA_DE_COMANDO.test(texto(objeto(bloco, "input"), "file_path"));
+        // A leitura da saída de um comando conta como o próprio comando.
+        this.ferramentaPorChamada.set(texto(bloco, "id"), lendoSaida ? "Bash" : nome);
+      }
+    }
 
     if (typeof chamadaDeOrigem === "string") {
       const subagenteId =
@@ -231,14 +266,15 @@ export class AdaptadorDeEventosDoClaudeCode {
    * Só quando a chamada terminou (`completed`): um Subagente lançado em
    * segundo plano devolve na hora um retorno vazio, e o relatório dele chega
    * depois, no resumo do `task_notification`.
+   *
+   * O retorno de qualquer ferramenta também pode citar um endereço local.
    */
   private traduzirRetorno(mensagem: Objeto): EventoDoMotor[] {
+    const eventos = this.detectarEnderecosLocais(mensagem);
     const estruturado = objeto(mensagem, "tool_use_result");
     if (mensagem["parent_tool_use_id"] !== null || texto(estruturado, "status") !== "completed") {
-      return [];
+      return eventos;
     }
-
-    const eventos: EventoDoMotor[] = [];
 
     for (const bloco of objetos(objeto(mensagem, "message"), "content")) {
       if (texto(bloco, "type") !== "tool_result") {
@@ -255,6 +291,42 @@ export class AdaptadorDeEventosDoClaudeCode {
         .trim();
       if (resultado !== "") {
         eventos.push({ tipo: "resultado_do_subagente", subagenteId, resultado });
+      }
+    }
+    return eventos;
+  }
+
+  /**
+   * Procura endereços locais no retorno das ferramentas do Orquestrador e
+   * dos Subagentes (ex.: o `npm run dev` que subiu um servidor), menos as de
+   * ler e escrever arquivos. Cada endereço é anunciado uma vez por turno.
+   */
+  private detectarEnderecosLocais(mensagem: Objeto): EventoDoMotor[] {
+    const textos: string[] = [];
+    for (const bloco of objetos(objeto(mensagem, "message"), "content")) {
+      if (texto(bloco, "type") !== "tool_result") {
+        continue;
+      }
+      const ferramenta = this.ferramentaPorChamada.get(texto(bloco, "tool_use_id"));
+      if (ferramenta !== undefined && FERRAMENTAS_SEM_SERVIDOR.has(ferramenta)) {
+        continue;
+      }
+      const conteudo = bloco["content"];
+      if (typeof conteudo === "string") {
+        textos.push(conteudo);
+      } else {
+        textos.push(...objetos(bloco, "content").map((parte) => texto(parte, "text")));
+      }
+    }
+    // stdout e stderr estruturados só existem no retorno de comandos (Bash).
+    const estruturado = objeto(mensagem, "tool_use_result");
+    textos.push(texto(estruturado, "stdout"), texto(estruturado, "stderr"));
+
+    const eventos: EventoDoMotor[] = [];
+    for (const url of extrairEnderecosLocais(textos.join("\n"))) {
+      if (!this.enderecosAnunciados.has(url)) {
+        this.enderecosAnunciados.add(url);
+        eventos.push({ tipo: "endereco_local_detectado", url });
       }
     }
     return eventos;

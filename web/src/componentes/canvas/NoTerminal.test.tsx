@@ -85,6 +85,10 @@ function renderizar(resumo: ResumoDoOrquestrador) {
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),
       recarregar: vi.fn(async () => undefined),
+      abrirPrevia: vi.fn(),
+      navegarPrevia: vi.fn(),
+      minimizarOuRestaurarPrevia: vi.fn(),
+      fecharPrevia: vi.fn(),
     },
   };
   render(
@@ -259,6 +263,10 @@ function canvasDoTerminal(conversa: EstadoDaConversa): ValorDoCanvas {
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),
       recarregar: vi.fn(async () => undefined),
+      abrirPrevia: vi.fn(),
+      navegarPrevia: vi.fn(),
+      minimizarOuRestaurarPrevia: vi.fn(),
+      fecharPrevia: vi.fn(),
     },
   };
 }
@@ -499,5 +507,28 @@ describe("NoTerminal · conversa nova", () => {
 
     expect(await screen.findByText("Orquestrador não encontrado.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Nova conversa" })).toBeInTheDocument();
+  });
+});
+
+describe("NoTerminal · servidor no ar", () => {
+  it("com servidores detectados, a faixa acima do prompt abre a prévia ligada a este terminal", () => {
+    const conversa: EstadoDaConversa = {
+      ...ESTADO_INICIAL,
+      enderecosLocais: ["http://localhost:3001", "http://localhost:5173"],
+    };
+    const canvas = canvasDoTerminal(conversa);
+    render(<Terminal canvas={canvas} no={propsDoNo()} />);
+
+    expect(screen.getByText("servidor no ar")).toBeInTheDocument();
+    expect(screen.getByText("localhost:5173")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Abrir prévia de http://localhost:5173" }));
+
+    expect(canvas.acoes.abrirPrevia).toHaveBeenCalledWith("o1", "http://localhost:5173");
+  });
+
+  it("sem servidores, não há faixa", () => {
+    render(<Terminal canvas={canvasDoTerminal(ESTADO_INICIAL)} no={propsDoNo()} />);
+
+    expect(screen.queryByText("servidor no ar")).not.toBeInTheDocument();
   });
 });

@@ -15,6 +15,7 @@ import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
 import { IconeEngrenagem, IconeFechar, IconeOrquestrador, IconePasta } from "../Icones";
 import { BotaoDeLimparBixinhos } from "./BotaoDeLimparBixinhos";
 import type { AcoesDoPlano } from "./CartaoDoPlano";
+import { FaixaDeServidores } from "./FaixaDeServidores";
 import { PromptDoTerminal } from "./PromptDoTerminal";
 import { TranscricaoDoTerminal } from "./TranscricaoDoTerminal";
 
@@ -403,6 +404,10 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
     campoDoPrompt.current?.focus();
   }, []);
 
+  /** "abrir prévia" na faixa dos servidores: a prévia nasce ligada a este terminal. */
+  const { abrirPrevia } = acoes;
+  const aoAbrirPrevia = useCallback((url: string) => abrirPrevia(orquestradorId, url), [abrirPrevia, orquestradorId]);
+
   const acoesDoPlano = useMemo<AcoesDoPlano>(
     () => ({ aoAprovar: aprovarPlano, aoAjustar: ajustarPlano, aoDescartar: descartarPlano }),
     [aprovarPlano, ajustarPlano, descartarPlano],
@@ -523,6 +528,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
         {erro !== null && <p className="mono texto-longo mt-3 text-error">✗ {erro}</p>}
       </div>
 
+      <FaixaDeServidores enderecos={conversa.enderecosLocais} aoAbrir={aoAbrirPrevia} />
       <PromptDoTerminal
         desconectado={!servidor.conectado}
         trabalhando={trabalhando}

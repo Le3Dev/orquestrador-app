@@ -25,6 +25,17 @@ export interface AcoesDoCanvas {
   orquestradorCriado: (rascunhoId: string, orquestrador: ResumoDoOrquestrador) => void;
   descartarRascunho: (rascunhoId: string) => void;
   recarregar: () => Promise<void>;
+  /**
+   * Abre a prévia ao vivo de um servidor que o Orquestrador subiu: se ela já
+   * existe (mesmo terminal, mesmo endereço), restaura e centraliza a vista
+   * nela; senão, cria ao lado do terminal.
+   */
+  abrirPrevia: (orquestradorId: string, url: string) => void;
+  /** Leva a prévia a outro endereço (já validado). */
+  navegarPrevia: (previaId: string, url: string) => void;
+  minimizarOuRestaurarPrevia: (previaId: string) => void;
+  /** Tira a prévia do canvas e, com isso, do layout. */
+  fecharPrevia: (previaId: string) => void;
 }
 
 /**

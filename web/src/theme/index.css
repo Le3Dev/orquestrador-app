@@ -469,13 +469,15 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .react-flow__minimap-node.minimapa-terminal { fill: var(--surface-3); stroke: var(--border-forte); }
 .react-flow__minimap-node.minimapa-bixinho { fill: var(--active); }
 .react-flow__minimap-node.minimapa-nota { fill: color-mix(in srgb, var(--warning) 60%, var(--surface)); }
+.react-flow__minimap-node.minimapa-previa { fill: color-mix(in srgb, var(--info) 55%, var(--surface)); }
 .react-flow__controls { border-radius: var(--radius-input); overflow: hidden; border: 1px solid var(--border); }
 
 /* Nós sem a moldura padrão do React Flow: cada tipo desenha a própria. */
 .react-flow__node-terminal,
 .react-flow__node-rascunho,
 .react-flow__node-bixinho,
-.react-flow__node-nota { background: transparent; border: 0; padding: 0; }
+.react-flow__node-nota,
+.react-flow__node-previa { background: transparent; border: 0; padding: 0; }
 
 /* Âncoras das linhas: existem para o React Flow, não para o usuário. */
 .ancora { opacity: 0; pointer-events: none; width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; }
@@ -893,6 +895,123 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   overflow-wrap: anywhere;
 }
 
+/* ---------------- Prévia ao vivo (navegador no canvas) ----------------
+ * A moldura da nota, no azul de informação, com o site num iframe. O fundo
+ * é opaco: enquanto o site carrega, nada do canvas aparece por trás. */
+
+.janela-previa {
+  --cor-da-previa: var(--info);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  /* Sem `overflow: hidden` aqui: o balão da dica sai da barra. Quem corta os cantos é o corpo. */
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--cor-da-previa) 35%, var(--border-forte));
+  box-shadow: 0 18px 44px -22px rgba(0, 0, 0, .85);
+  transition: border-color .2s;
+}
+.react-flow__node.selected .janela-previa { border-color: color-mix(in srgb, var(--cor-da-previa) 80%, transparent); }
+
+/* A barra tem 38px, como a da nota: minimizada, a prévia é só ela e a borda (ALTURA_DA_PREVIA_MINIMIZADA). */
+.barra-da-previa {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  height: 38px;
+  padding: 0 6px 0 12px;
+  border-radius: 11px 11px 0 0;
+  background: color-mix(in srgb, var(--cor-da-previa) 12%, var(--surface-2));
+  border-bottom: 1px solid color-mix(in srgb, var(--cor-da-previa) 22%, var(--border));
+  cursor: grab;
+}
+.barra-da-previa:active { cursor: grabbing; }
+.janela-previa-minimizada .barra-da-previa { border-bottom: 0; border-radius: 11px; }
+.barra-da-previa > svg { margin-right: 4px; }
+.barra-da-previa .botao-icone { width: 28px; height: 28px; }
+/* Perto da borda direita: o balão abre para a esquerda. */
+.barra-da-previa .dica { margin: 0 4px; }
+.barra-da-previa .dica-balao { left: auto; right: -10px; }
+
+.campo-do-endereco {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--primary);
+  font-family: var(--fonte-mono);
+  font-size: 11.5px;
+  outline: none;
+  cursor: text;
+}
+.campo-do-endereco:focus { border-color: var(--cor-da-previa); }
+.campo-do-endereco::placeholder { color: var(--placeholder); }
+.campo-do-endereco-invalido, .campo-do-endereco-invalido:focus { border-color: var(--error); }
+
+.corpo-da-previa {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 0 0 11px 11px;
+  background: var(--surface);
+}
+.corpo-da-previa[hidden] { display: none; }
+
+.quadro-da-previa {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  /* Sites sem fundo próprio assumem o branco do navegador, como numa aba. */
+  background: white;
+}
+/* Um iframe captura o mouse: enquanto algo é arrastado, redimensionado ou o
+ * canvas se move, os sites ficam sem eventos para o gesto não se perder. */
+.canvas-movendo .quadro-da-previa,
+.canvas-redimensionando .quadro-da-previa { pointer-events: none; }
+
+.mensagem-da-previa {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 24px;
+  text-align: center;
+  font-family: var(--fonte-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+/* Linha do terminal até a prévia que saiu dele: discreta, tracejada. */
+.react-flow__edge.aresta-previa .react-flow__edge-path {
+  stroke: color-mix(in srgb, var(--info) 45%, transparent);
+  stroke-dasharray: 5 6;
+}
+
+/* Faixa "servidor no ar" logo acima do prompt do terminal. */
+.faixa-de-servidores {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  flex-shrink: 0;
+  padding: 3px 14px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--info) 6%, var(--surface));
+  font-family: var(--fonte-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.faixa-de-servidores .ponto-de-status { width: 6px; height: 6px; background: var(--success); }
+.faixa-de-servidores-item { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.faixa-de-servidores .botao-de-texto { color: var(--info); font-size: inherit; }
+
 /* ---------------- Bixinhos (Subagentes) ---------------- */
 
 .no-bixinho {
@@ -1190,6 +1309,11 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 /* macOS: as 3 bolinhas nativas da janela ficam dentro da barra do canvas, à
  * esquerda (posição em electron/mac.js); a barra abre espaço para elas. */
 .barra-com-semaforo { padding-left: 84px; }
+/* Em janelas mais estreitas a barra encostaria no painel de status, à
+   direita: o nome do app sai e fica só o ícone. */
+@media (max-width: 1599px) {
+  .titulo-da-barra { display: none; }
+}
 
 /* ---------------- Dica (ⓘ ao lado do nome de um campo) ---------------- */
 .dica { position: relative; display: inline-flex; flex: none; }

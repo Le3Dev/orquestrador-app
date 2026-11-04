@@ -244,6 +244,9 @@ type EventoDeTurno =
     }
   | { tipo: "resultado_do_subagente"; subagenteId: string; resultado: string }
   | { tipo: "permissao_negada"; ferramenta: string; detalhe: string }
+  // Um servidor de desenvolvimento subiu (ex.: "npm run dev"). Uma vez por endereço por turno; `url` já
+  // normalizada: "http(s)://localhost:PORTA" e o caminho, sem a barra final solitária.
+  | { tipo: "endereco_local_detectado"; url: string }
   | { tipo: "uso_da_cota"; janelas: JanelaDaCota[] }
   // `anexos` e `modo` faltam nos eventos gravados antes de existirem imagens e o Plan Mode.
   | {

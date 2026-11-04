@@ -36,6 +36,10 @@ function abrir(orquestradores: ResumoDoOrquestrador[] = [], conectado = true) {
     orquestradorCriado: vi.fn(),
     descartarRascunho: vi.fn(),
     recarregar: vi.fn(async () => undefined),
+    abrirPrevia: vi.fn(),
+    navegarPrevia: vi.fn(),
+    minimizarOuRestaurarPrevia: vi.fn(),
+    fecharPrevia: vi.fn(),
   };
   const valor: ValorDoCanvas = {
     orquestradores: new Map(orquestradores.map((o) => [o.id, o])),

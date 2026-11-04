@@ -29,11 +29,23 @@ export interface RetanguloDaNota extends RetanguloDoTerminal {
   minimizada: boolean;
 }
 
+/**
+ * Uma prévia ao vivo (um navegador dentro do canvas): onde fica, o endereço
+ * aberto (vazio enquanto o usuário não digita um) e o Orquestrador de cujo
+ * terminal ela saiu (nulo quando foi aberta pela barra do canvas).
+ */
+export interface RetanguloDaPrevia extends RetanguloDaNota {
+  url: string;
+  orquestradorId: string | null;
+}
+
 export interface LayoutDoCanvas {
   /** Terminais abertos no canvas, por id do Orquestrador. */
   terminais: Record<string, RetanguloDoTerminal>;
   /** Notas no canvas, por id da Nota. Layouts gravados antes das notas não têm o campo: valem como sem notas. */
   notas: Record<string, RetanguloDaNota>;
+  /** Prévias no canvas, pelo id criado na tela. Layouts gravados antes delas não têm o campo: valem como sem prévias. */
+  previas: Record<string, RetanguloDaPrevia>;
   viewport: Viewport | null;
 }
 
@@ -57,6 +69,10 @@ export const TAMANHO_DA_NOTA = { largura: 320, altura: 280 } as const;
 export const TAMANHO_MINIMO_DA_NOTA = { largura: 220, altura: 140 } as const;
 /** Altura da nota minimizada: só a barra de título (38px) e a borda. */
 export const ALTURA_DA_NOTA_MINIMIZADA = 40;
+export const TAMANHO_DA_PREVIA = { largura: 720, altura: 520 } as const;
+export const TAMANHO_MINIMO_DA_PREVIA = { largura: 360, altura: 240 } as const;
+/** A prévia minimizada também fica só com a barra de título, da mesma altura da nota. */
+export const ALTURA_DA_PREVIA_MINIMIZADA = ALTURA_DA_NOTA_MINIMIZADA;
 
 const ESPACO_ENTRE_BIXINHOS = 18;
 const BIXINHOS_POR_FILEIRA = 5;
@@ -65,6 +81,8 @@ const DISTANCIA_DO_TERMINAL = 80;
 const DESLOCAMENTO_EM_CASCATA = 36;
 const ESPACO_ENTRE_TERMINAIS = 120;
 const ESPACO_ENTRE_NOTAS = 24;
+/** Distância entre o terminal e a prévia que abre ao lado dele. */
+const ESPACO_ATE_A_PREVIA = 60;
 const NOTAS_POR_COLUNA = 4;
 /** Folga mínima entre o grupo de bixinhos e as outras janelas (e bixinhos) do canvas. */
 export const MARGEM_DOS_BIXINHOS = 24;
@@ -109,9 +127,41 @@ function interpretarNotas(notas: unknown): Record<string, RetanguloDaNota> {
   return validas;
 }
 
+/**
+ * As prévias válidas do layout salvo, validadas como as notas. Um endereço
+ * que não é http(s) vira vazio (a prévia abre pedindo outro); sem
+ * Orquestrador, a prévia fica solta.
+ */
+function interpretarPrevias(previas: unknown): Record<string, RetanguloDaPrevia> {
+  const validas: Record<string, RetanguloDaPrevia> = {};
+  if (typeof previas !== "object" || previas === null) {
+    return validas;
+  }
+  for (const [id, retangulo] of Object.entries(previas)) {
+    if (ehRetangulo(retangulo)) {
+      const { x, y, largura, altura } = retangulo;
+      const { minimizada, url, orquestradorId } = retangulo as { minimizada?: unknown; url?: unknown; orquestradorId?: unknown };
+      validas[id] = {
+        x,
+        y,
+        largura,
+        altura,
+        minimizada: minimizada === true,
+        url: typeof url === "string" && /^https?:\/\//i.test(url) ? url : "",
+        orquestradorId: typeof orquestradorId === "string" ? orquestradorId : null,
+      };
+    }
+  }
+  return validas;
+}
+
+function layoutVazio(): LayoutDoCanvas {
+  return { terminais: {}, notas: {}, previas: {}, viewport: null };
+}
+
 /** Lê o layout salvo, descartando o que estiver corrompido em vez de quebrar a tela. */
 export function interpretarLayout(texto: string | null): LayoutDoCanvas {
-  const vazio: LayoutDoCanvas = { terminais: {}, notas: {}, viewport: null };
+  const vazio = layoutVazio();
   if (texto === null) {
     return vazio;
   }
@@ -120,7 +170,7 @@ export function interpretarLayout(texto: string | null): LayoutDoCanvas {
     if (typeof salvo !== "object" || salvo === null) {
       return vazio;
     }
-    const { terminais, notas, viewport } = salvo as Record<string, unknown>;
+    const { terminais, notas, previas, viewport } = salvo as Record<string, unknown>;
     const validos: Record<string, RetanguloDoTerminal> = {};
     if (typeof terminais === "object" && terminais !== null) {
       for (const [id, retangulo] of Object.entries(terminais)) {
@@ -129,7 +179,12 @@ export function interpretarLayout(texto: string | null): LayoutDoCanvas {
         }
       }
     }
-    return { terminais: validos, notas: interpretarNotas(notas), viewport: ehViewport(viewport) ? viewport : null };
+    return {
+      terminais: validos,
+      notas: interpretarNotas(notas),
+      previas: interpretarPrevias(previas),
+      viewport: ehViewport(viewport) ? viewport : null,
+    };
   } catch {
     return vazio;
   }
@@ -139,7 +194,7 @@ export function lerLayout(): LayoutDoCanvas {
   try {
     return interpretarLayout(localStorage.getItem(CHAVE));
   } catch {
-    return { terminais: {}, notas: {}, viewport: null };
+    return layoutVazio();
   }
 }
 
@@ -317,6 +372,29 @@ export function posicaoParaNovoTerminal(
     posicao = { x: posicao.x + DESLOCAMENTO_EM_CASCATA, y: posicao.y + DESLOCAMENTO_EM_CASCATA };
   }
   return posicao;
+}
+
+/**
+ * Onde abrir a prévia de um terminal: à direita dele, com o topo alinhado; se
+ * algo estiver no caminho, à esquerda, abaixo ou acima; e, sem nenhum lugar
+ * livre, à direita mesmo. `terminal` e `obstaculos` em coordenadas absolutas.
+ */
+export function posicaoAoLado(
+  terminal: Retangulo,
+  tamanho: { largura: number; altura: number },
+  obstaculos: readonly Retangulo[],
+): Ponto {
+  const candidatos: Ponto[] = [
+    { x: terminal.x + terminal.largura + ESPACO_ATE_A_PREVIA, y: terminal.y },
+    { x: terminal.x - ESPACO_ATE_A_PREVIA - tamanho.largura, y: terminal.y },
+    { x: terminal.x, y: terminal.y + terminal.altura + ESPACO_ATE_A_PREVIA },
+    { x: terminal.x, y: terminal.y - ESPACO_ATE_A_PREVIA - tamanho.altura },
+  ];
+  const livre = candidatos.find(
+    (candidato) => !obstaculos.some((obstaculo) => sobrepoe({ ...candidato, ...tamanho }, obstaculo)),
+  );
+  const { x, y } = livre ?? candidatos[0] ?? terminal;
+  return { x: Math.round(x), y: Math.round(y) };
 }
 
 /** Uma janela do canvas (terminal, rascunho ou nota) a organizar. */

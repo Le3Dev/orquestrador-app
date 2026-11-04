@@ -181,3 +181,51 @@ export function IconeSetaAcima({ tamanho = 16, className = "" }: PropsDoIcone) {
     </Quadro>
   );
 }
+
+/** Traço para baixo: minimizar a janela à barra de título (nota, prévia). */
+export function IconeMinimizar({ tamanho = 12, className = "" }: PropsDoIcone) {
+  return (
+    <svg width={tamanho} height={tamanho} viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <path d="M5 17h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Quadrado: restaurar a janela minimizada. */
+export function IconeRestaurar({ tamanho = 12, className = "" }: PropsDoIcone) {
+  return (
+    <svg width={tamanho} height={tamanho} viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <rect x="5" y="5" width="14" height="14" rx="2" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+
+/** Globo: a prévia ao vivo, um navegador dentro do canvas. */
+export function IconeNavegador({ tamanho = 14, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <circle cx="12" cy="12" r="8.5" {...TRACO} />
+      <path d="M3.5 12h17M12 3.5c2.3 2.4 3.5 5.2 3.5 8.5s-1.2 6.1-3.5 8.5c-2.3-2.4-3.5-5.2-3.5-8.5s1.2-6.1 3.5-8.5Z" {...TRACO} />
+    </Quadro>
+  );
+}
+
+/** Seta circular: recarregar a página. */
+export function IconeRecarregar({ tamanho = 14, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" {...TRACO} />
+      <path d="M19.5 4.5v4h-4" {...TRACO} />
+    </Quadro>
+  );
+}
+
+/** Caixa com seta saindo: abrir fora, no navegador do sistema. */
+export function IconeAbrirFora({ tamanho = 14, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path d="M13.5 4.5h6v6M19.5 4.5l-8 8" {...TRACO} />
+      <path d="M17.5 14v4a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V8A1.5 1.5 0 0 1 6 6.5h4" {...TRACO} />
+    </Quadro>
+  );
+}

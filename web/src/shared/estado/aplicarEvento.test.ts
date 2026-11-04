@@ -474,4 +474,92 @@ describe("aplicarEvento", () => {
       expect(turno).toMatchObject({ situacao: "cancelado", decisaoDoPlano: null });
     });
   });
+
+  describe("servidores de desenvolvimento", () => {
+    const usoDoTurno = { duracaoMs: 1000, tokensDeEntrada: 10, tokensDeSaida: 5, subagentesLancados: 0 };
+
+    it("guarda o endereço detectado pelo servidor e deixa uma linha no terminal", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "suba o site", configuracao },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173" },
+        ]),
+      );
+
+      expect(estado.enderecosLocais).toEqual(["http://localhost:5173"]);
+      expect(estado.turnos[0]?.log.at(-1)).toMatchObject({
+        origem: "orquestrador",
+        tipo: "sistema",
+        texto: "servidor no ar em http://localhost:5173",
+      });
+    });
+
+    it("só o evento do servidor conta: endereços citados no texto ou na resposta não viram servidor no ar", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "suba o site", configuracao },
+          { tipo: "texto_do_orquestrador", turnoId: "t1", texto: "Configure o CORS para http://localhost:8080." },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173" },
+          { tipo: "turno_concluido", turnoId: "t1", resposta: "O backend deve rodar em http://localhost:3000", uso: usoDoTurno },
+        ]),
+      );
+
+      expect(estado.enderecosLocais).toEqual(["http://localhost:5173"]);
+    });
+
+    it("guarda o endereço do evento como veio, sem repetir, o mais recente por último", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "suba o site", configuracao },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173/foo_" },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:3001" },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173/foo_" },
+        ]),
+      );
+
+      expect(estado.enderecosLocais).toEqual(["http://localhost:3001", "http://localhost:5173/foo_"]);
+    });
+
+    it("descarta o evento com um endereço que não é http(s) local", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "suba o site", configuracao },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "javascript:alert(document.cookie)" },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "https://example.com:443" },
+        ]),
+      );
+
+      expect(estado.enderecosLocais).toEqual([]);
+    });
+
+    it("eventos sem endereço não trocam a lista", () => {
+      const comEndereco = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "suba o site", configuracao },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173" },
+        ]),
+      );
+      const depois = aplicarEvento(comEndereco, {
+        tipo: "texto_do_orquestrador",
+        turnoId: "t1",
+        texto: "Tudo certo.",
+        sequencia: comEndereco.ultimaSequencia + 1,
+        em: "2026-10-28T12:01:00Z",
+      });
+
+      expect(depois.enderecosLocais).toBe(comEndereco.enderecosLocais);
+    });
+
+    it("a conversa nova esquece os endereços", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "suba o site", configuracao },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173" },
+          { tipo: "conversa_limpa", turnosAnteriores: 1, planoDescartado: false, worktreeComAlteracoes: false },
+        ]),
+      );
+
+      expect(estado.enderecosLocais).toEqual([]);
+    });
+  });
 });

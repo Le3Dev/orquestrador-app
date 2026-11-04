@@ -89,6 +89,8 @@ export type PainelDaBarra = "subagentes" | "instrucoes";
 interface PropsDaBarra {
   aoCriar: () => void;
   aoCriarNota: () => void;
+  /** Abre uma prévia ao vivo vazia no centro da tela, com o campo de endereço focado. */
+  aoCriarPrevia: () => void;
   aoOrganizar: () => void;
   podeOrganizar: boolean;
   /** Abre um dos painéis da barra (ou fecha, se já estava aberto). Só um fica aberto por vez. */
@@ -102,6 +104,7 @@ interface PropsDaBarra {
 export function BarraDoCanvas({
   aoCriar,
   aoCriarNota,
+  aoCriarPrevia,
   aoOrganizar,
   podeOrganizar,
   aoAlternarPainel,
@@ -116,12 +119,12 @@ export function BarraDoCanvas({
   const mac = rodandoNoDesktopDoMac();
   return (
     <div
-      className={`painel-flutuante flex items-center gap-3 px-3 py-2${desktop ? " barra-arrastavel" : ""}${mac ? " barra-com-semaforo" : ""}`}
+      className={`painel-flutuante flex items-center gap-2 px-3 py-2${desktop ? " barra-arrastavel" : ""}${mac ? " barra-com-semaforo" : ""}`}
     >
       <div className="no-orquestrador-icone h-8 w-8">
         <IconeOrquestrador tamanho={18} />
       </div>
-      <div className="flex flex-col leading-tight">
+      <div className="titulo-da-barra flex flex-col leading-tight">
         <h1 className="text-[14px]">Orquestrador de agentes</h1>
         <span className="mono text-muted">claude code · canvas · local</span>
       </div>
@@ -139,10 +142,18 @@ export function BarraDoCanvas({
       </button>
       <button
         type="button"
+        className="btn btn-sm btn-cta no-drag"
+        onClick={aoCriarPrevia}
+        title="Abre uma prévia ao vivo: um navegador no canvas para ver o site que os agentes estão fazendo"
+      >
+        + prévia
+      </button>
+      <button
+        type="button"
         className="btn btn-sm btn-outline no-drag"
         onClick={aoOrganizar}
         disabled={!podeOrganizar}
-        title="Coloca os terminais lado a lado, e as notas em colunas à direita deles"
+        title="Coloca os terminais lado a lado, e as notas e prévias em colunas à direita deles"
       >
         Organizar
       </button>

@@ -222,3 +222,59 @@ describe("CanvasDeOrquestradores · bixinhos", () => {
     }
   });
 });
+
+describe("CanvasDeOrquestradores · prévias", () => {
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoFalso);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    simulados.orquestradores.orquestradores = [];
+    simulados.conversas.conversas = new Map();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it("o botão Prévia abre uma prévia vazia com o endereço focado, e fechar a tira do layout", async () => {
+    render(<CanvasDeOrquestradores />);
+
+    fireEvent.click(screen.getByRole("button", { name: "+ prévia" }));
+
+    const campo = await screen.findByRole("textbox", { name: "Endereço da prévia" });
+    await waitFor(() => expect(campo).toHaveFocus());
+    await waitFor(() => expect(Object.values(lerLayout().previas)).toEqual([
+      expect.objectContaining({ url: "", orquestradorId: null, minimizada: false }),
+    ]));
+
+    fireEvent.change(campo, { target: { value: "localhost:5173" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+    await waitFor(() => expect(Object.values(lerLayout().previas)[0]?.url).toBe("http://localhost:5173"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Fechar a prévia" }));
+    await waitFor(() => expect(lerLayout().previas).toEqual({}));
+  });
+
+  it("\"abrir prévia\" no terminal cria a prévia à direita dele e, de novo, reaproveita a mesma", async () => {
+    localStorage.setItem(
+      "orquestrador-agentes:canvas:v1",
+      JSON.stringify({ terminais: { o1: { x: 0, y: 0, largura: 600, altura: 520 } }, viewport: { x: 0, y: 0, zoom: 1 } }),
+    );
+    simulados.orquestradores.orquestradores = [orquestrador("o1")];
+    simulados.conversas.conversas = new Map([["o1", { ...ESTADO_INICIAL, enderecosLocais: ["http://localhost:5173"] }]]);
+    render(<CanvasDeOrquestradores />);
+
+    const abrir = await screen.findByRole("button", { name: "Abrir prévia de http://localhost:5173" });
+    fireEvent.click(abrir);
+    await screen.findByRole("textbox", { name: "Endereço da prévia" });
+    fireEvent.click(abrir);
+
+    await waitFor(() => expect(Object.values(lerLayout().previas)).toHaveLength(1));
+    const [previa] = Object.values(lerLayout().previas);
+    expect(previa).toMatchObject({ url: "http://localhost:5173", orquestradorId: "o1", y: 0 });
+    expect(sobrepoe(previa ?? { x: 0, y: 0, largura: 0, altura: 0 }, { x: 0, y: 0, largura: 600, altura: 520 })).toBe(false);
+    expect(previa?.x).toBeGreaterThan(600);
+  });
+});

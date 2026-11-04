@@ -9,6 +9,7 @@ import type {
   SituacaoDoTurno,
   UsoDoTurno,
 } from "../api/tipos";
+import { juntarEnderecos, normalizarEndereco } from "../enderecosLocais";
 import { formatarDuracao, formatarTokens, idCurto } from "../formatacao";
 
 export interface SubagenteNaTela {
@@ -82,9 +83,21 @@ export interface EstadoDaConversa {
   cota: JanelaDaCota[] | null;
   /** Quando o usuário começou a conversa atual (/clear); nulo enquanto é a primeira. */
   conversaIniciadaEm: string | null;
+  /**
+   * Servidores de desenvolvimento que os agentes subiram nesta conversa
+   * (evento do servidor, texto do orquestrador e resposta final): sem
+   * repetição, o mais recente por último. O terminal oferece a prévia deles.
+   */
+  enderecosLocais: readonly string[];
 }
 
-export const ESTADO_INICIAL: EstadoDaConversa = { ultimaSequencia: 0, turnos: [], cota: null, conversaIniciadaEm: null };
+export const ESTADO_INICIAL: EstadoDaConversa = {
+  ultimaSequencia: 0,
+  turnos: [],
+  cota: null,
+  conversaIniciadaEm: null,
+  enderecosLocais: [],
+};
 
 type AlteracaoDeTurno = (turno: TurnoNaTela) => TurnoNaTela;
 
@@ -300,6 +313,8 @@ export function linhaDoLog(evento: EventoRegistrado, turno: TurnoNaTela): Omit<L
       };
     case "permissao_negada":
       return { origem: "orquestrador", tipo: "erro", texto: `bloqueado: ${evento.ferramenta} · ${evento.detalhe}` };
+    case "endereco_local_detectado":
+      return { origem: "orquestrador", tipo: "sistema", texto: `servidor no ar em ${evento.url}` };
     case "turno_concluido": {
       const uso = `${formatarDuracao(evento.uso.duracaoMs)} · ${formatarTokens(evento.uso.tokensDeEntrada + evento.uso.tokensDeSaida)} tokens`;
       // Pedido de execução em que o Orquestrador preferiu propor um plano antes de alterar.
@@ -323,6 +338,20 @@ export function linhaDoLog(evento: EventoRegistrado, turno: TurnoNaTela): Omit<L
     default:
       return null;
   }
+}
+
+/**
+ * O servidor de desenvolvimento que o evento anuncia. A fonte é só o evento
+ * `endereco_local_detectado`: um endereço citado no texto do orquestrador não
+ * quer dizer que haja um servidor no ar. Um endereço que não seja http(s)
+ * local (histórico editado, por exemplo) é descartado: ele iria para a prévia.
+ */
+function enderecosDoEvento(evento: EventoRegistrado): string[] {
+  if (evento.tipo !== "endereco_local_detectado") {
+    return [];
+  }
+  const url = normalizarEndereco(evento.url);
+  return url === null ? [] : [url];
 }
 
 function novoTurno(evento: Extract<EventoRegistrado, { tipo: "turno_iniciado" }>): TurnoNaTela {
@@ -380,8 +409,9 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
   }
   if (evento.tipo === "conversa_limpa") {
     // Conversa nova (/clear): os pedidos anteriores ficam arquivados no servidor
-    // e saem da tela. A cota fica: é da assinatura, não da conversa.
-    return { ...proximo, turnos: [], conversaIniciadaEm: evento.em };
+    // e saem da tela, e os servidores que eles subiram também. A cota fica: é da
+    // assinatura, não da conversa.
+    return { ...proximo, turnos: [], conversaIniciadaEm: evento.em, enderecosLocais: [] };
   }
   if (evento.tipo === "uso_da_cota") {
     return { ...proximo, cota: evento.janelas };
@@ -392,6 +422,7 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
 
   return {
     ...proximo,
+    enderecosLocais: juntarEnderecos(estado.enderecosLocais, enderecosDoEvento(evento)),
     turnos: turnos.map((turno) => {
       if (turno.id !== evento.turnoId) {
         return turno;

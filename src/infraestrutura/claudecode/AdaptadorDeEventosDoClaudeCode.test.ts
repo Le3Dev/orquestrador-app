@@ -187,6 +187,121 @@ describe("AdaptadorDeEventosDoClaudeCode — subagente em segundo plano", () => 
   });
 });
 
+describe("AdaptadorDeEventosDoClaudeCode: endereços locais", () => {
+  const VITE = "\n  VITE v6.0.0  ready in 300 ms\n\n  ➜  Local:   http://localhost:\x1b[1m5173\x1b[22m/\n";
+
+  it("anuncia o endereço que o Bash do orquestrador imprimiu, mesmo colorido", () => {
+    const eventos = new AdaptadorDeEventosDoClaudeCode().traduzir({
+      type: "user",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_result", tool_use_id: "chamada-1", content: VITE }] },
+      tool_use_result: { stdout: VITE, stderr: "", interrupted: false },
+    });
+
+    expect(eventos).toEqual([{ tipo: "endereco_local_detectado", url: "http://localhost:5173" }]);
+  });
+
+  it("anuncia o endereço achado por um subagente, com o retorno em blocos", () => {
+    const eventos = new AdaptadorDeEventosDoClaudeCode().traduzir({
+      type: "user",
+      parent_tool_use_id: "chamada-do-subagente",
+      agent_id: "t1",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "chamada-2",
+            content: [{ type: "text", text: "ready - started server on 0.0.0.0:3000, url: http://0.0.0.0:3000" }],
+          },
+        ],
+      },
+    });
+
+    expect(eventos).toEqual([{ tipo: "endereco_local_detectado", url: "http://localhost:3000" }]);
+  });
+
+  it("acha o endereço só na saída estruturada, quando o texto não o traz", () => {
+    const eventos = new AdaptadorDeEventosDoClaudeCode().traduzir({
+      type: "user",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_result", tool_use_id: "chamada-3", content: "" }] },
+      tool_use_result: { stdout: "", stderr: "Listening on http://127.0.0.1:8080" },
+    });
+
+    expect(eventos).toEqual([{ tipo: "endereco_local_detectado", url: "http://localhost:8080" }]);
+  });
+
+  it("não repete o mesmo endereço no turno", () => {
+    const adaptador = new AdaptadorDeEventosDoClaudeCode();
+    const retorno = (conteudo: string) => ({
+      type: "user",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_result", tool_use_id: "chamada", content: conteudo }] },
+    });
+
+    expect(adaptador.traduzir(retorno(VITE))).toHaveLength(1);
+    expect(adaptador.traduzir(retorno("de novo: http://127.0.0.1:5173/"))).toEqual([]);
+    expect(adaptador.traduzir(retorno("http://localhost:5173 e http://localhost:4173"))).toEqual([
+      { tipo: "endereco_local_detectado", url: "http://localhost:4173" },
+    ]);
+  });
+
+  it("ignora endereço citado num arquivo lido, mas vê o do comando", () => {
+    const adaptador = new AdaptadorDeEventosDoClaudeCode();
+    adaptador.traduzir({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: {
+        content: [
+          { type: "tool_use", id: "leitura", name: "Read", input: { file_path: "README.md" } },
+          { type: "tool_use", id: "comando", name: "Bash", input: { command: "npm run dev" } },
+        ],
+      },
+    });
+    const retorno = (chamada: string, conteudo: string) => ({
+      type: "user",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_result", tool_use_id: chamada, content: conteudo }] },
+    });
+
+    expect(adaptador.traduzir(retorno("leitura", "Abra http://localhost:3000 no navegador."))).toEqual([]);
+    expect(adaptador.traduzir(retorno("comando", VITE))).toEqual([
+      { tipo: "endereco_local_detectado", url: "http://localhost:5173" },
+    ]);
+  });
+
+  it("vê o endereço na leitura da saída de um comando em segundo plano", () => {
+    const adaptador = new AdaptadorDeEventosDoClaudeCode();
+    adaptador.traduzir({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "saida",
+            name: "Read",
+            input: { file_path: "/private/tmp/claude-501/projeto/sessao/tasks/b9ogs3hfd.output" },
+          },
+        ],
+      },
+    });
+
+    expect(
+      adaptador.traduzir({
+        type: "user",
+        parent_tool_use_id: null,
+        message: { content: [{ type: "tool_result", tool_use_id: "saida", content: VITE }] },
+      }),
+    ).toEqual([{ tipo: "endereco_local_detectado", url: "http://localhost:5173" }]);
+  });
+
+  it("não vê endereço nos turnos gravados, que não sobem servidor", () => {
+    expect(doTipo(traduzirFixture("turno1").eventos, "endereco_local_detectado")).toEqual([]);
+    expect(doTipo(traduzirFixture("turno2").eventos, "endereco_local_detectado")).toEqual([]);
+  });
+});
+
 describe("AdaptadorDeEventosDoClaudeCode — falhas", () => {
   it("transforma um resultado com erro em falha com o texto do Claude Code", () => {
     const adaptador = new AdaptadorDeEventosDoClaudeCode();

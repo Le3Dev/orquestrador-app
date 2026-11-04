@@ -53,6 +53,10 @@ function renderizar(estado: EstadoDaConversa, limpos?: BixinhosLimpos) {
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),
       recarregar: vi.fn(async () => undefined),
+      abrirPrevia: vi.fn(),
+      navegarPrevia: vi.fn(),
+      minimizarOuRestaurarPrevia: vi.fn(),
+      fecharPrevia: vi.fn(),
     },
   };
   render(
