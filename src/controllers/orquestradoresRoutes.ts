@@ -17,9 +17,10 @@ import {
   TAMANHO_MAXIMO_DO_NOME,
 } from "../orquestracao/Orquestrador";
 import { PastaDeTrabalho } from "../orquestracao/PastaDeTrabalho";
+import { PREDEFINICOES } from "../orquestracao/PredefinicaoDeConfiguracao";
 import { LIMITE_DE_SUBAGENTES } from "../orquestracao/QuantidadeDeSubagentes";
 import { RepositorioDeOrquestradores } from "../orquestracao/RepositorioDeOrquestradores";
-import { ServicoDeOrquestracao } from "../orquestracao/ServicoDeOrquestracao";
+import { EsforcoHerdadoDosPapeis, ServicoDeOrquestracao } from "../orquestracao/ServicoDeOrquestracao";
 
 interface Dependencias {
   servico: ServicoDeOrquestracao;
@@ -107,6 +108,16 @@ const esquemaDeAprovacaoDoPlano = z.object({
     .default(""),
 });
 
+const esquemaDaPredefinicao = z.object({
+  predefinicao: z.string({ error: "Predefinição desconhecida." }),
+});
+
+const esquemaDaConsultaDeEsforco = z.object({
+  modeloDoOrquestrador: z.enum(MODELOS_CLAUDE, { error: "Modelo do orquestrador inválido." }),
+  modeloDosSubagentes: z.enum(MODELOS_CLAUDE, { error: "Modelo dos subagentes inválido." }),
+  pasta: z.string({ error: "Escolha a pasta de trabalho." }).min(1, { error: "Escolha a pasta de trabalho." }),
+});
+
 const STATUS_POR_MOTIVO: Readonly<Record<MotivoDoErro, number>> = {
   dados_invalidos: 400,
   nao_encontrado: 404,
@@ -155,6 +166,7 @@ function apresentarResumo(orquestrador: Orquestrador) {
     nomeDaPasta: orquestrador.pastaDeTrabalho.nome,
     situacao: orquestrador.situacao,
     configuracao: orquestrador.configuracao.paraDados(),
+    predefinicaoCorrespondente: orquestrador.predefinicaoCorrespondente,
     worktree: orquestrador.worktree,
     criadoEm: orquestrador.criadoEm.toISOString(),
     totalDeTurnos: orquestrador.totalDeTurnos,
@@ -171,6 +183,13 @@ function apresentarResumo(orquestrador: Orquestrador) {
 
 function apresentarDetalhe(orquestrador: Orquestrador) {
   return { ...apresentarResumo(orquestrador), turnos: orquestrador.paraDados().turnos };
+}
+
+function apresentarEsforcoHerdado({ orquestrador, subagentes }: EsforcoHerdadoDosPapeis) {
+  return {
+    orquestrador: orquestrador === null ? null : orquestrador.paraDados(),
+    subagentes: subagentes === null ? null : subagentes.paraDados(),
+  };
 }
 
 export function criarOrquestradoresRoutes({
@@ -229,6 +248,50 @@ export function criarOrquestradoresRoutes({
       const alteracoes = esquemaDaConfiguracao.partial().parse(requisicao.body);
       const orquestrador = await servico.alterarConfiguracao(requisicao.params.id, alteracoes);
       resposta.json(apresentarResumo(orquestrador));
+    }),
+  );
+
+  /** As predefinições de configuração disponíveis (ex.: "Modo econômico"). */
+  rotas.get(
+    "/predefinicoes",
+    rota((_requisicao, resposta) => {
+      resposta.json(PREDEFINICOES.map((predefinicao) => predefinicao.paraDados()));
+    }),
+  );
+
+  /** Aplica uma predefinição; responde como o PATCH da configuração. */
+  rotas.post(
+    "/orquestradores/:id/configuracao/predefinicao",
+    rota(async (requisicao, resposta) => {
+      const { predefinicao } = esquemaDaPredefinicao.parse(requisicao.body ?? {});
+      const orquestrador = await servico.aplicarPredefinicao(requisicao.params.id, predefinicao);
+      resposta.json(apresentarResumo(orquestrador));
+    }),
+  );
+
+  /** O esforço que cada papel herda do Claude Code da máquina quando está em "Padrão". */
+  rotas.get(
+    "/orquestradores/:id/esforco-herdado",
+    rota(async (requisicao, resposta) => {
+      resposta.json(apresentarEsforcoHerdado(await servico.esforcoHerdadoDe(requisicao.params.id)));
+    }),
+  );
+
+  /** O mesmo, para o formulário de criação: modelos e pasta ainda não salvos. */
+  rotas.get(
+    "/esforco-herdado",
+    rota(async (requisicao, resposta) => {
+      const consulta = esquemaDaConsultaDeEsforco.parse(requisicao.query);
+      const pasta = PastaDeTrabalho.dentroDe(pastaRaiz, consulta.pasta);
+      if (!(await explorador.existe(pasta.caminho))) {
+        throw new ErroDeOrquestracao("dados_invalidos", `A pasta "${pasta.caminho}" não existe.`);
+      }
+      const herdado = await servico.esforcoHerdadoPara({
+        modeloDoOrquestrador: consulta.modeloDoOrquestrador,
+        modeloDosSubagentes: consulta.modeloDosSubagentes,
+        pastaDoProjeto: pasta.caminho,
+      });
+      resposta.json(apresentarEsforcoHerdado(herdado));
     }),
   );
 

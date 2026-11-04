@@ -15,7 +15,9 @@ import { ExploradorDePastas } from "./infraestrutura/arquivos/ExploradorDePastas
 import { RepositorioDeNotasEmArquivo } from "./infraestrutura/arquivos/RepositorioDeNotasEmArquivo";
 import { RepositorioDeOrquestradoresEmArquivo } from "./infraestrutura/arquivos/RepositorioDeOrquestradoresEmArquivo";
 import { RepositorioDoChatEmArquivo } from "./infraestrutura/arquivos/RepositorioDoChatEmArquivo";
+import { ConfiguracoesDeEsforcoDoClaudeCode } from "./infraestrutura/claudecode/ConfiguracoesDeEsforcoDoClaudeCode";
 import { FachadaClaudeCodeCli } from "./infraestrutura/claudecode/FachadaClaudeCodeCli";
+import { MedidorDeConsumoPorTranscricoes } from "./infraestrutura/claudecode/MedidorDeConsumoPorTranscricoes";
 import { MotorClaudeCodeCli } from "./infraestrutura/claudecode/MotorClaudeCodeCli";
 import { MotorDeChatClaudeCodeCli } from "./infraestrutura/claudecode/MotorDeChatClaudeCodeCli";
 import {
@@ -140,6 +142,10 @@ async function iniciar(): Promise<void> {
     worktrees,
     gerarId: randomUUID,
     agora: () => new Date(),
+    // Economia de tokens (ADR-21): custo de cada turno lido das transcrições e
+    // esforço que o Claude Code da máquina usa quando o app deixa "Padrão".
+    medidor: new MedidorDeConsumoPorTranscricoes(),
+    esforcoDaMaquina: new ConfiguracoesDeEsforcoDoClaudeCode(),
   });
 
   const interrompidos = await servico.interromperTurnosPendentes();

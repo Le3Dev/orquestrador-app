@@ -1,9 +1,11 @@
 import type { DadosDaConfiguracao } from "./api/tipos";
 import {
+  descreverAlteracoesDaConfiguracao,
   descreverConfiguracao,
   formatarDuracao,
   formatarMomento,
   formatarPercentual,
+  formatarTokens,
   rotuloCurtoDaCota,
 } from "./formatacao";
 
@@ -24,6 +26,39 @@ describe("formatacao", () => {
     expect(formatarDuracao(900)).toBe("1s");
     expect(formatarDuracao(59_400)).toBe("59s");
     expect(formatarDuracao(65_000)).toBe("1min 05s");
+  });
+
+  it("formata tokens de forma compacta, em pt-BR", () => {
+    // O Intl separa o número da unidade com espaço inseparável.
+    const normalizar = (texto: string) => texto.replace(/\s/g, " ");
+
+    expect(normalizar(formatarTokens(950))).toBe("950");
+    expect(normalizar(formatarTokens(235_000))).toBe("235 mil");
+    expect(normalizar(formatarTokens(712_400))).toBe("712,4 mil");
+    expect(normalizar(formatarTokens(4_400_000))).toBe("4,4 mi");
+  });
+
+  it("lista o que uma configuração parcial muda, só os campos presentes", () => {
+    expect(
+      descreverAlteracoesDaConfiguracao({
+        modeloDoOrquestrador: "opus",
+        esforcoDoOrquestrador: "medio",
+        modeloDosSubagentes: "sonnet",
+        esforcoDosSubagentes: "medio",
+        quantidadeDeSubagentes: { modo: "automatica", limite: 1 },
+        permitirTrabalhoDireto: true,
+        proporPlanoEmPedidosGrandes: false,
+      }),
+    ).toEqual([
+      "Modelo do orquestrador: Opus",
+      "Esforço do orquestrador: Médio",
+      "Modelo dos subagentes: Sonnet",
+      "Esforço dos subagentes: Médio",
+      "Quantidade de subagentes: automática, ≤1 agente",
+      "Fazer o trivial sozinho: ligado",
+      "Propor plano antes de mudanças grandes: desligado",
+    ]);
+    expect(descreverAlteracoesDaConfiguracao({})).toEqual([]);
   });
 
   it("formata a utilização da cota como percentual", () => {

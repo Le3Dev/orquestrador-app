@@ -1,5 +1,5 @@
 import { type NodeProps, NodeResizer } from "@xyflow/react";
-import { type FormEvent, useEffect, useId, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useId, useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { PastaDeProjeto } from "../../shared/api/tipos";
@@ -49,6 +49,13 @@ export function NoRascunho({ id, selected }: NodeProps<TipoDoNo>) {
     }
     setPasta(caminho);
   }
+
+  // O aviso de esforço depende dos modelos e da pasta escolhidos: a busca muda junto com eles.
+  const { modeloDoOrquestrador, modeloDosSubagentes } = configuracao;
+  const buscarEsforcoHerdado = useCallback(
+    () => api.lerEsforcoHerdado(modeloDoOrquestrador, modeloDosSubagentes, pasta),
+    [modeloDoOrquestrador, modeloDosSubagentes, pasta],
+  );
 
   async function iniciar(evento: FormEvent): Promise<void> {
     evento.preventDefault();
@@ -138,7 +145,11 @@ export function NoRascunho({ id, selected }: NodeProps<TipoDoNo>) {
             </div>
           </div>
 
-          <CamposDaConfiguracao valor={configuracao} aoMudar={setConfiguracao} />
+          <CamposDaConfiguracao
+            valor={configuracao}
+            aoMudar={setConfiguracao}
+            buscarEsforcoHerdado={buscarEsforcoHerdado}
+          />
 
           {erro !== null && <p className="mono texto-longo text-error">✗ {erro}</p>}
         </div>

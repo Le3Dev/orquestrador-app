@@ -247,6 +247,8 @@ h3 { font-size: 12px; font-weight: 600; }
 
 .hint { font-size: 11px; color: var(--muted); }
 .hint-error { font-size: 11px; color: var(--error); }
+/* Aviso discreto junto de um campo (ex.: esforço herdado do Claude Code que gasta mais tokens). */
+.hint-warning { font-size: 11px; color: var(--warning); }
 
 input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 
@@ -612,6 +614,26 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .linha-fim .linha-simbolo, .linha-fim .linha-texto { color: var(--success); }
 .linha-erro .linha-simbolo, .linha-erro .linha-texto { color: var(--error); }
 .linha-sistema .linha-texto { color: var(--muted); }
+
+/* Custo estimado do pedido: uma linha discreta no fim, que abre a tabela por trecho. */
+.custo-do-turno { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.custo-do-turno-resumo {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--secondary);
+  text-align: left;
+  cursor: pointer;
+}
+.custo-do-turno-resumo:hover { color: var(--primary); text-decoration: underline; }
+.custo-do-turno-resumo:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; border-radius: 3px; }
+.custo-do-turno-tabela { border-collapse: collapse; color: var(--secondary); }
+.custo-do-turno-tabela th,
+.custo-do-turno-tabela td { padding: 2px 0 2px 14px; text-align: right; font-weight: 400; white-space: nowrap; }
+.custo-do-turno-tabela th:first-child { padding-left: 0; text-align: left; }
+.custo-do-turno-tabela thead th { color: var(--muted); border-bottom: 1px solid var(--border); }
+.custo-do-turno-tabela tfoot th,
+.custo-do-turno-tabela tfoot td { color: var(--primary); border-top: 1px solid var(--border); }
 
 .resposta-no-terminal {
   margin-top: 4px;

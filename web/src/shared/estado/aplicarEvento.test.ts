@@ -434,4 +434,57 @@ describe("aplicarEvento", () => {
       expect(turno).toMatchObject({ situacao: "cancelado", decisaoDoPlano: null });
     });
   });
+
+  describe("consumo medido do turno", () => {
+    const consumo = {
+      principal: { entrada: 1000, criacaoDeCache: 2000, leituraDeCache: 50_000, saida: 300 },
+      subagentes: { entrada: 500, criacaoDeCache: 0, leituraDeCache: 10_000, saida: 100 },
+      subagentesMedidos: 1,
+      parcial: false,
+      indiceDeCusto: 12_500,
+      modeloDoPrincipal: "claude-opus-5-5",
+    };
+    const turnoConcluido = registrar([
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija", configuracao },
+      {
+        tipo: "turno_concluido",
+        turnoId: "t1",
+        resposta: "feito",
+        uso: { duracaoMs: 1000, tokensDeEntrada: 1, tokensDeSaida: 1, subagentesLancados: 0 },
+      },
+    ]);
+
+    it("começa sem consumo e guarda o medido no turno, depois do fim, sem linha nova no log", () => {
+      const antes = reproduzir(turnoConcluido);
+      const depois = aplicarEvento(antes, {
+        tipo: "consumo_do_turno_medido",
+        turnoId: "t1",
+        consumo,
+        sequencia: 3,
+        em: "2026-10-28T12:01:00Z",
+      });
+
+      expect(antes.turnos[0]?.consumo).toBeNull();
+      expect(depois.turnos[0]?.consumo).toEqual(consumo);
+      expect(depois.turnos[0]?.situacao).toBe("concluido");
+      expect(depois.turnos[0]?.log).toHaveLength(antes.turnos[0]?.log.length ?? -1);
+    });
+
+    it("evento repetido é ignorado e turno desconhecido não muda nenhum turno", () => {
+      const medido: EventoRegistrado = {
+        tipo: "consumo_do_turno_medido",
+        turnoId: "t1",
+        consumo,
+        sequencia: 3,
+        em: "2026-10-28T12:01:00Z",
+      };
+      const umaVez = aplicarEvento(reproduzir(turnoConcluido), medido);
+      expect(aplicarEvento(umaVez, medido)).toBe(umaVez);
+
+      const desconhecido = aplicarEvento(umaVez, { ...medido, turnoId: "outro", sequencia: 4 });
+      expect(desconhecido.ultimaSequencia).toBe(4);
+      expect(desconhecido.turnos).toHaveLength(1);
+      expect(desconhecido.turnos[0]).toBe(umaVez.turnos[0]);
+    });
+  });
 });

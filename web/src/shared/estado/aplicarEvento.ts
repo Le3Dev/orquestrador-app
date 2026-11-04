@@ -1,6 +1,7 @@
 import type {
   DadosDaConfiguracao,
   DadosDoAnexo,
+  DadosDoConsumoDoTurno,
   DecisaoDoPlano,
   EventoRegistrado,
   JanelaDaCota,
@@ -69,6 +70,11 @@ export interface TurnoNaTela {
   resposta: string | null;
   motivoDaFalha: string | null;
   uso: UsoDoTurno | null;
+  /**
+   * Consumo medido do turno (principal e Subagentes), que chega depois do fim.
+   * Nulo — ou ausente — enquanto não foi medido.
+   */
+  consumo?: DadosDoConsumoDoTurno | null;
   subagentes: SubagenteNaTela[];
   /** Ferramentas que o Orquestrador usou ele mesmo, sem Subagente (leituras, checagens, comandos curtos). */
   ferramentasDiretas: AcaoRegistrada[];
@@ -233,6 +239,10 @@ function alteracaoDoTurno(evento: EventoRegistrado): AlteracaoDeTurno | null {
     case "plano_aprovado":
       return (turno) => ({ ...turno, decisaoDoPlano: "aprovado" });
 
+    // Chega depois do fim do turno; uma medição nova substitui a anterior.
+    case "consumo_do_turno_medido":
+      return (turno) => ({ ...turno, consumo: evento.consumo });
+
     case "plano_descartado":
       return (turno) => ({ ...turno, decisaoDoPlano: "descartado" });
 
@@ -352,6 +362,7 @@ function novoTurno(evento: Extract<EventoRegistrado, { tipo: "turno_iniciado" }>
     resposta: null,
     motivoDaFalha: null,
     uso: null,
+    consumo: null,
     subagentes: [],
     ferramentasDiretas: [],
     permissoesNegadas: [],
