@@ -11,7 +11,7 @@ import {
 } from "../../shared/formatacao";
 import { useRelogio } from "../../shared/hooks/useRelogio";
 import type { EstadoDoServidor } from "../../shared/hooks/useServidor";
-import { nivelDaMemoria } from "../../shared/memoria";
+import { nivelDaMemoria, type NivelDaMemoria } from "../../shared/memoria";
 import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
 import { IconeOrquestrador, IconePasta } from "../Icones";
 
@@ -259,6 +259,13 @@ function MedidorDeMemoria({ memoria }: { memoria: LeituraDeMemoria }) {
 /** Canto superior direito: quem está trabalhando agora e a cota da assinatura. */
 export function StatusDoCanvas({ trabalhando, bixinhosAtivos, cota, memoria }: PropsDoStatus) {
   const nivel = memoria === null ? "normal" : nivelDaMemoria(memoria);
+  // Fechar esconde o aviso daquele nível. Ele volta se a memória piorar
+  // (baixa → crítica) ou se normalizar e apertar de novo; o medidor fica.
+  const [dispensado, setDispensado] = useState<NivelDaMemoria | null>(null);
+  if (nivel === "normal" && dispensado !== null) {
+    setDispensado(null);
+  }
+  const aviso = nivel === "normal" || dispensado === "critica" || dispensado === nivel ? null : nivel;
   return (
     <div className="flex flex-col items-end gap-2">
     <div className="painel-flutuante flex items-center gap-4 px-3 py-2">
@@ -286,9 +293,21 @@ export function StatusDoCanvas({ trabalhando, bixinhosAtivos, cota, memoria }: P
         ))}
       {memoria !== null && <MedidorDeMemoria memoria={memoria} />}
     </div>
-    {nivel !== "normal" && (
-      <div className={`aviso-de-memoria ${nivel === "critica" ? "aviso-de-memoria-critica" : ""}`} role="status">
-        ⚠ {AVISO_DA_MEMORIA[nivel]}
+    {aviso !== null && (
+      <div
+        className={`aviso-de-memoria flex items-start gap-2 ${aviso === "critica" ? "aviso-de-memoria-critica" : ""}`}
+        role="status"
+      >
+        <span className="flex-1">⚠ {AVISO_DA_MEMORIA[aviso]}</span>
+        <button
+          type="button"
+          className="botao-icone shrink-0"
+          title="Fechar aviso"
+          aria-label="Fechar aviso de memória"
+          onClick={() => setDispensado(aviso)}
+        >
+          ✕
+        </button>
       </div>
     )}
     </div>
