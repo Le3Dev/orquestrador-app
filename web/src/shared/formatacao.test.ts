@@ -1,5 +1,11 @@
 import type { DadosDaConfiguracao } from "./api/tipos";
-import { descreverConfiguracao, formatarDuracao, formatarMomento, formatarPercentual } from "./formatacao";
+import {
+  descreverConfiguracao,
+  formatarDuracao,
+  formatarMomento,
+  formatarPercentual,
+  rotuloCurtoDaCota,
+} from "./formatacao";
 
 const configuracao: DadosDaConfiguracao = {
   modeloDoOrquestrador: "opus",
@@ -22,6 +28,12 @@ describe("formatacao", () => {
 
   it("formata a utilização da cota como percentual", () => {
     expect(formatarPercentual(0.094)).toBe("9%");
+  });
+
+  it("encurta o nome das janelas da cota (\"5 horas\" → \"5h\")", () => {
+    expect(rotuloCurtoDaCota("5 horas")).toBe("5h");
+    expect(rotuloCurtoDaCota("7 dias")).toBe("7d");
+    expect(rotuloCurtoDaCota("semanal")).toBe("semanal");
   });
 
   it("mostra só o horário para hoje e a data para dias anteriores", () => {

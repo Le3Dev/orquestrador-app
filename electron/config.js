@@ -49,7 +49,10 @@ module.exports = {
   appId: "com.orquestradoragentes.app",
   productName: "Orquestrador de Agentes",
 
-  // Porta do servidor Express local (deve bater com a do servidor; o main.js
-  // ainda respeita a env PORTA se ela existir).
-  porta: 3200,
+  // A porta do servidor local não é mais fixa: o main.js escolhe uma porta
+  // livre em 127.0.0.1 a cada abertura (ou usa a env PORTA, se existir).
+
+  // Página de download do app, repassada ao servidor como
+  // ORQUESTRADOR_URL_DE_DOWNLOAD. null = não repassa.
+  urlDeDownload: null,
 };

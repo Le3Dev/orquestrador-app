@@ -361,3 +361,70 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
     expect(document.querySelector('.react-flow__node[data-id="o5"]')).toBeNull();
   });
 });
+
+describe("CanvasDeOrquestradores · zoom e barra de título", () => {
+  const janelaComPonte = window as unknown as { electron?: unknown };
+  const transformacao = () => document.querySelector<HTMLElement>(".react-flow__viewport")?.style.transform;
+
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoFalso);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+    localStorage.setItem(
+      "orquestrador-agentes:canvas:v1",
+      JSON.stringify({ terminais: {}, notas: {}, viewport: { x: 100, y: 50, zoom: 0.5 } }),
+    );
+  });
+
+  afterEach(() => {
+    delete janelaComPonte.electron;
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it("restaura o zoom e a posição salvos; Ctrl+0 volta a 100% mantendo o centro", async () => {
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(transformacao()).toBe("translate(100px,50px) scale(0.5)"));
+
+    // O jsdom não mede: a área tem 0 × 0 e o centro é a origem (0, 0) da tela.
+    fireEvent.keyDown(window, { key: "0", code: "Digit0", ctrlKey: true });
+
+    await waitFor(() => expect(transformacao()).toBe("translate(200px,100px) scale(1)"));
+  });
+
+  it("Ctrl+0 com o foco num campo de texto não mexe no zoom", async () => {
+    render(<CanvasDeOrquestradores />);
+    const campo = await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+    await waitFor(() => expect(transformacao()).toBe("translate(100px,50px) scale(0.5)"));
+
+    fireEvent.keyDown(campo, { key: "0", code: "Digit0", ctrlKey: true });
+
+    expect(transformacao()).toBe("translate(100px,50px) scale(0.5)");
+  });
+
+  it("no navegador o status fica no painel do topo; no desktop, na barra de título", () => {
+    const { unmount } = render(<CanvasDeOrquestradores />);
+    expect(screen.queryByTestId("barra-de-titulo")).not.toBeInTheDocument();
+    expect(screen.getByTestId("status-do-canvas").closest(".paineis-do-topo")).not.toBeNull();
+    unmount();
+
+    janelaComPonte.electron = {
+      desktop: true,
+      janela: {
+        minimizar: vi.fn(),
+        maximizar: vi.fn(),
+        fechar: vi.fn(),
+        estaMaximizada: vi.fn().mockResolvedValue(false),
+        aoMudarMaximizada: vi.fn(() => () => undefined),
+      },
+    };
+    render(<CanvasDeOrquestradores />);
+    const barra = screen.getByTestId("barra-de-titulo");
+    expect(within(barra).getByTestId("status-do-canvas")).toHaveTextContent("todos ociosos");
+    expect(within(barra).getByRole("group", { name: "Controles da janela" })).toBeInTheDocument();
+    expect(screen.getAllByTestId("status-do-canvas")).toHaveLength(1);
+    // A barra fica fora do canvas, acima dele.
+    expect(barra.nextElementSibling?.querySelector(".react-flow")).not.toBeNull();
+  });
+});

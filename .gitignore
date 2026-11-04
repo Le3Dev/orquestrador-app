@@ -9,4 +9,5 @@ dados/
 
 # Saída do empacotamento desktop (electron-builder)
 dist_electron/
+dist_electron_teste/
 release/

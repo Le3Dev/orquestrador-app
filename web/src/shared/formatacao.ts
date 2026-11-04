@@ -105,6 +105,12 @@ export function formatarPercentual(fracao: number): string {
   return `${Math.round(fracao * 100)}%`;
 }
 
+/** "5 horas" → "5h", "7 dias" → "7d": o nome curto de uma janela da cota. */
+export function rotuloCurtoDaCota(nome: string): string {
+  const [, numero, letra] = /^(\d+)\s*(\p{L})/u.exec(nome.trim()) ?? [];
+  return numero === undefined || letra === undefined ? nome : `${numero}${letra.toLowerCase()}`;
+}
+
 const horario = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" });
 const horarioComSegundos = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 

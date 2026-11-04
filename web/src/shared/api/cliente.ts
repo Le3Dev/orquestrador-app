@@ -40,9 +40,7 @@ async function requisitar<Resposta>(caminho: string, opcoes: RequestInit = {}): 
       headers: { "Content-Type": "application/json", ...opcoes.headers },
     });
   } catch {
-    throw new Error(
-      "Não foi possível falar com o servidor. Confira se ele está rodando (iniciar-orquestrador.cmd ou npm start).",
-    );
+    throw new Error("Não foi possível falar com o servidor. Feche e abra o Orquestrador de novo.");
   }
 
   const corpo: unknown = resposta.status === 204 ? null : await resposta.json().catch(() => null);

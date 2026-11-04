@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Central local para trabalhar com vários agentes do Claude ao mesmo tempo, por uma tela no navegador.
+Central local para trabalhar com vários agentes do Claude ao mesmo tempo. É um **aplicativo desktop** (Electron, Windows): a tela só abre dentro da janela do aplicativo. Aberto no navegador, o servidor recusa (ver ADR-19).
 
 Você cria **Orquestradores** — um por projeto, por exemplo — e conversa com cada um. A cada pedido, o Orquestrador **coordena**: o trivial (ler poucos arquivos, conferir um estado, um comando curto) ele resolve sozinho; o resto ele divide em subtarefas e entrega a **Subagentes** em paralelo, que leem, editam ou rodam comandos na pasta do projeto. Ele **nunca edita arquivos**: toda alteração vai para um Subagente. A tela mostra cada Subagente ao vivo (atividade, ferramentas, tokens, resultado), o que o próprio Orquestrador está fazendo e, no final, a síntese.
 
@@ -20,22 +20,46 @@ O motor é o próprio **Claude Code em modo headless**, usando o login da sua as
 
 ## Como rodar
 
-**Pré-requisitos:** Node 22+ e o Claude Code instalado e logado (`claude` funcionando no terminal).
+**Pré-requisito em qualquer modo:** o Claude Code instalado e logado (`claude` funcionando no terminal). Para rodar a partir do código-fonte, também Node 22+.
+
+**Usuário final (instalador):** instale o `.exe` gerado por `npm run dist:win` (sai em `dist_electron/`). O instalador é por usuário, sem pedir administrador, e deixa escolher a pasta. Sem certificado de assinatura, o Windows SmartScreen avisa na primeira execução (*Mais informações → Executar assim mesmo*). O app instalado pede a **chave de licença** (Lemon Squeezy) antes de abrir.
+
+**Dia a dia, a partir do código-fonte:** dê dois cliques em **`iniciar-desktop.cmd`**. Na primeira vez ele instala as dependências e gera o build; depois roda `npm run desktop` (`electron .`), que abre a janela do aplicativo. Rodando assim (não empacotado), **não há licença**. Depois de atualizar o código, rode `npm run build` (o `.cmd` só gera o build quando falta `dist/` ou `web/dist/`).
 
 ```bash
 npm install
 npm --prefix web install
-cp .env.example .env   # opcional: os padrões funcionam neste computador
+npm run build
+npm run desktop
 ```
 
-| Variável | Padrão | Para quê |
-|---|---|---|
-| `PORTA` | `3200` | Porta da API (escuta só em `127.0.0.1`) |
-| `PASTA_RAIZ_PROJETOS` | pasta acima deste projeto (caminho relativo é resolvido a partir da pasta do app, não de onde o comando roda) | Raiz dentro da qual os Orquestradores podem trabalhar |
-| `CLAUDE_CODE_BIN` | `%APPDATA%\npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe` | Executável **nativo** do Claude Code (o `claude.cmd` não serve: o app inicia o processo sem shell) |
-| `PASTA_DADOS` | `dados/` dentro da pasta do app | Histórico dos Orquestradores, as notas do canvas (`notas/`) e o chat rápido (`chat/`) |
+**Primeira abertura:** o aplicativo pede três coisas, guardadas na configuração local dele:
+1. a **pasta raiz dos projetos** (os Orquestradores só trabalham dentro dela);
+2. o **`claude.exe`** do Claude Code (ele procura sozinho no caminho padrão; dá para escolher outro);
+3. se encontrar um histórico antigo (`<pasta do app>\dados` ou `%USERPROFILE%\projetos\orquestrador-app\dados`), oferece **importar**: copia orquestradores, notas e anexos para a pasta nova; o chat rápido antigo fica só para consulta em `dados\chat\historico\conversa-importada\` (a conversa não é retomada; o chat começa uma nova). A origem nunca é apagada, e os worktrees antigos continuam onde estão.
 
-**Desenvolvimento** (dois terminais):
+Para trocar depois, use o botão **⚙ Pastas** na barra do canvas, que reabre essa tela.
+
+**Onde ficam os dados e o log** (a mesma pasta no app instalado e no `npm run desktop`):
+- configuração (`config.json`: pasta dos projetos, `claude.exe` e porta): `%APPDATA%\Orquestrador de Agentes\config.json`;
+- dados (histórico, notas, chat, anexos, worktrees novos): `%APPDATA%\Orquestrador de Agentes\dados`;
+- log do servidor: `%APPDATA%\Orquestrador de Agentes\logs\servidor.log`.
+
+Antes, o `npm run desktop` usava `%APPDATA%\orquestrador-agentes-app`. Na primeira abertura com a pasta nova (sem `config.json` nela), o app **copia** de lá o `config.json` e a pasta `dados\` e registra no log; a pasta antiga não é apagada nem alterada, e caches do Chromium, logs e layout antigo não vêm junto.
+
+O aplicativo sobe o servidor sozinho, numa **porta fixa desta instalação** (sorteada na primeira abertura e gravada no `config.json`; se ela estiver ocupada, o app escolhe outra, grava e registra no log), e o **religa se ele cair**. Fechar a janela desliga o servidor e cancela os pedidos em andamento. Ao subir, o servidor encerra os processos do Claude que tenham sobrado da queda anterior; antes, confere a linha de comando de cada um, para nunca derrubar uma sessão do Claude Code sua.
+
+> **Não abra o aplicativo pedindo a uma sessão do Claude Code.** Lá ele roda em segundo plano, e o Claude Code encerra processos em segundo plano quando a memória do computador fica baixa. Foi o que derrubou três orquestradores ao mesmo tempo em 28/10. Use o `.cmd`, o atalho do instalado ou um terminal próprio. Se o servidor cair mesmo assim, a tela mostra o aviso **Servidor desconectado** e reconecta sozinha quando o app o religar.
+
+**Desenvolvimento (no aplicativo):**
+
+```bash
+npm run desktop:dev
+```
+
+O script (`scripts/desktop-dev.cjs`) compila o backend uma vez, sobe o Vite em http://localhost:5173 (com `/api` repassado à porta 3201) e abre o Electron com `ORQUESTRADOR_URL_DA_TELA=http://localhost:5173` e `PORTA=3201`. Mudanças em `web/` recarregam na janela; mudanças no backend pedem fechar e rodar de novo. Fechar a janela ou Ctrl+C encerra tudo.
+
+**Desenvolvimento no navegador (só com a trava desligada):** o servidor recusa o navegador e nem sobe sem a chave do aplicativo. Para depurar a API e a tela no navegador, ligue `ORQUESTRADOR_PERMITIR_NAVEGADOR=1` (no `.env`, a partir do `.env.example`) e use dois terminais:
 
 ```bash
 npm run dev       # API em http://localhost:3200 (recarrega ao salvar)
@@ -44,28 +68,35 @@ npm run web:dev   # tela em http://localhost:5173 (repassa /api para a 3200)
 
 > Evite salvar arquivos do backend com um pedido rodando: no Windows, o `tsx watch` reinicia o servidor sem avisar o processo, e o `claude.exe` em andamento continua até terminar sozinho. O turno aparece como "interrompido" e pode ser reenviado.
 
-**Uso no dia a dia:** dê dois cliques em **`iniciar-orquestrador.cmd`**. Ele abre uma janela própria com o servidor e, depois de alguns segundos, o navegador em http://localhost:3200. Na primeira vez, também instala as dependências e gera o build. Para desligar, feche a janela ou aperte Ctrl+C nela.
-
-O `.cmd` sobe o servidor por um **vigia** (`scripts/manter-no-ar.cjs`, também em `npm run iniciar`):
-- **religa sozinho** quando o servidor sai com erro, esperando 2 s, 4 s, 8 s… até 30 s entre as tentativas;
-- **não religa** quando você fecha a janela ou aperta Ctrl+C;
-- **desiste** se o servidor cair 5 vezes em 2 minutos, para mostrar o erro em vez de entrar em loop.
-
-Ao subir, o servidor encerra os processos do Claude que tenham sobrado da queda anterior. Antes de encerrar, confere a linha de comando de cada um, para nunca derrubar uma sessão do Claude Code sua.
-
-O equivalente manual, num terminal na pasta do app:
+**Empacotar:**
 
 ```bash
-npm run build
-npm start         # http://localhost:3200
+npm run dist:win         # instalador normal, em dist_electron/
+npm run dist:win:teste   # build de teste, em dist_electron_teste/: pula a licença. NUNCA distribuir
 ```
 
-> **Não suba o servidor pedindo a uma sessão do Claude Code.** Lá ele roda em segundo plano, e o Claude Code encerra processos em segundo plano quando a memória do computador fica baixa. Foi o que derrubou três orquestradores ao mesmo tempo em 28/10. Use o `.cmd` ou um terminal próprio. Se o servidor cair mesmo assim, a tela mostra o aviso **Servidor desconectado** e reconecta sozinha quando ele voltar.
+O build de teste grava `"buildDeTeste": true` no `package.json` empacotado; serve para os testes de ponta a ponta do instalado.
+
+**Variáveis de ambiente.** No aplicativo, as do servidor são passadas pelo próprio app; ninguém precisa configurá-las. O `.env` só vale para `npm run dev` / `npm start`.
+
+| Variável | Quem lê | Padrão | Para quê |
+|---|---|---|---|
+| `PORTA` | servidor e aplicativo | `3200` (o app usa a porta gravada no `config.json`; `desktop:dev` usa `3201`) | Porta da API (escuta só em `127.0.0.1`). No app, definida no ambiente vale por cima da gravada e não é gravada |
+| `PASTA_DADOS` | servidor | `dados/` dentro da pasta do app (o app passa `%APPDATA%\Orquestrador de Agentes\dados`) | Histórico dos Orquestradores, notas (`notas/`), chat (`chat/`), anexos e worktrees |
+| `PASTA_RAIZ_PROJETOS` | servidor | pasta acima deste projeto (o app passa a escolhida na primeira abertura) | Raiz dentro da qual os Orquestradores podem trabalhar |
+| `CLAUDE_CODE_BIN` | servidor | `%APPDATA%\npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe` (o app passa o escolhido na primeira abertura) | Executável **nativo** do Claude Code (o `claude.cmd` não serve: o app inicia o processo sem shell) |
+| `PASTA_DA_TELA` | servidor | `web/dist` do app | Pasta da tela já construída |
+| `ORQUESTRADOR_CHAVE_DE_ACESSO` | servidor | — (o app gera uma aleatória a cada abertura) | Chave conferida no cookie `orquestrador_acesso`; sem ela o servidor não sobe |
+| `ORQUESTRADOR_PERMITIR_NAVEGADOR` | servidor | desligada | `1` = **só desenvolvimento**: sobe sem chave e aceita o navegador |
+| `ORQUESTRADOR_URL_DE_DOWNLOAD` | servidor (opcional) | — | Link para baixar o aplicativo, mostrado na página "roda só no aplicativo" |
+| `ORQUESTRADOR_URL_DA_TELA` | aplicativo | — | Carrega a tela desta URL (o Vite, em `desktop:dev`) em vez da servida pelo servidor |
+| `ORQUESTRADOR_PASTA_DO_USUARIO` | aplicativo | `%APPDATA%\Orquestrador de Agentes` | Troca a pasta do usuário do app (configuração, dados, log, licença). Só não empacotado ou no build de teste; usada nos testes de ponta a ponta. Com ela, a cópia da pasta antiga não acontece |
+| `PORTA_DA_API` | Vite (`web/`) | `3200` | Porta para onde o Vite repassa o `/api` |
 
 **Testes e verificações:**
 
 ```bash
-npm test            # domínio, adaptador do Claude Code (com saídas reais), repositórios, rotas das notas e do chat
+npm test            # domínio, adaptador do Claude Code (com saídas reais), repositórios, rotas, trava de acesso e electron/*.test.js
 npm run typecheck
 npm run web:test    # reducer da conversa, fases, nós e layout do canvas, bixinhos, notas e formatação
 npm run web:lint
@@ -127,8 +158,28 @@ Casos de teste do **limite de 4 orquestradores abertos** (ver ADR-18):
 - **Canvas:** com 4 abertos, *+ Novo orquestrador* mostra o aviso (`alert-warning`, fechável) e não abre o formulário; reabrir pela lista mostra o aviso e não abre; clicar num já aberto não recusa; fechar um no *✕* faz o aviso sumir, o Orquestrador continua na lista e a vaga volta; com 3 abertos e o formulário aberto, não abre outro.
 - **`CartaoDeAcao`:** ver acima (sem vaga não chama `criarOrquestrador` nem `enviarMensagem`).
 
+Casos de teste do **só no aplicativo** (ver ADR-19):
+- **Electron (`electron/*.test.js`):**
+  - *configuração local (`configuracaoLocal.test.js`):* detecta o `claude.exe` (`CLAUDE_CODE_BIN` existente primeiro, depois npm, `.local\bin`, `Programs`); sugere `%USERPROFILE%\projetos`; valida pasta e arquivo (vazios, relativos, inexistentes); sem `config.json` → `null` (primeira abertura); grava atomicamente e relê (com a `porta`); normaliza arquivo editado à mão (porta fora de 1–65535 vira `null`); explica arquivo corrompido;
+  - *porta da instalação (`escolherPortaDaInstalacao`):* `PORTA` do ambiente vale por cima da gravada (sem testar nem gravar); `PORTA` inválida é recusada; a gravada livre é reaproveitada; a gravada ocupada é trocada por uma sorteada (`origem: "trocada"`, com a anterior); sem porta gravada, sorteia (`"nova"`);
+  - *pasta de dados única (`copiarDaPastaAntiga`, com pastas temporárias):* copia `config.json` e `dados/` da antiga e nada mais (nem `Cache`, nem `Local Storage`), deixando a antiga intacta; não faz nada se a nova já tem `config.json`, se a antiga não tem, ou se as duas são a mesma; sem `dados/` na antiga, copia só o `config.json`; não sobrescreve o que já está em `dados/` da nova;
+  - *importação do histórico (`importacaoDoHistorico.test.js`):* acha `<pasta do app>\dados` (só não empacotado) e `%USERPROFILE%\projetos\orquestrador-app\dados`; só conta pasta com `orquestradores/` ou `notas/`; ignora o próprio destino; copia `orquestradores/`, `notas/` e `anexos/` como estão; o `chat/` antigo vai para `chat/historico/conversa-importada/` (sem `chat/sessao`) e não vira a conversa atual; não copia `worktrees/` nem `processos-em-execucao.json`; não sobrescreve; nunca apaga nem altera a origem;
+  - *processo principal (`main.js`) — sem teste unitário, conferido no ponta a ponta:* com `ORQUESTRADOR_PASTA_DO_USUARIO` apontando para uma pasta temporária com `config.json`, o log mostra `Porta do servidor escolhida para esta instalação: <PORTA>` e `servidor em http://127.0.0.1:<PORTA>`, e a porta fica no `config.json`; fechar e abrir de novo reaproveita a porta e restaura o layout e o zoom do canvas; com a porta gravada ocupada por outro processo, o log mostra `A porta X estava ocupada; o servidor passa a usar a Y` e o `config.json` passa a ter Y; sem cookie, `GET /` dá 403 com a página "roda só no aplicativo" e `GET /api/saude` dá 403 `{ erro }`; dentro da janela, `fetch('/api/saude')` e `fetch('/api/orquestradores')` dão 200; ao fechar, não sobra processo do servidor; com a pasta dos projetos ou o `claude.exe` removidos, abre os Ajustes com o aviso. Vale para `npm run desktop` e para o instalado do build de teste.
+- **Servidor (trava e configuração):** sem cookie → 403 (página "roda só no aplicativo" para HTML, `{ erro }` para `/api`); cookie com a chave errada → 403; com a chave → passa; sem chave e sem `ORQUESTRADOR_PERMITIR_NAVEGADOR=1` não sobe; com a variável, aceita o navegador; `PASTA_DA_TELA` e `PASTA_DADOS` absolutas respeitadas.
+- **Tela:** o botão *⚙ Pastas* só aparece com `window.electron.configuracao`, chama `abrirAjustes()` e mostra a mensagem se falhar; no navegador não aparece.
+
+Casos de teste da **barra de título e das larguras da janela** (ver ADR-20):
+- **`BarraDeTituloDoApp`:** "Orquestrador de Agentes" à esquerda; à direita (`.direita-da-barra-de-titulo`) o status (situação e cotas, `no-drag`) e, logo depois dele, o grupo "Controles da janela" com Minimizar, Maximizar e Fechar; no navegador (sem a ponte), nenhum botão de janela.
+- **`ControlesDaJanela`:** fora do desktop não renderiza; minimizar, maximizar e fechar chamam a ponte (`window.electron.janela`); o grupo é `no-drag` e cada botão tem `aria-label` e `title`; abre como "Restaurar" se a janela já estiver maximizada e troca entre Maximizar/Restaurar a cada aviso de `aoMudarMaximizada`; ao sair da tela, cancela a inscrição.
+- **`BarraDoCanvas`:** cada botão traz os rótulos completo, curto e ícone (`+ Novo orquestrador` / `+ Novo` / `+`, `+ notas` / `+ Nota` / `✎`, `Organizar` / `▦`, `⚙ Pastas` / `⚙`), com o nome acessível e a dica fixos; no navegador mostra o título do app; no desktop não repete o título nem desenha minimizar/maximizar/fechar.
+- **`StatusDoCanvas`:** rótulos curtos das cotas (`5h`, `7d`); o resumo mostra o medidor de maior uso e põe o resto (agentes ativos, cada cota, RAM) no balão (`title`); sem cota, memória nem agentes, não há resumo; no painel, o alerta de memória fica abaixo; na barra de título, não.
+- **`rotuloCurtoDaCota`:** "5 horas" → "5h", "7 dias" → "7d", nome sem número fica igual.
+- **Canvas:** restaura o zoom e a posição salvos; **Ctrl+0** volta a 100% mantendo o centro (`translate(100px,50px) scale(0.5)` → `translate(200px,100px) scale(1)` com a área 0 × 0 do jsdom); com o foco num campo de texto, Ctrl+0 não mexe no zoom; no navegador o status fica nos painéis do topo, e no desktop só na barra de título, acima do canvas.
+- **Conferência visual (manual, pasta temporária):** janelas de 900×650, 1100×750, 1200×800, 1440×900 e maximizada, com captura da janela inteira: nenhum botão nativo do Windows; ─ ☐ ✕ do app alinhados na barra, com hover cinza (e vermelho no fechar) e foco visível pelo teclado; status à direita sem encostar nos botões e, se não couber, cortado pelo fim (a situação nunca some); linha inferior da barra de ponta a ponta; ícone de "restaurar" com a janela maximizada (pelo botão ou pelo Windows); minimizar, maximizar/restaurar e fechar funcionando; painéis do topo sem sobreposição, minimapa só a partir de 1100 px, chat sem cobrir os controles de zoom nem o minimapa, texto dos terminais nítido em 100%.
+
 ## Tecnologias
 
+- **Aplicativo desktop:** **Electron 33** (processo principal em `electron/`, servidor em `utilityProcess`) e **electron-builder** (instalador NSIS para Windows x64). Licença via Lemon Squeezy, só no instalado.
 - **Node 22+ / TypeScript 6** (estrito, `exactOptionalPropertyTypes`), **Express 5**, **zod 4** (validação da API), **vitest**.
 - **Tela:** React 19, Vite 6, Tailwind 4, react-markdown com remark-gfm e **React Flow** (`@xyflow/react` 12) para o canvas (ver ADR-8). Tema escuro com a paleta da Anthropic (ver ADR-7). Fontes empacotadas via `@fontsource`, sem CDN: Poppins, Lora e JetBrains Mono.
 - **Claude Code 2.1.x** (`claude -p --output-format stream-json`) como motor dos agentes.
@@ -138,9 +189,35 @@ Casos de teste do **limite de 4 orquestradores abertos** (ver ADR-18):
 
 ### Visão geral
 
+**Aplicativo desktop** (ver ADR-19 e ADR-20): o processo principal do Electron sobe o servidor Express num `utilityProcess`, numa porta de `127.0.0.1` fixa por instalação (gravada no `config.json`), com uma chave aleatória por abertura. A janela recebe essa chave num cookie `httpOnly` só da sessão dela; o servidor recusa toda requisição sem o cookie. Um navegador apontado para a mesma porta recebe 403.
+
 ```mermaid
 flowchart LR
-  subgraph Navegador
+  subgraph App["Aplicativo (Electron)"]
+    MAIN["Processo principal<br/>electron/main.js<br/>licença · primeira abertura · religar"]
+    J["Janela (BrowserWindow)<br/>cookie orquestrador_acesso"]
+  end
+  subgraph UP["utilityProcess"]
+    SRV["Servidor Express<br/>dist/root.js · 127.0.0.1:‹porta da instalação›"]
+  end
+  CC2["claude.exe -p"]
+  NAV["Navegador"]
+  CFG[("%APPDATA%\Orquestrador de Agentes<br/>configuração · dados · logs\servidor.log")]
+
+  MAIN -- "fork com PORTA, PASTA_DADOS, PASTA_RAIZ_PROJETOS,<br/>CLAUDE_CODE_BIN, PASTA_DA_TELA, chave" --> SRV
+  MAIN -- "grava o cookie e carrega a tela" --> J
+  MAIN --> CFG
+  J -- "/api + tela, com o cookie" --> SRV
+  SRV --> CC2
+  SRV --> CFG
+  NAV -. "sem cookie → 403" .-> SRV
+```
+
+Dentro do servidor:
+
+```mermaid
+flowchart LR
+  subgraph Janela["Janela do aplicativo"]
     T[Tela React]
   end
   subgraph API["API Express (127.0.0.1)"]
@@ -226,6 +303,9 @@ src/
   controllers/                 REST + SSE, validação (zod), erros → HTTP
                                (orquestradoresRoutes.ts, notasRoutes.ts,
                                chatRoutes.ts com o CanalDoChat)
+electron/                      aplicativo desktop (CommonJS): main.js (janelas, servidor no
+                               utilityProcess, religar, cookie), preload.js (window.electron),
+                               licença, configuração local e primeira abertura; testes *.test.js
 web/src/
   paginas/CanvasDeOrquestradores.tsx   canvas (React Flow): nós, linhas, painéis, layout salvo
   componentes/canvas/                  NoTerminal (terminal do Orquestrador), NoRascunho (configuração),
@@ -244,7 +324,7 @@ web/src/
 
 **Chat rápido** (contexto `chat`, ver ADR-17): uma conversa única com o Claude, fora dos Orquestradores. Cada pergunta roda um `claude -p` em `<PASTA_DADOS>/chat/sessao/` (o primeiro com `--session-id`, os seguintes com `--resume`), com ferramentas só de leitura (Read, Glob, Grep na pasta raiz dos projetos, `.env*` negado) e de web (WebSearch, WebFetch). Pelo stdin vai a pergunta precedida do bloco `<contexto-do-app>` (data, pasta raiz, projetos e orquestradores existentes, e o formato das ações). O texto chega aos poucos (`--include-partial-messages`) e vai para a tela como evento SSE passageiro `trecho`, sem entrar no histórico; no fim, o servidor tira da resposta os blocos ` ```acao-do-app `, valida cada um e grava a resposta com as ações. O contexto não importa o agregado `Orquestrador`: projetos e orquestradores chegam pela porta `ProjetosDoChat`, implementada em `root.ts`.
 
-**Pasta de dados** (`<PASTA_DADOS>`, padrão `dados/`; ver ADR-5, ADR-13, ADR-16 e ADR-17):
+**Pasta de dados** (`<PASTA_DADOS>`: no aplicativo, `%APPDATA%\Orquestrador de Agentes\dados`; rodando o servidor sozinho, `dados/` na pasta do app; ver ADR-5, ADR-13, ADR-16, ADR-17 e ADR-19):
 
 ```
 dados/
@@ -562,6 +642,48 @@ flowchart TD
   - fechar um terminal libera a vaga sem perder nada: o Orquestrador e o histórico continuam salvos e voltam pela lista;
   - mudar o limite é trocar uma constante.
 
+**ADR-19 — Só no aplicativo: servidor dentro do Electron e acesso por chave de sessão.**
+- *Contexto:*
+  - o Orquestrador virou um produto desktop (instalador, licença), mas a tela também abria em `http://localhost:3200` em qualquer navegador da máquina, para qualquer um, sem licença;
+  - o executável empacotado não subia o servidor: o app reaproveitava o vigia com `spawn(process.execPath, …)`, e no empacotado `process.execPath` é o próprio Electron, não o Node; o `cwd` ficava dentro do `app.asar`; e os caminhos padrão (`dados/`, pasta raiz) eram relativos à pasta de instalação, que não é lugar de gravar dados.
+- *Decisão:*
+  - o processo principal sobe o servidor com `utilityProcess.fork(<app>/dist/root.js)` (Node embutido no Electron, lendo de dentro do asar) e o **religa se cair**, no lugar do vigia `scripts/manter-no-ar.cjs`; a porta é **fixa por instalação** (ver ADR-20);
+  - a cada abertura o app gera uma **chave aleatória**, passa ao servidor (`ORQUESTRADOR_CHAVE_DE_ACESSO`) e grava o cookie `orquestrador_acesso` (`httpOnly`) **só na sessão da janela**; o servidor recusa (403) toda requisição sem o cookie certo e **nem sobe sem chave**, a não ser em desenvolvimento com `ORQUESTRADOR_PERMITIR_NAVEGADOR=1`;
+  - dados e log ficam em `userData`, fixado em `%APPDATA%\Orquestrador de Agentes` também fora do empacotado (ver ADR-20): `\dados` e `\logs\servidor.log`; a pasta raiz dos projetos e o `claude.exe` vêm da **primeira abertura**, que também oferece **importar** o histórico antigo **copiando** (nunca move nem apaga): orquestradores, notas e anexos como estão; o chat rápido antigo vai só para consulta em `chat/historico/conversa-importada/`, sem `chat/sessao`, porque o Claude Code guarda a sessão pela pasta de trabalho e ela muda de `<antigo>\chat\sessao` para `<userData>\dados\chat\sessao` (não daria para retomar);
+  - se o `config.json` existe mas a pasta dos projetos ou o `claude.exe` não existem mais, o app abre os **Ajustes** com o aviso, em vez de subir o servidor;
+  - a **licença** só é pedida no app empacotado normal; `npm run desktop` e o **build de teste** (`"buildDeTeste": true` no `package.json` empacotado, gerado por `npm run dist:win:teste`) pulam;
+  - `dist/` e `web/dist/` vão dentro do asar (sem `asarUnpack`); se o `utilityProcess` não carregar do asar, a alternativa é `"asar": false` no `build`.
+- *Consequências:*
+  - acabou o uso pelo navegador e o `iniciar-orquestrador.cmd`; o atalho do código-fonte é o `iniciar-desktop.cmd`, e o desenvolvimento passa a ser `npm run desktop:dev` (navegador só com a trava desligada);
+  - a trava evita o acesso casual pelo navegador, não um atacante na mesma máquina: quem roda código como o usuário consegue ler a memória ou o ambiente do processo;
+  - worktrees antigos continuam na pasta antiga (`<dados antigos>\worktrees`); os novos nascem em `%APPDATA%\Orquestrador de Agentes\dados\worktrees`;
+  - o app instalado exige a loja do Lemon Squeezy configurada; o build de teste pula a licença e **não pode ser distribuído**;
+  - sem certificado de assinatura, o SmartScreen avisa ao instalar e na primeira execução.
+
+**ADR-20 — Barra de título própria, larguras da janela, porta fixa e pasta de dados única.**
+- *Contexto:*
+  - o texto dos terminais saía borrado: a porta mudava a cada abertura, e o `localStorage` (layout e zoom) é separado por origem, que inclui a porta. O canvas abria sem nada salvo e enquadrava tudo num zoom fracionado (ex.: 87%), que borra o texto;
+  - os botões nativos ─ ☐ ✕ do `titleBarOverlay` ficavam por cima do painel de status (canto superior direito do canvas), e a barra da esquerda arrastava a janela e ainda tinha botões de janela próprios;
+  - mesmo com a barra própria, o overlay nativo do Windows destoava do tema (botões quadrados, hover do sistema) e a linha inferior da barra parava antes dele;
+  - em janela estreita, os painéis do topo (dois blocos absolutos independentes) se sobrepunham;
+  - o app instalado usava `%APPDATA%\Orquestrador de Agentes` e o `npm run desktop`, `%APPDATA%\orquestrador-agentes-app` (o nome do `package.json`): dois históricos.
+- *Decisão:*
+  - **porta fixa por instalação**, no campo `porta` do `config.json`: na primeira abertura, uma porta livre em `127.0.0.1`, gravada; depois, reaproveitada se estiver livre, ou trocada (gravada e registrada no log) se estiver ocupada. `PORTA` no ambiente vale por cima e não é gravada;
+  - **zoom nítido:** o enquadramento ao abrir e o *Organizar* nunca passam de 100% (`maxZoom: 1`); **Ctrl+0** volta a 100% mantendo o centro da área do canvas, com a posição arredondada (fora de campos de texto);
+  - **barra de título da tela, só no desktop** (`BarraDeTituloDoApp`): faixa de 36 px, de ponta a ponta, com a cor do token `--barra-de-titulo` (igual à `COR_BARRA`). Esquerda: ícone e nome; direita: o status (`StatusDoCanvas`) e, colados a ele, os **botões ─ ☐ ✕ do próprio app** (`ControlesDaJanela`), no estilo dos demais botões (arredondados, ícones finos, hover `--surface-3`, fechar em `--error`). A faixa inteira arrasta a janela (`-webkit-app-region: drag`), e o que tem clique ou balão é `no-drag`;
+  - **sem botões nativos na janela principal:** `titleBarStyle: "hidden"` **sem** `titleBarOverlay`. Pela documentação do Electron ([BaseWindowOptions](https://www.electronjs.org/docs/latest/api/structures/base-window-options)), no Windows o `hidden` só liga o Window Controls Overlay quando combinado com `titleBarOverlay`, "otherwise no window controls will be shown"; o [Custom Title Bar](https://www.electronjs.org/docs/latest/tutorial/custom-title-bar) manda marcar a barra própria com `app-region: drag`, e o [Custom Window Interactions](https://www.electronjs.org/docs/latest/tutorial/custom-window-interactions) explica que o `no-drag` devolve os cliques e que menus próprios não devem ficar sobre a área de arraste. Ao contrário de `frame: false`, a janela continua com borda, sombra, redimensionamento pelas bordas e encaixe. Os botões usam o IPC `janela:minimizar|maximizar|fechar|esta-maximizada`; o main avisa `janela:maximizada` (boolean) nos eventos `maximize`/`unmaximize`, e a ponte expõe `janela.aoMudarMaximizada(callback)` (devolve a função que cancela), para o ícone trocar também quando a janela maximiza por duplo clique, Win+↑ ou encaixe. As **janelas de ativação e de primeira abertura/Ajustes** não têm botão de fechar próprio e **mantêm o `titleBarOverlay`** (botões nativos na cor do tema);
+  - **painéis do topo num só painel em linha** (esquerda: ações e lista; centro: aviso de conexão; direita: status no navegador, ou o alerta de memória no desktop): eles se acomodam juntos e não colidem;
+  - **larguras**, por media query no CSS (sem lógica em JS): ≥ 1280 px tudo completo; 1100–1280 px rótulos curtos (`5h`, `7d`, `+ Novo`, `+ Nota`, `Organizar`, `⚙`); < 1100 px botões só com ícone (dica no `title` e `aria-label`), status só com a situação e um medidor resumido (o de maior uso; o resto no balão) e sem minimapa, o que libera a largura do chat (a folga lateral passa a ser só a dos controles de zoom);
+  - **pasta de dados única:** `app.setPath("userData", %APPDATA%\Orquestrador de Agentes)` antes da trava de instância única, empacotado ou não (exceto com `ORQUESTRADOR_PASTA_DO_USUARIO`). Na abertura, se a pasta nova não tem `config.json` e a antiga tem, **copia** `config.json` e `dados/` (nunca apaga nem altera a antiga; caches do Chromium não vêm).
+- *Consequências:*
+  - o layout e o zoom passam a sobreviver ao fechar e abrir; se a porta gravada estiver ocupada, a troca de porta perde o layout (outra origem), e isso fica no log;
+  - na primeira abertura com a pasta única, o layout do canvas recomeça (o antigo estava preso a uma porta que não volta mais), mas orquestradores, notas e histórico vêm na cópia;
+  - com escala do Windows fracionada (ex.: 110%), o texto em 100% ainda depende do `devicePixelRatio`; o zoom do canvas deixa de somar outra fração;
+  - o app instalado e o `npm run desktop` dividem a pasta e a trava de instância única: não dá para abrir os dois ao mesmo tempo com a mesma pasta;
+  - sem o botão maximizar nativo, some o menu de layouts do Windows 11 ao parar o mouse sobre ele; Win+Z, Win+setas, arrastar a janela para as bordas da tela e o duplo clique na barra continuam funcionando;
+  - se a tela travar, os botões do app param junto: **Alt+F4** continua fechando a janela, porque é tratado pelo Windows;
+  - em janela estreita com muitas cotas, o status é cortado pelo fim (`justify-content: safe flex-end`), nunca pela situação.
+
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
 - `modelUsage` acumula a sessão, então o consumo do turno vem de `model_usage_since_last_result`;
@@ -705,9 +827,16 @@ Passageiros (sem id, fora do histórico): `event: trecho` com `data: { mensagemI
 
 A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma janela de terminal, e cada Subagente que ele instancia vira um bixinho ligado ao terminal.
 
+**Abrir:** pelo atalho do aplicativo instalado ou pelo `iniciar-desktop.cmd` (ver *Como rodar*). Na primeira abertura, escolha a pasta dos projetos, confirme o `claude.exe` e, se quiser, importe o histórico antigo. Para mudar a pasta dos projetos ou o Claude Code depois, clique em **⚙ Pastas** na barra do canvas (no canto superior esquerdo, depois de *Organizar*; em janela estreita, só o **⚙**).
+
+**Barra de título:** no topo da janela fica a barra do aplicativo: à esquerda o nome; à direita o status (quem está trabalhando, cotas e RAM) e, logo depois, os botões do próprio app: **minimizar**, **maximizar/restaurar** (o ícone muda conforme a janela) e **fechar** (fica vermelho ao passar o mouse). Também dá para usá-los pelo teclado (Tab até eles e Enter). Arraste a janela por qualquer ponto vazio da barra; clique duplo maximiza ou restaura; arrastar para as bordas da tela, Win+setas e Win+Z encaixam a janela como em qualquer programa. O menu de layouts que o Windows 11 mostra ao parar o mouse sobre o maximizar nativo não aparece (use Win+Z). Se a tela travar, **Alt+F4** fecha o aplicativo. As janelas de ativação e de primeira abertura/Ajustes continuam com os botões do Windows.
+
+**Janela estreita:** abaixo de 1280 px de largura, os rótulos encurtam (*+ Novo*, *+ Nota*, *5h*, *7d*); abaixo de 1100 px, os botões ficam só com o ícone (passe o mouse para ver o nome), o status mostra a situação e um medidor resumido (passe o mouse para ver tudo) e o minimapa some. Abrir o endereço do servidor no navegador mostra só o aviso de que o Orquestrador roda no aplicativo.
+
 **Navegar no canvas:**
 - arrastar o fundo move o canvas;
 - a roda do mouse rola; **Ctrl + roda** dá zoom;
+- **Ctrl+0** volta o zoom para 100% sem sair do lugar — é onde o texto dos terminais fica mais nítido (ao abrir e ao *Organizar*, o canvas nunca passa de 100%, mas pode ficar abaixo para caber tudo); o zoom e a posição ficam salvos ao fechar o app;
 - os botões no canto inferior esquerdo aproximam, afastam e enquadram tudo;
 - o minimapa no canto inferior direito mostra onde cada coisa está (as notas têm cor própria);
 - enquanto você arrasta um terminal/bixinho ou move o canvas, as animações dos nós pausam e a bolinha das linhas some (para o movimento ficar leve); tudo volta ao soltar.
@@ -777,16 +906,16 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
    - Precisa da permissão *Editar e rodar comandos*: sem comandos não há como commitar, e a tela avisa quando o nível escolhido não permite. Em Plan Mode, commit e push continuam bloqueados; a permissão vale na execução do plano aprovado. Atenção: a mensagem automática de aprovação não contém um pedido explícito de commit, então o Orquestrador pode recusar o commit/push na execução do plano (pendência conhecida, ver ADR-10).
    - Push forçado (`--force`, `-f`, `+branch`…) continua bloqueado mesmo com a opção ligada.
    - A regra de pedir explicitamente e a de nunca usar a `main` vêm das instruções ao modelo, e não de uma trava técnica (ver ADR-10). Revise o resultado antes de abrir o PR.
-9. **Cota e memória:** o canto superior direito mostra quantos orquestradores e agentes estão trabalhando, o uso dos limites da assinatura (5 horas / 7 dias) e a **RAM livre** do computador, com quanto os agentes estão usando. Cada terminal com pedido rodando mostra a RAM do seu processo na barra de título.
+9. **Cota e memória:** a barra de título (no navegador, o canto superior direito) mostra quantos orquestradores e agentes estão trabalhando, o uso dos limites da assinatura (5 horas / 7 dias) e a **RAM livre** do computador, com quanto os agentes estão usando. Cada terminal com pedido rodando mostra a RAM do seu processo na barra de título.
    - **Memória baixa** (menos de 1,5 GB ou 10% livres): aparece um alerta amarelo.
    - **Memória crítica** (menos de 0,8 GB ou 5%): o alerta fica vermelho. Espere os pedidos terminarem, feche programas ou use Sonnet/Haiku nos subagentes.
 
    Vários Subagentes Opus em paralelo consomem a cota rapidamente, e esforço *Extra alto* ou *Máximo* acelera ainda mais. Se ela acabar, o pedido termina com a mensagem do Claude no terminal.
 
-10. **Se o servidor cair:** aparece no topo a faixa vermelha **Servidor desconectado**, com o tempo fora do ar e como subir de novo.
+10. **Se o servidor cair:** aparece no topo a faixa vermelha **Servidor desconectado**, com o tempo fora do ar. O aplicativo religa o servidor sozinho; se ele não voltar, feche e abra o Orquestrador de novo (o motivo fica em `%APPDATA%\Orquestrador de Agentes\logs\servidor.log`).
     - O canvas fica cinza e as animações param.
     - Dá para continuar escrevendo nos terminais, mas o envio fica bloqueado.
-    - A aba do navegador mostra "⚠ Desconectado".
+    - O título da página passa a "⚠ Desconectado".
 
     Quando o servidor volta, a tela reconecta sozinha e mostra **Servidor reconectado**. Se ele foi reiniciado, os pedidos que rodavam aparecem como interrompidos; é só reenviar.
 11. **Bloco de notas:** para anotar observações e coisas para fazer depois, ao lado dos terminais.
