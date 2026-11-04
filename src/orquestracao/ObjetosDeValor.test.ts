@@ -7,6 +7,7 @@ import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { ESFORCOS_DE_RACIOCINIO } from "./EsforcoDeRaciocinio";
 import {
   instrucoesDoOrquestrador,
+  instrucoesDoSubagente,
   MARCADOR_DE_PLANO,
   mensagemDeAprovacaoDoPlano,
   mensagemParaOOrquestrador,
@@ -281,9 +282,31 @@ describe("instrucoesDoOrquestrador", () => {
 
     expect(texto).not.toContain("não leia, edite nem execute nada diretamente");
     expect(texto).toContain("Faça você mesmo o trivial quando o bloco <configuracao-do-pedido> permitir");
-    expect(texto).toContain("Nunca edite arquivos você mesmo");
+    expect(texto).toContain("Nunca edite arquivos você mesmo: toda alteração, por menor que seja, vai para um subagente.");
     expect(texto).toContain("as regras de delegação, a quantidade de subagentes e as permissões");
     expect(texto).toContain("Responda sempre em português.");
+  });
+
+  it("na regra 4, manda copiar literalmente as restrições do usuário e passar o que já descobriu", () => {
+    const texto = instrucoesDoOrquestrador(pasta);
+
+    expect(texto).toContain(
+      "Copie literalmente as restrições do pedido do usuário e as permissões e a regra de commit/push do bloco, e passe o que você já descobriu (caminhos, trechos, causa provável).",
+    );
+  });
+});
+
+describe("instrucoesDoSubagente", () => {
+  const pasta = PastaDeTrabalho.dentroDe(raiz, "painel");
+
+  it.each([false, true])("respeita as restrições, para e relata, e usa o contexto recebido (commit e push: %s)", (permite) => {
+    const texto = instrucoesDoSubagente(pasta, permite);
+
+    expect(texto).toContain(
+      "Respeite as restrições da subtarefa. Se cumpri-la exigir alterar algo que ela proíbe (ex.: testes), não altere: pare e relate o motivo.",
+    );
+    expect(texto).toContain("Use o contexto recebido; não refaça buscas amplas que já vieram prontas.");
+    expect(texto).toContain(pasta.caminho);
   });
 });
 
@@ -417,6 +440,33 @@ describe("mensagemParaOOrquestrador: delegação e pedidos grandes", () => {
 
   const REGRA_ESTRITA =
     '- Não faça o trabalho você mesmo: não leia, edite nem execute nada diretamente; delegue cada subtarefa a um subagente "executor". Perguntas simples sobre o que já foi feito podem ser respondidas diretamente.';
+  const REGRA_DAS_RESTRICOES =
+    '- Ao delegar, copie LITERALMENTE para a subtarefa todas as restrições e exigências do pedido do usuário — o que não pode ser alterado (ex.: "não altere os testes"), arquivos ou pastas proibidos, padrões a seguir, formato da resposta — e as permissões e a regra de commit/push deste bloco.';
+  const REGRA_DO_CONTEXTO =
+    "- Entregue o contexto pronto: a subtarefa leva o que você já descobriu — caminhos exatos, trechos e linhas relevantes, causa provável, o comando que confere o resultado — para o subagente não refazer buscas.";
+
+  describe("subtarefas: restrições e contexto", () => {
+    it.each<[string, Opcoes, ModoDoTurno]>([
+      ["trabalho direto ligado", {}, "execucao"],
+      ["trabalho direto desligado", { permitirTrabalhoDireto: false }, "execucao"],
+      ["planejamento", {}, "planejamento"],
+    ])("com %s, manda repassar as restrições literalmente e entregar o contexto pronto", (_caso, opcoes, modo) => {
+      const texto = bloco(opcoes, modo);
+
+      expect(texto).toContain(REGRA_DAS_RESTRICOES);
+      expect(texto).toContain(REGRA_DO_CONTEXTO);
+    });
+
+    it("com trabalho direto ligado, sempre diz que o orquestrador não edita arquivos", () => {
+      expect(bloco()).toContain('- Você não edita arquivos: toda alteração vai para um subagente "executor", por menor que seja.');
+    });
+
+    it("com trabalho direto desligado, mantém a regra estrita junto das regras da subtarefa", () => {
+      const texto = bloco({ permitirTrabalhoDireto: false });
+
+      expect(texto).toContain(`${REGRA_ESTRITA}\n${REGRA_DAS_RESTRICOES}\n${REGRA_DO_CONTEXTO}`);
+    });
+  });
 
   describe("trabalho direto", () => {
     it("ligado (padrão): faz o trivial, delega o que vale a pena e não edita arquivos", () => {

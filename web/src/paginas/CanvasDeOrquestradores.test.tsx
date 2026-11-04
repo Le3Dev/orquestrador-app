@@ -73,7 +73,7 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
     const painel = campo.closest(".react-flow__panel");
     expect(painel).toHaveClass("bottom", "center", "painel-do-chat");
     expect(screen.getByTestId("chat-rapido")).toHaveClass("nodrag", "nowheel", "nopan");
-    expect(screen.getByRole("button", { name: /Modelo: Opus 5\.5, esforço alto/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Modelo: Sonnet 5\.5, esforço médio/ })).toBeInTheDocument();
   });
 });
 

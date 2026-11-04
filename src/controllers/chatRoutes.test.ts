@@ -123,7 +123,7 @@ describe("rotas do chat", () => {
     expect(await resposta.json()).toEqual({
       sessaoId: "sessao-1",
       situacao: "ocioso",
-      preferencias: { modelo: "opus", esforco: "alto" },
+      preferencias: { modelo: "sonnet", esforco: "medio" },
       mensagens: [],
       ultimaSequencia: 0,
       cota: null,
@@ -185,7 +185,7 @@ describe("rotas do chat", () => {
   it("PATCH /chat/preferencias altera e valida", async () => {
     const ok = await enviar("/chat/preferencias", "PATCH", { modelo: "fable" });
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ modelo: "fable", esforco: "alto" });
+    expect(await ok.json()).toEqual({ modelo: "fable", esforco: "medio" });
 
     const modelo = await enviar("/chat/preferencias", "PATCH", { modelo: "gpt" });
     expect(modelo.status).toBe(400);

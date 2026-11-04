@@ -160,8 +160,8 @@ describe("ServicoDeChat", () => {
       instrucoes: expect.stringContaining("Orquestrador de agentes"),
       pastaDaSessao: "/dados/chat/sessao",
       pastaDosProjetos: raiz,
-      modelo: "opus",
-      esforco: "alto",
+      modelo: "sonnet",
+      esforco: "medio",
       imagens: [],
       pastaDasImagens: null,
     });
@@ -295,7 +295,7 @@ describe("ServicoDeChat", () => {
     const estado = servico.estado();
     expect(estado.sessaoId).not.toBe("sessao-1");
     expect(estado.mensagens).toEqual([]);
-    expect(estado.preferencias).toEqual({ modelo: "fable", esforco: "alto" });
+    expect(estado.preferencias).toEqual({ modelo: "fable", esforco: "medio" });
   });
 
   it("limpar é recusado durante a resposta e não faz nada numa conversa vazia", async () => {
@@ -307,7 +307,7 @@ describe("ServicoDeChat", () => {
   });
 
   it("alterarPreferencias publica o evento e vale para a próxima pergunta", async () => {
-    expect(await servico.alterarPreferencias({ esforco: "maximo" })).toEqual({ modelo: "opus", esforco: "maximo" });
+    expect(await servico.alterarPreferencias({ esforco: "maximo" })).toEqual({ modelo: "sonnet", esforco: "maximo" });
     expect(publicados.at(-1)).toMatchObject({ tipo: "preferencias_alteradas", preferencias: { esforco: "maximo" } });
 
     await servico.perguntar({ texto: "oi" });

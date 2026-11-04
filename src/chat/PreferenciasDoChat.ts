@@ -9,7 +9,12 @@ export interface DadosDasPreferenciasDoChat {
 
 export type AlteracoesDasPreferenciasDoChat = Partial<DadosDasPreferenciasDoChat>;
 
-const PADRAO: DadosDasPreferenciasDoChat = { modelo: "opus", esforco: "alto" };
+/**
+ * Sonnet com esforço médio: o mais econômico que ainda responde bem à maioria
+ * das perguntas (ver ADR-22). Só vale para quem ainda não tem
+ * `preferencias.json`; uma escolha já gravada continua valendo.
+ */
+const PADRAO: DadosDasPreferenciasDoChat = { modelo: "sonnet", esforco: "medio" };
 
 /**
  * Modelo e esforço com que o chat responde. Objeto de valor: para alterar,
