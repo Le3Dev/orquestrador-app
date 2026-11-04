@@ -29,7 +29,7 @@ cp .env.example .env   # opcional: os padrões funcionam neste computador
 | Variável | Padrão | Para quê |
 |---|---|---|
 | `PORTA` | `3200` | Porta da API (escuta só em `127.0.0.1`) |
-| `PASTA_RAIZ_PROJETOS` | pasta acima deste projeto (caminho relativo é resolvido a partir da pasta do app, não de onde o comando roda) | Raiz dentro da qual os Orquestradores podem trabalhar |
+| `PASTA_RAIZ_PROJETOS` | pasta acima deste projeto (caminho relativo é resolvido a partir da pasta do app, não de onde o comando roda) | Onde o navegador de pastas da criação começa (atalho *Projetos*). Os Orquestradores podem trabalhar em qualquer pasta do computador (ver ADR-19) |
 | `CLAUDE_CODE_BIN` | `%APPDATA%\npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe` | Executável **nativo** do Claude Code (o `claude.cmd` não serve: o app inicia o processo sem shell) |
 | `PASTA_DADOS` | `dados/` dentro da pasta do app | Histórico dos Orquestradores e as notas do canvas (`notas/`) |
 
@@ -109,7 +109,7 @@ Casos de teste das **instruções personalizadas** (ver ADR-17):
 - **Montagem (`InstrucoesPersonalizadas`):** vazio ou só espaços → nenhuma linha no bloco (mensagem idêntica à de antes); só o padrão global → cabeçalho "padrão do usuário"; só as do Orquestrador → "deste orquestrador"; as duas → valem as do Orquestrador, sem somar; texto longo (4.000 passa, 4.001 é recusado com a contagem); quebras de linha, `{{x}}`, `$&`, crases, aspas e emoji chegam intactos; tags `</configuracao-do-pedido>` e `</instrucoes-do-usuario>` escritas no texto são desarmadas (`‹`); apagar as instruções no meio da conversa manda a linha de revogação; o prompt de sistema e o argv nunca levam o texto.
 - **Persistência:** o campo reabre igual por Orquestrador, sem misturar; orquestradores salvos antes do campo valem `""`; `preferencias.json` ausente vale vazio e ilegível é renomeado para `preferencias.ilegivel.json`.
 - **Serviço:** editar vale no pedido seguinte; um pedido em andamento segue com as instruções com que começou; não vazam entre Orquestradores; `/clear` zera a revogação.
-- **Rotas:** POST/PATCH aceitam e devolvem o campo; acima do limite → 400; `GET/PATCH /preferencias`; `POST /previa-do-prompt` mostra o bloco e recusa pasta fora da raiz.
+- **Rotas:** POST/PATCH aceitam e devolvem o campo; acima do limite → 400; `GET/PATCH /preferencias`; `POST /previa-do-prompt` mostra o bloco.
 - **Tela:** contador e aviso de limite; prévia do prompt final; painel *Preferências* (Salvar só com mudança, Cancelar descarta); chip *instruções* no terminal; resumo com *instruções próprias*.
 
 Casos de teste dos **subagentes prontos** (ver ADR-18):
@@ -118,6 +118,13 @@ Casos de teste dos **subagentes prontos** (ver ADR-18):
 - **`agentes.json`:** sem prontos, só o `executor`; cada pronto tem as ferramentas e o esforço do `executor` e não lança outros agentes; `herdar` usa o modelo dos subagentes; no planejamento só leem; seguem a regra de commit e push do turno; o prompt traz as regras do executor com o nome do pronto e a especialidade no fim.
 - **Serviço e rotas:** o turno captura a lista no início; `PATCH /preferencias` grava e a prévia lista; inválidos → 400 sem gravar nada.
 - **Adaptador e tela:** `subagente_iniciado.papel` vem do `subagent_type` (sem ele, `executor`); o log mostra *instanciou <nome>#…*; o painel lista, adiciona (nome ajustado para minúsculas e hífen), remove e trava em 10.
+
+Casos de teste da **escolha de qualquer pasta** (ver ADR-19):
+- **`PastaDeTrabalho`:** aceita caminho absoluto fora da pasta dos projetos; relativo parte dela; vazio é recusado.
+- **`ExploradorDePastas`:** sem caminho abre a pasta dos projetos; abre pasta de fora; esconde ocultas, `node_modules` e `$…`; ignora arquivos; mostra links e junctions para pastas e esconde os quebrados; `acima` é `null` na raiz do disco; inexistente ou arquivo → `A pasta "…" não existe.`; unidades só no Windows, consultadas uma vez a cada 30 s, e a que não responde em 1 s fica de fora; no Windows, `D:` sozinho vira `D:\`.
+- **Worktree em subpasta (`GerenciadorDeWorktreesGit`, com git de verdade):** na raiz do repositório, o turno roda na raiz do worktree; numa subpasta versionada, na mesma subpasta dentro do worktree; numa subpasta não versionada, na própria pasta, sem worktree.
+- **Rotas:** `GET /pastas` com e sem `caminho`, inexistente → 400, dois `caminho` → 400; `POST /orquestradores` cria fora da pasta dos projetos e continua recusando pasta inexistente; a prévia aceita pasta de fora.
+- **Tela (`NavegadorDePastas`):** abre sem escolher; entrar, subir e atalhos escolhem; ↑ desabilitado na raiz do disco; Enter no caminho abre sem enviar o formulário; caminho inválido mostra o erro e mantém a pasta; *Usar esta pasta*; espera o servidor voltar; resposta atrasada de um Enter antigo é descartada; a carga inicial não apaga o que já foi digitado; falha na carga inicial oferece *Tentar de novo*; com caminho digitado e não aberto, avisa *Tecle Enter* e *iniciar orquestrador* fica desabilitado; a escolha usa o callback mais recente.
 
 ## Tecnologias
 
@@ -271,6 +278,7 @@ flowchart TD
 **Worktree por Orquestrador** (`GerenciadorDeWorktreesGit`, atrás da porta `GerenciadorDeWorktrees`):
 - **Quando:** antes de cada turno, se a pasta estiver dentro de um repositório git que já tenha HEAD (um `git init` sem commit não serve). Qualquer falha do git faz o turno rodar na pasta normal, sem quebrar o pedido.
 - **O que é criado:** `git worktree add -b orquestrador/<id> <caminho> HEAD`, ou seja, uma branch `orquestrador/<id do Orquestrador>` a partir do HEAD atual da pasta. Alterações não commitadas da pasta original não vão para o worktree. Se a branch já existir, ela é reaproveitada; se o worktree já existir no caminho, nada é refeito.
+- **Pasta escolhida dentro do repositório** (ver ADR-19): o worktree é do repositório inteiro, e o turno roda na subpasta equivalente dentro dele (`git rev-parse --show-prefix`). Subpasta não versionada no HEAD: o turno roda na própria pasta, sem worktree.
 - **Onde fica:** `<PASTA_DADOS>/worktrees/<8 primeiros caracteres do id>`. O caminho é curto de propósito, para não estourar o `MAX_PATH` do Windows quando os agentes criam `node_modules` lá dentro; a criação e a remoção usam `git -c core.longpaths=true`.
 - **No fim do turno:** sem alterações (`git status --porcelain` vazio), o worktree é removido (seguido de `git worktree prune`). A branch `orquestrador/<id>` só é apagada (`git branch -D`) se não tiver commits que não existam em outra ref: o app confere com `git rev-list --count refs/heads/orquestrador/<id> --not --exclude=refs/heads/orquestrador/<id> --all` (outras branches, tags, remotas, stash e HEADs). Se tiver (ex.: um commit feito direto nela, com a opção de commit ligada, ver ADR-10), ou se a conferência falhar, a branch é mantida e o servidor avisa no log do console (`[worktrees] A branch "orquestrador/<id>" tem commits que não estão em nenhuma outra branch; mantida…`). Com alterações, o worktree fica e é marcado como inativo; o próximo turno continua nele.
 - **Branches criadas pelo agente** (ex.: `feature/x` via `git checkout -b` dentro do worktree) nunca são apagadas pelo app: os worktrees compartilham as branches com o repositório, então elas aparecem no repositório do projeto.
@@ -527,6 +535,22 @@ flowchart TD
   - o prompt do pronto vai como prompt de sistema do subagente, renovado a cada lançamento: editar vale no próximo pedido;
   - o bixinho continua com nome de bicho; só o log mostra o tipo.
 
+**ADR-19 — Pasta de trabalho: qualquer pasta do computador.**
+- *Contexto:*
+  - a criação só oferecia as pastas de primeiro nível dentro de `PASTA_RAIZ_PROJETOS` (ou a própria raiz), e o servidor recusava qualquer caminho fora dela. A trava existia para um caminho digitado errado (`..\..\Windows`) não virar área de trabalho dos agentes;
+  - o usuário quer escolher qualquer pasta: uma subpasta de um projeto, um projeto em outro disco ou fora da pasta dos projetos.
+- *Decisão:*
+  - `PastaDeTrabalho.resolver(base, caminho)` aceita qualquer caminho; relativo parte da pasta dos projetos. A rota continua conferindo que a pasta existe;
+  - **navegador de pastas na tela**, e não o seletor nativo do sistema: o navegador não entrega o caminho de uma pasta escolhida no diálogo do sistema, e abrir um diálogo pelo servidor dependeria do sistema operacional (PowerShell no Windows, `osascript` no macOS). `GET /pastas?caminho=` lista as subpastas de qualquer pasta, com a pasta acima e atalhos;
+  - `PASTA_RAIZ_PROJETOS` vira só o ponto de partida do navegador (atalho *Projetos*);
+  - a escolha continua explícita: o navegador abre na pasta dos projetos sem escolher nada; entrar numa pasta, subir, usar um atalho ou digitar um caminho escolhe a pasta aberta.
+- *Consequências:*
+  - a proteção contra erro de digitação agora é ver a pasta antes de escolher, e não uma trava. Uma pasta ampla (a pasta pessoal ou a raiz do disco) é aceita: com *Editar e rodar comandos*, os agentes podem mexer em tudo dentro dela;
+  - pastas ocultas não aparecem na lista, mas dá para abrir digitando o caminho;
+  - **subpasta de um repositório git:** o worktree (ver *Worktree por Orquestrador*) é sempre do repositório inteiro; o turno roda na subpasta equivalente dentro dele (`git rev-parse --show-prefix`). Se a subpasta não estiver versionada no HEAD, ela não existe no worktree, e o turno roda na própria pasta, sem worktree;
+  - enquanto houver um caminho digitado e não aberto (Enter), *iniciar orquestrador* fica desabilitado, para não criar na pasta anterior por engano;
+  - orquestradores já criados não mudam.
+
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
 - `modelUsage` acumula a sessão, então o consumo do turno vem de `model_usage_since_last_result`;
@@ -549,7 +573,7 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | Método | Rota | Entrada | Resposta |
 |---|---|---|---|
 | GET | `/saude` | — | `{ ok: true, iniciadoEm, memoria: { totalBytes, livreBytes, servidorBytes, agentesBytes, porOrquestrador } }`. A tela consulta a cada 3 s; um `iniciadoEm` diferente indica que o servidor reiniciou. A memória é medida a cada 5 s. |
-| GET | `/pastas` | — | `{ raiz, pastas: [{ nome, caminho }] }` |
+| GET | `/pastas?caminho=` | `caminho` opcional: qualquer pasta do computador (relativo parte da pasta dos projetos); sem ele, a pasta dos projetos | `{ raiz, atual, acima, pastas: [{ nome, caminho }], atalhos: [{ nome, caminho }] }`: `acima` é `null` na raiz do disco; ocultas (`.`), `node_modules` e pastas de sistema do Windows (`$…`, `System Volume Information`) ficam de fora; `atalhos` traz *Projetos*, *Pasta pessoal* e, no Windows, as unidades. unidades consultadas em paralelo, com 1 s de limite cada, e guardadas por 30 s; links e junctions para pastas aparecem. 400 `A pasta "…" não existe.`, `Sem permissão para abrir a pasta "…".`, `Não foi possível abrir a pasta "…".` (outras falhas de leitura) ou `Informe um único caminho.` (`caminho` repetido) (ver ADR-19) |
 | GET | `/orquestradores` | — | `[ResumoDoOrquestrador]` |
 | POST | `/orquestradores` | `{ nome, pastaDeTrabalho, modeloDoOrquestrador, modeloDosSubagentes, quantidadeDeSubagentes: { modo: "fixa" \| "automatica", limite: 1–10 }, nivelDePermissao, permitirCommitEPush?: boolean, esforcoDoOrquestrador?, esforcoDosSubagentes?, permitirTrabalhoDireto?: boolean, proporPlanoEmPedidosGrandes?: boolean, instrucoesPersonalizadas?: string }` (mesmo esquema de configuração do PATCH; `permitirCommitEPush` ausente vale `false`; esforços ausentes valem `"padrao"`; `permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes` ausentes valem `true`; `instrucoesPersonalizadas` ausente vale `""`) | 201 + orquestrador com `turnos` (400 se algum campo for inválido, ex.: `permitirCommitEPush` não booleano, esforço fora da lista: `Esforço do orquestrador inválido.` / `Esforço dos subagentes inválido.`, ou as opções novas não booleanas: `A opção "Deixar o orquestrador fazer o trivial sozinho" deve ser verdadeira ou falsa.` / `A opção "Propor plano antes de mudanças grandes" deve ser verdadeira ou falsa.`) |
 | GET | `/orquestradores/:id` | — | orquestrador com `turnos` (resumo de cada Turno e seus Subagentes) |
@@ -564,7 +588,7 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | GET | `/orquestradores/:id/eventos` | cabeçalho opcional `Last-Event-ID` ou `?desde=` (última sequência recebida) | `text/event-stream`: histórico desde a sequência informada + eventos novos |
 | GET | `/preferencias` | — | `{ instrucoesPadrao, subagentesProntos }` (`""` e `[]` sem preferências gravadas; ver ADR-17 e ADR-18) |
 | PATCH | `/preferencias` | `{ instrucoesPadrao?: string, subagentesProntos?: [{ nome, descricao, prompt, modelo?: "herdar" \| "opus" \| "sonnet" \| "haiku" }] }` (`""` apaga as instruções; a lista troca inteira, `[]` apaga) | 200 + `{ instrucoesPadrao, subagentesProntos }`. Vale a partir do próximo pedido de cada Orquestrador. 400 com a mensagem do campo, ex.: `As instruções padrão devem ter até 4000 caracteres (hoje têm N).`, `O nome "executor" é reservado; escolha outro.`, `Já existe um subagente pronto chamado "revisor".` |
-| POST | `/previa-do-prompt` | `{ configuracao, pastaDeTrabalho?, modo?: "execucao" \| "planejamento" }` (`configuracao` no esquema do POST, sem nome nem pasta) | `{ instrucoesIniciais, mensagem, origemDasInstrucoes }`: o prompt de sistema da conversa e a mensagem de um pedido de exemplo, com o bloco e as instruções que valeriam. Não salva nada. 400 com pasta fora da raiz |
+| POST | `/previa-do-prompt` | `{ configuracao, pastaDeTrabalho?, modo?: "execucao" \| "planejamento" }` (`configuracao` no esquema do POST, sem nome nem pasta) | `{ instrucoesIniciais, mensagem, origemDasInstrucoes }`: o prompt de sistema da conversa e a mensagem de um pedido de exemplo, com o bloco e as instruções que valeriam. Não salva nada. |
 | GET | `/notas` | — | 200 `[DadosDaNota]`, por `criadaEm` crescente |
 | POST | `/notas` | `{ titulo?: string, texto?: string }` (corpo vazio vale; ausentes: `"Nova nota"` e `""`) | 201 + `DadosDaNota` (400 com as mensagens abaixo) |
 | PATCH | `/notas/:id` | `{ titulo?: string, texto?: string }` (só o enviado muda) | 200 + `DadosDaNota`; `atualizadaEm` só muda se o conteúdo mudar. Com algum campo inválido, 400 e nada é gravado (404 `Nota não encontrada.`) |
@@ -649,7 +673,7 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 - o minimapa no canto inferior direito mostra onde cada coisa está (as notas têm cor própria);
 - enquanto você arrasta um terminal/bixinho ou move o canvas, as animações dos nós pausam e a bolinha das linhas some (para o movimento ficar leve); tudo volta ao soltar.
 
-1. **Criar um Orquestrador:** clique em *+ Novo orquestrador*. Abre um terminal de configuração: escolha a **pasta** do projeto (o nome é sugerido a partir dela). Depois defina:
+1. **Criar um Orquestrador:** clique em *+ Novo orquestrador*. Abre um terminal de configuração: escolha a **pasta** de trabalho, que pode ser qualquer pasta do computador (o nome é sugerido a partir dela). O navegador começa na pasta dos projetos: clique numa subpasta para entrar nela, use ↑ para subir, os atalhos (*Projetos*, *Pasta pessoal* e, no Windows, as unidades) ou digite um caminho e tecle Enter. A pasta aberta é a escolhida; ao abrir o terminal, *Usar esta pasta* escolhe a pasta dos projetos. Depois defina:
    - **Modelos:** o do Orquestrador planeja e sintetiza; o dos Subagentes executa. Opus é o mais capaz; Haiku é rápido e gasta menos cota.
    - **Esforço:** abaixo de cada modelo há uma lista, *Esforço do orquestrador* e *Esforço dos subagentes*, com *Padrão (Claude Code)*, *Baixo*, *Médio*, *Alto*, *Extra alto* e *Máximo*. Cada papel tem o seu.
      - *Padrão (Claude Code)* (o inicial) não força nada: vale o `settings.json` do Claude Code desta máquina ou, sem ele, o padrão do modelo. Neste computador, hoje, isso dá *Extra alto* (`xhigh`) no Opus 5.5, porque está salvo nas configurações do Claude Code.
