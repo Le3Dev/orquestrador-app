@@ -109,9 +109,6 @@ export function NoRascunho({ id, selected }: NodeProps<TipoDoNo>) {
                   aoMudarPendencia={setPastaPendente}
                   conectado={servidor.conectado}
                 />
-                <span className="hint">
-                  Qualquer pasta do computador. Os agentes só trabalham dentro dela.
-                </span>
               </div>
               <div className="field">
                 <label className="label" htmlFor={`${idDoCampo}-nome`}>

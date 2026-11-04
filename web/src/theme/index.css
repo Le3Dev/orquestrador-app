@@ -240,6 +240,17 @@ h3 { font-size: 12px; font-weight: 600; }
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--active) 22%, transparent);
 }
 
+/* Flecha própria: a nativa encosta na borda (sobretudo no Chrome do macOS). */
+.select {
+  appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%23b0aea5' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 12px;
+  cursor: pointer;
+}
+.select:disabled { cursor: not-allowed; opacity: .6; }
 .select option { background: var(--surface-2); color: var(--primary); }
 
 .hint { font-size: 11px; color: var(--muted); }
@@ -1117,6 +1128,21 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 }
 
 /* Navegador de pastas da criação do orquestrador. */
+.botao-pasta-acima { height: auto; min-width: 40px; padding: 0 12px; font-size: 14px; }
+.atalho-de-pasta {
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-forte);
+  background: var(--surface-2);
+  color: var(--secondary);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.atalho-de-pasta:not(:disabled):hover { background: var(--surface-3); color: var(--primary); }
+.atalho-de-pasta:disabled { opacity: .5; cursor: not-allowed; }
+.atalho-de-pasta-atual { border-color: var(--active); color: var(--primary); }
 .lista-de-pastas {
   max-height: 180px;
   overflow-y: auto;
@@ -1127,7 +1153,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 }
 .item-de-pasta {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
   width: 100%;
   padding: 5px 8px;
   border-radius: 6px;

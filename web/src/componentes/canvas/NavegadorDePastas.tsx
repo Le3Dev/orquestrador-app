@@ -87,7 +87,9 @@ export function NavegadorDePastas({ id, valor, aoEscolher, aoMudarPendencia, con
     }
   }, [carregou, conectado]);
 
-  const pendente = abrindo || (conteudo !== null && digitado.trim() !== conteudo.atual);
+  // Campo vazio não é caminho pendente: ao sair dele, volta a mostrar a pasta aberta.
+  const digitadoPendente = conteudo !== null && digitado.trim() !== "" && digitado.trim() !== conteudo.atual;
+  const pendente = abrindo || digitadoPendente;
   useEffect(() => {
     aoMudarPendenciaAtual.current?.(pendente);
   }, [pendente]);
@@ -106,21 +108,10 @@ export function NavegadorDePastas({ id, valor, aoEscolher, aoMudarPendencia, con
 
   return (
     <div className="navegador-de-pastas flex flex-col gap-2">
-      <div className="flex gap-2">
-        <input
-          id={id}
-          ref={campo}
-          className="input mono flex-1 text-[12px]"
-          value={digitado}
-          placeholder={conteudo === null && erro === null ? "carregando pastas…" : "digite um caminho e tecle Enter"}
-          spellCheck={false}
-          autoComplete="off"
-          onChange={(evento) => setDigitado(evento.target.value)}
-          onKeyDown={aoTeclar}
-        />
+      <div className="flex items-stretch gap-2">
         <button
           type="button"
-          className="btn btn-sm btn-outline"
+          className="btn btn-outline botao-pasta-acima"
           title="Pasta acima"
           aria-label="Pasta acima"
           disabled={abrindo || conteudo?.acima == null}
@@ -128,15 +119,28 @@ export function NavegadorDePastas({ id, valor, aoEscolher, aoMudarPendencia, con
         >
           ↑
         </button>
+        <input
+          id={id}
+          ref={campo}
+          className="input mono min-w-0 flex-1 text-[12px]"
+          value={digitado}
+          placeholder={conteudo === null && erro === null ? "carregando pastas…" : "digite um caminho e tecle Enter"}
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(evento) => setDigitado(evento.target.value)}
+          onKeyDown={aoTeclar}
+          onBlur={() => conteudo !== null && digitado.trim() === "" && setDigitado(conteudo.atual)}
+        />
       </div>
 
       {conteudo !== null && conteudo.atalhos.length > 0 && (
-        <div className="flex flex-wrap gap-1.5" aria-label="Atalhos">
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Atalhos">
+          <span className="rotulo-tecnico mr-1">ir para</span>
           {conteudo.atalhos.map((atalho) => (
             <button
               key={atalho.caminho}
               type="button"
-              className="btn btn-sm btn-ghost"
+              className={`atalho-de-pasta ${conteudo.atual === atalho.caminho ? "atalho-de-pasta-atual" : ""}`}
               title={atalho.caminho}
               disabled={abrindo}
               onClick={() => abrir(atalho.caminho, true)}
@@ -161,7 +165,8 @@ export function NavegadorDePastas({ id, valor, aoEscolher, aoMudarPendencia, con
                   disabled={abrindo}
                   onClick={() => abrir(subpasta.caminho, true)}
                 >
-                  <span aria-hidden="true">▸</span> {subpasta.nome}
+                  <span aria-hidden="true">▸</span>
+                  <span className="truncate">{subpasta.nome}</span>
                 </button>
               </li>
             ))
@@ -169,24 +174,30 @@ export function NavegadorDePastas({ id, valor, aoEscolher, aoMudarPendencia, con
         </ul>
       )}
 
-      {conteudo !== null &&
-        (escolhida ? (
-          <span className="hint">
-            ✓ Escolhida: <strong className="mono text-caption">{nomeDaPasta(conteudo.atual)}</strong>
-          </span>
-        ) : (
-          <button
-            type="button"
-            className="btn btn-sm btn-outline self-start"
-            disabled={abrindo}
-            onClick={() => aoEscolher(conteudo.atual)}
-          >
-            Usar esta pasta
-          </button>
-        ))}
-
-      {conteudo !== null && pendente && !abrindo && (
-        <span className="hint text-warning">Tecle Enter para abrir o caminho digitado.</span>
+      {/* Uma linha só de situação: pendente, escolhida ou ainda por escolher. */}
+      {conteudo !== null && (
+        <div className="flex min-h-7 items-center justify-between gap-2">
+          {digitadoPendente ? (
+            <span className="hint text-warning">Tecle Enter para abrir o caminho digitado.</span>
+          ) : escolhida ? (
+            <span className="hint truncate">
+              ✓ Os agentes trabalham só dentro de{" "}
+              <strong className="mono text-caption">{nomeDaPasta(conteudo.atual)}</strong>
+            </span>
+          ) : (
+            <>
+              <span className="hint">Entre numa pasta ou use esta. Pode ser qualquer pasta do computador.</span>
+              <button
+                type="button"
+                className="btn btn-sm btn-outline shrink-0"
+                disabled={abrindo}
+                onClick={() => aoEscolher(conteudo.atual)}
+              >
+                Usar esta pasta
+              </button>
+            </>
+          )}
+        </div>
       )}
 
       {erro !== null && <p className="mono texto-longo text-[11.5px] text-error">✗ {erro}</p>}

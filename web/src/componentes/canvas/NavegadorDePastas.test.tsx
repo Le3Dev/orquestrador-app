@@ -133,7 +133,7 @@ describe("NavegadorDePastas", () => {
 
     rerender(<NavegadorDePastas id="pasta" valor="/u/projetos" aoEscolher={aoEscolher} conectado />);
     expect(screen.queryByRole("button", { name: "Usar esta pasta" })).not.toBeInTheDocument();
-    expect(screen.getByText(/Escolhida:/)).toHaveTextContent("✓ Escolhida: projetos");
+    expect(screen.getByText(/trabalham só dentro de/)).toHaveTextContent("✓ Os agentes trabalham só dentro de projetos");
   });
 
   it("com o servidor fora, espera ele voltar para carregar", async () => {
@@ -226,5 +226,21 @@ describe("NavegadorDePastas", () => {
 
     await waitFor(() => expect(novo).toHaveBeenCalledWith("/u/projetos/painel"));
     expect(antigo).not.toHaveBeenCalled();
+  });
+
+  it("apagar o caminho não trava a criação, e sair do campo vazio volta a mostrar a pasta aberta", async () => {
+    vi.spyOn(api, "listarPastas").mockResolvedValue(projetos);
+    const aoMudarPendencia = vi.fn();
+    render(
+      <NavegadorDePastas id="pasta" valor="" aoEscolher={vi.fn()} aoMudarPendencia={aoMudarPendencia} conectado />,
+    );
+    const campo = await screen.findByDisplayValue("/u/projetos");
+
+    fireEvent.change(campo, { target: { value: "" } });
+    expect(aoMudarPendencia).not.toHaveBeenLastCalledWith(true);
+    expect(screen.queryByText(/Tecle Enter/)).not.toBeInTheDocument();
+    fireEvent.blur(campo);
+
+    expect(campo).toHaveValue("/u/projetos");
   });
 });
