@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>Ativar licença</title>
+    <style>
+      :root {
+        --bg: #141413;
+        --surface: #1c1c1a;
+        --surface-2: #232321;
+        --border: rgba(250, 249, 245, 0.12);
+        --texto: #faf9f5;
+        --muted: #b0aea5;
+        --laranja: #d97757;
+        --erro: #bf4d43;
+        --ok: #788c5d;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: var(--bg);
+        color: var(--texto);
+        font-family: system-ui, "Segoe UI", sans-serif;
+        display: flex;
+        flex-direction: column;
+      }
+      /* Faixa superior arrastável (titleBarStyle hidden cobre os botões). */
+      .barra { height: 40px; -webkit-app-region: drag; flex-shrink: 0; }
+      .conteudo {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 0 40px 40px;
+        -webkit-app-region: no-drag;
+      }
+      h1 { font-size: 20px; margin: 0 0 6px; }
+      p.sub { color: var(--muted); font-size: 13px; margin: 0 0 24px; line-height: 1.5; }
+      label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+      input {
+        width: 100%;
+        padding: 12px 14px;
+        font-size: 14px;
+        font-family: ui-monospace, "Cascadia Mono", monospace;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--texto);
+        outline: none;
+      }
+      input:focus { border-color: var(--laranja); }
+      button {
+        margin-top: 18px;
+        width: 100%;
+        padding: 12px;
+        font-size: 14px;
+        font-weight: 600;
+        border: none;
+        border-radius: 8px;
+        background: var(--laranja);
+        color: #141413;
+        cursor: pointer;
+      }
+      button:disabled { opacity: 0.6; cursor: default; }
+      .msg { margin-top: 16px; font-size: 13px; line-height: 1.5; min-height: 20px; }
+      .msg.erro { color: var(--erro); }
+      .msg.ok { color: var(--ok); }
+      .rodape { margin-top: 24px; font-size: 11px; color: var(--muted); line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <div class="barra"></div>
+    <div class="conteudo">
+      <h1>Orquestrador de Agentes</h1>
+      <p class="sub">Cole a sua chave de licença para ativar este computador. A ativação precisa de internet apenas desta vez.</p>
+      <label for="chave">Chave de licença</label>
+      <input id="chave" type="text" placeholder="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX" autocomplete="off" spellcheck="false" />
+      <button id="ativar">Ativar</button>
+      <div id="msg" class="msg"></div>
+      <div class="rodape">Sua licença permite ativar um número limitado de computadores. Para trocar de máquina, desative a licença nas configurações antes.</div>
+    </div>
+
+    <script>
+      const input = document.getElementById("chave");
+      const botao = document.getElementById("ativar");
+      const msg = document.getElementById("msg");
+
+      function mostrar(texto, tipo) {
+        msg.textContent = texto;
+        msg.className = "msg" + (tipo ? " " + tipo : "");
+      }
+
+      async function ativar() {
+        const chave = input.value.trim();
+        if (!chave) {
+          mostrar("Informe a chave de licença.", "erro");
+          return;
+        }
+        botao.disabled = true;
+        mostrar("Ativando…", "");
+        try {
+          const r = await window.electron.licenca.activate(chave);
+          if (r && r.ok) {
+            mostrar("Licença ativada. Abrindo o app…", "ok");
+            // O main troca para a janela principal e fecha esta.
+          } else {
+            mostrar((r && r.mensagem) || "Não foi possível ativar.", "erro");
+            botao.disabled = false;
+          }
+        } catch (e) {
+          mostrar("Erro ao ativar: " + (e && e.message ? e.message : e), "erro");
+          botao.disabled = false;
+        }
+      }
+
+      botao.addEventListener("click", ativar);
+      input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") ativar();
+      });
+      input.focus();
+    </script>
+  </body>
+</html>

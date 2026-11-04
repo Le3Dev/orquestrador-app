@@ -6,3 +6,7 @@ dados/
 .env
 *.log
 *.tsbuildinfo
+
+# Saída do empacotamento desktop (electron-builder)
+dist_electron/
+release/

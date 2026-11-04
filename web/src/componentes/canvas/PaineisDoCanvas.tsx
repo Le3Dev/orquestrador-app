@@ -14,6 +14,7 @@ import type { EstadoDoServidor } from "../../shared/hooks/useServidor";
 import { nivelDaMemoria, type NivelDaMemoria } from "../../shared/memoria";
 import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
 import { IconeOrquestrador, IconePasta } from "../Icones";
+import { ControlesDaJanela, rodandoNoDesktop } from "./ControlesDaJanela";
 
 /** Por quanto tempo o aviso de "reconectado" fica na tela. */
 const DURACAO_DO_AVISO_DE_VOLTA_MS = 10_000;
@@ -100,8 +101,14 @@ export function BarraDoCanvas({
   aoAlternarPreferencias,
   preferenciasAbertas,
 }: PropsDaBarra) {
+  // Dentro do app desktop (Electron), a própria barra vira a área de arraste da
+  // janela (-webkit-app-region: drag) e ganha os botões min/max/fechar. No
+  // navegador puro, `desktop` é false e nada muda.
+  const desktop = rodandoNoDesktop();
   return (
-    <div className="painel-flutuante flex items-center gap-3 px-3 py-2">
+    <div
+      className={`painel-flutuante flex items-center gap-3 px-3 py-2${desktop ? " barra-arrastavel" : ""}`}
+    >
       <div className="no-orquestrador-icone h-8 w-8">
         <IconeOrquestrador tamanho={18} />
       </div>
@@ -110,12 +117,12 @@ export function BarraDoCanvas({
         <span className="mono text-muted">claude code · canvas · local</span>
       </div>
       <span className="mx-1 h-8 w-px bg-border" />
-      <button type="button" className="btn btn-sm btn-cta" onClick={aoCriar}>
+      <button type="button" className="btn btn-sm btn-cta no-drag" onClick={aoCriar}>
         + Novo orquestrador
       </button>
       <button
         type="button"
-        className="btn btn-sm btn-cta"
+        className="btn btn-sm btn-cta no-drag"
         onClick={aoCriarNota}
         title="Cria uma nota no centro da tela (bloco de notas, salvo automaticamente)"
       >
@@ -123,7 +130,7 @@ export function BarraDoCanvas({
       </button>
       <button
         type="button"
-        className="btn btn-sm btn-outline"
+        className="btn btn-sm btn-outline no-drag"
         onClick={aoOrganizar}
         disabled={!podeOrganizar}
         title="Coloca os terminais lado a lado, e as notas em colunas à direita deles"
@@ -132,13 +139,14 @@ export function BarraDoCanvas({
       </button>
       <button
         type="button"
-        className="btn btn-sm btn-outline"
+        className="btn btn-sm btn-outline no-drag"
         onClick={aoAlternarPreferencias}
         aria-expanded={preferenciasAbertas}
         title="Instruções padrão para todos os orquestradores"
       >
         Preferências
       </button>
+      {desktop && <ControlesDaJanela />}
     </div>
   );
 }
