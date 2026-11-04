@@ -50,6 +50,7 @@ function renderizar(chat: EstadoDoChatNaTela = OCIOSO, desconectado = false) {
     erroAoCarregar: null,
     aoMudarPreferencias: vi.fn(),
     aoAbrirTerminal: vi.fn(),
+    temVagaPara: vi.fn().mockReturnValue(true),
     aoAtualizarOrquestradores: vi.fn().mockResolvedValue(undefined),
   };
   const resultado = render(<ChatRapido chat={chat} {...props} />);

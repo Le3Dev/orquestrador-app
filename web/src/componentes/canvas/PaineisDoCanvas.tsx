@@ -132,10 +132,20 @@ export function BarraDoCanvas({ aoCriar, aoCriarNota, aoOrganizar, podeOrganizar
   );
 }
 
-/** Falha numa ação do canvas (ex.: criar uma nota), logo abaixo da barra. */
-export function ErroDoCanvas({ erro, aoFechar }: { erro: string; aoFechar: () => void }) {
+interface PropsDoErroDoCanvas {
+  erro: string;
+  aoFechar: () => void;
+  /** "aviso" para recusas esperadas (ex.: limite de terminais abertos); padrão, erro. */
+  nivel?: "erro" | "aviso";
+}
+
+/** Falha ou recusa numa ação do canvas (ex.: criar uma nota), logo abaixo da barra. */
+export function ErroDoCanvas({ erro, aoFechar, nivel = "erro" }: PropsDoErroDoCanvas) {
   return (
-    <div className="alert alert-error mt-2 flex max-w-md items-start gap-2" role="alert">
+    <div
+      className={`alert ${nivel === "aviso" ? "alert-warning" : "alert-error"} mt-2 flex max-w-md items-start gap-2`}
+      role="alert"
+    >
       <span className="flex-1">{erro}</span>
       <button type="button" className="botao-icone shrink-0" title="Fechar aviso" onClick={aoFechar}>
         ✕
