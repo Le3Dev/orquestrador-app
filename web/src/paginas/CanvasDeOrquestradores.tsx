@@ -31,8 +31,11 @@ import { NoBixinho } from "../componentes/canvas/NoBixinho";
 import { NoNota } from "../componentes/canvas/NoNota";
 import { NoRascunho } from "../componentes/canvas/NoRascunho";
 import { NoTerminal } from "../componentes/canvas/NoTerminal";
+import { BarraDeTituloDoApp } from "../componentes/canvas/BarraDeTituloDoApp";
+import { rodandoNoDesktop } from "../shared/ponteDoDesktop";
 import {
   AvisoDeConexao,
+  AvisoDeMemoria,
   BarraDoCanvas,
   Doca,
   ErroDoCanvas,
@@ -86,8 +89,33 @@ import { useServidor } from "../shared/hooks/useServidor";
 // Flow atualizar o estado interno e re-renderizar por dentro.
 const TIPOS_DE_NO = { terminal: NoTerminal, rascunho: NoRascunho, bixinho: NoBixinho, nota: NoNota } satisfies NodeTypes;
 const TIPOS_DE_ARESTA = { bixinho: ArestaDoBixinho } satisfies EdgeTypes;
+// Nunca acima de 100%: o texto dos terminais só fica nítido em zoom inteiro
+// (100%), e enquadrar não deve ampliar além disso.
 const ENQUADRAMENTO_AO_ABRIR: FitViewOptions<NoDoCanvas> = { maxZoom: 1, padding: 0.15 };
 const VIEWPORT_PADRAO: Viewport = { x: 0, y: 0, zoom: 1 };
+
+/** Foco num campo de texto: o atalho é do campo, não do canvas. */
+function focoEmCampoDeTexto(alvo: EventTarget | null): boolean {
+  return (
+    alvo instanceof HTMLElement &&
+    (alvo.isContentEditable || alvo.tagName === "INPUT" || alvo.tagName === "TEXTAREA" || alvo.tagName === "SELECT")
+  );
+}
+
+/**
+ * O viewport em 100% mantendo no lugar o ponto do centro da área do canvas; a
+ * posição arredondada também evita texto borrado (meio pixel).
+ */
+function viewportEmCemPorCento(atual: Viewport, largura: number, altura: number): Viewport {
+  const centroX = largura / 2;
+  const centroY = altura / 2;
+  const escala = 1 / atual.zoom;
+  return {
+    x: Math.round(centroX - (centroX - atual.x) * escala),
+    y: Math.round(centroY - (centroY - atual.y) * escala),
+    zoom: 1,
+  };
+}
 
 function classeNoMinimapa(no: { type?: string }): string {
   return no.type === "bixinho" ? "minimapa-bixinho" : no.type === "nota" ? "minimapa-nota" : "minimapa-terminal";
@@ -154,6 +182,9 @@ function Canvas() {
   // Enquadra só ao abrir com terminais (ou notas) salvos e sem posição de
   // câmera salva. Com o canvas vazio, o React Flow enquadraria o primeiro
   // terminal criado depois, com zoom exagerado.
+  // Dentro do app desktop, a barra de título é da tela (com o status).
+  const [desktop] = useState(rodandoNoDesktop);
+  const areaDoCanvas = useRef<HTMLDivElement>(null);
   const [enquadrarAoAbrir] = useState(
     () =>
       layoutInicial.viewport === null &&
@@ -271,10 +302,15 @@ function Canvas() {
   const arestasCalculadas = useMemo(() => arestasDosBixinhos(ligados, conversas), [ligados, conversas]);
   const arestas = useReaproveitado(arestasCalculadas, reaproveitarArestas);
 
-  const centroDaTela = useCallback(
-    () => fluxo.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }),
-    [fluxo],
-  );
+  // O centro da área do canvas (no desktop, abaixo da barra de título).
+  const centroDaTela = useCallback(() => {
+    const area = areaDoCanvas.current?.getBoundingClientRect();
+    return fluxo.screenToFlowPosition(
+      area !== undefined && area.width > 0
+        ? { x: area.left + area.width / 2, y: area.top + area.height / 2 }
+        : { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+    );
+  }, [fluxo]);
 
   // O conteúdo das notas fica numa loja própria: digitar ou salvar uma nota não re-renderiza o canvas.
   const notas = useNotas(setNosDasNotas, centroDaTela, servidor.conectado);
@@ -416,8 +452,28 @@ function Canvas() {
         }),
       );
     });
-    setTimeout(() => void fluxo.fitView({ duration: 600, padding: 0.12 }), ESPERA_PARA_MEDIR_MS);
+    setTimeout(() => void fluxo.fitView({ duration: 600, padding: 0.12, maxZoom: 1 }), ESPERA_PARA_MEDIR_MS);
   }, [fluxo, setNos]);
+
+  // Ctrl+0: volta o zoom para 100% (texto nítido) sem sair do lugar.
+  useEffect(() => {
+    const aoApertarTecla = (evento: KeyboardEvent) => {
+      if (!evento.ctrlKey || evento.altKey || evento.shiftKey || evento.metaKey) {
+        return;
+      }
+      if (evento.key !== "0" && evento.code !== "Digit0" && evento.code !== "Numpad0") {
+        return;
+      }
+      if (focoEmCampoDeTexto(evento.target)) {
+        return;
+      }
+      evento.preventDefault();
+      const area = areaDoCanvas.current?.getBoundingClientRect();
+      void fluxo.setViewport(viewportEmCemPorCento(fluxo.getViewport(), area?.width ?? 0, area?.height ?? 0));
+    };
+    window.addEventListener("keydown", aoApertarTecla);
+    return () => window.removeEventListener("keydown", aoApertarTecla);
+  }, [fluxo]);
 
   const acoes = useMemo<AcoesDoCanvas>(
     () => ({
@@ -484,10 +540,12 @@ function Canvas() {
   const fecharAvisoDoLimite = useCallback(() => setAvisoDoLimite(false), []);
 
   // Os painéis não dependem da posição dos nós: memorizados, não re-renderizam
-  // a cada quadro do arraste.
-  const painelDaEsquerda = useMemo(
+  // a cada quadro do arraste. Os do topo ficam num só painel em linha
+  // (esquerda · centro · direita), para se acomodarem juntos em qualquer
+  // largura, sem um bloco absoluto cobrir o outro.
+  const colunaDaEsquerda = useMemo(
     () => (
-      <Panel position="top-left">
+      <div className="coluna-do-topo coluna-do-topo-esquerda">
         <BarraDoCanvas
           aoCriar={novoOrquestrador}
           aoCriarNota={novaNota}
@@ -499,7 +557,7 @@ function Canvas() {
         )}
         {erroDasNotas !== null && <ErroDoCanvas erro={erroDasNotas} aoFechar={descartarErroDasNotas} />}
         <Doca orquestradores={orquestradores} noCanvas={noCanvas} erro={erro} aoAbrir={abrirTerminal} />
-      </Panel>
+      </div>
     ),
     [
       novoOrquestrador,
@@ -516,26 +574,43 @@ function Canvas() {
       abrirTerminal,
     ],
   );
-  const painelDoCentro = useMemo(
+  const colunaDoCentro = useMemo(
     () => (
-      <Panel position="top-center">
+      <div className="coluna-do-topo coluna-do-topo-centro">
         <AvisoDeConexao servidor={servidor} />
-      </Panel>
+      </div>
     ),
     [servidor],
   );
-  const painelDaDireita = useMemo(
+  // No desktop o status está na barra de título; aqui fica só o alerta de memória.
+  const colunaDaDireita = useMemo(
     () => (
-      <Panel position="top-right">
-        <StatusDoCanvas
+      <div className="coluna-do-topo coluna-do-topo-direita">
+        {desktop ? (
+          <AvisoDeMemoria memoria={servidor.memoria} />
+        ) : (
+          <StatusDoCanvas
+            trabalhando={trabalhando}
+            bixinhosAtivos={bixinhosAtivos}
+            cota={cota}
+            memoria={servidor.memoria}
+          />
+        )}
+      </div>
+    ),
+    [desktop, trabalhando, bixinhosAtivos, cota, servidor.memoria],
+  );
+  const barraDeTitulo = useMemo(
+    () =>
+      desktop ? (
+        <BarraDeTituloDoApp
           trabalhando={trabalhando}
           bixinhosAtivos={bixinhosAtivos}
           cota={cota}
           memoria={servidor.memoria}
         />
-      </Panel>
-    ),
-    [trabalhando, bixinhosAtivos, cota, servidor.memoria],
+      ) : null,
+    [desktop, trabalhando, bixinhosAtivos, cota, servidor.memoria],
   );
   // Fora do viewport: o chat não se move com o canvas e só re-renderiza com novidades dele.
   const painelDoChat = useMemo(
@@ -567,38 +642,43 @@ function Canvas() {
     <ProvedorDoCanvas valor={valor}>
       <ProvedorDasNotas valor={notas.valor}>
         <div
-          className={`relative h-screen w-screen ${servidor.conectado ? "" : "canvas-desconectado"} ${movimento.movendo ? "canvas-movendo" : ""}`}
+          className={`flex h-screen w-screen flex-col ${servidor.conectado ? "" : "canvas-desconectado"} ${movimento.movendo ? "canvas-movendo" : ""}`}
         >
-          <ReactFlow<NoDoCanvas, ArestaDoCanvas>
-            nodes={nos}
-            edges={arestas}
-            nodeTypes={TIPOS_DE_NO}
-            edgeTypes={TIPOS_DE_ARESTA}
-            onNodesChange={aoMudarNosEReacomodar}
-            onNodeDragStart={movimento.aoComecarArraste}
-            onNodeDragStop={aoSoltarNo}
-            onMoveStart={movimento.aoComecarMovimento}
-            onMoveEnd={movimento.aoTerminarMovimento}
-            colorMode="dark"
-            defaultViewport={layoutInicial.viewport ?? VIEWPORT_PADRAO}
-            fitView={enquadrarAoAbrir}
-            fitViewOptions={ENQUADRAMENTO_AO_ABRIR}
-            minZoom={0.1}
-            maxZoom={2}
-            // Como no Excalidraw: a roda do mouse rola o canvas; com Ctrl, dá zoom.
-            panOnScroll
-            zoomActivationKeyCode="Control"
-            deleteKeyCode={null}
-          >
-            <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} />
-            <Controls position="bottom-left" showInteractive={false} />
-            <MiniMap position="bottom-right" pannable zoomable nodeClassName={classeNoMinimapa} />
-            {painelDaEsquerda}
-            {painelDoCentro}
-            {painelDaDireita}
-            {painelDoChat}
-          </ReactFlow>
-          {quantidadeDeJanelas === 0 && <CanvasVazio aoCriar={novoOrquestrador} />}
+          {barraDeTitulo}
+          <div ref={areaDoCanvas} className="relative min-h-0 w-full flex-1">
+            <ReactFlow<NoDoCanvas, ArestaDoCanvas>
+              nodes={nos}
+              edges={arestas}
+              nodeTypes={TIPOS_DE_NO}
+              edgeTypes={TIPOS_DE_ARESTA}
+              onNodesChange={aoMudarNosEReacomodar}
+              onNodeDragStart={movimento.aoComecarArraste}
+              onNodeDragStop={aoSoltarNo}
+              onMoveStart={movimento.aoComecarMovimento}
+              onMoveEnd={movimento.aoTerminarMovimento}
+              colorMode="dark"
+              defaultViewport={layoutInicial.viewport ?? VIEWPORT_PADRAO}
+              fitView={enquadrarAoAbrir}
+              fitViewOptions={ENQUADRAMENTO_AO_ABRIR}
+              minZoom={0.1}
+              maxZoom={2}
+              // Como no Excalidraw: a roda do mouse rola o canvas; com Ctrl, dá zoom.
+              panOnScroll
+              zoomActivationKeyCode="Control"
+              deleteKeyCode={null}
+            >
+              <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} />
+              <Controls position="bottom-left" showInteractive={false} />
+              <MiniMap position="bottom-right" pannable zoomable nodeClassName={classeNoMinimapa} />
+              <Panel position="top-left" className="paineis-do-topo">
+                {colunaDaEsquerda}
+                {colunaDoCentro}
+                {colunaDaDireita}
+              </Panel>
+              {painelDoChat}
+            </ReactFlow>
+            {quantidadeDeJanelas === 0 && <CanvasVazio aoCriar={novoOrquestrador} />}
+          </div>
         </div>
       </ProvedorDasNotas>
     </ProvedorDoCanvas>

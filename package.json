@@ -12,10 +12,11 @@
     "dev": "tsx watch --env-file-if-exists=.env src/root.ts",
     "build": "tsc -p tsconfig.build.json && npm run web:build",
     "start": "node --env-file-if-exists=.env dist/root.js",
-    "iniciar": "node scripts/manter-no-ar.cjs",
     "desktop": "electron .",
+    "desktop:dev": "node scripts/desktop-dev.cjs",
     "desktop:build": "npm run build",
     "dist:win": "npm run build && electron-builder --win",
+    "dist:win:teste": "npm run build && electron-builder --win -c.extraMetadata.buildDeTeste=true -c.directories.output=dist_electron_teste",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -45,14 +46,14 @@
     },
     "files": [
       "electron/**/*",
+      "!electron/**/*.test.js",
       "dist/**/*",
+      "!dist/**/*.test.js",
+      "!dist/**/*.test.js.map",
+      "!dist/**/*.test.d.ts",
+      "!dist/**/fixtures/**",
       "web/dist/**/*",
-      "scripts/manter-no-ar.cjs",
       "package.json"
-    ],
-    "asarUnpack": [
-      "scripts/manter-no-ar.cjs",
-      "dist/**/*"
     ],
     "win": {
       "target": [

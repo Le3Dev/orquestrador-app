@@ -34,6 +34,9 @@
   --surface-3: #2c2c29;
   --border: color-mix(in srgb, var(--claude-claro) 10%, transparent);
   --border-forte: color-mix(in srgb, var(--claude-claro) 18%, transparent);
+  /* Barra de título do app desktop: a mesma cor de COR_BARRA em
+   * electron/main.js (fundo da janela e overlay das janelas pequenas). */
+  --barra-de-titulo: #141413;
 
   /* Texto */
   --primary: var(--claude-claro);
@@ -355,9 +358,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  max-width: min(720px, calc(100vw - 32px));
-  /* Abaixo da barra superior, para não cobrir o botão de novo orquestrador. */
-  margin-top: 64px;
+  /* Na coluna do centro dos painéis do topo: nunca passa da largura dela. */
+  max-width: min(720px, 100%);
   padding: 12px 16px;
   border-radius: var(--radius-card);
   font-size: 12.5px;
@@ -1087,9 +1089,10 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   width: min(680px, calc(100vw - 2 * var(--folga-lateral-do-chat)));
 }
 
-/* Tela estreita: o chat sobe acima do minimapa e dos controles e usa a largura toda. */
-@media (max-width: 820px) {
-  .painel-do-chat { width: calc(100vw - 32px); margin-bottom: 182px; }
+/* Abaixo de 1100 px o minimapa some: a folga só precisa dos controles de zoom
+ * (26 + margem 15 + respiro). */
+@media (width < 1100px) {
+  .painel-do-chat { --folga-lateral-do-chat: 64px; }
 }
 
 .chat-rapido {
@@ -1353,26 +1356,104 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   .composer-expandido .linha-do-composer { animation: none; }
 }
 
-/* ---------------- App desktop (Electron): arraste e botões da janela -------- */
-
-/* Só tem efeito dentro do Electron; no navegador o `-webkit-app-region` é
- * ignorado. Arrasta a janela pegando na barra do cabeçalho. */
-.barra-arrastavel { -webkit-app-region: drag; }
-/* Elementos interativos dentro da barra não podem arrastar a janela. */
-.no-drag, .barra-arrastavel .btn, .barra-arrastavel button { -webkit-app-region: no-drag; }
-
-.controles-da-janela { display: flex; align-items: center; gap: 2px; margin-left: 6px; }
-.botao-janela {
-  display: grid;
-  place-items: center;
-  width: 30px;
+/* ---------------- App desktop (Electron): barra de título ----------------
+ * Faixa própria no topo, de ponta a ponta: a janela principal não tem barra
+ * nem botões nativos (titleBarStyle 'hidden' sem titleBarOverlay, em
+ * electron/main.js). Esquerda: identidade; direita: status e botões ─ ☐ ✕.
+ * O `-webkit-app-region` só tem efeito no Electron. */
+.barra-de-titulo {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 36px;
+  padding: 0 4px 0 12px;
+  min-width: 0;
+  background: var(--barra-de-titulo);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.direita-da-barra-de-titulo {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+}
+.controles-da-janela { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.botao-da-janela {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
   height: 26px;
+  padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-button);
   background: transparent;
   color: var(--secondary);
   cursor: pointer;
-  transition: background-color .15s, color .15s;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
-.botao-janela:hover { background: var(--surface-3); color: var(--primary); }
-.botao-janela-fechar:hover { background: var(--error); color: var(--claude-claro); }
+.botao-da-janela:hover { background: var(--surface-3); color: var(--primary); }
+.botao-da-janela:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.botao-da-janela-fechar:hover { background: var(--error); color: var(--primary); }
+.identidade-da-barra-de-titulo { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.identidade-da-barra-de-titulo .no-orquestrador-icone { width: 22px; height: 22px; border-radius: 6px; }
+.titulo-da-barra-de-titulo {
+  font-family: var(--fonte-titulo);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--primary);
+  white-space: nowrap;
+}
+/* O que é clicável (ou tem balão ao passar o mouse) não arrasta a janela. */
+.no-drag { -webkit-app-region: no-drag; }
+
+/* ---------------- Status (situação, cotas, RAM) ---------------- */
+.status-do-canvas { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 16px; min-width: 0; }
+/* Encostado à direita (nos botões da janela); se não couber, `safe` alinha
+ * pelo início para cortar o fim e nunca esconder a situação. */
+.status-na-barra-de-titulo { flex-wrap: nowrap; justify-content: safe flex-end; overflow: hidden; }
+.status-resumo { display: none; cursor: default; }
+.status-resumo:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; border-radius: 4px; }
+.medidor-curto { width: 40px; }
+
+/* ---------------- Painéis do topo do canvas ----------------
+ * Um só painel em linha (esquerda · centro · direita): os blocos se acomodam
+ * juntos e nunca se sobrepõem. O vão entre eles deixa o canvas clicável. */
+.react-flow__panel.paineis-do-topo {
+  right: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  pointer-events: none;
+}
+.coluna-do-topo { display: flex; flex-direction: column; min-width: 0; pointer-events: none; }
+.coluna-do-topo > * { pointer-events: auto; }
+.coluna-do-topo-esquerda { flex: 0 0 auto; align-items: flex-start; }
+.coluna-do-topo-centro { flex: 1 1 0; align-items: center; }
+.coluna-do-topo-direita { flex: 0 1 auto; align-items: flex-end; }
+
+/* ---------------- Larguras da janela ----------------
+ * ≥ 1280 px: tudo completo. 1100–1280 px: rótulos curtos ("5h", "+ Novo").
+ * < 1100 px: botões só com ícone (dica no `title`), status só com a situação
+ * e um medidor resumido (o resto no balão) e sem minimapa. */
+.rotulo-curto, .rotulo-icone { display: none; }
+
+@media (width < 1280px) {
+  .rotulo-completo { display: none; }
+  .rotulo-curto { display: inline; }
+  .status-extra, .subtitulo-da-barra { display: none; }
+}
+
+@media (width < 1100px) {
+  .rotulo-curto, .identidade-da-barra { display: none; }
+  .rotulo-icone { display: inline; }
+  .barra-do-canvas .btn-sm { width: 30px; padding: 0; font-size: 14px; }
+  .status-detalhe { display: none; }
+  .status-resumo { display: inline-flex; }
+  .react-flow__minimap { display: none; }
+}

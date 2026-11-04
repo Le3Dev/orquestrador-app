@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>Configurar o Orquestrador</title>
+    <style>
+      :root {
+        --bg: #141413;
+        --surface: #1c1c1a;
+        --surface-2: #232321;
+        --border: rgba(250, 249, 245, 0.12);
+        --texto: #faf9f5;
+        --muted: #b0aea5;
+        --laranja: #d97757;
+        --erro: #bf4d43;
+        --ok: #788c5d;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        background: var(--bg);
+        color: var(--texto);
+        font-family: system-ui, "Segoe UI", sans-serif;
+        display: flex;
+        flex-direction: column;
+      }
+      /* Faixa superior arrastável (titleBarStyle hidden cobre os botões). */
+      .barra { height: 40px; -webkit-app-region: drag; flex-shrink: 0; }
+      .conteudo {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        padding: 0 40px 32px;
+        overflow-y: auto;
+        -webkit-app-region: no-drag;
+      }
+      h1 { font-size: 20px; margin: 0 0 6px; }
+      p.sub { color: var(--muted); font-size: 13px; margin: 0 0 22px; line-height: 1.5; }
+      .campo { margin-bottom: 18px; }
+      label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+      .linha { display: flex; gap: 8px; }
+      input[type="text"] {
+        flex: 1;
+        min-width: 0;
+        padding: 11px 14px;
+        font-size: 13px;
+        font-family: ui-monospace, "Cascadia Mono", monospace;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--texto);
+        outline: none;
+      }
+      input[type="text"]:focus { border-color: var(--laranja); }
+      button {
+        padding: 11px 14px;
+        font-size: 13px;
+        font-weight: 600;
+        border: none;
+        border-radius: 8px;
+        background: var(--laranja);
+        color: var(--bg);
+        cursor: pointer;
+      }
+      button.secundario {
+        background: var(--surface-2);
+        color: var(--texto);
+        border: 1px solid var(--border);
+        font-weight: 500;
+        flex-shrink: 0;
+      }
+      button:disabled { opacity: 0.6; cursor: default; }
+      .acoes { display: flex; gap: 8px; margin-top: 8px; }
+      .acoes button.principal { flex: 1; }
+      .dica { margin-top: 6px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+      .dica.erro { color: var(--erro); }
+      .dica.ok { color: var(--ok); }
+      a { color: var(--laranja); }
+      .importar {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        padding: 12px 14px;
+        margin-bottom: 18px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .importar input { margin-top: 3px; accent-color: var(--laranja); }
+      .importar .caminho { font-family: ui-monospace, "Cascadia Mono", monospace; font-size: 12px; color: var(--muted); word-break: break-all; }
+      .oculto { display: none; }
+      .msg { margin-top: 14px; font-size: 13px; line-height: 1.5; min-height: 20px; white-space: pre-line; }
+      .msg.erro { color: var(--erro); }
+      .msg.ok { color: var(--ok); }
+    </style>
+  </head>
+  <body>
+    <div class="barra"></div>
+    <div class="conteudo">
+      <h1 id="titulo">Bem-vindo ao Orquestrador de Agentes</h1>
+      <p class="sub" id="subtitulo">Antes de começar, diga onde ficam os seus projetos e onde está o Claude Code. Você pode mudar isso depois em Ajustes.</p>
+
+      <div class="campo">
+        <label for="pasta">Pasta raiz dos projetos</label>
+        <div class="linha">
+          <input id="pasta" type="text" autocomplete="off" spellcheck="false" />
+          <button id="escolherPasta" class="secundario" type="button">Escolher…</button>
+        </div>
+        <div class="dica">Os Orquestradores trabalham nas pastas dentro desta.</div>
+      </div>
+
+      <div class="campo">
+        <label for="claude">Claude Code (claude.exe)</label>
+        <div class="linha">
+          <input id="claude" type="text" autocomplete="off" spellcheck="false" placeholder="não encontrado" />
+          <button id="escolherClaude" class="secundario" type="button">Escolher…</button>
+        </div>
+        <div id="dicaClaude" class="dica">
+          Instale e faça login no Claude Code — <a href="https://code.claude.com/docs" target="_blank" rel="noreferrer">https://code.claude.com/docs</a>
+        </div>
+      </div>
+
+      <label id="caixaImportar" class="importar oculto">
+        <input id="importar" type="checkbox" />
+        <span>
+          Importar o histórico de <span id="origemHistorico" class="caminho"></span><br />
+          <span class="dica">Copia orquestradores, notas e anexos; o chat rápido antigo fica só para consulta no histórico do chat. A pasta antiga não é apagada.</span>
+        </span>
+      </label>
+
+      <div class="acoes">
+        <button id="cancelar" class="secundario oculto" type="button">Cancelar</button>
+        <button id="salvar" class="principal" type="button">Salvar e abrir</button>
+      </div>
+      <div id="msg" class="msg"></div>
+    </div>
+
+    <script>
+      const ponte = window.electron;
+      const campoPasta = document.getElementById("pasta");
+      const campoClaude = document.getElementById("claude");
+      const dicaClaude = document.getElementById("dicaClaude");
+      const caixaImportar = document.getElementById("caixaImportar");
+      const marcarImportar = document.getElementById("importar");
+      const origemHistorico = document.getElementById("origemHistorico");
+      const botaoSalvar = document.getElementById("salvar");
+      const botaoCancelar = document.getElementById("cancelar");
+      const msg = document.getElementById("msg");
+      let historicoAntigo = null;
+
+      function mostrar(texto, tipo) {
+        msg.textContent = texto;
+        msg.className = "msg" + (tipo ? " " + tipo : "");
+      }
+
+      function erroEmTexto(e) {
+        return e && e.message ? e.message : String(e);
+      }
+
+      async function carregar() {
+        try {
+          const dados = await ponte.primeiraAbertura.carregar();
+          campoPasta.value = dados.pastaRaizDosProjetos || "";
+          campoClaude.value = dados.caminhoDoClaudeCode || "";
+          if (!dados.caminhoDoClaudeCode) {
+            dicaClaude.firstChild.textContent = "Claude Code não encontrado. Instale e faça login no Claude Code — ";
+            dicaClaude.className = "dica erro";
+          }
+          historicoAntigo = dados.historicoAntigo || null;
+          if (historicoAntigo) {
+            origemHistorico.textContent = historicoAntigo;
+            marcarImportar.checked = true;
+            caixaImportar.classList.remove("oculto");
+          }
+          if (dados.modo === "ajustes") {
+            document.getElementById("titulo").textContent = "Ajustes";
+            document.getElementById("subtitulo").textContent =
+              "Ao salvar, o servidor local é reiniciado com os novos valores. Pedidos em andamento são interrompidos.";
+            botaoSalvar.textContent = "Salvar";
+            botaoCancelar.classList.remove("oculto");
+          }
+          if (dados.aviso) mostrar(dados.aviso, "erro");
+        } catch (e) {
+          mostrar("Não foi possível carregar a configuração: " + erroEmTexto(e), "erro");
+        }
+      }
+
+      async function escolher(funcao, campo) {
+        try {
+          const escolhido = await funcao(campo.value.trim());
+          if (escolhido) campo.value = escolhido;
+        } catch (e) {
+          mostrar("Não foi possível abrir a escolha: " + erroEmTexto(e), "erro");
+        }
+      }
+
+      async function salvar() {
+        const dados = {
+          pastaRaizDosProjetos: campoPasta.value.trim(),
+          caminhoDoClaudeCode: campoClaude.value.trim(),
+          importarHistorico: Boolean(historicoAntigo) && marcarImportar.checked,
+        };
+        botaoSalvar.disabled = true;
+        mostrar("Salvando…", "");
+        try {
+          const r = await ponte.primeiraAbertura.salvar(dados);
+          if (r && r.ok) {
+            mostrar(r.mensagem || "Pronto. Abrindo o app…", "ok");
+            // O main abre/recarrega a janela principal e fecha esta.
+          } else {
+            mostrar((r && r.erros && r.erros.join("\n")) || "Não foi possível salvar.", "erro");
+            botaoSalvar.disabled = false;
+          }
+        } catch (e) {
+          mostrar("Erro ao salvar: " + erroEmTexto(e), "erro");
+          botaoSalvar.disabled = false;
+        }
+      }
+
+      document.getElementById("escolherPasta").addEventListener("click", () =>
+        escolher(ponte.primeiraAbertura.escolherPasta, campoPasta),
+      );
+      document.getElementById("escolherClaude").addEventListener("click", () =>
+        escolher(ponte.primeiraAbertura.escolherClaudeCode, campoClaude),
+      );
+      botaoSalvar.addEventListener("click", salvar);
+      botaoCancelar.addEventListener("click", () => ponte.janela.fechar());
+      carregar();
+    </script>
+  </body>
+</html>
