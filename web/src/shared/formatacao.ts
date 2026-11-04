@@ -35,16 +35,16 @@ export function descreverQuantidade({ modo, limite }: DadosDaConfiguracao["quant
 
 export const ROTULOS_DAS_PERMISSOES: Readonly<Record<NivelDePermissao, { nome: string; descricao: string }>> = {
   leitura: {
-    nome: "Somente leitura",
-    descricao: "Lê arquivos e pesquisa na web. Não altera nada.",
+    nome: "Só olhar e responder",
+    descricao: "Lê, explica e planeja. Não muda nada.",
   },
   edicao: {
-    nome: "Ler e editar arquivos",
-    descricao: "Cria e altera arquivos na pasta. Não executa comandos.",
+    nome: "Mudar arquivos",
+    descricao: "Edita código e textos. Não roda comandos.",
   },
   edicao_e_comandos: {
-    nome: "Editar e rodar comandos",
-    descricao: "Também executa comandos no terminal (testes, builds). Commit e push só com a opção abaixo ligada.",
+    nome: "Mudar arquivos e rodar comandos",
+    descricao: "Também instala, testa e compila. Commit e push só com a opção abaixo ligada.",
   },
 };
 
@@ -55,13 +55,25 @@ function descreverModelo(modelo: ModeloClaude, esforco: EsforcoDeRaciocinio): st
 }
 
 /**
- * Ex.: "Opus → Sonnet · até 3 subagentes · Somente leitura" (+ " · commit/push quando pedir", se liberado).
+ * Ex.: "Opus → Sonnet · até 3 subagentes · Só olhar e responder" (+ " · commit/push quando pedir", se liberado).
  * Com esforço escolhido (diferente de "padrao"): "Opus (esforço alto) → Sonnet (esforço médio) · …".
  * O trabalho direto e o plano automático vêm ligados: só aparecem quando desligados
  * (" · delegação total", " · sem plano automático").
  * Com instruções personalizadas próprias, termina com " · instruções próprias".
  */
 export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string {
+  return partesDaConfiguracao(configuracao, true).join(" · ");
+}
+
+/**
+ * O mesmo resumo sem a permissão, que a criação mostra à parte. Ex.:
+ * "Opus → Opus · até 3 subagentes".
+ */
+export function descreverAjustes(configuracao: DadosDaConfiguracao): string {
+  return partesDaConfiguracao(configuracao, false).join(" · ");
+}
+
+function partesDaConfiguracao(configuracao: DadosDaConfiguracao, comPermissao: boolean): string[] {
   const { modo, limite } = configuracao.quantidadeDeSubagentes;
   const plural = limite === 1 ? "subagente" : "subagentes";
   const quantidade = modo === "fixa" ? `${limite} ${plural}` : `até ${limite} ${plural}`;
@@ -70,12 +82,12 @@ export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string
   return [
     `${orquestrador} → ${subagentes}`,
     quantidade,
-    ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome,
+    ...(comPermissao ? [ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome] : []),
     ...(configuracao.permitirCommitEPush ? ["commit/push quando pedir"] : []),
     ...(configuracao.permitirTrabalhoDireto ? [] : ["delegação total"]),
     ...(configuracao.proporPlanoEmPedidosGrandes ? [] : ["sem plano automático"]),
     ...(configuracao.instrucoesPersonalizadas.trim() === "" ? [] : ["instruções próprias"]),
-  ].join(" · ");
+  ];
 }
 
 export function formatarDuracao(milissegundos: number): string {

@@ -112,6 +112,8 @@ interface Props {
   aoMudar: (configuracao: DadosDaConfiguracao) => void;
   /** A pasta do orquestrador (ou a escolhida no rascunho), para a pré-visualização do prompt. */
   pastaDeTrabalho?: string | undefined;
+  /** A criação pergunta a permissão à parte, antes destes ajustes. */
+  semPermissoes?: boolean;
 }
 
 /**
@@ -119,7 +121,7 @@ interface Props {
  * orquestrador faz sozinho ou planeja antes, e as instruções personalizadas.
  * Usado ao criar e ao reconfigurar.
  */
-export function CamposDaConfiguracao({ valor, aoMudar, pastaDeTrabalho }: Props) {
+export function CamposDaConfiguracao({ valor, aoMudar, pastaDeTrabalho, semPermissoes = false }: Props) {
   const idDoLimite = useId();
   const idDaAjudaDoEsforco = useId();
   const idDaAjudaDoCommit = useId();
@@ -223,15 +225,17 @@ export function CamposDaConfiguracao({ valor, aoMudar, pastaDeTrabalho }: Props)
         </div>
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <Segmentado
-          rotulo="Permissões"
-          opcoes={PERMISSOES}
-          valor={valor.nivelDePermissao}
-          aoEscolher={(nivel) => mudar("nivelDePermissao", nivel)}
-        />
-        <span className="hint">{ROTULOS_DAS_PERMISSOES[valor.nivelDePermissao].descricao}</span>
-      </div>
+      {!semPermissoes && (
+        <div className="flex flex-col gap-1.5">
+          <Segmentado
+            rotulo="Permissões"
+            opcoes={PERMISSOES}
+            valor={valor.nivelDePermissao}
+            aoEscolher={(nivel) => mudar("nivelDePermissao", nivel)}
+          />
+          <span className="hint">{ROTULOS_DAS_PERMISSOES[valor.nivelDePermissao].descricao}</span>
+        </div>
+      )}
 
       <div className="flex flex-col gap-1.5">
         <label className="flex w-fit cursor-pointer items-center gap-2">

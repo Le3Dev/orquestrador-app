@@ -40,7 +40,7 @@ describe("formatacao", () => {
         quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
         nivelDePermissao: "edicao",
       }),
-    ).toBe("Opus → Haiku · até 3 subagentes · Ler e editar arquivos");
+    ).toBe("Opus → Haiku · até 3 subagentes · Mudar arquivos");
 
     expect(
       descreverConfiguracao({
@@ -49,7 +49,7 @@ describe("formatacao", () => {
         quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
         nivelDePermissao: "leitura",
       }),
-    ).toBe("Sonnet → Sonnet · 1 subagente · Somente leitura");
+    ).toBe("Sonnet → Sonnet · 1 subagente · Só olhar e responder");
   });
 
   it("indica instruções próprias só quando preenchidas", () => {
@@ -62,16 +62,16 @@ describe("formatacao", () => {
 
   it("acrescenta o commit e push à descrição só quando liberados", () => {
     expect(descreverConfiguracao({ ...configuracao, permitirCommitEPush: true })).toBe(
-      "Opus → Sonnet · 2 subagentes · Editar e rodar comandos · commit/push quando pedir",
+      "Opus → Sonnet · 2 subagentes · Mudar arquivos e rodar comandos · commit/push quando pedir",
     );
   });
 
   it("menciona o trabalho direto e o plano automático só quando desligados", () => {
     expect(descreverConfiguracao({ ...configuracao, permitirTrabalhoDireto: false })).toBe(
-      "Opus → Sonnet · 2 subagentes · Editar e rodar comandos · delegação total",
+      "Opus → Sonnet · 2 subagentes · Mudar arquivos e rodar comandos · delegação total",
     );
     expect(descreverConfiguracao({ ...configuracao, proporPlanoEmPedidosGrandes: false })).toBe(
-      "Opus → Sonnet · 2 subagentes · Editar e rodar comandos · sem plano automático",
+      "Opus → Sonnet · 2 subagentes · Mudar arquivos e rodar comandos · sem plano automático",
     );
     expect(
       descreverConfiguracao({
@@ -81,19 +81,19 @@ describe("formatacao", () => {
         proporPlanoEmPedidosGrandes: false,
       }),
     ).toBe(
-      "Opus → Sonnet · 2 subagentes · Editar e rodar comandos · commit/push quando pedir · delegação total · sem plano automático",
+      "Opus → Sonnet · 2 subagentes · Mudar arquivos e rodar comandos · commit/push quando pedir · delegação total · sem plano automático",
     );
   });
 
   it("acrescenta o esforço junto do modelo só quando não é o padrão (Claude Code)", () => {
     expect(descreverConfiguracao({ ...configuracao, esforcoDoOrquestrador: "alto" })).toBe(
-      "Opus (esforço alto) → Sonnet · 2 subagentes · Editar e rodar comandos",
+      "Opus (esforço alto) → Sonnet · 2 subagentes · Mudar arquivos e rodar comandos",
     );
     expect(descreverConfiguracao({ ...configuracao, esforcoDosSubagentes: "medio" })).toBe(
-      "Opus → Sonnet (esforço médio) · 2 subagentes · Editar e rodar comandos",
+      "Opus → Sonnet (esforço médio) · 2 subagentes · Mudar arquivos e rodar comandos",
     );
     expect(
       descreverConfiguracao({ ...configuracao, esforcoDoOrquestrador: "maximo", esforcoDosSubagentes: "extra_alto" }),
-    ).toBe("Opus (esforço máximo) → Sonnet (esforço extra alto) · 2 subagentes · Editar e rodar comandos");
+    ).toBe("Opus (esforço máximo) → Sonnet (esforço extra alto) · 2 subagentes · Mudar arquivos e rodar comandos");
   });
 });

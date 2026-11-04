@@ -75,6 +75,18 @@ export interface AlteracaoDaNota {
 }
 
 export const api = {
+  /**
+   * Abre a janela de escolher pasta do sistema e espera. `caminho` nulo:
+   * a pessoa cancelou. Erro 503: o sistema não tem a janela (use o navegador
+   * interno). Abortar o sinal fecha a janela.
+   */
+  escolherPastaNoSistema: (inicial: string | undefined, sinal: AbortSignal) =>
+    requisitar<{ caminho: string | null }>("/pastas/escolher", {
+      method: "POST",
+      body: JSON.stringify(inicial === undefined ? {} : { inicial }),
+      signal: sinal,
+    }),
+
   /** Sem caminho, abre a pasta dos projetos. */
   listarPastas: (caminho?: string) =>
     requisitar<ConteudoDaPasta>(caminho === undefined ? "/pastas" : `/pastas?caminho=${encodeURIComponent(caminho)}`),
