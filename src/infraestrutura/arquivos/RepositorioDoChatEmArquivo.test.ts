@@ -32,9 +32,19 @@ describe("RepositorioDoChatEmArquivo", () => {
     expect(repositorio.pastaDaSessao).toBe(path.join(pasta, "chat", "sessao"));
     expect(repositorio.conversa().sessaoId).toBe("sessao-1");
     expect(repositorio.conversa().totalDeMensagens).toBe(0);
-    expect(repositorio.preferencias().paraDados()).toEqual({ modelo: "opus", esforco: "alto" });
+    expect(repositorio.preferencias().paraDados()).toEqual({ modelo: "sonnet", esforco: "medio" });
     expect(repositorio.ultimaSequencia()).toBe(0);
     expect(repositorio.ultimaCota()).toBeNull();
+  });
+
+  it("preferências já gravadas continuam valendo: o padrão novo é só para quem não tem o arquivo", async () => {
+    const pastaDoChat = path.join(pasta, "chat");
+    await mkdir(pastaDoChat, { recursive: true });
+    await writeFile(path.join(pastaDoChat, "preferencias.json"), '{"modelo":"opus","esforco":"alto"}', "utf8");
+
+    const repositorio = await RepositorioDoChatEmArquivo.abrir(pasta, gerarSessao);
+
+    expect(repositorio.preferencias().paraDados()).toEqual({ modelo: "opus", esforco: "alto" });
   });
 
   it("grava e relê conversa, eventos, preferências e a última cota", async () => {
@@ -103,7 +113,7 @@ describe("RepositorioDoChatEmArquivo", () => {
     const repositorio = await RepositorioDoChatEmArquivo.abrir(pasta, gerarSessao);
 
     expect(repositorio.conversa().sessaoId).toBe("sessao-1");
-    expect(repositorio.preferencias().modelo).toBe("opus");
+    expect(repositorio.preferencias().modelo).toBe("sonnet");
     expect(repositorio.ultimaSequencia()).toBe(7);
     expect(aviso).toHaveBeenCalledTimes(2);
     const arquivos = await readdir(pastaDoChat);

@@ -25,22 +25,25 @@ export const ESFORCOS_DO_CHAT: readonly { esforco: EsforcoDeRaciocinio; rotulo: 
   { esforco: "maximo", rotulo: "Máximo" },
 ];
 
-export const PREFERENCIAS_PADRAO_DO_CHAT: PreferenciasDoChat = { modelo: "opus", esforco: "alto" };
+/** O mesmo padrão do servidor (`PreferenciasDoChat`), até o estado do chat carregar. */
+export const PREFERENCIAS_PADRAO_DO_CHAT: PreferenciasDoChat = { modelo: "sonnet", esforco: "medio" };
 
 /**
  * A configuração com que um Orquestrador nasce — a mesma do formulário de
  * criação (`NoRascunho`) e a usada quando o chat abre um Orquestrador novo.
+ * Os campos de modelo, esforço, quantidade e opções de trabalho são os do
+ * Modo econômico (ver ADR-22); permissão e commit/push ficam nos mais seguros.
  */
 export const CONFIGURACAO_PADRAO_DO_ORQUESTRADOR: DadosDaConfiguracao = {
   modeloDoOrquestrador: "opus",
-  esforcoDoOrquestrador: "padrao",
-  modeloDosSubagentes: "opus",
-  esforcoDosSubagentes: "padrao",
-  quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
+  esforcoDoOrquestrador: "medio",
+  modeloDosSubagentes: "sonnet",
+  esforcoDosSubagentes: "medio",
+  quantidadeDeSubagentes: { modo: "automatica", limite: 1 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
   permitirTrabalhoDireto: true,
-  proporPlanoEmPedidosGrandes: true,
+  proporPlanoEmPedidosGrandes: false,
 };
 
 export function modeloNoSeletor(modelo: ModeloClaude): ModeloNoSeletor {

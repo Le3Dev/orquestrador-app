@@ -144,16 +144,16 @@ describe("ConversaDoChat", () => {
 });
 
 describe("PreferenciasDoChat", () => {
-  it("nasce com opus e esforço alto", () => {
-    expect(PreferenciasDoChat.padrao().paraDados()).toEqual({ modelo: "opus", esforco: "alto" });
+  it("nasce com sonnet e esforço médio", () => {
+    expect(PreferenciasDoChat.padrao().paraDados()).toEqual({ modelo: "sonnet", esforco: "medio" });
   });
 
   it("com() cria outra e não altera a original", () => {
     const original = PreferenciasDoChat.padrao();
     const alterada = original.com({ modelo: "fable" });
 
-    expect(alterada.paraDados()).toEqual({ modelo: "fable", esforco: "alto" });
-    expect(original.modelo).toBe("opus");
+    expect(alterada.paraDados()).toEqual({ modelo: "fable", esforco: "medio" });
+    expect(original.modelo).toBe("sonnet");
     expect(Object.isFrozen(original)).toBe(true);
   });
 
