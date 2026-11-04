@@ -50,7 +50,8 @@ export interface BixinhosLimpos {
 
 export const TAMANHO_DO_TERMINAL = { largura: 600, altura: 520 } as const;
 export const TAMANHO_MINIMO_DO_TERMINAL = { largura: 420, altura: 300 } as const;
-export const TAMANHO_DO_RASCUNHO = { largura: 640, altura: 620 } as const;
+// A criação mostra tudo de uma vez: no tamanho padrão, o formulário cabe sem rolar.
+export const TAMANHO_DO_RASCUNHO = { largura: 760, altura: 720 } as const;
 export const TAMANHO_DO_BIXINHO = { largura: 150, altura: 170 } as const;
 export const TAMANHO_DA_NOTA = { largura: 320, altura: 280 } as const;
 export const TAMANHO_MINIMO_DA_NOTA = { largura: 220, altura: 140 } as const;

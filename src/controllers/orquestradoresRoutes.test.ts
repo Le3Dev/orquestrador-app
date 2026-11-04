@@ -598,7 +598,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       const resposta = await requisitar("PATCH", "/preferencias", { instrucoesPadrao: ["a"] });
 
       expect(resposta.status).toBe(400);
-      expect(await resposta.json()).toEqual({ erro: "As instruções padrão devem ser um texto." });
+      expect(await resposta.json()).toEqual({ erro: "As instruções gerais devem ser um texto." });
     });
 
     it("a prévia mostra o system prompt e a mensagem com as instruções que valeriam, sem salvar nada", async () => {

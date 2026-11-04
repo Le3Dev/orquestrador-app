@@ -57,3 +57,19 @@ export function IconeBranch({ tamanho = 12, className = "" }: PropsDoIcone) {
     </svg>
   );
 }
+
+/** Duas pessoas: os subagentes prontos. */
+export function IconePessoas({ tamanho = 14, className = "" }: PropsDoIcone) {
+  return (
+    <svg width={tamanho} height={tamanho} viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <circle cx="9" cy="8" r="3.2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M3 19.5a6 6 0 0 1 12 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path
+        d="M15.5 5.2a3.2 3.2 0 0 1 0 5.6M17.5 14.2a6 6 0 0 1 3.5 5.3"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}

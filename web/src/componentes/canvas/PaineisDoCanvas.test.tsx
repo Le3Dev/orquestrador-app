@@ -13,8 +13,9 @@ describe("BarraDoCanvas", () => {
         aoCriarNota={aoCriarNota}
         aoOrganizar={vi.fn()}
         podeOrganizar={false}
-        aoAlternarPreferencias={vi.fn()}
-        preferenciasAbertas={false}
+        aoAlternarPainel={vi.fn()}
+        painelAberto={null}
+        quantidadeDeSubagentes={null}
       />,
     );
     const botao = screen.getByRole("button", { name: "+ notas" });
@@ -26,6 +27,72 @@ describe("BarraDoCanvas", () => {
 
     expect(aoCriarNota).toHaveBeenCalledTimes(2);
     expect(aoCriar).not.toHaveBeenCalled();
+  });
+});
+
+describe("BarraDoCanvas: Subagentes e Instruções gerais", () => {
+  function barra(painelAberto: "subagentes" | "instrucoes" | null, quantidadeDeSubagentes: number | null = 3) {
+    const aoAlternarPainel = vi.fn();
+    const resultado = render(
+      <BarraDoCanvas
+        aoCriar={vi.fn()}
+        aoCriarNota={vi.fn()}
+        aoOrganizar={vi.fn()}
+        podeOrganizar={false}
+        aoAlternarPainel={aoAlternarPainel}
+        painelAberto={painelAberto}
+        quantidadeDeSubagentes={quantidadeDeSubagentes}
+      />,
+    );
+    return { aoAlternarPainel, ...resultado };
+  }
+
+  it("troca o botão Preferências por Subagentes (com a contagem) e Instruções gerais", () => {
+    const { aoAlternarPainel } = barra(null);
+
+    expect(screen.queryByRole("button", { name: /Preferências/ })).not.toBeInTheDocument();
+    const subagentes = screen.getByRole("button", { name: /Subagentes/ });
+    const instrucoes = screen.getByRole("button", { name: "Instruções gerais" });
+    expect(subagentes).toHaveTextContent("Subagentes3");
+    expect(subagentes).toHaveClass("btn", "btn-sm", "btn-outline", "no-drag");
+    expect(instrucoes).toHaveAttribute(
+      "title",
+      "Instruções que valem para todo orquestrador sem instruções próprias",
+    );
+
+    fireEvent.click(subagentes);
+    fireEvent.click(instrucoes);
+    expect(aoAlternarPainel.mock.calls).toEqual([["subagentes"], ["instrucoes"]]);
+  });
+
+  it("sem a contagem (servidor fora), o botão fica só com o nome", () => {
+    barra(null, null);
+
+    expect(screen.getByRole("button", { name: /Subagentes/ })).toHaveTextContent(/^Subagentes$/);
+  });
+
+  it("aria-expanded marca só o painel aberto", () => {
+    const { rerender } = barra("subagentes");
+    const subagentes = () => screen.getByRole("button", { name: /Subagentes/ });
+    const instrucoes = () => screen.getByRole("button", { name: "Instruções gerais" });
+
+    expect(subagentes()).toHaveAttribute("aria-expanded", "true");
+    expect(instrucoes()).toHaveAttribute("aria-expanded", "false");
+
+    rerender(
+      <BarraDoCanvas
+        aoCriar={vi.fn()}
+        aoCriarNota={vi.fn()}
+        aoOrganizar={vi.fn()}
+        podeOrganizar={false}
+        aoAlternarPainel={vi.fn()}
+        painelAberto="instrucoes"
+        quantidadeDeSubagentes={3}
+      />,
+    );
+
+    expect(subagentes()).toHaveAttribute("aria-expanded", "false");
+    expect(instrucoes()).toHaveAttribute("aria-expanded", "true");
   });
 });
 
@@ -49,8 +116,9 @@ describe("BarraDoCanvas no app desktop", () => {
         aoCriarNota={vi.fn()}
         aoOrganizar={vi.fn()}
         podeOrganizar={false}
-        aoAlternarPreferencias={vi.fn()}
-        preferenciasAbertas={false}
+        aoAlternarPainel={vi.fn()}
+        painelAberto={null}
+        quantidadeDeSubagentes={null}
       />,
     );
   }

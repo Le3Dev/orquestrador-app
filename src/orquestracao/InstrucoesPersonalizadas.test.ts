@@ -220,7 +220,7 @@ describe("PreferenciasGlobais", () => {
     expect(preferencias.com({}).instrucoesPadrao).toBe("Responda curto.");
     expect(preferencias.com({ instrucoesPadrao: "" }).instrucoesPadrao).toBe("");
     expect(() => PreferenciasGlobais.de({ instrucoesPadrao: "x".repeat(TAMANHO_MAXIMO_DAS_INSTRUCOES + 1) })).toThrow(
-      "As instruções padrão devem ter até",
+      "As instruções gerais devem ter até",
     );
   });
 });

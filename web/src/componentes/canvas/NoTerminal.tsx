@@ -451,10 +451,10 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
             title={
               orquestrador.instrucoesAtivas === "orquestrador"
                 ? "Instruções personalizadas deste orquestrador ativas (⚙ para ver ou editar)"
-                : "Instruções padrão ativas (Preferências, na barra do canvas)"
+                : "Instruções gerais ativas (botão Instruções gerais, na barra do canvas)"
             }
           >
-            {orquestrador.instrucoesAtivas === "orquestrador" ? "instruções" : "instruções padrão"}
+            {orquestrador.instrucoesAtivas === "orquestrador" ? "instruções" : "instruções gerais"}
           </span>
         )}
         {servidor.conectado && conexoes.get(orquestradorId) === "reconectando" && (

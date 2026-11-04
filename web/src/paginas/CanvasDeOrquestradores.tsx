@@ -26,9 +26,12 @@ import {
   BarraDoCanvas,
   Doca,
   ErroDoCanvas,
+  type PainelDaBarra,
   StatusDoCanvas,
 } from "../componentes/canvas/PaineisDoCanvas";
-import { PainelDePreferencias } from "../componentes/canvas/PainelDePreferencias";
+import { PainelDeInstrucoesGerais } from "../componentes/canvas/PainelDeInstrucoesGerais";
+import { PainelDeSubagentes } from "../componentes/canvas/PainelDeSubagentes";
+import { api } from "../shared/api/cliente";
 import type { ResumoDoOrquestrador } from "../shared/api/tipos";
 import { type AcoesDoCanvas, ProvedorDoCanvas, servidorParaOsNos, type ValorDoCanvas } from "../shared/canvas/contexto";
 import {
@@ -69,6 +72,9 @@ import { useNotas } from "../shared/hooks/useNotas";
 import { useOrquestradores } from "../shared/hooks/useOrquestradores";
 import { useReaproveitado } from "../shared/hooks/useReaproveitado";
 import { useServidor } from "../shared/hooks/useServidor";
+
+/** Altura, na tela, da faixa ocupada pela barra do canvas (com folga). */
+const TOPO_LIVRE_DA_TELA_PX = 84;
 
 // Tudo o que vai ao <ReactFlow> é constante ou estável: uma prop nova a cada
 // renderização (e o canvas renderiza a cada quadro do arraste) faz o React
@@ -263,11 +269,15 @@ function Canvas() {
   const novoOrquestrador = useCallback(() => {
     const id = `rascunho:${crypto.randomUUID()}`;
     setNos((atuais) => {
-      const posicao = posicaoParaNovoTerminal(
+      const centralizada = posicaoParaNovoTerminal(
         centroDaTela(),
         TAMANHO_DO_RASCUNHO,
         atuais.filter((no) => !ehBixinho(no)).map((no) => no.position),
       );
+      // Em telas baixas, centralizar esconderia a barra de título atrás da barra
+      // do canvas: o topo da janela começa sempre abaixo dela.
+      const topoLivre = fluxo.screenToFlowPosition({ x: 0, y: TOPO_LIVRE_DA_TELA_PX }).y;
+      const posicao = { ...centralizada, y: Math.max(centralizada.y, Math.round(topoLivre)) };
       const rascunho: TipoDoRascunho = {
         id,
         type: "rascunho",
@@ -280,7 +290,7 @@ function Canvas() {
       };
       return reacomodarBixinhos([...atuais.map((no) => ({ ...no, selected: false })), rascunho]);
     });
-  }, [centroDaTela, setNos]);
+  }, [centroDaTela, fluxo, setNos]);
 
   const abrirTerminal = useCallback(
     (orquestradorId: string) => {
@@ -325,7 +335,8 @@ function Canvas() {
         const terminal = novoTerminal(
           orquestrador.id,
           rascunho?.position ?? centroDaTela(),
-          rascunho?.width ?? TAMANHO_DO_TERMINAL.largura,
+          // O rascunho nasce mais largo para caber o formulário; o terminal volta à largura de sempre.
+          Math.min(rascunho?.width ?? TAMANHO_DO_TERMINAL.largura, TAMANHO_DO_TERMINAL.largura),
           TAMANHO_DO_TERMINAL.altura,
         );
         return reacomodarBixinhos([...atuais.filter((no) => no.id !== rascunhoId), { ...terminal, selected: true }]);
@@ -394,9 +405,34 @@ function Canvas() {
     () => [...conversas.values()].find((conversa) => conversa.cota !== null)?.cota ?? null,
     [conversas],
   );
-  const [preferenciasAbertas, setPreferenciasAbertas] = useState(false);
-  const alternarPreferencias = useCallback(() => setPreferenciasAbertas((abertas) => !abertas), []);
-  const fecharPreferencias = useCallback(() => setPreferenciasAbertas(false), []);
+  const [painelAberto, setPainelAberto] = useState<PainelDaBarra | null>(null);
+  const alternarPainel = useCallback(
+    (painel: PainelDaBarra) => setPainelAberto((aberto) => (aberto === painel ? null : painel)),
+    [],
+  );
+  const fecharPainel = useCallback(() => setPainelAberto(null), []);
+
+  // A contagem do botão Subagentes. Com o servidor fora, fica sem número até
+  // ele voltar (o efeito roda de novo na reconexão).
+  const [quantidadeDeSubagentes, setQuantidadeDeSubagentes] = useState<number | null>(null);
+  const lerQuantidadeDeSubagentes = useCallback(() => {
+    api
+      .lerPreferencias()
+      .then((preferencias) => setQuantidadeDeSubagentes(preferencias.subagentesProntos.length))
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    if (servidor.conectado) {
+      lerQuantidadeDeSubagentes();
+    } else {
+      setQuantidadeDeSubagentes(null);
+    }
+  }, [servidor.conectado, lerQuantidadeDeSubagentes]);
+  // Salvar qualquer um dos painéis: os indicadores dos terminais e a contagem podem ter mudado.
+  const aoSalvarPainel = useCallback(() => {
+    void recarregar();
+    lerQuantidadeDeSubagentes();
+  }, [recarregar, lerQuantidadeDeSubagentes]);
   const quantidadeDeJanelas = nos.filter((no) => !ehBixinho(no)).length;
   const podeOrganizar = quantidadeDeJanelas > 1;
 
@@ -410,11 +446,13 @@ function Canvas() {
           aoCriarNota={novaNota}
           aoOrganizar={organizar}
           podeOrganizar={podeOrganizar}
-          aoAlternarPreferencias={alternarPreferencias}
-          preferenciasAbertas={preferenciasAbertas}
+          aoAlternarPainel={alternarPainel}
+          painelAberto={painelAberto}
+          quantidadeDeSubagentes={quantidadeDeSubagentes}
         />
-        {preferenciasAbertas && (
-          <PainelDePreferencias aoFechar={fecharPreferencias} aoSalvar={() => void recarregar()} />
+        {painelAberto === "subagentes" && <PainelDeSubagentes aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />}
+        {painelAberto === "instrucoes" && (
+          <PainelDeInstrucoesGerais aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />
         )}
         {erroDasNotas !== null && <ErroDoCanvas erro={erroDasNotas} aoFechar={descartarErroDasNotas} />}
         <Doca orquestradores={orquestradores} noCanvas={noCanvas} erro={erro} aoAbrir={abrirTerminal} />
@@ -425,10 +463,11 @@ function Canvas() {
       novaNota,
       organizar,
       podeOrganizar,
-      preferenciasAbertas,
-      alternarPreferencias,
-      fecharPreferencias,
-      recarregar,
+      painelAberto,
+      alternarPainel,
+      fecharPainel,
+      quantidadeDeSubagentes,
+      aoSalvarPainel,
       erroDasNotas,
       descartarErroDasNotas,
       orquestradores,
@@ -493,7 +532,9 @@ function Canvas() {
             {painelDoCentro}
             {painelDaDireita}
           </ReactFlow>
-          {quantidadeDeJanelas === 0 && <CanvasVazio aoCriar={novoOrquestrador} />}
+          {/* Fica fora do ReactFlow (que é uma camada própria), então cobriria os
+              painéis da barra: some enquanto um deles está aberto. */}
+          {quantidadeDeJanelas === 0 && painelAberto === null && <CanvasVazio aoCriar={novoOrquestrador} />}
         </div>
       </ProvedorDasNotas>
     </ProvedorDoCanvas>

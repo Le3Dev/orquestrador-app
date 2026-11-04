@@ -14,7 +14,7 @@ import { useRelogio } from "../../shared/hooks/useRelogio";
 import type { EstadoDoServidor } from "../../shared/hooks/useServidor";
 import { nivelDaMemoria, type NivelDaMemoria } from "../../shared/memoria";
 import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
-import { IconeOrquestrador, IconePasta } from "../Icones";
+import { IconeOrquestrador, IconePasta, IconePessoas } from "../Icones";
 import { ControlesDaJanela, rodandoNoDesktop } from "./ControlesDaJanela";
 
 /** Por quanto tempo o aviso de "reconectado" fica na tela. */
@@ -83,14 +83,19 @@ export function AvisoDeConexao({ servidor }: { servidor: EstadoDoServidor }) {
 /** A partir daqui o medidor da cota fica vermelho. */
 const COTA_ALTA = 0.8;
 
+/** Os painéis que abrem logo abaixo da barra do canvas. */
+export type PainelDaBarra = "subagentes" | "instrucoes";
+
 interface PropsDaBarra {
   aoCriar: () => void;
   aoCriarNota: () => void;
   aoOrganizar: () => void;
   podeOrganizar: boolean;
-  /** Abre ou fecha o painel de Preferências (instruções padrão). */
-  aoAlternarPreferencias: () => void;
-  preferenciasAbertas: boolean;
+  /** Abre um dos painéis da barra (ou fecha, se já estava aberto). Só um fica aberto por vez. */
+  aoAlternarPainel: (painel: PainelDaBarra) => void;
+  painelAberto: PainelDaBarra | null;
+  /** Quantos subagentes prontos existem; nulo enquanto não se sabe (ex.: servidor fora). */
+  quantidadeDeSubagentes: number | null;
 }
 
 /** Canto superior esquerdo: identidade do app e as ações do canvas. */
@@ -99,8 +104,9 @@ export function BarraDoCanvas({
   aoCriarNota,
   aoOrganizar,
   podeOrganizar,
-  aoAlternarPreferencias,
-  preferenciasAbertas,
+  aoAlternarPainel,
+  painelAberto,
+  quantidadeDeSubagentes,
 }: PropsDaBarra) {
   // Dentro do app desktop (Electron), a própria barra vira a área de arraste da
   // janela (-webkit-app-region: drag) e ganha os botões min/max/fechar. No
@@ -142,12 +148,23 @@ export function BarraDoCanvas({
       </button>
       <button
         type="button"
-        className="btn btn-sm btn-outline no-drag"
-        onClick={aoAlternarPreferencias}
-        aria-expanded={preferenciasAbertas}
-        title="Instruções padrão para todos os orquestradores"
+        className="btn btn-sm btn-outline no-drag botao-de-painel"
+        onClick={() => aoAlternarPainel("subagentes")}
+        aria-expanded={painelAberto === "subagentes"}
+        title="Ajudantes prontos que todo orquestrador pode chamar"
       >
-        Preferências
+        <IconePessoas />
+        Subagentes
+        {quantidadeDeSubagentes !== null && <span className="mono text-muted">{quantidadeDeSubagentes}</span>}
+      </button>
+      <button
+        type="button"
+        className="btn btn-sm btn-outline no-drag botao-de-painel"
+        onClick={() => aoAlternarPainel("instrucoes")}
+        aria-expanded={painelAberto === "instrucoes"}
+        title="Instruções que valem para todo orquestrador sem instruções próprias"
+      >
+        Instruções gerais
       </button>
       {desktop && !mac && <ControlesDaJanela />}
     </div>

@@ -8,13 +8,15 @@ const ESPERA_PARA_ATUALIZAR_MS = 400;
 
 const ORIGEM: Readonly<Record<NonNullable<PreviaDoPrompt["origemDasInstrucoes"]>, string>> = {
   orquestrador: "valem as instruções deste orquestrador",
-  padrao: "valem as instruções padrão (Preferências)",
+  padrao: "valem as instruções gerais",
 };
 
 interface Props {
   configuracao: DadosDaConfiguracao;
   /** Sem pasta (rascunho ainda sem projeto), o servidor mostra um marcador no lugar do caminho. */
   pastaDeTrabalho?: string | undefined;
+  /** Na criação, o botão de abrir é um link discreto abaixo das instruções. */
+  comoLink?: boolean;
 }
 
 /**
@@ -23,7 +25,7 @@ interface Props {
  * as instruções personalizadas no fim do bloco. Quem monta o texto é o
  * servidor, com a mesma função usada nos pedidos de verdade.
  */
-export function PreviaDoPromptFinal({ configuracao, pastaDeTrabalho }: Props) {
+export function PreviaDoPromptFinal({ configuracao, pastaDeTrabalho, comoLink = false }: Props) {
   const [aberta, setAberta] = useState(false);
   const [previa, setPrevia] = useState<PreviaDoPrompt | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -61,7 +63,7 @@ export function PreviaDoPromptFinal({ configuracao, pastaDeTrabalho }: Props) {
     <div className="flex flex-col gap-2">
       <button
         type="button"
-        className="btn btn-sm btn-outline w-fit"
+        className={comoLink ? "botao-link w-fit text-[12px]" : "btn btn-sm btn-outline w-fit"}
         aria-expanded={aberta}
         onClick={() => setAberta((valor) => !valor)}
       >

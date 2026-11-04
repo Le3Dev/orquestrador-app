@@ -1,5 +1,11 @@
 import type { DadosDaConfiguracao } from "./api/tipos";
-import { descreverConfiguracao, formatarDuracao, formatarMomento, formatarPercentual } from "./formatacao";
+import {
+  descreverConfiguracao,
+  formatarDuracao,
+  formatarMomento,
+  formatarPercentual,
+  rotuloDoEsforcoNaCriacao,
+} from "./formatacao";
 
 const configuracao: DadosDaConfiguracao = {
   modeloDoOrquestrador: "opus",
@@ -95,5 +101,10 @@ describe("formatacao", () => {
     expect(
       descreverConfiguracao({ ...configuracao, esforcoDoOrquestrador: "maximo", esforcoDosSubagentes: "extra_alto" }),
     ).toBe("Opus (esforço máximo) → Sonnet (esforço extra alto) · 2 subagentes · Mudar arquivos e rodar comandos");
+  });
+
+  it("na criação, o esforço padrão se chama Automático", () => {
+    expect(rotuloDoEsforcoNaCriacao("padrao")).toBe("Automático");
+    expect(rotuloDoEsforcoNaCriacao("extra_alto")).toBe("Extra alto");
   });
 });

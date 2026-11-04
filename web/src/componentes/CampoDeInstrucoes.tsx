@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { type ReactNode, useId } from "react";
 
 import { TAMANHO_MAXIMO_DAS_INSTRUCOES } from "../shared/api/tipos";
 import { tamanhoDasInstrucoes } from "../shared/instrucoes";
@@ -9,6 +9,10 @@ interface Props {
   valor: string;
   aoMudar: (texto: string) => void;
   placeholder?: string;
+  /** Explicação curta ao lado do rótulo (o ícone ⓘ da `Dica`). */
+  dica?: ReactNode;
+  /** Altura inicial da caixa, em linhas. */
+  linhas?: number;
 }
 
 /**
@@ -16,7 +20,7 @@ interface Props {
  * limite não trava a digitação (colar um texto grande não some em silêncio):
  * só avisa, e o servidor recusa ao salvar com a mesma mensagem.
  */
-export function CampoDeInstrucoes({ rotulo, ajuda, valor, aoMudar, placeholder }: Props) {
+export function CampoDeInstrucoes({ rotulo, ajuda, valor, aoMudar, placeholder, dica, linhas = 4 }: Props) {
   const id = useId();
   const idDaAjuda = useId();
   const tamanho = tamanhoDasInstrucoes(valor);
@@ -25,9 +29,12 @@ export function CampoDeInstrucoes({ rotulo, ajuda, valor, aoMudar, placeholder }
   return (
     <div className="field">
       <div className="flex items-baseline justify-between gap-2">
-        <label className="label" htmlFor={id}>
-          {rotulo}
-        </label>
+        <span className="flex items-center gap-1.5">
+          <label className="label" htmlFor={id}>
+            {rotulo}
+          </label>
+          {dica}
+        </span>
         <span className={`mono text-[10.5px] ${passou ? "text-error" : "text-muted"}`} aria-live="polite">
           {tamanho.toLocaleString("pt-BR")} / {TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString("pt-BR")}
         </span>
@@ -35,7 +42,7 @@ export function CampoDeInstrucoes({ rotulo, ajuda, valor, aoMudar, placeholder }
       <textarea
         id={id}
         className="textarea textarea-instrucoes custom-scrollbar"
-        rows={4}
+        rows={linhas}
         value={valor}
         placeholder={placeholder}
         aria-describedby={idDaAjuda}

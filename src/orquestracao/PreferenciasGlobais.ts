@@ -39,7 +39,7 @@ export class PreferenciasGlobais {
 
   static de(dados: DadosDasPreferencias | AlteracoesDasPreferencias): PreferenciasGlobais {
     return new PreferenciasGlobais(
-      instrucoesValidas(dados.instrucoesPadrao, "As instruções padrão"),
+      instrucoesValidas(dados.instrucoesPadrao, "As instruções gerais"),
       subagentesProntosValidos(dados.subagentesProntos),
     );
   }

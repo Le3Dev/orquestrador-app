@@ -152,7 +152,7 @@ describe("CamposDaConfiguracao", () => {
       const { aoMudar } = renderizar();
 
       expect(campo()).toHaveValue("");
-      expect(campo()).toHaveAccessibleDescription(/Vazio: valem as instruções padrão/);
+      expect(campo()).toHaveAccessibleDescription(/Vazio: valem as instruções gerais/);
       expect(screen.getByText("0 / 4.000")).toBeInTheDocument();
 
       fireEvent.change(campo(), { target: { value: "Comece com PIRULITO.\nDepois o resto." } });

@@ -16,6 +16,11 @@ export const ROTULOS_DOS_ESFORCOS: Readonly<Record<EsforcoDeRaciocinio, string>>
   maximo: "Máximo",
 };
 
+/** Na criação, "padrao" se chama Automático: o app não força nada e vale o padrão do Claude Code. */
+export function rotuloDoEsforcoNaCriacao(esforco: EsforcoDeRaciocinio): string {
+  return esforco === "padrao" ? "Automático" : ROTULOS_DOS_ESFORCOS[esforco];
+}
+
 /** Identificador curto de um Subagente, para caber em chips e no terminal. */
 export function idCurto(id: string): string {
   return id.slice(-4);
@@ -62,18 +67,10 @@ function descreverModelo(modelo: ModeloClaude, esforco: EsforcoDeRaciocinio): st
  * Com instruções personalizadas próprias, termina com " · instruções próprias".
  */
 export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string {
-  return partesDaConfiguracao(configuracao, true).join(" · ");
+  return partesDaConfiguracao(configuracao).join(" · ");
 }
 
-/**
- * O mesmo resumo sem a permissão, que a criação mostra à parte. Ex.:
- * "Opus → Opus · até 3 subagentes".
- */
-export function descreverAjustes(configuracao: DadosDaConfiguracao): string {
-  return partesDaConfiguracao(configuracao, false).join(" · ");
-}
-
-function partesDaConfiguracao(configuracao: DadosDaConfiguracao, comPermissao: boolean): string[] {
+function partesDaConfiguracao(configuracao: DadosDaConfiguracao): string[] {
   const { modo, limite } = configuracao.quantidadeDeSubagentes;
   const plural = limite === 1 ? "subagente" : "subagentes";
   const quantidade = modo === "fixa" ? `${limite} ${plural}` : `até ${limite} ${plural}`;
@@ -82,7 +79,7 @@ function partesDaConfiguracao(configuracao: DadosDaConfiguracao, comPermissao: b
   return [
     `${orquestrador} → ${subagentes}`,
     quantidade,
-    ...(comPermissao ? [ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome] : []),
+    ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome,
     ...(configuracao.permitirCommitEPush ? ["commit/push quando pedir"] : []),
     ...(configuracao.permitirTrabalhoDireto ? [] : ["delegação total"]),
     ...(configuracao.proporPlanoEmPedidosGrandes ? [] : ["sem plano automático"]),

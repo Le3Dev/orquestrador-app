@@ -290,7 +290,7 @@ export function CamposDaConfiguracao({ valor, aoMudar, pastaDeTrabalho, semPermi
       <div className="flex flex-col gap-2">
         <CampoDeInstrucoes
           rotulo="Instruções personalizadas (opcional)"
-          ajuda="Regras suas que este orquestrador segue em todo pedido, além das dele. Valem já no próximo pedido, inclusive nesta conversa. Vazio: valem as instruções padrão (Preferências), se houver. Não ampliam as permissões acima."
+          ajuda="Regras suas que este orquestrador segue em todo pedido, além das dele. Valem já no próximo pedido, inclusive nesta conversa. Vazio: valem as instruções gerais (botão na barra do canvas), se houver. Não ampliam as permissões acima."
           placeholder="Ex.: Responda em tópicos curtos. Rode os testes antes de concluir."
           valor={valor.instrucoesPersonalizadas}
           aoMudar={(texto) => mudar("instrucoesPersonalizadas", texto)}

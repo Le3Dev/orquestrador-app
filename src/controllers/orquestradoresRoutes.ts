@@ -122,7 +122,7 @@ const esquemaDoSubagentePronto = z.object({
 });
 
 const esquemaDasPreferencias = z.object({
-  instrucoesPadrao: esquemaDeInstrucoes("As instruções padrão").optional(),
+  instrucoesPadrao: esquemaDeInstrucoes("As instruções gerais").optional(),
   subagentesProntos: z
     .array(esquemaDoSubagentePronto, { error: "Os subagentes prontos devem ser uma lista." })
     .optional(),
