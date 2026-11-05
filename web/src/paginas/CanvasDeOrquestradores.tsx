@@ -1,6 +1,7 @@
 import {
   Background,
   BackgroundVariant,
+  ControlButton,
   Controls,
   MiniMap,
   Panel,
@@ -24,7 +25,7 @@ import {
   useState,
 } from "react";
 
-import { IconeOrquestrador } from "../componentes/Icones";
+import { IconeGrade, IconeOrquestrador } from "../componentes/Icones";
 import { ChatRapido } from "../componentes/chat/ChatRapido";
 import { ArestaDoBixinho } from "../componentes/canvas/ArestaDoBixinho";
 import { NoBixinho } from "../componentes/canvas/NoBixinho";
@@ -78,6 +79,7 @@ import {
   subagentesVisiveis,
 } from "../shared/canvas/nos";
 import { ProvedorDasNotas } from "../shared/canvas/notas";
+import { useAjustesDoAplicativo } from "../shared/hooks/useAjustesDoAplicativo";
 import { useChat } from "../shared/hooks/useChat";
 import { useConversas } from "../shared/hooks/useConversas";
 import { useMovimentoDoCanvas } from "../shared/hooks/useMovimentoDoCanvas";
@@ -96,6 +98,8 @@ const TIPOS_DE_ARESTA = { bixinho: ArestaDoBixinho } satisfies EdgeTypes;
 // (100%), e enquadrar não deve ampliar além disso.
 const ENQUADRAMENTO_AO_ABRIR: FitViewOptions<NoDoCanvas> = { maxZoom: 1, padding: 0.15 };
 const VIEWPORT_PADRAO: Viewport = { x: 0, y: 0, zoom: 1 };
+/** Nome e dica do "Organizar", o 4º botão dos controles do canto inferior esquerdo. */
+const DICA_DO_ORGANIZAR = "Organizar: terminais lado a lado e notas à direita";
 
 /** Foco num campo de texto: o atalho é do campo, não do canvas. */
 function focoEmCampoDeTexto(alvo: EventTarget | null): boolean {
@@ -516,6 +520,39 @@ function Canvas() {
     return () => window.removeEventListener("keydown", aoApertarTecla);
   }, [zoomEmCemPorCento]);
 
+  // Ctrl+N: novo orquestrador (o mesmo do "+ Novo ▾", com o limite do
+  // ADR-18); Ctrl+Shift+N: nova nota. Fora de campos de texto, como o Ctrl+0;
+  // o preventDefault impede o Chromium/Electron de abrir outra janela.
+  useEffect(() => {
+    const aoApertarTecla = (evento: KeyboardEvent) => {
+      if (!evento.ctrlKey || evento.altKey || evento.metaKey || evento.repeat) {
+        return;
+      }
+      if (evento.code !== "KeyN" && evento.key !== "n" && evento.key !== "N") {
+        return;
+      }
+      if (focoEmCampoDeTexto(evento.target)) {
+        return;
+      }
+      evento.preventDefault();
+      if (evento.shiftKey) {
+        novaNota();
+      } else {
+        novoOrquestrador();
+      }
+    };
+    window.addEventListener("keydown", aoApertarTecla);
+    return () => window.removeEventListener("keydown", aoApertarTecla);
+  }, [novoOrquestrador, novaNota]);
+
+  // Os Ajustes do app desktop, pela paleta; a falha aparece abaixo da barra do canvas.
+  const {
+    disponivel: ajustesDisponiveis,
+    abrir: abrirAjustes,
+    erro: erroDosAjustes,
+    descartarErro: descartarErroDosAjustes,
+  } = useAjustesDoAplicativo();
+
   // Paleta de comandos (Ctrl+K): o estado é dela; o canvas só entrega o que
   // listar (lido na hora de abrir) e executa o escolhido. Tudo estável, para a
   // paleta não re-renderizar com o canvas.
@@ -526,6 +563,7 @@ function Canvas() {
     const atuais = nosAtuais.current;
     return {
       podeOrganizar: atuais.filter((no) => !ehBixinho(no)).length > 1,
+      podeAbrirAjustes: desktop && ajustesDisponiveis,
       orquestradores: orquestradoresAtuais.current ?? [],
       abertos: new Set(atuais.filter(ehTerminal).map((no) => no.data.orquestradorId)),
       notas: atuais.filter(ehNota).map((no) => {
@@ -535,7 +573,7 @@ function Canvas() {
       // Só as conversas carregadas: as dos terminais abertos, sem as arquivadas (/clear).
       conversas: conversasAtuais.current,
     };
-  }, [lojaDasNotas]);
+  }, [lojaDasNotas, desktop, ajustesDisponiveis]);
   const executarItemDaPaleta = useCallback(
     (item: ItemDaPaleta) => {
       switch (item.tipo) {
@@ -546,6 +584,7 @@ function Canvas() {
             organizar,
             "zoom-100": zoomEmCemPorCento,
             "enquadrar-tudo": enquadrarTudo,
+            "ajustes-do-aplicativo": () => void abrirAjustes(),
           };
           acoesDaPaleta[item.acao]();
           return;
@@ -560,7 +599,7 @@ function Canvas() {
           return;
       }
     },
-    [novoOrquestrador, novaNota, organizar, zoomEmCemPorCento, enquadrarTudo, abrirTerminal, focar],
+    [novoOrquestrador, novaNota, organizar, zoomEmCemPorCento, enquadrarTudo, abrirAjustes, abrirTerminal, focar],
   );
 
   const acoes = useMemo<AcoesDoCanvas>(
@@ -631,35 +670,48 @@ function Canvas() {
   const colunaDaEsquerda = useMemo(
     () => (
       <div className="coluna-do-topo coluna-do-topo-esquerda">
-        <BarraDoCanvas
-          aoCriar={novoOrquestrador}
-          aoCriarNota={novaNota}
-          aoOrganizar={organizar}
-          podeOrganizar={podeOrganizar}
-          aoBuscar={abrirPaleta}
-        />
+        <BarraDoCanvas aoCriar={novoOrquestrador} aoCriarNota={novaNota} aoBuscar={abrirPaleta} />
         {avisoDoLimite && (
           <ErroDoCanvas erro={AVISO_DO_LIMITE_DE_ORQUESTRADORES} aoFechar={fecharAvisoDoLimite} nivel="aviso" />
         )}
         {erroDasNotas !== null && <ErroDoCanvas erro={erroDasNotas} aoFechar={descartarErroDasNotas} />}
+        {erroDosAjustes !== null && <ErroDoCanvas erro={erroDosAjustes} aoFechar={descartarErroDosAjustes} />}
         <Doca orquestradores={orquestradores} noCanvas={noCanvas} erro={erro} aoAbrir={abrirTerminal} />
       </div>
     ),
     [
       novoOrquestrador,
       novaNota,
-      organizar,
-      podeOrganizar,
       abrirPaleta,
       avisoDoLimite,
       fecharAvisoDoLimite,
       erroDasNotas,
       descartarErroDasNotas,
+      erroDosAjustes,
+      descartarErroDosAjustes,
       orquestradores,
       noCanvas,
       erro,
       abrirTerminal,
     ],
+  );
+  // Os controles do canto inferior esquerdo: zoom, enquadrar e, em 4º, o
+  // "Organizar". Memorizados: com um filho novo a cada render, o <Controls>
+  // re-renderizaria a cada quadro do arraste.
+  const controles = useMemo(
+    () => (
+      <Controls position="bottom-left" showInteractive={false}>
+        <ControlButton
+          onClick={organizar}
+          disabled={!podeOrganizar}
+          title={DICA_DO_ORGANIZAR}
+          aria-label={DICA_DO_ORGANIZAR}
+        >
+          <IconeGrade />
+        </ControlButton>
+      </Controls>
+    ),
+    [organizar, podeOrganizar],
   );
   const colunaDoCentro = useMemo(
     () => (
@@ -695,9 +747,10 @@ function Canvas() {
           bixinhosAtivos={bixinhosAtivos}
           cota={cota}
           memoria={servidor.memoria}
+          aoBuscar={abrirPaleta}
         />
       ) : null,
-    [desktop, trabalhando, bixinhosAtivos, cota, servidor.memoria],
+    [desktop, trabalhando, bixinhosAtivos, cota, servidor.memoria, abrirPaleta],
   );
   // Fora do viewport: o chat não se move com o canvas e só re-renderiza com novidades dele.
   const painelDoChat = useMemo(
@@ -755,7 +808,7 @@ function Canvas() {
               deleteKeyCode={null}
             >
               <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} />
-              <Controls position="bottom-left" showInteractive={false} />
+              {controles}
               <MiniMap<NoDoCanvas> position="bottom-right" pannable zoomable nodeClassName={classeDoMinimapa} />
               <Panel position="top-left" className="paineis-do-topo">
                 {colunaDaEsquerda}

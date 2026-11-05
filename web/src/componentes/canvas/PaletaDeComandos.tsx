@@ -19,7 +19,7 @@ import {
   montarItensDaPaleta,
 } from "../../shared/paletaDeComandos";
 
-/** O que o canvas pode pedir à paleta (o botão "Buscar" da barra). */
+/** O que o canvas pode pedir à paleta (o "Buscar ou executar…" da barra de título; no navegador, o "Buscar"). */
 export interface ControleDaPaleta {
   abrir: () => void;
 }
