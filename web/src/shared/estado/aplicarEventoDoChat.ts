@@ -1,5 +1,6 @@
 import type {
   AtividadeDaResposta,
+  AutorizacaoPendente,
   EstadoDoChat,
   EventoDoChatRegistrado,
   JanelaDaCota,
@@ -14,6 +15,8 @@ import { PREFERENCIAS_PADRAO_DO_CHAT } from "../modelos";
 export interface MensagemDoChatNaTela extends MensagemDoChat {
   /** Vem no evento `resposta_falhou` ou, no estado carregado, do último aviso da mensagem que falhou. */
   motivoDaFalha: string | null;
+  /** O que a resposta quis alterar sem autorização; `null` também nos dados antigos, sem o campo. */
+  autorizacaoPendente: AutorizacaoPendente | null;
 }
 
 export interface EstadoDoChatNaTela {
@@ -26,6 +29,8 @@ export interface EstadoDoChatNaTela {
   cota: JanelaDaCota[] | null;
   /** Só a atividade mais recente da resposta em andamento ("lendo README.md…"). */
   atividade: AtividadeDaResposta | null;
+  /** O chat pode editar arquivos e rodar comandos sem perguntar, até o próximo `/clear`. */
+  alteracoesAutorizadas: boolean;
 }
 
 export const ESTADO_INICIAL_DO_CHAT: EstadoDoChatNaTela = {
@@ -36,17 +41,25 @@ export const ESTADO_INICIAL_DO_CHAT: EstadoDoChatNaTela = {
   ultimaSequencia: 0,
   cota: null,
   atividade: null,
+  alteracoesAutorizadas: false,
 };
 
 /**
  * No estado gravado, o servidor guarda o motivo de uma falha como o último
  * aviso da mensagem: aqui ele volta a ser o motivo, como no evento ao vivo.
+ * Sem o campo da autorização (dados antigos), não há autorização pendente.
  */
 function naTela(mensagem: MensagemDoChat): MensagemDoChatNaTela {
+  const autorizacaoPendente = mensagem.autorizacaoPendente ?? null;
   if (mensagem.situacao === "falhou" && mensagem.avisos.length > 0) {
-    return { ...mensagem, avisos: mensagem.avisos.slice(0, -1), motivoDaFalha: mensagem.avisos.at(-1) ?? null };
+    return {
+      ...mensagem,
+      avisos: mensagem.avisos.slice(0, -1),
+      motivoDaFalha: mensagem.avisos.at(-1) ?? null,
+      autorizacaoPendente,
+    };
   }
-  return { ...mensagem, motivoDaFalha: null };
+  return { ...mensagem, motivoDaFalha: null, autorizacaoPendente };
 }
 
 /** O estado do servidor (carga inicial ou recarga depois de uma queda) substitui o da tela. */
@@ -59,6 +72,7 @@ export function carregarEstadoDoChat(estado: EstadoDoChat): EstadoDoChatNaTela {
     ultimaSequencia: estado.ultimaSequencia,
     cota: estado.cota,
     atividade: null,
+    alteracoesAutorizadas: estado.alteracoesAutorizadas ?? false,
   };
 }
 
@@ -111,6 +125,7 @@ export function aplicarEventoDoChat(estado: EstadoDoChatNaTela, evento: EventoDo
           acoes: evento.acoes,
           avisos: evento.avisos,
           uso: evento.uso,
+          autorizacaoPendente: evento.autorizacaoPendente ?? null,
         })),
         ultimaSequencia,
       };
@@ -130,11 +145,23 @@ export function aplicarEventoDoChat(estado: EstadoDoChatNaTela, evento: EventoDo
         ultimaSequencia,
       };
     case "conversa_limpa":
-      return { ...estado, ultimaSequencia, situacao: "ocioso", atividade: null, mensagens: [] };
+      // O `/clear` também desfaz a autorização de alterações.
+      return {
+        ...estado,
+        ultimaSequencia,
+        situacao: "ocioso",
+        atividade: null,
+        mensagens: [],
+        alteracoesAutorizadas: false,
+      };
     case "preferencias_alteradas":
       return { ...estado, ultimaSequencia, preferencias: evento.preferencias };
     case "uso_da_cota":
       return { ...estado, ultimaSequencia, cota: evento.janelas };
+    case "alteracoes_autorizadas":
+      return { ...estado, ultimaSequencia, alteracoesAutorizadas: true };
+    case "autorizacao_revogada":
+      return { ...estado, ultimaSequencia, alteracoesAutorizadas: false };
     default:
       // Evento de uma versão mais nova do servidor: só avança a sequência.
       return { ...estado, ultimaSequencia };
@@ -205,6 +232,29 @@ function semCercaPelaMetade(texto: string): string {
   const inicioDaLinha = texto.lastIndexOf("\n") + 1;
   const ultimaLinha = texto.slice(inicioDaLinha);
   return ultimaLinha.length >= 3 && CERCA_DE_ACAO.startsWith(ultimaLinha) ? texto.slice(0, inicioDaLinha) : texto;
+}
+
+/** A resposta que parou pedindo autorização, com o que ela quis fazer. */
+export interface PedidoDeAutorizacao {
+  mensagemId: string;
+  autorizacao: AutorizacaoPendente;
+}
+
+/**
+ * O pedido de autorização que vale agora: o da **última** resposta do Claude,
+ * se ela parou por falta de autorização. Respostas anteriores não pedem mais
+ * nada. Se o chat já está autorizado, quem decide esconder é o cartão.
+ */
+export function pedidoDeAutorizacaoAtual(estado: EstadoDoChatNaTela): PedidoDeAutorizacao | null {
+  for (let indice = estado.mensagens.length - 1; indice >= 0; indice -= 1) {
+    const mensagem = estado.mensagens[indice];
+    if (mensagem?.papel === "claude") {
+      return mensagem.autorizacaoPendente === null
+        ? null
+        : { mensagemId: mensagem.id, autorizacao: mensagem.autorizacaoPendente };
+    }
+  }
+  return null;
 }
 
 /** O modelo usado na última resposta que informou, para o rótulo do seletor. */

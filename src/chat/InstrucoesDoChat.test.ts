@@ -100,7 +100,14 @@ describe("mensagemParaOChat", () => {
     pastaDosProjetos: raiz,
     projetos,
     orquestradores: [{ nome: "Painel", pasta: path.join(raiz, "painel-app") }],
+    alteracoesAutorizadas: false,
   };
+
+  /** Só o bloco de contexto, sem a pergunta. */
+  function blocoDeContexto(alteracoesAutorizadas: boolean): string {
+    const mensagem = mensagemParaOChat("pergunta", { ...contexto, alteracoesAutorizadas });
+    return mensagem.slice(0, mensagem.indexOf("</contexto-do-app>"));
+  }
 
   it("antecede o texto com o bloco <contexto-do-app> completo", () => {
     const mensagem = mensagemParaOChat("Abra o painel", contexto);
@@ -122,16 +129,82 @@ describe("mensagemParaOChat", () => {
     expect(mensagem).toContain("- (nenhum)");
     expect(mensagem.endsWith("Veja a imagem anexada.")).toBe(true);
   });
+
+  it("as permissões declaram substituir as regras anteriores e limitam tudo às pastas dos projetos", () => {
+    for (const autorizado of [false, true]) {
+      const bloco = blocoDeContexto(autorizado);
+
+      expect(bloco).toContain("substituem qualquer regra anterior");
+      expect(bloco).toContain(`só dentro das pastas dos projetos da pasta raiz (${raiz})`);
+      expect(bloco).toMatch(/\.env\* são bloqueados/);
+    }
+  });
+
+  it("sem autorização: manda tentar a ferramenta, e se negada, avisar em uma linha e parar sem contornar", () => {
+    const bloco = blocoDeContexto(false);
+
+    expect(bloco).toContain("Alterações NÃO autorizadas ainda");
+    expect(bloco).toContain("use a ferramenta mesmo assim: o app pede a autorização ao usuário");
+    expect(bloco).toContain("diga em uma linha que precisa da autorização e pare");
+    expect(bloco).toContain("Não contorne a negação");
+    expect(bloco).not.toContain("AUTORIZADAS pelo usuário");
+  });
+
+  it("com autorização: edita e roda comandos sem pedir confirmação, até o próximo /clear", () => {
+    const bloco = blocoDeContexto(true);
+
+    expect(bloco).toContain("Alterações AUTORIZADAS pelo usuário até o próximo /clear");
+    expect(bloco).toContain("sem pedir confirmação");
+    expect(bloco).not.toContain("NÃO autorizadas");
+  });
+
+  it("commit e push só a pedido, em branch própria, sem main, sem push forçado e sem Co-authored-by", () => {
+    for (const autorizado of [false, true]) {
+      const bloco = blocoDeContexto(autorizado);
+
+      expect(bloco).toContain("Commit e push: só quando o usuário pedir explicitamente nesta mensagem");
+      expect(bloco).toContain("feature/, fix/, hotfix/ ou refactor/, nunca na main");
+      expect(bloco).toContain("nunca push forçado");
+      expect(bloco).toContain("nunca a linha Co-authored-by");
+    }
+  });
+
+  it("pede a lista do que foi alterado e sugere orquestrador para mudanças grandes", () => {
+    const bloco = blocoDeContexto(true);
+
+    expect(bloco).toContain("listando os arquivos alterados e os comandos rodados");
+    expect(bloco).toMatch(/Mudanças grandes .*sugira abrir um orquestrador/);
+  });
 });
 
 describe("instrucoesDoChat", () => {
-  it("diz que o chat só lê, pesquisa na web e responde em português", () => {
+  it("diz que o chat pesquisa, lê, edita e roda comandos nas pastas dos projetos, em português", () => {
     const instrucoes = instrucoesDoChat();
 
     expect(instrucoes).toContain("Orquestrador de agentes");
     expect(instrucoes).toMatch(/português/);
     expect(instrucoes).toMatch(/WebSearch/);
-    expect(instrucoes).toMatch(/Nunca altera nada/);
+    expect(instrucoes).toMatch(/editar arquivos \(Edit, Write, NotebookEdit\) e rodar comandos \(PowerShell, Bash\)/);
+    expect(instrucoes).toContain("só dentro das pastas dos projetos da pasta raiz");
+    expect(instrucoes).not.toMatch(/Nunca altera nada/);
     expect(instrucoes).toContain("acao-do-app");
+  });
+
+  it("explica a autorização única e o que fazer quando ela é negada", () => {
+    const instrucoes = instrucoesDoChat();
+
+    expect(instrucoes).toContain("autorização única do usuário, que vale até o próximo /clear");
+    expect(instrucoes).toContain("use a ferramenta mesmo assim: o app pede a autorização ao usuário");
+    expect(instrucoes).toContain("Não contorne a negação");
+  });
+
+  it("traz as regras de commit e push, do relatório e das mudanças grandes", () => {
+    const instrucoes = instrucoesDoChat();
+
+    expect(instrucoes).toContain("Commit e push: só quando o usuário pedir explicitamente");
+    expect(instrucoes).toContain("nunca na main");
+    expect(instrucoes).toContain("nunca a linha Co-authored-by");
+    expect(instrucoes).toContain("listando os arquivos alterados e os comandos rodados");
+    expect(instrucoes).toMatch(/sugira abrir um orquestrador/);
   });
 });

@@ -6,6 +6,7 @@ import {
   carregarEstadoDoChat,
   ESTADO_INICIAL_DO_CHAT,
   type EstadoDoChatNaTela,
+  pedidoDeAutorizacaoAtual,
   textoParaMostrar,
   ultimoModeloUsado,
 } from "./aplicarEventoDoChat";
@@ -153,6 +154,101 @@ describe("aplicarEventoDoChat", () => {
     });
 
     expect(estado.mensagens[0]).toMatchObject({ avisos: ["ação ignorada"], motivoDaFalha: "sem cota" });
+  });
+
+  describe("autorização de alterações", () => {
+    const concluidaPedindo: EventoDoChat = {
+      tipo: "resposta_concluida",
+      mensagemId: "c1",
+      texto: "Preciso rodar os testes.",
+      acoes: [],
+      avisos: [],
+      uso: null,
+      autorizacaoPendente: { acao: "rodar_comando", detalhe: "npm test" },
+    };
+
+    it("vem do GET; sem o campo (servidor antigo) vale falso, e mensagens sem o campo não pedem nada", () => {
+      const base = {
+        sessaoId: "s",
+        situacao: "ocioso" as const,
+        preferencias: { modelo: "opus" as const, esforco: "alto" as const },
+        ultimaSequencia: 4,
+        cota: null,
+      };
+      const autorizado = carregarEstadoDoChat({
+        ...base,
+        alteracoesAutorizadas: true,
+        mensagens: [
+          mensagem("c1", "claude", {
+            situacao: "concluida",
+            autorizacaoPendente: { acao: "editar", detalhe: "src/x.ts" },
+          }),
+        ],
+      });
+      expect(autorizado.alteracoesAutorizadas).toBe(true);
+      expect(autorizado.mensagens[0]?.autorizacaoPendente).toEqual({ acao: "editar", detalhe: "src/x.ts" });
+
+      const antigo = carregarEstadoDoChat({ ...base, mensagens: [mensagem("c1", "claude", { situacao: "concluida" })] });
+      expect(antigo.alteracoesAutorizadas).toBe(false);
+      expect(antigo.mensagens[0]?.autorizacaoPendente).toBeNull();
+    });
+
+    it("alteracoes_autorizadas liga, autorizacao_revogada desliga e o /clear (conversa_limpa) zera", () => {
+      const autorizado = aplicar([{ tipo: "alteracoes_autorizadas" }]);
+      expect(autorizado.alteracoesAutorizadas).toBe(true);
+
+      expect(aplicar([{ tipo: "alteracoes_autorizadas" }, { tipo: "autorizacao_revogada" }]).alteracoesAutorizadas).toBe(
+        false,
+      );
+
+      const limpo = aplicar([{ tipo: "alteracoes_autorizadas" }, { tipo: "conversa_limpa" }]);
+      expect(limpo.alteracoesAutorizadas).toBe(false);
+      expect(limpo.ultimaSequencia).toBe(2);
+    });
+
+    it("eventos de autorização repetidos ou fora de ordem são ignorados pela sequência", () => {
+      const revogado = aplicar([{ tipo: "alteracoes_autorizadas" }, { tipo: "autorizacao_revogada" }]);
+
+      // A autorização (sequência 1) chega de novo numa reconexão: não volta a valer.
+      expect(aplicarEventoDoChat(revogado, registrado({ tipo: "alteracoes_autorizadas" }, 1))).toBe(revogado);
+      expect(revogado.alteracoesAutorizadas).toBe(false);
+    });
+
+    it("a resposta concluída guarda o pedido de autorização; sem o campo, fica nulo", () => {
+      const pedindo = aplicar([pergunta, concluidaPedindo]);
+      expect(pedindo.mensagens[1]?.autorizacaoPendente).toEqual({ acao: "rodar_comando", detalhe: "npm test" });
+
+      const semCampo = aplicar([
+        pergunta,
+        { tipo: "resposta_concluida", mensagemId: "c1", texto: "Ok.", acoes: [], avisos: [], uso: null },
+      ]);
+      expect(semCampo.mensagens[1]?.autorizacaoPendente).toBeNull();
+      // Também na mensagem que chega na pergunta, sem o campo.
+      expect(aplicar([pergunta]).mensagens[1]?.autorizacaoPendente).toBeNull();
+    });
+
+    it("o pedido que vale é só o da última resposta do Claude", () => {
+      const pedindo = aplicar([pergunta, concluidaPedindo]);
+      expect(pedidoDeAutorizacaoAtual(pedindo)).toEqual({
+        mensagemId: "c1",
+        autorizacao: { acao: "rodar_comando", detalhe: "npm test" },
+      });
+
+      // Uma pergunta nova: a resposta nova (sem pedido) passa a ser a última.
+      const depois = aplicarEventoDoChat(
+        pedindo,
+        registrado(
+          {
+            tipo: "pergunta_enviada",
+            mensagemDoUsuario: mensagem("u2", "usuario", { texto: "Autorizado. Continue de onde parou." }),
+            mensagemDoClaude: mensagem("c2", "claude"),
+          },
+          3,
+        ),
+      );
+      expect(pedidoDeAutorizacaoAtual(depois)).toBeNull();
+      expect(pedidoDeAutorizacaoAtual(ESTADO_INICIAL_DO_CHAT)).toBeNull();
+    });
   });
 });
 

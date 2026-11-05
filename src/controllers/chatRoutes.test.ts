@@ -8,7 +8,7 @@ import path from "node:path";
 import express from "express";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import {
+import type {
   EventoDoMotorDeChat,
   MotorDeChat,
   PerguntaAoMotorDeChat,
@@ -22,6 +22,10 @@ import { CanalDoChat, criarChatRoutes } from "./chatRoutes";
 
 const uso = { duracaoMs: 1, tokensDeEntrada: 1, tokensDeSaida: 1, modeloUsado: null };
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64");
+
+function sucesso(resposta: string): ResultadoDaResposta {
+  return { sucesso: true, resposta, uso, autorizacaoPendente: null, avisos: [] };
+}
 
 /** Motor que espera o teste mandar terminar. */
 class MotorDoTeste implements MotorDeChat {
@@ -123,6 +127,7 @@ describe("rotas do chat", () => {
     expect(await resposta.json()).toEqual({
       sessaoId: "sessao-1",
       situacao: "ocioso",
+      alteracoesAutorizadas: false,
       preferencias: { modelo: "opus", esforco: "alto" },
       mensagens: [],
       ultimaSequencia: 0,
@@ -145,7 +150,7 @@ describe("rotas do chat", () => {
     expect(outra.status).toBe(409);
     expect(await outra.json()).toEqual({ erro: "Já há uma resposta em andamento." });
 
-    motor.terminar({ sucesso: true, resposta: "Olá, tudo bem?", uso });
+    motor.terminar(sucesso("Olá, tudo bem?"));
     await aguardarOcioso();
   });
 
@@ -178,7 +183,7 @@ describe("rotas do chat", () => {
     expect((await fetch(`${base}/chat/anexos/..%5C..%5Cconversa.json`)).status).toBe(404);
     expect((await fetch(`${base}/chat/anexos/nao-existe.png`)).status).toBe(404);
 
-    motor.terminar({ sucesso: true, resposta: "ok", uso });
+    motor.terminar(sucesso("ok"));
     await aguardarOcioso();
   });
 
@@ -194,6 +199,42 @@ describe("rotas do chat", () => {
     const esforco = await enviar("/chat/preferencias", "PATCH", { esforco: "enorme" });
     expect(esforco.status).toBe(400);
     expect(await esforco.json()).toEqual({ erro: "Esforço inválido." });
+  });
+
+  it("PATCH /chat/autorizacao autoriza e revoga, e o GET /chat mostra o campo", async () => {
+    const autorizar = await enviar("/chat/autorizacao", "PATCH", { autorizado: true });
+    expect(autorizar.status).toBe(200);
+    expect(await autorizar.json()).toEqual({ autorizado: true });
+    expect(((await (await fetch(`${base}/chat`)).json()) as { alteracoesAutorizadas: boolean }).alteracoesAutorizadas).toBe(true);
+
+    const revogar = await enviar("/chat/autorizacao", "PATCH", { autorizado: false });
+    expect(revogar.status).toBe(200);
+    expect(await revogar.json()).toEqual({ autorizado: false });
+    expect(((await (await fetch(`${base}/chat`)).json()) as { alteracoesAutorizadas: boolean }).alteracoesAutorizadas).toBe(false);
+  });
+
+  it("PATCH /chat/autorizacao recusa corpo inválido com 400", async () => {
+    for (const corpo of [{}, { autorizado: "sim" }, { autorizado: 1 }, { autorizado: null }, [true]]) {
+      const resposta = await enviar("/chat/autorizacao", "PATCH", corpo);
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: "A autorização deve ser verdadeira ou falsa." });
+    }
+    const semCorpo = await enviar("/chat/autorizacao", "PATCH");
+    expect(semCorpo.status).toBe(400);
+    expect(await semCorpo.json()).toEqual({ erro: "A autorização deve ser verdadeira ou falsa." });
+  });
+
+  it("a autorização dada pelo PATCH vale na próxima pergunta e é gravada no histórico", async () => {
+    await enviar("/chat/autorizacao", "PATCH", { autorizado: true });
+    await enviar("/chat/mensagens", "POST", { texto: "rode os testes" });
+    await expect.poll(() => motor.perguntas.length).toBe(1);
+    expect(motor.perguntas[0]?.alteracoesAutorizadas).toBe(true);
+    motor.terminar(sucesso("ok"));
+    await aguardarOcioso();
+
+    const recebido = await lerSse(`${base}/chat/eventos`, (texto) => texto.includes("resposta_concluida"));
+    expect(recebido).toMatch(/id: 1\ndata: \{"tipo":"alteracoes_autorizadas"/);
+    expect(recebido).toContain('"autorizacaoPendente":null');
   });
 
   it("POST /chat/cancelar: 409 sem resposta, 202 com resposta em andamento", async () => {
@@ -214,7 +255,7 @@ describe("rotas do chat", () => {
     const durante = await enviar("/chat/limpar", "POST");
     expect(durante.status).toBe(409);
 
-    motor.terminar({ sucesso: true, resposta: "ok", uso });
+    motor.terminar(sucesso("ok"));
     await aguardarOcioso();
 
     const depois = await enviar("/chat/limpar", "POST");
@@ -247,7 +288,7 @@ describe("rotas do chat", () => {
     expect(recebido).toContain('event: atividade\ndata: {"mensagemId":"id1","ferramenta":"WebSearch","detalhe":"node lts"}\n\n');
     expect(recebido).not.toMatch(/id: \d+\nevent:/);
 
-    motor.terminar({ sucesso: true, resposta: "Olá", uso });
+    motor.terminar(sucesso("Olá"));
     await aguardarOcioso();
 
     const retomado = await lerSse(`${base}/chat/eventos`, (texto) => texto.includes("resposta_concluida"), {
