@@ -8,12 +8,14 @@ import {
   formatarMomento,
   formatarPercentual,
   ROTULOS_DOS_MODELOS,
+  rotuloCurtoDaCota,
 } from "../../shared/formatacao";
 import { useRelogio } from "../../shared/hooks/useRelogio";
 import type { EstadoDoServidor } from "../../shared/hooks/useServidor";
 import { nivelDaMemoria } from "../../shared/memoria";
 import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
 import { IconeOrquestrador, IconePasta } from "../Icones";
+import { apiDaConfiguracao, rodandoNoDesktop } from "../../shared/ponteDoDesktop";
 
 /** Por quanto tempo o aviso de "reconectado" fica na tela. */
 const DURACAO_DO_AVISO_DE_VOLTA_MS = 10_000;
@@ -48,7 +50,7 @@ export function AvisoDeConexao({ servidor }: { servidor: EstadoDoServidor }) {
             Os orquestradores pararam de responder. A tela reconecta sozinha assim que o servidor voltar.
           </span>
           <span className="mono text-muted">
-            para subir: abra iniciar-orquestrador.cmd, ou rode npm start na pasta orquestrador-agentes-app
+            o aplicativo religa o servidor sozinho; se não voltar, feche e abra o Orquestrador de novo
           </span>
         </div>
       </div>
@@ -88,46 +90,132 @@ interface PropsDaBarra {
   podeOrganizar: boolean;
 }
 
-/** Canto superior esquerdo: identidade do app e as ações do canvas. */
-export function BarraDoCanvas({ aoCriar, aoCriarNota, aoOrganizar, podeOrganizar }: PropsDaBarra) {
+interface PropsDoRotulo {
+  /** Texto inteiro (≥ 1280 px). */
+  completo: string;
+  /** Entre 1100 e 1280 px. */
+  curto: string;
+  /** Abaixo de 1100 px: o botão fica só com o ícone e a dica (`title`). */
+  icone: string;
+}
+
+/**
+ * O rótulo de um botão em três tamanhos; o CSS (`.rotulo-*`, pela largura da
+ * janela) mostra um só. O nome acessível vem do `aria-label` do botão.
+ */
+function RotuloResponsivo({ completo, curto, icone }: PropsDoRotulo) {
   return (
-    <div className="painel-flutuante flex items-center gap-3 px-3 py-2">
-      <div className="no-orquestrador-icone h-8 w-8">
-        <IconeOrquestrador tamanho={18} />
-      </div>
-      <div className="flex flex-col leading-tight">
-        <h1 className="text-[14px]">Orquestrador de agentes</h1>
-        <span className="mono text-muted">claude code · canvas · local</span>
-      </div>
-      <span className="mx-1 h-8 w-px bg-border" />
-      <button type="button" className="btn btn-sm btn-cta" onClick={aoCriar}>
-        + Novo orquestrador
+    <>
+      <span className="rotulo-completo" aria-hidden="true">
+        {completo}
+      </span>
+      <span className="rotulo-curto" aria-hidden="true">
+        {curto}
+      </span>
+      <span className="rotulo-icone" aria-hidden="true">
+        {icone}
+      </span>
+    </>
+  );
+}
+
+/**
+ * Canto superior esquerdo: as ações do canvas. No navegador, também a
+ * identidade do app; no desktop ela já está na barra de título (que é a área
+ * de arraste da janela).
+ */
+export function BarraDoCanvas({ aoCriar, aoCriarNota, aoOrganizar, podeOrganizar }: PropsDaBarra) {
+  const desktop = rodandoNoDesktop();
+  const configuracao = apiDaConfiguracao();
+  const [erroDosAjustes, setErroDosAjustes] = useState<string | null>(null);
+
+  const abrirAjustes = async () => {
+    if (configuracao === null) return;
+    setErroDosAjustes(null);
+    try {
+      await configuracao.abrirAjustes();
+    } catch (falha) {
+      const motivo = falha instanceof Error ? falha.message : String(falha);
+      setErroDosAjustes(`Não foi possível abrir os ajustes de pastas: ${motivo}`);
+    }
+  };
+
+  return (
+    <div className="barra-do-canvas painel-flutuante flex items-center gap-2 px-2.5 py-2">
+      {!desktop && (
+        <>
+          <div className="no-orquestrador-icone h-8 w-8 shrink-0">
+            <IconeOrquestrador tamanho={18} />
+          </div>
+          <div className="identidade-da-barra flex flex-col leading-tight">
+            <h1 className="text-[14px] whitespace-nowrap">Orquestrador de agentes</h1>
+            <span className="subtitulo-da-barra mono text-muted whitespace-nowrap">claude code · canvas · local</span>
+          </div>
+          <span className="mx-1 h-8 w-px shrink-0 bg-border" />
+        </>
+      )}
+      <button
+        type="button"
+        className="btn btn-sm btn-cta"
+        onClick={aoCriar}
+        aria-label="+ Novo orquestrador"
+        title="Novo orquestrador"
+      >
+        <RotuloResponsivo completo="+ Novo orquestrador" curto="+ Novo" icone="+" />
       </button>
       <button
         type="button"
         className="btn btn-sm btn-cta"
         onClick={aoCriarNota}
+        aria-label="+ notas"
         title="Cria uma nota no centro da tela (bloco de notas, salvo automaticamente)"
       >
-        + notas
+        <RotuloResponsivo completo="+ notas" curto="+ Nota" icone="✎" />
       </button>
       <button
         type="button"
         className="btn btn-sm btn-outline"
         onClick={aoOrganizar}
         disabled={!podeOrganizar}
+        aria-label="Organizar"
         title="Coloca os terminais lado a lado, e as notas em colunas à direita deles"
       >
-        Organizar
+        <RotuloResponsivo completo="Organizar" curto="Organizar" icone="▦" />
       </button>
+      {configuracao !== null && (
+        <button
+          type="button"
+          className="btn btn-sm btn-outline"
+          onClick={() => void abrirAjustes()}
+          aria-label="⚙ Pastas"
+          title="Pasta dos projetos e Claude Code"
+        >
+          <RotuloResponsivo completo="⚙ Pastas" curto="⚙" icone="⚙" />
+        </button>
+      )}
+      {erroDosAjustes !== null && (
+        <span className="mono text-error max-w-64" role="alert">
+          {erroDosAjustes}
+        </span>
+      )}
     </div>
   );
 }
 
-/** Falha numa ação do canvas (ex.: criar uma nota), logo abaixo da barra. */
-export function ErroDoCanvas({ erro, aoFechar }: { erro: string; aoFechar: () => void }) {
+interface PropsDoErroDoCanvas {
+  erro: string;
+  aoFechar: () => void;
+  /** "aviso" para recusas esperadas (ex.: limite de terminais abertos); padrão, erro. */
+  nivel?: "erro" | "aviso";
+}
+
+/** Falha ou recusa numa ação do canvas (ex.: criar uma nota), logo abaixo da barra. */
+export function ErroDoCanvas({ erro, aoFechar, nivel = "erro" }: PropsDoErroDoCanvas) {
   return (
-    <div className="alert alert-error mt-2 flex max-w-md items-start gap-2" role="alert">
+    <div
+      className={`alert ${nivel === "aviso" ? "alert-warning" : "alert-error"} mt-2 flex max-w-md items-start gap-2`}
+      role="alert"
+    >
       <span className="flex-1">{erro}</span>
       <button type="button" className="botao-icone shrink-0" title="Fechar aviso" onClick={aoFechar}>
         ✕
@@ -205,6 +293,7 @@ export function Doca({ orquestradores, noCanvas, erro, aoAbrir }: PropsDaDoca) {
   );
 }
 
+
 interface PropsDoStatus {
   trabalhando: number;
   bixinhosAtivos: number;
@@ -218,36 +307,100 @@ const AVISO_DA_MEMORIA = {
     "Memória quase esgotada: espere os pedidos em andamento terminarem, feche programas ou use Haiku/Sonnet nos subagentes.",
 } as const;
 
+function descreverMemoria(memoria: LeituraDeMemoria): string {
+  return `Livre: ${formatarBytes(memoria.livreBytes)} de ${formatarBytes(memoria.totalBytes)}. Agentes: ${formatarBytes(memoria.agentesBytes)}. Servidor: ${formatarBytes(memoria.servidorBytes)}.`;
+}
+
 /** RAM livre do computador e quanto os agentes estão usando, com alerta quando aperta. */
 function MedidorDeMemoria({ memoria }: { memoria: LeituraDeMemoria }) {
   const nivel = nivelDaMemoria(memoria);
   const usada = 1 - memoria.livreBytes / memoria.totalBytes;
   return (
     <span
-      className={`flex items-center gap-1.5 mono ${nivel === "normal" ? "text-muted" : nivel === "baixa" ? "text-warning" : "text-error"}`}
-      title={`Livre: ${formatarBytes(memoria.livreBytes)} de ${formatarBytes(memoria.totalBytes)}. Agentes: ${formatarBytes(memoria.agentesBytes)}. Servidor: ${formatarBytes(memoria.servidorBytes)}.`}
+      className={`status-detalhe flex items-center gap-1.5 mono whitespace-nowrap ${nivel === "normal" ? "text-muted" : nivel === "baixa" ? "text-warning" : "text-error"}`}
+      title={descreverMemoria(memoria)}
     >
       RAM
       <span className={`medidor ${nivel === "normal" ? "" : "medidor-alto"}`}>
         <span style={{ width: `${Math.round(usada * 100)}%` }} />
       </span>
       {formatarBytes(memoria.livreBytes)} livres
-      {memoria.agentesBytes > 0 && <span className="text-muted">· agentes {formatarBytes(memoria.agentesBytes)}</span>}
+      {memoria.agentesBytes > 0 && (
+        <span className="status-extra text-muted">· agentes {formatarBytes(memoria.agentesBytes)}</span>
+      )}
     </span>
   );
 }
 
-/** Canto superior direito: quem está trabalhando agora e a cota da assinatura. */
-export function StatusDoCanvas({ trabalhando, bixinhosAtivos, cota, memoria }: PropsDoStatus) {
-  const nivel = memoria === null ? "normal" : nivelDaMemoria(memoria);
+interface LeituraDoResumo {
+  rotulo: string;
+  uso: number;
+  alto: boolean;
+  linha: string;
+}
+
+/**
+ * Abaixo de 1100 px: um só medidor (o uso mais alto entre as cotas e a RAM),
+ * com o resto no balão ao passar o mouse.
+ */
+function ResumoDoStatus({ bixinhosAtivos, cota, memoria }: Omit<PropsDoStatus, "trabalhando">) {
+  const leituras: LeituraDoResumo[] = (cota ?? []).map((janela) => ({
+    rotulo: rotuloCurtoDaCota(janela.nome),
+    uso: janela.utilizacao,
+    alto: janela.utilizacao >= COTA_ALTA,
+    linha: `${janela.nome}: ${formatarPercentual(janela.utilizacao)}${janela.renovaEm ? ` (renova ${formatarMomento(janela.renovaEm)})` : ""}`,
+  }));
+  if (memoria !== null) {
+    leituras.push({
+      rotulo: "RAM",
+      uso: 1 - memoria.livreBytes / memoria.totalBytes,
+      alto: nivelDaMemoria(memoria) !== "normal",
+      linha: `RAM: ${descreverMemoria(memoria)}`,
+    });
+  }
+  if (leituras.length === 0 && bixinhosAtivos === 0) {
+    return null;
+  }
+  const principal = leituras.reduce<LeituraDoResumo | null>(
+    (maior, leitura) => (maior === null || leitura.uso > maior.uso ? leitura : maior),
+    null,
+  );
+  const dica = [
+    ...(bixinhosAtivos > 0 ? [`${bixinhosAtivos} ${bixinhosAtivos === 1 ? "agente ativo" : "agentes ativos"}`] : []),
+    ...leituras.map((leitura) => leitura.linha),
+  ].join("\n");
   return (
-    <div className="flex flex-col items-end gap-2">
-    <div className="painel-flutuante flex items-center gap-4 px-3 py-2">
-      <span className={`etiqueta ${trabalhando > 0 ? "etiqueta-ativa etiqueta-pulso" : ""}`}>
+    <span
+      className={`status-resumo items-center gap-1.5 mono whitespace-nowrap ${leituras.some((leitura) => leitura.alto) ? "text-error" : "text-muted"}`}
+      title={dica}
+      aria-label={dica}
+      role="note"
+      tabIndex={0}
+      data-testid="resumo-do-status"
+    >
+      {bixinhosAtivos > 0 && <span className="text-active">{bixinhosAtivos} ativos ·</span>}
+      {principal !== null && (
+        <>
+          {principal.rotulo}
+          <span className={`medidor medidor-curto ${principal.alto ? "medidor-alto" : ""}`}>
+            <span style={{ width: `${Math.min(100, Math.round(principal.uso * 100))}%` }} />
+          </span>
+          {formatarPercentual(principal.uso)}
+        </>
+      )}
+    </span>
+  );
+}
+
+/** Situação, agentes ativos, cotas e RAM: o conteúdo do status, em linha. */
+function ConteudoDoStatus({ trabalhando, bixinhosAtivos, cota, memoria }: PropsDoStatus) {
+  return (
+    <>
+      <span className={`etiqueta shrink-0 ${trabalhando > 0 ? "etiqueta-ativa etiqueta-pulso" : ""}`}>
         {trabalhando > 0 ? `${trabalhando} trabalhando` : "todos ociosos"}
       </span>
       {bixinhosAtivos > 0 && (
-        <span className="mono text-active">
+        <span className="status-detalhe mono text-active whitespace-nowrap">
           {bixinhosAtivos} {bixinhosAtivos === 1 ? "agente ativo" : "agentes ativos"}
         </span>
       )}
@@ -255,10 +408,11 @@ export function StatusDoCanvas({ trabalhando, bixinhosAtivos, cota, memoria }: P
         cota.map((janela) => (
           <span
             key={janela.nome}
-            className="flex items-center gap-1.5 mono text-muted"
+            className="status-detalhe flex items-center gap-1.5 mono text-muted whitespace-nowrap"
             title={janela.renovaEm ? `Renova ${formatarMomento(janela.renovaEm)}` : undefined}
           >
-            {janela.nome}
+            <span className="rotulo-completo">{janela.nome}</span>
+            <span className="rotulo-curto">{rotuloCurtoDaCota(janela.nome)}</span>
             <span className={`medidor ${janela.utilizacao >= COTA_ALTA ? "medidor-alto" : ""}`}>
               <span style={{ width: `${Math.min(100, Math.round(janela.utilizacao * 100))}%` }} />
             </span>
@@ -266,12 +420,49 @@ export function StatusDoCanvas({ trabalhando, bixinhosAtivos, cota, memoria }: P
           </span>
         ))}
       {memoria !== null && <MedidorDeMemoria memoria={memoria} />}
+      <ResumoDoStatus bixinhosAtivos={bixinhosAtivos} cota={cota} memoria={memoria} />
+    </>
+  );
+}
+
+/** Alerta de memória baixa/crítica: abaixo do status (navegador) ou no canto direito do canvas (desktop). */
+export function AvisoDeMemoria({ memoria }: { memoria: LeituraDeMemoria | null }) {
+  const nivel = memoria === null ? "normal" : nivelDaMemoria(memoria);
+  if (nivel === "normal") {
+    return null;
+  }
+  return (
+    <div className={`aviso-de-memoria ${nivel === "critica" ? "aviso-de-memoria-critica" : ""}`} role="status">
+      ⚠ {AVISO_DA_MEMORIA[nivel]}
     </div>
-    {nivel !== "normal" && (
-      <div className={`aviso-de-memoria ${nivel === "critica" ? "aviso-de-memoria-critica" : ""}`} role="status">
-        ⚠ {AVISO_DA_MEMORIA[nivel]}
+  );
+}
+
+interface PropsDoStatusDoCanvas extends PropsDoStatus {
+  /** No desktop, o status vai na barra de título: sem moldura e sem o alerta de memória. */
+  naBarraDeTitulo?: boolean;
+}
+
+/**
+ * Quem está trabalhando agora, a cota da assinatura e a RAM. No navegador, é
+ * o painel do canto superior direito; no desktop, fica na barra de título. A
+ * largura da janela decide o detalhe (CSS): rótulos curtos abaixo de 1280 px
+ * e só a situação com um medidor resumido abaixo de 1100 px.
+ */
+export function StatusDoCanvas({ naBarraDeTitulo = false, ...status }: PropsDoStatusDoCanvas) {
+  if (naBarraDeTitulo) {
+    return (
+      <div className="status-do-canvas status-na-barra-de-titulo no-drag" data-testid="status-do-canvas">
+        <ConteudoDoStatus {...status} />
       </div>
-    )}
+    );
+  }
+  return (
+    <div className="flex min-w-0 flex-col items-end gap-2">
+      <div className="status-do-canvas painel-flutuante px-3 py-2" data-testid="status-do-canvas">
+        <ConteudoDoStatus {...status} />
+      </div>
+      <AvisoDeMemoria memoria={status.memoria} />
     </div>
   );
 }

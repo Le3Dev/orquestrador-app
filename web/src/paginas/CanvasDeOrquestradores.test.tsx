@@ -1,20 +1,38 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { api } from "../shared/api/cliente";
-import type { DadosDaNota } from "../shared/api/tipos";
-import { lerLayout } from "../shared/canvas/layout";
+import type {
+  DadosDaConfiguracao,
+  DadosDaNota,
+  EventoDeOrquestracao,
+  EventoRegistrado,
+  ResumoDoOrquestrador,
+} from "../shared/api/tipos";
+import { lerLayout, sobrepoe, TAMANHO_DO_BIXINHO } from "../shared/canvas/layout";
+import { idDoBixinho } from "../shared/canvas/nos";
+import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../shared/estado/aplicarEvento";
 import { CanvasDeOrquestradores } from "./CanvasDeOrquestradores";
 
 // O canvas sem servidor: nenhum orquestrador, conectado e sem conversas.
 const simulados = vi.hoisted(() => ({
-  orquestradores: { orquestradores: [], erro: null, recarregar: async () => undefined },
+  orquestradores: { orquestradores: [] as ResumoDoOrquestrador[], erro: null, recarregar: async () => undefined },
   servidor: { conectado: true, caiuEm: null, voltouEm: null, reiniciou: false, memoria: null },
-  conversas: { conversas: new Map(), conexoes: new Map(), sinais: new Map() },
+  conversas: {
+    conversas: new Map<string, EstadoDaConversa>(),
+    conexoes: new Map<string, string>(),
+    sinais: new Map<string, unknown>(),
+  },
 }));
 
 vi.mock("../shared/hooks/useOrquestradores", () => ({ useOrquestradores: () => simulados.orquestradores }));
 vi.mock("../shared/hooks/useServidor", () => ({ useServidor: () => simulados.servidor }));
 vi.mock("../shared/hooks/useConversas", () => ({ useConversas: () => simulados.conversas }));
+vi.mock("../shared/hooks/useChat", async () => {
+  const { ESTADO_INICIAL_DO_CHAT } = await import("../shared/estado/aplicarEventoDoChat");
+  const chat = { ...ESTADO_INICIAL_DO_CHAT, carregado: true };
+  const aplicarPreferencias = () => undefined;
+  return { useChat: () => ({ chat, conexao: "conectado", erro: null, aplicarPreferencias }) };
+});
 
 /** O jsdom não mede nada: o React Flow só precisa que o observador exista. */
 class ObservadorDeTamanhoFalso {
@@ -33,6 +51,31 @@ function nota(id: string, alteracoes: Partial<DadosDaNota> = {}): DadosDaNota {
     ...alteracoes,
   };
 }
+
+describe("CanvasDeOrquestradores · chat rápido", () => {
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoFalso);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it("mostra o chat no painel do centro de baixo, sem arrastar nem rolar o canvas", async () => {
+    render(<CanvasDeOrquestradores />);
+
+    const campo = await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+    expect(campo).toHaveAttribute("placeholder", "Pergunte qualquer coisa ao Claude · / para comandos");
+    const painel = campo.closest(".react-flow__panel");
+    expect(painel).toHaveClass("bottom", "center", "painel-do-chat");
+    expect(screen.getByTestId("chat-rapido")).toHaveClass("nodrag", "nowheel", "nopan");
+    expect(screen.getByRole("button", { name: /Modelo: Opus 5\.5, esforço alto/ })).toBeInTheDocument();
+  });
+});
 
 describe("CanvasDeOrquestradores · notas", () => {
   beforeEach(() => {
@@ -81,5 +124,307 @@ describe("CanvasDeOrquestradores · notas", () => {
     expect(screen.queryByRole("textbox", { name: "Texto da nota" })).not.toBeInTheDocument();
     await waitFor(() => expect(Object.keys(lerLayout().notas)).toEqual(["n1"]));
     expect(lerLayout().notas.n1).toMatchObject({ minimizada: true, altura: 280 });
+  });
+});
+
+const configuracao: DadosDaConfiguracao = {
+  modeloDoOrquestrador: "opus",
+  esforcoDoOrquestrador: "padrao",
+  modeloDosSubagentes: "haiku",
+  esforcoDosSubagentes: "padrao",
+  quantidadeDeSubagentes: { modo: "fixa", limite: 2 },
+  nivelDePermissao: "leitura",
+  permitirCommitEPush: false,
+  permitirTrabalhoDireto: true,
+  proporPlanoEmPedidosGrandes: true,
+};
+
+function orquestrador(id: string): ResumoDoOrquestrador {
+  return {
+    id,
+    nome: `Orquestrador ${id}`,
+    pastaDeTrabalho: `C:\\projetos\\${id}`,
+    nomeDaPasta: id,
+    situacao: "trabalhando",
+    configuracao,
+    criadoEm: "2026-10-28T12:00:00Z",
+    totalDeTurnos: 1,
+    ultimoTurno: null,
+    worktree: null,
+  };
+}
+
+function conversaComDoisSubagentes(): EstadoDaConversa {
+  const eventos: EventoDeOrquestracao[] = [
+    { tipo: "turno_iniciado", turnoId: "t1", texto: "analise", configuracao },
+    { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "s1", descricao: "A", tarefa: "" },
+    { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "s2", descricao: "B", tarefa: "" },
+  ];
+  return eventos
+    .map((evento, indice): EventoRegistrado => ({ ...evento, sequencia: indice + 1, em: "2026-10-28T12:00:00Z" }))
+    .reduce(aplicarEvento, ESTADO_INICIAL);
+}
+
+/** O elemento do nó no React Flow. */
+function noNaTela(id: string): HTMLElement {
+  const elemento = document.querySelector<HTMLElement>(`.react-flow__node[data-id="${id}"]`);
+  if (elemento === null) {
+    throw new Error(`nó ${id} não está na tela`);
+  }
+  return elemento;
+}
+
+/** Onde o React Flow desenhou o nó (posição absoluta no canvas, com zoom 1 e sem pan). */
+function posicaoNaTela(id: string): { x: number; y: number } {
+  const [, x, y] = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)/.exec(noNaTela(id).style.transform) ?? [];
+  return { x: Number(x), y: Number(y) };
+}
+
+/**
+ * Um evento de mouse com a janela em `view`: o d3-drag do React Flow ouve o
+ * movimento e o soltar nela. O jsdom recusa `view` no construtor sob o
+ * vitest, então ela entra depois.
+ */
+function eventoDoMouse(tipo: "mousedown" | "mousemove" | "mouseup", clientX: number, clientY: number): MouseEvent {
+  const evento = new MouseEvent(tipo, { bubbles: true, cancelable: true, button: 0, clientX, clientY });
+  Object.defineProperty(evento, "view", { value: window });
+  return evento;
+}
+
+describe("CanvasDeOrquestradores · bixinhos", () => {
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoFalso);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+    // Um canvas de tamanho real: sem ele (o jsdom mede tudo como zero), o React
+    // Flow acharia o mouse sempre na borda e rolaria o canvas durante o arraste.
+    const tela = { x: 0, y: 0, left: 0, top: 0, width: 4000, height: 3000, right: 4000, bottom: 3000 };
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({ ...tela, toJSON: () => tela });
+  });
+
+  afterEach(() => {
+    simulados.orquestradores.orquestradores = [];
+    simulados.conversas.conversas = new Map();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it("soltar um terminal em cima dos bixinhos de outro tira esses bixinhos de baixo dele", async () => {
+    localStorage.setItem(
+      "orquestrador-agentes:canvas:v1",
+      JSON.stringify({
+        terminais: {
+          o1: { x: 0, y: 0, largura: 600, altura: 520 },
+          o2: { x: 1500, y: 0, largura: 600, altura: 520 },
+        },
+        notas: {},
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }),
+    );
+    simulados.orquestradores.orquestradores = [orquestrador("o1"), orquestrador("o2")];
+    simulados.conversas.conversas = new Map([["o1", conversaComDoisSubagentes()]]);
+    render(<CanvasDeOrquestradores />);
+
+    const bixinho = idDoBixinho("o1", "s1");
+    await waitFor(() => expect(noNaTela(bixinho)).toBeInTheDocument());
+    const antes = posicaoNaTela(bixinho);
+    expect(antes.y).toBeGreaterThan(520);
+
+    // Arrasta o2 pela barra de título até (0, 560): bem em cima dos bixinhos de o1.
+    // O primeiro movimento só começa o arraste (passa do limiar); o segundo leva o
+    // terminal até lá — o ponto de pega fica a (101, 102) do canto de o2.
+    const alca = noNaTela("o2").querySelector(".alca-do-terminal");
+    if (alca === null) {
+      throw new Error("barra de título de o2 não encontrada");
+    }
+    fireEvent(alca, eventoDoMouse("mousedown", 1600, 100));
+    fireEvent(window, eventoDoMouse("mousemove", 1601, 102));
+    fireEvent(window, eventoDoMouse("mousemove", 101, 662));
+    fireEvent(window, eventoDoMouse("mouseup", 101, 662));
+
+    await waitFor(() => expect(posicaoNaTela("o2")).toEqual({ x: 0, y: 560 }));
+    await waitFor(() => expect(posicaoNaTela(bixinho)).not.toEqual(antes));
+    const terminalSolto = { x: 0, y: 560, largura: 600, altura: 520 };
+    for (const id of [bixinho, idDoBixinho("o1", "s2")]) {
+      expect(sobrepoe({ ...posicaoNaTela(id), ...TAMANHO_DO_BIXINHO }, terminalSolto)).toBe(false);
+    }
+  });
+});
+
+// Vários terminais no jsdom: sob a carga da suíte inteira, passam dos 5 s padrão.
+describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout: 20_000 }, () => {
+  const AVISO =
+    "Limite de 4 orquestradores abertos. Feche um dos orquestradores (✕ na barra do terminal) antes de iniciar outro.";
+
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoFalso);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+    localStorage.setItem(
+      "orquestrador-agentes:canvas:v1",
+      JSON.stringify({
+        terminais: Object.fromEntries(
+          ["o1", "o2", "o3", "o4"].map((id, indice) => [id, { x: indice * 700, y: 0, largura: 600, altura: 520 }]),
+        ),
+        notas: {},
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }),
+    );
+    simulados.orquestradores.orquestradores = ["o1", "o2", "o3", "o4", "o5"].map(orquestrador);
+  });
+
+  afterEach(() => {
+    simulados.orquestradores.orquestradores = [];
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  const rascunhosNaTela = () => document.querySelectorAll(".react-flow__node-rascunho").length;
+
+  /** O item do Orquestrador na lista da esquerda (Doca). */
+  function itemDaDoca(id: string): HTMLElement {
+    const item = screen
+      .getAllByRole("button")
+      .find(
+        (botao) =>
+          ["Ir até o terminal", "Abrir o terminal no canvas"].includes(botao.title) &&
+          botao.textContent?.startsWith(`Orquestrador ${id}`) === true,
+      );
+    if (item === undefined) {
+      throw new Error(`${id} não está na lista`);
+    }
+    return item;
+  }
+
+  const fecharAviso = () => fireEvent.click(within(screen.getByText(AVISO).parentElement as HTMLElement).getByTitle("Fechar aviso"));
+
+  it("com 4 abertos, \"+ Novo orquestrador\" mostra o aviso e não abre o formulário", async () => {
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o4")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Novo orquestrador" }));
+
+    expect(await screen.findByText(AVISO)).toBeInTheDocument();
+    expect(screen.getByText(AVISO).closest(".alert")).toHaveClass("alert-warning");
+    expect(rascunhosNaTela()).toBe(0);
+
+    // Fechável no ✕ do próprio aviso.
+    fecharAviso();
+    expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
+  });
+
+  it("com 4 abertos, reabrir pela lista mostra o aviso; um já aberto só foca; fechar um libera a vaga", async () => {
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o4")).toBeInTheDocument());
+
+    fireEvent.click(itemDaDoca("o5"));
+    expect(await screen.findByText(AVISO)).toBeInTheDocument();
+    expect(document.querySelector('.react-flow__node[data-id="o5"]')).toBeNull();
+
+    // Já aberto não conta: não recusa (e não deixa aviso).
+    fireEvent.click(itemDaDoca("o2"));
+    expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
+
+    // Recusa de novo e fecha o terminal o1 no ✕: o aviso some sozinho e a vaga volta.
+    fireEvent.click(itemDaDoca("o5"));
+    expect(await screen.findByText(AVISO)).toBeInTheDocument();
+    fireEvent.click(within(noNaTela("o1")).getByTitle("Fechar o terminal (o orquestrador e o histórico continuam salvos)"));
+    await waitFor(() => expect(screen.queryByText(AVISO)).not.toBeInTheDocument());
+    // O1 continua na lista: nada foi excluído.
+    expect(itemDaDoca("o1")).toHaveAttribute("title", "Abrir o terminal no canvas");
+
+    fireEvent.click(itemDaDoca("o5"));
+    await waitFor(() => expect(noNaTela("o5")).toBeInTheDocument());
+    expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
+  });
+
+  it("o rascunho conta: com 3 abertos e o formulário aberto, não abre outro", async () => {
+    localStorage.setItem(
+      "orquestrador-agentes:canvas:v1",
+      JSON.stringify({
+        terminais: { o1: { x: 0, y: 0, largura: 600, altura: 520 }, o2: { x: 700, y: 0, largura: 600, altura: 520 }, o3: { x: 1400, y: 0, largura: 600, altura: 520 } },
+        notas: {},
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }),
+    );
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o3")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Novo orquestrador" }));
+    await waitFor(() => expect(rascunhosNaTela()).toBe(1));
+    expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
+
+    fireEvent.click(itemDaDoca("o5"));
+    expect(await screen.findByText(AVISO)).toBeInTheDocument();
+    expect(document.querySelector('.react-flow__node[data-id="o5"]')).toBeNull();
+  });
+});
+
+describe("CanvasDeOrquestradores · zoom e barra de título", () => {
+  const janelaComPonte = window as unknown as { electron?: unknown };
+  const transformacao = () => document.querySelector<HTMLElement>(".react-flow__viewport")?.style.transform;
+
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoFalso);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+    localStorage.setItem(
+      "orquestrador-agentes:canvas:v1",
+      JSON.stringify({ terminais: {}, notas: {}, viewport: { x: 100, y: 50, zoom: 0.5 } }),
+    );
+  });
+
+  afterEach(() => {
+    delete janelaComPonte.electron;
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it("restaura o zoom e a posição salvos; Ctrl+0 volta a 100% mantendo o centro", async () => {
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(transformacao()).toBe("translate(100px,50px) scale(0.5)"));
+
+    // O jsdom não mede: a área tem 0 × 0 e o centro é a origem (0, 0) da tela.
+    fireEvent.keyDown(window, { key: "0", code: "Digit0", ctrlKey: true });
+
+    await waitFor(() => expect(transformacao()).toBe("translate(200px,100px) scale(1)"));
+  });
+
+  it("Ctrl+0 com o foco num campo de texto não mexe no zoom", async () => {
+    render(<CanvasDeOrquestradores />);
+    const campo = await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+    await waitFor(() => expect(transformacao()).toBe("translate(100px,50px) scale(0.5)"));
+
+    fireEvent.keyDown(campo, { key: "0", code: "Digit0", ctrlKey: true });
+
+    expect(transformacao()).toBe("translate(100px,50px) scale(0.5)");
+  });
+
+  it("no navegador o status fica no painel do topo; no desktop, na barra de título", () => {
+    const { unmount } = render(<CanvasDeOrquestradores />);
+    expect(screen.queryByTestId("barra-de-titulo")).not.toBeInTheDocument();
+    expect(screen.getByTestId("status-do-canvas").closest(".paineis-do-topo")).not.toBeNull();
+    unmount();
+
+    janelaComPonte.electron = {
+      desktop: true,
+      janela: {
+        minimizar: vi.fn(),
+        maximizar: vi.fn(),
+        fechar: vi.fn(),
+        estaMaximizada: vi.fn().mockResolvedValue(false),
+        aoMudarMaximizada: vi.fn(() => () => undefined),
+      },
+    };
+    render(<CanvasDeOrquestradores />);
+    const barra = screen.getByTestId("barra-de-titulo");
+    expect(within(barra).getByTestId("status-do-canvas")).toHaveTextContent("todos ociosos");
+    expect(within(barra).getByRole("group", { name: "Controles da janela" })).toBeInTheDocument();
+    expect(screen.getAllByTestId("status-do-canvas")).toHaveLength(1);
+    // A barra fica fora do canvas, acima dele.
+    expect(barra.nextElementSibling?.querySelector(".react-flow")).not.toBeNull();
   });
 });

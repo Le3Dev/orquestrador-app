@@ -34,6 +34,9 @@
   --surface-3: #2c2c29;
   --border: color-mix(in srgb, var(--claude-claro) 10%, transparent);
   --border-forte: color-mix(in srgb, var(--claude-claro) 18%, transparent);
+  /* Barra de título do app desktop: a mesma cor de COR_BARRA em
+   * electron/main.js (fundo da janela e overlay das janelas pequenas). */
+  --barra-de-titulo: #141413;
 
   /* Texto */
   --primary: var(--claude-claro);
@@ -244,6 +247,8 @@ h3 { font-size: 12px; font-weight: 600; }
 
 .hint { font-size: 11px; color: var(--muted); }
 .hint-error { font-size: 11px; color: var(--error); }
+/* Aviso discreto junto de um campo (ex.: esforço herdado do Claude Code que gasta mais tokens). */
+.hint-warning { font-size: 11px; color: var(--warning); }
 
 input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 
@@ -355,9 +360,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  max-width: min(720px, calc(100vw - 32px));
-  /* Abaixo da barra superior, para não cobrir o botão de novo orquestrador. */
-  margin-top: 64px;
+  /* Na coluna do centro dos painéis do topo: nunca passa da largura dela. */
+  max-width: min(720px, 100%);
   padding: 12px 16px;
   border-radius: var(--radius-card);
   font-size: 12.5px;
@@ -470,6 +474,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .ancora { opacity: 0; pointer-events: none; width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; }
 /* A linha chega no topo do desenho do bixinho, abaixo do balão de fala. */
 .ancora-bixinho { top: 34px !important; }
+/* Pelos lados, chega na borda do desenho (80px, centralizado), na altura do meio do corpo. */
+.ancora-bixinho-esquerda { top: 74px !important; left: calc(50% - 40px) !important; }
+.ancora-bixinho-direita { top: 74px !important; right: calc(50% - 40px) !important; }
 
 /* Linhas terminal → bixinho, coloridas pela situação do Subagente. */
 .react-flow__edge.aresta-executando .react-flow__edge-path { stroke: var(--active); stroke-width: 2; }
@@ -607,6 +614,26 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .linha-fim .linha-simbolo, .linha-fim .linha-texto { color: var(--success); }
 .linha-erro .linha-simbolo, .linha-erro .linha-texto { color: var(--error); }
 .linha-sistema .linha-texto { color: var(--muted); }
+
+/* Custo estimado do pedido: uma linha discreta no fim, que abre a tabela por trecho. */
+.custo-do-turno { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.custo-do-turno-resumo {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--secondary);
+  text-align: left;
+  cursor: pointer;
+}
+.custo-do-turno-resumo:hover { color: var(--primary); text-decoration: underline; }
+.custo-do-turno-resumo:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; border-radius: 3px; }
+.custo-do-turno-tabela { border-collapse: collapse; color: var(--secondary); }
+.custo-do-turno-tabela th,
+.custo-do-turno-tabela td { padding: 2px 0 2px 14px; text-align: right; font-weight: 400; white-space: nowrap; }
+.custo-do-turno-tabela th:first-child { padding-left: 0; text-align: left; }
+.custo-do-turno-tabela thead th { color: var(--muted); border-bottom: 1px solid var(--border); }
+.custo-do-turno-tabela tfoot th,
+.custo-do-turno-tabela tfoot td { color: var(--primary); border-top: 1px solid var(--border); }
 
 .resposta-no-terminal {
   margin-top: 4px;
@@ -1067,8 +1094,388 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .markdown .task-list-item { list-style: none; }
 .markdown .task-list-item input { margin-right: 6px; accent-color: var(--active); }
 
+/* ---------------- Chat rápido (centro de baixo do canvas) ----------------
+ * Fora do viewport do React Flow: não se move com o canvas. A largura deixa
+ * livres o minimapa (200 × 150 + 15px de margem, à direita) e os controles
+ * (à esquerda): como o painel é centralizado, a folga vale para os dois lados. */
+
+/* Ângulo registrado para poder ser animado; sem suporte a @property, a borda fica parada. */
+@property --angulo-da-borda {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.painel-do-chat {
+  --folga-lateral-do-chat: 231px; /* minimapa (200) + margem (15) + respiro (16) */
+  width: min(680px, calc(100vw - 2 * var(--folga-lateral-do-chat)));
+}
+
+/* Abaixo de 1100 px o minimapa some: a folga só precisa dos controles de zoom
+ * (26 + margem 15 + respiro). */
+@media (width < 1100px) {
+  .painel-do-chat { --folga-lateral-do-chat: 64px; }
+}
+
+.chat-rapido {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  cursor: auto;
+}
+
+.conversa-do-chat {
+  display: flex;
+  flex-direction: column;
+  max-height: 45vh;
+  overflow: hidden;
+  animation: subir .2s ease-out both;
+}
+.conversa-do-chat[hidden] { display: none; }
+@keyframes subir { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.cabecalho-do-chat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mensagens-do-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px 14px;
+  user-select: text;
+}
+
+/* Pergunta do usuário: à direita e discreta. */
+.mensagem-do-usuario {
+  align-self: flex-end;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: 85%;
+  padding: 7px 11px;
+  border-radius: 12px 12px 4px 12px;
+  background: var(--surface-3);
+  color: var(--caption);
+  font-size: 13px;
+}
+
+.anexos-do-chat { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.anexos-do-chat a {
+  display: block;
+  width: 72px;
+  height: 52px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-forte);
+}
+.anexos-do-chat a:hover { border-color: var(--active); }
+.anexos-do-chat img { width: 100%; height: 100%; object-fit: cover; }
+
+/* Resposta do Claude: Markdown em Lora, com o cursor no fim enquanto chega texto. */
+.mensagem-do-claude { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.texto-respondendo > .markdown > :last-child::after {
+  content: "▍";
+  margin-left: 2px;
+  color: var(--active);
+  font-family: var(--fonte-mono);
+  animation: piscar 1s steps(1) infinite;
+}
+
+.cartao-de-acao {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+  border: 1px solid color-mix(in srgb, var(--active) 40%, var(--border));
+  background: color-mix(in srgb, var(--active) 6%, var(--surface-2));
+}
+
+.mostrar-conversa { align-self: center; gap: 6px; cursor: pointer; }
+.mostrar-conversa:hover { color: var(--primary); border-color: var(--border-forte); }
+
+/* Borda laranja que gira devagar em volta do composer (a moldura é o gradiente;
+ * o composer, por cima, deixa só 1px dele à mostra). Respondendo, gira mais
+ * rápido e acende. */
+.moldura-do-composer {
+  position: relative;
+  padding: 1px;
+  border-radius: 14px;
+  background: conic-gradient(
+    from var(--angulo-da-borda, 0deg),
+    var(--border-forte) 0%,
+    color-mix(in srgb, var(--active) 45%, var(--border-forte)) 10%,
+    var(--border-forte) 22%,
+    var(--border-forte) 50%,
+    color-mix(in srgb, var(--active) 30%, var(--border-forte)) 62%,
+    var(--border-forte) 74%,
+    var(--border-forte) 100%
+  );
+  box-shadow: 0 18px 44px -18px rgba(0, 0, 0, .85);
+  animation: girar-a-borda 8s linear infinite;
+}
+.chat-rapido-respondendo .moldura-do-composer {
+  background: conic-gradient(
+    from var(--angulo-da-borda, 0deg),
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 0%,
+    var(--active) 12%,
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 28%,
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 50%,
+    color-mix(in srgb, var(--active) 80%, var(--border-forte)) 62%,
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 78%,
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 100%
+  );
+  box-shadow: 0 18px 44px -18px rgba(0, 0, 0, .85), 0 0 28px -10px color-mix(in srgb, var(--active) 60%, transparent);
+  animation-duration: 2s;
+}
+@keyframes girar-a-borda { to { --angulo-da-borda: 360deg; } }
+
+.composer-do-chat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-radius: 13px;
+  background: var(--surface);
+}
+/* Sem `overflow: hidden` no composer: o menu do modelo sai por cima dele. */
+.composer-do-chat > .faixa-de-progresso { position: absolute; inset: 0 12px auto; }
+.composer-do-chat .miniaturas-do-prompt { padding: 10px 12px 0; }
+
+.campo-do-chat {
+  width: 100%;
+  min-height: 44px;
+  max-height: 140px;
+  resize: none;
+  padding: 12px 14px 4px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--primary);
+  font-family: var(--fonte-texto);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.campo-do-chat::placeholder { color: var(--placeholder); }
+
+.linha-do-composer { display: flex; align-items: center; gap: 8px; padding: 4px 8px 8px; }
+.botao-de-anexar { width: 30px; height: 30px; font-size: 18px; line-height: 1; }
+
+/* Compacto (padrão): tudo numa linha só — "+" · campo · modelo · enviar. Ao
+ * usar, expande: o campo sobe e os botões descem para a linha de baixo. */
+.campo-do-chat { transition: min-height .18s ease-out, padding .18s ease-out; }
+.composer-compacto {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  cursor: text;
+}
+.composer-compacto .linha-do-composer { display: contents; }
+.composer-compacto .botao-de-anexar { order: -1; }
+.composer-compacto .linha-do-composer > .flex-1,
+.composer-compacto .linha-do-composer > .etiqueta { display: none; }
+.composer-compacto > .hint,
+.composer-compacto > .hint-error { order: 1; flex-basis: 100%; }
+.composer-compacto .campo-do-chat {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.composer-compacto .campo-do-chat::placeholder { white-space: nowrap; text-overflow: ellipsis; }
+.composer-expandido .linha-do-composer { animation: subir .18s ease-out both; }
+
+/* Seletor de modelo e esforço: o menu abre para cima. */
+.seletor-de-modelo { position: relative; }
+.botao-do-seletor {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-button);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.botao-do-seletor:not(:disabled):hover, .botao-do-seletor[aria-expanded="true"] { background: var(--surface-3); }
+.botao-do-seletor:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.botao-do-seletor:disabled { opacity: .45; cursor: not-allowed; }
+
+.menu-do-seletor {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  padding: 6px;
+  background: var(--surface-2);
+  border-color: var(--border-forte);
+}
+.submenu-do-seletor {
+  position: absolute;
+  left: calc(100% + 10px);
+  bottom: -6px;
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  width: 180px;
+  padding: 6px;
+  background: var(--surface-2);
+  border-color: var(--border-forte);
+}
+/* Sem espaço ao lado: o submenu sobe por cima do menu. */
+@media (max-width: 1100px) {
+  .submenu-do-seletor { left: auto; right: 0; bottom: calc(100% + 6px); }
+}
+
+.item-do-menu {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 6px;
+  text-align: left;
+  cursor: pointer;
+}
+.item-do-menu:hover, .item-do-menu:focus-visible, .item-do-menu[aria-expanded="true"] { background: var(--surface-3); outline: none; }
+.marca-do-item { width: 14px; flex-shrink: 0; color: var(--info); text-align: center; }
+.separador-do-menu { margin: 4px 6px; border: 0; border-top: 1px solid var(--border); }
+
+/* Servidor fora: o chat congela e a borda perde a cor, como o resto do canvas. */
+.canvas-desconectado .chat-rapido *,
+.canvas-desconectado .chat-rapido *::before,
+.canvas-desconectado .chat-rapido *::after { animation-play-state: paused !important; }
+.canvas-desconectado .moldura-do-composer { filter: grayscale(.85); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
   /* A bolinha é SMIL, que ignora as regras de animação do CSS acima. */
   .bolinha-da-troca { display: none; }
+  /* A borda do chat fica parada (a cor de "respondendo" continua). */
+  .moldura-do-composer { animation: none !important; }
+  /* O composer troca de compacto para expandido sem transição. */
+  .campo-do-chat { transition: none; }
+  .composer-expandido .linha-do-composer { animation: none; }
+}
+
+/* ---------------- App desktop (Electron): barra de título ----------------
+ * Faixa própria no topo, de ponta a ponta: a janela principal não tem barra
+ * nem botões nativos (titleBarStyle 'hidden' sem titleBarOverlay, em
+ * electron/main.js). Esquerda: identidade; direita: status e botões ─ ☐ ✕.
+ * O `-webkit-app-region` só tem efeito no Electron. */
+.barra-de-titulo {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 36px;
+  padding: 0 4px 0 12px;
+  min-width: 0;
+  background: var(--barra-de-titulo);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.direita-da-barra-de-titulo {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+}
+.controles-da-janela { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.botao-da-janela {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--secondary);
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.botao-da-janela:hover { background: var(--surface-3); color: var(--primary); }
+.botao-da-janela:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.botao-da-janela-fechar:hover { background: var(--error); color: var(--primary); }
+.identidade-da-barra-de-titulo { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.identidade-da-barra-de-titulo .no-orquestrador-icone { width: 22px; height: 22px; border-radius: 6px; }
+.titulo-da-barra-de-titulo {
+  font-family: var(--fonte-titulo);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--primary);
+  white-space: nowrap;
+}
+/* O que é clicável (ou tem balão ao passar o mouse) não arrasta a janela. */
+.no-drag { -webkit-app-region: no-drag; }
+
+/* ---------------- Status (situação, cotas, RAM) ---------------- */
+.status-do-canvas { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 16px; min-width: 0; }
+/* Encostado à direita (nos botões da janela); se não couber, `safe` alinha
+ * pelo início para cortar o fim e nunca esconder a situação. */
+.status-na-barra-de-titulo { flex-wrap: nowrap; justify-content: safe flex-end; overflow: hidden; }
+.status-resumo { display: none; cursor: default; }
+.status-resumo:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; border-radius: 4px; }
+.medidor-curto { width: 40px; }
+
+/* ---------------- Painéis do topo do canvas ----------------
+ * Um só painel em linha (esquerda · centro · direita): os blocos se acomodam
+ * juntos e nunca se sobrepõem. O vão entre eles deixa o canvas clicável. */
+.react-flow__panel.paineis-do-topo {
+  right: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  pointer-events: none;
+}
+.coluna-do-topo { display: flex; flex-direction: column; min-width: 0; pointer-events: none; }
+.coluna-do-topo > * { pointer-events: auto; }
+.coluna-do-topo-esquerda { flex: 0 0 auto; align-items: flex-start; }
+.coluna-do-topo-centro { flex: 1 1 0; align-items: center; }
+.coluna-do-topo-direita { flex: 0 1 auto; align-items: flex-end; }
+
+/* ---------------- Larguras da janela ----------------
+ * ≥ 1280 px: tudo completo. 1100–1280 px: rótulos curtos ("5h", "+ Novo").
+ * < 1100 px: botões só com ícone (dica no `title`), status só com a situação
+ * e um medidor resumido (o resto no balão) e sem minimapa. */
+.rotulo-curto, .rotulo-icone { display: none; }
+
+@media (width < 1280px) {
+  .rotulo-completo { display: none; }
+  .rotulo-curto { display: inline; }
+  .status-extra, .subtitulo-da-barra { display: none; }
+}
+
+@media (width < 1100px) {
+  .rotulo-curto, .identidade-da-barra { display: none; }
+  .rotulo-icone { display: inline; }
+  .barra-do-canvas .btn-sm { width: 30px; padding: 0; font-size: 14px; }
+  .status-detalhe { display: none; }
+  .status-resumo { display: inline-flex; }
+  .react-flow__minimap { display: none; }
 }

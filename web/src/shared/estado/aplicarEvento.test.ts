@@ -14,6 +14,8 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
+  permitirTrabalhoDireto: true,
+  proporPlanoEmPedidosGrandes: true,
 };
 
 function registrar(eventos: EventoDeOrquestracao[]): EventoRegistrado[] {
@@ -209,8 +211,115 @@ describe("aplicarEvento", () => {
       permitirCommitEPush: false,
       esforcoDoOrquestrador: "padrao",
       esforcoDosSubagentes: "padrao",
+      permitirTrabalhoDireto: true,
+      proporPlanoEmPedidosGrandes: true,
     });
     expect(novo?.configuracao.permitirCommitEPush).toBe(true);
+  });
+
+  it("lê com o trabalho direto e o plano automático ligados os eventos gravados antes das opções", () => {
+    const configuracaoAntiga: DadosDaConfiguracaoGravada = {
+      modeloDoOrquestrador: "opus",
+      esforcoDoOrquestrador: "padrao",
+      modeloDosSubagentes: "sonnet",
+      esforcoDosSubagentes: "padrao",
+      quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
+      nivelDePermissao: "leitura",
+      permitirCommitEPush: false,
+    };
+    const [antigo, novo] = reproduzir(
+      registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "antigo", configuracao: configuracaoAntiga },
+        { tipo: "turno_cancelado", turnoId: "t1" },
+        {
+          tipo: "turno_iniciado",
+          turnoId: "t2",
+          texto: "novo",
+          configuracao: { ...configuracao, permitirTrabalhoDireto: false, proporPlanoEmPedidosGrandes: false },
+        },
+      ]),
+    ).turnos;
+
+    expect(antigo?.configuracao).toMatchObject({ permitirTrabalhoDireto: true, proporPlanoEmPedidosGrandes: true });
+    expect(novo?.configuracao).toMatchObject({ permitirTrabalhoDireto: false, proporPlanoEmPedidosGrandes: false });
+  });
+
+  it("ferramenta usada pelo próprio orquestrador vira uma linha normal de atividade, com o verbo da ferramenta", () => {
+    const [turno] = reproduzir(
+      registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "veja o package.json", configuracao },
+        { tipo: "ferramenta_do_orquestrador", turnoId: "t1", ferramenta: "Read", detalhe: "package.json" },
+        { tipo: "ferramenta_do_orquestrador", turnoId: "t1", ferramenta: "Grep", detalhe: "useMemo" },
+        { tipo: "ferramenta_do_orquestrador", turnoId: "t1", ferramenta: "Glob", detalhe: "src/**/*.ts" },
+        { tipo: "ferramenta_do_orquestrador", turnoId: "t1", ferramenta: "PowerShell", detalhe: "git status" },
+        { tipo: "ferramenta_do_orquestrador", turnoId: "t1", ferramenta: "Bash", detalhe: "ls" },
+        { tipo: "ferramenta_do_orquestrador", turnoId: "t1", ferramenta: "WebFetch", detalhe: "https://exemplo.com" },
+        { tipo: "ferramenta_do_orquestrador", turnoId: "t1", ferramenta: "WebSearch", detalhe: "vitest" },
+        { tipo: "ferramenta_do_orquestrador", turnoId: "t1", ferramenta: "TodoWrite", detalhe: "" },
+      ]),
+    ).turnos;
+
+    expect(turno?.log.slice(1).map((linha) => [linha.origem, linha.tipo, linha.texto])).toEqual([
+      ["orquestrador", "ferramenta", "lendo package.json"],
+      ["orquestrador", "ferramenta", "buscando useMemo"],
+      ["orquestrador", "ferramenta", "listando src/**/*.ts"],
+      ["orquestrador", "ferramenta", "executando git status"],
+      ["orquestrador", "ferramenta", "executando ls"],
+      ["orquestrador", "ferramenta", "abrindo https://exemplo.com"],
+      ["orquestrador", "ferramenta", "pesquisando vitest"],
+      ["orquestrador", "ferramenta", "usando TodoWrite"],
+    ]);
+    expect(turno?.log.some((linha) => linha.tipo === "erro")).toBe(false);
+    expect(turno?.ferramentasDiretas).toHaveLength(8);
+  });
+
+  describe("conversa nova (/clear)", () => {
+    const cota = [{ nome: "5 horas", utilizacao: 0.2, renovaEm: null, situacao: "allowed" }];
+    const anterior = registrar([
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "um", configuracao },
+      { tipo: "uso_da_cota", turnoId: "t1", janelas: cota },
+      {
+        tipo: "turno_concluido",
+        turnoId: "t1",
+        resposta: "feito",
+        uso: { duracaoMs: 1000, tokensDeEntrada: 1, tokensDeSaida: 1, subagentesLancados: 0 },
+      },
+      { tipo: "conversa_limpa", turnosAnteriores: 1, planoDescartado: false, worktreeComAlteracoes: false },
+    ]);
+
+    it("esvazia os pedidos, mantém a sequência e a cota e marca quando a conversa começou", () => {
+      const antes = reproduzir(anterior.slice(0, 3));
+      const estado = reproduzir(anterior);
+
+      expect(antes.conversaIniciadaEm).toBeNull();
+      expect(estado.turnos).toEqual([]);
+      expect(estado.ultimaSequencia).toBe(4);
+      expect(estado.cota).toEqual(cota);
+      expect(estado.conversaIniciadaEm).toBe(anterior[3]?.em);
+    });
+
+    it("o pedido seguinte aparece sozinho na conversa nova", () => {
+      const estado = reproduzir([
+        ...anterior,
+        {
+          tipo: "turno_iniciado",
+          turnoId: "t2",
+          texto: "dois",
+          configuracao,
+          sequencia: 5,
+          em: "2026-10-28T12:10:00Z",
+        },
+      ]);
+
+      expect(estado.turnos.map((turno) => [turno.id, turno.situacao])).toEqual([["t2", "em_andamento"]]);
+      expect(estado.conversaIniciadaEm).toBe(anterior[3]?.em);
+    });
+
+    it("repetido na reconexão, não muda nada", () => {
+      const estado = reproduzir(anterior);
+
+      expect(reproduzir(anterior, estado)).toBe(estado);
+    });
   });
 
   it("lê com o esforço padrão do modelo os eventos gravados antes da escolha do esforço", () => {
@@ -276,12 +385,106 @@ describe("aplicarEvento", () => {
       expect(turno?.log.at(-1)).toMatchObject({ tipo: "sistema", texto: "plano descartado" });
     });
 
+    it("plano proposto num pedido de execução também fica pendente, com a linha de aguardando aprovação", () => {
+      const [turno] = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "migre o projeto inteiro", configuracao },
+          { tipo: "turno_concluido", turnoId: "t1", resposta: "1. Ler\n2. Migrar", uso, planoPendente: true },
+        ]),
+      ).turnos;
+
+      expect(turno).toMatchObject({ modo: "execucao", situacao: "concluido", decisaoDoPlano: "pendente" });
+      expect(turno?.log.at(-1)?.texto).toMatch(/^plano proposto · aguardando aprovação · /);
+    });
+
+    it("com o campo informado, vale o que o servidor diz", () => {
+      const [execucao, planejamento] = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija", configuracao },
+          { tipo: "turno_concluido", turnoId: "t1", resposta: "feito", uso, planoPendente: false },
+          { tipo: "turno_iniciado", turnoId: "t2", texto: "planeje", configuracao, modo: "planejamento" },
+          { tipo: "turno_concluido", turnoId: "t2", resposta: "1. Ler", uso, planoPendente: true },
+        ]),
+      ).turnos;
+
+      expect(execucao?.decisaoDoPlano).toBeNull();
+      expect(execucao?.log.at(-1)?.texto).toMatch(/^síntese entregue/);
+      expect(planejamento?.decisaoDoPlano).toBe("pendente");
+      expect(planejamento?.log.at(-1)?.texto).toMatch(/^síntese entregue/);
+    });
+
+    it("sem o campo (eventos antigos), só o plan mode deixa plano pendente", () => {
+      const [execucao] = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija", configuracao },
+          { tipo: "turno_concluido", turnoId: "t1", resposta: "feito", uso },
+        ]),
+      ).turnos;
+      const [plano] = reproduzir(registrar(planoEntregue)).turnos;
+
+      expect(execucao?.decisaoDoPlano).toBeNull();
+      expect(plano?.decisaoDoPlano).toBe("pendente");
+    });
+
     it("plano que não chegou ao fim não fica pendente", () => {
       const [turno] = reproduzir(
         registrar([...planoEntregue.slice(0, 1), { tipo: "turno_cancelado", turnoId: "t1" }]),
       ).turnos;
 
       expect(turno).toMatchObject({ situacao: "cancelado", decisaoDoPlano: null });
+    });
+  });
+
+  describe("consumo medido do turno", () => {
+    const consumo = {
+      principal: { entrada: 1000, criacaoDeCache: 2000, leituraDeCache: 50_000, saida: 300 },
+      subagentes: { entrada: 500, criacaoDeCache: 0, leituraDeCache: 10_000, saida: 100 },
+      subagentesMedidos: 1,
+      parcial: false,
+      indiceDeCusto: 12_500,
+      modeloDoPrincipal: "claude-opus-5-5",
+    };
+    const turnoConcluido = registrar([
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija", configuracao },
+      {
+        tipo: "turno_concluido",
+        turnoId: "t1",
+        resposta: "feito",
+        uso: { duracaoMs: 1000, tokensDeEntrada: 1, tokensDeSaida: 1, subagentesLancados: 0 },
+      },
+    ]);
+
+    it("começa sem consumo e guarda o medido no turno, depois do fim, sem linha nova no log", () => {
+      const antes = reproduzir(turnoConcluido);
+      const depois = aplicarEvento(antes, {
+        tipo: "consumo_do_turno_medido",
+        turnoId: "t1",
+        consumo,
+        sequencia: 3,
+        em: "2026-10-28T12:01:00Z",
+      });
+
+      expect(antes.turnos[0]?.consumo).toBeNull();
+      expect(depois.turnos[0]?.consumo).toEqual(consumo);
+      expect(depois.turnos[0]?.situacao).toBe("concluido");
+      expect(depois.turnos[0]?.log).toHaveLength(antes.turnos[0]?.log.length ?? -1);
+    });
+
+    it("evento repetido é ignorado e turno desconhecido não muda nenhum turno", () => {
+      const medido: EventoRegistrado = {
+        tipo: "consumo_do_turno_medido",
+        turnoId: "t1",
+        consumo,
+        sequencia: 3,
+        em: "2026-10-28T12:01:00Z",
+      };
+      const umaVez = aplicarEvento(reproduzir(turnoConcluido), medido);
+      expect(aplicarEvento(umaVez, medido)).toBe(umaVez);
+
+      const desconhecido = aplicarEvento(umaVez, { ...medido, turnoId: "outro", sequencia: 4 });
+      expect(desconhecido.ultimaSequencia).toBe(4);
+      expect(desconhecido.turnos).toHaveLength(1);
+      expect(desconhecido.turnos[0]).toBe(umaVez.turnos[0]);
     });
   });
 });

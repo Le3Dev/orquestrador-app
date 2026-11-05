@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { type NodeProps, ReactFlowProvider } from "@xyflow/react";
 import type { ComponentProps } from "react";
 
-import { api } from "../../shared/api/cliente";
+import { api, ErroDaApi } from "../../shared/api/cliente";
 import type {
   DadosDaConfiguracao,
   EventoDeOrquestracao,
@@ -48,6 +48,8 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "edicao_e_comandos",
   permitirCommitEPush: false,
+  permitirTrabalhoDireto: true,
+  proporPlanoEmPedidosGrandes: true,
 };
 
 function orquestrador(alteracoes: Partial<DadosDaConfiguracao> = {}): ResumoDoOrquestrador {
@@ -85,7 +87,12 @@ function renderizar(resumo: ResumoDoOrquestrador) {
   };
   render(
     <ContextoDoCanvas.Provider value={canvas}>
-      <PainelDeConfiguracao orquestrador={resumo} trabalhando={false} aoFechar={aoFechar} />
+      <PainelDeConfiguracao
+        orquestrador={resumo}
+        trabalhando={false}
+        aoFechar={aoFechar}
+        aoLimparConversa={vi.fn(async () => undefined)}
+      />
     </ContextoDoCanvas.Provider>,
   );
   return { aoFechar, opcao: screen.getByRole("checkbox", { name: "Permitir commit e push quando eu pedir" }) };
@@ -136,6 +143,22 @@ describe("PainelDeConfiguracao", () => {
     });
   });
 
+  it("o trabalho direto e o plano automático vão no PATCH junto com o resto da configuração", async () => {
+    const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+    const { aoFechar } = renderizar(orquestrador());
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Deixar o orquestrador fazer o trivial sozinho" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Propor plano antes de mudanças grandes" }));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+    await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+    expect(alterar).toHaveBeenCalledWith("o1", {
+      ...configuracao,
+      permitirTrabalhoDireto: false,
+      proporPlanoEmPedidosGrandes: false,
+    });
+  });
+
   it("se o servidor recusar, mostra o erro e o painel continua aberto", async () => {
     vi.spyOn(api, "alterarConfiguracao").mockRejectedValue(new Error("Opção de commit e push inválida."));
     const { aoFechar, opcao } = renderizar(orquestrador());
@@ -146,6 +169,35 @@ describe("PainelDeConfiguracao", () => {
     expect(await screen.findByText("Opção de commit e push inválida.")).toBeInTheDocument();
     expect(aoFechar).not.toHaveBeenCalled();
     expect(opcao).toBeChecked();
+  });
+
+  it("o modo econômico é aplicado no servidor e o formulário mostra a configuração devolvida", async () => {
+    vi.spyOn(api, "listarPredefinicoes").mockResolvedValue([
+      {
+        nome: "economico",
+        rotulo: "Modo econômico",
+        descricao: "Gasta menos tokens.",
+        configuracao: { esforcoDoOrquestrador: "medio", esforcoDosSubagentes: "medio" },
+      },
+    ]);
+    const herdado = vi.spyOn(api, "lerEsforcoHerdadoDoOrquestrador").mockResolvedValue({
+      orquestrador: null,
+      subagentes: null,
+    });
+    const aplicarPredefinicao = vi.spyOn(api, "aplicarPredefinicao").mockResolvedValue({
+      ...orquestrador({ esforcoDoOrquestrador: "medio", esforcoDosSubagentes: "medio" }),
+      predefinicaoCorrespondente: "economico",
+    });
+    renderizar(orquestrador());
+
+    fireEvent.click(await screen.findByRole("button", { name: "Modo econômico" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Esforço do orquestrador" })).toHaveValue("medio"),
+    );
+    expect(aplicarPredefinicao).toHaveBeenCalledWith("o1", "economico");
+    expect(herdado).toHaveBeenCalledWith("o1");
+    expect(screen.getByRole("combobox", { name: "Esforço dos subagentes" })).toHaveValue("medio");
   });
 });
 
@@ -173,6 +225,22 @@ function conversaDoTerminal(): EstadoDaConversa {
     { tipo: "turno_iniciado", turnoId: "t2", texto: "corrija o bug", configuracao },
   );
 }
+
+/** Um pedido concluído e nenhum em andamento: dá para limpar a conversa. */
+function conversaOciosa(): EstadoDaConversa {
+  return aplicar(
+    ESTADO_INICIAL,
+    { tipo: "turno_iniciado", turnoId: "t1", texto: "resuma o projeto", configuracao },
+    { tipo: "turno_concluido", turnoId: "t1", resposta: "Resumo pronto", uso: USO },
+  );
+}
+
+const CONVERSA_LIMPA: EventoDeOrquestracao = {
+  tipo: "conversa_limpa",
+  turnosAnteriores: 1,
+  planoDescartado: false,
+  worktreeComAlteracoes: false,
+};
 
 function canvasDoTerminal(conversa: EstadoDaConversa): ValorDoCanvas {
   return {
@@ -299,5 +367,135 @@ describe("NoTerminal", () => {
     expect(screen.getByText("lendo o código")).toBeInTheDocument();
     expect(contagem.transcricoes).toBe(2);
     expect(contagem.analises).toBe(1);
+  });
+
+  it("conversa_limpa do próprio orquestrador esvazia a transcrição e mostra o separador", () => {
+    const conversa = conversaOciosa();
+    const canvas = canvasDoTerminal(conversa);
+    const { rerender } = render(<Terminal canvas={canvas} no={propsDoNo()} />);
+    expect(screen.getByText("resuma o projeto")).toBeInTheDocument();
+
+    const limpa = aplicar(conversa, CONVERSA_LIMPA);
+    rerender(<Terminal canvas={{ ...canvas, conversas: new Map([["o1", limpa]]) }} no={propsDoNo()} />);
+
+    expect(screen.queryByText("resuma o projeto")).not.toBeInTheDocument();
+    expect(screen.getByText(/^— conversa nova iniciada às \d{2}:\d{2} —$/)).toBeInTheDocument();
+    expect(contagem.transcricoes).toBe(2);
+  });
+
+  it("conversa_limpa de outro orquestrador não re-renderiza a transcrição", () => {
+    const canvas = canvasDoTerminal(conversaOciosa());
+    const doOutro = conversaOciosa();
+    const comOutro: ValorDoCanvas = { ...canvas, conversas: new Map([...canvas.conversas, ["o2", doOutro]]) };
+    const { rerender } = render(<Terminal canvas={comOutro} no={propsDoNo()} />);
+
+    const outroLimpo: ValorDoCanvas = {
+      ...comOutro,
+      conversas: new Map([...comOutro.conversas, ["o2", aplicar(doOutro, CONVERSA_LIMPA)]]),
+    };
+    rerender(<Terminal canvas={outroLimpo} no={propsDoNo()} />);
+
+    expect(contagem.transcricoes).toBe(1);
+    expect(screen.getByText("resuma o projeto")).toBeInTheDocument();
+  });
+
+  it("tem uma âncora de saída no meio de cada lado, também enquanto carrega", () => {
+    const ancoras = (container: HTMLElement) =>
+      [...container.querySelectorAll<HTMLElement>(".react-flow__handle")].map((ancora) => [
+        ancora.dataset.handleid,
+        ancora.dataset.handlepos,
+        ancora.classList.contains("source"),
+      ]);
+    const esperadas = [
+      ["baixo", "bottom", true],
+      ["cima", "top", true],
+      ["direita", "right", true],
+      ["esquerda", "left", true],
+    ];
+
+    const { container, unmount } = render(<Terminal canvas={canvasDoTerminal(conversaDoTerminal())} no={propsDoNo()} />);
+    expect(ancoras(container)).toEqual(esperadas);
+    unmount();
+
+    const carregando = render(
+      <Terminal canvas={{ ...canvasDoTerminal(conversaDoTerminal()), orquestradores: new Map() }} no={propsDoNo()} />,
+    );
+    expect(screen.getByText("carregando orquestrador…")).toBeInTheDocument();
+    expect(ancoras(carregando.container)).toEqual(esperadas);
+  });
+
+  it("'Nova conversa' no ⚙ fica desabilitado durante um pedido", () => {
+    render(<Terminal canvas={canvasDoTerminal(conversaDoTerminal())} no={propsDoNo()} />);
+
+    fireEvent.click(screen.getByTitle("Configurar"));
+
+    expect(screen.getByRole("button", { name: "Nova conversa" })).toBeDisabled();
+  });
+});
+
+describe("NoTerminal · conversa nova", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function renderizarOcioso() {
+    const canvas = canvasDoTerminal(conversaOciosa());
+    render(<Terminal canvas={canvas} no={propsDoNo()} />);
+    return { canvas, campo: screen.getByRole("textbox", { name: "Mensagem para o orquestrador" }) };
+  }
+
+  it("/clear no prompt pede a conversa nova ao servidor, recarrega a lista e esvazia o campo", async () => {
+    const limpar = vi.spyOn(api, "limparConversa").mockResolvedValue(orquestrador());
+    const enviar = vi.spyOn(api, "enviarMensagem");
+    const { canvas, campo } = renderizarOcioso();
+    const recargasAntes = vi.mocked(canvas.acoes.recarregar).mock.calls.length;
+
+    fireEvent.change(campo, { target: { value: "/clear" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+
+    await waitFor(() => expect(campo).toHaveValue(""));
+    expect(limpar).toHaveBeenCalledWith("o1");
+    expect(enviar).not.toHaveBeenCalled();
+    expect(vi.mocked(canvas.acoes.recarregar).mock.calls.length).toBeGreaterThan(recargasAntes);
+  });
+
+  it("se o servidor recusar, mostra o erro no terminal e o /clear fica no campo", async () => {
+    vi.spyOn(api, "limparConversa").mockRejectedValue(
+      new ErroDaApi('Cancele o pedido em andamento de "Painel de salas" antes de limpar a conversa.', 409),
+    );
+    const { campo } = renderizarOcioso();
+
+    fireEvent.change(campo, { target: { value: "/clear" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+
+    expect(await screen.findByText(/✗ Cancele o pedido em andamento de "Painel de salas"/)).toBeInTheDocument();
+    expect(campo).toHaveValue("/clear");
+  });
+
+  it("'Nova conversa' no ⚙ pede confirmação e, confirmada, limpa e fecha o painel", async () => {
+    const limpar = vi.spyOn(api, "limparConversa").mockResolvedValue(orquestrador());
+    const confirmar = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    renderizarOcioso();
+    fireEvent.click(screen.getByTitle("Configurar"));
+    const botao = screen.getByRole("button", { name: "Nova conversa" });
+    expect(botao).toBeEnabled();
+
+    fireEvent.click(botao);
+    expect(confirmar).toHaveBeenCalledWith("Começar uma conversa nova? A conversa atual será arquivada.");
+    expect(limpar).not.toHaveBeenCalled();
+
+    fireEvent.click(botao);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Nova conversa" })).not.toBeInTheDocument());
+    expect(limpar).toHaveBeenCalledWith("o1");
+  });
+
+  it("se o servidor recusar a conversa nova pelo ⚙, o erro aparece no painel", async () => {
+    vi.spyOn(api, "limparConversa").mockRejectedValue(new Error("Orquestrador não encontrado."));
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    renderizarOcioso();
+    fireEvent.click(screen.getByTitle("Configurar"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Nova conversa" }));
+
+    expect(await screen.findByText("Orquestrador não encontrado.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Nova conversa" })).toBeInTheDocument();
   });
 });

@@ -4,10 +4,16 @@ import {
   ConfiguracaoDoOrquestrador,
   DadosDaConfiguracao,
 } from "./ConfiguracaoDoOrquestrador";
+import { ConsumoDoTurno } from "./ConsumoDoTurno";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { EventoDeOrquestracao, EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
+import {
+  NomeDaPredefinicao,
+  PredefinicaoDeConfiguracao,
+  predefinicaoCorrespondente,
+} from "./PredefinicaoDeConfiguracao";
 import { DadosDoTurno, Turno } from "./Turno";
 
 export const TAMANHO_MAXIMO_DO_NOME = 60;
@@ -64,11 +70,11 @@ export class Orquestrador {
     public readonly id: string,
     public readonly nome: string,
     public readonly pastaDeTrabalho: PastaDeTrabalho,
-    public readonly sessaoId: string,
+    private sessaoAtual: string,
     private readonly criadoEmMs: number,
     private sessaoJaIniciada: boolean,
     private configuracaoAtual: ConfiguracaoDoOrquestrador,
-    private readonly turnos: Turno[],
+    private turnos: Turno[],
     private worktreeAtual: DadosDoWorktree | null,
   ) {}
 
@@ -138,6 +144,11 @@ export class Orquestrador {
     this.worktreeAtual = null;
   }
 
+  /** A sessão do Claude Code da conversa atual; muda quando a conversa é limpa. */
+  get sessaoId(): string {
+    return this.sessaoAtual;
+  }
+
   /**
    * Se a sessão do Claude Code já existe. Define se o próximo turno começa uma
    * sessão nova ou retoma a anterior — é o que dá memória à conversa.
@@ -179,6 +190,69 @@ export class Orquestrador {
   alterarConfiguracao(alteracoes: AlteracoesDaConfiguracao): EventoDeOrquestracao {
     this.configuracaoAtual = this.configuracaoAtual.com(alteracoes);
     return { tipo: "configuracao_alterada", configuracao: this.configuracaoAtual.paraDados() };
+  }
+
+  /**
+   * Aplica uma predefinição (ex.: "Modo econômico"): só os campos dela mudam,
+   * e a configuração segue editável depois. Vale a partir do próximo turno.
+   */
+  aplicarPredefinicao(predefinicao: PredefinicaoDeConfiguracao): EventoDeOrquestracao {
+    this.configuracaoAtual = predefinicao.aplicarEm(this.configuracaoAtual);
+    return {
+      tipo: "configuracao_alterada",
+      configuracao: this.configuracaoAtual.paraDados(),
+      predefinicao: predefinicao.nome,
+    };
+  }
+
+  /** A predefinição cujos campos batem com a configuração atual, ou `null`. */
+  get predefinicaoCorrespondente(): NomeDaPredefinicao | null {
+    return predefinicaoCorrespondente(this.configuracaoAtual);
+  }
+
+  /**
+   * Registra quanto um turno já encerrado gastou. Um turno que não terminou
+   * com sucesso (cancelado, com falha, interrompido) pode ter parado antes de
+   * gastar tudo o que gastaria: o consumo fica marcado como parcial.
+   */
+  registrarConsumoDoTurno(turnoId: string, consumo: ConsumoDoTurno): EventoDeOrquestracao {
+    const turno = this.turnos.find((candidato) => candidato.id === turnoId);
+    if (turno === undefined || turno.emAndamento) {
+      throw new ErroDeOrquestracao(
+        "sem_turno_em_andamento",
+        `O turno ${turnoId} não está encerrado em "${this.nome}" para registrar o consumo.`,
+      );
+    }
+    const medido = turno.situacao === "concluido" ? consumo : consumo.comoParcial();
+    return { tipo: "consumo_do_turno_medido", turnoId, consumo: medido.paraDados() };
+  }
+
+  /**
+   * Começa uma conversa nova ("/clear") no mesmo Orquestrador: os turnos saem
+   * do agregado (o histórico anterior é arquivado pelo repositório) e o
+   * próximo turno abre outra sessão do Claude Code, sem memória da anterior.
+   * Nome, pasta, configuração e worktree continuam os mesmos.
+   *
+   * Um Plano pendente é descartado junto. `worktreeComAlteracoes` avisa que o
+   * worktree segue com trabalho: worktrees sem alterações são removidos ao
+   * fim de cada turno, então um worktree registrado aqui é um que ficou.
+   */
+  limparConversa(novaSessaoId: string): EventoDeOrquestracao {
+    if (this.turnoEmAndamento !== null) {
+      throw new ErroDeOrquestracao(
+        "turno_em_andamento",
+        `Cancele o pedido em andamento de "${this.nome}" antes de limpar a conversa.`,
+      );
+    }
+
+    const turnosAnteriores = this.turnos.length;
+    const planoDescartado = this.turnoComPlanoPendente !== null;
+    const worktreeComAlteracoes = this.worktreeAtual !== null;
+
+    this.turnos = [];
+    this.sessaoAtual = novaSessaoId;
+    this.sessaoJaIniciada = false;
+    return { tipo: "conversa_limpa", turnosAnteriores, planoDescartado, worktreeComAlteracoes };
   }
 
   iniciarTurno(
@@ -244,9 +318,21 @@ export class Orquestrador {
     return { ...evento, turnoId };
   }
 
-  concluirTurno(turnoId: string, resposta: string, uso: UsoDoTurno, agora: Date): EventoDeOrquestracao {
-    this.turnoAtivo(turnoId).concluir(resposta, uso, agora);
-    return { tipo: "turno_concluido", turnoId, resposta, uso };
+  /**
+   * `planoProposto`: num turno de execução, o Orquestrador respondeu com um
+   * Plano em vez de executar (pedido grande) — ele fica pendente como o de um
+   * turno de planejamento.
+   */
+  concluirTurno(
+    turnoId: string,
+    resposta: string,
+    uso: UsoDoTurno,
+    agora: Date,
+    planoProposto = false,
+  ): EventoDeOrquestracao {
+    const turno = this.turnoAtivo(turnoId);
+    turno.concluir(resposta, uso, agora, planoProposto);
+    return { tipo: "turno_concluido", turnoId, resposta, uso, planoPendente: turno.planoPendente };
   }
 
   cancelarTurno(turnoId: string, agora: Date): EventoDeOrquestracao {
@@ -274,7 +360,7 @@ export class Orquestrador {
       id: this.id,
       nome: this.nome,
       pastaDeTrabalho: this.pastaDeTrabalho.caminho,
-      sessaoId: this.sessaoId,
+      sessaoId: this.sessaoAtual,
       sessaoIniciada: this.sessaoJaIniciada,
       criadoEm: new Date(this.criadoEmMs).toISOString(),
       configuracao: this.configuracaoAtual.paraDados(),

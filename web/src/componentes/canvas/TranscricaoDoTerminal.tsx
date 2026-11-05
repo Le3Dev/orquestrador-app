@@ -1,16 +1,24 @@
 import { memo, useEffect, useState } from "react";
 
 import { api } from "../../shared/api/cliente";
-import type { DadosDaConfiguracao, SinalDeVida } from "../../shared/api/tipos";
+import type { DadosDaConfiguracao, NomeDaPredefinicao, SinalDeVida } from "../../shared/api/tipos";
 import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
 import type { LinhaDoLog, TipoDeLinhaDoLog, TurnoNaTela } from "../../shared/estado/aplicarEvento";
 import { faseDoTurno } from "../../shared/estado/faseDoTurno";
 import { estadoDeVida } from "../../shared/estado/sinalDeVida";
-import { descreverConfiguracao, formatarDuracao, formatarHora, formatarTokens, idCurto } from "../../shared/formatacao";
+import {
+  descreverConfiguracao,
+  formatarDuracao,
+  formatarHora,
+  formatarMomento,
+  formatarTokens,
+  idCurto,
+} from "../../shared/formatacao";
 import { useRelogio } from "../../shared/hooks/useRelogio";
 import { IconeOrquestrador } from "../Icones";
 import { TextoFormatado } from "../TextoFormatado";
 import { type AcoesDoPlano, CartaoDoPlano } from "./CartaoDoPlano";
+import { CustoDoTurno } from "./CustoDoTurno";
 
 const SIMBOLOS: Readonly<Record<TipoDeLinhaDoLog, string>> = {
   sistema: "○",
@@ -152,7 +160,8 @@ const Turno = memo(function Turno({
         ))}
       {turno.resposta !== null &&
         turno.resposta !== "" &&
-        (turno.modo === "planejamento" ? (
+        // Plano também sai de um pedido de execução, quando o Orquestrador o propõe antes de uma mudança grande.
+        (turno.modo === "planejamento" || turno.decisaoDoPlano !== null ? (
           <CartaoDoPlano
             turno={turno}
             configuracao={configuracao}
@@ -168,6 +177,8 @@ const Turno = memo(function Turno({
       {turno.situacao === "falhou" && turno.motivoDaFalha !== null && (
         <p className="mono texto-longo text-error">{turno.motivoDaFalha}</p>
       )}
+      {/* O consumo é medido depois do fim do pedido; até lá, nada aparece. */}
+      {turno.consumo !== undefined && turno.consumo !== null && <CustoDoTurno consumo={turno.consumo} />}
     </div>
   );
 });
@@ -178,8 +189,12 @@ interface Props {
   pastaDeTrabalho: string;
   /** Configuração atual do Orquestrador; a mesma referência enquanto o conteúdo não muda. */
   configuracao: DadosDaConfiguracao;
+  /** A predefinição que a configuração atual reproduz (ex.: modo econômico), se houver. */
+  predefinicao?: NomeDaPredefinicao | null;
   /** Os pedidos da conversa deste Orquestrador (`EstadoDaConversa.turnos`). */
   turnos: readonly TurnoNaTela[];
+  /** Quando a conversa atual começou (/clear); nulo enquanto é a primeira. */
+  conversaIniciadaEm: string | null;
   sinal: SinalDeVida | undefined;
   desconectado: boolean;
   /** Aprovar, ajustar ou descartar o plano pendente do último pedido (Plan Mode). */
@@ -198,7 +213,9 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
   nome,
   pastaDeTrabalho,
   configuracao,
+  predefinicao = null,
   turnos,
+  conversaIniciadaEm,
   sinal,
   desconectado,
   acoesDoPlano,
@@ -217,13 +234,21 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
         <p>
           <span className="text-muted">config </span>
           {descreverConfiguracao(configuracao).toLowerCase()}
+          {predefinicao === "economico" && (
+            <span className="chip ml-1.5" title="A configuração atual é a do modo econômico.">
+              econômico
+            </span>
+          )}
         </p>
         <p className="text-muted">
           {turnos.length === 0
             ? "digite um pedido e pressione enter — o orquestrador divide o trabalho e instancia os agentes."
-            : `${turnos.length} ${turnos.length === 1 ? "pedido" : "pedidos"} nesta conversa`}
+            : `${turnos.length} ${turnos.length === 1 ? "pedido" : "pedidos"} nesta conversa · /clear começa uma nova`}
         </p>
       </div>
+      {conversaIniciadaEm !== null && (
+        <p className="mono hint text-center">{`— conversa nova iniciada às ${formatarMomento(conversaIniciadaEm)} —`}</p>
+      )}
       {turnos.map((turno, indice) => (
         <Turno
           key={turno.id}

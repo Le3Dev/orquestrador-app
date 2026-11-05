@@ -1,6 +1,7 @@
 import { type ClipboardEvent, type KeyboardEvent, memo, type RefObject, useRef, useState } from "react";
 
 import type { ModoDoTurno } from "../../shared/api/tipos";
+import { comandoDoPrompt, completarComando, dicaDeComando, dicaDePedidoGrande } from "../../shared/comandosDoPrompt";
 import { formatarBytes } from "../../shared/formatacao";
 import { type ImagemAnexada, TIPOS_DE_IMAGEM } from "../../shared/imagens";
 
@@ -21,6 +22,8 @@ interface Props {
   aoRemoverImagem: (id: string) => void;
   /** Devolve se a mensagem foi aceita; só então o campo é limpo. */
   aoEnviar: (texto: string) => Promise<boolean>;
+  /** "/clear": começa uma conversa nova. Devolve se o servidor aceitou; só então o campo é limpo. */
+  aoLimparConversa: () => Promise<boolean>;
   aoCancelar: () => void;
 }
 
@@ -29,6 +32,7 @@ interface Props {
  * cancela o pedido em andamento e Shift+Tab liga/desliga o Plan Mode. Imagens
  * entram colando (Ctrl+V), pelo botão de anexo ou arrastando para o terminal.
  * Continua editável durante o trabalho, para já ir escrevendo o próximo pedido.
+ * "/clear" sozinho começa uma conversa nova (Tab completa o comando).
  *
  * Memorizado: novidades de outros terminais não o re-renderizam (o terminal
  * passa as funções estáveis).
@@ -44,6 +48,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
   aoAnexar,
   aoRemoverImagem,
   aoEnviar,
+  aoLimparConversa,
   aoCancelar,
 }: Props) {
   const [texto, setTexto] = useState("");
@@ -51,6 +56,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
   const seletor = useRef<HTMLInputElement>(null);
   const temConteudo = texto.trim() !== "" || imagens.length > 0;
   const planejando = modo === "planejamento";
+  const dica = dicaDeComando(texto, trabalhando) ?? dicaDePedidoGrande(texto, modo);
 
   function ajustarAltura(): void {
     const elemento = campo.current;
@@ -60,7 +66,29 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
     }
   }
 
+  async function limparConversa(): Promise<void> {
+    // Durante um pedido o servidor recusaria: a dica já avisa, então nada acontece.
+    if (trabalhando || enviando || desconectado) {
+      return;
+    }
+    setEnviando(true);
+    try {
+      if (await aoLimparConversa()) {
+        setTexto("");
+        requestAnimationFrame(ajustarAltura);
+      }
+    } finally {
+      setEnviando(false);
+    }
+  }
+
   async function enviar(): Promise<void> {
+    // Antes da trava do envio: "/clear" é um comando, não um pedido. As imagens
+    // anexadas e o modo ficam para o próximo pedido.
+    if (comandoDoPrompt(texto) === "limpar") {
+      await limparConversa();
+      return;
+    }
     if (!temConteudo || trabalhando || enviando || desconectado) {
       return;
     }
@@ -80,6 +108,13 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
     if (evento.key === "Tab" && evento.shiftKey) {
       evento.preventDefault();
       aoAlternarModo();
+      return;
+    }
+    // Tab completa o comando começado ("/cl" → "/clear"); fora disso, segue o padrão.
+    const completo = evento.key === "Tab" ? completarComando(texto) : null;
+    if (completo !== null) {
+      evento.preventDefault();
+      setTexto(completo);
       return;
     }
     if (evento.key === "Enter" && !evento.shiftKey) {
@@ -181,6 +216,11 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
           </button>
         )}
       </div>
+      {dica !== null && (
+        <p className="mono hint px-[14px] pb-0.5" role="status">
+          {dica}
+        </p>
+      )}
       <button
         type="button"
         className={`selo-de-modo ${planejando ? "selo-de-modo-ativo" : ""}`}

@@ -42,6 +42,8 @@ function turno(
       quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
       nivelDePermissao: "leitura",
       permitirCommitEPush: false,
+      permitirTrabalhoDireto: true,
+      proporPlanoEmPedidosGrandes: true,
     },
     modo,
     decisaoDoPlano: null,
@@ -92,6 +94,17 @@ describe("faseDoTurno", () => {
       atual: null,
       descricao: "Plano entregue",
     });
+  });
+
+  it("pedido de execução que terminou com um plano proposto também entregou um plano", () => {
+    expect(faseDoTurno({ ...turno("concluido", []), decisaoDoPlano: "pendente" })).toMatchObject({
+      atual: null,
+      descricao: "Plano entregue",
+    });
+    expect(faseDoTurno({ ...turno("concluido", ["concluido"]), decisaoDoPlano: "aprovado" }).descricao).toBe(
+      "Plano entregue",
+    );
+    expect(faseDoTurno(turno("concluido", [])).descricao).toBe("Respondeu diretamente");
   });
 
   it("no plan mode mantém as demais frases", () => {

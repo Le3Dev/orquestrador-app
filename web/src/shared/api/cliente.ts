@@ -1,9 +1,15 @@
 import type {
   DadosDaConfiguracao,
   DadosDaNota,
+  DadosDaPredefinicao,
+  EsforcosHerdados,
+  EstadoDoChat,
+  ModeloClaude,
   ModoDoTurno,
   NavegacaoDePastas,
+  NomeDaPredefinicao,
   PastaDeProjeto,
+  PreferenciasDoChat,
   ResumoDoOrquestrador,
   SaudeDoServidor,
   TipoDeImagem,
@@ -39,9 +45,7 @@ async function requisitar<Resposta>(caminho: string, opcoes: RequestInit = {}): 
       headers: { "Content-Type": "application/json", ...opcoes.headers },
     });
   } catch {
-    throw new Error(
-      "Não foi possível falar com o servidor. Confira se ele está rodando (iniciar-orquestrador.cmd ou npm start).",
-    );
+    throw new Error("Não foi possível falar com o servidor. Feche e abra o Orquestrador de novo.");
   }
 
   const corpo: unknown = resposta.status === 204 ? null : await resposta.json().catch(() => null);
@@ -93,6 +97,28 @@ export const api = {
       body: JSON.stringify(configuracao),
     }),
 
+  listarPredefinicoes: () => requisitar<DadosDaPredefinicao[]>("/predefinicoes"),
+
+  /** Aplica uma predefinição (ex.: modo econômico) à configuração; devolve o resumo atualizado. */
+  aplicarPredefinicao: (id: string, predefinicao: NomeDaPredefinicao) =>
+    requisitar<ResumoDoOrquestrador>(`/orquestradores/${encodeURIComponent(id)}/configuracao/predefinicao`, {
+      method: "POST",
+      body: JSON.stringify({ predefinicao }),
+    }),
+
+  /** O esforço que o Claude Code usaria em "padrao" para os modelos salvos deste Orquestrador. */
+  lerEsforcoHerdadoDoOrquestrador: (id: string) =>
+    requisitar<EsforcosHerdados>(`/orquestradores/${encodeURIComponent(id)}/esforco-herdado`),
+
+  /** O esforço que o Claude Code usaria em "padrao" para estes modelos, nesta pasta (formulário de criação). */
+  lerEsforcoHerdado: (modeloDoOrquestrador: ModeloClaude, modeloDosSubagentes: ModeloClaude, pasta: string) => {
+    const parametros = new URLSearchParams({ modeloDoOrquestrador, modeloDosSubagentes });
+    if (pasta !== "") {
+      parametros.set("pasta", pasta);
+    }
+    return requisitar<EsforcosHerdados>(`/esforco-herdado?${parametros.toString()}`);
+  },
+
   enviarMensagem: (
     id: string,
     texto: string,
@@ -113,6 +139,10 @@ export const api = {
 
   descartarPlano: (id: string) =>
     requisitar<null>(`/orquestradores/${encodeURIComponent(id)}/plano/descartar`, { method: "POST" }),
+
+  /** Começa uma conversa nova (/clear): a atual fica arquivada. Recusado (409) durante um pedido. */
+  limparConversa: (id: string) =>
+    requisitar<ResumoDoOrquestrador>(`/orquestradores/${encodeURIComponent(id)}/conversa/limpar`, { method: "POST" }),
 
   cancelar: (id: string) =>
     requisitar<{ cancelando: boolean }>(`/orquestradores/${encodeURIComponent(id)}/cancelar`, { method: "POST" }),
@@ -138,4 +168,29 @@ export const api = {
   /** `desde`: última sequência já recebida, para o servidor reenviar só o que faltou. */
   enderecoDosEventos: (id: string, desde = 0) =>
     `/api/orquestradores/${encodeURIComponent(id)}/eventos${desde > 0 ? `?desde=${desde}` : ""}`,
+
+  // ---------------- Chat rápido ----------------
+
+  /** O chat inteiro; a resposta em andamento já vem com o texto acumulado. */
+  lerChat: () => requisitar<EstadoDoChat>("/chat"),
+
+  /** Pergunta nova; a resposta chega pelos eventos. Recusada (409) durante outra resposta. */
+  perguntarNoChat: (texto: string, imagens: readonly ImagemParaEnvio[] = []) =>
+    requisitar<{ mensagemId: string }>("/chat/mensagens", {
+      method: "POST",
+      body: JSON.stringify(imagens.length > 0 ? { texto, imagens } : { texto }),
+    }),
+
+  /** Modelo e/ou esforço do chat; a escolha vira o padrão das próximas perguntas. */
+  alterarPreferenciasDoChat: (alteracao: Partial<PreferenciasDoChat>) =>
+    requisitar<PreferenciasDoChat>("/chat/preferencias", { method: "PATCH", body: JSON.stringify(alteracao) }),
+
+  cancelarRespostaDoChat: () => requisitar<{ cancelando: boolean }>("/chat/cancelar", { method: "POST" }),
+
+  /** Conversa nova ("/clear"): o servidor confirma com o evento `conversa_limpa`. Recusado (409) durante a resposta. */
+  limparChat: () => requisitar<unknown>("/chat/limpar", { method: "POST" }),
+
+  enderecoDoAnexoDoChat: (arquivo: string) => `/api/chat/anexos/${encodeURIComponent(arquivo)}`,
+
+  enderecoDosEventosDoChat: (desde = 0) => `/api/chat/eventos${desde > 0 ? `?desde=${desde}` : ""}`,
 };

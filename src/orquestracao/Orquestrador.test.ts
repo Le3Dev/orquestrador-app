@@ -3,9 +3,12 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
+import { ConsumoDoTurno } from "./ConsumoDoTurno";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { Orquestrador } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
+import { PredefinicaoDeConfiguracao, predefinicaoPorNome } from "./PredefinicaoDeConfiguracao";
+import { UsoDeTokens } from "./UsoDeTokens";
 
 const raiz = path.resolve("/projetos");
 const agora = new Date("2026-10-28T12:00:00Z");
@@ -230,6 +233,39 @@ describe("Orquestrador no modo de planejamento", () => {
     expect(orquestrador.aprovarPlano()).toEqual({ tipo: "plano_aprovado", turnoId: "t2" });
   });
 
+  it("o turno de planejamento concluído publica o plano pendente no evento", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "planeje", agora, [], "planejamento");
+
+    expect(orquestrador.concluirTurno("t1", "o plano", uso, agora)).toEqual({
+      tipo: "turno_concluido",
+      turnoId: "t1",
+      resposta: "o plano",
+      uso,
+      planoPendente: true,
+    });
+  });
+
+  it("um turno de execução que propôs plano deixa o plano pendente", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "refatore tudo", agora);
+
+    const evento = orquestrador.concluirTurno("t1", "proponho: 1. ... 2. ...", uso, agora, true);
+
+    expect(evento).toMatchObject({ tipo: "turno_concluido", turnoId: "t1", planoPendente: true });
+    expect(orquestrador.turnoComPlanoPendente?.id).toBe("t1");
+    expect(orquestrador.paraDados().turnos[0]).toMatchObject({ modo: "execucao", decisaoDoPlano: "pendente" });
+    expect(orquestrador.aprovarPlano()).toEqual({ tipo: "plano_aprovado", turnoId: "t1" });
+  });
+
+  it("um turno de execução sem plano proposto conclui sem pendência", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "analise", agora);
+
+    expect(orquestrador.concluirTurno("t1", "pronto", uso, agora)).toMatchObject({ planoPendente: false });
+    expect(orquestrador.turnoComPlanoPendente).toBeNull();
+  });
+
   it("mantém o plano pendente ao reabrir o histórico", () => {
     const reaberto = Orquestrador.reconstituir(comPlanoPendente().paraDados());
 
@@ -256,6 +292,87 @@ describe("Orquestrador no modo de planejamento", () => {
     expect(reaberto.paraDados().turnos[0]).toMatchObject({ modo: "execucao", decisaoDoPlano: null });
     expect(reaberto.ultimoTurno?.modo).toBe("execucao");
     expect(reaberto.turnoComPlanoPendente).toBeNull();
+  });
+});
+
+describe("Orquestrador ao limpar a conversa", () => {
+  function comConversa(): Orquestrador {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "analise", agora);
+    orquestrador.registrarDoMotor("t1", { tipo: "sessao_iniciada" });
+    orquestrador.concluirTurno("t1", "pronto", uso, agora);
+    return orquestrador;
+  }
+
+  it("troca a sessão, zera os turnos e volta a pedir uma sessão nova", () => {
+    const orquestrador = comConversa();
+    orquestrador.iniciarTurno("t2", "planeje", agora, [], "planejamento");
+    orquestrador.concluirTurno("t2", "o plano", uso, agora);
+
+    const evento = orquestrador.limparConversa("s2");
+
+    expect(evento).toEqual({
+      tipo: "conversa_limpa",
+      turnosAnteriores: 2,
+      planoDescartado: true,
+      worktreeComAlteracoes: false,
+    });
+    expect(orquestrador.sessaoId).toBe("s2");
+    expect(orquestrador.sessaoIniciada).toBe(false);
+    expect(orquestrador.totalDeTurnos).toBe(0);
+    expect(orquestrador.ultimoTurno).toBeNull();
+    expect(orquestrador.turnoComPlanoPendente).toBeNull();
+    expect(capturarErro(() => orquestrador.aprovarPlano()).motivo).toBe("sem_plano_pendente");
+  });
+
+  it("mantém nome, configuração e worktree, e avisa do worktree com alterações", () => {
+    const orquestrador = comConversa();
+    orquestrador.alterarConfiguracao({ nivelDePermissao: "edicao" });
+    orquestrador.usarWorktree("orquestrador/o1", "/worktrees/o1");
+    orquestrador.liberarWorktree();
+
+    const evento = orquestrador.limparConversa("s2");
+
+    expect(evento).toMatchObject({ planoDescartado: false, worktreeComAlteracoes: true, turnosAnteriores: 1 });
+    expect(orquestrador.nome).toBe("Painel");
+    expect(orquestrador.configuracao.nivelDePermissao).toBe("edicao");
+    expect(orquestrador.worktree).toEqual({ branch: "orquestrador/o1", caminho: "/worktrees/o1", ativo: false });
+  });
+
+  it("recusa limpar com um turno em andamento", () => {
+    const orquestrador = comConversa();
+    orquestrador.iniciarTurno("t2", "outra", agora);
+
+    const erro = capturarErro(() => orquestrador.limparConversa("s2"));
+
+    expect(erro.motivo).toBe("turno_em_andamento");
+    expect(erro.message).toBe('Cancele o pedido em andamento de "Painel" antes de limpar a conversa.');
+    expect(orquestrador.sessaoId).toBe("s1");
+    expect(orquestrador.totalDeTurnos).toBe(2);
+  });
+
+  it("a conversa limpa sobrevive a gravar e reabrir", () => {
+    const orquestrador = comConversa();
+    orquestrador.limparConversa("s2");
+
+    const dados = orquestrador.paraDados();
+    const reaberto = Orquestrador.reconstituir(dados);
+
+    expect(dados).toMatchObject({ sessaoId: "s2", sessaoIniciada: false, turnos: [] });
+    expect(reaberto.sessaoId).toBe("s2");
+    expect(reaberto.sessaoIniciada).toBe(false);
+    expect(reaberto.totalDeTurnos).toBe(0);
+    expect(reaberto.paraDados()).toEqual(dados);
+  });
+
+  it("aceita um turno novo depois de limpar", () => {
+    const orquestrador = comConversa();
+    orquestrador.limparConversa("s2");
+
+    orquestrador.iniciarTurno("t3", "do zero", agora);
+
+    expect(orquestrador.totalDeTurnos).toBe(1);
+    expect(orquestrador.ultimoTurno?.id).toBe("t3");
   });
 });
 
@@ -315,5 +432,80 @@ describe("Orquestrador e o esforço de raciocínio", () => {
       tipo: "turno_iniciado",
       configuracao: { esforcoDoOrquestrador: "extra_alto", esforcoDosSubagentes: "padrao" },
     });
+  });
+});
+
+describe("Orquestrador e a economia de tokens", () => {
+  const consumo = ConsumoDoTurno.criar({
+    principal: UsoDeTokens.criar({ entrada: 6, criacaoDeCache: 33062, leituraDeCache: 62885, saida: 383 }),
+    subagentes: UsoDeTokens.vazio,
+    subagentesMedidos: 0,
+    parcial: false,
+    modeloDoPrincipal: "claude-opus-5-5",
+  });
+
+  function economico(): PredefinicaoDeConfiguracao {
+    const predefinicao = predefinicaoPorNome("economico");
+    if (predefinicao === null) {
+      throw new Error("predefinição econômica ausente");
+    }
+    return predefinicao;
+  }
+
+  it("aplicar a predefinição registra configuracao_alterada com o nome dela", () => {
+    const orquestrador = novoOrquestrador();
+    expect(orquestrador.predefinicaoCorrespondente).toBeNull();
+
+    const evento = orquestrador.aplicarPredefinicao(economico());
+
+    expect(evento).toEqual({
+      tipo: "configuracao_alterada",
+      configuracao: orquestrador.configuracao.paraDados(),
+      predefinicao: "economico",
+    });
+    expect(orquestrador.configuracao.paraDados()).toMatchObject({
+      modeloDosSubagentes: "sonnet",
+      esforcoDoOrquestrador: "medio",
+      nivelDePermissao: "leitura",
+    });
+    expect(orquestrador.predefinicaoCorrespondente).toBe("economico");
+
+    orquestrador.alterarConfiguracao({ esforcoDoOrquestrador: "alto" });
+    expect(orquestrador.predefinicaoCorrespondente).toBeNull();
+  });
+
+  it("registra o consumo de um turno concluído como veio", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "analise", agora);
+    orquestrador.concluirTurno("t1", "ok", uso, agora);
+
+    expect(orquestrador.registrarConsumoDoTurno("t1", consumo)).toEqual({
+      tipo: "consumo_do_turno_medido",
+      turnoId: "t1",
+      consumo: consumo.paraDados(),
+    });
+  });
+
+  it("marca como parcial o consumo de um turno cancelado ou com falha", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "analise", agora);
+    orquestrador.cancelarTurno("t1", agora);
+    orquestrador.iniciarTurno("t2", "de novo", agora);
+    orquestrador.falharTurno("t2", "caiu", agora);
+
+    expect(orquestrador.registrarConsumoDoTurno("t1", consumo)).toMatchObject({ consumo: { parcial: true } });
+    expect(orquestrador.registrarConsumoDoTurno("t2", consumo)).toMatchObject({ consumo: { parcial: true } });
+  });
+
+  it("recusa registrar consumo de turno em andamento ou desconhecido", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "analise", agora);
+
+    expect(capturarErro(() => orquestrador.registrarConsumoDoTurno("t1", consumo)).motivo).toBe(
+      "sem_turno_em_andamento",
+    );
+    expect(capturarErro(() => orquestrador.registrarConsumoDoTurno("t9", consumo)).motivo).toBe(
+      "sem_turno_em_andamento",
+    );
   });
 });

@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import type { NodeProps } from "@xyflow/react";
+import type { HandleProps, NodeProps } from "@xyflow/react";
 import type { ReactNode } from "react";
 
 import type { DadosDaConfiguracao, EventoDeOrquestracao, EventoRegistrado } from "../../shared/api/tipos";
@@ -16,10 +16,13 @@ const simulados = vi.hoisted(() => ({
 
 vi.mock("../../shared/hooks/useRelogio", () => ({ useRelogio: simulados.useRelogio }));
 
-// Fora de um <ReactFlow> de verdade, a âncora e a barra do nó não têm onde se pendurar.
+// Fora de um <ReactFlow> de verdade, as âncoras e a barra do nó não têm onde se
+// pendurar: a âncora vira só uma marca com o id, o tipo e o lado.
 vi.mock("@xyflow/react", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@xyflow/react")>()),
-  Handle: () => null,
+  Handle: ({ id, type, position }: HandleProps) => (
+    <i data-testid="ancora" data-id={id ?? undefined} data-tipo={type} data-lado={position} />
+  ),
   NodeToolbar: ({ children, isVisible }: { children?: ReactNode; isVisible?: boolean }) => {
     simulados.barraDoNo(isVisible);
     return <div data-testid="barra-do-no">{children}</div>;
@@ -34,6 +37,8 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
+  permitirTrabalhoDireto: true,
+  proporPlanoEmPedidosGrandes: true,
 };
 
 function aplicar(estado: EstadoDaConversa, ...eventos: EventoDeOrquestracao[]): EstadoDaConversa {
@@ -151,6 +156,19 @@ describe("NoBixinho", () => {
 
     rerender(tela(conversa, "s1", false));
     expect(screen.queryByTestId("barra-do-no")).not.toBeInTheDocument();
+  });
+
+  it("tem uma âncora de chegada em cada lado, para a linha vir pelo lado voltado ao terminal", () => {
+    render(tela(doisTrabalhando(), "s1"));
+
+    expect(
+      screen.getAllByTestId("ancora").map((ancora) => [ancora.dataset.id, ancora.dataset.tipo, ancora.dataset.lado]),
+    ).toEqual([
+      ["cima", "target", "top"],
+      ["baixo", "target", "bottom"],
+      ["esquerda", "target", "left"],
+      ["direita", "target", "right"],
+    ]);
   });
 
   it("sem o Subagente na conversa, não desenha nada", () => {

@@ -42,7 +42,7 @@ export function nivelDeEsforcoDoClaudeCode(esforco: EsforcoDeRaciocinio): NivelD
  * Vence o `--effort` e o `effort` dos agentes
  * (https://code.claude.com/docs/en/model-config#adjust-effort-level).
  */
-const VARIAVEL_DE_ESFORCO = "CLAUDE_CODE_EFFORT_LEVEL";
+export const VARIAVEL_DE_ESFORCO = "CLAUDE_CODE_EFFORT_LEVEL";
 
 /**
  * O que cada nível de permissão libera, em nomes de ferramentas do Claude
@@ -141,6 +141,15 @@ const VARIAVEIS_DA_SESSAO_PAI = [
   "CLAUDE_EFFORT",
   "AI_AGENT",
 ];
+
+/** Cópia do ambiente sem as variáveis que amarrariam o processo a uma sessão do Claude Code já aberta. */
+export function ambienteSemSessaoPai(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const ambiente: NodeJS.ProcessEnv = { ...base };
+  for (const variavel of VARIAVEIS_DA_SESSAO_PAI) {
+    delete ambiente[variavel];
+  }
+  return ambiente;
+}
 
 export interface ArquivosDoTurno {
   agentes: string;
@@ -271,10 +280,7 @@ export function linhaDeEntrada(texto: string, imagens: readonly ImagemEmBase64[]
  * escolhido. Com os dois em `padrao`, o ambiente fica como está.
  */
 export function montarAmbiente(base: NodeJS.ProcessEnv, pedido: PedidoDeTurno): NodeJS.ProcessEnv {
-  const ambiente: NodeJS.ProcessEnv = { ...base };
-  for (const variavel of VARIAVEIS_DA_SESSAO_PAI) {
-    delete ambiente[variavel];
-  }
+  const ambiente = ambienteSemSessaoPai(base);
   const { esforcoDoOrquestrador, esforcoDosSubagentes } = pedido.configuracao;
   if (esforcoDoOrquestrador !== "padrao" || esforcoDosSubagentes !== "padrao") {
     delete ambiente[VARIAVEL_DE_ESFORCO];

@@ -1,6 +1,7 @@
 import type { DadosDaConfiguracao, EsforcoDeRaciocinio, ModeloClaude, NivelDePermissao } from "./api/tipos";
 
 export const ROTULOS_DOS_MODELOS: Readonly<Record<ModeloClaude, { nome: string; descricao: string }>> = {
+  fable: { nome: "Fable", descricao: "Desafios mais difíceis" },
   opus: { nome: "Opus", descricao: "Mais capaz" },
   sonnet: { nome: "Sonnet", descricao: "Equilibrado" },
   haiku: { nome: "Haiku", descricao: "Rápido, menos cota" },
@@ -57,6 +58,8 @@ function descreverModelo(modelo: ModeloClaude, esforco: EsforcoDeRaciocinio): st
 /**
  * Ex.: "Opus → Sonnet · até 3 subagentes · Somente leitura" (+ " · commit/push quando pedir", se liberado).
  * Com esforço escolhido (diferente de "padrao"): "Opus (esforço alto) → Sonnet (esforço médio) · …".
+ * O trabalho direto e o plano automático vêm ligados: só aparecem quando desligados
+ * (" · delegação total", " · sem plano automático").
  */
 export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string {
   const { modo, limite } = configuracao.quantidadeDeSubagentes;
@@ -69,7 +72,50 @@ export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string
     quantidade,
     ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome,
     ...(configuracao.permitirCommitEPush ? ["commit/push quando pedir"] : []),
+    ...(configuracao.permitirTrabalhoDireto ? [] : ["delegação total"]),
+    ...(configuracao.proporPlanoEmPedidosGrandes ? [] : ["sem plano automático"]),
   ].join(" · ");
+}
+
+function ligado(valor: boolean): string {
+  return valor ? "ligado" : "desligado";
+}
+
+/**
+ * O que uma configuração parcial (ex.: a de uma predefinição) muda, um item
+ * por campo presente — ex.: ["Modelo do orquestrador: Opus", "Esforço do orquestrador: Médio"].
+ */
+export function descreverAlteracoesDaConfiguracao(alteracoes: Partial<DadosDaConfiguracao>): string[] {
+  const itens: string[] = [];
+  if (alteracoes.modeloDoOrquestrador !== undefined) {
+    itens.push(`Modelo do orquestrador: ${ROTULOS_DOS_MODELOS[alteracoes.modeloDoOrquestrador].nome}`);
+  }
+  if (alteracoes.esforcoDoOrquestrador !== undefined) {
+    itens.push(`Esforço do orquestrador: ${ROTULOS_DOS_ESFORCOS[alteracoes.esforcoDoOrquestrador]}`);
+  }
+  if (alteracoes.modeloDosSubagentes !== undefined) {
+    itens.push(`Modelo dos subagentes: ${ROTULOS_DOS_MODELOS[alteracoes.modeloDosSubagentes].nome}`);
+  }
+  if (alteracoes.esforcoDosSubagentes !== undefined) {
+    itens.push(`Esforço dos subagentes: ${ROTULOS_DOS_ESFORCOS[alteracoes.esforcoDosSubagentes]}`);
+  }
+  if (alteracoes.quantidadeDeSubagentes !== undefined) {
+    const { modo, limite } = alteracoes.quantidadeDeSubagentes;
+    itens.push(`Quantidade de subagentes: ${modo === "fixa" ? "fixa" : "automática"}, ${descreverQuantidade({ modo, limite })}`);
+  }
+  if (alteracoes.nivelDePermissao !== undefined) {
+    itens.push(`Permissões: ${ROTULOS_DAS_PERMISSOES[alteracoes.nivelDePermissao].nome}`);
+  }
+  if (alteracoes.permitirCommitEPush !== undefined) {
+    itens.push(`Commit e push quando pedir: ${ligado(alteracoes.permitirCommitEPush)}`);
+  }
+  if (alteracoes.permitirTrabalhoDireto !== undefined) {
+    itens.push(`Fazer o trivial sozinho: ${ligado(alteracoes.permitirTrabalhoDireto)}`);
+  }
+  if (alteracoes.proporPlanoEmPedidosGrandes !== undefined) {
+    itens.push(`Propor plano antes de mudanças grandes: ${ligado(alteracoes.proporPlanoEmPedidosGrandes)}`);
+  }
+  return itens;
 }
 
 export function formatarDuracao(milissegundos: number): string {
@@ -98,6 +144,12 @@ export function formatarBytes(bytes: number): string {
 
 export function formatarPercentual(fracao: number): string {
   return `${Math.round(fracao * 100)}%`;
+}
+
+/** "5 horas" → "5h", "7 dias" → "7d": o nome curto de uma janela da cota. */
+export function rotuloCurtoDaCota(nome: string): string {
+  const [, numero, letra] = /^(\d+)\s*(\p{L})/u.exec(nome.trim()) ?? [];
+  return numero === undefined || letra === undefined ? nome : `${numero}${letra.toLowerCase()}`;
 }
 
 const horario = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" });

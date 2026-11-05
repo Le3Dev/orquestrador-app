@@ -1,11 +1,12 @@
 import { type NodeProps, NodeResizer } from "@xyflow/react";
-import { type FormEvent, useEffect, useId, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useId, useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
-import type { DadosDaConfiguracao, PastaDeProjeto } from "../../shared/api/tipos";
+import type { PastaDeProjeto } from "../../shared/api/tipos";
 import { useCanvas } from "../../shared/canvas/contexto";
 import { TAMANHO_MINIMO_DO_TERMINAL } from "../../shared/canvas/layout";
 import { ALCA_DO_TERMINAL, type NoRascunho as TipoDoNo } from "../../shared/canvas/nos";
+import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
 import { CamposDaConfiguracao } from "../CamposDaConfiguracao";
 import { NavegadorDePastas } from "./NavegadorDePastas";
 
@@ -14,16 +15,6 @@ function nomeDaPasta(caminho: string): string {
   const partes = caminho.split(/[\\/]/).filter((parte) => parte !== "");
   return partes[partes.length - 1] ?? caminho;
 }
-
-const CONFIGURACAO_PADRAO: DadosDaConfiguracao = {
-  modeloDoOrquestrador: "opus",
-  esforcoDoOrquestrador: "padrao",
-  modeloDosSubagentes: "opus",
-  esforcoDosSubagentes: "padrao",
-  quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
-  nivelDePermissao: "leitura",
-  permitirCommitEPush: false,
-};
 
 /**
  * O terminal que abre ao clicar em "Novo orquestrador": pede a pasta, o nome
@@ -35,7 +26,7 @@ export function NoRascunho({ id, selected }: NodeProps<TipoDoNo>) {
   const idDoCampo = useId();
   const [nome, setNome] = useState("");
   const [pasta, setPasta] = useState("");
-  const [configuracao, setConfiguracao] = useState(CONFIGURACAO_PADRAO);
+  const [configuracao, setConfiguracao] = useState(CONFIGURACAO_PADRAO_DO_ORQUESTRADOR);
   const [opcoes, setOpcoes] = useState<{ raiz: string; pastas: PastaDeProjeto[] } | null>(null);
   // Pasta escolhida pelo navegador do computador, fora da lista de projetos.
   const [pastaExterna, setPastaExterna] = useState<PastaDeProjeto | null>(null);
@@ -88,6 +79,12 @@ export function NoRascunho({ id, selected }: NodeProps<TipoDoNo>) {
     setPasta(caminho);
     setNavegando(false);
   }
+  // O aviso de esforço depende dos modelos e da pasta escolhidos: a busca muda junto com eles.
+  const { modeloDoOrquestrador, modeloDosSubagentes } = configuracao;
+  const buscarEsforcoHerdado = useCallback(
+    () => api.lerEsforcoHerdado(modeloDoOrquestrador, modeloDosSubagentes, pasta),
+    [modeloDoOrquestrador, modeloDosSubagentes, pasta],
+  );
 
   async function iniciar(evento: FormEvent): Promise<void> {
     evento.preventDefault();
@@ -192,7 +189,11 @@ export function NoRascunho({ id, selected }: NodeProps<TipoDoNo>) {
             </div>
           </div>
 
-          <CamposDaConfiguracao valor={configuracao} aoMudar={setConfiguracao} />
+          <CamposDaConfiguracao
+            valor={configuracao}
+            aoMudar={setConfiguracao}
+            buscarEsforcoHerdado={buscarEsforcoHerdado}
+          />
 
           {erro !== null && <p className="mono texto-longo text-error">✗ {erro}</p>}
         </div>
