@@ -17,6 +17,7 @@ import { ModoDoTurno } from "./ModoDoTurno";
 import { MotorDeAgentes, ResultadoDoTurno } from "./MotorDeAgentes";
 import { Orquestrador, TAMANHO_MAXIMO_DA_MENSAGEM } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
+import { PedidoNaFila } from "./PedidoNaFila";
 import { predefinicaoPorNome } from "./PredefinicaoDeConfiguracao";
 import { GerenciadorDeWorktrees } from "./PreparoDeWorktree";
 import { RepositorioDeOrquestradores } from "./RepositorioDeOrquestradores";
@@ -77,6 +78,16 @@ export interface MensagemEnviada {
    * termina (com ou sem evento). Nunca rejeita. Ninguém precisa esperá-la.
    */
   medicao: Promise<void>;
+  /**
+   * Resolve depois da `conclusao`, quando o envio automático do próximo
+   * pedido da fila foi decidido — e, se ele saiu, quando o turno dele já
+   * começou. Nunca rejeita. Ninguém precisa esperá-la.
+   */
+  envioDaFila: Promise<void>;
+}
+
+export interface PedidoEnfileirado {
+  pedidoId: string;
 }
 
 function descreverErro(erro: unknown): string {
@@ -85,8 +96,8 @@ function descreverErro(erro: unknown): string {
 
 /**
  * Casos de uso da orquestração: criar Orquestradores, conversar com eles,
- * decidir os Planos que entregarem, limpar a conversa e cancelar o que
- * estiverem fazendo.
+ * enfileirar pedidos, decidir os Planos que entregarem, limpar a conversa e
+ * cancelar o que estiverem fazendo.
  *
  * Não guarda estado: os Orquestradores vêm do repositório, e os turnos em
  * execução ficam no `ControleDeExecucoes`.
@@ -184,8 +195,57 @@ export class ServicoDeOrquestracao {
     imagens: readonly ImagemRecebida[] = [],
     modo: ModoDoTurno = "execucao",
   ): Promise<MensagemEnviada> {
-    const { repositorio, execucoes, anexos, gerarId, agora } = this.dependencias;
+    return this.iniciarTurno(this.buscar(id), texto, imagens, modo, null);
+  }
+
+  /**
+   * Guarda um pedido na fila do Orquestrador, com ou sem turno em andamento.
+   * Ele sai sozinho quando um turno terminar bem, ou com `enviarDaFila`.
+   */
+  async enfileirarPedido(id: string, texto: string, modo: ModoDoTurno = "execucao"): Promise<PedidoEnfileirado> {
+    const { repositorio, gerarId, agora } = this.dependencias;
     const orquestrador = this.buscar(id);
+    const pedido = PedidoNaFila.criar({ id: gerarId(), texto, modo, enfileiradoEm: agora() });
+    this.publicar(orquestrador, orquestrador.enfileirarPedido(pedido));
+    await repositorio.salvar(orquestrador);
+    return { pedidoId: pedido.id };
+  }
+
+  async removerDaFila(id: string, pedidoId: string): Promise<void> {
+    const orquestrador = this.buscar(id);
+    this.publicar(orquestrador, orquestrador.retirarDaFila(pedidoId, "removido"));
+    await this.dependencias.repositorio.salvar(orquestrador);
+  }
+
+  /**
+   * Envia agora um pedido da fila, com o texto e o modo dele, como se fosse
+   * uma mensagem. Com um turno em andamento, é recusado como uma mensagem
+   * seria — e o pedido continua na fila.
+   */
+  async enviarDaFila(id: string, pedidoId: string): Promise<MensagemEnviada> {
+    const orquestrador = this.buscar(id);
+    const pedido = orquestrador.pedidoDaFila(pedidoId);
+    return this.iniciarTurno(orquestrador, pedido.texto, [], pedido.modo, pedido);
+  }
+
+  /**
+   * Inicia um turno, vindo de uma mensagem ou de um pedido da fila
+   * (`pedidoDaFila`).
+   *
+   * O pedido só sai da fila depois que o agregado aceitou o turno, e sem
+   * espera entre uma coisa e outra: se o turno for recusado (ex.: outro em
+   * andamento), o pedido continua na fila; uma vez aceito, nada se intercala.
+   * Se depois disso a gravação falhar, o turno fica registrado como falho
+   * com o texto do pedido — que não se perde, fica no histórico da conversa.
+   */
+  private async iniciarTurno(
+    orquestrador: Orquestrador,
+    texto: string,
+    imagens: readonly ImagemRecebida[],
+    modo: ModoDoTurno,
+    pedidoDaFila: PedidoNaFila | null,
+  ): Promise<MensagemEnviada> {
+    const { repositorio, execucoes, anexos, gerarId, agora } = this.dependencias;
     const turnoId = gerarId();
 
     const anexosDoTurno = imagens.map((imagem) =>
@@ -197,12 +257,17 @@ export class ServicoDeOrquestracao {
       }),
     );
     const inicio = orquestrador.iniciarTurno(turnoId, texto, agora(), anexosDoTurno, modo);
+    const retirada = pedidoDaFila === null ? null : orquestrador.retirarDaFila(pedidoDaFila.id, "enviado");
     // A mesma do evento `turno_iniciado`: o turno segue com ela até o fim,
     // mesmo que o usuário altere a configuração enquanto ele roda.
     const configuracaoDoTurno = orquestrador.configuracao;
     // O sinal nasce antes de qualquer espera: um cancelamento que chegue
     // enquanto o turno é gravado já encontra a execução registrada.
     const sinal = execucoes.iniciar(orquestrador.id);
+    // A tela vê o pedido sair da fila antes de o turno dele aparecer.
+    if (retirada !== null) {
+      this.publicar(orquestrador, retirada);
+    }
     this.publicar(orquestrador, inicio);
 
     try {
@@ -227,7 +292,15 @@ export class ServicoDeOrquestracao {
       .catch((falha: unknown) =>
         console.warn(`[orquestracao] Não foi possível medir o consumo do turno ${turnoId}:`, descreverErro(falha)),
       );
-    return { turnoId, conclusao, medicao };
+    // Depois do `encerrar`: o turno que sair da fila registra a própria
+    // execução sem que o fim deste a apague. Turno que nem conseguiu ser
+    // gravado como encerrado (`null`) pausa a fila.
+    const envioDaFila = execucao.then(
+      (encerrado) => (encerrado === null ? undefined : this.enviarProximoDaFila(orquestrador.id, turnoId)),
+      // A execução falhou por fora do turno (a medição já avisa no log): a fila pausa.
+      () => undefined,
+    );
+    return { turnoId, conclusao, medicao, envioDaFila };
   }
 
   /**
@@ -315,6 +388,9 @@ export class ServicoDeOrquestracao {
    * Ao subir o servidor, nenhum turno pode estar de fato rodando: os
    * processos morreram junto com o servidor anterior. Devolve quantos foram
    * marcados como interrompidos.
+   *
+   * A fila não anda aqui: um turno interrompido pausa a fila, e os pedidos
+   * esperam o usuário mandar enviar.
    */
   async interromperTurnosPendentes(): Promise<number> {
     const { repositorio, agora } = this.dependencias;
@@ -432,6 +508,29 @@ export class ServicoDeOrquestracao {
       return null;
     }
     return encerrado;
+  }
+
+  /**
+   * A fila anda sozinha: terminado o turno `turnoId`, envia o primeiro pedido
+   * dela se o agregado deixar (ver `proximoDaFilaApos`). Se o usuário já
+   * iniciou outro turno, nada sai — e o pedido segue na fila. Nunca rejeita:
+   * um erro aqui só vira aviso no log, sem afetar o turno que terminou.
+   */
+  private async enviarProximoDaFila(orquestradorId: string, turnoId: string): Promise<void> {
+    try {
+      // Excluído enquanto o turno terminava: nada a enviar.
+      const orquestrador = this.dependencias.repositorio.buscarPorId(orquestradorId);
+      const proximo = orquestrador?.proximoDaFilaApos(turnoId) ?? null;
+      if (proximo === null) {
+        return;
+      }
+      await this.enviarDaFila(orquestradorId, proximo.id);
+    } catch (falha) {
+      console.warn(
+        `[orquestracao] Não foi possível enviar sozinho o próximo pedido da fila do orquestrador ${orquestradorId}:`,
+        descreverErro(falha),
+      );
+    }
   }
 
   /**

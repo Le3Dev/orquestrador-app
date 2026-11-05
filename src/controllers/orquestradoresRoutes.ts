@@ -14,6 +14,7 @@ import { MODELOS_CLAUDE } from "../orquestracao/ModeloClaude";
 import { MODOS_DO_TURNO } from "../orquestracao/ModoDoTurno";
 import { NIVEIS_DE_PERMISSAO } from "../orquestracao/NivelDePermissao";
 import {
+  ErroDeFilaCheia,
   Orquestrador,
   TAMANHO_MAXIMO_DA_MENSAGEM,
   TAMANHO_MAXIMO_DO_NOME,
@@ -100,6 +101,23 @@ const esquemaDeMensagem = z.object({
   modo: z.enum(MODOS_DO_TURNO, { error: "Modo do pedido inválido." }).default("execucao"),
 });
 
+/** Pedido para a fila: só texto e modo (imagens não entram na fila). */
+const esquemaDoPedidoNaFila = z.object({
+  texto: z
+    .string({ error: "Escreva o pedido." })
+    .trim()
+    .min(1, { error: "Escreva o pedido." })
+    .max(TAMANHO_MAXIMO_DA_MENSAGEM, {
+      error: `O pedido deve ter até ${TAMANHO_MAXIMO_DA_MENSAGEM} caracteres.`,
+    }),
+  modo: z.enum(MODOS_DO_TURNO, { error: "Modo do pedido inválido." }).default("execucao"),
+  // Recusadas em vez de descartadas em silêncio.
+  imagens: z
+    .array(z.unknown())
+    .max(0, { error: "A fila aceita só texto: envie as imagens quando o orquestrador estiver livre." })
+    .optional(),
+});
+
 const esquemaDeAprovacaoDoPlano = z.object({
   observacoes: z
     .string({ error: "As observações devem ser um texto." })
@@ -131,6 +149,10 @@ const STATUS_POR_MOTIVO: Readonly<Record<MotivoDoErro, number>> = {
 function responderErro(resposta: Response, erro: unknown): void {
   if (erro instanceof ErroDeOrquestracao) {
     resposta.status(STATUS_POR_MOTIVO[erro.motivo]).json({ erro: erro.message });
+    return;
+  }
+  if (erro instanceof ErroDeFilaCheia) {
+    resposta.status(409).json({ erro: erro.message });
     return;
   }
   if (erro instanceof ZodError) {
@@ -170,6 +192,7 @@ function apresentarResumo(orquestrador: Orquestrador) {
     configuracao: orquestrador.configuracao.paraDados(),
     predefinicaoCorrespondente: orquestrador.predefinicaoCorrespondente,
     worktree: orquestrador.worktree,
+    fila: orquestrador.fila.map((pedido) => pedido.paraDados()),
     criadoEm: orquestrador.criadoEm.toISOString(),
     totalDeTurnos: orquestrador.totalDeTurnos,
     ultimoTurno:
@@ -325,6 +348,36 @@ export function criarOrquestradoresRoutes({
         })),
         modo,
       );
+      resposta.status(202).json({ turnoId });
+    }),
+  );
+
+  /**
+   * Guarda um pedido na fila: ele sai sozinho quando o turno atual terminar
+   * bem, ou com "enviar agora". Aceito com ou sem turno em andamento.
+   */
+  rotas.post(
+    "/orquestradores/:id/fila",
+    rota(async (requisicao, resposta) => {
+      const { texto, modo } = esquemaDoPedidoNaFila.parse(requisicao.body ?? {});
+      const { pedidoId } = await servico.enfileirarPedido(requisicao.params.id, texto, modo);
+      resposta.status(201).json({ pedidoId });
+    }),
+  );
+
+  rotas.delete(
+    "/orquestradores/:id/fila/:pedidoId",
+    rota<{ id: string; pedidoId: string }>(async (requisicao, resposta) => {
+      await servico.removerDaFila(requisicao.params.id, requisicao.params.pedidoId);
+      resposta.status(204).end();
+    }),
+  );
+
+  /** "Enviar agora": o pedido sai da fila e vira um turno, como uma mensagem. */
+  rotas.post(
+    "/orquestradores/:id/fila/:pedidoId/enviar",
+    rota<{ id: string; pedidoId: string }>(async (requisicao, resposta) => {
+      const { turnoId } = await servico.enviarDaFila(requisicao.params.id, requisicao.params.pedidoId);
       resposta.status(202).json({ turnoId });
     }),
   );

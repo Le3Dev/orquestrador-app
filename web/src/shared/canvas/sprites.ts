@@ -1,5 +1,6 @@
 import type { SituacaoDoSubagente } from "../api/tipos";
 import type { AcessorioDoBixinho, FormaDoBixinho } from "./bixinhos";
+import type { IconeDeFerramenta } from "./iconesDeFerramenta";
 
 /**
  * Desenhos dos bixinhos numa grade de 16 × 16 "pixels". As duas primeiras
@@ -64,16 +65,21 @@ const CORPOS: Readonly<Record<FormaDoBixinho, readonly string[]>> = {
   ],
 };
 
-export function pixelsDoCorpo(forma: FormaDoBixinho): Pixel[] {
+/** As células `#` de uma grade, com as linhas deslocadas de `deslocamento`. */
+function pixelsDaGrade(grade: readonly string[], deslocamento = 0): Pixel[] {
   const pixels: Pixel[] = [];
-  CORPOS[forma].forEach((linha, indice) => {
+  grade.forEach((linha, indice) => {
     [...linha].forEach((celula, coluna) => {
       if (celula === "#") {
-        pixels.push([indice + LINHAS_DE_ACESSORIO, coluna]);
+        pixels.push([indice + deslocamento, coluna]);
       }
     });
   });
   return pixels;
+}
+
+export function pixelsDoCorpo(forma: FormaDoBixinho): Pixel[] {
+  return pixelsDaGrade(CORPOS[forma], LINHAS_DE_ACESSORIO);
 }
 
 /** Linhas de cada forma, para conferir nos testes que a grade está íntegra. */
@@ -140,3 +146,62 @@ export const ACESSORIOS_DESENHADOS: Readonly<
   },
   broto: { escuro: [[2, 8]], destaque: [[0, 6], [0, 7], [1, 7], [1, 8], [0, 9], [0, 10], [1, 9]] },
 };
+
+/** Os ícones de ferramenta, numa grade de 8 × 8, no mesmo estilo dos bixinhos. */
+export const LADO_DO_ICONE = 8;
+
+const ICONES: Readonly<Record<IconeDeFerramenta, readonly string[]>> = {
+  lupa: [
+    "..###...",
+    ".#...#..",
+    "#.....#.",
+    "#.....#.",
+    "#.....#.",
+    ".#...#..",
+    "..###.#.",
+    ".......#",
+  ],
+  lapis: [
+    "......##",
+    ".....#.#",
+    "....#.#.",
+    "...#.#..",
+    "..#.#...",
+    ".#.#....",
+    "##......",
+    "#.......",
+  ],
+  engrenagem: [
+    "...##...",
+    ".######.",
+    ".##..##.",
+    "###..###",
+    "###..###",
+    ".##..##.",
+    ".######.",
+    "...##...",
+  ],
+  globo: [
+    "..####..",
+    ".#.##.#.",
+    "#..##..#",
+    "########",
+    "#..##..#",
+    "#..##..#",
+    ".#.##.#.",
+    "..####..",
+  ],
+};
+
+/** Calculados uma vez: o ícone não refaz as células a cada evento. */
+export const PIXELS_DOS_ICONES: Readonly<Record<IconeDeFerramenta, readonly Pixel[]>> = {
+  lupa: pixelsDaGrade(ICONES.lupa),
+  lapis: pixelsDaGrade(ICONES.lapis),
+  engrenagem: pixelsDaGrade(ICONES.engrenagem),
+  globo: pixelsDaGrade(ICONES.globo),
+};
+
+/** Linhas de cada ícone, para conferir nos testes que a grade está íntegra. */
+export function linhasDoIcone(icone: IconeDeFerramenta): readonly string[] {
+  return ICONES[icone];
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ExecutorDeGit, Worktrees } from "./Worktrees";
+import { criarExecutorDeGit, ExecutorDeGit, Worktrees } from "./Worktrees";
 
 /** Executor de git falso: responde por padrão de argumentos, guardando o que foi chamado. */
 function executorFalso(
@@ -127,5 +127,24 @@ describe("Worktrees", () => {
     await new Worktrees(executar).remover("/repo", "/wt/abc");
 
     expect(tentativas).toBe(3);
+  });
+});
+
+describe("criarExecutorDeGit", () => {
+  it("devolve a saída do git com código zero", async () => {
+    const executar = criarExecutorDeGit({ maxBuffer: 1024 * 1024, tempoLimiteMs: 15_000 });
+
+    const { codigo, saida } = await executar(["--version"]);
+
+    expect(codigo).toBe(0);
+    expect(saida).toMatch(/^git version/);
+  });
+
+  it("saída acima do limite vira código diferente de zero, sem rejeitar", async () => {
+    const executar = criarExecutorDeGit({ maxBuffer: 4 });
+
+    const { codigo } = await executar(["--version"]);
+
+    expect(codigo).not.toBe(0);
   });
 });

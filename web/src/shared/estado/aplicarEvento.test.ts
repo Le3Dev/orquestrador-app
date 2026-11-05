@@ -1,10 +1,12 @@
 import type {
   DadosDaConfiguracao,
   DadosDaConfiguracaoGravada,
+  DadosDoPedidoNaFila,
   EventoDeOrquestracao,
   EventoRegistrado,
+  ModoDoTurno,
 } from "../api/tipos";
-import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "./aplicarEvento";
+import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa, filaDePedidos } from "./aplicarEvento";
 
 const configuracao: DadosDaConfiguracao = {
   modeloDoOrquestrador: "opus",
@@ -485,6 +487,126 @@ describe("aplicarEvento", () => {
       expect(desconhecido.ultimaSequencia).toBe(4);
       expect(desconhecido.turnos).toHaveLength(1);
       expect(desconhecido.turnos[0]).toBe(umaVez.turnos[0]);
+    });
+  });
+
+  describe("fila de pedidos", () => {
+    function pedido(id: string, segundo: number, modo: ModoDoTurno = "execucao"): DadosDoPedidoNaFila {
+      return { id, texto: `pedido ${id}`, modo, enfileiradoEm: `2026-10-28T12:00:0${segundo}.000Z` };
+    }
+    const a = pedido("a", 1);
+    const b = pedido("b", 2, "planejamento");
+    const c = pedido("c", 3);
+    const limpa: EventoDeOrquestracao = {
+      tipo: "conversa_limpa",
+      turnosAnteriores: 1,
+      planoDescartado: false,
+      worktreeComAlteracoes: false,
+    };
+
+    it("o estado inicial da fila vem do resumo do servidor", () => {
+      expect(ESTADO_INICIAL.pedidosEnfileirados).toEqual([]);
+      expect(filaDePedidos(ESTADO_INICIAL, [a, b])).toEqual([a, b]);
+      expect(filaDePedidos(ESTADO_INICIAL, [])).toEqual([]);
+    });
+
+    it("pedido_enfileirado entra no fim da fila, sem mexer no turno em andamento nem no log", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "um", configuracao },
+          { tipo: "pedido_enfileirado", pedido: a },
+          { tipo: "pedido_enfileirado", pedido: b },
+        ]),
+      );
+
+      expect(estado.ultimaSequencia).toBe(3);
+      expect(filaDePedidos(estado, [])).toEqual([a, b]);
+      expect(estado.turnos).toHaveLength(1);
+      expect(estado.turnos[0]?.log).toHaveLength(1);
+    });
+
+    it("pedido_retirado_da_fila tira o pedido, removido pelo usuário ou enviado como turno", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "pedido_enfileirado", pedido: a },
+          { tipo: "pedido_enfileirado", pedido: b },
+          { tipo: "pedido_enfileirado", pedido: c },
+          { tipo: "pedido_retirado_da_fila", pedidoId: "b", motivo: "removido" },
+          { tipo: "pedido_retirado_da_fila", pedidoId: "a", motivo: "enviado" },
+          { tipo: "turno_iniciado", turnoId: "t2", texto: a.texto, configuracao },
+        ]),
+      );
+
+      expect(filaDePedidos(estado, [])).toEqual([c]);
+      expect(estado.turnos.map((turno) => [turno.texto, turno.situacao])).toEqual([["pedido a", "em_andamento"]]);
+    });
+
+    it("os eventos corrigem o resumo defasado: tiram o que saiu e acrescentam o que entrou depois da consulta, sem repetir", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "pedido_retirado_da_fila", pedidoId: "a", motivo: "enviado" },
+          { tipo: "pedido_enfileirado", pedido: c },
+        ]),
+      );
+
+      expect(filaDePedidos(estado, [a, b])).toEqual([b, c]);
+      expect(filaDePedidos(estado, [b, c])).toEqual([b, c]);
+    });
+
+    it("repetidos são ignorados: na reconexão do SSE e com o mesmo pedido de novo", () => {
+      const eventos = registrar([
+        { tipo: "pedido_enfileirado", pedido: a },
+        { tipo: "pedido_retirado_da_fila", pedidoId: "a", motivo: "removido" },
+      ]);
+      const umaVez = reproduzir(eventos);
+      expect(reproduzir(eventos, umaVez)).toBe(umaVez);
+
+      const soAEntrada = reproduzir(eventos.slice(0, 1));
+      const deNovo = aplicarEvento(soAEntrada, { tipo: "pedido_enfileirado", pedido: a, sequencia: 7, em: "2026-10-28T12:00:07Z" });
+      expect(deNovo.pedidosEnfileirados).toEqual([a]);
+      expect(deNovo.ultimaSequencia).toBe(7);
+
+      const retiradaDeNovo = aplicarEvento(umaVez, {
+        tipo: "pedido_retirado_da_fila",
+        pedidoId: "a",
+        motivo: "removido",
+        sequencia: 8,
+        em: "2026-10-28T12:00:08Z",
+      });
+      expect(retiradaDeNovo.pedidosRetirados).toEqual(["a"]);
+    });
+
+    it("fora de ordem: evento de sequência antiga é ignorado, e a entrada que chega depois da retirada também", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "pedido_enfileirado", pedido: b },
+          { tipo: "pedido_retirado_da_fila", pedidoId: "a", motivo: "removido" },
+          { tipo: "pedido_enfileirado", pedido: a },
+        ]),
+      );
+      expect(filaDePedidos(estado, [])).toEqual([b]);
+      expect(filaDePedidos(estado, [a, b])).toEqual([b]);
+
+      const atrasado = aplicarEvento(estado, { tipo: "pedido_enfileirado", pedido: c, sequencia: 2, em: "2026-10-28T12:00:02Z" });
+      expect(atrasado).toBe(estado);
+    });
+
+    it("o /clear não esvazia a fila: daí em diante ela vem do resumo, ainda filtrada pelas retiradas", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "pedido_enfileirado", pedido: a },
+          { tipo: "pedido_enfileirado", pedido: b },
+          { tipo: "pedido_retirado_da_fila", pedidoId: "a", motivo: "removido" },
+          limpa,
+        ]),
+      );
+      expect(estado.turnos).toEqual([]);
+      expect(estado.pedidosEnfileirados).toEqual([]);
+      expect(filaDePedidos(estado, [a, b])).toEqual([b]);
+
+      // Terminal aberto depois do /clear: o histórico só tem o conversa_limpa, e a fila vem do resumo.
+      const abertoDepois = reproduzir(registrar([limpa]));
+      expect(filaDePedidos(abertoDepois, [b])).toEqual([b]);
     });
   });
 });

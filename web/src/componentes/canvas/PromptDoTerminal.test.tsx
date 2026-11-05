@@ -1,9 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createRef } from "react";
 
-import type { ModoDoTurno } from "../../shared/api/tipos";
+import type { DadosDoPedidoNaFila, ModoDoTurno } from "../../shared/api/tipos";
 import type { ImagemAnexada } from "../../shared/imagens";
-import { PromptDoTerminal } from "./PromptDoTerminal";
+import { type ControleDoPrompt, PromptDoTerminal } from "./PromptDoTerminal";
 
 interface Opcoes {
   modo?: ModoDoTurno;
@@ -11,7 +11,15 @@ interface Opcoes {
   desconectado?: boolean;
   imagens?: readonly ImagemAnexada[];
   limpezaAceita?: boolean;
+  fila?: readonly DadosDoPedidoNaFila[];
+  proximoDaFilaACaminho?: boolean;
+  enfileiramentoAceito?: boolean;
 }
+
+const FILA: readonly DadosDoPedidoNaFila[] = [
+  { id: "p1", texto: "rode os testes\ne corrija o que quebrar", modo: "execucao", enfileiradoEm: "2026-10-28T12:00:01.000Z" },
+  { id: "p2", texto: "planeje a migração", modo: "planejamento", enfileiradoEm: "2026-10-28T12:00:02.000Z" },
+];
 
 const IMAGEM: ImagemAnexada = {
   id: "i1",
@@ -28,10 +36,18 @@ function renderizar({
   desconectado = false,
   imagens = [],
   limpezaAceita = true,
+  fila = [],
+  proximoDaFilaACaminho = false,
+  enfileiramentoAceito = true,
 }: Opcoes = {}) {
   const aoAlternarModo = vi.fn();
   const aoEnviar = vi.fn(async () => true);
+  const aoEnfileirar = vi.fn(async () => enfileiramentoAceito);
+  const aoRemoverDaFila = vi.fn();
+  const aoEnviarDaFila = vi.fn();
   const aoLimparConversa = vi.fn(async () => limpezaAceita);
+  const controle = createRef<ControleDoPrompt>();
+  const campo = createRef<HTMLTextAreaElement>();
   render(
     <PromptDoTerminal
       desconectado={desconectado}
@@ -39,11 +55,17 @@ function renderizar({
       cancelando={false}
       modo={modo}
       aoAlternarModo={aoAlternarModo}
-      campo={createRef<HTMLTextAreaElement>()}
+      campo={campo}
+      controle={controle}
       imagens={imagens}
       aoAnexar={vi.fn()}
       aoRemoverImagem={vi.fn()}
       aoEnviar={aoEnviar}
+      aoEnfileirar={aoEnfileirar}
+      fila={fila}
+      proximoDaFilaACaminho={proximoDaFilaACaminho}
+      aoRemoverDaFila={aoRemoverDaFila}
+      aoEnviarDaFila={aoEnviarDaFila}
       aoLimparConversa={aoLimparConversa}
       aoCancelar={vi.fn()}
     />,
@@ -51,7 +73,11 @@ function renderizar({
   return {
     aoAlternarModo,
     aoEnviar,
+    aoEnfileirar,
+    aoRemoverDaFila,
+    aoEnviarDaFila,
     aoLimparConversa,
+    controle,
     campo: screen.getByRole("textbox", { name: "Mensagem para o orquestrador" }),
   };
 }
@@ -188,6 +214,135 @@ describe("PromptDoTerminal", () => {
 
       fireEvent.change(campo, { target: { value: "corrija o bug" } });
       expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("fila de pedidos", () => {
+    it("com um pedido rodando, Enter põe o texto na fila em vez de enviar e esvazia o campo", async () => {
+      const { aoEnviar, aoEnfileirar, campo } = renderizar({ trabalhando: true });
+
+      expect(campo).toHaveAttribute("placeholder", "trabalhando… escreva o próximo e enter põe na fila · esc cancela");
+      digitarEEnviar(campo, "agora rode os testes");
+
+      await waitFor(() => expect(campo).toHaveValue(""));
+      expect(aoEnfileirar).toHaveBeenCalledWith("agora rode os testes");
+      expect(aoEnviar).not.toHaveBeenCalled();
+    });
+
+    it("se o servidor recusar (ex.: fila cheia), o texto fica no campo", async () => {
+      const { aoEnfileirar, campo } = renderizar({ trabalhando: true, enfileiramentoAceito: false });
+
+      digitarEEnviar(campo, "mais um");
+
+      await waitFor(() => expect(aoEnfileirar).toHaveBeenCalledTimes(1));
+      expect(campo).toHaveValue("mais um");
+    });
+
+    it("com imagens anexadas, avisa que elas não entram na fila e não envia nada", () => {
+      const { aoEnviar, aoEnfileirar, campo } = renderizar({ trabalhando: true, imagens: [IMAGEM] });
+
+      digitarEEnviar(campo, "veja a tela");
+
+      expect(screen.getByRole("alert")).toHaveTextContent("imagens não entram na fila");
+      expect(aoEnfileirar).not.toHaveBeenCalled();
+      expect(aoEnviar).not.toHaveBeenCalled();
+      expect(campo).toHaveValue("veja a tela");
+    });
+
+    it("sem pedido rodando, Enter envia normalmente", async () => {
+      const { aoEnviar, aoEnfileirar, campo } = renderizar({ fila: FILA });
+
+      digitarEEnviar(campo, "outro assunto");
+
+      await waitFor(() => expect(aoEnviar).toHaveBeenCalledWith("outro assunto"));
+      expect(aoEnfileirar).not.toHaveBeenCalled();
+    });
+
+    it("mostra os pedidos com o número, a primeira linha e o selo do plan mode; ✕ tira da fila", () => {
+      const { aoRemoverDaFila } = renderizar({ trabalhando: true, fila: FILA });
+      const lista = screen.getByRole("region", { name: "Fila de pedidos" });
+      const itens = within(lista).getAllByRole("listitem");
+
+      expect(lista).toHaveTextContent("na fila· 2/10");
+      expect(itens).toHaveLength(2);
+      expect(itens[0]).toHaveTextContent("1rode os testes …");
+      expect(within(itens[0] as HTMLElement).getByText("rode os testes …")).toHaveAttribute(
+        "title",
+        "rode os testes\ne corrija o que quebrar",
+      );
+      expect(itens[0]).not.toHaveTextContent("plan mode");
+      expect(itens[1]).toHaveTextContent("2plan modeplaneje a migração");
+
+      fireEvent.click(screen.getByRole("button", { name: "Remover da fila o pedido 2" }));
+      expect(aoRemoverDaFila).toHaveBeenCalledWith("p2");
+    });
+
+    it("com um pedido rodando, a fila anda sozinha: não há 'enviar agora'", () => {
+      renderizar({ trabalhando: true, fila: FILA });
+
+      expect(screen.queryByText("fila pausada")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "enviar agora" })).not.toBeInTheDocument();
+    });
+
+    it("pausada (sem pedido rodando e com itens), mostra 'fila pausada' e o 'enviar agora' só no primeiro", () => {
+      const { aoEnviarDaFila } = renderizar({ fila: FILA });
+      const itens = screen.getAllByRole("listitem");
+
+      expect(screen.getByText("fila pausada")).toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: "enviar agora" })).toHaveLength(1);
+      expect(within(itens[1] as HTMLElement).queryByRole("button", { name: "enviar agora" })).not.toBeInTheDocument();
+
+      fireEvent.click(within(itens[0] as HTMLElement).getByRole("button", { name: "enviar agora" }));
+      expect(aoEnviarDaFila).toHaveBeenCalledWith("p1");
+    });
+
+    it("com o próximo a caminho (o anterior acabou de terminar bem), mostra 'enviando o próximo…' sem 'enviar agora'", () => {
+      renderizar({ fila: FILA, proximoDaFilaACaminho: true });
+
+      expect(screen.getByText("enviando o próximo…")).toBeInTheDocument();
+      expect(screen.queryByText("fila pausada")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "enviar agora" })).not.toBeInTheDocument();
+    });
+
+    it("sem pedidos à espera, a lista não aparece", () => {
+      renderizar({ trabalhando: true });
+
+      expect(screen.queryByRole("region", { name: "Fila de pedidos" })).not.toBeInTheDocument();
+    });
+
+    it("/clear durante um pedido continua indisponível e não vai para a fila", () => {
+      const { aoEnfileirar, aoLimparConversa, campo } = renderizar({ trabalhando: true, fila: FILA });
+
+      digitarEEnviar(campo, "/clear");
+
+      expect(aoEnfileirar).not.toHaveBeenCalled();
+      expect(aoLimparConversa).not.toHaveBeenCalled();
+      expect(campo).toHaveValue("/clear");
+    });
+  });
+
+  describe("texto vindo de fora (nota arrastada)", () => {
+    it("entra no prompt vazio e foca o campo, sem enviar", () => {
+      const { aoEnviar, aoEnfileirar, controle, campo } = renderizar();
+
+      act(() => controle.current?.acrescentarTexto("revisar o domínio"));
+
+      expect(campo).toHaveValue("revisar o domínio");
+      expect(campo).toHaveFocus();
+      expect(aoEnviar).not.toHaveBeenCalled();
+      expect(aoEnfileirar).not.toHaveBeenCalled();
+    });
+
+    it("com texto no campo, é acrescentado numa linha nova", () => {
+      const { controle, campo } = renderizar();
+      fireEvent.change(campo, { target: { value: "corrija o bug" } });
+
+      act(() => controle.current?.acrescentarTexto("e rode os testes"));
+      expect(campo).toHaveValue("corrija o bug\ne rode os testes");
+
+      fireEvent.change(campo, { target: { value: "lista:\n" } });
+      act(() => controle.current?.acrescentarTexto("item"));
+      expect(campo).toHaveValue("lista:\nitem");
     });
   });
 });

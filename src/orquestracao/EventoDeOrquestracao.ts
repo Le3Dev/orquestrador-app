@@ -2,6 +2,7 @@ import { DadosDoAnexo } from "./Anexo";
 import { DadosDaConfiguracao } from "./ConfiguracaoDoOrquestrador";
 import { DadosDoConsumoDoTurno } from "./ConsumoDoTurno";
 import { ModoDoTurno } from "./ModoDoTurno";
+import { DadosDoPedidoNaFila, MotivoDaRetiradaDaFila } from "./PedidoNaFila";
 import { NomeDaPredefinicao } from "./PredefinicaoDeConfiguracao";
 
 export interface UsoDoTurno {
@@ -110,7 +111,17 @@ export type EventoDeOrquestracao =
       planoDescartado: boolean;
       /** O worktree do Orquestrador continua com alterações da conversa anterior. */
       worktreeComAlteracoes: boolean;
-    };
+    }
+  /**
+   * Um pedido entrou no fim da fila do Orquestrador. Não pertence a nenhum
+   * turno: espera a vez, com ou sem um turno em andamento.
+   */
+  | { tipo: "pedido_enfileirado"; pedido: DadosDoPedidoNaFila }
+  /**
+   * Um pedido saiu da fila: `removido` pelo usuário, ou `enviado` — então vem
+   * logo antes do `turno_iniciado` do turno que o atende.
+   */
+  | { tipo: "pedido_retirado_da_fila"; pedidoId: string; motivo: MotivoDaRetiradaDaFila };
 
 /** Evento já gravado no histórico, com a posição na sequência e o instante. */
 export type EventoRegistrado = EventoDeOrquestracao & { sequencia: number; em: string };

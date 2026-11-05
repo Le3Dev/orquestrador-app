@@ -32,6 +32,7 @@ import { NoNota } from "../componentes/canvas/NoNota";
 import { NoRascunho } from "../componentes/canvas/NoRascunho";
 import { NoTerminal } from "../componentes/canvas/NoTerminal";
 import { BarraDeTituloDoApp } from "../componentes/canvas/BarraDeTituloDoApp";
+import { type ControleDaPaleta, PaletaDeComandos } from "../componentes/canvas/PaletaDeComandos";
 import { rodandoNoDesktop } from "../shared/ponteDoDesktop";
 import {
   AvisoDeConexao,
@@ -63,6 +64,7 @@ import {
   ehBixinho,
   ehNota,
   ehTerminal,
+  idDoNoDaNota,
   limparBixinhos,
   mesmasLigacoes,
   type NoDoCanvas,
@@ -83,6 +85,7 @@ import { useNotas } from "../shared/hooks/useNotas";
 import { useOrquestradores } from "../shared/hooks/useOrquestradores";
 import { useReaproveitado } from "../shared/hooks/useReaproveitado";
 import { useServidor } from "../shared/hooks/useServidor";
+import type { AcaoDaPaleta, FonteDaPaleta, ItemDaPaleta } from "../shared/paletaDeComandos";
 
 // Tudo o que vai ao <ReactFlow> é constante ou estável: uma prop nova a cada
 // renderização (e o canvas renderiza a cada quadro do arraste) faz o React
@@ -117,8 +120,17 @@ function viewportEmCemPorCento(atual: Viewport, largura: number, altura: number)
   };
 }
 
-function classeNoMinimapa(no: { type?: string }): string {
-  return no.type === "bixinho" ? "minimapa-bixinho" : no.type === "nota" ? "minimapa-nota" : "minimapa-terminal";
+/** A classe de cada nó no minimapa; o terminal de um Orquestrador trabalhando também brilha. */
+function classeNoMinimapa(no: NoDoCanvas, trabalhando: ReadonlySet<string>): string {
+  if (ehBixinho(no)) {
+    return "minimapa-bixinho";
+  }
+  if (ehNota(no)) {
+    return "minimapa-nota";
+  }
+  return ehTerminal(no) && trabalhando.has(no.data.orquestradorId)
+    ? "minimapa-terminal minimapa-terminal-trabalhando"
+    : "minimapa-terminal";
 }
 
 /** O tamanho de uma janela do canvas para organizar: o do nó, o medido ou o padrão. */
@@ -257,6 +269,24 @@ function Canvas() {
     () => new Map((orquestradores ?? []).map((orquestrador) => [orquestrador.id, orquestrador])),
     [orquestradores],
   );
+  // A paleta lê a lista por aqui, só ao abrir: as ações dela não mudam a cada consulta.
+  const orquestradoresAtuais = useRef(orquestradores);
+  useEffect(() => {
+    orquestradoresAtuais.current = orquestradores;
+  }, [orquestradores]);
+
+  // Quem está trabalhando: o mesmo array enquanto ninguém começa nem para.
+  const idsTrabalhando = useReaproveitado(
+    (orquestradores ?? [])
+      .filter((orquestrador) => orquestrador.situacao === "trabalhando")
+      .map((orquestrador) => orquestrador.id),
+    mesmosIds,
+  );
+  // Estável: uma função nova re-renderizaria todos os nós do minimapa (ver ADR-11).
+  const classeDoMinimapa = useMemo(() => {
+    const trabalhando = new Set(idsTrabalhando);
+    return (no: NoDoCanvas) => classeNoMinimapa(no, trabalhando);
+  }, [idsTrabalhando]);
 
   // Terminais de orquestradores excluídos (por outra aba, por exemplo) saem do canvas.
   useEffect(() => {
@@ -455,6 +485,18 @@ function Canvas() {
     setTimeout(() => void fluxo.fitView({ duration: 600, padding: 0.12, maxZoom: 1 }), ESPERA_PARA_MEDIR_MS);
   }, [fluxo, setNos]);
 
+  /** Zoom em 100% (texto nítido) sem sair do lugar: o Ctrl+0 e a paleta. */
+  const zoomEmCemPorCento = useCallback(() => {
+    const area = areaDoCanvas.current?.getBoundingClientRect();
+    void fluxo.setViewport(viewportEmCemPorCento(fluxo.getViewport(), area?.width ?? 0, area?.height ?? 0));
+  }, [fluxo]);
+
+  /** Mostra tudo o que está no canvas, sem passar de 100% (ver ADR-20). */
+  const enquadrarTudo = useCallback(
+    () => void fluxo.fitView({ duration: 500, padding: 0.12, maxZoom: 1 }),
+    [fluxo],
+  );
+
   // Ctrl+0: volta o zoom para 100% (texto nítido) sem sair do lugar.
   useEffect(() => {
     const aoApertarTecla = (evento: KeyboardEvent) => {
@@ -468,12 +510,58 @@ function Canvas() {
         return;
       }
       evento.preventDefault();
-      const area = areaDoCanvas.current?.getBoundingClientRect();
-      void fluxo.setViewport(viewportEmCemPorCento(fluxo.getViewport(), area?.width ?? 0, area?.height ?? 0));
+      zoomEmCemPorCento();
     };
     window.addEventListener("keydown", aoApertarTecla);
     return () => window.removeEventListener("keydown", aoApertarTecla);
-  }, [fluxo]);
+  }, [zoomEmCemPorCento]);
+
+  // Paleta de comandos (Ctrl+K): o estado é dela; o canvas só entrega o que
+  // listar (lido na hora de abrir) e executa o escolhido. Tudo estável, para a
+  // paleta não re-renderizar com o canvas.
+  const controleDaPaleta = useRef<ControleDaPaleta>(null);
+  const abrirPaleta = useCallback(() => controleDaPaleta.current?.abrir(), []);
+  const lojaDasNotas = notas.valor.loja;
+  const lerFonteDaPaleta = useCallback((): FonteDaPaleta => {
+    const atuais = nosAtuais.current;
+    return {
+      podeOrganizar: atuais.filter((no) => !ehBixinho(no)).length > 1,
+      orquestradores: orquestradoresAtuais.current ?? [],
+      abertos: new Set(atuais.filter(ehTerminal).map((no) => no.data.orquestradorId)),
+      notas: atuais.filter(ehNota).map((no) => {
+        const nota = lojaDasNotas.ler(no.data.notaId);
+        return { notaId: no.data.notaId, titulo: nota?.titulo ?? "", texto: nota?.texto ?? "" };
+      }),
+      // Só as conversas carregadas: as dos terminais abertos, sem as arquivadas (/clear).
+      conversas: conversasAtuais.current,
+    };
+  }, [lojaDasNotas]);
+  const executarItemDaPaleta = useCallback(
+    (item: ItemDaPaleta) => {
+      switch (item.tipo) {
+        case "acao": {
+          const acoesDaPaleta: Readonly<Record<AcaoDaPaleta, () => void>> = {
+            "novo-orquestrador": novoOrquestrador,
+            "nova-nota": novaNota,
+            organizar,
+            "zoom-100": zoomEmCemPorCento,
+            "enquadrar-tudo": enquadrarTudo,
+          };
+          acoesDaPaleta[item.acao]();
+          return;
+        }
+        case "orquestrador":
+        case "pedido":
+          // O ponto único de abertura: aberto, só centraliza; fechado, abre se houver vaga (ADR-18).
+          abrirTerminal(item.orquestradorId);
+          return;
+        case "nota":
+          focar(idDoNoDaNota(item.notaId));
+          return;
+      }
+    },
+    [novoOrquestrador, novaNota, organizar, zoomEmCemPorCento, enquadrarTudo, abrirTerminal, focar],
+  );
 
   const acoes = useMemo<AcoesDoCanvas>(
     () => ({
@@ -495,10 +583,7 @@ function Canvas() {
     [porId, conversas, conexoes, sinais, bixinhosLimpos, servidorDosNos, acoes],
   );
 
-  const trabalhando = useMemo(
-    () => (orquestradores ?? []).filter((orquestrador) => orquestrador.situacao === "trabalhando").length,
-    [orquestradores],
-  );
+  const trabalhando = idsTrabalhando.length;
   const bixinhosAtivos = useMemo(
     () =>
       [...conversas.values()].reduce(
@@ -551,6 +636,7 @@ function Canvas() {
           aoCriarNota={novaNota}
           aoOrganizar={organizar}
           podeOrganizar={podeOrganizar}
+          aoBuscar={abrirPaleta}
         />
         {avisoDoLimite && (
           <ErroDoCanvas erro={AVISO_DO_LIMITE_DE_ORQUESTRADORES} aoFechar={fecharAvisoDoLimite} nivel="aviso" />
@@ -564,6 +650,7 @@ function Canvas() {
       novaNota,
       organizar,
       podeOrganizar,
+      abrirPaleta,
       avisoDoLimite,
       fecharAvisoDoLimite,
       erroDasNotas,
@@ -669,7 +756,7 @@ function Canvas() {
             >
               <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} />
               <Controls position="bottom-left" showInteractive={false} />
-              <MiniMap position="bottom-right" pannable zoomable nodeClassName={classeNoMinimapa} />
+              <MiniMap<NoDoCanvas> position="bottom-right" pannable zoomable nodeClassName={classeDoMinimapa} />
               <Panel position="top-left" className="paineis-do-topo">
                 {colunaDaEsquerda}
                 {colunaDoCentro}
@@ -678,6 +765,12 @@ function Canvas() {
               {painelDoChat}
             </ReactFlow>
             {quantidadeDeJanelas === 0 && <CanvasVazio aoCriar={novoOrquestrador} />}
+            {/* Fora do <ReactFlow>: não escala com o zoom e cobre só a área do canvas. */}
+            <PaletaDeComandos
+              controle={controleDaPaleta}
+              lerFonte={lerFonteDaPaleta}
+              aoExecutar={executarItemDaPaleta}
+            />
           </div>
         </div>
       </ProvedorDasNotas>

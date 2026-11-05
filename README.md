@@ -6,13 +6,16 @@ Central local para trabalhar com vários agentes do Claude ao mesmo tempo. É um
 
 Você cria **Orquestradores** — um por projeto, por exemplo — e conversa com cada um. A cada pedido, o Orquestrador **coordena**: o trivial (ler poucos arquivos, conferir um estado, um comando curto) ele resolve sozinho; o resto ele divide em subtarefas e entrega a **Subagentes** em paralelo, que leem, editam ou rodam comandos na pasta do projeto. Ele **nunca edita arquivos**: toda alteração vai para um Subagente. A tela mostra cada Subagente ao vivo (atividade, ferramentas, tokens, resultado), o que o próprio Orquestrador está fazendo e, no final, a síntese.
 
-- Vários Orquestradores rodam ao mesmo tempo, cada um na sua pasta: são terminais espalhados num canvas infinito, que você move, redimensiona e organiza. Cada Subagente aparece como um bixinho animado ligado ao terminal.
+- Vários Orquestradores rodam ao mesmo tempo, cada um na sua pasta: são terminais espalhados num canvas infinito, que você move, redimensiona e organiza. Cada Subagente aparece como um bixinho animado ligado ao terminal, com o ícone da ferramenta que está usando; ao terminar, um envelope leva o relatório pela linha e a borda do terminal pisca. No minimapa, o terminal de quem está trabalhando brilha.
 - A conversa tem memória: cada Orquestrador lembra dos pedidos anteriores. **`/clear`** no prompt (ou *Nova conversa* no *⚙*) começa uma conversa do zero; a anterior fica arquivada.
+- **Fila de pedidos:** com um pedido rodando, o Enter guarda o próximo numa fila (até 10 por Orquestrador). Ela anda sozinha quando o pedido termina bem e pausa quando ele falha, é cancelado ou deixa um plano para aprovar.
+- **Painel de alterações:** um botão na barra do terminal mostra quantos arquivos o Orquestrador deixou por commitar no worktree e abre a lista com o diff de cada um (só leitura).
+- **Paleta de comandos (Ctrl+K):** busca ações do canvas, Orquestradores, notas e pedidos, e leva até o escolhido.
 - Por Orquestrador você escolhe os modelos e o esforço de raciocínio de cada papel, a quantidade de Subagentes (fixa ou automática com máximo), as permissões, se commit e push são permitidos quando você pedir (desligado por padrão), se o Orquestrador pode fazer o trivial sozinho (ligado por padrão) e se ele propõe um plano antes de mudanças grandes (ligado por padrão).
 - **Plan Mode:** em vez de executar direto, o Orquestrador pode entregar primeiro um plano, feito só com leitura, que você aprova, ajusta ou descarta. Mesmo sem o Plan Mode, um pedido grande pode voltar como plano para aprovação.
 - Em pastas com git, cada pedido roda num **worktree** próprio do Orquestrador, e não na pasta original.
 - Dá para cancelar um pedido no meio, e o histórico fica salvo.
-- **Bloco de notas:** no mesmo canvas, ao lado dos terminais, você cria notas de texto para observações e coisas para fazer depois. O conteúdo fica salvo no servidor, com salvamento automático.
+- **Bloco de notas:** no mesmo canvas, ao lado dos terminais, você cria notas de texto para observações e coisas para fazer depois. O conteúdo fica salvo no servidor, com salvamento automático. No modo lista, os itens `[ ]` viram caixas de marcar, e uma linha (ou a nota inteira) arrastada até um terminal vira texto no prompt.
 - **Chat rápido:** uma caixa no centro, embaixo da tela, para perguntar algo ao Claude sem abrir um terminal: dúvidas rápidas, pesquisas na web ou perguntas sobre os projetos (ele só lê, nunca altera). Ele também pode sugerir abrir um Orquestrador num projeto, já com um pedido; a sugestão vira um cartão que só roda quando você clica.
 - Modelos disponíveis: **Fable**, Opus, Sonnet e Haiku, tanto nos Orquestradores quanto no chat.
 
@@ -186,6 +189,29 @@ Casos de teste da **economia de tokens** (ver ADR-21):
 - **Serviço (medidor e esforço falsos):** a medição recebe o `sessaoId`, a pasta onde o processo rodou (o worktree, ou a pasta do projeto sem git), o início e o fim do turno; o `consumo_do_turno_medido` vem depois do `turno_concluido`/`turno_falhou`/`turno_cancelado`, parcial nos dois últimos; sem transcrição, nenhum evento; erro do medidor só gera `console.warn`, sem evento, e o próximo pedido roda; aplicar predefinição desconhecida → `dados_invalidos`, orquestrador inexistente → `nao_encontrado`; o esforço herdado usa os modelos atuais e, no Orquestrador, o modelo do último consumo medido; erro na leitura do esforço → `null`.
 - **Rotas:** `GET /predefinicoes`; o resumo (lista e detalhe) traz `predefinicaoCorrespondente`; `POST /configuracao/predefinicao` → 200 com as mesmas chaves do `PATCH`, 400 `Predefinição desconhecida.` (nome errado, não texto ou ausente), 404 `Orquestrador não encontrado.`; `GET /orquestradores/:id/esforco-herdado` → 200 com os dois papéis (e 404); `GET /esforco-herdado` → 200 com os modelos e a pasta do formulário, 400 para modelo inválido, pasta ausente, fora da raiz ou inexistente.
 
+Casos de teste da **fila de pedidos** (ver ADR-23):
+- **`PedidoNaFila`:** guarda o texto aparado, o modo e o instante de entrada; recusa texto vazio, acima de 50.000 caracteres (aceita no limite) e modo desconhecido; é imutável (o instante devolvido é uma cópia); `paraDados`/`reconstituir` vão e voltam iguais.
+- **Agregado:** enfileira na ordem e recusa o 11º (`ErroDeFilaCheia`); retirar mantém a ordem dos outros; retirar ou buscar pedido que não está na fila → `nao_encontrado`; a fila exposta é uma cópia; sobrevive a gravar e reabrir, e um `orquestrador.json` anterior à fila reabre com ela vazia; `/clear` mantém a fila; `proximoDaFilaApos` só devolve o primeiro quando o turno é o último da conversa e terminou concluído sem plano pendente (cancelado, com falha, interrompido, com plano ou com outro turno depois → `null`).
+- **Serviço (motor falso):** enfileirar publica `pedido_enfileirado` e grava, e sem turno o pedido fica parado; turno concluído envia o primeiro, com o `pedido_retirado_da_fila` (`enviado`) antes do `turno_iniciado` dele; "enviar agora" sem turno usa o texto e o modo do pedido, e com turno em andamento é recusado e o pedido continua; remover publica `removido`; se o usuário inicia outro turno antes do envio automático, nada sai; erro no envio automático vira aviso no log; o turno interrompido no boot não tira nada da fila; o envio automático não atrapalha a medição do turno que terminou.
+- **Rotas:** `POST /fila` → 201 `{ pedidoId }` (sem modo, execução), 409 com a fila cheia, 404 sem orquestrador; `DELETE /fila/:pedidoId` → 204 e 404; `POST /fila/:pedidoId/enviar` → 202 `{ turnoId }`, 409 com turno em andamento (o pedido continua) e 404; a lista e o detalhe trazem `fila` (vazia sem pedidos).
+- **Tela (`web/`):**
+  - *`aplicarEvento`/`filaDePedidos`:* a fila inicial vem do resumo; `pedido_enfileirado` entra no fim sem mexer no turno nem no log; `pedido_retirado_da_fila` tira o pedido (removido ou enviado); os eventos tiram do resumo defasado o que saiu e acrescentam o que entrou depois, sem repetir; repetidos (reconexão, mesmo pedido de novo) e fora de ordem (sequência antiga, entrada depois da retirada) são ignorados; o `/clear` não esvazia a fila, que passa a vir do resumo, ainda filtrada pelas retiradas.
+  - *`PromptDoTerminal`:* com pedido rodando, o Enter chama `aoEnfileirar` e limpa o campo (recusado, o texto fica); com imagens, avisa que elas não entram na fila e não envia nada; sem pedido rodando, envia normalmente; a lista mostra número, primeira linha (texto inteiro no `title`) e o selo *plan mode*; o *✕* remove; *enviar agora* só com a fila pausada e só no primeiro; `/clear` durante um pedido não vai para a fila.
+  - *`NoTerminal`:* o Enter durante um pedido chama `api.enfileirarPedido` com o modo do Plan Mode; fila cheia mostra o erro do servidor no terminal e o texto fica; resumo + eventos na lista; *✕* chama `api.removerDaFila`; *enviar agora* chama `api.enviarDaFila` com o primeiro; depois de um `/clear` a fila continua.
+
+Casos de teste do **painel de alterações** (ver ADR-24):
+- **`LeitorDeAlteracoesGit` (repositório git de verdade):** lista modificado (com linhas a mais e a menos), adicionado, removido, renomeado (com o caminho anterior) e não rastreado (com linhas contadas, ignorando o `.gitignore`); binário sem contagem nem diff; nomes com acento e espaço; ordem por caminho; diff do modificado, do renomeado, do removido e de arquivo novo; diff grande cortado no fim de uma linha (`truncado`); limite de arquivos com os rastreados primeiro; conta os commits da branch que não estão no HEAD da pasta original (zero quando não dá); diz se a pasta é repositório com HEAD; lança quando o git falha.
+- **`ServicoDeAlteracoes`:** sem worktree → `sem_git` ou `sem_worktree` (sem listar arquivos); com worktree → arquivos e commits da branch, `emUso` só com turno rodando; não grava nada no agregado; falha do git → `ErroDeLeituraDasAlteracoes`; o diff só sai para um arquivo que está na lista atual; orquestrador inexistente → `nao_encontrado`.
+- **Rotas:** `GET /alteracoes` → 200 com tudo, 404, 500 com mensagem pronta (o motivo vai para o log); `GET /alteracoes/diff?arquivo=` → 200 (inclusive com acento e espaço), 400 sem o arquivo, 404 para arquivo fora da lista ou orquestrador inexistente, 500 quando o git falha.
+- **Tela:** o botão mostra a contagem, relê a lista ao abrir e quando o pedido termina (não a cada render), fica esmaecido sem alterações ou sem git, continua abrível só com commits na branch e mostra a falha no `title`; o painel abre como modal fora do canvas, lista situação e linhas, pinta o diff (+, −, @@), avisa diff cortado, binário, pasta sem git, pedido em andamento e commits da branch; Esc, clique fora e *✕* fecham sem o evento chegar ao terminal; o arquivo escolhido sai da seleção quando some da lista.
+
+Casos de teste do **canvas: paleta, notas em lista, bixinhos e entrega**:
+- **Paleta (`PaletaDeComandos`, `paletaDeComandos`):** fechada não mostra nada; Ctrl+K abre com o foco na busca, mesmo dentro de um campo de texto, e fecha se já aberta; Ctrl com outra tecla ou com Shift não abre; ↑/↓ navegam com volta; Enter executa e fecha; a busca ignora acentos e maiúsculas e exige todas as palavras; sem resultado, avisa e o Enter não faz nada; Esc e clique fora fecham e devolvem o foco; o botão *Buscar* abre.
+- **Notas (`checklistDaNota`, `NoNota`):** alterna entre editar e lista; `[ ]`/`[x]` (com ou sem `- `) viram caixas de marcar, e marcar reescreve só aquela linha e salva na hora; erro ao salvar o item aparece no rodapé; as alças arrastam a nota inteira ou uma linha (sem o marcador) como pedido, sem mover a nota; nota em branco não arrasta.
+- **Nota arrastada para o terminal (`NoTerminal`):** durante o arraste aparece *solte para escrever no prompt…*; ao soltar, o texto entra no prompt (numa linha nova, se já havia texto), o campo ganha o foco e nada é enviado; arquivos continuam com o aviso de anexar imagens.
+- **Bixinhos e entrega:** o ícone da ferramenta (`iconeDaFerramenta`: ler, editar, comando, web; desconhecida sem ícone) só aparece executando; executando → concluído faz o envelope percorrer a linha uma vez (não ao montar já concluído, ao falhar, com reduzir movimento ou desconectado); a borda do terminal ganha `janela-terminal-entrega` depois de `DURACAO_DA_ENTREGA_MS` e a perde depois de `DURACAO_DO_PISCAR_MS`, sem re-renderizar a transcrição; não pisca ao abrir com Subagente já concluído, com o histórico antigo reenviado, com falha, desconectado ou com reduzir movimento; fechar o terminal no meio cancela os relógios.
+- **Minimapa:** só o terminal do Orquestrador trabalhando ganha o brilho.
+
 ## Tecnologias
 
 - **Aplicativo desktop:** **Electron 33** (processo principal em `electron/`, servidor em `utilityProcess`) e **electron-builder** (instalador NSIS para Windows x64). Licença via Lemon Squeezy, só no instalado.
@@ -338,7 +364,7 @@ web/src/
 ```
 dados/
   orquestradores/<id>/
-    orquestrador.json          estado atual do agregado (conversa atual)
+    orquestrador.json          estado atual do agregado (conversa atual e fila de pedidos)
     eventos.jsonl              eventos da conversa atual, um por linha
     historico/                 conversas anteriores, arquivadas pelo /clear (só consulta; não é carregado)
       conversa-<N>/            <N> = sequência do evento conversa_limpa que a arquivou
@@ -373,7 +399,9 @@ dados/
 
 O primeiro turno usa `--session-id`; os seguintes, `--resume`, o que mantém a memória da conversa.
 
-**Conversa nova (`/clear`, ver ADR-16):** `POST /conversa/limpar` (recusado durante um pedido) arquiva o histórico em `historico/conversa-<N>/`, esvazia os turnos, descarta um plano pendente e gera um `sessaoId` novo. O próximo turno volta a usar `--session-id`, numa sessão do Claude Code sem memória da anterior. Nome, pasta, configuração e worktree continuam os mesmos.
+**Conversa nova (`/clear`, ver ADR-16):** `POST /conversa/limpar` (recusado durante um pedido) arquiva o histórico em `historico/conversa-<N>/`, esvazia os turnos, descarta um plano pendente e gera um `sessaoId` novo. O próximo turno volta a usar `--session-id`, numa sessão do Claude Code sem memória da anterior. Nome, pasta, configuração, worktree e fila de pedidos continuam os mesmos.
+
+**Fila de pedidos (ver ADR-23):** o agregado guarda até 10 `PedidoNaFila` (texto e modo; imagens não entram), gravados no `orquestrador.json`. `POST /fila` enfileira com ou sem turno em andamento (`pedido_enfileirado`). Quando um turno termina, o serviço pergunta ao agregado o próximo (`proximoDaFilaApos`): só sai algo se esse turno ainda é o último da conversa e terminou **concluído sem plano pendente**. Aí o pedido sai (`pedido_retirado_da_fila`, motivo `enviado`) e vira um turno, como uma mensagem. Cancelado, com falha, interrompido ou com plano pendente, a fila **pausa** (sem turno rodando, por exemplo depois de um `/clear`, ela também espera): volta a andar com *enviar agora* (`POST /fila/:pedidoId/enviar`) ou quando um pedido enviado à mão terminar bem. A tela mostra a fila do resumo do servidor corrigida pelos eventos (`filaDePedidos`).
 
 ```mermaid
 flowchart TD
@@ -401,6 +429,8 @@ flowchart TD
 - **Branches criadas pelo agente** (ex.: `feature/x` via `git checkout -b` dentro do worktree) nunca são apagadas pelo app: os worktrees compartilham as branches com o repositório, então elas aparecem no repositório do projeto.
 - **Ao subir o servidor:** os worktrees que sobraram da execução anterior são limpos (análogo aos processos órfãos do Claude), com a mesma regra do fim do turno: pelo git, só os sem alterações são removidos; os com trabalho são preservados. Em `<PASTA_DADOS>/worktrees/`, só são apagadas as pastas órfãs sem `.git` (ex.: `worktree add` pela metade). Uma pasta com `.git` cujo repositório de origem sumiu ou foi movido também é mantida, com um aviso no log (resolva com `git worktree repair` no repositório ou apague a pasta à mão).
 - O estado fica no agregado (`worktree: { branch, caminho, ativo }`) e aparece na tela como uma etiqueta com a branch.
+
+**Painel de alterações** (`ServicoDeAlteracoes`, atrás da porta `LeitorDeAlteracoes`, ver ADR-24): só lê o worktree, nunca altera. `GET /alteracoes` devolve o objeto de valor `AlteracoesDoWorktree`: `sem_git` (a pasta não é repositório com HEAD), `sem_worktree` (repositório, mas o último pedido não deixou alterações) ou `com_worktree`, com a branch, se há um pedido rodando nele (`emUso`), quantos commits da branch ainda não estão no HEAD da pasta original e os arquivos não commitados (alterações em relação ao HEAD do worktree mais os não rastreados, até 500). `GET /alteracoes/diff` só monta o diff de um caminho que está, exatamente igual, na lista atual (nunca monta caminho a partir do que veio na URL), cortado em ~200 KB. A implementação (`LeitorDeAlteracoesGit`) roda o git com tempo limite de 15 s; qualquer falha vira 500 com mensagem pronta e o motivo no log.
 
 ### Decisões de arquitetura (ADRs)
 
@@ -710,6 +740,41 @@ flowchart TD
   - o índice é **relativo**: serve para comparar pedidos e configurações, não é preço em dinheiro nem porcentagem da cota da assinatura;
   - o Modo econômico pode piorar o resultado em tarefas grandes (um só Subagente, menos raciocínio, sem plano automático). Para elas, volte a configuração ou use o Plan Mode (Shift+Tab).
 
+**ADR-23 — Fila de pedidos no agregado, envio automático só em turno concluído.**
+- *Contexto:*
+  - durante um pedido, o prompt deixava escrever o próximo, mas o Enter não fazia nada: era preciso esperar o fim para enviar. Com pedidos longos, o usuário ficava vigiando o terminal;
+  - um turno por vez é regra do agregado (o `--resume` não admite dois processos na mesma sessão), e o servidor recusa (409) uma mensagem com turno em andamento;
+  - mandar o próximo pedido depois de um turno que falhou, foi cancelado ou deixou um plano para aprovar pode executar algo que já não faz sentido.
+- *Decisão:*
+  - **a fila é do agregado `Orquestrador`**, não da tela nem da conversa: lista de até `LIMITE_DA_FILA` (10) objetos de valor `PedidoNaFila` (id, texto aparado de até 50.000 caracteres, `ModoDoTurno`, `enfileiradoEm`), gravada no `orquestrador.json`. O 11º lança `ErroDeFilaCheia` (409). Imagens não entram (a rota recusa com 400). O `/clear` não mexe na fila;
+  - eventos `pedido_enfileirado { pedido }` e `pedido_retirado_da_fila { pedidoId, motivo: "removido" | "enviado" }`, sem `turnoId`, no `eventos.jsonl` da conversa atual;
+  - **envio automático só depois de turno concluído sem plano pendente** (`proximoDaFilaApos`), e só se ele ainda for o último turno. Cancelado, com falha, interrompido (boot) ou com plano pendente → a fila pausa; o usuário segue com *enviar agora*, que passa pelo mesmo `iniciarTurno` de uma mensagem (409 com turno em andamento, e o pedido continua na fila);
+  - o pedido só sai da fila depois que o agregado aceitou o turno, e o `pedido_retirado_da_fila` (`enviado`) é publicado antes do `turno_iniciado`;
+  - **na tela**, a fila mostrada é `filaDePedidos(conversa, resumo.fila)`: a `fila` do resumo do servidor (consultado a cada 4 s) menos os pedidos que os eventos já tiraram, mais os que os eventos puseram depois da consulta, sem repetir. O estado inicial vem do resumo porque, depois de um `/clear`, o histórico recomeça só com o `conversa_limpa` e os pedidos de antes não estão mais nos eventos. Por isso o `conversa_limpa` esvazia os enfileirados vindos de eventos (que poderiam ter perdido uma retirada numa reconexão) e mantém os ids retirados (que filtram um resumo defasado). O estado mora em `EstadoDaConversa` (`pedidosEnfileirados`, `pedidosRetirados`), com a mesma regra de sequência dos outros eventos, e a junção é feita na janela do terminal, reaproveitando a lista enquanto o conteúdo não muda (o prompt é `memo`, ADR-11);
+  - com um pedido rodando, o Enter do prompt **enfileira** (com o modo, inclusive o Plan Mode); com imagens anexadas, avisa e não envia. A fila **pausada** é: sem pedido rodando e com pedidos à espera.
+- *Consequências:*
+  - o próximo pedido sai sem o usuário vigiar, mas sem conferir o resultado do anterior: um turno "concluído" com resultado ruim ainda dispara o seguinte;
+  - entre o fim de um turno concluído e o início do próximo da fila, o servidor ainda fecha o turno (gravação, worktree), e a tela pode mostrar "fila pausada" com *enviar agora* por um instante. Clicar nesse intervalo é seguro: o envio automático vê que já há outro turno e não manda nada;
+  - pedidos na fila não levam imagens; quem precisa de imagem espera o pedido acabar;
+  - a fila é por Orquestrador e sobrevive a reiniciar o servidor; o turno interrompido no boot pausa a fila, e os pedidos esperam o usuário;
+  - a lista da tela junta dois caminhos (resumo e eventos). Os eventos corrigem na hora o que mudou depois da última consulta, mas um pedido tirado da fila logo antes de um `/clear` pode continuar aparecendo, num terminal aberto em seguida, até a próxima consulta da lista (até 4 s).
+
+**ADR-24 — Painel de alterações só leitura: diff do que não foi commitado no worktree.**
+- *Contexto:*
+  - em pastas com git, os agentes trabalham num worktree próprio do Orquestrador (`<PASTA_DADOS>/worktrees/…`), longe da pasta do projeto. Para revisar o que eles fizeram, o usuário precisava abrir a pasta do worktree à mão e rodar `git status`/`git diff`;
+  - editar, commitar ou descartar pela tela abriria conflito com os agentes (que podem estar rodando no worktree) e com as regras de commit (ADR-10).
+- *Decisão:*
+  - **só leitura**: nenhuma rota altera o worktree. Contexto `orquestracao`, com o objeto de valor `AlteracoesDoWorktree` (`sem_git`, `sem_worktree`, `com_worktree`; branch, caminho, `emUso`, `commitsNaBranch` e a lista de `ArquivoAlterado` com situação, caminho anterior, linhas a mais e a menos, binário), o `DiffDoArquivo` e a porta `LeitorDeAlteracoes`, implementada com o git (`LeitorDeAlteracoesGit`);
+  - a lista é o que **não foi commitado** no worktree: alterações em relação ao HEAD dele mais os não rastreados (respeitando o `.gitignore`), até 500 arquivos. Os commits que a branch tem e a pasta original não, só contados (aviso no painel), não listados;
+  - o diff só é montado para um caminho que está, exatamente igual, na lista atual: o caminho da URL nunca vira caminho no disco. Cortado em ~200 KB no fim de uma linha (`truncado`); binário sem diff; git com tempo limite de 15 s;
+  - rotas `GET /orquestradores/:id/alteracoes` e `GET /orquestradores/:id/alteracoes/diff?arquivo=`, num controller próprio;
+  - na tela, o botão de alterações na barra do terminal (ao lado do *limpar*) lê a lista ao montar, ao abrir e quando um pedido termina — nunca a cada evento do Claude (ADR-11) — e mostra a contagem. O painel é um modal no `document.body`, fora do viewport do React Flow (não escala com o zoom).
+- *Consequências:*
+  - revisar fica a um clique, mas levar as alterações para o projeto continua manual (ou pelo Orquestrador, com commit e push ligados, ADR-10);
+  - com um pedido rodando, a lista é uma foto do instante (o painel avisa) e só é relida ao abrir, ao clicar *atualizar* ou no fim do pedido;
+  - sem worktree (pasta sem git), os agentes alteram a pasta direto, e o painel só explica isso;
+  - commits já feitos na branch do worktree não aparecem como diff, só como contagem.
+
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
 - `modelUsage` acumula a sessão, então o consumo do turno vem de `model_usage_since_last_result`;
@@ -726,7 +791,7 @@ Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com os status:
 - **400:** dados inválidos;
 - **404:** não encontrado;
-- **409:** já existe pedido em andamento (inclusive ao excluir ou limpar a conversa), não há pedido para cancelar, ou não há plano pendente para aprovar/descartar (motivo `sem_plano_pendente`);
+- **409:** já existe pedido em andamento (inclusive ao excluir, limpar a conversa ou mandar um pedido da fila), não há pedido para cancelar, não há plano pendente para aprovar/descartar (motivo `sem_plano_pendente`), ou a fila de pedidos está cheia;
 - **500:** erro inesperado.
 
 | Método | Rota | Entrada | Resposta |
@@ -742,6 +807,11 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | GET | `/orquestradores/:id/esforco-herdado` | — | 200 `{ orquestrador: EsforcoHerdado \| null, subagentes: EsforcoHerdado \| null }` para os modelos da configuração atual (o do Orquestrador usa o modelo real do último consumo medido, se houver). `null` = nada definido na máquina (ou falha ao ler). 404 `Orquestrador não encontrado.` |
 | GET | `/esforco-herdado` | `?modeloDoOrquestrador=opus&modeloDosSubagentes=sonnet&pasta=<pasta>` (pasta relativa à raiz ou absoluta dentro dela) | 200, mesmo formato acima, para o formulário de criação. 400 `Modelo do orquestrador inválido.` / `Modelo dos subagentes inválido.` / `Escolha a pasta de trabalho.` / pasta fora da raiz / `A pasta "<caminho>" não existe.` |
 | POST | `/orquestradores/:id/mensagens` | `{ texto, imagens?: [{ nome, tipoDeMidia: image/png\|jpeg\|gif\|webp, base64 }], modo?: "execucao" \| "planejamento" }` (até 5 imagens de 5 MB; `modo` padrão `"execucao"`) | 202 `{ turnoId }` (400 se `modo` for inválido) |
+| POST | `/orquestradores/:id/fila` | `{ texto, modo?: "execucao" \| "planejamento" }` (`modo` padrão `"execucao"`; `imagens`, se vier, tem de ser vazia) | 201 `{ pedidoId }`: o pedido entra no fim da fila, com ou sem turno em andamento, e sai sozinho quando um turno terminar concluído sem plano pendente (ver ADR-23). 400 `Escreva o pedido.` / `O pedido deve ter até 50000 caracteres.` / `Modo do pedido inválido.` / `A fila aceita só texto: envie as imagens quando o orquestrador estiver livre.`; 404 `Orquestrador não encontrado.`; 409 `A fila de "<nome>" está cheia (máximo 10 pedidos).` |
+| DELETE | `/orquestradores/:id/fila/:pedidoId` | — | 204 (registra `pedido_retirado_da_fila` com `removido`). 404 `Pedido não encontrado na fila.` / `Orquestrador não encontrado.` |
+| POST | `/orquestradores/:id/fila/:pedidoId/enviar` | — | 202 `{ turnoId }`: "enviar agora", o pedido sai da fila (`enviado`) e vira um turno com o texto e o modo dele. 409 `"<nome>" ainda está trabalhando no pedido anterior. Aguarde terminar ou cancele.` (o pedido continua na fila); 404 `Pedido não encontrado na fila.` / `Orquestrador não encontrado.` |
+| GET | `/orquestradores/:id/alteracoes` | — | 200 `AlteracoesDoWorktree` (abaixo): o que o Orquestrador deixou por commitar no worktree. Só leitura (ver ADR-24). 404 `Orquestrador não encontrado.`; 500 `Não foi possível ler as alterações do worktree.` (o motivo vai para o log) |
+| GET | `/orquestradores/:id/alteracoes/diff` | `?arquivo=<caminho>` (um `caminho` da lista acima, exatamente igual) | 200 `{ caminho, diff, truncado, binario }`: diff unificado, cortado em ~200 KB no fim de uma linha (`truncado: true`); binário vem com `diff: ""`. 400 `Informe o arquivo.`; 404 `Arquivo não está entre as alterações.` / `Orquestrador não encontrado.`; 500 `Não foi possível ler as alterações do worktree.` |
 | POST | `/orquestradores/:id/plano/aprovar` | `{ observacoes?: string }` | 202 `{ turnoId }` do novo turno de execução (409 `sem_plano_pendente`) |
 | POST | `/orquestradores/:id/plano/descartar` | — | 204 (409 `sem_plano_pendente`) |
 | POST | `/orquestradores/:id/conversa/limpar` | — (sem corpo) | 200 + resumo, com `totalDeTurnos: 0` e `ultimoTurno: null`: a conversa foi arquivada em `historico/conversa-<N>/` e o próximo pedido abre uma sessão nova (ver ADR-16). Sem conversa para limpar, 200 sem efeito. 409 durante um pedido (`Cancele o pedido em andamento de "<nome>" antes de limpar a conversa.`); 404 `Orquestrador não encontrado.` |
@@ -783,10 +853,13 @@ Valores aceitos:
                     "permitirTrabalhoDireto": true, "proporPlanoEmPedidosGrandes": true },
   "predefinicaoCorrespondente": null,
   "worktree": { "branch": "orquestrador/…", "caminho": "…\\dados\\worktrees\\1a2b3c4d", "ativo": false },
+  "fila": [{ "id": "…", "texto": "agora rode os testes", "modo": "execucao", "enfileiradoEm": "2026-11-05T12:00:00.000Z" }],
   "criadoEm": "…", "totalDeTurnos": 2,
   "ultimoTurno": { "texto": "…", "situacao": "concluido", "iniciadoEm": "…" }
 }
 ```
+
+`fila` são os pedidos à espera, na ordem em que vão sair (até 10; vazia sem pedidos), no instante da consulta. O `/clear` não a esvazia. A tela junta com os eventos `pedido_enfileirado` e `pedido_retirado_da_fila` (ver ADR-23).
 
 O GET de `/orquestradores/:id` traz a mesma `configuracao`. O servidor sempre devolve todos os campos da configuração, inclusive `permitirCommitEPush`, `esforcoDoOrquestrador`, `esforcoDosSubagentes`, `permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes`, já com o padrão aplicado nos orquestradores salvos antes de cada opção. `totalDeTurnos` conta só a conversa atual (zera no `/clear`).
 
@@ -795,6 +868,19 @@ O GET de `/orquestradores/:id` traz a mesma `configuracao`. O servidor sempre de
 `EsforcoHerdado` (ver ADR-21): `{ "nivel": "extra_alto", "origem": "~/.claude/settings.json", "modelo": "claude-opus-5-5", "deveAvisar": true }`. `nivel` vai de `baixo` a `maximo`; `origem` diz de onde veio (variável de ambiente ou arquivo de configuração); `modelo` é o ID considerado (ou `null`); `deveAvisar` é `true` em `extra_alto` e `maximo`. Vale só para papéis com esforço *Padrão*: com outro nível escolhido, a tela ignora.
 
 `worktree` é `null` quando não há worktree (pasta sem git ou sem commit, ou o último turno terminou sem alterações); `ativo` é `true` enquanto um turno roda nele.
+
+`AlteracoesDoWorktree` (ver ADR-24):
+
+```json
+{ "situacao": "com_worktree", "branch": "orquestrador/…", "caminho": "…\\dados\\worktrees\\1a2b3c4d",
+  "emUso": false, "commitsNaBranch": 0,
+  "arquivos": [{ "caminho": "src/app.ts", "caminhoAnterior": null, "situacao": "modificado",
+                 "adicoes": 12, "remocoes": 3, "binario": false }] }
+```
+
+- `situacao`: `sem_git` (a pasta não é repositório git com HEAD; os agentes alteram a pasta direto), `sem_worktree` (repositório, mas o último pedido não deixou alterações) ou `com_worktree`. Nos dois primeiros, `branch` e `caminho` são `null` e `arquivos` vem vazio.
+- `emUso`: um pedido está rodando no worktree agora, e a lista pode mudar. `commitsNaBranch`: commits da branch do worktree que ainda não estão no HEAD da pasta original (só contados, não listados).
+- `arquivos[]` (até 500, por caminho, com `/`): o que não foi commitado, em relação ao HEAD do worktree, mais os não rastreados (sem o que está no `.gitignore`). `situacao` é `adicionado`, `modificado`, `removido`, `renomeado` (com `caminhoAnterior`) ou `nao_rastreado`; `adicoes`/`remocoes` são `null` quando não dá para contar (binário ou arquivo grande).
 
 `DadosDaNota` (ver ADR-13; posição, tamanho e "minimizada" não vêm daqui, ficam no layout do navegador):
 
@@ -813,7 +899,7 @@ Erros 400 das notas:
 
 | `tipo` | Campos | Quando |
 |---|---|---|
-| `turno_iniciado` | `texto`, `configuracao` (cópia da vigente no pedido, com `permitirCommitEPush`, `esforcoDoOrquestrador`, `esforcoDosSubagentes`, `permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes`; a tela lê os eventos gravados antes de cada opção com o padrão dela: `false`, `"padrao"`, `true`), `anexos`, `modo` (`execucao` · `planejamento`) | o usuário enviou uma mensagem, ou aprovou um plano (turno de execução) |
+| `turno_iniciado` | `texto`, `configuracao` (cópia da vigente no pedido, com `permitirCommitEPush`, `esforcoDoOrquestrador`, `esforcoDosSubagentes`, `permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes`; a tela lê os eventos gravados antes de cada opção com o padrão dela: `false`, `"padrao"`, `true`), `anexos`, `modo` (`execucao` · `planejamento`) | o usuário enviou uma mensagem, aprovou um plano (turno de execução) ou um pedido saiu da fila |
 | `sessao_iniciada` | — | o Claude Code abriu (ou retomou) a sessão |
 | `texto_do_orquestrador` | `texto` | o Orquestrador escreveu algo |
 | `ferramenta_do_orquestrador` | `ferramenta`, `detalhe` | o Orquestrador usou uma ferramenta ele mesmo (o trivial, ver ADR-14); a tela mostra como atividade, ex.: "orquestrador lendo package.json" |
@@ -830,7 +916,9 @@ Erros 400 das notas:
 | `plano_descartado` | — | o usuário descartou o plano pendente |
 | `consumo_do_turno_medido` | `consumo: { principal, subagentes, subagentesMedidos, parcial, indiceDeCusto, modeloDoPrincipal }`; `principal` e `subagentes` são `{ entrada, criacaoDeCache, leituraDeCache, saida }` | depois do fim de um turno (concluído, com falha ou cancelado), quando há transcrição para medir; sempre depois do evento de fim. `parcial: true` em turno que não terminou com sucesso (ver ADR-21) |
 | `configuracao_alterada` | `configuracao` (sem `turnoId`; inclui os dois esforços e as opções de trabalho direto e de plano), `predefinicao?` (`"economico"` quando veio de uma predefinição) | a configuração mudou |
-| `conversa_limpa` | `turnosAnteriores`, `planoDescartado`, `worktreeComAlteracoes` (sem `turnoId`) | a conversa foi limpa (`/clear` ou *Nova conversa*). É o primeiro evento da conversa nova, com a sequência seguinte à da anterior; a tela esvazia os pedidos e mostra o separador "— conversa nova iniciada às HH:MM —" |
+| `conversa_limpa` | `turnosAnteriores`, `planoDescartado`, `worktreeComAlteracoes` (sem `turnoId`) | a conversa foi limpa (`/clear` ou *Nova conversa*). É o primeiro evento da conversa nova, com a sequência seguinte à da anterior; a tela esvazia os pedidos e mostra o separador "— conversa nova iniciada às HH:MM —". A fila de pedidos continua |
+| `pedido_enfileirado` | `pedido: { id, texto, modo, enfileiradoEm }` (sem `turnoId`) | um pedido entrou no fim da fila (`POST /fila`) |
+| `pedido_retirado_da_fila` | `pedidoId`, `motivo` (`removido` · `enviado`) (sem `turnoId`) | o pedido saiu da fila: o usuário o tirou, ou ele virou um turno (envio automático ou *enviar agora*) — nesse caso vem logo antes do `turno_iniciado` dele |
 
 `MensagemDoChat`:
 
@@ -874,7 +962,14 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 - a roda do mouse rola; **Ctrl + roda** dá zoom;
 - **Ctrl+0** volta o zoom para 100% sem sair do lugar — é onde o texto dos terminais fica mais nítido (ao abrir e ao *Organizar*, o canvas nunca passa de 100%, mas pode ficar abaixo para caber tudo); o zoom e a posição ficam salvos ao fechar o app;
 - os botões no canto inferior esquerdo aproximam, afastam e enquadram tudo;
-- o minimapa no canto inferior direito mostra onde cada coisa está (as notas têm cor própria);
+- **Ctrl+K** (ou o botão *Buscar* na barra do canvas) abre a **paleta de comandos**, de qualquer lugar, inclusive com o cursor num prompt. Digite parte do nome (acentos e maiúsculas não importam; todas as palavras precisam aparecer) para achar:
+  - **ações:** *Novo orquestrador*, *Nova nota*, *Organizar* (com mais de uma janela), *Zoom 100%* e *Enquadrar tudo*;
+  - **orquestradores:** todos, abertos ou não, com a pasta e se estão trabalhando; escolher abre o terminal (respeitando o limite de 4) ou leva até ele;
+  - **notas:** pelo título ou pelo texto; escolher centraliza a nota;
+  - **pedidos:** o texto dos pedidos das conversas dos terminais abertos, do mais recente ao mais antigo; escolher leva até o terminal.
+
+  **↑/↓** escolhem, **Enter** executa, **Esc** ou um clique fora fecham (o cursor volta para onde estava), e **Ctrl+K** de novo também fecha;
+- o minimapa no canto inferior direito mostra onde cada coisa está (as notas têm cor própria). O terminal de um Orquestrador trabalhando **brilha** no minimapa (contorno laranja que pulsa), para achar quem está ocupado num canvas grande; o pulso para com o reduzir movimento do sistema, durante o arraste e com o servidor desconectado;
 - enquanto você arrasta um terminal/bixinho ou move o canvas, as animações dos nós pausam e a bolinha das linhas some (para o movimento ficar leve); tudo volta ao soltar.
 
 1. **Criar um Orquestrador:** clique em *+ Novo orquestrador*. Abre um terminal de configuração: escolha a **pasta** do projeto (o nome é sugerido a partir dela). Depois defina:
@@ -905,11 +1000,23 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
      - Imagens já anexadas e o Plan Mode continuam no prompt depois do `/clear`.
      - Um plano pendente é descartado junto. Alterações que estiverem no worktree continuam lá.
      - O mesmo pode ser feito pelo botão *Nova conversa* no *⚙* (item 8).
+     - A fila de pedidos (abaixo) continua depois do `/clear`.
+   - **Fila de pedidos:** com um pedido rodando, escreva o próximo e aperte **Enter**: ele vai para a **fila** em vez de esperar (o prompt avisa: *enter põe na fila*). O modo vai junto: com o Plan Mode ligado, o pedido entra como planejamento.
+     - A fila aparece logo acima do prompt, compacta: o número, a primeira linha do pedido (passe o mouse para ver o texto inteiro), o selo *plan mode* quando for o caso e o **✕** para tirar da fila. O cabeçalho mostra quantos há (máximo 10).
+     - **Anda sozinha:** quando o pedido atual termina bem, o primeiro da fila é enviado na hora, como se você o tivesse mandado.
+     - **Pausa** quando o pedido atual é cancelado, falha, é interrompido (servidor reiniciado) ou termina com um plano para aprovar: nada sai sozinho, para não executar algo que já não faz sentido. Sem pedido rodando e com itens, aparece **fila pausada** e o botão **enviar agora** no primeiro item. Se preferir, mande outro pedido à mão: quando ele terminar bem, a fila volta a andar.
+     - **Imagens não entram na fila:** com imagens anexadas, o Enter durante um pedido só avisa e nada é enviado. Espere o pedido terminar, ou remova as imagens para pôr só o texto na fila.
+     - Com a fila cheia (10), o terminal mostra o erro do servidor e o texto fica no prompt.
+     - A fila é do Orquestrador: fica salva no servidor, sobrevive a reiniciar o app e ao `/clear`.
    - **Imagens:** cole com **Ctrl+V** no prompt, arraste para o terminal ou use o **📎**. São até 5 imagens (PNG, JPEG, GIF ou WebP, até 5 MB cada), com miniaturas antes de enviar e no histórico; clique numa miniatura para abrir em tamanho real. O Orquestrador vê a imagem, e os subagentes podem abri-la pelo caminho em disco, que ele repassa.
    - **Está pensando ou travou?** Enquanto o pedido roda, o terminal mostra a fase e o tempo total. Abaixo, uma linha com **♥**, que pulsa a cada notícia do Claude: *pensando · ~N tokens de raciocínio · último sinal há Xs*. Se o silêncio passar do normal (90 s pensando, 5 min com subagentes executando, já que um build ou teste longo pode demorar), ela vira um **⚠ sem notícias há…** e sugere cancelar (Esc) e reenviar.
    - **Onde as alterações ficam (pastas com git):** se a pasta do projeto for um repositório git com pelo menos um commit, o pedido roda num **worktree** do Orquestrador, e não na pasta original. Ele parte do último commit (HEAD) da pasta, então alterações ainda não commitadas dela não entram. A barra do terminal e a lista *orquestradores* mostram a branch (`orquestrador/…`), com o caminho no tooltip; a etiqueta fica esmaecida entre pedidos.
      - Se o pedido não alterou nada, o worktree é apagado no fim. A branch `orquestrador/…` também, a menos que tenha commits que não existam em nenhuma outra branch: aí ela é mantida e o servidor avisa no log do console (mescle ou apague à mão quando não precisar mais). Branches criadas pelo agente (ex.: `feature/x`) nunca são apagadas pelo app e aparecem no repositório do projeto.
      - Se alterou, o worktree fica em `dados/worktrees/…` e o próximo pedido continua nele. Com a opção de commit desligada (padrão), o app não faz commit: é você quem revisa e leva as alterações para o projeto. Ligada, você pode pedir o commit (item 8); as branches e commits criados no worktree já aparecem no repositório do projeto. Reiniciar o servidor não apaga um worktree com alterações; ele só é removido quando fica sem alterações (no fim de um pedido ou ao subir o servidor).
+     - **Painel de alterações:** o botão de alterações (ícone de arquivo com ±) na barra do terminal, ao lado do *limpar*, mostra quantos arquivos o Orquestrador deixou por commitar no worktree. Clique para abrir o painel: à esquerda, os arquivos (A adicionado, M modificado, D removido, R renomeado, ? não rastreado) com as linhas a mais e a menos; clique num para ver o **diff** à direita (verde o que entrou, vermelho o que saiu). É **só leitura**: nada é alterado, commitado ou descartado por ali.
+       - O botão fica esmaecido quando não há o que mostrar (sem alterações, ou pasta sem git); passe o mouse para ver o motivo. A lista é relida ao abrir, ao clicar *atualizar* e quando um pedido termina.
+       - Avisos do painel: *Um pedido está rodando: a lista pode mudar.*; commits que a branch já tem e a pasta do projeto não (só contados, não listados); *O diff é grande e foi cortado aqui…* (o resto está no arquivo, dentro do worktree); arquivo binário sem diff; *Esta pasta não é um repositório git…* (os agentes alteram a pasta direto).
+       - **Esc**, clique fora ou o **✕** fecham.
 4. **Plan Mode (planejar antes de executar):** no prompt, aperte **Shift+Tab** (ou clique no selo abaixo da caixa) para ligar ou desligar. Ligado, o terminal ganha borda azul e o selo *plan mode ligado*.
    - O pedido roda só com ferramentas de leitura, no Orquestrador e nos Subagentes, qualquer que seja a permissão configurada: nada é editado nem executado.
    - No fim, o plano aparece num cartão: objetivo, subtarefas por Subagente (com os arquivos), ordem, riscos e perguntas em aberto.
@@ -922,8 +1029,8 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
    - A diferença: no Plan Mode as ferramentas ficam travadas em leitura; no plano automático, o Orquestrador tem as permissões configuradas e "não alterar antes do plano" depende dele seguir a instrução. **Quando precisar da garantia, use o Shift+Tab.**
    - Ao escrever um pedido longo em execução (mais de 400 caracteres ou uma lista com 3 ou mais itens), aparece a dica *pedido grande? shift+tab para planejar antes*. É só um lembrete: Enter envia normalmente.
 5. **Os bixinhos:** cada Subagente nasce abaixo do terminal, com nome (ex.: *Pixel #03eb*), aparência própria e uma linha até o Orquestrador.
-   - **Trabalhando:** pula, pisca e mostra num balão a atividade atual (ex.: `Reading src\Periodo.ts`). A linha fica laranja e tracejada, e uma **bolinha vai e vem** por ela entre o terminal e o bixinho: é a troca de informação entre o Orquestrador e o Subagente. A bolinha some quando o Subagente termina, e não aparece com a opção de reduzir movimento do sistema ligada nem com o servidor desconectado.
-   - **Concluído:** comemora com um pulinho, diz *pronto!* e a linha fica verde.
+   - **Trabalhando:** pula, pisca e mostra num balão a atividade atual (ex.: `Reading src\Periodo.ts`). Ao lado, um **ícone da ferramenta** que ele usou por último: lupa (lendo ou buscando), lápis (editando), engrenagem (rodando comando) ou globo (pesquisando na web); passe o mouse para ler. Ferramentas fora dessas não têm ícone. A linha fica laranja e tracejada, e uma **bolinha vai e vem** por ela entre o terminal e o bixinho: é a troca de informação entre o Orquestrador e o Subagente. A bolinha some quando o Subagente termina, e não aparece com a opção de reduzir movimento do sistema ligada nem com o servidor desconectado.
+   - **Concluído:** comemora com um pulinho, diz *pronto!* e a linha fica verde. Na hora em que conclui, um **envelope** (o relatório) percorre a linha do bixinho até o terminal, e, quando ele chega, a **borda do terminal pisca** uma vez. Isso só acontece ao vivo: abrir ou recarregar a página com Subagentes já concluídos não repete a entrega, e nada anima com o reduzir movimento do sistema ou com o servidor desconectado. Falhar ou ser cancelado não entrega relatório.
    - **Falhou:** fica tonto e a linha fica vermelha.
    - **Cancelado:** dorme.
 
@@ -933,7 +1040,7 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 
    **Limpar bixinhos:** com muitos bixinhos acumulados o canvas fica lento. O botão *limpar (N)* na barra do terminal, ao lado do *⚙*, tira do canvas os N bixinhos daquele Orquestrador que não estão executando (concluídos, com falha ou cancelados). Os que trabalham continuam, e os Subagentes que nascerem depois aparecem normalmente. É só visual: nada é apagado no servidor nem no histórico do terminal. A limpeza é lembrada neste navegador, inclusive depois de recarregar a página (F5). Sem bixinho parado, o botão fica desabilitado.
 6. **Vários projetos ao mesmo tempo:** crie ou abra quantos terminais quiser e espalhe pelo canvas. Cada um trabalha em paralelo com os seus bixinhos.
-7. **Cancelar:** com um pedido rodando, aperte **Esc** no prompt ou clique em *cancelar*. O Orquestrador e todos os Subagentes são encerrados.
+7. **Cancelar:** com um pedido rodando, aperte **Esc** no prompt ou clique em *cancelar*. O Orquestrador e todos os Subagentes são encerrados. Se houver pedidos na fila, ela pausa: nada sai sozinho (use *enviar agora*, item 3).
 8. **Reconfigurar, começar conversa nova ou excluir:** use o *⚙* na barra do terminal. Mudanças valem a partir do próximo pedido. Excluir apaga o histórico daquele Orquestrador, inclusive as conversas arquivadas.
    - O *⚙* tem os mesmos campos da criação, inclusive os dois seletores de **esforço** e as opções **Deixar o orquestrador fazer o trivial sozinho** e **Propor plano antes de mudanças grandes** (item 1). Orquestradores criados antes das opções começam em *Padrão (Claude Code)* nos esforços e com as duas opções ligadas.
    - **Nova conversa:** o mesmo que `/clear` (item 3). Pede confirmação ("Começar uma conversa nova? A conversa atual será arquivada.") e fica desabilitado enquanto há um pedido rodando.
@@ -963,6 +1070,8 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
     - **Redimensionar:** clique na nota para selecioná-la e puxe as bordas ou os cantos.
     - **Apagar:** o ícone de lixeira, com confirmação ("Apagar esta nota? Isso não pode ser desfeito."). Apagar remove a nota do servidor: não tem volta.
     - **Organizar:** com notas no canvas, o *Organizar* mantém os terminais na grade de sempre e põe as notas em colunas de até 4, à direita deles.
+    - **Modo lista e checklist:** o botão de lista na barra da nota alterna entre *editar* (o texto puro) e *lista* (linha a linha). Na lista, as linhas no formato de checklist do Markdown, `[ ] comprar café` ou `[x] feito` (com ou sem `- ` antes), viram caixas de marcar: marcar ou desmarcar troca só o `x` daquela linha no texto e salva na hora. O modo vale enquanto a página estiver aberta (recarregar volta para *editar*).
+    - **Arrastar para o terminal:** cada linha da lista tem uma alça (seis pontinhos) à esquerda, e a barra da nota tem uma alça para a nota inteira. Arraste até a janela de um terminal: aparece *solte para escrever no prompt — nada é enviado até você apertar enter*. Ao soltar, o texto entra no prompt (numa linha nova, se já houver texto; uma linha de checklist vai sem o `[ ]`), o cursor vai para o campo e **nada é enviado**: revise e aperte Enter (com um pedido rodando, o Enter põe na fila). Nota em branco não arrasta. Arrastar não move a nota nem o canvas.
 
     O texto das notas fica salvo no servidor (em `dados/notas/`), então volta ao recarregar a página. Posição, tamanho e se está minimizada são lembrados neste navegador, como os terminais. Notas abertas em duas abas não se sincronizam: vale o último salvamento, e a outra aba só vê a mudança ao recarregar.
 12. **Chat rápido:** a caixa no centro, embaixo da tela, para perguntar algo ao Claude sem abrir um terminal.
@@ -992,6 +1101,9 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 - *"plano proposto · aguardando aprovação"*: o pedido foi considerado grande e nada foi alterado ainda (salvo desvio do modelo, ver ADR-15). Aprove, ajuste ou descarte no cartão.
 - *"bloqueado: …"*: um agente tentou algo fora do nível escolhido (por exemplo, editar em modo leitura, ou fazer `git commit` com a opção de commit e push desligada ou em Plan Mode).
 - *"turno interrompido"*: o servidor reiniciou durante o pedido. Envie de novo.
+- *"fila pausada"* (acima do prompt): nenhum pedido está rodando e há pedidos à espera, porque o último foi cancelado, falhou, foi interrompido ou deixou um plano para aprovar. Use *enviar agora* no primeiro, tire os que não fazem mais sentido (✕) ou mande outro pedido (item 3). Logo depois de um pedido terminar bem, o aviso pode aparecer por um instante, até o próximo da fila começar.
+- *"A fila de … está cheia (máximo 10 pedidos)."*: espere a fila andar ou tire algum pedido dela.
+- *"imagens não entram na fila…"*: o Enter durante um pedido não manda imagens para a fila. Espere o pedido terminar ou remova as imagens.
 - Aviso de **esforço herdado** (*Extra alto* ou *Máximo* no *Padrão*): o Claude Code desta máquina vai raciocinar no nível mais caro. Escolha um nível no seletor ou aplique o *Modo econômico* (item 13).
 - Custo **parcial**: o pedido foi cancelado ou falhou, e o número mostra só o que foi gasto até ali (item 13).
 - *"interrompida"* (numa resposta do chat): o servidor reiniciou enquanto o Claude respondia. Pergunte de novo.

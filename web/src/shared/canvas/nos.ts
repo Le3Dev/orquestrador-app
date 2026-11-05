@@ -36,8 +36,14 @@ export type NoBixinho = Node<DadosDoBixinho, "bixinho">;
 export type NoNota = Node<DadosDoNoDaNota, "nota">;
 export type NoDoCanvas = NoTerminal | NoRascunho | NoBixinho | NoNota;
 
+/**
+ * O que a linha do terminal a um bixinho leva: a situação do Subagente, para
+ * a linha notar quando ele conclui e entregar o relatório (o envelope), e
+ * quando ele encerrou, para não entregar o que veio do histórico reenviado.
+ */
+export type DadosDaArestaDoBixinho = { situacao: SituacaoDoSubagente; encerradoEm: string | null };
 /** A linha do terminal a um bixinho; `animated` já diz se o Subagente trabalha. */
-export type ArestaDoBixinho = Edge<Record<string, never>, "bixinho">;
+export type ArestaDoBixinho = Edge<DadosDaArestaDoBixinho, "bixinho">;
 export type ArestaDoCanvas = ArestaDoBixinho;
 
 /** O `id` de cada âncora das linhas: o lado do nó, no terminal e no bixinho. */
@@ -449,7 +455,8 @@ function terminaisPorId(nos: readonly NoDoCanvas[]): Map<string, NoTerminal> {
 }
 
 /**
- * Uma linha do terminal a cada bixinho; animada enquanto ele trabalha. Sai do
+ * Uma linha do terminal a cada bixinho; animada enquanto ele trabalha e com a
+ * situação do Subagente e a hora do fim em `data` (a entrega do relatório). Sai do
  * lado do terminal voltado para o bixinho e chega no lado do bixinho voltado
  * para o terminal (`ladoDoBixinho`), por isso `nos` precisa trazer também os
  * terminais.
@@ -477,6 +484,7 @@ export function arestasDosBixinhos(
         targetHandle: ancoras.bixinho,
         animated: subagente.situacao === "executando",
         className: CLASSE_DA_ARESTA[subagente.situacao],
+        data: { situacao: subagente.situacao, encerradoEm: subagente.encerradoEm },
         selectable: false,
         focusable: false,
       },
@@ -526,7 +534,9 @@ function mesmaAresta(anterior: ArestaDoCanvas, nova: ArestaDoCanvas): boolean {
     anterior.targetHandle === nova.targetHandle &&
     anterior.type === nova.type &&
     anterior.animated === nova.animated &&
-    anterior.className === nova.className
+    anterior.className === nova.className &&
+    anterior.data?.situacao === nova.data?.situacao &&
+    anterior.data?.encerradoEm === nova.data?.encerradoEm
   );
 }
 
