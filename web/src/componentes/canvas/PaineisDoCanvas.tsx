@@ -1,4 +1,11 @@
-import { useEffect, useState } from "react";
+import {
+  type KeyboardEvent as EventoDeTecladoDoReact,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 
 import type { JanelaDaCota, LeituraDeMemoria, ResumoDoOrquestrador } from "../../shared/api/tipos";
 import {
@@ -10,12 +17,13 @@ import {
   ROTULOS_DOS_MODELOS,
   rotuloCurtoDaCota,
 } from "../../shared/formatacao";
+import { useAjustesDoAplicativo } from "../../shared/hooks/useAjustesDoAplicativo";
 import { useRelogio } from "../../shared/hooks/useRelogio";
 import type { EstadoDoServidor } from "../../shared/hooks/useServidor";
 import { nivelDaMemoria } from "../../shared/memoria";
 import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
 import { IconeOrquestrador, IconePasta } from "../Icones";
-import { apiDaConfiguracao, rodandoNoDesktop } from "../../shared/ponteDoDesktop";
+import { rodandoNoDesktop } from "../../shared/ponteDoDesktop";
 
 /** Por quanto tempo o aviso de "reconectado" fica na tela. */
 const DURACAO_DO_AVISO_DE_VOLTA_MS = 10_000;
@@ -86,9 +94,10 @@ const COTA_ALTA = 0.8;
 interface PropsDaBarra {
   aoCriar: () => void;
   aoCriarNota: () => void;
-  aoOrganizar: () => void;
-  podeOrganizar: boolean;
-  /** Abre a paleta de comandos (o mesmo do Ctrl+K); sem ela, o botão "Buscar" não aparece. */
+  /**
+   * Abre a paleta de comandos (o mesmo do Ctrl+K). Só no navegador: no
+   * desktop, a busca fica na barra de título. Sem ela, "Buscar" não aparece.
+   */
   aoBuscar?: () => void;
 }
 
@@ -121,26 +130,212 @@ function RotuloResponsivo({ completo, curto, icone }: PropsDoRotulo) {
   );
 }
 
-/**
- * Canto superior esquerdo: as ações do canvas. No navegador, também a
- * identidade do app; no desktop ela já está na barra de título (que é a área
- * de arraste da janela).
- */
-export function BarraDoCanvas({ aoCriar, aoCriarNota, aoOrganizar, podeOrganizar, aoBuscar }: PropsDaBarra) {
-  const desktop = rodandoNoDesktop();
-  const configuracao = apiDaConfiguracao();
-  const [erroDosAjustes, setErroDosAjustes] = useState<string | null>(null);
+type EscolhaDoNovo = "orquestrador" | "nota";
 
-  const abrirAjustes = async () => {
-    if (configuracao === null) return;
-    setErroDosAjustes(null);
-    try {
-      await configuracao.abrirAjustes();
-    } catch (falha) {
-      const motivo = falha instanceof Error ? falha.message : String(falha);
-      setErroDosAjustes(`Não foi possível abrir os ajustes de pastas: ${motivo}`);
+/** Os itens do `+ Novo ▾`, com o atalho de teclado de cada um (o mesmo do canvas). */
+const ITENS_DO_NOVO: readonly {
+  escolha: EscolhaDoNovo;
+  rotulo: string;
+  atalho: string;
+  teclas: string;
+  dica: string;
+}[] = [
+  {
+    escolha: "orquestrador",
+    rotulo: "Orquestrador",
+    atalho: "Ctrl+N",
+    teclas: "Control+N",
+    dica: "Abre o formulário de um terminal novo",
+  },
+  {
+    escolha: "nota",
+    rotulo: "Nota",
+    atalho: "Ctrl+Shift+N",
+    teclas: "Control+Shift+N",
+    dica: "Cria uma nota no centro da tela (bloco de notas, salvo automaticamente)",
+  },
+];
+
+interface PropsDoMenuDoNovo {
+  aoCriar: () => void;
+  aoCriarNota: () => void;
+}
+
+/**
+ * O botão `+ Novo ▾` e o menu dele (Orquestrador · Nota), no padrão de botão
+ * de menu: Enter, Espaço ou ↓ abrem no primeiro item, ↑ no último; ↑/↓ (e
+ * Home/End) navegam; Enter escolhe; Esc e clique fora fecham, e o foco volta
+ * ao botão.
+ */
+function MenuDoNovo({ aoCriar, aoCriarNota }: PropsDoMenuDoNovo) {
+  const [aberto, setAberto] = useState(false);
+  const ancora = useRef<HTMLDivElement>(null);
+  const botao = useRef<HTMLButtonElement>(null);
+  const itens = useRef<(HTMLButtonElement | null)[]>([]);
+  // O item que ganha o foco ao abrir: ↑ no botão abre no último.
+  const focoAoAbrir = useRef(0);
+  const idDoMenu = `${useId()}-menu`;
+
+  const focarItem = (indice: number) => itens.current[indice]?.focus();
+
+  const abrir = (indice: number) => {
+    if (aberto) {
+      focarItem(indice);
+      return;
+    }
+    focoAoAbrir.current = indice;
+    setAberto(true);
+  };
+
+  const fechar = useCallback((devolverFoco: boolean) => {
+    setAberto(false);
+    if (devolverFoco) {
+      botao.current?.focus();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (aberto) {
+      itens.current[focoAoAbrir.current]?.focus();
+    }
+  }, [aberto]);
+
+  // Clique fora (inclusive no canvas ou na barra de título) fecha.
+  useEffect(() => {
+    if (!aberto) {
+      return;
+    }
+    const aoPressionar = (evento: MouseEvent) => {
+      if (ancora.current !== null && evento.target instanceof Node && !ancora.current.contains(evento.target)) {
+        fechar(true);
+      }
+    };
+    document.addEventListener("mousedown", aoPressionar, true);
+    return () => document.removeEventListener("mousedown", aoPressionar, true);
+  }, [aberto, fechar]);
+
+  const escolher = (escolha: EscolhaDoNovo) => {
+    fechar(true);
+    if (escolha === "orquestrador") {
+      aoCriar();
+    } else {
+      aoCriarNota();
     }
   };
+
+  const aoTeclarNoBotao = (evento: EventoDeTecladoDoReact<HTMLButtonElement>) => {
+    if (evento.key === "ArrowDown") {
+      evento.preventDefault();
+      abrir(0);
+    } else if (evento.key === "ArrowUp") {
+      evento.preventDefault();
+      abrir(ITENS_DO_NOVO.length - 1);
+    }
+  };
+
+  const aoTeclarNoMenu = (evento: EventoDeTecladoDoReact<HTMLDivElement>) => {
+    const total = ITENS_DO_NOVO.length;
+    const atual = itens.current.findIndex((item) => item !== null && item === evento.target);
+    switch (evento.key) {
+      case "ArrowDown":
+        evento.preventDefault();
+        focarItem((atual + 1) % total);
+        break;
+      case "ArrowUp":
+        evento.preventDefault();
+        focarItem(atual <= 0 ? total - 1 : atual - 1);
+        break;
+      case "Home":
+        evento.preventDefault();
+        focarItem(0);
+        break;
+      case "End":
+        evento.preventDefault();
+        focarItem(total - 1);
+        break;
+      case "Enter":
+      case " ": {
+        evento.preventDefault();
+        const item = ITENS_DO_NOVO[atual];
+        if (item !== undefined) {
+          escolher(item.escolha);
+        }
+        break;
+      }
+      case "Escape":
+        evento.preventDefault();
+        evento.stopPropagation();
+        fechar(true);
+        break;
+      case "Tab":
+        // Sem impedir o Tab: o foco volta ao botão e segue dali.
+        fechar(true);
+        break;
+    }
+  };
+
+  return (
+    <div ref={ancora} className="ancora-do-menu">
+      <button
+        ref={botao}
+        type="button"
+        className="btn btn-sm btn-cta"
+        aria-haspopup="menu"
+        aria-expanded={aberto}
+        aria-controls={aberto ? idDoMenu : undefined}
+        aria-label="Novo"
+        title="Novo orquestrador (Ctrl+N) ou nota (Ctrl+Shift+N)"
+        onClick={() => (aberto ? fechar(false) : abrir(0))}
+        onKeyDown={aoTeclarNoBotao}
+      >
+        <RotuloResponsivo completo="+ Novo ▾" curto="+ Novo ▾" icone="+" />
+      </button>
+      {aberto && (
+        <div id={idDoMenu} role="menu" aria-label="Novo" className="menu-do-novo painel-flutuante" onKeyDown={aoTeclarNoMenu}>
+          {ITENS_DO_NOVO.map((item, indice) => (
+            <button
+              key={item.escolha}
+              ref={(elemento) => {
+                itens.current[indice] = elemento;
+              }}
+              type="button"
+              role="menuitem"
+              tabIndex={-1}
+              className="item-do-menu"
+              aria-keyshortcuts={item.teclas}
+              title={item.dica}
+              onClick={() => escolher(item.escolha)}
+            >
+              <span className="item-com-icone">
+                <span
+                  className={`icone-do-item ${item.escolha === "orquestrador" ? "icone-do-item-ativo" : ""}`}
+                  aria-hidden="true"
+                >
+                  {item.escolha === "orquestrador" ? <IconeOrquestrador tamanho={14} /> : "✎"}
+                </span>
+                {item.rotulo}
+              </span>
+              <kbd className="atalho-do-item" aria-hidden="true">
+                {item.atalho}
+              </kbd>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Canto superior esquerdo: o `+ Novo ▾` (Orquestrador ou nota). No desktop,
+ * só ele: a busca e o ⚙ ficam na barra de título, que também tem a
+ * identidade do app. No navegador (sem barra de título própria), a barra
+ * também mostra a identidade, o "Buscar" e o ⚙, para nada ficar inacessível.
+ * O "Organizar" fica nos controles do canto inferior esquerdo.
+ */
+export function BarraDoCanvas({ aoCriar, aoCriarNota, aoBuscar }: PropsDaBarra) {
+  const [desktop] = useState(rodandoNoDesktop);
+  const ajustes = useAjustesDoAplicativo();
 
   return (
     <div className="barra-do-canvas painel-flutuante flex items-center gap-2 px-2.5 py-2">
@@ -156,35 +351,8 @@ export function BarraDoCanvas({ aoCriar, aoCriarNota, aoOrganizar, podeOrganizar
           <span className="mx-1 h-8 w-px shrink-0 bg-border" />
         </>
       )}
-      <button
-        type="button"
-        className="btn btn-sm btn-cta"
-        onClick={aoCriar}
-        aria-label="+ Novo orquestrador"
-        title="Novo orquestrador"
-      >
-        <RotuloResponsivo completo="+ Novo orquestrador" curto="+ Novo" icone="+" />
-      </button>
-      <button
-        type="button"
-        className="btn btn-sm btn-cta"
-        onClick={aoCriarNota}
-        aria-label="+ notas"
-        title="Cria uma nota no centro da tela (bloco de notas, salvo automaticamente)"
-      >
-        <RotuloResponsivo completo="+ notas" curto="+ Nota" icone="✎" />
-      </button>
-      <button
-        type="button"
-        className="btn btn-sm btn-outline"
-        onClick={aoOrganizar}
-        disabled={!podeOrganizar}
-        aria-label="Organizar"
-        title="Coloca os terminais lado a lado, e as notas em colunas à direita deles"
-      >
-        <RotuloResponsivo completo="Organizar" curto="Organizar" icone="▦" />
-      </button>
-      {aoBuscar !== undefined && (
+      <MenuDoNovo aoCriar={aoCriar} aoCriarNota={aoCriarNota} />
+      {!desktop && aoBuscar !== undefined && (
         <button
           type="button"
           className="btn btn-sm btn-outline"
@@ -196,20 +364,20 @@ export function BarraDoCanvas({ aoCriar, aoCriarNota, aoOrganizar, podeOrganizar
           <RotuloResponsivo completo="Buscar (Ctrl+K)" curto="Buscar" icone="⌕" />
         </button>
       )}
-      {configuracao !== null && (
+      {!desktop && ajustes.disponivel && (
         <button
           type="button"
           className="btn btn-sm btn-outline"
-          onClick={() => void abrirAjustes()}
+          onClick={() => void ajustes.abrir()}
           aria-label="⚙ Pastas"
           title="Pasta dos projetos e Claude Code"
         >
           <RotuloResponsivo completo="⚙ Pastas" curto="⚙" icone="⚙" />
         </button>
       )}
-      {erroDosAjustes !== null && (
+      {!desktop && ajustes.erro !== null && (
         <span className="mono text-error max-w-64" role="alert">
-          {erroDosAjustes}
+          {ajustes.erro}
         </span>
       )}
     </div>
@@ -461,7 +629,9 @@ interface PropsDoStatusDoCanvas extends PropsDoStatus {
  * Quem está trabalhando agora, a cota da assinatura e a RAM. No navegador, é
  * o painel do canto superior direito; no desktop, fica na barra de título. A
  * largura da janela decide o detalhe (CSS): rótulos curtos abaixo de 1280 px
- * e só a situação com um medidor resumido abaixo de 1100 px.
+ * e só a situação com um medidor resumido abaixo de 1100 px. Na barra de
+ * título, que divide a largura com a busca, cada passo vem antes: 1440 px e
+ * 1280 px.
  */
 export function StatusDoCanvas({ naBarraDeTitulo = false, ...status }: PropsDoStatusDoCanvas) {
   if (naBarraDeTitulo) {

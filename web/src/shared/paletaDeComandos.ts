@@ -7,7 +7,13 @@ import type { TurnoNaTela } from "./estado/aplicarEvento";
  */
 
 /** As ações do canvas que a paleta oferece. */
-export type AcaoDaPaleta = "novo-orquestrador" | "nova-nota" | "organizar" | "zoom-100" | "enquadrar-tudo";
+export type AcaoDaPaleta =
+  | "novo-orquestrador"
+  | "nova-nota"
+  | "organizar"
+  | "zoom-100"
+  | "enquadrar-tudo"
+  | "ajustes-do-aplicativo";
 
 interface BaseDoItem {
   /** Único na paleta. */
@@ -54,6 +60,8 @@ export type TipoDeItemDaPaleta = ItemDaPaleta["tipo"];
 export interface FonteDaPaleta {
   /** Mais de uma janela no canvas: só então "Organizar" entra. */
   podeOrganizar: boolean;
+  /** No app desktop: "Pastas e Claude Code" reabre os Ajustes. */
+  podeAbrirAjustes: boolean;
   /** Todos os Orquestradores, abertos ou não, na ordem da lista. */
   orquestradores: readonly Pick<ResumoDoOrquestrador, "id" | "nome" | "nomeDaPasta" | "situacao">[];
   /** Orquestradores com o terminal aberto no canvas. */
@@ -103,7 +111,7 @@ function primeiraLinha(texto: string): string {
   return trecho(texto.trim().split("\n")[0] ?? "", TAMANHO_DO_TRECHO);
 }
 
-function acoes(podeOrganizar: boolean): ItemDeAcao[] {
+function acoes(podeOrganizar: boolean, podeAbrirAjustes: boolean): ItemDeAcao[] {
   const todas: ItemDeAcao[] = [
     {
       tipo: "acao",
@@ -112,7 +120,7 @@ function acoes(podeOrganizar: boolean): ItemDeAcao[] {
       titulo: "Novo orquestrador",
       detalhe: "Abre o formulário de um terminal novo",
       busca: "criar terminal",
-      atalho: null,
+      atalho: "Ctrl+N",
     },
     {
       tipo: "acao",
@@ -121,7 +129,7 @@ function acoes(podeOrganizar: boolean): ItemDeAcao[] {
       titulo: "Nova nota",
       detalhe: "Cria uma nota no centro da tela",
       busca: "criar notas bloco",
-      atalho: null,
+      atalho: "Ctrl+Shift+N",
     },
     {
       tipo: "acao",
@@ -150,8 +158,20 @@ function acoes(podeOrganizar: boolean): ItemDeAcao[] {
       busca: "ver tudo ajustar zoom",
       atalho: null,
     },
+    {
+      tipo: "acao",
+      id: "acao:ajustes-do-aplicativo",
+      acao: "ajustes-do-aplicativo",
+      titulo: "Pastas e Claude Code",
+      detalhe: "Abre os ajustes: pasta dos projetos e Claude Code",
+      busca: "ajustes configuracao pasta projetos claude code engrenagem",
+      atalho: null,
+    },
   ];
-  return podeOrganizar ? todas : todas.filter((item) => item.acao !== "organizar");
+  return todas.filter(
+    (item) =>
+      (podeOrganizar || item.acao !== "organizar") && (podeAbrirAjustes || item.acao !== "ajustes-do-aplicativo"),
+  );
 }
 
 /**
@@ -208,7 +228,7 @@ export function montarItensDaPaleta(fonte: FonteDaPaleta): ItemDaPaleta[] {
       }),
     );
 
-  return [...acoes(fonte.podeOrganizar), ...orquestradores, ...notas, ...pedidos];
+  return [...acoes(fonte.podeOrganizar, fonte.podeAbrirAjustes), ...orquestradores, ...notas, ...pedidos];
 }
 
 interface TextoNormalizado {

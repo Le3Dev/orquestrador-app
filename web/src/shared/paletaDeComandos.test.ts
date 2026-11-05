@@ -3,6 +3,7 @@ import {
   buscarNaPaleta,
   type FonteDaPaleta,
   type ItemDaPaleta,
+  type ItemDeAcao,
   LIMITE_DE_RESULTADOS,
   montarItensDaPaleta,
   normalizar,
@@ -11,6 +12,7 @@ import {
 function fonte(alteracoes: Partial<FonteDaPaleta> = {}): FonteDaPaleta {
   return {
     podeOrganizar: true,
+    podeAbrirAjustes: false,
     orquestradores: [
       { id: "o1", nome: "Painel de vendas", nomeDaPasta: "painel-app", situacao: "trabalhando" },
       { id: "o2", nome: "Relatórios", nomeDaPasta: "relatorios", situacao: "ocioso" },
@@ -81,6 +83,39 @@ describe("montarItensDaPaleta", () => {
     expect(itens.find((candidato) => candidato.id === "orquestrador:o1")?.detalhe).toBe(
       "painel-app · trabalhando · no canvas",
     );
+  });
+
+  it("as ações de criar trazem o atalho do canvas (Ctrl+N e Ctrl+Shift+N), como o Zoom 100% (Ctrl+0)", () => {
+    const acoesComAtalho = montarItensDaPaleta(fonte())
+      .filter((candidato): candidato is ItemDeAcao => candidato.tipo === "acao")
+      .map((candidato) => [candidato.titulo, candidato.atalho]);
+
+    expect(acoesComAtalho).toEqual([
+      ["Novo orquestrador", "Ctrl+N"],
+      ["Nova nota", "Ctrl+Shift+N"],
+      ["Organizar", null],
+      ["Zoom 100%", "Ctrl+0"],
+      ["Enquadrar tudo", null],
+    ]);
+  });
+
+  it("\"Pastas e Claude Code\" (reabrir os Ajustes) só entra no app desktop, por último entre as ações", () => {
+    expect(titulos(montarItensDaPaleta(fonte()))).not.toContain("Pastas e Claude Code");
+
+    const acoesNoDesktop = montarItensDaPaleta(fonte({ podeAbrirAjustes: true })).filter(
+      (candidato) => candidato.tipo === "acao",
+    );
+
+    expect(titulos(acoesNoDesktop)).toEqual([
+      "Novo orquestrador",
+      "Nova nota",
+      "Organizar",
+      "Zoom 100%",
+      "Enquadrar tudo",
+      "Pastas e Claude Code",
+    ]);
+    expect(acoesNoDesktop.at(-1)).toMatchObject({ acao: "ajustes-do-aplicativo", atalho: null });
+    expect(titulos(buscarNaPaleta(acoesNoDesktop, "pasta claude"))).toEqual(["Pastas e Claude Code"]);
   });
 
   it("sem mais de uma janela, não oferece \"Organizar\"; nota sem título ganha um nome", () => {
