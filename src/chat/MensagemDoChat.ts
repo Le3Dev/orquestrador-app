@@ -13,6 +13,19 @@ export interface ImagemDaMensagem {
   tipoDeMidia: TipoDeImagem;
 }
 
+/** O que o Claude tentou fazer e precisa da autorização do usuário. */
+export type AcaoQuePedeAutorizacao = "editar" | "rodar_comando";
+
+/**
+ * A primeira ação de uma resposta que não aconteceu por falta de
+ * autorização: editar um arquivo ou rodar um comando. Objeto de valor.
+ */
+export interface AutorizacaoPendente {
+  readonly acao: AcaoQuePedeAutorizacao;
+  /** O caminho do arquivo (`editar`) ou o comando (`rodar_comando`). */
+  readonly detalhe: string;
+}
+
 export interface DadosDaMensagemDoChat {
   id: string;
   papel: PapelNaConversa;
@@ -21,9 +34,11 @@ export interface DadosDaMensagemDoChat {
   criadaEm: string;
   situacao: SituacaoDaMensagem;
   acoes: AcaoDoApp[];
-  /** Avisos legíveis: ações ignoradas, o motivo de uma falha. */
+  /** Avisos legíveis: ações ignoradas, ações bloqueadas, o motivo de uma falha. */
   avisos: string[];
   uso: UsoDaResposta | null;
+  /** Só numa resposta concluída; nulo em mensagens gravadas antes do campo. */
+  autorizacaoPendente: AutorizacaoPendente | null;
 }
 
 /**
@@ -44,14 +59,15 @@ export class MensagemDoChat {
     private acoesAtuais: readonly AcaoDoApp[],
     private avisosAtuais: readonly string[],
     private usoAtual: UsoDaResposta | null,
+    private autorizacaoPendenteAtual: AutorizacaoPendente | null,
   ) {}
 
   static pergunta(id: string, texto: string, imagens: readonly ImagemDaMensagem[], agora: Date): MensagemDoChat {
-    return new MensagemDoChat(id, "usuario", texto, [...imagens], agora.getTime(), "concluida", [], [], null);
+    return new MensagemDoChat(id, "usuario", texto, [...imagens], agora.getTime(), "concluida", [], [], null, null);
   }
 
   static resposta(id: string, agora: Date): MensagemDoChat {
-    return new MensagemDoChat(id, "claude", "", [], agora.getTime(), "respondendo", [], [], null);
+    return new MensagemDoChat(id, "claude", "", [], agora.getTime(), "respondendo", [], [], null, null);
   }
 
   static reconstituir(dados: DadosDaMensagemDoChat): MensagemDoChat {
@@ -65,6 +81,7 @@ export class MensagemDoChat {
       dados.acoes ?? [],
       dados.avisos ?? [],
       dados.uso ?? null,
+      copiarAutorizacaoPendente(dados.autorizacaoPendente ?? null),
     );
   }
 
@@ -80,15 +97,26 @@ export class MensagemDoChat {
     return this.situacaoAtual === "respondendo";
   }
 
+  get autorizacaoPendente(): AutorizacaoPendente | null {
+    return this.autorizacaoPendenteAtual;
+  }
+
   acrescentar(trecho: string): void {
     this.textoAtual += trecho;
   }
 
-  concluir(texto: string, acoes: readonly AcaoDoApp[], avisos: readonly string[], uso: UsoDaResposta): void {
+  concluir(
+    texto: string,
+    acoes: readonly AcaoDoApp[],
+    avisos: readonly string[],
+    uso: UsoDaResposta,
+    autorizacaoPendente: AutorizacaoPendente | null,
+  ): void {
     this.textoAtual = texto;
     this.acoesAtuais = [...acoes];
     this.avisosAtuais = [...avisos];
     this.usoAtual = uso;
+    this.autorizacaoPendenteAtual = copiarAutorizacaoPendente(autorizacaoPendente);
     this.situacaoAtual = "concluida";
   }
 
@@ -114,6 +142,12 @@ export class MensagemDoChat {
       acoes: this.acoesAtuais.map((acao) => ({ ...acao })),
       avisos: [...this.avisosAtuais],
       uso: this.usoAtual === null ? null : { ...this.usoAtual },
+      autorizacaoPendente: this.autorizacaoPendenteAtual === null ? null : { ...this.autorizacaoPendenteAtual },
     };
   }
+}
+
+/** Cópia congelada, só com os dois campos: o objeto de valor não muda depois de criado. */
+function copiarAutorizacaoPendente(pendente: AutorizacaoPendente | null): AutorizacaoPendente | null {
+  return pendente === null ? null : Object.freeze({ acao: pendente.acao, detalhe: pendente.detalhe });
 }

@@ -208,6 +208,14 @@ export const api = {
   alterarPreferenciasDoChat: (alteracao: Partial<PreferenciasDoChat>) =>
     requisitar<PreferenciasDoChat>("/chat/preferencias", { method: "PATCH", body: JSON.stringify(alteracao) }),
 
+  /**
+   * Autoriza (`true`) o chat a editar arquivos e rodar comandos até o próximo
+   * `/clear`, ou revoga (`false`). O servidor confirma com o evento
+   * `alteracoes_autorizadas` ou `autorizacao_revogada`.
+   */
+  autorizarAlteracoesDoChat: (autorizado: boolean) =>
+    requisitar<{ autorizado: boolean }>("/chat/autorizacao", { method: "PATCH", body: JSON.stringify({ autorizado }) }),
+
   cancelarRespostaDoChat: () => requisitar<{ cancelando: boolean }>("/chat/cancelar", { method: "POST" }),
 
   /** Conversa nova ("/clear"): o servidor confirma com o evento `conversa_limpa`. Recusado (409) durante a resposta. */

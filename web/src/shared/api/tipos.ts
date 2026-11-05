@@ -341,6 +341,18 @@ export interface ImagemDaMensagemDoChat {
 export type PapelNoChat = "usuario" | "claude";
 export type SituacaoDaMensagemDoChat = "respondendo" | "concluida" | "falhou" | "cancelada";
 
+/** O que o chat quis fazer e não pôde, por falta de autorização. */
+export type AcaoQuePedeAutorizacao = "editar" | "rodar_comando";
+
+/**
+ * A resposta parou porque o chat precisava editar um arquivo ou rodar um
+ * comando sem estar autorizado. `detalhe` é o arquivo ou o comando.
+ */
+export interface AutorizacaoPendente {
+  acao: AcaoQuePedeAutorizacao;
+  detalhe: string;
+}
+
 export interface MensagemDoChat {
   id: string;
   papel: PapelNoChat;
@@ -351,6 +363,8 @@ export interface MensagemDoChat {
   acoes: AcaoDoApp[];
   avisos: string[];
   uso: UsoDaResposta | null;
+  /** Falta nas mensagens gravadas antes da autorização (vale `null`). */
+  autorizacaoPendente?: AutorizacaoPendente | null;
 }
 
 export type SituacaoDoChat = "ocioso" | "respondendo";
@@ -363,11 +377,17 @@ export interface EstadoDoChat {
   mensagens: MensagemDoChat[];
   ultimaSequencia: number;
   cota: JanelaDaCota[] | null;
+  /**
+   * O usuário autorizou o chat a editar arquivos e rodar comandos, até o
+   * próximo `/clear`. Falta em servidores anteriores à autorização (vale `false`).
+   */
+  alteracoesAutorizadas?: boolean;
 }
 
 export type EventoDoChat =
   | { tipo: "pergunta_enviada"; mensagemDoUsuario: MensagemDoChat; mensagemDoClaude: MensagemDoChat }
-  // O `texto` final substitui o que veio nos trechos.
+  // O `texto` final substitui o que veio nos trechos. `autorizacaoPendente` falta nos eventos
+  // gravados antes da autorização (vale `null`).
   | {
       tipo: "resposta_concluida";
       mensagemId: string;
@@ -375,12 +395,18 @@ export type EventoDoChat =
       acoes: AcaoDoApp[];
       avisos: string[];
       uso: UsoDaResposta | null;
+      autorizacaoPendente?: AutorizacaoPendente | null;
     }
   | { tipo: "resposta_falhou"; mensagemId: string; motivo: string; uso: UsoDaResposta | null }
   | { tipo: "resposta_cancelada"; mensagemId: string }
+  // O `/clear` também desfaz a autorização de alterações.
   | { tipo: "conversa_limpa" }
   | { tipo: "preferencias_alteradas"; preferencias: PreferenciasDoChat }
-  | { tipo: "uso_da_cota"; janelas: JanelaDaCota[] };
+  | { tipo: "uso_da_cota"; janelas: JanelaDaCota[] }
+  // O usuário autorizou o chat a editar arquivos e rodar comandos, até o próximo `/clear`.
+  | { tipo: "alteracoes_autorizadas" }
+  // O usuário revogou a autorização (o ✕ do selo).
+  | { tipo: "autorizacao_revogada" };
 
 export type EventoDoChatRegistrado = EventoDoChat & { sequencia: number; em: string };
 

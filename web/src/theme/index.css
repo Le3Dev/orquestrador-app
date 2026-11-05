@@ -1346,6 +1346,67 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   background: color-mix(in srgb, var(--active) 6%, var(--surface-2));
 }
 
+/* Pedido de autorização (o chat quis editar ou rodar um comando): em tom de
+ * aviso, porque autorizar deixa o chat alterar os projetos até o /clear. */
+.cartao-de-autorizacao {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
+  background: color-mix(in srgb, var(--warning) 7%, var(--surface-2));
+}
+.detalhe-da-autorizacao {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--fonte-mono);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--warning);
+  background: var(--surface-3);
+  overflow-wrap: anywhere;
+}
+.acoes-da-autorizacao { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* Cor própria: utilitários do Tailwind ficam na camada e perdem para o `.btn`, sem camada. */
+.botao-de-autorizar { background: var(--warning); color: var(--claude-escuro); }
+.botao-de-autorizar:not(:disabled):hover { background: color-mix(in srgb, var(--warning) 85%, var(--claude-claro)); }
+
+/* Selo "alterações autorizadas" ao lado do campo do chat; o ✕ revoga. */
+.selo-de-autorizacao {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  height: 22px;
+  padding: 0 2px 0 8px;
+  border-radius: 999px;
+  font-family: var(--fonte-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  cursor: default;
+}
+.selo-de-autorizacao::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); }
+.revogar-autorizacao {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 10px;
+  color: var(--warning);
+  cursor: pointer;
+}
+.revogar-autorizacao:not(:disabled):hover { background: color-mix(in srgb, var(--warning) 22%, transparent); color: var(--primary); }
+.revogar-autorizacao:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.revogar-autorizacao:disabled { opacity: .45; cursor: not-allowed; }
+
 .mostrar-conversa { align-self: center; gap: 6px; cursor: pointer; }
 .mostrar-conversa:hover { color: var(--primary); border-color: var(--border-forte); }
 

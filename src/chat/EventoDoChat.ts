@@ -1,6 +1,6 @@
 import type { JanelaDaCota } from "../orquestracao/EventoDeOrquestracao";
 import type { AcaoDoApp } from "./AcaoDoApp";
-import type { DadosDaMensagemDoChat } from "./MensagemDoChat";
+import type { AutorizacaoPendente, DadosDaMensagemDoChat } from "./MensagemDoChat";
 import type { UsoDaResposta } from "./MotorDeChat";
 import type { DadosDasPreferenciasDoChat } from "./PreferenciasDoChat";
 
@@ -23,11 +23,17 @@ export type EventoDoChat =
       acoes: AcaoDoApp[];
       avisos: string[];
       uso: UsoDaResposta;
+      /** A primeira edição ou comando negado por falta de autorização; nulo se não houve. */
+      autorizacaoPendente: AutorizacaoPendente | null;
     }
   | { tipo: "resposta_falhou"; mensagemId: string; motivo: string; uso: UsoDaResposta | null }
   | { tipo: "resposta_cancelada"; mensagemId: string }
-  /** Primeiro evento da conversa nova; a sequência continua a da anterior. */
+  /** Primeiro evento da conversa nova (que começa sem autorização); a sequência continua a da anterior. */
   | { tipo: "conversa_limpa" }
+  /** O usuário autorizou o chat a editar arquivos e rodar comandos; vale a partir da próxima pergunta. */
+  | { tipo: "alteracoes_autorizadas" }
+  /** O usuário tirou a autorização; vale a partir da próxima pergunta. */
+  | { tipo: "autorizacao_revogada" }
   | { tipo: "preferencias_alteradas"; preferencias: DadosDasPreferenciasDoChat }
   | { tipo: "uso_da_cota"; janelas: JanelaDaCota[] };
 
@@ -39,7 +45,8 @@ export type EventoDoChatRegistrado = EventoDoChat & { sequencia: number; em: str
  * final da resposta já chega inteiro em `resposta_concluida`.
  *
  * - `trecho`: um pedaço novo do texto da resposta (delta);
- * - `atividade`: uma ferramenta que o Claude está usando (pesquisa, leitura).
+ * - `atividade`: uma ferramenta que o Claude está usando (pesquisa, leitura,
+ *   edição, comando).
  */
 export type SinalDoChat =
   | { tipo: "trecho"; mensagemId: string; texto: string }

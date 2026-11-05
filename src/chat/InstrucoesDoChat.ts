@@ -26,7 +26,23 @@ export interface ContextoDoApp {
   pastaDosProjetos: string;
   projetos: readonly ProjetoDoChat[];
   orquestradores: readonly OrquestradorExistente[];
+  /** Se o usuário já autorizou editar arquivos e rodar comandos nesta conversa. */
+  alteracoesAutorizadas: boolean;
 }
+
+/** Branches em que o chat pode commitar, pela política do time. */
+const PREFIXOS_DE_BRANCH = "feature/, fix/, hotfix/ ou refactor/";
+
+/** Regra de commit e push: a mesma nas instruções e no bloco de cada mensagem. */
+const REGRA_DE_COMMIT_E_PUSH = `Commit e push: só quando o usuário pedir explicitamente nesta mensagem. Sempre numa branch ${PREFIXOS_DE_BRANCH}, nunca na main; nunca push forçado; nunca a linha Co-authored-by.`;
+
+const REGRA_DO_RELATORIO = "Se você alterou algo, termine a resposta listando os arquivos alterados e os comandos rodados.";
+
+const REGRA_DAS_MUDANCAS_GRANDES =
+  "Mudanças grandes (vários arquivos, refatoração): não faça pelo chat; sugira abrir um orquestrador no projeto, com o bloco de ação.";
+
+const REGRA_DA_NEGACAO =
+  "Se uma edição ou um comando for negado, diga em uma linha que precisa da autorização e pare. Não contorne a negação: nada de alterar por outro caminho (outra ferramenta, script, outro comando).";
 
 export interface RespostaSeparada {
   texto: string;
@@ -36,8 +52,9 @@ export interface RespostaSeparada {
 
 /**
  * As regras fixas do chat. Vão uma vez, ao criar a sessão: ao retomá-la, o
- * Claude Code ignora instruções novas — o que muda entre perguntas vai no
- * bloco de contexto de cada mensagem (`mensagemParaOChat`).
+ * Claude Code ignora instruções novas — o que muda entre perguntas (como a
+ * autorização para alterar) vai no bloco de contexto de cada mensagem
+ * (`mensagemParaOChat`), que prevalece sobre estas regras.
  */
 export function instrucoesDoChat(): string {
   return [
@@ -45,11 +62,39 @@ export function instrucoesDoChat(): string {
     "",
     "Regras:",
     "1. Responda sempre em português, de forma direta e curta; use Markdown quando ajudar.",
-    "2. Você pode pesquisar na web (WebSearch, WebFetch) e LER os projetos da pasta raiz (Read, Glob, Grep). Nunca altera nada: não edita arquivos, não roda comandos, não faz commits. Arquivos .env* são bloqueados.",
-    `3. Cada mensagem do usuário começa com um bloco <${MARCA_DO_CONTEXTO}> com a data, a pasta raiz, os projetos e os orquestradores existentes. Use-o para responder e não o comente.`,
-    `4. Quando o usuário pedir para abrir ou criar um orquestrador num projeto, siga a regra de ações do bloco <${MARCA_DO_CONTEXTO}>: explique o que vai acontecer e inclua o bloco \`\`\`${MARCA_DA_ACAO}. Você não executa a ação — o usuário confirma clicando no cartão que aparece na tela.`,
-    "5. Para trabalho de verdade num projeto (alterar código, rodar testes), sugira abrir um orquestrador.",
+    "2. Você pode pesquisar na web (WebSearch, WebFetch), ler (Read, Glob, Grep), editar arquivos (Edit, Write, NotebookEdit) e rodar comandos (PowerShell, Bash), mas só dentro das pastas dos projetos da pasta raiz. Arquivos .env* são bloqueados.",
+    `3. Editar arquivos e rodar comandos exige uma autorização única do usuário, que vale até o próximo /clear. O bloco <${MARCA_DO_CONTEXTO}> diz se ela já foi dada. Sem ela, quando precisar editar ou rodar um comando, use a ferramenta mesmo assim: o app pede a autorização ao usuário. ${REGRA_DA_NEGACAO}`,
+    `4. ${REGRA_DE_COMMIT_E_PUSH}`,
+    `5. ${REGRA_DO_RELATORIO}`,
+    `6. Cada mensagem do usuário começa com um bloco <${MARCA_DO_CONTEXTO}> com a data, a pasta raiz, os projetos, os orquestradores existentes e as permissões. Use-o para responder e não o comente; se ele divergir destas regras, vale o bloco.`,
+    `7. Quando o usuário pedir para abrir ou criar um orquestrador num projeto, siga a regra de ações do bloco <${MARCA_DO_CONTEXTO}>: explique o que vai acontecer e inclua o bloco \`\`\`${MARCA_DA_ACAO}. Você não executa a ação — o usuário confirma clicando no cartão que aparece na tela.`,
+    `8. ${REGRA_DAS_MUDANCAS_GRANDES}`,
   ].join("\n");
+}
+
+/**
+ * As permissões da pergunta. Declaram substituir as regras anteriores porque
+ * sessões criadas antes da autorização existir guardam instruções antigas
+ * ("nunca altera nada"), e o Claude Code não as troca ao retomar a sessão.
+ */
+function regrasDePermissao(contexto: ContextoDoApp): string[] {
+  const situacao = contexto.alteracoesAutorizadas
+    ? [
+        "- Alterações AUTORIZADAS pelo usuário até o próximo /clear: edite arquivos e rode comandos quando o pedido exigir, sem pedir confirmação.",
+        "- Se mesmo assim uma ação for bloqueada, é uma regra fixa do app: avise em uma linha e não contorne.",
+      ]
+    : [
+        "- Alterações NÃO autorizadas ainda. Se precisar editar um arquivo ou rodar um comando, use a ferramenta mesmo assim: o app pede a autorização ao usuário.",
+        `- ${REGRA_DA_NEGACAO}`,
+      ];
+  return [
+    "Permissões (substituem qualquer regra anterior sobre o que você pode alterar, inclusive as das instruções iniciais):",
+    `- Você pode ler, editar arquivos e rodar comandos, mas só dentro das pastas dos projetos da pasta raiz (${contexto.pastaDosProjetos}). Rode os comandos na pasta do projeto. Arquivos .env* são bloqueados.`,
+    ...situacao,
+    `- ${REGRA_DE_COMMIT_E_PUSH}`,
+    `- ${REGRA_DO_RELATORIO}`,
+    `- ${REGRA_DAS_MUDANCAS_GRANDES}`,
+  ];
 }
 
 function descreverData(agora: Date): string {
@@ -86,6 +131,8 @@ export function mensagemParaOChat(texto: string, contexto: ContextoDoApp): strin
     ...projetos,
     "Orquestradores existentes (nome → pasta):",
     ...orquestradores,
+    "",
+    ...regrasDePermissao(contexto),
     "",
     "Ações do app: quando o usuário pedir para abrir ou criar um orquestrador num projeto (opcionalmente com um pedido para ele), responda explicando e inclua UM bloco por ação, exatamente assim:",
     "```" + MARCA_DA_ACAO,

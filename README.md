@@ -16,7 +16,7 @@ Você cria **Orquestradores** — um por projeto, por exemplo — e conversa com
 - Em pastas com git, cada pedido roda num **worktree** próprio do Orquestrador, e não na pasta original.
 - Dá para cancelar um pedido no meio, e o histórico fica salvo.
 - **Bloco de notas:** no mesmo canvas, ao lado dos terminais, você cria notas de texto para observações e coisas para fazer depois. O conteúdo fica salvo no servidor, com salvamento automático. No modo lista, os itens `[ ]` viram caixas de marcar, e uma linha (ou a nota inteira) arrastada até um terminal vira texto no prompt.
-- **Chat rápido:** uma caixa no centro, embaixo da tela, para perguntar algo ao Claude sem abrir um terminal: dúvidas rápidas, pesquisas na web ou perguntas sobre os projetos (ele só lê, nunca altera). Ele também pode sugerir abrir um Orquestrador num projeto, já com um pedido; a sugestão vira um cartão que só roda quando você clica.
+- **Chat rápido:** uma caixa no centro, embaixo da tela, para perguntar algo ao Claude sem abrir um terminal: dúvidas rápidas, pesquisas na web, perguntas sobre os projetos e pequenas alterações. Para **editar arquivos e rodar comandos**, ele pede uma **autorização única** na primeira vez, que vale até o próximo `/clear`; commit e push, só quando você pedir. Ele também pode sugerir abrir um Orquestrador num projeto, já com um pedido; a sugestão vira um cartão que só roda quando você clica.
 - Modelos disponíveis: **Fable**, Opus, Sonnet e Haiku, tanto nos Orquestradores quanto no chat.
 
 O motor é o próprio **Claude Code em modo headless**, usando o login da sua assinatura — não precisa de API key.
@@ -141,7 +141,7 @@ Casos de teste do **`/clear`** (ver ADR-16):
 - **Rota:** 200 com `totalDeTurnos: 0`; 409 durante um pedido; 404 sem orquestrador; sem conversa → 200 sem gravar nada.
 - **Tela:** `/clear` (maiúsculas e espaços tolerados) não vira pedido; "/clear algo" vira; Tab completa "/cl"; durante um pedido aparece a dica de indisponível; imagens e Plan Mode continuam no prompt; o separador "— conversa nova iniciada às HH:MM —" aparece; *Nova conversa* no *⚙* pede confirmação e fica desabilitado durante um pedido.
 
-Casos de teste do **chat rápido** (ver ADR-17):
+Casos de teste do **chat rápido** (ver ADR-17 e ADR-25):
 - **Agregado `ConversaDoChat`:** perguntar cria a pergunta (concluída) e a resposta vazia ("respondendo"); recusa outra pergunta com resposta em andamento (`Já há uma resposta em andamento.`), texto vazio sem imagens e mais de 5 imagens; aceita só imagem; acumula os trechos e ignora trecho sem resposta; `concluir` grava texto, ações, avisos e uso e marca a sessão como iniciada; `falhar` guarda o motivo nos avisos e só marca a sessão com uso informado; a sessão marcada no primeiro sinal do motor continua após cancelar; `limpar` recusa durante a resposta, troca o `sessaoId`, volta `sessaoIniciada` a `false` e esvazia as mensagens; ao reabrir, a resposta "respondendo" vira "falhou" com `interrompida`.
 - **`separarAcoesDoApp`:** sem bloco devolve o texto intacto; bloco válido vira ação com a pasta resolvida e sai do texto; vários blocos; projeto em maiúsculas casa com a pasta e devolve o nome real; projeto inexistente, JSON inválido, tipo desconhecido e bloco sem fechamento saem do texto e viram aviso, sem ação; ações imutáveis.
 - **`mensagemParaOChat`:** bloco `<contexto-do-app>` com data/hora, pasta raiz, projetos, orquestradores e o formato exato do bloco de ação, antes do texto; listas vazias indicadas; pergunta só com imagem vira "Veja a imagem anexada.".
@@ -155,6 +155,15 @@ Casos de teste do **chat rápido** (ver ADR-17):
   - *`SeletorDeModelo`:* mostra modelo, versão e esforço, com ✓ no escolhido; escolher modelo ou esforço chama o `PATCH`; Esc e clique fora fecham; o rótulo usa a versão da última resposta quando é da mesma família; falha ao gravar avisa.
   - *`CartaoDeAcao`:* nada antes do clique; com Orquestrador na mesma pasta (barras e maiúsculas diferentes) só abre o terminal; sem ele, cria com a configuração padrão e abre; com pedido, envia o pedido e um segundo clique só reabre; erro mostra a mensagem e permite tentar de novo; sem vaga no canvas, não cria nem envia e mostra o aviso do limite; com o Orquestrador da pasta já aberto (canvas cheio), só foca nele.
   - *`CamposDaConfiguracao`:* oferece Fable, Opus, Sonnet e Haiku nos dois seletores e mostra Fable já escolhido. *Canvas:* o chat fica no painel do centro de baixo, sem arrastar nem rolar o canvas. *`modelos`:* versão lida do id do modelo só na mesma família, nome com versão e rótulos dos esforços.
+- **Autorização de alterações** (ver ADR-25):
+  - *Agregado `ConversaDoChat`:* nasce sem autorização; `autorizarAlteracoes` gera `alteracoes_autorizadas` e, repetido, nada; `revogarAlteracoes` gera `autorizacao_revogada` e, sem autorização, nada; o `/clear` volta a `false`; `concluir` guarda a `autorizacaoPendente`; dados gravados antes, sem os campos, reabrem sem autorização e sem pendência.
+  - *Adaptador do Claude Code:* sem autorização, a primeira edição (Edit, Write, NotebookEdit) ou comando (PowerShell, Bash) negado por não estar liberado vira a `autorizacaoPendente` (`editar` com o arquivo, `rodar_comando` com o comando); negação por regra fixa (`.env*`, push forçado) e qualquer negação com o chat já autorizado viram aviso.
+  - *Argumentos:* sem autorização, `--allowedTools` só com pesquisa e leitura; com ela, as dez ferramentas; `--disallowedTools` sempre com `.env*` e o push forçado, por último; `--settings` sempre com a atribuição desligada (sem `Co-authored-by`).
+  - *`mensagemParaOChat`:* o bloco `<contexto-do-app>` diz se as alterações estão autorizadas e traz a regra de commit e push.
+  - *Rotas:* `GET /chat` com `alteracoesAutorizadas`; `PATCH /chat/autorizacao` 200 `{ autorizado }` (também durante uma resposta) e 400 `A autorização deve ser verdadeira ou falsa.`; os dois eventos saem no SSE com sequência.
+  - *Tela, `aplicarEventoDoChat`:* o campo vem do GET (sem ele, `false`); `alteracoes_autorizadas` liga, `autorizacao_revogada` desliga e `conversa_limpa` zera; eventos de autorização repetidos ou fora de ordem ignorados pela sequência; `autorizacaoPendente` ausente (no GET, na pergunta ou na conclusão) vale `null`; o pedido que vale é só o da última resposta do Claude (`pedidoDeAutorizacaoAtual`).
+  - *Tela, `CartaoDeAutorizacao`:* textos de editar (arquivo) e de rodar comando; *Autorizar até o /clear e continuar* chama o `PATCH` com `true` e depois envia "Autorizado. Continue de onde parou.", nessa ordem, e o cartão some; erro mostra a mensagem e o *tentar de novo*, sem enviar, e continua visível mesmo com o chat já autorizado; *Agora não* esconde sem chamar o servidor; desabilitado durante a resposta ou desconectado; já autorizado, não aparece.
+  - *Tela, `ChatRapido`:* o cartão aparece só na última resposta com pendência e sem autorização; o selo *alterações autorizadas* aparece com o `title` e o ✕ chama o `PATCH` com `false`; falha ao revogar aparece no composer e o selo fica; sem autorização não há selo; a atividade descreve edições ("editando src/x.ts…") e comandos ("rodando: npm test…").
 
 Casos de teste do **limite de 4 orquestradores abertos** (ver ADR-18):
 - **`cabeOutroTerminal`:** 3 abertos → cabe; 4 → não cabe; 4 abertos e pedido de um já aberto → cabe (só foca); o rascunho conta como aberto; o aviso usa o número da constante.
@@ -283,7 +292,7 @@ flowchart LR
     end
   end
   CC["claude.exe -p<br/>(um por turno)"]
-  CCC["claude.exe -p<br/>(um por pergunta do chat,<br/>só leitura + web)"]
+  CCC["claude.exe -p<br/>(um por pergunta do chat,<br/>leitura + web; edição e<br/>comandos com autorização)"]
   SA1[Subagente]
   SA2[Subagente]
 
@@ -364,7 +373,7 @@ web/src/
 
 **Bloco de notas** (contexto `notas`, ver ADR-13): o conteúdo de cada nota (título e texto) fica no servidor, um arquivo por nota em `<PASTA_DADOS>/notas/<id>.json` (padrão `dados/notas/`). Posição, tamanho e se está minimizada ficam no layout do navegador, como os terminais (ver ADR-8). O contexto não conversa com a orquestração: tem entidade, serviço, porta e rotas próprias.
 
-**Chat rápido** (contexto `chat`, ver ADR-17): uma conversa única com o Claude, fora dos Orquestradores. Cada pergunta roda um `claude -p` em `<PASTA_DADOS>/chat/sessao/` (o primeiro com `--session-id`, os seguintes com `--resume`), com ferramentas só de leitura (Read, Glob, Grep na pasta raiz dos projetos, `.env*` negado) e de web (WebSearch, WebFetch). Pelo stdin vai a pergunta precedida do bloco `<contexto-do-app>` (data, pasta raiz, projetos e orquestradores existentes, e o formato das ações). O texto chega aos poucos (`--include-partial-messages`) e vai para a tela como evento SSE passageiro `trecho`, sem entrar no histórico; no fim, o servidor tira da resposta os blocos ` ```acao-do-app `, valida cada um e grava a resposta com as ações. O contexto não importa o agregado `Orquestrador`: projetos e orquestradores chegam pela porta `ProjetosDoChat`, implementada em `root.ts`.
+**Chat rápido** (contexto `chat`, ver ADR-17): uma conversa única com o Claude, fora dos Orquestradores. Cada pergunta roda um `claude -p` em `<PASTA_DADOS>/chat/sessao/` (o primeiro com `--session-id`, os seguintes com `--resume`), com ferramentas de leitura (Read, Glob, Grep na pasta raiz dos projetos, `.env*` negado) e de web (WebSearch, WebFetch) e, só com a autorização do usuário (até o `/clear`), de edição (Edit, Write, NotebookEdit) e de comando (PowerShell, Bash), direto na pasta dos projetos, sem worktree (ver ADR-25). Pelo stdin vai a pergunta precedida do bloco `<contexto-do-app>` (data, pasta raiz, projetos e orquestradores existentes, se as alterações estão autorizadas, a regra de commit e push e o formato das ações). O texto chega aos poucos (`--include-partial-messages`) e vai para a tela como evento SSE passageiro `trecho`, sem entrar no histórico; no fim, o servidor tira da resposta os blocos ` ```acao-do-app `, valida cada um e grava a resposta com as ações. O contexto não importa o agregado `Orquestrador`: projetos e orquestradores chegam pela porta `ProjetosDoChat`, implementada em `root.ts`.
 
 **Pasta de dados** (`<PASTA_DADOS>`: no aplicativo, `%APPDATA%\Orquestrador de Agentes\dados`; rodando o servidor sozinho, `dados/` na pasta do app; ver ADR-5, ADR-13, ADR-16, ADR-17 e ADR-19):
 
@@ -656,6 +665,7 @@ flowchart TD
   - a cota exibida no terminal continua: é da assinatura, não da conversa.
 
 **ADR-17 — Chat rápido: contexto próprio, um processo por pergunta e ações confirmadas pelo usuário.**
+- *Atualizado pelo ADR-25:* o chat deixou de ser só leitura. Com uma autorização única do usuário, que vale até o `/clear`, ele também edita arquivos e roda comandos; o resto desta decisão continua valendo.
 - *Contexto:*
   - para uma dúvida rápida, uma pesquisa na web ou uma pergunta sobre um projeto, criar um Orquestrador (pasta, configuração, terminal) é pesado demais;
   - o chat não deve alterar nada: quem altera são os Orquestradores, com permissões e worktree próprios;
@@ -666,7 +676,7 @@ flowchart TD
   - **núcleo compartilhado** com a orquestração só de objetos de valor e portas genéricas: `ModeloClaude` (agora com `fable`), `EsforcoDeRaciocinio`, `TipoDeImagem` e limites de imagem, `JanelaDaCota`, `Anexo`/`ArmazemDeAnexos` (com a chave `chat`) e `ControleDeExecucoes` (o mesmo controle dos turnos, então desligar o servidor também cancela a resposta do chat);
   - **um `claude -p` por pergunta**, rodando em `dados/chat/sessao/`: a primeira com `--session-id`, as seguintes com `--resume`. A sessão conta como iniciada no primeiro sinal do motor (texto, ferramenta, cota) ou num resultado com consumo, inclusive se a resposta depois falhar ou for cancelada, como a `sessao_iniciada` do Orquestrador;
   - **texto aos poucos** com `--include-partial-messages`: cada delta vai à tela como evento SSE `trecho` (e cada ferramenta como `atividade`), **passageiros**, sem id e fora do `eventos.jsonl`. O servidor acumula o texto parcial na memória, para o `GET /chat` mostrar a resposta em andamento; o texto final chega inteiro em `resposta_concluida`;
-  - **ferramentas só de leitura + web**: WebSearch, WebFetch, Read, Glob e Grep, com a pasta raiz dos projetos liberada para leitura e `Read(.env*)` negado;
+  - **ferramentas só de leitura + web**: WebSearch, WebFetch, Read, Glob e Grep, com a pasta raiz dos projetos liberada para leitura e `Read(.env*)` negado (com autorização, também edição e comandos: ver ADR-25);
   - **contexto em cada mensagem**: o bloco `<contexto-do-app>` (data e hora, pasta raiz, projetos, orquestradores e a regra das ações) antecede cada pergunta; as instruções fixas vão em `--append-system-prompt-file`;
   - **ações por bloco** ` ```acao-do-app ` com `{"tipo":"abrir_orquestrador","projeto","pedido"}`. O servidor tira todos os blocos do texto (inclusive malformados), valida com zod, resolve `projeto` → `pasta` pela lista (sem diferenciar maiúsculas) e devolve avisos legíveis para o que não vale. A tela mostra cada ação como cartão e **só executa no clique**;
   - **preferências fora da conversa** (`preferencias.json`, padrão Opus com esforço alto): o `/clear` não as reseta; trocar o modelo ou o esforço vale a partir da próxima pergunta e vira o padrão.
@@ -795,6 +805,25 @@ flowchart TD
   - sem worktree (pasta sem git), os agentes alteram a pasta direto, e o painel só explica isso;
   - commits já feitos na branch do worktree não aparecem como diff, só como contagem.
 
+**ADR-25 — Chat rápido com alterações autorizadas uma vez até o /clear e commit só a pedido.** Atualiza o ADR-17.
+- *Contexto:*
+  - o chat rápido era só leitura (ADR-17). Para uma correção pequena ("troque essa frase", "rode os testes"), o usuário precisava abrir um Orquestrador, com pasta, configuração e terminal;
+  - pedir confirmação a cada edição ou comando não é possível: o `claude -p` roda headless com `dontAsk` (ADR-1 e ADR-3), sem ninguém no terminal para aprovar;
+  - perguntar de novo a cada pergunta cansa; liberar para sempre esquece que o chat pode alterar.
+- *Decisão:*
+  - **autorização única, guardada na conversa** (`ConversaDoChat.alteracoesAutorizadas`): nasce `false`; `PATCH /chat/autorizacao` liga ou desliga, com os eventos `alteracoes_autorizadas` e `autorizacao_revogada` gravados com sequência (repetir o estado atual não gera evento). O `/clear` volta a `false`. Mudar durante uma resposta vale a partir da próxima pergunta;
+  - **a sessão tem sempre as dez ferramentas** (`--tools`): leitura, web, edição (Edit, Write, NotebookEdit) e comandos (PowerShell, Bash). Sem autorização, `--allowedTools` libera só leitura e web, e o `dontAsk` nega o resto. A primeira edição ou comando negado por isso vira a `autorizacaoPendente` da resposta (`{ acao: "editar" | "rodar_comando", detalhe }`); negação por regra fixa vira aviso, porque autorizar não a resolveria;
+  - **a tela pede a autorização uma vez**: o cartão na última resposta com pendência. Autorizar grava a autorização e já manda "Autorizado. Continue de onde parou." pelo envio normal do chat. Enquanto vale, o selo *alterações autorizadas* fica ao lado do campo, com ✕ para revogar;
+  - **o que muda entre perguntas vai no bloco `<contexto-do-app>`** (se está autorizado, commit e push), que declara substituir as regras anteriores, porque o `--resume` não troca as instruções de sessões criadas antes (ADR-2);
+  - **commit e push só a pedido**: só quando o usuário pedir explicitamente na mensagem, numa branch `feature/`, `fix/`, `hotfix/` ou `refactor/`, nunca na `main`, sem push forçado (também em `--disallowedTools`) e sem `Co-authored-by` (`--settings` com a atribuição desligada).
+- *Consequências:*
+  - **sem worktree:** o chat altera a pasta real do projeto (e a branch em que ela estiver), mesmo com um Orquestrador trabalhando no mesmo projeto. Não há painel de alterações para o chat (ADR-24): revise com o git;
+  - **a lista de proibidos dos comandos não é garantia:** `--disallowedTools` casa por texto (`git push --force`…), e um comando escrito de outro jeito (alias, script, outra sintaxe) passa. Com a autorização, o chat roda o que quiser dentro das permissões do usuário do Windows;
+  - **o commit só a pedido, a branch da política e o "nunca na main" dependem da instrução**, como no ADR-10: não há trava técnica, só o push forçado bloqueado por texto;
+  - a autorização vale para editar **e** rodar comandos ao mesmo tempo, até o `/clear` ou o ✕: não dá para liberar só um dos dois;
+  - a resposta que pede autorização para no primeiro bloqueio; o Claude retoma a partir da pergunta "Autorizado. Continue de onde parou.", o que custa mais uma pergunta (e cota);
+  - "Agora não" só esconde o cartão nesta tela: recarregar a página mostra de novo o pedido da última resposta.
+
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
 - `modelUsage` acumula a sessão, então o consumo do turno vem de `model_usage_since_last_result`;
@@ -843,10 +872,11 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | POST | `/notas` | `{ titulo?: string, texto?: string }` (corpo vazio vale; ausentes: `"Nova nota"` e `""`) | 201 + `DadosDaNota` (400 com as mensagens abaixo) |
 | PATCH | `/notas/:id` | `{ titulo?: string, texto?: string }` (só o enviado muda) | 200 + `DadosDaNota`; `atualizadaEm` só muda se o conteúdo mudar. Com algum campo inválido, 400 e nada é gravado (404 `Nota não encontrada.`) |
 | DELETE | `/notas/:id` | — | 204 (404 `Nota não encontrada.`) |
-| GET | `/chat` | — | `{ sessaoId, situacao: "ocioso" \| "respondendo", preferencias: { modelo, esforco }, mensagens: [MensagemDoChat], ultimaSequencia, cota: [{ nome, utilizacao, renovaEm, situacao }] \| null }`. A resposta em andamento já traz o texto parcial acumulado; use `ultimaSequencia` no `?desde=` do SSE |
+| GET | `/chat` | — | `{ sessaoId, situacao: "ocioso" \| "respondendo", alteracoesAutorizadas: boolean, preferencias: { modelo, esforco }, mensagens: [MensagemDoChat], ultimaSequencia, cota: [{ nome, utilizacao, renovaEm, situacao }] \| null }`. A resposta em andamento já traz o texto parcial acumulado; use `ultimaSequencia` no `?desde=` do SSE. `alteracoesAutorizadas`: o chat pode editar arquivos e rodar comandos até o próximo `/clear` (ver ADR-25) |
 | GET | `/chat/eventos` | cabeçalho opcional `Last-Event-ID` ou `?desde=` | `text/event-stream`: eventos gravados da conversa atual desde a sequência (sem nenhum dos dois, todos) + novos; `trecho` e `atividade` como eventos nomeados, sem id |
 | POST | `/chat/mensagens` | `{ texto: string, imagens?: [{ nome, tipoDeMidia: image/png\|jpeg\|gif\|webp, base64 }] }` (até 5 imagens de 5 MB; texto pode ser vazio se houver imagem) | 202 `{ mensagemId }` — o id da **resposta do Claude**, que recebe os trechos. 409 `Já há uma resposta em andamento.`; 400 `Escreva uma mensagem ou anexe uma imagem.` e erros de imagem |
 | PATCH | `/chat/preferencias` | `{ modelo?, esforco? }` | 200 `{ modelo, esforco }`; vale a partir da próxima pergunta. 400 `Modelo inválido.` / `Esforço inválido.` |
+| PATCH | `/chat/autorizacao` | `{ autorizado: boolean }` | 200 `{ autorizado }`: `true` autoriza o chat a editar arquivos e rodar comandos até o próximo `/clear`; `false` revoga. Aceito também durante uma resposta (vale a partir da próxima pergunta); repetir o estado atual não gera evento. Confirmado pelo evento `alteracoes_autorizadas` ou `autorizacao_revogada`. 400 `A autorização deve ser verdadeira ou falsa.` (ver ADR-25) |
 | POST | `/chat/cancelar` | — | 202 `{ cancelando: true }`; 409 `Não há resposta em andamento.` |
 | POST | `/chat/limpar` | — | 200 `{ totalDeMensagens: 0 }`: arquiva em `dados/chat/historico/conversa-<N>/` e a próxima pergunta abre outra sessão; as preferências ficam. 409 durante uma resposta (`Aguarde a resposta terminar ou cancele antes de limpar a conversa.`) |
 | GET | `/chat/anexos/:arquivo` | — | a imagem anexada a uma pergunta (404 `Anexo não encontrado.` para nome inválido ou inexistente) |
@@ -948,22 +978,25 @@ Erros 400 das notas:
   "criadaEm": "…", "situacao": "respondendo | concluida | falhou | cancelada",
   "acoes": [{ "tipo": "abrir_orquestrador", "projeto": "painel-app", "pasta": "C:\\…\\painel-app", "pedido": "rodar os testes" }],
   "avisos": ["O projeto \"x\" não existe na pasta raiz; a ação foi ignorada."],
-  "uso": { "duracaoMs": 4200, "tokensDeEntrada": 31000, "tokensDeSaida": 180, "modeloUsado": "claude-…" } }
+  "uso": { "duracaoMs": 4200, "tokensDeEntrada": 31000, "tokensDeSaida": 180, "modeloUsado": "claude-…" },
+  "autorizacaoPendente": { "acao": "editar | rodar_comando", "detalhe": "src/x.ts | npm test" } }
 ```
 
-Perguntas do usuário vêm sempre `concluida`, sem ações. Numa resposta que falhou, o motivo está em `avisos` (ex.: `interrompida`, quando o servidor reiniciou no meio).
+Perguntas do usuário vêm sempre `concluida`, sem ações. Numa resposta que falhou, o motivo está em `avisos` (ex.: `interrompida`, quando o servidor reiniciou no meio). `autorizacaoPendente` é `null`, a menos que a resposta tenha parado porque o chat quis editar um arquivo ou rodar um comando sem autorização (`detalhe` é o arquivo ou o comando); a tela mostra o pedido só na última resposta. Mensagens gravadas antes da autorização não têm o campo: vale `null` (ver ADR-25).
 
 **Eventos SSE do chat** (`/chat/eventos`). Os gravados vêm com `id: <sequencia>` e JSON `{ tipo, sequencia, em, … }`:
 
 | `tipo` | Campos | Quando |
 |---|---|---|
 | `pergunta_enviada` | `mensagemDoUsuario`, `mensagemDoClaude` (vazia, `respondendo`) | o usuário perguntou |
-| `resposta_concluida` | `mensagemId`, `texto` (sem os blocos de ação), `acoes`, `avisos`, `uso` | fim com sucesso |
+| `resposta_concluida` | `mensagemId`, `texto` (sem os blocos de ação), `acoes`, `avisos`, `uso`, `autorizacaoPendente` (`{ acao, detalhe }` ou `null`; falta nos eventos gravados antes) | fim com sucesso |
 | `resposta_falhou` | `mensagemId`, `motivo`, `uso` (ou `null`) | erro do Claude Code, ou `interrompida` ao reiniciar |
 | `resposta_cancelada` | `mensagemId` | Esc / `POST /chat/cancelar` |
-| `conversa_limpa` | — | `/clear`; primeiro evento da conversa nova, com a sequência seguinte |
+| `conversa_limpa` | — | `/clear`; primeiro evento da conversa nova, com a sequência seguinte. A conversa nova começa sem autorização de alterações |
 | `preferencias_alteradas` | `preferencias: { modelo, esforco }` | o seletor mudou |
 | `uso_da_cota` | `janelas` | uso dos limites da assinatura |
+| `alteracoes_autorizadas` | — | `PATCH /chat/autorizacao` com `true` (cartão de autorização): o chat edita e roda comandos até o `/clear` |
+| `autorizacao_revogada` | — | `PATCH /chat/autorizacao` com `false` (✕ do selo) |
 
 Passageiros (sem id, fora do histórico): `event: trecho` com `data: { mensagemId, texto }` (pedaço novo do texto) e `event: atividade` com `data: { mensagemId, ferramenta, detalhe }` (ex.: `WebSearch` · `node lts`).
 
@@ -1097,13 +1130,18 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
     O texto das notas fica salvo no servidor (em `dados/notas/`), então volta ao recarregar a página. Posição, tamanho e se está minimizada são lembrados neste navegador, como os terminais. Notas abertas em duas abas não se sincronizam: vale o último salvamento, e a outra aba só vê a mudança ao recarregar.
 12. **Chat rápido:** a caixa no centro, embaixo da tela, para perguntar algo ao Claude sem abrir um terminal.
     - **Compacta por padrão:** fica numa linha só (*+* · campo · modelo · *enviar*). Clique nela (ou foque o campo com Tab) e ela expande; volta a uma linha quando sai o foco e não há texto, imagens nem o menu do modelo aberto.
-    - **Perguntar:** escreva e aperte **Enter** (Shift+Enter quebra linha). A resposta aparece aos poucos; enquanto o Claude pesquisa ou lê, aparece a atividade (ex.: *pesquisando "node lts"*). O chat lembra da conversa.
+    - **Perguntar:** escreva e aperte **Enter** (Shift+Enter quebra linha). A resposta aparece aos poucos; enquanto o Claude pesquisa, lê, edita ou roda um comando, aparece a atividade (ex.: *pesquisando "node lts"*, *editando src/x.ts*, *rodando: npm test*). O chat lembra da conversa.
     - **Imagens:** cole, arraste ou anexe, como nos terminais (até 5, PNG/JPEG/GIF/WebP, 5 MB cada). Dá para mandar só a imagem.
     - **Cancelar:** **Esc** durante a resposta. O texto que já chegou fica.
-    - **`/clear`:** começa uma conversa nova; a anterior fica arquivada em `dados/chat/historico/`. Durante uma resposta, cancele antes.
+    - **`/clear`:** começa uma conversa nova; a anterior fica arquivada em `dados/chat/historico/`. Também desfaz a autorização de alterações. Durante uma resposta, cancele antes.
     - **Modelo e esforço:** o seletor do chat (Fable, Opus, Sonnet, Haiku; esforço de *Padrão* a *Máximo*) vale a partir da próxima pergunta e fica como padrão, mesmo depois do `/clear` ou de reiniciar. O inicial é Opus com esforço alto.
     - **Abrir um orquestrador pelo chat:** peça, por exemplo, *"abra um orquestrador no painel-app para rodar os testes"*. O Claude explica e mostra um **cartão** com o projeto e o pedido. Nada acontece até você clicar no cartão. Se ele citar um projeto que não existe, aparece um aviso no lugar do cartão.
-    - **O que o chat pode ler:** a web (pesquisa e páginas) e os arquivos dos projetos da pasta raiz. Ele nunca altera nada nem roda comandos. Arquivos `.env*` são bloqueados, mas outros arquivos com segredos (chaves, credenciais) podem ser lidos se você pedir (ver ADR-17).
+    - **O que o chat pode fazer** (ver ADR-17 e ADR-25):
+      - *Sempre:* pesquisar na web (pesquisa e páginas) e ler os arquivos dos projetos da pasta raiz. Arquivos `.env*` são bloqueados, mas outros arquivos com segredos (chaves, credenciais) podem ser lidos se você pedir.
+      - *Com autorização:* editar arquivos e rodar comandos nos projetos. Na primeira vez que precisar, o Claude para e a resposta mostra um **cartão**: *"O chat quer editar `src/x.ts`"* ou *"O chat quer rodar `npm test`"*. **Autorizar até o /clear e continuar** libera editar **e** rodar comandos, sem perguntar de novo, até o próximo `/clear`, e já manda o Claude continuar de onde parou. **Agora não** só esconde o cartão (nada é liberado).
+      - *Enquanto vale:* ao lado do campo aparece o selo **alterações autorizadas** (passe o mouse para a explicação). O **✕** do selo revoga: a partir da próxima pergunta, o chat volta a pedir. O `/clear` também revoga.
+      - *Commit e push:* só quando você pedir explicitamente na mensagem, numa branch da política (`feature/`, `fix/`, `hotfix/` ou `refactor/`), nunca na `main`, sem push forçado e sem a linha `Co-authored-by`.
+      - *Riscos:* o chat altera a **pasta real** do projeto, sem worktree (diferente dos Orquestradores) e sem painel de alterações: revise com o git. Os bloqueios de comandos (como o push forçado) casam por texto e não são garantia, e o "commit só quando pedir" depende do modelo seguir a instrução. Para mudanças grandes, prefira um Orquestrador; o próprio chat sugere abrir um.
     - Cada pergunta usa cota da assinatura (dezenas de milhares de tokens de contexto, a maior parte em cache) e leva alguns segundos até o primeiro trecho.
 13. **Economizar tokens** (ver ADR-21):
     - **Modo econômico:** na criação e no *⚙*, o botão *Modo econômico* preenche de uma vez: Opus com esforço *Médio* no Orquestrador, Sonnet com esforço *Médio* nos Subagentes, quantidade *Automática* até 1, **Deixar o orquestrador fazer o trivial sozinho** ligada e **Propor plano antes de mudanças grandes** desligada. Permissões e commit/push ficam como estavam. Tudo continua editável depois; ao mudar um desses campos, a configuração deixa de ser o Modo econômico (o selo some). Vale a partir do próximo pedido.
