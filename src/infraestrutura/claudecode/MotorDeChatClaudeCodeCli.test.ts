@@ -21,6 +21,7 @@ type Roteiro = (
 class FachadaFalsa extends FachadaClaudeCodeCli {
   execucao: ExecucaoDoClaudeCode | null = null;
   instrucoesGravadas = "";
+  configuracoesGravadas = "";
 
   constructor(private readonly roteiro: Roteiro) {
     super("claude-falso");
@@ -32,10 +33,15 @@ class FachadaFalsa extends FachadaClaudeCodeCli {
     sinal: AbortSignal,
   ): Promise<SaidaDoClaudeCode> {
     this.execucao = execucao;
-    const arquivo = execucao.argumentos[execucao.argumentos.indexOf("--append-system-prompt-file") + 1] ?? "";
-    this.instrucoesGravadas = readFileSync(arquivo, "utf8");
+    this.instrucoesGravadas = readFileSync(argumentoDe(execucao, "--append-system-prompt-file"), "utf8");
+    this.configuracoesGravadas = readFileSync(argumentoDe(execucao, "--settings"), "utf8");
     return this.roteiro(execucao, aoReceberMensagem, sinal);
   }
+}
+
+function argumentoDe(execucao: ExecucaoDoClaudeCode | null, opcao: string): string {
+  const argumentos = execucao?.argumentos ?? [];
+  return argumentos[argumentos.indexOf(opcao) + 1] ?? "";
 }
 
 function pergunta(alteracoes: Partial<PerguntaAoMotorDeChat> = {}): PerguntaAoMotorDeChat {
@@ -50,6 +56,7 @@ function pergunta(alteracoes: Partial<PerguntaAoMotorDeChat> = {}): PerguntaAoMo
     pastaDosProjetos: pastaDoTeste,
     modelo: "haiku",
     esforco: "baixo",
+    alteracoesAutorizadas: false,
     ...alteracoes,
   };
 }
@@ -62,6 +69,16 @@ const RESULTADO = {
   duration_ms: 10,
   modelUsage: { "claude-haiku-5-5": { inputTokens: 3, outputTokens: 4 } },
 };
+
+/** Negação de um Write, como o Claude Code manda sem a ferramenta liberada. */
+const NEGACAO_DO_WRITE = [
+  { type: "system", subtype: "permission_denied", tool_name: "Write", tool_use_id: "toolu_1", decision_reason_type: "mode" },
+  {
+    ...RESULTADO,
+    result: "Preciso da autorização.",
+    permission_denials: [{ tool_name: "Write", tool_use_id: "toolu_1", tool_input: { file_path: "C:\\p\\a.ts", content: "x" } }],
+  },
+];
 
 describe("MotorDeChatClaudeCodeCli", () => {
   it("roda o Claude Code com dono chat, instruções em arquivo e mensagem pelo stdin", async () => {
@@ -95,7 +112,7 @@ describe("MotorDeChatClaudeCodeCli", () => {
     ]);
   });
 
-  it("apaga o arquivo temporário das instruções ao final", async () => {
+  it("grava o --settings sem a atribuição Co-authored-by e apaga os temporários ao final", async () => {
     const fachada = new FachadaFalsa(async (_execucao, aoReceber) => {
       aoReceber(RESULTADO);
       return { codigoDeSaida: 0, erroPadrao: "" };
@@ -103,8 +120,42 @@ describe("MotorDeChatClaudeCodeCli", () => {
 
     await new MotorDeChatClaudeCodeCli(fachada).responder(pergunta(), () => undefined, new AbortController().signal);
 
-    const arquivo = fachada.execucao?.argumentos[fachada.execucao.argumentos.indexOf("--append-system-prompt-file") + 1] ?? "";
-    expect(existsSync(arquivo)).toBe(false);
+    expect(JSON.parse(fachada.configuracoesGravadas)).toEqual({ attribution: { commit: "", pr: "" } });
+    expect(path.basename(argumentoDe(fachada.execucao, "--settings"))).toBe("configuracoes.json");
+    expect(existsSync(argumentoDe(fachada.execucao, "--append-system-prompt-file"))).toBe(false);
+    expect(existsSync(argumentoDe(fachada.execucao, "--settings"))).toBe(false);
+  });
+
+  it("sem autorização, a edição negada volta como autorização pendente", async () => {
+    const fachada = new FachadaFalsa(async (_execucao, aoReceber) => {
+      NEGACAO_DO_WRITE.forEach(aoReceber);
+      return { codigoDeSaida: 0, erroPadrao: "" };
+    });
+
+    const resultado = await new MotorDeChatClaudeCodeCli(fachada).responder(pergunta(), () => undefined, new AbortController().signal);
+
+    expect(resultado).toMatchObject({ sucesso: true, autorizacaoPendente: { acao: "editar", detalhe: "C:\\p\\a.ts" }, avisos: [] });
+    expect(fachada.execucao?.argumentos).toContain("--allowedTools");
+    expect(fachada.execucao?.argumentos).not.toContain("--dangerously-skip-permissions");
+  });
+
+  it("com autorização, libera as alterações e nenhuma negação vira pendência", async () => {
+    const fachada = new FachadaFalsa(async (_execucao, aoReceber) => {
+      NEGACAO_DO_WRITE.forEach(aoReceber);
+      return { codigoDeSaida: 0, erroPadrao: "" };
+    });
+
+    const resultado = await new MotorDeChatClaudeCodeCli(fachada).responder(
+      pergunta({ alteracoesAutorizadas: true }),
+      () => undefined,
+      new AbortController().signal,
+    );
+
+    expect(resultado).toMatchObject({ sucesso: true, autorizacaoPendente: null, avisos: [expect.stringContaining("Write")] });
+    const argumentos = fachada.execucao?.argumentos ?? [];
+    const liberadas = argumentos.slice(argumentos.indexOf("--allowedTools") + 1, argumentos.indexOf("--disallowedTools"));
+    expect(liberadas).toContain("Edit");
+    expect(liberadas).toContain("PowerShell");
   });
 
   it("resolve como cancelada quando o sinal é abortado", async () => {

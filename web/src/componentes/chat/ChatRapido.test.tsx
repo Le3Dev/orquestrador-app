@@ -25,6 +25,7 @@ function mensagem(
     avisos: [],
     uso: null,
     motivoDaFalha: null,
+    autorizacaoPendente: null,
     ...alteracoes,
   };
 }
@@ -253,5 +254,112 @@ describe("ChatRapido", () => {
     expect(screen.getByText("resposta cancelada")).toBeInTheDocument();
     expect(screen.getByText("Ação ignorada: pasta fora da raiz.")).toHaveClass("alert-warning");
     expect(screen.getByText("Abrir orquestrador em painel")).toBeInTheDocument();
+  });
+
+  describe("autorização de alterações", () => {
+    const cartoes = () => screen.queryAllByRole("group", { name: "Pedido de autorização do chat" });
+    const AUTORIZAR = "Autorizar até o /clear e continuar";
+
+    /** Duas respostas pedindo autorização: só a última mostra o cartão. */
+    const PEDINDO: EstadoDoChatNaTela = {
+      ...OCIOSO,
+      mensagens: [
+        mensagem("u1", "usuario", { texto: "Corrija o x.ts" }),
+        mensagem("c1", "claude", {
+          texto: "Preciso editar.",
+          autorizacaoPendente: { acao: "editar", detalhe: "src/x.ts" },
+        }),
+        mensagem("u2", "usuario", { texto: "E rode os testes" }),
+        mensagem("c2", "claude", {
+          texto: "Preciso rodar os testes.",
+          autorizacaoPendente: { acao: "rodar_comando", detalhe: "npm test" },
+        }),
+      ],
+    };
+
+    it("o cartão aparece só na última resposta com pedido, e só sem autorização", () => {
+      const { rerender } = renderizar(PEDINDO);
+
+      expect(cartoes()).toHaveLength(1);
+      expect(cartoes()[0]).toHaveTextContent("O chat quer rodar npm test");
+
+      // A última resposta não pede nada: nenhum cartão, nem o da anterior.
+      rerender({ ...PEDINDO, mensagens: [...PEDINDO.mensagens, mensagem("u3", "usuario"), mensagem("c3", "claude")] });
+      expect(cartoes()).toHaveLength(0);
+
+      // Já autorizado: nenhum cartão.
+      rerender({ ...PEDINDO, alteracoesAutorizadas: true });
+      expect(cartoes()).toHaveLength(0);
+    });
+
+    it("Autorizar grava a autorização e manda o Claude continuar pelo envio do chat", async () => {
+      const autorizar = vi.spyOn(api, "autorizarAlteracoesDoChat").mockResolvedValue({ autorizado: true });
+      const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "c3" });
+      renderizar(PEDINDO);
+
+      fireEvent.click(screen.getByRole("button", { name: AUTORIZAR }));
+
+      await waitFor(() => expect(perguntar).toHaveBeenCalledWith("Autorizado. Continue de onde parou.", []));
+      expect(autorizar).toHaveBeenCalledWith(true);
+      expect(autorizar.mock.invocationCallOrder[0]).toBeLessThan(perguntar.mock.invocationCallOrder[0] ?? 0);
+    });
+
+    it("desconectado, o botão de autorizar fica desabilitado", () => {
+      renderizar(PEDINDO, true);
+      expect(screen.getByRole("button", { name: AUTORIZAR })).toBeDisabled();
+    });
+
+    it("durante uma resposta, o botão de autorizar fica desabilitado", () => {
+      const { rerender } = renderizar(PEDINDO);
+      expect(screen.getByRole("button", { name: AUTORIZAR })).toBeEnabled();
+
+      rerender({ ...PEDINDO, situacao: "respondendo" });
+      expect(screen.getByRole("button", { name: AUTORIZAR })).toBeDisabled();
+    });
+
+    it("o selo aparece com o chat autorizado, explica no title e o ✕ revoga", async () => {
+      const revogar = vi.spyOn(api, "autorizarAlteracoesDoChat").mockResolvedValue({ autorizado: false });
+      const { rerender } = renderizar({ ...OCIOSO, alteracoesAutorizadas: true });
+
+      const selo = screen.getByText("alterações autorizadas");
+      expect(selo).toHaveClass("selo-de-autorizacao");
+      expect(selo).toHaveAttribute(
+        "title",
+        "Até o próximo /clear, o chat edita arquivos e roda comandos sem perguntar",
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Revogar a autorização de alterações" }));
+      await waitFor(() => expect(revogar).toHaveBeenCalledWith(false));
+
+      // O evento `autorizacao_revogada` (ou o `/clear`) zera o estado: o selo some.
+      rerender({ ...OCIOSO, alteracoesAutorizadas: false });
+      expect(screen.queryByText("alterações autorizadas")).not.toBeInTheDocument();
+    });
+
+    it("falha ao revogar aparece no composer e o selo continua", async () => {
+      vi.spyOn(api, "autorizarAlteracoesDoChat").mockRejectedValue(new Error("fora do ar"));
+      renderizar({ ...OCIOSO, alteracoesAutorizadas: true });
+
+      fireEvent.click(screen.getByRole("button", { name: "Revogar a autorização de alterações" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível revogar a autorização: fora do ar");
+      expect(screen.getByText("alterações autorizadas")).toBeInTheDocument();
+    });
+
+    it("a atividade descreve edições e comandos", () => {
+      const { rerender } = renderizar({
+        ...RESPONDENDO,
+        atividade: { mensagemId: "c1", ferramenta: "Edit", detalhe: "src/x.ts" },
+      });
+      expect(screen.getByText(/editando src\/x\.ts…/)).toBeInTheDocument();
+
+      rerender({ ...RESPONDENDO, atividade: { mensagemId: "c1", ferramenta: "PowerShell", detalhe: "npm test" } });
+      expect(screen.getByText(/rodando: npm test…/)).toBeInTheDocument();
+    });
+
+    it("sem autorização não há selo", () => {
+      renderizar();
+      expect(screen.queryByText("alterações autorizadas")).not.toBeInTheDocument();
+    });
   });
 });

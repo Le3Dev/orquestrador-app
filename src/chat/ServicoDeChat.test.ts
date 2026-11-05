@@ -22,6 +22,13 @@ import { ServicoDeChat } from "./ServicoDeChat";
 const raiz = path.resolve("/projetos");
 const uso: UsoDaResposta = { duracaoMs: 5, tokensDeEntrada: 30_000, tokensDeSaida: 50, modeloUsado: "claude-opus" };
 
+function sucesso(
+  resposta: string,
+  extras: Partial<Extract<ResultadoDaResposta, { sucesso: true }>> = {},
+): ResultadoDaResposta {
+  return { sucesso: true, resposta, uso, autorizacaoPendente: null, avisos: [], ...extras };
+}
+
 class RepositorioDoChatEmMemoria implements RepositorioDoChat {
   atual = ConversaDoChat.nova("sessao-1");
   prefs = PreferenciasDoChat.padrao();
@@ -174,11 +181,9 @@ describe("ServicoDeChat", () => {
     expect(servico.estado().mensagens[1]?.texto).toBe("Vou abrir.");
     expect(repositorio.conversa().sessaoIniciada).toBe(true);
 
-    motor.concluir({
-      sucesso: true,
-      resposta: 'Vou abrir.\n```acao-do-app\n{"tipo":"abrir_orquestrador","projeto":"painel-app","pedido":null}\n```',
-      uso,
-    });
+    motor.concluir(
+      sucesso('Vou abrir.\n```acao-do-app\n{"tipo":"abrir_orquestrador","projeto":"painel-app","pedido":null}\n```'),
+    );
     await conclusao;
 
     expect(sinais).toEqual([
@@ -203,7 +208,7 @@ describe("ServicoDeChat", () => {
   it("a segunda pergunta retoma a sessão", async () => {
     const primeira = await servico.perguntar({ texto: "oi" });
     await aguardarMotor();
-    motor.concluir({ sucesso: true, resposta: "olá", uso });
+    motor.concluir(sucesso("olá"));
     await primeira.conclusao;
 
     await servico.perguntar({ texto: "e aí" });
@@ -250,7 +255,7 @@ describe("ServicoDeChat", () => {
     await aguardarMotor();
     const janelas = [{ nome: "5 horas", utilizacao: 0.4, renovaEm: null, situacao: "allowed" }];
     motor.emitir({ tipo: "uso_da_cota", janelas });
-    motor.concluir({ sucesso: true, resposta: "ok", uso });
+    motor.concluir(sucesso("ok"));
     await conclusao;
 
     expect(publicados.map((evento) => evento.tipo)).toContain("uso_da_cota");
@@ -283,9 +288,10 @@ describe("ServicoDeChat", () => {
 
   it("limpar arquiva a conversa, troca a sessão e mantém as preferências", async () => {
     await servico.alterarPreferencias({ modelo: "fable" });
+    await servico.alterarAutorizacao(true);
     const { conclusao } = await servico.perguntar({ texto: "oi" });
     await aguardarMotor();
-    motor.concluir({ sucesso: true, resposta: "ok", uso });
+    motor.concluir(sucesso("ok"));
     await conclusao;
 
     expect(await servico.limpar()).toEqual({ totalDeMensagens: 0 });
@@ -296,6 +302,7 @@ describe("ServicoDeChat", () => {
     expect(estado.sessaoId).not.toBe("sessao-1");
     expect(estado.mensagens).toEqual([]);
     expect(estado.preferencias).toEqual({ modelo: "fable", esforco: "alto" });
+    expect(estado.alteracoesAutorizadas).toBe(false);
   });
 
   it("limpar é recusado durante a resposta e não faz nada numa conversa vazia", async () => {
@@ -313,6 +320,67 @@ describe("ServicoDeChat", () => {
     await servico.perguntar({ texto: "oi" });
     await aguardarMotor();
     expect(motor.perguntas[0]?.esforco).toBe("maximo");
+  });
+
+  it("a pergunta leva alteracoesAutorizadas ao motor e ao bloco de contexto", async () => {
+    const { conclusao } = await servico.perguntar({ texto: "edite o README" });
+    await aguardarMotor();
+
+    expect(motor.perguntas[0]?.alteracoesAutorizadas).toBe(false);
+    expect(motor.perguntas[0]?.mensagem).toContain("Alterações NÃO autorizadas ainda");
+    motor.concluir(sucesso("ok"));
+    await conclusao;
+  });
+
+  it("alterarAutorizacao publica e grava o evento; repetir não gera outro", async () => {
+    expect(await servico.alterarAutorizacao(true)).toEqual({ autorizado: true });
+    expect(await servico.alterarAutorizacao(true)).toEqual({ autorizado: true });
+    expect(await servico.alterarAutorizacao(false)).toEqual({ autorizado: false });
+    expect(await servico.alterarAutorizacao(false)).toEqual({ autorizado: false });
+
+    expect(publicados.map((evento) => evento.tipo)).toEqual(["alteracoes_autorizadas", "autorizacao_revogada"]);
+    expect(publicados.map((evento) => evento.sequencia)).toEqual([1, 2]);
+    expect(repositorio.salvamentos).toBe(2);
+    expect(servico.estado().alteracoesAutorizadas).toBe(false);
+  });
+
+  it("autorizar durante uma resposta não muda essa resposta e vale na próxima pergunta", async () => {
+    const primeira = await servico.perguntar({ texto: "edite o README" });
+    await aguardarMotor();
+    expect(motor.perguntas[0]?.alteracoesAutorizadas).toBe(false);
+
+    expect(await servico.alterarAutorizacao(true)).toEqual({ autorizado: true });
+    expect(servico.estado()).toMatchObject({ situacao: "respondendo", alteracoesAutorizadas: true });
+    motor.concluir(sucesso("Preciso da autorização.", { autorizacaoPendente: { acao: "editar", detalhe: "README.md" } }));
+    await primeira.conclusao;
+
+    await servico.perguntar({ texto: "pode editar" });
+    await aguardarMotor(2);
+    expect(motor.perguntas[1]?.alteracoesAutorizadas).toBe(true);
+    expect(motor.perguntas[1]?.mensagem).toContain("Alterações AUTORIZADAS");
+  });
+
+  it("a autorização pendente e os avisos do motor vão para a resposta concluída", async () => {
+    const { mensagemId, conclusao } = await servico.perguntar({ texto: "rode os testes" });
+    await aguardarMotor();
+    motor.concluir(
+      sucesso("Preciso da autorização para rodar comandos.", {
+        autorizacaoPendente: { acao: "rodar_comando", detalhe: "npm test" },
+        avisos: ["Bloqueado pelas permissões do chat: Read · .env"],
+      }),
+    );
+    await conclusao;
+
+    expect(publicados.at(-1)).toMatchObject({
+      tipo: "resposta_concluida",
+      mensagemId,
+      autorizacaoPendente: { acao: "rodar_comando", detalhe: "npm test" },
+      avisos: ["Bloqueado pelas permissões do chat: Read · .env"],
+    });
+    expect(servico.estado().mensagens[1]).toMatchObject({
+      autorizacaoPendente: { acao: "rodar_comando", detalhe: "npm test" },
+      avisos: ["Bloqueado pelas permissões do chat: Read · .env"],
+    });
   });
 
   it("ao subir, marca como interrompida a resposta que ficou em andamento", async () => {

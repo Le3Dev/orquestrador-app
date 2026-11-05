@@ -70,7 +70,15 @@ describe("ConversaDoChat", () => {
 
     const evento = conversa.concluir("final", [acao], ["aviso"], uso);
 
-    expect(evento).toEqual({ tipo: "resposta_concluida", mensagemId: "c1", texto: "final", acoes: [acao], avisos: ["aviso"], uso });
+    expect(evento).toEqual({
+      tipo: "resposta_concluida",
+      mensagemId: "c1",
+      texto: "final",
+      acoes: [acao],
+      avisos: ["aviso"],
+      uso,
+      autorizacaoPendente: null,
+    });
     expect(conversa.mensagens[1]).toMatchObject({ texto: "final", situacao: "concluida", acoes: [acao], avisos: ["aviso"], uso });
     expect(conversa.sessaoIniciada).toBe(true);
     expect(conversa.situacao).toBe("ocioso");
@@ -139,7 +147,97 @@ describe("ConversaDoChat", () => {
   });
 
   it("reconstituir recusa dados sem sessão ou sem mensagens", () => {
-    expect(() => ConversaDoChat.reconstituir({ sessaoId: "", sessaoIniciada: false, mensagens: [] })).toThrow();
+    expect(() =>
+      ConversaDoChat.reconstituir({ sessaoId: "", sessaoIniciada: false, alteracoesAutorizadas: false, mensagens: [] }),
+    ).toThrow();
+  });
+});
+
+describe("ConversaDoChat — autorização para alterar", () => {
+  it("nasce sem autorização", () => {
+    const conversa = ConversaDoChat.nova("s1");
+
+    expect(conversa.alteracoesAutorizadas).toBe(false);
+    expect(conversa.paraDados().alteracoesAutorizadas).toBe(false);
+  });
+
+  it("autorizar e revogar geram os eventos; repetir o mesmo estado não gera", () => {
+    const conversa = ConversaDoChat.nova("s1");
+
+    expect(conversa.revogarAlteracoes()).toBeNull();
+    expect(conversa.autorizarAlteracoes()).toEqual({ tipo: "alteracoes_autorizadas" });
+    expect(conversa.alteracoesAutorizadas).toBe(true);
+    expect(conversa.autorizarAlteracoes()).toBeNull();
+
+    expect(conversa.revogarAlteracoes()).toEqual({ tipo: "autorizacao_revogada" });
+    expect(conversa.alteracoesAutorizadas).toBe(false);
+    expect(conversa.revogarAlteracoes()).toBeNull();
+  });
+
+  it("vale também durante uma resposta, sem mexer nela", () => {
+    const conversa = ConversaDoChat.nova("s1");
+    conversa.perguntar(pergunta());
+
+    expect(conversa.autorizarAlteracoes()).toEqual({ tipo: "alteracoes_autorizadas" });
+    expect(conversa.situacao).toBe("respondendo");
+  });
+
+  it("o /clear começa a conversa nova sem autorização", () => {
+    const conversa = ConversaDoChat.nova("s1");
+    conversa.autorizarAlteracoes();
+
+    conversa.limpar("s2");
+
+    expect(conversa.alteracoesAutorizadas).toBe(false);
+  });
+
+  it("a autorização é gravada com a conversa", () => {
+    const conversa = ConversaDoChat.nova("s1");
+    conversa.autorizarAlteracoes();
+
+    const reaberta = ConversaDoChat.reconstituir(JSON.parse(JSON.stringify(conversa.paraDados())));
+
+    expect(reaberta.alteracoesAutorizadas).toBe(true);
+  });
+
+  it("conversa gravada antes do campo carrega sem autorização, e as mensagens sem pendência", () => {
+    const gravadaAntes = JSON.parse(
+      JSON.stringify({
+        sessaoId: "s1",
+        sessaoIniciada: true,
+        mensagens: [
+          { id: "u1", papel: "usuario", texto: "oi", imagens: [], criadaEm: agora.toISOString(), situacao: "concluida", acoes: [], avisos: [], uso: null },
+          { id: "c1", papel: "claude", texto: "olá", imagens: [], criadaEm: agora.toISOString(), situacao: "concluida", acoes: [], avisos: [], uso },
+        ],
+      }),
+    );
+
+    const reaberta = ConversaDoChat.reconstituir(gravadaAntes);
+
+    expect(reaberta.alteracoesAutorizadas).toBe(false);
+    expect(reaberta.mensagens.map((mensagem) => mensagem.autorizacaoPendente)).toEqual([null, null]);
+  });
+
+  it("concluir guarda a autorização pendente na resposta e no evento", () => {
+    const conversa = ConversaDoChat.nova("s1");
+    conversa.perguntar(pergunta());
+
+    const evento = conversa.concluir("Preciso da autorização.", [], [], uso, { acao: "editar", detalhe: "src/x.ts" });
+
+    expect(evento).toMatchObject({ tipo: "resposta_concluida", autorizacaoPendente: { acao: "editar", detalhe: "src/x.ts" } });
+    expect(conversa.mensagens[1]?.autorizacaoPendente).toEqual({ acao: "editar", detalhe: "src/x.ts" });
+    expect(conversa.mensagens[0]?.autorizacaoPendente).toBeNull();
+
+    const reaberta = ConversaDoChat.reconstituir(JSON.parse(JSON.stringify(conversa.paraDados())));
+    expect(reaberta.mensagens[1]?.autorizacaoPendente).toEqual({ acao: "editar", detalhe: "src/x.ts" });
+  });
+
+  it("concluir sem pendência grava nulo", () => {
+    const conversa = ConversaDoChat.nova("s1");
+    conversa.perguntar(pergunta());
+
+    expect(conversa.concluir("ok", [], [], uso, null)).toMatchObject({ autorizacaoPendente: null });
+    expect(conversa.mensagens[1]?.autorizacaoPendente).toBeNull();
   });
 });
 

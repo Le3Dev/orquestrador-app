@@ -1,12 +1,51 @@
 import type { PerguntaAoMotorDeChat } from "../../chat/MotorDeChat";
 import type { EsforcoDeRaciocinio } from "../../orquestracao/EsforcoDeRaciocinio";
-import { ambienteSemSessaoPai, nivelDeEsforcoDoClaudeCode, VARIAVEL_DE_ESFORCO } from "./ArgumentosDoClaudeCode";
+import {
+  ambienteSemSessaoPai,
+  COMANDOS_DE_PUSH_FORCADO,
+  type ConfiguracoesDaSessao,
+  nivelDeEsforcoDoClaudeCode,
+  VARIAVEL_DE_ESFORCO,
+} from "./ArgumentosDoClaudeCode";
+
+/** Pesquisar na web e ler: liberadas sempre. */
+export const FERRAMENTAS_DE_LEITURA_DO_CHAT: readonly string[] = ["WebSearch", "WebFetch", "Read", "Glob", "Grep"];
+
+/** Editar arquivos: só com a autorização do usuário. */
+export const FERRAMENTAS_DE_EDICAO_DO_CHAT: readonly string[] = ["Edit", "Write", "NotebookEdit"];
 
 /**
- * As únicas ferramentas do chat rápido: pesquisar na web e ler (sem editar,
- * sem terminal, sem Subagentes).
+ * Rodar comandos: só com a autorização do usuário. No Windows o terminal é a
+ * ferramenta `PowerShell`; `Bash` entra junto para quando o Git Bash estiver
+ * configurado.
  */
-export const FERRAMENTAS_DO_CHAT: readonly string[] = ["WebSearch", "WebFetch", "Read", "Glob", "Grep"];
+export const FERRAMENTAS_DE_COMANDO_DO_CHAT: readonly string[] = ["PowerShell", "Bash"];
+
+/**
+ * Todas as ferramentas que existem na sessão do chat (`--tools`), com ou sem
+ * autorização — sem Subagentes. As de edição e comando existem sempre, para
+ * que o Claude tente usá-las e a negação vire o pedido de autorização na tela.
+ */
+export const FERRAMENTAS_DO_CHAT: readonly string[] = [
+  ...FERRAMENTAS_DE_LEITURA_DO_CHAT,
+  ...FERRAMENTAS_DE_EDICAO_DO_CHAT,
+  ...FERRAMENTAS_DE_COMANDO_DO_CHAT,
+];
+
+/** O que vai em `--allowedTools`: com `dontAsk`, o resto é negado em vez de perguntado. */
+export function ferramentasLiberadasDoChat(alteracoesAutorizadas: boolean): readonly string[] {
+  return alteracoesAutorizadas ? FERRAMENTAS_DO_CHAT : FERRAMENTAS_DE_LEITURA_DO_CHAT;
+}
+
+/**
+ * Configuração da sessão do chat (`--settings`), sempre: desliga a atribuição
+ * do Claude Code (o trailer `Co-Authored-By` nos commits e o "Generated with
+ * Claude Code" nos PRs), que a política do usuário proíbe. Mesmo formato dos
+ * Orquestradores com commit e push liberados (`configuracoesDaSessao`).
+ */
+export function configuracoesDaSessaoDoChat(): ConfiguracoesDaSessao {
+  return { attribution: { commit: "", pr: "" } };
+}
 
 /** Arquivos de ambiente (`.env`, `.env.local`, `.env.production`…): podem guardar segredos. */
 const ARQUIVOS_DE_AMBIENTE = ".env*";
@@ -44,9 +83,20 @@ export function regrasDeNegacaoDoChat(pastaDosProjetos: string): string[] {
   ];
 }
 
+/**
+ * Tudo o que vai em `--disallowedTools`, com ou sem autorização: a leitura
+ * dos arquivos de ambiente e o push forçado (o mesmo bloqueio dos
+ * Orquestradores, com os mesmos limites do casamento por texto).
+ */
+export function comandosProibidosDoChat(pastaDosProjetos: string): string[] {
+  return [...regrasDeNegacaoDoChat(pastaDosProjetos), ...COMANDOS_DE_PUSH_FORCADO];
+}
+
 export interface ArquivosDoChat {
   /** Arquivo temporário com as instruções; vai em `--append-system-prompt-file`. */
   instrucoes: string;
+  /** Arquivo temporário com `configuracoesDaSessaoDoChat`; vai em `--settings`. */
+  configuracoes: string;
 }
 
 /**
@@ -55,16 +105,23 @@ export interface ArquivosDoChat {
  * Mesmo desenho dos turnos dos Orquestradores: a mensagem vai pelo stdin em
  * `stream-json` (texto e imagens), as instruções em arquivo. A diferença é o
  * `--include-partial-messages`, que entrega a resposta em pedaços enquanto é
- * gerada, e o conjunto fechado de ferramentas de leitura e pesquisa.
+ * gerada.
  *
- * A raiz dos projetos entra em `--add-dir` para leitura: sem `Edit`/`Write`
- * nas ferramentas, a pasta adicional não dá como alterar nada.
+ * `--tools` traz sempre as dez ferramentas; `--allowedTools`, só as de
+ * leitura e pesquisa até o usuário autorizar alterações. Com `dontAsk`, a
+ * edição ou o comando sem autorização é negado (e vira o pedido de
+ * autorização na tela), em vez de esperar por alguém no terminal.
+ *
+ * A raiz dos projetos entra em `--add-dir`: leitura sempre e, autorizado,
+ * edição. `--settings` entra sempre, para nenhum commit sair com a linha
+ * Co-authored-by.
  *
  * `--disallowedTools` é variádica e fica por último, para não engolir as
  * opções seguintes.
  */
 export function montarArgumentosDoChat(pergunta: PerguntaAoMotorDeChat, arquivos: ArquivosDoChat): string[] {
   const esforco = nivelDeEsforcoDoClaudeCode(pergunta.esforco);
+  const liberadas = ferramentasLiberadasDoChat(pergunta.alteracoesAutorizadas);
   return [
     "-p",
     "--input-format",
@@ -83,14 +140,16 @@ export function montarArgumentosDoChat(pergunta: PerguntaAoMotorDeChat, arquivos
     "--append-system-prompt-file",
     arquivos.instrucoes,
     "--strict-mcp-config",
+    "--settings",
+    arquivos.configuracoes,
     "--permission-mode",
     "dontAsk",
     "--tools",
     ...FERRAMENTAS_DO_CHAT,
     "--allowedTools",
-    ...FERRAMENTAS_DO_CHAT,
+    ...liberadas,
     "--disallowedTools",
-    ...regrasDeNegacaoDoChat(pergunta.pastaDosProjetos),
+    ...comandosProibidosDoChat(pergunta.pastaDosProjetos),
   ];
 }
 

@@ -3,13 +3,15 @@ import { describe, expect, it } from "vitest";
 import type { PerguntaAoMotorDeChat } from "../../chat/MotorDeChat";
 import {
   caminhoParaRegraDePermissao,
+  configuracoesDaSessaoDoChat,
   FERRAMENTAS_DO_CHAT,
   montarAmbienteDoChat,
   montarArgumentosDoChat,
   regrasDeNegacaoDoChat,
 } from "./ArgumentosDoChat";
+import { COMANDOS_DE_PUSH_FORCADO } from "./ArgumentosDoClaudeCode";
 
-const arquivos = { instrucoes: "instrucoes.txt" };
+const arquivos = { instrucoes: "instrucoes.txt", configuracoes: "configuracoes.json" };
 
 function pergunta(alteracoes: Partial<PerguntaAoMotorDeChat> = {}): PerguntaAoMotorDeChat {
   return {
@@ -23,9 +25,13 @@ function pergunta(alteracoes: Partial<PerguntaAoMotorDeChat> = {}): PerguntaAoMo
     pastaDosProjetos: "C:\\Users\\ana\\projetos",
     modelo: "haiku",
     esforco: "padrao",
+    alteracoesAutorizadas: false,
     ...alteracoes,
   };
 }
+
+const LEITURA = ["WebSearch", "WebFetch", "Read", "Glob", "Grep"];
+const TODAS = [...LEITURA, "Edit", "Write", "NotebookEdit", "PowerShell", "Bash"];
 
 /** Valores de uma opção variádica: tudo entre ela e a próxima opção. */
 function valoresDe(argumentos: string[], opcao: string): string[] {
@@ -53,23 +59,57 @@ describe("montarArgumentosDoChat", () => {
     expect(valoresDe(argumentos, "--model")).toEqual(["haiku"]);
   });
 
-  it("libera só pesquisa e leitura, sem Subagentes", () => {
-    const argumentos = montarArgumentosDoChat(pergunta(), arquivos);
+  it("--tools traz sempre as dez ferramentas, sem Subagentes", () => {
+    for (const alteracoesAutorizadas of [false, true]) {
+      const argumentos = montarArgumentosDoChat(pergunta({ alteracoesAutorizadas }), arquivos);
 
-    expect(valoresDe(argumentos, "--tools")).toEqual(["WebSearch", "WebFetch", "Read", "Glob", "Grep"]);
-    expect(valoresDe(argumentos, "--allowedTools")).toEqual([...FERRAMENTAS_DO_CHAT]);
-    expect(argumentos).not.toContain("Agent");
-    expect(argumentos).not.toContain("--agents");
+      expect(valoresDe(argumentos, "--tools")).toEqual(TODAS);
+      expect(argumentos).not.toContain("Agent");
+      expect(argumentos).not.toContain("--agents");
+    }
+    expect([...FERRAMENTAS_DO_CHAT]).toEqual(TODAS);
   });
 
-  it("nega a leitura de .env* na raiz dos projetos e na pasta da sessão, por último", () => {
-    const argumentos = montarArgumentosDoChat(pergunta(), arquivos);
+  it("sem autorização, --allowedTools libera só pesquisa e leitura", () => {
+    const argumentos = montarArgumentosDoChat(pergunta({ alteracoesAutorizadas: false }), arquivos);
 
-    expect(valoresDe(argumentos, "--disallowedTools")).toEqual([
-      "Read(//c/Users/ana/projetos/**/.env*)",
-      "Read(.env*)",
-    ]);
-    expect(argumentos.at(-1)).toBe("Read(.env*)");
+    expect(valoresDe(argumentos, "--allowedTools")).toEqual(LEITURA);
+  });
+
+  it("com autorização, --allowedTools libera as dez ferramentas", () => {
+    const argumentos = montarArgumentosDoChat(pergunta({ alteracoesAutorizadas: true }), arquivos);
+
+    expect(valoresDe(argumentos, "--allowedTools")).toEqual(TODAS);
+  });
+
+  it("nega sempre .env* e o push forçado, com --disallowedTools por último", () => {
+    for (const alteracoesAutorizadas of [false, true]) {
+      const argumentos = montarArgumentosDoChat(pergunta({ alteracoesAutorizadas }), arquivos);
+      const negados = valoresDe(argumentos, "--disallowedTools");
+
+      expect(negados).toEqual(["Read(//c/Users/ana/projetos/**/.env*)", "Read(.env*)", ...COMANDOS_DE_PUSH_FORCADO]);
+      expect(negados).toContain("PowerShell(git push *--force*)");
+      expect(negados).toContain("Bash(git push * +*)");
+      expect(argumentos.lastIndexOf("--disallowedTools")).toBe(argumentos.length - negados.length - 1);
+      expect(argumentos.at(-1)).toBe(COMANDOS_DE_PUSH_FORCADO.at(-1));
+      // Commit e push comuns não são bloqueados: dependem do pedido explícito do usuário.
+      expect(negados).not.toContain("PowerShell(git commit:*)");
+    }
+  });
+
+  it("passa --settings sempre, com o arquivo da configuração da sessão", () => {
+    for (const alteracoesAutorizadas of [false, true]) {
+      const argumentos = montarArgumentosDoChat(pergunta({ alteracoesAutorizadas }), arquivos);
+
+      expect(valoresDe(argumentos, "--settings")).toEqual(["configuracoes.json"]);
+    }
+  });
+
+  it("continua com --permission-mode dontAsk e a raiz dos projetos em --add-dir, com ou sem autorização", () => {
+    const argumentos = montarArgumentosDoChat(pergunta({ alteracoesAutorizadas: true }), arquivos);
+
+    expect(valoresDe(argumentos, "--permission-mode")).toEqual(["dontAsk"]);
+    expect(valoresDe(argumentos, "--add-dir")).toEqual(["C:\\Users\\ana\\projetos"]);
   });
 
   it("adiciona a raiz dos projetos e, só com imagens, a pasta das imagens", () => {
@@ -99,6 +139,13 @@ describe("montarArgumentosDoChat", () => {
     expect(montarArgumentosDoChat(pergunta(), arquivos)).not.toContain("--effort");
     expect(valoresDe(montarArgumentosDoChat(pergunta({ esforco: "baixo" }), arquivos), "--effort")).toEqual(["low"]);
     expect(valoresDe(montarArgumentosDoChat(pergunta({ esforco: "maximo" }), arquivos), "--effort")).toEqual(["max"]);
+  });
+});
+
+describe("configuracoesDaSessaoDoChat", () => {
+  it("desliga a atribuição Co-authored-by com textos vazios", () => {
+    expect(configuracoesDaSessaoDoChat()).toEqual({ attribution: { commit: "", pr: "" } });
+    expect(JSON.stringify(configuracoesDaSessaoDoChat())).toBe('{"attribution":{"commit":"","pr":""}}');
   });
 });
 

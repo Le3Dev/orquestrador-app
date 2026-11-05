@@ -82,6 +82,13 @@ const esquemaDasPreferencias = z.object({
   esforco: z.enum(ESFORCOS_DE_RACIOCINIO, { error: "Esforço inválido." }).optional(),
 });
 
+const MENSAGEM_DA_AUTORIZACAO_INVALIDA = "A autorização deve ser verdadeira ou falsa.";
+
+const esquemaDaAutorizacao = z.object(
+  { autorizado: z.boolean({ error: MENSAGEM_DA_AUTORIZACAO_INVALIDA }) },
+  { error: MENSAGEM_DA_AUTORIZACAO_INVALIDA },
+);
+
 const STATUS_POR_MOTIVO: Readonly<Record<MotivoDoErroDoChat, number>> = {
   dados_invalidos: 400,
   em_andamento: 409,
@@ -157,6 +164,18 @@ export function criarChatRoutes({ servico, canal, anexos }: Dependencias): Route
         ...(esforco === undefined ? {} : { esforco }),
       });
       resposta.json(preferencias);
+    }),
+  );
+
+  /**
+   * Autorização única para o chat editar arquivos e rodar comandos; vale até
+   * o próximo /clear. Pode chegar durante uma resposta: vale na próxima pergunta.
+   */
+  rotas.patch(
+    "/chat/autorizacao",
+    rota(async (requisicao, resposta) => {
+      const { autorizado } = esquemaDaAutorizacao.parse(requisicao.body ?? {});
+      resposta.json(await servico.alterarAutorizacao(autorizado));
     }),
   );
 

@@ -64,7 +64,8 @@ function ultimaCotaDe(eventos: readonly EventoDoChatRegistrado[]): JanelaDaCota[
 /**
  * Repositório do chat em arquivos, para uso local de uma pessoa só:
  *
- * dados/chat/conversa.json      — estado atual da conversa
+ * dados/chat/conversa.json      — estado atual da conversa (mensagens, sessão e
+ *                                 autorização para alterar; sem o campo, vale false)
  * dados/chat/eventos.jsonl      — histórico da conversa atual, um evento por linha
  * dados/chat/preferencias.json  — modelo e esforço escolhidos (sobrevivem ao /clear)
  * dados/chat/historico/conversa-<N>/{conversa.json,eventos.jsonl}

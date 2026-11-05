@@ -1,5 +1,7 @@
+import type { AcaoQuePedeAutorizacao, AutorizacaoPendente } from "../../chat/MensagemDoChat";
 import type { EventoDoMotorDeChat, ResultadoDaResposta, UsoDaResposta } from "../../chat/MotorDeChat";
 import { descreverFalha, janelasDaCota, resumirEntrada } from "./AdaptadorDeEventosDoClaudeCode";
+import { FERRAMENTAS_DE_COMANDO_DO_CHAT, FERRAMENTAS_DE_EDICAO_DO_CHAT } from "./ArgumentosDoChat";
 
 type Objeto = Record<string, unknown>;
 
@@ -41,12 +43,49 @@ const CAMPO_DO_DETALHE: Readonly<Record<string, string>> = {
   Read: "file_path",
   Glob: "pattern",
   Grep: "pattern",
+  Edit: "file_path",
+  Write: "file_path",
+  NotebookEdit: "notebook_path",
+  PowerShell: "command",
+  Bash: "command",
 };
 
-function detalheDaFerramenta(ferramenta: string, entrada: Objeto): string {
+function detalheDaFerramenta(ferramenta: string, entrada: Objeto, tamanho = TAMANHO_DO_DETALHE): string {
   const campo = CAMPO_DO_DETALHE[ferramenta];
   const valor = campo === undefined ? "" : texto(entrada, campo);
-  return valor === "" ? resumirEntrada(entrada) : valor.slice(0, TAMANHO_DO_DETALHE);
+  return valor === "" ? resumirEntrada(entrada) : valor.slice(0, tamanho);
+}
+
+/** Um comando pode ser um script inteiro; a tela precisa só de o reconhecer. */
+const TAMANHO_DO_DETALHE_DA_PENDENCIA = 500;
+
+/**
+ * O que cada ferramenta negada pede ao usuário: edição de arquivo ou comando.
+ * As demais (leitura, pesquisa) nunca pedem autorização.
+ */
+function acaoQuePedeAutorizacao(ferramenta: string): AcaoQuePedeAutorizacao | null {
+  if (FERRAMENTAS_DE_EDICAO_DO_CHAT.includes(ferramenta)) {
+    return "editar";
+  }
+  if (FERRAMENTAS_DE_COMANDO_DO_CHAT.includes(ferramenta)) {
+    return "rodar_comando";
+  }
+  return null;
+}
+
+/**
+ * Motivo que o Claude Code dá numa negação (`system`/`permission_denied`,
+ * campo `decision_reason_type`): `"mode"` quando a ferramenta não estava
+ * liberada (o `dontAsk` nega em vez de perguntar) e `"rule"` quando uma regra
+ * do `--disallowedTools` bloqueou — essa, autorizar não resolve.
+ */
+const NEGADA_POR_REGRA = "rule";
+
+/** Uma ação que o Claude Code não deixou acontecer (`permission_denials` do `result`). */
+interface Negacao {
+  ferramenta: string;
+  idDaChamada: string;
+  entrada: Objeto;
 }
 
 const SINAIS_DE_LIMITE_DE_USO = /usage limit|rate limit|limit reached|out of extra usage/i;
@@ -90,12 +129,26 @@ interface UsoDoModelo {
  * (`content_block_delta` com `text_delta`); deltas de raciocínio e do JSON de
  * entrada das ferramentas são descartados. As ferramentas usadas aparecem nas
  * mensagens `assistant` completas, com a entrada já fechada.
+ *
+ * Negações: cada ação que o Claude Code não deixou acontecer chega em
+ * `permission_denials` no `result` (ferramenta e entrada) e, antes, numa
+ * mensagem `system`/`permission_denied` com o motivo. Sem autorização, a
+ * primeira edição ou comando negado por não estar liberado vira a
+ * `autorizacaoPendente`; o resto (leitura de `.env*`, regra fixa do app,
+ * qualquer negação com alterações já autorizadas) vira aviso.
  */
 export class AdaptadorDeEventosDoChat {
   private ultimoResultado: Objeto | null = null;
   /** Soma dos consumos desde o último `result` de cada ciclo, por modelo. */
   private readonly usoDosCiclos = new Map<string, UsoDoModelo>();
   private algumCicloSemDelta = false;
+  /** Na ordem em que aconteceram, sem repetir a mesma chamada. */
+  private readonly negacoes: Negacao[] = [];
+  /** `tool_use_id` → `decision_reason_type` das mensagens `permission_denied`. */
+  private readonly motivoDaNegacao = new Map<string, string>();
+
+  /** `alteracoesAutorizadas`: com elas, nenhuma negação vira pedido de autorização. */
+  constructor(private readonly alteracoesAutorizadas = false) {}
 
   /** Preenchido quando chega a mensagem final (`result`); nulo se o processo parou antes. */
   get resultado(): ResultadoDaResposta | null {
@@ -106,7 +159,10 @@ export class AdaptadorDeEventosDoChat {
     const resposta = texto(mensagem, "result");
     const uso = this.extrairUso(mensagem);
     const sucesso = texto(mensagem, "subtype") === "success" && mensagem["is_error"] !== true;
-    return sucesso ? { sucesso: true, resposta, uso } : { sucesso: false, motivo: motivoDaFalha(mensagem, resposta), uso };
+    if (!sucesso) {
+      return { sucesso: false, motivo: motivoDaFalha(mensagem, resposta), uso };
+    }
+    return { sucesso: true, resposta, uso, ...this.separarNegacoes() };
   }
 
   traduzir(mensagem: unknown): EventoDoMotorDeChat[] {
@@ -114,6 +170,9 @@ export class AdaptadorDeEventosDoChat {
       return [];
     }
     switch (texto(mensagem, "type")) {
+      case "system":
+        this.registrarMotivoDaNegacao(mensagem);
+        return [];
       case "stream_event":
         return this.traduzirTrecho(mensagem);
       case "assistant":
@@ -164,6 +223,7 @@ export class AdaptadorDeEventosDoChat {
    */
   private registrarResultado(mensagem: Objeto): void {
     this.ultimoResultado = mensagem;
+    this.registrarNegacoes(mensagem);
     const { porModelo, ehDelta } = usoPorModelo(mensagem);
     if (!ehDelta) {
       this.algumCicloSemDelta = true;
@@ -179,6 +239,54 @@ export class AdaptadorDeEventosDoChat {
         saida: anterior.saida + numero(uso, "outputTokens"),
       });
     }
+  }
+
+  private registrarMotivoDaNegacao(mensagem: Objeto): void {
+    const idDaChamada = texto(mensagem, "tool_use_id");
+    if (texto(mensagem, "subtype") === "permission_denied" && idDaChamada !== "") {
+      this.motivoDaNegacao.set(idDaChamada, texto(mensagem, "decision_reason_type"));
+    }
+  }
+
+  /**
+   * Não se sabe se cada `result` traz só as negações do seu ciclo ou todas
+   * as do processo: junta as de todos, sem repetir a mesma chamada.
+   */
+  private registrarNegacoes(mensagem: Objeto): void {
+    for (const negacao of objetos(mensagem, "permission_denials")) {
+      const idDaChamada = texto(negacao, "tool_use_id");
+      if (idDaChamada !== "" && this.negacoes.some((anterior) => anterior.idDaChamada === idDaChamada)) {
+        continue;
+      }
+      this.negacoes.push({
+        ferramenta: texto(negacao, "tool_name"),
+        idDaChamada,
+        entrada: objeto(negacao, "tool_input"),
+      });
+    }
+  }
+
+  /**
+   * Sem autorização, a primeira edição ou comando negado por não estar
+   * liberado é o pedido de autorização; as edições e comandos negados depois
+   * dele são cobertos pela mesma autorização. O resto vira aviso.
+   */
+  private separarNegacoes(): { autorizacaoPendente: AutorizacaoPendente | null; avisos: string[] } {
+    let autorizacaoPendente: AutorizacaoPendente | null = null;
+    const avisos = new Set<string>();
+    for (const { ferramenta, idDaChamada, entrada } of this.negacoes) {
+      const acao = acaoQuePedeAutorizacao(ferramenta);
+      const porRegra = this.motivoDaNegacao.get(idDaChamada) === NEGADA_POR_REGRA;
+      if (acao !== null && !this.alteracoesAutorizadas && !porRegra) {
+        autorizacaoPendente ??= {
+          acao,
+          detalhe: detalheDaFerramenta(ferramenta, entrada, TAMANHO_DO_DETALHE_DA_PENDENCIA),
+        };
+        continue;
+      }
+      avisos.add(`Bloqueado pelas permissões do chat: ${ferramenta} · ${detalheDaFerramenta(ferramenta, entrada)}`);
+    }
+    return { autorizacaoPendente, avisos: [...avisos] };
   }
 
   private extrairUso(ultimo: Objeto): UsoDaResposta {

@@ -2,6 +2,7 @@ import type { TipoDeImagem } from "../orquestracao/Anexo";
 import type { EsforcoDeRaciocinio } from "../orquestracao/EsforcoDeRaciocinio";
 import type { JanelaDaCota } from "../orquestracao/EventoDeOrquestracao";
 import type { ModeloClaude } from "../orquestracao/ModeloClaude";
+import type { AutorizacaoPendente } from "./MensagemDoChat";
 
 /** Imagem anexada à pergunta, já guardada em disco. */
 export interface ImagemDaPergunta {
@@ -25,17 +26,25 @@ export interface PerguntaAoMotorDeChat {
   pastaDasImagens: string | null;
   /** Pasta de trabalho do processo (cwd); criada se não existir. */
   pastaDaSessao: string;
-  /** Raiz dos projetos, liberada só para leitura (arquivos `.env*` continuam negados). */
+  /**
+   * Raiz dos projetos: leitura sempre; edição e comandos só com
+   * `alteracoesAutorizadas` (arquivos `.env*` continuam negados).
+   */
   pastaDosProjetos: string;
   modelo: ModeloClaude;
   esforco: EsforcoDeRaciocinio;
+  /**
+   * Se o usuário autorizou editar arquivos e rodar comandos nesta conversa.
+   * Sem autorização, a tentativa é negada e volta como `autorizacaoPendente`.
+   */
+  alteracoesAutorizadas: boolean;
 }
 
 /** O que acontece enquanto o motor responde, para a tela acompanhar ao vivo. */
 export type EventoDoMotorDeChat =
   /** Pedaço de texto da resposta, na ordem em que é gerado. */
   | { tipo: "trecho_da_resposta"; texto: string }
-  /** O motor usou uma ferramenta (pesquisa na web, leitura de arquivo…); `detalhe` é um resumo curto da entrada. */
+  /** O motor usou uma ferramenta (pesquisa na web, leitura, edição, comando…); `detalhe` é um resumo curto da entrada. */
   | { tipo: "ferramenta_do_chat"; ferramenta: string; detalhe: string }
   /** Situação da cota da assinatura do Claude. */
   | { tipo: "uso_da_cota"; janelas: JanelaDaCota[] };
@@ -52,7 +61,15 @@ export interface UsoDaResposta {
 }
 
 export type ResultadoDaResposta =
-  | { sucesso: true; resposta: string; uso: UsoDaResposta }
+  | {
+      sucesso: true;
+      resposta: string;
+      uso: UsoDaResposta;
+      /** A primeira edição ou comando negado por falta de autorização; nulo se não houve. */
+      autorizacaoPendente: AutorizacaoPendente | null;
+      /** Outras ações bloqueadas (leitura de `.env*`, regra fixa do app), já legíveis. */
+      avisos: string[];
+    }
   | { sucesso: false; motivo: string; uso: UsoDaResposta | null };
 
 /** Porta do chat rápido para o motor que gera as respostas. */
