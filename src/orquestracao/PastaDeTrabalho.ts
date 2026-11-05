@@ -34,6 +34,23 @@ export class PastaDeTrabalho {
     return new PastaDeTrabalho(alvo);
   }
 
+  /**
+   * Pasta escolhida à mão pelo usuário em qualquer lugar do computador (pelo
+   * navegador de pastas). Diferente de `dentroDe`, não exige ficar sob a raiz
+   * dos projetos: o caminho foi informado de propósito, não por um erro de
+   * digitação de um caminho relativo. Exige um caminho absoluto, já existente.
+   */
+  static qualquer(caminho: string): PastaDeTrabalho {
+    const informado = caminho.trim();
+    if (informado === "") {
+      throw new ErroDeOrquestracao("dados_invalidos", "Informe a pasta de trabalho.");
+    }
+    if (!path.isAbsolute(informado)) {
+      throw new ErroDeOrquestracao("dados_invalidos", "Informe o caminho completo da pasta.");
+    }
+    return new PastaDeTrabalho(path.resolve(informado));
+  }
+
   /** Recria a partir do histórico salvo, que já passou pela validação ao ser criado. */
   static reconstituir(caminho: string): PastaDeTrabalho {
     return new PastaDeTrabalho(caminho);

@@ -8,6 +8,13 @@ import { TAMANHO_MINIMO_DO_TERMINAL } from "../../shared/canvas/layout";
 import { ALCA_DO_TERMINAL, type NoRascunho as TipoDoNo } from "../../shared/canvas/nos";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
 import { CamposDaConfiguracao } from "../CamposDaConfiguracao";
+import { NavegadorDePastas } from "./NavegadorDePastas";
+
+/** Nome exibido para um caminho: a última parte da pasta. */
+function nomeDaPasta(caminho: string): string {
+  const partes = caminho.split(/[\\/]/).filter((parte) => parte !== "");
+  return partes[partes.length - 1] ?? caminho;
+}
 
 /**
  * O terminal que abre ao clicar em "Novo orquestrador": pede a pasta, o nome
@@ -21,6 +28,9 @@ export function NoRascunho({ id, selected }: NodeProps<TipoDoNo>) {
   const [pasta, setPasta] = useState("");
   const [configuracao, setConfiguracao] = useState(CONFIGURACAO_PADRAO_DO_ORQUESTRADOR);
   const [opcoes, setOpcoes] = useState<{ raiz: string; pastas: PastaDeProjeto[] } | null>(null);
+  // Pasta escolhida pelo navegador do computador, fora da lista de projetos.
+  const [pastaExterna, setPastaExterna] = useState<PastaDeProjeto | null>(null);
+  const [navegando, setNavegando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [criando, setCriando] = useState(false);
 
@@ -40,16 +50,35 @@ export function NoRascunho({ id, selected }: NodeProps<TipoDoNo>) {
       .catch((falha: unknown) => setErro(mensagemDeErro(falha)));
   }, [carregou, servidor.conectado]);
 
+  /** As opções do seletor: os projetos da raiz mais a pasta escolhida à mão, se houver. */
+  function nomeDoCaminho(caminho: string): string {
+    if (pastaExterna?.caminho === caminho) {
+      return pastaExterna.nome;
+    }
+    return opcoes?.pastas.find((opcao) => opcao.caminho === caminho)?.nome ?? "";
+  }
+
   /** Sugere o nome da pasta como nome do orquestrador, sem apagar um nome digitado. */
   function escolherPasta(caminho: string): void {
-    const anterior = opcoes?.pastas.find((opcao) => opcao.caminho === pasta)?.nome ?? "";
-    const escolhida = opcoes?.pastas.find((opcao) => opcao.caminho === caminho)?.nome ?? "";
+    const anterior = nomeDoCaminho(pasta);
+    const escolhida = nomeDoCaminho(caminho);
     if (nome.trim() === "" || nome === anterior) {
       setNome(escolhida);
     }
     setPasta(caminho);
   }
 
+  /** Confirma a pasta vinda do navegador do computador e a deixa selecionada. */
+  function escolherPastaExterna(caminho: string): void {
+    const externa = { nome: nomeDaPasta(caminho), caminho };
+    const anterior = nomeDoCaminho(pasta);
+    if (nome.trim() === "" || nome === anterior) {
+      setNome(externa.nome);
+    }
+    setPastaExterna(externa);
+    setPasta(caminho);
+    setNavegando(false);
+  }
   // O aviso de esforço depende dos modelos e da pasta escolhidos: a busca muda junto com eles.
   const { modeloDoOrquestrador, modeloDosSubagentes } = configuracao;
   const buscarEsforcoHerdado = useCallback(
@@ -109,24 +138,39 @@ export function NoRascunho({ id, selected }: NodeProps<TipoDoNo>) {
                 <label className="label" htmlFor={`${idDoCampo}-pasta`}>
                   Pasta de trabalho
                 </label>
-                <select
-                  id={`${idDoCampo}-pasta`}
-                  className="select font-mono text-[12px]"
-                  value={pasta}
-                  onChange={(evento) => escolherPasta(evento.target.value)}
-                  required
-                >
-                  <option value="" disabled>
-                    {opcoes === null ? "carregando pastas…" : "escolha um projeto"}
-                  </option>
-                  {opcoes?.pastas.map((opcao) => (
-                    <option key={opcao.caminho} value={opcao.caminho}>
-                      {opcao.nome}
+                <div className="flex items-stretch gap-2">
+                  <select
+                    id={`${idDoCampo}-pasta`}
+                    className="select min-w-0 flex-1 font-mono text-[12px]"
+                    value={pasta}
+                    onChange={(evento) => escolherPasta(evento.target.value)}
+                    required
+                  >
+                    <option value="" disabled>
+                      {opcoes === null ? "carregando pastas…" : "escolha um projeto"}
                     </option>
-                  ))}
-                  {opcoes !== null && <option value={opcoes.raiz}>todos os projetos (pasta raiz)</option>}
-                </select>
-                <span className="hint">Os agentes só trabalham dentro desta pasta.</span>
+                    {opcoes?.pastas.map((opcao) => (
+                      <option key={opcao.caminho} value={opcao.caminho}>
+                        {opcao.nome}
+                      </option>
+                    ))}
+                    {opcoes !== null && <option value={opcoes.raiz}>todos os projetos (pasta raiz)</option>}
+                    {pastaExterna !== null && (
+                      <option value={pastaExterna.caminho}>{pastaExterna.nome} (pasta do computador)</option>
+                    )}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline shrink-0"
+                    title="Escolher uma pasta qualquer do computador"
+                    onClick={() => setNavegando(true)}
+                  >
+                    procurar…
+                  </button>
+                </div>
+                <span className="hint">
+                  Os agentes só trabalham dentro desta pasta. Use "procurar…" para uma pasta fora dos projetos.
+                </span>
               </div>
               <div className="field">
                 <label className="label" htmlFor={`${idDoCampo}-nome`}>
@@ -167,6 +211,14 @@ export function NoRascunho({ id, selected }: NodeProps<TipoDoNo>) {
           </button>
         </div>
       </form>
+
+      {navegando && (
+        <NavegadorDePastas
+          caminhoInicial={pastaExterna?.caminho ?? opcoes?.raiz}
+          aoEscolher={escolherPastaExterna}
+          aoFechar={() => setNavegando(false)}
+        />
+      )}
     </>
   );
 }

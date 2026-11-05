@@ -173,6 +173,16 @@ export interface PastaDeProjeto {
   caminho: string;
 }
 
+/** Resultado de navegar pelo computador para escolher uma pasta qualquer. */
+export interface NavegacaoDePastas {
+  /** A pasta que está sendo listada. */
+  caminho: string;
+  /** A pasta acima; `null` quando já se chegou à raiz do disco. */
+  pai: string | null;
+  /** As subpastas visíveis, em ordem alfabética. */
+  pastas: PastaDeProjeto[];
+}
+
 /**
  * Nota livre do canvas (bloco de notas). O conteúdo fica no servidor; a
  * posição, o tamanho e se está minimizada ficam no layout do navegador.

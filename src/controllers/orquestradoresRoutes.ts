@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { Request, Response, Router } from "express";
 import { z, ZodError } from "zod";
 
@@ -209,6 +211,15 @@ export function criarOrquestradoresRoutes({
     }),
   );
 
+  // Navega pelo computador para escolher uma pasta fora da raiz dos projetos.
+  rotas.get(
+    "/pastas/navegar",
+    rota(async (requisicao, resposta) => {
+      const caminho = typeof requisicao.query.caminho === "string" ? requisicao.query.caminho : undefined;
+      resposta.json(await explorador.navegar(caminho));
+    }),
+  );
+
   rotas.get(
     "/orquestradores",
     rota((_requisicao, resposta) => {
@@ -221,7 +232,12 @@ export function criarOrquestradoresRoutes({
     rota(async (requisicao, resposta) => {
       const { nome, pastaDeTrabalho, ...configuracao } = esquemaDeCriacao.parse(requisicao.body);
 
-      const pasta = PastaDeTrabalho.dentroDe(pastaRaiz, pastaDeTrabalho);
+      // Caminho absoluto = pasta escolhida à mão pelo navegador de pastas, que
+      // pode ficar fora da raiz. Relativo = veio do seletor de projetos, preso
+      // à raiz por segurança.
+      const pasta = path.isAbsolute(pastaDeTrabalho.trim())
+        ? PastaDeTrabalho.qualquer(pastaDeTrabalho)
+        : PastaDeTrabalho.dentroDe(pastaRaiz, pastaDeTrabalho);
       if (!(await explorador.existe(pasta.caminho))) {
         throw new ErroDeOrquestracao("dados_invalidos", `A pasta "${pasta.caminho}" não existe.`);
       }
