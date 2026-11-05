@@ -1346,6 +1346,67 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   background: color-mix(in srgb, var(--active) 6%, var(--surface-2));
 }
 
+/* Pedido de autorização (o chat quis editar ou rodar um comando): em tom de
+ * aviso, porque autorizar deixa o chat alterar os projetos até o /clear. */
+.cartao-de-autorizacao {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
+  background: color-mix(in srgb, var(--warning) 7%, var(--surface-2));
+}
+.detalhe-da-autorizacao {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--fonte-mono);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--warning);
+  background: var(--surface-3);
+  overflow-wrap: anywhere;
+}
+.acoes-da-autorizacao { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* Cor própria: utilitários do Tailwind ficam na camada e perdem para o `.btn`, sem camada. */
+.botao-de-autorizar { background: var(--warning); color: var(--claude-escuro); }
+.botao-de-autorizar:not(:disabled):hover { background: color-mix(in srgb, var(--warning) 85%, var(--claude-claro)); }
+
+/* Selo "alterações autorizadas" ao lado do campo do chat; o ✕ revoga. */
+.selo-de-autorizacao {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  height: 22px;
+  padding: 0 2px 0 8px;
+  border-radius: 999px;
+  font-family: var(--fonte-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  cursor: default;
+}
+.selo-de-autorizacao::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); }
+.revogar-autorizacao {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 10px;
+  color: var(--warning);
+  cursor: pointer;
+}
+.revogar-autorizacao:not(:disabled):hover { background: color-mix(in srgb, var(--warning) 22%, transparent); color: var(--primary); }
+.revogar-autorizacao:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.revogar-autorizacao:disabled { opacity: .45; cursor: not-allowed; }
+
 .mostrar-conversa { align-self: center; gap: 6px; cursor: pointer; }
 .mostrar-conversa:hover { color: var(--primary); border-color: var(--border-forte); }
 
@@ -1530,9 +1591,13 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 /* ---------------- App desktop (Electron): barra de título ----------------
  * Faixa própria no topo, de ponta a ponta: a janela principal não tem barra
  * nem botões nativos (titleBarStyle 'hidden' sem titleBarOverlay, em
- * electron/main.js). Esquerda: identidade; direita: status e botões ─ ☐ ✕.
- * O `-webkit-app-region` só tem efeito no Electron. */
+ * electron/main.js). Esquerda: identidade; centro: a busca (abre a paleta);
+ * direita: status, ⚙ e botões ─ ☐ ✕. O `-webkit-app-region` só tem efeito
+ * no Electron. Acima do canvas (`z-index`), para o aviso de falha do ⚙
+ * descer sobre ele. */
 .barra-de-titulo {
+  position: relative;
+  z-index: 30;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -1545,14 +1610,56 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   -webkit-app-region: drag;
   user-select: none;
 }
+/* O espaço livre entre o nome e o status; a busca fica no meio dele. O vão
+ * em volta dela continua arrastando a janela. */
+.centro-da-barra-de-titulo { flex: 1 1 0; display: flex; justify-content: center; }
 .direita-da-barra-de-titulo {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 16px;
 }
+/* Um botão com cara de campo: não é um input, só abre a paleta (Ctrl+K). */
+.campo-de-busca-da-barra {
+  flex: 0 1 340px;
+  min-width: 200px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 4px 0 10px;
+  border-radius: var(--radius-button);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--fonte-texto);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color .15s, border-color .15s, color .15s;
+}
+.campo-de-busca-da-barra:hover { background: var(--surface-3); border-color: var(--border-forte); color: var(--secondary); }
+.campo-de-busca-da-barra:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.icone-da-busca { flex-shrink: 0; font-size: 14px; line-height: 1; }
+.texto-da-busca { flex: 1 1 auto; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.campo-de-busca-da-barra kbd {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+  font-family: var(--fonte-mono);
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--muted);
+}
+/* ⚙ (pastas e Claude Code), um separador e os botões ─ ☐ ✕, colados. */
+.botoes-da-barra-de-titulo { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.botao-dos-ajustes { font-size: 14px; }
+.separador-da-barra-de-titulo { width: 1px; height: 16px; margin: 0 4px; background: var(--border-forte); flex-shrink: 0; }
+/* Falha ao abrir os Ajustes: desce da barra, à direita, sobre o canvas. */
+.erro-da-barra-de-titulo { position: absolute; top: 100%; right: 8px; max-width: calc(100% - 16px); }
 .controles-da-janela { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .botao-da-janela {
   display: inline-flex;
@@ -1608,16 +1715,50 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .coluna-do-topo-centro { flex: 1 1 0; align-items: center; }
 .coluna-do-topo-direita { flex: 0 1 auto; align-items: flex-end; }
 
+/* ---------------- "+ Novo ▾": menu da barra do canvas ---------------- */
+.ancora-do-menu { position: relative; display: flex; }
+.menu-do-novo {
+  position: absolute;
+  /* Logo abaixo do painel da barra (8 px de respiro dela + 6 px). */
+  top: calc(100% + 14px);
+  left: -10px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 230px;
+  padding: 6px;
+  background: var(--surface-2);
+  border-color: var(--border-forte);
+  box-shadow: 0 18px 50px -18px rgba(0, 0, 0, .9);
+  animation: subir-menu .14s ease-out both;
+}
+@keyframes subir-menu { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.menu-do-novo .item-do-menu { gap: 16px; font-size: 12.5px; color: var(--primary); }
+.item-com-icone { display: inline-flex; align-items: center; gap: 9px; min-width: 0; }
+.icone-do-item { display: grid; place-items: center; width: 16px; flex-shrink: 0; font-size: 13px; color: var(--secondary); }
+.icone-do-item-ativo { color: var(--active); }
+.atalho-do-item { flex-shrink: 0; font-family: var(--fonte-mono); font-size: 10.5px; color: var(--muted); }
+
 /* ---------------- Larguras da janela ----------------
- * ≥ 1280 px: tudo completo. 1100–1280 px: rótulos curtos ("5h", "+ Novo").
+ * ≥ 1280 px: tudo completo. 1100–1280 px: rótulos curtos ("5h", "+ Nota").
  * < 1100 px: botões só com ícone (dica no `title`), status só com a situação
- * e um medidor resumido (o resto no balão) e sem minimapa. */
+ * e um medidor resumido (o resto no balão) e sem minimapa.
+ * Na barra de título, o status divide a largura com a busca e encurta um
+ * passo antes: nomes curtos abaixo de 1440 px e só o resumo abaixo de 1280 px;
+ * abaixo de 1100 px a busca fica só com a lupa. */
 .rotulo-curto, .rotulo-icone { display: none; }
+
+@media (width < 1440px) {
+  .status-na-barra-de-titulo .rotulo-completo, .status-na-barra-de-titulo .status-extra { display: none; }
+  .status-na-barra-de-titulo .rotulo-curto { display: inline; }
+}
 
 @media (width < 1280px) {
   .rotulo-completo { display: none; }
   .rotulo-curto { display: inline; }
   .status-extra, .subtitulo-da-barra { display: none; }
+  .status-na-barra-de-titulo .status-detalhe { display: none; }
+  .status-na-barra-de-titulo .status-resumo { display: inline-flex; }
 }
 
 @media (width < 1100px) {
@@ -1627,4 +1768,15 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   .status-detalhe { display: none; }
   .status-resumo { display: inline-flex; }
   .react-flow__minimap { display: none; }
+  .campo-de-busca-da-barra {
+    flex: 0 0 28px;
+    min-width: 0;
+    width: 28px;
+    padding: 0;
+    justify-content: center;
+    background: transparent;
+    border-color: transparent;
+    color: var(--secondary);
+  }
+  .campo-de-busca-da-barra .texto-da-busca, .campo-de-busca-da-barra kbd { display: none; }
 }

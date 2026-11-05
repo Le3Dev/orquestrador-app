@@ -2,7 +2,7 @@ import { MAXIMO_DE_IMAGENS_POR_MENSAGEM } from "../orquestracao/Anexo";
 import type { AcaoDoApp } from "./AcaoDoApp";
 import { ErroDoChat } from "./ErroDoChat";
 import type { EventoDoChat } from "./EventoDoChat";
-import { DadosDaMensagemDoChat, ImagemDaMensagem, MensagemDoChat } from "./MensagemDoChat";
+import { AutorizacaoPendente, DadosDaMensagemDoChat, ImagemDaMensagem, MensagemDoChat } from "./MensagemDoChat";
 import type { UsoDaResposta } from "./MotorDeChat";
 
 export const TAMANHO_MAXIMO_DA_PERGUNTA = 50_000;
@@ -15,6 +15,8 @@ export type SituacaoDaConversa = "ocioso" | "respondendo";
 export interface DadosDaConversaDoChat {
   sessaoId: string;
   sessaoIniciada: boolean;
+  /** Conversas gravadas antes do campo não o têm: valem `false`. */
+  alteracoesAutorizadas: boolean;
   mensagens: DadosDaMensagemDoChat[];
 }
 
@@ -32,16 +34,21 @@ export interface NovaPergunta {
  *
  * A regra central mora aqui: uma pergunta por vez. Enquanto o Claude
  * responde, não dá para perguntar de novo nem limpar a conversa.
+ *
+ * A conversa também guarda se o usuário autorizou o chat a editar arquivos e
+ * rodar comandos. A autorização é única: vale para todas as perguntas
+ * seguintes até ser revogada ou até a conversa ser limpa ("/clear").
  */
 export class ConversaDoChat {
   private constructor(
     private sessaoAtual: string,
     private sessaoJaIniciada: boolean,
+    private alteracoesJaAutorizadas: boolean,
     private mensagensAtuais: MensagemDoChat[],
   ) {}
 
   static nova(sessaoId: string): ConversaDoChat {
-    return new ConversaDoChat(sessaoId, false, []);
+    return new ConversaDoChat(sessaoId, false, false, []);
   }
 
   static reconstituir(dados: DadosDaConversaDoChat): ConversaDoChat {
@@ -51,6 +58,7 @@ export class ConversaDoChat {
     return new ConversaDoChat(
       dados.sessaoId,
       dados.sessaoIniciada === true,
+      dados.alteracoesAutorizadas === true,
       dados.mensagens.map((mensagem) => MensagemDoChat.reconstituir(mensagem)),
     );
   }
@@ -67,6 +75,11 @@ export class ConversaDoChat {
 
   get situacao(): SituacaoDaConversa {
     return this.respostaEmAndamento === null ? "ocioso" : "respondendo";
+  }
+
+  /** Se o chat pode editar arquivos e rodar comandos nas próximas perguntas. */
+  get alteracoesAutorizadas(): boolean {
+    return this.alteracoesJaAutorizadas;
   }
 
   get respostaEmAndamento(): MensagemDoChat | null {
@@ -147,12 +160,43 @@ export class ConversaDoChat {
     acoes: readonly AcaoDoApp[],
     avisos: readonly string[],
     uso: UsoDaResposta,
+    autorizacaoPendente: AutorizacaoPendente | null = null,
   ): EventoDoChat {
     const resposta = this.respostaAtiva();
     // Uma resposta concluída prova que a sessão foi criada.
     this.sessaoJaIniciada = true;
-    resposta.concluir(texto, acoes, avisos, uso);
-    return { tipo: "resposta_concluida", mensagemId: resposta.id, texto, acoes: [...acoes], avisos: [...avisos], uso };
+    resposta.concluir(texto, acoes, avisos, uso, autorizacaoPendente);
+    return {
+      tipo: "resposta_concluida",
+      mensagemId: resposta.id,
+      texto,
+      acoes: [...acoes],
+      avisos: [...avisos],
+      uso,
+      autorizacaoPendente: resposta.autorizacaoPendente === null ? null : { ...resposta.autorizacaoPendente },
+    };
+  }
+
+  /**
+   * O usuário autoriza o chat a editar arquivos e rodar comandos. Pode
+   * acontecer a qualquer momento, inclusive durante uma resposta: vale a
+   * partir da próxima pergunta. Já autorizado, não gera evento (nulo).
+   */
+  autorizarAlteracoes(): EventoDoChat | null {
+    if (this.alteracoesJaAutorizadas) {
+      return null;
+    }
+    this.alteracoesJaAutorizadas = true;
+    return { tipo: "alteracoes_autorizadas" };
+  }
+
+  /** Tira a autorização; vale a partir da próxima pergunta. Sem autorização, não gera evento (nulo). */
+  revogarAlteracoes(): EventoDoChat | null {
+    if (!this.alteracoesJaAutorizadas) {
+      return null;
+    }
+    this.alteracoesJaAutorizadas = false;
+    return { tipo: "autorizacao_revogada" };
   }
 
   falhar(motivo: string, uso: UsoDaResposta | null): EventoDoChat {
@@ -173,8 +217,9 @@ export class ConversaDoChat {
 
   /**
    * Começa uma conversa nova ("/clear"): as mensagens saem do agregado (o
-   * histórico é arquivado pelo repositório) e a próxima pergunta abre outra
-   * sessão do Claude Code, sem memória da anterior.
+   * histórico é arquivado pelo repositório), a próxima pergunta abre outra
+   * sessão do Claude Code, sem memória da anterior, e a autorização para
+   * alterar volta a não existir.
    */
   limpar(novaSessaoId: string): EventoDoChat {
     if (this.respostaEmAndamento !== null) {
@@ -186,6 +231,7 @@ export class ConversaDoChat {
     this.mensagensAtuais = [];
     this.sessaoAtual = novaSessaoId;
     this.sessaoJaIniciada = false;
+    this.alteracoesJaAutorizadas = false;
     return { tipo: "conversa_limpa" };
   }
 
@@ -201,6 +247,7 @@ export class ConversaDoChat {
     return {
       sessaoId: this.sessaoAtual,
       sessaoIniciada: this.sessaoJaIniciada,
+      alteracoesAutorizadas: this.alteracoesJaAutorizadas,
       mensagens: this.mensagens,
     };
   }

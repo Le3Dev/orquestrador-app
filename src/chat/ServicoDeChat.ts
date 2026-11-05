@@ -26,7 +26,7 @@ export interface DependenciasDoServicoDeChat {
   execucoes: ControleDeExecucoes;
   /** Pasta onde o processo do Claude Code roda (`<PASTA_DADOS>/chat/sessao`). */
   pastaDaSessao: string;
-  /** Raiz dos projetos, liberada só para leitura. */
+  /** Raiz dos projetos: leitura sempre; edição e comandos só com a autorização do usuário. */
   pastaDosProjetos: string;
   gerarId: () => string;
   agora: () => Date;
@@ -54,6 +54,8 @@ export interface PerguntaEnviada {
 export interface EstadoDoChat {
   sessaoId: string;
   situacao: SituacaoDaConversa;
+  /** Se o chat pode editar arquivos e rodar comandos (vale a partir da próxima pergunta). */
+  alteracoesAutorizadas: boolean;
   preferencias: DadosDasPreferenciasDoChat;
   mensagens: DadosDaMensagemDoChat[];
   ultimaSequencia: number;
@@ -65,8 +67,8 @@ function descreverErro(erro: unknown): string {
 }
 
 /**
- * Casos de uso do chat rápido: perguntar, cancelar, limpar a conversa e
- * trocar modelo e esforço.
+ * Casos de uso do chat rápido: perguntar, cancelar, limpar a conversa,
+ * trocar modelo e esforço e autorizar (ou não) alterações.
  *
  * Não guarda estado: a conversa vem do repositório e a resposta em execução
  * fica no `ControleDeExecucoes`.
@@ -80,6 +82,7 @@ export class ServicoDeChat {
     return {
       sessaoId: conversa.sessaoId,
       situacao: conversa.situacao,
+      alteracoesAutorizadas: conversa.alteracoesAutorizadas,
       preferencias: repositorio.preferencias().paraDados(),
       mensagens: conversa.mensagens,
       ultimaSequencia: repositorio.ultimaSequencia(),
@@ -116,6 +119,7 @@ export class ServicoDeChat {
     });
     // Valem do começo ao fim desta resposta, mesmo que o usuário as troque no meio.
     const preferencias = repositorio.preferencias();
+    const alteracoesAutorizadas = conversa.alteracoesAutorizadas;
     // O sinal nasce antes de qualquer espera: um cancelamento que chegue
     // enquanto a pergunta é gravada já encontra a execução registrada.
     const sinal = execucoes.iniciar(ID_DO_CHAT);
@@ -133,8 +137,8 @@ export class ServicoDeChat {
       throw erro;
     }
 
-    const conclusao = this.responder(conversa, mensagemId, imagens, preferencias, sinal).finally(() =>
-      execucoes.encerrar(ID_DO_CHAT),
+    const conclusao = this.responder(conversa, mensagemId, imagens, preferencias, alteracoesAutorizadas, sinal).finally(
+      () => execucoes.encerrar(ID_DO_CHAT),
     );
     return { mensagemId, conclusao };
   }
@@ -183,6 +187,22 @@ export class ServicoDeChat {
   }
 
   /**
+   * Autoriza (ou tira a autorização) o chat a editar arquivos e rodar
+   * comandos. Vale a qualquer momento, inclusive durante uma resposta, e passa
+   * a valer na próxima pergunta. Repetir o estado atual não gera evento.
+   */
+  async alterarAutorizacao(autorizado: boolean): Promise<{ autorizado: boolean }> {
+    const { repositorio } = this.dependencias;
+    const conversa = repositorio.conversa();
+    const evento = autorizado ? conversa.autorizarAlteracoes() : conversa.revogarAlteracoes();
+    if (evento !== null) {
+      this.publicar(evento);
+      await repositorio.salvar(conversa);
+    }
+    return { autorizado: conversa.alteracoesAutorizadas };
+  }
+
+  /**
    * Ao subir o servidor, nenhuma resposta pode estar de fato rodando: o
    * processo morreu junto com o servidor anterior. Devolve se havia uma.
    */
@@ -203,6 +223,7 @@ export class ServicoDeChat {
     mensagemId: string,
     imagens: readonly ImagemDaMensagem[],
     preferencias: PreferenciasDoChat,
+    alteracoesAutorizadas: boolean,
     sinal: AbortSignal,
   ): Promise<void> {
     const { motor, repositorio, anexos, agora, pastaDaSessao, pastaDosProjetos } = this.dependencias;
@@ -224,6 +245,7 @@ export class ServicoDeChat {
             pastaDosProjetos,
             projetos: contexto.projetos,
             orquestradores: contexto.orquestradores,
+            alteracoesAutorizadas,
           }),
           instrucoes: instrucoesDoChat(),
           imagens: imagens.map((imagem) => ({
@@ -235,6 +257,7 @@ export class ServicoDeChat {
           pastaDosProjetos,
           modelo: preferencias.modelo,
           esforco: preferencias.esforco,
+          alteracoesAutorizadas,
         },
         (evento) => this.observar(conversa, mensagemId, evento),
         sinal,
@@ -248,7 +271,9 @@ export class ServicoDeChat {
         this.publicar(conversa.cancelar());
       } else if (resultado !== null && resultado.sucesso) {
         const { texto, acoes, avisos } = separarAcoesDoApp(resultado.resposta, projetos);
-        this.publicar(conversa.concluir(texto, acoes, avisos, resultado.uso));
+        this.publicar(
+          conversa.concluir(texto, acoes, [...resultado.avisos, ...avisos], resultado.uso, resultado.autorizacaoPendente),
+        );
       } else {
         const motivo = resultado !== null && !resultado.sucesso ? resultado.motivo : descreverErro(erro);
         this.publicar(conversa.falhar(motivo, resultado !== null && !resultado.sucesso ? resultado.uso : null));

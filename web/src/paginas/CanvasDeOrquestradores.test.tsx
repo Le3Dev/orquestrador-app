@@ -8,7 +8,7 @@ import type {
   EventoRegistrado,
   ResumoDoOrquestrador,
 } from "../shared/api/tipos";
-import { lerLayout, sobrepoe, TAMANHO_DO_BIXINHO } from "../shared/canvas/layout";
+import { lerLayout, organizarComNotas, sobrepoe, TAMANHO_DO_BIXINHO } from "../shared/canvas/layout";
 import { idDoBixinho } from "../shared/canvas/nos";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../shared/estado/aplicarEvento";
 import { CanvasDeOrquestradores } from "./CanvasDeOrquestradores";
@@ -39,6 +39,17 @@ class ObservadorDeTamanhoFalso {
   observe(): void {}
   unobserve(): void {}
   disconnect(): void {}
+}
+
+/** Escolhe um item do "+ Novo ▾" da barra do canvas. */
+function escolherNoNovo(item: "Orquestrador" | "Nota"): void {
+  fireEvent.click(screen.getByRole("button", { name: "Novo" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: item }));
+}
+
+/** Ctrl+N (novo orquestrador) ou Ctrl+Shift+N (nova nota); devolve false se o padrão foi impedido. */
+function ctrlN(alvo: Window | HTMLElement, { comShift = false } = {}): boolean {
+  return fireEvent.keyDown(alvo, { key: comShift ? "N" : "n", code: "KeyN", ctrlKey: true, shiftKey: comShift });
 }
 
 function nota(id: string, alteracoes: Partial<DadosDaNota> = {}): DadosDaNota {
@@ -90,17 +101,34 @@ describe("CanvasDeOrquestradores · notas", () => {
     localStorage.clear();
   });
 
-  it("\"+ notas\" chama o POST, cria o nó com o foco no texto e guarda a nota no layout", async () => {
+  it("\"+ Novo ▾\" › Nota chama o POST, cria o nó com o foco no texto e guarda a nota no layout", async () => {
     vi.spyOn(api, "listarNotas").mockResolvedValue([]);
     const criar = vi.spyOn(api, "criarNota").mockResolvedValue(nota("n1"));
     render(<CanvasDeOrquestradores />);
 
-    fireEvent.click(screen.getByRole("button", { name: "+ notas" }));
+    escolherNoNovo("Nota");
 
     const campo = await screen.findByRole("textbox", { name: "Texto da nota" });
     expect(criar).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(campo).toHaveFocus());
     await waitFor(() => expect(lerLayout().notas.n1).toMatchObject({ minimizada: false }));
+  });
+
+  it("Ctrl+Shift+N cria uma nota (impedindo o padrão); com o foco num campo de texto, não faz nada", async () => {
+    vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+    const criar = vi.spyOn(api, "criarNota").mockResolvedValue(nota("n1"));
+    render(<CanvasDeOrquestradores />);
+    const chat = await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+
+    expect(ctrlN(chat, { comShift: true })).toBe(true);
+    expect(criar).not.toHaveBeenCalled();
+
+    expect(ctrlN(window, { comShift: true })).toBe(false);
+
+    expect(await screen.findByRole("textbox", { name: "Texto da nota" })).toBeInTheDocument();
+    expect(criar).toHaveBeenCalledTimes(1);
+    // Não abre o formulário de orquestrador.
+    expect(document.querySelectorAll(".react-flow__node-rascunho")).toHaveLength(0);
   });
 
   it("ao abrir, mostra as notas do servidor; a que sumiu do servidor sai do layout", async () => {
@@ -301,11 +329,11 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
 
   const fecharAviso = () => fireEvent.click(within(screen.getByText(AVISO).parentElement as HTMLElement).getByTitle("Fechar aviso"));
 
-  it("com 4 abertos, \"+ Novo orquestrador\" mostra o aviso e não abre o formulário", async () => {
+  it("com 4 abertos, \"+ Novo ▾\" › Orquestrador mostra o aviso e não abre o formulário", async () => {
     render(<CanvasDeOrquestradores />);
     await waitFor(() => expect(noNaTela("o4")).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: "+ Novo orquestrador" }));
+    escolherNoNovo("Orquestrador");
 
     expect(await screen.findByText(AVISO)).toBeInTheDocument();
     expect(screen.getByText(AVISO).closest(".alert")).toHaveClass("alert-warning");
@@ -314,6 +342,16 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
     // Fechável no ✕ do próprio aviso.
     fecharAviso();
     expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
+  });
+
+  it("com 4 abertos, Ctrl+N também mostra o aviso e não abre o formulário", async () => {
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o4")).toBeInTheDocument());
+
+    expect(ctrlN(window)).toBe(false);
+
+    expect(await screen.findByText(AVISO)).toBeInTheDocument();
+    expect(rascunhosNaTela()).toBe(0);
   });
 
   it("com 4 abertos, reabrir pela lista mostra o aviso; um já aberto só foca; fechar um libera a vaga", async () => {
@@ -381,7 +419,7 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
     render(<CanvasDeOrquestradores />);
     await waitFor(() => expect(noNaTela("o3")).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: "+ Novo orquestrador" }));
+    escolherNoNovo("Orquestrador");
     await waitFor(() => expect(rascunhosNaTela()).toBe(1));
     expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
 
@@ -425,6 +463,88 @@ describe("CanvasDeOrquestradores · minimapa", () => {
     expect(brilhando).toHaveLength(1);
     // o1 está em x = 0; o2, em x = 1500.
     expect(brilhando[0]).toHaveAttribute("x", "0");
+  });
+});
+
+describe("CanvasDeOrquestradores · Ctrl+N e Organizar nos controles", () => {
+  const ORGANIZAR = "Organizar: terminais lado a lado e notas à direita";
+  const rascunhosNaTela = () => document.querySelectorAll(".react-flow__node-rascunho").length;
+
+  function layoutCom(ids: string[]): void {
+    localStorage.setItem(
+      "orquestrador-agentes:canvas:v1",
+      JSON.stringify({
+        terminais: Object.fromEntries(
+          ids.map((id, indice) => [id, { x: indice * 1500, y: 0, largura: 600, altura: 520 }]),
+        ),
+        notas: {},
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }),
+    );
+    simulados.orquestradores.orquestradores = ids.map(orquestrador);
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoFalso);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    simulados.orquestradores.orquestradores = [];
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it("Ctrl+N abre o formulário de novo orquestrador (impedindo o padrão); com o foco num campo de texto, não", async () => {
+    layoutCom(["o1"]);
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o1")).toBeInTheDocument());
+    const chat = await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+
+    expect(ctrlN(chat)).toBe(true);
+    expect(rascunhosNaTela()).toBe(0);
+
+    expect(ctrlN(window)).toBe(false);
+
+    await waitFor(() => expect(rascunhosNaTela()).toBe(1));
+  });
+
+  it("o \"Organizar\" é o 4º botão dos controles e põe os terminais lado a lado", async () => {
+    layoutCom(["o1", "o2"]);
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(posicaoNaTela("o2")).toEqual({ x: 1500, y: 0 }));
+    const organizar = screen.getByRole("button", { name: ORGANIZAR });
+
+    expect(organizar).toHaveAttribute("title", ORGANIZAR);
+    expect(organizar).toBeEnabled();
+    expect(organizar.closest(".react-flow__controls")).not.toBeNull();
+    expect(organizar.parentElement?.children).toHaveLength(4);
+    expect(organizar.parentElement?.lastElementChild).toBe(organizar);
+    // Saiu da barra do canvas.
+    expect(organizar.closest(".barra-do-canvas")).toBeNull();
+
+    fireEvent.click(organizar);
+
+    const esperado = organizarComNotas(
+      [
+        { id: "o1", largura: 600, altura: 520 },
+        { id: "o2", largura: 600, altura: 520 },
+      ],
+      [],
+    );
+    await waitFor(() => expect(posicaoNaTela("o2")).toEqual(esperado.o2));
+    expect(posicaoNaTela("o1")).toEqual(esperado.o1);
+    expect(esperado.o2).not.toEqual({ x: 1500, y: 0 });
+  });
+
+  it("com uma janela só, o \"Organizar\" fica desabilitado", async () => {
+    layoutCom(["o1"]);
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o1")).toBeInTheDocument());
+
+    expect(screen.getByRole("button", { name: ORGANIZAR })).toBeDisabled();
   });
 });
 
@@ -492,5 +612,45 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     expect(screen.getAllByTestId("status-do-canvas")).toHaveLength(1);
     // A barra fica fora do canvas, acima dele.
     expect(barra.nextElementSibling?.querySelector(".react-flow")).not.toBeNull();
+  });
+
+  it("no desktop, a busca e o ⚙ ficam na barra de título; a paleta oferece \"Pastas e Claude Code\" só nele", () => {
+    // Navegador: busca e ⚙ (sem a ponte, não há ⚙) na barra do canvas; a paleta não tem a ação.
+    const { unmount } = render(<CanvasDeOrquestradores />);
+    fireEvent.click(screen.getByRole("button", { name: "Buscar (Ctrl+K)" }));
+    expect(screen.getByRole("dialog", { name: "Paleta de comandos" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Pastas e Claude Code/ })).not.toBeInTheDocument();
+    unmount();
+
+    const abrirAjustes = vi.fn().mockResolvedValue(undefined);
+    janelaComPonte.electron = {
+      desktop: true,
+      janela: {
+        minimizar: vi.fn(),
+        maximizar: vi.fn(),
+        fechar: vi.fn(),
+        estaMaximizada: vi.fn().mockResolvedValue(false),
+        aoMudarMaximizada: vi.fn(() => () => undefined),
+      },
+      configuracao: { obter: vi.fn(), abrirAjustes },
+    };
+    render(<CanvasDeOrquestradores />);
+    const barra = screen.getByTestId("barra-de-titulo");
+    const barraDoCanvas = document.querySelector<HTMLElement>(".barra-do-canvas");
+    if (barraDoCanvas === null) {
+      throw new Error("barra do canvas não encontrada");
+    }
+
+    // A barra do canvas fica só com o "+ Novo ▾".
+    expect(within(barraDoCanvas).getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual([
+      "Novo",
+    ]);
+    expect(within(barra).getByRole("button", { name: "Pastas e Claude Code" })).toBeInTheDocument();
+
+    fireEvent.click(within(barra).getByRole("button", { name: "Buscar ou executar (Ctrl+K)" }));
+    fireEvent.click(screen.getByRole("option", { name: /Pastas e Claude Code/ }));
+
+    expect(abrirAjustes).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

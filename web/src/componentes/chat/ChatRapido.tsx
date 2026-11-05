@@ -1,5 +1,6 @@
 import {
   type ClipboardEvent,
+  Fragment,
   type KeyboardEvent,
   memo,
   useCallback,
@@ -8,12 +9,13 @@ import {
   useState,
 } from "react";
 
-import { api, mensagemDeErro } from "../../shared/api/cliente";
+import { api, type ImagemParaEnvio, mensagemDeErro } from "../../shared/api/cliente";
 import type { AtividadeDaResposta, PreferenciasDoChat } from "../../shared/api/tipos";
 import { comandoDoPrompt, completarComando, dicaDeComando } from "../../shared/comandosDoPrompt";
 import {
   type EstadoDoChatNaTela,
   type MensagemDoChatNaTela,
+  pedidoDeAutorizacaoAtual,
   textoParaMostrar,
   ultimoModeloUsado,
 } from "../../shared/estado/aplicarEventoDoChat";
@@ -21,6 +23,7 @@ import { formatarBytes, formatarDuracao } from "../../shared/formatacao";
 import { type ImagemAnexada, lerImagem, problemaDaImagem, TIPOS_DE_IMAGEM } from "../../shared/imagens";
 import { TextoFormatado } from "../TextoFormatado";
 import { CartaoDeAcao, type PropsDasAcoesDoChat } from "./CartaoDeAcao";
+import { CartaoDeAutorizacao } from "./CartaoDeAutorizacao";
 import { SeletorDeModelo } from "./SeletorDeModelo";
 
 const ALTURA_MAXIMA_DO_CAMPO = 140;
@@ -36,7 +39,10 @@ interface Props extends PropsDasAcoesDoChat {
   aoMudarPreferencias: (preferencias: PreferenciasDoChat) => void;
 }
 
-/** Ex.: "pesquisando na web: clima em BH…", "lendo README.md…". */
+/** Verbos seguidos direto do arquivo, sem dois-pontos ("lendo README.md…"). */
+const VERBOS_DE_ARQUIVO: ReadonlySet<string> = new Set(["lendo", "editando", "escrevendo"]);
+
+/** Ex.: "pesquisando na web: clima em BH…", "lendo README.md…", "rodando: npm test…". */
 function descreverAtividade({ ferramenta, detalhe }: AtividadeDaResposta): string {
   const verbos: Readonly<Record<string, string>> = {
     WebSearch: "pesquisando na web",
@@ -44,6 +50,11 @@ function descreverAtividade({ ferramenta, detalhe }: AtividadeDaResposta): strin
     Read: "lendo",
     Grep: "procurando",
     Glob: "listando arquivos",
+    Edit: "editando",
+    NotebookEdit: "editando",
+    Write: "escrevendo",
+    PowerShell: "rodando",
+    Bash: "rodando",
   };
   const verbo = verbos[ferramenta];
   if (verbo === undefined) {
@@ -52,7 +63,7 @@ function descreverAtividade({ ferramenta, detalhe }: AtividadeDaResposta): strin
   if (detalhe === "") {
     return `${verbo}…`;
   }
-  return verbo === "lendo" ? `${verbo} ${detalhe}…` : `${verbo}: ${detalhe}…`;
+  return VERBOS_DE_ARQUIVO.has(verbo) ? `${verbo} ${detalhe}…` : `${verbo}: ${detalhe}…`;
 }
 
 interface PropsDaMensagem extends PropsDasAcoesDoChat {
@@ -151,6 +162,11 @@ function assinaturaDaUltima(chat: EstadoDoChatNaTela): string {
  * (Enter envia, Shift+Enter quebra linha, Esc cancela ou oculta, "/clear"
  * limpa) e, acima dele, a conversa. Respostas em Markdown, com o cursor
  * enquanto chegam, e cartões para as ações que o Claude sugere no app.
+ *
+ * Quando o chat precisa editar um arquivo ou rodar um comando sem estar
+ * autorizado, a última resposta ganha o cartão de autorização. Autorizado,
+ * o selo "alterações autorizadas" fica ao lado do campo até o `/clear`; o ✕
+ * dele revoga.
  */
 export function ChatRapido({
   chat,
@@ -172,6 +188,7 @@ export function ChatRapido({
   // Composer em uso: o campo ganhou foco e o foco segue dentro do composer.
   const [emUso, setEmUso] = useState(false);
   const [menuAberto, setMenuAberto] = useState(false);
+  const [revogando, setRevogando] = useState(false);
   const campo = useRef<HTMLTextAreaElement>(null);
   const seletorDeArquivos = useRef<HTMLInputElement>(null);
   const rolagem = useRef<HTMLDivElement>(null);
@@ -185,6 +202,7 @@ export function ChatRapido({
   const temConteudo = texto.trim() !== "" || imagens.length > 0;
   const dica = dicaDeComando(texto, respondendo);
   const ultima = chat.mensagens.at(-1);
+  const pedidoDeAutorizacao = pedidoDeAutorizacaoAtual(chat);
   // Compacto (uma linha) até a pessoa usar; recolhe só sem foco, texto, imagens nem menu aberto.
   const expandido = emUso || texto !== "" || imagens.length > 0 || menuAberto || arrastando;
 
@@ -256,6 +274,25 @@ export function ChatRapido({
     }
   }
 
+  /**
+   * O envio de uma pergunta, do campo ou do cartão de autorização: mostra a
+   * conversa e volta a acompanhar o fim. Lança se o servidor recusar.
+   */
+  const enviarPergunta = useCallback(
+    async (pergunta: string, anexos: readonly ImagemParaEnvio[] = []): Promise<void> => {
+      setEnviando(true);
+      try {
+        await api.perguntarNoChat(pergunta, anexos);
+        setOcultaEm(null);
+        setPedidoDeCancelar(false);
+        acompanhando.current = true;
+      } finally {
+        setEnviando(false);
+      }
+    },
+    [],
+  );
+
   async function enviar(): Promise<void> {
     // "/clear" é um comando, não uma pergunta.
     if (comandoDoPrompt(texto) === "limpar") {
@@ -266,23 +303,33 @@ export function ChatRapido({
       return;
     }
     setErro(null);
-    setEnviando(true);
     try {
       // Só imagens, sem texto: o servidor exige uma pergunta, então vai uma padrão.
       const pergunta = texto.trim() === "" ? "Analise as imagens anexadas." : texto;
-      await api.perguntarNoChat(
+      await enviarPergunta(
         pergunta,
         imagens.map((imagem) => ({ nome: imagem.nome, tipoDeMidia: imagem.tipoDeMidia, base64: imagem.base64 })),
       );
       limparCampo();
       setImagens([]);
-      setOcultaEm(null);
-      setPedidoDeCancelar(false);
-      acompanhando.current = true;
     } catch (falha) {
       setErro(mensagemDeErro(falha));
+    }
+  }
+
+  /** O ✕ do selo: o chat volta a pedir autorização antes de alterar. O evento confirma. */
+  async function revogarAutorizacao(): Promise<void> {
+    if (revogando || desconectado) {
+      return;
+    }
+    setErro(null);
+    setRevogando(true);
+    try {
+      await api.autorizarAlteracoesDoChat(false);
+    } catch (falha) {
+      setErro(`Não foi possível revogar a autorização: ${mensagemDeErro(falha)}`);
     } finally {
-      setEnviando(false);
+      setRevogando(false);
     }
   }
 
@@ -379,7 +426,13 @@ export function ChatRapido({
               className="btn btn-sm btn-ghost"
               onClick={() => void limparConversa()}
               disabled={respondendo || enviando || desconectado}
-              title={respondendo ? "Cancele a resposta antes de limpar." : "Começa uma conversa nova (/clear)"}
+              title={
+                respondendo
+                  ? "Cancele a resposta antes de limpar."
+                  : chat.alteracoesAutorizadas
+                    ? "Começa uma conversa nova (/clear) e desfaz a autorização de alterações"
+                    : "Começa uma conversa nova (/clear)"
+              }
             >
               limpar
             </button>
@@ -399,14 +452,24 @@ export function ChatRapido({
             }}
           >
             {chat.mensagens.map((mensagem) => (
-              <MensagemNaConversa
-                key={mensagem.id}
-                mensagem={mensagem}
-                atividade={mensagem.situacao === "respondendo" ? chat.atividade : null}
-                aoAbrirTerminal={aoAbrirTerminal}
-                temVagaPara={temVagaPara}
-                aoAtualizarOrquestradores={aoAtualizarOrquestradores}
-              />
+              <Fragment key={mensagem.id}>
+                <MensagemNaConversa
+                  mensagem={mensagem}
+                  atividade={mensagem.situacao === "respondendo" ? chat.atividade : null}
+                  aoAbrirTerminal={aoAbrirTerminal}
+                  temVagaPara={temVagaPara}
+                  aoAtualizarOrquestradores={aoAtualizarOrquestradores}
+                />
+                {/* Fora da mensagem memorizada: o cartão depende do estado do chat, não só da mensagem. */}
+                {pedidoDeAutorizacao?.mensagemId === mensagem.id && (
+                  <CartaoDeAutorizacao
+                    autorizacao={pedidoDeAutorizacao.autorizacao}
+                    autorizado={chat.alteracoesAutorizadas}
+                    desabilitado={respondendo || desconectado}
+                    aoEnviarPergunta={enviarPergunta}
+                  />
+                )}
+              </Fragment>
             ))}
           </div>
         </section>
@@ -511,6 +574,24 @@ export function ChatRapido({
               +
             </button>
             {respondendo && <span className="etiqueta etiqueta-ativa etiqueta-pulso">respondendo…</span>}
+            {chat.alteracoesAutorizadas && (
+              <span
+                className="selo-de-autorizacao"
+                title="Até o próximo /clear, o chat edita arquivos e roda comandos sem perguntar"
+              >
+                alterações autorizadas
+                <button
+                  type="button"
+                  className="revogar-autorizacao"
+                  aria-label="Revogar a autorização de alterações"
+                  title="Revogar: o chat volta a pedir autorização antes de editar ou rodar comandos"
+                  disabled={revogando || desconectado}
+                  onClick={() => void revogarAutorizacao()}
+                >
+                  ✕
+                </button>
+              </span>
+            )}
             <span className="flex-1" />
             <SeletorDeModelo
               preferencias={chat.preferencias}

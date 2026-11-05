@@ -7,6 +7,7 @@ import { type ControleDaPaleta, PaletaDeComandos } from "./PaletaDeComandos";
 function fonte(): FonteDaPaleta {
   return {
     podeOrganizar: true,
+    podeAbrirAjustes: false,
     orquestradores: [
       { id: "o1", nome: "Painel de vendas", nomeDaPasta: "painel-app", situacao: "trabalhando" },
       { id: "o2", nome: "Relatórios", nomeDaPasta: "relatorios", situacao: "ocioso" },

@@ -16,7 +16,7 @@ Você cria **Orquestradores** — um por projeto, por exemplo — e conversa com
 - Em pastas com git, cada pedido roda num **worktree** próprio do Orquestrador, e não na pasta original.
 - Dá para cancelar um pedido no meio, e o histórico fica salvo.
 - **Bloco de notas:** no mesmo canvas, ao lado dos terminais, você cria notas de texto para observações e coisas para fazer depois. O conteúdo fica salvo no servidor, com salvamento automático. No modo lista, os itens `[ ]` viram caixas de marcar, e uma linha (ou a nota inteira) arrastada até um terminal vira texto no prompt.
-- **Chat rápido:** uma caixa no centro, embaixo da tela, para perguntar algo ao Claude sem abrir um terminal: dúvidas rápidas, pesquisas na web ou perguntas sobre os projetos (ele só lê, nunca altera). Ele também pode sugerir abrir um Orquestrador num projeto, já com um pedido; a sugestão vira um cartão que só roda quando você clica.
+- **Chat rápido:** uma caixa no centro, embaixo da tela, para perguntar algo ao Claude sem abrir um terminal: dúvidas rápidas, pesquisas na web, perguntas sobre os projetos e pequenas alterações. Para **editar arquivos e rodar comandos**, ele pede uma **autorização única** na primeira vez, que vale até o próximo `/clear`; commit e push, só quando você pedir. Ele também pode sugerir abrir um Orquestrador num projeto, já com um pedido; a sugestão vira um cartão que só roda quando você clica.
 - Modelos disponíveis: **Fable**, Opus, Sonnet e Haiku, tanto nos Orquestradores quanto no chat.
 
 O motor é o próprio **Claude Code em modo headless**, usando o login da sua assinatura — não precisa de API key.
@@ -41,7 +41,7 @@ npm run desktop
 2. o **`claude.exe`** do Claude Code (ele procura sozinho no caminho padrão; dá para escolher outro);
 3. se encontrar um histórico antigo (`<pasta do app>\dados` ou `%USERPROFILE%\projetos\orquestrador-app\dados`), oferece **importar**: copia orquestradores, notas e anexos para a pasta nova; o chat rápido antigo fica só para consulta em `dados\chat\historico\conversa-importada\` (a conversa não é retomada; o chat começa uma nova). A origem nunca é apagada, e os worktrees antigos continuam onde estão.
 
-Para trocar depois, use o botão **⚙ Pastas** na barra do canvas, que reabre essa tela.
+Para trocar depois, use o **⚙** da barra de título do aplicativo (à esquerda de minimizar, maximizar e fechar) ou a ação *Pastas e Claude Code* da paleta (**Ctrl+K**); os dois reabrem essa tela.
 
 **Onde ficam os dados e o log** (a mesma pasta no app instalado e no `npm run desktop`):
 - configuração (`config.json`: pasta dos projetos, `claude.exe` e porta): `%APPDATA%\Orquestrador de Agentes\config.json`;
@@ -141,7 +141,7 @@ Casos de teste do **`/clear`** (ver ADR-16):
 - **Rota:** 200 com `totalDeTurnos: 0`; 409 durante um pedido; 404 sem orquestrador; sem conversa → 200 sem gravar nada.
 - **Tela:** `/clear` (maiúsculas e espaços tolerados) não vira pedido; "/clear algo" vira; Tab completa "/cl"; durante um pedido aparece a dica de indisponível; imagens e Plan Mode continuam no prompt; o separador "— conversa nova iniciada às HH:MM —" aparece; *Nova conversa* no *⚙* pede confirmação e fica desabilitado durante um pedido.
 
-Casos de teste do **chat rápido** (ver ADR-17):
+Casos de teste do **chat rápido** (ver ADR-17 e ADR-25):
 - **Agregado `ConversaDoChat`:** perguntar cria a pergunta (concluída) e a resposta vazia ("respondendo"); recusa outra pergunta com resposta em andamento (`Já há uma resposta em andamento.`), texto vazio sem imagens e mais de 5 imagens; aceita só imagem; acumula os trechos e ignora trecho sem resposta; `concluir` grava texto, ações, avisos e uso e marca a sessão como iniciada; `falhar` guarda o motivo nos avisos e só marca a sessão com uso informado; a sessão marcada no primeiro sinal do motor continua após cancelar; `limpar` recusa durante a resposta, troca o `sessaoId`, volta `sessaoIniciada` a `false` e esvazia as mensagens; ao reabrir, a resposta "respondendo" vira "falhou" com `interrompida`.
 - **`separarAcoesDoApp`:** sem bloco devolve o texto intacto; bloco válido vira ação com a pasta resolvida e sai do texto; vários blocos; projeto em maiúsculas casa com a pasta e devolve o nome real; projeto inexistente, JSON inválido, tipo desconhecido e bloco sem fechamento saem do texto e viram aviso, sem ação; ações imutáveis.
 - **`mensagemParaOChat`:** bloco `<contexto-do-app>` com data/hora, pasta raiz, projetos, orquestradores e o formato exato do bloco de ação, antes do texto; listas vazias indicadas; pergunta só com imagem vira "Veja a imagem anexada.".
@@ -155,10 +155,19 @@ Casos de teste do **chat rápido** (ver ADR-17):
   - *`SeletorDeModelo`:* mostra modelo, versão e esforço, com ✓ no escolhido; escolher modelo ou esforço chama o `PATCH`; Esc e clique fora fecham; o rótulo usa a versão da última resposta quando é da mesma família; falha ao gravar avisa.
   - *`CartaoDeAcao`:* nada antes do clique; com Orquestrador na mesma pasta (barras e maiúsculas diferentes) só abre o terminal; sem ele, cria com a configuração padrão e abre; com pedido, envia o pedido e um segundo clique só reabre; erro mostra a mensagem e permite tentar de novo; sem vaga no canvas, não cria nem envia e mostra o aviso do limite; com o Orquestrador da pasta já aberto (canvas cheio), só foca nele.
   - *`CamposDaConfiguracao`:* oferece Fable, Opus, Sonnet e Haiku nos dois seletores e mostra Fable já escolhido. *Canvas:* o chat fica no painel do centro de baixo, sem arrastar nem rolar o canvas. *`modelos`:* versão lida do id do modelo só na mesma família, nome com versão e rótulos dos esforços.
+- **Autorização de alterações** (ver ADR-25):
+  - *Agregado `ConversaDoChat`:* nasce sem autorização; `autorizarAlteracoes` gera `alteracoes_autorizadas` e, repetido, nada; `revogarAlteracoes` gera `autorizacao_revogada` e, sem autorização, nada; o `/clear` volta a `false`; `concluir` guarda a `autorizacaoPendente`; dados gravados antes, sem os campos, reabrem sem autorização e sem pendência.
+  - *Adaptador do Claude Code:* sem autorização, a primeira edição (Edit, Write, NotebookEdit) ou comando (PowerShell, Bash) negado por não estar liberado vira a `autorizacaoPendente` (`editar` com o arquivo, `rodar_comando` com o comando); negação por regra fixa (`.env*`, push forçado) e qualquer negação com o chat já autorizado viram aviso.
+  - *Argumentos:* sem autorização, `--allowedTools` só com pesquisa e leitura; com ela, as dez ferramentas; `--disallowedTools` sempre com `.env*` e o push forçado, por último; `--settings` sempre com a atribuição desligada (sem `Co-authored-by`).
+  - *`mensagemParaOChat`:* o bloco `<contexto-do-app>` diz se as alterações estão autorizadas e traz a regra de commit e push.
+  - *Rotas:* `GET /chat` com `alteracoesAutorizadas`; `PATCH /chat/autorizacao` 200 `{ autorizado }` (também durante uma resposta) e 400 `A autorização deve ser verdadeira ou falsa.`; os dois eventos saem no SSE com sequência.
+  - *Tela, `aplicarEventoDoChat`:* o campo vem do GET (sem ele, `false`); `alteracoes_autorizadas` liga, `autorizacao_revogada` desliga e `conversa_limpa` zera; eventos de autorização repetidos ou fora de ordem ignorados pela sequência; `autorizacaoPendente` ausente (no GET, na pergunta ou na conclusão) vale `null`; o pedido que vale é só o da última resposta do Claude (`pedidoDeAutorizacaoAtual`).
+  - *Tela, `CartaoDeAutorizacao`:* textos de editar (arquivo) e de rodar comando; *Autorizar até o /clear e continuar* chama o `PATCH` com `true` e depois envia "Autorizado. Continue de onde parou.", nessa ordem, e o cartão some; erro mostra a mensagem e o *tentar de novo*, sem enviar, e continua visível mesmo com o chat já autorizado; *Agora não* esconde sem chamar o servidor; desabilitado durante a resposta ou desconectado; já autorizado, não aparece.
+  - *Tela, `ChatRapido`:* o cartão aparece só na última resposta com pendência e sem autorização; o selo *alterações autorizadas* aparece com o `title` e o ✕ chama o `PATCH` com `false`; falha ao revogar aparece no composer e o selo fica; sem autorização não há selo; a atividade descreve edições ("editando src/x.ts…") e comandos ("rodando: npm test…").
 
 Casos de teste do **limite de 4 orquestradores abertos** (ver ADR-18):
 - **`cabeOutroTerminal`:** 3 abertos → cabe; 4 → não cabe; 4 abertos e pedido de um já aberto → cabe (só foca); o rascunho conta como aberto; o aviso usa o número da constante.
-- **Canvas:** com 4 abertos, *+ Novo orquestrador* mostra o aviso (`alert-warning`, fechável) e não abre o formulário; reabrir pela lista mostra o aviso e não abre; clicar num já aberto não recusa; fechar um no *✕* faz o aviso sumir, o Orquestrador continua na lista e a vaga volta; com 3 abertos e o formulário aberto, não abre outro.
+- **Canvas:** com 4 abertos, *+ Novo ▾ › Orquestrador* mostra o aviso (`alert-warning`, fechável) e não abre o formulário, e o **Ctrl+N** também; reabrir pela lista mostra o aviso e não abre; clicar num já aberto não recusa; fechar um no *✕* faz o aviso sumir, o Orquestrador continua na lista e a vaga volta; com 3 abertos e o formulário aberto, não abre outro.
 - **`CartaoDeAcao`:** ver acima (sem vaga não chama `criarOrquestrador` nem `enviarMensagem`).
 
 Casos de teste do **só no aplicativo** (ver ADR-19):
@@ -169,16 +178,23 @@ Casos de teste do **só no aplicativo** (ver ADR-19):
   - *importação do histórico (`importacaoDoHistorico.test.js`):* acha `<pasta do app>\dados` (só não empacotado) e `%USERPROFILE%\projetos\orquestrador-app\dados`; só conta pasta com `orquestradores/` ou `notas/`; ignora o próprio destino; copia `orquestradores/`, `notas/` e `anexos/` como estão; o `chat/` antigo vai para `chat/historico/conversa-importada/` (sem `chat/sessao`) e não vira a conversa atual; não copia `worktrees/` nem `processos-em-execucao.json`; não sobrescreve; nunca apaga nem altera a origem;
   - *processo principal (`main.js`) — sem teste unitário, conferido no ponta a ponta:* com `ORQUESTRADOR_PASTA_DO_USUARIO` apontando para uma pasta temporária com `config.json`, o log mostra `Porta do servidor escolhida para esta instalação: <PORTA>` e `servidor em http://127.0.0.1:<PORTA>`, e a porta fica no `config.json`; fechar e abrir de novo reaproveita a porta e restaura o layout e o zoom do canvas; com a porta gravada ocupada por outro processo, o log mostra `A porta X estava ocupada; o servidor passa a usar a Y` e o `config.json` passa a ter Y; sem cookie, `GET /` dá 403 com a página "roda só no aplicativo" e `GET /api/saude` dá 403 `{ erro }`; dentro da janela, `fetch('/api/saude')` e `fetch('/api/orquestradores')` dão 200; ao fechar, não sobra processo do servidor; com a pasta dos projetos ou o `claude.exe` removidos, abre os Ajustes com o aviso. Vale para `npm run desktop` e para o instalado do build de teste.
 - **Servidor (trava e configuração):** sem cookie → 403 (página "roda só no aplicativo" para HTML, `{ erro }` para `/api`); cookie com a chave errada → 403; com a chave → passa; sem chave e sem `ORQUESTRADOR_PERMITIR_NAVEGADOR=1` não sobe; com a variável, aceita o navegador; `PASTA_DA_TELA` e `PASTA_DADOS` absolutas respeitadas.
-- **Tela:** o botão *⚙ Pastas* só aparece com `window.electron.configuracao`, chama `abrirAjustes()` e mostra a mensagem se falhar; no navegador não aparece.
+- **Tela:** no desktop, o *⚙* (Pastas e Claude Code) da barra de título chama `abrirAjustes()` e mostra a mensagem se falhar, e a paleta oferece *Pastas e Claude Code*; sem `window.electron.configuracao`, o ⚙ não aparece. No navegador, o *⚙ Pastas* fica na barra do canvas e só aparece com `window.electron.configuracao`.
 
 Casos de teste da **barra de título e das larguras da janela** (ver ADR-20):
-- **`BarraDeTituloDoApp`:** "Orquestrador de Agentes" à esquerda; à direita (`.direita-da-barra-de-titulo`) o status (situação e cotas, `no-drag`) e, logo depois dele, o grupo "Controles da janela" com Minimizar, Maximizar e Fechar; no navegador (sem a ponte), nenhum botão de janela.
+- **`BarraDeTituloDoApp`:** "Orquestrador de Agentes" à esquerda; no centro (`.centro-da-barra-de-titulo`, que continua arrastando a janela), o campo-botão *Buscar ou executar…* (`no-drag`, `aria-label` "Buscar ou executar (Ctrl+K)", `aria-keyshortcuts`, dica `Ctrl+K`), que chama a abertura da paleta; à direita (`.direita-da-barra-de-titulo`) o status (situação e cotas, `no-drag`) e, logo depois dele, o *⚙* (só ícone, `no-drag`, "Pastas e Claude Code"), que chama `abrirAjustes()` e, se falhar, mostra a mensagem (fechável no ✕) descendo da barra, e o grupo "Controles da janela" com Minimizar, Maximizar e Fechar; sem a API dos Ajustes, sem ⚙; no navegador (sem a ponte), só a busca, sem ⚙ nem botões de janela.
 - **`ControlesDaJanela`:** fora do desktop não renderiza; minimizar, maximizar e fechar chamam a ponte (`window.electron.janela`); o grupo é `no-drag` e cada botão tem `aria-label` e `title`; abre como "Restaurar" se a janela já estiver maximizada e troca entre Maximizar/Restaurar a cada aviso de `aoMudarMaximizada`; ao sair da tela, cancela a inscrição.
-- **`BarraDoCanvas`:** cada botão traz os rótulos completo, curto e ícone (`+ Novo orquestrador` / `+ Novo` / `+`, `+ notas` / `+ Nota` / `✎`, `Organizar` / `▦`, `⚙ Pastas` / `⚙`), com o nome acessível e a dica fixos; no navegador mostra o título do app; no desktop não repete o título nem desenha minimizar/maximizar/fechar.
+- **`BarraDoCanvas`:**
+  - *desktop:* só o `+ Novo ▾` (`aria-haspopup="menu"`, `aria-expanded`), sem título, busca, ⚙, notas, organizar ou botões de janela; rótulos completo, curto e ícone `+ Novo ▾` / `+ Novo ▾` / `+`, com o nome acessível e a dica fixos;
+  - *menu (`role="menu"`/`menuitem`):* abre com o foco no primeiro item ("Orquestrador", `Ctrl+N`; "Nota", `Ctrl+Shift+N`, com `aria-keyshortcuts`); ↓ no botão abre no primeiro e ↑ no último; ↑/↓ navegam com volta; Enter escolhe; "Orquestrador" chama `aoCriar` e "Nota", `aoCriarNota`; Esc e clique fora fecham sem escolher e devolvem o foco ao botão; clique dentro do menu não fecha;
+  - *navegador:* mostra o título do app, o `+ Novo ▾`, o *Buscar* (só com a paleta; `Buscar (Ctrl+K)` / `Buscar` / `⌕`, abre a paleta) e, com `window.electron.configuracao`, o *⚙ Pastas* (`⚙ Pastas` / `⚙`), que reabre os Ajustes e mostra a mensagem se falhar.
 - **`StatusDoCanvas`:** rótulos curtos das cotas (`5h`, `7d`); o resumo mostra o medidor de maior uso e põe o resto (agentes ativos, cada cota, RAM) no balão (`title`); sem cota, memória nem agentes, não há resumo; no painel, o alerta de memória fica abaixo; na barra de título, não.
 - **`rotuloCurtoDaCota`:** "5 horas" → "5h", "7 dias" → "7d", nome sem número fica igual.
-- **Canvas:** restaura o zoom e a posição salvos; **Ctrl+0** volta a 100% mantendo o centro (`translate(100px,50px) scale(0.5)` → `translate(200px,100px) scale(1)` com a área 0 × 0 do jsdom); com o foco num campo de texto, Ctrl+0 não mexe no zoom; no navegador o status fica nos painéis do topo, e no desktop só na barra de título, acima do canvas.
-- **Conferência visual (manual, pasta temporária):** janelas de 900×650, 1100×750, 1200×800, 1440×900 e maximizada, com captura da janela inteira: nenhum botão nativo do Windows; ─ ☐ ✕ do app alinhados na barra, com hover cinza (e vermelho no fechar) e foco visível pelo teclado; status à direita sem encostar nos botões e, se não couber, cortado pelo fim (a situação nunca some); linha inferior da barra de ponta a ponta; ícone de "restaurar" com a janela maximizada (pelo botão ou pelo Windows); minimizar, maximizar/restaurar e fechar funcionando; painéis do topo sem sobreposição, minimapa só a partir de 1100 px, chat sem cobrir os controles de zoom nem o minimapa, texto dos terminais nítido em 100%.
+- **Canvas:**
+  - restaura o zoom e a posição salvos; **Ctrl+0** volta a 100% mantendo o centro (`translate(100px,50px) scale(0.5)` → `translate(200px,100px) scale(1)` com a área 0 × 0 do jsdom); com o foco num campo de texto, Ctrl+0 não mexe no zoom; no navegador o status fica nos painéis do topo, e no desktop só na barra de título, acima do canvas;
+  - **Ctrl+N** abre o formulário de novo orquestrador (com 4 abertos, o aviso do limite) e **Ctrl+Shift+N** cria uma nota, os dois impedindo o padrão; com o foco num campo de texto, nada acontece;
+  - o *Organizar* é o 4º botão dos controles do canto inferior esquerdo (fora da barra do canvas), põe os terminais nas posições de `organizarComNotas` e fica desabilitado com uma janela só;
+  - no desktop, a barra do canvas tem só o `+ Novo ▾`; a busca da barra de título abre a paleta, que oferece *Pastas e Claude Code* (chama `abrirAjustes()`); no navegador, o *Buscar* fica na barra do canvas e a paleta não tem essa ação.
+- **Conferência visual (manual, pasta temporária):** janelas de 900×650, 1100×750, 1200×800, 1440×900 e maximizada, com captura da janela inteira: nenhum botão nativo do Windows; ─ ☐ ✕ do app alinhados na barra, com hover cinza (e vermelho no fechar) e foco visível pelo teclado; status à direita sem encostar nos botões e, se não couber, cortado pelo fim (a situação nunca some); linha inferior da barra de ponta a ponta; ícone de "restaurar" com a janela maximizada (pelo botão ou pelo Windows); minimizar, maximizar/restaurar e fechar funcionando; painéis do topo sem sobreposição, minimapa só a partir de 1100 px, chat sem cobrir os controles de zoom nem o minimapa, texto dos terminais nítido em 100%. Com a barra enxuta (atualização do ADR-20), conferir também 1300 e 1500 px: busca centralizada entre o nome e o status (só a lupa abaixo de 1100 px), status com nomes curtos abaixo de 1440 px e só o resumo abaixo de 1280 px, sem encostar no ⚙; o menu `+ Novo ▾` por cima da lista de orquestradores; o vão da barra em volta da busca arrasta a janela e o clique duplo maximiza.
 
 Casos de teste da **economia de tokens** (ver ADR-21):
 - **`PredefinicaoDeConfiguracao`:** o catálogo tem só `economico` (rótulo "Modo econômico"); nome desconhecido → `null`; aplicar muda exatamente os sete campos (Opus/médio, Sonnet/médio, automática até 1, trivial ligado, plano automático desligado) e preserva nível de permissão e commit/push; a configuração de origem não muda; `correspondeA` é verdadeiro logo depois de aplicar, continua verdadeiro mudando só a permissão e fica falso mudando um campo dela (esforço, limite); `paraDados` devolve cópia; predefinição e alterações congeladas.
@@ -206,7 +222,7 @@ Casos de teste do **painel de alterações** (ver ADR-24):
 - **Tela:** o botão mostra a contagem, relê a lista ao abrir e quando o pedido termina (não a cada render), fica esmaecido sem alterações ou sem git, continua abrível só com commits na branch e mostra a falha no `title`; o painel abre como modal fora do canvas, lista situação e linhas, pinta o diff (+, −, @@), avisa diff cortado, binário, pasta sem git, pedido em andamento e commits da branch; Esc, clique fora e *✕* fecham sem o evento chegar ao terminal; o arquivo escolhido sai da seleção quando some da lista.
 
 Casos de teste do **canvas: paleta, notas em lista, bixinhos e entrega**:
-- **Paleta (`PaletaDeComandos`, `paletaDeComandos`):** fechada não mostra nada; Ctrl+K abre com o foco na busca, mesmo dentro de um campo de texto, e fecha se já aberta; Ctrl com outra tecla ou com Shift não abre; ↑/↓ navegam com volta; Enter executa e fecha; a busca ignora acentos e maiúsculas e exige todas as palavras; sem resultado, avisa e o Enter não faz nada; Esc e clique fora fecham e devolvem o foco; o botão *Buscar* abre.
+- **Paleta (`PaletaDeComandos`, `paletaDeComandos`):** fechada não mostra nada; Ctrl+K abre com o foco na busca, mesmo dentro de um campo de texto, e fecha se já aberta; Ctrl com outra tecla ou com Shift não abre; ↑/↓ navegam com volta; Enter executa e fecha; a busca ignora acentos e maiúsculas e exige todas as palavras; sem resultado, avisa e o Enter não faz nada; Esc e clique fora fecham e devolvem o foco; o controle (a busca da barra de título ou, no navegador, o *Buscar*) abre; *Novo orquestrador* e *Nova nota* trazem os atalhos `Ctrl+N` e `Ctrl+Shift+N`; *Pastas e Claude Code* só entra no desktop, por último entre as ações.
 - **Notas (`checklistDaNota`, `NoNota`):** alterna entre editar e lista; `[ ]`/`[x]` (com ou sem `- `) viram caixas de marcar, e marcar reescreve só aquela linha e salva na hora; erro ao salvar o item aparece no rodapé; as alças arrastam a nota inteira ou uma linha (sem o marcador) como pedido, sem mover a nota; nota em branco não arrasta.
 - **Nota arrastada para o terminal (`NoTerminal`):** durante o arraste aparece *solte para escrever no prompt…*; ao soltar, o texto entra no prompt (numa linha nova, se já havia texto), o campo ganha o foco e nada é enviado; arquivos continuam com o aviso de anexar imagens.
 - **Bixinhos e entrega:** o ícone da ferramenta (`iconeDaFerramenta`: ler, editar, comando, web; desconhecida sem ícone) só aparece executando; executando → concluído faz o envelope percorrer a linha uma vez (não ao montar já concluído, ao falhar, com reduzir movimento ou desconectado); a borda do terminal ganha `janela-terminal-entrega` depois de `DURACAO_DA_ENTREGA_MS` e a perde depois de `DURACAO_DO_PISCAR_MS`, sem re-renderizar a transcrição; não pisca ao abrir com Subagente já concluído, com o histórico antigo reenviado, com falha, desconectado ou com reduzir movimento; fechar o terminal no meio cancela os relógios.
@@ -276,7 +292,7 @@ flowchart LR
     end
   end
   CC["claude.exe -p<br/>(um por turno)"]
-  CCC["claude.exe -p<br/>(um por pergunta do chat,<br/>só leitura + web)"]
+  CCC["claude.exe -p<br/>(um por pergunta do chat,<br/>leitura + web; edição e<br/>comandos com autorização)"]
   SA1[Subagente]
   SA2[Subagente]
 
@@ -357,7 +373,7 @@ web/src/
 
 **Bloco de notas** (contexto `notas`, ver ADR-13): o conteúdo de cada nota (título e texto) fica no servidor, um arquivo por nota em `<PASTA_DADOS>/notas/<id>.json` (padrão `dados/notas/`). Posição, tamanho e se está minimizada ficam no layout do navegador, como os terminais (ver ADR-8). O contexto não conversa com a orquestração: tem entidade, serviço, porta e rotas próprias.
 
-**Chat rápido** (contexto `chat`, ver ADR-17): uma conversa única com o Claude, fora dos Orquestradores. Cada pergunta roda um `claude -p` em `<PASTA_DADOS>/chat/sessao/` (o primeiro com `--session-id`, os seguintes com `--resume`), com ferramentas só de leitura (Read, Glob, Grep na pasta raiz dos projetos, `.env*` negado) e de web (WebSearch, WebFetch). Pelo stdin vai a pergunta precedida do bloco `<contexto-do-app>` (data, pasta raiz, projetos e orquestradores existentes, e o formato das ações). O texto chega aos poucos (`--include-partial-messages`) e vai para a tela como evento SSE passageiro `trecho`, sem entrar no histórico; no fim, o servidor tira da resposta os blocos ` ```acao-do-app `, valida cada um e grava a resposta com as ações. O contexto não importa o agregado `Orquestrador`: projetos e orquestradores chegam pela porta `ProjetosDoChat`, implementada em `root.ts`.
+**Chat rápido** (contexto `chat`, ver ADR-17): uma conversa única com o Claude, fora dos Orquestradores. Cada pergunta roda um `claude -p` em `<PASTA_DADOS>/chat/sessao/` (o primeiro com `--session-id`, os seguintes com `--resume`), com ferramentas de leitura (Read, Glob, Grep na pasta raiz dos projetos, `.env*` negado) e de web (WebSearch, WebFetch) e, só com a autorização do usuário (até o `/clear`), de edição (Edit, Write, NotebookEdit) e de comando (PowerShell, Bash), direto na pasta dos projetos, sem worktree (ver ADR-25). Pelo stdin vai a pergunta precedida do bloco `<contexto-do-app>` (data, pasta raiz, projetos e orquestradores existentes, se as alterações estão autorizadas, a regra de commit e push e o formato das ações). O texto chega aos poucos (`--include-partial-messages`) e vai para a tela como evento SSE passageiro `trecho`, sem entrar no histórico; no fim, o servidor tira da resposta os blocos ` ```acao-do-app `, valida cada um e grava a resposta com as ações. O contexto não importa o agregado `Orquestrador`: projetos e orquestradores chegam pela porta `ProjetosDoChat`, implementada em `root.ts`.
 
 **Pasta de dados** (`<PASTA_DADOS>`: no aplicativo, `%APPDATA%\Orquestrador de Agentes\dados`; rodando o servidor sozinho, `dados/` na pasta do app; ver ADR-5, ADR-13, ADR-16, ADR-17 e ADR-19):
 
@@ -649,6 +665,7 @@ flowchart TD
   - a cota exibida no terminal continua: é da assinatura, não da conversa.
 
 **ADR-17 — Chat rápido: contexto próprio, um processo por pergunta e ações confirmadas pelo usuário.**
+- *Atualizado pelo ADR-25:* o chat deixou de ser só leitura. Com uma autorização única do usuário, que vale até o `/clear`, ele também edita arquivos e roda comandos; o resto desta decisão continua valendo.
 - *Contexto:*
   - para uma dúvida rápida, uma pesquisa na web ou uma pergunta sobre um projeto, criar um Orquestrador (pasta, configuração, terminal) é pesado demais;
   - o chat não deve alterar nada: quem altera são os Orquestradores, com permissões e worktree próprios;
@@ -659,7 +676,7 @@ flowchart TD
   - **núcleo compartilhado** com a orquestração só de objetos de valor e portas genéricas: `ModeloClaude` (agora com `fable`), `EsforcoDeRaciocinio`, `TipoDeImagem` e limites de imagem, `JanelaDaCota`, `Anexo`/`ArmazemDeAnexos` (com a chave `chat`) e `ControleDeExecucoes` (o mesmo controle dos turnos, então desligar o servidor também cancela a resposta do chat);
   - **um `claude -p` por pergunta**, rodando em `dados/chat/sessao/`: a primeira com `--session-id`, as seguintes com `--resume`. A sessão conta como iniciada no primeiro sinal do motor (texto, ferramenta, cota) ou num resultado com consumo, inclusive se a resposta depois falhar ou for cancelada, como a `sessao_iniciada` do Orquestrador;
   - **texto aos poucos** com `--include-partial-messages`: cada delta vai à tela como evento SSE `trecho` (e cada ferramenta como `atividade`), **passageiros**, sem id e fora do `eventos.jsonl`. O servidor acumula o texto parcial na memória, para o `GET /chat` mostrar a resposta em andamento; o texto final chega inteiro em `resposta_concluida`;
-  - **ferramentas só de leitura + web**: WebSearch, WebFetch, Read, Glob e Grep, com a pasta raiz dos projetos liberada para leitura e `Read(.env*)` negado;
+  - **ferramentas só de leitura + web**: WebSearch, WebFetch, Read, Glob e Grep, com a pasta raiz dos projetos liberada para leitura e `Read(.env*)` negado (com autorização, também edição e comandos: ver ADR-25);
   - **contexto em cada mensagem**: o bloco `<contexto-do-app>` (data e hora, pasta raiz, projetos, orquestradores e a regra das ações) antecede cada pergunta; as instruções fixas vão em `--append-system-prompt-file`;
   - **ações por bloco** ` ```acao-do-app ` com `{"tipo":"abrir_orquestrador","projeto","pedido"}`. O servidor tira todos os blocos do texto (inclusive malformados), valida com zod, resolve `projeto` → `pasta` pela lista (sem diferenciar maiúsculas) e devolve avisos legíveis para o que não vale. A tela mostra cada ação como cartão e **só executa no clique**;
   - **preferências fora da conversa** (`preferencias.json`, padrão Opus com esforço alto): o `/clear` não as reseta; trocar o modelo ou o esforço vale a partir da próxima pergunta e vira o padrão.
@@ -675,7 +692,7 @@ flowchart TD
 - *Contexto:* cada terminal aberto no canvas mantém conversa, conexão SSE e bixinhos ao vivo; muitos abertos pesam na tela e no computador, e o usuário quer no máximo 4.
 - *Decisão:*
   - contar os **terminais abertos no canvas + o rascunho** de *Novo orquestrador*; abrir um que já está aberto não conta (só foca);
-  - a trava fica no **ponto único de abertura** do canvas (`temVagaPara`/`reservarVaga` em `CanvasDeOrquestradores.tsx`, usados por *+ Novo orquestrador* e por `abrirTerminal`, que atende a lista e o chat), com a regra pura `cabeOutroTerminal` e a **constante única** `LIMITE_DE_ORQUESTRADORES_ABERTOS` em `web/src/shared/canvas/limiteDeTerminais.ts`;
+  - a trava fica no **ponto único de abertura** do canvas (`temVagaPara`/`reservarVaga` em `CanvasDeOrquestradores.tsx`, usados por *Novo orquestrador* (o `+ Novo ▾`, o **Ctrl+N** e a paleta) e por `abrirTerminal`, que atende a lista e o chat), com a regra pura `cabeOutroTerminal` e a **constante única** `LIMITE_DE_ORQUESTRADORES_ABERTOS` em `web/src/shared/canvas/limiteDeTerminais.ts`;
   - o **cartão do chat confere a vaga antes de criar** o Orquestrador ou enviar o pedido, e mostra o aviso no próprio cartão.
 - *Consequências:*
   - é uma trava só da tela: outra aba do navegador ou uma chamada direta à API (`POST /orquestradores`) passam;
@@ -723,6 +740,19 @@ flowchart TD
   - sem o botão maximizar nativo, some o menu de layouts do Windows 11 ao parar o mouse sobre ele; Win+Z, Win+setas, arrastar a janela para as bordas da tela e o duplo clique na barra continuam funcionando;
   - se a tela travar, os botões do app param junto: **Alt+F4** continua fechando a janela, porque é tratado pelo Windows;
   - em janela estreita com muitas cotas, o status é cortado pelo fim (`justify-content: safe flex-end`), nunca pela situação.
+
+**Atualização: barra do canvas enxuta.**
+- *Contexto:* a barra do canvas acumulou cinco botões disputando atenção no canto superior esquerdo (*+ Novo orquestrador*, *+ notas*, *Organizar*, *Buscar (Ctrl+K)* e *⚙ Pastas*), dois deles laranja; a busca e os ajustes são do aplicativo, não do canvas, e o *Organizar* é um ajuste de vista, como o zoom.
+- *Decisão* (variante "A" do protótipo aprovado):
+  - **barra de título:** entre o nome e o status, o campo-botão **Buscar ou executar…** (`Ctrl+K`), centralizado no espaço livre; não é um input, só abre a paleta. Antes de ─ ☐ ✕, o **⚙** (só ícone, "Pastas e Claude Code"), que reabre os Ajustes. Os dois são `no-drag`; o resto da barra continua arrastando a janela e o clique duplo continua maximizando. Uma falha ao abrir os Ajustes desce da barra, à direita, sobre o canvas;
+  - **barra do canvas:** só o botão laranja **`+ Novo ▾`**, um botão de menu acessível (`aria-haspopup`/`aria-expanded`, `role="menu"`/`menuitem`; ↑/↓, Enter, Esc e clique fora, com o foco voltando ao botão) com *Orquestrador* (`Ctrl+N`) e *Nota* (`Ctrl+Shift+N`); rótulos `+ Novo ▾` / `+ Novo ▾` / `+`. A lista *orquestradores · N* continua abaixo dela, recolhível;
+  - **Organizar:** 4º botão dos controles do canto inferior esquerdo (`ControlButton` do React Flow, ícone de grade), desabilitado com uma janela só; os controles ficam memorizados para não re-renderizar a cada quadro do arraste;
+  - **atalhos:** **Ctrl+N** (novo orquestrador, com o limite do ADR-18) e **Ctrl+Shift+N** (nova nota), no mesmo lugar e padrão do Ctrl+0: nada com o foco num campo de texto, e `preventDefault` para o Chromium/Electron não abrir outra janela (o `electron/main.js` não tem menu, `Menu.setApplicationMenu(null)`, nem acelerador com esses atalhos);
+  - **paleta:** ganha *Pastas e Claude Code* (só no desktop) e mostra os atalhos de *Novo orquestrador* e *Nova nota*.
+- *Consequências:*
+  - o status da barra de título divide a largura com a busca e **encurta um passo antes**: nomes curtos das cotas (`5h`, `7d`, sem o "· agentes") abaixo de 1440 px e só o resumo (situação + medidor de maior uso, o resto no balão) abaixo de 1280 px; abaixo de 1100 px a busca fica só com a lupa ⌕. A situação nunca some, e o status nunca encosta no ⚙. No navegador, o status segue as larguras de antes;
+  - **no navegador** (sem a ponte do desktop, portanto sem barra de título própria), o *Buscar* e o *⚙ Pastas* continuam na barra do canvas, ao lado do `+ Novo ▾`, para nada ficar inacessível;
+  - criar uma nota passou de um clique para dois (menu) ou para o Ctrl+Shift+N.
 
 **ADR-21 — Economia de tokens: predefinição, custo por turno e aviso de esforço.**
 - *Contexto:*
@@ -775,6 +805,25 @@ flowchart TD
   - sem worktree (pasta sem git), os agentes alteram a pasta direto, e o painel só explica isso;
   - commits já feitos na branch do worktree não aparecem como diff, só como contagem.
 
+**ADR-25 — Chat rápido com alterações autorizadas uma vez até o /clear e commit só a pedido.** Atualiza o ADR-17.
+- *Contexto:*
+  - o chat rápido era só leitura (ADR-17). Para uma correção pequena ("troque essa frase", "rode os testes"), o usuário precisava abrir um Orquestrador, com pasta, configuração e terminal;
+  - pedir confirmação a cada edição ou comando não é possível: o `claude -p` roda headless com `dontAsk` (ADR-1 e ADR-3), sem ninguém no terminal para aprovar;
+  - perguntar de novo a cada pergunta cansa; liberar para sempre esquece que o chat pode alterar.
+- *Decisão:*
+  - **autorização única, guardada na conversa** (`ConversaDoChat.alteracoesAutorizadas`): nasce `false`; `PATCH /chat/autorizacao` liga ou desliga, com os eventos `alteracoes_autorizadas` e `autorizacao_revogada` gravados com sequência (repetir o estado atual não gera evento). O `/clear` volta a `false`. Mudar durante uma resposta vale a partir da próxima pergunta;
+  - **a sessão tem sempre as dez ferramentas** (`--tools`): leitura, web, edição (Edit, Write, NotebookEdit) e comandos (PowerShell, Bash). Sem autorização, `--allowedTools` libera só leitura e web, e o `dontAsk` nega o resto. A primeira edição ou comando negado por isso vira a `autorizacaoPendente` da resposta (`{ acao: "editar" | "rodar_comando", detalhe }`); negação por regra fixa vira aviso, porque autorizar não a resolveria;
+  - **a tela pede a autorização uma vez**: o cartão na última resposta com pendência. Autorizar grava a autorização e já manda "Autorizado. Continue de onde parou." pelo envio normal do chat. Enquanto vale, o selo *alterações autorizadas* fica ao lado do campo, com ✕ para revogar;
+  - **o que muda entre perguntas vai no bloco `<contexto-do-app>`** (se está autorizado, commit e push), que declara substituir as regras anteriores, porque o `--resume` não troca as instruções de sessões criadas antes (ADR-2);
+  - **commit e push só a pedido**: só quando o usuário pedir explicitamente na mensagem, numa branch `feature/`, `fix/`, `hotfix/` ou `refactor/`, nunca na `main`, sem push forçado (também em `--disallowedTools`) e sem `Co-authored-by` (`--settings` com a atribuição desligada).
+- *Consequências:*
+  - **sem worktree:** o chat altera a pasta real do projeto (e a branch em que ela estiver), mesmo com um Orquestrador trabalhando no mesmo projeto. Não há painel de alterações para o chat (ADR-24): revise com o git;
+  - **a lista de proibidos dos comandos não é garantia:** `--disallowedTools` casa por texto (`git push --force`…), e um comando escrito de outro jeito (alias, script, outra sintaxe) passa. Com a autorização, o chat roda o que quiser dentro das permissões do usuário do Windows;
+  - **o commit só a pedido, a branch da política e o "nunca na main" dependem da instrução**, como no ADR-10: não há trava técnica, só o push forçado bloqueado por texto;
+  - a autorização vale para editar **e** rodar comandos ao mesmo tempo, até o `/clear` ou o ✕: não dá para liberar só um dos dois;
+  - a resposta que pede autorização para no primeiro bloqueio; o Claude retoma a partir da pergunta "Autorizado. Continue de onde parou.", o que custa mais uma pergunta (e cota);
+  - "Agora não" só esconde o cartão nesta tela: recarregar a página mostra de novo o pedido da última resposta.
+
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
 - `modelUsage` acumula a sessão, então o consumo do turno vem de `model_usage_since_last_result`;
@@ -823,10 +872,11 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | POST | `/notas` | `{ titulo?: string, texto?: string }` (corpo vazio vale; ausentes: `"Nova nota"` e `""`) | 201 + `DadosDaNota` (400 com as mensagens abaixo) |
 | PATCH | `/notas/:id` | `{ titulo?: string, texto?: string }` (só o enviado muda) | 200 + `DadosDaNota`; `atualizadaEm` só muda se o conteúdo mudar. Com algum campo inválido, 400 e nada é gravado (404 `Nota não encontrada.`) |
 | DELETE | `/notas/:id` | — | 204 (404 `Nota não encontrada.`) |
-| GET | `/chat` | — | `{ sessaoId, situacao: "ocioso" \| "respondendo", preferencias: { modelo, esforco }, mensagens: [MensagemDoChat], ultimaSequencia, cota: [{ nome, utilizacao, renovaEm, situacao }] \| null }`. A resposta em andamento já traz o texto parcial acumulado; use `ultimaSequencia` no `?desde=` do SSE |
+| GET | `/chat` | — | `{ sessaoId, situacao: "ocioso" \| "respondendo", alteracoesAutorizadas: boolean, preferencias: { modelo, esforco }, mensagens: [MensagemDoChat], ultimaSequencia, cota: [{ nome, utilizacao, renovaEm, situacao }] \| null }`. A resposta em andamento já traz o texto parcial acumulado; use `ultimaSequencia` no `?desde=` do SSE. `alteracoesAutorizadas`: o chat pode editar arquivos e rodar comandos até o próximo `/clear` (ver ADR-25) |
 | GET | `/chat/eventos` | cabeçalho opcional `Last-Event-ID` ou `?desde=` | `text/event-stream`: eventos gravados da conversa atual desde a sequência (sem nenhum dos dois, todos) + novos; `trecho` e `atividade` como eventos nomeados, sem id |
 | POST | `/chat/mensagens` | `{ texto: string, imagens?: [{ nome, tipoDeMidia: image/png\|jpeg\|gif\|webp, base64 }] }` (até 5 imagens de 5 MB; texto pode ser vazio se houver imagem) | 202 `{ mensagemId }` — o id da **resposta do Claude**, que recebe os trechos. 409 `Já há uma resposta em andamento.`; 400 `Escreva uma mensagem ou anexe uma imagem.` e erros de imagem |
 | PATCH | `/chat/preferencias` | `{ modelo?, esforco? }` | 200 `{ modelo, esforco }`; vale a partir da próxima pergunta. 400 `Modelo inválido.` / `Esforço inválido.` |
+| PATCH | `/chat/autorizacao` | `{ autorizado: boolean }` | 200 `{ autorizado }`: `true` autoriza o chat a editar arquivos e rodar comandos até o próximo `/clear`; `false` revoga. Aceito também durante uma resposta (vale a partir da próxima pergunta); repetir o estado atual não gera evento. Confirmado pelo evento `alteracoes_autorizadas` ou `autorizacao_revogada`. 400 `A autorização deve ser verdadeira ou falsa.` (ver ADR-25) |
 | POST | `/chat/cancelar` | — | 202 `{ cancelando: true }`; 409 `Não há resposta em andamento.` |
 | POST | `/chat/limpar` | — | 200 `{ totalDeMensagens: 0 }`: arquiva em `dados/chat/historico/conversa-<N>/` e a próxima pergunta abre outra sessão; as preferências ficam. 409 durante uma resposta (`Aguarde a resposta terminar ou cancele antes de limpar a conversa.`) |
 | GET | `/chat/anexos/:arquivo` | — | a imagem anexada a uma pergunta (404 `Anexo não encontrado.` para nome inválido ou inexistente) |
@@ -928,22 +978,25 @@ Erros 400 das notas:
   "criadaEm": "…", "situacao": "respondendo | concluida | falhou | cancelada",
   "acoes": [{ "tipo": "abrir_orquestrador", "projeto": "painel-app", "pasta": "C:\\…\\painel-app", "pedido": "rodar os testes" }],
   "avisos": ["O projeto \"x\" não existe na pasta raiz; a ação foi ignorada."],
-  "uso": { "duracaoMs": 4200, "tokensDeEntrada": 31000, "tokensDeSaida": 180, "modeloUsado": "claude-…" } }
+  "uso": { "duracaoMs": 4200, "tokensDeEntrada": 31000, "tokensDeSaida": 180, "modeloUsado": "claude-…" },
+  "autorizacaoPendente": { "acao": "editar | rodar_comando", "detalhe": "src/x.ts | npm test" } }
 ```
 
-Perguntas do usuário vêm sempre `concluida`, sem ações. Numa resposta que falhou, o motivo está em `avisos` (ex.: `interrompida`, quando o servidor reiniciou no meio).
+Perguntas do usuário vêm sempre `concluida`, sem ações. Numa resposta que falhou, o motivo está em `avisos` (ex.: `interrompida`, quando o servidor reiniciou no meio). `autorizacaoPendente` é `null`, a menos que a resposta tenha parado porque o chat quis editar um arquivo ou rodar um comando sem autorização (`detalhe` é o arquivo ou o comando); a tela mostra o pedido só na última resposta. Mensagens gravadas antes da autorização não têm o campo: vale `null` (ver ADR-25).
 
 **Eventos SSE do chat** (`/chat/eventos`). Os gravados vêm com `id: <sequencia>` e JSON `{ tipo, sequencia, em, … }`:
 
 | `tipo` | Campos | Quando |
 |---|---|---|
 | `pergunta_enviada` | `mensagemDoUsuario`, `mensagemDoClaude` (vazia, `respondendo`) | o usuário perguntou |
-| `resposta_concluida` | `mensagemId`, `texto` (sem os blocos de ação), `acoes`, `avisos`, `uso` | fim com sucesso |
+| `resposta_concluida` | `mensagemId`, `texto` (sem os blocos de ação), `acoes`, `avisos`, `uso`, `autorizacaoPendente` (`{ acao, detalhe }` ou `null`; falta nos eventos gravados antes) | fim com sucesso |
 | `resposta_falhou` | `mensagemId`, `motivo`, `uso` (ou `null`) | erro do Claude Code, ou `interrompida` ao reiniciar |
 | `resposta_cancelada` | `mensagemId` | Esc / `POST /chat/cancelar` |
-| `conversa_limpa` | — | `/clear`; primeiro evento da conversa nova, com a sequência seguinte |
+| `conversa_limpa` | — | `/clear`; primeiro evento da conversa nova, com a sequência seguinte. A conversa nova começa sem autorização de alterações |
 | `preferencias_alteradas` | `preferencias: { modelo, esforco }` | o seletor mudou |
 | `uso_da_cota` | `janelas` | uso dos limites da assinatura |
+| `alteracoes_autorizadas` | — | `PATCH /chat/autorizacao` com `true` (cartão de autorização): o chat edita e roda comandos até o `/clear` |
+| `autorizacao_revogada` | — | `PATCH /chat/autorizacao` com `false` (✕ do selo) |
 
 Passageiros (sem id, fora do histórico): `event: trecho` com `data: { mensagemId, texto }` (pedaço novo do texto) e `event: atividade` com `data: { mensagemId, ferramenta, detalhe }` (ex.: `WebSearch` · `node lts`).
 
@@ -951,19 +1004,20 @@ Passageiros (sem id, fora do histórico): `event: trecho` com `data: { mensagemI
 
 A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma janela de terminal, e cada Subagente que ele instancia vira um bixinho ligado ao terminal.
 
-**Abrir:** pelo atalho do aplicativo instalado ou pelo `iniciar-desktop.cmd` (ver *Como rodar*). Na primeira abertura, escolha a pasta dos projetos, confirme o `claude.exe` e, se quiser, importe o histórico antigo. Para mudar a pasta dos projetos ou o Claude Code depois, clique em **⚙ Pastas** na barra do canvas (no canto superior esquerdo, depois de *Organizar*; em janela estreita, só o **⚙**).
+**Abrir:** pelo atalho do aplicativo instalado ou pelo `iniciar-desktop.cmd` (ver *Como rodar*). Na primeira abertura, escolha a pasta dos projetos, confirme o `claude.exe` e, se quiser, importe o histórico antigo. Para mudar a pasta dos projetos ou o Claude Code depois, clique no **⚙** da barra de título (à esquerda de minimizar, maximizar e fechar) ou use a ação *Pastas e Claude Code* da paleta (**Ctrl+K**).
 
-**Barra de título:** no topo da janela fica a barra do aplicativo: à esquerda o nome; à direita o status (quem está trabalhando, cotas e RAM) e, logo depois, os botões do próprio app: **minimizar**, **maximizar/restaurar** (o ícone muda conforme a janela) e **fechar** (fica vermelho ao passar o mouse). Também dá para usá-los pelo teclado (Tab até eles e Enter). Arraste a janela por qualquer ponto vazio da barra; clique duplo maximiza ou restaura; arrastar para as bordas da tela, Win+setas e Win+Z encaixam a janela como em qualquer programa. O menu de layouts que o Windows 11 mostra ao parar o mouse sobre o maximizar nativo não aparece (use Win+Z). Se a tela travar, **Alt+F4** fecha o aplicativo. As janelas de ativação e de primeira abertura/Ajustes continuam com os botões do Windows.
+**Barra de título:** no topo da janela fica a barra do aplicativo: à esquerda o nome; no meio, o campo **Buscar ou executar…** (`Ctrl+K`), que abre a paleta de comandos (veja *Navegar no canvas*); à direita o status (quem está trabalhando, cotas e RAM) e, logo depois, o **⚙** (pastas e Claude Code: reabre os Ajustes da primeira abertura; se não abrirem, aparece a mensagem logo abaixo da barra, fechável no ✕) e os botões do próprio app: **minimizar**, **maximizar/restaurar** (o ícone muda conforme a janela) e **fechar** (fica vermelho ao passar o mouse). Também dá para usá-los pelo teclado (Tab até eles e Enter). Arraste a janela por qualquer ponto vazio da barra, inclusive em volta da busca; clique duplo maximiza ou restaura; arrastar para as bordas da tela, Win+setas e Win+Z encaixam a janela como em qualquer programa. O menu de layouts que o Windows 11 mostra ao parar o mouse sobre o maximizar nativo não aparece (use Win+Z). Se a tela travar, **Alt+F4** fecha o aplicativo. As janelas de ativação e de primeira abertura/Ajustes continuam com os botões do Windows.
 
-**Janela estreita:** abaixo de 1280 px de largura, os rótulos encurtam (*+ Novo*, *+ Nota*, *5h*, *7d*); abaixo de 1100 px, os botões ficam só com o ícone (passe o mouse para ver o nome), o status mostra a situação e um medidor resumido (passe o mouse para ver tudo) e o minimapa some. Abrir o endereço do servidor no navegador mostra só o aviso de que o Orquestrador roda no aplicativo.
+**Janela estreita:** na barra de título, o status divide a largura com a busca e encurta antes: abaixo de 1440 px as cotas aparecem como *5h* e *7d* (sem o "· agentes"); abaixo de 1280 px, o status mostra só a situação e um medidor resumido (passe o mouse para ver tudo). Abaixo de 1100 px, a busca vira só a lupa **⌕**, o `+ Novo ▾` fica só com o **+** (passe o mouse para ver o nome) e o minimapa some. A situação (quem está trabalhando) nunca some. No navegador, a barra do canvas e o status seguem os passos de 1280 px (rótulos curtos) e 1100 px (só ícones e o resumo). Abrir o endereço do servidor no navegador mostra só o aviso de que o Orquestrador roda no aplicativo.
 
 **Navegar no canvas:**
 - arrastar o fundo move o canvas;
 - a roda do mouse rola; **Ctrl + roda** dá zoom;
 - **Ctrl+0** volta o zoom para 100% sem sair do lugar — é onde o texto dos terminais fica mais nítido (ao abrir e ao *Organizar*, o canvas nunca passa de 100%, mas pode ficar abaixo para caber tudo); o zoom e a posição ficam salvos ao fechar o app;
-- os botões no canto inferior esquerdo aproximam, afastam e enquadram tudo;
-- **Ctrl+K** (ou o botão *Buscar* na barra do canvas) abre a **paleta de comandos**, de qualquer lugar, inclusive com o cursor num prompt. Digite parte do nome (acentos e maiúsculas não importam; todas as palavras precisam aparecer) para achar:
-  - **ações:** *Novo orquestrador*, *Nova nota*, *Organizar* (com mais de uma janela), *Zoom 100%* e *Enquadrar tudo*;
+- os botões no canto inferior esquerdo aproximam, afastam e enquadram tudo; o 4º, com o ícone de grade, é o **Organizar**: põe os terminais lado a lado e as notas em colunas à direita deles (fica desabilitado com uma janela só);
+- **Ctrl+N** abre o formulário de um orquestrador novo (o mesmo de *+ Novo ▾ › Orquestrador*, respeitando o limite de 4) e **Ctrl+Shift+N** cria uma nota; com o cursor num campo de texto (prompt, nota, chat), os dois não fazem nada;
+- **Ctrl+K** (ou o campo *Buscar ou executar…* da barra de título; no navegador, o botão *Buscar* na barra do canvas) abre a **paleta de comandos**, de qualquer lugar, inclusive com o cursor num prompt. Digite parte do nome (acentos e maiúsculas não importam; todas as palavras precisam aparecer) para achar:
+  - **ações:** *Novo orquestrador* (Ctrl+N), *Nova nota* (Ctrl+Shift+N), *Organizar* (com mais de uma janela), *Zoom 100%* (Ctrl+0), *Enquadrar tudo* e, no aplicativo, *Pastas e Claude Code*;
   - **orquestradores:** todos, abertos ou não, com a pasta e se estão trabalhando; escolher abre o terminal (respeitando o limite de 4) ou leva até ele;
   - **notas:** pelo título ou pelo texto; escolher centraliza a nota;
   - **pedidos:** o texto dos pedidos das conversas dos terminais abertos, do mais recente ao mais antigo; escolher leva até o terminal.
@@ -972,7 +1026,7 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 - o minimapa no canto inferior direito mostra onde cada coisa está (as notas têm cor própria). O terminal de um Orquestrador trabalhando **brilha** no minimapa (contorno laranja que pulsa), para achar quem está ocupado num canvas grande; o pulso para com o reduzir movimento do sistema, durante o arraste e com o servidor desconectado;
 - enquanto você arrasta um terminal/bixinho ou move o canvas, as animações dos nós pausam e a bolinha das linhas some (para o movimento ficar leve); tudo volta ao soltar.
 
-1. **Criar um Orquestrador:** clique em *+ Novo orquestrador*. Abre um terminal de configuração: escolha a **pasta** do projeto (o nome é sugerido a partir dela). Depois defina:
+1. **Criar um Orquestrador:** clique no botão laranja **`+ Novo ▾`** (canto superior esquerdo) e escolha *Orquestrador*, ou aperte **Ctrl+N** (com o canvas vazio, também há o *+ Novo orquestrador* no meio da tela). No menu, ↑/↓ escolhem, Enter confirma e Esc ou um clique fora fecham. Abre um terminal de configuração: escolha a **pasta** do projeto (o nome é sugerido a partir dela). Depois defina:
    - **Modelos:** o do Orquestrador planeja e sintetiza; o dos Subagentes executa. Opus é o mais capaz; Haiku é rápido e gasta menos cota.
    - **Esforço:** abaixo de cada modelo há uma lista, *Esforço do orquestrador* e *Esforço dos subagentes*, com *Padrão (Claude Code)*, *Baixo*, *Médio*, *Alto*, *Extra alto* e *Máximo*. Cada papel tem o seu.
      - *Padrão (Claude Code)* (o inicial) não força nada: vale o `settings.json` do Claude Code desta máquina ou, sem ele, o padrão do modelo. Neste computador, hoje, isso dá *Extra alto* (`xhigh`) no Opus 5.5, porque está salvo nas configurações do Claude Code.
@@ -988,9 +1042,9 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 2. **Mexer nos terminais:**
    - **mover:** arraste pela barra de título;
    - **redimensionar:** clique no terminal para selecioná-lo e puxe as bordas ou os cantos;
-   - **organizar:** o botão *Organizar* coloca todos lado a lado (e as notas em colunas à direita deles, item 11);
+   - **organizar:** o botão *Organizar*, o 4º dos controles do canto inferior esquerdo (ícone de grade, abaixo de aproximar, afastar e enquadrar), coloca todos lado a lado (e as notas em colunas à direita deles, item 11); também está na paleta (Ctrl+K);
    - **fechar:** o *✕* só tira o terminal do canvas; o Orquestrador e o histórico continuam salvos. Para reabrir, clique nele na lista *orquestradores*, no canto superior esquerdo.
-   - **limite de 4 abertos:** o canvas mostra no máximo **4 orquestradores abertos** ao mesmo tempo, e o formulário de *+ Novo orquestrador* conta como um. Tentar abrir um quinto (pelo *+ Novo orquestrador*, pela lista ou pelo cartão do chat) mostra, abaixo da barra do canvas, o aviso *"Limite de 4 orquestradores abertos. Feche um dos orquestradores (✕ na barra do terminal) antes de iniciar outro."*. Feche um no *✕* (nada é excluído) e tente de novo; o aviso some sozinho ao liberar a vaga. Clicar num que já está aberto só leva até ele (ver ADR-18).
+   - **limite de 4 abertos:** o canvas mostra no máximo **4 orquestradores abertos** ao mesmo tempo, e o formulário de novo orquestrador conta como um. Tentar abrir um quinto (pelo *+ Novo ▾ › Orquestrador*, pelo Ctrl+N, pela lista, pela paleta ou pelo cartão do chat) mostra, abaixo da barra do canvas, o aviso *"Limite de 4 orquestradores abertos. Feche um dos orquestradores (✕ na barra do terminal) antes de iniciar outro."*. Feche um no *✕* (nada é excluído) e tente de novo; o aviso some sozinho ao liberar a vaga. Clicar num que já está aberto só leva até ele (ver ADR-18).
 
    O canvas é lembrado neste navegador: posições, tamanhos e zoom (gravados ao soltar o arraste e ao fim do pan/zoom).
 3. **Conversar:** digite no prompt `❯` e aperte **Enter** (Shift+Enter quebra linha). O terminal mostra o log de cada pedido: o que o próprio Orquestrador está fazendo (ex.: *orquestrador lendo package.json*, *orquestrador executando git status*), quando ele instancia cada agente (`⚡`), o que cada bixinho está fazendo, quando termina (`✓`) e, no fim, a resposta. Para continuar o assunto, mande outra mensagem: ele lembra da conversa. O topo do terminal mostra quantos pedidos a conversa já tem (*N pedidos nesta conversa · /clear começa uma nova*).
@@ -1062,7 +1116,7 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 
     Quando o servidor volta, a tela reconecta sozinha e mostra **Servidor reconectado**. Se ele foi reiniciado, os pedidos que rodavam aparecem como interrompidos; é só reenviar.
 11. **Bloco de notas:** para anotar observações e coisas para fazer depois, ao lado dos terminais.
-    - **Criar:** clique em *+ notas*, ao lado de *+ Novo orquestrador*. A nota ("Nova nota") abre no centro da tela, já com o cursor no texto. Cada clique cria outra, um pouco deslocada da anterior.
+    - **Criar:** no **`+ Novo ▾`** (canto superior esquerdo), escolha *Nota*, ou aperte **Ctrl+Shift+N** (fora de um campo de texto). A nota ("Nova nota") abre no centro da tela, já com o cursor no texto. Cada vez cria outra, um pouco deslocada da anterior.
     - **Escrever:** é texto puro. A nota **salva sozinha** um instante (0,6 s) depois que você para de digitar e quando você clica fora dela. O rodapé mostra *salvando…* e depois *salvo*. Se der *erro ao salvar — tentar de novo*, o texto continua na tela: clique na mensagem para tentar outra vez. Antes de fechar a aba logo depois de digitar, clique fora da nota ou espere o *salvo*.
     - **Título:** clique duplo no título para editar. **Enter** confirma, **Esc** desiste; em branco, volta ao título anterior. Até 120 caracteres.
     - **Minimizar e restaurar:** o botão de minimizar na barra deixa só a barra, com o título e a primeira linha do texto; o mesmo botão restaura no tamanho de antes. Minimizada, um **⚠** na barra avisa se algo deu errado (clique para abrir a nota e ver).
@@ -1076,13 +1130,18 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
     O texto das notas fica salvo no servidor (em `dados/notas/`), então volta ao recarregar a página. Posição, tamanho e se está minimizada são lembrados neste navegador, como os terminais. Notas abertas em duas abas não se sincronizam: vale o último salvamento, e a outra aba só vê a mudança ao recarregar.
 12. **Chat rápido:** a caixa no centro, embaixo da tela, para perguntar algo ao Claude sem abrir um terminal.
     - **Compacta por padrão:** fica numa linha só (*+* · campo · modelo · *enviar*). Clique nela (ou foque o campo com Tab) e ela expande; volta a uma linha quando sai o foco e não há texto, imagens nem o menu do modelo aberto.
-    - **Perguntar:** escreva e aperte **Enter** (Shift+Enter quebra linha). A resposta aparece aos poucos; enquanto o Claude pesquisa ou lê, aparece a atividade (ex.: *pesquisando "node lts"*). O chat lembra da conversa.
+    - **Perguntar:** escreva e aperte **Enter** (Shift+Enter quebra linha). A resposta aparece aos poucos; enquanto o Claude pesquisa, lê, edita ou roda um comando, aparece a atividade (ex.: *pesquisando "node lts"*, *editando src/x.ts*, *rodando: npm test*). O chat lembra da conversa.
     - **Imagens:** cole, arraste ou anexe, como nos terminais (até 5, PNG/JPEG/GIF/WebP, 5 MB cada). Dá para mandar só a imagem.
     - **Cancelar:** **Esc** durante a resposta. O texto que já chegou fica.
-    - **`/clear`:** começa uma conversa nova; a anterior fica arquivada em `dados/chat/historico/`. Durante uma resposta, cancele antes.
+    - **`/clear`:** começa uma conversa nova; a anterior fica arquivada em `dados/chat/historico/`. Também desfaz a autorização de alterações. Durante uma resposta, cancele antes.
     - **Modelo e esforço:** o seletor do chat (Fable, Opus, Sonnet, Haiku; esforço de *Padrão* a *Máximo*) vale a partir da próxima pergunta e fica como padrão, mesmo depois do `/clear` ou de reiniciar. O inicial é Opus com esforço alto.
     - **Abrir um orquestrador pelo chat:** peça, por exemplo, *"abra um orquestrador no painel-app para rodar os testes"*. O Claude explica e mostra um **cartão** com o projeto e o pedido. Nada acontece até você clicar no cartão. Se ele citar um projeto que não existe, aparece um aviso no lugar do cartão.
-    - **O que o chat pode ler:** a web (pesquisa e páginas) e os arquivos dos projetos da pasta raiz. Ele nunca altera nada nem roda comandos. Arquivos `.env*` são bloqueados, mas outros arquivos com segredos (chaves, credenciais) podem ser lidos se você pedir (ver ADR-17).
+    - **O que o chat pode fazer** (ver ADR-17 e ADR-25):
+      - *Sempre:* pesquisar na web (pesquisa e páginas) e ler os arquivos dos projetos da pasta raiz. Arquivos `.env*` são bloqueados, mas outros arquivos com segredos (chaves, credenciais) podem ser lidos se você pedir.
+      - *Com autorização:* editar arquivos e rodar comandos nos projetos. Na primeira vez que precisar, o Claude para e a resposta mostra um **cartão**: *"O chat quer editar `src/x.ts`"* ou *"O chat quer rodar `npm test`"*. **Autorizar até o /clear e continuar** libera editar **e** rodar comandos, sem perguntar de novo, até o próximo `/clear`, e já manda o Claude continuar de onde parou. **Agora não** só esconde o cartão (nada é liberado).
+      - *Enquanto vale:* ao lado do campo aparece o selo **alterações autorizadas** (passe o mouse para a explicação). O **✕** do selo revoga: a partir da próxima pergunta, o chat volta a pedir. O `/clear` também revoga.
+      - *Commit e push:* só quando você pedir explicitamente na mensagem, numa branch da política (`feature/`, `fix/`, `hotfix/` ou `refactor/`), nunca na `main`, sem push forçado e sem a linha `Co-authored-by`.
+      - *Riscos:* o chat altera a **pasta real** do projeto, sem worktree (diferente dos Orquestradores) e sem painel de alterações: revise com o git. Os bloqueios de comandos (como o push forçado) casam por texto e não são garantia, e o "commit só quando pedir" depende do modelo seguir a instrução. Para mudanças grandes, prefira um Orquestrador; o próprio chat sugere abrir um.
     - Cada pergunta usa cota da assinatura (dezenas de milhares de tokens de contexto, a maior parte em cache) e leva alguns segundos até o primeiro trecho.
 13. **Economizar tokens** (ver ADR-21):
     - **Modo econômico:** na criação e no *⚙*, o botão *Modo econômico* preenche de uma vez: Opus com esforço *Médio* no Orquestrador, Sonnet com esforço *Médio* nos Subagentes, quantidade *Automática* até 1, **Deixar o orquestrador fazer o trivial sozinho** ligada e **Propor plano antes de mudanças grandes** desligada. Permissões e commit/push ficam como estavam. Tudo continua editável depois; ao mudar um desses campos, a configuração deixa de ser o Modo econômico (o selo some). Vale a partir do próximo pedido.

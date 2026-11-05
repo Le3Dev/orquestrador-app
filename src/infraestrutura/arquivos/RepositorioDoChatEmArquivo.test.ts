@@ -5,10 +5,19 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { EventoDoChatRegistrado } from "../../chat/EventoDoChat";
+import type { ConversaDoChat } from "../../chat/ConversaDoChat";
+import type { EventoDoChat, EventoDoChatRegistrado } from "../../chat/EventoDoChat";
 import { RepositorioDoChatEmArquivo } from "./RepositorioDoChatEmArquivo";
 
 const uso = { duracaoMs: 1, tokensDeEntrada: 1, tokensDeSaida: 1, modeloUsado: null };
+
+function autorizar(conversa: ConversaDoChat): EventoDoChat {
+  const evento = conversa.autorizarAlteracoes();
+  if (evento === null) {
+    throw new Error("A conversa já estava autorizada.");
+  }
+  return evento;
+}
 
 describe("RepositorioDoChatEmArquivo", () => {
   let pasta: string;
@@ -90,6 +99,66 @@ describe("RepositorioDoChatEmArquivo", () => {
     expect(reaberto.lerEventos(0).map((evento: EventoDoChatRegistrado) => evento.tipo)).toEqual(["conversa_limpa"]);
     expect(reaberto.anexarEvento({ tipo: "resposta_cancelada", mensagemId: "x" }).sequencia).toBe(4);
     expect(reaberto.preferencias().esforco).toBe("baixo");
+  });
+
+  it("grava e relê a autorização, os eventos dela e a autorização pendente da resposta", async () => {
+    const repositorio = await RepositorioDoChatEmArquivo.abrir(pasta, gerarSessao);
+    const conversa = repositorio.conversa();
+    repositorio.anexarEvento(
+      conversa.perguntar({ mensagemDoUsuarioId: "u1", mensagemDoClaudeId: "c1", texto: "rode os testes", imagens: [], agora: new Date() }),
+    );
+    repositorio.anexarEvento(autorizar(conversa));
+    repositorio.anexarEvento(conversa.concluir("Preciso da autorização.", [], [], uso, { acao: "rodar_comando", detalhe: "npm test" }));
+    await repositorio.salvar(conversa);
+    await repositorio.aguardarGravacoes();
+
+    const reaberto = await RepositorioDoChatEmArquivo.abrir(pasta, gerarSessao);
+
+    expect(reaberto.conversa().alteracoesAutorizadas).toBe(true);
+    expect(reaberto.conversa().mensagens[1]?.autorizacaoPendente).toEqual({ acao: "rodar_comando", detalhe: "npm test" });
+    expect(reaberto.lerEventos(0).map((evento) => [evento.sequencia, evento.tipo])).toEqual([
+      [1, "pergunta_enviada"],
+      [2, "alteracoes_autorizadas"],
+      [3, "resposta_concluida"],
+    ]);
+    expect(reaberto.lerEventos(2)[0]).toMatchObject({ autorizacaoPendente: { acao: "rodar_comando", detalhe: "npm test" } });
+  });
+
+  it("conversa.json gravado antes da autorização carrega sem ela e sem pendências", async () => {
+    const pastaDoChat = path.join(pasta, "chat");
+    await mkdir(pastaDoChat, { recursive: true });
+    const mensagem = { imagens: [], criadaEm: "2026-11-01T10:00:00.000Z", situacao: "concluida", acoes: [], avisos: [] };
+    await writeFile(
+      path.join(pastaDoChat, "conversa.json"),
+      JSON.stringify({
+        sessaoId: "antiga",
+        sessaoIniciada: true,
+        mensagens: [
+          { ...mensagem, id: "u1", papel: "usuario", texto: "oi", uso: null },
+          { ...mensagem, id: "c1", papel: "claude", texto: "olá", uso },
+        ],
+      }),
+      "utf8",
+    );
+
+    const repositorio = await RepositorioDoChatEmArquivo.abrir(pasta, gerarSessao);
+
+    expect(repositorio.conversa().sessaoId).toBe("antiga");
+    expect(repositorio.conversa().alteracoesAutorizadas).toBe(false);
+    expect(repositorio.conversa().mensagens.map((dados) => dados.autorizacaoPendente)).toEqual([null, null]);
+  });
+
+  it("/clear grava a conversa nova sem autorização", async () => {
+    const repositorio = await RepositorioDoChatEmArquivo.abrir(pasta, gerarSessao);
+    const conversa = repositorio.conversa();
+    repositorio.anexarEvento(autorizar(conversa));
+    await repositorio.salvar(conversa);
+
+    await repositorio.arquivarConversa(conversa, conversa.limpar("sessao-nova")).gravacao;
+    const reaberto = await RepositorioDoChatEmArquivo.abrir(pasta, gerarSessao);
+
+    expect(reaberto.conversa().alteracoesAutorizadas).toBe(false);
+    expect(JSON.parse(await readFile(path.join(pasta, "chat", "conversa.json"), "utf8")).alteracoesAutorizadas).toBe(false);
   });
 
   it("arquivo ilegível vira aviso e uma cópia ao lado, sem impedir a abertura", async () => {

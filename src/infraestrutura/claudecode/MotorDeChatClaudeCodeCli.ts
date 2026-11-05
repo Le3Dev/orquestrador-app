@@ -10,7 +10,7 @@ import type {
   ResultadoDaResposta,
 } from "../../chat/MotorDeChat";
 import { AdaptadorDeEventosDoChat } from "./AdaptadorDeEventosDoChat";
-import { montarAmbienteDoChat, montarArgumentosDoChat } from "./ArgumentosDoChat";
+import { configuracoesDaSessaoDoChat, montarAmbienteDoChat, montarArgumentosDoChat } from "./ArgumentosDoChat";
 import { linhaDeEntrada } from "./ArgumentosDoClaudeCode";
 import { FachadaClaudeCodeCli, SaidaDoClaudeCode } from "./FachadaClaudeCodeCli";
 
@@ -31,9 +31,11 @@ function descreverSaidaSemResultado(saida: SaidaDoClaudeCode): string {
  * `MotorDeChat` sobre o Claude Code em modo headless: um processo `claude -p`
  * por pergunta, com o login da assinatura do usuário.
  *
- * As instruções vão num arquivo temporário próprio da pergunta, apagado ao
- * final. Com o sinal abortado, a fachada encerra a árvore do processo e a
- * resposta resolve como cancelada.
+ * As instruções e a configuração da sessão (`--settings`, sem a atribuição
+ * Co-authored-by) vão em arquivos temporários próprios da pergunta, apagados
+ * ao final — no mesmo padrão dos turnos dos Orquestradores. Com o sinal
+ * abortado, a fachada encerra a árvore do processo e a resposta resolve como
+ * cancelada.
  */
 export class MotorDeChatClaudeCodeCli implements MotorDeChat {
   constructor(
@@ -50,11 +52,15 @@ export class MotorDeChatClaudeCodeCli implements MotorDeChat {
       return { sucesso: false, motivo: MOTIVO_DO_CANCELAMENTO, uso: null };
     }
     const pastaTemporaria = path.join(tmpdir(), "orquestrador-chat", randomUUID());
-    const arquivos = { instrucoes: path.join(pastaTemporaria, "instrucoes.txt") };
+    const arquivos = {
+      instrucoes: path.join(pastaTemporaria, "instrucoes.txt"),
+      configuracoes: path.join(pastaTemporaria, "configuracoes.json"),
+    };
 
     try {
       await mkdir(pastaTemporaria, { recursive: true });
       await writeFile(arquivos.instrucoes, pergunta.instrucoes, "utf8");
+      await writeFile(arquivos.configuracoes, JSON.stringify(configuracoesDaSessaoDoChat()), "utf8");
       await mkdir(pergunta.pastaDaSessao, { recursive: true });
 
       const imagens = await Promise.all(
@@ -64,7 +70,7 @@ export class MotorDeChatClaudeCodeCli implements MotorDeChat {
         })),
       );
 
-      const adaptador = new AdaptadorDeEventosDoChat();
+      const adaptador = new AdaptadorDeEventosDoChat(pergunta.alteracoesAutorizadas);
       const inicio = Date.now();
       const saida = await this.fachada.executar(
         {
