@@ -2,13 +2,16 @@ import { memo } from "react";
 
 import type { SituacaoDoSubagente } from "../../shared/api/tipos";
 import type { AparenciaDoBixinho } from "../../shared/canvas/bixinhos";
+import { type IconeDeFerramenta, ROTULO_DO_ICONE } from "../../shared/canvas/iconesDeFerramenta";
 import {
   ACESSORIOS_DESENHADOS,
   COLUNAS,
   expressaoPara,
+  LADO_DO_ICONE,
   LINHAS,
   type Pixel,
   pixelsDoCorpo,
+  PIXELS_DOS_ICONES,
   ROSTOS,
 } from "../../shared/canvas/sprites";
 
@@ -81,6 +84,32 @@ export const Bixinho = memo(function Bixinho({ aparencia, situacao }: Props) {
           <Pixels pixels={rosto.boca} className="bixinho-escuro" />
           <Pixels pixels={rosto.bochechas} className="bixinho-bochecha" />
         </g>
+      </svg>
+    </span>
+  );
+});
+
+const VIEWBOX_DO_ICONE = `0 0 ${LADO_DO_ICONE * TAMANHO_DO_PIXEL} ${LADO_DO_ICONE * TAMANHO_DO_PIXEL}`;
+const TAMANHO_DO_ICONE_NA_TELA = 12;
+
+/**
+ * O ícone da ferramenta que o Subagente usa agora (lupa, lápis, engrenagem,
+ * globo), num selo ao lado do bixinho. Fica fora do `Bixinho`, e é `memo`:
+ * trocar de ferramenta redesenha só as poucas células do ícone, e não as do
+ * bixinho.
+ */
+export const IconeDaFerramenta = memo(function IconeDaFerramenta({ icone }: { icone: IconeDeFerramenta }) {
+  const rotulo = ROTULO_DO_ICONE[icone];
+  return (
+    <span className={`icone-da-ferramenta icone-da-ferramenta-${icone}`} role="img" aria-label={rotulo} title={rotulo}>
+      <svg
+        viewBox={VIEWBOX_DO_ICONE}
+        width={TAMANHO_DO_ICONE_NA_TELA}
+        height={TAMANHO_DO_ICONE_NA_TELA}
+        shapeRendering="crispEdges"
+        aria-hidden="true"
+      >
+        <Pixels pixels={PIXELS_DOS_ICONES[icone]} className="icone-da-ferramenta-pixels" />
       </svg>
     </span>
   );

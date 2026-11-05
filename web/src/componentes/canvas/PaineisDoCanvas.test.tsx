@@ -80,6 +80,27 @@ describe("BarraDoCanvas · rótulos e desktop", () => {
     expect(screen.getByRole("heading", { name: "Orquestrador de agentes" })).toBeInTheDocument();
   });
 
+  it("\"Buscar\" só aparece com a paleta; tem os três rótulos, o atalho e abre a paleta", () => {
+    const { unmount } = render(
+      <BarraDoCanvas aoCriar={vi.fn()} aoCriarNota={vi.fn()} aoOrganizar={vi.fn()} podeOrganizar />,
+    );
+    expect(screen.queryByRole("button", { name: "Buscar (Ctrl+K)" })).not.toBeInTheDocument();
+    unmount();
+
+    const aoBuscar = vi.fn();
+    render(
+      <BarraDoCanvas aoCriar={vi.fn()} aoCriarNota={vi.fn()} aoOrganizar={vi.fn()} podeOrganizar aoBuscar={aoBuscar} />,
+    );
+    const buscar = screen.getByRole("button", { name: "Buscar (Ctrl+K)" });
+
+    expect(buscar).toHaveAttribute("aria-keyshortcuts", "Control+K");
+    expect(buscar.querySelector(".rotulo-completo")).toHaveTextContent("Buscar (Ctrl+K)");
+    expect(buscar.querySelector(".rotulo-curto")).toHaveTextContent("Buscar");
+    expect(buscar.querySelector(".rotulo-icone")).toHaveTextContent("⌕");
+    fireEvent.click(buscar);
+    expect(aoBuscar).toHaveBeenCalledTimes(1);
+  });
+
   it("no desktop, não repete o título do app nem desenha botões de janela", () => {
     janelaComPonte.electron = {
       desktop: true,

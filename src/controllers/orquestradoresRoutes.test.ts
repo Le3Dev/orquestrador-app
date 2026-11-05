@@ -389,6 +389,159 @@ describe("rotas de orquestradores — modo de planejamento", () => {
     });
   });
 
+  describe("fila de pedidos", () => {
+    const agora = new Date("2026-10-28T12:00:00Z");
+
+    async function enfileirar(corpo: unknown, id = orquestrador.id): Promise<Response> {
+      return postar(`/orquestradores/${id}/fila`, corpo);
+    }
+
+    async function excluir(caminho: string): Promise<Response> {
+      return fetch(`${base}${caminho}`, { method: "DELETE" });
+    }
+
+    it("POST /fila responde 201 com o pedidoId e o pedido fica parado, sem turno", async () => {
+      const pedidosAntes = motor.pedidos.length;
+
+      const resposta = await enfileirar({ texto: "  rode os testes  ", modo: "planejamento" });
+
+      expect(resposta.status).toBe(201);
+      const { pedidoId } = (await resposta.json()) as { pedidoId: string };
+      expect(orquestrador.fila.map((pedido) => pedido.paraDados())).toEqual([
+        { id: pedidoId, texto: "rode os testes", modo: "planejamento", enfileiradoEm: agora.toISOString() },
+      ]);
+      expect(repositorio.eventos.at(-1)).toMatchObject({ tipo: "pedido_enfileirado", pedido: { id: pedidoId } });
+      expect(orquestrador.totalDeTurnos).toBe(0);
+      expect(motor.pedidos).toHaveLength(pedidosAntes);
+    });
+
+    it("POST /fila sem modo enfileira um pedido de execução", async () => {
+      const resposta = await enfileirar({ texto: "analise" });
+
+      expect(resposta.status).toBe(201);
+      expect(orquestrador.fila[0]?.modo).toBe("execucao");
+    });
+
+    it.each<[string, unknown, string]>([
+      ["sem texto", {}, "Escreva o pedido."],
+      ["com texto em branco", { texto: "   " }, "Escreva o pedido."],
+      ["com texto que não é texto", { texto: 42 }, "Escreva o pedido."],
+      ["com modo inválido", { texto: "oi", modo: "turbo" }, "Modo do pedido inválido."],
+      ["com texto longo demais", { texto: "a".repeat(50_001) }, "O pedido deve ter até 50000 caracteres."],
+      [
+        "com imagens",
+        { texto: "oi", imagens: [{ nome: "a.png" }] },
+        "A fila aceita só texto: envie as imagens quando o orquestrador estiver livre.",
+      ],
+    ])("POST /fila %s responde 400", async (_caso, corpo, mensagem) => {
+      const resposta = await enfileirar(corpo);
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: mensagem });
+      expect(orquestrador.fila).toHaveLength(0);
+    });
+
+    it("POST /fila com a fila cheia responde 409", async () => {
+      for (let numero = 1; numero <= 10; numero += 1) {
+        await servico.enfileirarPedido(orquestrador.id, `pedido ${numero}`);
+      }
+
+      const resposta = await enfileirar({ texto: "o décimo primeiro" });
+
+      expect(resposta.status).toBe(409);
+      expect(await resposta.json()).toEqual({ erro: 'A fila de "Painel" está cheia (máximo 10 pedidos).' });
+      expect(orquestrador.fila).toHaveLength(10);
+    });
+
+    it("POST /fila em orquestrador inexistente responde 404", async () => {
+      const resposta = await enfileirar({ texto: "oi" }, "nao-existe");
+
+      expect(resposta.status).toBe(404);
+      expect(await resposta.json()).toEqual({ erro: "Orquestrador não encontrado." });
+    });
+
+    it("DELETE /fila/:pedidoId responde 204 e tira o pedido da fila", async () => {
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "um");
+      const outro = await servico.enfileirarPedido(orquestrador.id, "dois");
+
+      const resposta = await excluir(`/orquestradores/${orquestrador.id}/fila/${pedidoId}`);
+
+      expect(resposta.status).toBe(204);
+      expect(orquestrador.fila.map((pedido) => pedido.id)).toEqual([outro.pedidoId]);
+      expect(repositorio.eventos.at(-1)).toMatchObject({ tipo: "pedido_retirado_da_fila", pedidoId, motivo: "removido" });
+    });
+
+    it("DELETE /fila/:pedidoId responde 404 para pedido ou orquestrador inexistente", async () => {
+      const semPedido = await excluir(`/orquestradores/${orquestrador.id}/fila/nao-existe`);
+      const semOrquestrador = await excluir("/orquestradores/nao-existe/fila/p1");
+
+      expect(semPedido.status).toBe(404);
+      expect(await semPedido.json()).toEqual({ erro: "Pedido não encontrado na fila." });
+      expect(semOrquestrador.status).toBe(404);
+      expect(await semOrquestrador.json()).toEqual({ erro: "Orquestrador não encontrado." });
+    });
+
+    it("POST /fila/:pedidoId/enviar responde 202 com o turno, que usa o texto e o modo do pedido", async () => {
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "planeje a migração", "planejamento");
+      const inicio = repositorio.eventos.length;
+
+      const resposta = await postar(`/orquestradores/${orquestrador.id}/fila/${pedidoId}/enviar`);
+
+      expect(resposta.status).toBe(202);
+      const { turnoId } = (await resposta.json()) as { turnoId: string };
+      await aguardarOcioso();
+      expect(orquestrador.ultimoTurno?.id).toBe(turnoId);
+      expect(orquestrador.ultimoTurno?.texto).toBe("planeje a migração");
+      expect(orquestrador.ultimoTurno?.modo).toBe("planejamento");
+      expect(orquestrador.fila).toEqual([]);
+      expect(repositorio.eventos.slice(inicio, inicio + 2)).toMatchObject([
+        { tipo: "pedido_retirado_da_fila", pedidoId, motivo: "enviado" },
+        { tipo: "turno_iniciado", turnoId },
+      ]);
+    });
+
+    it("POST /fila/:pedidoId/enviar com turno em andamento responde 409 e o pedido continua na fila", async () => {
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "depois");
+      orquestrador.iniciarTurno("em-andamento", "analise", agora);
+
+      const resposta = await postar(`/orquestradores/${orquestrador.id}/fila/${pedidoId}/enviar`);
+
+      expect(resposta.status).toBe(409);
+      expect(await resposta.json()).toEqual({
+        erro: '"Painel" ainda está trabalhando no pedido anterior. Aguarde terminar ou cancele.',
+      });
+      expect(orquestrador.fila.map((pedido) => pedido.id)).toEqual([pedidoId]);
+      orquestrador.cancelarTurno("em-andamento", agora);
+    });
+
+    it("POST /fila/:pedidoId/enviar responde 404 para pedido ou orquestrador inexistente", async () => {
+      const semPedido = await postar(`/orquestradores/${orquestrador.id}/fila/nao-existe/enviar`);
+      const semOrquestrador = await postar("/orquestradores/nao-existe/fila/p1/enviar");
+
+      expect(semPedido.status).toBe(404);
+      expect(await semPedido.json()).toEqual({ erro: "Pedido não encontrado na fila." });
+      expect(semOrquestrador.status).toBe(404);
+      expect(await semOrquestrador.json()).toEqual({ erro: "Orquestrador não encontrado." });
+    });
+
+    it("o resumo da lista e o detalhe trazem a fila", async () => {
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "rode os testes");
+      const esperada = [{ id: pedidoId, texto: "rode os testes", modo: "execucao", enfileiradoEm: agora.toISOString() }];
+
+      const detalhe = (await (await fetch(`${base}/orquestradores/${orquestrador.id}`)).json()) as Record<string, unknown>;
+      const lista = (await (await fetch(`${base}/orquestradores`)).json()) as Array<Record<string, unknown>>;
+
+      expect(detalhe.fila).toEqual(esperada);
+      expect(lista.find((item) => item.id === orquestrador.id)?.fila).toEqual(esperada);
+    });
+
+    it("um orquestrador sem pedidos traz a fila vazia no resumo", async () => {
+      const detalhe = (await (await fetch(`${base}/orquestradores/${orquestrador.id}`)).json()) as Record<string, unknown>;
+
+      expect(detalhe.fila).toEqual([]);
+    });
+  });
+
   describe("opções de trabalho direto e de propor plano", () => {
     async function alterarConfiguracao(corpo: unknown): Promise<Response> {
       return fetch(`${base}/orquestradores/${orquestrador.id}/configuracao`, {

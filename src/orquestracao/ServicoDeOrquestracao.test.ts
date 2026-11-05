@@ -16,9 +16,10 @@ import { UsoDeTokens } from "./UsoDeTokens";
 import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "./MotorDeAgentes";
 import { Orquestrador } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
+import { PedidoNaFila } from "./PedidoNaFila";
 import { GerenciadorDeWorktrees, PreparoDeWorktree } from "./PreparoDeWorktree";
 import { ConversaArquivada, RepositorioDeOrquestradores } from "./RepositorioDeOrquestradores";
-import { ServicoDeOrquestracao } from "./ServicoDeOrquestracao";
+import { MensagemEnviada, ServicoDeOrquestracao } from "./ServicoDeOrquestracao";
 
 class RepositorioEmMemoria implements RepositorioDeOrquestradores {
   readonly orquestradores = new Map<string, Orquestrador>();
@@ -649,6 +650,270 @@ describe("ServicoDeOrquestracao", () => {
       await expect(servico.limparConversa("nao-existe")).rejects.toMatchObject({ motivo: "nao_encontrado" });
     });
   });
+
+  describe("fila de pedidos", () => {
+    const mensagemDeTurnoEmAndamento = '"Painel" ainda está trabalhando no pedido anterior. Aguarde terminar ou cancele.';
+
+    function tipos(): string[] {
+      return repositorio.eventos.map((evento) => evento.tipo);
+    }
+
+    it("enfileirar publica pedido_enfileirado, grava e, sem turno, o pedido fica parado", async () => {
+      const orquestrador = await criar();
+
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "  rode os testes  ", "planejamento");
+
+      expect(publicados.at(-1)).toMatchObject({
+        tipo: "pedido_enfileirado",
+        pedido: { id: pedidoId, texto: "rode os testes", modo: "planejamento", enfileiradoEm: "2026-10-28T12:00:00.000Z" },
+      });
+      expect(repositorio.buscarPorId(orquestrador.id)?.paraDados().fila?.map((pedido) => pedido.id)).toEqual([pedidoId]);
+      expect(motor.pedidos).toHaveLength(0);
+      expect(orquestrador.situacao).toBe("ocioso");
+    });
+
+    it("recusa pedido vazio e orquestrador inexistente", async () => {
+      const orquestrador = await criar();
+
+      await expect(servico.enfileirarPedido(orquestrador.id, "   ")).rejects.toMatchObject({
+        motivo: "dados_invalidos",
+        message: "Escreva o pedido.",
+      });
+      await expect(servico.enfileirarPedido("nao-existe", "oi")).rejects.toMatchObject({ motivo: "nao_encontrado" });
+      expect(orquestrador.fila).toHaveLength(0);
+    });
+
+    it("turno concluído envia o primeiro da fila, que sai antes de o turno dele começar", async () => {
+      const orquestrador = await criar();
+      const { conclusao, envioDaFila } = await servico.enviarMensagem(orquestrador.id, "primeiro");
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "segundo");
+      await servico.enfileirarPedido(orquestrador.id, "terceiro", "planejamento");
+
+      motor.terminar();
+      await conclusao;
+      await envioDaFila;
+
+      expect(tipos()).toEqual([
+        "turno_iniciado",
+        "pedido_enfileirado",
+        "pedido_enfileirado",
+        "turno_concluido",
+        "pedido_retirado_da_fila",
+        "turno_iniciado",
+      ]);
+      expect(repositorio.eventos[4]).toMatchObject({ tipo: "pedido_retirado_da_fila", pedidoId, motivo: "enviado" });
+      expect(repositorio.eventos[5]).toMatchObject({ tipo: "turno_iniciado", texto: "segundo", modo: "execucao" });
+      expect(orquestrador.fila.map((pedido) => pedido.texto)).toEqual(["terceiro"]);
+      expect(orquestrador.situacao).toBe("trabalhando");
+      await vi.waitFor(() => expect(motor.pedidos.map((pedido) => pedido.texto)).toEqual(["primeiro", "segundo"]));
+
+      // E a fila segue andando: o terceiro sai quando o segundo termina, no modo dele.
+      motor.terminar();
+      await vi.waitFor(() => expect(motor.pedidos).toHaveLength(3));
+      expect(motor.pedidos[2]).toMatchObject({ texto: "terceiro", modo: "planejamento" });
+      expect(orquestrador.fila).toEqual([]);
+    });
+
+    it.each<[string, (orquestradorId: string) => Promise<MensagemEnviada>]>([
+      [
+        "cancelado",
+        async (orquestradorId) => {
+          const enviada = await servico.enviarMensagem(orquestradorId, "primeiro");
+          await servico.enfileirarPedido(orquestradorId, "segundo");
+          await servico.cancelar(orquestradorId);
+          return enviada;
+        },
+      ],
+      [
+        "com falha",
+        async (orquestradorId) => {
+          motor.resultado = { sucesso: false, motivo: "Limite de uso atingido.", uso: null };
+          const enviada = await servico.enviarMensagem(orquestradorId, "primeiro");
+          await servico.enfileirarPedido(orquestradorId, "segundo");
+          motor.terminar();
+          return enviada;
+        },
+      ],
+      [
+        "com plano pendente de um planejamento",
+        async (orquestradorId) => {
+          const enviada = await servico.enviarMensagem(orquestradorId, "primeiro", [], "planejamento");
+          await servico.enfileirarPedido(orquestradorId, "segundo");
+          motor.terminar();
+          return enviada;
+        },
+      ],
+      [
+        "com plano proposto numa execução",
+        async (orquestradorId) => {
+          motor.resultado = resultadoComResposta(`Proponho mudar tudo.\n${MARCADOR_DE_PLANO}`);
+          const enviada = await servico.enviarMensagem(orquestradorId, "primeiro");
+          await servico.enfileirarPedido(orquestradorId, "segundo");
+          motor.terminar();
+          return enviada;
+        },
+      ],
+    ])("turno %s não envia nada da fila", async (_situacao, encerrarTurno) => {
+      const orquestrador = await criar();
+
+      const { conclusao, envioDaFila } = await encerrarTurno(orquestrador.id);
+      await conclusao;
+      await envioDaFila;
+
+      expect(motor.pedidos).toHaveLength(1);
+      expect(tipos()).not.toContain("pedido_retirado_da_fila");
+      expect(orquestrador.fila.map((pedido) => pedido.texto)).toEqual(["segundo"]);
+      expect(orquestrador.situacao).toBe("ocioso");
+    });
+
+    it("enviar agora sem turno retira o pedido e inicia o turno com o texto e o modo dele", async () => {
+      const orquestrador = await criar();
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "planeje a migração", "planejamento");
+
+      const { turnoId, conclusao } = await servico.enviarDaFila(orquestrador.id, pedidoId);
+
+      expect(tipos()).toEqual(["pedido_enfileirado", "pedido_retirado_da_fila", "turno_iniciado"]);
+      expect(repositorio.eventos[1]).toMatchObject({ pedidoId, motivo: "enviado" });
+      expect(repositorio.eventos[2]).toMatchObject({ turnoId, texto: "planeje a migração", modo: "planejamento" });
+      expect(orquestrador.fila).toEqual([]);
+      expect(repositorio.buscarPorId(orquestrador.id)?.paraDados().fila).toEqual([]);
+      motor.terminar();
+      await conclusao;
+      expect(motor.pedidos[0]).toMatchObject({ texto: "planeje a migração", modo: "planejamento" });
+    });
+
+    it("enviar agora com turno em andamento é recusado como uma mensagem, e o pedido continua na fila", async () => {
+      const orquestrador = await criar();
+      const { conclusao } = await servico.enviarMensagem(orquestrador.id, "primeiro");
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "segundo");
+
+      await expect(servico.enviarDaFila(orquestrador.id, pedidoId)).rejects.toMatchObject({
+        motivo: "turno_em_andamento",
+        message: mensagemDeTurnoEmAndamento,
+      });
+
+      expect(orquestrador.fila.map((pedido) => pedido.id)).toEqual([pedidoId]);
+      expect(tipos()).not.toContain("pedido_retirado_da_fila");
+      expect(orquestrador.totalDeTurnos).toBe(1);
+      await servico.cancelar(orquestrador.id);
+      await conclusao;
+    });
+
+    it("enviar ou remover um pedido que não está na fila responde não encontrado", async () => {
+      const orquestrador = await criar();
+
+      await expect(servico.enviarDaFila(orquestrador.id, "nao-existe")).rejects.toMatchObject({
+        motivo: "nao_encontrado",
+        message: "Pedido não encontrado na fila.",
+      });
+      await expect(servico.removerDaFila(orquestrador.id, "nao-existe")).rejects.toMatchObject({
+        motivo: "nao_encontrado",
+        message: "Pedido não encontrado na fila.",
+      });
+      await expect(servico.enviarDaFila("nao-existe", "p1")).rejects.toMatchObject({
+        message: "Orquestrador não encontrado.",
+      });
+    });
+
+    it("remover publica a retirada como removido e grava a fila sem o pedido", async () => {
+      const orquestrador = await criar();
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "um");
+      const outro = await servico.enfileirarPedido(orquestrador.id, "dois");
+
+      await servico.removerDaFila(orquestrador.id, pedidoId);
+
+      expect(repositorio.eventos.at(-1)).toMatchObject({ tipo: "pedido_retirado_da_fila", pedidoId, motivo: "removido" });
+      expect(repositorio.buscarPorId(orquestrador.id)?.paraDados().fila?.map((pedido) => pedido.id)).toEqual([
+        outro.pedidoId,
+      ]);
+    });
+
+    it("se o usuário inicia outro turno antes do envio automático, nada sai e o pedido fica para depois", async () => {
+      const orquestrador = await criar();
+      const { envioDaFila } = await servico.enviarMensagem(orquestrador.id, "primeiro");
+      await servico.enfileirarPedido(orquestrador.id, "da fila");
+      // O pedido do usuário chega logo depois do fim do turno, antes do envio automático.
+      const doUsuario: Array<Promise<MensagemEnviada>> = [];
+      const anexar = repositorio.anexarEvento.bind(repositorio);
+      const espiao = vi.spyOn(repositorio, "anexarEvento").mockImplementation((id, evento) => {
+        const registrado = anexar(id, evento);
+        if (evento.tipo === "turno_concluido" && doUsuario.length === 0) {
+          doUsuario.push(servico.enviarMensagem(orquestrador.id, "do usuário"));
+        }
+        return registrado;
+      });
+
+      motor.terminar();
+      await envioDaFila;
+
+      expect(orquestrador.ultimoTurno?.texto).toBe("do usuário");
+      expect(orquestrador.fila.map((pedido) => pedido.texto)).toEqual(["da fila"]);
+      expect(tipos()).not.toContain("pedido_retirado_da_fila");
+
+      // Quando o turno do usuário termina bem, a fila anda.
+      const turnoDoUsuario = await doUsuario[0];
+      motor.terminar();
+      await turnoDoUsuario?.envioDaFila;
+      expect(tipos().slice(-2)).toEqual(["pedido_retirado_da_fila", "turno_iniciado"]);
+      expect(orquestrador.ultimoTurno?.texto).toBe("da fila");
+      espiao.mockRestore();
+    });
+
+    it("um erro no envio automático vira aviso no log, e o pedido fica como turno com falha", async () => {
+      const orquestrador = await criar();
+      const { conclusao, envioDaFila } = await servico.enviarMensagem(orquestrador.id, "primeiro");
+      await servico.enfileirarPedido(orquestrador.id, "segundo");
+      const avisos = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const salvar = repositorio.salvar.bind(repositorio);
+      const espiao = vi.spyOn(repositorio, "salvar").mockImplementation(async (alvo) => {
+        if (alvo.ultimoTurno?.texto === "segundo") {
+          throw new Error("disco cheio");
+        }
+        return salvar(alvo);
+      });
+
+      motor.terminar();
+      await conclusao;
+      await expect(envioDaFila).resolves.toBeUndefined();
+
+      expect(avisos).toHaveBeenCalledWith(expect.stringContaining("próximo pedido da fila"), "disco cheio");
+      expect(orquestrador.ultimoTurno?.texto).toBe("segundo");
+      expect(orquestrador.ultimoTurno?.situacao).toBe("falhou");
+      expect(orquestrador.situacao).toBe("ocioso");
+      espiao.mockRestore();
+      avisos.mockRestore();
+    });
+
+    it("ao subir o servidor, o turno interrompido não tira nada da fila", async () => {
+      const orquestrador = await criar();
+      orquestrador.iniciarTurno("t-antigo", "analise", new Date("2026-10-28T11:00:00Z"));
+      orquestrador.enfileirarPedido(
+        PedidoNaFila.criar({ id: "p1", texto: "depois", modo: "execucao", enfileiradoEm: new Date("2026-10-28T11:00:00Z") }),
+      );
+
+      expect(await servico.interromperTurnosPendentes()).toBe(1);
+      await new Promise((resolver) => setTimeout(resolver, 0));
+
+      expect(tipos()).toEqual(["turno_interrompido"]);
+      expect(motor.pedidos).toHaveLength(0);
+      expect(orquestrador.fila.map((pedido) => pedido.id)).toEqual(["p1"]);
+    });
+
+    it("limpar a conversa mantém a fila", async () => {
+      const orquestrador = await criar();
+      const { conclusao } = await servico.enviarMensagem(orquestrador.id, "planeje", [], "planejamento");
+      await servico.enfileirarPedido(orquestrador.id, "depois");
+      motor.terminar();
+      await conclusao;
+
+      await servico.limparConversa(orquestrador.id);
+
+      expect(orquestrador.totalDeTurnos).toBe(0);
+      expect(repositorio.buscarPorId(orquestrador.id)?.paraDados().fila?.map((pedido) => pedido.texto)).toEqual([
+        "depois",
+      ]);
+    });
+  });
 });
 
 /** Medidor que devolve o consumo combinado (ou falha) e guarda os períodos pedidos. */
@@ -825,6 +1090,23 @@ describe("ServicoDeOrquestracao e a economia de tokens", () => {
     expect(repositorio.eventos.some((evento) => evento.tipo === "consumo_do_turno_medido")).toBe(false);
     expect(avisos).toHaveBeenCalled();
     avisos.mockRestore();
+  });
+
+  it("o envio automático da fila não atrapalha a medição do turno que terminou", async () => {
+    const orquestrador = await criar();
+    const { turnoId, medicao, envioDaFila } = await servico.enviarMensagem(orquestrador.id, "analise");
+    await servico.enfileirarPedido(orquestrador.id, "depois");
+
+    relogio = fim;
+    motor.terminar();
+    await envioDaFila;
+    await medicao;
+
+    expect(orquestrador.ultimoTurno?.texto).toBe("depois");
+    expect(repositorio.eventos.filter((evento) => evento.tipo === "consumo_do_turno_medido")).toEqual([
+      expect.objectContaining({ turnoId, consumo: expect.objectContaining({ parcial: false }) }),
+    ]);
+    expect(medidor.periodos[0]).toMatchObject({ inicio, fim });
   });
 
   it("aplica a predefinição, publica configuracao_alterada e mantém a configuração editável", async () => {

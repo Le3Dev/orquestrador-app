@@ -7,7 +7,7 @@ import { rm } from "node:fs/promises";
  * um `git rev-parse` com saída diferente de zero é a resposta "não é repo",
  * não um erro a propagar.
  */
-interface SaidaDoGit {
+export interface SaidaDoGit {
   codigo: number;
   saida: string;
   erro: string;
@@ -15,24 +15,37 @@ interface SaidaDoGit {
 
 export type ExecutorDeGit = (argumentos: readonly string[], cwd?: string) => Promise<SaidaDoGit>;
 
+export interface OpcoesDoExecutorDeGit {
+  /** Limite da saída; acima dele o processo é encerrado e o código vem diferente de zero. */
+  maxBuffer: number;
+  /** Tempo máximo do comando; estourado, o processo é encerrado e o código vem diferente de zero. */
+  tempoLimiteMs?: number;
+}
+
 /**
- * Executor padrão: chama `git` direto pelo execFile, sem shell, no mesmo
- * espírito de `Processos.ts`. Nunca rejeita por código de saída — devolve o
- * código para quem chamou decidir o que fazer.
+ * Chama `git` direto pelo execFile, sem shell, no mesmo espírito de
+ * `Processos.ts`. Nunca rejeita por código de saída — devolve o código para
+ * quem chamou decidir o que fazer. Saída grande demais, tempo estourado ou git
+ * ausente também viram código diferente de zero.
  */
-export const executarGit: ExecutorDeGit = (argumentos, cwd) =>
-  new Promise((resolver) => {
-    execFile(
-      "git",
-      [...argumentos],
-      { cwd, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
-      (erro, saida, erroPadrao) => {
-        const codigo =
-          erro === null ? 0 : typeof erro.code === "number" ? erro.code : erro.code === undefined ? 1 : 1;
-        resolver({ codigo, saida: saida.toString(), erro: erroPadrao.toString() });
-      },
-    );
-  });
+export function criarExecutorDeGit({ maxBuffer, tempoLimiteMs }: OpcoesDoExecutorDeGit): ExecutorDeGit {
+  return (argumentos, cwd) =>
+    new Promise((resolver) => {
+      execFile(
+        "git",
+        [...argumentos],
+        { cwd, windowsHide: true, maxBuffer, ...(tempoLimiteMs === undefined ? {} : { timeout: tempoLimiteMs }) },
+        (erro, saida, erroPadrao) => {
+          const codigo =
+            erro === null ? 0 : typeof erro.code === "number" ? erro.code : erro.code === undefined ? 1 : 1;
+          resolver({ codigo, saida: saida.toString(), erro: erroPadrao.toString() });
+        },
+      );
+    });
+}
+
+/** Executor padrão do ciclo de vida dos worktrees. */
+export const executarGit: ExecutorDeGit = criarExecutorDeGit({ maxBuffer: 4 * 1024 * 1024 });
 
 /**
  * `git -c core.longpaths=true` nas operações que criam/apagam arquivos:

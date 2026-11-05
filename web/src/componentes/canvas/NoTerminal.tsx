@@ -1,30 +1,164 @@
 import { Handle, type NodeProps, NodeResizer, Position } from "@xyflow/react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type {
   DadosDaConfiguracao,
+  DadosDoPedidoNaFila,
   ModoDoTurno,
   NomeDaPredefinicao,
   ResumoDoOrquestrador,
+  SituacaoDoSubagente,
 } from "../../shared/api/tipos";
 import { useCanvas } from "../../shared/canvas/contexto";
+import {
+  DURACAO_DA_ENTREGA_MS,
+  DURACAO_DO_PISCAR_MS,
+  entregaRecente,
+  houveEntrega,
+  prefereMovimentoReduzido,
+} from "../../shared/canvas/entrega";
 import { TAMANHO_MINIMO_DO_TERMINAL } from "../../shared/canvas/layout";
 import { ALCA_DO_TERMINAL, type Ancora, type NoTerminal as TipoDoNo } from "../../shared/canvas/nos";
-import { ESTADO_INICIAL } from "../../shared/estado/aplicarEvento";
+import { lerPedidoArrastado, temPedidoArrastado } from "../../shared/canvas/pedidoArrastado";
+import {
+  ESTADO_INICIAL,
+  filaDePedidos,
+  type SubagenteNaTela,
+  type TurnoNaTela,
+} from "../../shared/estado/aplicarEvento";
 import { formatarBytes } from "../../shared/formatacao";
+import { mesmoConteudo, useReaproveitado } from "../../shared/hooks/useReaproveitado";
 import { type ImagemAnexada, lerImagem, problemaDaImagem } from "../../shared/imagens";
 import { CamposDaConfiguracao } from "../CamposDaConfiguracao";
 import { Etiqueta } from "../Etiqueta";
 import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
 import { IconeOrquestrador, IconePasta } from "../Icones";
+import { BotaoDeAlteracoes } from "./BotaoDeAlteracoes";
 import { BotaoDeLimparBixinhos } from "./BotaoDeLimparBixinhos";
 import type { AcoesDoPlano } from "./CartaoDoPlano";
-import { PromptDoTerminal } from "./PromptDoTerminal";
+import { type ControleDoPrompt, PromptDoTerminal } from "./PromptDoTerminal";
 import { TranscricaoDoTerminal } from "./TranscricaoDoTerminal";
 
 /** Distância do fim (px) em que o terminal ainda acompanha as novidades sozinho. */
 const MARGEM_DE_ACOMPANHAMENTO = 120;
+
+/**
+ * Quanto a fila espera o servidor mandar o próximo pedido, depois de um turno
+ * que terminou bem, antes de se dizer pausada.
+ */
+const ESPERA_DO_PROXIMO_DA_FILA_MS = 5_000;
+
+const SEM_FILA: readonly DadosDoPedidoNaFila[] = [];
+const SEM_SUBAGENTES: readonly SubagenteNaTela[] = [];
+
+/** A fila anterior enquanto o conteúdo não muda: o prompt (memorizado) não re-renderiza à toa. */
+function reaproveitarFila(
+  anterior: readonly DadosDoPedidoNaFila[],
+  nova: readonly DadosDoPedidoNaFila[],
+): readonly DadosDoPedidoNaFila[] {
+  return mesmoConteudo(anterior, nova) ? anterior : nova;
+}
+
+/** O que está sendo arrastado sobre o terminal, para o aviso de soltar. */
+type Arraste = "imagens" | "pedido";
+
+/**
+ * Se a borda do terminal está piscando: o envelope do relatório de um
+ * Subagente do pedido atual chegou. Quando um deles passa de executando a
+ * concluído (`houveEntrega`), a borda pisca depois de `DURACAO_DA_ENTREGA_MS`
+ * (o tempo do envelope pela linha), por `DURACAO_DO_PISCAR_MS`.
+ *
+ * Não pisca ao abrir ou recarregar com Subagentes já concluídos (a primeira
+ * leitura só registra as situações, e o histórico reenviado chega com a hora
+ * antiga), com o servidor desconectado nem com o reduzir movimento do sistema.
+ * Só roda quando os Subagentes deste terminal mudam: eventos de outros
+ * Orquestradores não o acordam.
+ */
+function usePiscarNaEntrega(subagentes: readonly SubagenteNaTela[], conectado: boolean): boolean {
+  const [piscando, setPiscando] = useState(false);
+  const situacoes = useRef<ReadonlyMap<string, SituacaoDoSubagente> | null>(null);
+  const relogios = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const conectadoAgora = useRef(conectado);
+
+  useEffect(() => {
+    conectadoAgora.current = conectado;
+  }, [conectado]);
+
+  useEffect(() => {
+    const anteriores = situacoes.current;
+    situacoes.current = new Map(subagentes.map((subagente) => [subagente.id, subagente.situacao]));
+    if (anteriores === null || !conectadoAgora.current || prefereMovimentoReduzido()) {
+      return;
+    }
+    const agora = Date.now();
+    const entregou = subagentes.some(
+      (subagente) =>
+        houveEntrega(anteriores.get(subagente.id), subagente.situacao) && entregaRecente(subagente.encerradoEm, agora),
+    );
+    if (!entregou) {
+      return;
+    }
+    const agendar = (acao: () => void, esperaMs: number): void => {
+      const relogio = setTimeout(() => {
+        relogios.current.delete(relogio);
+        acao();
+      }, esperaMs);
+      relogios.current.add(relogio);
+    };
+    agendar(() => {
+      // O servidor caiu enquanto o envelope andava: nada no canvas está ao vivo.
+      if (!conectadoAgora.current) {
+        return;
+      }
+      setPiscando(true);
+      agendar(() => setPiscando(false), DURACAO_DO_PISCAR_MS);
+    }, DURACAO_DA_ENTREGA_MS);
+  }, [subagentes]);
+
+  useEffect(() => {
+    const pendentes = relogios.current;
+    return () => {
+      for (const relogio of pendentes) {
+        clearTimeout(relogio);
+      }
+      pendentes.clear();
+    };
+  }, []);
+
+  return piscando;
+}
+
+/**
+ * Se o próximo pedido da fila está a caminho: há pedidos à espera e o último
+ * turno terminou concluído, sem plano pendente, há menos de
+ * `ESPERA_DO_PROXIMO_DA_FILA_MS`. Nesse intervalo o servidor ainda fecha o
+ * turno e manda o próximo; sem isto, a fila apareceria "pausada", com o
+ * *enviar agora*, por um instante. Passado o prazo sem turno novo, a fila
+ * volta a ser dada como pausada. Com a hora antiga (abrir o terminal,
+ * recarregar a página), já começa pausada.
+ *
+ * De layout: decide antes de o navegador pintar a fila como pausada.
+ */
+function useProximoDaFilaACaminho(ultimoTurno: TurnoNaTela | undefined, temFila: boolean): boolean {
+  const terminouBem = ultimoTurno?.situacao === "concluido" && ultimoTurno.decisaoDoPlano !== "pendente";
+  const encerradoEm = terminouBem && temFila ? ultimoTurno.encerradoEm : null;
+  // O fim de turno (`encerradoEm`) cujo próximo pedido está a caminho; nulo fora do prazo.
+  const [aCaminhoApos, setACaminhoApos] = useState<string | null>(null);
+
+  useLayoutEffect(() => {
+    const restante = encerradoEm === null ? 0 : Date.parse(encerradoEm) + ESPERA_DO_PROXIMO_DA_FILA_MS - Date.now();
+    if (restante <= 0) {
+      setACaminhoApos(null);
+      return undefined;
+    }
+    setACaminhoApos(encerradoEm);
+    const prazo = setTimeout(() => setACaminhoApos(null), restante);
+    return () => clearTimeout(prazo);
+  }, [encerradoEm]);
+
+  return encerradoEm !== null && aCaminhoApos === encerradoEm;
+}
 
 interface PropsDaConfiguracao {
   orquestrador: ResumoDoOrquestrador;
@@ -280,17 +414,27 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
   const [configurando, setConfigurando] = useState(false);
   const [cancelamentoPedido, setCancelamentoPedido] = useState(false);
   const [imagens, setImagens] = useState<ImagemAnexada[]>([]);
-  const [arrastandoImagens, setArrastandoImagens] = useState(false);
+  const [arraste, setArraste] = useState<Arraste | null>(null);
   // Modo do próximo pedido; "planejamento" é o Plan Mode (Shift+Tab no prompt).
   const [modo, setModo] = useState<ModoDoTurno>("execucao");
   const memoriaDoProcesso = servidor.memoria?.porOrquestrador[orquestradorId] ?? 0;
   const configuracao = useConfiguracaoEstavel(orquestrador.configuracao);
   const rolagem = useRef<HTMLDivElement>(null);
   const campoDoPrompt = useRef<HTMLTextAreaElement>(null);
+  const controleDoPrompt = useRef<ControleDoPrompt>(null);
   const acompanhando = useRef(true);
 
-  const trabalhando = conversa.turnos.at(-1)?.situacao === "em_andamento";
+  const ultimoTurno = conversa.turnos.at(-1);
+  const trabalhando = ultimoTurno?.situacao === "em_andamento";
   const cancelando = cancelamentoPedido && trabalhando;
+  const piscando = usePiscarNaEntrega(ultimoTurno?.subagentes ?? SEM_SUBAGENTES, servidor.conectado);
+
+  // A fila vem do resumo do servidor, corrigida pelos eventos (ver `filaDePedidos`).
+  const fila = useReaproveitado<readonly DadosDoPedidoNaFila[]>(
+    filaDePedidos(conversa, orquestrador.fila ?? SEM_FILA),
+    reaproveitarFila,
+  );
+  const proximoDaFilaACaminho = useProximoDaFilaACaminho(ultimoTurno, fila.length > 0);
 
   useEffect(() => {
     const elemento = rolagem.current;
@@ -366,6 +510,57 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
     [orquestradorId, imagens, modo],
   );
 
+  /**
+   * Com um pedido rodando, o Enter põe o texto na fila, com o modo escolhido
+   * (o prompt já barra as imagens). O pedido aparece na fila pelo evento
+   * `pedido_enfileirado`; com a fila cheia, o servidor recusa e o erro aparece
+   * no terminal.
+   */
+  const enfileirar = useCallback(
+    async (texto: string): Promise<boolean> => {
+      setErro(null);
+      try {
+        await api.enfileirarPedido(orquestradorId, texto, modo);
+        return true;
+      } catch (falha) {
+        setErro(mensagemDeErro(falha));
+        return false;
+      }
+    },
+    [orquestradorId, modo],
+  );
+
+  const removerDaFila = useCallback(
+    async (pedidoId: string): Promise<void> => {
+      setErro(null);
+      try {
+        await api.removerDaFila(orquestradorId, pedidoId);
+      } catch (falha) {
+        setErro(mensagemDeErro(falha));
+      }
+    },
+    [orquestradorId],
+  );
+
+  const aoRemoverDaFila = useCallback((pedidoId: string) => void removerDaFila(pedidoId), [removerDaFila]);
+
+  /** "Enviar agora" (fila pausada): o pedido sai da fila e vira um turno, como um envio. */
+  const enviarDaFila = useCallback(
+    async (pedidoId: string): Promise<void> => {
+      setErro(null);
+      try {
+        await api.enviarDaFila(orquestradorId, pedidoId);
+        acompanhando.current = true;
+        setCancelamentoPedido(false);
+      } catch (falha) {
+        setErro(mensagemDeErro(falha));
+      }
+    },
+    [orquestradorId],
+  );
+
+  const aoEnviarDaFila = useCallback((pedidoId: string) => void enviarDaFila(pedidoId), [enviarDaFila]);
+
   const cancelar = useCallback(async (): Promise<void> => {
     setErro(null);
     setCancelamentoPedido(true);
@@ -439,27 +634,47 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
 
   return (
     <div
-      className={`janela-terminal ${trabalhando ? "janela-terminal-ativa" : ""} ${modo === "planejamento" ? "janela-terminal-planejando" : ""}`}
+      className={`janela-terminal ${trabalhando ? "janela-terminal-ativa" : ""} ${modo === "planejamento" ? "janela-terminal-planejando" : ""} ${piscando ? "janela-terminal-entrega" : ""}`}
       onDragOver={(evento) => {
-        if (evento.dataTransfer.types.includes("Files")) {
+        // Uma linha ou uma nota arrastada vira texto no prompt; arquivos, imagens anexadas.
+        if (temPedidoArrastado(evento.dataTransfer)) {
           evento.preventDefault();
-          setArrastandoImagens(true);
+          evento.dataTransfer.dropEffect = "copy";
+          setArraste("pedido");
+        } else if (evento.dataTransfer.types.includes("Files")) {
+          evento.preventDefault();
+          setArraste("imagens");
         }
       }}
       onDragLeave={(evento) => {
         if (!evento.currentTarget.contains(evento.relatedTarget as Node | null)) {
-          setArrastandoImagens(false);
+          setArraste(null);
         }
       }}
       onDrop={(evento) => {
+        setArraste(null);
+        if (temPedidoArrastado(evento.dataTransfer)) {
+          // Também impede o campo de texto de colar o texto puro do arraste por conta própria.
+          evento.preventDefault();
+          const pedido = lerPedidoArrastado(evento.dataTransfer);
+          if (pedido !== null) {
+            // Só escreve no prompt: quem envia é o usuário.
+            controleDoPrompt.current?.acrescentarTexto(pedido.texto);
+          }
+          return;
+        }
         if (evento.dataTransfer.files.length > 0) {
           evento.preventDefault();
-          setArrastandoImagens(false);
           void anexar([...evento.dataTransfer.files]);
         }
       }}
     >
-      {arrastandoImagens && <div className="soltar-imagens">solte para anexar as imagens a este orquestrador</div>}
+      {arraste === "imagens" && (
+        <div className="soltar-imagens">solte para anexar as imagens a este orquestrador</div>
+      )}
+      {arraste === "pedido" && (
+        <div className="soltar-imagens">solte para escrever no prompt — nada é enviado até você apertar enter</div>
+      )}
       <div className={`barra-do-terminal ${ALCA_DO_TERMINAL}`}>
         <span className="semaforo" aria-hidden="true">
           <i />
@@ -485,6 +700,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
         )}
         <Etiqueta situacao={trabalhando ? "trabalhando" : "ocioso"} />
         <BotaoDeLimparBixinhos orquestradorId={orquestradorId} />
+        <BotaoDeAlteracoes orquestradorId={orquestradorId} />
         <button
           type="button"
           className="botao-icone nodrag"
@@ -546,10 +762,16 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
         modo={modo}
         aoAlternarModo={aoAlternarModo}
         campo={campoDoPrompt}
+        controle={controleDoPrompt}
         imagens={imagens}
         aoAnexar={aoAnexar}
         aoRemoverImagem={aoRemoverImagem}
         aoEnviar={enviar}
+        aoEnfileirar={enfileirar}
+        fila={fila}
+        proximoDaFilaACaminho={proximoDaFilaACaminho}
+        aoRemoverDaFila={aoRemoverDaFila}
+        aoEnviarDaFila={aoEnviarDaFila}
         aoLimparConversa={limparConversa}
         aoCancelar={aoCancelar}
       />

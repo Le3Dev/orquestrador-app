@@ -130,6 +130,29 @@ export const api = {
       body: JSON.stringify({ texto, imagens, modo }),
     }),
 
+  /**
+   * Guarda um pedido na fila do Orquestrador (só texto e modo: imagens não
+   * entram). Ele sai sozinho quando o turno atual terminar concluído, ou com
+   * `enviarDaFila`. Recusado (409) com a fila cheia.
+   */
+  enfileirarPedido: (id: string, texto: string, modo: ModoDoTurno = "execucao") =>
+    requisitar<{ pedidoId: string }>(`/orquestradores/${encodeURIComponent(id)}/fila`, {
+      method: "POST",
+      body: JSON.stringify({ texto, modo }),
+    }),
+
+  removerDaFila: (id: string, pedidoId: string) =>
+    requisitar<null>(`/orquestradores/${encodeURIComponent(id)}/fila/${encodeURIComponent(pedidoId)}`, {
+      method: "DELETE",
+    }),
+
+  /** "Enviar agora": o pedido sai da fila e vira um turno. Recusado (409) com um turno em andamento. */
+  enviarDaFila: (id: string, pedidoId: string) =>
+    requisitar<{ turnoId: string }>(
+      `/orquestradores/${encodeURIComponent(id)}/fila/${encodeURIComponent(pedidoId)}/enviar`,
+      { method: "POST" },
+    ),
+
   /** Aprova o plano pendente do último pedido; o servidor já inicia a execução na mesma sessão. */
   aprovarPlano: (id: string, observacoes = "") =>
     requisitar<{ turnoId: string }>(`/orquestradores/${encodeURIComponent(id)}/plano/aprovar`, {

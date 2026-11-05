@@ -7,6 +7,7 @@ import express, { Express } from "express";
 import { ProjetosDoChat } from "./chat/ProjetosDoChat";
 import { ServicoDeChat } from "./chat/ServicoDeChat";
 import { acessoSoPeloApp } from "./controllers/acessoSoPeloApp";
+import { criarAlteracoesRoutes } from "./controllers/alteracoesRoutes";
 import { CanalDoChat, criarChatRoutes } from "./controllers/chatRoutes";
 import { criarNotasRoutes } from "./controllers/notasRoutes";
 import { criarOrquestradoresRoutes } from "./controllers/orquestradoresRoutes";
@@ -28,10 +29,12 @@ import {
 } from "./infraestrutura/Configuracao";
 import { ControleDeExecucoesEmMemoria } from "./infraestrutura/execucoes/ControleDeExecucoesEmMemoria";
 import { GerenciadorDeWorktreesGit } from "./infraestrutura/sistema/GerenciadorDeWorktreesGit";
+import { LeitorDeAlteracoesGit } from "./infraestrutura/sistema/LeitorDeAlteracoesGit";
 import { MonitorDeMemoria } from "./infraestrutura/sistema/MonitorDeMemoria";
 import { encerrarAgentesOrfaos, RegistroDeProcessos } from "./infraestrutura/sistema/RegistroDeProcessos";
 import { CanalDeEventos } from "./infraestrutura/sse/CanalDeEventos";
 import { ServicoDeNotas } from "./notas/ServicoDeNotas";
+import { ServicoDeAlteracoes } from "./orquestracao/ServicoDeAlteracoes";
 import { ServicoDeOrquestracao } from "./orquestracao/ServicoDeOrquestracao";
 
 type ConfiguracaoDaMontagem = Pick<
@@ -199,6 +202,13 @@ async function iniciar(): Promise<void> {
         explorador,
         anexos,
         pastaRaiz: configuracao.pastaRaizDosProjetos,
+      }),
+    );
+    // Painel de alterações do worktree: só leitura, sobre o mesmo repositório dos Orquestradores.
+    rotas.use(
+      "/api",
+      criarAlteracoesRoutes({
+        servico: new ServicoDeAlteracoes({ repositorio, leitor: new LeitorDeAlteracoesGit() }),
       }),
     );
     rotas.use("/api", criarChatRoutes({ servico: servicoDeChat, canal: canalDoChat, anexos }));

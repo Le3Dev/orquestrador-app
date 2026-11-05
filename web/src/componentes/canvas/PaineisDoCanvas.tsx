@@ -88,6 +88,8 @@ interface PropsDaBarra {
   aoCriarNota: () => void;
   aoOrganizar: () => void;
   podeOrganizar: boolean;
+  /** Abre a paleta de comandos (o mesmo do Ctrl+K); sem ela, o botão "Buscar" não aparece. */
+  aoBuscar?: () => void;
 }
 
 interface PropsDoRotulo {
@@ -124,7 +126,7 @@ function RotuloResponsivo({ completo, curto, icone }: PropsDoRotulo) {
  * identidade do app; no desktop ela já está na barra de título (que é a área
  * de arraste da janela).
  */
-export function BarraDoCanvas({ aoCriar, aoCriarNota, aoOrganizar, podeOrganizar }: PropsDaBarra) {
+export function BarraDoCanvas({ aoCriar, aoCriarNota, aoOrganizar, podeOrganizar, aoBuscar }: PropsDaBarra) {
   const desktop = rodandoNoDesktop();
   const configuracao = apiDaConfiguracao();
   const [erroDosAjustes, setErroDosAjustes] = useState<string | null>(null);
@@ -182,6 +184,18 @@ export function BarraDoCanvas({ aoCriar, aoCriarNota, aoOrganizar, podeOrganizar
       >
         <RotuloResponsivo completo="Organizar" curto="Organizar" icone="▦" />
       </button>
+      {aoBuscar !== undefined && (
+        <button
+          type="button"
+          className="btn btn-sm btn-outline"
+          onClick={aoBuscar}
+          aria-label="Buscar (Ctrl+K)"
+          aria-keyshortcuts="Control+K"
+          title="Paleta de comandos: ações, orquestradores, notas e pedidos (Ctrl+K)"
+        >
+          <RotuloResponsivo completo="Buscar (Ctrl+K)" curto="Buscar" icone="⌕" />
+        </button>
+      )}
       {configuracao !== null && (
         <button
           type="button"

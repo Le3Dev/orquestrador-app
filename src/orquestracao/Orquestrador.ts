@@ -10,16 +10,39 @@ import { EventoDeOrquestracao, EventoDoMotor, UsoDoTurno } from "./EventoDeOrque
 import { ModoDoTurno } from "./ModoDoTurno";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import {
+  DadosDoPedidoNaFila,
+  MotivoDaRetiradaDaFila,
+  PedidoNaFila,
+  TAMANHO_MAXIMO_DA_MENSAGEM,
+} from "./PedidoNaFila";
+import {
   NomeDaPredefinicao,
   PredefinicaoDeConfiguracao,
   predefinicaoCorrespondente,
 } from "./PredefinicaoDeConfiguracao";
 import { DadosDoTurno, Turno } from "./Turno";
 
+export { TAMANHO_MAXIMO_DA_MENSAGEM } from "./PedidoNaFila";
+
 export const TAMANHO_MAXIMO_DO_NOME = 60;
-export const TAMANHO_MAXIMO_DA_MENSAGEM = 50_000;
+/** Quantos pedidos cabem na fila de um Orquestrador. */
+export const LIMITE_DA_FILA = 10;
 
 export type SituacaoDoOrquestrador = "ocioso" | "trabalhando";
+
+/**
+ * A fila do Orquestrador já tem `LIMITE_DA_FILA` pedidos: conflito com o
+ * estado atual (HTTP 409), como um turno em andamento. Fica à parte do
+ * `ErroDeOrquestracao` porque `fila_cheia` não está entre os `MotivoDoErro`.
+ */
+export class ErroDeFilaCheia extends Error {
+  readonly motivo = "fila_cheia";
+
+  constructor(mensagem: string) {
+    super(mensagem);
+    this.name = "ErroDeFilaCheia";
+  }
+}
 
 /**
  * Worktree git isolado deste Orquestrador. `ativo` diz se ele existe e está em
@@ -42,6 +65,8 @@ export interface DadosDoOrquestrador {
   configuracao: DadosDaConfiguracao;
   turnos: DadosDoTurno[];
   worktree?: DadosDoWorktree | null;
+  /** Ausente nos `orquestrador.json` gravados antes da fila: vale fila vazia. */
+  fila?: DadosDoPedidoNaFila[];
 }
 
 export interface NovoOrquestrador {
@@ -62,6 +87,9 @@ export interface NovoOrquestrador {
  * separação que permite cuidar de dois projetos em paralelo sem que um pedido
  * atropele o outro.
  *
+ * Os pedidos que chegam enquanto ele trabalha esperam na fila (até
+ * `LIMITE_DA_FILA`), na ordem em que chegaram.
+ *
  * Cada mudança de estado devolve o evento correspondente, que o serviço grava
  * no histórico e publica para a tela.
  */
@@ -76,6 +104,7 @@ export class Orquestrador {
     private configuracaoAtual: ConfiguracaoDoOrquestrador,
     private turnos: Turno[],
     private worktreeAtual: DadosDoWorktree | null,
+    private filaAtual: PedidoNaFila[],
   ) {}
 
   static criar(novo: NovoOrquestrador): Orquestrador {
@@ -99,6 +128,7 @@ export class Orquestrador {
       novo.configuracao,
       [],
       null,
+      [],
     );
   }
 
@@ -115,6 +145,7 @@ export class Orquestrador {
       // Ao reabrir, nenhum turno está de fato rodando: um worktree salvo como
       // "ativo" era de um turno interrompido pela queda do servidor.
       dados.worktree === undefined || dados.worktree === null ? null : { ...dados.worktree, ativo: false },
+      (dados.fila ?? []).map((pedido) => PedidoNaFila.reconstituir(pedido)),
     );
   }
 
@@ -186,6 +217,55 @@ export class Orquestrador {
     return ultimo !== null && ultimo.planoPendente ? ultimo : null;
   }
 
+  /** Os pedidos à espera, na ordem em que vão sair (o primeiro sai antes). */
+  get fila(): readonly PedidoNaFila[] {
+    return [...this.filaAtual];
+  }
+
+  /**
+   * Guarda um pedido no fim da fila. Vale com ou sem turno em andamento: sem
+   * turno, o pedido espera até o usuário mandar enviar.
+   */
+  enfileirarPedido(pedido: PedidoNaFila): EventoDeOrquestracao {
+    if (this.filaAtual.length >= LIMITE_DA_FILA) {
+      throw new ErroDeFilaCheia(`A fila de "${this.nome}" está cheia (máximo ${LIMITE_DA_FILA} pedidos).`);
+    }
+    this.filaAtual.push(pedido);
+    return { tipo: "pedido_enfileirado", pedido: pedido.paraDados() };
+  }
+
+  /** O pedido da fila com esse id. */
+  pedidoDaFila(pedidoId: string): PedidoNaFila {
+    const pedido = this.filaAtual.find((candidato) => candidato.id === pedidoId);
+    if (pedido === undefined) {
+      throw new ErroDeOrquestracao("nao_encontrado", "Pedido não encontrado na fila.");
+    }
+    return pedido;
+  }
+
+  /** Tira o pedido da fila: o usuário o removeu ou ele virou um turno (`enviado`). */
+  retirarDaFila(pedidoId: string, motivo: MotivoDaRetiradaDaFila): EventoDeOrquestracao {
+    const pedido = this.pedidoDaFila(pedidoId);
+    this.filaAtual = this.filaAtual.filter((candidato) => candidato !== pedido);
+    return { tipo: "pedido_retirado_da_fila", pedidoId, motivo };
+  }
+
+  /**
+   * O pedido que sai sozinho da fila depois do turno `turnoId`, ou `null`
+   * quando a fila deve esperar o usuário. Ela só anda se esse turno ainda é o
+   * último da conversa e terminou concluído, sem Plano aguardando decisão:
+   * cancelado, com falha, interrompido ou com Plano pendente, a fila pausa
+   * (o usuário segue com "enviar agora"). Outro turno já iniciado depois dele
+   * também pausa: a fila anda quando esse outro terminar.
+   */
+  proximoDaFilaApos(turnoId: string): PedidoNaFila | null {
+    const ultimo = this.ultimoTurno;
+    if (ultimo === null || ultimo.id !== turnoId || ultimo.situacao !== "concluido" || ultimo.planoPendente) {
+      return null;
+    }
+    return this.filaAtual[0] ?? null;
+  }
+
   /** Vale a partir do próximo turno; um turno em andamento segue com a configuração com que começou. */
   alterarConfiguracao(alteracoes: AlteracoesDaConfiguracao): EventoDeOrquestracao {
     this.configuracaoAtual = this.configuracaoAtual.com(alteracoes);
@@ -231,7 +311,7 @@ export class Orquestrador {
    * Começa uma conversa nova ("/clear") no mesmo Orquestrador: os turnos saem
    * do agregado (o histórico anterior é arquivado pelo repositório) e o
    * próximo turno abre outra sessão do Claude Code, sem memória da anterior.
-   * Nome, pasta, configuração e worktree continuam os mesmos.
+   * Nome, pasta, configuração, worktree e a fila de pedidos continuam os mesmos.
    *
    * Um Plano pendente é descartado junto. `worktreeComAlteracoes` avisa que o
    * worktree segue com trabalho: worktrees sem alterações são removidos ao
@@ -366,6 +446,7 @@ export class Orquestrador {
       configuracao: this.configuracaoAtual.paraDados(),
       turnos: this.turnos.map((turno) => turno.paraDados()),
       worktree: this.worktreeAtual === null ? null : { ...this.worktreeAtual },
+      fila: this.filaAtual.map((pedido) => pedido.paraDados()),
     };
   }
 

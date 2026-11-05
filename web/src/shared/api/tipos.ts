@@ -153,6 +153,29 @@ export interface EsforcosHerdados {
   subagentes: DadosDoEsforcoHerdado | null;
 }
 
+/**
+ * Quantos pedidos cabem na fila de um Orquestrador; o servidor recusa o
+ * seguinte com 409. Só para mostrar: quem decide é o servidor
+ * (`LIMITE_DA_FILA` em `src/orquestracao/Orquestrador.ts`).
+ */
+export const LIMITE_DA_FILA = 10;
+
+/**
+ * Um pedido guardado na fila do Orquestrador, à espera da vez: sai sozinho
+ * quando o turno atual termina concluído (sem plano pendente) ou quando o
+ * usuário manda "enviar agora". Só texto e modo: imagens não entram na fila.
+ */
+export interface DadosDoPedidoNaFila {
+  id: string;
+  texto: string;
+  modo: ModoDoTurno;
+  /** ISO 8601. */
+  enfileiradoEm: string;
+}
+
+/** Por que um pedido saiu da fila: o usuário o tirou, ou ele virou um turno. */
+export type MotivoDaRetiradaDaFila = "removido" | "enviado";
+
 export interface ResumoDoOrquestrador {
   id: string;
   nome: string;
@@ -166,6 +189,12 @@ export interface ResumoDoOrquestrador {
   worktree: DadosDoWorktree | null;
   /** A predefinição que a configuração atual reproduz por inteiro, se houver. Falta em servidores anteriores. */
   predefinicaoCorrespondente?: NomeDaPredefinicao | null;
+  /**
+   * Os pedidos à espera, na ordem em que vão sair. É a fila no instante da
+   * consulta: a tela junta com os eventos da fila (ver `filaDePedidos`).
+   * Falta em servidores anteriores à fila (vale vazia).
+   */
+  fila?: DadosDoPedidoNaFila[];
 }
 
 export interface PastaDeProjeto {
@@ -261,12 +290,18 @@ export type EventoDeOrquestracao =
   | (EventoDeTurno & { turnoId: string })
   | { tipo: "configuracao_alterada"; configuracao: DadosDaConfiguracaoGravada }
   // O usuário começou uma conversa nova (/clear): os pedidos anteriores ficam arquivados no servidor.
+  // A fila de pedidos não muda: ela é do Orquestrador, não da conversa.
   | {
       tipo: "conversa_limpa";
       turnosAnteriores: number;
       planoDescartado: boolean;
       worktreeComAlteracoes: boolean;
-    };
+    }
+  // Um pedido entrou no fim da fila (sem `turnoId`: espera a vez, com ou sem turno em andamento).
+  | { tipo: "pedido_enfileirado"; pedido: DadosDoPedidoNaFila }
+  // Um pedido saiu da fila: `removido` pelo usuário, ou `enviado` — então vem logo antes do
+  // `turno_iniciado` do turno que o atende.
+  | { tipo: "pedido_retirado_da_fila"; pedidoId: string; motivo: MotivoDaRetiradaDaFila };
 
 export type EventoRegistrado = EventoDeOrquestracao & { sequencia: number; em: string };
 

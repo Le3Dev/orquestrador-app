@@ -1,5 +1,19 @@
 import { ACESSORIOS, aparenciaDoBixinho, CORES, FORMAS } from "./bixinhos";
-import { ACESSORIOS_DESENHADOS, COLUNAS, expressaoPara, LINHAS, linhasDoCorpo, pixelsDoCorpo, ROSTOS } from "./sprites";
+import type { IconeDeFerramenta } from "./iconesDeFerramenta";
+import {
+  ACESSORIOS_DESENHADOS,
+  COLUNAS,
+  expressaoPara,
+  LADO_DO_ICONE,
+  LINHAS,
+  linhasDoCorpo,
+  linhasDoIcone,
+  pixelsDoCorpo,
+  PIXELS_DOS_ICONES,
+  ROSTOS,
+} from "./sprites";
+
+const ICONES: readonly IconeDeFerramenta[] = ["lupa", "lapis", "engrenagem", "globo"];
 
 describe("aparenciaDoBixinho", () => {
   it("é sempre a mesma para o mesmo subagente", () => {
@@ -53,6 +67,14 @@ describe("sprites", () => {
         expect(corpo.has(`${linha},${coluna}`)).toBe(true);
       }
     }
+  });
+
+  it.each(ICONES)("o ícone %s tem 8 linhas de 8 colunas, já em pixels", (icone) => {
+    const linhas = linhasDoIcone(icone);
+
+    expect(linhas).toHaveLength(LADO_DO_ICONE);
+    expect(linhas.every((linha) => linha.length === LADO_DO_ICONE)).toBe(true);
+    expect(PIXELS_DOS_ICONES[icone].length).toBe(linhas.join("").split("#").length - 1);
   });
 
   it("cada situação tem a sua expressão", () => {

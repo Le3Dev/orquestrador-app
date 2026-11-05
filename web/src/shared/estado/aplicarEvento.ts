@@ -2,6 +2,7 @@ import type {
   DadosDaConfiguracao,
   DadosDoAnexo,
   DadosDoConsumoDoTurno,
+  DadosDoPedidoNaFila,
   DecisaoDoPlano,
   EventoRegistrado,
   JanelaDaCota,
@@ -88,9 +89,50 @@ export interface EstadoDaConversa {
   cota: JanelaDaCota[] | null;
   /** Quando o usuário começou a conversa atual (/clear); nulo enquanto é a primeira. */
   conversaIniciadaEm: string | null;
+  /**
+   * Pedidos que os eventos puseram na fila e ainda não tiraram, na ordem de
+   * chegada. Não é a fila inteira: os pedidos enfileirados antes de um /clear
+   * não estão mais no histórico. A fila da tela é `filaDePedidos`.
+   */
+  pedidosEnfileirados: readonly DadosDoPedidoNaFila[];
+  /** Ids que os eventos já tiraram da fila (removidos ou enviados). */
+  pedidosRetirados: readonly string[];
 }
 
-export const ESTADO_INICIAL: EstadoDaConversa = { ultimaSequencia: 0, turnos: [], cota: null, conversaIniciadaEm: null };
+export const ESTADO_INICIAL: EstadoDaConversa = {
+  ultimaSequencia: 0,
+  turnos: [],
+  cota: null,
+  conversaIniciadaEm: null,
+  pedidosEnfileirados: [],
+  pedidosRetirados: [],
+};
+
+/**
+ * A fila de pedidos que a tela mostra: a do servidor (`fila` do resumo do
+ * Orquestrador), corrigida pelos eventos da fila.
+ *
+ * O resumo é a fila inteira, mas no instante da consulta (a lista é
+ * consultada a cada poucos segundos); os eventos chegam na hora, mas só os da
+ * conversa atual — depois de um /clear, o histórico começa de novo e a fila
+ * continua. Juntando: os pedidos do resumo que nenhum evento tirou, seguidos
+ * dos que os eventos puseram depois da consulta, sem repetir.
+ */
+export function filaDePedidos(
+  estado: EstadoDaConversa,
+  filaDoServidor: readonly DadosDoPedidoNaFila[],
+): DadosDoPedidoNaFila[] {
+  const retirados = new Set(estado.pedidosRetirados);
+  const vistos = new Set<string>();
+  const fila: DadosDoPedidoNaFila[] = [];
+  for (const pedido of [...filaDoServidor, ...estado.pedidosEnfileirados]) {
+    if (!retirados.has(pedido.id) && !vistos.has(pedido.id)) {
+      vistos.add(pedido.id);
+      fila.push(pedido);
+    }
+  }
+  return fila;
+}
 
 type AlteracaoDeTurno = (turno: TurnoNaTela) => TurnoNaTela;
 
@@ -390,10 +432,35 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
   if (evento.tipo === "conversa_limpa") {
     // Conversa nova (/clear): os pedidos anteriores ficam arquivados no servidor
     // e saem da tela. A cota fica: é da assinatura, não da conversa.
-    return { ...proximo, turnos: [], conversaIniciadaEm: evento.em };
+    // A fila do Orquestrador continua, mas daqui em diante vem do resumo do
+    // servidor: quem abrir o terminal depois não verá os eventos de antes do
+    // /clear, e um terminal que reconectar depois dele pode ter perdido uma
+    // retirada. Os retirados ficam, para filtrar um resumo defasado.
+    return { ...proximo, turnos: [], conversaIniciadaEm: evento.em, pedidosEnfileirados: [] };
   }
   if (evento.tipo === "uso_da_cota") {
     return { ...proximo, cota: evento.janelas };
+  }
+  if (evento.tipo === "pedido_enfileirado") {
+    const { pedido } = evento;
+    // Repetido, ou já retirado por um evento que chegou antes: nada muda.
+    if (
+      estado.pedidosRetirados.includes(pedido.id) ||
+      estado.pedidosEnfileirados.some((enfileirado) => enfileirado.id === pedido.id)
+    ) {
+      return proximo;
+    }
+    return { ...proximo, pedidosEnfileirados: [...estado.pedidosEnfileirados, pedido] };
+  }
+  if (evento.tipo === "pedido_retirado_da_fila") {
+    if (estado.pedidosRetirados.includes(evento.pedidoId)) {
+      return proximo;
+    }
+    return {
+      ...proximo,
+      pedidosEnfileirados: estado.pedidosEnfileirados.filter((pedido) => pedido.id !== evento.pedidoId),
+      pedidosRetirados: [...estado.pedidosRetirados, evento.pedidoId],
+    };
   }
 
   const turnos = evento.tipo === "turno_iniciado" ? [...estado.turnos, novoTurno(evento)] : estado.turnos;

@@ -276,6 +276,7 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
 
   afterEach(() => {
     simulados.orquestradores.orquestradores = [];
+    simulados.conversas.conversas = new Map();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     localStorage.clear();
@@ -340,6 +341,34 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
     expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
   });
 
+  it("pela paleta (Ctrl+K), abrir um quinto mostra o aviso e não abre; um pedido de um aberto só leva até ele", async () => {
+    simulados.conversas.conversas = new Map([["o2", conversaComDoisSubagentes()]]);
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o4")).toBeInTheDocument());
+
+    fireEvent.keyDown(window, { key: "k", code: "KeyK", ctrlKey: true });
+    const busca = screen.getByRole("combobox", { name: "Buscar ações, orquestradores, notas e pedidos" });
+    fireEvent.change(busca, { target: { value: "o5" } });
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent("Orquestrador o5");
+    fireEvent.keyDown(busca, { key: "Enter" });
+
+    expect(await screen.findByText(AVISO)).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(document.querySelector('.react-flow__node[data-id="o5"]')).toBeNull();
+
+    // O pedido "analise" é da conversa de o2, que está aberto: não recusa (e o aviso some).
+    fireEvent.click(screen.getByRole("button", { name: "Buscar (Ctrl+K)" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Buscar ações, orquestradores, notas e pedidos" }), {
+      target: { value: "analise" },
+    });
+    const pedido = screen.getByRole("option");
+    expect(pedido).toHaveTextContent("Orquestrador o2");
+    fireEvent.click(pedido);
+
+    expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
+    expect(document.querySelectorAll(".react-flow__node-terminal")).toHaveLength(4);
+  });
+
   it("o rascunho conta: com 3 abertos e o formulário aberto, não abre outro", async () => {
     localStorage.setItem(
       "orquestrador-agentes:canvas:v1",
@@ -359,6 +388,43 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
     fireEvent.click(itemDaDoca("o5"));
     expect(await screen.findByText(AVISO)).toBeInTheDocument();
     expect(document.querySelector('.react-flow__node[data-id="o5"]')).toBeNull();
+  });
+});
+
+describe("CanvasDeOrquestradores · minimapa", () => {
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoFalso);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+    localStorage.setItem(
+      "orquestrador-agentes:canvas:v1",
+      JSON.stringify({
+        terminais: {
+          o1: { x: 0, y: 0, largura: 600, altura: 520 },
+          o2: { x: 1500, y: 0, largura: 600, altura: 520 },
+        },
+        notas: {},
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }),
+    );
+  });
+
+  afterEach(() => {
+    simulados.orquestradores.orquestradores = [];
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it("só o terminal do Orquestrador trabalhando ganha o brilho no minimapa", async () => {
+    simulados.orquestradores.orquestradores = [orquestrador("o1"), { ...orquestrador("o2"), situacao: "ocioso" }];
+    render(<CanvasDeOrquestradores />);
+
+    await waitFor(() => expect(document.querySelectorAll(".react-flow__minimap-node.minimapa-terminal")).toHaveLength(2));
+    const brilhando = document.querySelectorAll(".react-flow__minimap-node.minimapa-terminal-trabalhando");
+    expect(brilhando).toHaveLength(1);
+    // o1 está em x = 0; o2, em x = 1500.
+    expect(brilhando[0]).toHaveAttribute("x", "0");
   });
 });
 
