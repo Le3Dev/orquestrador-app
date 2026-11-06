@@ -10,8 +10,8 @@ const CODIGOS_ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
 const ENDERECO_LOCAL =
   /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):\d{1,5}(?![\w-])(?:\/[^\s"'<>`]*)?/gi;
 
-/** Pontuação que fecha a frase em volta do endereço, não faz parte dele. */
-const PONTUACAO_FINAL = /[.,;:!?)\]}'"]+$/;
+/** Pontuação que fecha a frase (ou o negrito e o código do Markdown) em volta do endereço, não faz parte dele. */
+const PONTUACAO_FINAL = /[.,;:!?)\]}'"*~]+$/;
 
 const HOSTS_DA_MAQUINA = /^(https?:\/\/)(?:127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?=:)/i;
 

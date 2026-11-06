@@ -23,6 +23,12 @@ describe("extrairEnderecosLocais", () => {
     expect(extrairEnderecosLocais('url: "http://localhost:3000/";')).toEqual(["http://localhost:3000"]);
   });
 
+  it("tira o negrito do Markdown em volta do endereço", () => {
+    expect(extrairEnderecosLocais("No ar: **http://127.0.0.1:4173/** (respondeu 200).")).toEqual([
+      "http://localhost:4173",
+    ]);
+  });
+
   it("só tira a barra final quando ela está sozinha", () => {
     expect(extrairEnderecosLocais("http://localhost:5173/")).toEqual(["http://localhost:5173"]);
     expect(extrairEnderecosLocais("http://localhost:5173/app/")).toEqual(["http://localhost:5173/app/"]);

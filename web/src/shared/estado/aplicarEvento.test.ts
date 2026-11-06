@@ -560,6 +560,22 @@ describe("aplicarEvento", () => {
       );
 
       expect(estado.enderecosLocais).toEqual([]);
+      expect(estado.ultimoEnderecoDetectado).toBeNull();
+    });
+
+    it("guarda o último servidor anunciado com a sequência e a hora, para a prévia abrir sozinha", () => {
+      const eventos = registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "suba o site", configuracao },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173" },
+        { tipo: "texto_do_orquestrador", turnoId: "t1", texto: "Pronto." },
+      ]);
+      const estado = reproduzir(eventos);
+
+      expect(estado.ultimoEnderecoDetectado).toEqual({
+        url: "http://localhost:5173",
+        sequencia: eventos[1]?.sequencia,
+        em: eventos[1]?.em,
+      });
     });
   });
 });

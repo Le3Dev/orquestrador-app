@@ -17,8 +17,8 @@ export const LIMITE_DE_ENDERECOS = 10;
 /** O endereço local inteiro, já sem a pontuação do fim. */
 const ENDERECO_LOCAL = /^(https?):\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):(\d{1,5})(\/\S*)?$/i;
 
-/** Pontuação que encerra a frase e não faz parte do endereço (a mesma classe do servidor). */
-const PONTUACAO_FINAL = /[.,;:!?)\]}'"]+$/;
+/** Pontuação (e negrito do Markdown) que encerra a frase e não faz parte do endereço (a mesma classe do servidor). */
+const PONTUACAO_FINAL = /[.,;:!?)\]}'"*~]+$/;
 
 /** Um esquema explícito ("http://", "ftp://"...): sem ele, o endereço digitado ganha "http://". */
 const COM_ESQUEMA = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -112,4 +112,27 @@ export function enderecosParaPrevia(enderecos: readonly string[], origemDaTela: 
 /** O endereço sem o esquema, para mostrar: "localhost:5173/app". */
 export function enderecoCurto(endereco: string): string {
   return endereco.replace(/^https?:\/\//i, "");
+}
+
+/** Por quanto tempo um servidor anunciado ainda conta como "acabou de subir". */
+export const JANELA_DA_ABERTURA_AUTOMATICA_MS = 2 * 60_000;
+
+/**
+ * Se a prévia deve abrir sozinha para o servidor anunciado: só quando o
+ * anúncio é recente (reler o histórico ao abrir a tela não reabre prévias que
+ * o usuário fechou) e não é a própria tela.
+ */
+export function abrirPreviaSozinha(
+  detectado: { url: string; em: string } | null,
+  agora: number,
+  origemDaTela: string,
+): boolean {
+  if (detectado === null) {
+    return false;
+  }
+  const idade = agora - Date.parse(detectado.em);
+  if (!(idade >= -JANELA_DA_ABERTURA_AUTOMATICA_MS && idade <= JANELA_DA_ABERTURA_AUTOMATICA_MS)) {
+    return false;
+  }
+  return enderecosParaPrevia([detectado.url], origemDaTela).length === 1;
 }

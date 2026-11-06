@@ -1,4 +1,5 @@
 import {
+  abrirPreviaSozinha,
   enderecoCurto,
   enderecoDigitado,
   enderecosParaPrevia,
@@ -91,5 +92,27 @@ describe("enderecosParaPrevia", () => {
 describe("enderecoCurto", () => {
   it("tira o esquema", () => {
     expect(enderecoCurto("http://localhost:5173/app")).toBe("localhost:5173/app");
+  });
+});
+
+describe("abrirPreviaSozinha", () => {
+  const agora = Date.parse("2026-11-06T15:30:00Z");
+  const origem = "http://localhost:3200";
+
+  it("abre o servidor que acabou de subir", () => {
+    expect(abrirPreviaSozinha({ url: "http://localhost:4173", em: "2026-11-06T15:29:50Z" }, agora, origem)).toBe(true);
+  });
+
+  it("não abre o anúncio antigo, relido do histórico", () => {
+    expect(abrirPreviaSozinha({ url: "http://localhost:4173", em: "2026-11-06T15:20:00Z" }, agora, origem)).toBe(false);
+  });
+
+  it("não abre a própria tela nem sem anúncio", () => {
+    expect(abrirPreviaSozinha({ url: "http://localhost:3200", em: "2026-11-06T15:29:59Z" }, agora, origem)).toBe(false);
+    expect(abrirPreviaSozinha(null, agora, origem)).toBe(false);
+  });
+
+  it("hora inválida não abre", () => {
+    expect(abrirPreviaSozinha({ url: "http://localhost:4173", em: "ontem" }, agora, origem)).toBe(false);
   });
 });

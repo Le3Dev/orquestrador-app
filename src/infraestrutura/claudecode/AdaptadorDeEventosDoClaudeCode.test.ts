@@ -296,6 +296,68 @@ describe("AdaptadorDeEventosDoClaudeCode: endereços locais", () => {
     ).toEqual([{ tipo: "endereco_local_detectado", url: "http://localhost:5173" }]);
   });
 
+  it("guarda como candidato o endereço citado no comando e na fala, sem anunciar", () => {
+    const adaptador = new AdaptadorDeEventosDoClaudeCode();
+    const eventos = adaptador.traduzir({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: {
+        content: [
+          { type: "text", text: "O servidor está no ar em **http://127.0.0.1:4173/**." },
+          { type: "tool_use", id: "abrir", name: "Bash", input: { command: "open http://127.0.0.1:4173/" } },
+          { type: "tool_use", id: "ler", name: "Read", input: { file_path: "http://localhost:9999" } },
+        ],
+      },
+    });
+
+    expect(doTipo(eventos, "endereco_local_detectado")).toEqual([]);
+    expect(adaptador.retirarCandidatos()).toEqual(["http://localhost:4173"]);
+    // Retirados uma vez: não voltam.
+    expect(adaptador.retirarCandidatos()).toEqual([]);
+  });
+
+  it("acha candidatos na fala e no relatório de um subagente e na resposta final", () => {
+    const adaptador = new AdaptadorDeEventosDoClaudeCode();
+    adaptador.traduzir({
+      type: "assistant",
+      parent_tool_use_id: "chamada-do-subagente",
+      agent_id: "t1",
+      message: {
+        content: [
+          { type: "text", text: "Subi em http://localhost:3000" },
+          { type: "tool_use", id: "c", name: "Bash", input: { command: "curl -s localhost:3001 http://localhost:3002" } },
+        ],
+      },
+    });
+    adaptador.traduzir({ type: "result", subtype: "success", is_error: false, result: "Pronto: http://localhost:8080/app" });
+
+    expect(adaptador.retirarCandidatos()).toEqual([
+      "http://localhost:3000",
+      "http://localhost:3002",
+      "http://localhost:8080/app",
+    ]);
+  });
+
+  it("confirma um candidato uma vez só, e não repete o que a saída de um comando já anunciou", () => {
+    const adaptador = new AdaptadorDeEventosDoClaudeCode();
+    adaptador.traduzir({
+      type: "user",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_result", tool_use_id: "x", content: VITE }] },
+    });
+    adaptador.traduzir({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "text", text: "http://localhost:5173 e http://localhost:4173" }] },
+    });
+
+    expect(adaptador.retirarCandidatos()).toEqual(["http://localhost:4173"]);
+    expect(adaptador.confirmarEndereco("http://localhost:4173")).toEqual([
+      { tipo: "endereco_local_detectado", url: "http://localhost:4173" },
+    ]);
+    expect(adaptador.confirmarEndereco("http://localhost:4173")).toEqual([]);
+  });
+
   it("não vê endereço nos turnos gravados, que não sobem servidor", () => {
     expect(doTipo(traduzirFixture("turno1").eventos, "endereco_local_detectado")).toEqual([]);
     expect(doTipo(traduzirFixture("turno2").eventos, "endereco_local_detectado")).toEqual([]);

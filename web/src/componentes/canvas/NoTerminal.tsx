@@ -6,6 +6,7 @@ import type { DadosDaConfiguracao, ModoDoTurno, ResumoDoOrquestrador } from "../
 import { useCanvas } from "../../shared/canvas/contexto";
 import { TAMANHO_MINIMO_DO_TERMINAL } from "../../shared/canvas/layout";
 import { ALCA_DO_TERMINAL, type Ancora, type NoTerminal as TipoDoNo } from "../../shared/canvas/nos";
+import { abrirPreviaSozinha } from "../../shared/enderecosLocais";
 import { ESTADO_INICIAL } from "../../shared/estado/aplicarEvento";
 import { formatarBytes } from "../../shared/formatacao";
 import { type ImagemAnexada, lerImagem, problemaDaImagem } from "../../shared/imagens";
@@ -21,6 +22,36 @@ import { TranscricaoDoTerminal } from "./TranscricaoDoTerminal";
 
 /** Distância do fim (px) em que o terminal ainda acompanha as novidades sozinho. */
 const MARGEM_DE_ACOMPANHAMENTO = 120;
+
+/**
+ * Anúncios de servidor que já abriram a prévia sozinhos, por orquestrador e
+ * sequência do evento: guardados na sessão para que recarregar a tela não
+ * reabra uma prévia que o usuário fechou.
+ */
+const CHAVE_DAS_PREVIAS_ABERTAS = "previas-abertas-sozinhas";
+const previasAbertasSozinhas = new Set<string>(lerPreviasAbertas());
+
+function lerPreviasAbertas(): string[] {
+  try {
+    const salvo: unknown = JSON.parse(sessionStorage.getItem(CHAVE_DAS_PREVIAS_ABERTAS) ?? "[]");
+    return Array.isArray(salvo) ? salvo.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function jaAbertoSozinho(orquestradorId: string, sequencia: number): boolean {
+  return previasAbertasSozinhas.has(`${orquestradorId}:${sequencia}`);
+}
+
+function marcarAbertoSozinho(orquestradorId: string, sequencia: number): void {
+  previasAbertasSozinhas.add(`${orquestradorId}:${sequencia}`);
+  try {
+    sessionStorage.setItem(CHAVE_DAS_PREVIAS_ABERTAS, JSON.stringify([...previasAbertasSozinhas].slice(-200)));
+  } catch {
+    // Sem armazenamento da sessão: vale só enquanto a página estiver aberta.
+  }
+}
 
 interface PropsDaConfiguracao {
   orquestrador: ResumoDoOrquestrador;
@@ -407,6 +438,19 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
   /** "abrir prévia" na faixa dos servidores: a prévia nasce ligada a este terminal. */
   const { abrirPrevia } = acoes;
   const aoAbrirPrevia = useCallback((url: string) => abrirPrevia(orquestradorId, url), [abrirPrevia, orquestradorId]);
+
+  // Um agente acabou de subir um servidor: a prévia abre sozinha, ao lado
+  // deste terminal e selecionada. Cada anúncio abre uma vez só.
+  const detectado = conversa.ultimoEnderecoDetectado;
+  useEffect(() => {
+    if (detectado === null || jaAbertoSozinho(orquestradorId, detectado.sequencia)) {
+      return;
+    }
+    marcarAbertoSozinho(orquestradorId, detectado.sequencia);
+    if (abrirPreviaSozinha(detectado, Date.now(), window.location.origin)) {
+      abrirPrevia(orquestradorId, detectado.url);
+    }
+  }, [abrirPrevia, detectado, orquestradorId]);
 
   const acoesDoPlano = useMemo<AcoesDoPlano>(
     () => ({ aoAprovar: aprovarPlano, aoAjustar: ajustarPlano, aoDescartar: descartarPlano }),

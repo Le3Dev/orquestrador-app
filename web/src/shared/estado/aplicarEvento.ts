@@ -89,6 +89,17 @@ export interface EstadoDaConversa {
    * repetição, o mais recente por último. O terminal oferece a prévia deles.
    */
   enderecosLocais: readonly string[];
+  /**
+   * O último servidor anunciado, com a sequência e a hora do evento: a tela
+   * abre a prévia sozinha quando ele acabou de subir (não ao reler o histórico).
+   */
+  ultimoEnderecoDetectado: EnderecoDetectado | null;
+}
+
+export interface EnderecoDetectado {
+  url: string;
+  sequencia: number;
+  em: string;
 }
 
 export const ESTADO_INICIAL: EstadoDaConversa = {
@@ -97,6 +108,7 @@ export const ESTADO_INICIAL: EstadoDaConversa = {
   cota: null,
   conversaIniciadaEm: null,
   enderecosLocais: [],
+  ultimoEnderecoDetectado: null,
 };
 
 type AlteracaoDeTurno = (turno: TurnoNaTela) => TurnoNaTela;
@@ -411,18 +423,29 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
     // Conversa nova (/clear): os pedidos anteriores ficam arquivados no servidor
     // e saem da tela, e os servidores que eles subiram também. A cota fica: é da
     // assinatura, não da conversa.
-    return { ...proximo, turnos: [], conversaIniciadaEm: evento.em, enderecosLocais: [] };
+    return {
+      ...proximo,
+      turnos: [],
+      conversaIniciadaEm: evento.em,
+      enderecosLocais: [],
+      ultimoEnderecoDetectado: null,
+    };
   }
   if (evento.tipo === "uso_da_cota") {
     return { ...proximo, cota: evento.janelas };
   }
 
   const turnos = evento.tipo === "turno_iniciado" ? [...estado.turnos, novoTurno(evento)] : estado.turnos;
+  const [detectado] = enderecosDoEvento(evento);
   const alteracao = alteracaoDoTurno(evento);
 
   return {
     ...proximo,
     enderecosLocais: juntarEnderecos(estado.enderecosLocais, enderecosDoEvento(evento)),
+    ultimoEnderecoDetectado:
+      detectado === undefined
+        ? estado.ultimoEnderecoDetectado
+        : { url: detectado, sequencia: evento.sequencia, em: evento.em },
     turnos: turnos.map((turno) => {
       if (turno.id !== evento.turnoId) {
         return turno;

@@ -15,6 +15,7 @@ import {
   montarArgumentos,
 } from "./ArgumentosDoClaudeCode";
 import { FachadaClaudeCodeCli, SaidaDoClaudeCode } from "./FachadaClaudeCodeCli";
+import { SondaDeEndereco, sondarEnderecoLocal } from "./SondaDeEnderecoLocal";
 
 function descreverSaidaSemResultado(saida: SaidaDoClaudeCode): string {
   const detalhe = saida.erroPadrao.slice(0, 600);
@@ -33,7 +34,10 @@ function descreverSaidaSemResultado(saida: SaidaDoClaudeCode): string {
  * tempo nunca compartilham arquivos.
  */
 export class MotorClaudeCodeCli implements MotorDeAgentes {
-  constructor(private readonly fachada: FachadaClaudeCodeCli) {}
+  constructor(
+    private readonly fachada: FachadaClaudeCodeCli,
+    private readonly sondar: SondaDeEndereco = sondarEnderecoLocal,
+  ) {}
 
   async executarTurno(
     pedido: PedidoDeTurno,
@@ -73,6 +77,34 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
       );
 
       const adaptador = new AdaptadorDeEventosDoClaudeCode();
+      // Endereços citados num comando ou na fala de um agente: só viram prévia
+      // se responderem. O turno espera estas conferências (no máximo poucos
+      // segundos) para o anúncio não chegar depois do fim do turno.
+      // Um endereço citado de novo enquanto ainda é conferido não é sondado duas vezes.
+      const conferencias: Promise<void>[] = [];
+      const emConferencia = new Set<string>();
+      const conferirCitados = (): void => {
+        for (const url of adaptador.retirarCandidatos()) {
+          if (emConferencia.has(url)) {
+            continue;
+          }
+          emConferencia.add(url);
+          conferencias.push(
+            this.sondar(url)
+              .then(
+                (noAr) => {
+                  if (noAr && !sinal.aborted) {
+                    for (const evento of adaptador.confirmarEndereco(url)) {
+                      aoObservar(evento);
+                    }
+                  }
+                },
+                () => undefined,
+              )
+              .finally(() => emConferencia.delete(url)),
+          );
+        }
+      };
       const inicio = Date.now();
       const saida = await this.fachada.executar(
         {
@@ -86,9 +118,11 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
           for (const evento of adaptador.traduzir(mensagem)) {
             aoObservar(evento);
           }
+          conferirCitados();
         },
         sinal,
       );
+      await Promise.all(conferencias);
 
       const resultado = adaptador.resultado;
       if (resultado === null) {

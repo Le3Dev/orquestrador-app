@@ -97,3 +97,67 @@ describe("MotorClaudeCodeCli e as instruções personalizadas", () => {
     expect(textoDaEntrada(fachada)).not.toContain("Instruções personalizadas");
   });
 });
+
+/** Um turno em que o agente só cita o servidor: no comando e na resposta final. */
+class FachadaQueCitaServidor {
+  async executar(
+    _execucao: ExecucaoDoClaudeCode,
+    aoReceberMensagem: (mensagem: unknown) => void,
+  ): Promise<SaidaDoClaudeCode> {
+    aoReceberMensagem({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: {
+        content: [
+          { type: "tool_use", id: "c1", name: "Bash", input: { command: "open http://127.0.0.1:4173/" } },
+        ],
+      },
+    });
+    aoReceberMensagem({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "No ar em http://127.0.0.1:4173/ e a documentação em http://localhost:9000.",
+      duration_ms: 1,
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    return { codigoDeSaida: 0, erroPadrao: "" };
+  }
+}
+
+function enderecos(eventos: unknown[]): unknown[] {
+  return eventos.filter((evento) => (evento as { tipo: string }).tipo === "endereco_local_detectado");
+}
+
+describe("MotorClaudeCodeCli e os servidores citados", () => {
+  it("anuncia, antes do fim do turno, só os endereços citados que respondem, uma vez cada", async () => {
+    const sondados: string[] = [];
+    const motor = new MotorClaudeCodeCli(
+      new FachadaQueCitaServidor() as unknown as FachadaClaudeCodeCli,
+      async (url) => {
+        sondados.push(url);
+        await new Promise((resolver) => setTimeout(resolver, 5));
+        return url === "http://localhost:4173";
+      },
+    );
+    const eventos: unknown[] = [];
+
+    const resultado = await motor.executarTurno(pedido(null), (evento) => eventos.push(evento), new AbortController().signal);
+
+    expect(resultado.sucesso).toBe(true);
+    expect(sondados).toEqual(["http://localhost:4173", "http://localhost:9000"]);
+    expect(enderecos(eventos)).toEqual([{ tipo: "endereco_local_detectado", url: "http://localhost:4173" }]);
+  });
+
+  it("uma sonda que falha não derruba o turno", async () => {
+    const motor = new MotorClaudeCodeCli(new FachadaQueCitaServidor() as unknown as FachadaClaudeCodeCli, () =>
+      Promise.reject(new Error("rede")),
+    );
+    const eventos: unknown[] = [];
+
+    const resultado = await motor.executarTurno(pedido(null), (evento) => eventos.push(evento), new AbortController().signal);
+
+    expect(resultado.sucesso).toBe(true);
+    expect(enderecos(eventos)).toEqual([]);
+  });
+});

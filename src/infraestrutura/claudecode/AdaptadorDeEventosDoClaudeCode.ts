@@ -138,10 +138,38 @@ export class AdaptadorDeEventosDoClaudeCode {
   private readonly enderecosAnunciados = new Set<string>();
   /** Nome da ferramenta de cada chamada (`tool_use_id`), do Orquestrador e dos Subagentes. */
   private readonly ferramentaPorChamada = new Map<string, string>();
+  /**
+   * Endereços locais citados num comando ou na fala de um agente: ainda não
+   * se sabe se há um servidor neles. O motor confere cada um
+   * (`retirarCandidatos`) e anuncia os que respondem (`confirmarEndereco`).
+   */
+  private readonly candidatos = new Set<string>();
 
   /** Preenchido quando chega a mensagem final (`result`); nulo se o processo parou antes. */
   get resultado(): ResultadoDoTurno | null {
     return this.resultadoDoTurno;
+  }
+
+  /** Os endereços citados desde a última retirada que ainda não foram anunciados. */
+  retirarCandidatos(): string[] {
+    const novos = [...this.candidatos].filter((url) => !this.enderecosAnunciados.has(url));
+    this.candidatos.clear();
+    return novos;
+  }
+
+  /** Um endereço citado que respondeu: vira o mesmo anúncio da saída de um comando, uma vez por turno. */
+  confirmarEndereco(url: string): EventoDoMotor[] {
+    if (this.enderecosAnunciados.has(url)) {
+      return [];
+    }
+    this.enderecosAnunciados.add(url);
+    return [{ tipo: "endereco_local_detectado", url }];
+  }
+
+  private citarEnderecos(texto: string): void {
+    for (const url of extrairEnderecosLocais(texto)) {
+      this.candidatos.add(url);
+    }
   }
 
   traduzir(mensagem: unknown): EventoDoMotor[] {
@@ -232,6 +260,13 @@ export class AdaptadorDeEventosDoClaudeCode {
         const lendoSaida = nome === "Read" && SAIDA_DE_COMANDO.test(texto(objeto(bloco, "input"), "file_path"));
         // A leitura da saída de um comando conta como o próprio comando.
         this.ferramentaPorChamada.set(texto(bloco, "id"), lendoSaida ? "Bash" : nome);
+        // `open http://127.0.0.1:4173`, `curl localhost:3000`: o comando cita o servidor.
+        if (nome === "Bash") {
+          this.citarEnderecos(texto(objeto(bloco, "input"), "command"));
+        }
+      }
+      if (texto(bloco, "type") === "text") {
+        this.citarEnderecos(texto(bloco, "text"));
       }
     }
 
@@ -290,6 +325,7 @@ export class AdaptadorDeEventosDoClaudeCode {
         .join("")
         .trim();
       if (resultado !== "") {
+        this.citarEnderecos(resultado);
         eventos.push({ tipo: "resultado_do_subagente", subagenteId, resultado });
       }
     }
@@ -356,6 +392,7 @@ export class AdaptadorDeEventosDoClaudeCode {
     const uso = somarUso(this.usoAcumulado, this.extrairUso(mensagem));
     this.usoAcumulado = uso;
     const resposta = texto(mensagem, "result");
+    this.citarEnderecos(resposta);
     const sucesso = texto(mensagem, "subtype") === "success" && mensagem["is_error"] !== true;
 
     this.resultadoDoTurno = sucesso
