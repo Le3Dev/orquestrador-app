@@ -19,7 +19,7 @@ export function EtiquetaDeWorktree({
   const { branch, caminho, ativo } = worktree;
   return (
     <span
-      className={`chip ${ativo ? "text-active" : "text-muted"} ${className}`}
+      className={`chip ${ativo ? "chip-ativo" : "chip-inativo"} ${className}`}
       title={`Worktree: ${caminho}${ativo ? " · em uso agora" : " · inativo"}`}
     >
       <IconeBranch tamanho={11} className="mr-1 shrink-0" />

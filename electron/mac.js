@@ -7,49 +7,44 @@
 // O que muda no Mac:
 //   1. Menu do app com os papéis nativos. Sem ele, Cmd+C, Cmd+V, Cmd+Z, Cmd+A
 //      e Cmd+Q não funcionam (no Mac quem faz isso é o menu, não a página).
-//   2. Janela sem a faixa de título, com as 3 bolinhas nativas dentro da
-//      barra do canvas. O titleBarOverlay (botões desenhados no Windows) sai.
+//   2. Janelas com as 3 bolinhas nativas. O titleBarOverlay (botões nativos
+//      pintados no Windows) sai; na janela principal as bolinhas ficam
+//      centradas na barra de título do app (36px), e a tela não desenha os
+//      botões ─ ☐ ✕ (BarraDeTituloDoApp).
 //   3. PATH do shell de login: aberto pelo Finder ou pelo Dock, o app recebe
-//      um PATH mínimo e não acharia o `node` (nvm, Homebrew) nem o `claude`.
-//   4. Servidor no Node do sistema (o projeto pede Node 22), e não no binário
-//      do Electron, que traz Node 20 e não entende --env-file-if-exists.
-//   5. Se já houver um servidor do Orquestrador na porta, a janela usa ele em
-//      vez de subir outro (quem usa a versão no navegador e o app juntos).
-//   6. Rodando pelo código (fora do app empacotado), dá para abrir sem
-//      licença com ORQUESTRADOR_SEM_LICENCA=1. O app empacotado continua
-//      exigindo a chave.
+//      um PATH mínimo, e o Claude Code (que precisa do `node`, via nvm ou
+//      Homebrew) não rodaria.
+//   4. Primeira abertura: acha o `claude` no PATH (no Mac não há claude.exe).
+//   5. Sem atualização automática: sem assinatura da Apple ela não funciona.
 
 const { execFileSync } = require("node:child_process");
-const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 
 const ehMac = process.platform === "darwin";
 
-/** Versão mínima do Node que o servidor aceita (package.json, "engines"). */
-const NODE_MINIMO = 22;
-
-// Barra do canvas: painel do React Flow com margem de 15px e 48px de altura.
-// As bolinhas (cerca de 14px de altura) ficam centradas nela, à esquerda.
-const SEMAFORO_DA_JANELA_PRINCIPAL = { x: 29, y: 32 };
-// Tela de ativação: faixa arrastável de 40px no topo.
-const SEMAFORO_DA_ATIVACAO = { x: 14, y: 13 };
+// Bolinhas (cerca de 14px de altura) centradas na faixa de cima, à esquerda.
+// Janela principal: barra de título do app com 36px (BarraDeTituloDoApp).
+const SEMAFORO_DA_JANELA_PRINCIPAL = { x: 14, y: 11 };
+// Ativação e primeira abertura: faixa arrastável de 40px no topo.
+const SEMAFORO_DAS_JANELAS_PEQUENAS = { x: 14, y: 13 };
 
 // ──────────────────────────────────────────────────────────────────────────
 // Janela.
 // ──────────────────────────────────────────────────────────────────────────
 
 /**
- * Ajusta as opções do BrowserWindow para o Mac. `tipo` é "principal" ou
- * "ativacao". Fora do Mac devolve as opções sem mudança.
+ * Ajusta as opções do BrowserWindow para o Mac. `principal` diz se é a janela
+ * principal (barra de título do app) ou uma das pequenas (ativação,
+ * configuração). Fora do Mac devolve as opções sem mudança.
  */
-function ajustarOpcoesDaJanela(opcoes, tipo) {
+function ajustarOpcoesDaJanela(opcoes, principal) {
   if (!ehMac) return opcoes;
   const { titleBarOverlay: _semOverlay, ...resto } = opcoes;
   return {
     ...resto,
     titleBarStyle: "hidden",
-    trafficLightPosition: tipo === "ativacao" ? SEMAFORO_DA_ATIVACAO : SEMAFORO_DA_JANELA_PRINCIPAL,
+    trafficLightPosition: principal ? SEMAFORO_DA_JANELA_PRINCIPAL : SEMAFORO_DAS_JANELAS_PEQUENAS,
   };
 }
 
@@ -114,7 +109,7 @@ function menuDoApp(Menu, nomeDoApp) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// PATH e Node do sistema.
+// PATH do shell de login.
 // ──────────────────────────────────────────────────────────────────────────
 
 const MARCA = "__PATH_DO_ORQUESTRADOR__";
@@ -152,8 +147,9 @@ function juntarPaths(primeiro, segundo) {
 
 /**
  * No Mac, completa o process.env.PATH com o do shell de login e com as pastas
- * comuns do Homebrew. Assim o servidor (e o Claude Code que ele chama) acham
- * `node` e `claude` mesmo com o app aberto pelo Finder. Fora do Mac não faz nada.
+ * comuns do Homebrew. O servidor herda esse PATH, e o Claude Code que ele
+ * chama acha o `node` mesmo com o app aberto pelo Finder. Fora do Mac não faz
+ * nada.
  */
 function carregarPathDoShell() {
   if (!ehMac) return;
@@ -162,93 +158,24 @@ function carregarPathDoShell() {
   process.env.PATH = juntarPaths(juntarPaths(doShell, process.env.PATH), comuns);
 }
 
-/** Versão principal de um executável `node`, ou null se não rodar. */
-function versaoPrincipalDoNode(executavel) {
-  // Sem isto, herdado de um terminal do VS Code, um Electron no PATH
-  // responderia como se fosse Node.
-  const ambiente = { ...process.env };
-  delete ambiente.ELECTRON_RUN_AS_NODE;
-  try {
-    const saida = execFileSync(executavel, ["--version"], {
-      encoding: "utf8",
-      timeout: 4000,
-      env: ambiente,
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    const m = /^v(\d+)\./.exec(saida.trim());
-    return m ? Number(m[1]) : null;
-  } catch {
-    return null;
-  }
-}
+// ──────────────────────────────────────────────────────────────────────────
+// Primeira abertura.
+// ──────────────────────────────────────────────────────────────────────────
 
-/** Primeiro `node` do PATH com a versão que o servidor pede. */
-function nodeDoSistema() {
-  for (const pasta of (process.env.PATH || "").split(":")) {
+/**
+ * No Mac, o primeiro `claude` do PATH. Fica o caminho do link (o de
+ * ~/.local/bin aponta para a versão instalada), que continua valendo quando o
+ * Claude Code se atualiza. Fora do Mac, ou sem `claude` instalado, devolve
+ * null e a primeira abertura segue com a detecção do Windows.
+ */
+function claudeCodeDoPath(ehArquivo, ambiente = process.env) {
+  if (!ehMac) return null;
+  for (const pasta of (ambiente.PATH || "").split(":")) {
     if (!pasta) continue;
-    const candidato = path.join(pasta, "node");
-    const versao = versaoPrincipalDoNode(candidato);
-    if (versao !== null && versao >= NODE_MINIMO) return candidato;
+    const candidato = path.join(pasta, "claude");
+    if (ehArquivo(candidato)) return candidato;
   }
   return null;
-}
-
-/**
- * Executável que deve rodar o vigia do servidor. No Mac, o Node do sistema
- * (22 ou mais); fora do Mac, ou sem Node adequado instalado, devolve null e o
- * main.js usa o process.execPath como sempre.
- */
-function executavelDoServidor() {
-  if (!ehMac) return null;
-  return nodeDoSistema();
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// Servidor já no ar.
-// ──────────────────────────────────────────────────────────────────────────
-
-/** true se já há um servidor respondendo em `url` (só consultado no Mac). */
-function servidorJaNoAr(url, limiteMs = 800) {
-  if (!ehMac) return Promise.resolve(false);
-  return new Promise((resolver) => {
-    const req = http.get(`${url}/api/saude`, (res) => {
-      res.resume();
-      resolver(res.statusCode === 200);
-    });
-    req.on("error", () => resolver(false));
-    req.setTimeout(limiteMs, () => {
-      req.destroy();
-      resolver(false);
-    });
-  });
-}
-
-/**
- * Promessa que resolve quando o processo sair (ou após `limiteMs`). Serve
- * para, no Mac, não subir um servidor novo enquanto o antigo ainda grava o
- * histórico. Fora do Mac devolve null.
- */
-function esperarSaida(processo, limiteMs = 10_000) {
-  if (!ehMac || !processo || processo.exitCode !== null || processo.signalCode !== null) return null;
-  return new Promise((resolver) => {
-    const limite = setTimeout(resolver, limiteMs);
-    processo.once("exit", () => {
-      clearTimeout(limite);
-      resolver();
-    });
-  });
-}
-
-// ──────────────────────────────────────────────────────────────────────────
-// Licença ao rodar pelo código.
-// ──────────────────────────────────────────────────────────────────────────
-
-/**
- * true quando o Mac roda pelo código (não empacotado) com
- * ORQUESTRADOR_SEM_LICENCA=1. O app empacotado sempre passa pela licença.
- */
-function liberadoSemLicenca(app) {
-  return ehMac && !app.isPackaged && process.env.ORQUESTRADOR_SEM_LICENCA === "1";
 }
 
 module.exports = {
@@ -256,10 +183,7 @@ module.exports = {
   ajustarOpcoesDaJanela,
   menuDoApp,
   carregarPathDoShell,
-  executavelDoServidor,
-  servidorJaNoAr,
-  esperarSaida,
-  liberadoSemLicenca,
+  claudeCodeDoPath,
   // Expostos para teste.
   juntarPaths,
 };

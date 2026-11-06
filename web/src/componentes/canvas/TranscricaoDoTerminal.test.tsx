@@ -32,8 +32,6 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "edicao_e_comandos",
   permitirCommitEPush: false,
-  permitirTrabalhoDireto: true,
-  proporPlanoEmPedidosGrandes: true,
   instrucoesPersonalizadas: "",
 };
 
@@ -151,6 +149,53 @@ describe("TranscricaoDoTerminal", () => {
 
     expect(screen.getByText("Corrigido.")).toBeInTheDocument();
     expect(screen.queryByText("plano proposto")).not.toBeInTheDocument();
+  });
+
+  it("o custo do turno só aparece depois de medido, no fim do pedido", () => {
+    const concluido = aplicar(
+      ESTADO_INICIAL,
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija o bug", configuracao },
+      { tipo: "turno_concluido", turnoId: "t1", resposta: "Corrigido.", uso: USO },
+    );
+    const { rerender } = render(<Transcricao conversa={concluido} />);
+    expect(screen.queryByText(/custo do turno/)).not.toBeInTheDocument();
+
+    const medido = aplicar(concluido, {
+      tipo: "consumo_do_turno_medido",
+      turnoId: "t1",
+      consumo: {
+        principal: { entrada: 100_000, criacaoDeCache: 0, leituraDeCache: 0, saida: 27_000 },
+        subagentes: { entrada: 0, criacaoDeCache: 0, leituraDeCache: 0, saida: 0 },
+        subagentesMedidos: 0,
+        parcial: true,
+        indiceDeCusto: 235_000,
+        modeloDoPrincipal: null,
+      },
+    });
+    rerender(<Transcricao conversa={medido} />);
+
+    expect(screen.getByRole("button", { name: /≈ custo do turno · índice 235\smil · parcial/ })).toBeInTheDocument();
+  });
+
+  it("marca a configuração com a etiqueta \"econômico\" só quando ela corresponde ao modo econômico", () => {
+    const { rerender } = render(<Transcricao conversa={ESTADO_INICIAL} />);
+    expect(screen.queryByText("econômico")).not.toBeInTheDocument();
+
+    rerender(
+      <TranscricaoDoTerminal
+        orquestradorId="o1"
+        nome="Painel de salas"
+        pastaDeTrabalho="C:\projetos\painel"
+        configuracao={configuracao}
+        predefinicao="economico"
+        turnos={[]}
+        conversaIniciadaEm={null}
+        sinal={undefined}
+        desconectado={false}
+        acoesDoPlano={acoesDoPlano}
+      />,
+    );
+    expect(screen.getByText("econômico")).toHaveClass("chip");
   });
 
   it("depois do /clear, mostra o separador da conversa nova e só os pedidos dela", () => {

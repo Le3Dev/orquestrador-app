@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -17,6 +17,18 @@ import {
 import { FachadaClaudeCodeCli, SaidaDoClaudeCode } from "./FachadaClaudeCodeCli";
 import { SondaDeEndereco, sondarEnderecoLocal } from "./SondaDeEnderecoLocal";
 
+/**
+ * Cria a pasta de artefatos (vai em `--add-dir`, precisa existir antes de o
+ * processo iniciar) e devolve o caminho real dela. O Claude Code compara as
+ * regras de permissão com o caminho real do arquivo: uma pasta com nome curto
+ * do Windows (`C:\Users\LEANDR~1.CAN\…`) geraria uma regra que nunca casa, e a
+ * gravação do artefato seria negada.
+ */
+export async function prepararPastaDeArtefatos(pasta: string): Promise<string> {
+  await mkdir(pasta, { recursive: true });
+  return realpath(pasta);
+}
+
 function descreverSaidaSemResultado(saida: SaidaDoClaudeCode): string {
   const detalhe = saida.erroPadrao.slice(0, 600);
   const codigo = saida.codigoDeSaida === null ? "" : ` (código ${saida.codigoDeSaida})`;
@@ -31,7 +43,8 @@ function descreverSaidaSemResultado(saida: SaidaDoClaudeCode): string {
  *
  * Cada turno grava as instruções e a definição dos Subagentes em uma pasta
  * temporária própria, apagada ao final — dois Orquestradores rodando ao mesmo
- * tempo nunca compartilham arquivos.
+ * tempo nunca compartilham arquivos. A pasta de artefatos do Orquestrador, ao
+ * contrário, é permanente: o motor só a cria, se faltar.
  */
 export class MotorClaudeCodeCli implements MotorDeAgentes {
   constructor(
@@ -40,7 +53,7 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
   ) {}
 
   async executarTurno(
-    pedido: PedidoDeTurno,
+    pedidoRecebido: PedidoDeTurno,
     aoObservar: (evento: EventoDoMotor) => void,
     sinal: AbortSignal,
   ): Promise<ResultadoDoTurno> {
@@ -53,6 +66,7 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
 
     try {
       await mkdir(pastaTemporaria, { recursive: true });
+      const pedido = { ...pedidoRecebido, pastaDeArtefatos: await prepararPastaDeArtefatos(pedidoRecebido.pastaDeArtefatos) };
       await writeFile(arquivos.agentes, JSON.stringify(definicaoDosAgentes(pedido)), "utf8");
       await writeFile(arquivos.instrucoes, instrucoesDoOrquestrador(pedido.pastaDeTrabalho), "utf8");
       const configuracoes = configuracoesDaSessao(pedido);
@@ -71,6 +85,7 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
         pedido.configuracao,
         pedido.imagens.map((imagem) => imagem.caminho),
         pedido.modo,
+        pedido.pastaDeArtefatos,
         pedido.instrucoes,
         pedido.revogarInstrucoesAnteriores,
         pedido.subagentesProntos,

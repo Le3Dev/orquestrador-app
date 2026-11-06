@@ -1,6 +1,8 @@
 import type {
   DadosDaConfiguracao,
   DadosDoAnexo,
+  DadosDoConsumoDoTurno,
+  DadosDoPedidoNaFila,
   DecisaoDoPlano,
   EventoRegistrado,
   JanelaDaCota,
@@ -70,6 +72,11 @@ export interface TurnoNaTela {
   resposta: string | null;
   motivoDaFalha: string | null;
   uso: UsoDoTurno | null;
+  /**
+   * Consumo medido do turno (principal e Subagentes), que chega depois do fim.
+   * Nulo — ou ausente — enquanto não foi medido.
+   */
+  consumo?: DadosDoConsumoDoTurno | null;
   subagentes: SubagenteNaTela[];
   /** Ferramentas que o Orquestrador usou ele mesmo, sem Subagente (leituras, checagens, comandos curtos). */
   ferramentasDiretas: AcaoRegistrada[];
@@ -83,6 +90,14 @@ export interface EstadoDaConversa {
   cota: JanelaDaCota[] | null;
   /** Quando o usuário começou a conversa atual (/clear); nulo enquanto é a primeira. */
   conversaIniciadaEm: string | null;
+  /**
+   * Pedidos que os eventos puseram na fila e ainda não tiraram, na ordem de
+   * chegada. Não é a fila inteira: os pedidos enfileirados antes de um /clear
+   * não estão mais no histórico. A fila da tela é `filaDePedidos`.
+   */
+  pedidosEnfileirados: readonly DadosDoPedidoNaFila[];
+  /** Ids que os eventos já tiraram da fila (removidos ou enviados). */
+  pedidosRetirados: readonly string[];
   /**
    * Servidores de desenvolvimento que os agentes subiram nesta conversa
    * (evento do servidor, texto do orquestrador e resposta final): sem
@@ -109,7 +124,35 @@ export const ESTADO_INICIAL: EstadoDaConversa = {
   conversaIniciadaEm: null,
   enderecosLocais: [],
   ultimoEnderecoDetectado: null,
+  pedidosEnfileirados: [],
+  pedidosRetirados: [],
 };
+
+/**
+ * A fila de pedidos que a tela mostra: a do servidor (`fila` do resumo do
+ * Orquestrador), corrigida pelos eventos da fila.
+ *
+ * O resumo é a fila inteira, mas no instante da consulta (a lista é
+ * consultada a cada poucos segundos); os eventos chegam na hora, mas só os da
+ * conversa atual — depois de um /clear, o histórico começa de novo e a fila
+ * continua. Juntando: os pedidos do resumo que nenhum evento tirou, seguidos
+ * dos que os eventos puseram depois da consulta, sem repetir.
+ */
+export function filaDePedidos(
+  estado: EstadoDaConversa,
+  filaDoServidor: readonly DadosDoPedidoNaFila[],
+): DadosDoPedidoNaFila[] {
+  const retirados = new Set(estado.pedidosRetirados);
+  const vistos = new Set<string>();
+  const fila: DadosDoPedidoNaFila[] = [];
+  for (const pedido of [...filaDoServidor, ...estado.pedidosEnfileirados]) {
+    if (!retirados.has(pedido.id) && !vistos.has(pedido.id)) {
+      vistos.add(pedido.id);
+      fila.push(pedido);
+    }
+  }
+  return fila;
+}
 
 type AlteracaoDeTurno = (turno: TurnoNaTela) => TurnoNaTela;
 
@@ -258,6 +301,10 @@ function alteracaoDoTurno(evento: EventoRegistrado): AlteracaoDeTurno | null {
     case "plano_aprovado":
       return (turno) => ({ ...turno, decisaoDoPlano: "aprovado" });
 
+    // Chega depois do fim do turno; uma medição nova substitui a anterior.
+    case "consumo_do_turno_medido":
+      return (turno) => ({ ...turno, consumo: evento.consumo });
+
     case "plano_descartado":
       return (turno) => ({ ...turno, decisaoDoPlano: "descartado" });
 
@@ -382,9 +429,6 @@ function novoTurno(evento: Extract<EventoRegistrado, { tipo: "turno_iniciado" }>
       permitirCommitEPush: evento.configuracao.permitirCommitEPush ?? false,
       esforcoDoOrquestrador: evento.configuracao.esforcoDoOrquestrador ?? "padrao",
       esforcoDosSubagentes: evento.configuracao.esforcoDosSubagentes ?? "padrao",
-      // Os anteriores às opções de trabalho direto e de plano automático ficam com o padrão (ligadas).
-      permitirTrabalhoDireto: evento.configuracao.permitirTrabalhoDireto ?? true,
-      proporPlanoEmPedidosGrandes: evento.configuracao.proporPlanoEmPedidosGrandes ?? true,
       // Os anteriores às instruções personalizadas rodaram sem elas.
       instrucoesPersonalizadas: evento.configuracao.instrucoesPersonalizadas ?? "",
     },
@@ -395,6 +439,7 @@ function novoTurno(evento: Extract<EventoRegistrado, { tipo: "turno_iniciado" }>
     resposta: null,
     motivoDaFalha: null,
     uso: null,
+    consumo: null,
     subagentes: [],
     ferramentasDiretas: [],
     permissoesNegadas: [],
@@ -423,16 +468,42 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
     // Conversa nova (/clear): os pedidos anteriores ficam arquivados no servidor
     // e saem da tela, e os servidores que eles subiram também. A cota fica: é da
     // assinatura, não da conversa.
+    // A fila do Orquestrador continua, mas daqui em diante vem do resumo do
+    // servidor: quem abrir o terminal depois não verá os eventos de antes do
+    // /clear, e um terminal que reconectar depois dele pode ter perdido uma
+    // retirada. Os retirados ficam, para filtrar um resumo defasado.
     return {
       ...proximo,
       turnos: [],
       conversaIniciadaEm: evento.em,
       enderecosLocais: [],
       ultimoEnderecoDetectado: null,
+      pedidosEnfileirados: [],
     };
   }
   if (evento.tipo === "uso_da_cota") {
     return { ...proximo, cota: evento.janelas };
+  }
+  if (evento.tipo === "pedido_enfileirado") {
+    const { pedido } = evento;
+    // Repetido, ou já retirado por um evento que chegou antes: nada muda.
+    if (
+      estado.pedidosRetirados.includes(pedido.id) ||
+      estado.pedidosEnfileirados.some((enfileirado) => enfileirado.id === pedido.id)
+    ) {
+      return proximo;
+    }
+    return { ...proximo, pedidosEnfileirados: [...estado.pedidosEnfileirados, pedido] };
+  }
+  if (evento.tipo === "pedido_retirado_da_fila") {
+    if (estado.pedidosRetirados.includes(evento.pedidoId)) {
+      return proximo;
+    }
+    return {
+      ...proximo,
+      pedidosEnfileirados: estado.pedidosEnfileirados.filter((pedido) => pedido.id !== evento.pedidoId),
+      pedidosRetirados: [...estado.pedidosRetirados, evento.pedidoId],
+    };
   }
 
   const turnos = evento.tipo === "turno_iniciado" ? [...estado.turnos, novoTurno(evento)] : estado.turnos;

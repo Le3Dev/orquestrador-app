@@ -11,8 +11,11 @@ import { ArmazemDeAnexosEmArquivo } from "../infraestrutura/arquivos/ArmazemDeAn
 import { ExploradorDePastas } from "../infraestrutura/arquivos/ExploradorDePastas";
 import { ControleDeExecucoesEmMemoria } from "../infraestrutura/execucoes/ControleDeExecucoesEmMemoria";
 import { CanalDeEventos } from "../infraestrutura/sse/CanalDeEventos";
-import { SeletorDePasta, SeletorDePastaIndisponivel } from "../infraestrutura/sistema/SeletorDePastaNativo";
+import { ConsumoDoTurno } from "../orquestracao/ConsumoDoTurno";
+import { ConsultaDeEsforcoHerdado } from "../orquestracao/EsforcoDaMaquina";
+import { EsforcoHerdado } from "../orquestracao/EsforcoHerdado";
 import { EventoDeOrquestracao, EventoDoMotor, EventoRegistrado } from "../orquestracao/EventoDeOrquestracao";
+import { UsoDeTokens } from "../orquestracao/UsoDeTokens";
 import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "../orquestracao/MotorDeAgentes";
 import { Orquestrador } from "../orquestracao/Orquestrador";
 import { PastaDeTrabalho } from "../orquestracao/PastaDeTrabalho";
@@ -87,8 +90,6 @@ describe("rotas de orquestradores — modo de planejamento", () => {
   let servico: ServicoDeOrquestracao;
   let preferencias: PreferenciasEmMemoria;
   let explorador: ExploradorDePastas;
-  /** Dublê da janela do sistema: cada teste diz o que ela devolve. */
-  const seletorDePasta: SeletorDePasta = { escolher: async () => null };
   let ids = 0;
 
   beforeAll(async () => {
@@ -107,6 +108,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
         preparar: async (_id, pastaDeTrabalho) => ({ cwd: pastaDeTrabalho, worktree: null }),
         concluir: async () => false,
       },
+      pastaDeArtefatos: (orquestradorId) => path.join(tmpdir(), "orquestrador-rotas-teste-artefatos", orquestradorId),
       preferencias,
       gerarId: () => `id${++ids}`,
       agora: () => new Date("2026-10-28T12:00:00Z"),
@@ -124,7 +126,6 @@ describe("rotas de orquestradores — modo de planejamento", () => {
         anexos,
         preferencias,
         pastaRaiz: raiz,
-        seletorDePasta,
       }),
     );
     servidor = aplicacao.listen(0, "127.0.0.1");
@@ -142,7 +143,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
   beforeEach(async () => {
     orquestrador = await servico.criarOrquestrador({
       nome: "Painel",
-      pastaDeTrabalho: PastaDeTrabalho.resolver(raiz, "painel"),
+      pastaDeTrabalho: PastaDeTrabalho.dentroDe(raiz, "painel"),
       configuracao: {
         modeloDoOrquestrador: "opus",
         modeloDosSubagentes: "sonnet",
@@ -406,7 +407,160 @@ describe("rotas de orquestradores — modo de planejamento", () => {
     });
   });
 
-  describe("opções de trabalho direto e de propor plano", () => {
+  describe("fila de pedidos", () => {
+    const agora = new Date("2026-10-28T12:00:00Z");
+
+    async function enfileirar(corpo: unknown, id = orquestrador.id): Promise<Response> {
+      return postar(`/orquestradores/${id}/fila`, corpo);
+    }
+
+    async function excluir(caminho: string): Promise<Response> {
+      return fetch(`${base}${caminho}`, { method: "DELETE" });
+    }
+
+    it("POST /fila responde 201 com o pedidoId e o pedido fica parado, sem turno", async () => {
+      const pedidosAntes = motor.pedidos.length;
+
+      const resposta = await enfileirar({ texto: "  rode os testes  ", modo: "planejamento" });
+
+      expect(resposta.status).toBe(201);
+      const { pedidoId } = (await resposta.json()) as { pedidoId: string };
+      expect(orquestrador.fila.map((pedido) => pedido.paraDados())).toEqual([
+        { id: pedidoId, texto: "rode os testes", modo: "planejamento", enfileiradoEm: agora.toISOString() },
+      ]);
+      expect(repositorio.eventos.at(-1)).toMatchObject({ tipo: "pedido_enfileirado", pedido: { id: pedidoId } });
+      expect(orquestrador.totalDeTurnos).toBe(0);
+      expect(motor.pedidos).toHaveLength(pedidosAntes);
+    });
+
+    it("POST /fila sem modo enfileira um pedido de execução", async () => {
+      const resposta = await enfileirar({ texto: "analise" });
+
+      expect(resposta.status).toBe(201);
+      expect(orquestrador.fila[0]?.modo).toBe("execucao");
+    });
+
+    it.each<[string, unknown, string]>([
+      ["sem texto", {}, "Escreva o pedido."],
+      ["com texto em branco", { texto: "   " }, "Escreva o pedido."],
+      ["com texto que não é texto", { texto: 42 }, "Escreva o pedido."],
+      ["com modo inválido", { texto: "oi", modo: "turbo" }, "Modo do pedido inválido."],
+      ["com texto longo demais", { texto: "a".repeat(50_001) }, "O pedido deve ter até 50000 caracteres."],
+      [
+        "com imagens",
+        { texto: "oi", imagens: [{ nome: "a.png" }] },
+        "A fila aceita só texto: envie as imagens quando o orquestrador estiver livre.",
+      ],
+    ])("POST /fila %s responde 400", async (_caso, corpo, mensagem) => {
+      const resposta = await enfileirar(corpo);
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: mensagem });
+      expect(orquestrador.fila).toHaveLength(0);
+    });
+
+    it("POST /fila com a fila cheia responde 409", async () => {
+      for (let numero = 1; numero <= 10; numero += 1) {
+        await servico.enfileirarPedido(orquestrador.id, `pedido ${numero}`);
+      }
+
+      const resposta = await enfileirar({ texto: "o décimo primeiro" });
+
+      expect(resposta.status).toBe(409);
+      expect(await resposta.json()).toEqual({ erro: 'A fila de "Painel" está cheia (máximo 10 pedidos).' });
+      expect(orquestrador.fila).toHaveLength(10);
+    });
+
+    it("POST /fila em orquestrador inexistente responde 404", async () => {
+      const resposta = await enfileirar({ texto: "oi" }, "nao-existe");
+
+      expect(resposta.status).toBe(404);
+      expect(await resposta.json()).toEqual({ erro: "Orquestrador não encontrado." });
+    });
+
+    it("DELETE /fila/:pedidoId responde 204 e tira o pedido da fila", async () => {
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "um");
+      const outro = await servico.enfileirarPedido(orquestrador.id, "dois");
+
+      const resposta = await excluir(`/orquestradores/${orquestrador.id}/fila/${pedidoId}`);
+
+      expect(resposta.status).toBe(204);
+      expect(orquestrador.fila.map((pedido) => pedido.id)).toEqual([outro.pedidoId]);
+      expect(repositorio.eventos.at(-1)).toMatchObject({ tipo: "pedido_retirado_da_fila", pedidoId, motivo: "removido" });
+    });
+
+    it("DELETE /fila/:pedidoId responde 404 para pedido ou orquestrador inexistente", async () => {
+      const semPedido = await excluir(`/orquestradores/${orquestrador.id}/fila/nao-existe`);
+      const semOrquestrador = await excluir("/orquestradores/nao-existe/fila/p1");
+
+      expect(semPedido.status).toBe(404);
+      expect(await semPedido.json()).toEqual({ erro: "Pedido não encontrado na fila." });
+      expect(semOrquestrador.status).toBe(404);
+      expect(await semOrquestrador.json()).toEqual({ erro: "Orquestrador não encontrado." });
+    });
+
+    it("POST /fila/:pedidoId/enviar responde 202 com o turno, que usa o texto e o modo do pedido", async () => {
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "planeje a migração", "planejamento");
+      const inicio = repositorio.eventos.length;
+
+      const resposta = await postar(`/orquestradores/${orquestrador.id}/fila/${pedidoId}/enviar`);
+
+      expect(resposta.status).toBe(202);
+      const { turnoId } = (await resposta.json()) as { turnoId: string };
+      await aguardarOcioso();
+      expect(orquestrador.ultimoTurno?.id).toBe(turnoId);
+      expect(orquestrador.ultimoTurno?.texto).toBe("planeje a migração");
+      expect(orquestrador.ultimoTurno?.modo).toBe("planejamento");
+      expect(orquestrador.fila).toEqual([]);
+      expect(repositorio.eventos.slice(inicio, inicio + 2)).toMatchObject([
+        { tipo: "pedido_retirado_da_fila", pedidoId, motivo: "enviado" },
+        { tipo: "turno_iniciado", turnoId },
+      ]);
+    });
+
+    it("POST /fila/:pedidoId/enviar com turno em andamento responde 409 e o pedido continua na fila", async () => {
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "depois");
+      orquestrador.iniciarTurno("em-andamento", "analise", agora);
+
+      const resposta = await postar(`/orquestradores/${orquestrador.id}/fila/${pedidoId}/enviar`);
+
+      expect(resposta.status).toBe(409);
+      expect(await resposta.json()).toEqual({
+        erro: '"Painel" ainda está trabalhando no pedido anterior. Aguarde terminar ou cancele.',
+      });
+      expect(orquestrador.fila.map((pedido) => pedido.id)).toEqual([pedidoId]);
+      orquestrador.cancelarTurno("em-andamento", agora);
+    });
+
+    it("POST /fila/:pedidoId/enviar responde 404 para pedido ou orquestrador inexistente", async () => {
+      const semPedido = await postar(`/orquestradores/${orquestrador.id}/fila/nao-existe/enviar`);
+      const semOrquestrador = await postar("/orquestradores/nao-existe/fila/p1/enviar");
+
+      expect(semPedido.status).toBe(404);
+      expect(await semPedido.json()).toEqual({ erro: "Pedido não encontrado na fila." });
+      expect(semOrquestrador.status).toBe(404);
+      expect(await semOrquestrador.json()).toEqual({ erro: "Orquestrador não encontrado." });
+    });
+
+    it("o resumo da lista e o detalhe trazem a fila", async () => {
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "rode os testes");
+      const esperada = [{ id: pedidoId, texto: "rode os testes", modo: "execucao", enfileiradoEm: agora.toISOString() }];
+
+      const detalhe = (await (await fetch(`${base}/orquestradores/${orquestrador.id}`)).json()) as Record<string, unknown>;
+      const lista = (await (await fetch(`${base}/orquestradores`)).json()) as Array<Record<string, unknown>>;
+
+      expect(detalhe.fila).toEqual(esperada);
+      expect(lista.find((item) => item.id === orquestrador.id)?.fila).toEqual(esperada);
+    });
+
+    it("um orquestrador sem pedidos traz a fila vazia no resumo", async () => {
+      const detalhe = (await (await fetch(`${base}/orquestradores/${orquestrador.id}`)).json()) as Record<string, unknown>;
+
+      expect(detalhe.fila).toEqual([]);
+    });
+  });
+
+  describe("trivial e plano sempre ligados: as opções antigas são ignoradas (ADR-28)", () => {
     async function alterarConfiguracao(corpo: unknown): Promise<Response> {
       return fetch(`${base}/orquestradores/${orquestrador.id}/configuracao`, {
         method: "PATCH",
@@ -422,21 +576,50 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       vi.restoreAllMocks();
     });
 
-    const mensagemDoTrabalhoDireto =
-      'A opção "Deixar o orquestrador fazer o trivial sozinho" deve ser verdadeira ou falsa.';
-    const mensagemDoPlano = 'A opção "Propor plano antes de mudanças grandes" deve ser verdadeira ou falsa.';
+    const CAMPOS_ANTIGOS = ["permitirTrabalhoDireto", "proporPlanoEmPedidosGrandes"];
 
-    it("o PATCH aceita as duas opções", async () => {
-      const resposta = await alterarConfiguracao({ permitirTrabalhoDireto: false, proporPlanoEmPedidosGrandes: false });
+    function semCamposAntigos(configuracao: unknown): void {
+      for (const campo of CAMPOS_ANTIGOS) {
+        expect(configuracao).not.toHaveProperty(campo);
+      }
+    }
+
+    it("o GET não traz mais as opções", async () => {
+      const detalhe = (await (await fetch(`${base}/orquestradores/${orquestrador.id}`)).json()) as {
+        configuracao: unknown;
+      };
+      const lista = (await (await fetch(`${base}/orquestradores`)).json()) as Array<{ id: string; configuracao: unknown }>;
+
+      semCamposAntigos(detalhe.configuracao);
+      semCamposAntigos(lista.find((item) => item.id === orquestrador.id)?.configuracao);
+    });
+
+    it.each<[unknown, unknown]>([
+      [false, false],
+      [true, true],
+      ["sim", null],
+    ])("o PATCH com trivial=%j e plano=%j responde 200 e ignora os dois", async (trivial, plano) => {
+      const resposta = await alterarConfiguracao({
+        permitirTrabalhoDireto: trivial,
+        proporPlanoEmPedidosGrandes: plano,
+      });
 
       expect(resposta.status).toBe(200);
-      expect(((await resposta.json()) as { configuracao: unknown }).configuracao).toMatchObject({
-        permitirTrabalhoDireto: false,
-        proporPlanoEmPedidosGrandes: false,
-      });
+      semCamposAntigos(((await resposta.json()) as { configuracao: unknown }).configuracao);
+      semCamposAntigos(orquestrador.configuracao.paraDados());
+      expect(orquestrador.configuracao.propoePlanoEmPedidosGrandes("execucao")).toBe(true);
     });
 
-    it("o POST aceita as duas opções", async () => {
+    it("o PATCH que manda as opções junto de outro campo aplica só o outro campo", async () => {
+      const resposta = await alterarConfiguracao({ nivelDePermissao: "edicao", permitirTrabalhoDireto: false });
+
+      expect(resposta.status).toBe(200);
+      const configuracao = ((await resposta.json()) as { configuracao: unknown }).configuracao;
+      expect(configuracao).toMatchObject({ nivelDePermissao: "edicao" });
+      semCamposAntigos(configuracao);
+    });
+
+    it("o POST com as opções (mesmo com valores inválidos) cria o orquestrador e as ignora", async () => {
       const resposta = await postar("/orquestradores", {
         nome: "Novo",
         pastaDeTrabalho: raiz,
@@ -445,41 +628,13 @@ describe("rotas de orquestradores — modo de planejamento", () => {
         quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
         nivelDePermissao: "leitura",
         permitirTrabalhoDireto: false,
-        proporPlanoEmPedidosGrandes: true,
-      });
-
-      expect(resposta.status).toBe(201);
-      expect(((await resposta.json()) as { configuracao: unknown }).configuracao).toMatchObject({
-        permitirTrabalhoDireto: false,
-        proporPlanoEmPedidosGrandes: true,
-      });
-    });
-
-    it.each<[string, unknown, string]>([
-      ["permitirTrabalhoDireto", "sim", mensagemDoTrabalhoDireto],
-      ["permitirTrabalhoDireto", null, mensagemDoTrabalhoDireto],
-      ["proporPlanoEmPedidosGrandes", 1, mensagemDoPlano],
-      ["proporPlanoEmPedidosGrandes", "nao", mensagemDoPlano],
-    ])("o PATCH recusa %s = %j com 400 e mensagem clara", async (campo, valor, mensagem) => {
-      const resposta = await alterarConfiguracao({ [campo]: valor });
-
-      expect(resposta.status).toBe(400);
-      expect(await resposta.json()).toEqual({ erro: mensagem });
-    });
-
-    it("o POST recusa opção inválida com 400", async () => {
-      const resposta = await postar("/orquestradores", {
-        nome: "Novo",
-        pastaDeTrabalho: raiz,
-        modeloDoOrquestrador: "opus",
-        modeloDosSubagentes: "haiku",
-        quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
-        nivelDePermissao: "leitura",
         proporPlanoEmPedidosGrandes: "sim",
       });
 
-      expect(resposta.status).toBe(400);
-      expect(await resposta.json()).toEqual({ erro: mensagemDoPlano });
+      expect(resposta.status).toBe(201);
+      const criado = (await resposta.json()) as { id: string; configuracao: unknown };
+      semCamposAntigos(criado.configuracao);
+      semCamposAntigos(repositorio.buscarPorId(criado.id)?.configuracao.paraDados());
     });
   });
 
@@ -637,169 +792,247 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(previa.instrucoesIniciais).toContain(`Pasta de trabalho: ${fora}`);
     });
   });
-  describe("pastas: qualquer pasta do computador", () => {
-    const configuracaoBasica = {
-      modeloDoOrquestrador: "opus",
-      modeloDosSubagentes: "haiku",
-      quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
-      nivelDePermissao: "leitura",
-    } as const;
+});
 
-    afterEach(() => {
-      vi.restoreAllMocks();
+describe("rotas de orquestradores — economia de tokens", () => {
+  const raiz = path.resolve("/projetos");
+  let servidor: Server;
+  let base: string;
+  let repositorio: RepositorioEmMemoria;
+  let servico: ServicoDeOrquestracao;
+  let explorador: ExploradorDePastas;
+  const consultas: ConsultaDeEsforcoHerdado[] = [];
+  let ids = 0;
+
+  const consumo = ConsumoDoTurno.criar({
+    principal: UsoDeTokens.criar({ entrada: 6, criacaoDeCache: 33062, leituraDeCache: 62885, saida: 383 }),
+    subagentes: UsoDeTokens.vazio,
+    subagentesMedidos: 0,
+    parcial: false,
+    modeloDoPrincipal: "claude-opus-5-5",
+  });
+
+  beforeAll(async () => {
+    repositorio = new RepositorioEmMemoria();
+    explorador = new ExploradorDePastas(raiz);
+    const anexos = new ArmazemDeAnexosEmArquivo(path.join(tmpdir(), "orquestrador-rotas-economia-teste"));
+    servico = new ServicoDeOrquestracao({
+      repositorio,
+      motor: new MotorImediato(),
+      execucoes: new ControleDeExecucoesEmMemoria(),
+      publicador: { publicar: () => undefined, sinalizar: () => undefined },
+      anexos,
+      worktrees: {
+        preparar: async (_id, pastaDeTrabalho) => ({ cwd: pastaDeTrabalho, worktree: null }),
+        concluir: async () => false,
+      },
+      pastaDeArtefatos: (orquestradorId) => path.join(tmpdir(), "orquestrador-rotas-economia-teste-artefatos", orquestradorId),
+      preferencias: new PreferenciasEmMemoria(),
+      gerarId: () => `e${++ids}`,
+      agora: () => new Date("2026-10-28T12:00:00Z"),
+      medidor: { medirTurno: async () => consumo },
+      esforcoDaMaquina: {
+        herdadoPara: async (consulta) => {
+          consultas.push(consulta);
+          return consulta.modelo === "opus"
+            ? EsforcoHerdado.criar({ nivel: "maximo", origem: "CLAUDE_CODE_EFFORT_LEVEL", modelo: consulta.modeloReal })
+            : null;
+        },
+      },
     });
 
-    it("GET /pastas sem caminho abre a pasta dos projetos e traz os atalhos", async () => {
-      const listar = vi
-        .spyOn(explorador, "listar")
-        .mockResolvedValue({ atual: raiz, acima: path.dirname(raiz), pastas: [{ nome: "painel", caminho: path.join(raiz, "painel") }] });
-      vi.spyOn(explorador, "atalhos").mockResolvedValue([{ nome: "Projetos", caminho: raiz }]);
+    const aplicacao = express();
+    aplicacao.use(express.json());
+    aplicacao.use(
+      "/api",
+      criarOrquestradoresRoutes({
+        servico,
+        repositorio,
+        canal: new CanalDeEventos(),
+        explorador,
+        anexos,
+        preferencias: new PreferenciasEmMemoria(),
+        pastaRaiz: raiz,
+      }),
+    );
+    servidor = aplicacao.listen(0, "127.0.0.1");
+    await once(servidor, "listening");
+    base = `http://127.0.0.1:${(servidor.address() as AddressInfo).port}/api`;
+  });
 
-      const resposta = await fetch(`${base}/pastas`);
+  afterAll(async () => {
+    servidor.close();
+    await once(servidor, "close");
+  });
 
-      expect(resposta.status).toBe(200);
-      expect(listar).toHaveBeenCalledWith(undefined);
-      expect(await resposta.json()).toEqual({
-        raiz,
-        atual: raiz,
-        acima: path.dirname(raiz),
-        pastas: [{ nome: "painel", caminho: path.join(raiz, "painel") }],
-        atalhos: [{ nome: "Projetos", caminho: raiz }],
-      });
-    });
+  let orquestrador: Orquestrador;
 
-    it("GET /pastas?caminho= abre a pasta pedida, mesmo fora da pasta dos projetos", async () => {
-      const fora = path.resolve("/outro/lugar");
-      const listar = vi.spyOn(explorador, "listar").mockResolvedValue({ atual: fora, acima: null, pastas: [] });
-      vi.spyOn(explorador, "atalhos").mockResolvedValue([]);
-
-      const resposta = await fetch(`${base}/pastas?caminho=${encodeURIComponent(fora)}`);
-
-      expect(resposta.status).toBe(200);
-      expect(listar).toHaveBeenCalledWith(fora);
-    });
-
-    it("GET /pastas com pasta que não existe responde 400 com a mensagem", async () => {
-      const resposta = await fetch(`${base}/pastas?caminho=${encodeURIComponent(path.join(raiz, "nao-existe"))}`);
-
-      expect(resposta.status).toBe(400);
-      expect(await resposta.json()).toEqual({ erro: `A pasta "${path.join(raiz, "nao-existe")}" não existe.` });
-    });
-
-    it("GET /pastas com dois caminhos responde 400", async () => {
-      const resposta = await fetch(`${base}/pastas?caminho=a&caminho=b`);
-
-      expect(resposta.status).toBe(400);
-    });
-
-    it("o POST cria um orquestrador numa pasta fora da pasta dos projetos", async () => {
-      const fora = path.resolve("/outro/lugar");
-      vi.spyOn(explorador, "existe").mockResolvedValue(true);
-
-      const resposta = await postar("/orquestradores", { nome: "Fora", pastaDeTrabalho: fora, ...configuracaoBasica });
-
-      expect(resposta.status).toBe(201);
-      expect(((await resposta.json()) as { pastaDeTrabalho: string }).pastaDeTrabalho).toBe(fora);
-    });
-
-    it("o POST continua recusando uma pasta que não existe", async () => {
-      const inexistente = path.resolve("/outro/nao-existe");
-      vi.spyOn(explorador, "existe").mockResolvedValue(false);
-
-      const resposta = await postar("/orquestradores", { nome: "X", pastaDeTrabalho: inexistente, ...configuracaoBasica });
-
-      expect(resposta.status).toBe(400);
-      expect(await resposta.json()).toEqual({ erro: `A pasta "${inexistente}" não existe.` });
+  beforeEach(async () => {
+    consultas.length = 0;
+    orquestrador = await servico.criarOrquestrador({
+      nome: "Painel",
+      pastaDeTrabalho: PastaDeTrabalho.dentroDe(raiz, "painel"),
+      configuracao: {
+        modeloDoOrquestrador: "opus",
+        modeloDosSubagentes: "haiku",
+        quantidadeDeSubagentes: { modo: "fixa", limite: 3 },
+        nivelDePermissao: "edicao_e_comandos",
+      },
     });
   });
-  describe("POST /pastas/escolher: a janela de escolher pasta do sistema", () => {
-    afterEach(() => {
-      vi.restoreAllMocks();
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function aplicar(id: string, corpo: unknown): Promise<Response> {
+    return fetch(`${base}/orquestradores/${id}/configuracao/predefinicao`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(corpo),
     });
+  }
 
-    it("devolve a pasta escolhida na janela, que abre na pasta dos projetos", async () => {
-      const escolhida = path.resolve("/outro/meu-app");
-      vi.spyOn(explorador, "existe").mockResolvedValue(true);
-      const escolher = vi.spyOn(seletorDePasta, "escolher").mockResolvedValue(escolhida);
+  it("GET /predefinicoes lista o modo econômico", async () => {
+    const resposta = await fetch(`${base}/predefinicoes`);
 
-      const resposta = await postar("/pastas/escolher", {});
+    expect(resposta.status).toBe(200);
+    expect(await resposta.json()).toEqual([
+      {
+        nome: "economico",
+        rotulo: "Modo econômico",
+        descricao: expect.any(String),
+        configuracao: {
+          modeloDoOrquestrador: "opus",
+          esforcoDoOrquestrador: "medio",
+          modeloDosSubagentes: "sonnet",
+          esforcoDosSubagentes: "medio",
+          quantidadeDeSubagentes: { modo: "automatica", limite: 1 },
+        },
+      },
+    ]);
+  });
 
-      expect(resposta.status).toBe(200);
-      expect(await resposta.json()).toEqual({ caminho: escolhida });
-      expect(escolher).toHaveBeenCalledWith(raiz, expect.any(AbortSignal));
+  it("o resumo traz predefinicaoCorrespondente null antes de aplicar", async () => {
+    const detalhe = (await (await fetch(`${base}/orquestradores/${orquestrador.id}`)).json()) as Record<string, unknown>;
+    const lista = (await (await fetch(`${base}/orquestradores`)).json()) as Array<Record<string, unknown>>;
+
+    expect(detalhe.predefinicaoCorrespondente).toBeNull();
+    expect(lista.find((item) => item.id === orquestrador.id)?.predefinicaoCorrespondente).toBeNull();
+  });
+
+  it("aplicar responde 200 com o mesmo corpo do PATCH da configuração", async () => {
+    const resposta = await aplicar(orquestrador.id, { predefinicao: "economico" });
+
+    expect(resposta.status).toBe(200);
+    const corpo = (await resposta.json()) as Record<string, unknown>;
+    expect(corpo).toMatchObject({
+      id: orquestrador.id,
+      predefinicaoCorrespondente: "economico",
+      configuracao: { modeloDosSubagentes: "sonnet", nivelDePermissao: "edicao_e_comandos", permitirCommitEPush: false },
     });
+    expect(repositorio.eventos.at(-1)).toMatchObject({ tipo: "configuracao_alterada", predefinicao: "economico" });
 
-    it("abre na pasta inicial pedida, se ela existir", async () => {
-      const inicial = path.resolve("/outro");
-      vi.spyOn(explorador, "existe").mockResolvedValue(true);
-      const escolher = vi.spyOn(seletorDePasta, "escolher").mockResolvedValue(null);
-
-      await postar("/pastas/escolher", { inicial });
-
-      expect(escolher).toHaveBeenCalledWith(inicial, expect.any(AbortSignal));
+    const patch = await fetch(`${base}/orquestradores/${orquestrador.id}/configuracao`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
     });
+    expect(Object.keys((await patch.json()) as object).sort()).toEqual(Object.keys(corpo).sort());
 
-    it("cancelar na janela devolve caminho nulo", async () => {
-      vi.spyOn(explorador, "existe").mockResolvedValue(true);
-      vi.spyOn(seletorDePasta, "escolher").mockResolvedValue(null);
-
-      const resposta = await postar("/pastas/escolher", {});
-
-      expect(resposta.status).toBe(200);
-      expect(await resposta.json()).toEqual({ caminho: null });
+    const editado = await fetch(`${base}/orquestradores/${orquestrador.id}/configuracao`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ esforcoDoOrquestrador: "alto" }),
     });
+    expect(((await editado.json()) as Record<string, unknown>).predefinicaoCorrespondente).toBeNull();
+  });
 
-    it("sem janela no sistema, responde 503 para a tela usar o navegador interno", async () => {
-      vi.spyOn(explorador, "existe").mockResolvedValue(true);
-      vi.spyOn(seletorDePasta, "escolher").mockRejectedValue(new SeletorDePastaIndisponivel("zenity não está instalado."));
-      vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  it.each([[{ predefinicao: "turbo" }], [{ predefinicao: 1 }], [{}]])(
+    "aplicar recusa %j com 400",
+    async (corpo) => {
+      const resposta = await aplicar(orquestrador.id, corpo);
 
-      const resposta = await postar("/pastas/escolher", {});
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: "Predefinição desconhecida." });
+    },
+  );
 
-      expect(resposta.status).toBe(503);
-      expect(await resposta.json()).toEqual({
-        erro: "Não deu para abrir a janela do sistema. Escolha a pasta aqui mesmo.",
-        indisponivel: true,
-      });
+  it("aplicar em orquestrador inexistente responde 404", async () => {
+    const resposta = await aplicar("nao-existe", { predefinicao: "economico" });
+
+    expect(resposta.status).toBe(404);
+    expect(await resposta.json()).toEqual({ erro: "Orquestrador não encontrado." });
+  });
+
+  it("GET /orquestradores/:id/esforco-herdado usa os modelos da configuração e o modelo medido", async () => {
+    const mensagem = await fetch(`${base}/orquestradores/${orquestrador.id}/mensagens`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ texto: "analise" }),
     });
+    expect(mensagem.status).toBe(202);
+    await vi.waitFor(() =>
+      expect(repositorio.eventos.at(-1)).toMatchObject({ tipo: "consumo_do_turno_medido" }),
+    );
 
-    it("uma janela por vez: a segunda responde 409 enquanto a primeira está aberta", async () => {
-      vi.spyOn(explorador, "existe").mockResolvedValue(true);
-      let responder: (caminho: string | null) => void = () => undefined;
-      vi.spyOn(seletorDePasta, "escolher").mockReturnValue(new Promise((resolver) => (responder = resolver)));
+    const resposta = await fetch(`${base}/orquestradores/${orquestrador.id}/esforco-herdado`);
 
-      const primeira = postar("/pastas/escolher", {});
-      await vi.waitFor(() => expect(seletorDePasta.escolher).toHaveBeenCalled());
-      const segunda = await postar("/pastas/escolher", {});
-      responder(null);
-
-      expect(segunda.status).toBe(409);
-      expect((await primeira).status).toBe(200);
+    expect(resposta.status).toBe(200);
+    expect(await resposta.json()).toEqual({
+      orquestrador: { nivel: "maximo", origem: "CLAUDE_CODE_EFFORT_LEVEL", modelo: "claude-opus-5-5", deveAvisar: true },
+      subagentes: null,
     });
+    expect(consultas).toEqual([
+      { modelo: "opus", pastaDoProjeto: orquestrador.pastaDeTrabalho.caminho, modeloReal: "claude-opus-5-5" },
+      { modelo: "haiku", pastaDoProjeto: orquestrador.pastaDeTrabalho.caminho, modeloReal: null },
+    ]);
+  });
 
-    it("se a tela desiste (fecha a conexão), a janela recebe o cancelamento", async () => {
-      vi.spyOn(explorador, "existe").mockResolvedValue(true);
-      let sinalRecebido: AbortSignal | undefined;
-      vi.spyOn(seletorDePasta, "escolher").mockImplementation(
-        (_inicial, sinal) =>
-          new Promise((resolver) => {
-            sinalRecebido = sinal;
-            sinal.addEventListener("abort", () => resolver(null));
-          }),
-      );
-      const desistir = new AbortController();
+  it("GET /orquestradores/:id/esforco-herdado responde 404 para inexistente", async () => {
+    const resposta = await fetch(`${base}/orquestradores/nao-existe/esforco-herdado`);
 
-      const pedido = fetch(`${base}/pastas/escolher`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-        signal: desistir.signal,
-      }).catch(() => null);
-      await vi.waitFor(() => expect(sinalRecebido).toBeDefined());
-      desistir.abort();
-      await pedido;
+    expect(resposta.status).toBe(404);
+    expect(await resposta.json()).toEqual({ erro: "Orquestrador não encontrado." });
+  });
 
-      await vi.waitFor(() => expect(sinalRecebido?.aborted).toBe(true));
+  it("GET /esforco-herdado consulta os modelos e a pasta do formulário", async () => {
+    vi.spyOn(explorador, "existe").mockResolvedValue(true);
+
+    const resposta = await fetch(
+      `${base}/esforco-herdado?modeloDoOrquestrador=sonnet&modeloDosSubagentes=opus&pasta=painel`,
+    );
+
+    expect(resposta.status).toBe(200);
+    expect(await resposta.json()).toEqual({
+      orquestrador: null,
+      subagentes: { nivel: "maximo", origem: "CLAUDE_CODE_EFFORT_LEVEL", modelo: null, deveAvisar: true },
     });
+    expect(consultas).toEqual([
+      { modelo: "sonnet", pastaDoProjeto: path.join(raiz, "painel"), modeloReal: null },
+      { modelo: "opus", pastaDoProjeto: path.join(raiz, "painel"), modeloReal: null },
+    ]);
+  });
+
+  it.each<[string, string]>([
+    ["modeloDoOrquestrador=turbo&modeloDosSubagentes=opus&pasta=painel", "Modelo do orquestrador inválido."],
+    ["modeloDoOrquestrador=opus&modeloDosSubagentes=opus", "Escolha a pasta de trabalho."],
+  ])("GET /esforco-herdado recusa %s com 400", async (query, mensagem) => {
+    const resposta = await fetch(`${base}/esforco-herdado?${query}`);
+
+    expect(resposta.status).toBe(400);
+    expect(await resposta.json()).toEqual({ erro: mensagem });
+  });
+
+  it("GET /esforco-herdado recusa pasta fora da raiz e pasta inexistente", async () => {
+    const fora = await fetch(`${base}/esforco-herdado?modeloDoOrquestrador=opus&modeloDosSubagentes=opus&pasta=..%2F..`);
+    vi.spyOn(explorador, "existe").mockResolvedValue(false);
+    const inexistente = await fetch(
+      `${base}/esforco-herdado?modeloDoOrquestrador=opus&modeloDosSubagentes=opus&pasta=sumiu`,
+    );
+
+    expect(fora.status).toBe(400);
+    expect(inexistente.status).toBe(400);
+    expect(await inexistente.json()).toEqual({ erro: `A pasta "${path.join(raiz, "sumiu")}" não existe.` });
   });
 });

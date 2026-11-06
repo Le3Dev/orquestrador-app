@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { type NodeProps, ReactFlowProvider } from "@xyflow/react";
 import { Profiler, type ReactNode } from "react";
 
@@ -6,6 +6,7 @@ import { api, ErroDaApi } from "../../shared/api/cliente";
 import type { DadosDaNota } from "../../shared/api/tipos";
 import type { NoNota as TipoDoNo } from "../../shared/canvas/nos";
 import { type AcoesDasNotas, criarLojaDasNotas, type LojaDasNotas, ProvedorDasNotas } from "../../shared/canvas/notas";
+import { lerPedidoArrastado, TIPO_DO_PEDIDO_ARRASTADO } from "../../shared/canvas/pedidoArrastado";
 import { ESPERA_PARA_SALVAR_A_NOTA_MS } from "../../shared/hooks/useEdicaoDaNota";
 import { CONFIRMACAO_PARA_APAGAR, NoNota } from "./NoNota";
 
@@ -61,6 +62,25 @@ async function esperarOSalvamento(): Promise<void> {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(ESPERA_PARA_SALVAR_A_NOTA_MS);
   });
+}
+
+/** O jsdom não tem `DataTransfer`: este guarda o que o arraste grava. */
+function dataTransferFalso(): Pick<DataTransfer, "setData" | "getData" | "types"> {
+  const dados = new Map<string, string>();
+  return {
+    setData: (tipo: string, valor: string) => void dados.set(tipo, valor),
+    getData: (tipo: string) => dados.get(tipo) ?? "",
+    get types() {
+      return [...dados.keys()];
+    },
+  };
+}
+
+/** O PATCH devolve a nota com o que foi enviado. */
+function servidorQueAceita() {
+  return vi
+    .spyOn(api, "alterarNota")
+    .mockImplementation(async (id, alteracao) => nota(id, { texto: alteracao.texto ?? "" }));
 }
 
 describe("NoNota", () => {
@@ -262,5 +282,149 @@ describe("NoNota", () => {
     expect(screen.getByText("carregando nota…")).toBeInTheDocument();
     act(() => loja.falhouAoCarregar("O servidor respondeu com erro 500."));
     expect(screen.getByText(/Não foi possível carregar a nota\. O servidor respondeu com erro 500\./)).toBeInTheDocument();
+  });
+
+  describe("modo lista, checklist e arraste como pedido", () => {
+    const CHECKLIST = "Fazer:\n- [ ] testes\n* [x] deploy\n\n[X] revisar\n[] não é item";
+
+    it("alterna entre editar e lista; na lista, as linhas de checklist viram caixas de marcar", () => {
+      const { tela } = preparar(nota("n1", { texto: CHECKLIST }));
+      render(tela(<NoNota {...propsDoNo("n1")} />));
+
+      fireEvent.click(screen.getByRole("button", { name: "Ver como lista" }));
+
+      expect(screen.queryByRole("textbox", { name: "Texto da nota" })).not.toBeInTheDocument();
+      const lista = screen.getByRole("list", { name: "Linhas da nota" });
+      expect(within(lista).getAllByRole("checkbox")).toHaveLength(3);
+      expect(screen.getByRole("checkbox", { name: "testes" })).not.toBeChecked();
+      expect(screen.getByRole("checkbox", { name: "deploy" })).toBeChecked();
+      expect(screen.getByRole("checkbox", { name: "revisar" })).toBeChecked();
+      // Linhas comuns ficam como texto, inclusive "[]" sem nada dentro.
+      expect(within(lista).getByText("Fazer:")).toBeInTheDocument();
+      expect(within(lista).getByText("[] não é item")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Editar o texto" }));
+
+      expect(screen.queryByRole("list", { name: "Linhas da nota" })).not.toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Texto da nota" })).toHaveValue(CHECKLIST);
+    });
+
+    it("marcar ou desmarcar um item reescreve só aquela linha e salva na hora, num único PATCH", async () => {
+      const alterar = servidorQueAceita();
+      const { loja, tela } = preparar(nota("n1", { texto: CHECKLIST }));
+      render(tela(<NoNota {...propsDoNo("n1")} />));
+      fireEvent.click(screen.getByRole("button", { name: "Ver como lista" }));
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("checkbox", { name: "testes" }));
+      });
+
+      const marcado = "Fazer:\n- [x] testes\n* [x] deploy\n\n[X] revisar\n[] não é item";
+      expect(alterar).toHaveBeenCalledTimes(1);
+      expect(alterar).toHaveBeenLastCalledWith("n1", { texto: marcado });
+      expect(screen.getByRole("checkbox", { name: "testes" })).toBeChecked();
+      expect(screen.getByText("salvo")).toBeInTheDocument();
+      expect(loja.ler("n1")?.texto).toBe(marcado);
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("checkbox", { name: "deploy" }));
+      });
+
+      const desmarcado = "Fazer:\n- [x] testes\n* [ ] deploy\n\n[X] revisar\n[] não é item";
+      expect(alterar).toHaveBeenLastCalledWith("n1", { texto: desmarcado });
+      // Nada ficou agendado: a espera do salvamento não manda outro PATCH.
+      await esperarOSalvamento();
+      expect(alterar).toHaveBeenCalledTimes(2);
+
+      fireEvent.click(screen.getByRole("button", { name: "Editar o texto" }));
+      expect(screen.getByRole("textbox", { name: "Texto da nota" })).toHaveValue(desmarcado);
+    });
+
+    it("erro ao salvar o item marcado aparece no rodapé, a marca fica e o \"tentar de novo\" reenvia", async () => {
+      const alterar = vi
+        .spyOn(api, "alterarNota")
+        .mockRejectedValueOnce(new ErroDaApi("Nota não encontrada.", 404))
+        .mockResolvedValueOnce(nota("n1", { texto: "[x] café" }));
+      const { tela } = preparar(nota("n1", { texto: "[ ] café" }));
+      render(tela(<NoNota {...propsDoNo("n1")} />));
+      fireEvent.click(screen.getByRole("button", { name: "Ver como lista" }));
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("checkbox", { name: "café" }));
+      });
+
+      expect(screen.getByText("Nota não encontrada.")).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: "café" })).toBeChecked();
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "erro ao salvar — tentar de novo" }));
+      });
+
+      expect(alterar).toHaveBeenCalledTimes(2);
+      expect(alterar).toHaveBeenLastCalledWith("n1", { texto: "[x] café" });
+      expect(screen.getByText("salvo")).toBeInTheDocument();
+    });
+
+    it("as alças arrastam a nota inteira ou uma linha (sem o marcador) como pedido, sem mover a nota", () => {
+      const texto = "Revisar:\n- [ ] rodar os testes\n\nescrever o README";
+      const { tela } = preparar(nota("n1", { texto }));
+      render(tela(<NoNota {...propsDoNo("n1")} />));
+
+      const daNota = screen.getByRole("img", { name: "Arrastar a nota inteira como pedido" });
+      expect(daNota).toHaveAttribute("draggable", "true");
+      expect(daNota).toHaveClass("nodrag", "nopan");
+      const inteira = dataTransferFalso();
+      fireEvent.dragStart(daNota, { dataTransfer: inteira });
+      expect(lerPedidoArrastado(inteira)).toEqual({ texto, notaId: "n1" });
+      expect(inteira.getData("text/plain")).toBe(texto);
+
+      fireEvent.click(screen.getByRole("button", { name: "Ver como lista" }));
+      const alcas = screen.getAllByRole("img", { name: "Arrastar esta linha como pedido" });
+      // Uma por linha com texto: a linha vazia não tem.
+      expect(alcas).toHaveLength(3);
+      for (const alca of alcas) {
+        expect(alca).toHaveAttribute("draggable", "true");
+        expect(alca).toHaveClass("nodrag", "nopan");
+      }
+      const doItem = alcas[1];
+      if (doItem === undefined) {
+        throw new Error("A linha do item não tem alça.");
+      }
+      const linha = dataTransferFalso();
+      fireEvent.dragStart(doItem, { dataTransfer: linha });
+      expect(Array.from(linha.types)).toEqual([TIPO_DO_PEDIDO_ARRASTADO, "text/plain"]);
+      expect(lerPedidoArrastado(linha)).toEqual({ texto: "rodar os testes", notaId: "n1" });
+      expect(linha.getData("text/plain")).toBe("rodar os testes");
+    });
+
+    it("nota em branco: a alça da barra não arrasta e a lista avisa que está vazia", () => {
+      const { tela } = preparar(nota("n1", { texto: "  \n " }));
+      render(tela(<NoNota {...propsDoNo("n1")} />));
+
+      const alca = screen.getByRole("img", { name: "Arrastar a nota inteira como pedido" });
+      expect(alca).toHaveAttribute("draggable", "false");
+      const vazio = dataTransferFalso();
+      // `false`: o arraste foi cancelado.
+      expect(fireEvent.dragStart(alca, { dataTransfer: vazio })).toBe(false);
+      expect(Array.from(vazio.types)).toEqual([]);
+
+      fireEvent.click(screen.getByRole("button", { name: "Ver como lista" }));
+      expect(screen.getByText("Nota vazia. Clique em editar para escrever.")).toBeInTheDocument();
+      expect(screen.queryAllByRole("img", { name: "Arrastar esta linha como pedido" })).toHaveLength(0);
+    });
+
+    it("minimizar e restaurar mantém o modo lista; minimizada, sem alça nem lista", () => {
+      const { tela } = preparar(nota("n1", { texto: "[ ] café" }));
+      const { rerender } = render(tela(<NoNota {...propsDoNo("n1")} />));
+      fireEvent.click(screen.getByRole("button", { name: "Ver como lista" }));
+
+      rerender(tela(<NoNota {...propsDoNo("n1", true)} />));
+      expect(screen.queryByRole("list", { name: "Linhas da nota" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("img", { name: "Arrastar a nota inteira como pedido" })).not.toBeInTheDocument();
+      expect(screen.getByTestId("previa-da-nota")).toHaveTextContent("[ ] café");
+
+      rerender(tela(<NoNota {...propsDoNo("n1")} />));
+      expect(screen.getByRole("checkbox", { name: "café" })).not.toBeChecked();
+      expect(screen.getByRole("button", { name: "Editar o texto" })).toBeInTheDocument();
+    });
   });
 });

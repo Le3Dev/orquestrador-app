@@ -1,6 +1,9 @@
 import { DadosDoAnexo } from "./Anexo";
 import { DadosDaConfiguracao } from "./ConfiguracaoDoOrquestrador";
+import { DadosDoConsumoDoTurno } from "./ConsumoDoTurno";
 import { ModoDoTurno } from "./ModoDoTurno";
+import { DadosDoPedidoNaFila, MotivoDaRetiradaDaFila } from "./PedidoNaFila";
+import { NomeDaPredefinicao } from "./PredefinicaoDeConfiguracao";
 
 export interface UsoDoTurno {
   /** Tempo de relógio do turno inteiro, incluindo a espera pelos Subagentes. */
@@ -93,7 +96,13 @@ export type EventoDeTurno =
   | { tipo: "turno_interrompido" }
   /** A decisão do usuário sobre o Plano pendente de um turno já concluído. */
   | { tipo: "plano_aprovado" }
-  | { tipo: "plano_descartado" };
+  | { tipo: "plano_descartado" }
+  /**
+   * Quanto o turno gastou, lido das transcrições do Claude Code depois que
+   * ele terminou. Vem sempre depois do evento de fim do turno; ausente quando
+   * não houve transcrição para medir.
+   */
+  | { tipo: "consumo_do_turno_medido"; consumo: DadosDoConsumoDoTurno };
 
 /**
  * Tudo o que acontece com um Orquestrador. É o que vai para o histórico
@@ -101,7 +110,12 @@ export type EventoDeTurno =
  */
 export type EventoDeOrquestracao =
   | ((EventoDoMotor | EventoDeTurno) & { turnoId: string })
-  | { tipo: "configuracao_alterada"; configuracao: DadosDaConfiguracao }
+  | {
+      tipo: "configuracao_alterada";
+      configuracao: DadosDaConfiguracao;
+      /** A alteração veio de uma predefinição (ex.: "Modo econômico"). Ausente nas alterações campo a campo. */
+      predefinicao?: NomeDaPredefinicao;
+    }
   /**
    * A conversa foi limpa ("/clear"): o histórico anterior foi arquivado e o
    * próximo turno começa uma sessão nova. É o primeiro evento da conversa
@@ -114,7 +128,17 @@ export type EventoDeOrquestracao =
       planoDescartado: boolean;
       /** O worktree do Orquestrador continua com alterações da conversa anterior. */
       worktreeComAlteracoes: boolean;
-    };
+    }
+  /**
+   * Um pedido entrou no fim da fila do Orquestrador. Não pertence a nenhum
+   * turno: espera a vez, com ou sem um turno em andamento.
+   */
+  | { tipo: "pedido_enfileirado"; pedido: DadosDoPedidoNaFila }
+  /**
+   * Um pedido saiu da fila: `removido` pelo usuário, ou `enviado` — então vem
+   * logo antes do `turno_iniciado` do turno que o atende.
+   */
+  | { tipo: "pedido_retirado_da_fila"; pedidoId: string; motivo: MotivoDaRetiradaDaFila };
 
 /** Evento já gravado no histórico, com a posição na sequência e o instante. */
 export type EventoRegistrado = EventoDeOrquestracao & { sequencia: number; em: string };

@@ -1,10 +1,17 @@
 "use strict";
 
-// Ponte segura entre o processo main (Node) e a SPA (renderer). Com
+// Ponte segura entre o processo main (Node) e as páginas (renderer). Com
 // contextIsolation ligado, a página só enxerga o que for exposto aqui.
 // Exposto em window.electron:
 //   - janela: controles min/max/fechar (barra de título customizada).
 //   - licenca: ativar/validar/desativar/status.
+//   - configuracao: ler a configuração local e abrir a janela de ajustes.
+//   - atualizacao: estado da atualização automática (obter/verificar), instalar
+//     a versão já baixada (instalarAgora, só da janela principal e só na
+//     situação "pronta") e aoMudar (canal "atualizacao:estado"). Fora do app
+//     instalado a situação é sempre "indisponivel".
+//   - primeiraAbertura: usado só pela tela electron/primeiraAbertura.html; o
+//     main recusa essas chamadas vindas de qualquer outra janela.
 
 const { contextBridge, ipcRenderer } = require("electron");
 
@@ -19,6 +26,13 @@ contextBridge.exposeInMainWorld("electron", {
     maximizar: () => ipcRenderer.invoke("janela:maximizar"),
     fechar: () => ipcRenderer.invoke("janela:fechar"),
     estaMaximizada: () => ipcRenderer.invoke("janela:esta-maximizada"),
+    // Chama `callback(maximizada)` a cada maximizar/restaurar; devolve a
+    // função que cancela a inscrição.
+    aoMudarMaximizada: (callback) => {
+      const ouvinte = (_evento, maximizada) => callback(Boolean(maximizada));
+      ipcRenderer.on("janela:maximizada", ouvinte);
+      return () => ipcRenderer.removeListener("janela:maximizada", ouvinte);
+    },
   },
 
   licenca: {
@@ -26,5 +40,35 @@ contextBridge.exposeInMainWorld("electron", {
     validate: () => ipcRenderer.invoke("licenca:validate"),
     deactivate: () => ipcRenderer.invoke("licenca:deactivate"),
     status: () => ipcRenderer.invoke("licenca:status"),
+  },
+
+  configuracao: {
+    // { pastaRaizDosProjetos, caminhoDoClaudeCode }
+    obter: () => ipcRenderer.invoke("configuracao:obter"),
+    abrirAjustes: () => ipcRenderer.invoke("configuracao:abrir-ajustes"),
+  },
+
+  // EstadoDaAtualizacao: { situacao: "indisponivel" | "verificando" | "em-dia" |
+  // "baixando" | "pronta" | "erro", versaoAtual, versaoNova, progresso,
+  // mensagemDeErro }
+  atualizacao: {
+    obter: () => ipcRenderer.invoke("atualizacao:obter"),
+    // Dispara a verificação e devolve o estado logo em seguida.
+    verificar: () => ipcRenderer.invoke("atualizacao:verificar"),
+    // Reinicia o app instalando a versão baixada (só em "pronta").
+    instalarAgora: () => ipcRenderer.invoke("atualizacao:instalar-agora").then(() => undefined),
+    // Chama `callback(estado)` a cada mudança; devolve a função que cancela.
+    aoMudar: (callback) => {
+      const ouvinte = (_evento, estado) => callback(estado);
+      ipcRenderer.on("atualizacao:estado", ouvinte);
+      return () => ipcRenderer.removeListener("atualizacao:estado", ouvinte);
+    },
+  },
+
+  primeiraAbertura: {
+    carregar: () => ipcRenderer.invoke("primeira-abertura:carregar"),
+    escolherPasta: (atual) => ipcRenderer.invoke("primeira-abertura:escolher-pasta", atual),
+    escolherClaudeCode: (atual) => ipcRenderer.invoke("primeira-abertura:escolher-claude-code", atual),
+    salvar: (dados) => ipcRenderer.invoke("primeira-abertura:salvar", dados),
   },
 });

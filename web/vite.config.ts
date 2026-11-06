@@ -14,10 +14,11 @@ export default defineConfig({
     },
     // Em desenvolvimento o Vite serve a tela e repassa /api ao Express, para
     // que o front rode na mesma origem que terá depois do build — sem CORS e
-    // sem variável de ambiente com a URL da API.
+    // sem variável de ambiente com a URL da API. O `npm run desktop:dev` passa
+    // PORTA_DA_API=3201 (a porta do servidor que o app sobe em desenvolvimento).
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:3200",
+        target: `http://127.0.0.1:${process.env.PORTA_DA_API ?? 3200}`,
         changeOrigin: true,
       },
     },

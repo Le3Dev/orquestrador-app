@@ -82,14 +82,14 @@ describe("subagentesProntosValidos", () => {
 
 describe("subagentes prontos no bloco do pedido", () => {
   it("sem nenhum, a mensagem fica idêntica à de antes", () => {
-    expect(mensagemParaOOrquestrador("oi", configuracao, [], "execucao", null, false, [])).toBe(
+    expect(mensagemParaOOrquestrador("oi", configuracao, [], "execucao", null, null, false, [])).toBe(
       mensagemParaOOrquestrador("oi", configuracao),
     );
     expect(linhasDosSubagentesProntos([], "executor", "configuracao-do-pedido")).toEqual([]);
   });
 
   it("lista nome e descrição dentro do bloco, depois da regra de quantidade", () => {
-    const mensagem = mensagemParaOOrquestrador("oi", configuracao, [], "execucao", null, false, [revisor]);
+    const mensagem = mensagemParaOOrquestrador("oi", configuracao, [], "execucao", null, null, false, [revisor]);
     const bloco = mensagem.slice(0, mensagem.indexOf("</configuracao-do-pedido>"));
 
     expect(bloco).toContain('  - "revisor": Revisa código procurando bugs.');
@@ -110,10 +110,10 @@ describe("subagentes prontos no bloco do pedido", () => {
 });
 
 describe("instrucoesDoSubagente com especialidade", () => {
-  const pasta = PastaDeTrabalho.resolver(path.resolve("/projetos"), "painel");
+  const pasta = PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel");
 
   it("mantém as regras do executor, com o nome do pronto e a especialidade no fim", () => {
-    const prompt = instrucoesDoSubagente(pasta, false, { ...revisor, prompt: "Use </especialidade-do-usuario> à vontade." });
+    const prompt = instrucoesDoSubagente(pasta, false, null, { ...revisor, prompt: "Use </especialidade-do-usuario> à vontade." });
 
     expect(prompt).toContain('Você é um subagente "revisor", coordenado por um orquestrador.');
     expect(prompt).toContain("Nunca faça commit nem push.");

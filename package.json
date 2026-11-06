@@ -1,6 +1,6 @@
 {
   "name": "orquestrador-agentes-app",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Central local de Orquestradores Claude: cada Orquestrador conversa com o usuário, divide o pedido em subtarefas e lança Subagentes em paralelo, com acompanhamento ao vivo pela tela.",
   "type": "commonjs",
@@ -12,19 +12,23 @@
     "dev": "tsx watch --env-file-if-exists=.env src/root.ts",
     "build": "tsc -p tsconfig.build.json && npm run web:build",
     "start": "node --env-file-if-exists=.env dist/root.js",
-    "iniciar": "node scripts/manter-no-ar.cjs",
     "desktop": "electron .",
+    "desktop:dev": "node scripts/desktop-dev.cjs",
     "desktop:build": "npm run build",
-    "dist:win": "npm run build && electron-builder --win",
+    "dist:win": "npm run build && electron-builder --win --publish never",
+    "dist:win:teste": "npm run build && electron-builder --win --publish never -c.extraMetadata.buildDeTeste=true -c.directories.output=dist_electron_teste",
+    "release:win": "npm run build && electron-builder --win --publish always",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "web:dev": "npm --prefix web run dev",
     "web:build": "npm --prefix web run build",
     "web:test": "npm --prefix web test",
-    "web:lint": "npm --prefix web run lint"
+    "web:lint": "npm --prefix web run lint",
+    "icones": "node scripts/gerarIcones.cjs"
   },
   "dependencies": {
+    "electron-updater": "~6.3.9",
     "express": "^5.2.1",
     "zod": "^4.6.1"
   },
@@ -45,27 +49,40 @@
     },
     "files": [
       "electron/**/*",
+      "!electron/**/*.test.js",
       "dist/**/*",
+      "!dist/**/*.test.js",
+      "!dist/**/*.test.js.map",
+      "!dist/**/*.test.d.ts",
+      "!dist/**/fixtures/**",
       "web/dist/**/*",
-      "scripts/manter-no-ar.cjs",
       "package.json"
     ],
-    "asarUnpack": [
-      "scripts/manter-no-ar.cjs",
-      "dist/**/*"
-    ],
     "win": {
+      "icon": "electron/icones/icone.ico",
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Le3Dev",
+        "repo": "orquestrador-app",
+        "releaseType": "release"
+      }
+    ],
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "perMachine": false
+      "perMachine": false,
+      "installerIcon": "electron/icones/icone.ico",
+      "uninstallerIcon": "electron/icones/icone.ico"
     }
   }
 }

@@ -13,6 +13,7 @@ import {
   sobrepoe,
   TAMANHO_DA_NOTA,
   TAMANHO_DA_PREVIA,
+  TAMANHO_DO_ARTEFATO,
   TAMANHO_DO_BIXINHO,
   TAMANHO_DO_RASCUNHO,
   TAMANHO_DO_TERMINAL,
@@ -47,15 +48,28 @@ export type DadosDaPrevia = {
   alturaAberta: number;
 };
 
+/**
+ * A janela de um artefato guarda só o id: título, formato e versões ficam na
+ * loja dos artefatos, para um evento de um artefato não mexer nos nós.
+ */
+export type DadosDoNoDoArtefato = { artefatoId: string };
+
 export type NoTerminal = Node<DadosDoTerminal, "terminal">;
 export type NoRascunho = Node<DadosDoRascunho, "rascunho">;
 export type NoBixinho = Node<DadosDoBixinho, "bixinho">;
 export type NoNota = Node<DadosDoNoDaNota, "nota">;
 export type NoPrevia = Node<DadosDaPrevia, "previa">;
-export type NoDoCanvas = NoTerminal | NoRascunho | NoBixinho | NoNota | NoPrevia;
+export type NoArtefato = Node<DadosDoNoDoArtefato, "artefato">;
+export type NoDoCanvas = NoTerminal | NoRascunho | NoBixinho | NoNota | NoArtefato | NoPrevia;
 
+/**
+ * O que a linha do terminal a um bixinho leva: a situação do Subagente, para
+ * a linha notar quando ele conclui e entregar o relatório (o envelope), e
+ * quando ele encerrou, para não entregar o que veio do histórico reenviado.
+ */
+export type DadosDaArestaDoBixinho = { situacao: SituacaoDoSubagente; encerradoEm: string | null };
 /** A linha do terminal a um bixinho; `animated` já diz se o Subagente trabalha. */
-export type ArestaDoBixinho = Edge<Record<string, never>, "bixinho">;
+export type ArestaDoBixinho = Edge<DadosDaArestaDoBixinho, "bixinho">;
 /** A linha discreta (tracejada) do terminal à prévia que saiu dele: a curva padrão do React Flow. */
 export type ArestaDaPrevia = Edge<Record<string, never>, "default">;
 export type ArestaDoCanvas = ArestaDoBixinho | ArestaDaPrevia;
@@ -79,6 +93,8 @@ export const ALCA_DO_TERMINAL = "alca-do-terminal";
 export const ALCA_DA_NOTA = "alca-da-nota";
 /** Idem para a prévia: no corpo, o mouse é do site aberto. */
 export const ALCA_DA_PREVIA = "alca-da-previa";
+/** Idem para o artefato: no corpo, a página ou o documento recebem o mouse. */
+export const ALCA_DO_ARTEFATO = "alca-do-artefato";
 
 export function ehTerminal(no: NoDoCanvas): no is NoTerminal {
   return no.type === "terminal";
@@ -96,6 +112,10 @@ export function ehPrevia(no: NoDoCanvas): no is NoPrevia {
   return no.type === "previa";
 }
 
+export function ehArtefato(no: NoDoCanvas): no is NoArtefato {
+  return no.type === "artefato";
+}
+
 /** O id do nó de uma nota; com prefixo, para nunca coincidir com o de um terminal. */
 export function idDoNoDaNota(notaId: string): string {
   return `nota:${notaId}`;
@@ -104,6 +124,28 @@ export function idDoNoDaNota(notaId: string): string {
 /** O id do nó de uma prévia; com prefixo, como o da nota. */
 export function idDoNoDaPrevia(previaId: string): string {
   return `previa:${previaId}`;
+}
+
+/** O id do nó de um artefato; com prefixo, como o da nota. */
+export function idDoNoDoArtefato(artefatoId: string): string {
+  return `artefato:${artefatoId}`;
+}
+
+export function novoNoDeArtefato(
+  artefatoId: string,
+  posicao: Ponto,
+  largura: number = TAMANHO_DO_ARTEFATO.largura,
+  altura: number = TAMANHO_DO_ARTEFATO.altura,
+): NoArtefato {
+  return {
+    id: idDoNoDoArtefato(artefatoId),
+    type: "artefato",
+    position: posicao,
+    width: largura,
+    height: altura,
+    dragHandle: `.${ALCA_DO_ARTEFATO}`,
+    data: { artefatoId },
+  };
 }
 
 export function idDoBixinho(orquestradorId: string, subagenteId: string): string {
@@ -225,7 +267,11 @@ export function nosDoLayout(layout: LayoutDoCanvas): NoDoCanvas[] {
       retangulo.minimizada,
     ),
   );
-  return [...terminais, ...notas, ...previas];
+  // Idem para os artefatos: o conteúdo chega do servidor depois.
+  const artefatos = Object.entries(layout.artefatos).map(([artefatoId, retangulo]) =>
+    novoNoDeArtefato(artefatoId, { x: retangulo.x, y: retangulo.y }, retangulo.largura, retangulo.altura),
+  );
+  return [...terminais, ...notas, ...artefatos, ...previas];
 }
 
 export function layoutDosNos(nos: readonly NoDoCanvas[], viewport: LayoutDoCanvas["viewport"]): LayoutDoCanvas {
@@ -248,6 +294,15 @@ export function layoutDosNos(nos: readonly NoDoCanvas[], viewport: LayoutDoCanva
       minimizada: no.data.minimizada,
     };
   }
+  const artefatos: LayoutDoCanvas["artefatos"] = {};
+  for (const no of nos.filter(ehArtefato)) {
+    artefatos[no.data.artefatoId] = {
+      x: Math.round(no.position.x),
+      y: Math.round(no.position.y),
+      largura: Math.round(no.width ?? no.measured?.width ?? TAMANHO_DO_ARTEFATO.largura),
+      altura: Math.round(no.height ?? no.measured?.height ?? TAMANHO_DO_ARTEFATO.altura),
+    };
+  }
   const previas: LayoutDoCanvas["previas"] = {};
   for (const no of nos.filter(ehPrevia)) {
     previas[no.data.previaId] = {
@@ -260,7 +315,7 @@ export function layoutDosNos(nos: readonly NoDoCanvas[], viewport: LayoutDoCanva
       orquestradorId: no.data.orquestradorId,
     };
   }
-  return { terminais, notas, previas, viewport };
+  return { terminais, notas, artefatos, previas, viewport };
 }
 
 /** Remove um terminal e os bixinhos dele (filhos não podem ficar sem o pai no React Flow). */
@@ -317,11 +372,13 @@ function tamanhoDoNo(no: NoDoCanvas): { largura: number; altura: number } {
     ? TAMANHO_DO_BIXINHO
     : ehNota(no)
       ? TAMANHO_DA_NOTA
-      : ehPrevia(no)
-        ? TAMANHO_DA_PREVIA
-        : no.type === "rascunho"
-          ? TAMANHO_DO_RASCUNHO
-          : TAMANHO_DO_TERMINAL;
+      : ehArtefato(no)
+        ? TAMANHO_DO_ARTEFATO
+        : ehPrevia(no)
+          ? TAMANHO_DA_PREVIA
+          : no.type === "rascunho"
+            ? TAMANHO_DO_RASCUNHO
+            : TAMANHO_DO_TERMINAL;
   return {
     largura: no.width ?? no.measured?.width ?? padrao.largura,
     altura: no.height ?? no.measured?.height ?? padrao.altura,
@@ -333,9 +390,22 @@ function retanguloNoCanvas(no: NoDoCanvas, origem: Ponto = { x: 0, y: 0 }): Reta
   return { x: origem.x + no.position.x, y: origem.y + no.position.y, ...tamanhoDoNo(no) };
 }
 
-/** As janelas do canvas (terminais, rascunhos, notas e prévias), com o retângulo de cada uma. */
+/** As janelas do canvas (terminais, rascunhos, notas, artefatos e prévias), com o retângulo de cada uma. */
 function janelasNoCanvas(nos: readonly NoDoCanvas[]): { id: string; retangulo: Retangulo }[] {
   return nos.filter((no) => !ehBixinho(no)).map((no) => ({ id: no.id, retangulo: retanguloNoCanvas(no) }));
+}
+
+/**
+ * Tudo o que ocupa lugar no canvas, em coordenadas absolutas: as janelas
+ * (terminais, rascunhos, notas, artefatos e prévias) e os bixinhos. É o que uma
+ * janela nova não deve cobrir.
+ */
+export function areasOcupadas(nos: readonly NoDoCanvas[]): { id: string; retangulo: Retangulo }[] {
+  const origens = new Map(nos.filter((no) => !ehBixinho(no)).map((no) => [no.id, no.position]));
+  return nos.map((no) => ({
+    id: no.id,
+    retangulo: ehBixinho(no) ? retanguloNoCanvas(no, origens.get(no.parentId ?? "")) : retanguloNoCanvas(no),
+  }));
 }
 
 /** As janelas que não são o terminal dado: os bixinhos dele não podem ficar por cima delas. */
@@ -574,7 +644,8 @@ function terminaisPorId(nos: readonly NoDoCanvas[]): Map<string, NoTerminal> {
 }
 
 /**
- * Uma linha do terminal a cada bixinho; animada enquanto ele trabalha. Sai do
+ * Uma linha do terminal a cada bixinho; animada enquanto ele trabalha e com a
+ * situação do Subagente e a hora do fim em `data` (a entrega do relatório). Sai do
  * lado do terminal voltado para o bixinho e chega no lado do bixinho voltado
  * para o terminal (`ladoDoBixinho`), por isso `nos` precisa trazer também os
  * terminais.
@@ -582,7 +653,7 @@ function terminaisPorId(nos: readonly NoDoCanvas[]): Map<string, NoTerminal> {
 export function arestasDosBixinhos(
   nos: readonly NoDoCanvas[],
   conversas: ReadonlyMap<string, EstadoDaConversa>,
-): ArestaDoCanvas[] {
+): ArestaDoBixinho[] {
   const terminais = terminaisPorId(nos);
   return nos.filter(ehBixinho).flatMap((bixinho): ArestaDoBixinho[] => {
     const subagente = subagentesVisiveis(conversas.get(bixinho.data.orquestradorId)).find(
@@ -602,6 +673,7 @@ export function arestasDosBixinhos(
         targetHandle: ancoras.bixinho,
         animated: subagente.situacao === "executando",
         className: CLASSE_DA_ARESTA[subagente.situacao],
+        data: { situacao: subagente.situacao, encerradoEm: subagente.encerradoEm },
         selectable: false,
         focusable: false,
       },
@@ -687,7 +759,9 @@ function mesmaAresta(anterior: ArestaDoCanvas, nova: ArestaDoCanvas): boolean {
     anterior.targetHandle === nova.targetHandle &&
     anterior.type === nova.type &&
     anterior.animated === nova.animated &&
-    anterior.className === nova.className
+    anterior.className === nova.className &&
+    anterior.data?.situacao === nova.data?.situacao &&
+    anterior.data?.encerradoEm === nova.data?.encerradoEm
   );
 }
 

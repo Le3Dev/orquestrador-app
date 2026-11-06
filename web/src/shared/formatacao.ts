@@ -1,6 +1,7 @@
 import type { DadosDaConfiguracao, EsforcoDeRaciocinio, ModeloClaude, NivelDePermissao } from "./api/tipos";
 
 export const ROTULOS_DOS_MODELOS: Readonly<Record<ModeloClaude, { nome: string; descricao: string }>> = {
+  fable: { nome: "Fable", descricao: "Desafios mais difíceis" },
   opus: { nome: "Opus", descricao: "Mais capaz" },
   sonnet: { nome: "Sonnet", descricao: "Equilibrado" },
   haiku: { nome: "Haiku", descricao: "Rápido, menos cota" },
@@ -15,11 +16,6 @@ export const ROTULOS_DOS_ESFORCOS: Readonly<Record<EsforcoDeRaciocinio, string>>
   extra_alto: "Extra alto",
   maximo: "Máximo",
 };
-
-/** Na criação, "padrao" se chama Automático: o app não força nada e vale o padrão do Claude Code. */
-export function rotuloDoEsforcoNaCriacao(esforco: EsforcoDeRaciocinio): string {
-  return esforco === "padrao" ? "Automático" : ROTULOS_DOS_ESFORCOS[esforco];
-}
 
 /** Identificador curto de um Subagente, para caber em chips e no terminal. */
 export function idCurto(id: string): string {
@@ -40,16 +36,16 @@ export function descreverQuantidade({ modo, limite }: DadosDaConfiguracao["quant
 
 export const ROTULOS_DAS_PERMISSOES: Readonly<Record<NivelDePermissao, { nome: string; descricao: string }>> = {
   leitura: {
-    nome: "Só olhar e responder",
-    descricao: "Lê, explica e planeja. Não muda nada.",
+    nome: "Somente leitura",
+    descricao: "Lê arquivos e pesquisa na web. Não altera nada.",
   },
   edicao: {
-    nome: "Mudar arquivos",
-    descricao: "Edita código e textos. Não roda comandos.",
+    nome: "Ler e editar arquivos",
+    descricao: "Cria e altera arquivos na pasta. Não executa comandos.",
   },
   edicao_e_comandos: {
-    nome: "Mudar arquivos e rodar comandos",
-    descricao: "Também instala, testa e compila. Commit e push só com a opção abaixo ligada.",
+    nome: "Editar e rodar comandos",
+    descricao: "Também executa comandos no terminal (testes, builds). Commit e push só com a opção abaixo ligada.",
   },
 };
 
@@ -60,17 +56,11 @@ function descreverModelo(modelo: ModeloClaude, esforco: EsforcoDeRaciocinio): st
 }
 
 /**
- * Ex.: "Opus → Sonnet · até 3 subagentes · Só olhar e responder" (+ " · commit/push quando pedir", se liberado).
+ * Ex.: "Opus → Sonnet · até 3 subagentes · Somente leitura" (+ " · commit/push quando pedir", se liberado).
  * Com esforço escolhido (diferente de "padrao"): "Opus (esforço alto) → Sonnet (esforço médio) · …".
- * O trabalho direto e o plano automático vêm ligados: só aparecem quando desligados
- * (" · delegação total", " · sem plano automático").
  * Com instruções personalizadas próprias, termina com " · instruções próprias".
  */
 export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string {
-  return partesDaConfiguracao(configuracao).join(" · ");
-}
-
-function partesDaConfiguracao(configuracao: DadosDaConfiguracao): string[] {
   const { modo, limite } = configuracao.quantidadeDeSubagentes;
   const plural = limite === 1 ? "subagente" : "subagentes";
   const quantidade = modo === "fixa" ? `${limite} ${plural}` : `até ${limite} ${plural}`;
@@ -81,10 +71,43 @@ function partesDaConfiguracao(configuracao: DadosDaConfiguracao): string[] {
     quantidade,
     ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome,
     ...(configuracao.permitirCommitEPush ? ["commit/push quando pedir"] : []),
-    ...(configuracao.permitirTrabalhoDireto ? [] : ["delegação total"]),
-    ...(configuracao.proporPlanoEmPedidosGrandes ? [] : ["sem plano automático"]),
     ...(configuracao.instrucoesPersonalizadas.trim() === "" ? [] : ["instruções próprias"]),
-  ];
+  ].join(" · ");
+}
+
+function ligado(valor: boolean): string {
+  return valor ? "ligado" : "desligado";
+}
+
+/**
+ * O que uma configuração parcial (ex.: a de uma predefinição) muda, um item
+ * por campo presente — ex.: ["Modelo do orquestrador: Opus", "Esforço do orquestrador: Médio"].
+ */
+export function descreverAlteracoesDaConfiguracao(alteracoes: Partial<DadosDaConfiguracao>): string[] {
+  const itens: string[] = [];
+  if (alteracoes.modeloDoOrquestrador !== undefined) {
+    itens.push(`Modelo do orquestrador: ${ROTULOS_DOS_MODELOS[alteracoes.modeloDoOrquestrador].nome}`);
+  }
+  if (alteracoes.esforcoDoOrquestrador !== undefined) {
+    itens.push(`Esforço do orquestrador: ${ROTULOS_DOS_ESFORCOS[alteracoes.esforcoDoOrquestrador]}`);
+  }
+  if (alteracoes.modeloDosSubagentes !== undefined) {
+    itens.push(`Modelo dos subagentes: ${ROTULOS_DOS_MODELOS[alteracoes.modeloDosSubagentes].nome}`);
+  }
+  if (alteracoes.esforcoDosSubagentes !== undefined) {
+    itens.push(`Esforço dos subagentes: ${ROTULOS_DOS_ESFORCOS[alteracoes.esforcoDosSubagentes]}`);
+  }
+  if (alteracoes.quantidadeDeSubagentes !== undefined) {
+    const { modo, limite } = alteracoes.quantidadeDeSubagentes;
+    itens.push(`Quantidade de subagentes: ${modo === "fixa" ? "fixa" : "automática"}, ${descreverQuantidade({ modo, limite })}`);
+  }
+  if (alteracoes.nivelDePermissao !== undefined) {
+    itens.push(`Permissões: ${ROTULOS_DAS_PERMISSOES[alteracoes.nivelDePermissao].nome}`);
+  }
+  if (alteracoes.permitirCommitEPush !== undefined) {
+    itens.push(`Commit e push quando pedir: ${ligado(alteracoes.permitirCommitEPush)}`);
+  }
+  return itens;
 }
 
 export function formatarDuracao(milissegundos: number): string {
@@ -113,6 +136,12 @@ export function formatarBytes(bytes: number): string {
 
 export function formatarPercentual(fracao: number): string {
   return `${Math.round(fracao * 100)}%`;
+}
+
+/** "5 horas" → "5h", "7 dias" → "7d": o nome curto de uma janela da cota. */
+export function rotuloCurtoDaCota(nome: string): string {
+  const [, numero, letra] = /^(\d+)\s*(\p{L})/u.exec(nome.trim()) ?? [];
+  return numero === undefined || letra === undefined ? nome : `${numero}${letra.toLowerCase()}`;
 }
 
 const horario = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" });

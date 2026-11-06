@@ -35,8 +35,6 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "fixa", limite: 2 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
-  permitirTrabalhoDireto: true,
-  proporPlanoEmPedidosGrandes: true,
   instrucoesPersonalizadas: "",
 };
 
@@ -349,6 +347,16 @@ describe("arestasDosBixinhos", () => {
     ]);
   });
 
+  it("leva a situação do Subagente e a hora do fim em data, para a linha notar a entrega do relatório", () => {
+    const conversas = new Map([["o1", doisSubagentes]]);
+    const arestas = arestasDosBixinhos(sincronizarBixinhos([terminal], conversas), conversas);
+
+    expect(arestas.map((aresta) => aresta.data)).toEqual([
+      { situacao: "concluido", encerradoEm: "2026-10-28T12:00:00Z" },
+      { situacao: "executando", encerradoEm: null },
+    ]);
+  });
+
   it("usa a aresta própria do bixinho, a que desenha a bolinha da troca", () => {
     const conversas = new Map([["o1", doisSubagentes]]);
     const arestas = arestasDosBixinhos(sincronizarBixinhos([terminal], conversas), conversas);
@@ -387,7 +395,38 @@ describe("reaproveitarArestas", () => {
     expect(novas).not.toBe(anteriores);
     expect(novas[0]).toBe(anteriores[0]);
     expect(novas[1]).not.toBe(anteriores[1]);
-    expect(novas[1]).toMatchObject({ animated: false, className: "aresta-concluido" });
+    expect(novas[1]).toMatchObject({
+      animated: false,
+      className: "aresta-concluido",
+      data: { situacao: "concluido", encerradoEm: "2026-10-28T12:01:00Z" },
+    });
+  });
+
+  it("a situação em data também conta: a mesma linha com outra situação é trocada", () => {
+    const anteriores = arestasDosBixinhos(nos, conversas);
+    const iguais = anteriores.map((aresta) => ({ ...aresta, data: aresta.data === undefined ? undefined : { ...aresta.data } }));
+    const s1Falhou = anteriores.map((aresta, indice) =>
+      indice === 0 ? { ...aresta, data: { situacao: "falhou" as const, encerradoEm: "2026-10-28T12:00:00Z" } } : aresta,
+    );
+
+    expect(reaproveitarArestas(anteriores, iguais)).toBe(anteriores);
+    const novas = reaproveitarArestas(anteriores, s1Falhou);
+    expect(novas).not.toBe(anteriores);
+    expect(novas[0]?.data).toEqual({ situacao: "falhou", encerradoEm: "2026-10-28T12:00:00Z" });
+    expect(novas[1]).toBe(anteriores[1]);
+  });
+
+  it("a hora do fim em data também conta: a mesma linha com outro encerradoEm é trocada", () => {
+    const anteriores = arestasDosBixinhos(nos, conversas);
+    const outroFim = anteriores.map((aresta, indice) =>
+      indice === 0 ? { ...aresta, data: { situacao: "concluido" as const, encerradoEm: "2026-10-28T12:05:00Z" } } : aresta,
+    );
+
+    const novas = reaproveitarArestas(anteriores, outroFim);
+
+    expect(novas).not.toBe(anteriores);
+    expect(novas[0]?.data).toEqual({ situacao: "concluido", encerradoEm: "2026-10-28T12:05:00Z" });
+    expect(novas[1]).toBe(anteriores[1]);
   });
 
   it("um bixinho que sai leva a linha embora", () => {
@@ -599,6 +638,7 @@ describe("semTerminal e layoutDosNos", () => {
     expect(layoutDosNos(nos, null)).toEqual({
       terminais: { o1: { x: 100, y: 100, largura: 600, altura: 500 } },
       notas: {},
+      artefatos: {},
       previas: {},
       viewport: null,
     });

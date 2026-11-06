@@ -116,13 +116,13 @@ describe("linhasDasInstrucoes", () => {
 describe("mensagemParaOOrquestrador com instruções personalizadas", () => {
   it("sem instruções, a mensagem é idêntica à de antes do recurso", () => {
     const antes = mensagemParaOOrquestrador("analise", configuracao);
-    expect(mensagemParaOOrquestrador("analise", configuracao, [], "execucao", null)).toBe(antes);
+    expect(mensagemParaOOrquestrador("analise", configuracao, [], "execucao", null, null)).toBe(antes);
     expect(antes).not.toContain("instrucoes-do-usuario");
     expect(antes).not.toContain("Instruções personalizadas");
   });
 
   it("acrescenta as instruções no fim do bloco, antes de fechá-lo, e o pedido continua no fim", () => {
-    const texto = mensagemParaOOrquestrador("analise", configuracao, [], "execucao", {
+    const texto = mensagemParaOOrquestrador("analise", configuracao, [], "execucao", null, {
       texto: "Sempre comece a resposta com a palavra PIRULITO.",
       origem: "orquestrador",
     });
@@ -139,7 +139,7 @@ describe("mensagemParaOOrquestrador com instruções personalizadas", () => {
   });
 
   it("vale também no planejamento e depois das imagens", () => {
-    const texto = mensagemParaOOrquestrador("planeje", configuracao, ["/tmp/a.png"], "planejamento", {
+    const texto = mensagemParaOOrquestrador("planeje", configuracao, ["/tmp/a.png"], "planejamento", null, {
       texto: "Use tabelas.",
       origem: "padrao",
     });
@@ -151,7 +151,7 @@ describe("mensagemParaOOrquestrador com instruções personalizadas", () => {
   it("caracteres especiais e quebras de linha entram como dado, sem interpolação", () => {
     const especial =
       'Linha 1 com "aspas", `crases` e ${variavel}\nLinha 2: {{projeto}} $& $1 \\n <b>negrito</b>\n\nÇãõ 🎯 — fim';
-    const texto = mensagemParaOOrquestrador("analise", configuracao, [], "execucao", {
+    const texto = mensagemParaOOrquestrador("analise", configuracao, [], "execucao", null, {
       texto: especial,
       origem: "orquestrador",
     });
@@ -160,7 +160,7 @@ describe("mensagemParaOOrquestrador com instruções personalizadas", () => {
 
   it("texto longo (no limite) entra inteiro", () => {
     const longo = `${"Regra. ".repeat(571)}fim`.slice(0, TAMANHO_MAXIMO_DAS_INSTRUCOES);
-    const texto = mensagemParaOOrquestrador("analise", configuracao, [], "execucao", {
+    const texto = mensagemParaOOrquestrador("analise", configuracao, [], "execucao", null, {
       texto: longo,
       origem: "orquestrador",
     });
@@ -169,7 +169,7 @@ describe("mensagemParaOOrquestrador com instruções personalizadas", () => {
   });
 
   it("não mexe nas instruções iniciais (system prompt) da conversa", () => {
-    const pasta = PastaDeTrabalho.resolver(path.resolve("/projetos"), "painel");
+    const pasta = PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel");
     expect(instrucoesDoOrquestrador(pasta)).not.toContain("instrucoes-do-usuario");
   });
 });

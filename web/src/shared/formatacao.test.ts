@@ -1,10 +1,12 @@
 import type { DadosDaConfiguracao } from "./api/tipos";
 import {
+  descreverAlteracoesDaConfiguracao,
   descreverConfiguracao,
   formatarDuracao,
   formatarMomento,
   formatarPercentual,
-  rotuloDoEsforcoNaCriacao,
+  formatarTokens,
+  rotuloCurtoDaCota,
 } from "./formatacao";
 
 const configuracao: DadosDaConfiguracao = {
@@ -15,8 +17,6 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "fixa", limite: 2 },
   nivelDePermissao: "edicao_e_comandos",
   permitirCommitEPush: false,
-  permitirTrabalhoDireto: true,
-  proporPlanoEmPedidosGrandes: true,
   instrucoesPersonalizadas: "",
 };
 
@@ -27,8 +27,45 @@ describe("formatacao", () => {
     expect(formatarDuracao(65_000)).toBe("1min 05s");
   });
 
+  it("formata tokens de forma compacta, em pt-BR", () => {
+    // O Intl separa o número da unidade com espaço inseparável.
+    const normalizar = (texto: string) => texto.replace(/\s/g, " ");
+
+    expect(normalizar(formatarTokens(950))).toBe("950");
+    expect(normalizar(formatarTokens(235_000))).toBe("235 mil");
+    expect(normalizar(formatarTokens(712_400))).toBe("712,4 mil");
+    expect(normalizar(formatarTokens(4_400_000))).toBe("4,4 mi");
+  });
+
+  it("lista o que uma configuração parcial muda, só os campos presentes", () => {
+    expect(
+      descreverAlteracoesDaConfiguracao({
+        modeloDoOrquestrador: "opus",
+        esforcoDoOrquestrador: "medio",
+        modeloDosSubagentes: "sonnet",
+        esforcoDosSubagentes: "medio",
+        quantidadeDeSubagentes: { modo: "automatica", limite: 1 },
+        permitirCommitEPush: false,
+      }),
+    ).toEqual([
+      "Modelo do orquestrador: Opus",
+      "Esforço do orquestrador: Médio",
+      "Modelo dos subagentes: Sonnet",
+      "Esforço dos subagentes: Médio",
+      "Quantidade de subagentes: automática, ≤1 agente",
+      "Commit e push quando pedir: desligado",
+    ]);
+    expect(descreverAlteracoesDaConfiguracao({})).toEqual([]);
+  });
+
   it("formata a utilização da cota como percentual", () => {
     expect(formatarPercentual(0.094)).toBe("9%");
+  });
+
+  it("encurta o nome das janelas da cota (\"5 horas\" → \"5h\")", () => {
+    expect(rotuloCurtoDaCota("5 horas")).toBe("5h");
+    expect(rotuloCurtoDaCota("7 dias")).toBe("7d");
+    expect(rotuloCurtoDaCota("semanal")).toBe("semanal");
   });
 
   it("mostra só o horário para hoje e a data para dias anteriores", () => {
@@ -46,7 +83,7 @@ describe("formatacao", () => {
         quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
         nivelDePermissao: "edicao",
       }),
-    ).toBe("Opus → Haiku · até 3 subagentes · Mudar arquivos");
+    ).toBe("Opus → Haiku · até 3 subagentes · Ler e editar arquivos");
 
     expect(
       descreverConfiguracao({
@@ -55,7 +92,7 @@ describe("formatacao", () => {
         quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
         nivelDePermissao: "leitura",
       }),
-    ).toBe("Sonnet → Sonnet · 1 subagente · Só olhar e responder");
+    ).toBe("Sonnet → Sonnet · 1 subagente · Somente leitura");
   });
 
   it("indica instruções próprias só quando preenchidas", () => {
@@ -68,43 +105,19 @@ describe("formatacao", () => {
 
   it("acrescenta o commit e push à descrição só quando liberados", () => {
     expect(descreverConfiguracao({ ...configuracao, permitirCommitEPush: true })).toBe(
-      "Opus → Sonnet · 2 subagentes · Mudar arquivos e rodar comandos · commit/push quando pedir",
-    );
-  });
-
-  it("menciona o trabalho direto e o plano automático só quando desligados", () => {
-    expect(descreverConfiguracao({ ...configuracao, permitirTrabalhoDireto: false })).toBe(
-      "Opus → Sonnet · 2 subagentes · Mudar arquivos e rodar comandos · delegação total",
-    );
-    expect(descreverConfiguracao({ ...configuracao, proporPlanoEmPedidosGrandes: false })).toBe(
-      "Opus → Sonnet · 2 subagentes · Mudar arquivos e rodar comandos · sem plano automático",
-    );
-    expect(
-      descreverConfiguracao({
-        ...configuracao,
-        permitirCommitEPush: true,
-        permitirTrabalhoDireto: false,
-        proporPlanoEmPedidosGrandes: false,
-      }),
-    ).toBe(
-      "Opus → Sonnet · 2 subagentes · Mudar arquivos e rodar comandos · commit/push quando pedir · delegação total · sem plano automático",
+      "Opus → Sonnet · 2 subagentes · Editar e rodar comandos · commit/push quando pedir",
     );
   });
 
   it("acrescenta o esforço junto do modelo só quando não é o padrão (Claude Code)", () => {
     expect(descreverConfiguracao({ ...configuracao, esforcoDoOrquestrador: "alto" })).toBe(
-      "Opus (esforço alto) → Sonnet · 2 subagentes · Mudar arquivos e rodar comandos",
+      "Opus (esforço alto) → Sonnet · 2 subagentes · Editar e rodar comandos",
     );
     expect(descreverConfiguracao({ ...configuracao, esforcoDosSubagentes: "medio" })).toBe(
-      "Opus → Sonnet (esforço médio) · 2 subagentes · Mudar arquivos e rodar comandos",
+      "Opus → Sonnet (esforço médio) · 2 subagentes · Editar e rodar comandos",
     );
     expect(
       descreverConfiguracao({ ...configuracao, esforcoDoOrquestrador: "maximo", esforcoDosSubagentes: "extra_alto" }),
-    ).toBe("Opus (esforço máximo) → Sonnet (esforço extra alto) · 2 subagentes · Mudar arquivos e rodar comandos");
-  });
-
-  it("na criação, o esforço padrão se chama Automático", () => {
-    expect(rotuloDoEsforcoNaCriacao("padrao")).toBe("Automático");
-    expect(rotuloDoEsforcoNaCriacao("extra_alto")).toBe("Extra alto");
+    ).toBe("Opus (esforço máximo) → Sonnet (esforço extra alto) · 2 subagentes · Editar e rodar comandos");
   });
 });

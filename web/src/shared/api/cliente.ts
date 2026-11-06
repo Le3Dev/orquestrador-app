@@ -1,9 +1,16 @@
 import type {
-  ConteudoDaPasta,
   DadosDaConfiguracao,
   DadosDaNota,
+  DadosDaPredefinicao,
   DadosDasPreferencias,
+  EsforcosHerdados,
+  EstadoDoChat,
+  ModeloClaude,
   ModoDoTurno,
+  NavegacaoDePastas,
+  NomeDaPredefinicao,
+  PastaDeProjeto,
+  PreferenciasDoChat,
   PreviaDoPrompt,
   ResumoDoOrquestrador,
   SaudeDoServidor,
@@ -40,9 +47,7 @@ async function requisitar<Resposta>(caminho: string, opcoes: RequestInit = {}): 
       headers: { "Content-Type": "application/json", ...opcoes.headers },
     });
   } catch {
-    throw new Error(
-      "Não foi possível falar com o servidor. Confira se ele está rodando (iniciar-orquestrador.cmd ou npm start).",
-    );
+    throw new Error("Não foi possível falar com o servidor. Feche e abra o Orquestrador de novo.");
   }
 
   const corpo: unknown = resposta.status === 204 ? null : await resposta.json().catch(() => null);
@@ -75,21 +80,13 @@ export interface AlteracaoDaNota {
 }
 
 export const api = {
-  /**
-   * Abre a janela de escolher pasta do sistema e espera. `caminho` nulo:
-   * a pessoa cancelou. Erro 503: o sistema não tem a janela (use o navegador
-   * interno). Abortar o sinal fecha a janela.
-   */
-  escolherPastaNoSistema: (inicial: string | undefined, sinal: AbortSignal) =>
-    requisitar<{ caminho: string | null }>("/pastas/escolher", {
-      method: "POST",
-      body: JSON.stringify(inicial === undefined ? {} : { inicial }),
-      signal: sinal,
-    }),
+  listarPastas: () => requisitar<{ raiz: string; pastas: PastaDeProjeto[] }>("/pastas"),
 
-  /** Sem caminho, abre a pasta dos projetos. */
-  listarPastas: (caminho?: string) =>
-    requisitar<ConteudoDaPasta>(caminho === undefined ? "/pastas" : `/pastas?caminho=${encodeURIComponent(caminho)}`),
+  /** Navega pelo computador para escolher uma pasta qualquer; sem `caminho`, parte da raiz dos projetos. */
+  navegarPastas: (caminho?: string) =>
+    requisitar<NavegacaoDePastas>(
+      `/pastas/navegar${caminho !== undefined ? `?caminho=${encodeURIComponent(caminho)}` : ""}`,
+    ),
 
   listarOrquestradores: () => requisitar<ResumoDoOrquestrador[]>("/orquestradores"),
 
@@ -102,6 +99,28 @@ export const api = {
       body: JSON.stringify(configuracao),
     }),
 
+  listarPredefinicoes: () => requisitar<DadosDaPredefinicao[]>("/predefinicoes"),
+
+  /** Aplica uma predefinição (ex.: modo econômico) à configuração; devolve o resumo atualizado. */
+  aplicarPredefinicao: (id: string, predefinicao: NomeDaPredefinicao) =>
+    requisitar<ResumoDoOrquestrador>(`/orquestradores/${encodeURIComponent(id)}/configuracao/predefinicao`, {
+      method: "POST",
+      body: JSON.stringify({ predefinicao }),
+    }),
+
+  /** O esforço que o Claude Code usaria em "padrao" para os modelos salvos deste Orquestrador. */
+  lerEsforcoHerdadoDoOrquestrador: (id: string) =>
+    requisitar<EsforcosHerdados>(`/orquestradores/${encodeURIComponent(id)}/esforco-herdado`),
+
+  /** O esforço que o Claude Code usaria em "padrao" para estes modelos, nesta pasta (formulário de criação). */
+  lerEsforcoHerdado: (modeloDoOrquestrador: ModeloClaude, modeloDosSubagentes: ModeloClaude, pasta: string) => {
+    const parametros = new URLSearchParams({ modeloDoOrquestrador, modeloDosSubagentes });
+    if (pasta !== "") {
+      parametros.set("pasta", pasta);
+    }
+    return requisitar<EsforcosHerdados>(`/esforco-herdado?${parametros.toString()}`);
+  },
+
   enviarMensagem: (
     id: string,
     texto: string,
@@ -112,6 +131,29 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ texto, imagens, modo }),
     }),
+
+  /**
+   * Guarda um pedido na fila do Orquestrador (só texto e modo: imagens não
+   * entram). Ele sai sozinho quando o turno atual terminar concluído, ou com
+   * `enviarDaFila`. Recusado (409) com a fila cheia.
+   */
+  enfileirarPedido: (id: string, texto: string, modo: ModoDoTurno = "execucao") =>
+    requisitar<{ pedidoId: string }>(`/orquestradores/${encodeURIComponent(id)}/fila`, {
+      method: "POST",
+      body: JSON.stringify({ texto, modo }),
+    }),
+
+  removerDaFila: (id: string, pedidoId: string) =>
+    requisitar<null>(`/orquestradores/${encodeURIComponent(id)}/fila/${encodeURIComponent(pedidoId)}`, {
+      method: "DELETE",
+    }),
+
+  /** "Enviar agora": o pedido sai da fila e vira um turno. Recusado (409) com um turno em andamento. */
+  enviarDaFila: (id: string, pedidoId: string) =>
+    requisitar<{ turnoId: string }>(
+      `/orquestradores/${encodeURIComponent(id)}/fila/${encodeURIComponent(pedidoId)}/enviar`,
+      { method: "POST" },
+    ),
 
   /** Aprova o plano pendente do último pedido; o servidor já inicia a execução na mesma sessão. */
   aprovarPlano: (id: string, observacoes = "") =>
@@ -164,4 +206,37 @@ export const api = {
   /** `desde`: última sequência já recebida, para o servidor reenviar só o que faltou. */
   enderecoDosEventos: (id: string, desde = 0) =>
     `/api/orquestradores/${encodeURIComponent(id)}/eventos${desde > 0 ? `?desde=${desde}` : ""}`,
+
+  // ---------------- Chat rápido ----------------
+
+  /** O chat inteiro; a resposta em andamento já vem com o texto acumulado. */
+  lerChat: () => requisitar<EstadoDoChat>("/chat"),
+
+  /** Pergunta nova; a resposta chega pelos eventos. Recusada (409) durante outra resposta. */
+  perguntarNoChat: (texto: string, imagens: readonly ImagemParaEnvio[] = []) =>
+    requisitar<{ mensagemId: string }>("/chat/mensagens", {
+      method: "POST",
+      body: JSON.stringify(imagens.length > 0 ? { texto, imagens } : { texto }),
+    }),
+
+  /** Modelo e/ou esforço do chat; a escolha vira o padrão das próximas perguntas. */
+  alterarPreferenciasDoChat: (alteracao: Partial<PreferenciasDoChat>) =>
+    requisitar<PreferenciasDoChat>("/chat/preferencias", { method: "PATCH", body: JSON.stringify(alteracao) }),
+
+  /**
+   * Autoriza (`true`) o chat a editar arquivos e rodar comandos até o próximo
+   * `/clear`, ou revoga (`false`). O servidor confirma com o evento
+   * `alteracoes_autorizadas` ou `autorizacao_revogada`.
+   */
+  autorizarAlteracoesDoChat: (autorizado: boolean) =>
+    requisitar<{ autorizado: boolean }>("/chat/autorizacao", { method: "PATCH", body: JSON.stringify({ autorizado }) }),
+
+  cancelarRespostaDoChat: () => requisitar<{ cancelando: boolean }>("/chat/cancelar", { method: "POST" }),
+
+  /** Conversa nova ("/clear"): o servidor confirma com o evento `conversa_limpa`. Recusado (409) durante a resposta. */
+  limparChat: () => requisitar<unknown>("/chat/limpar", { method: "POST" }),
+
+  enderecoDoAnexoDoChat: (arquivo: string) => `/api/chat/anexos/${encodeURIComponent(arquivo)}`,
+
+  enderecoDosEventosDoChat: (desde = 0) => `/api/chat/eventos${desde > 0 ? `?desde=${desde}` : ""}`,
 };

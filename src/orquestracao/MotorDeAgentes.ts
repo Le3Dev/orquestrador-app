@@ -26,6 +26,12 @@ export interface PedidoDeTurno {
   /** Pasta das imagens, liberada para leitura dos Subagentes; nula sem imagens. */
   pastaDasImagens: string | null;
   /**
+   * Pasta de entrada dos artefatos deste Orquestrador (caminho absoluto): o
+   * Orquestrador e os Subagentes podem gravar nela em qualquer nível de
+   * permissão e no planejamento. O motor a cria se não existir.
+   */
+  pastaDeArtefatos: string;
+  /**
    * Instruções personalizadas que valem neste pedido (as do Orquestrador ou o
    * padrão global), resolvidas quando o turno começou; nulas sem nenhuma.
    */

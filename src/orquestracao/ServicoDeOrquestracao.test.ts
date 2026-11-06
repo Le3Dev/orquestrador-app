@@ -1,21 +1,27 @@
 import path from "node:path";
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ControleDeExecucoesEmMemoria } from "../infraestrutura/execucoes/ControleDeExecucoesEmMemoria";
 import { Anexo } from "./Anexo";
 import { ArmazemDeAnexos } from "./ArmazemDeAnexos";
 import { DadosDaConfiguracao } from "./ConfiguracaoDoOrquestrador";
+import { ConsumoDoTurno } from "./ConsumoDoTurno";
+import { ConsultaDeEsforcoHerdado, EsforcoDaMaquina } from "./EsforcoDaMaquina";
+import { EsforcoHerdado } from "./EsforcoHerdado";
 import { EventoDeOrquestracao, EventoDoMotor, EventoRegistrado, SinalDeVida } from "./EventoDeOrquestracao";
 import { MARCADOR_DE_PLANO } from "./InstrucoesDoOrquestrador";
+import { MedidorDeConsumo, PeriodoDoTurno } from "./MedidorDeConsumo";
+import { UsoDeTokens } from "./UsoDeTokens";
 import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "./MotorDeAgentes";
 import { Orquestrador } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
+import { PedidoNaFila } from "./PedidoNaFila";
 import { GerenciadorDeWorktrees, PreparoDeWorktree } from "./PreparoDeWorktree";
 import { PreferenciasGlobais } from "./PreferenciasGlobais";
 import { ConversaArquivada, RepositorioDeOrquestradores } from "./RepositorioDeOrquestradores";
 import { RepositorioDePreferencias } from "./RepositorioDePreferencias";
-import { ServicoDeOrquestracao } from "./ServicoDeOrquestracao";
+import { MensagemEnviada, ServicoDeOrquestracao } from "./ServicoDeOrquestracao";
 
 /** Preferências globais em memória: `atuais` devolve o que o teste definiu. */
 class PreferenciasEmMemoria implements RepositorioDePreferencias {
@@ -172,11 +178,11 @@ describe("ServicoDeOrquestracao", () => {
   beforeEach(() => {
     repositorio = new RepositorioEmMemoria();
     motor = new MotorFalso();
+    preferencias = new PreferenciasEmMemoria();
     armazem = new ArmazemEmMemoria();
     sinais = [];
     publicados = [];
     worktrees = new GerenciadorDeWorktreesFalso();
-    preferencias = new PreferenciasEmMemoria();
     ids = 0;
     servico = new ServicoDeOrquestracao({
       repositorio,
@@ -188,6 +194,7 @@ describe("ServicoDeOrquestracao", () => {
       },
       anexos: armazem,
       worktrees,
+      pastaDeArtefatos: (orquestradorId) => `/dados/artefatos/entrada/orquestradores/${orquestradorId}`,
       preferencias,
       gerarId: () => `id${++ids}`,
       agora: () => new Date("2026-10-28T12:00:00Z"),
@@ -197,7 +204,7 @@ describe("ServicoDeOrquestracao", () => {
   async function criar(): Promise<Orquestrador> {
     return servico.criarOrquestrador({
       nome: "Painel",
-      pastaDeTrabalho: PastaDeTrabalho.resolver(path.resolve("/projetos"), "painel"),
+      pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
       configuracao,
     });
   }
@@ -238,6 +245,21 @@ describe("ServicoDeOrquestracao", () => {
 
     expect(motor.pedidos.map((pedido) => pedido.sessaoIniciada)).toEqual([false, true]);
     expect(motor.pedidos[1]?.texto).toBe("dois");
+  });
+
+  it("passa ao motor a pasta de artefatos do próprio Orquestrador, mesmo rodando num worktree", async () => {
+    const orquestrador = await criar();
+    worktrees.preparo = {
+      cwd: path.resolve("/dados/worktrees/x"),
+      worktree: { branch: "orquestrador/x", caminho: path.resolve("/dados/worktrees/x") },
+    };
+
+    const { conclusao } = await servico.enviarMensagem(orquestrador.id, "monte um relatório");
+    motor.terminar();
+    await conclusao;
+
+    expect(motor.pedidos[0]?.pastaDeArtefatos).toBe(`/dados/artefatos/entrada/orquestradores/${orquestrador.id}`);
+    expect(motor.pedidos[0]?.pastaDeTrabalho.caminho).toBe(path.resolve("/dados/worktrees/x"));
   });
 
   it("cancelar aborta o motor e registra o turno como cancelado", async () => {
@@ -544,28 +566,55 @@ describe("ServicoDeOrquestracao", () => {
       expect(orquestrador.turnoComPlanoPendente).toBeNull();
     });
 
-    it("com a opção desligada, a resposta sai limpa e sem plano pendente", async () => {
-      const orquestrador = await criar();
-      await servico.alterarConfiguracao(orquestrador.id, { proporPlanoEmPedidosGrandes: false });
+    it("um orquestrador salvo com as opções antigas desligadas passa a deixar o plano pendente", async () => {
+      const criado = await criar();
+      const dados = criado.paraDados();
+      // Como ficava o orquestrador.json quando trivial e plano eram opções da tela.
+      const gravado = JSON.parse(
+        JSON.stringify({
+          ...dados,
+          configuracao: { ...dados.configuracao, permitirTrabalhoDireto: false, proporPlanoEmPedidosGrandes: false },
+        }),
+      ) as typeof dados;
+      const orquestrador = Orquestrador.reconstituir(gravado);
+      repositorio.orquestradores.set(orquestrador.id, orquestrador);
 
       await executar(orquestrador);
 
-      expect(orquestrador.ultimoTurno?.resposta).toContain("Proponho:");
-      expect(orquestrador.ultimoTurno?.resposta).not.toContain(MARCADOR_DE_PLANO);
-      expect(orquestrador.turnoComPlanoPendente).toBeNull();
-      expect(publicados.at(-1)).toMatchObject({ tipo: "turno_concluido", planoPendente: false });
+      expect(orquestrador.turnoComPlanoPendente).not.toBeNull();
+      expect(publicados.at(-1)).toMatchObject({ tipo: "turno_concluido", planoPendente: true });
+      expect(motor.pedidos[0]?.configuracao.propoePlanoEmPedidosGrandes("execucao")).toBe(true);
+      // Ao salvar de novo, os campos antigos somem.
+      expect(orquestrador.paraDados().configuracao).not.toHaveProperty("permitirTrabalhoDireto");
+      expect(orquestrador.paraDados().configuracao).not.toHaveProperty("proporPlanoEmPedidosGrandes");
     });
 
-    it("vale a configuração do início do turno, não a alterada enquanto ele roda", async () => {
+    it("o plano proposto fica pendente mesmo se a configuração muda enquanto o turno roda", async () => {
       const orquestrador = await criar();
 
-      await executar(orquestrador, () =>
-        servico.alterarConfiguracao(orquestrador.id, { proporPlanoEmPedidosGrandes: false }),
-      );
+      await executar(orquestrador, () => servico.alterarConfiguracao(orquestrador.id, { nivelDePermissao: "leitura" }));
 
       expect(orquestrador.turnoComPlanoPendente).not.toBeNull();
-      expect(motor.pedidos[0]?.configuracao.propoePlanoEmPedidosGrandes("execucao")).toBe(true);
-      expect(orquestrador.configuracao.propoePlanoEmPedidosGrandes("execucao")).toBe(false);
+      expect(motor.pedidos[0]?.configuracao.nivelDePermissao).toBe("edicao");
+      expect(orquestrador.configuracao.nivelDePermissao).toBe("leitura");
+    });
+
+    it("os eventos que levam a configuração não trazem mais as opções", async () => {
+      const orquestrador = await criar();
+      await servico.alterarConfiguracao(orquestrador.id, { nivelDePermissao: "leitura" });
+
+      await executar(orquestrador);
+
+      const comConfiguracao = publicados.filter(
+        (evento) => evento.tipo === "turno_iniciado" || evento.tipo === "configuracao_alterada",
+      );
+      expect(comConfiguracao.map((evento) => evento.tipo).sort()).toEqual(["configuracao_alterada", "turno_iniciado"]);
+      for (const evento of comConfiguracao) {
+        const configuracaoDoEvento = "configuracao" in evento ? evento.configuracao : null;
+        expect(configuracaoDoEvento).not.toBeNull();
+        expect(configuracaoDoEvento).not.toHaveProperty("permitirTrabalhoDireto");
+        expect(configuracaoDoEvento).not.toHaveProperty("proporPlanoEmPedidosGrandes");
+      }
     });
 
     it("sem o marcador, o turno de execução conclui sem plano pendente", async () => {
@@ -658,6 +707,270 @@ describe("ServicoDeOrquestracao", () => {
 
     it("recusa orquestrador inexistente", async () => {
       await expect(servico.limparConversa("nao-existe")).rejects.toMatchObject({ motivo: "nao_encontrado" });
+    });
+  });
+
+  describe("fila de pedidos", () => {
+    const mensagemDeTurnoEmAndamento = '"Painel" ainda está trabalhando no pedido anterior. Aguarde terminar ou cancele.';
+
+    function tipos(): string[] {
+      return repositorio.eventos.map((evento) => evento.tipo);
+    }
+
+    it("enfileirar publica pedido_enfileirado, grava e, sem turno, o pedido fica parado", async () => {
+      const orquestrador = await criar();
+
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "  rode os testes  ", "planejamento");
+
+      expect(publicados.at(-1)).toMatchObject({
+        tipo: "pedido_enfileirado",
+        pedido: { id: pedidoId, texto: "rode os testes", modo: "planejamento", enfileiradoEm: "2026-10-28T12:00:00.000Z" },
+      });
+      expect(repositorio.buscarPorId(orquestrador.id)?.paraDados().fila?.map((pedido) => pedido.id)).toEqual([pedidoId]);
+      expect(motor.pedidos).toHaveLength(0);
+      expect(orquestrador.situacao).toBe("ocioso");
+    });
+
+    it("recusa pedido vazio e orquestrador inexistente", async () => {
+      const orquestrador = await criar();
+
+      await expect(servico.enfileirarPedido(orquestrador.id, "   ")).rejects.toMatchObject({
+        motivo: "dados_invalidos",
+        message: "Escreva o pedido.",
+      });
+      await expect(servico.enfileirarPedido("nao-existe", "oi")).rejects.toMatchObject({ motivo: "nao_encontrado" });
+      expect(orquestrador.fila).toHaveLength(0);
+    });
+
+    it("turno concluído envia o primeiro da fila, que sai antes de o turno dele começar", async () => {
+      const orquestrador = await criar();
+      const { conclusao, envioDaFila } = await servico.enviarMensagem(orquestrador.id, "primeiro");
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "segundo");
+      await servico.enfileirarPedido(orquestrador.id, "terceiro", "planejamento");
+
+      motor.terminar();
+      await conclusao;
+      await envioDaFila;
+
+      expect(tipos()).toEqual([
+        "turno_iniciado",
+        "pedido_enfileirado",
+        "pedido_enfileirado",
+        "turno_concluido",
+        "pedido_retirado_da_fila",
+        "turno_iniciado",
+      ]);
+      expect(repositorio.eventos[4]).toMatchObject({ tipo: "pedido_retirado_da_fila", pedidoId, motivo: "enviado" });
+      expect(repositorio.eventos[5]).toMatchObject({ tipo: "turno_iniciado", texto: "segundo", modo: "execucao" });
+      expect(orquestrador.fila.map((pedido) => pedido.texto)).toEqual(["terceiro"]);
+      expect(orquestrador.situacao).toBe("trabalhando");
+      await vi.waitFor(() => expect(motor.pedidos.map((pedido) => pedido.texto)).toEqual(["primeiro", "segundo"]));
+
+      // E a fila segue andando: o terceiro sai quando o segundo termina, no modo dele.
+      motor.terminar();
+      await vi.waitFor(() => expect(motor.pedidos).toHaveLength(3));
+      expect(motor.pedidos[2]).toMatchObject({ texto: "terceiro", modo: "planejamento" });
+      expect(orquestrador.fila).toEqual([]);
+    });
+
+    it.each<[string, (orquestradorId: string) => Promise<MensagemEnviada>]>([
+      [
+        "cancelado",
+        async (orquestradorId) => {
+          const enviada = await servico.enviarMensagem(orquestradorId, "primeiro");
+          await servico.enfileirarPedido(orquestradorId, "segundo");
+          await servico.cancelar(orquestradorId);
+          return enviada;
+        },
+      ],
+      [
+        "com falha",
+        async (orquestradorId) => {
+          motor.resultado = { sucesso: false, motivo: "Limite de uso atingido.", uso: null };
+          const enviada = await servico.enviarMensagem(orquestradorId, "primeiro");
+          await servico.enfileirarPedido(orquestradorId, "segundo");
+          motor.terminar();
+          return enviada;
+        },
+      ],
+      [
+        "com plano pendente de um planejamento",
+        async (orquestradorId) => {
+          const enviada = await servico.enviarMensagem(orquestradorId, "primeiro", [], "planejamento");
+          await servico.enfileirarPedido(orquestradorId, "segundo");
+          motor.terminar();
+          return enviada;
+        },
+      ],
+      [
+        "com plano proposto numa execução",
+        async (orquestradorId) => {
+          motor.resultado = resultadoComResposta(`Proponho mudar tudo.\n${MARCADOR_DE_PLANO}`);
+          const enviada = await servico.enviarMensagem(orquestradorId, "primeiro");
+          await servico.enfileirarPedido(orquestradorId, "segundo");
+          motor.terminar();
+          return enviada;
+        },
+      ],
+    ])("turno %s não envia nada da fila", async (_situacao, encerrarTurno) => {
+      const orquestrador = await criar();
+
+      const { conclusao, envioDaFila } = await encerrarTurno(orquestrador.id);
+      await conclusao;
+      await envioDaFila;
+
+      expect(motor.pedidos).toHaveLength(1);
+      expect(tipos()).not.toContain("pedido_retirado_da_fila");
+      expect(orquestrador.fila.map((pedido) => pedido.texto)).toEqual(["segundo"]);
+      expect(orquestrador.situacao).toBe("ocioso");
+    });
+
+    it("enviar agora sem turno retira o pedido e inicia o turno com o texto e o modo dele", async () => {
+      const orquestrador = await criar();
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "planeje a migração", "planejamento");
+
+      const { turnoId, conclusao } = await servico.enviarDaFila(orquestrador.id, pedidoId);
+
+      expect(tipos()).toEqual(["pedido_enfileirado", "pedido_retirado_da_fila", "turno_iniciado"]);
+      expect(repositorio.eventos[1]).toMatchObject({ pedidoId, motivo: "enviado" });
+      expect(repositorio.eventos[2]).toMatchObject({ turnoId, texto: "planeje a migração", modo: "planejamento" });
+      expect(orquestrador.fila).toEqual([]);
+      expect(repositorio.buscarPorId(orquestrador.id)?.paraDados().fila).toEqual([]);
+      motor.terminar();
+      await conclusao;
+      expect(motor.pedidos[0]).toMatchObject({ texto: "planeje a migração", modo: "planejamento" });
+    });
+
+    it("enviar agora com turno em andamento é recusado como uma mensagem, e o pedido continua na fila", async () => {
+      const orquestrador = await criar();
+      const { conclusao } = await servico.enviarMensagem(orquestrador.id, "primeiro");
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "segundo");
+
+      await expect(servico.enviarDaFila(orquestrador.id, pedidoId)).rejects.toMatchObject({
+        motivo: "turno_em_andamento",
+        message: mensagemDeTurnoEmAndamento,
+      });
+
+      expect(orquestrador.fila.map((pedido) => pedido.id)).toEqual([pedidoId]);
+      expect(tipos()).not.toContain("pedido_retirado_da_fila");
+      expect(orquestrador.totalDeTurnos).toBe(1);
+      await servico.cancelar(orquestrador.id);
+      await conclusao;
+    });
+
+    it("enviar ou remover um pedido que não está na fila responde não encontrado", async () => {
+      const orquestrador = await criar();
+
+      await expect(servico.enviarDaFila(orquestrador.id, "nao-existe")).rejects.toMatchObject({
+        motivo: "nao_encontrado",
+        message: "Pedido não encontrado na fila.",
+      });
+      await expect(servico.removerDaFila(orquestrador.id, "nao-existe")).rejects.toMatchObject({
+        motivo: "nao_encontrado",
+        message: "Pedido não encontrado na fila.",
+      });
+      await expect(servico.enviarDaFila("nao-existe", "p1")).rejects.toMatchObject({
+        message: "Orquestrador não encontrado.",
+      });
+    });
+
+    it("remover publica a retirada como removido e grava a fila sem o pedido", async () => {
+      const orquestrador = await criar();
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "um");
+      const outro = await servico.enfileirarPedido(orquestrador.id, "dois");
+
+      await servico.removerDaFila(orquestrador.id, pedidoId);
+
+      expect(repositorio.eventos.at(-1)).toMatchObject({ tipo: "pedido_retirado_da_fila", pedidoId, motivo: "removido" });
+      expect(repositorio.buscarPorId(orquestrador.id)?.paraDados().fila?.map((pedido) => pedido.id)).toEqual([
+        outro.pedidoId,
+      ]);
+    });
+
+    it("se o usuário inicia outro turno antes do envio automático, nada sai e o pedido fica para depois", async () => {
+      const orquestrador = await criar();
+      const { envioDaFila } = await servico.enviarMensagem(orquestrador.id, "primeiro");
+      await servico.enfileirarPedido(orquestrador.id, "da fila");
+      // O pedido do usuário chega logo depois do fim do turno, antes do envio automático.
+      const doUsuario: Array<Promise<MensagemEnviada>> = [];
+      const anexar = repositorio.anexarEvento.bind(repositorio);
+      const espiao = vi.spyOn(repositorio, "anexarEvento").mockImplementation((id, evento) => {
+        const registrado = anexar(id, evento);
+        if (evento.tipo === "turno_concluido" && doUsuario.length === 0) {
+          doUsuario.push(servico.enviarMensagem(orquestrador.id, "do usuário"));
+        }
+        return registrado;
+      });
+
+      motor.terminar();
+      await envioDaFila;
+
+      expect(orquestrador.ultimoTurno?.texto).toBe("do usuário");
+      expect(orquestrador.fila.map((pedido) => pedido.texto)).toEqual(["da fila"]);
+      expect(tipos()).not.toContain("pedido_retirado_da_fila");
+
+      // Quando o turno do usuário termina bem, a fila anda.
+      const turnoDoUsuario = await doUsuario[0];
+      motor.terminar();
+      await turnoDoUsuario?.envioDaFila;
+      expect(tipos().slice(-2)).toEqual(["pedido_retirado_da_fila", "turno_iniciado"]);
+      expect(orquestrador.ultimoTurno?.texto).toBe("da fila");
+      espiao.mockRestore();
+    });
+
+    it("um erro no envio automático vira aviso no log, e o pedido fica como turno com falha", async () => {
+      const orquestrador = await criar();
+      const { conclusao, envioDaFila } = await servico.enviarMensagem(orquestrador.id, "primeiro");
+      await servico.enfileirarPedido(orquestrador.id, "segundo");
+      const avisos = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const salvar = repositorio.salvar.bind(repositorio);
+      const espiao = vi.spyOn(repositorio, "salvar").mockImplementation(async (alvo) => {
+        if (alvo.ultimoTurno?.texto === "segundo") {
+          throw new Error("disco cheio");
+        }
+        return salvar(alvo);
+      });
+
+      motor.terminar();
+      await conclusao;
+      await expect(envioDaFila).resolves.toBeUndefined();
+
+      expect(avisos).toHaveBeenCalledWith(expect.stringContaining("próximo pedido da fila"), "disco cheio");
+      expect(orquestrador.ultimoTurno?.texto).toBe("segundo");
+      expect(orquestrador.ultimoTurno?.situacao).toBe("falhou");
+      expect(orquestrador.situacao).toBe("ocioso");
+      espiao.mockRestore();
+      avisos.mockRestore();
+    });
+
+    it("ao subir o servidor, o turno interrompido não tira nada da fila", async () => {
+      const orquestrador = await criar();
+      orquestrador.iniciarTurno("t-antigo", "analise", new Date("2026-10-28T11:00:00Z"));
+      orquestrador.enfileirarPedido(
+        PedidoNaFila.criar({ id: "p1", texto: "depois", modo: "execucao", enfileiradoEm: new Date("2026-10-28T11:00:00Z") }),
+      );
+
+      expect(await servico.interromperTurnosPendentes()).toBe(1);
+      await new Promise((resolver) => setTimeout(resolver, 0));
+
+      expect(tipos()).toEqual(["turno_interrompido"]);
+      expect(motor.pedidos).toHaveLength(0);
+      expect(orquestrador.fila.map((pedido) => pedido.id)).toEqual(["p1"]);
+    });
+
+    it("limpar a conversa mantém a fila", async () => {
+      const orquestrador = await criar();
+      const { conclusao } = await servico.enviarMensagem(orquestrador.id, "planeje", [], "planejamento");
+      await servico.enfileirarPedido(orquestrador.id, "depois");
+      motor.terminar();
+      await conclusao;
+
+      await servico.limparConversa(orquestrador.id);
+
+      expect(orquestrador.totalDeTurnos).toBe(0);
+      expect(repositorio.buscarPorId(orquestrador.id)?.paraDados().fila?.map((pedido) => pedido.texto)).toEqual([
+        "depois",
+      ]);
     });
   });
 
@@ -754,5 +1067,259 @@ describe("ServicoDeOrquestracao", () => {
       preferencias.preferencias = PreferenciasGlobais.de({ instrucoesPadrao: "Global." });
       expect(servico.instrucoesPara(orquestrador.configuracao)?.origem).toBe("padrao");
     });
+  });
+});
+
+/** Medidor que devolve o consumo combinado (ou falha) e guarda os períodos pedidos. */
+class MedidorFalso implements MedidorDeConsumo {
+  periodos: PeriodoDoTurno[] = [];
+  consumo: ConsumoDoTurno | null = ConsumoDoTurno.criar({
+    principal: UsoDeTokens.criar({ entrada: 6, criacaoDeCache: 33062, leituraDeCache: 62885, saida: 383 }),
+    subagentes: UsoDeTokens.criar({ entrada: 1, criacaoDeCache: 0, leituraDeCache: 0, saida: 1 }),
+    subagentesMedidos: 1,
+    parcial: false,
+    modeloDoPrincipal: "claude-opus-5-5",
+  });
+  falha: Error | null = null;
+
+  async medirTurno(periodo: PeriodoDoTurno): Promise<ConsumoDoTurno | null> {
+    this.periodos.push(periodo);
+    if (this.falha !== null) {
+      throw this.falha;
+    }
+    return this.consumo;
+  }
+}
+
+class EsforcoDaMaquinaFalso implements EsforcoDaMaquina {
+  consultas: ConsultaDeEsforcoHerdado[] = [];
+  falha: Error | null = null;
+
+  async herdadoPara(consulta: ConsultaDeEsforcoHerdado): Promise<EsforcoHerdado | null> {
+    this.consultas.push(consulta);
+    if (this.falha !== null) {
+      throw this.falha;
+    }
+    return consulta.modelo === "opus"
+      ? EsforcoHerdado.criar({ nivel: "extra_alto", origem: "CLAUDE_CODE_EFFORT_LEVEL", modelo: consulta.modeloReal })
+      : null;
+  }
+}
+
+describe("ServicoDeOrquestracao e a economia de tokens", () => {
+  let repositorio: RepositorioEmMemoria;
+  let motor: MotorFalso;
+  let medidor: MedidorFalso;
+  let esforco: EsforcoDaMaquinaFalso;
+  let worktrees: GerenciadorDeWorktreesFalso;
+  let servico: ServicoDeOrquestracao;
+  let ids: number;
+  const inicio = new Date("2026-10-28T12:00:00Z");
+  const fim = new Date("2026-10-28T12:05:00Z");
+  let relogio: Date;
+
+  beforeEach(() => {
+    repositorio = new RepositorioEmMemoria();
+    motor = new MotorFalso();
+    medidor = new MedidorFalso();
+    esforco = new EsforcoDaMaquinaFalso();
+    worktrees = new GerenciadorDeWorktreesFalso();
+    ids = 0;
+    relogio = inicio;
+    servico = new ServicoDeOrquestracao({
+      repositorio,
+      motor,
+      execucoes: new ControleDeExecucoesEmMemoria(),
+      publicador: { publicar: () => undefined, sinalizar: () => undefined },
+      anexos: new ArmazemEmMemoria(),
+      worktrees,
+      pastaDeArtefatos: (orquestradorId) => `/dados/artefatos/entrada/orquestradores/${orquestradorId}`,
+      preferencias: new PreferenciasEmMemoria(),
+      gerarId: () => `id${++ids}`,
+      agora: () => relogio,
+      medidor,
+      esforcoDaMaquina: esforco,
+    });
+  });
+
+  async function criar(): Promise<Orquestrador> {
+    return servico.criarOrquestrador({
+      nome: "Painel",
+      pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
+      configuracao,
+    });
+  }
+
+  it("mede o turno concluído depois do fim, com sessão, pasta e horário do turno", async () => {
+    const orquestrador = await criar();
+    worktrees.preparo = {
+      cwd: path.resolve("/dados/worktrees/abc"),
+      worktree: { branch: "orquestrador/id1", caminho: path.resolve("/dados/worktrees/abc") },
+    };
+
+    const { turnoId, conclusao, medicao } = await servico.enviarMensagem(orquestrador.id, "analise");
+    relogio = fim;
+    motor.terminar();
+    await conclusao;
+    await medicao;
+
+    expect(medidor.periodos).toEqual([
+      { sessaoId: orquestrador.sessaoId, pastaDeTrabalho: path.resolve("/dados/worktrees/abc"), inicio, fim },
+    ]);
+    expect(repositorio.eventos.map((evento) => evento.tipo)).toEqual([
+      "turno_iniciado",
+      "turno_concluido",
+      "consumo_do_turno_medido",
+    ]);
+    expect(repositorio.eventos.at(-1)).toMatchObject({
+      tipo: "consumo_do_turno_medido",
+      turnoId,
+      consumo: { parcial: false, indiceDeCusto: 49543, subagentesMedidos: 1, modeloDoPrincipal: "claude-opus-5-5" },
+    });
+  });
+
+  it("sem worktree, mede na pasta do projeto", async () => {
+    const orquestrador = await criar();
+
+    const { medicao } = await servico.enviarMensagem(orquestrador.id, "analise");
+    motor.terminar();
+    await medicao;
+
+    expect(medidor.periodos[0]?.pastaDeTrabalho).toBe(orquestrador.pastaDeTrabalho.caminho);
+  });
+
+  it("marca como parcial o consumo de um turno com falha", async () => {
+    const orquestrador = await criar();
+    motor.resultado = { sucesso: false, motivo: "Limite de uso atingido.", uso: null };
+
+    const { medicao } = await servico.enviarMensagem(orquestrador.id, "analise");
+    motor.terminar();
+    await medicao;
+
+    expect(repositorio.eventos.map((evento) => evento.tipo).slice(-2)).toEqual([
+      "turno_falhou",
+      "consumo_do_turno_medido",
+    ]);
+    expect(repositorio.eventos.at(-1)).toMatchObject({ consumo: { parcial: true } });
+  });
+
+  it("marca como parcial o consumo de um turno cancelado", async () => {
+    const orquestrador = await criar();
+
+    const { medicao } = await servico.enviarMensagem(orquestrador.id, "analise");
+    await servico.cancelar(orquestrador.id);
+    await medicao;
+
+    expect(repositorio.eventos.map((evento) => evento.tipo).slice(-2)).toEqual([
+      "turno_cancelado",
+      "consumo_do_turno_medido",
+    ]);
+    expect(repositorio.eventos.at(-1)).toMatchObject({ consumo: { parcial: true } });
+  });
+
+  it("sem transcrição, não registra consumo", async () => {
+    const orquestrador = await criar();
+    medidor.consumo = null;
+
+    const { medicao } = await servico.enviarMensagem(orquestrador.id, "analise");
+    motor.terminar();
+    await medicao;
+
+    expect(medidor.periodos).toHaveLength(1);
+    expect(repositorio.eventos.map((evento) => evento.tipo)).toEqual(["turno_iniciado", "turno_concluido"]);
+  });
+
+  it("um erro do medidor não quebra o turno nem o próximo pedido", async () => {
+    const orquestrador = await criar();
+    medidor.falha = new Error("transcrição corrompida");
+    const avisos = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const primeiro = await servico.enviarMensagem(orquestrador.id, "analise");
+    motor.terminar();
+    await primeiro.conclusao;
+    await primeiro.medicao;
+    const segundo = await servico.enviarMensagem(orquestrador.id, "de novo");
+    motor.terminar();
+    await segundo.conclusao;
+
+    expect(orquestrador.ultimoTurno?.situacao).toBe("concluido");
+    expect(repositorio.eventos.some((evento) => evento.tipo === "consumo_do_turno_medido")).toBe(false);
+    expect(avisos).toHaveBeenCalled();
+    avisos.mockRestore();
+  });
+
+  it("o envio automático da fila não atrapalha a medição do turno que terminou", async () => {
+    const orquestrador = await criar();
+    const { turnoId, medicao, envioDaFila } = await servico.enviarMensagem(orquestrador.id, "analise");
+    await servico.enfileirarPedido(orquestrador.id, "depois");
+
+    relogio = fim;
+    motor.terminar();
+    await envioDaFila;
+    await medicao;
+
+    expect(orquestrador.ultimoTurno?.texto).toBe("depois");
+    expect(repositorio.eventos.filter((evento) => evento.tipo === "consumo_do_turno_medido")).toEqual([
+      expect.objectContaining({ turnoId, consumo: expect.objectContaining({ parcial: false }) }),
+    ]);
+    expect(medidor.periodos[0]).toMatchObject({ inicio, fim });
+  });
+
+  it("aplica a predefinição, publica configuracao_alterada e mantém a configuração editável", async () => {
+    const orquestrador = await criar();
+
+    await servico.aplicarPredefinicao(orquestrador.id, "economico");
+
+    expect(repositorio.eventos.at(-1)).toMatchObject({ tipo: "configuracao_alterada", predefinicao: "economico" });
+    expect(orquestrador.predefinicaoCorrespondente).toBe("economico");
+    expect(orquestrador.configuracao.nivelDePermissao).toBe("edicao");
+
+    await servico.alterarConfiguracao(orquestrador.id, { modeloDosSubagentes: "haiku" });
+    expect(orquestrador.predefinicaoCorrespondente).toBeNull();
+  });
+
+  it("recusa predefinição desconhecida e orquestrador inexistente", async () => {
+    const orquestrador = await criar();
+
+    await expect(servico.aplicarPredefinicao(orquestrador.id, "turbo")).rejects.toMatchObject({
+      motivo: "dados_invalidos",
+      message: "Predefinição desconhecida.",
+    });
+    await expect(servico.aplicarPredefinicao("nao-existe", "economico")).rejects.toMatchObject({
+      motivo: "nao_encontrado",
+    });
+  });
+
+  it("o esforço herdado usa os modelos atuais e o modelo real do último consumo medido", async () => {
+    const orquestrador = await criar();
+    const antes = await servico.esforcoHerdadoDe(orquestrador.id);
+
+    const { medicao } = await servico.enviarMensagem(orquestrador.id, "analise");
+    motor.terminar();
+    await medicao;
+    const depois = await servico.esforcoHerdadoDe(orquestrador.id);
+
+    expect(antes.orquestrador?.modelo).toBeNull();
+    expect(antes.subagentes).toBeNull();
+    expect(depois.orquestrador?.paraDados()).toEqual({
+      nivel: "extra_alto",
+      origem: "CLAUDE_CODE_EFFORT_LEVEL",
+      modelo: "claude-opus-5-5",
+      deveAvisar: true,
+    });
+    expect(esforco.consultas.at(-1)).toEqual({
+      modelo: "haiku",
+      pastaDoProjeto: orquestrador.pastaDeTrabalho.caminho,
+      modeloReal: null,
+    });
+  });
+
+  it("um erro ao ler o esforço herdado vira null", async () => {
+    const orquestrador = await criar();
+    esforco.falha = new Error("settings.json inválido");
+    const avisos = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    expect(await servico.esforcoHerdadoDe(orquestrador.id)).toEqual({ orquestrador: null, subagentes: null });
+    avisos.mockRestore();
   });
 });

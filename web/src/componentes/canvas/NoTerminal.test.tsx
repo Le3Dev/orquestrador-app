@@ -1,20 +1,32 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type NodeProps, ReactFlowProvider } from "@xyflow/react";
 import type { ComponentProps } from "react";
 
 import { api, ErroDaApi } from "../../shared/api/cliente";
 import type {
   DadosDaConfiguracao,
+  DadosDoPedidoNaFila,
   EventoDeOrquestracao,
   EventoRegistrado,
   ResumoDoOrquestrador,
 } from "../../shared/api/tipos";
 import { ContextoDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
+import { DURACAO_DA_ENTREGA_MS, DURACAO_DO_PISCAR_MS } from "../../shared/canvas/entrega";
 import type { NoTerminal as TipoDoNo } from "../../shared/canvas/nos";
+import { TIPO_DO_PEDIDO_ARRASTADO } from "../../shared/canvas/pedidoArrastado";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../../shared/estado/aplicarEvento";
 import { NoTerminal, PainelDeConfiguracao } from "./NoTerminal";
 
 const contagem = vi.hoisted(() => ({ analises: 0, transcricoes: 0 }));
+
+// O botão de alterações tem testes próprios; aqui basta saber que ele está na barra, com o id certo.
+vi.mock("./BotaoDeAlteracoes", async () => {
+  const { createElement } = await import("react");
+  return {
+    BotaoDeAlteracoes: ({ orquestradorId }: { orquestradorId: string }) =>
+      createElement("button", { type: "button", "aria-label": `Alterações de ${orquestradorId}` }, "±"),
+  };
+});
 
 // Conta as análises de Markdown sem mudar o que o react-markdown produz.
 vi.mock("react-markdown", async (importOriginal) => {
@@ -48,8 +60,6 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "edicao_e_comandos",
   permitirCommitEPush: false,
-  permitirTrabalhoDireto: true,
-  proporPlanoEmPedidosGrandes: true,
   instrucoesPersonalizadas: "",
 };
 
@@ -149,22 +159,6 @@ describe("PainelDeConfiguracao", () => {
     });
   });
 
-  it("o trabalho direto e o plano automático vão no PATCH junto com o resto da configuração", async () => {
-    const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
-    const { aoFechar } = renderizar(orquestrador());
-
-    fireEvent.click(screen.getByRole("checkbox", { name: "Deixar o orquestrador fazer o trivial sozinho" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Propor plano antes de mudanças grandes" }));
-    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
-
-    await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
-    expect(alterar).toHaveBeenCalledWith("o1", {
-      ...configuracao,
-      permitirTrabalhoDireto: false,
-      proporPlanoEmPedidosGrandes: false,
-    });
-  });
-
   it("carrega as instruções salvas e envia as editadas no PATCH junto com o resto da configuração", async () => {
     const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
     const { aoFechar } = renderizar(orquestrador({ instrucoesPersonalizadas: "Use Jest." }));
@@ -204,6 +198,35 @@ describe("PainelDeConfiguracao", () => {
     expect(await screen.findByText("Opção de commit e push inválida.")).toBeInTheDocument();
     expect(aoFechar).not.toHaveBeenCalled();
     expect(opcao).toBeChecked();
+  });
+
+  it("o modo econômico é aplicado no servidor e o formulário mostra a configuração devolvida", async () => {
+    vi.spyOn(api, "listarPredefinicoes").mockResolvedValue([
+      {
+        nome: "economico",
+        rotulo: "Modo econômico",
+        descricao: "Gasta menos tokens.",
+        configuracao: { esforcoDoOrquestrador: "medio", esforcoDosSubagentes: "medio" },
+      },
+    ]);
+    const herdado = vi.spyOn(api, "lerEsforcoHerdadoDoOrquestrador").mockResolvedValue({
+      orquestrador: null,
+      subagentes: null,
+    });
+    const aplicarPredefinicao = vi.spyOn(api, "aplicarPredefinicao").mockResolvedValue({
+      ...orquestrador({ esforcoDoOrquestrador: "medio", esforcoDosSubagentes: "medio" }),
+      predefinicaoCorrespondente: "economico",
+    });
+    renderizar(orquestrador());
+
+    fireEvent.click(await screen.findByRole("button", { name: "Modo econômico" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Esforço do orquestrador" })).toHaveValue("medio"),
+    );
+    expect(aplicarPredefinicao).toHaveBeenCalledWith("o1", "economico");
+    expect(herdado).toHaveBeenCalledWith("o1");
+    expect(screen.getByRole("combobox", { name: "Esforço dos subagentes" })).toHaveValue("medio");
   });
 });
 
@@ -248,9 +271,9 @@ const CONVERSA_LIMPA: EventoDeOrquestracao = {
   worktreeComAlteracoes: false,
 };
 
-function canvasDoTerminal(conversa: EstadoDaConversa): ValorDoCanvas {
+function canvasDoTerminal(conversa: EstadoDaConversa, resumo: ResumoDoOrquestrador = orquestrador()): ValorDoCanvas {
   return {
-    orquestradores: new Map([["o1", orquestrador()]]),
+    orquestradores: new Map([["o1", resumo]]),
     conversas: new Map([["o1", conversa]]),
     conexoes: new Map([["o1", "conectado"]]),
     sinais: new Map(),
@@ -530,5 +553,401 @@ describe("NoTerminal · servidor no ar", () => {
     render(<Terminal canvas={canvasDoTerminal(ESTADO_INICIAL)} no={propsDoNo()} />);
 
     expect(screen.queryByText("servidor no ar")).not.toBeInTheDocument();
+  });
+});
+
+/** Deixa terminar as promessas já resolvidas (a API falsa) sem avançar o relógio falso. */
+async function concluirPromessas(): Promise<void> {
+  await act(async () => {
+    for (let passo = 0; passo < 10; passo += 1) {
+      await Promise.resolve();
+    }
+  });
+}
+
+const PEDIDO_A: DadosDoPedidoNaFila = {
+  id: "pa",
+  texto: "rode os testes",
+  modo: "execucao",
+  enfileiradoEm: "2026-10-28T12:00:01.000Z",
+};
+const PEDIDO_B: DadosDoPedidoNaFila = {
+  id: "pb",
+  texto: "atualize o README",
+  modo: "planejamento",
+  enfileiradoEm: "2026-10-28T12:00:02.000Z",
+};
+const PEDIDO_C: DadosDoPedidoNaFila = {
+  id: "pc",
+  texto: "revise o PR",
+  modo: "execucao",
+  enfileiradoEm: "2026-10-28T12:00:03.000Z",
+};
+
+function comFila(...fila: DadosDoPedidoNaFila[]): ResumoDoOrquestrador {
+  return { ...orquestrador(), fila };
+}
+
+function campoDoPrompt(): HTMLElement {
+  return screen.getByRole("textbox", { name: "Mensagem para o orquestrador" });
+}
+
+describe("NoTerminal · fila de pedidos", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-28T12:00:06Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("Enter durante um pedido põe o texto na fila, com o modo escolhido, e não envia", async () => {
+    const enfileirar = vi.spyOn(api, "enfileirarPedido").mockResolvedValue({ pedidoId: "p9" });
+    const enviar = vi.spyOn(api, "enviarMensagem");
+    render(<Terminal canvas={canvasDoTerminal(conversaDoTerminal())} no={propsDoNo()} />);
+    const campo = campoDoPrompt();
+
+    fireEvent.keyDown(campo, { key: "Tab", shiftKey: true });
+    fireEvent.change(campo, { target: { value: "depois planeje a migração" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+    await concluirPromessas();
+
+    expect(enfileirar).toHaveBeenCalledWith("o1", "depois planeje a migração", "planejamento");
+    expect(enviar).not.toHaveBeenCalled();
+    expect(campo).toHaveValue("");
+  });
+
+  it("com a fila cheia, o erro do servidor aparece no terminal e o texto fica no prompt", async () => {
+    vi.spyOn(api, "enfileirarPedido").mockRejectedValue(
+      new ErroDaApi('A fila de "Painel de salas" está cheia (máximo 10 pedidos).', 409),
+    );
+    render(<Terminal canvas={canvasDoTerminal(conversaDoTerminal())} no={propsDoNo()} />);
+    const campo = campoDoPrompt();
+
+    fireEvent.change(campo, { target: { value: "mais um" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+    await concluirPromessas();
+
+    expect(screen.getByText(/✗ A fila de "Painel de salas" está cheia/)).toBeInTheDocument();
+    expect(campo).toHaveValue("mais um");
+  });
+
+  it("a fila vem do resumo do servidor e os eventos atualizam por cima", () => {
+    const conversa = aplicar(
+      conversaDoTerminal(),
+      { tipo: "pedido_retirado_da_fila", pedidoId: "pa", motivo: "removido" },
+      { tipo: "pedido_enfileirado", pedido: PEDIDO_C },
+    );
+    render(<Terminal canvas={canvasDoTerminal(conversa, comFila(PEDIDO_A, PEDIDO_B))} no={propsDoNo()} />);
+
+    const itens = within(screen.getByRole("region", { name: "Fila de pedidos" })).getAllByRole("listitem");
+    expect(itens.map((item) => item.textContent)).toEqual(["1plan modeatualize o README", "2revise o PR"]);
+  });
+
+  it("o X tira o pedido da fila no servidor", async () => {
+    const remover = vi.spyOn(api, "removerDaFila").mockResolvedValue(null);
+    render(<Terminal canvas={canvasDoTerminal(conversaDoTerminal(), comFila(PEDIDO_A, PEDIDO_B))} no={propsDoNo()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Remover da fila o pedido 2" }));
+    await concluirPromessas();
+
+    expect(remover).toHaveBeenCalledWith("o1", "pb");
+  });
+
+  it("durante um pedido a fila anda sozinha; sem pedido rodando, fica pausada e 'enviar agora' manda o primeiro", async () => {
+    const enviarDaFila = vi.spyOn(api, "enviarDaFila").mockResolvedValue({ turnoId: "t9" });
+    const { unmount } = render(
+      <Terminal canvas={canvasDoTerminal(conversaDoTerminal(), comFila(PEDIDO_A, PEDIDO_B))} no={propsDoNo()} />,
+    );
+    expect(screen.queryByText("fila pausada")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "enviar agora" })).not.toBeInTheDocument();
+    unmount();
+
+    render(<Terminal canvas={canvasDoTerminal(conversaOciosa(), comFila(PEDIDO_A, PEDIDO_B))} no={propsDoNo()} />);
+    expect(screen.getByText("fila pausada")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "enviar agora" }));
+    await concluirPromessas();
+
+    expect(enviarDaFila).toHaveBeenCalledWith("o1", "pa");
+  });
+
+  describe("logo depois de um pedido terminar", () => {
+    /** Um pedido que terminou com `fim` há 1 s (às 12:00:05; o relógio está em 12:00:06). */
+    function terminouHaPouco(fim: EventoDeOrquestracao): EstadoDaConversa {
+      const iniciado = aplicar(ESTADO_INICIAL, {
+        tipo: "turno_iniciado",
+        turnoId: "t1",
+        texto: "resuma o projeto",
+        configuracao,
+      });
+      return aplicarEvento(iniciado, { ...fim, sequencia: iniciado.ultimaSequencia + 1, em: "2026-10-28T12:00:05Z" });
+    }
+
+    function filaNaTela(conversa: EstadoDaConversa) {
+      return render(<Terminal canvas={canvasDoTerminal(conversa, comFila(PEDIDO_A, PEDIDO_B))} no={propsDoNo()} />);
+    }
+
+    it("concluído sem plano: mostra 'enviando o próximo…' sem 'enviar agora'; passado o prazo sem turno novo, 'fila pausada'", () => {
+      filaNaTela(terminouHaPouco({ tipo: "turno_concluido", turnoId: "t1", resposta: "Resumo pronto", uso: USO }));
+
+      expect(screen.getByText("enviando o próximo…")).toBeInTheDocument();
+      expect(screen.queryByText("fila pausada")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "enviar agora" })).not.toBeInTheDocument();
+
+      // O prazo é de 5 s desde o fim (12:00:05): faltam 4 s.
+      act(() => {
+        vi.advanceTimersByTime(3_999);
+      });
+      expect(screen.getByText("enviando o próximo…")).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(screen.getByText("fila pausada")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "enviar agora" })).toBeInTheDocument();
+    });
+
+    it("o turno do próximo pedido começa: a fila volta a andar sozinha", () => {
+      const concluido = terminouHaPouco({ tipo: "turno_concluido", turnoId: "t1", resposta: "Resumo pronto", uso: USO });
+      const { rerender } = filaNaTela(concluido);
+      const proximo = aplicar(
+        concluido,
+        { tipo: "pedido_retirado_da_fila", pedidoId: "pa", motivo: "enviado" },
+        { tipo: "turno_iniciado", turnoId: "t2", texto: PEDIDO_A.texto, configuracao },
+      );
+
+      rerender(<Terminal canvas={canvasDoTerminal(proximo, comFila(PEDIDO_A, PEDIDO_B))} no={propsDoNo()} />);
+
+      expect(screen.getByText("na fila")).toBeInTheDocument();
+      expect(screen.queryByText("enviando o próximo…")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "enviar agora" })).not.toBeInTheDocument();
+    });
+
+    it.each<[string, EventoDeOrquestracao]>([
+      ["cancelado", { tipo: "turno_cancelado", turnoId: "t1" }],
+      ["com falha", { tipo: "turno_falhou", turnoId: "t1", motivo: "o processo caiu" }],
+      [
+        "concluído com plano pendente",
+        { tipo: "turno_concluido", turnoId: "t1", resposta: "Plano", uso: USO, planoPendente: true },
+      ],
+    ])("%s: 'fila pausada' na hora, com 'enviar agora'", (_nome, fim) => {
+      filaNaTela(terminouHaPouco(fim));
+
+      expect(screen.getByText("fila pausada")).toBeInTheDocument();
+      expect(screen.queryByText("enviando o próximo…")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "enviar agora" })).toBeInTheDocument();
+    });
+
+    it("fechar o terminal no meio do prazo cancela o relógio", () => {
+      const { unmount } = filaNaTela(
+        terminouHaPouco({ tipo: "turno_concluido", turnoId: "t1", resposta: "Resumo pronto", uso: USO }),
+      );
+
+      unmount();
+
+      expect(vi.getTimerCount()).toBe(0);
+    });
+  });
+
+  it("depois de um /clear a fila continua, vinda do resumo", () => {
+    const limpa = aplicar(
+      conversaOciosa(),
+      { tipo: "pedido_enfileirado", pedido: PEDIDO_A },
+      { tipo: "conversa_limpa", turnosAnteriores: 1, planoDescartado: false, worktreeComAlteracoes: false },
+    );
+    render(<Terminal canvas={canvasDoTerminal(limpa, comFila(PEDIDO_A))} no={propsDoNo()} />);
+
+    expect(screen.getByText(/^— conversa nova iniciada às/)).toBeInTheDocument();
+    // Sem pedido rodando, a fila está pausada: o primeiro tem o "enviar agora".
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["1rode os testesenviar agora"]);
+  });
+});
+
+/** O que o navegador põe no arraste de uma linha de nota (ver `escreverPedidoArrastado`). */
+function arrasteDeNota(texto: string) {
+  const dados: Record<string, string> = {
+    [TIPO_DO_PEDIDO_ARRASTADO]: JSON.stringify({ texto, notaId: "n1" }),
+    "text/plain": texto,
+  };
+  return { types: Object.keys(dados), getData: (tipo: string) => dados[tipo] ?? "", files: [], dropEffect: "none" };
+}
+
+describe("NoTerminal · nota arrastada para o terminal", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function renderizarTerminal() {
+    const { container } = render(<Terminal canvas={canvasDoTerminal(conversaOciosa())} no={propsDoNo()} />);
+    const janela = container.querySelector(".janela-terminal");
+    if (!(janela instanceof HTMLElement)) {
+      throw new Error("janela do terminal não encontrada");
+    }
+    return janela;
+  }
+
+  it("durante o arraste avisa que vai escrever no prompt; ao soltar, o texto entra no prompt e nada é enviado", () => {
+    const enviar = vi.spyOn(api, "enviarMensagem");
+    const enfileirar = vi.spyOn(api, "enfileirarPedido");
+    const janela = renderizarTerminal();
+    const campo = campoDoPrompt();
+    fireEvent.change(campo, { target: { value: "corrija o bug" } });
+
+    const arraste = arrasteDeNota("revisar o domínio");
+    const aceito = !fireEvent.dragOver(janela, { dataTransfer: arraste });
+    expect(aceito).toBe(true);
+    expect(arraste.dropEffect).toBe("copy");
+    expect(screen.getByText(/solte para escrever no prompt/)).toBeInTheDocument();
+
+    fireEvent.drop(janela, { dataTransfer: arrasteDeNota("revisar o domínio") });
+
+    expect(screen.queryByText(/solte para escrever no prompt/)).not.toBeInTheDocument();
+    expect(campo).toHaveValue("corrija o bug\nrevisar o domínio");
+    expect(campo).toHaveFocus();
+    expect(enviar).not.toHaveBeenCalled();
+    expect(enfileirar).not.toHaveBeenCalled();
+  });
+
+  it("arquivos continuam com o aviso de anexar imagens", () => {
+    const janela = renderizarTerminal();
+
+    fireEvent.dragOver(janela, { dataTransfer: { types: ["Files"], files: [] } });
+
+    expect(screen.getByText("solte para anexar as imagens a este orquestrador")).toBeInTheDocument();
+    expect(screen.queryByText(/solte para escrever no prompt/)).not.toBeInTheDocument();
+  });
+
+  it("o botão de alterações fica na barra do terminal, com o id do orquestrador", () => {
+    renderizarTerminal();
+
+    expect(screen.getByRole("button", { name: "Alterações de o1" })).toBeInTheDocument();
+  });
+});
+
+describe("NoTerminal · borda piscando na entrega do relatório", () => {
+  const reduzirMovimento = { ligado: false };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-28T12:00:06Z"));
+    contagem.transcricoes = 0;
+    reduzirMovimento.ligado = false;
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: (consulta: string) => ({
+        matches: consulta === "(prefers-reduced-motion: reduce)" && reduzirMovimento.ligado,
+        media: consulta,
+      }),
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    Reflect.deleteProperty(window, "matchMedia");
+  });
+
+  const INICIADO: EventoDeOrquestracao = {
+    tipo: "subagente_iniciado",
+    turnoId: "t2",
+    subagenteId: "s1",
+    descricao: "Testes",
+    tarefa: "rode os testes",
+  };
+  const CONCLUIDO: Extract<EventoDeOrquestracao, { tipo: "subagente_concluido" }> = {
+    tipo: "subagente_concluido",
+    turnoId: "t2",
+    subagenteId: "s1",
+    situacao: "concluido",
+    resumo: "ok",
+    tokens: 10,
+    duracaoMs: 1000,
+  };
+
+  function executando(): EstadoDaConversa {
+    return aplicar(conversaDoTerminal(), INICIADO);
+  }
+
+  function renderizarComSubagente(conversa: EstadoDaConversa, canvas: ValorDoCanvas = canvasDoTerminal(conversa)) {
+    const resultado = render(<Terminal canvas={canvas} no={propsDoNo()} />);
+    const janela = () => resultado.container.querySelector(".janela-terminal");
+    return { ...resultado, janela, canvas };
+  }
+
+  function avancar(ms: number): void {
+    act(() => {
+      vi.advanceTimersByTime(ms);
+    });
+  }
+
+  it("quando o subagente conclui, pisca depois do envelope chegar e para em seguida, sem re-renderizar a transcrição", () => {
+    const conversa = executando();
+    const { janela, rerender, canvas } = renderizarComSubagente(conversa);
+
+    rerender(<Terminal canvas={{ ...canvas, conversas: new Map([["o1", aplicar(conversa, CONCLUIDO)]]) }} no={propsDoNo()} />);
+    const transcricoes = contagem.transcricoes;
+
+    avancar(DURACAO_DA_ENTREGA_MS - 1);
+    expect(janela()).not.toHaveClass("janela-terminal-entrega");
+    avancar(1);
+    expect(janela()).toHaveClass("janela-terminal-entrega");
+    avancar(DURACAO_DO_PISCAR_MS);
+    expect(janela()).not.toHaveClass("janela-terminal-entrega");
+    expect(contagem.transcricoes).toBe(transcricoes);
+  });
+
+  it("não pisca ao abrir com o subagente já concluído", () => {
+    const { janela } = renderizarComSubagente(aplicar(executando(), CONCLUIDO));
+
+    avancar(DURACAO_DA_ENTREGA_MS + DURACAO_DO_PISCAR_MS);
+    expect(janela()).not.toHaveClass("janela-terminal-entrega");
+  });
+
+  it("não pisca com o histórico antigo reenviado (ex.: recarregar a página)", () => {
+    const conversa = executando();
+    const { janela, rerender, canvas } = renderizarComSubagente(conversa);
+    const antigo: EventoRegistrado = { ...CONCLUIDO, sequencia: conversa.ultimaSequencia + 1, em: "2026-10-28T11:30:00Z" };
+
+    rerender(
+      <Terminal canvas={{ ...canvas, conversas: new Map([["o1", aplicarEvento(conversa, antigo)]]) }} no={propsDoNo()} />,
+    );
+    avancar(DURACAO_DA_ENTREGA_MS);
+    expect(janela()).not.toHaveClass("janela-terminal-entrega");
+  });
+
+  it("não pisca se o subagente falhou, com o servidor desconectado nem com o reduzir movimento", () => {
+    const conversa = executando();
+    const falhou = aplicar(conversa, { ...CONCLUIDO, situacao: "falhou" });
+    const concluido = aplicar(conversa, CONCLUIDO);
+    const desconectado = (estado: EstadoDaConversa): ValorDoCanvas => ({
+      ...canvasDoTerminal(estado),
+      servidor: { conectado: false, caiuEm: null, voltouEm: null, reiniciou: false, memoria: null },
+    });
+
+    const primeiro = renderizarComSubagente(conversa);
+    primeiro.rerender(<Terminal canvas={canvasDoTerminal(falhou)} no={propsDoNo()} />);
+    avancar(DURACAO_DA_ENTREGA_MS);
+    expect(primeiro.janela()).not.toHaveClass("janela-terminal-entrega");
+    primeiro.unmount();
+
+    const segundo = renderizarComSubagente(conversa, desconectado(conversa));
+    segundo.rerender(<Terminal canvas={desconectado(concluido)} no={propsDoNo()} />);
+    avancar(DURACAO_DA_ENTREGA_MS);
+    expect(segundo.janela()).not.toHaveClass("janela-terminal-entrega");
+    segundo.unmount();
+
+    reduzirMovimento.ligado = true;
+    const terceiro = renderizarComSubagente(conversa);
+    terceiro.rerender(<Terminal canvas={canvasDoTerminal(concluido)} no={propsDoNo()} />);
+    avancar(DURACAO_DA_ENTREGA_MS);
+    expect(terceiro.janela()).not.toHaveClass("janela-terminal-entrega");
+  });
+
+  it("fechar o terminal no meio da entrega cancela os relógios", () => {
+    const conversa = executando();
+    const { rerender, unmount, canvas } = renderizarComSubagente(conversa);
+    rerender(<Terminal canvas={{ ...canvas, conversas: new Map([["o1", aplicar(conversa, CONCLUIDO)]]) }} no={propsDoNo()} />);
+
+    unmount();
+
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

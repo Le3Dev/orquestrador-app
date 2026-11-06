@@ -44,6 +44,12 @@ export interface LayoutDoCanvas {
   terminais: Record<string, RetanguloDoTerminal>;
   /** Notas no canvas, por id da Nota. Layouts gravados antes das notas não têm o campo: valem como sem notas. */
   notas: Record<string, RetanguloDaNota>;
+  /**
+   * Janelas de artefatos abertas no canvas, por id do Artefato. Fechar só tira
+   * daqui; layouts gravados antes dos artefatos não têm o campo: valem como
+   * nenhum aberto.
+   */
+  artefatos: Record<string, Retangulo>;
   /** Prévias no canvas, pelo id criado na tela. Layouts gravados antes delas não têm o campo: valem como sem prévias. */
   previas: Record<string, RetanguloDaPrevia>;
   viewport: Viewport | null;
@@ -62,8 +68,7 @@ export interface BixinhosLimpos {
 
 export const TAMANHO_DO_TERMINAL = { largura: 600, altura: 520 } as const;
 export const TAMANHO_MINIMO_DO_TERMINAL = { largura: 420, altura: 300 } as const;
-// A criação mostra tudo de uma vez: no tamanho padrão, o formulário cabe sem rolar.
-export const TAMANHO_DO_RASCUNHO = { largura: 760, altura: 720 } as const;
+export const TAMANHO_DO_RASCUNHO = { largura: 640, altura: 620 } as const;
 export const TAMANHO_DO_BIXINHO = { largura: 150, altura: 170 } as const;
 export const TAMANHO_DA_NOTA = { largura: 320, altura: 280 } as const;
 export const TAMANHO_MINIMO_DA_NOTA = { largura: 220, altura: 140 } as const;
@@ -73,6 +78,8 @@ export const TAMANHO_DA_PREVIA = { largura: 720, altura: 520 } as const;
 export const TAMANHO_MINIMO_DA_PREVIA = { largura: 360, altura: 240 } as const;
 /** A prévia minimizada também fica só com a barra de título, da mesma altura da nota. */
 export const ALTURA_DA_PREVIA_MINIMIZADA = ALTURA_DA_NOTA_MINIMIZADA;
+export const TAMANHO_DO_ARTEFATO = { largura: 640, altura: 480 } as const;
+export const TAMANHO_MINIMO_DO_ARTEFATO = { largura: 320, altura: 200 } as const;
 
 const ESPACO_ENTRE_BIXINHOS = 18;
 const BIXINHOS_POR_FILEIRA = 5;
@@ -155,38 +162,45 @@ function interpretarPrevias(previas: unknown): Record<string, RetanguloDaPrevia>
   return validas;
 }
 
+/** Os retângulos válidos de um grupo do layout salvo (terminais ou artefatos); só os campos do retângulo. */
+function interpretarRetangulos(grupo: unknown): Record<string, Retangulo> {
+  const validos: Record<string, Retangulo> = {};
+  if (typeof grupo !== "object" || grupo === null) {
+    return validos;
+  }
+  for (const [id, retangulo] of Object.entries(grupo)) {
+    if (ehRetangulo(retangulo)) {
+      const { x, y, largura, altura } = retangulo;
+      validos[id] = { x, y, largura, altura };
+    }
+  }
+  return validos;
+}
+
 function layoutVazio(): LayoutDoCanvas {
-  return { terminais: {}, notas: {}, previas: {}, viewport: null };
+  return { terminais: {}, notas: {}, artefatos: {}, previas: {}, viewport: null };
 }
 
 /** Lê o layout salvo, descartando o que estiver corrompido em vez de quebrar a tela. */
 export function interpretarLayout(texto: string | null): LayoutDoCanvas {
-  const vazio = layoutVazio();
   if (texto === null) {
-    return vazio;
+    return layoutVazio();
   }
   try {
     const salvo: unknown = JSON.parse(texto);
     if (typeof salvo !== "object" || salvo === null) {
-      return vazio;
+      return layoutVazio();
     }
-    const { terminais, notas, previas, viewport } = salvo as Record<string, unknown>;
-    const validos: Record<string, RetanguloDoTerminal> = {};
-    if (typeof terminais === "object" && terminais !== null) {
-      for (const [id, retangulo] of Object.entries(terminais)) {
-        if (ehRetangulo(retangulo)) {
-          validos[id] = retangulo;
-        }
-      }
-    }
+    const { terminais, notas, artefatos, previas, viewport } = salvo as Record<string, unknown>;
     return {
-      terminais: validos,
+      terminais: interpretarRetangulos(terminais),
       notas: interpretarNotas(notas),
+      artefatos: interpretarRetangulos(artefatos),
       previas: interpretarPrevias(previas),
       viewport: ehViewport(viewport) ? viewport : null,
     };
   } catch {
-    return vazio;
+    return layoutVazio();
   }
 }
 
@@ -434,10 +448,14 @@ export function organizarEmGrade(terminais: readonly JanelaParaOrganizar[], colu
  * "Organizar" com notas: os terminais na grade de sempre e as notas em
  * colunas de até quatro, à direita dela. A grade não muda por causa das
  * notas — elas não têm bixinhos nem precisam do espaço reservado a eles.
+ *
+ * Os artefatos seguem nas mesmas colunas, depois das notas, começando numa
+ * coluna própria: uma página larga não alarga a coluna das notas.
  */
 export function organizarComNotas(
   terminais: readonly JanelaParaOrganizar[],
   notas: readonly JanelaParaOrganizar[],
+  artefatos: readonly JanelaParaOrganizar[] = [],
 ): Record<string, Ponto> {
   const posicoes = organizarEmGrade(terminais);
   let x = terminais.reduce(
@@ -446,14 +464,16 @@ export function organizarComNotas(
     0,
   );
 
-  for (let inicio = 0; inicio < notas.length; inicio += NOTAS_POR_COLUNA) {
-    const coluna = notas.slice(inicio, inicio + NOTAS_POR_COLUNA);
-    let y = 0;
-    for (const nota of coluna) {
-      posicoes[nota.id] = { x, y };
-      y += nota.altura + ESPACO_ENTRE_NOTAS;
+  for (const grupo of [notas, artefatos]) {
+    for (let inicio = 0; inicio < grupo.length; inicio += NOTAS_POR_COLUNA) {
+      const coluna = grupo.slice(inicio, inicio + NOTAS_POR_COLUNA);
+      let y = 0;
+      for (const janela of coluna) {
+        posicoes[janela.id] = { x, y };
+        y += janela.altura + ESPACO_ENTRE_NOTAS;
+      }
+      x += Math.max(...coluna.map((janela) => janela.largura)) + ESPACO_ENTRE_NOTAS;
     }
-    x += Math.max(...coluna.map((nota) => nota.largura)) + ESPACO_ENTRE_NOTAS;
   }
   return posicoes;
 }

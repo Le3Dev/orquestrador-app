@@ -1,11 +1,13 @@
 #!/bin/zsh -l
 # Abre o Orquestrador de agentes como APP DESKTOP no macOS (dois cliques no
 # Finder). É o par do iniciar-desktop.cmd do Windows. O próprio app sobe o
-# servidor local; se já houver um no ar (a versão no navegador), usa esse.
+# servidor local dentro dele, religa se cair e carrega a tela na janela. O
+# Orquestrador não abre no navegador.
 #
-# Rodando pelo código, o app abre sem pedir licença
-# (ORQUESTRADOR_SEM_LICENCA=1; o app empacotado continua pedindo a chave).
-# Fechar esta janela do Terminal fecha o app. O histórico fica em ./dados.
+# Na primeira execução instala as dependências e gera o build; depois refaz o
+# build só do que mudou. Rodando pelo código, o app abre sem pedir licença.
+# Fechar esta janela do Terminal fecha o app. O histórico fica em
+# ~/Library/Application Support/Orquestrador de Agentes/dados.
 
 cd "${0:A:h}" || exit 1
 
@@ -14,7 +16,7 @@ unset ELECTRON_RUN_AS_NODE
 
 falha() {
   echo
-  echo "Não foi possível preparar o projeto. Veja as mensagens acima."
+  echo "Não foi possível preparar ou abrir o aplicativo. Veja as mensagens acima."
   read -k 1 "?Aperte uma tecla para fechar."
   exit 1
 }
@@ -45,4 +47,5 @@ if [ ! -f web/dist/index.html ] || [ -n "$(find web/src web/index.html -newer we
   npm run web:build || falha
 fi
 
-ORQUESTRADOR_SEM_LICENCA="${ORQUESTRADOR_SEM_LICENCA:-1}" npm run desktop
+# Abre a janela do app (o electron/main.js cuida de subir o servidor).
+npm run desktop || falha

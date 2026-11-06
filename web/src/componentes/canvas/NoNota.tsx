@@ -6,6 +6,8 @@ import type { DadosDaNota } from "../../shared/api/tipos";
 import { TAMANHO_MINIMO_DA_NOTA } from "../../shared/canvas/layout";
 import { ALCA_DA_NOTA, type NoNota as TipoDoNo } from "../../shared/canvas/nos";
 import { useAcoesDasNotas, useErroAoCarregarNotas, useLojaDasNotas, useNota } from "../../shared/canvas/notas";
+import { escreverPedidoArrastado } from "../../shared/canvas/pedidoArrastado";
+import { alternarItem, linhasDaNota } from "../../shared/checklistDaNota";
 import { type SituacaoDoSalvamento, useEdicaoDaNota } from "../../shared/hooks/useEdicaoDaNota";
 import { IconeAlerta, IconeMinimizar, IconeRestaurar } from "../Icones";
 
@@ -34,6 +36,116 @@ function IconeLixeira() {
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
+
+function IconeLista() {
+  return (
+    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M4 6.5l1.5 1.5 3-3M4 13.5l1.5 1.5 3-3M11 7h9M11 14h9M5 19.5h.01M11 19.5h9"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconeEditar() {
+  return (
+    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3zM14 8l3 3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** Seis pontinhos: o desenho de "pegue aqui para arrastar". */
+function IconeDeArrastar() {
+  return (
+    <svg width={8} height={12} viewBox="0 0 8 12" aria-hidden="true">
+      {[2, 6].flatMap((x) => [2, 6, 10].map((y) => <circle key={`${x}-${y}`} cx={x} cy={y} r={1.1} fill="currentColor" />))}
+    </svg>
+  );
+}
+
+/**
+ * Pega um trecho da nota (uma linha ou o texto todo) para soltar num terminal
+ * como pedido. É um arraste do navegador, e não do React Flow: `nodrag` não
+ * move a nota, e `nopan` não move o canvas — o canvas cancelaria o arraste.
+ * Em branco, não arrasta.
+ */
+function AlcaDeArraste({ texto, notaId, rotulo, className = "" }: { texto: string; notaId: string; rotulo: string; className?: string }) {
+  const temTexto = texto.trim() !== "";
+  return (
+    <span
+      role="img"
+      aria-label={rotulo}
+      title={temTexto ? `${rotulo}: solte num terminal` : rotulo}
+      className={`alca-de-arraste nodrag nopan ${className}`}
+      draggable={temTexto}
+      onDragStart={(evento) => {
+        if (!temTexto) {
+          evento.preventDefault();
+          return;
+        }
+        escreverPedidoArrastado(evento.dataTransfer, { texto, notaId });
+      }}
+    >
+      <IconeDeArrastar />
+    </span>
+  );
+}
+
+type ModoDaNota = "editar" | "lista";
+
+/**
+ * O texto da nota linha a linha: as linhas de checklist (`[ ]`, `[x]`) viram
+ * caixas de marcar, e cada linha com texto pode ser arrastada até um terminal.
+ */
+function ListaDaNota({
+  texto,
+  notaId,
+  aoAlternar,
+}: {
+  texto: string;
+  notaId: string;
+  aoAlternar: (indiceDaLinha: number) => void;
+}) {
+  if (texto.trim() === "") {
+    return (
+      <p className="lista-da-nota lista-da-nota-vazia nodrag nowheel nopan">Nota vazia. Clique em editar para escrever.</p>
+    );
+  }
+  return (
+    <ul className="lista-da-nota custom-scrollbar nodrag nowheel nopan" aria-label="Linhas da nota">
+      {linhasDaNota(texto).map((linha, indice) => {
+        if (linha.tipo === "vazia") {
+          // A posição na lista é o índice da linha no texto: é o que o checklist reescreve.
+          return <li key={indice} className="linha-da-nota linha-da-nota-vazia" aria-hidden="true" />;
+        }
+        return (
+          <li key={indice} className="linha-da-nota">
+            <AlcaDeArraste texto={linha.texto} notaId={notaId} rotulo="Arrastar esta linha como pedido" />
+            {linha.tipo === "item" ? (
+              <label className="item-da-nota">
+                <input type="checkbox" checked={linha.marcado} onChange={() => aoAlternar(indice)} />
+                <span className={`texto-da-linha ${linha.marcado ? "item-da-nota-marcado" : ""}`}>{linha.texto}</span>
+              </label>
+            ) : (
+              <span className="texto-da-linha">{linha.texto}</span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 
@@ -151,6 +263,9 @@ interface PropsDoEditor {
 /**
  * O título e o texto em edição. O texto fica no estado daqui, e não no canvas:
  * digitar re-renderiza só esta nota.
+ *
+ * Dois modos: "editar" (o texto puro, no campo) e "lista" (linha a linha, com
+ * os itens de checklist marcáveis e cada linha arrastável até um terminal).
  */
 function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
   const loja = useLojaDasNotas();
@@ -158,6 +273,8 @@ function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
   const notaId = inicial.id;
   const edicao = useEdicaoDaNota(inicial, loja.guardar);
   const [editandoTitulo, setEditandoTitulo] = useState(false);
+  // Fica no estado da nota: sobrevive a minimizar e restaurar, mas não a recarregar a página.
+  const [modo, setModo] = useState<ModoDaNota>("editar");
   const [apagando, setApagando] = useState(false);
   const [erroAoApagar, setErroAoApagar] = useState<string | null>(null);
   const campo = useRef<HTMLTextAreaElement>(null);
@@ -168,6 +285,15 @@ function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
       campo.current?.focus({ preventScroll: true });
     }
   }, [loja, notaId]);
+
+  /** Marcar ou desmarcar um item reescreve o texto e salva na hora, como ao perder o foco. */
+  function alternarItemDaLista(indiceDaLinha: number): void {
+    const novo = alternarItem(edicao.texto, indiceDaLinha);
+    if (novo !== edicao.texto) {
+      edicao.mudarTexto(novo);
+      edicao.salvarAgora();
+    }
+  }
 
   function concluirTitulo(novo: string | null): void {
     if (novo !== null) {
@@ -217,7 +343,24 @@ function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
             {primeiraLinha(edicao.texto)}
           </span>
         ) : (
-          <span className="flex-1" />
+          <>
+            <span className="flex-1" />
+            <AlcaDeArraste
+              texto={edicao.texto}
+              notaId={notaId}
+              rotulo="Arrastar a nota inteira como pedido"
+              className="alca-de-arraste-da-nota"
+            />
+            <button
+              type="button"
+              className="botao-icone nodrag"
+              title={modo === "editar" ? "Ver como lista (marcar itens e arrastar linhas)" : "Editar o texto"}
+              aria-label={modo === "editar" ? "Ver como lista" : "Editar o texto"}
+              onClick={() => setModo(modo === "editar" ? "lista" : "editar")}
+            >
+              {modo === "editar" ? <IconeLista /> : <IconeEditar />}
+            </button>
+          </>
         )}
         {/* Minimizada, o rodapé some: o problema aparece aqui, e clicar restaura a nota para resolvê-lo. */}
         {minimizada && problema !== null && (
@@ -254,16 +397,20 @@ function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
 
       {!minimizada && (
         <>
-          <textarea
-            ref={campo}
-            className="texto-da-nota custom-scrollbar nodrag nowheel nopan"
-            aria-label="Texto da nota"
-            placeholder="Escreva aqui…"
-            value={edicao.texto}
-            maxLength={TAMANHO_MAXIMO_DO_TEXTO}
-            onChange={(evento) => edicao.mudarTexto(evento.target.value)}
-            onBlur={edicao.salvarAgora}
-          />
+          {modo === "editar" ? (
+            <textarea
+              ref={campo}
+              className="texto-da-nota custom-scrollbar nodrag nowheel nopan"
+              aria-label="Texto da nota"
+              placeholder="Escreva aqui…"
+              value={edicao.texto}
+              maxLength={TAMANHO_MAXIMO_DO_TEXTO}
+              onChange={(evento) => edicao.mudarTexto(evento.target.value)}
+              onBlur={edicao.salvarAgora}
+            />
+          ) : (
+            <ListaDaNota texto={edicao.texto} notaId={notaId} aoAlternar={alternarItemDaLista} />
+          )}
           <div className="rodape-da-nota">
             <IndicadorDeSalvamento situacao={edicao.situacao} aoTentarDeNovo={edicao.salvarAgora} />
             {edicao.situacao === "erro" && edicao.erro !== null && <span className="text-error">{edicao.erro}</span>}

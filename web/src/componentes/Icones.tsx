@@ -42,6 +42,21 @@ export function IconePasta({ tamanho = 12, className = "" }: PropsDoIcone) {
   );
 }
 
+/**
+ * Grade 2 × 2: "Organizar" (janelas lado a lado), nos controles do canvas.
+ * Preenchido, como os ícones de zoom do React Flow ao lado dele.
+ */
+export function IconeGrade({ tamanho = 12, className = "" }: PropsDoIcone) {
+  return (
+    <svg width={tamanho} height={tamanho} viewBox="0 0 12 12" className={className} aria-hidden="true">
+      <rect x="0.5" y="0.5" width="4.75" height="4.75" rx="1" fill="currentColor" />
+      <rect x="6.75" y="0.5" width="4.75" height="4.75" rx="1" fill="currentColor" />
+      <rect x="0.5" y="6.75" width="4.75" height="4.75" rx="1" fill="currentColor" />
+      <rect x="6.75" y="6.75" width="4.75" height="4.75" rx="1" fill="currentColor" />
+    </svg>
+  );
+}
+
 /** Branch de git: dois nós ligados, como o ícone de ramo de versão. */
 export function IconeBranch({ tamanho = 12, className = "" }: PropsDoIcone) {
   return (

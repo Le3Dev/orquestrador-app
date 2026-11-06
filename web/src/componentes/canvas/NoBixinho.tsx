@@ -3,13 +3,14 @@ import { memo } from "react";
 
 import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
 import { useCanvas } from "../../shared/canvas/contexto";
+import { iconeDaFerramenta } from "../../shared/canvas/iconesDeFerramenta";
 import { type Ancora, type NoBixinho as TipoDoNo, subagentesVisiveis } from "../../shared/canvas/nos";
 import type { SubagenteNaTela } from "../../shared/estado/aplicarEvento";
 import { formatarDecorrido, formatarTokens, idCurto } from "../../shared/formatacao";
 import { useRelogio } from "../../shared/hooks/useRelogio";
 import { Etiqueta } from "../Etiqueta";
 import { TextoFormatado } from "../TextoFormatado";
-import { Bixinho } from "./Bixinho";
+import { Bixinho, IconeDaFerramenta } from "./Bixinho";
 
 function Ficha({ subagente, nome, agora }: { subagente: SubagenteNaTela; nome: string; agora: Date }) {
   const executando = subagente.situacao === "executando";
@@ -69,6 +70,8 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({ subagente, se
   const executando = subagente.situacao === "executando";
   const agora = useRelogio(executando);
   const aparencia = aparenciaDoBixinho(subagente.id);
+  // Só enquanto trabalha: parado, a última ferramenta não diz nada.
+  const icone = executando ? iconeDaFerramenta(subagente.ultimaFerramenta) : null;
   const fala = executando
     ? subagente.atividade || "pensando…"
     : subagente.situacao === "concluido"
@@ -97,6 +100,7 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({ subagente, se
         <div className="balao-do-bixinho">
           <span className={executando ? "cursor" : ""}>{fala}</span>
         </div>
+        {icone !== null && <IconeDaFerramenta icone={icone} />}
         <Bixinho aparencia={aparencia} situacao={subagente.situacao} />
         <span className="font-titulo text-[12px] font-semibold leading-none">
           {aparencia.nome}

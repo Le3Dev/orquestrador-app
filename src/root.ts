@@ -2,29 +2,120 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-import express from "express";
+import express, { Express } from "express";
 
+import { ProjetosDoChat } from "./chat/ProjetosDoChat";
+import { ServicoDeChat } from "./chat/ServicoDeChat";
+import { acessoSoPeloApp } from "./controllers/acessoSoPeloApp";
+import { criarAlteracoesRoutes } from "./controllers/alteracoesRoutes";
+import { CanalDoChat, criarChatRoutes } from "./controllers/chatRoutes";
 import { criarNotasRoutes } from "./controllers/notasRoutes";
 import { criarOrquestradoresRoutes } from "./controllers/orquestradoresRoutes";
 import { ArmazemDeAnexosEmArquivo } from "./infraestrutura/arquivos/ArmazemDeAnexosEmArquivo";
+import { PastaDeEntradaDosArtefatos } from "./infraestrutura/arquivos/ColetorDeArtefatosEmPasta";
 import { ExploradorDePastas } from "./infraestrutura/arquivos/ExploradorDePastas";
 import { RepositorioDeNotasEmArquivo } from "./infraestrutura/arquivos/RepositorioDeNotasEmArquivo";
 import { RepositorioDeOrquestradoresEmArquivo } from "./infraestrutura/arquivos/RepositorioDeOrquestradoresEmArquivo";
 import { RepositorioDePreferenciasEmArquivo } from "./infraestrutura/arquivos/RepositorioDePreferenciasEmArquivo";
+import { RepositorioDoChatEmArquivo } from "./infraestrutura/arquivos/RepositorioDoChatEmArquivo";
+import { ConfiguracoesDeEsforcoDoClaudeCode } from "./infraestrutura/claudecode/ConfiguracoesDeEsforcoDoClaudeCode";
 import { FachadaClaudeCodeCli } from "./infraestrutura/claudecode/FachadaClaudeCodeCli";
+import { MedidorDeConsumoPorTranscricoes } from "./infraestrutura/claudecode/MedidorDeConsumoPorTranscricoes";
 import { MotorClaudeCodeCli } from "./infraestrutura/claudecode/MotorClaudeCodeCli";
-import { lerConfiguracao } from "./infraestrutura/Configuracao";
+import { MotorDeChatClaudeCodeCli } from "./infraestrutura/claudecode/MotorDeChatClaudeCodeCli";
+import {
+  Configuracao,
+  lerConfiguracao,
+  MENSAGEM_SO_NO_APLICATIVO,
+  modoDeAcesso,
+} from "./infraestrutura/Configuracao";
 import { ControleDeExecucoesEmMemoria } from "./infraestrutura/execucoes/ControleDeExecucoesEmMemoria";
+import { montarArtefatos, pastaDeEntradaDosArtefatos } from "./infraestrutura/montarArtefatos";
 import { GerenciadorDeWorktreesGit } from "./infraestrutura/sistema/GerenciadorDeWorktreesGit";
+import { LeitorDeAlteracoesGit } from "./infraestrutura/sistema/LeitorDeAlteracoesGit";
 import { MonitorDeMemoria } from "./infraestrutura/sistema/MonitorDeMemoria";
 import { encerrarAgentesOrfaos, RegistroDeProcessos } from "./infraestrutura/sistema/RegistroDeProcessos";
-import { SeletorDePastaNativo } from "./infraestrutura/sistema/SeletorDePastaNativo";
 import { CanalDeEventos } from "./infraestrutura/sse/CanalDeEventos";
 import { ServicoDeNotas } from "./notas/ServicoDeNotas";
+import { ServicoDeAlteracoes } from "./orquestracao/ServicoDeAlteracoes";
 import { ServicoDeOrquestracao } from "./orquestracao/ServicoDeOrquestracao";
+
+type ConfiguracaoDaMontagem = Pick<
+  Configuracao,
+  "chaveDeAcesso" | "permitirNavegador" | "urlDeDownload" | "pastaDaTela"
+>;
+
+/**
+ * Monta o Express na ordem que importa: a trava do aplicativo primeiro (antes
+ * do corpo JSON, das rotas, do SSE e da tela), depois as rotas e, por último,
+ * a tela estática.
+ */
+export function montarAplicacao(
+  configuracao: ConfiguracaoDaMontagem,
+  registrarRotas: (aplicacao: Express) => void,
+): Express {
+  const modo = modoDeAcesso(configuracao);
+  if (modo === "recusado") {
+    throw new Error(MENSAGEM_SO_NO_APLICATIVO);
+  }
+
+  const aplicacao = express();
+  aplicacao.disable("x-powered-by");
+  if (modo === "aplicativo" && configuracao.chaveDeAcesso !== null) {
+    aplicacao.use(
+      acessoSoPeloApp({ chave: configuracao.chaveDeAcesso, urlDeDownload: configuracao.urlDeDownload }),
+    );
+  }
+  // Mensagens podem levar até 5 imagens de 5 MB, em base64.
+  aplicacao.use(express.json({ limit: "40mb" }));
+
+  registrarRotas(aplicacao);
+
+  // Depois do build, a própria API serve a tela. Em desenvolvimento quem
+  // serve é o Vite, que repassa /api para cá.
+  const pastaDaTela = configuracao.pastaDaTela;
+  if (existsSync(pastaDaTela)) {
+    aplicacao.use(isolarOrigem);
+    aplicacao.use(express.static(pastaDaTela));
+    aplicacao.use((requisicao, resposta, proximo) => {
+      if (requisicao.method !== "GET" || requisicao.path.startsWith("/api")) {
+        proximo();
+        return;
+      }
+      resposta.sendFile(path.join(pastaDaTela, "index.html"));
+    });
+  }
+  return aplicacao;
+}
+
+/**
+ * Isolamento de origem (COOP + COEP): sem ele o navegador não libera threads
+ * no WebAssembly, e o ditado por voz (Whisper, rodando na tela) usa um núcleo
+ * só, umas 3 vezes mais lento. "credentialless" deixa a tela continuar
+ * carregando recursos de fora (o modelo do Hugging Face, imagens de links).
+ */
+function isolarOrigem(_requisicao: express.Request, resposta: express.Response, proximo: express.NextFunction): void {
+  resposta.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+  resposta.setHeader("Cross-Origin-Embedder-Policy", "credentialless");
+  proximo();
+}
 
 async function iniciar(): Promise<void> {
   const configuracao = lerConfiguracao();
+
+  // Antes de abrir porta ou mexer em dados e processos: fora do aplicativo
+  // (e sem a liberação de desenvolvimento) o servidor nem sobe.
+  const modo = modoDeAcesso(configuracao);
+  if (modo === "recusado") {
+    process.stderr.write(`${MENSAGEM_SO_NO_APLICATIVO}\n`);
+    process.exitCode = 1;
+    return;
+  }
+  if (modo === "navegador") {
+    console.warn(
+      "[acesso] ORQUESTRADOR_PERMITIR_NAVEGADOR=1: acesso pelo navegador liberado, sem a trava do aplicativo. Use só em desenvolvimento.",
+    );
+  }
 
   if (path.isAbsolute(configuracao.caminhoDoClaudeCode) && !existsSync(configuracao.caminhoDoClaudeCode)) {
     console.warn(
@@ -32,9 +123,16 @@ async function iniciar(): Promise<void> {
     );
   }
 
+  const { pastaDeDados } = configuracao;
+  // Pasta de entrada dos artefatos: os agentes gravam aqui (`chat/` e
+  // `orquestradores/<id>/`), e o contexto de artefatos coleta. O mesmo objeto
+  // do coletor, para o layout ter uma fonte só.
+  const entradaDosArtefatos = new PastaDeEntradaDosArtefatos(pastaDeEntradaDosArtefatos(pastaDeDados));
+
   const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(configuracao.pastaDeDados);
   const notas = await RepositorioDeNotasEmArquivo.abrir(configuracao.pastaDeDados);
   const preferencias = await RepositorioDePreferenciasEmArquivo.abrir(configuracao.pastaDeDados);
+  const repositorioDoChat = await RepositorioDoChatEmArquivo.abrir(configuracao.pastaDeDados, randomUUID);
 
   // Antes de registrar processos novos: se o servidor anterior caiu, os
   // agentes dele podem ter ficado rodando sozinhos.
@@ -68,9 +166,14 @@ async function iniciar(): Promise<void> {
     publicador: canal,
     anexos,
     worktrees,
+    pastaDeArtefatos: (orquestradorId) => entradaDosArtefatos.pastaDoOrquestrador(orquestradorId),
     preferencias,
     gerarId: randomUUID,
     agora: () => new Date(),
+    // Economia de tokens (ADR-21): custo de cada turno lido das transcrições e
+    // esforço que o Claude Code da máquina usa quando o app deixa "Padrão".
+    medidor: new MedidorDeConsumoPorTranscricoes(),
+    esforcoDaMaquina: new ConfiguracoesDeEsforcoDoClaudeCode(),
   });
 
   const interrompidos = await servico.interromperTurnosPendentes();
@@ -78,53 +181,77 @@ async function iniciar(): Promise<void> {
     console.warn(`[orquestracao] ${interrompidos} turno(s) marcado(s) como interrompido(s) pelo reinício.`);
   }
 
-  const aplicacao = express();
-  aplicacao.disable("x-powered-by");
-  // Mensagens podem levar até 5 imagens de 5 MB, em base64.
-  aplicacao.use(express.json({ limit: "40mb" }));
-
-  // A tela consulta isto a cada poucos segundos para saber se o servidor está
-  // no ar. O instante de início denuncia um reinício: os pedidos que rodavam
-  // antes dele foram interrompidos.
-  const iniciadoEm = new Date().toISOString();
-  aplicacao.get("/api/saude", (_requisicao, resposta) => {
-    resposta.json({ ok: true, iniciadoEm, memoria: monitor.ultimaLeitura });
+  // Adaptador: o chat enxerga projetos e Orquestradores só como nome e pasta.
+  const explorador = new ExploradorDePastas(configuracao.pastaRaizDosProjetos);
+  const projetosDoChat: ProjetosDoChat = {
+    listarProjetos: () => explorador.listarProjetos(),
+    listarOrquestradores: async () =>
+      repositorio.listar().map((orquestrador) => ({
+        nome: orquestrador.nome,
+        pasta: orquestrador.pastaDeTrabalho.caminho,
+      })),
+  };
+  const canalDoChat = new CanalDoChat();
+  const servicoDeChat = new ServicoDeChat({
+    repositorio: repositorioDoChat,
+    motor: new MotorDeChatClaudeCodeCli(new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro)),
+    projetos: projetosDoChat,
+    // dados/anexos/chat/: o mesmo armazém dos Orquestradores, com a chave "chat".
+    anexos,
+    publicador: canalDoChat,
+    // O mesmo controle dos turnos: ao desligar, a resposta do chat também é cancelada.
+    execucoes,
+    pastaDaSessao: repositorioDoChat.pastaDaSessao,
+    pastaDosProjetos: configuracao.pastaRaizDosProjetos,
+    pastaDeArtefatos: entradaDosArtefatos.pastaDoChat,
+    gerarId: randomUUID,
+    agora: () => new Date(),
   });
-
-  aplicacao.use(
-    "/api",
-    criarOrquestradoresRoutes({
-      servico,
-      repositorio,
-      canal,
-      explorador: new ExploradorDePastas(configuracao.pastaRaizDosProjetos),
-      anexos,
-      preferencias,
-      pastaRaiz: configuracao.pastaRaizDosProjetos,
-      seletorDePasta: new SeletorDePastaNativo(),
-    }),
-  );
-  aplicacao.use(
-    "/api",
-    criarNotasRoutes({
-      servico: new ServicoDeNotas({ repositorio: notas, gerarId: randomUUID, agora: () => new Date() }),
-    }),
-  );
-
-  // Depois do build, a própria API serve a tela (web/dist). Em desenvolvimento
-  // quem serve é o Vite, que repassa /api para cá.
-  const pastaDaTela = path.resolve(__dirname, "..", "web", "dist");
-  if (existsSync(pastaDaTela)) {
-    aplicacao.use(isolarOrigem);
-    aplicacao.use(express.static(pastaDaTela));
-    aplicacao.use((requisicao, resposta, proximo) => {
-      if (requisicao.method !== "GET" || requisicao.path.startsWith("/api")) {
-        proximo();
-        return;
-      }
-      resposta.sendFile(path.join(pastaDaTela, "index.html"));
-    });
+  if (await servicoDeChat.interromperRespostaPendente()) {
+    console.warn("[chat] A resposta em andamento foi marcada como interrompida pelo reinício.");
   }
+
+  // Artefatos: coleta o que os agentes gravam na pasta de entrada e serve na tela.
+  const artefatos = await montarArtefatos({ pastaDeDados });
+
+  // A tela consulta /api/saude a cada poucos segundos para saber se o servidor
+  // está no ar. O instante de início denuncia um reinício: os pedidos que
+  // rodavam antes dele foram interrompidos.
+  const iniciadoEm = new Date().toISOString();
+  const aplicacao = montarAplicacao(configuracao, (rotas) => {
+    rotas.get("/api/saude", (_requisicao, resposta) => {
+      resposta.json({ ok: true, iniciadoEm, memoria: monitor.ultimaLeitura });
+    });
+    rotas.use(
+      "/api",
+      criarOrquestradoresRoutes({
+        servico,
+        repositorio,
+        canal,
+        explorador,
+        anexos,
+        preferencias,
+        pastaRaiz: configuracao.pastaRaizDosProjetos,
+      }),
+    );
+    // Painel de alterações do worktree: só leitura, sobre o mesmo repositório dos Orquestradores.
+    rotas.use(
+      "/api",
+      criarAlteracoesRoutes({
+        servico: new ServicoDeAlteracoes({ repositorio, leitor: new LeitorDeAlteracoesGit() }),
+      }),
+    );
+    rotas.use("/api", criarChatRoutes({ servico: servicoDeChat, canal: canalDoChat, anexos }));
+    rotas.use(
+      "/api",
+      criarNotasRoutes({
+        servico: new ServicoDeNotas({ repositorio: notas, gerarId: randomUUID, agora: () => new Date() }),
+      }),
+    );
+    rotas.use("/api", artefatos.rotas);
+  });
+  // Depois das rotas: inclui o que chegou na pasta de entrada com o servidor desligado.
+  await artefatos.iniciar();
 
   // Só em 127.0.0.1: os agentes editam arquivos e rodam comandos com o login
   // do usuário — ninguém mais na rede pode mandar mensagens para eles.
@@ -137,6 +264,9 @@ async function iniciar(): Promise<void> {
     const cancelados = execucoes.cancelarTodas();
     console.log(`[${sinal}] Encerrando${cancelados > 0 ? ` e cancelando ${cancelados} turno(s)` : ""}.`);
     servidor.close();
+    artefatos
+      .encerrar()
+      .catch((erro: unknown) => console.warn("[artefatos] Falha ao encerrar a coleta:", erro));
     // Tempo para o taskkill derrubar os processos e o histórico ser gravado.
     setTimeout(() => process.exit(0), cancelados > 0 ? 2_000 : 200);
   };
@@ -144,8 +274,8 @@ async function iniciar(): Promise<void> {
   process.once("SIGTERM", () => desligar("SIGTERM"));
 
   // Um erro que escapou de todo tratamento: derruba os agentes (no Windows
-  // eles sobreviveriam ao servidor) e sai com código de erro, para o vigia
-  // (scripts/manter-no-ar.cjs) religar o servidor.
+  // eles sobreviveriam ao servidor) e sai com código de erro, para o app
+  // desktop (electron/main.js) religar o servidor.
   const cair = (erro: unknown): void => {
     console.error("[servidor] Erro inesperado; encerrando para religar:", erro);
     execucoes.cancelarTodas();
@@ -155,19 +285,10 @@ async function iniciar(): Promise<void> {
   process.once("unhandledRejection", cair);
 }
 
-iniciar().catch((erro: unknown) => {
-  console.error("Falha ao iniciar o servidor:", erro);
-  process.exit(1);
-});
-
-/**
- * Isolamento de origem (COOP + COEP): sem ele o navegador não libera threads
- * no WebAssembly, e o ditado por voz (Whisper, rodando na tela) usa um núcleo
- * só, umas 3 vezes mais lento. "credentialless" deixa a tela continuar
- * carregando recursos de fora (o modelo do Hugging Face, imagens de links).
- */
-function isolarOrigem(_requisicao: express.Request, resposta: express.Response, proximo: express.NextFunction): void {
-  resposta.setHeader("Cross-Origin-Opener-Policy", "same-origin");
-  resposta.setHeader("Cross-Origin-Embedder-Policy", "credentialless");
-  proximo();
+// Nos testes (vitest), só montarAplicacao é usada: importar não sobe o servidor.
+if (process.env.VITEST === undefined) {
+  iniciar().catch((erro: unknown) => {
+    console.error("Falha ao iniciar o servidor:", erro);
+    process.exit(1);
+  });
 }

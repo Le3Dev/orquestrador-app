@@ -1,7 +1,7 @@
 import { memo, type ReactNode, useEffect, useState } from "react";
 
 import { api } from "../../shared/api/cliente";
-import type { DadosDaConfiguracao, SinalDeVida } from "../../shared/api/tipos";
+import type { DadosDaConfiguracao, NomeDaPredefinicao, SinalDeVida } from "../../shared/api/tipos";
 import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
 import type { LinhaDoLog, TipoDeLinhaDoLog, TurnoNaTela } from "../../shared/estado/aplicarEvento";
 import { faseDoTurno } from "../../shared/estado/faseDoTurno";
@@ -18,6 +18,7 @@ import { useRelogio } from "../../shared/hooks/useRelogio";
 import { IconeAlerta, IconeCoracao, IconeOrquestrador, IconeRaio } from "../Icones";
 import { TextoFormatado } from "../TextoFormatado";
 import { type AcoesDoPlano, CartaoDoPlano } from "./CartaoDoPlano";
+import { CustoDoTurno } from "./CustoDoTurno";
 
 const SIMBOLOS: Readonly<Record<TipoDeLinhaDoLog, ReactNode>> = {
   sistema: "○",
@@ -178,6 +179,8 @@ const Turno = memo(function Turno({
       {turno.situacao === "falhou" && turno.motivoDaFalha !== null && (
         <p className="mono texto-longo text-error">{turno.motivoDaFalha}</p>
       )}
+      {/* O consumo é medido depois do fim do pedido; até lá, nada aparece. */}
+      {turno.consumo !== undefined && turno.consumo !== null && <CustoDoTurno consumo={turno.consumo} />}
     </div>
   );
 });
@@ -188,6 +191,8 @@ interface Props {
   pastaDeTrabalho: string;
   /** Configuração atual do Orquestrador; a mesma referência enquanto o conteúdo não muda. */
   configuracao: DadosDaConfiguracao;
+  /** A predefinição que a configuração atual reproduz (ex.: modo econômico), se houver. */
+  predefinicao?: NomeDaPredefinicao | null;
   /** Os pedidos da conversa deste Orquestrador (`EstadoDaConversa.turnos`). */
   turnos: readonly TurnoNaTela[];
   /** Quando a conversa atual começou (/clear); nulo enquanto é a primeira. */
@@ -210,6 +215,7 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
   nome,
   pastaDeTrabalho,
   configuracao,
+  predefinicao = null,
   turnos,
   conversaIniciadaEm,
   sinal,
@@ -230,6 +236,11 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
         <p>
           <span className="text-muted">config </span>
           {descreverConfiguracao(configuracao).toLowerCase()}
+          {predefinicao === "economico" && (
+            <span className="chip ml-1.5" title="A configuração atual é a do modo econômico.">
+              econômico
+            </span>
+          )}
         </p>
         <p className="text-muted">
           {turnos.length === 0

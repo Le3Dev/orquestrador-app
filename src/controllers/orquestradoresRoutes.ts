@@ -1,30 +1,33 @@
+import path from "node:path";
+
 import { Request, Response, Router } from "express";
 import { z, ZodError } from "zod";
 
 import { ArmazemDeAnexosEmArquivo, ehNomeDeAnexoValido } from "../infraestrutura/arquivos/ArmazemDeAnexosEmArquivo";
 import { ExploradorDePastas } from "../infraestrutura/arquivos/ExploradorDePastas";
 import { CanalDeEventos } from "../infraestrutura/sse/CanalDeEventos";
-import { SeletorDePasta, SeletorDePastaIndisponivel } from "../infraestrutura/sistema/SeletorDePastaNativo";
 import { MAXIMO_DE_IMAGENS_POR_MENSAGEM, TAMANHO_MAXIMO_DA_IMAGEM, TIPOS_DE_IMAGEM } from "../orquestracao/Anexo";
+import { ConfiguracaoDoOrquestrador } from "../orquestracao/ConfiguracaoDoOrquestrador";
 import { ErroDeOrquestracao, MotivoDoErro } from "../orquestracao/ErroDeOrquestracao";
 import { ESFORCOS_DE_RACIOCINIO } from "../orquestracao/EsforcoDeRaciocinio";
 import { EventoRegistrado } from "../orquestracao/EventoDeOrquestracao";
 import { instrucoesDoOrquestrador, mensagemParaOOrquestrador } from "../orquestracao/InstrucoesDoOrquestrador";
-import { ConfiguracaoDoOrquestrador } from "../orquestracao/ConfiguracaoDoOrquestrador";
 import { InstrucoesAplicadas, TAMANHO_MAXIMO_DAS_INSTRUCOES } from "../orquestracao/InstrucoesPersonalizadas";
 import { MODELOS_CLAUDE } from "../orquestracao/ModeloClaude";
 import { MODOS_DO_TURNO } from "../orquestracao/ModoDoTurno";
 import { NIVEIS_DE_PERMISSAO } from "../orquestracao/NivelDePermissao";
 import {
+  ErroDeFilaCheia,
   Orquestrador,
   TAMANHO_MAXIMO_DA_MENSAGEM,
   TAMANHO_MAXIMO_DO_NOME,
 } from "../orquestracao/Orquestrador";
 import { PastaDeTrabalho } from "../orquestracao/PastaDeTrabalho";
+import { PREDEFINICOES } from "../orquestracao/PredefinicaoDeConfiguracao";
 import { LIMITE_DE_SUBAGENTES } from "../orquestracao/QuantidadeDeSubagentes";
 import { RepositorioDeOrquestradores } from "../orquestracao/RepositorioDeOrquestradores";
 import { RepositorioDePreferencias } from "../orquestracao/RepositorioDePreferencias";
-import { ServicoDeOrquestracao } from "../orquestracao/ServicoDeOrquestracao";
+import { EsforcoHerdadoDosPapeis, ServicoDeOrquestracao } from "../orquestracao/ServicoDeOrquestracao";
 
 interface Dependencias {
   servico: ServicoDeOrquestracao;
@@ -34,13 +37,6 @@ interface Dependencias {
   anexos: ArmazemDeAnexosEmArquivo;
   preferencias: RepositorioDePreferencias;
   pastaRaiz: string;
-  /** A janela de escolher pasta do sistema (Windows, macOS, Linux com zenity). */
-  seletorDePasta: SeletorDePasta;
-}
-
-/** A janela abre no computador do servidor: só faz sentido para quem está nele. */
-function ehDaPropriaMaquina(endereco: string | undefined): boolean {
-  return endereco === "127.0.0.1" || endereco === "::1" || endereco === "::ffff:127.0.0.1";
 }
 
 /**
@@ -55,14 +51,6 @@ function esquemaDeInstrucoes(rotulo: string) {
       error: `${rotulo} devem ter até ${TAMANHO_MAXIMO_DAS_INSTRUCOES} caracteres.`,
     });
 }
-
-const esquemaDaEscolhaDePasta = z.object({
-  inicial: z.string({ error: "A pasta inicial deve ser um texto." }).optional(),
-});
-
-const esquemaDaConsultaDePastas = z.object({
-  caminho: z.string({ error: "Informe um único caminho." }).optional(),
-});
 
 const esquemaDaConfiguracao = z.object({
   modeloDoOrquestrador: z.enum(MODELOS_CLAUDE, { error: "Modelo do orquestrador inválido." }),
@@ -87,13 +75,9 @@ const esquemaDaConfiguracao = z.object({
   esforcoDosSubagentes: z
     .enum(ESFORCOS_DE_RACIOCINIO, { error: "Esforço dos subagentes inválido." })
     .optional(),
-  // Opcionais também na criação: ausentes valem `true` (ligadas).
-  permitirTrabalhoDireto: z
-    .boolean({ error: 'A opção "Deixar o orquestrador fazer o trivial sozinho" deve ser verdadeira ou falsa.' })
-    .optional(),
-  proporPlanoEmPedidosGrandes: z
-    .boolean({ error: 'A opção "Propor plano antes de mudanças grandes" deve ser verdadeira ou falsa.' })
-    .optional(),
+  // Chaves desconhecidas são descartadas pelo `z.object`: clientes antigos que
+  // ainda mandam as opções de trivial e de plano (fixas desde o ADR-28) não
+  // recebem erro, e os campos são ignorados.
   // Opcional também na criação: ausente vale "" (sem instruções próprias).
   instrucoesPersonalizadas: esquemaDeInstrucoes("As instruções personalizadas").optional(),
 });
@@ -166,6 +150,23 @@ const esquemaDeMensagem = z.object({
   modo: z.enum(MODOS_DO_TURNO, { error: "Modo do pedido inválido." }).default("execucao"),
 });
 
+/** Pedido para a fila: só texto e modo (imagens não entram na fila). */
+const esquemaDoPedidoNaFila = z.object({
+  texto: z
+    .string({ error: "Escreva o pedido." })
+    .trim()
+    .min(1, { error: "Escreva o pedido." })
+    .max(TAMANHO_MAXIMO_DA_MENSAGEM, {
+      error: `O pedido deve ter até ${TAMANHO_MAXIMO_DA_MENSAGEM} caracteres.`,
+    }),
+  modo: z.enum(MODOS_DO_TURNO, { error: "Modo do pedido inválido." }).default("execucao"),
+  // Recusadas em vez de descartadas em silêncio.
+  imagens: z
+    .array(z.unknown())
+    .max(0, { error: "A fila aceita só texto: envie as imagens quando o orquestrador estiver livre." })
+    .optional(),
+});
+
 const esquemaDeAprovacaoDoPlano = z.object({
   observacoes: z
     .string({ error: "As observações devem ser um texto." })
@@ -174,6 +175,16 @@ const esquemaDeAprovacaoDoPlano = z.object({
       error: `As observações devem ter até ${TAMANHO_MAXIMO_DA_MENSAGEM} caracteres.`,
     })
     .default(""),
+});
+
+const esquemaDaPredefinicao = z.object({
+  predefinicao: z.string({ error: "Predefinição desconhecida." }),
+});
+
+const esquemaDaConsultaDeEsforco = z.object({
+  modeloDoOrquestrador: z.enum(MODELOS_CLAUDE, { error: "Modelo do orquestrador inválido." }),
+  modeloDosSubagentes: z.enum(MODELOS_CLAUDE, { error: "Modelo dos subagentes inválido." }),
+  pasta: z.string({ error: "Escolha a pasta de trabalho." }).min(1, { error: "Escolha a pasta de trabalho." }),
 });
 
 const STATUS_POR_MOTIVO: Readonly<Record<MotivoDoErro, number>> = {
@@ -187,6 +198,10 @@ const STATUS_POR_MOTIVO: Readonly<Record<MotivoDoErro, number>> = {
 function responderErro(resposta: Response, erro: unknown): void {
   if (erro instanceof ErroDeOrquestracao) {
     resposta.status(STATUS_POR_MOTIVO[erro.motivo]).json({ erro: erro.message });
+    return;
+  }
+  if (erro instanceof ErroDeFilaCheia) {
+    resposta.status(409).json({ erro: erro.message });
     return;
   }
   if (erro instanceof ZodError) {
@@ -227,8 +242,10 @@ function apresentarResumo(orquestrador: Orquestrador, instrucoes: InstrucoesApli
     nomeDaPasta: orquestrador.pastaDeTrabalho.nome,
     situacao: orquestrador.situacao,
     configuracao: orquestrador.configuracao.paraDados(),
+    predefinicaoCorrespondente: orquestrador.predefinicaoCorrespondente,
     instrucoesAtivas: instrucoes?.origem ?? null,
     worktree: orquestrador.worktree,
+    fila: orquestrador.fila.map((pedido) => pedido.paraDados()),
     criadoEm: orquestrador.criadoEm.toISOString(),
     totalDeTurnos: orquestrador.totalDeTurnos,
     ultimoTurno:
@@ -246,6 +263,13 @@ function apresentarDetalhe(orquestrador: Orquestrador, instrucoes: InstrucoesApl
   return { ...apresentarResumo(orquestrador, instrucoes), turnos: orquestrador.paraDados().turnos };
 }
 
+function apresentarEsforcoHerdado({ orquestrador, subagentes }: EsforcoHerdadoDosPapeis) {
+  return {
+    orquestrador: orquestrador === null ? null : orquestrador.paraDados(),
+    subagentes: subagentes === null ? null : subagentes.paraDados(),
+  };
+}
+
 export function criarOrquestradoresRoutes({
   servico,
   repositorio,
@@ -254,7 +278,6 @@ export function criarOrquestradoresRoutes({
   anexos,
   preferencias,
   pastaRaiz,
-  seletorDePasta,
 }: Dependencias): Router {
   const rotas = Router();
   const resumo = (orquestrador: Orquestrador) =>
@@ -262,62 +285,19 @@ export function criarOrquestradoresRoutes({
   const detalhe = (orquestrador: Orquestrador) =>
     apresentarDetalhe(orquestrador, servico.instrucoesPara(orquestrador.configuracao));
 
-  /**
-   * Navegador de pastas da criação: as subpastas de `?caminho=` (qualquer
-   * pasta do computador; sem ele, a pasta dos projetos) e os atalhos.
-   */
   rotas.get(
     "/pastas",
-    rota(async (requisicao, resposta) => {
-      const { caminho } = esquemaDaConsultaDePastas.parse(requisicao.query);
-      const [conteudo, atalhos] = await Promise.all([explorador.listar(caminho), explorador.atalhos()]);
-      resposta.json({ raiz: pastaRaiz, ...conteudo, atalhos });
+    rota(async (_requisicao, resposta) => {
+      resposta.json({ raiz: pastaRaiz, pastas: await explorador.listarProjetos() });
     }),
   );
 
-  /**
-   * Abre a janela de escolher pasta do sistema e espera a pessoa escolher.
-   * `{ caminho }`, nulo quando ela cancela. Uma janela por vez; se a tela
-   * desistir (fechou a aba ou clicou em cancelar), a janela é fechada.
-   */
-  let janelaAberta = false;
-  rotas.post(
-    "/pastas/escolher",
+  // Navega pelo computador para escolher uma pasta fora da raiz dos projetos.
+  rotas.get(
+    "/pastas/navegar",
     rota(async (requisicao, resposta) => {
-      if (!ehDaPropriaMaquina(requisicao.socket.remoteAddress)) {
-        resposta.status(403).json({ erro: "A janela de escolher pasta só abre para quem usa o app neste computador." });
-        return;
-      }
-      if (janelaAberta) {
-        resposta.status(409).json({ erro: "A janela de escolher pasta já está aberta. Escolha ou cancele nela." });
-        return;
-      }
-      const { inicial } = esquemaDaEscolhaDePasta.parse(requisicao.body ?? {});
-      const candidata = inicial === undefined || inicial.trim() === "" ? pastaRaiz : PastaDeTrabalho.resolver(pastaRaiz, inicial).caminho;
-      const pastaInicial = (await explorador.existe(candidata)) ? candidata : undefined;
-
-      const desistencia = new AbortController();
-      resposta.on("close", () => {
-        if (!resposta.writableEnded) {
-          desistencia.abort();
-        }
-      });
-      janelaAberta = true;
-      try {
-        const caminho = await seletorDePasta.escolher(pastaInicial, desistencia.signal);
-        if (caminho !== null && !(await explorador.existe(caminho))) {
-          throw new ErroDeOrquestracao("dados_invalidos", `A pasta "${caminho}" não existe.`);
-        }
-        resposta.json({ caminho });
-      } catch (erro) {
-        if (!(erro instanceof SeletorDePastaIndisponivel)) {
-          throw erro;
-        }
-        console.warn("[pastas] Janela de escolher pasta indisponível:", erro.message);
-        resposta.status(503).json({ erro: "Não deu para abrir a janela do sistema. Escolha a pasta aqui mesmo.", indisponivel: true });
-      } finally {
-        janelaAberta = false;
-      }
+      const caminho = typeof requisicao.query.caminho === "string" ? requisicao.query.caminho : undefined;
+      resposta.json(await explorador.navegar(caminho));
     }),
   );
 
@@ -333,7 +313,12 @@ export function criarOrquestradoresRoutes({
     rota(async (requisicao, resposta) => {
       const { nome, pastaDeTrabalho, ...configuracao } = esquemaDeCriacao.parse(requisicao.body);
 
-      const pasta = PastaDeTrabalho.resolver(pastaRaiz, pastaDeTrabalho);
+      // Caminho absoluto = pasta escolhida à mão pelo navegador de pastas, que
+      // pode ficar fora da raiz. Relativo = veio do seletor de projetos, preso
+      // à raiz por segurança.
+      const pasta = path.isAbsolute(pastaDeTrabalho.trim())
+        ? PastaDeTrabalho.qualquer(pastaDeTrabalho)
+        : PastaDeTrabalho.dentroDe(pastaRaiz, pastaDeTrabalho);
       if (!(await explorador.existe(pasta.caminho))) {
         throw new ErroDeOrquestracao("dados_invalidos", `A pasta "${pasta.caminho}" não existe.`);
       }
@@ -363,7 +348,7 @@ export function criarOrquestradoresRoutes({
     }),
   );
 
-  /** Preferências que valem para todos os Orquestradores (hoje, as instruções padrão). */
+  /** Preferências que valem para todos os Orquestradores (instruções gerais e subagentes prontos). */
   rotas.get(
     "/preferencias",
     rota((_requisicao, resposta) => {
@@ -386,16 +371,21 @@ export function criarOrquestradoresRoutes({
    * O texto que o Orquestrador receberia: as instruções iniciais (system
    * prompt da conversa) e a mensagem de um pedido, com o bloco da
    * configuração e as instruções personalizadas que valeriam. Não salva nada.
+   * A pasta segue a regra da criação: absoluta vale qualquer uma; relativa
+   * fica presa à raiz dos projetos.
    */
   rotas.post(
     "/previa-do-prompt",
     rota((requisicao, resposta) => {
       const { configuracao: dados, pastaDeTrabalho, modo } = esquemaDaPrevia.parse(requisicao.body ?? {});
       const configuracao = ConfiguracaoDoOrquestrador.de(dados);
+      const informada = pastaDeTrabalho?.trim() ?? "";
       const pasta =
-        pastaDeTrabalho === undefined || pastaDeTrabalho.trim() === ""
+        informada === ""
           ? PastaDeTrabalho.reconstituir("<pasta de trabalho>")
-          : PastaDeTrabalho.resolver(pastaRaiz, pastaDeTrabalho);
+          : path.isAbsolute(informada)
+            ? PastaDeTrabalho.qualquer(informada)
+            : PastaDeTrabalho.dentroDe(pastaRaiz, informada);
       const instrucoes = servico.instrucoesPara(configuracao);
       resposta.json({
         instrucoesIniciais: instrucoesDoOrquestrador(pasta),
@@ -404,12 +394,58 @@ export function criarOrquestradoresRoutes({
           configuracao,
           [],
           modo,
+          // Cada Orquestrador tem a sua pasta de artefatos: a prévia mostra um marcador.
+          "<pasta de artefatos>",
           instrucoes,
           false,
           servico.subagentesProntos(),
         ),
         origemDasInstrucoes: instrucoes?.origem ?? null,
       });
+    }),
+  );
+
+  /** As predefinições de configuração disponíveis (ex.: "Modo econômico"). */
+  rotas.get(
+    "/predefinicoes",
+    rota((_requisicao, resposta) => {
+      resposta.json(PREDEFINICOES.map((predefinicao) => predefinicao.paraDados()));
+    }),
+  );
+
+  /** Aplica uma predefinição; responde como o PATCH da configuração. */
+  rotas.post(
+    "/orquestradores/:id/configuracao/predefinicao",
+    rota(async (requisicao, resposta) => {
+      const { predefinicao } = esquemaDaPredefinicao.parse(requisicao.body ?? {});
+      const orquestrador = await servico.aplicarPredefinicao(requisicao.params.id, predefinicao);
+      resposta.json(resumo(orquestrador));
+    }),
+  );
+
+  /** O esforço que cada papel herda do Claude Code da máquina quando está em "Padrão". */
+  rotas.get(
+    "/orquestradores/:id/esforco-herdado",
+    rota(async (requisicao, resposta) => {
+      resposta.json(apresentarEsforcoHerdado(await servico.esforcoHerdadoDe(requisicao.params.id)));
+    }),
+  );
+
+  /** O mesmo, para o formulário de criação: modelos e pasta ainda não salvos. */
+  rotas.get(
+    "/esforco-herdado",
+    rota(async (requisicao, resposta) => {
+      const consulta = esquemaDaConsultaDeEsforco.parse(requisicao.query);
+      const pasta = PastaDeTrabalho.dentroDe(pastaRaiz, consulta.pasta);
+      if (!(await explorador.existe(pasta.caminho))) {
+        throw new ErroDeOrquestracao("dados_invalidos", `A pasta "${pasta.caminho}" não existe.`);
+      }
+      const herdado = await servico.esforcoHerdadoPara({
+        modeloDoOrquestrador: consulta.modeloDoOrquestrador,
+        modeloDosSubagentes: consulta.modeloDosSubagentes,
+        pastaDoProjeto: pasta.caminho,
+      });
+      resposta.json(apresentarEsforcoHerdado(herdado));
     }),
   );
 
@@ -427,6 +463,36 @@ export function criarOrquestradoresRoutes({
         })),
         modo,
       );
+      resposta.status(202).json({ turnoId });
+    }),
+  );
+
+  /**
+   * Guarda um pedido na fila: ele sai sozinho quando o turno atual terminar
+   * bem, ou com "enviar agora". Aceito com ou sem turno em andamento.
+   */
+  rotas.post(
+    "/orquestradores/:id/fila",
+    rota(async (requisicao, resposta) => {
+      const { texto, modo } = esquemaDoPedidoNaFila.parse(requisicao.body ?? {});
+      const { pedidoId } = await servico.enfileirarPedido(requisicao.params.id, texto, modo);
+      resposta.status(201).json({ pedidoId });
+    }),
+  );
+
+  rotas.delete(
+    "/orquestradores/:id/fila/:pedidoId",
+    rota<{ id: string; pedidoId: string }>(async (requisicao, resposta) => {
+      await servico.removerDaFila(requisicao.params.id, requisicao.params.pedidoId);
+      resposta.status(204).end();
+    }),
+  );
+
+  /** "Enviar agora": o pedido sai da fila e vira um turno, como uma mensagem. */
+  rotas.post(
+    "/orquestradores/:id/fila/:pedidoId/enviar",
+    rota<{ id: string; pedidoId: string }>(async (requisicao, resposta) => {
+      const { turnoId } = await servico.enviarDaFila(requisicao.params.id, requisicao.params.pedidoId);
       resposta.status(202).json({ turnoId });
     }),
   );

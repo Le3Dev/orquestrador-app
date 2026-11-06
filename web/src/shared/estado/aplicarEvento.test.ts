@@ -1,10 +1,12 @@
 import type {
   DadosDaConfiguracao,
   DadosDaConfiguracaoGravada,
+  DadosDoPedidoNaFila,
   EventoDeOrquestracao,
   EventoRegistrado,
+  ModoDoTurno,
 } from "../api/tipos";
-import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "./aplicarEvento";
+import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa, filaDePedidos } from "./aplicarEvento";
 
 const configuracao: DadosDaConfiguracao = {
   modeloDoOrquestrador: "opus",
@@ -14,8 +16,6 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
-  permitirTrabalhoDireto: true,
-  proporPlanoEmPedidosGrandes: true,
   instrucoesPersonalizadas: "",
 };
 
@@ -226,8 +226,6 @@ describe("aplicarEvento", () => {
       permitirCommitEPush: false,
       esforcoDoOrquestrador: "padrao",
       esforcoDosSubagentes: "padrao",
-      permitirTrabalhoDireto: true,
-      proporPlanoEmPedidosGrandes: true,
       instrucoesPersonalizadas: "",
     });
     expect(novo?.configuracao.permitirCommitEPush).toBe(true);
@@ -255,33 +253,6 @@ describe("aplicarEvento", () => {
 
     expect(antigo?.configuracao.instrucoesPersonalizadas).toBe("");
     expect(novo?.configuracao.instrucoesPersonalizadas).toBe("Comece com PIRULITO.");
-  });
-
-  it("lê com o trabalho direto e o plano automático ligados os eventos gravados antes das opções", () => {
-    const configuracaoAntiga: DadosDaConfiguracaoGravada = {
-      modeloDoOrquestrador: "opus",
-      esforcoDoOrquestrador: "padrao",
-      modeloDosSubagentes: "sonnet",
-      esforcoDosSubagentes: "padrao",
-      quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
-      nivelDePermissao: "leitura",
-      permitirCommitEPush: false,
-    };
-    const [antigo, novo] = reproduzir(
-      registrar([
-        { tipo: "turno_iniciado", turnoId: "t1", texto: "antigo", configuracao: configuracaoAntiga },
-        { tipo: "turno_cancelado", turnoId: "t1" },
-        {
-          tipo: "turno_iniciado",
-          turnoId: "t2",
-          texto: "novo",
-          configuracao: { ...configuracao, permitirTrabalhoDireto: false, proporPlanoEmPedidosGrandes: false },
-        },
-      ]),
-    ).turnos;
-
-    expect(antigo?.configuracao).toMatchObject({ permitirTrabalhoDireto: true, proporPlanoEmPedidosGrandes: true });
-    expect(novo?.configuracao).toMatchObject({ permitirTrabalhoDireto: false, proporPlanoEmPedidosGrandes: false });
   });
 
   it("ferramenta usada pelo próprio orquestrador vira uma linha normal de atividade, com o verbo da ferramenta", () => {
@@ -576,6 +547,179 @@ describe("aplicarEvento", () => {
         sequencia: eventos[1]?.sequencia,
         em: eventos[1]?.em,
       });
+    });
+  });
+
+  describe("consumo medido do turno", () => {
+    const consumo = {
+      principal: { entrada: 1000, criacaoDeCache: 2000, leituraDeCache: 50_000, saida: 300 },
+      subagentes: { entrada: 500, criacaoDeCache: 0, leituraDeCache: 10_000, saida: 100 },
+      subagentesMedidos: 1,
+      parcial: false,
+      indiceDeCusto: 12_500,
+      modeloDoPrincipal: "claude-opus-5-5",
+    };
+    const turnoConcluido = registrar([
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija", configuracao },
+      {
+        tipo: "turno_concluido",
+        turnoId: "t1",
+        resposta: "feito",
+        uso: { duracaoMs: 1000, tokensDeEntrada: 1, tokensDeSaida: 1, subagentesLancados: 0 },
+      },
+    ]);
+
+    it("começa sem consumo e guarda o medido no turno, depois do fim, sem linha nova no log", () => {
+      const antes = reproduzir(turnoConcluido);
+      const depois = aplicarEvento(antes, {
+        tipo: "consumo_do_turno_medido",
+        turnoId: "t1",
+        consumo,
+        sequencia: 3,
+        em: "2026-10-28T12:01:00Z",
+      });
+
+      expect(antes.turnos[0]?.consumo).toBeNull();
+      expect(depois.turnos[0]?.consumo).toEqual(consumo);
+      expect(depois.turnos[0]?.situacao).toBe("concluido");
+      expect(depois.turnos[0]?.log).toHaveLength(antes.turnos[0]?.log.length ?? -1);
+    });
+
+    it("evento repetido é ignorado e turno desconhecido não muda nenhum turno", () => {
+      const medido: EventoRegistrado = {
+        tipo: "consumo_do_turno_medido",
+        turnoId: "t1",
+        consumo,
+        sequencia: 3,
+        em: "2026-10-28T12:01:00Z",
+      };
+      const umaVez = aplicarEvento(reproduzir(turnoConcluido), medido);
+      expect(aplicarEvento(umaVez, medido)).toBe(umaVez);
+
+      const desconhecido = aplicarEvento(umaVez, { ...medido, turnoId: "outro", sequencia: 4 });
+      expect(desconhecido.ultimaSequencia).toBe(4);
+      expect(desconhecido.turnos).toHaveLength(1);
+      expect(desconhecido.turnos[0]).toBe(umaVez.turnos[0]);
+    });
+  });
+
+  describe("fila de pedidos", () => {
+    function pedido(id: string, segundo: number, modo: ModoDoTurno = "execucao"): DadosDoPedidoNaFila {
+      return { id, texto: `pedido ${id}`, modo, enfileiradoEm: `2026-10-28T12:00:0${segundo}.000Z` };
+    }
+    const a = pedido("a", 1);
+    const b = pedido("b", 2, "planejamento");
+    const c = pedido("c", 3);
+    const limpa: EventoDeOrquestracao = {
+      tipo: "conversa_limpa",
+      turnosAnteriores: 1,
+      planoDescartado: false,
+      worktreeComAlteracoes: false,
+    };
+
+    it("o estado inicial da fila vem do resumo do servidor", () => {
+      expect(ESTADO_INICIAL.pedidosEnfileirados).toEqual([]);
+      expect(filaDePedidos(ESTADO_INICIAL, [a, b])).toEqual([a, b]);
+      expect(filaDePedidos(ESTADO_INICIAL, [])).toEqual([]);
+    });
+
+    it("pedido_enfileirado entra no fim da fila, sem mexer no turno em andamento nem no log", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "um", configuracao },
+          { tipo: "pedido_enfileirado", pedido: a },
+          { tipo: "pedido_enfileirado", pedido: b },
+        ]),
+      );
+
+      expect(estado.ultimaSequencia).toBe(3);
+      expect(filaDePedidos(estado, [])).toEqual([a, b]);
+      expect(estado.turnos).toHaveLength(1);
+      expect(estado.turnos[0]?.log).toHaveLength(1);
+    });
+
+    it("pedido_retirado_da_fila tira o pedido, removido pelo usuário ou enviado como turno", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "pedido_enfileirado", pedido: a },
+          { tipo: "pedido_enfileirado", pedido: b },
+          { tipo: "pedido_enfileirado", pedido: c },
+          { tipo: "pedido_retirado_da_fila", pedidoId: "b", motivo: "removido" },
+          { tipo: "pedido_retirado_da_fila", pedidoId: "a", motivo: "enviado" },
+          { tipo: "turno_iniciado", turnoId: "t2", texto: a.texto, configuracao },
+        ]),
+      );
+
+      expect(filaDePedidos(estado, [])).toEqual([c]);
+      expect(estado.turnos.map((turno) => [turno.texto, turno.situacao])).toEqual([["pedido a", "em_andamento"]]);
+    });
+
+    it("os eventos corrigem o resumo defasado: tiram o que saiu e acrescentam o que entrou depois da consulta, sem repetir", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "pedido_retirado_da_fila", pedidoId: "a", motivo: "enviado" },
+          { tipo: "pedido_enfileirado", pedido: c },
+        ]),
+      );
+
+      expect(filaDePedidos(estado, [a, b])).toEqual([b, c]);
+      expect(filaDePedidos(estado, [b, c])).toEqual([b, c]);
+    });
+
+    it("repetidos são ignorados: na reconexão do SSE e com o mesmo pedido de novo", () => {
+      const eventos = registrar([
+        { tipo: "pedido_enfileirado", pedido: a },
+        { tipo: "pedido_retirado_da_fila", pedidoId: "a", motivo: "removido" },
+      ]);
+      const umaVez = reproduzir(eventos);
+      expect(reproduzir(eventos, umaVez)).toBe(umaVez);
+
+      const soAEntrada = reproduzir(eventos.slice(0, 1));
+      const deNovo = aplicarEvento(soAEntrada, { tipo: "pedido_enfileirado", pedido: a, sequencia: 7, em: "2026-10-28T12:00:07Z" });
+      expect(deNovo.pedidosEnfileirados).toEqual([a]);
+      expect(deNovo.ultimaSequencia).toBe(7);
+
+      const retiradaDeNovo = aplicarEvento(umaVez, {
+        tipo: "pedido_retirado_da_fila",
+        pedidoId: "a",
+        motivo: "removido",
+        sequencia: 8,
+        em: "2026-10-28T12:00:08Z",
+      });
+      expect(retiradaDeNovo.pedidosRetirados).toEqual(["a"]);
+    });
+
+    it("fora de ordem: evento de sequência antiga é ignorado, e a entrada que chega depois da retirada também", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "pedido_enfileirado", pedido: b },
+          { tipo: "pedido_retirado_da_fila", pedidoId: "a", motivo: "removido" },
+          { tipo: "pedido_enfileirado", pedido: a },
+        ]),
+      );
+      expect(filaDePedidos(estado, [])).toEqual([b]);
+      expect(filaDePedidos(estado, [a, b])).toEqual([b]);
+
+      const atrasado = aplicarEvento(estado, { tipo: "pedido_enfileirado", pedido: c, sequencia: 2, em: "2026-10-28T12:00:02Z" });
+      expect(atrasado).toBe(estado);
+    });
+
+    it("o /clear não esvazia a fila: daí em diante ela vem do resumo, ainda filtrada pelas retiradas", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "pedido_enfileirado", pedido: a },
+          { tipo: "pedido_enfileirado", pedido: b },
+          { tipo: "pedido_retirado_da_fila", pedidoId: "a", motivo: "removido" },
+          limpa,
+        ]),
+      );
+      expect(estado.turnos).toEqual([]);
+      expect(estado.pedidosEnfileirados).toEqual([]);
+      expect(filaDePedidos(estado, [a, b])).toEqual([b]);
+
+      // Terminal aberto depois do /clear: o histórico só tem o conversa_limpa, e a fila vem do resumo.
+      const abertoDepois = reproduzir(registrar([limpa]));
+      expect(filaDePedidos(abertoDepois, [b])).toEqual([b]);
     });
   });
 });

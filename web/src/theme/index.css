@@ -34,6 +34,9 @@
   --surface-3: #2c2c29;
   --border: color-mix(in srgb, var(--claude-claro) 10%, transparent);
   --border-forte: color-mix(in srgb, var(--claude-claro) 18%, transparent);
+  /* Barra de título do app desktop: a mesma cor de COR_BARRA em
+   * electron/main.js (fundo da janela e overlay das janelas pequenas). */
+  --barra-de-titulo: #141413;
 
   /* Texto */
   --primary: var(--claude-claro);
@@ -251,10 +254,13 @@ h3 { font-size: 12px; font-weight: 600; }
   cursor: pointer;
 }
 .select:disabled { cursor: not-allowed; opacity: .6; }
+
 .select option { background: var(--surface-2); color: var(--primary); }
 
 .hint { font-size: 11px; color: var(--muted); }
 .hint-error { font-size: 11px; color: var(--error); }
+/* Aviso discreto junto de um campo (ex.: esforço herdado do Claude Code que gasta mais tokens). */
+.hint-warning { font-size: 11px; color: var(--warning); }
 
 input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 
@@ -366,9 +372,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  max-width: min(720px, calc(100vw - 32px));
-  /* Abaixo da barra superior, para não cobrir o botão de novo orquestrador. */
-  margin-top: 64px;
+  /* Na coluna do centro dos painéis do topo: nunca passa da largura dela. */
+  max-width: min(720px, 100%);
   padding: 12px 16px;
   border-radius: var(--radius-card);
   font-size: 12.5px;
@@ -410,6 +415,10 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   white-space: nowrap;
   flex-shrink: 0;
 }
+/* Cor do chip (ex.: etiqueta do worktree). Utilitários como `text-active` não
+ * servem aqui: ficam na camada do Tailwind e perdem para o `.chip`, sem camada. */
+.chip-ativo { color: var(--active); }
+.chip-inativo { color: var(--muted); }
 
 /* Medidor da cota da assinatura (5 horas / 7 dias). */
 .medidor { width: 64px; height: 4px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
@@ -469,7 +478,28 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .react-flow__minimap-node.minimapa-terminal { fill: var(--surface-3); stroke: var(--border-forte); }
 .react-flow__minimap-node.minimapa-bixinho { fill: var(--active); }
 .react-flow__minimap-node.minimapa-nota { fill: color-mix(in srgb, var(--warning) 60%, var(--surface)); }
+.react-flow__minimap-node.minimapa-artefato { fill: color-mix(in srgb, var(--info) 60%, var(--surface)); }
 .react-flow__minimap-node.minimapa-previa { fill: color-mix(in srgb, var(--info) 55%, var(--surface)); }
+/* Terminal de um Orquestrador trabalhando: contorno laranja que pulsa no
+ * minimapa. `non-scaling-stroke` deixa o contorno em pixels da tela, qualquer
+ * que seja a escala do minimapa. Parado (sem pulso) com o reduzir movimento,
+ * durante o arraste/pan e com o servidor desconectado. */
+.react-flow__minimap-node.minimapa-terminal-trabalhando {
+  fill: color-mix(in srgb, var(--active) 30%, var(--surface-3));
+  stroke: var(--active);
+  stroke-width: 2px;
+  vector-effect: non-scaling-stroke;
+  animation: pulso-no-minimapa 1.6s ease-in-out infinite;
+}
+@keyframes pulso-no-minimapa {
+  50% { stroke-opacity: .3; fill-opacity: .65; }
+}
+.canvas-movendo .react-flow__minimap-node.minimapa-terminal-trabalhando { animation-play-state: paused; }
+.canvas-desconectado .react-flow__minimap-node.minimapa-terminal-trabalhando {
+  animation: none;
+  fill: var(--surface-3);
+  stroke: color-mix(in srgb, var(--active) 35%, var(--muted));
+}
 .react-flow__controls { border-radius: var(--radius-input); overflow: hidden; border: 1px solid var(--border); }
 
 /* Nós sem a moldura padrão do React Flow: cada tipo desenha a própria. */
@@ -477,6 +507,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .react-flow__node-rascunho,
 .react-flow__node-bixinho,
 .react-flow__node-nota,
+.react-flow__node-artefato,
 .react-flow__node-previa { background: transparent; border: 0; padding: 0; }
 
 /* Âncoras das linhas: existem para o React Flow, não para o usuário. */
@@ -509,6 +540,27 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 }
 /* SMIL não pausa com `animation-play-state`: sem servidor, a bolinha some. */
 .canvas-desconectado .bolinha-da-troca { display: none; }
+
+/* Envelope do relatório: percorre a linha do bixinho até o terminal quando o
+ * Subagente conclui (`ArestaDoBixinho`). A opacidade e o percurso são do SMIL:
+ * nada de `opacity` nem `transform` aqui, que venceriam a animação. Também é
+ * SMIL, então some (em vez de pausar) com o canvas em movimento, sem servidor
+ * e com o reduzir movimento. */
+.envelope-da-entrega { pointer-events: none; }
+.envelope-da-entrega-papel {
+  fill: var(--claude-cinza-claro);
+  stroke: color-mix(in srgb, var(--success) 80%, var(--claude-escuro));
+  stroke-width: 1.2;
+}
+.envelope-da-entrega-aba {
+  fill: none;
+  stroke: color-mix(in srgb, var(--success) 80%, var(--claude-escuro));
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.canvas-desconectado .envelope-da-entrega,
+.canvas-movendo .envelope-da-entrega { display: none; }
 
 /* Redimensionamento dos terminais (só aparece no terminal selecionado). */
 .redimensionador-linha { border-color: color-mix(in srgb, var(--active) 55%, transparent) !important; }
@@ -551,6 +603,22 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   box-shadow: 0 24px 60px -24px rgba(0, 0, 0, .85), 0 0 34px -10px color-mix(in srgb, var(--active) 55%, transparent);
 }
 .react-flow__node.selected .janela-terminal { border-color: var(--active); }
+/* O relatório de um Subagente chegou (o envelope da linha): a borda pisca uma
+ * vez em verde, por DURACAO_DO_PISCAR_MS (entrega.ts). Só o meio da animação
+ * tem cor: o começo e o fim são a borda de antes (ativa, planejando…). O
+ * contorno, e não a sombra, para não apagar o brilho da janela ativa. */
+.janela-terminal.janela-terminal-entrega {
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+  animation: piscar-na-entrega 700ms ease-out 1;
+}
+@keyframes piscar-na-entrega {
+  30% {
+    border-color: var(--success);
+    outline-color: color-mix(in srgb, var(--success) 60%, transparent);
+  }
+}
+.canvas-desconectado .janela-terminal-entrega { animation: none; }
 
 .barra-do-terminal {
   display: flex;
@@ -624,6 +692,26 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .linha-fim .linha-simbolo, .linha-fim .linha-texto { color: var(--success); }
 .linha-erro .linha-simbolo, .linha-erro .linha-texto { color: var(--error); }
 .linha-sistema .linha-texto { color: var(--muted); }
+
+/* Custo estimado do pedido: uma linha discreta no fim, que abre a tabela por trecho. */
+.custo-do-turno { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.custo-do-turno-resumo {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--secondary);
+  text-align: left;
+  cursor: pointer;
+}
+.custo-do-turno-resumo:hover { color: var(--primary); text-decoration: underline; }
+.custo-do-turno-resumo:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; border-radius: 3px; }
+.custo-do-turno-tabela { border-collapse: collapse; color: var(--secondary); }
+.custo-do-turno-tabela th,
+.custo-do-turno-tabela td { padding: 2px 0 2px 14px; text-align: right; font-weight: 400; white-space: nowrap; }
+.custo-do-turno-tabela th:first-child { padding-left: 0; text-align: left; }
+.custo-do-turno-tabela thead th { color: var(--muted); border-bottom: 1px solid var(--border); }
+.custo-do-turno-tabela tfoot th,
+.custo-do-turno-tabela tfoot td { color: var(--primary); border-top: 1px solid var(--border); }
 
 .resposta-no-terminal {
   margin-top: 4px;
@@ -895,6 +983,279 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   overflow-wrap: anywhere;
 }
 
+/* Modo lista: o texto linha a linha, na mesma fonte e na mesma altura de linha
+ * do campo de edição (linha vazia também ocupa uma linha). */
+.lista-da-nota {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 10px 14px 10px 6px;
+  overflow-y: auto;
+  list-style: none;
+  font-family: var(--fonte-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--primary);
+  cursor: default;
+  user-select: text;
+}
+.lista-da-nota-vazia { padding: 12px 14px; color: var(--muted); }
+
+.linha-da-nota { display: flex; align-items: flex-start; gap: 4px; min-height: 1.6em; border-radius: 4px; }
+.linha-da-nota:not(.linha-da-nota-vazia):hover { background: color-mix(in srgb, var(--cor-da-nota) 8%, transparent); }
+.texto-da-linha { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Item de checklist (`[ ]`, `[x]`): a caixa marca e salva; marcado, risca. */
+.item-da-nota { display: flex; align-items: flex-start; gap: 7px; min-width: 0; cursor: pointer; }
+.item-da-nota input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  margin: .32em 0 0;
+  accent-color: var(--success);
+  cursor: pointer;
+}
+.item-da-nota input[type="checkbox"]:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.item-da-nota-marcado {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--muted) 70%, transparent);
+}
+
+/* Alça de arraste (seis pontinhos): leva uma linha, ou a nota inteira, até um
+ * terminal como pedido. Arraste do navegador, e não do React Flow (`nodrag`).
+ * Nas linhas, fica discreta até passar o mouse; em branco, não arrasta. */
+.alca-de-arraste {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 1.6em;
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: grab;
+}
+.alca-de-arraste:active { cursor: grabbing; }
+.alca-de-arraste:hover { color: var(--primary); background: color-mix(in srgb, var(--cor-da-nota) 18%, transparent); }
+.linha-da-nota .alca-de-arraste { opacity: .45; }
+.linha-da-nota:hover .alca-de-arraste { opacity: 1; }
+.alca-de-arraste[draggable="false"] { opacity: .35; cursor: default; }
+.alca-de-arraste[draggable="false"]:hover { color: var(--muted); background: transparent; }
+/* Na barra: do tamanho dos botões-ícone ao lado. */
+.alca-de-arraste-da-nota { width: 22px; height: 26px; border-radius: 6px; }
+
+/* ---------------- Artefatos (páginas HTML e documentos Markdown) ----------------
+ * A moldura da nota num tom azul. A página roda num iframe isolado (sandbox
+ * sem allow-same-origin), sobre fundo claro: é o que uma página sem estilo
+ * espera. Nada anima, menos o selo "vN nova", que some sozinho. */
+
+.moldura-do-artefato { width: 100%; height: 100%; }
+
+.janela-artefato {
+  --cor-do-artefato: var(--info);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--cor-do-artefato) 32%, var(--border-forte));
+  box-shadow: 0 18px 44px -22px rgba(0, 0, 0, .85);
+  transition: border-color .2s;
+}
+.react-flow__node.selected .janela-artefato { border-color: color-mix(in srgb, var(--cor-do-artefato) 80%, transparent); }
+
+.barra-do-artefato {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 38px;
+  padding: 0 6px 0 10px;
+  background: color-mix(in srgb, var(--cor-do-artefato) 12%, var(--surface-2));
+  border-bottom: 1px solid color-mix(in srgb, var(--cor-do-artefato) 22%, var(--border));
+  cursor: grab;
+}
+.barra-do-artefato:active { cursor: grabbing; }
+
+/* "</>" (HTML) ou "M↓" (Markdown), na barra e na paleta. */
+.icone-do-artefato {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  min-width: 26px;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: 5px;
+  font-family: var(--fonte-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--info) 30%, transparent);
+}
+.icone-do-artefato-markdown {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
+}
+
+.titulo-do-artefato {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--fonte-titulo);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.campo-do-titulo-do-artefato {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--active);
+  background: var(--surface-2);
+  color: var(--primary);
+  font-family: var(--fonte-titulo);
+  font-size: 12.5px;
+  font-weight: 600;
+  outline: none;
+  cursor: text;
+}
+.campo-do-titulo-do-artefato::placeholder { color: var(--placeholder); font-weight: 400; }
+
+/* Selo breve quando chega uma versão nova. */
+.destaque-de-versao-nova {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 6px;
+  font-family: var(--fonte-mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success) 45%, transparent);
+  animation: surgir-o-destaque .9s ease-out;
+}
+@keyframes surgir-o-destaque {
+  0% { opacity: 0; transform: translateY(-3px); }
+  35% { opacity: 1; transform: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 30%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* Seletor de versão ("v3 ▾") e a lista das versões. */
+.seletor-de-versao { position: relative; flex-shrink: 0; }
+.botao-da-versao {
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--secondary);
+  font-family: var(--fonte-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.botao-da-versao:hover, .botao-da-versao[aria-expanded="true"] { background: var(--surface-3); color: var(--primary); }
+.botao-da-versao:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+/* Vendo uma versão que não é a atual. */
+.botao-da-versao-antiga {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+}
+.menu-de-versoes {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 230px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px;
+  cursor: default;
+}
+.item-de-versao { font-size: 12px; text-align: left; }
+.item-de-versao[aria-checked="true"] { background: color-mix(in srgb, var(--info) 14%, transparent); }
+
+.corpo-do-artefato {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* A página: fundo claro e esquema claro (sem isso, o navegador pintaria o
+ * fundo de branco opaco por cima, ou o texto escuro ficaria sobre o escuro). */
+.corpo-do-artefato-html {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  color-scheme: light;
+  background: var(--claude-claro);
+}
+/* Enquanto o canvas se move ou a janela é redimensionada, a página não pega
+ * o mouse: passar por cima do iframe perderia o arraste. */
+.canvas-movendo .corpo-do-artefato-html,
+.moldura-do-artefato-redimensionando .corpo-do-artefato-html { pointer-events: none; }
+
+.corpo-do-artefato-markdown {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 18px;
+  cursor: auto;
+  user-select: text;
+}
+
+.estado-do-artefato {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 12px 14px;
+  font-family: var(--fonte-mono);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.rodape-do-artefato {
+  flex-shrink: 0;
+  padding: 5px 12px 6px;
+  border-top: 1px solid color-mix(in srgb, var(--error) 30%, var(--border));
+  font-family: var(--fonte-mono);
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+
+/* Tela cheia (modal no document.body, fora do zoom do canvas). */
+.artefato-ampliado {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1400px;
+  overflow: hidden;
+}
+.barra-do-artefato-ampliado {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 8px 10px 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
 /* ---------------- Prévia ao vivo (navegador no canvas) ----------------
  * A moldura da nota, no azul de informação, com o site num iframe. O fundo
  * é opaco: enquanto o site carrega, nada do canvas aparece por trás. */
@@ -1120,6 +1481,29 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 @keyframes tremer { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
 .no-bixinho-cancelado .bixinho-sprite { filter: grayscale(1) brightness(.7); }
 
+/* Ícone da ferramenta que o Subagente usa agora (só executando): um selo ao
+ * lado da cabeça do bixinho. Absoluto, para não empurrar o desenho nem as
+ * âncoras da linha; parado, não pula com o bixinho e não anima. */
+.icone-da-ferramenta {
+  --cor-do-icone: var(--secondary);
+  position: absolute;
+  top: 42px;
+  left: calc(50% + 32px);
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  border: 1px solid color-mix(in srgb, var(--cor-do-icone) 55%, var(--border));
+}
+.icone-da-ferramenta > svg { display: block; }
+.icone-da-ferramenta-pixels { fill: var(--cor-do-icone); }
+.icone-da-ferramenta-lupa { --cor-do-icone: var(--info); }
+.icone-da-ferramenta-lapis { --cor-do-icone: var(--warning); }
+.icone-da-ferramenta-engrenagem { --cor-do-icone: var(--active); }
+.icone-da-ferramenta-globo { --cor-do-icone: var(--success); }
+
 /* ---------------- Canvas em movimento ----------------
  * `canvas-movendo` fica no contêiner do canvas enquanto o usuário arrasta um
  * nó ou move/aproxima o canvas. */
@@ -1201,10 +1585,353 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .markdown .task-list-item { list-style: none; }
 .markdown .task-list-item input { margin-right: 6px; accent-color: var(--active); }
 
+/* ---------------- Chat rápido (centro de baixo do canvas) ----------------
+ * Fora do viewport do React Flow: não se move com o canvas. A largura deixa
+ * livres o minimapa (200 × 150 + 15px de margem, à direita) e os controles
+ * (à esquerda): como o painel é centralizado, a folga vale para os dois lados. */
+
+/* Ângulo registrado para poder ser animado; sem suporte a @property, a borda fica parada. */
+@property --angulo-da-borda {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.painel-do-chat {
+  --folga-lateral-do-chat: 231px; /* minimapa (200) + margem (15) + respiro (16) */
+  width: min(680px, calc(100vw - 2 * var(--folga-lateral-do-chat)));
+}
+
+/* Abaixo de 1100 px o minimapa some: a folga só precisa dos controles de zoom
+ * (26 + margem 15 + respiro). */
+@media (width < 1100px) {
+  .painel-do-chat { --folga-lateral-do-chat: 64px; }
+}
+
+.chat-rapido {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  cursor: auto;
+}
+
+.conversa-do-chat {
+  display: flex;
+  flex-direction: column;
+  max-height: 45vh;
+  overflow: hidden;
+  animation: subir .2s ease-out both;
+}
+.conversa-do-chat[hidden] { display: none; }
+@keyframes subir { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+.cabecalho-do-chat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.mensagens-do-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px 14px;
+  user-select: text;
+}
+
+/* Pergunta do usuário: à direita e discreta. */
+.mensagem-do-usuario {
+  align-self: flex-end;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  max-width: 85%;
+  padding: 7px 11px;
+  border-radius: 12px 12px 4px 12px;
+  background: var(--surface-3);
+  color: var(--caption);
+  font-size: 13px;
+}
+
+.anexos-do-chat { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.anexos-do-chat a {
+  display: block;
+  width: 72px;
+  height: 52px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border-forte);
+}
+.anexos-do-chat a:hover { border-color: var(--active); }
+.anexos-do-chat img { width: 100%; height: 100%; object-fit: cover; }
+
+/* Resposta do Claude: Markdown em Lora, com o cursor no fim enquanto chega texto. */
+.mensagem-do-claude { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.texto-respondendo > .markdown > :last-child::after {
+  content: "▍";
+  margin-left: 2px;
+  color: var(--active);
+  font-family: var(--fonte-mono);
+  animation: piscar 1s steps(1) infinite;
+}
+
+.cartao-de-acao {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+  border: 1px solid color-mix(in srgb, var(--active) 40%, var(--border));
+  background: color-mix(in srgb, var(--active) 6%, var(--surface-2));
+}
+
+/* Pedido de autorização (o chat quis editar ou rodar um comando): em tom de
+ * aviso, porque autorizar deixa o chat alterar os projetos até o /clear. */
+.cartao-de-autorizacao {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
+  background: color-mix(in srgb, var(--warning) 7%, var(--surface-2));
+}
+.detalhe-da-autorizacao {
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: var(--fonte-mono);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--warning);
+  background: var(--surface-3);
+  overflow-wrap: anywhere;
+}
+.acoes-da-autorizacao { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* Cor própria: utilitários do Tailwind ficam na camada e perdem para o `.btn`, sem camada. */
+.botao-de-autorizar { background: var(--warning); color: var(--claude-escuro); }
+.botao-de-autorizar:not(:disabled):hover { background: color-mix(in srgb, var(--warning) 85%, var(--claude-claro)); }
+
+/* Selo "alterações autorizadas" ao lado do campo do chat; o ✕ revoga. */
+.selo-de-autorizacao {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  height: 22px;
+  padding: 0 2px 0 8px;
+  border-radius: 999px;
+  font-family: var(--fonte-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  cursor: default;
+}
+.selo-de-autorizacao::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); }
+.revogar-autorizacao {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 10px;
+  color: var(--warning);
+  cursor: pointer;
+}
+.revogar-autorizacao:not(:disabled):hover { background: color-mix(in srgb, var(--warning) 22%, transparent); color: var(--primary); }
+.revogar-autorizacao:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.revogar-autorizacao:disabled { opacity: .45; cursor: not-allowed; }
+
+.mostrar-conversa { align-self: center; gap: 6px; cursor: pointer; }
+.mostrar-conversa:hover { color: var(--primary); border-color: var(--border-forte); }
+
+/* Borda laranja que gira devagar em volta do composer (a moldura é o gradiente;
+ * o composer, por cima, deixa só 1px dele à mostra). Respondendo, gira mais
+ * rápido e acende. */
+.moldura-do-composer {
+  position: relative;
+  padding: 1px;
+  border-radius: 14px;
+  background: conic-gradient(
+    from var(--angulo-da-borda, 0deg),
+    var(--border-forte) 0%,
+    color-mix(in srgb, var(--active) 45%, var(--border-forte)) 10%,
+    var(--border-forte) 22%,
+    var(--border-forte) 50%,
+    color-mix(in srgb, var(--active) 30%, var(--border-forte)) 62%,
+    var(--border-forte) 74%,
+    var(--border-forte) 100%
+  );
+  box-shadow: 0 18px 44px -18px rgba(0, 0, 0, .85);
+  animation: girar-a-borda 8s linear infinite;
+}
+.chat-rapido-respondendo .moldura-do-composer {
+  background: conic-gradient(
+    from var(--angulo-da-borda, 0deg),
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 0%,
+    var(--active) 12%,
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 28%,
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 50%,
+    color-mix(in srgb, var(--active) 80%, var(--border-forte)) 62%,
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 78%,
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 100%
+  );
+  box-shadow: 0 18px 44px -18px rgba(0, 0, 0, .85), 0 0 28px -10px color-mix(in srgb, var(--active) 60%, transparent);
+  animation-duration: 2s;
+}
+@keyframes girar-a-borda { to { --angulo-da-borda: 360deg; } }
+
+.composer-do-chat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-radius: 13px;
+  background: var(--surface);
+}
+/* Sem `overflow: hidden` no composer: o menu do modelo sai por cima dele. */
+.composer-do-chat > .faixa-de-progresso { position: absolute; inset: 0 12px auto; }
+.composer-do-chat .miniaturas-do-prompt { padding: 10px 12px 0; }
+
+.campo-do-chat {
+  width: 100%;
+  min-height: 44px;
+  max-height: 140px;
+  resize: none;
+  padding: 12px 14px 4px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--primary);
+  font-family: var(--fonte-texto);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+.campo-do-chat::placeholder { color: var(--placeholder); }
+
+.linha-do-composer { display: flex; align-items: center; gap: 8px; padding: 4px 8px 8px; }
+.botao-de-anexar { width: 30px; height: 30px; font-size: 18px; line-height: 1; }
+
+/* Compacto (padrão): tudo numa linha só — "+" · campo · modelo · enviar. Ao
+ * usar, expande: o campo sobe e os botões descem para a linha de baixo. */
+.campo-do-chat { transition: min-height .18s ease-out, padding .18s ease-out; }
+.composer-compacto {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  cursor: text;
+}
+.composer-compacto .linha-do-composer { display: contents; }
+.composer-compacto .botao-de-anexar { order: -1; }
+.composer-compacto .linha-do-composer > .flex-1,
+.composer-compacto .linha-do-composer > .etiqueta { display: none; }
+.composer-compacto > .hint,
+.composer-compacto > .hint-error { order: 1; flex-basis: 100%; }
+.composer-compacto .campo-do-chat {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.composer-compacto .campo-do-chat::placeholder { white-space: nowrap; text-overflow: ellipsis; }
+.composer-expandido .linha-do-composer { animation: subir .18s ease-out both; }
+
+/* Seletor de modelo e esforço: o menu abre para cima. */
+.seletor-de-modelo { position: relative; }
+.botao-do-seletor {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-button);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.botao-do-seletor:not(:disabled):hover, .botao-do-seletor[aria-expanded="true"] { background: var(--surface-3); }
+.botao-do-seletor:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.botao-do-seletor:disabled { opacity: .45; cursor: not-allowed; }
+
+.menu-do-seletor {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  padding: 6px;
+  background: var(--surface-2);
+  border-color: var(--border-forte);
+}
+.submenu-do-seletor {
+  position: absolute;
+  left: calc(100% + 10px);
+  bottom: -6px;
+  z-index: 11;
+  display: flex;
+  flex-direction: column;
+  width: 180px;
+  padding: 6px;
+  background: var(--surface-2);
+  border-color: var(--border-forte);
+}
+/* Sem espaço ao lado: o submenu sobe por cima do menu. */
+@media (max-width: 1100px) {
+  .submenu-do-seletor { left: auto; right: 0; bottom: calc(100% + 6px); }
+}
+
+.item-do-menu {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 6px;
+  text-align: left;
+  cursor: pointer;
+}
+.item-do-menu:hover, .item-do-menu:focus-visible, .item-do-menu[aria-expanded="true"] { background: var(--surface-3); outline: none; }
+.marca-do-item { width: 14px; flex-shrink: 0; color: var(--info); text-align: center; }
+.separador-do-menu { margin: 4px 6px; border: 0; border-top: 1px solid var(--border); }
+
+/* Servidor fora: o chat congela e a borda perde a cor, como o resto do canvas. */
+.canvas-desconectado .chat-rapido *,
+.canvas-desconectado .chat-rapido *::before,
+.canvas-desconectado .chat-rapido *::after { animation-play-state: paused !important; }
+.canvas-desconectado .moldura-do-composer { filter: grayscale(.85); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
-  /* A bolinha é SMIL, que ignora as regras de animação do CSS acima. */
-  .bolinha-da-troca { display: none; }
+  /* A bolinha e o envelope são SMIL, que ignora as regras de animação do CSS acima. */
+  .bolinha-da-troca, .envelope-da-entrega { display: none; }
+  /* O terminal trabalhando fica destacado no minimapa, sem pulsar. */
+  .react-flow__minimap-node.minimapa-terminal-trabalhando { animation: none; }
+  /* A chegada do relatório não pisca a borda do terminal. */
+  .janela-terminal.janela-terminal-entrega { animation: none; outline: none; }
+  /* A borda do chat fica parada (a cor de "respondendo" continua). */
+  .moldura-do-composer { animation: none !important; }
+  /* O composer troca de compacto para expandido sem transição. */
+  .campo-do-chat { transition: none; }
+  .composer-expandido .linha-do-composer { animation: none; }
 }
 
 /* Instruções personalizadas: texto livre com altura contida (o painel ⚙
@@ -1239,80 +1966,247 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   border-radius: var(--radius-input);
 }
 
-/* Navegador de pastas da criação do orquestrador. */
-.botao-pasta-acima { height: auto; min-width: 40px; padding: 0 12px; font-size: 14px; }
-.atalho-de-pasta {
-  height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border-forte);
-  background: var(--surface-2);
-  color: var(--secondary);
-  font-size: 11.5px;
-  cursor: pointer;
-  transition: background .15s, color .15s, border-color .15s;
+/* ---------------- App desktop (Electron): barra de título ----------------
+ * Faixa própria no topo, de ponta a ponta: a janela principal não tem barra
+ * nem botões nativos (titleBarStyle 'hidden' sem titleBarOverlay, em
+ * electron/main.js). Esquerda: identidade; centro: a busca (abre a paleta);
+ * direita: status, ⚙ e botões ─ ☐ ✕. O `-webkit-app-region` só tem efeito
+ * no Electron. Acima do canvas (`z-index`), para o aviso de falha do ⚙
+ * descer sobre ele. */
+.barra-de-titulo {
+  position: relative;
+  z-index: 30;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 36px;
+  padding: 0 4px 0 12px;
+  min-width: 0;
+  background: var(--barra-de-titulo);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag;
+  user-select: none;
 }
-.atalho-de-pasta:not(:disabled):hover { background: var(--surface-3); color: var(--primary); }
-.atalho-de-pasta:disabled { opacity: .5; cursor: not-allowed; }
-.atalho-de-pasta-atual { border-color: var(--active); color: var(--primary); }
-.lista-de-pastas {
-  max-height: 180px;
-  overflow-y: auto;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-input);
-  background: var(--surface-2);
-  padding: 4px;
+/* O espaço livre entre o nome e o status; a busca fica no meio dele. O vão
+ * em volta dela continua arrastando a janela. */
+.centro-da-barra-de-titulo { flex: 1 1 0; display: flex; justify-content: center; }
+.direita-da-barra-de-titulo {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
 }
-.item-de-pasta {
+/* Um botão com cara de campo: não é um input, só abre a paleta (Ctrl+K). */
+.campo-de-busca-da-barra {
+  flex: 0 1 340px;
+  min-width: 200px;
   display: flex;
   align-items: center;
   gap: 8px;
-  cursor: pointer;
-  width: 100%;
-  padding: 5px 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  color: var(--caption);
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.item-de-pasta:not(:disabled):hover { background: var(--surface-3); color: var(--primary); }
-.item-de-pasta:focus-visible { outline: 1px solid var(--active); outline-offset: -1px; }
-.item-de-pasta span { color: var(--muted); }
-
-/* ---------------- App desktop (Electron): arraste e botões da janela -------- */
-
-/* Só tem efeito dentro do Electron; no navegador o `-webkit-app-region` é
- * ignorado. Arrasta a janela pegando na barra do cabeçalho. */
-.barra-arrastavel { -webkit-app-region: drag; }
-/* Elementos interativos dentro da barra não podem arrastar a janela. */
-.no-drag, .barra-arrastavel .btn, .barra-arrastavel button { -webkit-app-region: no-drag; }
-
-.controles-da-janela { display: flex; align-items: center; gap: 2px; margin-left: 6px; }
-.botao-janela {
-  display: grid;
-  place-items: center;
-  width: 30px;
   height: 26px;
+  padding: 0 4px 0 10px;
+  border-radius: var(--radius-button);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-family: var(--fonte-texto);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color .15s, border-color .15s, color .15s;
+}
+.campo-de-busca-da-barra:hover { background: var(--surface-3); border-color: var(--border-forte); color: var(--secondary); }
+.campo-de-busca-da-barra:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.icone-da-busca { flex-shrink: 0; font-size: 14px; line-height: 1; }
+.texto-da-busca { flex: 1 1 auto; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.campo-de-busca-da-barra kbd {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+  font-family: var(--fonte-mono);
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--muted);
+}
+/* ⚙ (pastas e Claude Code), um separador e os botões ─ ☐ ✕, colados. */
+.botoes-da-barra-de-titulo { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.botao-dos-ajustes { font-size: 14px; }
+.separador-da-barra-de-titulo { width: 1px; height: 16px; margin: 0 4px; background: var(--border-forte); flex-shrink: 0; }
+/* Falha ao abrir os Ajustes: desce da barra, à direita, sobre o canvas. */
+.erro-da-barra-de-titulo { position: absolute; top: 100%; right: 8px; max-width: calc(100% - 16px); }
+.controles-da-janela { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.botao-da-janela {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 26px;
+  padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-button);
   background: transparent;
   color: var(--secondary);
   cursor: pointer;
-  transition: background-color .15s, color .15s;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
-.botao-janela:hover { background: var(--surface-3); color: var(--primary); }
-.botao-janela-fechar:hover { background: var(--error); color: var(--claude-claro); }
+.botao-da-janela:hover { background: var(--surface-3); color: var(--primary); }
+.botao-da-janela:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.botao-da-janela-fechar:hover { background: var(--error); color: var(--primary); }
+.identidade-da-barra-de-titulo { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.identidade-da-barra-de-titulo .no-orquestrador-icone { width: 22px; height: 22px; border-radius: 6px; }
+.titulo-da-barra-de-titulo {
+  font-family: var(--fonte-titulo);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--primary);
+  white-space: nowrap;
+}
+/* O que é clicável (ou tem balão ao passar o mouse) não arrasta a janela. */
+.no-drag { -webkit-app-region: no-drag; }
 
-/* macOS: as 3 bolinhas nativas da janela ficam dentro da barra do canvas, à
- * esquerda (posição em electron/mac.js); a barra abre espaço para elas. */
-.barra-com-semaforo { padding-left: 84px; }
-/* Em janelas mais estreitas a barra encostaria no painel de status, à
-   direita: o nome do app sai e fica só o ícone. */
-@media (max-width: 1599px) {
-  .titulo-da-barra { display: none; }
+/* ---------------- Atualização do app (barra de título) ----------------
+ * À esquerda do status. Baixando: texto e medidor discretos. Pronta: uma
+ * etiqueta clicável (sem caixa alta) que abre um cartão logo abaixo da
+ * barra, sobre o canvas. */
+.aviso-de-atualizacao {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: default;
+}
+.ancora-da-atualizacao { position: relative; display: flex; flex-shrink: 0; }
+.pilula-da-atualizacao {
+  cursor: pointer;
+  font-size: 10.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  transition: background-color .15s, border-color .15s;
+}
+.pilula-da-atualizacao:hover {
+  background: color-mix(in srgb, var(--cor-da-etiqueta) 22%, transparent);
+  border-color: color-mix(in srgb, var(--cor-da-etiqueta) 60%, transparent);
+}
+.pilula-da-atualizacao:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.cartao-da-atualizacao {
+  position: absolute;
+  /* Logo abaixo da barra de título (36 px, a pílula centralizada nela). */
+  top: calc(100% + 12px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 300px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-color: var(--border-forte);
+  font-size: 12.5px;
+  color: var(--caption);
+  white-space: normal;
+  user-select: text;
+  cursor: default;
+  animation: subir-menu .14s ease-out both;
+}
+.cartao-da-atualizacao:focus { outline: none; }
+.texto-do-cartao-da-atualizacao { margin: 0; line-height: 1.45; }
+.botoes-do-cartao-da-atualizacao { display: flex; justify-content: flex-end; gap: 6px; }
+
+/* ---------------- Status (situação, cotas, RAM) ---------------- */
+.status-do-canvas { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 16px; min-width: 0; }
+/* Encostado à direita (nos botões da janela); se não couber, `safe` alinha
+ * pelo início para cortar o fim e nunca esconder a situação. */
+.status-na-barra-de-titulo { flex-wrap: nowrap; justify-content: safe flex-end; overflow: hidden; }
+.status-resumo { display: none; cursor: default; }
+.status-resumo:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; border-radius: 4px; }
+.medidor-curto { width: 40px; }
+
+/* ---------------- Painéis do topo do canvas ----------------
+ * Um só painel em linha (esquerda · centro · direita): os blocos se acomodam
+ * juntos e nunca se sobrepõem. O vão entre eles deixa o canvas clicável. */
+.react-flow__panel.paineis-do-topo {
+  right: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  pointer-events: none;
+}
+.coluna-do-topo { display: flex; flex-direction: column; min-width: 0; pointer-events: none; }
+.coluna-do-topo > * { pointer-events: auto; }
+.coluna-do-topo-esquerda { flex: 0 0 auto; align-items: flex-start; }
+.coluna-do-topo-centro { flex: 1 1 0; align-items: center; }
+.coluna-do-topo-direita { flex: 0 1 auto; align-items: flex-end; }
+
+/* ---------------- "+ Novo ▾": menu da barra do canvas ---------------- */
+.ancora-do-menu { position: relative; display: flex; }
+.menu-do-novo {
+  position: absolute;
+  /* Logo abaixo do painel da barra (8 px de respiro dela + 6 px). */
+  top: calc(100% + 14px);
+  left: -10px;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 230px;
+  padding: 6px;
+  background: var(--surface-2);
+  border-color: var(--border-forte);
+  box-shadow: 0 18px 50px -18px rgba(0, 0, 0, .9);
+  animation: subir-menu .14s ease-out both;
+}
+@keyframes subir-menu { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.menu-do-novo .item-do-menu { gap: 16px; font-size: 12.5px; color: var(--primary); }
+.item-com-icone { display: inline-flex; align-items: center; gap: 9px; min-width: 0; }
+.icone-do-item { display: grid; place-items: center; width: 16px; flex-shrink: 0; font-size: 13px; color: var(--secondary); }
+.icone-do-item-ativo { color: var(--active); }
+.atalho-do-item { flex-shrink: 0; font-family: var(--fonte-mono); font-size: 10.5px; color: var(--muted); }
+
+/* ---------------- Larguras da janela ----------------
+ * ≥ 1280 px: tudo completo. 1100–1280 px: rótulos curtos ("5h", "+ Nota").
+ * < 1100 px: botões só com ícone (dica no `title`), status só com a situação
+ * e um medidor resumido (o resto no balão) e sem minimapa.
+ * Na barra de título, o status divide a largura com a busca e encurta um
+ * passo antes: nomes curtos abaixo de 1440 px e só o resumo abaixo de 1280 px;
+ * abaixo de 1100 px a busca fica só com a lupa. */
+.rotulo-curto, .rotulo-icone { display: none; }
+
+@media (width < 1440px) {
+  .status-na-barra-de-titulo .rotulo-completo, .status-na-barra-de-titulo .status-extra { display: none; }
+  .status-na-barra-de-titulo .rotulo-curto { display: inline; }
+}
+
+@media (width < 1280px) {
+  .rotulo-completo { display: none; }
+  .rotulo-curto { display: inline; }
+  .status-extra, .subtitulo-da-barra { display: none; }
+  .status-na-barra-de-titulo .status-detalhe { display: none; }
+  .status-na-barra-de-titulo .status-resumo { display: inline-flex; }
+}
+
+@media (width < 1100px) {
+  .rotulo-curto, .identidade-da-barra { display: none; }
+  .rotulo-icone { display: inline; }
+  .barra-do-canvas .btn-sm { width: 30px; padding: 0; font-size: 14px; }
+  .status-detalhe { display: none; }
+  .status-resumo { display: inline-flex; }
+  .react-flow__minimap { display: none; }
+  .campo-de-busca-da-barra {
+    flex: 0 0 28px;
+    min-width: 0;
+    width: 28px;
+    padding: 0;
+    justify-content: center;
+    background: transparent;
+    border-color: transparent;
+    color: var(--secondary);
+  }
+  .campo-de-busca-da-barra .texto-da-busca, .campo-de-busca-da-barra kbd { display: none; }
 }
 
 /* ---------------- Dica (ⓘ ao lado do nome de um campo) ---------------- */
@@ -1497,96 +2391,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   text-align: center;
 }
 
-/* ---------------- Criação do orquestrador (NoRascunho) ----------------
- * Tudo numa tela: rótulo à esquerda (com a Dica) e o controle à direita,
- * separados por linhas finas. A janela é redimensionável no canvas, então
- * estreita vira uma coluna só e nada estoura na horizontal. */
-.corpo-da-criacao {
-  container-type: inline-size;
-  overflow-x: hidden;
-  padding: 16px 24px 6px;
-  font-family: var(--fonte-texto);
-  font-size: 13px;
-  color: var(--primary);
-  cursor: default;
-}
-.linha-da-criacao {
-  display: grid;
-  grid-template-columns: 112px minmax(0, 1fr);
-  align-items: center;
-  column-gap: 12px;
-  row-gap: 8px;
-  padding: 12px 0;
-  border-top: 1px solid var(--border);
-}
-@container (max-width: 500px) {
-  .linha-da-criacao { grid-template-columns: minmax(0, 1fr); }
-}
-.rotulo-da-criacao {
-  font-family: var(--fonte-titulo);
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--primary);
-}
-/* A pasta fica acima das linhas, na largura toda: o rótulo dela é mais apagado. */
-.rotulo-da-criacao-discreto { color: var(--secondary); }
-
-.cartao-da-pasta {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: 62px;
-  padding: 8px 10px 8px 14px;
-  border: 1px solid var(--border-forte);
-  border-radius: var(--radius-card);
-  background: var(--surface-2);
-}
-.cartao-da-pasta-vazio { border-style: dashed; border-color: color-mix(in srgb, var(--primary) 24%, transparent); background: var(--screen-bg); }
-.nome-editavel {
-  min-width: 0;
-  max-width: 100%;
-  height: 26px;
-  padding: 0 6px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--primary);
-  font-family: var(--fonte-titulo);
-  font-size: 14px;
-  font-weight: 600;
-  outline: none;
-  transition: background .12s;
-}
-.nome-editavel:hover { background: var(--surface-3); }
-.nome-editavel:focus { background: var(--screen-bg); box-shadow: 0 0 0 1px color-mix(in srgb, var(--active) 60%, transparent); }
-.espera-da-janela {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 62px;
-  padding: 8px 10px 8px 14px;
-  border: 1px solid var(--border-forte);
-  border-radius: var(--radius-card);
-  background: var(--surface-2);
-}
-/* Botão de destaque sem ser o principal (ex.: "Escolher pasta…"). */
-.botao-de-destaque {
-  height: 40px;
-  padding: 0 14px;
-  border-radius: var(--radius-button);
-  border: 1px solid color-mix(in srgb, var(--active) 55%, transparent);
-  background: color-mix(in srgb, var(--active) 14%, transparent);
-  color: var(--primary);
-  font-family: var(--fonte-titulo);
-  font-size: 12.5px;
-  font-weight: 500;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background .12s;
-}
-.botao-de-destaque:not(:disabled):hover { background: color-mix(in srgb, var(--active) 24%, transparent); }
-.botao-de-destaque:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
-.botao-de-destaque:disabled { opacity: .5; cursor: not-allowed; }
 /* Link de verdade, laranja (o .botao-de-texto herda a cor). */
 .botao-link {
   padding: 0;
@@ -1598,245 +2402,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   cursor: pointer;
 }
 .botao-link:hover { color: color-mix(in srgb, var(--active) 75%, var(--claude-claro)); }
-.chip-de-pasta {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  height: 32px;
-  padding: 0 11px;
-  border-radius: var(--radius-input);
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--secondary);
-  font-size: 12.5px;
-  cursor: pointer;
-  transition: border-color .12s, background .12s;
-}
-.chip-de-pasta:not(:disabled):hover { border-color: color-mix(in srgb, var(--primary) 30%, transparent); }
-.chip-de-pasta[aria-pressed="true"] {
-  border-color: color-mix(in srgb, var(--active) 60%, transparent);
-  background: color-mix(in srgb, var(--active) 12%, transparent);
-  color: var(--primary);
-}
-.chip-de-pasta:disabled { opacity: .5; cursor: not-allowed; }
-
-/* Permissão: três opções numa linha, a escolhida acesa (rodar comandos em alerta). */
-.permissoes-da-criacao {
-  display: flex;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-input);
-  background: var(--screen-bg);
-}
-.opcao-da-permissao {
-  position: relative;
-  flex: 1 1 auto;
-  min-width: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  color: var(--secondary);
-  font-family: var(--fonte-titulo);
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: background .12s, color .12s, border-color .12s;
-}
-.opcao-da-permissao input { position: absolute; opacity: 0; pointer-events: none; }
-.opcao-da-permissao:hover { color: var(--primary); }
-.opcao-da-permissao:has(input:checked) {
-  border-color: var(--border-forte);
-  background: var(--surface-3);
-  color: var(--primary);
-  font-weight: 600;
-}
-.opcao-da-permissao-risco:has(input:checked) { border-color: color-mix(in srgb, var(--warning) 60%, transparent); color: var(--warning); }
-.opcao-da-permissao:has(input:focus-visible) { outline: 2px solid var(--active); outline-offset: 1px; }
-
-.select-compacto { width: 118px; height: 32px; padding: 0 30px 0 12px; font-family: var(--fonte-titulo); font-size: 12.5px; font-weight: 500; background-color: var(--screen-bg); background-position: right 10px center; }
-
-/* Chip de ajuste (esforço, quantidade): laranja quando sai do padrão, com o × que volta. */
-.chip-de-ajuste {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  height: 32px;
-  border-radius: 16px;
-  border: 1px solid var(--border);
-  overflow: hidden;
-  color: var(--secondary);
-  transition: color .12s, border-color .12s, background .12s;
-}
-.chip-de-ajuste:hover { color: var(--primary); border-color: color-mix(in srgb, var(--primary) 24%, transparent); }
-.chip-de-ajuste:has([aria-expanded="true"]) { border-color: color-mix(in srgb, var(--primary) 24%, transparent); }
-.chip-de-ajuste-personalizado,
-.chip-de-ajuste-personalizado:hover {
-  border-color: color-mix(in srgb, var(--active) 45%, transparent);
-  background: color-mix(in srgb, var(--active) 10%, transparent);
-  color: color-mix(in srgb, var(--active) 70%, var(--claude-claro));
-}
-.chip-de-ajuste-botao {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  height: 30px;
-  padding: 0 12px 0 11px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font-size: 12px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.chip-de-ajuste-botao svg { color: inherit; }
-.chip-de-ajuste-personalizado .chip-de-ajuste-botao { padding-right: 6px; }
-.chip-de-ajuste-limpar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 30px;
-  border: 0;
-  border-left: 1px solid color-mix(in srgb, var(--active) 30%, transparent);
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-.chip-de-ajuste-botao:focus-visible, .chip-de-ajuste-limpar:focus-visible { outline: 2px solid var(--active); outline-offset: -2px; border-radius: 16px; }
-.menu-da-criacao {
-  position: absolute;
-  top: 38px;
-  z-index: 6;
-  padding: 4px;
-  border-radius: var(--radius-input);
-  border: 1px solid var(--border-forte);
-  background: var(--surface-3);
-  box-shadow: 0 14px 36px rgba(0, 0, 0, .5);
-}
-.opcao-do-menu {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  height: 30px;
-  padding: 0 10px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--secondary);
-  font-size: 12.5px;
-  text-align: left;
-  cursor: pointer;
-}
-.opcao-do-menu:hover { background: color-mix(in srgb, var(--primary) 6%, transparent); color: var(--primary); }
-.opcao-do-menu[aria-selected="true"] { background: color-mix(in srgb, var(--active) 16%, transparent); color: var(--primary); font-weight: 600; }
-.opcao-do-menu:focus-visible { outline: 2px solid var(--active); outline-offset: -2px; }
-.segmentado-do-menu {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-input);
-  background: var(--screen-bg);
-}
-.segmentado-do-menu button {
-  height: 28px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--secondary);
-  font-family: var(--fonte-titulo);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-}
-.segmentado-do-menu button:hover { color: var(--primary); }
-.segmentado-do-menu button[aria-pressed="true"] { border-color: var(--border-forte); background: var(--surface-3); color: var(--primary); font-weight: 600; }
-.segmentado-do-menu button:focus-visible, .passo-numerico button:focus-visible { outline: 2px solid var(--active); outline-offset: -2px; }
-.passo-numerico {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  border: 1px solid var(--border-forte);
-  border-radius: var(--radius-input);
-  overflow: hidden;
-  background: var(--screen-bg);
-}
-.passo-numerico > span { min-width: 30px; text-align: center; }
-.passo-numerico button {
-  width: 32px;
-  height: 30px;
-  border: 0;
-  background: transparent;
-  color: var(--secondary);
-  font-size: 14px;
-  cursor: pointer;
-}
-.passo-numerico button:not(:disabled):hover { background: var(--surface-3); color: var(--primary); }
-.passo-numerico button:disabled { opacity: .35; cursor: not-allowed; }
-
-/* Interruptor (role="switch"): trilho com a bolinha; laranja quando ligado e valendo. */
-.interruptor {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 4px;
-  border: 0;
-  border-radius: var(--radius-input);
-  background: transparent;
-  color: var(--secondary);
-  font-size: 12.5px;
-  cursor: pointer;
-}
-.interruptor:hover { color: var(--primary); }
-.interruptor:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
-.interruptor-trilho {
-  position: relative;
-  flex: none;
-  width: 26px;
-  height: 15px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--primary) 14%, var(--surface));
-  transition: background .12s;
-}
-.interruptor-trilho::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 11px;
-  height: 11px;
-  border-radius: 50%;
-  background: var(--primary);
-  transition: left .12s;
-}
-.interruptor[aria-checked="true"] .interruptor-trilho { background: var(--active); }
-.interruptor[aria-checked="true"] .interruptor-trilho::after { left: 13px; }
-.interruptor[aria-checked="true"] .interruptor-sem-efeito { background: var(--muted); }
-
-.instrucoes-da-criacao { height: 150px; resize: vertical; background: var(--screen-bg); line-height: 1.5; }
-
-.rodape-da-criacao {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 16px 12px 24px;
-  border-top: 1px solid var(--border);
-  background: var(--surface-2);
-}
-.botao-de-comecar { flex: 0 1 auto; min-width: 0; height: 40px; padding: 0 18px; font-size: 13.5px; font-weight: 600; max-width: 55%; }
 
 /* ── Ditado por voz (BotaoDeDitado) ─────────────────────────────────────── */
 .ditado { position: relative; display: inline-flex; }

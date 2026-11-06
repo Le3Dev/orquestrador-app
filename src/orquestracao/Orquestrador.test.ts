@@ -3,9 +3,13 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
+import { ConsumoDoTurno } from "./ConsumoDoTurno";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
-import { Orquestrador } from "./Orquestrador";
+import { ErroDeFilaCheia, LIMITE_DA_FILA, Orquestrador } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
+import { PedidoNaFila } from "./PedidoNaFila";
+import { PredefinicaoDeConfiguracao, predefinicaoPorNome } from "./PredefinicaoDeConfiguracao";
+import { UsoDeTokens } from "./UsoDeTokens";
 
 const raiz = path.resolve("/projetos");
 const agora = new Date("2026-10-28T12:00:00Z");
@@ -15,7 +19,7 @@ function novoOrquestrador(): Orquestrador {
   return Orquestrador.criar({
     id: "o1",
     nome: "  Painel  ",
-    pastaDeTrabalho: PastaDeTrabalho.resolver(raiz, "painel"),
+    pastaDeTrabalho: PastaDeTrabalho.dentroDe(raiz, "painel"),
     sessaoId: "s1",
     configuracao: ConfiguracaoDoOrquestrador.de({
       modeloDoOrquestrador: "opus",
@@ -52,7 +56,7 @@ describe("Orquestrador", () => {
       Orquestrador.criar({
         id: "o1",
         nome: "   ",
-        pastaDeTrabalho: PastaDeTrabalho.resolver(raiz, "painel"),
+        pastaDeTrabalho: PastaDeTrabalho.dentroDe(raiz, "painel"),
         sessaoId: "s1",
         configuracao: novoOrquestrador().configuracao,
         agora,
@@ -428,6 +432,231 @@ describe("Orquestrador e o esforço de raciocínio", () => {
     expect(orquestrador.iniciarTurno("t1", "analise", agora)).toMatchObject({
       tipo: "turno_iniciado",
       configuracao: { esforcoDoOrquestrador: "extra_alto", esforcoDosSubagentes: "padrao" },
+    });
+  });
+});
+
+describe("Orquestrador e a economia de tokens", () => {
+  const consumo = ConsumoDoTurno.criar({
+    principal: UsoDeTokens.criar({ entrada: 6, criacaoDeCache: 33062, leituraDeCache: 62885, saida: 383 }),
+    subagentes: UsoDeTokens.vazio,
+    subagentesMedidos: 0,
+    parcial: false,
+    modeloDoPrincipal: "claude-opus-5-5",
+  });
+
+  function economico(): PredefinicaoDeConfiguracao {
+    const predefinicao = predefinicaoPorNome("economico");
+    if (predefinicao === null) {
+      throw new Error("predefinição econômica ausente");
+    }
+    return predefinicao;
+  }
+
+  it("aplicar a predefinição registra configuracao_alterada com o nome dela", () => {
+    const orquestrador = novoOrquestrador();
+    expect(orquestrador.predefinicaoCorrespondente).toBeNull();
+
+    const evento = orquestrador.aplicarPredefinicao(economico());
+
+    expect(evento).toEqual({
+      tipo: "configuracao_alterada",
+      configuracao: orquestrador.configuracao.paraDados(),
+      predefinicao: "economico",
+    });
+    expect(orquestrador.configuracao.paraDados()).toMatchObject({
+      modeloDosSubagentes: "sonnet",
+      esforcoDoOrquestrador: "medio",
+      nivelDePermissao: "leitura",
+    });
+    expect(orquestrador.predefinicaoCorrespondente).toBe("economico");
+
+    orquestrador.alterarConfiguracao({ esforcoDoOrquestrador: "alto" });
+    expect(orquestrador.predefinicaoCorrespondente).toBeNull();
+  });
+
+  it("registra o consumo de um turno concluído como veio", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "analise", agora);
+    orquestrador.concluirTurno("t1", "ok", uso, agora);
+
+    expect(orquestrador.registrarConsumoDoTurno("t1", consumo)).toEqual({
+      tipo: "consumo_do_turno_medido",
+      turnoId: "t1",
+      consumo: consumo.paraDados(),
+    });
+  });
+
+  it("marca como parcial o consumo de um turno cancelado ou com falha", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "analise", agora);
+    orquestrador.cancelarTurno("t1", agora);
+    orquestrador.iniciarTurno("t2", "de novo", agora);
+    orquestrador.falharTurno("t2", "caiu", agora);
+
+    expect(orquestrador.registrarConsumoDoTurno("t1", consumo)).toMatchObject({ consumo: { parcial: true } });
+    expect(orquestrador.registrarConsumoDoTurno("t2", consumo)).toMatchObject({ consumo: { parcial: true } });
+  });
+
+  it("recusa registrar consumo de turno em andamento ou desconhecido", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "analise", agora);
+
+    expect(capturarErro(() => orquestrador.registrarConsumoDoTurno("t1", consumo)).motivo).toBe(
+      "sem_turno_em_andamento",
+    );
+    expect(capturarErro(() => orquestrador.registrarConsumoDoTurno("t9", consumo)).motivo).toBe(
+      "sem_turno_em_andamento",
+    );
+  });
+});
+
+describe("Orquestrador e a fila de pedidos", () => {
+  function pedido(id: string, texto = `pedido ${id}`): PedidoNaFila {
+    return PedidoNaFila.criar({ id, texto, modo: "execucao", enfileiradoEm: agora });
+  }
+
+  it("enfileira até o limite, com ou sem turno em andamento, e recusa o seguinte", () => {
+    const orquestrador = novoOrquestrador();
+
+    expect(orquestrador.enfileirarPedido(pedido("p1"))).toEqual({
+      tipo: "pedido_enfileirado",
+      pedido: { id: "p1", texto: "pedido p1", modo: "execucao", enfileiradoEm: agora.toISOString() },
+    });
+    orquestrador.iniciarTurno("t1", "analise", agora);
+    for (let numero = 2; numero <= LIMITE_DA_FILA; numero += 1) {
+      orquestrador.enfileirarPedido(pedido(`p${numero}`));
+    }
+
+    let recusa: unknown = null;
+    try {
+      orquestrador.enfileirarPedido(pedido("p11"));
+    } catch (erro) {
+      recusa = erro;
+    }
+
+    expect(LIMITE_DA_FILA).toBe(10);
+    expect(recusa).toBeInstanceOf(ErroDeFilaCheia);
+    expect(recusa).toMatchObject({ motivo: "fila_cheia", message: 'A fila de "Painel" está cheia (máximo 10 pedidos).' });
+    expect(orquestrador.fila.map((item) => item.id)).toEqual(["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10"]);
+  });
+
+  it("retira um pedido mantendo a ordem dos outros", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.enfileirarPedido(pedido("p1"));
+    orquestrador.enfileirarPedido(pedido("p2"));
+    orquestrador.enfileirarPedido(pedido("p3"));
+
+    expect(orquestrador.retirarDaFila("p2", "removido")).toEqual({
+      tipo: "pedido_retirado_da_fila",
+      pedidoId: "p2",
+      motivo: "removido",
+    });
+    expect(orquestrador.retirarDaFila("p1", "enviado")).toMatchObject({ motivo: "enviado" });
+    expect(orquestrador.fila.map((item) => item.id)).toEqual(["p3"]);
+  });
+
+  it("recusa retirar ou buscar um pedido que não está na fila", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.enfileirarPedido(pedido("p1"));
+
+    const erro = capturarErro(() => orquestrador.retirarDaFila("p9", "removido"));
+
+    expect(erro.motivo).toBe("nao_encontrado");
+    expect(erro.message).toBe("Pedido não encontrado na fila.");
+    expect(capturarErro(() => orquestrador.pedidoDaFila("p9")).motivo).toBe("nao_encontrado");
+    expect(orquestrador.fila).toHaveLength(1);
+  });
+
+  it("a fila exposta é uma cópia", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.enfileirarPedido(pedido("p1"));
+
+    (orquestrador.fila as PedidoNaFila[]).pop();
+
+    expect(orquestrador.fila).toHaveLength(1);
+  });
+
+  it("a fila sobrevive a gravar e reabrir", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.enfileirarPedido(pedido("p1"));
+    orquestrador.enfileirarPedido(PedidoNaFila.criar({ id: "p2", texto: "planeje", modo: "planejamento", enfileiradoEm: agora }));
+
+    const dados = orquestrador.paraDados();
+    const reaberto = Orquestrador.reconstituir(dados);
+
+    expect(dados.fila).toEqual([
+      { id: "p1", texto: "pedido p1", modo: "execucao", enfileiradoEm: agora.toISOString() },
+      { id: "p2", texto: "planeje", modo: "planejamento", enfileiradoEm: agora.toISOString() },
+    ]);
+    expect(reaberto.fila.map((item) => item.paraDados())).toEqual(dados.fila);
+    expect(reaberto.paraDados()).toEqual(dados);
+  });
+
+  it("reabre um orquestrador.json gravado antes da fila com a fila vazia", () => {
+    const { fila: _semOCampo, ...dadosAntigos } = novoOrquestrador().paraDados();
+
+    const reaberto = Orquestrador.reconstituir(dadosAntigos);
+
+    expect(reaberto.fila).toEqual([]);
+    expect(reaberto.paraDados().fila).toEqual([]);
+  });
+
+  it("limpar a conversa mantém a fila", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "analise", agora);
+    orquestrador.concluirTurno("t1", "pronto", uso, agora);
+    orquestrador.enfileirarPedido(pedido("p1"));
+
+    orquestrador.limparConversa("s2");
+
+    expect(orquestrador.fila.map((item) => item.id)).toEqual(["p1"]);
+  });
+
+  describe("o próximo da fila depois de um turno", () => {
+    function comFila(): Orquestrador {
+      const orquestrador = novoOrquestrador();
+      orquestrador.enfileirarPedido(pedido("p1"));
+      orquestrador.enfileirarPedido(pedido("p2"));
+      orquestrador.iniciarTurno("t1", "analise", agora);
+      return orquestrador;
+    }
+
+    it("é o primeiro da fila quando o turno conclui sem plano pendente", () => {
+      const orquestrador = comFila();
+      orquestrador.concluirTurno("t1", "pronto", uso, agora);
+
+      expect(orquestrador.proximoDaFilaApos("t1")?.id).toBe("p1");
+    });
+
+    it.each<[string, (orquestrador: Orquestrador) => void]>([
+      ["cancelado", (orquestrador) => orquestrador.cancelarTurno("t1", agora)],
+      ["com falha", (orquestrador) => orquestrador.falharTurno("t1", "sem cota", agora)],
+      ["com plano pendente", (orquestrador) => orquestrador.concluirTurno("t1", "o plano", uso, agora, true)],
+      ["interrompido", (orquestrador) => orquestrador.interromperTurnoEmAndamento(agora)],
+      ["ainda em andamento", () => undefined],
+    ])("não há próximo com o turno %s", (_situacao, encerrar) => {
+      const orquestrador = comFila();
+      encerrar(orquestrador);
+
+      expect(orquestrador.proximoDaFilaApos("t1")).toBeNull();
+      expect(orquestrador.fila).toHaveLength(2);
+    });
+
+    it("não há próximo se outro turno já começou depois dele", () => {
+      const orquestrador = comFila();
+      orquestrador.concluirTurno("t1", "pronto", uso, agora);
+      orquestrador.iniciarTurno("t2", "do usuário", agora);
+
+      expect(orquestrador.proximoDaFilaApos("t1")).toBeNull();
+    });
+
+    it("não há próximo com a fila vazia", () => {
+      const orquestrador = novoOrquestrador();
+      orquestrador.iniciarTurno("t1", "analise", agora);
+      orquestrador.concluirTurno("t1", "pronto", uso, agora);
+
+      expect(orquestrador.proximoDaFilaApos("t1")).toBeNull();
     });
   });
 });

@@ -5,19 +5,50 @@ import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 /**
  * Pasta em que um Orquestrador e seus Subagentes trabalham. Objeto de valor.
  *
- * Pode ser qualquer pasta do computador. Caminho relativo parte da pasta dos
- * projetos (`PASTA_RAIZ_PROJETOS`); a tela sempre manda o caminho absoluto,
- * escolhido no navegador de pastas. Que a pasta exista, quem confere é a rota.
+ * Só é criada dentro da pasta raiz dos projetos: os agentes podem editar
+ * arquivos e rodar comandos, e um caminho como `..\..\Windows` não pode virar
+ * área de trabalho deles por um erro de digitação.
  */
 export class PastaDeTrabalho {
   private constructor(public readonly caminho: string) {}
 
-  static resolver(base: string, caminho: string): PastaDeTrabalho {
+  static dentroDe(raiz: string, caminho: string): PastaDeTrabalho {
     const informado = caminho.trim();
     if (informado === "") {
       throw new ErroDeOrquestracao("dados_invalidos", "Informe a pasta de trabalho.");
     }
-    return new PastaDeTrabalho(path.resolve(base, comBarraNaUnidade(informado)));
+
+    const raizResolvida = path.resolve(raiz);
+    const alvo = path.resolve(raizResolvida, informado);
+    const relativo = path.relative(raizResolvida, alvo);
+
+    const saiDaRaiz =
+      relativo === ".." || relativo.startsWith(`..${path.sep}`) || path.isAbsolute(relativo);
+    if (saiDaRaiz) {
+      throw new ErroDeOrquestracao(
+        "dados_invalidos",
+        `A pasta "${alvo}" fica fora de "${raizResolvida}". Escolha uma pasta dentro da raiz dos projetos.`,
+      );
+    }
+
+    return new PastaDeTrabalho(alvo);
+  }
+
+  /**
+   * Pasta escolhida à mão pelo usuário em qualquer lugar do computador (pelo
+   * navegador de pastas). Diferente de `dentroDe`, não exige ficar sob a raiz
+   * dos projetos: o caminho foi informado de propósito, não por um erro de
+   * digitação de um caminho relativo. Exige um caminho absoluto, já existente.
+   */
+  static qualquer(caminho: string): PastaDeTrabalho {
+    const informado = caminho.trim();
+    if (informado === "") {
+      throw new ErroDeOrquestracao("dados_invalidos", "Informe a pasta de trabalho.");
+    }
+    if (!path.isAbsolute(informado)) {
+      throw new ErroDeOrquestracao("dados_invalidos", "Informe o caminho completo da pasta.");
+    }
+    return new PastaDeTrabalho(path.resolve(informado));
   }
 
   /** Recria a partir do histórico salvo, que já passou pela validação ao ser criado. */
@@ -28,12 +59,4 @@ export class PastaDeTrabalho {
   get nome(): string {
     return path.basename(this.caminho);
   }
-}
-
-/**
- * No Windows, "C:" sozinho é "a pasta atual da unidade C" e resolve para a
- * pasta dos projetos quando ela está em C:. Quem digita "C:" quer a raiz.
- */
-export function comBarraNaUnidade(caminho: string): string {
-  return path.sep === "\\" && /^[A-Za-z]:$/.test(caminho) ? `${caminho}\\` : caminho;
 }

@@ -24,6 +24,13 @@
 // Os endpoints abaixo são fixos da Lemon Squeezy e normalmente não mudam.
 
 module.exports = {
+  // Exigir licença no app instalado. false durante a fase de testes com os
+  // devs: o app instalado abre sem pedir chave (a tela de ativação e o módulo
+  // de licença continuam no app, só não são usados). Para religar: mudar para
+  // true e publicar uma versão nova — a atualização automática a leva a todos
+  // os apps instalados, que passam a pedir a chave na abertura seguinte.
+  exigirLicenca: false,
+
   // Endpoints públicos da API de licenças do Lemon Squeezy.
   endpoints: {
     activate: "https://api.lemonsqueezy.com/v1/licenses/activate",
@@ -49,7 +56,10 @@ module.exports = {
   appId: "com.orquestradoragentes.app",
   productName: "Orquestrador de Agentes",
 
-  // Porta do servidor Express local (deve bater com a do servidor; o main.js
-  // ainda respeita a env PORTA se ela existir).
-  porta: 3200,
+  // A porta do servidor local não é mais fixa: o main.js escolhe uma porta
+  // livre em 127.0.0.1 a cada abertura (ou usa a env PORTA, se existir).
+
+  // Página de download do app (a última Release pública no GitHub), repassada
+  // ao servidor como ORQUESTRADOR_URL_DE_DOWNLOAD. null = não repassa.
+  urlDeDownload: "https://github.com/Le3Dev/orquestrador-app/releases/latest",
 };

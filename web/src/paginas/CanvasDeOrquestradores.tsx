@@ -1,6 +1,7 @@
 import {
   Background,
   BackgroundVariant,
+  ControlButton,
   Controls,
   MiniMap,
   Panel,
@@ -13,17 +14,32 @@ import {
   type NodeChange,
   type NodeTypes,
 } from "@xyflow/react";
-import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
-import { IconeOrquestrador } from "../componentes/Icones";
+import { IconeGrade, IconeOrquestrador } from "../componentes/Icones";
+import { ChatRapido } from "../componentes/chat/ChatRapido";
 import { ArestaDoBixinho } from "../componentes/canvas/ArestaDoBixinho";
+import { NoArtefato } from "../componentes/canvas/NoArtefato";
 import { NoBixinho } from "../componentes/canvas/NoBixinho";
 import { NoNota } from "../componentes/canvas/NoNota";
 import { NoPrevia } from "../componentes/canvas/NoPrevia";
 import { NoRascunho } from "../componentes/canvas/NoRascunho";
 import { NoTerminal } from "../componentes/canvas/NoTerminal";
+import { BarraDeTituloDoApp } from "../componentes/canvas/BarraDeTituloDoApp";
+import { type ControleDaPaleta, PaletaDeComandos } from "../componentes/canvas/PaletaDeComandos";
+import { rodandoNoDesktop } from "../shared/ponteDoDesktop";
 import {
   AvisoDeConexao,
+  AvisoDeMemoria,
   BarraDoCanvas,
   Doca,
   ErroDoCanvas,
@@ -33,7 +49,20 @@ import {
 import { PainelDeInstrucoesGerais } from "../componentes/canvas/PainelDeInstrucoesGerais";
 import { PainelDeSubagentes } from "../componentes/canvas/PainelDeSubagentes";
 import { api } from "../shared/api/cliente";
+import type { ResumoDoArtefato } from "../shared/api/artefatos";
 import type { ResumoDoOrquestrador } from "../shared/api/tipos";
+import {
+  type AcoesDosArtefatos,
+  artefatoAberto,
+  comArtefatoAberto,
+  criarLojaDosArtefatos,
+  posicaoParaArtefato,
+  ProvedorDosArtefatos,
+  semArtefato,
+  sincronizarArtefatos,
+  terminalDaOrigem,
+  type ValorDosArtefatos,
+} from "../shared/canvas/artefatos";
 import { type AcoesDoCanvas, ProvedorDoCanvas, servidorParaOsNos, type ValorDoCanvas } from "../shared/canvas/contexto";
 import {
   type JanelaParaOrganizar,
@@ -45,20 +74,25 @@ import {
   salvarBixinhosLimpos,
   TAMANHO_DA_NOTA,
   TAMANHO_DA_PREVIA,
+  TAMANHO_DO_ARTEFATO,
   TAMANHO_DO_RASCUNHO,
   TAMANHO_DO_TERMINAL,
   type Viewport,
 } from "../shared/canvas/layout";
+import { AVISO_DO_LIMITE_DE_ORQUESTRADORES, cabeOutroTerminal } from "../shared/canvas/limiteDeTerminais";
 import {
   ALCA_DO_TERMINAL,
   type ArestaDoCanvas,
   arestasDasPrevias,
   arestasDosBixinhos,
+  ehArtefato,
   ehBixinho,
   ehNota,
   ehPrevia,
   ehTerminal,
+  idDoNoDaNota,
   idDoNoDaPrevia,
+  idDoNoDoArtefato,
   limparBixinhos,
   mesmasLigacoes,
   minimizarOuRestaurar,
@@ -76,15 +110,17 @@ import {
   subagentesVisiveis,
 } from "../shared/canvas/nos";
 import { ProvedorDasNotas } from "../shared/canvas/notas";
+import { useAjustesDoAplicativo } from "../shared/hooks/useAjustesDoAplicativo";
+import { useArtefatos } from "../shared/hooks/useArtefatos";
+import { useAtualizacao } from "../shared/hooks/useAtualizacao";
+import { useChat } from "../shared/hooks/useChat";
 import { useConversas } from "../shared/hooks/useConversas";
 import { useMovimentoDoCanvas } from "../shared/hooks/useMovimentoDoCanvas";
 import { useNotas } from "../shared/hooks/useNotas";
 import { useOrquestradores } from "../shared/hooks/useOrquestradores";
 import { useReaproveitado } from "../shared/hooks/useReaproveitado";
 import { useServidor } from "../shared/hooks/useServidor";
-
-/** Altura, na tela, da faixa ocupada pela barra do canvas (com folga). */
-const TOPO_LIVRE_DA_TELA_PX = 84;
+import type { AcaoDaPaleta, FonteDaPaleta, ItemDaPaleta } from "../shared/paletaDeComandos";
 
 // Tudo o que vai ao <ReactFlow> é constante ou estável: uma prop nova a cada
 // renderização (e o canvas renderiza a cada quadro do arraste) faz o React
@@ -94,25 +130,64 @@ const TIPOS_DE_NO = {
   rascunho: NoRascunho,
   bixinho: NoBixinho,
   nota: NoNota,
+  artefato: NoArtefato,
   previa: NoPrevia,
 } satisfies NodeTypes;
 const TIPOS_DE_ARESTA = { bixinho: ArestaDoBixinho } satisfies EdgeTypes;
+// Nunca acima de 100%: o texto dos terminais só fica nítido em zoom inteiro
+// (100%), e enquadrar não deve ampliar além disso.
 const ENQUADRAMENTO_AO_ABRIR: FitViewOptions<NoDoCanvas> = { maxZoom: 1, padding: 0.15 };
 const VIEWPORT_PADRAO: Viewport = { x: 0, y: 0, zoom: 1 };
+/** Nome e dica do "Organizar", o 4º botão dos controles do canto inferior esquerdo. */
+const DICA_DO_ORGANIZAR = "Organizar: terminais lado a lado; notas e artefatos à direita";
+/**
+ * Quanto do pé da área do canvas o chat rápido ocupa (compacto, com a
+ * margem): a janela de um artefato aberta "no centro" fica acima dele.
+ */
+const ALTURA_RESERVADA_AO_CHAT = 110;
+/** Altura, na área do canvas, da faixa ocupada pela barra do canvas (com folga). */
+const TOPO_LIVRE_DA_TELA_PX = 84;
 
-const CLASSES_NO_MINIMAPA: Readonly<Record<string, string>> = {
-  bixinho: "minimapa-bixinho",
-  nota: "minimapa-nota",
-  previa: "minimapa-previa",
-};
-
-function classeNoMinimapa(no: { type?: string }): string {
-  return CLASSES_NO_MINIMAPA[no.type ?? ""] ?? "minimapa-terminal";
+/** Foco num campo de texto: o atalho é do campo, não do canvas. */
+function focoEmCampoDeTexto(alvo: EventTarget | null): boolean {
+  return (
+    alvo instanceof HTMLElement &&
+    (alvo.isContentEditable || alvo.tagName === "INPUT" || alvo.tagName === "TEXTAREA" || alvo.tagName === "SELECT")
+  );
 }
 
-/** Os nós com os selecionados desmarcados; os outros continuam o mesmo objeto e não re-renderizam. */
-function semSelecao(nos: readonly NoDoCanvas[]): NoDoCanvas[] {
-  return nos.map((no) => (no.selected === true ? { ...no, selected: false } : no));
+/**
+ * O viewport em 100% mantendo no lugar o ponto do centro da área do canvas; a
+ * posição arredondada também evita texto borrado (meio pixel).
+ */
+function viewportEmCemPorCento(atual: Viewport, largura: number, altura: number): Viewport {
+  const centroX = largura / 2;
+  const centroY = altura / 2;
+  const escala = 1 / atual.zoom;
+  return {
+    x: Math.round(centroX - (centroX - atual.x) * escala),
+    y: Math.round(centroY - (centroY - atual.y) * escala),
+    zoom: 1,
+  };
+}
+
+/** A classe de cada nó no minimapa; o terminal de um Orquestrador trabalhando também brilha. */
+function classeNoMinimapa(no: NoDoCanvas, trabalhando: ReadonlySet<string>): string {
+  if (ehBixinho(no)) {
+    return "minimapa-bixinho";
+  }
+  if (ehNota(no)) {
+    return "minimapa-nota";
+  }
+  if (ehArtefato(no)) {
+    return "minimapa-artefato";
+  }
+  if (ehPrevia(no)) {
+    return "minimapa-previa";
+  }
+  return ehTerminal(no) && trabalhando.has(no.data.orquestradorId)
+    ? "minimapa-terminal minimapa-terminal-trabalhando"
+    : "minimapa-terminal";
 }
 
 /** O tamanho de uma janela do canvas para organizar: o do nó, o medido ou o padrão. */
@@ -124,9 +199,29 @@ function tamanhoParaOrganizar(no: NoDoCanvas, padrao: { largura: number; altura:
   };
 }
 
+/** Os nós com os selecionados desmarcados; os outros continuam o mesmo objeto e não re-renderizam. */
+function semSelecao(nos: readonly NoDoCanvas[]): NoDoCanvas[] {
+  return nos.map((no) => (no.selected === true ? { ...no, selected: false } : no));
+}
+
 /** O mesmo array enquanto os ids e a ordem não mudam. */
 function mesmosIds(anteriores: string[], novos: string[]): string[] {
   return anteriores.length === novos.length && anteriores.every((id, indice) => id === novos[indice]) ? anteriores : novos;
+}
+
+/**
+ * O valor que mudou por último entre dois (nulo não conta como leitura). Ao
+ * começar, vale o primeiro não nulo.
+ */
+function useMaisRecente<Valor>(a: Valor | null, b: Valor | null): Valor | null {
+  const [registro, setRegistro] = useState({ a, b, atual: b ?? a });
+  if (registro.a !== a || registro.b !== b) {
+    // Ajuste durante o render (padrão do React para estado derivado de props).
+    const atual = registro.b !== b && b !== null ? b : registro.a !== a && a !== null ? a : registro.atual;
+    setRegistro({ a, b, atual });
+    return atual;
+  }
+  return registro.atual;
 }
 
 /** Atraso para o React Flow medir um nó recém-criado antes de enquadrá-lo. */
@@ -158,14 +253,18 @@ function CanvasVazio({ aoCriar }: { aoCriar: () => void }) {
 function Canvas() {
   const { orquestradores, erro, recarregar } = useOrquestradores();
   const [layoutInicial] = useState(lerLayout);
-  // Enquadra só ao abrir com terminais (notas ou prévias) salvos e sem posição de
+  // Enquadra só ao abrir com terminais (notas, artefatos ou prévias) salvos e sem posição de
   // câmera salva. Com o canvas vazio, o React Flow enquadraria o primeiro
   // terminal criado depois, com zoom exagerado.
+  // Dentro do app desktop, a barra de título é da tela (com o status).
+  const [desktop] = useState(rodandoNoDesktop);
+  const areaDoCanvas = useRef<HTMLDivElement>(null);
   const [enquadrarAoAbrir] = useState(
     () =>
       layoutInicial.viewport === null &&
       Object.keys(layoutInicial.terminais).length +
         Object.keys(layoutInicial.notas).length +
+        Object.keys(layoutInicial.artefatos).length +
         Object.keys(layoutInicial.previas).length >
         0,
   );
@@ -226,6 +325,8 @@ function Canvas() {
   );
   const noCanvas = useMemo(() => new Set(idsNoCanvas), [idsNoCanvas]);
   const { conversas, conexoes, sinais } = useConversas(idsNoCanvas, servidor.conectado);
+  const chatAoVivo = useChat(servidor.conectado);
+  const { chat } = chatAoVivo;
   // Limpar lê as conversas por aqui, para as ações do canvas não mudarem a cada evento.
   const conversasAtuais = useRef(conversas);
 
@@ -242,6 +343,24 @@ function Canvas() {
     () => new Map((orquestradores ?? []).map((orquestrador) => [orquestrador.id, orquestrador])),
     [orquestradores],
   );
+  // A paleta lê a lista por aqui, só ao abrir: as ações dela não mudam a cada consulta.
+  const orquestradoresAtuais = useRef(orquestradores);
+  useEffect(() => {
+    orquestradoresAtuais.current = orquestradores;
+  }, [orquestradores]);
+
+  // Quem está trabalhando: o mesmo array enquanto ninguém começa nem para.
+  const idsTrabalhando = useReaproveitado(
+    (orquestradores ?? [])
+      .filter((orquestrador) => orquestrador.situacao === "trabalhando")
+      .map((orquestrador) => orquestrador.id),
+    mesmosIds,
+  );
+  // Estável: uma função nova re-renderizaria todos os nós do minimapa (ver ADR-11).
+  const classeDoMinimapa = useMemo(() => {
+    const trabalhando = new Set(idsTrabalhando);
+    return (no: NoDoCanvas) => classeNoMinimapa(no, trabalhando);
+  }, [idsTrabalhando]);
 
   // Terminais de orquestradores excluídos (por outra aba, por exemplo) saem do canvas.
   useEffect(() => {
@@ -291,10 +410,15 @@ function Canvas() {
   );
   const arestas = useReaproveitado(arestasCalculadas, reaproveitarArestas);
 
-  const centroDaTela = useCallback(
-    () => fluxo.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }),
-    [fluxo],
-  );
+  // O centro da área do canvas (no desktop, abaixo da barra de título).
+  const centroDaTela = useCallback(() => {
+    const area = areaDoCanvas.current?.getBoundingClientRect();
+    return fluxo.screenToFlowPosition(
+      area !== undefined && area.width > 0
+        ? { x: area.left + area.width / 2, y: area.top + area.height / 2 }
+        : { x: window.innerWidth / 2, y: window.innerHeight / 2 },
+    );
+  }, [fluxo]);
 
   // O conteúdo das notas fica numa loja própria: digitar ou salvar uma nota não re-renderiza o canvas.
   const notas = useNotas(setNosDasNotas, centroDaTela, servidor.conectado);
@@ -330,15 +454,151 @@ function Canvas() {
         tamanho,
         atuais.filter((no) => !ehBixinho(no)).map((no) => no.position),
       );
-      // Em telas baixas, centralizar esconderia a barra de título atrás da barra
-      // do canvas: o topo da janela começa sempre abaixo dela.
-      const topoLivre = fluxo.screenToFlowPosition({ x: 0, y: TOPO_LIVRE_DA_TELA_PX }).y;
+      // Em telas baixas, centralizar esconderia a barra de título da janela atrás
+      // da barra do canvas: o topo da janela começa sempre abaixo dela.
+      const topoDaArea = areaDoCanvas.current?.getBoundingClientRect().top ?? 0;
+      const topoLivre = fluxo.screenToFlowPosition({ x: 0, y: topoDaArea + TOPO_LIVRE_DA_TELA_PX }).y;
       return { ...centralizada, y: Math.max(centralizada.y, Math.round(topoLivre)) };
     },
     [centroDaTela, fluxo],
   );
 
+  // Artefatos: a lista e os eventos ao vivo vêm do hook; os resumos vão para
+  // uma loja própria, lida por cada janela — um evento de um artefato não
+  // re-renderiza as outras janelas (ADR-11).
+  const {
+    lista: listaDeArtefatos,
+    carregada: artefatosCarregados,
+    erro: erroDosArtefatos,
+    eventosRecentes: eventosDosArtefatos,
+    renomear: renomearArtefato,
+    apagar: apagarArtefato,
+  } = useArtefatos(servidor.conectado);
+  const [lojaDosArtefatos] = useState(criarLojaDosArtefatos);
+  // Antes dos efeitos: a janela aberta por um evento já encontra o resumo na loja.
+  useLayoutEffect(() => {
+    lojaDosArtefatos.publicar({ lista: listaDeArtefatos, carregada: artefatosCarregados, erro: erroDosArtefatos });
+  }, [lojaDosArtefatos, listaDeArtefatos, artefatosCarregados, erroDosArtefatos]);
+  // A paleta lê a lista por aqui, só ao abrir.
+  const artefatosAtuais = useRef(listaDeArtefatos);
+  useEffect(() => {
+    artefatosAtuais.current = listaDeArtefatos;
+  }, [listaDeArtefatos]);
+
+  // Os artefatos apagados no servidor saem do canvas e, com isso, do layout.
+  useEffect(() => {
+    if (!artefatosCarregados) {
+      return;
+    }
+    const existentes = new Set(listaDeArtefatos.map((artefato) => artefato.id));
+    setNos((atuais) => sincronizarArtefatos(atuais, existentes));
+  }, [artefatosCarregados, listaDeArtefatos, setNos]);
+
+  /** O centro da área do canvas acima do chat rápido (que fica no pé da tela). */
+  const centroAcimaDoChat = useCallback((): Ponto => {
+    const area = areaDoCanvas.current?.getBoundingClientRect();
+    if (area === undefined || area.width <= 0 || area.height <= 0) {
+      return centroDaTela();
+    }
+    const alturaLivre = Math.max(area.height - ALTURA_RESERVADA_AO_CHAT, area.height / 2);
+    return fluxo.screenToFlowPosition({ x: area.left + area.width / 2, y: area.top + alturaLivre / 2 });
+  }, [centroDaTela, fluxo]);
+
+  /**
+   * Abre a janela do artefato, se ainda não estiver aberta: ao lado do terminal
+   * do Orquestrador que o criou, se ele estiver aberto; senão, no centro da
+   * vista. Sempre num lugar livre. Artefatos não contam no limite de terminais.
+   */
+  const abrirArtefato = useCallback(
+    (artefato: Pick<ResumoDoArtefato, "id" | "origem">) => {
+      setNos((atuais) => {
+        if (artefatoAberto(atuais, artefato.id)) {
+          return atuais;
+        }
+        const posicao = posicaoParaArtefato(
+          atuais,
+          TAMANHO_DO_ARTEFATO,
+          terminalDaOrigem(atuais, artefato),
+          centroAcimaDoChat(),
+        );
+        return reacomodarBixinhos(comArtefatoAberto(atuais, artefato.id, posicao));
+      });
+    },
+    [centroAcimaDoChat, setNos],
+  );
+
+  // Um artefato criado agora abre sozinho. Versão nova não abre a janela
+  // fechada (a aberta passa sozinha para ela); título novo e remoção só mudam
+  // a lista.
+  const ultimoEventoVisto = useRef(0);
+  useEffect(() => {
+    for (const { numero, evento } of eventosDosArtefatos) {
+      if (numero <= ultimoEventoVisto.current) {
+        continue;
+      }
+      ultimoEventoVisto.current = numero;
+      if (evento.tipo === "artefato_criado") {
+        abrirArtefato(evento.artefato);
+      }
+    }
+  }, [eventosDosArtefatos, abrirArtefato]);
+
+  /** Pela paleta: abre a janela (se fechada) e leva até ela. */
+  const abrirOuFocarArtefato = useCallback(
+    (artefatoId: string) => {
+      const artefato = artefatosAtuais.current.find((candidato) => candidato.id === artefatoId);
+      abrirArtefato(artefato ?? { id: artefatoId, origem: { tipo: "chat", id: null } });
+      focar(idDoNoDoArtefato(artefatoId));
+    },
+    [abrirArtefato, focar],
+  );
+
+  const acoesDosArtefatos = useMemo<AcoesDosArtefatos>(
+    () => ({
+      renomear: async (artefatoId, titulo) => {
+        await renomearArtefato(artefatoId, titulo);
+      },
+      apagar: apagarArtefato,
+      fechar: (artefatoId) => setNos((atuais) => semArtefato(atuais, artefatoId)),
+    }),
+    [renomearArtefato, apagarArtefato, setNos],
+  );
+  const valorDosArtefatos = useMemo<ValorDosArtefatos>(
+    () => ({ loja: lojaDosArtefatos, acoes: acoesDosArtefatos }),
+    [lojaDosArtefatos, acoesDosArtefatos],
+  );
+
+  // Trava de terminais abertos: lê os nós por aqui, para as ações não mudarem a cada arraste.
+  const nosAtuais = useRef(nos);
+  useLayoutEffect(() => {
+    nosAtuais.current = nos;
+  }, [nos]);
+  const [avisoDoLimite, setAvisoDoLimite] = useState(false);
+
+  /** Se cabe abrir o terminal pedido (nulo: um terminal novo). Ponto único da trava. */
+  const temVagaPara = useCallback((orquestradorId: string | null) => {
+    const atuais = nosAtuais.current;
+    return cabeOutroTerminal(
+      atuais.filter(ehTerminal).map((no) => no.data.orquestradorId),
+      atuais.filter((no) => no.type === "rascunho").map((no) => no.id),
+      orquestradorId,
+    );
+  }, []);
+
+  /** Confere a vaga e, sem ela, mostra o aviso abaixo da barra do canvas. */
+  const reservarVaga = useCallback(
+    (orquestradorId: string | null) => {
+      const cabe = temVagaPara(orquestradorId);
+      setAvisoDoLimite(!cabe);
+      return cabe;
+    },
+    [temVagaPara],
+  );
+
   const novoOrquestrador = useCallback(() => {
+    if (!reservarVaga(null)) {
+      return;
+    }
     const id = `rascunho:${crypto.randomUUID()}`;
     setNos((atuais) => {
       const posicao = posicaoNoCentroVisivel(atuais, TAMANHO_DO_RASCUNHO);
@@ -354,7 +614,7 @@ function Canvas() {
       };
       return reacomodarBixinhos([...atuais.map((no) => ({ ...no, selected: false })), rascunho]);
     });
-  }, [posicaoNoCentroVisivel, setNos]);
+  }, [posicaoNoCentroVisivel, reservarVaga, setNos]);
 
   /** O botão Prévia da barra: uma prévia vazia no centro da tela, com o campo de endereço focado. */
   const novaPreviaVazia = useCallback(() => {
@@ -418,6 +678,10 @@ function Canvas() {
 
   const abrirTerminal = useCallback(
     (orquestradorId: string) => {
+      // Já aberto sempre cabe: só ganha o foco.
+      if (!reservarVaga(orquestradorId)) {
+        return;
+      }
       setNos((atuais) => {
         if (atuais.some((no) => no.id === orquestradorId)) {
           return atuais;
@@ -434,7 +698,7 @@ function Canvas() {
       });
       focar(orquestradorId);
     },
-    [centroDaTela, focar, setNos],
+    [centroDaTela, focar, reservarVaga, setNos],
   );
 
   const fecharTerminal = useCallback(
@@ -459,8 +723,7 @@ function Canvas() {
         const terminal = novoTerminal(
           orquestrador.id,
           rascunho?.position ?? centroDaTela(),
-          // O rascunho nasce mais largo para caber o formulário; o terminal volta à largura de sempre.
-          Math.min(rascunho?.width ?? TAMANHO_DO_TERMINAL.largura, TAMANHO_DO_TERMINAL.largura),
+          rascunho?.width ?? TAMANHO_DO_TERMINAL.largura,
           TAMANHO_DO_TERMINAL.altura,
         );
         return reacomodarBixinhos([...atuais.filter((no) => no.id !== rascunhoId), { ...terminal, selected: true }]);
@@ -478,13 +741,14 @@ function Canvas() {
   const organizar = useCallback(() => {
     setNos((atuais) => {
       const janelas = atuais
-        .filter((no) => !ehBixinho(no) && !ehNota(no) && !ehPrevia(no))
+        .filter((no) => !ehBixinho(no) && !ehNota(no) && !ehArtefato(no) && !ehPrevia(no))
         .map((no) => tamanhoParaOrganizar(no, TAMANHO_DO_TERMINAL));
       // As prévias vão para as colunas das notas: também não têm bixinhos.
       const notasNoCanvas = atuais
         .filter((no) => ehNota(no) || ehPrevia(no))
         .map((no) => tamanhoParaOrganizar(no, ehNota(no) ? TAMANHO_DA_NOTA : TAMANHO_DA_PREVIA));
-      const posicoes = organizarComNotas(janelas, notasNoCanvas);
+      const artefatosNoCanvas = atuais.filter(ehArtefato).map((no) => tamanhoParaOrganizar(no, TAMANHO_DO_ARTEFATO));
+      const posicoes = organizarComNotas(janelas, notasNoCanvas, artefatosNoCanvas);
       return reacomodarBixinhos(
         atuais.map((no) => {
           const posicao = posicoes[no.id];
@@ -492,8 +756,158 @@ function Canvas() {
         }),
       );
     });
-    setTimeout(() => void fluxo.fitView({ duration: 600, padding: 0.12 }), ESPERA_PARA_MEDIR_MS);
+    setTimeout(() => void fluxo.fitView({ duration: 600, padding: 0.12, maxZoom: 1 }), ESPERA_PARA_MEDIR_MS);
   }, [fluxo, setNos]);
+
+  /** Zoom em 100% (texto nítido) sem sair do lugar: o Ctrl+0 e a paleta. */
+  const zoomEmCemPorCento = useCallback(() => {
+    const area = areaDoCanvas.current?.getBoundingClientRect();
+    void fluxo.setViewport(viewportEmCemPorCento(fluxo.getViewport(), area?.width ?? 0, area?.height ?? 0));
+  }, [fluxo]);
+
+  /** Mostra tudo o que está no canvas, sem passar de 100% (ver ADR-20). */
+  const enquadrarTudo = useCallback(
+    () => void fluxo.fitView({ duration: 500, padding: 0.12, maxZoom: 1 }),
+    [fluxo],
+  );
+
+  // Ctrl+0: volta o zoom para 100% (texto nítido) sem sair do lugar.
+  useEffect(() => {
+    const aoApertarTecla = (evento: KeyboardEvent) => {
+      if (!evento.ctrlKey || evento.altKey || evento.shiftKey || evento.metaKey) {
+        return;
+      }
+      if (evento.key !== "0" && evento.code !== "Digit0" && evento.code !== "Numpad0") {
+        return;
+      }
+      if (focoEmCampoDeTexto(evento.target)) {
+        return;
+      }
+      evento.preventDefault();
+      zoomEmCemPorCento();
+    };
+    window.addEventListener("keydown", aoApertarTecla);
+    return () => window.removeEventListener("keydown", aoApertarTecla);
+  }, [zoomEmCemPorCento]);
+
+  // Ctrl+N: novo orquestrador (o mesmo do "+ Novo ▾", com o limite do
+  // ADR-18); Ctrl+Shift+N: nova nota. Fora de campos de texto, como o Ctrl+0;
+  // o preventDefault impede o Chromium/Electron de abrir outra janela.
+  useEffect(() => {
+    const aoApertarTecla = (evento: KeyboardEvent) => {
+      if (!evento.ctrlKey || evento.altKey || evento.metaKey || evento.repeat) {
+        return;
+      }
+      if (evento.code !== "KeyN" && evento.key !== "n" && evento.key !== "N") {
+        return;
+      }
+      if (focoEmCampoDeTexto(evento.target)) {
+        return;
+      }
+      evento.preventDefault();
+      if (evento.shiftKey) {
+        novaNota();
+      } else {
+        novoOrquestrador();
+      }
+    };
+    window.addEventListener("keydown", aoApertarTecla);
+    return () => window.removeEventListener("keydown", aoApertarTecla);
+  }, [novoOrquestrador, novaNota]);
+
+  // Os Ajustes do app desktop, pela paleta; a falha aparece abaixo da barra do canvas.
+  const {
+    disponivel: ajustesDisponiveis,
+    abrir: abrirAjustes,
+    erro: erroDosAjustes,
+    descartarErro: descartarErroDosAjustes,
+  } = useAjustesDoAplicativo();
+
+  // Paleta de comandos (Ctrl+K): o estado é dela; o canvas só entrega o que
+  // listar (lido na hora de abrir) e executa o escolhido. Tudo estável, para a
+  // paleta não re-renderizar com o canvas.
+  const controleDaPaleta = useRef<ControleDaPaleta>(null);
+  const abrirPaleta = useCallback(() => controleDaPaleta.current?.abrir(), []);
+
+  // A atualização do app desktop, pela paleta ("Procurar atualizações"). Lida
+  // por aqui só ao abrir; com a paleta aberta, o detalhe acompanha a verificação.
+  const { estado: estadoDaAtualizacao, verificar: verificarAtualizacao } = useAtualizacao();
+  const atualizacaoAtual = useRef(estadoDaAtualizacao);
+  useEffect(() => {
+    atualizacaoAtual.current = estadoDaAtualizacao;
+    controleDaPaleta.current?.atualizar();
+  }, [estadoDaAtualizacao]);
+
+  const lojaDasNotas = notas.valor.loja;
+  const lerFonteDaPaleta = useCallback((): FonteDaPaleta => {
+    const atuais = nosAtuais.current;
+    const artefatosNoCanvas = new Set(atuais.filter(ehArtefato).map((no) => no.data.artefatoId));
+    return {
+      podeOrganizar: atuais.filter((no) => !ehBixinho(no)).length > 1,
+      podeAbrirAjustes: desktop && ajustesDisponiveis,
+      atualizacao: atualizacaoAtual.current,
+      orquestradores: orquestradoresAtuais.current ?? [],
+      abertos: new Set(atuais.filter(ehTerminal).map((no) => no.data.orquestradorId)),
+      notas: atuais.filter(ehNota).map((no) => {
+        const nota = lojaDasNotas.ler(no.data.notaId);
+        return { notaId: no.data.notaId, titulo: nota?.titulo ?? "", texto: nota?.texto ?? "" };
+      }),
+      artefatos: artefatosAtuais.current.map((artefato) => ({
+        artefatoId: artefato.id,
+        titulo: artefato.titulo,
+        formato: artefato.formato,
+        origem: artefato.origem,
+        aberto: artefatosNoCanvas.has(artefato.id),
+      })),
+      // Só as conversas carregadas: as dos terminais abertos, sem as arquivadas (/clear).
+      conversas: conversasAtuais.current,
+    };
+  }, [lojaDasNotas, desktop, ajustesDisponiveis]);
+  const executarItemDaPaleta = useCallback(
+    (item: ItemDaPaleta) => {
+      switch (item.tipo) {
+        case "acao": {
+          const acoesDaPaleta: Readonly<Record<AcaoDaPaleta, () => void>> = {
+            "novo-orquestrador": novoOrquestrador,
+            "nova-nota": novaNota,
+            "nova-previa": novaPreviaVazia,
+            organizar,
+            "zoom-100": zoomEmCemPorCento,
+            "enquadrar-tudo": enquadrarTudo,
+            "ajustes-do-aplicativo": () => void abrirAjustes(),
+            // A paleta fica aberta: o detalhe da ação mostra "verificando…" e o resultado.
+            "procurar-atualizacoes": () => void verificarAtualizacao(),
+          };
+          acoesDaPaleta[item.acao]();
+          return;
+        }
+        case "orquestrador":
+        case "pedido":
+          // O ponto único de abertura: aberto, só centraliza; fechado, abre se houver vaga (ADR-18).
+          abrirTerminal(item.orquestradorId);
+          return;
+        case "nota":
+          focar(idDoNoDaNota(item.notaId));
+          return;
+        case "artefato":
+          abrirOuFocarArtefato(item.artefatoId);
+          return;
+      }
+    },
+    [
+      novoOrquestrador,
+      novaNota,
+      novaPreviaVazia,
+      organizar,
+      zoomEmCemPorCento,
+      enquadrarTudo,
+      abrirAjustes,
+      verificarAtualizacao,
+      abrirTerminal,
+      focar,
+      abrirOuFocarArtefato,
+    ],
+  );
 
   const acoes = useMemo<AcoesDoCanvas>(
     () => ({
@@ -530,10 +944,10 @@ function Canvas() {
     [porId, conversas, conexoes, sinais, bixinhosLimpos, servidorDosNos, acoes],
   );
 
-  const trabalhando = useMemo(
-    () => (orquestradores ?? []).filter((orquestrador) => orquestrador.situacao === "trabalhando").length,
-    [orquestradores],
-  );
+  const trabalhando = idsTrabalhando.length;
+  // O que reiniciar o app (para instalar uma atualização) cancelaria: os
+  // Orquestradores trabalhando num turno e a resposta do chat rápido.
+  const pedidosEmAndamento = trabalhando + (chat.situacao === "respondendo" ? 1 : 0);
   const bixinhosAtivos = useMemo(
     () =>
       [...conversas.values()].reduce(
@@ -543,10 +957,37 @@ function Canvas() {
       ),
     [conversas],
   );
-  const cota = useMemo(
+  const cotaDosTerminais = useMemo(
     () => [...conversas.values()].find((conversa) => conversa.cota !== null)?.cota ?? null,
     [conversas],
   );
+  // Os medidores mostram a leitura mais recente, venha do chat ou dos terminais.
+  const cota = useMaisRecente(cotaDosTerminais, chat.cota);
+  const { aplicarPreferencias } = chatAoVivo;
+  const atualizarOrquestradoresDoChat = useCallback(
+    async (criado?: ResumoDoOrquestrador) => {
+      // Como no formulário de criação: uma consulta que saiu antes não tira o terminal novo do canvas.
+      if (criado !== undefined) {
+        criadosAgora.current.add(criado.id);
+      }
+      await recarregar();
+    },
+    [recarregar],
+  );
+  const quantidadeDeJanelas = nos.filter((no) => !ehBixinho(no)).length;
+  const podeOrganizar = quantidadeDeJanelas > 1;
+  // O aviso do limite some sozinho quando uma vaga é liberada (fechar um terminal ou descartar o rascunho).
+  const temVaga = cabeOutroTerminal(
+    idsNoCanvas,
+    nos.filter((no) => no.type === "rascunho").map((no) => no.id),
+    null,
+  );
+  if (avisoDoLimite && temVaga) {
+    // Ajuste durante o render (padrão do React para estado derivado).
+    setAvisoDoLimite(false);
+  }
+  const fecharAvisoDoLimite = useCallback(() => setAvisoDoLimite(false), []);
+
   const [painelAberto, setPainelAberto] = useState<PainelDaBarra | null>(null);
   const alternarPainel = useCallback(
     (painel: PainelDaBarra) => setPainelAberto((aberto) => (aberto === painel ? null : painel)),
@@ -575,20 +1016,19 @@ function Canvas() {
     void recarregar();
     lerQuantidadeDeSubagentes();
   }, [recarregar, lerQuantidadeDeSubagentes]);
-  const quantidadeDeJanelas = nos.filter((no) => !ehBixinho(no)).length;
-  const podeOrganizar = quantidadeDeJanelas > 1;
 
   // Os painéis não dependem da posição dos nós: memorizados, não re-renderizam
-  // a cada quadro do arraste.
-  const painelDaEsquerda = useMemo(
+  // a cada quadro do arraste. Os do topo ficam num só painel em linha
+  // (esquerda · centro · direita), para se acomodarem juntos em qualquer
+  // largura, sem um bloco absoluto cobrir o outro.
+  const colunaDaEsquerda = useMemo(
     () => (
-      <Panel position="top-left">
+      <div className="coluna-do-topo coluna-do-topo-esquerda">
         <BarraDoCanvas
           aoCriar={novoOrquestrador}
           aoCriarNota={novaNota}
+          aoBuscar={abrirPaleta}
           aoCriarPrevia={novaPreviaVazia}
-          aoOrganizar={organizar}
-          podeOrganizar={podeOrganizar}
           aoAlternarPainel={alternarPainel}
           painelAberto={painelAberto}
           quantidadeDeSubagentes={quantidadeDeSubagentes}
@@ -597,89 +1037,172 @@ function Canvas() {
         {painelAberto === "instrucoes" && (
           <PainelDeInstrucoesGerais aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />
         )}
+        {avisoDoLimite && (
+          <ErroDoCanvas erro={AVISO_DO_LIMITE_DE_ORQUESTRADORES} aoFechar={fecharAvisoDoLimite} nivel="aviso" />
+        )}
         {erroDasNotas !== null && <ErroDoCanvas erro={erroDasNotas} aoFechar={descartarErroDasNotas} />}
+        {erroDosAjustes !== null && <ErroDoCanvas erro={erroDosAjustes} aoFechar={descartarErroDosAjustes} />}
         <Doca orquestradores={orquestradores} noCanvas={noCanvas} erro={erro} aoAbrir={abrirTerminal} />
-      </Panel>
+      </div>
     ),
     [
       novoOrquestrador,
       novaNota,
+      abrirPaleta,
       novaPreviaVazia,
-      organizar,
-      podeOrganizar,
       painelAberto,
       alternarPainel,
       fecharPainel,
       quantidadeDeSubagentes,
       aoSalvarPainel,
+      avisoDoLimite,
+      fecharAvisoDoLimite,
       erroDasNotas,
       descartarErroDasNotas,
+      erroDosAjustes,
+      descartarErroDosAjustes,
       orquestradores,
       noCanvas,
       erro,
       abrirTerminal,
     ],
   );
-  const painelDoCentro = useMemo(
+  // Os controles do canto inferior esquerdo: zoom, enquadrar e, em 4º, o
+  // "Organizar". Memorizados: com um filho novo a cada render, o <Controls>
+  // re-renderizaria a cada quadro do arraste.
+  const controles = useMemo(
     () => (
-      <Panel position="top-center">
+      <Controls position="bottom-left" showInteractive={false}>
+        <ControlButton
+          onClick={organizar}
+          disabled={!podeOrganizar}
+          title={DICA_DO_ORGANIZAR}
+          aria-label={DICA_DO_ORGANIZAR}
+        >
+          <IconeGrade />
+        </ControlButton>
+      </Controls>
+    ),
+    [organizar, podeOrganizar],
+  );
+  const colunaDoCentro = useMemo(
+    () => (
+      <div className="coluna-do-topo coluna-do-topo-centro">
         <AvisoDeConexao servidor={servidor} />
-      </Panel>
+      </div>
     ),
     [servidor],
   );
-  const painelDaDireita = useMemo(
+  // No desktop o status está na barra de título; aqui fica só o alerta de memória.
+  const colunaDaDireita = useMemo(
     () => (
-      <Panel position="top-right">
-        <StatusDoCanvas
+      <div className="coluna-do-topo coluna-do-topo-direita">
+        {desktop ? (
+          <AvisoDeMemoria memoria={servidor.memoria} />
+        ) : (
+          <StatusDoCanvas
+            trabalhando={trabalhando}
+            bixinhosAtivos={bixinhosAtivos}
+            cota={cota}
+            memoria={servidor.memoria}
+          />
+        )}
+      </div>
+    ),
+    [desktop, trabalhando, bixinhosAtivos, cota, servidor.memoria],
+  );
+  const barraDeTitulo = useMemo(
+    () =>
+      desktop ? (
+        <BarraDeTituloDoApp
           trabalhando={trabalhando}
           bixinhosAtivos={bixinhosAtivos}
           cota={cota}
           memoria={servidor.memoria}
+          aoBuscar={abrirPaleta}
+          pedidosEmAndamento={pedidosEmAndamento}
+        />
+      ) : null,
+    [desktop, trabalhando, bixinhosAtivos, cota, servidor.memoria, abrirPaleta, pedidosEmAndamento],
+  );
+  // Fora do viewport: o chat não se move com o canvas e só re-renderiza com novidades dele.
+  const painelDoChat = useMemo(
+    () => (
+      <Panel position="bottom-center" className="painel-do-chat">
+        <ChatRapido
+          chat={chat}
+          desconectado={!servidor.conectado}
+          erroAoCarregar={chatAoVivo.erro}
+          aoMudarPreferencias={aplicarPreferencias}
+          aoAbrirTerminal={abrirTerminal}
+          temVagaPara={temVagaPara}
+          aoAtualizarOrquestradores={atualizarOrquestradoresDoChat}
         />
       </Panel>
     ),
-    [trabalhando, bixinhosAtivos, cota, servidor.memoria],
+    [
+      chat,
+      servidor.conectado,
+      chatAoVivo.erro,
+      aplicarPreferencias,
+      abrirTerminal,
+      temVagaPara,
+      atualizarOrquestradoresDoChat,
+    ],
   );
 
   return (
     <ProvedorDoCanvas valor={valor}>
       <ProvedorDasNotas valor={notas.valor}>
-        <div
-          className={`relative h-screen w-screen ${servidor.conectado ? "" : "canvas-desconectado"} ${movimento.movendo ? "canvas-movendo" : ""} ${redimensionando ? "canvas-redimensionando" : ""}`}
-        >
-          <ReactFlow<NoDoCanvas, ArestaDoCanvas>
-            nodes={nos}
-            edges={arestas}
-            nodeTypes={TIPOS_DE_NO}
-            edgeTypes={TIPOS_DE_ARESTA}
-            onNodesChange={aoMudarNosEReacomodar}
-            onNodeDragStart={movimento.aoComecarArraste}
-            onNodeDragStop={aoSoltarNo}
-            onMoveStart={movimento.aoComecarMovimento}
-            onMoveEnd={movimento.aoTerminarMovimento}
-            colorMode="dark"
-            defaultViewport={layoutInicial.viewport ?? VIEWPORT_PADRAO}
-            fitView={enquadrarAoAbrir}
-            fitViewOptions={ENQUADRAMENTO_AO_ABRIR}
-            minZoom={0.1}
-            maxZoom={2}
-            // Como no Excalidraw: a roda do mouse rola o canvas; com Ctrl, dá zoom.
-            panOnScroll
-            zoomActivationKeyCode="Control"
-            deleteKeyCode={null}
+        <ProvedorDosArtefatos valor={valorDosArtefatos}>
+          <div
+            className={`flex h-screen w-screen flex-col ${servidor.conectado ? "" : "canvas-desconectado"} ${movimento.movendo ? "canvas-movendo" : ""} ${redimensionando ? "canvas-redimensionando" : ""}`}
           >
-            <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} />
-            <Controls position="bottom-left" showInteractive={false} />
-            <MiniMap position="bottom-right" pannable zoomable nodeClassName={classeNoMinimapa} />
-            {painelDaEsquerda}
-            {painelDoCentro}
-            {painelDaDireita}
-          </ReactFlow>
-          {/* Fica fora do ReactFlow (que é uma camada própria), então cobriria os
-              painéis da barra: some enquanto um deles está aberto. */}
-          {quantidadeDeJanelas === 0 && painelAberto === null && <CanvasVazio aoCriar={novoOrquestrador} />}
-        </div>
+            {barraDeTitulo}
+            <div ref={areaDoCanvas} className="relative min-h-0 w-full flex-1">
+              <ReactFlow<NoDoCanvas, ArestaDoCanvas>
+                nodes={nos}
+                edges={arestas}
+                nodeTypes={TIPOS_DE_NO}
+                edgeTypes={TIPOS_DE_ARESTA}
+                onNodesChange={aoMudarNosEReacomodar}
+                onNodeDragStart={movimento.aoComecarArraste}
+                onNodeDragStop={aoSoltarNo}
+                onMoveStart={movimento.aoComecarMovimento}
+                onMoveEnd={movimento.aoTerminarMovimento}
+                colorMode="dark"
+                defaultViewport={layoutInicial.viewport ?? VIEWPORT_PADRAO}
+                fitView={enquadrarAoAbrir}
+                fitViewOptions={ENQUADRAMENTO_AO_ABRIR}
+                minZoom={0.1}
+                maxZoom={2}
+                // Como no Excalidraw: a roda do mouse rola o canvas; com Ctrl, dá zoom.
+                panOnScroll
+                zoomActivationKeyCode="Control"
+                deleteKeyCode={null}
+              >
+                <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} />
+                {controles}
+                <MiniMap<NoDoCanvas> position="bottom-right" pannable zoomable nodeClassName={classeDoMinimapa} />
+                <Panel position="top-left" className="paineis-do-topo">
+                  {colunaDaEsquerda}
+                  {colunaDoCentro}
+                  {colunaDaDireita}
+                </Panel>
+                {painelDoChat}
+              </ReactFlow>
+              {/* Fica fora do ReactFlow (que é uma camada própria), então cobriria os
+                  painéis da barra: some enquanto um deles está aberto. */}
+              {quantidadeDeJanelas === 0 && painelAberto === null && <CanvasVazio aoCriar={novoOrquestrador} />}
+              {/* Fora do <ReactFlow>: não escala com o zoom e cobre só a área do canvas. */}
+              <PaletaDeComandos
+                controle={controleDaPaleta}
+                lerFonte={lerFonteDaPaleta}
+                aoExecutar={executarItemDaPaleta}
+              />
+            </div>
+          </div>
+        </ProvedorDosArtefatos>
       </ProvedorDasNotas>
     </ProvedorDoCanvas>
   );
