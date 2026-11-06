@@ -52,4 +52,12 @@ describe("electron/mac", () => {
     expect(mac.menuDoApp({ buildFromTemplate: () => "menu" }, "Orquestrador")).toBeNull();
     expect(mac.claudeCodeDoPath(() => true, { PATH: "/b" })).toBeNull();
   });
+
+  it.runIf(noMac)("no Mac, acha o histórico na pasta dados do repositório gravado no pacote", () => {
+    const existe = (c) => c === "/repo/dados/orquestradores";
+    expect(mac.historicoDoRepositorio({ repositorioDoMac: "/repo" }, existe)).toBe("/repo/dados");
+    expect(mac.historicoDoRepositorio({ repositorioDoMac: "/outro" }, existe)).toBeNull();
+    expect(mac.historicoDoRepositorio({}, existe)).toBeNull();
+    expect(mac.historicoDoRepositorio(null, existe)).toBeNull();
+  });
 });

@@ -88,12 +88,16 @@ const NOME_DO_COOKIE = "orquestrador_acesso";
 // ──────────────────────────────────────────────────────────────────────────
 // Build de teste: gerado por `npm run dist:win:teste`, com "buildDeTeste": true
 // no package.json empacotado.
-function lerBuildDeTeste() {
+function lerPacoteDoApp() {
   try {
-    return require(path.join(app.getAppPath(), "package.json")).buildDeTeste === true;
+    return require(path.join(app.getAppPath(), "package.json"));
   } catch {
-    return false;
+    return null;
   }
+}
+function lerBuildDeTeste() {
+  const pacote = lerPacoteDoApp();
+  return Boolean(pacote) && pacote.buildDeTeste === true;
 }
 const BUILD_DE_TESTE = lerBuildDeTeste();
 
@@ -887,12 +891,13 @@ function exigirJanelaDeConfiguracao(evento) {
 
 function historicoParaImportar(atual) {
   if (atual && atual.historicoImportadoDe) return null;
-  return localizarHistoricoAntigo({
+  const encontrado = localizarHistoricoAntigo({
     empacotado: app.isPackaged,
     pastaDoApp: app.getAppPath(),
     ambiente: process.env,
     destinoDados: pastaDeDados(),
   });
+  return encontrado || (app.isPackaged ? mac.historicoDoRepositorio(lerPacoteDoApp(), ehPasta) : null);
 }
 
 ipcMain.handle("primeira-abertura:carregar", (e) => {

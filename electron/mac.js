@@ -178,12 +178,26 @@ function claudeCodeDoPath(ehArquivo, ambiente = process.env) {
   return null;
 }
 
+/**
+ * No Mac, a pasta `dados` do repositório de onde o app foi gerado (o
+ * `npm run dist:mac` grava esse caminho em "repositorioDoMac" no package.json
+ * empacotado). É onde fica o histórico de quem usava o app pelo terminal, e o
+ * app instalado não teria como achá-la sozinho. Devolve null fora do Mac, sem
+ * o caminho gravado ou quando a pasta não tem orquestradores/ nem notas/.
+ */
+function historicoDoRepositorio(pacote, ehPasta) {
+  if (!ehMac || !pacote || typeof pacote.repositorioDoMac !== "string") return null;
+  const dados = path.join(pacote.repositorioDoMac, "dados");
+  return ["orquestradores", "notas"].some((nome) => ehPasta(path.join(dados, nome))) ? dados : null;
+}
+
 module.exports = {
   ehMac,
   ajustarOpcoesDaJanela,
   menuDoApp,
   carregarPathDoShell,
   claudeCodeDoPath,
+  historicoDoRepositorio,
   // Expostos para teste.
   juntarPaths,
 };

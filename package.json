@@ -18,6 +18,7 @@
     "dist:win": "npm run build && electron-builder --win --publish never",
     "dist:win:teste": "npm run build && electron-builder --win --publish never -c.extraMetadata.buildDeTeste=true -c.directories.output=dist_electron_teste",
     "release:win": "npm run build && electron-builder --win --publish always",
+    "dist:mac": "npm run build && electron-builder --mac dir --arm64 --publish never -c.extraMetadata.repositorioDoMac=\"$PWD\" && codesign --force --deep --sign - \"dist_electron/mac-arm64/Orquestrador de Agentes.app\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -68,6 +69,14 @@
           ]
         }
       ]
+    },
+    "mac": {
+      "icon": "electron/icones/icone.png",
+      "category": "public.app-category.developer-tools",
+      "identity": null,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "O ditado usa o microfone para transcrever o que você fala."
+      }
     },
     "publish": [
       {
