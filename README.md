@@ -81,6 +81,12 @@ npm run dist:win:teste   # build de teste, em dist_electron_teste/: pula a licen
 
 O build de teste grava `"buildDeTeste": true` no `package.json` empacotado; serve para os testes de ponta a ponta do instalado.
 
+**Ícone do app** (ver ADR-27): fica em `electron/icones/` e é versionado. O `icone.ico` (16, 20, 24, 32, 40, 48, 64, 128 e 256 px) vai na janela e na barra de tarefas do Windows, no `.exe` (`build.win.icon`) e no instalador e desinstalador (`build.nsis.installerIcon`/`uninstallerIcon`); o `icone.png` (512 × 512) vai na janela fora do Windows. Para regenerar depois de mudar o desenho ou as cores em `scripts/gerarIcones.cjs`:
+
+```bash
+npm run icones   # grava electron/icones/icone.ico e icone.png
+```
+
 **Variáveis de ambiente.** No aplicativo, as do servidor são passadas pelo próprio app; ninguém precisa configurá-las. O `.env` só vale para `npm run dev` / `npm start`.
 
 | Variável | Quem lê | Padrão | Para quê |
@@ -247,6 +253,13 @@ Casos de teste dos **artefatos** (ver ADR-26):
   - *`NoArtefato`:* HTML num iframe com `sandbox="allow-scripts"` e a meta CSP no começo do `<head>` (sem `<head>`, depois do `<!DOCTYPE>`); Markdown formatado, com rolagem e sem iframe; o `v3 ▾` busca a versão escolhida e mostra a data de cada uma; uma versão nova passa sozinha para ela, com o selo `v4 nova` por um instante; versão inexistente (404) avisa e oferece a atual, e erro de rede permite tentar de novo; clique duplo no título abre o campo, Enter chama o `PATCH`, Esc desiste e a recusa do servidor mostra o motivo; apagar pede confirmação e chama o `DELETE`, e a falha mantém a janela com o motivo; o ✕ só fecha; *salvar como…* baixa a versão num Blob com o nome do arquivo; ampliar abre o modal em tela cheia fora do canvas, e Esc fecha; sem o resumo, avisa (com o motivo, se a lista falhou); um evento de outro artefato não re-renderiza a janela.
   - *Paleta e canvas:* a paleta lista os artefatos depois das notas, com o formato, a origem e se estão no canvas, e escolher um fechado abre a janela; `artefato_criado` de um Orquestrador aberto abre a janela ao lado do terminal, sem cobri-lo; do chat, no centro da vista; `versao_adicionada` com a janela fechada não abre; artefatos não contam no limite de 4 orquestradores abertos; ao carregar, o que sumiu do servidor sai do canvas e do layout; o minimapa pinta os artefatos com a classe `minimapa-artefato`; o *Organizar* põe os artefatos em colunas à direita dos terminais e das notas.
 - **Conferência manual (app aberto):** com um Orquestrador em *Somente leitura* e com o chat sem autorização, pedir *"crie um artefato com um gráfico das vendas por mês"*: a janela abre sozinha (ao lado do terminal ou no centro), o gráfico roda, nada externo carrega e não aparece *bloqueado:* na gravação; pedir *"mude as cores do gráfico"* gera a `v2`; *salvar como…*, ampliar, renomear, apagar (o arquivo some de `dados\artefatos\entrada\…`) e reabrir pela paleta funcionam.
+
+Casos de teste do **ícone do app** (ver ADR-27; `electron/icones.test.js`):
+- **`gerarPng`:** assinatura PNG, IHDR com largura, altura, 8 bits e RGBA; o IDAT descompactado é cada linha com o filtro 0 e os pixels; RGBA com a quantidade errada de bytes é recusado; o CRC-32 do `IEND` bate com o conhecido.
+- **`pixelsDoIcone`:** em 16 px, cantos transparentes, corpo laranja em [7, 2], olho escuro em [6, 5], bochecha em [8, 3] e fundo escuro em [8, 0]; o desenho ocupa as linhas 2–13 e as colunas 1–14; em 256 px cada célula é um bloco nítido de 16 × 16; em 24 px, escala 1 e margem 4; a borda do arredondado tem alpha parcial; tamanho menor que 16 é recusado.
+- **`gerarIco`:** cabeçalho com tipo 1 e a quantidade de entradas; o 256 grava 0 na largura e na altura; planes 1, 32 bits e cada offset aponta para o PNG certo; lista vazia e PNG maior que 256 são recusados.
+- **Arquivos versionados:** o `icone.ico` tem os 9 tamanhos (inclusive o 256), cada um como PNG; o `icone.png` tem 512 × 512.
+- **Conferência manual:** `npm run desktop` mostra o bixinho na janela e na barra de tarefas (não o átomo do Electron); no instalado, também no atalho, no instalador e no desinstalador.
 
 ## Tecnologias
 
@@ -913,6 +926,23 @@ flowchart TD
   - os eventos não têm histórico nem sequência: ao (re)conectar, a tela relê a lista. As janelas abertas são por navegador, como as notas;
   - os artefatos não contam no limite de 4 orquestradores abertos (ADR-18) e não têm rotação: ficam até serem apagados. Excluir um Orquestrador ou dar `/clear` não apaga os artefatos dele;
   - o *salvar como* baixa a versão vista pelo navegador do app (um Blob), sem rota nova no servidor.
+
+**ADR-27 — Ícone do app: o bixinho gota feliz em pixel art, gerado por script sem dependências.**
+- *Contexto:*
+  - sem ícone definido, a janela, a barra de tarefas, o `.exe` e o instalador mostravam o átomo padrão do Electron;
+  - o mascote do app já existe na tela: os bixinhos dos Subagentes, em pixel art 16 × 16 (`web/src/shared/canvas/sprites.ts`);
+  - a rede fica bloqueada no ambiente de trabalho, e uma biblioteca de imagem (ou um editor externo) só para gerar um ícone seria uma dependência a mais para manter.
+- *Decisão:*
+  - **o ícone é o bixinho `gota` com a expressão `feliz`, laranja**, sobre um quadrado escuro (`#141413`) de cantos arredondados (raio de 22% do lado). As cores repetem os tokens do tema (`--claude-escuro`, `--claude-laranja` e a mistura da bochecha); o desenho é uma cópia de `CORPOS.gota` e `ROSTOS.feliz`, subida 1 linha para ficar centralizado;
+  - **`scripts/gerarIcones.cjs`**, só com `fs`, `path` e `zlib` do Node: rasteriza a grade, escreve o PNG à mão (RGBA de 8 bits, filtro 0, CRC-32 próprio) e monta o `.ico`. Os arquivos gerados (`electron/icones/icone.ico` e `icone.png`) são versionados, então o build não depende de rodar o script;
+  - **escala inteira**: em cada tamanho, cada célula vira um bloco de ⌊N/16⌋ × ⌊N/16⌋ pixels, centralizado, para o pixel art ficar nítido, sem borrão; só a borda do arredondado tem antialias (4 × 4 amostras por pixel);
+  - **`.ico` com PNG embutido** em cada tamanho (16 a 256), formato aceito pelo Windows desde o Vista;
+  - no `main.js`, toda janela recebe o `icon` (`.ico` no Windows, `.png` fora dele) e, no Windows, `app.setAppUserModelId(config.appId)` usa o mesmo appId do atalho do electron-builder, para a barra de tarefas agrupar e mostrar o ícone certo.
+- *Consequências:*
+  - o desenho fica em dois lugares (o sprite da tela e a cópia no script): mudar o mascote pede atualizar o script e rodar `npm run icones`;
+  - nos tamanhos que não são múltiplos de 16 (20, 24, 40), o desenho fica menor que a imagem, com margem escura, em troca da nitidez;
+  - com `setAppUserModelId`, o `npm run desktop` e o app instalado têm a mesma identidade na barra de tarefas e podem aparecer agrupados se abertos juntos;
+  - o `.ico` só com PNG não foi conferido no `npm run dist:win` (precisa de rede): se o electron-builder ou o NSIS recusarem algum tamanho, a saída é trocar os tamanhos pequenos por BMP no script.
 
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;

@@ -23,7 +23,8 @@
     "web:dev": "npm --prefix web run dev",
     "web:build": "npm --prefix web run build",
     "web:test": "npm --prefix web test",
-    "web:lint": "npm --prefix web run lint"
+    "web:lint": "npm --prefix web run lint",
+    "icones": "node scripts/gerarIcones.cjs"
   },
   "dependencies": {
     "express": "^5.2.1",
@@ -56,6 +57,7 @@
       "package.json"
     ],
     "win": {
+      "icon": "electron/icones/icone.ico",
       "target": [
         {
           "target": "nsis",
@@ -66,7 +68,9 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "perMachine": false
+      "perMachine": false,
+      "installerIcon": "electron/icones/icone.ico",
+      "uninstallerIcon": "electron/icones/icone.ico"
     }
   }
 }
