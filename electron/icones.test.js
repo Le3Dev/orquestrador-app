@@ -79,7 +79,7 @@ describe("gerarPng", () => {
 });
 
 describe("pixelsDoIcone", () => {
-  it("em 16 px: canto transparente, corpo laranja, olho escuro, bochecha e fundo", () => {
+  it("em 16 px: canto transparente, corpo laranja, lente escura com brilho, boca, bochecha e fundo", () => {
     const rgba = pixelsDoIcone(16);
 
     expect(rgba.length).toBe(16 * 16 * 4);
@@ -87,10 +87,31 @@ describe("pixelsDoIcone", () => {
     expect(pixel(rgba, 16, 15, 15)[3]).toBe(0);
     // Linha 7 do desenho deslocado = linha 6 do CORPOS.gota (".##############.").
     expect(pixel(rgba, 16, 7, 2)).toEqual(opaco(CORES.corpo));
-    // Olho [7, 5] do ROSTOS.feliz, uma linha acima depois do deslocamento.
+    // Lente [7, 5] dos óculos escuros, uma linha acima depois do deslocamento.
     expect(pixel(rgba, 16, 6, 5)).toEqual(opaco(CORES.escuro));
+    // Brilho [7, 4] e [7, 10], no alto de cada lente.
+    expect(pixel(rgba, 16, 6, 4)).toEqual(opaco(CORES.brilho));
+    expect(pixel(rgba, 16, 6, 10)).toEqual(opaco(CORES.brilho));
+    // Boca [11, 7] (o sorriso).
+    expect(pixel(rgba, 16, 10, 7)).toEqual(opaco(CORES.escuro));
     expect(pixel(rgba, 16, 8, 3)).toEqual(opaco(CORES.bochecha));
     expect(pixel(rgba, 16, 8, 0)).toEqual(opaco(CORES.fundo));
+  });
+
+  it("os óculos não têm olhos por baixo: as duas lentes e a ponte são blocos escuros", () => {
+    const grade = gradeDoMascote();
+    const lentes = [5, 6, 7].flatMap((linha) =>
+      [3, 4, 5, 6, 9, 10, 11, 12].map((coluna) => [linha, coluna]),
+    );
+    const brilhos = new Set(["6,4", "6,10"]);
+
+    for (const [linha, coluna] of lentes) {
+      expect(grade[linha][coluna]).toBe(brilhos.has(`${linha},${coluna}`) ? "brilho" : "escuro");
+    }
+    expect(grade[5][7]).toBe("escuro");
+    expect(grade[5][8]).toBe("escuro");
+    expect(grade[6][7]).toBe("corpo");
+    expect(grade[7][8]).toBe("corpo");
   });
 
   it("centraliza o desenho: linhas 2–13 e colunas 1–14", () => {
@@ -112,6 +133,8 @@ describe("pixelsDoIcone", () => {
     expect(pixel(rgba, 256, 7 * 16, 2 * 16)).toEqual(opaco(CORES.corpo));
     expect(pixel(rgba, 256, 7 * 16 + 15, 2 * 16 + 15)).toEqual(opaco(CORES.corpo));
     expect(pixel(rgba, 256, 6 * 16 + 8, 5 * 16 + 8)).toEqual(opaco(CORES.escuro));
+    expect(pixel(rgba, 256, 6 * 16, 4 * 16)).toEqual(opaco(CORES.brilho));
+    expect(pixel(rgba, 256, 6 * 16 + 15, 4 * 16 + 15)).toEqual(opaco(CORES.brilho));
     expect(pixel(rgba, 256, 0, 0)[3]).toBe(0);
   });
 

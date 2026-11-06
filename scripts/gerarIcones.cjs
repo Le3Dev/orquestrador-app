@@ -1,6 +1,6 @@
 // Gera o ícone do aplicativo desktop: `npm run icones`.
 //
-// O ícone é o mascote do app, o bixinho "gota" com a expressão "feliz", na cor
+// O ícone é o mascote do app, o bixinho "gota" de óculos escuros, na cor
 // laranja, em pixel art 16 × 16, sobre um quadrado escuro de cantos
 // arredondados. Saídas:
 //   - electron/icones/icone.ico: 16, 20, 24, 32, 40, 48, 64, 128 e 256 px, cada
@@ -32,14 +32,17 @@ const AMOSTRAS_DA_BORDA = 4;
 const CORES = Object.freeze({
   fundo: [0x14, 0x14, 0x13], // --claude-escuro (#141413)
   corpo: [0xd9, 0x77, 0x57], // --claude-laranja (#d97757), .bixinho-cor-laranja
-  escuro: [0x14, 0x14, 0x13], // olhos e boca: .bixinho-escuro (--claude-escuro)
+  escuro: [0x14, 0x14, 0x13], // lentes e boca: .bixinho-escuro (--claude-escuro)
   // .bixinho-bochecha: color-mix(--claude-laranja 60%, --claude-claro #faf9f5) = #e6ab96
   bochecha: [0xe6, 0xab, 0x96],
+  brilho: [0xfa, 0xf9, 0xf5], // brilho das lentes: --claude-claro (#faf9f5)
 });
 
-// Desenho copiado de web/src/shared/canvas/sprites.ts (CORPOS.gota e
-// ROSTOS.feliz). Lá é TypeScript do front; aqui fica a cópia, que precisa
-// acompanhar o original se o mascote mudar.
+// O corpo e a boca são copiados de web/src/shared/canvas/sprites.ts
+// (CORPOS.gota e a boca e as bochechas de ROSTOS.feliz). Lá é TypeScript do
+// front; aqui fica a cópia, que precisa acompanhar o original se o mascote
+// mudar. As lentes e o brilho dos óculos escuros são desenho próprio do ícone:
+// não vêm de sprites.ts (nem do acessório `oculos` de lá).
 //
 // CORPOS.gota: 14 linhas que, na grade 16 × 16, começam na linha 2 (as linhas
 // 0 e 1 ficam para os acessórios).
@@ -61,11 +64,22 @@ const CORPO_GOTA = Object.freeze([
 ]);
 const LINHAS_DE_ACESSORIO = 2;
 
-// ROSTOS.feliz: coordenadas [linha, coluna] já na grade 16 × 16.
-const ROSTO_FELIZ = Object.freeze({
-  olhos: [[8, 4], [7, 5], [7, 6], [8, 7], [8, 8], [7, 9], [7, 10], [8, 11]],
-  boca: [[10, 6], [11, 7], [11, 8], [10, 9]],
+// Rosto de óculos escuros: coordenadas [linha, coluna] já na grade 16 × 16
+// (antes do deslocamento). Não tem olhos: as lentes ocupam o lugar deles.
+//   - bochechas e boca (o sorriso): as mesmas de ROSTOS.feliz em sprites.ts;
+//   - lentes: desenho próprio do ícone, dois blocos de 3 × 4 (linhas 6–8,
+//     colunas 3–6 e 9–12) unidos pela ponte [6, 7]–[6, 8];
+//   - brilho: desenho próprio do ícone, um pixel claro no alto de cada lente.
+const COLUNAS_DAS_LENTES = [3, 4, 5, 6, 9, 10, 11, 12];
+const ROSTO_DE_OCULOS_ESCUROS = Object.freeze({
   bochechas: [[9, 3], [9, 12]],
+  lentes: [
+    ...[6, 7, 8].flatMap((linha) => COLUNAS_DAS_LENTES.map((coluna) => [linha, coluna])),
+    [6, 7], // ponte
+    [6, 8], // ponte
+  ],
+  brilho: [[7, 4], [7, 10]],
+  boca: [[10, 6], [11, 7], [11, 8], [10, 9]],
 });
 
 // Sem acessório, o desenho ocupa as linhas 3–14; subir 1 linha deixa-o em
@@ -73,9 +87,9 @@ const ROSTO_FELIZ = Object.freeze({
 const DESLOCAMENTO_VERTICAL = -1;
 
 /**
- * Grade 16 × 16 com o nome da cor de cada célula (`corpo`, `bochecha`,
- * `escuro`) ou `null` onde só aparece o fundo. Ordem de pintura: corpo,
- * bochechas, olhos, boca.
+ * Grade 16 × 16 do bixinho gota de óculos escuros, com o nome da cor de cada
+ * célula (`corpo`, `bochecha`, `escuro`, `brilho`) ou `null` onde só aparece o
+ * fundo. Ordem de pintura: corpo, bochechas, lentes, brilho, boca.
  */
 function gradeDoMascote() {
   const grade = Array.from({ length: CELULAS }, () => new Array(CELULAS).fill(null));
@@ -92,9 +106,10 @@ function gradeDoMascote() {
       if (celula === "#") pintar(indice + LINHAS_DE_ACESSORIO, coluna, "corpo");
     });
   });
-  for (const [linha, coluna] of ROSTO_FELIZ.bochechas) pintar(linha, coluna, "bochecha");
-  for (const [linha, coluna] of ROSTO_FELIZ.olhos) pintar(linha, coluna, "escuro");
-  for (const [linha, coluna] of ROSTO_FELIZ.boca) pintar(linha, coluna, "escuro");
+  for (const [linha, coluna] of ROSTO_DE_OCULOS_ESCUROS.bochechas) pintar(linha, coluna, "bochecha");
+  for (const [linha, coluna] of ROSTO_DE_OCULOS_ESCUROS.lentes) pintar(linha, coluna, "escuro");
+  for (const [linha, coluna] of ROSTO_DE_OCULOS_ESCUROS.brilho) pintar(linha, coluna, "brilho");
+  for (const [linha, coluna] of ROSTO_DE_OCULOS_ESCUROS.boca) pintar(linha, coluna, "escuro");
   return grade;
 }
 
