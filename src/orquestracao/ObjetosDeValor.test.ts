@@ -302,6 +302,7 @@ describe("mensagemParaOOrquestrador", () => {
       REGRA_DOS_SERVIDORES,
     );
     expect(mensagemParaOOrquestrador("suba o site", soLeitura)).not.toContain(REGRA_DOS_SERVIDORES);
+    expect(REGRA_DOS_SERVIDORES).toContain("Não abra o navegador do computador");
   });
 
   it("no modo automático informa o máximo", () => {
