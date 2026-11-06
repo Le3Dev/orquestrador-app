@@ -28,6 +28,7 @@ import {
 import { IconeGrade, IconeOrquestrador } from "../componentes/Icones";
 import { ChatRapido } from "../componentes/chat/ChatRapido";
 import { ArestaDoBixinho } from "../componentes/canvas/ArestaDoBixinho";
+import { NoArtefato } from "../componentes/canvas/NoArtefato";
 import { NoBixinho } from "../componentes/canvas/NoBixinho";
 import { NoNota } from "../componentes/canvas/NoNota";
 import { NoRascunho } from "../componentes/canvas/NoRascunho";
@@ -43,16 +44,31 @@ import {
   ErroDoCanvas,
   StatusDoCanvas,
 } from "../componentes/canvas/PaineisDoCanvas";
+import type { ResumoDoArtefato } from "../shared/api/artefatos";
 import type { ResumoDoOrquestrador } from "../shared/api/tipos";
+import {
+  type AcoesDosArtefatos,
+  artefatoAberto,
+  comArtefatoAberto,
+  criarLojaDosArtefatos,
+  posicaoParaArtefato,
+  ProvedorDosArtefatos,
+  semArtefato,
+  sincronizarArtefatos,
+  terminalDaOrigem,
+  type ValorDosArtefatos,
+} from "../shared/canvas/artefatos";
 import { type AcoesDoCanvas, ProvedorDoCanvas, servidorParaOsNos, type ValorDoCanvas } from "../shared/canvas/contexto";
 import {
   type JanelaParaOrganizar,
   lerBixinhosLimpos,
   lerLayout,
   organizarComNotas,
+  type Ponto,
   posicaoParaNovoTerminal,
   salvarBixinhosLimpos,
   TAMANHO_DA_NOTA,
+  TAMANHO_DO_ARTEFATO,
   TAMANHO_DO_RASCUNHO,
   TAMANHO_DO_TERMINAL,
   type Viewport,
@@ -62,10 +78,12 @@ import {
   ALCA_DO_TERMINAL,
   type ArestaDoCanvas,
   arestasDosBixinhos,
+  ehArtefato,
   ehBixinho,
   ehNota,
   ehTerminal,
   idDoNoDaNota,
+  idDoNoDoArtefato,
   limparBixinhos,
   mesmasLigacoes,
   type NoDoCanvas,
@@ -80,6 +98,7 @@ import {
 } from "../shared/canvas/nos";
 import { ProvedorDasNotas } from "../shared/canvas/notas";
 import { useAjustesDoAplicativo } from "../shared/hooks/useAjustesDoAplicativo";
+import { useArtefatos } from "../shared/hooks/useArtefatos";
 import { useChat } from "../shared/hooks/useChat";
 import { useConversas } from "../shared/hooks/useConversas";
 import { useMovimentoDoCanvas } from "../shared/hooks/useMovimentoDoCanvas";
@@ -92,14 +111,25 @@ import type { AcaoDaPaleta, FonteDaPaleta, ItemDaPaleta } from "../shared/paleta
 // Tudo o que vai ao <ReactFlow> é constante ou estável: uma prop nova a cada
 // renderização (e o canvas renderiza a cada quadro do arraste) faz o React
 // Flow atualizar o estado interno e re-renderizar por dentro.
-const TIPOS_DE_NO = { terminal: NoTerminal, rascunho: NoRascunho, bixinho: NoBixinho, nota: NoNota } satisfies NodeTypes;
+const TIPOS_DE_NO = {
+  terminal: NoTerminal,
+  rascunho: NoRascunho,
+  bixinho: NoBixinho,
+  nota: NoNota,
+  artefato: NoArtefato,
+} satisfies NodeTypes;
 const TIPOS_DE_ARESTA = { bixinho: ArestaDoBixinho } satisfies EdgeTypes;
 // Nunca acima de 100%: o texto dos terminais só fica nítido em zoom inteiro
 // (100%), e enquadrar não deve ampliar além disso.
 const ENQUADRAMENTO_AO_ABRIR: FitViewOptions<NoDoCanvas> = { maxZoom: 1, padding: 0.15 };
 const VIEWPORT_PADRAO: Viewport = { x: 0, y: 0, zoom: 1 };
 /** Nome e dica do "Organizar", o 4º botão dos controles do canto inferior esquerdo. */
-const DICA_DO_ORGANIZAR = "Organizar: terminais lado a lado e notas à direita";
+const DICA_DO_ORGANIZAR = "Organizar: terminais lado a lado; notas e artefatos à direita";
+/**
+ * Quanto do pé da área do canvas o chat rápido ocupa (compacto, com a
+ * margem): a janela de um artefato aberta "no centro" fica acima dele.
+ */
+const ALTURA_RESERVADA_AO_CHAT = 110;
 
 /** Foco num campo de texto: o atalho é do campo, não do canvas. */
 function focoEmCampoDeTexto(alvo: EventTarget | null): boolean {
@@ -131,6 +161,9 @@ function classeNoMinimapa(no: NoDoCanvas, trabalhando: ReadonlySet<string>): str
   }
   if (ehNota(no)) {
     return "minimapa-nota";
+  }
+  if (ehArtefato(no)) {
+    return "minimapa-artefato";
   }
   return ehTerminal(no) && trabalhando.has(no.data.orquestradorId)
     ? "minimapa-terminal minimapa-terminal-trabalhando"
@@ -204,7 +237,10 @@ function Canvas() {
   const [enquadrarAoAbrir] = useState(
     () =>
       layoutInicial.viewport === null &&
-      Object.keys(layoutInicial.terminais).length + Object.keys(layoutInicial.notas).length > 0,
+      Object.keys(layoutInicial.terminais).length +
+        Object.keys(layoutInicial.notas).length +
+        Object.keys(layoutInicial.artefatos).length >
+        0,
   );
   const [nosIniciais] = useState(() => nosDoLayout(layoutInicial));
   const [nos, setNos, aoMudarNos] = useNodesState<NoDoCanvas>(nosIniciais);
@@ -358,6 +394,111 @@ function Canvas() {
     [fluxo],
   );
 
+  // Artefatos: a lista e os eventos ao vivo vêm do hook; os resumos vão para
+  // uma loja própria, lida por cada janela — um evento de um artefato não
+  // re-renderiza as outras janelas (ADR-11).
+  const {
+    lista: listaDeArtefatos,
+    carregada: artefatosCarregados,
+    erro: erroDosArtefatos,
+    eventosRecentes: eventosDosArtefatos,
+    renomear: renomearArtefato,
+    apagar: apagarArtefato,
+  } = useArtefatos(servidor.conectado);
+  const [lojaDosArtefatos] = useState(criarLojaDosArtefatos);
+  // Antes dos efeitos: a janela aberta por um evento já encontra o resumo na loja.
+  useLayoutEffect(() => {
+    lojaDosArtefatos.publicar({ lista: listaDeArtefatos, carregada: artefatosCarregados, erro: erroDosArtefatos });
+  }, [lojaDosArtefatos, listaDeArtefatos, artefatosCarregados, erroDosArtefatos]);
+  // A paleta lê a lista por aqui, só ao abrir.
+  const artefatosAtuais = useRef(listaDeArtefatos);
+  useEffect(() => {
+    artefatosAtuais.current = listaDeArtefatos;
+  }, [listaDeArtefatos]);
+
+  // Os artefatos apagados no servidor saem do canvas e, com isso, do layout.
+  useEffect(() => {
+    if (!artefatosCarregados) {
+      return;
+    }
+    const existentes = new Set(listaDeArtefatos.map((artefato) => artefato.id));
+    setNos((atuais) => sincronizarArtefatos(atuais, existentes));
+  }, [artefatosCarregados, listaDeArtefatos, setNos]);
+
+  /** O centro da área do canvas acima do chat rápido (que fica no pé da tela). */
+  const centroAcimaDoChat = useCallback((): Ponto => {
+    const area = areaDoCanvas.current?.getBoundingClientRect();
+    if (area === undefined || area.width <= 0 || area.height <= 0) {
+      return centroDaTela();
+    }
+    const alturaLivre = Math.max(area.height - ALTURA_RESERVADA_AO_CHAT, area.height / 2);
+    return fluxo.screenToFlowPosition({ x: area.left + area.width / 2, y: area.top + alturaLivre / 2 });
+  }, [centroDaTela, fluxo]);
+
+  /**
+   * Abre a janela do artefato, se ainda não estiver aberta: ao lado do terminal
+   * do Orquestrador que o criou, se ele estiver aberto; senão, no centro da
+   * vista. Sempre num lugar livre. Artefatos não contam no limite de terminais.
+   */
+  const abrirArtefato = useCallback(
+    (artefato: Pick<ResumoDoArtefato, "id" | "origem">) => {
+      setNos((atuais) => {
+        if (artefatoAberto(atuais, artefato.id)) {
+          return atuais;
+        }
+        const posicao = posicaoParaArtefato(
+          atuais,
+          TAMANHO_DO_ARTEFATO,
+          terminalDaOrigem(atuais, artefato),
+          centroAcimaDoChat(),
+        );
+        return reacomodarBixinhos(comArtefatoAberto(atuais, artefato.id, posicao));
+      });
+    },
+    [centroAcimaDoChat, setNos],
+  );
+
+  // Um artefato criado agora abre sozinho. Versão nova não abre a janela
+  // fechada (a aberta passa sozinha para ela); título novo e remoção só mudam
+  // a lista.
+  const ultimoEventoVisto = useRef(0);
+  useEffect(() => {
+    for (const { numero, evento } of eventosDosArtefatos) {
+      if (numero <= ultimoEventoVisto.current) {
+        continue;
+      }
+      ultimoEventoVisto.current = numero;
+      if (evento.tipo === "artefato_criado") {
+        abrirArtefato(evento.artefato);
+      }
+    }
+  }, [eventosDosArtefatos, abrirArtefato]);
+
+  /** Pela paleta: abre a janela (se fechada) e leva até ela. */
+  const abrirOuFocarArtefato = useCallback(
+    (artefatoId: string) => {
+      const artefato = artefatosAtuais.current.find((candidato) => candidato.id === artefatoId);
+      abrirArtefato(artefato ?? { id: artefatoId, origem: { tipo: "chat", id: null } });
+      focar(idDoNoDoArtefato(artefatoId));
+    },
+    [abrirArtefato, focar],
+  );
+
+  const acoesDosArtefatos = useMemo<AcoesDosArtefatos>(
+    () => ({
+      renomear: async (artefatoId, titulo) => {
+        await renomearArtefato(artefatoId, titulo);
+      },
+      apagar: apagarArtefato,
+      fechar: (artefatoId) => setNos((atuais) => semArtefato(atuais, artefatoId)),
+    }),
+    [renomearArtefato, apagarArtefato, setNos],
+  );
+  const valorDosArtefatos = useMemo<ValorDosArtefatos>(
+    () => ({ loja: lojaDosArtefatos, acoes: acoesDosArtefatos }),
+    [lojaDosArtefatos, acoesDosArtefatos],
+  );
+
   // Trava de terminais abertos: lê os nós por aqui, para as ações não mudarem a cada arraste.
   const nosAtuais = useRef(nos);
   useLayoutEffect(() => {
@@ -475,10 +616,11 @@ function Canvas() {
   const organizar = useCallback(() => {
     setNos((atuais) => {
       const janelas = atuais
-        .filter((no) => !ehBixinho(no) && !ehNota(no))
+        .filter((no) => !ehBixinho(no) && !ehNota(no) && !ehArtefato(no))
         .map((no) => tamanhoParaOrganizar(no, TAMANHO_DO_TERMINAL));
       const notasNoCanvas = atuais.filter(ehNota).map((no) => tamanhoParaOrganizar(no, TAMANHO_DA_NOTA));
-      const posicoes = organizarComNotas(janelas, notasNoCanvas);
+      const artefatosNoCanvas = atuais.filter(ehArtefato).map((no) => tamanhoParaOrganizar(no, TAMANHO_DO_ARTEFATO));
+      const posicoes = organizarComNotas(janelas, notasNoCanvas, artefatosNoCanvas);
       return reacomodarBixinhos(
         atuais.map((no) => {
           const posicao = posicoes[no.id];
@@ -561,6 +703,7 @@ function Canvas() {
   const lojaDasNotas = notas.valor.loja;
   const lerFonteDaPaleta = useCallback((): FonteDaPaleta => {
     const atuais = nosAtuais.current;
+    const artefatosNoCanvas = new Set(atuais.filter(ehArtefato).map((no) => no.data.artefatoId));
     return {
       podeOrganizar: atuais.filter((no) => !ehBixinho(no)).length > 1,
       podeAbrirAjustes: desktop && ajustesDisponiveis,
@@ -570,6 +713,13 @@ function Canvas() {
         const nota = lojaDasNotas.ler(no.data.notaId);
         return { notaId: no.data.notaId, titulo: nota?.titulo ?? "", texto: nota?.texto ?? "" };
       }),
+      artefatos: artefatosAtuais.current.map((artefato) => ({
+        artefatoId: artefato.id,
+        titulo: artefato.titulo,
+        formato: artefato.formato,
+        origem: artefato.origem,
+        aberto: artefatosNoCanvas.has(artefato.id),
+      })),
       // Só as conversas carregadas: as dos terminais abertos, sem as arquivadas (/clear).
       conversas: conversasAtuais.current,
     };
@@ -597,9 +747,22 @@ function Canvas() {
         case "nota":
           focar(idDoNoDaNota(item.notaId));
           return;
+        case "artefato":
+          abrirOuFocarArtefato(item.artefatoId);
+          return;
       }
     },
-    [novoOrquestrador, novaNota, organizar, zoomEmCemPorCento, enquadrarTudo, abrirAjustes, abrirTerminal, focar],
+    [
+      novoOrquestrador,
+      novaNota,
+      organizar,
+      zoomEmCemPorCento,
+      enquadrarTudo,
+      abrirAjustes,
+      abrirTerminal,
+      focar,
+      abrirOuFocarArtefato,
+    ],
   );
 
   const acoes = useMemo<AcoesDoCanvas>(
@@ -781,51 +944,53 @@ function Canvas() {
   return (
     <ProvedorDoCanvas valor={valor}>
       <ProvedorDasNotas valor={notas.valor}>
-        <div
-          className={`flex h-screen w-screen flex-col ${servidor.conectado ? "" : "canvas-desconectado"} ${movimento.movendo ? "canvas-movendo" : ""}`}
-        >
-          {barraDeTitulo}
-          <div ref={areaDoCanvas} className="relative min-h-0 w-full flex-1">
-            <ReactFlow<NoDoCanvas, ArestaDoCanvas>
-              nodes={nos}
-              edges={arestas}
-              nodeTypes={TIPOS_DE_NO}
-              edgeTypes={TIPOS_DE_ARESTA}
-              onNodesChange={aoMudarNosEReacomodar}
-              onNodeDragStart={movimento.aoComecarArraste}
-              onNodeDragStop={aoSoltarNo}
-              onMoveStart={movimento.aoComecarMovimento}
-              onMoveEnd={movimento.aoTerminarMovimento}
-              colorMode="dark"
-              defaultViewport={layoutInicial.viewport ?? VIEWPORT_PADRAO}
-              fitView={enquadrarAoAbrir}
-              fitViewOptions={ENQUADRAMENTO_AO_ABRIR}
-              minZoom={0.1}
-              maxZoom={2}
-              // Como no Excalidraw: a roda do mouse rola o canvas; com Ctrl, dá zoom.
-              panOnScroll
-              zoomActivationKeyCode="Control"
-              deleteKeyCode={null}
-            >
-              <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} />
-              {controles}
-              <MiniMap<NoDoCanvas> position="bottom-right" pannable zoomable nodeClassName={classeDoMinimapa} />
-              <Panel position="top-left" className="paineis-do-topo">
-                {colunaDaEsquerda}
-                {colunaDoCentro}
-                {colunaDaDireita}
-              </Panel>
-              {painelDoChat}
-            </ReactFlow>
-            {quantidadeDeJanelas === 0 && <CanvasVazio aoCriar={novoOrquestrador} />}
-            {/* Fora do <ReactFlow>: não escala com o zoom e cobre só a área do canvas. */}
-            <PaletaDeComandos
-              controle={controleDaPaleta}
-              lerFonte={lerFonteDaPaleta}
-              aoExecutar={executarItemDaPaleta}
-            />
+        <ProvedorDosArtefatos valor={valorDosArtefatos}>
+          <div
+            className={`flex h-screen w-screen flex-col ${servidor.conectado ? "" : "canvas-desconectado"} ${movimento.movendo ? "canvas-movendo" : ""}`}
+          >
+            {barraDeTitulo}
+            <div ref={areaDoCanvas} className="relative min-h-0 w-full flex-1">
+              <ReactFlow<NoDoCanvas, ArestaDoCanvas>
+                nodes={nos}
+                edges={arestas}
+                nodeTypes={TIPOS_DE_NO}
+                edgeTypes={TIPOS_DE_ARESTA}
+                onNodesChange={aoMudarNosEReacomodar}
+                onNodeDragStart={movimento.aoComecarArraste}
+                onNodeDragStop={aoSoltarNo}
+                onMoveStart={movimento.aoComecarMovimento}
+                onMoveEnd={movimento.aoTerminarMovimento}
+                colorMode="dark"
+                defaultViewport={layoutInicial.viewport ?? VIEWPORT_PADRAO}
+                fitView={enquadrarAoAbrir}
+                fitViewOptions={ENQUADRAMENTO_AO_ABRIR}
+                minZoom={0.1}
+                maxZoom={2}
+                // Como no Excalidraw: a roda do mouse rola o canvas; com Ctrl, dá zoom.
+                panOnScroll
+                zoomActivationKeyCode="Control"
+                deleteKeyCode={null}
+              >
+                <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} />
+                {controles}
+                <MiniMap<NoDoCanvas> position="bottom-right" pannable zoomable nodeClassName={classeDoMinimapa} />
+                <Panel position="top-left" className="paineis-do-topo">
+                  {colunaDaEsquerda}
+                  {colunaDoCentro}
+                  {colunaDaDireita}
+                </Panel>
+                {painelDoChat}
+              </ReactFlow>
+              {quantidadeDeJanelas === 0 && <CanvasVazio aoCriar={novoOrquestrador} />}
+              {/* Fora do <ReactFlow>: não escala com o zoom e cobre só a área do canvas. */}
+              <PaletaDeComandos
+                controle={controleDaPaleta}
+                lerFonte={lerFonteDaPaleta}
+                aoExecutar={executarItemDaPaleta}
+              />
+            </div>
           </div>
-        </div>
+        </ProvedorDosArtefatos>
       </ProvedorDasNotas>
     </ProvedorDoCanvas>
   );

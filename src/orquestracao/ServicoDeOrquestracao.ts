@@ -29,6 +29,12 @@ export interface DependenciasDoServico {
   publicador: PublicadorDeEventos;
   anexos: ArmazemDeAnexos;
   worktrees: GerenciadorDeWorktrees;
+  /**
+   * Pasta de entrada dos artefatos de cada Orquestrador, absoluta
+   * (`<PASTA_DADOS>/artefatos/entrada/orquestradores/<id>`): vai em cada
+   * pedido ao motor.
+   */
+  pastaDeArtefatos: (orquestradorId: string) => string;
   gerarId: () => string;
   agora: () => Date;
   /** Mede o gasto de cada turno ao fim dele. Sem medidor, nenhum consumo é registrado. */
@@ -413,7 +419,7 @@ export class ServicoDeOrquestracao {
     sinal: AbortSignal,
     configuracaoDoTurno: ConfiguracaoDoOrquestrador,
   ): Promise<TurnoEncerrado | null> {
-    const { motor, repositorio, anexos, worktrees, agora } = this.dependencias;
+    const { motor, repositorio, anexos, worktrees, pastaDeArtefatos, agora } = this.dependencias;
     const turno = orquestrador.turnoEmAndamento;
     const anexosDoTurno = turno?.anexos ?? [];
     const modo = turno?.modo ?? "execucao";
@@ -455,6 +461,8 @@ export class ServicoDeOrquestracao {
             tipoDeMidia: anexo.tipoDeMidia,
           })),
           pastaDasImagens: anexosDoTurno.length > 0 ? anexos.pastaDe(orquestrador.id) : null,
+          // Do Orquestrador, e não do worktree: os artefatos sobrevivem ao turno.
+          pastaDeArtefatos: pastaDeArtefatos(orquestrador.id),
         },
         (evento) => this.registrarDoMotor(orquestrador, turnoId, evento),
         sinal,

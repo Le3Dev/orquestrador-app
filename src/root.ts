@@ -12,6 +12,7 @@ import { CanalDoChat, criarChatRoutes } from "./controllers/chatRoutes";
 import { criarNotasRoutes } from "./controllers/notasRoutes";
 import { criarOrquestradoresRoutes } from "./controllers/orquestradoresRoutes";
 import { ArmazemDeAnexosEmArquivo } from "./infraestrutura/arquivos/ArmazemDeAnexosEmArquivo";
+import { PastaDeEntradaDosArtefatos } from "./infraestrutura/arquivos/ColetorDeArtefatosEmPasta";
 import { ExploradorDePastas } from "./infraestrutura/arquivos/ExploradorDePastas";
 import { RepositorioDeNotasEmArquivo } from "./infraestrutura/arquivos/RepositorioDeNotasEmArquivo";
 import { RepositorioDeOrquestradoresEmArquivo } from "./infraestrutura/arquivos/RepositorioDeOrquestradoresEmArquivo";
@@ -28,6 +29,7 @@ import {
   modoDeAcesso,
 } from "./infraestrutura/Configuracao";
 import { ControleDeExecucoesEmMemoria } from "./infraestrutura/execucoes/ControleDeExecucoesEmMemoria";
+import { montarArtefatos, pastaDeEntradaDosArtefatos } from "./infraestrutura/montarArtefatos";
 import { GerenciadorDeWorktreesGit } from "./infraestrutura/sistema/GerenciadorDeWorktreesGit";
 import { LeitorDeAlteracoesGit } from "./infraestrutura/sistema/LeitorDeAlteracoesGit";
 import { MonitorDeMemoria } from "./infraestrutura/sistema/MonitorDeMemoria";
@@ -107,6 +109,12 @@ async function iniciar(): Promise<void> {
     );
   }
 
+  const { pastaDeDados } = configuracao;
+  // Pasta de entrada dos artefatos: os agentes gravam aqui (`chat/` e
+  // `orquestradores/<id>/`), e o contexto de artefatos coleta. O mesmo objeto
+  // do coletor, para o layout ter uma fonte só.
+  const entradaDosArtefatos = new PastaDeEntradaDosArtefatos(pastaDeEntradaDosArtefatos(pastaDeDados));
+
   const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(configuracao.pastaDeDados);
   const notas = await RepositorioDeNotasEmArquivo.abrir(configuracao.pastaDeDados);
   const repositorioDoChat = await RepositorioDoChatEmArquivo.abrir(configuracao.pastaDeDados, randomUUID);
@@ -143,6 +151,7 @@ async function iniciar(): Promise<void> {
     publicador: canal,
     anexos,
     worktrees,
+    pastaDeArtefatos: (orquestradorId) => entradaDosArtefatos.pastaDoOrquestrador(orquestradorId),
     gerarId: randomUUID,
     agora: () => new Date(),
     // Economia de tokens (ADR-21): custo de cada turno lido das transcrições e
@@ -178,12 +187,16 @@ async function iniciar(): Promise<void> {
     execucoes,
     pastaDaSessao: repositorioDoChat.pastaDaSessao,
     pastaDosProjetos: configuracao.pastaRaizDosProjetos,
+    pastaDeArtefatos: entradaDosArtefatos.pastaDoChat,
     gerarId: randomUUID,
     agora: () => new Date(),
   });
   if (await servicoDeChat.interromperRespostaPendente()) {
     console.warn("[chat] A resposta em andamento foi marcada como interrompida pelo reinício.");
   }
+
+  // Artefatos: coleta o que os agentes gravam na pasta de entrada e serve na tela.
+  const artefatos = await montarArtefatos({ pastaDeDados });
 
   // A tela consulta /api/saude a cada poucos segundos para saber se o servidor
   // está no ar. O instante de início denuncia um reinício: os pedidos que
@@ -218,7 +231,10 @@ async function iniciar(): Promise<void> {
         servico: new ServicoDeNotas({ repositorio: notas, gerarId: randomUUID, agora: () => new Date() }),
       }),
     );
+    rotas.use("/api", artefatos.rotas);
   });
+  // Depois das rotas: inclui o que chegou na pasta de entrada com o servidor desligado.
+  await artefatos.iniciar();
 
   // Só em 127.0.0.1: os agentes editam arquivos e rodam comandos com o login
   // do usuário — ninguém mais na rede pode mandar mensagens para eles.
@@ -231,6 +247,9 @@ async function iniciar(): Promise<void> {
     const cancelados = execucoes.cancelarTodas();
     console.log(`[${sinal}] Encerrando${cancelados > 0 ? ` e cancelando ${cancelados} turno(s)` : ""}.`);
     servidor.close();
+    artefatos
+      .encerrar()
+      .catch((erro: unknown) => console.warn("[artefatos] Falha ao encerrar a coleta:", erro));
     // Tempo para o taskkill derrubar os processos e o histórico ser gravado.
     setTimeout(() => process.exit(0), cancelados > 0 ? 2_000 : 200);
   };

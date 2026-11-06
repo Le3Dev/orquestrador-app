@@ -466,6 +466,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .react-flow__minimap-node.minimapa-terminal { fill: var(--surface-3); stroke: var(--border-forte); }
 .react-flow__minimap-node.minimapa-bixinho { fill: var(--active); }
 .react-flow__minimap-node.minimapa-nota { fill: color-mix(in srgb, var(--warning) 60%, var(--surface)); }
+.react-flow__minimap-node.minimapa-artefato { fill: color-mix(in srgb, var(--info) 60%, var(--surface)); }
 /* Terminal de um Orquestrador trabalhando: contorno laranja que pulsa no
  * minimapa. `non-scaling-stroke` deixa o contorno em pixels da tela, qualquer
  * que seja a escala do minimapa. Parado (sem pulso) com o reduzir movimento,
@@ -492,7 +493,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .react-flow__node-terminal,
 .react-flow__node-rascunho,
 .react-flow__node-bixinho,
-.react-flow__node-nota { background: transparent; border: 0; padding: 0; }
+.react-flow__node-nota,
+.react-flow__node-artefato { background: transparent; border: 0; padding: 0; }
 
 /* Âncoras das linhas: existem para o React Flow, não para o usuário. */
 .ancora { opacity: 0; pointer-events: none; width: 1px; height: 1px; min-width: 0; min-height: 0; border: 0; }
@@ -1026,6 +1028,218 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .alca-de-arraste[draggable="false"]:hover { color: var(--muted); background: transparent; }
 /* Na barra: do tamanho dos botões-ícone ao lado. */
 .alca-de-arraste-da-nota { width: 22px; height: 26px; border-radius: 6px; }
+
+/* ---------------- Artefatos (páginas HTML e documentos Markdown) ----------------
+ * A moldura da nota num tom azul. A página roda num iframe isolado (sandbox
+ * sem allow-same-origin), sobre fundo claro: é o que uma página sem estilo
+ * espera. Nada anima, menos o selo "vN nova", que some sozinho. */
+
+.moldura-do-artefato { width: 100%; height: 100%; }
+
+.janela-artefato {
+  --cor-do-artefato: var(--info);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--cor-do-artefato) 32%, var(--border-forte));
+  box-shadow: 0 18px 44px -22px rgba(0, 0, 0, .85);
+  transition: border-color .2s;
+}
+.react-flow__node.selected .janela-artefato { border-color: color-mix(in srgb, var(--cor-do-artefato) 80%, transparent); }
+
+.barra-do-artefato {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 38px;
+  padding: 0 6px 0 10px;
+  background: color-mix(in srgb, var(--cor-do-artefato) 12%, var(--surface-2));
+  border-bottom: 1px solid color-mix(in srgb, var(--cor-do-artefato) 22%, var(--border));
+  cursor: grab;
+}
+.barra-do-artefato:active { cursor: grabbing; }
+
+/* "</>" (HTML) ou "M↓" (Markdown), na barra e na paleta. */
+.icone-do-artefato {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  min-width: 26px;
+  height: 20px;
+  padding: 0 4px;
+  border-radius: 5px;
+  font-family: var(--fonte-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--info) 30%, transparent);
+}
+.icone-do-artefato-markdown {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
+}
+
+.titulo-do-artefato {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--fonte-titulo);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.campo-do-titulo-do-artefato {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--active);
+  background: var(--surface-2);
+  color: var(--primary);
+  font-family: var(--fonte-titulo);
+  font-size: 12.5px;
+  font-weight: 600;
+  outline: none;
+  cursor: text;
+}
+.campo-do-titulo-do-artefato::placeholder { color: var(--placeholder); font-weight: 400; }
+
+/* Selo breve quando chega uma versão nova. */
+.destaque-de-versao-nova {
+  flex-shrink: 0;
+  padding: 1px 7px;
+  border-radius: 6px;
+  font-family: var(--fonte-mono);
+  font-size: 10.5px;
+  white-space: nowrap;
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success) 45%, transparent);
+  animation: surgir-o-destaque .9s ease-out;
+}
+@keyframes surgir-o-destaque {
+  0% { opacity: 0; transform: translateY(-3px); }
+  35% { opacity: 1; transform: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 30%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* Seletor de versão ("v3 ▾") e a lista das versões. */
+.seletor-de-versao { position: relative; flex-shrink: 0; }
+.botao-da-versao {
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--secondary);
+  font-family: var(--fonte-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.botao-da-versao:hover, .botao-da-versao[aria-expanded="true"] { background: var(--surface-3); color: var(--primary); }
+.botao-da-versao:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+/* Vendo uma versão que não é a atual. */
+.botao-da-versao-antiga {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+}
+.menu-de-versoes {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 230px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px;
+  cursor: default;
+}
+.item-de-versao { font-size: 12px; text-align: left; }
+.item-de-versao[aria-checked="true"] { background: color-mix(in srgb, var(--info) 14%, transparent); }
+
+.corpo-do-artefato {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/* A página: fundo claro e esquema claro (sem isso, o navegador pintaria o
+ * fundo de branco opaco por cima, ou o texto escuro ficaria sobre o escuro). */
+.corpo-do-artefato-html {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  color-scheme: light;
+  background: var(--claude-claro);
+}
+/* Enquanto o canvas se move ou a janela é redimensionada, a página não pega
+ * o mouse: passar por cima do iframe perderia o arraste. */
+.canvas-movendo .corpo-do-artefato-html,
+.moldura-do-artefato-redimensionando .corpo-do-artefato-html { pointer-events: none; }
+
+.corpo-do-artefato-markdown {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 18px;
+  cursor: auto;
+  user-select: text;
+}
+
+.estado-do-artefato {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 12px 14px;
+  font-family: var(--fonte-mono);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.rodape-do-artefato {
+  flex-shrink: 0;
+  padding: 5px 12px 6px;
+  border-top: 1px solid color-mix(in srgb, var(--error) 30%, var(--border));
+  font-family: var(--fonte-mono);
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+
+/* Tela cheia (modal no document.body, fora do zoom do canvas). */
+.artefato-ampliado {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 1400px;
+  overflow: hidden;
+}
+.barra-do-artefato-ampliado {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 8px 10px 8px 14px;
+  border-bottom: 1px solid var(--border);
+}
 
 /* ---------------- Bixinhos (Subagentes) ---------------- */
 

@@ -28,6 +28,12 @@ export interface DependenciasDoServicoDeChat {
   pastaDaSessao: string;
   /** Raiz dos projetos: leitura sempre; edição e comandos só com a autorização do usuário. */
   pastaDosProjetos: string;
+  /**
+   * Pasta de entrada dos artefatos do chat, absoluta
+   * (`<PASTA_DADOS>/artefatos/entrada/chat`): gravar nela não depende da
+   * autorização do usuário.
+   */
+  pastaDeArtefatos: string;
   gerarId: () => string;
   agora: () => Date;
 }
@@ -226,7 +232,7 @@ export class ServicoDeChat {
     alteracoesAutorizadas: boolean,
     sinal: AbortSignal,
   ): Promise<void> {
-    const { motor, repositorio, anexos, agora, pastaDaSessao, pastaDosProjetos } = this.dependencias;
+    const { motor, repositorio, anexos, agora, pastaDaSessao, pastaDosProjetos, pastaDeArtefatos } = this.dependencias;
     const textoDaPergunta = conversa.perguntaEmAndamento?.texto ?? "";
 
     let projetos: ProjetoDoChat[] = [];
@@ -246,6 +252,7 @@ export class ServicoDeChat {
             projetos: contexto.projetos,
             orquestradores: contexto.orquestradores,
             alteracoesAutorizadas,
+            pastaDeArtefatos,
           }),
           instrucoes: instrucoesDoChat(),
           imagens: imagens.map((imagem) => ({
@@ -255,6 +262,7 @@ export class ServicoDeChat {
           pastaDasImagens: imagens.length > 0 ? anexos.pastaDe(ID_DO_CHAT) : null,
           pastaDaSessao,
           pastaDosProjetos,
+          pastaDeArtefatos,
           modelo: preferencias.modelo,
           esforco: preferencias.esforco,
           alteracoesAutorizadas,

@@ -9,6 +9,7 @@ import { PedidoDeTurno } from "../../orquestracao/MotorDeAgentes";
 import { NivelDePermissao } from "../../orquestracao/NivelDePermissao";
 import { PastaDeTrabalho } from "../../orquestracao/PastaDeTrabalho";
 import {
+  comandosProibidosDoTurno,
   configuracoesDaSessao,
   definicaoDosAgentes,
   ferramentasDoTurno,
@@ -22,6 +23,13 @@ import {
 const arquivos = { agentes: "agentes.json", instrucoes: "instrucoes.txt", configuracoes: "configuracoes.json" };
 
 const COMMIT_E_PUSH = ["PowerShell(git commit:*)", "PowerShell(git push:*)", "Bash(git commit:*)", "Bash(git push:*)"];
+
+/** Pasta de artefatos do Orquestrador "o1", com espaço no caminho como a pasta de dados real. */
+const PASTA_DE_ARTEFATOS = "C:\\Users\\ana\\Orquestrador de Agentes\\dados\\artefatos\\entrada\\orquestradores\\o1";
+const REGRAS_DE_ARTEFATO = [
+  "Write(//c/Users/ana/Orquestrador de Agentes/dados/artefatos/entrada/orquestradores/o1/**)",
+  "Edit(//c/Users/ana/Orquestrador de Agentes/dados/artefatos/entrada/orquestradores/o1/**)",
+];
 
 interface Esforcos {
   esforcoDoOrquestrador?: EsforcoDeRaciocinio;
@@ -39,6 +47,7 @@ function pedido(
     orquestradorId: "o1",
     imagens: [],
     pastaDasImagens: null,
+    pastaDeArtefatos: PASTA_DE_ARTEFATOS,
     sessaoId: "sessao-1",
     sessaoIniciada,
     texto: "analise",
@@ -62,6 +71,64 @@ function valoresDe(argumentos: string[], opcao: string): string[] {
   return argumentos.slice(inicio, fim === -1 ? undefined : fim);
 }
 
+/** Todas as pastas passadas em `--add-dir`, na ordem. */
+function pastasLiberadas(argumentos: string[]): string[] {
+  return argumentos.flatMap((argumento, indice) => (argumento === "--add-dir" ? [argumentos[indice + 1] ?? ""] : []));
+}
+
+describe("artefatos do Orquestrador e dos Subagentes", () => {
+  const CASOS: [NivelDePermissao, ModoDoTurno, boolean][] = [
+    ["leitura", "execucao", false],
+    ["edicao", "execucao", true],
+    ["edicao_e_comandos", "execucao", true],
+    ["leitura", "planejamento", false],
+    ["edicao", "planejamento", false],
+    ["edicao_e_comandos", "planejamento", false],
+  ];
+
+  it.each(CASOS)("no nível %s, em %s, libera a pasta de artefatos e Write/Edit nela", (nivel, modo, edicaoLivre) => {
+    const turno = pedido(true, nivel, modo);
+    const argumentos = montarArgumentos(turno, arquivos);
+    const ferramentas = valoresDe(argumentos, "--tools");
+    const permitidas = valoresDe(argumentos, "--allowedTools");
+    const executor = definicaoDosAgentes(turno).executor;
+
+    expect(pastasLiberadas(argumentos)).toContain(PASTA_DE_ARTEFATOS);
+    expect(ferramentas).toEqual(expect.arrayContaining(["Write", "Edit", "Agent"]));
+    expect(executor?.tools).toEqual(expect.arrayContaining(["Write", "Edit"]));
+    expect(valoresDe(argumentos, "--permission-mode")).toEqual(["dontAsk"]);
+    if (edicaoLivre) {
+      // Edição já liberada no projeto: nada de regra por caminho.
+      expect(permitidas).toEqual(expect.arrayContaining(["Write", "Edit"]));
+      expect(permitidas.some((regra) => regra.startsWith("Write(") || regra.startsWith("Edit("))).toBe(false);
+    } else {
+      // Só a regra de caminho: gravar fora da pasta de artefatos continua negado pelo dontAsk.
+      expect(permitidas).toEqual(expect.arrayContaining(REGRAS_DE_ARTEFATO));
+      expect(permitidas).not.toContain("Write");
+      expect(permitidas).not.toContain("Edit");
+      expect(permitidas).not.toContain("NotebookEdit");
+    }
+    // `--disallowedTools` é variádico: continua por último.
+    expect(argumentos.at(-1)).toBe(comandosProibidosDoTurno(turno).at(-1));
+    expect(argumentos.lastIndexOf("--disallowedTools")).toBe(argumentos.length - comandosProibidosDoTurno(turno).length - 1);
+  });
+
+  it("o executor recebe a pasta de artefatos nas instruções", () => {
+    const prompt = definicaoDosAgentes(pedido(false)).executor?.prompt ?? "";
+
+    expect(prompt).toContain(`grave UM arquivo autocontido na pasta ${PASTA_DE_ARTEFATOS}`);
+    expect(prompt).toContain("permitido em qualquer permissão");
+  });
+
+  it("a definição gravada em agentes.json leva Write e Edit no nível só leitura", () => {
+    const definicao = JSON.parse(JSON.stringify(definicaoDosAgentes(pedido(false, "leitura")))) as {
+      executor: { tools: string[] };
+    };
+
+    expect(definicao.executor.tools).toEqual(["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Write", "Edit"]);
+  });
+});
+
 describe("montarArgumentos", () => {
   it("cria a sessão no primeiro turno e a retoma nos seguintes", () => {
     const primeiro = montarArgumentos(pedido(false), arquivos);
@@ -74,22 +141,35 @@ describe("montarArgumentos", () => {
   });
 
   it("nega por padrão o que não está liberado, sem perguntar", () => {
-    const argumentos = montarArgumentos(pedido(false), arquivos);
+    const leitura = montarArgumentos(pedido(false), arquivos);
+    const edicao = montarArgumentos(pedido(false, "edicao"), arquivos);
 
-    expect(valoresDe(argumentos, "--permission-mode")).toEqual(["dontAsk"]);
-    expect(valoresDe(argumentos, "--allowedTools")).toEqual(valoresDe(argumentos, "--tools"));
+    expect(valoresDe(leitura, "--permission-mode")).toEqual(["dontAsk"]);
+    // Só leitura: Write e Edit existem, mas só valem na pasta de artefatos.
+    expect(valoresDe(leitura, "--tools")).toEqual(["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Agent", "Write", "Edit"]);
+    expect(valoresDe(leitura, "--allowedTools")).toEqual([
+      "Read",
+      "Glob",
+      "Grep",
+      "WebSearch",
+      "WebFetch",
+      "Agent",
+      ...REGRAS_DE_ARTEFATO,
+    ]);
+    // Onde Write e Edit já são livres, as permitidas são as próprias ferramentas.
+    expect(valoresDe(edicao, "--allowedTools")).toEqual(valoresDe(edicao, "--tools"));
   });
 
   it.each<[NivelDePermissao, string[], string[]]>([
-    ["leitura", ["Read", "Grep", "Agent"], ["Edit", "Write", "PowerShell", "Bash"]],
-    ["edicao", ["Read", "Edit", "Write", "Agent"], ["PowerShell", "Bash"]],
-    ["edicao_e_comandos", ["Edit", "PowerShell", "Bash", "Agent"], []],
+    ["leitura", ["Read", "Grep", "Agent"], ["Edit", "Write", "NotebookEdit", "PowerShell", "Bash"]],
+    ["edicao", ["Read", "Edit", "Write", "NotebookEdit", "Agent"], ["PowerShell", "Bash"]],
+    ["edicao_e_comandos", ["Edit", "Write", "PowerShell", "Bash", "Agent"], []],
   ])("no nível %s libera só as ferramentas certas", (nivel, liberadas, ausentes) => {
-    const ferramentas = valoresDe(montarArgumentos(pedido(false, nivel), arquivos), "--tools");
+    const permitidas = valoresDe(montarArgumentos(pedido(false, nivel), arquivos), "--allowedTools");
 
-    expect(ferramentas).toEqual(expect.arrayContaining(liberadas));
+    expect(permitidas).toEqual(expect.arrayContaining(liberadas));
     for (const ferramenta of ausentes) {
-      expect(ferramentas).not.toContain(ferramenta);
+      expect(permitidas).not.toContain(ferramenta);
     }
   });
 
@@ -160,7 +240,8 @@ describe("montarArgumentos", () => {
     const argumentos = montarArgumentos(pedido(false), arquivos);
 
     expect(valoresDe(argumentos, "--input-format")).toEqual(["stream-json"]);
-    expect(argumentos).not.toContain("--add-dir");
+    // Sem imagens, só a pasta de artefatos fica liberada fora do projeto.
+    expect(pastasLiberadas(argumentos)).toEqual([PASTA_DE_ARTEFATOS]);
   });
 
   it("libera a pasta das imagens para os subagentes quando há anexos", () => {
@@ -170,10 +251,10 @@ describe("montarArgumentos", () => {
       pastaDasImagens: "C:/dados/anexos/o1",
     };
 
-    expect(valoresDe(montarArgumentos(comImagens, arquivos), "--add-dir")).toEqual(["C:/dados/anexos/o1"]);
+    expect(pastasLiberadas(montarArgumentos(comImagens, arquivos))).toEqual([PASTA_DE_ARTEFATOS, "C:/dados/anexos/o1"]);
   });
 
-  it("no planejamento só libera leitura, mesmo no nível mais permissivo", () => {
+  it("no planejamento só libera leitura no projeto, mesmo no nível mais permissivo", () => {
     const planejamento = pedido(true, "edicao_e_comandos", "planejamento");
     const argumentos = montarArgumentos(planejamento, arquivos);
     const listas = {
@@ -184,10 +265,16 @@ describe("montarArgumentos", () => {
 
     for (const ferramentas of Object.values(listas)) {
       expect(ferramentas).toEqual(expect.arrayContaining(["Read", "Grep", "WebSearch"]));
-      for (const ferramenta of ["Edit", "Write", "NotebookEdit", "Bash", "PowerShell"]) {
+      for (const ferramenta of ["NotebookEdit", "Bash", "PowerShell"]) {
         expect(ferramentas).not.toContain(ferramenta);
       }
     }
+    // Write e Edit existem (artefatos), mas só valem na pasta de artefatos.
+    expect(listas.tools).toEqual(expect.arrayContaining(["Write", "Edit"]));
+    expect(listas.executor).toEqual(expect.arrayContaining(["Write", "Edit"]));
+    expect(listas.allowedTools).not.toContain("Write");
+    expect(listas.allowedTools).not.toContain("Edit");
+    expect(listas.allowedTools).toEqual(expect.arrayContaining(REGRAS_DE_ARTEFATO));
     expect(listas.tools).toContain("Agent");
     expect(listas.executor).not.toContain("Agent");
     expect(valoresDe(argumentos, "--permission-mode")).toEqual(["dontAsk"]);
@@ -321,7 +408,7 @@ describe("esforço de raciocínio", () => {
 
     expect(valoresDe(argumentos, "--effort")).toEqual(["high"]);
     expect(definicaoDosAgentes(planejamento).executor?.effort).toBe("medium");
-    expect(valoresDe(argumentos, "--tools")).not.toContain("Edit");
+    expect(valoresDe(argumentos, "--allowedTools")).not.toContain("Edit");
     expect(argumentos).not.toContain("--settings");
   });
 

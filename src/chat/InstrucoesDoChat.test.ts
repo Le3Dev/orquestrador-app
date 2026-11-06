@@ -101,6 +101,7 @@ describe("mensagemParaOChat", () => {
     projetos,
     orquestradores: [{ nome: "Painel", pasta: path.join(raiz, "painel-app") }],
     alteracoesAutorizadas: false,
+    pastaDeArtefatos: path.resolve("/dados/artefatos/entrada/chat"),
   };
 
   /** Só o bloco de contexto, sem a pergunta. */
@@ -169,6 +170,25 @@ describe("mensagemParaOChat", () => {
     }
   });
 
+  it("artefatos: liberados sem autorização, na pasta exata, com quando, formato, versão e citação", () => {
+    for (const autorizado of [false, true]) {
+      const bloco = blocoDeContexto(autorizado);
+
+      expect(bloco).toContain("Artefatos (liberados sempre, sem autorização; não contam como alterar projetos):");
+      expect(bloco).toContain(`grave UM arquivo autocontido na pasta ${contexto.pastaDeArtefatos}`);
+      expect(bloco).toContain(
+        "Quando o usuário pedir uma visualização, relatório, diagrama, protótipo, dashboard ou página, ou quando a resposta ficar melhor como página do que como texto",
+      );
+      expect(bloco).toContain(".html com CSS e JS inline, sem CDN nem recursos externos (a rede é bloqueada) e imagens como data URI; ou .md");
+      expect(bloco).toContain("Até 5 MB");
+      expect(bloco).toContain("Nome do arquivo curto e descritivo, porque vira o título");
+      expect(bloco).toContain("regrave o MESMO arquivo: ele vira uma nova versão");
+      expect(bloco).toContain("cite pelo nome o artefato criado ou atualizado");
+      expect(bloco).toContain("A única pasta fora dos projetos em que você grava é a de artefatos");
+    }
+    expect(blocoDeContexto(false)).toContain("Alterações NÃO autorizadas ainda (gravar artefatos não depende disso)");
+  });
+
   it("pede a lista do que foi alterado e sugere orquestrador para mudanças grandes", () => {
     const bloco = blocoDeContexto(true);
 
@@ -196,6 +216,15 @@ describe("instrucoesDoChat", () => {
     expect(instrucoes).toContain("autorização única do usuário, que vale até o próximo /clear");
     expect(instrucoes).toContain("use a ferramenta mesmo assim: o app pede a autorização ao usuário");
     expect(instrucoes).toContain("Não contorne a negação");
+  });
+
+  it("explica os artefatos: sem autorização, na pasta indicada pelo bloco", () => {
+    const instrucoes = instrucoesDoChat();
+
+    expect(instrucoes).toContain("9. Artefatos: quando o usuário pedir uma visualização, relatório, diagrama");
+    expect(instrucoes).toContain("na pasta de artefatos que o bloco <contexto-do-app> indica");
+    expect(instrucoes).toContain("Gravar artefatos não precisa da autorização e não conta como alterar projetos.");
+    expect(instrucoes).toContain("A exceção é a pasta de artefatos (regra 9).");
   });
 
   it("traz as regras de commit e push, do relatório e das mudanças grandes", () => {

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
+import { apiDosArtefatos, type EventoDeArtefato, type ResumoDoArtefato } from "../shared/api/artefatos";
 import { api } from "../shared/api/cliente";
 import type {
   DadosDaConfiguracao,
@@ -8,31 +9,52 @@ import type {
   EventoRegistrado,
   ResumoDoOrquestrador,
 } from "../shared/api/tipos";
-import { lerLayout, organizarComNotas, sobrepoe, TAMANHO_DO_BIXINHO } from "../shared/canvas/layout";
-import { idDoBixinho } from "../shared/canvas/nos";
+import { lerLayout, organizarComNotas, sobrepoe, TAMANHO_DO_ARTEFATO, TAMANHO_DO_BIXINHO } from "../shared/canvas/layout";
+import { idDoBixinho, idDoNoDoArtefato } from "../shared/canvas/nos";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../shared/estado/aplicarEvento";
+import type { ArtefatosAoVivo } from "../shared/hooks/useArtefatos";
 import { CanvasDeOrquestradores } from "./CanvasDeOrquestradores";
 
-// O canvas sem servidor: nenhum orquestrador, conectado e sem conversas.
-const simulados = vi.hoisted(() => ({
-  orquestradores: { orquestradores: [] as ResumoDoOrquestrador[], erro: null, recarregar: async () => undefined },
-  servidor: { conectado: true, caiuEm: null, voltouEm: null, reiniciou: false, memoria: null },
-  conversas: {
-    conversas: new Map<string, EstadoDaConversa>(),
-    conexoes: new Map<string, string>(),
-    sinais: new Map<string, unknown>(),
-  },
-}));
+// O canvas sem servidor: nenhum orquestrador, conectado, sem conversas e sem artefatos.
+const simulados = vi.hoisted(() => {
+  const semArtefatos: ArtefatosAoVivo = {
+    lista: [],
+    carregada: true,
+    erro: null,
+    conexao: "conectado",
+    ultimoEvento: null,
+    eventosRecentes: [],
+    renomear: async () => {
+      throw new Error("não usado");
+    },
+    apagar: async () => undefined,
+  };
+  return {
+    orquestradores: { orquestradores: [] as ResumoDoOrquestrador[], erro: null, recarregar: async () => undefined },
+    servidor: { conectado: true, caiuEm: null, voltouEm: null, reiniciou: false, memoria: null },
+    conversas: {
+      conversas: new Map<string, EstadoDaConversa>(),
+      conexoes: new Map<string, string>(),
+      sinais: new Map<string, unknown>(),
+    },
+    semArtefatos,
+    artefatos: semArtefatos,
+  };
+});
 
 vi.mock("../shared/hooks/useOrquestradores", () => ({ useOrquestradores: () => simulados.orquestradores }));
 vi.mock("../shared/hooks/useServidor", () => ({ useServidor: () => simulados.servidor }));
 vi.mock("../shared/hooks/useConversas", () => ({ useConversas: () => simulados.conversas }));
+vi.mock("../shared/hooks/useArtefatos", () => ({ useArtefatos: () => simulados.artefatos }));
 vi.mock("../shared/hooks/useChat", async () => {
   const { ESTADO_INICIAL_DO_CHAT } = await import("../shared/estado/aplicarEventoDoChat");
   const chat = { ...ESTADO_INICIAL_DO_CHAT, carregado: true };
   const aplicarPreferencias = () => undefined;
   return { useChat: () => ({ chat, conexao: "conectado", erro: null, aplicarPreferencias }) };
 });
+
+/** O nome do campo de busca da paleta (Ctrl+K). */
+const BUSCA_DA_PALETA = "Buscar ações, orquestradores, notas, artefatos e pedidos";
 
 /** O jsdom não mede nada: o React Flow só precisa que o observador exista. */
 class ObservadorDeTamanhoFalso {
@@ -385,7 +407,7 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
     await waitFor(() => expect(noNaTela("o4")).toBeInTheDocument());
 
     fireEvent.keyDown(window, { key: "k", code: "KeyK", ctrlKey: true });
-    const busca = screen.getByRole("combobox", { name: "Buscar ações, orquestradores, notas e pedidos" });
+    const busca = screen.getByRole("combobox", { name: BUSCA_DA_PALETA });
     fireEvent.change(busca, { target: { value: "o5" } });
     expect(screen.getAllByRole("option")[0]).toHaveTextContent("Orquestrador o5");
     fireEvent.keyDown(busca, { key: "Enter" });
@@ -396,7 +418,7 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
 
     // O pedido "analise" é da conversa de o2, que está aberto: não recusa (e o aviso some).
     fireEvent.click(screen.getByRole("button", { name: "Buscar (Ctrl+K)" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Buscar ações, orquestradores, notas e pedidos" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: BUSCA_DA_PALETA }), {
       target: { value: "analise" },
     });
     const pedido = screen.getByRole("option");
@@ -467,7 +489,7 @@ describe("CanvasDeOrquestradores · minimapa", () => {
 });
 
 describe("CanvasDeOrquestradores · Ctrl+N e Organizar nos controles", () => {
-  const ORGANIZAR = "Organizar: terminais lado a lado e notas à direita";
+  const ORGANIZAR = "Organizar: terminais lado a lado; notas e artefatos à direita";
   const rascunhosNaTela = () => document.querySelectorAll(".react-flow__node-rascunho").length;
 
   function layoutCom(ids: string[]): void {
@@ -652,5 +674,190 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
 
     expect(abrirAjustes).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+});
+
+function artefato(id: string, alteracoes: Partial<ResumoDoArtefato> = {}): ResumoDoArtefato {
+  return {
+    id,
+    titulo: `Artefato ${id}`,
+    formato: "html",
+    origem: { tipo: "orquestrador", id: "o1" },
+    arquivo: `${id}.html`,
+    criadoEm: "2026-11-05T12:00:00Z",
+    atualizadoEm: "2026-11-05T12:00:00Z",
+    versaoAtual: 1,
+    versoes: [{ numero: 1, criadaEm: "2026-11-05T12:00:00Z", tamanho: 120 }],
+    ...alteracoes,
+  };
+}
+
+/** O hook dos artefatos com esta lista e estes eventos (numerados na ordem). */
+function comArtefatos(lista: ResumoDoArtefato[], eventos: EventoDeArtefato[] = []): void {
+  const eventosRecentes = eventos.map((evento, indice) => ({ numero: indice + 1, evento }));
+  simulados.artefatos = {
+    ...simulados.semArtefatos,
+    lista,
+    eventosRecentes,
+    ultimoEvento: eventosRecentes.at(-1) ?? null,
+  };
+}
+
+// Vários terminais no jsdom: sob a carga da suíte inteira, passam dos 5 s padrão.
+describe("CanvasDeOrquestradores · artefatos", { timeout: 20_000 }, () => {
+  function layoutCom(terminais: string[], artefatos: string[] = []): void {
+    localStorage.setItem(
+      "orquestrador-agentes:canvas:v1",
+      JSON.stringify({
+        terminais: Object.fromEntries(
+          terminais.map((id, indice) => [id, { x: indice * 1500, y: 0, largura: 600, altura: 520 }]),
+        ),
+        notas: {},
+        artefatos: Object.fromEntries(
+          artefatos.map((id, indice) => [id, { x: indice * 800, y: 2000, largura: 640, altura: 480 }]),
+        ),
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }),
+    );
+    simulados.orquestradores.orquestradores = terminais.map(orquestrador);
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoFalso);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+    vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("<h1>Olá</h1>");
+    const tela = { x: 0, y: 0, left: 0, top: 0, width: 4000, height: 3000, right: 4000, bottom: 3000 };
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({ ...tela, toJSON: () => tela });
+  });
+
+  afterEach(() => {
+    simulados.orquestradores.orquestradores = [];
+    simulados.artefatos = simulados.semArtefatos;
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it("artefato_criado por um orquestrador aberto abre a janela ao lado do terminal, sem cobri-lo", async () => {
+    layoutCom(["o1"]);
+    const { rerender } = render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o1")).toBeInTheDocument());
+
+    const criado = artefato("a1", { titulo: "Relatório de vendas" });
+    comArtefatos([criado], [{ tipo: "artefato_criado", artefato: criado }]);
+    rerender(<CanvasDeOrquestradores />);
+
+    const id = idDoNoDoArtefato("a1");
+    await waitFor(() => expect(noNaTela(id)).toBeInTheDocument());
+    // À direita do terminal (600 de largura + 40 de espaço), com o topo alinhado.
+    expect(posicaoNaTela(id)).toEqual({ x: 640, y: 0 });
+    expect(sobrepoe({ ...posicaoNaTela(id), ...TAMANHO_DO_ARTEFATO }, { x: 0, y: 0, largura: 600, altura: 520 })).toBe(
+      false,
+    );
+    expect(within(noNaTela(id)).getByText("Relatório de vendas")).toBeInTheDocument();
+    expect(await within(noNaTela(id)).findByTitle("Conteúdo do artefato: Relatório de vendas")).toBeInTheDocument();
+    await waitFor(() => expect(lerLayout().artefatos.a1).toEqual({ x: 640, y: 0, largura: 640, altura: 480 }));
+  });
+
+  it("artefato_criado pelo chat abre no centro da vista; versao_adicionada com a janela fechada não abre", async () => {
+    layoutCom(["o1"]);
+    const { rerender } = render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o1")).toBeInTheDocument());
+
+    const fechado = artefato("a1", {
+      versaoAtual: 2,
+      versoes: [
+        { numero: 1, criadaEm: "2026-11-05T12:00:00Z", tamanho: 120 },
+        { numero: 2, criadaEm: "2026-11-05T12:05:00Z", tamanho: 140 },
+      ],
+    });
+    const doChat = artefato("a2", { origem: { tipo: "chat", id: null }, formato: "markdown", arquivo: "a2.md" });
+    // Os dois eventos chegam juntos: nenhum se perde.
+    comArtefatos(
+      [doChat, fechado],
+      [
+        { tipo: "versao_adicionada", artefato: fechado },
+        { tipo: "artefato_criado", artefato: doChat },
+      ],
+    );
+    rerender(<CanvasDeOrquestradores />);
+
+    await waitFor(() => expect(noNaTela(idDoNoDoArtefato("a2"))).toBeInTheDocument());
+    expect(document.querySelector(`.react-flow__node[data-id="${idDoNoDoArtefato("a1")}"]`)).toBeNull();
+    // Fora do terminal: o centro da vista (acima do chat) estava livre.
+    expect(
+      sobrepoe(
+        { ...posicaoNaTela(idDoNoDoArtefato("a2")), ...TAMANHO_DO_ARTEFATO },
+        { x: 0, y: 0, largura: 600, altura: 520 },
+      ),
+    ).toBe(false);
+  });
+
+  it("artefatos não contam no limite de 4 orquestradores abertos", async () => {
+    layoutCom(["o1", "o2", "o3"], ["a1", "a2"]);
+    comArtefatos([artefato("a1"), artefato("a2")]);
+    const { rerender } = render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela(idDoNoDoArtefato("a2"))).toBeInTheDocument());
+
+    // 3 terminais + 2 artefatos: ainda cabe o formulário de um orquestrador novo.
+    escolherNoNovo("Orquestrador");
+    await waitFor(() => expect(document.querySelectorAll(".react-flow__node-rascunho")).toHaveLength(1));
+    expect(screen.queryByText(/Limite de 4 orquestradores abertos/)).not.toBeInTheDocument();
+
+    // Com as 4 vagas ocupadas, um artefato novo continua abrindo.
+    const novo = artefato("a3", { origem: { tipo: "orquestrador", id: "o2" } });
+    comArtefatos([novo, artefato("a1"), artefato("a2")], [{ tipo: "artefato_criado", artefato: novo }]);
+    rerender(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela(idDoNoDoArtefato("a3"))).toBeInTheDocument());
+    expect(screen.queryByText(/Limite de 4 orquestradores abertos/)).not.toBeInTheDocument();
+  });
+
+  it("a paleta (Ctrl+K) lista os artefatos; escolher um fechado abre a janela", async () => {
+    layoutCom(["o1"]);
+    comArtefatos([artefato("a1", { titulo: "Relatório de vendas", origem: { tipo: "chat", id: null } })]);
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o1")).toBeInTheDocument());
+
+    fireEvent.keyDown(window, { key: "k", code: "KeyK", ctrlKey: true });
+    fireEvent.change(screen.getByRole("combobox", { name: BUSCA_DA_PALETA }), { target: { value: "relatorio" } });
+    const opcao = screen.getByRole("option", { name: /Relatório de vendas/ });
+    expect(opcao).toHaveTextContent("HTML · do chat rápido · abrir");
+    expect(within(screen.getByRole("listbox")).getByText("Artefatos")).toBeInTheDocument();
+    fireEvent.click(opcao);
+
+    await waitFor(() => expect(noNaTela(idDoNoDoArtefato("a1"))).toBeInTheDocument());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("ao carregar, o artefato que sumiu do servidor sai do canvas e do layout; o minimapa tem cor própria", async () => {
+    layoutCom(["o1"], ["a1", "apagado"]);
+    comArtefatos([artefato("a1")]);
+    render(<CanvasDeOrquestradores />);
+
+    await waitFor(() => expect(Object.keys(lerLayout().artefatos)).toEqual(["a1"]));
+    expect(document.querySelector(`.react-flow__node[data-id="${idDoNoDoArtefato("apagado")}"]`)).toBeNull();
+    await waitFor(() => expect(document.querySelectorAll(".react-flow__minimap-node.minimapa-artefato")).toHaveLength(1));
+  });
+
+  it("o \"Organizar\" põe os artefatos em colunas à direita dos terminais (e das notas)", async () => {
+    layoutCom(["o1", "o2"], ["a1"]);
+    comArtefatos([artefato("a1")]);
+    render(<CanvasDeOrquestradores />);
+    const id = idDoNoDoArtefato("a1");
+    await waitFor(() => expect(noNaTela(id)).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Organizar: terminais lado a lado; notas e artefatos à direita" }));
+
+    const esperado = organizarComNotas(
+      [
+        { id: "o1", largura: 600, altura: 520 },
+        { id: "o2", largura: 600, altura: 520 },
+      ],
+      [],
+      [{ id, largura: 640, altura: 480 }],
+    );
+    await waitFor(() => expect(posicaoNaTela(id)).toEqual(esperado[id]));
+    expect(esperado[id]?.x).toBeGreaterThan((esperado.o2?.x ?? 0) + 600);
   });
 });

@@ -71,6 +71,7 @@ describe("rotas do chat", () => {
       execucoes: new ControleDeExecucoesEmMemoria(),
       pastaDaSessao: repositorio.pastaDaSessao,
       pastaDosProjetos: pasta,
+      pastaDeArtefatos: path.join(pasta, "artefatos", "entrada", "chat"),
       gerarId: () => `id${++ids}`,
       agora: () => new Date("2026-11-04T12:00:00Z"),
     });

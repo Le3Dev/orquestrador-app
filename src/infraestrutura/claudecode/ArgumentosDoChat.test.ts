@@ -13,6 +13,13 @@ import { COMANDOS_DE_PUSH_FORCADO } from "./ArgumentosDoClaudeCode";
 
 const arquivos = { instrucoes: "instrucoes.txt", configuracoes: "configuracoes.json" };
 
+/** Pasta de artefatos do chat, com espaço no caminho como a pasta de dados real. */
+const PASTA_DE_ARTEFATOS = "C:\\Users\\ana\\Orquestrador de Agentes\\dados\\artefatos\\entrada\\chat";
+const REGRAS_DE_ARTEFATO = [
+  "Write(//c/Users/ana/Orquestrador de Agentes/dados/artefatos/entrada/chat/**)",
+  "Edit(//c/Users/ana/Orquestrador de Agentes/dados/artefatos/entrada/chat/**)",
+];
+
 function pergunta(alteracoes: Partial<PerguntaAoMotorDeChat> = {}): PerguntaAoMotorDeChat {
   return {
     sessaoId: "sessao-1",
@@ -23,6 +30,7 @@ function pergunta(alteracoes: Partial<PerguntaAoMotorDeChat> = {}): PerguntaAoMo
     pastaDasImagens: null,
     pastaDaSessao: "C:\\dados\\chat\\sessao-1",
     pastaDosProjetos: "C:\\Users\\ana\\projetos",
+    pastaDeArtefatos: PASTA_DE_ARTEFATOS,
     modelo: "haiku",
     esforco: "padrao",
     alteracoesAutorizadas: false,
@@ -38,6 +46,11 @@ function valoresDe(argumentos: string[], opcao: string): string[] {
   const inicio = argumentos.indexOf(opcao) + 1;
   const fim = argumentos.findIndex((argumento, indice) => indice >= inicio && argumento.startsWith("--"));
   return argumentos.slice(inicio, fim === -1 ? undefined : fim);
+}
+
+/** Todas as pastas passadas em `--add-dir`, na ordem. */
+function pastasLiberadas(argumentos: string[]): string[] {
+  return argumentos.flatMap((argumento, indice) => (argumento === "--add-dir" ? [argumentos[indice + 1] ?? ""] : []));
 }
 
 describe("montarArgumentosDoChat", () => {
@@ -70,10 +83,24 @@ describe("montarArgumentosDoChat", () => {
     expect([...FERRAMENTAS_DO_CHAT]).toEqual(TODAS);
   });
 
-  it("sem autorização, --allowedTools libera só pesquisa e leitura", () => {
+  it("sem autorização, --allowedTools libera só pesquisa, leitura e a gravação na pasta de artefatos", () => {
     const argumentos = montarArgumentosDoChat(pergunta({ alteracoesAutorizadas: false }), arquivos);
+    const liberadas = valoresDe(argumentos, "--allowedTools");
 
-    expect(valoresDe(argumentos, "--allowedTools")).toEqual(LEITURA);
+    expect(liberadas).toEqual([...LEITURA, ...REGRAS_DE_ARTEFATO]);
+    // Editar projetos e rodar comandos continuam negados (e pedem autorização).
+    for (const ferramenta of ["Edit", "Write", "NotebookEdit", "PowerShell", "Bash"]) {
+      expect(liberadas).not.toContain(ferramenta);
+    }
+  });
+
+  it("libera a pasta de artefatos em --add-dir, com ou sem autorização", () => {
+    for (const alteracoesAutorizadas of [false, true]) {
+      const argumentos = montarArgumentosDoChat(pergunta({ alteracoesAutorizadas }), arquivos);
+
+      expect(pastasLiberadas(argumentos)).toEqual(["C:\\Users\\ana\\projetos", PASTA_DE_ARTEFATOS]);
+      expect(valoresDe(argumentos, "--tools")).toEqual(expect.arrayContaining(["Write", "Edit"]));
+    }
   });
 
   it("com autorização, --allowedTools libera as dez ferramentas", () => {
@@ -121,8 +148,7 @@ describe("montarArgumentosDoChat", () => {
       pergunta({ pastaDasImagens: "C:\\anexos", imagens: [{ caminho: "C:\\anexos\\a.png", tipoDeMidia: "image/png" }] }),
       arquivos,
     );
-    const pastas = comImagens.flatMap((argumento, indice) => (argumento === "--add-dir" ? [comImagens[indice + 1]] : []));
-    expect(pastas).toEqual(["C:\\Users\\ana\\projetos", "C:\\anexos"]);
+    expect(pastasLiberadas(comImagens)).toEqual(["C:\\Users\\ana\\projetos", PASTA_DE_ARTEFATOS, "C:\\anexos"]);
   });
 
   it("cria a sessão na primeira pergunta e retoma nas seguintes", () => {

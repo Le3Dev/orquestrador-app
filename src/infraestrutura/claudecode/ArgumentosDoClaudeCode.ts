@@ -66,6 +66,50 @@ export const FERRAMENTAS_POR_NIVEL: Readonly<Record<NivelDePermissao, readonly s
   ],
 };
 
+/** Caracteres de padrão do gitignore que, num caminho real, devem valer literalmente. */
+const CARACTERES_DE_PADRAO = /[[\]*?]/g;
+
+/**
+ * Caminho absoluto no formato das regras de permissão do Claude Code: o
+ * Windows é normalizado para POSIX antes da comparação (`C:\Users\x` vira
+ * `/c/Users/x`) e o caminho absoluto leva `//` na frente
+ * (https://code.claude.com/docs/en/permissions, "How path patterns match").
+ */
+export function caminhoParaRegraDePermissao(caminho: string): string {
+  const posix = caminho
+    .replace(/\\/g, "/")
+    .replace(/^([A-Za-z]):(?=\/|$)/, (_, unidade: string) => `/${unidade.toLowerCase()}`)
+    .replace(/\/+$/, "");
+  const escapado = posix.replace(CARACTERES_DE_PADRAO, (caractere) => `\\${caractere}`);
+  return `/${escapado.startsWith("/") ? escapado : `/${escapado}`}`;
+}
+
+/**
+ * Ferramentas com que os agentes gravam artefatos (páginas e relatórios para
+ * o usuário). Existem em toda sessão — Orquestrador, Subagentes e chat —,
+ * mesmo nos níveis só de leitura e no Plan Mode.
+ */
+export const FERRAMENTAS_DE_ARTEFATO: readonly string[] = ["Write", "Edit"];
+
+/** As ferramentas recebidas, mais as de artefato que ainda não estiverem nelas. */
+export function comFerramentasDeArtefato(ferramentas: readonly string[]): string[] {
+  return [...ferramentas, ...FERRAMENTAS_DE_ARTEFATO.filter((ferramenta) => !ferramentas.includes(ferramenta))];
+}
+
+/**
+ * As ferramentas liberadas (`--allowedTools`), mais a gravação na pasta de
+ * artefatos: `Write(<pasta>/**)` e `Edit(<pasta>/**)` para as de artefato que
+ * não estiverem livres. Com `dontAsk`, gravar fora dessa pasta continua
+ * negado; onde `Write`/`Edit` já são livres, nada muda.
+ */
+export function liberadasComArtefatos(liberadas: readonly string[], pastaDeArtefatos: string): string[] {
+  const pasta = caminhoParaRegraDePermissao(pastaDeArtefatos);
+  const regras = FERRAMENTAS_DE_ARTEFATO.filter((ferramenta) => !liberadas.includes(ferramenta)).map(
+    (ferramenta) => `${ferramenta}(${pasta}/**)`,
+  );
+  return [...liberadas, ...regras];
+}
+
 /**
  * Negados em qualquer nível enquanto a opção "Permitir commit e push" não os
  * libera no turno (desligada, ou turno de planejamento).
@@ -168,10 +212,13 @@ export interface DefinicaoDeAgente {
 }
 
 /**
- * As ferramentas liberadas neste turno. No planejamento a trava é aqui: só as
- * de leitura existem, seja qual for o nível configurado — não usamos o
- * `--permission-mode plan`, que em modo headless não tem quem aprove a saída
- * do plano.
+ * As ferramentas do nível neste turno, para o projeto. No planejamento a trava
+ * é aqui: só as de leitura valem no projeto, seja qual for o nível configurado
+ * — não usamos o `--permission-mode plan`, que em modo headless não tem quem
+ * aprove a saída do plano.
+ *
+ * As de artefato (`FERRAMENTAS_DE_ARTEFATO`) entram à parte, em todo turno,
+ * liberadas só na pasta de artefatos (`liberadasComArtefatos`).
  */
 export function ferramentasDoTurno(pedido: PedidoDeTurno): readonly string[] {
   return pedido.modo === "planejamento"
@@ -179,14 +226,25 @@ export function ferramentasDoTurno(pedido: PedidoDeTurno): readonly string[] {
     : FERRAMENTAS_POR_NIVEL[pedido.configuracao.nivelDePermissao];
 }
 
+/**
+ * O `tools` do executor leva sempre `Write` e `Edit`, para ele poder gravar
+ * artefatos mesmo nos níveis só de leitura e no planejamento. O que ele pode
+ * gravar quem decide são as regras da sessão (`--allowedTools` com `dontAsk`),
+ * que valem também para os Subagentes: fora da pasta de artefatos, só no nível
+ * que libera a edição.
+ */
 export function definicaoDosAgentes(pedido: PedidoDeTurno): Record<string, DefinicaoDeAgente> {
   const esforco = nivelDeEsforcoDoClaudeCode(pedido.configuracao.esforcoDosSubagentes);
   return {
     [NOME_DO_SUBAGENTE]: {
       description:
         "Executa uma subtarefa delegada pelo orquestrador e devolve um resultado objetivo.",
-      prompt: instrucoesDoSubagente(pedido.pastaDeTrabalho, pedido.configuracao.permiteCommitEPush(pedido.modo)),
-      tools: [...ferramentasDoTurno(pedido)],
+      prompt: instrucoesDoSubagente(
+        pedido.pastaDeTrabalho,
+        pedido.configuracao.permiteCommitEPush(pedido.modo),
+        pedido.pastaDeArtefatos,
+      ),
+      tools: comFerramentasDeArtefato(ferramentasDoTurno(pedido)),
       model: pedido.configuracao.modeloDosSubagentes,
       ...(esforco === null ? {} : { effort: esforco }),
     },
@@ -208,6 +266,11 @@ export function definicaoDosAgentes(pedido: PedidoDeTurno): Record<string, Defin
  * `--permission-mode dontAsk` faz o resto ser negado em vez de perguntado —
  * não há ninguém no terminal para responder.
  *
+ * Artefatos: a pasta de artefatos do Orquestrador entra em `--add-dir`, e
+ * `Write`/`Edit` existem em todo nível e no planejamento. Onde o nível não
+ * libera a edição, as permitidas levam só `Write(<pasta>/**)` e
+ * `Edit(<pasta>/**)`: gravar no projeto continua negado.
+ *
  * `--settings` entra só quando há configuração da sessão (commit e push
  * liberados): fica acima das configurações do usuário e do projeto, abaixo
  * das gerenciadas pela organização.
@@ -219,7 +282,9 @@ export function definicaoDosAgentes(pedido: PedidoDeTurno): Record<string, Defin
  * processo: cada turno a recebe de novo.
  */
 export function montarArgumentos(pedido: PedidoDeTurno, arquivos: ArquivosDoTurno): string[] {
-  const ferramentas = [...ferramentasDoTurno(pedido), FERRAMENTA_DE_SUBAGENTES];
+  const doNivel = [...ferramentasDoTurno(pedido), FERRAMENTA_DE_SUBAGENTES];
+  const ferramentas = comFerramentasDeArtefato(doNivel);
+  const liberadas = liberadasComArtefatos(doNivel, pedido.pastaDeArtefatos);
   const configuracoes = configuracoesDaSessao(pedido) === null ? [] : ["--settings", arquivos.configuracoes];
   const esforco = nivelDeEsforcoDoClaudeCode(pedido.configuracao.esforcoDoOrquestrador);
 
@@ -230,6 +295,8 @@ export function montarArgumentos(pedido: PedidoDeTurno, arquivos: ArquivosDoTurn
     "--output-format",
     "stream-json",
     "--verbose",
+    "--add-dir",
+    pedido.pastaDeArtefatos,
     ...(pedido.pastaDasImagens === null ? [] : ["--add-dir", pedido.pastaDasImagens]),
     ...(pedido.sessaoIniciada ? ["--resume", pedido.sessaoId] : ["--session-id", pedido.sessaoId]),
     "--model",
@@ -246,7 +313,7 @@ export function montarArgumentos(pedido: PedidoDeTurno, arquivos: ArquivosDoTurn
     "--tools",
     ...ferramentas,
     "--allowedTools",
-    ...ferramentas,
+    ...liberadas,
     "--disallowedTools",
     ...comandosProibidosDoTurno(pedido),
   ];

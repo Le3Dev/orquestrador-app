@@ -2,11 +2,15 @@ import type { PerguntaAoMotorDeChat } from "../../chat/MotorDeChat";
 import type { EsforcoDeRaciocinio } from "../../orquestracao/EsforcoDeRaciocinio";
 import {
   ambienteSemSessaoPai,
+  caminhoParaRegraDePermissao,
   COMANDOS_DE_PUSH_FORCADO,
   type ConfiguracoesDaSessao,
+  liberadasComArtefatos,
   nivelDeEsforcoDoClaudeCode,
   VARIAVEL_DE_ESFORCO,
 } from "./ArgumentosDoClaudeCode";
+
+export { caminhoParaRegraDePermissao } from "./ArgumentosDoClaudeCode";
 
 /** Pesquisar na web e ler: liberadas sempre. */
 export const FERRAMENTAS_DE_LEITURA_DO_CHAT: readonly string[] = ["WebSearch", "WebFetch", "Read", "Glob", "Grep"];
@@ -32,9 +36,16 @@ export const FERRAMENTAS_DO_CHAT: readonly string[] = [
   ...FERRAMENTAS_DE_COMANDO_DO_CHAT,
 ];
 
-/** O que vai em `--allowedTools`: com `dontAsk`, o resto é negado em vez de perguntado. */
-export function ferramentasLiberadasDoChat(alteracoesAutorizadas: boolean): readonly string[] {
-  return alteracoesAutorizadas ? FERRAMENTAS_DO_CHAT : FERRAMENTAS_DE_LEITURA_DO_CHAT;
+/**
+ * O que vai em `--allowedTools`: com `dontAsk`, o resto é negado em vez de
+ * perguntado. Sem autorização, só leitura e pesquisa, mais a gravação na
+ * pasta de artefatos (`Write`/`Edit` restritos a ela): gravar um artefato é
+ * permitido, então não vira pedido de autorização.
+ */
+export function ferramentasLiberadasDoChat(alteracoesAutorizadas: boolean, pastaDeArtefatos: string): readonly string[] {
+  return alteracoesAutorizadas
+    ? FERRAMENTAS_DO_CHAT
+    : liberadasComArtefatos(FERRAMENTAS_DE_LEITURA_DO_CHAT, pastaDeArtefatos);
 }
 
 /**
@@ -49,24 +60,6 @@ export function configuracoesDaSessaoDoChat(): ConfiguracoesDaSessao {
 
 /** Arquivos de ambiente (`.env`, `.env.local`, `.env.production`…): podem guardar segredos. */
 const ARQUIVOS_DE_AMBIENTE = ".env*";
-
-/** Caracteres de padrão do gitignore que, num caminho real, devem valer literalmente. */
-const CARACTERES_DE_PADRAO = /[[\]*?]/g;
-
-/**
- * Caminho absoluto no formato das regras de permissão do Claude Code: o
- * Windows é normalizado para POSIX antes da comparação (`C:\Users\x` vira
- * `/c/Users/x`) e o caminho absoluto leva `//` na frente
- * (https://code.claude.com/docs/en/permissions, "How path patterns match").
- */
-export function caminhoParaRegraDePermissao(caminho: string): string {
-  const posix = caminho
-    .replace(/\\/g, "/")
-    .replace(/^([A-Za-z]):(?=\/|$)/, (_, unidade: string) => `/${unidade.toLowerCase()}`)
-    .replace(/\/+$/, "");
-  const escapado = posix.replace(CARACTERES_DE_PADRAO, (caractere) => `\\${caractere}`);
-  return `/${escapado.startsWith("/") ? escapado : `/${escapado}`}`;
-}
 
 /**
  * Regras de negação de leitura dos arquivos de ambiente. Uma ancorada na raiz
@@ -113,15 +106,16 @@ export interface ArquivosDoChat {
  * autorização na tela), em vez de esperar por alguém no terminal.
  *
  * A raiz dos projetos entra em `--add-dir`: leitura sempre e, autorizado,
- * edição. `--settings` entra sempre, para nenhum commit sair com a linha
- * Co-authored-by.
+ * edição. A pasta de artefatos também entra em `--add-dir`, com gravação
+ * liberada sempre (`ferramentasLiberadasDoChat`). `--settings` entra sempre,
+ * para nenhum commit sair com a linha Co-authored-by.
  *
  * `--disallowedTools` é variádica e fica por último, para não engolir as
  * opções seguintes.
  */
 export function montarArgumentosDoChat(pergunta: PerguntaAoMotorDeChat, arquivos: ArquivosDoChat): string[] {
   const esforco = nivelDeEsforcoDoClaudeCode(pergunta.esforco);
-  const liberadas = ferramentasLiberadasDoChat(pergunta.alteracoesAutorizadas);
+  const liberadas = ferramentasLiberadasDoChat(pergunta.alteracoesAutorizadas, pergunta.pastaDeArtefatos);
   return [
     "-p",
     "--input-format",
@@ -132,6 +126,8 @@ export function montarArgumentosDoChat(pergunta: PerguntaAoMotorDeChat, arquivos
     "--include-partial-messages",
     "--add-dir",
     pergunta.pastaDosProjetos,
+    "--add-dir",
+    pergunta.pastaDeArtefatos,
     ...(pergunta.imagens.length > 0 && pergunta.pastaDasImagens !== null ? ["--add-dir", pergunta.pastaDasImagens] : []),
     ...(pergunta.sessaoIniciada ? ["--resume", pergunta.sessaoId] : ["--session-id", pergunta.sessaoId]),
     "--model",

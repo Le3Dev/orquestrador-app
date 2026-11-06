@@ -179,6 +179,7 @@ describe("ServicoDeOrquestracao", () => {
       },
       anexos: armazem,
       worktrees,
+      pastaDeArtefatos: (orquestradorId) => `/dados/artefatos/entrada/orquestradores/${orquestradorId}`,
       gerarId: () => `id${++ids}`,
       agora: () => new Date("2026-10-28T12:00:00Z"),
     });
@@ -228,6 +229,21 @@ describe("ServicoDeOrquestracao", () => {
 
     expect(motor.pedidos.map((pedido) => pedido.sessaoIniciada)).toEqual([false, true]);
     expect(motor.pedidos[1]?.texto).toBe("dois");
+  });
+
+  it("passa ao motor a pasta de artefatos do próprio Orquestrador, mesmo rodando num worktree", async () => {
+    const orquestrador = await criar();
+    worktrees.preparo = {
+      cwd: path.resolve("/dados/worktrees/x"),
+      worktree: { branch: "orquestrador/x", caminho: path.resolve("/dados/worktrees/x") },
+    };
+
+    const { conclusao } = await servico.enviarMensagem(orquestrador.id, "monte um relatório");
+    motor.terminar();
+    await conclusao;
+
+    expect(motor.pedidos[0]?.pastaDeArtefatos).toBe(`/dados/artefatos/entrada/orquestradores/${orquestrador.id}`);
+    expect(motor.pedidos[0]?.pastaDeTrabalho.caminho).toBe(path.resolve("/dados/worktrees/x"));
   });
 
   it("cancelar aborta o motor e registra o turno como cancelado", async () => {
@@ -979,6 +995,7 @@ describe("ServicoDeOrquestracao e a economia de tokens", () => {
       publicador: { publicar: () => undefined, sinalizar: () => undefined },
       anexos: new ArmazemEmMemoria(),
       worktrees,
+      pastaDeArtefatos: (orquestradorId) => `/dados/artefatos/entrada/orquestradores/${orquestradorId}`,
       gerarId: () => `id${++ids}`,
       agora: () => relogio,
       medidor,

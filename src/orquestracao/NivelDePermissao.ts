@@ -1,7 +1,8 @@
 /**
  * O quanto os agentes de um Orquestrador podem mexer na pasta de trabalho.
  *
- * - `leitura`: só leem arquivos e pesquisam na web;
+ * - `leitura`: só leem arquivos e pesquisam na web (e gravam artefatos na
+ *   pasta de artefatos do pedido, a única exceção — ver `DESCRICAO_DO_NIVEL`);
  * - `edicao`: também criam e alteram arquivos;
  * - `edicao_e_comandos`: também executam comandos no terminal.
  *
@@ -26,10 +27,15 @@ export function ehNivelDePermissao(valor: unknown): valor is NivelDePermissao {
  * Como o nível é explicado ao Orquestrador, para ele planejar dentro do que é
  * permitido. Descreve os Subagentes, que fazem toda alteração; o que o próprio
  * Orquestrador faz sem delegar está em `TRABALHO_DIRETO_NO_NIVEL`.
+ *
+ * Em todo nível (e no planejamento, que usa a descrição de `leitura`), gravar
+ * artefatos na pasta de artefatos do pedido é permitido (ADR-26): em `leitura`
+ * isso é a única exceção ao "não podem criar nem editar"; nos outros níveis,
+ * criar arquivos já é permitido.
  */
 export const DESCRICAO_DO_NIVEL: Readonly<Record<NivelDePermissao, string>> = {
   leitura:
-    "os subagentes só podem ler arquivos e pesquisar na web; não podem criar, editar nem executar comandos",
+    "os subagentes só podem ler arquivos e pesquisar na web; não podem criar, editar nem executar comandos — a única exceção é gravar artefatos na pasta de artefatos do pedido",
   edicao: "os subagentes podem ler, criar e editar arquivos, mas não podem executar comandos no terminal",
   edicao_e_comandos:
     "os subagentes podem ler, criar e editar arquivos e executar comandos no terminal",
