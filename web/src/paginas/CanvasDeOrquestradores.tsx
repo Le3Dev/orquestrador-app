@@ -308,6 +308,20 @@ function Canvas() {
     [fluxo],
   );
 
+  /**
+   * Mostra a prévia junto do terminal que a abriu, sem aproximar além do zoom
+   * atual: no máximo afasta, quando os dois não cabem na tela.
+   */
+  const enquadrarSemAproximar = useCallback(
+    (ids: readonly string[]) => {
+      setTimeout(() => {
+        const nos = ids.filter((id) => fluxo.getNode(id) !== undefined).map((id) => ({ id }));
+        void fluxo.fitView({ nodes: nos, duration: 500, padding: 0.15, maxZoom: Math.min(1, fluxo.getZoom()) });
+      }, ESPERA_PARA_MEDIR_MS);
+    },
+    [fluxo],
+  );
+
   /** Onde abrir uma janela nova no centro da área visível, sem cobrir as que já estão ali. */
   const posicaoNoCentroVisivel = useCallback(
     (atuais: readonly NoDoCanvas[], tamanho: { largura: number; altura: number }): Ponto => {
@@ -374,9 +388,9 @@ function Canvas() {
         const previa = novaPrevia(previaId, posicao, { url, orquestradorId });
         return reacomodarBixinhos([...semSelecao(atuais), { ...previa, selected: true }]);
       });
-      focar(existente?.id ?? idDoNoDaPrevia(previaId));
+      enquadrarSemAproximar([orquestradorId, existente?.id ?? idDoNoDaPrevia(previaId)]);
     },
-    [fluxo, focar, posicaoNoCentroVisivel, setNos],
+    [fluxo, enquadrarSemAproximar, posicaoNoCentroVisivel, setNos],
   );
 
   const navegarPrevia = useCallback(
