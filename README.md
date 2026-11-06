@@ -26,9 +26,9 @@ O motor é o próprio **Claude Code em modo headless**, usando o login da sua as
 
 **Pré-requisito em qualquer modo:** o Claude Code instalado e logado (`claude` funcionando no terminal). Para rodar a partir do código-fonte, também Node 22+.
 
-**Usuário final (instalador):** instale o `.exe` gerado por `npm run dist:win` (sai em `dist_electron/`). O instalador é por usuário, sem pedir administrador, e deixa escolher a pasta. Sem certificado de assinatura, o Windows SmartScreen avisa na primeira execução (*Mais informações → Executar assim mesmo*). O app instalado pede a **chave de licença** (Lemon Squeezy) antes de abrir.
+**Usuário final (instalador):** baixe o `.exe` da última versão em **https://github.com/Le3Dev/orquestrador-app/releases/latest** e instale. O instalador é por usuário, sem pedir administrador, e deixa escolher a pasta. Sem certificado de assinatura, o Windows SmartScreen avisa na primeira instalação (*Mais informações → Executar assim mesmo*). O Claude Code precisa estar instalado e logado (pré-requisito acima). **Por enquanto o app não pede chave de licença:** é a fase de testes (`exigirLicenca: false` em `electron/config.js`; ver ADR-29). Depois de instalado, as **atualizações chegam sozinhas**: o app baixa a versão nova em segundo plano e avisa na barra de título para reiniciar (ver *Guia do usuário*, item 15). A atualização não mexe na configuração nem nos dados (`%APPDATA%\Orquestrador de Agentes`).
 
-**Dia a dia, a partir do código-fonte:** dê dois cliques em **`iniciar-desktop.cmd`**. Na primeira vez ele instala as dependências e gera o build; depois roda `npm run desktop` (`electron .`), que abre a janela do aplicativo. Rodando assim (não empacotado), **não há licença**. Depois de atualizar o código, rode `npm run build` (o `.cmd` só gera o build quando falta `dist/` ou `web/dist/`).
+**Dia a dia, a partir do código-fonte:** dê dois cliques em **`iniciar-desktop.cmd`**. Na primeira vez ele instala as dependências e gera o build; depois roda `npm run desktop` (`electron .`), que abre a janela do aplicativo. Rodando assim (não empacotado), **não há licença nem atualização automática**. Depois de atualizar o código, rode `npm run build` (o `.cmd` só gera o build quando falta `dist/` ou `web/dist/`).
 
 ```bash
 npm install
@@ -75,11 +75,37 @@ npm run web:dev   # tela em http://localhost:5173 (repassa /api para a 3200)
 **Empacotar:**
 
 ```bash
-npm run dist:win         # instalador normal, em dist_electron/
-npm run dist:win:teste   # build de teste, em dist_electron_teste/: pula a licença. NUNCA distribuir
+npm run dist:win         # instalador normal, em dist_electron/ (só gera; não publica)
+npm run dist:win:teste   # build de teste, em dist_electron_teste/: pula a licença e não se atualiza. NUNCA distribuir
+npm run release:win      # gera o instalador normal e PUBLICA a release no GitHub (precisa do GH_TOKEN)
 ```
 
 O build de teste grava `"buildDeTeste": true` no `package.json` empacotado; serve para os testes de ponta a ponta do instalado.
+
+`dist:win` e `dist:win:teste` rodam o electron-builder com **`--publish never`**: nunca publicam, mesmo com `GH_TOKEN` no ambiente. Só o **`release:win`** (`npm run build && electron-builder --win --publish always`) publica, nas **Releases do GitHub público `Le3Dev/orquestrador-app`** (`build.publish`: provider `github`, owner `Le3Dev`, repo `orquestrador-app`, `releaseType: "release"`). A release leva o instalador `.exe`, o `.blockmap` e o **`latest.yml`**, que é o que os apps instalados leem para saber se há versão nova (ver ADR-29). Os apps baixam sem token (o repositório é público); o token só existe no PC de quem publica.
+
+**Erro de symlink ao empacotar no Windows:** se o `dist:win` (ou o `release:win`) parar com `ERROR: Cannot create symbolic link : O cliente não tem o privilégio necessário. : …\winCodeSign\<número>\darwin\10.12\lib\libcrypto.dylib`, é o electron-builder extraindo a ferramenta `winCodeSign-2.6.0` para o cache (`%LOCALAPPDATA%\electron-builder\Cache\winCodeSign`): o `.7z` dela traz dois symlinks de macOS (`libcrypto.dylib` e `libssl.dylib`), e o Windows só deixa criar symlink com o Modo de Desenvolvedor ligado ou como administrador. Cada tentativa deixa no cache uma pasta numerada e um `<número>.7z`, sem a pasta final `winCodeSign-2.6.0`. Duas saídas, uma vez por máquina:
+- ligar o **Modo de Desenvolvedor** do Windows (*Configurações → Sistema → Para desenvolvedores*) e rodar o `dist:win` de novo; ou
+- sem administrador, extrair uma vez o `.7z` já baixado (o mais recente da pasta; se não houver nenhum, rode o `dist:win` uma vez para baixar) para a pasta que o electron-builder procura, com o 7-Zip das dependências. No Prompt de Comando, na pasta do projeto (no PowerShell, troque `%LOCALAPPDATA%` por `$env:LOCALAPPDATA`):
+  ```bat
+  node_modules\7zip-bin\win\x64\7za.exe x -bd -y "%LOCALAPPDATA%\electron-builder\Cache\winCodeSign\<número>.7z" "-o%LOCALAPPDATA%\electron-builder\Cache\winCodeSign\winCodeSign-2.6.0"
+  ```
+  Os dois erros de symlink em `darwin\10.12\lib` (e o código de saída 2) são esperados: o Windows só usa o resto (`rcedit-x64.exe`, `windows-10\`). Com a pasta `winCodeSign-2.6.0` no cache, o electron-builder não extrai de novo. As pastas numeradas das tentativas podem ficar.
+
+**Publicar uma nova versão** (ver ADR-29):
+1. **Suba a versão** no `package.json` (`version`; hoje `0.2.0`): `npm version patch --no-git-tag-version` (correção) ou `npm version minor --no-git-tag-version` (novidade), ou edite o campo à mão. **Sem subir a versão, nenhum app recebe nada:** o app só baixa versão maior que a instalada.
+2. **Commit e merge na `main`:** o código publicado deve ser o da `main`. Publique a partir dela, atualizada (`git checkout main` e `git pull`), já com a versão nova.
+3. **Token do GitHub:** crie um token *fine-grained* com acesso **só ao repositório `orquestrador-app`** e a permissão **Contents: Read and write**. Defina-o só na sessão do PowerShell:
+   ```powershell
+   $env:GH_TOKEN = "..."
+   ```
+   **Nunca commite o token** e nunca o coloque no `.env` nem em outro arquivo do projeto.
+4. **Publique:** `npm run release:win`.
+5. **Confira** em https://github.com/Le3Dev/orquestrador-app/releases: a release `v<versão>` publicada, com o `.exe`, o `.blockmap` e o `latest.yml`. Os apps instalados pegam a versão nova ao abrir (uns 10 s depois) ou, se já estiverem abertos, em até 4 h.
+
+**Nunca publique o build de teste** (`dist:win:teste`): ele abre sem licença e não deve chegar aos apps instalados.
+
+**Religar a licença:** mude `exigirLicenca` para `true` em `electron/config.js` e publique uma versão nova (passos acima). Todos os apps instalados passam a pedir a chave do Lemon Squeezy na versão nova, então **avise os testadores antes**.
 
 **Ícone do app** (ver ADR-27): o bixinho gota de óculos escuros; fica em `electron/icones/` e é versionado. O `icone.ico` (16, 20, 24, 32, 40, 48, 64, 128 e 256 px) vai na janela e na barra de tarefas do Windows, no `.exe` (`build.win.icon`) e no instalador e desinstalador (`build.nsis.installerIcon`/`uninstallerIcon`); o `icone.png` (512 × 512) vai na janela fora do Windows. Para regenerar depois de mudar o desenho ou as cores em `scripts/gerarIcones.cjs`:
 
@@ -98,10 +124,11 @@ npm run icones   # grava electron/icones/icone.ico e icone.png
 | `PASTA_DA_TELA` | servidor | `web/dist` do app | Pasta da tela já construída |
 | `ORQUESTRADOR_CHAVE_DE_ACESSO` | servidor | — (o app gera uma aleatória a cada abertura) | Chave conferida no cookie `orquestrador_acesso`; sem ela o servidor não sobe |
 | `ORQUESTRADOR_PERMITIR_NAVEGADOR` | servidor | desligada | `1` = **só desenvolvimento**: sobe sem chave e aceita o navegador |
-| `ORQUESTRADOR_URL_DE_DOWNLOAD` | servidor (opcional) | — | Link para baixar o aplicativo, mostrado na página "roda só no aplicativo" |
+| `ORQUESTRADOR_URL_DE_DOWNLOAD` | servidor (opcional) | — (o app passa o `urlDeDownload` do `electron/config.js`: `https://github.com/Le3Dev/orquestrador-app/releases/latest`) | Link para baixar o aplicativo, mostrado na página "roda só no aplicativo" |
 | `ORQUESTRADOR_URL_DA_TELA` | aplicativo | — | Carrega a tela desta URL (o Vite, em `desktop:dev`) em vez da servida pelo servidor |
 | `ORQUESTRADOR_PASTA_DO_USUARIO` | aplicativo | `%APPDATA%\Orquestrador de Agentes` | Troca a pasta do usuário do app (configuração, dados, log, licença). Só não empacotado ou no build de teste; usada nos testes de ponta a ponta. Com ela, a cópia da pasta antiga não acontece |
 | `PORTA_DA_API` | Vite (`web/`) | `3200` | Porta para onde o Vite repassa o `/api` |
+| `GH_TOKEN` | electron-builder, só no `npm run release:win` | — | Token *fine-grained* do GitHub (só no repositório `orquestrador-app`, **Contents: Read and write**) para publicar a release. Só na sessão de quem publica (`$env:GH_TOKEN = "..."`); nunca em arquivo do projeto. Os apps instalados não precisam dele (ver ADR-29) |
 
 **Testes e verificações:**
 
@@ -262,9 +289,22 @@ Casos de teste do **ícone do app** (ver ADR-27; `electron/icones.test.js`):
 - **Arquivos versionados:** o `icone.ico` tem os 9 tamanhos (inclusive o 256), cada um como PNG; o `icone.png` tem 512 × 512.
 - **Conferência manual:** `npm run desktop` mostra o bixinho na janela e na barra de tarefas (não o átomo do Electron); no instalado, também no atalho, no instalador e no desinstalador.
 
+Casos de teste da **atualização automática** (ver ADR-29):
+- **Serviço (`electron/atualizacao.test.js`, com um atualizador falso no formato do `autoUpdater` e um agendador falso):**
+  - *`proximoEstado`:* verificando → baixando (progresso em inteiro, limitado a 0–100; valor que não é número vira 0) → pronta; sem atualização → `em-dia`; erro na verificação manual vira `erro` com a mensagem, e na automática volta ao estado anterior; `indisponivel` não sai dele, e uma versão já baixada (`pronta`) não regride com uma nova verificação.
+  - *`mensagemDoErro`:* sem internet (`net::ERR_INTERNET_DISCONNECTED`, `ENOTFOUND`) → "Sem conexão com o GitHub…"; `ERR_UPDATER_NO_PUBLISHED_VERSIONS` → "Nenhuma versão publicada…"; status 403 → limite de acessos; outro erro → "Não foi possível verificar a atualização: <motivo>".
+  - *`criarServicoDeAtualizacao`:* inativo (fora do app instalado) → `indisponivel` com a versão atual, sem verificar, agendar nem instalar; o fluxo completo avisa a tela a cada mudança (o mesmo percentual inteiro não avisa de novo) e, com a versão já baixada, não consulta o GitHub de novo; erro na verificação automática só vai para o log e volta à situação anterior, com a primeira verificação agendada para `ATRASO_DA_PRIMEIRA_VERIFICACAO_MS` e a seguinte para `INTERVALO_ENTRE_VERIFICACOES_MS` (4 h); erro na manual vira `erro` com mensagem clara, um aviso só por falha; erro no download de uma automática também volta à situação anterior; pedir a verificação durante uma automática passa a mostrar o erro; `instalarAgora` fora de `pronta` não faz nada; em `pronta`, roda o `antesDeInstalar` (encerrar o servidor) e chama `quitAndInstall(true, true)` (silencioso, reabrindo), uma vez só; falha ao iniciar a instalação vira `erro` com a versão na mensagem e devolve `false`; `iniciar` agenda uma vez só e `parar` cancela.
+- **Tela (`web/`):**
+  - *`shared/atualizacao`:* `descreverAtualizacao` traz a versão atual e o resultado de cada situação ("baixando 0.2.1… 45%", "0.2.1 pronta: será instalada ao fechar o app", erro com e sem motivo); fora do instalado, "Atualizações só no app instalado"; sem a versão (o app não respondeu), só o resultado. `percentualDoDownload` arredonda e limita entre 0 e 100 (nulo sem progresso ou com `NaN`); `avisoDosPedidosEmAndamento` concorda com a quantidade.
+  - *`useAtualizacao`:* sem a ponte (navegador), estado nulo e verificar e instalar sem efeito; lê o estado ao montar, segue o `aoMudar` e cancela a inscrição ao desmontar; o mesmo estado repetido não troca o objeto; um aviso que chega antes da leitura inicial vale mais que ela; dispensar esconde a `pronta` até o estado mudar de novo; verificar mostra `verificando` na hora e aplica a resposta do app; falhas da ponte viram `erro` (ou `erroAoInstalar`, "Não foi possível reiniciar para instalar: …") sem quebrar; a falha de uma verificação manual não esconde a atualização já pronta.
+  - *`AvisoDeAtualizacao`:* sem a ponte, e em `indisponivel`, `em-dia`, `verificando` e `erro`, não desenha nada; `baixando` mostra um indicador discreto (`role="status"`, `no-drag`, sem botões) com o percentual, o medidor e a dica de que instala ao fechar; `pronta` mostra a pílula *Atualização pronta (v0.2.1)* (`no-drag`, `aria-expanded`), que abre o cartão com o foco, e *Reiniciar agora* instala; com pedidos em andamento, avisa quantos serão cancelados e pede *Reiniciar mesmo assim* (*Voltar* desiste); *Depois* esconde a pílula até o estado mudar, e ela volta com o cartão fechado; Esc e clique fora fecham o cartão e a pílula fica; falha ao reiniciar mostra o motivo no cartão.
+  - *Barra de título, paleta e canvas:* a pílula fica à direita da barra, antes do status, e recebe os pedidos em andamento; *Procurar atualizações* só entra com a ponte do app, por último entre as ações, com a versão e o resultado no detalhe (fora do instalado, "Atualizações só no app instalado"); escolher verifica sem fechar a paleta, que mostra o resultado (o `atualizar()` relê a lista só com ela aberta); o erro da verificação manual fica só na paleta, sem aviso na barra; com a atualização pronta, reiniciar com Orquestradores trabalhando pede confirmação.
+- **Conferência do pacote (manual, depois do `npm run dist:win`):** `dist_electron/` tem o `Orquestrador de Agentes Setup <versão>.exe`, o `.blockmap` e o `latest.yml` (versão, `sha512` e `size` do instalador); `dist_electron\win-unpacked\resources\app-update.yml` tem `provider: github`, `owner: Le3Dev` e `repo: orquestrador-app`, sem `publisherName` (sem ele, o updater não exige assinatura no instalador baixado); o `electron-updater` está dentro do pacote (`npx --no-install @electron/asar list dist_electron\win-unpacked\resources\app.asar | findstr electron-updater`).
+- **Ponta a ponta (manual):** instalar uma versão normal mais antiga, publicar uma mais nova e abrir o app: uns 10 s depois aparece o indicador do download e, ao terminar, a pílula; *Reiniciar agora* reabre na versão nova, com a configuração e os dados intactos.
+
 ## Tecnologias
 
-- **Aplicativo desktop:** **Electron 33** (processo principal em `electron/`, servidor em `utilityProcess`) e **electron-builder** (instalador NSIS para Windows x64). Licença via Lemon Squeezy, só no instalado.
+- **Aplicativo desktop:** **Electron 33** (processo principal em `electron/`, servidor em `utilityProcess`), **electron-builder** (instalador NSIS para Windows x64, publicado nas Releases do GitHub) e **electron-updater** (atualização automática do instalado, ver ADR-29). Licença via Lemon Squeezy, só no instalado e hoje desligada (`exigirLicenca: false`, fase de testes).
 - **Node 22+ / TypeScript 6** (estrito, `exactOptionalPropertyTypes`), **Express 5**, **zod 4** (validação da API), **vitest**.
 - **Tela:** React 19, Vite 6, Tailwind 4, react-markdown com remark-gfm e **React Flow** (`@xyflow/react` 12) para o canvas (ver ADR-8). Tema escuro com a paleta da Anthropic (ver ADR-7). Fontes empacotadas via `@fontsource`, sem CDN: Poppins, Lora e JetBrains Mono.
 - **Claude Code 2.1.x** (`claude -p --output-format stream-json`) como motor dos agentes.
@@ -274,12 +314,12 @@ Casos de teste do **ícone do app** (ver ADR-27; `electron/icones.test.js`):
 
 ### Visão geral
 
-**Aplicativo desktop** (ver ADR-19 e ADR-20): o processo principal do Electron sobe o servidor Express num `utilityProcess`, numa porta de `127.0.0.1` fixa por instalação (gravada no `config.json`), com uma chave aleatória por abertura. A janela recebe essa chave num cookie `httpOnly` só da sessão dela; o servidor recusa toda requisição sem o cookie. Um navegador apontado para a mesma porta recebe 403.
+**Aplicativo desktop** (ver ADR-19 e ADR-20): o processo principal do Electron sobe o servidor Express num `utilityProcess`, numa porta de `127.0.0.1` fixa por instalação (gravada no `config.json`), com uma chave aleatória por abertura. A janela recebe essa chave num cookie `httpOnly` só da sessão dela; o servidor recusa toda requisição sem o cookie. Um navegador apontado para a mesma porta recebe 403. O processo principal também roda o **serviço de atualização** (abaixo) e só pede a licença com `exigirLicenca: true` no `electron/config.js` (hoje `false`, ver ADR-29).
 
 ```mermaid
 flowchart LR
   subgraph App["Aplicativo (Electron)"]
-    MAIN["Processo principal<br/>electron/main.js<br/>licença · primeira abertura · religar"]
+    MAIN["Processo principal<br/>electron/main.js<br/>licença · primeira abertura · religar · atualização"]
     J["Janela (BrowserWindow)<br/>cookie orquestrador_acesso"]
   end
   subgraph UP["utilityProcess"]
@@ -288,14 +328,34 @@ flowchart LR
   CC2["claude.exe -p"]
   NAV["Navegador"]
   CFG[("%APPDATA%\Orquestrador de Agentes<br/>configuração · dados · logs\servidor.log")]
+  GH[("GitHub Releases<br/>Le3Dev/orquestrador-app")]
 
   MAIN -- "fork com PORTA, PASTA_DADOS, PASTA_RAIZ_PROJETOS,<br/>CLAUDE_CODE_BIN, PASTA_DA_TELA, chave" --> SRV
   MAIN -- "grava o cookie e carrega a tela" --> J
   MAIN --> CFG
+  MAIN -- "electron-updater (sem token)" --> GH
   J -- "/api + tela, com o cookie" --> SRV
   SRV --> CC2
   SRV --> CFG
   NAV -. "sem cookie → 403" .-> SRV
+```
+
+**Atualização automática** (`electron/atualizacao.js`, ver ADR-29): um serviço do processo principal, testável sem o Electron (`electron/atualizacao.test.js`), que usa o **electron-updater** para buscar versões novas nas Releases do GitHub público `Le3Dev/orquestrador-app`, sem token. Fica ligado **só no app instalado normal**: no `npm run desktop`, no `desktop:dev` e no build de teste, a situação é `indisponivel`.
+- **Quando verifica:** uns 10 s depois de abrir a janela principal e, depois, a cada 4 h. Compara a versão do `package.json` instalado com a do `latest.yml` da última release.
+- **Download:** com versão maior, baixa sozinho em segundo plano (`autoDownload`), com o progresso indo para a tela.
+- **Instalação:** quando o download termina (`pronta`), instala ao fechar o app (`autoInstallOnAppQuit`) ou na hora, com *Reiniciar agora*: o app encerra o servidor (e os pedidos em andamento), instala em silêncio e reabre.
+- **Tela:** o estado (`situacao`, `versaoAtual`, `versaoNova`, `progresso`, `mensagemDeErro`) chega pela ponte `window.electron.atualizacao` (ver *Manuais e APIs*), que alimenta o aviso da barra de título e a ação *Procurar atualizações* da paleta.
+- **Erros:** os da verificação automática vão só para o log (`logs\servidor.log`, origem `atualizacao`); o da verificação manual (paleta) também aparece na tela.
+- **Dados:** a atualização troca só a pasta do programa; `%APPDATA%\Orquestrador de Agentes` (configuração, dados, log) não é tocada.
+
+```mermaid
+flowchart LR
+  PUB["npm run release:win<br/>(versão nova + GH_TOKEN)"] --> REL[("Release no GitHub<br/>latest.yml · .exe · .blockmap")]
+  APP["App instalado<br/>~10 s após abrir · a cada 4 h"] -- "lê o latest.yml" --> REL
+  APP -- "versão maior" --> BX["baixando N%<br/>(segundo plano)"]
+  BX --> PR["pronta (vX)<br/>aviso na barra de título"]
+  PR -- "Reiniciar agora" --> RA["fecha o servidor,<br/>instala em silêncio e reabre"]
+  PR -- "Depois" --> FE["instala ao fechar o app"]
 ```
 
 Dentro do servidor:
@@ -413,7 +473,8 @@ src/
                                artefatosRoutes.ts com o CanalDosArtefatos)
 electron/                      aplicativo desktop (CommonJS): main.js (janelas, servidor no
                                utilityProcess, religar, cookie), preload.js (window.electron),
-                               licença, configuração local e primeira abertura; testes *.test.js
+                               licença, configuração local, primeira abertura e atualização
+                               automática (atualizacao.js); testes *.test.js
 web/src/
   paginas/CanvasDeOrquestradores.tsx   canvas (React Flow): nós, linhas, painéis, layout salvo
   componentes/canvas/                  NoTerminal (terminal do Orquestrador), NoRascunho (configuração),
@@ -782,6 +843,7 @@ flowchart TD
   - mudar o limite é trocar uma constante.
 
 **ADR-19 — Só no aplicativo: servidor dentro do Electron e acesso por chave de sessão.**
+- *Atualizado pelo ADR-29:* a licença passou a depender também da chave `exigirLicenca` do `electron/config.js` (hoje `false`, fase de testes): o app empacotado normal só pede a chave com ela `true`. O que abaixo diz que o app instalado exige a licença (e a loja do Lemon Squeezy configurada) vale só com a chave ligada. O app instalado normal também passa a se atualizar sozinho pelas Releases do GitHub; o `npm run desktop` e o build de teste, não.
 - *Contexto:*
   - o Orquestrador virou um produto desktop (instalador, licença), mas a tela também abria em `http://localhost:3200` em qualquer navegador da máquina, para qualquer um, sem licença;
   - o executável empacotado não subia o servidor: o app reaproveitava o vigia com `spawn(process.execPath, …)`, e no empacotado `process.execPath` é o próprio Electron, não o Node; o `cwd` ficava dentro do `app.asar`; e os caminhos padrão (`dados/`, pasta raiz) eram relativos à pasta de instalação, que não é lugar de gravar dados.
@@ -966,6 +1028,29 @@ flowchart TD
   - **contrato da API menor:** sem os dois campos e sem as duas mensagens de erro (`A opção "Deixar o orquestrador fazer o trivial sozinho"…` / `A opção "Propor plano antes de mudanças grandes"…`). Um cliente que mande valor inválido nesses campos recebe 200/201 em vez de 400;
   - os eventos já gravados no `eventos.jsonl` continuam com os campos na `configuracao` (o histórico não é reescrito); a tela os ignora;
   - não há mais como pedir "delegue tudo": para o Orquestrador não fazer nada sozinho, só pedindo no texto; para garantir plano com trava real, continua o Plan Mode (Shift+Tab, ADR-9).
+
+**ADR-29 — Atualização automática pelo electron-updater com GitHub Releases, e licença desligada na fase de testes.** Atualiza o ADR-19.
+- *Contexto:*
+  - dois desenvolvedores vão testar e validar o app instalado no dia a dia, enquanto ele continua mudando. Mandar um `.exe` novo a cada correção e pedir para reinstalar à mão é inviável: alguém sempre fica numa versão velha, e o retorno dos testes perde valor;
+  - o app não tem certificado de assinatura de código (ADR-19), e o instalador NSIS é por usuário, sem administrador;
+  - o repositório `Le3Dev/orquestrador-app` é público: as Releases dele podem ser baixadas sem login nem token;
+  - a licença do Lemon Squeezy (ADR-19) atrapalha nessa fase: cada testador precisaria de uma chave, e ainda não há produto à venda.
+- *Decisão:*
+  - **`electron-updater`** (do mesmo projeto do electron-builder), com **publicação nas Releases do GitHub** (`build.publish`: provider `github`, owner `Le3Dev`, repo `orquestrador-app`, `releaseType: "release"`). O novo `npm run release:win` (`npm run build && electron-builder --win --publish always`) gera o instalador e publica a release com o `latest.yml`; `dist:win` e `dist:win:teste` ganham `--publish never` e nunca publicam. A `version` do `package.json` passa a `0.2.0` e decide quem é mais novo;
+  - **GitHub Releases, e não um servidor próprio:** o repositório já existe e é público, o electron-builder publica direto nele e o electron-updater lê de lá sem configuração extra. Não há servidor para manter, pagar ou proteger, nem credencial dentro do app: o token de publicação (`GH_TOKEN`) só existe no PC de quem publica;
+  - **serviço próprio, `electron/atualizacao.js`**, testável sem o Electron (`electron/atualizacao.test.js`), ligado só no app instalado normal (não no `npm run desktop`, no `desktop:dev` nem no build de teste). Verifica ~10 s depois de abrir a janela principal, para não disputar a abertura, e a cada 4 h. Expõe um estado único (`situacao`, `versaoAtual`, `versaoNova`, `progresso`, `mensagemDeErro`) pela ponte `window.electron.atualizacao` (canais `atualizacao:obter`, `atualizacao:verificar`, `atualizacao:instalar-agora`, este só aceito da janela principal, e o evento `atualizacao:estado`);
+  - **baixa sozinho e só pergunta para reiniciar** (`autoDownload`): baixar em segundo plano não atrapalha ninguém; reiniciar sim, porque derruba o servidor;
+  - **o padrão é "Depois"** (`autoInstallOnAppQuit`): sem resposta, a versão nova entra ao fechar o app. *Reiniciar agora* fecha o servidor, instala em silêncio e reabre; com pedidos em andamento, a tela pede confirmação antes, porque reiniciar os cancela;
+  - **erros silenciosos na verificação automática** (só no log, origem `atualizacao`): sem internet ou com o GitHub fora do ar, o app não deve incomodar. Na verificação manual (*Procurar atualizações*, Ctrl+K), o erro aparece;
+  - **licença por chave no `config.js`** (`exigirLicenca: false`): o app instalado abre sem pedir licença enquanto durar a fase de testes. Religar é mudar para `true` e publicar uma versão nova: a atualização leva a mudança a todos os instalados, sem reinstalar. O `urlDeDownload` passa a ser `https://github.com/Le3Dev/orquestrador-app/releases/latest`.
+- *Consequências:*
+  - **cada publicação precisa subir a versão** do `package.json`; republicar a mesma versão não chega a ninguém. O passo a passo está em *Como rodar → Publicar uma nova versão*;
+  - **sem assinatura**, o SmartScreen avisa na primeira instalação, e antivírus podem desconfiar do instalador baixado ou da instalação silenciosa. A integridade do download é conferida pelo sha512 do `latest.yml`; a confiança na origem fica no HTTPS do GitHub e em quem pode publicar no repositório (o token *fine-grained* só nele, com **Contents: Read and write**);
+  - **o código do repositório é público:** qualquer um pode gerar o app a partir dele, inclusive com `exigirLicenca: false` ou sem a verificação. A licença só protege os instalados que vêm das nossas releases. **Antes de vender, decidir:** repositório privado (aí as releases precisam de outro lugar público, porque um token não pode ir dentro do app), um repositório só de releases, ou aceitar o risco;
+  - **religar a licença exige avisar os testadores antes:** na primeira abertura da versão com `exigirLicenca: true`, todos os apps instalados passam a pedir a chave do Lemon Squeezy e não abrem sem ela;
+  - **os dados ficam entre versões** (`%APPDATA%\Orquestrador de Agentes`: `config.json`, histórico, notas, chat, artefatos, log): a atualização troca só a pasta do programa. Por isso, mudanças de formato nos dados precisam continuar lendo o que as versões anteriores gravaram, como já acontece com os campos novos (ADR-10, 12, 23 e 28);
+  - quem está com o app fechado recebe a versão ao abrir (~10 s depois); quem o deixa aberto, em até 4 h. A versão baixada e não instalada entra ao fechar o app;
+  - o `npm run desktop`, o `desktop:dev` e o build de teste não se atualizam: para testar a atualização de ponta a ponta, é preciso instalar uma versão normal mais antiga e publicar uma mais nova.
 
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
@@ -1173,13 +1258,26 @@ Passageiros (sem id, fora do histórico): `event: trecho` com `data: { mensagemI
 | `artefato_renomeado` | `{ artefato }` | `PATCH /artefatos/:id` com um título diferente |
 | `artefato_removido` | `{ id }` | `DELETE /artefatos/:id` |
 
+**Ponte do aplicativo: atualização** (`window.electron.atualizacao`, exposta pelo `electron/preload.js`; ver ADR-29). Não é rota HTTP: é IPC entre a tela e o processo principal do Electron, e só existe no desktop.
+
+| Função | Canal IPC | O que faz |
+|---|---|---|
+| `obter()` | `atualizacao:obter` | devolve o estado atual da atualização |
+| `verificar()` | `atualizacao:verificar` | procura versão nova agora (verificação manual: um erro aparece na tela, com `situacao: "erro"`) |
+| `instalarAgora()` | `atualizacao:instalar-agora` | *Reiniciar agora*: fecha o servidor, instala em silêncio e reabre. Só aceito da janela principal |
+| `aoMudar(callback)` | evento `atualizacao:estado` (do processo principal para a tela) | chama `callback(estado)` a cada mudança do estado |
+
+Estado: `{ situacao, versaoAtual, versaoNova, progresso, mensagemDeErro }`.
+- `situacao`: `indisponivel` (não é o app instalado normal: `npm run desktop`, `desktop:dev` ou build de teste), `verificando`, `em-dia`, `baixando`, `pronta` (baixada; instala ao fechar o app ou com *Reiniciar agora*) ou `erro`.
+- `versaoAtual`: a versão instalada; `versaoNova`: a encontrada na release; `progresso`: de 0 a 100, durante o download; `mensagemDeErro`: o motivo, em `erro`.
+
 ### Guia do usuário
 
 A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma janela de terminal, e cada Subagente que ele instancia vira um bixinho ligado ao terminal.
 
 **Abrir:** pelo atalho do aplicativo instalado ou pelo `iniciar-desktop.cmd` (ver *Como rodar*). Na primeira abertura, escolha a pasta dos projetos, confirme o `claude.exe` e, se quiser, importe o histórico antigo. Para mudar a pasta dos projetos ou o Claude Code depois, clique no **⚙** da barra de título (à esquerda de minimizar, maximizar e fechar) ou use a ação *Pastas e Claude Code* da paleta (**Ctrl+K**).
 
-**Barra de título:** no topo da janela fica a barra do aplicativo: à esquerda o nome; no meio, o campo **Buscar ou executar…** (`Ctrl+K`), que abre a paleta de comandos (veja *Navegar no canvas*); à direita o status (quem está trabalhando, cotas e RAM) e, logo depois, o **⚙** (pastas e Claude Code: reabre os Ajustes da primeira abertura; se não abrirem, aparece a mensagem logo abaixo da barra, fechável no ✕) e os botões do próprio app: **minimizar**, **maximizar/restaurar** (o ícone muda conforme a janela) e **fechar** (fica vermelho ao passar o mouse). Também dá para usá-los pelo teclado (Tab até eles e Enter). Arraste a janela por qualquer ponto vazio da barra, inclusive em volta da busca; clique duplo maximiza ou restaura; arrastar para as bordas da tela, Win+setas e Win+Z encaixam a janela como em qualquer programa. O menu de layouts que o Windows 11 mostra ao parar o mouse sobre o maximizar nativo não aparece (use Win+Z). Se a tela travar, **Alt+F4** fecha o aplicativo. As janelas de ativação e de primeira abertura/Ajustes continuam com os botões do Windows.
+**Barra de título:** no topo da janela fica a barra do aplicativo: à esquerda o nome; no meio, o campo **Buscar ou executar…** (`Ctrl+K`), que abre a paleta de comandos (veja *Navegar no canvas*); à direita o status (quem está trabalhando, cotas e RAM) e, logo depois, o **⚙** (pastas e Claude Code: reabre os Ajustes da primeira abertura; se não abrirem, aparece a mensagem logo abaixo da barra, fechável no ✕) e os botões do próprio app: **minimizar**, **maximizar/restaurar** (o ícone muda conforme a janela) e **fechar** (fica vermelho ao passar o mouse). Também dá para usá-los pelo teclado (Tab até eles e Enter). Arraste a janela por qualquer ponto vazio da barra, inclusive em volta da busca; clique duplo maximiza ou restaura; arrastar para as bordas da tela, Win+setas e Win+Z encaixam a janela como em qualquer programa. O menu de layouts que o Windows 11 mostra ao parar o mouse sobre o maximizar nativo não aparece (use Win+Z). Se a tela travar, **Alt+F4** fecha o aplicativo. As janelas de ativação e de primeira abertura/Ajustes continuam com os botões do Windows. Quando há uma versão nova do app, a barra também mostra o aviso da atualização (item 15).
 
 **Janela estreita:** na barra de título, o status divide a largura com a busca e encurta antes: abaixo de 1440 px as cotas aparecem como *5h* e *7d* (sem o "· agentes"); abaixo de 1280 px, o status mostra só a situação e um medidor resumido (passe o mouse para ver tudo). Abaixo de 1100 px, a busca vira só a lupa **⌕**, o `+ Novo ▾` fica só com o **+** (passe o mouse para ver o nome) e o minimapa some. A situação (quem está trabalhando) nunca some. No navegador, a barra do canvas e o status seguem os passos de 1280 px (rótulos curtos) e 1100 px (só ícones e o resumo). Abrir o endereço do servidor no navegador mostra só o aviso de que o Orquestrador roda no aplicativo.
 
@@ -1190,7 +1288,7 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 - os botões no canto inferior esquerdo aproximam, afastam e enquadram tudo; o 4º, com o ícone de grade, é o **Organizar**: põe os terminais lado a lado e, à direita deles, as notas em colunas e, depois delas, os artefatos (fica desabilitado com uma janela só);
 - **Ctrl+N** abre o formulário de um orquestrador novo (o mesmo de *+ Novo ▾ › Orquestrador*, respeitando o limite de 4) e **Ctrl+Shift+N** cria uma nota; com o cursor num campo de texto (prompt, nota, chat), os dois não fazem nada;
 - **Ctrl+K** (ou o campo *Buscar ou executar…* da barra de título; no navegador, o botão *Buscar* na barra do canvas) abre a **paleta de comandos**, de qualquer lugar, inclusive com o cursor num prompt. Digite parte do nome (acentos e maiúsculas não importam; todas as palavras precisam aparecer) para achar:
-  - **ações:** *Novo orquestrador* (Ctrl+N), *Nova nota* (Ctrl+Shift+N), *Organizar* (com mais de uma janela), *Zoom 100%* (Ctrl+0), *Enquadrar tudo* e, no aplicativo, *Pastas e Claude Code*;
+  - **ações:** *Novo orquestrador* (Ctrl+N), *Nova nota* (Ctrl+Shift+N), *Organizar* (com mais de uma janela), *Zoom 100%* (Ctrl+0), *Enquadrar tudo* e, no aplicativo, *Pastas e Claude Code* e *Procurar atualizações* (item 15);
   - **orquestradores:** todos, abertos ou não, com a pasta e se estão trabalhando; escolher abre o terminal (respeitando o limite de 4) ou leva até ele;
   - **notas:** pelo título ou pelo texto; escolher centraliza a nota;
   - **artefatos:** todos, abertos ou não, pelo título (ou por "artefato", "html", "md", "pagina"), com o formato, a origem (o Orquestrador ou o chat rápido) e se já estão no canvas; escolher abre a janela, se estiver fechada, e leva até ela (item 14);
@@ -1343,6 +1441,14 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
     - **Versões:** quando o agente regrava o mesmo arquivo (*"agora mude as cores do gráfico"*), nasce uma versão nova; a janela aberta passa sozinha para ela e mostra o selo *v2 nova* por um instante. No **`vN ▾`** aparecem todas, da mais nova para a mais antiga, com data, hora e tamanho; escolher uma antiga mostra aquela versão (o botão fica destacado), e a atual continua na lista. Um arquivo regravado igual não cria versão. Se o agente gravar com outro nome, nasce outro artefato.
     - **Sem internet:** a página roda isolada: os scripts dela funcionam, mas ela não acessa a internet (bibliotecas por CDN, imagens e fontes externas não carregam) nem nada do aplicativo. Por isso o agente embute tudo no próprio arquivo, até 5 MB; se a página aparecer quebrada, peça para ele embutir o que falta.
     - **Onde ficam os arquivos:** em `%APPDATA%\Orquestrador de Agentes\dados\artefatos\`: cada artefato numa pasta `<id>\`, com as versões `v1.html`, `v2.html`… Os agentes gravam em `dados\artefatos\entrada\orquestradores\<id>\` (Orquestradores) e `dados\artefatos\entrada\chat\` (chat); um `.html` ou `.md` copiado à mão para uma delas também vira artefato. Os artefatos ficam até você apagá-los: excluir um Orquestrador ou dar `/clear` não os apaga, e eles não contam no limite de 4 orquestradores abertos.
+15. **Atualizações** (ver ADR-29): o app instalado se atualiza sozinho; não precisa baixar nem reinstalar nada.
+    - **Sozinho:** uns 10 segundos depois de abrir e, com o app aberto, a cada 4 horas, ele procura uma versão nova. Se houver, baixa em segundo plano, sem atrapalhar o trabalho, e a barra de título mostra **Baixando atualização N%**.
+    - **Pronta:** quando o download termina, a barra mostra **Atualização pronta (vX)**. Clique no aviso: um cartão oferece **Reiniciar agora** (o app fecha, instala em silêncio e abre de novo) ou **Depois** (a versão nova é instalada quando você fechar o app e já vem na próxima abertura).
+    - **Pedidos em andamento:** reiniciar cancela os pedidos que estiverem rodando, como fechar o app. Se houver algum, o app pede confirmação antes; na dúvida, escolha *Depois* e deixe terminar. Os pedidos cortados voltam como *interrompidos* e podem ser reenviados; a fila de pedidos continua salva.
+    - **Procurar agora:** na paleta (**Ctrl+K**), a ação *Procurar atualizações* mostra a versão atual e procura na hora: diz se o app está em dia, começa a baixar a versão nova ou mostra o erro (ex.: sem internet).
+    - **Seus dados ficam:** orquestradores, histórico, notas, chat, artefatos e configuração (`%APPDATA%\Orquestrador de Agentes`) não são tocados pela atualização.
+    - Erros da busca automática (sem internet, GitHub fora do ar) não aparecem na tela: ficam no log (`logs\servidor.log`, linhas `[atualizacao]`), e o app tenta de novo na próxima verificação.
+    - Rodando pelo código-fonte (`iniciar-desktop.cmd`, `npm run desktop`), não há atualização automática: atualize o código e rode `npm run build`.
 
 **Avisos que podem aparecer:**
 - *"orquestrador lendo …"*, *"orquestrador executando …"* (no log do terminal): não é erro. O Orquestrador está fazendo um trivial ele mesmo (ver ADR-14). Isso vale sempre e não tem opção para desligar (ver ADR-28); se quiser que ele delegue algo específico, peça no texto do pedido.

@@ -29,11 +29,40 @@ export interface ApiDaConfiguracao {
   abrirAjustes: () => Promise<void>;
 }
 
+/**
+ * Onde está a atualização automática do app: "indisponivel" fora do app
+ * instalado (navegador ou desenvolvimento).
+ */
+export type SituacaoDaAtualizacao = "indisponivel" | "verificando" | "em-dia" | "baixando" | "pronta" | "erro";
+
+export interface EstadoDaAtualizacao {
+  situacao: SituacaoDaAtualizacao;
+  versaoAtual: string;
+  /** Preenchida em "baixando" e "pronta". */
+  versaoNova: string | null;
+  /** 0–100 (inteiro), só em "baixando". */
+  progresso: number | null;
+  /** Só em "erro". */
+  mensagemDeErro: string | null;
+}
+
+/** A atualização automática do app desktop (baixa sozinha; instala ao fechar ou ao reiniciar). */
+export interface ApiDaAtualizacao {
+  obter: () => Promise<EstadoDaAtualizacao>;
+  /** Verificação manual. */
+  verificar: () => Promise<EstadoDaAtualizacao>;
+  /** Fecha o app, instala e reabre; só faz efeito em "pronta". */
+  instalarAgora: () => Promise<void>;
+  /** Avisa a cada mudança; devolve a função que cancela o aviso. */
+  aoMudar: (callback: (estado: EstadoDaAtualizacao) => void) => () => void;
+}
+
 interface PonteDoDesktop {
   desktop?: boolean;
   plataforma?: string;
   janela?: ApiDaJanela;
   configuracao?: ApiDaConfiguracao;
+  atualizacao?: ApiDaAtualizacao;
 }
 
 function ponteDoDesktop(): PonteDoDesktop | null {
@@ -50,6 +79,11 @@ export function apiDaJanela(): ApiDaJanela | null {
 /** Devolve a API de configuração do app desktop, ou null quando a ponte não a expõe. */
 export function apiDaConfiguracao(): ApiDaConfiguracao | null {
   return ponteDoDesktop()?.configuracao ?? null;
+}
+
+/** Devolve a API da atualização do app desktop, ou null quando a ponte não a expõe. */
+export function apiDaAtualizacao(): ApiDaAtualizacao | null {
+  return ponteDoDesktop()?.atualizacao ?? null;
 }
 
 /** true quando a tela está rodando dentro do app desktop (Electron). */

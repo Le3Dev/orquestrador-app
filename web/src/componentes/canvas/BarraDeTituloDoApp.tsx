@@ -2,12 +2,15 @@ import type { ComponentProps } from "react";
 
 import { useAjustesDoAplicativo } from "../../shared/hooks/useAjustesDoAplicativo";
 import { IconeOrquestrador } from "../Icones";
+import { AvisoDeAtualizacao } from "./AvisoDeAtualizacao";
 import { ControlesDaJanela } from "./ControlesDaJanela";
 import { ErroDoCanvas, StatusDoCanvas } from "./PaineisDoCanvas";
 
 type PropsDaBarraDeTitulo = Omit<ComponentProps<typeof StatusDoCanvas>, "naBarraDeTitulo"> & {
   /** Abre a paleta de comandos (o mesmo do Ctrl+K). */
   aoBuscar: () => void;
+  /** Pedidos rodando agora: reiniciar para atualizar o app pede confirmação. */
+  pedidosEmAndamento: number;
 };
 
 /**
@@ -15,12 +18,13 @@ type PropsDaBarraDeTitulo = Omit<ComponentProps<typeof StatusDoCanvas>, "naBarra
  * ponta a ponta (a janela não tem barra nem botões nativos).
  *
  * Esquerda: ícone e nome do app. Centro: o campo "Buscar ou executar…", que
- * abre a paleta de comandos. Direita: o status (situação, cotas e RAM) e,
- * colados a ele, o ⚙ (pastas e Claude Code) e os botões ─ ☐ ✕ do próprio app.
+ * abre a paleta de comandos. Direita: o aviso de atualização (só baixando ou
+ * pronta), o status (situação, cotas e RAM) e, colados a ele, o ⚙ (pastas e
+ * Claude Code) e os botões ─ ☐ ✕ do próprio app.
  * A faixa inteira arrasta a janela (e o duplo clique nela maximiza); o que é
  * clicável é `no-drag`.
  */
-export function BarraDeTituloDoApp({ aoBuscar, ...status }: PropsDaBarraDeTitulo) {
+export function BarraDeTituloDoApp({ aoBuscar, pedidosEmAndamento, ...status }: PropsDaBarraDeTitulo) {
   const ajustes = useAjustesDoAplicativo();
 
   return (
@@ -50,6 +54,7 @@ export function BarraDeTituloDoApp({ aoBuscar, ...status }: PropsDaBarraDeTitulo
         </button>
       </div>
       <div className="direita-da-barra-de-titulo">
+        <AvisoDeAtualizacao pedidosEmAndamento={pedidosEmAndamento} />
         <StatusDoCanvas naBarraDeTitulo {...status} />
         <div className="botoes-da-barra-de-titulo">
           {ajustes.disponivel && (

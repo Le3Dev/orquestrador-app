@@ -1,6 +1,8 @@
 import type { FormatoDoArtefato, OrigemDoArtefato } from "./api/artefatos";
 import type { ResumoDoOrquestrador } from "./api/tipos";
+import { descreverAtualizacao } from "./atualizacao";
 import type { TurnoNaTela } from "./estado/aplicarEvento";
+import type { EstadoDaAtualizacao } from "./ponteDoDesktop";
 
 /**
  * Paleta de comandos (Ctrl+K): o que ela lista e como busca. Tudo aqui é puro;
@@ -14,7 +16,8 @@ export type AcaoDaPaleta =
   | "organizar"
   | "zoom-100"
   | "enquadrar-tudo"
-  | "ajustes-do-aplicativo";
+  | "ajustes-do-aplicativo"
+  | "procurar-atualizacoes";
 
 interface BaseDoItem {
   /** Único na paleta. */
@@ -32,6 +35,8 @@ export interface ItemDeAcao extends BaseDoItem {
   readonly acao: AcaoDaPaleta;
   /** O atalho de teclado da mesma ação, quando há (ex.: "Ctrl+0"). */
   readonly atalho: string | null;
+  /** Executar não fecha a paleta: o detalhe mostra o resultado (ex.: "Procurar atualizações"). */
+  readonly mantemAPaletaAberta?: boolean;
 }
 
 export interface ItemDeOrquestrador extends BaseDoItem {
@@ -72,6 +77,8 @@ export interface FonteDaPaleta {
   podeOrganizar: boolean;
   /** No app desktop: "Pastas e Claude Code" reabre os Ajustes. */
   podeAbrirAjustes: boolean;
+  /** A atualização do app desktop; null sem a ponte (navegador): "Procurar atualizações" não entra. */
+  atualizacao: EstadoDaAtualizacao | null;
   /** Todos os Orquestradores, abertos ou não, na ordem da lista. */
   orquestradores: readonly Pick<ResumoDoOrquestrador, "id" | "nome" | "nomeDaPasta" | "situacao">[];
   /** Orquestradores com o terminal aberto no canvas. */
@@ -143,7 +150,25 @@ function primeiraLinha(texto: string): string {
   return trecho(texto.trim().split("\n")[0] ?? "", TAMANHO_DO_TRECHO);
 }
 
-function acoes(podeOrganizar: boolean, podeAbrirAjustes: boolean): ItemDeAcao[] {
+/** "Procurar atualizações" (só com a ponte do app desktop): o detalhe traz a versão e o resultado. */
+function acaoDeAtualizacao(estado: EstadoDaAtualizacao): ItemDeAcao {
+  return {
+    tipo: "acao",
+    id: "acao:procurar-atualizacoes",
+    acao: "procurar-atualizacoes",
+    titulo: "Procurar atualizações",
+    detalhe: descreverAtualizacao(estado),
+    busca: "atualizar atualizacao versao nova update",
+    atalho: null,
+    mantemAPaletaAberta: true,
+  };
+}
+
+function acoes(
+  podeOrganizar: boolean,
+  podeAbrirAjustes: boolean,
+  atualizacao: EstadoDaAtualizacao | null,
+): ItemDeAcao[] {
   const todas: ItemDeAcao[] = [
     {
       tipo: "acao",
@@ -200,10 +225,11 @@ function acoes(podeOrganizar: boolean, podeAbrirAjustes: boolean): ItemDeAcao[] 
       atalho: null,
     },
   ];
-  return todas.filter(
+  const disponiveis = todas.filter(
     (item) =>
       (podeOrganizar || item.acao !== "organizar") && (podeAbrirAjustes || item.acao !== "ajustes-do-aplicativo"),
   );
+  return atualizacao === null ? disponiveis : [...disponiveis, acaoDeAtualizacao(atualizacao)];
 }
 
 /** De onde o artefato veio, para o detalhe: "de <Orquestrador>" ou "do chat rápido". */
@@ -287,7 +313,13 @@ export function montarItensDaPaleta(fonte: FonteDaPaleta): ItemDaPaleta[] {
       }),
     );
 
-  return [...acoes(fonte.podeOrganizar, fonte.podeAbrirAjustes), ...orquestradores, ...notas, ...artefatos, ...pedidos];
+  return [
+    ...acoes(fonte.podeOrganizar, fonte.podeAbrirAjustes, fonte.atualizacao),
+    ...orquestradores,
+    ...notas,
+    ...artefatos,
+    ...pedidos,
+  ];
 }
 
 interface TextoNormalizado {

@@ -9,8 +9,8 @@ describe("BarraDeTituloDoApp", () => {
     delete janelaComPonte.electron;
   });
 
-  /** A ponte do app desktop; `abrirAjustes` só quando o teste passa. */
-  function ponteDoDesktop(abrirAjustes?: () => Promise<void>) {
+  /** A ponte do app desktop; `abrirAjustes` e a atualização só quando o teste passa. */
+  function ponteDoDesktop(abrirAjustes?: () => Promise<void>, atualizacao?: unknown) {
     janelaComPonte.electron = {
       desktop: true,
       janela: {
@@ -21,6 +21,7 @@ describe("BarraDeTituloDoApp", () => {
         aoMudarMaximizada: vi.fn(() => () => undefined),
       },
       ...(abrirAjustes === undefined ? {} : { configuracao: { obter: vi.fn(), abrirAjustes } }),
+      ...(atualizacao === undefined ? {} : { atualizacao }),
     };
   }
 
@@ -32,6 +33,7 @@ describe("BarraDeTituloDoApp", () => {
         cota={[{ nome: "5 horas", utilizacao: 0.3, renovaEm: null, situacao: "allowed" }]}
         memoria={null}
         aoBuscar={aoBuscar}
+        pedidosEmAndamento={2}
       />,
     );
     return { aoBuscar, barra: screen.getByTestId("barra-de-titulo") };
@@ -122,6 +124,28 @@ describe("BarraDeTituloDoApp", () => {
 
     expect(screen.queryByRole("button", { name: "Pastas e Claude Code" })).not.toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Controles da janela" })).toBeInTheDocument();
+  });
+
+  it("com uma atualização pronta, a pílula fica à direita, antes do status, fora do arraste", async () => {
+    const pronta = { situacao: "pronta", versaoAtual: "0.2.0", versaoNova: "0.2.1", progresso: null, mensagemDeErro: null };
+    ponteDoDesktop(undefined, {
+      obter: vi.fn().mockResolvedValue(pronta),
+      verificar: vi.fn().mockResolvedValue(pronta),
+      instalarAgora: vi.fn().mockResolvedValue(undefined),
+      aoMudar: vi.fn(() => () => undefined),
+    });
+    const { barra } = renderizar();
+
+    const pilula = await within(barra).findByRole("button", { name: "Atualização pronta (v0.2.1)" });
+    const direita = barra.querySelector(".direita-da-barra-de-titulo");
+    expect(direita?.firstElementChild).toBe(pilula.parentElement);
+    expect(pilula.parentElement).toHaveClass("no-drag");
+    expect(pilula.parentElement?.nextElementSibling).toBe(within(barra).getByTestId("status-do-canvas"));
+
+    // Os pedidos em andamento (2) chegam ao aviso: reiniciar pede confirmação.
+    fireEvent.click(pilula);
+    fireEvent.click(screen.getByRole("button", { name: "Reiniciar agora" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Há 2 pedidos em andamento");
   });
 
   it("no navegador (sem a ponte), não desenha botões de janela nem o ⚙", () => {

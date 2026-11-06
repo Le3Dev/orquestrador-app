@@ -13,6 +13,7 @@ function fonte(alteracoes: Partial<FonteDaPaleta> = {}): FonteDaPaleta {
   return {
     podeOrganizar: true,
     podeAbrirAjustes: false,
+    atualizacao: null,
     orquestradores: [
       { id: "o1", nome: "Painel de vendas", nomeDaPasta: "painel-app", situacao: "trabalhando" },
       { id: "o2", nome: "Relatórios", nomeDaPasta: "relatorios", situacao: "ocioso" },
@@ -117,6 +118,40 @@ describe("montarItensDaPaleta", () => {
     ]);
     expect(acoesNoDesktop.at(-1)).toMatchObject({ acao: "ajustes-do-aplicativo", atalho: null });
     expect(titulos(buscarNaPaleta(acoesNoDesktop, "pasta claude"))).toEqual(["Pastas e Claude Code"]);
+  });
+
+  it("\"Procurar atualizações\" só entra com a ponte do app, por último entre as ações, com a versão e o resultado", () => {
+    expect(titulos(montarItensDaPaleta(fonte()))).not.toContain("Procurar atualizações");
+
+    const atualizacao = {
+      situacao: "em-dia" as const,
+      versaoAtual: "0.2.0",
+      versaoNova: null,
+      progresso: null,
+      mensagemDeErro: null,
+    };
+    const acoesNoDesktop = montarItensDaPaleta(fonte({ podeAbrirAjustes: true, atualizacao })).filter(
+      (candidato) => candidato.tipo === "acao",
+    );
+
+    expect(acoesNoDesktop.at(-1)).toEqual({
+      tipo: "acao",
+      id: "acao:procurar-atualizacoes",
+      acao: "procurar-atualizacoes",
+      titulo: "Procurar atualizações",
+      detalhe: "Versão 0.2.0 — você está na versão mais recente",
+      busca: expect.any(String),
+      atalho: null,
+      // A paleta fica aberta para mostrar o resultado da verificação.
+      mantemAPaletaAberta: true,
+    });
+    expect(titulos(buscarNaPaleta(acoesNoDesktop, "atualizar versao"))).toEqual(["Procurar atualizações"]);
+
+    // Fora do app instalado: a ação continua, avisando que só lá há atualizações.
+    const foraDoInstalado = montarItensDaPaleta(fonte({ atualizacao: { ...atualizacao, situacao: "indisponivel" } }));
+    expect(foraDoInstalado.find((candidato) => candidato.id === "acao:procurar-atualizacoes")?.detalhe).toBe(
+      "Atualizações só no app instalado",
+    );
   });
 
   it("sem mais de uma janela, não oferece \"Organizar\"; nota sem título ganha um nome", () => {

@@ -13,6 +13,7 @@ import { lerLayout, organizarComNotas, sobrepoe, TAMANHO_DO_ARTEFATO, TAMANHO_DO
 import { idDoBixinho, idDoNoDoArtefato } from "../shared/canvas/nos";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../shared/estado/aplicarEvento";
 import type { ArtefatosAoVivo } from "../shared/hooks/useArtefatos";
+import type { EstadoDaAtualizacao } from "../shared/ponteDoDesktop";
 import { CanvasDeOrquestradores } from "./CanvasDeOrquestradores";
 
 // O canvas sem servidor: nenhum orquestrador, conectado, sem conversas e sem artefatos.
@@ -584,9 +585,85 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
 
   afterEach(() => {
     delete janelaComPonte.electron;
+    simulados.orquestradores.orquestradores = [];
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     localStorage.clear();
+  });
+
+  /** A ponte do app desktop com a atualização no estado dado; `verificar` responde `aposVerificar`. */
+  function ponteComAtualizacao(inicial: EstadoDaAtualizacao, aposVerificar: EstadoDaAtualizacao = inicial) {
+    const atualizacao = {
+      obter: vi.fn(async () => inicial),
+      verificar: vi.fn(async () => aposVerificar),
+      instalarAgora: vi.fn(async () => undefined),
+      aoMudar: vi.fn(() => () => undefined),
+    };
+    janelaComPonte.electron = {
+      desktop: true,
+      janela: {
+        minimizar: vi.fn(),
+        maximizar: vi.fn(),
+        fechar: vi.fn(),
+        estaMaximizada: vi.fn().mockResolvedValue(false),
+        aoMudarMaximizada: vi.fn(() => () => undefined),
+      },
+      atualizacao,
+    };
+    return atualizacao;
+  }
+
+  function estadoDaAtualizacao(alteracoes: Partial<EstadoDaAtualizacao> = {}): EstadoDaAtualizacao {
+    return {
+      situacao: "em-dia",
+      versaoAtual: "0.2.0",
+      versaoNova: null,
+      progresso: null,
+      mensagemDeErro: null,
+      ...alteracoes,
+    };
+  }
+
+  it("a paleta oferece \"Procurar atualizações\" com a versão; escolher verifica e ela, aberta, mostra o resultado", async () => {
+    const atualizacao = ponteComAtualizacao(
+      estadoDaAtualizacao(),
+      estadoDaAtualizacao({ situacao: "erro", mensagemDeErro: "sem internet" }),
+    );
+    render(<CanvasDeOrquestradores />);
+
+    // Aberta antes da resposta do app: a ação entra assim que ele responde.
+    fireEvent.click(screen.getByRole("button", { name: "Buscar ou executar (Ctrl+K)" }));
+    const opcao = await screen.findByRole("option", { name: /Procurar atualizações/ });
+    expect(opcao).toHaveTextContent("Versão 0.2.0 — você está na versão mais recente");
+
+    fireEvent.click(opcao);
+
+    expect(atualizacao.verificar).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("dialog", { name: "Paleta de comandos" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("option", { name: /Procurar atualizações/ })).toHaveTextContent(
+        "Versão 0.2.0 — não foi possível verificar: sem internet",
+      ),
+    );
+    // O erro fica só na paleta: nada na barra de título.
+    expect(within(screen.getByTestId("barra-de-titulo")).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("com a atualização pronta, reiniciar com Orquestradores trabalhando pede confirmação", async () => {
+    simulados.orquestradores.orquestradores = [orquestrador("o1"), { ...orquestrador("o2"), situacao: "ocioso" }];
+    const atualizacao = ponteComAtualizacao(estadoDaAtualizacao({ situacao: "pronta", versaoNova: "0.2.1" }));
+    render(<CanvasDeOrquestradores />);
+    const barra = screen.getByTestId("barra-de-titulo");
+
+    fireEvent.click(await within(barra).findByRole("button", { name: "Atualização pronta (v0.2.1)" }));
+    fireEvent.click(within(barra).getByRole("button", { name: "Reiniciar agora" }));
+
+    expect(within(barra).getByRole("alert")).toHaveTextContent(
+      "Há 1 pedido em andamento; reiniciar agora vai cancelá-lo.",
+    );
+    expect(atualizacao.instalarAgora).not.toHaveBeenCalled();
+    fireEvent.click(within(barra).getByRole("button", { name: "Reiniciar mesmo assim" }));
+    expect(atualizacao.instalarAgora).toHaveBeenCalledTimes(1);
   });
 
   it("restaura o zoom e a posição salvos; Ctrl+0 volta a 100% mantendo o centro", async () => {

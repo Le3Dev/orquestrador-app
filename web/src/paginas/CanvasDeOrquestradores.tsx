@@ -99,6 +99,7 @@ import {
 import { ProvedorDasNotas } from "../shared/canvas/notas";
 import { useAjustesDoAplicativo } from "../shared/hooks/useAjustesDoAplicativo";
 import { useArtefatos } from "../shared/hooks/useArtefatos";
+import { useAtualizacao } from "../shared/hooks/useAtualizacao";
 import { useChat } from "../shared/hooks/useChat";
 import { useConversas } from "../shared/hooks/useConversas";
 import { useMovimentoDoCanvas } from "../shared/hooks/useMovimentoDoCanvas";
@@ -700,6 +701,16 @@ function Canvas() {
   // paleta não re-renderizar com o canvas.
   const controleDaPaleta = useRef<ControleDaPaleta>(null);
   const abrirPaleta = useCallback(() => controleDaPaleta.current?.abrir(), []);
+
+  // A atualização do app desktop, pela paleta ("Procurar atualizações"). Lida
+  // por aqui só ao abrir; com a paleta aberta, o detalhe acompanha a verificação.
+  const { estado: estadoDaAtualizacao, verificar: verificarAtualizacao } = useAtualizacao();
+  const atualizacaoAtual = useRef(estadoDaAtualizacao);
+  useEffect(() => {
+    atualizacaoAtual.current = estadoDaAtualizacao;
+    controleDaPaleta.current?.atualizar();
+  }, [estadoDaAtualizacao]);
+
   const lojaDasNotas = notas.valor.loja;
   const lerFonteDaPaleta = useCallback((): FonteDaPaleta => {
     const atuais = nosAtuais.current;
@@ -707,6 +718,7 @@ function Canvas() {
     return {
       podeOrganizar: atuais.filter((no) => !ehBixinho(no)).length > 1,
       podeAbrirAjustes: desktop && ajustesDisponiveis,
+      atualizacao: atualizacaoAtual.current,
       orquestradores: orquestradoresAtuais.current ?? [],
       abertos: new Set(atuais.filter(ehTerminal).map((no) => no.data.orquestradorId)),
       notas: atuais.filter(ehNota).map((no) => {
@@ -735,6 +747,8 @@ function Canvas() {
             "zoom-100": zoomEmCemPorCento,
             "enquadrar-tudo": enquadrarTudo,
             "ajustes-do-aplicativo": () => void abrirAjustes(),
+            // A paleta fica aberta: o detalhe da ação mostra "verificando…" e o resultado.
+            "procurar-atualizacoes": () => void verificarAtualizacao(),
           };
           acoesDaPaleta[item.acao]();
           return;
@@ -759,6 +773,7 @@ function Canvas() {
       zoomEmCemPorCento,
       enquadrarTudo,
       abrirAjustes,
+      verificarAtualizacao,
       abrirTerminal,
       focar,
       abrirOuFocarArtefato,
@@ -786,6 +801,9 @@ function Canvas() {
   );
 
   const trabalhando = idsTrabalhando.length;
+  // O que reiniciar o app (para instalar uma atualização) cancelaria: os
+  // Orquestradores trabalhando num turno e a resposta do chat rápido.
+  const pedidosEmAndamento = trabalhando + (chat.situacao === "respondendo" ? 1 : 0);
   const bixinhosAtivos = useMemo(
     () =>
       [...conversas.values()].reduce(
@@ -911,9 +929,10 @@ function Canvas() {
           cota={cota}
           memoria={servidor.memoria}
           aoBuscar={abrirPaleta}
+          pedidosEmAndamento={pedidosEmAndamento}
         />
       ) : null,
-    [desktop, trabalhando, bixinhosAtivos, cota, servidor.memoria, abrirPaleta],
+    [desktop, trabalhando, bixinhosAtivos, cota, servidor.memoria, abrirPaleta, pedidosEmAndamento],
   );
   // Fora do viewport: o chat não se move com o canvas e só re-renderiza com novidades dele.
   const painelDoChat = useMemo(

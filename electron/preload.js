@@ -6,6 +6,10 @@
 //   - janela: controles min/max/fechar (barra de título customizada).
 //   - licenca: ativar/validar/desativar/status.
 //   - configuracao: ler a configuração local e abrir a janela de ajustes.
+//   - atualizacao: estado da atualização automática (obter/verificar), instalar
+//     a versão já baixada (instalarAgora, só da janela principal e só na
+//     situação "pronta") e aoMudar (canal "atualizacao:estado"). Fora do app
+//     instalado a situação é sempre "indisponivel".
 //   - primeiraAbertura: usado só pela tela electron/primeiraAbertura.html; o
 //     main recusa essas chamadas vindas de qualquer outra janela.
 
@@ -42,6 +46,23 @@ contextBridge.exposeInMainWorld("electron", {
     // { pastaRaizDosProjetos, caminhoDoClaudeCode }
     obter: () => ipcRenderer.invoke("configuracao:obter"),
     abrirAjustes: () => ipcRenderer.invoke("configuracao:abrir-ajustes"),
+  },
+
+  // EstadoDaAtualizacao: { situacao: "indisponivel" | "verificando" | "em-dia" |
+  // "baixando" | "pronta" | "erro", versaoAtual, versaoNova, progresso,
+  // mensagemDeErro }
+  atualizacao: {
+    obter: () => ipcRenderer.invoke("atualizacao:obter"),
+    // Dispara a verificação e devolve o estado logo em seguida.
+    verificar: () => ipcRenderer.invoke("atualizacao:verificar"),
+    // Reinicia o app instalando a versão baixada (só em "pronta").
+    instalarAgora: () => ipcRenderer.invoke("atualizacao:instalar-agora").then(() => undefined),
+    // Chama `callback(estado)` a cada mudança; devolve a função que cancela.
+    aoMudar: (callback) => {
+      const ouvinte = (_evento, estado) => callback(estado);
+      ipcRenderer.on("atualizacao:estado", ouvinte);
+      return () => ipcRenderer.removeListener("atualizacao:estado", ouvinte);
+    },
   },
 
   primeiraAbertura: {
