@@ -13,6 +13,7 @@ import { AdaptadorDeEventosDoChat } from "./AdaptadorDeEventosDoChat";
 import { configuracoesDaSessaoDoChat, montarAmbienteDoChat, montarArgumentosDoChat } from "./ArgumentosDoChat";
 import { linhaDeEntrada } from "./ArgumentosDoClaudeCode";
 import { FachadaClaudeCodeCli, SaidaDoClaudeCode } from "./FachadaClaudeCodeCli";
+import { prepararPastaDeArtefatos } from "./MotorClaudeCodeCli";
 
 /** Dono dos processos do chat no registro de processos (não é um Orquestrador). */
 export const DONO_DOS_PROCESSOS_DO_CHAT = "chat";
@@ -62,6 +63,8 @@ export class MotorDeChatClaudeCodeCli implements MotorDeChat {
       await writeFile(arquivos.instrucoes, pergunta.instrucoes, "utf8");
       await writeFile(arquivos.configuracoes, JSON.stringify(configuracoesDaSessaoDoChat()), "utf8");
       await mkdir(pergunta.pastaDaSessao, { recursive: true });
+      // Criada antes do processo e pelo caminho real, para a regra de gravação casar.
+      const pastaDeArtefatos = await prepararPastaDeArtefatos(pergunta.pastaDeArtefatos);
 
       const imagens = await Promise.all(
         pergunta.imagens.map(async (imagem) => ({
@@ -74,7 +77,7 @@ export class MotorDeChatClaudeCodeCli implements MotorDeChat {
       const inicio = Date.now();
       const saida = await this.fachada.executar(
         {
-          argumentos: montarArgumentosDoChat(pergunta, arquivos),
+          argumentos: montarArgumentosDoChat({ ...pergunta, pastaDeArtefatos }, arquivos),
           pasta: pergunta.pastaDaSessao,
           ambiente: montarAmbienteDoChat(this.ambienteBase, pergunta.esforco),
           entrada: linhaDeEntrada(pergunta.mensagem, imagens),

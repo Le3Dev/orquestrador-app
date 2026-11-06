@@ -636,6 +636,7 @@ describe("semTerminal e layoutDosNos", () => {
     expect(layoutDosNos(nos, null)).toEqual({
       terminais: { o1: { x: 100, y: 100, largura: 600, altura: 500 } },
       notas: {},
+      artefatos: {},
       viewport: null,
     });
   });

@@ -14,6 +14,7 @@ function fonte(): FonteDaPaleta {
     ],
     abertos: new Set(["o1"]),
     notas: [{ notaId: "n1", titulo: "Compras", texto: "pão" }],
+    artefatos: [],
     conversas: new Map([
       ["o1", { turnos: [{ id: "t1", texto: "Corrija a exportação para Excel", iniciadoEm: "2026-11-01T10:00:00Z" }] }],
     ]),
@@ -34,7 +35,8 @@ function renderizar() {
 }
 
 const ctrlK = (alvo: Window | HTMLElement = window) => fireEvent.keyDown(alvo, { key: "k", code: "KeyK", ctrlKey: true });
-const campoDaBusca = () => screen.getByRole("combobox", { name: "Buscar ações, orquestradores, notas e pedidos" });
+const campoDaBusca = () =>
+  screen.getByRole("combobox", { name: "Buscar ações, orquestradores, notas, artefatos e pedidos" });
 const executado = (aoExecutar: ReturnType<typeof renderizar>["aoExecutar"]) => aoExecutar.mock.calls[0]?.[0];
 
 describe("PaletaDeComandos", () => {

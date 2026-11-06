@@ -1,3 +1,4 @@
+import type { FormatoDoArtefato, OrigemDoArtefato } from "./api/artefatos";
 import type { ResumoDoOrquestrador } from "./api/tipos";
 import type { TurnoNaTela } from "./estado/aplicarEvento";
 
@@ -46,6 +47,15 @@ export interface ItemDeNota extends BaseDoItem {
   readonly notaId: string;
 }
 
+/** Um artefato (página HTML ou documento Markdown); escolher abre a janela dele ou leva até ela. */
+export interface ItemDeArtefato extends BaseDoItem {
+  readonly tipo: "artefato";
+  readonly artefatoId: string;
+  readonly formato: FormatoDoArtefato;
+  /** A janela já está no canvas (escolher só leva até ela). */
+  readonly aberto: boolean;
+}
+
 /** Um pedido (o texto de um turno) de uma conversa carregada na tela. */
 export interface ItemDePedido extends BaseDoItem {
   readonly tipo: "pedido";
@@ -53,7 +63,7 @@ export interface ItemDePedido extends BaseDoItem {
   readonly turnoId: string;
 }
 
-export type ItemDaPaleta = ItemDeAcao | ItemDeOrquestrador | ItemDeNota | ItemDePedido;
+export type ItemDaPaleta = ItemDeAcao | ItemDeOrquestrador | ItemDeNota | ItemDeArtefato | ItemDePedido;
 export type TipoDeItemDaPaleta = ItemDaPaleta["tipo"];
 
 /** O que a paleta lista, lido do canvas na hora de abrir. */
@@ -68,6 +78,14 @@ export interface FonteDaPaleta {
   abertos: ReadonlySet<string>;
   /** As notas do canvas, com o conteúdo já confirmado pelo servidor. */
   notas: readonly { notaId: string; titulo: string; texto: string }[];
+  /** Todos os artefatos do servidor, abertos ou não, do mais recente para o mais antigo. */
+  artefatos: readonly {
+    artefatoId: string;
+    titulo: string;
+    formato: FormatoDoArtefato;
+    origem: OrigemDoArtefato;
+    aberto: boolean;
+  }[];
   /** As conversas carregadas na tela (só as dos terminais abertos). */
   conversas: ReadonlyMap<string, { readonly turnos: readonly Pick<TurnoNaTela, "id" | "texto" | "iniciadoEm">[] }>;
 }
@@ -86,14 +104,28 @@ const TAMANHO_DO_TRECHO = 90;
 /** Até quanto do texto de um pedido a busca lê (pedidos enormes não pesam a digitação). */
 const TAMANHO_MAXIMO_DA_BUSCA = 4_000;
 
-/** Sem texto, e no empate do ranking: ações, Orquestradores, notas e pedidos, nesta ordem. */
-const ORDEM_DOS_TIPOS: Readonly<Record<TipoDeItemDaPaleta, number>> = { acao: 0, orquestrador: 1, nota: 2, pedido: 3 };
+/** Sem texto, e no empate do ranking: ações, Orquestradores, notas, artefatos e pedidos, nesta ordem. */
+const ORDEM_DOS_TIPOS: Readonly<Record<TipoDeItemDaPaleta, number>> = {
+  acao: 0,
+  orquestrador: 1,
+  nota: 2,
+  artefato: 3,
+  pedido: 4,
+};
 
 export const ROTULOS_DOS_TIPOS: Readonly<Record<TipoDeItemDaPaleta, string>> = {
   acao: "Ações",
   orquestrador: "Orquestradores",
   nota: "Notas",
+  artefato: "Artefatos",
   pedido: "Pedidos",
+};
+
+const ROTULOS_DOS_FORMATOS: Readonly<Record<FormatoDoArtefato, string>> = { html: "HTML", markdown: "Markdown" };
+/** Palavras a mais que a busca considera para cada formato (ex.: "md", "pagina"). */
+const BUSCA_DOS_FORMATOS: Readonly<Record<FormatoDoArtefato, string>> = {
+  html: "pagina web",
+  markdown: "md documento",
 };
 
 /** Sem acentos e em minúsculas: "Ação" e "acao" casam. */
@@ -136,7 +168,7 @@ function acoes(podeOrganizar: boolean, podeAbrirAjustes: boolean): ItemDeAcao[] 
       id: "acao:organizar",
       acao: "organizar",
       titulo: "Organizar",
-      detalhe: "Terminais lado a lado e notas em colunas à direita",
+      detalhe: "Terminais lado a lado; notas e artefatos em colunas à direita",
       busca: "arrumar grade",
       atalho: null,
     },
@@ -174,10 +206,20 @@ function acoes(podeOrganizar: boolean, podeAbrirAjustes: boolean): ItemDeAcao[] 
   );
 }
 
+/** De onde o artefato veio, para o detalhe: "de <Orquestrador>" ou "do chat rápido". */
+function origemDoArtefato(origem: OrigemDoArtefato, nomes: ReadonlyMap<string, string>): string {
+  if (origem.tipo === "chat") {
+    return "do chat rápido";
+  }
+  const nome = origem.id === null ? undefined : nomes.get(origem.id);
+  return nome === undefined ? "de um orquestrador" : `de ${nome}`;
+}
+
 /**
- * Os itens da paleta: as ações, todos os Orquestradores, as notas do canvas e
- * os pedidos das conversas carregadas (só dos terminais abertos), do mais
- * recente para o mais antigo. Pedidos só com imagens (sem texto) ficam de fora.
+ * Os itens da paleta: as ações, todos os Orquestradores, as notas do canvas,
+ * todos os artefatos e os pedidos das conversas carregadas (só dos terminais
+ * abertos), do mais recente para o mais antigo. Pedidos só com imagens (sem
+ * texto) ficam de fora.
  */
 export function montarItensDaPaleta(fonte: FonteDaPaleta): ItemDaPaleta[] {
   const nomes = new Map(fonte.orquestradores.map((orquestrador) => [orquestrador.id, orquestrador.nome]));
@@ -208,6 +250,23 @@ export function montarItensDaPaleta(fonte: FonteDaPaleta): ItemDaPaleta[] {
     }),
   );
 
+  const artefatos = fonte.artefatos.map(
+    (artefato): ItemDeArtefato => ({
+      tipo: "artefato",
+      id: `artefato:${artefato.artefatoId}`,
+      artefatoId: artefato.artefatoId,
+      titulo: artefato.titulo.trim() === "" ? "Artefato sem título" : artefato.titulo.trim(),
+      detalhe: [
+        ROTULOS_DOS_FORMATOS[artefato.formato],
+        origemDoArtefato(artefato.origem, nomes),
+        artefato.aberto ? "no canvas" : "abrir",
+      ].join(" · "),
+      busca: `artefato ${BUSCA_DOS_FORMATOS[artefato.formato]}`,
+      formato: artefato.formato,
+      aberto: artefato.aberto,
+    }),
+  );
+
   const pedidos = [...fonte.conversas]
     .filter(([orquestradorId]) => fonte.abertos.has(orquestradorId))
     .flatMap(([orquestradorId, conversa]) =>
@@ -228,7 +287,7 @@ export function montarItensDaPaleta(fonte: FonteDaPaleta): ItemDaPaleta[] {
       }),
     );
 
-  return [...acoes(fonte.podeOrganizar, fonte.podeAbrirAjustes), ...orquestradores, ...notas, ...pedidos];
+  return [...acoes(fonte.podeOrganizar, fonte.podeAbrirAjustes), ...orquestradores, ...notas, ...artefatos, ...pedidos];
 }
 
 interface TextoNormalizado {
@@ -285,7 +344,8 @@ function relevancia(item: ItemDaPaleta, palavras: readonly string[]): number | n
  * Busca na paleta, sem diferenciar maiúsculas nem acentos. Todas as palavras
  * digitadas precisam aparecer no item (título, detalhe ou texto de busca).
  * Ordem: título começando com o digitado, depois começo de palavra, depois
- * meio; no empate, ações, Orquestradores, notas e pedidos, e a ordem original.
+ * meio; no empate, ações, Orquestradores, notas, artefatos e pedidos, e a
+ * ordem original.
  * Sem texto, devolve os itens na ordem dos tipos. No máximo
  * `LIMITE_DE_RESULTADOS`.
  */

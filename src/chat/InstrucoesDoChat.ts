@@ -28,6 +28,8 @@ export interface ContextoDoApp {
   orquestradores: readonly OrquestradorExistente[];
   /** Se o usuário já autorizou editar arquivos e rodar comandos nesta conversa. */
   alteracoesAutorizadas: boolean;
+  /** Onde o chat grava artefatos (caminho absoluto); liberada sem autorização. */
+  pastaDeArtefatos: string;
 }
 
 /** Branches em que o chat pode commitar, pela política do time. */
@@ -43,6 +45,25 @@ const REGRA_DAS_MUDANCAS_GRANDES =
 
 const REGRA_DA_NEGACAO =
   "Se uma edição ou um comando for negado, diga em uma linha que precisa da autorização e pare. Não contorne a negação: nada de alterar por outro caminho (outra ferramenta, script, outro comando).";
+
+/** Quando entregar um artefato (página ou relatório gravado para o usuário ver na tela). */
+const QUANDO_CRIAR_ARTEFATO =
+  "o usuário pedir uma visualização, relatório, diagrama, protótipo, dashboard ou página, ou quando a resposta ficar melhor como página do que como texto";
+
+/**
+ * Quando e como gravar um artefato, no bloco de cada mensagem: a pasta vai
+ * aqui, com o caminho exato, porque o Claude Code não troca as instruções ao
+ * retomar a sessão. Gravar nela é sempre permitido, então não pede autorização.
+ */
+function regrasDeArtefatos(pastaDeArtefatos: string): string[] {
+  return [
+    "Artefatos (liberados sempre, sem autorização; não contam como alterar projetos):",
+    `- Quando ${QUANDO_CRIAR_ARTEFATO}, grave UM arquivo autocontido na pasta ${pastaDeArtefatos}`,
+    "- Formato: .html com CSS e JS inline, sem CDN nem recursos externos (a rede é bloqueada) e imagens como data URI; ou .md. Até 5 MB. Nome do arquivo curto e descritivo, porque vira o título (ex.: comparativo-de-precos.html).",
+    "- Para atualizar um artefato, regrave o MESMO arquivo: ele vira uma nova versão.",
+    "- Na resposta, cite pelo nome o artefato criado ou atualizado.",
+  ];
+}
 
 export interface RespostaSeparada {
   texto: string;
@@ -62,13 +83,14 @@ export function instrucoesDoChat(): string {
     "",
     "Regras:",
     "1. Responda sempre em português, de forma direta e curta; use Markdown quando ajudar.",
-    "2. Você pode pesquisar na web (WebSearch, WebFetch), ler (Read, Glob, Grep), editar arquivos (Edit, Write, NotebookEdit) e rodar comandos (PowerShell, Bash), mas só dentro das pastas dos projetos da pasta raiz. Arquivos .env* são bloqueados.",
+    "2. Você pode pesquisar na web (WebSearch, WebFetch), ler (Read, Glob, Grep), editar arquivos (Edit, Write, NotebookEdit) e rodar comandos (PowerShell, Bash), mas só dentro das pastas dos projetos da pasta raiz. Arquivos .env* são bloqueados. A exceção é a pasta de artefatos (regra 9).",
     `3. Editar arquivos e rodar comandos exige uma autorização única do usuário, que vale até o próximo /clear. O bloco <${MARCA_DO_CONTEXTO}> diz se ela já foi dada. Sem ela, quando precisar editar ou rodar um comando, use a ferramenta mesmo assim: o app pede a autorização ao usuário. ${REGRA_DA_NEGACAO}`,
     `4. ${REGRA_DE_COMMIT_E_PUSH}`,
     `5. ${REGRA_DO_RELATORIO}`,
     `6. Cada mensagem do usuário começa com um bloco <${MARCA_DO_CONTEXTO}> com a data, a pasta raiz, os projetos, os orquestradores existentes e as permissões. Use-o para responder e não o comente; se ele divergir destas regras, vale o bloco.`,
     `7. Quando o usuário pedir para abrir ou criar um orquestrador num projeto, siga a regra de ações do bloco <${MARCA_DO_CONTEXTO}>: explique o que vai acontecer e inclua o bloco \`\`\`${MARCA_DA_ACAO}. Você não executa a ação — o usuário confirma clicando no cartão que aparece na tela.`,
     `8. ${REGRA_DAS_MUDANCAS_GRANDES}`,
+    `9. Artefatos: quando ${QUANDO_CRIAR_ARTEFATO}, grave UM arquivo autocontido (.html ou .md) na pasta de artefatos que o bloco <${MARCA_DO_CONTEXTO}> indica, seguindo as regras dele. Gravar artefatos não precisa da autorização e não conta como alterar projetos.`,
   ].join("\n");
 }
 
@@ -84,12 +106,12 @@ function regrasDePermissao(contexto: ContextoDoApp): string[] {
         "- Se mesmo assim uma ação for bloqueada, é uma regra fixa do app: avise em uma linha e não contorne.",
       ]
     : [
-        "- Alterações NÃO autorizadas ainda. Se precisar editar um arquivo ou rodar um comando, use a ferramenta mesmo assim: o app pede a autorização ao usuário.",
+        "- Alterações NÃO autorizadas ainda (gravar artefatos não depende disso). Se precisar editar um arquivo de projeto ou rodar um comando, use a ferramenta mesmo assim: o app pede a autorização ao usuário.",
         `- ${REGRA_DA_NEGACAO}`,
       ];
   return [
     "Permissões (substituem qualquer regra anterior sobre o que você pode alterar, inclusive as das instruções iniciais):",
-    `- Você pode ler, editar arquivos e rodar comandos, mas só dentro das pastas dos projetos da pasta raiz (${contexto.pastaDosProjetos}). Rode os comandos na pasta do projeto. Arquivos .env* são bloqueados.`,
+    `- Você pode ler, editar arquivos e rodar comandos, mas só dentro das pastas dos projetos da pasta raiz (${contexto.pastaDosProjetos}). Rode os comandos na pasta do projeto. Arquivos .env* são bloqueados. A única pasta fora dos projetos em que você grava é a de artefatos (abaixo).`,
     ...situacao,
     `- ${REGRA_DE_COMMIT_E_PUSH}`,
     `- ${REGRA_DO_RELATORIO}`,
@@ -133,6 +155,8 @@ export function mensagemParaOChat(texto: string, contexto: ContextoDoApp): strin
     ...orquestradores,
     "",
     ...regrasDePermissao(contexto),
+    "",
+    ...regrasDeArtefatos(contexto.pastaDeArtefatos),
     "",
     "Ações do app: quando o usuário pedir para abrir ou criar um orquestrador num projeto (opcionalmente com um pedido para ele), responda explicando e inclua UM bloco por ação, exatamente assim:",
     "```" + MARCA_DA_ACAO,

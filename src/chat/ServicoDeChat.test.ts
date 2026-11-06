@@ -147,6 +147,7 @@ describe("ServicoDeChat", () => {
       execucoes: new ControleDeExecucoesEmMemoria(),
       pastaDaSessao: "/dados/chat/sessao",
       pastaDosProjetos: raiz,
+      pastaDeArtefatos: "/dados/artefatos/entrada/chat",
       gerarId: () => `id${++ids}`,
       agora: () => new Date("2026-11-04T12:00:00Z"),
     });
@@ -167,12 +168,14 @@ describe("ServicoDeChat", () => {
       instrucoes: expect.stringContaining("Orquestrador de agentes"),
       pastaDaSessao: "/dados/chat/sessao",
       pastaDosProjetos: raiz,
+      pastaDeArtefatos: "/dados/artefatos/entrada/chat",
       modelo: "opus",
       esforco: "alto",
       imagens: [],
       pastaDasImagens: null,
     });
     expect(enviada?.mensagem).toMatch(/^<contexto-do-app>[\s\S]*- painel-app[\s\S]*Abra o painel$/);
+    expect(enviada?.mensagem).toContain("grave UM arquivo autocontido na pasta /dados/artefatos/entrada/chat");
 
     motor.emitir({ tipo: "trecho_da_resposta", texto: "Vou " });
     motor.emitir({ tipo: "ferramenta_do_chat", ferramenta: "WebSearch", detalhe: "node lts" });

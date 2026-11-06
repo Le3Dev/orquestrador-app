@@ -31,6 +31,12 @@ export interface PerguntaAoMotorDeChat {
    * `alteracoesAutorizadas` (arquivos `.env*` continuam negados).
    */
   pastaDosProjetos: string;
+  /**
+   * Pasta de entrada dos artefatos do chat (caminho absoluto): gravar nela é
+   * sempre permitido, com ou sem `alteracoesAutorizadas`, e nunca pede
+   * autorização. O motor a cria se não existir.
+   */
+  pastaDeArtefatos: string;
   modelo: ModeloClaude;
   esforco: EsforcoDeRaciocinio;
   /**

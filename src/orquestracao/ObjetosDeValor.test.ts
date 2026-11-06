@@ -340,6 +340,7 @@ describe("mensagemParaOOrquestrador", () => {
       "Ela substitui qualquer regra de delegação, quantidade de subagentes ou permissão mencionada antes nesta conversa, inclusive nas suas instruções iniciais.",
     );
     expect(texto).toContain("só podem ler arquivos");
+    expect(texto).toContain("a única exceção é gravar artefatos na pasta de artefatos do pedido");
     expect(texto).toContain("exatamente 1 subagente ");
     expect(texto.endsWith("\n\nliste os testes")).toBe(true);
     expect(texto).not.toContain(pasta.caminho);
@@ -371,6 +372,8 @@ describe("mensagemParaOOrquestrador", () => {
 
     expect(texto).not.toContain("PLANEJAMENTO");
     expect(texto).toContain(`- Permissões: ${DESCRICAO_DO_NIVEL.edicao}.`);
+    // A exceção dos artefatos só precisa ser dita no nível só leitura.
+    expect(DESCRICAO_DO_NIVEL.edicao).not.toContain("artefatos");
   });
 
   describe("regra de commit e push", () => {
@@ -446,7 +449,7 @@ describe("mensagemParaOOrquestrador: delegação e pedidos grandes", () => {
         '- Delegue a subagentes "executor" quando houver alteração de arquivos, quando o trabalho exigir ler muitos arquivos ou rodar comandos demorados (build, testes), ou quando der para dividir em partes paralelas.',
       );
       expect(texto).toContain("Não use subagente para conferir o próprio trabalho.");
-      expect(texto).toContain("- Você não edita arquivos: toda alteração vai para um subagente");
+      expect(texto).toContain("- Você não edita arquivos: toda alteração no projeto vai para um subagente");
       expect(texto).not.toContain(REGRA_ESTRITA);
     });
 

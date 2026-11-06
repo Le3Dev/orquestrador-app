@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -54,6 +54,7 @@ function pergunta(alteracoes: Partial<PerguntaAoMotorDeChat> = {}): PerguntaAoMo
     pastaDasImagens: null,
     pastaDaSessao: path.join(pastaDoTeste, "sessoes", "sessao-chat"),
     pastaDosProjetos: pastaDoTeste,
+    pastaDeArtefatos: path.join(pastaDoTeste, "artefatos", "entrada", "chat"),
     modelo: "haiku",
     esforco: "baixo",
     alteracoesAutorizadas: false,
@@ -137,6 +138,49 @@ describe("MotorDeChatClaudeCodeCli", () => {
     expect(resultado).toMatchObject({ sucesso: true, autorizacaoPendente: { acao: "editar", detalhe: "C:\\p\\a.ts" }, avisos: [] });
     expect(fachada.execucao?.argumentos).toContain("--allowedTools");
     expect(fachada.execucao?.argumentos).not.toContain("--dangerously-skip-permissions");
+  });
+
+  it("cria a pasta de artefatos antes de iniciar e a passa em --add-dir", async () => {
+    const pastaDeArtefatos = path.join(pastaDoTeste, "artefatos-novos", "entrada", "chat");
+    let existiaAoIniciar = false;
+    const fachada = new FachadaFalsa(async (_execucao, aoReceber) => {
+      existiaAoIniciar = existsSync(pastaDeArtefatos);
+      aoReceber(RESULTADO);
+      return { codigoDeSaida: 0, erroPadrao: "" };
+    });
+
+    await new MotorDeChatClaudeCodeCli(fachada).responder(pergunta({ pastaDeArtefatos }), () => undefined, new AbortController().signal);
+
+    expect(existiaAoIniciar).toBe(true);
+    const argumentos = fachada.execucao?.argumentos ?? [];
+    // Pelo caminho real: a regra de gravação precisa casar com o que o Claude Code compara.
+    expect(argumentos.flatMap((argumento, indice) => (argumento === "--add-dir" ? [argumentos[indice + 1]] : []))).toContain(
+      realpathSync.native(pastaDeArtefatos),
+    );
+    expect(argumentos.find((argumento) => argumento.startsWith("Write("))).not.toContain("~");
+  });
+
+  it("sem autorização, gravar um artefato não vira pedido de autorização", async () => {
+    const artefato = path.join(pergunta().pastaDeArtefatos, "relatorio.html");
+    const fachada = new FachadaFalsa(async (_execucao, aoReceber) => {
+      aoReceber({
+        type: "assistant",
+        parent_tool_use_id: null,
+        message: { content: [{ type: "tool_use", id: "toolu_2", name: "Write", input: { file_path: artefato, content: "<p>oi</p>" } }] },
+      });
+      aoReceber({ ...RESULTADO, result: "Criei o artefato relatorio.html.", permission_denials: [] });
+      return { codigoDeSaida: 0, erroPadrao: "" };
+    });
+    const eventos: EventoDoMotorDeChat[] = [];
+
+    const resultado = await new MotorDeChatClaudeCodeCli(fachada).responder(
+      pergunta({ alteracoesAutorizadas: false }),
+      (evento) => eventos.push(evento),
+      new AbortController().signal,
+    );
+
+    expect(resultado).toMatchObject({ sucesso: true, autorizacaoPendente: null, avisos: [] });
+    expect(eventos).toContainEqual({ tipo: "ferramenta_do_chat", ferramenta: "Write", detalhe: artefato });
   });
 
   it("com autorização, libera as alterações e nenhuma negação vira pendência", async () => {

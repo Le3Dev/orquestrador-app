@@ -4,7 +4,7 @@
 
 Central local para trabalhar com vários agentes do Claude ao mesmo tempo. É um **aplicativo desktop** (Electron, Windows): a tela só abre dentro da janela do aplicativo. Aberto no navegador, o servidor recusa (ver ADR-19).
 
-Você cria **Orquestradores** — um por projeto, por exemplo — e conversa com cada um. A cada pedido, o Orquestrador **coordena**: o trivial (ler poucos arquivos, conferir um estado, um comando curto) ele resolve sozinho; o resto ele divide em subtarefas e entrega a **Subagentes** em paralelo, que leem, editam ou rodam comandos na pasta do projeto. Ele **nunca edita arquivos**: toda alteração vai para um Subagente. A tela mostra cada Subagente ao vivo (atividade, ferramentas, tokens, resultado), o que o próprio Orquestrador está fazendo e, no final, a síntese.
+Você cria **Orquestradores** — um por projeto, por exemplo — e conversa com cada um. A cada pedido, o Orquestrador **coordena**: o trivial (ler poucos arquivos, conferir um estado, um comando curto) ele resolve sozinho; o resto ele divide em subtarefas e entrega a **Subagentes** em paralelo, que leem, editam ou rodam comandos na pasta do projeto. Ele **nunca edita arquivos do projeto**: toda alteração vai para um Subagente (a única exceção são os artefatos, abaixo). A tela mostra cada Subagente ao vivo (atividade, ferramentas, tokens, resultado), o que o próprio Orquestrador está fazendo e, no final, a síntese.
 
 - Vários Orquestradores rodam ao mesmo tempo, cada um na sua pasta: são terminais espalhados num canvas infinito, que você move, redimensiona e organiza. Cada Subagente aparece como um bixinho animado ligado ao terminal, com o ícone da ferramenta que está usando; ao terminar, um envelope leva o relatório pela linha e a borda do terminal pisca. No minimapa, o terminal de quem está trabalhando brilha.
 - A conversa tem memória: cada Orquestrador lembra dos pedidos anteriores. **`/clear`** no prompt (ou *Nova conversa* no *⚙*) começa uma conversa do zero; a anterior fica arquivada.
@@ -17,6 +17,7 @@ Você cria **Orquestradores** — um por projeto, por exemplo — e conversa com
 - Dá para cancelar um pedido no meio, e o histórico fica salvo.
 - **Bloco de notas:** no mesmo canvas, ao lado dos terminais, você cria notas de texto para observações e coisas para fazer depois. O conteúdo fica salvo no servidor, com salvamento automático. No modo lista, os itens `[ ]` viram caixas de marcar, e uma linha (ou a nota inteira) arrastada até um terminal vira texto no prompt.
 - **Chat rápido:** uma caixa no centro, embaixo da tela, para perguntar algo ao Claude sem abrir um terminal: dúvidas rápidas, pesquisas na web, perguntas sobre os projetos e pequenas alterações. Para **editar arquivos e rodar comandos**, ele pede uma **autorização única** na primeira vez, que vale até o próximo `/clear`; commit e push, só quando você pedir. Ele também pode sugerir abrir um Orquestrador num projeto, já com um pedido; a sugestão vira um cartão que só roda quando você clica.
+- **Artefatos:** peça a um Orquestrador ou ao chat uma página ou um relatório (*"crie um artefato com um gráfico das vendas por mês"*) e o resultado abre sozinho numa janela do canvas, ao lado do terminal de quem o criou (ou no centro, se veio do chat): uma página HTML interativa, isolada e sem acesso à internet, ou um documento Markdown formatado. Cada vez que o agente regrava o arquivo, nasce uma versão nova (`v1`, `v2`…); dá para ampliar, salvar como arquivo, renomear e apagar. Funciona em qualquer permissão, inclusive *Somente leitura* e Plan Mode (ver ADR-26).
 - Modelos disponíveis: **Fable**, Opus, Sonnet e Haiku, tanto nos Orquestradores quanto no chat.
 
 O motor é o próprio **Claude Code em modo headless**, usando o login da sua assinatura — não precisa de API key.
@@ -85,7 +86,7 @@ O build de teste grava `"buildDeTeste": true` no `package.json` empacotado; serv
 | Variável | Quem lê | Padrão | Para quê |
 |---|---|---|---|
 | `PORTA` | servidor e aplicativo | `3200` (o app usa a porta gravada no `config.json`; `desktop:dev` usa `3201`) | Porta da API (escuta só em `127.0.0.1`). No app, definida no ambiente vale por cima da gravada e não é gravada |
-| `PASTA_DADOS` | servidor | `dados/` dentro da pasta do app (o app passa `%APPDATA%\Orquestrador de Agentes\dados`) | Histórico dos Orquestradores, notas (`notas/`), chat (`chat/`), anexos e worktrees |
+| `PASTA_DADOS` | servidor | `dados/` dentro da pasta do app (o app passa `%APPDATA%\Orquestrador de Agentes\dados`) | Histórico dos Orquestradores, notas (`notas/`), chat (`chat/`), artefatos (`artefatos/`), anexos e worktrees |
 | `PASTA_RAIZ_PROJETOS` | servidor | pasta acima deste projeto (o app passa a escolhida na primeira abertura) | Raiz dentro da qual os Orquestradores podem trabalhar |
 | `CLAUDE_CODE_BIN` | servidor | `%APPDATA%\npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe` (o app passa o escolhido na primeira abertura) | Executável **nativo** do Claude Code (o `claude.cmd` não serve: o app inicia o processo sem shell) |
 | `PASTA_DA_TELA` | servidor | `web/dist` do app | Pasta da tela já construída |
@@ -228,6 +229,25 @@ Casos de teste do **canvas: paleta, notas em lista, bixinhos e entrega**:
 - **Bixinhos e entrega:** o ícone da ferramenta (`iconeDaFerramenta`: ler, editar, comando, web; desconhecida sem ícone) só aparece executando; executando → concluído faz o envelope percorrer a linha uma vez (não ao montar já concluído, ao falhar, com reduzir movimento ou desconectado); a borda do terminal ganha `janela-terminal-entrega` depois de `DURACAO_DA_ENTREGA_MS` e a perde depois de `DURACAO_DO_PISCAR_MS`, sem re-renderizar a transcrição; não pisca ao abrir com Subagente já concluído, com o histórico antigo reenviado, com falha, desconectado ou com reduzir movimento; fechar o terminal no meio cancela os relógios.
 - **Minimapa:** só o terminal do Orquestrador trabalhando ganha o brilho.
 
+Casos de teste dos **artefatos** (ver ADR-26):
+- **Domínio:**
+  - *`Artefato`:* nasce com o título tirado do nome do arquivo (`-` e `_` viram espaço; sem letras, "Artefato"), a versão 1 e criação = atualização; guarda a origem do Orquestrador; recusa arquivo que não é HTML nem Markdown e nome com pasta; conteúdo novo cria a versão seguinte e atualiza `atualizadoEm`; hash igual ao da última versão não duplica nem muda `atualizadoEm`; voltar a um conteúdo antigo (A → B → A) é versão nova; renomear apara, aceita exatamente 120 caracteres e devolve se mudou; reconstitui exatamente o gravado e recusa versões fora de sequência; a origem recusa id de Orquestrador que escaparia da pasta.
+  - *`ServicoDeArtefatos`:* a coleta cria, adiciona versão e ignora conteúdo repetido, publicando os eventos; o mesmo nome em origens diferentes são artefatos diferentes; duas coletas simultâneas do mesmo arquivo não criam dois artefatos; renomear só avisa as telas quando muda; remover apaga o arquivo da entrada e o artefato; artefato ou versão inexistente → `nao_encontrado`.
+- **Repositório em arquivos:** cria `artefatos/` e começa vazio; grava `artefato.json` e o `v<N>` de cada versão e reabre igual; acha pelo arquivo e pela origem; lista do atualizado mais recentemente para o mais antigo; devolve cópias; remove a pasta inteira; artefato ilegível é ignorado com aviso no log, sem ser apagado, e a pasta `entrada/` nunca vira artefato; recusa id que escaparia da pasta ou igual a `entrada`.
+- **Coletor (pastas temporárias):** `PastaDeEntradaDosArtefatos` identifica a origem pelo caminho (`chat/<arquivo>` e `orquestradores/<id>/<arquivo>`); o coletor cria as pastas que faltam; `.html` novo cria o artefato, outro conteúdo cria a v2 e o mesmo conteúdo não cria versão; gravações em rajada viram uma versão só, com o conteúdo final; ignora `.txt` e subpastas; ignora arquivo acima de 5 MB com aviso claro no log; ao iniciar, coleta o que foi entregue com o servidor desligado e só versiona o que mudou (pelo hash); arquivo apagado antes da coleta é só ignorado; `removerArquivo` não reclama de arquivo que já sumiu. *`montarArtefatos`:* cria a entrada, coleta o que já estava lá e o que chega depois.
+- **Rotas:** `GET /artefatos` vazio → 200 `[]`, e com artefatos, ordenado; `GET /artefatos/:id` → 200 e 404; `GET` da versão → conteúdo bruto com o tipo certo, a CSP e o `nosniff`, a versão antiga com o conteúdo dela e o artefato inexistente com o 404 do artefato; `PATCH` apara e devolve o resumo; título vazio, só espaços, longo demais, não texto, ausente ou corpo que não é objeto → 400 `Título inválido.` sem gravar; `PATCH`/`DELETE` de inexistente → 404; `DELETE` → 204 e apaga o artefato, as versões e o arquivo da entrada; o SSE entrega os eventos ao vivo, nomeados e com o resumo.
+- **Argumentos e motores do `claude -p`:** a pasta de artefatos vai em `--add-dir` (Orquestrador; chat com ou sem autorização) e é criada antes de o processo iniciar, pelo caminho real (`realpath`, nunca o 8.3); o `agentes.json` leva `Write` e `Edit` no `tools` do `executor` mesmo em *Somente leitura*; no planejamento, mesmo no nível mais permissivo, `--allowedTools` só libera leitura no projeto, mais `Write(<pasta>/**)` e `Edit(<pasta>/**)`; chat sem autorização: pesquisa, leitura e a gravação na pasta de artefatos, e gravar um artefato não vira pedido de autorização; o serviço passa ao motor a pasta do próprio Orquestrador, mesmo com o turno num worktree.
+- **Instruções:**
+  - *Orquestrador e Subagente:* o bloco `<configuracao-do-pedido>` traz a pasta exata, quando criar, o formato, a regra da versão e a citação na resposta; artefato não é arquivo do projeto, então o Orquestrador pode gravá-lo ou delegar passando o caminho; o "Você não edita arquivos" (ADR-14) continua, com a exceção explícita dos artefatos, também com a delegação total; sem pasta de artefatos, o bloco não fala deles; as instruções fixas mantêm o "nunca edite" com a exceção; o Subagente recebe a pasta exata e o formato; em *Somente leitura* (e no planejamento), a permissão diz que a única exceção é gravar artefatos na pasta de artefatos do pedido.
+  - *Chat:* a regra 9 das instruções fixas e, no `<contexto-do-app>`, artefatos liberados sem autorização, na pasta exata, com quando criar, formato, versão e citação.
+- **Tela (`web/`):**
+  - *`apiDosArtefatos`:* renomear manda um `PATCH` só com o título; a recusa traz a mensagem e o status do servidor; `lerVersao` devolve o conteúdo bruto (404 na inexistente); apagar aceita o 204 sem corpo; sem servidor, explica que não conseguiu falar com ele.
+  - *`useArtefatos`:* assina os eventos e carrega a lista pelo GET quando a conexão abre; aplica os quatro eventos e numera cada um; ignora evento malformado; o evento que chega com o GET no ar não se perde; conexão abandonada pelo navegador → assina de novo e recarrega; reconexão automática → recarrega; servidor voltando → fecha a conexão antiga e assina de novo; lista que não carrega avisa e tenta de novo; renomear e apagar atualizam a lista (404 no apagar também tira; outro erro sobe); sem `EventSource`, só o GET.
+  - *`shared/canvas/artefatos`:* `lugarLivre` e `posicaoParaArtefato`: à direita do terminal da origem com o topo alinhado; à esquerda se a direita estiver ocupada; andando para a direita se os dois lados estiverem; centralizado no ponto dado sem terminal (chat ou Orquestrador fechado); nunca cobre um terminal. `terminalDaOrigem` só com o terminal aberto; abrir não duplica e fechar tira só aquela janela; o layout grava e relê posição e tamanho, e o layout antigo, sem `artefatos`, continua válido; o artefato apagado no servidor sai do canvas e do layout; a loja só avisa quando algo muda e mantém o mesmo objeto do artefato que não mudou.
+  - *`NoArtefato`:* HTML num iframe com `sandbox="allow-scripts"` e a meta CSP no começo do `<head>` (sem `<head>`, depois do `<!DOCTYPE>`); Markdown formatado, com rolagem e sem iframe; o `v3 ▾` busca a versão escolhida e mostra a data de cada uma; uma versão nova passa sozinha para ela, com o selo `v4 nova` por um instante; versão inexistente (404) avisa e oferece a atual, e erro de rede permite tentar de novo; clique duplo no título abre o campo, Enter chama o `PATCH`, Esc desiste e a recusa do servidor mostra o motivo; apagar pede confirmação e chama o `DELETE`, e a falha mantém a janela com o motivo; o ✕ só fecha; *salvar como…* baixa a versão num Blob com o nome do arquivo; ampliar abre o modal em tela cheia fora do canvas, e Esc fecha; sem o resumo, avisa (com o motivo, se a lista falhou); um evento de outro artefato não re-renderiza a janela.
+  - *Paleta e canvas:* a paleta lista os artefatos depois das notas, com o formato, a origem e se estão no canvas, e escolher um fechado abre a janela; `artefato_criado` de um Orquestrador aberto abre a janela ao lado do terminal, sem cobri-lo; do chat, no centro da vista; `versao_adicionada` com a janela fechada não abre; artefatos não contam no limite de 4 orquestradores abertos; ao carregar, o que sumiu do servidor sai do canvas e do layout; o minimapa pinta os artefatos com a classe `minimapa-artefato`; o *Organizar* põe os artefatos em colunas à direita dos terminais e das notas.
+- **Conferência manual (app aberto):** com um Orquestrador em *Somente leitura* e com o chat sem autorização, pedir *"crie um artefato com um gráfico das vendas por mês"*: a janela abre sozinha (ao lado do terminal ou no centro), o gráfico roda, nada externo carrega e não aparece *bloqueado:* na gravação; pedir *"mude as cores do gráfico"* gera a `v2`; *salvar como…*, ampliar, renomear, apagar (o arquivo some de `dados\artefatos\entrada\…`) e reabrir pela paleta funcionam.
+
 ## Tecnologias
 
 - **Aplicativo desktop:** **Electron 33** (processo principal em `electron/`, servidor em `utilityProcess`) e **electron-builder** (instalador NSIS para Windows x64). Licença via Lemon Squeezy, só no instalado.
@@ -284,6 +304,10 @@ flowchart LR
     CV[(ConversaDoChat<br/>agregado)]
     RC["RepositorioDoChatEmArquivo<br/>(dados/chat/)"]
     PC["ProjetosDoChat<br/>(adaptador em root.ts)"]
+    SAR[ServicoDeArtefatos]
+    RAR["RepositorioDeArtefatosEmArquivo<br/>(dados/artefatos/‹id›/)"]
+    COL["ColetorDeArtefatosEmPasta<br/>(fs.watch · ~700 ms estável · sha256)"]
+    CAR[CanalDosArtefatos SSE]
     subgraph ACL["Camada anticorrupção · Claude Code"]
       M[MotorClaudeCodeCli]
       MC[MotorDeChatClaudeCodeCli]
@@ -295,6 +319,7 @@ flowchart LR
   CCC["claude.exe -p<br/>(um por pergunta do chat,<br/>leitura + web; edição e<br/>comandos com autorização)"]
   SA1[Subagente]
   SA2[Subagente]
+  ENT[("dados/artefatos/entrada/<br/>orquestradores/‹id›/ · chat/")]
 
   T -- POST mensagem / plano / cancelar / conversa/limpar<br/>GET / POST / PATCH / DELETE das notas --> R
   C -- eventos ao vivo --> T
@@ -313,6 +338,13 @@ flowchart LR
   SC --> PC
   SC --> C
   SC --> MC --> F -- "stdin: contexto + pergunta<br/>stdout: stream-json parcial" --> CCC
+  CC -- "Write .html/.md<br/>(Orquestrador e Subagentes)" --> ENT
+  CCC -- "Write .html/.md" --> ENT
+  COL -- observa --> ENT
+  COL --> SAR
+  T -- "GET / PATCH / DELETE /artefatos…" --> R
+  R --> SAR --> RAR
+  SAR --> CAR -- "artefato_criado · versao_adicionada…" --> T
 ```
 
 Organização por contexto (DDD):
@@ -343,17 +375,28 @@ src/
     InstrucoesDoChat.ts        regras fixas, bloco <contexto-do-app> e separarAcoesDoApp
     ServicoDeChat.ts           casos de uso (stateless)
     MotorDeChat.ts, RepositorioDoChat.ts, ProjetosDoChat.ts   portas
+  artefatos/                 domínio dos artefatos — contexto próprio (ver ADR-26)
+    Artefato.ts                raiz do agregado (página HTML ou documento Markdown, com as versões)
+    VersaoDoArtefato, OrigemDoArtefato   objetos de valor (imutáveis)
+    EventoDeArtefato.ts        artefato_criado · versao_adicionada · artefato_renomeado · artefato_removido
+    ErroDeArtefato.ts          dados_invalidos · nao_encontrado
+    ServicoDeArtefatos.ts      casos de uso (stateless): coletar, listar, ler versão, renomear, remover
+    RepositorioDeArtefatos.ts, EntradaDeArtefatos.ts   portas
   infraestrutura/
     claudecode/                camada anticorrupção: Fachada (processo), Adaptador
                                (stream-json → eventos do domínio), Argumentos, Motor
     arquivos/                  repositório JSON/JSONL dos Orquestradores, repositório das
-                               notas (um JSON por nota), repositório do chat e listagem de pastas
+                               notas (um JSON por nota), repositório do chat, listagem de pastas,
+                               repositório dos artefatos (uma pasta por artefato) e a pasta de
+                               entrada com o coletor (ColetorDeArtefatosEmPasta)
+    montarArtefatos.ts         composição do contexto de artefatos (repositório, serviço, coletor, rotas)
     sse/, execucoes/           canal de eventos e controle de cancelamento
     sistema/                   worktrees git (Worktrees, GerenciadorDeWorktreesGit),
                                memória e processos do Claude
   controllers/                 REST + SSE, validação (zod), erros → HTTP
                                (orquestradoresRoutes.ts, notasRoutes.ts,
-                               chatRoutes.ts com o CanalDoChat)
+                               chatRoutes.ts com o CanalDoChat,
+                               artefatosRoutes.ts com o CanalDosArtefatos)
 electron/                      aplicativo desktop (CommonJS): main.js (janelas, servidor no
                                utilityProcess, religar, cookie), preload.js (window.electron),
                                licença, configuração local e primeira abertura; testes *.test.js
@@ -362,20 +405,30 @@ web/src/
   componentes/canvas/                  NoTerminal (terminal do Orquestrador), NoRascunho (configuração),
                                        NoBixinho + Bixinho (Subagente em pixel art),
                                        ArestaDoBixinho (linha com a bolinha de troca), NoNota (nota),
+                                       NoArtefato (janela do artefato: iframe isolado ou Markdown),
                                        painéis flutuantes
   shared/estado/                       aplicarEvento (reducer da conversa + log), faseDoTurno
   shared/canvas/                       nós e linhas a partir das conversas, layout, aparência e desenhos dos bixinhos,
-                                       notas.ts (loja das notas, separada do contexto do canvas)
+                                       notas.ts (loja das notas, separada do contexto do canvas),
+                                       artefatos.ts (loja dos artefatos e onde abrir cada janela)
+  shared/api/artefatos.ts              cliente das rotas /artefatos
   shared/hooks/useConversas.ts         um EventSource por terminal aberto
   shared/hooks/useNotas.ts,            notas do canvas (carregar, criar, minimizar, apagar)
     useEdicaoDaNota.ts                 e a edição com salvamento automático
+  shared/hooks/useArtefatos.ts         lista e eventos ao vivo dos artefatos (um EventSource)
 ```
 
 **Bloco de notas** (contexto `notas`, ver ADR-13): o conteúdo de cada nota (título e texto) fica no servidor, um arquivo por nota em `<PASTA_DADOS>/notas/<id>.json` (padrão `dados/notas/`). Posição, tamanho e se está minimizada ficam no layout do navegador, como os terminais (ver ADR-8). O contexto não conversa com a orquestração: tem entidade, serviço, porta e rotas próprias.
 
 **Chat rápido** (contexto `chat`, ver ADR-17): uma conversa única com o Claude, fora dos Orquestradores. Cada pergunta roda um `claude -p` em `<PASTA_DADOS>/chat/sessao/` (o primeiro com `--session-id`, os seguintes com `--resume`), com ferramentas de leitura (Read, Glob, Grep na pasta raiz dos projetos, `.env*` negado) e de web (WebSearch, WebFetch) e, só com a autorização do usuário (até o `/clear`), de edição (Edit, Write, NotebookEdit) e de comando (PowerShell, Bash), direto na pasta dos projetos, sem worktree (ver ADR-25). Pelo stdin vai a pergunta precedida do bloco `<contexto-do-app>` (data, pasta raiz, projetos e orquestradores existentes, se as alterações estão autorizadas, a regra de commit e push e o formato das ações). O texto chega aos poucos (`--include-partial-messages`) e vai para a tela como evento SSE passageiro `trecho`, sem entrar no histórico; no fim, o servidor tira da resposta os blocos ` ```acao-do-app `, valida cada um e grava a resposta com as ações. O contexto não importa o agregado `Orquestrador`: projetos e orquestradores chegam pela porta `ProjetosDoChat`, implementada em `root.ts`.
 
-**Pasta de dados** (`<PASTA_DADOS>`: no aplicativo, `%APPDATA%\Orquestrador de Agentes\dados`; rodando o servidor sozinho, `dados/` na pasta do app; ver ADR-5, ADR-13, ADR-16, ADR-17 e ADR-19):
+**Artefatos** (contexto `artefatos`, ver ADR-26): páginas HTML e documentos Markdown que os agentes entregam para o usuário ver no canvas.
+- **Entrega:** cada origem tem uma pasta de entrada: `<PASTA_DADOS>/artefatos/entrada/orquestradores/<id>/` (o Orquestrador e os Subagentes dele, mesmo com o turno num worktree) e `<PASTA_DADOS>/artefatos/entrada/chat/`. O motor cria a pasta antes de iniciar o `claude -p`, passa o caminho real dela (`realpath`) em `--add-dir` e libera a gravação: `Write` e `Edit` existem em todo nível e no Plan Mode e, onde o nível não libera a edição, só valem nessa pasta (`Write(<pasta>/**)`, `Edit(<pasta>/**)` em `--allowedTools`). O bloco de cada mensagem (`<configuracao-do-pedido>` ou `<contexto-do-app>`) diz quando e como gravar: UM arquivo autocontido, `.html` (CSS e JS inline, sem CDN, imagens em data URI) ou `.md`, até 5 MB, com nome curto (vira o título); regravar o mesmo arquivo gera uma versão nova.
+- **Coleta** (`ColetorDeArtefatosEmPasta`, atrás da porta `EntradaDeArtefatos`): `fs.watch` recursivo sobre o caminho real da entrada. Cada `.html`/`.htm`/`.md`/`.markdown` no primeiro nível da pasta de uma origem é lido depois de ~700 ms sem mudança, só se o tamanho lido bater com o do disco (senão, ou com o arquivo preso por outro programa, tenta de novo até 10 vezes); acima de 5 MB é ignorado com aviso no log. Ao subir, o servidor varre a entrada inteira (pega o que chegou com ele desligado). O serviço calcula a identidade pela origem + nome do arquivo: arquivo novo vira `artefato_criado`; sha256 diferente do da última versão, `versao_adicionada`; igual, nada.
+- **Guarda** (`RepositorioDeArtefatosEmArquivo`): uma pasta por artefato, `<PASTA_DADOS>/artefatos/<id>/`, com `artefato.json` (o agregado) e `v<N>.html`/`v<N>.md` (o conteúdo de cada versão, gravado antes do `artefato.json`, de forma atômica e numa fila por artefato). Apagar remove a pasta e também o arquivo da entrada, senão a próxima varredura o traria de volta.
+- **Tela:** as rotas `/artefatos` (lista, detalhe, conteúdo de cada versão, renomear, apagar) e o SSE `/artefatos/eventos`, só ao vivo, sem histórico: ao (re)conectar, a tela relê a lista (`useArtefatos`). Um `artefato_criado` abre a janela (`NoArtefato`) ao lado do terminal de origem, ou no centro, acima do chat, num lugar livre. O HTML roda num `iframe sandbox="allow-scripts"` sem `allow-same-origin`, com uma meta CSP que bloqueia a rede; a rota do conteúdo também responde com a CSP `sandbox`. O Markdown usa o `TextoFormatado`. Posição e tamanho das janelas vão para o layout do navegador (campo `artefatos`, ADR-8).
+
+**Pasta de dados** (`<PASTA_DADOS>`: no aplicativo, `%APPDATA%\Orquestrador de Agentes\dados`; rodando o servidor sozinho, `dados/` na pasta do app; ver ADR-5, ADR-13, ADR-16, ADR-17, ADR-19 e ADR-26):
 
 ```
 dados/
@@ -394,6 +447,13 @@ dados/
     preferencias.json          modelo e esforço do chat (não muda com o /clear)
     historico/conversa-<N>/    conversas anteriores, arquivadas pelo /clear
     sessao/                    pasta onde o claude -p do chat roda
+  artefatos/
+    <id>/                      um artefato por pasta (ver ADR-26)
+      artefato.json            título, formato, origem, nome do arquivo e versões (gravação atômica)
+      v<N>.html | v<N>.md      o conteúdo de cada versão
+    entrada/                   onde os agentes gravam; o servidor observa e coleta (nunca é um artefato)
+      orquestradores/<id>/     artefatos de cada Orquestrador e dos Subagentes dele
+      chat/                    artefatos do chat rápido
   worktrees/<8 caracteres>/    worktrees git dos Orquestradores
 ```
 
@@ -404,6 +464,7 @@ dados/
    - **Delegação** (ver ADR-14): com **Deixar o orquestrador fazer o trivial sozinho** ligada (padrão), o bloco manda o Orquestrador fazer ele mesmo o trivial do nível (ler ou buscar em poucos arquivos, conferir um estado e, só em *Editar e rodar comandos* fora do Plan Mode, um comando curto) e delegar quando houver alteração de arquivos, muitos arquivos ou comandos demorados, ou partes paralelas; em nenhum caso ele edita arquivos. Desligada, vale a regra estrita: delegar tudo.
    - **Pedidos grandes** (ver ADR-15): com **Propor plano antes de mudanças grandes** ligada (padrão), num turno de `execucao`, o bloco manda o Orquestrador medir o pedido. Grande (mais de cerca de 3 arquivos, contratos, dados ou arquitetura, ambiguidade relevante) → não executa, investiga só lendo, responde com um PLANO e termina com a linha `<plano-para-aprovacao/>`. Pequeno, ou mensagem que começa com "Plano aprovado." → executa direto.
    - Em `planejamento`, o Orquestrador e o `executor` recebem só as ferramentas de leitura, qualquer que seja o nível configurado, e o bloco pede um **plano** em vez da execução (ver ADR-9).
+   - **Artefatos** (ver ADR-26): em qualquer nível e modo, a pasta de artefatos do Orquestrador vai em `--add-dir`, `Write`/`Edit` entram nas ferramentas (também no `executor`) e, onde o nível não libera a edição, ficam permitidos só nessa pasta. O bloco diz quando e como gravar um artefato.
    - Com **Permitir commit e push quando eu pedir** ligada, num turno de `execucao`, o bloco libera commit e push só quando o usuário pedir explicitamente naquela mensagem, e o `claude -p` sai sem o bloqueio de `git commit`/`git push` (ver ADR-10). Desligada, ou em `planejamento`, continua tudo proibido.
    - **Esforço** (ver ADR-12): com esforço escolhido para o Orquestrador, o `claude -p` recebe `--effort <low|medium|high|xhigh|max>` logo depois do `--model`; com esforço escolhido para os Subagentes, a definição do `executor` no `agentes.json` ganha o campo `"effort"`. Em `"padrao"` nada disso é enviado. Se algum dos dois papéis tiver esforço escolhido, a variável `CLAUDE_CODE_EFFORT_LEVEL` herdada do servidor é removida do ambiente do processo, porque ela venceria a escolha.
 4. Cada linha `stream-json` vira evento do domínio (`subagente_iniciado`, `progresso_do_subagente`…), gravado em `eventos.jsonl` e publicado por SSE.
@@ -473,6 +534,8 @@ flowchart TD
   - **edição:** o anterior + Edit, Write, NotebookEdit;
   - **comandos:** o anterior + PowerShell e Bash.
 
+  *Atualização (ADR-26):* `Write` e `Edit` entram em `--tools` em todos os níveis e no Plan Mode, para os agentes gravarem artefatos. Onde o nível não libera a edição (*leitura* e Plan Mode), `--allowedTools` só os permite na pasta de artefatos do Orquestrador (`Write(<pasta>/**)`, `Edit(<pasta>/**)`), que também vai em `--add-dir`; gravar no projeto continua negado.
+
   Por padrão, `git commit` e `git push` são negados em todos os níveis por `--disallowedTools` (PowerShell e Bash). A exceção é a opção **Permitir commit e push quando eu pedir**: ligada, num turno de execução, esses bloqueios saem, mas o `--disallowedTools` continua negando o push forçado (`--force*`, `-f`/`-fu`, refspec com `+`), e a atribuição Co-authored-by do Claude Code é desligada por um `--settings` só daquele turno (detalhes na ADR-10). `--strict-mcp-config` deixa de fora os MCPs da conta. Num turno de Plan Mode vale sempre a lista de **leitura**, qualquer que seja o nível configurado, com commit e push bloqueados (ver ADR-9).
 - *Consequências:*
   - as negações aparecem na tela;
@@ -512,10 +575,11 @@ flowchart TD
 **ADR-8 — Canvas com React Flow, e não layout fixo nem uma biblioteca de desenho.**
 - *Contexto:* o usuário quer trabalhar como no Excalidraw: vários terminais espalhados, que se movem e se redimensionam, e os Subagentes visíveis como bixinhos ligados ao seu Orquestrador.
 - *Decisão:* usar `@xyflow/react` (MIT), que já traz canvas infinito, arrasto, redimensionamento (`NodeResizer`), zoom, minimapa e linhas animadas entre nós.
-  - **Nós:** terminais, rascunhos, bixinhos e notas são nós próprios em React. Os bixinhos são filhos do terminal (`parentId`) e acompanham quando ele é movido.
+  - **Nós:** terminais, rascunhos, bixinhos, notas e artefatos são nós próprios em React. Os bixinhos são filhos do terminal (`parentId`) e acompanham quando ele é movido.
   - **Estado ao vivo:** fica num contexto, e os nós guardam só ids. Assim o canvas não é recriado a cada evento do Claude.
   - **Layout:** posições, tamanhos e zoom ficam no `localStorage`, por serem preferência de quem olha. O histórico continua no servidor. O layout é gravado ao soltar o arraste e ao fim do pan/zoom; redimensionar, abrir, fechar e organizar continuam gravando após uma espera de 300 ms (ver ADR-11).
-    - **Formato** (chave `orquestrador-agentes:canvas:v1`): `{ "terminais": { "<orquestradorId>": { "x", "y", "largura", "altura" } }, "notas": { "<notaId>": { "x", "y", "largura", "altura", "minimizada" } }, "viewport": { "x", "y", "zoom" } | null }`.
+    - **Formato** (chave `orquestrador-agentes:canvas:v1`): `{ "terminais": { "<orquestradorId>": { "x", "y", "largura", "altura" } }, "notas": { "<notaId>": { "x", "y", "largura", "altura", "minimizada" } }, "artefatos": { "<artefatoId>": { "x", "y", "largura", "altura" } }, "viewport": { "x", "y", "zoom" } | null }`.
+    - **Artefatos** (*atualização, ADR-26*): o layout ganhou o campo `artefatos`, com as janelas de artefatos abertas no canvas (fechar só tira daqui; o artefato continua no servidor). Layouts gravados antes, sem o campo, valem como nenhum aberto; entradas corrompidas são descartadas; ao carregar a lista do servidor, a janela de um artefato que não existe mais sai do canvas e do layout. O conteúdo não vai para o layout.
     - **Notas:** a `altura` gravada é sempre a da nota aberta; minimizada, ela mostra só a barra (40 px), e restaurar volta a essa altura. Layouts gravados antes das notas, sem o campo `notas`, continuam válidos (valem como sem notas); entradas corrompidas são descartadas, e sem `minimizada` a nota fica aberta. Ao carregar a lista do servidor, a nota que não existe mais sai do canvas e, com isso, do layout. O conteúdo das notas não vai para o layout: fica no servidor (ver ADR-13).
   - **Bixinhos limpos:** o botão *limpar* de cada terminal guarda, na chave `orquestrador-agentes:canvas:v1:bixinhos-limpos`, o id do último pedido e os ids dos Subagentes limpos dele, por Orquestrador. Um pedido novo invalida a lista, a próxima limpeza a substitui e a de um Orquestrador excluído é apagada, então ela não cresce sem limite. Os limpos são filtrados antes de virar nós e linhas do React Flow. As posições dos bixinhos não são salvas (só as dos terminais), então não há posição a apagar.
   - **Bixinhos sem sobreposição:** os bixinhos nunca ficam sobre outro terminal, formulário ou nota: ao soltar um arraste, redimensionar, abrir/criar janelas ou organizar, o grupo que ficou sobreposto vai para o primeiro lugar livre (abaixo, direita, esquerda, acima, ou mais abaixo); grupos sem conflito ficam onde estão. A linha sai do lado do terminal voltado para o bixinho e chega no lado do bixinho voltado para o terminal (ex.: bixinho acima → sai do topo do terminal e chega embaixo do bixinho), acompanhando arrastes e redimensionamentos.
@@ -533,7 +597,7 @@ flowchart TD
   - ao retomar a sessão, o prompt de sistema é ignorado (ADR-2), então a instrução de "só planejar" não pode morar nele.
 - *Decisão:*
   - o modo é do domínio: cada Turno tem um `ModoDoTurno`, `execucao` (padrão) ou `planejamento`, enviado no `POST /mensagens`;
-  - em `planejamento`, a trava é real: `--tools`/`--allowedTools` e o `tools` do Subagente `executor` ficam só com as ferramentas de leitura (Read, Glob, Grep, WebSearch, WebFetch);
+  - em `planejamento`, a trava é real: `--tools`/`--allowedTools` e o `tools` do Subagente `executor` ficam só com as ferramentas de leitura (Read, Glob, Grep, WebSearch, WebFetch). *Atualização (ADR-26):* `Write` e `Edit` também existem, mas só são permitidos na pasta de artefatos do Orquestrador; no projeto, a trava continua a mesma, e o plano pode vir acompanhado de um artefato (ex.: um diagrama);
   - o bloco `<configuracao-do-pedido>` instrui o Orquestrador a entregar um PLANO, sem executar: objetivo, subtarefas por Subagente com os arquivos envolvidos, ordem, riscos e perguntas em aberto;
   - o plano do último turno fica pendente. Aprovar registra `plano_aprovado` e abre um novo turno de `execucao` na mesma sessão (`--resume`), com as permissões configuradas; descartar registra `plano_descartado`.
 - *Consequências:*
@@ -612,6 +676,7 @@ flowchart TD
   - as funções `rota` e `responderErro` foram duplicadas em `notasRoutes.ts` (já existem em `orquestradoresRoutes.ts`): candidatas a extração para um módulo comum dos controllers.
 
 **ADR-14 — Delegação sob demanda: o Orquestrador faz o trivial e nunca edita.**
+- *Atualizado pelo ADR-26:* a única exceção ao "nunca edita arquivos" são os artefatos. Eles não são arquivos do projeto: o Orquestrador pode gravá-los ele mesmo na pasta de artefatos, ou delegar passando o caminho. O bloco diz "Você não edita arquivos: toda alteração no projeto vai para um subagente… A única exceção são os artefatos".
 - *Contexto:*
   - cada Subagente tem um custo fixo alto: dezenas de milhares de tokens só para começar (prompt, ferramentas, contexto da tarefa) e alguns segundos de partida, antes de fazer qualquer coisa;
   - a regra antiga ("não leia, edite nem execute nada; delegue tudo") fazia o Orquestrador lançar um Subagente para ler um arquivo ou rodar um `git status`, e a tela tratava o uso direto como desvio ("usou … sem delegar").
@@ -666,6 +731,7 @@ flowchart TD
 
 **ADR-17 — Chat rápido: contexto próprio, um processo por pergunta e ações confirmadas pelo usuário.**
 - *Atualizado pelo ADR-25:* o chat deixou de ser só leitura. Com uma autorização única do usuário, que vale até o `/clear`, ele também edita arquivos e roda comandos; o resto desta decisão continua valendo.
+- *Atualizado pelo ADR-26:* mesmo sem autorização, o chat grava artefatos na pasta `<PASTA_DADOS>/artefatos/entrada/chat/` (em `--add-dir`, com `Write`/`Edit` liberados só nela).
 - *Contexto:*
   - para uma dúvida rápida, uma pesquisa na web ou uma pergunta sobre um projeto, criar um Orquestrador (pasta, configuração, terminal) é pesado demais;
   - o chat não deve alterar nada: quem altera são os Orquestradores, com permissões e worktree próprios;
@@ -806,6 +872,7 @@ flowchart TD
   - commits já feitos na branch do worktree não aparecem como diff, só como contagem.
 
 **ADR-25 — Chat rápido com alterações autorizadas uma vez até o /clear e commit só a pedido.** Atualiza o ADR-17.
+- *Atualizado pelo ADR-26:* sem autorização, `--allowedTools` libera, além de leitura e web, `Write`/`Edit` só na pasta de artefatos do chat (também em `--add-dir`). Gravar um artefato não é negado, então não vira `autorizacaoPendente`; o `<contexto-do-app>` avisa que artefatos não dependem da autorização.
 - *Contexto:*
   - o chat rápido era só leitura (ADR-17). Para uma correção pequena ("troque essa frase", "rode os testes"), o usuário precisava abrir um Orquestrador, com pasta, configuração e terminal;
   - pedir confirmação a cada edição ou comando não é possível: o `claude -p` roda headless com `dontAsk` (ADR-1 e ADR-3), sem ninguém no terminal para aprovar;
@@ -823,6 +890,29 @@ flowchart TD
   - a autorização vale para editar **e** rodar comandos ao mesmo tempo, até o `/clear` ou o ✕: não dá para liberar só um dos dois;
   - a resposta que pede autorização para no primeiro bloqueio; o Claude retoma a partir da pergunta "Autorizado. Continue de onde parou.", o que custa mais uma pergunta (e cota);
   - "Agora não" só esconde o cartão nesta tela: recarregar a página mostra de novo o pedido da última resposta.
+
+**ADR-26 — Artefatos locais no canvas, e não os artefatos nativos do claude.ai.** Atualiza os ADR-3, 8, 9, 14, 17 e 25.
+- *Contexto:*
+  - o usuário quer que o Orquestrador e o chat entreguem resultados visuais (gráfico, relatório, diagrama, protótipo, dashboard) como os artefatos do claude.ai, e não só texto no terminal;
+  - os artefatos nativos não servem aqui: são beta, só dos planos Team/Enterprise, exigem login no claude.ai, abrem lá e não dentro do app, e não se sabe como (nem se) se comportam no `claude -p` headless que o app usa (ADR-1);
+  - os agentes rodam com `dontAsk` e listas explícitas de ferramentas (ADR-3): em *Somente leitura* e no Plan Mode (ADR-9) eles não gravam nada, o Orquestrador nunca edita arquivos (ADR-14) e o chat sem autorização também não (ADR-25);
+  - o HTML escrito por um modelo pode ter scripts: mostrá-lo na janela do app não pode dar acesso à API, ao cookie de acesso (ADR-19), ao `localStorage` nem à internet.
+- *Decisão:*
+  - **contexto delimitado `artefatos`** (`src/artefatos/`): o agregado `Artefato` (raiz: título, formato `html` ou `markdown`, origem, nome do arquivo e versões), os objetos de valor `VersaoDoArtefato` (número, data, tamanho e sha256) e `OrigemDoArtefato` (`orquestrador` com o id, ou `chat`), o `ServicoDeArtefatos` (stateless), as portas `RepositorioDeArtefatos` e `EntradaDeArtefatos` e os eventos `artefato_criado`, `versao_adicionada`, `artefato_renomeado` e `artefato_removido`, só ao vivo. O contexto não importa nada da orquestração nem do chat: a origem é só o tipo e o id. A composição fica em `montarArtefatos.ts`, ligada no `root.ts`;
+  - **pasta de entrada por origem:** `<PASTA_DADOS>/artefatos/entrada/orquestradores/<id>/` e `<PASTA_DADOS>/artefatos/entrada/chat/`. É a do Orquestrador, e não a do worktree: os artefatos sobrevivem ao turno. Os motores criam a pasta antes de iniciar o processo e passam o caminho real em `--add-dir`. O bloco de cada mensagem (`<configuracao-do-pedido>` ou `<contexto-do-app>`, porque o `--resume` não troca as instruções, ADR-2) diz quando e como: UM arquivo autocontido (`.html` com CSS e JS inline, sem CDN, imagens em data URI; ou `.md`), até 5 MB, com nome curto e descritivo (vira o título); para atualizar, regravar o mesmo arquivo; citar o artefato na resposta. O Subagente recebe a pasta nas instruções dele;
+  - **coletor** (`ColetorDeArtefatosEmPasta`): `fs.watch` recursivo na entrada; cada `.html`, `.htm`, `.md` ou `.markdown` no primeiro nível da pasta de uma origem é lido depois de ~700 ms sem mudança, e só se o tamanho lido bater com o do disco (o agente pode estar gravando; até 10 novas tentativas, também com o arquivo preso por antivírus ou indexador). Acima de 5 MB, é ignorado com aviso no log. Uma fila por arquivo: os eventos repetidos do Windows não duplicam a coleta. Ao subir, o servidor varre a entrada inteira;
+  - **versões por hash:** a identidade na coleta é a origem + o nome do arquivo. Conteúdo com o mesmo sha256 da última versão não muda nada; conteúdo diferente vira a versão seguinte (voltar a um conteúdo antigo, A → B → A, também). Cada versão fica em `artefatos/<id>/v<N>.html|md`, e o agregado em `artefato.json` (gravação atômica, uma fila por artefato, conteúdo antes do agregado). Apagar remove também o arquivo da entrada, senão a próxima varredura o traria de volta;
+  - **exibição isolada:** o HTML roda num `iframe sandbox="allow-scripts"` **sem** `allow-same-origin` (origem opaca: sem cookie, `localStorage` nem a API do app, e sem navegar a janela principal), com uma `<meta http-equiv="Content-Security-Policy">` injetada no começo do `<head>`: `default-src 'none'`, só scripts e estilos inline, imagens `data:`/`blob:` e fontes `data:`. A rota do conteúdo também responde com `Content-Security-Policy: sandbox allow-scripts; default-src 'none'; …` e `X-Content-Type-Options: nosniff`. O Markdown usa o `TextoFormatado`, o mesmo das respostas;
+  - **gravação liberada por regra de caminho:** `Write` e `Edit` entram em `--tools` em todos os níveis e no Plan Mode (e no `tools` do `executor`). Onde o nível não libera a edição (*Somente leitura*, Plan Mode, chat sem autorização), `--allowedTools` leva só `Write(//c/…/artefatos/entrada/<origem>/**)` e `Edit(…/**)`, no formato de caminho das regras de permissão do Claude Code; com `dontAsk`, gravar fora dessa pasta continua negado;
+  - **na tela:** o nó `artefato` (`NoArtefato`) abre sozinho no `artefato_criado`, ao lado do terminal de origem ou no centro da vista, num lugar livre; versões no `vN ▾`, ampliar, salvar como, renomear, apagar e fechar. A lista e os eventos vêm de `useArtefatos`, numa loja separada do contexto do canvas (como as notas, ADR-11 e ADR-13); a posição e o tamanho, do layout do navegador (ADR-8).
+- *Consequências:*
+  - **exceção às permissões:** em *Somente leitura* e no Plan Mode, o Orquestrador e os Subagentes agora gravam, só na pasta de artefatos, e o Orquestrador, que "nunca edita arquivos" (ADR-14), pode gravar artefatos ele mesmo. A descrição do nível *leitura* (`DESCRICAO_DO_NIVEL`) diz que essa é a única exceção. No projeto, a trava do Plan Mode continua real (ADR-9): a regra de caminho não abre nada fora da pasta. O chat sem autorização também grava artefatos, e isso não vira pedido de autorização (ADR-25);
+  - **risco do caminho 8.3:** no Windows, uma pasta com nome curto (ex.: `C:\Users\LEANDR~1.CAN\…`, comum no `TEMP`) quebra duas coisas: o `fs.watch` recursivo aborta o processo do Node inteiro numa assertiva do libuv, sem `catch` possível, e a regra `Write(<pasta>/**)` nunca casa com o caminho real que o Claude Code compara, então a gravação é negada. Por isso o coletor e os motores convertem o caminho com `realpath` antes de usá-lo. Uma mudança que volte a passar o caminho cru pode derrubar o servidor;
+  - **o modelo pode não criar o artefato quando deveria:** criar é instrução, não trava. Ele pode responder só com texto, criar um artefato sem precisar ou gravar com outro nome (aí nasce um artefato novo, e não uma versão). Peça explicitamente (*"crie um artefato…"*, *"atualize o artefato X"*);
+  - a página não acessa a internet: bibliotecas por CDN, imagens e fontes externas não carregam, e o modelo precisa embutir tudo. Bibliotecas grandes pesam no limite de 5 MB;
+  - os eventos não têm histórico nem sequência: ao (re)conectar, a tela relê a lista. As janelas abertas são por navegador, como as notas;
+  - os artefatos não contam no limite de 4 orquestradores abertos (ADR-18) e não têm rotação: ficam até serem apagados. Excluir um Orquestrador ou dar `/clear` não apaga os artefatos dele;
+  - o *salvar como* baixa a versão vista pelo navegador do app (um Blob), sem rota nova no servidor.
 
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
@@ -880,6 +970,12 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | POST | `/chat/cancelar` | — | 202 `{ cancelando: true }`; 409 `Não há resposta em andamento.` |
 | POST | `/chat/limpar` | — | 200 `{ totalDeMensagens: 0 }`: arquiva em `dados/chat/historico/conversa-<N>/` e a próxima pergunta abre outra sessão; as preferências ficam. 409 durante uma resposta (`Aguarde a resposta terminar ou cancele antes de limpar a conversa.`) |
 | GET | `/chat/anexos/:arquivo` | — | a imagem anexada a uma pergunta (404 `Anexo não encontrado.` para nome inválido ou inexistente) |
+| GET | `/artefatos` | — | 200 `[ResumoDoArtefato]`, do atualizado mais recentemente para o mais antigo (ver ADR-26). Não há `POST`: os artefatos nascem só pela pasta de entrada |
+| GET | `/artefatos/:id` | — | 200 `ResumoDoArtefato`; 404 `Artefato não encontrado.` |
+| GET | `/artefatos/:id/versoes/:numero` | — | 200 com o conteúdo bruto da versão, `text/html; charset=utf-8` ou `text/markdown; charset=utf-8`, com `Content-Security-Policy: sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:` e `X-Content-Type-Options: nosniff`. 404 `Artefato não encontrado.` / `Versão não encontrada.` (também para número fora do formato, ex.: `0`, `01`, `abc`) |
+| PATCH | `/artefatos/:id` | `{ titulo: string }` | 200 `ResumoDoArtefato`, com o título aparado (o mesmo título não grava nem gera evento). 400 `Título inválido.` (vazio depois de aparar, mais de 120 caracteres, não texto, ausente ou corpo que não é objeto; nada é gravado); 404 `Artefato não encontrado.` |
+| DELETE | `/artefatos/:id` | — | 204: apaga o artefato, todas as versões e o arquivo dele na pasta de entrada. 404 `Artefato não encontrado.` |
+| GET | `/artefatos/eventos` | — | `text/event-stream` só ao vivo: `retry: 3000`, os eventos nomeados abaixo e o comentário `: ping` a cada 25 s. Sem `id:`, sem histórico e sem `Last-Event-ID`: ao (re)conectar, a tela relê `GET /artefatos` |
 
 Valores aceitos:
 - **Modelos:** `fable`, `opus`, `sonnet` ou `haiku`. O Claude Code resolve o apelido para a versão vigente (`fable` = Fable 5.1, aceito desde a v2.1.257). Valem para os orquestradores e para o chat.
@@ -1000,6 +1096,32 @@ Perguntas do usuário vêm sempre `concluida`, sem ações. Numa resposta que fa
 
 Passageiros (sem id, fora do histórico): `event: trecho` com `data: { mensagemId, texto }` (pedaço novo do texto) e `event: atividade` com `data: { mensagemId, ferramenta, detalhe }` (ex.: `WebSearch` · `node lts`).
 
+`ResumoDoArtefato` (ver ADR-26; posição e tamanho da janela não vêm daqui, ficam no layout do navegador):
+
+```json
+{ "id": "…", "titulo": "vendas por mes", "formato": "html | markdown",
+  "origem": { "tipo": "orquestrador | chat", "id": "<id do Orquestrador> | null" },
+  "arquivo": "vendas-por-mes.html",
+  "criadoEm": "2026-11-05T14:00:00.000Z", "atualizadoEm": "2026-11-05T14:07:30.000Z",
+  "versaoAtual": 2,
+  "versoes": [{ "numero": 1, "criadaEm": "2026-11-05T14:00:00.000Z", "tamanho": 18432 },
+              { "numero": 2, "criadaEm": "2026-11-05T14:07:30.000Z", "tamanho": 19107 }] }
+```
+
+- `titulo`: nasce do nome do arquivo, sem a extensão, com `-` e `_` virando espaço (até 120 caracteres; nome sem letras vira "Artefato"); muda pelo `PATCH`.
+- `origem.id`: o id do Orquestrador que entregou; `null` quando veio do chat rápido.
+- `arquivo`: o nome do arquivo na pasta de entrada; é a chave da coleta (regravá-lo cria uma versão) e o nome sugerido no *salvar como*.
+- `versaoAtual`: a mais recente. `versoes` vem da 1 em diante; `tamanho` em bytes. O hash não sai na API.
+
+**Eventos SSE dos artefatos** (`/artefatos/eventos`). Cada um é um `event:` nomeado com `data:` JSON, sem `id:`:
+
+| `event` | `data` | Quando |
+|---|---|---|
+| `artefato_criado` | `{ artefato: ResumoDoArtefato }` | um arquivo novo foi coletado da pasta de entrada; a tela abre a janela |
+| `versao_adicionada` | `{ artefato }` | o mesmo arquivo foi regravado com outro conteúdo (sha256 diferente do da última versão); a janela aberta passa para a versão nova |
+| `artefato_renomeado` | `{ artefato }` | `PATCH /artefatos/:id` com um título diferente |
+| `artefato_removido` | `{ id }` | `DELETE /artefatos/:id` |
+
 ### Guia do usuário
 
 A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma janela de terminal, e cada Subagente que ele instancia vira um bixinho ligado ao terminal.
@@ -1014,16 +1136,17 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 - arrastar o fundo move o canvas;
 - a roda do mouse rola; **Ctrl + roda** dá zoom;
 - **Ctrl+0** volta o zoom para 100% sem sair do lugar — é onde o texto dos terminais fica mais nítido (ao abrir e ao *Organizar*, o canvas nunca passa de 100%, mas pode ficar abaixo para caber tudo); o zoom e a posição ficam salvos ao fechar o app;
-- os botões no canto inferior esquerdo aproximam, afastam e enquadram tudo; o 4º, com o ícone de grade, é o **Organizar**: põe os terminais lado a lado e as notas em colunas à direita deles (fica desabilitado com uma janela só);
+- os botões no canto inferior esquerdo aproximam, afastam e enquadram tudo; o 4º, com o ícone de grade, é o **Organizar**: põe os terminais lado a lado e, à direita deles, as notas em colunas e, depois delas, os artefatos (fica desabilitado com uma janela só);
 - **Ctrl+N** abre o formulário de um orquestrador novo (o mesmo de *+ Novo ▾ › Orquestrador*, respeitando o limite de 4) e **Ctrl+Shift+N** cria uma nota; com o cursor num campo de texto (prompt, nota, chat), os dois não fazem nada;
 - **Ctrl+K** (ou o campo *Buscar ou executar…* da barra de título; no navegador, o botão *Buscar* na barra do canvas) abre a **paleta de comandos**, de qualquer lugar, inclusive com o cursor num prompt. Digite parte do nome (acentos e maiúsculas não importam; todas as palavras precisam aparecer) para achar:
   - **ações:** *Novo orquestrador* (Ctrl+N), *Nova nota* (Ctrl+Shift+N), *Organizar* (com mais de uma janela), *Zoom 100%* (Ctrl+0), *Enquadrar tudo* e, no aplicativo, *Pastas e Claude Code*;
   - **orquestradores:** todos, abertos ou não, com a pasta e se estão trabalhando; escolher abre o terminal (respeitando o limite de 4) ou leva até ele;
   - **notas:** pelo título ou pelo texto; escolher centraliza a nota;
+  - **artefatos:** todos, abertos ou não, pelo título (ou por "artefato", "html", "md", "pagina"), com o formato, a origem (o Orquestrador ou o chat rápido) e se já estão no canvas; escolher abre a janela, se estiver fechada, e leva até ela (item 14);
   - **pedidos:** o texto dos pedidos das conversas dos terminais abertos, do mais recente ao mais antigo; escolher leva até o terminal.
 
   **↑/↓** escolhem, **Enter** executa, **Esc** ou um clique fora fecham (o cursor volta para onde estava), e **Ctrl+K** de novo também fecha;
-- o minimapa no canto inferior direito mostra onde cada coisa está (as notas têm cor própria). O terminal de um Orquestrador trabalhando **brilha** no minimapa (contorno laranja que pulsa), para achar quem está ocupado num canvas grande; o pulso para com o reduzir movimento do sistema, durante o arraste e com o servidor desconectado;
+- o minimapa no canto inferior direito mostra onde cada coisa está (as notas e os artefatos têm cor própria; os artefatos, azul-ciano). O terminal de um Orquestrador trabalhando **brilha** no minimapa (contorno laranja que pulsa), para achar quem está ocupado num canvas grande; o pulso para com o reduzir movimento do sistema, durante o arraste e com o servidor desconectado;
 - enquanto você arrasta um terminal/bixinho ou move o canvas, as animações dos nós pausam e a bolinha das linhas some (para o movimento ficar leve); tudo volta ao soltar.
 
 1. **Criar um Orquestrador:** clique no botão laranja **`+ Novo ▾`** (canto superior esquerdo) e escolha *Orquestrador*, ou aperte **Ctrl+N** (com o canvas vazio, também há o *+ Novo orquestrador* no meio da tela). No menu, ↑/↓ escolhem, Enter confirma e Esc ou um clique fora fecham. Abre um terminal de configuração: escolha a **pasta** do projeto (o nome é sugerido a partir dela). Depois defina:
@@ -1034,7 +1157,7 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
      - Se o modelo não suportar o nível, o Claude Code usa o mais alto suportado até ele. Com *Padrão* nos Subagentes e um esforço escolhido no Orquestrador, os Subagentes podem herdar o nível do Orquestrador (ver ADR-12).
      - Quando o esforço não é o padrão, ele aparece no resumo da configuração, ex.: *Opus (esforço alto) → Sonnet (esforço médio) · …*.
    - **Quantidade de subagentes:** vale quando o Orquestrador delega. *Automática* deixa ele decidir, até o máximo (se um basta, usa um). *Fixa* obriga a dividir o trabalho delegado nesse número. Um pedido trivial pode terminar sem nenhum Subagente.
-   - **Permissões:** *Somente leitura*, *Ler e editar arquivos* ou *Editar e rodar comandos*. Commit e push ficam bloqueados, a menos que você ligue **Permitir commit e push quando eu pedir** (desligada por padrão). O toggle aparece aqui, na criação, e depois no *⚙* do terminal; o funcionamento está no item 8.
+   - **Permissões:** *Somente leitura*, *Ler e editar arquivos* ou *Editar e rodar comandos*. Em qualquer uma, os agentes podem gravar artefatos, só na pasta de artefatos (item 14). Commit e push ficam bloqueados, a menos que você ligue **Permitir commit e push quando eu pedir** (desligada por padrão). O toggle aparece aqui, na criação, e depois no *⚙* do terminal; o funcionamento está no item 8.
    - **Deixar o orquestrador fazer o trivial sozinho** (ligada por padrão): leituras rápidas, uma checagem ou um comando curto (este só com *Editar e rodar comandos*) ele faz sem lançar Subagente, o que economiza tempo e cota. Alterações de arquivos continuam sempre delegadas. Desligada, ele delega tudo, como antes; o resumo da configuração mostra *delegação total* (ver ADR-14).
    - **Propor plano antes de mudanças grandes** (ligada por padrão): fora do Plan Mode, se o pedido for grande (vários arquivos, contratos, dados, arquitetura ou algo ambíguo), o Orquestrador responde com um plano para você aprovar antes de alterar (item 4). Desligada, ele executa direto; o resumo mostra *sem plano automático* (ver ADR-15).
 
@@ -1042,7 +1165,7 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 2. **Mexer nos terminais:**
    - **mover:** arraste pela barra de título;
    - **redimensionar:** clique no terminal para selecioná-lo e puxe as bordas ou os cantos;
-   - **organizar:** o botão *Organizar*, o 4º dos controles do canto inferior esquerdo (ícone de grade, abaixo de aproximar, afastar e enquadrar), coloca todos lado a lado (e as notas em colunas à direita deles, item 11); também está na paleta (Ctrl+K);
+   - **organizar:** o botão *Organizar*, o 4º dos controles do canto inferior esquerdo (ícone de grade, abaixo de aproximar, afastar e enquadrar), coloca todos lado a lado (e, à direita deles, as notas em colunas, item 11, e depois os artefatos, item 14); também está na paleta (Ctrl+K);
    - **fechar:** o *✕* só tira o terminal do canvas; o Orquestrador e o histórico continuam salvos. Para reabrir, clique nele na lista *orquestradores*, no canto superior esquerdo.
    - **limite de 4 abertos:** o canvas mostra no máximo **4 orquestradores abertos** ao mesmo tempo, e o formulário de novo orquestrador conta como um. Tentar abrir um quinto (pelo *+ Novo ▾ › Orquestrador*, pelo Ctrl+N, pela lista, pela paleta ou pelo cartão do chat) mostra, abaixo da barra do canvas, o aviso *"Limite de 4 orquestradores abertos. Feche um dos orquestradores (✕ na barra do terminal) antes de iniciar outro."*. Feche um no *✕* (nada é excluído) e tente de novo; o aviso some sozinho ao liberar a vaga. Clicar num que já está aberto só leva até ele (ver ADR-18).
 
@@ -1123,7 +1246,7 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
     - **Mover:** arraste pela barra de título (o texto não arrasta a nota).
     - **Redimensionar:** clique na nota para selecioná-la e puxe as bordas ou os cantos.
     - **Apagar:** o ícone de lixeira, com confirmação ("Apagar esta nota? Isso não pode ser desfeito."). Apagar remove a nota do servidor: não tem volta.
-    - **Organizar:** com notas no canvas, o *Organizar* mantém os terminais na grade de sempre e põe as notas em colunas de até 4, à direita deles.
+    - **Organizar:** com notas no canvas, o *Organizar* mantém os terminais na grade de sempre e põe as notas em colunas de até 4, à direita deles (os artefatos vêm depois, em colunas próprias).
     - **Modo lista e checklist:** o botão de lista na barra da nota alterna entre *editar* (o texto puro) e *lista* (linha a linha). Na lista, as linhas no formato de checklist do Markdown, `[ ] comprar café` ou `[x] feito` (com ou sem `- ` antes), viram caixas de marcar: marcar ou desmarcar troca só o `x` daquela linha no texto e salva na hora. O modo vale enquanto a página estiver aberta (recarregar volta para *editar*).
     - **Arrastar para o terminal:** cada linha da lista tem uma alça (seis pontinhos) à esquerda, e a barra da nota tem uma alça para a nota inteira. Arraste até a janela de um terminal: aparece *solte para escrever no prompt — nada é enviado até você apertar enter*. Ao soltar, o texto entra no prompt (numa linha nova, se já houver texto; uma linha de checklist vai sem o `[ ]`), o cursor vai para o campo e **nada é enviado**: revise e aperte Enter (com um pedido rodando, o Enter põe na fila). Nota em branco não arrasta. Arrastar não move a nota nem o canvas.
 
@@ -1154,6 +1277,20 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
       - **parcial** quer dizer que o pedido foi cancelado ou falhou: o gasto é o que houve até parar;
       - se a linha não aparecer, não havia transcrição para medir (ou a leitura falhou): o pedido não é afetado.
     - **Aviso de esforço herdado:** com o esforço em *Padrão (Claude Code)*, o app não manda nível nenhum e vale o que está configurado no Claude Code desta máquina. Se isso der *Extra alto* ou *Máximo*, o formulário e o *⚙* avisam, com o nível e de onde ele vem (ex.: `~/.claude/settings.json` ou a variável `CLAUDE_CODE_EFFORT_LEVEL`). Para resolver, escolha um nível no seletor de esforço daquele papel (ex.: *Médio*) ou aplique o *Modo econômico*; o aviso some porque o app passa a mandar o nível escolhido.
+14. **Artefatos** (ver ADR-26): páginas e documentos que os agentes criam para você ver no canvas, como os artefatos do claude.ai.
+    - **Como pedir:** no prompt de um Orquestrador ou no chat rápido, peça o resultado como artefato, por exemplo *"crie um artefato com um gráfico das vendas por mês"*, *"faça um relatório dos testes que falharam como artefato"* ou *"desenhe um diagrama da arquitetura deste projeto"*. Visualizações, relatórios, diagramas, protótipos, dashboards e páginas costumam virar artefato sozinhos; se o Claude responder só com texto, peça de novo dizendo "crie um artefato". Funciona em qualquer permissão, inclusive *Somente leitura* e Plan Mode, e no chat não pede a autorização de alterações: o agente só consegue gravar na pasta de artefatos, nunca no projeto.
+    - **Onde aparece:** assim que o agente grava o arquivo, a janela do artefato abre sozinha no canvas: ao lado do terminal do Orquestrador que o criou (à direita ou, sem espaço, à esquerda) ou, se veio do chat (ou o terminal está fechado), no centro da tela, acima do chat. Ela nunca cobre outra janela. A resposta do Claude cita o artefato pelo nome.
+    - **O que tem na janela:** um ícone do formato (`</>` página HTML, `M↓` documento Markdown), o título e os botões:
+      - **título:** clique duplo para renomear (Enter confirma, Esc desiste; até 120 caracteres). Ele nasce do nome do arquivo (ex.: `vendas-por-mes.html` → *vendas por mes*);
+      - **`vN ▾`:** troca de versão (abaixo);
+      - **ampliar:** abre em tela cheia, fora do canvas; **Esc**, o ✕ ou um clique fora fecham;
+      - **salvar como:** baixa a versão que você está vendo como arquivo (`.html` ou `.md`; numa versão antiga, com `-vN` no nome);
+      - **apagar** (lixeira): pede confirmação ("Apagar este artefato? Isso não pode ser desfeito.") e apaga o artefato, todas as versões e o arquivo que o agente gravou. Não tem volta;
+      - **✕:** só fecha a janela; o artefato continua salvo. Para reabrir, use a paleta (**Ctrl+K**, grupo *Artefatos*).
+      - Mova a janela pela barra e redimensione puxando as bordas (clique nela antes para selecioná-la). Posição e tamanho ficam lembrados neste navegador; o *Organizar* põe os artefatos em colunas à direita dos terminais e das notas.
+    - **Versões:** quando o agente regrava o mesmo arquivo (*"agora mude as cores do gráfico"*), nasce uma versão nova; a janela aberta passa sozinha para ela e mostra o selo *v2 nova* por um instante. No **`vN ▾`** aparecem todas, da mais nova para a mais antiga, com data, hora e tamanho; escolher uma antiga mostra aquela versão (o botão fica destacado), e a atual continua na lista. Um arquivo regravado igual não cria versão. Se o agente gravar com outro nome, nasce outro artefato.
+    - **Sem internet:** a página roda isolada: os scripts dela funcionam, mas ela não acessa a internet (bibliotecas por CDN, imagens e fontes externas não carregam) nem nada do aplicativo. Por isso o agente embute tudo no próprio arquivo, até 5 MB; se a página aparecer quebrada, peça para ele embutir o que falta.
+    - **Onde ficam os arquivos:** em `%APPDATA%\Orquestrador de Agentes\dados\artefatos\`: cada artefato numa pasta `<id>\`, com as versões `v1.html`, `v2.html`… Os agentes gravam em `dados\artefatos\entrada\orquestradores\<id>\` (Orquestradores) e `dados\artefatos\entrada\chat\` (chat); um `.html` ou `.md` copiado à mão para uma delas também vira artefato. Os artefatos ficam até você apagá-los: excluir um Orquestrador ou dar `/clear` não os apaga, e eles não contam no limite de 4 orquestradores abertos.
 
 **Avisos que podem aparecer:**
 - *"orquestrador lendo …"*, *"orquestrador executando …"* (no log do terminal): não é erro. O Orquestrador está fazendo um trivial ele mesmo (ver ADR-14). Se preferir que ele delegue tudo, desligue **Deixar o orquestrador fazer o trivial sozinho** no *⚙*.
@@ -1167,3 +1304,6 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 - Custo **parcial**: o pedido foi cancelado ou falhou, e o número mostra só o que foi gasto até ali (item 13).
 - *"interrompida"* (numa resposta do chat): o servidor reiniciou enquanto o Claude respondia. Pergunte de novo.
 - *"… a ação foi ignorada."* (no chat): o Claude sugeriu abrir um orquestrador num projeto que não existe ou num formato inválido. Peça de novo citando o nome da pasta.
+- *"Este artefato não existe mais."* (numa janela de artefato): ele foi apagado (em outra aba, por exemplo). Feche a janela no ✕.
+- *"A versão N não existe mais."*: o conteúdo daquela versão sumiu do disco; use *ver a versão atual*. *"Não foi possível carregar a versão N."*: falha ao falar com o servidor; use *tentar de novo*.
+- Um artefato maior que 5 MB não aparece: o servidor o ignora e registra o motivo no log (`logs\servidor.log`). Peça ao agente uma página mais leve.

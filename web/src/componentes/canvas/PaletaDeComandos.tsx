@@ -44,8 +44,8 @@ function ehAtalhoDaPaleta(evento: KeyboardEvent): boolean {
 }
 
 /**
- * Paleta de comandos (Ctrl+K): busca ações do canvas, Orquestradores, notas e
- * pedidos, e executa o escolhido. Caixa no topo da área do canvas, fora do
+ * Paleta de comandos (Ctrl+K): busca ações do canvas, Orquestradores, notas,
+ * artefatos e pedidos, e executa o escolhido. Caixa no topo da área do canvas, fora do
  * viewport do React Flow (não escala com o zoom).
  *
  * Todo o estado é daqui: abrir, digitar e navegar não re-renderizam o canvas.
@@ -195,12 +195,12 @@ function Paleta({ lerFonte, aoExecutar, controle }: PropsDaPaleta) {
             className="input"
             type="text"
             role="combobox"
-            aria-label="Buscar ações, orquestradores, notas e pedidos"
+            aria-label="Buscar ações, orquestradores, notas, artefatos e pedidos"
             aria-expanded="true"
             aria-controls={idDaLista}
             aria-autocomplete="list"
             aria-activedescendant={idSelecionado}
-            placeholder="Buscar ações, orquestradores, notas e pedidos…"
+            placeholder="Buscar ações, orquestradores, notas, artefatos e pedidos…"
             autoComplete="off"
             spellCheck={false}
             autoFocus
@@ -241,6 +241,11 @@ function Paleta({ lerFonte, aoExecutar, controle }: PropsDaPaleta) {
                             aria-hidden="true"
                             className={`ponto-de-status ${item.trabalhando ? "ponto-de-status-ativo" : ""}`}
                           />
+                        )}
+                        {item.tipo === "artefato" && (
+                          <span aria-hidden="true" className={`icone-do-artefato icone-do-artefato-${item.formato}`}>
+                            {item.formato === "html" ? "</>" : "M↓"}
+                          </span>
                         )}
                         <span className="flex min-w-0 flex-col">
                           <span className="truncate font-titulo text-[12.5px] font-medium text-primary">{item.titulo}</span>

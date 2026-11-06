@@ -183,6 +183,7 @@ describe("interpretarLayout", () => {
     expect(interpretarLayout(texto)).toEqual({
       terminais: { o1: { x: 10, y: 20, largura: 600, altura: 500 } },
       notas: {},
+      artefatos: {},
       viewport: { x: 1, y: 2, zoom: 0.8 },
     });
   });
@@ -190,7 +191,7 @@ describe("interpretarLayout", () => {
   it.each([null, "", "não é json", "[]", JSON.stringify({ terminais: 5, viewport: { zoom: 0 } })])(
     "não quebra com conteúdo inválido: %s",
     (texto) => {
-      expect(interpretarLayout(texto)).toEqual({ terminais: {}, notas: {}, viewport: null });
+      expect(interpretarLayout(texto)).toEqual({ terminais: {}, notas: {}, artefatos: {}, viewport: null });
     },
   );
 
@@ -239,6 +240,7 @@ describe("notas no layout", () => {
     expect(interpretarLayout(antigo)).toEqual({
       terminais: { o1: { x: 10, y: 20, largura: 600, altura: 500 } },
       notas: {},
+      artefatos: {},
       viewport: { x: 1, y: 2, zoom: 0.8 },
     });
   });

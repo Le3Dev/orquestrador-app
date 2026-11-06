@@ -93,6 +93,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
         preparar: async (_id, pastaDeTrabalho) => ({ cwd: pastaDeTrabalho, worktree: null }),
         concluir: async () => false,
       },
+      pastaDeArtefatos: (orquestradorId) => path.join(tmpdir(), "orquestrador-rotas-teste-artefatos", orquestradorId),
       gerarId: () => `id${++ids}`,
       agora: () => new Date("2026-10-28T12:00:00Z"),
     });
@@ -652,6 +653,7 @@ describe("rotas de orquestradores — economia de tokens", () => {
         preparar: async (_id, pastaDeTrabalho) => ({ cwd: pastaDeTrabalho, worktree: null }),
         concluir: async () => false,
       },
+      pastaDeArtefatos: (orquestradorId) => path.join(tmpdir(), "orquestrador-rotas-economia-teste-artefatos", orquestradorId),
       gerarId: () => `e${++ids}`,
       agora: () => new Date("2026-10-28T12:00:00Z"),
       medidor: { medirTurno: async () => consumo },

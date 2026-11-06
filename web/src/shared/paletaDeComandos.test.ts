@@ -19,6 +19,7 @@ function fonte(alteracoes: Partial<FonteDaPaleta> = {}): FonteDaPaleta {
     ],
     abertos: new Set(["o1"]),
     notas: [{ notaId: "n1", titulo: "Compras", texto: "pão\nleite" }],
+    artefatos: [],
     conversas: new Map([
       [
         "o1",
@@ -126,6 +127,49 @@ describe("montarItensDaPaleta", () => {
       titulo: "Nota sem título",
       detalhe: "nota vazia",
     });
+  });
+
+  it("lista os artefatos (depois das notas) com o formato, a origem e se estão no canvas", () => {
+    const itens = montarItensDaPaleta(
+      fonte({
+        artefatos: [
+          {
+            artefatoId: "a1",
+            titulo: "Relatório de vendas",
+            formato: "html",
+            origem: { tipo: "orquestrador", id: "o1" },
+            aberto: true,
+          },
+          { artefatoId: "a2", titulo: "  ", formato: "markdown", origem: { tipo: "chat", id: null }, aberto: false },
+          {
+            artefatoId: "a3",
+            titulo: "Plano",
+            formato: "markdown",
+            origem: { tipo: "orquestrador", id: "excluido" },
+            aberto: false,
+          },
+        ],
+      }),
+    );
+
+    const tipos = itens.map((candidato) => candidato.tipo);
+    expect(tipos.indexOf("artefato")).toBe(tipos.lastIndexOf("nota") + 1);
+    expect(itens.filter((candidato) => candidato.tipo === "artefato")).toEqual([
+      expect.objectContaining({
+        id: "artefato:a1",
+        artefatoId: "a1",
+        titulo: "Relatório de vendas",
+        detalhe: "HTML · de Painel de vendas · no canvas",
+        formato: "html",
+        aberto: true,
+      }),
+      expect.objectContaining({ titulo: "Artefato sem título", detalhe: "Markdown · do chat rápido · abrir" }),
+      expect.objectContaining({ titulo: "Plano", detalhe: "Markdown · de um orquestrador · abrir" }),
+    ]);
+    // O formato também conta na busca, e o grupo se chama "Artefatos".
+    expect(titulos(buscarNaPaleta(itens, "relatorio html"))).toEqual(["Relatório de vendas"]);
+    expect(titulos(buscarNaPaleta(itens, "plano md"))).toEqual(["Plano"]);
+    expect(agruparPorTipo(buscarNaPaleta(itens, "html")).map((grupo) => grupo.rotulo)).toEqual(["Artefatos"]);
   });
 
   it("corta pedidos longos num trecho de uma linha", () => {
