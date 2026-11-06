@@ -564,6 +564,8 @@ function criarJanela({ botoesNativos = true, ...opcoes } = {}) {
       nodeIntegration: false,
       sandbox: true,
     },
+    // Mascote do app (gerado por `npm run icones`); sem ele, aparece o átomo do Electron.
+    icon: path.join(__dirname, "icones", process.platform === "win32" ? "icone.ico" : "icone.png"),
     ...opcoes,
   });
   // Links externos abrem no navegador do sistema, não dentro do app.
@@ -905,6 +907,8 @@ if (!conseguiuLock) {
   });
 
   app.whenReady().then(async () => {
+    // Mesmo appId do atalho do instalador: a barra de tarefas agrupa e mostra o ícone do app.
+    if (process.platform === "win32") app.setAppUserModelId(config.appId);
     Menu.setApplicationMenu(null); // remove File/Edit/View/Window
     licenca.iniciar(pastaDoUsuario());
     try {
