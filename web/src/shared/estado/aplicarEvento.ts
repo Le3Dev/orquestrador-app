@@ -393,9 +393,6 @@ function novoTurno(evento: Extract<EventoRegistrado, { tipo: "turno_iniciado" }>
       permitirCommitEPush: evento.configuracao.permitirCommitEPush ?? false,
       esforcoDoOrquestrador: evento.configuracao.esforcoDoOrquestrador ?? "padrao",
       esforcoDosSubagentes: evento.configuracao.esforcoDosSubagentes ?? "padrao",
-      // Os anteriores às opções de trabalho direto e de plano automático ficam com o padrão (ligadas).
-      permitirTrabalhoDireto: evento.configuracao.permitirTrabalhoDireto ?? true,
-      proporPlanoEmPedidosGrandes: evento.configuracao.proporPlanoEmPedidosGrandes ?? true,
     },
     // Pedidos gravados antes do Plan Mode foram todos de execução.
     modo: evento.modo ?? "execucao",

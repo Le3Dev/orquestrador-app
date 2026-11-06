@@ -27,27 +27,14 @@ export interface DadosDaConfiguracao {
   nivelDePermissao: NivelDePermissao;
   /** Libera `git commit`/`git push` só quando o usuário pede na mensagem. Desligado por padrão. */
   permitirCommitEPush: boolean;
-  /**
-   * O Orquestrador faz o trivial sozinho (leituras rápidas, uma checagem, um
-   * comando curto), sem Subagente; alterações continuam delegadas. Ligado por padrão.
-   */
-  permitirTrabalhoDireto: boolean;
-  /** Em pedidos grandes, o Orquestrador responde com um plano para aprovar antes de alterar. Ligado por padrão. */
-  proporPlanoEmPedidosGrandes: boolean;
 }
 
 /** Campos que faltam nos eventos gravados antes de existirem. */
-type CamposPosterioresDaConfiguracao =
-  | "permitirCommitEPush"
-  | "esforcoDoOrquestrador"
-  | "esforcoDosSubagentes"
-  | "permitirTrabalhoDireto"
-  | "proporPlanoEmPedidosGrandes";
+type CamposPosterioresDaConfiguracao = "permitirCommitEPush" | "esforcoDoOrquestrador" | "esforcoDosSubagentes";
 
 /**
  * A configuração como os eventos a gravaram: os anteriores à opção de commit e
- * push, à escolha do esforço e às opções de trabalho direto e de plano
- * automático não têm esses campos.
+ * push e à escolha do esforço não têm esses campos.
  */
 export type DadosDaConfiguracaoGravada = Omit<DadosDaConfiguracao, CamposPosterioresDaConfiguracao> &
   Partial<Pick<DadosDaConfiguracao, CamposPosterioresDaConfiguracao>>;

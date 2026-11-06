@@ -57,13 +57,9 @@ const esquemaDaConfiguracao = z.object({
   esforcoDosSubagentes: z
     .enum(ESFORCOS_DE_RACIOCINIO, { error: "Esforço dos subagentes inválido." })
     .optional(),
-  // Opcionais também na criação: ausentes valem `true` (ligadas).
-  permitirTrabalhoDireto: z
-    .boolean({ error: 'A opção "Deixar o orquestrador fazer o trivial sozinho" deve ser verdadeira ou falsa.' })
-    .optional(),
-  proporPlanoEmPedidosGrandes: z
-    .boolean({ error: 'A opção "Propor plano antes de mudanças grandes" deve ser verdadeira ou falsa.' })
-    .optional(),
+  // Chaves desconhecidas são descartadas pelo `z.object`: clientes antigos que
+  // ainda mandam as opções de trivial e de plano (fixas desde o ADR-28) não
+  // recebem erro, e os campos são ignorados.
 });
 
 const esquemaDeCriacao = esquemaDaConfiguracao.extend({

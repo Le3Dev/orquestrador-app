@@ -12,8 +12,6 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "edicao_e_comandos",
   permitirCommitEPush: false,
-  permitirTrabalhoDireto: true,
-  proporPlanoEmPedidosGrandes: true,
 };
 
 function renderizar(alteracoes: Partial<DadosDaConfiguracao> = {}) {
@@ -32,8 +30,6 @@ const ECONOMICO: DadosDaPredefinicao = {
     modeloDosSubagentes: "sonnet",
     esforcoDosSubagentes: "medio",
     quantidadeDeSubagentes: { modo: "automatica", limite: 1 },
-    permitirTrabalhoDireto: true,
-    proporPlanoEmPedidosGrandes: false,
   },
 };
 
@@ -64,7 +60,7 @@ describe("CamposDaConfiguracao", () => {
 
       expect(botao).toHaveAttribute("title", expect.stringContaining("Gasta menos tokens por pedido."));
       expect(botao).toHaveAttribute("title", expect.stringContaining("• Esforço do orquestrador: Médio"));
-      expect(botao).toHaveAttribute("title", expect.stringContaining("• Propor plano antes de mudanças grandes: desligado"));
+      expect(botao).toHaveAttribute("title", expect.stringContaining("• Quantidade de subagentes: automática, ≤1 agente"));
 
       fireEvent.click(botao);
       expect(aoMudar).toHaveBeenCalledWith({
@@ -195,46 +191,13 @@ describe("CamposDaConfiguracao", () => {
     expect(screen.queryByText(/exigem a permissão de rodar comandos/)).not.toBeInTheDocument();
   });
 
-  describe("trabalho direto e plano automático", () => {
-    function opcoes() {
-      return {
-        trabalhoDireto: screen.getByRole("checkbox", { name: "Deixar o orquestrador fazer o trivial sozinho" }),
-        plano: screen.getByRole("checkbox", { name: "Propor plano antes de mudanças grandes" }),
-      };
-    }
+  it("não oferece as caixas de trabalho direto e de plano: valem sempre", () => {
+    renderizar();
 
-    it("começam ligadas, com a ajuda de cada uma", () => {
-      renderizar();
-      const { trabalhoDireto, plano } = opcoes();
-
-      expect(trabalhoDireto).toBeChecked();
-      expect(trabalhoDireto).toHaveAccessibleDescription(
-        "Leituras rápidas, uma checagem ou um comando curto, sem subagente. Alterações continuam delegadas.",
-      );
-      expect(plano).toBeChecked();
-      expect(plano).toHaveAccessibleDescription(
-        "Em pedidos grandes, o orquestrador responde com um plano para você aprovar antes de alterar.",
-      );
-    });
-
-    it("refletem as opções desligadas", () => {
-      renderizar({ permitirTrabalhoDireto: false, proporPlanoEmPedidosGrandes: false });
-      const { trabalhoDireto, plano } = opcoes();
-
-      expect(trabalhoDireto).not.toBeChecked();
-      expect(plano).not.toBeChecked();
-    });
-
-    it("ao desligar, mudam só a opção correspondente", () => {
-      const { aoMudar } = renderizar();
-      const { trabalhoDireto, plano } = opcoes();
-
-      fireEvent.click(trabalhoDireto);
-      expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, permitirTrabalhoDireto: false });
-
-      fireEvent.click(plano);
-      expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, proporPlanoEmPedidosGrandes: false });
-    });
+    // A única caixa de seleção que resta é a de commit e push.
+    expect(screen.getAllByRole("checkbox")).toHaveLength(1);
+    expect(screen.queryByText("Deixar o orquestrador fazer o trivial sozinho")).not.toBeInTheDocument();
+    expect(screen.queryByText("Propor plano antes de mudanças grandes")).not.toBeInTheDocument();
   });
 
   describe("modelo", () => {

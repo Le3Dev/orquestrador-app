@@ -14,7 +14,6 @@ const PASTA_DE_ARTEFATOS = path.resolve("/dados/artefatos/entrada/orquestradores
 function bloco(
   nivelDePermissao: NivelDePermissao = "leitura",
   modo: ModoDoTurno = "execucao",
-  permitirTrabalhoDireto = true,
   pastaDeArtefatos: string | null = PASTA_DE_ARTEFATOS,
 ): string {
   const configuracao = ConfiguracaoDoOrquestrador.de({
@@ -22,7 +21,6 @@ function bloco(
     modeloDosSubagentes: "haiku",
     quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
     nivelDePermissao,
-    permitirTrabalhoDireto,
   });
   const texto = mensagemParaOOrquestrador("monte um dashboard", configuracao, [], modo, pastaDeArtefatos);
   return texto.slice(0, texto.indexOf("</configuracao-do-pedido>"));
@@ -64,15 +62,20 @@ describe("artefatos no bloco <configuracao-do-pedido>", () => {
     );
   });
 
-  it("com a delegação total, a regra estrita continua e os artefatos seguem como exceção", () => {
-    const texto = bloco("leitura", "execucao", false);
+  it.each<ModoDoTurno>(["execucao", "planejamento"])(
+    "em %s, o \"Você não edita arquivos\" vale sempre, junto da exceção dos artefatos",
+    (modo) => {
+      const texto = bloco("leitura", modo);
 
-    expect(texto).toContain("Não faça o trabalho você mesmo: não leia, edite nem execute nada diretamente");
-    expect(texto).toContain(`gravado na pasta ${PASTA_DE_ARTEFATOS}`);
-  });
+      expect(texto).toContain("- Faça você mesmo o trivial:");
+      expect(texto).toContain("- Você não edita arquivos:");
+      expect(texto).toContain(`gravado na pasta ${PASTA_DE_ARTEFATOS}`);
+      expect(texto).not.toContain("Não faça o trabalho você mesmo");
+    },
+  );
 
   it("sem pasta de artefatos, não fala de artefatos", () => {
-    expect(bloco("leitura", "execucao", true, null)).not.toContain("- Artefatos:");
+    expect(bloco("leitura", "execucao", null)).not.toContain("- Artefatos:");
   });
 });
 

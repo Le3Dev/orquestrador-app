@@ -550,28 +550,55 @@ describe("ServicoDeOrquestracao", () => {
       expect(orquestrador.turnoComPlanoPendente).toBeNull();
     });
 
-    it("com a opção desligada, a resposta sai limpa e sem plano pendente", async () => {
-      const orquestrador = await criar();
-      await servico.alterarConfiguracao(orquestrador.id, { proporPlanoEmPedidosGrandes: false });
+    it("um orquestrador salvo com as opções antigas desligadas passa a deixar o plano pendente", async () => {
+      const criado = await criar();
+      const dados = criado.paraDados();
+      // Como ficava o orquestrador.json quando trivial e plano eram opções da tela.
+      const gravado = JSON.parse(
+        JSON.stringify({
+          ...dados,
+          configuracao: { ...dados.configuracao, permitirTrabalhoDireto: false, proporPlanoEmPedidosGrandes: false },
+        }),
+      ) as typeof dados;
+      const orquestrador = Orquestrador.reconstituir(gravado);
+      repositorio.orquestradores.set(orquestrador.id, orquestrador);
 
       await executar(orquestrador);
 
-      expect(orquestrador.ultimoTurno?.resposta).toContain("Proponho:");
-      expect(orquestrador.ultimoTurno?.resposta).not.toContain(MARCADOR_DE_PLANO);
-      expect(orquestrador.turnoComPlanoPendente).toBeNull();
-      expect(publicados.at(-1)).toMatchObject({ tipo: "turno_concluido", planoPendente: false });
+      expect(orquestrador.turnoComPlanoPendente).not.toBeNull();
+      expect(publicados.at(-1)).toMatchObject({ tipo: "turno_concluido", planoPendente: true });
+      expect(motor.pedidos[0]?.configuracao.propoePlanoEmPedidosGrandes("execucao")).toBe(true);
+      // Ao salvar de novo, os campos antigos somem.
+      expect(orquestrador.paraDados().configuracao).not.toHaveProperty("permitirTrabalhoDireto");
+      expect(orquestrador.paraDados().configuracao).not.toHaveProperty("proporPlanoEmPedidosGrandes");
     });
 
-    it("vale a configuração do início do turno, não a alterada enquanto ele roda", async () => {
+    it("o plano proposto fica pendente mesmo se a configuração muda enquanto o turno roda", async () => {
       const orquestrador = await criar();
 
-      await executar(orquestrador, () =>
-        servico.alterarConfiguracao(orquestrador.id, { proporPlanoEmPedidosGrandes: false }),
-      );
+      await executar(orquestrador, () => servico.alterarConfiguracao(orquestrador.id, { nivelDePermissao: "leitura" }));
 
       expect(orquestrador.turnoComPlanoPendente).not.toBeNull();
-      expect(motor.pedidos[0]?.configuracao.propoePlanoEmPedidosGrandes("execucao")).toBe(true);
-      expect(orquestrador.configuracao.propoePlanoEmPedidosGrandes("execucao")).toBe(false);
+      expect(motor.pedidos[0]?.configuracao.nivelDePermissao).toBe("edicao");
+      expect(orquestrador.configuracao.nivelDePermissao).toBe("leitura");
+    });
+
+    it("os eventos que levam a configuração não trazem mais as opções", async () => {
+      const orquestrador = await criar();
+      await servico.alterarConfiguracao(orquestrador.id, { nivelDePermissao: "leitura" });
+
+      await executar(orquestrador);
+
+      const comConfiguracao = publicados.filter(
+        (evento) => evento.tipo === "turno_iniciado" || evento.tipo === "configuracao_alterada",
+      );
+      expect(comConfiguracao.map((evento) => evento.tipo).sort()).toEqual(["configuracao_alterada", "turno_iniciado"]);
+      for (const evento of comConfiguracao) {
+        const configuracaoDoEvento = "configuracao" in evento ? evento.configuracao : null;
+        expect(configuracaoDoEvento).not.toBeNull();
+        expect(configuracaoDoEvento).not.toHaveProperty("permitirTrabalhoDireto");
+        expect(configuracaoDoEvento).not.toHaveProperty("proporPlanoEmPedidosGrandes");
+      }
     });
 
     it("sem o marcador, o turno de execução conclui sem plano pendente", async () => {

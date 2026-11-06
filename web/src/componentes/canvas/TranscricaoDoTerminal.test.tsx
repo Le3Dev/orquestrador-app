@@ -32,8 +32,6 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "edicao_e_comandos",
   permitirCommitEPush: false,
-  permitirTrabalhoDireto: true,
-  proporPlanoEmPedidosGrandes: true,
 };
 
 const USO = { duracaoMs: 1000, tokensDeEntrada: 1, tokensDeSaida: 1, subagentesLancados: 0 };

@@ -108,7 +108,6 @@ describe("ConfiguracaoDoOrquestrador", () => {
     nivelDePermissao: "edicao_e_comandos",
   } as const;
   const esforcosPadrao = { esforcoDoOrquestrador: "padrao", esforcoDosSubagentes: "padrao" } as const;
-  const opcoesDeTrabalhoPadrao = { permitirTrabalhoDireto: true, proporPlanoEmPedidosGrandes: true } as const;
 
   it("nasce com commit e push desligados quando a opção não é informada", () => {
     const configuracao = ConfiguracaoDoOrquestrador.de(dados);
@@ -118,7 +117,6 @@ describe("ConfiguracaoDoOrquestrador", () => {
       ...dados,
       permitirCommitEPush: false,
       ...esforcosPadrao,
-      ...opcoesDeTrabalhoPadrao,
     });
   });
 
@@ -135,7 +133,6 @@ describe("ConfiguracaoDoOrquestrador", () => {
       ...dados,
       permitirCommitEPush: true,
       ...esforcosPadrao,
-      ...opcoesDeTrabalhoPadrao,
     });
     expect(ligada.com({ nivelDePermissao: "edicao" }).permitirCommitEPush).toBe(true);
     expect(ligada.com({ permitirCommitEPush: undefined }).permitirCommitEPush).toBe(true);
@@ -204,71 +201,73 @@ describe("ConfiguracaoDoOrquestrador", () => {
     });
   });
 
-  describe("trabalho direto e plano em pedidos grandes", () => {
-    it("nasce com as duas opções ligadas quando não são informadas", () => {
+  describe("trivial e plano em pedidos grandes, sempre ligados (ADR-28)", () => {
+    /** Configuração gravada quando as duas ainda eram opções da tela. */
+    function gravadosComAsOpcoesAntigas(trivial: unknown, plano: unknown): DadosDaConfiguracao {
+      return JSON.parse(
+        JSON.stringify({
+          ...dados,
+          permitirCommitEPush: true,
+          ...esforcosPadrao,
+          permitirTrabalhoDireto: trivial,
+          proporPlanoEmPedidosGrandes: plano,
+        }),
+      ) as DadosDaConfiguracao;
+    }
+
+    it("os dois campos não fazem mais parte da configuração", () => {
       const configuracao = ConfiguracaoDoOrquestrador.de(dados);
 
-      expect(configuracao.permitirTrabalhoDireto).toBe(true);
-      expect(configuracao.proporPlanoEmPedidosGrandes).toBe(true);
-      expect(configuracao.paraDados()).toMatchObject(opcoesDeTrabalhoPadrao);
+      expect(Object.keys(configuracao.paraDados()).sort()).toEqual(
+        [
+          "esforcoDoOrquestrador",
+          "esforcoDosSubagentes",
+          "modeloDoOrquestrador",
+          "modeloDosSubagentes",
+          "nivelDePermissao",
+          "permitirCommitEPush",
+          "quantidadeDeSubagentes",
+        ].sort(),
+      );
     });
 
-    it("reconstitui dados gravados antes das opções existirem com as duas ligadas", () => {
-      const gravados = JSON.parse(
-        JSON.stringify({ ...dados, permitirCommitEPush: true, ...esforcosPadrao }),
-      ) as DadosDaConfiguracao;
+    it.each<[unknown, unknown]>([
+      [true, true],
+      [false, false],
+      [true, false],
+      [false, true],
+    ])("lê dados antigos com trivial=%j e plano=%j sem erro e os descarta ao salvar de novo", (trivial, plano) => {
+      const configuracao = ConfiguracaoDoOrquestrador.de(gravadosComAsOpcoesAntigas(trivial, plano));
 
-      expect(gravados).not.toHaveProperty("permitirTrabalhoDireto");
-      expect(ConfiguracaoDoOrquestrador.de(gravados).paraDados()).toMatchObject(opcoesDeTrabalhoPadrao);
+      expect(configuracao.paraDados()).toEqual({ ...dados, permitirCommitEPush: true, ...esforcosPadrao });
+      expect(configuracao.paraDados()).not.toHaveProperty("permitirTrabalhoDireto");
+      expect(configuracao.paraDados()).not.toHaveProperty("proporPlanoEmPedidosGrandes");
     });
 
-    it("aceita as opções desligadas e as devolve em paraDados", () => {
-      const desligadas = ConfiguracaoDoOrquestrador.de({
-        ...dados,
-        permitirTrabalhoDireto: false,
-        proporPlanoEmPedidosGrandes: false,
+    it("dados antigos com valores fora do esperado também são lidos, sem erro", () => {
+      expect(() => ConfiguracaoDoOrquestrador.de(gravadosComAsOpcoesAntigas("sim", 1))).not.toThrow();
+    });
+
+    it("um orquestrador antigo com as duas desligadas passa a propor plano na execução", () => {
+      const antiga = ConfiguracaoDoOrquestrador.de(gravadosComAsOpcoesAntigas(false, false));
+
+      expect(antiga.propoePlanoEmPedidosGrandes("execucao")).toBe(true);
+    });
+
+    it("alterar outro campo não traz os campos antigos de volta", () => {
+      const alterada = ConfiguracaoDoOrquestrador.de(gravadosComAsOpcoesAntigas(false, false)).com({
+        nivelDePermissao: "edicao",
       });
 
-      expect(desligadas.paraDados()).toMatchObject({ permitirTrabalhoDireto: false, proporPlanoEmPedidosGrandes: false });
+      expect(alterada.paraDados()).not.toHaveProperty("permitirTrabalhoDireto");
+      expect(alterada.paraDados()).not.toHaveProperty("proporPlanoEmPedidosGrandes");
     });
 
-    it("altera só a opção informada e mantém o resto", () => {
-      const semTrabalhoDireto = ConfiguracaoDoOrquestrador.de(dados).com({ permitirTrabalhoDireto: false });
+    it("propõe plano em pedidos grandes em todo turno de execução e nunca no planejamento", () => {
+      const configuracao = ConfiguracaoDoOrquestrador.de(dados);
 
-      expect(semTrabalhoDireto.permitirTrabalhoDireto).toBe(false);
-      expect(semTrabalhoDireto.proporPlanoEmPedidosGrandes).toBe(true);
-      expect(semTrabalhoDireto.com({ nivelDePermissao: "edicao" }).permitirTrabalhoDireto).toBe(false);
-      expect(semTrabalhoDireto.com({ permitirTrabalhoDireto: undefined }).permitirTrabalhoDireto).toBe(false);
-      expect(semTrabalhoDireto.com({ proporPlanoEmPedidosGrandes: false }).paraDados()).toMatchObject({
-        permitirTrabalhoDireto: false,
-        proporPlanoEmPedidosGrandes: false,
-      });
-    });
-
-    it.each<[string, Record<string, unknown>, string]>([
-      [
-        "permitirTrabalhoDireto",
-        { permitirTrabalhoDireto: "sim" },
-        'A opção "Deixar o orquestrador fazer o trivial sozinho" deve ser verdadeira ou falsa.',
-      ],
-      [
-        "proporPlanoEmPedidosGrandes",
-        { proporPlanoEmPedidosGrandes: 1 },
-        'A opção "Propor plano antes de mudanças grandes" deve ser verdadeira ou falsa.',
-      ],
-    ])("recusa %s que não é verdadeiro ou falso, com mensagem clara", (_campo, invalido, mensagem) => {
-      const dadosInvalidos = { ...dados, ...invalido } as unknown as DadosDaConfiguracao;
-
-      expect(() => ConfiguracaoDoOrquestrador.de(dadosInvalidos)).toThrow(new ErroDeOrquestracao("dados_invalidos", mensagem));
-    });
-
-    it("só propõe plano em pedidos grandes com a opção ligada e num turno de execução", () => {
-      const ligada = ConfiguracaoDoOrquestrador.de(dados);
-      const desligada = ligada.com({ proporPlanoEmPedidosGrandes: false });
-
-      expect(ligada.propoePlanoEmPedidosGrandes("execucao")).toBe(true);
-      expect(ligada.propoePlanoEmPedidosGrandes("planejamento")).toBe(false);
-      expect(desligada.propoePlanoEmPedidosGrandes("execucao")).toBe(false);
+      expect(configuracao.propoePlanoEmPedidosGrandes("execucao")).toBe(true);
+      expect(configuracao.propoePlanoEmPedidosGrandes("planejamento")).toBe(false);
     });
   });
 });
@@ -416,30 +415,27 @@ describe("mensagemParaOOrquestrador", () => {
 });
 
 describe("mensagemParaOOrquestrador: delegação e pedidos grandes", () => {
-  interface Opcoes {
-    permitirTrabalhoDireto?: boolean;
-    proporPlanoEmPedidosGrandes?: boolean;
-    nivelDePermissao?: NivelDePermissao;
-  }
+  const dadosDoBloco: DadosDaConfiguracao = {
+    modeloDoOrquestrador: "opus",
+    modeloDosSubagentes: "haiku",
+    quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
+    nivelDePermissao: "edicao_e_comandos",
+  };
 
-  function bloco(opcoes: Opcoes = {}, modo: ModoDoTurno = "execucao"): string {
-    const configuracao = ConfiguracaoDoOrquestrador.de({
-      modeloDoOrquestrador: "opus",
-      modeloDosSubagentes: "haiku",
-      quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
-      nivelDePermissao: opcoes.nivelDePermissao ?? "edicao_e_comandos",
-      permitirTrabalhoDireto: opcoes.permitirTrabalhoDireto,
-      proporPlanoEmPedidosGrandes: opcoes.proporPlanoEmPedidosGrandes,
-    });
+  function blocoDe(configuracao: ConfiguracaoDoOrquestrador, modo: ModoDoTurno = "execucao"): string {
     const texto = mensagemParaOOrquestrador("refatore o módulo", configuracao, [], modo);
     return texto.slice(0, texto.indexOf("</configuracao-do-pedido>"));
   }
 
-  const REGRA_ESTRITA =
-    '- Não faça o trabalho você mesmo: não leia, edite nem execute nada diretamente; delegue cada subtarefa a um subagente "executor". Perguntas simples sobre o que já foi feito podem ser respondidas diretamente.';
+  function bloco(nivelDePermissao: NivelDePermissao = "edicao_e_comandos", modo: ModoDoTurno = "execucao"): string {
+    return blocoDe(ConfiguracaoDoOrquestrador.de({ ...dadosDoBloco, nivelDePermissao }), modo);
+  }
 
-  describe("trabalho direto", () => {
-    it("ligado (padrão): faz o trivial, delega o que vale a pena e não edita arquivos", () => {
+  /** A regra de "delegar tudo", que existia quando o trivial era uma opção desligável. */
+  const REGRA_ESTRITA_ANTIGA = "Não faça o trabalho você mesmo";
+
+  describe("trivial", () => {
+    it("sempre: faz o trivial, delega o que vale a pena e não edita arquivos", () => {
       const texto = bloco();
 
       expect(texto).toContain(`- Faça você mesmo o trivial: ${TRABALHO_DIRETO_NO_NIVEL.edicao_e_comandos}.`);
@@ -450,42 +446,63 @@ describe("mensagemParaOOrquestrador: delegação e pedidos grandes", () => {
       );
       expect(texto).toContain("Não use subagente para conferir o próprio trabalho.");
       expect(texto).toContain("- Você não edita arquivos: toda alteração no projeto vai para um subagente");
-      expect(texto).not.toContain(REGRA_ESTRITA);
+      expect(texto).not.toContain(REGRA_ESTRITA_ANTIGA);
     });
 
-    it.each<NivelDePermissao>(["leitura", "edicao"])("ligado no nível %s, não promete terminal ao orquestrador", (nivel) => {
-      const texto = bloco({ nivelDePermissao: nivel });
+    it.each<NivelDePermissao>(["leitura", "edicao"])("no nível %s, não promete terminal ao orquestrador", (nivel) => {
+      const texto = bloco(nivel);
 
       expect(texto).toContain(`- Faça você mesmo o trivial: ${TRABALHO_DIRETO_NO_NIVEL[nivel]}.`);
       expect(texto).toContain("não tem terminal");
       expect(texto).not.toContain("git status");
     });
 
-    it("ligado no planejamento, usa o que o orquestrador pode fazer só lendo", () => {
-      const texto = bloco({}, "planejamento");
+    it("no planejamento, usa o que o orquestrador pode fazer só lendo e investiga ele mesmo ou delegando", () => {
+      const texto = bloco("edicao_e_comandos", "planejamento");
 
       expect(texto).toContain(`- Faça você mesmo o trivial: ${TRABALHO_DIRETO_NO_NIVEL.leitura}.`);
       expect(texto).toContain("  Investigue (você mesmo, se for rápido, ou delegando) e responda com um PLANO, sem executá-lo:");
+      expect(texto).not.toContain("Delegue a investigação");
+      expect(texto).not.toContain(REGRA_ESTRITA_ANTIGA);
+    });
+  });
+
+  describe("orquestrador salvo com as opções antigas desligadas", () => {
+    const antiga = ConfiguracaoDoOrquestrador.de(
+      JSON.parse(
+        JSON.stringify({ ...dadosDoBloco, permitirTrabalhoDireto: false, proporPlanoEmPedidosGrandes: false }),
+      ) as DadosDaConfiguracao,
+    );
+
+    it("na execução, passa a ter o trivial e a regra de pedidos grandes", () => {
+      const texto = blocoDe(antiga);
+
+      expect(texto).toContain(`- Faça você mesmo o trivial: ${TRABALHO_DIRETO_NO_NIVEL.edicao_e_comandos}.`);
+      expect(texto).toContain("- Você não edita arquivos:");
+      expect(texto).toContain("investigue só lendo (você ou subagentes com subtarefas só de leitura)");
+      expect(texto).toContain(`termine a resposta com a linha ${MARCADOR_DE_PLANO}.`);
+      expect(texto).not.toContain(REGRA_ESTRITA_ANTIGA);
+      expect(texto).toBe(bloco());
     });
 
-    it("desligado: volta à regra estrita de delegar tudo", () => {
-      const texto = bloco({ permitirTrabalhoDireto: false });
-
-      expect(texto).toContain(REGRA_ESTRITA);
-      expect(texto).not.toContain("Faça você mesmo o trivial");
-      expect(texto).not.toContain("Você não edita arquivos");
-    });
-
-    it("desligado no planejamento, delega a investigação", () => {
-      const texto = bloco({ permitirTrabalhoDireto: false }, "planejamento");
-
-      expect(texto).toContain("  Delegue a investigação e responda com um PLANO, sem executá-lo:");
-      expect(texto).not.toContain("você mesmo, se for rápido");
+    it("no planejamento, recebe o mesmo bloco de um orquestrador novo", () => {
+      expect(blocoDe(antiga, "planejamento")).toBe(bloco("edicao_e_comandos", "planejamento"));
     });
   });
 
   describe("plano em pedidos grandes", () => {
-    it("ligado (padrão) num turno de execução, manda propor plano com o marcador e executar o pequeno", () => {
+    it.each<NivelDePermissao>(["leitura", "edicao", "edicao_e_comandos"])(
+      "em todo turno de execução (nível %s), manda propor plano com o marcador e executar o pequeno",
+      (nivel) => {
+        const texto = bloco(nivel);
+
+        expect(texto).toContain("- Pedidos grandes: antes de alterar qualquer coisa, avalie o tamanho.");
+        expect(texto).toContain("investigue só lendo (você ou subagentes com subtarefas só de leitura)");
+        expect(texto).toContain(`termine a resposta com a linha ${MARCADOR_DE_PLANO}.`);
+      },
+    );
+
+    it("o texto da regra: limiar, investigação só lendo, marcador e pedido pequeno", () => {
       const texto = bloco();
 
       expect(texto).toContain("- Pedidos grandes: antes de alterar qualquer coisa, avalie o tamanho.");
@@ -502,25 +519,19 @@ describe("mensagemParaOOrquestrador: delegação e pedidos grandes", () => {
       expect(bloco()).toContain(`(mensagem que começa com "${aprovacao.slice(0, aprovacao.indexOf(".") + 1)}")`);
     });
 
-    it("com o trabalho direto desligado, a investigação fica com subagentes", () => {
-      expect(bloco({ permitirTrabalhoDireto: false })).toContain(
-        "investigue só lendo (com subagentes em subtarefas só de leitura)",
-      );
+    it("a investigação nunca fica só com subagentes", () => {
+      expect(bloco()).not.toContain("com subagentes em subtarefas só de leitura");
     });
 
-    it("não aparece no planejamento", () => {
-      const texto = bloco({}, "planejamento");
+    it.each<NivelDePermissao>(["leitura", "edicao", "edicao_e_comandos"])(
+      "não aparece no planejamento (nível de execução %s)",
+      (nivel) => {
+        const texto = bloco(nivel, "planejamento");
 
-      expect(texto).not.toContain("Pedidos grandes");
-      expect(texto).not.toContain(MARCADOR_DE_PLANO);
-    });
-
-    it("não aparece com a opção desligada", () => {
-      const texto = bloco({ proporPlanoEmPedidosGrandes: false });
-
-      expect(texto).not.toContain("Pedidos grandes");
-      expect(texto).not.toContain(MARCADOR_DE_PLANO);
-    });
+        expect(texto).not.toContain("Pedidos grandes");
+        expect(texto).not.toContain(MARCADOR_DE_PLANO);
+      },
+    );
   });
 });
 

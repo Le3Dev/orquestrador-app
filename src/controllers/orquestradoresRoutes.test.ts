@@ -543,7 +543,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
     });
   });
 
-  describe("opções de trabalho direto e de propor plano", () => {
+  describe("trivial e plano sempre ligados: as opções antigas são ignoradas (ADR-28)", () => {
     async function alterarConfiguracao(corpo: unknown): Promise<Response> {
       return fetch(`${base}/orquestradores/${orquestrador.id}/configuracao`, {
         method: "PATCH",
@@ -559,21 +559,50 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       vi.restoreAllMocks();
     });
 
-    const mensagemDoTrabalhoDireto =
-      'A opção "Deixar o orquestrador fazer o trivial sozinho" deve ser verdadeira ou falsa.';
-    const mensagemDoPlano = 'A opção "Propor plano antes de mudanças grandes" deve ser verdadeira ou falsa.';
+    const CAMPOS_ANTIGOS = ["permitirTrabalhoDireto", "proporPlanoEmPedidosGrandes"];
 
-    it("o PATCH aceita as duas opções", async () => {
-      const resposta = await alterarConfiguracao({ permitirTrabalhoDireto: false, proporPlanoEmPedidosGrandes: false });
+    function semCamposAntigos(configuracao: unknown): void {
+      for (const campo of CAMPOS_ANTIGOS) {
+        expect(configuracao).not.toHaveProperty(campo);
+      }
+    }
+
+    it("o GET não traz mais as opções", async () => {
+      const detalhe = (await (await fetch(`${base}/orquestradores/${orquestrador.id}`)).json()) as {
+        configuracao: unknown;
+      };
+      const lista = (await (await fetch(`${base}/orquestradores`)).json()) as Array<{ id: string; configuracao: unknown }>;
+
+      semCamposAntigos(detalhe.configuracao);
+      semCamposAntigos(lista.find((item) => item.id === orquestrador.id)?.configuracao);
+    });
+
+    it.each<[unknown, unknown]>([
+      [false, false],
+      [true, true],
+      ["sim", null],
+    ])("o PATCH com trivial=%j e plano=%j responde 200 e ignora os dois", async (trivial, plano) => {
+      const resposta = await alterarConfiguracao({
+        permitirTrabalhoDireto: trivial,
+        proporPlanoEmPedidosGrandes: plano,
+      });
 
       expect(resposta.status).toBe(200);
-      expect(((await resposta.json()) as { configuracao: unknown }).configuracao).toMatchObject({
-        permitirTrabalhoDireto: false,
-        proporPlanoEmPedidosGrandes: false,
-      });
+      semCamposAntigos(((await resposta.json()) as { configuracao: unknown }).configuracao);
+      semCamposAntigos(orquestrador.configuracao.paraDados());
+      expect(orquestrador.configuracao.propoePlanoEmPedidosGrandes("execucao")).toBe(true);
     });
 
-    it("o POST aceita as duas opções", async () => {
+    it("o PATCH que manda as opções junto de outro campo aplica só o outro campo", async () => {
+      const resposta = await alterarConfiguracao({ nivelDePermissao: "edicao", permitirTrabalhoDireto: false });
+
+      expect(resposta.status).toBe(200);
+      const configuracao = ((await resposta.json()) as { configuracao: unknown }).configuracao;
+      expect(configuracao).toMatchObject({ nivelDePermissao: "edicao" });
+      semCamposAntigos(configuracao);
+    });
+
+    it("o POST com as opções (mesmo com valores inválidos) cria o orquestrador e as ignora", async () => {
       const resposta = await postar("/orquestradores", {
         nome: "Novo",
         pastaDeTrabalho: raiz,
@@ -582,41 +611,13 @@ describe("rotas de orquestradores — modo de planejamento", () => {
         quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
         nivelDePermissao: "leitura",
         permitirTrabalhoDireto: false,
-        proporPlanoEmPedidosGrandes: true,
-      });
-
-      expect(resposta.status).toBe(201);
-      expect(((await resposta.json()) as { configuracao: unknown }).configuracao).toMatchObject({
-        permitirTrabalhoDireto: false,
-        proporPlanoEmPedidosGrandes: true,
-      });
-    });
-
-    it.each<[string, unknown, string]>([
-      ["permitirTrabalhoDireto", "sim", mensagemDoTrabalhoDireto],
-      ["permitirTrabalhoDireto", null, mensagemDoTrabalhoDireto],
-      ["proporPlanoEmPedidosGrandes", 1, mensagemDoPlano],
-      ["proporPlanoEmPedidosGrandes", "nao", mensagemDoPlano],
-    ])("o PATCH recusa %s = %j com 400 e mensagem clara", async (campo, valor, mensagem) => {
-      const resposta = await alterarConfiguracao({ [campo]: valor });
-
-      expect(resposta.status).toBe(400);
-      expect(await resposta.json()).toEqual({ erro: mensagem });
-    });
-
-    it("o POST recusa opção inválida com 400", async () => {
-      const resposta = await postar("/orquestradores", {
-        nome: "Novo",
-        pastaDeTrabalho: raiz,
-        modeloDoOrquestrador: "opus",
-        modeloDosSubagentes: "haiku",
-        quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
-        nivelDePermissao: "leitura",
         proporPlanoEmPedidosGrandes: "sim",
       });
 
-      expect(resposta.status).toBe(400);
-      expect(await resposta.json()).toEqual({ erro: mensagemDoPlano });
+      expect(resposta.status).toBe(201);
+      const criado = (await resposta.json()) as { id: string; configuracao: unknown };
+      semCamposAntigos(criado.configuracao);
+      semCamposAntigos(repositorio.buscarPorId(criado.id)?.configuracao.paraDados());
     });
   });
 });
@@ -733,8 +734,6 @@ describe("rotas de orquestradores — economia de tokens", () => {
           modeloDosSubagentes: "sonnet",
           esforcoDosSubagentes: "medio",
           quantidadeDeSubagentes: { modo: "automatica", limite: 1 },
-          permitirTrabalhoDireto: true,
-          proporPlanoEmPedidosGrandes: false,
         },
       },
     ]);

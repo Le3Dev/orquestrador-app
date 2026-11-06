@@ -498,8 +498,8 @@ export class ServicoDeOrquestracao {
       if (sinal.aborted) {
         this.publicar(orquestrador, orquestrador.cancelarTurno(turnoId, agora()));
       } else if (resultado !== null && resultado.sucesso) {
-        // O marcador sai sempre da resposta; só vira Plano pendente se a
-        // opção estava ligada quando o turno começou e o turno é de execução.
+        // O marcador sai sempre da resposta; só vira Plano pendente num turno
+        // de execução (no planejamento, o turno já termina em Plano).
         const { resposta, planoProposto } = separarPropostaDePlano(resultado.resposta);
         const planoPendente = planoProposto && configuracaoDoTurno.propoePlanoEmPedidosGrandes(modo);
         this.publicar(

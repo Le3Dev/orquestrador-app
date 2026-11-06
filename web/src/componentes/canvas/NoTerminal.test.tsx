@@ -60,8 +60,6 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "edicao_e_comandos",
   permitirCommitEPush: false,
-  permitirTrabalhoDireto: true,
-  proporPlanoEmPedidosGrandes: true,
 };
 
 function orquestrador(alteracoes: Partial<DadosDaConfiguracao> = {}): ResumoDoOrquestrador {
@@ -152,22 +150,6 @@ describe("PainelDeConfiguracao", () => {
       ...configuracao,
       esforcoDoOrquestrador: "alto",
       esforcoDosSubagentes: "baixo",
-    });
-  });
-
-  it("o trabalho direto e o plano automático vão no PATCH junto com o resto da configuração", async () => {
-    const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
-    const { aoFechar } = renderizar(orquestrador());
-
-    fireEvent.click(screen.getByRole("checkbox", { name: "Deixar o orquestrador fazer o trivial sozinho" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "Propor plano antes de mudanças grandes" }));
-    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
-
-    await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
-    expect(alterar).toHaveBeenCalledWith("o1", {
-      ...configuracao,
-      permitirTrabalhoDireto: false,
-      proporPlanoEmPedidosGrandes: false,
     });
   });
 

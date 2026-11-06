@@ -58,8 +58,6 @@ function descreverModelo(modelo: ModeloClaude, esforco: EsforcoDeRaciocinio): st
 /**
  * Ex.: "Opus → Sonnet · até 3 subagentes · Somente leitura" (+ " · commit/push quando pedir", se liberado).
  * Com esforço escolhido (diferente de "padrao"): "Opus (esforço alto) → Sonnet (esforço médio) · …".
- * O trabalho direto e o plano automático vêm ligados: só aparecem quando desligados
- * (" · delegação total", " · sem plano automático").
  */
 export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string {
   const { modo, limite } = configuracao.quantidadeDeSubagentes;
@@ -72,8 +70,6 @@ export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string
     quantidade,
     ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome,
     ...(configuracao.permitirCommitEPush ? ["commit/push quando pedir"] : []),
-    ...(configuracao.permitirTrabalhoDireto ? [] : ["delegação total"]),
-    ...(configuracao.proporPlanoEmPedidosGrandes ? [] : ["sem plano automático"]),
   ].join(" · ");
 }
 
@@ -108,12 +104,6 @@ export function descreverAlteracoesDaConfiguracao(alteracoes: Partial<DadosDaCon
   }
   if (alteracoes.permitirCommitEPush !== undefined) {
     itens.push(`Commit e push quando pedir: ${ligado(alteracoes.permitirCommitEPush)}`);
-  }
-  if (alteracoes.permitirTrabalhoDireto !== undefined) {
-    itens.push(`Fazer o trivial sozinho: ${ligado(alteracoes.permitirTrabalhoDireto)}`);
-  }
-  if (alteracoes.proporPlanoEmPedidosGrandes !== undefined) {
-    itens.push(`Propor plano antes de mudanças grandes: ${ligado(alteracoes.proporPlanoEmPedidosGrandes)}`);
   }
   return itens;
 }
