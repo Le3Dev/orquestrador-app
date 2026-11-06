@@ -134,6 +134,16 @@ export function IconeEngrenagem({ tamanho = 18, className = "" }: PropsDoIcone) 
   );
 }
 
+/** Lápis: o que tem ele ao lado se edita clicando. */
+export function IconeLapis({ tamanho = 13, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={`shrink-0 ${className}`}>
+      <path d="M4 20h4L19 9l-4-4L4 16z" {...TRACO} strokeWidth={1.9} />
+      <path d="m13.5 6.5 4 4" {...TRACO} strokeWidth={1.9} />
+    </Quadro>
+  );
+}
+
 /** Clipe de anexo. */
 export function IconeAnexo({ tamanho = 18, className = "" }: PropsDoIcone) {
   return (

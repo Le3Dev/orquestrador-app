@@ -17,6 +17,11 @@ export const ROTULOS_DOS_ESFORCOS: Readonly<Record<EsforcoDeRaciocinio, string>>
   maximo: "Máximo",
 };
 
+/** Na criação, "padrao" se chama Automático: o app não força nada e vale o padrão do Claude Code. */
+export function rotuloDoEsforcoNaCriacao(esforco: EsforcoDeRaciocinio): string {
+  return esforco === "padrao" ? "Automático" : ROTULOS_DOS_ESFORCOS[esforco];
+}
+
 /** Identificador curto de um Subagente, para caber em chips e no terminal. */
 export function idCurto(id: string): string {
   return id.slice(-4);
