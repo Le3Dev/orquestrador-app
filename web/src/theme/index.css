@@ -1904,6 +1904,56 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 /* O que é clicável (ou tem balão ao passar o mouse) não arrasta a janela. */
 .no-drag { -webkit-app-region: no-drag; }
 
+/* ---------------- Atualização do app (barra de título) ----------------
+ * À esquerda do status. Baixando: texto e medidor discretos. Pronta: uma
+ * etiqueta clicável (sem caixa alta) que abre um cartão logo abaixo da
+ * barra, sobre o canvas. */
+.aviso-de-atualizacao {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: default;
+}
+.ancora-da-atualizacao { position: relative; display: flex; flex-shrink: 0; }
+.pilula-da-atualizacao {
+  cursor: pointer;
+  font-size: 10.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  transition: background-color .15s, border-color .15s;
+}
+.pilula-da-atualizacao:hover {
+  background: color-mix(in srgb, var(--cor-da-etiqueta) 22%, transparent);
+  border-color: color-mix(in srgb, var(--cor-da-etiqueta) 60%, transparent);
+}
+.pilula-da-atualizacao:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.cartao-da-atualizacao {
+  position: absolute;
+  /* Logo abaixo da barra de título (36 px, a pílula centralizada nela). */
+  top: calc(100% + 12px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 300px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border-color: var(--border-forte);
+  font-size: 12.5px;
+  color: var(--caption);
+  white-space: normal;
+  user-select: text;
+  cursor: default;
+  animation: subir-menu .14s ease-out both;
+}
+.cartao-da-atualizacao:focus { outline: none; }
+.texto-do-cartao-da-atualizacao { margin: 0; line-height: 1.45; }
+.botoes-do-cartao-da-atualizacao { display: flex; justify-content: flex-end; gap: 6px; }
+
 /* ---------------- Status (situação, cotas, RAM) ---------------- */
 .status-do-canvas { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 16px; min-width: 0; }
 /* Encostado à direita (nos botões da janela); se não couber, `safe` alinha

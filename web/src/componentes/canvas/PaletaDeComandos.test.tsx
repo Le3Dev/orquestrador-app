@@ -8,6 +8,7 @@ function fonte(): FonteDaPaleta {
   return {
     podeOrganizar: true,
     podeAbrirAjustes: false,
+    atualizacao: null,
     orquestradores: [
       { id: "o1", nome: "Painel de vendas", nomeDaPasta: "painel-app", situacao: "trabalhando" },
       { id: "o2", nome: "Relatórios", nomeDaPasta: "relatorios", situacao: "ocioso" },
@@ -169,6 +170,44 @@ describe("PaletaDeComandos", () => {
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     // Lê de novo ao abrir: a lista sai sempre atualizada.
     expect(lerFonte).toHaveBeenCalledTimes(2);
+  });
+
+  it("\"Procurar atualizações\" executa sem fechar; atualizar() relê a lista só com a paleta aberta", () => {
+    const emDia = {
+      situacao: "em-dia" as const,
+      versaoAtual: "0.2.0",
+      versaoNova: null,
+      progresso: null,
+      mensagemDeErro: null,
+    };
+    let atual: FonteDaPaleta = { ...fonte(), atualizacao: emDia };
+    const lerFonte = vi.fn(() => atual);
+    const aoExecutar = vi.fn<(item: ItemDaPaleta) => void>();
+    const controle = createRef<ControleDaPaleta>();
+    render(<PaletaDeComandos lerFonte={lerFonte} aoExecutar={aoExecutar} controle={controle} />);
+
+    // Fechada, atualizar não lê nada.
+    act(() => controle.current?.atualizar());
+    expect(lerFonte).not.toHaveBeenCalled();
+
+    ctrlK();
+    fireEvent.change(campoDaBusca(), { target: { value: "atualizacoes" } });
+    const opcao = screen.getByRole("option", { name: /Procurar atualizações/ });
+    expect(opcao).toHaveTextContent("Versão 0.2.0 — você está na versão mais recente");
+    fireEvent.click(opcao);
+
+    expect(executado(aoExecutar)).toMatchObject({ tipo: "acao", acao: "procurar-atualizacoes" });
+    expect(screen.getByRole("dialog", { name: "Paleta de comandos" })).toBeInTheDocument();
+    expect(campoDaBusca()).toHaveValue("atualizacoes");
+
+    // O canvas avisa a mudança: o detalhe mostra o resultado, com a busca e a seleção de antes.
+    atual = { ...atual, atualizacao: { ...emDia, situacao: "erro", mensagemDeErro: "sem internet" } };
+    act(() => controle.current?.atualizar());
+
+    expect(screen.getByRole("option", { name: /Procurar atualizações/ })).toHaveTextContent(
+      "Versão 0.2.0 — não foi possível verificar: sem internet",
+    );
+    expect(screen.getByRole("option", { name: /Procurar atualizações/ })).toHaveAttribute("aria-selected", "true");
   });
 
   it("Ctrl com outra tecla ou com Shift não abre", () => {

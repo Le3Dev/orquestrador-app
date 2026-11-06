@@ -13,8 +13,9 @@
 // config.json e a pasta dados/ são COPIADOS (a antiga fica intacta).
 //
 // Fluxo:
-//   1. Licença (só no app empacotado normal): sem uma válida (online ou
-//      grace), abre a telinha de ativação (electron/ativacao.html).
+//   1. Licença (só no app empacotado normal E com `exigirLicenca: true` no
+//      electron/config.js; hoje false, fase de testes): sem uma válida (online
+//      ou grace), abre a telinha de ativação (electron/ativacao.html).
 //   2. Configuração local (<userData>/config.json): sem ela, abre a janela de
 //      primeira abertura (electron/primeiraAbertura.html), que grava a pasta
 //      raiz dos projetos, o caminho do Claude Code e, se marcado, importa o
@@ -24,7 +25,13 @@
 //      30 s; 5 quedas em 2 min → para e mostra o erro).
 //   4. Grava o cookie de acesso, espera /api/saude responder e carrega
 //      http://127.0.0.1:<PORTA> na janela.
-//   5. Ao fechar o app, derruba a árvore inteira do servidor (os claude.exe
+//   5. Atualização automática (só no app empacotado normal; electron/
+//      atualizacao.js): ~10 s depois que a janela principal aparece e a cada
+//      4 h, procura versão nova nas Releases públicas do GitHub
+//      (Le3Dev/orquestrador-app), baixa em segundo plano e avisa a tela
+//      (canal "atualizacao:estado"). A tela pergunta se reinicia agora; se
+//      não, a versão baixada é instalada quando o app fecha.
+//   6. Ao fechar o app, derruba a árvore inteira do servidor (os claude.exe
 //      dos agentes morrem junto).
 //
 // Janela principal: titleBarStyle 'hidden' SEM titleBarOverlay — no Windows a
@@ -45,6 +52,7 @@ const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 
+const { criarServicoDeAtualizacao, estadoInicial: estadoInicialDaAtualizacao } = require("./atualizacao");
 const config = require("./config");
 const licenca = require("./licenca");
 const {
@@ -81,11 +89,20 @@ function lerBuildDeTeste() {
 }
 const BUILD_DE_TESTE = lerBuildDeTeste();
 
-// Licença exigida só no app empacotado normal. Em desenvolvimento e no build
-// de teste ela é pulada para os testes de ponta a ponta rodarem sem chave nem
-// internet. RISCO: um build de teste abre sem licença — ele não pode ser
-// distribuído a clientes (fica em dist_electron_teste, separado do normal).
-const EXIGE_LICENCA = app.isPackaged && !BUILD_DE_TESTE;
+// Licença exigida só no app empacotado normal E quando o config.js manda
+// (`exigirLicenca: true`). Hoje está false (fase de testes com os devs): o app
+// instalado abre sem chave. Mudar para true e publicar uma versão nova religa
+// a licença em todos os apps instalados (chega pela atualização automática).
+// Em desenvolvimento e no build de teste ela é sempre pulada para os testes de
+// ponta a ponta rodarem sem chave nem internet. RISCO: um build de teste abre
+// sem licença — ele não pode ser distribuído a clientes (fica em
+// dist_electron_teste, separado do normal).
+const EXIGE_LICENCA = app.isPackaged && !BUILD_DE_TESTE && config.exigirLicenca === true;
+
+// Atualização automática só no app instalado normal: em desenvolvimento não há
+// app-update.yml, e o build de teste nunca deve trocar a si mesmo por uma
+// versão publicada.
+const ATUALIZACAO_ATIVA = app.isPackaged && !BUILD_DE_TESTE;
 
 // Pasta do usuário trocável só fora do app instalado normal (testes isolados).
 // No instalado, ignorar evita que uma variável de ambiente esquecida desvie os
@@ -128,6 +145,7 @@ let modoDaConfiguracao = "primeira"; // "primeira" | "ajustes"
 let avisoDaConfiguracao = null; // mostrado na janela de configuração ao abrir
 let appFechando = false;
 let salvandoConfiguracao = false;
+let servicoDeAtualizacao = null; // criado no `ready` (prepararAtualizacao)
 
 // ──────────────────────────────────────────────────────────────────────────
 // Utilidades de arquivo.
@@ -535,6 +553,64 @@ async function mostrarErro(janela, titulo, detalhe) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// Atualização automática (electron/atualizacao.js + electron-updater).
+// ──────────────────────────────────────────────────────────────────────────
+// Releases públicas do GitHub (build.publish no package.json → app-update.yml
+// dentro do app instalado). Sem assinatura digital: sem `publisherName` no
+// app-update.yml, o electron-updater pula a verificação de assinatura.
+function enviarEstadoDaAtualizacao(estado) {
+  const janela = janelaPrincipal;
+  if (!janela || janela.isDestroyed() || janela.webContents.isDestroyed()) return;
+  janela.webContents.send("atualizacao:estado", estado);
+}
+
+// O electron-updater só é carregado no app instalado normal; fora dele o
+// serviço fica inativo ("indisponivel").
+function prepararAtualizacao() {
+  let atualizador = null;
+  if (ATUALIZACAO_ATIVA) {
+    try {
+      ({ autoUpdater: atualizador } = require("electron-updater"));
+      atualizador.logger = {
+        info: (texto) => registrarNoLog("atualizacao", texto),
+        warn: (texto) => registrarNoLog("atualizacao", `aviso: ${texto}`),
+        error: (texto) => registrarNoLog("atualizacao", `erro: ${texto}`),
+      };
+      atualizador.autoDownload = true; // baixa sozinho em segundo plano
+      atualizador.autoInstallOnAppQuit = true; // fechar o app instala a versão baixada
+      atualizador.allowPrerelease = false;
+      // Instalador NSIS completo (não o web installer): sem isso o
+      // electron-updater só enche o log com um aviso a cada download.
+      atualizador.disableWebInstaller = true;
+    } catch (erro) {
+      registrarNoLog("atualizacao", `Atualização automática desligada: ${erro.message || erro}`);
+      atualizador = null;
+    }
+  }
+  servicoDeAtualizacao = criarServicoDeAtualizacao({
+    atualizador,
+    versaoAtual: app.getVersion(),
+    ativo: atualizador !== null,
+    registrar: (texto) => registrarNoLog("atualizacao", texto),
+    aoMudar: enviarEstadoDaAtualizacao,
+  });
+}
+
+function estadoDaAtualizacao() {
+  return servicoDeAtualizacao ? servicoDeAtualizacao.obter() : estadoInicialDaAtualizacao(app.getVersion(), false);
+}
+
+// Se a instalação não chegou a disparar depois de o servidor ser encerrado,
+// religa o servidor e recarrega a tela (o app continua aberto).
+async function retomarAposFalhaNaInstalacao() {
+  registrarNoLog("atualizacao", "A instalação não começou; religando o servidor.");
+  appFechando = false;
+  servidor.quedas = [];
+  servidor.desistiu = false;
+  if (janelaPrincipal && !janelaPrincipal.isDestroyed()) await carregarTela(janelaPrincipal);
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // Janelas.
 // ──────────────────────────────────────────────────────────────────────────
 function abrirNoNavegador(url) {
@@ -637,6 +713,11 @@ async function abrirJanelaPrincipal() {
     if (janelaPrincipal === janela) janelaPrincipal = null;
   });
   avisarQuandoMudarMaximizada(janela);
+  // Primeira verificação de atualização ~10 s depois que a janela aparece
+  // (iniciar() só agenda uma vez por abertura do app).
+  janela.once("show", () => {
+    if (servicoDeAtualizacao) servicoDeAtualizacao.iniciar();
+  });
 
   // A tela só navega dentro da própria origem; o resto vai para o navegador.
   const origemDaTela = new URL(urlDaTela()).origin;
@@ -733,6 +814,42 @@ ipcMain.handle("licenca:activate", async (_e, chave) => {
 ipcMain.handle("licenca:validate", () => licenca.validate());
 ipcMain.handle("licenca:deactivate", () => licenca.deactivate());
 ipcMain.handle("licenca:status", () => licenca.status());
+
+// ──────────────────────────────────────────────────────────────────────────
+// IPC — atualização automática (tela principal). Fora do app instalado,
+// obter/verificar devolvem situacao "indisponivel" com a versão atual.
+// ──────────────────────────────────────────────────────────────────────────
+function exigirJanelaPrincipal(evento) {
+  if (!janelaPrincipal || janelaPrincipal.isDestroyed() || evento.sender !== janelaPrincipal.webContents) {
+    throw new Error("Operação permitida só na janela principal.");
+  }
+}
+
+ipcMain.handle("atualizacao:obter", () => estadoDaAtualizacao());
+// Dispara a verificação e devolve o estado logo em seguida (não espera o download).
+ipcMain.handle("atualizacao:verificar", () => {
+  if (!servicoDeAtualizacao) return estadoDaAtualizacao();
+  try {
+    return servicoDeAtualizacao.verificar({ manual: true });
+  } catch (erro) {
+    registrarNoLog("atualizacao", `Falha ao verificar a atualização: ${erro.message || erro}`);
+    return estadoDaAtualizacao();
+  }
+});
+// Só na situação "pronta": encerra o servidor e instala em silêncio, reabrindo
+// o app depois. Em qualquer outra situação não faz nada.
+ipcMain.handle("atualizacao:instalar-agora", async (evento) => {
+  exigirJanelaPrincipal(evento);
+  if (!servicoDeAtualizacao) return;
+  let servidorEncerrado = false;
+  const disparou = servicoDeAtualizacao.instalarAgora({
+    antesDeInstalar: () => {
+      servidorEncerrado = true;
+      encerrarServidorAoFechar();
+    },
+  });
+  if (!disparou && servidorEncerrado) await retomarAposFalhaNaInstalacao();
+});
 
 // ──────────────────────────────────────────────────────────────────────────
 // IPC — configuração (usado pela tela principal).
@@ -911,6 +1028,12 @@ if (!conseguiuLock) {
     if (process.platform === "win32") app.setAppUserModelId(config.appId);
     Menu.setApplicationMenu(null); // remove File/Edit/View/Window
     licenca.iniciar(pastaDoUsuario());
+    // Sem atualização o app ainda abre: a falha só vai para o log.
+    try {
+      prepararAtualizacao();
+    } catch (erro) {
+      registrarNoLog("atualizacao", `Falha ao preparar a atualização automática: ${erro.message || erro}`);
+    }
     try {
       PORTA = await escolherPorta();
     } catch (erro) {

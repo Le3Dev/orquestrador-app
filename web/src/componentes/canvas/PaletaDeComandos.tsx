@@ -22,12 +22,14 @@ import {
 /** O que o canvas pode pedir à paleta (o "Buscar ou executar…" da barra de título; no navegador, o "Buscar"). */
 export interface ControleDaPaleta {
   abrir: () => void;
+  /** Aberta, lê de novo o que listar (ex.: o resultado de "Procurar atualizações"); fechada, nada. */
+  atualizar: () => void;
 }
 
 interface PropsDaPaleta {
-  /** Lê do canvas o que listar, só na hora de abrir: a paleta fechada não acompanha os eventos. */
+  /** Lê do canvas o que listar, ao abrir e a cada `atualizar`: a paleta fechada não acompanha os eventos. */
   lerFonte: () => FonteDaPaleta;
-  /** Executa o item escolhido; a paleta já fechou. */
+  /** Executa o item escolhido; a paleta já fechou (menos nas ações que a mantêm aberta). */
   aoExecutar: (item: ItemDaPaleta) => void;
   controle?: RefObject<ControleDaPaleta | null>;
 }
@@ -85,7 +87,13 @@ function Paleta({ lerFonte, aoExecutar, controle }: PropsDaPaleta) {
     }
   }, []);
 
-  useImperativeHandle(controle, () => ({ abrir }), [abrir]);
+  const atualizar = useCallback(() => {
+    if (caixa.current !== null) {
+      setItens(montarItensDaPaleta(lerFonte()));
+    }
+  }, [lerFonte]);
+
+  useImperativeHandle(controle, () => ({ abrir, atualizar }), [abrir, atualizar]);
 
   // Ctrl+K abre de qualquer lugar e, com a paleta aberta, fecha. Na captura,
   // para nenhum campo engolir o atalho antes.
@@ -136,7 +144,10 @@ function Paleta({ lerFonte, aoExecutar, controle }: PropsDaPaleta) {
   }, [idSelecionado]);
 
   const executar = (item: ItemDaPaleta) => {
-    fechar(false);
+    // Ex.: "Procurar atualizações": a paleta fica aberta e o detalhe mostra o resultado.
+    if (item.tipo !== "acao" || item.mantemAPaletaAberta !== true) {
+      fechar(false);
+    }
     aoExecutar(item);
   };
 
