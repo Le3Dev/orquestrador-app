@@ -17,8 +17,6 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "fixa", limite: 2 },
   nivelDePermissao: "edicao_e_comandos",
   permitirCommitEPush: false,
-  permitirTrabalhoDireto: true,
-  proporPlanoEmPedidosGrandes: true,
 };
 
 describe("formatacao", () => {
@@ -46,8 +44,7 @@ describe("formatacao", () => {
         modeloDosSubagentes: "sonnet",
         esforcoDosSubagentes: "medio",
         quantidadeDeSubagentes: { modo: "automatica", limite: 1 },
-        permitirTrabalhoDireto: true,
-        proporPlanoEmPedidosGrandes: false,
+        permitirCommitEPush: false,
       }),
     ).toEqual([
       "Modelo do orquestrador: Opus",
@@ -55,8 +52,7 @@ describe("formatacao", () => {
       "Modelo dos subagentes: Sonnet",
       "Esforço dos subagentes: Médio",
       "Quantidade de subagentes: automática, ≤1 agente",
-      "Fazer o trivial sozinho: ligado",
-      "Propor plano antes de mudanças grandes: desligado",
+      "Commit e push quando pedir: desligado",
     ]);
     expect(descreverAlteracoesDaConfiguracao({})).toEqual([]);
   });
@@ -101,25 +97,6 @@ describe("formatacao", () => {
   it("acrescenta o commit e push à descrição só quando liberados", () => {
     expect(descreverConfiguracao({ ...configuracao, permitirCommitEPush: true })).toBe(
       "Opus → Sonnet · 2 subagentes · Editar e rodar comandos · commit/push quando pedir",
-    );
-  });
-
-  it("menciona o trabalho direto e o plano automático só quando desligados", () => {
-    expect(descreverConfiguracao({ ...configuracao, permitirTrabalhoDireto: false })).toBe(
-      "Opus → Sonnet · 2 subagentes · Editar e rodar comandos · delegação total",
-    );
-    expect(descreverConfiguracao({ ...configuracao, proporPlanoEmPedidosGrandes: false })).toBe(
-      "Opus → Sonnet · 2 subagentes · Editar e rodar comandos · sem plano automático",
-    );
-    expect(
-      descreverConfiguracao({
-        ...configuracao,
-        permitirCommitEPush: true,
-        permitirTrabalhoDireto: false,
-        proporPlanoEmPedidosGrandes: false,
-      }),
-    ).toBe(
-      "Opus → Sonnet · 2 subagentes · Editar e rodar comandos · commit/push quando pedir · delegação total · sem plano automático",
     );
   });
 

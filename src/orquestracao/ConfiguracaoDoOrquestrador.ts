@@ -22,20 +22,10 @@ export interface DadosDaConfiguracao {
    */
   esforcoDoOrquestrador?: EsforcoDeRaciocinio | undefined;
   esforcoDosSubagentes?: EsforcoDeRaciocinio | undefined;
-  /**
-   * "Deixar o orquestrador fazer o trivial sozinho": se o Orquestrador pode
-   * ler, buscar e rodar comandos curtos ele mesmo, em vez de delegar tudo.
-   * Ausente nas configurações gravadas antes de a opção existir: vale `true`.
-   * `paraDados` sempre o preenche.
-   */
-  permitirTrabalhoDireto?: boolean | undefined;
-  /**
-   * "Propor plano antes de mudanças grandes": se, num turno de execução, o
-   * Orquestrador para e propõe um Plano quando o pedido é grande. Ausente nas
-   * configurações gravadas antes de a opção existir: vale `true`. `paraDados`
-   * sempre o preenche.
-   */
-  proporPlanoEmPedidosGrandes?: boolean | undefined;
+  // "Fazer o trivial sozinho" e "Propor plano antes de mudanças grandes"
+  // deixaram de ser opções (ADR-28): valem sempre. Configurações gravadas
+  // quando ainda eram opções trazem os dois campos; `de` os ignora e
+  // `paraDados` não os devolve, então somem ao salvar de novo.
 }
 
 /** Só os campos informados mudam; os ausentes mantêm o valor atual. */
@@ -45,9 +35,9 @@ export type AlteracoesDaConfiguracao = {
 
 /**
  * Como um Orquestrador trabalha: modelos, esforço de raciocínio, quantos
- * Subagentes, o que eles podem fazer, se o Orquestrador faz o trivial ele
- * mesmo e se propõe um Plano antes de mudanças grandes. Objeto de valor —
- * alterar a configuração produz outra.
+ * Subagentes e o que eles podem fazer. Fazer o trivial ele mesmo e propor um
+ * Plano antes de mudanças grandes não são opções: valem sempre (ADR-28).
+ * Objeto de valor — alterar a configuração produz outra.
  */
 export class ConfiguracaoDoOrquestrador {
   private constructor(
@@ -58,8 +48,6 @@ export class ConfiguracaoDoOrquestrador {
     public readonly permitirCommitEPush: boolean,
     public readonly esforcoDoOrquestrador: EsforcoDeRaciocinio,
     public readonly esforcoDosSubagentes: EsforcoDeRaciocinio,
-    public readonly permitirTrabalhoDireto: boolean,
-    public readonly proporPlanoEmPedidosGrandes: boolean,
   ) {}
 
   static de(dados: DadosDaConfiguracao): ConfiguracaoDoOrquestrador {
@@ -84,20 +72,6 @@ export class ConfiguracaoDoOrquestrador {
     if (!ehEsforcoDeRaciocinio(esforcoDosSubagentes)) {
       throw new ErroDeOrquestracao("dados_invalidos", "Esforço dos subagentes inválido.");
     }
-    const permitirTrabalhoDireto: unknown = dados.permitirTrabalhoDireto ?? true;
-    if (typeof permitirTrabalhoDireto !== "boolean") {
-      throw new ErroDeOrquestracao(
-        "dados_invalidos",
-        'A opção "Deixar o orquestrador fazer o trivial sozinho" deve ser verdadeira ou falsa.',
-      );
-    }
-    const proporPlanoEmPedidosGrandes: unknown = dados.proporPlanoEmPedidosGrandes ?? true;
-    if (typeof proporPlanoEmPedidosGrandes !== "boolean") {
-      throw new ErroDeOrquestracao(
-        "dados_invalidos",
-        'A opção "Propor plano antes de mudanças grandes" deve ser verdadeira ou falsa.',
-      );
-    }
     return new ConfiguracaoDoOrquestrador(
       dados.modeloDoOrquestrador,
       dados.modeloDosSubagentes,
@@ -106,8 +80,6 @@ export class ConfiguracaoDoOrquestrador {
       permitirCommitEPush,
       esforcoDoOrquestrador,
       esforcoDosSubagentes,
-      permitirTrabalhoDireto,
-      proporPlanoEmPedidosGrandes,
     );
   }
 
@@ -123,11 +95,11 @@ export class ConfiguracaoDoOrquestrador {
 
   /**
    * Se, num turno deste modo, o Orquestrador deve avaliar o tamanho do pedido
-   * e, se for grande, propor um Plano em vez de executar: só com a opção
-   * ligada e num turno de execução — o planejamento já termina em Plano.
+   * e, se for grande, propor um Plano em vez de executar: sempre num turno de
+   * execução (ADR-28) — o planejamento já termina em Plano.
    */
   propoePlanoEmPedidosGrandes(modo: ModoDoTurno): boolean {
-    return this.proporPlanoEmPedidosGrandes && modo === "execucao";
+    return modo === "execucao";
   }
 
   com(alteracoes: AlteracoesDaConfiguracao): ConfiguracaoDoOrquestrador {
@@ -140,8 +112,6 @@ export class ConfiguracaoDoOrquestrador {
       permitirCommitEPush: alteracoes.permitirCommitEPush ?? atual.permitirCommitEPush,
       esforcoDoOrquestrador: alteracoes.esforcoDoOrquestrador ?? atual.esforcoDoOrquestrador,
       esforcoDosSubagentes: alteracoes.esforcoDosSubagentes ?? atual.esforcoDosSubagentes,
-      permitirTrabalhoDireto: alteracoes.permitirTrabalhoDireto ?? atual.permitirTrabalhoDireto,
-      proporPlanoEmPedidosGrandes: alteracoes.proporPlanoEmPedidosGrandes ?? atual.proporPlanoEmPedidosGrandes,
     });
   }
 
@@ -154,8 +124,6 @@ export class ConfiguracaoDoOrquestrador {
       permitirCommitEPush: this.permitirCommitEPush,
       esforcoDoOrquestrador: this.esforcoDoOrquestrador,
       esforcoDosSubagentes: this.esforcoDosSubagentes,
-      permitirTrabalhoDireto: this.permitirTrabalhoDireto,
-      proporPlanoEmPedidosGrandes: this.proporPlanoEmPedidosGrandes,
     };
   }
 }

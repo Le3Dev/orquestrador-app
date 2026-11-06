@@ -6,9 +6,9 @@
  * - `edicao`: também criam e alteram arquivos;
  * - `edicao_e_comandos`: também executam comandos no terminal.
  *
- * Com a opção `permitirTrabalhoDireto` ligada, o Orquestrador também lê,
- * busca e roda comandos curtos ele mesmo, dentro do nível — mas nunca edita
- * arquivos: toda alteração vai para um Subagente.
+ * O Orquestrador sempre lê, busca e roda comandos curtos ele mesmo, dentro do
+ * nível (ADR-28) — mas nunca edita arquivos: toda alteração vai para um
+ * Subagente.
  *
  * Commit e push não dependem do nível: ficam proibidos, a menos que o usuário
  * ligue a opção `permitirCommitEPush` da configuração — e, mesmo assim, só
@@ -42,9 +42,9 @@ export const DESCRICAO_DO_NIVEL: Readonly<Record<NivelDePermissao, string>> = {
 };
 
 /**
- * O trivial que o Orquestrador pode fazer ele mesmo em cada nível, quando a
- * opção `permitirTrabalhoDireto` está ligada. Usa as mesmas ferramentas do
- * nível, mas nunca para editar: alterações ficam sempre com os Subagentes.
+ * O trivial que o Orquestrador sempre pode fazer ele mesmo em cada nível
+ * (ADR-28). Usa as mesmas ferramentas do nível, mas nunca para editar:
+ * alterações ficam sempre com os Subagentes.
  * Só no nível `edicao_e_comandos` há terminal.
  */
 export const TRABALHO_DIRETO_NO_NIVEL: Readonly<Record<NivelDePermissao, string>> = {

@@ -202,15 +202,13 @@ interface Props {
 }
 
 /**
- * Modelos e esforço, quantidade de subagentes, permissões e o quanto o
- * orquestrador faz sozinho ou planeja antes — usado ao criar e ao reconfigurar.
+ * Modelos e esforço, quantidade de subagentes, permissões e commit e push —
+ * usado ao criar e ao reconfigurar.
  */
 export function CamposDaConfiguracao({ valor, aoMudar, buscarEsforcoHerdado, aplicarPredefinicao }: Props) {
   const idDoLimite = useId();
   const idDaAjudaDoEsforco = useId();
   const idDaAjudaDoCommit = useId();
-  const idDaAjudaDoTrabalhoDireto = useId();
-  const idDaAjudaDoPlano = useId();
   const predefinicoes = usePredefinicoes();
   const herdados = useEsforcosHerdados(buscarEsforcoHerdado);
   const [aplicando, setAplicando] = useState(false);
@@ -379,36 +377,6 @@ export function CamposDaConfiguracao({ valor, aoMudar, buscarEsforcoHerdado, apl
             Commit e push exigem a permissão de rodar comandos ({ROTULOS_DAS_PERMISSOES.edicao_e_comandos.nome}).
           </span>
         )}
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <label className="flex w-fit cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            checked={valor.permitirTrabalhoDireto}
-            aria-describedby={idDaAjudaDoTrabalhoDireto}
-            onChange={(evento) => mudar("permitirTrabalhoDireto", evento.target.checked)}
-          />
-          <span className="label">Deixar o orquestrador fazer o trivial sozinho</span>
-        </label>
-        <span id={idDaAjudaDoTrabalhoDireto} className="hint">
-          Leituras rápidas, uma checagem ou um comando curto, sem subagente. Alterações continuam delegadas.
-        </span>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <label className="flex w-fit cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            checked={valor.proporPlanoEmPedidosGrandes}
-            aria-describedby={idDaAjudaDoPlano}
-            onChange={(evento) => mudar("proporPlanoEmPedidosGrandes", evento.target.checked)}
-          />
-          <span className="label">Propor plano antes de mudanças grandes</span>
-        </label>
-        <span id={idDaAjudaDoPlano} className="hint">
-          Em pedidos grandes, o orquestrador responde com um plano para você aprovar antes de alterar.
-        </span>
       </div>
 
       <p className="hint">

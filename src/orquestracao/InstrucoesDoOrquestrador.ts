@@ -44,16 +44,10 @@ function regraDaQuantidade(quantidade: QuantidadeDeSubagentes): string {
 }
 
 /**
- * Quem faz o quê no pedido: com o trabalho direto ligado, o Orquestrador faz o
- * trivial dentro do nível e delega o resto; desligado, delega tudo. Em nenhum
- * caso ele edita arquivos.
+ * Quem faz o quê no pedido: o Orquestrador sempre faz o trivial dentro do
+ * nível e delega o resto (ADR-28). Ele nunca edita arquivos do projeto.
  */
-function regrasDeDelegacao(permitirTrabalhoDireto: boolean, nivel: NivelDePermissao): string[] {
-  if (!permitirTrabalhoDireto) {
-    return [
-      `- Não faça o trabalho você mesmo: não leia, edite nem execute nada diretamente; delegue cada subtarefa a um subagente "${NOME_DO_SUBAGENTE}". Perguntas simples sobre o que já foi feito podem ser respondidas diretamente.`,
-    ];
-  }
+function regrasDeDelegacao(nivel: NivelDePermissao): string[] {
   return [
     `- Faça você mesmo o trivial: ${TRABALHO_DIRETO_NO_NIVEL[nivel]}. Cada subagente custa dezenas de milhares de tokens só para começar.`,
     `- Delegue a subagentes "${NOME_DO_SUBAGENTE}" quando houver alteração de arquivos, quando o trabalho exigir ler muitos arquivos ou rodar comandos demorados (build, testes), ou quando der para dividir em partes paralelas. Não use subagente para conferir o próprio trabalho.`,
@@ -84,16 +78,13 @@ function regrasDeArtefatos(pastaDeArtefatos: string): string[] {
 }
 
 /**
- * Num turno de execução, o Orquestrador mede o pedido antes de mexer em algo:
- * se for grande, só investiga e devolve um Plano marcado com
- * `MARCADOR_DE_PLANO`, para o usuário aprovar.
+ * Em todo turno de execução, o Orquestrador mede o pedido antes de mexer em
+ * algo: se for grande, só investiga e devolve um Plano marcado com
+ * `MARCADOR_DE_PLANO`, para o usuário aprovar (ADR-15, ADR-28).
  */
-function regrasDePedidosGrandes(permitirTrabalhoDireto: boolean): string[] {
-  const quemInvestiga = permitirTrabalhoDireto
-    ? "você ou subagentes com subtarefas só de leitura"
-    : "com subagentes em subtarefas só de leitura";
+function regrasDePedidosGrandes(): string[] {
   return [
-    `- Pedidos grandes: antes de alterar qualquer coisa, avalie o tamanho. Se envolver alterar mais de cerca de 3 arquivos, mudar contratos, dados ou arquitetura, ou tiver ambiguidade relevante, NÃO execute: investigue só lendo (${quemInvestiga}) e responda com um PLANO (objetivo; subtarefas por subagente com os arquivos de cada uma, sem dois no mesmo arquivo; ordem; riscos; perguntas em aberto) e termine a resposta com a linha ${MARCADOR_DE_PLANO}. O usuário vai aprovar, ajustar ou descartar.`,
+    `- Pedidos grandes: antes de alterar qualquer coisa, avalie o tamanho. Se envolver alterar mais de cerca de 3 arquivos, mudar contratos, dados ou arquitetura, ou tiver ambiguidade relevante, NÃO execute: investigue só lendo (você ou subagentes com subtarefas só de leitura) e responda com um PLANO (objetivo; subtarefas por subagente com os arquivos de cada uma, sem dois no mesmo arquivo; ordem; riscos; perguntas em aberto) e termine a resposta com a linha ${MARCADOR_DE_PLANO}. O usuário vai aprovar, ajustar ou descartar.`,
     `- Pedido pequeno, ou plano já aprovado (mensagem que começa com "${INICIO_DA_APROVACAO}"): execute direto, sem o marcador.`,
   ];
 }
@@ -149,20 +140,15 @@ export function mensagemParaOOrquestrador(
   const regraDeCommitEPush = configuracao.permiteCommitEPush(modo)
     ? COMMIT_E_PUSH_QUANDO_PEDIDOS
     : COMMIT_E_PUSH_PROIBIDOS;
-  const investigacao = configuracao.permitirTrabalhoDireto
-    ? "Investigue (você mesmo, se for rápido, ou delegando)"
-    : "Delegue a investigação";
   const regrasDoPlanejamento = planejamento
     ? [
         "- Modo: PLANEJAMENTO. Neste pedido nada no projeto pode ser alterado: os subagentes só leem e pesquisam, seja qual for a permissão de execução.",
-        `  ${investigacao} e responda com um PLANO, sem executá-lo: objetivo; subtarefas (uma por subagente, com os arquivos que cada uma vai alterar, sem dois subagentes no mesmo arquivo); ordem; riscos; perguntas em aberto.`,
+        "  Investigue (você mesmo, se for rápido, ou delegando) e responda com um PLANO, sem executá-lo: objetivo; subtarefas (uma por subagente, com os arquivos que cada uma vai alterar, sem dois subagentes no mesmo arquivo); ordem; riscos; perguntas em aberto.",
         `  Na execução valerá: ${DESCRICAO_DO_NIVEL[configuracao.nivelDePermissao]}. Planeje dentro disso.`,
         "  O usuário vai aprovar, ajustar ou descartar o plano antes de qualquer execução.",
       ]
     : [];
-  const regrasDoTamanho = configuracao.propoePlanoEmPedidosGrandes(modo)
-    ? regrasDePedidosGrandes(configuracao.permitirTrabalhoDireto)
-    : [];
+  const regrasDoTamanho = configuracao.propoePlanoEmPedidosGrandes(modo) ? regrasDePedidosGrandes() : [];
   // As imagens chegam junto com a mensagem para o Orquestrador; os
   // Subagentes não as recebem, então precisam dos caminhos para abri-las.
   const imagens =
@@ -176,7 +162,7 @@ export function mensagemParaOOrquestrador(
   return [
     `<${MARCA_DA_CONFIGURACAO}>`,
     "Configuração vigente para este pedido, definida pelo usuário na tela. Ela substitui qualquer regra de delegação, quantidade de subagentes ou permissão mencionada antes nesta conversa, inclusive nas suas instruções iniciais.",
-    ...regrasDeDelegacao(configuracao.permitirTrabalhoDireto, nivelDoPedido),
+    ...regrasDeDelegacao(nivelDoPedido),
     `- Subagentes: ${regraDaQuantidade(configuracao.quantidadeDeSubagentes)}`,
     `- Permissões: ${DESCRICAO_DO_NIVEL[nivelDoPedido]}. ${regraDeCommitEPush}`,
     ...regrasDoPlanejamento,

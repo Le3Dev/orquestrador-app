@@ -301,8 +301,6 @@ function useConfiguracaoEstavel(atual: DadosDaConfiguracao): DadosDaConfiguracao
     esforcoDosSubagentes,
     nivelDePermissao,
     permitirCommitEPush,
-    permitirTrabalhoDireto,
-    proporPlanoEmPedidosGrandes,
   } = atual;
   const { modo, limite } = atual.quantidadeDeSubagentes;
   return useMemo<DadosDaConfiguracao>(
@@ -314,8 +312,6 @@ function useConfiguracaoEstavel(atual: DadosDaConfiguracao): DadosDaConfiguracao
       quantidadeDeSubagentes: { modo, limite },
       nivelDePermissao,
       permitirCommitEPush,
-      permitirTrabalhoDireto,
-      proporPlanoEmPedidosGrandes,
     }),
     [
       modeloDoOrquestrador,
@@ -326,8 +322,6 @@ function useConfiguracaoEstavel(atual: DadosDaConfiguracao): DadosDaConfiguracao
       limite,
       nivelDePermissao,
       permitirCommitEPush,
-      permitirTrabalhoDireto,
-      proporPlanoEmPedidosGrandes,
     ],
   );
 }

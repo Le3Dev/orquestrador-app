@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
+import { ConfiguracaoDoOrquestrador, DadosDaConfiguracao } from "./ConfiguracaoDoOrquestrador";
 import {
   predefinicaoCorrespondente,
   PREDEFINICOES,
@@ -15,8 +15,6 @@ const configuracao = ConfiguracaoDoOrquestrador.de({
   permitirCommitEPush: true,
   esforcoDoOrquestrador: "maximo",
   esforcoDosSubagentes: "padrao",
-  permitirTrabalhoDireto: false,
-  proporPlanoEmPedidosGrandes: true,
 });
 
 function economico() {
@@ -44,13 +42,43 @@ describe("PredefinicaoDeConfiguracao", () => {
       modeloDosSubagentes: "sonnet",
       esforcoDosSubagentes: "medio",
       quantidadeDeSubagentes: { modo: "automatica", limite: 1 },
-      permitirTrabalhoDireto: true,
-      proporPlanoEmPedidosGrandes: false,
       nivelDePermissao: "edicao_e_comandos",
       permitirCommitEPush: true,
     });
     // A configuração de origem não muda (objeto de valor).
     expect(configuracao.modeloDoOrquestrador).toBe("fable");
+  });
+
+  it("não mexe no trivial nem no plano em pedidos grandes, que valem sempre (ADR-28)", () => {
+    const predefinicao = economico();
+    const aplicada = predefinicao.aplicarEm(configuracao);
+
+    expect(Object.keys(predefinicao.alteracoes).sort()).toEqual(
+      [
+        "esforcoDoOrquestrador",
+        "esforcoDosSubagentes",
+        "modeloDoOrquestrador",
+        "modeloDosSubagentes",
+        "quantidadeDeSubagentes",
+      ].sort(),
+    );
+    expect(predefinicao.descricao).not.toMatch(/plano|trivial/i);
+    expect(aplicada.propoePlanoEmPedidosGrandes("execucao")).toBe(true);
+  });
+
+  it("um orquestrador salvo com o modo econômico antigo (que desligava o plano) continua correspondendo a ele", () => {
+    const salvaAntes = ConfiguracaoDoOrquestrador.de(
+      JSON.parse(
+        JSON.stringify({
+          ...economico().aplicarEm(configuracao).paraDados(),
+          permitirTrabalhoDireto: true,
+          proporPlanoEmPedidosGrandes: false,
+        }),
+      ) as DadosDaConfiguracao,
+    );
+
+    expect(predefinicaoCorrespondente(salvaAntes)).toBe("economico");
+    expect(salvaAntes.propoePlanoEmPedidosGrandes("execucao")).toBe(true);
   });
 
   it("correspondeA é verdadeiro depois de aplicar e falso se um campo dela muda", () => {

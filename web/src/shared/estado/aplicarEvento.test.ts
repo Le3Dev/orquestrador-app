@@ -16,8 +16,6 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
-  permitirTrabalhoDireto: true,
-  proporPlanoEmPedidosGrandes: true,
 };
 
 function registrar(eventos: EventoDeOrquestracao[]): EventoRegistrado[] {
@@ -213,37 +211,8 @@ describe("aplicarEvento", () => {
       permitirCommitEPush: false,
       esforcoDoOrquestrador: "padrao",
       esforcoDosSubagentes: "padrao",
-      permitirTrabalhoDireto: true,
-      proporPlanoEmPedidosGrandes: true,
     });
     expect(novo?.configuracao.permitirCommitEPush).toBe(true);
-  });
-
-  it("lê com o trabalho direto e o plano automático ligados os eventos gravados antes das opções", () => {
-    const configuracaoAntiga: DadosDaConfiguracaoGravada = {
-      modeloDoOrquestrador: "opus",
-      esforcoDoOrquestrador: "padrao",
-      modeloDosSubagentes: "sonnet",
-      esforcoDosSubagentes: "padrao",
-      quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
-      nivelDePermissao: "leitura",
-      permitirCommitEPush: false,
-    };
-    const [antigo, novo] = reproduzir(
-      registrar([
-        { tipo: "turno_iniciado", turnoId: "t1", texto: "antigo", configuracao: configuracaoAntiga },
-        { tipo: "turno_cancelado", turnoId: "t1" },
-        {
-          tipo: "turno_iniciado",
-          turnoId: "t2",
-          texto: "novo",
-          configuracao: { ...configuracao, permitirTrabalhoDireto: false, proporPlanoEmPedidosGrandes: false },
-        },
-      ]),
-    ).turnos;
-
-    expect(antigo?.configuracao).toMatchObject({ permitirTrabalhoDireto: true, proporPlanoEmPedidosGrandes: true });
-    expect(novo?.configuracao).toMatchObject({ permitirTrabalhoDireto: false, proporPlanoEmPedidosGrandes: false });
   });
 
   it("ferramenta usada pelo próprio orquestrador vira uma linha normal de atividade, com o verbo da ferramenta", () => {

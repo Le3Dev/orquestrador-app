@@ -60,22 +60,21 @@ export class PredefinicaoDeConfiguracao {
 /**
  * "Modo econômico": o modo orquestrador chegou a gastar de 1,1× a 2,2× o
  * Claude Code direto no benchmark. Esta predefinição corta o que mais pesa —
- * esforço alto, muitos Subagentes e o Plano obrigatório em pedidos grandes —
- * sem mexer em permissões nem em commit e push.
+ * esforço alto e muitos Subagentes — sem mexer em permissões nem em commit e
+ * push. Fazer o trivial sozinho e propor plano em pedidos grandes valem
+ * sempre, também aqui (ADR-28).
  */
 const ECONOMICO = new PredefinicaoDeConfiguracao(
   "economico",
   "Modo econômico",
-  "Orquestrador no Opus e subagentes no Sonnet, os dois com esforço médio; no máximo 1 subagente; " +
-    "o orquestrador faz o trivial sozinho e não para para propor plano. Permissões e commit/push não mudam.",
+  "Orquestrador no Opus e subagentes no Sonnet, os dois com esforço médio; no máximo 1 subagente. " +
+    "Permissões e commit/push não mudam.",
   {
     modeloDoOrquestrador: "opus",
     esforcoDoOrquestrador: "medio",
     modeloDosSubagentes: "sonnet",
     esforcoDosSubagentes: "medio",
     quantidadeDeSubagentes: { modo: "automatica", limite: 1 },
-    permitirTrabalhoDireto: true,
-    proporPlanoEmPedidosGrandes: false,
   },
 );
 
