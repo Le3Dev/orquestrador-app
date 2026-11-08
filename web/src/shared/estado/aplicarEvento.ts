@@ -12,6 +12,7 @@ import type {
   PerguntaDoApp,
   SituacaoDoSubagente,
   SituacaoDoTurno,
+  TarefaDoOrquestrador,
   UsoDoTurno,
 } from "../api/tipos";
 import { CERCA_DE_PERGUNTA, semBlocosDoApp } from "../blocosDoApp";
@@ -92,6 +93,11 @@ export interface TurnoNaTela {
   /** Ferramentas que o Orquestrador usou ele mesmo, sem Subagente (leituras, checagens, comandos curtos). */
   ferramentasDiretas: AcaoRegistrada[];
   permissoesNegadas: AcaoRegistrada[];
+  /**
+   * A lista de tarefas mais recente do Orquestrador (`TodoWrite`): cada
+   * atualização substitui a anterior. Vazia, ou ausente, sem lista.
+   */
+  tarefas?: TarefaDoOrquestrador[];
   log: LinhaDoLog[];
   /**
    * A última etapa da autorrecuperação deste turno (travou ou falhou e o app
@@ -289,6 +295,10 @@ function alteracaoDoTurno(evento: EventoRegistrado): AlteracaoDeTurno | null {
         ferramentasDiretas: [...turno.ferramentasDiretas, { ferramenta: evento.ferramenta, detalhe: evento.detalhe }],
       });
 
+    // A lista chega inteira a cada atualização: a última vale.
+    case "tarefas_atualizadas":
+      return (turno) => ({ ...turno, tarefas: evento.tarefas });
+
     case "permissao_negada":
       return (turno) => ({
         ...turno,
@@ -471,6 +481,17 @@ export function linhaDoLog(evento: EventoRegistrado, turno: TurnoNaTela): Omit<L
         tipo: "ferramenta",
         texto: atividadeDoOrquestrador(evento.ferramenta, evento.detalhe),
       };
+    // Como as ferramentas, some do histórico quando o pedido termina: o progresso fica na barra.
+    case "tarefas_atualizadas": {
+      const concluidas = evento.tarefas.filter((tarefa) => tarefa.situacao === "concluida").length;
+      const emAndamento = evento.tarefas.find((tarefa) => tarefa.situacao === "em_andamento");
+      const progresso = `tarefas: ${concluidas} de ${evento.tarefas.length} concluídas`;
+      return {
+        origem: "orquestrador",
+        tipo: "ferramenta",
+        texto: emAndamento === undefined ? progresso : `${progresso} · ${primeiraLinha(emAndamento.texto)}`,
+      };
+    }
     case "subagente_iniciado":
       return {
         origem: "orquestrador",
@@ -563,6 +584,7 @@ function novoTurno(evento: Extract<EventoRegistrado, { tipo: "turno_iniciado" }>
     subagentes: [],
     ferramentasDiretas: [],
     permissoesNegadas: [],
+    tarefas: [],
     log: [],
     recuperacao: null,
     retomada: evento.retomada ?? null,

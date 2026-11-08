@@ -193,6 +193,62 @@ describe("TranscricaoDoTerminal", () => {
     expect(screen.getByRole("button", { name: /≈ custo do turno · índice 235\smil · parcial/ })).toBeInTheDocument();
   });
 
+  describe("progresso das tarefas", () => {
+    const comTarefas = () =>
+      aplicar(
+        ESTADO_INICIAL,
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija o bug", configuracao },
+        {
+          tipo: "tarefas_atualizadas",
+          turnoId: "t1",
+          tarefas: [
+            { texto: "Ler o código", situacao: "concluida" },
+            { texto: "Corrigir o cálculo", situacao: "concluida" },
+            { texto: "Rodando os testes", situacao: "em_andamento" },
+            { texto: "Atualizar o README", situacao: "pendente" },
+          ],
+        },
+      );
+
+    it("o pedido em andamento mostra a barra com a contagem e a tarefa atual; o clique abre a lista", () => {
+      render(<Transcricao conversa={comTarefas()} />);
+
+      const resumo = screen.getByRole("button", { name: /2 de 4 tarefas/ });
+      expect(resumo).toHaveTextContent("· Rodando os testes");
+      expect(resumo).toHaveAttribute("title", "✓ Ler o código\n✓ Corrigir o cálculo\n▸ Rodando os testes\n○ Atualizar o README");
+      expect(screen.getByRole("progressbar", { name: "Tarefas concluídas" })).toHaveAttribute("aria-valuenow", "2");
+      expect(screen.queryByRole("list", { name: "Tarefas do orquestrador" })).not.toBeInTheDocument();
+
+      fireEvent.click(resumo);
+
+      const lista = screen.getByRole("list", { name: "Tarefas do orquestrador" });
+      expect(resumo).toHaveAttribute("aria-expanded", "true");
+      expect([...lista.querySelectorAll("li")].map((item) => [item.className, item.textContent])).toEqual([
+        ["tarefa-concluida", "✓Ler o código (concluída)"],
+        ["tarefa-concluida", "✓Corrigir o cálculo (concluída)"],
+        ["tarefa-em_andamento", "▸Rodando os testes (em andamento)"],
+        ["tarefa-pendente", "○Atualizar o README (pendente)"],
+      ]);
+    });
+
+    it("some quando o pedido termina, e sem lista não aparece", () => {
+      const { rerender } = render(
+        <Transcricao
+          conversa={aplicar(ESTADO_INICIAL, { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija", configuracao })}
+        />,
+      );
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+
+      rerender(
+        <Transcricao
+          conversa={aplicar(comTarefas(), { tipo: "turno_concluido", turnoId: "t1", resposta: "Corrigido.", uso: USO })}
+        />,
+      );
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      expect(screen.queryByText(/de 4 tarefas/)).not.toBeInTheDocument();
+    });
+  });
+
   it("marca a configuração com a etiqueta \"econômico\" só quando ela corresponde ao modo econômico", () => {
     const { rerender } = render(<Transcricao conversa={ESTADO_INICIAL} />);
     expect(screen.queryByText("econômico")).not.toBeInTheDocument();

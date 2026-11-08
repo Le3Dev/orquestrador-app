@@ -317,6 +317,22 @@ describe("ServicoDeOrquestracao", () => {
     expect(repositorio.eventos.map((evento) => evento.tipo)).toEqual(["turno_iniciado", "turno_concluido"]);
   });
 
+  it("grava e publica a lista de tarefas do orquestrador com o turno", async () => {
+    const orquestrador = await criar();
+    const tarefas = [
+      { texto: "Ler o código", situacao: "concluida" as const },
+      { texto: "Rodando os testes", situacao: "em_andamento" as const },
+    ];
+    motor.eventos = [{ tipo: "tarefas_atualizadas", tarefas }];
+
+    const { turnoId, conclusao } = await servico.enviarMensagem(orquestrador.id, "analise");
+    motor.terminar();
+    await conclusao;
+
+    expect(repositorio.eventos[1]).toMatchObject({ tipo: "tarefas_atualizadas", turnoId, tarefas });
+    expect(publicados.filter((evento) => evento.tipo === "tarefas_atualizadas")).toHaveLength(1);
+  });
+
   it("guarda as imagens e as entrega ao motor pelo caminho em disco", async () => {
     const orquestrador = await criar();
     const conteudo = new Uint8Array([1, 2, 3]);

@@ -25,6 +25,14 @@ export interface JanelaDaCota {
 
 export type SituacaoFinalDoSubagente = "concluido" | "falhou" | "cancelado";
 
+export type SituacaoDaTarefa = "pendente" | "em_andamento" | "concluida";
+
+/** Um item da lista de tarefas que o Orquestrador mantém (`TodoWrite` do Claude Code). */
+export interface TarefaDoOrquestrador {
+  texto: string;
+  situacao: SituacaoDaTarefa;
+}
+
 /** O que o motor observa enquanto executa um turno. */
 export type EventoDoMotor =
   | { tipo: "sessao_iniciada" }
@@ -69,6 +77,11 @@ export type EventoDoMotor =
    * Chega uma vez por endereço em cada turno, já normalizado.
    */
   | { tipo: "endereco_local_detectado"; url: string }
+  /**
+   * O Orquestrador atualizou a lista de tarefas do trabalho (`TodoWrite`):
+   * a lista inteira, que substitui a anterior. Nunca vem vazia.
+   */
+  | { tipo: "tarefas_atualizadas"; tarefas: TarefaDoOrquestrador[] }
   /** O Claude está raciocinando: não muda o turno, só mostra que há vida. */
   | { tipo: "sinal_de_vida"; tokensPensando: number };
 

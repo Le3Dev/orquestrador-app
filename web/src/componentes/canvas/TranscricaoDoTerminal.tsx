@@ -30,6 +30,7 @@ import { CartaoDePergunta } from "../chat/CartaoDePergunta";
 import { TextoFormatado } from "../TextoFormatado";
 import { type AcoesDoPlano, CartaoDoPlano } from "./CartaoDoPlano";
 import { CustoDoTurno } from "./CustoDoTurno";
+import { ProgressoDasTarefas } from "./ProgressoDasTarefas";
 
 const SIMBOLOS: Readonly<Record<TipoDeLinhaDoLog, ReactNode>> = {
   sistema: "○",
@@ -257,6 +258,8 @@ const Turno = memo(function Turno({
   const linhas = emAndamento ? turno.log : turno.log.filter((linha) => linha.tipo !== "ferramenta");
   const recuperacao = turno.recuperacao ?? null;
   const retomada = turno.retomada ?? null;
+  // Como o sinal de vida, o progresso só interessa enquanto o pedido roda.
+  const tarefas = emAndamento ? (turno.tarefas ?? []) : [];
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -298,6 +301,7 @@ const Turno = memo(function Turno({
           <LinhaDoTerminal key={linha.sequencia} linha={linha} />
         ))}
       </div>
+      {tarefas.length > 0 && <ProgressoDasTarefas tarefas={tarefas} />}
       {emAndamento &&
         (desconectado ? (
           // Sem servidor não há notícia dos agentes: o spinner daria a

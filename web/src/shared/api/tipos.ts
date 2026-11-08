@@ -176,6 +176,14 @@ export type ModoDoTurno = "execucao" | "planejamento";
 export type DecisaoDoPlano = "pendente" | "aprovado" | "descartado";
 export type SituacaoDoSubagente = "executando" | "concluido" | "falhou" | "cancelado";
 
+export type SituacaoDaTarefa = "pendente" | "em_andamento" | "concluida";
+
+/** Um item da lista de tarefas que o Orquestrador mantém (`TodoWrite` do Claude Code). */
+export interface TarefaDoOrquestrador {
+  texto: string;
+  situacao: SituacaoDaTarefa;
+}
+
 /**
  * Git worktree em que o Orquestrador opera. `null` quando a pasta não é um
  * repositório git (o Orquestrador não usa worktree).
@@ -396,6 +404,8 @@ type EventoDeTurno =
   // normalizada: "http(s)://localhost:PORTA" e o caminho, sem a barra final solitária.
   | { tipo: "endereco_local_detectado"; url: string }
   | { tipo: "uso_da_cota"; janelas: JanelaDaCota[] }
+  // A lista de tarefas do Orquestrador (`TodoWrite`), inteira: substitui a anterior. Nunca vem vazia.
+  | { tipo: "tarefas_atualizadas"; tarefas: TarefaDoOrquestrador[] }
   // `anexos` e `modo` faltam nos eventos gravados antes de existirem imagens e o Plan Mode.
   | {
       tipo: "turno_iniciado";

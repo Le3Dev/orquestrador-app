@@ -735,6 +735,33 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .linha-erro .linha-simbolo, .linha-erro .linha-texto { color: var(--error); }
 .linha-sistema .linha-texto { color: var(--muted); }
 
+/* Progresso das tarefas do pedido em andamento (TodoWrite): a barra, "3 de 7
+ * tarefas" e a tarefa atual; o clique abre a lista. Sem animação. */
+.progresso-das-tarefas { display: flex; flex-direction: column; gap: 2px; }
+.progresso-das-tarefas-resumo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--secondary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.progresso-das-tarefas-resumo .medidor { flex-shrink: 0; }
+.progresso-das-tarefas-resumo:hover .progresso-das-tarefas-contagem { color: var(--primary); text-decoration: underline; }
+.progresso-das-tarefas-resumo:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; border-radius: 3px; }
+.progresso-das-tarefas-contagem { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.progresso-das-tarefas-atual { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--active); }
+.progresso-das-tarefas-lista { display: flex; flex-direction: column; gap: 1px; margin: 2px 0 2px 84px; font-size: 11px; color: var(--muted); }
+.progresso-das-tarefas-lista li { display: flex; gap: 6px; overflow-wrap: anywhere; }
+.tarefa-marca { width: 12px; flex-shrink: 0; text-align: center; }
+.tarefa-concluida { color: var(--success); }
+.tarefa-em_andamento { color: var(--active); }
+
 /* Custo estimado do pedido: uma linha discreta no fim, que abre a tabela por trecho. */
 .custo-do-turno { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .custo-do-turno-resumo {

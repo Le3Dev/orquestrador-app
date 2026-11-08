@@ -301,6 +301,50 @@ describe("aplicarEvento", () => {
     expect(turno?.ferramentasDiretas).toHaveLength(8);
   });
 
+  describe("tarefas do orquestrador", () => {
+    it("guarda a última lista do turno, que substitui a anterior, com uma linha de atividade por atualização", () => {
+      const [turno] = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija o bug", configuracao },
+          {
+            tipo: "tarefas_atualizadas",
+            turnoId: "t1",
+            tarefas: [
+              { texto: "Lendo o código", situacao: "em_andamento" },
+              { texto: "Rodar os testes", situacao: "pendente" },
+            ],
+          },
+          {
+            tipo: "tarefas_atualizadas",
+            turnoId: "t1",
+            tarefas: [
+              { texto: "Ler o código", situacao: "concluida" },
+              { texto: "Rodando os testes", situacao: "em_andamento" },
+              { texto: "Atualizar o README", situacao: "pendente" },
+            ],
+          },
+        ]),
+      ).turnos;
+
+      expect(turno?.tarefas).toEqual([
+        { texto: "Ler o código", situacao: "concluida" },
+        { texto: "Rodando os testes", situacao: "em_andamento" },
+        { texto: "Atualizar o README", situacao: "pendente" },
+      ]);
+      expect(turno?.log.slice(1).map((linha) => [linha.tipo, linha.texto])).toEqual([
+        ["ferramenta", "tarefas: 0 de 2 concluídas · Lendo o código"],
+        ["ferramenta", "tarefas: 1 de 3 concluídas · Rodando os testes"],
+      ]);
+      expect(turno?.ferramentasDiretas).toEqual([]);
+    });
+
+    it("sem o evento (histórico antigo), o turno fica sem tarefas", () => {
+      const [turno] = reproduzir(historico).turnos;
+
+      expect(turno?.tarefas).toEqual([]);
+    });
+  });
+
   describe("orquestrador renomeado", () => {
     it("guarda o nome mais recente sem mexer nos turnos, também durante um pedido e depois do /clear", () => {
       const eventos = registrar([
