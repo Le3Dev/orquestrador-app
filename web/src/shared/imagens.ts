@@ -5,6 +5,11 @@ export const TIPOS_DE_IMAGEM: readonly TipoDeImagem[] = ["image/png", "image/jpe
 export const TAMANHO_MAXIMO_DA_IMAGEM = 5 * 1024 * 1024;
 export const MAXIMO_DE_IMAGENS = 5;
 
+/** Captura de tela do modo invisível: o Electron nomeia como `tela-<ISO>.jpg`. */
+export function ehCapturaDeTela(nome: string): boolean {
+  return /^tela-.+\.jpg$/i.test(nome);
+}
+
 export interface ImagemAnexada {
   id: string;
   nome: string;

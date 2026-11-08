@@ -100,6 +100,7 @@ import { ProvedorDasNotas } from "../shared/canvas/notas";
 import { useAjustesDoAplicativo } from "../shared/hooks/useAjustesDoAplicativo";
 import { useArtefatos } from "../shared/hooks/useArtefatos";
 import { useAtualizacao } from "../shared/hooks/useAtualizacao";
+import { useModoInvisivel } from "../shared/hooks/useModoInvisivel";
 import { useChat } from "../shared/hooks/useChat";
 import { useConversas } from "../shared/hooks/useConversas";
 import { useMovimentoDoCanvas } from "../shared/hooks/useMovimentoDoCanvas";
@@ -205,7 +206,7 @@ const ESPERA_PARA_MEDIR_MS = 80;
 
 function CanvasVazio({ aoCriar }: { aoCriar: () => void }) {
   return (
-    <div className="pointer-events-none absolute inset-0 grid place-items-center">
+    <div className="canvas-vazio pointer-events-none absolute inset-0 grid place-items-center">
       <div className="painel-flutuante pointer-events-auto flex max-w-md flex-col items-center gap-4 px-8 py-7 text-center">
         <div className="no-orquestrador-icone h-12 w-12">
           <IconeOrquestrador tamanho={26} />
@@ -235,6 +236,12 @@ function Canvas() {
   // Dentro do app desktop, a barra de título é da tela (com o status).
   const [desktop] = useState(rodandoNoDesktop);
   const areaDoCanvas = useRef<HTMLDivElement>(null);
+  // Modo invisível: só o header e o chat rápido ficam; o resto é escondido por CSS (nada é desmontado).
+  const { ativo: modoInvisivel } = useModoInvisivel();
+  useEffect(() => {
+    document.documentElement.classList.toggle("modo-invisivel", modoInvisivel);
+    return () => document.documentElement.classList.remove("modo-invisivel");
+  }, [modoInvisivel]);
   const [enquadrarAoAbrir] = useState(
     () =>
       layoutInicial.viewport === null &&
@@ -965,7 +972,7 @@ function Canvas() {
       <ProvedorDasNotas valor={notas.valor}>
         <ProvedorDosArtefatos valor={valorDosArtefatos}>
           <div
-            className={`flex h-screen w-screen flex-col ${servidor.conectado ? "" : "canvas-desconectado"} ${movimento.movendo ? "canvas-movendo" : ""}`}
+            className={`flex h-screen w-screen flex-col ${servidor.conectado ? "" : "canvas-desconectado"} ${movimento.movendo ? "canvas-movendo" : ""} ${modoInvisivel ? "canvas-modo-invisivel" : ""}`}
           >
             {barraDeTitulo}
             <div ref={areaDoCanvas} className="relative min-h-0 w-full flex-1">

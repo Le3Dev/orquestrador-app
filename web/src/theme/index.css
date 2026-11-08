@@ -107,6 +107,12 @@
 
 * { box-sizing: border-box; }
 
+/* A janela do app é transparente; o fundo opaco do modo normal vem daqui. */
+html,
+#root {
+  background-color: var(--screen-bg);
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -1901,6 +1907,125 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   color: var(--primary);
   white-space: nowrap;
 }
+/* ---------------- Modo invisível (app desktop) ----------------
+ * A janela fica transparente: só a barra de título e o chat rápido aparecem.
+ * O canvas, os terminais, os cards e os painéis continuam montados (o estado
+ * e as sessões dos terminais ficam), só escondidos e sem receber o mouse;
+ * `visibility` (e não `display`) mantém o tamanho, para os terminais não
+ * redimensionarem. A classe `modo-invisivel` vai no <html>. */
+html.modo-invisivel,
+html.modo-invisivel body,
+html.modo-invisivel #root,
+html.modo-invisivel .canvas-modo-invisivel,
+html.modo-invisivel .canvas-modo-invisivel .react-flow,
+html.modo-invisivel .canvas-modo-invisivel .react-flow__renderer,
+html.modo-invisivel .canvas-modo-invisivel .react-flow__pane,
+html.modo-invisivel .canvas-modo-invisivel .react-flow__viewport,
+html.modo-invisivel .canvas-modo-invisivel .react-flow__background {
+  --xy-background-color: transparent;
+  --xy-background-color-default: transparent;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+/* Tudo dentro do canvas some (nós, arestas, fundo de pontos, painéis, zoom,
+ * minimapa, atribuição, paleta, avisos); o chat e a barra voltam a aparecer. */
+.canvas-modo-invisivel .react-flow *,
+.canvas-modo-invisivel .canvas-vazio,
+.canvas-modo-invisivel .canvas-vazio *,
+.canvas-modo-invisivel [data-testid="fundo-da-paleta"],
+.canvas-modo-invisivel [data-testid="fundo-da-paleta"] * {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+/* display:none só no que não tem terminal (o viewport/nós ficam só com visibility,
+ * para os terminais manterem o tamanho). */
+.canvas-modo-invisivel .react-flow__background,
+.canvas-modo-invisivel .react-flow__minimap,
+.canvas-modo-invisivel .react-flow__controls,
+.canvas-modo-invisivel .react-flow__attribution,
+.canvas-modo-invisivel .react-flow__panel:not(.painel-do-chat) {
+  display: none !important;
+}
+.canvas-modo-invisivel .painel-do-chat,
+.canvas-modo-invisivel .painel-do-chat * {
+  visibility: visible !important;
+}
+.canvas-modo-invisivel .painel-do-chat { pointer-events: none !important; }
+.canvas-modo-invisivel .painel-do-chat .chat-rapido,
+.canvas-modo-invisivel .painel-do-chat .chat-rapido * { pointer-events: auto !important; }
+/* A barra de título inteira some e não captura nada (nem arrasto): no modo
+ * invisível só o chat rápido aparece, para não cobrir as abas do navegador. */
+html.modo-invisivel .barra-de-titulo,
+html.modo-invisivel .barra-de-titulo * {
+  visibility: hidden !important;
+  pointer-events: none !important;
+  -webkit-app-region: no-drag !important;
+}
+/* Faixa do chat com o indicador e a saída (só no modo invisível). */
+.faixa-modo-invisivel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-forte);
+  border-radius: var(--radius-button);
+  background: var(--surface-2);
+}
+.faixa-modo-invisivel-erro { flex-basis: 100%; margin: 0; }
+/* O indicador permanente: nunca some e chama a atenção. */
+.indicador-tela-vista {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--error);
+  background: color-mix(in srgb, var(--error) 22%, var(--surface-2));
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ponto-tela-vista {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--error);
+  animation: pulso-tela-vista 1.4s ease-in-out infinite;
+}
+@keyframes pulso-tela-vista { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .ponto-tela-vista { animation: none; } }
+.botao-modo-invisivel { font-size: 14px; }
+/* 👁 do composer: discreto, no tamanho dos outros botões da linha. */
+.botao-entrar-modo-invisivel { width: 28px; height: 28px; font-size: 14px; opacity: .75; }
+.botao-entrar-modo-invisivel:hover, .botao-entrar-modo-invisivel:focus-visible { opacity: 1; }
+.botao-modo-invisivel-ativo {
+  width: auto;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border-forte);
+  border-radius: var(--radius-button);
+  background: var(--surface-2);
+  color: var(--primary);
+  font-family: var(--fonte-texto);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.botao-modo-invisivel-ativo:hover { background: var(--surface-3); }
+.botao-modo-invisivel-ativo:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.selo-tela-junto {
+  font-size: 11px;
+  color: var(--secondary);
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-forte);
+  white-space: nowrap;
+}
+
 /* O que é clicável (ou tem balão ao passar o mouse) não arrasta a janela. */
 .no-drag { -webkit-app-region: no-drag; }
 

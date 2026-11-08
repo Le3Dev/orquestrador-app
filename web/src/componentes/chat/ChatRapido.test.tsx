@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { api } from "../../shared/api/cliente";
 import type { MensagemDoChat } from "../../shared/api/tipos";
@@ -61,6 +61,180 @@ function renderizar(chat: EstadoDoChatNaTela = OCIOSO, desconectado = false) {
     rerender: (novo: EstadoDoChatNaTela) => resultado.rerender(<ChatRapido chat={novo} {...props} />),
   };
 }
+
+describe("ChatRapido · modo invisível", () => {
+  const janelaComPonte = window as unknown as { electron?: unknown };
+  const FOTO = { nome: "tela.jpg", tipoDeMidia: "image/jpeg" as const, base64: "QUJD" };
+
+  afterEach(() => {
+    delete janelaComPonte.electron;
+    vi.restoreAllMocks();
+  });
+
+  function ponteAtiva(capturarTela = vi.fn().mockResolvedValue(FOTO)) {
+    let ouvinte: ((ativo: boolean) => void) | null = null;
+    const modoInvisivel = {
+      entrar: vi.fn(),
+      sair: vi.fn(),
+      capturarMouse: vi.fn().mockResolvedValue(undefined),
+      capturarTela,
+      aoMudar: vi.fn((callback: (ativo: boolean) => void) => {
+        ouvinte = callback;
+        return () => undefined;
+      }),
+    };
+    janelaComPonte.electron = { desktop: true, janela: {}, modoInvisivel };
+    return { modoInvisivel, ativar: () => act(() => ouvinte?.(true)) };
+  }
+
+  it("ativo, fotografa a tela a cada pergunta e a anexa; o composer avisa que a tela vai junto", async () => {
+    const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+    const { modoInvisivel, ativar } = ponteAtiva();
+    const { campo } = renderizar();
+
+    expect(screen.queryByText(/a tela vai junto/)).not.toBeInTheDocument();
+    ativar();
+    expect(screen.getByText(/a tela vai junto/)).toBeInTheDocument();
+    expect(screen.getByTestId("faixa-modo-invisivel")).toHaveTextContent("Tela sendo vista");
+
+    fireEvent.change(campo, { target: { value: "O que é isso?" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+    await waitFor(() => expect(perguntar).toHaveBeenCalledTimes(1));
+    expect(perguntar).toHaveBeenCalledWith("O que é isso?", [FOTO]);
+
+    fireEvent.change(campo, { target: { value: "E agora?" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+    await waitFor(() => expect(perguntar).toHaveBeenCalledTimes(2));
+    expect(modoInvisivel.capturarTela).toHaveBeenCalledTimes(2);
+  });
+
+  it("se a captura falhar, mostra o erro, não envia e mantém o texto", async () => {
+    const perguntar = vi.spyOn(api, "perguntarNoChat");
+    const { ativar } = ponteAtiva(vi.fn().mockRejectedValue(new Error("sem permissão de tela")));
+    const { campo } = renderizar();
+    ativar();
+
+    fireEvent.change(campo, { target: { value: "Veja" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Não foi possível capturar a tela: sem permissão de tela. A pergunta não foi enviada.",
+    );
+    expect(perguntar).not.toHaveBeenCalled();
+    expect(campo).toHaveValue("Veja");
+  });
+
+  it("sem o modo ativo, não captura nem anexa nada", async () => {
+    const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+    const { modoInvisivel } = ponteAtiva();
+    const { campo } = renderizar();
+
+    fireEvent.change(campo, { target: { value: "Oi" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+
+    await waitFor(() => expect(perguntar).toHaveBeenCalledWith("Oi", []));
+    expect(modoInvisivel.capturarTela).not.toHaveBeenCalled();
+  });
+
+  describe("miniaturas das capturas no histórico", () => {
+    const CAPTURA = { arquivo: "a.jpg", nome: "tela-2026-11-07T10-00-00-000Z.jpg" };
+    const MANUAL = { arquivo: "b.png", nome: "foto.png" };
+    const chatComImagens = (imagens: unknown[]): EstadoDoChatNaTela => ({
+      ...OCIOSO,
+      mensagens: [
+        mensagem("u1", "usuario", {
+          texto: "Veja",
+          imagens: imagens as MensagemDoChatNaTela["imagens"],
+        }),
+      ],
+    });
+
+    it("ativo, esconde a captura de tela e mantém a imagem manual", () => {
+      const { ativar } = ponteAtiva();
+      renderizar(chatComImagens([CAPTURA, MANUAL]));
+      expect(screen.getByAltText(CAPTURA.nome)).toBeInTheDocument();
+      ativar();
+      expect(screen.queryByAltText(CAPTURA.nome)).not.toBeInTheDocument();
+      expect(screen.getByAltText(MANUAL.nome)).toBeInTheDocument();
+    });
+
+    it("ativo, sem imagens visíveis não renderiza o contêiner", () => {
+      const { ativar } = ponteAtiva();
+      renderizar(chatComImagens([CAPTURA]));
+      ativar();
+      expect(document.querySelector(".anexos-do-chat")).toBeNull();
+    });
+
+    it("fora do modo, a captura aparece", () => {
+      ponteAtiva();
+      renderizar(chatComImagens([CAPTURA]));
+      expect(screen.getByAltText(CAPTURA.nome)).toBeInTheDocument();
+    });
+  });
+
+  it("o 👁 fica na linha de baixo do composer, entra no modo e some quando ativo", async () => {
+    const { modoInvisivel, ativar } = ponteAtiva();
+    renderizar();
+
+    const botao = screen.getByRole("button", { name: "Modo invisível" });
+    expect(botao).toHaveAttribute("title", expect.stringContaining("Modo invisível"));
+    expect(botao.closest(".linha-do-composer")).not.toBeNull();
+    fireEvent.click(botao);
+    await waitFor(() => expect(modoInvisivel.entrar).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(modoInvisivel.capturarMouse).toHaveBeenCalledWith(true));
+
+    ativar();
+    expect(screen.queryByRole("button", { name: "Modo invisível" })).not.toBeInTheDocument();
+  });
+
+  it("sem a ponte do modo invisível (navegador), não desenha o 👁", () => {
+    renderizar();
+    expect(screen.queryByRole("button", { name: "Modo invisível" })).not.toBeInTheDocument();
+  });
+
+  it("se entrar falhar, o erro aparece no chat", async () => {
+    const { modoInvisivel } = ponteAtiva();
+    modoInvisivel.entrar.mockRejectedValue(new Error("sem janela"));
+    renderizar();
+
+    fireEvent.click(screen.getByRole("button", { name: "Modo invisível" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível entrar no modo invisível: sem janela");
+  });
+
+  it("ativo, o indicador e o botão de voltar ficam dentro do chat; clicar sai do modo", () => {
+    const { modoInvisivel, ativar } = ponteAtiva();
+    renderizar();
+    expect(screen.queryByRole("button", { name: "Voltar ao modo normal" })).not.toBeInTheDocument();
+    ativar();
+
+    const chat = screen.getByTestId("chat-rapido");
+    expect(within(chat).getByText("Tela sendo vista")).toBeInTheDocument();
+    fireEvent.click(within(chat).getByRole("button", { name: "Voltar ao modo normal" }));
+    expect(modoInvisivel.sair).toHaveBeenCalledTimes(1);
+  });
+
+  it("ativo, se sair falhar, o erro aparece no chat", async () => {
+    const { modoInvisivel, ativar } = ponteAtiva();
+    modoInvisivel.sair.mockRejectedValue(new Error("janela ocupada"));
+    renderizar();
+    ativar();
+
+    fireEvent.click(screen.getByRole("button", { name: "Voltar ao modo normal" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível sair do modo invisível: janela ocupada");
+  });
+
+  it("ativo, o mouse sobre o chat captura os cliques e, ao sair, deixa atravessar", () => {
+    const { modoInvisivel, ativar } = ponteAtiva();
+    renderizar();
+    ativar();
+    modoInvisivel.capturarMouse.mockClear();
+
+    fireEvent.mouseEnter(screen.getByTestId("chat-rapido"));
+    expect(modoInvisivel.capturarMouse).toHaveBeenLastCalledWith(true);
+    fireEvent.mouseLeave(screen.getByTestId("chat-rapido"));
+    expect(modoInvisivel.capturarMouse).toHaveBeenLastCalledWith(false);
+  });
+});
 
 describe("ChatRapido", () => {
   afterEach(() => vi.restoreAllMocks());
