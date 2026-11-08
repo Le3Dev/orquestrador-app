@@ -284,8 +284,38 @@ describe("aplicarEvento", () => {
     expect(turno?.ferramentasDiretas).toHaveLength(8);
   });
 
+  describe("orquestrador renomeado", () => {
+    it("guarda o nome mais recente sem mexer nos turnos, também durante um pedido e depois do /clear", () => {
+      const eventos = registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "analise", configuracao },
+        { tipo: "orquestrador_renomeado", nome: "Primeiro" },
+        { tipo: "orquestrador_renomeado", nome: "Segundo" },
+        { tipo: "turno_cancelado", turnoId: "t1" },
+        { tipo: "conversa_limpa", turnosAnteriores: 1, planoDescartado: false, worktreeComAlteracoes: false },
+      ]);
+
+      const durante = reproduzir(eventos.slice(0, 3));
+      expect(ESTADO_INICIAL.nome).toBeNull();
+      expect(durante.nome).toBe("Segundo");
+      expect(durante.ultimaSequencia).toBe(3);
+      expect(durante.turnos.map((turno) => [turno.id, turno.situacao, turno.log.length])).toEqual([
+        ["t1", "em_andamento", 1],
+      ]);
+      expect(reproduzir(eventos).nome).toBe("Segundo");
+    });
+
+    it("um evento repetido (reconexão) não volta o nome", () => {
+      const [antigo, novo] = registrar([
+        { tipo: "orquestrador_renomeado", nome: "Antigo" },
+        { tipo: "orquestrador_renomeado", nome: "Novo" },
+      ]);
+
+      expect(reproduzir([antigo!, novo!, antigo!]).nome).toBe("Novo");
+    });
+  });
+
   describe("conversa nova (/clear)", () => {
-    const cota = [{ nome: "5 horas", utilizacao: 0.2, renovaEm: null, situacao: "allowed" }];
+    const cota =[{ nome: "5 horas", utilizacao: 0.2, renovaEm: null, situacao: "allowed" }];
     const anterior = registrar([
       { tipo: "turno_iniciado", turnoId: "t1", texto: "um", configuracao },
       { tipo: "uso_da_cota", turnoId: "t1", janelas: cota },

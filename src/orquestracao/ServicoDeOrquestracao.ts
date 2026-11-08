@@ -216,6 +216,21 @@ export class ServicoDeOrquestracao {
   }
 
   /**
+   * Troca o nome do Orquestrador; vale também durante um turno. Trocar pelo
+   * mesmo nome não grava nem avisa as telas.
+   */
+  async renomear(id: string, nome: string): Promise<Orquestrador> {
+    const orquestrador = this.buscar(id);
+    const evento = orquestrador.renomear(nome);
+    if (evento === null) {
+      return orquestrador;
+    }
+    this.publicar(orquestrador, evento);
+    await this.dependencias.repositorio.salvar(orquestrador);
+    return orquestrador;
+  }
+
+  /**
    * Aplica uma predefinição de configuração (ex.: "economico"). Como uma
    * alteração de configuração: vale a partir do próximo turno e continua
    * editável campo a campo depois.

@@ -407,6 +407,51 @@ describe("ServicoDeOrquestracao", () => {
     expect(motor.pedidos[0]).toMatchObject({ imagens: [], pastaDasImagens: null, orquestradorId: orquestrador.id });
   });
 
+  describe("renomear", () => {
+    it("troca o nome, grava e publica orquestrador_renomeado", async () => {
+      const orquestrador = await criar();
+      const salvar = vi.spyOn(repositorio, "salvar");
+
+      const renomeado = await servico.renomear(orquestrador.id, "  Backlog  ");
+
+      expect(renomeado.nome).toBe("Backlog");
+      expect(salvar).toHaveBeenCalledWith(orquestrador);
+      expect(repositorio.eventos.at(-1)).toMatchObject({ tipo: "orquestrador_renomeado", nome: "Backlog" });
+      expect(publicados.at(-1)).toMatchObject({ tipo: "orquestrador_renomeado", nome: "Backlog" });
+    });
+
+    it("vale com um pedido em andamento, que segue rodando", async () => {
+      const orquestrador = await criar();
+      const { conclusao } = await servico.enviarMensagem(orquestrador.id, "analise");
+
+      await servico.renomear(orquestrador.id, "Durante o pedido");
+
+      expect(orquestrador.nome).toBe("Durante o pedido");
+      expect(orquestrador.situacao).toBe("trabalhando");
+      motor.terminar();
+      await conclusao;
+      expect(orquestrador.ultimoTurno?.situacao).toBe("concluido");
+    });
+
+    it("o mesmo nome não grava nem publica", async () => {
+      const orquestrador = await criar();
+      const salvar = vi.spyOn(repositorio, "salvar");
+
+      await servico.renomear(orquestrador.id, "Painel");
+
+      expect(salvar).not.toHaveBeenCalled();
+      expect(publicados).toEqual([]);
+    });
+
+    it("recusa nome inválido e orquestrador inexistente", async () => {
+      const orquestrador = await criar();
+
+      await expect(servico.renomear(orquestrador.id, " ")).rejects.toMatchObject({ motivo: "dados_invalidos" });
+      await expect(servico.renomear("nao-existe", "Outro")).rejects.toMatchObject({ motivo: "nao_encontrado" });
+      expect(publicados).toEqual([]);
+    });
+  });
+
   describe("modo de planejamento", () => {
     async function planejar(orquestrador: Orquestrador): Promise<string> {
       motor.eventos = [{ tipo: "sessao_iniciada" }];

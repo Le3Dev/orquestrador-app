@@ -99,6 +99,40 @@ function reaproveitarFila(
   return mesmoConteudo(anterior, nova) ? anterior : nova;
 }
 
+/** Como o servidor confere (`TAMANHO_MAXIMO_DO_NOME`). */
+const TAMANHO_MAXIMO_DO_NOME = 60;
+
+/** Campo do nome na barra, aberto no clique duplo (como o título do artefato). Enter confirma; Esc desiste. */
+function CampoDoNome({ nome, aoConcluir }: { nome: string; aoConcluir: (novo: string | null) => void }) {
+  const campo = useRef<HTMLInputElement>(null);
+  const desistiu = useRef(false);
+
+  useEffect(() => {
+    // Sem rolar: o foco num elemento do canvas faria o navegador deslocá-lo.
+    campo.current?.focus({ preventScroll: true });
+    campo.current?.select();
+  }, []);
+
+  return (
+    <input
+      ref={campo}
+      className="campo-do-titulo-do-artefato nodrag"
+      aria-label="Nome do orquestrador"
+      defaultValue={nome}
+      maxLength={TAMANHO_MAXIMO_DO_NOME}
+      onKeyDown={(evento) => {
+        if (evento.key === "Enter") {
+          evento.currentTarget.blur();
+        } else if (evento.key === "Escape") {
+          desistiu.current = true;
+          evento.currentTarget.blur();
+        }
+      }}
+      onBlur={(evento) => aoConcluir(desistiu.current ? null : evento.currentTarget.value)}
+    />
+  );
+}
+
 /** O que está sendo arrastado sobre o terminal, para o aviso de soltar. */
 type Arraste = "imagens" | "pedido";
 
@@ -527,6 +561,8 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   const conversa = conversas.get(orquestradorId) ?? ESTADO_INICIAL;
   const [erro, setErro] = useState<string | null>(null);
   const [configurando, setConfigurando] = useState(false);
+  const [editandoNome, setEditandoNome] = useState(false);
+  const [nomePendente, setNomePendente] = useState<string | null>(null);
   const [cancelamentoPedido, setCancelamentoPedido] = useState(false);
   const [imagens, setImagens] = useState<ImagemAnexada[]>([]);
   const [arraste, setArraste] = useState<Arraste | null>(null);
@@ -539,6 +575,8 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   const controleDoPrompt = useRef<ControleDoPrompt>(null);
   const acompanhando = useRef(true);
 
+  // O nome do evento chega na hora; o do resumo, na próxima consulta da lista.
+  const nome = nomePendente ?? conversa.nome ?? orquestrador.nome;
   const ultimoTurno = conversa.turnos.at(-1);
   const trabalhando = ultimoTurno?.situacao === "em_andamento";
   const cancelando = cancelamentoPedido && trabalhando;
@@ -764,6 +802,25 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
     campoDoPrompt.current?.focus();
   }, []);
 
+  /** Renomear pelo clique duplo no nome: vale também durante um pedido. Esc ou em branco mantém o nome. */
+  async function concluirNome(novo: string | null): Promise<void> {
+    setEditandoNome(false);
+    const aparado = novo?.trim() ?? "";
+    if (aparado === "" || aparado === nome) {
+      return;
+    }
+    setErro(null);
+    setNomePendente(aparado);
+    try {
+      await api.renomearOrquestrador(orquestradorId, aparado);
+      await recarregar();
+    } catch (falha) {
+      setErro(`Não foi possível renomear: ${mensagemDeErro(falha)}`);
+    } finally {
+      setNomePendente(null);
+    }
+  }
+
   /** "abrir prévia" na faixa dos servidores: a prévia nasce ligada a este terminal. */
   const { abrirPrevia } = acoes;
   const aoAbrirPrevia = useCallback((url: string) => abrirPrevia(orquestradorId, url), [abrirPrevia, orquestradorId]);
@@ -858,7 +915,17 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
           <i />
         </span>
         <IconeOrquestrador tamanho={14} className="shrink-0 text-active" />
-        <strong className="truncate font-titulo text-[12.5px] font-semibold">{orquestrador.nome}</strong>
+        {editandoNome ? (
+          <CampoDoNome nome={nome} aoConcluir={(novo) => void concluirNome(novo)} />
+        ) : (
+          <strong
+            className="truncate font-titulo text-[12.5px] font-semibold"
+            title={`${nome} · clique duplo para renomear`}
+            onDoubleClick={() => setEditandoNome(true)}
+          >
+            {nome}
+          </strong>
+        )}
         <span className="flex min-w-0 items-center gap-1 mono text-muted" title={orquestrador.pastaDeTrabalho}>
           <IconePasta className="shrink-0" />
           <span className="truncate">{orquestrador.nomeDaPasta}</span>
@@ -889,7 +956,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
         <Etiqueta situacao={trabalhando ? "trabalhando" : "ocioso"} />
         <BotaoDeLimparBixinhos orquestradorId={orquestradorId} />
         <BotaoDeAlteracoes orquestradorId={orquestradorId} />
-        <BotaoDeArquivos orquestradorId={orquestradorId} nomeDoOrquestrador={orquestrador.nome} />
+        <BotaoDeArquivos orquestradorId={orquestradorId} nomeDoOrquestrador={nome} />
         {acoesDosShells !== null && (
           <button
             type="button"
@@ -946,7 +1013,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
         >
           <TranscricaoDoTerminal
             orquestradorId={orquestradorId}
-            nome={orquestrador.nome}
+            nome={nome}
             pastaDeTrabalho={orquestrador.pastaDeTrabalho}
             configuracao={configuracao}
             predefinicao={orquestrador.predefinicaoCorrespondente ?? null}

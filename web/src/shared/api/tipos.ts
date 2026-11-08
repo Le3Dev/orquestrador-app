@@ -438,6 +438,8 @@ type EventoDeTurno =
 export type EventoDeOrquestracao =
   | (EventoDeTurno & { turnoId: string })
   | { tipo: "configuracao_alterada"; configuracao: DadosDaConfiguracaoGravada }
+  // O usuário trocou o nome do Orquestrador (já aparado; sem `turnoId`: vale também durante um pedido).
+  | { tipo: "orquestrador_renomeado"; nome: string }
   // O usuário começou uma conversa nova (/clear): os pedidos anteriores ficam arquivados no servidor.
   // A fila de pedidos não muda: ela é do Orquestrador, não da conversa.
   | {

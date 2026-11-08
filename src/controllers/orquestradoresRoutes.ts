@@ -88,12 +88,14 @@ const esquemaDaConfiguracao = z.object({
   instrucoesPersonalizadas: esquemaDeInstrucoes("As instruções personalizadas").optional(),
 });
 
+const esquemaDoNome = z
+  .string({ error: "Dê um nome ao orquestrador." })
+  .trim()
+  .min(1, { error: "Dê um nome ao orquestrador." })
+  .max(TAMANHO_MAXIMO_DO_NOME, { error: `O nome deve ter até ${TAMANHO_MAXIMO_DO_NOME} caracteres.` });
+
 const esquemaDeCriacao = esquemaDaConfiguracao.extend({
-  nome: z
-    .string({ error: "Dê um nome ao orquestrador." })
-    .trim()
-    .min(1, { error: "Dê um nome ao orquestrador." })
-    .max(TAMANHO_MAXIMO_DO_NOME, { error: `O nome deve ter até ${TAMANHO_MAXIMO_DO_NOME} caracteres.` }),
+  nome: esquemaDoNome,
   pastaDeTrabalho: z.string({ error: "Escolha a pasta de trabalho." }).min(1, {
     error: "Escolha a pasta de trabalho.",
   }),
@@ -185,6 +187,9 @@ const esquemaDeAprovacaoDoPlano = z.object({
     })
     .default(""),
 });
+
+/** Renomear: só o nome, com a regra da criação. */
+const esquemaDeRenomeacao = z.object({ nome: esquemaDoNome });
 
 const esquemaDaPredefinicao = z.object({
   predefinicao: z.string({ error: "Predefinição desconhecida." }),
@@ -383,6 +388,16 @@ export function criarOrquestradoresRoutes({
       if (orquestrador === null) {
         throw new ErroDeOrquestracao("nao_encontrado", "Orquestrador não encontrado.");
       }
+      resposta.json(detalhe(orquestrador));
+    }),
+  );
+
+  /** Troca o nome; vale também durante um pedido. Responde o detalhe, como o GET. */
+  rotas.patch(
+    "/orquestradores/:id",
+    rota(async (requisicao, resposta) => {
+      const { nome } = esquemaDeRenomeacao.parse(requisicao.body ?? {});
+      const orquestrador = await servico.renomear(requisicao.params.id, nome);
       resposta.json(detalhe(orquestrador));
     }),
   );

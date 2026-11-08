@@ -156,6 +156,8 @@ export type EventoDeOrquestracao =
       /** A alteração veio de uma predefinição (ex.: "Modo econômico"). Ausente nas alterações campo a campo. */
       predefinicao?: NomeDaPredefinicao;
     }
+  /** O usuário trocou o nome do Orquestrador (já aparado). Não pertence a nenhum turno. */
+  | { tipo: "orquestrador_renomeado"; nome: string }
   /**
    * A conversa foi limpa ("/clear"): o histórico anterior foi arquivado e o
    * próximo turno começa uma sessão nova. É o primeiro evento da conversa

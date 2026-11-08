@@ -629,6 +629,75 @@ describe("NoTerminal · conversa nova", () => {
   });
 });
 
+describe("NoTerminal · renomear pelo nome na barra", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const nomeNaBarra = (nome: string) => screen.getByTitle(`${nome} · clique duplo para renomear`);
+  const campoDoNome = () => screen.getByRole("textbox", { name: "Nome do orquestrador" });
+
+  it("clique duplo abre o campo; Enter salva o nome aparado e recarrega a lista", async () => {
+    const renomear = vi.spyOn(api, "renomearOrquestrador").mockResolvedValue(orquestrador());
+    const canvas = canvasDoTerminal(conversaOciosa());
+    render(<Terminal canvas={canvas} no={propsDoNo()} />);
+
+    fireEvent.doubleClick(nomeNaBarra("Painel de salas"));
+    expect(campoDoNome()).toHaveValue("Painel de salas");
+    expect(campoDoNome()).toHaveAttribute("maxLength", "60");
+    fireEvent.change(campoDoNome(), { target: { value: "  Backlog do app  " } });
+    fireEvent.keyDown(campoDoNome(), { key: "Enter" });
+
+    // Enquanto o servidor responde, a barra já mostra o nome novo.
+    expect(nomeNaBarra("Backlog do app")).toBeInTheDocument();
+    await waitFor(() => expect(canvas.acoes.recarregar).toHaveBeenCalled());
+    expect(renomear).toHaveBeenCalledWith("o1", "Backlog do app");
+    expect(screen.queryByRole("textbox", { name: "Nome do orquestrador" })).not.toBeInTheDocument();
+  });
+
+  it("Esc desiste, e em branco ou sem mudança não chama o servidor", () => {
+    const renomear = vi.spyOn(api, "renomearOrquestrador");
+    render(<Terminal canvas={canvasDoTerminal(conversaOciosa())} no={propsDoNo()} />);
+
+    fireEvent.doubleClick(nomeNaBarra("Painel de salas"));
+    fireEvent.change(campoDoNome(), { target: { value: "Outro nome" } });
+    fireEvent.keyDown(campoDoNome(), { key: "Escape" });
+    expect(nomeNaBarra("Painel de salas")).toBeInTheDocument();
+
+    for (const valor of ["   ", "Painel de salas"]) {
+      fireEvent.doubleClick(nomeNaBarra("Painel de salas"));
+      fireEvent.change(campoDoNome(), { target: { value: valor } });
+      fireEvent.keyDown(campoDoNome(), { key: "Enter" });
+    }
+
+    expect(renomear).not.toHaveBeenCalled();
+    expect(nomeNaBarra("Painel de salas")).toBeInTheDocument();
+  });
+
+  it("se o servidor recusar, o erro aparece no terminal e volta o nome anterior", async () => {
+    vi.spyOn(api, "renomearOrquestrador").mockRejectedValue(
+      new ErroDaApi("O nome deve ter até 60 caracteres.", 400),
+    );
+    render(<Terminal canvas={canvasDoTerminal(conversaOciosa())} no={propsDoNo()} />);
+
+    fireEvent.doubleClick(nomeNaBarra("Painel de salas"));
+    fireEvent.change(campoDoNome(), { target: { value: "Novo" } });
+    fireEvent.keyDown(campoDoNome(), { key: "Enter" });
+
+    expect(await screen.findByText("✗ Não foi possível renomear: O nome deve ter até 60 caracteres.")).toBeInTheDocument();
+    expect(nomeNaBarra("Painel de salas")).toBeInTheDocument();
+  });
+
+  it("o evento orquestrador_renomeado troca o nome na hora, antes da próxima consulta da lista", () => {
+    const conversa = conversaOciosa();
+    const canvas = canvasDoTerminal(conversa);
+    const { rerender } = render(<Terminal canvas={canvas} no={propsDoNo()} />);
+
+    const renomeada = aplicar(conversa, { tipo: "orquestrador_renomeado", nome: "Renomeado em outra aba" });
+    rerender(<Terminal canvas={{ ...canvas, conversas: new Map([["o1", renomeada]]) }} no={propsDoNo()} />);
+
+    expect(nomeNaBarra("Renomeado em outra aba")).toBeInTheDocument();
+  });
+});
+
 describe("NoTerminal · servidor no ar", () => {
   it("com servidores detectados, a faixa acima do prompt abre a prévia ligada a este terminal", () => {
     const conversa: EstadoDaConversa = {

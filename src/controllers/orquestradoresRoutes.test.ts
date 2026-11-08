@@ -244,6 +244,48 @@ describe("rotas de orquestradores — modo de planejamento", () => {
     expect((await postar("/orquestradores/nao-existe/plano/aprovar")).status).toBe(404);
   });
 
+  describe("renomear (PATCH /orquestradores/:id)", () => {
+    async function renomear(id: string, corpo: unknown): Promise<Response> {
+      return fetch(`${base}/orquestradores/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(corpo),
+      });
+    }
+
+    it("troca o nome aparado, responde o detalhe e registra orquestrador_renomeado", async () => {
+      const resposta = await renomear(orquestrador.id, { nome: "  Backlog do app  " });
+
+      expect(resposta.status).toBe(200);
+      const corpo = (await resposta.json()) as { id: string; nome: string; turnos: unknown[] };
+      expect(corpo).toMatchObject({ id: orquestrador.id, nome: "Backlog do app", turnos: [] });
+      expect(orquestrador.nome).toBe("Backlog do app");
+      expect(repositorio.eventos.at(-1)).toMatchObject({ tipo: "orquestrador_renomeado", nome: "Backlog do app" });
+      const lista = (await (await fetch(`${base}/orquestradores`)).json()) as Array<{ id: string; nome: string }>;
+      expect(lista.find((item) => item.id === orquestrador.id)?.nome).toBe("Backlog do app");
+    });
+
+    it.each([
+      [{ nome: "   " }, "Dê um nome ao orquestrador."],
+      [{}, "Dê um nome ao orquestrador."],
+      [{ nome: 42 }, "Dê um nome ao orquestrador."],
+      [{ nome: "x".repeat(61) }, "O nome deve ter até 60 caracteres."],
+    ])("recusa %j com 400 e mantém o nome", async (corpo, mensagem) => {
+      const resposta = await renomear(orquestrador.id, corpo);
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: mensagem });
+      expect(orquestrador.nome).toBe("Painel");
+    });
+
+    it("responde 404 para orquestrador inexistente", async () => {
+      const resposta = await renomear("nao-existe", { nome: "Outro" });
+
+      expect(resposta.status).toBe(404);
+      expect(await resposta.json()).toEqual({ erro: "Orquestrador não encontrado." });
+    });
+  });
+
   describe("opção \"Permitir commit e push\"", () => {
     async function alterarConfiguracao(corpo: unknown): Promise<Response> {
       return fetch(`${base}/orquestradores/${orquestrador.id}/configuracao`, {

@@ -110,6 +110,13 @@ export const api = {
   criarOrquestrador: (dados: NovoOrquestrador) =>
     requisitar<ResumoDoOrquestrador>("/orquestradores", { method: "POST", body: JSON.stringify(dados) }),
 
+  /** Troca o nome (1 a 60 caracteres, aparado); devolve o orquestrador atualizado. */
+  renomearOrquestrador: (id: string, nome: string) =>
+    requisitar<ResumoDoOrquestrador>(`/orquestradores/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ nome }),
+    }),
+
   alterarConfiguracao: (id: string, configuracao: Partial<DadosDaConfiguracao>) =>
     requisitar<ResumoDoOrquestrador>(`/orquestradores/${encodeURIComponent(id)}/configuracao`, {
       method: "PATCH",

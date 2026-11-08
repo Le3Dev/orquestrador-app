@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { ConsumoDoTurno } from "./ConsumoDoTurno";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
-import { ErroDeFilaCheia, LIMITE_DA_FILA, Orquestrador } from "./Orquestrador";
+import { ErroDeFilaCheia, LIMITE_DA_FILA, Orquestrador, TAMANHO_MAXIMO_DO_NOME } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { PedidoNaFila } from "./PedidoNaFila";
 import { PredefinicaoDeConfiguracao, predefinicaoPorNome } from "./PredefinicaoDeConfiguracao";
@@ -152,6 +152,44 @@ describe("Orquestrador", () => {
     expect(evento).toEqual({ tipo: "turno_interrompido", turnoId: "t1" });
     expect(reaberto.situacao).toBe("ocioso");
     expect(reaberto.interromperTurnoEmAndamento(agora)).toBeNull();
+  });
+});
+
+describe("Orquestrador ao renomear", () => {
+  it("troca o nome aparado, registra orquestrador_renomeado e o nome sobrevive a reabrir", () => {
+    const orquestrador = novoOrquestrador();
+
+    const evento = orquestrador.renomear("  Backlog do app  ");
+
+    expect(evento).toEqual({ tipo: "orquestrador_renomeado", nome: "Backlog do app" });
+    expect(orquestrador.nome).toBe("Backlog do app");
+    expect(Orquestrador.reconstituir(orquestrador.paraDados()).nome).toBe("Backlog do app");
+  });
+
+  it("recusa nome vazio ou acima do limite e mantém o anterior", () => {
+    const orquestrador = novoOrquestrador();
+
+    expect(capturarErro(() => orquestrador.renomear("   ")).motivo).toBe("dados_invalidos");
+    expect(capturarErro(() => orquestrador.renomear("x".repeat(TAMANHO_MAXIMO_DO_NOME + 1))).motivo).toBe(
+      "dados_invalidos",
+    );
+    expect(orquestrador.nome).toBe("Painel");
+    expect(orquestrador.renomear("x".repeat(TAMANHO_MAXIMO_DO_NOME))).toMatchObject({ tipo: "orquestrador_renomeado" });
+  });
+
+  it("o mesmo nome não conta como alteração", () => {
+    expect(novoOrquestrador().renomear(" Painel ")).toBeNull();
+  });
+
+  it("vale com um turno em andamento, sem mexer nele", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "analise", agora);
+
+    orquestrador.renomear("Outro nome");
+
+    expect(orquestrador.nome).toBe("Outro nome");
+    expect(orquestrador.situacao).toBe("trabalhando");
+    expect(orquestrador.turnoEmAndamento?.id).toBe("t1");
   });
 });
 

@@ -139,6 +139,12 @@ export interface EstadoDaConversa {
    * abre a prévia sozinha quando ele acabou de subir (não ao reler o histórico).
    */
   ultimoEnderecoDetectado: EnderecoDetectado | null;
+  /**
+   * O nome mais recente trazido por `orquestrador_renomeado`, que chega na hora;
+   * nulo sem renomeação no histórico (vale o nome do resumo, consultado a cada
+   * poucos segundos). Não muda com o /clear: o nome é do Orquestrador.
+   */
+  nome: string | null;
 }
 
 export interface EnderecoDetectado {
@@ -156,6 +162,7 @@ export const ESTADO_INICIAL: EstadoDaConversa = {
   ultimoEnderecoDetectado: null,
   pedidosEnfileirados: [],
   pedidosRetirados: [],
+  nome: null,
 };
 
 /**
@@ -560,6 +567,9 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
 
   if (evento.tipo === "configuracao_alterada") {
     return proximo;
+  }
+  if (evento.tipo === "orquestrador_renomeado") {
+    return { ...proximo, nome: evento.nome };
   }
   if (evento.tipo === "conversa_limpa") {
     // Conversa nova (/clear): os pedidos anteriores ficam arquivados no servidor

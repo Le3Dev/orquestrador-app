@@ -31,6 +31,21 @@ export const LIMITE_DA_FILA = 10;
 
 export type SituacaoDoOrquestrador = "ocioso" | "trabalhando";
 
+/** O nome aparado, de 1 a `TAMANHO_MAXIMO_DO_NOME` caracteres: vale ao criar e ao renomear. */
+function nomeValido(nome: string): string {
+  const aparado = nome.trim();
+  if (aparado === "") {
+    throw new ErroDeOrquestracao("dados_invalidos", "Dê um nome ao orquestrador.");
+  }
+  if (aparado.length > TAMANHO_MAXIMO_DO_NOME) {
+    throw new ErroDeOrquestracao(
+      "dados_invalidos",
+      `O nome do orquestrador deve ter até ${TAMANHO_MAXIMO_DO_NOME} caracteres.`,
+    );
+  }
+  return aparado;
+}
+
 /**
  * A fila do Orquestrador já tem `LIMITE_DA_FILA` pedidos: conflito com o
  * estado atual (HTTP 409), como um turno em andamento. Fica à parte do
@@ -102,7 +117,7 @@ export interface NovoOrquestrador {
 export class Orquestrador {
   private constructor(
     public readonly id: string,
-    public readonly nome: string,
+    private nomeAtual: string,
     public readonly pastaDeTrabalho: PastaDeTrabalho,
     private sessaoAtual: string,
     private readonly criadoEmMs: number,
@@ -115,19 +130,9 @@ export class Orquestrador {
   ) {}
 
   static criar(novo: NovoOrquestrador): Orquestrador {
-    const nome = novo.nome.trim();
-    if (nome === "") {
-      throw new ErroDeOrquestracao("dados_invalidos", "Dê um nome ao orquestrador.");
-    }
-    if (nome.length > TAMANHO_MAXIMO_DO_NOME) {
-      throw new ErroDeOrquestracao(
-        "dados_invalidos",
-        `O nome do orquestrador deve ter até ${TAMANHO_MAXIMO_DO_NOME} caracteres.`,
-      );
-    }
     return new Orquestrador(
       novo.id,
-      nome,
+      nomeValido(novo.nome),
       novo.pastaDeTrabalho,
       novo.sessaoId,
       novo.agora.getTime(),
@@ -156,6 +161,24 @@ export class Orquestrador {
       (dados.fila ?? []).map((pedido) => PedidoNaFila.reconstituir(pedido)),
       dados.instrucoesNaConversa ?? false,
     );
+  }
+
+  get nome(): string {
+    return this.nomeAtual;
+  }
+
+  /**
+   * Troca o nome, com a mesma regra da criação. Só muda o que a tela mostra:
+   * vale também com um turno em andamento. Trocar pelo mesmo nome não conta
+   * como alteração (`null`, sem evento).
+   */
+  renomear(nome: string): EventoDeOrquestracao | null {
+    const novo = nomeValido(nome);
+    if (novo === this.nomeAtual) {
+      return null;
+    }
+    this.nomeAtual = novo;
+    return { tipo: "orquestrador_renomeado", nome: novo };
   }
 
   get configuracao(): ConfiguracaoDoOrquestrador {
@@ -473,7 +496,7 @@ export class Orquestrador {
   paraDados(): DadosDoOrquestrador {
     return {
       id: this.id,
-      nome: this.nome,
+      nome: this.nomeAtual,
       pastaDeTrabalho: this.pastaDeTrabalho.caminho,
       sessaoId: this.sessaoAtual,
       sessaoIniciada: this.sessaoJaIniciada,
