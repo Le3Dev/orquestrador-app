@@ -1,14 +1,14 @@
 import path from "node:path";
 
-import { Request, Response, Router } from "express";
-import { z, ZodError } from "zod";
+import { Response, Router } from "express";
+import { z } from "zod";
 
 import { ArmazemDeAnexosEmArquivo, ehNomeDeAnexoValido } from "../infraestrutura/arquivos/ArmazemDeAnexosEmArquivo";
 import { ErroDeCaminho, ExploradorDePastas } from "../infraestrutura/arquivos/ExploradorDePastas";
 import { CanalDeEventos } from "../infraestrutura/sse/CanalDeEventos";
 import { MAXIMO_DE_IMAGENS_POR_MENSAGEM, TAMANHO_MAXIMO_DA_IMAGEM, TIPOS_DE_IMAGEM } from "../orquestracao/Anexo";
 import { ConfiguracaoDoOrquestrador } from "../orquestracao/ConfiguracaoDoOrquestrador";
-import { ErroDeOrquestracao, MotivoDoErro } from "../orquestracao/ErroDeOrquestracao";
+import { ErroDeOrquestracao } from "../orquestracao/ErroDeOrquestracao";
 import {
   ESFORCOS_DE_RACIOCINIO,
   serveParaSubagentes,
@@ -32,6 +32,7 @@ import { LIMITE_DE_SUBAGENTES } from "../orquestracao/QuantidadeDeSubagentes";
 import { RepositorioDeOrquestradores } from "../orquestracao/RepositorioDeOrquestradores";
 import { RepositorioDePreferencias } from "../orquestracao/RepositorioDePreferencias";
 import { EsforcoHerdadoDosPapeis, ServicoDeOrquestracao } from "../orquestracao/ServicoDeOrquestracao";
+import { criarRota, responderErroGenerico, STATUS_DA_ORQUESTRACAO } from "./respostasHttp";
 
 interface Dependencias {
   servico: ServicoDeOrquestracao;
@@ -201,17 +202,9 @@ const esquemaDaConsultaDeEsforco = z.object({
   pasta: z.string({ error: "Escolha a pasta de trabalho." }).min(1, { error: "Escolha a pasta de trabalho." }),
 });
 
-const STATUS_POR_MOTIVO: Readonly<Record<MotivoDoErro, number>> = {
-  dados_invalidos: 400,
-  nao_encontrado: 404,
-  turno_em_andamento: 409,
-  sem_turno_em_andamento: 409,
-  sem_plano_pendente: 409,
-};
-
 function responderErro(resposta: Response, erro: unknown): void {
   if (erro instanceof ErroDeOrquestracao) {
-    resposta.status(STATUS_POR_MOTIVO[erro.motivo]).json({ erro: erro.message });
+    resposta.status(STATUS_DA_ORQUESTRACAO[erro.motivo]).json({ erro: erro.message });
     return;
   }
   if (erro instanceof ErroDeFilaCheia) {
@@ -222,14 +215,10 @@ function responderErro(resposta: Response, erro: unknown): void {
     resposta.status(400).json({ erro: erro.message });
     return;
   }
-  if (erro instanceof ZodError) {
-    resposta.status(400).json({ erro: erro.issues[0]?.message ?? "Dados inválidos." });
-    return;
-  }
-  console.error("[http] Erro inesperado:", erro);
-  const detalhe = erro instanceof Error ? erro.message : String(erro);
-  resposta.status(500).json({ erro: `Erro inesperado no servidor: ${detalhe}` });
+  responderErroGenerico(resposta, erro, "[http] Erro inesperado:");
 }
+
+const rota = criarRota(responderErro);
 
 /** Quantos Orquestradores uma conexão de eventos acompanha, no máximo. */
 export const MAXIMO_DE_ORQUESTRADORES_POR_CONEXAO = 200;
@@ -259,19 +248,6 @@ function lerAssinaturasDeEventos(valor: unknown): Map<string, number> {
     }
   }
   return assinaturas;
-}
-
-type Tratador<Parametros> =(requisicao: Request<Parametros>, resposta: Response) => Promise<void> | void;
-
-/** Envolve cada rota num try/catch que devolve a mensagem de erro pronta para a tela. */
-function rota<Parametros = { id: string }>(tratador: Tratador<Parametros>): Tratador<Parametros> {
-  return async (requisicao, resposta) => {
-    try {
-      await tratador(requisicao, resposta);
-    } catch (erro) {
-      responderErro(resposta, erro);
-    }
-  };
 }
 
 /**

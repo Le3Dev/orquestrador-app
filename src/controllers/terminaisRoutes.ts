@@ -2,16 +2,17 @@ import { IncomingMessage, STATUS_CODES } from "node:http";
 import { Duplex } from "node:stream";
 import path from "node:path";
 
-import { Request, Response, Router } from "express";
+import { Response, Router } from "express";
 import { RawData, WebSocket, WebSocketServer } from "ws";
-import { z, ZodError } from "zod";
+import { z } from "zod";
 
-import { ErroDeOrquestracao, MotivoDoErro } from "../orquestracao/ErroDeOrquestracao";
+import { ErroDeOrquestracao } from "../orquestracao/ErroDeOrquestracao";
 import { PastaDeTrabalho } from "../orquestracao/PastaDeTrabalho";
 import { RepositorioDeOrquestradores } from "../orquestracao/RepositorioDeOrquestradores";
 import { ErroDeTerminal, MotivoDoErroDeTerminal } from "../terminais/ErroDeTerminal";
 import { ServicoDeTerminais } from "../terminais/ServicoDeTerminais";
 import { MENSAGEM_DE_ACESSO_NEGADO, temChaveDoApp } from "./acessoSoPeloApp";
+import { criarRota, responderErroGenerico, STATUS_DA_ORQUESTRACAO } from "./respostasHttp";
 
 interface Dependencias {
   servico: ServicoDeTerminais;
@@ -58,14 +59,6 @@ const STATUS_DO_TERMINAL: Readonly<Record<MotivoDoErroDeTerminal, number>> = {
   limite_atingido: 409,
 };
 
-const STATUS_DA_ORQUESTRACAO: Readonly<Record<MotivoDoErro, number>> = {
-  dados_invalidos: 400,
-  nao_encontrado: 404,
-  turno_em_andamento: 409,
-  sem_turno_em_andamento: 409,
-  sem_plano_pendente: 409,
-};
-
 function responderErro(resposta: Response, erro: unknown): void {
   if (erro instanceof ErroDeTerminal) {
     resposta.status(STATUS_DO_TERMINAL[erro.motivo]).json({ erro: erro.message });
@@ -75,27 +68,10 @@ function responderErro(resposta: Response, erro: unknown): void {
     resposta.status(STATUS_DA_ORQUESTRACAO[erro.motivo]).json({ erro: erro.message });
     return;
   }
-  if (erro instanceof ZodError) {
-    resposta.status(400).json({ erro: erro.issues[0]?.message ?? "Dados inválidos." });
-    return;
-  }
-  console.error("[http] Erro inesperado nos terminais:", erro);
-  const detalhe = erro instanceof Error ? erro.message : String(erro);
-  resposta.status(500).json({ erro: `Erro inesperado no servidor: ${detalhe}` });
+  responderErroGenerico(resposta, erro, "[http] Erro inesperado nos terminais:");
 }
 
-type Tratador<Parametros> = (requisicao: Request<Parametros>, resposta: Response) => Promise<void> | void;
-
-/** Envolve cada rota num try/catch que devolve a mensagem de erro pronta para a tela. */
-function rota<Parametros = { id: string }>(tratador: Tratador<Parametros>): Tratador<Parametros> {
-  return async (requisicao, resposta) => {
-    try {
-      await tratador(requisicao, resposta);
-    } catch (erro) {
-      responderErro(resposta, erro);
-    }
-  };
-}
+const rota = criarRota(responderErro);
 
 /**
  * Terminais interativos do canvas. As rotas REST abrem, listam e fecham; a

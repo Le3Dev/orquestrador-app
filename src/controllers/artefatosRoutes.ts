@@ -1,5 +1,5 @@
-import { Request, Response, Router } from "express";
-import { z, ZodError } from "zod";
+import { Response, Router } from "express";
+import { z } from "zod";
 
 import { DadosDoArtefato, FormatoDoArtefato } from "../artefatos/Artefato";
 import {
@@ -11,6 +11,7 @@ import {
 import { EventoDeArtefato, PublicadorDeArtefatos } from "../artefatos/EventoDeArtefato";
 import { TipoDaOrigem } from "../artefatos/OrigemDoArtefato";
 import { ServicoDeArtefatos } from "../artefatos/ServicoDeArtefatos";
+import { criarRota, responderErroGenerico } from "./respostasHttp";
 
 export interface ResumoDaVersao {
   numero: number;
@@ -110,27 +111,10 @@ function responderErro(resposta: Response, erro: unknown): void {
     resposta.status(STATUS_POR_MOTIVO[erro.motivo]).json({ erro: erro.message });
     return;
   }
-  if (erro instanceof ZodError) {
-    resposta.status(400).json({ erro: erro.issues[0]?.message ?? "Dados inválidos." });
-    return;
-  }
-  console.error("[http] Erro inesperado nos artefatos:", erro);
-  const detalhe = erro instanceof Error ? erro.message : String(erro);
-  resposta.status(500).json({ erro: `Erro inesperado no servidor: ${detalhe}` });
+  responderErroGenerico(resposta, erro, "[http] Erro inesperado nos artefatos:");
 }
 
-type Tratador<Parametros> = (requisicao: Request<Parametros>, resposta: Response) => Promise<void> | void;
-
-/** Envolve cada rota num try/catch que devolve a mensagem de erro pronta para a tela. */
-function rota<Parametros = { id: string }>(tratador: Tratador<Parametros>): Tratador<Parametros> {
-  return async (requisicao, resposta) => {
-    try {
-      await tratador(requisicao, resposta);
-    } catch (erro) {
-      responderErro(resposta, erro);
-    }
-  };
-}
+const rota = criarRota(responderErro);
 
 /** `event:` nomeado e `data:` JSON, sem id: os eventos dos artefatos não têm histórico. */
 function formatarEvento(evento: EventoDeArtefato): string {

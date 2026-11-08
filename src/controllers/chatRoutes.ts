@@ -1,5 +1,5 @@
-import { Request, Response, Router } from "express";
-import { z, ZodError } from "zod";
+import { Response, Router } from "express";
+import { z } from "zod";
 
 import { TAMANHO_MAXIMO_DA_PERGUNTA } from "../chat/ConversaDoChat";
 import { ErroDoChat, MotivoDoErroDoChat } from "../chat/ErroDoChat";
@@ -10,6 +10,7 @@ import { MAXIMO_DE_IMAGENS_POR_MENSAGEM, TAMANHO_MAXIMO_DA_IMAGEM, TIPOS_DE_IMAG
 import { ErroDeOrquestracao } from "../orquestracao/ErroDeOrquestracao";
 import { ESFORCOS_DE_RACIOCINIO } from "../orquestracao/EsforcoDeRaciocinio";
 import { MODELOS_CLAUDE } from "../orquestracao/ModeloClaude";
+import { criarRota, responderErroGenerico } from "./respostasHttp";
 
 export interface AssinanteDoChat {
   aoEvento: (evento: EventoDoChatRegistrado) => void;
@@ -104,27 +105,10 @@ function responderErro(resposta: Response, erro: unknown): void {
     resposta.status(400).json({ erro: erro.message });
     return;
   }
-  if (erro instanceof ZodError) {
-    resposta.status(400).json({ erro: erro.issues[0]?.message ?? "Dados inválidos." });
-    return;
-  }
-  console.error("[http] Erro inesperado no chat:", erro);
-  const detalhe = erro instanceof Error ? erro.message : String(erro);
-  resposta.status(500).json({ erro: `Erro inesperado no servidor: ${detalhe}` });
+  responderErroGenerico(resposta, erro, "[http] Erro inesperado no chat:");
 }
 
-type Tratador<Parametros> = (requisicao: Request<Parametros>, resposta: Response) => Promise<void> | void;
-
-/** Envolve cada rota num try/catch que devolve a mensagem de erro pronta para a tela. */
-function rota<Parametros = Record<string, string>>(tratador: Tratador<Parametros>): Tratador<Parametros> {
-  return async (requisicao, resposta) => {
-    try {
-      await tratador(requisicao, resposta);
-    } catch (erro) {
-      responderErro(resposta, erro);
-    }
-  };
-}
+const rota = criarRota<Record<string, string>>(responderErro);
 
 export function criarChatRoutes({ servico, canal, anexos }: Dependencias): Router {
   const rotas = Router();
