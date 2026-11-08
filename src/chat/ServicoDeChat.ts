@@ -237,12 +237,14 @@ export class ServicoDeChat {
     const textoDaPergunta = conversa.perguntaEmAndamento?.texto ?? "";
 
     let projetos: ProjetoDoChat[] = [];
+    let orquestradores: OrquestradorExistente[] = [];
     let resultado: ResultadoDaResposta | null = null;
     let erro: unknown = null;
 
     try {
       const contexto = await this.lerContexto();
       projetos = contexto.projetos;
+      orquestradores = contexto.orquestradores;
       resultado = await motor.responder(
         {
           sessaoId: conversa.sessaoId,
@@ -279,7 +281,7 @@ export class ServicoDeChat {
       if (sinal.aborted) {
         this.publicar(conversa.cancelar());
       } else if (resultado !== null && resultado.sucesso) {
-        const semAcoes = separarAcoesDoApp(resultado.resposta, projetos);
+        const semAcoes = separarAcoesDoApp(resultado.resposta, projetos, orquestradores);
         const { texto, perguntas, avisos } = separarPerguntasDoApp(semAcoes.texto);
         this.publicar(
           conversa.concluir(

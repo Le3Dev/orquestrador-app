@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-import { api } from "../../shared/api/cliente";
+import { api, ErroDaApi } from "../../shared/api/cliente";
 import type { AcaoDoApp, ResumoDoOrquestrador } from "../../shared/api/tipos";
 import { AVISO_DO_LIMITE_DE_ORQUESTRADORES } from "../../shared/canvas/limiteDeTerminais";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
@@ -22,7 +22,20 @@ function orquestrador(id: string, pasta: string): ResumoDoOrquestrador {
   };
 }
 
-function renderizar(acao: Partial<AcaoDoApp> = {}, temVagaPara = vi.fn<(id: string | null) => boolean>(() => true)) {
+/** Trabalhando desde agora há pouco, no pedido dado. */
+function trabalhando(id: string, pasta: string, texto = "rodar os testes"): ResumoDoOrquestrador {
+  return {
+    ...orquestrador(id, pasta),
+    situacao: "trabalhando",
+    ultimoTurno: { texto, situacao: "em_andamento", iniciadoEm: new Date(Date.now() - 12 * 60_000).toISOString() },
+  };
+}
+
+function renderizar(
+  acao: Partial<AcaoDoApp> = {},
+  temVagaPara = vi.fn<(id: string | null) => boolean>(() => true),
+  orquestradores: ResumoDoOrquestrador[] = [],
+) {
   const aoAbrirTerminal = vi.fn();
   const aoAtualizarOrquestradores = vi.fn().mockResolvedValue(undefined);
   render(
@@ -31,6 +44,7 @@ function renderizar(acao: Partial<AcaoDoApp> = {}, temVagaPara = vi.fn<(id: stri
       aoAbrirTerminal={aoAbrirTerminal}
       temVagaPara={temVagaPara}
       aoAtualizarOrquestradores={aoAtualizarOrquestradores}
+      orquestradores={orquestradores}
     />,
   );
   return { aoAbrirTerminal, aoAtualizarOrquestradores, temVagaPara };
@@ -176,6 +190,204 @@ describe("CartaoDeAcao", () => {
     await screen.findByRole("button", { name: "aberto ✓" });
     expect(aoAbrirTerminal).toHaveBeenCalledWith("o1");
     expect(criar).not.toHaveBeenCalled();
+  });
+
+  describe("estado dos orquestradores", () => {
+    const PASTA = "C:\\Projetos\\Painel";
+
+    it("prefere um ocioso da pasta a um ocupado usado mais recentemente", async () => {
+      const ocioso = { ...orquestrador("o1", PASTA), criadoEm: "2026-11-01T12:00:00Z" };
+      const ocupado = trabalhando("o2", PASTA);
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue([ocioso, ocupado]);
+      const enviar = vi.spyOn(api, "enviarMensagem").mockResolvedValue({ turnoId: "t1" });
+      const { aoAbrirTerminal } = renderizar({ pedido: "revisar o login" }, undefined, [ocioso, ocupado]);
+
+      expect(screen.getByTestId("estado-do-escolhido")).toHaveTextContent("o1: ocioso");
+      fireEvent.click(screen.getByRole("button", { name: "abrir" }));
+
+      await screen.findByRole("button", { name: "aberto ✓" });
+      expect(aoAbrirTerminal).toHaveBeenCalledWith("o1");
+      expect(enviar).toHaveBeenCalledWith("o1", "revisar o login");
+    });
+
+    it("escolhe pelo nome da ação quando ele existe na pasta; um nome de fora vira a escolha normal", async () => {
+      const antigo = { ...orquestrador("o1", PASTA), criadoEm: "2026-11-01T12:00:00Z" };
+      const recente = { ...orquestrador("o2", PASTA), criadoEm: "2026-11-03T12:00:00Z" };
+      const deFora = orquestrador("o3", "C:\\Projetos\\Outro");
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue([antigo, recente, deFora]);
+      const { aoAbrirTerminal } = renderizar({ orquestrador: "O1" }, undefined, [antigo, recente, deFora]);
+
+      expect(screen.getByTestId("estado-do-escolhido")).toHaveTextContent("o1: ocioso");
+      fireEvent.click(screen.getByRole("button", { name: "abrir" }));
+      await screen.findByRole("button", { name: "aberto ✓" });
+      expect(aoAbrirTerminal).toHaveBeenCalledWith("o1");
+    });
+
+    it("nome de outra pasta não vale: fica com o mais recente da pasta", () => {
+      const antigo = { ...orquestrador("o1", PASTA), criadoEm: "2026-11-01T12:00:00Z" };
+      const recente = { ...orquestrador("o2", PASTA), criadoEm: "2026-11-03T12:00:00Z" };
+      renderizar({ orquestrador: "o3" }, undefined, [antigo, recente, orquestrador("o3", "C:\\Projetos\\Outro")]);
+
+      expect(screen.getByTestId("estado-do-escolhido")).toHaveTextContent("o2: ocioso");
+    });
+
+    it("ocioso com worktree mostra alterações sem commit", () => {
+      const comWorktree = {
+        ...orquestrador("o1", PASTA),
+        worktree: { branch: "orquestrador/o1", caminho: "C:\\dados\\worktrees\\o1", ativo: false },
+      };
+      renderizar({}, undefined, [comWorktree]);
+
+      expect(screen.getByTestId("estado-do-escolhido")).toHaveTextContent("o1: ocioso · alterações sem commit");
+    });
+
+    it("ocupado com pedido: mostra o estado e troca o botão por colocar na fila e criar outro", () => {
+      const ocupado = {
+        ...trabalhando("o1", PASTA, "corrigir memória"),
+        fila: [{ id: "f1", texto: "x", modo: "execucao" as const, enfileiradoEm: "2026-11-04T12:00:00Z" }],
+      };
+      const listar = vi.spyOn(api, "listarOrquestradores");
+      renderizar({ pedido: "rode os testes" }, undefined, [ocupado]);
+
+      const estado = screen.getByTestId("estado-do-escolhido");
+      expect(estado).toHaveTextContent(/o1: trabalhando há 12min \d{2}s em “corrigir memória” · 1 na fila/);
+      expect(screen.getByRole("button", { name: "Colocar na fila" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Criar outro" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "abrir" })).not.toBeInTheDocument();
+      expect(listar).not.toHaveBeenCalled();
+    });
+
+    it("plano pendente conta como ocupado", () => {
+      renderizar({ pedido: "rode os testes" }, undefined, [{ ...orquestrador("o1", PASTA), planoPendente: true }]);
+
+      expect(screen.getByTestId("estado-do-escolhido")).toHaveTextContent("o1: aguardando aprovação do plano");
+      expect(screen.getByRole("button", { name: "Colocar na fila" })).toBeInTheDocument();
+    });
+
+    it("ocupado sem pedido: só abre o terminal dele, como antes", async () => {
+      const ocupado = trabalhando("o1", PASTA);
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue([ocupado]);
+      const { aoAbrirTerminal } = renderizar({}, undefined, [ocupado]);
+
+      fireEvent.click(screen.getByRole("button", { name: "abrir" }));
+
+      await screen.findByRole("button", { name: "aberto ✓" });
+      expect(aoAbrirTerminal).toHaveBeenCalledWith("o1");
+    });
+
+    it("colocar na fila abre o terminal e guarda o pedido na fila dele, sem enviar", async () => {
+      const ocupado = trabalhando("o1", PASTA);
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue([ocupado]);
+      const enfileirar = vi.spyOn(api, "enfileirarPedido").mockResolvedValue({ pedidoId: "p1" });
+      const enviar = vi.spyOn(api, "enviarMensagem");
+      const { aoAbrirTerminal, temVagaPara } = renderizar({ pedido: "rode os testes" }, undefined, [ocupado]);
+
+      fireEvent.click(screen.getByRole("button", { name: "Colocar na fila" }));
+
+      const feito = await screen.findByRole("button", { name: "na fila ✓" });
+      expect(temVagaPara).toHaveBeenCalledWith("o1");
+      expect(aoAbrirTerminal).toHaveBeenCalledWith("o1");
+      expect(enfileirar).toHaveBeenCalledWith("o1", "rode os testes");
+      expect(enviar).not.toHaveBeenCalled();
+
+      fireEvent.click(feito);
+      expect(aoAbrirTerminal).toHaveBeenCalledTimes(2);
+      expect(enfileirar).toHaveBeenCalledTimes(1);
+    });
+
+    it("fila cheia (409) mostra a mensagem clara e mantém as duas opções", async () => {
+      const ocupado = trabalhando("o1", PASTA);
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue([ocupado]);
+      vi.spyOn(api, "enfileirarPedido").mockRejectedValue(new ErroDaApi('A fila de "o1" está cheia (máximo 10 pedidos).', 409));
+      renderizar({ pedido: "rode os testes" }, undefined, [ocupado]);
+
+      fireEvent.click(screen.getByRole("button", { name: "Colocar na fila" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        'A fila de "o1" está cheia (máximo 10 pedidos). Crie outro orquestrador ou espere a fila andar.',
+      );
+      expect(screen.getByRole("button", { name: "Criar outro" })).toBeInTheDocument();
+    });
+
+    it("fila já cheia na lista do servidor: avisa sem abrir nem enfileirar", async () => {
+      const fila = Array.from({ length: 10 }, (_, indice) => ({
+        id: `f${indice}`,
+        texto: "x",
+        modo: "execucao" as const,
+        enfileiradoEm: "2026-11-04T12:00:00Z",
+      }));
+      const cheio = { ...trabalhando("o1", PASTA), fila };
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue([cheio]);
+      const enfileirar = vi.spyOn(api, "enfileirarPedido");
+      const { aoAbrirTerminal } = renderizar({ pedido: "rode os testes" }, undefined, [cheio]);
+
+      fireEvent.click(screen.getByRole("button", { name: "Colocar na fila" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent('A fila de "o1" está cheia');
+      expect(enfileirar).not.toHaveBeenCalled();
+      expect(aoAbrirTerminal).not.toHaveBeenCalled();
+    });
+
+    it("criar outro cria um novo com nome livre na pasta e envia o pedido a ele", async () => {
+      const ocupado = { ...trabalhando("o1", PASTA), nome: "painel" };
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue([ocupado]);
+      const criado = orquestrador("o2", PASTA);
+      const criar = vi.spyOn(api, "criarOrquestrador").mockResolvedValue(criado);
+      const enviar = vi.spyOn(api, "enviarMensagem").mockResolvedValue({ turnoId: "t1" });
+      const { aoAbrirTerminal, aoAtualizarOrquestradores, temVagaPara } = renderizar(
+        { pedido: "rode os testes" },
+        undefined,
+        [ocupado],
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Criar outro" }));
+
+      await screen.findByRole("button", { name: "aberto ✓" });
+      expect(temVagaPara).toHaveBeenCalledWith(null);
+      expect(criar).toHaveBeenCalledWith(expect.objectContaining({ nome: "painel 2", pastaDeTrabalho: PASTA }));
+      expect(aoAtualizarOrquestradores).toHaveBeenCalledWith(criado);
+      expect(aoAbrirTerminal).toHaveBeenCalledWith("o2");
+      expect(enviar).toHaveBeenCalledWith("o2", "rode os testes");
+    });
+
+    it("criar outro respeita o limite de terminais do canvas", async () => {
+      const ocupado = trabalhando("o1", PASTA);
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue([ocupado]);
+      const criar = vi.spyOn(api, "criarOrquestrador");
+      renderizar({ pedido: "rode os testes" }, vi.fn<(id: string | null) => boolean>((id) => id === "o1"), [ocupado]);
+
+      fireEvent.click(screen.getByRole("button", { name: "Criar outro" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(AVISO_DO_LIMITE_DE_ORQUESTRADORES);
+      expect(criar).not.toHaveBeenCalled();
+    });
+
+    it("decide com o dado vivo no clique: ocupado agora, oferece fila ou outro em vez de enviar", async () => {
+      const livreNaTela = orquestrador("o1", PASTA);
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue([trabalhando("o1", PASTA)]);
+      const enviar = vi.spyOn(api, "enviarMensagem");
+      const { aoAbrirTerminal } = renderizar({ pedido: "rode os testes" }, undefined, [livreNaTela]);
+
+      fireEvent.click(screen.getByRole("button", { name: "abrir" }));
+
+      expect(await screen.findByRole("button", { name: "Colocar na fila" })).toBeInTheDocument();
+      expect(screen.getByTestId("estado-do-escolhido")).toHaveTextContent("o1: trabalhando há");
+      expect(enviar).not.toHaveBeenCalled();
+      expect(aoAbrirTerminal).not.toHaveBeenCalled();
+    });
+
+    it("colocar na fila de quem ficou livre envia direto, sem enfileirar", async () => {
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue([orquestrador("o1", PASTA)]);
+      const enfileirar = vi.spyOn(api, "enfileirarPedido");
+      const enviar = vi.spyOn(api, "enviarMensagem").mockResolvedValue({ turnoId: "t1" });
+      renderizar({ pedido: "rode os testes" }, undefined, [trabalhando("o1", PASTA)]);
+
+      fireEvent.click(screen.getByRole("button", { name: "Colocar na fila" }));
+
+      await screen.findByRole("button", { name: "aberto ✓" });
+      expect(enviar).toHaveBeenCalledWith("o1", "rode os testes");
+      expect(enfileirar).not.toHaveBeenCalled();
+    });
   });
 
   describe("com novo", () => {

@@ -1370,6 +1370,8 @@ function Canvas() {
     (fixo: boolean) => mudarPreferenciasDaTela({ chatFixoNaEsquerda: fixo }),
     [mudarPreferenciasDaTela],
   );
+  // Os cartões de ação do chat mostram o estado de quem vai receber o pedido.
+  const orquestradoresDoChat = useMemo(() => orquestradores ?? [], [orquestradores]);
   // A alça da borda do chat fixo grava a largura ao soltar; a área do canvas
   // (flex-1) acompanha e o React Flow se remede pelo observador de tamanho dele.
   const mudarLarguraDoChat = useCallback(
@@ -1386,6 +1388,7 @@ function Canvas() {
         aoAbrirTerminal={abrirTerminal}
         temVagaPara={temVagaPara}
         aoAtualizarOrquestradores={atualizarOrquestradoresDoChat}
+        orquestradores={orquestradoresDoChat}
         fixo={chatFixo}
         aoAlternarFixo={alternarChatFixo}
         largura={larguraDoChatFixo}
@@ -1400,6 +1403,7 @@ function Canvas() {
       abrirTerminal,
       temVagaPara,
       atualizarOrquestradoresDoChat,
+      orquestradoresDoChat,
       chatFixo,
       alternarChatFixo,
       larguraDoChatFixo,

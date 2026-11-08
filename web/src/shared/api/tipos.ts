@@ -294,6 +294,8 @@ export interface ResumoDoOrquestrador {
    * Falta em servidores anteriores à fila (vale vazia).
    */
   fila?: DadosDoPedidoNaFila[];
+  /** O último pedido terminou com um Plano à espera da decisão. Falta em servidores anteriores (vale false). */
+  planoPendente?: boolean;
 }
 
 export interface PastaDeProjeto {
@@ -471,6 +473,11 @@ export interface AcaoDoApp {
   pedido: string | null;
   /** Cria um Orquestrador novo na pasta em vez de reaproveitar um. Falta nas mensagens antigas (vale false). */
   novo?: boolean;
+  /**
+   * Nome de um orquestrador da pasta que o Claude escolheu para o pedido, já
+   * conferido pelo servidor; nulo deixa a tela escolher. Falta nas mensagens antigas.
+   */
+  orquestrador?: string | null;
 }
 
 export interface UsoDaResposta {

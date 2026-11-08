@@ -201,15 +201,29 @@ async function iniciar(): Promise<void> {
     console.warn(`[orquestracao] ${interrompidos} turno(s) marcado(s) como interrompido(s) pelo reinício.`);
   }
 
-  // Adaptador: o chat enxerga projetos e Orquestradores só como nome e pasta.
+  // Adaptador: o chat enxerga projetos pelo nome e pasta, e Orquestradores
+  // também pelo estado (ocupado ou não, fila, worktree), sem o agregado.
   const explorador = new ExploradorDePastas(configuracao.pastaRaizDosProjetos);
   const projetosDoChat: ProjetosDoChat = {
     listarProjetos: () => explorador.listarProjetos(),
     listarOrquestradores: async () =>
-      repositorio.listar().map((orquestrador) => ({
-        nome: orquestrador.nome,
-        pasta: orquestrador.pastaDeTrabalho.caminho,
-      })),
+      repositorio.listar().map((orquestrador) => {
+        const turno = orquestrador.turnoEmAndamento;
+        const worktree = orquestrador.worktree;
+        return {
+          nome: orquestrador.nome,
+          pasta: orquestrador.pastaDeTrabalho.caminho,
+          situacao: orquestrador.situacao,
+          pedidoAtual: turno?.texto ?? null,
+          turnoIniciadoEm: turno?.iniciadoEm ?? null,
+          tamanhoDaFila: orquestrador.fila.length,
+          planoPendente: orquestrador.turnoComPlanoPendente !== null,
+          branch: worktree?.branch ?? null,
+          // Sem rodar git: o fim do turno remove o worktree limpo, então um
+          // que ficou com o orquestrador parado tem alterações. No turno, desconhecido.
+          alteracoesSemCommit: turno === null ? worktree !== null : null,
+        };
+      }),
   };
   const canalDoChat = new CanalDoChat();
   const servicoDeChat = new ServicoDeChat({

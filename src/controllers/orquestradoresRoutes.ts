@@ -275,6 +275,8 @@ function rota<Parametros = { id: string }>(tratador: Tratador<Parametros>): Trat
  *
  * `instrucoesAtivas` diz de onde viriam as instruções personalizadas no
  * próximo pedido (próprias, padrão global ou nenhuma), sem repetir o texto.
+ * `planoPendente` diz se o último pedido terminou com um Plano à espera da
+ * decisão do usuário (o cartão do chat conta isso como ocupado).
  */
 function apresentarResumo(orquestrador: Orquestrador, instrucoes: InstrucoesAplicadas | null) {
   const ultimo = orquestrador.ultimoTurno;
@@ -289,6 +291,7 @@ function apresentarResumo(orquestrador: Orquestrador, instrucoes: InstrucoesApli
     instrucoesAtivas: instrucoes?.origem ?? null,
     worktree: orquestrador.worktree,
     fila: orquestrador.fila.map((pedido) => pedido.paraDados()),
+    planoPendente: orquestrador.turnoComPlanoPendente !== null,
     criadoEm: orquestrador.criadoEm.toISOString(),
     totalDeTurnos: orquestrador.totalDeTurnos,
     ultimoTurno:

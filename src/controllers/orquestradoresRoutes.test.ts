@@ -221,6 +221,16 @@ describe("rotas de orquestradores — modo de planejamento", () => {
     expect(orquestrador.turnoComPlanoPendente).not.toBeNull();
   });
 
+  it("o resumo diz se há plano pendente", async () => {
+    const resumo = async () =>
+      ((await (await fetch(`${base}/orquestradores/${orquestrador.id}`)).json()) as { planoPendente: boolean }).planoPendente;
+    expect(await resumo()).toBe(false);
+
+    await planejar();
+
+    expect(await resumo()).toBe(true);
+  });
+
   it("descartar um plano pendente responde 204", async () => {
     await planejar();
 
