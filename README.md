@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Central local para trabalhar com vários agentes do Claude ao mesmo tempo. É um **aplicativo desktop** (Electron, Windows; no Mac, rodando pelo código): a tela só abre dentro da janela do aplicativo. Aberto no navegador, o servidor recusa (ver ADR-19).
+Central local para trabalhar com vários agentes do Claude ao mesmo tempo. É um **aplicativo desktop** (Electron, Windows; no Mac e no Linux, rodando pelo código): a tela só abre dentro da janela do aplicativo. Aberto no navegador, o servidor recusa (ver ADR-19).
 
 Você cria **Orquestradores** — um por projeto, por exemplo — e conversa com cada um. A cada pedido, o Orquestrador **coordena**: o trivial (ler poucos arquivos, conferir um estado, um comando curto) ele resolve sozinho; o resto ele divide em subtarefas e entrega a **Subagentes** em paralelo, que leem, editam ou rodam comandos na pasta do projeto. Ele **nunca edita arquivos do projeto**: toda alteração vai para um Subagente (a única exceção são os artefatos, abaixo). A tela mostra cada Subagente ao vivo (atividade, ferramentas, tokens, resultado), o que o próprio Orquestrador está fazendo e, no final, a síntese.
 
@@ -44,17 +44,21 @@ npm run desktop
 - na primeira abertura, o `claude` do PATH no lugar do `claude.exe`;
 - sem atualização automática, mesmo empacotado: sem assinatura da Apple ela não instala. Ainda não há instalador para Mac.
 
+**No Linux, a partir do código-fonte:** no terminal, na pasta do projeto, rode **`./iniciar-desktop.sh`** (par do `iniciar-desktop.command`, em bash). Como no Mac, na primeira vez ele instala as dependências; depois refaz o build só do que mudou e roda `npm run desktop`. Pelo código não há licença nem atualização automática, e fechar o terminal fecha o app. A pasta do app fica em `~/.config/Orquestrador de Agentes` (ou em `$XDG_CONFIG_HOME/Orquestrador de Agentes`, se a variável estiver definida), com o mesmo `config.json`, `dados/` e `logs/`. Não há ajustes próprios do Linux (como os do `electron/mac.js`) nem instalador. **Na primeira abertura o `claude` não é detectado sozinho:** escolha o arquivo do Claude Code na tela (em geral `~/.local/bin/claude`; `command -v claude` mostra onde ele está). A pasta `~/.local` é oculta: no seletor de arquivos, Ctrl+L deixa digitar o caminho.
+
 **Primeira abertura:** o aplicativo pede três coisas, guardadas na configuração local dele:
 1. a **pasta raiz dos projetos** (os Orquestradores só trabalham dentro dela);
-2. o **`claude.exe`** do Claude Code (ele procura sozinho no caminho padrão; dá para escolher outro);
-3. se encontrar um histórico antigo (`<pasta do app>\dados` ou `%USERPROFILE%\projetos\orquestrador-app\dados`), oferece **importar**: copia orquestradores, notas e anexos para a pasta nova; o chat rápido antigo fica só para consulta em `dados\chat\historico\conversa-importada\` (a conversa não é retomada; o chat começa uma nova). A origem nunca é apagada, e os worktrees antigos continuam onde estão.
+2. o **`claude.exe`** do Claude Code (ele procura sozinho no caminho padrão; dá para escolher outro). No Mac, ele já vem preenchido com o `claude` do PATH (em geral `~/.local/bin/claude`); no Linux, não é detectado sozinho e você escolhe o arquivo `claude`;
+3. se encontrar um histórico antigo (`<pasta do app>\dados` ou `%USERPROFILE%\projetos\orquestrador-app\dados`; no Mac e no Linux, `<pasta do app>/dados` ou `~/projetos/orquestrador-app/dados`), oferece **importar**: copia orquestradores, notas e anexos para a pasta nova; o chat rápido antigo fica só para consulta em `dados\chat\historico\conversa-importada\` (a conversa não é retomada; o chat começa uma nova). A origem nunca é apagada, e os worktrees antigos continuam onde estão.
 
 Para trocar depois, use o **⚙** da barra de título do aplicativo (à esquerda de minimizar, maximizar e fechar) ou a ação *Pastas e Claude Code* da paleta (**Ctrl+K**); os dois reabrem essa tela.
 
-**Onde ficam os dados e o log** (a mesma pasta no app instalado e no `npm run desktop`):
-- configuração (`config.json`: pasta dos projetos, `claude.exe` e porta): `%APPDATA%\Orquestrador de Agentes\config.json`;
-- dados (histórico, notas, chat, anexos, worktrees novos): `%APPDATA%\Orquestrador de Agentes\dados`;
-- log do servidor: `%APPDATA%\Orquestrador de Agentes\logs\servidor.log`.
+**Onde ficam os dados e o log** (a mesma pasta no app instalado e no `npm run desktop`; é a `userData` do Electron, `<appData>/Orquestrador de Agentes`):
+- configuração (`config.json`: pasta dos projetos, `claude.exe` e porta): `%APPDATA%\Orquestrador de Agentes\config.json`; no Mac, `~/Library/Application Support/Orquestrador de Agentes/config.json`; no Linux, `~/.config/Orquestrador de Agentes/config.json`;
+- dados (histórico, notas, chat, anexos, worktrees novos): `%APPDATA%\Orquestrador de Agentes\dados`; no Mac, `~/Library/Application Support/Orquestrador de Agentes/dados`; no Linux, `~/.config/Orquestrador de Agentes/dados`;
+- log do servidor: `%APPDATA%\Orquestrador de Agentes\logs\servidor.log`; no Mac, `~/Library/Application Support/Orquestrador de Agentes/logs/servidor.log`; no Linux, `~/.config/Orquestrador de Agentes/logs/servidor.log`.
+
+No Linux, `~/.config` vale quando `$XDG_CONFIG_HOME` não está definida; definida, a pasta do app fica dentro dela.
 
 Antes, o `npm run desktop` usava `%APPDATA%\orquestrador-agentes-app`. Na primeira abertura com a pasta nova (sem `config.json` nela), o app **copia** de lá o `config.json` e a pasta `dados\` e registra no log; a pasta antiga não é apagada nem alterada, e caches do Chromium, logs e layout antigo não vêm junto.
 
