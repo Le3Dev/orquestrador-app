@@ -1,129 +1,26 @@
 import { useId, useState } from "react";
 
 import { mensagemDeErro } from "../shared/api/cliente";
-import type {
-  DadosDaConfiguracao,
-  DadosDaPredefinicao,
-  DadosDaQuantidade,
-  DadosDoEsforcoHerdado,
-  EsforcoDeRaciocinio,
-  EsforcosHerdados,
-  ModeloClaude,
-  NivelDePermissao,
-  NomeDaPredefinicao,
+import {
+  type DadosDaConfiguracao,
+  type DadosDaPredefinicao,
+  type EsforcosHerdados,
+  type NivelDePermissao,
+  type NomeDaPredefinicao,
+  TAMANHO_MAXIMO_DAS_INSTRUCOES,
 } from "../shared/api/tipos";
-import { ROTULOS_DAS_PERMISSOES, ROTULOS_DOS_ESFORCOS, ROTULOS_DOS_MODELOS } from "../shared/formatacao";
+import { type EscalaDaLetra, OPCOES_DA_ESCALA_DA_LETRA } from "../shared/canvas/layout";
+import { AVISO_DO_ULTRACODE, ROTULOS_DAS_PERMISSOES } from "../shared/formatacao";
 import { ajudaDaPredefinicao, useEsforcosHerdados, usePredefinicoes } from "../shared/hooks/useDadosDaConfiguracao";
-import { CampoDeInstrucoes } from "./CampoDeInstrucoes";
+import { tamanhoDasInstrucoes } from "../shared/instrucoes";
+import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../shared/modelos";
+import { ChipDeEsforco, ChipDeQuantidade } from "./canvas/ChipsDaCriacao";
+import { AvisoDoEsforcoHerdado, IconeDaPermissao, Rotulo, SeletorDeModelo } from "./canvas/LinhasDaConfiguracao";
 import { PreviaDoPromptFinal } from "./PreviaDoPromptFinal";
 
-const LIMITE_DE_SUBAGENTES = 10;
+const PERMISSOES: readonly NivelDePermissao[] = ["leitura", "edicao", "edicao_e_comandos"];
 
-interface Opcao<Valor extends string> {
-  valor: Valor;
-  titulo: string;
-  descricao?: string;
-}
-
-const MODELOS: readonly Opcao<ModeloClaude>[] = (["fable", "opus", "sonnet", "haiku"] as const).map((modelo) => ({
-  valor: modelo,
-  titulo: ROTULOS_DOS_MODELOS[modelo].nome,
-  descricao: ROTULOS_DOS_MODELOS[modelo].descricao,
-}));
-
-const ESFORCOS: readonly Opcao<EsforcoDeRaciocinio>[] = (
-  ["padrao", "baixo", "medio", "alto", "extra_alto", "maximo"] as const
-).map((esforco) => ({ valor: esforco, titulo: ROTULOS_DOS_ESFORCOS[esforco] }));
-
-const PERMISSOES: readonly Opcao<NivelDePermissao>[] =(["leitura", "edicao", "edicao_e_comandos"] as const).map(
-  (nivel) => ({ valor: nivel, titulo: ROTULOS_DAS_PERMISSOES[nivel].nome }),
-);
-
-const MODOS: readonly Opcao<DadosDaQuantidade["modo"]>[] = [
-  { valor: "automatica", titulo: "Automática", descricao: "Ele decide, até o máximo" },
-  { valor: "fixa", titulo: "Fixa", descricao: "Sempre essa quantidade" },
-];
-
-interface PropsDoSegmentado<Valor extends string> {
-  rotulo: string;
-  opcoes: readonly Opcao<Valor>[];
-  valor: Valor;
-  aoEscolher: (valor: Valor) => void;
-}
-
-/** Grupo de opções lado a lado (rádios), com a escolhida em destaque. */
-function Segmentado<Valor extends string>({ rotulo, opcoes, valor, aoEscolher }: PropsDoSegmentado<Valor>) {
-  const nome = useId();
-  return (
-    <fieldset className="field">
-      <legend className="label mb-1.5">{rotulo}</legend>
-      <div className="segmentado">
-        {opcoes.map((opcao) => (
-          <label key={opcao.valor}>
-            <input
-              type="radio"
-              name={nome}
-              value={opcao.valor}
-              checked={valor === opcao.valor}
-              onChange={() => aoEscolher(opcao.valor)}
-            />
-            <span className="font-titulo text-[12px] font-medium">{opcao.titulo}</span>
-            {opcao.descricao !== undefined && <span className="text-[10.5px] text-muted">{opcao.descricao}</span>}
-          </label>
-        ))}
-      </div>
-    </fieldset>
-  );
-}
-
-interface PropsDoSeletorDeEsforco {
-  rotulo: string;
-  valor: EsforcoDeRaciocinio;
-  idDaAjuda: string;
-  /** O que o Claude Code usa quando fica em "padrao"; nulo quando não se sabe. */
-  herdado: DadosDoEsforcoHerdado | null;
-  aoEscolher: (esforco: EsforcoDeRaciocinio) => void;
-}
-
-/** Lista suspensa, e não segmentado: seis níveis não cabem lado a lado na coluna do modelo. */
-function SeletorDeEsforco({ rotulo, valor, idDaAjuda, herdado, aoEscolher }: PropsDoSeletorDeEsforco) {
-  const id = useId();
-  const idDoAviso = useId();
-  // Em "padrao" o app não força nada: avisa quando o que o Claude Code herda gasta tokens demais.
-  const avisar = valor === "padrao" && herdado !== null && herdado.deveAvisar;
-  return (
-    <div className="field">
-      <label className="label" htmlFor={id}>
-        {rotulo}
-      </label>
-      <select
-        id={id}
-        className="select text-[12px]"
-        value={valor}
-        aria-describedby={avisar ? `${idDaAjuda} ${idDoAviso}` : idDaAjuda}
-        onChange={(evento) => {
-          const escolhido = ESFORCOS.find((opcao) => opcao.valor === evento.target.value);
-          if (escolhido !== undefined) {
-            aoEscolher(escolhido.valor);
-          }
-        }}
-      >
-        {ESFORCOS.map((opcao) => (
-          <option key={opcao.valor} value={opcao.valor}>
-            {opcao.titulo}
-          </option>
-        ))}
-      </select>
-      {avisar && (
-        <span id={idDoAviso} className="hint-warning">
-          Em Padrão, o Claude Code usa <strong>{ROTULOS_DOS_ESFORCOS[herdado.nivel]}</strong> para este modelo
-          (definido em <span className="mono">{herdado.origem}</span>). Isso gasta mais tokens; escolha um nível aqui
-          para controlar.
-        </span>
-      )}
-    </div>
-  );
-}
+type Menu = "esforcoDoOrquestrador" | "esforcoDosSubagentes" | "quantidade";
 
 interface Props {
   valor: DadosDaConfiguracao;
@@ -136,17 +33,26 @@ interface Props {
   buscarEsforcoHerdado?: () => Promise<EsforcosHerdados>;
   /**
    * Aplica a predefinição no servidor e devolve a configuração resultante (⚙ de
-   * um Orquestrador existente). Sem ela (formulário de criação), o botão só
-   * preenche os campos, que continuam editáveis.
+   * um Orquestrador existente). Sem ela, o botão só preenche os campos, que
+   * continuam editáveis.
    */
   aplicarPredefinicao?: (predefinicao: NomeDaPredefinicao) => Promise<DadosDaConfiguracao>;
-  /** A pasta do orquestrador (ou a escolhida no rascunho), para a pré-visualização do prompt. */
+  /** A pasta do orquestrador, para a pré-visualização do prompt. */
   pastaDeTrabalho?: string | undefined;
+  /**
+   * O tamanho da letra do cartão no canvas (⚙ de um Orquestrador existente).
+   * Não é dado do servidor: fica no layout do canvas e vale na hora. Sem ele,
+   * o campo não aparece.
+   */
+  tamanhoDaLetra?: { valor: EscalaDaLetra; aoMudar: (escala: EscalaDaLetra) => void };
 }
 
 /**
- * Modelos e esforço, quantidade de subagentes, permissões, commit e push e
- * as instruções personalizadas. Usado ao criar e ao reconfigurar.
+ * As linhas da ⚙ do terminal, com a mesma cara da criação (NoRascunho):
+ * permissão, modelos com os chips de esforço e quantidade, opções, tamanho da
+ * letra e instruções. Pasta e nome não aparecem: não mudam depois de criado.
+ * Precisa estar dentro de um `.corpo-da-criacao` (a consulta de contêiner
+ * empilha as linhas e os menus dos chips viram de lado pela borda dele).
  */
 export function CamposDaConfiguracao({
   valor,
@@ -154,21 +60,35 @@ export function CamposDaConfiguracao({
   buscarEsforcoHerdado,
   aplicarPredefinicao,
   pastaDeTrabalho,
+  tamanhoDaLetra,
 }: Props) {
-  const idDoLimite = useId();
-  const idDaAjudaDoEsforco = useId();
-  const idDaAjudaDoCommit = useId();
+  const idDoCampo = useId();
+  const idDaPermissao = useId();
+  const idDaLetra = useId();
   const predefinicoes = usePredefinicoes();
   const herdados = useEsforcosHerdados(buscarEsforcoHerdado);
+  const [menuAberto, setMenuAberto] = useState<Menu | null>(null);
   const [aplicando, setAplicando] = useState(false);
   const [erroDaPredefinicao, setErroDaPredefinicao] = useState<string | null>(null);
   const economico = predefinicoes.find((predefinicao) => predefinicao.nome === "economico");
-  const quantidade = valor.quantidadeDeSubagentes;
+
+  const comandos = valor.nivelDePermissao === "edicao_e_comandos";
   // Commit e push são comandos git: sem permissão de rodar comandos, a opção não tem efeito.
-  const commitSemComandos = valor.permitirCommitEPush && valor.nivelDePermissao !== "edicao_e_comandos";
+  const commitSemComandos = valor.permitirCommitEPush && !comandos;
+  const tamanho = tamanhoDasInstrucoes(valor.instrucoesPersonalizadas);
+  const passouDoLimite = tamanho > TAMANHO_MAXIMO_DAS_INSTRUCOES;
 
   function mudar<Campo extends keyof DadosDaConfiguracao>(campo: Campo, novo: DadosDaConfiguracao[Campo]): void {
     aoMudar({ ...valor, [campo]: novo });
+  }
+
+  /** Um menu aberto por vez: abrir um fecha o outro. */
+  function controleDoMenu(menu: Menu) {
+    return {
+      aberto: menuAberto === menu,
+      aoMudarAberto: (aberto: boolean) =>
+        setMenuAberto((atual) => (aberto ? menu : atual === menu ? null : atual)),
+    };
   }
 
   async function usarPredefinicao(predefinicao: DadosDaPredefinicao): Promise<void> {
@@ -187,162 +107,209 @@ export function CamposDaConfiguracao({
     }
   }
 
-  function mudarLimite(limite: number): void {
-    if (Number.isInteger(limite)) {
-      mudar("quantidadeDeSubagentes", { ...quantidade, limite: Math.min(LIMITE_DE_SUBAGENTES, Math.max(1, limite)) });
-    }
-  }
-
-  // Consulta de contêiner, e não de tela: os campos vivem dentro de terminais
-  // que o usuário redimensiona no canvas.
   return (
-    <div className="flex flex-col gap-4 @container">
-      {economico !== undefined && (
-        <div className="flex flex-col items-end gap-1">
-          <button
-            type="button"
-            className="btn btn-sm btn-outline"
-            title={ajudaDaPredefinicao(economico)}
-            disabled={aplicando}
-            aria-busy={aplicando}
-            onClick={() => void usarPredefinicao(economico)}
-          >
-            {aplicando ? "Aplicando…" : "Modo econômico"}
-          </button>
+    <>
+      <div className="linha-da-criacao">
+        <Rotulo
+          id={idDaPermissao}
+          titulo="Permissão"
+          dica="O que ele pode fazer na pasta."
+          explicacao={`Vale para o orquestrador e para os subagentes. Libere ${ROTULOS_DAS_PERMISSOES.edicao_e_comandos.nome} só quando precisar instalar, testar ou compilar.`}
+          alinharAoTopo
+        />
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="permissoes-da-criacao" role="radiogroup" aria-labelledby={idDaPermissao}>
+            {PERMISSOES.map((nivel) => {
+              const escolhida = valor.nivelDePermissao === nivel;
+              return (
+                <label
+                  key={nivel}
+                  className={`opcao-da-permissao ${escolhida && nivel === "edicao_e_comandos" ? "opcao-da-permissao-risco" : ""}`}
+                  title={ROTULOS_DAS_PERMISSOES[nivel].nome}
+                >
+                  <input
+                    type="radio"
+                    name={`${idDaPermissao}-nivel`}
+                    value={nivel}
+                    checked={escolhida}
+                    onChange={() => mudar("nivelDePermissao", nivel)}
+                  />
+                  <IconeDaPermissao nivel={nivel} />
+                  <span className="truncate">{ROTULOS_DAS_PERMISSOES[nivel].nome}</span>
+                </label>
+              );
+            })}
+          </div>
+          <span className={`text-[12px] ${comandos ? "text-warning" : "text-secondary"}`}>
+            {comandos
+              ? "Edita, instala, testa e compila. Use só em pastas que você confia."
+              : ROTULOS_DAS_PERMISSOES[valor.nivelDePermissao].descricao}
+          </span>
+        </div>
+      </div>
+
+      <div className="linha-da-criacao">
+        <Rotulo
+          htmlFor={`${idDoCampo}-orquestrador`}
+          titulo="Orquestrador"
+          dica="Quem conversa com você."
+          explicacao="Ele entende o pedido, divide em tarefas e passa para os subagentes. Fable é para os desafios mais difíceis, Opus é o mais capaz no dia a dia, Sonnet equilibra e Haiku é rápido e gasta menos cota. O esforço é quanto ele pensa antes de responder; no automático, vale o padrão do Claude Code."
+          alinharAoTopo
+        />
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <SeletorDeModelo
+              id={`${idDoCampo}-orquestrador`}
+              valor={valor.modeloDoOrquestrador}
+              aoEscolher={(modelo) => mudar("modeloDoOrquestrador", modelo)}
+            />
+            <ChipDeEsforco
+              dono="do orquestrador"
+              valor={valor.esforcoDoOrquestrador}
+              aoEscolher={(esforco) => mudar("esforcoDoOrquestrador", esforco)}
+              comUltracode
+              {...controleDoMenu("esforcoDoOrquestrador")}
+            />
+          </div>
+          <AvisoDoEsforcoHerdado esforco={valor.esforcoDoOrquestrador} herdado={herdados?.orquestrador ?? null} />
+          {valor.esforcoDoOrquestrador === "ultracode" && <span className="hint-warning">{AVISO_DO_ULTRACODE}</span>}
+        </div>
+
+        <Rotulo
+          htmlFor={`${idDoCampo}-subagentes`}
+          titulo="Subagentes"
+          dica="Ajudantes que trabalham em paralelo."
+          explicacao="O orquestrador lança um para cada tarefa, e eles aparecem como bixinhos ligados ao terminal. No padrão, ele decide quantos usar, até 3 ao mesmo tempo. Cada subagente consome a cota da sua assinatura do Claude."
+          alinharAoTopo
+        />
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <SeletorDeModelo
+              id={`${idDoCampo}-subagentes`}
+              valor={valor.modeloDosSubagentes}
+              aoEscolher={(modelo) => mudar("modeloDosSubagentes", modelo)}
+            />
+            <ChipDeEsforco
+              dono="dos subagentes"
+              valor={valor.esforcoDosSubagentes}
+              aoEscolher={(esforco) => mudar("esforcoDosSubagentes", esforco)}
+              {...controleDoMenu("esforcoDosSubagentes")}
+            />
+            <ChipDeQuantidade
+              valor={valor.quantidadeDeSubagentes}
+              padrao={CONFIGURACAO_PADRAO_DO_ORQUESTRADOR.quantidadeDeSubagentes}
+              aoMudar={(quantidade) => mudar("quantidadeDeSubagentes", quantidade)}
+              {...controleDoMenu("quantidade")}
+            />
+          </div>
+          <AvisoDoEsforcoHerdado esforco={valor.esforcoDosSubagentes} herdado={herdados?.subagentes ?? null} />
+        </div>
+      </div>
+
+      <div className="linha-da-criacao">
+        <Rotulo
+          titulo="Opções"
+          dica="Commit e push ficam travados."
+          explicacao="Só acontecem quando você pedir na mensagem, e só com a permissão de rodar comandos. O Modo econômico troca modelos e esforço por outros que gastam menos cota e já vale, sem o Salvar; os campos continuam editáveis."
+          alinharAoTopo
+        />
+        <div className="flex min-w-0 flex-col gap-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+            <button
+              type="button"
+              role="switch"
+              className="interruptor"
+              aria-checked={valor.permitirCommitEPush}
+              onClick={() => mudar("permitirCommitEPush", !valor.permitirCommitEPush)}
+            >
+              <span className={`interruptor-trilho ${commitSemComandos ? "interruptor-sem-efeito" : ""}`} aria-hidden="true" />
+              Commit e push quando eu pedir
+            </button>
+            {economico !== undefined && (
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost ml-auto shrink-0"
+                title={ajudaDaPredefinicao(economico)}
+                disabled={aplicando}
+                aria-busy={aplicando}
+                onClick={() => void usarPredefinicao(economico)}
+              >
+                {aplicando ? "Aplicando…" : "Modo econômico"}
+              </button>
+            )}
+          </div>
+          {/* Os avisos ficam embaixo: o Modo econômico não muda de lugar quando eles aparecem. */}
+          {commitSemComandos && (
+            <span className="text-[11.5px] text-warning">Só vale com {ROTULOS_DAS_PERMISSOES.edicao_e_comandos.nome}.</span>
+          )}
           {erroDaPredefinicao !== null && (
             <span role="alert" className="hint-error">
               {erroDaPredefinicao}
             </span>
           )}
         </div>
-      )}
-      <div className="flex flex-col gap-1.5">
-        <div className="grid gap-4 @xl:grid-cols-2">
-          <div className="flex flex-col gap-2">
-            <Segmentado
-              rotulo="Modelo do orquestrador"
-              opcoes={MODELOS}
-              valor={valor.modeloDoOrquestrador}
-              aoEscolher={(modelo) => mudar("modeloDoOrquestrador", modelo)}
-            />
-            <SeletorDeEsforco
-              rotulo="Esforço do orquestrador"
-              valor={valor.esforcoDoOrquestrador}
-              idDaAjuda={idDaAjudaDoEsforco}
-              herdado={herdados?.orquestrador ?? null}
-              aoEscolher={(esforco) => mudar("esforcoDoOrquestrador", esforco)}
-            />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Segmentado
-              rotulo="Modelo dos subagentes"
-              opcoes={MODELOS}
-              valor={valor.modeloDosSubagentes}
-              aoEscolher={(modelo) => mudar("modeloDosSubagentes", modelo)}
-            />
-            <SeletorDeEsforco
-              rotulo="Esforço dos subagentes"
-              valor={valor.esforcoDosSubagentes}
-              idDaAjuda={idDaAjudaDoEsforco}
-              herdado={herdados?.subagentes ?? null}
-              aoEscolher={(esforco) => mudar("esforcoDosSubagentes", esforco)}
-            />
-          </div>
-        </div>
-        <span id={idDaAjudaDoEsforco} className="hint">
-          Padrão: o app não força nada — vale o settings.json do Claude Code desta máquina ou, sem ele, o padrão do
-          modelo. Mais esforço = respostas mais cuidadosas, porém mais lentas e com mais uso de cota.
-        </span>
       </div>
 
-      <div className="flex flex-wrap items-end gap-4">
-        <Segmentado
-          rotulo="Quantidade de subagentes"
-          opcoes={MODOS}
-          valor={quantidade.modo}
-          aoEscolher={(modo) => mudar("quantidadeDeSubagentes", { ...quantidade, modo })}
-        />
-        <div className="field">
-          <label className="label" htmlFor={idDoLimite}>
-            {quantidade.modo === "automatica" ? "Máximo" : "Quantidade"}
-          </label>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              className="btn btn-sm btn-outline w-8 px-0"
-              aria-label="Diminuir"
-              disabled={quantidade.limite <= 1}
-              onClick={() => mudarLimite(quantidade.limite - 1)}
-            >
-              −
-            </button>
-            <input
-              id={idDoLimite}
-              type="number"
-              className="input w-14 text-center font-mono"
-              min={1}
-              max={LIMITE_DE_SUBAGENTES}
-              value={quantidade.limite}
-              onChange={(evento) => mudarLimite(Number(evento.target.value))}
-            />
-            <button
-              type="button"
-              className="btn btn-sm btn-outline w-8 px-0"
-              aria-label="Aumentar"
-              disabled={quantidade.limite >= LIMITE_DE_SUBAGENTES}
-              onClick={() => mudarLimite(quantidade.limite + 1)}
-            >
-              +
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <Segmentado
-          rotulo="Permissões"
-          opcoes={PERMISSOES}
-          valor={valor.nivelDePermissao}
-          aoEscolher={(nivel) => mudar("nivelDePermissao", nivel)}
-        />
-        <span className="hint">{ROTULOS_DAS_PERMISSOES[valor.nivelDePermissao].descricao}</span>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <label className="flex w-fit cursor-pointer items-center gap-2">
-          <input
-            type="checkbox"
-            checked={valor.permitirCommitEPush}
-            aria-describedby={idDaAjudaDoCommit}
-            onChange={(evento) => mudar("permitirCommitEPush", evento.target.checked)}
+      {tamanhoDaLetra !== undefined && (
+        <div className="linha-da-criacao">
+          <Rotulo
+            id={idDaLetra}
+            titulo="Tamanho da letra"
+            dica="Só deste orquestrador, no canvas."
+            explicacao="Aumenta a letra do cartão inteiro, na configuração e na conversa, e o cartão cresce junto. Vale na hora, sem o Salvar, e fica guardado neste navegador."
           />
-          <span className="label">Permitir commit e push quando eu pedir</span>
-        </label>
-        <span id={idDaAjudaDoCommit} className="hint">
-          Commit e push só quando você pedir explicitamente na mensagem; nunca na main e sem Co-authored-by.
-        </span>
-        {commitSemComandos && (
-          <span className="text-[11px] text-warning">
-            Commit e push exigem a permissão de rodar comandos ({ROTULOS_DAS_PERMISSOES.edicao_e_comandos.nome}).
-          </span>
-        )}
-      </div>
+          <div className="permissoes-da-criacao w-fit" role="radiogroup" aria-labelledby={idDaLetra}>
+            {OPCOES_DA_ESCALA_DA_LETRA.map((opcao) => (
+              <label key={opcao.valor} className="opcao-da-permissao">
+                <input
+                  type="radio"
+                  name={`${idDaLetra}-escala`}
+                  value={opcao.valor}
+                  checked={tamanhoDaLetra.valor === opcao.valor}
+                  onChange={() => tamanhoDaLetra.aoMudar(opcao.valor)}
+                />
+                {opcao.titulo}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
-      <div className="flex flex-col gap-2">
-        <CampoDeInstrucoes
-          rotulo="Instruções personalizadas (opcional)"
-          ajuda="Regras suas que este orquestrador segue em todo pedido, além das dele. Valem já no próximo pedido, inclusive nesta conversa. Vazio: valem as instruções gerais (botão na barra do canvas), se houver. Não ampliam as permissões acima."
-          placeholder="Ex.: Responda em tópicos curtos. Rode os testes antes de concluir."
-          valor={valor.instrucoesPersonalizadas}
-          aoMudar={(texto) => mudar("instrucoesPersonalizadas", texto)}
+      <div className="linha-da-criacao">
+        <Rotulo
+          htmlFor={`${idDoCampo}-instrucoes`}
+          titulo="Instruções"
+          dica="Regras só deste orquestrador."
+          explicacao="Entram no prompt dele, por exemplo o jeito de responder ou o que rodar antes de concluir, e valem já no próximo pedido, inclusive nesta conversa. Vazio, valem as Instruções gerais (botão na barra). Não ampliam a permissão acima."
+          alinharAoTopo
         />
-        <PreviaDoPromptFinal configuracao={valor} pastaDeTrabalho={pastaDeTrabalho} comoLink />
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <textarea
+            id={`${idDoCampo}-instrucoes`}
+            className="textarea instrucoes-da-criacao custom-scrollbar"
+            rows={7}
+            value={valor.instrucoesPersonalizadas}
+            placeholder="Opcional. Ex.: Responda em tópicos curtos. Rode os testes antes de concluir."
+            aria-invalid={passouDoLimite}
+            spellCheck
+            onChange={(evento) => mudar("instrucoesPersonalizadas", evento.target.value)}
+          />
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <PreviaDoPromptFinal configuracao={valor} pastaDeTrabalho={pastaDeTrabalho} comoLink />
+            </div>
+            <span className={`mono shrink-0 text-[11px] ${passouDoLimite ? "text-error" : "text-muted"}`} aria-live="polite">
+              {tamanho.toLocaleString("pt-BR")} / {TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString("pt-BR")}
+            </span>
+          </div>
+          {passouDoLimite && (
+            <span className="text-[11px] text-error" role="alert">
+              Passou do limite de {TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString("pt-BR")} caracteres: encurte o texto
+              para conseguir salvar.
+            </span>
+          )}
+        </div>
       </div>
-
-      <p className="hint">
-        Cada subagente consome a cota da sua assinatura do Claude, e todos rodam ao mesmo tempo. Opus em vários
-        subagentes gasta a cota mais rápido.
-      </p>
-    </div>
+    </>
   );
 }

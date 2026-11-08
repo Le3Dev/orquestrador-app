@@ -26,6 +26,7 @@ function mensagem(
     uso: null,
     motivoDaFalha: null,
     autorizacaoPendente: null,
+    perguntas: [],
     ...alteracoes,
   };
 }
@@ -360,6 +361,370 @@ describe("ChatRapido", () => {
     it("sem autorização não há selo", () => {
       renderizar();
       expect(screen.queryByText("alterações autorizadas")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("perguntas com opções", () => {
+    const cartao = () => screen.queryByRole("group", { name: "Pergunta do Claude" });
+    const PERGUNTANDO: EstadoDoChatNaTela = {
+      ...OCIOSO,
+      mensagens: [
+        mensagem("u1", "usuario", { texto: "Crie o cadastro" }),
+        mensagem("c1", "claude", {
+          texto: "Antes, uma dúvida.",
+          perguntas: [
+            {
+              pergunta: "Qual banco usar?",
+              opcoes: [
+                { rotulo: "PostgreSQL", descricao: "Relacional" },
+                { rotulo: "SQLite", descricao: null },
+              ],
+              multipla: false,
+            },
+          ],
+        }),
+      ],
+    };
+
+    it("o clique numa opção responde pelo envio do chat", async () => {
+      const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "c2" });
+      renderizar(PERGUNTANDO);
+
+      expect(cartao()).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "SQLite" }));
+
+      await waitFor(() => expect(perguntar).toHaveBeenCalledWith("Qual banco usar? → SQLite", []));
+      await waitFor(() => expect(screen.getByText(/· respondida/)).toBeInTheDocument());
+    });
+
+    it("com uma mensagem depois, o cartão fica travado como respondido", () => {
+      renderizar({
+        ...PERGUNTANDO,
+        mensagens: [...PERGUNTANDO.mensagens, mensagem("u2", "usuario", { texto: "Qual banco usar? → SQLite" })],
+      });
+
+      expect(screen.getByText(/· respondida/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "SQLite" })).toBeDisabled();
+    });
+
+    it("durante uma resposta, as opções ficam desabilitadas", () => {
+      const { rerender } = renderizar(PERGUNTANDO);
+      expect(screen.getByRole("button", { name: "SQLite" })).toBeEnabled();
+
+      rerender({ ...PERGUNTANDO, situacao: "respondendo" });
+      expect(screen.getByRole("button", { name: "SQLite" })).toBeDisabled();
+    });
+
+    it("desconectado, as opções ficam desabilitadas", () => {
+      renderizar(PERGUNTANDO, true);
+      expect(screen.getByRole("button", { name: "SQLite" })).toBeDisabled();
+    });
+
+    it("o bloco cru da pergunta não aparece enquanto a resposta chega", () => {
+      renderizar({
+        ...OCIOSO,
+        situacao: "respondendo",
+        mensagens: [
+          mensagem("u1", "usuario", { texto: "Crie o cadastro" }),
+          mensagem("c1", "claude", {
+            situacao: "respondendo",
+            texto: "Antes, uma dúvida.\n\n```pergunta-do-app\n{\"perguntas\":[{\"pergunta\":\"Qual",
+          }),
+        ],
+      });
+
+      expect(screen.getByText("Antes, uma dúvida.")).toBeInTheDocument();
+      expect(screen.queryByText(/pergunta-do-app/)).not.toBeInTheDocument();
+      expect(cartao()).not.toBeInTheDocument();
+    });
+  });
+
+  describe("melhorar o pedido (✨)", () => {
+    const MELHORADO = {
+      texto: "Qual é a diferença entre useMemo e useCallback no React 19?",
+      uso: { entrada: 700, criacaoDeCache: 0, leituraDeCache: 0, saida: 40 },
+      indiceDeCusto: 19_800,
+      duracaoMs: 1500,
+    };
+
+    it("desabilitado com o campo vazio, com o Claude respondendo e com o servidor fora", () => {
+      const { campo } = renderizar();
+      const botao = screen.getByRole("button", { name: "Melhorar o pedido" });
+      expect(botao).toBeDisabled();
+      fireEvent.change(campo, { target: { value: "usememo x usecallback" } });
+      expect(botao).toBeEnabled();
+    });
+
+    it.each([
+      ["respondendo", RESPONDENDO, false],
+      ["desconectado", OCIOSO, true],
+    ] as const)("%s: o botão fica desabilitado mesmo com texto", (_nome, chat, desconectado) => {
+      const { campo } = renderizar(chat, desconectado);
+      fireEvent.change(campo, { target: { value: "usememo x usecallback" } });
+      expect(screen.getByRole("button", { name: "Melhorar o pedido" })).toBeDisabled();
+    });
+
+    it("manda onde \"chat\" sem pasta, troca o texto sem enviar e editar tira o desfazer", async () => {
+      const melhorar = vi.spyOn(api, "melhorarPrompt").mockResolvedValue(MELHORADO);
+      const perguntar = vi.spyOn(api, "perguntarNoChat");
+      const { campo } = renderizar();
+      fireEvent.change(campo, { target: { value: "usememo x usecallback" } });
+
+      fireEvent.click(screen.getByRole("button", { name: "Melhorar o pedido" }));
+
+      expect(melhorar).toHaveBeenCalledWith(
+        { texto: "usememo x usecallback", onde: "chat" },
+        expect.any(AbortSignal),
+      );
+      await waitFor(() => expect(campo).toHaveValue(MELHORADO.texto));
+      expect(screen.getByRole("status")).toHaveTextContent("melhorado · ≈ índice 19,8 mil · desfazer");
+      expect(perguntar).not.toHaveBeenCalled();
+
+      fireEvent.change(campo, { target: { value: `${MELHORADO.texto} Com exemplo.` } });
+      expect(screen.queryByRole("button", { name: "desfazer" })).not.toBeInTheDocument();
+    });
+
+    it("melhorando: o campo trava, Enter não envia e cancelar aborta", () => {
+      let sinal: AbortSignal | undefined;
+      vi.spyOn(api, "melhorarPrompt").mockImplementation((_dados, recebido) => {
+        sinal = recebido;
+        return new Promise(() => undefined);
+      });
+      const perguntar = vi.spyOn(api, "perguntarNoChat");
+      const { campo } = renderizar();
+      fireEvent.change(campo, { target: { value: "usememo x usecallback" } });
+
+      fireEvent.click(screen.getByRole("button", { name: "Melhorar o pedido" }));
+      expect(campo).toHaveAttribute("readonly");
+      fireEvent.keyDown(campo, { key: "Enter" });
+      expect(perguntar).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Cancelar a melhoria do pedido" }));
+      expect(sinal?.aborted).toBe(true);
+      expect(campo).toHaveValue("usememo x usecallback");
+    });
+  });
+
+  describe("fixo à esquerda", () => {
+    const CONVERSA: EstadoDoChatNaTela = {
+      ...OCIOSO,
+      mensagens: [
+        mensagem("u1", "usuario", { texto: "Abra o painel" }),
+        mensagem("c1", "claude", {
+          texto: "Pronto, sugeri abrir.",
+          acoes: [{ tipo: "abrir_orquestrador", projeto: "painel", pasta: "C:\\p\\painel", pedido: null }],
+          perguntas: [
+            { pergunta: "Qual banco usar?", opcoes: [{ rotulo: "SQLite", descricao: null }], multipla: false },
+          ],
+        }),
+      ],
+    };
+
+    function renderizarFixo(chat: EstadoDoChatNaTela = CONVERSA) {
+      const aoAlternarFixo = vi.fn();
+      const props = {
+        desconectado: false,
+        erroAoCarregar: null,
+        aoMudarPreferencias: vi.fn(),
+        aoAbrirTerminal: vi.fn(),
+        temVagaPara: vi.fn().mockReturnValue(true),
+        aoAtualizarOrquestradores: vi.fn().mockResolvedValue(undefined),
+      };
+      render(<ChatRapido chat={chat} {...props} fixo aoAlternarFixo={aoAlternarFixo} />);
+      return { aoAlternarFixo };
+    }
+
+    it("vira um aside com as mensagens em bolhas, os cartões e o campo embaixo, sempre expandido", () => {
+      renderizarFixo();
+
+      const lateral = screen.getByRole("complementary", { name: "Chat rápido" });
+      expect(lateral.tagName).toBe("ASIDE");
+      expect(lateral).toHaveClass("chat-rapido", "chat-lateral");
+      expect(screen.getByText("Abra o painel").closest(".mensagem-do-usuario")).not.toBeNull();
+      expect(screen.getByText("Pronto, sugeri abrir.").closest(".mensagem-do-claude")).not.toBeNull();
+      expect(screen.getByText("Abrir orquestrador em painel")).toBeInTheDocument();
+      expect(screen.getByRole("group", { name: "Pergunta do Claude" })).toBeInTheDocument();
+      const campo = screen.getByRole("textbox", { name: "Pergunta para o Claude" });
+      expect(lateral).toContainElement(campo);
+      expect(screen.getByTestId("composer-do-chat")).toHaveClass("composer-expandido");
+      expect(screen.getByRole("button", { name: "Anexar imagens" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Modelo:/ })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "limpar" })).toBeInTheDocument();
+    });
+
+    it("sem mensagens, a conversa continua à vista, com o convite", () => {
+      renderizarFixo(OCIOSO);
+
+      expect(screen.getByRole("region", { name: "Conversa com o Claude" })).toBeVisible();
+      expect(screen.getByText(/a conversa aparece aqui/)).toBeInTheDocument();
+    });
+
+    it("não oculta: sem o botão ocultar e o Esc não esconde a conversa; \"soltar\" desliga a preferência", () => {
+      const { aoAlternarFixo } = renderizarFixo();
+
+      expect(screen.queryByRole("button", { name: "ocultar" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Fixar o chat à esquerda" })).not.toBeInTheDocument();
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Pergunta para o Claude" }), { key: "Escape" });
+      expect(screen.getByRole("region", { name: "Conversa com o Claude" })).toBeVisible();
+
+      fireEvent.click(screen.getByRole("button", { name: "Soltar o chat" }));
+      expect(aoAlternarFixo).toHaveBeenCalledWith(false);
+    });
+
+    describe("alça de largura", () => {
+      // O jsdom não tem PointerEvent: sem ele, o fireEvent manda um Event sem clientX nem pointerId.
+      class EventoDePonteiroFalso extends MouseEvent {
+        readonly pointerId: number;
+        constructor(tipo: string, inicio: PointerEventInit = {}) {
+          super(tipo, inicio);
+          this.pointerId = inicio.pointerId ?? 0;
+        }
+      }
+      beforeEach(() => vi.stubGlobal("PointerEvent", EventoDePonteiroFalso));
+      afterEach(() => vi.unstubAllGlobals());
+
+      function renderizarComAlca(largura = 360) {
+        const aoMudarLargura = vi.fn();
+        const props = {
+          desconectado: false,
+          erroAoCarregar: null,
+          aoMudarPreferencias: vi.fn(),
+          aoAbrirTerminal: vi.fn(),
+          temVagaPara: vi.fn().mockReturnValue(true),
+          aoAtualizarOrquestradores: vi.fn().mockResolvedValue(undefined),
+        };
+        const resultado = render(
+          <ChatRapido chat={CONVERSA} {...props} fixo largura={largura} aoMudarLargura={aoMudarLargura} />,
+        );
+        return {
+          aoMudarLargura,
+          alca: screen.getByRole("separator", { name: "Largura do chat" }),
+          lateral: screen.getByRole("complementary", { name: "Chat rápido" }),
+          rerender: (nova: number) =>
+            resultado.rerender(
+              <ChatRapido chat={CONVERSA} {...props} fixo largura={nova} aoMudarLargura={aoMudarLargura} />,
+            ),
+        };
+      }
+
+      it("fica na borda da coluna, com a largura dela e o intervalo no aria", () => {
+        const { alca, lateral } = renderizarComAlca(420);
+
+        expect(alca.parentElement).toBe(lateral);
+        expect(lateral).toHaveStyle({ width: "420px" });
+        expect(alca).toHaveAttribute("aria-orientation", "vertical");
+        expect(alca).toHaveAttribute("aria-valuenow", "420");
+        expect(alca).toHaveAttribute("aria-valuemin", "280");
+        expect(alca).toHaveAttribute("aria-valuemax", "640");
+        expect(alca).toHaveAttribute("tabindex", "0");
+        expect(alca).toHaveClass("nodrag", "nopan", "nowheel");
+      });
+
+      it("sem aoMudarLargura ou flutuante, não há alça", () => {
+        renderizarFixo();
+        expect(screen.queryByRole("separator")).not.toBeInTheDocument();
+      });
+
+      it("teclado: setas mudam 16 px, Home e End vão ao mínimo e ao máximo; cada uma grava", () => {
+        const { alca, aoMudarLargura, rerender } = renderizarComAlca(400);
+
+        fireEvent.keyDown(alca, { key: "ArrowRight" });
+        expect(aoMudarLargura).toHaveBeenLastCalledWith(416);
+        fireEvent.keyDown(alca, { key: "ArrowLeft" });
+        expect(aoMudarLargura).toHaveBeenLastCalledWith(384);
+        fireEvent.keyDown(alca, { key: "Home" });
+        expect(aoMudarLargura).toHaveBeenLastCalledWith(280);
+        fireEvent.keyDown(alca, { key: "End" });
+        expect(aoMudarLargura).toHaveBeenLastCalledWith(640);
+
+        // No limite, a seta não grava de novo.
+        rerender(280);
+        aoMudarLargura.mockClear();
+        fireEvent.keyDown(alca, { key: "ArrowLeft" });
+        expect(aoMudarLargura).not.toHaveBeenCalled();
+      });
+
+      it("dois cliques voltam aos 360", () => {
+        const { alca, aoMudarLargura } = renderizarComAlca(520);
+
+        fireEvent.doubleClick(alca);
+
+        expect(aoMudarLargura).toHaveBeenCalledWith(360);
+      });
+
+      it("arrastar muda a largura ao vivo, limitada ao intervalo, e só grava ao soltar", () => {
+        const { alca, lateral, aoMudarLargura } = renderizarComAlca(360);
+
+        fireEvent.pointerDown(alca, { pointerId: 1, button: 0, clientX: 360 });
+        expect(document.body).toHaveClass("redimensionando-chat-lateral");
+        fireEvent.pointerMove(alca, { pointerId: 1, clientX: 400 });
+        fireEvent.pointerMove(alca, { pointerId: 1, clientX: 460 });
+
+        expect(lateral).toHaveStyle({ width: "460px" });
+        expect(alca).toHaveAttribute("aria-valuenow", "460");
+        expect(alca).toHaveClass("alca-arrastando");
+        expect(aoMudarLargura).not.toHaveBeenCalled();
+
+        // Passa do máximo: para nos 640.
+        fireEvent.pointerMove(alca, { pointerId: 1, clientX: 2000 });
+        expect(lateral).toHaveStyle({ width: "640px" });
+
+        fireEvent.pointerMove(alca, { pointerId: 1, clientX: 500 });
+        fireEvent.pointerUp(alca, { pointerId: 1, clientX: 500 });
+
+        expect(aoMudarLargura).toHaveBeenCalledTimes(1);
+        expect(aoMudarLargura).toHaveBeenCalledWith(500);
+        expect(document.body).not.toHaveClass("redimensionando-chat-lateral");
+        expect(alca).not.toHaveClass("alca-arrastando");
+      });
+
+      it("não deixa o canvas com menos de 360 px: a linha estreita limita o máximo", () => {
+        const { alca, lateral, aoMudarLargura } = renderizarComAlca(360);
+        vi.spyOn(lateral.parentElement!, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 900, 600));
+
+        fireEvent.pointerDown(alca, { pointerId: 1, button: 0, clientX: 360 });
+        fireEvent.pointerMove(alca, { pointerId: 1, clientX: 800 });
+        fireEvent.pointerUp(alca, { pointerId: 1, clientX: 800 });
+
+        expect(aoMudarLargura).toHaveBeenCalledWith(540);
+      });
+
+      it("um clique sem mover não grava; cancelar o arraste devolve a largura de antes", () => {
+        const { alca, lateral, aoMudarLargura } = renderizarComAlca(400);
+
+        fireEvent.pointerDown(alca, { pointerId: 1, button: 0, clientX: 400 });
+        fireEvent.pointerUp(alca, { pointerId: 1, clientX: 400 });
+        expect(aoMudarLargura).not.toHaveBeenCalled();
+
+        fireEvent.pointerDown(alca, { pointerId: 2, button: 0, clientX: 400 });
+        fireEvent.pointerMove(alca, { pointerId: 2, clientX: 300 });
+        expect(lateral).toHaveStyle({ width: "300px" });
+        fireEvent.pointerCancel(alca, { pointerId: 2 });
+
+        expect(lateral).toHaveStyle({ width: "400px" });
+        expect(aoMudarLargura).not.toHaveBeenCalled();
+      });
+    });
+
+    it("flutuante, o cabeçalho tem o botão de fixar à esquerda (e o ocultar)", () => {
+      const aoAlternarFixo = vi.fn();
+      render(
+        <ChatRapido
+          chat={CONVERSA}
+          desconectado={false}
+          erroAoCarregar={null}
+          aoMudarPreferencias={vi.fn()}
+          aoAbrirTerminal={vi.fn()}
+          temVagaPara={vi.fn().mockReturnValue(true)}
+          aoAtualizarOrquestradores={vi.fn().mockResolvedValue(undefined)}
+          aoAlternarFixo={aoAlternarFixo}
+        />,
+      );
+
+      expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "ocultar" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Fixar o chat à esquerda" }));
+      expect(aoAlternarFixo).toHaveBeenCalledWith(true);
     });
   });
 });

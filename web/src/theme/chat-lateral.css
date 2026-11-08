@@ -1,0 +1,117 @@
+/* ---------------- Chat rápido fixo à esquerda ----------------
+ * Com a preferência "Chat fixo à esquerda", o chat sai do pé do canvas e vira
+ * uma coluna da altura toda: a conversa em bolhas (você à direita, o Claude à
+ * esquerda) e o campo embaixo. O canvas fica ao lado (flex-1) e o React Flow
+ * se ajusta ao tamanho novo. Seletores com `.chat-lateral` na frente: vencem
+ * as regras do chat flutuante qualquer que seja a ordem dos arquivos. */
+
+.chat-rapido.chat-lateral {
+  flex: none;
+  /* A largura vem da preferência (estilo na própria coluna, mudada pela alça);
+   * em janela estreita, a coluna não passa de 42% dela. */
+  width: 360px;
+  max-width: max(42vw, calc(100vw - 360px));
+  height: 100%;
+  min-height: 0;
+  gap: 0;
+  padding: 0 10px 10px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+}
+
+.chat-lateral .conversa-do-chat.conversa-lateral {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+  margin: 0 -10px;
+  animation: none;
+}
+.chat-lateral .cabecalho-do-chat { min-height: 44px; padding: 6px 8px 6px 14px; background: var(--surface); }
+.chat-lateral .cabecalho-do-chat .btn { gap: 5px; }
+
+.chat-lateral .mensagens-do-chat {
+  flex: 1 1 0;
+  gap: 10px;
+  padding: 14px 12px 16px;
+  background:
+    radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--claude-claro) 5%, transparent) 1px, transparent 0) 0 0 / 18px 18px,
+    var(--screen-bg);
+}
+
+.vazio-do-chat-lateral { margin: auto; max-width: 240px; text-align: center; line-height: 1.5; }
+
+/* Bolhas: a sua à direita, com o tom laranja do app; a do Claude à esquerda. */
+.chat-lateral .mensagem-do-usuario {
+  max-width: 86%;
+  padding: 7px 11px;
+  border-radius: 14px 14px 4px 14px;
+  background: color-mix(in srgb, var(--active) 18%, var(--surface-3));
+  border: 1px solid color-mix(in srgb, var(--active) 30%, transparent);
+  color: var(--primary);
+}
+.chat-lateral .mensagem-do-claude {
+  align-self: flex-start;
+  max-width: 92%;
+  padding: 9px 12px;
+  border-radius: 14px 14px 14px 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+/* Cartões (ação, pergunta, autorização) ocupam a largura da coluna. */
+.chat-lateral .mensagens-do-chat > .cartao-de-pergunta,
+.chat-lateral .mensagens-do-chat > .cartao-de-autorizacao { align-self: stretch; }
+
+/* O campo embaixo, sempre expandido; o menu do modelo abre para cima, dentro da coluna. */
+.chat-lateral .moldura-do-composer { flex: none; margin-top: 10px; box-shadow: none; }
+/* O texto de ajuda do campo fica numa linha só; se a coluna estreitar, termina em reticências. */
+.chat-lateral .campo-do-chat::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-lateral .linha-do-composer { flex-wrap: wrap; row-gap: 6px; }
+.chat-lateral .seletor-de-modelo { min-width: 0; }
+
+/* ---------------- Alça de largura ----------------
+ * Na borda direita da coluna: 6 px de área de pegar (metade sobre o canvas),
+ * uma linha fina que acende no hover, no foco do teclado e enquanto arrasta. */
+.alca-do-chat-lateral {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  bottom: 0;
+  z-index: 20;
+  width: 7px;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+}
+.alca-do-chat-lateral::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: transparent;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+/* Um instante antes de acender: passar o mouse pela borda não pisca a linha. */
+.alca-do-chat-lateral:hover::before {
+  background: color-mix(in srgb, var(--active) 70%, transparent);
+  transition-delay: 120ms;
+}
+.alca-do-chat-lateral:focus-visible::before,
+.alca-do-chat-lateral.alca-arrastando::before {
+  left: 2px;
+  width: 3px;
+  background: var(--active);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--active) 45%, transparent);
+  transition-delay: 0ms;
+}
+
+/* Enquanto arrasta: nada se seleciona, o cursor fica o da alça em toda a tela
+ * e as prévias (iframes) não roubam o ponteiro. */
+body.redimensionando-chat-lateral,
+body.redimensionando-chat-lateral * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+body.redimensionando-chat-lateral iframe { pointer-events: none; }
