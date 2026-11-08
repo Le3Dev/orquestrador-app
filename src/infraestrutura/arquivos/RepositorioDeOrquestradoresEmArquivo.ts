@@ -111,6 +111,15 @@ const esquemaDoArquivo = z.object({
     .array(z.object({ id: z.string(), texto: z.string(), modo: z.enum(MODOS_DO_TURNO), enfileiradoEm: dataIso }))
     .default([]),
   instrucoesNaConversa: z.boolean().default(false),
+  retomadaPendente: z
+    .object({
+      deTurnoId: z.string(),
+      causa: z.enum(["silencio", "limite_de_uso", "sobrecarga", "rede"]),
+      tentativa: z.number().int().min(1),
+      retomarEm: dataIso,
+    })
+    .nullable()
+    .default(null),
 });
 
 async function lerSeExistir(caminho: string): Promise<string | null> {

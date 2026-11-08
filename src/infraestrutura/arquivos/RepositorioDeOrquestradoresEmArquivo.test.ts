@@ -66,17 +66,21 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
     await repositorio.salvar(orquestrador);
     repositorio.anexarEvento("a", orquestrador.iniciarTurno("t1", "analise", agora));
     repositorio.anexarEvento("a", orquestrador.registrarDoMotor("t1", { tipo: "texto_do_orquestrador", texto: "ok" }));
+    repositorio.anexarEvento("a", orquestrador.falharTurno("t1", "falha de rede", agora));
+    orquestrador.agendarRetomada({ deTurnoId: "t1", causa: "rede", tentativa: 1, retomarEm: "2026-10-28T12:01:00.000Z" });
     await repositorio.salvar(orquestrador);
     await repositorio.aguardarGravacoes();
 
     const reaberto = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
 
     expect(reaberto.buscarPorId("a")?.paraDados()).toEqual(orquestrador.paraDados());
+    expect(reaberto.buscarPorId("a")?.retomadaPendente).toMatchObject({ deTurnoId: "t1", causa: "rede" });
     expect(reaberto.lerEventos("a", 0).map((evento) => [evento.sequencia, evento.tipo])).toEqual([
       [1, "turno_iniciado"],
       [2, "texto_do_orquestrador"],
+      [3, "turno_falhou"],
     ]);
-    expect(reaberto.lerEventos("a", 1)).toHaveLength(1);
+    expect(reaberto.lerEventos("a", 1)).toHaveLength(2);
   });
 
   it("numera os eventos por orquestrador, de forma independente", async () => {
@@ -159,6 +163,7 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
         worktree: null,
         fila: [],
         instrucoesNaConversa: false,
+        retomadaPendente: null,
         configuracao: {
           permitirCommitEPush: false,
           esforcoDoOrquestrador: "padrao",
@@ -176,6 +181,37 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
       expect(dados).not.toHaveProperty("campoQueNaoExisteMais");
       expect(dados?.configuracao).not.toHaveProperty("proporPlanoEmPedidosGrandes");
       expect(existsSync(path.join(pastaDo("antigo"), "orquestrador.ilegivel.json"))).toBe(false);
+    });
+
+    it("reabre a retomada automática pendente gravada antes do reinício", async () => {
+      const retomadaPendente = {
+        deTurnoId: "t0",
+        causa: "limite_de_uso",
+        tentativa: 2,
+        retomarEm: "2026-10-01T13:01:00.000Z",
+      };
+      await gravarArquivo("antigo", JSON.stringify({ ...arquivoAntigo(), retomadaPendente }));
+
+      const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+
+      expect(repositorio.buscarPorId("antigo")?.retomadaPendente).toEqual(retomadaPendente);
+    });
+
+    it("guarda ao lado uma retomada pendente fora do esquema", async () => {
+      const avisos = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      await gravarArquivo(
+        "causa-errada",
+        JSON.stringify({
+          ...arquivoAntigo(),
+          retomadaPendente: { deTurnoId: "t0", causa: "outro", tentativa: 1, retomarEm: "2026-10-01T13:01:00.000Z" },
+        }),
+      );
+
+      const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+
+      expect(repositorio.listar()).toEqual([]);
+      expect(existsSync(path.join(pastaDo("causa-errada"), "orquestrador.ilegivel.json"))).toBe(true);
+      avisos.mockRestore();
     });
 
     it("guarda ao lado um JSON quebrado, avisa no log e abre os outros", async () => {

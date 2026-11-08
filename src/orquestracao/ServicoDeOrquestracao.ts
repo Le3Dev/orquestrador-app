@@ -23,7 +23,7 @@ import { MedidorDeConsumo, PeriodoDoTurno } from "./MedidorDeConsumo";
 import { ModeloClaude } from "./ModeloClaude";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { ABORTO_POR_SILENCIO, CausaDaFalha, MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "./MotorDeAgentes";
-import { Orquestrador, TAMANHO_MAXIMO_DA_MENSAGEM } from "./Orquestrador";
+import { DadosDaRetomadaPendente, Orquestrador, TAMANHO_MAXIMO_DA_MENSAGEM } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { PedidoNaFila } from "./PedidoNaFila";
 import { predefinicaoPorNome } from "./PredefinicaoDeConfiguracao";
@@ -33,6 +33,7 @@ import {
   descreverEsperas,
   ehRecuperavel,
   esperaAntesDaTentativa,
+  formatarHora,
   maximoDeTentativas,
   mensagemDeRetomada,
   resumoDaEspera,
@@ -114,6 +115,12 @@ interface RetomadaAgendada {
   desmarcar: () => void;
 }
 
+/**
+ * Retomada vencida durante o reinício: espera ao menos isto, multiplicado
+ * pela ordem dela, para várias não abrirem o Claude ao mesmo tempo.
+ */
+export const ATRASO_DA_RETOMADA_APOS_REINICIO_MS = 10_000;
+
 /** Imagem como chega do usuário, antes de virar Anexo. */
 export interface ImagemRecebida {
   nome: string;
@@ -165,9 +172,9 @@ function descreverErro(erro: unknown): string {
  *
  * Os Orquestradores vêm do repositório, e os turnos em execução ficam no
  * `ControleDeExecucoes`. O único estado daqui é o da autorrecuperação (ver
- * ADR-36): as retomadas agendadas e a contagem de tentativas, só em memória.
- * Um reinício do servidor durante a espera perde a retomada, e o turno fica
- * como falhou, com o motivo: nada fica inconsistente.
+ * ADR-36): o relógio de cada retomada agendada e a contagem de tentativas. A
+ * retomada em si (turno, causa, tentativa e horário) fica no agregado e vai
+ * para o disco; ao subir, `reagendarRetomadasPendentes` volta a marcá-las.
  */
 export class ServicoDeOrquestracao {
   /** Tentativas de retomada já feitas, por Orquestrador e por causa. Zeram quando um turno conclui. */
@@ -501,6 +508,7 @@ export class ServicoDeOrquestracao {
 
     if (turno === null) {
       if (this.cancelarRetomada(orquestrador, "o usuário cancelou")) {
+        await repositorio.salvar(orquestrador);
         return;
       }
       throw new ErroDeOrquestracao(
@@ -556,6 +564,67 @@ export class ServicoDeOrquestracao {
       }
     }
     return interrompidos;
+  }
+
+  /**
+   * Ao subir o servidor, depois de `interromperTurnosPendentes`: volta a
+   * marcar as retomadas automáticas gravadas antes do reinício (ver ADR-36),
+   * com a tentativa e a causa de antes, e registra no log do turno. A que já
+   * venceu retoma logo, uma a cada `ATRASO_DA_RETOMADA_APOS_REINICIO_MS`.
+   * Com a autorrecuperação desligada, a retomada só sai, com o registro.
+   * Devolve quantas foram reagendadas.
+   */
+  async reagendarRetomadasPendentes(): Promise<number> {
+    const { repositorio, preferencias, agora } = this.dependencias;
+    let reagendadas = 0;
+
+    for (const orquestrador of repositorio.listar()) {
+      const pendente = orquestrador.retomadaPendente;
+      if (pendente === null) {
+        continue;
+      }
+      try {
+        const { causa, tentativa } = pendente;
+        const de = maximoDeTentativas(causa);
+        const turno = orquestrador.ultimoTurno;
+        if (turno === null || turno.id !== pendente.deTurnoId || turno.emAndamento) {
+          // Gravada para um turno que já não é o último: não há o que retomar.
+          orquestrador.limparRetomada();
+        } else if (!preferencias.atuais().autorrecuperacao) {
+          orquestrador.limparRetomada();
+          this.publicarRecuperacao(orquestrador, turno.id, "cancelada", {
+            causa,
+            tentativa,
+            de,
+            resumo: "retomada cancelada: a autorrecuperação está desligada (o app foi reiniciado durante a espera)",
+            retomaEm: null,
+          });
+        } else {
+          const restante = Date.parse(pendente.retomarEm) - agora().getTime();
+          const espera = Math.max(restante, ATRASO_DA_RETOMADA_APOS_REINICIO_MS * (reagendadas + 1));
+          const retomaEm = new Date(agora().getTime() + espera);
+          const retomada: DadosDaRetomadaPendente = { ...pendente, retomarEm: retomaEm.toISOString() };
+          orquestrador.agendarRetomada(retomada);
+          this.tentativas.set(orquestrador.id, new Map([[causa, tentativa]]));
+          this.publicarRecuperacao(orquestrador, turno.id, "aguardando", {
+            causa,
+            tentativa,
+            de,
+            resumo: `retomada reagendada após o reinício do app; retoma às ${formatarHora(retomaEm)}`,
+            retomaEm: retomada.retomarEm,
+          });
+          this.marcarRetomada(orquestrador.id, retomada, turno.modo, espera);
+          reagendadas += 1;
+        }
+        await repositorio.salvar(orquestrador);
+      } catch (falha) {
+        console.warn(
+          `[orquestracao] Não foi possível reagendar a retomada do orquestrador ${orquestrador.id}:`,
+          descreverErro(falha),
+        );
+      }
+    }
+    return reagendadas;
   }
 
   private async executar(
@@ -763,7 +832,7 @@ export class ServicoDeOrquestracao {
    * da causa se esgotaram. Nunca lança.
    */
   private decidirRecuperacao(orquestradorId: string, encerrado: TurnoEncerrado): void {
-    const { repositorio, preferencias, agendador, agora } = this.dependencias;
+    const { repositorio, preferencias, agora } = this.dependencias;
     try {
       const { falha } = encerrado;
       if (falha === null) {
@@ -810,17 +879,18 @@ export class ServicoDeOrquestracao {
         resumo: resumoDaEspera(causa, falha.liberaEm, retomaEm),
         retomaEm: retomaEm.toISOString(),
       });
-      const desmarcar = (agendador ?? agendadorDoRelogio).agendar(espera, () => {
-        void this.retomar(orquestradorId);
-      });
-      this.retomadas.set(orquestradorId, {
-        turnoId: encerrado.turnoId,
+      const retomada: DadosDaRetomadaPendente = {
+        deTurnoId: encerrado.turnoId,
         causa,
         tentativa,
-        de,
-        modo: encerrado.modo,
-        desmarcar,
-      });
+        retomarEm: retomaEm.toISOString(),
+      };
+      // Gravada para sobreviver a um reinício durante a espera.
+      orquestrador.agendarRetomada(retomada);
+      repositorio
+        .salvar(orquestrador)
+        .catch((erro: unknown) => console.error("[orquestracao] Falha ao gravar a retomada agendada:", erro));
+      this.marcarRetomada(orquestradorId, retomada, encerrado.modo, espera);
     } catch (falha) {
       console.warn(
         `[orquestracao] Não foi possível decidir a autorrecuperação do turno ${encerrado.turnoId}:`,
@@ -840,10 +910,13 @@ export class ServicoDeOrquestracao {
       return;
     }
     this.retomadas.delete(orquestradorId);
-    const orquestrador = this.dependencias.repositorio.buscarPorId(orquestradorId);
+    const { repositorio } = this.dependencias;
+    const orquestrador = repositorio.buscarPorId(orquestradorId);
     if (orquestrador === null) {
       return;
     }
+    // O turno que abre também a limparia; fica limpa mesmo se ele for recusado.
+    orquestrador.limparRetomada();
     const { turnoId, causa, tentativa, de, modo } = agendada;
     try {
       this.publicarRecuperacao(orquestrador, turnoId, "retomando", {
@@ -867,6 +940,9 @@ export class ServicoDeOrquestracao {
         descreverErro(falha),
       );
       this.tentativas.delete(orquestradorId);
+      repositorio
+        .salvar(orquestrador)
+        .catch((erro: unknown) => console.error("[orquestracao] Falha ao gravar a retomada desfeita:", erro));
       try {
         this.publicarRecuperacao(orquestrador, turnoId, "desistiu", {
           causa,
@@ -881,9 +957,30 @@ export class ServicoDeOrquestracao {
     }
   }
 
+  /** Marca no relógio a retomada já registrada no agregado. */
+  private marcarRetomada(
+    orquestradorId: string,
+    retomada: DadosDaRetomadaPendente,
+    modo: ModoDoTurno,
+    espera: number,
+  ): void {
+    const desmarcar = (this.dependencias.agendador ?? agendadorDoRelogio).agendar(espera, () => {
+      void this.retomar(orquestradorId);
+    });
+    this.retomadas.set(orquestradorId, {
+      turnoId: retomada.deTurnoId,
+      causa: retomada.causa,
+      tentativa: retomada.tentativa,
+      de: maximoDeTentativas(retomada.causa),
+      modo,
+      desmarcar,
+    });
+  }
+
   /**
    * Cancela a retomada agendada do Orquestrador, se houver, e publica
-   * "cancelada" com o porquê. As tentativas zeram: o usuário assumiu.
+   * "cancelada" com o porquê. As tentativas zeram: o usuário assumiu. Tira a
+   * retomada do agregado; gravar fica com quem chama.
    */
   private cancelarRetomada(orquestrador: Orquestrador, porque: string): boolean {
     const agendada = this.retomadas.get(orquestrador.id);
@@ -893,6 +990,7 @@ export class ServicoDeOrquestracao {
     agendada.desmarcar();
     this.retomadas.delete(orquestrador.id);
     this.tentativas.delete(orquestrador.id);
+    orquestrador.limparRetomada();
     this.publicarRecuperacao(orquestrador, agendada.turnoId, "cancelada", {
       causa: agendada.causa,
       tentativa: agendada.tentativa,

@@ -201,6 +201,11 @@ async function iniciar(): Promise<void> {
   if (interrompidos > 0) {
     console.warn(`[orquestracao] ${interrompidos} turno(s) marcado(s) como interrompido(s) pelo reinício.`);
   }
+  // Depois das interrupções: as retomadas gravadas antes do reinício voltam ao relógio (ADR-36).
+  const reagendadas = await servico.reagendarRetomadasPendentes();
+  if (reagendadas > 0) {
+    console.warn(`[orquestracao] ${reagendadas} retomada(s) automática(s) reagendada(s) após o reinício.`);
+  }
 
   // Adaptador: o chat enxerga projetos pelo nome e pasta, e Orquestradores
   // também pelo estado (ocupado ou não, fila, worktree), sem o agregado.

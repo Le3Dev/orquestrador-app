@@ -1964,4 +1964,127 @@ describe("ServicoDeOrquestracao e a autorrecuperação (ADR-36)", () => {
     expect(etapas()).toEqual([]);
     expect(relogio.pendentes).toBe(0);
   });
+
+  describe("retomada gravada e o reinício do app", () => {
+    /** Um Orquestrador cujo último turno falhou, com a retomada gravada como ficou no disco. */
+    async function comRetomadaGravada(
+      retomada: Partial<{ deTurnoId: string; causa: "silencio" | "rede"; tentativa: number; retomarEm: string }> = {},
+    ): Promise<Orquestrador> {
+      const orquestrador = await criar();
+      const turnoId = `t-${orquestrador.id}`;
+      orquestrador.iniciarTurno(turnoId, "faça", relogio.agora());
+      orquestrador.falharTurno(turnoId, "falhou", relogio.agora());
+      orquestrador.agendarRetomada({
+        deTurnoId: turnoId,
+        causa: "rede",
+        tentativa: 1,
+        retomarEm: new Date(relogio.agoraMs + 2 * MINUTO).toISOString(),
+        ...retomada,
+      });
+      return orquestrador;
+    }
+
+    function aguardando(): Array<{ turnoId: string; retomaEm: string | null }> {
+      return repositorio.eventos.flatMap((evento) =>
+        evento.tipo === "recuperacao_do_turno" && evento.etapa === "aguardando"
+          ? [{ turnoId: evento.turnoId, retomaEm: evento.retomaEm }]
+          : [],
+      );
+    }
+
+    it("ao agendar, a retomada fica no agregado; cancelar a tira", async () => {
+      const orquestrador = await criar();
+      motor.roteiro = [falhaPor("rede")];
+      const primeiro = await servico.enviarMensagem(orquestrador.id, "faça");
+      await primeiro.recuperacao;
+
+      expect(orquestrador.retomadaPendente).toEqual({
+        deTurnoId: primeiro.turnoId,
+        causa: "rede",
+        tentativa: 1,
+        retomarEm: new Date(relogio.agoraMs + MINUTO).toISOString(),
+      });
+
+      await servico.cancelar(orquestrador.id);
+      expect(orquestrador.retomadaPendente).toBeNull();
+    });
+
+    it("reagenda com a tentativa gravada, registra no log do turno e retoma na hora marcada", async () => {
+      const retomarEm = new Date(relogio.agoraMs + 2 * MINUTO).toISOString();
+      const orquestrador = await comRetomadaGravada({ tentativa: 3, retomarEm });
+      const turnoId = `t-${orquestrador.id}`;
+      motor.roteiro = [falhaPor("rede")];
+
+      expect(await servico.reagendarRetomadasPendentes()).toBe(1);
+
+      expect(ultimaRecuperacao()).toMatchObject({
+        turnoId,
+        etapa: "aguardando",
+        causa: "rede",
+        tentativa: 3,
+        de: 3,
+        resumo: `retomada reagendada após o reinício do app; retoma às ${formatarHora(new Date(retomarEm))}`,
+        retomaEm: retomarEm,
+      });
+      expect(orquestrador.retomadaPendente).toMatchObject({ deTurnoId: turnoId, tentativa: 3, retomarEm });
+
+      await relogio.avancar(2 * MINUTO - 1);
+      expect(motor.pedidos).toHaveLength(0);
+      await relogio.avancar(1);
+      // A contagem voltou com a tentativa gravada: a falha seguinte já é a desistência.
+      await vi.waitFor(() => expect(etapas().at(-1)).toBe("desistiu 3/3"));
+
+      expect(etapas()).toEqual(["aguardando 3/3", "retomando 3/3", "desistiu 3/3"]);
+      expect(repositorio.eventos.find((evento) => evento.tipo === "turno_iniciado")).toMatchObject({
+        retomada: { deTurnoId: turnoId, tentativa: 3 },
+      });
+      expect(motor.pedidos[0]?.texto).toContain("Você foi interrompido por uma falha de rede");
+      expect(orquestrador.retomadaPendente).toBeNull();
+    });
+
+    it("as que venceram durante o reinício saem logo, uma de cada vez", async () => {
+      const vencida = new Date(relogio.agoraMs - MINUTO).toISOString();
+      await comRetomadaGravada({ causa: "silencio", retomarEm: vencida });
+      await comRetomadaGravada({ causa: "silencio", retomarEm: vencida });
+      motor.roteiro = [SUCESSO, SUCESSO];
+
+      expect(await servico.reagendarRetomadasPendentes()).toBe(2);
+      expect(aguardando().map((evento) => evento.retomaEm)).toEqual([
+        new Date(relogio.agoraMs + 10 * SEGUNDO).toISOString(),
+        new Date(relogio.agoraMs + 20 * SEGUNDO).toISOString(),
+      ]);
+
+      await relogio.avancar(10 * SEGUNDO);
+      await vi.waitFor(() => expect(motor.pedidos).toHaveLength(1));
+      await relogio.avancar(10 * SEGUNDO);
+      await vi.waitFor(() => expect(motor.pedidos).toHaveLength(2));
+    });
+
+    it("com a autorrecuperação desligada, só tira a retomada e registra no log do turno", async () => {
+      preferencias.preferencias = PreferenciasGlobais.de({ autorrecuperacao: false });
+      const orquestrador = await comRetomadaGravada();
+
+      expect(await servico.reagendarRetomadasPendentes()).toBe(0);
+
+      expect(orquestrador.retomadaPendente).toBeNull();
+      expect(ultimaRecuperacao()).toMatchObject({
+        turnoId: `t-${orquestrador.id}`,
+        etapa: "cancelada",
+        resumo: "retomada cancelada: a autorrecuperação está desligada (o app foi reiniciado durante a espera)",
+        retomaEm: null,
+      });
+      await relogio.avancar(10 * MINUTO);
+      expect(motor.pedidos).toHaveLength(0);
+    });
+
+    it("a de um turno que já não é o último só sai, sem evento", async () => {
+      const orquestrador = await comRetomadaGravada({ deTurnoId: "t-de-outra-vez" });
+
+      expect(await servico.reagendarRetomadasPendentes()).toBe(0);
+
+      expect(orquestrador.retomadaPendente).toBeNull();
+      expect(etapas()).toEqual([]);
+      expect(relogio.pendentes).toBe(0);
+    });
+  });
 });
