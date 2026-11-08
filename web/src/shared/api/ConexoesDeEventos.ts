@@ -27,107 +27,130 @@ const FECHADA = 2;
 export const ESPERA_PARA_REABRIR_MS = 3_000;
 
 /**
- * As conexões de eventos dos terminais abertos — uma por Orquestrador.
+ * A conexão de eventos dos terminais abertos: uma só para todos os
+ * Orquestradores, recriada quando um terminal entra ou sai do canvas.
  *
- * O navegador reconecta sozinho quando a conexão cai, mas desiste de vez se
- * receber uma resposta de erro (é o que acontece em desenvolvimento, quando o
- * proxy do Vite responde 500 porque o servidor está fora). Nesses casos a
- * conexão é recriada aqui, a partir do último evento recebido.
+ * Uma só, e não uma por terminal, porque o navegador abre no máximo 6
+ * conexões HTTP/1.1 com o mesmo servidor e cada uma destas fica aberta para
+ * sempre: com 4 terminais, mais o chat e os artefatos, nenhum outro pedido da
+ * tela saía da fila e o app parecia travado.
+ *
+ * Quando a conexão cai, ela é fechada e recriada aqui a partir do último
+ * evento de cada terminal (a reconexão do próprio navegador repetiria o
+ * endereço antigo e reenviaria histórico que a tela já tem).
  */
 export class ConexoesDeEventos {
-  private readonly fontes = new Map<string, FonteDeEventos>();
-  private readonly reaberturas = new Map<string, ReturnType<typeof setTimeout>>();
+  private ids: ReadonlySet<string> = new Set();
+  private fonte: FonteDeEventos | null = null;
+  private reabertura: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly ouvintes: OuvintesDasConexoes,
     private readonly criarFonte: (endereco: string) => FonteDeEventos = (endereco) => new EventSource(endereco),
   ) {}
 
-  /** Abre as conexões que faltam e fecha as dos terminais que saíram do canvas. */
+  /** Acompanha exatamente estes terminais; sem mudança no conjunto, não mexe na conexão. */
   sincronizar(ids: ReadonlySet<string>): void {
-    for (const id of [...this.fontes.keys()]) {
-      if (!ids.has(id)) {
-        this.fechar(id);
-        this.ouvintes.aoMudarSituacao(id, null);
-      }
+    const sairam = [...this.ids].filter((id) => !ids.has(id));
+    const entraram = [...ids].some((id) => !this.ids.has(id));
+    if (sairam.length === 0 && !entraram) {
+      return;
     }
-    for (const id of ids) {
-      if (!this.fontes.has(id)) {
-        this.abrir(id);
-      }
+    this.ids = new Set(ids);
+    for (const id of sairam) {
+      this.ouvintes.aoMudarSituacao(id, null);
+    }
+    if (this.ids.size === 0) {
+      this.fechar();
+    } else {
+      this.abrir();
     }
   }
 
-  /** O servidor voltou: reabre na hora as conexões que o navegador abandonou. */
+  /** O servidor voltou: se a conexão caiu, reabre na hora em vez de esperar. */
   reabrirAbandonadas(): void {
-    for (const [id, fonte] of this.fontes) {
-      if (fonte.readyState === FECHADA) {
-        this.abrir(id);
-      }
+    if (this.ids.size > 0 && (this.fonte === null || this.fonte.readyState === FECHADA)) {
+      this.abrir();
     }
   }
 
   fecharTodas(): void {
-    for (const id of [...this.fontes.keys()]) {
-      this.fechar(id);
-    }
+    this.fechar();
+    this.ids = new Set();
   }
 
-  private abrir(id: string): void {
-    this.cancelarReabertura(id);
-    this.fontes.get(id)?.close();
+  private abrir(): void {
+    this.fechar();
 
-    const fonte = this.criarFonte(api.enderecoDosEventos(id, this.ouvintes.ultimaSequencia(id)));
-    this.fontes.set(id, fonte);
-    this.ouvintes.aoMudarSituacao(id, "conectando");
+    const desdePorId = new Map([...this.ids].map((id) => [id, this.ouvintes.ultimaSequencia(id)] as const));
+    const fonte = this.criarFonte(api.enderecoDosEventos(desdePorId));
+    this.fonte = fonte;
+    this.avisarTodos("conectando");
 
-    fonte.onopen = () => this.ouvintes.aoMudarSituacao(id, "conectado");
-    fonte.onerror = () => {
-      this.ouvintes.aoMudarSituacao(id, "reconectando");
-      if (fonte.readyState === FECHADA && this.fontes.get(id) === fonte) {
-        this.agendarReabertura(id);
+    fonte.onopen = () => {
+      if (this.fonte === fonte) {
+        this.avisarTodos("conectado");
       }
+    };
+    fonte.onerror = () => {
+      if (this.fonte !== fonte) {
+        return;
+      }
+      this.avisarTodos("reconectando");
+      fonte.close();
+      this.agendarReabertura();
     };
     fonte.onmessage = (mensagem) => {
       try {
-        this.ouvintes.aoReceber(id, JSON.parse(mensagem.data) as EventoRegistrado);
+        const { orquestradorId, evento } = JSON.parse(mensagem.data) as {
+          orquestradorId: string;
+          evento: EventoRegistrado;
+        };
+        if (this.fonte === fonte && this.ids.has(orquestradorId)) {
+          this.ouvintes.aoReceber(orquestradorId, evento);
+        }
       } catch (erro) {
         console.error("Evento inválido recebido do servidor:", erro);
       }
     };
     fonte.addEventListener("sinal", (mensagem) => {
       try {
-        this.ouvintes.aoSinal(id, JSON.parse(mensagem.data) as SinalDeVida);
+        const { orquestradorId, sinal } = JSON.parse(mensagem.data) as { orquestradorId: string; sinal: SinalDeVida };
+        if (this.fonte === fonte && this.ids.has(orquestradorId)) {
+          this.ouvintes.aoSinal(orquestradorId, sinal);
+        }
       } catch {
         // Um sinal malformado não importa: o próximo chega em instantes.
       }
     });
   }
 
-  private agendarReabertura(id: string): void {
-    this.cancelarReabertura(id);
-    this.reaberturas.set(
-      id,
-      setTimeout(() => {
-        this.reaberturas.delete(id);
-        if (this.fontes.has(id)) {
-          this.abrir(id);
-        }
-      }, ESPERA_PARA_REABRIR_MS),
-    );
-  }
-
-  private cancelarReabertura(id: string): void {
-    const agendada = this.reaberturas.get(id);
-    if (agendada !== undefined) {
-      clearTimeout(agendada);
-      this.reaberturas.delete(id);
+  private avisarTodos(situacao: SituacaoDaConexao): void {
+    for (const id of this.ids) {
+      this.ouvintes.aoMudarSituacao(id, situacao);
     }
   }
 
-  private fechar(id: string): void {
-    this.cancelarReabertura(id);
-    this.fontes.get(id)?.close();
-    this.fontes.delete(id);
+  private agendarReabertura(): void {
+    this.cancelarReabertura();
+    this.reabertura = setTimeout(() => {
+      this.reabertura = null;
+      if (this.ids.size > 0) {
+        this.abrir();
+      }
+    }, ESPERA_PARA_REABRIR_MS);
+  }
+
+  private cancelarReabertura(): void {
+    if (this.reabertura !== null) {
+      clearTimeout(this.reabertura);
+      this.reabertura = null;
+    }
+  }
+
+  private fechar(): void {
+    this.cancelarReabertura();
+    this.fonte?.close();
+    this.fonte = null;
   }
 }

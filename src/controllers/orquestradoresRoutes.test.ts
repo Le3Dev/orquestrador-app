@@ -23,7 +23,7 @@ import { PreferenciasGlobais } from "../orquestracao/PreferenciasGlobais";
 import { ConversaArquivada, RepositorioDeOrquestradores } from "../orquestracao/RepositorioDeOrquestradores";
 import { RepositorioDePreferencias } from "../orquestracao/RepositorioDePreferencias";
 import { ServicoDeOrquestracao } from "../orquestracao/ServicoDeOrquestracao";
-import { criarOrquestradoresRoutes } from "./orquestradoresRoutes";
+import { criarOrquestradoresRoutes, MAXIMO_DE_ORQUESTRADORES_POR_CONEXAO } from "./orquestradoresRoutes";
 
 /** Preferências globais em memória: `atuais` devolve o que o teste definiu. */
 class PreferenciasEmMemoria implements RepositorioDePreferencias {
@@ -353,7 +353,27 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       });
     });
 
+    it("o POST aceita ultracode no orquestrador e recusa nos subagentes", async () => {
+      const aceito = await postar("/orquestradores", { ...criacao, esforcoDoOrquestrador: "ultracode" });
+      const recusado = await postar("/orquestradores", { ...criacao, esforcoDosSubagentes: "ultracode" });
+
+      expect(aceito.status).toBe(201);
+      expect(((await aceito.json()) as { configuracao: unknown }).configuracao).toMatchObject({
+        esforcoDoOrquestrador: "ultracode",
+        esforcoDosSubagentes: "padrao",
+      });
+      expect(recusado.status).toBe(400);
+      expect(await recusado.json()).toEqual({
+        erro: 'O esforço "ultracode" vale só para o orquestrador e o chat. Escolha outro esforço para os subagentes.',
+      });
+    });
+
     it.each<[string, unknown, string]>([
+      [
+        "esforcoDosSubagentes",
+        "ultracode",
+        'O esforço "ultracode" vale só para o orquestrador e o chat. Escolha outro esforço para os subagentes.',
+      ],
       ["esforcoDoOrquestrador", "turbo", "Esforço do orquestrador inválido."],
       ["esforcoDoOrquestrador", null, "Esforço do orquestrador inválido."],
       ["esforcoDosSubagentes", "xhigh", "Esforço dos subagentes inválido."],
@@ -712,11 +732,19 @@ describe("rotas de orquestradores — modo de planejamento", () => {
     });
 
     it("GET e PATCH /preferencias leem e gravam as instruções padrão", async () => {
-      expect(await (await requisitar("GET", "/preferencias")).json()).toEqual({ instrucoesPadrao: "", subagentesProntos: [] });
+      expect(await (await requisitar("GET", "/preferencias")).json()).toEqual({
+        instrucoesPadrao: "",
+        subagentesProntos: [],
+        autorrecuperacao: true,
+      });
 
       const resposta = await requisitar("PATCH", "/preferencias", { instrucoesPadrao: " Responda curto. " });
       expect(resposta.status).toBe(200);
-      expect(await resposta.json()).toEqual({ instrucoesPadrao: "Responda curto.", subagentesProntos: [] });
+      expect(await resposta.json()).toEqual({
+        instrucoesPadrao: "Responda curto.",
+        subagentesProntos: [],
+        autorrecuperacao: true,
+      });
       expect(preferencias.atuais().instrucoesPadrao).toBe("Responda curto.");
 
       const resumo = (await (await requisitar("GET", `/orquestradores/${orquestrador.id}`)).json()) as {
@@ -729,7 +757,11 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       const revisor = { nome: "revisor", descricao: "Revisa código.", prompt: "Aponte bugs." };
       const resposta = await requisitar("PATCH", "/preferencias", { subagentesProntos: [revisor] });
       expect(resposta.status).toBe(200);
-      expect(await resposta.json()).toEqual({ instrucoesPadrao: "", subagentesProntos: [{ ...revisor, modelo: "herdar" }] });
+      expect(await resposta.json()).toEqual({
+        instrucoesPadrao: "",
+        subagentesProntos: [{ ...revisor, modelo: "herdar" }],
+        autorrecuperacao: true,
+      });
 
       const previa = (await (
         await requisitar("POST", "/previa-do-prompt", { configuracao: orquestrador.configuracao.paraDados() })
@@ -747,6 +779,32 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(resposta.status).toBe(400);
       expect(await resposta.json()).toEqual({ erro: mensagem });
       expect(preferencias.atuais().subagentesProntos).toEqual([]);
+    });
+
+    it("GET e PATCH /preferencias leem e gravam a autorrecuperação, ligada por padrão", async () => {
+      expect(await (await requisitar("GET", "/preferencias")).json()).toMatchObject({ autorrecuperacao: true });
+
+      const desligada = await requisitar("PATCH", "/preferencias", { autorrecuperacao: false });
+      expect(desligada.status).toBe(200);
+      expect(await desligada.json()).toMatchObject({ autorrecuperacao: false });
+      expect(preferencias.atuais().autorrecuperacao).toBe(false);
+
+      // Mudar outro campo não religa.
+      await requisitar("PATCH", "/preferencias", { instrucoesPadrao: "Curto." });
+      expect(await (await requisitar("GET", "/preferencias")).json()).toMatchObject({
+        instrucoesPadrao: "Curto.",
+        autorrecuperacao: false,
+      });
+
+      const invalida = await requisitar("PATCH", "/preferencias", { autorrecuperacao: "sim" });
+      expect(invalida.status).toBe(400);
+      expect(await invalida.json()).toEqual({ erro: 'A opção "Autorrecuperação" deve ser verdadeira ou falsa.' });
+      expect(preferencias.atuais().autorrecuperacao).toBe(false);
+    });
+
+    it("POST /cancelar sem pedido em andamento nem retomada agendada continua 409", async () => {
+      const resposta = await postar(`/orquestradores/${orquestrador.id}/cancelar`, {});
+      expect(resposta.status).toBe(409);
     });
 
     it("PATCH /preferencias recusa valor inválido com 400", async () => {
@@ -1034,5 +1092,149 @@ describe("rotas de orquestradores — economia de tokens", () => {
     expect(fora.status).toBe(400);
     expect(inexistente.status).toBe(400);
     expect(await inexistente.json()).toEqual({ erro: `A pasta "${path.join(raiz, "sumiu")}" não existe.` });
+  });
+
+  it("GET /pastas/navegar com estrito=1 recusa caminho inexistente com 400", async () => {
+    const alvo = path.join(raiz, "sumiu");
+    const resposta = await fetch(`${base}/pastas/navegar?caminho=${encodeURIComponent(alvo)}&estrito=1`);
+
+    expect(resposta.status).toBe(400);
+    expect(await resposta.json()).toEqual({ erro: `A pasta "${alvo}" não existe.` });
+  });
+});
+
+/** Os históricos de cada Orquestrador, para a rota de eventos ao vivo. */
+class RepositorioDeHistoricos implements RepositorioDeOrquestradores {
+  readonly historicos = new Map<string, EventoRegistrado[]>();
+
+  listar(): readonly Orquestrador[] {
+    return [];
+  }
+  buscarPorId(id: string): Orquestrador | null {
+    return this.historicos.has(id) ? ({ id } as unknown as Orquestrador) : null;
+  }
+  async salvar(): Promise<void> {}
+  async remover(): Promise<void> {}
+  anexarEvento(): EventoRegistrado {
+    throw new Error("não usado nestes testes");
+  }
+  arquivarConversa(): ConversaArquivada {
+    throw new Error("não usado nestes testes");
+  }
+  lerEventos(orquestradorId: string, depoisDaSequencia: number): readonly EventoRegistrado[] {
+    return (this.historicos.get(orquestradorId) ?? []).filter((evento) => evento.sequencia > depoisDaSequencia);
+  }
+}
+
+describe("rotas de orquestradores — eventos de vários orquestradores numa conexão só", () => {
+  let servidor: Server;
+  let base: string;
+  let repositorio: RepositorioDeHistoricos;
+  let canal: CanalDeEventos;
+
+  const evento = (sequencia: number): EventoRegistrado => ({
+    tipo: "turno_cancelado",
+    turnoId: "t1",
+    sequencia,
+    em: "agora",
+  });
+
+  beforeAll(async () => {
+    repositorio = new RepositorioDeHistoricos();
+    canal = new CanalDeEventos();
+    const aplicacao = express();
+    aplicacao.use(
+      "/api",
+      criarOrquestradoresRoutes({
+        // A rota de eventos não usa o serviço.
+        servico: {} as unknown as ServicoDeOrquestracao,
+        repositorio,
+        canal,
+        explorador: new ExploradorDePastas(path.resolve("/projetos")),
+        anexos: new ArmazemDeAnexosEmArquivo(path.join(tmpdir(), "orquestrador-rotas-teste")),
+        preferencias: new PreferenciasEmMemoria(),
+        pastaRaiz: path.resolve("/projetos"),
+      }),
+    );
+    servidor = aplicacao.listen(0, "127.0.0.1");
+    await once(servidor, "listening");
+    base = `http://127.0.0.1:${(servidor.address() as AddressInfo).port}/api`;
+  });
+
+  afterAll(async () => {
+    servidor.closeAllConnections();
+    servidor.close();
+    await once(servidor, "close");
+  });
+
+  /** Lê o stream até ter `quantas` mensagens com dados; devolve cada uma como [tipo, dados]. */
+  async function lerMensagens(
+    leitor: ReadableStreamDefaultReader<Uint8Array>,
+    quantas: number,
+    acumulado: { texto: string },
+  ): Promise<[string, unknown][]> {
+    const decodificador = new TextDecoder();
+    const mensagens = (): [string, unknown][] =>
+      acumulado.texto
+        .split("\n\n")
+        .filter((bloco) => bloco.includes("data: "))
+        .map((bloco) => {
+          const tipo = /^event: (.+)$/m.exec(bloco)?.[1] ?? "message";
+          const dados = /^data: (.+)$/m.exec(bloco)?.[1] ?? "null";
+          return [tipo, JSON.parse(dados) as unknown];
+        });
+    while (mensagens().length < quantas) {
+      const { value, done } = await leitor.read();
+      if (done) {
+        break;
+      }
+      acumulado.texto += decodificador.decode(value, { stream: true });
+    }
+    return mensagens();
+  }
+
+  it("manda o histórico e os eventos novos de cada orquestrador, marcados com o id, e ignora ids desconhecidos", async () => {
+    repositorio.historicos.set("o1", [evento(1), evento(2), evento(3)]);
+    repositorio.historicos.set("o2", [evento(1), evento(2)]);
+
+    const resposta = await fetch(`${base}/eventos-dos-orquestradores?orquestradores=o1:1,o2:0,sumiu:0`);
+    expect(resposta.status).toBe(200);
+    expect(resposta.headers.get("content-type")).toContain("text/event-stream");
+    const leitor = resposta.body!.getReader();
+    const acumulado = { texto: "" };
+
+    try {
+      expect(await lerMensagens(leitor, 4, acumulado)).toEqual([
+        ["message", { orquestradorId: "o1", evento: evento(2) }],
+        ["message", { orquestradorId: "o1", evento: evento(3) }],
+        ["message", { orquestradorId: "o2", evento: evento(1) }],
+        ["message", { orquestradorId: "o2", evento: evento(2) }],
+      ]);
+
+      canal.publicar("o2", evento(3));
+      canal.publicar("o2", evento(3)); // repetido: não sai de novo
+      canal.sinalizar("o1", { turnoId: "t9", em: "agora", tokensPensando: 50 });
+
+      expect((await lerMensagens(leitor, 6, acumulado)).slice(4)).toEqual([
+        ["message", { orquestradorId: "o2", evento: evento(3) }],
+        ["sinal", { orquestradorId: "o1", sinal: { turnoId: "t9", em: "agora", tokensPensando: 50 } }],
+      ]);
+      expect(acumulado.texto).not.toContain("sumiu");
+    } finally {
+      await leitor.cancel();
+    }
+  });
+
+  it.each<[string, string]>([
+    ["", "Informe de quais orquestradores quer os eventos."],
+    [
+      `?orquestradores=${Array.from({ length: MAXIMO_DE_ORQUESTRADORES_POR_CONEXAO + 1 }, (_, i) => `o${i}:0`).join(",")}`,
+      `Acompanhe no máximo ${MAXIMO_DE_ORQUESTRADORES_POR_CONEXAO} orquestradores por conexão.`,
+    ],
+  ])("recusa a consulta %# com 400", async (consulta, mensagem) => {
+    const resposta = await fetch(`${base}/eventos-dos-orquestradores${consulta}`);
+
+    expect(resposta.status).toBe(400);
+    expect(await resposta.json()).toEqual({ erro: mensagem });
   });
 });

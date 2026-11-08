@@ -8,8 +8,12 @@ export type ModeloClaude = "fable" | "opus" | "sonnet" | "haiku";
 
 export type NivelDePermissao = "leitura" | "edicao" | "edicao_e_comandos";
 
-/** Esforço de raciocínio do modelo. "padrao" não força nada: vale o padrão do modelo no Claude Code. */
-export type EsforcoDeRaciocinio = "padrao" | "baixo" | "medio" | "alto" | "extra_alto" | "maximo";
+/**
+ * Esforço de raciocínio do modelo. "padrao" não força nada: vale o padrão do modelo no Claude Code.
+ * "ultracode" (xhigh com workflows de vários agentes em paralelo) só vale para o orquestrador e o
+ * chat: o servidor recusa no esforço dos subagentes.
+ */
+export type EsforcoDeRaciocinio = "padrao" | "baixo" | "medio" | "alto" | "extra_alto" | "maximo" | "ultracode";
 
 export interface DadosDaQuantidade {
   modo: "fixa" | "automatica";
@@ -64,6 +68,12 @@ export interface DadosDasPreferencias {
   /** Instruções para os orquestradores sem instruções próprias. */
   instrucoesPadrao: string;
   subagentesProntos: DadosDoSubagentePronto[];
+  /**
+   * Retoma o turno sozinho quando o Claude fica em silêncio (travado) ou a API
+   * falha (limite de uso, sobrecarga, rede). Ligada por padrão; falta em
+   * servidores anteriores a ela (vale `true`).
+   */
+  autorrecuperacao?: boolean;
 }
 
 /** O que o orquestrador receberia num pedido com uma configuração (`POST /previa-do-prompt`). */
@@ -104,6 +114,38 @@ export interface SinalDeVida {
   turnoId: string;
   em: string;
   tokensPensando: number;
+  /**
+   * O que o servidor apurou de um turno calado há 90 s ou mais (chega a cada
+   * ~30 s enquanto o silêncio dura). Não é atividade nova: só explica o silêncio.
+   * Falta nos sinais comuns e em servidores anteriores ao diagnóstico.
+   */
+  diagnostico?: DiagnosticoDoSilencio;
+}
+
+/**
+ * "trabalhando": há trabalho de verdade (ex.: "rodando `npm test` há 6 min");
+ * "suspeito": nada indica trabalho (ex.: "sem saída há 3 min, sem CPU").
+ */
+export interface DiagnosticoDoSilencio {
+  situacao: "trabalhando" | "suspeito";
+  resumo: string;
+}
+
+/** Por que o turno precisou de recuperação. */
+export type CausaDaRecuperacao = "silencio" | "limite_de_uso" | "sobrecarga" | "rede";
+
+/**
+ * Etapas da autorrecuperação: "encerrado" (o turno travado foi encerrado),
+ * "aguardando" (espera até `retomaEm`), "retomando" (um turno novo vai
+ * começar), "cancelada" (o usuário cancelou ou mandou outra mensagem) e
+ * "desistiu" (esgotou as tentativas).
+ */
+export type EtapaDaRecuperacao = "encerrado" | "aguardando" | "retomando" | "cancelada" | "desistiu";
+
+/** O turno novo que retoma sozinho um turno que travou ou falhou. */
+export interface DadosDaRetomada {
+  deTurnoId: string;
+  tentativa: number;
 }
 
 export interface LeituraDeMemoria {
@@ -174,6 +216,24 @@ export interface DadosDoConsumoDoTurno {
   parcial: boolean;
   indiceDeCusto: number;
   modeloDoPrincipal: string | null;
+}
+
+/** Onde o pedido está sendo escrito: uma pergunta ao chat rápido ou um pedido de trabalho ao orquestrador. */
+export type OndeDoPrompt = "chat" | "orquestrador";
+
+/** O "melhorar o pedido" (✨): o texto do campo, onde ele está e, no orquestrador, o nome da pasta do projeto. */
+export interface PedidoDeMelhoria {
+  texto: string;
+  onde: OndeDoPrompt;
+  pasta?: string;
+}
+
+/** O pedido reescrito e quanto custou reescrever (`indiceDeCusto` como o dos turnos). */
+export interface PromptMelhorado {
+  texto: string;
+  uso: DadosDoUso;
+  indiceDeCusto: number;
+  duracaoMs: number;
 }
 
 /** O esforço que o Claude Code usa quando o app deixa em "padrao", e de onde ele vem. */
@@ -265,6 +325,23 @@ export interface DadosDaNota {
   atualizadaEm: string;
 }
 
+/** Uma opção de uma pergunta do Claude; `descricao` aparece em letra menor embaixo do rótulo. */
+export interface OpcaoDaPergunta {
+  rotulo: string;
+  descricao: string | null;
+}
+
+/**
+ * Pergunta que o Claude faz com opções clicáveis (bloco ```pergunta-do-app).
+ * Vêm de 1 a 4 por resposta, cada uma com 2 a 6 opções; `multipla` deixa
+ * escolher mais de uma.
+ */
+export interface PerguntaDoApp {
+  pergunta: string;
+  opcoes: OpcaoDaPergunta[];
+  multipla: boolean;
+}
+
 export interface UsoDoTurno {
   duracaoMs: number;
   tokensDeEntrada: number;
@@ -322,10 +399,31 @@ type EventoDeTurno =
       configuracao: DadosDaConfiguracaoGravada;
       anexos?: DadosDoAnexo[];
       modo?: ModoDoTurno;
+      // Só nos turnos que o app abriu sozinho para retomar um que travou ou falhou; `texto` é a mensagem de retomada.
+      retomada?: DadosDaRetomada;
+    }
+  // Autorrecuperação do turno travado ou que falhou por limite de uso, sobrecarga ou rede.
+  // `tentativa` começa em 1 e `de` é o máximo para a causa; `resumo` vem pronto em pt-BR (em "desistiu",
+  // o diagnóstico completo); `retomaEm` (ISO) só em "aguardando".
+  | {
+      tipo: "recuperacao_do_turno";
+      etapa: EtapaDaRecuperacao;
+      causa: CausaDaRecuperacao;
+      tentativa: number;
+      de: number;
+      resumo: string;
+      retomaEm: string | null;
     }
   // `planoPendente`: o turno terminou com um plano à espera de decisão — no Plan Mode ou num pedido
   // de execução em que o Orquestrador propôs um plano antes de alterar. Falta nos eventos gravados antes.
-  | { tipo: "turno_concluido"; resposta: string; uso: UsoDoTurno; planoPendente?: boolean }
+  // `perguntas`: o Orquestrador terminou perguntando, com opções para o usuário escolher. Falta nos eventos antigos.
+  | {
+      tipo: "turno_concluido";
+      resposta: string;
+      uso: UsoDoTurno;
+      planoPendente?: boolean;
+      perguntas?: PerguntaDoApp[];
+    }
   | { tipo: "turno_cancelado" }
   | { tipo: "turno_falhou"; motivo: string }
   | { tipo: "turno_interrompido" }
@@ -371,6 +469,8 @@ export interface AcaoDoApp {
   projeto: string;
   pasta: string;
   pedido: string | null;
+  /** Cria um Orquestrador novo na pasta em vez de reaproveitar um. Falta nas mensagens antigas (vale false). */
+  novo?: boolean;
 }
 
 export interface UsoDaResposta {
@@ -410,6 +510,8 @@ export interface MensagemDoChat {
   criadaEm: string;
   situacao: SituacaoDaMensagemDoChat;
   acoes: AcaoDoApp[];
+  /** Perguntas com opções da resposta. Falta nas mensagens gravadas antes delas (vale vazio). */
+  perguntas?: PerguntaDoApp[];
   avisos: string[];
   uso: UsoDaResposta | null;
   /** Falta nas mensagens gravadas antes da autorização (vale `null`). */
@@ -436,12 +538,13 @@ export interface EstadoDoChat {
 export type EventoDoChat =
   | { tipo: "pergunta_enviada"; mensagemDoUsuario: MensagemDoChat; mensagemDoClaude: MensagemDoChat }
   // O `texto` final substitui o que veio nos trechos. `autorizacaoPendente` falta nos eventos
-  // gravados antes da autorização (vale `null`).
+  // gravados antes da autorização (vale `null`); `perguntas`, nos anteriores a elas (vale vazio).
   | {
       tipo: "resposta_concluida";
       mensagemId: string;
       texto: string;
       acoes: AcaoDoApp[];
+      perguntas?: PerguntaDoApp[];
       avisos: string[];
       uso: UsoDaResposta | null;
       autorizacaoPendente?: AutorizacaoPendente | null;
@@ -470,4 +573,64 @@ export interface AtividadeDaResposta {
   mensagemId: string;
   ferramenta: string;
   detalhe: string;
+}
+
+// ---------------- Terminais (shell interativo no canvas) ----------------
+
+/**
+ * Um terminal de verdade (o shell do computador) aberto pela tela e vivo no
+ * servidor. No código da tela ele se chama "shell", para não confundir com o
+ * terminal de um Orquestrador; na tela, "Terminal".
+ */
+export interface DadosDoShell {
+  id: string;
+  /** A pasta em que o shell começou. */
+  pasta: string;
+  /** O Orquestrador de cuja pasta (ou worktree) o shell saiu; nulo quando aberto pela barra do canvas. */
+  orquestradorId: string | null;
+  criadoEm: string;
+}
+
+/** O que `POST /api/terminais` recebe: a pasta ou o Orquestrador, e o tamanho inicial em caracteres. */
+export interface NovoShell {
+  pasta?: string;
+  orquestradorId?: string;
+  colunas: number;
+  linhas: number;
+}
+
+/** Do servidor para a tela, pelo WebSocket do terminal (JSON em texto). */
+export type MensagemDoShell = { tipo: "saida"; dados: string } | { tipo: "fim"; codigo: number | null };
+
+/** Da tela para o servidor, pelo WebSocket do terminal (JSON em texto). */
+export type MensagemParaOShell =
+  | { tipo: "entrada"; dados: string }
+  | { tipo: "tamanho"; colunas: number; linhas: number };
+
+// ---------------- Visualizador de código ----------------
+
+/** Um item de uma pasta do Orquestrador, num nível só (as subpastas são lidas quando abertas). */
+export interface EntradaDaPasta {
+  nome: string;
+  tipo: "pasta" | "arquivo";
+  /** Bytes; só nos arquivos. */
+  tamanho?: number;
+}
+
+/** O que `GET /api/orquestradores/:id/arquivos` devolve. */
+export interface ListagemDaPasta {
+  /** Relativo à pasta (ou worktree) do Orquestrador, com `/`; vazio na raiz. */
+  caminho: string;
+  entradas: EntradaDaPasta[];
+  /** A pasta tinha itens demais e a lista veio cortada. */
+  truncada: boolean;
+}
+
+/** O que `GET /api/orquestradores/:id/arquivos/conteudo` devolve. Só texto até 500 KB. */
+export interface ConteudoDoArquivo {
+  caminho: string;
+  conteudo: string;
+  /** Bytes. */
+  tamanho: number;
+  linhas: number;
 }

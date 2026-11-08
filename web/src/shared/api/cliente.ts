@@ -1,17 +1,23 @@
 import type {
+  ConteudoDoArquivo,
   DadosDaConfiguracao,
   DadosDaNota,
   DadosDaPredefinicao,
   DadosDasPreferencias,
+  DadosDoShell,
   EsforcosHerdados,
   EstadoDoChat,
+  ListagemDaPasta,
   ModeloClaude,
   ModoDoTurno,
   NavegacaoDePastas,
   NomeDaPredefinicao,
+  NovoShell,
   PastaDeProjeto,
+  PedidoDeMelhoria,
   PreferenciasDoChat,
   PreviaDoPrompt,
+  PromptMelhorado,
   ResumoDoOrquestrador,
   SaudeDoServidor,
   TipoDeImagem,
@@ -82,11 +88,22 @@ export interface AlteracaoDaNota {
 export const api = {
   listarPastas: () => requisitar<{ raiz: string; pastas: PastaDeProjeto[] }>("/pastas"),
 
-  /** Navega pelo computador para escolher uma pasta qualquer; sem `caminho`, parte da raiz dos projetos. */
-  navegarPastas: (caminho?: string) =>
-    requisitar<NavegacaoDePastas>(
-      `/pastas/navegar${caminho !== undefined ? `?caminho=${encodeURIComponent(caminho)}` : ""}`,
-    ),
+  /**
+   * Navega pelo computador para escolher uma pasta qualquer; sem `caminho`, parte da raiz dos projetos.
+   * `estrito`: caminho digitado à mão; se não existir ou não for pasta, falha com a mensagem do servidor
+   * (sem ele, o servidor volta em silêncio para a raiz).
+   */
+  navegarPastas: (caminho?: string, opcoes: { estrito?: boolean } = {}) => {
+    const parametros = new URLSearchParams();
+    if (caminho !== undefined) {
+      parametros.set("caminho", caminho);
+    }
+    if (opcoes.estrito === true) {
+      parametros.set("estrito", "1");
+    }
+    const busca = parametros.toString();
+    return requisitar<NavegacaoDePastas>(`/pastas/navegar${busca !== "" ? `?${busca}` : ""}`);
+  },
 
   listarOrquestradores: () => requisitar<ResumoDoOrquestrador[]>("/orquestradores"),
 
@@ -200,12 +217,28 @@ export const api = {
       body: JSON.stringify({ configuracao, modo, ...(pastaDeTrabalho ? { pastaDeTrabalho } : {}) }),
     }),
 
+  /**
+   * Reescreve o pedido do campo para ficar mais claro (o ✨). Não envia nada:
+   * só devolve o texto novo. Abortar o `sinal` cancela.
+   */
+  melhorarPrompt: (dados: PedidoDeMelhoria, sinal?: AbortSignal) =>
+    requisitar<PromptMelhorado>("/prompts/melhorar", {
+      method: "POST",
+      body: JSON.stringify(dados),
+      ...(sinal ? { signal: sinal } : {}),
+    }),
+
   enderecoDoAnexo: (id: string, arquivo: string) =>
     `/api/orquestradores/${encodeURIComponent(id)}/anexos/${encodeURIComponent(arquivo)}`,
 
-  /** `desde`: última sequência já recebida, para o servidor reenviar só o que faltou. */
-  enderecoDosEventos: (id: string, desde = 0) =>
-    `/api/orquestradores/${encodeURIComponent(id)}/eventos${desde > 0 ? `?desde=${desde}` : ""}`,
+  /**
+   * Uma conexão para os eventos de vários Orquestradores. Para cada id, a
+   * última sequência já recebida, para o servidor reenviar só o que faltou.
+   */
+  enderecoDosEventos: (desdePorId: ReadonlyMap<string, number>) =>
+    `/api/eventos-dos-orquestradores?orquestradores=${[...desdePorId]
+      .map(([id, desde]) => `${encodeURIComponent(id)}:${desde > 0 ? desde : 0}`)
+      .join(",")}`,
 
   // ---------------- Chat rápido ----------------
 
@@ -239,4 +272,40 @@ export const api = {
   enderecoDoAnexoDoChat: (arquivo: string) => `/api/chat/anexos/${encodeURIComponent(arquivo)}`,
 
   enderecoDosEventosDoChat: (desde = 0) => `/api/chat/eventos${desde > 0 ? `?desde=${desde}` : ""}`,
+
+  // ---------------- Terminais (shell interativo no canvas) ----------------
+
+  /** Os terminais vivos no servidor. */
+  listarShells: () => requisitar<DadosDoShell[]>("/terminais"),
+
+  /**
+   * Abre um shell na pasta (ou na pasta/worktree do Orquestrador). Recusado
+   * com 400 (pasta inválida), 404 (Orquestrador ou pasta inexistente) ou 409
+   * (limite de terminais abertos).
+   */
+  criarShell: (dados: NovoShell) =>
+    requisitar<DadosDoShell>("/terminais", { method: "POST", body: JSON.stringify(dados) }),
+
+  /** Encerra o shell no servidor. */
+  encerrarShell: (id: string) => requisitar<null>(`/terminais/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  /** O caminho do WebSocket do terminal (mesma origem): a saída chega e a entrada vai por ele. */
+  enderecoDaConexaoDoShell: (id: string) => `/api/terminais/${encodeURIComponent(id)}/conexao`,
+
+  // ---------------- Visualizador de código (só leitura) ----------------
+
+  /**
+   * Um nível de uma pasta do Orquestrador (o worktree, se houver); `caminho`
+   * relativo a ela, vazio na raiz. Sem `.git`, `node_modules` e `.env*`.
+   */
+  listarArquivos: (id: string, caminho = "") =>
+    requisitar<ListagemDaPasta>(
+      `/orquestradores/${encodeURIComponent(id)}/arquivos${caminho !== "" ? `?caminho=${encodeURIComponent(caminho)}` : ""}`,
+    ),
+
+  /** Um arquivo de texto da pasta. Recusado com 403 (bloqueado), 413 (acima de 500 KB) ou 415 (binário). */
+  lerArquivo: (id: string, caminho: string) =>
+    requisitar<ConteudoDoArquivo>(
+      `/orquestradores/${encodeURIComponent(id)}/arquivos/conteudo?caminho=${encodeURIComponent(caminho)}`,
+    ),
 };

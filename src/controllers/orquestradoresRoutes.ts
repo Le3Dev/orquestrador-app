@@ -4,12 +4,16 @@ import { Request, Response, Router } from "express";
 import { z, ZodError } from "zod";
 
 import { ArmazemDeAnexosEmArquivo, ehNomeDeAnexoValido } from "../infraestrutura/arquivos/ArmazemDeAnexosEmArquivo";
-import { ExploradorDePastas } from "../infraestrutura/arquivos/ExploradorDePastas";
+import { ErroDeCaminho, ExploradorDePastas } from "../infraestrutura/arquivos/ExploradorDePastas";
 import { CanalDeEventos } from "../infraestrutura/sse/CanalDeEventos";
 import { MAXIMO_DE_IMAGENS_POR_MENSAGEM, TAMANHO_MAXIMO_DA_IMAGEM, TIPOS_DE_IMAGEM } from "../orquestracao/Anexo";
 import { ConfiguracaoDoOrquestrador } from "../orquestracao/ConfiguracaoDoOrquestrador";
 import { ErroDeOrquestracao, MotivoDoErro } from "../orquestracao/ErroDeOrquestracao";
-import { ESFORCOS_DE_RACIOCINIO } from "../orquestracao/EsforcoDeRaciocinio";
+import {
+  ESFORCOS_DE_RACIOCINIO,
+  serveParaSubagentes,
+  ULTRACODE_NOS_SUBAGENTES,
+} from "../orquestracao/EsforcoDeRaciocinio";
 import { EventoRegistrado } from "../orquestracao/EventoDeOrquestracao";
 import { instrucoesDoOrquestrador, mensagemParaOOrquestrador } from "../orquestracao/InstrucoesDoOrquestrador";
 import { InstrucoesAplicadas, TAMANHO_MAXIMO_DAS_INSTRUCOES } from "../orquestracao/InstrucoesPersonalizadas";
@@ -72,8 +76,10 @@ const esquemaDaConfiguracao = z.object({
   esforcoDoOrquestrador: z
     .enum(ESFORCOS_DE_RACIOCINIO, { error: "Esforço do orquestrador inválido." })
     .optional(),
+  // O `ultracode` vale só para o orquestrador (e o chat).
   esforcoDosSubagentes: z
     .enum(ESFORCOS_DE_RACIOCINIO, { error: "Esforço dos subagentes inválido." })
+    .refine(serveParaSubagentes, { error: ULTRACODE_NOS_SUBAGENTES })
     .optional(),
   // Chaves desconhecidas são descartadas pelo `z.object`: clientes antigos que
   // ainda mandam as opções de trivial e de plano (fixas desde o ADR-28) não
@@ -109,6 +115,9 @@ const esquemaDasPreferencias = z.object({
   instrucoesPadrao: esquemaDeInstrucoes("As instruções gerais").optional(),
   subagentesProntos: z
     .array(esquemaDoSubagentePronto, { error: "Os subagentes prontos devem ser uma lista." })
+    .optional(),
+  autorrecuperacao: z
+    .boolean({ error: 'A opção "Autorrecuperação" deve ser verdadeira ou falsa.' })
     .optional(),
 });
 
@@ -204,6 +213,10 @@ function responderErro(resposta: Response, erro: unknown): void {
     resposta.status(409).json({ erro: erro.message });
     return;
   }
+  if (erro instanceof ErroDeCaminho) {
+    resposta.status(400).json({ erro: erro.message });
+    return;
+  }
   if (erro instanceof ZodError) {
     resposta.status(400).json({ erro: erro.issues[0]?.message ?? "Dados inválidos." });
     return;
@@ -213,7 +226,37 @@ function responderErro(resposta: Response, erro: unknown): void {
   resposta.status(500).json({ erro: `Erro inesperado no servidor: ${detalhe}` });
 }
 
-type Tratador<Parametros> = (requisicao: Request<Parametros>, resposta: Response) => Promise<void> | void;
+/** Quantos Orquestradores uma conexão de eventos acompanha, no máximo. */
+export const MAXIMO_DE_ORQUESTRADORES_POR_CONEXAO = 200;
+
+/**
+ * `id:desde,id:desde` → id e a última sequência que a tela já tem (0 quando
+ * falta ou não é um inteiro positivo). Um id repetido vale a última vez.
+ */
+function lerAssinaturasDeEventos(valor: unknown): Map<string, number> {
+  if (typeof valor !== "string" || valor.trim() === "") {
+    throw new ErroDeOrquestracao("dados_invalidos", "Informe de quais orquestradores quer os eventos.");
+  }
+  const itens = valor.split(",");
+  if (itens.length > MAXIMO_DE_ORQUESTRADORES_POR_CONEXAO) {
+    throw new ErroDeOrquestracao(
+      "dados_invalidos",
+      `Acompanhe no máximo ${MAXIMO_DE_ORQUESTRADORES_POR_CONEXAO} orquestradores por conexão.`,
+    );
+  }
+  const assinaturas = new Map<string, number>();
+  for (const item of itens) {
+    const separador = item.lastIndexOf(":");
+    const id = (separador < 0 ? item : item.slice(0, separador)).trim();
+    const desde = separador < 0 ? 0 : Number(item.slice(separador + 1));
+    if (id !== "") {
+      assinaturas.set(id, Number.isInteger(desde) && desde > 0 ? desde : 0);
+    }
+  }
+  return assinaturas;
+}
+
+type Tratador<Parametros> =(requisicao: Request<Parametros>, resposta: Response) => Promise<void> | void;
 
 /** Envolve cada rota num try/catch que devolve a mensagem de erro pronta para a tela. */
 function rota<Parametros = { id: string }>(tratador: Tratador<Parametros>): Tratador<Parametros> {
@@ -297,7 +340,9 @@ export function criarOrquestradoresRoutes({
     "/pastas/navegar",
     rota(async (requisicao, resposta) => {
       const caminho = typeof requisicao.query.caminho === "string" ? requisicao.query.caminho : undefined;
-      resposta.json(await explorador.navegar(caminho));
+      // `estrito=1`: caminho digitado à mão; se não servir, responde 400 em vez de voltar à raiz.
+      const estrito = requisicao.query.estrito === "1";
+      resposta.json(await explorador.navegar(caminho, { estrito }));
     }),
   );
 
@@ -348,7 +393,10 @@ export function criarOrquestradoresRoutes({
     }),
   );
 
-  /** Preferências que valem para todos os Orquestradores (instruções gerais e subagentes prontos). */
+  /**
+   * Preferências que valem para todos os Orquestradores (instruções gerais,
+   * subagentes prontos e autorrecuperação dos turnos).
+   */
   rotas.get(
     "/preferencias",
     rota((_requisicao, resposta) => {
@@ -561,22 +609,25 @@ export function criarOrquestradoresRoutes({
   );
 
   /**
-   * Eventos ao vivo (Server-Sent Events). Ao conectar, reenvia o histórico a
-   * partir de `Last-Event-ID` — que o navegador manda sozinho ao reconectar —
-   * ou de `?desde=`, usado quando a tela recria a conexão por conta própria
-   * (depois de o servidor ter ficado fora). Sem nenhum dos dois, envia tudo: é
-   * assim que a tela reconstrói uma conversa antiga.
+   * Eventos ao vivo (Server-Sent Events) de vários Orquestradores numa conexão
+   * só: `?orquestradores=<id>:<desde>,<id>:<desde>`. Para cada um, reenvia o
+   * histórico depois de `desde` (0 ou ausente: tudo, que é como a tela
+   * reconstrói uma conversa antiga) e segue com os eventos novos. Cada
+   * mensagem leva o id do seu Orquestrador.
+   *
+   * Uma conexão para todos os terminais, e não uma por terminal: o navegador
+   * abre no máximo 6 conexões HTTP/1.1 com o mesmo servidor, e cada SSE ocupa
+   * uma para sempre. Com uma por terminal, 4 terminais mais o chat e os
+   * artefatos esgotavam o limite e todo pedido da tela ficava parado na fila.
+   *
+   * Sem `id:` nas mensagens (um único Last-Event-ID não serve para vários
+   * históricos): quando a conexão cai, a tela a recria com as sequências que
+   * já tem. Ids que não existem são ignorados.
    */
   rotas.get(
-    "/orquestradores/:id/eventos",
+    "/eventos-dos-orquestradores",
     rota((requisicao, resposta) => {
-      const id = requisicao.params.id;
-      if (repositorio.buscarPorId(id) === null) {
-        throw new ErroDeOrquestracao("nao_encontrado", "Orquestrador não encontrado.");
-      }
-
-      const informado = Number(requisicao.get("Last-Event-ID") ?? requisicao.query.desde ?? 0);
-      let ultimaSequencia = Number.isInteger(informado) && informado > 0 ? informado : 0;
+      const assinaturas = lerAssinaturasDeEventos(requisicao.query.orquestradores);
 
       resposta.writeHead(200, {
         "Content-Type": "text/event-stream; charset=utf-8",
@@ -586,31 +637,42 @@ export function criarOrquestradoresRoutes({
       });
       resposta.write("retry: 3000\n\n");
 
-      const enviar = (evento: EventoRegistrado): void => {
-        if (evento.sequencia <= ultimaSequencia) {
-          return;
+      const cancelamentos: (() => void)[] = [];
+      for (const [orquestradorId, desde] of assinaturas) {
+        if (repositorio.buscarPorId(orquestradorId) === null) {
+          continue;
         }
-        ultimaSequencia = evento.sequencia;
-        resposta.write(`id: ${evento.sequencia}\ndata: ${JSON.stringify(evento)}\n\n`);
-      };
+        let ultimaSequencia = desde;
+        const enviar = (evento: EventoRegistrado): void => {
+          if (evento.sequencia <= ultimaSequencia) {
+            return;
+          }
+          ultimaSequencia = evento.sequencia;
+          resposta.write(`data: ${JSON.stringify({ orquestradorId, evento })}\n\n`);
+        };
 
-      // Leitura do histórico e assinatura acontecem no mesmo tick: nenhum
-      // evento novo consegue cair entre as duas.
-      for (const evento of repositorio.lerEventos(id, ultimaSequencia)) {
-        enviar(evento);
+        // Leitura do histórico e assinatura acontecem no mesmo tick: nenhum
+        // evento novo consegue cair entre as duas.
+        for (const evento of repositorio.lerEventos(orquestradorId, ultimaSequencia)) {
+          enviar(evento);
+        }
+        // Sinais de vida vão como outro tipo de evento SSE: não entram na
+        // sequência do histórico.
+        cancelamentos.push(
+          canal.assinar(orquestradorId, {
+            aoEvento: enviar,
+            aoSinal: (sinal) => resposta.write(`event: sinal\ndata: ${JSON.stringify({ orquestradorId, sinal })}\n\n`),
+          }),
+        );
       }
-      // Sinais de vida vão como outro tipo de evento SSE e sem id: não entram
-      // na sequência do histórico nem no Last-Event-ID da reconexão.
-      const cancelarAssinatura = canal.assinar(id, {
-        aoEvento: enviar,
-        aoSinal: (sinal) => resposta.write(`event: sinal\ndata: ${JSON.stringify(sinal)}\n\n`),
-      });
 
       // Comentário periódico: mantém a conexão viva através de proxies e antivírus.
       const batimento = setInterval(() => resposta.write(": ping\n\n"), 25_000);
       requisicao.on("close", () => {
         clearInterval(batimento);
-        cancelarAssinatura();
+        for (const cancelar of cancelamentos) {
+          cancelar();
+        }
       });
     }),
   );

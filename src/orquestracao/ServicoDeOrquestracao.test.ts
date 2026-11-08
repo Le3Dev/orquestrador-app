@@ -7,21 +7,24 @@ import { Anexo } from "./Anexo";
 import { ArmazemDeAnexos } from "./ArmazemDeAnexos";
 import { DadosDaConfiguracao } from "./ConfiguracaoDoOrquestrador";
 import { ConsumoDoTurno } from "./ConsumoDoTurno";
+import { DiagnosticadorDoClaude, DiagnosticoDoClaude } from "./DiagnosticoDoClaude";
 import { ConsultaDeEsforcoHerdado, EsforcoDaMaquina } from "./EsforcoDaMaquina";
 import { EsforcoHerdado } from "./EsforcoHerdado";
 import { EventoDeOrquestracao, EventoDoMotor, EventoRegistrado, SinalDeVida } from "./EventoDeOrquestracao";
 import { MARCADOR_DE_PLANO } from "./InstrucoesDoOrquestrador";
 import { MedidorDeConsumo, PeriodoDoTurno } from "./MedidorDeConsumo";
 import { UsoDeTokens } from "./UsoDeTokens";
-import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "./MotorDeAgentes";
+import { CausaDaFalha, MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "./MotorDeAgentes";
 import { Orquestrador } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { PedidoNaFila } from "./PedidoNaFila";
 import { GerenciadorDeWorktrees, PreparoDeWorktree } from "./PreparoDeWorktree";
 import { PreferenciasGlobais } from "./PreferenciasGlobais";
+import { formatarHora } from "./RecuperacaoDoTurno";
 import { ConversaArquivada, RepositorioDeOrquestradores } from "./RepositorioDeOrquestradores";
 import { RepositorioDePreferencias } from "./RepositorioDePreferencias";
 import { MensagemEnviada, ServicoDeOrquestracao } from "./ServicoDeOrquestracao";
+import { AgendadorDeTarefas } from "./VigiaDoTurno";
 
 /** Preferências globais em memória: `atuais` devolve o que o teste definiu. */
 class PreferenciasEmMemoria implements RepositorioDePreferencias {
@@ -615,6 +618,54 @@ describe("ServicoDeOrquestracao", () => {
         expect(configuracaoDoEvento).not.toHaveProperty("permitirTrabalhoDireto");
         expect(configuracaoDoEvento).not.toHaveProperty("proporPlanoEmPedidosGrandes");
       }
+    });
+
+    it("o bloco de perguntas sai da resposta, vira perguntas no evento e no turno e convive com o plano", async () => {
+      const orquestrador = await criar();
+      motor.resultado = resultadoComResposta(
+        [
+          "Proponho:",
+          "1. separar o módulo",
+          "```pergunta-do-app",
+          '{"perguntas":[{"pergunta":"Qual banco usar?","opcoes":[{"rotulo":"Postgres","descricao":"já usado no projeto"},"SQLite"],"multipla":false}]}',
+          "```",
+          "```pergunta-do-app",
+          "{quebrado",
+          "```",
+          MARCADOR_DE_PLANO,
+        ].join("\n"),
+      );
+
+      await executar(orquestrador);
+
+      const perguntas = [
+        {
+          pergunta: "Qual banco usar?",
+          opcoes: [
+            { rotulo: "Postgres", descricao: "já usado no projeto" },
+            { rotulo: "SQLite", descricao: null },
+          ],
+          multipla: false,
+        },
+      ];
+      const concluido = publicados.at(-1);
+      expect(concluido).toMatchObject({
+        tipo: "turno_concluido",
+        resposta: "Proponho:\n1. separar o módulo",
+        planoPendente: true,
+        perguntas,
+      });
+      expect(orquestrador.ultimoTurno?.resposta).toBe("Proponho:\n1. separar o módulo");
+      expect(repositorio.buscarPorId(orquestrador.id)?.paraDados().turnos[0]?.perguntas).toEqual(perguntas);
+    });
+
+    it("sem bloco de perguntas, o turno conclui com perguntas vazias", async () => {
+      const orquestrador = await criar();
+      motor.resultado = resultadoComResposta("feito");
+
+      await executar(orquestrador);
+
+      expect(publicados.at(-1)).toMatchObject({ tipo: "turno_concluido", resposta: "feito", perguntas: [] });
     });
 
     it("sem o marcador, o turno de execução conclui sem plano pendente", async () => {
@@ -1321,5 +1372,441 @@ describe("ServicoDeOrquestracao e a economia de tokens", () => {
 
     expect(await servico.esforcoHerdadoDe(orquestrador.id)).toEqual({ orquestrador: null, subagentes: null });
     avisos.mockRestore();
+  });
+});
+
+const SEGUNDO = 1_000;
+const MINUTO = 60 * SEGUNDO;
+
+const esvaziar = (): Promise<void> => new Promise((resolver) => setImmediate(resolver));
+
+/** Relógio e agendador falsos: o tempo só anda com `avancar`, rodando as tarefas na ordem. */
+class RelogioFalso implements AgendadorDeTarefas {
+  agoraMs = Date.parse("2026-11-08T12:00:00Z");
+  private tarefas: Array<{ em: number; tarefa: () => void }> = [];
+
+  agora = (): Date => new Date(this.agoraMs);
+
+  agendar(ms: number, tarefa: () => void): () => void {
+    const item = { em: this.agoraMs + ms, tarefa };
+    this.tarefas.push(item);
+    return () => {
+      this.tarefas = this.tarefas.filter((outro) => outro !== item);
+    };
+  }
+
+  get pendentes(): number {
+    return this.tarefas.length;
+  }
+
+  async avancar(ms: number): Promise<void> {
+    const alvo = this.agoraMs + ms;
+    for (;;) {
+      this.tarefas.sort((a, b) => a.em - b.em);
+      const proxima = this.tarefas[0];
+      if (proxima === undefined || proxima.em > alvo) {
+        break;
+      }
+      this.tarefas.shift();
+      this.agoraMs = proxima.em;
+      proxima.tarefa();
+      await esvaziar();
+    }
+    this.agoraMs = alvo;
+    await esvaziar();
+  }
+}
+
+/** Claude parado: vivo, sem CPU, sem comando e sem transcrição crescendo. */
+class DiagnosticadorParado implements DiagnosticadorDoClaude {
+  readonly esquecidos: string[] = [];
+  async diagnosticar(): Promise<DiagnosticoDoClaude> {
+    return { processoVivo: true, cpuDoClaude: 0, filhos: [], transcricoesCrescendo: false, ultimaEscritaEm: null };
+  }
+  esquecer(orquestradorId: string): void {
+    this.esquecidos.push(orquestradorId);
+  }
+}
+
+const SUCESSO: ResultadoDoTurno = {
+  sucesso: true,
+  resposta: "feito",
+  uso: { duracaoMs: 1, tokensDeEntrada: 1, tokensDeSaida: 1, subagentesLancados: 0 },
+};
+
+function falhaPor(causa: CausaDaFalha, liberaEm?: string): ResultadoDoTurno {
+  return {
+    sucesso: false,
+    motivo: `falhou: ${causa}`,
+    uso: null,
+    causa,
+    ...(liberaEm === undefined ? {} : { liberaEm }),
+  };
+}
+
+/**
+ * Motor que segue um roteiro, um passo por turno: um resultado na hora, ou
+ * "rodando" (fica calado até ser abortado). Abortado com "silencio",
+ * responde como o motor de verdade: falha com `causa: "silencio"`.
+ */
+class MotorRoteirizado implements MotorDeAgentes {
+  readonly pedidos: PedidoDeTurno[] = [];
+  roteiro: Array<ResultadoDoTurno | "rodando"> = [];
+
+  executarTurno(
+    pedido: PedidoDeTurno,
+    aoObservar: (evento: EventoDoMotor) => void,
+    sinal: AbortSignal,
+  ): Promise<ResultadoDoTurno> {
+    this.pedidos.push(pedido);
+    aoObservar({ tipo: "sessao_iniciada" });
+    const passo = this.roteiro.shift() ?? "rodando";
+    return new Promise((resolver) => {
+      sinal.addEventListener("abort", () =>
+        resolver(
+          sinal.reason === "silencio"
+            ? { sucesso: false, motivo: "encerrado", uso: null, causa: "silencio" }
+            : { sucesso: false, motivo: "morto", uso: null },
+        ),
+      );
+      if (passo !== "rodando") {
+        resolver(passo);
+      }
+    });
+  }
+}
+
+describe("ServicoDeOrquestracao e a autorrecuperação (ADR-36)", () => {
+  let repositorio: RepositorioEmMemoria;
+  let motor: MotorRoteirizado;
+  let relogio: RelogioFalso;
+  let diagnosticador: DiagnosticadorParado;
+  let preferencias: PreferenciasEmMemoria;
+  let sinais: SinalDeVida[];
+  let servico: ServicoDeOrquestracao;
+  let ids: number;
+
+  beforeEach(() => {
+    repositorio = new RepositorioEmMemoria();
+    motor = new MotorRoteirizado();
+    relogio = new RelogioFalso();
+    diagnosticador = new DiagnosticadorParado();
+    preferencias = new PreferenciasEmMemoria();
+    sinais = [];
+    ids = 0;
+    servico = new ServicoDeOrquestracao({
+      repositorio,
+      motor,
+      execucoes: new ControleDeExecucoesEmMemoria(),
+      publicador: { publicar: () => undefined, sinalizar: (_id, sinal) => sinais.push(sinal) },
+      anexos: new ArmazemEmMemoria(),
+      worktrees: new GerenciadorDeWorktreesFalso(),
+      pastaDeArtefatos: (orquestradorId) => `/dados/artefatos/entrada/orquestradores/${orquestradorId}`,
+      preferencias,
+      gerarId: () => `id${++ids}`,
+      agora: relogio.agora,
+      diagnosticador,
+      agendador: relogio,
+    });
+  });
+
+  async function criar(): Promise<Orquestrador> {
+    return servico.criarOrquestrador({
+      nome: "Painel",
+      pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
+      configuracao,
+    });
+  }
+
+  /** As etapas da recuperação publicadas, como "etapa tentativa/de". */
+  function etapas(): string[] {
+    return repositorio.eventos.flatMap((evento) =>
+      evento.tipo === "recuperacao_do_turno" ? [`${evento.etapa} ${evento.tentativa}/${evento.de}`] : [],
+    );
+  }
+
+  function ultimaRecuperacao(): EventoRegistrado | undefined {
+    return repositorio.eventos.filter((evento) => evento.tipo === "recuperacao_do_turno").at(-1);
+  }
+
+  it("turno travado: encerra com o motivo, espera, e retoma a mesma sessão num turno novo", async () => {
+    const orquestrador = await criar();
+    motor.roteiro = ["rodando", SUCESSO];
+    const primeiro = await servico.enviarMensagem(orquestrador.id, "faça o painel");
+    await esvaziar();
+
+    await relogio.avancar(5 * MINUTO);
+    await primeiro.conclusao;
+    await primeiro.recuperacao;
+
+    expect(sinais[0]).toEqual({
+      turnoId: primeiro.turnoId,
+      em: "2026-11-08T12:01:30.000Z",
+      tokensPensando: 0,
+      diagnostico: { situacao: "suspeito", resumo: "sem saída há 1 min, sem CPU" },
+    });
+    expect(repositorio.eventos.map((evento) => evento.tipo)).toEqual([
+      "turno_iniciado",
+      "sessao_iniciada",
+      "recuperacao_do_turno",
+      "turno_falhou",
+      "recuperacao_do_turno",
+    ]);
+    expect(repositorio.eventos[2]).toMatchObject({
+      turnoId: primeiro.turnoId,
+      etapa: "encerrado",
+      causa: "silencio",
+      tentativa: 1,
+      de: 2,
+      resumo: "sem saída há 5 min, sem CPU e sem transcrição crescendo",
+      retomaEm: null,
+    });
+    expect(repositorio.eventos[3]).toMatchObject({
+      tipo: "turno_falhou",
+      motivo:
+        "O app encerrou o turno porque o Claude ficou sem dar notícias (sem saída há 5 min, sem CPU e sem transcrição crescendo).",
+    });
+    expect(repositorio.eventos[4]).toMatchObject({
+      turnoId: primeiro.turnoId,
+      etapa: "aguardando",
+      tentativa: 1,
+      de: 2,
+      retomaEm: "2026-11-08T12:05:30.000Z",
+    });
+    expect(diagnosticador.esquecidos).toEqual([orquestrador.id]);
+
+    await relogio.avancar(30 * SEGUNDO - 1);
+    expect(motor.pedidos).toHaveLength(1);
+    await relogio.avancar(1);
+    await vi.waitFor(() => expect(orquestrador.ultimoTurno?.situacao).toBe("concluido"));
+
+    expect(ultimaRecuperacao()).toMatchObject({ etapa: "retomando", turnoId: primeiro.turnoId, tentativa: 1 });
+    const retomada = repositorio.eventos.filter((evento) => evento.tipo === "turno_iniciado").at(-1);
+    expect(retomada).toMatchObject({ retomada: { deTurnoId: primeiro.turnoId, tentativa: 1 }, modo: "execucao" });
+    expect(motor.pedidos[1]).toMatchObject({ sessaoId: orquestrador.sessaoId, sessaoIniciada: true });
+    expect(motor.pedidos[1]?.sessaoId).toBe(motor.pedidos[0]?.sessaoId);
+    expect(motor.pedidos[1]?.texto).toContain(
+      "Você foi interrompido pelo app porque ficou sem dar notícias. Confira o estado atual da pasta de trabalho",
+    );
+    expect(orquestrador.totalDeTurnos).toBe(2);
+  });
+
+  it("silêncio: 2 retomadas (30 s e 2 min) e então desiste com o diagnóstico", async () => {
+    const orquestrador = await criar();
+    motor.roteiro = ["rodando", "rodando", "rodando"];
+    const primeiro = await servico.enviarMensagem(orquestrador.id, "faça");
+    await esvaziar();
+
+    await relogio.avancar(5 * MINUTO); // trava o 1º
+    await primeiro.recuperacao;
+    await relogio.avancar(30 * SEGUNDO); // retoma
+    await relogio.avancar(5 * MINUTO); // trava o 2º
+    await vi.waitFor(() => expect(etapas().at(-1)).toBe("aguardando 2/2"));
+    expect(ultimaRecuperacao()).toMatchObject({ retomaEm: new Date(relogio.agoraMs + 2 * MINUTO).toISOString() });
+    await relogio.avancar(2 * MINUTO); // retoma
+    await relogio.avancar(5 * MINUTO); // trava o 3º
+    await vi.waitFor(() => expect(etapas().at(-1)).toBe("desistiu 2/2"));
+
+    expect(etapas()).toEqual([
+      "encerrado 1/2",
+      "aguardando 1/2",
+      "retomando 1/2",
+      "encerrado 2/2",
+      "aguardando 2/2",
+      "retomando 2/2",
+      "encerrado 2/2",
+      "desistiu 2/2",
+    ]);
+    const desistencia = ultimaRecuperacao() as { resumo: string };
+    expect(desistencia.resumo).toContain("o Claude ficou sem dar notícias");
+    expect(desistencia.resumo).toContain("com esperas de 30 s, 2 min");
+    expect(desistencia.resumo).toContain("sem saída há 5 min, sem CPU e sem transcrição crescendo");
+    expect(motor.pedidos).toHaveLength(3);
+    expect(relogio.pendentes).toBe(0);
+  });
+
+  it("limite de uso: espera até liberar mais 1 min, mesmo horas depois", async () => {
+    const orquestrador = await criar();
+    const liberaEm = new Date(relogio.agoraMs + 3 * 60 * MINUTO).toISOString();
+    motor.roteiro = [falhaPor("limite_de_uso", liberaEm), SUCESSO];
+
+    const primeiro = await servico.enviarMensagem(orquestrador.id, "faça");
+    await primeiro.recuperacao;
+
+    expect(repositorio.eventos.at(-2)).toMatchObject({ tipo: "turno_falhou", motivo: "falhou: limite_de_uso" });
+    expect(ultimaRecuperacao()).toMatchObject({
+      etapa: "aguardando",
+      causa: "limite_de_uso",
+      tentativa: 1,
+      de: 3,
+      resumo: `limite de uso, libera às ${formatarHora(new Date(liberaEm))}`,
+      retomaEm: new Date(Date.parse(liberaEm) + MINUTO).toISOString(),
+    });
+
+    await relogio.avancar(3 * 60 * MINUTO);
+    expect(motor.pedidos).toHaveLength(1);
+    await relogio.avancar(MINUTO);
+    await vi.waitFor(() => expect(orquestrador.ultimoTurno?.situacao).toBe("concluido"));
+    expect(motor.pedidos[1]?.texto).toContain("limite de uso da assinatura foi atingido");
+  });
+
+  it("limite de uso sem horário: tenta de novo em 15 min", async () => {
+    const orquestrador = await criar();
+    motor.roteiro = [falhaPor("limite_de_uso")];
+
+    const primeiro = await servico.enviarMensagem(orquestrador.id, "faça");
+    await primeiro.recuperacao;
+
+    expect(ultimaRecuperacao()).toMatchObject({
+      etapa: "aguardando",
+      retomaEm: new Date(relogio.agoraMs + 15 * MINUTO).toISOString(),
+    });
+  });
+
+  it("sobrecarga: 3 tentativas (1, 3 e 5 min) e então desiste", async () => {
+    const orquestrador = await criar();
+    motor.roteiro = [falhaPor("sobrecarga"), falhaPor("sobrecarga"), falhaPor("sobrecarga"), falhaPor("sobrecarga")];
+
+    const primeiro = await servico.enviarMensagem(orquestrador.id, "faça");
+    await primeiro.recuperacao;
+    await relogio.avancar(MINUTO);
+    await vi.waitFor(() => expect(etapas().at(-1)).toBe("aguardando 2/3"));
+    await relogio.avancar(3 * MINUTO);
+    await vi.waitFor(() => expect(etapas().at(-1)).toBe("aguardando 3/3"));
+    await relogio.avancar(5 * MINUTO);
+    await vi.waitFor(() => expect(etapas().at(-1)).toBe("desistiu 3/3"));
+
+    expect(etapas()).toEqual([
+      "aguardando 1/3",
+      "retomando 1/3",
+      "aguardando 2/3",
+      "retomando 2/3",
+      "aguardando 3/3",
+      "retomando 3/3",
+      "desistiu 3/3",
+    ]);
+    expect((ultimaRecuperacao() as { resumo: string }).resumo).toBe(
+      "O app desistiu de retomar sozinho: API do Claude sobrecarregada. Retomou a mesma sessão 3 vezes, " +
+        "com esperas de 1 min, 3 min, 5 min, e o turno falhou de novo. Última falha: falhou: sobrecarga",
+    );
+    expect(motor.pedidos).toHaveLength(4);
+    expect(orquestrador.ultimoTurno?.situacao).toBe("falhou");
+  });
+
+  it("as tentativas zeram quando um turno conclui", async () => {
+    const orquestrador = await criar();
+    motor.roteiro = [falhaPor("rede"), SUCESSO, falhaPor("rede")];
+
+    const primeiro = await servico.enviarMensagem(orquestrador.id, "faça");
+    await primeiro.recuperacao;
+    await relogio.avancar(MINUTO);
+    await vi.waitFor(() => expect(orquestrador.ultimoTurno?.situacao).toBe("concluido"));
+    const segundo = await servico.enviarMensagem(orquestrador.id, "outra");
+    await segundo.recuperacao;
+
+    expect(etapas()).toEqual(["aguardando 1/3", "retomando 1/3", "aguardando 1/3"]);
+  });
+
+  it("cancelar durante a espera cancela a retomada; sem nada agendado, volta o 409", async () => {
+    const orquestrador = await criar();
+    motor.roteiro = [falhaPor("rede")];
+    const primeiro = await servico.enviarMensagem(orquestrador.id, "faça");
+    await primeiro.recuperacao;
+
+    await servico.cancelar(orquestrador.id);
+
+    expect(ultimaRecuperacao()).toMatchObject({
+      etapa: "cancelada",
+      turnoId: primeiro.turnoId,
+      resumo: "retomada cancelada: o usuário cancelou",
+      retomaEm: null,
+    });
+    await relogio.avancar(10 * MINUTO);
+    expect(motor.pedidos).toHaveLength(1);
+    await expect(servico.cancelar(orquestrador.id)).rejects.toMatchObject({ motivo: "sem_turno_em_andamento" });
+  });
+
+  it("uma mensagem do usuário durante a espera cancela a retomada antes de o turno dela começar", async () => {
+    const orquestrador = await criar();
+    motor.roteiro = [falhaPor("rede"), SUCESSO];
+    const primeiro = await servico.enviarMensagem(orquestrador.id, "faça");
+    await primeiro.recuperacao;
+
+    const segundo = await servico.enviarMensagem(orquestrador.id, "deixa, faça outra coisa");
+    await segundo.conclusao;
+    await relogio.avancar(10 * MINUTO);
+
+    expect(repositorio.eventos.map((evento) => evento.tipo).slice(-4)).toEqual([
+      "recuperacao_do_turno",
+      "turno_iniciado",
+      "sessao_iniciada",
+      "turno_concluido",
+    ]);
+    expect(ultimaRecuperacao()).toMatchObject({ etapa: "cancelada", resumo: "retomada cancelada: um novo pedido começou" });
+    expect(repositorio.eventos.at(-3)).not.toHaveProperty("retomada");
+    expect(motor.pedidos.map((pedido) => pedido.texto)).toEqual(["faça", "deixa, faça outra coisa"]);
+  });
+
+  it("limpar a conversa durante a espera cancela a retomada", async () => {
+    const orquestrador = await criar();
+    motor.roteiro = [falhaPor("rede")];
+    const primeiro = await servico.enviarMensagem(orquestrador.id, "faça");
+    await primeiro.recuperacao;
+
+    await servico.limparConversa(orquestrador.id);
+    await relogio.avancar(10 * MINUTO);
+
+    expect(repositorio.eventos.map((evento) => evento.tipo).slice(-2)).toEqual(["recuperacao_do_turno", "conversa_limpa"]);
+    expect(ultimaRecuperacao()).toMatchObject({ etapa: "cancelada", resumo: "retomada cancelada: a conversa foi limpa" });
+    expect(motor.pedidos).toHaveLength(1);
+  });
+
+  it("falha por outra causa (ou sem causa) não retoma", async () => {
+    const orquestrador = await criar();
+    motor.roteiro = [falhaPor("outro"), { sucesso: false, motivo: "sem causa", uso: null }];
+
+    const primeiro = await servico.enviarMensagem(orquestrador.id, "faça");
+    await primeiro.recuperacao;
+    const segundo = await servico.enviarMensagem(orquestrador.id, "de novo");
+    await segundo.recuperacao;
+
+    expect(etapas()).toEqual([]);
+    expect(relogio.pendentes).toBe(0);
+  });
+
+  it("cancelamento do usuário no meio do turno é cancelamento, não falha: não retoma", async () => {
+    const orquestrador = await criar();
+    motor.roteiro = ["rodando"];
+    const primeiro = await servico.enviarMensagem(orquestrador.id, "faça");
+    await esvaziar();
+
+    await servico.cancelar(orquestrador.id);
+    await primeiro.recuperacao;
+
+    expect(orquestrador.ultimoTurno?.situacao).toBe("cancelado");
+    expect(etapas()).toEqual([]);
+  });
+
+  it("com a autorrecuperação desligada, só mostra o diagnóstico: não encerra nem retoma", async () => {
+    preferencias.preferencias = PreferenciasGlobais.de({ autorrecuperacao: false });
+    const orquestrador = await criar();
+    motor.roteiro = ["rodando"];
+    const primeiro = await servico.enviarMensagem(orquestrador.id, "faça");
+    await esvaziar();
+
+    await relogio.avancar(20 * MINUTO);
+    expect(orquestrador.situacao).toBe("trabalhando");
+    expect(sinais.at(-1)?.diagnostico).toEqual({ situacao: "suspeito", resumo: "sem saída há 20 min, sem CPU" });
+
+    await servico.cancelar(orquestrador.id);
+    await primeiro.recuperacao;
+    expect(etapas()).toEqual([]);
+
+    // Falha por rede também não é retomada.
+    motor.roteiro = [falhaPor("rede")];
+    const segundo = await servico.enviarMensagem(orquestrador.id, "de novo");
+    await segundo.recuperacao;
+    expect(etapas()).toEqual([]);
+    expect(relogio.pendentes).toBe(0);
   });
 });

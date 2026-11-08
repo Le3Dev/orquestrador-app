@@ -43,6 +43,7 @@ function abrir(conectado = true) {
     limparBixinhos: vi.fn(),
     orquestradorCriado: vi.fn(),
     descartarRascunho: vi.fn(),
+    mudarEscalaDaLetra: vi.fn(),
     recarregar: vi.fn(async () => undefined),
     abrirPrevia: vi.fn(),
     navegarPrevia: vi.fn(),
@@ -304,6 +305,18 @@ describe("NoRascunho", () => {
     await waitFor(() => expect(acoes.orquestradorCriado).toHaveBeenCalledWith("rascunho:1", criado));
   });
 
+  it("o tamanho da letra começa no Normal e a troca vai para o nó, não para o servidor", async () => {
+    const acoes = abrir();
+    await screen.findByRole("option", { name: "app" });
+    const grupo = screen.getByRole("radiogroup", { name: "Tamanho da letra" });
+
+    expect(within(grupo).getAllByRole("radio")).toHaveLength(3);
+    expect(within(grupo).getByRole("radio", { name: "Normal" })).toBeChecked();
+
+    fireEvent.click(within(grupo).getByRole("radio", { name: "Maior" }));
+    expect(acoes.mudarEscalaDaLetra).toHaveBeenCalledWith("rascunho:1", 1.3);
+  });
+
   it("Enter no nome cria", async () => {
     const criar = espiarCriacao();
     await abrirComPasta();
@@ -332,7 +345,8 @@ describe("NoRascunho", () => {
 
     fireEvent.click(chipDoEsforco());
     const menu = screen.getByRole("listbox", { name: "Esforço do orquestrador" });
-    expect(within(menu).getAllByRole("option")).toHaveLength(6);
+    expect(within(menu).getAllByRole("option")).toHaveLength(7);
+    expect(within(menu).getAllByRole("option").at(-1)).toHaveTextContent("Ultracode");
     expect(within(menu).getByRole("option", { name: /Automático/ })).toHaveAttribute("aria-selected", "true");
     fireEvent.click(within(menu).getByRole("option", { name: "Alto" }));
 
@@ -347,6 +361,25 @@ describe("NoRascunho", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Esforço dos subagentes:/ }));
     fireEvent.click(screen.getByRole("option", { name: "Máximo" }));
     expect(await criarEPegarPayload(criar)).toMatchObject({ esforcoDoOrquestrador: "padrao", esforcoDosSubagentes: "maximo" });
+  });
+
+  it("Ultracode só existe no esforço do orquestrador e, escolhido, avisa do custo", async () => {
+    const criar = espiarCriacao();
+    await abrirComPasta();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Esforço dos subagentes:/ }));
+    const dosSubagentes = screen.getByRole("listbox", { name: "Esforço dos subagentes" });
+    expect(within(dosSubagentes).getAllByRole("option")).toHaveLength(6);
+    expect(within(dosSubagentes).queryByRole("option", { name: "Ultracode" })).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByText(/Ultracode dispara workflows/)).not.toBeInTheDocument();
+    fireEvent.click(chipDoEsforco());
+    fireEvent.click(screen.getByRole("option", { name: "Ultracode" }));
+
+    expect(chipDoEsforco()).toHaveTextContent("esforço ultracode");
+    expect(screen.getByText(/Ultracode dispara workflows com vários agentes em paralelo/)).toHaveClass("hint-warning");
+    expect(await criarEPegarPayload(criar)).toMatchObject({ esforcoDoOrquestrador: "ultracode", esforcoDosSubagentes: "padrao" });
   });
 
   it("Esc e clique fora fecham o menu, e só um fica aberto por vez", async () => {

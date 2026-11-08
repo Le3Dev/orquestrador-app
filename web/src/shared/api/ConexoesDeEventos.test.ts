@@ -14,9 +14,9 @@ class FonteFalsa implements FonteDeEventos {
     this.ouvintesDeSinal.push(ouvinte);
   }
 
-  sinalizar(sinal: SinalDeVida): void {
+  sinalizar(orquestradorId: string, sinal: SinalDeVida): void {
     for (const ouvinte of this.ouvintesDeSinal) {
-      ouvinte(new MessageEvent("sinal", { data: JSON.stringify(sinal) }));
+      ouvinte(new MessageEvent("sinal", { data: JSON.stringify({ orquestradorId, sinal }) }));
     }
   }
 
@@ -29,18 +29,19 @@ class FonteFalsa implements FonteDeEventos {
     this.onopen?.(new Event("open"));
   }
 
-  /** `abandonou`: o navegador desistiu (resposta de erro); senão, ele mesmo tenta de novo. */
-  cair(abandonou: boolean): void {
-    this.readyState = abandonou ? 2 : 0;
+  cair(): void {
+    this.readyState = 0;
     this.onerror?.(new Event("error"));
   }
 
-  receber(evento: EventoRegistrado): void {
-    this.onmessage?.(new MessageEvent("message", { data: JSON.stringify(evento) }));
+  receber(orquestradorId: string, evento: EventoRegistrado): void {
+    this.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ orquestradorId, evento }) }));
   }
 }
 
-function montar(ultimaSequencia = 0) {
+const BASE = "/api/eventos-dos-orquestradores?orquestradores=";
+
+function montar(ultimaSequencia: (id: string) => number = () => 0) {
   const fontes: FonteFalsa[] = [];
   const recebidos: [string, EventoRegistrado][] = [];
   const situacoes: [string, SituacaoDaConexao | null][] = [];
@@ -50,7 +51,7 @@ function montar(ultimaSequencia = 0) {
       aoReceber: (id, evento) => recebidos.push([id, evento]),
       aoSinal: (id, sinal) => sinais.push([id, sinal]),
       aoMudarSituacao: (id, situacao) => situacoes.push([id, situacao]),
-      ultimaSequencia: () => ultimaSequencia,
+      ultimaSequencia,
     },
     (endereco) => {
       const fonte = new FonteFalsa(endereco);
@@ -58,94 +59,133 @@ function montar(ultimaSequencia = 0) {
       return fonte;
     },
   );
-  return { conexoes, fontes, recebidos, situacoes, sinais };
+  const abertas = () => fontes.filter((fonte) => fonte.readyState !== 2);
+  return { conexoes, fontes, abertas, recebidos, situacoes, sinais };
 }
+
+const evento = (sequencia: number): EventoRegistrado => ({
+  tipo: "turno_cancelado",
+  turnoId: "t1",
+  sequencia,
+  em: "agora",
+});
 
 describe("ConexoesDeEventos", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("abre uma conexão por terminal e fecha a de quem saiu do canvas", () => {
-    const { conexoes, fontes, situacoes } = montar();
+  it("usa uma conexão só para todos os terminais, mesmo com 20 abertos", () => {
+    const { conexoes, abertas } = montar();
+    const ids = Array.from({ length: 20 }, (_, indice) => `o${indice + 1}`);
 
+    conexoes.sincronizar(new Set(ids));
+
+    expect(abertas()).toHaveLength(1);
+    expect(abertas()[0]?.endereco).toBe(`${BASE}${ids.map((id) => `${id}:0`).join(",")}`);
+  });
+
+  it("recria a conexão quando um terminal entra ou sai, retomando cada um do seu último evento", () => {
+    const sequencias: Record<string, number> = { o1: 12, o2: 0 };
+    const { conexoes, fontes, abertas, situacoes } = montar((id) => sequencias[id] ?? 0);
+
+    conexoes.sincronizar(new Set(["o1"]));
     conexoes.sincronizar(new Set(["o1", "o2"]));
+    sequencias.o2 = 7;
     conexoes.sincronizar(new Set(["o2"]));
 
-    expect(fontes.map((fonte) => fonte.endereco)).toEqual([
-      "/api/orquestradores/o1/eventos",
-      "/api/orquestradores/o2/eventos",
-    ]);
-    expect(fontes[0]?.readyState).toBe(2);
+    expect(fontes.map((fonte) => fonte.endereco)).toEqual([`${BASE}o1:12`, `${BASE}o1:12,o2:0`, `${BASE}o2:7`]);
+    expect(abertas()).toHaveLength(1);
     expect(situacoes).toContainEqual(["o1", null]);
   });
 
-  it("entrega os eventos recebidos com o id do orquestrador", () => {
-    const { conexoes, fontes, recebidos, situacoes } = montar();
-    conexoes.sincronizar(new Set(["o1"]));
-
-    fontes[0]?.abrir();
-    fontes[0]?.receber({ tipo: "turno_cancelado", turnoId: "t1", sequencia: 7, em: "agora" });
-
-    expect(situacoes.at(-1)).toEqual(["o1", "conectado"]);
-    expect(recebidos).toEqual([["o1", { tipo: "turno_cancelado", turnoId: "t1", sequencia: 7, em: "agora" }]]);
-  });
-
-  it("deixa o navegador reconectar sozinho quando a queda é temporária", () => {
+  it("não mexe na conexão quando o conjunto de terminais não mudou", () => {
     const { conexoes, fontes } = montar();
-    conexoes.sincronizar(new Set(["o1"]));
 
-    fontes[0]?.cair(false);
-    vi.advanceTimersByTime(ESPERA_PARA_REABRIR_MS * 3);
+    conexoes.sincronizar(new Set(["o1", "o2"]));
+    conexoes.sincronizar(new Set(["o2", "o1"]));
 
     expect(fontes).toHaveLength(1);
   });
 
-  it("reabre sozinho, a partir do último evento, quando o navegador desiste", () => {
-    const { conexoes, fontes, situacoes } = montar(42);
-    conexoes.sincronizar(new Set(["o1"]));
+  it("entrega cada evento ao orquestrador certo", () => {
+    const { conexoes, fontes, recebidos, situacoes } = montar();
+    conexoes.sincronizar(new Set(["o1", "o2"]));
 
-    fontes[0]?.cair(true);
-    expect(situacoes.at(-1)).toEqual(["o1", "reconectando"]);
-    vi.advanceTimersByTime(ESPERA_PARA_REABRIR_MS);
+    fontes[0]?.abrir();
+    fontes[0]?.receber("o2", evento(7));
+    fontes[0]?.receber("o1", evento(3));
 
-    expect(fontes.map((fonte) => fonte.endereco)).toEqual([
-      "/api/orquestradores/o1/eventos?desde=42",
-      "/api/orquestradores/o1/eventos?desde=42",
+    expect(situacoes).toContainEqual(["o1", "conectado"]);
+    expect(situacoes).toContainEqual(["o2", "conectado"]);
+    expect(recebidos).toEqual([
+      ["o2", evento(7)],
+      ["o1", evento(3)],
     ]);
   });
 
-  it("quando o servidor volta, reabre na hora só as conexões abandonadas", () => {
-    const { conexoes, fontes } = montar(5);
+  it("ignora eventos de um terminal que já saiu do canvas", () => {
+    const { conexoes, fontes, recebidos } = montar();
     conexoes.sincronizar(new Set(["o1", "o2"]));
-    fontes[0]?.cair(true);
-    fontes[1]?.abrir();
+    conexoes.sincronizar(new Set(["o1"]));
+
+    fontes[1]?.receber("o2", evento(1));
+    fontes[0]?.receber("o1", evento(1));
+
+    expect(recebidos).toEqual([]);
+  });
+
+  it("quando cai, fecha e reabre sozinho a partir do último evento de cada terminal", () => {
+    const { conexoes, fontes, abertas, situacoes } = montar(() => 42);
+    conexoes.sincronizar(new Set(["o1", "o2"]));
+
+    fontes[0]?.cair();
+    expect(situacoes.slice(-2)).toEqual([
+      ["o1", "reconectando"],
+      ["o2", "reconectando"],
+    ]);
+    expect(abertas()).toHaveLength(0);
+    vi.advanceTimersByTime(ESPERA_PARA_REABRIR_MS);
+
+    expect(fontes.map((fonte) => fonte.endereco)).toEqual([`${BASE}o1:42,o2:42`, `${BASE}o1:42,o2:42`]);
+    expect(abertas()).toHaveLength(1);
+  });
+
+  it("quando o servidor volta, reabre na hora a conexão que caiu, uma vez só", () => {
+    const { conexoes, fontes } = montar(() => 5);
+    conexoes.sincronizar(new Set(["o1"]));
+    fontes[0]?.cair();
 
     conexoes.reabrirAbandonadas();
     vi.advanceTimersByTime(ESPERA_PARA_REABRIR_MS);
 
-    // Só o o1 foi reaberto, e uma vez só: a reabertura agendada foi cancelada.
-    expect(fontes.map((fonte) => fonte.endereco)).toEqual([
-      "/api/orquestradores/o1/eventos?desde=5",
-      "/api/orquestradores/o2/eventos?desde=5",
-      "/api/orquestradores/o1/eventos?desde=5",
-    ]);
+    expect(fontes).toHaveLength(2);
+  });
+
+  it("não reabre uma conexão que está de pé", () => {
+    const { conexoes, fontes } = montar();
+    conexoes.sincronizar(new Set(["o1"]));
+    fontes[0]?.abrir();
+
+    conexoes.reabrirAbandonadas();
+
+    expect(fontes).toHaveLength(1);
   });
 
   it("entrega os sinais de vida separados dos eventos do histórico", () => {
     const { conexoes, fontes, recebidos, sinais } = montar();
     conexoes.sincronizar(new Set(["o1"]));
 
-    fontes[0]?.sinalizar({ turnoId: "t1", em: "agora", tokensPensando: 300 });
+    fontes[0]?.sinalizar("o1", { turnoId: "t1", em: "agora", tokensPensando: 300 });
 
     expect(sinais).toEqual([["o1", { turnoId: "t1", em: "agora", tokensPensando: 300 }]]);
     expect(recebidos).toEqual([]);
   });
 
-  it("não reabre um terminal que foi fechado enquanto esperava", () => {
+  it("não reabre depois que todos os terminais fecharam", () => {
     const { conexoes, fontes } = montar();
     conexoes.sincronizar(new Set(["o1"]));
 
-    fontes[0]?.cair(true);
+    fontes[0]?.cair();
     conexoes.sincronizar(new Set());
     vi.advanceTimersByTime(ESPERA_PARA_REABRIR_MS);
 
