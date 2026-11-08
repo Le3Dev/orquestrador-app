@@ -478,6 +478,8 @@ export interface AcaoDoApp {
    * conferido pelo servidor; nulo deixa a tela escolher. Falta nas mensagens antigas.
    */
   orquestrador?: string | null;
+  /** Nome sugerido (a função) para o orquestrador que a ação criar; nulo usa o do projeto. Falta nas mensagens antigas. */
+  nome?: string | null;
 }
 
 export interface UsoDaResposta {

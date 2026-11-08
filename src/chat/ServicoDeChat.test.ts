@@ -221,6 +221,7 @@ describe("ServicoDeChat", () => {
           pedido: null,
           novo: false,
           orquestrador: null,
+          nome: null,
         },
       ],
       avisos: [],

@@ -52,6 +52,7 @@ describe("separarAcoesDoApp", () => {
           pedido: "rodar os testes",
           novo: false,
           orquestrador: null,
+          nome: null,
         },
       ],
       avisos: [],
@@ -86,6 +87,7 @@ describe("separarAcoesDoApp", () => {
         pedido: null,
         novo: false,
         orquestrador: null,
+        nome: null,
       },
     ]);
   });
@@ -104,6 +106,7 @@ describe("separarAcoesDoApp", () => {
         pedido: "revisar o login",
         novo: true,
         orquestrador: null,
+        nome: null,
       },
     ]);
     expect(avisos).toEqual([]);
@@ -161,6 +164,44 @@ describe("separarAcoesDoApp", () => {
     expect(acoes).toEqual([]);
     expect(avisos).toHaveLength(3);
     expect(avisos[0]).toMatch(/formato inválido/);
+  });
+
+  describe("nome do orquestrador criado", () => {
+    function nomeDa(json: string): string | null | undefined {
+      return separarAcoesDoApp(bloco(json), projetos).acoes[0]?.nome;
+    }
+
+    it("vem limpo, com a função sugerida", () => {
+      expect(nomeDa('{"tipo":"abrir_orquestrador","projeto":"painel-app","novo":true,"nome":"  Correção da memória  "}')).toBe(
+        "Correção da memória",
+      );
+    });
+
+    it("vazio, só espaços, nulo ou ausente vira null", () => {
+      expect(nomeDa('{"tipo":"abrir_orquestrador","projeto":"painel-app","nome":""}')).toBeNull();
+      expect(nomeDa('{"tipo":"abrir_orquestrador","projeto":"painel-app","nome":"   "}')).toBeNull();
+      expect(nomeDa('{"tipo":"abrir_orquestrador","projeto":"painel-app","nome":null}')).toBeNull();
+      expect(nomeDa('{"tipo":"abrir_orquestrador","projeto":"painel-app"}')).toBeNull();
+    });
+
+    it("longo demais é cortado em 60 caracteres, sem descartar a ação", () => {
+      const longo = `PR de integração ${"x".repeat(80)}`;
+      const { acoes, avisos } = separarAcoesDoApp(
+        bloco(`{"tipo":"abrir_orquestrador","projeto":"painel-app","novo":true,"nome":"${longo}"}`),
+        projetos,
+      );
+
+      expect(acoes).toHaveLength(1);
+      expect(acoes[0]?.nome).toBe(longo.slice(0, 60));
+      expect(avisos).toEqual([]);
+    });
+
+    it("nome com tipo errado vira aviso de formato inválido", () => {
+      const { acoes, avisos } = separarAcoesDoApp(bloco('{"tipo":"abrir_orquestrador","projeto":"painel-app","nome":7}'), projetos);
+
+      expect(acoes).toEqual([]);
+      expect(avisos).toEqual(["O Claude sugeriu uma ação do app em formato inválido; ela foi ignorada."]);
+    });
   });
 
   describe("orquestrador indicado", () => {
@@ -255,7 +296,7 @@ describe("mensagemParaOChat", () => {
     expect(mensagem).toContain(`- Painel → ${path.join(raiz, "painel-app")} (ocioso)`);
     expect(mensagem).toContain(
       "```acao-do-app\n" +
-        '{"tipo":"abrir_orquestrador","projeto":"<nome exato da pasta>","orquestrador":"<nome de um orquestrador ocioso do projeto, ou omita>","pedido":"<texto do pedido ou null>","novo":false}\n```',
+        '{"tipo":"abrir_orquestrador","projeto":"<nome exato da pasta>","orquestrador":"<nome de um orquestrador ocioso do projeto, ou omita>","pedido":"<texto do pedido ou null>","novo":false,"nome":"<função do orquestrador criado, ou omita>"}\n```',
     );
     expect(mensagem).toContain('Use "novo":true também quando o usuário pedir explicitamente outro (ou um novo) orquestrador');
     expect(mensagem).toContain("o app reaproveita um orquestrador existente do projeto, de preferência um ocioso");
@@ -310,6 +351,12 @@ describe("mensagemParaOChat", () => {
       "Só mande para um orquestrador ocupado quando o pedido depender do trabalho dele (ex.: commitar o que está na worktree dele)",
     );
     expect(bloco).toContain("avise na resposta que o pedido entra na fila dele");
+  });
+
+  it("regra do nome: ao criar, a função em 2 a 4 palavras; sem função clara, omite", () => {
+    expect(blocoDeContexto(false)).toContain(
+      'Ao criar um orquestrador ("novo":true, ou num projeto sem nenhum), inclua "nome" com a função dele em 2 a 4 palavras (ex.: "Correção da memória", "PR de integração", "Vídeo de venda"); sem função clara, omita o campo.',
+    );
   });
 
   it("o exemplo do bloco de ação no contexto é um bloco válido", () => {

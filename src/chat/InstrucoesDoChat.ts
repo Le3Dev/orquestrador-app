@@ -15,6 +15,9 @@ const MARCA_DO_CONTEXTO = "contexto-do-app";
  * Um bloco ```acao-do-app … ```, inclusive sem o fechamento (até o fim do
  * texto): mesmo malformado, ele sai da resposta.
  */
+/** O limite do nome de um orquestrador no servidor (`TAMANHO_MAXIMO_DO_NOME`). */
+const TAMANHO_MAXIMO_DO_NOME_SUGERIDO = 60;
+
 const BLOCO_DE_ACAO = /[ \t]*```[ \t]*acao-do-app[^\n]*(?:\n([\s\S]*?))?(?:```[ \t]*|$)/g;
 
 const esquemaDaAcao = z.object({
@@ -23,6 +26,15 @@ const esquemaDaAcao = z.object({
   pedido: z.string().nullable().optional(),
   novo: z.boolean().optional(),
   orquestrador: z.string().nullable().optional(),
+  // Cortado em vez de recusado: um nome longo demais não derruba a ação.
+  nome: z
+    .string()
+    .nullable()
+    .optional()
+    .transform((nome) => {
+      const limpo = (nome ?? "").trim().slice(0, TAMANHO_MAXIMO_DO_NOME_SUGERIDO).trim();
+      return limpo === "" ? null : limpo;
+    }),
 });
 
 /** Até quantos caracteres do pedido em andamento entram no bloco de contexto. */
@@ -222,11 +234,12 @@ export function mensagemParaOChat(texto: string, contexto: ContextoDoApp): strin
     "",
     "Ações do app: quando o usuário pedir para abrir ou criar um orquestrador num projeto (opcionalmente com um pedido para ele), responda explicando e inclua UM bloco por ação, exatamente assim:",
     "```" + MARCA_DA_ACAO,
-    '{"tipo":"abrir_orquestrador","projeto":"<nome exato da pasta>","orquestrador":"<nome de um orquestrador ocioso do projeto, ou omita>","pedido":"<texto do pedido ou null>","novo":false}',
+    '{"tipo":"abrir_orquestrador","projeto":"<nome exato da pasta>","orquestrador":"<nome de um orquestrador ocioso do projeto, ou omita>","pedido":"<texto do pedido ou null>","novo":false,"nome":"<função do orquestrador criado, ou omita>"}',
     "```",
     'Para onde vai o pedido: um pedido novo e independente vai para um orquestrador ocioso do projeto (indique o nome dele em "orquestrador", exatamente como na lista); se nenhum do projeto estiver ocioso, use "novo":true. Trabalhando ou aguardando aprovação do plano conta como ocupado.',
     'Só mande para um orquestrador ocupado quando o pedido depender do trabalho dele (ex.: commitar o que está na worktree dele); aí indique-o em "orquestrador" e avise na resposta que o pedido entra na fila dele.',
     'Use "novo":true também quando o usuário pedir explicitamente outro (ou um novo) orquestrador. Sem "orquestrador" e sem "novo", o app reaproveita um orquestrador existente do projeto, de preferência um ocioso.',
+    'Ao criar um orquestrador ("novo":true, ou num projeto sem nenhum), inclua "nome" com a função dele em 2 a 4 palavras (ex.: "Correção da memória", "PR de integração", "Vídeo de venda"); sem função clara, omita o campo.',
     "Diga que o usuário confirma clicando no cartão. Use só projetos e orquestradores da lista acima; nunca invente um projeto.",
     "",
     ...linhasDaRegraDasPerguntas(),
@@ -298,7 +311,8 @@ export function separarAcoesDoApp(
     }
     const novo = lida.data.novo ?? false;
     const orquestrador = novo ? null : orquestradorDaPasta(lida.data.orquestrador, projeto.caminho, orquestradores);
-    acoes.push(abrirOrquestrador(projeto.nome, projeto.caminho, lida.data.pedido ?? null, novo, orquestrador));
+    const pedido = lida.data.pedido ?? null;
+    acoes.push(abrirOrquestrador(projeto.nome, projeto.caminho, pedido, novo, orquestrador, lida.data.nome ?? null));
     return "";
   });
 

@@ -119,8 +119,9 @@ function avisoDeFilaCheia(nome: string): string {
  * se houver, já mandar o pedido para ele). Só acontece no clique. Sem `novo`,
  * reaproveita um Orquestrador da mesma pasta (o indicado pelo Claude, senão
  * um ocioso, senão o usado mais recentemente) ou cria um; com `novo`, cria
- * sempre, com um nome que não se repete na pasta. Quem é criado recebe a
- * configuração padrão. Depois abre o terminal dele no canvas.
+ * sempre. Quem é criado recebe o nome da função sugerido pelo Claude (ou,
+ * sem ele, o do projeto), sem repetir um nome da pasta, e a configuração
+ * padrão. Depois abre o terminal dele no canvas.
  *
  * Antes do clique, mostra o estado de quem vai receber o pedido. Ocupado
  * (trabalhando ou com Plano pendente), o cartão troca o botão por dois:
@@ -139,6 +140,9 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
       ? etapa.orquestrador
       : escolher(daPastaNaTela, acao.orquestrador);
   const ocupado = etapa.tipo === "ocupado" || (escolhido !== undefined && estaOcupado(escolhido));
+  // O nome só vale para quem a ação criar; reaproveitando um existente, fica de lado.
+  const baseDoNome = acao.nome?.trim() || acao.projeto;
+  const nomeSugerido = nomeLivre(baseDoNome, daPastaNaTela.map((item) => item.nome));
   // Fila ou outro: só com um pedido a mandar e enquanto o "abrir" não estiver em curso.
   const oferecerFila =
     !novo &&
@@ -190,7 +194,7 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
       }
       if (orquestrador === undefined) {
         orquestrador = await api.criarOrquestrador({
-          nome: nomeLivre(acao.projeto, daPasta.map((item) => item.nome)),
+          nome: nomeLivre(baseDoNome, daPasta.map((item) => item.nome)),
           pastaDeTrabalho: acao.pasta,
           ...CONFIGURACAO_PADRAO_DO_ORQUESTRADOR,
         });
@@ -226,6 +230,11 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
           {acao.pasta}
         </span>
         {pedido !== null && <span className="texto-longo text-[12px] text-secondary">pedido: {pedido}</span>}
+        {(escolhido === undefined || oferecerFila) && etapa.tipo !== "feito" && (
+          <span className="mono truncate text-[11.5px] text-secondary" title={nomeSugerido} data-testid="nome-sugerido">
+            {oferecerFila ? "se criar outro" : "nome"}: {nomeSugerido}
+          </span>
+        )}
         {escolhido !== undefined && etapa.tipo !== "feito" && (
           <span className="mono truncate text-[11.5px] text-secondary" data-testid="estado-do-escolhido">
             {escolhido.nome}: {descreverEstado(escolhido, new Date())}

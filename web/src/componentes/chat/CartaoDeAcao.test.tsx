@@ -350,6 +350,34 @@ describe("CartaoDeAcao", () => {
       expect(enviar).toHaveBeenCalledWith("o2", "rode os testes");
     });
 
+    it("criar outro usa o nome da função e mostra qual seria", async () => {
+      const ocupado = trabalhando("o1", PASTA);
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue([ocupado]);
+      const criar = vi.spyOn(api, "criarOrquestrador").mockResolvedValue(orquestrador("o2", PASTA));
+      vi.spyOn(api, "enviarMensagem").mockResolvedValue({ turnoId: "t1" });
+      renderizar({ pedido: "abrir o PR", nome: "PR de integração" }, undefined, [ocupado]);
+
+      expect(screen.getByTestId("nome-sugerido")).toHaveTextContent("se criar outro: PR de integração");
+      fireEvent.click(screen.getByRole("button", { name: "Criar outro" }));
+
+      await screen.findByRole("button", { name: "aberto ✓" });
+      expect(criar).toHaveBeenCalledWith(expect.objectContaining({ nome: "PR de integração" }));
+    });
+
+    it("reaproveitando um existente, ignora o nome sugerido", async () => {
+      const existente = orquestrador("o1", PASTA);
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue([existente]);
+      const criar = vi.spyOn(api, "criarOrquestrador");
+      const { aoAbrirTerminal } = renderizar({ nome: "Vídeo de venda" }, undefined, [existente]);
+
+      expect(screen.queryByTestId("nome-sugerido")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "abrir" }));
+
+      await screen.findByRole("button", { name: "aberto ✓" });
+      expect(aoAbrirTerminal).toHaveBeenCalledWith("o1");
+      expect(criar).not.toHaveBeenCalled();
+    });
+
     it("criar outro respeita o limite de terminais do canvas", async () => {
       const ocupado = trabalhando("o1", PASTA);
       vi.spyOn(api, "listarOrquestradores").mockResolvedValue([ocupado]);
@@ -440,6 +468,31 @@ describe("CartaoDeAcao", () => {
 
       await screen.findByRole("button", { name: "aberto ✓" });
       expect(criar).toHaveBeenCalledWith(expect.objectContaining({ nome: "painel 3" }));
+    });
+
+    it("cria com o nome da função sugerido pelo Claude e o mostra antes do clique", async () => {
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue([]);
+      const criar = vi.spyOn(api, "criarOrquestrador").mockResolvedValue(orquestrador("o1", "C:\\Projetos\\Painel"));
+      renderizar({ novo: true, nome: "Correção da memória" });
+
+      expect(screen.getByTestId("nome-sugerido")).toHaveTextContent("nome: Correção da memória");
+      fireEvent.click(screen.getByRole("button", { name: "criar" }));
+
+      await screen.findByRole("button", { name: "aberto ✓" });
+      expect(criar).toHaveBeenCalledWith(expect.objectContaining({ nome: "Correção da memória" }));
+    });
+
+    it("com o nome da função já usado na pasta, desambigua com 2", async () => {
+      const existente = { ...orquestrador("o1", "C:\\Projetos\\Painel"), nome: "correção da memória" };
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue([existente]);
+      const criar = vi.spyOn(api, "criarOrquestrador").mockResolvedValue(orquestrador("o2", "C:\\Projetos\\Painel"));
+      renderizar({ novo: true, nome: "Correção da memória" }, undefined, [existente]);
+
+      expect(screen.getByTestId("nome-sugerido")).toHaveTextContent("nome: Correção da memória 2");
+      fireEvent.click(screen.getByRole("button", { name: "criar" }));
+
+      await screen.findByRole("button", { name: "aberto ✓" });
+      expect(criar).toHaveBeenCalledWith(expect.objectContaining({ nome: "Correção da memória 2" }));
     });
 
     it("sem vaga no canvas, não cria e mostra o aviso do limite", async () => {

@@ -8,7 +8,9 @@
  *   projeto, opcionalmente já com um pedido para ele. Sem `novo`, reaproveita
  *   um orquestrador que já existe na pasta (o indicado em `orquestrador`, ou
  *   um que esteja livre) e só cria se não houver nenhum; com `novo: true`,
- *   cria outro orquestrador no mesmo projeto.
+ *   cria outro orquestrador no mesmo projeto. `nome` é a função sugerida
+ *   para o orquestrador que for criado (ex.: "Correção da memória"); quem
+ *   reaproveita um existente o ignora.
  */
 export interface AcaoDoApp {
   readonly tipo: "abrir_orquestrador";
@@ -24,6 +26,8 @@ export interface AcaoDoApp {
    * pedido, já conferido pelo servidor; nulo para a tela escolher.
    */
   readonly orquestrador: string | null;
+  /** Nome sugerido (a função dele) para o orquestrador que a ação criar; nulo usa o nome do projeto. */
+  readonly nome: string | null;
 }
 
 export function abrirOrquestrador(
@@ -32,6 +36,7 @@ export function abrirOrquestrador(
   pedido: string | null,
   novo = false,
   orquestrador: string | null = null,
+  nome: string | null = null,
 ): AcaoDoApp {
   const pedidoLimpo = pedido === null ? null : pedido.trim();
   return Object.freeze({
@@ -41,5 +46,6 @@ export function abrirOrquestrador(
     pedido: pedidoLimpo === null || pedidoLimpo === "" ? null : pedidoLimpo,
     novo,
     orquestrador,
+    nome,
   });
 }
