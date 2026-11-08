@@ -2490,8 +2490,8 @@ html.modo-invisivel .barra-de-titulo * {
 .fundo-que-esmaece { animation: esmaecer-fundo var(--tempo-de-surgir) ease-out backwards; }
 /* O canvas em movimento e o servidor fora pausam as animações (acima): a
  * entrada ficaria congelada no começo, invisível. O que surge vai até o fim. */
-.canvas-movendo .react-flow__node :is(.surgir, .menu-da-criacao, .menu-de-versoes, .painel-da-configuracao),
-.canvas-desconectado .chat-rapido :is(.surgir, .menu-do-seletor, .submenu-do-seletor, .menu-da-criacao) {
+.canvas-movendo .react-flow__node :is(.surgir, .menu-de-versoes, .painel-da-configuracao),
+.canvas-desconectado .chat-rapido :is(.surgir, .menu-do-seletor, .submenu-do-seletor) {
   animation-play-state: running !important;
 }
 
@@ -2937,132 +2937,172 @@ html.modo-invisivel .barra-de-titulo * {
 
 .select-compacto { width: 118px; height: 32px; padding: 0 30px 0 12px; font-family: var(--fonte-titulo); font-size: 12.5px; font-weight: 500; background-color: var(--screen-bg); background-position: right 10px center; }
 
-/* Chip de ajuste (esforço, quantidade): laranja quando sai do padrão, com o × que volta. */
-.chip-de-ajuste {
-  display: inline-flex;
-  align-items: center;
-  min-width: 0;
-  height: 32px;
-  border-radius: 16px;
-  border: 1px solid var(--border);
-  overflow: hidden;
-  color: var(--secondary);
-  transition: color .12s, border-color .12s, background .12s;
-}
-.chip-de-ajuste:hover { color: var(--primary); border-color: color-mix(in srgb, var(--primary) 24%, transparent); }
-.chip-de-ajuste:has([aria-expanded="true"]) { border-color: color-mix(in srgb, var(--primary) 24%, transparent); }
-.chip-de-ajuste-personalizado,
-.chip-de-ajuste-personalizado:hover {
-  border-color: color-mix(in srgb, var(--active) 45%, transparent);
-  background: color-mix(in srgb, var(--active) 10%, transparent);
-  color: color-mix(in srgb, var(--active) 70%, var(--claude-claro));
-}
-.chip-de-ajuste-botao {
+/* Menu de modelo e esforço (MenuDeModelo): botão-resumo na linha e menu num
+ * portal em document.body (position: fixed, top/left inline) — o mesmo visual
+ * do menu do chat rápido. */
+.menu-de-modelo { display: inline-flex; min-width: 0; max-width: 100%; }
+.menu-de-modelo-botao {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  max-width: 100%;
   height: 30px;
-  padding: 0 12px 0 11px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font-size: 12px;
+  padding: 0 10px;
+  border: 1px solid var(--border-forte);
+  border-radius: 8px;
+  background: var(--screen-bg);
+  color: var(--primary);
+  font-family: var(--fonte-titulo);
+  font-size: 12.5px;
   white-space: nowrap;
   cursor: pointer;
+  transition: background .12s, border-color .12s;
 }
-.chip-de-ajuste-botao svg { color: inherit; }
-.chip-de-ajuste-personalizado .chip-de-ajuste-botao { padding-right: 6px; }
-.chip-de-ajuste-limpar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 30px;
-  border: 0;
-  border-left: 1px solid color-mix(in srgb, var(--active) 30%, transparent);
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-.chip-de-ajuste-botao:focus-visible, .chip-de-ajuste-limpar:focus-visible { outline: 2px solid var(--active); outline-offset: -2px; border-radius: 16px; }
-.menu-da-criacao {
-  position: absolute;
-  top: 38px;
-  z-index: 6;
-  padding: 4px;
-  border-radius: var(--radius-input);
-  border: 1px solid var(--border-forte);
+.menu-de-modelo-botao:hover, .menu-de-modelo-botao[aria-expanded="true"] {
   background: var(--surface-3);
-  box-shadow: 0 14px 36px rgba(0, 0, 0, .5);
-  /* Desce do chip: cresce do canto de cima do lado em que está preso. */
+  border-color: color-mix(in srgb, var(--primary) 28%, transparent);
+}
+.menu-de-modelo-botao:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.menu-de-modelo-nome { font-weight: 500; flex: none; }
+.menu-de-modelo-detalhe {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--secondary);
+  font-family: var(--fonte-texto);
+  font-weight: 400;
+}
+/* Fora do padrão: o detalhe fica laranja suave. */
+.menu-de-modelo-detalhe-personalizado { color: color-mix(in srgb, var(--active) 75%, var(--claude-claro)); }
+.menu-de-modelo-seta { flex: none; color: var(--muted); font-size: 10px; }
+
+.menu-de-modelo-lista {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--border-forte);
+  border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7);
+  color: var(--primary);
+  font-family: var(--fonte-texto);
+  cursor: default;
   transform-origin: top left;
   animation: surgir-mola var(--tempo-de-surgir) var(--curva-de-mola) backwards;
 }
-.menu-da-criacao.right-0 { transform-origin: top right; }
-.opcao-do-menu {
+.menu-de-modelo-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
   width: 100%;
-  height: 30px;
-  padding: 0 10px;
+  padding: 7px 10px;
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: var(--secondary);
-  font-size: 12.5px;
+  color: inherit;
   text-align: left;
   cursor: pointer;
 }
-.opcao-do-menu:hover { background: color-mix(in srgb, var(--primary) 6%, transparent); color: var(--primary); }
-.opcao-do-menu[aria-selected="true"] { background: color-mix(in srgb, var(--active) 16%, transparent); color: var(--primary); font-weight: 600; }
-.opcao-do-menu:focus-visible { outline: 2px solid var(--active); outline-offset: -2px; }
-.segmentado-do-menu {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-input);
-  background: var(--screen-bg);
-}
-.segmentado-do-menu button {
+.menu-de-modelo-item:hover, .menu-de-modelo-item:focus-visible { background: var(--surface-3); outline: none; }
+.menu-de-modelo-item:focus-visible { outline: 2px solid var(--active); outline-offset: -2px; }
+.menu-de-modelo-texto { display: flex; min-width: 0; flex-direction: column; }
+.menu-de-modelo-titulo { font-family: var(--fonte-titulo); font-size: 12.5px; font-weight: 500; color: var(--primary); }
+.menu-de-modelo-descricao { font-size: 11px; color: var(--secondary); }
+.menu-de-modelo-marca { width: 14px; flex-shrink: 0; color: var(--info); text-align: center; }
+.menu-de-modelo-valor { display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--secondary); font-size: 12px; }
+.menu-de-modelo-separador { margin: 4px 6px; border: 0; border-top: 1px solid var(--border); }
+.menu-de-modelo-cabecalho { display: flex; align-items: center; gap: 8px; padding: 4px 4px 6px; }
+.menu-de-modelo-voltar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   height: 28px;
-  border: 1px solid transparent;
+  padding: 0 8px;
+  border: 0;
   border-radius: 6px;
   background: transparent;
   color: var(--secondary);
-  font-family: var(--fonte-titulo);
-  font-size: 12px;
-  font-weight: 500;
   cursor: pointer;
 }
-.segmentado-do-menu button:hover { color: var(--primary); }
-.segmentado-do-menu button[aria-pressed="true"] { border-color: var(--border-forte); background: var(--surface-3); color: var(--primary); font-weight: 600; }
-.segmentado-do-menu button:focus-visible, .passo-numerico button:focus-visible { outline: 2px solid var(--active); outline-offset: -2px; }
-.passo-numerico {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  border: 1px solid var(--border-forte);
-  border-radius: var(--radius-input);
-  overflow: hidden;
+.menu-de-modelo-voltar:hover { background: var(--surface-3); color: var(--primary); }
+.menu-de-modelo-voltar:focus-visible { outline: 2px solid var(--active); outline-offset: -2px; }
+/* Celular: o menu vira folha presa embaixo (top/left vêm inline, por isso !important). */
+.menu-de-modelo-folha {
+  left: 0 !important;
+  right: 0;
+  bottom: 0;
+  top: auto !important;
+  width: auto;
+  max-width: none;
+  max-height: 75vh;
+  border-radius: 14px 14px 0 0;
+  transform-origin: bottom center;
+}
+
+/* Quantidade de subagentes (QuantidadeDeSubagentes): modos lado a lado, como o
+ * segmentado, e o passo numérico (− n +) ao lado, quebrando de linha se faltar. */
+.quantidade-de-subagentes { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px 12px; }
+.quantidade-de-subagentes-modos {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 3px;
+  min-width: 0;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
   background: var(--screen-bg);
 }
-.passo-numerico > span { min-width: 30px; text-align: center; }
-.passo-numerico button {
-  width: 32px;
-  height: 30px;
-  border: 0;
-  background: transparent;
+.quantidade-de-subagentes-opcao {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
   color: var(--secondary);
-  font-size: 14px;
   cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s;
 }
-.passo-numerico button:not(:disabled):hover { background: var(--surface-3); color: var(--primary); }
-.passo-numerico button:disabled { opacity: .35; cursor: not-allowed; }
+.quantidade-de-subagentes-opcao input { position: absolute; opacity: 0; pointer-events: none; }
+.quantidade-de-subagentes-opcao:hover { color: var(--primary); }
+.quantidade-de-subagentes-opcao:has(input:checked) {
+  border-color: color-mix(in srgb, var(--active) 55%, transparent);
+  background: color-mix(in srgb, var(--active) 16%, var(--surface-3));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--active) 55%, transparent);
+  color: var(--primary);
+}
+.quantidade-de-subagentes-opcao:has(input:focus-visible) { outline: 2px solid var(--active); outline-offset: 1px; }
+.quantidade-de-subagentes-titulo { font-family: var(--fonte-titulo); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.quantidade-de-subagentes-descricao {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.quantidade-de-subagentes-passo { display: inline-flex; align-items: center; gap: 5px; }
+.quantidade-de-subagentes-rotulo { font-family: var(--fonte-titulo); font-size: 11.5px; color: var(--secondary); white-space: nowrap; }
+.quantidade-de-subagentes-numero {
+  width: 44px;
+  height: 28px;
+  padding: 0;
+  text-align: center;
+  font-family: var(--fonte-mono);
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.quantidade-de-subagentes-numero::-webkit-inner-spin-button,
+.quantidade-de-subagentes-numero::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 
 /* Interruptor (role="switch"): trilho com a bolinha; laranja quando ligado e valendo. */
 .interruptor {
@@ -3122,21 +3162,60 @@ html.modo-invisivel .barra-de-titulo * {
  * permissão quebram de linha em vez de cortar o texto. */
 .painel-da-configuracao {
   display: flex;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
-  max-height: 70%;
+  /* Ocupa a altura do terminal (nunca passa dela): o corpo rola, o rodapé fica fixo. */
+  max-height: 100%;
   border-bottom: 1px solid var(--border);
   /* Abre logo abaixo da barra do terminal: cresce do topo. */
   transform-origin: top center;
   animation: surgir-mola var(--tempo-de-surgir) var(--curva-de-mola) backwards;
 }
-.corpo-da-configuracao { flex: 0 1 auto; }
+/* Corpo compacto: rola sozinho; as linhas (wrapper) esticam para sobrar espaço
+ * às instruções, mas nunca encolhem abaixo do conteúdo. */
+.corpo-da-configuracao {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 20px 4px;
+}
+.linhas-da-configuracao { flex: 1 1 auto; display: flex; flex-direction: column; }
 @container (max-width: 620px) {
   .corpo-da-configuracao .linha-da-criacao { grid-template-columns: minmax(0, 1fr); }
+  .corpo-da-configuracao .linha-instrucoes { grid-template-rows: auto minmax(0, 1fr); }
 }
-.corpo-da-configuracao .permissoes-da-criacao { flex-wrap: wrap; }
-.rodape-da-configuracao { flex: none; }
+/* Espaçamento compacto só aqui; o cartão de criação segue como está. */
+.corpo-da-configuracao .linha-da-criacao { padding: 7px 0; row-gap: 4px; }
+.corpo-da-configuracao .permissoes-da-criacao { flex-wrap: wrap; gap: 3px; }
+.corpo-da-configuracao .opcao-da-permissao { height: 28px; gap: 5px; }
+.corpo-da-configuracao .btn-sm { height: 26px; }
+/* Instruções: a linha toma o espaço que sobra e o campo cresce com ela. */
+.corpo-da-configuracao .linha-instrucoes { flex: 1 1 auto; align-items: stretch; }
+.corpo-da-configuracao .instrucoes-da-criacao {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 60px;
+  resize: none;
+  overflow-y: auto;
+}
+.rodape-da-configuracao { flex: none; padding: 8px 14px 8px 20px; gap: 8px; }
+.rodape-da-configuracao .btn,
+.rodape-da-configuracao .botao-de-comecar { height: 32px; }
+
+/* Toque: alvos de pelo menos 40–44px. */
+@media (pointer: coarse) {
+  .menu-de-modelo-botao, .menu-de-modelo-item { min-height: 44px; }
+  .quantidade-de-subagentes-opcao,
+  .quantidade-de-subagentes-passo .btn,
+  .quantidade-de-subagentes-numero { min-height: 40px; }
+  .quantidade-de-subagentes-passo .btn { min-width: 40px; }
+  .corpo-da-configuracao .opcao-da-permissao,
+  .corpo-da-configuracao .btn-sm { height: 40px; }
+  .corpo-da-configuracao .instrucoes-da-criacao { font-size: 16px; }
+}
 
 /* ── Melhorar o pedido (✨) ─────────────────────────────────────────────── */
 /* Melhorando, o campo fica travado (readOnly) e esmaecido até o texto novo chegar. */

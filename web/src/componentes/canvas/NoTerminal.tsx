@@ -294,7 +294,7 @@ export function PainelDeConfiguracao({
     <div className="painel-da-configuracao nodrag">
       <div className="corpo-do-terminal corpo-da-criacao corpo-da-configuracao custom-scrollbar nodrag nowheel">
         <span className="rotulo-tecnico">configuração · vale a partir do próximo pedido</span>
-        <div className="mt-2.5">
+        <div className="linhas-da-configuracao mt-2.5">
           <CamposDaConfiguracao
             valor={configuracao}
             aoMudar={setConfiguracao}
