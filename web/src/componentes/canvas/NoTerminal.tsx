@@ -252,9 +252,48 @@ function camposAlterados(antes: DadosDaConfiguracao, depois: DadosDaConfiguracao
   return alterados;
 }
 
+function palavras(texto: string): string[] {
+  return texto
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((palavra) => palavra !== "");
+}
+
+/**
+ * Se as instruções foram apagadas ou mudaram mais da metade: menos da metade
+ * das palavras de `antes` continua em `depois` (contando as repetidas).
+ * Acrescentar texto ou corrigir uma palavra não conta; instruções que não
+ * existiam também não, porque nada antigo fica pesando no histórico.
+ */
+function instrucoesMudaramMuito(antes: string, depois: string): boolean {
+  const deAntes = palavras(antes);
+  if (deAntes.length === 0) {
+    return false;
+  }
+  const restantes = new Map<string, number>();
+  for (const palavra of palavras(depois)) {
+    restantes.set(palavra, (restantes.get(palavra) ?? 0) + 1);
+  }
+  let mantidas = 0;
+  for (const palavra of deAntes) {
+    const quantas = restantes.get(palavra) ?? 0;
+    if (quantas > 0) {
+      mantidas += 1;
+      restantes.set(palavra, quantas - 1);
+    }
+  }
+  return mantidas * 2 < deAntes.length;
+}
+
 interface PropsDaConfiguracao {
   orquestrador: ResumoDoOrquestrador;
   trabalhando: boolean;
+  /**
+   * Se a conversa atual já tem pedidos: com as instruções apagadas ou muito
+   * mudadas, o rodapé sugere salvar e começar uma conversa nova, porque as
+   * antigas continuam no histórico.
+   */
+  conversaComTurnos?: boolean;
   aoFechar: () => void;
   /** Começa uma conversa nova (o mesmo que "/clear"); lança o erro do servidor, se houver. */
   aoLimparConversa: () => Promise<void>;
@@ -265,6 +304,7 @@ interface PropsDaConfiguracao {
 export function PainelDeConfiguracao({
   orquestrador,
   trabalhando,
+  conversaComTurnos = false,
   aoFechar,
   aoLimparConversa,
   tamanhoDaLetra,
@@ -350,7 +390,31 @@ export function PainelDeConfiguracao({
     }
   }
 
+  /**
+   * O aviso das instruções muito mudadas: salva o que mudou e segue o fluxo da
+   * Nova conversa (confirmação antes de tudo; recusada, nada é salvo).
+   */
+  async function salvarEComecarConversaNova(): Promise<void> {
+    if (!window.confirm("Salvar e começar uma conversa nova? A conversa atual será arquivada.")) {
+      return;
+    }
+    setErro(null);
+    setSalvando(true);
+    try {
+      await api.alterarConfiguracao(orquestrador.id, camposAlterados(configuracaoDeOrigem, configuracao));
+      await aoLimparConversa();
+      aoFechar();
+    } catch (falha) {
+      setErro(mensagemDeErro(falha));
+    } finally {
+      setSalvando(false);
+    }
+  }
+
   const passouDoLimite = tamanhoDasInstrucoes(configuracao.instrucoesPersonalizadas) > TAMANHO_MAXIMO_DAS_INSTRUCOES;
+  const sugerirConversaNova =
+    conversaComTurnos &&
+    instrucoesMudaramMuito(configuracaoDeOrigem.instrucoesPersonalizadas, configuracao.instrucoesPersonalizadas);
 
   // As mesmas linhas e o mesmo rodapé do cartão de criação (NoRascunho).
   return (
@@ -412,6 +476,29 @@ export function PainelDeConfiguracao({
               <IconeAlerta tamanho={15} className="shrink-0" />
               Encurte as instruções para salvar.
             </span>
+          ) : sugerirConversaNova ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <span
+                className="flex min-w-0 items-center gap-1.5 text-[12px] text-warning"
+                title="O Claude ainda vê no histórico desta conversa as instruções de antes. Numa conversa nova, só valem as novas."
+              >
+                <IconeAlerta tamanho={14} className="shrink-0" />
+                <span className="truncate">As instruções antigas seguem no histórico.</span>
+              </span>
+              <button
+                type="button"
+                className="btn btn-sm btn-outline shrink-0"
+                onClick={() => void salvarEComecarConversaNova()}
+                disabled={salvando || trabalhando}
+                title={
+                  trabalhando
+                    ? "Cancele o pedido em andamento antes de começar uma conversa nova."
+                    : "Salva a configuração e arquiva a conversa atual (o mesmo que /clear no prompt)."
+                }
+              >
+                Salvar e começar conversa nova
+              </button>
+            </div>
           ) : (
             <span className="truncate text-[12.5px] text-primary" title={resumoDaConfiguracao(configuracao)}>
               {resumoDaConfiguracao(configuracao)}
@@ -995,6 +1082,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
           <PainelDeConfiguracao
             orquestrador={orquestrador}
             trabalhando={trabalhando}
+            conversaComTurnos={conversa.turnos.length > 0}
             aoFechar={() => setConfigurando(false)}
             aoLimparConversa={iniciarConversaNova}
             tamanhoDaLetra={tamanhoDaLetra}

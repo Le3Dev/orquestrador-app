@@ -79,8 +79,9 @@ function orquestrador(alteracoes: Partial<DadosDaConfiguracao> = {}): ResumoDoOr
   };
 }
 
-function renderizar(resumo: ResumoDoOrquestrador, { trabalhando = false } = {}) {
+function renderizar(resumo: ResumoDoOrquestrador, { trabalhando = false, conversaComTurnos = false } = {}) {
   const aoFechar = vi.fn();
+  const aoLimparConversa = vi.fn(async () => undefined);
   const canvas: ValorDoCanvas = {
     orquestradores: new Map([[resumo.id, resumo]]),
     conversas: new Map(),
@@ -107,12 +108,18 @@ function renderizar(resumo: ResumoDoOrquestrador, { trabalhando = false } = {}) 
       <PainelDeConfiguracao
         orquestrador={resumo}
         trabalhando={trabalhando}
+        conversaComTurnos={conversaComTurnos}
         aoFechar={aoFechar}
-        aoLimparConversa={vi.fn(async () => undefined)}
+        aoLimparConversa={aoLimparConversa}
       />
     </ContextoDoCanvas.Provider>,
   );
-  return { aoFechar, acoes: canvas.acoes, opcao: screen.getByRole("switch", { name: "Commit e push quando eu pedir" }) };
+  return {
+    aoFechar,
+    aoLimparConversa,
+    acoes: canvas.acoes,
+    opcao: screen.getByRole("switch", { name: "Commit e push quando eu pedir" }),
+  };
 }
 
 const chipDoEsforco = (dono: "do orquestrador" | "dos subagentes") =>
@@ -178,6 +185,80 @@ describe("PainelDeConfiguracao", () => {
     await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
     expect(alterar).toHaveBeenCalledWith("o1", {
       instrucoesPersonalizadas: "Sempre comece a resposta com a palavra PIRULITO.",
+    });
+  });
+
+  describe("instruções apagadas ou muito mudadas com a conversa em andamento", () => {
+    const INSTRUCOES = "Use Jest nos testes e escreva as mensagens de commit em português.";
+    const sugestao = () => screen.queryByRole("button", { name: "Salvar e começar conversa nova" });
+
+    it("apagadas: o rodapé avisa e oferece salvar e começar conversa nova, depois de confirmar", async () => {
+      const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+      const confirmar = vi.spyOn(window, "confirm").mockReturnValue(true);
+      const { aoFechar, aoLimparConversa } = renderizar(orquestrador({ instrucoesPersonalizadas: INSTRUCOES }), {
+        conversaComTurnos: true,
+      });
+      expect(sugestao()).not.toBeInTheDocument();
+
+      fireEvent.change(campoDasInstrucoes(), { target: { value: "" } });
+      expect(screen.getByText("As instruções antigas seguem no histórico.")).toBeInTheDocument();
+      fireEvent.click(sugestao() as HTMLElement);
+
+      await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+      expect(confirmar).toHaveBeenCalledWith("Salvar e começar uma conversa nova? A conversa atual será arquivada.");
+      expect(alterar).toHaveBeenCalledWith("o1", { instrucoesPersonalizadas: "" });
+      expect(aoLimparConversa).toHaveBeenCalledTimes(1);
+      expect(alterar.mock.invocationCallOrder[0]).toBeLessThan(aoLimparConversa.mock.invocationCallOrder[0] ?? 0);
+    });
+
+    it("trocadas por outras: também avisa; recusada a confirmação, nada é salvo", () => {
+      const alterar = vi.spyOn(api, "alterarConfiguracao");
+      vi.spyOn(window, "confirm").mockReturnValue(false);
+      const { aoFechar, aoLimparConversa } = renderizar(orquestrador({ instrucoesPersonalizadas: INSTRUCOES }), {
+        conversaComTurnos: true,
+      });
+
+      fireEvent.change(campoDasInstrucoes(), { target: { value: "Responda sempre em inglês, sem rodeios." } });
+      fireEvent.click(sugestao() as HTMLElement);
+
+      expect(alterar).not.toHaveBeenCalled();
+      expect(aoLimparConversa).not.toHaveBeenCalled();
+      expect(aoFechar).not.toHaveBeenCalled();
+    });
+
+    it("acréscimo ou correção pequena não avisa, e o Salvar continua só salvando", async () => {
+      const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+      const { aoFechar, aoLimparConversa } = renderizar(orquestrador({ instrucoesPersonalizadas: INSTRUCOES }), {
+        conversaComTurnos: true,
+      });
+
+      fireEvent.change(campoDasInstrucoes(), { target: { value: `${INSTRUCOES} Rode o lint antes de entregar.` } });
+      expect(sugestao()).not.toBeInTheDocument();
+      fireEvent.change(campoDasInstrucoes(), { target: { value: INSTRUCOES.replace("Jest", "Vitest") } });
+      expect(sugestao()).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+      await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+      expect(alterar).toHaveBeenCalledWith("o1", { instrucoesPersonalizadas: INSTRUCOES.replace("Jest", "Vitest") });
+      expect(aoLimparConversa).not.toHaveBeenCalled();
+    });
+
+    it("sem pedidos na conversa, ou sem instruções antes, não avisa", () => {
+      renderizar(orquestrador({ instrucoesPersonalizadas: INSTRUCOES }));
+      fireEvent.change(campoDasInstrucoes(), { target: { value: "" } });
+      expect(sugestao()).not.toBeInTheDocument();
+    });
+
+    it("instruções novas, onde não havia nenhuma, não avisam", () => {
+      renderizar(orquestrador(), { conversaComTurnos: true });
+      fireEvent.change(campoDasInstrucoes(), { target: { value: INSTRUCOES } });
+      expect(sugestao()).not.toBeInTheDocument();
+    });
+
+    it("durante um pedido, o botão fica desabilitado", () => {
+      renderizar(orquestrador({ instrucoesPersonalizadas: INSTRUCOES }), { conversaComTurnos: true, trabalhando: true });
+      fireEvent.change(campoDasInstrucoes(), { target: { value: "" } });
+      expect(sugestao()).toBeDisabled();
     });
   });
 
@@ -626,6 +707,22 @@ describe("NoTerminal · conversa nova", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("✗ Orquestrador não encontrado.");
     expect(screen.getByRole("button", { name: "Nova conversa" })).toBeInTheDocument();
+  });
+
+  it("instruções apagadas no ⚙ com pedidos na conversa: 'Salvar e começar conversa nova' salva e limpa", async () => {
+    const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+    const limpar = vi.spyOn(api, "limparConversa").mockResolvedValue(orquestrador());
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const resumo = orquestrador({ instrucoesPersonalizadas: "Responda sempre em tópicos curtos." });
+    render(<Terminal canvas={canvasDoTerminal(conversaOciosa(), resumo)} no={propsDoNo()} />);
+    fireEvent.click(screen.getByTitle("Configurar"));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Instruções" }), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar e começar conversa nova" }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Nova conversa" })).not.toBeInTheDocument());
+    expect(alterar).toHaveBeenCalledWith("o1", { instrucoesPersonalizadas: "" });
+    expect(limpar).toHaveBeenCalledWith("o1");
   });
 });
 
