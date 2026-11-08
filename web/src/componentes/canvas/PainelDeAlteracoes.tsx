@@ -341,7 +341,7 @@ export const PainelDeAlteracoes = memo(function PainelDeAlteracoes({
   return createPortal(
     <div
       data-testid="fundo-do-painel-de-alteracoes"
-      className="nokey fixed inset-0 z-50 flex items-center justify-center bg-screen-bg/60 p-6"
+      className="nokey fundo-que-esmaece fixed inset-0 z-50 flex items-center justify-center bg-screen-bg/60 p-6"
       onMouseDown={aoPressionarOFundo}
       onKeyDown={aoTeclar}
       onKeyUp={naoPropagar}
@@ -360,7 +360,7 @@ export const PainelDeAlteracoes = memo(function PainelDeAlteracoes({
         aria-modal="true"
         aria-labelledby={idDoTitulo}
         tabIndex={-1}
-        className="painel-flutuante flex h-full max-h-[760px] w-full max-w-[1100px] flex-col overflow-hidden outline-none"
+        className="painel-flutuante surgir flex h-full max-h-[760px] w-full max-w-[1100px] flex-col overflow-hidden outline-none"
       >
         <div className="flex items-center gap-2.5 border-b border-border px-4 py-2.5">
           <h2 id={idDoTitulo} className="shrink-0">

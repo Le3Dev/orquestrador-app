@@ -57,11 +57,13 @@ describe("BarraDeTituloDoApp", () => {
     const direita = barra.querySelector(".direita-da-barra-de-titulo");
     expect(direita).toBe(barra.lastElementChild);
     const controles = within(barra).getByRole("group", { name: "Controles da janela" });
-    const ajustes = within(barra).getByRole("button", { name: "Pastas e Claude Code" });
+    const configuracoes = within(barra).getByRole("button", { name: "Configurações" });
     expect(direita?.firstElementChild).toBe(status);
     const botoes = status.nextElementSibling;
     expect(botoes).toHaveClass("botoes-da-barra-de-titulo");
-    expect(botoes?.firstElementChild).toBe(ajustes);
+    // O ⚙ vai numa âncora (o painel abre ancorado nele), também fora do arraste.
+    expect(botoes?.firstElementChild).toBe(configuracoes.parentElement);
+    expect(configuracoes.parentElement).toHaveClass("ancora-do-menu", "no-drag");
     expect(botoes?.lastElementChild).toBe(controles);
     expect(within(controles).getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual([
       "Minimizar",
@@ -91,25 +93,48 @@ describe("BarraDeTituloDoApp", () => {
     expect(aoBuscar).toHaveBeenCalledTimes(1);
   });
 
-  it("o ⚙ (só ícone, no-drag) reabre os ajustes de pastas e Claude Code", () => {
+  const botaoDeConfiguracoes = () => screen.getByRole("button", { name: "Configurações" });
+
+  it("o ⚙ (só ícone, no-drag) abre o painel Configurações: seção Tela e \"Pastas e Claude Code…\", que abre os Ajustes", () => {
     const abrirAjustes = vi.fn().mockResolvedValue(undefined);
     ponteDoDesktop(abrirAjustes);
     renderizar();
-    const ajustes = screen.getByRole("button", { name: "Pastas e Claude Code" });
 
-    expect(ajustes).toHaveTextContent("⚙");
-    expect(ajustes).toHaveAttribute("title", "Pastas e Claude Code");
-    expect(ajustes).toHaveClass("no-drag");
-    fireEvent.click(ajustes);
+    expect(botaoDeConfiguracoes()).toHaveTextContent("⚙");
+    expect(botaoDeConfiguracoes()).toHaveAttribute("title", "Configurações: tela, pastas e Claude Code");
+    expect(botaoDeConfiguracoes()).toHaveClass("no-drag");
+    expect(botaoDeConfiguracoes()).toHaveAttribute("aria-haspopup", "menu");
+    fireEvent.click(botaoDeConfiguracoes());
+
+    const painel = screen.getByRole("menu", { name: "Configurações" });
+    expect(painel).toHaveClass("painel-de-configuracoes-direita", "no-drag");
+    expect(within(painel).getByRole("group", { name: "Tela" })).toBeInTheDocument();
+    expect(within(painel).getByRole("menuitemcheckbox", { name: /Chat fixo à esquerda/ })).toHaveFocus();
+    expect(abrirAjustes).not.toHaveBeenCalled();
+
+    fireEvent.click(within(painel).getByRole("menuitem", { name: "Pastas e Claude Code…" }));
 
     expect(abrirAjustes).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("Esc fecha o painel e devolve o foco ao ⚙", () => {
+    ponteDoDesktop(vi.fn().mockResolvedValue(undefined));
+    renderizar();
+    fireEvent.click(botaoDeConfiguracoes());
+
+    fireEvent.keyDown(screen.getByRole("menuitemcheckbox", { name: /Chat fixo à esquerda/ }), { key: "Escape" });
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(botaoDeConfiguracoes()).toHaveFocus();
   });
 
   it("mostra a mensagem quando os ajustes não abrem, e o ✕ dela fecha", async () => {
     ponteDoDesktop(vi.fn().mockRejectedValue(new Error("janela ocupada")));
     renderizar();
 
-    fireEvent.click(screen.getByRole("button", { name: "Pastas e Claude Code" }));
+    fireEvent.click(botaoDeConfiguracoes());
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pastas e Claude Code…" }));
 
     const alerta = await screen.findByRole("alert");
     expect(alerta).toHaveTextContent("Não foi possível abrir os ajustes de pastas: janela ocupada");
@@ -118,11 +143,15 @@ describe("BarraDeTituloDoApp", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("sem a API dos Ajustes, não desenha o ⚙", () => {
+  it("sem a API dos Ajustes, o ⚙ continua (preferências da tela), mas sem \"Pastas e Claude Code…\"", () => {
     ponteDoDesktop();
     renderizar();
 
-    expect(screen.queryByRole("button", { name: "Pastas e Claude Code" })).not.toBeInTheDocument();
+    fireEvent.click(botaoDeConfiguracoes());
+
+    // Os dois da Tela e a Autorrecuperação dos orquestradores.
+    expect(screen.getAllByRole("menuitemcheckbox")).toHaveLength(3);
+    expect(screen.queryByRole("menuitem", { name: /Pastas e Claude Code/ })).not.toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Controles da janela" })).toBeInTheDocument();
   });
 
@@ -203,9 +232,30 @@ describe("BarraDeTituloDoApp", () => {
     });
   });
 
-  it("no navegador (sem a ponte), não desenha botões de janela nem o ⚙", () => {
+  it("no Mac, deixa as bolinhas nativas à esquerda e não desenha os botões ─ ☐ ✕", () => {
+    ponteDoDesktop(vi.fn().mockResolvedValue(undefined));
+    (janelaComPonte.electron as { plataforma?: string }).plataforma = "darwin";
     const { barra } = renderizar();
 
-    expect(within(barra).getAllByRole("button")).toEqual([campoDeBusca()]);
+    expect(barra.style.paddingLeft).toBe("80px");
+    expect(within(barra).queryByRole("group", { name: "Controles da janela" })).not.toBeInTheDocument();
+    expect(barra.querySelector(".separador-da-barra-de-titulo")).toBeNull();
+    // O ⚙ continua.
+    expect(within(barra).getByRole("button", { name: "Configurações" })).toBeInTheDocument();
+  });
+
+  it("no Windows, a barra não reserva espaço à esquerda", () => {
+    ponteDoDesktop();
+    (janelaComPonte.electron as { plataforma?: string }).plataforma = "win32";
+    const { barra } = renderizar();
+
+    expect(barra.style.paddingLeft).toBe("");
+    expect(within(barra).getByRole("group", { name: "Controles da janela" })).toBeInTheDocument();
+  });
+
+  it("sem a ponte, não desenha botões de janela; ficam a busca e o ⚙", () => {
+    const { barra } = renderizar();
+
+    expect(within(barra).getAllByRole("button")).toEqual([campoDeBusca(), botaoDeConfiguracoes()]);
   });
 });

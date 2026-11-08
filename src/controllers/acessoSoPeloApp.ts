@@ -50,6 +50,12 @@ function chavesIguais(recebida: string, esperada: string): boolean {
   return timingSafeEqual(a, b) && recebida.length === esperada.length;
 }
 
+/** O cabeçalho `Cookie` traz a chave do aplicativo? Usado também no upgrade do WebSocket. */
+export function temChaveDoApp(cabecalhoDoCookie: string | undefined, chave: string): boolean {
+  const recebida = lerCookie(cabecalhoDoCookie, NOME_DO_COOKIE_DE_ACESSO);
+  return recebida !== null && chavesIguais(recebida, chave);
+}
+
 function escaparHtml(texto: string): string {
   return texto
     .replace(/&/g, "&amp;")
@@ -130,8 +136,7 @@ function querHtml(requisicao: Request): boolean {
 export function acessoSoPeloApp(opcoes: OpcoesDoAcesso): RequestHandler {
   const { chave, urlDeDownload } = opcoes;
   return (requisicao: Request, resposta: Response, proximo: NextFunction): void => {
-    const recebida = lerCookie(requisicao.headers.cookie, NOME_DO_COOKIE_DE_ACESSO);
-    if (recebida !== null && chavesIguais(recebida, chave)) {
+    if (temChaveDoApp(requisicao.headers.cookie, chave)) {
       proximo();
       return;
     }

@@ -3,6 +3,7 @@ import {
   Fragment,
   type KeyboardEvent,
   memo,
+  type PointerEvent as EventoDePonteiro,
   useCallback,
   useEffect,
   useRef,
@@ -20,13 +21,18 @@ import {
   ultimoModeloUsado,
 } from "../../shared/estado/aplicarEventoDoChat";
 import { formatarBytes, formatarDuracao } from "../../shared/formatacao";
-import { ehCapturaDeTela, type ImagemAnexada, lerImagem, MAXIMO_DE_IMAGENS, problemaDaImagem, TIPOS_DE_IMAGEM } from "../../shared/imagens";
+import { useMelhorarPrompt } from "../../shared/hooks/useMelhorarPrompt";
 import { useModoInvisivel } from "../../shared/hooks/useModoInvisivel";
+import { LARGURA_DO_CHAT_FIXO, limitarLarguraDoChatFixo } from "../../shared/hooks/usePreferenciasDaTela";
+import { ehCapturaDeTela, type ImagemAnexada, lerImagem, MAXIMO_DE_IMAGENS, problemaDaImagem, TIPOS_DE_IMAGEM } from "../../shared/imagens";
 import type { CapturaDeTela } from "../../shared/ponteDoDesktop";
+import { AvisoDaMelhoria, BotaoDeMelhorar } from "../MelhoriaDoPrompt";
 import { TextoFormatado } from "../TextoFormatado";
 import { CartaoDeAcao, type PropsDasAcoesDoChat } from "./CartaoDeAcao";
 import { CartaoDeAutorizacao } from "./CartaoDeAutorizacao";
+import { CartaoDePergunta } from "./CartaoDePergunta";
 import { SeletorDeModelo } from "./SeletorDeModelo";
+import "../../theme/chat-lateral.css";
 
 const ALTURA_MAXIMA_DO_CAMPO = 140;
 /** Distância do fim (px) em que a conversa ainda acompanha o texto que chega. */
@@ -39,6 +45,174 @@ interface Props extends PropsDasAcoesDoChat {
   /** Erro ao carregar o chat (o hook segue tentando sozinho). */
   erroAoCarregar: string | null;
   aoMudarPreferencias: (preferencias: PreferenciasDoChat) => void;
+  /**
+   * Fixo à esquerda (a preferência da tela): uma coluna da altura toda, com a
+   * conversa sempre à vista e o campo embaixo. Padrão: flutuante no pé do canvas.
+   */
+  fixo?: boolean;
+  /** Fixa o chat à esquerda (true) ou o solta de volta no pé do canvas (false). Sem ela, não há botão. */
+  aoAlternarFixo?: (fixo: boolean) => void;
+  /** Fixo: a largura da coluna (px). Padrão: 360. */
+  largura?: number;
+  /** Fixo: grava a largura nova (ao soltar a alça, pelo teclado ou nos dois cliques). Sem ela, não há alça. */
+  aoMudarLargura?: (largura: number) => void;
+}
+
+/** O mínimo (px) que a área do canvas guarda ao lado do chat fixo. */
+const LARGURA_MINIMA_DO_CANVAS = 360;
+/** Quanto cada seta do teclado muda a largura do chat fixo (px). */
+const PASSO_DA_LARGURA = 16;
+/** No corpo, enquanto a alça é arrastada: sem seleção de texto e com o cursor de redimensionar em toda a tela. */
+const CLASSE_DO_ARRASTE = "redimensionando-chat-lateral";
+
+/**
+ * A maior largura possível agora: até 640 px e sem deixar o canvas (o resto
+ * da linha) com menos de 360 px. Sem medida (a linha ainda sem tamanho), só os 640.
+ */
+function larguraMaximaAgora(coluna: HTMLElement | null): number {
+  const linha = coluna?.parentElement?.getBoundingClientRect().width ?? 0;
+  const disponivel = linha > 0 ? linha : window.innerWidth;
+  return Math.max(LARGURA_DO_CHAT_FIXO.minima, Math.min(LARGURA_DO_CHAT_FIXO.maxima, disponivel - LARGURA_MINIMA_DO_CANVAS));
+}
+
+/** Entre a mínima e a maior possível agora. */
+function limitarAgora(largura: number, coluna: HTMLElement | null): number {
+  return Math.min(limitarLarguraDoChatFixo(largura), larguraMaximaAgora(coluna));
+}
+
+interface PropsDaAlca {
+  largura: number;
+  aoMudar: (largura: number) => void;
+}
+
+/**
+ * A alça da borda direita do chat fixo: arrastar muda a largura ao vivo (só
+ * no estilo da coluna, sem re-renderizar a conversa) e grava ao soltar; as
+ * setas mudam 16 px, Home/End vão ao mínimo/máximo e dois cliques voltam aos 360.
+ */
+function AlcaDaLargura({ largura, aoMudar }: PropsDaAlca) {
+  // Durante o arraste: a largura ao vivo (para o aria-valuenow); nula, a gravada.
+  const [aoVivo, setAoVivo] = useState<number | null>(null);
+  const arraste = useRef<{ ponteiro: number; inicioX: number; inicio: number; atual: number; coluna: HTMLElement } | null>(
+    null,
+  );
+
+  // Desmontar no meio do arraste (soltar o chat, por exemplo) não deixa a tela travada sem seleção.
+  useEffect(() => () => document.body.classList.remove(CLASSE_DO_ARRASTE), []);
+
+  function terminar(gravar: boolean): void {
+    const atual = arraste.current;
+    if (atual === null) {
+      return;
+    }
+    arraste.current = null;
+    setAoVivo(null);
+    document.body.classList.remove(CLASSE_DO_ARRASTE);
+    // Um clique sem mover (o começo dos dois cliques) não grava nada.
+    const final = gravar && atual.atual !== atual.inicio ? atual.atual : largura;
+    // A coluna fica com a final já agora; o React a confirma ao receber a largura gravada.
+    atual.coluna.style.width = `${final}px`;
+    if (final !== largura) {
+      aoMudar(final);
+    }
+  }
+
+  function aoApertar(evento: EventoDePonteiro<HTMLDivElement>): void {
+    const coluna = evento.currentTarget.parentElement;
+    if (evento.button !== 0 || coluna === null) {
+      return;
+    }
+    // Sem seleção de texto nem o canvas entendendo como arrastar o fundo.
+    evento.preventDefault();
+    evento.stopPropagation();
+    if (typeof evento.currentTarget.setPointerCapture === "function") {
+      evento.currentTarget.setPointerCapture(evento.pointerId);
+    }
+    const medida = coluna.getBoundingClientRect().width;
+    const inicio = medida > 0 ? Math.round(medida) : largura;
+    arraste.current = { ponteiro: evento.pointerId, inicioX: evento.clientX, inicio, atual: inicio, coluna };
+    document.body.classList.add(CLASSE_DO_ARRASTE);
+  }
+
+  function aoMover(evento: EventoDePonteiro<HTMLDivElement>): void {
+    const atual = arraste.current;
+    if (atual === null || atual.ponteiro !== evento.pointerId) {
+      return;
+    }
+    evento.stopPropagation();
+    const nova = limitarAgora(atual.inicio + evento.clientX - atual.inicioX, atual.coluna);
+    if (nova !== atual.atual) {
+      atual.atual = nova;
+      atual.coluna.style.width = `${nova}px`;
+      setAoVivo(nova);
+    }
+  }
+
+  function aoTeclar(evento: KeyboardEvent<HTMLDivElement>): void {
+    const coluna = evento.currentTarget.parentElement;
+    const destinos: Readonly<Record<string, number>> = {
+      ArrowLeft: largura - PASSO_DA_LARGURA,
+      ArrowRight: largura + PASSO_DA_LARGURA,
+      Home: LARGURA_DO_CHAT_FIXO.minima,
+      End: LARGURA_DO_CHAT_FIXO.maxima,
+    };
+    const destino = destinos[evento.key];
+    if (destino === undefined) {
+      return;
+    }
+    evento.preventDefault();
+    evento.stopPropagation();
+    const nova = limitarAgora(destino, coluna);
+    if (nova !== largura) {
+      aoMudar(nova);
+    }
+  }
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Largura do chat"
+      aria-valuenow={aoVivo ?? largura}
+      aria-valuemin={LARGURA_DO_CHAT_FIXO.minima}
+      aria-valuemax={LARGURA_DO_CHAT_FIXO.maxima}
+      tabIndex={0}
+      title="Arraste para mudar a largura do chat · dois cliques voltam ao padrão"
+      className={`alca-do-chat-lateral nodrag nopan nowheel ${aoVivo === null ? "" : "alca-arrastando"}`}
+      onPointerDown={aoApertar}
+      onPointerMove={aoMover}
+      onPointerUp={() => terminar(true)}
+      onPointerCancel={() => terminar(false)}
+      onLostPointerCapture={() => terminar(true)}
+      onKeyDown={aoTeclar}
+      onDoubleClick={() => {
+        if (largura !== LARGURA_DO_CHAT_FIXO.padrao) {
+          aoMudar(LARGURA_DO_CHAT_FIXO.padrao);
+        }
+      }}
+    />
+  );
+}
+
+/** Alfinete: fixar o chat à esquerda. */
+function IconeFixar() {
+  return (
+    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M9.5 4.5v15" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M5.8 9h1.7M5.8 12h1.7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** Soltar: o chat volta a flutuar no pé do canvas. */
+function IconeSoltar() {
+  return (
+    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M7.5 16h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
 }
 
 /** Verbos seguidos direto do arquivo, sem dois-pontos ("lendo README.md…"). */
@@ -169,12 +343,17 @@ function assinaturaDaUltima(chat: EstadoDoChatNaTela): string {
  * O chat rápido com o Claude, no centro de baixo do canvas: um composer
  * (Enter envia, Shift+Enter quebra linha, Esc cancela ou oculta, "/clear"
  * limpa) e, acima dele, a conversa. Respostas em Markdown, com o cursor
- * enquanto chegam, e cartões para as ações que o Claude sugere no app.
+ * enquanto chegam, cartões para as ações que o Claude sugere no app e
+ * cartões de pergunta com opções clicáveis (a escolha vai como a próxima pergunta).
  *
  * Quando o chat precisa editar um arquivo ou rodar um comando sem estar
  * autorizado, a última resposta ganha o cartão de autorização. Autorizado,
  * o selo "alterações autorizadas" fica ao lado do campo até o `/clear`; o ✕
  * dele revoga.
+ *
+ * Com `fixo`, o mesmo chat vira uma coluna à esquerda do canvas (`<aside>`):
+ * conversa em bolhas sempre à vista, campo embaixo e "soltar" no lugar de "ocultar".
+ * Com `aoMudarLargura`, a borda direita da coluna ganha a alça de largura.
  */
 export function ChatRapido({
   chat,
@@ -184,6 +363,10 @@ export function ChatRapido({
   aoAbrirTerminal,
   temVagaPara,
   aoAtualizarOrquestradores,
+  fixo = false,
+  aoAlternarFixo,
+  largura = LARGURA_DO_CHAT_FIXO.padrao,
+  aoMudarLargura,
 }: Props) {
   const [texto, setTexto] = useState("");
   const [imagens, setImagens] = useState<ImagemAnexada[]>([]);
@@ -215,14 +398,16 @@ export function ChatRapido({
   const respondendo = chat.situacao === "respondendo";
   const cancelando = pedidoDeCancelar && respondendo;
   const temMensagens = chat.mensagens.length > 0;
-  const oculta = ocultaEm !== null;
+  // Fixo à esquerda, a conversa nunca se oculta.
+  const oculta = !fixo && ocultaEm !== null;
   const novidadeOculta = oculta && ocultaEm !== assinaturaDaUltima(chat);
   const temConteudo = texto.trim() !== "" || imagens.length > 0;
   const dica = dicaDeComando(texto, respondendo);
   const ultima = chat.mensagens.at(-1);
   const pedidoDeAutorizacao = pedidoDeAutorizacaoAtual(chat);
   // Compacto (uma linha) até a pessoa usar; recolhe só sem foco, texto, imagens nem menu aberto.
-  const expandido = emUso || texto !== "" || imagens.length > 0 || menuAberto || arrastando;
+  // Fixo à esquerda, fica sempre expandido: a coluna é estreita para tudo numa linha.
+  const expandido = fixo || emUso || texto !== "" || imagens.length > 0 || menuAberto || arrastando;
 
   // Recolhido, o campo volta à altura de uma linha.
   useEffect(() => {
@@ -251,6 +436,16 @@ export function ChatRapido({
     setTexto("");
     requestAnimationFrame(ajustarAltura);
   }
+
+  /** O ✨ troca o texto do campo (e o "desfazer" o devolve); não envia nada. */
+  const melhoria = useMelhorarPrompt({
+    texto,
+    aoTrocarTexto: (novo) => {
+      setTexto(novo);
+      requestAnimationFrame(ajustarAltura);
+    },
+    onde: "chat",
+  });
 
   const anexar = useCallback(
     async (arquivos: File[]): Promise<void> => {
@@ -336,7 +531,7 @@ export function ChatRapido({
       await limparConversa();
       return;
     }
-    if (!temConteudo || respondendo || enviando || desconectado) {
+    if (!temConteudo || respondendo || enviando || desconectado || melhoria.melhorando) {
       return;
     }
     setErro(null);
@@ -405,7 +600,7 @@ export function ChatRapido({
       if (respondendo) {
         evento.preventDefault();
         void cancelar();
-      } else if (temMensagens && !oculta) {
+      } else if (!fixo && temMensagens && !oculta) {
         evento.preventDefault();
         ocultar();
       }
@@ -424,11 +619,19 @@ export function ChatRapido({
     ? "servidor desconectado — dá para escrever, o envio volta quando ele voltar"
     : respondendo
       ? "respondendo… (esc cancela) — já pode escrever a próxima"
-      : "Pergunte qualquer coisa ao Claude · / para comandos";
+      : fixo
+        ? // Na coluna, o texto inteiro quebraria linha: a versão curta cabe numa só.
+          "Pergunte ao Claude · / para comandos"
+        : "Pergunte qualquer coisa ao Claude · / para comandos";
+
+  // Fixo à esquerda: uma coluna (aside) ao lado do canvas; flutuante: um bloco no painel do pé do canvas.
+  const Raiz = fixo ? "aside" : "div";
 
   return (
-    <div
-      className={`chat-rapido nodrag nowheel nopan ${respondendo ? "chat-rapido-respondendo" : ""}`}
+    <Raiz
+      className={`chat-rapido nodrag nowheel nopan ${fixo ? "chat-lateral" : ""} ${respondendo ? "chat-rapido-respondendo" : ""}`}
+      aria-label={fixo ? "Chat rápido" : undefined}
+      style={fixo ? { width: `${largura}px` } : undefined}
       data-testid="chat-rapido"
       {...mouseDaArea}
       onDragOver={(evento) => {
@@ -451,14 +654,30 @@ export function ChatRapido({
       }}
     >
       {arrastando && <div className="soltar-imagens">solte para anexar as imagens à pergunta</div>}
+      {fixo && aoMudarLargura !== undefined && <AlcaDaLargura largura={largura} aoMudar={aoMudarLargura} />}
 
       {/* Oculta, a conversa continua montada: os cartões de ação lembram o que já fizeram. */}
-      {temMensagens && (
-        <section className="conversa-do-chat painel-flutuante" hidden={oculta} aria-label="Conversa com o Claude">
+      {(temMensagens || fixo) && (
+        <section
+          className={`conversa-do-chat ${fixo ? "conversa-lateral" : "painel-flutuante"}`}
+          hidden={oculta}
+          aria-label="Conversa com o Claude"
+        >
           <header className="cabecalho-do-chat">
             <span className="rotulo-tecnico">chat rápido</span>
             {respondendo && <span className="etiqueta etiqueta-ativa etiqueta-pulso">respondendo…</span>}
             <span className="flex-1" />
+            {!fixo && aoAlternarFixo !== undefined && (
+              <button
+                type="button"
+                className="botao-icone"
+                aria-label="Fixar o chat à esquerda"
+                title="Fixar o chat à esquerda: uma coluna ao lado do canvas, sempre aberta"
+                onClick={() => aoAlternarFixo(true)}
+              >
+                <IconeFixar />
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-sm btn-ghost"
@@ -474,9 +693,24 @@ export function ChatRapido({
             >
               limpar
             </button>
-            <button type="button" className="btn btn-sm btn-ghost" onClick={ocultar} title="Ocultar a conversa (esc)">
-              ocultar
-            </button>
+            {fixo ? (
+              aoAlternarFixo !== undefined && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  aria-label="Soltar o chat"
+                  title="Soltar: o chat volta a flutuar no pé do canvas"
+                  onClick={() => aoAlternarFixo(false)}
+                >
+                  <IconeSoltar />
+                  soltar
+                </button>
+              )
+            ) : (
+              <button type="button" className="btn btn-sm btn-ghost" onClick={ocultar} title="Ocultar a conversa (esc)">
+                ocultar
+              </button>
+            )}
           </header>
           <div
             ref={rolagem}
@@ -489,7 +723,12 @@ export function ChatRapido({
               }
             }}
           >
-            {chat.mensagens.map((mensagem) => (
+            {!temMensagens && (
+              <p className="vazio-do-chat-lateral text-support">
+                Pergunte qualquer coisa ao Claude: a conversa aparece aqui, ao lado do canvas.
+              </p>
+            )}
+            {chat.mensagens.map((mensagem, indice) => (
               <Fragment key={mensagem.id}>
                 <MensagemNaConversa
                   mensagem={mensagem}
@@ -506,6 +745,15 @@ export function ChatRapido({
                     autorizado={chat.alteracoesAutorizadas}
                     desabilitado={respondendo || desconectado}
                     aoEnviarPergunta={enviarPergunta}
+                  />
+                )}
+                {/* Também fora: trava quando chega uma mensagem depois (a resposta já foi dada). */}
+                {mensagem.papel === "claude" && mensagem.situacao === "concluida" && mensagem.perguntas.length > 0 && (
+                  <CartaoDePergunta
+                    perguntas={mensagem.perguntas}
+                    respondida={indice < chat.mensagens.length - 1}
+                    desabilitado={respondendo || enviando || desconectado}
+                    aoResponder={enviarPergunta}
                   />
                 )}
               </Fragment>
@@ -611,6 +859,8 @@ export function ChatRapido({
             rows={1}
             className="campo-do-chat"
             value={texto}
+            readOnly={melhoria.melhorando}
+            aria-busy={melhoria.melhorando}
             onChange={(evento) => {
               setTexto(evento.target.value);
               ajustarAltura();
@@ -626,6 +876,7 @@ export function ChatRapido({
               {dica}
             </p>
           )}
+          <AvisoDaMelhoria melhoria={melhoria} className="px-3" />
           {(erro ?? erroAoCarregar) !== null && (
             <p className="hint-error texto-longo px-3" role="alert">
               {erro ?? `Não foi possível carregar o chat: ${erroAoCarregar}`}
@@ -652,6 +903,10 @@ export function ChatRapido({
             >
               +
             </button>
+            <BotaoDeMelhorar
+              melhoria={melhoria}
+              desabilitado={texto.trim() === "" || desconectado || respondendo || enviando}
+            />
             {respondendo && <span className="etiqueta etiqueta-ativa etiqueta-pulso">respondendo…</span>}
             {chat.alteracoesAutorizadas && (
               <span
@@ -706,7 +961,7 @@ export function ChatRapido({
                 type="button"
                 className="btn btn-sm btn-cta"
                 onClick={() => void enviar()}
-                disabled={!temConteudo || enviando || desconectado}
+                disabled={!temConteudo || enviando || desconectado || melhoria.melhorando}
               >
                 {enviando ? "…" : "enviar ⏎"}
               </button>
@@ -714,6 +969,6 @@ export function ChatRapido({
           </div>
         </div>
       </div>
-    </div>
+    </Raiz>
   );
 }

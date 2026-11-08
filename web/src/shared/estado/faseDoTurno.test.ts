@@ -42,6 +42,7 @@ function turno(
       quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
       nivelDePermissao: "leitura",
       permitirCommitEPush: false,
+      instrucoesPersonalizadas: "",
     },
     modo,
     decisaoDoPlano: null,

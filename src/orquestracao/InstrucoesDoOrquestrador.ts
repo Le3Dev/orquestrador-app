@@ -1,8 +1,11 @@
+import { linhasDaRegraDasPerguntas } from "../perguntas/PerguntaDoApp";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
+import { InstrucoesAplicadas, linhasDasInstrucoes } from "./InstrucoesPersonalizadas";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { DESCRICAO_DO_NIVEL, NivelDePermissao, TRABALHO_DIRETO_NO_NIVEL } from "./NivelDePermissao";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { QuantidadeDeSubagentes } from "./QuantidadeDeSubagentes";
+import { DadosDoSubagentePronto, linhasDaEspecialidade, linhasDosSubagentesProntos } from "./SubagentesProntos";
 
 /** Nome do papel de quem executa as subtarefas. */
 export const NOME_DO_SUBAGENTE = "executor";
@@ -24,6 +27,16 @@ const COMMIT_E_PUSH_PROIBIDOS = "Commits e push são sempre proibidos.";
 /** Regra de commit e push no bloco do pedido, com a opção ligada num turno de execução. */
 const COMMIT_E_PUSH_QUANDO_PEDIDOS =
   "Commits e push: permitidos somente quando o usuário pedir explicitamente nesta mensagem. Nunca commitar direto na main; usar branch conforme a política (feature/, fix/, hotfix/, refactor/). Nunca adicionar a linha Co-authored-by.";
+
+/**
+ * Servidor de desenvolvimento (npm run dev, vite...) não pode ir para o
+ * segundo plano do Claude Code: o processo do pedido só termina quando ele
+ * para, e o pedido ficaria "trabalhando" para sempre. Desacoplado, ele segue
+ * no ar depois do pedido, e o endereço impresso no log aparece na saída do
+ * comando, onde a tela o detecta para a prévia ao vivo.
+ */
+export const REGRA_DOS_SERVIDORES =
+  "Servidor que deve continuar no ar (npm run dev, vite, next dev e afins): não use a execução em segundo plano da ferramenta (run_in_background), que prende o pedido até o servidor parar. Suba desacoplado, com a saída num log fora do projeto, e mostre o começo do log para o endereço aparecer, por exemplo: `nohup npm run dev > /tmp/servidor-<nome>.log 2>&1 & sleep 4; tail -n 20 /tmp/servidor-<nome>.log`. Ele continua rodando depois do pedido; para parar, use kill no processo. Não abra o navegador do computador (open, xdg-open, start): o aplicativo já mostra a página numa prévia ao vivo quando o endereço aparece; para conferir, use curl e cite o endereço completo na resposta.";
 
 /**
  * O marcador como o Orquestrador pode escrevê-lo: com espaços em volta, um
@@ -78,6 +91,20 @@ function regrasDeArtefatos(pastaDeArtefatos: string): string[] {
 }
 
 /**
+ * Perguntas com opções clicáveis (```pergunta-do-app): vão em todo pedido,
+ * em qualquer modo, porque o Claude Code não relê as instruções ao retomar a
+ * sessão. Só a resposta final do Orquestrador é lida, nunca a dos Subagentes.
+ */
+function regrasDasPerguntas(): string[] {
+  const [primeira = "", ...resto] = linhasDaRegraDasPerguntas();
+  return [
+    `- ${primeira}`,
+    ...resto.map((linha) => `  ${linha}`),
+    `  Só a sua resposta final é lida: subagentes não perguntam ao usuário. Se um deles precisar de uma decisão, pergunte você, sem delegar a pergunta.`,
+  ];
+}
+
+/**
  * Em todo turno de execução, o Orquestrador mede o pedido antes de mexer em
  * algo: se for grande, só investiga e devolve um Plano marcado com
  * `MARCADOR_DE_PLANO`, para o usuário aprovar (ADR-15, ADR-28).
@@ -125,6 +152,10 @@ export function instrucoesDoOrquestrador(pasta: PastaDeTrabalho): string {
  * as substitui.
  *
  * Com `pastaDeArtefatos`, o bloco diz quando e como gravar artefatos nela.
+ *
+ * As instruções personalizadas do usuário (`resolverInstrucoes`) vão no fim
+ * do bloco pelo mesmo motivo: editadas no meio da conversa, valem já no
+ * pedido seguinte. Sem elas, o bloco fica exatamente como antes.
  */
 export function mensagemParaOOrquestrador(
   texto: string,
@@ -132,6 +163,9 @@ export function mensagemParaOOrquestrador(
   caminhosDasImagens: readonly string[] = [],
   modo: ModoDoTurno = "execucao",
   pastaDeArtefatos: string | null = null,
+  instrucoes: InstrucoesAplicadas | null = null,
+  revogarInstrucoesAnteriores = false,
+  subagentesProntos: readonly DadosDoSubagentePronto[] = [],
 ): string {
   const planejamento = modo === "planejamento";
   // No planejamento os agentes só leem (as ferramentas já vêm travadas
@@ -164,11 +198,15 @@ export function mensagemParaOOrquestrador(
     "Configuração vigente para este pedido, definida pelo usuário na tela. Ela substitui qualquer regra de delegação, quantidade de subagentes ou permissão mencionada antes nesta conversa, inclusive nas suas instruções iniciais.",
     ...regrasDeDelegacao(nivelDoPedido),
     `- Subagentes: ${regraDaQuantidade(configuracao.quantidadeDeSubagentes)}`,
+    ...linhasDosSubagentesProntos(subagentesProntos, NOME_DO_SUBAGENTE, MARCA_DA_CONFIGURACAO),
     `- Permissões: ${DESCRICAO_DO_NIVEL[nivelDoPedido]}. ${regraDeCommitEPush}`,
     ...regrasDoPlanejamento,
     ...regrasDoTamanho,
+    ...(nivelDoPedido === "edicao_e_comandos" ? [`- ${REGRA_DOS_SERVIDORES}`] : []),
     ...(pastaDeArtefatos === null ? [] : regrasDeArtefatos(pastaDeArtefatos)),
+    ...regrasDasPerguntas(),
     ...imagens,
+    ...linhasDasInstrucoes(instrucoes, MARCA_DA_CONFIGURACAO, revogarInstrucoesAnteriores),
     `</${MARCA_DA_CONFIGURACAO}>`,
     "",
     texto,
@@ -207,11 +245,15 @@ export function mensagemDeAprovacaoDoPlano(observacoes: string): string {
  * Vai na definição dos agentes, refeita a cada turno: por isso pode levar a
  * regra de commit e push do pedido (`ConfiguracaoDoOrquestrador.permiteCommitEPush`)
  * e a pasta de artefatos do Orquestrador.
+ *
+ * Um subagente pronto (`especialidade`) recebe as mesmas regras, com o nome
+ * dele, e a especialidade definida pelo usuário no fim.
  */
 export function instrucoesDoSubagente(
   pasta: PastaDeTrabalho,
   permiteCommitEPush = false,
   pastaDeArtefatos: string | null = null,
+  especialidade: DadosDoSubagentePronto | null = null,
 ): string {
   const regraDeCommitEPush = permiteCommitEPush
     ? "Commit e push: faça somente se a subtarefa recebida pedir explicitamente — o orquestrador só pede quando o usuário pediu. Nunca na main; use branch conforme a política (feature/, fix/, hotfix/, refactor/). Nunca adicione a linha Co-authored-by."
@@ -222,11 +264,14 @@ export function instrucoesDoSubagente(
       : [
           `Se a subtarefa pedir um artefato (página ou relatório para o usuário), grave UM arquivo autocontido na pasta ${pastaDeArtefatos}: ${FORMATO_DO_ARTEFATO}. Artefato não é arquivo do projeto: gravar nessa pasta é permitido em qualquer permissão. Para atualizar, regrave o mesmo arquivo.`,
         ];
+  const papel = especialidade === null ? NOME_DO_SUBAGENTE : `"${especialidade.nome}"`;
   return [
-    "Você é um subagente executor, coordenado por um orquestrador.",
+    `Você é um subagente ${papel}, coordenado por um orquestrador.`,
     `Faça somente a subtarefa recebida, dentro da pasta ${pasta.caminho}. Seja objetivo.`,
     ...regraDeArtefatos,
     "Ao terminar, devolva: o que fez, os arquivos que alterou (se houver) e o resultado.",
+    REGRA_DOS_SERVIDORES,
     `${regraDeCommitEPush} Responda em português.`,
+    ...(especialidade === null ? [] : linhasDaEspecialidade(especialidade)),
   ].join("\n");
 }

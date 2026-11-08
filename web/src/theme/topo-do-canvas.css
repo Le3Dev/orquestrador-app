@@ -1,0 +1,60 @@
+/* ---------------- Topo do canvas pela largura do canvas ----------------
+ * As regras de `index.css` olham a largura da janela. Com o chat fixo à
+ * esquerda (ou numa janela estreita), o canvas fica menor que a janela e a
+ * barra e o status não cabiam numa linha: o status quebrava em duas. Aqui o
+ * painel do topo vira um container e cada passo de compactação acontece pela
+ * largura dele (medidas com a barra do navegador e o status completos):
+ *   < 1350 px: rótulos curtos e sem subtítulo nem "agentes …" na RAM;
+ *   < 1225 px: o status fica com a situação e um medidor resumido;
+ *   < 1010 px: botões da barra só com ícone;
+ *   < 540 px e < 470 px: o resumo perde o medidor e depois sai.
+ * O status nunca quebra linha: se ainda faltar espaço, ele corta o fim e a
+ * situação continua à vista. A barra não encolhe, então os dois não se
+ * sobrepõem. Os passos da barra valem só quando o status está no painel
+ * (navegador); no desktop ele fica na barra de título. */
+
+.react-flow__panel.paineis-do-topo { container: topo-do-canvas / inline-size; }
+
+.paineis-do-topo .coluna-do-topo-direita > * { max-width: 100%; }
+.paineis-do-topo .status-do-canvas {
+  flex-wrap: nowrap;
+  justify-content: safe flex-end;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+@container topo-do-canvas (width < 1350px) {
+  .paineis-do-topo .status-do-canvas .rotulo-completo,
+  .paineis-do-topo .status-extra,
+  .paineis-do-topo:has(.status-do-canvas) .barra-do-canvas .rotulo-completo,
+  .paineis-do-topo:has(.status-do-canvas) .subtitulo-da-barra { display: none; }
+  .paineis-do-topo .status-do-canvas .rotulo-curto,
+  .paineis-do-topo:has(.status-do-canvas) .barra-do-canvas .rotulo-curto { display: inline; }
+}
+
+@container topo-do-canvas (width < 1225px) {
+  .paineis-do-topo .status-detalhe { display: none; }
+  .paineis-do-topo .status-resumo { display: inline-flex; }
+}
+
+@container topo-do-canvas (width < 1010px) {
+  .paineis-do-topo:has(.status-do-canvas) .barra-do-canvas .rotulo-curto,
+  .paineis-do-topo:has(.status-do-canvas) .identidade-da-barra { display: none; }
+  .paineis-do-topo:has(.status-do-canvas) .barra-do-canvas .rotulo-icone { display: inline; }
+  .paineis-do-topo:has(.status-do-canvas) .barra-do-canvas .btn-sm { width: 30px; padding: 0; font-size: 14px; }
+}
+
+/* Canvas bem estreito (chat fixo numa janela pequena): o resumo perde o
+ * medidor e, depois, sai; a situação (quem está trabalhando) fica. */
+@container topo-do-canvas (width < 540px) {
+  .paineis-do-topo .status-resumo .medidor-curto { display: none; }
+}
+@container topo-do-canvas (width < 470px) {
+  .paineis-do-topo .status-resumo { display: none; }
+}
+
+/* Abaixo de 1100 px de janela, `index.css` já deixa a barra só com ícones:
+ * o passo de rótulos curtos acima não pode trazer o texto de volta. */
+@media (width < 1100px) {
+  .paineis-do-topo:has(.status-do-canvas) .barra-do-canvas .rotulo-curto { display: none; }
+}

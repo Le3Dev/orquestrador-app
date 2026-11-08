@@ -1,3 +1,4 @@
+import { separarPerguntasDoApp } from "../perguntas/PerguntaDoApp";
 import { Anexo } from "./Anexo";
 import { ArmazemDeAnexos } from "./ArmazemDeAnexos";
 import {
@@ -6,21 +7,40 @@ import {
   DadosDaConfiguracao,
 } from "./ConfiguracaoDoOrquestrador";
 import { ControleDeExecucoes, PublicadorDeEventos } from "./ControleDeExecucoes";
+import { DiagnosticadorDoClaude } from "./DiagnosticoDoClaude";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { EsforcoDaMaquina } from "./EsforcoDaMaquina";
 import { EsforcoHerdado } from "./EsforcoHerdado";
-import { EventoDeOrquestracao, EventoDoMotor } from "./EventoDeOrquestracao";
+import {
+  CausaDaRecuperacao,
+  EtapaDaRecuperacao,
+  EventoDeOrquestracao,
+  EventoDoMotor,
+} from "./EventoDeOrquestracao";
 import { mensagemDeAprovacaoDoPlano, separarPropostaDePlano } from "./InstrucoesDoOrquestrador";
+import { InstrucoesAplicadas, resolverInstrucoes } from "./InstrucoesPersonalizadas";
 import { MedidorDeConsumo, PeriodoDoTurno } from "./MedidorDeConsumo";
 import { ModeloClaude } from "./ModeloClaude";
 import { ModoDoTurno } from "./ModoDoTurno";
-import { MotorDeAgentes, ResultadoDoTurno } from "./MotorDeAgentes";
+import { ABORTO_POR_SILENCIO, CausaDaFalha, MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "./MotorDeAgentes";
 import { Orquestrador, TAMANHO_MAXIMO_DA_MENSAGEM } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { PedidoNaFila } from "./PedidoNaFila";
 import { predefinicaoPorNome } from "./PredefinicaoDeConfiguracao";
 import { GerenciadorDeWorktrees } from "./PreparoDeWorktree";
+import {
+  descreverCausa,
+  descreverEsperas,
+  ehRecuperavel,
+  esperaAntesDaTentativa,
+  maximoDeTentativas,
+  mensagemDeRetomada,
+  resumoDaEspera,
+} from "./RecuperacaoDoTurno";
 import { RepositorioDeOrquestradores } from "./RepositorioDeOrquestradores";
+import { RepositorioDePreferencias } from "./RepositorioDePreferencias";
+import { DadosDoSubagentePronto } from "./SubagentesProntos";
+import { AgendadorDeTarefas, agendadorDoRelogio, VigiaDoTurno } from "./VigiaDoTurno";
 
 export interface DependenciasDoServico {
   repositorio: RepositorioDeOrquestradores;
@@ -35,12 +55,22 @@ export interface DependenciasDoServico {
    * pedido ao motor.
    */
   pastaDeArtefatos: (orquestradorId: string) => string;
+  /** De onde vêm as instruções padrão, para Orquestradores sem instruções próprias. */
+  preferencias: RepositorioDePreferencias;
   gerarId: () => string;
   agora: () => Date;
   /** Mede o gasto de cada turno ao fim dele. Sem medidor, nenhum consumo é registrado. */
   medidor?: MedidorDeConsumo | undefined;
   /** Lê o esforço que o Claude Code da máquina usa no "Padrão". Sem ele, nada é herdado. */
   esforcoDaMaquina?: EsforcoDaMaquina | undefined;
+  /**
+   * Examina o Claude de um turno que ficou em silêncio (ver ADR-36). Sem ele,
+   * não há vigia: o turno espera o quanto for. As falhas por limite de uso,
+   * sobrecarga e rede são retomadas do mesmo jeito.
+   */
+  diagnosticador?: DiagnosticadorDoClaude | undefined;
+  /** Marca as esperas da vigia e da retomada. Sem ele, `setTimeout`. */
+  agendador?: AgendadorDeTarefas | undefined;
 }
 
 /** O esforço que cada papel herda da máquina quando a configuração está em "Padrão". */
@@ -56,10 +86,32 @@ export interface ConsultaDeEsforcoDosPapeis {
   pastaDoProjeto: string;
 }
 
-/** O que a medição precisa saber do turno que acabou de terminar. */
+/** Por que um turno falhou, para decidir se ele é retomado (ver ADR-36). */
+interface FalhaDoTurno {
+  causa: CausaDaFalha;
+  liberaEm: string | null;
+  /** O motivo gravado no `turno_falhou`. */
+  motivo: string;
+}
+
+/** O que a medição e a autorrecuperação precisam saber do turno que acabou de terminar. */
 interface TurnoEncerrado {
   turnoId: string;
   periodo: PeriodoDoTurno;
+  modo: ModoDoTurno;
+  /** Nula quando o turno foi concluído ou cancelado. */
+  falha: FalhaDoTurno | null;
+}
+
+/** Uma retomada marcada para daqui a pouco, que o usuário ainda pode cancelar. */
+interface RetomadaAgendada {
+  /** O turno que travou ou falhou. */
+  turnoId: string;
+  causa: CausaDaRecuperacao;
+  tentativa: number;
+  de: number;
+  modo: ModoDoTurno;
+  desmarcar: () => void;
 }
 
 /** Imagem como chega do usuário, antes de virar Anexo. */
@@ -90,6 +142,12 @@ export interface MensagemEnviada {
    * começou. Nunca rejeita. Ninguém precisa esperá-la.
    */
   envioDaFila: Promise<void>;
+  /**
+   * Resolve depois da `conclusao`, quando a autorrecuperação decidiu o que
+   * fazer com o turno (nada, agendar a retomada ou desistir; ver ADR-36). Não
+   * espera a retomada em si. Nunca rejeita. Ninguém precisa esperá-la.
+   */
+  recuperacao: Promise<void>;
 }
 
 export interface PedidoEnfileirado {
@@ -105,10 +163,18 @@ function descreverErro(erro: unknown): string {
  * enfileirar pedidos, decidir os Planos que entregarem, limpar a conversa e
  * cancelar o que estiverem fazendo.
  *
- * Não guarda estado: os Orquestradores vêm do repositório, e os turnos em
- * execução ficam no `ControleDeExecucoes`.
+ * Os Orquestradores vêm do repositório, e os turnos em execução ficam no
+ * `ControleDeExecucoes`. O único estado daqui é o da autorrecuperação (ver
+ * ADR-36): as retomadas agendadas e a contagem de tentativas, só em memória.
+ * Um reinício do servidor durante a espera perde a retomada, e o turno fica
+ * como falhou, com o motivo: nada fica inconsistente.
  */
 export class ServicoDeOrquestracao {
+  /** Tentativas de retomada já feitas, por Orquestrador e por causa. Zeram quando um turno conclui. */
+  private readonly tentativas = new Map<string, Map<CausaDaRecuperacao, number>>();
+  /** No máximo uma por Orquestrador. */
+  private readonly retomadas = new Map<string, RetomadaAgendada>();
+
   constructor(private readonly dependencias: DependenciasDoServico) {}
 
   async criarOrquestrador(pedido: NovoPedidoDeOrquestrador): Promise<Orquestrador> {
@@ -124,6 +190,22 @@ export class ServicoDeOrquestracao {
     });
     await repositorio.salvar(orquestrador);
     return orquestrador;
+  }
+
+  /**
+   * As instruções personalizadas que um pedido com esta configuração
+   * receberia agora: as próprias, se houver; senão o padrão global.
+   */
+  instrucoesPara(configuracao: ConfiguracaoDoOrquestrador): InstrucoesAplicadas | null {
+    return resolverInstrucoes(
+      configuracao.instrucoesPersonalizadas,
+      this.dependencias.preferencias.atuais().instrucoesPadrao,
+    );
+  }
+
+  /** A biblioteca de subagentes prontos que um pedido receberia agora. */
+  subagentesProntos(): readonly DadosDoSubagentePronto[] {
+    return this.dependencias.preferencias.atuais().subagentesProntos;
   }
 
   async alterarConfiguracao(id: string, alteracoes: AlteracoesDaConfiguracao): Promise<Orquestrador> {
@@ -243,6 +325,10 @@ export class ServicoDeOrquestracao {
    * andamento), o pedido continua na fila; uma vez aceito, nada se intercala.
    * Se depois disso a gravação falhar, o turno fica registrado como falho
    * com o texto do pedido — que não se perde, fica no histórico da conversa.
+   *
+   * `retomada`: o turno é o app retomando sozinho um que travou ou falhou
+   * (ver ADR-36). Qualquer outro turno que começa cancela a retomada que
+   * estivesse agendada: o usuário assumiu.
    */
   private async iniciarTurno(
     orquestrador: Orquestrador,
@@ -250,6 +336,7 @@ export class ServicoDeOrquestracao {
     imagens: readonly ImagemRecebida[],
     modo: ModoDoTurno,
     pedidoDaFila: PedidoNaFila | null,
+    retomada: { deTurnoId: string; tentativa: number } | null = null,
   ): Promise<MensagemEnviada> {
     const { repositorio, execucoes, anexos, gerarId, agora } = this.dependencias;
     const turnoId = gerarId();
@@ -262,11 +349,21 @@ export class ServicoDeOrquestracao {
         tamanhoEmBytes: imagem.conteudo.byteLength,
       }),
     );
-    const inicio = orquestrador.iniciarTurno(turnoId, texto, agora(), anexosDoTurno, modo);
+    const aceito = orquestrador.iniciarTurno(turnoId, texto, agora(), anexosDoTurno, modo);
+    const inicio: EventoDeOrquestracao =
+      retomada !== null && aceito.tipo === "turno_iniciado" ? { ...aceito, retomada } : aceito;
+    if (retomada === null) {
+      // Só depois de o agregado aceitar: um pedido recusado não cancela nada.
+      this.cancelarRetomada(orquestrador, "um novo pedido começou");
+    }
     const retirada = pedidoDaFila === null ? null : orquestrador.retirarDaFila(pedidoDaFila.id, "enviado");
     // A mesma do evento `turno_iniciado`: o turno segue com ela até o fim,
     // mesmo que o usuário altere a configuração enquanto ele roda.
     const configuracaoDoTurno = orquestrador.configuracao;
+    // Resolvidas agora, junto com a configuração: mudar o padrão global com o
+    // turno rodando também só vale a partir do próximo.
+    const instrucoesDoTurno = this.instrucoesPara(configuracaoDoTurno);
+    const { revogarAnteriores } = orquestrador.registrarInstrucoesDoPedido(instrucoesDoTurno !== null);
     // O sinal nasce antes de qualquer espera: um cancelamento que chegue
     // enquanto o turno é gravado já encontra a execução registrada.
     const sinal = execucoes.iniciar(orquestrador.id);
@@ -287,9 +384,11 @@ export class ServicoDeOrquestracao {
       throw erro;
     }
 
-    const execucao = this.executar(orquestrador, turnoId, sinal, configuracaoDoTurno).finally(() =>
-      execucoes.encerrar(orquestrador.id),
-    );
+    const execucao = this.executar(orquestrador, turnoId, sinal, configuracaoDoTurno, {
+      instrucoes: instrucoesDoTurno,
+      revogarInstrucoesAnteriores: revogarAnteriores,
+      subagentesProntos: this.subagentesProntos(),
+    }).finally(() => execucoes.encerrar(orquestrador.id));
     const conclusao = execucao.then(() => undefined);
     // Em segundo plano, depois do fim do turno: não segura a resposta nem o
     // próximo pedido, e o evento do consumo sempre vem depois do de fim.
@@ -306,7 +405,13 @@ export class ServicoDeOrquestracao {
       // A execução falhou por fora do turno (a medição já avisa no log): a fila pausa.
       () => undefined,
     );
-    return { turnoId, conclusao, medicao, envioDaFila };
+    // Também depois do `encerrar`: a retomada abre outro turno, que registra a
+    // própria execução. Turno que nem foi gravado como encerrado não é retomado.
+    const recuperacao = execucao.then(
+      (encerrado) => (encerrado === null ? undefined : this.decidirRecuperacao(orquestrador.id, encerrado)),
+      () => undefined,
+    );
+    return { turnoId, conclusao, medicao, envioDaFila, recuperacao };
   }
 
   /**
@@ -321,6 +426,11 @@ export class ServicoDeOrquestracao {
       return orquestrador;
     }
 
+    // Recusado antes, com turno em andamento (e aí não há retomada agendada).
+    if (orquestrador.turnoEmAndamento === null) {
+      // Vai para o histórico que será arquivado, junto do turno que falhou.
+      this.cancelarRetomada(orquestrador, "a conversa foi limpa");
+    }
     // Sem espera entre limpar e arquivar: nenhum evento pode cair no meio.
     const evento = orquestrador.limparConversa(gerarId());
     const { registrado, gravacao } = repositorio.arquivarConversa(orquestrador, evento);
@@ -356,19 +466,26 @@ export class ServicoDeOrquestracao {
     await this.dependencias.repositorio.salvar(orquestrador);
   }
 
+  /**
+   * Cancela o turno em andamento ou, sem turno, a retomada automática que
+   * estiver agendada (ver ADR-36). Sem nenhum dos dois, `sem_turno_em_andamento`.
+   */
   async cancelar(id: string): Promise<void> {
     const { repositorio, execucoes, agora } = this.dependencias;
     const orquestrador = this.buscar(id);
     const turno = orquestrador.turnoEmAndamento;
 
     if (turno === null) {
+      if (this.cancelarRetomada(orquestrador, "o usuário cancelou")) {
+        return;
+      }
       throw new ErroDeOrquestracao(
         "sem_turno_em_andamento",
         `"${orquestrador.nome}" não está trabalhando em nenhum pedido.`,
       );
     }
 
-    if (execucoes.cancelar(id)) {
+    if (execucoes.cancelar(id, "usuario")) {
       // O turno é encerrado por `executar`, quando o motor terminar de parar.
       return;
     }
@@ -386,6 +503,10 @@ export class ServicoDeOrquestracao {
         `Cancele o pedido em andamento de "${orquestrador.nome}" antes de excluí-lo.`,
       );
     }
+    // Sem evento: o histórico vai embora junto.
+    this.retomadas.get(id)?.desmarcar();
+    this.retomadas.delete(id);
+    this.tentativas.delete(id);
     await this.dependencias.repositorio.remover(id);
     await this.dependencias.anexos.removerTodos(id);
   }
@@ -418,6 +539,7 @@ export class ServicoDeOrquestracao {
     turnoId: string,
     sinal: AbortSignal,
     configuracaoDoTurno: ConfiguracaoDoOrquestrador,
+    instrucoesDoTurno: Pick<PedidoDeTurno, "instrucoes" | "revogarInstrucoesAnteriores" | "subagentesProntos">,
   ): Promise<TurnoEncerrado | null> {
     const { motor, repositorio, anexos, worktrees, pastaDeArtefatos, agora } = this.dependencias;
     const turno = orquestrador.turnoEmAndamento;
@@ -445,6 +567,12 @@ export class ServicoDeOrquestracao {
 
     let resultado: ResultadoDoTurno | null = null;
     let erro: unknown = null;
+    // O resumo do diagnóstico, se a vigia encerrou o turno por silêncio.
+    const travamento: { resumo: string | null } = { resumo: null };
+    const vigia = this.vigiarTurno(orquestrador, turnoId, sessaoDoTurno, pastaDoTurno.caminho, (resumo) => {
+      travamento.resumo = resumo;
+    });
+    vigia?.ligar();
 
     try {
       resultado = await motor.executarTurno(
@@ -463,12 +591,20 @@ export class ServicoDeOrquestracao {
           pastaDasImagens: anexosDoTurno.length > 0 ? anexos.pastaDe(orquestrador.id) : null,
           // Do Orquestrador, e não do worktree: os artefatos sobrevivem ao turno.
           pastaDeArtefatos: pastaDeArtefatos(orquestrador.id),
+          ...instrucoesDoTurno,
         },
-        (evento) => this.registrarDoMotor(orquestrador, turnoId, evento),
+        (evento) => {
+          vigia?.registrarLinha();
+          this.registrarDoMotor(orquestrador, turnoId, evento);
+        },
         sinal,
+        () => vigia?.registrarLinha(),
       );
     } catch (falha) {
       erro = falha;
+    } finally {
+      vigia?.desligar();
+      this.dependencias.diagnosticador?.esquecer(orquestrador.id);
     }
 
     // Auto-cleanup no espírito do CLI: worktree sem alterações é removido;
@@ -492,23 +628,45 @@ export class ServicoDeOrquestracao {
         inicio: inicioDoTurno,
         fim: fimDoTurno,
       },
+      modo,
+      falha: null,
     };
+    // Abortado pela vigia (ADR-36) é falha, não cancelamento: o turno pode ser retomado.
+    const encerradoPorSilencio = sinal.aborted && sinal.reason === ABORTO_POR_SILENCIO;
 
     try {
-      if (sinal.aborted) {
+      if (sinal.aborted && !encerradoPorSilencio) {
         this.publicar(orquestrador, orquestrador.cancelarTurno(turnoId, agora()));
+      } else if (encerradoPorSilencio) {
+        const diagnostico = travamento.resumo ?? "sem saída";
+        encerrado.falha = {
+          causa: "silencio",
+          liberaEm: null,
+          motivo: `O app encerrou o turno porque o Claude ficou sem dar notícias (${diagnostico}).`,
+        };
+        this.publicar(orquestrador, orquestrador.falharTurno(turnoId, encerrado.falha.motivo, agora()));
       } else if (resultado !== null && resultado.sucesso) {
+        // Só a resposta final do Orquestrador: o texto dos Subagentes nunca
+        // chega aqui. Os blocos de pergunta saem do texto e viram perguntas;
+        // os inválidos só são descartados (o turno não tem avisos).
+        const semPerguntas = separarPerguntasDoApp(resultado.resposta);
+        for (const aviso of semPerguntas.avisos) {
+          console.warn(`[orquestracao] Turno ${turnoId}: ${aviso}`);
+        }
         // O marcador sai sempre da resposta; só vira Plano pendente num turno
         // de execução (no planejamento, o turno já termina em Plano).
-        const { resposta, planoProposto } = separarPropostaDePlano(resultado.resposta);
+        const { resposta, planoProposto } = separarPropostaDePlano(semPerguntas.texto);
         const planoPendente = planoProposto && configuracaoDoTurno.propoePlanoEmPedidosGrandes(modo);
         this.publicar(
           orquestrador,
-          orquestrador.concluirTurno(turnoId, resposta, resultado.uso, agora(), planoPendente),
+          orquestrador.concluirTurno(turnoId, resposta, resultado.uso, agora(), planoPendente, semPerguntas.perguntas),
         );
       } else {
-        const motivo = resultado !== null && !resultado.sucesso ? resultado.motivo : descreverErro(erro);
-        this.publicar(orquestrador, orquestrador.falharTurno(turnoId, motivo, agora()));
+        encerrado.falha =
+          resultado !== null && !resultado.sucesso
+            ? { causa: resultado.causa ?? "outro", liberaEm: resultado.liberaEm ?? null, motivo: resultado.motivo }
+            : { causa: "outro", liberaEm: null, motivo: descreverErro(erro) };
+        this.publicar(orquestrador, orquestrador.falharTurno(turnoId, encerrado.falha.motivo, agora()));
       }
       await repositorio.salvar(orquestrador);
     } catch (falha) {
@@ -516,6 +674,213 @@ export class ServicoDeOrquestracao {
       return null;
     }
     return encerrado;
+  }
+
+  /**
+   * A vigia do turno (ver ADR-36), ou `null` sem diagnosticador. Durante o
+   * silêncio publica o diagnóstico como sinal de vida; se o turno travar e a
+   * autorrecuperação estiver ligada, publica a etapa "encerrado" e aborta a
+   * execução com o motivo "silencio".
+   */
+  private vigiarTurno(
+    orquestrador: Orquestrador,
+    turnoId: string,
+    sessaoId: string,
+    pastaDoTurno: string,
+    aoTravar: (resumo: string) => void,
+  ): VigiaDoTurno | null {
+    const { diagnosticador, agendador, preferencias, publicador, execucoes, agora } = this.dependencias;
+    if (diagnosticador === undefined) {
+      return null;
+    }
+    return new VigiaDoTurno({
+      alvo: { orquestradorId: orquestrador.id, sessaoId, pastaDoTurno },
+      diagnosticador,
+      agendador: agendador ?? agendadorDoRelogio,
+      agora,
+      podeAgir: () => preferencias.atuais().autorrecuperacao,
+      aoDiagnosticar: (diagnostico) =>
+        publicador.sinalizar(orquestrador.id, {
+          turnoId,
+          em: agora().toISOString(),
+          tokensPensando: 0,
+          diagnostico,
+        }),
+      aoTravar: (resumo) => {
+        aoTravar(resumo);
+        const de = maximoDeTentativas("silencio");
+        this.publicarRecuperacao(orquestrador, turnoId, "encerrado", {
+          causa: "silencio",
+          // A tentativa que vem a seguir; se já se esgotaram, a desistência vem depois do fim do turno.
+          tentativa: Math.min(this.tentativasFeitas(orquestrador.id, "silencio") + 1, de),
+          de,
+          resumo,
+          retomaEm: null,
+        });
+        execucoes.cancelar(orquestrador.id, ABORTO_POR_SILENCIO);
+      },
+    });
+  }
+
+  private tentativasFeitas(orquestradorId: string, causa: CausaDaRecuperacao): number {
+    return this.tentativas.get(orquestradorId)?.get(causa) ?? 0;
+  }
+
+  /**
+   * Terminado o turno (e já fora do `ControleDeExecucoes`), decide a
+   * autorrecuperação: um turno concluído zera as tentativas; um que falhou
+   * por silêncio, limite de uso, sobrecarga ou rede, com a preferência
+   * ligada, ganha uma retomada agendada, ou a desistência se as tentativas
+   * da causa se esgotaram. Nunca lança.
+   */
+  private decidirRecuperacao(orquestradorId: string, encerrado: TurnoEncerrado): void {
+    const { repositorio, preferencias, agendador, agora } = this.dependencias;
+    try {
+      const { falha } = encerrado;
+      if (falha === null) {
+        this.tentativas.delete(orquestradorId);
+        return;
+      }
+      if (!ehRecuperavel(falha.causa) || !preferencias.atuais().autorrecuperacao) {
+        return;
+      }
+      const orquestrador = repositorio.buscarPorId(orquestradorId);
+      // Excluído, ou o usuário já abriu outro turno: não há o que retomar.
+      if (orquestrador === null || orquestrador.ultimoTurno?.id !== encerrado.turnoId) {
+        return;
+      }
+
+      const causa = falha.causa;
+      const de = maximoDeTentativas(causa);
+      const tentativa = this.tentativasFeitas(orquestradorId, causa) + 1;
+      if (tentativa > de) {
+        this.tentativas.delete(orquestradorId);
+        this.publicarRecuperacao(orquestrador, encerrado.turnoId, "desistiu", {
+          causa,
+          tentativa: de,
+          de,
+          resumo:
+            `O app desistiu de retomar sozinho: ${descreverCausa(causa)}. ` +
+            `Retomou a mesma sessão ${de} ${de === 1 ? "vez" : "vezes"}, ${descreverEsperas(causa)}, ` +
+            `e o turno falhou de novo. Última falha: ${falha.motivo}`,
+          retomaEm: null,
+        });
+        return;
+      }
+
+      const contagem = this.tentativas.get(orquestradorId) ?? new Map<CausaDaRecuperacao, number>();
+      contagem.set(causa, tentativa);
+      this.tentativas.set(orquestradorId, contagem);
+
+      const espera = esperaAntesDaTentativa(causa, tentativa, falha.liberaEm, agora());
+      const retomaEm = new Date(agora().getTime() + espera);
+      this.publicarRecuperacao(orquestrador, encerrado.turnoId, "aguardando", {
+        causa,
+        tentativa,
+        de,
+        resumo: resumoDaEspera(causa, falha.liberaEm, retomaEm),
+        retomaEm: retomaEm.toISOString(),
+      });
+      const desmarcar = (agendador ?? agendadorDoRelogio).agendar(espera, () => {
+        void this.retomar(orquestradorId);
+      });
+      this.retomadas.set(orquestradorId, {
+        turnoId: encerrado.turnoId,
+        causa,
+        tentativa,
+        de,
+        modo: encerrado.modo,
+        desmarcar,
+      });
+    } catch (falha) {
+      console.warn(
+        `[orquestracao] Não foi possível decidir a autorrecuperação do turno ${encerrado.turnoId}:`,
+        descreverErro(falha),
+      );
+    }
+  }
+
+  /**
+   * Chegou a hora: publica "retomando" no turno que falhou e abre outro na
+   * mesma sessão, pedindo ao Claude para continuar de onde parou. Nada na
+   * pasta de trabalho é tocado. Nunca rejeita.
+   */
+  private async retomar(orquestradorId: string): Promise<void> {
+    const agendada = this.retomadas.get(orquestradorId);
+    if (agendada === undefined) {
+      return;
+    }
+    this.retomadas.delete(orquestradorId);
+    const orquestrador = this.dependencias.repositorio.buscarPorId(orquestradorId);
+    if (orquestrador === null) {
+      return;
+    }
+    const { turnoId, causa, tentativa, de, modo } = agendada;
+    try {
+      this.publicarRecuperacao(orquestrador, turnoId, "retomando", {
+        causa,
+        tentativa,
+        de,
+        resumo: `retomando a mesma sessão (tentativa ${tentativa} de ${de})`,
+        retomaEm: null,
+      });
+      await this.iniciarTurno(
+        orquestrador,
+        mensagemDeRetomada(causa, orquestrador.worktree !== null),
+        [],
+        modo,
+        null,
+        { deTurnoId: turnoId, tentativa },
+      );
+    } catch (falha) {
+      console.warn(
+        `[orquestracao] Não foi possível retomar o turno ${turnoId} do orquestrador ${orquestradorId}:`,
+        descreverErro(falha),
+      );
+      this.tentativas.delete(orquestradorId);
+      try {
+        this.publicarRecuperacao(orquestrador, turnoId, "desistiu", {
+          causa,
+          tentativa,
+          de,
+          resumo: `O app não conseguiu retomar o turno (${descreverCausa(causa)}): ${descreverErro(falha)}`,
+          retomaEm: null,
+        });
+      } catch {
+        // Sem histórico onde registrar: o aviso acima basta.
+      }
+    }
+  }
+
+  /**
+   * Cancela a retomada agendada do Orquestrador, se houver, e publica
+   * "cancelada" com o porquê. As tentativas zeram: o usuário assumiu.
+   */
+  private cancelarRetomada(orquestrador: Orquestrador, porque: string): boolean {
+    const agendada = this.retomadas.get(orquestrador.id);
+    if (agendada === undefined) {
+      return false;
+    }
+    agendada.desmarcar();
+    this.retomadas.delete(orquestrador.id);
+    this.tentativas.delete(orquestrador.id);
+    this.publicarRecuperacao(orquestrador, agendada.turnoId, "cancelada", {
+      causa: agendada.causa,
+      tentativa: agendada.tentativa,
+      de: agendada.de,
+      resumo: `retomada cancelada: ${porque}`,
+      retomaEm: null,
+    });
+    return true;
+  }
+
+  private publicarRecuperacao(
+    orquestrador: Orquestrador,
+    turnoId: string,
+    etapa: EtapaDaRecuperacao,
+    dados: { causa: CausaDaRecuperacao; tentativa: number; de: number; resumo: string; retomaEm: string | null },
+  ): void {
+    this.publicar(orquestrador, { tipo: "recuperacao_do_turno", turnoId, etapa, ...dados });
   }
 
   /**

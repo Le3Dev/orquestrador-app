@@ -244,6 +244,7 @@ describe("Orquestrador no modo de planejamento", () => {
       resposta: "o plano",
       uso,
       planoPendente: true,
+      perguntas: [],
     });
   });
 
@@ -273,6 +274,29 @@ describe("Orquestrador no modo de planejamento", () => {
     expect(reaberto.turnoComPlanoPendente?.id).toBe("t1");
   });
 
+  it("as perguntas da resposta vão ao evento e ao turno, convivem com o plano e sobrevivem a reabrir", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "refatore tudo", agora);
+    const perguntas = [
+      { pergunta: "Qual banco?", opcoes: [{ rotulo: "Postgres", descricao: "já usado" }, { rotulo: "SQLite", descricao: null }], multipla: false },
+    ];
+
+    const evento = orquestrador.concluirTurno("t1", "proponho", uso, agora, true, perguntas);
+
+    expect(evento).toMatchObject({ tipo: "turno_concluido", planoPendente: true, perguntas });
+    expect(orquestrador.paraDados().turnos[0]).toMatchObject({ decisaoDoPlano: "pendente", perguntas });
+    expect(orquestrador.ultimoTurno?.perguntas).toEqual(perguntas);
+    expect(Orquestrador.reconstituir(orquestrador.paraDados()).paraDados().turnos[0]?.perguntas).toEqual(perguntas);
+  });
+
+  it("um turno sem perguntas fica com perguntas vazias", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "analise", agora);
+
+    expect(orquestrador.concluirTurno("t1", "pronto", uso, agora)).toMatchObject({ perguntas: [] });
+    expect(orquestrador.paraDados().turnos[0]?.perguntas).toEqual([]);
+  });
+
   it("reabre turnos gravados antes do modo de planejamento como execução", () => {
     const dados = novoOrquestrador().paraDados();
     const turnoAntigo = {
@@ -290,7 +314,7 @@ describe("Orquestrador no modo de planejamento", () => {
 
     const reaberto = Orquestrador.reconstituir({ ...dados, turnos: [turnoAntigo] });
 
-    expect(reaberto.paraDados().turnos[0]).toMatchObject({ modo: "execucao", decisaoDoPlano: null });
+    expect(reaberto.paraDados().turnos[0]).toMatchObject({ modo: "execucao", decisaoDoPlano: null, perguntas: [] });
     expect(reaberto.ultimoTurno?.modo).toBe("execucao");
     expect(reaberto.turnoComPlanoPendente).toBeNull();
   });

@@ -12,6 +12,7 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
+  instrucoesPersonalizadas: "",
 };
 
 function turnoDoPlano(...decisao: EventoDeOrquestracao[]): TurnoNaTela {

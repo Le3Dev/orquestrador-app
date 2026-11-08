@@ -64,6 +64,7 @@ describe("montarItensDaPaleta", () => {
       "acao",
       "acao",
       "acao",
+      "acao",
       "orquestrador",
       "orquestrador",
       "nota",
@@ -73,6 +74,7 @@ describe("montarItensDaPaleta", () => {
     expect(titulos(itens.filter((candidato) => candidato.tipo === "acao"))).toEqual([
       "Novo orquestrador",
       "Nova nota",
+      "Nova prévia",
       "Organizar",
       "Zoom 100%",
       "Enquadrar tudo",
@@ -95,6 +97,7 @@ describe("montarItensDaPaleta", () => {
     expect(acoesComAtalho).toEqual([
       ["Novo orquestrador", "Ctrl+N"],
       ["Nova nota", "Ctrl+Shift+N"],
+      ["Nova prévia", null],
       ["Organizar", null],
       ["Zoom 100%", "Ctrl+0"],
       ["Enquadrar tudo", null],
@@ -111,6 +114,7 @@ describe("montarItensDaPaleta", () => {
     expect(titulos(acoesNoDesktop)).toEqual([
       "Novo orquestrador",
       "Nova nota",
+      "Nova prévia",
       "Organizar",
       "Zoom 100%",
       "Enquadrar tudo",
@@ -268,7 +272,8 @@ describe("buscarNaPaleta", () => {
     const resultado = buscarNaPaleta(itens, "   ");
 
     expect(resultado).toHaveLength(itens.length);
-    expect(resultado.slice(0, 7).map((candidato) => candidato.tipo)).toEqual([
+    expect(resultado.slice(0, 8).map((candidato) => candidato.tipo)).toEqual([
+      "acao",
       "acao",
       "acao",
       "acao",

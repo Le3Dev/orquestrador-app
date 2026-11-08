@@ -1,3 +1,4 @@
+import { PerguntaDoApp } from "../perguntas/PerguntaDoApp";
 import { DadosDoAnexo } from "./Anexo";
 import { DadosDaConfiguracao } from "./ConfiguracaoDoOrquestrador";
 import { DadosDoConsumoDoTurno } from "./ConsumoDoTurno";
@@ -29,7 +30,17 @@ export type EventoDoMotor =
   | { tipo: "sessao_iniciada" }
   | { tipo: "texto_do_orquestrador"; texto: string }
   | { tipo: "ferramenta_do_orquestrador"; ferramenta: string; detalhe: string }
-  | { tipo: "subagente_iniciado"; subagenteId: string; descricao: string; tarefa: string }
+  | {
+      tipo: "subagente_iniciado";
+      subagenteId: string;
+      descricao: string;
+      tarefa: string;
+      /**
+       * Tipo do subagente: o "executor" ou o nome de um subagente pronto.
+       * Ausente nos eventos gravados antes dos subagentes prontos.
+       */
+      papel?: string | undefined;
+    }
   | {
       tipo: "progresso_do_subagente";
       subagenteId: string;
@@ -51,8 +62,21 @@ export type EventoDoMotor =
   | { tipo: "resultado_do_subagente"; subagenteId: string; resultado: string }
   | { tipo: "permissao_negada"; ferramenta: string; detalhe: string }
   | { tipo: "uso_da_cota"; janelas: JanelaDaCota[] }
+  /**
+   * Um endereço local (ex.: `http://localhost:5173`) apareceu na saída de uma
+   * ferramenta, do Orquestrador ou de um Subagente: em geral, um servidor de
+   * desenvolvimento que acabou de subir. A tela o mostra numa prévia ao vivo.
+   * Chega uma vez por endereço em cada turno, já normalizado.
+   */
+  | { tipo: "endereco_local_detectado"; url: string }
   /** O Claude está raciocinando: não muda o turno, só mostra que há vida. */
   | { tipo: "sinal_de_vida"; tokensPensando: number };
+
+/** Em que ponto está a autorrecuperação de um turno que travou ou falhou (ver ADR-36). */
+export type EtapaDaRecuperacao = "encerrado" | "aguardando" | "retomando" | "cancelada" | "desistiu";
+
+/** Por que o turno precisou ser retomado: as causas de falha que o app sabe recuperar. */
+export type CausaDaRecuperacao = "silencio" | "limite_de_uso" | "sobrecarga" | "rede";
 
 /** Marcos do ciclo de vida de um turno, decididos pelo domínio. */
 export type EventoDeTurno =
@@ -62,6 +86,11 @@ export type EventoDeTurno =
       configuracao: DadosDaConfiguracao;
       anexos: DadosDoAnexo[];
       modo: ModoDoTurno;
+      /**
+       * O turno foi aberto sozinho pelo app para retomar `deTurnoId`, que
+       * travou ou falhou (ver ADR-36). Ausente nos turnos normais.
+       */
+      retomada?: { deTurnoId: string; tentativa: number };
     }
   | {
       tipo: "turno_concluido";
@@ -73,6 +102,12 @@ export type EventoDeTurno =
        * Plano antes de mexer. Ausente nos eventos gravados antes do campo.
        */
       planoPendente: boolean;
+      /**
+       * Perguntas com opções clicáveis que o Orquestrador fez na resposta
+       * final (blocos ```pergunta-do-app), já fora de `resposta`. Ausente nos
+       * eventos gravados antes do campo: valem [].
+       */
+      perguntas: PerguntaDoApp[];
     }
   | { tipo: "turno_cancelado" }
   | { tipo: "turno_falhou"; motivo: string }
@@ -85,7 +120,29 @@ export type EventoDeTurno =
    * ele terminou. Vem sempre depois do evento de fim do turno; ausente quando
    * não houve transcrição para medir.
    */
-  | { tipo: "consumo_do_turno_medido"; consumo: DadosDoConsumoDoTurno };
+  | { tipo: "consumo_do_turno_medido"; consumo: DadosDoConsumoDoTurno }
+  /**
+   * Um passo da autorrecuperação do turno (ver ADR-36): o app encerrou o
+   * turno parado, espera para retomar, retoma, teve a retomada cancelada
+   * ou desistiu. Vem sempre com o `turnoId` do turno que travou ou falhou.
+   */
+  | {
+      tipo: "recuperacao_do_turno";
+      etapa: EtapaDaRecuperacao;
+      causa: CausaDaRecuperacao;
+      /** 1 para a primeira tentativa. */
+      tentativa: number;
+      /** Máximo de tentativas para essa causa. */
+      de: number;
+      /**
+       * Texto pronto para o log, em pt-BR (ex.: "sem saída há 5 min, sem CPU
+       * e sem transcrição crescendo"; "limite de uso, libera às 14:30"). Em
+       * "desistiu", o diagnóstico completo.
+       */
+      resumo: string;
+      /** Em "aguardando": quando retoma (ISO). Nulo nas outras etapas. */
+      retomaEm: string | null;
+    };
 
 /**
  * Tudo o que acontece com um Orquestrador. É o que vai para o histórico
@@ -134,6 +191,12 @@ export type EventoRegistrado = EventoDeOrquestracao & { sequencia: number; em: s
 export interface SinalDeVida {
   turnoId: string;
   em: string;
-  /** Estimativa de tokens de raciocínio do ciclo atual. */
+  /** Estimativa de tokens de raciocínio do ciclo atual. Zero nos sinais com `diagnostico`. */
   tokensPensando: number;
+  /**
+   * O que a vigia do turno viu quando o Claude ficou sem dar saída (ver
+   * ADR-36), ex.: trabalhando "rodando `npm test` há 6 min"; suspeito "sem
+   * saída há 3 min, sem CPU". Ausente nos sinais de raciocínio.
+   */
+  diagnostico?: { situacao: "trabalhando" | "suspeito"; resumo: string };
 }

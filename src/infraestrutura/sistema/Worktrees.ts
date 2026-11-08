@@ -86,6 +86,25 @@ export class Worktrees {
   }
 
   /**
+   * Onde a pasta fica dentro do repositório, com "/" e sem a barra final
+   * ("" na raiz). Lança se o git não responder: sem o prefixo, o turno rodaria
+   * na raiz do repositório e não na pasta escolhida.
+   */
+  async prefixo(pasta: string): Promise<string> {
+    const { codigo, saida, erro } = await this.executar(["rev-parse", "--show-prefix"], pasta);
+    if (codigo !== 0) {
+      throw new Error(`git rev-parse --show-prefix falhou (código ${codigo}): ${erro.trim()}`);
+    }
+    return saida.trim().replace(/\/+$/, "");
+  }
+
+  /** Se a pasta `prefixo` existe no HEAD; uma pasta não versionada não aparece no worktree. */
+  async existeNoHead(pastaRepo: string, prefixo: string): Promise<boolean> {
+    const { codigo } = await this.executar(["cat-file", "-e", `HEAD:${prefixo}`], pastaRepo);
+    return codigo === 0;
+  }
+
+  /**
    * Cria um worktree em `caminhoWorktree` ligado a `branch` (criada do HEAD
    * atual). Se o worktree já existe no caminho pedido, não refaz nada.
    */

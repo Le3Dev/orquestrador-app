@@ -42,6 +42,12 @@
 // janela:*); o estado de maximizada chega por "janela:maximizada".
 // Janelas de ativação e de configuração: pequenas e sem botão de fechar
 // próprio, mantêm o titleBarOverlay (botões nativos na cor do tema).
+//
+// macOS (electron/mac.js, tudo atrás de process.platform === "darwin"): menu
+// nativo (Cmd+C/V/Z/Q), PATH do shell de login (aberto pelo Finder ou pelo
+// Dock), as 3 bolinhas nativas no lugar do overlay (na principal, centradas na
+// barra de título do app), o `claude` do PATH na primeira abertura e nada de
+// atualização automática (sem assinatura da Apple ela não funciona).
 
 const {
   app,
@@ -79,6 +85,8 @@ const {
   validarConfiguracao,
 } = require("./configuracaoLocal");
 const { importarHistorico, localizarHistoricoAntigo } = require("./importacaoDoHistorico");
+// Ajustes só do macOS; fora dele cada função devolve o comportamento de antes.
+const mac = require("./mac");
 
 // Cores do tema escuro (web/src/theme/index.css): fundo e texto claro.
 // COR_BARRA é o token --barra-de-titulo. O overlay (só nas janelas de ativação
@@ -94,12 +102,16 @@ const NOME_DO_COOKIE = "orquestrador_acesso";
 // ──────────────────────────────────────────────────────────────────────────
 // Build de teste: gerado por `npm run dist:win:teste`, com "buildDeTeste": true
 // no package.json empacotado.
-function lerBuildDeTeste() {
+function lerPacoteDoApp() {
   try {
-    return require(path.join(app.getAppPath(), "package.json")).buildDeTeste === true;
+    return require(path.join(app.getAppPath(), "package.json"));
   } catch {
-    return false;
+    return null;
   }
+}
+function lerBuildDeTeste() {
+  const pacote = lerPacoteDoApp();
+  return Boolean(pacote) && pacote.buildDeTeste === true;
 }
 const BUILD_DE_TESTE = lerBuildDeTeste();
 
@@ -115,8 +127,9 @@ const EXIGE_LICENCA = app.isPackaged && !BUILD_DE_TESTE && config.exigirLicenca 
 
 // Atualização automática só no app instalado normal: em desenvolvimento não há
 // app-update.yml, e o build de teste nunca deve trocar a si mesmo por uma
-// versão publicada.
-const ATUALIZACAO_ATIVA = app.isPackaged && !BUILD_DE_TESTE;
+// versão publicada. No Mac fica desligada: sem assinatura da Apple o
+// electron-updater não instala a versão nova.
+const ATUALIZACAO_ATIVA = app.isPackaged && !BUILD_DE_TESTE && !mac.ehMac;
 
 // Pasta do usuário trocável só fora do app instalado normal (testes isolados).
 // No instalado, ignorar evita que uma variável de ambiente esquecida desvie os
@@ -633,8 +646,9 @@ function abrirNoNavegador(url) {
 
 // `botoesNativos`: as janelas pequenas (ativação, configuração) não desenham
 // botões próprios e ficam com o overlay nativo; a principal desenha os seus.
+// No Mac todas usam as bolinhas nativas (mac.ajustarOpcoesDaJanela).
 function criarJanela({ botoesNativos = true, transparente = false, ...opcoes } = {}) {
-  const janela = new BrowserWindow({
+  const janela = new BrowserWindow(mac.ajustarOpcoesDaJanela({
     title: config.productName,
     // A principal é transparente desde a criação (o Windows não aceita mudar
     // depois); o fundo opaco do modo normal vem do CSS.
@@ -659,7 +673,7 @@ function criarJanela({ botoesNativos = true, transparente = false, ...opcoes } =
     // Mascote do app (gerado por `npm run icones`); sem ele, aparece o átomo do Electron.
     icon: path.join(__dirname, "icones", process.platform === "win32" ? "icone.ico" : "icone.png"),
     ...opcoes,
-  });
+  }, !botoesNativos));
   // Links externos abrem no navegador do sistema, não dentro do app.
   janela.webContents.setWindowOpenHandler(({ url }) => {
     abrirNoNavegador(url);
@@ -992,12 +1006,13 @@ function exigirJanelaDeConfiguracao(evento) {
 
 function historicoParaImportar(atual) {
   if (atual && atual.historicoImportadoDe) return null;
-  return localizarHistoricoAntigo({
+  const encontrado = localizarHistoricoAntigo({
     empacotado: app.isPackaged,
     pastaDoApp: app.getAppPath(),
     ambiente: process.env,
     destinoDados: pastaDeDados(),
   });
+  return encontrado || (app.isPackaged ? mac.historicoDoRepositorio(lerPacoteDoApp(), ehPasta) : null);
 }
 
 ipcMain.handle("primeira-abertura:carregar", (e) => {
@@ -1008,7 +1023,7 @@ ipcMain.handle("primeira-abertura:carregar", (e) => {
     aviso: avisoDaConfiguracao,
     pastaRaizDosProjetos:
       (atual && atual.pastaRaizDosProjetos) || sugerirPastaDosProjetos(process.env, ehPasta) || "",
-    caminhoDoClaudeCode: (atual && atual.caminhoDoClaudeCode) || detectarClaudeCode(process.env, ehArquivo) || "",
+    caminhoDoClaudeCode: (atual && atual.caminhoDoClaudeCode) || detectarClaudeCode(process.env, ehArquivo) || mac.claudeCodeDoPath(ehArquivo) || "",
     historicoAntigo: historicoParaImportar(atual),
   };
 });
@@ -1027,7 +1042,8 @@ ipcMain.handle("primeira-abertura:escolher-claude-code", async (e, atual) => {
   exigirJanelaDeConfiguracao(e);
   const resultado = await dialog.showOpenDialog(janelaConfiguracao, {
     title: "Onde está o Claude Code (claude.exe)",
-    properties: ["openFile"],
+    // No Mac o ~/.local/bin, onde o instalador põe o `claude`, é oculto.
+    properties: mac.ehMac ? ["openFile", "showHiddenFiles"] : ["openFile"],
     defaultPath: typeof atual === "string" && ehArquivo(atual) ? atual : undefined,
     filters:
       process.platform === "win32"
@@ -1141,7 +1157,13 @@ if (!conseguiuLock) {
   app.whenReady().then(async () => {
     // Mesmo appId do atalho do instalador: a barra de tarefas agrupa e mostra o ícone do app.
     if (process.platform === "win32") app.setAppUserModelId(config.appId);
-    Menu.setApplicationMenu(null); // remove File/Edit/View/Window
+    // Remove File/Edit/View/Window. No Mac o menu é quem faz Cmd+C/Cmd+V
+    // funcionarem: volta só com o essencial (fora dele menuDoApp devolve null).
+    Menu.setApplicationMenu(mac.menuDoApp(Menu, config.productName));
+    // Antes de subir o servidor e da primeira abertura (que procura o `claude`).
+    mac.carregarPathDoShell();
+    // No Mac o ícone da janela não vale: o do Dock vem daqui fora do app empacotado.
+    if (mac.ehMac && app.dock) app.dock.setIcon(path.join(__dirname, "icones", "icone.png"));
     licenca.iniciar(pastaDoUsuario());
     // Sem atualização o app ainda abre: a falha só vai para o log.
     try {

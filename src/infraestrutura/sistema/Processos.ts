@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 
-function executar(comando: string, argumentos: readonly string[]): Promise<string> {
+export function executar(comando: string, argumentos: readonly string[]): Promise<string> {
   return new Promise((resolver, rejeitar) => {
     execFile(comando, [...argumentos], { windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (erro, saida) => {
       if (erro !== null) {
@@ -12,12 +12,29 @@ function executar(comando: string, argumentos: readonly string[]): Promise<strin
   });
 }
 
+/** Espera entre o SIGTERM e o SIGKILL ao encerrar uma árvore no Mac/Linux. */
+export const ESPERA_ANTES_DO_SIGKILL_MS = 5_000;
+
+/** Manda o sinal a um pid (ou, negativo, a um grupo); falso se não havia ninguém. */
+function sinalizar(alvo: number, sinal: NodeJS.Signals | 0): boolean {
+  try {
+    process.kill(alvo, sinal);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Encerra o processo e todos os filhos. No Windows `kill()` mataria só o
  * `claude.exe`, deixando para trás comandos que um Subagente tenha aberto
  * (um `npm test` longo, por exemplo); `taskkill /T` derruba a árvore inteira.
+ *
+ * No Mac/Linux o Claude Code é iniciado como líder de um grupo de processos
+ * próprio (`detached`): o SIGTERM vai ao grupo inteiro e, se alguém ainda
+ * estiver vivo depois de `ESPERA_ANTES_DO_SIGKILL_MS`, o grupo leva SIGKILL.
  */
-export function encerrarArvore(pid: number | undefined): void {
+export function encerrarArvore(pid: number | undefined, esperaAntesDoSigkillMs = ESPERA_ANTES_DO_SIGKILL_MS): void {
   if (pid === undefined) {
     return;
   }
@@ -29,11 +46,21 @@ export function encerrarArvore(pid: number | undefined): void {
     });
     return;
   }
-  try {
-    process.kill(pid, "SIGTERM");
-  } catch {
-    // Já tinha terminado.
+  if (!sinalizar(-pid, "SIGTERM")) {
+    // Sem grupo com esse id: um processo iniciado sem `detached` (por uma
+    // versão anterior do app) ou que já terminou com todo o grupo. Só o
+    // SIGTERM ao pid, como antes: um SIGKILL depois da espera poderia acertar
+    // um pid já reaproveitado por outro programa.
+    sinalizar(pid, "SIGTERM");
+    return;
   }
+  // `unref`: a espera não segura o servidor que está desligando. O id do
+  // grupo não é reaproveitado enquanto houver alguém nele.
+  setTimeout(() => {
+    if (sinalizar(-pid, 0)) {
+      sinalizar(-pid, "SIGKILL");
+    }
+  }, esperaAntesDoSigkillMs).unref();
 }
 
 /** Linha de comando de um processo, ou nulo se ele não existe mais. */
@@ -93,4 +120,67 @@ export async function memoriaDosProcessos(pids: readonly number[]): Promise<Map<
     }
   }
   return memoria;
+}
+
+/** Um processo da máquina, como o `ps` o mostra. */
+export interface ProcessoListado {
+  pid: number;
+  ppid: number;
+  /** % de CPU. */
+  cpu: number;
+  /** Há quanto tempo está rodando. */
+  haMs: number;
+  /** Linha de comando completa. */
+  comando: string;
+}
+
+/** `etime` do `ps` (`[[dd-]hh:]mm:ss`) em milissegundos; nulo se não reconhecer. */
+export function tempoDoPsEmMs(etime: string): number | null {
+  const partes = /^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/.exec(etime.trim());
+  if (partes === null) {
+    return null;
+  }
+  const [dias, horas, minutos, segundos] = [partes[1], partes[2], partes[3], partes[4]].map((parte) => Number(parte ?? 0));
+  return ((((dias ?? 0) * 24 + (horas ?? 0)) * 60 + (minutos ?? 0)) * 60 + (segundos ?? 0)) * 1000;
+}
+
+/**
+ * Lê a saída de `ps -A -o pid=,ppid=,pcpu=,etime=,args=`. A CPU pode vir com
+ * vírgula decimal, conforme o idioma do sistema; linhas irreconhecíveis são
+ * ignoradas.
+ */
+export function lerListaDeProcessos(texto: string): ProcessoListado[] {
+  const processos: ProcessoListado[] = [];
+  for (const linha of texto.split("\n")) {
+    const campos = /^\s*(\d+)\s+(\d+)\s+([\d.,]+)\s+(\S+)\s+(.*)$/.exec(linha);
+    if (campos === null) {
+      continue;
+    }
+    const haMs = tempoDoPsEmMs(campos[4] ?? "");
+    const cpu = Number((campos[3] ?? "").replace(",", "."));
+    if (haMs === null || !Number.isFinite(cpu)) {
+      continue;
+    }
+    processos.push({
+      pid: Number(campos[1]),
+      ppid: Number(campos[2]),
+      cpu,
+      haMs,
+      comando: (campos[5] ?? "").trim(),
+    });
+  }
+  return processos;
+}
+
+/**
+ * Todos os processos da máquina com pai, CPU e idade, numa única chamada ao
+ * `ps`. No Windows devolve lista vazia: não há um equivalente barato (o
+ * `Get-CimInstance` leva segundos e não dá a CPU do momento), e quem usa trata
+ * a lista vazia como "não deu para saber".
+ */
+export async function listarProcessos(): Promise<ProcessoListado[]> {
+  if (process.platform === "win32") {
+    return [];
+  }
+  return lerListaDeProcessos(await executar("ps", ["-A", "-o", "pid=,ppid=,pcpu=,etime=,args="]));
 }

@@ -5,10 +5,12 @@ import type {
   EventoDoChatRegistrado,
   JanelaDaCota,
   MensagemDoChat,
+  PerguntaDoApp,
   PreferenciasDoChat,
   SituacaoDoChat,
   TrechoDaResposta,
 } from "../api/tipos";
+import { CERCA_DE_ACAO, CERCA_DE_PERGUNTA, semBlocosDoApp } from "../blocosDoApp";
 import { PREFERENCIAS_PADRAO_DO_CHAT } from "../modelos";
 
 /** Uma mensagem como a tela a mostra: a do servidor e, se falhou, o motivo. */
@@ -17,6 +19,8 @@ export interface MensagemDoChatNaTela extends MensagemDoChat {
   motivoDaFalha: string | null;
   /** O que a resposta quis alterar sem autorização; `null` também nos dados antigos, sem o campo. */
   autorizacaoPendente: AutorizacaoPendente | null;
+  /** As perguntas com opções da resposta; vazias também nos dados antigos, sem o campo. */
+  perguntas: PerguntaDoApp[];
 }
 
 export interface EstadoDoChatNaTela {
@@ -51,15 +55,17 @@ export const ESTADO_INICIAL_DO_CHAT: EstadoDoChatNaTela = {
  */
 function naTela(mensagem: MensagemDoChat): MensagemDoChatNaTela {
   const autorizacaoPendente = mensagem.autorizacaoPendente ?? null;
+  const perguntas = mensagem.perguntas ?? [];
   if (mensagem.situacao === "falhou" && mensagem.avisos.length > 0) {
     return {
       ...mensagem,
       avisos: mensagem.avisos.slice(0, -1),
       motivoDaFalha: mensagem.avisos.at(-1) ?? null,
       autorizacaoPendente,
+      perguntas,
     };
   }
-  return { ...mensagem, motivoDaFalha: null, autorizacaoPendente };
+  return { ...mensagem, motivoDaFalha: null, autorizacaoPendente, perguntas };
 }
 
 /** O estado do servidor (carga inicial ou recarga depois de uma queda) substitui o da tela. */
@@ -123,6 +129,7 @@ export function aplicarEventoDoChat(estado: EstadoDoChatNaTela, evento: EventoDo
           situacao: "concluida",
           texto: evento.texto,
           acoes: evento.acoes,
+          perguntas: evento.perguntas ?? [],
           avisos: evento.avisos,
           uso: evento.uso,
           autorizacaoPendente: evento.autorizacaoPendente ?? null,
@@ -192,46 +199,17 @@ export function aplicarAtividadeDoChat(
   return alvo === undefined || alvo.situacao !== "respondendo" ? estado : { ...estado, atividade };
 }
 
-const CERCA_DE_ACAO = "```acao-do-app";
+const CERCAS_DO_CHAT = [CERCA_DE_ACAO, CERCA_DE_PERGUNTA] as const;
 
 /**
- * O texto da resposta sem os blocos ```` ```acao-do-app ```` (até a cerca de
- * fechamento ou o fim): as ações chegam prontas no fim da resposta e viram
- * cartões. Durante a resposta, também some uma cerca ainda pela metade no fim
- * ("```aca"), para o bloco não piscar na tela antes de ser reconhecido.
+ * O texto da resposta sem os blocos ```` ```acao-do-app ```` e
+ * ```` ```pergunta-do-app ```` (até a cerca de fechamento ou o fim): as ações
+ * e as perguntas chegam prontas no fim da resposta e viram cartões. Durante a
+ * resposta, também some uma cerca ainda pela metade no fim ("```aca"), para o
+ * bloco não piscar na tela antes de ser reconhecido.
  */
 export function textoParaMostrar(texto: string, respondendo: boolean): string {
-  let restante = texto;
-  let resultado = "";
-  for (;;) {
-    const inicio = restante.indexOf(CERCA_DE_ACAO);
-    if (inicio === -1) {
-      resultado += restante;
-      break;
-    }
-    resultado += restante.slice(0, inicio);
-    const fimDaAbertura = restante.indexOf("\n", inicio);
-    if (fimDaAbertura === -1) {
-      break;
-    }
-    const fechamento = restante.indexOf("\n```", fimDaAbertura);
-    if (fechamento === -1) {
-      break;
-    }
-    const fimDoFechamento = restante.indexOf("\n", fechamento + 4);
-    restante = fimDoFechamento === -1 ? "" : restante.slice(fimDoFechamento + 1);
-  }
-  if (respondendo) {
-    resultado = semCercaPelaMetade(resultado);
-  }
-  return resultado.trimEnd();
-}
-
-/** Tira do fim um começo de cerca de ação ainda incompleto, no início de uma linha. */
-function semCercaPelaMetade(texto: string): string {
-  const inicioDaLinha = texto.lastIndexOf("\n") + 1;
-  const ultimaLinha = texto.slice(inicioDaLinha);
-  return ultimaLinha.length >= 3 && CERCA_DE_ACAO.startsWith(ultimaLinha) ? texto.slice(0, inicioDaLinha) : texto;
+  return semBlocosDoApp(texto, CERCAS_DO_CHAT, respondendo);
 }
 
 /** A resposta que parou pedindo autorização, com o que ela quis fazer. */

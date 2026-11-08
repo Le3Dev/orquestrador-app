@@ -4,30 +4,35 @@ import {
   LIMITE_DE_ORQUESTRADORES_ABERTOS,
 } from "./limiteDeTerminais";
 
+/** `o1`, `o2`… até `quantos`. */
+const ids = (quantos: number) => Array.from({ length: quantos }, (_, indice) => `o${indice + 1}`);
+
 describe("limite de orquestradores abertos", () => {
-  it("o limite é 4 e o aviso usa o número da constante", () => {
-    expect(LIMITE_DE_ORQUESTRADORES_ABERTOS).toBe(4);
+  const LIMITE = LIMITE_DE_ORQUESTRADORES_ABERTOS;
+
+  it("o limite é 20 e o aviso usa o número da constante", () => {
+    expect(LIMITE).toBe(20);
     expect(AVISO_DO_LIMITE_DE_ORQUESTRADORES).toBe(
-      "Limite de 4 orquestradores abertos. Feche um dos orquestradores (✕ na barra do terminal) antes de iniciar outro.",
+      "Limite de 20 orquestradores abertos. Feche um dos orquestradores (✕ na barra do terminal) antes de iniciar outro.",
     );
   });
 
-  it("com 3 abertos, cabe outro", () => {
-    expect(cabeOutroTerminal(["o1", "o2", "o3"], [], null)).toBe(true);
-    expect(cabeOutroTerminal(["o1", "o2", "o3"], [], "o4")).toBe(true);
+  it("com um a menos que o limite, cabe outro", () => {
+    expect(cabeOutroTerminal(ids(LIMITE - 1), [], null)).toBe(true);
+    expect(cabeOutroTerminal(ids(LIMITE - 1), [], `o${LIMITE}`)).toBe(true);
   });
 
-  it("com 4 abertos, não cabe outro", () => {
-    expect(cabeOutroTerminal(["o1", "o2", "o3", "o4"], [], null)).toBe(false);
-    expect(cabeOutroTerminal(["o1", "o2", "o3", "o4"], [], "o5")).toBe(false);
+  it("no limite, não cabe outro", () => {
+    expect(cabeOutroTerminal(ids(LIMITE), [], null)).toBe(false);
+    expect(cabeOutroTerminal(ids(LIMITE), [], `o${LIMITE + 1}`)).toBe(false);
   });
 
-  it("com 4 abertos, pedir um que já está aberto cabe (só foca)", () => {
-    expect(cabeOutroTerminal(["o1", "o2", "o3", "o4"], [], "o2")).toBe(true);
+  it("no limite, pedir um que já está aberto cabe (só foca)", () => {
+    expect(cabeOutroTerminal(ids(LIMITE), [], "o2")).toBe(true);
   });
 
   it("o rascunho de novo orquestrador conta como aberto", () => {
-    expect(cabeOutroTerminal(["o1", "o2", "o3"], ["rascunho:1"], null)).toBe(false);
-    expect(cabeOutroTerminal(["o1", "o2"], ["rascunho:1"], "o3")).toBe(true);
+    expect(cabeOutroTerminal(ids(LIMITE - 1), ["rascunho:1"], null)).toBe(false);
+    expect(cabeOutroTerminal(ids(LIMITE - 2), ["rascunho:1"], `o${LIMITE - 1}`)).toBe(true);
   });
 });

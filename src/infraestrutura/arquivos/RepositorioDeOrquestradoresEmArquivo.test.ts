@@ -40,6 +40,26 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
     await rm(pasta, { recursive: true, force: true });
   });
 
+  it("reabre as instruções personalizadas de cada orquestrador, sem misturar", async () => {
+    const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+    const comInstrucoes = novoOrquestrador("a");
+    comInstrucoes.alterarConfiguracao({ instrucoesPersonalizadas: "Comece com PIRULITO.\nDepois: {{x}} $&" });
+    comInstrucoes.registrarInstrucoesDoPedido(true);
+    await repositorio.salvar(comInstrucoes);
+    await repositorio.salvar(novoOrquestrador("b"));
+    await repositorio.aguardarGravacoes();
+
+    const reaberto = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+
+    expect(reaberto.buscarPorId("a")?.configuracao.instrucoesPersonalizadas).toBe(
+      "Comece com PIRULITO.\nDepois: {{x}} $&",
+    );
+    expect(reaberto.buscarPorId("b")?.configuracao.instrucoesPersonalizadas).toBe("");
+    // Lembra que a conversa de "a" já recebeu instruções: apagá-las depois revoga as antigas.
+    expect(reaberto.buscarPorId("a")?.registrarInstrucoesDoPedido(false)).toEqual({ revogarAnteriores: true });
+    expect(reaberto.buscarPorId("b")?.registrarInstrucoesDoPedido(false)).toEqual({ revogarAnteriores: false });
+  });
+
   it("reabre os orquestradores e os eventos exatamente como ficaram", async () => {
     const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
     const orquestrador = novoOrquestrador("a");

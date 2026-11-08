@@ -9,6 +9,7 @@ describe("EsforcoHerdado", () => {
     ["alto", false],
     ["extra_alto", true],
     ["maximo", true],
+    ["ultracode", true],
   ] as const)("com nível %s, deveAvisar = %s", (nivel, aviso) => {
     const herdado = EsforcoHerdado.criar({ nivel, origem: "CLAUDE_CODE_EFFORT_LEVEL", modelo: null });
 

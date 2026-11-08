@@ -6,7 +6,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { GerenciadorDeWorktreesGit } from "./GerenciadorDeWorktreesGit";
-import { ExecutorDeGit, Worktrees } from "./Worktrees";
+import { ExecutorDeGit, executarGit, Worktrees } from "./Worktrees";
 
 const REPO = path.join(tmpdir(), "repo-que-nao-existe-no-disco");
 
@@ -189,5 +189,61 @@ describe("GerenciadorDeWorktreesGit.concluir", () => {
     await new GerenciadorDeWorktreesGit(pastaDeDados, new Worktrees(executar)).concluir("o1", REPO);
 
     expect(apagouBranch(chamadas)).toBe(false);
+  });
+});
+
+describe("GerenciadorDeWorktreesGit.preparar com git de verdade", () => {
+  let base: string;
+  let repo: string;
+  let pastaDeDados: string;
+
+  async function git(...argumentos: string[]): Promise<void> {
+    const { codigo, erro } = await executarGit(argumentos, repo);
+    if (codigo !== 0) {
+      throw new Error(erro);
+    }
+  }
+
+  beforeEach(async () => {
+    base = await mkdtemp(path.join(tmpdir(), "worktrees-subpasta-"));
+    repo = path.join(base, "monorepo");
+    pastaDeDados = path.join(base, "dados");
+    await mkdir(path.join(repo, "apps", "painel"), { recursive: true });
+    await writeFile(path.join(repo, "apps", "painel", "index.ts"), "export {};\n");
+    await mkdir(path.join(repo, "rascunho"), { recursive: true });
+    await writeFile(path.join(repo, "rascunho", "nota.txt"), "não versionado\n");
+    await git("init", "-q");
+    await git("add", "apps");
+    await git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "inicial");
+  });
+
+  afterEach(async () => {
+    await rm(base, { recursive: true, force: true });
+  });
+
+  it("na raiz do repositório, o turno roda na raiz do worktree", async () => {
+    const preparo = await new GerenciadorDeWorktreesGit(pastaDeDados).preparar("o1aaaaaaaa", repo);
+
+    expect(preparo.worktree).not.toBeNull();
+    expect(preparo.cwd).toBe(preparo.worktree?.caminho);
+  });
+
+  it("numa subpasta do repositório, o turno roda na mesma subpasta dentro do worktree", async () => {
+    const preparo = await new GerenciadorDeWorktreesGit(pastaDeDados).preparar(
+      "o2bbbbbbbb",
+      path.join(repo, "apps", "painel"),
+    );
+
+    expect(preparo.worktree).not.toBeNull();
+    expect(preparo.cwd).toBe(path.join(preparo.worktree?.caminho ?? "", "apps", "painel"));
+    expect(existsSync(path.join(preparo.cwd, "index.ts"))).toBe(true);
+  });
+
+  it("numa subpasta não versionada, roda na própria pasta, sem worktree", async () => {
+    const pasta = path.join(repo, "rascunho");
+
+    const preparo = await new GerenciadorDeWorktreesGit(pastaDeDados).preparar("o3cccccccc", pasta);
+
+    expect(preparo).toEqual({ cwd: pasta, worktree: null });
   });
 });

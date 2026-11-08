@@ -19,9 +19,22 @@ import { UsoDeTokens } from "../orquestracao/UsoDeTokens";
 import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "../orquestracao/MotorDeAgentes";
 import { Orquestrador } from "../orquestracao/Orquestrador";
 import { PastaDeTrabalho } from "../orquestracao/PastaDeTrabalho";
+import { PreferenciasGlobais } from "../orquestracao/PreferenciasGlobais";
 import { ConversaArquivada, RepositorioDeOrquestradores } from "../orquestracao/RepositorioDeOrquestradores";
+import { RepositorioDePreferencias } from "../orquestracao/RepositorioDePreferencias";
 import { ServicoDeOrquestracao } from "../orquestracao/ServicoDeOrquestracao";
-import { criarOrquestradoresRoutes } from "./orquestradoresRoutes";
+import { criarOrquestradoresRoutes, MAXIMO_DE_ORQUESTRADORES_POR_CONEXAO } from "./orquestradoresRoutes";
+
+/** Preferências globais em memória: `atuais` devolve o que o teste definiu. */
+class PreferenciasEmMemoria implements RepositorioDePreferencias {
+  preferencias = PreferenciasGlobais.vazias();
+  atuais(): PreferenciasGlobais {
+    return this.preferencias;
+  }
+  async salvar(preferencias: PreferenciasGlobais): Promise<void> {
+    this.preferencias = preferencias;
+  }
+}
 
 class RepositorioEmMemoria implements RepositorioDeOrquestradores {
   readonly orquestradores = new Map<string, Orquestrador>();
@@ -75,6 +88,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
   let repositorio: RepositorioEmMemoria;
   let motor: MotorImediato;
   let servico: ServicoDeOrquestracao;
+  let preferencias: PreferenciasEmMemoria;
   let explorador: ExploradorDePastas;
   let ids = 0;
 
@@ -83,6 +97,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
     motor = new MotorImediato();
     explorador = new ExploradorDePastas(raiz);
     const anexos = new ArmazemDeAnexosEmArquivo(path.join(tmpdir(), "orquestrador-rotas-teste"));
+    preferencias = new PreferenciasEmMemoria();
     servico = new ServicoDeOrquestracao({
       repositorio,
       motor,
@@ -94,6 +109,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
         concluir: async () => false,
       },
       pastaDeArtefatos: (orquestradorId) => path.join(tmpdir(), "orquestrador-rotas-teste-artefatos", orquestradorId),
+      preferencias,
       gerarId: () => `id${++ids}`,
       agora: () => new Date("2026-10-28T12:00:00Z"),
     });
@@ -108,6 +124,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
         canal: new CanalDeEventos(),
         explorador,
         anexos,
+        preferencias,
         pastaRaiz: raiz,
       }),
     );
@@ -336,7 +353,27 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       });
     });
 
+    it("o POST aceita ultracode no orquestrador e recusa nos subagentes", async () => {
+      const aceito = await postar("/orquestradores", { ...criacao, esforcoDoOrquestrador: "ultracode" });
+      const recusado = await postar("/orquestradores", { ...criacao, esforcoDosSubagentes: "ultracode" });
+
+      expect(aceito.status).toBe(201);
+      expect(((await aceito.json()) as { configuracao: unknown }).configuracao).toMatchObject({
+        esforcoDoOrquestrador: "ultracode",
+        esforcoDosSubagentes: "padrao",
+      });
+      expect(recusado.status).toBe(400);
+      expect(await recusado.json()).toEqual({
+        erro: 'O esforço "ultracode" vale só para o orquestrador e o chat. Escolha outro esforço para os subagentes.',
+      });
+    });
+
     it.each<[string, unknown, string]>([
+      [
+        "esforcoDosSubagentes",
+        "ultracode",
+        'O esforço "ultracode" vale só para o orquestrador e o chat. Escolha outro esforço para os subagentes.',
+      ],
       ["esforcoDoOrquestrador", "turbo", "Esforço do orquestrador inválido."],
       ["esforcoDoOrquestrador", null, "Esforço do orquestrador inválido."],
       ["esforcoDosSubagentes", "xhigh", "Esforço dos subagentes inválido."],
@@ -620,6 +657,199 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       semCamposAntigos(repositorio.buscarPorId(criado.id)?.configuracao.paraDados());
     });
   });
+
+  describe("instruções personalizadas e preferências globais", () => {
+    async function requisitar(metodo: string, caminho: string, corpo?: unknown): Promise<Response> {
+      return fetch(`${base}${caminho}`, {
+        method: metodo,
+        headers: { "Content-Type": "application/json" },
+        ...(corpo === undefined ? {} : { body: JSON.stringify(corpo) }),
+      });
+    }
+    const configuracaoBasica = {
+      modeloDoOrquestrador: "opus",
+      modeloDosSubagentes: "haiku",
+      quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
+      nivelDePermissao: "leitura",
+    } as const;
+
+    beforeEach(() => {
+      vi.spyOn(explorador, "existe").mockResolvedValue(true);
+      preferencias.preferencias = PreferenciasGlobais.vazias();
+    });
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("o POST aceita as instruções como campo opcional e o resumo indica que estão ativas", async () => {
+      const resposta = await postar("/orquestradores", {
+        nome: "Novo",
+        pastaDeTrabalho: raiz,
+        ...configuracaoBasica,
+        instrucoesPersonalizadas: "  Comece com PIRULITO.  \n",
+      });
+
+      expect(resposta.status).toBe(201);
+      const corpo = (await resposta.json()) as { configuracao: { instrucoesPersonalizadas: string }; instrucoesAtivas: string };
+      expect(corpo.configuracao.instrucoesPersonalizadas).toBe("Comece com PIRULITO.");
+      expect(corpo.instrucoesAtivas).toBe("orquestrador");
+    });
+
+    it("sem o campo, cria sem instruções e o resumo diz que não há nenhuma ativa", async () => {
+      const resposta = await postar("/orquestradores", { nome: "Novo", pastaDeTrabalho: raiz, ...configuracaoBasica });
+
+      const corpo = (await resposta.json()) as { configuracao: { instrucoesPersonalizadas: string }; instrucoesAtivas: unknown };
+      expect(corpo.configuracao.instrucoesPersonalizadas).toBe("");
+      expect(corpo.instrucoesAtivas).toBeNull();
+    });
+
+    it("o PATCH edita e limpa as instruções; o pedido seguinte já as recebe", async () => {
+      const editada = await requisitar("PATCH", `/orquestradores/${orquestrador.id}/configuracao`, {
+        instrucoesPersonalizadas: "Use tabelas.",
+      });
+      expect(editada.status).toBe(200);
+      expect(await postar(`/orquestradores/${orquestrador.id}/mensagens`, { texto: "oi" })).toHaveProperty("status", 202);
+      await aguardarOcioso();
+      expect(motor.pedidos.at(-1)?.instrucoes).toEqual({ texto: "Use tabelas.", origem: "orquestrador" });
+
+      const limpa = await requisitar("PATCH", `/orquestradores/${orquestrador.id}/configuracao`, {
+        instrucoesPersonalizadas: "",
+      });
+      expect(((await limpa.json()) as { instrucoesAtivas: unknown }).instrucoesAtivas).toBeNull();
+    });
+
+    it.each<[unknown, string]>([
+      [42, "As instruções personalizadas devem ser um texto."],
+      ["x".repeat(8_001), "As instruções personalizadas devem ter até 4000 caracteres."],
+      ["x".repeat(4_001), "As instruções personalizadas devem ter até 4000 caracteres (hoje têm 4001)."],
+    ])("o PATCH recusa instruções inválidas com 400 (%#)", async (valor, mensagem) => {
+      const resposta = await requisitar("PATCH", `/orquestradores/${orquestrador.id}/configuracao`, {
+        instrucoesPersonalizadas: valor,
+      });
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: mensagem });
+    });
+
+    it("GET e PATCH /preferencias leem e gravam as instruções padrão", async () => {
+      expect(await (await requisitar("GET", "/preferencias")).json()).toEqual({
+        instrucoesPadrao: "",
+        subagentesProntos: [],
+        autorrecuperacao: true,
+      });
+
+      const resposta = await requisitar("PATCH", "/preferencias", { instrucoesPadrao: " Responda curto. " });
+      expect(resposta.status).toBe(200);
+      expect(await resposta.json()).toEqual({
+        instrucoesPadrao: "Responda curto.",
+        subagentesProntos: [],
+        autorrecuperacao: true,
+      });
+      expect(preferencias.atuais().instrucoesPadrao).toBe("Responda curto.");
+
+      const resumo = (await (await requisitar("GET", `/orquestradores/${orquestrador.id}`)).json()) as {
+        instrucoesAtivas: string;
+      };
+      expect(resumo.instrucoesAtivas).toBe("padrao");
+    });
+
+    it("PATCH /preferencias grava subagentes prontos, que aparecem na prévia", async () => {
+      const revisor = { nome: "revisor", descricao: "Revisa código.", prompt: "Aponte bugs." };
+      const resposta = await requisitar("PATCH", "/preferencias", { subagentesProntos: [revisor] });
+      expect(resposta.status).toBe(200);
+      expect(await resposta.json()).toEqual({
+        instrucoesPadrao: "",
+        subagentesProntos: [{ ...revisor, modelo: "herdar" }],
+        autorrecuperacao: true,
+      });
+
+      const previa = (await (
+        await requisitar("POST", "/previa-do-prompt", { configuracao: orquestrador.configuracao.paraDados() })
+      ).json()) as { mensagem: string };
+      expect(previa.mensagem).toContain('  - "revisor": Revisa código.');
+    });
+
+    it.each([
+      [[{ nome: "executor", descricao: "a", prompt: "b" }], 'O nome "executor" é reservado; escolha outro.'],
+      [[{ nome: "a-b", descricao: "a" }], "O prompt do subagente pronto deve ser um texto."],
+      ["revisor", "Os subagentes prontos devem ser uma lista."],
+    ])("PATCH /preferencias recusa subagentes prontos inválidos (%j) com 400", async (subagentesProntos, mensagem) => {
+      const resposta = await requisitar("PATCH", "/preferencias", { subagentesProntos });
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: mensagem });
+      expect(preferencias.atuais().subagentesProntos).toEqual([]);
+    });
+
+    it("GET e PATCH /preferencias leem e gravam a autorrecuperação, ligada por padrão", async () => {
+      expect(await (await requisitar("GET", "/preferencias")).json()).toMatchObject({ autorrecuperacao: true });
+
+      const desligada = await requisitar("PATCH", "/preferencias", { autorrecuperacao: false });
+      expect(desligada.status).toBe(200);
+      expect(await desligada.json()).toMatchObject({ autorrecuperacao: false });
+      expect(preferencias.atuais().autorrecuperacao).toBe(false);
+
+      // Mudar outro campo não religa.
+      await requisitar("PATCH", "/preferencias", { instrucoesPadrao: "Curto." });
+      expect(await (await requisitar("GET", "/preferencias")).json()).toMatchObject({
+        instrucoesPadrao: "Curto.",
+        autorrecuperacao: false,
+      });
+
+      const invalida = await requisitar("PATCH", "/preferencias", { autorrecuperacao: "sim" });
+      expect(invalida.status).toBe(400);
+      expect(await invalida.json()).toEqual({ erro: 'A opção "Autorrecuperação" deve ser verdadeira ou falsa.' });
+      expect(preferencias.atuais().autorrecuperacao).toBe(false);
+    });
+
+    it("POST /cancelar sem pedido em andamento nem retomada agendada continua 409", async () => {
+      const resposta = await postar(`/orquestradores/${orquestrador.id}/cancelar`, {});
+      expect(resposta.status).toBe(409);
+    });
+
+    it("PATCH /preferencias recusa valor inválido com 400", async () => {
+      const resposta = await requisitar("PATCH", "/preferencias", { instrucoesPadrao: ["a"] });
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: "As instruções gerais devem ser um texto." });
+    });
+
+    it("a prévia mostra o system prompt e a mensagem com as instruções que valeriam, sem salvar nada", async () => {
+      preferencias.preferencias = PreferenciasGlobais.de({ instrucoesPadrao: "Global." });
+      const resposta = await postar("/previa-do-prompt", {
+        configuracao: { ...configuracaoBasica, instrucoesPersonalizadas: "Comece com PIRULITO." },
+        pastaDeTrabalho: "painel",
+      });
+
+      expect(resposta.status).toBe(200);
+      const previa = (await resposta.json()) as { instrucoesIniciais: string; mensagem: string; origemDasInstrucoes: string };
+      expect(previa.origemDasInstrucoes).toBe("orquestrador");
+      expect(previa.instrucoesIniciais).toContain(`Pasta de trabalho: ${path.join(raiz, "painel")}`);
+      expect(previa.instrucoesIniciais).not.toContain("PIRULITO");
+      expect(previa.mensagem).toContain("<instrucoes-do-usuario>\nComece com PIRULITO.\n</instrucoes-do-usuario>\n</configuracao-do-pedido>");
+      expect(previa.mensagem).not.toContain("Global.");
+      expect(previa.mensagem.endsWith("(aqui entra a sua mensagem)")).toBe(true);
+      expect(orquestrador.configuracao.instrucoesPersonalizadas).toBe("");
+    });
+
+    it("a prévia sem instruções nem padrão não tem o bloco, e sem pasta usa um marcador", async () => {
+      const resposta = await postar("/previa-do-prompt", { configuracao: configuracaoBasica });
+
+      const previa = (await resposta.json()) as { instrucoesIniciais: string; mensagem: string; origemDasInstrucoes: unknown };
+      expect(previa.origemDasInstrucoes).toBeNull();
+      expect(previa.mensagem).not.toContain("instrucoes-do-usuario");
+      expect(previa.instrucoesIniciais).toContain("Pasta de trabalho: <pasta de trabalho>");
+    });
+
+    it("a prévia aceita pasta fora da pasta dos projetos", async () => {
+      const fora = path.resolve("/outro/lugar");
+      const resposta = await postar("/previa-do-prompt", { configuracao: configuracaoBasica, pastaDeTrabalho: fora });
+
+      expect(resposta.status).toBe(200);
+      const previa = (await resposta.json()) as { instrucoesIniciais: string };
+      expect(previa.instrucoesIniciais).toContain(`Pasta de trabalho: ${fora}`);
+    });
+  });
 });
 
 describe("rotas de orquestradores — economia de tokens", () => {
@@ -655,6 +885,7 @@ describe("rotas de orquestradores — economia de tokens", () => {
         concluir: async () => false,
       },
       pastaDeArtefatos: (orquestradorId) => path.join(tmpdir(), "orquestrador-rotas-economia-teste-artefatos", orquestradorId),
+      preferencias: new PreferenciasEmMemoria(),
       gerarId: () => `e${++ids}`,
       agora: () => new Date("2026-10-28T12:00:00Z"),
       medidor: { medirTurno: async () => consumo },
@@ -678,6 +909,7 @@ describe("rotas de orquestradores — economia de tokens", () => {
         canal: new CanalDeEventos(),
         explorador,
         anexos,
+        preferencias: new PreferenciasEmMemoria(),
         pastaRaiz: raiz,
       }),
     );
@@ -860,5 +1092,149 @@ describe("rotas de orquestradores — economia de tokens", () => {
     expect(fora.status).toBe(400);
     expect(inexistente.status).toBe(400);
     expect(await inexistente.json()).toEqual({ erro: `A pasta "${path.join(raiz, "sumiu")}" não existe.` });
+  });
+
+  it("GET /pastas/navegar com estrito=1 recusa caminho inexistente com 400", async () => {
+    const alvo = path.join(raiz, "sumiu");
+    const resposta = await fetch(`${base}/pastas/navegar?caminho=${encodeURIComponent(alvo)}&estrito=1`);
+
+    expect(resposta.status).toBe(400);
+    expect(await resposta.json()).toEqual({ erro: `A pasta "${alvo}" não existe.` });
+  });
+});
+
+/** Os históricos de cada Orquestrador, para a rota de eventos ao vivo. */
+class RepositorioDeHistoricos implements RepositorioDeOrquestradores {
+  readonly historicos = new Map<string, EventoRegistrado[]>();
+
+  listar(): readonly Orquestrador[] {
+    return [];
+  }
+  buscarPorId(id: string): Orquestrador | null {
+    return this.historicos.has(id) ? ({ id } as unknown as Orquestrador) : null;
+  }
+  async salvar(): Promise<void> {}
+  async remover(): Promise<void> {}
+  anexarEvento(): EventoRegistrado {
+    throw new Error("não usado nestes testes");
+  }
+  arquivarConversa(): ConversaArquivada {
+    throw new Error("não usado nestes testes");
+  }
+  lerEventos(orquestradorId: string, depoisDaSequencia: number): readonly EventoRegistrado[] {
+    return (this.historicos.get(orquestradorId) ?? []).filter((evento) => evento.sequencia > depoisDaSequencia);
+  }
+}
+
+describe("rotas de orquestradores — eventos de vários orquestradores numa conexão só", () => {
+  let servidor: Server;
+  let base: string;
+  let repositorio: RepositorioDeHistoricos;
+  let canal: CanalDeEventos;
+
+  const evento = (sequencia: number): EventoRegistrado => ({
+    tipo: "turno_cancelado",
+    turnoId: "t1",
+    sequencia,
+    em: "agora",
+  });
+
+  beforeAll(async () => {
+    repositorio = new RepositorioDeHistoricos();
+    canal = new CanalDeEventos();
+    const aplicacao = express();
+    aplicacao.use(
+      "/api",
+      criarOrquestradoresRoutes({
+        // A rota de eventos não usa o serviço.
+        servico: {} as unknown as ServicoDeOrquestracao,
+        repositorio,
+        canal,
+        explorador: new ExploradorDePastas(path.resolve("/projetos")),
+        anexos: new ArmazemDeAnexosEmArquivo(path.join(tmpdir(), "orquestrador-rotas-teste")),
+        preferencias: new PreferenciasEmMemoria(),
+        pastaRaiz: path.resolve("/projetos"),
+      }),
+    );
+    servidor = aplicacao.listen(0, "127.0.0.1");
+    await once(servidor, "listening");
+    base = `http://127.0.0.1:${(servidor.address() as AddressInfo).port}/api`;
+  });
+
+  afterAll(async () => {
+    servidor.closeAllConnections();
+    servidor.close();
+    await once(servidor, "close");
+  });
+
+  /** Lê o stream até ter `quantas` mensagens com dados; devolve cada uma como [tipo, dados]. */
+  async function lerMensagens(
+    leitor: ReadableStreamDefaultReader<Uint8Array>,
+    quantas: number,
+    acumulado: { texto: string },
+  ): Promise<[string, unknown][]> {
+    const decodificador = new TextDecoder();
+    const mensagens = (): [string, unknown][] =>
+      acumulado.texto
+        .split("\n\n")
+        .filter((bloco) => bloco.includes("data: "))
+        .map((bloco) => {
+          const tipo = /^event: (.+)$/m.exec(bloco)?.[1] ?? "message";
+          const dados = /^data: (.+)$/m.exec(bloco)?.[1] ?? "null";
+          return [tipo, JSON.parse(dados) as unknown];
+        });
+    while (mensagens().length < quantas) {
+      const { value, done } = await leitor.read();
+      if (done) {
+        break;
+      }
+      acumulado.texto += decodificador.decode(value, { stream: true });
+    }
+    return mensagens();
+  }
+
+  it("manda o histórico e os eventos novos de cada orquestrador, marcados com o id, e ignora ids desconhecidos", async () => {
+    repositorio.historicos.set("o1", [evento(1), evento(2), evento(3)]);
+    repositorio.historicos.set("o2", [evento(1), evento(2)]);
+
+    const resposta = await fetch(`${base}/eventos-dos-orquestradores?orquestradores=o1:1,o2:0,sumiu:0`);
+    expect(resposta.status).toBe(200);
+    expect(resposta.headers.get("content-type")).toContain("text/event-stream");
+    const leitor = resposta.body!.getReader();
+    const acumulado = { texto: "" };
+
+    try {
+      expect(await lerMensagens(leitor, 4, acumulado)).toEqual([
+        ["message", { orquestradorId: "o1", evento: evento(2) }],
+        ["message", { orquestradorId: "o1", evento: evento(3) }],
+        ["message", { orquestradorId: "o2", evento: evento(1) }],
+        ["message", { orquestradorId: "o2", evento: evento(2) }],
+      ]);
+
+      canal.publicar("o2", evento(3));
+      canal.publicar("o2", evento(3)); // repetido: não sai de novo
+      canal.sinalizar("o1", { turnoId: "t9", em: "agora", tokensPensando: 50 });
+
+      expect((await lerMensagens(leitor, 6, acumulado)).slice(4)).toEqual([
+        ["message", { orquestradorId: "o2", evento: evento(3) }],
+        ["sinal", { orquestradorId: "o1", sinal: { turnoId: "t9", em: "agora", tokensPensando: 50 } }],
+      ]);
+      expect(acumulado.texto).not.toContain("sumiu");
+    } finally {
+      await leitor.cancel();
+    }
+  });
+
+  it.each<[string, string]>([
+    ["", "Informe de quais orquestradores quer os eventos."],
+    [
+      `?orquestradores=${Array.from({ length: MAXIMO_DE_ORQUESTRADORES_POR_CONEXAO + 1 }, (_, i) => `o${i}:0`).join(",")}`,
+      `Acompanhe no máximo ${MAXIMO_DE_ORQUESTRADORES_POR_CONEXAO} orquestradores por conexão.`,
+    ],
+  ])("recusa a consulta %# com 400", async (consulta, mensagem) => {
+    const resposta = await fetch(`${base}/eventos-dos-orquestradores${consulta}`);
+
+    expect(resposta.status).toBe(400);
+    expect(await resposta.json()).toEqual({ erro: mensagem });
   });
 });

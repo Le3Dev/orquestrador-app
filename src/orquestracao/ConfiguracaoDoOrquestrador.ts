@@ -1,5 +1,12 @@
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
-import { ehEsforcoDeRaciocinio, ESFORCO_PADRAO, EsforcoDeRaciocinio } from "./EsforcoDeRaciocinio";
+import {
+  ehEsforcoDeRaciocinio,
+  ESFORCO_PADRAO,
+  EsforcoDeRaciocinio,
+  serveParaSubagentes,
+  ULTRACODE_NOS_SUBAGENTES,
+} from "./EsforcoDeRaciocinio";
+import { instrucoesValidas } from "./InstrucoesPersonalizadas";
 import { ehModeloClaude, ModeloClaude } from "./ModeloClaude";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { ehNivelDePermissao, NivelDePermissao } from "./NivelDePermissao";
@@ -26,6 +33,13 @@ export interface DadosDaConfiguracao {
   // deixaram de ser opções (ADR-28): valem sempre. Configurações gravadas
   // quando ainda eram opções trazem os dois campos; `de` os ignora e
   // `paraDados` não os devolve, então somem ao salvar de novo.
+  /**
+   * Instruções personalizadas do usuário para este Orquestrador, acrescentadas
+   * ao fim do bloco de cada pedido. Vazias, vale o padrão global (se houver).
+   * Ausentes nas configurações gravadas antes de a opção existir: vale `""`.
+   * `paraDados` sempre as preenche, já normalizadas.
+   */
+  instrucoesPersonalizadas?: string | undefined;
 }
 
 /** Só os campos informados mudam; os ausentes mantêm o valor atual. */
@@ -35,7 +49,8 @@ export type AlteracoesDaConfiguracao = {
 
 /**
  * Como um Orquestrador trabalha: modelos, esforço de raciocínio, quantos
- * Subagentes e o que eles podem fazer. Fazer o trivial ele mesmo e propor um
+ * Subagentes, o que eles podem fazer e as instruções personalizadas do
+ * usuário. Fazer o trivial ele mesmo e propor um
  * Plano antes de mudanças grandes não são opções: valem sempre (ADR-28).
  * Objeto de valor — alterar a configuração produz outra.
  */
@@ -48,6 +63,7 @@ export class ConfiguracaoDoOrquestrador {
     public readonly permitirCommitEPush: boolean,
     public readonly esforcoDoOrquestrador: EsforcoDeRaciocinio,
     public readonly esforcoDosSubagentes: EsforcoDeRaciocinio,
+    public readonly instrucoesPersonalizadas: string,
   ) {}
 
   static de(dados: DadosDaConfiguracao): ConfiguracaoDoOrquestrador {
@@ -72,6 +88,13 @@ export class ConfiguracaoDoOrquestrador {
     if (!ehEsforcoDeRaciocinio(esforcoDosSubagentes)) {
       throw new ErroDeOrquestracao("dados_invalidos", "Esforço dos subagentes inválido.");
     }
+    if (!serveParaSubagentes(esforcoDosSubagentes)) {
+      throw new ErroDeOrquestracao("dados_invalidos", ULTRACODE_NOS_SUBAGENTES);
+    }
+    const instrucoesPersonalizadas = instrucoesValidas(
+      dados.instrucoesPersonalizadas,
+      "As instruções personalizadas",
+    );
     return new ConfiguracaoDoOrquestrador(
       dados.modeloDoOrquestrador,
       dados.modeloDosSubagentes,
@@ -80,6 +103,7 @@ export class ConfiguracaoDoOrquestrador {
       permitirCommitEPush,
       esforcoDoOrquestrador,
       esforcoDosSubagentes,
+      instrucoesPersonalizadas,
     );
   }
 
@@ -112,6 +136,8 @@ export class ConfiguracaoDoOrquestrador {
       permitirCommitEPush: alteracoes.permitirCommitEPush ?? atual.permitirCommitEPush,
       esforcoDoOrquestrador: alteracoes.esforcoDoOrquestrador ?? atual.esforcoDoOrquestrador,
       esforcoDosSubagentes: alteracoes.esforcoDosSubagentes ?? atual.esforcoDosSubagentes,
+      // `""` limpa as instruções: só a ausência mantém as atuais.
+      instrucoesPersonalizadas: alteracoes.instrucoesPersonalizadas ?? atual.instrucoesPersonalizadas,
     });
   }
 
@@ -124,6 +150,7 @@ export class ConfiguracaoDoOrquestrador {
       permitirCommitEPush: this.permitirCommitEPush,
       esforcoDoOrquestrador: this.esforcoDoOrquestrador,
       esforcoDosSubagentes: this.esforcoDosSubagentes,
+      instrucoesPersonalizadas: this.instrucoesPersonalizadas,
     };
   }
 }

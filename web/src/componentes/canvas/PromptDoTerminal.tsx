@@ -11,8 +11,13 @@ import {
 
 import { type DadosDoPedidoNaFila, LIMITE_DA_FILA, type ModoDoTurno } from "../../shared/api/tipos";
 import { comandoDoPrompt, completarComando, dicaDeComando, dicaDePedidoGrande } from "../../shared/comandosDoPrompt";
+import { juntarDitado } from "../../shared/ditado/texto";
 import { formatarBytes } from "../../shared/formatacao";
+import { useMelhorarPrompt } from "../../shared/hooks/useMelhorarPrompt";
 import { type ImagemAnexada, TIPOS_DE_IMAGEM } from "../../shared/imagens";
+import { BotaoDeDitado } from "../BotaoDeDitado";
+import { IconeAnexo, IconeFechar } from "../Icones";
+import { AvisoDaMelhoria, BotaoDeMelhorar } from "../MelhoriaDoPrompt";
 
 const ALTURA_MAXIMA = 140;
 
@@ -52,7 +57,7 @@ interface PropsDaFila {
 
 /**
  * A fila de pedidos, compacta, acima do prompt: número, trecho do texto, o
- * selo do Plan Mode e o ✕ para tirar da fila. Pausada, o primeiro ganha o
+ * selo do Plan Mode e o X para tirar da fila. Pausada, o primeiro ganha o
  * "enviar agora".
  */
 function FilaDePedidos({ fila, pausada, enviandoProximo, desconectado, aoRemover, aoEnviarAgora }: PropsDaFila) {
@@ -106,7 +111,7 @@ function FilaDePedidos({ fila, pausada, enviandoProximo, desconectado, aoRemover
                 title="Remover da fila"
                 onClick={() => aoRemover(pedido.id)}
               >
-                ✕
+                <IconeFechar tamanho={11} />
               </button>
             </li>
           );
@@ -117,6 +122,8 @@ function FilaDePedidos({ fila, pausada, enviandoProximo, desconectado, aoRemover
 }
 
 interface Props {
+  /** O nome da pasta do projeto do orquestrador: vai junto no "melhorar o pedido" (✨). */
+  pasta: string;
   /** Servidor fora do ar: dá para escrever, mas não para enviar nem cancelar. */
   desconectado: boolean;
   trabalhando: boolean;
@@ -155,12 +162,15 @@ interface Props {
  * entram colando (Ctrl+V), pelo botão de anexo ou arrastando para o terminal.
  * Continua editável durante o trabalho: aí o Enter põe o pedido na fila (com
  * o modo; imagens não entram), que sai sozinha quando o pedido atual termina
- * bem. "/clear" sozinho começa uma conversa nova (Tab completa o comando).
+ * bem. "/clear" sozinho começa uma conversa nova (Tab completa o comando). O
+ * microfone dita o pedido por voz. O ✨ reescreve o pedido para ficar mais
+ * claro (não envia; "desfazer" volta o texto) e só fica livre sem pedido rodando.
  *
  * Memorizado: novidades de outros terminais não o re-renderizam (o terminal
  * passa as funções estáveis).
  */
 export const PromptDoTerminal = memo(function PromptDoTerminal({
+  pasta,
   desconectado,
   trabalhando,
   cancelando,
@@ -222,6 +232,16 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
     [campo, ajustarAltura],
   );
 
+  /** O ✨ troca o texto do campo (e o "desfazer" o devolve); não envia nada. */
+  const trocarTexto = useCallback(
+    (novo: string): void => {
+      setTexto(novo);
+      requestAnimationFrame(ajustarAltura);
+    },
+    [ajustarAltura],
+  );
+  const melhoria = useMelhorarPrompt({ texto, aoTrocarTexto: trocarTexto, onde: "orquestrador", pasta });
+
   async function limparConversa(): Promise<void> {
     // Durante um pedido o servidor recusaria: a dica já avisa, então nada acontece.
     if (trabalhando || enviando || desconectado) {
@@ -265,7 +285,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
       await limparConversa();
       return;
     }
-    if (!temConteudo || enviando || desconectado) {
+    if (!temConteudo || enviando || desconectado || melhoria.melhorando) {
       return;
     }
     if (trabalhando) {
@@ -308,6 +328,12 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
     }
   }
 
+  function receberDitado(ditado: string): void {
+    setTexto((atual) => juntarDitado(atual, ditado));
+    requestAnimationFrame(ajustarAltura);
+    campo.current?.focus();
+  }
+
   function aoColar(evento: ClipboardEvent<HTMLTextAreaElement>): void {
     const arquivos = [...evento.clipboardData.files].filter((arquivo) => arquivo.type.startsWith("image/"));
     if (arquivos.length > 0) {
@@ -339,7 +365,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
                 aria-label={`Remover ${imagem.nome}`}
                 onClick={() => aoRemoverImagem(imagem.id)}
               >
-                ✕
+                <IconeFechar tamanho={11} />
               </button>
             </figure>
           ))}
@@ -351,6 +377,8 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
           ref={campo}
           rows={1}
           value={texto}
+          readOnly={melhoria.melhorando}
+          aria-busy={melhoria.melhorando}
           onChange={(evento) => {
             setTexto(evento.target.value);
             ajustarAltura();
@@ -379,13 +407,19 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
             evento.target.value = "";
           }}
         />
+        <BotaoDeMelhorar
+          melhoria={melhoria}
+          desabilitado={texto.trim() === "" || desconectado || trabalhando || enviando}
+        />
+        <BotaoDeDitado destino="a mensagem" aoTranscrever={receberDitado} />
         <button
           type="button"
           className="botao-icone"
           title="Anexar imagens (também dá para colar com Ctrl+V ou arrastar para o terminal)"
+          aria-label="Anexar imagens"
           onClick={() => seletor.current?.click()}
         >
-          📎
+          <IconeAnexo />
         </button>
         {trabalhando ? (
           <button
@@ -401,7 +435,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
             type="button"
             className="btn btn-sm btn-cta"
             onClick={() => void enviar()}
-            disabled={!temConteudo || enviando || desconectado}
+            disabled={!temConteudo || enviando || desconectado || melhoria.melhorando}
           >
             {enviando ? "…" : "enviar ⏎"}
           </button>
@@ -412,6 +446,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
           {AVISO_DAS_IMAGENS}
         </p>
       )}
+      <AvisoDaMelhoria melhoria={melhoria} className="px-[14px] pb-0.5" />
       {dica !== null && (
         <p className="mono hint px-[14px] pb-0.5" role="status">
           {dica}

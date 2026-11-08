@@ -1,0 +1,147 @@
+import { useSyncExternalStore } from "react";
+
+/** Preferências de exibição da tela, guardadas neste computador (localStorage). */
+export type PreferenciasDaTela = {
+  /** O chat rápido vira uma coluna fixa à esquerda do canvas, em vez de flutuar no pé dele. */
+  chatFixoNaEsquerda: boolean;
+  /** Mostra o botão Arquivos nos terminais (o visualizador de código). */
+  visualizadorDeCodigo: boolean;
+  /** Largura (px) do chat fixo à esquerda, ajustada pela alça da borda dele. */
+  larguraDoChatFixo: number;
+};
+
+export const CHAVE_DAS_PREFERENCIAS_DA_TELA = "orquestrador.preferenciasDaTela";
+
+/** A largura do chat fixo: padrão, mínima e máxima (px). */
+export const LARGURA_DO_CHAT_FIXO = { padrao: 360, minima: 280, maxima: 640 } as const;
+
+const PADRAO: PreferenciasDaTela = {
+  chatFixoNaEsquerda: false,
+  visualizadorDeCodigo: false,
+  larguraDoChatFixo: LARGURA_DO_CHAT_FIXO.padrao,
+};
+
+/** Uma largura inteira entre a mínima e a máxima; número inválido (NaN, infinito) vale o padrão. */
+export function limitarLarguraDoChatFixo(largura: number): number {
+  if (!Number.isFinite(largura)) {
+    return LARGURA_DO_CHAT_FIXO.padrao;
+  }
+  return Math.min(LARGURA_DO_CHAT_FIXO.maxima, Math.max(LARGURA_DO_CHAT_FIXO.minima, Math.round(largura)));
+}
+
+/** Quem usa o hook nesta aba: avisados a cada mudança (o evento `storage` só chega às outras abas). */
+const ouvintes = new Set<() => void>();
+
+/**
+ * A última leitura, pelo texto guardado: o mesmo objeto enquanto o texto não
+ * muda (o `useSyncExternalStore` exige um retrato estável). Sem localStorage
+ * gravável, o valor mudado fica só aqui, na memória desta aba.
+ */
+let ultimaLeitura: { bruto: string | null; valor: PreferenciasDaTela } | null = null;
+
+/** O texto guardado; sem localStorage (bloqueado), nulo. */
+function lerBruto(): string | null {
+  try {
+    return localStorage.getItem(CHAVE_DAS_PREFERENCIAS_DA_TELA);
+  } catch {
+    return null;
+  }
+}
+
+/** Tolerante: JSON inválido, outro formato ou campo de outro tipo valem o padrão. */
+function interpretar(bruto: string | null): PreferenciasDaTela {
+  if (bruto === null) {
+    return PADRAO;
+  }
+  let lido: unknown;
+  try {
+    lido = JSON.parse(bruto);
+  } catch {
+    return PADRAO;
+  }
+  if (typeof lido !== "object" || lido === null || Array.isArray(lido)) {
+    return PADRAO;
+  }
+  const registro = lido as Record<string, unknown>;
+  const booleano = (campo: "chatFixoNaEsquerda" | "visualizadorDeCodigo"): boolean =>
+    typeof registro[campo] === "boolean" ? (registro[campo] as boolean) : PADRAO[campo];
+  const largura = registro.larguraDoChatFixo;
+  return {
+    chatFixoNaEsquerda: booleano("chatFixoNaEsquerda"),
+    visualizadorDeCodigo: booleano("visualizadorDeCodigo"),
+    // Número fora do intervalo é limitado a ele; outro tipo vale o padrão.
+    larguraDoChatFixo: typeof largura === "number" ? limitarLarguraDoChatFixo(largura) : PADRAO.larguraDoChatFixo,
+  };
+}
+
+function lerPreferencias(): PreferenciasDaTela {
+  const bruto = lerBruto();
+  if (ultimaLeitura !== null && ultimaLeitura.bruto === bruto) {
+    return ultimaLeitura.valor;
+  }
+  const valor = interpretar(bruto);
+  ultimaLeitura = { bruto, valor };
+  return valor;
+}
+
+function avisar(): void {
+  for (const ouvinte of ouvintes) {
+    ouvinte();
+  }
+}
+
+/** Outra aba gravou (ou limpou tudo): relê. */
+function aoMudarEmOutraAba(evento: StorageEvent): void {
+  if (evento.key === null || evento.key === CHAVE_DAS_PREFERENCIAS_DA_TELA) {
+    avisar();
+  }
+}
+
+function assinar(ouvinte: () => void): () => void {
+  if (ouvintes.size === 0) {
+    window.addEventListener("storage", aoMudarEmOutraAba);
+  }
+  ouvintes.add(ouvinte);
+  return () => {
+    ouvintes.delete(ouvinte);
+    if (ouvintes.size === 0) {
+      window.removeEventListener("storage", aoMudarEmOutraAba);
+    }
+  };
+}
+
+function mudar(parcial: Partial<PreferenciasDaTela>): void {
+  const atuais = lerPreferencias();
+  const novas: PreferenciasDaTela = { ...atuais, ...parcial };
+  novas.larguraDoChatFixo = limitarLarguraDoChatFixo(novas.larguraDoChatFixo);
+  if (
+    novas.chatFixoNaEsquerda === atuais.chatFixoNaEsquerda &&
+    novas.visualizadorDeCodigo === atuais.visualizadorDeCodigo &&
+    novas.larguraDoChatFixo === atuais.larguraDoChatFixo
+  ) {
+    return;
+  }
+  const bruto = JSON.stringify(novas);
+  try {
+    localStorage.setItem(CHAVE_DAS_PREFERENCIAS_DA_TELA, bruto);
+    ultimaLeitura = { bruto, valor: novas };
+  } catch {
+    // Sem gravar: vale nesta aba até recarregar.
+    ultimaLeitura = { bruto: lerBruto(), valor: novas };
+  }
+  avisar();
+}
+
+/**
+ * As preferências da tela (chat fixo à esquerda e a largura dele, visualizador de código):
+ * mudar num lugar reflete em todos os componentes que usam o hook e nas
+ * outras abas abertas.
+ */
+export function usePreferenciasDaTela(): {
+  preferencias: PreferenciasDaTela;
+  mudarPreferencias: (parcial: Partial<PreferenciasDaTela>) => void;
+} {
+  const preferencias = useSyncExternalStore(assinar, lerPreferencias, () => PADRAO);
+  // Função do módulo: a mesma em todo render (estável como um setState).
+  return { preferencias, mudarPreferencias: mudar };
+}

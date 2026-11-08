@@ -15,7 +15,17 @@ export const ROTULOS_DOS_ESFORCOS: Readonly<Record<EsforcoDeRaciocinio, string>>
   alto: "Alto",
   extra_alto: "Extra alto",
   maximo: "Máximo",
+  ultracode: "Ultracode",
 };
+
+/** Mostrado perto do esforço quando "ultracode" está escolhido (orquestrador e chat). */
+export const AVISO_DO_ULTRACODE =
+  "Ultracode dispara workflows com vários agentes em paralelo: custa bem mais e pesa na memória. Num teste, uma tarefa pequena custou US$ 3,24 em 4,5 min.";
+
+/** Na criação, "padrao" se chama Automático: o app não força nada e vale o padrão do Claude Code. */
+export function rotuloDoEsforcoNaCriacao(esforco: EsforcoDeRaciocinio): string {
+  return esforco === "padrao" ? "Automático" : ROTULOS_DOS_ESFORCOS[esforco];
+}
 
 /** Identificador curto de um Subagente, para caber em chips e no terminal. */
 export function idCurto(id: string): string {
@@ -58,6 +68,7 @@ function descreverModelo(modelo: ModeloClaude, esforco: EsforcoDeRaciocinio): st
 /**
  * Ex.: "Opus → Sonnet · até 3 subagentes · Somente leitura" (+ " · commit/push quando pedir", se liberado).
  * Com esforço escolhido (diferente de "padrao"): "Opus (esforço alto) → Sonnet (esforço médio) · …".
+ * Com instruções personalizadas próprias, termina com " · instruções próprias".
  */
 export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string {
   const { modo, limite } = configuracao.quantidadeDeSubagentes;
@@ -70,6 +81,7 @@ export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string
     quantidade,
     ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome,
     ...(configuracao.permitirCommitEPush ? ["commit/push quando pedir"] : []),
+    ...(configuracao.instrucoesPersonalizadas.trim() === "" ? [] : ["instruções próprias"]),
   ].join(" · ");
 }
 

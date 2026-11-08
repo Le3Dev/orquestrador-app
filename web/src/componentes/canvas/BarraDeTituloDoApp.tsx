@@ -1,11 +1,19 @@
-import type { ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
 
 import { useAjustesDoAplicativo } from "../../shared/hooks/useAjustesDoAplicativo";
 import { useModoInvisivel } from "../../shared/hooks/useModoInvisivel";
+import { rodandoNoMac } from "../../shared/ponteDoDesktop";
 import { IconeOrquestrador } from "../Icones";
 import { AvisoDeAtualizacao } from "./AvisoDeAtualizacao";
 import { ControlesDaJanela } from "./ControlesDaJanela";
 import { ErroDoCanvas, StatusDoCanvas } from "./PaineisDoCanvas";
+import { PainelDeConfiguracoesDoApp } from "./PainelDeConfiguracoesDoApp";
+
+/**
+ * No Mac, espaço à esquerda para as 3 bolinhas nativas da janela (posição em
+ * electron/mac.js: 14px da borda e cerca de 52px de largura).
+ */
+const ESPACO_DAS_BOLINHAS_DO_MAC = 80;
 
 type PropsDaBarraDeTitulo = Omit<ComponentProps<typeof StatusDoCanvas>, "naBarraDeTitulo"> & {
   /** Abre a paleta de comandos (o mesmo do Ctrl+K). */
@@ -20,13 +28,17 @@ type PropsDaBarraDeTitulo = Omit<ComponentProps<typeof StatusDoCanvas>, "naBarra
  *
  * Esquerda: ícone e nome do app. Centro: o campo "Buscar ou executar…", que
  * abre a paleta de comandos. Direita: o aviso de atualização (só baixando ou
- * pronta), o status (situação, cotas e RAM) e, colados a ele, o ⚙ (pastas e
- * Claude Code) e os botões ─ ☐ ✕ do próprio app.
+ * pronta), o status (situação, cotas e RAM) e, colados a ele, o ⚙
+ * Configurações (preferências da tela e, pelo painel, a janela dos Ajustes de
+ * pastas e Claude Code) e os botões ─ ☐ ✕ do próprio app.
+ * No Mac os botões ─ ☐ ✕ saem: ficam as bolinhas nativas, à esquerda, num
+ * espaço reservado antes do ícone.
  * A faixa inteira arrasta a janela (e o duplo clique nela maximiza); o que é
  * clicável é `no-drag`.
  */
 export function BarraDeTituloDoApp({ aoBuscar, pedidosEmAndamento, ...status }: PropsDaBarraDeTitulo) {
   const ajustes = useAjustesDoAplicativo();
+  const [mac] = useState(rodandoNoMac);
   const invisivel = useModoInvisivel();
   // No modo invisível a barra inteira fica escondida (CSS) e sem mouse. O botão de entrar fica no chat rápido.
 
@@ -35,6 +47,7 @@ export function BarraDeTituloDoApp({ aoBuscar, pedidosEmAndamento, ...status }: 
       className={`barra-de-titulo ${invisivel.ativo ? "barra-de-titulo-invisivel" : ""}`}
       data-testid="barra-de-titulo"
       aria-hidden={invisivel.ativo ? true : undefined}
+      style={mac ? { paddingLeft: ESPACO_DAS_BOLINHAS_DO_MAC } : undefined}
     >
       <div className="identidade-da-barra-de-titulo">
         <span className="no-orquestrador-icone shrink-0">
@@ -64,21 +77,15 @@ export function BarraDeTituloDoApp({ aoBuscar, pedidosEmAndamento, ...status }: 
         <AvisoDeAtualizacao pedidosEmAndamento={pedidosEmAndamento} />
         <StatusDoCanvas naBarraDeTitulo {...status} />
         <div className="botoes-da-barra-de-titulo">
-          {ajustes.disponivel && (
-            <>
-              <button
-                type="button"
-                className="botao-da-janela botao-dos-ajustes no-drag"
-                onClick={() => void ajustes.abrir()}
-                aria-label="Pastas e Claude Code"
-                title="Pastas e Claude Code"
-              >
-                ⚙
-              </button>
-              <span className="separador-da-barra-de-titulo" aria-hidden="true" />
-            </>
-          )}
-          <ControlesDaJanela />
+          <PainelDeConfiguracoesDoApp
+            ajustes={ajustes}
+            alinhamento="direita"
+            classeDaAncora="no-drag"
+            classeDoBotao="botao-da-janela botao-dos-ajustes no-drag"
+            conteudoDoBotao="⚙"
+          />
+          {!mac && <span className="separador-da-barra-de-titulo" aria-hidden="true" />}
+          {!mac && <ControlesDaJanela />}
         </div>
       </div>
       {ajustes.erro !== null && (

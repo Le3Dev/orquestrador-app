@@ -18,6 +18,7 @@
     "dist:win": "npm run build && electron-builder --win --publish never",
     "dist:win:teste": "npm run build && electron-builder --win --publish never -c.extraMetadata.buildDeTeste=true -c.directories.output=dist_electron_teste",
     "release:win": "npm run build && electron-builder --win --publish always",
+    "dist:mac": "node scripts/permissaoDoPty.cjs && npm run build && electron-builder --mac dir --arm64 --publish never -c.extraMetadata.repositorioDoMac=\"$PWD\" && codesign --force --deep --sign - \"dist_electron/mac-arm64/Orquestrador de Agentes.app\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -25,16 +26,20 @@
     "web:build": "npm --prefix web run build",
     "web:test": "npm --prefix web test",
     "web:lint": "npm --prefix web run lint",
-    "icones": "node scripts/gerarIcones.cjs"
+    "icones": "node scripts/gerarIcones.cjs",
+    "postinstall": "node scripts/permissaoDoPty.cjs"
   },
   "dependencies": {
     "electron-updater": "~6.3.9",
     "express": "^5.2.1",
+    "node-pty": "^1.1.0",
+    "ws": "^8.22.1",
     "zod": "^4.6.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.2",
     "electron": "^33.0.0",
     "electron-builder": "^25.1.8",
     "tsx": "^4.23.13",
@@ -58,7 +63,14 @@
       "web/dist/**/*",
       "package.json"
     ],
+    "asarUnpack": [
+      "node_modules/node-pty/**"
+    ],
+    "npmRebuild": false,
     "win": {
+      "files": [
+        "!node_modules/node-pty/prebuilds/darwin-*/**"
+      ],
       "icon": "electron/icones/icone.ico",
       "target": [
         {
@@ -68,6 +80,17 @@
           ]
         }
       ]
+    },
+    "mac": {
+      "files": [
+        "!node_modules/node-pty/prebuilds/win32-*/**"
+      ],
+      "icon": "electron/icones/icone.png",
+      "category": "public.app-category.developer-tools",
+      "identity": null,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "O ditado usa o microfone para transcrever o que você fala."
+      }
     },
     "publish": [
       {

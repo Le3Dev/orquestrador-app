@@ -1,6 +1,7 @@
 import type { DadosDaConfiguracao, EventoDeOrquestracao, EventoRegistrado } from "../api/tipos";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../estado/aplicarEvento";
 import {
+  arestasDasPrevias,
   arestasDosBixinhos,
   bixinhosParaLimpar,
   ehNota,
@@ -14,7 +15,9 @@ import {
   type NoBixinho,
   type NoDoCanvas,
   novaNota,
+  novaPrevia,
   novoTerminal,
+  posicaoDaPreviaDoTerminal,
   reacomodarBixinhos,
   reaproveitarArestas,
   semTerminal,
@@ -32,6 +35,7 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "fixa", limite: 2 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
+  instrucoesPersonalizadas: "",
 };
 
 function conversa(eventos: EventoDeOrquestracao[]): EstadoDaConversa {
@@ -635,7 +639,54 @@ describe("semTerminal e layoutDosNos", () => {
       terminais: { o1: { x: 100, y: 100, largura: 600, altura: 500 } },
       notas: {},
       artefatos: {},
+      previas: {},
+      shells: {},
       viewport: null,
     });
+  });
+});
+
+describe("prévias no canvas", () => {
+  const terminal = novoTerminal("o1", { x: 0, y: 0 }, 600, 500);
+  const doTerminal = novaPrevia("p1", { x: 700, y: 0 }, { url: "http://localhost:5173", orquestradorId: "o1" });
+
+  it("uma linha tracejada do terminal até a prévia que saiu dele, do lado voltado para ela", () => {
+    const solta = novaPrevia("p2", { x: 0, y: 900 }, { url: "", orquestradorId: null });
+
+    expect(arestasDasPrevias([terminal, doTerminal, solta])).toEqual([
+      expect.objectContaining({
+        id: "aresta:previa:p1",
+        type: "default",
+        source: "o1",
+        sourceHandle: "direita",
+        target: "previa:p1",
+        targetHandle: "esquerda",
+        className: "aresta-previa",
+      }),
+    ]);
+  });
+
+  it("com o terminal fechado, a prévia continua, sem linha", () => {
+    expect(arestasDasPrevias([doTerminal])).toEqual([]);
+  });
+
+  it("as linhas só mudam quando a prévia troca de lado do terminal", () => {
+    const anteriores = [terminal, doTerminal];
+    const navegou = [terminal, { ...doTerminal, data: { ...doTerminal.data, url: "http://localhost:3000" } }];
+    const foiParaBaixo = [terminal, { ...doTerminal, position: { x: 0, y: 700 } }];
+
+    expect(mesmasLigacoes(anteriores, navegou)).toBe(anteriores);
+    expect(mesmasLigacoes(anteriores, foiParaBaixo)).toBe(foiParaBaixo);
+  });
+
+  it("a prévia do terminal abre ao lado dele, sem cobrir outra janela", () => {
+    const vizinho = novoTerminal("o2", { x: 660, y: 0 }, 600, 500);
+
+    const posicao = posicaoDaPreviaDoTerminal([terminal, vizinho], "o1", { largura: 720, altura: 520 });
+    expect(posicao).not.toBeNull();
+    expect(
+      sobrepoe({ ...(posicao ?? { x: 0, y: 0 }), largura: 720, altura: 520 }, { x: 660, y: 0, largura: 600, altura: 500 }),
+    ).toBe(false);
+    expect(posicaoDaPreviaDoTerminal([vizinho], "o1", { largura: 720, altura: 520 })).toBeNull();
   });
 });
