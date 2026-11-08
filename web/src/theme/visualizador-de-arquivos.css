@@ -1,0 +1,78 @@
+/* ---------------- Visualizador de código (botão Arquivos do terminal) ----------------
+ * À esquerda, a árvore da pasta do orquestrador; à direita, o arquivo aberto
+ * no tema escuro do VS Code (Dark+), com números de linha. As cores do código
+ * vêm do shiki em `style`; aqui ficam o fundo, a calha e a tipografia. */
+
+.arvore-de-arquivos {
+  width: 290px;
+  flex-shrink: 0;
+  overflow: auto;
+  border-right: 1px solid var(--border);
+  padding: 6px 4px;
+  margin: 0;
+  list-style: none;
+}
+.arvore-de-arquivos ul { list-style: none; margin: 0; padding: 0; }
+
+.item-da-arvore {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  text-align: left;
+  font-family: var(--fonte-mono);
+  font-size: 12px;
+  color: var(--secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.item-da-arvore:hover, .item-da-arvore:focus-visible { background: var(--surface-3); color: var(--primary); outline: none; }
+.item-da-arvore[aria-current="true"] { background: var(--surface-3); color: var(--primary); }
+.item-da-arvore .seta-da-pasta {
+  width: 10px;
+  flex-shrink: 0;
+  color: var(--muted);
+  transition: transform .12s ease-out;
+}
+.item-da-arvore[aria-expanded="true"] .seta-da-pasta { transform: rotate(90deg); }
+.item-da-arvore .nome-do-item { overflow: hidden; text-overflow: ellipsis; }
+.aviso-da-arvore { padding: 2px 8px; font-size: 11px; color: var(--muted); }
+
+/* O código: Dark+ do VS Code. */
+.codigo-do-visualizador {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  background: #1e1e1e;
+  color: #d4d4d4;
+}
+.codigo-do-visualizador:focus-visible { outline: 1px solid var(--border-forte); outline-offset: -1px; }
+.codigo-do-visualizador pre {
+  margin: 0;
+  padding: 8px 0;
+  min-width: max-content;
+  font-family: var(--fonte-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  tab-size: 4;
+}
+.linha-do-codigo { display: flex; }
+.linha-do-codigo:hover { background: #2a2d2e; }
+.numero-da-linha {
+  position: sticky;
+  left: 0;
+  flex-shrink: 0;
+  min-width: 3.5em;
+  padding: 0 14px 0 10px;
+  text-align: right;
+  color: #858585;
+  background: #1e1e1e;
+  user-select: none;
+}
+.linha-do-codigo:hover .numero-da-linha { color: #c6c6c6; background: #2a2d2e; }
+/* Nome próprio: `.texto-da-linha` é das notas (index.css), que quebram a linha. */
+.texto-da-linha-do-codigo { white-space: pre; padding-right: 24px; }

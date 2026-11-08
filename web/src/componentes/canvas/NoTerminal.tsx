@@ -2,13 +2,14 @@ import { Handle, type NodeProps, NodeResizer, Position } from "@xyflow/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
-import type {
-  DadosDaConfiguracao,
-  DadosDoPedidoNaFila,
-  ModoDoTurno,
-  NomeDaPredefinicao,
-  ResumoDoOrquestrador,
-  SituacaoDoSubagente,
+import {
+  type DadosDaConfiguracao,
+  type DadosDoPedidoNaFila,
+  type ModoDoTurno,
+  type NomeDaPredefinicao,
+  type ResumoDoOrquestrador,
+  type SituacaoDoSubagente,
+  TAMANHO_MAXIMO_DAS_INSTRUCOES,
 } from "../../shared/api/tipos";
 import { useCanvas } from "../../shared/canvas/contexto";
 import {
@@ -18,9 +19,11 @@ import {
   houveEntrega,
   prefereMovimentoReduzido,
 } from "../../shared/canvas/entrega";
-import { TAMANHO_MINIMO_DO_TERMINAL } from "../../shared/canvas/layout";
+import { ESCALA_DA_LETRA_PADRAO, type EscalaDaLetra, TAMANHO_MINIMO_DO_TERMINAL } from "../../shared/canvas/layout";
 import { ALCA_DO_TERMINAL, type Ancora, type NoTerminal as TipoDoNo } from "../../shared/canvas/nos";
 import { lerPedidoArrastado, temPedidoArrastado } from "../../shared/canvas/pedidoArrastado";
+import { registrarPromptDoTerminal } from "../../shared/canvas/promptsDosTerminais";
+import { useAcoesDosShellsSeHouver } from "../../shared/canvas/shells";
 import { abrirPreviaSozinha } from "../../shared/enderecosLocais";
 import {
   ESTADO_INICIAL,
@@ -31,14 +34,18 @@ import {
 import { formatarBytes } from "../../shared/formatacao";
 import { mesmoConteudo, useReaproveitado } from "../../shared/hooks/useReaproveitado";
 import { type ImagemAnexada, lerImagem, problemaDaImagem } from "../../shared/imagens";
+import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
+import { resumoDaConfiguracao } from "../../shared/resumoDaConfiguracao";
 import { CamposDaConfiguracao } from "../CamposDaConfiguracao";
 import { Etiqueta } from "../Etiqueta";
 import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
-import { IconeEngrenagem, IconeFechar, IconeOrquestrador, IconePasta } from "../Icones";
+import { IconeAlerta, IconeEngrenagem, IconeFechar, IconeOrquestrador, IconePasta, IconeShell } from "../Icones";
 import { BotaoDeAlteracoes } from "./BotaoDeAlteracoes";
+import { BotaoDeArquivos } from "./BotaoDeArquivos";
 import { BotaoDeLimparBixinhos } from "./BotaoDeLimparBixinhos";
 import type { AcoesDoPlano } from "./CartaoDoPlano";
 import { FaixaDeServidores } from "./FaixaDeServidores";
+import { Rotulo } from "./LinhasDaConfiguracao";
 import { type ControleDoPrompt, PromptDoTerminal } from "./PromptDoTerminal";
 import { TranscricaoDoTerminal } from "./TranscricaoDoTerminal";
 
@@ -198,9 +205,17 @@ interface PropsDaConfiguracao {
   aoFechar: () => void;
   /** Começa uma conversa nova (o mesmo que "/clear"); lança o erro do servidor, se houver. */
   aoLimparConversa: () => Promise<void>;
+  /** O tamanho da letra deste terminal no canvas: muda na hora, sem o Salvar (não é dado do servidor). */
+  tamanhoDaLetra?: { valor: EscalaDaLetra; aoMudar: (escala: EscalaDaLetra) => void };
 }
 
-export function PainelDeConfiguracao({ orquestrador, trabalhando, aoFechar, aoLimparConversa }: PropsDaConfiguracao) {
+export function PainelDeConfiguracao({
+  orquestrador,
+  trabalhando,
+  aoFechar,
+  aoLimparConversa,
+  tamanhoDaLetra,
+}: PropsDaConfiguracao) {
   const { acoes } = useCanvas();
   const [configuracao, setConfiguracao] = useState(orquestrador.configuracao);
   const [erro, setErro] = useState<string | null>(null);
@@ -272,50 +287,84 @@ export function PainelDeConfiguracao({ orquestrador, trabalhando, aoFechar, aoLi
     }
   }
 
+  const passouDoLimite = tamanhoDasInstrucoes(configuracao.instrucoesPersonalizadas) > TAMANHO_MAXIMO_DAS_INSTRUCOES;
+
+  // As mesmas linhas e o mesmo rodapé do cartão de criação (NoRascunho).
   return (
-    <div className="custom-scrollbar flex max-h-[70%] flex-col gap-4 overflow-y-auto border-b border-border bg-surface-2 px-4 py-3 nodrag nowheel">
-      <span className="rotulo-tecnico">configuração · vale a partir do próximo pedido</span>
-      <CamposDaConfiguracao
-        valor={configuracao}
-        aoMudar={setConfiguracao}
-        buscarEsforcoHerdado={buscarEsforcoHerdado}
-        aplicarPredefinicao={aplicarPredefinicao}
-        pastaDeTrabalho={pastaDeTrabalho}
-      />
-      {erro !== null && <div className="alert alert-error">{erro}</div>}
-      <div className="flex justify-between gap-2">
-        <div className="flex gap-2">
-          <button
-            type="button"
-            className="btn btn-sm btn-danger"
-            onClick={() => void excluir()}
-            disabled={trabalhando}
-            title={trabalhando ? "Cancele o pedido em andamento antes de excluir." : undefined}
-          >
-            Excluir orquestrador
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm btn-outline"
-            onClick={() => void novaConversa()}
-            disabled={trabalhando}
-            title={
-              trabalhando
-                ? "Cancele o pedido em andamento antes de começar uma conversa nova."
-                : "Arquiva a conversa atual e começa outra do zero (o mesmo que /clear no prompt)."
-            }
-          >
-            Nova conversa
-          </button>
+    <div className="painel-da-configuracao nodrag">
+      <div className="corpo-do-terminal corpo-da-criacao corpo-da-configuracao custom-scrollbar nodrag nowheel">
+        <span className="rotulo-tecnico">configuração · vale a partir do próximo pedido</span>
+        <div className="mt-2.5">
+          <CamposDaConfiguracao
+            valor={configuracao}
+            aoMudar={setConfiguracao}
+            buscarEsforcoHerdado={buscarEsforcoHerdado}
+            aplicarPredefinicao={aplicarPredefinicao}
+            pastaDeTrabalho={pastaDeTrabalho}
+            tamanhoDaLetra={tamanhoDaLetra}
+          />
+          <div className="linha-da-criacao">
+            <Rotulo
+              titulo="Conversa"
+              dica="Começar de novo ou excluir."
+              explicacao="Nova conversa arquiva a conversa atual e começa outra do zero (o mesmo que /clear no prompt). Excluir apaga o orquestrador e todo o histórico. Os dois pedem confirmação e esperam o pedido em andamento acabar."
+            />
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="btn btn-sm btn-outline"
+                onClick={() => void novaConversa()}
+                disabled={trabalhando}
+                title={
+                  trabalhando
+                    ? "Cancele o pedido em andamento antes de começar uma conversa nova."
+                    : "Arquiva a conversa atual e começa outra do zero (o mesmo que /clear no prompt)."
+                }
+              >
+                Nova conversa
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-danger"
+                onClick={() => void excluir()}
+                disabled={trabalhando}
+                title={trabalhando ? "Cancele o pedido em andamento antes de excluir." : undefined}
+              >
+                Excluir orquestrador
+              </button>
+            </div>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <button type="button" className="btn btn-sm btn-ghost" onClick={aoFechar}>
-            Voltar
-          </button>
-          <button type="button" className="btn btn-sm btn-cta" onClick={() => void salvar()} disabled={salvando}>
-            {salvando ? "Salvando…" : "Salvar"}
-          </button>
+      </div>
+
+      <div className="rodape-da-criacao rodape-da-configuracao">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          {erro !== null ? (
+            <p className="mono texto-longo line-clamp-3 text-[11.5px] text-error" role="alert">
+              ✗ {erro}
+            </p>
+          ) : passouDoLimite ? (
+            <span className="flex items-center gap-2 text-[12.5px] text-warning">
+              <IconeAlerta tamanho={15} className="shrink-0" />
+              Encurte as instruções para salvar.
+            </span>
+          ) : (
+            <span className="truncate text-[12.5px] text-primary" title={resumoDaConfiguracao(configuracao)}>
+              {resumoDaConfiguracao(configuracao)}
+            </span>
+          )}
         </div>
+        <button type="button" className="btn btn-ghost shrink-0" onClick={aoFechar}>
+          Voltar
+        </button>
+        <button
+          type="button"
+          className="btn btn-cta shrink-0"
+          onClick={() => void salvar()}
+          disabled={salvando || passouDoLimite}
+        >
+          {salvando ? "Salvando…" : "Salvar"}
+        </button>
       </div>
     </div>
   );
@@ -426,7 +475,7 @@ export function NoTerminal({ data, selected }: NodeProps<TipoDoNo>) {
     <>
       <Redimensionador visivel={selected} />
       <AncorasDoTerminal />
-      <JanelaDoTerminal orquestrador={orquestrador} />
+      <JanelaDoTerminal orquestrador={orquestrador} escalaDaLetra={data.escalaDaLetra ?? ESCALA_DA_LETRA_PADRAO} />
     </>
   );
 }
@@ -434,9 +483,16 @@ export function NoTerminal({ data, selected }: NodeProps<TipoDoNo>) {
 /**
  * A janela do terminal: barra de título, transcrição e prompt. Só re-renderiza
  * com novidades do canvas, nunca no arraste; e a transcrição e o prompt,
- * memorizados e com props estáveis, só quando o que eles mostram muda.
+ * memorizados e com props estáveis, só quando o que eles mostram muda. O
+ * tamanho da letra (`escalaDaLetra`) vale para tudo abaixo da barra de título.
  */
-const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orquestrador: ResumoDoOrquestrador }) {
+const JanelaDoTerminal = memo(function JanelaDoTerminal({
+  orquestrador,
+  escalaDaLetra,
+}: {
+  orquestrador: ResumoDoOrquestrador;
+  escalaDaLetra: EscalaDaLetra;
+}) {
   const { conversas, conexoes, sinais, servidor, acoes } = useCanvas();
   const orquestradorId = orquestrador.id;
   const conversa = conversas.get(orquestradorId) ?? ESTADO_INICIAL;
@@ -651,6 +707,28 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
     }
   }, [orquestradorId]);
 
+  // O modo atual sem trocar a identidade da resposta às perguntas: a transcrição
+  // é memorizada e não precisa re-renderizar quando o Plan Mode liga ou desliga.
+  const modoAtual = useRef(modo);
+  useEffect(() => {
+    modoAtual.current = modo;
+  }, [modo]);
+
+  /**
+   * A escolha nas perguntas do Orquestrador vai como um pedido novo, pelo mesmo
+   * envio do prompt e no modo atual (sem as imagens anexadas no prompt). Lança
+   * o erro do servidor (ex.: 409 com um pedido rodando): o cartão o mostra.
+   */
+  const responderPergunta = useCallback(
+    async (texto: string): Promise<void> => {
+      setErro(null);
+      await api.enviarMensagem(orquestradorId, texto, [], modoAtual.current);
+      acompanhando.current = true;
+      setCancelamentoPedido(false);
+    },
+    [orquestradorId],
+  );
+
   /** O ajuste vai como um novo pedido de planejamento, escrito no prompt. */
   const ajustarPlano = useCallback((): void => {
     setModo("planejamento");
@@ -660,6 +738,16 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
   /** "abrir prévia" na faixa dos servidores: a prévia nasce ligada a este terminal. */
   const { abrirPrevia } = acoes;
   const aoAbrirPrevia = useCallback((url: string) => abrirPrevia(orquestradorId, url), [abrirPrevia, orquestradorId]);
+
+  /** O campo "Tamanho da letra" do ⚙: o nó do terminal tem o id do Orquestrador. */
+  const { mudarEscalaDaLetra } = acoes;
+  const tamanhoDaLetra = useMemo(
+    () => ({
+      valor: escalaDaLetra,
+      aoMudar: (escala: EscalaDaLetra) => mudarEscalaDaLetra(orquestradorId, escala),
+    }),
+    [escalaDaLetra, mudarEscalaDaLetra, orquestradorId],
+  );
 
   // Um agente acabou de subir um servidor: a prévia abre sozinha, ao lado
   // deste terminal e selecionada. Cada anúncio abre uma vez só.
@@ -673,6 +761,18 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
       abrirPrevia(orquestradorId, detectado.url);
     }
   }, [abrirPrevia, detectado, orquestradorId]);
+
+  // O bloco "Terminal" ligado a este Orquestrador escreve no prompt por aqui (o "enviar ao orquestrador").
+  useEffect(
+    () =>
+      registrarPromptDoTerminal(orquestradorId, {
+        acrescentarTexto: (texto) => controleDoPrompt.current?.acrescentarTexto(texto),
+      }),
+    [orquestradorId],
+  );
+
+  /** "Abrir terminal": um shell na pasta (ou worktree) deste Orquestrador, ligado a ele. */
+  const acoesDosShells = useAcoesDosShellsSeHouver();
 
   const acoesDoPlano = useMemo<AcoesDoPlano>(
     () => ({ aoAprovar: aprovarPlano, aoAjustar: ajustarPlano, aoDescartar: descartarPlano }),
@@ -760,6 +860,18 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
         <Etiqueta situacao={trabalhando ? "trabalhando" : "ocioso"} />
         <BotaoDeLimparBixinhos orquestradorId={orquestradorId} />
         <BotaoDeAlteracoes orquestradorId={orquestradorId} />
+        <BotaoDeArquivos orquestradorId={orquestradorId} nomeDoOrquestrador={orquestrador.nome} />
+        {acoesDosShells !== null && (
+          <button
+            type="button"
+            className="botao-icone nodrag"
+            title="Abrir um terminal na pasta deste orquestrador"
+            aria-label="Abrir terminal"
+            onClick={() => acoesDosShells.abrirShell({ orquestradorId })}
+          >
+            <IconeShell tamanho={16} />
+          </button>
+        )}
         <button
           type="button"
           className="botao-icone nodrag"
@@ -781,62 +893,67 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({ orquestrador }: { orqu
         </button>
       </div>
 
-      {configurando && (
-        <PainelDeConfiguracao
-          orquestrador={orquestrador}
-          trabalhando={trabalhando}
-          aoFechar={() => setConfigurando(false)}
-          aoLimparConversa={iniciarConversaNova}
-        />
-      )}
+      <div className="conteudo-do-cartao" style={{ zoom: escalaDaLetra }}>
+        {configurando && (
+          <PainelDeConfiguracao
+            orquestrador={orquestrador}
+            trabalhando={trabalhando}
+            aoFechar={() => setConfigurando(false)}
+            aoLimparConversa={iniciarConversaNova}
+            tamanhoDaLetra={tamanhoDaLetra}
+          />
+        )}
 
-      <div
-        ref={rolagem}
-        onScroll={() => {
-          const elemento = rolagem.current;
-          if (elemento !== null) {
-            acompanhando.current =
-              elemento.scrollHeight - elemento.scrollTop - elemento.clientHeight < MARGEM_DE_ACOMPANHAMENTO;
-          }
-        }}
-        className="corpo-do-terminal custom-scrollbar nodrag nowheel"
-      >
-        <TranscricaoDoTerminal
-          orquestradorId={orquestradorId}
-          nome={orquestrador.nome}
-          pastaDeTrabalho={orquestrador.pastaDeTrabalho}
-          configuracao={configuracao}
-          predefinicao={orquestrador.predefinicaoCorrespondente ?? null}
-          turnos={conversa.turnos}
-          conversaIniciadaEm={conversa.conversaIniciadaEm}
-          sinal={sinais.get(orquestradorId)}
+        <div
+          ref={rolagem}
+          onScroll={() => {
+            const elemento = rolagem.current;
+            if (elemento !== null) {
+              acompanhando.current =
+                elemento.scrollHeight - elemento.scrollTop - elemento.clientHeight < MARGEM_DE_ACOMPANHAMENTO;
+            }
+          }}
+          className="corpo-do-terminal custom-scrollbar nodrag nowheel"
+        >
+          <TranscricaoDoTerminal
+            orquestradorId={orquestradorId}
+            nome={orquestrador.nome}
+            pastaDeTrabalho={orquestrador.pastaDeTrabalho}
+            configuracao={configuracao}
+            predefinicao={orquestrador.predefinicaoCorrespondente ?? null}
+            turnos={conversa.turnos}
+            conversaIniciadaEm={conversa.conversaIniciadaEm}
+            sinal={sinais.get(orquestradorId)}
+            desconectado={!servidor.conectado}
+            acoesDoPlano={acoesDoPlano}
+            aoResponderPergunta={responderPergunta}
+          />
+          {erro !== null && <p className="mono texto-longo mt-3 text-error">✗ {erro}</p>}
+        </div>
+
+        <FaixaDeServidores enderecos={conversa.enderecosLocais} aoAbrir={aoAbrirPrevia} />
+        <PromptDoTerminal
+          pasta={orquestrador.nomeDaPasta}
           desconectado={!servidor.conectado}
-          acoesDoPlano={acoesDoPlano}
+          trabalhando={trabalhando}
+          cancelando={cancelando}
+          modo={modo}
+          aoAlternarModo={aoAlternarModo}
+          campo={campoDoPrompt}
+          controle={controleDoPrompt}
+          imagens={imagens}
+          aoAnexar={aoAnexar}
+          aoRemoverImagem={aoRemoverImagem}
+          aoEnviar={enviar}
+          aoEnfileirar={enfileirar}
+          fila={fila}
+          proximoDaFilaACaminho={proximoDaFilaACaminho}
+          aoRemoverDaFila={aoRemoverDaFila}
+          aoEnviarDaFila={aoEnviarDaFila}
+          aoLimparConversa={limparConversa}
+          aoCancelar={aoCancelar}
         />
-        {erro !== null && <p className="mono texto-longo mt-3 text-error">✗ {erro}</p>}
       </div>
-
-      <FaixaDeServidores enderecos={conversa.enderecosLocais} aoAbrir={aoAbrirPrevia} />
-      <PromptDoTerminal
-        desconectado={!servidor.conectado}
-        trabalhando={trabalhando}
-        cancelando={cancelando}
-        modo={modo}
-        aoAlternarModo={aoAlternarModo}
-        campo={campoDoPrompt}
-        controle={controleDoPrompt}
-        imagens={imagens}
-        aoAnexar={aoAnexar}
-        aoRemoverImagem={aoRemoverImagem}
-        aoEnviar={enviar}
-        aoEnfileirar={enfileirar}
-        fila={fila}
-        proximoDaFilaACaminho={proximoDaFilaACaminho}
-        aoRemoverDaFila={aoRemoverDaFila}
-        aoEnviarDaFila={aoEnviarDaFila}
-        aoLimparConversa={limparConversa}
-        aoCancelar={aoCancelar}
-      />
       {trabalhando && servidor.conectado && <div className="faixa-de-progresso" />}
     </div>
   );
