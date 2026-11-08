@@ -1085,6 +1085,114 @@ describe("NoTerminal · nota arrastada para o terminal", () => {
   });
 });
 
+describe("NoTerminal · barra estreita", () => {
+  /** Guarda o aviso do observador: o teste diz quando a barra "mudou de tamanho". */
+  const avisos: (() => void)[] = [];
+  class ObservadorDeTamanhoSimulado {
+    constructor(aviso: () => void) {
+      avisos.push(aviso);
+    }
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+
+  beforeEach(() => {
+    avisos.length = 0;
+    vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoSimulado);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const resumoCheio = (): ResumoDoOrquestrador => ({
+    ...orquestrador(),
+    instrucoesAtivas: "padrao",
+    worktree: { branch: "feature/barra-estreita", caminho: "C:\\projetos\\painel-wt", ativo: true },
+  });
+
+  /** Renderiza o terminal e simula a barra com `largura` px (o jsdom não tem layout). */
+  function renderizarComLargura(largura: number) {
+    const { container } = render(<Terminal canvas={canvasDoTerminal(conversaOciosa(), resumoCheio())} no={propsDoNo()} />);
+    const barra = container.querySelector(".barra-do-terminal");
+    if (!(barra instanceof HTMLElement)) {
+      throw new Error("barra do terminal não encontrada");
+    }
+    Object.defineProperty(barra, "clientWidth", { configurable: true, value: largura });
+    act(() => {
+      for (const aviso of avisos) {
+        aviso();
+      }
+    });
+    return barra;
+  }
+
+  const CONTROLES = ["Limpar bixinhos", "Alterações de o1", "Configurar", "Fechar o terminal"];
+
+  it("larga, todos os chips ficam na barra, cada um com o texto inteiro no title, e não há ⋯", () => {
+    const barra = renderizarComLargura(1400);
+
+    expect(within(barra).getByTitle("C:\\projetos\\painel")).toHaveTextContent("painel");
+    expect(within(barra).getByTitle(/^Branch: feature\/barra-estreita/)).toHaveTextContent("feature/barra-estreita");
+    expect(within(barra).getByTitle(/^Instruções gerais ativas/)).toHaveTextContent("instruções gerais");
+    expect(within(barra).getByTitle("Situação: ocioso")).toHaveTextContent("Ocioso");
+    expect(screen.queryByRole("button", { name: "Mais da barra" })).not.toBeInTheDocument();
+    for (const controle of CONTROLES) {
+      expect(within(barra).getByRole("button", { name: controle })).toBeInTheDocument();
+    }
+  });
+
+  it("estreita, os controles continuam na barra e os chips que sobram vão para o ⋯", () => {
+    const barra = renderizarComLargura(360);
+
+    for (const controle of CONTROLES) {
+      expect(within(barra).getByRole("button", { name: controle })).toBeInTheDocument();
+    }
+    expect(within(barra).queryByText("instruções gerais")).not.toBeInTheDocument();
+    expect(within(barra).getByText("Painel de salas")).toBeInTheDocument();
+
+    const mais = screen.getByRole("button", { name: "Mais da barra" });
+    expect(mais).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(mais);
+
+    const menu = screen.getByRole("group", { name: "O que não coube na barra" });
+    expect(mais).toHaveAttribute("aria-expanded", "true");
+    expect(within(menu).getByTitle(/^Instruções gerais ativas/)).toHaveTextContent("instruções gerais");
+    expect(within(menu).getByTitle(/^Branch: feature\/barra-estreita/)).toBeInTheDocument();
+    // Os controles não vão para o menu.
+    expect(within(menu).queryByRole("button")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(menu, { key: "Escape" });
+    expect(screen.queryByRole("group", { name: "O que não coube na barra" })).not.toBeInTheDocument();
+  });
+
+  it("a janela que volta a crescer traz os chips de volta e tira o ⋯", () => {
+    const barra = renderizarComLargura(360);
+    expect(screen.getByRole("button", { name: "Mais da barra" })).toBeInTheDocument();
+
+    Object.defineProperty(barra, "clientWidth", { configurable: true, value: 1400 });
+    act(() => {
+      for (const aviso of avisos) {
+        aviso();
+      }
+    });
+
+    expect(screen.queryByRole("button", { name: "Mais da barra" })).not.toBeInTheDocument();
+    expect(within(barra).getByText("instruções gerais")).toBeInTheDocument();
+  });
+
+  it("o ✕ vem depois de um separador, com o tooltip de que o orquestrador continua salvo", () => {
+    const barra = renderizarComLargura(1400);
+    const fechar = within(barra).getByRole("button", { name: "Fechar o terminal" });
+
+    expect(fechar).toHaveAttribute("title", "Fechar o terminal (o orquestrador e o histórico continuam salvos)");
+    expect(fechar.previousElementSibling).toHaveClass("separador-da-barra");
+    expect(fechar.closest(".controles-da-barra")).not.toBeNull();
+  });
+});
+
 describe("NoTerminal · borda piscando na entrega do relatório", () => {
   const reduzirMovimento = { ligado: false };
 

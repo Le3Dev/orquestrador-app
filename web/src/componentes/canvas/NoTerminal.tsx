@@ -1,5 +1,18 @@
 import { Handle, type NodeProps, NodeResizer, Position } from "@xyflow/react";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  type KeyboardEvent as EventoDeTecladoDoReact,
+  memo,
+  type ReactNode,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import {
@@ -11,6 +24,7 @@ import {
   type SituacaoDoSubagente,
   TAMANHO_MAXIMO_DAS_INSTRUCOES,
 } from "../../shared/api/tipos";
+import { type ChipDaBarra, chipsParaOMenu } from "../../shared/canvas/barraDoTerminal";
 import { useCanvas } from "../../shared/canvas/contexto";
 import {
   DURACAO_DA_ENTREGA_MS,
@@ -600,6 +614,102 @@ const Redimensionador = memo(function Redimensionador({ visivel }: { visivel: bo
 });
 
 /**
+ * A largura da barra de título (`clientWidth`, com o recuo) e a do grupo dos
+ * controles, acompanhadas pelo `ResizeObserver`. As duas ignoram o zoom do
+ * canvas (são do layout, não da tela). Sem o observador (jsdom), ficam em
+ * zero e nada vai para o "⋯".
+ */
+function useLargurasDaBarra(
+  barra: RefObject<HTMLDivElement | null>,
+  controles: RefObject<HTMLDivElement | null>,
+): { barra: number; controles: number } {
+  const [larguraDaBarra, setLarguraDaBarra] = useState(0);
+  const [larguraDosControles, setLarguraDosControles] = useState(0);
+
+  useEffect(() => {
+    const elementoDaBarra = barra.current;
+    const elementoDosControles = controles.current;
+    if (elementoDaBarra === null || elementoDosControles === null || typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+    const medir = (): void => {
+      setLarguraDaBarra(Math.round(elementoDaBarra.clientWidth));
+      setLarguraDosControles(Math.round(elementoDosControles.offsetWidth));
+    };
+    const observador = new ResizeObserver(medir);
+    observador.observe(elementoDaBarra);
+    observador.observe(elementoDosControles);
+    return () => observador.disconnect();
+  }, [barra, controles]);
+
+  return { barra: larguraDaBarra, controles: larguraDosControles };
+}
+
+/** Um chip da barra do terminal: na barra, cortado com reticências; no "⋯", inteiro. */
+interface ItemDaBarra {
+  id: ChipDaBarra;
+  elemento: ReactNode;
+}
+
+/**
+ * "⋯" na barra do terminal: os chips que não couberam, num menu que desce
+ * encostado à direita. Clique fora e Esc fecham.
+ */
+function MaisDaBarra({ itens }: { itens: readonly ItemDaBarra[] }) {
+  const [aberto, setAberto] = useState(false);
+  const raiz = useRef<HTMLDivElement>(null);
+  const idDoMenu = useId();
+
+  // Clique fora fecha.
+  useEffect(() => {
+    if (!aberto) {
+      return;
+    }
+    const aoPressionar = (evento: MouseEvent) => {
+      if (raiz.current !== null && evento.target instanceof Node && !raiz.current.contains(evento.target)) {
+        setAberto(false);
+      }
+    };
+    document.addEventListener("mousedown", aoPressionar, true);
+    return () => document.removeEventListener("mousedown", aoPressionar, true);
+  }, [aberto]);
+
+  const aoTeclar = (evento: EventoDeTecladoDoReact<HTMLDivElement>) => {
+    if (evento.key === "Escape") {
+      evento.preventDefault();
+      evento.stopPropagation();
+      setAberto(false);
+    }
+  };
+
+  return (
+    <div ref={raiz} className="ancora-do-mais-da-barra nodrag" onKeyDown={aoTeclar}>
+      <button
+        type="button"
+        className="botao-icone nodrag"
+        aria-label="Mais da barra"
+        aria-haspopup="true"
+        aria-expanded={aberto}
+        aria-controls={aberto ? idDoMenu : undefined}
+        title="O que não coube na barra deste terminal"
+        onClick={() => setAberto((anterior) => !anterior)}
+      >
+        ⋯
+      </button>
+      {aberto && (
+        <div id={idDoMenu} role="group" aria-label="O que não coube na barra" className="menu-da-barra-do-terminal painel-flutuante">
+          {itens.map((item) => (
+            <div key={item.id} className="item-da-barra-no-menu">
+              {item.elemento}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
  * Um Orquestrador no canvas: uma janela de terminal que se arrasta pela barra
  * de título e se redimensiona pelas bordas quando selecionada. Os bixinhos dos
  * Subagentes nascem abaixo dela, ligados por linhas.
@@ -662,6 +772,9 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   const campoDoPrompt = useRef<HTMLTextAreaElement>(null);
   const controleDoPrompt = useRef<ControleDoPrompt>(null);
   const acompanhando = useRef(true);
+  const barra = useRef<HTMLDivElement>(null);
+  const controlesDaBarra = useRef<HTMLDivElement>(null);
+  const larguras = useLargurasDaBarra(barra, controlesDaBarra);
 
   // O nome do evento chega na hora; o do resumo, na próxima consulta da lista.
   const nome = nomePendente ?? conversa.nome ?? orquestrador.nome;
@@ -953,6 +1066,85 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
     [aprovarPlano, ajustarPlano, descartarPlano],
   );
 
+  // Os chips da barra: à esquerda do espaçador, a pasta e a branch; à direita, o resto.
+  // Cortados com reticências (o texto inteiro no `title`); sem espaço nem assim, vão para o "⋯".
+  const chipsDaEsquerda: ItemDaBarra[] = [
+    {
+      id: "pasta",
+      elemento: (
+        <span className="flex min-w-0 items-center gap-1 mono text-muted" title={orquestrador.pastaDeTrabalho}>
+          <IconePasta className="shrink-0" />
+          <span className="truncate">{orquestrador.nomeDaPasta}</span>
+        </span>
+      ),
+    },
+  ];
+  if (orquestrador.worktree !== null) {
+    chipsDaEsquerda.push({
+      id: "branch",
+      elemento: <EtiquetaDeWorktree worktree={orquestrador.worktree} className="max-w-[9rem]" />,
+    });
+  }
+  const chipsDaDireita: ItemDaBarra[] = [];
+  if (orquestrador.instrucoesAtivas !== null) {
+    chipsDaDireita.push({
+      id: "instrucoes",
+      elemento: (
+        <span
+          className="chip chip-instrucoes min-w-0 overflow-hidden"
+          title={
+            orquestrador.instrucoesAtivas === "orquestrador"
+              ? "Instruções personalizadas deste orquestrador ativas (na engrenagem, para ver ou editar)"
+              : "Instruções gerais ativas (botão Instruções gerais, na barra do canvas)"
+          }
+        >
+          <span className="min-w-0 truncate">
+            {orquestrador.instrucoesAtivas === "orquestrador" ? "instruções" : "instruções gerais"}
+          </span>
+        </span>
+      ),
+    });
+  }
+  if (servidor.conectado && conexoes.get(orquestradorId) === "reconectando") {
+    chipsDaDireita.push({
+      id: "reconectando",
+      elemento: (
+        <span className="min-w-0 truncate mono text-error" title="Reconectando à conversa deste orquestrador">
+          reconectando…
+        </span>
+      ),
+    });
+  }
+  // A medição é a cada 5 s: fora de um pedido, o número seria de um processo que já acabou.
+  if (trabalhando && memoriaDoProcesso > 0) {
+    chipsDaDireita.push({
+      id: "memoria",
+      elemento: (
+        <span
+          className="chip min-w-0 overflow-hidden"
+          title={`Memória usada agora pelo processo do Claude deste orquestrador (com os subagentes): ${formatarBytes(memoriaDoProcesso)}`}
+        >
+          <span className="min-w-0 truncate">RAM {formatarBytes(memoriaDoProcesso)}</span>
+        </span>
+      ),
+    });
+  }
+  chipsDaDireita.push({
+    id: "situacao",
+    elemento: (
+      <span className="flex shrink-0" title={trabalhando ? "Situação: trabalhando num pedido" : "Situação: ocioso"}>
+        <Etiqueta situacao={trabalhando ? "trabalhando" : "ocioso"} />
+      </span>
+    ),
+  });
+  const noMenu = chipsParaOMenu(
+    larguras.barra,
+    larguras.controles,
+    [...chipsDaEsquerda, ...chipsDaDireita].map((chip) => chip.id),
+  );
+  const naBarra = (chip: ItemDaBarra): boolean => !noMenu.has(chip.id);
+  const foraDaBarra = [...chipsDaEsquerda, ...chipsDaDireita].filter((chip) => noMenu.has(chip.id));
+
   return (
     <div
       className={`janela-terminal ${trabalhando ? "janela-terminal-ativa" : ""} ${modo === "planejamento" ? "janela-terminal-planejando" : ""} ${piscando ? "janela-terminal-entrega" : ""}`}
@@ -996,7 +1188,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
       {arraste === "pedido" && (
         <div className="soltar-imagens">solte para escrever no prompt — nada é enviado até você apertar enter</div>
       )}
-      <div className={`barra-do-terminal ${ALCA_DO_TERMINAL}`}>
+      <div ref={barra} className={`barra-do-terminal ${ALCA_DO_TERMINAL}`}>
         <span className="semaforo" aria-hidden="true">
           <i />
           <i />
@@ -1014,67 +1206,52 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
             {nome}
           </strong>
         )}
-        <span className="flex min-w-0 items-center gap-1 mono text-muted" title={orquestrador.pastaDeTrabalho}>
-          <IconePasta className="shrink-0" />
-          <span className="truncate">{orquestrador.nomeDaPasta}</span>
-        </span>
-        <EtiquetaDeWorktree worktree={orquestrador.worktree} className="max-w-[9rem]" />
+        {chipsDaEsquerda.filter(naBarra).map((chip) => (
+          <Fragment key={chip.id}>{chip.elemento}</Fragment>
+        ))}
         <span className="flex-1" />
-        {orquestrador.instrucoesAtivas !== null && (
-          <span
-            className="chip chip-instrucoes"
-            title={
-              orquestrador.instrucoesAtivas === "orquestrador"
-                ? "Instruções personalizadas deste orquestrador ativas (na engrenagem, para ver ou editar)"
-                : "Instruções gerais ativas (botão Instruções gerais, na barra do canvas)"
-            }
-          >
-            {orquestrador.instrucoesAtivas === "orquestrador" ? "instruções" : "instruções gerais"}
-          </span>
-        )}
-        {servidor.conectado && conexoes.get(orquestradorId) === "reconectando" && (
-          <span className="mono text-error">reconectando…</span>
-        )}
-        {/* A medição é a cada 5 s: fora de um pedido, o número seria de um processo que já acabou. */}
-        {trabalhando && memoriaDoProcesso > 0 && (
-          <span className="chip" title="Memória usada agora pelo processo do Claude deste orquestrador (com os subagentes)">
-            RAM {formatarBytes(memoriaDoProcesso)}
-          </span>
-        )}
-        <Etiqueta situacao={trabalhando ? "trabalhando" : "ocioso"} />
-        <BotaoDeLimparBixinhos orquestradorId={orquestradorId} />
-        <BotaoDeAlteracoes orquestradorId={orquestradorId} />
-        <BotaoDeArquivos orquestradorId={orquestradorId} nomeDoOrquestrador={nome} />
-        {acoesDosShells !== null && (
+        {chipsDaDireita.filter(naBarra).map((chip) => (
+          <Fragment key={chip.id}>{chip.elemento}</Fragment>
+        ))}
+        {foraDaBarra.length > 0 && <MaisDaBarra itens={foraDaBarra} />}
+        {/* Os controles nunca encolhem nem saem da barra: quem cede espaço são os chips. */}
+        <div ref={controlesDaBarra} className="controles-da-barra">
+          <BotaoDeLimparBixinhos orquestradorId={orquestradorId} />
+          <BotaoDeAlteracoes orquestradorId={orquestradorId} />
+          <BotaoDeArquivos orquestradorId={orquestradorId} nomeDoOrquestrador={nome} />
+          {acoesDosShells !== null && (
+            <button
+              type="button"
+              className="botao-icone nodrag"
+              title="Abrir um terminal na pasta deste orquestrador"
+              aria-label="Abrir terminal"
+              onClick={() => acoesDosShells.abrirShell({ orquestradorId })}
+            >
+              <IconeShell tamanho={16} />
+            </button>
+          )}
           <button
             type="button"
             className="botao-icone nodrag"
-            title="Abrir um terminal na pasta deste orquestrador"
-            aria-label="Abrir terminal"
-            onClick={() => acoesDosShells.abrirShell({ orquestradorId })}
+            title="Configurar"
+            aria-label="Configurar"
+            aria-pressed={configurando}
+            onClick={() => setConfigurando((atual) => !atual)}
           >
-            <IconeShell tamanho={16} />
+            <IconeEngrenagem />
           </button>
-        )}
-        <button
-          type="button"
-          className="botao-icone nodrag"
-          title="Configurar"
-          aria-label="Configurar"
-          aria-pressed={configurando}
-          onClick={() => setConfigurando((atual) => !atual)}
-        >
-          <IconeEngrenagem />
-        </button>
-        <button
-          type="button"
-          className="botao-icone nodrag"
-          title="Fechar o terminal (o orquestrador e o histórico continuam salvos)"
-          aria-label="Fechar o terminal"
-          onClick={() => acoes.fecharTerminal(orquestradorId)}
-        >
-          <IconeFechar />
-        </button>
+          {/* Separado das funções e sem o círculo vermelho: não é o fechar da janela do sistema. */}
+          <span className="separador-da-barra" aria-hidden="true" />
+          <button
+            type="button"
+            className="botao-icone botao-fechar-do-terminal nodrag"
+            title="Fechar o terminal (o orquestrador e o histórico continuam salvos)"
+            aria-label="Fechar o terminal"
+            onClick={() => acoes.fecharTerminal(orquestradorId)}
+          >
+            <IconeFechar tamanho={14} />
+          </button>
+        </div>
       </div>
 
       <div className="conteudo-do-cartao" style={{ zoom: escalaDaLetra }}>
