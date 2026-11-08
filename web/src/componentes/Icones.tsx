@@ -166,6 +166,16 @@ export function IconeMicrofone({ tamanho = 18, className = "" }: PropsDoIcone) {
   );
 }
 
+/** Brilhos (✨): melhorar o pedido escrito no campo. */
+export function IconeBrilho({ tamanho = 16, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path d="M10 3.5c.6 3.6 2.4 5.4 6 6-3.6.6-5.4 2.4-6 6-.6-3.6-2.4-5.4-6-6 3.6-.6 5.4-2.4 6-6Z" {...TRACO} />
+      <path d="M17.5 14.5c.3 1.8 1.2 2.7 3 3-1.8.3-2.7 1.2-3 3-.3-1.8-1.2-2.7-3-3 1.8-.3 2.7-1.2 3-3Z" {...TRACO} />
+    </Quadro>
+  );
+}
+
 /** Triângulo de alerta. */
 export function IconeAlerta({ tamanho = 14, className = "" }: PropsDoIcone) {
   return (
@@ -251,6 +261,16 @@ export function IconeAbrirFora({ tamanho = 14, className = "" }: PropsDoIcone) {
     <Quadro tamanho={tamanho} className={className}>
       <path d="M13.5 4.5h6v6M19.5 4.5l-8 8" {...TRACO} />
       <path d="M17.5 14v4a1.5 1.5 0 0 1-1.5 1.5H6A1.5 1.5 0 0 1 4.5 18V8A1.5 1.5 0 0 1 6 6.5h4" {...TRACO} />
+    </Quadro>
+  );
+}
+
+/** Janela com o sinal de prompt: o bloco "Terminal", um shell de verdade no canvas. */
+export function IconeShell({ tamanho = 14, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" {...TRACO} />
+      <path d="m7.5 9.5 3 2.5-3 2.5M12.5 15h4" {...TRACO} />
     </Quadro>
   );
 }

@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createRef } from "react";
 
+import { api } from "../../shared/api/cliente";
 import type { DadosDoPedidoNaFila, ModoDoTurno } from "../../shared/api/tipos";
 import type { ImagemAnexada } from "../../shared/imagens";
 import { type ControleDoPrompt, PromptDoTerminal } from "./PromptDoTerminal";
@@ -50,6 +51,7 @@ function renderizar({
   const campo = createRef<HTMLTextAreaElement>();
   render(
     <PromptDoTerminal
+      pasta="painel-app"
       desconectado={desconectado}
       trabalhando={trabalhando}
       cancelando={false}
@@ -343,6 +345,93 @@ describe("PromptDoTerminal", () => {
       fireEvent.change(campo, { target: { value: "lista:\n" } });
       act(() => controle.current?.acrescentarTexto("item"));
       expect(campo).toHaveValue("lista:\nitem");
+    });
+  });
+
+  describe("melhorar o pedido (✨)", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    const MELHORADO = {
+      texto: "Rode os testes do pacote web e corrija os que falharem.",
+      uso: { entrada: 900, criacaoDeCache: 0, leituraDeCache: 0, saida: 60 },
+      indiceDeCusto: 19_800,
+      duracaoMs: 1800,
+    };
+
+    it("desabilitado com o campo vazio, com o servidor fora e com um pedido rodando", () => {
+      const { campo } = renderizar();
+      const botao = screen.getByRole("button", { name: "Melhorar o pedido" });
+      expect(botao).toHaveAttribute("title", "Melhorar o pedido");
+      expect(botao).toBeDisabled();
+      fireEvent.change(campo, { target: { value: "testes" } });
+      expect(botao).toBeEnabled();
+    });
+
+    it.each([
+      ["trabalhando", { trabalhando: true }],
+      ["desconectado", { desconectado: true }],
+    ] as const)("%s: o botão fica desabilitado mesmo com texto", (_nome, opcoes) => {
+      const { campo } = renderizar(opcoes);
+      fireEvent.change(campo, { target: { value: "testes" } });
+      expect(screen.getByRole("button", { name: "Melhorar o pedido" })).toBeDisabled();
+    });
+
+    it("manda onde \"orquestrador\" e a pasta, troca o texto sem enviar e o desfazer volta o original", async () => {
+      const melhorar = vi.spyOn(api, "melhorarPrompt").mockResolvedValue(MELHORADO);
+      const { aoEnviar, aoEnfileirar, campo } = renderizar({ imagens: [IMAGEM] });
+      fireEvent.change(campo, { target: { value: "roda os testes" } });
+
+      fireEvent.click(screen.getByRole("button", { name: "Melhorar o pedido" }));
+
+      expect(melhorar).toHaveBeenCalledWith(
+        { texto: "roda os testes", onde: "orquestrador", pasta: "painel-app" },
+        expect.any(AbortSignal),
+      );
+      await waitFor(() => expect(campo).toHaveValue(MELHORADO.texto));
+      expect(screen.getByRole("status")).toHaveTextContent("melhorado · ≈ índice 19,8 mil · desfazer");
+      expect(aoEnviar).not.toHaveBeenCalled();
+      expect(aoEnfileirar).not.toHaveBeenCalled();
+      // A imagem anexada continua no campo.
+      expect(screen.getByRole("img", { name: "tela.png" })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "desfazer" }));
+      expect(campo).toHaveValue("roda os testes");
+      expect(screen.queryByRole("button", { name: "desfazer" })).not.toBeInTheDocument();
+    });
+
+    it("melhorando: o campo trava, o botão vira cancelar e cancelar aborta", () => {
+      let sinal: AbortSignal | undefined;
+      vi.spyOn(api, "melhorarPrompt").mockImplementation((_dados, recebido) => {
+        sinal = recebido;
+        return new Promise(() => undefined);
+      });
+      const { aoEnviar, campo } = renderizar();
+      fireEvent.change(campo, { target: { value: "roda os testes" } });
+
+      fireEvent.click(screen.getByRole("button", { name: "Melhorar o pedido" }));
+
+      expect(campo).toHaveAttribute("readonly");
+      expect(screen.getByRole("button", { name: "enviar ⏎" })).toBeDisabled();
+      fireEvent.keyDown(campo, { key: "Enter" });
+      expect(aoEnviar).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Cancelar a melhoria do pedido" }));
+      expect(sinal?.aborted).toBe(true);
+      expect(campo).not.toHaveAttribute("readonly");
+      expect(campo).toHaveValue("roda os testes");
+    });
+
+    it("erro: mensagem curta perto do campo e o texto fica intacto", async () => {
+      vi.spyOn(api, "melhorarPrompt").mockRejectedValue(new Error("O servidor respondeu com erro 500."));
+      const { campo } = renderizar();
+      fireEvent.change(campo, { target: { value: "roda os testes" } });
+
+      fireEvent.click(screen.getByRole("button", { name: "Melhorar o pedido" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Não foi possível melhorar o pedido: O servidor respondeu com erro 500.",
+      );
+      expect(campo).toHaveValue("roda os testes");
     });
   });
 });
