@@ -79,8 +79,19 @@ function abrir(conectado = true) {
 const campoDaPasta = () => screen.getByRole("combobox", { name: "Pasta de trabalho" });
 const campoDoNome = () => screen.getByRole("textbox", { name: "Nome" });
 const botaoDeComecar = () => screen.getByRole("button", { name: /^Começar/ });
-const chipDoEsforco = () => screen.getByRole("button", { name: /^Esforço do orquestrador:/ });
-const chipDaQuantidade = () => screen.getByRole("button", { name: /^Subagentes:/ });
+const menuDoModelo = (dono: "do orquestrador" | "dos subagentes") =>
+  screen.getByRole("button", { name: new RegExp(`^Modelo ${dono}:`) });
+/** Abre o menu do modelo e escolhe o modelo (o menu fecha). */
+function escolherModelo(dono: "do orquestrador" | "dos subagentes", nome: RegExp): void {
+  fireEvent.click(menuDoModelo(dono));
+  fireEvent.click(screen.getByRole("menuitemradio", { name: nome }));
+}
+/** Abre o menu do modelo, entra em "Esforço" e escolhe o nível (o menu continua aberto). */
+function escolherEsforco(dono: "do orquestrador" | "dos subagentes", nivel: string): void {
+  fireEvent.click(menuDoModelo(dono));
+  fireEvent.click(screen.getByRole("menuitem", { name: /^Esforço/ }));
+  fireEvent.click(screen.getByRole("menuitemradio", { name: nivel }));
+}
 
 /** Abre e escolhe o projeto /p/app da lista. */
 async function abrirComPasta() {
@@ -124,10 +135,11 @@ describe("NoRascunho", () => {
 
     expect(await screen.findByRole("option", { name: "todos os projetos (pasta raiz)" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Somente leitura" })).toBeChecked();
-    expect(screen.getByRole("combobox", { name: "Orquestrador" })).toHaveValue("opus");
-    expect(screen.getByRole("combobox", { name: "Subagentes" })).toHaveValue("opus");
-    expect(chipDoEsforco()).toHaveTextContent("esforço automático");
-    expect(chipDaQuantidade()).toHaveTextContent("até 3 por vez");
+    expect(menuDoModelo("do orquestrador")).toHaveTextContent("Opus 5.5");
+    expect(menuDoModelo("dos subagentes")).toHaveTextContent("Opus 5.5");
+    expect(menuDoModelo("do orquestrador")).toHaveTextContent("esforço padrão");
+    expect(screen.getByRole("radio", { name: /Automática/ })).toBeChecked();
+    expect(screen.getByLabelText("Máximo")).toHaveValue(3);
     expect(screen.getByRole("switch", { name: "Commit e push quando eu pedir" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("textbox", { name: "Instruções" })).toBeInTheDocument();
     expect(screen.getAllByRole("switch")).toHaveLength(1);
@@ -137,21 +149,23 @@ describe("NoRascunho", () => {
     expect(screen.getByText("novo orquestrador")).toBeInTheDocument();
   });
 
-  it("os seletores de modelo têm Fable, Opus, Sonnet e Haiku", async () => {
+  it("os menus de modelo têm Fable, Opus, Sonnet e Haiku", async () => {
     abrir();
     await screen.findByRole("option", { name: "app" });
 
-    for (const nome of ["Orquestrador", "Subagentes"]) {
-      const seletor = screen.getByRole("combobox", { name: nome });
-      expect(within(seletor).getAllByRole("option").map((opcao) => opcao.getAttribute("value"))).toEqual([
-        "fable",
-        "opus",
-        "sonnet",
-        "haiku",
+    for (const dono of ["do orquestrador", "dos subagentes"] as const) {
+      fireEvent.click(menuDoModelo(dono));
+      const itens = screen.getAllByRole("menuitemradio");
+      expect(itens.map((item) => item.textContent)).toEqual([
+        expect.stringMatching(/^Fable 5\.1/),
+        expect.stringMatching(/^Opus 5\.5/),
+        expect.stringMatching(/^Sonnet 5\.5/),
+        expect.stringMatching(/^Haiku 5\.5/),
       ]);
+      fireEvent.keyDown(document, { key: "Escape" });
     }
-    fireEvent.change(screen.getByRole("combobox", { name: "Orquestrador" }), { target: { value: "fable" } });
-    expect(screen.getByRole("combobox", { name: "Orquestrador" })).toHaveValue("fable");
+    escolherModelo("do orquestrador", /^Fable/);
+    expect(menuDoModelo("do orquestrador")).toHaveTextContent("Fable 5.1");
   });
 
   it("escolher a pasta da lista dá o nome, o título e o resumo de pronto", async () => {
@@ -244,11 +258,11 @@ describe("NoRascunho", () => {
     expect(botao).toHaveAttribute("title", expect.stringContaining("Gasta menos tokens por pedido."));
     fireEvent.click(botao);
 
-    expect(screen.getByRole("combobox", { name: "Orquestrador" })).toHaveValue("sonnet");
-    expect(screen.getByRole("combobox", { name: "Subagentes" })).toHaveValue("haiku");
-    expect(chipDoEsforco()).toHaveTextContent("esforço médio");
-    expect(chipDaQuantidade()).toHaveTextContent("até 1 por vez");
-    fireEvent.change(screen.getByRole("combobox", { name: "Subagentes" }), { target: { value: "opus" } });
+    expect(menuDoModelo("do orquestrador")).toHaveTextContent("Sonnet");
+    expect(menuDoModelo("dos subagentes")).toHaveTextContent("Haiku");
+    expect(menuDoModelo("do orquestrador")).toHaveTextContent("esforço médio");
+    expect(screen.getByLabelText("Máximo")).toHaveValue(1);
+    escolherModelo("dos subagentes", /^Opus/);
     expect(await criarEPegarPayload(criar)).toMatchObject({
       modeloDoOrquestrador: "sonnet",
       esforcoDoOrquestrador: "medio",
@@ -276,8 +290,7 @@ describe("NoRascunho", () => {
     expect(screen.getAllByText(/No automático, o Claude Code usa/)).toHaveLength(1);
     expect(ler).toHaveBeenLastCalledWith("opus", "opus", "/p/app");
 
-    fireEvent.click(chipDoEsforco());
-    fireEvent.click(screen.getByRole("option", { name: "Alto" }));
+    escolherEsforco("do orquestrador", "Alto");
     expect(screen.queryByText(/No automático, o Claude Code usa/)).not.toBeInTheDocument();
   });
 
@@ -285,7 +298,7 @@ describe("NoRascunho", () => {
     const criado = { id: "novo" } as ResumoDoOrquestrador;
     const criar = vi.spyOn(api, "criarOrquestrador").mockResolvedValue(criado);
     const acoes = await abrirComPasta();
-    fireEvent.change(screen.getByRole("combobox", { name: "Subagentes" }), { target: { value: "haiku" } });
+    escolherModelo("dos subagentes", /^Haiku/);
     fireEvent.change(screen.getByRole("textbox", { name: "Instruções" }), { target: { value: "Seja breve." } });
 
     const payload = await criarEPegarPayload(criar);
@@ -339,85 +352,84 @@ describe("NoRascunho", () => {
     expect(await criarEPegarPayload(criar)).toMatchObject({ nivelDePermissao: "edicao_e_comandos" });
   });
 
-  it("o chip de esforço muda pelo menu e o × volta ao automático", async () => {
+  it("o esforço muda pelo menu do modelo, que continua aberto até escolher o modelo ou apertar Esc", async () => {
     const criar = espiarCriacao();
     await abrirComPasta();
 
-    fireEvent.click(chipDoEsforco());
-    const menu = screen.getByRole("listbox", { name: "Esforço do orquestrador" });
-    expect(within(menu).getAllByRole("option")).toHaveLength(7);
-    expect(within(menu).getAllByRole("option").at(-1)).toHaveTextContent("Ultracode");
-    expect(within(menu).getByRole("option", { name: /Automático/ })).toHaveAttribute("aria-selected", "true");
-    fireEvent.click(within(menu).getByRole("option", { name: "Alto" }));
+    fireEvent.click(menuDoModelo("do orquestrador"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Esforço/ }));
+    const menu = screen.getByRole("menu", { name: "Esforço" });
+    expect(within(menu).getAllByRole("menuitemradio")).toHaveLength(7);
+    expect(within(menu).getAllByRole("menuitemradio").at(-1)).toHaveTextContent("Ultracode");
+    expect(within(menu).getByRole("menuitemradio", { name: "Padrão" })).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "Alto" }));
 
-    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    expect(chipDoEsforco()).toHaveTextContent("esforço alto");
-    expect(chipDoEsforco()).toHaveFocus();
+    // Voltou para a vista raiz, ainda aberto.
+    expect(screen.getByRole("menuitem", { name: /^Esforço/ })).toHaveTextContent("Alto");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(menuDoModelo("do orquestrador")).toHaveFocus();
+    expect(menuDoModelo("do orquestrador")).toHaveTextContent("esforço alto");
     expect(screen.getByText("Somente leitura, Opus (esforço alto) com até 3 subagentes Opus.")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Voltar o esforço do orquestrador ao automático" }));
-    expect(chipDoEsforco()).toHaveTextContent("esforço automático");
-
-    fireEvent.click(screen.getByRole("button", { name: /^Esforço dos subagentes:/ }));
-    fireEvent.click(screen.getByRole("option", { name: "Máximo" }));
-    expect(await criarEPegarPayload(criar)).toMatchObject({ esforcoDoOrquestrador: "padrao", esforcoDosSubagentes: "maximo" });
+    escolherEsforco("dos subagentes", "Máximo");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(await criarEPegarPayload(criar)).toMatchObject({ esforcoDoOrquestrador: "alto", esforcoDosSubagentes: "maximo" });
   });
 
   it("Ultracode só existe no esforço do orquestrador e, escolhido, avisa do custo", async () => {
     const criar = espiarCriacao();
     await abrirComPasta();
 
-    fireEvent.click(screen.getByRole("button", { name: /^Esforço dos subagentes:/ }));
-    const dosSubagentes = screen.getByRole("listbox", { name: "Esforço dos subagentes" });
-    expect(within(dosSubagentes).getAllByRole("option")).toHaveLength(6);
-    expect(within(dosSubagentes).queryByRole("option", { name: "Ultracode" })).not.toBeInTheDocument();
+    fireEvent.click(menuDoModelo("dos subagentes"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Esforço/ }));
+    const dosSubagentes = screen.getByRole("menu", { name: "Esforço" });
+    expect(within(dosSubagentes).getAllByRole("menuitemradio")).toHaveLength(6);
+    expect(within(dosSubagentes).queryByRole("menuitemradio", { name: "Ultracode" })).not.toBeInTheDocument();
     fireEvent.keyDown(document, { key: "Escape" });
 
     expect(screen.queryByText(/Ultracode dispara workflows/)).not.toBeInTheDocument();
-    fireEvent.click(chipDoEsforco());
-    fireEvent.click(screen.getByRole("option", { name: "Ultracode" }));
+    escolherEsforco("do orquestrador", "Ultracode");
 
-    expect(chipDoEsforco()).toHaveTextContent("esforço ultracode");
+    expect(menuDoModelo("do orquestrador")).toHaveTextContent("esforço ultracode");
     expect(screen.getByText(/Ultracode dispara workflows com vários agentes em paralelo/)).toHaveClass("hint-warning");
     expect(await criarEPegarPayload(criar)).toMatchObject({ esforcoDoOrquestrador: "ultracode", esforcoDosSubagentes: "padrao" });
   });
 
-  it("Esc e clique fora fecham o menu, e só um fica aberto por vez", async () => {
+  it("Esc e clique fora fecham o menu, e escolher o modelo também", async () => {
     abrir();
     await screen.findByRole("option", { name: "app" });
 
-    fireEvent.click(chipDoEsforco());
+    fireEvent.click(menuDoModelo("do orquestrador"));
     fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    expect(chipDoEsforco()).toHaveFocus();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(menuDoModelo("do orquestrador")).toHaveFocus();
 
-    fireEvent.click(chipDoEsforco());
+    fireEvent.click(menuDoModelo("do orquestrador"));
     fireEvent.pointerDown(screen.getByText("novo orquestrador"));
-    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
 
-    fireEvent.click(chipDoEsforco());
-    fireEvent.click(chipDaQuantidade());
-    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Quantos subagentes" })).toBeInTheDocument();
+    fireEvent.click(menuDoModelo("do orquestrador"));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /^Fable/ }));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(menuDoModelo("do orquestrador")).toHaveTextContent("Fable 5.1");
   });
 
-  it("quantidade fixa ou automática, com os limites de 1 a 10 e o × que volta ao padrão", async () => {
+  it("quantidade fixa ou automática, com os limites de 1 a 10", async () => {
     const criar = espiarCriacao();
     await abrirComPasta();
+    const grupo = screen.getByRole("radiogroup", { name: "Quantidade de subagentes" });
 
-    fireEvent.click(chipDaQuantidade());
-    fireEvent.click(screen.getByRole("button", { name: "Sempre" }));
-    fireEvent.click(screen.getByRole("button", { name: "Mais subagentes" }));
-    expect(screen.getByText("Sempre 4 subagentes.")).toBeInTheDocument();
-    expect(chipDaQuantidade()).toHaveTextContent("sempre 4");
+    expect(within(grupo).getByRole("radio", { name: /Automática/ })).toBeChecked();
+    expect(screen.getByLabelText("Máximo")).toHaveValue(3);
+    fireEvent.click(within(grupo).getByRole("radio", { name: /Fixa/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Aumentar" }));
+    expect(screen.getByLabelText("Quantidade")).toHaveValue(4);
     for (let i = 0; i < 12; i++) {
-      fireEvent.click(screen.getByRole("button", { name: "Mais subagentes" }));
+      fireEvent.click(screen.getByRole("button", { name: "Aumentar" }));
     }
-    expect(screen.getByRole("button", { name: "Mais subagentes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Aumentar" })).toBeDisabled();
     expect(await criarEPegarPayload(criar)).toMatchObject({ quantidadeDeSubagentes: { modo: "fixa", limite: 10 } });
-
-    fireEvent.click(screen.getByRole("button", { name: "Voltar a quantidade ao padrão, até 3 por vez" }));
-    expect(chipDaQuantidade()).toHaveTextContent("até 3 por vez");
   });
 
   it("commit e push avisam quando falta a permissão de rodar comandos", async () => {

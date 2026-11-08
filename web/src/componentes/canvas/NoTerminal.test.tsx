@@ -115,8 +115,14 @@ function renderizar(resumo: ResumoDoOrquestrador, { trabalhando = false } = {}) 
   return { aoFechar, acoes: canvas.acoes, opcao: screen.getByRole("switch", { name: "Commit e push quando eu pedir" }) };
 }
 
-const chipDoEsforco = (dono: "do orquestrador" | "dos subagentes") =>
-  screen.getByRole("button", { name: new RegExp(`^Esforço ${dono}:`) });
+const menuDoModelo = (dono: "do orquestrador" | "dos subagentes") =>
+  screen.getByRole("button", { name: new RegExp(`^Modelo ${dono}:`) });
+/** Abre o menu do modelo, entra em "Esforço" e escolhe o nível (o menu continua aberto). */
+function escolherEsforco(dono: "do orquestrador" | "dos subagentes", nivel: string): void {
+  fireEvent.click(menuDoModelo(dono));
+  fireEvent.click(screen.getByRole("menuitem", { name: /^Esforço/ }));
+  fireEvent.click(screen.getByRole("menuitemradio", { name: nivel }));
+}
 const campoDasInstrucoes = () => screen.getByRole("textbox", { name: "Instruções" });
 
 describe("PainelDeConfiguracao", () => {
@@ -157,10 +163,9 @@ describe("PainelDeConfiguracao", () => {
     const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
     const { aoFechar } = renderizar(orquestrador({ esforcoDoOrquestrador: "alto" }));
 
-    expect(chipDoEsforco("do orquestrador")).toHaveTextContent("esforço alto");
-    expect(chipDoEsforco("dos subagentes")).toHaveTextContent("esforço automático");
-    fireEvent.click(chipDoEsforco("dos subagentes"));
-    fireEvent.click(screen.getByRole("option", { name: "Baixo" }));
+    expect(menuDoModelo("do orquestrador")).toHaveTextContent("esforço alto");
+    expect(menuDoModelo("dos subagentes")).toHaveTextContent("esforço padrão");
+    escolherEsforco("dos subagentes", "Baixo");
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
 
     await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
@@ -207,8 +212,7 @@ describe("PainelDeConfiguracao", () => {
     expect(screen.getByText("configuração · vale a partir do próximo pedido")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("radio", { name: "Somente leitura" }));
-    fireEvent.click(chipDoEsforco("do orquestrador"));
-    fireEvent.click(screen.getByRole("option", { name: "Alto" }));
+    escolherEsforco("do orquestrador", "Alto");
 
     expect(screen.getByText("Somente leitura, Opus (esforço alto) com até 3 subagentes Sonnet.")).toBeInTheDocument();
   });
@@ -283,10 +287,10 @@ describe("PainelDeConfiguracao", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Modo econômico" }));
 
-    await waitFor(() => expect(chipDoEsforco("do orquestrador")).toHaveTextContent("esforço médio"));
+    await waitFor(() => expect(menuDoModelo("do orquestrador")).toHaveTextContent("esforço médio"));
     expect(aplicarPredefinicao).toHaveBeenCalledWith("o1", "economico");
     expect(herdado).toHaveBeenCalledWith("o1");
-    expect(chipDoEsforco("dos subagentes")).toHaveTextContent("esforço médio");
+    expect(menuDoModelo("dos subagentes")).toHaveTextContent("esforço médio");
   });
 });
 

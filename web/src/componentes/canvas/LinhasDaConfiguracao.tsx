@@ -1,15 +1,13 @@
 import type { ReactNode } from "react";
 
-import type { DadosDoEsforcoHerdado, EsforcoDeRaciocinio, ModeloClaude, NivelDePermissao } from "../../shared/api/tipos";
-import { ROTULOS_DOS_ESFORCOS, ROTULOS_DOS_MODELOS } from "../../shared/formatacao";
+import type { DadosDoEsforcoHerdado, EsforcoDeRaciocinio, NivelDePermissao } from "../../shared/api/tipos";
+import { ROTULOS_DOS_ESFORCOS } from "../../shared/formatacao";
 import { Dica } from "../Dica";
 
 /*
  * Peças das linhas de configuração (rótulo à esquerda, controle à direita),
  * usadas pela criação (NoRascunho) e pela ⚙ do terminal (CamposDaConfiguracao).
  */
-
-const MODELOS: readonly ModeloClaude[] = ["fable", "opus", "sonnet", "haiku"];
 
 interface PropsDoRotulo {
   titulo: string;
@@ -47,37 +45,6 @@ export function Rotulo({ titulo, dica, explicacao, htmlFor, id, alinharAoTopo = 
   );
 }
 
-export function SeletorDeModelo({
-  id,
-  valor,
-  aoEscolher,
-}: {
-  id: string;
-  valor: ModeloClaude;
-  aoEscolher: (modelo: ModeloClaude) => void;
-}) {
-  return (
-    <select
-      id={id}
-      className="select select-compacto"
-      value={valor}
-      title={ROTULOS_DOS_MODELOS[valor].descricao}
-      onChange={(evento) => {
-        const escolhido = MODELOS.find((modelo) => modelo === evento.target.value);
-        if (escolhido !== undefined) {
-          aoEscolher(escolhido);
-        }
-      }}
-    >
-      {MODELOS.map((modelo) => (
-        <option key={modelo} value={modelo} title={ROTULOS_DOS_MODELOS[modelo].descricao}>
-          {ROTULOS_DOS_MODELOS[modelo].nome}
-        </option>
-      ))}
-    </select>
-  );
-}
-
 /** No automático o app não força nada: avisa quando o que o Claude Code herda gasta tokens demais. */
 export function AvisoDoEsforcoHerdado({
   esforco,
@@ -92,7 +59,7 @@ export function AvisoDoEsforcoHerdado({
   return (
     <span className="hint-warning">
       No automático, o Claude Code usa <strong>{ROTULOS_DOS_ESFORCOS[herdado.nivel]}</strong> para este modelo
-      (definido em <span className="mono">{herdado.origem}</span>). Isso gasta mais tokens; escolha um esforço no chip
+      (definido em <span className="mono">{herdado.origem}</span>). Isso gasta mais tokens; escolha um esforço no menu
       para controlar.
     </span>
   );
