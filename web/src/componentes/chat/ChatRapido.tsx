@@ -20,7 +20,9 @@ import {
   ultimoModeloUsado,
 } from "../../shared/estado/aplicarEventoDoChat";
 import { formatarBytes, formatarDuracao } from "../../shared/formatacao";
-import { type ImagemAnexada, lerImagem, problemaDaImagem, TIPOS_DE_IMAGEM } from "../../shared/imagens";
+import { ehCapturaDeTela, type ImagemAnexada, lerImagem, MAXIMO_DE_IMAGENS, problemaDaImagem, TIPOS_DE_IMAGEM } from "../../shared/imagens";
+import { useModoInvisivel } from "../../shared/hooks/useModoInvisivel";
+import type { CapturaDeTela } from "../../shared/ponteDoDesktop";
 import { TextoFormatado } from "../TextoFormatado";
 import { CartaoDeAcao, type PropsDasAcoesDoChat } from "./CartaoDeAcao";
 import { CartaoDeAutorizacao } from "./CartaoDeAutorizacao";
@@ -69,22 +71,28 @@ function descreverAtividade({ ferramenta, detalhe }: AtividadeDaResposta): strin
 interface PropsDaMensagem extends PropsDasAcoesDoChat {
   mensagem: MensagemDoChatNaTela;
   atividade: AtividadeDaResposta | null;
+  /** Modo invisível ativo: esconde as miniaturas das capturas de tela (só visual). */
+  ocultarCapturas: boolean;
 }
 
 /** Uma mensagem da conversa. Memorizada: só a resposta em andamento re-renderiza a cada trecho. */
 const MensagemNaConversa = memo(function MensagemNaConversa({
   mensagem,
   atividade,
+  ocultarCapturas,
   aoAbrirTerminal,
   temVagaPara,
   aoAtualizarOrquestradores,
 }: PropsDaMensagem) {
   if (mensagem.papel === "usuario") {
+    const imagensVisiveis = ocultarCapturas
+      ? mensagem.imagens.filter((imagem) => !ehCapturaDeTela(imagem.nome))
+      : mensagem.imagens;
     return (
       <div className="mensagem-do-usuario">
-        {mensagem.imagens.length > 0 && (
+        {imagensVisiveis.length > 0 && (
           <div className="anexos-do-chat">
-            {mensagem.imagens.map((imagem) => (
+            {imagensVisiveis.map((imagem) => (
               <a
                 key={imagem.arquivo}
                 href={api.enderecoDoAnexoDoChat(imagem.arquivo)}
@@ -189,6 +197,16 @@ export function ChatRapido({
   const [emUso, setEmUso] = useState(false);
   const [menuAberto, setMenuAberto] = useState(false);
   const [revogando, setRevogando] = useState(false);
+  const {
+    disponivel: modoDisponivel,
+    ativo: modoAtivo,
+    entrar: entrarNoModo,
+    capturarTela,
+    mouseDaArea,
+    sair: sairDoModo,
+    erro: erroDoModo,
+    descartarErro: descartarErroDoModo,
+  } = useModoInvisivel();
   const campo = useRef<HTMLTextAreaElement>(null);
   const seletorDeArquivos = useRef<HTMLInputElement>(null);
   const rolagem = useRef<HTMLDivElement>(null);
@@ -282,7 +300,26 @@ export function ChatRapido({
     async (pergunta: string, anexos: readonly ImagemParaEnvio[] = []): Promise<void> => {
       setEnviando(true);
       try {
-        await api.perguntarNoChat(pergunta, anexos);
+        let todosOsAnexos = anexos;
+        // Modo invisível: a tela vai junto, fotografada agora. Sem a foto, nada é enviado.
+        if (modoAtivo) {
+          if (anexos.length >= MAXIMO_DE_IMAGENS) {
+            throw new Error(
+              `No modo invisível a tela ocupa uma das ${MAXIMO_DE_IMAGENS} imagens: remova uma imagem anexada.`,
+            );
+          }
+          let captura: CapturaDeTela;
+          try {
+            captura = await capturarTela();
+          } catch (falha) {
+            throw new Error(`Não foi possível capturar a tela: ${mensagemDeErro(falha)}. A pergunta não foi enviada.`);
+          }
+          todosOsAnexos = [
+            ...anexos,
+            { nome: captura.nome, tipoDeMidia: captura.tipoDeMidia, base64: captura.base64 },
+          ];
+        }
+        await api.perguntarNoChat(pergunta, todosOsAnexos);
         setOcultaEm(null);
         setPedidoDeCancelar(false);
         acompanhando.current = true;
@@ -290,7 +327,7 @@ export function ChatRapido({
         setEnviando(false);
       }
     },
-    [],
+    [modoAtivo, capturarTela],
   );
 
   async function enviar(): Promise<void> {
@@ -393,6 +430,7 @@ export function ChatRapido({
     <div
       className={`chat-rapido nodrag nowheel nopan ${respondendo ? "chat-rapido-respondendo" : ""}`}
       data-testid="chat-rapido"
+      {...mouseDaArea}
       onDragOver={(evento) => {
         if (evento.dataTransfer.types.includes("Files")) {
           evento.preventDefault();
@@ -455,6 +493,7 @@ export function ChatRapido({
               <Fragment key={mensagem.id}>
                 <MensagemNaConversa
                   mensagem={mensagem}
+                  ocultarCapturas={modoAtivo}
                   atividade={mensagem.situacao === "respondendo" ? chat.atividade : null}
                   aoAbrirTerminal={aoAbrirTerminal}
                   temVagaPara={temVagaPara}
@@ -487,6 +526,46 @@ export function ChatRapido({
           {novidadeOculta && <span className="ponto-de-status ponto-de-status-ativo" aria-hidden="true" />}
           {novidadeOculta ? "resposta nova · mostrar conversa" : "mostrar conversa"} ({chat.mensagens.length})
         </button>
+      )}
+
+      {modoAtivo && (
+        <div className="faixa-modo-invisivel" data-testid="faixa-modo-invisivel">
+          <span
+            className="indicador-tela-vista"
+            role="status"
+            title="O Claude vê a sua tela a cada pergunta do chat: uma foto dela vai junto"
+          >
+            <span className="ponto-tela-vista" aria-hidden="true" />
+            Tela sendo vista
+          </span>
+          <span className="selo-tela-junto">a tela vai junto</span>
+          <span className="flex-1" />
+          <button
+            type="button"
+            className="botao-modo-invisivel botao-modo-invisivel-ativo"
+            onClick={() => void sairDoModo()}
+            title="Voltar ao modo normal (Ctrl+Shift+I)"
+          >
+            Voltar ao modo normal
+          </button>
+          {erroDoModo !== null && (
+            <p className="hint-error texto-longo faixa-modo-invisivel-erro" role="alert">
+              {erroDoModo}{" "}
+              <button type="button" className="btn btn-sm btn-ghost" onClick={descartarErroDoModo}>
+                fechar
+              </button>
+            </p>
+          )}
+        </div>
+      )}
+
+      {!modoAtivo && erroDoModo !== null && (
+        <p className="hint-error texto-longo" role="alert">
+          {erroDoModo}{" "}
+          <button type="button" className="btn btn-sm btn-ghost" onClick={descartarErroDoModo}>
+            fechar
+          </button>
+        </p>
       )}
 
       <div className="moldura-do-composer">
@@ -593,6 +672,17 @@ export function ChatRapido({
               </span>
             )}
             <span className="flex-1" />
+            {modoDisponivel && !modoAtivo && (
+              <button
+                type="button"
+                className="botao-icone botao-entrar-modo-invisivel"
+                aria-label="Modo invisível"
+                title="Modo invisível: janela transparente, só o chat rápido; o Claude vê a tela a cada pergunta (Ctrl+Shift+I para sair)"
+                onClick={() => void entrarNoModo()}
+              >
+                👁
+              </button>
+            )}
             <SeletorDeModelo
               preferencias={chat.preferencias}
               modeloUsado={ultimoModeloUsado(chat)}
