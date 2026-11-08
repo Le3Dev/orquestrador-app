@@ -14,8 +14,12 @@ export interface NovoEsforcoHerdado {
   modelo: string | null;
 }
 
-/** Níveis caros o bastante para avisar quem deixou o esforço em "Padrão". */
-const NIVEIS_QUE_AVISAM: readonly EsforcoDeRaciocinio[] = ["extra_alto", "maximo"];
+/**
+ * Níveis caros o bastante para avisar quem deixou o esforço em "Padrão". O
+ * `ultracode` não chega a ser herdado (só a flag `--effort` o liga), mas, se
+ * vier, é o mais caro de todos.
+ */
+const NIVEIS_QUE_AVISAM: readonly EsforcoDeRaciocinio[] = ["extra_alto", "maximo", "ultracode"];
 
 /**
  * O esforço de raciocínio que o Claude Code usa de verdade quando o app deixa
@@ -46,7 +50,7 @@ export class EsforcoHerdado {
     return new EsforcoHerdado(dados.nivel, origem, modelo === null || modelo === "" ? null : modelo);
   }
 
-  /** "Padrão" está saindo caro: o Claude Code raciocina em extra alto ou máximo. */
+  /** "Padrão" está saindo caro: o Claude Code raciocina em extra alto, máximo ou ultracode. */
   deveAvisar(): boolean {
     return NIVEIS_QUE_AVISAM.includes(this.nivel);
   }

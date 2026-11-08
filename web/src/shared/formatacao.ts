@@ -15,7 +15,12 @@ export const ROTULOS_DOS_ESFORCOS: Readonly<Record<EsforcoDeRaciocinio, string>>
   alto: "Alto",
   extra_alto: "Extra alto",
   maximo: "Máximo",
+  ultracode: "Ultracode",
 };
+
+/** Mostrado perto do esforço quando "ultracode" está escolhido (orquestrador e chat). */
+export const AVISO_DO_ULTRACODE =
+  "Ultracode dispara workflows com vários agentes em paralelo: custa bem mais e pesa na memória. Num teste, uma tarefa pequena custou US$ 3,24 em 4,5 min.";
 
 /** Na criação, "padrao" se chama Automático: o app não força nada e vale o padrão do Claude Code. */
 export function rotuloDoEsforcoNaCriacao(esforco: EsforcoDeRaciocinio): string {

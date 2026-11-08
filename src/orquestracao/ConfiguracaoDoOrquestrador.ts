@@ -1,5 +1,11 @@
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
-import { ehEsforcoDeRaciocinio, ESFORCO_PADRAO, EsforcoDeRaciocinio } from "./EsforcoDeRaciocinio";
+import {
+  ehEsforcoDeRaciocinio,
+  ESFORCO_PADRAO,
+  EsforcoDeRaciocinio,
+  serveParaSubagentes,
+  ULTRACODE_NOS_SUBAGENTES,
+} from "./EsforcoDeRaciocinio";
 import { instrucoesValidas } from "./InstrucoesPersonalizadas";
 import { ehModeloClaude, ModeloClaude } from "./ModeloClaude";
 import { ModoDoTurno } from "./ModoDoTurno";
@@ -81,6 +87,9 @@ export class ConfiguracaoDoOrquestrador {
     const esforcoDosSubagentes: unknown = dados.esforcoDosSubagentes ?? ESFORCO_PADRAO;
     if (!ehEsforcoDeRaciocinio(esforcoDosSubagentes)) {
       throw new ErroDeOrquestracao("dados_invalidos", "Esforço dos subagentes inválido.");
+    }
+    if (!serveParaSubagentes(esforcoDosSubagentes)) {
+      throw new ErroDeOrquestracao("dados_invalidos", ULTRACODE_NOS_SUBAGENTES);
     }
     const instrucoesPersonalizadas = instrucoesValidas(
       dados.instrucoesPersonalizadas,

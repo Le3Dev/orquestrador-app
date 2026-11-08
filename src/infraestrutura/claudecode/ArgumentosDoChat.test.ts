@@ -166,6 +166,40 @@ describe("montarArgumentosDoChat", () => {
     expect(valoresDe(montarArgumentosDoChat(pergunta({ esforco: "baixo" }), arquivos), "--effort")).toEqual(["low"]);
     expect(valoresDe(montarArgumentosDoChat(pergunta({ esforco: "maximo" }), arquivos), "--effort")).toEqual(["max"]);
   });
+
+  describe("com esforço ultracode", () => {
+    it("manda --effort ultracode e acrescenta o Workflow às ferramentas da sessão", () => {
+      const argumentos = montarArgumentosDoChat(pergunta({ esforco: "ultracode" }), arquivos);
+
+      expect(valoresDe(argumentos, "--effort")).toEqual(["ultracode"]);
+      expect(valoresDe(argumentos, "--tools")).toEqual([...TODAS, "Workflow"]);
+    });
+
+    it("libera o Workflow sem autorização, junto da leitura e da pasta de artefatos", () => {
+      const argumentos = montarArgumentosDoChat(pergunta({ esforco: "ultracode" }), arquivos);
+
+      expect(valoresDe(argumentos, "--allowedTools")).toEqual([...LEITURA, ...REGRAS_DE_ARTEFATO, "Workflow"]);
+    });
+
+    it("com alterações autorizadas, libera tudo mais o Workflow", () => {
+      const argumentos = montarArgumentosDoChat(
+        pergunta({ esforco: "ultracode", alteracoesAutorizadas: true }),
+        arquivos,
+      );
+
+      expect(valoresDe(argumentos, "--allowedTools")).toEqual([...TODAS, "Workflow"]);
+    });
+
+    it("nos outros esforços, o Workflow não aparece", () => {
+      for (const esforco of ["padrao", "extra_alto", "maximo"] as const) {
+        expect(montarArgumentosDoChat(pergunta({ esforco }), arquivos)).not.toContain("Workflow");
+      }
+    });
+
+    it("tira CLAUDE_CODE_EFFORT_LEVEL do ambiente", () => {
+      expect(montarAmbienteDoChat({ CLAUDE_CODE_EFFORT_LEVEL: "high" }, "ultracode").CLAUDE_CODE_EFFORT_LEVEL).toBeUndefined();
+    });
+  });
 });
 
 describe("configuracoesDaSessaoDoChat", () => {

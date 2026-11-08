@@ -12,12 +12,15 @@ import {
   comandosProibidosDoTurno,
   configuracoesDaSessao,
   definicaoDosAgentes,
+  FERRAMENTAS_POR_NIVEL,
+  ferramentasDoEsforco,
   ferramentasDoTurno,
   linhaDeEntrada,
   montarAmbiente,
   montarArgumentos,
   NivelDeEsforcoDoClaudeCode,
   nivelDeEsforcoDoClaudeCode,
+  nivelDeEsforcoDosSubagentes,
 } from "./ArgumentosDoClaudeCode";
 
 const arquivos = { agentes: "agentes.json", instrucoes: "instrucoes.txt", configuracoes: "configuracoes.json" };
@@ -482,5 +485,97 @@ describe("esforço de raciocínio", () => {
 
     expect(valoresDe(argumentos, "--effort")).toEqual(["low"]);
     expect(argumentos).not.toContain("--settings");
+  });
+});
+
+describe("esforço ultracode", () => {
+  const REVISOR = { nome: "revisor", descricao: "Revisa.", prompt: "Revise.", modelo: "herdar" as const };
+  const ultracode = (esforcoDosSubagentes: EsforcoDeRaciocinio = "padrao", nivel: NivelDePermissao = "edicao_e_comandos") =>
+    pedido(false, nivel, "execucao", false, { esforcoDoOrquestrador: "ultracode", esforcoDosSubagentes });
+
+  it("vira --effort ultracode, logo depois do --model", () => {
+    const argumentos = montarArgumentos(ultracode(), arquivos);
+
+    expect(valoresDe(argumentos, "--effort")).toEqual(["ultracode"]);
+    expect(argumentos.indexOf("--effort")).toBe(argumentos.indexOf("--model") + 2);
+  });
+
+  it("acrescenta o Workflow em --tools e em --allowedTools, depois do Agent", () => {
+    const argumentos = montarArgumentos(ultracode(), arquivos);
+
+    expect(valoresDe(argumentos, "--tools")).toEqual([...FERRAMENTAS_POR_NIVEL.edicao_e_comandos, "Agent", "Workflow"]);
+    expect(valoresDe(argumentos, "--allowedTools")).toEqual([
+      ...FERRAMENTAS_POR_NIVEL.edicao_e_comandos,
+      "Agent",
+      "Workflow",
+    ]);
+  });
+
+  it("no nível só de leitura, o Workflow entra antes das regras da pasta de artefatos", () => {
+    const argumentos = montarArgumentos(ultracode("padrao", "leitura"), arquivos);
+
+    expect(valoresDe(argumentos, "--allowedTools")).toEqual([
+      ...FERRAMENTAS_POR_NIVEL.leitura,
+      "Agent",
+      "Workflow",
+      ...REGRAS_DE_ARTEFATO,
+    ]);
+  });
+
+  it.each<EsforcoDeRaciocinio>(["padrao", "baixo", "medio", "alto", "extra_alto", "maximo"])(
+    "com o orquestrador em %s, o Workflow não aparece",
+    (esforco) => {
+      const argumentos = montarArgumentos(
+        pedido(false, "edicao_e_comandos", "execucao", false, { esforcoDoOrquestrador: esforco }),
+        arquivos,
+      );
+
+      expect(argumentos).not.toContain("Workflow");
+    },
+  );
+
+  it("com os subagentes em padrão, o executor e os prontos recebem effort xhigh", () => {
+    const definicao = definicaoDosAgentes({
+      ...ultracode(),
+      subagentesProntos: [REVISOR],
+    });
+
+    expect(definicao.executor?.effort).toBe("xhigh");
+    expect(definicao.revisor?.effort).toBe("xhigh");
+  });
+
+  it("com esforço escolhido para os subagentes, vale o escolhido", () => {
+    expect(definicaoDosAgentes(ultracode("baixo")).executor?.effort).toBe("low");
+    expect(definicaoDosAgentes(ultracode("maximo")).executor?.effort).toBe("max");
+  });
+
+  it("o Workflow nunca entra nas ferramentas do executor nem dos prontos", () => {
+    const definicao = definicaoDosAgentes({
+      ...ultracode(),
+      subagentesProntos: [REVISOR],
+    });
+
+    expect(definicao.executor?.tools).not.toContain("Workflow");
+    expect(definicao.revisor?.tools).not.toContain("Workflow");
+    expect(JSON.stringify(definicao)).not.toContain("ultracode");
+  });
+
+  it("o ultracode dos subagentes, se chegasse, viraria xhigh: o effort de agente não o aceita", () => {
+    expect(nivelDeEsforcoDosSubagentes("ultracode", "padrao")).toBe("xhigh");
+    expect(nivelDeEsforcoDosSubagentes("padrao", "maximo")).toBeNull();
+    expect(nivelDeEsforcoDosSubagentes("padrao", "padrao")).toBeNull();
+  });
+
+  it("ferramentasDoEsforco só devolve o Workflow no ultracode", () => {
+    expect(ferramentasDoEsforco("ultracode")).toEqual(["Workflow"]);
+    expect(ferramentasDoEsforco("maximo")).toEqual([]);
+  });
+
+  it("remove a variável de esforço herdada e não vai para as configurações da sessão", () => {
+    const comCommit = pedido(false, "edicao_e_comandos", "execucao", true, { esforcoDoOrquestrador: "ultracode" });
+    const ambiente = montarAmbiente({ PATH: "x", CLAUDE_CODE_EFFORT_LEVEL: "low" }, comCommit);
+
+    expect(ambiente.CLAUDE_CODE_EFFORT_LEVEL).toBeUndefined();
+    expect(configuracoesDaSessao(comCommit)).toEqual({ attribution: { commit: "", pr: "" } });
   });
 });

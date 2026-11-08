@@ -173,7 +173,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
       expect(ConfiguracaoDoOrquestrador.de(gravados).paraDados()).toMatchObject(esforcosPadrao);
     });
 
-    it.each(ESFORCOS_DE_RACIOCINIO)("aceita o esforço %s nos dois papéis", (esforco) => {
+    it.each(ESFORCOS_DE_RACIOCINIO.filter((esforco) => esforco !== "ultracode"))("aceita o esforço %s nos dois papéis", (esforco) => {
       const configuracao = ConfiguracaoDoOrquestrador.de({
         ...dados,
         esforcoDoOrquestrador: esforco,
@@ -203,6 +203,22 @@ describe("ConfiguracaoDoOrquestrador", () => {
       const dadosInvalidos = { ...dados, ...invalido } as unknown as DadosDaConfiguracao;
 
       expect(() => ConfiguracaoDoOrquestrador.de(dadosInvalidos)).toThrow(new ErroDeOrquestracao("dados_invalidos", mensagem));
+    });
+
+    it("aceita o ultracode só no orquestrador", () => {
+      const configuracao = ConfiguracaoDoOrquestrador.de({ ...dados, esforcoDoOrquestrador: "ultracode" });
+
+      expect(configuracao.paraDados()).toMatchObject({ esforcoDoOrquestrador: "ultracode", esforcoDosSubagentes: "padrao" });
+    });
+
+    it("recusa o ultracode nos subagentes, também ao alterar, com mensagem clara", () => {
+      const erro = new ErroDeOrquestracao(
+        "dados_invalidos",
+        'O esforço "ultracode" vale só para o orquestrador e o chat. Escolha outro esforço para os subagentes.',
+      );
+
+      expect(() => ConfiguracaoDoOrquestrador.de({ ...dados, esforcoDosSubagentes: "ultracode" })).toThrow(erro);
+      expect(() => ConfiguracaoDoOrquestrador.de(dados).com({ esforcoDosSubagentes: "ultracode" })).toThrow(erro);
     });
   });
 

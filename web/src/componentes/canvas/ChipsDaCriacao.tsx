@@ -8,6 +8,9 @@ const LIMITE_DE_SUBAGENTES = 10;
 
 const ESFORCOS: readonly EsforcoDeRaciocinio[] = ["padrao", "baixo", "medio", "alto", "extra_alto", "maximo"];
 
+// Ultracode só vale para o orquestrador: o servidor recusa no esforço dos subagentes.
+const ESFORCOS_COM_ULTRACODE: readonly EsforcoDeRaciocinio[] = [...ESFORCOS, "ultracode"];
+
 /** Ex.: "até 3 por vez" (automática) ou "sempre 4" (fixa). */
 function textoDaQuantidade({ modo, limite }: DadosDaQuantidade): string {
   return modo === "automatica" ? `até ${limite} por vez` : `sempre ${limite}`;
@@ -146,11 +149,14 @@ interface PropsDoEsforco {
   aoEscolher: (esforco: EsforcoDeRaciocinio) => void;
   aberto: boolean;
   aoMudarAberto: (aberto: boolean) => void;
+  /** Oferece "ultracode" como última opção (só o orquestrador). */
+  comUltracode?: boolean;
 }
 
 /** Quanto o modelo pensa antes de responder. No automático, o app não força nada. */
-export function ChipDeEsforco({ dono, valor, aoEscolher, aberto, aoMudarAberto }: PropsDoEsforco) {
+export function ChipDeEsforco({ dono, valor, aoEscolher, aberto, aoMudarAberto, comUltracode = false }: PropsDoEsforco) {
   const nome = rotuloDoEsforcoNaCriacao(valor).toLowerCase();
+  const esforcos = comUltracode ? ESFORCOS_COM_ULTRACODE : ESFORCOS;
 
   // Setas sobem e descem entre as opções, como numa lista do sistema.
   function aoTeclar(evento: KeyboardEvent<HTMLDivElement>): void {
@@ -176,7 +182,7 @@ export function ChipDeEsforco({ dono, valor, aoEscolher, aberto, aoMudarAberto }
     >
       {(fechar) => (
         <div role="listbox" aria-label={`Esforço ${dono}`} className="flex w-[232px] flex-col" onKeyDown={aoTeclar}>
-          {ESFORCOS.map((esforco) => (
+          {esforcos.map((esforco) => (
             <button
               key={esforco}
               type="button"

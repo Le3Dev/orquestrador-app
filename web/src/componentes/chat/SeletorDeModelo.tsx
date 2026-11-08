@@ -2,6 +2,7 @@ import { type RefObject, useEffect, useId, useRef, useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { PreferenciasDoChat } from "../../shared/api/tipos";
+import { AVISO_DO_ULTRACODE } from "../../shared/formatacao";
 import { ESFORCOS_DO_CHAT, MODELOS_DO_CHAT, nomeComVersao, rotuloDoEsforco } from "../../shared/modelos";
 
 interface Props {
@@ -178,6 +179,9 @@ export function SeletorDeModelo({
                     </button>
                   );
                 })}
+                {preferencias.esforco === "ultracode" && (
+                  <p className="hint-warning px-2.5 pt-1.5 pb-1 leading-snug">{AVISO_DO_ULTRACODE}</p>
+                )}
               </div>
             )}
           </div>

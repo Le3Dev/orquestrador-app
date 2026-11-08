@@ -8,11 +8,26 @@ import { modeloDoSubagentePronto } from "../../orquestracao/SubagentesProntos";
 const FERRAMENTA_DE_SUBAGENTES = "Agent";
 
 /**
- * Níveis de esforço que o Claude Code aceita no `--effort` e no campo `effort`
- * da definição de agente (https://code.claude.com/docs/en/cli-reference e
- * https://code.claude.com/docs/en/sub-agents#supported-frontmatter-fields).
+ * Ferramenta dos workflows dinâmicos do esforço `ultracode`: o agente escreve
+ * um script que lança vários agentes em segundo plano. Só existe na sessão
+ * principal com `ultracode`; nunca vai para os Subagentes.
  */
-export type NivelDeEsforcoDoClaudeCode = "low" | "medium" | "high" | "xhigh" | "max";
+export const FERRAMENTA_DE_WORKFLOW = "Workflow";
+
+/**
+ * Níveis de esforço que o Claude Code aceita no `--effort`
+ * (https://code.claude.com/docs/en/cli-reference). `ultracode` (xhigh mais
+ * workflows dinâmicos) só existe na flag: nem a `CLAUDE_CODE_EFFORT_LEVEL`,
+ * nem o `effortLevel` dos arquivos de configuração, nem o `effort` de um
+ * agente o aceitam (verificado no Claude Code 2.1.301).
+ */
+export type NivelDeEsforcoDoClaudeCode = "low" | "medium" | "high" | "xhigh" | "max" | "ultracode";
+
+/**
+ * Níveis aceitos no campo `effort` da definição de agente
+ * (https://code.claude.com/docs/en/sub-agents#supported-frontmatter-fields).
+ */
+export type NivelDeEsforcoDoAgente = Exclude<NivelDeEsforcoDoClaudeCode, "ultracode">;
 
 /**
  * Adaptador do Esforço de Raciocínio para o nível do Claude Code. `padrao` não
@@ -33,10 +48,39 @@ const NIVEL_DE_ESFORCO: Readonly<Record<EsforcoDeRaciocinio, NivelDeEsforcoDoCla
   alto: "high",
   extra_alto: "xhigh",
   maximo: "max",
+  ultracode: "ultracode",
 };
 
 export function nivelDeEsforcoDoClaudeCode(esforco: EsforcoDeRaciocinio): NivelDeEsforcoDoClaudeCode | null {
   return NIVEL_DE_ESFORCO[esforco];
+}
+
+/**
+ * O `effort` do executor e dos subagentes prontos. Com o Orquestrador em
+ * `ultracode` e os Subagentes em `padrao`, eles recebem `xhigh`, o nível de
+ * raciocínio do `ultracode` (os workflows ficam só com o Orquestrador). O
+ * domínio recusa `ultracode` nos Subagentes; se chegasse, também viraria
+ * `xhigh`, porque o campo `effort` não o aceita.
+ */
+export function nivelDeEsforcoDosSubagentes(
+  esforcoDosSubagentes: EsforcoDeRaciocinio,
+  esforcoDoOrquestrador: EsforcoDeRaciocinio,
+): NivelDeEsforcoDoAgente | null {
+  if (esforcoDosSubagentes === "padrao" && esforcoDoOrquestrador === "ultracode") {
+    return "xhigh";
+  }
+  const nivel = nivelDeEsforcoDoClaudeCode(esforcoDosSubagentes);
+  return nivel === "ultracode" ? "xhigh" : nivel;
+}
+
+/**
+ * Ferramentas que o esforço acrescenta à sessão principal (`--tools` e
+ * `--allowedTools`): o `Workflow` com `ultracode`, nada nos outros. Liberado
+ * sem pedir autorização: ele só orquestra agentes, que seguem as permissões
+ * da sessão. Sem ele em `--allowedTools`, o `dontAsk` negaria os workflows.
+ */
+export function ferramentasDoEsforco(esforco: EsforcoDeRaciocinio): readonly string[] {
+  return esforco === "ultracode" ? [FERRAMENTA_DE_WORKFLOW] : [];
 }
 
 /**
@@ -208,8 +252,8 @@ export interface DefinicaoDeAgente {
   prompt: string;
   tools: string[];
   model: string;
-  /** Ausente com esforço `padrao`. */
-  effort?: NivelDeEsforcoDoClaudeCode;
+  /** Ausente com esforço `padrao` (e o Orquestrador fora do `ultracode`). */
+  effort?: NivelDeEsforcoDoAgente;
 }
 
 /**
@@ -238,9 +282,13 @@ export function ferramentasDoTurno(pedido: PedidoDeTurno): readonly string[] {
  * O executor e os subagentes prontos do usuário. Os prontos têm as mesmas
  * ferramentas, esforço e regra de commit do executor: nunca mais permissão
  * que o turno; só mudam a descrição, a especialidade e, se escolhido, o modelo.
+ * O `Workflow` do `ultracode` nunca entra no `tools` deles.
  */
 export function definicaoDosAgentes(pedido: PedidoDeTurno): Record<string, DefinicaoDeAgente> {
-  const esforco = nivelDeEsforcoDoClaudeCode(pedido.configuracao.esforcoDosSubagentes);
+  const esforco = nivelDeEsforcoDosSubagentes(
+    pedido.configuracao.esforcoDosSubagentes,
+    pedido.configuracao.esforcoDoOrquestrador,
+  );
   const permiteCommitEPush = pedido.configuracao.permiteCommitEPush(pedido.modo);
   const prontos = Object.fromEntries(
     pedido.subagentesProntos.map((subagente): [string, DefinicaoDeAgente] => [
@@ -294,11 +342,16 @@ export function definicaoDosAgentes(pedido: PedidoDeTurno): Record<string, Defin
  * `--effort` entra só com esforço escolhido para o Orquestrador. É a flag, e
  * não a chave `effortLevel` em `--settings`, porque vence as configurações do
  * usuário (inclusive o nível salvo por modelo em `modelSettings`) e aceita
- * `max`, que as chaves de configuração não aceitam. Vale só para este
- * processo: cada turno a recebe de novo.
+ * `max` e `ultracode`, que as chaves de configuração não aceitam. Vale só
+ * para este processo: cada turno a recebe de novo. Com `ultracode`, o
+ * `Workflow` entra em `--tools` e em `--allowedTools` (`ferramentasDoEsforco`).
  */
 export function montarArgumentos(pedido: PedidoDeTurno, arquivos: ArquivosDoTurno): string[] {
-  const doNivel = [...ferramentasDoTurno(pedido), FERRAMENTA_DE_SUBAGENTES];
+  const doNivel = [
+    ...ferramentasDoTurno(pedido),
+    FERRAMENTA_DE_SUBAGENTES,
+    ...ferramentasDoEsforco(pedido.configuracao.esforcoDoOrquestrador),
+  ];
   const ferramentas = comFerramentasDeArtefato(doNivel);
   const liberadas = liberadasComArtefatos(doNivel, pedido.pastaDeArtefatos);
   const configuracoes = configuracoesDaSessao(pedido) === null ? [] : ["--settings", arquivos.configuracoes];
