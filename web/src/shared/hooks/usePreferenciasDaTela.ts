@@ -1,12 +1,21 @@
 import { useSyncExternalStore } from "react";
 
+/** De que lado do canvas fica o chat fixo. */
+export type LadoDoChatFixo = "esquerda" | "direita";
+
 /** Preferências de exibição da tela, guardadas neste computador (localStorage). */
 export type PreferenciasDaTela = {
-  /** O chat rápido vira uma coluna fixa à esquerda do canvas, em vez de flutuar no pé dele. */
+  /**
+   * O chat rápido vira uma coluna fixa ao lado do canvas (o lado vem de
+   * `ladoDoChatFixo`), em vez de flutuar no pé dele. O nome ficou do tempo em
+   * que só havia a esquerda: trocá-lo apagaria a escolha já guardada.
+   */
   chatFixoNaEsquerda: boolean;
+  /** O lado do chat fixo; preferências antigas, sem o campo, valem a esquerda. */
+  ladoDoChatFixo: LadoDoChatFixo;
   /** Mostra o botão Arquivos nos terminais (o visualizador de código). */
   visualizadorDeCodigo: boolean;
-  /** Largura (px) do chat fixo à esquerda, ajustada pela alça da borda dele. */
+  /** Largura (px) do chat fixo, ajustada pela alça da borda dele. */
   larguraDoChatFixo: number;
 };
 
@@ -17,6 +26,7 @@ export const LARGURA_DO_CHAT_FIXO = { padrao: 360, minima: 280, maxima: 640 } as
 
 const PADRAO: PreferenciasDaTela = {
   chatFixoNaEsquerda: false,
+  ladoDoChatFixo: "esquerda",
   visualizadorDeCodigo: false,
   larguraDoChatFixo: LARGURA_DO_CHAT_FIXO.padrao,
 };
@@ -68,6 +78,8 @@ function interpretar(bruto: string | null): PreferenciasDaTela {
   const largura = registro.larguraDoChatFixo;
   return {
     chatFixoNaEsquerda: booleano("chatFixoNaEsquerda"),
+    // Só "direita" muda o lado: ausente (preferência antiga) ou outro valor vale a esquerda.
+    ladoDoChatFixo: registro.ladoDoChatFixo === "direita" ? "direita" : PADRAO.ladoDoChatFixo,
     visualizadorDeCodigo: booleano("visualizadorDeCodigo"),
     // Número fora do intervalo é limitado a ele; outro tipo vale o padrão.
     larguraDoChatFixo: typeof largura === "number" ? limitarLarguraDoChatFixo(largura) : PADRAO.larguraDoChatFixo,
@@ -116,6 +128,7 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
   novas.larguraDoChatFixo = limitarLarguraDoChatFixo(novas.larguraDoChatFixo);
   if (
     novas.chatFixoNaEsquerda === atuais.chatFixoNaEsquerda &&
+    novas.ladoDoChatFixo === atuais.ladoDoChatFixo &&
     novas.visualizadorDeCodigo === atuais.visualizadorDeCodigo &&
     novas.larguraDoChatFixo === atuais.larguraDoChatFixo
   ) {
@@ -133,7 +146,7 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
 }
 
 /**
- * As preferências da tela (chat fixo à esquerda e a largura dele, visualizador de código):
+ * As preferências da tela (chat fixo, o lado e a largura dele, visualizador de código):
  * mudar num lugar reflete em todos os componentes que usam o hook e nas
  * outras abas abertas.
  */

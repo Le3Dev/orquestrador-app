@@ -109,7 +109,7 @@ describe("BarraDeTituloDoApp", () => {
     const painel = screen.getByRole("menu", { name: "Configurações" });
     expect(painel).toHaveClass("painel-de-configuracoes-direita", "no-drag");
     expect(within(painel).getByRole("group", { name: "Tela" })).toBeInTheDocument();
-    expect(within(painel).getByRole("menuitemcheckbox", { name: /Chat fixo à esquerda/ })).toHaveFocus();
+    expect(within(painel).getByRole("menuitemcheckbox", { name: "Chat fixo" })).toHaveFocus();
     expect(abrirAjustes).not.toHaveBeenCalled();
 
     fireEvent.click(within(painel).getByRole("menuitem", { name: "Pastas e Claude Code…" }));
@@ -123,7 +123,7 @@ describe("BarraDeTituloDoApp", () => {
     renderizar();
     fireEvent.click(botaoDeConfiguracoes());
 
-    fireEvent.keyDown(screen.getByRole("menuitemcheckbox", { name: /Chat fixo à esquerda/ }), { key: "Escape" });
+    fireEvent.keyDown(screen.getByRole("menuitemcheckbox", { name: "Chat fixo" }), { key: "Escape" });
 
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(botaoDeConfiguracoes()).toHaveFocus();

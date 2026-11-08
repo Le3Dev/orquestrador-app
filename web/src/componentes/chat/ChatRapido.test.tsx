@@ -740,7 +740,7 @@ describe("ChatRapido", () => {
 
       const lateral = screen.getByRole("complementary", { name: "Chat rápido" });
       expect(lateral.tagName).toBe("ASIDE");
-      expect(lateral).toHaveClass("chat-rapido", "chat-lateral");
+      expect(lateral).toHaveClass("chat-rapido", "chat-lateral", "chat-lateral-esquerda");
       expect(screen.getByText("Abra o painel").closest(".mensagem-do-usuario")).not.toBeNull();
       expect(screen.getByText("Pronto, sugeri abrir.").closest(".mensagem-do-claude")).not.toBeNull();
       expect(screen.getByText("Abrir orquestrador em painel")).toBeInTheDocument();
@@ -784,7 +784,7 @@ describe("ChatRapido", () => {
       beforeEach(() => vi.stubGlobal("PointerEvent", EventoDePonteiroFalso));
       afterEach(() => vi.unstubAllGlobals());
 
-      function renderizarComAlca(largura = 360) {
+      function renderizarComAlca(largura = 360, lado: "esquerda" | "direita" = "esquerda") {
         const aoMudarLargura = vi.fn();
         const props = {
           desconectado: false,
@@ -796,7 +796,7 @@ describe("ChatRapido", () => {
           orquestradores: [],
         };
         const resultado = render(
-          <ChatRapido chat={CONVERSA} {...props} fixo largura={largura} aoMudarLargura={aoMudarLargura} />,
+          <ChatRapido chat={CONVERSA} {...props} fixo lado={lado} largura={largura} aoMudarLargura={aoMudarLargura} />,
         );
         return {
           aoMudarLargura,
@@ -804,7 +804,7 @@ describe("ChatRapido", () => {
           lateral: screen.getByRole("complementary", { name: "Chat rápido" }),
           rerender: (nova: number) =>
             resultado.rerender(
-              <ChatRapido chat={CONVERSA} {...props} fixo largura={nova} aoMudarLargura={aoMudarLargura} />,
+              <ChatRapido chat={CONVERSA} {...props} fixo lado={lado} largura={nova} aoMudarLargura={aoMudarLargura} />,
             ),
         };
       }
@@ -891,6 +891,27 @@ describe("ChatRapido", () => {
         expect(aoMudarLargura).toHaveBeenCalledWith(540);
       });
 
+      it("à direita: a coluna e a alça marcam o lado, e o arraste e as setas se invertem (a borda vai para a esquerda e a coluna alarga)", () => {
+        const { alca, lateral, aoMudarLargura } = renderizarComAlca(400, "direita");
+
+        expect(lateral).toHaveClass("chat-lateral", "chat-lateral-direita");
+        expect(alca).toHaveClass("alca-do-chat-lateral", "alca-do-chat-lateral-direita");
+
+        fireEvent.keyDown(alca, { key: "ArrowLeft" });
+        expect(aoMudarLargura).toHaveBeenLastCalledWith(416);
+        fireEvent.keyDown(alca, { key: "ArrowRight" });
+        expect(aoMudarLargura).toHaveBeenLastCalledWith(384);
+
+        aoMudarLargura.mockClear();
+        fireEvent.pointerDown(alca, { pointerId: 1, button: 0, clientX: 900 });
+        fireEvent.pointerMove(alca, { pointerId: 1, clientX: 840 });
+        expect(lateral).toHaveStyle({ width: "460px" });
+        fireEvent.pointerMove(alca, { pointerId: 1, clientX: 950 });
+        expect(lateral).toHaveStyle({ width: "350px" });
+        fireEvent.pointerUp(alca, { pointerId: 1, clientX: 950 });
+        expect(aoMudarLargura).toHaveBeenCalledWith(350);
+      });
+
       it("um clique sem mover não grava; cancelar o arraste devolve a largura de antes", () => {
         const { alca, lateral, aoMudarLargura } = renderizarComAlca(400);
 
@@ -928,6 +949,28 @@ describe("ChatRapido", () => {
       expect(screen.getByRole("button", { name: "ocultar" })).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Fixar o chat à esquerda" }));
       expect(aoAlternarFixo).toHaveBeenCalledWith(true);
+    });
+
+    it("flutuante com o lado direita, o botão de fixar diz à direita", () => {
+      render(
+        <ChatRapido
+          chat={CONVERSA}
+          desconectado={false}
+          erroAoCarregar={null}
+          aoMudarPreferencias={vi.fn()}
+          aoAbrirTerminal={vi.fn()}
+          temVagaPara={vi.fn().mockReturnValue(true)}
+          aoAtualizarOrquestradores={vi.fn().mockResolvedValue(undefined)}
+          orquestradores={[]}
+          lado="direita"
+          aoAlternarFixo={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: "Fixar o chat à direita" })).toHaveAttribute(
+        "title",
+        "Fixar o chat à direita: uma coluna ao lado do canvas, sempre aberta",
+      );
     });
   });
 });

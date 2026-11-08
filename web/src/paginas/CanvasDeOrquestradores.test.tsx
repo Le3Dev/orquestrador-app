@@ -167,7 +167,7 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
     await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
 
     fireEvent.click(screen.getByRole("button", { name: "Configurações" }));
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /Chat fixo à esquerda/ }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Chat fixo" }));
 
     const lateral = await screen.findByRole("complementary", { name: "Chat rápido" });
     const fluxo = document.querySelector(".react-flow");
@@ -213,6 +213,38 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
 
     fireEvent.doubleClick(alca);
     await waitFor(() => expect(lateral).toHaveStyle({ width: "360px" }));
+  });
+
+  it("com o lado direita, a coluna fica depois da área do canvas, com a alça à esquerda e o arraste invertido", async () => {
+    localStorage.setItem(
+      "orquestrador.preferenciasDaTela",
+      JSON.stringify({ chatFixoNaEsquerda: true, ladoDoChatFixo: "direita", visualizadorDeCodigo: false, larguraDoChatFixo: 420 }),
+    );
+    render(<CanvasDeOrquestradores />);
+
+    const lateral = await screen.findByRole("complementary", { name: "Chat rápido" });
+    const area = document.querySelector(".react-flow")!.parentElement!;
+    // Na mesma linha, depois da área: o canvas fica à esquerda e é empurrado, não coberto.
+    expect(lateral.previousElementSibling).toBe(area);
+    expect(lateral.nextElementSibling).toBeNull();
+    expect(lateral).toHaveClass("chat-lateral", "chat-lateral-direita");
+    const alca = within(lateral).getByRole("separator", { name: "Largura do chat" });
+    expect(alca).toHaveClass("alca-do-chat-lateral-direita");
+
+    // A seta para a esquerda leva a borda para o canvas: a coluna alarga.
+    fireEvent.keyDown(alca, { key: "ArrowLeft" });
+    await waitFor(() => expect(lateral).toHaveStyle({ width: "436px" }));
+    expect(JSON.parse(localStorage.getItem("orquestrador.preferenciasDaTela") ?? "null")).toMatchObject({
+      ladoDoChatFixo: "direita",
+      larguraDoChatFixo: 436,
+    });
+
+    // Pelas Configurações, de volta à esquerda: a coluna passa para antes da área.
+    fireEvent.click(screen.getByRole("button", { name: "Configurações" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "esquerda" }));
+    const naEsquerda = await screen.findByRole("complementary", { name: "Chat rápido" });
+    await waitFor(() => expect(naEsquerda.nextElementSibling).toBe(area));
+    expect(naEsquerda).toHaveClass("chat-lateral-esquerda");
   });
 });
 

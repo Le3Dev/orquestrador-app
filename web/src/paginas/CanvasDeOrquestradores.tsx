@@ -388,9 +388,10 @@ function Canvas() {
   const { conversas, conexoes, sinais } = useConversas(idsNoCanvas, servidor.conectado);
   const chatAoVivo = useChat(servidor.conectado);
   const { chat } = chatAoVivo;
-  // Chat fixo à esquerda (painel Configurações do ⚙ ou o botão do próprio chat).
+  // Chat fixo à esquerda ou à direita (painel Configurações do ⚙ ou o botão do próprio chat).
   const { preferencias: preferenciasDaTela, mudarPreferencias: mudarPreferenciasDaTela } = usePreferenciasDaTela();
   const chatFixo = preferenciasDaTela.chatFixoNaEsquerda;
+  const ladoDoChatFixo = preferenciasDaTela.ladoDoChatFixo;
   const larguraDoChatFixo = preferenciasDaTela.larguraDoChatFixo;
   // Limpar lê as conversas por aqui, para as ações do canvas não mudarem a cada evento.
   const conversasAtuais = useRef(conversas);
@@ -561,7 +562,7 @@ function Canvas() {
 
   /**
    * O centro da área do canvas acima do chat rápido (que fica no pé da tela).
-   * Com o chat fixo à esquerda, fora da área, é o próprio centro.
+   * Com o chat fixo ao lado, fora da área, é o próprio centro.
    */
   const centroAcimaDoChat = useCallback((): Ponto => {
     const area = areaDoCanvas.current?.getBoundingClientRect();
@@ -1372,7 +1373,7 @@ function Canvas() {
     [desktop, trabalhando, bixinhosAtivos, cota, servidor.memoria, abrirPaleta, pedidosEmAndamento],
   );
   // Fora do viewport: o chat não se move com o canvas e só re-renderiza com novidades dele.
-  // Fixo à esquerda (preferência da tela), vira uma coluna ao lado da área do canvas;
+  // Fixo (preferência da tela), vira uma coluna ao lado da área do canvas, do lado escolhido;
   // senão, fica no painel do centro de baixo, dentro do React Flow.
   const alternarChatFixo = useCallback(
     (fixo: boolean) => mudarPreferenciasDaTela({ chatFixoNaEsquerda: fixo }),
@@ -1398,6 +1399,7 @@ function Canvas() {
         aoAtualizarOrquestradores={atualizarOrquestradoresDoChat}
         orquestradores={orquestradoresDoChat}
         fixo={chatFixo}
+        lado={ladoDoChatFixo}
         aoAlternarFixo={alternarChatFixo}
         largura={larguraDoChatFixo}
         aoMudarLargura={mudarLarguraDoChat}
@@ -1413,6 +1415,7 @@ function Canvas() {
       atualizarOrquestradoresDoChat,
       orquestradoresDoChat,
       chatFixo,
+      ladoDoChatFixo,
       alternarChatFixo,
       larguraDoChatFixo,
       mudarLarguraDoChat,
@@ -1437,9 +1440,9 @@ function Canvas() {
               className={`flex h-screen w-screen flex-col ${servidor.conectado ? "" : "canvas-desconectado"} ${movimento.movendo ? "canvas-movendo" : ""} ${redimensionando ? "canvas-redimensionando" : ""} ${modoInvisivel ? "canvas-modo-invisivel" : ""}`}
             >
               {barraDeTitulo}
-              {/* Linha: o chat fixo à esquerda (quando a preferência pede) empurra a área do canvas. */}
+              {/* Linha: o chat fixo (quando a preferência pede) empurra a área do canvas para o outro lado. */}
               <div className="flex min-h-0 w-full flex-1">
-                {chatFixo && chatRapido}
+                {chatFixo && ladoDoChatFixo === "esquerda" && chatRapido}
                 <div ref={areaDoCanvas} className="relative min-h-0 min-w-0 flex-1">
                   <ReactFlow<NoDoCanvas, ArestaDoCanvas>
                     nodes={nos}
@@ -1479,6 +1482,7 @@ function Canvas() {
                     aoExecutar={executarItemDaPaleta}
                   />
                 </div>
+                {chatFixo && ladoDoChatFixo === "direita" && chatRapido}
               </div>
             </div>
             {/* "Terminal" do "+ Novo ▾": a pasta é escolhida no mesmo navegador de pastas da criação do orquestrador. */}

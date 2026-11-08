@@ -23,7 +23,11 @@ import {
 import { formatarBytes, formatarDuracao } from "../../shared/formatacao";
 import { useMelhorarPrompt } from "../../shared/hooks/useMelhorarPrompt";
 import { useModoInvisivel } from "../../shared/hooks/useModoInvisivel";
-import { LARGURA_DO_CHAT_FIXO, limitarLarguraDoChatFixo } from "../../shared/hooks/usePreferenciasDaTela";
+import {
+  LARGURA_DO_CHAT_FIXO,
+  type LadoDoChatFixo,
+  limitarLarguraDoChatFixo,
+} from "../../shared/hooks/usePreferenciasDaTela";
 import { ehCapturaDeTela, type ImagemAnexada, lerImagem, MAXIMO_DE_IMAGENS, problemaDaImagem, TIPOS_DE_IMAGEM } from "../../shared/imagens";
 import type { CapturaDeTela } from "../../shared/ponteDoDesktop";
 import { AvisoDaMelhoria, BotaoDeMelhorar } from "../MelhoriaDoPrompt";
@@ -49,11 +53,13 @@ interface Props extends PropsDasAcoesDoChat {
   erroAoCarregar: string | null;
   aoMudarPreferencias: (preferencias: PreferenciasDoChat) => void;
   /**
-   * Fixo à esquerda (a preferência da tela): uma coluna da altura toda, com a
-   * conversa sempre à vista e o campo embaixo. Padrão: flutuante no pé do canvas.
+   * Fixo (a preferência da tela): uma coluna da altura toda ao lado do canvas,
+   * com a conversa sempre à vista e o campo embaixo. Padrão: flutuante no pé do canvas.
    */
   fixo?: boolean;
-  /** Fixa o chat à esquerda (true) ou o solta de volta no pé do canvas (false). Sem ela, não há botão. */
+  /** De que lado do canvas fica a coluna fixa (a alça vai na borda virada para o canvas). Padrão: esquerda. */
+  lado?: LadoDoChatFixo;
+  /** Fixa o chat ao lado do canvas (true) ou o solta de volta no pé dele (false). Sem ela, não há botão. */
   aoAlternarFixo?: (fixo: boolean) => void;
   /** Fixo: a largura da coluna (px). Padrão: 360. */
   largura?: number;
@@ -86,14 +92,20 @@ function limitarAgora(largura: number, coluna: HTMLElement | null): number {
 interface PropsDaAlca {
   largura: number;
   aoMudar: (largura: number) => void;
+  /** O lado da coluna: à direita, a alça fica na borda esquerda e o arraste se inverte. */
+  lado: LadoDoChatFixo;
 }
 
 /**
- * A alça da borda direita do chat fixo: arrastar muda a largura ao vivo (só
- * no estilo da coluna, sem re-renderizar a conversa) e grava ao soltar; as
- * setas mudam 16 px, Home/End vão ao mínimo/máximo e dois cliques voltam aos 360.
+ * A alça da borda do chat fixo virada para o canvas (a direita da coluna da
+ * esquerda, a esquerda da coluna da direita): arrastar muda a largura ao vivo
+ * (só no estilo da coluna, sem re-renderizar a conversa) e grava ao soltar; as
+ * setas levam a borda 16 px para o lado delas, Home/End vão ao mínimo/máximo e
+ * dois cliques voltam aos 360.
  */
-function AlcaDaLargura({ largura, aoMudar }: PropsDaAlca) {
+function AlcaDaLargura({ largura, aoMudar, lado }: PropsDaAlca) {
+  // À direita, levar a borda para a esquerda alarga a coluna.
+  const sentido = lado === "direita" ? -1 : 1;
   // Durante o arraste: a largura ao vivo (para o aria-valuenow); nula, a gravada.
   const [aoVivo, setAoVivo] = useState<number | null>(null);
   const arraste = useRef<{ ponteiro: number; inicioX: number; inicio: number; atual: number; coluna: HTMLElement } | null>(
@@ -143,7 +155,7 @@ function AlcaDaLargura({ largura, aoMudar }: PropsDaAlca) {
       return;
     }
     evento.stopPropagation();
-    const nova = limitarAgora(atual.inicio + evento.clientX - atual.inicioX, atual.coluna);
+    const nova = limitarAgora(atual.inicio + sentido * (evento.clientX - atual.inicioX), atual.coluna);
     if (nova !== atual.atual) {
       atual.atual = nova;
       atual.coluna.style.width = `${nova}px`;
@@ -154,8 +166,8 @@ function AlcaDaLargura({ largura, aoMudar }: PropsDaAlca) {
   function aoTeclar(evento: KeyboardEvent<HTMLDivElement>): void {
     const coluna = evento.currentTarget.parentElement;
     const destinos: Readonly<Record<string, number>> = {
-      ArrowLeft: largura - PASSO_DA_LARGURA,
-      ArrowRight: largura + PASSO_DA_LARGURA,
+      ArrowLeft: largura - sentido * PASSO_DA_LARGURA,
+      ArrowRight: largura + sentido * PASSO_DA_LARGURA,
       Home: LARGURA_DO_CHAT_FIXO.minima,
       End: LARGURA_DO_CHAT_FIXO.maxima,
     };
@@ -181,7 +193,7 @@ function AlcaDaLargura({ largura, aoMudar }: PropsDaAlca) {
       aria-valuemax={LARGURA_DO_CHAT_FIXO.maxima}
       tabIndex={0}
       title="Arraste para mudar a largura do chat · dois cliques voltam ao padrão"
-      className={`alca-do-chat-lateral nodrag nopan nowheel ${aoVivo === null ? "" : "alca-arrastando"}`}
+      className={`alca-do-chat-lateral alca-do-chat-lateral-${lado} nodrag nopan nowheel ${aoVivo === null ? "" : "alca-arrastando"}`}
       onPointerDown={aoApertar}
       onPointerMove={aoMover}
       onPointerUp={() => terminar(true)}
@@ -197,10 +209,18 @@ function AlcaDaLargura({ largura, aoMudar }: PropsDaAlca) {
   );
 }
 
-/** Alfinete: fixar o chat à esquerda. */
-function IconeFixar() {
+/** Fixar: uma janela com a coluna do lado em que o chat vai ficar. */
+function IconeFixar({ lado }: { lado: LadoDoChatFixo }) {
   return (
-    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg
+      width={13}
+      height={13}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      // À direita, o mesmo desenho espelhado.
+      style={lado === "direita" ? { transform: "scaleX(-1)" } : undefined}
+    >
       <rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" strokeWidth="1.8" />
       <path d="M9.5 4.5v15" stroke="currentColor" strokeWidth="1.8" />
       <path d="M5.8 9h1.7M5.8 12h1.7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
@@ -361,9 +381,10 @@ function assinaturaDaUltima(chat: EstadoDoChatNaTela): string {
  * o selo "alterações autorizadas" fica ao lado do campo até o `/clear`; o ✕
  * dele revoga.
  *
- * Com `fixo`, o mesmo chat vira uma coluna à esquerda do canvas (`<aside>`):
- * conversa em bolhas sempre à vista, campo embaixo e "soltar" no lugar de "ocultar".
- * Com `aoMudarLargura`, a borda direita da coluna ganha a alça de largura.
+ * Com `fixo`, o mesmo chat vira uma coluna ao lado do canvas (`<aside>`, do
+ * `lado` pedido): conversa em bolhas sempre à vista, campo embaixo e "soltar"
+ * no lugar de "ocultar". Com `aoMudarLargura`, a borda da coluna virada para o
+ * canvas ganha a alça de largura.
  */
 export function ChatRapido({
   chat,
@@ -375,6 +396,7 @@ export function ChatRapido({
   aoAtualizarOrquestradores,
   orquestradores,
   fixo = false,
+  lado = "esquerda",
   aoAlternarFixo,
   largura = LARGURA_DO_CHAT_FIXO.padrao,
   aoMudarLargura,
@@ -409,7 +431,7 @@ export function ChatRapido({
   const respondendo = chat.situacao === "respondendo";
   const cancelando = pedidoDeCancelar && respondendo;
   const temMensagens = chat.mensagens.length > 0;
-  // Fixo à esquerda, a conversa nunca se oculta.
+  // Fixo, a conversa nunca se oculta.
   const oculta = !fixo && ocultaEm !== null;
   const novidadeOculta = oculta && ocultaEm !== assinaturaDaUltima(chat);
   const temConteudo = texto.trim() !== "" || imagens.length > 0;
@@ -417,7 +439,7 @@ export function ChatRapido({
   const ultima = chat.mensagens.at(-1);
   const pedidoDeAutorizacao = pedidoDeAutorizacaoAtual(chat);
   // Compacto (uma linha) até a pessoa usar; recolhe só sem foco, texto, imagens nem menu aberto.
-  // Fixo à esquerda, fica sempre expandido: a coluna é estreita para tudo numa linha.
+  // Fixo, fica sempre expandido: a coluna é estreita para tudo numa linha.
   const expandido = fixo || emUso || texto !== "" || imagens.length > 0 || menuAberto || arrastando;
 
   // Recolhido, o campo volta à altura de uma linha.
@@ -635,12 +657,12 @@ export function ChatRapido({
           "Pergunte ao Claude · / para comandos"
         : "Pergunte qualquer coisa ao Claude · / para comandos";
 
-  // Fixo à esquerda: uma coluna (aside) ao lado do canvas; flutuante: um bloco no painel do pé do canvas.
+  // Fixo: uma coluna (aside) ao lado do canvas; flutuante: um bloco no painel do pé do canvas.
   const Raiz = fixo ? "aside" : "div";
 
   return (
     <Raiz
-      className={`chat-rapido nodrag nowheel nopan ${fixo ? "chat-lateral" : ""} ${respondendo ? "chat-rapido-respondendo" : ""}`}
+      className={`chat-rapido nodrag nowheel nopan ${fixo ? `chat-lateral chat-lateral-${lado}` : ""} ${respondendo ? "chat-rapido-respondendo" : ""}`}
       aria-label={fixo ? "Chat rápido" : undefined}
       style={fixo ? { width: `${largura}px` } : undefined}
       data-testid="chat-rapido"
@@ -665,7 +687,7 @@ export function ChatRapido({
       }}
     >
       {arrastando && <div className="soltar-imagens">solte para anexar as imagens à pergunta</div>}
-      {fixo && aoMudarLargura !== undefined && <AlcaDaLargura largura={largura} aoMudar={aoMudarLargura} />}
+      {fixo && aoMudarLargura !== undefined && <AlcaDaLargura largura={largura} aoMudar={aoMudarLargura} lado={lado} />}
 
       {/* Oculta, a conversa continua montada: os cartões de ação lembram o que já fizeram. */}
       {(temMensagens || fixo) && (
@@ -682,11 +704,11 @@ export function ChatRapido({
               <button
                 type="button"
                 className="botao-icone"
-                aria-label="Fixar o chat à esquerda"
-                title="Fixar o chat à esquerda: uma coluna ao lado do canvas, sempre aberta"
+                aria-label={`Fixar o chat à ${lado}`}
+                title={`Fixar o chat à ${lado}: uma coluna ao lado do canvas, sempre aberta`}
                 onClick={() => aoAlternarFixo(true)}
               >
-                <IconeFixar />
+                <IconeFixar lado={lado} />
               </button>
             )}
             <button

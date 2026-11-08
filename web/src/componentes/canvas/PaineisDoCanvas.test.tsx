@@ -364,7 +364,7 @@ describe("BarraDoCanvas: ⚙ Configurações no lugar do menu Preferências", ()
     expect(screen.queryByRole("button", { name: "Preferências" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Configurações" }));
     const painel = screen.getByRole("menu", { name: "Configurações" });
-    const chat = within(painel).getByRole("menuitemcheckbox", { name: /Chat fixo à esquerda/ });
+    const chat = within(painel).getByRole("menuitemcheckbox", { name: "Chat fixo" });
     expect(chat).toHaveFocus();
 
     fireEvent.click(chat);
