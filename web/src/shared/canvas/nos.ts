@@ -10,6 +10,7 @@ import {
   type LayoutDoCanvas,
   type Ponto,
   posicaoAoLado,
+  posicaoLivrePerto,
   posicoesLivresDosBixinhos,
   type Retangulo,
   sobrepoe,
@@ -750,6 +751,27 @@ export function posicaoDaPreviaDoTerminal(
     ...nos.filter(ehBixinho).map((bixinho) => retanguloNoCanvas(bixinho, origens.get(bixinho.parentId ?? ""))),
   ];
   return posicaoAoLado(retanguloNoCanvas(terminal), tamanho, obstaculos);
+}
+
+/**
+ * Onde abrir o terminal do Orquestrador: nulo se ele já está no canvas (aí só
+ * se leva a câmera até ele); senão, a primeira área livre perto de `inicio`,
+ * sem cobrir nenhuma janela nem bixinho (`posicaoLivrePerto`).
+ */
+export function posicaoDoTerminalNovo(
+  nos: readonly NoDoCanvas[],
+  orquestradorId: string,
+  inicio: Ponto,
+  tamanho: { largura: number; altura: number },
+): Ponto | null {
+  if (nos.some((no) => ehTerminal(no) && no.data.orquestradorId === orquestradorId)) {
+    return null;
+  }
+  return posicaoLivrePerto(
+    inicio,
+    tamanho,
+    areasOcupadas(nos).map((area) => area.retangulo),
+  );
 }
 
 /** O lado do bixinho em relação ao terminal dele; sem o terminal na lista, o padrão (abaixo). */

@@ -11,10 +11,19 @@ import type {
   EventoRegistrado,
   ResumoDoOrquestrador,
 } from "../shared/api/tipos";
-import { lerLayout, organizarComNotas, sobrepoe, TAMANHO_DO_ARTEFATO, TAMANHO_DO_BIXINHO } from "../shared/canvas/layout";
+import {
+  lerLayout,
+  organizarComNotas,
+  sobrepoe,
+  TAMANHO_DA_PREVIA,
+  TAMANHO_DO_ARTEFATO,
+  TAMANHO_DO_BIXINHO,
+  TAMANHO_DO_TERMINAL,
+} from "../shared/canvas/layout";
 import { AVISO_DO_LIMITE_DE_ORQUESTRADORES, LIMITE_DE_ORQUESTRADORES_ABERTOS } from "../shared/canvas/limiteDeTerminais";
-import { idDoBixinho, idDoNoDoArtefato } from "../shared/canvas/nos";
+import { idDoBixinho, idDoNoDaPrevia, idDoNoDoArtefato } from "../shared/canvas/nos";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../shared/estado/aplicarEvento";
+import { ESTADO_INICIAL_DO_CHAT, type EstadoDoChatNaTela } from "../shared/estado/aplicarEventoDoChat";
 import type { ArtefatosAoVivo } from "../shared/hooks/useArtefatos";
 import type { EstadoDaAtualizacao } from "../shared/ponteDoDesktop";
 import { ErroDaApi } from "../shared/api/cliente";
@@ -44,6 +53,7 @@ const simulados = vi.hoisted(() => {
     },
     semArtefatos,
     artefatos: semArtefatos,
+    chat: null as EstadoDoChatNaTela | null,
   };
 });
 
@@ -78,7 +88,8 @@ vi.mock("../shared/hooks/useChat", async () => {
   const { ESTADO_INICIAL_DO_CHAT } = await import("../shared/estado/aplicarEventoDoChat");
   const chat = { ...ESTADO_INICIAL_DO_CHAT, carregado: true };
   const aplicarPreferencias = () => undefined;
-  return { useChat: () => ({ chat, conexao: "conectado", erro: null, aplicarPreferencias }) };
+  // `simulados.chat` troca a conversa (ex.: uma resposta com o cartão de abrir orquestrador).
+  return { useChat: () => ({ chat: simulados.chat ?? chat, conexao: "conectado", erro: null, aplicarPreferencias }) };
 });
 
 /** O nome do campo de busca da paleta (Ctrl+K). */
@@ -394,6 +405,104 @@ describe("CanvasDeOrquestradores · bixinhos", () => {
     for (const id of [bixinho, idDoBixinho("o1", "s2")]) {
       expect(sobrepoe({ ...posicaoNaTela(id), ...TAMANHO_DO_BIXINHO }, terminalSolto)).toBe(false);
     }
+  });
+});
+
+describe("CanvasDeOrquestradores · abrir orquestrador pelo chat", () => {
+  /** O lugar de partida do terminal novo: centralizado na tela simulada (4000 × 3000), zoom 1 e sem pan. */
+  const PARTIDA = { x: 2000 - TAMANHO_DO_TERMINAL.largura / 2, y: 1500 - TAMANHO_DO_TERMINAL.altura / 2 };
+  const NA_VISTA = { x: PARTIDA.x, y: PARTIDA.y, largura: 600, altura: 520 };
+  const PREVIA_AO_LADO = { x: PARTIDA.x + 640, y: PARTIDA.y, ...TAMANHO_DA_PREVIA };
+
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoFalso);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+    const tela = { x: 0, y: 0, left: 0, top: 0, width: 4000, height: 3000, right: 4000, bottom: 3000 };
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({ ...tela, toJSON: () => tela });
+    // Chat fixo à esquerda: a conversa (com o cartão) fica sempre à vista.
+    localStorage.setItem(
+      "orquestrador.preferenciasDaTela",
+      JSON.stringify({ chatFixoNaEsquerda: true, visualizadorDeCodigo: false, larguraDoChatFixo: 360 }),
+    );
+    // O terminal de o1 no meio da vista e uma prévia logo à direita dele.
+    localStorage.setItem(
+      "orquestrador-agentes:canvas:v1",
+      JSON.stringify({
+        terminais: { o1: NA_VISTA },
+        notas: {},
+        previas: {
+          p1: { ...PREVIA_AO_LADO, minimizada: false, url: "", orquestradorId: null },
+        },
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }),
+    );
+    const resumos = [orquestrador("o1"), { ...orquestrador("o2"), situacao: "ocioso" as const }];
+    simulados.orquestradores.orquestradores = resumos;
+    vi.spyOn(api, "listarOrquestradores").mockResolvedValue(resumos);
+    simulados.chat = {
+      ...ESTADO_INICIAL_DO_CHAT,
+      carregado: true,
+      mensagens: [
+        {
+          id: "c1",
+          papel: "claude",
+          texto: "Sugeri abrir o o2.",
+          imagens: [],
+          criadaEm: "2026-11-08T12:00:00Z",
+          situacao: "concluida",
+          acoes: [{ tipo: "abrir_orquestrador", projeto: "o2", pasta: "C:\\projetos\\o2", pedido: null }],
+          avisos: [],
+          uso: null,
+          motivoDaFalha: null,
+          autorizacaoPendente: null,
+          perguntas: [],
+        },
+      ],
+    };
+  });
+
+  afterEach(() => {
+    simulados.orquestradores.orquestradores = [];
+    simulados.chat = null;
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it("o cartão abre a tela num lugar livre, sem cobrir o terminal nem a prévia abertos, e selecionada", async () => {
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o1")).toBeInTheDocument());
+    expect(posicaoNaTela(idDoNoDaPrevia("p1"))).toEqual({ x: PREVIA_AO_LADO.x, y: PREVIA_AO_LADO.y });
+
+    fireEvent.click(await screen.findByRole("button", { name: "abrir" }));
+
+    await waitFor(() => expect(noNaTela("o2")).toBeInTheDocument());
+    const aberta = { ...posicaoNaTela("o2"), ...TAMANHO_DO_TERMINAL };
+    expect(sobrepoe(aberta, NA_VISTA)).toBe(false);
+    expect(sobrepoe(aberta, PREVIA_AO_LADO)).toBe(false);
+    // Na mesma fileira, à direita do que já estava na vista.
+    expect(aberta.y).toBe(PARTIDA.y);
+    expect(noNaTela("o2")).toHaveClass("selected");
+    expect(noNaTela("o1")).not.toHaveClass("selected");
+  });
+
+  it("com a tela do orquestrador já no canvas, o cartão só a seleciona: não abre outra nem a move", async () => {
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o1")).toBeInTheDocument());
+    fireEvent.click(await screen.findByRole("button", { name: "abrir" }));
+    await waitFor(() => expect(noNaTela("o2")).toBeInTheDocument());
+    const antes = posicaoNaTela("o2");
+
+    // Seleciona o1 e pede o o2 de novo pelo cartão ("aberto ✓" reabre).
+    fireEvent.click(noNaTela("o1"));
+    await waitFor(() => expect(noNaTela("o1")).toHaveClass("selected"));
+    fireEvent.click(screen.getByRole("button", { name: "aberto ✓" }));
+
+    await waitFor(() => expect(noNaTela("o2")).toHaveClass("selected"));
+    expect(noNaTela("o1")).not.toHaveClass("selected");
+    expect(posicaoNaTela("o2")).toEqual(antes);
+    expect(document.querySelectorAll(".react-flow__node-terminal")).toHaveLength(2);
   });
 });
 

@@ -118,6 +118,7 @@ import {
   novoShell,
   novoTerminal,
   posicaoDaPreviaDoTerminal,
+  posicaoDoTerminalNovo,
   reacomodarBixinhos,
   reaproveitarArestas,
   semTerminal,
@@ -838,6 +839,12 @@ function Canvas() {
     [abrirShell],
   );
 
+  /**
+   * O ponto único de abrir o terminal de um Orquestrador (cartão do chat, Doca
+   * e paleta). Já aberto, só fica selecionado e a câmera vai até ele; fechado,
+   * abre selecionado na primeira área livre perto do centro da vista, sem
+   * cobrir terminais, notas, prévias, artefatos nem bixinhos.
+   */
   const abrirTerminal = useCallback(
     (orquestradorId: string) => {
       // Já aberto sempre cabe: só ganha o foco.
@@ -845,22 +852,23 @@ function Canvas() {
         return;
       }
       setNos((atuais) => {
-        if (atuais.some((no) => no.id === orquestradorId)) {
-          return atuais;
+        // O lugar de partida: centralizado na vista, com a barra de título abaixo da barra do canvas.
+        const inicio = posicaoNoCentroVisivel([], TAMANHO_DO_TERMINAL);
+        const posicao = posicaoDoTerminalNovo(atuais, orquestradorId, inicio, TAMANHO_DO_TERMINAL);
+        if (posicao === null) {
+          const jaSelecionado = atuais.every((no) => (no.selected === true) === (no.id === orquestradorId));
+          return jaSelecionado
+            ? atuais
+            : atuais.map((no) =>
+                no.id === orquestradorId ? { ...no, selected: true } : no.selected === true ? { ...no, selected: false } : no,
+              );
         }
-        const posicao = posicaoParaNovoTerminal(
-          centroDaTela(),
-          TAMANHO_DO_TERMINAL,
-          atuais.filter(ehTerminal).map((no) => no.position),
-        );
-        return reacomodarBixinhos([
-          ...atuais,
-          novoTerminal(orquestradorId, posicao, TAMANHO_DO_TERMINAL.largura, TAMANHO_DO_TERMINAL.altura),
-        ]);
+        const terminal = novoTerminal(orquestradorId, posicao, TAMANHO_DO_TERMINAL.largura, TAMANHO_DO_TERMINAL.altura);
+        return reacomodarBixinhos([...semSelecao(atuais), { ...terminal, selected: true }]);
       });
       focar(orquestradorId);
     },
-    [centroDaTela, focar, reservarVaga, setNos],
+    [focar, posicaoNoCentroVisivel, reservarVaga, setNos],
   );
 
   const fecharTerminal = useCallback(

@@ -18,6 +18,7 @@ import {
   novaPrevia,
   novoTerminal,
   posicaoDaPreviaDoTerminal,
+  posicaoDoTerminalNovo,
   reacomodarBixinhos,
   reaproveitarArestas,
   semTerminal,
@@ -688,5 +689,48 @@ describe("prévias no canvas", () => {
       sobrepoe({ ...(posicao ?? { x: 0, y: 0 }), largura: 720, altura: 520 }, { x: 660, y: 0, largura: 600, altura: 500 }),
     ).toBe(false);
     expect(posicaoDaPreviaDoTerminal([vizinho], "o1", { largura: 720, altura: 520 })).toBeNull();
+  });
+});
+
+describe("posicaoDoTerminalNovo", () => {
+  const tamanho = { largura: 600, altura: 520 };
+  const inicio = { x: 1000, y: 500 };
+  const ocupa = (no: NoDoCanvas): Retangulo => retanguloDe(no);
+  const cobre = (posicao: { x: number; y: number }, retangulos: readonly Retangulo[]) =>
+    retangulos.some((retangulo) => sobrepoe({ ...posicao, ...tamanho }, retangulo));
+
+  it("sem nós no canvas, abre no lugar de partida", () => {
+    expect(posicaoDoTerminalNovo([], "o9", inicio, tamanho)).toEqual(inicio);
+  });
+
+  it("com terminal, nota e prévia ocupando a vista, abre numa área livre sem cobrir nenhum", () => {
+    const naVista = novoTerminal("o1", { x: 1000, y: 500 }, 600, 500);
+    const nota = novaNota("n1", { x: 1640, y: 500 });
+    const previa = novaPrevia("p1", { x: 2000, y: 500 }, { url: "", orquestradorId: null });
+    const nos: NoDoCanvas[] = [naVista, nota, previa];
+
+    const posicao = posicaoDoTerminalNovo(nos, "o9", inicio, tamanho);
+
+    expect(posicao).not.toBeNull();
+    expect(cobre(posicao ?? inicio, nos.map(ocupa))).toBe(false);
+    expect(posicao?.y).toBe(inicio.y);
+  });
+
+  it("também não cobre os bixinhos de outro terminal", () => {
+    // O terminal fica acima da vista; os bixinhos dele descem até o lugar de partida.
+    const acima = novoTerminal("o1", { x: 1000, y: -100 }, 600, 500);
+    const bixinho = bixinhoEm(100, 620);
+    const nos: NoDoCanvas[] = [acima, bixinho];
+
+    const posicao = posicaoDoTerminalNovo(nos, "o9", inicio, tamanho);
+
+    expect(posicao).not.toEqual(inicio);
+    expect(algumPorCima(bixinhosNoCanvas(nos), [{ ...(posicao ?? inicio), ...tamanho }])).toBe(false);
+  });
+
+  it("com a tela do orquestrador já no canvas, não abre outra: nulo (só foca)", () => {
+    const aberto = novoTerminal("o9", { x: -2000, y: -2000 }, 600, 500);
+
+    expect(posicaoDoTerminalNovo([aberto], "o9", inicio, tamanho)).toBeNull();
   });
 });

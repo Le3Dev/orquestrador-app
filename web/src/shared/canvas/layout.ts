@@ -133,6 +133,10 @@ const NOTAS_POR_COLUNA = 4;
 export const MARGEM_DOS_BIXINHOS = 24;
 /** Quantas vezes, no máximo, o grupo desce procurando um lugar livre abaixo do terminal. */
 const TENTATIVAS_DESCENDO = 50;
+/** Folga entre uma janela aberta numa área livre e o que já está no canvas (`posicaoLivrePerto`). */
+const MARGEM_DA_AREA_LIVRE = 40;
+/** Colunas (à direita) e fileiras (abaixo) que `posicaoLivrePerto` testa antes de abrir abaixo de tudo. */
+const PASSOS_DA_VARREDURA = 6;
 
 const CHAVE = "orquestrador-agentes:canvas:v1";
 const CHAVE_DOS_BIXINHOS_LIMPOS = `${CHAVE}:bixinhos-limpos`;
@@ -479,6 +483,43 @@ export function posicaoParaNovoTerminal(
     posicao = { x: posicao.x + DESLOCAMENTO_EM_CASCATA, y: posicao.y + DESLOCAMENTO_EM_CASCATA };
   }
   return posicao;
+}
+
+/**
+ * A primeira área livre para uma janela do tamanho dado, perto de `inicio`
+ * (onde ela abriria, ex.: centralizada na vista): o próprio `inicio` se nada
+ * estiver no caminho (com a folga de `MARGEM_DA_AREA_LIVRE`); senão, varre à
+ * direita e depois as fileiras abaixo, em passos do tamanho da janela mais a
+ * folga. Sem lugar na varredura, abre logo abaixo de tudo, alinhada a
+ * `inicio`. `obstaculos` em coordenadas absolutas (janelas e bixinhos).
+ */
+export function posicaoLivrePerto(
+  inicio: Ponto,
+  tamanho: { largura: number; altura: number },
+  obstaculos: readonly Retangulo[],
+): Ponto {
+  const comFolga = (ponto: Ponto): Retangulo => ({
+    x: ponto.x - MARGEM_DA_AREA_LIVRE,
+    y: ponto.y - MARGEM_DA_AREA_LIVRE,
+    largura: tamanho.largura + 2 * MARGEM_DA_AREA_LIVRE,
+    altura: tamanho.altura + 2 * MARGEM_DA_AREA_LIVRE,
+  });
+  const livre = (ponto: Ponto): boolean => !obstaculos.some((obstaculo) => sobrepoe(comFolga(ponto), obstaculo));
+  const arredondar = ({ x, y }: Ponto): Ponto => ({ x: Math.round(x), y: Math.round(y) });
+
+  for (let fileira = 0; fileira < PASSOS_DA_VARREDURA; fileira++) {
+    for (let coluna = 0; coluna < PASSOS_DA_VARREDURA; coluna++) {
+      const candidato = {
+        x: inicio.x + coluna * (tamanho.largura + MARGEM_DA_AREA_LIVRE),
+        y: inicio.y + fileira * (tamanho.altura + MARGEM_DA_AREA_LIVRE),
+      };
+      if (livre(candidato)) {
+        return arredondar(candidato);
+      }
+    }
+  }
+  const base = Math.max(...obstaculos.map((obstaculo) => obstaculo.y + obstaculo.altura));
+  return arredondar({ x: inicio.x, y: base + MARGEM_DA_AREA_LIVRE });
 }
 
 /**

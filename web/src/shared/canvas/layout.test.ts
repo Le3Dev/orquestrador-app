@@ -9,6 +9,7 @@ import {
   organizarEmGrade,
   type Ponto,
   posicaoAoLado,
+  posicaoLivrePerto,
   posicaoParaNovoTerminal,
   posicoesDosBixinhos,
   posicoesLivresDosBixinhos,
@@ -433,6 +434,60 @@ describe("posicaoAoLado", () => {
     const tudo: Retangulo = { x: -5000, y: -5000, largura: 10_000, altura: 10_000 };
 
     expect(posicaoAoLado(terminal, tamanho, [tudo])).toEqual(posicaoAoLado(terminal, tamanho, []));
+  });
+});
+
+describe("posicaoLivrePerto", () => {
+  const tamanho = TAMANHO_DO_TERMINAL;
+  const inicio: Ponto = { x: 1000, y: 500 };
+  const passoX = tamanho.largura + 40;
+  const livreDe = (posicao: Ponto, obstaculos: readonly Retangulo[]) =>
+    obstaculos.every((obstaculo) => !sobrepoe({ ...posicao, ...tamanho }, obstaculo));
+
+  it("sem nada no canvas, abre no lugar de partida", () => {
+    expect(posicaoLivrePerto(inicio, tamanho, [])).toEqual(inicio);
+  });
+
+  it("com algo longe, também abre no lugar de partida", () => {
+    expect(posicaoLivrePerto(inicio, tamanho, [{ x: -3000, y: -3000, largura: 400, altura: 300 }])).toEqual(inicio);
+  });
+
+  it("com um terminal ocupando a vista, vai para a direita, sem cobri-lo", () => {
+    const naVista: Retangulo = { x: 1000, y: 500, ...tamanho };
+    const posicao = posicaoLivrePerto(inicio, tamanho, [naVista]);
+
+    expect(posicao).toEqual({ x: inicio.x + passoX, y: inicio.y });
+    expect(livreDe(posicao, [naVista])).toBe(true);
+  });
+
+  it("encostar conta como ocupado: a folga entre as janelas vale", () => {
+    const quaseEncostado: Retangulo = { x: inicio.x + tamanho.largura + 10, y: inicio.y, largura: 320, altura: 280 };
+
+    expect(posicaoLivrePerto(inicio, tamanho, [quaseEncostado])).not.toEqual(inicio);
+  });
+
+  it("com a fileira toda ocupada à direita, desce para a primeira fileira livre abaixo", () => {
+    const faixa: Retangulo = { x: inicio.x - 100, y: inicio.y - 50, largura: 6 * passoX + 200, altura: tamanho.altura + 100 };
+    const posicao = posicaoLivrePerto(inicio, tamanho, [faixa]);
+
+    expect(posicao.x).toBe(inicio.x);
+    expect(posicao.y).toBeGreaterThan(inicio.y);
+    expect(livreDe(posicao, [faixa])).toBe(true);
+  });
+
+  it("sem lugar na varredura, abre logo abaixo de tudo, alinhada ao lugar de partida", () => {
+    const tudo: Retangulo = { x: -5000, y: -5000, largura: 20_000, altura: 10_000 };
+
+    expect(posicaoLivrePerto(inicio, tamanho, [tudo])).toEqual({ x: inicio.x, y: 5000 + 40 });
+  });
+
+  it("varre em passos do tamanho da janela mais a folga", () => {
+    const doisNaVista: Retangulo[] = [
+      { x: 1000, y: 500, ...tamanho },
+      { x: 1000 + passoX, y: 500, largura: 320, altura: 280 },
+    ];
+
+    expect(posicaoLivrePerto(inicio, tamanho, doisNaVista)).toEqual({ x: inicio.x + 2 * passoX, y: inicio.y });
   });
 });
 
