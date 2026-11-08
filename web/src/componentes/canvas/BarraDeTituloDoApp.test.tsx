@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 
 import { BarraDeTituloDoApp } from "./BarraDeTituloDoApp";
 
@@ -175,6 +175,61 @@ describe("BarraDeTituloDoApp", () => {
     fireEvent.click(pilula);
     fireEvent.click(screen.getByRole("button", { name: "Reiniciar agora" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Há 2 pedidos em andamento");
+  });
+
+  describe("modo invisível", () => {
+    function ponteComModoInvisivel() {
+      let ouvinte: ((ativo: boolean) => void) | null = null;
+      const modoInvisivel = {
+        entrar: vi.fn().mockResolvedValue(undefined),
+        sair: vi.fn().mockResolvedValue(undefined),
+        capturarMouse: vi.fn().mockResolvedValue(undefined),
+        capturarTela: vi.fn(),
+        aoMudar: vi.fn((callback: (ativo: boolean) => void) => {
+          ouvinte = callback;
+          return () => undefined;
+        }),
+      };
+      janelaComPonte.electron = {
+        desktop: true,
+        janela: {
+          minimizar: vi.fn(),
+          maximizar: vi.fn(),
+          fechar: vi.fn(),
+          estaMaximizada: vi.fn().mockResolvedValue(false),
+          aoMudarMaximizada: vi.fn(() => () => undefined),
+        },
+        modoInvisivel,
+      };
+      return { modoInvisivel, avisar: (ativo: boolean) => act(() => ouvinte?.(ativo)) };
+    }
+
+    it("a barra não tem o botão 👁 (fica no chat rápido); ativo, fica escondida e sem indicador", () => {
+      const { avisar } = ponteComModoInvisivel();
+      renderizar();
+
+      expect(screen.queryByRole("button", { name: "Modo invisível" })).not.toBeInTheDocument();
+
+      avisar(true);
+      expect(screen.queryByText("Tela sendo vista")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Voltar ao modo normal" })).not.toBeInTheDocument();
+      expect(screen.getByTestId("barra-de-titulo")).toHaveClass("barra-de-titulo-invisivel");
+
+      avisar(false);
+      expect(screen.getByTestId("barra-de-titulo")).not.toHaveClass("barra-de-titulo-invisivel");
+      expect(screen.queryByRole("button", { name: "Modo invisível" })).not.toBeInTheDocument();
+    });
+
+    it("ativo, o mouse sobre a barra não captura os cliques (ela é escondida)", () => {
+      const { modoInvisivel, avisar } = ponteComModoInvisivel();
+      const { barra } = renderizar();
+      avisar(true);
+      modoInvisivel.capturarMouse.mockClear();
+
+      fireEvent.mouseEnter(barra);
+      fireEvent.mouseLeave(barra);
+      expect(modoInvisivel.capturarMouse).not.toHaveBeenCalled();
+    });
   });
 
   it("no Mac, deixa as bolinhas nativas à esquerda e não desenha os botões ─ ☐ ✕", () => {

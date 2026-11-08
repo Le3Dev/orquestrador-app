@@ -1,4 +1,6 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { apiDosArtefatos, type EventoDeArtefato, type ResumoDoArtefato } from "../shared/api/artefatos";
 import { api } from "../shared/api/cliente";
@@ -724,6 +726,108 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
       ...alteracoes,
     };
   }
+
+  it("no modo invisível, a tela fica transparente e escondida (só a barra e o chat) e volta ao sair", async () => {
+    // Vários componentes ouvem o aviso (canvas, barra de título e chat).
+    const ouvintes: Array<(ativo: boolean) => void> = [];
+    janelaComPonte.electron = {
+      desktop: true,
+      janela: {
+        minimizar: vi.fn(),
+        maximizar: vi.fn(),
+        fechar: vi.fn(),
+        estaMaximizada: vi.fn().mockResolvedValue(false),
+        aoMudarMaximizada: vi.fn(() => () => undefined),
+      },
+      modoInvisivel: {
+        entrar: vi.fn(),
+        sair: vi.fn(),
+        capturarMouse: vi.fn().mockResolvedValue(undefined),
+        capturarTela: vi.fn(),
+        aoMudar: vi.fn((callback: (ativo: boolean) => void) => {
+          ouvintes.push(callback);
+          return () => undefined;
+        }),
+      },
+    };
+    const { container } = render(<CanvasDeOrquestradores />);
+    const raiz = container.querySelector(".h-screen");
+    const avisar = (ativo: boolean) => act(() => ouvintes.forEach((ouvinte) => ouvinte(ativo)));
+
+    expect(document.documentElement).not.toHaveClass("modo-invisivel");
+    expect(raiz).not.toHaveClass("canvas-modo-invisivel");
+
+    avisar(true);
+    expect(document.documentElement).toHaveClass("modo-invisivel");
+    expect(raiz).toHaveClass("canvas-modo-invisivel");
+    // Nada é desmontado: o canvas continua no DOM, só escondido por CSS.
+    expect(container.querySelector(".react-flow__renderer")).not.toBeNull();
+    expect(screen.getByTestId("barra-de-titulo")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-rapido")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-rapido")).toHaveTextContent("Tela sendo vista");
+
+    avisar(false);
+    expect(screen.queryByText("Tela sendo vista")).not.toBeInTheDocument();
+    expect(document.documentElement).not.toHaveClass("modo-invisivel");
+    expect(raiz).not.toHaveClass("canvas-modo-invisivel");
+  });
+
+  it("no modo invisível, o CSS esconde painéis, minimapa, controles e nós, e mantém a barra e o chat visíveis", async () => {
+    const ouvintes: Array<(ativo: boolean) => void> = [];
+    janelaComPonte.electron = {
+      desktop: true,
+      janela: {
+        minimizar: vi.fn(),
+        maximizar: vi.fn(),
+        fechar: vi.fn(),
+        estaMaximizada: vi.fn().mockResolvedValue(false),
+        aoMudarMaximizada: vi.fn(() => () => undefined),
+      },
+      modoInvisivel: {
+        entrar: vi.fn(),
+        sair: vi.fn(),
+        capturarMouse: vi.fn().mockResolvedValue(undefined),
+        capturarTela: vi.fn(),
+        aoMudar: vi.fn((callback: (ativo: boolean) => void) => {
+          ouvintes.push(callback);
+          return () => undefined;
+        }),
+      },
+    };
+    const css = readFileSync(resolve(__dirname, "../theme/index.css"), "utf8");
+    const estilo = document.createElement("style");
+    estilo.textContent = css;
+    document.head.appendChild(estilo);
+    try {
+      const { container } = render(<CanvasDeOrquestradores />);
+      const visibilidade = (el: Element | null) => (el ? getComputedStyle(el).visibility : "ausente");
+      const paineis = container.querySelector(".paineis-do-topo");
+      const painelDoChat = container.querySelector(".painel-do-chat");
+      expect(paineis).not.toBeNull();
+      expect(painelDoChat).not.toBeNull();
+      expect(visibilidade(paineis)).not.toBe("hidden");
+
+      act(() => ouvintes.forEach((ouvinte) => ouvinte(true)));
+
+      expect(visibilidade(paineis)).toBe("hidden");
+      for (const seletor of [".react-flow__viewport", ".react-flow__minimap", ".react-flow__controls", ".react-flow__background"]) {
+        const el = container.querySelector(seletor);
+        if (el) expect(visibilidade(el), seletor).toBe("hidden");
+      }
+      expect(visibilidade(screen.getByTestId("chat-rapido"))).toBe("visible");
+      expect(visibilidade(painelDoChat)).toBe("visible");
+      // A barra inteira fica escondida e sem mouse; indicador e botão de voltar ficam no chat, visíveis.
+      const barra = screen.getByTestId("barra-de-titulo");
+      expect(visibilidade(barra)).toBe("hidden");
+      expect(getComputedStyle(barra).pointerEvents).toBe("none");
+      const faixa = screen.getByTestId("faixa-modo-invisivel");
+      expect(visibilidade(faixa)).toBe("visible");
+      expect(visibilidade(screen.getByText("Tela sendo vista"))).toBe("visible");
+      expect(visibilidade(screen.getByRole("button", { name: "Voltar ao modo normal" }))).toBe("visible");
+    } finally {
+      estilo.remove();
+    }
+  });
 
   it("a paleta oferece \"Procurar atualizações\" com a versão; escolher verifica e ela, aberta, mostra o resultado", async () => {
     const atualizacao = ponteComAtualizacao(

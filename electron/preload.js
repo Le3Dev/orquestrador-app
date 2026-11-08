@@ -65,6 +65,22 @@ contextBridge.exposeInMainWorld("electron", {
     },
   },
 
+  // Modo invisível da janela principal (transparente, sempre no topo, fora de
+  // capturas). Sai também pelo atalho global Ctrl+Shift+I.
+  modoInvisivel: {
+    entrar: () => ipcRenderer.invoke("modo-invisivel:entrar").then(() => undefined),
+    sair: () => ipcRenderer.invoke("modo-invisivel:sair").then(() => undefined),
+    // true = a janela recebe cliques; false = cliques passam aos apps atrás.
+    capturarMouse: (capturar) => ipcRenderer.invoke("modo-invisivel:capturar-mouse", Boolean(capturar)).then(() => undefined),
+    // { nome, tipoDeMidia: "image/jpeg", base64 }; rejeita fora do modo.
+    capturarTela: () => ipcRenderer.invoke("tela:capturar"),
+    aoMudar: (callback) => {
+      const ouvinte = (_evento, ativo) => callback(Boolean(ativo));
+      ipcRenderer.on("modo-invisivel:estado", ouvinte);
+      return () => ipcRenderer.removeListener("modo-invisivel:estado", ouvinte);
+    },
+  },
+
   primeiraAbertura: {
     carregar: () => ipcRenderer.invoke("primeira-abertura:carregar"),
     escolherPasta: (atual) => ipcRenderer.invoke("primeira-abertura:escolher-pasta", atual),

@@ -1,6 +1,16 @@
 import { formatarBytes } from "./formatacao";
-import { MAXIMO_DE_IMAGENS, problemaDaImagem, TAMANHO_MAXIMO_DA_IMAGEM } from "./imagens";
+import { ehCapturaDeTela, MAXIMO_DE_IMAGENS, problemaDaImagem, TAMANHO_MAXIMO_DA_IMAGEM } from "./imagens";
 import { nivelDaMemoria } from "./memoria";
+
+describe("ehCapturaDeTela", () => {
+  it("reconhece só o nome gerado pelo Electron", () => {
+    expect(ehCapturaDeTela("tela-2026-11-07T10-00-00-000Z.jpg")).toBe(true);
+    expect(ehCapturaDeTela("tela.jpg")).toBe(false);
+    expect(ehCapturaDeTela("tela-1.png")).toBe(false);
+    expect(ehCapturaDeTela("foto.jpg")).toBe(false);
+    expect(ehCapturaDeTela("image.png")).toBe(false);
+  });
+});
 
 describe("problemaDaImagem", () => {
   const png = { name: "tela.png", type: "image/png", size: 1024 };

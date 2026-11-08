@@ -49,7 +49,21 @@
 // barra de título do app), o `claude` do PATH na primeira abertura e nada de
 // atualização automática (sem assinatura da Apple ela não funciona).
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, session, shell, utilityProcess } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  desktopCapturer,
+  dialog,
+  globalShortcut,
+  ipcMain,
+  Menu,
+  screen,
+  session,
+  shell,
+  utilityProcess,
+} = require("electron");
+const { capturarTela } = require("./capturaDeTela");
+const { criarMaximizacao } = require("./maximizacao");
 const { execFileSync, spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -633,10 +647,12 @@ function abrirNoNavegador(url) {
 // `botoesNativos`: as janelas pequenas (ativação, configuração) não desenham
 // botões próprios e ficam com o overlay nativo; a principal desenha os seus.
 // No Mac todas usam as bolinhas nativas (mac.ajustarOpcoesDaJanela).
-function criarJanela({ botoesNativos = true, ...opcoes } = {}) {
+function criarJanela({ botoesNativos = true, transparente = false, ...opcoes } = {}) {
   const janela = new BrowserWindow(mac.ajustarOpcoesDaJanela({
     title: config.productName,
-    backgroundColor: COR_BARRA,
+    // A principal é transparente desde a criação (o Windows não aceita mudar
+    // depois); o fundo opaco do modo normal vem do CSS.
+    ...(transparente ? { transparent: true, backgroundColor: "#00000000" } : { backgroundColor: COR_BARRA }),
     autoHideMenuBar: true,
     titleBarStyle: "hidden",
     ...(botoesNativos
@@ -721,12 +737,20 @@ async function abrirJanelaPrincipal() {
     minHeight: 600,
     show: false,
     botoesNativos: false,
+    transparente: true,
   });
   janelaPrincipal = janela;
+  janela.on("close", () => sairDoModoInvisivel());
   janela.on("closed", () => {
     if (janelaPrincipal === janela) janelaPrincipal = null;
   });
-  avisarQuandoMudarMaximizada(janela);
+  maximizacoes.set(
+    janela,
+    criarMaximizacao(janela, screen, (maximizada) => {
+      if (janela.isDestroyed() || janela.webContents.isDestroyed()) return;
+      janela.webContents.send("janela:maximizada", maximizada);
+    }),
+  );
   // Primeira verificação de atualização ~10 s depois que a janela aparece
   // (iniciar() só agenda uma vez por abertura do app).
   janela.once("show", () => {
@@ -796,23 +820,21 @@ ipcMain.handle("janela:minimizar", (e) => janelaDoEvento(e)?.minimize());
 ipcMain.handle("janela:maximizar", (e) => {
   const j = janelaDoEvento(e);
   if (!j) return;
+  const m = maximizacoes.get(j);
+  if (m) return m.alternar();
   if (j.isMaximized()) j.unmaximize();
   else j.maximize();
 });
 ipcMain.handle("janela:fechar", (e) => janelaDoEvento(e)?.close());
-ipcMain.handle("janela:esta-maximizada", (e) => janelaDoEvento(e)?.isMaximized() ?? false);
+ipcMain.handle("janela:esta-maximizada", (e) => {
+  const j = janelaDoEvento(e);
+  if (!j) return false;
+  return maximizacoes.get(j)?.estaMaximizada() ?? j.isMaximized();
+});
 
-// Avisa a tela quando a janela maximiza/restaura (pelo botão, duplo clique na
-// barra, Win+↑, encaixe nas bordas) para o botão trocar o ícone. Sem menu, o
-// app não tem como entrar em tela cheia; por isso só maximize/unmaximize.
-function avisarQuandoMudarMaximizada(janela) {
-  const avisar = () => {
-    if (janela.isDestroyed() || janela.webContents.isDestroyed()) return;
-    janela.webContents.send("janela:maximizada", janela.isMaximized());
-  };
-  janela.on("maximize", avisar);
-  janela.on("unmaximize", avisar);
-}
+// A janela principal é transparente, então maximiza "na mão" (electron/maximizacao.js),
+// que também avisa a tela ("janela:maximizada") para o botão trocar o ícone.
+const maximizacoes = new WeakMap();
 
 // ──────────────────────────────────────────────────────────────────────────
 // IPC — licença. Após ativar com sucesso, segue para a configuração/tela.
@@ -863,6 +885,99 @@ ipcMain.handle("atualizacao:instalar-agora", async (evento) => {
     },
   });
   if (!disparou && servidorEncerrado) await retomarAposFalhaNaInstalacao();
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Modo invisível da janela principal: fundo transparente, sempre no topo,
+// fora de capturas de tela, cliques passando para os apps atrás (a tela liga
+// a captura de mouse só sobre seus controles). Sai com Ctrl+Shift+I.
+//
+// A janela principal já nasce `transparent: true`; o fundo opaco do modo
+// normal vem do CSS (html/body/#root), e o modo invisível só o torna transparente.
+// ──────────────────────────────────────────────────────────────────────────
+const ATALHO_DO_MODO_INVISIVEL = "CommandOrControl+Shift+I";
+let modoInvisivel = null; // { janela, anterior } enquanto ativo
+
+function avisarModoInvisivel(janela, ativo) {
+  if (janela && !janela.isDestroyed()) janela.webContents.send("modo-invisivel:estado", ativo);
+}
+
+function entrarNoModoInvisivel() {
+  if (modoInvisivel || !janelaPrincipal || janelaPrincipal.isDestroyed()) return;
+  const janela = janelaPrincipal;
+  const anterior = {
+    bounds: janela.getBounds(),
+    maximizada: maximizacoes.get(janela)?.estaMaximizada() ?? janela.isMaximized(),
+    alwaysOnTop: janela.isAlwaysOnTop(),
+    skipTaskbar: false, // a janela principal nunca nasce com skipTaskbar (o Electron não tem getter)
+  };
+  modoInvisivel = { janela, anterior };
+  // Maximizada fica como está (cobre o monitor); os bounds só são restaurados se não estava.
+  janela.setAlwaysOnTop(true, "screen-saver");
+  janela.setContentProtection(true);
+  // Some da barra de tarefas; no Windows o Alt+Tab acompanha o skipTaskbar na maioria dos casos
+  // (não há API JS dedicada para janela-ferramenta sem módulo nativo).
+  janela.setSkipTaskbar(true);
+  janela.setIgnoreMouseEvents(true, { forward: true });
+  try {
+    if (!globalShortcut.register(ATALHO_DO_MODO_INVISIVEL, sairDoModoInvisivel)) {
+      registrarNoLog("app", "Não foi possível registrar o atalho do modo invisível.");
+    }
+  } catch (erro) {
+    registrarNoLog("app", `Falha ao registrar o atalho do modo invisível: ${erro.message || erro}`);
+  }
+  registrarNoLog("app", "Modo invisível ligado.");
+  avisarModoInvisivel(janela, true);
+}
+
+function sairDoModoInvisivel() {
+  if (!modoInvisivel) return;
+  const { janela, anterior } = modoInvisivel;
+  modoInvisivel = null;
+  try {
+    globalShortcut.unregister(ATALHO_DO_MODO_INVISIVEL);
+  } catch {
+    /* ignora */
+  }
+  if (janela.isDestroyed()) return;
+  janela.setIgnoreMouseEvents(false);
+  janela.setContentProtection(false);
+  janela.setSkipTaskbar(anterior.skipTaskbar);
+  janela.setAlwaysOnTop(anterior.alwaysOnTop);
+  const maximizadaAgora = maximizacoes.get(janela)?.estaMaximizada() ?? janela.isMaximized();
+  if (!anterior.maximizada && !maximizadaAgora) janela.setBounds(anterior.bounds);
+  registrarNoLog("app", "Modo invisível desligado.");
+  avisarModoInvisivel(janela, false);
+}
+
+ipcMain.handle("modo-invisivel:entrar", (evento) => {
+  exigirJanelaPrincipal(evento);
+  entrarNoModoInvisivel();
+});
+ipcMain.handle("modo-invisivel:sair", (evento) => {
+  exigirJanelaPrincipal(evento);
+  sairDoModoInvisivel();
+});
+ipcMain.handle("modo-invisivel:capturar-mouse", (evento, capturar) => {
+  exigirJanelaPrincipal(evento);
+  if (!modoInvisivel) return;
+  if (capturar) modoInvisivel.janela.setIgnoreMouseEvents(false);
+  else modoInvisivel.janela.setIgnoreMouseEvents(true, { forward: true });
+});
+ipcMain.handle("tela:capturar", (evento) => {
+  exigirJanelaPrincipal(evento);
+  if (!modoInvisivel) throw new Error("A captura de tela só funciona com o modo invisível ativo.");
+  return capturarTela({
+    desktopCapturer,
+    screen,
+    janela: modoInvisivel.janela,
+    janelaProtegida: process.platform === "win32" || process.platform === "darwin",
+    registrar: (texto) => registrarNoLog("captura", texto),
+  });
+});
+app.on("will-quit", () => {
+  sairDoModoInvisivel();
+  globalShortcut.unregisterAll();
 });
 
 // ──────────────────────────────────────────────────────────────────────────

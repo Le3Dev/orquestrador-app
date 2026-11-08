@@ -1,6 +1,7 @@
 import { useState, type ComponentProps } from "react";
 
 import { useAjustesDoAplicativo } from "../../shared/hooks/useAjustesDoAplicativo";
+import { useModoInvisivel } from "../../shared/hooks/useModoInvisivel";
 import { rodandoNoMac } from "../../shared/ponteDoDesktop";
 import { IconeOrquestrador } from "../Icones";
 import { AvisoDeAtualizacao } from "./AvisoDeAtualizacao";
@@ -38,11 +39,14 @@ type PropsDaBarraDeTitulo = Omit<ComponentProps<typeof StatusDoCanvas>, "naBarra
 export function BarraDeTituloDoApp({ aoBuscar, pedidosEmAndamento, ...status }: PropsDaBarraDeTitulo) {
   const ajustes = useAjustesDoAplicativo();
   const [mac] = useState(rodandoNoMac);
+  const invisivel = useModoInvisivel();
+  // No modo invisível a barra inteira fica escondida (CSS) e sem mouse. O botão de entrar fica no chat rápido.
 
   return (
     <header
-      className="barra-de-titulo"
+      className={`barra-de-titulo ${invisivel.ativo ? "barra-de-titulo-invisivel" : ""}`}
       data-testid="barra-de-titulo"
+      aria-hidden={invisivel.ativo ? true : undefined}
       style={mac ? { paddingLeft: ESPACO_DAS_BOLINHAS_DO_MAC } : undefined}
     >
       <div className="identidade-da-barra-de-titulo">

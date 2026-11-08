@@ -1,6 +1,6 @@
 {
   "name": "orquestrador-agentes-app",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Central local de Orquestradores Claude: cada Orquestrador conversa com o usuário, divide o pedido em subtarefas e lança Subagentes em paralelo, com acompanhamento ao vivo pela tela.",
   "type": "commonjs",

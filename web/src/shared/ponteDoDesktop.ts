@@ -57,12 +57,34 @@ export interface ApiDaAtualizacao {
   aoMudar: (callback: (estado: EstadoDaAtualizacao) => void) => () => void;
 }
 
+/** Foto da tela (JPEG reduzido) do monitor onde está a janela. */
+export interface CapturaDeTela {
+  nome: string;
+  tipoDeMidia: "image/jpeg";
+  base64: string;
+}
+
+/**
+ * O modo invisível: a janela fica transparente, só o header e o chat rápido
+ * aparecem, e os cliques fora deles atravessam para os apps de trás.
+ */
+export interface ApiDoModoInvisivel {
+  entrar: () => Promise<void>;
+  sair: () => Promise<void>;
+  /** true: a janela recebe os cliques; false: eles atravessam para os apps de trás. */
+  capturarMouse: (capturar: boolean) => Promise<void>;
+  capturarTela: () => Promise<CapturaDeTela>;
+  /** Avisa a cada entrar/sair (inclusive pelo atalho Ctrl+Shift+I); devolve a função que cancela o aviso. */
+  aoMudar: (callback: (ativo: boolean) => void) => () => void;
+}
+
 interface PonteDoDesktop {
   desktop?: boolean;
   plataforma?: string;
   janela?: ApiDaJanela;
   configuracao?: ApiDaConfiguracao;
   atualizacao?: ApiDaAtualizacao;
+  modoInvisivel?: ApiDoModoInvisivel;
 }
 
 function ponteDoDesktop(): PonteDoDesktop | null {
@@ -84,6 +106,12 @@ export function apiDaConfiguracao(): ApiDaConfiguracao | null {
 /** Devolve a API da atualização do app desktop, ou null quando a ponte não a expõe. */
 export function apiDaAtualizacao(): ApiDaAtualizacao | null {
   return ponteDoDesktop()?.atualizacao ?? null;
+}
+
+/** Devolve a API do modo invisível, ou null fora do app desktop. */
+export function apiDoModoInvisivel(): ApiDoModoInvisivel | null {
+  const ponte = ponteDoDesktop();
+  return ponte?.desktop && ponte.modoInvisivel ? ponte.modoInvisivel : null;
 }
 
 /** true quando a tela está rodando dentro do app desktop (Electron). */
