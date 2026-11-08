@@ -72,23 +72,84 @@ describe("ChatRapido · modo invisível", () => {
     vi.restoreAllMocks();
   });
 
+  const QUADRO = { nome: "tela-2026-11-08T10-00-00-000Z.jpg", tipoDeMidia: "image/jpeg" as const, base64: "QUJD" };
+
   function ponteAtiva(capturarTela = vi.fn().mockResolvedValue(FOTO)) {
     let ouvinte: ((ativo: boolean) => void) | null = null;
+    let ouvinteDeQuadro: ((captura: typeof QUADRO) => void) | null = null;
+    const cancelarQuadro = vi.fn();
     const modoInvisivel = {
       entrar: vi.fn(),
       sair: vi.fn(),
       capturarMouse: vi.fn().mockResolvedValue(undefined),
       capturarTela,
+      capturarAgora: vi.fn().mockResolvedValue(QUADRO),
+      aoCapturarQuadro: vi.fn((callback: (captura: typeof QUADRO) => void) => {
+        ouvinteDeQuadro = callback;
+        return cancelarQuadro;
+      }),
       aoMudar: vi.fn((callback: (ativo: boolean) => void) => {
         ouvinte = callback;
         return () => undefined;
       }),
     };
     janelaComPonte.electron = { desktop: true, janela: {}, modoInvisivel };
-    return { modoInvisivel, ativar: () => act(() => ouvinte?.(true)) };
+    return {
+      modoInvisivel,
+      cancelarQuadro,
+      ativar: () => act(() => ouvinte?.(true)),
+      desativar: () => act(() => ouvinte?.(false)),
+      quadroDoAtalho: (captura = QUADRO) => act(() => ouvinteDeQuadro?.(captura)),
+    };
   }
 
-  it("ativo, fotografa a tela a cada pergunta e a anexa; o composer avisa que a tela vai junto", async () => {
+  describe("capturar agora", () => {
+    it("o atalho guarda o quadro como anexo pendente e o envio não tira outro print", async () => {
+      const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+      const { modoInvisivel, ativar, quadroDoAtalho } = ponteAtiva();
+      const { campo } = renderizar();
+      expect(screen.queryByRole("button", { name: /capturar agora/ })).not.toBeInTheDocument();
+      ativar();
+      expect(screen.queryByRole("button", { name: /capturar agora/ })).not.toBeInTheDocument();
+
+      quadroDoAtalho();
+      expect(screen.queryAllByRole("img")).toHaveLength(0);
+
+      fireEvent.change(campo, { target: { value: "Veja" } });
+      fireEvent.keyDown(campo, { key: "Enter" });
+      await waitFor(() => expect(perguntar).toHaveBeenCalledWith("Veja", [QUADRO]));
+      expect(modoInvisivel.capturarTela).not.toHaveBeenCalled();
+    });
+
+    it("o atalho global adiciona o quadro aos pendentes e a assinatura é cancelada ao sair do modo", async () => {
+      const { cancelarQuadro, ativar, desativar, quadroDoAtalho } = ponteAtiva();
+      renderizar();
+      ativar();
+
+      quadroDoAtalho();
+      quadroDoAtalho({ ...QUADRO, nome: "tela-2.jpg" });
+      // Pendentes, mas sem miniatura: a captura nunca aparece.
+      expect(screen.queryAllByRole("img")).toHaveLength(0);
+      expect(document.querySelector(".miniaturas-do-prompt")).toBeNull();
+
+      desativar();
+      expect(cancelarQuadro).toHaveBeenCalled();
+    });
+
+    it("respeita o limite de 5 imagens e avisa", async () => {
+      const { ativar, quadroDoAtalho } = ponteAtiva();
+      renderizar();
+      ativar();
+
+      for (let i = 0; i < 6; i += 1) {
+        quadroDoAtalho({ ...QUADRO, nome: `tela-${i}.jpg` });
+      }
+      expect(screen.queryAllByRole("img")).toHaveLength(0);
+      expect(screen.getByRole("alert")).toHaveTextContent("até 5 imagens");
+    });
+  });
+
+  it("ativo, fotografa a tela a cada pergunta e a anexa; não há mais faixa do modo", async () => {
     const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
     const { modoInvisivel, ativar } = ponteAtiva();
     const { campo } = renderizar();
@@ -97,7 +158,8 @@ describe("ChatRapido · modo invisível", () => {
     ativar();
     expect(screen.getByRole("button", { name: "Modo invisível" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByTestId("faixa-modo-invisivel")).not.toBeInTheDocument();
-    expect(screen.queryByText("Voltar ao modo normal")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Modo invisível" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Voltar ao modo normal" })).not.toBeInTheDocument();
 
     fireEvent.change(campo, { target: { value: "O que é isso?" } });
     fireEvent.keyDown(campo, { key: "Enter" });
@@ -169,26 +231,31 @@ describe("ChatRapido · modo invisível", () => {
       ],
     });
 
-    it("ativo, esconde a captura de tela e mantém a imagem manual", () => {
+    it("esconde a captura de tela e mantém a imagem manual, no modo normal e no invisível", () => {
       const { ativar } = ponteAtiva();
       renderizar(chatComImagens([CAPTURA, MANUAL]));
-      expect(screen.getByAltText(CAPTURA.nome)).toBeInTheDocument();
+      expect(screen.queryByAltText(CAPTURA.nome)).not.toBeInTheDocument();
+      expect(screen.getByAltText(MANUAL.nome)).toBeInTheDocument();
       ativar();
       expect(screen.queryByAltText(CAPTURA.nome)).not.toBeInTheDocument();
       expect(screen.getByAltText(MANUAL.nome)).toBeInTheDocument();
     });
 
-    it("ativo, sem imagens visíveis não renderiza o contêiner", () => {
-      const { ativar } = ponteAtiva();
-      renderizar(chatComImagens([CAPTURA]));
-      ativar();
-      expect(document.querySelector(".anexos-do-chat")).toBeNull();
-    });
-
-    it("fora do modo, a captura aparece", () => {
+    it("só com captura, não renderiza o contêiner (sem espaço vazio) e o texto continua", () => {
       ponteAtiva();
       renderizar(chatComImagens([CAPTURA]));
-      expect(screen.getByAltText(CAPTURA.nome)).toBeInTheDocument();
+      expect(document.querySelector(".anexos-do-chat")).toBeNull();
+      expect(screen.getByText("Veja")).toBeInTheDocument();
+    });
+
+    it("nos anexos pendentes, a captura não aparece e a imagem comum sim", () => {
+      const { quadroDoAtalho, ativar } = ponteAtiva();
+      renderizar();
+      quadroDoAtalho();
+      expect(document.querySelector(".miniaturas-do-prompt")).toBeNull();
+      ativar();
+      quadroDoAtalho({ ...QUADRO, nome: "tela-9.jpg" });
+      expect(document.querySelector(".miniaturas-do-prompt")).toBeNull();
     });
   });
 

@@ -74,6 +74,10 @@ export interface ApiDoModoInvisivel {
   /** true: a janela recebe os cliques; false: eles atravessam para os apps de trás. */
   capturarMouse: (capturar: boolean) => Promise<void>;
   capturarTela: () => Promise<CapturaDeTela>;
+  /** Botão "capturar agora": o quadro atual da tela. */
+  capturarAgora: () => Promise<CapturaDeTela>;
+  /** Quadros capturados pelo atalho global Ctrl+Shift+S; devolve a função que cancela. */
+  aoCapturarQuadro: (callback: (captura: CapturaDeTela) => void) => () => void;
   /** Avisa a cada entrar/sair (inclusive pelo atalho Ctrl+Shift+I); devolve a função que cancela o aviso. */
   aoMudar: (callback: (ativo: boolean) => void) => () => void;
 }

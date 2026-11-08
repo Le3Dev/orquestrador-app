@@ -74,6 +74,14 @@ contextBridge.exposeInMainWorld("electron", {
     capturarMouse: (capturar) => ipcRenderer.invoke("modo-invisivel:capturar-mouse", Boolean(capturar)).then(() => undefined),
     // { nome, tipoDeMidia: "image/jpeg", base64 }; rejeita fora do modo.
     capturarTela: () => ipcRenderer.invoke("tela:capturar"),
+    // Botão "capturar agora": devolve o quadro atual (mesmo formato).
+    capturarAgora: () => ipcRenderer.invoke("modo-invisivel:capturar-agora"),
+    // Quadros capturados pelo atalho global Ctrl+Shift+S; devolve o cancelamento.
+    aoCapturarQuadro: (callback) => {
+      const ouvinte = (_evento, captura) => callback(captura);
+      ipcRenderer.on("modo-invisivel:quadro-capturado", ouvinte);
+      return () => ipcRenderer.removeListener("modo-invisivel:quadro-capturado", ouvinte);
+    },
     aoMudar: (callback) => {
       const ouvinte = (_evento, ativo) => callback(Boolean(ativo));
       ipcRenderer.on("modo-invisivel:estado", ouvinte);

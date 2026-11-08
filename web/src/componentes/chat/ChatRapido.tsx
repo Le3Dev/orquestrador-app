@@ -245,23 +245,19 @@ function descreverAtividade({ ferramenta, detalhe }: AtividadeDaResposta): strin
 interface PropsDaMensagem extends PropsDasAcoesDoChat {
   mensagem: MensagemDoChatNaTela;
   atividade: AtividadeDaResposta | null;
-  /** Modo invisível ativo: esconde as miniaturas das capturas de tela (só visual). */
-  ocultarCapturas: boolean;
 }
 
 /** Uma mensagem da conversa. Memorizada: só a resposta em andamento re-renderiza a cada trecho. */
 const MensagemNaConversa = memo(function MensagemNaConversa({
   mensagem,
   atividade,
-  ocultarCapturas,
   aoAbrirTerminal,
   temVagaPara,
   aoAtualizarOrquestradores,
 }: PropsDaMensagem) {
   if (mensagem.papel === "usuario") {
-    const imagensVisiveis = ocultarCapturas
-      ? mensagem.imagens.filter((imagem) => !ehCapturaDeTela(imagem.nome))
-      : mensagem.imagens;
+    // Capturas de tela seguem para o Claude, mas nunca viram miniatura (só visual).
+    const imagensVisiveis = mensagem.imagens.filter((imagem) => !ehCapturaDeTela(imagem.nome));
     return (
       <div className="mensagem-do-usuario">
         {imagensVisiveis.length > 0 && (
@@ -385,11 +381,15 @@ export function ChatRapido({
     ativo: modoAtivo,
     entrar: entrarNoModo,
     capturarTela,
+    aoCapturarQuadro,
     mouseDaArea,
     sair: sairDoModo,
     erro: erroDoModo,
     descartarErro: descartarErroDoModo,
   } = useModoInvisivel();
+  // Contagem síncrona dos anexos pendentes: vários quadros podem chegar antes de renderizar.
+  const quantidadeDeImagens = useRef(0);
+  quantidadeDeImagens.current = imagens.length;
   const campo = useRef<HTMLTextAreaElement>(null);
   const seletorDeArquivos = useRef<HTMLInputElement>(null);
   const rolagem = useRef<HTMLDivElement>(null);
@@ -401,13 +401,14 @@ export function ChatRapido({
   // Fixo à esquerda, a conversa nunca se oculta.
   const oculta = !fixo && ocultaEm !== null;
   const novidadeOculta = oculta && ocultaEm !== assinaturaDaUltima(chat);
+  const imagensVisiveis = imagens.filter((imagem) => !ehCapturaDeTela(imagem.nome));
   const temConteudo = texto.trim() !== "" || imagens.length > 0;
   const dica = dicaDeComando(texto, respondendo);
   const ultima = chat.mensagens.at(-1);
   const pedidoDeAutorizacao = pedidoDeAutorizacaoAtual(chat);
   // Compacto (uma linha) até a pessoa usar; recolhe só sem foco, texto, imagens nem menu aberto.
   // Fixo à esquerda, fica sempre expandido: a coluna é estreita para tudo numa linha.
-  const expandido = fixo || emUso || texto !== "" || imagens.length > 0 || menuAberto || arrastando;
+  const expandido = fixo || emUso || texto !== "" || imagensVisiveis.length > 0 || menuAberto || arrastando;
 
   // Recolhido, o campo volta à altura de uma linha.
   useEffect(() => {
@@ -469,6 +470,35 @@ export function ChatRapido({
     [imagens.length],
   );
 
+  /** Guarda um quadro capturado (botão ou atalho) como anexo pendente, respeitando o limite. */
+  const adicionarQuadro = useCallback((captura: CapturaDeTela): void => {
+    if (quantidadeDeImagens.current >= MAXIMO_DE_IMAGENS) {
+      setErro(`Dá para anexar até ${MAXIMO_DE_IMAGENS} imagens por mensagem: o quadro não foi guardado.`);
+      return;
+    }
+    quantidadeDeImagens.current += 1;
+    setErro(null);
+    setImagens((atuais) => [
+      ...atuais,
+      {
+        id: crypto.randomUUID(),
+        nome: captura.nome,
+        tipoDeMidia: captura.tipoDeMidia,
+        base64: captura.base64,
+        previa: `data:${captura.tipoDeMidia};base64,${captura.base64}`,
+        tamanhoEmBytes: Math.floor((captura.base64.length * 3) / 4),
+      },
+    ]);
+  }, []);
+
+  // Quadros do atalho global Ctrl+Shift+S (o app de trás mantém o foco).
+  useEffect(() => {
+    if (!modoAtivo) {
+      return undefined;
+    }
+    return aoCapturarQuadro(adicionarQuadro);
+  }, [modoAtivo, aoCapturarQuadro, adicionarQuadro]);
+
   async function limparConversa(): Promise<void> {
     // Durante a resposta o servidor recusaria: a dica já avisa.
     if (respondendo || enviando || desconectado) {
@@ -496,8 +526,9 @@ export function ChatRapido({
       setEnviando(true);
       try {
         let todosOsAnexos = anexos;
-        // Modo invisível: a tela vai junto, fotografada agora. Sem a foto, nada é enviado.
-        if (modoAtivo) {
+        // Modo invisível: a tela vai junto, fotografada agora — a menos que já haja um quadro
+        // capturado (botão/atalho) entre os anexos. Sem a foto, nada é enviado.
+        if (modoAtivo && !anexos.some((anexo) => ehCapturaDeTela(anexo.nome))) {
           if (anexos.length >= MAXIMO_DE_IMAGENS) {
             throw new Error(
               `No modo invisível a tela ocupa uma das ${MAXIMO_DE_IMAGENS} imagens: remova uma imagem anexada.`,
@@ -732,7 +763,6 @@ export function ChatRapido({
               <Fragment key={mensagem.id}>
                 <MensagemNaConversa
                   mensagem={mensagem}
-                  ocultarCapturas={modoAtivo}
                   atividade={mensagem.situacao === "respondendo" ? chat.atividade : null}
                   aoAbrirTerminal={aoAbrirTerminal}
                   temVagaPara={temVagaPara}
@@ -802,9 +832,9 @@ export function ChatRapido({
           }}
         >
           {respondendo && !desconectado && <div className="faixa-de-progresso" />}
-          {imagens.length > 0 && (
+          {imagensVisiveis.length > 0 && (
             <div className="miniaturas-do-prompt">
-              {imagens.map((imagem) => (
+              {imagensVisiveis.map((imagem) => (
                 <figure
                   key={imagem.id}
                   className="miniatura"
