@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ConfiguracaoDoOrquestrador } from "../../orquestracao/ConfiguracaoDoOrquestrador";
 import { EventoRegistrado } from "../../orquestracao/EventoDeOrquestracao";
@@ -100,6 +100,138 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
     const reaberto = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
 
     expect(reaberto.listar()).toEqual([]);
+  });
+
+  describe("ao ler o orquestrador.json", () => {
+    const pastaDo = (id: string): string => path.join(pasta, "orquestradores", id);
+
+    async function gravarArquivo(id: string, conteudo: string): Promise<void> {
+      await mkdir(pastaDo(id), { recursive: true });
+      await writeFile(path.join(pastaDo(id), "orquestrador.json"), conteudo, "utf8");
+    }
+
+    /** Um orquestrador.json como as primeiras versões gravavam, com as opções que a ADR-28 removeu. */
+    function arquivoAntigo(): Record<string, unknown> {
+      return {
+        id: "antigo",
+        nome: "Antigo",
+        pastaDeTrabalho: path.resolve("/projetos/antigo"),
+        sessaoId: "sessao-antiga",
+        sessaoIniciada: true,
+        criadoEm: "2026-10-01T10:00:00.000Z",
+        configuracao: {
+          modeloDoOrquestrador: "opus",
+          modeloDosSubagentes: "sonnet",
+          quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
+          nivelDePermissao: "leitura",
+          permitirTrabalhoDireto: true,
+          proporPlanoEmPedidosGrandes: false,
+        },
+        turnos: [
+          {
+            id: "t0",
+            texto: "antigo",
+            iniciadoEm: "2026-10-01T10:00:00.000Z",
+            encerradoEm: "2026-10-01T10:01:00.000Z",
+            situacao: "concluido",
+            resposta: "ok",
+            motivoDaFalha: null,
+            uso: { duracaoMs: 1, tokensDeEntrada: 2, tokensDeSaida: 3, subagentesLancados: 0 },
+            subagentes: [
+              { id: "s1", descricao: "ler", situacao: "concluido", tokens: 5, duracaoMs: 6, resumo: "lido" },
+            ],
+          },
+        ],
+        campoQueNaoExisteMais: "x",
+      };
+    }
+
+    it("abre um arquivo antigo válido com os padrões do agregado e descarta chaves desconhecidas", async () => {
+      await gravarArquivo("antigo", JSON.stringify(arquivoAntigo()));
+
+      const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+      const dados = repositorio.buscarPorId("antigo")?.paraDados();
+
+      expect(dados).toMatchObject({
+        id: "antigo",
+        nome: "Antigo",
+        sessaoIniciada: true,
+        worktree: null,
+        fila: [],
+        instrucoesNaConversa: false,
+        configuracao: {
+          permitirCommitEPush: false,
+          esforcoDoOrquestrador: "padrao",
+          esforcoDosSubagentes: "padrao",
+          instrucoesPersonalizadas: "",
+        },
+      });
+      expect(dados?.turnos[0]).toMatchObject({
+        anexos: [],
+        modo: "execucao",
+        decisaoDoPlano: null,
+        perguntas: [],
+        subagentes: [{ id: "s1", resumo: "lido" }],
+      });
+      expect(dados).not.toHaveProperty("campoQueNaoExisteMais");
+      expect(dados?.configuracao).not.toHaveProperty("proporPlanoEmPedidosGrandes");
+      expect(existsSync(path.join(pastaDo("antigo"), "orquestrador.ilegivel.json"))).toBe(false);
+    });
+
+    it("guarda ao lado um JSON quebrado, avisa no log e abre os outros", async () => {
+      const avisos = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+      await repositorio.salvar(novoOrquestrador("bom"));
+      await repositorio.aguardarGravacoes();
+      await gravarArquivo("quebrado", '{"id": "quebrado", "nome": ');
+
+      const reaberto = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+
+      expect(reaberto.listar().map((item) => item.id)).toEqual(["bom"]);
+      expect(existsSync(path.join(pastaDo("quebrado"), "orquestrador.json"))).toBe(false);
+      expect(await readFile(path.join(pastaDo("quebrado"), "orquestrador.ilegivel.json"), "utf8")).toBe(
+        '{"id": "quebrado", "nome": ',
+      );
+      expect(avisos).toHaveBeenCalledTimes(1);
+      expect(String(avisos.mock.calls[0]?.[0])).toContain("orquestrador.ilegivel.json");
+      avisos.mockRestore();
+    });
+
+    it("guarda ao lado um arquivo fora do esquema ou com valor que o agregado recusa", async () => {
+      const avisos = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const semTurnos = arquivoAntigo();
+      delete semTurnos.turnos;
+      await gravarArquivo("sem-turnos", JSON.stringify(semTurnos));
+      await gravarArquivo("tipo-errado", JSON.stringify({ ...arquivoAntigo(), sessaoIniciada: "sim" }));
+      await gravarArquivo(
+        "limite-errado",
+        JSON.stringify({
+          ...arquivoAntigo(),
+          configuracao: {
+            modeloDoOrquestrador: "opus",
+            modeloDosSubagentes: "sonnet",
+            quantidadeDeSubagentes: { modo: "fixa", limite: 99 },
+            nivelDePermissao: "leitura",
+          },
+        }),
+      );
+
+      const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+
+      expect(repositorio.listar()).toEqual([]);
+      for (const id of ["sem-turnos", "tipo-errado", "limite-errado"]) {
+        expect(existsSync(path.join(pastaDo(id), "orquestrador.json"))).toBe(false);
+        expect(existsSync(path.join(pastaDo(id), "orquestrador.ilegivel.json"))).toBe(true);
+      }
+      expect(avisos).toHaveBeenCalledTimes(3);
+      avisos.mockRestore();
+
+      // O arquivo renomeado não é lido de novo: reabrir não repete o aviso.
+      const outroAviso = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+      expect(outroAviso).not.toHaveBeenCalled();
+      outroAviso.mockRestore();
+    });
   });
 
   describe("ao arquivar a conversa", () => {
