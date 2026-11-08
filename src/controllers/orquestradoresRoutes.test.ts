@@ -925,6 +925,34 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(previa.instrucoesIniciais).toContain("Pasta de trabalho: <pasta de trabalho>");
     });
 
+    it("a prévia mostra {{pasta}} e {{nome}} com os valores informados", async () => {
+      const resposta = await postar("/previa-do-prompt", {
+        configuracao: { ...configuracaoBasica, instrucoesPersonalizadas: "Em {{pasta}}, como {{ nome }}. {{outra}}" },
+        pastaDeTrabalho: "painel",
+        nome: "  Painel  ",
+      });
+
+      expect(resposta.status).toBe(200);
+      const previa = (await resposta.json()) as { mensagem: string };
+      expect(previa.mensagem).toContain(`Em ${path.join(raiz, "painel")}, como Painel. {{outra}}`);
+    });
+
+    it("a prévia sem pasta nem nome mostra os marcadores no lugar das variáveis, também nas gerais", async () => {
+      preferencias.preferencias = PreferenciasGlobais.de({ instrucoesPadrao: "Em {{pasta}}, como {{nome}}." });
+      const resposta = await postar("/previa-do-prompt", { configuracao: configuracaoBasica });
+
+      const previa = (await resposta.json()) as { mensagem: string; origemDasInstrucoes: string };
+      expect(previa.origemDasInstrucoes).toBe("padrao");
+      expect(previa.mensagem).toContain("Em <pasta de trabalho>, como <nome do orquestrador>.");
+    });
+
+    it("a prévia recusa nome que não é texto com 400", async () => {
+      const resposta = await postar("/previa-do-prompt", { configuracao: configuracaoBasica, nome: 42 });
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: "O nome deve ser um texto." });
+    });
+
     it("a prévia aceita pasta fora da pasta dos projetos", async () => {
       const fora = path.resolve("/outro/lugar");
       const resposta = await postar("/previa-do-prompt", { configuracao: configuracaoBasica, pastaDeTrabalho: fora });

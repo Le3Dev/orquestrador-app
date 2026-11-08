@@ -35,6 +35,12 @@ describe("PainelDeInstrucoesGerais", () => {
     expect(screen.getByRole("button", { name: "Salvar" })).toBeEnabled();
   });
 
+  it("a ajuda do campo dá a dica das variáveis {{pasta}} e {{nome}}", async () => {
+    const { campo } = await abrir();
+
+    expect(campo).toHaveAccessibleDescription(/Use \{\{pasta\}\} e \{\{nome\}\} para a pasta e o nome do orquestrador\./);
+  });
+
   it("salva só as instruções gerais (os subagentes ficam como estão), avisa a página e fecha", async () => {
     const alterar = vi
       .spyOn(api, "alterarPreferencias")

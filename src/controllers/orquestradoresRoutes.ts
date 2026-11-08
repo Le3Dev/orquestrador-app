@@ -16,7 +16,11 @@ import {
 } from "../orquestracao/EsforcoDeRaciocinio";
 import { EventoRegistrado } from "../orquestracao/EventoDeOrquestracao";
 import { instrucoesDoOrquestrador, mensagemParaOOrquestrador } from "../orquestracao/InstrucoesDoOrquestrador";
-import { InstrucoesAplicadas, TAMANHO_MAXIMO_DAS_INSTRUCOES } from "../orquestracao/InstrucoesPersonalizadas";
+import {
+  aplicarVariaveis,
+  InstrucoesAplicadas,
+  TAMANHO_MAXIMO_DAS_INSTRUCOES,
+} from "../orquestracao/InstrucoesPersonalizadas";
 import { MODELOS_CLAUDE } from "../orquestracao/ModeloClaude";
 import { MODOS_DO_TURNO } from "../orquestracao/ModoDoTurno";
 import { NIVEIS_DE_PERMISSAO } from "../orquestracao/NivelDePermissao";
@@ -126,12 +130,13 @@ const esquemaDasPreferencias = z.object({
 
 /**
  * Pré-visualização do que o Orquestrador recebe num pedido com esta
- * configuração (ainda não salva). Sem pasta, o texto mostra um marcador no
- * lugar do caminho.
+ * configuração (ainda não salva). Sem pasta ou sem nome, o texto mostra um
+ * marcador no lugar de cada um (também em `{{pasta}}` e `{{nome}}`).
  */
 const esquemaDaPrevia = z.object({
   configuracao: esquemaDaConfiguracao,
   pastaDeTrabalho: z.string().optional(),
+  nome: z.string({ error: "O nome deve ser um texto." }).optional(),
   modo: z.enum(MODOS_DO_TURNO, { error: "Modo do pedido inválido." }).default("execucao"),
 });
 
@@ -423,7 +428,7 @@ export function criarOrquestradoresRoutes({
   rotas.post(
     "/previa-do-prompt",
     rota((requisicao, resposta) => {
-      const { configuracao: dados, pastaDeTrabalho, modo } = esquemaDaPrevia.parse(requisicao.body ?? {});
+      const { configuracao: dados, pastaDeTrabalho, nome, modo } = esquemaDaPrevia.parse(requisicao.body ?? {});
       const configuracao = ConfiguracaoDoOrquestrador.de(dados);
       const informada = pastaDeTrabalho?.trim() ?? "";
       const pasta =
@@ -432,7 +437,12 @@ export function criarOrquestradoresRoutes({
           : path.isAbsolute(informada)
             ? PastaDeTrabalho.qualquer(informada)
             : PastaDeTrabalho.dentroDe(pastaRaiz, informada);
-      const instrucoes = servico.instrucoesPara(configuracao);
+      const nomeInformado = nome?.trim() ?? "";
+      // No turno, `{{pasta}}` vira o worktree, se houver; a prévia mostra a pasta de trabalho.
+      const instrucoes = aplicarVariaveis(servico.instrucoesPara(configuracao), {
+        pasta: pasta.caminho,
+        nome: nomeInformado === "" ? "<nome do orquestrador>" : nomeInformado,
+      });
       resposta.json({
         instrucoesIniciais: instrucoesDoOrquestrador(pasta),
         mensagem: mensagemParaOOrquestrador(

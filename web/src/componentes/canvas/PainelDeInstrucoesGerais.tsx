@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
+import { DICA_DAS_VARIAVEIS } from "../../shared/instrucoes";
 import { CampoDeInstrucoes } from "../CampoDeInstrucoes";
 import { Dica } from "../Dica";
 
@@ -82,7 +83,7 @@ export function PainelDeInstrucoesGerais({ aoFechar, aoSalvar }: Props) {
         ) : (
           <CampoDeInstrucoes
             rotulo="Instruções gerais"
-            ajuda="Valem a partir do próximo pedido de cada orquestrador."
+            ajuda={`Valem a partir do próximo pedido de cada orquestrador. ${DICA_DAS_VARIAVEIS}`}
             placeholder="Ex.: Responda sempre em português, com tópicos curtos."
             valor={instrucoes}
             aoMudar={setInstrucoes}

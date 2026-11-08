@@ -12,7 +12,7 @@ import {
 import { type EscalaDaLetra, OPCOES_DA_ESCALA_DA_LETRA } from "../shared/canvas/layout";
 import { AVISO_DO_ULTRACODE, ROTULOS_DAS_PERMISSOES } from "../shared/formatacao";
 import { ajudaDaPredefinicao, useEsforcosHerdados, usePredefinicoes } from "../shared/hooks/useDadosDaConfiguracao";
-import { tamanhoDasInstrucoes } from "../shared/instrucoes";
+import { DICA_DAS_VARIAVEIS, tamanhoDasInstrucoes } from "../shared/instrucoes";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../shared/modelos";
 import { ChipDeEsforco, ChipDeQuantidade } from "./canvas/ChipsDaCriacao";
 import { AvisoDoEsforcoHerdado, IconeDaPermissao, Rotulo, SeletorDeModelo } from "./canvas/LinhasDaConfiguracao";
@@ -39,6 +39,8 @@ interface Props {
   aplicarPredefinicao?: (predefinicao: NomeDaPredefinicao) => Promise<DadosDaConfiguracao>;
   /** A pasta do orquestrador, para a pré-visualização do prompt. */
   pastaDeTrabalho?: string | undefined;
+  /** O nome do orquestrador, para `{{nome}}` na pré-visualização do prompt. */
+  nome?: string | undefined;
   /**
    * O tamanho da letra do cartão no canvas (⚙ de um Orquestrador existente).
    * Não é dado do servidor: fica no layout do canvas e vale na hora. Sem ele,
@@ -60,6 +62,7 @@ export function CamposDaConfiguracao({
   buscarEsforcoHerdado,
   aplicarPredefinicao,
   pastaDeTrabalho,
+  nome,
   tamanhoDaLetra,
 }: Props) {
   const idDoCampo = useId();
@@ -294,9 +297,10 @@ export function CamposDaConfiguracao({
             spellCheck
             onChange={(evento) => mudar("instrucoesPersonalizadas", evento.target.value)}
           />
+          <span className="hint">{DICA_DAS_VARIAVEIS}</span>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <PreviaDoPromptFinal configuracao={valor} pastaDeTrabalho={pastaDeTrabalho} comoLink />
+              <PreviaDoPromptFinal configuracao={valor} pastaDeTrabalho={pastaDeTrabalho} nome={nome} comoLink />
             </div>
             <span className={`mono shrink-0 text-[11px] ${passouDoLimite ? "text-error" : "text-muted"}`} aria-live="polite">
               {tamanho.toLocaleString("pt-BR")} / {TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString("pt-BR")}

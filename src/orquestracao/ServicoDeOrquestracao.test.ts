@@ -1205,6 +1205,37 @@ describe("ServicoDeOrquestracao", () => {
       expect(motor.pedidos.at(-1)?.subagentesProntos).toEqual([revisor]);
     });
 
+    it("{{pasta}} vira a pasta do turno (o worktree) e {{nome}} o nome do orquestrador", async () => {
+      const orquestrador = await criar();
+      const caminho = path.resolve("/dados/worktrees/abc");
+      worktrees.preparo = { cwd: caminho, worktree: { branch: "orquestrador/id1", caminho } };
+      await servico.alterarConfiguracao(orquestrador.id, {
+        instrucoesPersonalizadas: "Trabalhe só em {{pasta}}. Assine como {{ nome }}. {{projeto}}",
+      });
+
+      const pedido = await pedidoDoTurno(orquestrador.id);
+
+      expect(pedido.pastaDeTrabalho.caminho).toBe(caminho);
+      expect(pedido.instrucoes).toEqual({
+        texto: `Trabalhe só em ${caminho}. Assine como Painel. {{projeto}}`,
+        origem: "orquestrador",
+      });
+      // Guardadas sem trocar: o próximo turno troca de novo, com a pasta dele.
+      expect(orquestrador.configuracao.instrucoesPersonalizadas).toContain("{{pasta}}");
+    });
+
+    it("sem worktree, {{pasta}} vira a pasta de trabalho; vale também nas instruções gerais", async () => {
+      preferencias.preferencias = PreferenciasGlobais.de({ instrucoesPadrao: "Pasta: {{pasta}}; nome: {{nome}}." });
+      const orquestrador = await criar();
+
+      const pedido = await pedidoDoTurno(orquestrador.id);
+
+      expect(pedido.instrucoes).toEqual({
+        texto: `Pasta: ${orquestrador.pastaDeTrabalho.caminho}; nome: Painel.`,
+        origem: "padrao",
+      });
+    });
+
     it("instrucoesPara diz o que o próximo pedido receberia", async () => {
       const orquestrador = await criar();
       expect(servico.instrucoesPara(orquestrador.configuracao)).toBeNull();

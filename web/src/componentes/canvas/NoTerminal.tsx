@@ -364,6 +364,7 @@ export function PainelDeConfiguracao({
             buscarEsforcoHerdado={buscarEsforcoHerdado}
             aplicarPredefinicao={aplicarPredefinicao}
             pastaDeTrabalho={pastaDeTrabalho}
+            nome={orquestrador.nome}
             tamanhoDaLetra={tamanhoDaLetra}
           />
           <div className="linha-da-criacao">

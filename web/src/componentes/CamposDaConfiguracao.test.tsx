@@ -389,5 +389,18 @@ describe("CamposDaConfiguracao", () => {
 
       expect(screen.getByRole("button", { name: "Pré-visualizar prompt final" })).toHaveAttribute("aria-expanded", "false");
     });
+
+    it("dá a dica das variáveis e a prévia leva a pasta e o nome do orquestrador", async () => {
+      const previa = vi
+        .spyOn(api, "previaDoPrompt")
+        .mockResolvedValue({ instrucoesIniciais: "x", mensagem: "y", origemDasInstrucoes: null });
+      renderizar({}, { pastaDeTrabalho: "/projetos/painel", nome: "Painel" });
+
+      expect(screen.getByText("Use {{pasta}} e {{nome}} para a pasta e o nome do orquestrador.")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Pré-visualizar prompt final" }));
+
+      await waitFor(() => expect(previa).toHaveBeenCalledWith(configuracao, "/projetos/painel", "execucao", "Painel"));
+      previa.mockRestore();
+    });
   });
 });

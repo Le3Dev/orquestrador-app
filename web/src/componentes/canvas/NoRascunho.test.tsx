@@ -447,6 +447,20 @@ describe("NoRascunho", () => {
     expect(botaoDeComecar()).toBeDisabled();
   });
 
+  it("as instruções dão a dica das variáveis e a prévia leva a pasta e o nome escolhidos", async () => {
+    const previa = vi
+      .spyOn(api, "previaDoPrompt")
+      .mockResolvedValue({ instrucoesIniciais: "x", mensagem: "y", origemDasInstrucoes: null });
+    await abrirComPasta();
+
+    expect(screen.getByText("Use {{pasta}} e {{nome}} para a pasta e o nome do orquestrador.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pré-visualizar prompt final" }));
+
+    await waitFor(() =>
+      expect(previa).toHaveBeenCalledWith(expect.any(Object), "/p/app", "execucao", "app"),
+    );
+  });
+
   it("sem nome, não começa e diz por quê", async () => {
     await abrirComPasta();
 

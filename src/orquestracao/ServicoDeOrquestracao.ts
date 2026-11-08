@@ -18,7 +18,7 @@ import {
   EventoDoMotor,
 } from "./EventoDeOrquestracao";
 import { mensagemDeAprovacaoDoPlano, separarPropostaDePlano } from "./InstrucoesDoOrquestrador";
-import { InstrucoesAplicadas, resolverInstrucoes } from "./InstrucoesPersonalizadas";
+import { aplicarVariaveis, InstrucoesAplicadas, resolverInstrucoes } from "./InstrucoesPersonalizadas";
 import { MedidorDeConsumo, PeriodoDoTurno } from "./MedidorDeConsumo";
 import { ModeloClaude } from "./ModeloClaude";
 import { ModoDoTurno } from "./ModoDoTurno";
@@ -194,7 +194,9 @@ export class ServicoDeOrquestracao {
 
   /**
    * As instruções personalizadas que um pedido com esta configuração
-   * receberia agora: as próprias, se houver; senão o padrão global.
+   * receberia agora: as próprias, se houver; senão o padrão global. Ainda com
+   * `{{pasta}}` e `{{nome}}`: são trocadas no turno (`executar`), quando a
+   * pasta do turno já é conhecida.
    */
   instrucoesPara(configuracao: ConfiguracaoDoOrquestrador): InstrucoesAplicadas | null {
     return resolverInstrucoes(
@@ -614,6 +616,11 @@ export class ServicoDeOrquestracao {
           // Do Orquestrador, e não do worktree: os artefatos sobrevivem ao turno.
           pastaDeArtefatos: pastaDeArtefatos(orquestrador.id),
           ...instrucoesDoTurno,
+          // Só agora, com o worktree preparado: `{{pasta}}` é a mesma pasta que vai ao motor.
+          instrucoes: aplicarVariaveis(instrucoesDoTurno.instrucoes, {
+            pasta: pastaDoTurno.caminho,
+            nome: orquestrador.nome,
+          }),
         },
         (evento) => {
           vigia?.registrarLinha();

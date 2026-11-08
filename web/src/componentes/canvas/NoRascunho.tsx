@@ -17,7 +17,7 @@ import {
 import { ALCA_DO_TERMINAL, type NoRascunho as TipoDoNo } from "../../shared/canvas/nos";
 import { AVISO_DO_ULTRACODE, ROTULOS_DAS_PERMISSOES } from "../../shared/formatacao";
 import { ajudaDaPredefinicao, useEsforcosHerdados, usePredefinicoes } from "../../shared/hooks/useDadosDaConfiguracao";
-import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
+import { DICA_DAS_VARIAVEIS, tamanhoDasInstrucoes } from "../../shared/instrucoes";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
 import { resumoDaConfiguracao } from "../../shared/resumoDaConfiguracao";
 import { IconeAlerta, IconeFechar } from "../Icones";
@@ -462,9 +462,15 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                   spellCheck
                   onChange={(evento) => mudar("instrucoesPersonalizadas", evento.target.value)}
                 />
+                <span className="hint">{DICA_DAS_VARIAVEIS}</span>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <PreviaDoPromptFinal configuracao={configuracao} pastaDeTrabalho={pasta || undefined} comoLink />
+                    <PreviaDoPromptFinal
+                      configuracao={configuracao}
+                      pastaDeTrabalho={pasta || undefined}
+                      nome={nome.trim() || undefined}
+                      comoLink
+                    />
                   </div>
                   <span className={`mono shrink-0 text-[11px] ${passouDoLimite ? "text-error" : "text-muted"}`} aria-live="polite">
                     {tamanho.toLocaleString("pt-BR")} / {TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString("pt-BR")}

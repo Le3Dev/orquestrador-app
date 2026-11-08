@@ -223,11 +223,24 @@ export const api = {
   alterarPreferencias: (alteracao: Partial<DadosDasPreferencias>) =>
     requisitar<DadosDasPreferencias>("/preferencias", { method: "PATCH", body: JSON.stringify(alteracao) }),
 
-  /** O que o orquestrador receberia com esta configuração (ainda não salva). Não grava nada. */
-  previaDoPrompt: (configuracao: DadosDaConfiguracao, pastaDeTrabalho?: string, modo: ModoDoTurno = "execucao") =>
+  /**
+   * O que o orquestrador receberia com esta configuração (ainda não salva). Não grava nada.
+   * A pasta e o nome também preenchem `{{pasta}}` e `{{nome}}` das instruções.
+   */
+  previaDoPrompt: (
+    configuracao: DadosDaConfiguracao,
+    pastaDeTrabalho?: string,
+    modo: ModoDoTurno = "execucao",
+    nome?: string,
+  ) =>
     requisitar<PreviaDoPrompt>("/previa-do-prompt", {
       method: "POST",
-      body: JSON.stringify({ configuracao, modo, ...(pastaDeTrabalho ? { pastaDeTrabalho } : {}) }),
+      body: JSON.stringify({
+        configuracao,
+        modo,
+        ...(pastaDeTrabalho ? { pastaDeTrabalho } : {}),
+        ...(nome ? { nome } : {}),
+      }),
     }),
 
   /**
