@@ -112,9 +112,13 @@
 
 * { box-sizing: border-box; }
 
-/* A janela do app é transparente; o fundo opaco do modo normal vem daqui. */
-html,
+/* A janela do app é transparente; o fundo opaco do modo normal vem do #root.
+ * Nunca do html nem do body: no macOS, o fundo do elemento raiz (que o
+ * Chromium leva para a camada nativa da janela) fica preso depois de pintado
+ * opaco, e o modo invisível ficava com a janela inteira escura por cima dos
+ * apps de trás. */
 #root {
+  min-height: 100vh;
   background-color: var(--screen-bg);
 }
 
@@ -124,7 +128,6 @@ body {
   font-family: var(--fonte-texto);
   font-size: 13px;
   color: var(--primary);
-  background-color: var(--screen-bg);
 }
 
 h1, h2, h3 { font-family: var(--fonte-titulo); margin: 0; letter-spacing: -.01em; }

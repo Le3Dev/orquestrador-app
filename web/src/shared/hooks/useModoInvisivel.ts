@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { apiDoModoInvisivel, type CapturaDeTela } from "../ponteDoDesktop";
+import { type ApiDoModoInvisivel, apiDoModoInvisivel, type CapturaDeTela } from "../ponteDoDesktop";
 
 export interface MouseDaArea {
   onMouseEnter: () => void;
@@ -28,20 +28,48 @@ export interface ModoInvisivel {
 const SEM_EFEITO: MouseDaArea = { onMouseEnter: () => undefined, onMouseLeave: () => undefined };
 
 /**
+ * O último estado avisado pelo processo principal, por ponte. O aviso só chega
+ * a quem já estava montado: quem monta depois (o chat rápido, que sai da coluna
+ * fixa para o painel do pé ao entrar no modo) começa por aqui, e não como inativo.
+ */
+const ultimoEstadoAvisado = new WeakMap<ApiDoModoInvisivel, boolean>();
+
+/**
  * O modo invisível do app desktop. O estado vem do aviso do processo principal
  * (que também avisa a saída pelo atalho Ctrl+Shift+I), então todas as telas que
  * usam o hook ficam em sincronia. Fora do desktop, nada faz efeito.
  */
 export function useModoInvisivel(): ModoInvisivel {
   const [api] = useState(apiDoModoInvisivel);
-  const [ativo, setAtivo] = useState(false);
+  const [ativo, setAtivo] = useState(() => api !== null && ultimoEstadoAvisado.get(api) === true);
+  const [comecouAtivo] = useState(ativo);
   const [erro, setErro] = useState<string | null>(null);
+  const montado = useRef(true);
+
+  useEffect(() => {
+    montado.current = true;
+    return () => {
+      montado.current = false;
+    };
+  }, []);
+
+  // Montado já com o modo ativo (o chat que trocou de lugar ao entrar): o mouse
+  // não está sobre a área nova, então os cliques voltam a passar; passar o mouse
+  // sobre ela liga a captura de novo.
+  useEffect(() => {
+    if (api !== null && comecouAtivo) {
+      void api.capturarMouse(false).catch(() => undefined);
+    }
+  }, [api, comecouAtivo]);
 
   useEffect(() => {
     if (api === null) {
       return undefined;
     }
-    return api.aoMudar(setAtivo);
+    return api.aoMudar((novo) => {
+      ultimoEstadoAvisado.set(api, novo);
+      setAtivo(novo);
+    });
   }, [api]);
 
   const entrar = useCallback(async () => {
@@ -52,7 +80,10 @@ export function useModoInvisivel(): ModoInvisivel {
     try {
       await api.entrar();
       // O mouse está sobre o botão: a janela precisa receber o clique de voltar.
-      await api.capturarMouse(true);
+      // Se o chat já trocou de lugar (desmontou este), quem montou cuida do mouse.
+      if (montado.current) {
+        await api.capturarMouse(true);
+      }
     } catch (falha) {
       setErro(`Não foi possível entrar no modo invisível: ${falha instanceof Error ? falha.message : String(falha)}`);
     }

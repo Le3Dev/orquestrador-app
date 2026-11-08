@@ -388,8 +388,10 @@ function Canvas() {
   const chatAoVivo = useChat(servidor.conectado);
   const { chat } = chatAoVivo;
   // Chat fixo à esquerda (painel Configurações do ⚙ ou o botão do próprio chat).
+  // No modo invisível ele volta a ser o painel flutuante do pé (a coluna da altura
+  // toda cobriria os apps de trás); a preferência salva não muda.
   const { preferencias: preferenciasDaTela, mudarPreferencias: mudarPreferenciasDaTela } = usePreferenciasDaTela();
-  const chatFixo = preferenciasDaTela.chatFixoNaEsquerda;
+  const chatFixo = preferenciasDaTela.chatFixoNaEsquerda && !modoInvisivel;
   const larguraDoChatFixo = preferenciasDaTela.larguraDoChatFixo;
   // Limpar lê as conversas por aqui, para as ações do canvas não mudarem a cada evento.
   const conversasAtuais = useRef(conversas);
@@ -1390,7 +1392,8 @@ function Canvas() {
         aoAtualizarOrquestradores={atualizarOrquestradoresDoChat}
         orquestradores={orquestradoresDoChat}
         fixo={chatFixo}
-        aoAlternarFixo={alternarChatFixo}
+        // No modo invisível não dá para fixar: o chat fica flutuante até sair dele.
+        aoAlternarFixo={modoInvisivel ? undefined : alternarChatFixo}
         largura={larguraDoChatFixo}
         aoMudarLargura={mudarLarguraDoChat}
       />
@@ -1405,6 +1408,7 @@ function Canvas() {
       atualizarOrquestradoresDoChat,
       orquestradoresDoChat,
       chatFixo,
+      modoInvisivel,
       alternarChatFixo,
       larguraDoChatFixo,
       mudarLarguraDoChat,
