@@ -1,4 +1,5 @@
 import type {
+  ConsumoDoOrquestrador,
   ConteudoDoArquivo,
   DadosDaConfiguracao,
   DadosDaNota,
@@ -106,6 +107,9 @@ export const api = {
   },
 
   listarOrquestradores: () => requisitar<ResumoDoOrquestrador[]>("/orquestradores"),
+
+  /** O consumo medido de cada orquestrador na conversa atual, do maior índice de custo para o menor. */
+  lerConsumoDosOrquestradores: () => requisitar<ConsumoDoOrquestrador[]>("/consumo-dos-orquestradores"),
 
   criarOrquestrador: (dados: NovoOrquestrador) =>
     requisitar<ResumoDoOrquestrador>("/orquestradores", { method: "POST", body: JSON.stringify(dados) }),

@@ -36,6 +36,7 @@ import { LIMITE_DE_SUBAGENTES } from "../orquestracao/QuantidadeDeSubagentes";
 import { RepositorioDeOrquestradores } from "../orquestracao/RepositorioDeOrquestradores";
 import { RepositorioDePreferencias } from "../orquestracao/RepositorioDePreferencias";
 import { EsforcoHerdadoDosPapeis, ServicoDeOrquestracao } from "../orquestracao/ServicoDeOrquestracao";
+import { UsoDeTokens } from "../orquestracao/UsoDeTokens";
 import { criarRota, responderErroGenerico, STATUS_DA_ORQUESTRACAO } from "./respostasHttp";
 
 interface Dependencias {
@@ -299,6 +300,34 @@ function apresentarDetalhe(orquestrador: Orquestrador, instrucoes: InstrucoesApl
   return { ...apresentarResumo(orquestrador, instrucoes), turnos: orquestrador.paraDados().turnos };
 }
 
+/**
+ * Quanto o Orquestrador gastou na conversa atual: a soma dos consumos medidos
+ * (`consumo_do_turno_medido`) do histórico em memória. Conversas limpas ficam
+ * de fora (o histórico delas está arquivado no disco). `parcial`: algum dos
+ * turnos somados foi cancelado ou falhou.
+ */
+function apresentarConsumo(orquestrador: Orquestrador, eventos: readonly EventoRegistrado[]) {
+  let uso = UsoDeTokens.vazio;
+  let turnosMedidos = 0;
+  let parcial = false;
+  for (const evento of eventos) {
+    if (evento.tipo !== "consumo_do_turno_medido") {
+      continue;
+    }
+    uso = uso.somar(UsoDeTokens.criar(evento.consumo.principal)).somar(UsoDeTokens.criar(evento.consumo.subagentes));
+    turnosMedidos += 1;
+    parcial ||= evento.consumo.parcial;
+  }
+  return {
+    id: orquestrador.id,
+    nome: orquestrador.nome,
+    turnosMedidos,
+    parcial,
+    uso: uso.paraDados(),
+    indiceDeCusto: uso.indiceDeCusto(),
+  };
+}
+
 function apresentarEsforcoHerdado({ orquestrador, subagentes }: EsforcoHerdadoDosPapeis) {
   return {
     orquestrador: orquestrador === null ? null : orquestrador.paraDados(),
@@ -343,6 +372,22 @@ export function criarOrquestradoresRoutes({
     "/orquestradores",
     rota((_requisicao, resposta) => {
       resposta.json(repositorio.listar().map(resumo));
+    }),
+  );
+
+  /**
+   * O consumo medido de cada Orquestrador na conversa atual, do maior índice
+   * de custo para o menor. Só entra quem tem algum turno medido.
+   */
+  rotas.get(
+    "/consumo-dos-orquestradores",
+    rota((_requisicao, resposta) => {
+      const consumos = repositorio
+        .listar()
+        .map((orquestrador) => apresentarConsumo(orquestrador, repositorio.lerEventos(orquestrador.id, 0)))
+        .filter((consumo) => consumo.turnosMedidos > 0)
+        .sort((a, b) => b.indiceDeCusto - a.indiceDeCusto);
+      resposta.json(consumos);
     }),
   );
 

@@ -1218,9 +1218,11 @@ describe("rotas de orquestradores — economia de tokens", () => {
 /** Os históricos de cada Orquestrador, para a rota de eventos ao vivo. */
 class RepositorioDeHistoricos implements RepositorioDeOrquestradores {
   readonly historicos = new Map<string, EventoRegistrado[]>();
+  /** O que a lista devolve (só a rota do consumo usa). */
+  orquestradores: Orquestrador[] = [];
 
   listar(): readonly Orquestrador[] {
-    return [];
+    return this.orquestradores;
   }
   buscarPorId(id: string): Orquestrador | null {
     return this.historicos.has(id) ? ({ id } as unknown as Orquestrador) : null;
@@ -1348,5 +1350,71 @@ describe("rotas de orquestradores — eventos de vários orquestradores numa con
 
     expect(resposta.status).toBe(400);
     expect(await resposta.json()).toEqual({ erro: mensagem });
+  });
+
+  describe("GET /consumo-dos-orquestradores", () => {
+    const uso = (entrada: number, saida: number) => ({ entrada, criacaoDeCache: 0, leituraDeCache: 0, saida });
+    const medido = (sequencia: number, entrada: number, parcial = false): EventoRegistrado => ({
+      tipo: "consumo_do_turno_medido",
+      turnoId: `t${sequencia}`,
+      consumo: {
+        principal: uso(entrada, 10),
+        subagentes: uso(entrada, 0),
+        subagentesMedidos: 1,
+        parcial,
+        indiceDeCusto: 0,
+        modeloDoPrincipal: null,
+      },
+      sequencia,
+      em: "agora",
+    });
+
+    afterEach(() => {
+      repositorio.orquestradores = [];
+      repositorio.historicos.clear();
+    });
+
+    it("soma os turnos medidos da conversa atual de cada um, do maior índice para o menor, sem quem não tem medição", async () => {
+      repositorio.orquestradores = [
+        { id: "o1", nome: "Painel" },
+        { id: "o2", nome: "Sem pedidos" },
+        { id: "o3", nome: "Backend" },
+      ] as unknown as Orquestrador[];
+      repositorio.historicos.set("o1", [evento(1), medido(2, 100), medido(3, 50, true)]);
+      repositorio.historicos.set("o2", [evento(1)]);
+      repositorio.historicos.set("o3", [medido(1, 1000)]);
+
+      const resposta = await fetch(`${base}/consumo-dos-orquestradores`);
+
+      expect(resposta.status).toBe(200);
+      expect(await resposta.json()).toEqual([
+        {
+          id: "o3",
+          nome: "Backend",
+          turnosMedidos: 1,
+          parcial: false,
+          uso: uso(2000, 10),
+          indiceDeCusto: 2050,
+        },
+        {
+          id: "o1",
+          nome: "Painel",
+          turnosMedidos: 2,
+          parcial: true,
+          uso: uso(300, 20),
+          indiceDeCusto: 400,
+        },
+      ]);
+    });
+
+    it("sem orquestradores ou sem medição, responde a lista vazia", async () => {
+      repositorio.orquestradores = [{ id: "o1", nome: "Painel" }] as unknown as Orquestrador[];
+      repositorio.historicos.set("o1", [evento(1)]);
+
+      const resposta = await fetch(`${base}/consumo-dos-orquestradores`);
+
+      expect(resposta.status).toBe(200);
+      expect(await resposta.json()).toEqual([]);
+    });
   });
 });

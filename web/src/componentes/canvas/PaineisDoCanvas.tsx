@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from "react";
+import { type MouseEvent as EventoDeMouseDoReact, type ReactNode, useCallback, useEffect, useId, useState } from "react";
 
 import type { JanelaDaCota, LeituraDeMemoria, ResumoDoOrquestrador } from "../../shared/api/tipos";
 import {
@@ -27,6 +27,7 @@ import {
 } from "../Icones";
 import { rodandoNoDesktop } from "../../shared/ponteDoDesktop";
 import { PainelDeConfiguracoesDoApp } from "./PainelDeConfiguracoesDoApp";
+import { ATRIBUTO_DO_GATILHO, COTA_ALTA, PopoverDoUso } from "./PopoverDoUso";
 import "../../theme/topo-do-canvas.css";
 
 /** Por quanto tempo o aviso de "reconectado" fica na tela. */
@@ -91,9 +92,6 @@ export function AvisoDeConexao({ servidor }: { servidor: EstadoDoServidor }) {
 
   return null;
 }
-
-/** A partir daqui o medidor da cota fica vermelho. */
-const COTA_ALTA = 0.8;
 
 interface PropsDaBarra {
   aoCriar: () => void;
@@ -527,11 +525,35 @@ interface LeituraDoResumo {
   linha: string;
 }
 
+/** O que liga um botão do status ao popover do uso: abre, fecha e diz se está aberto. */
+interface GatilhoDoUso {
+  aberto: boolean;
+  idDoPopover: string;
+  aoAlternar: (evento: EventoDeMouseDoReact<HTMLElement>) => void;
+}
+
+/** Atributos comuns dos botões que abrem o popover do uso. */
+function propsDoGatilho({ aberto, idDoPopover, aoAlternar }: GatilhoDoUso) {
+  return {
+    type: "button" as const,
+    "aria-haspopup": "dialog" as const,
+    "aria-expanded": aberto,
+    "aria-controls": aberto ? idDoPopover : undefined,
+    [ATRIBUTO_DO_GATILHO]: "",
+    onClick: aoAlternar,
+  };
+}
+
 /**
  * Abaixo de 1100 px: um só medidor (o uso mais alto entre as cotas e a RAM),
- * com o resto no balão ao passar o mouse.
+ * com o resto no balão ao passar o mouse. O clique abre o popover do uso.
  */
-function ResumoDoStatus({ bixinhosAtivos, cota, memoria }: Omit<PropsDoStatus, "trabalhando">) {
+function ResumoDoStatus({
+  bixinhosAtivos,
+  cota,
+  memoria,
+  gatilho,
+}: Omit<PropsDoStatus, "trabalhando"> & { gatilho: GatilhoDoUso }) {
   const leituras: LeituraDoResumo[] = (cota ?? []).map((janela) => ({
     rotulo: rotuloCurtoDaCota(janela.nome),
     uso: janela.utilizacao,
@@ -558,12 +580,11 @@ function ResumoDoStatus({ bixinhosAtivos, cota, memoria }: Omit<PropsDoStatus, "
     ...leituras.map((leitura) => leitura.linha),
   ].join("\n");
   return (
-    <span
+    <button
+      {...propsDoGatilho(gatilho)}
       className={`status-resumo items-center gap-1.5 mono whitespace-nowrap ${leituras.some((leitura) => leitura.alto) ? "text-error" : "text-muted"}`}
-      title={dica}
+      title={`${dica}\nClique para ver o uso`}
       aria-label={dica}
-      role="note"
-      tabIndex={0}
       data-testid="resumo-do-status"
     >
       {bixinhosAtivos > 0 && <span className="text-active">{bixinhosAtivos} ativos ·</span>}
@@ -576,12 +597,29 @@ function ResumoDoStatus({ bixinhosAtivos, cota, memoria }: Omit<PropsDoStatus, "
           {formatarPercentual(principal.uso)}
         </>
       )}
-    </span>
+    </button>
   );
 }
 
-/** Situação, agentes ativos, cotas e RAM: o conteúdo do status, em linha. */
+/**
+ * Situação, agentes ativos, cotas e RAM: o conteúdo do status, em linha. Cada
+ * medidor da cota (e o resumo, na janela estreita) abre o popover do uso; sem
+ * cota ainda, um "cota —" faz o mesmo papel.
+ */
 function ConteudoDoStatus({ trabalhando, bixinhosAtivos, cota, memoria }: PropsDoStatus) {
+  // O botão que abriu o popover; nulo com ele fechado. Um clique em qualquer gatilho fecha.
+  const [gatilhoAberto, setGatilhoAberto] = useState<HTMLElement | null>(null);
+  const idDoPopover = `${useId()}-uso`;
+  const fecharUso = useCallback(() => setGatilhoAberto(null), []);
+  const gatilho: GatilhoDoUso = {
+    aberto: gatilhoAberto !== null,
+    idDoPopover,
+    aoAlternar: (evento) => {
+      const alvo = evento.currentTarget;
+      setGatilhoAberto((atual) => (atual === null ? alvo : null));
+    },
+  };
+
   return (
     <>
       <span className={`etiqueta shrink-0 ${trabalhando > 0 ? "etiqueta-ativa etiqueta-pulso" : ""}`}>
@@ -592,12 +630,14 @@ function ConteudoDoStatus({ trabalhando, bixinhosAtivos, cota, memoria }: PropsD
           {bixinhosAtivos} {bixinhosAtivos === 1 ? "agente ativo" : "agentes ativos"}
         </span>
       )}
-      {cota !== null &&
+      {cota !== null && cota.length > 0 ? (
         cota.map((janela) => (
-          <span
+          <button
             key={janela.nome}
-            className="status-detalhe flex items-center gap-1.5 mono text-muted whitespace-nowrap"
-            title={janela.renovaEm ? `Renova ${formatarMomento(janela.renovaEm)}` : undefined}
+            {...propsDoGatilho(gatilho)}
+            className="status-detalhe status-da-cota flex items-center gap-1.5 mono text-muted whitespace-nowrap"
+            aria-label={`Cota de ${janela.nome}: ${formatarPercentual(janela.utilizacao)}`}
+            title={`${janela.renovaEm ? `Renova ${formatarMomento(janela.renovaEm)} · ` : ""}Clique para ver o uso`}
           >
             <span className="rotulo-completo">{janela.nome}</span>
             <span className="rotulo-curto">{rotuloCurtoDaCota(janela.nome)}</span>
@@ -605,10 +645,23 @@ function ConteudoDoStatus({ trabalhando, bixinhosAtivos, cota, memoria }: PropsD
               <span style={{ width: `${Math.min(100, Math.round(janela.utilizacao * 100))}%` }} />
             </span>
             {formatarPercentual(janela.utilizacao)}
-          </span>
-        ))}
+          </button>
+        ))
+      ) : (
+        <button
+          {...propsDoGatilho(gatilho)}
+          className="status-detalhe status-da-cota flex items-center gap-1.5 mono text-muted whitespace-nowrap"
+          aria-label="Cota: ainda sem dados"
+          title="A cota aparece depois do primeiro pedido · Clique para ver o uso"
+        >
+          cota —
+        </button>
+      )}
       {memoria !== null && <MedidorDeMemoria memoria={memoria} />}
-      <ResumoDoStatus bixinhosAtivos={bixinhosAtivos} cota={cota} memoria={memoria} />
+      <ResumoDoStatus bixinhosAtivos={bixinhosAtivos} cota={cota} memoria={memoria} gatilho={gatilho} />
+      {gatilhoAberto !== null && (
+        <PopoverDoUso id={idDoPopover} cota={cota} gatilho={gatilhoAberto} aoFechar={fecharUso} />
+      )}
     </>
   );
 }

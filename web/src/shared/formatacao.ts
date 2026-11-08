@@ -173,3 +173,24 @@ export function formatarMomento(iso: string, agora: Date = new Date()): string {
   const momento = new Date(iso);
   return momento.toDateString() === agora.toDateString() ? horario.format(momento) : dataEHora.format(momento);
 }
+
+/**
+ * Quando uma janela da cota renova: "renova em 3 h 20 min", "renova em 45 min"
+ * ou, a partir de um dia, "renova em 12/11, 14:00".
+ */
+export function descreverRenovacao(iso: string, agora: Date): string {
+  const faltaMs = new Date(iso).getTime() - agora.getTime();
+  if (faltaMs <= 0) {
+    return "já renovou: o uso atualiza no próximo pedido";
+  }
+  const minutos = Math.ceil(faltaMs / 60_000);
+  if (minutos < 60) {
+    return `renova em ${minutos} min`;
+  }
+  const horas = Math.floor(minutos / 60);
+  if (horas < 24) {
+    const resto = minutos % 60;
+    return `renova em ${horas} h${resto > 0 ? ` ${resto} min` : ""}`;
+  }
+  return `renova em ${formatarMomento(iso, agora)}`;
+}

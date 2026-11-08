@@ -253,9 +253,14 @@ describe("BarraDeTituloDoApp", () => {
     expect(within(barra).getByRole("group", { name: "Controles da janela" })).toBeInTheDocument();
   });
 
-  it("sem a ponte, não desenha botões de janela; ficam a busca e o ⚙", () => {
+  it("sem a ponte, não desenha botões de janela; ficam a busca, os medidores do status (abrem o uso) e o ⚙", () => {
     const { barra } = renderizar();
 
-    expect(within(barra).getAllByRole("button")).toEqual([campoDeBusca(), botaoDeConfiguracoes()]);
+    expect(within(barra).getAllByRole("button")).toEqual([
+      campoDeBusca(),
+      screen.getByRole("button", { name: "Cota de 5 horas: 30%" }),
+      screen.getByTestId("resumo-do-status"),
+      botaoDeConfiguracoes(),
+    ]);
   });
 });

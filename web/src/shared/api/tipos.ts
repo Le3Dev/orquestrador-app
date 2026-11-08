@@ -228,6 +228,21 @@ export interface DadosDoConsumoDoTurno {
   modeloDoPrincipal: string | null;
 }
 
+/**
+ * O consumo medido de um Orquestrador na conversa atual (`GET
+ * /consumo-dos-orquestradores`): a soma dos turnos medidos, com o principal e
+ * os Subagentes juntos em `uso`. `parcial`: algum desses turnos foi cancelado
+ * ou falhou.
+ */
+export interface ConsumoDoOrquestrador {
+  id: string;
+  nome: string;
+  turnosMedidos: number;
+  parcial: boolean;
+  uso: DadosDoUso;
+  indiceDeCusto: number;
+}
+
 /** Onde o pedido está sendo escrito: uma pergunta ao chat rápido ou um pedido de trabalho ao orquestrador. */
 export type OndeDoPrompt = "chat" | "orquestrador";
 
