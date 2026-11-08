@@ -8,6 +8,7 @@ import {
   organizarComNotas,
   organizarEmGrade,
   type Ponto,
+  posicaoAoLado,
   posicaoParaNovoTerminal,
   posicoesDosBixinhos,
   posicoesLivresDosBixinhos,
@@ -15,16 +16,28 @@ import {
   salvarBixinhosLimpos,
   salvarLayout,
   sobrepoe,
+  TAMANHO_DA_PREVIA,
   TAMANHO_DO_BIXINHO,
+  TAMANHO_DO_SHELL,
+  TAMANHO_DO_TERMINAL,
+  TAMANHO_MINIMO_DO_TERMINAL,
+  tamanhoNaEscalaDaLetra,
 } from "./layout";
 import {
   ehNota,
+  ehPrevia,
+  ehShell,
+  ehTerminal,
   idDoNoDaNota,
+  idDoNoDaPrevia,
+  idDoNoDoShell,
   layoutDosNos,
   minimizarOuRestaurar,
   type NoNota,
   nosDoLayout,
   novaNota,
+  novaPrevia,
+  novoShell,
   novoTerminal,
   sincronizarNotas,
 } from "./nos";
@@ -184,6 +197,8 @@ describe("interpretarLayout", () => {
       terminais: { o1: { x: 10, y: 20, largura: 600, altura: 500 } },
       notas: {},
       artefatos: {},
+      previas: {},
+      shells: {},
       viewport: { x: 1, y: 2, zoom: 0.8 },
     });
   });
@@ -191,7 +206,14 @@ describe("interpretarLayout", () => {
   it.each([null, "", "não é json", "[]", JSON.stringify({ terminais: 5, viewport: { zoom: 0 } })])(
     "não quebra com conteúdo inválido: %s",
     (texto) => {
-      expect(interpretarLayout(texto)).toEqual({ terminais: {}, notas: {}, artefatos: {}, viewport: null });
+      expect(interpretarLayout(texto)).toEqual({
+        terminais: {},
+        notas: {},
+        artefatos: {},
+        previas: {},
+        shells: {},
+        viewport: null,
+      });
     },
   );
 
@@ -199,6 +221,76 @@ describe("interpretarLayout", () => {
     const texto = JSON.stringify({ terminais: { bom: { x: 0, y: 0, largura: 1, altura: 1 }, ruim: { x: "a" } } });
 
     expect(Object.keys(interpretarLayout(texto).terminais)).toEqual(["bom"]);
+  });
+});
+
+describe("tamanho da letra no layout", () => {
+  afterEach(() => localStorage.clear());
+
+  const retangulo = { x: 10, y: 20, largura: 600, altura: 500 };
+
+  it("lê o tamanho da letra gravado no terminal", () => {
+    const texto = JSON.stringify({ terminais: { o1: { ...retangulo, escalaDaLetra: 1.3 } } });
+
+    expect(interpretarLayout(texto).terminais.o1).toEqual({ ...retangulo, escalaDaLetra: 1.3 });
+  });
+
+  it("um layout antigo, sem o campo, vale como a letra normal", () => {
+    const texto = JSON.stringify({ terminais: { o1: retangulo } });
+
+    expect(interpretarLayout(texto).terminais.o1).toEqual(retangulo);
+    expect(nosDoLayout(interpretarLayout(texto)).filter(ehTerminal)[0]?.data).toEqual({ orquestradorId: "o1" });
+  });
+
+  it.each([2, 0, -1, "1.3", null, 1.2])("descarta um tamanho fora das opções (%s), mantendo o terminal", (escala) => {
+    const texto = JSON.stringify({ terminais: { o1: { ...retangulo, escalaDaLetra: escala } } });
+
+    expect(interpretarLayout(texto).terminais.o1).toEqual(retangulo);
+  });
+
+  it("grava e lê de volta; a letra normal fica sem o campo", () => {
+    salvarLayout(
+      layoutDosNos(
+        [novoTerminal("grande", { x: 0, y: 0 }, 690, 598, 1.15), novoTerminal("normal", { x: 800, y: 0 }, 600, 520, 1)],
+        null,
+      ),
+    );
+    const lido = lerLayout();
+
+    expect(lido.terminais.grande).toEqual({ x: 0, y: 0, largura: 690, altura: 598, escalaDaLetra: 1.15 });
+    expect(lido.terminais.normal).toEqual({ x: 800, y: 0, largura: 600, altura: 520 });
+    expect(nosDoLayout(lido).filter(ehTerminal).find((no) => no.id === "grande")?.data.escalaDaLetra).toBe(1.15);
+  });
+});
+
+describe("tamanhoNaEscalaDaLetra", () => {
+  const padrao = TAMANHO_DO_TERMINAL;
+  const minimo = TAMANHO_MINIMO_DO_TERMINAL;
+
+  it("cresce e diminui na mesma proporção da letra", () => {
+    expect(tamanhoNaEscalaDaLetra({ largura: 600, altura: 520 }, 1, 1.15, padrao, minimo)).toEqual({
+      largura: 690,
+      altura: 598,
+    });
+    expect(tamanhoNaEscalaDaLetra({ largura: 690, altura: 598 }, 1.15, 1, padrao, minimo)).toEqual({
+      largura: 600,
+      altura: 520,
+    });
+  });
+
+  it("não passa do padrão na maior letra, nem encolhe um cartão já maior que isso", () => {
+    expect(tamanhoNaEscalaDaLetra({ largura: 700, altura: 600 }, 1, 1.3, padrao, minimo)).toEqual({
+      largura: Math.round(padrao.largura * 1.3),
+      altura: Math.round(padrao.altura * 1.3),
+    });
+    expect(tamanhoNaEscalaDaLetra({ largura: 1200, altura: 900 }, 1, 1.15, padrao, minimo)).toEqual({
+      largura: 1200,
+      altura: 900,
+    });
+  });
+
+  it("ao diminuir, não fica menor que o mínimo", () => {
+    expect(tamanhoNaEscalaDaLetra({ largura: 430, altura: 310 }, 1.3, 1, padrao, minimo)).toEqual(minimo);
   });
 });
 
@@ -241,6 +333,8 @@ describe("notas no layout", () => {
       terminais: { o1: { x: 10, y: 20, largura: 600, altura: 500 } },
       notas: {},
       artefatos: {},
+      previas: {},
+      shells: {},
       viewport: { x: 1, y: 2, zoom: 0.8 },
     });
   });
@@ -261,6 +355,84 @@ describe("notas no layout", () => {
     salvarLayout(layoutDosNos(nos, null));
 
     expect(Object.keys(lerLayout().notas)).toEqual(["n1"]);
+  });
+});
+
+describe("prévias no layout", () => {
+  afterEach(() => localStorage.clear());
+
+  it("grava e lê de volta posição, tamanho, minimizada, endereço e orquestrador", () => {
+    const daBarra = novaPrevia("p1", { x: 10.4, y: 20.6 }, { url: "", orquestradorId: null }, 700, 500);
+    const doTerminal = minimizarOuRestaurar(
+      novaPrevia("p2", { x: 800, y: 0 }, { url: "http://localhost:5173", orquestradorId: "o1" }),
+    );
+
+    salvarLayout(layoutDosNos([novoTerminal("o1", { x: 0, y: 0 }, 600, 500), daBarra, doTerminal], null));
+    const lido = lerLayout();
+
+    expect(lido.previas).toEqual({
+      p1: { x: 10, y: 21, largura: 700, altura: 500, minimizada: false, url: "", orquestradorId: null },
+      p2: {
+        x: 800,
+        y: 0,
+        largura: TAMANHO_DA_PREVIA.largura,
+        altura: TAMANHO_DA_PREVIA.altura,
+        minimizada: true,
+        url: "http://localhost:5173",
+        orquestradorId: "o1",
+      },
+    });
+
+    // De volta ao canvas: o endereço vai no data do nó, e a minimizada tem só a barra.
+    const p2 = nosDoLayout(lido).filter(ehPrevia).find((no) => no.id === idDoNoDaPrevia("p2"));
+    expect(p2?.data).toMatchObject({ previaId: "p2", url: "http://localhost:5173", orquestradorId: "o1", minimizada: true });
+    expect(p2?.height).toBe(ALTURA_DA_NOTA_MINIMIZADA);
+    expect(p2 === undefined ? null : minimizarOuRestaurar(p2).height).toBe(TAMANHO_DA_PREVIA.altura);
+  });
+
+  it("um layout antigo, sem prévias, vale como sem prévias", () => {
+    const antigo = JSON.stringify({ terminais: {}, notas: { n1: { x: 0, y: 0, largura: 300, altura: 200 } } });
+
+    expect(interpretarLayout(antigo).previas).toEqual({});
+  });
+
+  it("descarta só as prévias corrompidas e limpa endereço e orquestrador inválidos", () => {
+    const texto = JSON.stringify({
+      previas: {
+        boa: { x: 0, y: 0, largura: 720, altura: 520, url: "javascript:alert(1)", orquestradorId: 5 },
+        ruim: { x: 0, y: "a", largura: 720, altura: 520 },
+      },
+    });
+
+    expect(interpretarLayout(texto).previas).toEqual({
+      boa: { x: 0, y: 0, largura: 720, altura: 520, minimizada: false, url: "", orquestradorId: null },
+    });
+  });
+});
+
+describe("posicaoAoLado", () => {
+  const terminal: Retangulo = { x: 0, y: 0, largura: 600, altura: 500 };
+  const tamanho = { largura: 720, altura: 520 };
+
+  it("abre à direita do terminal, com o topo alinhado", () => {
+    const posicao = posicaoAoLado(terminal, tamanho, []);
+
+    expect(posicao.y).toBe(0);
+    expect(posicao.x).toBeGreaterThan(600);
+  });
+
+  it("com algo à direita, vai para a esquerda sem sobrepor", () => {
+    const aDireita: Retangulo = { x: 650, y: 0, largura: 600, altura: 500 };
+    const posicao = posicaoAoLado(terminal, tamanho, [aDireita]);
+
+    expect(posicao.x + tamanho.largura).toBeLessThanOrEqual(0);
+    expect(sobrepoe({ ...posicao, ...tamanho }, aDireita)).toBe(false);
+  });
+
+  it("sem lugar livre, fica à direita mesmo", () => {
+    const tudo: Retangulo = { x: -5000, y: -5000, largura: 10_000, altura: 10_000 };
+
+    expect(posicaoAoLado(terminal, tamanho, [tudo])).toEqual(posicaoAoLado(terminal, tamanho, []));
   });
 });
 
@@ -326,5 +498,58 @@ describe("bixinhos limpos no armazenamento", () => {
 
     expect(lerBixinhosLimpos()).toEqual(new Map());
     expect(() => salvarBixinhosLimpos(new Map([["o1", { turnoId: "t1", subagentes: ["s1"] }]]))).not.toThrow();
+  });
+});
+
+describe("shells no layout", () => {
+  afterEach(() => localStorage.clear());
+
+  it("grava e lê de volta posição, tamanho, terminal do servidor, pasta e orquestrador", () => {
+    const solto = novoShell("s1", { x: 10.4, y: 20.6 }, { terminalId: "t1", pasta: "/p/app", orquestradorId: null }, 700, 420);
+    const ligado = novoShell("s2", { x: 800, y: 0 }, { terminalId: "t2", pasta: "/p/api", orquestradorId: "o1" });
+
+    salvarLayout(layoutDosNos([novoTerminal("o1", { x: 0, y: 0 }, 600, 500), solto, ligado], null));
+    const lido = lerLayout();
+
+    expect(lido.shells).toEqual({
+      s1: { x: 10, y: 21, largura: 700, altura: 420, terminalId: "t1", pasta: "/p/app", orquestradorId: null },
+      s2: {
+        x: 800,
+        y: 0,
+        largura: TAMANHO_DO_SHELL.largura,
+        altura: TAMANHO_DO_SHELL.altura,
+        terminalId: "t2",
+        pasta: "/p/api",
+        orquestradorId: "o1",
+      },
+    });
+
+    // De volta ao canvas: o bloco religa ao mesmo terminal do servidor.
+    const s2 = nosDoLayout(lido).filter(ehShell).find((no) => no.id === idDoNoDoShell("s2"));
+    expect(s2?.data).toEqual({ shellId: "s2", terminalId: "t2", pasta: "/p/api", orquestradorId: "o1" });
+    expect(s2).toMatchObject({ position: { x: 800, y: 0 }, width: TAMANHO_DO_SHELL.largura });
+  });
+
+  it("um layout antigo, sem shells, vale como nenhum shell", () => {
+    const antigo = JSON.stringify({ terminais: {}, previas: {} });
+
+    expect(interpretarLayout(antigo).shells).toEqual({});
+    expect(nosDoLayout(interpretarLayout(antigo)).filter(ehShell)).toEqual([]);
+  });
+
+  it("descarta só os shells corrompidos ou sem terminal ou pasta; orquestrador inválido fica solto", () => {
+    const texto = JSON.stringify({
+      shells: {
+        bom: { x: 0, y: 0, largura: 640, altura: 400, terminalId: "t1", pasta: "/p", orquestradorId: 5 },
+        semTerminal: { x: 0, y: 0, largura: 640, altura: 400, pasta: "/p" },
+        semPasta: { x: 0, y: 0, largura: 640, altura: 400, terminalId: "t2", pasta: "" },
+        torto: { x: "a", y: 0, largura: 640, altura: 400, terminalId: "t3", pasta: "/p" },
+      },
+    });
+
+    expect(interpretarLayout(texto).shells).toEqual({
+      bom: { x: 0, y: 0, largura: 640, altura: 400, terminalId: "t1", pasta: "/p", orquestradorId: null },
+    });
+    expect(interpretarLayout(JSON.stringify({ shells: 5 })).shells).toEqual({});
   });
 });

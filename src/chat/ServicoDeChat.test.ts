@@ -198,7 +198,7 @@ describe("ServicoDeChat", () => {
     expect(publicados[1]).toMatchObject({
       mensagemId,
       texto: "Vou abrir.",
-      acoes: [{ tipo: "abrir_orquestrador", projeto: "painel-app", pasta: path.join(raiz, "painel-app"), pedido: null }],
+      acoes: [{ tipo: "abrir_orquestrador", projeto: "painel-app", pasta: path.join(raiz, "painel-app"), pedido: null, novo: false }],
       avisos: [],
       uso,
     });
@@ -384,6 +384,66 @@ describe("ServicoDeChat", () => {
       autorizacaoPendente: { acao: "rodar_comando", detalhe: "npm test" },
       avisos: ["Bloqueado pelas permissões do chat: Read · .env"],
     });
+  });
+
+  it("a pergunta leva ao Claude a regra das perguntas com opções", async () => {
+    await servico.perguntar({ texto: "oi" });
+    await aguardarMotor();
+
+    expect(motor.perguntas[0]?.mensagem).toContain("```pergunta-do-app\n");
+    expect(motor.perguntas[0]?.instrucoes).toContain("pergunta-do-app");
+  });
+
+  it("tira do texto as perguntas com opções, junto com as ações, e as leva ao evento e à mensagem", async () => {
+    const { mensagemId, conclusao } = await servico.perguntar({ texto: "Abra o painel" });
+    await aguardarMotor();
+    motor.concluir(
+      sucesso(
+        [
+          "Antes, uma decisão.",
+          "```acao-do-app",
+          '{"tipo":"abrir_orquestrador","projeto":"painel-app","pedido":null}',
+          "```",
+          "```pergunta-do-app",
+          '{"perguntas":[{"pergunta":"Qual banco usar?","opcoes":[{"rotulo":"Postgres","descricao":"já usado no projeto"},"SQLite"]}]}',
+          "```",
+          "```pergunta-do-app",
+          "{quebrado",
+          "```",
+        ].join("\n"),
+        { avisos: ["do motor"] },
+      ),
+    );
+    await conclusao;
+
+    const perguntas = [
+      {
+        pergunta: "Qual banco usar?",
+        opcoes: [
+          { rotulo: "Postgres", descricao: "já usado no projeto" },
+          { rotulo: "SQLite", descricao: null },
+        ],
+        multipla: false,
+      },
+    ];
+    expect(publicados.at(-1)).toMatchObject({
+      tipo: "resposta_concluida",
+      mensagemId,
+      texto: "Antes, uma decisão.",
+      acoes: [{ projeto: "painel-app" }],
+      perguntas,
+      avisos: ["do motor", "O Claude fez uma pergunta com opções em formato inválido; ela foi ignorada."],
+    });
+    expect(servico.estado().mensagens[1]).toMatchObject({ texto: "Antes, uma decisão.", perguntas });
+  });
+
+  it("resposta sem bloco de perguntas conclui com perguntas vazias", async () => {
+    const { conclusao } = await servico.perguntar({ texto: "oi" });
+    await aguardarMotor();
+    motor.concluir(sucesso("olá"));
+    await conclusao;
+
+    expect(publicados.at(-1)).toMatchObject({ tipo: "resposta_concluida", texto: "olá", perguntas: [] });
   });
 
   it("ao subir, marca como interrompida a resposta que ficou em andamento", async () => {

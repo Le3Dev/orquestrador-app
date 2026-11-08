@@ -32,11 +32,20 @@ export class GerenciadorDeWorktreesGit implements GerenciadorDeWorktrees {
       if (!(await this.worktrees.ehRepoGit(pastaDeTrabalho)) || !(await this.worktrees.temHead(pastaDeTrabalho))) {
         return { cwd: pastaDeTrabalho, worktree: null };
       }
+      // A pasta escolhida pode ser uma subpasta do repositório: o worktree é
+      // do repositório inteiro, e o turno roda na subpasta equivalente dele.
+      // Subpasta fora do HEAD (não versionada) não existe no worktree: roda na
+      // pasta normal.
+      const prefixo = await this.worktrees.prefixo(pastaDeTrabalho);
+      if (prefixo !== "" && !(await this.worktrees.existeNoHead(pastaDeTrabalho, prefixo))) {
+        return { cwd: pastaDeTrabalho, worktree: null };
+      }
       const caminho = this.caminhoDoWorktree(orquestradorId);
       const branch = this.branchDe(orquestradorId);
       await this.worktrees.prune(pastaDeTrabalho);
       await this.worktrees.criar(pastaDeTrabalho, caminho, branch);
-      return { cwd: caminho, worktree: { branch, caminho } };
+      const cwd = prefixo === "" ? caminho : path.join(caminho, ...prefixo.split("/"));
+      return { cwd, worktree: { branch, caminho } };
     } catch (erro) {
       // Degradação graciosa: nunca quebrar o turno por causa do git.
       console.warn(`[worktrees] Não foi possível preparar o worktree de ${orquestradorId}; usando a pasta normal.`, erro);

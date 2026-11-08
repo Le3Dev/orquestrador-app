@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { linhasDaRegraDasPerguntas } from "../perguntas/PerguntaDoApp";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { instrucoesDoOrquestrador, instrucoesDoSubagente, mensagemParaOOrquestrador } from "./InstrucoesDoOrquestrador";
 import { ModoDoTurno } from "./ModoDoTurno";
@@ -76,6 +77,34 @@ describe("artefatos no bloco <configuracao-do-pedido>", () => {
 
   it("sem pasta de artefatos, não fala de artefatos", () => {
     expect(bloco("leitura", "execucao", null)).not.toContain("- Artefatos:");
+  });
+});
+
+describe("perguntas com opções no bloco <configuracao-do-pedido>", () => {
+  it.each<[NivelDePermissao, ModoDoTurno, string | null]>([
+    ["leitura", "execucao", PASTA_DE_ARTEFATOS],
+    ["edicao_e_comandos", "execucao", null],
+    ["edicao_e_comandos", "planejamento", PASTA_DE_ARTEFATOS],
+  ])("no nível %s, em %s, traz a regra com o exemplo do bloco", (nivel, modo, pastaDeArtefatos) => {
+    const texto = bloco(nivel, modo, pastaDeArtefatos);
+    const [primeira = "", ...resto] = linhasDaRegraDasPerguntas();
+
+    expect(texto).toContain(`- ${primeira}`);
+    for (const linha of resto) {
+      expect(texto).toContain(`  ${linha}`);
+    }
+    expect(texto).toContain("  ```pergunta-do-app\n");
+    expect(texto).toContain('no formato "pergunta → escolha"');
+  });
+
+  it("só a resposta final do orquestrador é lida: subagentes não perguntam", () => {
+    expect(bloco()).toContain(
+      "  Só a sua resposta final é lida: subagentes não perguntam ao usuário. Se um deles precisar de uma decisão, pergunte você, sem delegar a pergunta.",
+    );
+  });
+
+  it("não vai nas instruções dos subagentes", () => {
+    expect(instrucoesDoSubagente(pasta, false, PASTA_DE_ARTEFATOS)).not.toContain("pergunta-do-app");
   });
 });
 

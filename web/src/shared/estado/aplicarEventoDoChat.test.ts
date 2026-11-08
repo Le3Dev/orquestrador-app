@@ -252,6 +252,51 @@ describe("aplicarEventoDoChat", () => {
   });
 });
 
+describe("perguntas com opções", () => {
+  const PERGUNTAS = [
+    {
+      pergunta: "Qual banco usar?",
+      opcoes: [
+        { rotulo: "PostgreSQL", descricao: "Relacional" },
+        { rotulo: "SQLite", descricao: null },
+      ],
+      multipla: false,
+    },
+  ];
+
+  it("a conclusão traz as perguntas; sem o campo (evento antigo), ficam vazias", () => {
+    const comPerguntas = aplicar([
+      pergunta,
+      { tipo: "resposta_concluida", mensagemId: "c1", texto: "Preciso saber.", acoes: [], perguntas: PERGUNTAS, avisos: [], uso: null },
+    ]);
+    expect(comPerguntas.mensagens[1]?.perguntas).toEqual(PERGUNTAS);
+
+    const semCampo = aplicar([
+      pergunta,
+      { tipo: "resposta_concluida", mensagemId: "c1", texto: "Ok.", acoes: [], avisos: [], uso: null },
+    ]);
+    expect(semCampo.mensagens[1]?.perguntas).toEqual([]);
+    // A mensagem que chega na pergunta, sem o campo, também.
+    expect(aplicar([pergunta]).mensagens[1]?.perguntas).toEqual([]);
+  });
+
+  it("vêm do GET; mensagens gravadas sem o campo ficam sem perguntas", () => {
+    const estado = carregarEstadoDoChat({
+      sessaoId: "s",
+      situacao: "ocioso",
+      preferencias: { modelo: "opus", esforco: "alto" },
+      ultimaSequencia: 2,
+      cota: null,
+      mensagens: [
+        mensagem("c1", "claude", { situacao: "concluida", perguntas: PERGUNTAS }),
+        mensagem("c2", "claude", { situacao: "concluida" }),
+      ],
+    });
+    expect(estado.mensagens[0]?.perguntas).toEqual(PERGUNTAS);
+    expect(estado.mensagens[1]?.perguntas).toEqual([]);
+  });
+});
+
 describe("textoParaMostrar", () => {
   it("esconde o bloco de ação ainda aberto durante a resposta", () => {
     expect(textoParaMostrar("Vou abrir.\n\n```acao-do-app\n{\"tipo\":", true)).toBe("Vou abrir.");
@@ -264,6 +309,16 @@ describe("textoParaMostrar", () => {
   it("esconde a cerca ainda pela metade no fim só durante a resposta", () => {
     expect(textoParaMostrar("Texto\n```aca", true)).toBe("Texto");
     expect(textoParaMostrar("Texto\n```aca", false)).toBe("Texto\n```aca");
+  });
+
+  it("esconde também o bloco de pergunta, aberto durante a resposta ou fechado no meio", () => {
+    expect(textoParaMostrar("Preciso saber.\n\n```pergunta-do-app\n{\"perguntas\":[", true)).toBe("Preciso saber.");
+    expect(textoParaMostrar("Antes\n```pergunta-do-app\n{}\n```\nDepois", false)).toBe("Antes\nDepois");
+    expect(textoParaMostrar("Texto\n```perg", true)).toBe("Texto");
+    // Os dois tipos de bloco na mesma resposta.
+    expect(
+      textoParaMostrar("A\n```acao-do-app\n{}\n```\nB\n```pergunta-do-app\n{}\n```\nC", false),
+    ).toBe("A\nB\nC");
   });
 
   it("não mexe em outros blocos de código", () => {

@@ -10,6 +10,7 @@ import {
   MARCADOR_DE_PLANO,
   mensagemDeAprovacaoDoPlano,
   mensagemParaOOrquestrador,
+  REGRA_DOS_SERVIDORES,
   separarPropostaDePlano,
 } from "./InstrucoesDoOrquestrador";
 import { ehModeloClaude, MODELOS_CLAUDE } from "./ModeloClaude";
@@ -108,6 +109,8 @@ describe("ConfiguracaoDoOrquestrador", () => {
     nivelDePermissao: "edicao_e_comandos",
   } as const;
   const esforcosPadrao = { esforcoDoOrquestrador: "padrao", esforcoDosSubagentes: "padrao" } as const;
+  // Sem instruções personalizadas, o campo existe e fica vazio.
+  const semInstrucoes = { instrucoesPersonalizadas: "" } as const;
 
   it("nasce com commit e push desligados quando a opção não é informada", () => {
     const configuracao = ConfiguracaoDoOrquestrador.de(dados);
@@ -117,6 +120,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
       ...dados,
       permitirCommitEPush: false,
       ...esforcosPadrao,
+      ...semInstrucoes,
     });
   });
 
@@ -133,6 +137,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
       ...dados,
       permitirCommitEPush: true,
       ...esforcosPadrao,
+      ...semInstrucoes,
     });
     expect(ligada.com({ nivelDePermissao: "edicao" }).permitirCommitEPush).toBe(true);
     expect(ligada.com({ permitirCommitEPush: undefined }).permitirCommitEPush).toBe(true);
@@ -168,7 +173,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
       expect(ConfiguracaoDoOrquestrador.de(gravados).paraDados()).toMatchObject(esforcosPadrao);
     });
 
-    it.each(ESFORCOS_DE_RACIOCINIO)("aceita o esforço %s nos dois papéis", (esforco) => {
+    it.each(ESFORCOS_DE_RACIOCINIO.filter((esforco) => esforco !== "ultracode"))("aceita o esforço %s nos dois papéis", (esforco) => {
       const configuracao = ConfiguracaoDoOrquestrador.de({
         ...dados,
         esforcoDoOrquestrador: esforco,
@@ -199,6 +204,22 @@ describe("ConfiguracaoDoOrquestrador", () => {
 
       expect(() => ConfiguracaoDoOrquestrador.de(dadosInvalidos)).toThrow(new ErroDeOrquestracao("dados_invalidos", mensagem));
     });
+
+    it("aceita o ultracode só no orquestrador", () => {
+      const configuracao = ConfiguracaoDoOrquestrador.de({ ...dados, esforcoDoOrquestrador: "ultracode" });
+
+      expect(configuracao.paraDados()).toMatchObject({ esforcoDoOrquestrador: "ultracode", esforcoDosSubagentes: "padrao" });
+    });
+
+    it("recusa o ultracode nos subagentes, também ao alterar, com mensagem clara", () => {
+      const erro = new ErroDeOrquestracao(
+        "dados_invalidos",
+        'O esforço "ultracode" vale só para o orquestrador e o chat. Escolha outro esforço para os subagentes.',
+      );
+
+      expect(() => ConfiguracaoDoOrquestrador.de({ ...dados, esforcoDosSubagentes: "ultracode" })).toThrow(erro);
+      expect(() => ConfiguracaoDoOrquestrador.de(dados).com({ esforcoDosSubagentes: "ultracode" })).toThrow(erro);
+    });
   });
 
   describe("trivial e plano em pedidos grandes, sempre ligados (ADR-28)", () => {
@@ -222,6 +243,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
         [
           "esforcoDoOrquestrador",
           "esforcoDosSubagentes",
+          "instrucoesPersonalizadas",
           "modeloDoOrquestrador",
           "modeloDosSubagentes",
           "nivelDePermissao",
@@ -239,7 +261,12 @@ describe("ConfiguracaoDoOrquestrador", () => {
     ])("lê dados antigos com trivial=%j e plano=%j sem erro e os descarta ao salvar de novo", (trivial, plano) => {
       const configuracao = ConfiguracaoDoOrquestrador.de(gravadosComAsOpcoesAntigas(trivial, plano));
 
-      expect(configuracao.paraDados()).toEqual({ ...dados, permitirCommitEPush: true, ...esforcosPadrao });
+      expect(configuracao.paraDados()).toEqual({
+        ...dados,
+        permitirCommitEPush: true,
+        ...esforcosPadrao,
+        ...semInstrucoes,
+      });
       expect(configuracao.paraDados()).not.toHaveProperty("permitirTrabalhoDireto");
       expect(configuracao.paraDados()).not.toHaveProperty("proporPlanoEmPedidosGrandes");
     });
@@ -317,6 +344,23 @@ describe("mensagemParaOOrquestrador", () => {
 
     expect(texto).toContain('- Subagentes: quando delegar, use exatamente 4 subagentes "executor"');
     expect(texto).not.toContain("Se o pedido for pequeno, divida-o");
+  });
+
+  it("só com comandos liberados explica como subir servidor sem prender o pedido", () => {
+    const quantidadeDeSubagentes = { modo: "fixa", limite: 1 } as const;
+    const comComandos = ConfiguracaoDoOrquestrador.de({
+      ...base,
+      quantidadeDeSubagentes,
+      nivelDePermissao: "edicao_e_comandos",
+    });
+    const soLeitura = ConfiguracaoDoOrquestrador.de({ ...base, quantidadeDeSubagentes });
+
+    expect(mensagemParaOOrquestrador("suba o site", comComandos)).toContain(`- ${REGRA_DOS_SERVIDORES}`);
+    expect(mensagemParaOOrquestrador("suba o site", comComandos, [], "planejamento")).not.toContain(
+      REGRA_DOS_SERVIDORES,
+    );
+    expect(mensagemParaOOrquestrador("suba o site", soLeitura)).not.toContain(REGRA_DOS_SERVIDORES);
+    expect(REGRA_DOS_SERVIDORES).toContain("Não abra o navegador do computador");
   });
 
   it("no modo automático informa o máximo", () => {

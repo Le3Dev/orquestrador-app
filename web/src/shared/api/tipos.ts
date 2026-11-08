@@ -8,8 +8,12 @@ export type ModeloClaude = "fable" | "opus" | "sonnet" | "haiku";
 
 export type NivelDePermissao = "leitura" | "edicao" | "edicao_e_comandos";
 
-/** Esforço de raciocínio do modelo. "padrao" não força nada: vale o padrão do modelo no Claude Code. */
-export type EsforcoDeRaciocinio = "padrao" | "baixo" | "medio" | "alto" | "extra_alto" | "maximo";
+/**
+ * Esforço de raciocínio do modelo. "padrao" não força nada: vale o padrão do modelo no Claude Code.
+ * "ultracode" (xhigh com workflows de vários agentes em paralelo) só vale para o orquestrador e o
+ * chat: o servidor recusa no esforço dos subagentes.
+ */
+export type EsforcoDeRaciocinio = "padrao" | "baixo" | "medio" | "alto" | "extra_alto" | "maximo" | "ultracode";
 
 export interface DadosDaQuantidade {
   modo: "fixa" | "automatica";
@@ -27,14 +31,70 @@ export interface DadosDaConfiguracao {
   nivelDePermissao: NivelDePermissao;
   /** Libera `git commit`/`git push` só quando o usuário pede na mensagem. Desligado por padrão. */
   permitirCommitEPush: boolean;
+  /**
+   * Instruções do usuário acrescentadas ao fim do bloco de cada pedido. Vazias
+   * por padrão: aí vale o padrão global (`DadosDasPreferencias.instrucoesPadrao`), se houver.
+   */
+  instrucoesPersonalizadas: string;
+}
+
+/** Limite das instruções personalizadas e das padrão, como o servidor confere (já sem espaço sobrando). */
+export const TAMANHO_MAXIMO_DAS_INSTRUCOES = 4_000;
+
+/** De onde vêm as instruções personalizadas de um pedido: as do orquestrador ou o padrão global. */
+export type OrigemDasInstrucoes = "orquestrador" | "padrao";
+
+/** `herdar` usa o modelo dos subagentes do orquestrador que o lançar. */
+export type ModeloDoSubagentePronto = "herdar" | ModeloClaude;
+
+/** Subagente com prompt pronto, que qualquer orquestrador pode decidir usar. */
+export interface DadosDoSubagentePronto {
+  /** Como o orquestrador o chama: letras minúsculas, números e hífen. */
+  nome: string;
+  /** Quando usar (uma linha): o orquestrador decide por ela. */
+  descricao: string;
+  /** A especialidade, somada às regras de todo subagente. */
+  prompt: string;
+  modelo: ModeloDoSubagentePronto;
+}
+
+/** Limites dos subagentes prontos, como o servidor confere. */
+export const MAXIMO_DE_SUBAGENTES_PRONTOS = 10;
+export const TAMANHO_MAXIMO_DA_DESCRICAO_DO_SUBAGENTE = 300;
+export const TAMANHO_MAXIMO_DO_PROMPT_DO_SUBAGENTE = 4_000;
+
+/** Preferências que valem para todos os orquestradores. */
+export interface DadosDasPreferencias {
+  /** Instruções para os orquestradores sem instruções próprias. */
+  instrucoesPadrao: string;
+  subagentesProntos: DadosDoSubagentePronto[];
+  /**
+   * Retoma o turno sozinho quando o Claude fica em silêncio (travado) ou a API
+   * falha (limite de uso, sobrecarga, rede). Ligada por padrão; falta em
+   * servidores anteriores a ela (vale `true`).
+   */
+  autorrecuperacao?: boolean;
+}
+
+/** O que o orquestrador receberia num pedido com uma configuração (`POST /previa-do-prompt`). */
+export interface PreviaDoPrompt {
+  /** System prompt da conversa (fixo desde o primeiro pedido). */
+  instrucoesIniciais: string;
+  /** A mensagem de um pedido: bloco da configuração, instruções personalizadas e o pedido. */
+  mensagem: string;
+  origemDasInstrucoes: OrigemDasInstrucoes | null;
 }
 
 /** Campos que faltam nos eventos gravados antes de existirem. */
-type CamposPosterioresDaConfiguracao = "permitirCommitEPush" | "esforcoDoOrquestrador" | "esforcoDosSubagentes";
+type CamposPosterioresDaConfiguracao =
+  | "permitirCommitEPush"
+  | "esforcoDoOrquestrador"
+  | "esforcoDosSubagentes"
+  | "instrucoesPersonalizadas";
 
 /**
  * A configuração como os eventos a gravaram: os anteriores à opção de commit e
- * push e à escolha do esforço não têm esses campos.
+ * push, à escolha do esforço e às instruções personalizadas não têm esses campos.
  */
 export type DadosDaConfiguracaoGravada = Omit<DadosDaConfiguracao, CamposPosterioresDaConfiguracao> &
   Partial<Pick<DadosDaConfiguracao, CamposPosterioresDaConfiguracao>>;
@@ -54,6 +114,38 @@ export interface SinalDeVida {
   turnoId: string;
   em: string;
   tokensPensando: number;
+  /**
+   * O que o servidor apurou de um turno calado há 90 s ou mais (chega a cada
+   * ~30 s enquanto o silêncio dura). Não é atividade nova: só explica o silêncio.
+   * Falta nos sinais comuns e em servidores anteriores ao diagnóstico.
+   */
+  diagnostico?: DiagnosticoDoSilencio;
+}
+
+/**
+ * "trabalhando": há trabalho de verdade (ex.: "rodando `npm test` há 6 min");
+ * "suspeito": nada indica trabalho (ex.: "sem saída há 3 min, sem CPU").
+ */
+export interface DiagnosticoDoSilencio {
+  situacao: "trabalhando" | "suspeito";
+  resumo: string;
+}
+
+/** Por que o turno precisou de recuperação. */
+export type CausaDaRecuperacao = "silencio" | "limite_de_uso" | "sobrecarga" | "rede";
+
+/**
+ * Etapas da autorrecuperação: "encerrado" (o turno travado foi encerrado),
+ * "aguardando" (espera até `retomaEm`), "retomando" (um turno novo vai
+ * começar), "cancelada" (o usuário cancelou ou mandou outra mensagem) e
+ * "desistiu" (esgotou as tentativas).
+ */
+export type EtapaDaRecuperacao = "encerrado" | "aguardando" | "retomando" | "cancelada" | "desistiu";
+
+/** O turno novo que retoma sozinho um turno que travou ou falhou. */
+export interface DadosDaRetomada {
+  deTurnoId: string;
+  tentativa: number;
 }
 
 export interface LeituraDeMemoria {
@@ -126,6 +218,24 @@ export interface DadosDoConsumoDoTurno {
   modeloDoPrincipal: string | null;
 }
 
+/** Onde o pedido está sendo escrito: uma pergunta ao chat rápido ou um pedido de trabalho ao orquestrador. */
+export type OndeDoPrompt = "chat" | "orquestrador";
+
+/** O "melhorar o pedido" (✨): o texto do campo, onde ele está e, no orquestrador, o nome da pasta do projeto. */
+export interface PedidoDeMelhoria {
+  texto: string;
+  onde: OndeDoPrompt;
+  pasta?: string;
+}
+
+/** O pedido reescrito e quanto custou reescrever (`indiceDeCusto` como o dos turnos). */
+export interface PromptMelhorado {
+  texto: string;
+  uso: DadosDoUso;
+  indiceDeCusto: number;
+  duracaoMs: number;
+}
+
 /** O esforço que o Claude Code usa quando o app deixa em "padrao", e de onde ele vem. */
 export interface DadosDoEsforcoHerdado {
   nivel: EsforcoDeRaciocinio;
@@ -170,6 +280,8 @@ export interface ResumoDoOrquestrador {
   nomeDaPasta: string;
   situacao: SituacaoDoOrquestrador;
   configuracao: DadosDaConfiguracao;
+  /** De onde viriam as instruções personalizadas no próximo pedido; nulo sem nenhuma. */
+  instrucoesAtivas: OrigemDasInstrucoes | null;
   criadoEm: string;
   totalDeTurnos: number;
   ultimoTurno: { texto: string; situacao: SituacaoDoTurno; iniciadoEm: string } | null;
@@ -213,6 +325,23 @@ export interface DadosDaNota {
   atualizadaEm: string;
 }
 
+/** Uma opção de uma pergunta do Claude; `descricao` aparece em letra menor embaixo do rótulo. */
+export interface OpcaoDaPergunta {
+  rotulo: string;
+  descricao: string | null;
+}
+
+/**
+ * Pergunta que o Claude faz com opções clicáveis (bloco ```pergunta-do-app).
+ * Vêm de 1 a 4 por resposta, cada uma com 2 a 6 opções; `multipla` deixa
+ * escolher mais de uma.
+ */
+export interface PerguntaDoApp {
+  pergunta: string;
+  opcoes: OpcaoDaPergunta[];
+  multipla: boolean;
+}
+
 export interface UsoDoTurno {
   duracaoMs: number;
   tokensDeEntrada: number;
@@ -231,7 +360,14 @@ type EventoDeTurno =
   | { tipo: "sessao_iniciada" }
   | { tipo: "texto_do_orquestrador"; texto: string }
   | { tipo: "ferramenta_do_orquestrador"; ferramenta: string; detalhe: string }
-  | { tipo: "subagente_iniciado"; subagenteId: string; descricao: string; tarefa: string }
+  | {
+      tipo: "subagente_iniciado";
+      subagenteId: string;
+      descricao: string;
+      tarefa: string;
+      /** "executor" ou o nome de um subagente pronto; ausente nos eventos antigos. */
+      papel?: string;
+    }
   | {
       tipo: "progresso_do_subagente";
       subagenteId: string;
@@ -252,6 +388,9 @@ type EventoDeTurno =
     }
   | { tipo: "resultado_do_subagente"; subagenteId: string; resultado: string }
   | { tipo: "permissao_negada"; ferramenta: string; detalhe: string }
+  // Um servidor de desenvolvimento subiu (ex.: "npm run dev"). Uma vez por endereço por turno; `url` já
+  // normalizada: "http(s)://localhost:PORTA" e o caminho, sem a barra final solitária.
+  | { tipo: "endereco_local_detectado"; url: string }
   | { tipo: "uso_da_cota"; janelas: JanelaDaCota[] }
   // `anexos` e `modo` faltam nos eventos gravados antes de existirem imagens e o Plan Mode.
   | {
@@ -260,10 +399,31 @@ type EventoDeTurno =
       configuracao: DadosDaConfiguracaoGravada;
       anexos?: DadosDoAnexo[];
       modo?: ModoDoTurno;
+      // Só nos turnos que o app abriu sozinho para retomar um que travou ou falhou; `texto` é a mensagem de retomada.
+      retomada?: DadosDaRetomada;
+    }
+  // Autorrecuperação do turno travado ou que falhou por limite de uso, sobrecarga ou rede.
+  // `tentativa` começa em 1 e `de` é o máximo para a causa; `resumo` vem pronto em pt-BR (em "desistiu",
+  // o diagnóstico completo); `retomaEm` (ISO) só em "aguardando".
+  | {
+      tipo: "recuperacao_do_turno";
+      etapa: EtapaDaRecuperacao;
+      causa: CausaDaRecuperacao;
+      tentativa: number;
+      de: number;
+      resumo: string;
+      retomaEm: string | null;
     }
   // `planoPendente`: o turno terminou com um plano à espera de decisão — no Plan Mode ou num pedido
   // de execução em que o Orquestrador propôs um plano antes de alterar. Falta nos eventos gravados antes.
-  | { tipo: "turno_concluido"; resposta: string; uso: UsoDoTurno; planoPendente?: boolean }
+  // `perguntas`: o Orquestrador terminou perguntando, com opções para o usuário escolher. Falta nos eventos antigos.
+  | {
+      tipo: "turno_concluido";
+      resposta: string;
+      uso: UsoDoTurno;
+      planoPendente?: boolean;
+      perguntas?: PerguntaDoApp[];
+    }
   | { tipo: "turno_cancelado" }
   | { tipo: "turno_falhou"; motivo: string }
   | { tipo: "turno_interrompido" }
@@ -309,6 +469,8 @@ export interface AcaoDoApp {
   projeto: string;
   pasta: string;
   pedido: string | null;
+  /** Cria um Orquestrador novo na pasta em vez de reaproveitar um. Falta nas mensagens antigas (vale false). */
+  novo?: boolean;
 }
 
 export interface UsoDaResposta {
@@ -348,6 +510,8 @@ export interface MensagemDoChat {
   criadaEm: string;
   situacao: SituacaoDaMensagemDoChat;
   acoes: AcaoDoApp[];
+  /** Perguntas com opções da resposta. Falta nas mensagens gravadas antes delas (vale vazio). */
+  perguntas?: PerguntaDoApp[];
   avisos: string[];
   uso: UsoDaResposta | null;
   /** Falta nas mensagens gravadas antes da autorização (vale `null`). */
@@ -374,12 +538,13 @@ export interface EstadoDoChat {
 export type EventoDoChat =
   | { tipo: "pergunta_enviada"; mensagemDoUsuario: MensagemDoChat; mensagemDoClaude: MensagemDoChat }
   // O `texto` final substitui o que veio nos trechos. `autorizacaoPendente` falta nos eventos
-  // gravados antes da autorização (vale `null`).
+  // gravados antes da autorização (vale `null`); `perguntas`, nos anteriores a elas (vale vazio).
   | {
       tipo: "resposta_concluida";
       mensagemId: string;
       texto: string;
       acoes: AcaoDoApp[];
+      perguntas?: PerguntaDoApp[];
       avisos: string[];
       uso: UsoDaResposta | null;
       autorizacaoPendente?: AutorizacaoPendente | null;
@@ -408,4 +573,64 @@ export interface AtividadeDaResposta {
   mensagemId: string;
   ferramenta: string;
   detalhe: string;
+}
+
+// ---------------- Terminais (shell interativo no canvas) ----------------
+
+/**
+ * Um terminal de verdade (o shell do computador) aberto pela tela e vivo no
+ * servidor. No código da tela ele se chama "shell", para não confundir com o
+ * terminal de um Orquestrador; na tela, "Terminal".
+ */
+export interface DadosDoShell {
+  id: string;
+  /** A pasta em que o shell começou. */
+  pasta: string;
+  /** O Orquestrador de cuja pasta (ou worktree) o shell saiu; nulo quando aberto pela barra do canvas. */
+  orquestradorId: string | null;
+  criadoEm: string;
+}
+
+/** O que `POST /api/terminais` recebe: a pasta ou o Orquestrador, e o tamanho inicial em caracteres. */
+export interface NovoShell {
+  pasta?: string;
+  orquestradorId?: string;
+  colunas: number;
+  linhas: number;
+}
+
+/** Do servidor para a tela, pelo WebSocket do terminal (JSON em texto). */
+export type MensagemDoShell = { tipo: "saida"; dados: string } | { tipo: "fim"; codigo: number | null };
+
+/** Da tela para o servidor, pelo WebSocket do terminal (JSON em texto). */
+export type MensagemParaOShell =
+  | { tipo: "entrada"; dados: string }
+  | { tipo: "tamanho"; colunas: number; linhas: number };
+
+// ---------------- Visualizador de código ----------------
+
+/** Um item de uma pasta do Orquestrador, num nível só (as subpastas são lidas quando abertas). */
+export interface EntradaDaPasta {
+  nome: string;
+  tipo: "pasta" | "arquivo";
+  /** Bytes; só nos arquivos. */
+  tamanho?: number;
+}
+
+/** O que `GET /api/orquestradores/:id/arquivos` devolve. */
+export interface ListagemDaPasta {
+  /** Relativo à pasta (ou worktree) do Orquestrador, com `/`; vazio na raiz. */
+  caminho: string;
+  entradas: EntradaDaPasta[];
+  /** A pasta tinha itens demais e a lista veio cortada. */
+  truncada: boolean;
+}
+
+/** O que `GET /api/orquestradores/:id/arquivos/conteudo` devolve. Só texto até 500 KB. */
+export interface ConteudoDoArquivo {
+  caminho: string;
+  conteudo: string;
+  /** Bytes. */
+  tamanho: number;
+  linhas: number;
 }

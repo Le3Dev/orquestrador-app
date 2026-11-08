@@ -80,12 +80,38 @@ describe("SeletorDeModelo", () => {
       "Alto",
       "Extra alto",
       "Máximo",
+      "Ultracode",
     ]);
     expect(within(submenu).getByRole("menuitemradio", { name: /Alto/, checked: true })).toHaveTextContent("Alto");
+    expect(within(submenu).queryByText(/Ultracode dispara workflows/)).not.toBeInTheDocument();
 
     fireEvent.click(within(submenu).getByRole("menuitemradio", { name: /Máximo/ }));
     expect(alterar).toHaveBeenCalledWith({ esforco: "maximo" });
     await waitFor(() => expect(aoAlterar).toHaveBeenCalled());
+  });
+
+  it("Ultracode é a última opção do esforço e escolher chama o PATCH", async () => {
+    const alterar = vi.spyOn(api, "alterarPreferenciasDoChat").mockResolvedValue({ modelo: "opus", esforco: "ultracode" });
+    const { aoAlterar } = renderizar();
+
+    fireEvent.click(botao());
+    fireEvent.click(screen.getByRole("menuitem", { name: /Esforço/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Ultracode/ }));
+    expect(alterar).toHaveBeenCalledWith({ esforco: "ultracode" });
+    await waitFor(() => expect(aoAlterar).toHaveBeenCalledWith({ modelo: "opus", esforco: "ultracode" }));
+  });
+
+  it("com Ultracode escolhido, o botão mostra o nível e o submenu traz o aviso de custo", () => {
+    renderizar({ modelo: "opus", esforco: "ultracode" });
+
+    expect(botao()).toHaveTextContent("Opus 5.5Ultracode");
+    fireEvent.click(botao());
+    fireEvent.click(screen.getByRole("menuitem", { name: /Esforço/ }));
+    const submenu = screen.getByRole("menu", { name: "Esforço" });
+    expect(within(submenu).getByRole("menuitemradio", { name: /Ultracode/, checked: true })).toBeInTheDocument();
+    expect(within(submenu).getByText(/Ultracode dispara workflows com vários agentes em paralelo/)).toHaveClass(
+      "hint-warning",
+    );
   });
 
   it("Esc e clique fora fecham o menu", () => {

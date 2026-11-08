@@ -1,5 +1,6 @@
 import { type NodeProps, NodeResizer } from "@xyflow/react";
 import {
+  type CSSProperties,
   type KeyboardEvent as EventoDeTecladoDoReact,
   memo,
   type MouseEvent as EventoDeMouseDoReact,
@@ -30,6 +31,7 @@ import {
 import { TAMANHO_MINIMO_DO_ARTEFATO } from "../../shared/canvas/layout";
 import { ALCA_DO_ARTEFATO, type NoArtefato as TipoDoNo } from "../../shared/canvas/nos";
 import { TextoFormatado } from "../TextoFormatado";
+import { QuadroAtivavel } from "./NoPrevia";
 
 export const CONFIRMACAO_PARA_APAGAR_O_ARTEFATO = "Apagar este artefato? Isso não pode ser desfeito.";
 /**
@@ -249,28 +251,35 @@ function useConteudoDaVersao(
 /**
  * A página (num iframe isolado) ou o documento (Markdown formatado).
  * Memorizado: o mesmo texto não recria o iframe nem re-analisa o Markdown.
+ *
+ * No canvas, a página fica atrás da camada de ativar (`QuadroAtivavel`): a roda
+ * e a pinça em cima dela movem o canvas até um clique. Em tela cheia, não.
  */
 const CorpoPronto = memo(function CorpoPronto({
   formato,
   titulo,
   texto,
+  noCanvas,
 }: {
   formato: FormatoDoArtefato;
   titulo: string;
   texto: string;
+  noCanvas: boolean;
 }) {
   const pagina = useMemo(() => (formato === "html" ? comPoliticaDeSeguranca(texto) : ""), [formato, texto]);
   if (formato === "html") {
-    return (
+    const quadro = (estilo?: CSSProperties) => (
       <iframe
         title={`Conteúdo do artefato: ${titulo}`}
         className="corpo-do-artefato-html nodrag nowheel"
+        style={estilo}
         // Sem `allow-same-origin`: a página roda numa origem opaca, sem acesso ao app.
         sandbox="allow-scripts"
         referrerPolicy="no-referrer"
         srcDoc={pagina}
       />
     );
+    return noCanvas ? <QuadroAtivavel>{quadro}</QuadroAtivavel> : quadro();
   }
   return (
     <div className="corpo-do-artefato-markdown custom-scrollbar nodrag nowheel" data-testid="documento-do-artefato">
@@ -285,12 +294,15 @@ function CorpoDoArtefato({
   conteudo,
   aoTentarDeNovo,
   aoVerAtual,
+  noCanvas,
 }: {
   artefato: ResumoDoArtefato;
   numero: number;
   conteudo: ConteudoDaVersao;
   aoTentarDeNovo: () => void;
   aoVerAtual: () => void;
+  /** Na janela do canvas (e não em tela cheia): a página só pega o mouse depois de ativada. */
+  noCanvas: boolean;
 }) {
   switch (conteudo.situacao) {
     case "carregando":
@@ -316,7 +328,9 @@ function CorpoDoArtefato({
         </div>
       );
     case "pronto":
-      return <CorpoPronto formato={artefato.formato} titulo={artefato.titulo} texto={conteudo.texto} />;
+      return (
+        <CorpoPronto formato={artefato.formato} titulo={artefato.titulo} texto={conteudo.texto} noCanvas={noCanvas} />
+      );
   }
 }
 
@@ -484,7 +498,7 @@ function ArtefatoAmpliado({
   return createPortal(
     <div
       data-testid="fundo-do-artefato-ampliado"
-      className="nokey fixed inset-0 z-50 flex items-stretch justify-center bg-screen-bg/70 p-6"
+      className="nokey fundo-que-esmaece fixed inset-0 z-50 flex items-stretch justify-center bg-screen-bg/70 p-6"
       onMouseDown={aoPressionarOFundo}
       onClick={naoPropagar}
       onDoubleClick={naoPropagar}
@@ -500,7 +514,7 @@ function ArtefatoAmpliado({
         aria-modal="true"
         aria-labelledby={idDoTitulo}
         tabIndex={-1}
-        className="painel-flutuante artefato-ampliado outline-none"
+        className="painel-flutuante surgir artefato-ampliado outline-none"
       >
         <div className="barra-do-artefato-ampliado">
           <IconeDoFormato formato={artefato.formato} />
@@ -678,13 +692,14 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
     }
   }
 
-  const corpo = (
+  const corpo = (noCanvas: boolean) => (
     <CorpoDoArtefato
       artefato={artefato}
       numero={escolhida}
       conteudo={conteudo}
       aoTentarDeNovo={tentarDeNovo}
       aoVerAtual={verAtual}
+      noCanvas={noCanvas}
     />
   );
 
@@ -741,7 +756,7 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
 
       {/* Em tela cheia, a página roda só no modal: duas cópias rodariam os scripts dela duas vezes. */}
       <div className="corpo-do-artefato">
-        {ampliado ? <p className="estado-do-artefato text-muted">Aberto em tela cheia.</p> : corpo}
+        {ampliado ? <p className="estado-do-artefato text-muted">Aberto em tela cheia.</p> : corpo(true)}
       </div>
 
       {problema !== null && (
@@ -752,7 +767,7 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
 
       {ampliado && (
         <ArtefatoAmpliado artefato={artefato} numero={escolhida} aoFechar={fecharAmpliado}>
-          {corpo}
+          {corpo(false)}
         </ArtefatoAmpliado>
       )}
     </div>

@@ -2,6 +2,7 @@ import { Anexo, ehTipoDeImagem, TAMANHO_MAXIMO_DA_IMAGEM } from "../orquestracao
 import type { ArmazemDeAnexos } from "../orquestracao/ArmazemDeAnexos";
 import type { ControleDeExecucoes } from "../orquestracao/ControleDeExecucoes";
 import type { JanelaDaCota } from "../orquestracao/EventoDeOrquestracao";
+import { separarPerguntasDoApp } from "../perguntas/PerguntaDoApp";
 import { ConversaDoChat, SituacaoDaConversa } from "./ConversaDoChat";
 import { ErroDoChat } from "./ErroDoChat";
 import type { EventoDoChat, EventoDoChatRegistrado, PublicadorDoChat } from "./EventoDoChat";
@@ -278,9 +279,17 @@ export class ServicoDeChat {
       if (sinal.aborted) {
         this.publicar(conversa.cancelar());
       } else if (resultado !== null && resultado.sucesso) {
-        const { texto, acoes, avisos } = separarAcoesDoApp(resultado.resposta, projetos);
+        const semAcoes = separarAcoesDoApp(resultado.resposta, projetos);
+        const { texto, perguntas, avisos } = separarPerguntasDoApp(semAcoes.texto);
         this.publicar(
-          conversa.concluir(texto, acoes, [...resultado.avisos, ...avisos], resultado.uso, resultado.autorizacaoPendente),
+          conversa.concluir(
+            texto,
+            semAcoes.acoes,
+            [...resultado.avisos, ...semAcoes.avisos, ...avisos],
+            resultado.uso,
+            resultado.autorizacaoPendente,
+            perguntas,
+          ),
         );
       } else {
         const motivo = resultado !== null && !resultado.sucesso ? resultado.motivo : descreverErro(erro);

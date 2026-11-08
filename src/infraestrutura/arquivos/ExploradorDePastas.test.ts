@@ -1,10 +1,10 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { ExploradorDePastas } from "./ExploradorDePastas";
+import { ErroDeCaminho, ExploradorDePastas } from "./ExploradorDePastas";
 
 describe("ExploradorDePastas.navegar", () => {
   let raiz: string;
@@ -45,5 +45,27 @@ describe("ExploradorDePastas.navegar", () => {
     const navegacao = await explorador.navegar(path.join(raiz, "nao-existe"));
 
     expect(navegacao.caminho).toBe(path.resolve(raiz));
+  });
+
+  it("no modo estrito, recusa caminho que não existe ou que não é pasta", async () => {
+    const inexistente = path.join(raiz, "nao-existe");
+    const arquivo = path.join(raiz, "arquivo.txt");
+
+    await expect(explorador.navegar(inexistente, { estrito: true })).rejects.toThrow(
+      new ErroDeCaminho(`A pasta "${inexistente}" não existe.`),
+    );
+    await expect(explorador.navegar(arquivo, { estrito: true })).rejects.toThrow(
+      new ErroDeCaminho(`"${arquivo}" não é uma pasta.`),
+    );
+  });
+
+  it("no modo estrito, normaliza o caminho digitado", async () => {
+    const navegacao = await explorador.navegar(`${raiz}/projeto-b/sub/../`, { estrito: true });
+
+    expect(navegacao.caminho).toBe(path.join(path.resolve(raiz), "projeto-b"));
+  });
+
+  it("expande ~ para a pasta do usuário", async () => {
+    expect((await explorador.navegar("~", { estrito: true })).caminho).toBe(path.resolve(homedir()));
   });
 });

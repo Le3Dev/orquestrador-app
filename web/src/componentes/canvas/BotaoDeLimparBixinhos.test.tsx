@@ -14,6 +14,7 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "fixa", limite: 2 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
+  instrucoesPersonalizadas: "",
 };
 
 function conversa(eventos: EventoDeOrquestracao[]): EstadoDaConversa {
@@ -49,7 +50,12 @@ function renderizar(estado: EstadoDaConversa, limpos?: BixinhosLimpos) {
       limparBixinhos,
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),
+      mudarEscalaDaLetra: vi.fn(),
       recarregar: vi.fn(async () => undefined),
+      abrirPrevia: vi.fn(),
+      navegarPrevia: vi.fn(),
+      minimizarOuRestaurarPrevia: vi.fn(),
+      fecharPrevia: vi.fn(),
     },
   };
   render(

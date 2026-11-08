@@ -118,3 +118,12 @@ export function apiDoModoInvisivel(): ApiDoModoInvisivel | null {
 export function rodandoNoDesktop(): boolean {
   return apiDaJanela() !== null;
 }
+
+/**
+ * true dentro do app desktop no macOS (o preload expõe `plataforma`, o
+ * process.platform). Lá a janela tem as 3 bolinhas nativas no canto esquerdo
+ * da barra de título, e a tela não desenha os botões ─ ☐ ✕.
+ */
+export function rodandoNoMac(): boolean {
+  return rodandoNoDesktop() && ponteDoDesktop()?.plataforma === "darwin";
+}

@@ -13,6 +13,7 @@ import type { EstadoDaAtualizacao } from "./ponteDoDesktop";
 export type AcaoDaPaleta =
   | "novo-orquestrador"
   | "nova-nota"
+  | "nova-previa"
   | "organizar"
   | "zoom-100"
   | "enquadrar-tudo"
@@ -187,6 +188,15 @@ function acoes(
       detalhe: "Cria uma nota no centro da tela",
       busca: "criar notas bloco",
       atalho: "Ctrl+Shift+N",
+    },
+    {
+      tipo: "acao",
+      id: "acao:nova-previa",
+      acao: "nova-previa",
+      titulo: "Nova prévia",
+      detalhe: "Abre um navegador no canvas para ver o site rodando",
+      busca: "criar previa navegador site localhost",
+      atalho: null,
     },
     {
       tipo: "acao",

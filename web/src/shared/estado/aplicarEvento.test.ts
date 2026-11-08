@@ -16,6 +16,7 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
+  instrucoesPersonalizadas: "",
 };
 
 function registrar(eventos: EventoDeOrquestracao[]): EventoRegistrado[] {
@@ -136,6 +137,20 @@ describe("aplicarEvento", () => {
     expect(turno?.log[5]?.texto).toBe("Read · Lendo Periodo.ts");
   });
 
+  it("no log, o subagente aparece pelo tipo; eventos antigos sem tipo valem executor", () => {
+    const [turno] = reproduzir(
+      registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "conte", configuracao },
+        { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "abcd1234", descricao: "Contar", tarefa: "x", papel: "contador-de-linhas" },
+        { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "efgh5678", descricao: "Ler", tarefa: "y" },
+      ]),
+    ).turnos;
+
+    const spawns = turno?.log.filter((linha) => linha.tipo === "spawn").map((linha) => linha.texto) ?? [];
+    expect(spawns[0]).toMatch(/^instanciou contador-de-linhas#/);
+    expect(spawns[1]).toMatch(/^instanciou executor#/);
+  });
+
   it("guarda as imagens do pedido e a hora da última atividade", () => {
     const anexo = { id: "a1", nome: "tela.png", tipoDeMidia: "image/png" as const, tamanhoEmBytes: 10, arquivo: "a1.png" };
     const estado = reproduzir(
@@ -211,8 +226,33 @@ describe("aplicarEvento", () => {
       permitirCommitEPush: false,
       esforcoDoOrquestrador: "padrao",
       esforcoDosSubagentes: "padrao",
+      instrucoesPersonalizadas: "",
     });
     expect(novo?.configuracao.permitirCommitEPush).toBe(true);
+  });
+
+  it("lê sem instruções personalizadas os eventos gravados antes delas e mantém as dos novos", () => {
+    const configuracaoAntiga: DadosDaConfiguracaoGravada = {
+      modeloDoOrquestrador: "opus",
+      modeloDosSubagentes: "sonnet",
+      quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
+      nivelDePermissao: "leitura",
+    };
+    const [antigo, novo] = reproduzir(
+      registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "antigo", configuracao: configuracaoAntiga },
+        { tipo: "turno_cancelado", turnoId: "t1" },
+        {
+          tipo: "turno_iniciado",
+          turnoId: "t2",
+          texto: "novo",
+          configuracao: { ...configuracao, instrucoesPersonalizadas: "Comece com PIRULITO." },
+        },
+      ]),
+    ).turnos;
+
+    expect(antigo?.configuracao.instrucoesPersonalizadas).toBe("");
+    expect(novo?.configuracao.instrucoesPersonalizadas).toBe("Comece com PIRULITO.");
   });
 
   it("ferramenta usada pelo próprio orquestrador vira uma linha normal de atividade, com o verbo da ferramenta", () => {
@@ -318,6 +358,51 @@ describe("aplicarEvento", () => {
     expect(novo?.configuracao).toMatchObject({ esforcoDoOrquestrador: "alto", esforcoDosSubagentes: "baixo" });
   });
 
+  describe("perguntas com opções", () => {
+    const uso = { duracaoMs: 3000, tokensDeEntrada: 10, tokensDeSaida: 5, subagentesLancados: 0 };
+    const perguntas = [
+      {
+        pergunta: "Qual banco usar?",
+        opcoes: [
+          { rotulo: "PostgreSQL", descricao: "Relacional" },
+          { rotulo: "SQLite", descricao: null },
+        ],
+        multipla: false,
+      },
+    ];
+
+    it("o turno concluído guarda as perguntas; sem o campo (evento antigo), ficam vazias", () => {
+      const [comPerguntas, semCampo] = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "crie o cadastro", configuracao },
+          { tipo: "turno_concluido", turnoId: "t1", resposta: "Antes, uma dúvida.", uso, perguntas },
+          { tipo: "turno_iniciado", turnoId: "t2", texto: "Qual banco usar? → SQLite", configuracao },
+          { tipo: "turno_concluido", turnoId: "t2", resposta: "Feito.", uso },
+        ]),
+      ).turnos;
+
+      expect(comPerguntas).toMatchObject({ situacao: "concluido", resposta: "Antes, uma dúvida.", perguntas });
+      expect(semCampo?.perguntas).toEqual([]);
+    });
+
+    it("o bloco cru da pergunta não aparece no log nem nos textos do orquestrador", () => {
+      const [turno] = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "crie o cadastro", configuracao },
+          { tipo: "texto_do_orquestrador", turnoId: "t1", texto: "```pergunta-do-app\n{\"perguntas\":[]}\n```" },
+          { tipo: "texto_do_orquestrador", turnoId: "t1", texto: "```pergunta-do-app\n{\"perguntas\":[" },
+          { tipo: "texto_do_orquestrador", turnoId: "t1", texto: "Antes, uma dúvida.\n```pergunta-do-app\n{}\n```" },
+        ]),
+      ).turnos;
+
+      expect(turno?.textosDoOrquestrador).toEqual(["Antes, uma dúvida."]);
+      expect(turno?.log.filter((linha) => linha.tipo === "texto").map((linha) => linha.texto)).toEqual([
+        "Antes, uma dúvida.",
+      ]);
+      expect(turno?.log.some((linha) => linha.texto.includes("pergunta-do-app"))).toBe(false);
+    });
+  });
+
   describe("plan mode", () => {
     const uso = { duracaoMs: 3000, tokensDeEntrada: 10, tokensDeSaida: 5, subagentesLancados: 0 };
     const planoEntregue: EventoDeOrquestracao[] = [
@@ -406,6 +491,110 @@ describe("aplicarEvento", () => {
     });
   });
 
+  describe("servidores de desenvolvimento", () => {
+    const usoDoTurno = { duracaoMs: 1000, tokensDeEntrada: 10, tokensDeSaida: 5, subagentesLancados: 0 };
+
+    it("guarda o endereço detectado pelo servidor e deixa uma linha no terminal", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "suba o site", configuracao },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173" },
+        ]),
+      );
+
+      expect(estado.enderecosLocais).toEqual(["http://localhost:5173"]);
+      expect(estado.turnos[0]?.log.at(-1)).toMatchObject({
+        origem: "orquestrador",
+        tipo: "sistema",
+        texto: "servidor no ar em http://localhost:5173",
+      });
+    });
+
+    it("só o evento do servidor conta: endereços citados no texto ou na resposta não viram servidor no ar", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "suba o site", configuracao },
+          { tipo: "texto_do_orquestrador", turnoId: "t1", texto: "Configure o CORS para http://localhost:8080." },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173" },
+          { tipo: "turno_concluido", turnoId: "t1", resposta: "O backend deve rodar em http://localhost:3000", uso: usoDoTurno },
+        ]),
+      );
+
+      expect(estado.enderecosLocais).toEqual(["http://localhost:5173"]);
+    });
+
+    it("guarda o endereço do evento como veio, sem repetir, o mais recente por último", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "suba o site", configuracao },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173/foo_" },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:3001" },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173/foo_" },
+        ]),
+      );
+
+      expect(estado.enderecosLocais).toEqual(["http://localhost:3001", "http://localhost:5173/foo_"]);
+    });
+
+    it("descarta o evento com um endereço que não é http(s) local", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "suba o site", configuracao },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "javascript:alert(document.cookie)" },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "https://example.com:443" },
+        ]),
+      );
+
+      expect(estado.enderecosLocais).toEqual([]);
+    });
+
+    it("eventos sem endereço não trocam a lista", () => {
+      const comEndereco = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "suba o site", configuracao },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173" },
+        ]),
+      );
+      const depois = aplicarEvento(comEndereco, {
+        tipo: "texto_do_orquestrador",
+        turnoId: "t1",
+        texto: "Tudo certo.",
+        sequencia: comEndereco.ultimaSequencia + 1,
+        em: "2026-10-28T12:01:00Z",
+      });
+
+      expect(depois.enderecosLocais).toBe(comEndereco.enderecosLocais);
+    });
+
+    it("a conversa nova esquece os endereços", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "suba o site", configuracao },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173" },
+          { tipo: "conversa_limpa", turnosAnteriores: 1, planoDescartado: false, worktreeComAlteracoes: false },
+        ]),
+      );
+
+      expect(estado.enderecosLocais).toEqual([]);
+      expect(estado.ultimoEnderecoDetectado).toBeNull();
+    });
+
+    it("guarda o último servidor anunciado com a sequência e a hora, para a prévia abrir sozinha", () => {
+      const eventos = registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "suba o site", configuracao },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173" },
+        { tipo: "texto_do_orquestrador", turnoId: "t1", texto: "Pronto." },
+      ]);
+      const estado = reproduzir(eventos);
+
+      expect(estado.ultimoEnderecoDetectado).toEqual({
+        url: "http://localhost:5173",
+        sequencia: eventos[1]?.sequencia,
+        em: eventos[1]?.em,
+      });
+    });
+  });
+
   describe("consumo medido do turno", () => {
     const consumo = {
       principal: { entrada: 1000, criacaoDeCache: 2000, leituraDeCache: 50_000, saida: 300 },
@@ -456,6 +645,126 @@ describe("aplicarEvento", () => {
       expect(desconhecido.ultimaSequencia).toBe(4);
       expect(desconhecido.turnos).toHaveLength(1);
       expect(desconhecido.turnos[0]).toBe(umaVez.turnos[0]);
+    });
+  });
+
+  describe("autorrecuperação do turno", () => {
+    // No fuso do computador: a linha mostra a hora local da retomada.
+    const local = (hora: number, minuto: number) => new Date(2026, 9, 28, hora, minuto).toISOString();
+    const base = { causa: "silencio" as const, tentativa: 1, de: 2, retomaEm: null };
+    const travado: EventoRegistrado[] = [
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija o bug", configuracao, sequencia: 1, em: local(14, 0) },
+      {
+        tipo: "recuperacao_do_turno",
+        turnoId: "t1",
+        etapa: "encerrado",
+        ...base,
+        resumo: "sem saída há 5 min, sem CPU",
+        sequencia: 2,
+        em: local(14, 30),
+      },
+      { tipo: "turno_falhou", turnoId: "t1", motivo: "O Claude ficou em silêncio.", sequencia: 3, em: local(14, 30) },
+      {
+        tipo: "recuperacao_do_turno",
+        turnoId: "t1",
+        etapa: "aguardando",
+        ...base,
+        resumo: "retomo em 2 min",
+        retomaEm: local(14, 32),
+        sequencia: 4,
+        em: local(14, 30),
+      },
+    ];
+    const textosDoLog = (estado: EstadoDaConversa, indice = 0) => estado.turnos[indice]?.log.map((linha) => [linha.tipo, linha.texto]);
+
+    it("cada etapa deixa uma linha curta no log e o turno guarda a última", () => {
+      const estado = reproduzir(travado);
+
+      expect(textosDoLog(estado)?.slice(1)).toEqual([
+        ["erro", "travado: sem saída há 5 min, sem CPU · encerrado (tentativa 1 de 2)"],
+        ["erro", "falhou · O Claude ficou em silêncio."],
+        ["sistema", "retoma às 14:32 (Claude em silêncio) · tentativa 1 de 2"],
+      ]);
+      expect(estado.turnos[0]?.recuperacao).toEqual({
+        etapa: "aguardando",
+        causa: "silencio",
+        tentativa: 1,
+        de: 2,
+        resumo: "retomo em 2 min",
+        retomaEm: local(14, 32),
+        em: local(14, 30),
+      });
+    });
+
+    it("retomando, cancelada e desistiu; causas da API com o nome legível", () => {
+      const etapa = (
+        sequencia: number,
+        etapa: "retomando" | "cancelada" | "desistiu" | "encerrado" | "aguardando",
+        extra: Partial<Extract<EventoRegistrado, { tipo: "recuperacao_do_turno" }>> = {},
+      ): EventoRegistrado => ({
+        tipo: "recuperacao_do_turno",
+        turnoId: "t1",
+        etapa,
+        ...base,
+        resumo: "detalhe",
+        sequencia,
+        em: local(14, 31),
+        ...extra,
+      });
+      const estado = reproduzir([
+        ...travado,
+        etapa(5, "retomando"),
+        etapa(6, "cancelada"),
+        etapa(7, "desistiu", { resumo: "Tentei 2 vezes e o Claude travou nas duas.\nÚltimo comando: npm test" }),
+        etapa(8, "aguardando", { causa: "limite_de_uso", retomaEm: null }),
+        etapa(9, "encerrado", { causa: "sobrecarga", tentativa: 2, de: 3, resumo: "a API respondeu 529" }),
+      ]);
+
+      expect(textosDoLog(estado)?.slice(4)).toEqual([
+        ["sistema", "retomando sozinho (tentativa 1 de 2)"],
+        ["sistema", "retomada cancelada"],
+        ["erro", "não consegui retomar · Tentei 2 vezes e o Claude travou nas duas."],
+        ["sistema", "retoma em instantes (limite de uso) · tentativa 1 de 2"],
+        ["erro", "API sobrecarregada: a API respondeu 529 · encerrado (tentativa 2 de 3)"],
+      ]);
+      expect(estado.turnos[0]?.recuperacao?.etapa).toBe("encerrado");
+    });
+
+    it("conta como atividade do turno a que pertence (a cota não conta)", () => {
+      const iniciado = reproduzir(travado.slice(0, 1));
+      const comCota = aplicarEvento(iniciado, {
+        tipo: "uso_da_cota",
+        turnoId: "t1",
+        janelas: [],
+        sequencia: 2,
+        em: local(14, 10),
+      });
+      expect(comCota.turnos[0]?.ultimaAtividadeEm).toBe(local(14, 0));
+
+      const recuperando = aplicarEvento(comCota, { ...travado[1]!, sequencia: 3 } as EventoRegistrado);
+      expect(recuperando.turnos[0]?.ultimaAtividadeEm).toBe(local(14, 30));
+    });
+
+    it("o turno aberto para retomar fica marcado como retomada; os pedidos comuns não", () => {
+      const estado = reproduzir([
+        ...travado,
+        {
+          tipo: "turno_iniciado",
+          turnoId: "t2",
+          texto: "Continue de onde parou.",
+          configuracao,
+          retomada: { deTurnoId: "t1", tentativa: 1 },
+          sequencia: 5,
+          em: local(14, 32),
+        },
+      ]);
+
+      expect(estado.turnos[0]?.retomada).toBeNull();
+      expect(estado.turnos[1]?.retomada).toEqual({ deTurnoId: "t1", tentativa: 1 });
+      expect(estado.turnos[1]?.recuperacao).toBeNull();
+      expect(estado.turnos[1]?.log[0]?.texto).toBe(
+        "retomada automática (tentativa 1) · turno iniciado · opus → sonnet · ≤3 agentes",
+      );
     });
   });
 

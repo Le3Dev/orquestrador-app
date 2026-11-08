@@ -1,0 +1,27 @@
+/* ---------------- ⚙ Configurações: painel do app ----------------
+ * Mesmo painel do "+ Novo ▾", com a seção "Tela" (um interruptor, o trilho do
+ * `.interruptor`, à direita de cada item) e, no desktop, "Pastas e Claude
+ * Code…". Três classes nos itens: vence o `.interruptor` do tema qualquer que
+ * seja a ordem dos arquivos. */
+.painel-de-configuracoes { min-width: 270px; }
+/* Na barra de título (36 px, sem o respiro da barra do canvas): logo abaixo
+ * do ⚙, alinhado pela direita, crescendo do canto dele. */
+.painel-de-configuracoes.painel-de-configuracoes-direita {
+  top: calc(100% + 6px);
+  left: auto;
+  right: -4px;
+  transform-origin: right top;
+  cursor: default;
+}
+.painel-de-configuracoes.painel-de-configuracoes-esquerda { transform-origin: 24px top; }
+.titulo-da-secao-de-configuracoes { display: block; padding: 4px 10px 6px; }
+.painel-de-configuracoes .item-do-menu.interruptor {
+  height: auto;
+  min-height: 34px;
+  padding: 7px 10px;
+  gap: 16px;
+  font-size: 12.5px;
+  color: var(--primary);
+}
+.painel-de-configuracoes .item-do-menu.interruptor .mono { font-size: 10.5px; margin-top: 2px; }
+.painel-de-configuracoes .item-do-menu.interruptor:focus-visible { outline: none; background: var(--surface-3); }

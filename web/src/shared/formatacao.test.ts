@@ -17,6 +17,7 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "fixa", limite: 2 },
   nivelDePermissao: "edicao_e_comandos",
   permitirCommitEPush: false,
+  instrucoesPersonalizadas: "",
 };
 
 describe("formatacao", () => {
@@ -92,6 +93,14 @@ describe("formatacao", () => {
         nivelDePermissao: "leitura",
       }),
     ).toBe("Sonnet → Sonnet · 1 subagente · Somente leitura");
+  });
+
+  it("indica instruções próprias só quando preenchidas", () => {
+    expect(descreverConfiguracao(configuracao)).not.toContain("instruções");
+    expect(descreverConfiguracao({ ...configuracao, instrucoesPersonalizadas: "  " })).not.toContain("instruções");
+    expect(descreverConfiguracao({ ...configuracao, instrucoesPersonalizadas: "Use Jest." })).toMatch(
+      / · instruções próprias$/,
+    );
   });
 
   it("acrescenta o commit e push à descrição só quando liberados", () => {

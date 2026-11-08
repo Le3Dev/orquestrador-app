@@ -45,6 +45,7 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
+  instrucoesPersonalizadas: "",
 };
 
 function aplicar(estado: EstadoDaConversa, ...eventos: EventoDeOrquestracao[]): EstadoDaConversa {
@@ -95,7 +96,12 @@ function valorDoCanvas(conversa: EstadoDaConversa): ValorDoCanvas {
       limparBixinhos: vi.fn(),
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),
+      mudarEscalaDaLetra: vi.fn(),
       recarregar: vi.fn(async () => undefined),
+      abrirPrevia: vi.fn(),
+      navegarPrevia: vi.fn(),
+      minimizarOuRestaurarPrevia: vi.fn(),
+      fecharPrevia: vi.fn(),
     },
   };
 }

@@ -18,5 +18,6 @@ describe("modelos do chat", () => {
   it("rotula os esforços", () => {
     expect(rotuloDoEsforco("padrao")).toBe("Padrão");
     expect(rotuloDoEsforco("extra_alto")).toBe("Extra alto");
+    expect(rotuloDoEsforco("ultracode")).toBe("Ultracode");
   });
 });

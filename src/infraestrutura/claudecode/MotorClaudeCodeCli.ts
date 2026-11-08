@@ -5,8 +5,8 @@ import path from "node:path";
 
 import { EventoDoMotor } from "../../orquestracao/EventoDeOrquestracao";
 import { instrucoesDoOrquestrador, mensagemParaOOrquestrador } from "../../orquestracao/InstrucoesDoOrquestrador";
-import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "../../orquestracao/MotorDeAgentes";
-import { AdaptadorDeEventosDoClaudeCode } from "./AdaptadorDeEventosDoClaudeCode";
+import { ABORTO_POR_SILENCIO, MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "../../orquestracao/MotorDeAgentes";
+import { AdaptadorDeEventosDoClaudeCode, falhaComCausa } from "./AdaptadorDeEventosDoClaudeCode";
 import {
   configuracoesDaSessao,
   definicaoDosAgentes,
@@ -15,6 +15,7 @@ import {
   montarArgumentos,
 } from "./ArgumentosDoClaudeCode";
 import { FachadaClaudeCodeCli, SaidaDoClaudeCode } from "./FachadaClaudeCodeCli";
+import { SondaDeEndereco, sondarEnderecoLocal } from "./SondaDeEnderecoLocal";
 
 /**
  * Cria a pasta de artefatos (vai em `--add-dir`, precisa existir antes de o
@@ -26,6 +27,24 @@ import { FachadaClaudeCodeCli, SaidaDoClaudeCode } from "./FachadaClaudeCodeCli"
 export async function prepararPastaDeArtefatos(pasta: string): Promise<string> {
   await mkdir(pasta, { recursive: true });
   return realpath(pasta);
+}
+
+/** Intervalo mínimo entre dois avisos de `aoReceberLinha`. */
+export const INTERVALO_DOS_AVISOS_DE_LINHA_MS = 1_000;
+
+export const MOTIVO_DO_SILENCIO = "Encerrado pela autorrecuperação: sem notícias do Claude.";
+
+/** Chama `aviso` na primeira vez e depois no máximo uma vez a cada `intervaloMs`. */
+export function limitarAvisos(aviso: () => void, intervaloMs: number, agora: () => number = Date.now): () => void {
+  let ultimo: number | null = null;
+  return () => {
+    const instante = agora();
+    if (ultimo !== null && instante - ultimo < intervaloMs) {
+      return;
+    }
+    ultimo = instante;
+    aviso();
+  };
 }
 
 function descreverSaidaSemResultado(saida: SaidaDoClaudeCode): string {
@@ -46,12 +65,16 @@ function descreverSaidaSemResultado(saida: SaidaDoClaudeCode): string {
  * contrário, é permanente: o motor só a cria, se faltar.
  */
 export class MotorClaudeCodeCli implements MotorDeAgentes {
-  constructor(private readonly fachada: FachadaClaudeCodeCli) {}
+  constructor(
+    private readonly fachada: FachadaClaudeCodeCli,
+    private readonly sondar: SondaDeEndereco = sondarEnderecoLocal,
+  ) {}
 
   async executarTurno(
     pedidoRecebido: PedidoDeTurno,
     aoObservar: (evento: EventoDoMotor) => void,
     sinal: AbortSignal,
+    aoReceberLinha?: () => void,
   ): Promise<ResultadoDoTurno> {
     const pastaTemporaria = path.join(tmpdir(), "orquestrador-agentes", randomUUID());
     const arquivos = {
@@ -82,9 +105,40 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
         pedido.imagens.map((imagem) => imagem.caminho),
         pedido.modo,
         pedido.pastaDeArtefatos,
+        pedido.instrucoes,
+        pedido.revogarInstrucoesAnteriores,
+        pedido.subagentesProntos,
       );
 
       const adaptador = new AdaptadorDeEventosDoClaudeCode();
+      // Endereços citados num comando ou na fala de um agente: só viram prévia
+      // se responderem. O turno espera estas conferências (no máximo poucos
+      // segundos) para o anúncio não chegar depois do fim do turno.
+      // Um endereço citado de novo enquanto ainda é conferido não é sondado duas vezes.
+      const conferencias: Promise<void>[] = [];
+      const emConferencia = new Set<string>();
+      const conferirCitados = (): void => {
+        for (const url of adaptador.retirarCandidatos()) {
+          if (emConferencia.has(url)) {
+            continue;
+          }
+          emConferencia.add(url);
+          conferencias.push(
+            this.sondar(url)
+              .then(
+                (noAr) => {
+                  if (noAr && !sinal.aborted) {
+                    for (const evento of adaptador.confirmarEndereco(url)) {
+                      aoObservar(evento);
+                    }
+                  }
+                },
+                () => undefined,
+              )
+              .finally(() => emConferencia.delete(url)),
+          );
+        }
+      };
       const inicio = Date.now();
       const saida = await this.fachada.executar(
         {
@@ -98,13 +152,32 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
           for (const evento of adaptador.traduzir(mensagem)) {
             aoObservar(evento);
           }
+          conferirCitados();
         },
         sinal,
+        aoReceberLinha === undefined ? undefined : limitarAvisos(aoReceberLinha, INTERVALO_DOS_AVISOS_DE_LINHA_MS),
       );
+      await Promise.all(conferencias);
 
       const resultado = adaptador.resultado;
+      // A autorrecuperação derrubou o processo: o que ele disse por último não importa.
+      if (sinal.aborted && sinal.reason === ABORTO_POR_SILENCIO) {
+        return { sucesso: false, causa: "silencio", motivo: MOTIVO_DO_SILENCIO, uso: resultado?.uso ?? null };
+      }
       if (resultado === null) {
-        return { sucesso: false, motivo: descreverSaidaSemResultado(saida), uso: null };
+        return falhaComCausa(descreverSaidaSemResultado(saida), [saida.erroPadrao], adaptador.pistasDaFalha, null);
+      }
+      // O `result` não disse a causa: o stderr às vezes diz (um ECONNRESET, um 529).
+      if (!resultado.sucesso && (resultado.causa ?? "outro") === "outro" && saida.erroPadrao !== "") {
+        const pelaSaida = falhaComCausa(
+          resultado.motivo,
+          [resultado.motivo, saida.erroPadrao],
+          adaptador.pistasDaFalha,
+          resultado.uso,
+        );
+        if (pelaSaida.causa !== "outro") {
+          return pelaSaida;
+        }
       }
       // O `duration_ms` do Claude Code não conta a espera por Subagentes em
       // segundo plano; o tempo que interessa é o de relógio, do início ao fim.

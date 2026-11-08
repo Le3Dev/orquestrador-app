@@ -14,6 +14,9 @@ export interface ExecucaoDoClaudeCode {
   dono: { orquestradorId: string; sessaoId: string };
 }
 
+/** De onde veio uma linha escrita pelo processo. */
+export type OrigemDaLinha = "stdout" | "stderr";
+
 export interface SaidaDoClaudeCode {
   codigoDeSaida: number | null;
   erroPadrao: string;
@@ -80,6 +83,10 @@ export async function comNovasTentativas<Resultado>(
  * Inicia `claude -p` direto pelo executável, sem shell — com shell, cada
  * argumento passaria por regras de aspas do cmd.exe. Lê a saída linha a linha
  * (cada linha é um JSON) e entrega ao chamador já decodificada.
+ *
+ * No Mac/Linux o processo nasce num grupo próprio (`detached`), para que
+ * `encerrarArvore` derrube junto os comandos que ele lançou. Sem `unref()`:
+ * o servidor continua esperando o `close`.
  */
 export class FachadaClaudeCodeCli {
   constructor(
@@ -92,9 +99,11 @@ export class FachadaClaudeCodeCli {
     execucao: ExecucaoDoClaudeCode,
     aoReceberMensagem: (mensagem: unknown) => void,
     sinal: AbortSignal,
+    /** Chamado a cada linha do stdout ou do stderr, inclusive as que não são JSON: sinal de que o processo está vivo. */
+    aoReceberLinha?: (linha: string, origem: OrigemDaLinha) => void,
   ): Promise<SaidaDoClaudeCode> {
     try {
-      return await comNovasTentativas(() => this.executarUmaVez(execucao, aoReceberMensagem, sinal), {
+      return await comNovasTentativas(() => this.executarUmaVez(execucao, aoReceberMensagem, sinal, aoReceberLinha), {
         tentativas: TENTATIVAS_AO_INICIAR,
         esperaMs: this.esperaEntreTentativasMs,
         sinal,
@@ -115,6 +124,7 @@ export class FachadaClaudeCodeCli {
     execucao: ExecucaoDoClaudeCode,
     aoReceberMensagem: (mensagem: unknown) => void,
     sinal: AbortSignal,
+    aoReceberLinha?: (linha: string, origem: OrigemDaLinha) => void,
   ): Promise<SaidaDoClaudeCode> {
     return new Promise((resolver, rejeitar) => {
       if (sinal.aborted) {
@@ -127,6 +137,8 @@ export class FachadaClaudeCodeCli {
         env: execucao.ambiente,
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
+        // No Windows `detached` abriria um console novo; lá o `taskkill /T` já derruba a árvore.
+        detached: process.platform !== "win32",
       });
       const pid = filho.pid;
       if (pid !== undefined) {
@@ -137,6 +149,7 @@ export class FachadaClaudeCodeCli {
       sinal.addEventListener("abort", aoAbortar, { once: true });
 
       createInterface({ input: filho.stdout }).on("line", (linha) => {
+        aoReceberLinha?.(linha, "stdout");
         if (linha.trim() === "") {
           return;
         }
@@ -157,6 +170,9 @@ export class FachadaClaudeCodeCli {
           erroPadrao += parte;
         }
       });
+      if (aoReceberLinha !== undefined) {
+        createInterface({ input: filho.stderr }).on("line", (linha) => aoReceberLinha(linha, "stderr"));
+      }
 
       filho.on("error", (erro: NodeJS.ErrnoException) => {
         sinal.removeEventListener("abort", aoAbortar);

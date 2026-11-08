@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 
 import { TextoFormatado } from "./TextoFormatado";
 
@@ -123,6 +123,87 @@ describe("TextoFormatado", () => {
     expect(link).toHaveAttribute("href", "https://exemplo.dev/doc");
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
+  describe("botão de copiar do bloco de código", () => {
+    let writeText: ReturnType<typeof vi.fn<(texto: string) => Promise<void>>>;
+
+    beforeEach(() => {
+      writeText = vi.fn<(texto: string) => Promise<void>>(async () => undefined);
+      Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+      Reflect.deleteProperty(navigator, "clipboard");
+    });
+
+    it("só o bloco ganha botão; código inline, não", () => {
+      const { container } = render(
+        <TextoFormatado texto={["rode `npm test` antes:", "", "```sh", "npm run build", "```"].join("\n")} />,
+      );
+
+      const botoes = screen.getAllByRole("button", { name: "copiar" });
+      expect(botoes).toHaveLength(1);
+      expect(botoes[0]?.closest(".bloco-de-codigo")?.querySelector("pre")).toHaveTextContent("npm run build");
+      expect(container.querySelector("p code")?.closest(".bloco-de-codigo")).toBeNull();
+    });
+
+    it("sem bloco de código, nenhum botão", () => {
+      render(<TextoFormatado texto="só `inline` aqui" />);
+
+      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    });
+
+    it("copia o texto exato do bloco e mostra copiado por um instante", async () => {
+      vi.useFakeTimers();
+      render(
+        <TextoFormatado
+          texto={["```ts", "const a = `x`;", "  if (a) { return 1; }", "", "fim | <b>", "```"].join("\n")}
+        />,
+      );
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "copiar" }));
+      });
+
+      expect(writeText).toHaveBeenCalledTimes(1);
+      expect(writeText).toHaveBeenCalledWith("const a = `x`;\n  if (a) { return 1; }\n\nfim | <b>");
+      const botao = screen.getByRole("button", { name: "copiado" });
+      expect(botao).toHaveAttribute("data-estado", "copiado");
+
+      act(() => {
+        vi.advanceTimersByTime(1500);
+      });
+      expect(screen.getByRole("button", { name: "copiar" })).toHaveAttribute("data-estado", "pronto");
+    });
+
+    it("se a cópia falha, avisa que não copiou e depois volta", async () => {
+      vi.useFakeTimers();
+      writeText.mockRejectedValueOnce(new Error("sem permissão"));
+      render(<TextoFormatado texto={["```", "segredo", "```"].join("\n")} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "copiar" }));
+      });
+
+      expect(screen.getByRole("button", { name: "não copiou" })).toHaveAttribute("data-estado", "falhou");
+      act(() => {
+        vi.advanceTimersByTime(1500);
+      });
+      expect(screen.getByRole("button", { name: "copiar" })).toBeInTheDocument();
+    });
+
+    it("sem a API da área de transferência, também avisa que não copiou", async () => {
+      Reflect.deleteProperty(navigator, "clipboard");
+      render(<TextoFormatado texto={["```", "x", "```"].join("\n")} />);
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "copiar" }));
+      });
+
+      expect(screen.getByRole("button", { name: "não copiou" })).toBeInTheDocument();
+    });
   });
 
   it("com as mesmas props não re-analisa o Markdown; com texto novo, sim", () => {

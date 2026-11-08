@@ -193,13 +193,13 @@ function Paleta({ lerFonte, aoExecutar, controle }: PropsDaPaleta) {
   }
 
   return (
-    <div className="absolute inset-0 z-50 flex items-start justify-center bg-screen-bg/40 px-4 pt-14" data-testid="fundo-da-paleta">
+    <div className="fundo-que-esmaece absolute inset-0 z-50 flex items-start justify-center bg-screen-bg/40 px-4 pt-14" data-testid="fundo-da-paleta">
       <div
         ref={caixa}
         role="dialog"
         aria-modal="true"
         aria-label="Paleta de comandos"
-        className="painel-flutuante flex w-full max-w-[560px] flex-col overflow-hidden"
+        className="painel-flutuante surgir surgir-do-topo flex w-full max-w-[560px] flex-col overflow-hidden"
       >
         <div className="border-b border-border p-2.5">
           <input

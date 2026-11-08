@@ -1,3 +1,4 @@
+import { copiarPergunta, PerguntaDoApp } from "../perguntas/PerguntaDoApp";
 import { Anexo, MAXIMO_DE_IMAGENS_POR_MENSAGEM } from "./Anexo";
 import {
   AlteracoesDaConfiguracao,
@@ -67,6 +68,11 @@ export interface DadosDoOrquestrador {
   worktree?: DadosDoWorktree | null;
   /** Ausente nos `orquestrador.json` gravados antes da fila: vale fila vazia. */
   fila?: DadosDoPedidoNaFila[];
+  /**
+   * Se algum pedido da conversa atual já levou instruções personalizadas.
+   * Ausente nos dados gravados antes de elas existirem: vale `false`.
+   */
+  instrucoesNaConversa?: boolean | undefined;
 }
 
 export interface NovoOrquestrador {
@@ -105,6 +111,7 @@ export class Orquestrador {
     private turnos: Turno[],
     private worktreeAtual: DadosDoWorktree | null,
     private filaAtual: PedidoNaFila[],
+    private instrucoesJaEnviadas: boolean,
   ) {}
 
   static criar(novo: NovoOrquestrador): Orquestrador {
@@ -129,6 +136,7 @@ export class Orquestrador {
       [],
       null,
       [],
+      false,
     );
   }
 
@@ -146,6 +154,7 @@ export class Orquestrador {
       // "ativo" era de um turno interrompido pela queda do servidor.
       dados.worktree === undefined || dados.worktree === null ? null : { ...dados.worktree, ativo: false },
       (dados.fila ?? []).map((pedido) => PedidoNaFila.reconstituir(pedido)),
+      dados.instrucoesNaConversa ?? false,
     );
   }
 
@@ -332,6 +341,7 @@ export class Orquestrador {
     this.turnos = [];
     this.sessaoAtual = novaSessaoId;
     this.sessaoJaIniciada = false;
+    this.instrucoesJaEnviadas = false;
     return { tipo: "conversa_limpa", turnosAnteriores, planoDescartado, worktreeComAlteracoes };
   }
 
@@ -377,6 +387,20 @@ export class Orquestrador {
     };
   }
 
+  /**
+   * Registra se o pedido que começa leva instruções personalizadas e diz se
+   * ele precisa revogar as anteriores: sem instruções agora, mas com
+   * instruções já enviadas nesta conversa (que seguem no histórico da sessão).
+   * Quem nunca usou instruções nunca recebe a revogação.
+   */
+  registrarInstrucoesDoPedido(comInstrucoes: boolean): { revogarAnteriores: boolean } {
+    const revogarAnteriores = !comInstrucoes && this.instrucoesJaEnviadas;
+    if (comInstrucoes) {
+      this.instrucoesJaEnviadas = true;
+    }
+    return { revogarAnteriores };
+  }
+
   /** O usuário aprovou o Plano: a execução vem num turno novo, na mesma sessão. */
   aprovarPlano(): EventoDeOrquestracao {
     const turno = this.turnoDoPlanoPendente();
@@ -402,6 +426,9 @@ export class Orquestrador {
    * `planoProposto`: num turno de execução, o Orquestrador respondeu com um
    * Plano em vez de executar (pedido grande) — ele fica pendente como o de um
    * turno de planejamento.
+   *
+   * `perguntas`: as perguntas com opções que o Orquestrador fez na resposta
+   * (blocos ```pergunta-do-app), já fora do texto.
    */
   concluirTurno(
     turnoId: string,
@@ -409,10 +436,18 @@ export class Orquestrador {
     uso: UsoDoTurno,
     agora: Date,
     planoProposto = false,
+    perguntas: readonly PerguntaDoApp[] = [],
   ): EventoDeOrquestracao {
     const turno = this.turnoAtivo(turnoId);
-    turno.concluir(resposta, uso, agora, planoProposto);
-    return { tipo: "turno_concluido", turnoId, resposta, uso, planoPendente: turno.planoPendente };
+    turno.concluir(resposta, uso, agora, planoProposto, perguntas);
+    return {
+      tipo: "turno_concluido",
+      turnoId,
+      resposta,
+      uso,
+      planoPendente: turno.planoPendente,
+      perguntas: turno.perguntas.map(copiarPergunta),
+    };
   }
 
   cancelarTurno(turnoId: string, agora: Date): EventoDeOrquestracao {
@@ -447,6 +482,7 @@ export class Orquestrador {
       turnos: this.turnos.map((turno) => turno.paraDados()),
       worktree: this.worktreeAtual === null ? null : { ...this.worktreeAtual },
       fila: this.filaAtual.map((pedido) => pedido.paraDados()),
+      instrucoesNaConversa: this.instrucoesJaEnviadas,
     };
   }
 

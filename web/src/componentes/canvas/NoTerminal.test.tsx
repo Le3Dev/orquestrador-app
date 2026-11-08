@@ -60,6 +60,7 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "edicao_e_comandos",
   permitirCommitEPush: false,
+  instrucoesPersonalizadas: "",
 };
 
 function orquestrador(alteracoes: Partial<DadosDaConfiguracao> = {}): ResumoDoOrquestrador {
@@ -70,6 +71,7 @@ function orquestrador(alteracoes: Partial<DadosDaConfiguracao> = {}): ResumoDoOr
     nomeDaPasta: "painel",
     situacao: "ocioso",
     configuracao: { ...configuracao, ...alteracoes },
+    instrucoesAtivas: null,
     criadoEm: "2026-10-28T12:00:00Z",
     totalDeTurnos: 0,
     ultimoTurno: null,
@@ -77,7 +79,7 @@ function orquestrador(alteracoes: Partial<DadosDaConfiguracao> = {}): ResumoDoOr
   };
 }
 
-function renderizar(resumo: ResumoDoOrquestrador) {
+function renderizar(resumo: ResumoDoOrquestrador, { trabalhando = false } = {}) {
   const aoFechar = vi.fn();
   const canvas: ValorDoCanvas = {
     orquestradores: new Map([[resumo.id, resumo]]),
@@ -92,23 +94,39 @@ function renderizar(resumo: ResumoDoOrquestrador) {
       limparBixinhos: vi.fn(),
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),
+      mudarEscalaDaLetra: vi.fn(),
       recarregar: vi.fn(async () => undefined),
+      abrirPrevia: vi.fn(),
+      navegarPrevia: vi.fn(),
+      minimizarOuRestaurarPrevia: vi.fn(),
+      fecharPrevia: vi.fn(),
     },
   };
   render(
     <ContextoDoCanvas.Provider value={canvas}>
       <PainelDeConfiguracao
         orquestrador={resumo}
-        trabalhando={false}
+        trabalhando={trabalhando}
         aoFechar={aoFechar}
         aoLimparConversa={vi.fn(async () => undefined)}
       />
     </ContextoDoCanvas.Provider>,
   );
-  return { aoFechar, opcao: screen.getByRole("checkbox", { name: "Permitir commit e push quando eu pedir" }) };
+  return { aoFechar, acoes: canvas.acoes, opcao: screen.getByRole("switch", { name: "Commit e push quando eu pedir" }) };
 }
 
+const chipDoEsforco = (dono: "do orquestrador" | "dos subagentes") =>
+  screen.getByRole("button", { name: new RegExp(`^Esforço ${dono}:`) });
+const campoDasInstrucoes = () => screen.getByRole("textbox", { name: "Instruções" });
+
 describe("PainelDeConfiguracao", () => {
+  beforeEach(() => {
+    // Sem resposta por padrão: os testes que dependem delas trocam o retorno.
+    vi.spyOn(api, "listarPredefinicoes").mockReturnValue(new Promise(() => undefined));
+    vi.spyOn(api, "lerEsforcoHerdadoDoOrquestrador").mockReturnValue(new Promise(() => undefined));
+    vi.spyOn(api, "lerEsforcoHerdado").mockReturnValue(new Promise(() => undefined));
+  });
+
   afterEach(() => vi.restoreAllMocks());
 
   it("commit e push começam desligados e, ligados, vão no PATCH junto com o resto da configuração", async () => {
@@ -138,11 +156,11 @@ describe("PainelDeConfiguracao", () => {
   it("carrega o esforço salvo e envia o escolhido no PATCH junto com o resto da configuração", async () => {
     const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
     const { aoFechar } = renderizar(orquestrador({ esforcoDoOrquestrador: "alto" }));
-    const dosSubagentes = screen.getByRole("combobox", { name: "Esforço dos subagentes" });
 
-    expect(screen.getByRole("combobox", { name: "Esforço do orquestrador" })).toHaveValue("alto");
-    expect(dosSubagentes).toHaveValue("padrao");
-    fireEvent.change(dosSubagentes, { target: { value: "baixo" } });
+    expect(chipDoEsforco("do orquestrador")).toHaveTextContent("esforço alto");
+    expect(chipDoEsforco("dos subagentes")).toHaveTextContent("esforço automático");
+    fireEvent.click(chipDoEsforco("dos subagentes"));
+    fireEvent.click(screen.getByRole("option", { name: "Baixo" }));
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
 
     await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
@@ -153,16 +171,95 @@ describe("PainelDeConfiguracao", () => {
     });
   });
 
-  it("se o servidor recusar, mostra o erro e o painel continua aberto", async () => {
+  it("carrega as instruções salvas e envia as editadas no PATCH junto com o resto da configuração", async () => {
+    const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+    const { aoFechar } = renderizar(orquestrador({ instrucoesPersonalizadas: "Use Jest." }));
+
+    expect(campoDasInstrucoes()).toHaveValue("Use Jest.");
+    fireEvent.change(campoDasInstrucoes(), { target: { value: "Sempre comece a resposta com a palavra PIRULITO." } });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+    await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+    expect(alterar).toHaveBeenCalledWith("o1", {
+      ...configuracao,
+      instrucoesPersonalizadas: "Sempre comece a resposta com a palavra PIRULITO.",
+    });
+  });
+
+  it("instruções acima do limite: o Salvar fica desabilitado e o rodapé diz por quê", () => {
+    renderizar(orquestrador());
+
+    fireEvent.change(campoDasInstrucoes(), { target: { value: "x".repeat(4_001) } });
+
+    expect(screen.getByRole("button", { name: "Salvar" })).toBeDisabled();
+    expect(screen.getByText("Encurte as instruções para salvar.")).toBeInTheDocument();
+
+    fireEvent.change(campoDasInstrucoes(), { target: { value: "curto" } });
+    expect(screen.getByRole("button", { name: "Salvar" })).toBeEnabled();
+  });
+
+  it("o rodapé resume a configuração e acompanha a edição", () => {
+    renderizar(orquestrador());
+
+    expect(
+      screen.getByText("Editar e rodar comandos, Opus (esforço automático) com até 3 subagentes Sonnet."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("configuração · vale a partir do próximo pedido")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Somente leitura" }));
+    fireEvent.click(chipDoEsforco("do orquestrador"));
+    fireEvent.click(screen.getByRole("option", { name: "Alto" }));
+
+    expect(screen.getByText("Somente leitura, Opus (esforço alto) com até 3 subagentes Sonnet.")).toBeInTheDocument();
+  });
+
+  it("\"Voltar\" descarta a edição das instruções sem PATCH", () => {
+    const alterar = vi.spyOn(api, "alterarConfiguracao");
+    const { aoFechar } = renderizar(orquestrador());
+
+    fireEvent.change(campoDasInstrucoes(), { target: { value: "rascunho" } });
+    fireEvent.click(screen.getByRole("button", { name: "Voltar" }));
+
+    expect(aoFechar).toHaveBeenCalledTimes(1);
+    expect(alterar).not.toHaveBeenCalled();
+  });
+
+  it("se o servidor recusar, o erro aparece no rodapé no lugar do resumo e o painel continua aberto", async () => {
     vi.spyOn(api, "alterarConfiguracao").mockRejectedValue(new Error("Opção de commit e push inválida."));
     const { aoFechar, opcao } = renderizar(orquestrador());
 
     fireEvent.click(opcao);
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
 
-    expect(await screen.findByText("Opção de commit e push inválida.")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("✗ Opção de commit e push inválida.");
+    expect(screen.queryByText(/com até 3 subagentes/)).not.toBeInTheDocument();
     expect(aoFechar).not.toHaveBeenCalled();
     expect(opcao).toBeChecked();
+  });
+
+  it("excluir fica na linha Conversa, pede confirmação e, confirmado, remove e fecha o terminal", async () => {
+    const remover = vi.spyOn(api, "removerOrquestrador").mockResolvedValue(null);
+    const confirmar = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
+    const { acoes } = renderizar(orquestrador());
+    const botao = screen.getByRole("button", { name: "Excluir orquestrador" });
+
+    expect(botao.closest(".linha-da-criacao")).toHaveTextContent(/^Conversa/);
+    fireEvent.click(botao);
+    expect(confirmar).toHaveBeenCalledWith('Excluir "Painel de salas" e todo o histórico desta conversa?');
+    expect(remover).not.toHaveBeenCalled();
+
+    fireEvent.click(botao);
+    await waitFor(() => expect(acoes.fecharTerminal).toHaveBeenCalledWith("o1"));
+    expect(remover).toHaveBeenCalledWith("o1");
+    expect(acoes.recarregar).toHaveBeenCalled();
+  });
+
+  it("durante um pedido, excluir e nova conversa ficam desabilitados", () => {
+    renderizar(orquestrador(), { trabalhando: true });
+
+    expect(screen.getByRole("button", { name: "Excluir orquestrador" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Nova conversa" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Salvar" })).toBeEnabled();
   });
 
   it("o modo econômico é aplicado no servidor e o formulário mostra a configuração devolvida", async () => {
@@ -186,12 +283,10 @@ describe("PainelDeConfiguracao", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Modo econômico" }));
 
-    await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Esforço do orquestrador" })).toHaveValue("medio"),
-    );
+    await waitFor(() => expect(chipDoEsforco("do orquestrador")).toHaveTextContent("esforço médio"));
     expect(aplicarPredefinicao).toHaveBeenCalledWith("o1", "economico");
     expect(herdado).toHaveBeenCalledWith("o1");
-    expect(screen.getByRole("combobox", { name: "Esforço dos subagentes" })).toHaveValue("medio");
+    expect(chipDoEsforco("dos subagentes")).toHaveTextContent("esforço médio");
   });
 });
 
@@ -250,7 +345,12 @@ function canvasDoTerminal(conversa: EstadoDaConversa, resumo: ResumoDoOrquestrad
       limparBixinhos: vi.fn(),
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),
+      mudarEscalaDaLetra: vi.fn(),
       recarregar: vi.fn(async () => undefined),
+      abrirPrevia: vi.fn(),
+      navegarPrevia: vi.fn(),
+      minimizarOuRestaurarPrevia: vi.fn(),
+      fecharPrevia: vi.fn(),
     },
   };
 }
@@ -489,8 +589,31 @@ describe("NoTerminal · conversa nova", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Nova conversa" }));
 
-    expect(await screen.findByText("Orquestrador não encontrado.")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("✗ Orquestrador não encontrado.");
     expect(screen.getByRole("button", { name: "Nova conversa" })).toBeInTheDocument();
+  });
+});
+
+describe("NoTerminal · servidor no ar", () => {
+  it("com servidores detectados, a faixa acima do prompt abre a prévia ligada a este terminal", () => {
+    const conversa: EstadoDaConversa = {
+      ...ESTADO_INICIAL,
+      enderecosLocais: ["http://localhost:3001", "http://localhost:5173"],
+    };
+    const canvas = canvasDoTerminal(conversa);
+    render(<Terminal canvas={canvas} no={propsDoNo()} />);
+
+    expect(screen.getByText("servidor no ar")).toBeInTheDocument();
+    expect(screen.getByText("localhost:5173")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Abrir prévia de http://localhost:5173" }));
+
+    expect(canvas.acoes.abrirPrevia).toHaveBeenCalledWith("o1", "http://localhost:5173");
+  });
+
+  it("sem servidores, não há faixa", () => {
+    render(<Terminal canvas={canvasDoTerminal(ESTADO_INICIAL)} no={propsDoNo()} />);
+
+    expect(screen.queryByText("servidor no ar")).not.toBeInTheDocument();
   });
 });
 
@@ -581,10 +704,10 @@ describe("NoTerminal · fila de pedidos", () => {
     render(<Terminal canvas={canvasDoTerminal(conversa, comFila(PEDIDO_A, PEDIDO_B))} no={propsDoNo()} />);
 
     const itens = within(screen.getByRole("region", { name: "Fila de pedidos" })).getAllByRole("listitem");
-    expect(itens.map((item) => item.textContent)).toEqual(["1plan modeatualize o README✕", "2revise o PR✕"]);
+    expect(itens.map((item) => item.textContent)).toEqual(["1plan modeatualize o README", "2revise o PR"]);
   });
 
-  it("✕ tira o pedido da fila no servidor", async () => {
+  it("o X tira o pedido da fila no servidor", async () => {
     const remover = vi.spyOn(api, "removerDaFila").mockResolvedValue(null);
     render(<Terminal canvas={canvasDoTerminal(conversaDoTerminal(), comFila(PEDIDO_A, PEDIDO_B))} no={propsDoNo()} />);
 
@@ -698,7 +821,7 @@ describe("NoTerminal · fila de pedidos", () => {
 
     expect(screen.getByText(/^— conversa nova iniciada às/)).toBeInTheDocument();
     // Sem pedido rodando, a fila está pausada: o primeiro tem o "enviar agora".
-    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["1rode os testesenviar agora✕"]);
+    expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual(["1rode os testesenviar agora"]);
   });
 });
 

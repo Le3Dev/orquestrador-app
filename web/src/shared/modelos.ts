@@ -23,6 +23,7 @@ export const ESFORCOS_DO_CHAT: readonly { esforco: EsforcoDeRaciocinio; rotulo: 
   { esforco: "alto", rotulo: "Alto" },
   { esforco: "extra_alto", rotulo: "Extra alto" },
   { esforco: "maximo", rotulo: "Máximo" },
+  { esforco: "ultracode", rotulo: "Ultracode" },
 ];
 
 export const PREFERENCIAS_PADRAO_DO_CHAT: PreferenciasDoChat = { modelo: "opus", esforco: "alto" };
@@ -39,6 +40,7 @@ export const CONFIGURACAO_PADRAO_DO_ORQUESTRADOR: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
+  instrucoesPersonalizadas: "",
 };
 
 export function modeloNoSeletor(modelo: ModeloClaude): ModeloNoSeletor {

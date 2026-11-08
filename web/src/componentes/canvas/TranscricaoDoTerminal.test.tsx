@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 
 import type {
   DadosDaConfiguracao,
@@ -6,7 +6,9 @@ import type {
   EventoRegistrado,
   SinalDeVida,
 } from "../../shared/api/tipos";
+import { api } from "../../shared/api/cliente";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../../shared/estado/aplicarEvento";
+import { esquecerAutorrecuperacao } from "../../shared/hooks/useAutorrecuperacao";
 import type { AcoesDoPlano } from "./CartaoDoPlano";
 import { TranscricaoDoTerminal } from "./TranscricaoDoTerminal";
 
@@ -32,6 +34,7 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "edicao_e_comandos",
   permitirCommitEPush: false,
+  instrucoesPersonalizadas: "",
 };
 
 const USO = { duracaoMs: 1000, tokensDeEntrada: 1, tokensDeSaida: 1, subagentesLancados: 0 };
@@ -55,7 +58,19 @@ function aplicar(conversa: EstadoDaConversa, ...eventos: EventoDeOrquestracao[])
     .reduce(aplicarEvento, conversa);
 }
 
-function Transcricao({ conversa, sinal }: { conversa: EstadoDaConversa; sinal?: SinalDeVida }) {
+const semResposta = async () => undefined;
+
+function Transcricao({
+  conversa,
+  sinal,
+  desconectado = false,
+  aoResponderPergunta = semResposta,
+}: {
+  conversa: EstadoDaConversa;
+  sinal?: SinalDeVida;
+  desconectado?: boolean;
+  aoResponderPergunta?: (texto: string) => Promise<void>;
+}) {
   return (
     <TranscricaoDoTerminal
       orquestradorId="o1"
@@ -65,8 +80,9 @@ function Transcricao({ conversa, sinal }: { conversa: EstadoDaConversa; sinal?: 
       turnos={conversa.turnos}
       conversaIniciadaEm={conversa.conversaIniciadaEm}
       sinal={sinal}
-      desconectado={false}
+      desconectado={desconectado}
       acoesDoPlano={acoesDoPlano}
+      aoResponderPergunta={aoResponderPergunta}
     />
   );
 }
@@ -192,9 +208,239 @@ describe("TranscricaoDoTerminal", () => {
         sinal={undefined}
         desconectado={false}
         acoesDoPlano={acoesDoPlano}
+        aoResponderPergunta={semResposta}
       />,
     );
     expect(screen.getByText("econômico")).toHaveClass("chip");
+  });
+
+  describe("perguntas com opções", () => {
+    const perguntas = [
+      {
+        pergunta: "Qual banco usar?",
+        opcoes: [
+          { rotulo: "PostgreSQL", descricao: "Relacional" },
+          { rotulo: "SQLite", descricao: null },
+        ],
+        multipla: false,
+      },
+    ];
+    const perguntando = () =>
+      aplicar(
+        ESTADO_INICIAL,
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "crie o cadastro", configuracao },
+        { tipo: "turno_concluido", turnoId: "t1", resposta: "Antes, uma dúvida.", uso: USO, perguntas },
+      );
+
+    it("o turno que terminou perguntando mostra o cartão, e o clique responde pelo envio do terminal", async () => {
+      const aoResponderPergunta = vi.fn<(texto: string) => Promise<void>>().mockResolvedValue(undefined);
+      render(<Transcricao conversa={perguntando()} aoResponderPergunta={aoResponderPergunta} />);
+
+      expect(screen.getByText("Antes, uma dúvida.")).toBeInTheDocument();
+      expect(screen.getByRole("group", { name: "Pergunta do Claude" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "PostgreSQL" }));
+      await act(async () => undefined);
+
+      expect(aoResponderPergunta).toHaveBeenCalledWith("Qual banco usar? → PostgreSQL");
+      expect(screen.getByText(/· respondida/)).toBeInTheDocument();
+    });
+
+    it("com um pedido depois, fica travado; com um pedido rodando ou sem servidor, desabilitado", () => {
+      const conversa = perguntando();
+      const { rerender } = render(<Transcricao conversa={conversa} desconectado />);
+      expect(screen.getByRole("button", { name: "SQLite" })).toBeDisabled();
+      expect(screen.queryByText(/· respondida/)).not.toBeInTheDocument();
+
+      const comPedidoDepois = aplicar(conversa, {
+        tipo: "turno_iniciado",
+        turnoId: "t2",
+        texto: "Qual banco usar? → SQLite",
+        configuracao,
+      });
+      rerender(<Transcricao conversa={comPedidoDepois} />);
+      expect(screen.getByRole("button", { name: "SQLite" })).toBeDisabled();
+      expect(screen.getByText(/· respondida/)).toBeInTheDocument();
+    });
+
+    it("o bloco cru da pergunta não aparece no log enquanto o pedido roda", () => {
+      const conversa = aplicar(
+        ESTADO_INICIAL,
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "crie o cadastro", configuracao },
+        { tipo: "texto_do_orquestrador", turnoId: "t1", texto: "```pergunta-do-app\n{\"perguntas\":[" },
+        { tipo: "texto_do_orquestrador", turnoId: "t1", texto: "Antes, uma dúvida." },
+      );
+      render(<Transcricao conversa={conversa} />);
+
+      expect(screen.getByText("Antes, uma dúvida.")).toBeInTheDocument();
+      expect(screen.queryByText(/pergunta-do-app/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("group", { name: "Pergunta do Claude" })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("autorrecuperação", () => {
+    beforeEach(() => {
+      esquecerAutorrecuperacao();
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    const emAndamento = () =>
+      aplicar(ESTADO_INICIAL, { tipo: "turno_iniciado", turnoId: "t1", texto: "rode os testes", configuracao });
+    const linhaDoSinal = (texto: string | RegExp) => screen.getByText(texto).closest(".linha-do-terminal");
+
+    it("diagnóstico \"trabalhando\": uma linha neutra com o resumo, sem alarme", () => {
+      const lerPreferencias = vi.spyOn(api, "lerPreferencias");
+      render(
+        <Transcricao
+          conversa={emAndamento()}
+          sinal={{
+            turnoId: "t1",
+            em: "2026-10-28T12:00:05Z",
+            tokensPensando: 0,
+            diagnostico: { situacao: "trabalhando", resumo: "rodando `npm test` há 6 min" },
+          }}
+        />,
+      );
+
+      const linha = linhaDoSinal("rodando `npm test` há 6 min");
+      expect(linha).toHaveClass("linha-sistema");
+      expect(linha).not.toHaveClass("linha-erro");
+      expect(screen.queryByText(/sem notícias/)).not.toBeInTheDocument();
+      // Sem suspeita, nem precisa saber da preferência.
+      expect(lerPreferencias).not.toHaveBeenCalled();
+    });
+
+    it("diagnóstico \"suspeito\": avisa que o app retoma sozinho; com a autorrecuperação desligada, orienta cancelar", async () => {
+      const sinal: SinalDeVida = {
+        turnoId: "t1",
+        em: "2026-10-28T12:00:05Z",
+        tokensPensando: 0,
+        diagnostico: { situacao: "suspeito", resumo: "sem saída há 3 min, sem CPU" },
+      };
+      const lerPreferencias = vi
+        .spyOn(api, "lerPreferencias")
+        .mockResolvedValue({ instrucoesPadrao: "", subagentesProntos: [], autorrecuperacao: true });
+      const { unmount } = render(<Transcricao conversa={emAndamento()} sinal={sinal} />);
+      await act(async () => undefined);
+
+      const texto = "sem notícias do Claude há 6s: sem saída há 3 min, sem CPU. O app retoma sozinho se travar.";
+      expect(linhaDoSinal(texto)).toHaveClass("linha-erro");
+      expect(lerPreferencias).toHaveBeenCalledTimes(1);
+      unmount();
+
+      esquecerAutorrecuperacao();
+      lerPreferencias.mockResolvedValue({ instrucoesPadrao: "", subagentesProntos: [], autorrecuperacao: false });
+      render(<Transcricao conversa={emAndamento()} sinal={sinal} />);
+      await act(async () => undefined);
+
+      expect(
+        screen.getByText(
+          "sem notícias do Claude há 6s: sem saída há 3 min, sem CPU. Se continuar assim, cancele (esc) e reenvie.",
+        ),
+      ).toBeInTheDocument();
+    });
+
+    const aguardando = () =>
+      aplicar(
+        emAndamento(),
+        {
+          tipo: "recuperacao_do_turno",
+          turnoId: "t1",
+          etapa: "encerrado",
+          causa: "silencio",
+          tentativa: 1,
+          de: 2,
+          resumo: "sem saída há 5 min",
+          retomaEm: null,
+        },
+        { tipo: "turno_falhou", turnoId: "t1", motivo: "O Claude ficou em silêncio." },
+        {
+          tipo: "recuperacao_do_turno",
+          turnoId: "t1",
+          etapa: "aguardando",
+          causa: "silencio",
+          tentativa: 1,
+          de: 2,
+          resumo: "o Claude ficou calado",
+          retomaEm: "2026-10-28T12:02:11Z",
+        },
+      );
+
+    it("aguardando: cartão com a contagem regressiva e o \"cancelar retomada\", que cancela o orquestrador", async () => {
+      const cancelar = vi.spyOn(api, "cancelar").mockResolvedValue({ cancelando: true });
+      render(<Transcricao conversa={aguardando()} />);
+
+      const cartao = screen.getByRole("status", { name: "Retomada automática" });
+      expect(cartao).toHaveTextContent("Retomando em 02:05 (tentativa 1 de 2) · o Claude ficou calado");
+      act(() => vi.advanceTimersByTime(5_000));
+      expect(cartao).toHaveTextContent("Retomando em 02:00 (tentativa 1 de 2)");
+
+      fireEvent.click(screen.getByRole("button", { name: "cancelar retomada" }));
+      await act(async () => undefined);
+
+      expect(cancelar).toHaveBeenCalledWith("o1");
+      expect(screen.getByRole("button", { name: "cancelando…" })).toBeDisabled();
+    });
+
+    it("o cartão some quando a retomada é cancelada ou o turno novo começa", () => {
+      const conversa = aguardando();
+      const { rerender } = render(<Transcricao conversa={conversa} />);
+      expect(screen.getByRole("status", { name: "Retomada automática" })).toBeInTheDocument();
+
+      rerender(
+        <Transcricao
+          conversa={aplicar(conversa, {
+            tipo: "recuperacao_do_turno",
+            turnoId: "t1",
+            etapa: "cancelada",
+            causa: "silencio",
+            tentativa: 1,
+            de: 2,
+            resumo: "",
+            retomaEm: null,
+          })}
+        />,
+      );
+      expect(screen.queryByRole("status", { name: "Retomada automática" })).not.toBeInTheDocument();
+      expect(screen.getByText("retomada cancelada")).toBeInTheDocument();
+    });
+
+    it("o turno de retomada aparece como retomada automática, com a mensagem recolhida", () => {
+      const conversa = aplicar(aguardando(), {
+        tipo: "turno_iniciado",
+        turnoId: "t2",
+        texto: "Continue de onde parou.",
+        configuracao,
+        retomada: { deTurnoId: "t1", tentativa: 1 },
+      });
+      render(<Transcricao conversa={conversa} />);
+
+      expect(screen.getByText("retomada automática (tentativa 1)")).toBeInTheDocument();
+      expect(screen.getByText("Continue de onde parou.").closest("details")).not.toHaveAttribute("open");
+      expect(screen.queryByRole("status", { name: "Retomada automática" })).not.toBeInTheDocument();
+    });
+
+    it("desistiu: cartão de alerta com o diagnóstico e a orientação", () => {
+      const conversa = aplicar(aguardando(), {
+        tipo: "recuperacao_do_turno",
+        turnoId: "t1",
+        etapa: "desistiu",
+        causa: "silencio",
+        tentativa: 2,
+        de: 2,
+        resumo: "Tentei 2 vezes; o Claude travou nas duas no mesmo comando.",
+        retomaEm: null,
+      });
+      render(<Transcricao conversa={conversa} />);
+
+      const cartao = screen.getByRole("group", { name: "Retomada automática sem sucesso" });
+      expect(cartao).toHaveTextContent("Não consegui retomar sozinho (Claude em silêncio, 2 de 2 tentativas)");
+      expect(cartao).toHaveTextContent("Tentei 2 vezes; o Claude travou nas duas no mesmo comando.");
+      expect(cartao).toHaveTextContent(/reenvie o pedido .* ou confira o log acima/);
+      expect(screen.queryByRole("button", { name: "cancelar retomada" })).not.toBeInTheDocument();
+    });
   });
 
   it("depois do /clear, mostra o separador da conversa nova e só os pedidos dela", () => {

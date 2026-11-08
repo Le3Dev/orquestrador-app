@@ -4,6 +4,7 @@ import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { AcaoDoApp, ResumoDoOrquestrador } from "../../shared/api/tipos";
 import { AVISO_DO_LIMITE_DE_ORQUESTRADORES } from "../../shared/canvas/limiteDeTerminais";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
+import { nomeLivre } from "../../shared/nomeLivre";
 
 export interface PropsDasAcoesDoChat {
   /** Abre (ou foca) o terminal do Orquestrador no canvas. */
@@ -33,14 +34,35 @@ function mesmaPasta(a: string, b: string): boolean {
   return normalizar(a) === normalizar(b);
 }
 
+/** Instante do último uso: o início do último turno ou, sem turnos, a criação. */
+function ultimoUso(orquestrador: ResumoDoOrquestrador): number {
+  const criado = Date.parse(orquestrador.criadoEm);
+  const turno = orquestrador.ultimoTurno === null ? Number.NaN : Date.parse(orquestrador.ultimoTurno.iniciadoEm);
+  return Math.max(Number.isNaN(criado) ? 0 : criado, Number.isNaN(turno) ? 0 : turno);
+}
+
+/** Entre os Orquestradores da pasta, o usado mais recentemente. */
+function maisRecente(daPasta: readonly ResumoDoOrquestrador[]): ResumoDoOrquestrador | undefined {
+  let escolhido: ResumoDoOrquestrador | undefined;
+  for (const item of daPasta) {
+    if (escolhido === undefined || ultimoUso(item) > ultimoUso(escolhido)) {
+      escolhido = item;
+    }
+  }
+  return escolhido;
+}
+
 /**
  * Ação sugerida pelo Claude no chat: abrir um Orquestrador num projeto (e,
- * se houver, já mandar o pedido para ele). Só acontece no clique: reaproveita
- * o Orquestrador que já trabalha na mesma pasta ou cria um com a configuração
- * padrão, e abre o terminal dele no canvas.
+ * se houver, já mandar o pedido para ele). Só acontece no clique. Sem `novo`,
+ * reaproveita o Orquestrador da mesma pasta (o usado mais recentemente, se
+ * houver vários) ou cria um; com `novo`, cria sempre, com um nome que não se
+ * repete na pasta. Quem é criado recebe a configuração padrão. Depois abre o
+ * terminal dele no canvas.
  */
 export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOrquestradores }: Props) {
   const [etapa, setEtapa] = useState<Etapa>({ tipo: "pronto" });
+  const novo = acao.novo === true;
 
   async function executar(): Promise<void> {
     if (etapa.tipo === "executando") {
@@ -58,7 +80,8 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
     setEtapa({ tipo: "executando" });
     try {
       const existentes = await api.listarOrquestradores();
-      let orquestrador = existentes.find((item) => mesmaPasta(item.pastaDeTrabalho, acao.pasta));
+      const daPasta = existentes.filter((item) => mesmaPasta(item.pastaDeTrabalho, acao.pasta));
+      let orquestrador = novo ? undefined : maisRecente(daPasta);
       // Confere a vaga antes de criar: sem ela, nada é criado nem enviado.
       if (!temVagaPara(orquestrador?.id ?? null)) {
         setEtapa({ tipo: "erro", mensagem: AVISO_DO_LIMITE_DE_ORQUESTRADORES });
@@ -66,7 +89,7 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
       }
       if (orquestrador === undefined) {
         orquestrador = await api.criarOrquestrador({
-          nome: acao.projeto,
+          nome: nomeLivre(acao.projeto, daPasta.map((item) => item.nome)),
           pastaDeTrabalho: acao.pasta,
           ...CONFIGURACAO_PADRAO_DO_ORQUESTRADOR,
         });
@@ -86,7 +109,7 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
     <div className="cartao-de-acao">
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="font-titulo text-[12.5px] font-medium text-primary">
-          Abrir orquestrador em {acao.projeto}
+          {novo ? "Novo orquestrador em" : "Abrir orquestrador em"} {acao.projeto}
         </span>
         <span className="mono truncate text-muted" title={acao.pasta}>
           {acao.pasta}
@@ -107,12 +130,16 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
         onClick={() => void executar()}
       >
         {etapa.tipo === "executando"
-          ? "abrindo…"
+          ? novo
+            ? "criando…"
+            : "abrindo…"
           : etapa.tipo === "feito"
             ? "aberto ✓"
             : etapa.tipo === "erro"
               ? "tentar de novo"
-              : "abrir"}
+              : novo
+                ? "criar"
+                : "abrir"}
       </button>
     </div>
   );

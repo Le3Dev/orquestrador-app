@@ -29,7 +29,12 @@ function valorDoCanvas(alteracoes: Partial<ValorDoCanvas> = {}): ValorDoCanvas {
       limparBixinhos: vi.fn(),
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),
+      mudarEscalaDaLetra: vi.fn(),
       recarregar: vi.fn(async () => undefined),
+      abrirPrevia: vi.fn(),
+      navegarPrevia: vi.fn(),
+      minimizarOuRestaurarPrevia: vi.fn(),
+      fecharPrevia: vi.fn(),
     },
     ...alteracoes,
   };

@@ -1,4 +1,5 @@
 import type { JanelaDaCota } from "../orquestracao/EventoDeOrquestracao";
+import type { PerguntaDoApp } from "../perguntas/PerguntaDoApp";
 import type { AcaoDoApp } from "./AcaoDoApp";
 import type { AutorizacaoPendente, DadosDaMensagemDoChat } from "./MensagemDoChat";
 import type { UsoDaResposta } from "./MotorDeChat";
@@ -21,6 +22,11 @@ export type EventoDoChat =
       mensagemId: string;
       texto: string;
       acoes: AcaoDoApp[];
+      /**
+       * Perguntas com opções clicáveis (blocos ```pergunta-do-app), já fora do
+       * texto. Ausente nos eventos gravados antes do campo: valem [].
+       */
+      perguntas: PerguntaDoApp[];
       avisos: string[];
       uso: UsoDaResposta;
       /** A primeira edição ou comando negado por falta de autorização; nulo se não houve. */

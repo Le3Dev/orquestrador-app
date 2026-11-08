@@ -5,6 +5,7 @@ import {
   caminhoParaRegraDePermissao,
   COMANDOS_DE_PUSH_FORCADO,
   type ConfiguracoesDaSessao,
+  ferramentasDoEsforco,
   liberadasComArtefatos,
   nivelDeEsforcoDoClaudeCode,
   VARIAVEL_DE_ESFORCO,
@@ -105,6 +106,10 @@ export interface ArquivosDoChat {
  * edição ou o comando sem autorização é negado (e vira o pedido de
  * autorização na tela), em vez de esperar por alguém no terminal.
  *
+ * Com esforço `ultracode`, o `Workflow` entra nas duas listas, com ou sem
+ * autorização (`ferramentasDoEsforco`): ele só orquestra agentes, e os
+ * agentes dele seguem as mesmas permissões da sessão.
+ *
  * A raiz dos projetos entra em `--add-dir`: leitura sempre e, autorizado,
  * edição. A pasta de artefatos também entra em `--add-dir`, com gravação
  * liberada sempre (`ferramentasLiberadasDoChat`). `--settings` entra sempre,
@@ -115,7 +120,11 @@ export interface ArquivosDoChat {
  */
 export function montarArgumentosDoChat(pergunta: PerguntaAoMotorDeChat, arquivos: ArquivosDoChat): string[] {
   const esforco = nivelDeEsforcoDoClaudeCode(pergunta.esforco);
-  const liberadas = ferramentasLiberadasDoChat(pergunta.alteracoesAutorizadas, pergunta.pastaDeArtefatos);
+  const doEsforco = ferramentasDoEsforco(pergunta.esforco);
+  const liberadas = [
+    ...ferramentasLiberadasDoChat(pergunta.alteracoesAutorizadas, pergunta.pastaDeArtefatos),
+    ...doEsforco,
+  ];
   return [
     "-p",
     "--input-format",
@@ -142,6 +151,7 @@ export function montarArgumentosDoChat(pergunta: PerguntaAoMotorDeChat, arquivos
     "dontAsk",
     "--tools",
     ...FERRAMENTAS_DO_CHAT,
+    ...doEsforco,
     "--allowedTools",
     ...liberadas,
     "--disallowedTools",

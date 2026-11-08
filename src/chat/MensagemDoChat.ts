@@ -1,4 +1,5 @@
 import type { TipoDeImagem } from "../orquestracao/Anexo";
+import { copiarPergunta, PerguntaDoApp } from "../perguntas/PerguntaDoApp";
 import type { AcaoDoApp } from "./AcaoDoApp";
 import type { UsoDaResposta } from "./MotorDeChat";
 
@@ -34,6 +35,8 @@ export interface DadosDaMensagemDoChat {
   criadaEm: string;
   situacao: SituacaoDaMensagem;
   acoes: AcaoDoApp[];
+  /** Perguntas com opções clicáveis da resposta; ausente nas mensagens gravadas antes do campo (vale []). */
+  perguntas: PerguntaDoApp[];
   /** Avisos legíveis: ações ignoradas, ações bloqueadas, o motivo de uma falha. */
   avisos: string[];
   uso: UsoDaResposta | null;
@@ -57,17 +60,18 @@ export class MensagemDoChat {
     private readonly criadaEmMs: number,
     private situacaoAtual: SituacaoDaMensagem,
     private acoesAtuais: readonly AcaoDoApp[],
+    private perguntasAtuais: readonly PerguntaDoApp[],
     private avisosAtuais: readonly string[],
     private usoAtual: UsoDaResposta | null,
     private autorizacaoPendenteAtual: AutorizacaoPendente | null,
   ) {}
 
   static pergunta(id: string, texto: string, imagens: readonly ImagemDaMensagem[], agora: Date): MensagemDoChat {
-    return new MensagemDoChat(id, "usuario", texto, [...imagens], agora.getTime(), "concluida", [], [], null, null);
+    return new MensagemDoChat(id, "usuario", texto, [...imagens], agora.getTime(), "concluida", [], [], [], null, null);
   }
 
   static resposta(id: string, agora: Date): MensagemDoChat {
-    return new MensagemDoChat(id, "claude", "", [], agora.getTime(), "respondendo", [], [], null, null);
+    return new MensagemDoChat(id, "claude", "", [], agora.getTime(), "respondendo", [], [], [], null, null);
   }
 
   static reconstituir(dados: DadosDaMensagemDoChat): MensagemDoChat {
@@ -79,6 +83,7 @@ export class MensagemDoChat {
       Date.parse(dados.criadaEm),
       dados.situacao,
       dados.acoes ?? [],
+      (dados.perguntas ?? []).map(copiarPergunta),
       dados.avisos ?? [],
       dados.uso ?? null,
       copiarAutorizacaoPendente(dados.autorizacaoPendente ?? null),
@@ -101,6 +106,10 @@ export class MensagemDoChat {
     return this.autorizacaoPendenteAtual;
   }
 
+  get perguntas(): readonly PerguntaDoApp[] {
+    return this.perguntasAtuais;
+  }
+
   acrescentar(trecho: string): void {
     this.textoAtual += trecho;
   }
@@ -111,9 +120,11 @@ export class MensagemDoChat {
     avisos: readonly string[],
     uso: UsoDaResposta,
     autorizacaoPendente: AutorizacaoPendente | null,
+    perguntas: readonly PerguntaDoApp[] = [],
   ): void {
     this.textoAtual = texto;
     this.acoesAtuais = [...acoes];
+    this.perguntasAtuais = perguntas.map(copiarPergunta);
     this.avisosAtuais = [...avisos];
     this.usoAtual = uso;
     this.autorizacaoPendenteAtual = copiarAutorizacaoPendente(autorizacaoPendente);
@@ -140,6 +151,7 @@ export class MensagemDoChat {
       criadaEm: new Date(this.criadaEmMs).toISOString(),
       situacao: this.situacaoAtual,
       acoes: this.acoesAtuais.map((acao) => ({ ...acao })),
+      perguntas: this.perguntasAtuais.map(copiarPergunta),
       avisos: [...this.avisosAtuais],
       uso: this.usoAtual === null ? null : { ...this.usoAtual },
       autorizacaoPendente: this.autorizacaoPendenteAtual === null ? null : { ...this.autorizacaoPendenteAtual },

@@ -10,7 +10,6 @@ import {
   useNodesState,
   useReactFlow,
   type EdgeTypes,
-  type FitViewOptions,
   type NodeChange,
   type NodeTypes,
 } from "@xyflow/react";
@@ -31,7 +30,10 @@ import { ArestaDoBixinho } from "../componentes/canvas/ArestaDoBixinho";
 import { NoArtefato } from "../componentes/canvas/NoArtefato";
 import { NoBixinho } from "../componentes/canvas/NoBixinho";
 import { NoNota } from "../componentes/canvas/NoNota";
+import { NoPrevia } from "../componentes/canvas/NoPrevia";
+import { NavegadorDePastas } from "../componentes/canvas/NavegadorDePastas";
 import { NoRascunho } from "../componentes/canvas/NoRascunho";
+import { NoShell } from "../componentes/canvas/NoShell";
 import { NoTerminal } from "../componentes/canvas/NoTerminal";
 import { BarraDeTituloDoApp } from "../componentes/canvas/BarraDeTituloDoApp";
 import { type ControleDaPaleta, PaletaDeComandos } from "../componentes/canvas/PaletaDeComandos";
@@ -42,8 +44,12 @@ import {
   BarraDoCanvas,
   Doca,
   ErroDoCanvas,
+  type PainelDaBarra,
   StatusDoCanvas,
 } from "../componentes/canvas/PaineisDoCanvas";
+import { PainelDeInstrucoesGerais } from "../componentes/canvas/PainelDeInstrucoesGerais";
+import { PainelDeSubagentes } from "../componentes/canvas/PainelDeSubagentes";
+import { api, ErroDaApi, mensagemDeErro } from "../shared/api/cliente";
 import type { ResumoDoArtefato } from "../shared/api/artefatos";
 import type { ResumoDoOrquestrador } from "../shared/api/tipos";
 import {
@@ -60,6 +66,13 @@ import {
 } from "../shared/canvas/artefatos";
 import { type AcoesDoCanvas, ProvedorDoCanvas, servidorParaOsNos, type ValorDoCanvas } from "../shared/canvas/contexto";
 import {
+  escolherEnquadramento,
+  ZOOM_MAXIMO_DO_ENQUADRAMENTO,
+  ZOOM_MINIMO_DO_ENQUADRAMENTO,
+} from "../shared/canvas/enquadramento";
+import {
+  ESCALA_DA_LETRA_PADRAO,
+  type EscalaDaLetra,
   type JanelaParaOrganizar,
   lerBixinhosLimpos,
   lerLayout,
@@ -68,8 +81,10 @@ import {
   posicaoParaNovoTerminal,
   salvarBixinhosLimpos,
   TAMANHO_DA_NOTA,
+  TAMANHO_DA_PREVIA,
   TAMANHO_DO_ARTEFATO,
   TAMANHO_DO_RASCUNHO,
+  TAMANHO_DO_SHELL,
   TAMANHO_DO_TERMINAL,
   type Viewport,
 } from "../shared/canvas/layout";
@@ -77,19 +92,32 @@ import { AVISO_DO_LIMITE_DE_ORQUESTRADORES, cabeOutroTerminal } from "../shared/
 import {
   ALCA_DO_TERMINAL,
   type ArestaDoCanvas,
+  arestasDasPrevias,
   arestasDosBixinhos,
+  arestasDosShells,
+  comEscalaDaLetra,
   ehArtefato,
   ehBixinho,
   ehNota,
+  ehPrevia,
+  ehRascunho,
+  ehShell,
   ehTerminal,
   idDoNoDaNota,
+  idDoNoDaPrevia,
   idDoNoDoArtefato,
+  idDoNoDoShell,
   limparBixinhos,
   mesmasLigacoes,
+  minimizarOuRestaurar,
   type NoDoCanvas,
+  type NoPrevia as TipoDaPrevia,
   type NoRascunho as TipoDoRascunho,
   nosDoLayout,
+  novaPrevia,
+  novoShell,
   novoTerminal,
+  posicaoDaPreviaDoTerminal,
   reacomodarBixinhos,
   reaproveitarArestas,
   semTerminal,
@@ -97,6 +125,12 @@ import {
   subagentesVisiveis,
 } from "../shared/canvas/nos";
 import { ProvedorDasNotas } from "../shared/canvas/notas";
+import {
+  type AcoesDosShells,
+  type OrigemDoShell,
+  ProvedorDosShells,
+  TAMANHO_INICIAL_DO_SHELL,
+} from "../shared/canvas/shells";
 import { useAjustesDoAplicativo } from "../shared/hooks/useAjustesDoAplicativo";
 import { useArtefatos } from "../shared/hooks/useArtefatos";
 import { useAtualizacao } from "../shared/hooks/useAtualizacao";
@@ -106,7 +140,9 @@ import { useConversas } from "../shared/hooks/useConversas";
 import { useMovimentoDoCanvas } from "../shared/hooks/useMovimentoDoCanvas";
 import { useNotas } from "../shared/hooks/useNotas";
 import { useOrquestradores } from "../shared/hooks/useOrquestradores";
+import { usePreferenciasDaTela } from "../shared/hooks/usePreferenciasDaTela";
 import { useReaproveitado } from "../shared/hooks/useReaproveitado";
+import { useRodaDoCanvas } from "../shared/hooks/useRodaDoCanvas";
 import { useServidor } from "../shared/hooks/useServidor";
 import type { AcaoDaPaleta, FonteDaPaleta, ItemDaPaleta } from "../shared/paletaDeComandos";
 
@@ -119,11 +155,20 @@ const TIPOS_DE_NO = {
   bixinho: NoBixinho,
   nota: NoNota,
   artefato: NoArtefato,
+  previa: NoPrevia,
+  shell: NoShell,
 } satisfies NodeTypes;
 const TIPOS_DE_ARESTA = { bixinho: ArestaDoBixinho } satisfies EdgeTypes;
-// Nunca acima de 100%: o texto dos terminais só fica nítido em zoom inteiro
-// (100%), e enquadrar não deve ampliar além disso.
-const ENQUADRAMENTO_AO_ABRIR: FitViewOptions<NoDoCanvas> = { maxZoom: 1, padding: 0.15 };
+// Enquadrar nunca passa de 100% (o texto dos terminais só fica nítido em zoom
+// inteiro) nem desce de 60% (ver `escolherEnquadramento`).
+/** Folga do enquadramento ao abrir o canvas. */
+const FOLGA_AO_ABRIR = 0.15;
+/** Folga do "enquadrar tudo" (controles, paleta). */
+const FOLGA_DO_ENQUADRAMENTO = 0.12;
+/** Os limites de zoom do canvas: do <ReactFlow> e do zoom por cima das caixas. */
+const LIMITES_DO_ZOOM = { minZoom: 0.1, maxZoom: 2 };
+/** O nome do botão de enquadrar dos controles: o mesmo do botão padrão do React Flow. */
+const ROTULO_DO_ENQUADRAR = "Fit View";
 const VIEWPORT_PADRAO: Viewport = { x: 0, y: 0, zoom: 1 };
 /** Nome e dica do "Organizar", o 4º botão dos controles do canto inferior esquerdo. */
 const DICA_DO_ORGANIZAR = "Organizar: terminais lado a lado; notas e artefatos à direita";
@@ -132,6 +177,8 @@ const DICA_DO_ORGANIZAR = "Organizar: terminais lado a lado; notas e artefatos �
  * margem): a janela de um artefato aberta "no centro" fica acima dele.
  */
 const ALTURA_RESERVADA_AO_CHAT = 110;
+/** Altura, na área do canvas, da faixa ocupada pela barra do canvas (com folga). */
+const TOPO_LIVRE_DA_TELA_PX = 84;
 
 /** Foco num campo de texto: o atalho é do campo, não do canvas. */
 function focoEmCampoDeTexto(alvo: EventTarget | null): boolean {
@@ -167,6 +214,12 @@ function classeNoMinimapa(no: NoDoCanvas, trabalhando: ReadonlySet<string>): str
   if (ehArtefato(no)) {
     return "minimapa-artefato";
   }
+  if (ehPrevia(no)) {
+    return "minimapa-previa";
+  }
+  if (ehShell(no)) {
+    return "minimapa-shell";
+  }
   return ehTerminal(no) && trabalhando.has(no.data.orquestradorId)
     ? "minimapa-terminal minimapa-terminal-trabalhando"
     : "minimapa-terminal";
@@ -179,6 +232,11 @@ function tamanhoParaOrganizar(no: NoDoCanvas, padrao: { largura: number; altura:
     largura: no.width ?? no.measured?.width ?? padrao.largura,
     altura: no.height ?? no.measured?.height ?? padrao.altura,
   };
+}
+
+/** Os nós com os selecionados desmarcados; os outros continuam o mesmo objeto e não re-renderizam. */
+function semSelecao(nos: readonly NoDoCanvas[]): NoDoCanvas[] {
+  return nos.map((no) => (no.selected === true ? { ...no, selected: false } : no));
 }
 
 /** O mesmo array enquanto os ids e a ordem não mudam. */
@@ -204,9 +262,25 @@ function useMaisRecente<Valor>(a: Valor | null, b: Valor | null): Valor | null {
 /** Atraso para o React Flow medir um nó recém-criado antes de enquadrá-lo. */
 const ESPERA_PARA_MEDIR_MS = 80;
 
+/** O ícone do enquadrar: o mesmo do botão padrão dos controles do React Flow. */
+function IconeDoEnquadrar() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 30">
+      <path d="M3.692 4.63c0-.53.4-.938.939-.938h5.215V0H4.708C2.13 0 0 2.054 0 4.63v5.216h3.692V4.631zM27.354 0h-5.2v3.692h5.17c.53 0 .984.4.984.939v5.215H32V4.631A4.624 4.624 0 0027.354 0zm.954 24.83c0 .532-.4.94-.939.94h-5.215v3.768h5.215c2.577 0 4.631-2.13 4.631-4.707v-5.139h-3.692v5.139zm-23.677.94c-.531 0-.939-.4-.939-.94v-5.138H0v5.139c0 2.577 2.13 4.707 4.708 4.707h5.138V25.77H4.631z" />
+    </svg>
+  );
+}
+
+/**
+ * O quadro do canvas sem janelas. Mora dentro do <ReactFlow>, na camada 4 (a
+ * dos nós): os painéis dele (barra do topo, controles, minimapa e o chat
+ * rápido) ficam na 5, então a conversa do chat, que abre para cima, passa por
+ * cima do quadro e continua clicável. Fora do <ReactFlow>, que é um contexto
+ * de empilhamento próprio, o quadro cobria todos eles.
+ */
 function CanvasVazio({ aoCriar }: { aoCriar: () => void }) {
   return (
-    <div className="canvas-vazio pointer-events-none absolute inset-0 grid place-items-center">
+    <div className="camada-do-canvas-vazio canvas-vazio pointer-events-none absolute inset-0 z-[4] grid place-items-center">
       <div className="painel-flutuante pointer-events-auto flex max-w-md flex-col items-center gap-4 px-8 py-7 text-center">
         <div className="no-orquestrador-icone h-12 w-12">
           <IconeOrquestrador tamanho={26} />
@@ -230,7 +304,7 @@ function CanvasVazio({ aoCriar }: { aoCriar: () => void }) {
 function Canvas() {
   const { orquestradores, erro, recarregar } = useOrquestradores();
   const [layoutInicial] = useState(lerLayout);
-  // Enquadra só ao abrir com terminais (ou notas) salvos e sem posição de
+  // Enquadra só ao abrir com terminais (notas, artefatos ou prévias) salvos e sem posição de
   // câmera salva. Com o canvas vazio, o React Flow enquadraria o primeiro
   // terminal criado depois, com zoom exagerado.
   // Dentro do app desktop, a barra de título é da tela (com o status).
@@ -247,7 +321,9 @@ function Canvas() {
       layoutInicial.viewport === null &&
       Object.keys(layoutInicial.terminais).length +
         Object.keys(layoutInicial.notas).length +
-        Object.keys(layoutInicial.artefatos).length >
+        Object.keys(layoutInicial.artefatos).length +
+        Object.keys(layoutInicial.previas).length +
+        Object.keys(layoutInicial.shells).length >
         0,
   );
   const [nosIniciais] = useState(() => nosDoLayout(layoutInicial));
@@ -257,6 +333,8 @@ function Canvas() {
   // Grava o layout (só depois de soltar um arraste) e marca quando algo se move.
   const movimento = useMovimentoDoCanvas(nos, layoutInicial.viewport);
   const { aoTerminarArraste } = movimento;
+  // Pinça/Ctrl+roda e o deslize que a caixa não rola também por cima das caixas (áreas `nowheel`).
+  useRodaDoCanvas(areaDoCanvas, LIMITES_DO_ZOOM);
 
   // Bixinhos que ficaram por cima de outra janela se reacomodam ao soltar um
   // arraste, ao terminar de redimensionar, ao abrir uma janela e ao organizar
@@ -269,11 +347,19 @@ function Canvas() {
     reacomodar();
   }, [aoTerminarArraste, reacomodar]);
 
+  // Enquanto uma janela é redimensionada, os sites das prévias não podem
+  // capturar o mouse (classe `canvas-redimensionando`, como `canvas-movendo`).
+  const [redimensionando, setRedimensionando] = useState(false);
+
   const aoMudarNosEReacomodar = useCallback(
     (mudancas: NodeChange<NoDoCanvas>[]) => {
       aoMudarNos(mudancas);
+      if (mudancas.some((mudanca) => mudanca.type === "dimensions" && mudanca.resizing === true)) {
+        setRedimensionando(true);
+      }
       // Fim de um redimensionamento (o React Flow manda `resizing: false` só ao soltar a alça).
       if (mudancas.some((mudanca) => mudanca.type === "dimensions" && mudanca.resizing === false)) {
+        setRedimensionando(false);
         reacomodar();
       }
     },
@@ -301,6 +387,10 @@ function Canvas() {
   const { conversas, conexoes, sinais } = useConversas(idsNoCanvas, servidor.conectado);
   const chatAoVivo = useChat(servidor.conectado);
   const { chat } = chatAoVivo;
+  // Chat fixo à esquerda (painel Configurações do ⚙ ou o botão do próprio chat).
+  const { preferencias: preferenciasDaTela, mudarPreferencias: mudarPreferenciasDaTela } = usePreferenciasDaTela();
+  const chatFixo = preferenciasDaTela.chatFixoNaEsquerda;
+  const larguraDoChatFixo = preferenciasDaTela.larguraDoChatFixo;
   // Limpar lê as conversas por aqui, para as ações do canvas não mudarem a cada evento.
   const conversasAtuais = useRef(conversas);
 
@@ -373,11 +463,15 @@ function Canvas() {
   // terminal ou passa para outro lado dele (as pontas seguem o lado), ou
   // quando chega um evento; e o React Flow só recebe um array novo quando
   // alguma linha mudou de fato. Arrastar sem trocar de lado não muda nenhuma.
+  // As prévias e os shells entram também: a linha tracejada do terminal até a janela que saiu dele.
   const ligados = useReaproveitado(
-    nos.filter((no) => ehTerminal(no) || ehBixinho(no)),
+    nos.filter((no) => ehTerminal(no) || ehBixinho(no) || ehPrevia(no) || ehShell(no)),
     mesmasLigacoes,
   );
-  const arestasCalculadas = useMemo(() => arestasDosBixinhos(ligados, conversas), [ligados, conversas]);
+  const arestasCalculadas = useMemo(
+    () => [...arestasDosBixinhos(ligados, conversas), ...arestasDasPrevias(ligados), ...arestasDosShells(ligados)],
+    [ligados, conversas],
+  );
   const arestas = useReaproveitado(arestasCalculadas, reaproveitarArestas);
 
   // O centro da área do canvas (no desktop, abaixo da barra de título).
@@ -400,6 +494,37 @@ function Canvas() {
       setTimeout(() => void fluxo.fitView({ nodes: [{ id }], duration: 500, padding: 0.3, maxZoom: 1 }), ESPERA_PARA_MEDIR_MS);
     },
     [fluxo],
+  );
+
+  /**
+   * Mostra a prévia junto do terminal que a abriu, sem aproximar além do zoom
+   * atual: no máximo afasta, quando os dois não cabem na tela.
+   */
+  const enquadrarSemAproximar = useCallback(
+    (ids: readonly string[]) => {
+      setTimeout(() => {
+        const nos = ids.filter((id) => fluxo.getNode(id) !== undefined).map((id) => ({ id }));
+        void fluxo.fitView({ nodes: nos, duration: 500, padding: 0.15, maxZoom: Math.min(1, fluxo.getZoom()) });
+      }, ESPERA_PARA_MEDIR_MS);
+    },
+    [fluxo],
+  );
+
+  /** Onde abrir uma janela nova no centro da área visível, sem cobrir as que já estão ali. */
+  const posicaoNoCentroVisivel = useCallback(
+    (atuais: readonly NoDoCanvas[], tamanho: { largura: number; altura: number }): Ponto => {
+      const centralizada = posicaoParaNovoTerminal(
+        centroDaTela(),
+        tamanho,
+        atuais.filter((no) => !ehBixinho(no)).map((no) => no.position),
+      );
+      // Em telas baixas, centralizar esconderia a barra de título da janela atrás
+      // da barra do canvas: o topo da janela começa sempre abaixo dela.
+      const topoDaArea = areaDoCanvas.current?.getBoundingClientRect().top ?? 0;
+      const topoLivre = fluxo.screenToFlowPosition({ x: 0, y: topoDaArea + TOPO_LIVRE_DA_TELA_PX }).y;
+      return { ...centralizada, y: Math.max(centralizada.y, Math.round(topoLivre)) };
+    },
+    [centroDaTela, fluxo],
   );
 
   // Artefatos: a lista e os eventos ao vivo vêm do hook; os resumos vão para
@@ -433,15 +558,18 @@ function Canvas() {
     setNos((atuais) => sincronizarArtefatos(atuais, existentes));
   }, [artefatosCarregados, listaDeArtefatos, setNos]);
 
-  /** O centro da área do canvas acima do chat rápido (que fica no pé da tela). */
+  /**
+   * O centro da área do canvas acima do chat rápido (que fica no pé da tela).
+   * Com o chat fixo à esquerda, fora da área, é o próprio centro.
+   */
   const centroAcimaDoChat = useCallback((): Ponto => {
     const area = areaDoCanvas.current?.getBoundingClientRect();
-    if (area === undefined || area.width <= 0 || area.height <= 0) {
+    if (chatFixo || area === undefined || area.width <= 0 || area.height <= 0) {
       return centroDaTela();
     }
     const alturaLivre = Math.max(area.height - ALTURA_RESERVADA_AO_CHAT, area.height / 2);
     return fluxo.screenToFlowPosition({ x: area.left + area.width / 2, y: area.top + alturaLivre / 2 });
-  }, [centroDaTela, fluxo]);
+  }, [centroDaTela, chatFixo, fluxo]);
 
   /**
    * Abre a janela do artefato, se ainda não estiver aberta: ao lado do terminal
@@ -540,11 +668,7 @@ function Canvas() {
     }
     const id = `rascunho:${crypto.randomUUID()}`;
     setNos((atuais) => {
-      const posicao = posicaoParaNovoTerminal(
-        centroDaTela(),
-        TAMANHO_DO_RASCUNHO,
-        atuais.filter((no) => !ehBixinho(no)).map((no) => no.position),
-      );
+      const posicao = posicaoNoCentroVisivel(atuais, TAMANHO_DO_RASCUNHO);
       const rascunho: TipoDoRascunho = {
         id,
         type: "rascunho",
@@ -557,7 +681,162 @@ function Canvas() {
       };
       return reacomodarBixinhos([...atuais.map((no) => ({ ...no, selected: false })), rascunho]);
     });
-  }, [centroDaTela, reservarVaga, setNos]);
+  }, [posicaoNoCentroVisivel, reservarVaga, setNos]);
+
+  /** O botão Prévia da barra: uma prévia vazia no centro da tela, com o campo de endereço focado. */
+  const novaPreviaVazia = useCallback(() => {
+    const previaId = crypto.randomUUID();
+    setNos((atuais) => {
+      const previa = novaPrevia(previaId, posicaoNoCentroVisivel(atuais, TAMANHO_DA_PREVIA), {
+        url: "",
+        orquestradorId: null,
+      });
+      return reacomodarBixinhos([...semSelecao(atuais), { ...previa, selected: true }]);
+    });
+  }, [posicaoNoCentroVisivel, setNos]);
+
+  const abrirPrevia = useCallback(
+    (orquestradorId: string, url: string) => {
+      const mesma = (no: NoDoCanvas): no is TipoDaPrevia =>
+        ehPrevia(no) && no.data.orquestradorId === orquestradorId && no.data.url === url;
+      const previaId = crypto.randomUUID();
+      const existente = fluxo.getNodes().find(mesma);
+      setNos((atuais) => {
+        const aberta = atuais.find(mesma);
+        if (aberta !== undefined) {
+          return aberta.data.minimizada
+            ? reacomodarBixinhos(atuais.map((no) => (no === aberta ? minimizarOuRestaurar(aberta) : no)))
+            : atuais;
+        }
+        // Ao lado do terminal, longe das outras janelas; sem o terminal no canvas, no centro da tela.
+        const posicao =
+          posicaoDaPreviaDoTerminal(atuais, orquestradorId, TAMANHO_DA_PREVIA) ??
+          posicaoNoCentroVisivel(atuais, TAMANHO_DA_PREVIA);
+        const previa = novaPrevia(previaId, posicao, { url, orquestradorId });
+        return reacomodarBixinhos([...semSelecao(atuais), { ...previa, selected: true }]);
+      });
+      enquadrarSemAproximar([orquestradorId, existente?.id ?? idDoNoDaPrevia(previaId)]);
+    },
+    [fluxo, enquadrarSemAproximar, posicaoNoCentroVisivel, setNos],
+  );
+
+  const navegarPrevia = useCallback(
+    (previaId: string, url: string) =>
+      setNos((atuais) =>
+        atuais.map((no) => (ehPrevia(no) && no.data.previaId === previaId ? { ...no, data: { ...no.data, url } } : no)),
+      ),
+    [setNos],
+  );
+
+  const minimizarOuRestaurarPrevia = useCallback(
+    (previaId: string) =>
+      setNos((atuais) =>
+        reacomodarBixinhos(
+          atuais.map((no) => (ehPrevia(no) && no.data.previaId === previaId ? minimizarOuRestaurar(no) : no)),
+        ),
+      ),
+    [setNos],
+  );
+
+  const fecharPrevia = useCallback(
+    (previaId: string) => setNos((atuais) => atuais.filter((no) => !ehPrevia(no) || no.data.previaId !== previaId)),
+    [setNos],
+  );
+
+  // Terminais de shell (o bloco "Terminal"): a recusa do servidor (409, o
+  // limite) aparece abaixo da barra do canvas, como aviso; as outras falhas, como erro.
+  const [erroDosShells, setErroDosShells] = useState<{ mensagem: string; nivel: "erro" | "aviso" } | null>(null);
+  const descartarErroDosShells = useCallback(() => setErroDosShells(null), []);
+  const [escolhendoPastaDoShell, setEscolhendoPastaDoShell] = useState(false);
+
+  const mostrarFalhaDoShell = useCallback((falha: unknown) => {
+    setErroDosShells({
+      mensagem: mensagemDeErro(falha),
+      nivel: falha instanceof ErroDaApi && falha.status === 409 ? "aviso" : "erro",
+    });
+  }, []);
+
+  /** Cria o shell no servidor e abre o bloco: ao lado do terminal do Orquestrador, ou no centro da tela. */
+  const abrirShell = useCallback(
+    (origem: OrigemDoShell) => {
+      setErroDosShells(null);
+      api
+        .criarShell({ ...origem, ...TAMANHO_INICIAL_DO_SHELL })
+        .then((criado) => {
+          const shellId = crypto.randomUUID();
+          const ligadoA = criado.orquestradorId;
+          setNos((atuais) => {
+            const posicao =
+              (ligadoA === null ? null : posicaoDaPreviaDoTerminal(atuais, ligadoA, TAMANHO_DO_SHELL)) ??
+              posicaoNoCentroVisivel(atuais, TAMANHO_DO_SHELL);
+            const shell = novoShell(shellId, posicao, {
+              terminalId: criado.id,
+              pasta: criado.pasta,
+              orquestradorId: ligadoA,
+            });
+            return reacomodarBixinhos([...semSelecao(atuais), { ...shell, selected: true }]);
+          });
+          if (ligadoA !== null) {
+            enquadrarSemAproximar([ligadoA, idDoNoDoShell(shellId)]);
+          }
+        })
+        .catch(mostrarFalhaDoShell);
+    },
+    [enquadrarSemAproximar, mostrarFalhaDoShell, posicaoNoCentroVisivel, setNos],
+  );
+
+  /** Tira o bloco do canvas e encerra o shell no servidor (já encerrado, o 404 não é falha). */
+  const fecharShell = useCallback(
+    (shellId: string) => {
+      const bloco = nosAtuais.current.filter(ehShell).find((no) => no.data.shellId === shellId);
+      setNos((atuais) => atuais.filter((no) => !ehShell(no) || no.data.shellId !== shellId));
+      if (bloco !== undefined) {
+        api.encerrarShell(bloco.data.terminalId).catch((falha: unknown) => {
+          if (!(falha instanceof ErroDaApi && falha.status === 404)) {
+            mostrarFalhaDoShell(falha);
+          }
+        });
+      }
+    },
+    [mostrarFalhaDoShell, setNos],
+  );
+
+  /** O shell encerrou: abre outro na mesma pasta e troca o id do terminal no mesmo bloco (que religa). */
+  const reabrirShell = useCallback(
+    (shellId: string) => {
+      const bloco = nosAtuais.current.filter(ehShell).find((no) => no.data.shellId === shellId);
+      if (bloco === undefined) {
+        return;
+      }
+      setErroDosShells(null);
+      api
+        .criarShell({ pasta: bloco.data.pasta, ...TAMANHO_INICIAL_DO_SHELL })
+        .then((criado) =>
+          setNos((atuais) =>
+            atuais.map((no) =>
+              ehShell(no) && no.data.shellId === shellId ? { ...no, data: { ...no.data, terminalId: criado.id } } : no,
+            ),
+          ),
+        )
+        .catch(mostrarFalhaDoShell);
+    },
+    [mostrarFalhaDoShell, setNos],
+  );
+
+  const valorDosShells = useMemo<AcoesDosShells>(
+    () => ({ abrirShell, fecharShell, reabrirShell }),
+    [abrirShell, fecharShell, reabrirShell],
+  );
+
+  const pedirPastaDoShell = useCallback(() => setEscolhendoPastaDoShell(true), []);
+  const fecharEscolhaDaPastaDoShell = useCallback(() => setEscolhendoPastaDoShell(false), []);
+  const abrirShellNaPasta = useCallback(
+    (pasta: string) => {
+      setEscolhendoPastaDoShell(false);
+      abrirShell({ pasta });
+    },
+    [abrirShell],
+  );
 
   const abrirTerminal = useCallback(
     (orquestradorId: string) => {
@@ -603,11 +882,15 @@ function Canvas() {
       criadosAgora.current.add(orquestrador.id);
       setNos((atuais) => {
         const rascunho = atuais.find((no) => no.id === rascunhoId);
+        // O tamanho da letra escolhido no rascunho passa para o terminal, com a altura na mesma proporção.
+        const escalaDaLetra =
+          rascunho !== undefined && ehRascunho(rascunho) ? rascunho.data.escalaDaLetra : undefined;
         const terminal = novoTerminal(
           orquestrador.id,
           rascunho?.position ?? centroDaTela(),
           rascunho?.width ?? TAMANHO_DO_TERMINAL.largura,
-          TAMANHO_DO_TERMINAL.altura,
+          Math.round(TAMANHO_DO_TERMINAL.altura * (escalaDaLetra ?? ESCALA_DA_LETRA_PADRAO)),
+          escalaDaLetra,
         );
         return reacomodarBixinhos([...atuais.filter((no) => no.id !== rascunhoId), { ...terminal, selected: true }]);
       });
@@ -621,12 +904,27 @@ function Canvas() {
     [setNos],
   );
 
+  // O cartão muda de tamanho junto com a letra: os bixinhos saem de baixo dele, como ao redimensionar.
+  const mudarEscalaDaLetra = useCallback(
+    (noId: string, escalaDaLetra: EscalaDaLetra) =>
+      setNos((atuais) => {
+        const novos = atuais.map((no) => (no.id === noId ? comEscalaDaLetra(no, escalaDaLetra) : no));
+        return novos.every((no, indice) => no === atuais[indice]) ? atuais : reacomodarBixinhos(novos);
+      }),
+    [setNos],
+  );
+
   const organizar = useCallback(() => {
     setNos((atuais) => {
       const janelas = atuais
-        .filter((no) => !ehBixinho(no) && !ehNota(no) && !ehArtefato(no))
+        .filter((no) => !ehBixinho(no) && !ehNota(no) && !ehArtefato(no) && !ehPrevia(no) && !ehShell(no))
         .map((no) => tamanhoParaOrganizar(no, TAMANHO_DO_TERMINAL));
-      const notasNoCanvas = atuais.filter(ehNota).map((no) => tamanhoParaOrganizar(no, TAMANHO_DA_NOTA));
+      // As prévias e os shells vão para as colunas das notas: também não têm bixinhos.
+      const notasNoCanvas = atuais
+        .filter((no) => ehNota(no) || ehPrevia(no) || ehShell(no))
+        .map((no) =>
+          tamanhoParaOrganizar(no, ehNota(no) ? TAMANHO_DA_NOTA : ehShell(no) ? TAMANHO_DO_SHELL : TAMANHO_DA_PREVIA),
+        );
       const artefatosNoCanvas = atuais.filter(ehArtefato).map((no) => tamanhoParaOrganizar(no, TAMANHO_DO_ARTEFATO));
       const posicoes = organizarComNotas(janelas, notasNoCanvas, artefatosNoCanvas);
       return reacomodarBixinhos(
@@ -645,11 +943,52 @@ function Canvas() {
     void fluxo.setViewport(viewportEmCemPorCento(fluxo.getViewport(), area?.width ?? 0, area?.height ?? 0));
   }, [fluxo]);
 
-  /** Mostra tudo o que está no canvas, sem passar de 100% (ver ADR-20). */
-  const enquadrarTudo = useCallback(
-    () => void fluxo.fitView({ duration: 500, padding: 0.12, maxZoom: 1 }),
-    [fluxo],
+  /**
+   * Mostra tudo o que está no canvas, entre 60% e 100% (ver ADR-20): se tudo
+   * não cabe legível, enquadra uma caixa só (a selecionada ou a mais perto do
+   * centro da tela; ver `escolherEnquadramento`).
+   */
+  const enquadrarLegivel = useCallback(
+    (folga: number, duracao: number) => {
+      const visiveis = fluxo.getNodes().filter((no) => no.hidden !== true);
+      const area = areaDoCanvas.current?.getBoundingClientRect();
+      const escolha = escolherEnquadramento({
+        caixas: visiveis.map((no) => ({
+          id: no.id,
+          retangulo: fluxo.getNodesBounds([no]),
+          selecionada: no.selected === true,
+          acessoria: ehBixinho(no),
+        })),
+        tela: { largura: area?.width ?? 0, altura: area?.height ?? 0 },
+        centro: centroDaTela(),
+        folga,
+      });
+      void fluxo.fitView(
+        escolha.tipo === "tudo"
+          ? { duration: duracao, padding: folga, maxZoom: ZOOM_MAXIMO_DO_ENQUADRAMENTO }
+          : {
+              nodes: [{ id: escolha.id }],
+              duration: duracao,
+              padding: folga,
+              minZoom: ZOOM_MINIMO_DO_ENQUADRAMENTO,
+              maxZoom: ZOOM_MAXIMO_DO_ENQUADRAMENTO,
+            },
+      );
+    },
+    [centroDaTela, fluxo],
   );
+  const enquadrarTudo = useCallback(() => enquadrarLegivel(FOLGA_DO_ENQUADRAMENTO, 500), [enquadrarLegivel]);
+
+  // Ao abrir com janelas salvas e sem câmera salva, enquadra com a mesma regra
+  // (o React Flow espera os nós serem medidos antes de aplicar o fitView).
+  const enquadrouAoAbrir = useRef(false);
+  useEffect(() => {
+    if (!enquadrarAoAbrir || enquadrouAoAbrir.current) {
+      return;
+    }
+    enquadrouAoAbrir.current = true;
+    enquadrarLegivel(FOLGA_AO_ABRIR, 0);
+  }, [enquadrarAoAbrir, enquadrarLegivel]);
 
   // Ctrl+0: volta o zoom para 100% (texto nítido) sem sair do lugar.
   useEffect(() => {
@@ -750,6 +1089,7 @@ function Canvas() {
           const acoesDaPaleta: Readonly<Record<AcaoDaPaleta, () => void>> = {
             "novo-orquestrador": novoOrquestrador,
             "nova-nota": novaNota,
+            "nova-previa": novaPreviaVazia,
             organizar,
             "zoom-100": zoomEmCemPorCento,
             "enquadrar-tudo": enquadrarTudo,
@@ -776,6 +1116,7 @@ function Canvas() {
     [
       novoOrquestrador,
       novaNota,
+      novaPreviaVazia,
       organizar,
       zoomEmCemPorCento,
       enquadrarTudo,
@@ -794,9 +1135,26 @@ function Canvas() {
       limparBixinhos: limparBixinhosDoTerminal,
       orquestradorCriado,
       descartarRascunho,
+      mudarEscalaDaLetra,
       recarregar,
+      abrirPrevia,
+      navegarPrevia,
+      minimizarOuRestaurarPrevia,
+      fecharPrevia,
     }),
-    [abrirTerminal, fecharTerminal, limparBixinhosDoTerminal, orquestradorCriado, descartarRascunho, recarregar],
+    [
+      abrirTerminal,
+      fecharTerminal,
+      limparBixinhosDoTerminal,
+      orquestradorCriado,
+      descartarRascunho,
+      mudarEscalaDaLetra,
+      recarregar,
+      abrirPrevia,
+      navegarPrevia,
+      minimizarOuRestaurarPrevia,
+      fecharPrevia,
+    ],
   );
   // Os nós só leem do servidor a conexão e a memória por Orquestrador: a
   // memória livre do computador, que muda a cada leitura, não os re-renderiza.
@@ -851,6 +1209,35 @@ function Canvas() {
   }
   const fecharAvisoDoLimite = useCallback(() => setAvisoDoLimite(false), []);
 
+  const [painelAberto, setPainelAberto] = useState<PainelDaBarra | null>(null);
+  const alternarPainel = useCallback(
+    (painel: PainelDaBarra) => setPainelAberto((aberto) => (aberto === painel ? null : painel)),
+    [],
+  );
+  const fecharPainel = useCallback(() => setPainelAberto(null), []);
+
+  // A contagem do botão Subagentes. Com o servidor fora, fica sem número até
+  // ele voltar (o efeito roda de novo na reconexão).
+  const [quantidadeDeSubagentes, setQuantidadeDeSubagentes] = useState<number | null>(null);
+  const lerQuantidadeDeSubagentes = useCallback(() => {
+    api
+      .lerPreferencias()
+      .then((preferencias) => setQuantidadeDeSubagentes(preferencias.subagentesProntos.length))
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    if (servidor.conectado) {
+      lerQuantidadeDeSubagentes();
+    } else {
+      setQuantidadeDeSubagentes(null);
+    }
+  }, [servidor.conectado, lerQuantidadeDeSubagentes]);
+  // Salvar qualquer um dos painéis: os indicadores dos terminais e a contagem podem ter mudado.
+  const aoSalvarPainel = useCallback(() => {
+    void recarregar();
+    lerQuantidadeDeSubagentes();
+  }, [recarregar, lerQuantidadeDeSubagentes]);
+
   // Os painéis não dependem da posição dos nós: memorizados, não re-renderizam
   // a cada quadro do arraste. Os do topo ficam num só painel em linha
   // (esquerda · centro · direita), para se acomodarem juntos em qualquer
@@ -858,12 +1245,28 @@ function Canvas() {
   const colunaDaEsquerda = useMemo(
     () => (
       <div className="coluna-do-topo coluna-do-topo-esquerda">
-        <BarraDoCanvas aoCriar={novoOrquestrador} aoCriarNota={novaNota} aoBuscar={abrirPaleta} />
+        <BarraDoCanvas
+          aoCriar={novoOrquestrador}
+          aoCriarNota={novaNota}
+          aoBuscar={abrirPaleta}
+          aoCriarPrevia={novaPreviaVazia}
+          aoCriarShell={pedirPastaDoShell}
+          aoAlternarPainel={alternarPainel}
+          painelAberto={painelAberto}
+          quantidadeDeSubagentes={quantidadeDeSubagentes}
+        />
+        {painelAberto === "subagentes" && <PainelDeSubagentes aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />}
+        {painelAberto === "instrucoes" && (
+          <PainelDeInstrucoesGerais aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />
+        )}
         {avisoDoLimite && (
           <ErroDoCanvas erro={AVISO_DO_LIMITE_DE_ORQUESTRADORES} aoFechar={fecharAvisoDoLimite} nivel="aviso" />
         )}
         {erroDasNotas !== null && <ErroDoCanvas erro={erroDasNotas} aoFechar={descartarErroDasNotas} />}
         {erroDosAjustes !== null && <ErroDoCanvas erro={erroDosAjustes} aoFechar={descartarErroDosAjustes} />}
+        {erroDosShells !== null && (
+          <ErroDoCanvas erro={erroDosShells.mensagem} aoFechar={descartarErroDosShells} nivel={erroDosShells.nivel} />
+        )}
         <Doca orquestradores={orquestradores} noCanvas={noCanvas} erro={erro} aoAbrir={abrirTerminal} />
       </div>
     ),
@@ -871,12 +1274,21 @@ function Canvas() {
       novoOrquestrador,
       novaNota,
       abrirPaleta,
+      novaPreviaVazia,
+      pedirPastaDoShell,
+      painelAberto,
+      alternarPainel,
+      fecharPainel,
+      quantidadeDeSubagentes,
+      aoSalvarPainel,
       avisoDoLimite,
       fecharAvisoDoLimite,
       erroDasNotas,
       descartarErroDasNotas,
       erroDosAjustes,
       descartarErroDosAjustes,
+      erroDosShells,
+      descartarErroDosShells,
       orquestradores,
       noCanvas,
       erro,
@@ -888,7 +1300,17 @@ function Canvas() {
   // re-renderizaria a cada quadro do arraste.
   const controles = useMemo(
     () => (
-      <Controls position="bottom-left" showInteractive={false}>
+      // O enquadrar padrão do React Flow encolheria tudo até ficar ilegível:
+      // o botão (mesmo ícone e nome) usa o `enquadrarTudo` com piso de 60%.
+      <Controls position="bottom-left" showInteractive={false} showFitView={false}>
+        <ControlButton
+          className="react-flow__controls-fitview"
+          onClick={enquadrarTudo}
+          title={ROTULO_DO_ENQUADRAR}
+          aria-label={ROTULO_DO_ENQUADRAR}
+        >
+          <IconeDoEnquadrar />
+        </ControlButton>
         <ControlButton
           onClick={organizar}
           disabled={!podeOrganizar}
@@ -899,7 +1321,7 @@ function Canvas() {
         </ControlButton>
       </Controls>
     ),
-    [organizar, podeOrganizar],
+    [enquadrarTudo, organizar, podeOrganizar],
   );
   const colunaDoCentro = useMemo(
     () => (
@@ -942,19 +1364,33 @@ function Canvas() {
     [desktop, trabalhando, bixinhosAtivos, cota, servidor.memoria, abrirPaleta, pedidosEmAndamento],
   );
   // Fora do viewport: o chat não se move com o canvas e só re-renderiza com novidades dele.
-  const painelDoChat = useMemo(
+  // Fixo à esquerda (preferência da tela), vira uma coluna ao lado da área do canvas;
+  // senão, fica no painel do centro de baixo, dentro do React Flow.
+  const alternarChatFixo = useCallback(
+    (fixo: boolean) => mudarPreferenciasDaTela({ chatFixoNaEsquerda: fixo }),
+    [mudarPreferenciasDaTela],
+  );
+  // A alça da borda do chat fixo grava a largura ao soltar; a área do canvas
+  // (flex-1) acompanha e o React Flow se remede pelo observador de tamanho dele.
+  const mudarLarguraDoChat = useCallback(
+    (largura: number) => mudarPreferenciasDaTela({ larguraDoChatFixo: largura }),
+    [mudarPreferenciasDaTela],
+  );
+  const chatRapido = useMemo(
     () => (
-      <Panel position="bottom-center" className="painel-do-chat">
-        <ChatRapido
-          chat={chat}
-          desconectado={!servidor.conectado}
-          erroAoCarregar={chatAoVivo.erro}
-          aoMudarPreferencias={aplicarPreferencias}
-          aoAbrirTerminal={abrirTerminal}
-          temVagaPara={temVagaPara}
-          aoAtualizarOrquestradores={atualizarOrquestradoresDoChat}
-        />
-      </Panel>
+      <ChatRapido
+        chat={chat}
+        desconectado={!servidor.conectado}
+        erroAoCarregar={chatAoVivo.erro}
+        aoMudarPreferencias={aplicarPreferencias}
+        aoAbrirTerminal={abrirTerminal}
+        temVagaPara={temVagaPara}
+        aoAtualizarOrquestradores={atualizarOrquestradoresDoChat}
+        fixo={chatFixo}
+        aoAlternarFixo={alternarChatFixo}
+        largura={larguraDoChatFixo}
+        aoMudarLargura={mudarLarguraDoChat}
+      />
     ),
     [
       chat,
@@ -964,58 +1400,80 @@ function Canvas() {
       abrirTerminal,
       temVagaPara,
       atualizarOrquestradoresDoChat,
+      chatFixo,
+      alternarChatFixo,
+      larguraDoChatFixo,
+      mudarLarguraDoChat,
     ],
+  );
+  const painelDoChat = useMemo(
+    () =>
+      chatFixo ? null : (
+        <Panel position="bottom-center" className="painel-do-chat">
+          {chatRapido}
+        </Panel>
+      ),
+    [chatFixo, chatRapido],
   );
 
   return (
     <ProvedorDoCanvas valor={valor}>
       <ProvedorDasNotas valor={notas.valor}>
         <ProvedorDosArtefatos valor={valorDosArtefatos}>
-          <div
-            className={`flex h-screen w-screen flex-col ${servidor.conectado ? "" : "canvas-desconectado"} ${movimento.movendo ? "canvas-movendo" : ""} ${modoInvisivel ? "canvas-modo-invisivel" : ""}`}
-          >
-            {barraDeTitulo}
-            <div ref={areaDoCanvas} className="relative min-h-0 w-full flex-1">
-              <ReactFlow<NoDoCanvas, ArestaDoCanvas>
-                nodes={nos}
-                edges={arestas}
-                nodeTypes={TIPOS_DE_NO}
-                edgeTypes={TIPOS_DE_ARESTA}
-                onNodesChange={aoMudarNosEReacomodar}
-                onNodeDragStart={movimento.aoComecarArraste}
-                onNodeDragStop={aoSoltarNo}
-                onMoveStart={movimento.aoComecarMovimento}
-                onMoveEnd={movimento.aoTerminarMovimento}
-                colorMode="dark"
-                defaultViewport={layoutInicial.viewport ?? VIEWPORT_PADRAO}
-                fitView={enquadrarAoAbrir}
-                fitViewOptions={ENQUADRAMENTO_AO_ABRIR}
-                minZoom={0.1}
-                maxZoom={2}
-                // Como no Excalidraw: a roda do mouse rola o canvas; com Ctrl, dá zoom.
-                panOnScroll
-                zoomActivationKeyCode="Control"
-                deleteKeyCode={null}
-              >
-                <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} />
-                {controles}
-                <MiniMap<NoDoCanvas> position="bottom-right" pannable zoomable nodeClassName={classeDoMinimapa} />
-                <Panel position="top-left" className="paineis-do-topo">
-                  {colunaDaEsquerda}
-                  {colunaDoCentro}
-                  {colunaDaDireita}
-                </Panel>
-                {painelDoChat}
-              </ReactFlow>
-              {quantidadeDeJanelas === 0 && <CanvasVazio aoCriar={novoOrquestrador} />}
-              {/* Fora do <ReactFlow>: não escala com o zoom e cobre só a área do canvas. */}
-              <PaletaDeComandos
-                controle={controleDaPaleta}
-                lerFonte={lerFonteDaPaleta}
-                aoExecutar={executarItemDaPaleta}
-              />
+          <ProvedorDosShells valor={valorDosShells}>
+            <div
+              className={`flex h-screen w-screen flex-col ${servidor.conectado ? "" : "canvas-desconectado"} ${movimento.movendo ? "canvas-movendo" : ""} ${redimensionando ? "canvas-redimensionando" : ""} ${modoInvisivel ? "canvas-modo-invisivel" : ""}`}
+            >
+              {barraDeTitulo}
+              {/* Linha: o chat fixo à esquerda (quando a preferência pede) empurra a área do canvas. */}
+              <div className="flex min-h-0 w-full flex-1">
+                {chatFixo && chatRapido}
+                <div ref={areaDoCanvas} className="relative min-h-0 min-w-0 flex-1">
+                  <ReactFlow<NoDoCanvas, ArestaDoCanvas>
+                    nodes={nos}
+                    edges={arestas}
+                    nodeTypes={TIPOS_DE_NO}
+                    edgeTypes={TIPOS_DE_ARESTA}
+                    onNodesChange={aoMudarNosEReacomodar}
+                    onNodeDragStart={movimento.aoComecarArraste}
+                    onNodeDragStop={aoSoltarNo}
+                    onMoveStart={movimento.aoComecarMovimento}
+                    onMoveEnd={movimento.aoTerminarMovimento}
+                    colorMode="dark"
+                    defaultViewport={layoutInicial.viewport ?? VIEWPORT_PADRAO}
+                    minZoom={LIMITES_DO_ZOOM.minZoom}
+                    maxZoom={LIMITES_DO_ZOOM.maxZoom}
+                    // Como no Excalidraw: a roda do mouse rola o canvas; com Ctrl, dá zoom.
+                    panOnScroll
+                    zoomActivationKeyCode="Control"
+                    deleteKeyCode={null}
+                  >
+                    <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} />
+                    {/* Abaixo dos painéis (inclusive o chat); some enquanto um painel da barra está aberto. */}
+                    {quantidadeDeJanelas === 0 && painelAberto === null && <CanvasVazio aoCriar={novoOrquestrador} />}
+                    {controles}
+                    <MiniMap<NoDoCanvas> position="bottom-right" pannable zoomable nodeClassName={classeDoMinimapa} />
+                    <Panel position="top-left" className="paineis-do-topo">
+                      {colunaDaEsquerda}
+                      {colunaDoCentro}
+                      {colunaDaDireita}
+                    </Panel>
+                    {painelDoChat}
+                  </ReactFlow>
+                  {/* Fora do <ReactFlow>: não escala com o zoom e cobre só a área do canvas. */}
+                  <PaletaDeComandos
+                    controle={controleDaPaleta}
+                    lerFonte={lerFonteDaPaleta}
+                    aoExecutar={executarItemDaPaleta}
+                  />
+                </div>
+              </div>
             </div>
-          </div>
+            {/* "Terminal" do "+ Novo ▾": a pasta é escolhida no mesmo navegador de pastas da criação do orquestrador. */}
+            {escolhendoPastaDoShell && (
+              <NavegadorDePastas aoEscolher={abrirShellNaPasta} aoFechar={fecharEscolhaDaPastaDoShell} />
+            )}
+          </ProvedorDosShells>
         </ProvedorDosArtefatos>
       </ProvedorDasNotas>
     </ProvedorDoCanvas>
