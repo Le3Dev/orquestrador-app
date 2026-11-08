@@ -1,3 +1,4 @@
+import { copiarPergunta, PerguntaDoApp } from "../perguntas/PerguntaDoApp";
 import { DadosDoAnexo } from "./Anexo";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
@@ -20,6 +21,8 @@ export interface DadosDoTurno {
   /** Ausente em turnos gravados antes do modo de planejamento: valem como execução. */
   modo?: ModoDoTurno;
   decisaoDoPlano?: DecisaoDoPlano | null;
+  /** Perguntas com opções da resposta final. Ausente em turnos gravados antes do campo: vale []. */
+  perguntas?: PerguntaDoApp[];
 }
 
 /**
@@ -45,6 +48,7 @@ export class Turno {
     public readonly anexos: readonly DadosDoAnexo[],
     public readonly modo: ModoDoTurno,
     private decisao: DecisaoDoPlano | null,
+    private perguntasDaResposta: readonly PerguntaDoApp[],
   ) {}
 
   static iniciar(
@@ -54,7 +58,7 @@ export class Turno {
     anexos: readonly DadosDoAnexo[] = [],
     modo: ModoDoTurno = "execucao",
   ): Turno {
-    return new Turno(id, texto, agora.getTime(), null, "em_andamento", "", null, null, [], anexos, modo, null);
+    return new Turno(id, texto, agora.getTime(), null, "em_andamento", "", null, null, [], anexos, modo, null, []);
   }
 
   static reconstituir(dados: DadosDoTurno): Turno {
@@ -73,6 +77,7 @@ export class Turno {
       // Nem os gravados antes do modo de planejamento: eram todos de execução.
       dados.modo ?? "execucao",
       dados.decisaoDoPlano ?? null,
+      (dados.perguntas ?? []).map(copiarPergunta),
     );
   }
 
@@ -108,6 +113,11 @@ export class Turno {
     return this.decisao;
   }
 
+  /** As perguntas com opções que o Orquestrador fez na resposta final; vazio se nenhuma. */
+  get perguntas(): readonly PerguntaDoApp[] {
+    return this.perguntasDaResposta;
+  }
+
   /** O Plano deste turno aguarda o usuário aprovar ou descartar. */
   get planoPendente(): boolean {
     return this.decisao === "pendente";
@@ -140,9 +150,17 @@ export class Turno {
   /**
    * `planoProposto`: num turno de execução, o Orquestrador achou o pedido
    * grande e respondeu com um Plano em vez de executar.
+   * `perguntas`: as perguntas com opções da resposta, já fora do texto.
    */
-  concluir(resposta: string, uso: UsoDoTurno, agora: Date, planoProposto = false): void {
+  concluir(
+    resposta: string,
+    uso: UsoDoTurno,
+    agora: Date,
+    planoProposto = false,
+    perguntas: readonly PerguntaDoApp[] = [],
+  ): void {
     this.respostaFinal = resposta;
+    this.perguntasDaResposta = perguntas.map(copiarPergunta);
     this.usoFinal = uso;
     if (this.modo === "planejamento" || planoProposto) {
       // A resposta é o Plano: nada foi executado ainda, o usuário decide.
@@ -186,6 +204,7 @@ export class Turno {
       anexos: [...this.anexos],
       modo: this.modo,
       decisaoDoPlano: this.decisao,
+      perguntas: this.perguntasDaResposta.map(copiarPergunta),
     };
   }
 

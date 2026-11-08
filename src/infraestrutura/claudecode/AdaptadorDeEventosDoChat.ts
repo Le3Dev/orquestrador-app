@@ -1,6 +1,6 @@
 import type { AcaoQuePedeAutorizacao, AutorizacaoPendente } from "../../chat/MensagemDoChat";
 import type { EventoDoMotorDeChat, ResultadoDaResposta, UsoDaResposta } from "../../chat/MotorDeChat";
-import { descreverFalha, janelasDaCota, resumirEntrada } from "./AdaptadorDeEventosDoClaudeCode";
+import { descreverFalha, detalheDaChamada, janelasDaCota, SINAIS_DE_LIMITE_DE_USO } from "./AdaptadorDeEventosDoClaudeCode";
 import { FERRAMENTAS_DE_COMANDO_DO_CHAT, FERRAMENTAS_DE_EDICAO_DO_CHAT } from "./ArgumentosDoChat";
 
 type Objeto = Record<string, unknown>;
@@ -53,7 +53,8 @@ const CAMPO_DO_DETALHE: Readonly<Record<string, string>> = {
 function detalheDaFerramenta(ferramenta: string, entrada: Objeto, tamanho = TAMANHO_DO_DETALHE): string {
   const campo = CAMPO_DO_DETALHE[ferramenta];
   const valor = campo === undefined ? "" : texto(entrada, campo);
-  return valor === "" ? resumirEntrada(entrada) : valor.slice(0, tamanho);
+  // O `Workflow` do `ultracode` traz um script inteiro: mostra só o nome dele.
+  return valor === "" ? detalheDaChamada(ferramenta, entrada) : valor.slice(0, tamanho);
 }
 
 /** Um comando pode ser um script inteiro; a tela precisa só de o reconhecer. */
@@ -87,8 +88,6 @@ interface Negacao {
   idDaChamada: string;
   entrada: Objeto;
 }
-
-const SINAIS_DE_LIMITE_DE_USO = /usage limit|rate limit|limit reached|out of extra usage/i;
 
 /**
  * Motivo legível de uma resposta que falhou. O limite de uso da assinatura
@@ -171,6 +170,8 @@ export class AdaptadorDeEventosDoChat {
     }
     switch (texto(mensagem, "type")) {
       case "system":
+        // Os `task_*` e `background_tasks_changed` (comandos e workflows em
+        // segundo plano) não têm lugar no chat: só a negação interessa.
         this.registrarMotivoDaNegacao(mensagem);
         return [];
       case "stream_event":

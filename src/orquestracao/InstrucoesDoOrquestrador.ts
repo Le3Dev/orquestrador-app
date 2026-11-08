@@ -1,3 +1,4 @@
+import { linhasDaRegraDasPerguntas } from "../perguntas/PerguntaDoApp";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { InstrucoesAplicadas, linhasDasInstrucoes } from "./InstrucoesPersonalizadas";
 import { ModoDoTurno } from "./ModoDoTurno";
@@ -86,6 +87,20 @@ function regrasDeArtefatos(pastaDeArtefatos: string): string[] {
     `  Formato: ${FORMATO_DO_ARTEFATO}. Nome do arquivo curto e descritivo, porque vira o título (ex.: relatorio-de-testes.html).`,
     "  Para atualizar um artefato, regrave o MESMO arquivo: ele vira uma nova versão.",
     "  Na resposta, cite pelo nome o artefato criado ou atualizado.",
+  ];
+}
+
+/**
+ * Perguntas com opções clicáveis (```pergunta-do-app): vão em todo pedido,
+ * em qualquer modo, porque o Claude Code não relê as instruções ao retomar a
+ * sessão. Só a resposta final do Orquestrador é lida, nunca a dos Subagentes.
+ */
+function regrasDasPerguntas(): string[] {
+  const [primeira = "", ...resto] = linhasDaRegraDasPerguntas();
+  return [
+    `- ${primeira}`,
+    ...resto.map((linha) => `  ${linha}`),
+    `  Só a sua resposta final é lida: subagentes não perguntam ao usuário. Se um deles precisar de uma decisão, pergunte você, sem delegar a pergunta.`,
   ];
 }
 
@@ -189,6 +204,7 @@ export function mensagemParaOOrquestrador(
     ...regrasDoTamanho,
     ...(nivelDoPedido === "edicao_e_comandos" ? [`- ${REGRA_DOS_SERVIDORES}`] : []),
     ...(pastaDeArtefatos === null ? [] : regrasDeArtefatos(pastaDeArtefatos)),
+    ...regrasDasPerguntas(),
     ...imagens,
     ...linhasDasInstrucoes(instrucoes, MARCA_DA_CONFIGURACAO, revogarInstrucoesAnteriores),
     `</${MARCA_DA_CONFIGURACAO}>`,

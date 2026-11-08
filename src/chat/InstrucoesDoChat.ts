@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { linhasDaRegraDasPerguntas, MARCA_DA_PERGUNTA } from "../perguntas/PerguntaDoApp";
 import { AcaoDoApp, abrirOrquestrador } from "./AcaoDoApp";
 import type { OrquestradorExistente, ProjetoDoChat } from "./ProjetosDoChat";
 
@@ -18,6 +19,7 @@ const esquemaDaAcao = z.object({
   tipo: z.literal("abrir_orquestrador"),
   projeto: z.string().trim().min(1),
   pedido: z.string().nullable().optional(),
+  novo: z.boolean().optional(),
 });
 
 /** Contexto do app que acompanha cada pergunta. */
@@ -91,6 +93,7 @@ export function instrucoesDoChat(): string {
     `7. Quando o usuário pedir para abrir ou criar um orquestrador num projeto, siga a regra de ações do bloco <${MARCA_DO_CONTEXTO}>: explique o que vai acontecer e inclua o bloco \`\`\`${MARCA_DA_ACAO}. Você não executa a ação — o usuário confirma clicando no cartão que aparece na tela.`,
     `8. ${REGRA_DAS_MUDANCAS_GRANDES}`,
     `9. Artefatos: quando ${QUANDO_CRIAR_ARTEFATO}, grave UM arquivo autocontido (.html ou .md) na pasta de artefatos que o bloco <${MARCA_DO_CONTEXTO}> indica, seguindo as regras dele. Gravar artefatos não precisa da autorização e não conta como alterar projetos.`,
+    `10. Quando precisar que o usuário escolha entre opções claras, siga a regra de perguntas do bloco <${MARCA_DO_CONTEXTO}>: inclua o bloco \`\`\`${MARCA_DA_PERGUNTA}, que vira botões clicáveis na tela, e espere a resposta.`,
   ].join("\n");
 }
 
@@ -160,9 +163,12 @@ export function mensagemParaOChat(texto: string, contexto: ContextoDoApp): strin
     "",
     "Ações do app: quando o usuário pedir para abrir ou criar um orquestrador num projeto (opcionalmente com um pedido para ele), responda explicando e inclua UM bloco por ação, exatamente assim:",
     "```" + MARCA_DA_ACAO,
-    '{"tipo":"abrir_orquestrador","projeto":"<nome exato da pasta>","pedido":"<texto do pedido ou null>"}',
+    '{"tipo":"abrir_orquestrador","projeto":"<nome exato da pasta>","pedido":"<texto do pedido ou null>","novo":false}',
     "```",
+    'Use "novo":true só quando o usuário pedir explicitamente outro (ou um novo) orquestrador num projeto que já tem um; caso contrário, omita o campo ou use false, e o app reaproveita o orquestrador existente.',
     "Diga que o usuário confirma clicando no cartão. Use só projetos da lista acima; nunca invente um projeto.",
+    "",
+    ...linhasDaRegraDasPerguntas(),
     `</${MARCA_DO_CONTEXTO}>`,
     "",
     pergunta,
@@ -198,7 +204,7 @@ export function separarAcoesDoApp(resposta: string, projetos: readonly ProjetoDo
       avisos.push(`O projeto "${lida.data.projeto}" não existe na pasta raiz; a ação foi ignorada.`);
       return "";
     }
-    acoes.push(abrirOrquestrador(projeto.nome, projeto.caminho, lida.data.pedido ?? null));
+    acoes.push(abrirOrquestrador(projeto.nome, projeto.caminho, lida.data.pedido ?? null, lida.data.novo ?? false));
     return "";
   });
 

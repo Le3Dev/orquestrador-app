@@ -359,4 +359,36 @@ describe("AdaptadorDeEventosDoChat — linhas sintéticas", () => {
       "**/*.ts",
     ]);
   });
+
+  it("com ultracode, mostra o Workflow pelo nome e ignora os task_* do workflow", () => {
+    const script = "export const meta = {\n  name: 'revisao-do-chat',\n  description: 'Revisar',\n}\nawait agent('x')\n";
+    const { adaptador, eventos } = traduzirTudo([
+      {
+        type: "assistant",
+        parent_tool_use_id: null,
+        message: { content: [{ type: "tool_use", id: "toolu_w", name: "Workflow", input: { script } }] },
+      },
+      { type: "system", subtype: "background_tasks_changed", tasks: [{ task_id: "w1", task_type: "local_workflow" }] },
+      {
+        type: "system",
+        subtype: "task_started",
+        task_id: "w1",
+        tool_use_id: "toolu_w",
+        task_type: "local_workflow",
+        workflow_name: "revisao-do-chat",
+        prompt: script,
+      },
+      { type: "system", subtype: "task_progress", task_id: "w1", description: "Revisar: revisor", workflow_progress: [] },
+      { type: "system", subtype: "task_updated", task_id: "w1", patch: { status: "completed" } },
+      { type: "system", subtype: "task_notification", task_id: "w1", status: "completed", summary: "Pronto" },
+      { type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_delta", delta: { type: "text_delta", text: "Feito." } } },
+      { type: "result", subtype: "success", is_error: false, result: "Feito.", duration_ms: 10 },
+    ]);
+
+    expect(eventos).toEqual([
+      { tipo: "ferramenta_do_chat", ferramenta: "Workflow", detalhe: "revisao-do-chat" },
+      { tipo: "trecho_da_resposta", texto: "Feito." },
+    ]);
+    expect(adaptador.resultado).toMatchObject({ sucesso: true, resposta: "Feito.", autorizacaoPendente: null, avisos: [] });
+  });
 });

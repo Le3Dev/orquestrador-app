@@ -1,4 +1,5 @@
 import { MAXIMO_DE_IMAGENS_POR_MENSAGEM } from "../orquestracao/Anexo";
+import { copiarPergunta, PerguntaDoApp } from "../perguntas/PerguntaDoApp";
 import type { AcaoDoApp } from "./AcaoDoApp";
 import { ErroDoChat } from "./ErroDoChat";
 import type { EventoDoChat } from "./EventoDoChat";
@@ -161,16 +162,18 @@ export class ConversaDoChat {
     avisos: readonly string[],
     uso: UsoDaResposta,
     autorizacaoPendente: AutorizacaoPendente | null = null,
+    perguntas: readonly PerguntaDoApp[] = [],
   ): EventoDoChat {
     const resposta = this.respostaAtiva();
     // Uma resposta concluída prova que a sessão foi criada.
     this.sessaoJaIniciada = true;
-    resposta.concluir(texto, acoes, avisos, uso, autorizacaoPendente);
+    resposta.concluir(texto, acoes, avisos, uso, autorizacaoPendente, perguntas);
     return {
       tipo: "resposta_concluida",
       mensagemId: resposta.id,
       texto,
       acoes: [...acoes],
+      perguntas: resposta.perguntas.map(copiarPergunta),
       avisos: [...avisos],
       uso,
       autorizacaoPendente: resposta.autorizacaoPendente === null ? null : { ...resposta.autorizacaoPendente },

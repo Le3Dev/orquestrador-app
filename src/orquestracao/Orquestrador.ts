@@ -1,3 +1,4 @@
+import { copiarPergunta, PerguntaDoApp } from "../perguntas/PerguntaDoApp";
 import { Anexo, MAXIMO_DE_IMAGENS_POR_MENSAGEM } from "./Anexo";
 import {
   AlteracoesDaConfiguracao,
@@ -425,6 +426,9 @@ export class Orquestrador {
    * `planoProposto`: num turno de execução, o Orquestrador respondeu com um
    * Plano em vez de executar (pedido grande) — ele fica pendente como o de um
    * turno de planejamento.
+   *
+   * `perguntas`: as perguntas com opções que o Orquestrador fez na resposta
+   * (blocos ```pergunta-do-app), já fora do texto.
    */
   concluirTurno(
     turnoId: string,
@@ -432,10 +436,18 @@ export class Orquestrador {
     uso: UsoDoTurno,
     agora: Date,
     planoProposto = false,
+    perguntas: readonly PerguntaDoApp[] = [],
   ): EventoDeOrquestracao {
     const turno = this.turnoAtivo(turnoId);
-    turno.concluir(resposta, uso, agora, planoProposto);
-    return { tipo: "turno_concluido", turnoId, resposta, uso, planoPendente: turno.planoPendente };
+    turno.concluir(resposta, uso, agora, planoProposto, perguntas);
+    return {
+      tipo: "turno_concluido",
+      turnoId,
+      resposta,
+      uso,
+      planoPendente: turno.planoPendente,
+      perguntas: turno.perguntas.map(copiarPergunta),
+    };
   }
 
   cancelarTurno(turnoId: string, agora: Date): EventoDeOrquestracao {

@@ -75,6 +75,7 @@ describe("ConversaDoChat", () => {
       mensagemId: "c1",
       texto: "final",
       acoes: [acao],
+      perguntas: [],
       avisos: ["aviso"],
       uso,
       autorizacaoPendente: null,
@@ -82,6 +83,33 @@ describe("ConversaDoChat", () => {
     expect(conversa.mensagens[1]).toMatchObject({ texto: "final", situacao: "concluida", acoes: [acao], avisos: ["aviso"], uso });
     expect(conversa.sessaoIniciada).toBe(true);
     expect(conversa.situacao).toBe("ocioso");
+  });
+
+  it("concluir com perguntas as leva ao evento e à mensagem, e elas sobrevivem a reabrir", () => {
+    const conversa = ConversaDoChat.nova("s1");
+    conversa.perguntar(pergunta());
+    const perguntas = [
+      { pergunta: "Qual banco?", opcoes: [{ rotulo: "Postgres", descricao: "já usado" }, { rotulo: "SQLite", descricao: null }], multipla: false },
+    ];
+
+    const evento = conversa.concluir("Preciso decidir.", [], [], uso, null, perguntas);
+
+    expect(evento).toMatchObject({ tipo: "resposta_concluida", perguntas });
+    expect(conversa.mensagens[1]?.perguntas).toEqual(perguntas);
+    expect(conversa.mensagens[0]?.perguntas).toEqual([]);
+    expect(ConversaDoChat.reconstituir(conversa.paraDados()).mensagens[1]?.perguntas).toEqual(perguntas);
+  });
+
+  it("mensagem gravada antes do campo perguntas é lida com []", () => {
+    const conversa = ConversaDoChat.nova("s1");
+    conversa.perguntar(pergunta());
+    conversa.concluir("ok", [], [], uso);
+    const dados = conversa.paraDados();
+    const semCampo = dados.mensagens.map(({ perguntas: _perguntas, ...resto }) => resto);
+
+    const reaberta = ConversaDoChat.reconstituir({ ...dados, mensagens: semCampo as typeof dados.mensagens });
+
+    expect(reaberta.mensagens.map((mensagem) => mensagem.perguntas)).toEqual([[], []]);
   });
 
   it("falhar guarda o motivo como aviso; com uso, a sessão conta como iniciada", () => {
@@ -258,5 +286,12 @@ describe("PreferenciasDoChat", () => {
   it("recusa modelo e esforço inválidos", () => {
     expect(() => PreferenciasDoChat.de({ modelo: "gpt", esforco: "alto" })).toThrow("Modelo inválido.");
     expect(() => PreferenciasDoChat.de({ modelo: "opus", esforco: "enorme" })).toThrow("Esforço inválido.");
+  });
+
+  it("aceita o esforço ultracode", () => {
+    expect(PreferenciasDoChat.padrao().com({ esforco: "ultracode" }).paraDados()).toEqual({
+      modelo: "opus",
+      esforco: "ultracode",
+    });
   });
 });

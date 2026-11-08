@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import { linhasDaRegraDasPerguntas, separarPerguntasDoApp } from "../perguntas/PerguntaDoApp";
 import { instrucoesDoChat, mensagemParaOChat, separarAcoesDoApp } from "./InstrucoesDoChat";
 import { ProjetoDoChat } from "./ProjetosDoChat";
 
@@ -30,7 +31,13 @@ describe("separarAcoesDoApp", () => {
     expect(separarAcoesDoApp(resposta, projetos)).toEqual({
       texto: "Vou abrir o painel.\n\nClique no cartão.",
       acoes: [
-        { tipo: "abrir_orquestrador", projeto: "painel-app", pasta: path.join(raiz, "painel-app"), pedido: "rodar os testes" },
+        {
+          tipo: "abrir_orquestrador",
+          projeto: "painel-app",
+          pasta: path.join(raiz, "painel-app"),
+          pedido: "rodar os testes",
+          novo: false,
+        },
       ],
       avisos: [],
     });
@@ -56,7 +63,46 @@ describe("separarAcoesDoApp", () => {
   it("compara o projeto sem diferenciar maiúsculas e devolve o nome real da pasta", () => {
     const { acoes } = separarAcoesDoApp(bloco('{"tipo":"abrir_orquestrador","projeto":"PAINEL-APP","pedido":""}'), projetos);
 
-    expect(acoes).toEqual([{ tipo: "abrir_orquestrador", projeto: "painel-app", pasta: path.join(raiz, "painel-app"), pedido: null }]);
+    expect(acoes).toEqual([
+      { tipo: "abrir_orquestrador", projeto: "painel-app", pasta: path.join(raiz, "painel-app"), pedido: null, novo: false },
+    ]);
+  });
+
+  it('"novo":true pede outro orquestrador no projeto', () => {
+    const { acoes, avisos } = separarAcoesDoApp(
+      bloco('{"tipo":"abrir_orquestrador","projeto":"painel-app","pedido":"revisar o login","novo":true}'),
+      projetos,
+    );
+
+    expect(acoes).toEqual([
+      { tipo: "abrir_orquestrador", projeto: "painel-app", pasta: path.join(raiz, "painel-app"), pedido: "revisar o login", novo: true },
+    ]);
+    expect(avisos).toEqual([]);
+  });
+
+  it("sem o campo novo, ou com false, reaproveita o orquestrador existente", () => {
+    const resposta = [
+      bloco('{"tipo":"abrir_orquestrador","projeto":"painel-app","pedido":null}'),
+      bloco('{"tipo":"abrir_orquestrador","projeto":"Financeiro","pedido":null,"novo":false}'),
+    ].join("\n");
+
+    const { acoes } = separarAcoesDoApp(resposta, projetos);
+
+    expect(acoes.map((acao) => [acao.projeto, acao.novo])).toEqual([
+      ["painel-app", false],
+      ["Financeiro", false],
+    ]);
+  });
+
+  it("novo com tipo errado vira aviso de formato inválido, sem ação", () => {
+    const { texto, acoes, avisos } = separarAcoesDoApp(
+      `Abrindo.\n${bloco('{"tipo":"abrir_orquestrador","projeto":"painel-app","pedido":null,"novo":"sim"}')}`,
+      projetos,
+    );
+
+    expect(texto).toBe("Abrindo.");
+    expect(acoes).toEqual([]);
+    expect(avisos).toEqual(["O Claude sugeriu uma ação do app em formato inválido; ela foi ignorada."]);
   });
 
   it("projeto inexistente vira aviso, sem ação", () => {
@@ -119,7 +165,9 @@ describe("mensagemParaOChat", () => {
     expect(mensagem).toContain(`Pasta raiz dos projetos: ${raiz}`);
     expect(mensagem).toContain("- painel-app\n- Financeiro");
     expect(mensagem).toContain(`- Painel → ${path.join(raiz, "painel-app")}`);
-    expect(mensagem).toContain("```acao-do-app\n" + '{"tipo":"abrir_orquestrador","projeto":"<nome exato da pasta>","pedido":"<texto do pedido ou null>"}\n```');
+    expect(mensagem).toContain("```acao-do-app\n" + '{"tipo":"abrir_orquestrador","projeto":"<nome exato da pasta>","pedido":"<texto do pedido ou null>","novo":false}\n```');
+    expect(mensagem).toContain('Use "novo":true só quando o usuário pedir explicitamente outro (ou um novo) orquestrador');
+    expect(mensagem).toContain("o app reaproveita o orquestrador existente");
     expect(mensagem).toMatch(/nunca invente um projeto/);
   });
 
@@ -189,6 +237,20 @@ describe("mensagemParaOChat", () => {
     expect(blocoDeContexto(false)).toContain("Alterações NÃO autorizadas ainda (gravar artefatos não depende disso)");
   });
 
+  it("traz em todo bloco a regra das perguntas com opções, com o exemplo", () => {
+    for (const autorizado of [false, true]) {
+      const bloco = blocoDeContexto(autorizado);
+
+      expect(bloco).toContain(linhasDaRegraDasPerguntas().join("\n"));
+      expect(bloco).toContain("```pergunta-do-app\n");
+      expect(bloco).toContain('no formato "pergunta → escolha"');
+    }
+  });
+
+  it("o exemplo do bloco de perguntas no contexto é um bloco válido", () => {
+    expect(separarPerguntasDoApp(blocoDeContexto(false)).perguntas).toHaveLength(1);
+  });
+
   it("pede a lista do que foi alterado e sugere orquestrador para mudanças grandes", () => {
     const bloco = blocoDeContexto(true);
 
@@ -225,6 +287,12 @@ describe("instrucoesDoChat", () => {
     expect(instrucoes).toContain("na pasta de artefatos que o bloco <contexto-do-app> indica");
     expect(instrucoes).toContain("Gravar artefatos não precisa da autorização e não conta como alterar projetos.");
     expect(instrucoes).toContain("A exceção é a pasta de artefatos (regra 9).");
+  });
+
+  it("aponta para a regra das perguntas com opções do bloco de contexto", () => {
+    expect(instrucoesDoChat()).toContain(
+      "10. Quando precisar que o usuário escolha entre opções claras, siga a regra de perguntas do bloco <contexto-do-app>: inclua o bloco ```pergunta-do-app",
+    );
   });
 
   it("traz as regras de commit e push, do relatório e das mudanças grandes", () => {
