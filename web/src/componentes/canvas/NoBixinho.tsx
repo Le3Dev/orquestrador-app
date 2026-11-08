@@ -20,7 +20,10 @@ function Ficha({ subagente, nome, agora }: { subagente: SubagenteNaTela; nome: s
     <div className="ficha-do-bixinho nowheel nodrag">
       <div className="flex items-center justify-between gap-2">
         <span className="font-titulo text-[13px] font-semibold">
-          {nome} <span className="mono text-muted">executor#{idCurto(subagente.id)}</span>
+          {nome}{" "}
+          <span className="mono text-muted">
+            {subagente.papel ?? "executor"}#{idCurto(subagente.id)}
+          </span>
         </span>
         <Etiqueta situacao={subagente.situacao} />
       </div>
@@ -79,6 +82,10 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({ subagente, se
       : subagente.situacao === "falhou"
         ? "deu ruim…"
         : "zzz";
+  // O papel (subagente pronto, workflow) vai no rótulo; o executor comum, que é
+  // a maioria, só no tooltip e na ficha, para não repetir em todo bixinho.
+  const papelNoRotulo = subagente.papel !== null && subagente.papel !== "executor" ? subagente.papel : null;
+  const dica = "Clique para ver a tarefa e o relatório";
 
   return (
     <>
@@ -95,15 +102,16 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({ subagente, se
 
       <div
         className={`no-bixinho no-bixinho-${subagente.situacao} ${selecionado ? "no-bixinho-selecionado" : ""}`}
-        title="Clique para ver a tarefa e o relatório"
+        title={subagente.papel === null ? dica : `${subagente.papel} · ${dica.toLowerCase()}`}
       >
         <div className="balao-do-bixinho">
           <span className={executando ? "cursor" : ""}>{fala}</span>
         </div>
         {icone !== null && <IconeDaFerramenta icone={icone} />}
         <Bixinho aparencia={aparencia} situacao={subagente.situacao} />
-        <span className="font-titulo text-[12px] font-semibold leading-none">
+        <span className="font-titulo max-w-full truncate text-[12px] font-semibold leading-none">
           {aparencia.nome}
+          {papelNoRotulo !== null && <span className="font-normal"> · {papelNoRotulo}</span>}
           <span className="mono ml-1 font-normal text-muted">#{idCurto(subagente.id)}</span>
         </span>
         <span className="mono text-muted">

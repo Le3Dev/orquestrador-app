@@ -7,6 +7,7 @@ function subagente(situacao: SituacaoDoSubagente): SubagenteNaTela {
     id: Math.random().toString(36),
     descricao: "",
     tarefa: "",
+    papel: null,
     situacao,
     iniciadoEm: "2026-10-28T12:00:00Z",
     encerradoEm: null,

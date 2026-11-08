@@ -22,6 +22,8 @@ export interface SubagenteNaTela {
   id: string;
   descricao: string;
   tarefa: string;
+  /** "executor", "workflow" ou o nome do subagente pronto; nulo nos eventos antigos, sem o campo. */
+  papel: string | null;
   situacao: SituacaoDoSubagente;
   iniciadoEm: string;
   encerradoEm: string | null;
@@ -302,6 +304,7 @@ function alteracaoDoTurno(evento: EventoRegistrado): AlteracaoDeTurno | null {
             id: evento.subagenteId,
             descricao: evento.descricao,
             tarefa: evento.tarefa,
+            papel: evento.papel ?? null,
             situacao: "executando",
             iniciadoEm: evento.em,
             encerradoEm: null,

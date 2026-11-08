@@ -240,6 +240,45 @@ describe("NoBixinho", () => {
     ]);
   });
 
+  it("subagente pronto: o papel aparece no rótulo, no tooltip e na ficha", () => {
+    const conversa = aplicar(doisTrabalhando(), {
+      tipo: "subagente_iniciado",
+      turnoId: "t1",
+      subagenteId: "s3",
+      descricao: "Revisar",
+      tarefa: "Revise o diff",
+      papel: "revisor",
+    });
+    render(tela(conversa, "s3", true));
+
+    expect(screen.getByText("· revisor", { exact: false })).toBeInTheDocument();
+    expect(screen.getByTitle(/^revisor · clique para ver a tarefa/)).toBeInTheDocument();
+    expect(screen.getByTestId("barra-do-no")).toHaveTextContent("revisor#");
+  });
+
+  it("executor: o papel fica no tooltip e na ficha, não no rótulo", () => {
+    const conversa = aplicar(doisTrabalhando(), {
+      tipo: "subagente_iniciado",
+      turnoId: "t1",
+      subagenteId: "s3",
+      descricao: "Ler",
+      tarefa: "Leia o README",
+      papel: "executor",
+    });
+    render(tela(conversa, "s3", true));
+
+    expect(screen.queryByText("· executor", { exact: false })).not.toBeInTheDocument();
+    expect(screen.getByTitle(/^executor · clique para ver a tarefa/)).toBeInTheDocument();
+    expect(screen.getByTestId("barra-do-no")).toHaveTextContent("executor#");
+  });
+
+  it("evento antigo, sem papel: como antes (só o nome no rótulo, executor na ficha)", () => {
+    render(tela(doisTrabalhando(), "s1", true));
+
+    expect(screen.getByTitle("Clique para ver a tarefa e o relatório")).toBeInTheDocument();
+    expect(screen.getByTestId("barra-do-no")).toHaveTextContent("executor#");
+  });
+
   it("sem o Subagente na conversa, não desenha nada", () => {
     const { container } = render(tela(doisTrabalhando(), "s9"));
 

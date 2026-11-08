@@ -151,6 +151,23 @@ describe("aplicarEvento", () => {
     expect(spawns[1]).toMatch(/^instanciou executor#/);
   });
 
+  it("guarda o papel do subagente para o bixinho; eventos antigos sem o campo ficam sem papel", () => {
+    const [turno] = reproduzir(
+      registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "conte", configuracao },
+        { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "a", descricao: "Contar", tarefa: "x", papel: "contador-de-linhas" },
+        { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "b", descricao: "Ler", tarefa: "y", papel: "executor" },
+        { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "c", descricao: "Antigo", tarefa: "z" },
+      ]),
+    ).turnos;
+
+    expect(turno?.subagentes.map((subagente) => [subagente.id, subagente.papel])).toEqual([
+      ["a", "contador-de-linhas"],
+      ["b", "executor"],
+      ["c", null],
+    ]);
+  });
+
   it("guarda as imagens do pedido e a hora da última atividade", () => {
     const anexo = { id: "a1", nome: "tela.png", tipoDeMidia: "image/png" as const, tamanhoEmBytes: 10, arquivo: "a1.png" };
     const estado = reproduzir(
