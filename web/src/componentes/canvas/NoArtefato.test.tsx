@@ -128,6 +128,45 @@ describe("NoArtefato", () => {
     expect(screen.getByRole("img", { name: "Página HTML" })).toBeInTheDocument();
   });
 
+  it("no canvas, a página fica atrás da camada de ativar: clique ou Enter ativa; pointerdown fora e Esc desativam", async () => {
+    vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("<p>x</p>");
+    const { tela } = preparar(artefato("a1"));
+    render(tela(<NoArtefato {...propsDoNo("a1")} />));
+    const pagina = await iframe();
+    const camada = screen.getByRole("button", { name: "Usar a página" });
+
+    expect(pagina).toHaveStyle({ pointerEvents: "none" });
+    expect(camada.closest(".nowheel, .nodrag")).toBeNull();
+
+    fireEvent.click(camada);
+    expect(screen.queryByRole("button", { name: "Usar a página" })).not.toBeInTheDocument();
+    expect(pagina).not.toHaveStyle({ pointerEvents: "none" });
+    expect(pagina).toHaveFocus();
+
+    fireEvent.pointerDown(document.body);
+    expect(pagina).toHaveStyle({ pointerEvents: "none" });
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Usar a página" }), { key: "Enter" });
+    expect(pagina).not.toHaveStyle({ pointerEvents: "none" });
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.getByRole("button", { name: "Usar a página" })).toBeInTheDocument();
+    // Ativar e desativar não recria a página.
+    expect(await iframe()).toBe(pagina);
+  });
+
+  it("em tela cheia a página não tem a camada de ativar", async () => {
+    vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("<p>x</p>");
+    const { tela } = preparar(artefato("a1"));
+    render(tela(<NoArtefato {...propsDoNo("a1")} />));
+    await iframe();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ampliar o artefato" }));
+
+    const modal = screen.getByRole("dialog", { name: "Relatório de vendas" });
+    expect(within(modal).queryByRole("button", { name: "Usar a página" })).not.toBeInTheDocument();
+    expect(within(modal).getByTitle("Conteúdo do artefato: Relatório de vendas")).not.toHaveStyle({ pointerEvents: "none" });
+  });
+
   it("sem <head>, a política entra no começo do documento (depois do DOCTYPE)", async () => {
     vi.spyOn(apiDosArtefatos, "lerVersao").mockImplementation(async (id) =>
       id === "a1" ? "<!doctype html><p>oi</p>" : "<p>sem doctype</p><header>não é head</header>",

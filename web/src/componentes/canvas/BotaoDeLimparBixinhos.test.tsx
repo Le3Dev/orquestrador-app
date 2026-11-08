@@ -50,6 +50,7 @@ function renderizar(estado: EstadoDaConversa, limpos?: BixinhosLimpos) {
       limparBixinhos,
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),
+      mudarEscalaDaLetra: vi.fn(),
       recarregar: vi.fn(async () => undefined),
       abrirPrevia: vi.fn(),
       navegarPrevia: vi.fn(),

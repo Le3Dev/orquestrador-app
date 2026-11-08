@@ -61,6 +61,11 @@
   --shadow-card: 0 1px 0 color-mix(in srgb, var(--claude-claro) 4%, transparent) inset,
     0 12px 32px -16px rgba(0, 0, 0, .6);
 
+  /* Movimento: a entrada do que abre por cima (seção "Surgir") e o brilho da
+   * janela selecionada. A mola passa um tiquinho do fim e assenta. */
+  --curva-de-mola: cubic-bezier(.2, .9, .3, 1.15);
+  --tempo-de-surgir: 180ms;
+
   /* Tipografia */
   --fonte-titulo: "Poppins", system-ui, "Segoe UI", sans-serif;
   --fonte-texto: system-ui, "Segoe UI", Roboto, sans-serif;
@@ -594,7 +599,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   background: color-mix(in srgb, var(--claude-escuro) 70%, black);
   border: 1px solid var(--border-forte);
   box-shadow: 0 24px 60px -24px rgba(0, 0, 0, .85), 0 0 0 1px rgba(0, 0, 0, .4);
-  transition: border-color .2s, box-shadow .2s;
+  transition: border-color .2s, box-shadow .25s ease-out;
 }
 /* Plan Mode ligado. Vem antes da ativa: trabalhando, o laranja prevalece. */
 .janela-terminal-planejando { border-color: color-mix(in srgb, var(--info) 55%, transparent); }
@@ -602,7 +607,28 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   border-color: color-mix(in srgb, var(--active) 55%, var(--border-forte));
   box-shadow: 0 24px 60px -24px rgba(0, 0, 0, .85), 0 0 34px -10px color-mix(in srgb, var(--active) 55%, transparent);
 }
-.react-flow__node.selected .janela-terminal { border-color: var(--active); }
+/* Selecionada, a janela brilha na cor do tipo: um anel de 2 px colado à borda,
+ * um halo próximo e outro largo, bem mais fortes que o brilho do chat
+ * respondendo e do terminal trabalhando (as outras janelas repetem o desenho
+ * na cor delas). Sombra, e não contorno: o pisca da entrega usa o contorno
+ * (afastado 2 px, logo fora do anel) e passa por cima. */
+.react-flow__node.selected .janela-terminal {
+  border-color: var(--active);
+  box-shadow:
+    0 24px 60px -24px rgba(0, 0, 0, .85),
+    0 0 0 2px color-mix(in srgb, var(--active) 75%, transparent),
+    0 0 28px 2px color-mix(in srgb, var(--active) 55%, transparent),
+    0 0 70px -6px color-mix(in srgb, var(--active) 35%, transparent);
+}
+/* Selecionada e trabalhando: o halo de trabalho fica e o da seleção soma por cima. */
+.react-flow__node.selected .janela-terminal.janela-terminal-ativa {
+  box-shadow:
+    0 24px 60px -24px rgba(0, 0, 0, .85),
+    0 0 0 2px color-mix(in srgb, var(--active) 80%, transparent),
+    0 0 34px -10px color-mix(in srgb, var(--active) 55%, transparent),
+    0 0 28px 2px color-mix(in srgb, var(--active) 55%, transparent),
+    0 0 70px -6px color-mix(in srgb, var(--active) 40%, transparent);
+}
 /* O relatório de um Subagente chegou (o envelope da linha): a borda pisca uma
  * vez em verde, por DURACAO_DO_PISCAR_MS (entrega.ts). Só o meio da animação
  * tem cor: o começo e o fim são a borda de antes (ativa, planejando…). O
@@ -631,6 +657,16 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   cursor: grab;
 }
 .barra-do-terminal:active { cursor: grabbing; }
+
+/* Tudo abaixo da barra de título do terminal (e do rascunho). O tamanho da
+ * letra é um `zoom` inline aqui: a barra e as alças de redimensionar ficam no
+ * tamanho normal, e o que passar do cartão rola como antes. */
+.conteudo-do-cartao {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
 
 .semaforo { display: inline-flex; gap: 6px; margin-right: 4px; }
 .semaforo i { width: 10px; height: 10px; border-radius: 50%; background: var(--surface-3); }
@@ -892,9 +928,16 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   background: color-mix(in srgb, var(--cor-da-nota) 10%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--cor-da-nota) 35%, var(--border-forte));
   box-shadow: 0 18px 44px -22px rgba(0, 0, 0, .85);
-  transition: border-color .2s;
+  transition: border-color .2s, box-shadow .25s ease-out;
 }
-.react-flow__node.selected .janela-nota { border-color: color-mix(in srgb, var(--cor-da-nota) 80%, transparent); }
+.react-flow__node.selected .janela-nota {
+  border-color: var(--cor-da-nota);
+  box-shadow:
+    0 18px 44px -22px rgba(0, 0, 0, .85),
+    0 0 0 2px color-mix(in srgb, var(--cor-da-nota) 75%, transparent),
+    0 0 28px 2px color-mix(in srgb, var(--cor-da-nota) 55%, transparent),
+    0 0 70px -6px color-mix(in srgb, var(--cor-da-nota) 35%, transparent);
+}
 
 /* A barra tem 38px: minimizada, a nota é só ela e a borda (ALTURA_DA_NOTA_MINIMIZADA). */
 .barra-da-nota {
@@ -1062,9 +1105,16 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   background: var(--surface);
   border: 1px solid color-mix(in srgb, var(--cor-do-artefato) 32%, var(--border-forte));
   box-shadow: 0 18px 44px -22px rgba(0, 0, 0, .85);
-  transition: border-color .2s;
+  transition: border-color .2s, box-shadow .25s ease-out;
 }
-.react-flow__node.selected .janela-artefato { border-color: color-mix(in srgb, var(--cor-do-artefato) 80%, transparent); }
+.react-flow__node.selected .janela-artefato {
+  border-color: var(--cor-do-artefato);
+  box-shadow:
+    0 18px 44px -22px rgba(0, 0, 0, .85),
+    0 0 0 2px color-mix(in srgb, var(--cor-do-artefato) 75%, transparent),
+    0 0 28px 2px color-mix(in srgb, var(--cor-do-artefato) 55%, transparent),
+    0 0 70px -6px color-mix(in srgb, var(--cor-do-artefato) 35%, transparent);
+}
 
 .barra-do-artefato {
   display: flex;
@@ -1182,6 +1232,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   overflow-y: auto;
   padding: 4px;
   cursor: default;
+  /* Desce do "vN ▾", encostado à direita. */
+  transform-origin: top right;
+  animation: surgir-mola var(--tempo-de-surgir) var(--curva-de-mola) backwards;
 }
 .item-de-versao { font-size: 12px; text-align: left; }
 .item-de-versao[aria-checked="true"] { background: color-mix(in srgb, var(--info) 14%, transparent); }
@@ -1271,9 +1324,16 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   background: var(--surface);
   border: 1px solid color-mix(in srgb, var(--cor-da-previa) 35%, var(--border-forte));
   box-shadow: 0 18px 44px -22px rgba(0, 0, 0, .85);
-  transition: border-color .2s;
+  transition: border-color .2s, box-shadow .25s ease-out;
 }
-.react-flow__node.selected .janela-previa { border-color: color-mix(in srgb, var(--cor-da-previa) 80%, transparent); }
+.react-flow__node.selected .janela-previa {
+  border-color: var(--cor-da-previa);
+  box-shadow:
+    0 18px 44px -22px rgba(0, 0, 0, .85),
+    0 0 0 2px color-mix(in srgb, var(--cor-da-previa) 75%, transparent),
+    0 0 28px 2px color-mix(in srgb, var(--cor-da-previa) 55%, transparent),
+    0 0 70px -6px color-mix(in srgb, var(--cor-da-previa) 35%, transparent);
+}
 
 /* A barra tem 38px, como a da nota: minimizada, a prévia é só ela e a borda (ALTURA_DA_PREVIA_MINIMIZADA). */
 .barra-da-previa {
@@ -1294,7 +1354,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .barra-da-previa .botao-icone { width: 28px; height: 28px; }
 /* Perto da borda direita: o balão abre para a esquerda. */
 .barra-da-previa .dica { margin: 0 4px; }
-.barra-da-previa .dica-balao { left: auto; right: -10px; }
+.barra-da-previa .dica-balao { left: auto; right: -10px; transform-origin: calc(100% - 18px) top; }
 
 .campo-do-endereco {
   flex: 1;
@@ -1337,6 +1397,46 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .canvas-movendo .quadro-da-previa,
 .canvas-redimensionando .quadro-da-previa { pointer-events: none; }
 
+/* A camada de ativar (QuadroAtivavel) sobre o iframe da prévia e do artefato
+ * HTML: transparente, sem `nowheel`, para a roda e a pinça moverem o canvas
+ * até um clique ativar a página. A dica só aparece ao passar o mouse. */
+.quadro-ativavel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+.camada-de-ativar {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 0 12px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.camada-de-ativar:focus-visible { outline: 2px solid var(--active); outline-offset: -2px; }
+.dica-da-camada {
+  display: none;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-forte);
+  background: var(--surface-3);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, .5);
+  font-family: var(--fonte-texto);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--secondary);
+  pointer-events: none;
+}
+.camada-de-ativar:hover .dica-da-camada,
+.camada-de-ativar:focus-visible .dica-da-camada { display: block; }
+
 .mensagem-da-previa {
   display: grid;
   place-items: center;
@@ -1349,9 +1449,134 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   color: var(--muted);
 }
 
+/* Fora do ar: o anel da contagem, o aviso e o botão, empilhados no meio. */
+.mensagem-fora-do-ar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.mensagem-fora-do-ar p { margin: 0; max-width: 420px; }
+
+/* O anel começa cheio no topo e esvazia no sentido do relógio. Cada segundo
+ * desliza por um segundo inteiro, linear: o anel anda sem parar. */
+.anel-da-contagem { position: relative; display: grid; place-items: center; width: 48px; height: 48px; }
+.anel-da-contagem svg { transform: rotate(-90deg); }
+.trilho-do-anel, .progresso-do-anel { fill: none; stroke-width: 3; }
+.trilho-do-anel { stroke: color-mix(in srgb, var(--cor-da-previa) 16%, transparent); }
+.progresso-do-anel {
+  stroke: var(--cor-da-previa);
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s linear;
+}
+.segundos-do-anel {
+  position: absolute;
+  font-family: var(--fonte-mono);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--primary);
+}
+/* Minimizada: os segundos numa pílula pequena na barra. */
+.contagem-na-barra {
+  flex-shrink: 0;
+  min-width: 26px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--cor-da-previa) 45%, transparent);
+  background: color-mix(in srgb, var(--cor-da-previa) 14%, transparent);
+  font-family: var(--fonte-mono);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: var(--cor-da-previa);
+  cursor: default;
+}
+
 /* Linha do terminal até a prévia que saiu dele: discreta, tracejada. */
 .react-flow__edge.aresta-previa .react-flow__edge-path {
   stroke: color-mix(in srgb, var(--info) 45%, transparent);
+  stroke-dasharray: 5 6;
+}
+
+/* ---------------- Terminal (shell de verdade no canvas) ----------------
+ * A moldura da prévia, no verde de sucesso, com o xterm no corpo. O fundo do
+ * corpo é o mesmo do xterm (--surface), lido pelo NoShell. */
+
+.janela-shell {
+  --cor-do-shell: var(--success);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--cor-do-shell) 30%, var(--border-forte));
+  box-shadow: 0 18px 44px -22px rgba(0, 0, 0, .85);
+  transition: border-color .2s, box-shadow .25s ease-out;
+}
+.react-flow__node.selected .janela-shell {
+  border-color: var(--cor-do-shell);
+  box-shadow:
+    0 18px 44px -22px rgba(0, 0, 0, .85),
+    0 0 0 2px color-mix(in srgb, var(--cor-do-shell) 70%, transparent),
+    0 0 28px 2px color-mix(in srgb, var(--cor-do-shell) 50%, transparent),
+    0 0 70px -6px color-mix(in srgb, var(--cor-do-shell) 32%, transparent);
+}
+
+.barra-do-shell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 38px;
+  padding: 0 6px 0 12px;
+  border-radius: 11px 11px 0 0;
+  background: color-mix(in srgb, var(--cor-do-shell) 10%, var(--surface-2));
+  border-bottom: 1px solid color-mix(in srgb, var(--cor-do-shell) 20%, var(--border));
+  cursor: grab;
+}
+.barra-do-shell:active { cursor: grabbing; }
+.barra-do-shell .botao-icone { width: 28px; height: 28px; }
+
+.corpo-do-shell {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 6px 4px 4px 8px;
+  border-radius: 0 0 11px 11px;
+  background: var(--surface);
+}
+/* O xterm ocupa o corpo inteiro; o addon-fit calcula colunas e linhas por este tamanho. */
+.quadro-do-shell { width: 100%; height: 100%; }
+.quadro-do-shell .xterm { height: 100%; }
+.quadro-do-shell .xterm-viewport { background-color: var(--surface) !important; }
+
+/* O shell encerrou: a saída continua legível acima, e a faixa oferece abrir de novo. */
+.aviso-do-shell {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-forte);
+  background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+  color: var(--secondary);
+}
+
+.react-flow__node-shell { background: transparent; border: 0; padding: 0; }
+.react-flow__minimap-node.minimapa-shell { fill: color-mix(in srgb, var(--success) 50%, var(--surface)); }
+
+/* Linha do terminal do Orquestrador até o shell aberto a partir dele: como a da prévia. */
+.react-flow__edge.aresta-shell .react-flow__edge-path {
+  stroke: color-mix(in srgb, var(--success) 45%, transparent);
   stroke-dasharray: 5 6;
 }
 
@@ -1558,14 +1783,50 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   color: var(--claude-cinza-claro);
   background: var(--surface-3);
 }
+/* Bloco de código: quebra a linha em vez de cortar o texto na horizontal
+ * (a janela é estreita e rolar de lado no canvas não funciona bem). */
 .markdown pre {
   padding: 10px 12px;
   border-radius: var(--radius-input);
   background: color-mix(in srgb, var(--claude-escuro) 70%, black);
   border: 1px solid var(--border);
-  overflow-x: auto;
+  font-family: var(--fonte-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
-.markdown pre code { padding: 0; background: none; }
+.markdown pre code { padding: 0; background: none; white-space: inherit; overflow-wrap: anywhere; }
+/* O bloco vem num contêiner com o botão "copiar" no canto. O botão some até o
+ * mouse passar pelo bloco, mas continua na ordem do Tab e aparece com o foco. */
+.bloco-de-codigo { position: relative; }
+/* Reserva o canto do botão só na primeira linha: um float vazio da altura de
+ * uma linha empurra o começo do texto para a esquerda, e as linhas de baixo
+ * continuam com a largura toda. A largura cobre o rótulo mais longo ("não copiou"). */
+.bloco-de-codigo > pre::before { content: ""; float: right; width: 80px; height: 1lh; }
+.botao-de-copiar {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-forte);
+  background: var(--surface-2);
+  color: var(--secondary);
+  font-family: var(--fonte-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s ease-out, color .12s, border-color .12s;
+}
+.bloco-de-codigo:hover .botao-de-copiar,
+.botao-de-copiar:focus-visible,
+.botao-de-copiar[data-estado="copiado"],
+.botao-de-copiar[data-estado="falhou"] { opacity: 1; }
+.botao-de-copiar:hover, .botao-de-copiar:focus-visible { color: var(--primary); border-color: var(--active); outline: none; }
+.botao-de-copiar[data-estado="copiado"] { color: var(--success); border-color: color-mix(in srgb, var(--success) 55%, var(--border-forte)); }
+.botao-de-copiar[data-estado="falhou"] { color: var(--error); border-color: color-mix(in srgb, var(--error) 55%, var(--border-forte)); }
+/* Sem mouse (tela de toque), não há hover: o botão fica sempre à vista. */
+@media (hover: none) { .botao-de-copiar { opacity: 1; } }
 .markdown a { color: var(--active); text-decoration: underline; text-underline-offset: 2px; }
 .markdown blockquote { border-left: 2px solid var(--border-forte); padding-left: 12px; color: var(--secondary); }
 .markdown hr { border-color: var(--border); }
@@ -1674,7 +1935,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 
 /* Resposta do Claude: Markdown em Lora, com o cursor no fim enquanto chega texto. */
 .mensagem-do-claude { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.texto-respondendo > .markdown > :last-child::after {
+/* Se o último bloco é código, o cursor vai dentro do pre, e não abaixo do contêiner. */
+.texto-respondendo > .markdown > :last-child:not(.bloco-de-codigo)::after,
+.texto-respondendo > .markdown > .bloco-de-codigo:last-child > pre::after {
   content: "▍";
   margin-left: 2px;
   color: var(--active);
@@ -1691,6 +1954,55 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   border: 1px solid color-mix(in srgb, var(--active) 40%, var(--border));
   background: color-mix(in srgb, var(--active) 6%, var(--surface-2));
 }
+
+/* Perguntas do Claude com opções clicáveis (no chat e no terminal do orquestrador).
+ * Fonte própria: no terminal, o texto em volta é monoespaçado. */
+.cartao-de-pergunta {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+  padding: 12px 14px;
+  border-radius: var(--radius-card);
+  border: 1px solid color-mix(in srgb, var(--active) 40%, var(--border));
+  background: color-mix(in srgb, var(--active) 6%, var(--surface-2));
+  font-family: var(--fonte-texto);
+}
+.cartao-de-pergunta-respondida { border-color: var(--border); background: var(--surface-2); }
+.pergunta-do-cartao { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.texto-da-pergunta { font-family: var(--fonte-titulo); font-size: 12.5px; font-weight: 500; color: var(--primary); }
+.opcoes-da-pergunta { display: flex; flex-direction: column; gap: 6px; }
+.opcao-da-pergunta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 10px;
+  text-align: left;
+  border-radius: var(--radius-button);
+  border: 1px solid var(--border-forte);
+  background: var(--surface-2);
+  color: var(--primary);
+  cursor: pointer;
+  transition: background-color .15s, border-color .15s;
+}
+.opcao-da-pergunta:not(:disabled):hover { background: var(--surface-3); border-color: var(--secondary); }
+.opcao-da-pergunta:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
+.opcao-da-pergunta:disabled { cursor: not-allowed; opacity: .5; }
+.opcao-marcada,
+.opcao-marcada:not(:disabled):hover {
+  border-color: var(--active);
+  background: color-mix(in srgb, var(--active) 14%, var(--surface-2));
+}
+/* Travado, a escolha feita continua legível; só as outras opções apagam. */
+.opcao-marcada:disabled { opacity: 1; }
+.opcao-marcada .rotulo-da-opcao::before { content: "✓ "; color: var(--active); }
+.rotulo-da-opcao { font-family: var(--fonte-titulo); font-size: 12.5px; font-weight: 500; overflow-wrap: anywhere; }
+.descricao-da-opcao { font-size: 11.5px; line-height: 1.4; color: var(--secondary); overflow-wrap: anywhere; }
+.outro-da-pergunta { display: flex; align-items: center; gap: 6px; }
+.campo-do-outro { padding: 5px 10px; font-size: 12px; }
+.acoes-da-pergunta { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* Pedido de autorização (o chat quis editar ou rodar um comando): em tom de
  * aviso, porque autorizar deixa o chat alterar os projetos até o /clear. */
@@ -1880,6 +2192,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   padding: 6px;
   background: var(--surface-2);
   border-color: var(--border-forte);
+  /* Sobe do botão, encostado à direita: cresce do canto de baixo à direita. */
+  transform-origin: bottom right;
+  animation: surgir-mola var(--tempo-de-surgir) var(--curva-de-mola) backwards;
 }
 .submenu-do-seletor {
   position: absolute;
@@ -1892,10 +2207,13 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   padding: 6px;
   background: var(--surface-2);
   border-color: var(--border-forte);
+  /* Abre ao lado, alinhado por baixo: cresce do canto de baixo à esquerda. */
+  transform-origin: bottom left;
+  animation: surgir-mola var(--tempo-de-surgir) var(--curva-de-mola) backwards;
 }
 /* Sem espaço ao lado: o submenu sobe por cima do menu. */
 @media (max-width: 1100px) {
-  .submenu-do-seletor { left: auto; right: 0; bottom: calc(100% + 6px); }
+  .submenu-do-seletor { left: auto; right: 0; bottom: calc(100% + 6px); transform-origin: bottom right; }
 }
 
 .item-do-menu {
@@ -1932,6 +2250,12 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   /* O composer troca de compacto para expandido sem transição. */
   .campo-do-chat { transition: none; }
   .composer-expandido .linha-do-composer { animation: none; }
+  /* O brilho da seleção acende e apaga na hora; a dica abre e fecha sem
+   * crescer; o anel da contagem da prévia anda aos saltos, um por segundo.
+   * As entradas (surgir-mola, esmaecer-fundo) já caem na regra geral acima.
+   * `!important`: as regras da dica vêm depois desta no arquivo. */
+  .janela-terminal, .janela-nota, .janela-artefato, .janela-previa, .janela-shell,
+  .dica-balao, .progresso-do-anel, .botao-de-copiar { transition: none !important; }
 }
 
 /* Instruções personalizadas: texto livre com altura contida (o painel ⚙
@@ -2068,6 +2392,27 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 /* O que é clicável (ou tem balão ao passar o mouse) não arrasta a janela. */
 .no-drag { -webkit-app-region: no-drag; }
 
+/* ---------------- Surgir: menus, popovers, painéis e modais ----------------
+ * Tudo o que abre por cima entra do mesmo jeito: cresce de 96% a 100% enquanto
+ * aparece, na curva de mola (--curva-de-mola, em --tempo-de-surgir). A origem
+ * é de onde abre: o menu que desce cresce do topo; o que sobe, do fundo. O
+ * fundo dos modais só esmaece. A saída não anima: os componentes desmontam.
+ * `backwards`: terminada a entrada, nada fica preso no elemento (nem o
+ * transform, que criaria um contexto de empilhamento à toa). Os menus com
+ * classe própria recebem a animação na regra deles; `.surgir` é para quem
+ * só tem as classes do Tailwind (modais e a paleta). */
+@keyframes surgir-mola { from { opacity: 0; transform: scale(.96); } }
+@keyframes esmaecer-fundo { from { background-color: transparent; } }
+.surgir { animation: surgir-mola var(--tempo-de-surgir) var(--curva-de-mola) backwards; }
+.surgir-do-topo { transform-origin: top center; }
+.fundo-que-esmaece { animation: esmaecer-fundo var(--tempo-de-surgir) ease-out backwards; }
+/* O canvas em movimento e o servidor fora pausam as animações (acima): a
+ * entrada ficaria congelada no começo, invisível. O que surge vai até o fim. */
+.canvas-movendo .react-flow__node :is(.surgir, .menu-da-criacao, .menu-de-versoes, .painel-da-configuracao),
+.canvas-desconectado .chat-rapido :is(.surgir, .menu-do-seletor, .submenu-do-seletor, .menu-da-criacao) {
+  animation-play-state: running !important;
+}
+
 /* ---------------- Atualização do app (barra de título) ----------------
  * À esquerda do status. Baixando: texto e medidor discretos. Pronta: uma
  * etiqueta clicável (sem caixa alta) que abre um cartão logo abaixo da
@@ -2112,7 +2457,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   white-space: normal;
   user-select: text;
   cursor: default;
-  animation: subir-menu .14s ease-out both;
+  /* Desce da pílula, encostado à direita: cresce do canto de cima à direita. */
+  transform-origin: top right;
+  animation: surgir-mola var(--tempo-de-surgir) var(--curva-de-mola) backwards;
 }
 .cartao-da-atualizacao:focus { outline: none; }
 .texto-do-cartao-da-atualizacao { margin: 0; line-height: 1.45; }
@@ -2158,9 +2505,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   background: var(--surface-2);
   border-color: var(--border-forte);
   box-shadow: 0 18px 50px -18px rgba(0, 0, 0, .9);
-  animation: subir-menu .14s ease-out both;
+  transform-origin: 24px top;
+  animation: surgir-mola var(--tempo-de-surgir) var(--curva-de-mola) backwards;
 }
-@keyframes subir-menu { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 .menu-do-novo .item-do-menu { gap: 16px; font-size: 12.5px; color: var(--primary); }
 .item-com-icone { display: inline-flex; align-items: center; gap: 9px; min-width: 0; }
 .icone-do-item { display: grid; place-items: center; width: 16px; flex-shrink: 0; font-size: 13px; color: var(--secondary); }
@@ -2229,8 +2576,16 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   color: var(--primary);
   border-color: color-mix(in srgb, var(--primary) 45%, transparent);
 }
+/* Fechado, o balão fica invisível (e fora da árvore de acessibilidade, como
+ * com `display: none`) para poder surgir com transição: cresce do canto de
+ * cima, do lado do ⓘ, na mesma mola dos menus. Ao sair só esmaece, rápido. */
 .dica-balao {
-  display: none;
+  visibility: hidden;
+  opacity: 0;
+  transform: scale(.96);
+  transform-origin: 18px top;
+  pointer-events: none;
+  transition: opacity .1s ease-out, transform 0s linear .1s, visibility 0s linear .1s;
   position: absolute;
   left: -10px;
   top: 24px;
@@ -2250,7 +2605,13 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   white-space: normal;
 }
 .dica-balao strong { display: block; margin-bottom: 3px; color: var(--primary); font-weight: 600; }
-.dica:hover .dica-balao, .dica:focus-within .dica-balao { display: block; }
+.dica:hover .dica-balao, .dica:focus-within .dica-balao {
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  transition: opacity var(--tempo-de-surgir) ease-out, transform var(--tempo-de-surgir) var(--curva-de-mola), visibility 0s;
+}
 
 /* ---------------- Painéis da barra (Subagentes e Instruções gerais) ----------------
  * Abrem logo abaixo da barra do canvas, um por vez. Mesmo visual da criação:
@@ -2269,6 +2630,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   /* Opaco: abre por cima dos terminais, e o texto deles vazava pelo painel. */
   background: var(--surface);
   border-color: var(--border-forte);
+  /* Desce da barra, na coluna da esquerda: cresce do canto de cima à esquerda. */
+  transform-origin: top left;
+  animation: surgir-mola var(--tempo-de-surgir) var(--curva-de-mola) backwards;
 }
 .painel-da-barra-cabecalho {
   display: flex;
@@ -2549,7 +2913,11 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   border: 1px solid var(--border-forte);
   background: var(--surface-3);
   box-shadow: 0 14px 36px rgba(0, 0, 0, .5);
+  /* Desce do chip: cresce do canto de cima do lado em que está preso. */
+  transform-origin: top left;
+  animation: surgir-mola var(--tempo-de-surgir) var(--curva-de-mola) backwards;
 }
+.menu-da-criacao.right-0 { transform-origin: top right; }
 .opcao-do-menu {
   display: flex;
   align-items: center;
@@ -2665,6 +3033,34 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   background: var(--surface-2);
 }
 .botao-de-comecar { flex: 0 1 auto; min-width: 0; height: 40px; padding: 0 18px; font-size: 13.5px; font-weight: 600; max-width: 55%; }
+
+/* ⚙ do terminal (PainelDeConfiguracao): as linhas e o rodapé da criação, por
+ * cima da conversa. O terminal costuma ser mais estreito que o cartão de
+ * criação: as linhas empilham (rótulo em cima) antes, e as opções de
+ * permissão quebram de linha em vez de cortar o texto. */
+.painel-da-configuracao {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 70%;
+  border-bottom: 1px solid var(--border);
+  /* Abre logo abaixo da barra do terminal: cresce do topo. */
+  transform-origin: top center;
+  animation: surgir-mola var(--tempo-de-surgir) var(--curva-de-mola) backwards;
+}
+.corpo-da-configuracao { flex: 0 1 auto; }
+@container (max-width: 620px) {
+  .corpo-da-configuracao .linha-da-criacao { grid-template-columns: minmax(0, 1fr); }
+}
+.corpo-da-configuracao .permissoes-da-criacao { flex-wrap: wrap; }
+.rodape-da-configuracao { flex: none; }
+
+/* ── Melhorar o pedido (✨) ─────────────────────────────────────────────── */
+/* Melhorando, o campo fica travado (readOnly) e esmaecido até o texto novo chegar. */
+.campo-do-chat[aria-busy="true"],
+.prompt-do-terminal textarea[aria-busy="true"] { opacity: .55; cursor: progress; }
+.botao-de-melhorar:not(:disabled):hover { color: var(--active); }
 
 /* ── Ditado por voz (BotaoDeDitado) ─────────────────────────────────────── */
 .ditado { position: relative; display: inline-flex; }
