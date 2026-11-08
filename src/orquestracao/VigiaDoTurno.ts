@@ -35,6 +35,8 @@ export const CPU_DE_TRABALHO = 2;
 export interface LeituraDaVigia {
   situacao: "trabalhando" | "suspeito";
   resumo: string;
+  /** Sem a lista de processos (Windows), a vigia só avisa: não encerra nem retoma o turno sozinha. */
+  semRetomadaAutomatica?: true;
 }
 
 export interface OpcoesDaVigia {
@@ -59,6 +61,9 @@ export interface OpcoesDaVigia {
  * O Claude esperando a resposta da API tem CPU perto de zero, por isso o
  * critério principal é a falta de linhas e de transcrição crescendo, por
  * vários diagnósticos seguidos, e não a CPU sozinha.
+ *
+ * Onde o sistema não deixa ver os processos (Windows), a vigia não dá o turno
+ * como travado por silêncio: só avisa, e o usuário decide se interrompe.
  */
 export class VigiaDoTurno {
   private ligada = false;
@@ -177,6 +182,18 @@ export class VigiaDoTurno {
     if (diagnostico.cpuDoClaude >= CPU_DE_TRABALHO) {
       this.parados = 0;
       return { leitura: { situacao: "trabalhando", resumo: "Claude processando" }, travado: null };
+    }
+    if (!diagnostico.processosConhecidos) {
+      // Sem CPU nem filhos à vista, um `npm test` longo parece travado: a
+      // decisão fica com o usuário, e a retomada automática não dispara.
+      return {
+        leitura: {
+          situacao: "suspeito",
+          resumo: `${semSaida}; não dá para ver os processos neste sistema, então o app não encerra o pedido sozinho`,
+          semRetomadaAutomatica: true,
+        },
+        travado: null,
+      };
     }
 
     this.parados += 1;

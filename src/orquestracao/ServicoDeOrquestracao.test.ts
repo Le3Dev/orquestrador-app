@@ -1544,8 +1544,17 @@ class RelogioFalso implements AgendadorDeTarefas {
 /** Claude parado: vivo, sem CPU, sem comando e sem transcrição crescendo. */
 class DiagnosticadorParado implements DiagnosticadorDoClaude {
   readonly esquecidos: string[] = [];
+  /** Falso imita o Windows, onde o sistema não deixa ver os processos. */
+  processosConhecidos = true;
   async diagnosticar(): Promise<DiagnosticoDoClaude> {
-    return { processoVivo: true, cpuDoClaude: 0, filhos: [], transcricoesCrescendo: false, ultimaEscritaEm: null };
+    return {
+      processoVivo: true,
+      processosConhecidos: this.processosConhecidos,
+      cpuDoClaude: 0,
+      filhos: [],
+      transcricoesCrescendo: false,
+      ultimaEscritaEm: null,
+    };
   }
   esquecer(orquestradorId: string): void {
     this.esquecidos.push(orquestradorId);
@@ -1908,6 +1917,28 @@ describe("ServicoDeOrquestracao e a autorrecuperação (ADR-36)", () => {
     await primeiro.recuperacao;
 
     expect(orquestrador.ultimoTurno?.situacao).toBe("cancelado");
+    expect(etapas()).toEqual([]);
+  });
+
+  it("sem lista de processos (Windows), só mostra o diagnóstico: não encerra nem retoma", async () => {
+    diagnosticador.processosConhecidos = false;
+    const orquestrador = await criar();
+    motor.roteiro = ["rodando"];
+    const primeiro = await servico.enviarMensagem(orquestrador.id, "rode o npm test");
+    await esvaziar();
+
+    await relogio.avancar(20 * MINUTO);
+    expect(orquestrador.situacao).toBe("trabalhando");
+    expect(sinais.at(-1)?.diagnostico).toEqual({
+      situacao: "suspeito",
+      resumo: "sem saída há 20 min; não dá para ver os processos neste sistema, então o app não encerra o pedido sozinho",
+      semRetomadaAutomatica: true,
+    });
+    expect(etapas()).toEqual([]);
+    expect(motor.pedidos).toHaveLength(1);
+
+    await servico.cancelar(orquestrador.id);
+    await primeiro.recuperacao;
     expect(etapas()).toEqual([]);
   });
 

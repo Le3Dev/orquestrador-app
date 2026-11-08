@@ -199,6 +199,8 @@ export interface SinalDeVida {
    * O que a vigia do turno viu quando o Claude ficou sem dar saída (ver
    * ADR-36), ex.: trabalhando "rodando `npm test` há 6 min"; suspeito "sem
    * saída há 3 min, sem CPU". Ausente nos sinais de raciocínio.
+   * `semRetomadaAutomatica`: o sistema não deixa ver os processos (Windows),
+   * e a vigia só avisa, sem encerrar nem retomar o turno.
    */
-  diagnostico?: { situacao: "trabalhando" | "suspeito"; resumo: string };
+  diagnostico?: { situacao: "trabalhando" | "suspeito"; resumo: string; semRetomadaAutomatica?: true };
 }

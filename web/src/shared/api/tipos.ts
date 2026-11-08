@@ -129,6 +129,8 @@ export interface SinalDeVida {
 export interface DiagnosticoDoSilencio {
   situacao: "trabalhando" | "suspeito";
   resumo: string;
+  /** O servidor não vê os processos neste sistema (Windows): só avisa, não encerra nem retoma o turno sozinho. */
+  semRetomadaAutomatica?: true;
 }
 
 /** Por que o turno precisou de recuperação. */

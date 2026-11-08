@@ -174,13 +174,13 @@ export function lerListaDeProcessos(texto: string): ProcessoListado[] {
 
 /**
  * Todos os processos da máquina com pai, CPU e idade, numa única chamada ao
- * `ps`. No Windows devolve lista vazia: não há um equivalente barato (o
+ * `ps`. No Windows devolve `null`: não há um equivalente barato (o
  * `Get-CimInstance` leva segundos e não dá a CPU do momento), e quem usa trata
- * a lista vazia como "não deu para saber".
+ * o `null` como "não dá para ver os processos neste sistema".
  */
-export async function listarProcessos(): Promise<ProcessoListado[]> {
+export async function listarProcessos(): Promise<ProcessoListado[] | null> {
   if (process.platform === "win32") {
-    return [];
+    return null;
   }
   return lerListaDeProcessos(await executar("ps", ["-A", "-o", "pid=,ppid=,pcpu=,etime=,args="]));
 }

@@ -46,6 +46,7 @@ class RelogioFalso implements AgendadorDeTarefas {
 
 const parado: DiagnosticoDoClaude = {
   processoVivo: true,
+  processosConhecidos: true,
   cpuDoClaude: 0,
   filhos: [],
   transcricoesCrescendo: false,
@@ -181,6 +182,33 @@ describe("VigiaDoTurno", () => {
     expect(travamentos).toEqual([]);
 
     await relogio.avancar(30 * SEGUNDO);
+    expect(travamentos).toEqual(["sem saída há 2 min; o processo do Claude terminou sem fechar o turno"]);
+  });
+
+  it("sem lista de processos (Windows), só avisa: não trava nem com um silêncio longo", async () => {
+    diagnosticador.diagnostico = { ...parado, processosConhecidos: false };
+    vigia.ligar();
+    await relogio.avancar(30 * MINUTO);
+
+    expect(travamentos).toEqual([]);
+    expect(leituras.at(-1)).toEqual({
+      situacao: "suspeito",
+      resumo: "sem saída há 30 min; não dá para ver os processos neste sistema, então o app não encerra o pedido sozinho",
+      semRetomadaAutomatica: true,
+    });
+    expect(relogio.pendentes).toBe(1);
+
+    // Transcrições crescendo continuam valendo como trabalho.
+    diagnosticador.diagnostico = { ...parado, processosConhecidos: false, transcricoesCrescendo: true };
+    await relogio.avancar(30 * SEGUNDO);
+    expect(leituras.at(-1)).toEqual({ situacao: "trabalhando", resumo: "subagentes escrevendo" });
+  });
+
+  it("sem lista de processos, o processo do Claude morto ainda trava (ele é visto pelo sinal 0)", async () => {
+    diagnosticador.diagnostico = { ...parado, processosConhecidos: false, processoVivo: false };
+    vigia.ligar();
+    await relogio.avancar(2 * MINUTO);
+
     expect(travamentos).toEqual(["sem saída há 2 min; o processo do Claude terminou sem fechar o turno"]);
   });
 

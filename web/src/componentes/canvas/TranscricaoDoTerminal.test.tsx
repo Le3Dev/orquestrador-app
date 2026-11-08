@@ -343,6 +343,31 @@ describe("TranscricaoDoTerminal", () => {
       ).toBeInTheDocument();
     });
 
+    it("diagnóstico sem lista de processos (Windows): orienta cancelar mesmo com a autorrecuperação ligada", async () => {
+      vi.spyOn(api, "lerPreferencias").mockResolvedValue({
+        instrucoesPadrao: "",
+        subagentesProntos: [],
+        autorrecuperacao: true,
+      });
+      const resumo = "sem saída há 6 min; não dá para ver os processos neste sistema, então o app não encerra o pedido sozinho";
+      render(
+        <Transcricao
+          conversa={emAndamento()}
+          sinal={{
+            turnoId: "t1",
+            em: "2026-10-28T12:00:05Z",
+            tokensPensando: 0,
+            diagnostico: { situacao: "suspeito", resumo, semRetomadaAutomatica: true },
+          }}
+        />,
+      );
+      await act(async () => undefined);
+
+      const texto = `sem notícias do Claude há 6s: ${resumo}. Se continuar assim, cancele (esc) e reenvie.`;
+      expect(linhaDoSinal(texto)).toHaveClass("linha-erro");
+      expect(screen.queryByText(/retoma sozinho/)).not.toBeInTheDocument();
+    });
+
     it("silêncio longo sem diagnóstico do servidor: a mesma orientação, conforme a preferência", async () => {
       vi.setSystemTime(new Date("2026-10-28T12:03:00Z"));
       const lerPreferencias = vi

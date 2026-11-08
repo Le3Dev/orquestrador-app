@@ -51,6 +51,7 @@ describe("DiagnosticadorDoClaudeNoSistema", () => {
     const diagnostico = await diagnosticador.diagnosticar(ALVO);
 
     expect(diagnostico.processoVivo).toBe(true);
+    expect(diagnostico.processosConhecidos).toBe(true);
     expect(diagnostico.cpuDoClaude).toBe(3.5);
     expect(diagnostico.filhos).toEqual([
       { pid: 300, comando: "node vitest run", cpu: 95, haMs: 110_000 },
@@ -106,6 +107,7 @@ describe("DiagnosticadorDoClaudeNoSistema", () => {
 
     await expect(diagnosticador.diagnosticar(ALVO)).resolves.toEqual({
       processoVivo: false,
+      processosConhecidos: true,
       cpuDoClaude: 0,
       filhos: [],
       transcricoesCrescendo: false,
@@ -121,6 +123,21 @@ describe("DiagnosticadorDoClaudeNoSistema", () => {
     });
 
     expect((await diagnosticador.diagnosticar(ALVO)).processoVivo).toBe(true);
+  });
+
+  it("sem lista de processos no sistema (Windows), diz que não os conhece e decide a vida pelo sinal 0", async () => {
+    const diagnosticador = new DiagnosticadorDoClaudeNoSistema(registro, {
+      listarProcessos: async () => null,
+      pastaDoClaude,
+      processoExiste: (pid) => pid === 100,
+    });
+
+    expect(await diagnosticador.diagnosticar(ALVO)).toMatchObject({
+      processoVivo: true,
+      processosConhecidos: false,
+      cpuDoClaude: 0,
+      filhos: [],
+    });
   });
 
   it("um Orquestrador sem processo registrado não está vivo", async () => {

@@ -71,12 +71,12 @@ const LinhaDoTerminal = memo(function LinhaDoTerminal({ linha }: { linha: LinhaD
 /**
  * O Claude pode ter travado (pelo diagnóstico do servidor ou só pelo tempo de
  * silêncio). Com a autorrecuperação ligada, o app retoma sozinho; desligada,
- * vale a orientação de cancelar e reenviar. A preferência só é lida aqui, com
- * o aviso na tela.
+ * ou quando o servidor não vê os processos (`semRetomada`), vale a orientação
+ * de cancelar e reenviar. A preferência só é lida aqui, com o aviso na tela.
  */
-function AvisoDeSuspeita({ aviso }: { aviso: string }) {
+function AvisoDeSuspeita({ aviso, semRetomada = false }: { aviso: string; semRetomada?: boolean }) {
   const autorrecuperacao = useAutorrecuperacao();
-  const orientacao = autorrecuperacao
+  const orientacao = autorrecuperacao && !semRetomada
     ? "O app retoma sozinho se travar."
     : "Se continuar assim, cancele (esc) e reenvie.";
   return <>{`${aviso} ${orientacao}`}</>;
@@ -92,6 +92,7 @@ function TextoDoSinal({ vida }: { vida: EstadoDeVida }) {
     return (
       <AvisoDeSuspeita
         aviso={`sem notícias do Claude há ${formatarDuracao(vida.ultimoSinalHaMs)}: ${vida.diagnostico.resumo}.`}
+        semRetomada={vida.diagnostico.semRetomadaAutomatica === true}
       />
     );
   }

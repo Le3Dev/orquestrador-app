@@ -16,6 +16,11 @@ export interface ProcessoFilho {
  */
 export interface DiagnosticoDoClaude {
   processoVivo: boolean;
+  /**
+   * Se o sistema deixa ver os processos (CPU e filhos). Falso no Windows: aí
+   * `cpuDoClaude` e `filhos` vêm zerados sem querer dizer "parado".
+   */
+  processosConhecidos: boolean;
   /** % de CPU do processo do Claude (só ele). */
   cpuDoClaude: number;
   /** Descendentes do processo do Claude, do mais ocupado ao menos. `comando` encurtado (até ~80 caracteres, sem caminhos longos de node_modules). */
