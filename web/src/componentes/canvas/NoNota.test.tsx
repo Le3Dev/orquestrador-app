@@ -275,6 +275,71 @@ describe("NoNota", () => {
     expect(renderizacoes.n2).toBe(antes.n2);
   });
 
+  describe("fechar a aba com gravação pendente", () => {
+    /** Dispara o evento na janela, como o navegador ao fechar; devolve se o fechamento foi barrado. */
+    function sair(tipo: "beforeunload" | "pagehide"): boolean {
+      const evento = new Event(tipo, { cancelable: true });
+      act(() => {
+        window.dispatchEvent(evento);
+      });
+      return evento.defaultPrevented;
+    }
+
+    afterEach(() => {
+      delete (window as unknown as { electron?: unknown }).electron;
+    });
+
+    it("no navegador, pede confirmação e salva na hora; sem pendência, fecha sem perguntar", async () => {
+      const alterar = servidorQueAceita();
+      const { tela } = preparar(nota("n1"));
+      render(tela(<NoNota {...propsDoNo("n1")} />));
+      expect(sair("beforeunload")).toBe(false);
+
+      fireEvent.change(screen.getByRole("textbox", { name: "Texto da nota" }), { target: { value: "anotar já" } });
+      expect(sair("beforeunload")).toBe(true);
+      expect(alterar).toHaveBeenCalledWith("n1", { texto: "anotar já" });
+
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.getByText("salvo")).toBeInTheDocument();
+      expect(sair("beforeunload")).toBe(false);
+      expect(alterar).toHaveBeenCalledTimes(1);
+    });
+
+    it("no app desktop, não barra o fechamento: só salva na hora, no beforeunload e no pagehide", async () => {
+      (window as unknown as { electron?: unknown }).electron = { desktop: true, janela: {} };
+      const alterar = servidorQueAceita();
+      const { tela } = preparar(nota("n1"));
+      render(tela(<NoNota {...propsDoNo("n1")} />));
+
+      fireEvent.change(screen.getByRole("textbox", { name: "Texto da nota" }), { target: { value: "um" } });
+      expect(sair("beforeunload")).toBe(false);
+      expect(alterar).toHaveBeenLastCalledWith("n1", { texto: "um" });
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      fireEvent.change(screen.getByRole("textbox", { name: "Texto da nota" }), { target: { value: "dois" } });
+      expect(sair("pagehide")).toBe(false);
+      expect(alterar).toHaveBeenLastCalledWith("n1", { texto: "dois" });
+      expect(alterar).toHaveBeenCalledTimes(2);
+    });
+
+    it("tira o aviso ao desmontar", () => {
+      vi.spyOn(api, "alterarNota").mockReturnValue(new Promise(() => undefined));
+      const tirar = vi.spyOn(window, "removeEventListener");
+      const { tela } = preparar(nota("n1"));
+      const { unmount } = render(tela(<NoNota {...propsDoNo("n1")} />));
+      fireEvent.change(screen.getByRole("textbox", { name: "Texto da nota" }), { target: { value: "x" } });
+
+      unmount();
+
+      expect(tirar).toHaveBeenCalledWith("beforeunload", expect.any(Function));
+      expect(sair("beforeunload")).toBe(false);
+    });
+  });
+
   it("enquanto o conteúdo não chega do servidor, avisa; se a lista falhar, mostra o motivo", () => {
     const { loja, tela } = preparar();
     render(tela(<NoNota {...propsDoNo("n9")} />));
