@@ -129,7 +129,7 @@ describe("PainelDeConfiguracao", () => {
 
   afterEach(() => vi.restoreAllMocks());
 
-  it("commit e push começam desligados e, ligados, vão no PATCH junto com o resto da configuração", async () => {
+  it("commit e push começam desligados e, ligados, vão sozinhos no PATCH", async () => {
     const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador({ permitirCommitEPush: true }));
     const { aoFechar, opcao } = renderizar(orquestrador());
 
@@ -138,7 +138,7 @@ describe("PainelDeConfiguracao", () => {
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
 
     await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
-    expect(alterar).toHaveBeenCalledWith("o1", { ...configuracao, permitirCommitEPush: true });
+    expect(alterar).toHaveBeenCalledWith("o1", { permitirCommitEPush: true });
   });
 
   it("carrega a opção já ligada e permite desligar", async () => {
@@ -150,10 +150,10 @@ describe("PainelDeConfiguracao", () => {
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
 
     await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
-    expect(alterar).toHaveBeenCalledWith("o1", { ...configuracao, permitirCommitEPush: false });
+    expect(alterar).toHaveBeenCalledWith("o1", { permitirCommitEPush: false });
   });
 
-  it("carrega o esforço salvo e envia o escolhido no PATCH junto com o resto da configuração", async () => {
+  it("carrega o esforço salvo e envia no PATCH só o esforço alterado", async () => {
     const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
     const { aoFechar } = renderizar(orquestrador({ esforcoDoOrquestrador: "alto" }));
 
@@ -164,14 +164,10 @@ describe("PainelDeConfiguracao", () => {
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
 
     await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
-    expect(alterar).toHaveBeenCalledWith("o1", {
-      ...configuracao,
-      esforcoDoOrquestrador: "alto",
-      esforcoDosSubagentes: "baixo",
-    });
+    expect(alterar).toHaveBeenCalledWith("o1", { esforcoDosSubagentes: "baixo" });
   });
 
-  it("carrega as instruções salvas e envia as editadas no PATCH junto com o resto da configuração", async () => {
+  it("carrega as instruções salvas e envia no PATCH só as instruções editadas", async () => {
     const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
     const { aoFechar } = renderizar(orquestrador({ instrucoesPersonalizadas: "Use Jest." }));
 
@@ -181,7 +177,6 @@ describe("PainelDeConfiguracao", () => {
 
     await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
     expect(alterar).toHaveBeenCalledWith("o1", {
-      ...configuracao,
       instrucoesPersonalizadas: "Sempre comece a resposta com a palavra PIRULITO.",
     });
   });
@@ -219,6 +214,41 @@ describe("PainelDeConfiguracao", () => {
 
     fireEvent.change(campoDasInstrucoes(), { target: { value: "rascunho" } });
     fireEvent.click(screen.getByRole("button", { name: "Voltar" }));
+
+    expect(aoFechar).toHaveBeenCalledTimes(1);
+    expect(alterar).not.toHaveBeenCalled();
+  });
+
+  it("o PATCH leva só o campo alterado: outra aba que mudou outro campo não é desfeita", async () => {
+    const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+    const { aoFechar } = renderizar(orquestrador());
+
+    fireEvent.click(screen.getByRole("radio", { name: "Somente leitura" }));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+    await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+    expect(alterar).toHaveBeenCalledTimes(1);
+    expect(alterar).toHaveBeenCalledWith("o1", { nivelDePermissao: "leitura" });
+  });
+
+  it("sem nada alterado, o Salvar só fecha, sem chamar o servidor", () => {
+    const alterar = vi.spyOn(api, "alterarConfiguracao");
+    const { aoFechar, acoes } = renderizar(orquestrador());
+
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+    expect(aoFechar).toHaveBeenCalledTimes(1);
+    expect(alterar).not.toHaveBeenCalled();
+    expect(acoes.recarregar).not.toHaveBeenCalled();
+  });
+
+  it("mudar um campo e voltar ao valor salvo conta como sem alteração", () => {
+    const alterar = vi.spyOn(api, "alterarConfiguracao");
+    const { aoFechar, opcao } = renderizar(orquestrador());
+
+    fireEvent.click(opcao);
+    fireEvent.click(opcao);
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
 
     expect(aoFechar).toHaveBeenCalledTimes(1);
     expect(alterar).not.toHaveBeenCalled();
@@ -287,6 +317,11 @@ describe("PainelDeConfiguracao", () => {
     expect(aplicarPredefinicao).toHaveBeenCalledWith("o1", "economico");
     expect(herdado).toHaveBeenCalledWith("o1");
     expect(chipDoEsforco("dos subagentes")).toHaveTextContent("esforço médio");
+
+    // A predefinição já foi salva no servidor: o Salvar sem outra mudança não manda nada.
+    const alterar = vi.spyOn(api, "alterarConfiguracao");
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    expect(alterar).not.toHaveBeenCalled();
   });
 });
 

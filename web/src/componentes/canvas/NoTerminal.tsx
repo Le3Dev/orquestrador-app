@@ -199,6 +199,25 @@ function useProximoDaFilaACaminho(ultimoTurno: TurnoNaTela | undefined, temFila:
   return encerradoEm !== null && aCaminhoApos === encerradoEm;
 }
 
+/**
+ * Só os campos que o formulário mudou em relação a `antes`. A quantidade de
+ * subagentes é um objeto: compara modo e limite, não a referência.
+ */
+function camposAlterados(antes: DadosDaConfiguracao, depois: DadosDaConfiguracao): Partial<DadosDaConfiguracao> {
+  const alterados: Partial<DadosDaConfiguracao> = {};
+  for (const campo of Object.keys(depois) as (keyof DadosDaConfiguracao)[]) {
+    const igual =
+      campo === "quantidadeDeSubagentes"
+        ? antes.quantidadeDeSubagentes.modo === depois.quantidadeDeSubagentes.modo &&
+          antes.quantidadeDeSubagentes.limite === depois.quantidadeDeSubagentes.limite
+        : antes[campo] === depois[campo];
+    if (!igual) {
+      Object.assign(alterados, { [campo]: depois[campo] });
+    }
+  }
+  return alterados;
+}
+
 interface PropsDaConfiguracao {
   orquestrador: ResumoDoOrquestrador;
   trabalhando: boolean;
@@ -218,6 +237,9 @@ export function PainelDeConfiguracao({
 }: PropsDaConfiguracao) {
   const { acoes } = useCanvas();
   const [configuracao, setConfiguracao] = useState(orquestrador.configuracao);
+  // A configuração com que o formulário abriu (ou a devolvida pela predefinição):
+  // o Salvar manda só o que mudou desde ela, para não desfazer o que outra aba salvou.
+  const [configuracaoDeOrigem, setConfiguracaoDeOrigem] = useState(orquestrador.configuracao);
   const [erro, setErro] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
   const { id: orquestradorId, pastaDeTrabalho } = orquestrador;
@@ -241,17 +263,24 @@ export function PainelDeConfiguracao({
   const aplicarPredefinicao = useCallback(
     async (predefinicao: NomeDaPredefinicao): Promise<DadosDaConfiguracao> => {
       const resumo = await api.aplicarPredefinicao(orquestradorId, predefinicao);
+      setConfiguracaoDeOrigem(resumo.configuracao);
       void recarregar();
       return resumo.configuracao;
     },
     [orquestradorId, recarregar],
   );
 
+  /** Manda só os campos alterados; sem nenhum, não chama o servidor e só fecha. */
   async function salvar(): Promise<void> {
+    const alteracoes = camposAlterados(configuracaoDeOrigem, configuracao);
+    if (Object.keys(alteracoes).length === 0) {
+      aoFechar();
+      return;
+    }
     setErro(null);
     setSalvando(true);
     try {
-      await api.alterarConfiguracao(orquestrador.id, configuracao);
+      await api.alterarConfiguracao(orquestrador.id, alteracoes);
       await acoes.recarregar();
       aoFechar();
     } catch (falha) {
