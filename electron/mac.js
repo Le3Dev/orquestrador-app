@@ -15,6 +15,9 @@
 //      um PATH mínimo, e o Claude Code (que precisa do `node`, via nvm ou
 //      Homebrew) não rodaria.
 //   4. Primeira abertura: acha o `claude` no PATH (no Mac não há claude.exe).
+//      Esta é a única que vale também no Linux, que procura ainda em
+//      ~/.local/bin e /usr/local/bin (o app aberto pelo menu do sistema pode
+//      vir com um PATH sem o ~/.local/bin).
 //   5. Sem atualização automática: sem assinatura da Apple ela não funciona.
 
 const { execFileSync } = require("node:child_process");
@@ -163,16 +166,24 @@ function carregarPathDoShell() {
 // ──────────────────────────────────────────────────────────────────────────
 
 /**
- * No Mac, o primeiro `claude` do PATH. Fica o caminho do link (o de
+ * No Mac e no Linux, o primeiro `claude` do PATH. Fica o caminho do link (o de
  * ~/.local/bin aponta para a versão instalada), que continua valendo quando o
- * Claude Code se atualiza. Fora do Mac, ou sem `claude` instalado, devolve
- * null e a primeira abertura segue com a detecção do Windows.
+ * Claude Code se atualiza. No Linux, sem ele no PATH, tenta ainda
+ * ~/.local/bin/claude (onde o instalador do Claude Code o põe) e
+ * /usr/local/bin/claude. No Windows, ou sem `claude` instalado, devolve null e
+ * a primeira abertura segue com a detecção do Windows.
  */
-function claudeCodeDoPath(ehArquivo, ambiente = process.env) {
-  if (!ehMac) return null;
-  for (const pasta of (ambiente.PATH || "").split(":")) {
+function claudeCodeDoPath(ehArquivo, ambiente = process.env, plataforma = process.platform) {
+  if (plataforma !== "darwin" && plataforma !== "linux") return null;
+  const pastas = (ambiente.PATH || "").split(":");
+  if (plataforma === "linux") {
+    if (ambiente.HOME) pastas.push(path.posix.join(ambiente.HOME, ".local", "bin"));
+    pastas.push("/usr/local/bin");
+  }
+  for (const pasta of pastas) {
     if (!pasta) continue;
-    const candidato = path.join(pasta, "claude");
+    // Caminhos do Mac e do Linux: com "/" mesmo nos testes rodados no Windows.
+    const candidato = path.posix.join(pasta, "claude");
     if (ehArquivo(candidato)) return candidato;
   }
   return null;
