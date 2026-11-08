@@ -3,6 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { linhasDaRegraDasPerguntas, separarPerguntasDoApp } from "../perguntas/PerguntaDoApp";
+import { AcaoDeAbrirOrquestrador, AcaoDoApp } from "./AcaoDoApp";
 import { instrucoesDoChat, mensagemParaOChat, separarAcoesDoApp } from "./InstrucoesDoChat";
 import { OrquestradorExistente, ProjetoDoChat } from "./ProjetosDoChat";
 
@@ -28,6 +29,11 @@ function ocioso(nome: string, pasta: string): OrquestradorExistente {
 
 function bloco(json: string): string {
   return ["```acao-do-app", json, "```"].join("\n");
+}
+
+/** Só as ações de abrir orquestrador, para ler os campos delas. */
+function deAbrir(acoes: readonly AcaoDoApp[]): AcaoDeAbrirOrquestrador[] {
+  return acoes.filter((acao): acao is AcaoDeAbrirOrquestrador => acao.tipo === "abrir_orquestrador");
 }
 
 describe("separarAcoesDoApp", () => {
@@ -69,7 +75,7 @@ describe("separarAcoesDoApp", () => {
     const { texto, acoes, avisos } = separarAcoesDoApp(resposta, projetos);
 
     expect(texto).toBe("Dois orquestradores:");
-    expect(acoes.map((acao) => [acao.projeto, acao.pedido])).toEqual([
+    expect(deAbrir(acoes).map((acao) => [acao.projeto, acao.pedido])).toEqual([
       ["painel-app", null],
       ["Financeiro", null],
     ]);
@@ -120,7 +126,7 @@ describe("separarAcoesDoApp", () => {
 
     const { acoes } = separarAcoesDoApp(resposta, projetos);
 
-    expect(acoes.map((acao) => [acao.projeto, acao.novo])).toEqual([
+    expect(deAbrir(acoes).map((acao) => [acao.projeto, acao.novo])).toEqual([
       ["painel-app", false],
       ["Financeiro", false],
     ]);
@@ -218,7 +224,7 @@ describe("separarAcoesDoApp", () => {
         orquestradores,
       );
 
-      expect(acoes.map((acao) => acao.orquestrador)).toEqual(["Painel 2"]);
+      expect(deAbrir(acoes).map((acao) => acao.orquestrador)).toEqual(["Painel 2"]);
       expect(avisos).toEqual([]);
     });
 
@@ -232,7 +238,7 @@ describe("separarAcoesDoApp", () => {
 
       const { acoes, avisos } = separarAcoesDoApp(resposta, projetos, orquestradores);
 
-      expect(acoes.map((acao) => [acao.pedido, acao.orquestrador])).toEqual([
+      expect(deAbrir(acoes).map((acao) => [acao.pedido, acao.orquestrador])).toEqual([
         ["a", null],
         ["b", null],
         ["c", null],
@@ -267,6 +273,74 @@ describe("separarAcoesDoApp", () => {
     const { acoes } = separarAcoesDoApp(bloco('{"tipo":"abrir_orquestrador","projeto":"painel-app"}'), projetos);
     expect(Object.isFrozen(acoes[0])).toBe(true);
   });
+
+  describe("subagentes prontos", () => {
+    it("criar_subagente sai com os campos limpos e modelo herdar quando ausente ou nulo", () => {
+      const resposta = [
+        "Dois subagentes:",
+        bloco('{"tipo":"criar_subagente","nome":" revisor ","descricao":" Revisa o diff ","prompt":"  Leia o diff.  "}'),
+        bloco('{"tipo":"criar_subagente","nome":"testador","descricao":"Escreve testes","prompt":"Cubra os casos.","modelo":null}'),
+        bloco('{"tipo":"criar_subagente","nome":"rapido","descricao":"Respostas curtas","prompt":"Seja breve.","modelo":"haiku"}'),
+      ].join("\n");
+
+      const { texto, acoes, avisos } = separarAcoesDoApp(resposta, projetos);
+
+      expect(texto).toBe("Dois subagentes:");
+      expect(acoes).toEqual([
+        { tipo: "criar_subagente", nome: "revisor", descricao: "Revisa o diff", prompt: "Leia o diff.", modelo: "herdar" },
+        { tipo: "criar_subagente", nome: "testador", descricao: "Escreve testes", prompt: "Cubra os casos.", modelo: "herdar" },
+        { tipo: "criar_subagente", nome: "rapido", descricao: "Respostas curtas", prompt: "Seja breve.", modelo: "haiku" },
+      ]);
+      expect(avisos).toEqual([]);
+      expect(Object.isFrozen(acoes[0])).toBe(true);
+    });
+
+    it("editar_subagente leva só os campos a trocar; vazios, nulos e ausentes ficam como estão", () => {
+      const { acoes, avisos } = separarAcoesDoApp(
+        [
+          bloco('{"tipo":"editar_subagente","nome":"diretor-de-video","prompt":"Roteiro em 3 atos."}'),
+          bloco('{"tipo":"editar_subagente","nome":"revisor","descricao":"  ","prompt":null,"modelo":"sonnet"}'),
+        ].join("\n"),
+        projetos,
+      );
+
+      expect(acoes).toEqual([
+        { tipo: "editar_subagente", nome: "diretor-de-video", descricao: null, prompt: "Roteiro em 3 atos.", modelo: null },
+        { tipo: "editar_subagente", nome: "revisor", descricao: null, prompt: null, modelo: "sonnet" },
+      ]);
+      expect(avisos).toEqual([]);
+    });
+
+    it("malformadas viram aviso de formato inválido, sem ação", () => {
+      const resposta = [
+        bloco('{"tipo":"criar_subagente","nome":"revisor","descricao":"","prompt":"x"}'),
+        bloco('{"tipo":"criar_subagente","nome":"revisor","descricao":"d"}'),
+        bloco('{"tipo":"criar_subagente","nome":"revisor","descricao":"d","prompt":"p","modelo":"gpt"}'),
+        bloco('{"tipo":"editar_subagente","nome":"revisor"}'),
+        bloco('{"tipo":"editar_subagente","nome":"revisor","descricao":"","prompt":"  "}'),
+        bloco('{"tipo":"editar_subagente","nome":"","prompt":"p"}'),
+        bloco('{"tipo":"editar_subagente","nome":"revisor","prompt":7}'),
+      ].join("\n");
+
+      const { texto, acoes, avisos } = separarAcoesDoApp(resposta, projetos);
+
+      expect(texto).toBe("");
+      expect(acoes).toEqual([]);
+      expect(avisos).toEqual(Array(7).fill("O Claude sugeriu uma ação do app em formato inválido; ela foi ignorada."));
+    });
+
+    it("não dependem da lista de projetos e convivem com abrir_orquestrador", () => {
+      const { acoes } = separarAcoesDoApp(
+        [
+          bloco('{"tipo":"abrir_orquestrador","projeto":"painel-app"}'),
+          bloco('{"tipo":"criar_subagente","nome":"revisor","descricao":"d","prompt":"p"}'),
+        ].join("\n"),
+        [],
+      );
+
+      expect(acoes.map((acao) => acao.tipo)).toEqual(["criar_subagente"]);
+    });
+  });
 });
 
 describe("mensagemParaOChat", () => {
@@ -275,6 +349,7 @@ describe("mensagemParaOChat", () => {
     pastaDosProjetos: raiz,
     projetos,
     orquestradores: [ocioso("Painel", path.join(raiz, "painel-app"))],
+    subagentesProntos: [{ nome: "revisor", descricao: "Revisa o diff procurando bugs", modelo: "herdar" as const }],
     alteracoesAutorizadas: false,
     pastaDeArtefatos: path.resolve("/dados/artefatos/entrada/chat"),
   };
@@ -359,10 +434,42 @@ describe("mensagemParaOChat", () => {
     );
   });
 
-  it("o exemplo do bloco de ação no contexto é um bloco válido", () => {
+  it("os exemplos dos blocos de ação no contexto são blocos válidos", () => {
     const exemplo = blocoDeContexto(false).replace("<nome exato da pasta>", "painel-app");
 
-    expect(separarAcoesDoApp(exemplo, projetos).acoes).toHaveLength(1);
+    const { acoes, avisos } = separarAcoesDoApp(exemplo, projetos);
+    expect(acoes.map((acao) => acao.tipo)).toEqual(["abrir_orquestrador", "criar_subagente", "editar_subagente"]);
+    expect(avisos).toEqual([]);
+  });
+
+  it("lista os subagentes prontos com nome, modelo e quando usar, sem o prompt", () => {
+    const mensagem = mensagemParaOChat("oi", {
+      ...contexto,
+      subagentesProntos: [
+        { nome: "revisor", descricao: "Revisa o diff procurando bugs", modelo: "herdar" },
+        { nome: "diretor-de-video", descricao: "Roteiros de vídeo", modelo: "opus" },
+      ],
+    });
+
+    expect(mensagem).toContain(
+      "Subagentes prontos (nome · modelo: quando usar):\n- revisor · herdar: Revisa o diff procurando bugs\n- diretor-de-video · opus: Roteiros de vídeo",
+    );
+    expect(mensagemParaOChat("oi", { ...contexto, subagentesProntos: [] })).toContain(
+      "Subagentes prontos (nome · modelo: quando usar):\n- (nenhum)",
+    );
+  });
+
+  it("regra dos subagentes: só a pedido, editar com nome da lista e só os campos que mudam, limites do servidor", () => {
+    const bloco = blocoDeContexto(false);
+
+    expect(bloco).toContain("só quando o usuário pedir para criar ou editar um, responda explicando e inclua UM bloco por ação");
+    expect(bloco).toContain('{"tipo":"criar_subagente","nome":"<minúsculas, números e hífen, começando por letra>"');
+    expect(bloco).toContain("Para editar, use o nome exato de um subagente da lista acima e inclua só os campos que mudam");
+    expect(bloco).toContain("os omitidos ficam como estão");
+    expect(bloco).toContain("Você não vê o prompt atual: para trocá-lo, mande o prompt novo inteiro.");
+    expect(bloco).toContain('{"tipo":"editar_subagente","nome":"<nome exato de um subagente da lista>"');
+    expect(bloco).toContain("nome até 40 caracteres, descrição até 300, prompt até 4000, no máximo 10 subagentes");
+    expect(bloco).toContain("Para criar, use um nome que não está na lista");
   });
 
   it("indica listas vazias e pergunta só com imagem", () => {
@@ -464,6 +571,7 @@ describe("instrucoesDoChat", () => {
     expect(instrucoes).toContain("só dentro das pastas dos projetos da pasta raiz");
     expect(instrucoes).not.toMatch(/Nunca altera nada/);
     expect(instrucoes).toContain("acao-do-app");
+    expect(instrucoes).toContain("ou para criar ou editar um subagente pronto, siga a regra de ações");
   });
 
   it("explica a autorização única e o que fazer quando ela é negada", () => {

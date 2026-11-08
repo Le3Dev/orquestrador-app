@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { api, ErroDaApi } from "../../shared/api/cliente";
-import type { AcaoDoApp, ResumoDoOrquestrador } from "../../shared/api/tipos";
+import type { AcaoDeAbrirOrquestrador, ResumoDoOrquestrador } from "../../shared/api/tipos";
 import { AVISO_DO_LIMITE_DE_ORQUESTRADORES } from "../../shared/canvas/limiteDeTerminais";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
 import { CartaoDeAcao } from "./CartaoDeAcao";
@@ -32,7 +32,7 @@ function trabalhando(id: string, pasta: string, texto = "rodar os testes"): Resu
 }
 
 function renderizar(
-  acao: Partial<AcaoDoApp> = {},
+  acao: Partial<AcaoDeAbrirOrquestrador> = {},
   temVagaPara = vi.fn<(id: string | null) => boolean>(() => true),
   orquestradores: ResumoDoOrquestrador[] = [],
 ) {

@@ -66,6 +66,7 @@ describe("rotas do chat", () => {
       repositorio,
       motor,
       projetos: { listarProjetos: async () => [], listarOrquestradores: async () => [] },
+      subagentes: { listarSubagentesProntos: async () => [] },
       anexos,
       publicador: canal,
       execucoes: new ControleDeExecucoesEmMemoria(),

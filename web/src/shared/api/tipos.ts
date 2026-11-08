@@ -467,8 +467,34 @@ export interface PreferenciasDoChat {
   esforco: EsforcoDeRaciocinio;
 }
 
-/** Ação que o Claude sugere no app; só é executada quando o usuário clica. */
-export interface AcaoDoApp {
+/**
+ * Ação que o Claude sugere no app; só é executada quando o usuário clica.
+ * As mensagens gravadas antes das ações de subagente só têm `abrir_orquestrador`.
+ */
+export type AcaoDoApp = AcaoDeAbrirOrquestrador | AcaoDeCriarSubagente | AcaoDeEditarSubagente;
+
+/** Os modelos que o chat sugere para um subagente pronto: os mesmos do painel Subagentes. */
+export type ModeloDoSubagenteNoChat = "herdar" | "opus" | "sonnet" | "haiku";
+
+/** Acrescentar um subagente pronto à biblioteca (o servidor valida ao gravar). */
+export interface AcaoDeCriarSubagente {
+  tipo: "criar_subagente";
+  nome: string;
+  descricao: string;
+  prompt: string;
+  modelo: ModeloDoSubagenteNoChat;
+}
+
+/** Trocar campos de um subagente pronto existente, pelo nome; nulo fica como está. */
+export interface AcaoDeEditarSubagente {
+  tipo: "editar_subagente";
+  nome: string;
+  descricao: string | null;
+  prompt: string | null;
+  modelo: ModeloDoSubagenteNoChat | null;
+}
+
+export interface AcaoDeAbrirOrquestrador {
   tipo: "abrir_orquestrador";
   projeto: string;
   pasta: string;

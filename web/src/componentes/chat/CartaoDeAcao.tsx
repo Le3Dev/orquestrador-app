@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { api, ErroDaApi, mensagemDeErro } from "../../shared/api/cliente";
-import { type AcaoDoApp, LIMITE_DA_FILA, type ResumoDoOrquestrador } from "../../shared/api/tipos";
+import { type AcaoDeAbrirOrquestrador, LIMITE_DA_FILA, type ResumoDoOrquestrador } from "../../shared/api/tipos";
 import { AVISO_DO_LIMITE_DE_ORQUESTRADORES } from "../../shared/canvas/limiteDeTerminais";
 import { formatarDecorrido } from "../../shared/formatacao";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
@@ -25,7 +25,7 @@ export interface PropsDasAcoesDoChat {
 }
 
 interface Props extends PropsDasAcoesDoChat {
-  acao: AcaoDoApp;
+  acao: AcaoDeAbrirOrquestrador;
 }
 
 /** Abrir (como sempre), colocar o pedido na fila de um ocupado ou criar outro. */

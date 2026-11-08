@@ -432,6 +432,31 @@ describe("ChatRapido", () => {
     expect(screen.getByText("Abrir orquestrador em painel")).toBeInTheDocument();
   });
 
+  it("escolhe o cartão pelo tipo da ação: abrir orquestrador, criar e editar subagente", async () => {
+    const ler = vi.spyOn(api, "lerPreferencias").mockResolvedValue({ instrucoesPadrao: "", subagentesProntos: [] });
+    renderizar({
+      ...OCIOSO,
+      mensagens: [
+        mensagem("c1", "claude", {
+          texto: "Três cartões.",
+          acoes: [
+            { tipo: "abrir_orquestrador", projeto: "painel", pasta: "C:\\p\\painel", pedido: null },
+            { tipo: "criar_subagente", nome: "revisor", descricao: "Revisa o diff", prompt: "Leia o diff.", modelo: "herdar" },
+            { tipo: "editar_subagente", nome: "revisor", descricao: null, prompt: null, modelo: "opus" },
+          ],
+        }),
+      ],
+    });
+
+    expect(screen.getByText("Abrir orquestrador em painel")).toBeInTheDocument();
+    expect(screen.getByText("Novo subagente pronto")).toBeInTheDocument();
+    expect(screen.getByText("Editar subagente pronto")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "criar" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "aplicar" })).toBeInTheDocument();
+    // Só o cartão de editar lê a biblioteca ao aparecer, para mostrar o antes.
+    await waitFor(() => expect(ler).toHaveBeenCalledTimes(1));
+  });
+
   describe("autorização de alterações", () => {
     const cartoes = () => screen.queryAllByRole("group", { name: "Pedido de autorização do chat" });
     const AUTORIZAR = "Autorizar até o /clear e continuar";

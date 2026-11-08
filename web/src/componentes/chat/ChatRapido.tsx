@@ -31,6 +31,7 @@ import { TextoFormatado } from "../TextoFormatado";
 import { CartaoDeAcao, type PropsDasAcoesDoChat } from "./CartaoDeAcao";
 import { CartaoDeAutorizacao } from "./CartaoDeAutorizacao";
 import { CartaoDePergunta } from "./CartaoDePergunta";
+import { CartaoDeSubagente } from "./CartaoDeSubagente";
 import { SeletorDeModelo } from "./SeletorDeModelo";
 import "../../theme/chat-lateral.css";
 
@@ -317,16 +318,21 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
         </div>
       )}
       {mensagem.situacao === "cancelada" && <p className="mono text-muted">resposta cancelada</p>}
-      {mensagem.acoes.map((acao, indice) => (
-        <CartaoDeAcao
-          key={`${acao.pasta}:${indice}`}
-          acao={acao}
-          aoAbrirTerminal={aoAbrirTerminal}
-          temVagaPara={temVagaPara}
-          aoAtualizarOrquestradores={aoAtualizarOrquestradores}
-          orquestradores={orquestradores}
-        />
-      ))}
+      {/* Um cartão por ação, pelo tipo; a posição na resposta é a chave (as de subagente não têm pasta). */}
+      {mensagem.acoes.map((acao, indice) =>
+        acao.tipo === "abrir_orquestrador" ? (
+          <CartaoDeAcao
+            key={`${acao.tipo}:${indice}`}
+            acao={acao}
+            aoAbrirTerminal={aoAbrirTerminal}
+            temVagaPara={temVagaPara}
+            aoAtualizarOrquestradores={aoAtualizarOrquestradores}
+            orquestradores={orquestradores}
+          />
+        ) : (
+          <CartaoDeSubagente key={`${acao.tipo}:${indice}`} acao={acao} />
+        ),
+      )}
       {mensagem.situacao === "concluida" && mensagem.uso !== null && (
         <p className="mono text-muted">
           {formatarDuracao(mensagem.uso.duracaoMs)}
@@ -742,8 +748,10 @@ export function ChatRapido({
                   aoAbrirTerminal={aoAbrirTerminal}
                   temVagaPara={temVagaPara}
                   aoAtualizarOrquestradores={aoAtualizarOrquestradores}
-                  // Só quem tem cartões de ação acompanha a lista: as outras não re-renderizam a cada consulta.
-                  orquestradores={mensagem.acoes.length > 0 ? orquestradores : SEM_ORQUESTRADORES}
+                  // Só quem tem cartões de abrir orquestrador acompanha a lista: as outras não re-renderizam a cada consulta.
+                  orquestradores={
+                    mensagem.acoes.some((acao) => acao.tipo === "abrir_orquestrador") ? orquestradores : SEM_ORQUESTRADORES
+                  }
                 />
                 {/* Fora da mensagem memorizada: o cartão depende do estado do chat, não só da mensagem. */}
                 {pedidoDeAutorizacao?.mensagemId === mensagem.id && (

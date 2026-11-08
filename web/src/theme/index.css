@@ -1961,6 +1961,15 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   background: color-mix(in srgb, var(--active) 6%, var(--surface-2));
 }
 
+/* Prompt no cartão de subagente do chat: recolhido, com rolagem própria. */
+.prompt-do-subagente { color: var(--muted); font-size: 11.5px; }
+.prompt-do-subagente > summary { cursor: pointer; width: fit-content; }
+.prompt-do-subagente > summary:hover { color: var(--secondary); }
+.prompt-do-subagente > summary:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; border-radius: 3px; }
+.prompt-do-subagente > p { margin-top: 4px; max-height: 160px; overflow-y: auto; color: var(--secondary); }
+.prompt-do-subagente > p.text-muted { color: var(--muted); }
+.prompt-do-subagente .rotulo-do-prompt { display: block; margin-top: 6px; font-family: var(--fonte-mono); font-size: 10.5px; }
+
 /* Perguntas do Claude com opções clicáveis (no chat e no terminal do orquestrador).
  * Fonte própria: no terminal, o texto em volta é monoespaçado. */
 .cartao-de-pergunta {

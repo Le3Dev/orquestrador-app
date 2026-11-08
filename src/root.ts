@@ -6,6 +6,7 @@ import express, { Express } from "express";
 
 import { ProjetosDoChat } from "./chat/ProjetosDoChat";
 import { ServicoDeChat } from "./chat/ServicoDeChat";
+import { SubagentesDoChat } from "./chat/SubagentesDoChat";
 import { acessoSoPeloApp } from "./controllers/acessoSoPeloApp";
 import { criarAlteracoesRoutes } from "./controllers/alteracoesRoutes";
 import { criarArquivosRoutes } from "./controllers/arquivosRoutes";
@@ -225,11 +226,17 @@ async function iniciar(): Promise<void> {
         };
       }),
   };
+  // Adaptador: o chat vê os subagentes prontos sem o prompt, lidos a cada pergunta.
+  const subagentesDoChat: SubagentesDoChat = {
+    listarSubagentesProntos: async () =>
+      preferencias.atuais().subagentesProntos.map(({ nome, descricao, modelo }) => ({ nome, descricao, modelo })),
+  };
   const canalDoChat = new CanalDoChat();
   const servicoDeChat = new ServicoDeChat({
     repositorio: repositorioDoChat,
     motor: new MotorDeChatClaudeCodeCli(new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro)),
     projetos: projetosDoChat,
+    subagentes: subagentesDoChat,
     // dados/anexos/chat/: o mesmo armazém dos Orquestradores, com a chave "chat".
     anexos,
     publicador: canalDoChat,
