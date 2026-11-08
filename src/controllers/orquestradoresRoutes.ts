@@ -187,6 +187,10 @@ const esquemaDeAprovacaoDoPlano = z.object({
       error: `As observações devem ter até ${TAMANHO_MAXIMO_DA_MENSAGEM} caracteres.`,
     })
     .default(""),
+  // Opcional: ausente vale `false`. O serviço o ignora se a configuração não libera commit.
+  commitarAoFinal: z
+    .boolean({ error: 'A opção "Commitar ao final" deve ser verdadeira ou falsa.' })
+    .default(false),
 });
 
 /** Renomear: só o nome, com a regra da criação. */
@@ -543,8 +547,8 @@ export function criarOrquestradoresRoutes({
   rotas.post(
     "/orquestradores/:id/plano/aprovar",
     rota(async (requisicao, resposta) => {
-      const { observacoes } = esquemaDeAprovacaoDoPlano.parse(requisicao.body ?? {});
-      const { turnoId } = await servico.aprovarPlano(requisicao.params.id, observacoes);
+      const { observacoes, commitarAoFinal } = esquemaDeAprovacaoDoPlano.parse(requisicao.body ?? {});
+      const { turnoId } = await servico.aprovarPlano(requisicao.params.id, observacoes, commitarAoFinal);
       resposta.status(202).json({ turnoId });
     }),
   );

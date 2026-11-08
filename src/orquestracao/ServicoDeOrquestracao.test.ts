@@ -11,7 +11,7 @@ import { DiagnosticadorDoClaude, DiagnosticoDoClaude } from "./DiagnosticoDoClau
 import { ConsultaDeEsforcoHerdado, EsforcoDaMaquina } from "./EsforcoDaMaquina";
 import { EsforcoHerdado } from "./EsforcoHerdado";
 import { EventoDeOrquestracao, EventoDoMotor, EventoRegistrado, SinalDeVida } from "./EventoDeOrquestracao";
-import { MARCADOR_DE_PLANO } from "./InstrucoesDoOrquestrador";
+import { MARCADOR_DE_PLANO, PEDIDO_DE_COMMIT_AO_FINAL } from "./InstrucoesDoOrquestrador";
 import { MedidorDeConsumo, PeriodoDoTurno } from "./MedidorDeConsumo";
 import { UsoDeTokens } from "./UsoDeTokens";
 import { CausaDaFalha, MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "./MotorDeAgentes";
@@ -531,6 +531,54 @@ describe("ServicoDeOrquestracao", () => {
         ["execucao", caminho],
       ]);
       expect(worktrees.concluidos).toEqual([orquestrador.id, orquestrador.id]);
+    });
+
+    it("commitar ao final pede o commit local na aprovação quando a configuração libera", async () => {
+      const orquestrador = await criar();
+      await servico.alterarConfiguracao(orquestrador.id, {
+        permitirCommitEPush: true,
+        nivelDePermissao: "edicao_e_comandos",
+      });
+      await planejar(orquestrador);
+
+      const { conclusao } = await servico.aprovarPlano(orquestrador.id, "sem mexer nos testes", true);
+      motor.terminar();
+      await conclusao;
+
+      const texto = motor.pedidos[1]?.texto ?? "";
+      expect(texto).toMatch(/^Plano aprovado\. Execute agora o plano/);
+      expect(texto).toContain(PEDIDO_DE_COMMIT_AO_FINAL);
+      expect(texto).toContain("Observações do usuário: sem mexer nos testes");
+    });
+
+    it.each<[string, Partial<DadosDaConfiguracao>]>([
+      ["com commit desligado", { permitirCommitEPush: false, nivelDePermissao: "edicao_e_comandos" }],
+      ["sem terminal no nível", { permitirCommitEPush: true, nivelDePermissao: "edicao" }],
+    ])("commitar ao final é ignorado %s", async (_caso, alteracoes) => {
+      const orquestrador = await criar();
+      await servico.alterarConfiguracao(orquestrador.id, alteracoes);
+      await planejar(orquestrador);
+
+      const { conclusao } = await servico.aprovarPlano(orquestrador.id, "", true);
+      motor.terminar();
+      await conclusao;
+
+      expect(motor.pedidos[1]?.texto).not.toContain(PEDIDO_DE_COMMIT_AO_FINAL);
+    });
+
+    it("sem commitar ao final, a aprovação não pede commit mesmo com ele liberado", async () => {
+      const orquestrador = await criar();
+      await servico.alterarConfiguracao(orquestrador.id, {
+        permitirCommitEPush: true,
+        nivelDePermissao: "edicao_e_comandos",
+      });
+      await planejar(orquestrador);
+
+      const { conclusao } = await servico.aprovarPlano(orquestrador.id);
+      motor.terminar();
+      await conclusao;
+
+      expect(motor.pedidos[1]?.texto).not.toContain(PEDIDO_DE_COMMIT_AO_FINAL);
     });
 
     it("descartar publica a decisão e não inicia turno", async () => {

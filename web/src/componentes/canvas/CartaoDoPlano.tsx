@@ -7,7 +7,8 @@ import { TextoFormatado } from "../TextoFormatado";
 
 /** O que o usuário pode fazer com o plano pendente. Os erros ficam a cargo de quem executa. */
 export interface AcoesDoPlano {
-  aoAprovar: () => Promise<void>;
+  /** `commitarAoFinal`: o usuário marcou "Commitar ao final" (só aparece com o commit liberado). */
+  aoAprovar: (commitarAoFinal: boolean) => Promise<void>;
   /** Liga o Plan Mode e leva o foco ao prompt, para pedir as mudanças no plano. */
   aoAjustar: () => void;
   aoDescartar: () => Promise<void>;
@@ -38,8 +39,11 @@ interface Props {
  */
 export const CartaoDoPlano = memo(function CartaoDoPlano({ turno, configuracao, ultimo, desconectado, acoes }: Props) {
   const [decidindo, setDecidindo] = useState<"aprovar" | "descartar" | null>(null);
+  const [commitarAoFinal, setCommitarAoFinal] = useState(false);
   const pendente = turno.decisaoDoPlano === "pendente" && ultimo;
   const bloqueado = decidindo !== null || desconectado;
+  // Só com o commit liberado e o terminal (é com ele que o agente commita).
+  const podeCommitar = configuracao.permitirCommitEPush && configuracao.nivelDePermissao === "edicao_e_comandos";
 
   async function decidir(decisao: "aprovar" | "descartar", acao: () => Promise<void>): Promise<void> {
     setDecidindo(decisao);
@@ -65,11 +69,23 @@ export const CartaoDoPlano = memo(function CartaoDoPlano({ turno, configuracao, 
               aprovar.
             </div>
           )}
+          {podeCommitar && (
+            <label className="flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={commitarAoFinal}
+                onChange={(evento) => setCommitarAoFinal(evento.target.checked)}
+                disabled={bloqueado}
+              />
+              Commitar ao final
+              <span className="hint">(commit local na branch do worktree, sem push)</span>
+            </label>
+          )}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               className="btn btn-sm btn-cta"
-              onClick={() => void decidir("aprovar", acoes.aoAprovar)}
+              onClick={() => void decidir("aprovar", () => acoes.aoAprovar(podeCommitar && commitarAoFinal))}
               disabled={bloqueado}
             >
               {decidindo === "aprovar" ? "Aprovando…" : "Aprovar e executar"}

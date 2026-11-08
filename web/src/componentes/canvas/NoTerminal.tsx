@@ -752,10 +752,10 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
     }
   }, [iniciarConversaNova]);
 
-  const aprovarPlano = useCallback(async (): Promise<void> => {
+  const aprovarPlano = useCallback(async (commitarAoFinal: boolean): Promise<void> => {
     setErro(null);
     try {
-      await api.aprovarPlano(orquestradorId);
+      await api.aprovarPlano(orquestradorId, "", commitarAoFinal);
       // A execução começa na hora: sai do Plan Mode e acompanha o turno novo, como num envio.
       setModo("execucao");
       acompanhando.current = true;

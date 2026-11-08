@@ -10,6 +10,7 @@ import {
   MARCADOR_DE_PLANO,
   mensagemDeAprovacaoDoPlano,
   mensagemParaOOrquestrador,
+  PEDIDO_DE_COMMIT_AO_FINAL,
   REGRA_DOS_SERVIDORES,
   separarPropostaDePlano,
 } from "./InstrucoesDoOrquestrador";
@@ -613,5 +614,22 @@ describe("mensagemDeAprovacaoDoPlano", () => {
     expect(mensagemDeAprovacaoDoPlano(" use a branch nova ")).toMatch(
       /delegando as subtarefas como planejado\.\n\nObservações do usuário: use a branch nova$/,
     );
+  });
+
+  it("com commitar ao final, pede o commit local sem push, antes das observações", () => {
+    const texto = mensagemDeAprovacaoDoPlano(" use a branch nova ", true);
+
+    expect(texto).toBe(
+      "Plano aprovado. Execute agora o plano da sua resposta anterior, delegando as subtarefas como planejado." +
+        `\n\n${PEDIDO_DE_COMMIT_AO_FINAL}\n\nObservações do usuário: use a branch nova`,
+    );
+    expect(PEDIDO_DE_COMMIT_AO_FINAL).toContain("commit local");
+    expect(PEDIDO_DE_COMMIT_AO_FINAL).toContain("Conventional Commits");
+    expect(PEDIDO_DE_COMMIT_AO_FINAL).toContain("NÃO faça push");
+  });
+
+  it("sem commitar ao final, não pede commit", () => {
+    expect(mensagemDeAprovacaoDoPlano("", false)).not.toContain(PEDIDO_DE_COMMIT_AO_FINAL);
+    expect(mensagemDeAprovacaoDoPlano("")).not.toContain("commit");
   });
 });

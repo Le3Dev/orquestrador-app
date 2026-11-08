@@ -457,10 +457,17 @@ export class ServicoDeOrquestracao {
   /**
    * Aprova o Plano pendente e já abre o turno que o executa, na mesma sessão
    * do Claude Code — é ela que guarda o Plano da resposta anterior.
+   *
+   * `commitarAoFinal` põe na mensagem o pedido de commit local ao final, só
+   * se a configuração libera commit e o nível tem terminal
+   * (`edicao_e_comandos`); senão é ignorado.
    */
-  async aprovarPlano(id: string, observacoes = ""): Promise<MensagemEnviada> {
+  async aprovarPlano(id: string, observacoes = "", commitarAoFinal = false): Promise<MensagemEnviada> {
     const orquestrador = this.buscar(id);
-    const texto = mensagemDeAprovacaoDoPlano(observacoes);
+    const { configuracao } = orquestrador;
+    const commitLiberado =
+      configuracao.permiteCommitEPush("execucao") && configuracao.nivelDePermissao === "edicao_e_comandos";
+    const texto = mensagemDeAprovacaoDoPlano(observacoes, commitarAoFinal && commitLiberado);
     // Conferido antes de aprovar: se o pedido de execução fosse recusado
     // depois, o Plano ficaria aprovado sem nada rodando.
     if (texto.length > TAMANHO_MAXIMO_DA_MENSAGEM) {

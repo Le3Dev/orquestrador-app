@@ -179,11 +179,17 @@ export const api = {
       { method: "POST" },
     ),
 
-  /** Aprova o plano pendente do último pedido; o servidor já inicia a execução na mesma sessão. */
-  aprovarPlano: (id: string, observacoes = "") =>
+  /**
+   * Aprova o plano pendente do último pedido; o servidor já inicia a execução na mesma sessão.
+   * `commitarAoFinal` pede um commit local ao fim (o servidor o ignora se a configuração não libera commit).
+   */
+  aprovarPlano: (id: string, observacoes = "", commitarAoFinal = false) =>
     requisitar<{ turnoId: string }>(`/orquestradores/${encodeURIComponent(id)}/plano/aprovar`, {
       method: "POST",
-      body: JSON.stringify(observacoes.trim() === "" ? {} : { observacoes }),
+      body: JSON.stringify({
+        ...(observacoes.trim() === "" ? {} : { observacoes }),
+        ...(commitarAoFinal ? { commitarAoFinal: true } : {}),
+      }),
     }),
 
   descartarPlano: (id: string) =>

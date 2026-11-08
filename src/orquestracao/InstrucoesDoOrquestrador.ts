@@ -28,6 +28,10 @@ const COMMIT_E_PUSH_PROIBIDOS = "Commits e push são sempre proibidos.";
 const COMMIT_E_PUSH_QUANDO_PEDIDOS =
   "Commits e push: permitidos somente quando o usuário pedir explicitamente nesta mensagem. Nunca commitar direto na main; usar branch conforme a política (feature/, fix/, hotfix/, refactor/). Nunca adicionar a linha Co-authored-by.";
 
+/** O pedido de commit da aprovação com "Commitar ao final" marcado. */
+export const PEDIDO_DE_COMMIT_AO_FINAL =
+  "Commit ao final: o usuário pede que, com o plano executado e validado, você faça um commit local na branch atual da pasta de trabalho (a do worktree), com mensagem em Conventional Commits. NÃO faça push.";
+
 /**
  * Servidor de desenvolvimento (npm run dev, vite...) não pode ir para o
  * segundo plano do Claude Code: o processo do pedido só termina quando ele
@@ -232,11 +236,16 @@ export function separarPropostaDePlano(resposta: string): { resposta: string; pl
  * planejamento quanto o proposto num pedido grande. Vai como mensagem, e não
  * nas instruções: ao retomar a sessão (`--resume`), o Claude Code ignora
  * instruções novas.
+ *
+ * `commitarAoFinal` é o pedido explícito de commit que o bloco do pedido
+ * exige (`COMMIT_E_PUSH_QUANDO_PEDIDOS`): quem chama só o liga quando a
+ * configuração libera commit. Push nunca vai junto.
  */
-export function mensagemDeAprovacaoDoPlano(observacoes: string): string {
+export function mensagemDeAprovacaoDoPlano(observacoes: string, commitarAoFinal = false): string {
   const aprovacao = `${INICIO_DA_APROVACAO} Execute agora o plano da sua resposta anterior, delegando as subtarefas como planejado.`;
+  const comCommit = commitarAoFinal ? `${aprovacao}\n\n${PEDIDO_DE_COMMIT_AO_FINAL}` : aprovacao;
   const extras = observacoes.trim();
-  return extras === "" ? aprovacao : `${aprovacao}\n\nObservações do usuário: ${extras}`;
+  return extras === "" ? comCommit : `${comCommit}\n\nObservações do usuário: ${extras}`;
 }
 
 /**

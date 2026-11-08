@@ -15,6 +15,7 @@ import { ConsumoDoTurno } from "../orquestracao/ConsumoDoTurno";
 import { ConsultaDeEsforcoHerdado } from "../orquestracao/EsforcoDaMaquina";
 import { EsforcoHerdado } from "../orquestracao/EsforcoHerdado";
 import { EventoDeOrquestracao, EventoDoMotor, EventoRegistrado } from "../orquestracao/EventoDeOrquestracao";
+import { PEDIDO_DE_COMMIT_AO_FINAL } from "../orquestracao/InstrucoesDoOrquestrador";
 import { UsoDeTokens } from "../orquestracao/UsoDeTokens";
 import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "../orquestracao/MotorDeAgentes";
 import { Orquestrador } from "../orquestracao/Orquestrador";
@@ -218,6 +219,37 @@ describe("rotas de orquestradores — modo de planejamento", () => {
     const resposta = await postar(`/orquestradores/${orquestrador.id}/plano/aprovar`, { observacoes: 42 });
 
     expect(resposta.status).toBe(400);
+    expect(orquestrador.turnoComPlanoPendente).not.toBeNull();
+  });
+
+  it("commitarAoFinal com o commit liberado põe o pedido de commit na aprovação", async () => {
+    await servico.alterarConfiguracao(orquestrador.id, { permitirCommitEPush: true });
+    await planejar();
+
+    const resposta = await postar(`/orquestradores/${orquestrador.id}/plano/aprovar`, { commitarAoFinal: true });
+
+    expect(resposta.status).toBe(202);
+    await aguardarOcioso();
+    expect(motor.pedidos.at(-1)?.texto).toContain(PEDIDO_DE_COMMIT_AO_FINAL);
+  });
+
+  it("commitarAoFinal é ignorado quando a configuração não libera commit", async () => {
+    await planejar();
+
+    const resposta = await postar(`/orquestradores/${orquestrador.id}/plano/aprovar`, { commitarAoFinal: true });
+
+    expect(resposta.status).toBe(202);
+    await aguardarOcioso();
+    expect(motor.pedidos.at(-1)?.texto).not.toContain(PEDIDO_DE_COMMIT_AO_FINAL);
+  });
+
+  it("recusa commitarAoFinal que não é verdadeiro ou falso com 400", async () => {
+    await planejar();
+
+    const resposta = await postar(`/orquestradores/${orquestrador.id}/plano/aprovar`, { commitarAoFinal: "sim" });
+
+    expect(resposta.status).toBe(400);
+    expect(await resposta.json()).toEqual({ erro: 'A opção "Commitar ao final" deve ser verdadeira ou falsa.' });
     expect(orquestrador.turnoComPlanoPendente).not.toBeNull();
   });
 
