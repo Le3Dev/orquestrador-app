@@ -744,6 +744,8 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
         sair: vi.fn(),
         capturarMouse: vi.fn().mockResolvedValue(undefined),
         capturarTela: vi.fn(),
+        capturarAgora: vi.fn(),
+        aoCapturarQuadro: vi.fn(() => () => undefined),
         aoMudar: vi.fn((callback: (ativo: boolean) => void) => {
           ouvintes.push(callback);
           return () => undefined;
@@ -788,6 +790,8 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
         sair: vi.fn(),
         capturarMouse: vi.fn().mockResolvedValue(undefined),
         capturarTela: vi.fn(),
+        capturarAgora: vi.fn(),
+        aoCapturarQuadro: vi.fn(() => () => undefined),
         aoMudar: vi.fn((callback: (ativo: boolean) => void) => {
           ouvintes.push(callback);
           return () => undefined;

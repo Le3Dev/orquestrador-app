@@ -23,6 +23,10 @@ export interface ModoInvisivel {
   mouseDaArea: MouseDaArea;
   /** Foto da tela do monitor da janela; lança se a captura falhar. */
   capturarTela: () => Promise<CapturaDeTela>;
+  /** Quadro atual da tela (botão "capturar agora"); lança se falhar. */
+  capturarAgora: () => Promise<CapturaDeTela>;
+  /** Assina os quadros do atalho global Ctrl+Shift+S; devolve o cancelamento (no-op no navegador). */
+  aoCapturarQuadro: (callback: (captura: CapturaDeTela) => void) => () => void;
 }
 
 const SEM_EFEITO: MouseDaArea = { onMouseEnter: () => undefined, onMouseLeave: () => undefined };
@@ -87,7 +91,30 @@ export function useModoInvisivel(): ModoInvisivel {
     return api.capturarTela();
   }, [api]);
 
+  const capturarAgora = useCallback(async () => {
+    if (api === null) {
+      throw new Error("a captura de tela só existe no aplicativo desktop");
+    }
+    return api.capturarAgora();
+  }, [api]);
+
+  const aoCapturarQuadro = useCallback(
+    (callback: (captura: CapturaDeTela) => void) => (api === null ? () => undefined : api.aoCapturarQuadro(callback)),
+    [api],
+  );
+
   const descartarErro = useCallback(() => setErro(null), []);
 
-  return { disponivel: api !== null, ativo, entrar, sair, erro, descartarErro, mouseDaArea, capturarTela };
+  return {
+    disponivel: api !== null,
+    ativo,
+    entrar,
+    sair,
+    erro,
+    descartarErro,
+    mouseDaArea,
+    capturarTela,
+    capturarAgora,
+    aoCapturarQuadro,
+  };
 }

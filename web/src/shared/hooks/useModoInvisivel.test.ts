@@ -18,6 +18,8 @@ describe("useModoInvisivel", () => {
       sair: vi.fn().mockResolvedValue(undefined),
       capturarMouse: vi.fn().mockResolvedValue(undefined),
       capturarTela: vi.fn().mockResolvedValue({ nome: "tela.jpg", tipoDeMidia: "image/jpeg", base64: "AAA" }),
+      capturarAgora: vi.fn().mockResolvedValue({ nome: "tela-agora.jpg", tipoDeMidia: "image/jpeg", base64: "BBB" }),
+      aoCapturarQuadro: vi.fn(() => () => undefined),
       aoMudar: vi.fn((callback: (ativo: boolean) => void) => {
         ouvinte = callback;
         return cancelar;
@@ -37,6 +39,18 @@ describe("useModoInvisivel", () => {
     expect(result.current.erro).toBeNull();
     result.current.mouseDaArea.onMouseEnter();
     await expect(result.current.capturarTela()).rejects.toThrow();
+    await expect(result.current.capturarAgora()).rejects.toThrow();
+    expect(result.current.aoCapturarQuadro(vi.fn())()).toBeUndefined();
+  });
+
+  it("capturarAgora e aoCapturarQuadro repassam à ponte", async () => {
+    const { modoInvisivel } = ponte();
+    const { result } = renderHook(() => useModoInvisivel());
+
+    await expect(result.current.capturarAgora()).resolves.toMatchObject({ base64: "BBB" });
+    const callback = vi.fn();
+    result.current.aoCapturarQuadro(callback);
+    expect(modoInvisivel.aoCapturarQuadro).toHaveBeenCalledWith(callback);
   });
 
   it("acompanha o aviso do processo principal (inclusive a saída pelo atalho) e cancela ao desmontar", () => {

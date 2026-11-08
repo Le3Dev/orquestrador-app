@@ -742,6 +742,16 @@ async function abrirJanelaPrincipal() {
   });
   janelaPrincipal = janela;
   janela.on("close", () => sairDoModoInvisivel());
+  // Página recarregou/travou: o estado React volta a "normal", então o main
+  // também precisa sair do modo invisível (senão o usuário fica preso).
+  janela.webContents.on("did-start-navigation", (evento, _url, mesmoDoc, ehFramePrincipal) => {
+    const principal = evento?.isMainFrame ?? ehFramePrincipal;
+    const mesmo = evento?.isSameDocument ?? mesmoDoc;
+    if (principal && !mesmo && modoInvisivel?.janela === janela) sairDoModoInvisivel();
+  });
+  janela.webContents.on("render-process-gone", () => {
+    if (modoInvisivel?.janela === janela) sairDoModoInvisivel();
+  });
   janela.on("closed", () => {
     if (janelaPrincipal === janela) janelaPrincipal = null;
   });
@@ -897,7 +907,22 @@ ipcMain.handle("atualizacao:instalar-agora", async (evento) => {
 // normal vem do CSS (html/body/#root), e o modo invisível só o torna transparente.
 // ──────────────────────────────────────────────────────────────────────────
 const ATALHO_DO_MODO_INVISIVEL = "CommandOrControl+Shift+I";
+const ATALHO_CAPTURAR_AGORA = "CommandOrControl+Shift+S";
 let modoInvisivel = null; // { janela, anterior } enquanto ativo
+
+// Atalho global: não rouba o foco do app de trás; manda o quadro à tela.
+async function capturarAgoraPorAtalho() {
+  const atual = modoInvisivel;
+  if (!atual) return;
+  try {
+    const captura = await capturarQuadroAtual();
+    if (atual.janela && !atual.janela.isDestroyed()) {
+      atual.janela.webContents.send("modo-invisivel:quadro-capturado", captura);
+    }
+  } catch (erro) {
+    registrarNoLog("captura", `Falha ao capturar pelo atalho: ${erro.message || erro}`);
+  }
+}
 
 function avisarModoInvisivel(janela, ativo) {
   if (janela && !janela.isDestroyed()) janela.webContents.send("modo-invisivel:estado", ativo);
@@ -931,6 +956,13 @@ function entrarNoModoInvisivel() {
   } catch (erro) {
     registrarNoLog("app", `Falha ao registrar o atalho do modo invisível: ${erro.message || erro}`);
   }
+  try {
+    if (!globalShortcut.register(ATALHO_CAPTURAR_AGORA, capturarAgoraPorAtalho)) {
+      registrarNoLog("app", "Não foi possível registrar o atalho de capturar agora.");
+    }
+  } catch (erro) {
+    registrarNoLog("app", `Falha ao registrar o atalho de capturar agora: ${erro.message || erro}`);
+  }
   registrarNoLog("app", "Modo invisível ligado.");
   avisarModoInvisivel(janela, true);
 }
@@ -942,6 +974,7 @@ function sairDoModoInvisivel() {
   if (rastreio) rastreio.parar();
   try {
     globalShortcut.unregister(ATALHO_DO_MODO_INVISIVEL);
+    globalShortcut.unregister(ATALHO_CAPTURAR_AGORA);
   } catch {
     /* ignora */
   }
@@ -970,8 +1003,7 @@ ipcMain.handle("modo-invisivel:capturar-mouse", (evento, capturar) => {
   // O rastreio pelo cursor é quem decide; o pedido da tela só o mantém em sincronia.
   modoInvisivel.rastreio.definir(capturar);
 });
-ipcMain.handle("tela:capturar", (evento) => {
-  exigirJanelaPrincipal(evento);
+function capturarQuadroAtual() {
   if (!modoInvisivel) throw new Error("A captura de tela só funciona com o modo invisível ativo.");
   return capturarTela({
     desktopCapturer,
@@ -980,6 +1012,14 @@ ipcMain.handle("tela:capturar", (evento) => {
     janelaProtegida: process.platform === "win32" || process.platform === "darwin",
     registrar: (texto) => registrarNoLog("captura", texto),
   });
+}
+ipcMain.handle("tela:capturar", (evento) => {
+  exigirJanelaPrincipal(evento);
+  return capturarQuadroAtual();
+});
+ipcMain.handle("modo-invisivel:capturar-agora", (evento) => {
+  exigirJanelaPrincipal(evento);
+  return capturarQuadroAtual();
 });
 app.on("will-quit", () => {
   sairDoModoInvisivel();
