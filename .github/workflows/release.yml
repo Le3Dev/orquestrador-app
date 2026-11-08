@@ -1,0 +1,50 @@
+name: Build e publicar release (auto-update)
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  publicar:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout (com tags, para a guarda de versão)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Guarda de versão (só publica versão nova)
+        id: guarda
+        shell: bash
+        run: |
+          V=$(node -p "require('./package.json').version")
+          TAG="v$V"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "A tag $TAG já existe; nada a publicar."
+            echo "publicar=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Versão nova ($TAG); vai compilar e publicar."
+            echo "publicar=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Instalar dependências (raiz)
+        if: steps.guarda.outputs.publicar == 'true'
+        run: npm ci
+
+      - name: Instalar dependências (web)
+        if: steps.guarda.outputs.publicar == 'true'
+        run: npm --prefix web ci
+
+      - name: Compilar e publicar no GitHub Releases
+        if: steps.guarda.outputs.publicar == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run release:win
