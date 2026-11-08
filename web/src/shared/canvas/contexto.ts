@@ -14,7 +14,7 @@ import type { EstadoDaConversa } from "../estado/aplicarEvento";
 import type { SituacaoDaConexao } from "../hooks/useConversas";
 import { mesmoConteudo } from "../hooks/useReaproveitado";
 import type { EstadoDoServidor } from "../hooks/useServidor";
-import type { BixinhosLimpos } from "./layout";
+import type { BixinhosLimpos, EscalaDaLetra } from "./layout";
 
 export interface AcoesDoCanvas {
   abrirTerminal: (orquestradorId: string) => void;
@@ -24,6 +24,11 @@ export interface AcoesDoCanvas {
   /** O rascunho de configuração virou um Orquestrador de verdade: troca pelo terminal, no mesmo lugar. */
   orquestradorCriado: (rascunhoId: string, orquestrador: ResumoDoOrquestrador) => void;
   descartarRascunho: (rascunhoId: string) => void;
+  /**
+   * Troca o tamanho da letra do cartão (terminal ou rascunho, pelo id do nó)
+   * e muda o tamanho dele na mesma proporção. Fica no layout do canvas.
+   */
+  mudarEscalaDaLetra: (noId: string, escalaDaLetra: EscalaDaLetra) => void;
   recarregar: () => Promise<void>;
   /**
    * Abre a prévia ao vivo de um servidor que o Orquestrador subiu: se ela já

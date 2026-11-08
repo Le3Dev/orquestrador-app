@@ -15,7 +15,28 @@ export interface Retangulo extends Ponto {
   altura: number;
 }
 
-export type RetanguloDoTerminal = Retangulo;
+/**
+ * O tamanho da letra de um terminal (e do rascunho): o zoom do conteúdo do
+ * cartão. A barra de título e as alças de redimensionar ficam no tamanho normal.
+ */
+export const ESCALAS_DA_LETRA = [1, 1.15, 1.3] as const;
+export type EscalaDaLetra = (typeof ESCALAS_DA_LETRA)[number];
+export const ESCALA_DA_LETRA_PADRAO: EscalaDaLetra = 1;
+/** As opções do campo "Tamanho da letra", na criação e no ⚙ do terminal. */
+export const OPCOES_DA_ESCALA_DA_LETRA: readonly { valor: EscalaDaLetra; titulo: string }[] = [
+  { valor: 1, titulo: "Normal" },
+  { valor: 1.15, titulo: "Grande" },
+  { valor: 1.3, titulo: "Maior" },
+];
+
+export function ehEscalaDaLetra(valor: unknown): valor is EscalaDaLetra {
+  return ESCALAS_DA_LETRA.some((escala) => escala === valor);
+}
+
+/** Onde fica um terminal. Sem `escalaDaLetra` (layouts antigos), a letra é a normal. */
+export interface RetanguloDoTerminal extends Retangulo {
+  escalaDaLetra?: EscalaDaLetra;
+}
 
 export interface Viewport extends Ponto {
   zoom: number;
@@ -25,7 +46,7 @@ export interface Viewport extends Ponto {
  * Onde fica uma nota. `altura` é sempre a da nota aberta: minimizada, ela
  * mostra só a barra de título, e restaurar volta a esta altura.
  */
-export interface RetanguloDaNota extends RetanguloDoTerminal {
+export interface RetanguloDaNota extends Retangulo {
   minimizada: boolean;
 }
 
@@ -36,6 +57,18 @@ export interface RetanguloDaNota extends RetanguloDoTerminal {
  */
 export interface RetanguloDaPrevia extends RetanguloDaNota {
   url: string;
+  orquestradorId: string | null;
+}
+
+/**
+ * Um terminal de shell no canvas (o bloco "Terminal"): onde fica, o id do
+ * terminal no servidor (para religar ao recarregar a página), a pasta em que
+ * ele abriu e o Orquestrador a que está ligado (nulo quando aberto pela barra
+ * do canvas).
+ */
+export interface RetanguloDoShell extends Retangulo {
+  terminalId: string;
+  pasta: string;
   orquestradorId: string | null;
 }
 
@@ -52,6 +85,8 @@ export interface LayoutDoCanvas {
   artefatos: Record<string, Retangulo>;
   /** Prévias no canvas, pelo id criado na tela. Layouts gravados antes delas não têm o campo: valem como sem prévias. */
   previas: Record<string, RetanguloDaPrevia>;
+  /** Terminais de shell no canvas, pelo id criado na tela. Layouts gravados antes deles não têm o campo: valem como nenhum. */
+  shells: Record<string, RetanguloDoShell>;
   viewport: Viewport | null;
 }
 
@@ -79,6 +114,8 @@ export const TAMANHO_DA_PREVIA = { largura: 720, altura: 520 } as const;
 export const TAMANHO_MINIMO_DA_PREVIA = { largura: 360, altura: 240 } as const;
 /** A prévia minimizada também fica só com a barra de título, da mesma altura da nota. */
 export const ALTURA_DA_PREVIA_MINIMIZADA = ALTURA_DA_NOTA_MINIMIZADA;
+export const TAMANHO_DO_SHELL = { largura: 640, altura: 400 } as const;
+export const TAMANHO_MINIMO_DO_SHELL = { largura: 320, altura: 180 } as const;
 export const TAMANHO_DO_ARTEFATO = { largura: 640, altura: 480 } as const;
 export const TAMANHO_MINIMO_DO_ARTEFATO = { largura: 320, altura: 200 } as const;
 
@@ -104,7 +141,7 @@ function ehNumero(valor: unknown): valor is number {
   return typeof valor === "number" && Number.isFinite(valor);
 }
 
-function ehRetangulo(valor: unknown): valor is RetanguloDoTerminal {
+function ehRetangulo(valor: unknown): valor is Retangulo {
   if (typeof valor !== "object" || valor === null) {
     return false;
   }
@@ -163,7 +200,42 @@ function interpretarPrevias(previas: unknown): Record<string, RetanguloDaPrevia>
   return validas;
 }
 
-/** Os retângulos válidos de um grupo do layout salvo (terminais ou artefatos); só os campos do retângulo. */
+/**
+ * Os terminais de shell válidos do layout salvo: sem o id do terminal no
+ * servidor ou sem a pasta, o bloco não teria a que religar nem onde abrir de
+ * novo, e sai. Sem Orquestrador, o bloco fica solto.
+ */
+function interpretarShells(shells: unknown): Record<string, RetanguloDoShell> {
+  const validos: Record<string, RetanguloDoShell> = {};
+  if (typeof shells !== "object" || shells === null) {
+    return validos;
+  }
+  for (const [id, retangulo] of Object.entries(shells)) {
+    if (!ehRetangulo(retangulo)) {
+      continue;
+    }
+    const { x, y, largura, altura } = retangulo;
+    const { terminalId, pasta, orquestradorId } = retangulo as {
+      terminalId?: unknown;
+      pasta?: unknown;
+      orquestradorId?: unknown;
+    };
+    if (typeof terminalId === "string" && terminalId !== "" && typeof pasta === "string" && pasta !== "") {
+      validos[id] = {
+        x,
+        y,
+        largura,
+        altura,
+        terminalId,
+        pasta,
+        orquestradorId: typeof orquestradorId === "string" ? orquestradorId : null,
+      };
+    }
+  }
+  return validos;
+}
+
+/** Os retângulos válidos de um grupo do layout salvo (os artefatos); só os campos do retângulo. */
 function interpretarRetangulos(grupo: unknown): Record<string, Retangulo> {
   const validos: Record<string, Retangulo> = {};
   if (typeof grupo !== "object" || grupo === null) {
@@ -178,8 +250,27 @@ function interpretarRetangulos(grupo: unknown): Record<string, Retangulo> {
   return validos;
 }
 
+/** Os terminais válidos do layout salvo; um tamanho da letra fora das opções vale como o normal (sem o campo). */
+function interpretarTerminais(terminais: unknown): Record<string, RetanguloDoTerminal> {
+  const validos: Record<string, RetanguloDoTerminal> = {};
+  if (typeof terminais !== "object" || terminais === null) {
+    return validos;
+  }
+  for (const [id, retangulo] of Object.entries(terminais)) {
+    if (ehRetangulo(retangulo)) {
+      const { x, y, largura, altura } = retangulo;
+      const { escalaDaLetra } = retangulo as { escalaDaLetra?: unknown };
+      validos[id] =
+        ehEscalaDaLetra(escalaDaLetra) && escalaDaLetra !== ESCALA_DA_LETRA_PADRAO
+          ? { x, y, largura, altura, escalaDaLetra }
+          : { x, y, largura, altura };
+    }
+  }
+  return validos;
+}
+
 function layoutVazio(): LayoutDoCanvas {
-  return { terminais: {}, notas: {}, artefatos: {}, previas: {}, viewport: null };
+  return { terminais: {}, notas: {}, artefatos: {}, previas: {}, shells: {}, viewport: null };
 }
 
 /** Lê o layout salvo, descartando o que estiver corrompido em vez de quebrar a tela. */
@@ -192,12 +283,13 @@ export function interpretarLayout(texto: string | null): LayoutDoCanvas {
     if (typeof salvo !== "object" || salvo === null) {
       return layoutVazio();
     }
-    const { terminais, notas, artefatos, previas, viewport } = salvo as Record<string, unknown>;
+    const { terminais, notas, artefatos, previas, shells, viewport } = salvo as Record<string, unknown>;
     return {
-      terminais: interpretarRetangulos(terminais),
+      terminais: interpretarTerminais(terminais),
       notas: interpretarNotas(notas),
       artefatos: interpretarRetangulos(artefatos),
       previas: interpretarPrevias(previas),
+      shells: interpretarShells(shells),
       viewport: ehViewport(viewport) ? viewport : null,
     };
   } catch {
@@ -410,6 +502,33 @@ export function posicaoAoLado(
   );
   const { x, y } = livre ?? candidatos[0] ?? terminal;
   return { x: Math.round(x), y: Math.round(y) };
+}
+
+/**
+ * O tamanho do cartão ao trocar o tamanho da letra (de `anterior` para
+ * `nova`): largura e altura mudam na mesma proporção. Ao crescer, não passa do
+ * padrão do cartão na maior letra (nem encolhe um cartão que já é maior que
+ * isso); ao diminuir, não fica menor que o mínimo.
+ */
+export function tamanhoNaEscalaDaLetra(
+  atual: { largura: number; altura: number },
+  anterior: EscalaDaLetra,
+  nova: EscalaDaLetra,
+  padrao: { largura: number; altura: number },
+  minimo: { largura: number; altura: number },
+): { largura: number; altura: number } {
+  const fator = nova / anterior;
+  const maior = Math.max(...ESCALAS_DA_LETRA);
+  const ajustar = (medida: number, padraoDaMedida: number, minimoDaMedida: number): number =>
+    Math.round(
+      fator >= 1
+        ? Math.max(medida, Math.min(medida * fator, padraoDaMedida * maior))
+        : Math.max(medida * fator, minimoDaMedida),
+    );
+  return {
+    largura: ajustar(atual.largura, padrao.largura, minimo.largura),
+    altura: ajustar(atual.altura, padrao.altura, minimo.altura),
+  };
 }
 
 /** Uma janela do canvas (terminal, rascunho ou nota) a organizar. */

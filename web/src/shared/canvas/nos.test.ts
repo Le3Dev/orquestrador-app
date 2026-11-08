@@ -640,6 +640,7 @@ describe("semTerminal e layoutDosNos", () => {
       notas: {},
       artefatos: {},
       previas: {},
+      shells: {},
       viewport: null,
     });
   });

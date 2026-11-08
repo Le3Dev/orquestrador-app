@@ -20,6 +20,8 @@ export default defineConfig({
       "/api": {
         target: `http://127.0.0.1:${process.env.PORTA_DA_API ?? 3200}`,
         changeOrigin: true,
+        // O terminal do canvas usa WebSocket em /api/terminais/:id/conexao.
+        ws: true,
       },
     },
   },

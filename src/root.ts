@@ -8,9 +8,17 @@ import { ProjetosDoChat } from "./chat/ProjetosDoChat";
 import { ServicoDeChat } from "./chat/ServicoDeChat";
 import { acessoSoPeloApp } from "./controllers/acessoSoPeloApp";
 import { criarAlteracoesRoutes } from "./controllers/alteracoesRoutes";
+import { criarArquivosRoutes } from "./controllers/arquivosRoutes";
 import { CanalDoChat, criarChatRoutes } from "./controllers/chatRoutes";
 import { criarNotasRoutes } from "./controllers/notasRoutes";
 import { criarOrquestradoresRoutes } from "./controllers/orquestradoresRoutes";
+import { criarPromptsRoutes } from "./controllers/promptsRoutes";
+import {
+  acessoDoUpgrade,
+  criarConexaoDosTerminais,
+  criarTerminaisRoutes,
+  origensPermitidas,
+} from "./controllers/terminaisRoutes";
 import { ArmazemDeAnexosEmArquivo } from "./infraestrutura/arquivos/ArmazemDeAnexosEmArquivo";
 import { PastaDeEntradaDosArtefatos } from "./infraestrutura/arquivos/ColetorDeArtefatosEmPasta";
 import { ExploradorDePastas } from "./infraestrutura/arquivos/ExploradorDePastas";
@@ -18,11 +26,13 @@ import { RepositorioDeNotasEmArquivo } from "./infraestrutura/arquivos/Repositor
 import { RepositorioDeOrquestradoresEmArquivo } from "./infraestrutura/arquivos/RepositorioDeOrquestradoresEmArquivo";
 import { RepositorioDePreferenciasEmArquivo } from "./infraestrutura/arquivos/RepositorioDePreferenciasEmArquivo";
 import { RepositorioDoChatEmArquivo } from "./infraestrutura/arquivos/RepositorioDoChatEmArquivo";
+import { SistemaDeArquivosEmDisco } from "./infraestrutura/arquivos/SistemaDeArquivosEmDisco";
 import { ConfiguracoesDeEsforcoDoClaudeCode } from "./infraestrutura/claudecode/ConfiguracoesDeEsforcoDoClaudeCode";
 import { FachadaClaudeCodeCli } from "./infraestrutura/claudecode/FachadaClaudeCodeCli";
 import { MedidorDeConsumoPorTranscricoes } from "./infraestrutura/claudecode/MedidorDeConsumoPorTranscricoes";
 import { MotorClaudeCodeCli } from "./infraestrutura/claudecode/MotorClaudeCodeCli";
 import { MotorDeChatClaudeCodeCli } from "./infraestrutura/claudecode/MotorDeChatClaudeCodeCli";
+import { MotorDeMelhoriaDePromptClaudeCodeCli } from "./infraestrutura/claudecode/MotorDeMelhoriaDePromptClaudeCodeCli";
 import {
   Configuracao,
   lerConfiguracao,
@@ -31,14 +41,20 @@ import {
 } from "./infraestrutura/Configuracao";
 import { ControleDeExecucoesEmMemoria } from "./infraestrutura/execucoes/ControleDeExecucoesEmMemoria";
 import { montarArtefatos, pastaDeEntradaDosArtefatos } from "./infraestrutura/montarArtefatos";
+import { DiagnosticadorDoClaudeNoSistema } from "./infraestrutura/sistema/DiagnosticadorDoClaudeNoSistema";
 import { GerenciadorDeWorktreesGit } from "./infraestrutura/sistema/GerenciadorDeWorktreesGit";
 import { LeitorDeAlteracoesGit } from "./infraestrutura/sistema/LeitorDeAlteracoesGit";
 import { MonitorDeMemoria } from "./infraestrutura/sistema/MonitorDeMemoria";
+import { PtyDoSistema } from "./infraestrutura/sistema/PtyDoSistema";
 import { encerrarAgentesOrfaos, RegistroDeProcessos } from "./infraestrutura/sistema/RegistroDeProcessos";
 import { CanalDeEventos } from "./infraestrutura/sse/CanalDeEventos";
 import { ServicoDeNotas } from "./notas/ServicoDeNotas";
 import { ServicoDeAlteracoes } from "./orquestracao/ServicoDeAlteracoes";
+import { ServicoDeArquivos } from "./orquestracao/ServicoDeArquivos";
 import { ServicoDeOrquestracao } from "./orquestracao/ServicoDeOrquestracao";
+import { agendadorDoRelogio } from "./orquestracao/VigiaDoTurno";
+import { ServicoDeMelhoriaDePrompt } from "./prompts/ServicoDeMelhoriaDePrompt";
+import { ServicoDeTerminais } from "./terminais/ServicoDeTerminais";
 
 type ConfiguracaoDaMontagem = Pick<
   Configuracao,
@@ -174,6 +190,10 @@ async function iniciar(): Promise<void> {
     // esforço que o Claude Code da máquina usa quando o app deixa "Padrão".
     medidor: new MedidorDeConsumoPorTranscricoes(),
     esforcoDaMaquina: new ConfiguracoesDeEsforcoDoClaudeCode(),
+    // Autorrecuperação (ADR-36): a vigia examina o Claude em silêncio pelo
+    // mesmo registro de processos, e as esperas usam o relógio de verdade.
+    diagnosticador: new DiagnosticadorDoClaudeNoSistema(registro),
+    agendador: agendadorDoRelogio,
   });
 
   const interrompidos = await servico.interromperTurnosPendentes();
@@ -211,8 +231,20 @@ async function iniciar(): Promise<void> {
     console.warn("[chat] A resposta em andamento foi marcada como interrompida pelo reinício.");
   }
 
+  // Melhorar prompt: chamada curta ao Claude Code (Haiku, sem ferramentas). O
+  // mesmo controle dos turnos: ao desligar, a melhoria em andamento é cancelada.
+  const servicoDeMelhoria = new ServicoDeMelhoriaDePrompt({
+    motor: new MotorDeMelhoriaDePromptClaudeCodeCli(new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro)),
+    execucoes,
+    gerarId: randomUUID,
+    agora: () => new Date(),
+  });
+
   // Artefatos: coleta o que os agentes gravam na pasta de entrada e serve na tela.
   const artefatos = await montarArtefatos({ pastaDeDados });
+
+  // Terminais interativos do canvas: shells do usuário num pseudoterminal.
+  const terminais = new ServicoDeTerminais({ pty: new PtyDoSistema(), gerarId: randomUUID, agora: () => new Date() });
 
   // A tela consulta /api/saude a cada poucos segundos para saber se o servidor
   // está no ar. O instante de início denuncia um reinício: os pedidos que
@@ -241,6 +273,13 @@ async function iniciar(): Promise<void> {
         servico: new ServicoDeAlteracoes({ repositorio, leitor: new LeitorDeAlteracoesGit() }),
       }),
     );
+    // Visualizador de código: lista e lê arquivos da pasta (ou worktree) de um Orquestrador. Só leitura.
+    rotas.use(
+      "/api",
+      criarArquivosRoutes({
+        servico: new ServicoDeArquivos({ repositorio, sistema: new SistemaDeArquivosEmDisco() }),
+      }),
+    );
     rotas.use("/api", criarChatRoutes({ servico: servicoDeChat, canal: canalDoChat, anexos }));
     rotas.use(
       "/api",
@@ -248,7 +287,17 @@ async function iniciar(): Promise<void> {
         servico: new ServicoDeNotas({ repositorio: notas, gerarId: randomUUID, agora: () => new Date() }),
       }),
     );
+    rotas.use("/api", criarPromptsRoutes({ servico: servicoDeMelhoria }));
     rotas.use("/api", artefatos.rotas);
+    rotas.use(
+      "/api",
+      criarTerminaisRoutes({
+        servico: terminais,
+        repositorio,
+        pastaExiste: (caminho) => explorador.existe(caminho),
+        pastaRaiz: configuracao.pastaRaizDosProjetos,
+      }),
+    );
   });
   // Depois das rotas: inclui o que chegou na pasta de entrada com o servidor desligado.
   await artefatos.iniciar();
@@ -260,9 +309,26 @@ async function iniciar(): Promise<void> {
     console.log(`Projetos em: ${configuracao.pastaRaizDosProjetos}`);
   });
 
+  // WebSocket dos terminais: o upgrade não passa pelo Express, então a trava
+  // do aplicativo e a origem são conferidas no próprio upgrade. A tela do Vite
+  // no `desktop:dev` (ORQUESTRADOR_URL_DA_TELA) também é uma origem aceita.
+  const urlDaTelaDeDesenvolvimento = process.env.ORQUESTRADOR_URL_DA_TELA;
+  const conexaoDosTerminais = criarConexaoDosTerminais({
+    servico: terminais,
+    temAcesso: acessoDoUpgrade(modo === "aplicativo" ? configuracao.chaveDeAcesso : null),
+    origemPermitida: origensPermitidas({
+      porta: configuracao.porta,
+      extras: urlDaTelaDeDesenvolvimento ? [urlDaTelaDeDesenvolvimento] : [],
+      qualquerPortaLocal: modo === "navegador",
+    }),
+  });
+  servidor.on("upgrade", conexaoDosTerminais.aoPedirUpgrade);
+
   const desligar = (sinal: string): void => {
     const cancelados = execucoes.cancelarTodas();
     console.log(`[${sinal}] Encerrando${cancelados > 0 ? ` e cancelando ${cancelados} turno(s)` : ""}.`);
+    terminais.encerrarTodos();
+    conexaoDosTerminais.encerrar();
     servidor.close();
     artefatos
       .encerrar()
@@ -279,6 +345,7 @@ async function iniciar(): Promise<void> {
   const cair = (erro: unknown): void => {
     console.error("[servidor] Erro inesperado; encerrando para religar:", erro);
     execucoes.cancelarTodas();
+    terminais.encerrarTodos();
     setTimeout(() => process.exit(1), 1_500);
   };
   process.once("uncaughtException", cair);
