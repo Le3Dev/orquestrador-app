@@ -1,5 +1,7 @@
 import type {
+  CausaDaRecuperacao,
   DadosDaConfiguracao,
+  DadosDaRetomada,
   DadosDoAnexo,
   DadosDoConsumoDoTurno,
   DadosDoPedidoNaFila,
@@ -7,12 +9,14 @@ import type {
   EventoRegistrado,
   JanelaDaCota,
   ModoDoTurno,
+  PerguntaDoApp,
   SituacaoDoSubagente,
   SituacaoDoTurno,
   UsoDoTurno,
 } from "../api/tipos";
+import { CERCA_DE_PERGUNTA, semBlocosDoApp } from "../blocosDoApp";
 import { juntarEnderecos, normalizarEndereco } from "../enderecosLocais";
-import { formatarDuracao, formatarTokens, idCurto } from "../formatacao";
+import { formatarDuracao, formatarMomento, formatarTokens, idCurto } from "../formatacao";
 
 export interface SubagenteNaTela {
   id: string;
@@ -68,6 +72,11 @@ export interface TurnoNaTela {
    * de uma mudança grande.
    */
   decisaoDoPlano: DecisaoDoPlano | null;
+  /**
+   * Perguntas com opções com que o turno terminou, à espera da escolha do
+   * usuário (a resposta vai como o próximo pedido). Vazias, ou ausentes, sem perguntas.
+   */
+  perguntas?: PerguntaDoApp[];
   textosDoOrquestrador: string[];
   resposta: string | null;
   motivoDaFalha: string | null;
@@ -82,7 +91,28 @@ export interface TurnoNaTela {
   ferramentasDiretas: AcaoRegistrada[];
   permissoesNegadas: AcaoRegistrada[];
   log: LinhaDoLog[];
+  /**
+   * A última etapa da autorrecuperação deste turno (travou ou falhou e o app
+   * retoma sozinho), com a hora do evento. Nula, ou ausente, sem recuperação.
+   */
+  recuperacao?: RecuperacaoNaTela | null;
+  /**
+   * Turno que o app abriu sozinho para retomar outro: o `texto` é a mensagem
+   * de retomada, não um pedido do usuário. Nula, ou ausente, nos pedidos comuns.
+   */
+  retomada?: DadosDaRetomada | null;
 }
+
+/** O evento `recuperacao_do_turno` mais recente do turno, como a tela o mostra. */
+export type RecuperacaoNaTela = Omit<Extract<EventoRegistrado, { tipo: "recuperacao_do_turno" }>, "tipo" | "turnoId" | "sequencia">;
+
+/** A causa da recuperação, para as linhas do log e os cartões. */
+export const CAUSAS_LEGIVEIS: Readonly<Record<CausaDaRecuperacao, string>> = {
+  silencio: "Claude em silêncio",
+  limite_de_uso: "limite de uso",
+  sobrecarga: "API sobrecarregada",
+  rede: "falha de rede",
+};
 
 export interface EstadoDaConversa {
   ultimaSequencia: number;
@@ -178,6 +208,14 @@ function encerrar(turno: TurnoNaTela, situacao: SituacaoDoTurno, em: string): Tu
   };
 }
 
+/**
+ * O texto do Orquestrador sem os blocos ```pergunta-do-app: as perguntas
+ * chegam prontas no fim do turno e viram cartão.
+ */
+function semBlocoDePergunta(texto: string): string {
+  return semBlocosDoApp(texto, [CERCA_DE_PERGUNTA], false);
+}
+
 function primeiraLinha(texto: string, limite = 110): string {
   const linha = texto.trim().split("\n")[0] ?? "";
   return linha.length > limite ? `${linha.slice(0, limite)}…` : linha;
@@ -214,8 +252,12 @@ function atividadeDoOrquestrador(ferramenta: string, detalhe: string): string {
 /** O que cada evento muda no turno a que pertence. */
 function alteracaoDoTurno(evento: EventoRegistrado): AlteracaoDeTurno | null {
   switch (evento.tipo) {
-    case "texto_do_orquestrador":
-      return (turno) => ({ ...turno, textosDoOrquestrador: [...turno.textosDoOrquestrador, evento.texto] });
+    case "texto_do_orquestrador": {
+      const texto = semBlocoDePergunta(evento.texto);
+      return texto.trim() === ""
+        ? null
+        : (turno) => ({ ...turno, textosDoOrquestrador: [...turno.textosDoOrquestrador, texto] });
+    }
 
     case "ferramenta_do_orquestrador":
       return (turno) => ({
@@ -293,6 +335,8 @@ function alteracaoDoTurno(evento: EventoRegistrado): AlteracaoDeTurno | null {
         uso: evento.uso,
         // O plano entregue fica esperando o usuário aprovar ou descartar.
         decisaoDoPlano: ficouComPlanoPendente(turno, evento.planoPendente) ? "pendente" : turno.decisaoDoPlano,
+        // As perguntas com opções esperam a escolha do usuário, como o plano espera a decisão.
+        perguntas: evento.perguntas ?? [],
         // A resposta final também chega como último texto do orquestrador;
         // sem este filtro ela apareceria duas vezes.
         textosDoOrquestrador: turno.textosDoOrquestrador.filter((texto) => texto.trim() !== evento.resposta.trim()),
@@ -317,8 +361,52 @@ function alteracaoDoTurno(evento: EventoRegistrado): AlteracaoDeTurno | null {
     case "turno_falhou":
       return (turno) => ({ ...encerrar(turno, "falhou", evento.em), motivoDaFalha: evento.motivo });
 
+    // Cada etapa substitui a anterior: a transcrição mostra só onde a recuperação está.
+    case "recuperacao_do_turno":
+      return (turno) => ({
+        ...turno,
+        recuperacao: {
+          etapa: evento.etapa,
+          causa: evento.causa,
+          tentativa: evento.tentativa,
+          de: evento.de,
+          resumo: evento.resumo,
+          retomaEm: evento.retomaEm,
+          em: evento.em,
+        },
+      });
+
     default:
       return null;
+  }
+}
+
+/** Ex.: "14:32". O "agora" é a hora do evento: o mesmo histórico sempre dá o mesmo log. */
+function horaDaRetomada(retomaEm: string, em: string): string {
+  return formatarMomento(retomaEm, new Date(em));
+}
+
+/** A linha de cada etapa da autorrecuperação, curta: o detalhe fica no cartão da transcrição. */
+function linhaDaRecuperacao(
+  evento: Extract<EventoRegistrado, { tipo: "recuperacao_do_turno" }>,
+): Pick<LinhaDoLog, "tipo" | "texto"> {
+  const tentativa = `tentativa ${evento.tentativa} de ${evento.de}`;
+  const causa = CAUSAS_LEGIVEIS[evento.causa];
+  switch (evento.etapa) {
+    case "encerrado": {
+      const rotulo = evento.causa === "silencio" ? "travado" : causa;
+      return { tipo: "erro", texto: `${rotulo}: ${primeiraLinha(evento.resumo)} · encerrado (${tentativa})` };
+    }
+    case "aguardando": {
+      const quando = evento.retomaEm === null ? "retoma em instantes" : `retoma às ${horaDaRetomada(evento.retomaEm, evento.em)}`;
+      return { tipo: "sistema", texto: `${quando} (${causa}) · ${tentativa}` };
+    }
+    case "retomando":
+      return { tipo: "sistema", texto: `retomando sozinho (${tentativa})` };
+    case "cancelada":
+      return { tipo: "sistema", texto: "retomada cancelada" };
+    case "desistiu":
+      return { tipo: "erro", texto: `não consegui retomar · ${primeiraLinha(evento.resumo)}` };
   }
 }
 
@@ -334,16 +422,22 @@ export function linhaDoLog(evento: EventoRegistrado, turno: TurnoNaTela): Omit<L
       const quantidade =
         quantidadeDeSubagentes.modo === "fixa" ? `${quantidadeDeSubagentes.limite}` : `≤${quantidadeDeSubagentes.limite}`;
       const modo = evento.modo === "planejamento" ? "plan mode · " : "";
+      const retomada = evento.retomada === undefined ? "" : `retomada automática (tentativa ${evento.retomada.tentativa}) · `;
       return {
         origem: "orquestrador",
         tipo: "sistema",
-        texto: `${modo}turno iniciado · ${modeloDoOrquestrador} → ${modeloDosSubagentes} · ${quantidade} agentes`,
+        texto: `${retomada}${modo}turno iniciado · ${modeloDoOrquestrador} → ${modeloDosSubagentes} · ${quantidade} agentes`,
       };
     }
+    case "recuperacao_do_turno":
+      return { origem: "orquestrador", ...linhaDaRecuperacao(evento) };
     case "sessao_iniciada":
       return { origem: "orquestrador", tipo: "sistema", texto: "sessão do claude code conectada" };
-    case "texto_do_orquestrador":
-      return { origem: "orquestrador", tipo: "texto", texto: primeiraLinha(evento.texto) };
+    case "texto_do_orquestrador": {
+      // O bloco cru da pergunta não aparece no log: ela vira cartão no fim do turno.
+      const texto = semBlocoDePergunta(evento.texto);
+      return texto.trim() === "" ? null : { origem: "orquestrador", tipo: "texto", texto: primeiraLinha(texto) };
+    }
     // Atividade normal: o Orquestrador pode ler e rodar comandos curtos sozinho.
     // Como as ações dos Subagentes, some do histórico quando o pedido termina.
     case "ferramenta_do_orquestrador":
@@ -435,6 +529,7 @@ function novoTurno(evento: Extract<EventoRegistrado, { tipo: "turno_iniciado" }>
     // Pedidos gravados antes do Plan Mode foram todos de execução.
     modo: evento.modo ?? "execucao",
     decisaoDoPlano: null,
+    perguntas: [],
     textosDoOrquestrador: [],
     resposta: null,
     motivoDaFalha: null,
@@ -444,6 +539,8 @@ function novoTurno(evento: Extract<EventoRegistrado, { tipo: "turno_iniciado" }>
     ferramentasDiretas: [],
     permissoesNegadas: [],
     log: [],
+    recuperacao: null,
+    retomada: evento.retomada ?? null,
   };
 }
 
@@ -481,6 +578,8 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
       pedidosEnfileirados: [],
     };
   }
+  // A cota não é atividade do turno. A `recuperacao_do_turno`, sim: segue abaixo
+  // como os demais eventos do turno e renova a `ultimaAtividadeEm` dele.
   if (evento.tipo === "uso_da_cota") {
     return { ...proximo, cota: evento.janelas };
   }

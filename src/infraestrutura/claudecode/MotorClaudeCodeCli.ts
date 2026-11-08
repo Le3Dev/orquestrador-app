@@ -5,8 +5,8 @@ import path from "node:path";
 
 import { EventoDoMotor } from "../../orquestracao/EventoDeOrquestracao";
 import { instrucoesDoOrquestrador, mensagemParaOOrquestrador } from "../../orquestracao/InstrucoesDoOrquestrador";
-import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "../../orquestracao/MotorDeAgentes";
-import { AdaptadorDeEventosDoClaudeCode } from "./AdaptadorDeEventosDoClaudeCode";
+import { ABORTO_POR_SILENCIO, MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "../../orquestracao/MotorDeAgentes";
+import { AdaptadorDeEventosDoClaudeCode, falhaComCausa } from "./AdaptadorDeEventosDoClaudeCode";
 import {
   configuracoesDaSessao,
   definicaoDosAgentes,
@@ -27,6 +27,24 @@ import { SondaDeEndereco, sondarEnderecoLocal } from "./SondaDeEnderecoLocal";
 export async function prepararPastaDeArtefatos(pasta: string): Promise<string> {
   await mkdir(pasta, { recursive: true });
   return realpath(pasta);
+}
+
+/** Intervalo mínimo entre dois avisos de `aoReceberLinha`. */
+export const INTERVALO_DOS_AVISOS_DE_LINHA_MS = 1_000;
+
+export const MOTIVO_DO_SILENCIO = "Encerrado pela autorrecuperação: sem notícias do Claude.";
+
+/** Chama `aviso` na primeira vez e depois no máximo uma vez a cada `intervaloMs`. */
+export function limitarAvisos(aviso: () => void, intervaloMs: number, agora: () => number = Date.now): () => void {
+  let ultimo: number | null = null;
+  return () => {
+    const instante = agora();
+    if (ultimo !== null && instante - ultimo < intervaloMs) {
+      return;
+    }
+    ultimo = instante;
+    aviso();
+  };
 }
 
 function descreverSaidaSemResultado(saida: SaidaDoClaudeCode): string {
@@ -56,6 +74,7 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
     pedidoRecebido: PedidoDeTurno,
     aoObservar: (evento: EventoDoMotor) => void,
     sinal: AbortSignal,
+    aoReceberLinha?: () => void,
   ): Promise<ResultadoDoTurno> {
     const pastaTemporaria = path.join(tmpdir(), "orquestrador-agentes", randomUUID());
     const arquivos = {
@@ -136,12 +155,29 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
           conferirCitados();
         },
         sinal,
+        aoReceberLinha === undefined ? undefined : limitarAvisos(aoReceberLinha, INTERVALO_DOS_AVISOS_DE_LINHA_MS),
       );
       await Promise.all(conferencias);
 
       const resultado = adaptador.resultado;
+      // A autorrecuperação derrubou o processo: o que ele disse por último não importa.
+      if (sinal.aborted && sinal.reason === ABORTO_POR_SILENCIO) {
+        return { sucesso: false, causa: "silencio", motivo: MOTIVO_DO_SILENCIO, uso: resultado?.uso ?? null };
+      }
       if (resultado === null) {
-        return { sucesso: false, motivo: descreverSaidaSemResultado(saida), uso: null };
+        return falhaComCausa(descreverSaidaSemResultado(saida), [saida.erroPadrao], adaptador.pistasDaFalha, null);
+      }
+      // O `result` não disse a causa: o stderr às vezes diz (um ECONNRESET, um 529).
+      if (!resultado.sucesso && (resultado.causa ?? "outro") === "outro" && saida.erroPadrao !== "") {
+        const pelaSaida = falhaComCausa(
+          resultado.motivo,
+          [resultado.motivo, saida.erroPadrao],
+          adaptador.pistasDaFalha,
+          resultado.uso,
+        );
+        if (pelaSaida.causa !== "outro") {
+          return pelaSaida;
+        }
       }
       // O `duration_ms` do Claude Code não conta a espera por Subagentes em
       // segundo plano; o tempo que interessa é o de relógio, do início ao fim.

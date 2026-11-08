@@ -131,6 +131,10 @@ describe("PreferenciasGlobais.subagentesProntos", () => {
     const preferencias = PreferenciasGlobais.vazias().com({ instrucoesPadrao: "X", subagentesProntos: [revisor] });
     expect(preferencias.subagentesProntos).toEqual([revisor]);
     expect(preferencias.com({ instrucoesPadrao: "Y" }).subagentesProntos).toEqual([revisor]);
-    expect(preferencias.com({ subagentesProntos: [] }).paraDados()).toEqual({ instrucoesPadrao: "X", subagentesProntos: [] });
+    expect(preferencias.com({ subagentesProntos: [] }).paraDados()).toEqual({
+      instrucoesPadrao: "X",
+      subagentesProntos: [],
+      autorrecuperacao: true,
+    });
   });
 });

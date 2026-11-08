@@ -1,11 +1,19 @@
 import { memo, type ReactNode, useEffect, useState } from "react";
 
-import { api } from "../../shared/api/cliente";
+import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { DadosDaConfiguracao, NomeDaPredefinicao, SinalDeVida } from "../../shared/api/tipos";
 import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
-import type { LinhaDoLog, TipoDeLinhaDoLog, TurnoNaTela } from "../../shared/estado/aplicarEvento";
+import {
+  CAUSAS_LEGIVEIS,
+  type LinhaDoLog,
+  type RecuperacaoNaTela,
+  type TipoDeLinhaDoLog,
+  type TurnoNaTela,
+} from "../../shared/estado/aplicarEvento";
 import { faseDoTurno } from "../../shared/estado/faseDoTurno";
-import { estadoDeVida } from "../../shared/estado/sinalDeVida";
+import { type EstadoDeVida, estadoDeVida } from "../../shared/estado/sinalDeVida";
+import { useAutorrecuperacao } from "../../shared/hooks/useAutorrecuperacao";
+import "../../theme/recuperacao-do-turno.css";
 import {
   descreverConfiguracao,
   formatarDuracao,
@@ -16,6 +24,7 @@ import {
 } from "../../shared/formatacao";
 import { useRelogio } from "../../shared/hooks/useRelogio";
 import { IconeAlerta, IconeCoracao, IconeOrquestrador, IconeRaio } from "../Icones";
+import { CartaoDePergunta } from "../chat/CartaoDePergunta";
 import { TextoFormatado } from "../TextoFormatado";
 import { type AcoesDoPlano, CartaoDoPlano } from "./CartaoDoPlano";
 import { CustoDoTurno } from "./CustoDoTurno";
@@ -58,9 +67,40 @@ const LinhaDoTerminal = memo(function LinhaDoTerminal({ linha }: { linha: LinhaD
 });
 
 /**
+ * O servidor desconfia que o Claude travou. Com a autorrecuperação ligada, o
+ * app retoma sozinho; desligada, vale a orientação de cancelar e reenviar.
+ */
+function AvisoDeSuspeita({ silencioMs, resumo }: { silencioMs: number; resumo: string }) {
+  const autorrecuperacao = useAutorrecuperacao();
+  const orientacao = autorrecuperacao
+    ? "O app retoma sozinho se travar."
+    : "Se continuar assim, cancele (esc) e reenvie.";
+  return <>{`sem notícias do Claude há ${formatarDuracao(silencioMs)}: ${resumo}. ${orientacao}`}</>;
+}
+
+/** O texto do sinal de vida: o diagnóstico do servidor, quando há, ou o tempo de silêncio. */
+function TextoDoSinal({ vida }: { vida: EstadoDeVida }) {
+  if (vida.diagnostico?.situacao === "trabalhando") {
+    // Calado, mas trabalhando (um comando longo): sem tom de alarme.
+    return <>{vida.diagnostico.resumo}</>;
+  }
+  if (vida.diagnostico?.situacao === "suspeito") {
+    return <AvisoDeSuspeita silencioMs={vida.ultimoSinalHaMs} resumo={vida.diagnostico.resumo} />;
+  }
+  return (
+    <>
+      {vida.preocupante
+        ? `sem notícias do Claude há ${formatarDuracao(vida.ultimoSinalHaMs)} — pode ter travado. Se continuar assim, cancele (esc) e reenvie.`
+        : `${vida.tokensPensando === null ? "" : `pensando · ~${formatarTokens(vida.tokensPensando)} tokens de raciocínio · `}último sinal há ${formatarDuracao(vida.ultimoSinalHaMs)}`}
+    </>
+  );
+}
+
+/**
  * O que mostra que o turno está vivo: a fase, o tempo total, o último sinal
  * do Claude (com os tokens de raciocínio, quando ele está pensando) e, se o
- * silêncio passar do normal, o aviso de que pode ter travado.
+ * silêncio passar do normal, o aviso de que pode ter travado. Com o
+ * diagnóstico do servidor, a mensagem explica o silêncio.
  */
 function SinalDoTurno({ turno, sinal }: { turno: TurnoNaTela; sinal: SinalDeVida | undefined }) {
   const agora = useRelogio(true);
@@ -82,12 +122,92 @@ function SinalDoTurno({ turno, sinal }: { turno: TurnoNaTela; sinal: SinalDeVida
           {vida.preocupante ? <IconeAlerta tamanho={12} className="inline-block align-[-1px]" /> : <IconeCoracao className="inline-block align-[-1px]" />}
         </span>
         <span className="linha-texto col-span-2">
-          {vida.preocupante
-            ? `sem notícias do Claude há ${formatarDuracao(vida.ultimoSinalHaMs)} — pode ter travado. Se continuar assim, cancele (esc) e reenvie.`
-            : `${vida.tokensPensando === null ? "" : `pensando · ~${formatarTokens(vida.tokensPensando)} tokens de raciocínio · `}último sinal há ${formatarDuracao(vida.ultimoSinalHaMs)}`}
+          <TextoDoSinal vida={vida} />
         </span>
       </div>
     </>
+  );
+}
+
+/** Ex.: "02:05". */
+function formatarContagem(milissegundos: number): string {
+  const segundos = Math.max(0, Math.ceil(milissegundos / 1000));
+  return `${String(Math.floor(segundos / 60)).padStart(2, "0")}:${String(segundos % 60).padStart(2, "0")}`;
+}
+
+/**
+ * O app vai retomar sozinho o pedido que travou ou falhou: a contagem até lá
+ * e o botão para cancelar (o mesmo cancelamento do esc).
+ */
+function CartaoDeRetomada({
+  orquestradorId,
+  recuperacao,
+  desconectado,
+}: {
+  orquestradorId: string;
+  recuperacao: RecuperacaoNaTela;
+  desconectado: boolean;
+}) {
+  const agora = useRelogio(true);
+  const [cancelando, setCancelando] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const restanteMs = recuperacao.retomaEm === null ? 0 : Date.parse(recuperacao.retomaEm) - agora.getTime();
+  const tentativa = `(tentativa ${recuperacao.tentativa} de ${recuperacao.de})`;
+
+  const cancelar = async () => {
+    setErro(null);
+    setCancelando(true);
+    try {
+      await api.cancelar(orquestradorId);
+    } catch (falha) {
+      setErro(mensagemDeErro(falha));
+      setCancelando(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="cartao-de-retomada" role="status" aria-label="Retomada automática">
+        <span className="cartao-de-retomada-texto">
+          {restanteMs > 0 ? (
+            <>
+              Retomando em <span className="cartao-de-retomada-contagem">{formatarContagem(restanteMs)}</span>
+            </>
+          ) : (
+            "Retomando agora"
+          )}{" "}
+          {tentativa} · {recuperacao.resumo}
+        </span>
+        <button
+          type="button"
+          className="btn btn-sm btn-outline"
+          onClick={() => void cancelar()}
+          disabled={cancelando || desconectado}
+          title={`Não retomar sozinho (${CAUSAS_LEGIVEIS[recuperacao.causa]})`}
+        >
+          {cancelando ? "cancelando…" : "cancelar retomada"}
+        </button>
+      </div>
+      {erro !== null && <p className="hint-error">{erro}</p>}
+    </div>
+  );
+}
+
+/** O app esgotou as tentativas: o diagnóstico e o que o usuário pode fazer. */
+function CartaoDeDesistencia({ recuperacao }: { recuperacao: RecuperacaoNaTela }) {
+  return (
+    <div className="cartao-de-desistencia" role="group" aria-label="Retomada automática sem sucesso">
+      <span className="cartao-de-desistencia-titulo">
+        <IconeAlerta tamanho={12} />
+        Não consegui retomar sozinho ({CAUSAS_LEGIVEIS[recuperacao.causa]}, {recuperacao.tentativa} de {recuperacao.de}{" "}
+        tentativas)
+      </span>
+      <p className="cartao-de-desistencia-diagnostico">{recuperacao.resumo}</p>
+      <p className="cartao-de-desistencia-orientacao">
+        Você decide o próximo passo: reenvie o pedido (se puder, em partes menores) ou confira o log acima para ver onde
+        ele parou.
+      </p>
+    </div>
   );
 }
 
@@ -98,7 +218,10 @@ interface PropsDoTurno {
   ultimo: boolean;
   sinal: SinalDeVida | undefined;
   desconectado: boolean;
+  /** Algum pedido da conversa está rodando: as perguntas não podem ser respondidas agora. */
+  trabalhando: boolean;
   acoesDoPlano: AcoesDoPlano;
+  aoResponderPergunta: (texto: string) => Promise<void>;
 }
 
 /**
@@ -113,19 +236,37 @@ const Turno = memo(function Turno({
   ultimo,
   sinal,
   desconectado,
+  trabalhando,
   acoesDoPlano,
+  aoResponderPergunta,
 }: PropsDoTurno) {
   const emAndamento = turno.situacao === "em_andamento";
   // Pedidos já encerrados mostram só os marcos: as centenas de ações dos
   // agentes interessam enquanto acontecem, não no histórico.
   const linhas = emAndamento ? turno.log : turno.log.filter((linha) => linha.tipo !== "ferramenta");
+  const recuperacao = turno.recuperacao ?? null;
+  const retomada = turno.retomada ?? null;
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="prompt-registrado">
-        <span className="text-active">❯</span>
-        <span className="texto-longo">{turno.texto}</span>
-      </div>
+      {retomada === null ? (
+        <div className="prompt-registrado">
+          <span className="text-active">❯</span>
+          <span className="texto-longo">{turno.texto}</span>
+        </div>
+      ) : (
+        // O app abriu este turno sozinho: a mensagem de retomada não é um pedido do usuário e fica recolhida.
+        <>
+          <div className="prompt-registrado prompt-de-retomada">
+            <span className="text-active">↻</span>
+            <span>{`retomada automática (tentativa ${retomada.tentativa})`}</span>
+          </div>
+          <details className="mensagem-de-retomada">
+            <summary>mensagem enviada ao Claude</summary>
+            <p className="texto-longo">{turno.texto}</p>
+          </details>
+        </>
+      )}
       {turno.anexos.length > 0 && (
         <div className="anexos-do-turno">
           {turno.anexos.map((anexo) => (
@@ -176,9 +317,23 @@ const Turno = memo(function Turno({
             <TextoFormatado texto={turno.resposta} className="markdown-terminal" />
           </div>
         ))}
+      {/* Respondida quando já há um pedido depois deste: a escolha (ou outra mensagem) já foi enviada. */}
+      {turno.situacao === "concluido" && turno.perguntas !== undefined && turno.perguntas.length > 0 && (
+        <CartaoDePergunta
+          perguntas={turno.perguntas}
+          respondida={!ultimo}
+          desabilitado={desconectado || trabalhando}
+          aoResponder={aoResponderPergunta}
+        />
+      )}
       {turno.situacao === "falhou" && turno.motivoDaFalha !== null && (
         <p className="mono texto-longo text-error">{turno.motivoDaFalha}</p>
       )}
+      {/* Só no último pedido: com um pedido depois, a espera já acabou (retomou ou o usuário seguiu). */}
+      {ultimo && recuperacao?.etapa === "aguardando" && (
+        <CartaoDeRetomada orquestradorId={orquestradorId} recuperacao={recuperacao} desconectado={desconectado} />
+      )}
+      {recuperacao?.etapa === "desistiu" && <CartaoDeDesistencia recuperacao={recuperacao} />}
       {/* O consumo é medido depois do fim do pedido; até lá, nada aparece. */}
       {turno.consumo !== undefined && turno.consumo !== null && <CustoDoTurno consumo={turno.consumo} />}
     </div>
@@ -201,6 +356,8 @@ interface Props {
   desconectado: boolean;
   /** Aprovar, ajustar ou descartar o plano pendente do último pedido (Plan Mode). */
   acoesDoPlano: AcoesDoPlano;
+  /** Envia a resposta às perguntas do último pedido como um pedido novo, pelo envio do prompt; lança se recusar. */
+  aoResponderPergunta: (texto: string) => Promise<void>;
 }
 
 /**
@@ -221,7 +378,9 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
   sinal,
   desconectado,
   acoesDoPlano,
+  aoResponderPergunta,
 }: Props) {
+  const trabalhando = turnos.some((turno) => turno.situacao === "em_andamento");
   return (
     <div className="flex flex-col gap-5">
       <div className="banner-do-terminal">
@@ -262,7 +421,9 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
           // precisam re-renderizar a cada sinal que chega.
           sinal={turno.situacao === "em_andamento" ? sinal : undefined}
           desconectado={desconectado}
+          trabalhando={trabalhando}
           acoesDoPlano={acoesDoPlano}
+          aoResponderPergunta={aoResponderPergunta}
         />
       ))}
     </div>

@@ -1,0 +1,38 @@
+/* ---------------- Autorrecuperação do turno ----------------
+ * O turno que o app abriu sozinho (retomada), o cartão discreto da espera
+ * até retomar e o alerta de quando o app desistiu. */
+
+.prompt-de-retomada { color: var(--secondary); font-weight: 400; }
+.mensagem-de-retomada { margin-left: 18px; color: var(--muted); font-size: 11px; }
+.mensagem-de-retomada > summary { cursor: pointer; width: fit-content; }
+.mensagem-de-retomada > summary:hover { color: var(--secondary); }
+.mensagem-de-retomada > summary:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; border-radius: 3px; }
+.mensagem-de-retomada > p { margin-top: 4px; }
+
+.cartao-de-retomada {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  font-size: 11px;
+  color: var(--secondary);
+}
+.cartao-de-retomada-texto { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cartao-de-retomada-contagem { color: var(--active); font-variant-numeric: tabular-nums; }
+
+.cartao-de-desistencia {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius-card);
+  border: 1px solid color-mix(in srgb, var(--error) 45%, transparent);
+  background: color-mix(in srgb, var(--error) 6%, var(--surface));
+  font-size: 11.5px;
+}
+.cartao-de-desistencia-titulo { display: flex; align-items: center; gap: 6px; color: var(--error); font-weight: 600; }
+.cartao-de-desistencia-diagnostico { color: var(--caption); white-space: pre-wrap; overflow-wrap: anywhere; }
+.cartao-de-desistencia-orientacao { color: var(--secondary); }

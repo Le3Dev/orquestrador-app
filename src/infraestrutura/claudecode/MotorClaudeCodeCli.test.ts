@@ -12,7 +12,7 @@ import { NivelDePermissao } from "../../orquestracao/NivelDePermissao";
 import { PastaDeTrabalho } from "../../orquestracao/PastaDeTrabalho";
 import { caminhoParaRegraDePermissao } from "./ArgumentosDoClaudeCode";
 import { ExecucaoDoClaudeCode, FachadaClaudeCodeCli, SaidaDoClaudeCode } from "./FachadaClaudeCodeCli";
-import { MotorClaudeCodeCli } from "./MotorClaudeCodeCli";
+import { limitarAvisos, MOTIVO_DO_SILENCIO, MotorClaudeCodeCli } from "./MotorClaudeCodeCli";
 
 const pastaDoTeste = mkdtempSync(path.join(tmpdir(), "motor-do-orquestrador-"));
 afterAll(() => rmSync(pastaDoTeste, { recursive: true, force: true }));
@@ -271,5 +271,169 @@ describe("MotorClaudeCodeCli e os servidores citados", () => {
 
     expect(resultado.sucesso).toBe(true);
     expect(enderecos(eventos)).toEqual([]);
+  });
+});
+
+/** Fachada que roda um roteiro: recebe o que a fachada real receberia e devolve a saída dada. */
+function fachadaComRoteiro(
+  roteiro: (
+    aoReceberMensagem: (mensagem: unknown) => void,
+    aoReceberLinha: ((linha: string, origem: "stdout" | "stderr") => void) | undefined,
+  ) => SaidaDoClaudeCode,
+): FachadaClaudeCodeCli {
+  return {
+    async executar(
+      _execucao: ExecucaoDoClaudeCode,
+      aoReceberMensagem: (mensagem: unknown) => void,
+      _sinal: AbortSignal,
+      aoReceberLinha?: (linha: string, origem: "stdout" | "stderr") => void,
+    ): Promise<SaidaDoClaudeCode> {
+      return roteiro(aoReceberMensagem, aoReceberLinha);
+    },
+  } as unknown as FachadaClaudeCodeCli;
+}
+
+const RESULTADO_OK = {
+  type: "result",
+  subtype: "success",
+  is_error: false,
+  result: "feito",
+  duration_ms: 1,
+  modelUsage: { m: { inputTokens: 5, outputTokens: 7 } },
+};
+
+describe("limitarAvisos", () => {
+  it("avisa na primeira vez e depois no máximo uma vez por intervalo", () => {
+    let agora = 0;
+    let avisos = 0;
+    const avisar = limitarAvisos(() => (avisos += 1), 1_000, () => agora);
+
+    avisar();
+    agora = 999;
+    avisar();
+    expect(avisos).toBe(1);
+    agora = 1_000;
+    avisar();
+    avisar();
+    expect(avisos).toBe(2);
+    agora = 5_000;
+    avisar();
+    expect(avisos).toBe(3);
+  });
+});
+
+describe("MotorClaudeCodeCli — sinais de vida e autorrecuperação", () => {
+  it("avisa as linhas do processo (inclusive as que não viram evento) no máximo uma vez por segundo", async () => {
+    const motor = new MotorClaudeCodeCli(
+      fachadaComRoteiro((aoReceberMensagem, aoReceberLinha) => {
+        for (let linha = 0; linha < 10; linha++) {
+          aoReceberLinha?.(`linha ${linha}`, linha % 2 === 0 ? "stdout" : "stderr");
+        }
+        aoReceberMensagem(RESULTADO_OK);
+        return { codigoDeSaida: 0, erroPadrao: "" };
+      }),
+    );
+    let avisos = 0;
+
+    const resultado = await motor.executarTurno(
+      pedidoComInstrucoes(null),
+      () => undefined,
+      new AbortController().signal,
+      () => (avisos += 1),
+    );
+
+    expect(resultado.sucesso).toBe(true);
+    expect(avisos).toBe(1);
+  });
+
+  it("abortado com reason \"silencio\": falha por silêncio, com o consumo que já houve", async () => {
+    const controle = new AbortController();
+    const motor = new MotorClaudeCodeCli(
+      fachadaComRoteiro((aoReceberMensagem) => {
+        aoReceberMensagem({ ...RESULTADO_OK, subtype: "error_during_execution", is_error: true, result: "" });
+        controle.abort("silencio");
+        return { codigoDeSaida: null, erroPadrao: "" };
+      }),
+    );
+
+    const resultado = await motor.executarTurno(pedidoComInstrucoes(null), () => undefined, controle.signal);
+
+    expect(resultado).toEqual({
+      sucesso: false,
+      causa: "silencio",
+      motivo: MOTIVO_DO_SILENCIO,
+      uso: { duracaoMs: 1, tokensDeEntrada: 5, tokensDeSaida: 7, subagentesLancados: 0 },
+    });
+  });
+
+  it("um cancelamento comum não vira silêncio", async () => {
+    const controle = new AbortController();
+    const motor = new MotorClaudeCodeCli(
+      fachadaComRoteiro(() => {
+        controle.abort();
+        return { codigoDeSaida: null, erroPadrao: "" };
+      }),
+    );
+
+    const resultado = await motor.executarTurno(pedidoComInstrucoes(null), () => undefined, controle.signal);
+
+    expect(resultado).toMatchObject({ sucesso: false, causa: "outro", uso: null });
+  });
+});
+
+describe("MotorClaudeCodeCli — causa da falha pelo stderr", () => {
+  it("sem result, o stderr decide: rede", async () => {
+    const motor = new MotorClaudeCodeCli(
+      fachadaComRoteiro(() => ({ codigoDeSaida: 1, erroPadrao: "Error: read ECONNRESET\n    at TLSWrap.onStreamRead" })),
+    );
+
+    const resultado = await motor.executarTurno(pedidoComInstrucoes(null), () => undefined, new AbortController().signal);
+
+    expect(resultado).toMatchObject({
+      sucesso: false,
+      causa: "rede",
+      uso: null,
+      motivo: "Falha de conexão com os servidores do Claude (Error: read ECONNRESET at TLSWrap.onStreamRead).",
+    });
+  });
+
+  it("sem result, um limite com epoch no stderr dá a hora em que libera", async () => {
+    const motor = new MotorClaudeCodeCli(
+      fachadaComRoteiro(() => ({ codigoDeSaida: 1, erroPadrao: "Claude AI usage limit reached|1793221200" })),
+    );
+
+    const resultado = await motor.executarTurno(pedidoComInstrucoes(null), () => undefined, new AbortController().signal);
+
+    expect(resultado).toMatchObject({ causa: "limite_de_uso", liberaEm: new Date(1793221200 * 1000).toISOString() });
+  });
+
+  it("um result sem causa conhecida ganha a causa do stderr e mantém o texto do result no motivo", async () => {
+    const motor = new MotorClaudeCodeCli(
+      fachadaComRoteiro((aoReceberMensagem) => {
+        aoReceberMensagem({ ...RESULTADO_OK, is_error: true, result: "Execution error" });
+        return { codigoDeSaida: 1, erroPadrao: 'API Error: 529 {"type":"error","error":{"type":"overloaded_error"}}' };
+      }),
+    );
+
+    const resultado = await motor.executarTurno(pedidoComInstrucoes(null), () => undefined, new AbortController().signal);
+
+    expect(resultado).toMatchObject({
+      sucesso: false,
+      causa: "sobrecarga",
+      motivo: "Os servidores do Claude estão sobrecarregados ou com erro (Execution error).",
+    });
+  });
+
+  it("sem result e sem pista nenhuma, fica \"outro\" com o motivo de sempre", async () => {
+    const motor = new MotorClaudeCodeCli(fachadaComRoteiro(() => ({ codigoDeSaida: 2, erroPadrao: "" })));
+
+    const resultado = await motor.executarTurno(pedidoComInstrucoes(null), () => undefined, new AbortController().signal);
+
+    expect(resultado).toEqual({
+      sucesso: false,
+      causa: "outro",
+      uso: null,
+      motivo: "O Claude Code encerrou sem devolver resposta (código 2).",
+    });
   });
 });

@@ -49,9 +49,23 @@ export interface PedidoDeTurno {
   subagentesProntos: readonly DadosDoSubagentePronto[];
 }
 
+/** Por que um turno falhou, quando dá para saber. */
+export type CausaDaFalha = "silencio" | "limite_de_uso" | "sobrecarga" | "rede" | "outro";
+
 export type ResultadoDoTurno =
   | { sucesso: true; resposta: string; uso: UsoDoTurno }
-  | { sucesso: false; motivo: string; uso: UsoDoTurno | null };
+  | {
+      sucesso: false;
+      motivo: string;
+      uso: UsoDoTurno | null;
+      /** Ausente = "outro". */
+      causa?: CausaDaFalha;
+      /** Só em "limite_de_uso", quando o Claude informa quando libera (ISO). */
+      liberaEm?: string | null;
+    };
+
+/** Razão do abort que pede ao motor um resultado de falha por silêncio (`causa: "silencio"`). */
+export const ABORTO_POR_SILENCIO = "silencio";
 
 /**
  * Quem de fato executa o Orquestrador e seus Subagentes.
@@ -61,12 +75,16 @@ export type ResultadoDoTurno =
  * basta outro adaptador (Agent SDK com API key) sem mexer no domínio.
  *
  * Quando `sinal` é abortado, o motor encerra tudo o que lançou e resolve a
- * promessa — cabe ao chamador saber que foi um cancelamento.
+ * promessa — cabe ao chamador saber que foi um cancelamento. Com
+ * `sinal.reason === "silencio"` (a autorrecuperação desistiu de esperar), o
+ * motor resolve `{ sucesso: false, causa: "silencio", … }`.
  */
 export interface MotorDeAgentes {
   executarTurno(
     pedido: PedidoDeTurno,
     aoObservar: (evento: EventoDoMotor) => void,
     sinal: AbortSignal,
+    /** Chamado a cada linha que o processo escreve (stdout ou stderr), inclusive as que não viram evento; no máximo uma vez por segundo. */
+    aoReceberLinha?: () => void,
   ): Promise<ResultadoDoTurno>;
 }

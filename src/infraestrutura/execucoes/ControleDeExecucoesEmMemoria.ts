@@ -1,4 +1,4 @@
-import { ControleDeExecucoes } from "../../orquestracao/ControleDeExecucoes";
+import { ControleDeExecucoes, MotivoDoCancelamento } from "../../orquestracao/ControleDeExecucoes";
 
 export class ControleDeExecucoesEmMemoria implements ControleDeExecucoes {
   private readonly emAndamento = new Map<string, AbortController>();
@@ -9,12 +9,18 @@ export class ControleDeExecucoesEmMemoria implements ControleDeExecucoes {
     return controle.signal;
   }
 
-  cancelar(orquestradorId: string): boolean {
+  cancelar(orquestradorId: string, motivo?: MotivoDoCancelamento): boolean {
     const controle = this.emAndamento.get(orquestradorId);
     if (controle === undefined) {
       return false;
     }
-    controle.abort();
+    // O motivo vira o `reason` do sinal: é por ele que o motor e o serviço
+    // distinguem o silêncio (ADR-36) de um cancelamento do usuário.
+    if (motivo === undefined) {
+      controle.abort();
+    } else {
+      controle.abort(motivo);
+    }
     return true;
   }
 

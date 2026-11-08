@@ -210,8 +210,20 @@ describe("ConfiguracaoDoOrquestrador.instrucoesPersonalizadas", () => {
 
 describe("PreferenciasGlobais", () => {
   it("vazias não têm instruções padrão", () => {
-    expect(PreferenciasGlobais.vazias().paraDados()).toEqual({ instrucoesPadrao: "", subagentesProntos: [] });
+    expect(PreferenciasGlobais.vazias().paraDados()).toEqual({
+      instrucoesPadrao: "",
+      subagentesProntos: [],
+      autorrecuperacao: true,
+    });
     expect(PreferenciasGlobais.de({}).instrucoesPadrao).toBe("");
+  });
+
+  it("autorrecuperação: ligada por padrão e nos arquivos antigos; só false desliga; com() mantém", () => {
+    expect(PreferenciasGlobais.de({}).autorrecuperacao).toBe(true);
+    const desligada = PreferenciasGlobais.de({ autorrecuperacao: false });
+    expect(desligada.autorrecuperacao).toBe(false);
+    expect(desligada.com({ instrucoesPadrao: "X" }).autorrecuperacao).toBe(false);
+    expect(desligada.com({ autorrecuperacao: true }).paraDados()).toMatchObject({ autorrecuperacao: true });
   });
 
   it("normaliza, valida e altera só o que vem", () => {

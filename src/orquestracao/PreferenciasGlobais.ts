@@ -12,6 +12,12 @@ export interface DadosDasPreferencias {
    * Ausente num arquivo gravado antes de existir: vale lista vazia.
    */
   subagentesProntos?: DadosDoSubagentePronto[] | undefined;
+  /**
+   * O app encerra o turno parado e o retoma sozinho, e retoma os que caíram
+   * por limite de uso, sobrecarga ou rede (ver ADR-36). Ausente num arquivo
+   * gravado antes de existir: vale `true`.
+   */
+  autorrecuperacao?: boolean | undefined;
 }
 
 /**
@@ -21,6 +27,7 @@ export interface DadosDasPreferencias {
 export interface AlteracoesDasPreferencias {
   instrucoesPadrao?: string | undefined;
   subagentesProntos?: readonly unknown[] | undefined;
+  autorrecuperacao?: boolean | undefined;
 }
 
 /**
@@ -31,16 +38,19 @@ export class PreferenciasGlobais {
   private constructor(
     public readonly instrucoesPadrao: string,
     public readonly subagentesProntos: readonly DadosDoSubagentePronto[],
+    public readonly autorrecuperacao: boolean,
   ) {}
 
   static vazias(): PreferenciasGlobais {
-    return new PreferenciasGlobais("", []);
+    return new PreferenciasGlobais("", [], true);
   }
 
   static de(dados: DadosDasPreferencias | AlteracoesDasPreferencias): PreferenciasGlobais {
     return new PreferenciasGlobais(
       instrucoesValidas(dados.instrucoesPadrao, "As instruções gerais"),
       subagentesProntosValidos(dados.subagentesProntos),
+      // Só `false` desliga: ausente (arquivo antigo) ou qualquer outra coisa liga.
+      dados.autorrecuperacao !== false,
     );
   }
 
@@ -48,6 +58,7 @@ export class PreferenciasGlobais {
     return PreferenciasGlobais.de({
       instrucoesPadrao: alteracoes.instrucoesPadrao ?? this.instrucoesPadrao,
       subagentesProntos: alteracoes.subagentesProntos ?? this.subagentesProntos.map((subagente) => ({ ...subagente })),
+      autorrecuperacao: alteracoes.autorrecuperacao ?? this.autorrecuperacao,
     });
   }
 
@@ -55,6 +66,7 @@ export class PreferenciasGlobais {
     return {
       instrucoesPadrao: this.instrucoesPadrao,
       subagentesProntos: this.subagentesProntos.map((subagente) => ({ ...subagente })),
+      autorrecuperacao: this.autorrecuperacao,
     };
   }
 }

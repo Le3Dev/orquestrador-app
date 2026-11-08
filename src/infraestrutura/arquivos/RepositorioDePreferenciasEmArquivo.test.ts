@@ -23,7 +23,7 @@ describe("RepositorioDePreferenciasEmArquivo", () => {
   it("sem arquivo, abre com as preferências vazias e não cria nada", async () => {
     const repositorio = await RepositorioDePreferenciasEmArquivo.abrir(pasta);
 
-    expect(repositorio.atuais().paraDados()).toEqual({ instrucoesPadrao: "", subagentesProntos: [] });
+    expect(repositorio.atuais().paraDados()).toEqual({ instrucoesPadrao: "", subagentesProntos: [], autorrecuperacao: true });
     expect(existsSync(path.join(pasta, "preferencias.json"))).toBe(false);
   });
 
@@ -43,6 +43,7 @@ describe("RepositorioDePreferenciasEmArquivo", () => {
     expect(JSON.parse(await readFile(path.join(pasta, "preferencias.json"), "utf8"))).toEqual({
       instrucoesPadrao: 'Linha 1\nLinha 2 com "aspas" e {{x}}',
       subagentesProntos: [revisor],
+      autorrecuperacao: true,
     });
   });
 
