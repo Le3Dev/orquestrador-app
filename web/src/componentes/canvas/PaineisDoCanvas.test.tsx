@@ -1,6 +1,7 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 
 import type { JanelaDaCota, LeituraDeMemoria } from "../../shared/api/tipos";
+import { CHAVE_DAS_PREFERENCIAS_DA_TELA } from "../../shared/hooks/usePreferenciasDaTela";
 import { BarraDoCanvas, ErroDoCanvas, StatusDoCanvas } from "./PaineisDoCanvas";
 
 const janelaComPonte = window as unknown as { electron?: unknown };
@@ -14,7 +15,7 @@ function ponteDoDesktop(abrirAjustes = vi.fn().mockResolvedValue(undefined)) {
   };
 }
 
-/** Os botões nossos da barra (Prévia, Subagentes, Instruções gerais), sem efeito nos testes do "+ Novo ▾". */
+/** O resto da barra (Prévia, Subagentes, Instruções gerais), sem efeito nos testes do "+ Novo ▾". */
 const extrasDaBarra = {
   aoCriarPrevia: vi.fn(),
   aoAlternarPainel: vi.fn(),
@@ -43,15 +44,16 @@ describe("BarraDoCanvas · desktop", () => {
     return { aoCriar, aoCriarNota };
   }
 
-  it("o \"+ Novo ▾\" e os botões de Prévia, Subagentes e Instruções gerais: sem título, busca, ⚙, notas, organizar nem botões de janela", () => {
+  it("o \"+ Novo ▾\" e os botões de Subagentes e Instruções gerais: sem Preferências, Prévia, Terminal, título, busca, ⚙, notas, organizar nem botões de janela", () => {
     renderizar();
 
     expect(screen.getAllByRole("button")).toEqual([
       botaoDoNovo(),
-      screen.getByRole("button", { name: "Prévia" }),
       screen.getByRole("button", { name: "Subagentes" }),
       screen.getByRole("button", { name: "Instruções gerais" }),
     ]);
+    expect(screen.queryByRole("button", { name: /Preferências|Configurações/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Prévia|Terminal/ })).not.toBeInTheDocument();
     expect(botaoDoNovo()).toHaveClass("btn", "btn-sm", "btn-cta");
     expect(botaoDoNovo()).toHaveAttribute("aria-haspopup", "menu");
     expect(botaoDoNovo()).toHaveAttribute("aria-expanded", "false");
@@ -63,7 +65,7 @@ describe("BarraDoCanvas · desktop", () => {
     renderizar();
     const novo = botaoDoNovo();
 
-    expect(novo).toHaveAttribute("title", "Novo orquestrador (Ctrl+N) ou nota (Ctrl+Shift+N)");
+    expect(novo).toHaveAttribute("title", "Novo orquestrador (Ctrl+N), nota (Ctrl+Shift+N), terminal ou prévia");
     expect(novo.querySelector(".rotulo-completo")).toHaveTextContent("+ Novo ▾");
     expect(novo.querySelector(".rotulo-curto")).toHaveTextContent("+ Novo ▾");
     expect(novo.querySelector(".rotulo-icone")).toHaveTextContent("+");
@@ -77,17 +79,30 @@ describe("BarraDoCanvas · desktop", () => {
     const menu = screen.getByRole("menu", { name: "Novo" });
     expect(botaoDoNovo()).toHaveAttribute("aria-expanded", "true");
     expect(botaoDoNovo()).toHaveAttribute("aria-controls", menu.id);
-    // O atalho fica à direita de cada item (fora do nome acessível, que tem aria-keyshortcuts).
-    expect(itensDoMenu().map((item) => item.querySelector("kbd")?.textContent)).toEqual(["Ctrl+N", "Ctrl+Shift+N"]);
+    // Sem aoCriarShell, o "Terminal" não aparece. O atalho fica à direita de cada item
+    // (fora do nome acessível, que tem aria-keyshortcuts); a Prévia não tem atalho.
+    expect(itensDoMenu()).toEqual(
+      ["Orquestrador", "Nota", "Prévia"].map((nome) => screen.getByRole("menuitem", { name: nome })),
+    );
+    expect(itensDoMenu().map((item) => item.querySelector("kbd")?.textContent ?? null)).toEqual([
+      "Ctrl+N",
+      "Ctrl+Shift+N",
+      null,
+    ]);
     expect(screen.getByRole("menuitem", { name: "Orquestrador" })).toHaveAttribute("aria-keyshortcuts", "Control+N");
     expect(screen.getByRole("menuitem", { name: "Nota" })).toHaveAttribute("aria-keyshortcuts", "Control+Shift+N");
+    expect(screen.getByRole("menuitem", { name: "Prévia" })).not.toHaveAttribute("aria-keyshortcuts");
     expect(itensDoMenu()[0]).toHaveFocus();
 
     fireEvent.keyDown(itensDoMenu()[0] as HTMLElement, { key: "ArrowDown" });
     expect(itensDoMenu()[1]).toHaveFocus();
     fireEvent.keyDown(itensDoMenu()[1] as HTMLElement, { key: "ArrowDown" });
+    expect(itensDoMenu()[2]).toHaveFocus();
+    fireEvent.keyDown(itensDoMenu()[2] as HTMLElement, { key: "ArrowDown" });
     expect(itensDoMenu()[0]).toHaveFocus();
     fireEvent.keyDown(itensDoMenu()[0] as HTMLElement, { key: "ArrowUp" });
+    expect(itensDoMenu()[2]).toHaveFocus();
+    fireEvent.keyDown(itensDoMenu()[2] as HTMLElement, { key: "ArrowUp" });
     expect(itensDoMenu()[1]).toHaveFocus();
 
     fireEvent.keyDown(itensDoMenu()[1] as HTMLElement, { key: "Enter" });
@@ -119,7 +134,7 @@ describe("BarraDoCanvas · desktop", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
 
     fireEvent.keyDown(botaoDoNovo(), { key: "ArrowUp" });
-    expect(itensDoMenu()[1]).toHaveFocus();
+    expect(itensDoMenu()[2]).toHaveFocus();
   });
 
   it("Esc fecha sem escolher e o foco volta ao botão", () => {
@@ -158,13 +173,22 @@ describe("BarraDoCanvas · navegador", () => {
   const renderizarBarra = (aoBuscar?: () => void) =>
     render(<BarraDoCanvas aoCriar={vi.fn()} aoCriarNota={vi.fn()} aoBuscar={aoBuscar} {...extrasDaBarra} />);
 
-  it("mostra o título do app, o \"+ Novo ▾\" e, sem a ponte, nenhum ⚙", () => {
+  it("mostra o título do app, o \"+ Novo ▾\" e o ⚙ Configurações; sem a ponte, o painel não tem \"Pastas e Claude Code…\"", () => {
     renderizarBarra(vi.fn());
 
     expect(screen.getByRole("heading", { name: "Orquestrador de agentes" })).toBeInTheDocument();
     expect(botaoDoNovo()).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Organizar|\+ notas/ })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "⚙ Pastas" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Organizar|\+ notas|Preferências/ })).not.toBeInTheDocument();
+    const configuracoes = screen.getByRole("button", { name: "Configurações" });
+    expect(configuracoes.querySelector(".rotulo-completo")).toHaveTextContent("⚙ Configurações");
+    expect(configuracoes.querySelector(".rotulo-curto")).toHaveTextContent("⚙");
+
+    fireEvent.click(configuracoes);
+
+    const painel = screen.getByRole("menu", { name: "Configurações" });
+    // Os dois da Tela e a Autorrecuperação dos orquestradores.
+    expect(within(painel).getAllByRole("menuitemcheckbox")).toHaveLength(3);
+    expect(within(painel).queryByRole("menuitem", { name: /Pastas e Claude Code/ })).not.toBeInTheDocument();
   });
 
   it("\"Buscar\" só aparece com a paleta; tem os três rótulos, o atalho e abre a paleta", () => {
@@ -184,17 +208,18 @@ describe("BarraDoCanvas · navegador", () => {
     expect(aoBuscar).toHaveBeenCalledTimes(1);
   });
 
-  it("com a ponte dos Ajustes (sem janela própria), o ⚙ aparece e reabre os ajustes da primeira abertura", () => {
+  it("com a ponte dos Ajustes (sem janela própria), \"Pastas e Claude Code…\" do ⚙ reabre os ajustes da primeira abertura", () => {
     const abrirAjustes = vi.fn().mockResolvedValue(undefined);
     janelaComPonte.electron = { configuracao: { obter: vi.fn(), abrirAjustes } };
     renderizarBarra(vi.fn());
-    const botao = screen.getByRole("button", { name: "⚙ Pastas" });
+    const botao = screen.getByRole("button", { name: "Configurações" });
 
-    expect(botao).toHaveAttribute("title", "Pasta dos projetos e Claude Code");
-    expect(botao.querySelector(".rotulo-curto")).toHaveTextContent("⚙");
+    expect(botao).toHaveAttribute("title", "Configurações: tela, pastas e Claude Code");
     fireEvent.click(botao);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pastas e Claude Code…" }));
 
     expect(abrirAjustes).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
   it("mostra a mensagem quando os ajustes não abrem", async () => {
@@ -202,7 +227,8 @@ describe("BarraDoCanvas · navegador", () => {
     janelaComPonte.electron = { configuracao: { obter: vi.fn(), abrirAjustes } };
     renderizarBarra();
 
-    fireEvent.click(screen.getByRole("button", { name: "⚙ Pastas" }));
+    fireEvent.click(screen.getByRole("button", { name: "Configurações" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Pastas e Claude Code…" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Não foi possível abrir os ajustes de pastas: janela ocupada",
@@ -226,23 +252,15 @@ describe("BarraDoCanvas: Subagentes e Instruções gerais", () => {
     return { aoAlternarPainel, ...resultado };
   }
 
-  it("o botão Prévia abre uma prévia ao vivo, com os três rótulos", () => {
-    const aoCriarPrevia = vi.fn();
-    render(<BarraDoCanvas aoCriar={vi.fn()} aoCriarNota={vi.fn()} {...extrasDaBarra} aoCriarPrevia={aoCriarPrevia} />);
-    const botao = screen.getByRole("button", { name: "Prévia" });
-
-    expect(botao.querySelector(".rotulo-completo")).toHaveTextContent("+ Prévia");
-    expect(botao.querySelector(".rotulo-curto")).toHaveTextContent("Prévia");
-    expect(botao.querySelector(".rotulo-icone svg")).not.toBeNull();
-    fireEvent.click(botao);
-
-    expect(aoCriarPrevia).toHaveBeenCalledTimes(1);
-  });
-
-  it("troca o botão Preferências por Subagentes (com a contagem) e Instruções gerais", () => {
+  it("Subagentes (com a contagem) e Instruções gerais, antes do ⚙ Configurações (no navegador)", () => {
     const { aoAlternarPainel } = barra(null);
 
-    expect(screen.queryByRole("button", { name: /Preferências/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual([
+      "Novo",
+      "Subagentes (3)",
+      "Instruções gerais",
+      "Configurações",
+    ]);
     const subagentes = screen.getByRole("button", { name: /Subagentes/ });
     const instrucoes = screen.getByRole("button", { name: "Instruções gerais" });
     expect(subagentes).toHaveAccessibleName("Subagentes (3)");
@@ -286,6 +304,76 @@ describe("BarraDoCanvas: Subagentes e Instruções gerais", () => {
 
     expect(subagentes()).toHaveAttribute("aria-expanded", "false");
     expect(instrucoes()).toHaveAttribute("aria-expanded", "true");
+  });
+});
+
+describe("BarraDoCanvas: Terminal e Prévia no \"+ Novo ▾\"", () => {
+  function renderizar() {
+    const chamadas = { aoCriar: vi.fn(), aoCriarNota: vi.fn(), aoCriarPrevia: vi.fn(), aoCriarShell: vi.fn() };
+    render(
+      <BarraDoCanvas {...chamadas} aoAlternarPainel={vi.fn()} painelAberto={null} quantidadeDeSubagentes={null} />,
+    );
+    return chamadas;
+  }
+
+  it("os botões Prévia e Terminal saem da barra; o menu tem Orquestrador, Nota, Terminal e Prévia, com ícones", () => {
+    renderizar();
+
+    expect(screen.queryByRole("button", { name: "Prévia" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Terminal" })).not.toBeInTheDocument();
+    fireEvent.click(botaoDoNovo());
+
+    expect(itensDoMenu()).toEqual(
+      ["Orquestrador", "Nota", "Terminal", "Prévia"].map((nome) => screen.getByRole("menuitem", { name: nome })),
+    );
+    for (const nome of ["Terminal", "Prévia"]) {
+      const item = screen.getByRole("menuitem", { name: nome });
+      expect(item.querySelector(".icone-do-item svg")).not.toBeNull();
+      expect(item.querySelector("kbd")).toBeNull();
+      expect(item).not.toHaveAttribute("aria-keyshortcuts");
+    }
+  });
+
+  it("\"Terminal\" pede a pasta (aoCriarShell) e \"Prévia\" abre a prévia; cada um fecha o menu", () => {
+    const { aoCriar, aoCriarNota, aoCriarPrevia, aoCriarShell } = renderizar();
+
+    fireEvent.click(botaoDoNovo());
+    fireEvent.click(screen.getByRole("menuitem", { name: "Terminal" }));
+    expect(aoCriarShell).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    // Pelo teclado: ↑ no botão abre no último item (Prévia) e Enter escolhe.
+    fireEvent.keyDown(botaoDoNovo(), { key: "ArrowUp" });
+    expect(screen.getByRole("menuitem", { name: "Prévia" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Prévia" }), { key: "Enter" });
+
+    expect(aoCriarPrevia).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(botaoDoNovo()).toHaveFocus();
+    expect(aoCriar).not.toHaveBeenCalled();
+    expect(aoCriarNota).not.toHaveBeenCalled();
+  });
+});
+
+describe("BarraDoCanvas: ⚙ Configurações no lugar do menu Preferências", () => {
+  afterEach(() => localStorage.clear());
+
+  it("não há mais o botão Preferências; o ⚙ abre o painel com os dois interruptores, que mudam a preferência", () => {
+    render(<BarraDoCanvas aoCriar={vi.fn()} aoCriarNota={vi.fn()} {...extrasDaBarra} />);
+
+    expect(screen.queryByRole("button", { name: "Preferências" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Configurações" }));
+    const painel = screen.getByRole("menu", { name: "Configurações" });
+    const chat = within(painel).getByRole("menuitemcheckbox", { name: /Chat fixo à esquerda/ });
+    expect(chat).toHaveFocus();
+
+    fireEvent.click(chat);
+
+    expect(chat).toHaveAttribute("aria-checked", "true");
+    expect(JSON.parse(localStorage.getItem(CHAVE_DAS_PREFERENCIAS_DA_TELA) ?? "null")).toMatchObject({
+      chatFixoNaEsquerda: true,
+      visualizadorDeCodigo: false,
+    });
   });
 });
 

@@ -1,12 +1,4 @@
-import {
-  type KeyboardEvent as EventoDeTecladoDoReact,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-} from "react";
+import { type ReactNode, useEffect, useState } from "react";
 
 import type { JanelaDaCota, LeituraDeMemoria, ResumoDoOrquestrador } from "../../shared/api/tipos";
 import {
@@ -19,12 +11,23 @@ import {
   rotuloCurtoDaCota,
 } from "../../shared/formatacao";
 import { useAjustesDoAplicativo } from "../../shared/hooks/useAjustesDoAplicativo";
+import { useMenuDaBarra } from "../../shared/hooks/useMenuDaBarra";
 import { useRelogio } from "../../shared/hooks/useRelogio";
 import type { EstadoDoServidor } from "../../shared/hooks/useServidor";
 import { nivelDaMemoria, type NivelDaMemoria } from "../../shared/memoria";
 import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
-import { IconeAlerta, IconeFechar, IconeNavegador, IconeOrquestrador, IconePasta, IconePessoas } from "../Icones";
+import {
+  IconeAlerta,
+  IconeFechar,
+  IconeNavegador,
+  IconeOrquestrador,
+  IconePasta,
+  IconePessoas,
+  IconeShell,
+} from "../Icones";
 import { rodandoNoDesktop } from "../../shared/ponteDoDesktop";
+import { PainelDeConfiguracoesDoApp } from "./PainelDeConfiguracoesDoApp";
+import "../../theme/topo-do-canvas.css";
 
 /** Por quanto tempo o aviso de "reconectado" fica na tela. */
 const DURACAO_DO_AVISO_DE_VOLTA_MS = 10_000;
@@ -100,8 +103,10 @@ interface PropsDaBarra {
    * desktop, a busca fica na barra de título. Sem ela, "Buscar" não aparece.
    */
   aoBuscar?: () => void;
-  /** Abre uma prévia ao vivo vazia no centro da tela, com o campo de endereço focado. */
+  /** Abre uma prévia ao vivo vazia no centro da tela, com o campo de endereço focado ("Prévia" do `+ Novo ▾`). */
   aoCriarPrevia: () => void;
+  /** Pede a pasta e abre um terminal (shell) nela. Sem ela, "Terminal" não aparece no `+ Novo ▾`. */
+  aoCriarShell?: () => void;
   /** Abre um dos painéis da barra (ou fecha, se já estava aberto). Só um fica aberto por vez. */
   aoAlternarPainel: (painel: PainelDaBarra) => void;
   painelAberto: PainelDaBarra | null;
@@ -141,9 +146,12 @@ function RotuloResponsivo({ completo, curto, icone }: PropsDoRotulo) {
   );
 }
 
-type EscolhaDoNovo = "orquestrador" | "nota";
+type EscolhaDoNovo = "orquestrador" | "nota" | "terminal" | "previa";
 
-/** Os itens do `+ Novo ▾`, com o atalho de teclado de cada um (o mesmo do canvas). */
+/**
+ * Os itens do `+ Novo ▾`, com o atalho de teclado de cada um (o mesmo do
+ * canvas); sem atalho, `atalho` e `teclas` ficam vazios.
+ */
 const ITENS_DO_NOVO: readonly {
   escolha: EscolhaDoNovo;
   rotulo: string;
@@ -165,155 +173,101 @@ const ITENS_DO_NOVO: readonly {
     teclas: "Control+Shift+N",
     dica: "Cria uma nota no centro da tela (bloco de notas, salvo automaticamente)",
   },
+  {
+    escolha: "terminal",
+    rotulo: "Terminal",
+    atalho: "",
+    teclas: "",
+    dica: "Abre um terminal de verdade (o shell do computador) numa pasta escolhida",
+  },
+  {
+    escolha: "previa",
+    rotulo: "Prévia",
+    atalho: "",
+    teclas: "",
+    dica: "Abre uma prévia ao vivo: um navegador no canvas para ver o site que os agentes estão fazendo",
+  },
 ];
+
+/** O ícone de cada item do `+ Novo ▾`. */
+function IconeDoNovo({ escolha }: { escolha: EscolhaDoNovo }) {
+  switch (escolha) {
+    case "orquestrador":
+      return <IconeOrquestrador tamanho={14} />;
+    case "nota":
+      return "✎";
+    case "terminal":
+      return <IconeShell />;
+    case "previa":
+      return <IconeNavegador />;
+  }
+}
 
 interface PropsDoMenuDoNovo {
   aoCriar: () => void;
   aoCriarNota: () => void;
+  aoCriarPrevia: () => void;
+  /** Sem ela, o item "Terminal" não aparece. */
+  aoCriarShell?: () => void;
 }
 
-/**
- * O botão `+ Novo ▾` e o menu dele (Orquestrador · Nota), no padrão de botão
- * de menu: Enter, Espaço ou ↓ abrem no primeiro item, ↑ no último; ↑/↓ (e
- * Home/End) navegam; Enter escolhe; Esc e clique fora fecham, e o foco volta
- * ao botão.
- */
-function MenuDoNovo({ aoCriar, aoCriarNota }: PropsDoMenuDoNovo) {
-  const [aberto, setAberto] = useState(false);
-  const ancora = useRef<HTMLDivElement>(null);
-  const botao = useRef<HTMLButtonElement>(null);
-  const itens = useRef<(HTMLButtonElement | null)[]>([]);
-  // O item que ganha o foco ao abrir: ↑ no botão abre no último.
-  const focoAoAbrir = useRef(0);
-  const idDoMenu = `${useId()}-menu`;
-
-  const focarItem = (indice: number) => itens.current[indice]?.focus();
-
-  const abrir = (indice: number) => {
-    if (aberto) {
-      focarItem(indice);
-      return;
-    }
-    focoAoAbrir.current = indice;
-    setAberto(true);
-  };
-
-  const fechar = useCallback((devolverFoco: boolean) => {
-    setAberto(false);
-    if (devolverFoco) {
-      botao.current?.focus();
-    }
-  }, []);
-
-  useEffect(() => {
-    if (aberto) {
-      itens.current[focoAoAbrir.current]?.focus();
-    }
-  }, [aberto]);
-
-  // Clique fora (inclusive no canvas ou na barra de título) fecha.
-  useEffect(() => {
-    if (!aberto) {
-      return;
-    }
-    const aoPressionar = (evento: MouseEvent) => {
-      if (ancora.current !== null && evento.target instanceof Node && !ancora.current.contains(evento.target)) {
-        fechar(true);
-      }
-    };
-    document.addEventListener("mousedown", aoPressionar, true);
-    return () => document.removeEventListener("mousedown", aoPressionar, true);
-  }, [aberto, fechar]);
+/** O botão `+ Novo ▾` e o menu dele (Orquestrador · Nota · Terminal · Prévia). */
+function MenuDoNovo({ aoCriar, aoCriarNota, aoCriarPrevia, aoCriarShell }: PropsDoMenuDoNovo) {
+  const itensDoMenu = ITENS_DO_NOVO.filter((item) => item.escolha !== "terminal" || aoCriarShell !== undefined);
 
   const escolher = (escolha: EscolhaDoNovo) => {
-    fechar(true);
-    if (escolha === "orquestrador") {
-      aoCriar();
-    } else {
-      aoCriarNota();
+    menu.fechar(true);
+    switch (escolha) {
+      case "orquestrador":
+        aoCriar();
+        break;
+      case "nota":
+        aoCriarNota();
+        break;
+      case "terminal":
+        aoCriarShell?.();
+        break;
+      case "previa":
+        aoCriarPrevia();
+        break;
     }
   };
 
-  const aoTeclarNoBotao = (evento: EventoDeTecladoDoReact<HTMLButtonElement>) => {
-    if (evento.key === "ArrowDown") {
-      evento.preventDefault();
-      abrir(0);
-    } else if (evento.key === "ArrowUp") {
-      evento.preventDefault();
-      abrir(ITENS_DO_NOVO.length - 1);
+  const menu = useMenuDaBarra(itensDoMenu.length, (indice) => {
+    const item = itensDoMenu[indice];
+    if (item !== undefined) {
+      escolher(item.escolha);
     }
-  };
-
-  const aoTeclarNoMenu = (evento: EventoDeTecladoDoReact<HTMLDivElement>) => {
-    const total = ITENS_DO_NOVO.length;
-    const atual = itens.current.findIndex((item) => item !== null && item === evento.target);
-    switch (evento.key) {
-      case "ArrowDown":
-        evento.preventDefault();
-        focarItem((atual + 1) % total);
-        break;
-      case "ArrowUp":
-        evento.preventDefault();
-        focarItem(atual <= 0 ? total - 1 : atual - 1);
-        break;
-      case "Home":
-        evento.preventDefault();
-        focarItem(0);
-        break;
-      case "End":
-        evento.preventDefault();
-        focarItem(total - 1);
-        break;
-      case "Enter":
-      case " ": {
-        evento.preventDefault();
-        const item = ITENS_DO_NOVO[atual];
-        if (item !== undefined) {
-          escolher(item.escolha);
-        }
-        break;
-      }
-      case "Escape":
-        evento.preventDefault();
-        evento.stopPropagation();
-        fechar(true);
-        break;
-      case "Tab":
-        // Sem impedir o Tab: o foco volta ao botão e segue dali.
-        fechar(true);
-        break;
-    }
-  };
+  });
 
   return (
-    <div ref={ancora} className="ancora-do-menu">
+    <div ref={menu.ancora} className="ancora-do-menu">
       <button
-        ref={botao}
+        {...menu.propsDoBotao}
         type="button"
         className="btn btn-sm btn-cta"
-        aria-haspopup="menu"
-        aria-expanded={aberto}
-        aria-controls={aberto ? idDoMenu : undefined}
         aria-label="Novo"
-        title="Novo orquestrador (Ctrl+N) ou nota (Ctrl+Shift+N)"
-        onClick={() => (aberto ? fechar(false) : abrir(0))}
-        onKeyDown={aoTeclarNoBotao}
+        title="Novo orquestrador (Ctrl+N), nota (Ctrl+Shift+N), terminal ou prévia"
       >
         <RotuloResponsivo completo="+ Novo ▾" curto="+ Novo ▾" icone="+" />
       </button>
-      {aberto && (
-        <div id={idDoMenu} role="menu" aria-label="Novo" className="menu-do-novo painel-flutuante" onKeyDown={aoTeclarNoMenu}>
-          {ITENS_DO_NOVO.map((item, indice) => (
+      {menu.aberto && (
+        <div
+          id={menu.idDoMenu}
+          role="menu"
+          aria-label="Novo"
+          className="menu-do-novo painel-flutuante"
+          onKeyDown={menu.aoTeclarNoMenu}
+        >
+          {itensDoMenu.map((item, indice) => (
             <button
               key={item.escolha}
-              ref={(elemento) => {
-                itens.current[indice] = elemento;
-              }}
+              ref={menu.refDoItem(indice)}
               type="button"
               role="menuitem"
               tabIndex={-1}
               className="item-do-menu"
-              aria-keyshortcuts={item.teclas}
+              aria-keyshortcuts={item.teclas === "" ? undefined : item.teclas}
               title={item.dica}
               onClick={() => escolher(item.escolha)}
             >
@@ -322,13 +276,15 @@ function MenuDoNovo({ aoCriar, aoCriarNota }: PropsDoMenuDoNovo) {
                   className={`icone-do-item ${item.escolha === "orquestrador" ? "icone-do-item-ativo" : ""}`}
                   aria-hidden="true"
                 >
-                  {item.escolha === "orquestrador" ? <IconeOrquestrador tamanho={14} /> : "✎"}
+                  <IconeDoNovo escolha={item.escolha} />
                 </span>
                 {item.rotulo}
               </span>
-              <kbd className="atalho-do-item" aria-hidden="true">
-                {item.atalho}
-              </kbd>
+              {item.atalho !== "" && (
+                <kbd className="atalho-do-item" aria-hidden="true">
+                  {item.atalho}
+                </kbd>
+              )}
             </button>
           ))}
         </div>
@@ -338,18 +294,20 @@ function MenuDoNovo({ aoCriar, aoCriarNota }: PropsDoMenuDoNovo) {
 }
 
 /**
- * Canto superior esquerdo: o `+ Novo ▾` (Orquestrador ou nota). No desktop,
- * só ele: a busca e o ⚙ ficam na barra de título, que também tem a
- * identidade do app. No navegador (sem barra de título própria), a barra
- * também mostra a identidade, o "Buscar" e o ⚙, para nada ficar inacessível.
- * O "Organizar" fica nos controles do canto inferior esquerdo. Nos dois, a
- * Prévia, os Subagentes e as Instruções gerais seguem à vista como botões.
+ * Canto superior esquerdo: o `+ Novo ▾` (Orquestrador, nota, terminal ou
+ * prévia). No desktop, a busca e o ⚙ Configurações ficam na barra de título,
+ * que também tem a identidade do app. No navegador (sem barra de título
+ * própria), a barra também mostra a identidade, o "Buscar" e o ⚙
+ * Configurações, para nada ficar inacessível. O "Organizar" fica nos controles
+ * do canto inferior esquerdo. Nos dois, os Subagentes e as Instruções gerais
+ * seguem à vista como botões.
  */
 export function BarraDoCanvas({
   aoCriar,
   aoCriarNota,
   aoBuscar,
   aoCriarPrevia,
+  aoCriarShell,
   aoAlternarPainel,
   painelAberto,
   quantidadeDeSubagentes,
@@ -373,16 +331,12 @@ export function BarraDoCanvas({
           <span className="mx-1 h-8 w-px shrink-0 bg-border" />
         </>
       )}
-      <MenuDoNovo aoCriar={aoCriar} aoCriarNota={aoCriarNota} />
-      <button
-        type="button"
-        className="btn btn-sm btn-outline"
-        onClick={aoCriarPrevia}
-        aria-label="Prévia"
-        title="Abre uma prévia ao vivo: um navegador no canvas para ver o site que os agentes estão fazendo"
-      >
-        <RotuloResponsivo completo="+ Prévia" curto="Prévia" icone={<IconeNavegador />} />
-      </button>
+      <MenuDoNovo
+        aoCriar={aoCriar}
+        aoCriarNota={aoCriarNota}
+        aoCriarPrevia={aoCriarPrevia}
+        aoCriarShell={aoCriarShell}
+      />
       {!desktop && aoBuscar !== undefined && (
         <button
           type="button"
@@ -419,16 +373,13 @@ export function BarraDoCanvas({
       >
         <RotuloResponsivo completo="Instruções gerais" curto="Instruções" icone="¶" />
       </button>
-      {!desktop && ajustes.disponivel && (
-        <button
-          type="button"
-          className="btn btn-sm btn-outline"
-          onClick={() => void ajustes.abrir()}
-          aria-label="⚙ Pastas"
-          title="Pasta dos projetos e Claude Code"
-        >
-          <RotuloResponsivo completo="⚙ Pastas" curto="⚙" icone="⚙" />
-        </button>
+      {!desktop && (
+        <PainelDeConfiguracoesDoApp
+          ajustes={ajustes}
+          alinhamento="esquerda"
+          classeDoBotao="btn btn-sm btn-outline"
+          conteudoDoBotao={<RotuloResponsivo completo="⚙ Configurações" curto="⚙" icone="⚙" />}
+        />
       )}
       {!desktop && ajustes.erro !== null && (
         <span className="mono text-error max-w-64" role="alert">
@@ -516,7 +467,7 @@ export function Doca({ orquestradores, noCanvas, erro, aoAbrir }: PropsDaDoca) {
                     </span>
                   </span>
                   {orquestrador.worktree !== null && (
-                    <span className="flex items-center pl-4">
+                    <span className="flex min-w-0 items-center pl-4">
                       <EtiquetaDeWorktree worktree={orquestrador.worktree} className="max-w-full" />
                     </span>
                   )}
@@ -706,7 +657,8 @@ interface PropsDoStatusDoCanvas extends PropsDoStatus {
  * largura da janela decide o detalhe (CSS): rótulos curtos abaixo de 1280 px
  * e só a situação com um medidor resumido abaixo de 1100 px. Na barra de
  * título, que divide a largura com a busca, cada passo vem antes: 1440 px e
- * 1280 px.
+ * 1280 px. No painel, a largura do canvas também conta (`topo-do-canvas.css`):
+ * com o chat fixo à esquerda, ele compacta antes e nunca quebra linha.
  */
 export function StatusDoCanvas({ naBarraDeTitulo = false, ...status }: PropsDoStatusDoCanvas) {
   if (naBarraDeTitulo) {

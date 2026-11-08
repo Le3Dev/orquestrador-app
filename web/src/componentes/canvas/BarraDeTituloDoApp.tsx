@@ -6,6 +6,7 @@ import { IconeOrquestrador } from "../Icones";
 import { AvisoDeAtualizacao } from "./AvisoDeAtualizacao";
 import { ControlesDaJanela } from "./ControlesDaJanela";
 import { ErroDoCanvas, StatusDoCanvas } from "./PaineisDoCanvas";
+import { PainelDeConfiguracoesDoApp } from "./PainelDeConfiguracoesDoApp";
 
 /**
  * No Mac, espaço à esquerda para as 3 bolinhas nativas da janela (posição em
@@ -26,8 +27,9 @@ type PropsDaBarraDeTitulo = Omit<ComponentProps<typeof StatusDoCanvas>, "naBarra
  *
  * Esquerda: ícone e nome do app. Centro: o campo "Buscar ou executar…", que
  * abre a paleta de comandos. Direita: o aviso de atualização (só baixando ou
- * pronta), o status (situação, cotas e RAM) e, colados a ele, o ⚙ (pastas e
- * Claude Code) e os botões ─ ☐ ✕ do próprio app.
+ * pronta), o status (situação, cotas e RAM) e, colados a ele, o ⚙
+ * Configurações (preferências da tela e, pelo painel, a janela dos Ajustes de
+ * pastas e Claude Code) e os botões ─ ☐ ✕ do próprio app.
  * No Mac os botões ─ ☐ ✕ saem: ficam as bolinhas nativas, à esquerda, num
  * espaço reservado antes do ícone.
  * A faixa inteira arrasta a janela (e o duplo clique nela maximiza); o que é
@@ -71,20 +73,14 @@ export function BarraDeTituloDoApp({ aoBuscar, pedidosEmAndamento, ...status }: 
         <AvisoDeAtualizacao pedidosEmAndamento={pedidosEmAndamento} />
         <StatusDoCanvas naBarraDeTitulo {...status} />
         <div className="botoes-da-barra-de-titulo">
-          {ajustes.disponivel && (
-            <>
-              <button
-                type="button"
-                className="botao-da-janela botao-dos-ajustes no-drag"
-                onClick={() => void ajustes.abrir()}
-                aria-label="Pastas e Claude Code"
-                title="Pastas e Claude Code"
-              >
-                ⚙
-              </button>
-              {!mac && <span className="separador-da-barra-de-titulo" aria-hidden="true" />}
-            </>
-          )}
+          <PainelDeConfiguracoesDoApp
+            ajustes={ajustes}
+            alinhamento="direita"
+            classeDaAncora="no-drag"
+            classeDoBotao="botao-da-janela botao-dos-ajustes no-drag"
+            conteudoDoBotao="⚙"
+          />
+          {!mac && <span className="separador-da-barra-de-titulo" aria-hidden="true" />}
           {!mac && <ControlesDaJanela />}
         </div>
       </div>

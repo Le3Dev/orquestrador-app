@@ -10,10 +10,12 @@ import type {
   ResumoDoOrquestrador,
 } from "../shared/api/tipos";
 import { lerLayout, organizarComNotas, sobrepoe, TAMANHO_DO_ARTEFATO, TAMANHO_DO_BIXINHO } from "../shared/canvas/layout";
+import { AVISO_DO_LIMITE_DE_ORQUESTRADORES, LIMITE_DE_ORQUESTRADORES_ABERTOS } from "../shared/canvas/limiteDeTerminais";
 import { idDoBixinho, idDoNoDoArtefato } from "../shared/canvas/nos";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../shared/estado/aplicarEvento";
 import type { ArtefatosAoVivo } from "../shared/hooks/useArtefatos";
 import type { EstadoDaAtualizacao } from "../shared/ponteDoDesktop";
+import { ErroDaApi } from "../shared/api/cliente";
 import { CanvasDeOrquestradores } from "./CanvasDeOrquestradores";
 
 // O canvas sem servidor: nenhum orquestrador, conectado, sem conversas e sem artefatos.
@@ -47,6 +49,29 @@ vi.mock("../shared/hooks/useOrquestradores", () => ({ useOrquestradores: () => s
 vi.mock("../shared/hooks/useServidor", () => ({ useServidor: () => simulados.servidor }));
 vi.mock("../shared/hooks/useConversas", () => ({ useConversas: () => simulados.conversas }));
 vi.mock("../shared/hooks/useArtefatos", () => ({ useArtefatos: () => simulados.artefatos }));
+// O bloco "Terminal" usa o xterm, que o jsdom não desenha: aqui, um terminal que não faz nada.
+vi.mock("@xterm/xterm", () => ({
+  Terminal: class {
+    cols = 80;
+    rows = 24;
+    loadAddon(): void {}
+    open(): void {}
+    write(): void {}
+    reset(): void {}
+    onData() {
+      return { dispose: () => undefined };
+    }
+    onResize() {
+      return { dispose: () => undefined };
+    }
+    dispose(): void {}
+  },
+}));
+vi.mock("@xterm/addon-fit", () => ({
+  FitAddon: class {
+    fit(): void {}
+  },
+}));
 vi.mock("../shared/hooks/useChat", async () => {
   const { ESTADO_INICIAL_DO_CHAT } = await import("../shared/estado/aplicarEventoDoChat");
   const chat = { ...ESTADO_INICIAL_DO_CHAT, carregado: true };
@@ -65,7 +90,7 @@ class ObservadorDeTamanhoFalso {
 }
 
 /** Escolhe um item do "+ Novo ▾" da barra do canvas. */
-function escolherNoNovo(item: "Orquestrador" | "Nota"): void {
+function escolherNoNovo(item: "Orquestrador" | "Nota" | "Terminal" | "Prévia"): void {
   fireEvent.click(screen.getByRole("button", { name: "Novo" }));
   fireEvent.click(screen.getByRole("menuitem", { name: item }));
 }
@@ -108,6 +133,73 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
     expect(painel).toHaveClass("bottom", "center", "painel-do-chat");
     expect(screen.getByTestId("chat-rapido")).toHaveClass("nodrag", "nowheel", "nopan");
     expect(screen.getByRole("button", { name: /Modelo: Opus 5\.5, esforço alto/ })).toBeInTheDocument();
+  });
+
+  it("o quadro do canvas vazio fica abaixo do chat: dentro do React Flow, na camada 4, antes do painel do chat", async () => {
+    render(<CanvasDeOrquestradores />);
+
+    const campo = await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+    const painelDoChat = campo.closest(".react-flow__panel");
+    const camada = screen.getByRole("heading", { name: "Seu canvas de agentes" }).closest(".camada-do-canvas-vazio");
+    expect(camada).not.toBeNull();
+    expect(camada).toHaveClass("pointer-events-none", "z-[4]");
+    // No mesmo contexto de empilhamento que os painéis (z-index 5), e não por cima do React Flow.
+    expect(camada?.parentElement).toBe(painelDoChat?.parentElement);
+    expect(camada?.parentElement).toHaveClass("react-flow");
+    expect(camada!.compareDocumentPosition(painelDoChat!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("com \"Chat fixo à esquerda\", o chat vira uma coluna ao lado do canvas; \"soltar\" o devolve ao pé", async () => {
+    render(<CanvasDeOrquestradores />);
+    await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Configurações" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /Chat fixo à esquerda/ }));
+
+    const lateral = await screen.findByRole("complementary", { name: "Chat rápido" });
+    const fluxo = document.querySelector(".react-flow");
+    // Fora do React Flow, antes da área do canvas, na mesma linha: empurra, não cobre.
+    expect(fluxo).not.toBeNull();
+    expect(fluxo).not.toContainElement(lateral);
+    expect(document.querySelector(".painel-do-chat")).toBeNull();
+    const area = fluxo!.parentElement!;
+    expect(area).toHaveClass("flex-1", "min-w-0");
+    expect(lateral.nextElementSibling).toBe(area);
+    expect(lateral.parentElement).toHaveClass("flex");
+    expect(lateral).toContainElement(screen.getByRole("textbox", { name: "Pergunta para o Claude" }));
+    expect(JSON.parse(localStorage.getItem("orquestrador.preferenciasDaTela") ?? "null")).toMatchObject({
+      chatFixoNaEsquerda: true,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Soltar o chat" }));
+
+    await waitFor(() => expect(screen.queryByRole("complementary", { name: "Chat rápido" })).not.toBeInTheDocument());
+    const campo = screen.getByRole("textbox", { name: "Pergunta para o Claude" });
+    expect(campo.closest(".react-flow__panel")).toHaveClass("painel-do-chat");
+  });
+
+  it("o chat fixo abre com a largura guardada; a alça da borda muda e grava a preferência", async () => {
+    localStorage.setItem(
+      "orquestrador.preferenciasDaTela",
+      JSON.stringify({ chatFixoNaEsquerda: true, visualizadorDeCodigo: false, larguraDoChatFixo: 420 }),
+    );
+    render(<CanvasDeOrquestradores />);
+
+    const lateral = await screen.findByRole("complementary", { name: "Chat rápido" });
+    expect(lateral).toHaveStyle({ width: "420px" });
+    const alca = within(lateral).getByRole("separator", { name: "Largura do chat" });
+
+    fireEvent.keyDown(alca, { key: "ArrowRight" });
+
+    await waitFor(() => expect(lateral).toHaveStyle({ width: "436px" }));
+    expect(alca).toHaveAttribute("aria-valuenow", "436");
+    expect(JSON.parse(localStorage.getItem("orquestrador.preferenciasDaTela") ?? "null")).toMatchObject({
+      chatFixoNaEsquerda: true,
+      larguraDoChatFixo: 436,
+    });
+
+    fireEvent.doubleClick(alca);
+    await waitFor(() => expect(lateral).toHaveStyle({ width: "360px" }));
   });
 });
 
@@ -305,8 +397,13 @@ describe("CanvasDeOrquestradores · bixinhos", () => {
 
 // Vários terminais no jsdom: sob a carga da suíte inteira, passam dos 5 s padrão.
 describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout: 20_000 }, () => {
-  const AVISO =
-    "Limite de 4 orquestradores abertos. Feche um dos orquestradores (✕ na barra do terminal) antes de iniciar outro.";
+  const AVISO = AVISO_DO_LIMITE_DE_ORQUESTRADORES;
+  const LIMITE = LIMITE_DE_ORQUESTRADORES_ABERTOS;
+  /** Os terminais abertos no começo de cada teste: o canvas cheio. */
+  const ABERTOS = Array.from({ length: LIMITE }, (_, indice) => `o${indice + 1}`);
+  const ULTIMO = `o${LIMITE}`;
+  /** Um Orquestrador a mais, fechado: não cabe. */
+  const FORA = `o${LIMITE + 1}`;
 
   beforeEach(() => {
     vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoFalso);
@@ -316,13 +413,13 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
       "orquestrador-agentes:canvas:v1",
       JSON.stringify({
         terminais: Object.fromEntries(
-          ["o1", "o2", "o3", "o4"].map((id, indice) => [id, { x: indice * 700, y: 0, largura: 600, altura: 520 }]),
+          ABERTOS.map((id, indice) => [id, { x: indice * 700, y: 0, largura: 600, altura: 520 }]),
         ),
         notas: {},
         viewport: { x: 0, y: 0, zoom: 1 },
       }),
     );
-    simulados.orquestradores.orquestradores = ["o1", "o2", "o3", "o4", "o5"].map(orquestrador);
+    simulados.orquestradores.orquestradores = [...ABERTOS, FORA].map(orquestrador);
   });
 
   afterEach(() => {
@@ -352,9 +449,9 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
 
   const fecharAviso = () => fireEvent.click(within(screen.getByText(AVISO).parentElement as HTMLElement).getByTitle("Fechar aviso"));
 
-  it("com 4 abertos, \"+ Novo ▾\" › Orquestrador mostra o aviso e não abre o formulário", async () => {
+  it("no limite, \"+ Novo ▾\" › Orquestrador mostra o aviso e não abre o formulário", async () => {
     render(<CanvasDeOrquestradores />);
-    await waitFor(() => expect(noNaTela("o4")).toBeInTheDocument());
+    await waitFor(() => expect(noNaTela(ULTIMO)).toBeInTheDocument());
 
     escolherNoNovo("Orquestrador");
 
@@ -367,9 +464,9 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
     expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
   });
 
-  it("com 4 abertos, Ctrl+N também mostra o aviso e não abre o formulário", async () => {
+  it("no limite, Ctrl+N também mostra o aviso e não abre o formulário", async () => {
     render(<CanvasDeOrquestradores />);
-    await waitFor(() => expect(noNaTela("o4")).toBeInTheDocument());
+    await waitFor(() => expect(noNaTela(ULTIMO)).toBeInTheDocument());
 
     expect(ctrlN(window)).toBe(false);
 
@@ -377,45 +474,45 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
     expect(rascunhosNaTela()).toBe(0);
   });
 
-  it("com 4 abertos, reabrir pela lista mostra o aviso; um já aberto só foca; fechar um libera a vaga", async () => {
+  it("no limite, reabrir pela lista mostra o aviso; um já aberto só foca; fechar um libera a vaga", async () => {
     render(<CanvasDeOrquestradores />);
-    await waitFor(() => expect(noNaTela("o4")).toBeInTheDocument());
+    await waitFor(() => expect(noNaTela(ULTIMO)).toBeInTheDocument());
 
-    fireEvent.click(itemDaDoca("o5"));
+    fireEvent.click(itemDaDoca(FORA));
     expect(await screen.findByText(AVISO)).toBeInTheDocument();
-    expect(document.querySelector('.react-flow__node[data-id="o5"]')).toBeNull();
+    expect(document.querySelector(`.react-flow__node[data-id="${FORA}"]`)).toBeNull();
 
     // Já aberto não conta: não recusa (e não deixa aviso).
     fireEvent.click(itemDaDoca("o2"));
     expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
 
     // Recusa de novo e fecha o terminal o1 no ✕: o aviso some sozinho e a vaga volta.
-    fireEvent.click(itemDaDoca("o5"));
+    fireEvent.click(itemDaDoca(FORA));
     expect(await screen.findByText(AVISO)).toBeInTheDocument();
     fireEvent.click(within(noNaTela("o1")).getByTitle("Fechar o terminal (o orquestrador e o histórico continuam salvos)"));
     await waitFor(() => expect(screen.queryByText(AVISO)).not.toBeInTheDocument());
     // O1 continua na lista: nada foi excluído.
     expect(itemDaDoca("o1")).toHaveAttribute("title", "Abrir o terminal no canvas");
 
-    fireEvent.click(itemDaDoca("o5"));
-    await waitFor(() => expect(noNaTela("o5")).toBeInTheDocument());
+    fireEvent.click(itemDaDoca(FORA));
+    await waitFor(() => expect(noNaTela(FORA)).toBeInTheDocument());
     expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
   });
 
-  it("pela paleta (Ctrl+K), abrir um quinto mostra o aviso e não abre; um pedido de um aberto só leva até ele", async () => {
+  it("pela paleta (Ctrl+K), abrir um além do limite mostra o aviso e não abre; um pedido de um aberto só leva até ele", async () => {
     simulados.conversas.conversas = new Map([["o2", conversaComDoisSubagentes()]]);
     render(<CanvasDeOrquestradores />);
-    await waitFor(() => expect(noNaTela("o4")).toBeInTheDocument());
+    await waitFor(() => expect(noNaTela(ULTIMO)).toBeInTheDocument());
 
     fireEvent.keyDown(window, { key: "k", code: "KeyK", ctrlKey: true });
     const busca = screen.getByRole("combobox", { name: BUSCA_DA_PALETA });
-    fireEvent.change(busca, { target: { value: "o5" } });
-    expect(screen.getAllByRole("option")[0]).toHaveTextContent("Orquestrador o5");
+    fireEvent.change(busca, { target: { value: FORA } });
+    expect(screen.getAllByRole("option")[0]).toHaveTextContent(`Orquestrador ${FORA}`);
     fireEvent.keyDown(busca, { key: "Enter" });
 
     expect(await screen.findByText(AVISO)).toBeInTheDocument();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(document.querySelector('.react-flow__node[data-id="o5"]')).toBeNull();
+    expect(document.querySelector(`.react-flow__node[data-id="${FORA}"]`)).toBeNull();
 
     // O pedido "analise" é da conversa de o2, que está aberto: não recusa (e o aviso some).
     fireEvent.click(screen.getByRole("button", { name: "Buscar (Ctrl+K)" }));
@@ -427,28 +524,30 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
     fireEvent.click(pedido);
 
     expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
-    expect(document.querySelectorAll(".react-flow__node-terminal")).toHaveLength(4);
+    expect(document.querySelectorAll(".react-flow__node-terminal")).toHaveLength(LIMITE);
   });
 
-  it("o rascunho conta: com 3 abertos e o formulário aberto, não abre outro", async () => {
+  it("o rascunho conta: com um a menos que o limite e o formulário aberto, não abre outro", async () => {
     localStorage.setItem(
       "orquestrador-agentes:canvas:v1",
       JSON.stringify({
-        terminais: { o1: { x: 0, y: 0, largura: 600, altura: 520 }, o2: { x: 700, y: 0, largura: 600, altura: 520 }, o3: { x: 1400, y: 0, largura: 600, altura: 520 } },
+        terminais: Object.fromEntries(
+          ABERTOS.slice(0, -1).map((id, indice) => [id, { x: indice * 700, y: 0, largura: 600, altura: 520 }]),
+        ),
         notas: {},
         viewport: { x: 0, y: 0, zoom: 1 },
       }),
     );
     render(<CanvasDeOrquestradores />);
-    await waitFor(() => expect(noNaTela("o3")).toBeInTheDocument());
+    await waitFor(() => expect(noNaTela(`o${LIMITE - 1}`)).toBeInTheDocument());
 
     escolherNoNovo("Orquestrador");
     await waitFor(() => expect(rascunhosNaTela()).toBe(1));
     expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
 
-    fireEvent.click(itemDaDoca("o5"));
+    fireEvent.click(itemDaDoca(FORA));
     expect(await screen.findByText(AVISO)).toBeInTheDocument();
-    expect(document.querySelector('.react-flow__node[data-id="o5"]')).toBeNull();
+    expect(document.querySelector(`.react-flow__node[data-id="${FORA}"]`)).toBeNull();
   });
 });
 
@@ -740,14 +839,14 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
       throw new Error("barra do canvas não encontrada");
     }
 
-    // A barra do canvas fica com o "+ Novo ▾" e os botões de Prévia, Subagentes e Instruções gerais.
+    // A barra do canvas fica com o "+ Novo ▾" (que tem a Prévia e o Terminal) e os botões de
+    // Subagentes e Instruções gerais; o ⚙ Configurações vai para a barra de título.
     expect(within(barraDoCanvas).getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual([
       "Novo",
-      "Prévia",
       "Subagentes",
       "Instruções gerais",
     ]);
-    expect(within(barra).getByRole("button", { name: "Pastas e Claude Code" })).toBeInTheDocument();
+    expect(within(barra).getByRole("button", { name: "Configurações" })).toBeInTheDocument();
 
     fireEvent.click(within(barra).getByRole("button", { name: "Buscar ou executar (Ctrl+K)" }));
     fireEvent.click(screen.getByRole("option", { name: /Pastas e Claude Code/ }));
@@ -874,23 +973,26 @@ describe("CanvasDeOrquestradores · artefatos", { timeout: 20_000 }, () => {
     ).toBe(false);
   });
 
-  it("artefatos não contam no limite de 4 orquestradores abertos", async () => {
-    layoutCom(["o1", "o2", "o3"], ["a1", "a2"]);
+  it("artefatos não contam no limite de orquestradores abertos", async () => {
+    layoutCom(
+      Array.from({ length: LIMITE_DE_ORQUESTRADORES_ABERTOS - 1 }, (_, indice) => `o${indice + 1}`),
+      ["a1", "a2"],
+    );
     comArtefatos([artefato("a1"), artefato("a2")]);
     const { rerender } = render(<CanvasDeOrquestradores />);
     await waitFor(() => expect(noNaTela(idDoNoDoArtefato("a2"))).toBeInTheDocument());
 
-    // 3 terminais + 2 artefatos: ainda cabe o formulário de um orquestrador novo.
+    // Um terminal a menos que o limite + 2 artefatos: ainda cabe o formulário de um orquestrador novo.
     escolherNoNovo("Orquestrador");
     await waitFor(() => expect(document.querySelectorAll(".react-flow__node-rascunho")).toHaveLength(1));
-    expect(screen.queryByText(/Limite de 4 orquestradores abertos/)).not.toBeInTheDocument();
+    expect(screen.queryByText(AVISO_DO_LIMITE_DE_ORQUESTRADORES)).not.toBeInTheDocument();
 
-    // Com as 4 vagas ocupadas, um artefato novo continua abrindo.
+    // Com todas as vagas ocupadas, um artefato novo continua abrindo.
     const novo = artefato("a3", { origem: { tipo: "orquestrador", id: "o2" } });
     comArtefatos([novo, artefato("a1"), artefato("a2")], [{ tipo: "artefato_criado", artefato: novo }]);
     rerender(<CanvasDeOrquestradores />);
     await waitFor(() => expect(noNaTela(idDoNoDoArtefato("a3"))).toBeInTheDocument());
-    expect(screen.queryByText(/Limite de 4 orquestradores abertos/)).not.toBeInTheDocument();
+    expect(screen.queryByText(AVISO_DO_LIMITE_DE_ORQUESTRADORES)).not.toBeInTheDocument();
   });
 
   it("a paleta (Ctrl+K) lista os artefatos; escolher um fechado abre a janela", async () => {
@@ -957,10 +1059,10 @@ describe("CanvasDeOrquestradores · prévias", () => {
     localStorage.clear();
   });
 
-  it("o botão Prévia abre uma prévia vazia com o endereço focado, e fechar a tira do layout", async () => {
+  it("\"Prévia\" do \"+ Novo ▾\" abre uma prévia vazia com o endereço focado, e fechar a tira do layout", async () => {
     render(<CanvasDeOrquestradores />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Prévia" }));
+    escolherNoNovo("Prévia");
 
     const campo = await screen.findByRole("textbox", { name: "Endereço da prévia" });
     await waitFor(() => expect(campo).toHaveFocus());
@@ -995,5 +1097,92 @@ describe("CanvasDeOrquestradores · prévias", () => {
     expect(previa).toMatchObject({ url: "http://localhost:5173", orquestradorId: "o1", y: 0 });
     expect(sobrepoe(previa ?? { x: 0, y: 0, largura: 0, altura: 0 }, { x: 0, y: 0, largura: 600, altura: 520 })).toBe(false);
     expect(previa?.x).toBeGreaterThan(600);
+  });
+});
+
+/** Um WebSocket que nunca abre: os testes do canvas só olham o bloco e o layout. */
+class WebSocketParado {
+  static readonly OPEN = 1;
+  readyState = 0;
+  onopen = null;
+  onmessage = null;
+  onclose = null;
+  send(): void {}
+  close(): void {}
+}
+
+describe("CanvasDeOrquestradores · terminais (shell)", () => {
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoFalso);
+    vi.stubGlobal("WebSocket", WebSocketParado);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+    vi.spyOn(api, "navegarPastas").mockResolvedValue({ caminho: "/projetos/app", pai: "/projetos", pastas: [] });
+  });
+
+  afterEach(() => {
+    simulados.orquestradores.orquestradores = [];
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it("\"Terminal\" do \"+ Novo ▾\" pede a pasta, cria o shell nela e guarda o bloco no layout; fechar encerra e tira", async () => {
+    const criar = vi
+      .spyOn(api, "criarShell")
+      .mockResolvedValue({ id: "t1", pasta: "/projetos/app", orquestradorId: null, criadoEm: "2026-11-07T10:00:00Z" });
+    const encerrar = vi.spyOn(api, "encerrarShell").mockResolvedValue(null);
+    render(<CanvasDeOrquestradores />);
+
+    escolherNoNovo("Terminal");
+    const dialogo = await screen.findByRole("dialog", { name: "Escolher pasta do computador" });
+    expect(await within(dialogo).findByDisplayValue("/projetos/app")).toHaveAccessibleName("Caminho da pasta");
+    fireEvent.click(within(dialogo).getByRole("button", { name: /usar esta pasta/ }));
+
+    await screen.findByRole("button", { name: "Fechar este terminal" });
+    expect(criar).toHaveBeenCalledWith({ pasta: "/projetos/app", colunas: 80, linhas: 24 });
+    await waitFor(() =>
+      expect(Object.values(lerLayout().shells)).toEqual([
+        expect.objectContaining({ terminalId: "t1", pasta: "/projetos/app", orquestradorId: null }),
+      ]),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Fechar este terminal" }));
+    expect(encerrar).toHaveBeenCalledWith("t1");
+    await waitFor(() => expect(lerLayout().shells).toEqual({}));
+  });
+
+  it("no limite (409), a mensagem do servidor aparece abaixo da barra do canvas", async () => {
+    vi.spyOn(api, "criarShell").mockRejectedValue(new ErroDaApi("Limite de 6 terminais abertos.", 409));
+    render(<CanvasDeOrquestradores />);
+
+    escolherNoNovo("Terminal");
+    const dialogo = await screen.findByRole("dialog", { name: "Escolher pasta do computador" });
+    expect(await within(dialogo).findByDisplayValue("/projetos/app")).toHaveAccessibleName("Caminho da pasta");
+    fireEvent.click(within(dialogo).getByRole("button", { name: /usar esta pasta/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Limite de 6 terminais abertos.");
+    expect(document.querySelector(".react-flow__node-shell")).toBeNull();
+  });
+
+  it("\"abrir terminal\" no cartão do orquestrador cria o shell ligado a ele, ao lado", async () => {
+    localStorage.setItem(
+      "orquestrador-agentes:canvas:v1",
+      JSON.stringify({ terminais: { o1: { x: 0, y: 0, largura: 600, altura: 520 } }, viewport: { x: 0, y: 0, zoom: 1 } }),
+    );
+    simulados.orquestradores.orquestradores = [orquestrador("o1")];
+    const criar = vi
+      .spyOn(api, "criarShell")
+      .mockResolvedValue({ id: "t9", pasta: "C:\\projetos\\o1", orquestradorId: "o1", criadoEm: "2026-11-07T10:00:00Z" });
+    render(<CanvasDeOrquestradores />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Abrir terminal" }));
+
+    await screen.findByRole("button", { name: "Enviar ao orquestrador" });
+    expect(criar).toHaveBeenCalledWith({ orquestradorId: "o1", colunas: 80, linhas: 24 });
+    await waitFor(() => expect(Object.values(lerLayout().shells)).toHaveLength(1));
+    const [shell] = Object.values(lerLayout().shells);
+    expect(shell).toMatchObject({ terminalId: "t9", orquestradorId: "o1" });
+    expect(sobrepoe(shell ?? { x: 0, y: 0, largura: 0, altura: 0 }, { x: 0, y: 0, largura: 600, altura: 520 })).toBe(false);
   });
 });
