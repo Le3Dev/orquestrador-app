@@ -63,6 +63,7 @@ const {
   utilityProcess,
 } = require("electron");
 const { capturarTela } = require("./capturaDeTela");
+const { iniciarRastreioDoMouse } = require("./mouseDoModoInvisivel");
 const { criarMaximizacao } = require("./maximizacao");
 const { execFileSync, spawn } = require("node:child_process");
 const crypto = require("node:crypto");
@@ -919,6 +920,10 @@ function entrarNoModoInvisivel() {
   // (não há API JS dedicada para janela-ferramenta sem módulo nativo).
   janela.setSkipTaskbar(true);
   janela.setIgnoreMouseEvents(true, { forward: true });
+  // O encaminhamento de mouse do Electron não entrega mouseenter no Windows: o main
+  // decide pela posição do cursor se a janela recebe o clique (ver mouseDoModoInvisivel.js).
+  modoInvisivel.rastreio = iniciarRastreioDoMouse({ janela, screen });
+  modoInvisivel.rastreio.definir(false);
   try {
     if (!globalShortcut.register(ATALHO_DO_MODO_INVISIVEL, sairDoModoInvisivel)) {
       registrarNoLog("app", "Não foi possível registrar o atalho do modo invisível.");
@@ -932,8 +937,9 @@ function entrarNoModoInvisivel() {
 
 function sairDoModoInvisivel() {
   if (!modoInvisivel) return;
-  const { janela, anterior } = modoInvisivel;
+  const { janela, anterior, rastreio } = modoInvisivel;
   modoInvisivel = null;
+  if (rastreio) rastreio.parar();
   try {
     globalShortcut.unregister(ATALHO_DO_MODO_INVISIVEL);
   } catch {
@@ -961,8 +967,8 @@ ipcMain.handle("modo-invisivel:sair", (evento) => {
 ipcMain.handle("modo-invisivel:capturar-mouse", (evento, capturar) => {
   exigirJanelaPrincipal(evento);
   if (!modoInvisivel) return;
-  if (capturar) modoInvisivel.janela.setIgnoreMouseEvents(false);
-  else modoInvisivel.janela.setIgnoreMouseEvents(true, { forward: true });
+  // O rastreio pelo cursor é quem decide; o pedido da tela só o mantém em sincronia.
+  modoInvisivel.rastreio.definir(capturar);
 });
 ipcMain.handle("tela:capturar", (evento) => {
   exigirJanelaPrincipal(evento);
