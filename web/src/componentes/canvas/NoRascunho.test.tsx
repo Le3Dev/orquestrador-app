@@ -5,7 +5,7 @@ import { api, ErroDaApi } from "../../shared/api/cliente";
 import type { DadosDaPredefinicao, ResumoDoOrquestrador } from "../../shared/api/tipos";
 import { ProvedorDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
 import type { NoRascunho as TipoDoNo } from "../../shared/canvas/nos";
-import { NoRascunho } from "./NoRascunho";
+import { CONFIRMACAO_PARA_DESCARTAR_O_RASCUNHO, NoRascunho } from "./NoRascunho";
 
 const PROPS: NodeProps<TipoDoNo> = {
   id: "rascunho:1",
@@ -467,6 +467,7 @@ describe("NoRascunho", () => {
   });
 
   it("descartar pelo rodapé e pelo ✕", async () => {
+    const confirmar = vi.spyOn(window, "confirm");
     const acoes = abrir();
     await screen.findByRole("option", { name: "app" });
 
@@ -474,5 +475,51 @@ describe("NoRascunho", () => {
     fireEvent.click(screen.getByRole("button", { name: "Descartar rascunho" }));
     expect(acoes.descartarRascunho).toHaveBeenCalledTimes(2);
     expect(acoes.descartarRascunho).toHaveBeenCalledWith("rascunho:1");
+    expect(confirmar).not.toHaveBeenCalled();
+  });
+
+  it("só a pasta da lista e o nome sugerido por ela descartam sem perguntar", async () => {
+    const confirmar = vi.spyOn(window, "confirm");
+    const acoes = await abrirComPasta();
+    expect(campoDoNome()).toHaveValue("app");
+
+    fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
+
+    expect(confirmar).not.toHaveBeenCalled();
+    expect(acoes.descartarRascunho).toHaveBeenCalledWith("rascunho:1");
+  });
+
+  it.each([
+    ["nome digitado", () => fireEvent.change(campoDoNome(), { target: { value: "API" } })],
+    ["instruções", () => fireEvent.change(screen.getByRole("textbox", { name: "Instruções" }), { target: { value: "Seja breve." } })],
+    ["permissão", () => fireEvent.click(screen.getByRole("radio", { name: "Editar e rodar comandos" }))],
+    ["modelo", () => fireEvent.change(screen.getByRole("combobox", { name: "Subagentes" }), { target: { value: "haiku" } })],
+  ])("com %s alterado, pergunta antes de descartar e recusar mantém o rascunho", async (_campo, alterar) => {
+    const confirmar = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const acoes = await abrirComPasta();
+    alterar();
+
+    fireEvent.click(screen.getByRole("button", { name: "Descartar rascunho" }));
+    fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
+
+    expect(confirmar).toHaveBeenCalledTimes(2);
+    expect(confirmar).toHaveBeenCalledWith(CONFIRMACAO_PARA_DESCARTAR_O_RASCUNHO);
+    expect(acoes.descartarRascunho).not.toHaveBeenCalled();
+
+    confirmar.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
+    expect(acoes.descartarRascunho).toHaveBeenCalledWith("rascunho:1");
+  });
+
+  it("voltar a configuração ao padrão deixa descartar sem perguntar de novo", async () => {
+    const confirmar = vi.spyOn(window, "confirm");
+    const acoes = await abrirComPasta();
+    fireEvent.click(screen.getByRole("radio", { name: "Editar e rodar comandos" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Somente leitura" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
+
+    expect(confirmar).not.toHaveBeenCalled();
+    expect(acoes.descartarRascunho).toHaveBeenCalledTimes(1);
   });
 });

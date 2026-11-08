@@ -28,6 +28,7 @@ import { NavegadorDePastas } from "./NavegadorDePastas";
 
 const TAMANHO_MAXIMO_DO_NOME = 60;
 const PERMISSOES: readonly NivelDePermissao[] = ["leitura", "edicao", "edicao_e_comandos"];
+export const CONFIRMACAO_PARA_DESCARTAR_O_RASCUNHO = "Descartar este rascunho? O que você preencheu será perdido.";
 
 type Menu = "esforcoDoOrquestrador" | "esforcoDosSubagentes" | "quantidade";
 
@@ -151,6 +152,25 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
             ? "Servidor desconectado."
             : null;
 
+  /**
+   * O usuário preencheu algo que daria trabalho refazer: um nome digitado, uma
+   * configuração fora do padrão ou uma pasta achada pelo "procurar…". Escolher
+   * um projeto da lista, e o nome que vem dele, se refaz num clique e não conta.
+   */
+  const nomeDigitado = nome.trim() !== "" && nome !== nomeDoCaminho(pasta).slice(0, TAMANHO_MAXIMO_DO_NOME);
+  const configuracaoAlterada = (Object.keys(CONFIGURACAO_PADRAO_DO_ORQUESTRADOR) as (keyof DadosDaConfiguracao)[]).some(
+    (campo) => JSON.stringify(configuracao[campo]) !== JSON.stringify(CONFIGURACAO_PADRAO_DO_ORQUESTRADOR[campo]),
+  );
+  const preenchido = nomeDigitado || configuracaoAlterada || pastaExterna !== null;
+
+  /** Sem nada preenchido, descarta direto; com algo, confirma antes de perder. */
+  function descartar(): void {
+    if (preenchido && !window.confirm(CONFIRMACAO_PARA_DESCARTAR_O_RASCUNHO)) {
+      return;
+    }
+    acoes.descartarRascunho(id);
+  }
+
   async function comecar(evento: FormEvent): Promise<void> {
     evento.preventDefault();
     if (motivoParaNaoComecar !== null || criando) {
@@ -194,7 +214,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
             className="botao-icone nodrag"
             title="Descartar"
             aria-label="Descartar rascunho"
-            onClick={() => acoes.descartarRascunho(id)}
+            onClick={descartar}
           >
             <IconeFechar tamanho={16} />
           </button>
@@ -480,7 +500,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                 </>
               )}
             </div>
-            <button type="button" className="btn btn-ghost shrink-0" onClick={() => acoes.descartarRascunho(id)}>
+            <button type="button" className="btn btn-ghost shrink-0" onClick={descartar}>
               Descartar
             </button>
             <button
