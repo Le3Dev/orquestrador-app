@@ -1019,6 +1019,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
             predefinicao={orquestrador.predefinicaoCorrespondente ?? null}
             turnos={conversa.turnos}
             conversaIniciadaEm={conversa.conversaIniciadaEm}
+            avisosDaConversaNova={conversa.avisosDaConversaNova}
             sinal={sinais.get(orquestradorId)}
             desconectado={!servidor.conectado}
             acoesDoPlano={acoesDoPlano}

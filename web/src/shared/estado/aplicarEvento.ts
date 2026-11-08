@@ -121,6 +121,12 @@ export interface EstadoDaConversa {
   /** Quando o usuário começou a conversa atual (/clear); nulo enquanto é a primeira. */
   conversaIniciadaEm: string | null;
   /**
+   * O que o /clear deixou para trás, mostrado junto do separador da conversa
+   * nova: a worktree com as alterações da conversa anterior e o plano pendente
+   * descartado. Tudo falso enquanto é a primeira conversa.
+   */
+  avisosDaConversaNova: AvisosDaConversaNova;
+  /**
    * Pedidos que os eventos puseram na fila e ainda não tiraram, na ordem de
    * chegada. Não é a fila inteira: os pedidos enfileirados antes de um /clear
    * não estão mais no histórico. A fila da tela é `filaDePedidos`.
@@ -153,11 +159,20 @@ export interface EnderecoDetectado {
   em: string;
 }
 
+/** Os avisos do evento `conversa_limpa`. */
+export interface AvisosDaConversaNova {
+  worktreeComAlteracoes: boolean;
+  planoDescartado: boolean;
+}
+
+export const SEM_AVISOS_DA_CONVERSA_NOVA: AvisosDaConversaNova = { worktreeComAlteracoes: false, planoDescartado: false };
+
 export const ESTADO_INICIAL: EstadoDaConversa = {
   ultimaSequencia: 0,
   turnos: [],
   cota: null,
   conversaIniciadaEm: null,
+  avisosDaConversaNova: SEM_AVISOS_DA_CONVERSA_NOVA,
   enderecosLocais: [],
   ultimoEnderecoDetectado: null,
   pedidosEnfileirados: [],
@@ -579,10 +594,16 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
     // servidor: quem abrir o terminal depois não verá os eventos de antes do
     // /clear, e um terminal que reconectar depois dele pode ter perdido uma
     // retirada. Os retirados ficam, para filtrar um resumo defasado.
+    // A worktree não é tocada: a conversa nova parte das alterações da anterior,
+    // e o separador avisa (como avisa do plano pendente que se perdeu).
     return {
       ...proximo,
       turnos: [],
       conversaIniciadaEm: evento.em,
+      avisosDaConversaNova: {
+        worktreeComAlteracoes: evento.worktreeComAlteracoes === true,
+        planoDescartado: evento.planoDescartado === true,
+      },
       enderecosLocais: [],
       ultimoEnderecoDetectado: null,
       pedidosEnfileirados: [],

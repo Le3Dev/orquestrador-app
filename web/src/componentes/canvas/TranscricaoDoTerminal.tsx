@@ -4,9 +4,11 @@ import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { DadosDaConfiguracao, NomeDaPredefinicao, SinalDeVida } from "../../shared/api/tipos";
 import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
 import {
+  type AvisosDaConversaNova,
   CAUSAS_LEGIVEIS,
   type LinhaDoLog,
   type RecuperacaoNaTela,
+  SEM_AVISOS_DA_CONVERSA_NOVA,
   type TipoDeLinhaDoLog,
   type TurnoNaTela,
 } from "../../shared/estado/aplicarEvento";
@@ -360,6 +362,8 @@ interface Props {
   turnos: readonly TurnoNaTela[];
   /** Quando a conversa atual começou (/clear); nulo enquanto é a primeira. */
   conversaIniciadaEm: string | null;
+  /** O que o /clear deixou para trás (worktree alterada, plano descartado), junto do separador. */
+  avisosDaConversaNova?: AvisosDaConversaNova;
   sinal: SinalDeVida | undefined;
   desconectado: boolean;
   /** Aprovar, ajustar ou descartar o plano pendente do último pedido (Plan Mode). */
@@ -383,12 +387,17 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
   predefinicao = null,
   turnos,
   conversaIniciadaEm,
+  avisosDaConversaNova = SEM_AVISOS_DA_CONVERSA_NOVA,
   sinal,
   desconectado,
   acoesDoPlano,
   aoResponderPergunta,
 }: Props) {
   const trabalhando = turnos.some((turno) => turno.situacao === "em_andamento");
+  const avisos = [
+    avisosDaConversaNova.worktreeComAlteracoes ? "a worktree tem alterações da conversa anterior" : null,
+    avisosDaConversaNova.planoDescartado ? "o plano pendente foi descartado" : null,
+  ].filter((aviso) => aviso !== null);
   return (
     <div className="flex flex-col gap-5">
       <div className="banner-do-terminal">
@@ -416,7 +425,15 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
         </p>
       </div>
       {conversaIniciadaEm !== null && (
-        <p className="mono hint text-center">{`— conversa nova iniciada às ${formatarMomento(conversaIniciadaEm)} —`}</p>
+        <div className="flex flex-col gap-0.5">
+          <p className="mono hint text-center">{`— conversa nova iniciada às ${formatarMomento(conversaIniciadaEm)} —`}</p>
+          {/* A conversa nova parte da worktree como ela está: sem o aviso, ninguém saberia de onde vieram as alterações. */}
+          {avisos.length > 0 && (
+            <p className="mono hint-warning text-center" role="note" aria-label="Avisos da conversa nova">
+              {avisos.join(" · ")}
+            </p>
+          )}
+        </div>
       )}
       {turnos.map((turno, indice) => (
         <Turno

@@ -337,6 +337,32 @@ describe("aplicarEvento", () => {
       expect(estado.ultimaSequencia).toBe(4);
       expect(estado.cota).toEqual(cota);
       expect(estado.conversaIniciadaEm).toBe(anterior[3]?.em);
+      expect(antes.avisosDaConversaNova).toEqual({ worktreeComAlteracoes: false, planoDescartado: false });
+      expect(estado.avisosDaConversaNova).toEqual({ worktreeComAlteracoes: false, planoDescartado: false });
+    });
+
+    it("guarda os avisos do /clear (worktree alterada, plano descartado) até o próximo /clear", () => {
+      const comAvisos = registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "um", configuracao },
+        { tipo: "conversa_limpa", turnosAnteriores: 1, planoDescartado: true, worktreeComAlteracoes: true },
+        { tipo: "turno_iniciado", turnoId: "t2", texto: "dois", configuracao },
+        { tipo: "turno_cancelado", turnoId: "t2" },
+      ]);
+      const segundo: EventoRegistrado = {
+        tipo: "conversa_limpa",
+        turnosAnteriores: 1,
+        planoDescartado: false,
+        worktreeComAlteracoes: true,
+        sequencia: comAvisos.length + 1,
+        em: "2026-10-28T12:10:00Z",
+      };
+
+      const depois = reproduzir(comAvisos);
+      expect(depois.avisosDaConversaNova).toEqual({ worktreeComAlteracoes: true, planoDescartado: true });
+      expect(aplicarEvento(depois, segundo).avisosDaConversaNova).toEqual({
+        worktreeComAlteracoes: true,
+        planoDescartado: false,
+      });
     });
 
     it("o pedido seguinte aparece sozinho na conversa nova", () => {

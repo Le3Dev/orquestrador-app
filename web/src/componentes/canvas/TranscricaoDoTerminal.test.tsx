@@ -79,6 +79,7 @@ function Transcricao({
       configuracao={configuracao}
       turnos={conversa.turnos}
       conversaIniciadaEm={conversa.conversaIniciadaEm}
+      avisosDaConversaNova={conversa.avisosDaConversaNova}
       sinal={sinal}
       desconectado={desconectado}
       acoesDoPlano={acoesDoPlano}
@@ -487,5 +488,27 @@ describe("TranscricaoDoTerminal", () => {
     expect(screen.getByText(/^— conversa nova iniciada às \d{2}:\d{2} —$/)).toBeInTheDocument();
     expect(screen.queryByText("resuma o projeto")).not.toBeInTheDocument();
     expect(screen.getByText(/digite um pedido e pressione enter/)).toBeInTheDocument();
+    // Sem worktree alterada nem plano descartado, o separador fica sozinho.
+    expect(screen.queryByRole("note", { name: "Avisos da conversa nova" })).not.toBeInTheDocument();
+  });
+
+  it("depois do /clear, avisa junto do separador que a worktree tem alterações e que o plano foi descartado", () => {
+    const limpa = (worktreeComAlteracoes: boolean, planoDescartado: boolean) =>
+      aplicar(ESTADO_INICIAL, { tipo: "conversa_limpa", turnosAnteriores: 1, planoDescartado, worktreeComAlteracoes });
+
+    const { rerender } = render(<Transcricao conversa={limpa(true, true)} />);
+    const aviso = screen.getByRole("note", { name: "Avisos da conversa nova" });
+    expect(aviso).toHaveTextContent("a worktree tem alterações da conversa anterior · o plano pendente foi descartado");
+    expect(aviso).toHaveClass("hint-warning");
+
+    rerender(<Transcricao conversa={limpa(true, false)} />);
+    expect(screen.getByRole("note", { name: "Avisos da conversa nova" })).toHaveTextContent(
+      /^a worktree tem alterações da conversa anterior$/,
+    );
+
+    rerender(<Transcricao conversa={limpa(false, true)} />);
+    expect(screen.getByRole("note", { name: "Avisos da conversa nova" })).toHaveTextContent(
+      /^o plano pendente foi descartado$/,
+    );
   });
 });
