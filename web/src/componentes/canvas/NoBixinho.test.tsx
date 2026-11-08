@@ -82,13 +82,14 @@ function doisTrabalhando(): EstadoDaConversa {
   );
 }
 
-function valorDoCanvas(conversa: EstadoDaConversa): ValorDoCanvas {
+function valorDoCanvas(conversa: EstadoDaConversa, bixinhosSaindo?: ReadonlySet<string>): ValorDoCanvas {
   return {
     orquestradores: new Map(),
     conversas: new Map([["o1", conversa]]),
     conexoes: new Map(),
     sinais: new Map(),
     bixinhosLimpos: new Map(),
+    bixinhosSaindo,
     servidor: { conectado: true, caiuEm: null, voltouEm: null, reiniciou: false, memoria: null },
     acoes: {
       abrirTerminal: vi.fn(),
@@ -123,9 +124,15 @@ function propsDoNo(subagenteId: string, selected: boolean, x: number): NodeProps
   };
 }
 
-function tela(conversa: EstadoDaConversa, subagenteId: string, selected = false, x = 0) {
+function tela(
+  conversa: EstadoDaConversa,
+  subagenteId: string,
+  selected = false,
+  x = 0,
+  bixinhosSaindo?: ReadonlySet<string>,
+) {
   return (
-    <ContextoDoCanvas.Provider value={valorDoCanvas(conversa)}>
+    <ContextoDoCanvas.Provider value={valorDoCanvas(conversa, bixinhosSaindo)}>
       <NoBixinho {...propsDoNo(subagenteId, selected, x)} />
     </ContextoDoCanvas.Provider>
   );
@@ -277,6 +284,30 @@ describe("NoBixinho", () => {
 
     expect(screen.getByTitle("Clique para ver a tarefa e o relatório")).toBeInTheDocument();
     expect(screen.getByTestId("barra-do-no")).toHaveTextContent("executor#");
+  });
+
+  it("saindo sozinho do canvas, ganha a classe da saída (encolhe e some) e mantém a expressão final", () => {
+    const concluiu = aplicar(doisTrabalhando(), {
+      tipo: "subagente_concluido",
+      turnoId: "t1",
+      subagenteId: "s1",
+      situacao: "concluido",
+      resumo: "feito",
+      tokens: 10,
+      duracaoMs: 1000,
+    });
+    const { container, rerender } = render(tela(concluiu, "s1"));
+    const no = () => container.querySelector(".no-bixinho");
+    expect(no()).not.toHaveClass("no-bixinho-saindo");
+
+    rerender(tela(concluiu, "s1", false, 0, new Set([idDoBixinho("o1", "s1")])));
+
+    expect(no()).toHaveClass("no-bixinho", "no-bixinho-concluido", "no-bixinho-saindo");
+    expect(screen.getByText("pronto!")).toBeInTheDocument();
+
+    // Só o próprio: outro bixinho saindo não muda este.
+    rerender(tela(concluiu, "s1", false, 0, new Set([idDoBixinho("o1", "s2")])));
+    expect(no()).not.toHaveClass("no-bixinho-saindo");
   });
 
   it("sem o Subagente na conversa, não desenha nada", () => {

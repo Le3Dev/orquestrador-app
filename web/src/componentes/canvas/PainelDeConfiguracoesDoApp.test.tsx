@@ -123,11 +123,26 @@ describe("PainelDeConfiguracoesDoApp", () => {
       ladoDoChatFixo: "direita",
       visualizadorDeCodigo: false,
       larguraDoChatFixo: 360,
+      manterBixinhosAteLimpar: false,
     });
 
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Chat fixo" }));
     expect(grupo()).not.toHaveClass("lado-do-chat-solto");
     expect(lerLeitor()).toMatchObject({ chatFixoNaEsquerda: true, ladoDoChatFixo: "direita" });
+  });
+
+  it("\"Manter bixinhos até limpar à mão\": desligado por padrão, com a dica à vista; ligar grava a preferência", () => {
+    renderizar();
+    fireEvent.click(botao());
+    const tela = within(screen.getByRole("menu", { name: "Configurações" })).getByRole("group", { name: "Tela" });
+    const manter = within(tela).getByRole("menuitemcheckbox", { name: /Manter bixinhos até limpar à mão/ });
+    expect(manter).toHaveAttribute("aria-checked", "false");
+    expect(manter).toHaveTextContent("desligado, os que terminam saem sozinhos do canvas");
+
+    fireEvent.click(manter);
+
+    expect(manter).toHaveAttribute("aria-checked", "true");
+    expect(lerLeitor()).toMatchObject({ manterBixinhosAteLimpar: true });
   });
 
   it("\"Pastas e Claude Code…\" fecha o painel e abre os Ajustes", () => {
@@ -145,7 +160,7 @@ describe("PainelDeConfiguracoesDoApp", () => {
     renderizar(ajustesFalsos(false));
     fireEvent.click(botao());
 
-    expect(screen.getAllByRole("menuitemcheckbox")).toHaveLength(3);
+    expect(screen.getAllByRole("menuitemcheckbox")).toHaveLength(4);
     expect(screen.queryByRole("menuitem")).not.toBeInTheDocument();
   });
 
@@ -155,6 +170,7 @@ describe("PainelDeConfiguracoesDoApp", () => {
     const chat = () => screen.getByRole("menuitemcheckbox", { name: "Chat fixo" });
     const visualizador = () => screen.getByRole("menuitemcheckbox", { name: /Visualizador de código/ });
     const autorrecuperacao = () => screen.getByRole("menuitemcheckbox", { name: /Autorrecuperação/ });
+    const bixinhos = () => screen.getByRole("menuitemcheckbox", { name: /Manter bixinhos até limpar à mão/ });
     const pastas = () => screen.getByRole("menuitem", { name: "Pastas e Claude Code…" });
     const esquerda = () => screen.getByRole("menuitemradio", { name: "esquerda" });
     const direita = () => screen.getByRole("menuitemradio", { name: "direita" });
@@ -179,6 +195,8 @@ describe("PainelDeConfiguracoesDoApp", () => {
     fireEvent.keyDown(visualizador(), { key: "Enter" });
     expect(visualizador()).toHaveAttribute("aria-checked", "false");
     fireEvent.keyDown(visualizador(), { key: "ArrowDown" });
+    expect(bixinhos()).toHaveFocus();
+    fireEvent.keyDown(bixinhos(), { key: "ArrowDown" });
     expect(autorrecuperacao()).toHaveFocus();
     fireEvent.keyDown(autorrecuperacao(), { key: "ArrowDown" });
     expect(pastas()).toHaveFocus();

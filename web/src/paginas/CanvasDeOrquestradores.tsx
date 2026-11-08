@@ -144,6 +144,7 @@ import { useOrquestradores } from "../shared/hooks/useOrquestradores";
 import { usePreferenciasDaTela } from "../shared/hooks/usePreferenciasDaTela";
 import { useReaproveitado } from "../shared/hooks/useReaproveitado";
 import { useRodaDoCanvas } from "../shared/hooks/useRodaDoCanvas";
+import { useSaidaDosBixinhos } from "../shared/hooks/useSaidaDosBixinhos";
 import { useServidor } from "../shared/hooks/useServidor";
 import type { AcaoDaPaleta, FonteDaPaleta, ItemDaPaleta } from "../shared/paletaDeComandos";
 
@@ -400,6 +401,29 @@ function Canvas() {
     conversasAtuais.current = conversas;
   }, [conversas]);
 
+  // Os bixinhos de quem conclui ou é cancelado saem sozinhos (a menos que a
+  // preferência peça para manter), pelo mesmo caminho do "limpar": os limpos
+  // ficam guardados e não voltam ao recarregar. Depois do efeito acima: a
+  // limpeza feita na hora já lê as conversas deste render.
+  const limparBixinhosQueSairam = useCallback(
+    (orquestradorId: string, subagenteIds: readonly string[]) =>
+      setBixinhosLimpos((atuais) => {
+        const limpos = limparBixinhos(
+          conversasAtuais.current.get(orquestradorId),
+          atuais.get(orquestradorId),
+          new Set(subagenteIds),
+        );
+        return limpos === null ? atuais : new Map(atuais).set(orquestradorId, limpos);
+      }),
+    [],
+  );
+  const bixinhosSaindo = useSaidaDosBixinhos({
+    conversas,
+    bixinhosLimpos,
+    manter: preferenciasDaTela.manterBixinhosAteLimpar,
+    limpar: limparBixinhosQueSairam,
+  });
+
   // A aba do navegador também avisa: o canvas pode estar atrás de outra janela.
   useEffect(() => {
     const titulo = "Orquestrador de Agentes";
@@ -471,8 +495,12 @@ function Canvas() {
     mesmasLigacoes,
   );
   const arestasCalculadas = useMemo(
-    () => [...arestasDosBixinhos(ligados, conversas), ...arestasDasPrevias(ligados), ...arestasDosShells(ligados)],
-    [ligados, conversas],
+    () => [
+      ...arestasDosBixinhos(ligados, conversas, bixinhosSaindo),
+      ...arestasDasPrevias(ligados),
+      ...arestasDosShells(ligados),
+    ],
+    [ligados, conversas, bixinhosSaindo],
   );
   const arestas = useReaproveitado(arestasCalculadas, reaproveitarArestas);
 
@@ -1170,8 +1198,17 @@ function Canvas() {
   const servidorDosNos = useReaproveitado(servidor, servidorParaOsNos);
   // Não depende de `nos`: arrastar e mover o canvas não trocam o valor.
   const valor = useMemo<ValorDoCanvas>(
-    () => ({ orquestradores: porId, conversas, conexoes, sinais, bixinhosLimpos, servidor: servidorDosNos, acoes }),
-    [porId, conversas, conexoes, sinais, bixinhosLimpos, servidorDosNos, acoes],
+    () => ({
+      orquestradores: porId,
+      conversas,
+      conexoes,
+      sinais,
+      bixinhosLimpos,
+      bixinhosSaindo,
+      servidor: servidorDosNos,
+      acoes,
+    }),
+    [porId, conversas, conexoes, sinais, bixinhosLimpos, bixinhosSaindo, servidorDosNos, acoes],
   );
 
   const trabalhando = idsTrabalhando.length;

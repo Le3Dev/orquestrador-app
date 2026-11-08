@@ -17,6 +17,11 @@ export type PreferenciasDaTela = {
   visualizadorDeCodigo: boolean;
   /** Largura (px) do chat fixo, ajustada pela alça da borda dele. */
   larguraDoChatFixo: number;
+  /**
+   * Os bixinhos dos Subagentes que terminam ficam no canvas até o "limpar" do
+   * terminal. Desligada (o padrão), os concluídos e cancelados saem sozinhos.
+   */
+  manterBixinhosAteLimpar: boolean;
 };
 
 export const CHAVE_DAS_PREFERENCIAS_DA_TELA = "orquestrador.preferenciasDaTela";
@@ -29,6 +34,7 @@ const PADRAO: PreferenciasDaTela = {
   ladoDoChatFixo: "esquerda",
   visualizadorDeCodigo: false,
   larguraDoChatFixo: LARGURA_DO_CHAT_FIXO.padrao,
+  manterBixinhosAteLimpar: false,
 };
 
 /** Uma largura inteira entre a mínima e a máxima; número inválido (NaN, infinito) vale o padrão. */
@@ -73,7 +79,7 @@ function interpretar(bruto: string | null): PreferenciasDaTela {
     return PADRAO;
   }
   const registro = lido as Record<string, unknown>;
-  const booleano = (campo: "chatFixoNaEsquerda" | "visualizadorDeCodigo"): boolean =>
+  const booleano = (campo: "chatFixoNaEsquerda" | "visualizadorDeCodigo" | "manterBixinhosAteLimpar"): boolean =>
     typeof registro[campo] === "boolean" ? (registro[campo] as boolean) : PADRAO[campo];
   const largura = registro.larguraDoChatFixo;
   return {
@@ -83,6 +89,7 @@ function interpretar(bruto: string | null): PreferenciasDaTela {
     visualizadorDeCodigo: booleano("visualizadorDeCodigo"),
     // Número fora do intervalo é limitado a ele; outro tipo vale o padrão.
     larguraDoChatFixo: typeof largura === "number" ? limitarLarguraDoChatFixo(largura) : PADRAO.larguraDoChatFixo,
+    manterBixinhosAteLimpar: booleano("manterBixinhosAteLimpar"),
   };
 }
 
@@ -130,7 +137,8 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
     novas.chatFixoNaEsquerda === atuais.chatFixoNaEsquerda &&
     novas.ladoDoChatFixo === atuais.ladoDoChatFixo &&
     novas.visualizadorDeCodigo === atuais.visualizadorDeCodigo &&
-    novas.larguraDoChatFixo === atuais.larguraDoChatFixo
+    novas.larguraDoChatFixo === atuais.larguraDoChatFixo &&
+    novas.manterBixinhosAteLimpar === atuais.manterBixinhosAteLimpar
   ) {
     return;
   }
@@ -146,7 +154,8 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
 }
 
 /**
- * As preferências da tela (chat fixo, o lado e a largura dele, visualizador de código):
+ * As preferências da tela (chat fixo, o lado e a largura dele, visualizador de
+ * código, manter os bixinhos até limpar):
  * mudar num lugar reflete em todos os componentes que usam o hook e nas
  * outras abas abertas.
  */

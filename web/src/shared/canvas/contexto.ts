@@ -61,6 +61,11 @@ export interface ValorDoCanvas {
   /** Bixinhos limpos do canvas, por id do Orquestrador. */
   bixinhosLimpos: ReadonlyMap<string, BixinhosLimpos>;
   /**
+   * Os ids dos nós dos bixinhos saindo sozinhos agora (o Subagente terminou):
+   * encolhem e somem antes de virarem limpos. Ausente, nenhum.
+   */
+  bixinhosSaindo?: ReadonlySet<string>;
+  /**
    * Situação da conexão e a memória por Orquestrador. Só é trocado quando
    * uma delas muda: os totais de memória do computador (`livreBytes`,
    * `agentesBytes`...) podem estar defasados aqui — o painel de status os lê

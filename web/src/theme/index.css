@@ -534,6 +534,13 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .react-flow__edge.aresta-concluido .react-flow__edge-path { stroke: color-mix(in srgb, var(--success) 75%, transparent); }
 .react-flow__edge.aresta-falhou .react-flow__edge-path { stroke: color-mix(in srgb, var(--error) 80%, transparent); }
 .react-flow__edge.aresta-cancelado .react-flow__edge-path { stroke: var(--muted); stroke-dasharray: 3 6; }
+/* O bixinho saindo sozinho: a linha (pathLength 1) se recolhe do bixinho até o
+ * terminal, no tempo da saída dele (`DURACAO_DA_SAIDA_MS`). */
+.react-flow__edge.aresta-bixinho-saindo .react-flow__edge-path {
+  stroke-dasharray: 1 1;
+  animation: recolher-linha .4s ease-in both;
+}
+@keyframes recolher-linha { from { stroke-dashoffset: 0; } to { stroke-dashoffset: 1; } }
 /* Executando: a linha segue tracejada (o `stroke-dasharray` do React Flow),
  * mas parada. A bolinha já mostra a troca, e o tracejado correndo
  * (`dashdraw`) repintava todas as linhas ativas a cada quadro. */
@@ -1768,6 +1775,19 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .no-bixinho-falhou .bixinho-corpo-animado { animation: tremer .45s ease-in-out 2; }
 @keyframes tremer { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
 .no-bixinho-cancelado .bixinho-sprite { filter: grayscale(1) brightness(.7); }
+
+/* Saindo sozinho (concluiu ou foi cancelado, alguns segundos depois): encolhe
+ * em direção à base e some, no tempo de `DURACAO_DA_SAIDA_MS`. Com reduzir
+ * movimento, nem chega a ter a classe: sai direto. */
+.no-bixinho.no-bixinho-saindo {
+  animation: sair-do-canvas .4s ease-in both;
+  transform-origin: 50% 70%;
+  pointer-events: none;
+}
+@keyframes sair-do-canvas {
+  0% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: scale(.2) translateY(12px); }
+}
 
 /* Ícone da ferramenta que o Subagente usa agora (só executando): um selo ao
  * lado da cabeça do bixinho. Absoluto, para não empurrar o desenho nem as

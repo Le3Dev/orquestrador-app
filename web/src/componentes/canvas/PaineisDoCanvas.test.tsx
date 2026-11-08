@@ -186,8 +186,8 @@ describe("BarraDoCanvas · navegador", () => {
     fireEvent.click(configuracoes);
 
     const painel = screen.getByRole("menu", { name: "Configurações" });
-    // Os dois da Tela e a Autorrecuperação dos orquestradores.
-    expect(within(painel).getAllByRole("menuitemcheckbox")).toHaveLength(3);
+    // Os três da Tela e a Autorrecuperação dos orquestradores.
+    expect(within(painel).getAllByRole("menuitemcheckbox")).toHaveLength(4);
     expect(within(painel).queryByRole("menuitem", { name: /Pastas e Claude Code/ })).not.toBeInTheDocument();
   });
 

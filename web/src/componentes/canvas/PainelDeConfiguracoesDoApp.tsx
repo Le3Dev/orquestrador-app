@@ -10,9 +10,10 @@ import "../../theme/preferencias-da-tela.css";
 const DICA_DA_AUTORRECUPERACAO = "retoma sozinho quando o Claude trava ou a API falha";
 
 /** As preferências da tela que viram interruptor na seção "Tela". */
-type ChaveDoInterruptor = "chatFixoNaEsquerda" | "visualizadorDeCodigo";
+type ChaveDoInterruptor = "chatFixoNaEsquerda" | "visualizadorDeCodigo" | "manterBixinhosAteLimpar";
 
-type Interruptor = { chave: ChaveDoInterruptor; rotulo: string; dica: string };
+/** `dicaVisivel`: a dica aparece também embaixo do rótulo, não só no title. */
+type Interruptor = { chave: ChaveDoInterruptor; rotulo: string; dica: string; dicaVisivel?: boolean };
 
 const INTERRUPTOR_DO_CHAT_FIXO: Interruptor = {
   chave: "chatFixoNaEsquerda",
@@ -29,6 +30,13 @@ const OUTROS_INTERRUPTORES_DA_TELA: readonly Interruptor[] = [
     chave: "visualizadorDeCodigo",
     rotulo: "Visualizador de código",
     dica: "mostra o botão Arquivos nos terminais",
+    dicaVisivel: true,
+  },
+  {
+    chave: "manterBixinhosAteLimpar",
+    rotulo: "Manter bixinhos até limpar à mão",
+    dica: "desligado, os que terminam saem sozinhos do canvas",
+    dicaVisivel: true,
   },
 ];
 
@@ -54,7 +62,7 @@ interface PropsDoPainelDeConfiguracoes {
 
 /**
  * O ⚙ Configurações e o painel dele, ancorado no botão: a seção "Tela" (chat
- * fixo, o lado dele e visualizador de código), a seção "Orquestradores"
+ * fixo, o lado dele, visualizador de código e manter os bixinhos), a seção "Orquestradores"
  * (autorrecuperação, preferência do servidor) e, no app desktop, "Pastas e
  * Claude Code…", que abre a janela dos Ajustes. Ligar ou desligar não fecha o
  * painel (dá para mexer em vários); a navegação por teclado é a do `+ Novo ▾`.
@@ -192,7 +200,7 @@ export function PainelDeConfiguracoesDoApp({
                 >
                   <span className="flex min-w-0 flex-col items-start leading-tight">
                     <span>{item.rotulo}</span>
-                    {item.chave === "visualizadorDeCodigo" && <span className="mono text-muted">{item.dica}</span>}
+                    {item.dicaVisivel === true && <span className="mono text-muted">{item.dica}</span>}
                   </span>
                   <span className="interruptor-trilho" aria-hidden="true" />
                 </button>

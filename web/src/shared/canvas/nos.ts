@@ -90,7 +90,12 @@ type NoLigadoAoTerminal = NoPrevia | NoShell;
  * a linha notar quando ele conclui e entregar o relatório (o envelope), e
  * quando ele encerrou, para não entregar o que veio do histórico reenviado.
  */
-export type DadosDaArestaDoBixinho = { situacao: SituacaoDoSubagente; encerradoEm: string | null };
+export type DadosDaArestaDoBixinho = {
+  situacao: SituacaoDoSubagente;
+  encerradoEm: string | null;
+  /** O bixinho está saindo sozinho do canvas: a linha se recolhe até o terminal. */
+  saindo?: boolean;
+};
 /** A linha do terminal a um bixinho; `animated` já diz se o Subagente trabalha. */
 export type ArestaDoBixinho = Edge<DadosDaArestaDoBixinho, "bixinho">;
 /** A linha discreta (tracejada) do terminal à prévia (ou ao shell) que saiu dele: a curva padrão do React Flow. */
@@ -466,14 +471,18 @@ export function bixinhosParaLimpar(conversa: EstadoDaConversa | undefined, limpo
 /**
  * Limpa os bixinhos parados de um terminal, somando-os aos já limpos do mesmo
  * pedido. Quem executa fica, e os Subagentes que nascerem depois aparecem
- * normalmente. Nulo quando não há o que limpar.
+ * normalmente. Com `somente`, limpa só os parados desses Subagentes (a saída
+ * sozinha de quem terminou). Nulo quando não há o que limpar.
  */
 export function limparBixinhos(
   conversa: EstadoDaConversa | undefined,
   limpos?: BixinhosLimpos,
+  somente?: ReadonlySet<string>,
 ): BixinhosLimpos | null {
   const turno = conversa?.turnos.at(-1);
-  const novos = bixinhosParaLimpar(conversa, limpos);
+  const novos = bixinhosParaLimpar(conversa, limpos).filter(
+    (subagente) => somente === undefined || somente.has(subagente.id),
+  );
   if (turno === undefined || novos.length === 0) {
     return null;
   }
@@ -789,11 +798,13 @@ function terminaisPorId(nos: readonly NoDoCanvas[]): Map<string, NoTerminal> {
  * situação do Subagente e a hora do fim em `data` (a entrega do relatório). Sai do
  * lado do terminal voltado para o bixinho e chega no lado do bixinho voltado
  * para o terminal (`ladoDoBixinho`), por isso `nos` precisa trazer também os
- * terminais.
+ * terminais. As dos bixinhos em `saindo` (ids dos nós) ganham a classe que as
+ * recolhe até o terminal.
  */
 export function arestasDosBixinhos(
   nos: readonly NoDoCanvas[],
   conversas: ReadonlyMap<string, EstadoDaConversa>,
+  saindo: ReadonlySet<string> = new Set(),
 ): ArestaDoBixinho[] {
   const terminais = terminaisPorId(nos);
   return nos.filter(ehBixinho).flatMap((bixinho): ArestaDoBixinho[] => {
@@ -813,8 +824,12 @@ export function arestasDosBixinhos(
         target: bixinho.id,
         targetHandle: ancoras.bixinho,
         animated: subagente.situacao === "executando",
-        className: CLASSE_DA_ARESTA[subagente.situacao],
-        data: { situacao: subagente.situacao, encerradoEm: subagente.encerradoEm },
+        className: saindo.has(bixinho.id)
+          ? `${CLASSE_DA_ARESTA[subagente.situacao]} aresta-bixinho-saindo`
+          : CLASSE_DA_ARESTA[subagente.situacao],
+        data: saindo.has(bixinho.id)
+          ? { situacao: subagente.situacao, encerradoEm: subagente.encerradoEm, saindo: true }
+          : { situacao: subagente.situacao, encerradoEm: subagente.encerradoEm },
         selectable: false,
         focusable: false,
       },
@@ -917,7 +932,8 @@ function mesmaAresta(anterior: ArestaDoCanvas, nova: ArestaDoCanvas): boolean {
     anterior.animated === nova.animated &&
     anterior.className === nova.className &&
     anterior.data?.situacao === nova.data?.situacao &&
-    anterior.data?.encerradoEm === nova.data?.encerradoEm
+    anterior.data?.encerradoEm === nova.data?.encerradoEm &&
+    anterior.data?.saindo === nova.data?.saindo
   );
 }
 

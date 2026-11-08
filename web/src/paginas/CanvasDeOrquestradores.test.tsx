@@ -438,6 +438,92 @@ describe("CanvasDeOrquestradores · bixinhos", () => {
       expect(sobrepoe({ ...posicaoNaTela(id), ...TAMANHO_DO_BIXINHO }, terminalSolto)).toBe(false);
     }
   });
+
+  describe("saída sozinha de quem terminou", () => {
+    const AGORA = new Date("2026-11-08T12:00:00Z");
+    const CHAVE_DOS_LIMPOS = "orquestrador-agentes:canvas:v1:bixinhos-limpos";
+
+    beforeEach(() => {
+      // Só os timers e o relógio: o resto (promessas, quadros) segue de verdade.
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+      vi.setSystemTime(AGORA);
+      localStorage.setItem(
+        "orquestrador-agentes:canvas:v1",
+        JSON.stringify({ terminais: { o1: { x: 0, y: 0, largura: 600, altura: 520 } }, notas: {}, viewport: { x: 0, y: 0, zoom: 1 } }),
+      );
+      simulados.orquestradores.orquestradores = [orquestrador("o1")];
+    });
+
+    afterEach(() => vi.useRealTimers());
+
+    /** s1 concluiu em `em`; s2 segue executando. */
+    function s1Concluiu(em: string): EstadoDaConversa {
+      return aplicarEvento(conversaComDoisSubagentes(), {
+        tipo: "subagente_concluido",
+        turnoId: "t1",
+        subagenteId: "s1",
+        situacao: "concluido",
+        resumo: "",
+        tokens: 1,
+        duracaoMs: 1,
+        sequencia: 4,
+        em,
+      });
+    }
+
+    async function passar(ms: number): Promise<void> {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms);
+      });
+    }
+
+    const noOuNulo = (id: string) => document.querySelector(`.react-flow__node[data-id="${id}"]`);
+
+    it("concluído agora: 5 s com a expressão final, sai encolhendo e fica limpo ao recarregar", async () => {
+      simulados.conversas.conversas = new Map([["o1", s1Concluiu(AGORA.toISOString())]]);
+      const { unmount } = render(<CanvasDeOrquestradores />);
+      await passar(0);
+      const s1 = idDoBixinho("o1", "s1");
+      expect(noOuNulo(s1)).not.toBeNull();
+
+      await passar(4900);
+      expect(noOuNulo(s1)?.querySelector(".no-bixinho")).not.toHaveClass("no-bixinho-saindo");
+
+      await passar(100);
+      expect(noOuNulo(s1)?.querySelector(".no-bixinho")).toHaveClass("no-bixinho-saindo");
+      // A linha (que o jsdom não desenha: sem medida das âncoras) é coberta em nos.test.ts.
+
+      await passar(400);
+      expect(noOuNulo(s1)).toBeNull();
+      // Quem ainda executa fica.
+      expect(noOuNulo(idDoBixinho("o1", "s2"))).not.toBeNull();
+      expect(JSON.parse(localStorage.getItem(CHAVE_DOS_LIMPOS) ?? "null")).toEqual({
+        o1: { turnoId: "t1", subagentes: ["s1"] },
+      });
+
+      // Recarregar: o que saiu não volta.
+      unmount();
+      render(<CanvasDeOrquestradores />);
+      await passar(0);
+      expect(noOuNulo(s1)).toBeNull();
+      expect(noOuNulo(idDoBixinho("o1", "s2"))).not.toBeNull();
+    });
+
+    it("concluído havia tempo ao abrir: sai na hora; com a preferência de manter, fica", async () => {
+      simulados.conversas.conversas = new Map([["o1", s1Concluiu("2026-11-08T11:00:00Z")]]);
+      localStorage.setItem("orquestrador.preferenciasDaTela", JSON.stringify({ manterBixinhosAteLimpar: true }));
+      const { unmount } = render(<CanvasDeOrquestradores />);
+      await passar(60_000);
+      expect(noOuNulo(idDoBixinho("o1", "s1"))).not.toBeNull();
+      unmount();
+
+      localStorage.removeItem("orquestrador.preferenciasDaTela");
+      render(<CanvasDeOrquestradores />);
+      await passar(0);
+      expect(noOuNulo(idDoBixinho("o1", "s1"))).toBeNull();
+      expect(noOuNulo(idDoBixinho("o1", "s2"))).not.toBeNull();
+    });
+  });
 });
 
 describe("CanvasDeOrquestradores · abrir orquestrador pelo chat", () => {

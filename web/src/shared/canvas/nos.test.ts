@@ -294,6 +294,23 @@ describe("arestasDosBixinhos", () => {
     ]);
   });
 
+  it("a linha do bixinho saindo ganha a classe e o dado que a recolhem; as outras não mudam", () => {
+    const nos = sincronizarBixinhos([terminal], conversas);
+    const antes = arestasDosBixinhos(nos, conversas);
+    const saindo = arestasDosBixinhos(nos, conversas, new Set([idDoBixinho("o1", "s1")]));
+
+    expect(saindo[0]).toMatchObject({
+      className: "aresta-concluido aresta-bixinho-saindo",
+      data: { situacao: "concluido", saindo: true },
+    });
+    expect(saindo[1]).toEqual(antes[1]);
+    expect(antes[0]?.data).not.toHaveProperty("saindo");
+    // A troca chega ao React Flow: não reaproveita a linha de antes.
+    const reaproveitadas = reaproveitarArestas(antes, saindo);
+    expect(reaproveitadas[0]).toBe(saindo[0]);
+    expect(reaproveitadas[1]).toBe(antes[1]);
+  });
+
   it("liga os lados voltados um para o outro, bixinho a bixinho", () => {
     const nos = comBixinhoEm(comBixinhoEm(sincronizarBixinhos([terminal], conversas), "s1", 225, -250), "s2", 680, 0);
 
@@ -551,6 +568,22 @@ describe("limparBixinhos", () => {
     });
 
     expect(limparBixinhos(s2Terminou, primeira)).toEqual({ turnoId: "t1", subagentes: ["s1", "s2"] });
+  });
+
+  it("com `somente`, limpa só os parados desses Subagentes (a saída sozinha de quem terminou)", () => {
+    const s2Terminou = depois(doisSubagentes, {
+      tipo: "subagente_concluido",
+      turnoId: "t1",
+      subagenteId: "s2",
+      situacao: "falhou",
+      resumo: "",
+      tokens: 1,
+      duracaoMs: 1,
+    });
+
+    expect(limparBixinhos(s2Terminou, undefined, new Set(["s1"]))).toEqual({ turnoId: "t1", subagentes: ["s1"] });
+    // Pedir um que ainda executa (ou que não existe) não limpa nada.
+    expect(limparBixinhos(doisSubagentes, undefined, new Set(["s2", "s9"]))).toBeNull();
   });
 
   it("não há o que limpar quando todos executam ou já foram limpos", () => {

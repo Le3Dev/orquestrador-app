@@ -61,6 +61,8 @@ const ANCORAS_DO_BIXINHO: readonly { id: Ancora; posicao: Position; classe: stri
 interface PropsDoConteudo {
   subagente: SubagenteNaTela;
   selecionado: boolean;
+  /** Saindo sozinho do canvas (o Subagente terminou): encolhe e some com fade. */
+  saindo?: boolean;
 }
 
 /**
@@ -69,7 +71,11 @@ interface PropsDoConteudo {
  * quando é selecionado — e não a cada evento de outro Subagente nem a cada
  * quadro em que o terminal é arrastado. O relógio só corre executando.
  */
-export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({ subagente, selecionado }: PropsDoConteudo) {
+export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
+  subagente,
+  selecionado,
+  saindo = false,
+}: PropsDoConteudo) {
   const executando = subagente.situacao === "executando";
   const agora = useRelogio(executando);
   const aparencia = aparenciaDoBixinho(subagente.id);
@@ -101,7 +107,7 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({ subagente, se
       )}
 
       <div
-        className={`no-bixinho no-bixinho-${subagente.situacao} ${selecionado ? "no-bixinho-selecionado" : ""}`}
+        className={`no-bixinho no-bixinho-${subagente.situacao} ${selecionado ? "no-bixinho-selecionado" : ""} ${saindo ? "no-bixinho-saindo" : ""}`}
         title={subagente.papel === null ? dica : `${subagente.papel} · ${dica.toLowerCase()}`}
       >
         <div className="balao-do-bixinho">
@@ -125,14 +131,15 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({ subagente, se
 /**
  * Um Subagente no canvas. Fica preso ao terminal do Orquestrador (move junto
  * com ele), mas pode ser arrastado; clicando, abre a ficha com a tarefa e o
- * relatório.
+ * relatório. Quando o Subagente conclui ou é cancelado, sai sozinho depois de
+ * alguns segundos (`useSaidaDosBixinhos`), com a classe `no-bixinho-saindo`.
  *
  * Esta é só a casca: lê o contexto do canvas, que muda a cada evento de
  * qualquer conversa, e acha o próprio Subagente. O desenho fica no
  * `ConteudoDoBixinho`.
  */
-export function NoBixinho({ data, selected }: NodeProps<TipoDoNo>) {
-  const { conversas } = useCanvas();
+export function NoBixinho({ id, data, selected }: NodeProps<TipoDoNo>) {
+  const { conversas, bixinhosSaindo } = useCanvas();
   const subagente = subagentesVisiveis(conversas.get(data.orquestradorId)).find(
     (candidato) => candidato.id === data.subagenteId,
   );
@@ -141,5 +148,5 @@ export function NoBixinho({ data, selected }: NodeProps<TipoDoNo>) {
     return null;
   }
 
-  return <ConteudoDoBixinho subagente={subagente} selecionado={selected} />;
+  return <ConteudoDoBixinho subagente={subagente} selecionado={selected} saindo={bixinhosSaindo?.has(id) === true} />;
 }

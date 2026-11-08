@@ -149,8 +149,8 @@ describe("BarraDeTituloDoApp", () => {
 
     fireEvent.click(botaoDeConfiguracoes());
 
-    // Os dois da Tela e a Autorrecuperação dos orquestradores.
-    expect(screen.getAllByRole("menuitemcheckbox")).toHaveLength(3);
+    // Os três da Tela e a Autorrecuperação dos orquestradores.
+    expect(screen.getAllByRole("menuitemcheckbox")).toHaveLength(4);
     expect(screen.queryByRole("menuitem", { name: /Pastas e Claude Code/ })).not.toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Controles da janela" })).toBeInTheDocument();
   });
