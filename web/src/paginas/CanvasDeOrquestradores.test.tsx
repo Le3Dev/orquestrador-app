@@ -764,10 +764,10 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     expect(container.querySelector(".react-flow__renderer")).not.toBeNull();
     expect(screen.getByTestId("barra-de-titulo")).toBeInTheDocument();
     expect(screen.getByTestId("chat-rapido")).toBeInTheDocument();
-    expect(screen.getByTestId("chat-rapido")).toHaveTextContent("Tela sendo vista");
+    expect(screen.getByRole("button", { name: "Modo invisível" })).toHaveAttribute("aria-pressed", "true");
 
     avisar(false);
-    expect(screen.queryByText("Tela sendo vista")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Modo invisível" })).toHaveAttribute("aria-pressed", "false");
     expect(document.documentElement).not.toHaveClass("modo-invisivel");
     expect(raiz).not.toHaveClass("canvas-modo-invisivel");
   });
@@ -816,14 +816,15 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
       }
       expect(visibilidade(screen.getByTestId("chat-rapido"))).toBe("visible");
       expect(visibilidade(painelDoChat)).toBe("visible");
-      // A barra inteira fica escondida e sem mouse; indicador e botão de voltar ficam no chat, visíveis.
+      // A barra inteira fica escondida e sem mouse; o botão 👁 (que também volta) fica no chat, visível.
       const barra = screen.getByTestId("barra-de-titulo");
       expect(visibilidade(barra)).toBe("hidden");
       expect(getComputedStyle(barra).pointerEvents).toBe("none");
-      const faixa = screen.getByTestId("faixa-modo-invisivel");
-      expect(visibilidade(faixa)).toBe("visible");
-      expect(visibilidade(screen.getByText("Tela sendo vista"))).toBe("visible");
-      expect(visibilidade(screen.getByRole("button", { name: "Voltar ao modo normal" }))).toBe("visible");
+      expect(screen.queryByTestId("faixa-modo-invisivel")).not.toBeInTheDocument();
+      const botao = screen.getByRole("button", { name: "Modo invisível" });
+      expect(botao).toHaveAttribute("aria-pressed", "true");
+      expect(visibilidade(botao)).toBe("visible");
+      expect(getComputedStyle(botao).pointerEvents).toBe("auto");
     } finally {
       estilo.remove();
     }

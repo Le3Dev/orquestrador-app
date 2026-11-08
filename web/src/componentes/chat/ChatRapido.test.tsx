@@ -93,10 +93,11 @@ describe("ChatRapido · modo invisível", () => {
     const { modoInvisivel, ativar } = ponteAtiva();
     const { campo } = renderizar();
 
-    expect(screen.queryByText(/a tela vai junto/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Modo invisível" })).toHaveAttribute("aria-pressed", "false");
     ativar();
-    expect(screen.getByText(/a tela vai junto/)).toBeInTheDocument();
-    expect(screen.getByTestId("faixa-modo-invisivel")).toHaveTextContent("Tela sendo vista");
+    expect(screen.getByRole("button", { name: "Modo invisível" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByTestId("faixa-modo-invisivel")).not.toBeInTheDocument();
+    expect(screen.queryByText("Voltar ao modo normal")).not.toBeInTheDocument();
 
     fireEvent.change(campo, { target: { value: "O que é isso?" } });
     fireEvent.keyDown(campo, { key: "Enter" });
@@ -107,6 +108,24 @@ describe("ChatRapido · modo invisível", () => {
     fireEvent.keyDown(campo, { key: "Enter" });
     await waitFor(() => expect(perguntar).toHaveBeenCalledTimes(2));
     expect(modoInvisivel.capturarTela).toHaveBeenCalledTimes(2);
+  });
+
+  it("o mesmo botão 👁 entra e sai do modo, com aria-pressed refletindo o estado", () => {
+    const { modoInvisivel, ativar } = ponteAtiva();
+    renderizar();
+
+    const botao = screen.getByRole("button", { name: "Modo invisível" });
+    expect(botao).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(botao);
+    expect(modoInvisivel.entrar).toHaveBeenCalledTimes(1);
+
+    ativar();
+    const ativo = screen.getByRole("button", { name: "Modo invisível" });
+    expect(ativo).toHaveAttribute("aria-pressed", "true");
+    expect(ativo).toHaveAttribute("title", expect.stringContaining("clique para voltar ao modo normal"));
+    expect(screen.queryByTestId("faixa-modo-invisivel")).not.toBeInTheDocument();
+    fireEvent.click(ativo);
+    expect(modoInvisivel.sair).toHaveBeenCalledTimes(1);
   });
 
   it("se a captura falhar, mostra o erro, não envia e mantém o texto", async () => {
@@ -173,7 +192,7 @@ describe("ChatRapido · modo invisível", () => {
     });
   });
 
-  it("o 👁 fica na linha de baixo do composer, entra no modo e some quando ativo", async () => {
+  it("o 👁 fica na linha de baixo do composer, entra no modo e continua (pressionado) quando ativo", async () => {
     const { modoInvisivel, ativar } = ponteAtiva();
     renderizar();
 
@@ -185,7 +204,7 @@ describe("ChatRapido · modo invisível", () => {
     await waitFor(() => expect(modoInvisivel.capturarMouse).toHaveBeenCalledWith(true));
 
     ativar();
-    expect(screen.queryByRole("button", { name: "Modo invisível" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Modo invisível" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("sem a ponte do modo invisível (navegador), não desenha o 👁", () => {
@@ -202,15 +221,14 @@ describe("ChatRapido · modo invisível", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível entrar no modo invisível: sem janela");
   });
 
-  it("ativo, o indicador e o botão de voltar ficam dentro do chat; clicar sai do modo", () => {
+  it("ativo, o 👁 dentro do chat é o indicador e a saída; clicar sai do modo", () => {
     const { modoInvisivel, ativar } = ponteAtiva();
     renderizar();
-    expect(screen.queryByRole("button", { name: "Voltar ao modo normal" })).not.toBeInTheDocument();
     ativar();
 
     const chat = screen.getByTestId("chat-rapido");
-    expect(within(chat).getByText("Tela sendo vista")).toBeInTheDocument();
-    fireEvent.click(within(chat).getByRole("button", { name: "Voltar ao modo normal" }));
+    expect(within(chat).queryByText("Tela sendo vista")).not.toBeInTheDocument();
+    fireEvent.click(within(chat).getByRole("button", { name: "Modo invisível", pressed: true }));
     expect(modoInvisivel.sair).toHaveBeenCalledTimes(1);
   });
 
@@ -220,7 +238,7 @@ describe("ChatRapido · modo invisível", () => {
     renderizar();
     ativar();
 
-    fireEvent.click(screen.getByRole("button", { name: "Voltar ao modo normal" }));
+    fireEvent.click(screen.getByRole("button", { name: "Modo invisível" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível sair do modo invisível: janela ocupada");
   });
 

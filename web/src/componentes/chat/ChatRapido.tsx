@@ -776,38 +776,7 @@ export function ChatRapido({
         </button>
       )}
 
-      {modoAtivo && (
-        <div className="faixa-modo-invisivel" data-testid="faixa-modo-invisivel">
-          <span
-            className="indicador-tela-vista"
-            role="status"
-            title="O Claude vê a sua tela a cada pergunta do chat: uma foto dela vai junto"
-          >
-            <span className="ponto-tela-vista" aria-hidden="true" />
-            Tela sendo vista
-          </span>
-          <span className="selo-tela-junto">a tela vai junto</span>
-          <span className="flex-1" />
-          <button
-            type="button"
-            className="botao-modo-invisivel botao-modo-invisivel-ativo"
-            onClick={() => void sairDoModo()}
-            title="Voltar ao modo normal (Ctrl+Shift+I)"
-          >
-            Voltar ao modo normal
-          </button>
-          {erroDoModo !== null && (
-            <p className="hint-error texto-longo faixa-modo-invisivel-erro" role="alert">
-              {erroDoModo}{" "}
-              <button type="button" className="btn btn-sm btn-ghost" onClick={descartarErroDoModo}>
-                fechar
-              </button>
-            </p>
-          )}
-        </div>
-      )}
-
-      {!modoAtivo && erroDoModo !== null && (
+      {erroDoModo !== null && (
         <p className="hint-error texto-longo" role="alert">
           {erroDoModo}{" "}
           <button type="button" className="btn btn-sm btn-ghost" onClick={descartarErroDoModo}>
@@ -927,15 +896,21 @@ export function ChatRapido({
               </span>
             )}
             <span className="flex-1" />
-            {modoDisponivel && !modoAtivo && (
+            {modoDisponivel && (
               <button
                 type="button"
                 className="botao-icone botao-entrar-modo-invisivel"
                 aria-label="Modo invisível"
-                title="Modo invisível: janela transparente, só o chat rápido; o Claude vê a tela a cada pergunta (Ctrl+Shift+I para sair)"
-                onClick={() => void entrarNoModo()}
+                aria-pressed={modoAtivo}
+                title={
+                  modoAtivo
+                    ? "Tela sendo vista — clique para voltar ao modo normal (Ctrl+Shift+I)"
+                    : "Modo invisível: janela transparente, só o chat rápido; o Claude vê a tela a cada pergunta (Ctrl+Shift+I para sair)"
+                }
+                onClick={() => void (modoAtivo ? sairDoModo() : entrarNoModo())}
               >
                 👁
+                {modoAtivo && <span className="ponto-tela-vista" aria-hidden="true" />}
               </button>
             )}
             <SeletorDeModelo

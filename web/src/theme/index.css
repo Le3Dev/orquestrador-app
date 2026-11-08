@@ -2449,70 +2449,27 @@ html.modo-invisivel .barra-de-titulo * {
   pointer-events: none !important;
   -webkit-app-region: no-drag !important;
 }
-/* Faixa do chat com o indicador e a saída (só no modo invisível). */
-.faixa-modo-invisivel {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 6px;
-  border: 1px solid var(--border-forte);
-  border-radius: var(--radius-button);
-  background: var(--surface-2);
-}
-.faixa-modo-invisivel-erro { flex-basis: 100%; margin: 0; }
-/* O indicador permanente: nunca some e chama a atenção. */
-.indicador-tela-vista {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-  height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
+/* 👁 do composer: único botão do modo invisível (liga e desliga). */
+.botao-entrar-modo-invisivel { position: relative; width: 28px; height: 28px; font-size: 14px; opacity: .75; }
+.botao-entrar-modo-invisivel:hover, .botao-entrar-modo-invisivel:focus-visible { opacity: 1; }
+/* Ativo: é o indicador permanente de que a tela está sendo vista. */
+.botao-entrar-modo-invisivel[aria-pressed="true"] {
+  opacity: 1;
   border: 1px solid var(--error);
   background: color-mix(in srgb, var(--error) 22%, var(--surface-2));
-  color: var(--primary);
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
 }
 .ponto-tela-vista {
-  width: 9px;
-  height: 9px;
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--error);
   animation: pulso-tela-vista 1.4s ease-in-out infinite;
 }
 @keyframes pulso-tela-vista { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .ponto-tela-vista { animation: none; } }
-.botao-modo-invisivel { font-size: 14px; }
-/* 👁 do composer: discreto, no tamanho dos outros botões da linha. */
-.botao-entrar-modo-invisivel { width: 28px; height: 28px; font-size: 14px; opacity: .75; }
-.botao-entrar-modo-invisivel:hover, .botao-entrar-modo-invisivel:focus-visible { opacity: 1; }
-.botao-modo-invisivel-ativo {
-  width: auto;
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--border-forte);
-  border-radius: var(--radius-button);
-  background: var(--surface-2);
-  color: var(--primary);
-  font-family: var(--fonte-texto);
-  font-size: 12px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.botao-modo-invisivel-ativo:hover { background: var(--surface-3); }
-.botao-modo-invisivel-ativo:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
-.selo-tela-junto {
-  font-size: 11px;
-  color: var(--secondary);
-  padding: 1px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border-forte);
-  white-space: nowrap;
-}
 
 /* O que é clicável (ou tem balão ao passar o mouse) não arrasta a janela. */
 .no-drag { -webkit-app-region: no-drag; }
