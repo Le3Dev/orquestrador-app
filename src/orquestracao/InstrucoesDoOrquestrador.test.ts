@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { linhasDaRegraDasPerguntas } from "../perguntas/PerguntaDoApp";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { instrucoesDoOrquestrador, instrucoesDoSubagente, mensagemParaOOrquestrador } from "./InstrucoesDoOrquestrador";
+import { ModeloClaude } from "./ModeloClaude";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { NivelDePermissao } from "./NivelDePermissao";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
@@ -125,5 +126,133 @@ describe("artefatos nas instruções fixas", () => {
     expect(comPasta).toContain("gravar nessa pasta é permitido em qualquer permissão");
     expect(comPasta).toContain("Nunca faça commit nem push.");
     expect(semPasta).not.toContain("artefato");
+  });
+});
+
+interface OpcoesDoBlocoDeRapidez {
+  nivel?: NivelDePermissao;
+  modo?: ModoDoTurno;
+  permitirCommitEPush?: boolean;
+  modeloDosSubagentes?: ModeloClaude;
+}
+
+function blocoDeRapidez({
+  nivel = "edicao_e_comandos",
+  modo = "execucao",
+  permitirCommitEPush = false,
+  modeloDosSubagentes = "opus",
+}: OpcoesDoBlocoDeRapidez = {}): string {
+  const configuracao = ConfiguracaoDoOrquestrador.de({
+    modeloDoOrquestrador: "opus",
+    modeloDosSubagentes,
+    quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
+    nivelDePermissao: nivel,
+    permitirCommitEPush,
+  });
+  const texto = mensagemParaOOrquestrador("ajuste o login", configuracao, [], modo);
+  return texto.slice(0, texto.indexOf("</configuracao-do-pedido>"));
+}
+
+const COMANDOS_CURTOS = "- Comandos curtos são seus, sem subagente:";
+const UMA_LEVA_SO =
+  "- Ao delegar, uma leva só: todas as subtarefas independentes na mesma mensagem. A atualização do README (ou de outra documentação) vai dentro da subtarefa que mais mexe no assunto, não numa leva final só para ela.";
+const CAMINHOS_E_LINHAS =
+  "- No pedido a cada subagente, passe os caminhos e as linhas que você já localizou, para ele não refazer a busca.";
+const MODELO_SONNET = 'você pode passar model: "sonnet" na ferramenta Agent';
+
+describe("regras de rapidez no bloco <configuracao-do-pedido> (ADR-39)", () => {
+  it("em edicao_e_comandos, os comandos curtos (git e reiniciar) são do Orquestrador", () => {
+    const texto = blocoDeRapidez();
+
+    expect(texto).toContain(
+      `${COMANDOS_CURTOS} git status, diff e log, e reiniciar o app ou o servidor (seguindo a regra dos servidores abaixo). Lançar um subagente só para isso custa minutos.`,
+    );
+  });
+
+  it.each<[NivelDePermissao, ModoDoTurno]>([
+    ["leitura", "execucao"],
+    ["edicao", "execucao"],
+    ["edicao_e_comandos", "planejamento"],
+  ])("no nível %s, em %s, não fala de comandos curtos", (nivel, modo) => {
+    expect(blocoDeRapidez({ nivel, modo, permitirCommitEPush: true })).not.toContain(COMANDOS_CURTOS);
+  });
+
+  it("commit, push e PR só entram nos comandos curtos com commit permitido", () => {
+    const comCommit = blocoDeRapidez({ permitirCommitEPush: true });
+    const semCommit = blocoDeRapidez({ permitirCommitEPush: false });
+
+    expect(comCommit).toContain(
+      `${COMANDOS_CURTOS} git status, diff e log, commit, push e abrir PR quando o usuário pedir, e reiniciar o app ou o servidor`,
+    );
+    expect(semCommit).toContain(COMANDOS_CURTOS);
+    expect(semCommit).not.toContain("abrir PR");
+  });
+
+  it.each<[NivelDePermissao, ModoDoTurno, ModeloClaude]>([
+    ["leitura", "execucao", "haiku"],
+    ["edicao", "execucao", "sonnet"],
+    ["edicao_e_comandos", "execucao", "opus"],
+    ["edicao_e_comandos", "planejamento", "fable"],
+  ])("no nível %s, em %s, com %s, pede uma leva só e os caminhos e linhas", (nivel, modo, modeloDosSubagentes) => {
+    const texto = blocoDeRapidez({ nivel, modo, modeloDosSubagentes });
+
+    expect(texto).toContain(UMA_LEVA_SO);
+    expect(texto).toContain(CAMINHOS_E_LINHAS);
+  });
+
+  it("vem depois da linha dos subagentes e antes das permissões", () => {
+    const texto = blocoDeRapidez();
+    const subagentes = texto.indexOf("- Subagentes:");
+    const leva = texto.indexOf(UMA_LEVA_SO);
+    const permissoes = texto.indexOf("- Permissões:");
+
+    expect(subagentes).toBeGreaterThanOrEqual(0);
+    expect(leva).toBeGreaterThan(subagentes);
+    expect(permissoes).toBeGreaterThan(leva);
+  });
+
+  it.each<ModeloClaude>(["opus", "fable"])("com subagentes %s, sugere model: \"sonnet\" nas subtarefas mecânicas", (modeloDosSubagentes) => {
+    expect(blocoDeRapidez({ modeloDosSubagentes })).toContain(
+      '- Em subtarefas mecânicas (atualizar o README, renomear, rodar build ou testes), você pode passar model: "sonnet" na ferramenta Agent para terminar mais rápido; nas de implementação ou análise, mantenha o modelo configurado.',
+    );
+  });
+
+  it.each<ModeloClaude>(["sonnet", "haiku"])("com subagentes %s, não sugere trocar o modelo", (modeloDosSubagentes) => {
+    expect(blocoDeRapidez({ modeloDosSubagentes })).not.toContain(MODELO_SONNET);
+  });
+});
+
+describe("regras de rapidez nas instruções do Subagente (ADR-39)", () => {
+  const LEITURA_POR_TRECHO =
+    "Leia por trecho: localize com Grep e abra com Read usando offset e limit. Arquivo grande, como um README extenso, nunca inteiro: ache a seção com Grep e leia e edite só ela.";
+  const SEM_REFAZER_A_BUSCA = "Não refaça a busca do que a subtarefa já informou (caminhos e linhas): comece por eles.";
+  const TESTES_DO_QUE_ALTEROU =
+    "Rode só os testes e verificações do que você alterou; build ou suíte completa só se a subtarefa pedir.";
+  const RESPOSTA_CURTA =
+    "Ao terminar, devolva uma resposta curta: o que fez, os arquivos que alterou (se houver) e o resultado, inclusive dos testes.";
+
+  it.each<[string, string]>([
+    ["executor", instrucoesDoSubagente(pasta)],
+    [
+      "subagente pronto",
+      instrucoesDoSubagente(pasta, true, PASTA_DE_ARTEFATOS, {
+        nome: "revisor",
+        descricao: "Revisa o código.",
+        prompt: "Revise com rigor.",
+        modelo: "herdar",
+      }),
+    ],
+  ])("o %s lê por trecho, não refaz a busca, roda só os testes do que alterou e responde curto", (_papel, texto) => {
+    expect(texto).toContain(LEITURA_POR_TRECHO);
+    expect(texto).toContain(SEM_REFAZER_A_BUSCA);
+    expect(texto).toContain(TESTES_DO_QUE_ALTEROU);
+    expect(texto).toContain(RESPOSTA_CURTA);
+    expect(texto).not.toContain("Ao terminar, devolva: o que fez");
+  });
+
+  it("as regras de leitura vêm antes da regra dos servidores", () => {
+    const texto = instrucoesDoSubagente(pasta);
+
+    expect(texto.indexOf(TESTES_DO_QUE_ALTEROU)).toBeLessThan(texto.indexOf("Servidor que deve continuar no ar"));
   });
 });

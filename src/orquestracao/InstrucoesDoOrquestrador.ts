@@ -1,6 +1,7 @@
 import { linhasDaRegraDasPerguntas } from "../perguntas/PerguntaDoApp";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { InstrucoesAplicadas, linhasDasInstrucoes } from "./InstrucoesPersonalizadas";
+import { ModeloClaude } from "./ModeloClaude";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { DESCRICAO_DO_NIVEL, NivelDePermissao, TRABALHO_DIRETO_NO_NIVEL } from "./NivelDePermissao";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
@@ -87,6 +88,45 @@ function regrasDeDelegacao(nivel: NivelDePermissao): string[] {
     `- Faça você mesmo o trivial: ${TRABALHO_DIRETO_NO_NIVEL[nivel]}. Cada subagente custa dezenas de milhares de tokens só para começar.`,
     `- Delegue a subagentes "${NOME_DO_SUBAGENTE}" quando houver alteração de arquivos, quando o trabalho exigir ler muitos arquivos ou rodar comandos demorados (build, testes), ou quando der para dividir em partes paralelas. Não use subagente para conferir o próprio trabalho.`,
     `- Você não edita arquivos: toda alteração no projeto vai para um subagente "${NOME_DO_SUBAGENTE}". A única exceção são os artefatos (abaixo), que não são arquivos do projeto.`,
+  ];
+}
+
+/** Modelos lentos o bastante para valer sugerir o Sonnet nas subtarefas mecânicas. */
+const MODELOS_LENTOS: readonly ModeloClaude[] = ["opus", "fable"];
+
+/**
+ * Como o Orquestrador evita esperas (ADR-39). Na investigação de 09/11,
+ * subagentes Opus lançados só para commit e push levavam ~3 min cada, os
+ * planos rodavam em levas sequenciais (a do README por último) e cada
+ * subagente refazia a busca que o Orquestrador já tinha feito.
+ *
+ * Vai no bloco, e não nas instruções fixas, porque o Claude Code ignora
+ * instruções novas ao retomar a sessão (`--resume`). Os comandos curtos só
+ * valem quando o pedido permite rodar comandos; commit, push e PR só entram
+ * com commit permitido. O `model: "sonnet"` só é sugerido com subagentes
+ * Opus ou Fable: com Sonnet ou Haiku não há o que ganhar.
+ */
+function regrasDeRapidez(
+  nivel: NivelDePermissao,
+  permiteCommitEPush: boolean,
+  modeloDosSubagentes: ModeloClaude,
+): string[] {
+  const comandosDoGit = permiteCommitEPush
+    ? "git status, diff e log, commit, push e abrir PR quando o usuário pedir"
+    : "git status, diff e log";
+  return [
+    ...(nivel === "edicao_e_comandos"
+      ? [
+          `- Comandos curtos são seus, sem subagente: ${comandosDoGit}, e reiniciar o app ou o servidor (seguindo a regra dos servidores abaixo). Lançar um subagente só para isso custa minutos.`,
+        ]
+      : []),
+    "- Ao delegar, uma leva só: todas as subtarefas independentes na mesma mensagem. A atualização do README (ou de outra documentação) vai dentro da subtarefa que mais mexe no assunto, não numa leva final só para ela.",
+    "- No pedido a cada subagente, passe os caminhos e as linhas que você já localizou, para ele não refazer a busca.",
+    ...(MODELOS_LENTOS.includes(modeloDosSubagentes)
+      ? [
+          '- Em subtarefas mecânicas (atualizar o README, renomear, rodar build ou testes), você pode passar model: "sonnet" na ferramenta Agent para terminar mais rápido; nas de implementação ou análise, mantenha o modelo configurado.',
+        ]
+      : []),
   ];
 }
 
@@ -196,9 +236,8 @@ export function mensagemParaOOrquestrador(
   // No planejamento os agentes só leem (as ferramentas já vêm travadas
   // assim); o nível configurado é o que valerá quando o Plano for executado.
   const nivelDoPedido = planejamento ? "leitura" : configuracao.nivelDePermissao;
-  const regraDeCommitEPush = configuracao.permiteCommitEPush(modo)
-    ? COMMIT_E_PUSH_QUANDO_PEDIDOS
-    : COMMIT_E_PUSH_PROIBIDOS;
+  const commitEPushPermitidos = configuracao.permiteCommitEPush(modo);
+  const regraDeCommitEPush = commitEPushPermitidos ? COMMIT_E_PUSH_QUANDO_PEDIDOS : COMMIT_E_PUSH_PROIBIDOS;
   const regrasDoPlanejamento = planejamento
     ? [
         "- Modo: PLANEJAMENTO. Neste pedido nada no projeto pode ser alterado: os subagentes só leem e pesquisam, seja qual for a permissão de execução.",
@@ -224,6 +263,7 @@ export function mensagemParaOOrquestrador(
     ...regrasDeDelegacao(nivelDoPedido),
     `- Subagentes: ${regraDaQuantidade(configuracao.quantidadeDeSubagentes)}`,
     ...linhasDosSubagentesProntos(subagentesProntos, NOME_DO_SUBAGENTE, MARCA_DA_CONFIGURACAO),
+    ...regrasDeRapidez(nivelDoPedido, commitEPushPermitidos, configuracao.modeloDosSubagentes),
     `- Permissões: ${DESCRICAO_DO_NIVEL[nivelDoPedido]}. ${regraDeCommitEPush}`,
     ...regrasDoPlanejamento,
     ...regrasDoTamanho,
@@ -265,6 +305,18 @@ export function mensagemDeAprovacaoDoPlano(observacoes: string): string {
 }
 
 /**
+ * Como o Subagente gasta menos contexto e tempo (ADR-39). Na investigação de
+ * 09/11, subagentes liam o README inteiro (~80 mil tokens) e chegavam a
+ * contextos de 190 a 375 mil tokens, refaziam buscas já feitas pelo
+ * Orquestrador e rodavam a suíte inteira sem que fosse pedido.
+ */
+const REGRAS_DE_RAPIDEZ_DO_SUBAGENTE: readonly string[] = [
+  "Leia por trecho: localize com Grep e abra com Read usando offset e limit. Arquivo grande, como um README extenso, nunca inteiro: ache a seção com Grep e leia e edite só ela.",
+  "Não refaça a busca do que a subtarefa já informou (caminhos e linhas): comece por eles.",
+  "Rode só os testes e verificações do que você alterou; build ou suíte completa só se a subtarefa pedir.",
+];
+
+/**
  * As regras de cada Subagente: fazer só a subtarefa recebida e prestar contas.
  *
  * Vai na definição dos agentes, refeita a cada turno: por isso pode levar a
@@ -297,7 +349,8 @@ export function instrucoesDoSubagente(
     `Você é um subagente ${papel}, coordenado por um orquestrador.`,
     `Faça somente a subtarefa recebida, dentro da pasta ${pasta.caminho}. Seja objetivo.`,
     ...regraDeArtefatos,
-    "Ao terminar, devolva: o que fez, os arquivos que alterou (se houver) e o resultado.",
+    "Ao terminar, devolva uma resposta curta: o que fez, os arquivos que alterou (se houver) e o resultado, inclusive dos testes.",
+    ...REGRAS_DE_RAPIDEZ_DO_SUBAGENTE,
     regraDosServidores(plataforma),
     `${regraDeCommitEPush} Responda em português.`,
     ...(especialidade === null ? [] : linhasDaEspecialidade(especialidade)),
