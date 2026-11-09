@@ -25,7 +25,17 @@ import { formatarBytes, formatarDuracao } from "../../shared/formatacao";
 import { useMelhorarPrompt } from "../../shared/hooks/useMelhorarPrompt";
 import { useModoInvisivel } from "../../shared/hooks/useModoInvisivel";
 import { LARGURA_DO_CHAT_FIXO, limitarLarguraDoChatFixo } from "../../shared/hooks/usePreferenciasDaTela";
-import { ehCapturaDeTela, type ImagemAnexada, lerImagem, MAXIMO_DE_IMAGENS, problemaDaImagem, TIPOS_DE_IMAGEM } from "../../shared/imagens";
+import {
+  ehCapturaDeTela,
+  type ImagemAnexada,
+  imagemDaCaptura,
+  imagensParaEnvio,
+  lerImagem,
+  liberarImagens,
+  MAXIMO_DE_IMAGENS,
+  problemaDaImagem,
+  TIPOS_DE_IMAGEM,
+} from "../../shared/imagens";
 import type { CapturaDeTela } from "../../shared/ponteDoDesktop";
 import { AvisoDaMelhoria, BotaoDeMelhorar } from "../MelhoriaDoPrompt";
 import { TextoFormatado } from "../TextoFormatado";
@@ -410,6 +420,10 @@ export function ChatRapido({
   // Contagem síncrona dos anexos pendentes: vários quadros podem chegar antes de renderizar.
   const quantidadeDeImagens = useRef(0);
   quantidadeDeImagens.current = imagens.length;
+  // As anexadas agora, para liberar as miniaturas (URLs `blob:`) ao enviar e ao desmontar.
+  const imagensAtuais = useRef(imagens);
+  imagensAtuais.current = imagens;
+  useEffect(() => () => liberarImagens(imagensAtuais.current), []);
   const campo = useRef<HTMLTextAreaElement>(null);
   const seletorDeArquivos = useRef<HTMLInputElement>(null);
   const rolagem = useRef<HTMLDivElement>(null);
@@ -499,17 +513,15 @@ export function ChatRapido({
     }
     quantidadeDeImagens.current += 1;
     setErro(null);
-    setImagens((atuais) => [
-      ...atuais,
-      {
-        id: crypto.randomUUID(),
-        nome: captura.nome,
-        tipoDeMidia: captura.tipoDeMidia,
-        base64: captura.base64,
-        previa: `data:${captura.tipoDeMidia};base64,${captura.base64}`,
-        tamanhoEmBytes: Math.floor((captura.base64.length * 3) / 4),
-      },
-    ]);
+    let imagem: ImagemAnexada;
+    try {
+      imagem = imagemDaCaptura(captura);
+    } catch (falha) {
+      quantidadeDeImagens.current -= 1;
+      setErro(`Não foi possível guardar o quadro: ${mensagemDeErro(falha)}`);
+      return;
+    }
+    setImagens((atuais) => [...atuais, imagem]);
   }, []);
 
   // Quadros do atalho global Ctrl+Shift+S (o app de trás mantém o foco).
@@ -640,13 +652,26 @@ export function ChatRapido({
     try {
       // Só imagens, sem texto: o servidor exige uma pergunta, então vai uma padrão.
       const pergunta = texto.trim() === "" ? "Analise as imagens anexadas." : texto;
+      // O base64 só nasce aqui; o "enviando" já vale enquanto ele é gerado.
+      let anexos: ImagemParaEnvio[] = [];
+      if (imagens.length > 0) {
+        setEnviando(true);
+        try {
+          anexos = await imagensParaEnvio(imagens);
+        } catch (falha) {
+          setEnviando(false);
+          throw falha;
+        }
+      }
       await enviarPergunta(
         pergunta,
-        imagens.map((imagem) => ({ nome: imagem.nome, tipoDeMidia: imagem.tipoDeMidia, base64: imagem.base64 })),
+        anexos,
         // A pergunta que a escuta pôs no campo leva o selo, mesmo que o usuário a tenha retocado.
         origemDoComposer === null ? {} : { origem: origemDoComposer },
       );
       limparCampo();
+      // As enviadas (e as que chegaram durante o envio, que também saem) liberam a miniatura.
+      liberarImagens(imagensAtuais.current);
       setImagens([]);
     } catch (falha) {
       setErro(mensagemDeErro(falha));
@@ -935,7 +960,10 @@ export function ChatRapido({
                     type="button"
                     className="miniatura-remover"
                     aria-label={`Remover ${imagem.nome}`}
-                    onClick={() => setImagens((atuais) => atuais.filter((item) => item.id !== imagem.id))}
+                    onClick={() => {
+                      liberarImagens([imagem]);
+                      setImagens((atuais) => atuais.filter((item) => item.id !== imagem.id));
+                    }}
                   >
                     ✕
                   </button>

@@ -483,6 +483,44 @@ function pararServidor() {
   });
 }
 
+// Ao fechar o app, primeiro o servidor se desliga sozinho (mensagem
+// "desligar"): cancela os turnos e encerra os processos que os agentes
+// deixaram rodando (ADR-38). Só depois do limite, taskkill na árvore.
+const ESPERA_DO_DESLIGAMENTO_MS = 8_000;
+let desligamentoDoServidor = null;
+
+function desligarServidorComCalma() {
+  if (desligamentoDoServidor) return desligamentoDoServidor;
+  appFechando = true;
+  clearTimeout(servidor.timerReligar);
+  servidor.timerReligar = null;
+  const filho = servidor.filho;
+  if (!filho) {
+    desligamentoDoServidor = Promise.resolve();
+    return desligamentoDoServidor;
+  }
+  desligamentoDoServidor = new Promise((resolver) => {
+    const forcar = () => {
+      filho.removeListener("exit", saiu);
+      encerrarServidorAoFechar();
+      resolver();
+    };
+    const limite = setTimeout(forcar, ESPERA_DO_DESLIGAMENTO_MS);
+    function saiu() {
+      clearTimeout(limite);
+      resolver();
+    }
+    filho.once("exit", saiu);
+    try {
+      filho.postMessage({ tipo: "desligar" });
+    } catch {
+      clearTimeout(limite);
+      forcar();
+    }
+  });
+  return desligamentoDoServidor;
+}
+
 // Ao fechar o app: encerra de vez e não religa.
 function encerrarServidorAoFechar() {
   appFechando = true;
@@ -1273,10 +1311,23 @@ if (!conseguiuLock) {
   app.on("window-all-closed", () => {
     // No macOS o app continua vivo sem janelas; o before-quit encerra depois.
     if (process.platform === "darwin") return;
-    encerrarServidorAoFechar();
     app.quit();
   });
 
-  app.on("before-quit", encerrarServidorAoFechar);
+  // Segura o fechamento até o servidor se desligar (ou o limite passar); as
+  // janelas somem na hora. O "quit" fica como garantia.
+  let servidorDesligado = false;
+  app.on("before-quit", (evento) => {
+    if (servidorDesligado || !servidor.filho) {
+      encerrarServidorAoFechar();
+      return;
+    }
+    evento.preventDefault();
+    for (const janela of BrowserWindow.getAllWindows()) janela.hide();
+    desligarServidorComCalma().finally(() => {
+      servidorDesligado = true;
+      app.quit();
+    });
+  });
   app.on("quit", encerrarServidorAoFechar);
 }

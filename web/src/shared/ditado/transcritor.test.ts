@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PedidoDeTranscricao, RespostaDoTranscritor } from "./mensagens";
 import {
   criarTranscritor,
   MAXIMO_DE_PEDIDOS_DA_ESCUTA_ESPERANDO,
+  TEMPO_PARA_DESCARREGAR_O_DITADO_MS,
   type TrabalhadorDoTranscritor,
   TranscricaoDescartada,
 } from "./transcritor";
@@ -13,14 +14,13 @@ class TrabalhadorFalso implements TrabalhadorDoTranscritor {
   onmessage: ((evento: MessageEvent<RespostaDoTranscritor>) => void) | null = null;
   onerror: ((evento: ErrorEvent) => void) | null = null;
   readonly pedidos: PedidoDeTranscricao[] = [];
+  readonly terminate = vi.fn(() => {
+    this.encerrado = true;
+  });
   encerrado = false;
 
   postMessage(pedido: PedidoDeTranscricao): void {
     this.pedidos.push(pedido);
-  }
-
-  terminate(): void {
-    this.encerrado = true;
   }
 
   responder(resposta: RespostaDoTranscritor): void {
@@ -182,5 +182,98 @@ describe("transcritor", () => {
     await pedido;
     trabalhador.responder({ tipo: "baixando", progresso: 90 });
     expect(progressos).toEqual([40]);
+  });
+});
+
+describe("transcritor · descarga do modelo ocioso", () => {
+  /** Um worker novo a cada criação, para ver o encerramento e a recriação. */
+  function montarComRecriacao() {
+    const criados: TrabalhadorFalso[] = [];
+    const transcrever = criarTranscritor(() => {
+      const novo = new TrabalhadorFalso();
+      criados.push(novo);
+      return novo;
+    });
+    return { criados, transcrever };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("encerra o worker depois de 3 minutos sem uso", async () => {
+    expect(TEMPO_PARA_DESCARREGAR_O_DITADO_MS).toBe(3 * 60_000);
+    const { criados, transcrever } = montarComRecriacao();
+
+    const resultado = transcrever(audio());
+    const [worker] = criados;
+    worker?.concluirUltimo("olá mundo");
+    await expect(resultado).resolves.toBe("olá mundo");
+
+    await vi.advanceTimersByTimeAsync(TEMPO_PARA_DESCARREGAR_O_DITADO_MS - 1);
+    expect(worker?.terminate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(worker?.terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it("não encerra durante uma transcrição", async () => {
+    const { criados, transcrever } = montarComRecriacao();
+
+    const primeiro = transcrever(audio());
+    const [worker] = criados;
+    worker?.concluirUltimo("um");
+    await primeiro;
+
+    // Segundo ditado no meio da contagem: ela para enquanto ele roda.
+    await vi.advanceTimersByTimeAsync(TEMPO_PARA_DESCARREGAR_O_DITADO_MS - 1000);
+    const segundo = transcrever(audio());
+    await vi.advanceTimersByTimeAsync(TEMPO_PARA_DESCARREGAR_O_DITADO_MS * 2);
+    expect(worker?.terminate).not.toHaveBeenCalled();
+
+    worker?.concluirUltimo("dois");
+    await expect(segundo).resolves.toBe("dois");
+    // A contagem recomeça do zero depois do uso.
+    await vi.advanceTimersByTimeAsync(TEMPO_PARA_DESCARREGAR_O_DITADO_MS - 1);
+    expect(worker?.terminate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(worker?.terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it("não encerra com pedidos da escuta ainda na fila", async () => {
+    const { criados, transcrever } = montarComRecriacao();
+
+    const emAndamento = transcrever(audio(1), undefined, { origem: "escuta" });
+    const esperando = transcrever(audio(2), undefined, { origem: "escuta" });
+    const [worker] = criados;
+
+    worker?.concluirUltimo("1");
+    await expect(emAndamento).resolves.toBe("1");
+    // O segundo começou assim que o primeiro terminou: a contagem não corre.
+    await vi.advanceTimersByTimeAsync(TEMPO_PARA_DESCARREGAR_O_DITADO_MS * 2);
+    expect(worker?.terminate).not.toHaveBeenCalled();
+
+    worker?.concluirUltimo("2");
+    await expect(esperando).resolves.toBe("2");
+    await vi.advanceTimersByTimeAsync(TEMPO_PARA_DESCARREGAR_O_DITADO_MS);
+    expect(worker?.terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it("recria o worker no uso seguinte, com o mesmo texto", async () => {
+    const { criados, transcrever } = montarComRecriacao();
+
+    const primeiro = transcrever(audio());
+    criados[0]?.concluirUltimo("antes");
+    await expect(primeiro).resolves.toBe("antes");
+    await vi.advanceTimersByTimeAsync(TEMPO_PARA_DESCARREGAR_O_DITADO_MS);
+    expect(criados[0]?.terminate).toHaveBeenCalledTimes(1);
+
+    const segundo = transcrever(audio());
+    expect(criados).toHaveLength(2);
+    criados[1]?.concluirUltimo("depois");
+    await expect(segundo).resolves.toBe("depois");
   });
 });

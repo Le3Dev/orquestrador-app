@@ -11,7 +11,10 @@ export interface LeituraDeMemoria {
    */
   livreBytes: number;
   servidorBytes: number;
-  /** Soma dos processos do Claude iniciados por este servidor. */
+  /**
+   * Soma dos processos do Claude iniciados por este servidor, dos
+   * descendentes vivos deles e do que os agentes deixaram rodando.
+   */
   agentesBytes: number;
   porOrquestrador: Record<string, number>;
   lidaEm: string;
@@ -70,6 +73,9 @@ export class MonitorDeMemoria {
   constructor(
     private readonly registro: RegistroDeProcessos,
     private readonly intervaloMs = 5_000,
+    /** Os descendentes e os processos deixados de cada dono (ver `RastreadorDeProcessosDeixados`). */
+    private readonly outrosProcessos: { pidsPorOrquestrador(): Map<string, Set<number>> } | null = null,
+    private readonly memoriaPorPid: (pids: readonly number[]) => Promise<Map<number, number>> = memoriaDosProcessos,
   ) {}
 
   get ultimaLeitura(): LeituraDeMemoria | null {
@@ -88,16 +94,27 @@ export class MonitorDeMemoria {
     }
   }
 
-  private async medir(): Promise<void> {
-    const processos = this.registro.emExecucao();
-    const porPid = await memoriaDosProcessos(processos.map((processo) => processo.pid)).catch(
-      () => new Map<number, number>(),
-    );
+  /**
+   * Soma, por dono, o Claude Code e o que ele abriu (pwsh, cmd, conhost,
+   * node...), mais o que os agentes deixaram rodando. Cada pid conta uma vez.
+   */
+  async medir(): Promise<void> {
+    const donoDoPid = new Map<number, string>();
+    for (const processo of this.registro.emExecucao()) {
+      donoDoPid.set(processo.pid, processo.orquestradorId);
+    }
+    for (const [orquestradorId, pids] of this.outrosProcessos?.pidsPorOrquestrador() ?? []) {
+      for (const pid of pids) {
+        if (!donoDoPid.has(pid)) {
+          donoDoPid.set(pid, orquestradorId);
+        }
+      }
+    }
+    const porPid = await this.memoriaPorPid([...donoDoPid.keys()]).catch(() => new Map<number, number>());
 
     const porOrquestrador: Record<string, number> = {};
-    for (const processo of processos) {
-      porOrquestrador[processo.orquestradorId] =
-        (porOrquestrador[processo.orquestradorId] ?? 0) + (porPid.get(processo.pid) ?? 0);
+    for (const [pid, orquestradorId] of donoDoPid) {
+      porOrquestrador[orquestradorId] = (porOrquestrador[orquestradorId] ?? 0) + (porPid.get(pid) ?? 0);
     }
 
     const livreBytes = await memoriaLivre();

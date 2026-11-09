@@ -17,6 +17,13 @@ export interface OpcoesDaTranscricao {
 export const MAXIMO_DE_PEDIDOS_DA_ESCUTA_ESPERANDO = 2;
 
 /**
+ * Sem transcrição (nem ditado nem escuta) por este tempo, o worker (e o modelo
+ * de ~250 MB dentro dele) é encerrado para devolver a memória. O próximo pedido
+ * recria o worker, que relê o modelo do cache local (Cache API), sem baixar de novo.
+ */
+export const TEMPO_PARA_DESCARREGAR_O_DITADO_MS = 3 * 60_000;
+
+/**
  * Pedido da escuta jogado fora porque a fila dela encheu (o computador não
  * acompanha a fala). Não é falha: quem pediu pode ignorar em silêncio.
  */
@@ -57,14 +64,37 @@ export type Transcrever = (
  * máximo `MAXIMO_DE_PEDIDOS_DA_ESCUTA_ESPERANDO` esperando.
  *
  * O worker é criado só no primeiro pedido, e um para a tela toda: o modelo
- * carrega uma vez e serve ao ditado e à escuta.
+ * carrega uma vez e serve ao ditado e à escuta. Com a fila vazia e nada em
+ * andamento por `TEMPO_PARA_DESCARREGAR_O_DITADO_MS`, ele é encerrado; o
+ * pedido seguinte cria outro.
  */
 export function criarTranscritor(criarTrabalhador: () => TrabalhadorDoTranscritor): Transcrever {
   let trabalhador: TrabalhadorDoTranscritor | null = null;
   let proximoId = 1;
   let emAndamento: PedidoNaFila | null = null;
   let fila: PedidoNaFila[] = [];
+  let cronometroDeDescarga: ReturnType<typeof setTimeout> | null = null;
   const ouvintesDoDownload = new Set<(progresso: number) => void>();
+
+  function pararCronometroDeDescarga(): void {
+    if (cronometroDeDescarga !== null) {
+      clearTimeout(cronometroDeDescarga);
+      cronometroDeDescarga = null;
+    }
+  }
+
+  /** Reinicia a contagem para descarregar o modelo; nunca conta com pedido em andamento ou na fila. */
+  function agendarDescarga(): void {
+    pararCronometroDeDescarga();
+    if (trabalhador === null || emAndamento !== null || fila.length > 0) return;
+    cronometroDeDescarga = setTimeout(() => {
+      cronometroDeDescarga = null;
+      const ocioso = trabalhador;
+      if (ocioso === null || emAndamento !== null || fila.length > 0) return;
+      trabalhador = null;
+      ocioso.terminate();
+    }, TEMPO_PARA_DESCARREGAR_O_DITADO_MS);
+  }
 
   function obterTrabalhador(): TrabalhadorDoTranscritor {
     if (trabalhador !== null) return trabalhador;
@@ -89,6 +119,7 @@ export function criarTranscritor(criarTrabalhador: () => TrabalhadorDoTranscrito
       emAndamento = null;
       fila = [];
       for (const pedido of afetados) pedido.rejeitar(erro);
+      pararCronometroDeDescarga();
       novo.terminate();
       if (trabalhador === novo) trabalhador = null;
     };
@@ -109,6 +140,8 @@ export function criarTranscritor(criarTrabalhador: () => TrabalhadorDoTranscrito
         proximo.rejeitar(erro instanceof Error ? erro : new Error(String(erro)));
       }
     }
+    // Com trabalho, a contagem para; sem nada em andamento nem na fila, recomeça do zero.
+    agendarDescarga();
   }
 
   function enfileirar(pedido: PedidoNaFila): void {

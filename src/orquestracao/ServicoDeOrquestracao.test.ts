@@ -305,6 +305,65 @@ describe("ServicoDeOrquestracao", () => {
     expect(armazem.removidos).toEqual([orquestrador.id]);
   });
 
+  it("ao remover, chama o aoRemover com o id certo, e uma falha nele não desfaz a remoção", async () => {
+    const removidos: string[] = [];
+    const aviso = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    servico = new ServicoDeOrquestracao({
+      repositorio,
+      motor,
+      execucoes: new ControleDeExecucoesEmMemoria(),
+      publicador: { publicar: () => undefined, sinalizar: () => undefined },
+      anexos: armazem,
+      worktrees,
+      pastaDeArtefatos: (orquestradorId) => `/dados/artefatos/entrada/orquestradores/${orquestradorId}`,
+      preferencias,
+      gerarId: () => `id${++ids}`,
+      agora: () => new Date("2026-10-28T12:00:00Z"),
+      aoRemover: async (orquestradorId) => {
+        removidos.push(orquestradorId);
+        throw new Error("taskkill sumiu");
+      },
+    });
+    const primeiro = await criar();
+    const segundo = await criar();
+
+    await servico.remover(segundo.id);
+    await new Promise((resolver) => setTimeout(resolver, 0));
+
+    expect(removidos).toEqual([segundo.id]);
+    expect(repositorio.buscarPorId(segundo.id)).toBeNull();
+    expect(repositorio.buscarPorId(primeiro.id)).not.toBeNull();
+    expect(aviso).toHaveBeenCalled();
+    aviso.mockRestore();
+  });
+
+  it("não chama o aoRemover quando a remoção é recusada (turno em andamento)", async () => {
+    const removidos: string[] = [];
+    servico = new ServicoDeOrquestracao({
+      repositorio,
+      motor,
+      execucoes: new ControleDeExecucoesEmMemoria(),
+      publicador: { publicar: () => undefined, sinalizar: () => undefined },
+      anexos: armazem,
+      worktrees,
+      pastaDeArtefatos: (orquestradorId) => `/dados/artefatos/entrada/orquestradores/${orquestradorId}`,
+      preferencias,
+      gerarId: () => `id${++ids}`,
+      agora: () => new Date("2026-10-28T12:00:00Z"),
+      aoRemover: async (orquestradorId) => {
+        removidos.push(orquestradorId);
+      },
+    });
+    const orquestrador = await criar();
+    const { conclusao } = await servico.enviarMensagem(orquestrador.id, "analise");
+
+    await expect(servico.remover(orquestrador.id)).rejects.toMatchObject({ motivo: "turno_em_andamento" });
+    expect(removidos).toEqual([]);
+
+    motor.terminar();
+    await conclusao;
+  });
+
   it("repassa o sinal de vida para a tela sem gravá-lo no histórico", async () => {
     const orquestrador = await criar();
     motor.eventos = [{ tipo: "sinal_de_vida", tokensPensando: 1234 }];

@@ -719,6 +719,33 @@ describe("ChatRapido", () => {
       expect(composer()).toHaveClass("composer-expandido");
     });
 
+    it("remover a imagem libera a URL da miniatura", async () => {
+      const criar = vi.spyOn(URL, "createObjectURL");
+      const revogar = vi.spyOn(URL, "revokeObjectURL");
+      const { campo } = renderizar();
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["png"], "tela.png", { type: "image/png" })] } });
+      fireEvent.click(await screen.findByRole("button", { name: "Remover tela.png" }));
+      expect(revogar).toHaveBeenCalledWith(criar.mock.results[0]?.value);
+      expect(screen.queryByAltText("tela.png")).not.toBeInTheDocument();
+    });
+
+    it("o envio gera o base64 igual ao do arquivo e libera a URL depois", async () => {
+      const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+      const criar = vi.spyOn(URL, "createObjectURL");
+      const revogar = vi.spyOn(URL, "revokeObjectURL");
+      const { campo } = renderizar();
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["png"], "tela.png", { type: "image/png" })] } });
+      await screen.findByAltText("tela.png");
+      fireEvent.change(campo, { target: { value: "Veja" } });
+      fireEvent.keyDown(campo, { key: "Enter" });
+
+      // "cG5n" é o base64 de "png".
+      await waitFor(() =>
+        expect(perguntar).toHaveBeenCalledWith("Veja", [{ nome: "tela.png", tipoDeMidia: "image/png", base64: "cG5n" }]),
+      );
+      await waitFor(() => expect(revogar).toHaveBeenCalledWith(criar.mock.results[0]?.value));
+    });
+
     it("menu do modelo aberto não recolhe", () => {
       const { campo } = renderizar();
       fireEvent.click(screen.getByRole("button", { name: /^Modelo:/ }));

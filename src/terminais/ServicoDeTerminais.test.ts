@@ -114,6 +114,23 @@ describe("ServicoDeTerminais", () => {
     expect(servico.existe("t-1")).toBe(true);
   });
 
+  it("ao remover um Orquestrador, encerra só os terminais ligados a ele", () => {
+    const cliente = new ClienteFalso();
+    const doOrquestrador = servico.abrir({ ...pedido, orquestradorId: "orq-1" });
+    const outro = servico.abrir({ ...pedido, orquestradorId: "orq-2" });
+    const solto = servico.abrir(pedido);
+    const tambemDoOrquestrador = servico.abrir({ ...pedido, orquestradorId: "orq-1" });
+    servico.conectar(doOrquestrador.id, cliente);
+
+    expect(servico.encerrarDoOrquestrador("orq-1")).toBe(2);
+
+    expect(pty.processos.map((processo) => processo.encerrado)).toEqual([true, false, false, true]);
+    expect(servico.listar().map((terminal) => terminal.id)).toEqual([outro.id, solto.id]);
+    expect(servico.existe(tambemDoOrquestrador.id)).toBe(false);
+    expect(cliente.fins).toEqual([null]);
+    expect(servico.encerrarDoOrquestrador("orq-1")).toBe(0);
+  });
+
   it("recusa o sétimo terminal e libera a vaga quando um é fechado", () => {
     for (let i = 0; i < 6; i++) {
       servico.abrir(pedido);
