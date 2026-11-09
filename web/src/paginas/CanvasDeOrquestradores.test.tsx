@@ -27,6 +27,7 @@ import { ESTADO_INICIAL_DO_CHAT, type EstadoDoChatNaTela } from "../shared/estad
 import type { ArtefatosAoVivo } from "../shared/hooks/useArtefatos";
 import type { EstadoDaAtualizacao } from "../shared/ponteDoDesktop";
 import { ErroDaApi } from "../shared/api/cliente";
+import { avisarSubagentesProntosMudaram } from "../shared/subagentesProntos";
 import { TIPO_DA_RESPOSTA_DO_CHAT } from "../componentes/chat/ChatRapido";
 import { CanvasDeOrquestradores } from "./CanvasDeOrquestradores";
 
@@ -175,6 +176,23 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
     expect(camada?.parentElement).toBe(painelDoChat?.parentElement);
     expect(camada?.parentElement).toHaveClass("react-flow");
     expect(camada!.compareDocumentPosition(painelDoChat!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("a contagem do botão Subagentes acompanha a biblioteca quando o chat cria um subagente pronto", async () => {
+    const pronto = (nome: string) => ({ nome, descricao: "Faz algo", prompt: "Faça.", modelo: "herdar" as const });
+    const preferencias = (nomes: string[]) => ({
+      instrucoesPadrao: "",
+      subagentesProntos: nomes.map(pronto),
+      autorrecuperacao: true,
+    });
+    const ler = vi.spyOn(api, "lerPreferencias").mockResolvedValue(preferencias(["a", "b"]));
+    render(<CanvasDeOrquestradores />);
+    expect(await screen.findByRole("button", { name: "Subagentes (2)" })).toBeInTheDocument();
+
+    // O cartão do chat grava a lista nova e avisa; a barra relê sem reabrir nada.
+    ler.mockResolvedValue(preferencias(["a", "b", "c"]));
+    act(() => avisarSubagentesProntosMudaram());
+    expect(await screen.findByRole("button", { name: "Subagentes (3)" })).toBeInTheDocument();
   });
 
   it("com um painel da barra aberto, a lista de orquestradores some como o quadro vazio e volta como estava", async () => {

@@ -8,6 +8,7 @@ import type {
   ModeloDoSubagentePronto,
 } from "../../shared/api/tipos";
 import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
+import { avisarSubagentesProntosMudaram } from "../../shared/subagentesProntos";
 import { IconePessoas } from "../Icones";
 
 interface Props {
@@ -96,6 +97,7 @@ export function CartaoDeSubagente({ acao }: Props) {
         return;
       }
       await api.alterarPreferencias({ subagentesProntos: lista });
+      avisarSubagentesProntosMudaram();
       setEtapa({ tipo: "feito" });
     } catch (falha) {
       setEtapa({ tipo: "erro", mensagem: mensagemDeErro(falha) });

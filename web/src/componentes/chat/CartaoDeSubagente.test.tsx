@@ -7,6 +7,7 @@ import type {
   DadosDasPreferencias,
   DadosDoSubagentePronto,
 } from "../../shared/api/tipos";
+import { aoMudarSubagentesProntos } from "../../shared/subagentesProntos";
 import { CartaoDeSubagente } from "./CartaoDeSubagente";
 
 const REVISOR: DadosDoSubagentePronto = {
@@ -72,6 +73,33 @@ describe("CartaoDeSubagente", () => {
         { nome: "documentador", descricao: "Atualiza o README", prompt: "Documente o que mudou.", modelo: "haiku" },
       ],
     });
+  });
+
+  it("criar: avisa que a biblioteca mudou só depois de gravar (a barra do topo relê a contagem)", async () => {
+    vi.spyOn(api, "lerPreferencias").mockResolvedValue(preferencias([REVISOR]));
+    const alterar = vi.spyOn(api, "alterarPreferencias").mockResolvedValue(preferencias([REVISOR]));
+    const aviso = vi.fn();
+    const cancelar = aoMudarSubagentesProntos(aviso);
+    render(<CartaoDeSubagente acao={CRIAR} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "criar" }));
+    await screen.findByRole("button", { name: "criado ✓" });
+    expect(alterar).toHaveBeenCalledTimes(1);
+    expect(aviso).toHaveBeenCalledTimes(1);
+    cancelar();
+  });
+
+  it("criar com falha na gravação: não avisa", async () => {
+    vi.spyOn(api, "lerPreferencias").mockResolvedValue(preferencias([REVISOR]));
+    vi.spyOn(api, "alterarPreferencias").mockRejectedValue(new Error("fora do ar"));
+    const aviso = vi.fn();
+    const cancelar = aoMudarSubagentesProntos(aviso);
+    render(<CartaoDeSubagente acao={CRIAR} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "criar" }));
+    await screen.findByRole("alert");
+    expect(aviso).not.toHaveBeenCalled();
+    cancelar();
   });
 
   it("criar com um nome que já existe: erro no cartão, sem gravar", async () => {

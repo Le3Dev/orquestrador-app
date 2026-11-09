@@ -194,6 +194,7 @@ import { useServidor } from "../shared/hooks/useServidor";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../shared/modelos";
 import { nomeLivre } from "../shared/nomeLivre";
 import type { AcaoDaPaleta, FonteDaPaleta, ItemDaPaleta } from "../shared/paletaDeComandos";
+import { aoMudarSubagentesProntos } from "../shared/subagentesProntos";
 
 /** Onde chega a linha do terminal a uma nota ou artefato ligados: o meio de cada lado (a prévia já tem as dela). */
 const ANCORAS_DO_ITEM_LIGADO: readonly { id: Ancora; posicao: Position }[] = [
@@ -1736,6 +1737,8 @@ function Canvas() {
       setQuantidadeDeSubagentes(null);
     }
   }, [servidor.conectado, lerQuantidadeDeSubagentes]);
+  // A biblioteca também muda pelo cartão do chat, fora dos painéis.
+  useEffect(() => aoMudarSubagentesProntos(lerQuantidadeDeSubagentes), [lerQuantidadeDeSubagentes]);
   // Salvar qualquer um dos painéis: os indicadores dos terminais e a contagem podem ter mudado.
   const aoSalvarPainel = useCallback(() => {
     void recarregar();
