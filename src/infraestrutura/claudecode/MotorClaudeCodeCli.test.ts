@@ -272,7 +272,55 @@ describe("MotorClaudeCodeCli e os servidores citados", () => {
     expect(resultado.sucesso).toBe(true);
     expect(enderecos(eventos)).toEqual([]);
   });
+
+  it.each<[boolean, unknown[]]>([
+    [false, []],
+    [true, [{ tipo: "endereco_local_detectado", url: "http://localhost:8530/health" }]],
+  ])("o endereço na saída de um comando só é anunciado se responde (responde: %s)", async (responde, esperado) => {
+    const sondados: string[] = [];
+    const fachada = new FachadaQueImprimeEndereco();
+    const motor = new MotorClaudeCodeCli(fachada as unknown as FachadaClaudeCodeCli, async (url) => {
+      sondados.push(url);
+      return responde;
+    });
+    const eventos: unknown[] = [];
+
+    const resultado = await motor.executarTurno(pedidoComInstrucoes(null), (evento) => eventos.push(evento), new AbortController().signal);
+
+    expect(resultado.sucesso).toBe(true);
+    expect(sondados).toEqual(["http://localhost:8530/health"]);
+    expect(enderecos(eventos)).toEqual(esperado);
+  });
 });
+
+/** Um turno em que a saída de um comando (um `cat` de docker-compose) cita um endereço. */
+class FachadaQueImprimeEndereco {
+  async executar(
+    _execucao: ExecucaoDoClaudeCode,
+    aoReceberMensagem: (mensagem: unknown) => void,
+  ): Promise<SaidaDoClaudeCode> {
+    aoReceberMensagem({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_use", id: "c1", name: "Bash", input: { command: "cat docker-compose.yml" } }] },
+    });
+    aoReceberMensagem({
+      type: "user",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_result", tool_use_id: "c1", content: "" }] },
+      tool_use_result: { stdout: "test: curl -f http://localhost:8530/health", stderr: "" },
+    });
+    aoReceberMensagem({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "feito",
+      duration_ms: 1,
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    return { codigoDeSaida: 0, erroPadrao: "" };
+  }
+}
 
 /** Fachada que roda um roteiro: recebe o que a fachada real receberia e devolve a saída dada. */
 function fachadaComRoteiro(
