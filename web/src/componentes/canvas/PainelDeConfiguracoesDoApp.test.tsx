@@ -124,6 +124,7 @@ describe("PainelDeConfiguracoesDoApp", () => {
       visualizadorDeCodigo: false,
       larguraDoChatFixo: 360,
       manterBixinhosAteLimpar: false,
+      minimapaVisivel: false,
     });
 
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Chat fixo" }));

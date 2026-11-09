@@ -57,6 +57,23 @@ export function IconeGrade({ tamanho = 12, className = "" }: PropsDoIcone) {
   );
 }
 
+/**
+ * Moldura com um retângulo menor dentro: o minimapa (o canvas e o pedaço
+ * visível dele). Preenchido, como os ícones dos controles do canvas.
+ */
+export function IconeMinimapa({ tamanho = 12, className = "" }: PropsDoIcone) {
+  return (
+    <svg width={tamanho} height={tamanho} viewBox="0 0 12 12" className={className} aria-hidden="true">
+      <path
+        fillRule="evenodd"
+        d="M1.5 1.5h9a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1Zm.2 1.2v6.6h8.6V2.7H1.7Z"
+        fill="currentColor"
+      />
+      <rect x="5.6" y="5.4" width="3.6" height="2.8" rx=".5" fill="currentColor" />
+    </svg>
+  );
+}
+
 /** Branch de git: dois nós ligados, como o ícone de ramo de versão. */
 export function IconeBranch({ tamanho = 12, className = "" }: PropsDoIcone) {
   return (

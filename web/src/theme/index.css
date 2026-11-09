@@ -512,6 +512,15 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   stroke: color-mix(in srgb, var(--active) 35%, var(--muted));
 }
 .react-flow__controls { border-radius: var(--radius-input); overflow: hidden; border: 1px solid var(--border); }
+/* O botão do minimapa, no canto inferior direito (o minimapa vem recolhido):
+ * aceso enquanto o minimapa aparece, que fica logo acima dele (botão de 26 +
+ * bordas + respiro de 8). */
+.controles-do-minimapa .react-flow__controls-button { border-bottom: 0; }
+.controles-do-minimapa .react-flow__controls-button[aria-pressed="true"] {
+  background: var(--xy-controls-button-background-color-hover);
+  color: var(--xy-controls-button-color-hover);
+}
+.react-flow__minimap.minimapa-do-canvas { margin-bottom: 51px; }
 
 /* ---------------- Seleção múltipla ----------------
  * Arrastar no vazio desenha o retângulo de seleção, tracejado na cor ativa,
@@ -2930,7 +2939,7 @@ html.modo-invisivel .barra-de-titulo * {
   .barra-do-canvas .btn-sm { width: 30px; padding: 0; font-size: 14px; }
   .status-detalhe { display: none; }
   .status-resumo { display: inline-flex; }
-  .react-flow__minimap { display: none; }
+  .react-flow__minimap, .controles-do-minimapa { display: none; }
   .campo-de-busca-da-barra {
     flex: 0 0 28px;
     min-width: 0;

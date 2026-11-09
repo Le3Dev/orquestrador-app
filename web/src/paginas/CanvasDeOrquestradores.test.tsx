@@ -819,7 +819,36 @@ describe("CanvasDeOrquestradores · minimapa", () => {
     localStorage.clear();
   });
 
+  it("vem recolhido; o botão do canto mostra e esconde o minimapa e guarda a escolha", async () => {
+    simulados.orquestradores.orquestradores = [orquestrador("o1"), orquestrador("o2")];
+    const { unmount } = render(<CanvasDeOrquestradores />);
+
+    const mostrar = await screen.findByRole("button", { name: "Mostrar minimapa" });
+    expect(mostrar).toHaveAttribute("aria-pressed", "false");
+    expect(mostrar).toHaveAttribute("title", "Mostrar minimapa");
+    expect(document.querySelector(".react-flow__minimap")).toBeNull();
+
+    fireEvent.click(mostrar);
+    const esconder = await screen.findByRole("button", { name: "Esconder minimapa" });
+    expect(esconder).toHaveAttribute("aria-pressed", "true");
+    expect(document.querySelector(".react-flow__minimap")).not.toBeNull();
+    expect(JSON.parse(localStorage.getItem("orquestrador.preferenciasDaTela") ?? "null")).toMatchObject({
+      minimapaVisivel: true,
+    });
+    // Os controles de zoom continuam no canto esquerdo; o botão do minimapa fica no direito.
+    expect(esconder.closest(".react-flow__controls")).toHaveClass("bottom", "right");
+    expect(screen.getByRole("button", { name: "Fit View" }).closest(".react-flow__controls")).toHaveClass("bottom", "left");
+
+    // Ao abrir de novo, volta como foi deixado.
+    unmount();
+    render(<CanvasDeOrquestradores />);
+    fireEvent.click(await screen.findByRole("button", { name: "Esconder minimapa" }));
+    expect(screen.getByRole("button", { name: "Mostrar minimapa" })).toHaveAttribute("aria-pressed", "false");
+    expect(document.querySelector(".react-flow__minimap")).toBeNull();
+  });
+
   it("só o terminal do Orquestrador trabalhando ganha o brilho no minimapa", async () => {
+    localStorage.setItem("orquestrador.preferenciasDaTela", JSON.stringify({ minimapaVisivel: true }));
     simulados.orquestradores.orquestradores = [orquestrador("o1"), { ...orquestrador("o2"), situacao: "ocioso" }];
     render(<CanvasDeOrquestradores />);
 
@@ -1360,6 +1389,7 @@ describe("CanvasDeOrquestradores · artefatos", { timeout: 20_000 }, () => {
   it("ao carregar, o artefato que sumiu do servidor sai do canvas e do layout; o minimapa tem cor própria", async () => {
     layoutCom(["o1"], ["a1", "apagado"]);
     comArtefatos([artefato("a1")]);
+    localStorage.setItem("orquestrador.preferenciasDaTela", JSON.stringify({ minimapaVisivel: true }));
     render(<CanvasDeOrquestradores />);
 
     await waitFor(() => expect(Object.keys(lerLayout().artefatos)).toEqual(["a1"]));

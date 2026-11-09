@@ -34,7 +34,7 @@ import {
   useState,
 } from "react";
 
-import { IconeGrade, IconeOrquestrador } from "../componentes/Icones";
+import { IconeGrade, IconeMinimapa, IconeOrquestrador } from "../componentes/Icones";
 import { ChatRapido } from "../componentes/chat/ChatRapido";
 import { ArestaDoBixinho } from "../componentes/canvas/ArestaDoBixinho";
 import { BarraDoGrupo } from "../componentes/canvas/BarraDoGrupo";
@@ -259,6 +259,8 @@ const ROTULO_DO_ENQUADRAR = "Fit View";
 const VIEWPORT_PADRAO: Viewport = { x: 0, y: 0, zoom: 1 };
 /** Nome e dica do "Organizar", o 4º botão dos controles do canto inferior esquerdo. */
 const DICA_DO_ORGANIZAR = "Organizar: terminais lado a lado; notas e artefatos à direita";
+/** Nome e dica do botão do minimapa, no canto inferior direito. */
+const DICA_DO_MINIMAPA = { mostrar: "Mostrar minimapa", esconder: "Esconder minimapa" } as const;
 /**
  * Quanto do pé da área do canvas o chat rápido ocupa (compacto, com a
  * margem): a janela de um artefato aberta "no centro" fica acima dele.
@@ -500,6 +502,8 @@ function Canvas() {
   const chatFixo = preferenciasDaTela.chatFixoNaEsquerda;
   const ladoDoChatFixo = preferenciasDaTela.ladoDoChatFixo;
   const larguraDoChatFixo = preferenciasDaTela.larguraDoChatFixo;
+  // O minimapa vem recolhido; o botão do canto inferior direito o mostra e esconde.
+  const minimapaVisivel = preferenciasDaTela.minimapaVisivel;
   // Limpar lê as conversas por aqui, para as ações do canvas não mudarem a cada evento.
   const conversasAtuais = useRef(conversas);
 
@@ -1668,6 +1672,40 @@ function Canvas() {
     ),
     [enquadrarTudo, organizar, podeOrganizar],
   );
+  // O minimapa (recolhido por padrão) e, no canto, o botão que o mostra e
+  // esconde, com a pele dos controles. O minimapa aberto fica acima do botão.
+  const alternarMinimapa = useCallback(
+    () => mudarPreferenciasDaTela({ minimapaVisivel: !minimapaVisivel }),
+    [mudarPreferenciasDaTela, minimapaVisivel],
+  );
+  const minimapa = useMemo(() => {
+    const dica = minimapaVisivel ? DICA_DO_MINIMAPA.esconder : DICA_DO_MINIMAPA.mostrar;
+    return (
+      <>
+        {minimapaVisivel && (
+          <MiniMap<NoDoCanvas>
+            position="bottom-right"
+            className="minimapa-do-canvas"
+            pannable
+            zoomable
+            nodeClassName={classeDoMinimapa}
+          />
+        )}
+        <Controls
+          position="bottom-right"
+          className="controles-do-minimapa"
+          aria-label="Minimapa"
+          showZoom={false}
+          showFitView={false}
+          showInteractive={false}
+        >
+          <ControlButton onClick={alternarMinimapa} aria-pressed={minimapaVisivel} title={dica} aria-label={dica}>
+            <IconeMinimapa />
+          </ControlButton>
+        </Controls>
+      </>
+    );
+  }, [minimapaVisivel, classeDoMinimapa, alternarMinimapa]);
   const colunaDoCentro = useMemo(
     () => (
       <div className="coluna-do-topo coluna-do-topo-centro">
@@ -1816,7 +1854,7 @@ function Canvas() {
                     {/* Abaixo dos painéis (inclusive o chat); some enquanto um painel da barra está aberto. */}
                     {quantidadeDeJanelas === 0 && painelAberto === null && <CanvasVazio aoCriar={novoOrquestrador} />}
                     {controles}
-                    <MiniMap<NoDoCanvas> position="bottom-right" pannable zoomable nodeClassName={classeDoMinimapa} />
+                    {minimapa}
                     <Panel position="top-left" className="paineis-do-topo">
                       {colunaDaEsquerda}
                       {colunaDoCentro}
