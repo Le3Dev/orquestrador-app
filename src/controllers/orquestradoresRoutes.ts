@@ -135,10 +135,27 @@ const esquemaDoSubagentePronto = z.object({
   modelo: z.string({ error: "Modelo do subagente pronto inválido." }).optional(),
 });
 
+/**
+ * Forma de cada perfil de instruções. Nome vazio ou repetido e tamanhos são
+ * conferidos pelo domínio (`perfisDeInstrucoesValidos`).
+ */
+const esquemaDoPerfilDeInstrucoes = z.object({
+  nome: z.string({ error: "O nome do perfil de instruções deve ser um texto." }),
+  // Bruto folgado, como em `esquemaDeInstrucoes`: o limite de fato vem depois de normalizar.
+  texto: z
+    .string({ error: "O texto do perfil de instruções deve ser um texto." })
+    .max(TAMANHO_MAXIMO_DAS_INSTRUCOES * 2, {
+      error: `O texto do perfil de instruções deve ter até ${TAMANHO_MAXIMO_DAS_INSTRUCOES} caracteres.`,
+    }),
+});
+
 const esquemaDasPreferencias = z.object({
   instrucoesPadrao: esquemaDeInstrucoes("As instruções gerais").optional(),
   subagentesProntos: z
     .array(esquemaDoSubagentePronto, { error: "Os subagentes prontos devem ser uma lista." })
+    .optional(),
+  perfisDeInstrucoes: z
+    .array(esquemaDoPerfilDeInstrucoes, { error: "Os perfis de instruções devem ser uma lista." })
     .optional(),
   autorrecuperacao: z
     .boolean({ error: 'A opção "Autorrecuperação" deve ser verdadeira ou falsa.' })
@@ -497,7 +514,7 @@ export function criarOrquestradoresRoutes({
 
   /**
    * Preferências que valem para todos os Orquestradores (instruções gerais,
-   * subagentes prontos e autorrecuperação dos turnos).
+   * subagentes prontos, perfis de instruções e autorrecuperação dos turnos).
    */
   rotas.get(
     "/preferencias",

@@ -74,11 +74,28 @@ export const MAXIMO_DE_SUBAGENTES_PRONTOS = 10;
 export const TAMANHO_MAXIMO_DA_DESCRICAO_DO_SUBAGENTE = 300;
 export const TAMANHO_MAXIMO_DO_PROMPT_DO_SUBAGENTE = 4_000;
 
+/**
+ * Texto de instruções com nome. Aplicar num orquestrador copia o texto para as
+ * instruções personalizadas dele: sem vínculo, editar o perfil depois não muda
+ * quem já o usou.
+ */
+export interface PerfilDeInstrucoes {
+  nome: string;
+  /** Mesmo limite das instruções personalizadas (`TAMANHO_MAXIMO_DAS_INSTRUCOES`). */
+  texto: string;
+}
+
+/** Limites dos perfis de instruções, como o servidor confere. */
+export const MAXIMO_DE_PERFIS_DE_INSTRUCOES = 20;
+export const TAMANHO_MAXIMO_DO_NOME_DO_PERFIL = 40;
+
 /** Preferências que valem para todos os orquestradores. */
 export interface DadosDasPreferencias {
   /** Instruções para os orquestradores sem instruções próprias. */
   instrucoesPadrao: string;
   subagentesProntos: DadosDoSubagentePronto[];
+  /** Falta em servidores anteriores a eles (vale lista vazia). */
+  perfisDeInstrucoes?: PerfilDeInstrucoes[];
   /**
    * Retoma o turno sozinho quando o Claude fica em silêncio (travado) ou a API
    * falha (limite de uso, sobrecarga, rede). Ligada por padrão; falta em

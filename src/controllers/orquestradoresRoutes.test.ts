@@ -886,6 +886,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(await (await requisitar("GET", "/preferencias")).json()).toEqual({
         instrucoesPadrao: "",
         subagentesProntos: [],
+        perfisDeInstrucoes: [],
         autorrecuperacao: true,
       });
 
@@ -894,6 +895,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(await resposta.json()).toEqual({
         instrucoesPadrao: "Responda curto.",
         subagentesProntos: [],
+        perfisDeInstrucoes: [],
         autorrecuperacao: true,
       });
       expect(preferencias.atuais().instrucoesPadrao).toBe("Responda curto.");
@@ -911,6 +913,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(await resposta.json()).toEqual({
         instrucoesPadrao: "",
         subagentesProntos: [{ ...revisor, modelo: "herdar" }],
+        perfisDeInstrucoes: [],
         autorrecuperacao: true,
       });
 
@@ -975,6 +978,38 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(resposta.status).toBe(400);
       expect(await resposta.json()).toEqual({ erro: mensagem });
       expect(preferencias.atuais().subagentesProntos).toEqual([]);
+    });
+
+    it("PATCH /preferencias grava os perfis de instruções sem mexer no resto", async () => {
+      await requisitar("PATCH", "/preferencias", { instrucoesPadrao: "Curto." });
+      const resposta = await requisitar("PATCH", "/preferencias", {
+        perfisDeInstrucoes: [{ nome: " Backend ", texto: "Use Jest.  \n\n\n\nRode o lint." }],
+      });
+
+      expect(resposta.status).toBe(200);
+      expect(await resposta.json()).toEqual({
+        instrucoesPadrao: "Curto.",
+        subagentesProntos: [],
+        perfisDeInstrucoes: [{ nome: "Backend", texto: "Use Jest.\n\nRode o lint." }],
+        autorrecuperacao: true,
+      });
+      expect(await (await requisitar("GET", "/preferencias")).json()).toMatchObject({
+        perfisDeInstrucoes: [{ nome: "Backend", texto: "Use Jest.\n\nRode o lint." }],
+      });
+    });
+
+    it.each([
+      [[{ nome: "A", texto: "x" }, { nome: "a", texto: "y" }], 'Já existe um perfil de instruções chamado "a".'],
+      [[{ nome: "", texto: "x" }], "Dê um nome ao perfil de instruções 1."],
+      [[{ nome: "A", texto: "" }], 'Preencha o texto do perfil "A".'],
+      [[{ nome: "A" }], "O texto do perfil de instruções deve ser um texto."],
+      ["A", "Os perfis de instruções devem ser uma lista."],
+    ])("PATCH /preferencias recusa perfis de instruções inválidos (%j) com 400", async (perfisDeInstrucoes, mensagem) => {
+      const resposta = await requisitar("PATCH", "/preferencias", { perfisDeInstrucoes });
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: mensagem });
+      expect(preferencias.atuais().perfisDeInstrucoes).toEqual([]);
     });
 
     it("GET e PATCH /preferencias leem e gravam a autorrecuperação, ligada por padrão", async () => {

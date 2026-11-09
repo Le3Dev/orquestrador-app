@@ -172,6 +172,7 @@ describe("PreferenciasGlobais.subagentesProntos", () => {
     expect(preferencias.com({ subagentesProntos: [] }).paraDados()).toEqual({
       instrucoesPadrao: "X",
       subagentesProntos: [],
+      perfisDeInstrucoes: [],
       autorrecuperacao: true,
     });
   });

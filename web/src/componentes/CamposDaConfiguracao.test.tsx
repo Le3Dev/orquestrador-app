@@ -468,6 +468,80 @@ describe("CamposDaConfiguracao", () => {
       expect(screen.getByRole("alert")).toHaveTextContent(/Passou do limite de 4.000 caracteres/);
     });
 
+    describe("aplicar perfil", () => {
+      const seletor = () => screen.getByRole("combobox", { name: "Aplicar perfil de instruções" });
+      const PERFIS = [
+        { nome: "Backend", texto: "Use Jest." },
+        { nome: "Front", texto: "Use Vitest." },
+      ];
+
+      function comPerfis(perfisDeInstrucoes: { nome: string; texto: string }[] | undefined) {
+        vi.spyOn(api, "lerPreferencias").mockResolvedValue({
+          instrucoesPadrao: "",
+          subagentesProntos: [],
+          ...(perfisDeInstrucoes === undefined ? {} : { perfisDeInstrucoes }),
+        });
+      }
+
+      it.each([[[]], [undefined]])("sem perfis (%j), o select não aparece", async (perfis) => {
+        comPerfis(perfis);
+        renderizar();
+
+        await act(async () => Promise.resolve());
+        expect(screen.queryByRole("combobox", { name: "Aplicar perfil de instruções" })).not.toBeInTheDocument();
+      });
+
+      it("com o campo vazio, copia o texto do perfil sem perguntar e o select volta ao convite", async () => {
+        comPerfis(PERFIS);
+        const confirmar = vi.spyOn(window, "confirm");
+        const { aoMudar } = renderizar();
+
+        await screen.findByRole("combobox", { name: "Aplicar perfil de instruções" });
+        expect(within(seletor()).getAllByRole("option").map((opcao) => opcao.textContent)).toEqual([
+          "Aplicar perfil…",
+          "Backend",
+          "Front",
+        ]);
+        fireEvent.change(seletor(), { target: { value: "1" } });
+
+        expect(confirmar).not.toHaveBeenCalled();
+        expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, instrucoesPersonalizadas: "Use Vitest." });
+        expect(campo()).toHaveValue("Use Vitest.");
+        expect(seletor()).toHaveValue("");
+      });
+
+      it("com outro texto escrito, pergunta antes; recusar mantém o texto", async () => {
+        comPerfis(PERFIS);
+        const confirmar = vi.spyOn(window, "confirm").mockReturnValue(false);
+        const { aoMudar } = renderizar({ instrucoesPersonalizadas: "Meu texto." });
+
+        fireEvent.change(await screen.findByRole("combobox", { name: "Aplicar perfil de instruções" }), {
+          target: { value: "0" },
+        });
+
+        expect(confirmar).toHaveBeenCalledWith(expect.stringContaining('pelas do perfil "Backend"'));
+        expect(aoMudar).not.toHaveBeenCalled();
+        expect(campo()).toHaveValue("Meu texto.");
+
+        confirmar.mockReturnValue(true);
+        fireEvent.change(seletor(), { target: { value: "0" } });
+        expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, instrucoesPersonalizadas: "Use Jest." });
+      });
+
+      it("com o mesmo texto do perfil, não pergunta", async () => {
+        comPerfis(PERFIS);
+        const confirmar = vi.spyOn(window, "confirm");
+        renderizar({ instrucoesPersonalizadas: "Use Jest.\n" });
+
+        fireEvent.change(await screen.findByRole("combobox", { name: "Aplicar perfil de instruções" }), {
+          target: { value: "0" },
+        });
+
+        expect(confirmar).not.toHaveBeenCalled();
+        expect(campo()).toHaveValue("Use Jest.");
+      });
+    });
+
     it("tem o link de pré-visualizar o prompt final", () => {
       renderizar();
 

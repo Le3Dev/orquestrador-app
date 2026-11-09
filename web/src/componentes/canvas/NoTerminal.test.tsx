@@ -228,6 +228,25 @@ describe("PainelDeConfiguracao", () => {
     });
   });
 
+  it("aplicar um perfil copia o texto para as instruções e o PATCH envia só elas", async () => {
+    vi.spyOn(api, "lerPreferencias").mockResolvedValue({
+      instrucoesPadrao: "",
+      subagentesProntos: [],
+      perfisDeInstrucoes: [{ nome: "Backend", texto: "Use Jest e rode o lint." }],
+    });
+    const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+    const { aoFechar } = renderizar(orquestrador());
+
+    fireEvent.change(await screen.findByRole("combobox", { name: "Aplicar perfil de instruções" }), {
+      target: { value: "0" },
+    });
+    expect(campoDasInstrucoes()).toHaveValue("Use Jest e rode o lint.");
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+    await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+    expect(alterar).toHaveBeenCalledWith("o1", { instrucoesPersonalizadas: "Use Jest e rode o lint." });
+  });
+
   describe("instruções apagadas ou muito mudadas com a conversa em andamento", () => {
     const INSTRUCOES = "Use Jest nos testes e escreva as mensagens de commit em português.";
     const sugestao = () => screen.queryByRole("button", { name: "Salvar e começar conversa nova" });

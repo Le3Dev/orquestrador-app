@@ -114,6 +114,7 @@ describe("NoRascunho", () => {
     // Sem resposta por padrão: os testes que dependem delas trocam o retorno.
     vi.spyOn(api, "listarPredefinicoes").mockReturnValue(new Promise(() => undefined));
     vi.spyOn(api, "lerEsforcoHerdado").mockReturnValue(new Promise(() => undefined));
+    vi.spyOn(api, "lerPreferencias").mockReturnValue(new Promise(() => undefined));
   });
 
   afterEach(() => {
@@ -304,6 +305,63 @@ describe("NoRascunho", () => {
       instrucoesPersonalizadas: "Seja breve.",
     });
     await waitFor(() => expect(acoes.orquestradorCriado).toHaveBeenCalledWith("rascunho:1", criado));
+  });
+
+  describe("aplicar perfil de instruções", () => {
+    const seletor = () => screen.getByRole("combobox", { name: "Aplicar perfil de instruções" });
+    const campoDasInstrucoes = () => screen.getByRole("textbox", { name: "Instruções" });
+
+    function comPerfis() {
+      vi.spyOn(api, "lerPreferencias").mockResolvedValue({
+        instrucoesPadrao: "",
+        subagentesProntos: [],
+        perfisDeInstrucoes: [
+          { nome: "Backend", texto: "Use Jest." },
+          { nome: "Front", texto: "Use Vitest." },
+        ],
+      });
+    }
+
+    it("sem perfis, o select não aparece", async () => {
+      vi.spyOn(api, "lerPreferencias").mockResolvedValue({ instrucoesPadrao: "", subagentesProntos: [] });
+      abrir();
+      await screen.findByRole("option", { name: "app" });
+
+      await act(async () => Promise.resolve());
+      expect(screen.queryByRole("combobox", { name: "Aplicar perfil de instruções" })).not.toBeInTheDocument();
+    });
+
+    it("copia o texto do perfil para as instruções, que vão no começar", async () => {
+      comPerfis();
+      const criar = espiarCriacao();
+      await abrirComPasta();
+
+      fireEvent.change(await screen.findByRole("combobox", { name: "Aplicar perfil de instruções" }), {
+        target: { value: "0" },
+      });
+      expect(campoDasInstrucoes()).toHaveValue("Use Jest.");
+      expect(seletor()).toHaveValue("");
+
+      const payload = await criarEPegarPayload(criar);
+      expect(payload).toMatchObject({ instrucoesPersonalizadas: "Use Jest." });
+    });
+
+    it("com outro texto escrito, confirma antes de trocar", async () => {
+      comPerfis();
+      const confirmar = vi.spyOn(window, "confirm").mockReturnValue(false);
+      abrir();
+      fireEvent.change(campoDasInstrucoes(), { target: { value: "Meu texto." } });
+
+      fireEvent.change(await screen.findByRole("combobox", { name: "Aplicar perfil de instruções" }), {
+        target: { value: "1" },
+      });
+      expect(confirmar).toHaveBeenCalledWith(expect.stringContaining('pelas do perfil "Front"'));
+      expect(campoDasInstrucoes()).toHaveValue("Meu texto.");
+
+      confirmar.mockReturnValue(true);
+      fireEvent.change(seletor(), { target: { value: "1" } });
+      expect(campoDasInstrucoes()).toHaveValue("Use Vitest.");
+    });
   });
 
   it("o tamanho da letra começa no Normal e a troca vai para o nó, não para o servidor", async () => {

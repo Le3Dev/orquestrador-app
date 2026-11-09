@@ -23,7 +23,12 @@ describe("RepositorioDePreferenciasEmArquivo", () => {
   it("sem arquivo, abre com as preferências vazias e não cria nada", async () => {
     const repositorio = await RepositorioDePreferenciasEmArquivo.abrir(pasta);
 
-    expect(repositorio.atuais().paraDados()).toEqual({ instrucoesPadrao: "", subagentesProntos: [], autorrecuperacao: true });
+    expect(repositorio.atuais().paraDados()).toEqual({
+      instrucoesPadrao: "",
+      subagentesProntos: [],
+      perfisDeInstrucoes: [],
+      autorrecuperacao: true,
+    });
     expect(existsSync(path.join(pasta, "preferencias.json"))).toBe(false);
   });
 
@@ -43,7 +48,41 @@ describe("RepositorioDePreferenciasEmArquivo", () => {
     expect(JSON.parse(await readFile(path.join(pasta, "preferencias.json"), "utf8"))).toEqual({
       instrucoesPadrao: 'Linha 1\nLinha 2 com "aspas" e {{x}}',
       subagentesProntos: [revisor],
+      perfisDeInstrucoes: [],
       autorrecuperacao: true,
+    });
+  });
+
+  it("arquivo gravado antes dos perfis de instruções abre igual, com a lista vazia", async () => {
+    await writeFile(
+      path.join(pasta, "preferencias.json"),
+      JSON.stringify({ instrucoesPadrao: "Curto.", subagentesProntos: [], autorrecuperacao: false }),
+      "utf8",
+    );
+
+    const repositorio = await RepositorioDePreferenciasEmArquivo.abrir(pasta);
+
+    expect(repositorio.atuais().paraDados()).toEqual({
+      instrucoesPadrao: "Curto.",
+      subagentesProntos: [],
+      perfisDeInstrucoes: [],
+      autorrecuperacao: false,
+    });
+    expect(existsSync(path.join(pasta, "preferencias.ilegivel.json"))).toBe(false);
+  });
+
+  it("salva os perfis de instruções e reabre igual", async () => {
+    const repositorio = await RepositorioDePreferenciasEmArquivo.abrir(pasta);
+    const perfis = [
+      { nome: "Backend", texto: "Use Jest.\nRode o lint." },
+      { nome: "Front", texto: "Use Vitest." },
+    ];
+    await repositorio.salvar(repositorio.atuais().com({ perfisDeInstrucoes: perfis }));
+
+    const reaberto = await RepositorioDePreferenciasEmArquivo.abrir(pasta);
+    expect(reaberto.atuais().perfisDeInstrucoes).toEqual(perfis);
+    expect(JSON.parse(await readFile(path.join(pasta, "preferencias.json"), "utf8"))).toMatchObject({
+      perfisDeInstrucoes: perfis,
     });
   });
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api/cliente";
-import type { DadosDaPredefinicao, DadosDoSubagentePronto, EsforcosHerdados } from "../api/tipos";
+import type { DadosDaPredefinicao, DadosDasPreferencias, EsforcosHerdados } from "../api/tipos";
 import { descreverAlteracoesDaConfiguracao } from "../formatacao";
 
 // Usados pela ⚙ do terminal (CamposDaConfiguracao) e pela criação (NoRascunho).
@@ -33,18 +33,20 @@ export function usePredefinicoes(): DadosDaPredefinicao[] {
 }
 
 /**
- * Os subagentes prontos das preferências, para escolher os de um orquestrador.
- * Nulo enquanto carrega ou se a leitura falhar: a escolha segue sem as caixas.
+ * As preferências globais, lidas uma vez ao abrir: os subagentes prontos (para
+ * escolher os de um orquestrador) e os perfis de instruções (para aplicar).
+ * Nulo enquanto carrega ou se a leitura falhar: a escolha segue sem as caixas
+ * e o "Aplicar perfil…" não aparece.
  */
-export function useSubagentesProntos(): DadosDoSubagentePronto[] | null {
-  const [subagentes, setSubagentes] = useState<DadosDoSubagentePronto[] | null>(null);
+export function usePreferencias(): DadosDasPreferencias | null {
+  const [preferencias, setPreferencias] = useState<DadosDasPreferencias | null>(null);
   useEffect(() => {
     let ativo = true;
     api
       .lerPreferencias()
-      .then((preferencias) => {
+      .then((lidas) => {
         if (ativo) {
-          setSubagentes(preferencias.subagentesProntos);
+          setPreferencias(lidas);
         }
       })
       .catch(() => undefined);
@@ -52,7 +54,7 @@ export function useSubagentesProntos(): DadosDoSubagentePronto[] | null {
       ativo = false;
     };
   }, []);
-  return subagentes;
+  return preferencias;
 }
 
 /**

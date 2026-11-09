@@ -245,6 +245,7 @@ describe("PreferenciasGlobais", () => {
     expect(PreferenciasGlobais.vazias().paraDados()).toEqual({
       instrucoesPadrao: "",
       subagentesProntos: [],
+      perfisDeInstrucoes: [],
       autorrecuperacao: true,
     });
     expect(PreferenciasGlobais.de({}).instrucoesPadrao).toBe("");

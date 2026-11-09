@@ -16,12 +16,18 @@ import {
   ajudaDaPredefinicao,
   useEsforcosHerdados,
   usePredefinicoes,
-  useSubagentesProntos,
+  usePreferencias,
 } from "../shared/hooks/useDadosDaConfiguracao";
 import { DICA_DAS_VARIAVEIS, tamanhoDasInstrucoes } from "../shared/instrucoes";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../shared/modelos";
 import { ChipDeEsforco, ChipDeQuantidade } from "./canvas/ChipsDaCriacao";
-import { AvisoDoEsforcoHerdado, IconeDaPermissao, Rotulo, SeletorDeModelo } from "./canvas/LinhasDaConfiguracao";
+import {
+  AvisoDoEsforcoHerdado,
+  IconeDaPermissao,
+  Rotulo,
+  SeletorDeModelo,
+  SeletorDePerfil,
+} from "./canvas/LinhasDaConfiguracao";
 import { PreviaDoPromptFinal } from "./PreviaDoPromptFinal";
 
 const PERMISSOES: readonly NivelDePermissao[] = ["leitura", "edicao", "edicao_e_comandos"];
@@ -85,7 +91,9 @@ export function CamposDaConfiguracao({
   const idDaLetra = useId();
   const predefinicoes = usePredefinicoes();
   const herdados = useEsforcosHerdados(buscarEsforcoHerdado);
-  const biblioteca = useSubagentesProntos();
+  // Uma leitura só: a biblioteca de subagentes prontos e os perfis de instruções.
+  const preferencias = usePreferencias();
+  const biblioteca = preferencias?.subagentesProntos ?? null;
   const idDosProntos = useId();
   const [menuAberto, setMenuAberto] = useState<Menu | null>(null);
   const [aplicando, setAplicando] = useState(false);
@@ -374,10 +382,15 @@ export function CamposDaConfiguracao({
           htmlFor={`${idDoCampo}-instrucoes`}
           titulo="Instruções"
           dica="Regras só deste orquestrador."
-          explicacao="Entram no prompt dele, por exemplo o jeito de responder ou o que rodar antes de concluir, e valem já no próximo pedido, inclusive nesta conversa. Vazio, valem as Instruções gerais (botão na barra). Não ampliam a permissão acima."
+          explicacao="Entram no prompt dele, por exemplo o jeito de responder ou o que rodar antes de concluir, e valem já no próximo pedido, inclusive nesta conversa. Vazio, valem as Instruções gerais (botão na barra). Aplicar perfil copia um texto pronto, criado no mesmo botão. Não ampliam a permissão acima."
           alinharAoTopo
         />
         <div className="flex min-w-0 flex-col gap-1.5">
+          <SeletorDePerfil
+            perfis={preferencias?.perfisDeInstrucoes ?? []}
+            textoAtual={valor.instrucoesPersonalizadas}
+            aoAplicar={(texto) => mudar("instrucoesPersonalizadas", texto)}
+          />
           <textarea
             id={`${idDoCampo}-instrucoes`}
             className="textarea instrucoes-da-criacao custom-scrollbar"

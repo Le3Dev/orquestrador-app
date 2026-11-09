@@ -16,14 +16,25 @@ import {
 } from "../../shared/canvas/layout";
 import { ALCA_DO_TERMINAL, type NoRascunho as TipoDoNo } from "../../shared/canvas/nos";
 import { AVISO_DO_ULTRACODE, ROTULOS_DAS_PERMISSOES } from "../../shared/formatacao";
-import { ajudaDaPredefinicao, useEsforcosHerdados, usePredefinicoes } from "../../shared/hooks/useDadosDaConfiguracao";
+import {
+  ajudaDaPredefinicao,
+  useEsforcosHerdados,
+  usePredefinicoes,
+  usePreferencias,
+} from "../../shared/hooks/useDadosDaConfiguracao";
 import { DICA_DAS_VARIAVEIS, tamanhoDasInstrucoes } from "../../shared/instrucoes";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
 import { resumoDaConfiguracao } from "../../shared/resumoDaConfiguracao";
 import { IconeAlerta, IconeFechar } from "../Icones";
 import { PreviaDoPromptFinal } from "../PreviaDoPromptFinal";
 import { ChipDeEsforco, ChipDeQuantidade } from "./ChipsDaCriacao";
-import { AvisoDoEsforcoHerdado, IconeDaPermissao, Rotulo, SeletorDeModelo } from "./LinhasDaConfiguracao";
+import {
+  AvisoDoEsforcoHerdado,
+  IconeDaPermissao,
+  Rotulo,
+  SeletorDeModelo,
+  SeletorDePerfil,
+} from "./LinhasDaConfiguracao";
 import { NavegadorDePastas } from "./NavegadorDePastas";
 
 const TAMANHO_MAXIMO_DO_NOME = 60;
@@ -62,6 +73,8 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
   const [criando, setCriando] = useState(false);
   const predefinicoes = usePredefinicoes();
   const economico = predefinicoes.find((predefinicao) => predefinicao.nome === "economico");
+  // Os perfis de instruções, para o "Aplicar perfil…"; sem eles (ou sem resposta), o select não aparece.
+  const perfis = usePreferencias()?.perfisDeInstrucoes ?? [];
 
   // Tenta de novo quando o servidor volta: aberto com ele fora, o terminal
   // ficaria preso em "carregando pastas…".
@@ -448,10 +461,15 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                 htmlFor={`${idDoCampo}-instrucoes`}
                 titulo="Instruções"
                 dica="Regras só deste orquestrador."
-                explicacao="Entram no prompt dele, por exemplo o jeito de responder ou o que rodar antes de concluir. Vazio, valem as Instruções gerais (botão na barra). Não ampliam a permissão acima."
+                explicacao="Entram no prompt dele, por exemplo o jeito de responder ou o que rodar antes de concluir. Vazio, valem as Instruções gerais (botão na barra). Aplicar perfil copia um texto pronto, criado no mesmo botão. Não ampliam a permissão acima."
                 alinharAoTopo
               />
               <div className="flex min-w-0 flex-col gap-1.5">
+                <SeletorDePerfil
+                  perfis={perfis}
+                  textoAtual={configuracao.instrucoesPersonalizadas}
+                  aoAplicar={(texto) => mudar("instrucoesPersonalizadas", texto)}
+                />
                 <textarea
                   id={`${idDoCampo}-instrucoes`}
                   className="textarea instrucoes-da-criacao custom-scrollbar"
