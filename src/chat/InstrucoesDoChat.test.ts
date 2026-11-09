@@ -468,7 +468,7 @@ describe("mensagemParaOChat", () => {
     expect(bloco).toContain("os omitidos ficam como estão");
     expect(bloco).toContain("Você não vê o prompt atual: para trocá-lo, mande o prompt novo inteiro.");
     expect(bloco).toContain('{"tipo":"editar_subagente","nome":"<nome exato de um subagente da lista>"');
-    expect(bloco).toContain("nome até 40 caracteres, descrição até 300, prompt até 4000, no máximo 10 subagentes");
+    expect(bloco).toContain("nome até 40 caracteres, descrição até 300, prompt até 4000, no máximo 30 subagentes");
     expect(bloco).toContain("Para criar, use um nome que não está na lista");
   });
 

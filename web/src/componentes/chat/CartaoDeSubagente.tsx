@@ -54,7 +54,7 @@ function aplicar(
  * ação (criar com um nome que já existe, ou editar um que não existe, vira
  * erro no cartão, sem gravar) e grava a lista inteira, como o painel
  * Subagentes. Um 400 do servidor (formato do nome, reservado, tamanhos,
- * máximo de 10) aparece no cartão com a mensagem dele.
+ * máximo de 30) aparece no cartão com a mensagem dele.
  *
  * No editar, o cartão lê a biblioteca ao aparecer para mostrar o antes e o
  * depois de cada campo trocado; sem ela, mostra só o valor novo.

@@ -128,17 +128,17 @@ describe("PainelDeSubagentes", () => {
     expect(campo("Nome")).toHaveValue("");
   });
 
-  it("com 10, não deixa criar outro e mostra 10 / 10", async () => {
-    await abrir(Array.from({ length: 10 }, (_, i) => ({ ...revisor, nome: `r${i}` })));
+  it("com 30, não deixa criar outro e mostra 30 / 30", async () => {
+    await abrir(Array.from({ length: 30 }, (_, i) => ({ ...revisor, nome: `r${i}` })));
 
     expect(screen.getByRole("button", { name: "+ Novo subagente" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "+ Novo subagente" })).toHaveAccessibleDescription("Limite de 10 atingido.");
-    expect(screen.getByText("10 / 10")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Novo subagente" })).toHaveAccessibleDescription("Limite de 30 atingido.");
+    expect(screen.getByText("30 / 30")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Remover" }));
     expect(screen.getByRole("button", { name: "+ Novo subagente" })).toBeEnabled();
-    expect(screen.queryByText("Limite de 10 atingido.")).not.toBeInTheDocument();
-    expect(screen.getByText("9 / 10")).toBeInTheDocument();
+    expect(screen.queryByText("Limite de 30 atingido.")).not.toBeInTheDocument();
+    expect(screen.getByText("29 / 30")).toBeInTheDocument();
   });
 
   it("o contador do prompt acompanha o texto e fica vermelho ao passar do limite", async () => {

@@ -70,7 +70,7 @@ export interface DadosDoSubagentePronto {
 }
 
 /** Limites dos subagentes prontos, como o servidor confere. */
-export const MAXIMO_DE_SUBAGENTES_PRONTOS = 10;
+export const MAXIMO_DE_SUBAGENTES_PRONTOS = 30;
 export const TAMANHO_MAXIMO_DA_DESCRICAO_DO_SUBAGENTE = 300;
 export const TAMANHO_MAXIMO_DO_PROMPT_DO_SUBAGENTE = 4_000;
 

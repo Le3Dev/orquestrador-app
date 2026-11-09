@@ -3,7 +3,7 @@ import { MARCA_DAS_INSTRUCOES, desarmarMarcas, normalizarInstrucoes } from "./In
 import { ehModeloClaude, MODELOS_CLAUDE, ModeloClaude } from "./ModeloClaude";
 
 /** Quantos subagentes prontos a biblioteca guarda. */
-export const MAXIMO_DE_SUBAGENTES_PRONTOS = 10;
+export const MAXIMO_DE_SUBAGENTES_PRONTOS = 30;
 export const TAMANHO_MAXIMO_DO_NOME_DO_SUBAGENTE = 40;
 export const TAMANHO_MAXIMO_DA_DESCRICAO = 300;
 export const TAMANHO_MAXIMO_DO_PROMPT = 4_000;

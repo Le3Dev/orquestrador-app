@@ -253,7 +253,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
       expect(lista.com({ subagentesProntos: "nenhum" }).subagentesProntos).toBe("nenhum");
     });
 
-    it.each<[unknown]>([["alguns"], [3], [[1]], [[""]], [["x".repeat(41)]], [Array.from({ length: 11 }, (_, i) => `s${i}`)]])(
+    it.each<[unknown]>([["alguns"], [3], [[1]], [[""]], [["x".repeat(41)]], [Array.from({ length: 31 }, (_, i) => `s${i}`)]])(
       "recusa %j com erro de dados inválidos",
       (selecao) => {
         const invalidos = { ...dados, subagentesProntos: selecao } as unknown as DadosDaConfiguracao;

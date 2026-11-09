@@ -73,7 +73,7 @@ describe("subagentesProntosValidos", () => {
       'Já existe um subagente pronto chamado "revisor".',
     );
     const muitos = Array.from({ length: MAXIMO_DE_SUBAGENTES_PRONTOS + 1 }, (_, i) => ({ ...revisor, nome: `r${i}` }));
-    expect(mensagemDe(() => subagentesProntosValidos(muitos))).toBe("São no máximo 10 subagentes prontos.");
+    expect(mensagemDe(() => subagentesProntosValidos(muitos))).toBe("São no máximo 30 subagentes prontos.");
   });
 
   it("modelo herdar usa o dos subagentes do orquestrador", () => {

@@ -958,7 +958,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(await previa(undefined)).toContain('  - "revisor": Faz revisor.');
     });
 
-    it.each<[unknown]>([["alguns"], [42], [[1]], [Array.from({ length: 11 }, (_, i) => `s${i}`)]])(
+    it.each<[unknown]>([["alguns"], [42], [[1]], [Array.from({ length: 31 }, (_, i) => `s${i}`)]])(
       "o PATCH recusa uma escolha de subagentes prontos inválida (%j) com 400",
       async (subagentesProntos) => {
         const resposta = await requisitar("PATCH", `/orquestradores/${orquestrador.id}/configuracao`, { subagentesProntos });
