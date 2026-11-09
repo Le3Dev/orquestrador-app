@@ -108,7 +108,7 @@ export function SeletorDePerfil({
   }
   return (
     <select
-      className="select select-compacto w-fit max-w-full"
+      className="select select-compacto select-do-perfil"
       aria-label="Aplicar perfil de instruções"
       title="Copia o texto de um perfil para as instruções. Os perfis ficam no botão Instruções da barra."
       // Sempre no item "Aplicar perfil…": é uma ação, não uma escolha guardada.
