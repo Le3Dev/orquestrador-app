@@ -1709,6 +1709,33 @@ describe("CanvasDeOrquestradores · seleção múltipla e barra do grupo", { tim
     await waitFor(() => expect(lerLayout().terminais).toEqual({}));
   });
 
+  it("com só algumas telas selecionadas, alinhar não as sobrepõe nem as põe sobre as de fora da seleção", async () => {
+    // o1 e o2 empilhadas na mesma coluna; o3, fora da seleção, logo à direita de o1.
+    layoutCom({ o1: { x: 0, y: 0 }, o2: { x: 0, y: 700 }, o3: { x: 700, y: 0 } });
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o3")).toBeInTheDocument());
+    fireEvent.click(noNaTela("o1"));
+    await waitFor(() => expect(selecionados()).toEqual(["o1"]));
+    fireEvent.keyDown(document, { key: "Shift" });
+    fireEvent.click(noNaTela("o2"), { shiftKey: true });
+    fireEvent.keyUp(document, { key: "Shift" });
+    await waitFor(() => expect(selecionados()).toEqual(["o1", "o2"]));
+    const barra = await screen.findByRole("toolbar", { name: "Ações do grupo" });
+
+    fireEvent.click(within(barra).getByRole("button", { name: "Alinhar ao topo" }));
+
+    // Sem o desvio, o2 subiria para cima de o1; ao lado de o1, cairia sobre o3: o grupo vai para a área livre.
+    await waitFor(() => expect(posicaoNaTela("o1")).not.toEqual({ x: 0, y: 0 }));
+    const telas = ["o1", "o2", "o3"].map((id) => ({ ...posicaoNaTela(id), largura: 600, altura: 520 }));
+    const [o1, o2, o3] = telas;
+    expect(o3).toMatchObject({ x: 700, y: 0 });
+    expect(o2?.y).toBe(o1?.y);
+    for (const [indice, tela] of telas.entries()) {
+      expect(telas.filter((outra, outroIndice) => outroIndice !== indice && sobrepoe(tela, outra))).toEqual([]);
+    }
+    await waitFor(() => expect(lerLayout().terminais.o2).toMatchObject({ x: o2?.x, y: o2?.y }));
+  });
+
   it("minimizar pela barra deixa só a barra de título dos terminais; de novo, restaura", async () => {
     layoutCom({ o1: { x: 0, y: 0 }, o2: { x: 1500, y: 0 } });
     render(<CanvasDeOrquestradores />);

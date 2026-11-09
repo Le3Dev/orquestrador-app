@@ -93,6 +93,7 @@ import {
   type JanelaParaOrganizar,
   lerBixinhosLimpos,
   lerLayout,
+  MARGEM_DO_LADO_A_LADO,
   organizarComNotas,
   type Ponto,
   posicaoParaNovoTerminal,
@@ -148,6 +149,7 @@ import {
   novaPrevia,
   novoShell,
   novoTerminal,
+  outrasTelas,
   posicaoDaPreviaDoTerminal,
   posicaoDoTerminalNovo,
   reacomodarBixinhos,
@@ -1147,28 +1149,34 @@ function Canvas() {
   // Fim do retângulo de seleção: os bixinhos pegos junto saem dela (seguem o terminal).
   const aoTerminarSelecao = useCallback(() => setNos(semBixinhosNaSelecao), [setNos]);
 
-  /** Move as telas selecionadas para onde `posicionar` mandar e tira os bixinhos de baixo delas. */
+  /**
+   * Move as telas selecionadas para onde `posicionar` mandar, sem cobrir as
+   * telas de fora da seleção (`outras`), e tira os bixinhos de baixo delas.
+   */
   const moverGrupo = useCallback(
-    (posicionar: (janelas: readonly JanelaNoCanvas[]) => Record<string, Ponto>) =>
+    (posicionar: (janelas: readonly JanelaNoCanvas[], outras: readonly JanelaNoCanvas[]) => Record<string, Ponto>) =>
       setNos((atuais) => {
         const janelas = telasSelecionadas(atuais).map(janelaVisivel);
         if (janelas.length < 2) {
           return atuais;
         }
-        const novos = comPosicoes(atuais, posicionar(janelas));
+        const novos = comPosicoes(atuais, posicionar(janelas, outrasTelas(atuais)));
         return novos === atuais ? atuais : reacomodarBixinhos(novos);
       }),
     [setNos],
   );
   const alinharGrupo = useCallback(
-    (como: Alinhamento) => moverGrupo((janelas) => alinharJanelas(janelas, como)),
+    (como: Alinhamento) => moverGrupo((janelas, outras) => alinharJanelas(janelas, como, outras)),
     [moverGrupo],
   );
   const distribuirGrupo = useCallback(
-    (eixo: EixoDaDistribuicao) => moverGrupo((janelas) => distribuirJanelas(janelas, eixo)),
+    (eixo: EixoDaDistribuicao) => moverGrupo((janelas, outras) => distribuirJanelas(janelas, eixo, outras)),
     [moverGrupo],
   );
-  const porGrupoLadoALado = useCallback(() => moverGrupo((janelas) => janelasLadoALado(janelas)), [moverGrupo]);
+  const porGrupoLadoALado = useCallback(
+    () => moverGrupo((janelas, outras) => janelasLadoALado(janelas, MARGEM_DO_LADO_A_LADO, outras)),
+    [moverGrupo],
+  );
   const minimizarGrupo = useCallback(
     () =>
       setNos((atuais) => {

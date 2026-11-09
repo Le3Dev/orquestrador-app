@@ -729,11 +729,91 @@ describe("ações da barra do grupo", () => {
     { id: "c", x: 900, y: 50, largura: 100, altura: 50 },
   ];
 
-  it("alinha à esquerda, ao centro e à direita do contorno do grupo, sem mexer no y", () => {
-    expect(alinharJanelas(janelas, "esquerda")).toEqual({ a: { x: 0, y: 100 }, b: { x: 0, y: 0 }, c: { x: 0, y: 50 } });
-    // O contorno vai de 0 a 1000: o centro é 500.
-    expect(alinharJanelas(janelas, "centro")).toEqual({ a: { x: 400, y: 100 }, b: { x: 300, y: 0 }, c: { x: 450, y: 50 } });
-    expect(alinharJanelas(janelas, "direita")).toEqual({ a: { x: 800, y: 100 }, b: { x: 600, y: 0 }, c: { x: 900, y: 50 } });
+  /** Nenhuma janela, nas posições novas, cobre outra do grupo nem uma das `outras`. */
+  function semSobreposicao(
+    grupo: readonly JanelaNoCanvas[],
+    posicoes: Record<string, Ponto>,
+    outras: readonly Retangulo[] = [],
+  ): boolean {
+    const movidas = grupo.map((janela) => ({ ...janela, ...posicoes[janela.id] }));
+    return movidas.every(
+      (janela, indice) =>
+        !movidas.some((outra, outroIndice) => outroIndice !== indice && sobrepoe(janela, outra)) &&
+        !outras.some((outra) => sobrepoe(janela, outra)),
+    );
+  }
+
+  it("alinha à esquerda, ao centro e à direita do contorno do grupo, sem mexer no y quando nada se cobre", () => {
+    // Uma coluna com folga entre as duas: alinhadas, continuam uma sobre a outra só na vista, sem se cobrir.
+    const coluna: JanelaNoCanvas[] = [
+      { id: "a", x: 0, y: 0, largura: 200, altura: 100 },
+      { id: "b", x: 300, y: 200, largura: 400, altura: 100 },
+    ];
+
+    expect(alinharJanelas(coluna, "esquerda")).toEqual({ a: { x: 0, y: 0 }, b: { x: 0, y: 200 } });
+    // O contorno vai de 0 a 700: o centro é 350.
+    expect(alinharJanelas(coluna, "centro")).toEqual({ a: { x: 250, y: 0 }, b: { x: 150, y: 200 } });
+    expect(alinharJanelas(coluna, "direita")).toEqual({ a: { x: 500, y: 0 }, b: { x: 300, y: 200 } });
+  });
+
+  it("alinhar na horizontal janelas lado a lado não as empilha uma sobre a outra: desce o mínimo, com margem", () => {
+    // As três se cruzam no y: no mesmo x, cairiam umas sobre as outras. Na ordem do topo (b, c, a), cada
+    // uma que cobriria outra desce para logo abaixo dela.
+    const m = MARGEM_DO_LADO_A_LADO;
+    expect(alinharJanelas(janelas, "esquerda")).toEqual({
+      b: { x: 0, y: 0 },
+      c: { x: 0, y: 300 + m },
+      a: { x: 0, y: 300 + m + 50 + m },
+    });
+    expect(alinharJanelas(janelas, "centro")).toEqual({
+      b: { x: 300, y: 0 },
+      c: { x: 450, y: 300 + m },
+      a: { x: 400, y: 300 + m + 50 + m },
+    });
+    expect(alinharJanelas(janelas, "direita")).toEqual({
+      b: { x: 600, y: 0 },
+      c: { x: 900, y: 300 + m },
+      a: { x: 800, y: 300 + m + 50 + m },
+    });
+    for (const como of ["esquerda", "centro", "direita", "topo", "meio", "base"] as const) {
+      expect(semSobreposicao(janelas, alinharJanelas(janelas, como))).toBe(true);
+    }
+  });
+
+  it("alinhar ao topo telas empilhadas na mesma coluna as põe lado a lado, com margem, em vez de uma sobre a outra", () => {
+    const empilhadas: JanelaNoCanvas[] = [
+      { id: "cima", x: 0, y: 0, largura: 600, altura: 520 },
+      { id: "baixo", x: 0, y: 600, largura: 600, altura: 520 },
+    ];
+
+    expect(alinharJanelas(empilhadas, "topo")).toEqual({
+      cima: { x: 0, y: 0 },
+      baixo: { x: 600 + MARGEM_DO_LADO_A_LADO, y: 0 },
+    });
+    expect(alinharJanelas(empilhadas, "base")).toEqual({
+      cima: { x: 0, y: 600 },
+      baixo: { x: 600 + MARGEM_DO_LADO_A_LADO, y: 600 },
+    });
+  });
+
+  it("alinhar não deixa o grupo sobre uma tela fora da seleção: vai inteiro para a área livre mais perto", () => {
+    const grupo: JanelaNoCanvas[] = [
+      { id: "p", x: 0, y: 0, largura: 600, altura: 520 },
+      { id: "q", x: 1500, y: 700, largura: 600, altura: 520 },
+    ];
+    // Bem onde "q" pararia ao subir para o topo.
+    const fora: Retangulo[] = [{ x: 1500, y: 0, largura: 600, altura: 520 }];
+
+    const posicoes = alinharJanelas(grupo, "topo", fora);
+
+    expect(semSobreposicao(grupo, posicoes, fora)).toBe(true);
+    // O arranjo do grupo fica: os dois no mesmo topo, à mesma distância.
+    expect(posicoes.q?.y).toBe(posicoes.p?.y);
+    expect((posicoes.q?.x ?? 0) - (posicoes.p?.x ?? 0)).toBe(1500);
+    // Sem nada no caminho, as outras telas não mudam nada.
+    expect(alinharJanelas(grupo, "topo", [{ x: 5000, y: 5000, largura: 100, altura: 100 }])).toEqual(
+      alinharJanelas(grupo, "topo"),
+    );
   });
 
   it("alinha ao topo, ao meio e à base do contorno, sem mexer no x", () => {
@@ -773,6 +853,43 @@ describe("ações da barra do grupo", () => {
       c: { x: 30, y: 200 },
       b: { x: 20, y: 500 },
     });
+  });
+
+  it("distribuir quando as larguras somam mais que o espaço não sobrepõe: o vão vira a margem e o grupo cresce", () => {
+    // De 0 a 1200, mas as larguras somam 1800: o vão seria de -300.
+    const apertadas: JanelaNoCanvas[] = [
+      { id: "a", x: 0, y: 0, largura: 600, altura: 520 },
+      { id: "b", x: 300, y: 40, largura: 600, altura: 520 },
+      { id: "c", x: 600, y: 80, largura: 600, altura: 520 },
+    ];
+    const m = MARGEM_DO_LADO_A_LADO;
+
+    expect(distribuirJanelas(apertadas, "horizontal")).toEqual({
+      a: { x: 0, y: 0 },
+      b: { x: 600 + m, y: 40 },
+      c: { x: 1200 + 2 * m, y: 80 },
+    });
+    // Um vão positivo, mas menor que a margem, também vira a margem.
+    const juntas = apertadas.map((janela, indice) => ({ ...janela, x: 0, y: indice * 530 }));
+    expect(distribuirJanelas(juntas, "vertical")).toEqual({
+      a: { x: 0, y: 0 },
+      b: { x: 0, y: 520 + m },
+      c: { x: 0, y: 1040 + 2 * m },
+    });
+  });
+
+  it("distribuir não deixa o grupo sobre uma tela fora da seleção", () => {
+    const apertadas: JanelaNoCanvas[] = [
+      { id: "a", x: 0, y: 0, largura: 600, altura: 520 },
+      { id: "b", x: 300, y: 0, largura: 600, altura: 520 },
+      { id: "c", x: 600, y: 0, largura: 600, altura: 520 },
+    ];
+    // Logo à direita do grupo: o grupo, ao crescer, cairia sobre ela.
+    const fora: Retangulo[] = [{ x: 1300, y: 0, largura: 600, altura: 520 }];
+
+    const posicoes = distribuirJanelas(apertadas, "horizontal", fora);
+
+    expect(semSobreposicao(apertadas, posicoes, fora)).toBe(true);
   });
 
   it("com menos de três janelas, distribuir não move nada", () => {
@@ -821,5 +938,20 @@ describe("ações da barra do grupo", () => {
     expect(posicoes.j2).toEqual({ x: 200, y: 0 });
     expect(posicoes.j3).toEqual({ x: 0, y: 100 });
     expect(posicoes.j4).toEqual({ x: 100, y: 100 });
+  });
+
+  it("lado a lado não começa sobre uma tela fora da seleção: a grade vai inteira para a área livre mais perto", () => {
+    const grupo: JanelaNoCanvas[] = [
+      { id: "p", x: 0, y: 0, largura: 600, altura: 520 },
+      { id: "q", x: 0, y: 2000, largura: 600, altura: 520 },
+    ];
+    // Entre as duas na vista, bem onde "q" pararia ao lado de "p".
+    const fora: Retangulo[] = [{ x: 700, y: 0, largura: 600, altura: 520 }];
+
+    const posicoes = janelasLadoALado(grupo, MARGEM_DO_LADO_A_LADO, fora);
+
+    expect(semSobreposicao(grupo, posicoes, fora)).toBe(true);
+    expect(posicoes.q?.y).toBe(posicoes.p?.y);
+    expect((posicoes.q?.x ?? 0) - (posicoes.p?.x ?? 0)).toBe(600 + MARGEM_DO_LADO_A_LADO);
   });
 });

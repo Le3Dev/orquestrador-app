@@ -595,20 +595,38 @@ export function ehMinimizavel(no: NoDoCanvas): no is NoMinimizavel {
 
 /**
  * O lugar que a tela ocupa agora, como aparece: diferente de `tamanhoDoNo`, o
- * terminal minimizado conta só com a barra. É o que alinhar, distribuir e pôr
- * lado a lado usam.
+ * terminal minimizado conta só com a barra. Se o React Flow mediu a tela
+ * desenhada maior que o tamanho definido (o conteúdo a esticou), vale o
+ * medido: as ações do grupo não podem achar que ela é menor do que aparece. É
+ * o que alinhar, distribuir e pôr lado a lado usam, para as telas do grupo e
+ * para as de fora (`outrasTelas`).
  */
 export function janelaVisivel(no: NoDoCanvas): JanelaNoCanvas {
   const tamanho =
     ehTerminal(no) && no.data.minimizada === true
       ? { largura: tamanhoDoNo(no).largura, altura: no.height ?? ALTURA_DA_NOTA_MINIMIZADA }
       : tamanhoDoNo(no);
-  return { id: no.id, x: no.position.x, y: no.position.y, ...tamanho };
+  return {
+    id: no.id,
+    x: no.position.x,
+    y: no.position.y,
+    largura: Math.max(tamanho.largura, no.measured?.width ?? 0),
+    altura: Math.max(tamanho.altura, no.measured?.height ?? 0),
+  };
 }
 
 /** As telas selecionadas, na ordem dos nós; os bixinhos ficam de fora. */
 export function telasSelecionadas(nos: readonly NoDoCanvas[]): NoDoCanvas[] {
   return nos.filter((no) => no.selected === true && ehTela(no));
+}
+
+/**
+ * As telas fora da seleção, como aparecem (`janelaVisivel`): o que as ações
+ * do grupo não podem cobrir. Os bixinhos ficam de fora: saem sozinhos de
+ * baixo das telas (`reacomodarBixinhos`).
+ */
+export function outrasTelas(nos: readonly NoDoCanvas[]): JanelaNoCanvas[] {
+  return nos.filter((no) => no.selected !== true && ehTela(no)).map(janelaVisivel);
 }
 
 /** Os nós com as posições novas; os outros (e os que já estão lá) continuam o mesmo objeto, e sem mudança volta o mesmo array. */

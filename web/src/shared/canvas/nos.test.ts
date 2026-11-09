@@ -23,6 +23,7 @@ import {
   novoNoDeArtefato,
   novoShell,
   novoTerminal,
+  outrasTelas,
   posicaoDaPreviaDoTerminal,
   posicaoDoTerminalNovo,
   reacomodarBixinhos,
@@ -798,6 +799,24 @@ describe("seleção e ações do grupo", () => {
 
     expect(janelaVisivel(terminal)).toEqual({ id: "o1", x: 0, y: 0, largura: 600, altura: 500 });
     expect(janelaVisivel(minimizado)).toEqual({ id: "o1", x: 0, y: 0, largura: 600, altura: ALTURA_DA_NOTA_MINIMIZADA });
+  });
+
+  it("o lugar visível usa o tamanho medido pelo React Flow quando a tela desenhada é maior que a definida", () => {
+    const esticada: NoDoCanvas = { ...nota, measured: { width: 360, height: 410 } };
+    const medidaMenor: NoDoCanvas = { ...nota, measured: { width: 0, height: 0 } };
+
+    expect(janelaVisivel(esticada)).toMatchObject({ largura: 360, altura: 410 });
+    expect(janelaVisivel(medidaMenor)).toMatchObject({ largura: 320, altura: 280 });
+  });
+
+  it("as outras telas são as de fora da seleção, como aparecem, sem os bixinhos", () => {
+    const minimizado = minimizarOuRestaurar(terminal);
+    const nos: NoDoCanvas[] = [minimizado, bixinhoEm(0, 600), selecionado(nota), artefato];
+
+    expect(outrasTelas(nos)).toEqual([
+      { id: "o1", x: 0, y: 0, largura: 600, altura: ALTURA_DA_NOTA_MINIMIZADA },
+      { id: artefato.id, x: 1200, y: 0, largura: 640, altura: 480 },
+    ]);
   });
 
   it("comPosicoes troca só os nós que mudam de lugar; sem mudança, o mesmo array", () => {
