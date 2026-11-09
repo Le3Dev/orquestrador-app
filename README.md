@@ -474,6 +474,12 @@ src/
     ErroDeNota.ts              dados_invalidos · nao_encontrada
     ServicoDeNotas.ts          casos de uso (stateless; id e relógio injetados)
     RepositorioDeNotas.ts      porta
+  modelos/                   modelos de canvas: arranjos salvos para recriar e compartilhar (item 35)
+    ModeloDeCanvas.ts          esquema (zod) do modelo, dos itens e do arquivo exportado; limites;
+                               semCaminhosNemSegredos (exportar sem pastas, comandos e tokens)
+    ErroDeModeloDeCanvas.ts    dados_invalidos · nao_encontrado · limite_atingido
+    ServicoDeModelosDeCanvas.ts  casos de uso (stateless): listar, criar, alterar, remover, exportar
+    RepositorioDeModelosDeCanvas.ts   porta
   chat/                      domínio do chat rápido — contexto próprio (ver ADR-17)
     ConversaDoChat.ts          raiz do agregado (a conversa única, sessão do Claude Code)
     MensagemDoChat.ts          interno do agregado (pergunta ou resposta)
@@ -498,7 +504,8 @@ src/
     arquivos/                  repositório JSON/JSONL dos Orquestradores, repositório das
                                notas (um JSON por nota), repositório do chat, listagem de pastas,
                                repositório dos artefatos (uma pasta por artefato) e a pasta de
-                               entrada com o coletor (ColetorDeArtefatosEmPasta)
+                               entrada com o coletor (ColetorDeArtefatosEmPasta) e o dos modelos
+                               de canvas (RepositorioDeModelosDeCanvasEmArquivo, arquivo único)
     montarArtefatos.ts         composição do contexto de artefatos (repositório, serviço, coletor, rotas)
     sse/, execucoes/           canal de eventos e controle de cancelamento
     sistema/                   worktrees git (Worktrees, GerenciadorDeWorktreesGit),
@@ -506,7 +513,8 @@ src/
   controllers/                 REST + SSE, validação (zod), erros → HTTP
                                (orquestradoresRoutes.ts, notasRoutes.ts,
                                chatRoutes.ts com o CanalDoChat, promptsRoutes.ts,
-                               artefatosRoutes.ts com o CanalDosArtefatos)
+                               artefatosRoutes.ts com o CanalDosArtefatos,
+                               modelosDeCanvasRoutes.ts)
 electron/                      aplicativo desktop (CommonJS): main.js (janelas, servidor no
                                utilityProcess, religar, cookie), preload.js (window.electron),
                                licença, configuração local, primeira abertura e atualização
@@ -552,6 +560,7 @@ dados/
         eventos.jsonl
   anexos/<id>/                 imagens enviadas nos pedidos (anexos/chat/: as do chat rápido)
   notas/<id>.json              uma nota por arquivo
+  modelos-de-canvas.json       modelos de canvas salvos, numa lista só (ilegível vira modelos-de-canvas.ilegivel.json)
   preferencias.json            instruções gerais, perfis de instruções, subagentes prontos e autorrecuperação (ver ADR-30, ADR-31 e ADR-36)
   chat/
     conversa.json              estado da conversa do chat (gravação atômica)
@@ -1297,6 +1306,12 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | POST | `/notas` | `{ titulo?: string, texto?: string }` (corpo vazio vale; ausentes: `"Nova nota"` e `""`) | 201 + `DadosDaNota` (400 com as mensagens abaixo) |
 | PATCH | `/notas/:id` | `{ titulo?: string, texto?: string }` (só o enviado muda) | 200 + `DadosDaNota`; `atualizadaEm` só muda se o conteúdo mudar. Com algum campo inválido, 400 e nada é gravado (404 `Nota não encontrada.`) |
 | DELETE | `/notas/:id` | — | 204 (404 `Nota não encontrada.`) |
+| GET | `/modelos-de-canvas` | — | 200 `[DadosDoModeloDeCanvas]`, em ordem de criação |
+| POST | `/modelos-de-canvas` | `{ nome, icone, cor, itens: [ItemDoModelo] }` (campos de fora do esquema, como `id`, `worktree` ou a conversa, são descartados) | 201 + `DadosDoModeloDeCanvas`. 400 com a mensagem do campo (abaixo); 409 `Você já tem 50 modelos. Apague um antes de salvar outro.` |
+| PATCH | `/modelos-de-canvas/:id` | `{ nome?, icone?, cor? }` (só o enviado muda; os itens não mudam por aqui) | 200 + `DadosDoModeloDeCanvas`; `atualizadoEm` só muda se algo mudar. 400 como no POST; 404 `Modelo não encontrado.` |
+| DELETE | `/modelos-de-canvas/:id` | — | 204 (404 `Modelo não encontrado.`) |
+| GET | `/modelos-de-canvas/:id/exportar` | `?semCaminhos=0` leva tudo; sem o parâmetro (ou com `1`), sai **sem caminhos, comandos e tokens**: sem `pastaDeTrabalho` dos orquestradores, sem `pasta` e `comando` dos terminais, endereços sem usuário, senha e parâmetros como `token`, `key`, `secret`, `auth`, `code`, e textos (notas, instruções) com chaves e tokens conhecidos (`sk-…`, `ghp_…`, `AKIA…`, JWT, `API_KEY=…`) trocados por `[removido]` | 200 `{ formato: "orquestrador-de-agentes/modelo-de-canvas", versao: 1, exportadoEm, modelo: { nome, icone, cor, itens } }` com `Content-Disposition: attachment; filename="modelo-<nome>.json"`. 404 `Modelo não encontrado.` |
+| POST | `/modelos-de-canvas/importacao/conferir` | o conteúdo do arquivo exportado | 200 `{ nome, icone, cor, itens }`: o modelo como seria salvo, para a tela mostrar o resumo. **Não grava nada**: salvar é um `POST /modelos-de-canvas` depois que o usuário confirma. 400 `Este arquivo não é um modelo de canvas do Orquestrador.` / `Versão de modelo de canvas não suportada.` / a mensagem do campo inválido |
 | GET | `/chat` | — | `{ sessaoId, situacao: "ocioso" \| "respondendo", alteracoesAutorizadas: boolean, preferencias: { modelo, esforco }, mensagens: [MensagemDoChat], ultimaSequencia, cota: [{ nome, utilizacao, renovaEm, situacao }] \| null }`. A resposta em andamento já traz o texto parcial acumulado; use `ultimaSequencia` no `?desde=` do SSE. `alteracoesAutorizadas`: o chat pode editar arquivos e rodar comandos até o próximo `/clear` (ver ADR-25) |
 | GET | `/chat/eventos` | cabeçalho opcional `Last-Event-ID` ou `?desde=` | `text/event-stream`: eventos gravados da conversa atual desde a sequência (sem nenhum dos dois, todos) + novos; `trecho` e `atividade` como eventos nomeados, sem id |
 | POST | `/chat/mensagens` | `{ texto: string, imagens?: [{ nome, tipoDeMidia: image/png\|jpeg\|gif\|webp, base64 }] }` (até 5 imagens de 5 MB; texto pode ser vazio se houver imagem) | 202 `{ mensagemId }` — o id da **resposta do Claude**, que recebe os trechos. 409 `Já há uma resposta em andamento.`; 400 `Escreva uma mensagem ou anexe uma imagem.` e erros de imagem |
@@ -1380,6 +1395,27 @@ Erros 400 das notas:
 - `A nota pode ter até 100.000 caracteres.`;
 - `O título da nota deve ser um texto.` / `O conteúdo da nota deve ser um texto.` (ex.: número ou `null`);
 - `Envie os dados da nota.` (corpo que não é um objeto JSON, ex.: uma lista).
+
+`DadosDoModeloDeCanvas` (item 35; o modelo guarda só o que serve para recriar: nunca conversa, eventos, worktree ou id de orquestrador):
+
+```json
+{ "id": "…", "nome": "Backend + prévia", "icone": "🚀", "cor": "#d97757",
+  "itens": [
+    { "tipo": "orquestrador", "x": 0, "y": 0, "largura": 600, "altura": 520, "nome": "API",
+      "pastaDeTrabalho": "/Users/…/api", "configuracao": { "modeloDoOrquestrador": "opus", "…": "o esquema do POST /orquestradores" } },
+    { "tipo": "nota", "x": 640, "y": 0, "largura": 320, "altura": 280, "titulo": "Como subir", "texto": "…" },
+    { "tipo": "previa", "x": 0, "y": 560, "url": "http://localhost:5173" },
+    { "tipo": "terminal", "x": 760, "y": 560, "pasta": "/Users/…/api", "comando": "npm run dev" }
+  ],
+  "criadoEm": "2026-11-09T12:00:00.000Z", "atualizadoEm": "2026-11-09T12:00:00.000Z" }
+```
+
+- `x` e `y` são relativos ao canto de cima à esquerda do arranjo (de −100.000 a 100.000); `largura` e `altura` (40 a 5.000 px) são opcionais: sem eles, vale o tamanho padrão da janela.
+- Limites: até 50 modelos; de 1 a 30 itens por modelo; nome de 1 a 80 caracteres (aparado); ícone de 1 a 16 caracteres (um emoji); cor `#rrggbb`; nome do orquestrador até 60; título da nota de 1 a 120 e texto até 100.000; instruções com o limite bruto do POST de orquestradores; endereço da prévia vazio ou `http(s)://`, até 2.000; pastas até 1.000; comando até 2.000.
+- `pastaDeTrabalho` e `pasta` ausentes ou vazias: a tela pede a pasta ao recriar. `comando` é só guardado e mostrado; recriar nunca o executa nem o digita no terminal.
+- **Recriar é da tela**, item a item, pelas rotas de sempre: `POST /orquestradores` (o orquestrador nasce **parado**: nenhum turno, nenhuma mensagem), `POST /notas`, a prévia só no layout e `POST /terminais` (um shell na pasta, sem rodar comando). A falha de um item (ex.: `A pasta "…" não existe.`) aparece na lista do painel e não impede os outros.
+
+Erros 400 dos modelos de canvas (os principais): `Envie os dados do modelo.`, `Dê um nome ao modelo.`, `O nome do modelo deve ter até 80 caracteres.`, `Escolha um ícone para o modelo.`, `A cor do modelo deve estar no formato #rrggbb.`, `O modelo precisa de pelo menos 1 item.`, `Um modelo pode ter até 30 itens.`, `Tipo de item do modelo inválido (use "orquestrador", "nota", "previa" ou "terminal").`, `A posição de cada item deve ser um número.`, `O endereço da prévia deve começar com http:// ou https://.`, e as da configuração do orquestrador e da nota, iguais às das rotas deles.
 
 **Eventos SSE.** Cada evento é um `data:` com JSON `{ tipo, turnoId, sequencia, em, … }`.
 

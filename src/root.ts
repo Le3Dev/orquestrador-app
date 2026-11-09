@@ -11,6 +11,7 @@ import { acessoSoPeloApp } from "./controllers/acessoSoPeloApp";
 import { criarAlteracoesRoutes } from "./controllers/alteracoesRoutes";
 import { criarArquivosRoutes } from "./controllers/arquivosRoutes";
 import { CanalDoChat, criarChatRoutes } from "./controllers/chatRoutes";
+import { criarModelosDeCanvasRoutes } from "./controllers/modelosDeCanvasRoutes";
 import { criarNotasRoutes } from "./controllers/notasRoutes";
 import { criarOrquestradoresRoutes } from "./controllers/orquestradoresRoutes";
 import { criarPromptsRoutes } from "./controllers/promptsRoutes";
@@ -23,6 +24,7 @@ import {
 import { ArmazemDeAnexosEmArquivo } from "./infraestrutura/arquivos/ArmazemDeAnexosEmArquivo";
 import { PastaDeEntradaDosArtefatos } from "./infraestrutura/arquivos/ColetorDeArtefatosEmPasta";
 import { ExploradorDePastas } from "./infraestrutura/arquivos/ExploradorDePastas";
+import { RepositorioDeModelosDeCanvasEmArquivo } from "./infraestrutura/arquivos/RepositorioDeModelosDeCanvasEmArquivo";
 import { RepositorioDeNotasEmArquivo } from "./infraestrutura/arquivos/RepositorioDeNotasEmArquivo";
 import { RepositorioDeOrquestradoresEmArquivo } from "./infraestrutura/arquivos/RepositorioDeOrquestradoresEmArquivo";
 import { RepositorioDePreferenciasEmArquivo } from "./infraestrutura/arquivos/RepositorioDePreferenciasEmArquivo";
@@ -49,6 +51,7 @@ import { MonitorDeMemoria } from "./infraestrutura/sistema/MonitorDeMemoria";
 import { PtyDoSistema } from "./infraestrutura/sistema/PtyDoSistema";
 import { encerrarAgentesOrfaos, RegistroDeProcessos } from "./infraestrutura/sistema/RegistroDeProcessos";
 import { CanalDeEventos } from "./infraestrutura/sse/CanalDeEventos";
+import { ServicoDeModelosDeCanvas } from "./modelos/ServicoDeModelosDeCanvas";
 import { ServicoDeNotas } from "./notas/ServicoDeNotas";
 import { ServicoDeAlteracoes } from "./orquestracao/ServicoDeAlteracoes";
 import { ServicoDeArquivos } from "./orquestracao/ServicoDeArquivos";
@@ -149,6 +152,7 @@ async function iniciar(): Promise<void> {
   const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(configuracao.pastaDeDados);
   const notas = await RepositorioDeNotasEmArquivo.abrir(configuracao.pastaDeDados);
   const preferencias = await RepositorioDePreferenciasEmArquivo.abrir(configuracao.pastaDeDados);
+  const modelosDeCanvas = await RepositorioDeModelosDeCanvasEmArquivo.abrir(configuracao.pastaDeDados);
   const repositorioDoChat = await RepositorioDoChatEmArquivo.abrir(configuracao.pastaDeDados, randomUUID);
 
   // Antes de registrar processos novos: se o servidor anterior caiu, os
@@ -311,6 +315,17 @@ async function iniciar(): Promise<void> {
       "/api",
       criarNotasRoutes({
         servico: new ServicoDeNotas({ repositorio: notas, gerarId: randomUUID, agora: () => new Date() }),
+      }),
+    );
+    // Modelos de canvas: arranjos salvos para recriar (pela tela, item a item) e compartilhar.
+    rotas.use(
+      "/api",
+      criarModelosDeCanvasRoutes({
+        servico: new ServicoDeModelosDeCanvas({
+          repositorio: modelosDeCanvas,
+          gerarId: randomUUID,
+          agora: () => new Date(),
+        }),
       }),
     );
     rotas.use("/api", criarPromptsRoutes({ servico: servicoDeMelhoria }));
