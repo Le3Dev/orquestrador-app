@@ -181,9 +181,12 @@ export function lerListaDeProcessos(texto: string): ProcessoListado[] {
 
 /**
  * Todos os processos da máquina com pai, CPU e idade, numa única chamada ao
- * `ps`. No Windows devolve lista vazia: não há um equivalente barato (o
- * `Get-CimInstance` leva segundos e não dá a CPU do momento), e quem usa trata
- * a lista vazia como "não deu para saber".
+ * `ps`. No Windows devolve lista vazia: não há um equivalente barato. Medido,
+ * `Get-CimInstance Win32_PerfFormattedData_PerfProc_Process` aberto do zero
+ * leva 3,2–8,1 s com `powershell` e 3,9–4,3 s com `pwsh` (só abrir o
+ * `powershell` custa 1,4 s; o `pwsh`, 2,6 s): caro demais a cada 30 s. Com a
+ * lista vazia, o diagnóstico marca `processosVisiveis: false` e a vigia do
+ * turno ignora CPU e comandos e usa o limite tolerante.
  */
 export async function listarProcessos(): Promise<ProcessoListado[]> {
   if (process.platform === "win32") {

@@ -1480,7 +1480,14 @@ class RelogioFalso implements AgendadorDeTarefas {
 class DiagnosticadorParado implements DiagnosticadorDoClaude {
   readonly esquecidos: string[] = [];
   async diagnosticar(): Promise<DiagnosticoDoClaude> {
-    return { processoVivo: true, cpuDoClaude: 0, filhos: [], transcricoesCrescendo: false, ultimaEscritaEm: null };
+    return {
+      processoVivo: true,
+      processosVisiveis: true,
+      cpuDoClaude: 0,
+      filhos: [],
+      transcricoesCrescendo: false,
+      ultimaEscritaEm: null,
+    };
   }
   esquecer(orquestradorId: string): void {
     this.esquecidos.push(orquestradorId);

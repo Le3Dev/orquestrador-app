@@ -36,6 +36,7 @@ import { MedidorDeConsumoPorTranscricoes } from "./infraestrutura/claudecode/Med
 import { MotorClaudeCodeCli } from "./infraestrutura/claudecode/MotorClaudeCodeCli";
 import { MotorDeChatClaudeCodeCli } from "./infraestrutura/claudecode/MotorDeChatClaudeCodeCli";
 import { MotorDeMelhoriaDePromptClaudeCodeCli } from "./infraestrutura/claudecode/MotorDeMelhoriaDePromptClaudeCodeCli";
+import { sondarEnderecoLocal } from "./infraestrutura/claudecode/SondaDeEnderecoLocal";
 import {
   Configuracao,
   lerConfiguracao,
@@ -54,6 +55,7 @@ import { encerrarAgentesOrfaos, RegistroDeProcessos } from "./infraestrutura/sis
 import { RegistroDeProcessosDeixados } from "./infraestrutura/sistema/RegistroDeProcessosDeixados";
 import { CanalDeEventos } from "./infraestrutura/sse/CanalDeEventos";
 import { ServicoDeNotas } from "./notas/ServicoDeNotas";
+import { Plataforma } from "./orquestracao/InstrucoesDoOrquestrador";
 import { ServicoDeAlteracoes } from "./orquestracao/ServicoDeAlteracoes";
 import { ServicoDeArquivos } from "./orquestracao/ServicoDeArquivos";
 import { ServicoDeOrquestracao } from "./orquestracao/ServicoDeOrquestracao";
@@ -211,10 +213,16 @@ async function iniciar(): Promise<void> {
   // Terminais interativos do canvas: shells do usuário num pseudoterminal.
   const terminais = new ServicoDeTerminais({ pty: new PtyDoSistema(), gerarId: randomUUID, agora: () => new Date() });
 
+  // A plataforma decide a sintaxe dos comandos ensinados aos agentes (no
+  // Windows, PowerShell): lida uma vez aqui, o domínio só a recebe.
+  const plataforma: Plataforma = process.platform === "win32" ? "windows" : "unix";
+
   const servico = new ServicoDeOrquestracao({
     repositorio,
     motor: new MotorClaudeCodeCli(
       new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro, undefined, rastreador),
+      sondarEnderecoLocal,
+      plataforma,
     ),
     execucoes,
     publicador: canal,
@@ -323,6 +331,7 @@ async function iniciar(): Promise<void> {
         anexos,
         preferencias,
         pastaRaiz: configuracao.pastaRaizDosProjetos,
+        plataforma,
       }),
     );
     // Painel de alterações do worktree: só leitura, sobre o mesmo repositório dos Orquestradores.

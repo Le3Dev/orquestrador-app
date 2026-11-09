@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { ConfiguracaoDoOrquestrador } from "../../orquestracao/ConfiguracaoDoOrquestrador";
+import { REGRA_DOS_SERVIDORES_UNIX, REGRA_DOS_SERVIDORES_WINDOWS } from "../../orquestracao/InstrucoesDoOrquestrador";
 import { InstrucoesAplicadas } from "../../orquestracao/InstrucoesPersonalizadas";
 import { ModoDoTurno } from "../../orquestracao/ModoDoTurno";
 import { PedidoDeTurno } from "../../orquestracao/MotorDeAgentes";
@@ -118,6 +119,42 @@ describe("MotorClaudeCodeCli — artefatos", () => {
     const texto = entrada.message.content[0]?.text ?? "";
     expect(texto).toContain(`UM arquivo autocontido gravado na pasta ${realpathSync.native(pastaDeArtefatos)}`);
     expect(texto.endsWith("monte um relatório")).toBe(true);
+  });
+});
+
+describe("MotorClaudeCodeCli e a plataforma", () => {
+  const textoDaMensagem = (fachada: FachadaFalsa): string => {
+    const entrada = JSON.parse(fachada.gravado?.execucao.entrada ?? "{}") as { message: { content: { text: string }[] } };
+    return entrada.message.content[0]?.text ?? "";
+  };
+
+  it("criado para o Windows, ensina a regra dos servidores do Windows aos agentes e ao Orquestrador", async () => {
+    const fachada = new FachadaFalsa();
+    const motor = new MotorClaudeCodeCli(fachada, async () => false, "windows");
+
+    await motor.executarTurno(
+      pedido(path.join(pastaDoTeste, "artefatos-windows"), "edicao_e_comandos"),
+      () => undefined,
+      new AbortController().signal,
+    );
+
+    expect(fachada.gravado?.agentes.executor.prompt).toContain(REGRA_DOS_SERVIDORES_WINDOWS);
+    expect(fachada.gravado?.agentes.executor.prompt).not.toContain(REGRA_DOS_SERVIDORES_UNIX);
+    expect(textoDaMensagem(fachada)).toContain(`- ${REGRA_DOS_SERVIDORES_WINDOWS}`);
+    expect(textoDaMensagem(fachada)).not.toContain(REGRA_DOS_SERVIDORES_UNIX);
+  });
+
+  it("sem a plataforma, usa a regra do unix", async () => {
+    const fachada = new FachadaFalsa();
+
+    await new MotorClaudeCodeCli(fachada).executarTurno(
+      pedido(path.join(pastaDoTeste, "artefatos-unix"), "edicao_e_comandos"),
+      () => undefined,
+      new AbortController().signal,
+    );
+
+    expect(fachada.gravado?.agentes.executor.prompt).toContain(REGRA_DOS_SERVIDORES_UNIX);
+    expect(textoDaMensagem(fachada)).toContain(`- ${REGRA_DOS_SERVIDORES_UNIX}`);
   });
 });
 

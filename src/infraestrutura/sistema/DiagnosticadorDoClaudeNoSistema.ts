@@ -111,7 +111,14 @@ export class DiagnosticadorDoClaudeNoSistema implements DiagnosticadorDoClaude {
       return { ...processo, ...transcricoes };
     } catch (erro) {
       console.warn("[diagnostico] Diagnóstico falhou:", erro instanceof Error ? erro.message : erro);
-      return { processoVivo: false, cpuDoClaude: 0, filhos: [], transcricoesCrescendo: false, ultimaEscritaEm: null };
+      return {
+        processoVivo: false,
+        processosVisiveis: false,
+        cpuDoClaude: 0,
+        filhos: [],
+        transcricoesCrescendo: false,
+        ultimaEscritaEm: null,
+      };
     }
   }
 
@@ -130,10 +137,10 @@ export class DiagnosticadorDoClaudeNoSistema implements DiagnosticadorDoClaude {
 
   private async examinarProcesso(
     alvo: AlvoDoDiagnostico,
-  ): Promise<Pick<DiagnosticoDoClaude, "processoVivo" | "cpuDoClaude" | "filhos">> {
+  ): Promise<Pick<DiagnosticoDoClaude, "processoVivo" | "processosVisiveis" | "cpuDoClaude" | "filhos">> {
     const pid = this.pidDoClaude(alvo);
     if (pid === null) {
-      return { processoVivo: false, cpuDoClaude: 0, filhos: [] };
+      return { processoVivo: false, processosVisiveis: false, cpuDoClaude: 0, filhos: [] };
     }
     let processos: ProcessoListado[] = [];
     try {
@@ -153,7 +160,7 @@ export class DiagnosticadorDoClaudeNoSistema implements DiagnosticadorDoClaude {
     const filhos: ProcessoFilho[] = descendentes(pid, processos)
       .sort((a, b) => b.cpu - a.cpu)
       .map((filho) => ({ pid: filho.pid, comando: encurtarComando(filho.comando), cpu: filho.cpu, haMs: filho.haMs }));
-    return { processoVivo, cpuDoClaude: doClaude?.cpu ?? 0, filhos };
+    return { processoVivo, processosVisiveis: processos.length > 0, cpuDoClaude: doClaude?.cpu ?? 0, filhos };
   }
 
   private async examinarTranscricoes(
