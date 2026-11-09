@@ -15,7 +15,11 @@ import {
   ULTRACODE_NOS_SUBAGENTES,
 } from "../orquestracao/EsforcoDeRaciocinio";
 import { EventoRegistrado } from "../orquestracao/EventoDeOrquestracao";
-import { instrucoesDoOrquestrador, mensagemParaOOrquestrador } from "../orquestracao/InstrucoesDoOrquestrador";
+import {
+  instrucoesDoOrquestrador,
+  mensagemParaOOrquestrador,
+  Plataforma,
+} from "../orquestracao/InstrucoesDoOrquestrador";
 import { InstrucoesAplicadas, TAMANHO_MAXIMO_DAS_INSTRUCOES } from "../orquestracao/InstrucoesPersonalizadas";
 import { MODELOS_CLAUDE } from "../orquestracao/ModeloClaude";
 import { MODOS_DO_TURNO } from "../orquestracao/ModoDoTurno";
@@ -41,6 +45,8 @@ interface Dependencias {
   anexos: ArmazemDeAnexosEmArquivo;
   preferencias: RepositorioDePreferencias;
   pastaRaiz: string;
+  /** Plataforma do computador, para a prévia do prompt mostrar a regra dos servidores que vale nele. */
+  plataforma?: Plataforma;
 }
 
 /**
@@ -321,6 +327,7 @@ export function criarOrquestradoresRoutes({
   anexos,
   preferencias,
   pastaRaiz,
+  plataforma = "unix",
 }: Dependencias): Router {
   const rotas = Router();
   const resumo = (orquestrador: Orquestrador) =>
@@ -447,6 +454,7 @@ export function criarOrquestradoresRoutes({
           instrucoes,
           false,
           servico.subagentesProntos(),
+          plataforma,
         ),
         origemDasInstrucoes: instrucoes?.origem ?? null,
       });

@@ -16,6 +16,12 @@ export interface ProcessoFilho {
  */
 export interface DiagnosticoDoClaude {
   processoVivo: boolean;
+  /**
+   * O sistema deixou ver os processos (a listagem veio com algo). Falso no
+   * Windows, onde o app não lista processos, ou se a listagem falhou: aí
+   * `cpuDoClaude` e `filhos` não dizem nada.
+   */
+  processosVisiveis: boolean;
   /** % de CPU do processo do Claude (só ele). */
   cpuDoClaude: number;
   /** Descendentes do processo do Claude, do mais ocupado ao menos. `comando` encurtado (até ~80 caracteres, sem caminhos longos de node_modules). */

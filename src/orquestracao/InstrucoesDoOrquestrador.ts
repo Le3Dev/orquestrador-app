@@ -29,14 +29,36 @@ const COMMIT_E_PUSH_QUANDO_PEDIDOS =
   "Commits e push: permitidos somente quando o usuário pedir explicitamente nesta mensagem. Nunca commitar direto na main; usar branch conforme a política (feature/, fix/, hotfix/, refactor/). Nunca adicionar a linha Co-authored-by.";
 
 /**
+ * A plataforma do computador onde os agentes rodam: decide a sintaxe dos
+ * comandos ensinados a eles. Quem sabe é a infraestrutura; o domínio só a recebe.
+ */
+export type Plataforma = "windows" | "unix";
+
+/**
  * Servidor de desenvolvimento (npm run dev, vite...) não pode ir para o
  * segundo plano do Claude Code: o processo do pedido só termina quando ele
  * para, e o pedido ficaria "trabalhando" para sempre. Desacoplado, ele segue
  * no ar depois do pedido, e o endereço impresso no log aparece na saída do
  * comando, onde a tela o detecta para a prévia ao vivo.
  */
-export const REGRA_DOS_SERVIDORES =
+export const REGRA_DOS_SERVIDORES_UNIX =
   "Servidor que deve continuar no ar (npm run dev, vite, next dev e afins): não use a execução em segundo plano da ferramenta (run_in_background), que prende o pedido até o servidor parar. Suba desacoplado, com a saída num log fora do projeto, e mostre o começo do log para o endereço aparecer, por exemplo: `nohup npm run dev > /tmp/servidor-<nome>.log 2>&1 & sleep 4; tail -n 20 /tmp/servidor-<nome>.log`. Ele continua rodando depois do pedido; para parar, use kill no processo. Não abra o navegador do computador (open, xdg-open, start): o aplicativo já mostra a página numa prévia ao vivo quando o endereço aparece; para conferir, use curl e cite o endereço completo na resposta.";
+
+/**
+ * No Windows o Claude Code roda os comandos no PowerShell, e o `nohup … &` não
+ * existe. Com `-NoNewWindow` ou `-RedirectStandard*`, o servidor herda o handle
+ * do pipe da ferramenta, que só fecha quando ele para: o pedido fica preso. O
+ * `Start-Process -WindowStyle Hidden cmd /c` usa o ShellExecute, que não herda
+ * handles; o `cmd` grava o log. Para parar, `taskkill /T` derruba a árvore:
+ * `Stop-Process` só mata o `cmd` e deixa o `node` órfão, ainda no ar.
+ */
+export const REGRA_DOS_SERVIDORES_WINDOWS =
+  "Servidor que deve continuar no ar (npm run dev, vite, next dev e afins): não use a execução em segundo plano da ferramenta (run_in_background), que prende o pedido até o servidor parar. Neste computador (Windows), suba pela ferramenta PowerShell, desacoplado e com a saída num log em `$env:TEMP`, esperando o endereço aparecer: `$log = \"$env:TEMP\\servidor-<nome>.log\"; $p = Start-Process -WindowStyle Hidden cmd -ArgumentList '/c', ('npm run dev > \"{0}\" 2>&1' -f $log) -PassThru; $fim = (Get-Date).AddSeconds(30); do { Start-Sleep -Milliseconds 500 } until (((Test-Path $log) -and (Select-String -Path $log -Pattern 'https?://' -Quiet)) -or $p.HasExited -or (Get-Date) -gt $fim); Get-Content $log -Tail 20; \"PID $($p.Id)\"`. Não use -RedirectStandardOutput, -RedirectStandardError nem -NoNewWindow, que prendem a ferramenta; nem Start-Job ou `&`, que derrubam o servidor junto com o shell. Ele continua rodando depois do pedido; para parar, `taskkill /PID <PID> /T /F` (Stop-Process sozinho deixa o node no ar). Não abra o navegador do computador (start, Start-Process ou explorer com um endereço): o aplicativo já mostra a página numa prévia ao vivo quando o endereço aparece; para conferir, use curl.exe e cite o endereço completo na resposta.";
+
+/** Como subir um servidor que deve continuar no ar, na sintaxe da plataforma. */
+export function regraDosServidores(plataforma: Plataforma): string {
+  return plataforma === "windows" ? REGRA_DOS_SERVIDORES_WINDOWS : REGRA_DOS_SERVIDORES_UNIX;
+}
 
 /**
  * O marcador como o Orquestrador pode escrevê-lo: com espaços em volta, um
@@ -156,6 +178,8 @@ export function instrucoesDoOrquestrador(pasta: PastaDeTrabalho): string {
  * As instruções personalizadas do usuário (`resolverInstrucoes`) vão no fim
  * do bloco pelo mesmo motivo: editadas no meio da conversa, valem já no
  * pedido seguinte. Sem elas, o bloco fica exatamente como antes.
+ *
+ * A `plataforma` decide a sintaxe da regra dos servidores (`regraDosServidores`).
  */
 export function mensagemParaOOrquestrador(
   texto: string,
@@ -166,6 +190,7 @@ export function mensagemParaOOrquestrador(
   instrucoes: InstrucoesAplicadas | null = null,
   revogarInstrucoesAnteriores = false,
   subagentesProntos: readonly DadosDoSubagentePronto[] = [],
+  plataforma: Plataforma = "unix",
 ): string {
   const planejamento = modo === "planejamento";
   // No planejamento os agentes só leem (as ferramentas já vêm travadas
@@ -202,7 +227,7 @@ export function mensagemParaOOrquestrador(
     `- Permissões: ${DESCRICAO_DO_NIVEL[nivelDoPedido]}. ${regraDeCommitEPush}`,
     ...regrasDoPlanejamento,
     ...regrasDoTamanho,
-    ...(nivelDoPedido === "edicao_e_comandos" ? [`- ${REGRA_DOS_SERVIDORES}`] : []),
+    ...(nivelDoPedido === "edicao_e_comandos" ? [`- ${regraDosServidores(plataforma)}`] : []),
     ...(pastaDeArtefatos === null ? [] : regrasDeArtefatos(pastaDeArtefatos)),
     ...regrasDasPerguntas(),
     ...imagens,
@@ -248,12 +273,15 @@ export function mensagemDeAprovacaoDoPlano(observacoes: string): string {
  *
  * Um subagente pronto (`especialidade`) recebe as mesmas regras, com o nome
  * dele, e a especialidade definida pelo usuário no fim.
+ *
+ * A `plataforma` decide a sintaxe da regra dos servidores (`regraDosServidores`).
  */
 export function instrucoesDoSubagente(
   pasta: PastaDeTrabalho,
   permiteCommitEPush = false,
   pastaDeArtefatos: string | null = null,
   especialidade: DadosDoSubagentePronto | null = null,
+  plataforma: Plataforma = "unix",
 ): string {
   const regraDeCommitEPush = permiteCommitEPush
     ? "Commit e push: faça somente se a subtarefa recebida pedir explicitamente — o orquestrador só pede quando o usuário pediu. Nunca na main; use branch conforme a política (feature/, fix/, hotfix/, refactor/). Nunca adicione a linha Co-authored-by."
@@ -270,7 +298,7 @@ export function instrucoesDoSubagente(
     `Faça somente a subtarefa recebida, dentro da pasta ${pasta.caminho}. Seja objetivo.`,
     ...regraDeArtefatos,
     "Ao terminar, devolva: o que fez, os arquivos que alterou (se houver) e o resultado.",
-    REGRA_DOS_SERVIDORES,
+    regraDosServidores(plataforma),
     `${regraDeCommitEPush} Responda em português.`,
     ...(especialidade === null ? [] : linhasDaEspecialidade(especialidade)),
   ].join("\n");

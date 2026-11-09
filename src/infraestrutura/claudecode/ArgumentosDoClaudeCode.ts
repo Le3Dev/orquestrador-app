@@ -1,5 +1,5 @@
 import { EsforcoDeRaciocinio } from "../../orquestracao/EsforcoDeRaciocinio";
-import { instrucoesDoSubagente, NOME_DO_SUBAGENTE } from "../../orquestracao/InstrucoesDoOrquestrador";
+import { instrucoesDoSubagente, NOME_DO_SUBAGENTE, Plataforma } from "../../orquestracao/InstrucoesDoOrquestrador";
 import { PedidoDeTurno } from "../../orquestracao/MotorDeAgentes";
 import { NivelDePermissao } from "../../orquestracao/NivelDePermissao";
 import { modeloDoSubagentePronto } from "../../orquestracao/SubagentesProntos";
@@ -283,8 +283,12 @@ export function ferramentasDoTurno(pedido: PedidoDeTurno): readonly string[] {
  * ferramentas, esforço e regra de commit do executor: nunca mais permissão
  * que o turno; só mudam a descrição, a especialidade e, se escolhido, o modelo.
  * O `Workflow` do `ultracode` nunca entra no `tools` deles.
+ * A `plataforma` decide a sintaxe da regra dos servidores de todos eles.
  */
-export function definicaoDosAgentes(pedido: PedidoDeTurno): Record<string, DefinicaoDeAgente> {
+export function definicaoDosAgentes(
+  pedido: PedidoDeTurno,
+  plataforma: Plataforma = "unix",
+): Record<string, DefinicaoDeAgente> {
   const esforco = nivelDeEsforcoDosSubagentes(
     pedido.configuracao.esforcoDosSubagentes,
     pedido.configuracao.esforcoDoOrquestrador,
@@ -295,7 +299,13 @@ export function definicaoDosAgentes(pedido: PedidoDeTurno): Record<string, Defin
       subagente.nome,
       {
         description: subagente.descricao,
-        prompt: instrucoesDoSubagente(pedido.pastaDeTrabalho, permiteCommitEPush, pedido.pastaDeArtefatos, subagente),
+        prompt: instrucoesDoSubagente(
+          pedido.pastaDeTrabalho,
+          permiteCommitEPush,
+          pedido.pastaDeArtefatos,
+          subagente,
+          plataforma,
+        ),
         tools: comFerramentasDeArtefato(ferramentasDoTurno(pedido)),
         model: modeloDoSubagentePronto(subagente, pedido.configuracao.modeloDosSubagentes),
         ...(esforco === null ? {} : { effort: esforco }),
@@ -307,7 +317,7 @@ export function definicaoDosAgentes(pedido: PedidoDeTurno): Record<string, Defin
     [NOME_DO_SUBAGENTE]: {
       description:
         "Executa uma subtarefa delegada pelo orquestrador e devolve um resultado objetivo.",
-      prompt: instrucoesDoSubagente(pedido.pastaDeTrabalho, permiteCommitEPush, pedido.pastaDeArtefatos),
+      prompt: instrucoesDoSubagente(pedido.pastaDeTrabalho, permiteCommitEPush, pedido.pastaDeArtefatos, null, plataforma),
       tools: comFerramentasDeArtefato(ferramentasDoTurno(pedido)),
       model: pedido.configuracao.modeloDosSubagentes,
       ...(esforco === null ? {} : { effort: esforco }),

@@ -7,10 +7,13 @@ import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { ESFORCOS_DE_RACIOCINIO } from "./EsforcoDeRaciocinio";
 import {
   instrucoesDoOrquestrador,
+  instrucoesDoSubagente,
   MARCADOR_DE_PLANO,
   mensagemDeAprovacaoDoPlano,
   mensagemParaOOrquestrador,
-  REGRA_DOS_SERVIDORES,
+  REGRA_DOS_SERVIDORES_UNIX,
+  REGRA_DOS_SERVIDORES_WINDOWS,
+  regraDosServidores,
   separarPropostaDePlano,
 } from "./InstrucoesDoOrquestrador";
 import { ehModeloClaude, MODELOS_CLAUDE } from "./ModeloClaude";
@@ -355,12 +358,27 @@ describe("mensagemParaOOrquestrador", () => {
     });
     const soLeitura = ConfiguracaoDoOrquestrador.de({ ...base, quantidadeDeSubagentes });
 
-    expect(mensagemParaOOrquestrador("suba o site", comComandos)).toContain(`- ${REGRA_DOS_SERVIDORES}`);
+    expect(mensagemParaOOrquestrador("suba o site", comComandos)).toContain(`- ${REGRA_DOS_SERVIDORES_UNIX}`);
     expect(mensagemParaOOrquestrador("suba o site", comComandos, [], "planejamento")).not.toContain(
-      REGRA_DOS_SERVIDORES,
+      REGRA_DOS_SERVIDORES_UNIX,
     );
-    expect(mensagemParaOOrquestrador("suba o site", soLeitura)).not.toContain(REGRA_DOS_SERVIDORES);
-    expect(REGRA_DOS_SERVIDORES).toContain("Não abra o navegador do computador");
+    expect(mensagemParaOOrquestrador("suba o site", soLeitura)).not.toContain(REGRA_DOS_SERVIDORES_UNIX);
+    expect(REGRA_DOS_SERVIDORES_UNIX).toContain("Não abra o navegador do computador");
+  });
+
+  it("no Windows explica a subida pelo PowerShell, e não a do unix", () => {
+    const comComandos = ConfiguracaoDoOrquestrador.de({
+      ...base,
+      quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
+      nivelDePermissao: "edicao_e_comandos",
+    });
+    const noWindows = mensagemParaOOrquestrador("suba o site", comComandos, [], "execucao", null, null, false, [], "windows");
+    const semPlataforma = mensagemParaOOrquestrador("suba o site", comComandos);
+
+    expect(noWindows).toContain(`- ${REGRA_DOS_SERVIDORES_WINDOWS}`);
+    expect(noWindows).not.toContain(REGRA_DOS_SERVIDORES_UNIX);
+    expect(semPlataforma).toContain(`- ${REGRA_DOS_SERVIDORES_UNIX}`);
+    expect(semPlataforma).not.toContain(REGRA_DOS_SERVIDORES_WINDOWS);
   });
 
   it("no modo automático informa o máximo", () => {
@@ -576,6 +594,41 @@ describe("mensagemParaOOrquestrador: delegação e pedidos grandes", () => {
         expect(texto).not.toContain(MARCADOR_DE_PLANO);
       },
     );
+  });
+});
+
+describe("regraDosServidores", () => {
+  it("no unix é o texto de sempre, com nohup e /tmp", () => {
+    expect(regraDosServidores("unix")).toBe(
+      "Servidor que deve continuar no ar (npm run dev, vite, next dev e afins): não use a execução em segundo plano da ferramenta (run_in_background), que prende o pedido até o servidor parar. Suba desacoplado, com a saída num log fora do projeto, e mostre o começo do log para o endereço aparecer, por exemplo: `nohup npm run dev > /tmp/servidor-<nome>.log 2>&1 & sleep 4; tail -n 20 /tmp/servidor-<nome>.log`. Ele continua rodando depois do pedido; para parar, use kill no processo. Não abra o navegador do computador (open, xdg-open, start): o aplicativo já mostra a página numa prévia ao vivo quando o endereço aparece; para conferir, use curl e cite o endereço completo na resposta.",
+    );
+    expect(regraDosServidores("unix")).toBe(REGRA_DOS_SERVIDORES_UNIX);
+  });
+
+  it("no Windows sobe pelo PowerShell sem herdar handles e para com taskkill", () => {
+    const regra = regraDosServidores("windows");
+
+    expect(regra).toBe(REGRA_DOS_SERVIDORES_WINDOWS);
+    expect(regra).toContain("Start-Process -WindowStyle Hidden cmd");
+    expect(regra).toContain(String.raw`$env:TEMP\servidor-<nome>.log`);
+    expect(regra).toContain("taskkill /PID <PID> /T /F");
+    expect(regra).toContain("-NoNewWindow");
+    expect(regra).toContain("curl.exe");
+    expect(regra).toContain("Não abra o navegador do computador");
+    expect(regra).not.toContain("nohup");
+    expect(regra).not.toContain("/tmp");
+  });
+});
+
+describe("instrucoesDoSubagente e a plataforma", () => {
+  const pasta = PastaDeTrabalho.dentroDe(raiz, "painel");
+
+  it("no Windows leva a regra dos servidores do Windows; sem a plataforma, a do unix", () => {
+    const noWindows = instrucoesDoSubagente(pasta, false, null, null, "windows");
+
+    expect(noWindows).toContain(REGRA_DOS_SERVIDORES_WINDOWS);
+    expect(noWindows).not.toContain(REGRA_DOS_SERVIDORES_UNIX);
+    expect(instrucoesDoSubagente(pasta)).toContain(REGRA_DOS_SERVIDORES_UNIX);
   });
 });
 
