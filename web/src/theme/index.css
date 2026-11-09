@@ -2882,6 +2882,9 @@ html.modo-invisivel .barra-de-titulo * {
   gap: 12px;
   pointer-events: none;
 }
+/* Com um painel da barra aberto, a linha passa à frente do chat rápido (os
+ * dois têm z-index 5 e o chat vem depois): a conversa aberta não cobre o Salvar. */
+.react-flow__panel.paineis-do-topo:has(.painel-da-barra) { z-index: 6; }
 .coluna-do-topo { display: flex; flex-direction: column; min-width: 0; pointer-events: none; }
 .coluna-do-topo > * { pointer-events: auto; }
 .coluna-do-topo-esquerda { flex: 0 0 auto; align-items: flex-start; }
@@ -3023,7 +3026,9 @@ html.modo-invisivel .barra-de-titulo * {
   display: flex;
   flex-direction: column;
   max-width: calc(100vw - 2rem);
-  max-height: calc(100vh - 7rem);
+  /* Topo (barra + respiro, ~5 rem) e embaixo o composer do chat rápido
+   * flutuante (margem 15 px + ~43 px) com folga: o rodapé fica acima dele. */
+  max-height: calc(100vh - 9.5rem);
   overflow: hidden;
   /* Opaco: abre por cima dos terminais, e o texto deles vazava pelo painel. */
   background: var(--surface);
