@@ -176,6 +176,34 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
     expect(camada!.compareDocumentPosition(painelDoChat!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("com um painel da barra aberto, a lista de orquestradores some como o quadro vazio e volta como estava", async () => {
+    vi.spyOn(api, "lerPreferencias").mockRejectedValue(new Error("sem servidor"));
+    render(<CanvasDeOrquestradores />);
+    await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+    const lista = () => screen.getByRole("button", { name: /orquestradores · 0/, hidden: true });
+    expect(lista()).toBeVisible();
+    expect(lista()).toHaveAttribute("aria-expanded", "true");
+
+    // Expandida: some com o painel e volta expandida ao fechar.
+    fireEvent.click(screen.getByRole("button", { name: "Subagentes" }));
+    await screen.findByRole("region", { name: "Subagentes prontos" });
+    expect(lista()).not.toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Seu canvas de agentes" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Fechar subagentes" }));
+    expect(lista()).toBeVisible();
+    expect(lista()).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("heading", { name: "Seu canvas de agentes" })).toBeInTheDocument();
+
+    // Recolhida: escondida, e não desmontada, volta recolhida.
+    fireEvent.click(lista());
+    expect(lista()).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Subagentes" }));
+    expect(lista()).not.toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Subagentes" }));
+    expect(lista()).toBeVisible();
+    expect(lista()).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("com \"Chat fixo à esquerda\", o chat vira uma coluna ao lado do canvas; \"soltar\" o devolve ao pé", async () => {
     render(<CanvasDeOrquestradores />);
     await screen.findByRole("textbox", { name: "Pergunta para o Claude" });

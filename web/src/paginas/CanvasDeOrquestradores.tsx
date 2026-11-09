@@ -1616,7 +1616,11 @@ function Canvas() {
         {erroDosShells !== null && (
           <ErroDoCanvas erro={erroDosShells.mensagem} aoFechar={descartarErroDosShells} nivel={erroDosShells.nivel} />
         )}
-        <Doca orquestradores={orquestradores} noCanvas={noCanvas} erro={erro} aoAbrir={abrirTerminal} />
+        {/* Como o aviso do canvas vazio, some enquanto um painel da barra está aberto; escondida
+            (e não desmontada), volta recolhida ou expandida como estava. */}
+        <div hidden={painelAberto !== null}>
+          <Doca orquestradores={orquestradores} noCanvas={noCanvas} erro={erro} aoAbrir={abrirTerminal} />
+        </div>
       </div>
     ),
     [
