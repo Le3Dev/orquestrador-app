@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
 import { encerrarArvore } from "../sistema/Processos";
+import { AcompanhamentoDeProcessos } from "../sistema/RastreadorDeProcessosDeixados";
 import { RegistroDeProcessos } from "../sistema/RegistroDeProcessos";
 
 export interface ExecucaoDoClaudeCode {
@@ -57,6 +58,10 @@ function esperar(milissegundos: number, sinal: AbortSignal): Promise<void> {
   });
 }
 
+function ehResultado(mensagem: unknown): boolean {
+  return typeof mensagem === "object" && mensagem !== null && (mensagem as { type?: unknown }).type === "result";
+}
+
 /** Tenta de novo, com espera, só quando a falha ao iniciar é passageira. */
 export async function comNovasTentativas<Resultado>(
   tentar: () => Promise<Resultado>,
@@ -93,6 +98,12 @@ export class FachadaClaudeCodeCli {
     private readonly caminhoDoExecutavel: string,
     private readonly registro: RegistroDeProcessos = new RegistroDeProcessos(),
     private readonly esperaEntreTentativasMs = ESPERA_ENTRE_TENTATIVAS_MS,
+    /**
+     * Quem procura o que o processo deixa rodando depois do turno (servidores
+     * de desenvolvimento, watch...). Sem ele, nada é procurado: a melhoria de
+     * prompt, que não tem ferramentas, não deixa nada.
+     */
+    private readonly acompanhamento: AcompanhamentoDeProcessos | null = null,
   ) {}
 
   async executar(
@@ -143,6 +154,7 @@ export class FachadaClaudeCodeCli {
       const pid = filho.pid;
       if (pid !== undefined) {
         this.registro.registrar({ pid, ...execucao.dono, iniciadoEm: new Date().toISOString() });
+        this.acompanhamento?.iniciou({ pid, orquestradorId: execucao.dono.orquestradorId, pasta: execucao.pasta });
       }
 
       const aoAbortar = (): void => encerrarArvore(pid);
@@ -159,6 +171,10 @@ export class FachadaClaudeCodeCli {
         } catch {
           console.warn("[claude-code] Linha ignorada (não é JSON):", linha.slice(0, 200));
           return;
+        }
+        // O `result` fecha o turno com o processo ainda vivo: hora de ver o que ele deixou rodando.
+        if (pid !== undefined && ehResultado(mensagem)) {
+          this.acompanhamento?.resultadoChegou(pid);
         }
         aoReceberMensagem(mensagem);
       });
@@ -178,6 +194,7 @@ export class FachadaClaudeCodeCli {
         sinal.removeEventListener("abort", aoAbortar);
         if (pid !== undefined) {
           this.registro.remover(pid);
+          this.acompanhamento?.terminou(pid);
         }
         rejeitar(new ErroAoIniciarProcesso(`Falha ao iniciar o Claude Code: ${erro.message}.`, erro.code));
       });
@@ -186,6 +203,7 @@ export class FachadaClaudeCodeCli {
         sinal.removeEventListener("abort", aoAbortar);
         if (pid !== undefined) {
           this.registro.remover(pid);
+          this.acompanhamento?.terminou(pid);
         }
         resolver({ codigoDeSaida, erroPadrao: erroPadrao.trim() });
       });

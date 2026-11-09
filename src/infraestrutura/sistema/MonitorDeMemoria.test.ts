@@ -1,6 +1,54 @@
 import { describe, expect, it } from "vitest";
 
-import { memoriaLivreDoMac } from "./MonitorDeMemoria";
+import { memoriaLivreDoMac, MonitorDeMemoria } from "./MonitorDeMemoria";
+import { RegistroDeProcessos } from "./RegistroDeProcessos";
+
+describe("MonitorDeMemoria", () => {
+  it("soma por Orquestrador o Claude Code, os descendentes vivos e os processos deixados, cada pid uma vez", async () => {
+    const registro = new RegistroDeProcessos();
+    registro.registrar({ pid: 10, orquestradorId: "orq-1", sessaoId: "s1", iniciadoEm: "" });
+    registro.registrar({ pid: 20, orquestradorId: "chat", sessaoId: "s2", iniciadoEm: "" });
+    const outros = {
+      pidsPorOrquestrador: () =>
+        new Map([
+          // pwsh e node abertos pelo Claude do orq-1, mais um servidor deixado; o 10 repetido não conta duas vezes.
+          ["orq-1", new Set([11, 12, 10])],
+          ["orq-2", new Set([30])],
+        ]),
+    };
+    const MB = 1024 * 1024;
+    const memoria = new Map([
+      [10, 250 * MB],
+      [11, 40 * MB],
+      [12, 100 * MB],
+      [20, 230 * MB],
+      [30, 300 * MB],
+      [99, 999 * MB],
+    ]);
+    let pedidos: readonly number[] = [];
+    const monitor = new MonitorDeMemoria(registro, 5_000, outros, async (pids) => {
+      pedidos = pids;
+      return new Map([...memoria].filter(([pid]) => pids.includes(pid)));
+    });
+
+    await monitor.medir();
+
+    expect([...pedidos].sort((a, b) => a - b)).toEqual([10, 11, 12, 20, 30]);
+    expect(monitor.ultimaLeitura?.porOrquestrador).toEqual({ "orq-1": 390 * MB, chat: 230 * MB, "orq-2": 300 * MB });
+    expect(monitor.ultimaLeitura?.agentesBytes).toBe(920 * MB);
+  });
+
+  it("sem conseguir medir, conta zero em vez de falhar", async () => {
+    const registro = new RegistroDeProcessos();
+    registro.registrar({ pid: 10, orquestradorId: "orq-1", sessaoId: "s1", iniciadoEm: "" });
+    const monitor = new MonitorDeMemoria(registro, 5_000, null, () => Promise.reject(new Error("tasklist sumiu")));
+
+    await monitor.medir();
+
+    expect(monitor.ultimaLeitura?.porOrquestrador).toEqual({ "orq-1": 0 });
+    expect(monitor.ultimaLeitura?.agentesBytes).toBe(0);
+  });
+});
 
 const SAIDA_DO_VM_STAT = [
   "Mach Virtual Memory Statistics: (page size of 16384 bytes)",

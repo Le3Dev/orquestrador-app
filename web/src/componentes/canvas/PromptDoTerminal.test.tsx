@@ -27,8 +27,8 @@ const IMAGEM: ImagemAnexada = {
   nome: "tela.png",
   tipoDeMidia: "image/png",
   tamanhoEmBytes: 10,
-  base64: "AAAA",
-  previa: "data:image/png;base64,AAAA",
+  arquivo: new Blob([new Uint8Array(10)], { type: "image/png" }),
+  previa: "blob:teste/i1",
 };
 
 function renderizar({

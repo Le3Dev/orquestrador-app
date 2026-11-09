@@ -567,6 +567,56 @@ describe("NoTerminal · conversa nova", () => {
     return { canvas, campo: screen.getByRole("textbox", { name: "Mensagem para o orquestrador" }) };
   }
 
+  describe("imagens anexadas", () => {
+    it("guarda o arquivo com miniatura blob: e libera a URL ao remover", async () => {
+      const criar = vi.spyOn(URL, "createObjectURL");
+      const revogar = vi.spyOn(URL, "revokeObjectURL");
+      const { campo } = renderizarOcioso();
+
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["png"], "tela.png", { type: "image/png" })] } });
+      const remover = await screen.findByRole("button", { name: "Remover tela.png" });
+      const previa = criar.mock.results[0]?.value as string;
+      expect(screen.getByAltText("tela.png")).toHaveAttribute("src", previa);
+      expect(revogar).not.toHaveBeenCalled();
+
+      fireEvent.click(remover);
+      expect(revogar).toHaveBeenCalledWith(previa);
+      expect(screen.queryByAltText("tela.png")).not.toBeInTheDocument();
+    });
+
+    it("gera o base64 só no envio, igual ao do arquivo, e libera a URL depois", async () => {
+      const enviar = vi.spyOn(api, "enviarMensagem").mockResolvedValue({ turnoId: "t1" });
+      const criar = vi.spyOn(URL, "createObjectURL");
+      const revogar = vi.spyOn(URL, "revokeObjectURL");
+      const { campo } = renderizarOcioso();
+
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["png"], "tela.png", { type: "image/png" })] } });
+      await screen.findByAltText("tela.png");
+      fireEvent.change(campo, { target: { value: "Veja" } });
+      fireEvent.keyDown(campo, { key: "Enter" });
+
+      // "cG5n" é o base64 de "png", como o FileReader gerava antes.
+      await waitFor(() =>
+        expect(enviar).toHaveBeenCalledWith("o1", "Veja", [{ nome: "tela.png", tipoDeMidia: "image/png", base64: "cG5n" }], "execucao"),
+      );
+      await waitFor(() => expect(revogar).toHaveBeenCalledWith(criar.mock.results[0]?.value));
+      await waitFor(() => expect(screen.queryByAltText("tela.png")).not.toBeInTheDocument());
+    });
+
+    it("libera as URLs ao desmontar", async () => {
+      const criar = vi.spyOn(URL, "createObjectURL");
+      const revogar = vi.spyOn(URL, "revokeObjectURL");
+      const canvas = canvasDoTerminal(conversaOciosa());
+      const { unmount } = render(<Terminal canvas={canvas} no={propsDoNo()} />);
+      const campo = screen.getByRole("textbox", { name: "Mensagem para o orquestrador" });
+
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["png"], "tela.png", { type: "image/png" })] } });
+      await screen.findByAltText("tela.png");
+      unmount();
+      expect(revogar).toHaveBeenCalledWith(criar.mock.results[0]?.value);
+    });
+  });
+
   it("/clear no prompt pede a conversa nova ao servidor, recarrega a lista e esvazia o campo", async () => {
     const limpar = vi.spyOn(api, "limparConversa").mockResolvedValue(orquestrador());
     const enviar = vi.spyOn(api, "enviarMensagem");

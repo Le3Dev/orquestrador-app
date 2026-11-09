@@ -71,6 +71,13 @@ export interface DependenciasDoServico {
   diagnosticador?: DiagnosticadorDoClaude | undefined;
   /** Marca as esperas da vigia e da retomada. Sem ele, `setTimeout`. */
   agendador?: AgendadorDeTarefas | undefined;
+  /**
+   * Chamado depois que um Orquestrador é removido, para encerrar o que ficou
+   * ligado a ele fora do agregado (os processos que os agentes deixaram
+   * rodando, os terminais do canvas). Não é esperado: uma falha só vai para o
+   * log e a remoção vale do mesmo jeito.
+   */
+  aoRemover?: ((orquestradorId: string) => Promise<void>) | undefined;
 }
 
 /** O esforço que cada papel herda da máquina quando a configuração está em "Padrão". */
@@ -509,6 +516,9 @@ export class ServicoDeOrquestracao {
     this.tentativas.delete(id);
     await this.dependencias.repositorio.remover(id);
     await this.dependencias.anexos.removerTodos(id);
+    this.dependencias
+      .aoRemover?.(id)
+      .catch((erro: unknown) => console.warn(`[orquestracao] Falha ao encerrar o que era de "${orquestrador.nome}":`, erro));
   }
 
   /**
