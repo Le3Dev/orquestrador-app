@@ -1,6 +1,6 @@
-/* ---------------- Chat rápido fixo à esquerda ----------------
- * Com a preferência "Chat fixo à esquerda", o chat sai do pé do canvas e vira
- * uma coluna da altura toda: a conversa em bolhas (você à direita, o Claude à
+/* ---------------- Chat rápido fixo ao lado do canvas ----------------
+ * Com a preferência "Chat fixo", o chat sai do pé do canvas e vira uma coluna
+ * da altura toda, à esquerda ou à direita (o "Lado" da preferência): a conversa em bolhas (você à direita, o Claude à
  * esquerda) e o campo embaixo. O canvas fica ao lado (flex-1) e o React Flow
  * se ajusta ao tamanho novo. Seletores com `.chat-lateral` na frente: vencem
  * as regras do chat flutuante qualquer que seja a ordem dos arquivos. */
@@ -17,6 +17,11 @@
   padding: 0 10px 10px;
   background: var(--surface);
   border-right: 1px solid var(--border);
+}
+/* À direita: a borda fica do lado do canvas, à esquerda da coluna. */
+.chat-rapido.chat-lateral.chat-lateral-direita {
+  border-right: none;
+  border-left: 1px solid var(--border);
 }
 
 .chat-lateral .conversa-do-chat.conversa-lateral {
@@ -69,7 +74,8 @@
 .chat-lateral .seletor-de-modelo { min-width: 0; }
 
 /* ---------------- Alça de largura ----------------
- * Na borda direita da coluna: 6 px de área de pegar (metade sobre o canvas),
+ * Na borda da coluna virada para o canvas (a direita da coluna da esquerda, a
+ * esquerda da coluna da direita): 6 px de área de pegar (metade sobre o canvas),
  * uma linha fina que acende no hover, no foco do teclado e enquanto arrasta. */
 .alca-do-chat-lateral {
   position: absolute;
@@ -82,6 +88,10 @@
   touch-action: none;
   user-select: none;
   outline: none;
+}
+.alca-do-chat-lateral.alca-do-chat-lateral-direita {
+  right: auto;
+  left: -4px;
 }
 .alca-do-chat-lateral::before {
   content: "";

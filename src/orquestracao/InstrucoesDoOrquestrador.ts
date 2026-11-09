@@ -1,6 +1,6 @@
 import { linhasDaRegraDasPerguntas } from "../perguntas/PerguntaDoApp";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
-import { InstrucoesAplicadas, linhasDasInstrucoes } from "./InstrucoesPersonalizadas";
+import { desarmarMarcas, InstrucoesAplicadas, linhasDasInstrucoes } from "./InstrucoesPersonalizadas";
 import { ModeloClaude } from "./ModeloClaude";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { DESCRICAO_DO_NIVEL, NivelDePermissao, TRABALHO_DIRETO_NO_NIVEL } from "./NivelDePermissao";
@@ -19,6 +19,38 @@ export const MARCADOR_DE_PLANO = "<plano-para-aprovacao/>";
 
 const MARCA_DA_CONFIGURACAO = "configuracao-do-pedido";
 
+const MARCA_DOS_ITENS_LIGADOS = "itens-ligados";
+
+/** O que o usuário pode ligar a um Orquestrador no canvas (uma linha do item até o terminal). */
+export const TIPOS_DE_ITEM_LIGADO = ["nota", "previa", "artefato"] as const;
+export type TipoDeItemLigado = (typeof TIPOS_DE_ITEM_LIGADO)[number];
+
+/** Quantos itens ligados um pedido leva, no máximo. */
+export const MAXIMO_DE_ITENS_LIGADOS = 10;
+export const TAMANHO_MAXIMO_DO_TITULO_LIGADO = 200;
+/** O texto de uma nota ligada: a tela corta antes disso, com o aviso do corte. */
+export const TAMANHO_MAXIMO_DO_CONTEUDO_LIGADO = 4_000;
+export const TAMANHO_MAXIMO_DO_ENDERECO_LIGADO = 2_000;
+
+/**
+ * Um item que o usuário ligou ao Orquestrador no canvas e que vai como
+ * contexto no pedido: a nota com o texto, a prévia com o endereço, o artefato
+ * com o caminho do arquivo (sem o conteúdo).
+ */
+export interface ItemLigado {
+  tipo: TipoDeItemLigado;
+  titulo: string;
+  conteudo?: string | undefined;
+  url?: string | undefined;
+  caminho?: string | undefined;
+}
+
+const ROTULO_DO_ITEM_LIGADO: Readonly<Record<TipoDeItemLigado, string>> = {
+  nota: "Nota",
+  previa: "Prévia ao vivo",
+  artefato: "Artefato",
+};
+
 /** Como começa a mensagem que aprova um Plano (`mensagemDeAprovacaoDoPlano`). */
 const INICIO_DA_APROVACAO = "Plano aprovado.";
 
@@ -34,6 +66,10 @@ const COMMIT_E_PUSH_POR_FEATURE =
  * comandos ensinados a eles. Quem sabe é a infraestrutura; o domínio só a recebe.
  */
 export type Plataforma = "windows" | "unix";
+
+/** O pedido de commit da aprovação com "Commitar ao final" marcado. */
+export const PEDIDO_DE_COMMIT_AO_FINAL =
+  "Commit ao final: o usuário pede que, com o plano executado e validado, o trabalho fique commitado na branch atual da pasta de trabalho (a do worktree), com mensagem em Conventional Commits, seguindo a regra de commit e push por feature do bloco de configuração. Não abra PR nem faça merge.";
 
 /**
  * Servidor de desenvolvimento (npm run dev, vite...) não pode ir para o
@@ -204,6 +240,45 @@ export function instrucoesDoOrquestrador(pasta: PastaDeTrabalho): string {
   ].join("\n");
 }
 
+/** As linhas de um item ligado: o tipo e o título, e o endereço, o arquivo ou o texto (recuado). */
+function linhasDoItemLigado(item: ItemLigado): string[] {
+  // O título e o texto vêm do usuário: entram como dado, sem poder fechar os blocos antes da hora.
+  const desarmar = (texto: string) => desarmarMarcas(texto, [MARCA_DOS_ITENS_LIGADOS, MARCA_DA_CONFIGURACAO]);
+  const titulo = item.titulo.trim() === "" ? "sem título" : desarmar(item.titulo.trim());
+  const linhas = [`- ${ROTULO_DO_ITEM_LIGADO[item.tipo]} "${titulo}"`];
+  if (item.url !== undefined && item.url !== "") {
+    linhas.push(`  Endereço: ${item.url}`);
+  }
+  if (item.caminho !== undefined && item.caminho !== "") {
+    linhas.push(`  Arquivo (leia se precisar do conteúdo): ${item.caminho}`);
+  }
+  if (item.conteudo !== undefined) {
+    linhas.push(
+      ...(item.conteudo.trim() === ""
+        ? ["  Texto: (vazio)"]
+        : ["  Texto:", ...desarmar(item.conteudo).split(/\r?\n/).map((linha) => `    ${linha}`)]),
+    );
+  }
+  return linhas;
+}
+
+/**
+ * O bloco dos itens ligados ao Orquestrador no canvas, depois do bloco da
+ * configuração e antes do pedido. Sem itens, nada: a mensagem fica como antes.
+ */
+function linhasDosItensLigados(itens: readonly ItemLigado[]): string[] {
+  if (itens.length === 0) {
+    return [];
+  }
+  return [
+    "",
+    `<${MARCA_DOS_ITENS_LIGADOS}>`,
+    "Itens que o usuário ligou a você no canvas do app, como contexto deste pedido. Use o que servir ao pedido; não precisa comentá-los nem repeti-los na resposta.",
+    ...itens.flatMap(linhasDoItemLigado),
+    `</${MARCA_DOS_ITENS_LIGADOS}>`,
+  ];
+}
+
 /**
  * A mensagem que o Orquestrador recebe num turno: a configuração vigente e o
  * pedido do usuário.
@@ -220,6 +295,9 @@ export function instrucoesDoOrquestrador(pasta: PastaDeTrabalho): string {
  * pedido seguinte. Sem elas, o bloco fica exatamente como antes.
  *
  * A `plataforma` decide a sintaxe da regra dos servidores (`regraDosServidores`).
+ *
+ * Os itens que o usuário ligou ao Orquestrador no canvas (`itensLigados`)
+ * vão num bloco `<itens-ligados>` próprio, entre a configuração e o pedido.
  */
 export function mensagemParaOOrquestrador(
   texto: string,
@@ -231,6 +309,7 @@ export function mensagemParaOOrquestrador(
   revogarInstrucoesAnteriores = false,
   subagentesProntos: readonly DadosDoSubagentePronto[] = [],
   plataforma: Plataforma = "unix",
+  itensLigados: readonly ItemLigado[] = [],
 ): string {
   const planejamento = modo === "planejamento";
   // No planejamento os agentes só leem (as ferramentas já vêm travadas
@@ -273,6 +352,7 @@ export function mensagemParaOOrquestrador(
     ...imagens,
     ...linhasDasInstrucoes(instrucoes, MARCA_DA_CONFIGURACAO, revogarInstrucoesAnteriores),
     `</${MARCA_DA_CONFIGURACAO}>`,
+    ...linhasDosItensLigados(itensLigados),
     "",
     texto,
   ].join("\n");
@@ -297,11 +377,16 @@ export function separarPropostaDePlano(resposta: string): { resposta: string; pl
  * planejamento quanto o proposto num pedido grande. Vai como mensagem, e não
  * nas instruções: ao retomar a sessão (`--resume`), o Claude Code ignora
  * instruções novas.
+ *
+ * `commitarAoFinal` reforça a regra `COMMIT_E_PUSH_POR_FEATURE` do bloco do
+ * pedido: quem chama só o liga quando a configuração libera commit. PR e merge
+ * nunca vão junto.
  */
-export function mensagemDeAprovacaoDoPlano(observacoes: string): string {
+export function mensagemDeAprovacaoDoPlano(observacoes: string, commitarAoFinal = false): string {
   const aprovacao = `${INICIO_DA_APROVACAO} Execute agora o plano da sua resposta anterior, delegando as subtarefas como planejado.`;
+  const comCommit = commitarAoFinal ? `${aprovacao}\n\n${PEDIDO_DE_COMMIT_AO_FINAL}` : aprovacao;
   const extras = observacoes.trim();
-  return extras === "" ? aprovacao : `${aprovacao}\n\nObservações do usuário: ${extras}`;
+  return extras === "" ? comCommit : `${comCommit}\n\nObservações do usuário: ${extras}`;
 }
 
 /**

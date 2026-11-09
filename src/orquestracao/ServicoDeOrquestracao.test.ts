@@ -11,7 +11,7 @@ import { DiagnosticadorDoClaude, DiagnosticoDoClaude } from "./DiagnosticoDoClau
 import { ConsultaDeEsforcoHerdado, EsforcoDaMaquina } from "./EsforcoDaMaquina";
 import { EsforcoHerdado } from "./EsforcoHerdado";
 import { EventoDeOrquestracao, EventoDoMotor, EventoRegistrado, SinalDeVida } from "./EventoDeOrquestracao";
-import { MARCADOR_DE_PLANO } from "./InstrucoesDoOrquestrador";
+import { MARCADOR_DE_PLANO, PEDIDO_DE_COMMIT_AO_FINAL } from "./InstrucoesDoOrquestrador";
 import { MedidorDeConsumo, PeriodoDoTurno } from "./MedidorDeConsumo";
 import { UsoDeTokens } from "./UsoDeTokens";
 import { CausaDaFalha, MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "./MotorDeAgentes";
@@ -376,6 +376,22 @@ describe("ServicoDeOrquestracao", () => {
     expect(repositorio.eventos.map((evento) => evento.tipo)).toEqual(["turno_iniciado", "turno_concluido"]);
   });
 
+  it("grava e publica a lista de tarefas do orquestrador com o turno", async () => {
+    const orquestrador = await criar();
+    const tarefas = [
+      { texto: "Ler o código", situacao: "concluida" as const },
+      { texto: "Rodando os testes", situacao: "em_andamento" as const },
+    ];
+    motor.eventos = [{ tipo: "tarefas_atualizadas", tarefas }];
+
+    const { turnoId, conclusao } = await servico.enviarMensagem(orquestrador.id, "analise");
+    motor.terminar();
+    await conclusao;
+
+    expect(repositorio.eventos[1]).toMatchObject({ tipo: "tarefas_atualizadas", turnoId, tarefas });
+    expect(publicados.filter((evento) => evento.tipo === "tarefas_atualizadas")).toHaveLength(1);
+  });
+
   it("guarda as imagens e as entrega ao motor pelo caminho em disco", async () => {
     const orquestrador = await criar();
     const conteudo = new Uint8Array([1, 2, 3]);
@@ -466,6 +482,51 @@ describe("ServicoDeOrquestracao", () => {
     expect(motor.pedidos[0]).toMatchObject({ imagens: [], pastaDasImagens: null, orquestradorId: orquestrador.id });
   });
 
+  describe("renomear", () => {
+    it("troca o nome, grava e publica orquestrador_renomeado", async () => {
+      const orquestrador = await criar();
+      const salvar = vi.spyOn(repositorio, "salvar");
+
+      const renomeado = await servico.renomear(orquestrador.id, "  Backlog  ");
+
+      expect(renomeado.nome).toBe("Backlog");
+      expect(salvar).toHaveBeenCalledWith(orquestrador);
+      expect(repositorio.eventos.at(-1)).toMatchObject({ tipo: "orquestrador_renomeado", nome: "Backlog" });
+      expect(publicados.at(-1)).toMatchObject({ tipo: "orquestrador_renomeado", nome: "Backlog" });
+    });
+
+    it("vale com um pedido em andamento, que segue rodando", async () => {
+      const orquestrador = await criar();
+      const { conclusao } = await servico.enviarMensagem(orquestrador.id, "analise");
+
+      await servico.renomear(orquestrador.id, "Durante o pedido");
+
+      expect(orquestrador.nome).toBe("Durante o pedido");
+      expect(orquestrador.situacao).toBe("trabalhando");
+      motor.terminar();
+      await conclusao;
+      expect(orquestrador.ultimoTurno?.situacao).toBe("concluido");
+    });
+
+    it("o mesmo nome não grava nem publica", async () => {
+      const orquestrador = await criar();
+      const salvar = vi.spyOn(repositorio, "salvar");
+
+      await servico.renomear(orquestrador.id, "Painel");
+
+      expect(salvar).not.toHaveBeenCalled();
+      expect(publicados).toEqual([]);
+    });
+
+    it("recusa nome inválido e orquestrador inexistente", async () => {
+      const orquestrador = await criar();
+
+      await expect(servico.renomear(orquestrador.id, " ")).rejects.toMatchObject({ motivo: "dados_invalidos" });
+      await expect(servico.renomear("nao-existe", "Outro")).rejects.toMatchObject({ motivo: "nao_encontrado" });
+      expect(publicados).toEqual([]);
+    });
+  });
+
   describe("modo de planejamento", () => {
     async function planejar(orquestrador: Orquestrador): Promise<string> {
       motor.eventos = [{ tipo: "sessao_iniciada" }];
@@ -545,6 +606,54 @@ describe("ServicoDeOrquestracao", () => {
         ["execucao", caminho],
       ]);
       expect(worktrees.concluidos).toEqual([orquestrador.id, orquestrador.id]);
+    });
+
+    it("commitar ao final pede o commit por feature na aprovação quando a configuração libera", async () => {
+      const orquestrador = await criar();
+      await servico.alterarConfiguracao(orquestrador.id, {
+        permitirCommitEPush: true,
+        nivelDePermissao: "edicao_e_comandos",
+      });
+      await planejar(orquestrador);
+
+      const { conclusao } = await servico.aprovarPlano(orquestrador.id, "sem mexer nos testes", true);
+      motor.terminar();
+      await conclusao;
+
+      const texto = motor.pedidos[1]?.texto ?? "";
+      expect(texto).toMatch(/^Plano aprovado\. Execute agora o plano/);
+      expect(texto).toContain(PEDIDO_DE_COMMIT_AO_FINAL);
+      expect(texto).toContain("Observações do usuário: sem mexer nos testes");
+    });
+
+    it.each<[string, Partial<DadosDaConfiguracao>]>([
+      ["com commit desligado", { permitirCommitEPush: false, nivelDePermissao: "edicao_e_comandos" }],
+      ["sem terminal no nível", { permitirCommitEPush: true, nivelDePermissao: "edicao" }],
+    ])("commitar ao final é ignorado %s", async (_caso, alteracoes) => {
+      const orquestrador = await criar();
+      await servico.alterarConfiguracao(orquestrador.id, alteracoes);
+      await planejar(orquestrador);
+
+      const { conclusao } = await servico.aprovarPlano(orquestrador.id, "", true);
+      motor.terminar();
+      await conclusao;
+
+      expect(motor.pedidos[1]?.texto).not.toContain(PEDIDO_DE_COMMIT_AO_FINAL);
+    });
+
+    it("sem commitar ao final, a aprovação não pede commit mesmo com ele liberado", async () => {
+      const orquestrador = await criar();
+      await servico.alterarConfiguracao(orquestrador.id, {
+        permitirCommitEPush: true,
+        nivelDePermissao: "edicao_e_comandos",
+      });
+      await planejar(orquestrador);
+
+      const { conclusao } = await servico.aprovarPlano(orquestrador.id);
+      motor.terminar();
+      await conclusao;
+
+      expect(motor.pedidos[1]?.texto).not.toContain(PEDIDO_DE_COMMIT_AO_FINAL);
     });
 
     it("descartar publica a decisão e não inicia turno", async () => {
@@ -1171,6 +1280,58 @@ describe("ServicoDeOrquestracao", () => {
       expect(motor.pedidos.at(-1)?.subagentesProntos).toEqual([revisor]);
     });
 
+    it("o pedido leva só os subagentes prontos que a configuração escolhe", async () => {
+      const pronto = (nome: string) => ({ nome, descricao: `Faz ${nome}.`, prompt: "x", modelo: "herdar" as const });
+      const [revisor, testador, documentador] = [pronto("revisor"), pronto("testador"), pronto("documentador")];
+      preferencias.preferencias = PreferenciasGlobais.de({ subagentesProntos: [revisor, testador, documentador] });
+      const orquestrador = await criar();
+
+      // Sem a escolha (como os orquestradores antigos): todos.
+      expect((await pedidoDoTurno(orquestrador.id)).subagentesProntos).toEqual([revisor, testador, documentador]);
+
+      await servico.alterarConfiguracao(orquestrador.id, { subagentesProntos: "nenhum" });
+      expect((await pedidoDoTurno(orquestrador.id)).subagentesProntos).toEqual([]);
+
+      // Na ordem da biblioteca; o nome que não existe mais é ignorado.
+      await servico.alterarConfiguracao(orquestrador.id, { subagentesProntos: ["documentador", "apagado", "revisor"] });
+      expect((await pedidoDoTurno(orquestrador.id)).subagentesProntos).toEqual([revisor, documentador]);
+
+      await servico.alterarConfiguracao(orquestrador.id, { subagentesProntos: "todos" });
+      expect((await pedidoDoTurno(orquestrador.id)).subagentesProntos).toEqual([revisor, testador, documentador]);
+      preferencias.preferencias = PreferenciasGlobais.vazias();
+    });
+
+    it("{{pasta}} vira a pasta do turno (o worktree) e {{nome}} o nome do orquestrador", async () => {
+      const orquestrador = await criar();
+      const caminho = path.resolve("/dados/worktrees/abc");
+      worktrees.preparo = { cwd: caminho, worktree: { branch: "orquestrador/id1", caminho } };
+      await servico.alterarConfiguracao(orquestrador.id, {
+        instrucoesPersonalizadas: "Trabalhe só em {{pasta}}. Assine como {{ nome }}. {{projeto}}",
+      });
+
+      const pedido = await pedidoDoTurno(orquestrador.id);
+
+      expect(pedido.pastaDeTrabalho.caminho).toBe(caminho);
+      expect(pedido.instrucoes).toEqual({
+        texto: `Trabalhe só em ${caminho}. Assine como Painel. {{projeto}}`,
+        origem: "orquestrador",
+      });
+      // Guardadas sem trocar: o próximo turno troca de novo, com a pasta dele.
+      expect(orquestrador.configuracao.instrucoesPersonalizadas).toContain("{{pasta}}");
+    });
+
+    it("sem worktree, {{pasta}} vira a pasta de trabalho; vale também nas instruções gerais", async () => {
+      preferencias.preferencias = PreferenciasGlobais.de({ instrucoesPadrao: "Pasta: {{pasta}}; nome: {{nome}}." });
+      const orquestrador = await criar();
+
+      const pedido = await pedidoDoTurno(orquestrador.id);
+
+      expect(pedido.instrucoes).toEqual({
+        texto: `Pasta: ${orquestrador.pastaDeTrabalho.caminho}; nome: Painel.`,
+        origem: "padrao",
+      });
+    });
+
     it("instrucoesPara diz o que o próximo pedido receberia", async () => {
       const orquestrador = await criar();
       expect(servico.instrucoesPara(orquestrador.configuracao)).toBeNull();
@@ -1479,10 +1640,12 @@ class RelogioFalso implements AgendadorDeTarefas {
 /** Claude parado: vivo, sem CPU, sem comando e sem transcrição crescendo. */
 class DiagnosticadorParado implements DiagnosticadorDoClaude {
   readonly esquecidos: string[] = [];
+  /** Falso imita o Windows, onde o sistema não deixa ver os processos. */
+  processosConhecidos = true;
   async diagnosticar(): Promise<DiagnosticoDoClaude> {
     return {
       processoVivo: true,
-      processosVisiveis: true,
+      processosConhecidos: this.processosConhecidos,
       cpuDoClaude: 0,
       filhos: [],
       transcricoesCrescendo: false,
@@ -1853,6 +2016,28 @@ describe("ServicoDeOrquestracao e a autorrecuperação (ADR-36)", () => {
     expect(etapas()).toEqual([]);
   });
 
+  it("sem lista de processos (Windows), só mostra o diagnóstico: não encerra nem retoma", async () => {
+    diagnosticador.processosConhecidos = false;
+    const orquestrador = await criar();
+    motor.roteiro = ["rodando"];
+    const primeiro = await servico.enviarMensagem(orquestrador.id, "rode o npm test");
+    await esvaziar();
+
+    await relogio.avancar(20 * MINUTO);
+    expect(orquestrador.situacao).toBe("trabalhando");
+    expect(sinais.at(-1)?.diagnostico).toEqual({
+      situacao: "suspeito",
+      resumo: "sem saída há 20 min; não dá para ver os processos neste sistema, então o app não encerra o pedido sozinho",
+      semRetomadaAutomatica: true,
+    });
+    expect(etapas()).toEqual([]);
+    expect(motor.pedidos).toHaveLength(1);
+
+    await servico.cancelar(orquestrador.id);
+    await primeiro.recuperacao;
+    expect(etapas()).toEqual([]);
+  });
+
   it("com a autorrecuperação desligada, só mostra o diagnóstico: não encerra nem retoma", async () => {
     preferencias.preferencias = PreferenciasGlobais.de({ autorrecuperacao: false });
     const orquestrador = await criar();
@@ -1874,5 +2059,128 @@ describe("ServicoDeOrquestracao e a autorrecuperação (ADR-36)", () => {
     await segundo.recuperacao;
     expect(etapas()).toEqual([]);
     expect(relogio.pendentes).toBe(0);
+  });
+
+  describe("retomada gravada e o reinício do app", () => {
+    /** Um Orquestrador cujo último turno falhou, com a retomada gravada como ficou no disco. */
+    async function comRetomadaGravada(
+      retomada: Partial<{ deTurnoId: string; causa: "silencio" | "rede"; tentativa: number; retomarEm: string }> = {},
+    ): Promise<Orquestrador> {
+      const orquestrador = await criar();
+      const turnoId = `t-${orquestrador.id}`;
+      orquestrador.iniciarTurno(turnoId, "faça", relogio.agora());
+      orquestrador.falharTurno(turnoId, "falhou", relogio.agora());
+      orquestrador.agendarRetomada({
+        deTurnoId: turnoId,
+        causa: "rede",
+        tentativa: 1,
+        retomarEm: new Date(relogio.agoraMs + 2 * MINUTO).toISOString(),
+        ...retomada,
+      });
+      return orquestrador;
+    }
+
+    function aguardando(): Array<{ turnoId: string; retomaEm: string | null }> {
+      return repositorio.eventos.flatMap((evento) =>
+        evento.tipo === "recuperacao_do_turno" && evento.etapa === "aguardando"
+          ? [{ turnoId: evento.turnoId, retomaEm: evento.retomaEm }]
+          : [],
+      );
+    }
+
+    it("ao agendar, a retomada fica no agregado; cancelar a tira", async () => {
+      const orquestrador = await criar();
+      motor.roteiro = [falhaPor("rede")];
+      const primeiro = await servico.enviarMensagem(orquestrador.id, "faça");
+      await primeiro.recuperacao;
+
+      expect(orquestrador.retomadaPendente).toEqual({
+        deTurnoId: primeiro.turnoId,
+        causa: "rede",
+        tentativa: 1,
+        retomarEm: new Date(relogio.agoraMs + MINUTO).toISOString(),
+      });
+
+      await servico.cancelar(orquestrador.id);
+      expect(orquestrador.retomadaPendente).toBeNull();
+    });
+
+    it("reagenda com a tentativa gravada, registra no log do turno e retoma na hora marcada", async () => {
+      const retomarEm = new Date(relogio.agoraMs + 2 * MINUTO).toISOString();
+      const orquestrador = await comRetomadaGravada({ tentativa: 3, retomarEm });
+      const turnoId = `t-${orquestrador.id}`;
+      motor.roteiro = [falhaPor("rede")];
+
+      expect(await servico.reagendarRetomadasPendentes()).toBe(1);
+
+      expect(ultimaRecuperacao()).toMatchObject({
+        turnoId,
+        etapa: "aguardando",
+        causa: "rede",
+        tentativa: 3,
+        de: 3,
+        resumo: `retomada reagendada após o reinício do app; retoma às ${formatarHora(new Date(retomarEm))}`,
+        retomaEm: retomarEm,
+      });
+      expect(orquestrador.retomadaPendente).toMatchObject({ deTurnoId: turnoId, tentativa: 3, retomarEm });
+
+      await relogio.avancar(2 * MINUTO - 1);
+      expect(motor.pedidos).toHaveLength(0);
+      await relogio.avancar(1);
+      // A contagem voltou com a tentativa gravada: a falha seguinte já é a desistência.
+      await vi.waitFor(() => expect(etapas().at(-1)).toBe("desistiu 3/3"));
+
+      expect(etapas()).toEqual(["aguardando 3/3", "retomando 3/3", "desistiu 3/3"]);
+      expect(repositorio.eventos.find((evento) => evento.tipo === "turno_iniciado")).toMatchObject({
+        retomada: { deTurnoId: turnoId, tentativa: 3 },
+      });
+      expect(motor.pedidos[0]?.texto).toContain("Você foi interrompido por uma falha de rede");
+      expect(orquestrador.retomadaPendente).toBeNull();
+    });
+
+    it("as que venceram durante o reinício saem logo, uma de cada vez", async () => {
+      const vencida = new Date(relogio.agoraMs - MINUTO).toISOString();
+      await comRetomadaGravada({ causa: "silencio", retomarEm: vencida });
+      await comRetomadaGravada({ causa: "silencio", retomarEm: vencida });
+      motor.roteiro = [SUCESSO, SUCESSO];
+
+      expect(await servico.reagendarRetomadasPendentes()).toBe(2);
+      expect(aguardando().map((evento) => evento.retomaEm)).toEqual([
+        new Date(relogio.agoraMs + 10 * SEGUNDO).toISOString(),
+        new Date(relogio.agoraMs + 20 * SEGUNDO).toISOString(),
+      ]);
+
+      await relogio.avancar(10 * SEGUNDO);
+      await vi.waitFor(() => expect(motor.pedidos).toHaveLength(1));
+      await relogio.avancar(10 * SEGUNDO);
+      await vi.waitFor(() => expect(motor.pedidos).toHaveLength(2));
+    });
+
+    it("com a autorrecuperação desligada, só tira a retomada e registra no log do turno", async () => {
+      preferencias.preferencias = PreferenciasGlobais.de({ autorrecuperacao: false });
+      const orquestrador = await comRetomadaGravada();
+
+      expect(await servico.reagendarRetomadasPendentes()).toBe(0);
+
+      expect(orquestrador.retomadaPendente).toBeNull();
+      expect(ultimaRecuperacao()).toMatchObject({
+        turnoId: `t-${orquestrador.id}`,
+        etapa: "cancelada",
+        resumo: "retomada cancelada: a autorrecuperação está desligada (o app foi reiniciado durante a espera)",
+        retomaEm: null,
+      });
+      await relogio.avancar(10 * MINUTO);
+      expect(motor.pedidos).toHaveLength(0);
+    });
+
+    it("a de um turno que já não é o último só sai, sem evento", async () => {
+      const orquestrador = await comRetomadaGravada({ deTurnoId: "t-de-outra-vez" });
+
+      expect(await servico.reagendarRetomadasPendentes()).toBe(0);
+
+      expect(orquestrador.retomadaPendente).toBeNull();
+      expect(etapas()).toEqual([]);
+      expect(relogio.pendentes).toBe(0);
+    });
   });
 });

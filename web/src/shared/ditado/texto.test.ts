@@ -27,7 +27,16 @@ describe("mensagemDoErroDeDitado", () => {
     expect(mensagemDoErroDeDitado(new TypeError("Failed to fetch"))).toMatch(/baixar o modelo/);
   });
 
-  it("outros erros mostram a mensagem original", () => {
-    expect(mensagemDoErroDeDitado(new Error("deu ruim"))).toBe("O ditado falhou: deu ruim");
+  it("navegador sem acesso ao microfone vira aviso em português", () => {
+    expect(mensagemDoErroDeDitado(new DOMException("Not supported", "NotSupportedError"))).toBe(
+      "O ditado falhou: este navegador não deu acesso ao microfone.",
+    );
+  });
+
+  it("erros desconhecidos viram mensagem genérica em português, sem o texto cru", () => {
+    const generica = "O ditado falhou. Tente de novo ou digite o texto.";
+    expect(mensagemDoErroDeDitado(new Error("Not supported"))).toBe(generica);
+    expect(mensagemDoErroDeDitado(new DOMException("Unknown", "UnknownError"))).toBe(generica);
+    expect(mensagemDoErroDeDitado("qualquer coisa")).toBe(generica);
   });
 });

@@ -7,7 +7,7 @@ import {
 } from "./ConfiguracaoDoOrquestrador";
 import { ConsumoDoTurno } from "./ConsumoDoTurno";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
-import { EventoDeOrquestracao, EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
+import { CausaDaRecuperacao, EventoDeOrquestracao, EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import {
@@ -30,6 +30,21 @@ export const TAMANHO_MAXIMO_DO_NOME = 60;
 export const LIMITE_DA_FILA = 10;
 
 export type SituacaoDoOrquestrador = "ocioso" | "trabalhando";
+
+/** O nome aparado, de 1 a `TAMANHO_MAXIMO_DO_NOME` caracteres: vale ao criar e ao renomear. */
+function nomeValido(nome: string): string {
+  const aparado = nome.trim();
+  if (aparado === "") {
+    throw new ErroDeOrquestracao("dados_invalidos", "Dê um nome ao orquestrador.");
+  }
+  if (aparado.length > TAMANHO_MAXIMO_DO_NOME) {
+    throw new ErroDeOrquestracao(
+      "dados_invalidos",
+      `O nome do orquestrador deve ter até ${TAMANHO_MAXIMO_DO_NOME} caracteres.`,
+    );
+  }
+  return aparado;
+}
 
 /**
  * A fila do Orquestrador já tem `LIMITE_DA_FILA` pedidos: conflito com o
@@ -56,6 +71,21 @@ export interface DadosDoWorktree {
   ativo: boolean;
 }
 
+/**
+ * A retomada automática marcada depois de um turno que travou ou falhou (ver
+ * ADR-36). Fica no agregado, e no `orquestrador.json`, para sobreviver a um
+ * reinício do app durante a espera.
+ */
+export interface DadosDaRetomadaPendente {
+  /** O turno que travou ou falhou. */
+  deTurnoId: string;
+  causa: CausaDaRecuperacao;
+  /** A tentativa que a retomada vai fazer (1 na primeira). */
+  tentativa: number;
+  /** ISO: quando retomar. */
+  retomarEm: string;
+}
+
 export interface DadosDoOrquestrador {
   id: string;
   nome: string;
@@ -73,6 +103,8 @@ export interface DadosDoOrquestrador {
    * Ausente nos dados gravados antes de elas existirem: vale `false`.
    */
   instrucoesNaConversa?: boolean | undefined;
+  /** Ausente nos dados gravados antes de a retomada ser gravada: vale nenhuma. */
+  retomadaPendente?: DadosDaRetomadaPendente | null | undefined;
 }
 
 export interface NovoOrquestrador {
@@ -102,7 +134,7 @@ export interface NovoOrquestrador {
 export class Orquestrador {
   private constructor(
     public readonly id: string,
-    public readonly nome: string,
+    private nomeAtual: string,
     public readonly pastaDeTrabalho: PastaDeTrabalho,
     private sessaoAtual: string,
     private readonly criadoEmMs: number,
@@ -112,22 +144,13 @@ export class Orquestrador {
     private worktreeAtual: DadosDoWorktree | null,
     private filaAtual: PedidoNaFila[],
     private instrucoesJaEnviadas: boolean,
+    private retomadaAtual: DadosDaRetomadaPendente | null,
   ) {}
 
   static criar(novo: NovoOrquestrador): Orquestrador {
-    const nome = novo.nome.trim();
-    if (nome === "") {
-      throw new ErroDeOrquestracao("dados_invalidos", "Dê um nome ao orquestrador.");
-    }
-    if (nome.length > TAMANHO_MAXIMO_DO_NOME) {
-      throw new ErroDeOrquestracao(
-        "dados_invalidos",
-        `O nome do orquestrador deve ter até ${TAMANHO_MAXIMO_DO_NOME} caracteres.`,
-      );
-    }
     return new Orquestrador(
       novo.id,
-      nome,
+      nomeValido(novo.nome),
       novo.pastaDeTrabalho,
       novo.sessaoId,
       novo.agora.getTime(),
@@ -137,6 +160,7 @@ export class Orquestrador {
       null,
       [],
       false,
+      null,
     );
   }
 
@@ -155,7 +179,26 @@ export class Orquestrador {
       dados.worktree === undefined || dados.worktree === null ? null : { ...dados.worktree, ativo: false },
       (dados.fila ?? []).map((pedido) => PedidoNaFila.reconstituir(pedido)),
       dados.instrucoesNaConversa ?? false,
+      dados.retomadaPendente === undefined || dados.retomadaPendente === null ? null : { ...dados.retomadaPendente },
     );
+  }
+
+  get nome(): string {
+    return this.nomeAtual;
+  }
+
+  /**
+   * Troca o nome, com a mesma regra da criação. Só muda o que a tela mostra:
+   * vale também com um turno em andamento. Trocar pelo mesmo nome não conta
+   * como alteração (`null`, sem evento).
+   */
+  renomear(nome: string): EventoDeOrquestracao | null {
+    const novo = nomeValido(nome);
+    if (novo === this.nomeAtual) {
+      return null;
+    }
+    this.nomeAtual = novo;
+    return { tipo: "orquestrador_renomeado", nome: novo };
   }
 
   get configuracao(): ConfiguracaoDoOrquestrador {
@@ -224,6 +267,23 @@ export class Orquestrador {
   get turnoComPlanoPendente(): Turno | null {
     const ultimo = this.ultimoTurno;
     return ultimo !== null && ultimo.planoPendente ? ultimo : null;
+  }
+
+  /** A retomada automática marcada, ou `null` sem nenhuma. */
+  get retomadaPendente(): DadosDaRetomadaPendente | null {
+    return this.retomadaAtual === null ? null : { ...this.retomadaAtual };
+  }
+
+  /** Marca (ou remarca) a retomada automática; no máximo uma por Orquestrador. */
+  agendarRetomada(retomada: DadosDaRetomadaPendente): void {
+    this.retomadaAtual = { ...retomada };
+  }
+
+  /** Tira a retomada marcada; diz se havia uma. */
+  limparRetomada(): boolean {
+    const havia = this.retomadaAtual !== null;
+    this.retomadaAtual = null;
+    return havia;
   }
 
   /** Os pedidos à espera, na ordem em que vão sair (o primeiro sai antes). */
@@ -320,7 +380,8 @@ export class Orquestrador {
    * Começa uma conversa nova ("/clear") no mesmo Orquestrador: os turnos saem
    * do agregado (o histórico anterior é arquivado pelo repositório) e o
    * próximo turno abre outra sessão do Claude Code, sem memória da anterior.
-   * Nome, pasta, configuração, worktree e a fila de pedidos continuam os mesmos.
+   * Nome, pasta, configuração, worktree e a fila de pedidos continuam os mesmos;
+   * uma retomada marcada sai junto com o turno que ela retomaria.
    *
    * Um Plano pendente é descartado junto. `worktreeComAlteracoes` avisa que o
    * worktree segue com trabalho: worktrees sem alterações são removidos ao
@@ -339,6 +400,7 @@ export class Orquestrador {
     const worktreeComAlteracoes = this.worktreeAtual !== null;
 
     this.turnos = [];
+    this.retomadaAtual = null;
     this.sessaoAtual = novaSessaoId;
     this.sessaoJaIniciada = false;
     this.instrucoesJaEnviadas = false;
@@ -377,6 +439,8 @@ export class Orquestrador {
 
     const dadosDosAnexos = anexos.map((anexo) => anexo.paraDados());
     this.turnos.push(Turno.iniciar(turnoId, mensagem, agora, dadosDosAnexos, modo));
+    // Seja a própria retomada ou um pedido do usuário, a marcada deixa de valer.
+    this.retomadaAtual = null;
     return {
       tipo: "turno_iniciado",
       turnoId,
@@ -473,7 +537,7 @@ export class Orquestrador {
   paraDados(): DadosDoOrquestrador {
     return {
       id: this.id,
-      nome: this.nome,
+      nome: this.nomeAtual,
       pastaDeTrabalho: this.pastaDeTrabalho.caminho,
       sessaoId: this.sessaoAtual,
       sessaoIniciada: this.sessaoJaIniciada,
@@ -483,6 +547,7 @@ export class Orquestrador {
       worktree: this.worktreeAtual === null ? null : { ...this.worktreeAtual },
       fila: this.filaAtual.map((pedido) => pedido.paraDados()),
       instrucoesNaConversa: this.instrucoesJaEnviadas,
+      retomadaPendente: this.retomadaAtual === null ? null : { ...this.retomadaAtual },
     };
   }
 

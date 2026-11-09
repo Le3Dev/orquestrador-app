@@ -18,6 +18,7 @@ import {
 import { PreferenciasDoChat } from "./PreferenciasDoChat";
 import { ConversaDoChatArquivada, RepositorioDoChat } from "./RepositorioDoChat";
 import { ServicoDeChat } from "./ServicoDeChat";
+import { SubagenteDoChat } from "./SubagentesDoChat";
 
 const raiz = path.resolve("/projetos");
 const uso: UsoDaResposta = { duracaoMs: 5, tokensDeEntrada: 30_000, tokensDeSaida: 50, modeloUsado: "claude-opus" };
@@ -127,6 +128,7 @@ describe("ServicoDeChat", () => {
   let sinais: SinalDoChat[];
   let servico: ServicoDeChat;
   let ids: number;
+  let listarSubagentes: () => Promise<SubagenteDoChat[]>;
 
   beforeEach(() => {
     repositorio = new RepositorioDoChatEmMemoria();
@@ -135,6 +137,7 @@ describe("ServicoDeChat", () => {
     publicados = [];
     sinais = [];
     ids = 0;
+    listarSubagentes = async () => [{ nome: "revisor", descricao: "Revisa o diff procurando bugs", modelo: "herdar" }];
     servico = new ServicoDeChat({
       repositorio,
       motor,
@@ -154,6 +157,7 @@ describe("ServicoDeChat", () => {
           },
         ],
       },
+      subagentes: { listarSubagentesProntos: () => listarSubagentes() },
       anexos: armazem,
       publicador: { publicar: (evento) => publicados.push(evento), sinalizar: (sinal) => sinais.push(sinal) },
       execucoes: new ControleDeExecucoesEmMemoria(),
@@ -259,6 +263,54 @@ describe("ServicoDeChat", () => {
       ],
       avisos: [],
     });
+  });
+
+  it("leva os subagentes prontos ao contexto, sem o prompt, e extrai as ações de criar e editar", async () => {
+    const { conclusao } = await servico.perguntar({ texto: "Crie um documentador e troque o modelo do revisor" });
+    await aguardarMotor();
+
+    const enviada = motor.perguntas[0]?.mensagem ?? "";
+    expect(enviada).toContain("Subagentes prontos (nome · modelo: quando usar):\n- revisor · herdar: Revisa o diff procurando bugs");
+    expect(enviada).toContain('"tipo":"criar_subagente"');
+
+    motor.concluir(
+      sucesso(
+        [
+          "Dois cartões:",
+          "```acao-do-app",
+          '{"tipo":"criar_subagente","nome":"documentador","descricao":"Atualiza o README","prompt":"Documente o que mudou."}',
+          "```",
+          "```acao-do-app",
+          '{"tipo":"editar_subagente","nome":"revisor","modelo":"opus"}',
+          "```",
+        ].join("\n"),
+      ),
+    );
+    await conclusao;
+
+    expect(publicados.at(-1)).toMatchObject({
+      tipo: "resposta_concluida",
+      texto: "Dois cartões:",
+      acoes: [
+        { tipo: "criar_subagente", nome: "documentador", descricao: "Atualiza o README", prompt: "Documente o que mudou.", modelo: "herdar" },
+        { tipo: "editar_subagente", nome: "revisor", descricao: null, prompt: null, modelo: "opus" },
+      ],
+      avisos: [],
+    });
+    expect(servico.estado().mensagens[1]?.acoes).toHaveLength(2);
+  });
+
+  it("sem a lista de subagentes, o chat responde e o contexto diz nenhum", async () => {
+    listarSubagentes = async () => {
+      throw new Error("preferências ilegíveis");
+    };
+    const { conclusao } = await servico.perguntar({ texto: "oi" });
+    await aguardarMotor();
+
+    expect(motor.perguntas[0]?.mensagem).toContain("Subagentes prontos (nome · modelo: quando usar):\n- (nenhum)");
+    motor.concluir(sucesso("olá"));
+    await conclusao;
+    expect(publicados.at(-1)).toMatchObject({ tipo: "resposta_concluida", texto: "olá" });
   });
 
   it("a segunda pergunta retoma a sessão", async () => {

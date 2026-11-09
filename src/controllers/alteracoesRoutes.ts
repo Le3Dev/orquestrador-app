@@ -1,9 +1,10 @@
-import { Request, Response, Router } from "express";
-import { z, ZodError } from "zod";
+import { Response, Router } from "express";
+import { z } from "zod";
 
 import { ErroDeLeituraDasAlteracoes } from "../orquestracao/AlteracoesDoWorktree";
-import { ErroDeOrquestracao, MotivoDoErro } from "../orquestracao/ErroDeOrquestracao";
+import { ErroDeOrquestracao } from "../orquestracao/ErroDeOrquestracao";
 import { ServicoDeAlteracoes } from "../orquestracao/ServicoDeAlteracoes";
+import { criarRota, responderErroGenerico, STATUS_DA_ORQUESTRACAO } from "./respostasHttp";
 
 interface Dependencias {
   servico: ServicoDeAlteracoes;
@@ -14,21 +15,9 @@ const esquemaDoDiff = z.object({
   arquivo: z.string({ error: "Informe o arquivo." }).min(1, { error: "Informe o arquivo." }),
 });
 
-const STATUS_POR_MOTIVO: Readonly<Record<MotivoDoErro, number>> = {
-  dados_invalidos: 400,
-  nao_encontrado: 404,
-  turno_em_andamento: 409,
-  sem_turno_em_andamento: 409,
-  sem_plano_pendente: 409,
-};
-
 function responderErro(resposta: Response, erro: unknown): void {
   if (erro instanceof ErroDeOrquestracao) {
-    resposta.status(STATUS_POR_MOTIVO[erro.motivo]).json({ erro: erro.message });
-    return;
-  }
-  if (erro instanceof ZodError) {
-    resposta.status(400).json({ erro: erro.issues[0]?.message ?? "Dados inválidos." });
+    resposta.status(STATUS_DA_ORQUESTRACAO[erro.motivo]).json({ erro: erro.message });
     return;
   }
   if (erro instanceof ErroDeLeituraDasAlteracoes) {
@@ -37,23 +26,10 @@ function responderErro(resposta: Response, erro: unknown): void {
     resposta.status(500).json({ erro: erro.message });
     return;
   }
-  console.error("[http] Erro inesperado:", erro);
-  const detalhe = erro instanceof Error ? erro.message : String(erro);
-  resposta.status(500).json({ erro: `Erro inesperado no servidor: ${detalhe}` });
+  responderErroGenerico(resposta, erro, "[http] Erro inesperado:");
 }
 
-type Tratador = (requisicao: Request<{ id: string }>, resposta: Response) => Promise<void>;
-
-/** Envolve cada rota num try/catch que devolve a mensagem de erro pronta para a tela. */
-function rota(tratador: Tratador): Tratador {
-  return async (requisicao, resposta) => {
-    try {
-      await tratador(requisicao, resposta);
-    } catch (erro) {
-      responderErro(resposta, erro);
-    }
-  };
-}
+const rota = criarRota(responderErro);
 
 /**
  * Painel de alterações do worktree: o que o Orquestrador deixou por commitar

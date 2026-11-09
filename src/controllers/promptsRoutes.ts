@@ -1,8 +1,9 @@
 import { Response, Router } from "express";
-import { z, ZodError } from "zod";
+import { z } from "zod";
 
 import { ErroDeMelhoriaDePrompt, MotivoDoErroDeMelhoriaDePrompt } from "../prompts/ErroDeMelhoriaDePrompt";
 import { ServicoDeMelhoriaDePrompt } from "../prompts/ServicoDeMelhoriaDePrompt";
+import { responderErroGenerico } from "./respostasHttp";
 
 interface Dependencias {
   servico: ServicoDeMelhoriaDePrompt;
@@ -33,13 +34,7 @@ function responderErro(resposta: Response, erro: unknown): void {
     resposta.status(STATUS_POR_MOTIVO[erro.motivo]).json({ erro: erro.message });
     return;
   }
-  if (erro instanceof ZodError) {
-    resposta.status(400).json({ erro: erro.issues[0]?.message ?? "Dados inválidos." });
-    return;
-  }
-  console.error("[http] Erro inesperado:", erro);
-  const detalhe = erro instanceof Error ? erro.message : String(erro);
-  resposta.status(500).json({ erro: `Erro inesperado no servidor: ${detalhe}` });
+  responderErroGenerico(resposta, erro, "[http] Erro inesperado:");
 }
 
 /**

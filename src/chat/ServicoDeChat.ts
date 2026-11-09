@@ -13,6 +13,7 @@ import type { OrigemDaPergunta } from "./OrigemDaPergunta";
 import { AlteracoesDasPreferenciasDoChat, DadosDasPreferenciasDoChat, PreferenciasDoChat } from "./PreferenciasDoChat";
 import type { OrquestradorExistente, ProjetoDoChat, ProjetosDoChat } from "./ProjetosDoChat";
 import type { RepositorioDoChat } from "./RepositorioDoChat";
+import type { SubagenteDoChat, SubagentesDoChat } from "./SubagentesDoChat";
 
 /** Chave do chat no controle de execuções e no armazém de anexos. */
 export const ID_DO_CHAT = "chat";
@@ -23,6 +24,7 @@ export interface DependenciasDoServicoDeChat {
   repositorio: RepositorioDoChat;
   motor: MotorDeChat;
   projetos: ProjetosDoChat;
+  subagentes: SubagentesDoChat;
   anexos: ArmazemDeAnexos;
   publicador: PublicadorDoChat;
   execucoes: ControleDeExecucoes;
@@ -258,6 +260,7 @@ export class ServicoDeChat {
             pastaDosProjetos,
             projetos: contexto.projetos,
             orquestradores: contexto.orquestradores,
+            subagentesProntos: contexto.subagentesProntos,
             alteracoesAutorizadas,
             pastaDeArtefatos,
           }),
@@ -308,9 +311,13 @@ export class ServicoDeChat {
   }
 
   /** Sem a lista, o chat ainda responde — só não consegue validar ações. */
-  private async lerContexto(): Promise<{ projetos: ProjetoDoChat[]; orquestradores: OrquestradorExistente[] }> {
-    const { projetos } = this.dependencias;
-    const [listaDeProjetos, orquestradores] = await Promise.all([
+  private async lerContexto(): Promise<{
+    projetos: ProjetoDoChat[];
+    orquestradores: OrquestradorExistente[];
+    subagentesProntos: SubagenteDoChat[];
+  }> {
+    const { projetos, subagentes } = this.dependencias;
+    const [listaDeProjetos, orquestradores, subagentesProntos] = await Promise.all([
       projetos.listarProjetos().catch((erro: unknown) => {
         console.warn("[chat] Não foi possível listar os projetos:", descreverErro(erro));
         return [];
@@ -319,8 +326,12 @@ export class ServicoDeChat {
         console.warn("[chat] Não foi possível listar os orquestradores:", descreverErro(erro));
         return [];
       }),
+      subagentes.listarSubagentesProntos().catch((erro: unknown) => {
+        console.warn("[chat] Não foi possível listar os subagentes prontos:", descreverErro(erro));
+        return [];
+      }),
     ]);
-    return { projetos: listaDeProjetos, orquestradores };
+    return { projetos: listaDeProjetos, orquestradores, subagentesProntos };
   }
 
   private observar(conversa: ConversaDoChat, mensagemId: string, evento: EventoDoMotorDeChat): void {

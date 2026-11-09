@@ -12,6 +12,8 @@ import {
   linhasDosSubagentesProntos,
   MAXIMO_DE_SUBAGENTES_PRONTOS,
   modeloDoSubagentePronto,
+  selecaoDeSubagentesProntosValida,
+  subagentesProntosSelecionados,
   subagentesProntosValidos,
 } from "./SubagentesProntos";
 
@@ -71,12 +73,48 @@ describe("subagentesProntosValidos", () => {
       'Já existe um subagente pronto chamado "revisor".',
     );
     const muitos = Array.from({ length: MAXIMO_DE_SUBAGENTES_PRONTOS + 1 }, (_, i) => ({ ...revisor, nome: `r${i}` }));
-    expect(mensagemDe(() => subagentesProntosValidos(muitos))).toBe("São no máximo 10 subagentes prontos.");
+    expect(mensagemDe(() => subagentesProntosValidos(muitos))).toBe("São no máximo 30 subagentes prontos.");
   });
 
   it("modelo herdar usa o dos subagentes do orquestrador", () => {
     expect(modeloDoSubagentePronto({ ...revisor, modelo: "herdar" }, "haiku")).toBe("haiku");
     expect(modeloDoSubagentePronto(revisor, "haiku")).toBe("sonnet");
+  });
+});
+
+describe("subagentes prontos escolhidos para um orquestrador", () => {
+  const testador: DadosDoSubagentePronto = { ...revisor, nome: "testador", descricao: "Roda os testes." };
+  const biblioteca = [revisor, testador];
+
+  it("ausente vale todos; aceita todos, nenhum e uma lista sem repetidos", () => {
+    expect(selecaoDeSubagentesProntosValida(undefined)).toBe("todos");
+    expect(selecaoDeSubagentesProntosValida("todos")).toBe("todos");
+    expect(selecaoDeSubagentesProntosValida("nenhum")).toBe("nenhum");
+    expect(selecaoDeSubagentesProntosValida(["testador", "revisor", "testador"])).toEqual(["testador", "revisor"]);
+  });
+
+  it.each<[unknown]>([["alguns"], [{}], [[3]], [[" "]]])("recusa %j", (valor) => {
+    expect(() => selecaoDeSubagentesProntosValida(valor)).toThrow(ErroDeOrquestracao);
+  });
+
+  it("todos passa a biblioteca inteira; nenhum, nada; a lista filtra na ordem da biblioteca e ignora nomes sumidos", () => {
+    expect(subagentesProntosSelecionados(biblioteca, "todos")).toEqual([revisor, testador]);
+    expect(subagentesProntosSelecionados(biblioteca, "nenhum")).toEqual([]);
+    expect(subagentesProntosSelecionados(biblioteca, ["testador", "apagado"])).toEqual([testador]);
+    expect(subagentesProntosSelecionados(biblioteca, ["testador", "revisor"])).toEqual([revisor, testador]);
+  });
+
+  it("nenhum tira o bloco dos subagentes prontos da mensagem; a lista só traz os escolhidos", () => {
+    const comNenhum = mensagemParaOOrquestrador(
+      "oi", configuracao, [], "execucao", null, null, false, subagentesProntosSelecionados(biblioteca, "nenhum"),
+    );
+    const comLista = mensagemParaOOrquestrador(
+      "oi", configuracao, [], "execucao", null, null, false, subagentesProntosSelecionados(biblioteca, ["testador"]),
+    );
+
+    expect(comNenhum).not.toContain("Subagentes prontos");
+    expect(comLista).toContain('  - "testador": Roda os testes.');
+    expect(comLista).not.toContain('"revisor"');
   });
 });
 
@@ -134,6 +172,7 @@ describe("PreferenciasGlobais.subagentesProntos", () => {
     expect(preferencias.com({ subagentesProntos: [] }).paraDados()).toEqual({
       instrucoesPadrao: "X",
       subagentesProntos: [],
+      perfisDeInstrucoes: [],
       autorrecuperacao: true,
     });
   });

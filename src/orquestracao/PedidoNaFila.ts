@@ -1,4 +1,5 @@
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
+import { ItemLigado } from "./InstrucoesDoOrquestrador";
 import { MODOS_DO_TURNO, ModoDoTurno } from "./ModoDoTurno";
 
 /**
@@ -17,6 +18,8 @@ export interface DadosDoPedidoNaFila {
   modo: ModoDoTurno;
   /** ISO 8601. */
   enfileiradoEm: string;
+  /** Os itens ligados ao Orquestrador quando o pedido entrou na fila. Ausente: nenhum (e nos pedidos antigos). */
+  itensLigados?: ItemLigado[] | undefined;
 }
 
 export interface NovoPedidoNaFila {
@@ -24,12 +27,16 @@ export interface NovoPedidoNaFila {
   texto: string;
   modo: ModoDoTurno;
   enfileiradoEm: Date;
+  itensLigados?: readonly ItemLigado[] | undefined;
 }
 
 /**
  * Um pedido guardado na fila de um Orquestrador, à espera da vez: sai sozinho
  * quando o turno atual termina bem, ou quando o usuário manda enviar agora.
  * Objeto de valor imutável — só texto e modo (imagens não entram na fila).
+ *
+ * Os itens ligados ao Orquestrador no canvas ficam congelados como estavam
+ * ao enfileirar: o pedido sai mais tarde com o contexto que o usuário viu.
  *
  * O `id` não faz dele uma entidade: serve só para o usuário apontar qual
  * pedido quer tirar ou enviar.
@@ -40,6 +47,7 @@ export class PedidoNaFila {
     public readonly texto: string,
     public readonly modo: ModoDoTurno,
     private readonly enfileiradoEmMs: number,
+    public readonly itensLigados: readonly ItemLigado[],
   ) {
     Object.freeze(this);
   }
@@ -58,12 +66,14 @@ export class PedidoNaFila {
     if (!(MODOS_DO_TURNO as readonly string[]).includes(novo.modo)) {
       throw new ErroDeOrquestracao("dados_invalidos", "Modo do pedido inválido.");
     }
-    return new PedidoNaFila(novo.id, texto, novo.modo, novo.enfileiradoEm.getTime());
+    const itens = (novo.itensLigados ?? []).map((item) => Object.freeze({ ...item }));
+    return new PedidoNaFila(novo.id, texto, novo.modo, novo.enfileiradoEm.getTime(), Object.freeze(itens));
   }
 
   /** Lido do `orquestrador.json`: já foi validado ao entrar na fila. */
   static reconstituir(dados: DadosDoPedidoNaFila): PedidoNaFila {
-    return new PedidoNaFila(dados.id, dados.texto, dados.modo, Date.parse(dados.enfileiradoEm));
+    const itens = (dados.itensLigados ?? []).map((item) => Object.freeze({ ...item }));
+    return new PedidoNaFila(dados.id, dados.texto, dados.modo, Date.parse(dados.enfileiradoEm), Object.freeze(itens));
   }
 
   /** Uma cópia: quem a recebe não altera o pedido. */
@@ -77,6 +87,8 @@ export class PedidoNaFila {
       texto: this.texto,
       modo: this.modo,
       enfileiradoEm: new Date(this.enfileiradoEmMs).toISOString(),
+      // Sem itens, o campo nem aparece: o `orquestrador.json` e a tela ficam como antes.
+      ...(this.itensLigados.length === 0 ? {} : { itensLigados: this.itensLigados.map((item) => ({ ...item })) }),
     };
   }
 }

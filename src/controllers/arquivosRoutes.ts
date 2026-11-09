@@ -1,9 +1,10 @@
-import { Request, Response, Router } from "express";
-import { z, ZodError } from "zod";
+import { Response, Router } from "express";
+import { z } from "zod";
 
 import { ErroDeArquivo, MotivoDoErroDeArquivo } from "../orquestracao/ArquivosDaPasta";
 import { ErroDeOrquestracao } from "../orquestracao/ErroDeOrquestracao";
 import { ServicoDeArquivos } from "../orquestracao/ServicoDeArquivos";
+import { criarRota, responderErroGenerico } from "./respostasHttp";
 
 interface Dependencias {
   servico: ServicoDeArquivos;
@@ -36,27 +37,10 @@ function responderErro(resposta: Response, erro: unknown): void {
     resposta.status(erro.motivo === "nao_encontrado" ? 404 : 400).json({ erro: erro.message });
     return;
   }
-  if (erro instanceof ZodError) {
-    resposta.status(400).json({ erro: erro.issues[0]?.message ?? "Dados inválidos." });
-    return;
-  }
-  console.error("[arquivos] Erro inesperado:", erro);
-  const detalhe = erro instanceof Error ? erro.message : String(erro);
-  resposta.status(500).json({ erro: `Erro inesperado no servidor: ${detalhe}` });
+  responderErroGenerico(resposta, erro, "[arquivos] Erro inesperado:");
 }
 
-type Tratador = (requisicao: Request<{ id: string }>, resposta: Response) => Promise<void>;
-
-/** Envolve cada rota num try/catch que devolve a mensagem de erro pronta para a tela. */
-function rota(tratador: Tratador): Tratador {
-  return async (requisicao, resposta) => {
-    try {
-      await tratador(requisicao, resposta);
-    } catch (erro) {
-      responderErro(resposta, erro);
-    }
-  };
-}
+const rota = criarRota(responderErro);
 
 /**
  * Visualizador de código: navega pela pasta do Orquestrador (o worktree, se

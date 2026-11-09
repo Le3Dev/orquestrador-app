@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { separarPerguntasDoApp } from "../perguntas/PerguntaDoApp";
 import { Anexo } from "./Anexo";
 import { ArmazemDeAnexos } from "./ArmazemDeAnexos";
@@ -17,13 +19,13 @@ import {
   EventoDeOrquestracao,
   EventoDoMotor,
 } from "./EventoDeOrquestracao";
-import { mensagemDeAprovacaoDoPlano, separarPropostaDePlano } from "./InstrucoesDoOrquestrador";
-import { InstrucoesAplicadas, resolverInstrucoes } from "./InstrucoesPersonalizadas";
+import { ItemLigado, mensagemDeAprovacaoDoPlano, separarPropostaDePlano } from "./InstrucoesDoOrquestrador";
+import { aplicarVariaveis, InstrucoesAplicadas, resolverInstrucoes } from "./InstrucoesPersonalizadas";
 import { MedidorDeConsumo, PeriodoDoTurno } from "./MedidorDeConsumo";
 import { ModeloClaude } from "./ModeloClaude";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { ABORTO_POR_SILENCIO, CausaDaFalha, MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "./MotorDeAgentes";
-import { Orquestrador, TAMANHO_MAXIMO_DA_MENSAGEM } from "./Orquestrador";
+import { DadosDaRetomadaPendente, Orquestrador, TAMANHO_MAXIMO_DA_MENSAGEM } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { PedidoNaFila } from "./PedidoNaFila";
 import { predefinicaoPorNome } from "./PredefinicaoDeConfiguracao";
@@ -33,13 +35,14 @@ import {
   descreverEsperas,
   ehRecuperavel,
   esperaAntesDaTentativa,
+  formatarHora,
   maximoDeTentativas,
   mensagemDeRetomada,
   resumoDaEspera,
 } from "./RecuperacaoDoTurno";
 import { RepositorioDeOrquestradores } from "./RepositorioDeOrquestradores";
 import { RepositorioDePreferencias } from "./RepositorioDePreferencias";
-import { DadosDoSubagentePronto } from "./SubagentesProntos";
+import { DadosDoSubagentePronto, subagentesProntosSelecionados } from "./SubagentesProntos";
 import { AgendadorDeTarefas, agendadorDoRelogio, VigiaDoTurno } from "./VigiaDoTurno";
 
 export interface DependenciasDoServico {
@@ -121,6 +124,12 @@ interface RetomadaAgendada {
   desmarcar: () => void;
 }
 
+/**
+ * Retomada vencida durante o reinício: espera ao menos isto, multiplicado
+ * pela ordem dela, para várias não abrirem o Claude ao mesmo tempo.
+ */
+export const ATRASO_DA_RETOMADA_APOS_REINICIO_MS = 10_000;
+
 /** Imagem como chega do usuário, antes de virar Anexo. */
 export interface ImagemRecebida {
   nome: string;
@@ -161,6 +170,13 @@ export interface PedidoEnfileirado {
   pedidoId: string;
 }
 
+/**
+ * O arquivo de um artefato como a tela o conhece: relativo à pasta de entrada
+ * dos artefatos, onde os agentes o gravaram (`orquestradores/<id>/<arquivo>`
+ * ou `chat/<arquivo>`). Só um nível de pasta e nada de ".." no nome.
+ */
+const ARQUIVO_DE_ARTEFATO_NA_ENTRADA = /^(?:chat|orquestradores\/[A-Za-z0-9_-]{1,100})\/[^/\\.][^/\\]*$/;
+
 function descreverErro(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro);
 }
@@ -172,9 +188,9 @@ function descreverErro(erro: unknown): string {
  *
  * Os Orquestradores vêm do repositório, e os turnos em execução ficam no
  * `ControleDeExecucoes`. O único estado daqui é o da autorrecuperação (ver
- * ADR-36): as retomadas agendadas e a contagem de tentativas, só em memória.
- * Um reinício do servidor durante a espera perde a retomada, e o turno fica
- * como falhou, com o motivo: nada fica inconsistente.
+ * ADR-36): o relógio de cada retomada agendada e a contagem de tentativas. A
+ * retomada em si (turno, causa, tentativa e horário) fica no agregado e vai
+ * para o disco; ao subir, `reagendarRetomadasPendentes` volta a marcá-las.
  */
 export class ServicoDeOrquestracao {
   /** Tentativas de retomada já feitas, por Orquestrador e por causa. Zeram quando um turno conclui. */
@@ -201,7 +217,9 @@ export class ServicoDeOrquestracao {
 
   /**
    * As instruções personalizadas que um pedido com esta configuração
-   * receberia agora: as próprias, se houver; senão o padrão global.
+   * receberia agora: as próprias, se houver; senão o padrão global. Ainda com
+   * `{{pasta}}` e `{{nome}}`: são trocadas no turno (`executar`), quando a
+   * pasta do turno já é conhecida.
    */
   instrucoesPara(configuracao: ConfiguracaoDoOrquestrador): InstrucoesAplicadas | null {
     return resolverInstrucoes(
@@ -210,14 +228,36 @@ export class ServicoDeOrquestracao {
     );
   }
 
-  /** A biblioteca de subagentes prontos que um pedido receberia agora. */
-  subagentesProntos(): readonly DadosDoSubagentePronto[] {
-    return this.dependencias.preferencias.atuais().subagentesProntos;
+  /**
+   * Os subagentes prontos que um pedido com esta configuração receberia
+   * agora: os da biblioteca das preferências que a seleção do Orquestrador
+   * deixa passar.
+   */
+  subagentesProntosPara(configuracao: ConfiguracaoDoOrquestrador): readonly DadosDoSubagentePronto[] {
+    return subagentesProntosSelecionados(
+      this.dependencias.preferencias.atuais().subagentesProntos,
+      configuracao.subagentesProntos,
+    );
   }
 
   async alterarConfiguracao(id: string, alteracoes: AlteracoesDaConfiguracao): Promise<Orquestrador> {
     const orquestrador = this.buscar(id);
     this.publicar(orquestrador, orquestrador.alterarConfiguracao(alteracoes));
+    await this.dependencias.repositorio.salvar(orquestrador);
+    return orquestrador;
+  }
+
+  /**
+   * Troca o nome do Orquestrador; vale também durante um turno. Trocar pelo
+   * mesmo nome não grava nem avisa as telas.
+   */
+  async renomear(id: string, nome: string): Promise<Orquestrador> {
+    const orquestrador = this.buscar(id);
+    const evento = orquestrador.renomear(nome);
+    if (evento === null) {
+      return orquestrador;
+    }
+    this.publicar(orquestrador, evento);
     await this.dependencias.repositorio.salvar(orquestrador);
     return orquestrador;
   }
@@ -289,18 +329,33 @@ export class ServicoDeOrquestracao {
     texto: string,
     imagens: readonly ImagemRecebida[] = [],
     modo: ModoDoTurno = "execucao",
+    itensLigados: readonly ItemLigado[] = [],
   ): Promise<MensagemEnviada> {
-    return this.iniciarTurno(this.buscar(id), texto, imagens, modo, null);
+    const orquestrador = this.buscar(id);
+    const itens = this.itensComCaminhos(orquestrador, itensLigados);
+    return this.iniciarTurno(orquestrador, texto, imagens, modo, null, null, itens);
   }
 
   /**
    * Guarda um pedido na fila do Orquestrador, com ou sem turno em andamento.
-   * Ele sai sozinho quando um turno terminar bem, ou com `enviarDaFila`.
+   * Ele sai sozinho quando um turno terminar bem, ou com `enviarDaFila`. Os
+   * itens ligados vão congelados no pedido, como estavam ao enfileirar.
    */
-  async enfileirarPedido(id: string, texto: string, modo: ModoDoTurno = "execucao"): Promise<PedidoEnfileirado> {
+  async enfileirarPedido(
+    id: string,
+    texto: string,
+    modo: ModoDoTurno = "execucao",
+    itensLigados: readonly ItemLigado[] = [],
+  ): Promise<PedidoEnfileirado> {
     const { repositorio, gerarId, agora } = this.dependencias;
     const orquestrador = this.buscar(id);
-    const pedido = PedidoNaFila.criar({ id: gerarId(), texto, modo, enfileiradoEm: agora() });
+    const pedido = PedidoNaFila.criar({
+      id: gerarId(),
+      texto,
+      modo,
+      enfileiradoEm: agora(),
+      itensLigados: this.itensComCaminhos(orquestrador, itensLigados),
+    });
     this.publicar(orquestrador, orquestrador.enfileirarPedido(pedido));
     await repositorio.salvar(orquestrador);
     return { pedidoId: pedido.id };
@@ -320,7 +375,26 @@ export class ServicoDeOrquestracao {
   async enviarDaFila(id: string, pedidoId: string): Promise<MensagemEnviada> {
     const orquestrador = this.buscar(id);
     const pedido = orquestrador.pedidoDaFila(pedidoId);
-    return this.iniciarTurno(orquestrador, pedido.texto, [], pedido.modo, pedido);
+    return this.iniciarTurno(orquestrador, pedido.texto, [], pedido.modo, pedido, null, pedido.itensLigados);
+  }
+
+  /**
+   * Os itens ligados com o arquivo de cada artefato em caminho absoluto: a
+   * tela o manda relativo à pasta de entrada dos artefatos (a mãe de
+   * `orquestradores/<id>`, a pasta de artefatos de cada Orquestrador). Um
+   * caminho fora desse formato sai do item.
+   */
+  private itensComCaminhos(orquestrador: Orquestrador, itens: readonly ItemLigado[]): ItemLigado[] {
+    const entrada = path.dirname(path.dirname(this.dependencias.pastaDeArtefatos(orquestrador.id)));
+    return itens.map((item) => {
+      if (item.tipo !== "artefato" || item.caminho === undefined) {
+        return item;
+      }
+      const { caminho, ...semCaminho } = item;
+      return ARQUIVO_DE_ARTEFATO_NA_ENTRADA.test(caminho)
+        ? { ...semCaminho, caminho: path.join(entrada, ...caminho.split("/")) }
+        : semCaminho;
+    });
   }
 
   /**
@@ -336,6 +410,9 @@ export class ServicoDeOrquestracao {
    * `retomada`: o turno é o app retomando sozinho um que travou ou falhou
    * (ver ADR-36). Qualquer outro turno que começa cancela a retomada que
    * estivesse agendada: o usuário assumiu.
+   *
+   * `itensLigados`: o contexto que o usuário ligou ao Orquestrador no canvas;
+   * vai só na mensagem deste turno ao motor, não no histórico.
    */
   private async iniciarTurno(
     orquestrador: Orquestrador,
@@ -344,6 +421,7 @@ export class ServicoDeOrquestracao {
     modo: ModoDoTurno,
     pedidoDaFila: PedidoNaFila | null,
     retomada: { deTurnoId: string; tentativa: number } | null = null,
+    itensLigados: readonly ItemLigado[] = [],
   ): Promise<MensagemEnviada> {
     const { repositorio, execucoes, anexos, gerarId, agora } = this.dependencias;
     const turnoId = gerarId();
@@ -394,7 +472,8 @@ export class ServicoDeOrquestracao {
     const execucao = this.executar(orquestrador, turnoId, sinal, configuracaoDoTurno, {
       instrucoes: instrucoesDoTurno,
       revogarInstrucoesAnteriores: revogarAnteriores,
-      subagentesProntos: this.subagentesProntos(),
+      subagentesProntos: this.subagentesProntosPara(configuracaoDoTurno),
+      itensLigados,
     }).finally(() => execucoes.encerrar(orquestrador.id));
     const conclusao = execucao.then(() => undefined);
     // Em segundo plano, depois do fim do turno: não segura a resposta nem o
@@ -449,10 +528,17 @@ export class ServicoDeOrquestracao {
   /**
    * Aprova o Plano pendente e já abre o turno que o executa, na mesma sessão
    * do Claude Code — é ela que guarda o Plano da resposta anterior.
+   *
+   * `commitarAoFinal` põe na mensagem o pedido de commit ao final (pela regra por feature), só
+   * se a configuração libera commit e o nível tem terminal
+   * (`edicao_e_comandos`); senão é ignorado.
    */
-  async aprovarPlano(id: string, observacoes = ""): Promise<MensagemEnviada> {
+  async aprovarPlano(id: string, observacoes = "", commitarAoFinal = false): Promise<MensagemEnviada> {
     const orquestrador = this.buscar(id);
-    const texto = mensagemDeAprovacaoDoPlano(observacoes);
+    const { configuracao } = orquestrador;
+    const commitLiberado =
+      configuracao.permiteCommitEPush("execucao") && configuracao.nivelDePermissao === "edicao_e_comandos";
+    const texto = mensagemDeAprovacaoDoPlano(observacoes, commitarAoFinal && commitLiberado);
     // Conferido antes de aprovar: se o pedido de execução fosse recusado
     // depois, o Plano ficaria aprovado sem nada rodando.
     if (texto.length > TAMANHO_MAXIMO_DA_MENSAGEM) {
@@ -484,6 +570,7 @@ export class ServicoDeOrquestracao {
 
     if (turno === null) {
       if (this.cancelarRetomada(orquestrador, "o usuário cancelou")) {
+        await repositorio.salvar(orquestrador);
         return;
       }
       throw new ErroDeOrquestracao(
@@ -544,12 +631,76 @@ export class ServicoDeOrquestracao {
     return interrompidos;
   }
 
+  /**
+   * Ao subir o servidor, depois de `interromperTurnosPendentes`: volta a
+   * marcar as retomadas automáticas gravadas antes do reinício (ver ADR-36),
+   * com a tentativa e a causa de antes, e registra no log do turno. A que já
+   * venceu retoma logo, uma a cada `ATRASO_DA_RETOMADA_APOS_REINICIO_MS`.
+   * Com a autorrecuperação desligada, a retomada só sai, com o registro.
+   * Devolve quantas foram reagendadas.
+   */
+  async reagendarRetomadasPendentes(): Promise<number> {
+    const { repositorio, preferencias, agora } = this.dependencias;
+    let reagendadas = 0;
+
+    for (const orquestrador of repositorio.listar()) {
+      const pendente = orquestrador.retomadaPendente;
+      if (pendente === null) {
+        continue;
+      }
+      try {
+        const { causa, tentativa } = pendente;
+        const de = maximoDeTentativas(causa);
+        const turno = orquestrador.ultimoTurno;
+        if (turno === null || turno.id !== pendente.deTurnoId || turno.emAndamento) {
+          // Gravada para um turno que já não é o último: não há o que retomar.
+          orquestrador.limparRetomada();
+        } else if (!preferencias.atuais().autorrecuperacao) {
+          orquestrador.limparRetomada();
+          this.publicarRecuperacao(orquestrador, turno.id, "cancelada", {
+            causa,
+            tentativa,
+            de,
+            resumo: "retomada cancelada: a autorrecuperação está desligada (o app foi reiniciado durante a espera)",
+            retomaEm: null,
+          });
+        } else {
+          const restante = Date.parse(pendente.retomarEm) - agora().getTime();
+          const espera = Math.max(restante, ATRASO_DA_RETOMADA_APOS_REINICIO_MS * (reagendadas + 1));
+          const retomaEm = new Date(agora().getTime() + espera);
+          const retomada: DadosDaRetomadaPendente = { ...pendente, retomarEm: retomaEm.toISOString() };
+          orquestrador.agendarRetomada(retomada);
+          this.tentativas.set(orquestrador.id, new Map([[causa, tentativa]]));
+          this.publicarRecuperacao(orquestrador, turno.id, "aguardando", {
+            causa,
+            tentativa,
+            de,
+            resumo: `retomada reagendada após o reinício do app; retoma às ${formatarHora(retomaEm)}`,
+            retomaEm: retomada.retomarEm,
+          });
+          this.marcarRetomada(orquestrador.id, retomada, turno.modo, espera);
+          reagendadas += 1;
+        }
+        await repositorio.salvar(orquestrador);
+      } catch (falha) {
+        console.warn(
+          `[orquestracao] Não foi possível reagendar a retomada do orquestrador ${orquestrador.id}:`,
+          descreverErro(falha),
+        );
+      }
+    }
+    return reagendadas;
+  }
+
   private async executar(
     orquestrador: Orquestrador,
     turnoId: string,
     sinal: AbortSignal,
     configuracaoDoTurno: ConfiguracaoDoOrquestrador,
-    instrucoesDoTurno: Pick<PedidoDeTurno, "instrucoes" | "revogarInstrucoesAnteriores" | "subagentesProntos">,
+    instrucoesDoTurno: Pick<
+      PedidoDeTurno,
+      "instrucoes" | "revogarInstrucoesAnteriores" | "subagentesProntos" | "itensLigados"
+    >,
   ): Promise<TurnoEncerrado | null> {
     const { motor, repositorio, anexos, worktrees, pastaDeArtefatos, agora } = this.dependencias;
     const turno = orquestrador.turnoEmAndamento;
@@ -602,6 +753,11 @@ export class ServicoDeOrquestracao {
           // Do Orquestrador, e não do worktree: os artefatos sobrevivem ao turno.
           pastaDeArtefatos: pastaDeArtefatos(orquestrador.id),
           ...instrucoesDoTurno,
+          // Só agora, com o worktree preparado: `{{pasta}}` é a mesma pasta que vai ao motor.
+          instrucoes: aplicarVariaveis(instrucoesDoTurno.instrucoes, {
+            pasta: pastaDoTurno.caminho,
+            nome: orquestrador.nome,
+          }),
         },
         (evento) => {
           vigia?.registrarLinha();
@@ -744,7 +900,7 @@ export class ServicoDeOrquestracao {
    * da causa se esgotaram. Nunca lança.
    */
   private decidirRecuperacao(orquestradorId: string, encerrado: TurnoEncerrado): void {
-    const { repositorio, preferencias, agendador, agora } = this.dependencias;
+    const { repositorio, preferencias, agora } = this.dependencias;
     try {
       const { falha } = encerrado;
       if (falha === null) {
@@ -791,17 +947,18 @@ export class ServicoDeOrquestracao {
         resumo: resumoDaEspera(causa, falha.liberaEm, retomaEm),
         retomaEm: retomaEm.toISOString(),
       });
-      const desmarcar = (agendador ?? agendadorDoRelogio).agendar(espera, () => {
-        void this.retomar(orquestradorId);
-      });
-      this.retomadas.set(orquestradorId, {
-        turnoId: encerrado.turnoId,
+      const retomada: DadosDaRetomadaPendente = {
+        deTurnoId: encerrado.turnoId,
         causa,
         tentativa,
-        de,
-        modo: encerrado.modo,
-        desmarcar,
-      });
+        retomarEm: retomaEm.toISOString(),
+      };
+      // Gravada para sobreviver a um reinício durante a espera.
+      orquestrador.agendarRetomada(retomada);
+      repositorio
+        .salvar(orquestrador)
+        .catch((erro: unknown) => console.error("[orquestracao] Falha ao gravar a retomada agendada:", erro));
+      this.marcarRetomada(orquestradorId, retomada, encerrado.modo, espera);
     } catch (falha) {
       console.warn(
         `[orquestracao] Não foi possível decidir a autorrecuperação do turno ${encerrado.turnoId}:`,
@@ -821,10 +978,13 @@ export class ServicoDeOrquestracao {
       return;
     }
     this.retomadas.delete(orquestradorId);
-    const orquestrador = this.dependencias.repositorio.buscarPorId(orquestradorId);
+    const { repositorio } = this.dependencias;
+    const orquestrador = repositorio.buscarPorId(orquestradorId);
     if (orquestrador === null) {
       return;
     }
+    // O turno que abre também a limparia; fica limpa mesmo se ele for recusado.
+    orquestrador.limparRetomada();
     const { turnoId, causa, tentativa, de, modo } = agendada;
     try {
       this.publicarRecuperacao(orquestrador, turnoId, "retomando", {
@@ -848,6 +1008,9 @@ export class ServicoDeOrquestracao {
         descreverErro(falha),
       );
       this.tentativas.delete(orquestradorId);
+      repositorio
+        .salvar(orquestrador)
+        .catch((erro: unknown) => console.error("[orquestracao] Falha ao gravar a retomada desfeita:", erro));
       try {
         this.publicarRecuperacao(orquestrador, turnoId, "desistiu", {
           causa,
@@ -862,9 +1025,30 @@ export class ServicoDeOrquestracao {
     }
   }
 
+  /** Marca no relógio a retomada já registrada no agregado. */
+  private marcarRetomada(
+    orquestradorId: string,
+    retomada: DadosDaRetomadaPendente,
+    modo: ModoDoTurno,
+    espera: number,
+  ): void {
+    const desmarcar = (this.dependencias.agendador ?? agendadorDoRelogio).agendar(espera, () => {
+      void this.retomar(orquestradorId);
+    });
+    this.retomadas.set(orquestradorId, {
+      turnoId: retomada.deTurnoId,
+      causa: retomada.causa,
+      tentativa: retomada.tentativa,
+      de: maximoDeTentativas(retomada.causa),
+      modo,
+      desmarcar,
+    });
+  }
+
   /**
    * Cancela a retomada agendada do Orquestrador, se houver, e publica
-   * "cancelada" com o porquê. As tentativas zeram: o usuário assumiu.
+   * "cancelada" com o porquê. As tentativas zeram: o usuário assumiu. Tira a
+   * retomada do agregado; gravar fica com quem chama.
    */
   private cancelarRetomada(orquestrador: Orquestrador, porque: string): boolean {
     const agendada = this.retomadas.get(orquestrador.id);
@@ -874,6 +1058,7 @@ export class ServicoDeOrquestracao {
     agendada.desmarcar();
     this.retomadas.delete(orquestrador.id);
     this.tentativas.delete(orquestrador.id);
+    orquestrador.limparRetomada();
     this.publicarRecuperacao(orquestrador, agendada.turnoId, "cancelada", {
       causa: agendada.causa,
       tentativa: agendada.tentativa,

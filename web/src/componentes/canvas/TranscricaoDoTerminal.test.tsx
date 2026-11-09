@@ -7,6 +7,7 @@ import type {
   SinalDeVida,
 } from "../../shared/api/tipos";
 import { api } from "../../shared/api/cliente";
+import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../../shared/estado/aplicarEvento";
 import { esquecerAutorrecuperacao } from "../../shared/hooks/useAutorrecuperacao";
 import type { AcoesDoPlano } from "./CartaoDoPlano";
@@ -79,6 +80,7 @@ function Transcricao({
       configuracao={configuracao}
       turnos={conversa.turnos}
       conversaIniciadaEm={conversa.conversaIniciadaEm}
+      avisosDaConversaNova={conversa.avisosDaConversaNova}
       sinal={sinal}
       desconectado={desconectado}
       acoesDoPlano={acoesDoPlano}
@@ -166,6 +168,49 @@ describe("TranscricaoDoTerminal", () => {
     expect(screen.queryByText("plano proposto")).not.toBeInTheDocument();
   });
 
+  it("no log, o subagente pronto aparece pelo nome dele; executor, workflow e evento antigo, pelo nome do bicho", () => {
+    const concluiu = (subagenteId: string): EventoDeOrquestracao => ({
+      tipo: "subagente_concluido",
+      turnoId: "t1",
+      subagenteId,
+      situacao: "concluido",
+      resumo: "feito",
+      tokens: 10,
+      duracaoMs: 1000,
+    });
+    const iniciou = (subagenteId: string, papel?: string): EventoDeOrquestracao => ({
+      tipo: "subagente_iniciado",
+      turnoId: "t1",
+      subagenteId,
+      descricao: "parte",
+      tarefa: "faça a parte",
+      ...(papel === undefined ? {} : { papel }),
+    });
+    const conversa = aplicar(
+      ESTADO_INICIAL,
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "faça o vídeo", configuracao },
+      iniciou("sub-aaaa", "diretor-de-video"),
+      iniciou("sub-bbbb", "executor"),
+      iniciou("sub-cccc", "workflow"),
+      iniciou("sub-dddd"),
+      concluiu("sub-aaaa"),
+      concluiu("sub-bbbb"),
+      concluiu("sub-cccc"),
+      concluiu("sub-dddd"),
+    );
+    const { container } = render(<Transcricao conversa={conversa} />);
+
+    const origens = [...container.querySelectorAll(".linha-origem-bixinho")].map((origem) => origem.textContent);
+    expect(origens).toEqual([
+      "diretor-de-video#aaaa",
+      `${aparenciaDoBixinho("sub-bbbb").nome}#bbbb`,
+      `${aparenciaDoBixinho("sub-cccc").nome}#cccc`,
+      `${aparenciaDoBixinho("sub-dddd").nome}#dddd`,
+    ]);
+    // O nome inteiro fica no title: um nome longo corta com reticências.
+    expect(screen.getByText("diretor-de-video#aaaa")).toHaveAttribute("title", "diretor-de-video#aaaa");
+  });
+
   it("o custo do turno só aparece depois de medido, no fim do pedido", () => {
     const concluido = aplicar(
       ESTADO_INICIAL,
@@ -190,6 +235,62 @@ describe("TranscricaoDoTerminal", () => {
     rerender(<Transcricao conversa={medido} />);
 
     expect(screen.getByRole("button", { name: /≈ custo do turno · índice 235\smil · parcial/ })).toBeInTheDocument();
+  });
+
+  describe("progresso das tarefas", () => {
+    const comTarefas = () =>
+      aplicar(
+        ESTADO_INICIAL,
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija o bug", configuracao },
+        {
+          tipo: "tarefas_atualizadas",
+          turnoId: "t1",
+          tarefas: [
+            { texto: "Ler o código", situacao: "concluida" },
+            { texto: "Corrigir o cálculo", situacao: "concluida" },
+            { texto: "Rodando os testes", situacao: "em_andamento" },
+            { texto: "Atualizar o README", situacao: "pendente" },
+          ],
+        },
+      );
+
+    it("o pedido em andamento mostra a barra com a contagem e a tarefa atual; o clique abre a lista", () => {
+      render(<Transcricao conversa={comTarefas()} />);
+
+      const resumo = screen.getByRole("button", { name: /2 de 4 tarefas/ });
+      expect(resumo).toHaveTextContent("· Rodando os testes");
+      expect(resumo).toHaveAttribute("title", "✓ Ler o código\n✓ Corrigir o cálculo\n▸ Rodando os testes\n○ Atualizar o README");
+      expect(screen.getByRole("progressbar", { name: "Tarefas concluídas" })).toHaveAttribute("aria-valuenow", "2");
+      expect(screen.queryByRole("list", { name: "Tarefas do orquestrador" })).not.toBeInTheDocument();
+
+      fireEvent.click(resumo);
+
+      const lista = screen.getByRole("list", { name: "Tarefas do orquestrador" });
+      expect(resumo).toHaveAttribute("aria-expanded", "true");
+      expect([...lista.querySelectorAll("li")].map((item) => [item.className, item.textContent])).toEqual([
+        ["tarefa-concluida", "✓Ler o código (concluída)"],
+        ["tarefa-concluida", "✓Corrigir o cálculo (concluída)"],
+        ["tarefa-em_andamento", "▸Rodando os testes (em andamento)"],
+        ["tarefa-pendente", "○Atualizar o README (pendente)"],
+      ]);
+    });
+
+    it("some quando o pedido termina, e sem lista não aparece", () => {
+      const { rerender } = render(
+        <Transcricao
+          conversa={aplicar(ESTADO_INICIAL, { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija", configuracao })}
+        />,
+      );
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+
+      rerender(
+        <Transcricao
+          conversa={aplicar(comTarefas(), { tipo: "turno_concluido", turnoId: "t1", resposta: "Corrigido.", uso: USO })}
+        />,
+      );
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+      expect(screen.queryByText(/de 4 tarefas/)).not.toBeInTheDocument();
+    });
   });
 
   it("marca a configuração com a etiqueta \"econômico\" só quando ela corresponde ao modo econômico", () => {
@@ -342,6 +443,31 @@ describe("TranscricaoDoTerminal", () => {
       ).toBeInTheDocument();
     });
 
+    it("diagnóstico sem lista de processos (Windows): orienta cancelar mesmo com a autorrecuperação ligada", async () => {
+      vi.spyOn(api, "lerPreferencias").mockResolvedValue({
+        instrucoesPadrao: "",
+        subagentesProntos: [],
+        autorrecuperacao: true,
+      });
+      const resumo = "sem saída há 6 min; não dá para ver os processos neste sistema, então o app não encerra o pedido sozinho";
+      render(
+        <Transcricao
+          conversa={emAndamento()}
+          sinal={{
+            turnoId: "t1",
+            em: "2026-10-28T12:00:05Z",
+            tokensPensando: 0,
+            diagnostico: { situacao: "suspeito", resumo, semRetomadaAutomatica: true },
+          }}
+        />,
+      );
+      await act(async () => undefined);
+
+      const texto = `sem notícias do Claude há 6s: ${resumo}. Se continuar assim, cancele (esc) e reenvie.`;
+      expect(linhaDoSinal(texto)).toHaveClass("linha-erro");
+      expect(screen.queryByText(/retoma sozinho/)).not.toBeInTheDocument();
+    });
+
     it("silêncio longo sem diagnóstico do servidor: a mesma orientação, conforme a preferência", async () => {
       vi.setSystemTime(new Date("2026-10-28T12:03:00Z"));
       const lerPreferencias = vi
@@ -487,5 +613,27 @@ describe("TranscricaoDoTerminal", () => {
     expect(screen.getByText(/^— conversa nova iniciada às \d{2}:\d{2} —$/)).toBeInTheDocument();
     expect(screen.queryByText("resuma o projeto")).not.toBeInTheDocument();
     expect(screen.getByText(/digite um pedido e pressione enter/)).toBeInTheDocument();
+    // Sem worktree alterada nem plano descartado, o separador fica sozinho.
+    expect(screen.queryByRole("note", { name: "Avisos da conversa nova" })).not.toBeInTheDocument();
+  });
+
+  it("depois do /clear, avisa junto do separador que a worktree tem alterações e que o plano foi descartado", () => {
+    const limpa = (worktreeComAlteracoes: boolean, planoDescartado: boolean) =>
+      aplicar(ESTADO_INICIAL, { tipo: "conversa_limpa", turnosAnteriores: 1, planoDescartado, worktreeComAlteracoes });
+
+    const { rerender } = render(<Transcricao conversa={limpa(true, true)} />);
+    const aviso = screen.getByRole("note", { name: "Avisos da conversa nova" });
+    expect(aviso).toHaveTextContent("a worktree tem alterações da conversa anterior · o plano pendente foi descartado");
+    expect(aviso).toHaveClass("hint-warning");
+
+    rerender(<Transcricao conversa={limpa(true, false)} />);
+    expect(screen.getByRole("note", { name: "Avisos da conversa nova" })).toHaveTextContent(
+      /^a worktree tem alterações da conversa anterior$/,
+    );
+
+    rerender(<Transcricao conversa={limpa(false, true)} />);
+    expect(screen.getByRole("note", { name: "Avisos da conversa nova" })).toHaveTextContent(
+      /^o plano pendente foi descartado$/,
+    );
   });
 });

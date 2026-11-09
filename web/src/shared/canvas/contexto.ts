@@ -9,6 +9,7 @@ import {
   useSyncExternalStore,
 } from "react";
 
+import type { ItemLigadoParaEnvio } from "../api/cliente";
 import type { ResumoDoOrquestrador, SinalDeVida } from "../api/tipos";
 import type { EstadoDaConversa } from "../estado/aplicarEvento";
 import type { SituacaoDaConexao } from "../hooks/useConversas";
@@ -19,6 +20,8 @@ import type { BixinhosLimpos, EscalaDaLetra } from "./layout";
 export interface AcoesDoCanvas {
   abrirTerminal: (orquestradorId: string) => void;
   fecharTerminal: (orquestradorId: string) => void;
+  /** Minimiza o terminal à barra de título (a bolinha amarela do Mac) ou o restaura. Fica no layout do canvas. */
+  minimizarOuRestaurarTerminal: (orquestradorId: string) => void;
   /** Tira do canvas os bixinhos do terminal que não estão executando. Só visual: o histórico continua. */
   limparBixinhos: (orquestradorId: string) => void;
   /** O rascunho de configuração virou um Orquestrador de verdade: troca pelo terminal, no mesmo lugar. */
@@ -41,6 +44,10 @@ export interface AcoesDoCanvas {
   minimizarOuRestaurarPrevia: (previaId: string) => void;
   /** Tira a prévia do canvas e, com isso, do layout. */
   fecharPrevia: (previaId: string) => void;
+  /** Desliga do terminal uma nota, prévia ou artefato (pelo id do nó): o × do chip. Fica no layout do canvas. */
+  desligarItem?: (orquestradorId: string, itemId: string) => void;
+  /** Os itens ligados ao terminal agora, como vão no próximo pedido (enviar ou pôr na fila). */
+  lerItensLigados?: (orquestradorId: string) => ItemLigadoParaEnvio[];
 }
 
 /**
@@ -60,6 +67,11 @@ export interface ValorDoCanvas {
   sinais: ReadonlyMap<string, SinalDeVida>;
   /** Bixinhos limpos do canvas, por id do Orquestrador. */
   bixinhosLimpos: ReadonlyMap<string, BixinhosLimpos>;
+  /**
+   * Os ids dos nós dos bixinhos saindo sozinhos agora (o Subagente terminou):
+   * encolhem e somem antes de virarem limpos. Ausente, nenhum.
+   */
+  bixinhosSaindo?: ReadonlySet<string>;
   /**
    * Situação da conexão e a memória por Orquestrador. Só é trocado quando
    * uma delas muda: os totais de memória do computador (`livreBytes`,

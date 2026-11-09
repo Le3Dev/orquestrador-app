@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api/cliente";
-import type { DadosDaPredefinicao, EsforcosHerdados } from "../api/tipos";
+import type { DadosDaPredefinicao, DadosDasPreferencias, EsforcosHerdados } from "../api/tipos";
 import { descreverAlteracoesDaConfiguracao } from "../formatacao";
 
 // Usados pela ⚙ do terminal (CamposDaConfiguracao) e pela criação (NoRascunho).
@@ -30,6 +30,31 @@ export function usePredefinicoes(): DadosDaPredefinicao[] {
     };
   }, []);
   return predefinicoes;
+}
+
+/**
+ * As preferências globais, lidas uma vez ao abrir: os subagentes prontos (para
+ * escolher os de um orquestrador) e os perfis de instruções (para aplicar).
+ * Nulo enquanto carrega ou se a leitura falhar: a escolha segue sem as caixas
+ * e o "Aplicar perfil…" não aparece.
+ */
+export function usePreferencias(): DadosDasPreferencias | null {
+  const [preferencias, setPreferencias] = useState<DadosDasPreferencias | null>(null);
+  useEffect(() => {
+    let ativo = true;
+    api
+      .lerPreferencias()
+      .then((lidas) => {
+        if (ativo) {
+          setPreferencias(lidas);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      ativo = false;
+    };
+  }, []);
+  return preferencias;
 }
 
 /**

@@ -1,19 +1,26 @@
 import {
+  alinharJanelas,
   ALTURA_DA_NOTA_MINIMIZADA,
+  distribuirJanelas,
   interpretarBixinhosLimpos,
   interpretarLayout,
+  type JanelaNoCanvas,
+  janelasLadoALado,
   lerBixinhosLimpos,
   lerLayout,
+  MARGEM_DO_LADO_A_LADO,
   MARGEM_DOS_BIXINHOS,
   organizarComNotas,
   organizarEmGrade,
   type Ponto,
   posicaoAoLado,
+  posicaoLivrePerto,
   posicaoParaNovoTerminal,
   posicoesDosBixinhos,
   posicoesLivresDosBixinhos,
   type Retangulo,
   salvarBixinhosLimpos,
+  salvarDesenho,
   salvarLayout,
   sobrepoe,
   TAMANHO_DA_PREVIA,
@@ -22,6 +29,7 @@ import {
   TAMANHO_DO_TERMINAL,
   TAMANHO_MINIMO_DO_TERMINAL,
   tamanhoNaEscalaDaLetra,
+  type TracoDoDesenho,
 } from "./layout";
 import {
   ehNota,
@@ -263,6 +271,113 @@ describe("tamanho da letra no layout", () => {
   });
 });
 
+describe("terminal minimizado no layout", () => {
+  afterEach(() => localStorage.clear());
+
+  const retangulo = { x: 10, y: 20, largura: 600, altura: 500 };
+
+  it("grava e lê de volta o terminal minimizado, com a altura de aberto; o aberto fica sem o campo", () => {
+    const minimizado = minimizarOuRestaurar(novoTerminal("o1", { x: 0, y: 0 }, 600, 500));
+    expect(minimizado.height).toBe(ALTURA_DA_NOTA_MINIMIZADA);
+
+    salvarLayout(layoutDosNos([minimizado, novoTerminal("o2", { x: 800, y: 0 }, 640, 460)], null));
+    const lido = lerLayout();
+
+    expect(lido.terminais.o1).toEqual({ x: 0, y: 0, largura: 600, altura: 500, minimizada: true });
+    expect(lido.terminais.o2).toEqual({ x: 800, y: 0, largura: 640, altura: 460 });
+
+    // De volta ao canvas: só a barra, e restaurar volta à altura de antes.
+    const o1 = nosDoLayout(lido).filter(ehTerminal).find((no) => no.id === "o1");
+    expect(o1?.height).toBe(ALTURA_DA_NOTA_MINIMIZADA);
+    expect(o1?.data).toEqual({ orquestradorId: "o1", minimizada: true, alturaAberta: 500 });
+    const restaurado = o1 === undefined ? null : minimizarOuRestaurar(o1);
+    expect(restaurado?.height).toBe(500);
+    expect(restaurado === null ? null : layoutDosNos([restaurado], null).terminais.o1).toEqual({
+      x: 0,
+      y: 0,
+      largura: 600,
+      altura: 500,
+    });
+  });
+
+  it("um layout antigo, sem o campo, vale como aberto", () => {
+    const texto = JSON.stringify({ terminais: { o1: retangulo } });
+
+    expect(interpretarLayout(texto).terminais.o1).toEqual(retangulo);
+    const no = nosDoLayout(interpretarLayout(texto)).filter(ehTerminal)[0];
+    expect(no?.height).toBe(500);
+    expect(no?.data).toEqual({ orquestradorId: "o1" });
+  });
+
+  it.each([false, "sim", 1, null])("descarta um valor que não é true (%s), mantendo o terminal aberto", (valor) => {
+    const texto = JSON.stringify({ terminais: { o1: { ...retangulo, minimizada: valor } } });
+
+    expect(interpretarLayout(texto).terminais.o1).toEqual(retangulo);
+  });
+
+  it("guarda junto com o tamanho da letra", () => {
+    const texto = JSON.stringify({ terminais: { o1: { ...retangulo, escalaDaLetra: 1.15, minimizada: true } } });
+
+    expect(interpretarLayout(texto).terminais.o1).toEqual({ ...retangulo, escalaDaLetra: 1.15, minimizada: true });
+    expect(nosDoLayout(interpretarLayout(texto)).filter(ehTerminal)[0]?.data).toEqual({
+      orquestradorId: "o1",
+      escalaDaLetra: 1.15,
+      minimizada: true,
+      alturaAberta: 500,
+    });
+  });
+});
+
+describe("itens ligados no layout", () => {
+  afterEach(() => localStorage.clear());
+
+  const retangulo = { x: 10, y: 20, largura: 600, altura: 500 };
+
+  it("grava e lê de volta os itens ligados de cada terminal, na ordem; sem itens, sem o campo", () => {
+    const ligado = novoTerminal("o1", { x: 0, y: 0 }, 600, 500, undefined, false, ["nota:n1", "previa:p1"]);
+    const nos = [
+      ligado,
+      novoTerminal("o2", { x: 800, y: 0 }, 600, 500),
+      novaNota("n1", { x: 0, y: 700 }),
+      novaPrevia("p1", { x: 700, y: 700 }, { url: "http://localhost:5173/", orquestradorId: null }),
+    ];
+
+    salvarLayout(layoutDosNos(nos, null));
+    const lido = lerLayout();
+
+    expect(lido.terminais.o1).toEqual({ x: 0, y: 0, largura: 600, altura: 500, ligados: ["nota:n1", "previa:p1"] });
+    expect(lido.terminais.o2).toEqual({ x: 800, y: 0, largura: 600, altura: 500 });
+    expect(nosDoLayout(lido).filter(ehTerminal).find((no) => no.id === "o1")?.data).toEqual({
+      orquestradorId: "o1",
+      ligados: ["nota:n1", "previa:p1"],
+    });
+  });
+
+  it("não grava a ligação a um item que saiu do canvas", () => {
+    const terminal = novoTerminal("o1", { x: 0, y: 0 }, 600, 500, undefined, false, ["nota:n1", "artefato:a1"]);
+
+    expect(layoutDosNos([terminal, novaNota("n1", { x: 0, y: 700 })], null).terminais.o1?.ligados).toEqual(["nota:n1"]);
+    // Sem nenhum item no canvas, o campo nem aparece.
+    expect(layoutDosNos([terminal], null).terminais.o1).toEqual({ x: 0, y: 0, largura: 600, altura: 500 });
+  });
+
+  it("um layout antigo, sem o campo, vale como sem itens ligados", () => {
+    const texto = JSON.stringify({ terminais: { o1: retangulo } });
+
+    expect(interpretarLayout(texto).terminais.o1).toEqual(retangulo);
+    expect(nosDoLayout(interpretarLayout(texto)).filter(ehTerminal)[0]?.data.ligados).toBeUndefined();
+  });
+
+  it("descarta ids inválidos e repetidos (shell, terminal, bixinho, não texto)", () => {
+    const ligados = ["nota:n1", "nota:n1", "shell:s1", "o2", "o1::s1", "nota:", 3, null, "artefato:a1"];
+    const texto = JSON.stringify({ terminais: { o1: { ...retangulo, ligados }, o2: { ...retangulo, ligados: "nota:n1" } } });
+
+    const lido = interpretarLayout(texto);
+    expect(lido.terminais.o1?.ligados).toEqual(["nota:n1", "artefato:a1"]);
+    expect(lido.terminais.o2).toEqual(retangulo);
+  });
+});
+
 describe("tamanhoNaEscalaDaLetra", () => {
   const padrao = TAMANHO_DO_TERMINAL;
   const minimo = TAMANHO_MINIMO_DO_TERMINAL;
@@ -436,6 +551,60 @@ describe("posicaoAoLado", () => {
   });
 });
 
+describe("posicaoLivrePerto", () => {
+  const tamanho = TAMANHO_DO_TERMINAL;
+  const inicio: Ponto = { x: 1000, y: 500 };
+  const passoX = tamanho.largura + 40;
+  const livreDe = (posicao: Ponto, obstaculos: readonly Retangulo[]) =>
+    obstaculos.every((obstaculo) => !sobrepoe({ ...posicao, ...tamanho }, obstaculo));
+
+  it("sem nada no canvas, abre no lugar de partida", () => {
+    expect(posicaoLivrePerto(inicio, tamanho, [])).toEqual(inicio);
+  });
+
+  it("com algo longe, também abre no lugar de partida", () => {
+    expect(posicaoLivrePerto(inicio, tamanho, [{ x: -3000, y: -3000, largura: 400, altura: 300 }])).toEqual(inicio);
+  });
+
+  it("com um terminal ocupando a vista, vai para a direita, sem cobri-lo", () => {
+    const naVista: Retangulo = { x: 1000, y: 500, ...tamanho };
+    const posicao = posicaoLivrePerto(inicio, tamanho, [naVista]);
+
+    expect(posicao).toEqual({ x: inicio.x + passoX, y: inicio.y });
+    expect(livreDe(posicao, [naVista])).toBe(true);
+  });
+
+  it("encostar conta como ocupado: a folga entre as janelas vale", () => {
+    const quaseEncostado: Retangulo = { x: inicio.x + tamanho.largura + 10, y: inicio.y, largura: 320, altura: 280 };
+
+    expect(posicaoLivrePerto(inicio, tamanho, [quaseEncostado])).not.toEqual(inicio);
+  });
+
+  it("com a fileira toda ocupada à direita, desce para a primeira fileira livre abaixo", () => {
+    const faixa: Retangulo = { x: inicio.x - 100, y: inicio.y - 50, largura: 6 * passoX + 200, altura: tamanho.altura + 100 };
+    const posicao = posicaoLivrePerto(inicio, tamanho, [faixa]);
+
+    expect(posicao.x).toBe(inicio.x);
+    expect(posicao.y).toBeGreaterThan(inicio.y);
+    expect(livreDe(posicao, [faixa])).toBe(true);
+  });
+
+  it("sem lugar na varredura, abre logo abaixo de tudo, alinhada ao lugar de partida", () => {
+    const tudo: Retangulo = { x: -5000, y: -5000, largura: 20_000, altura: 10_000 };
+
+    expect(posicaoLivrePerto(inicio, tamanho, [tudo])).toEqual({ x: inicio.x, y: 5000 + 40 });
+  });
+
+  it("varre em passos do tamanho da janela mais a folga", () => {
+    const doisNaVista: Retangulo[] = [
+      { x: 1000, y: 500, ...tamanho },
+      { x: 1000 + passoX, y: 500, largura: 320, altura: 280 },
+    ];
+
+    expect(posicaoLivrePerto(inicio, tamanho, doisNaVista)).toEqual({ x: inicio.x + 2 * passoX, y: inicio.y });
+  });
+});
+
 describe("organizarComNotas", () => {
   const terminais = ["a", "b"].map((id) => ({ id, largura: 600, altura: 500 }));
 
@@ -551,5 +720,330 @@ describe("shells no layout", () => {
       bom: { x: 0, y: 0, largura: 640, altura: 400, terminalId: "t1", pasta: "/p", orquestradorId: null },
     });
     expect(interpretarLayout(JSON.stringify({ shells: 5 })).shells).toEqual({});
+  });
+});
+
+describe("ações da barra do grupo", () => {
+  // Três janelas espalhadas: a de cima à esquerda, a larga no meio e a baixa à direita.
+  const janelas: JanelaNoCanvas[] = [
+    { id: "a", x: 0, y: 100, largura: 200, altura: 100 },
+    { id: "b", x: 300, y: 0, largura: 400, altura: 300 },
+    { id: "c", x: 900, y: 50, largura: 100, altura: 50 },
+  ];
+
+  /** Nenhuma janela, nas posições novas, cobre outra do grupo nem uma das `outras`. */
+  function semSobreposicao(
+    grupo: readonly JanelaNoCanvas[],
+    posicoes: Record<string, Ponto>,
+    outras: readonly Retangulo[] = [],
+  ): boolean {
+    const movidas = grupo.map((janela) => ({ ...janela, ...posicoes[janela.id] }));
+    return movidas.every(
+      (janela, indice) =>
+        !movidas.some((outra, outroIndice) => outroIndice !== indice && sobrepoe(janela, outra)) &&
+        !outras.some((outra) => sobrepoe(janela, outra)),
+    );
+  }
+
+  it("alinha à esquerda, ao centro e à direita do contorno do grupo, sem mexer no y quando nada se cobre", () => {
+    // Uma coluna com folga entre as duas: alinhadas, continuam uma sobre a outra só na vista, sem se cobrir.
+    const coluna: JanelaNoCanvas[] = [
+      { id: "a", x: 0, y: 0, largura: 200, altura: 100 },
+      { id: "b", x: 300, y: 200, largura: 400, altura: 100 },
+    ];
+
+    expect(alinharJanelas(coluna, "esquerda")).toEqual({ a: { x: 0, y: 0 }, b: { x: 0, y: 200 } });
+    // O contorno vai de 0 a 700: o centro é 350.
+    expect(alinharJanelas(coluna, "centro")).toEqual({ a: { x: 250, y: 0 }, b: { x: 150, y: 200 } });
+    expect(alinharJanelas(coluna, "direita")).toEqual({ a: { x: 500, y: 0 }, b: { x: 300, y: 200 } });
+  });
+
+  it("alinhar na horizontal janelas lado a lado não as empilha uma sobre a outra: desce o mínimo, com margem", () => {
+    // As três se cruzam no y: no mesmo x, cairiam umas sobre as outras. Na ordem do topo (b, c, a), cada
+    // uma que cobriria outra desce para logo abaixo dela.
+    const m = MARGEM_DO_LADO_A_LADO;
+    expect(alinharJanelas(janelas, "esquerda")).toEqual({
+      b: { x: 0, y: 0 },
+      c: { x: 0, y: 300 + m },
+      a: { x: 0, y: 300 + m + 50 + m },
+    });
+    expect(alinharJanelas(janelas, "centro")).toEqual({
+      b: { x: 300, y: 0 },
+      c: { x: 450, y: 300 + m },
+      a: { x: 400, y: 300 + m + 50 + m },
+    });
+    expect(alinharJanelas(janelas, "direita")).toEqual({
+      b: { x: 600, y: 0 },
+      c: { x: 900, y: 300 + m },
+      a: { x: 800, y: 300 + m + 50 + m },
+    });
+    for (const como of ["esquerda", "centro", "direita", "topo", "meio", "base"] as const) {
+      expect(semSobreposicao(janelas, alinharJanelas(janelas, como))).toBe(true);
+    }
+  });
+
+  it("alinhar ao topo telas empilhadas na mesma coluna as põe lado a lado, com margem, em vez de uma sobre a outra", () => {
+    const empilhadas: JanelaNoCanvas[] = [
+      { id: "cima", x: 0, y: 0, largura: 600, altura: 520 },
+      { id: "baixo", x: 0, y: 600, largura: 600, altura: 520 },
+    ];
+
+    expect(alinharJanelas(empilhadas, "topo")).toEqual({
+      cima: { x: 0, y: 0 },
+      baixo: { x: 600 + MARGEM_DO_LADO_A_LADO, y: 0 },
+    });
+    expect(alinharJanelas(empilhadas, "base")).toEqual({
+      cima: { x: 0, y: 600 },
+      baixo: { x: 600 + MARGEM_DO_LADO_A_LADO, y: 600 },
+    });
+  });
+
+  it("alinhar não deixa o grupo sobre uma tela fora da seleção: vai inteiro para a área livre mais perto", () => {
+    const grupo: JanelaNoCanvas[] = [
+      { id: "p", x: 0, y: 0, largura: 600, altura: 520 },
+      { id: "q", x: 1500, y: 700, largura: 600, altura: 520 },
+    ];
+    // Bem onde "q" pararia ao subir para o topo.
+    const fora: Retangulo[] = [{ x: 1500, y: 0, largura: 600, altura: 520 }];
+
+    const posicoes = alinharJanelas(grupo, "topo", fora);
+
+    expect(semSobreposicao(grupo, posicoes, fora)).toBe(true);
+    // O arranjo do grupo fica: os dois no mesmo topo, à mesma distância.
+    expect(posicoes.q?.y).toBe(posicoes.p?.y);
+    expect((posicoes.q?.x ?? 0) - (posicoes.p?.x ?? 0)).toBe(1500);
+    // Sem nada no caminho, as outras telas não mudam nada.
+    expect(alinharJanelas(grupo, "topo", [{ x: 5000, y: 5000, largura: 100, altura: 100 }])).toEqual(
+      alinharJanelas(grupo, "topo"),
+    );
+  });
+
+  it("alinha ao topo, ao meio e à base do contorno, sem mexer no x", () => {
+    expect(alinharJanelas(janelas, "topo")).toEqual({ a: { x: 0, y: 0 }, b: { x: 300, y: 0 }, c: { x: 900, y: 0 } });
+    // O contorno vai de 0 a 300: o meio é 150.
+    expect(alinharJanelas(janelas, "meio")).toEqual({ a: { x: 0, y: 100 }, b: { x: 300, y: 0 }, c: { x: 900, y: 125 } });
+    expect(alinharJanelas(janelas, "base")).toEqual({ a: { x: 0, y: 200 }, b: { x: 300, y: 0 }, c: { x: 900, y: 250 } });
+  });
+
+  it("arredonda o centro e devolve vazio sem janelas", () => {
+    const impares: JanelaNoCanvas[] = [
+      { id: "a", x: 0, y: 0, largura: 101, altura: 10 },
+      { id: "b", x: 0, y: 20, largura: 50, altura: 10 },
+    ];
+
+    expect(alinharJanelas(impares, "centro").b).toEqual({ x: 26, y: 20 });
+    expect(alinharJanelas([], "esquerda")).toEqual({});
+  });
+
+  it("distribui na horizontal: as pontas ficam e os vãos entre vizinhas ficam iguais", () => {
+    // Espaço total 1000, larguras somam 700: dois vãos de 150.
+    const posicoes = distribuirJanelas(janelas, "horizontal");
+
+    expect(posicoes).toEqual({ a: { x: 0, y: 100 }, b: { x: 350, y: 0 }, c: { x: 900, y: 50 } });
+  });
+
+  it("distribui na vertical pela ordem do topo, sem mexer no x", () => {
+    const empilhadas: JanelaNoCanvas[] = [
+      { id: "a", x: 10, y: 0, largura: 100, altura: 100 },
+      { id: "b", x: 20, y: 500, largura: 100, altura: 100 },
+      { id: "c", x: 30, y: 120, largura: 100, altura: 200 },
+    ];
+
+    // De 0 a 600, alturas somam 400: dois vãos de 100. A ordem é a, c, b.
+    expect(distribuirJanelas(empilhadas, "vertical")).toEqual({
+      a: { x: 10, y: 0 },
+      c: { x: 30, y: 200 },
+      b: { x: 20, y: 500 },
+    });
+  });
+
+  it("distribuir quando as larguras somam mais que o espaço não sobrepõe: o vão vira a margem e o grupo cresce", () => {
+    // De 0 a 1200, mas as larguras somam 1800: o vão seria de -300.
+    const apertadas: JanelaNoCanvas[] = [
+      { id: "a", x: 0, y: 0, largura: 600, altura: 520 },
+      { id: "b", x: 300, y: 40, largura: 600, altura: 520 },
+      { id: "c", x: 600, y: 80, largura: 600, altura: 520 },
+    ];
+    const m = MARGEM_DO_LADO_A_LADO;
+
+    expect(distribuirJanelas(apertadas, "horizontal")).toEqual({
+      a: { x: 0, y: 0 },
+      b: { x: 600 + m, y: 40 },
+      c: { x: 1200 + 2 * m, y: 80 },
+    });
+    // Um vão positivo, mas menor que a margem, também vira a margem.
+    const juntas = apertadas.map((janela, indice) => ({ ...janela, x: 0, y: indice * 530 }));
+    expect(distribuirJanelas(juntas, "vertical")).toEqual({
+      a: { x: 0, y: 0 },
+      b: { x: 0, y: 520 + m },
+      c: { x: 0, y: 1040 + 2 * m },
+    });
+  });
+
+  it("distribuir não deixa o grupo sobre uma tela fora da seleção", () => {
+    const apertadas: JanelaNoCanvas[] = [
+      { id: "a", x: 0, y: 0, largura: 600, altura: 520 },
+      { id: "b", x: 300, y: 0, largura: 600, altura: 520 },
+      { id: "c", x: 600, y: 0, largura: 600, altura: 520 },
+    ];
+    // Logo à direita do grupo: o grupo, ao crescer, cairia sobre ela.
+    const fora: Retangulo[] = [{ x: 1300, y: 0, largura: 600, altura: 520 }];
+
+    const posicoes = distribuirJanelas(apertadas, "horizontal", fora);
+
+    expect(semSobreposicao(apertadas, posicoes, fora)).toBe(true);
+  });
+
+  it("com menos de três janelas, distribuir não move nada", () => {
+    expect(distribuirJanelas(janelas.slice(0, 2), "horizontal")).toEqual({ a: { x: 0, y: 100 }, b: { x: 300, y: 0 } });
+  });
+
+  it("lado a lado: até três numa fileira, a partir do canto do grupo, na ordem da esquerda para a direita", () => {
+    const posicoes = janelasLadoALado(janelas);
+
+    // O canto do grupo é (0, 0); "a" está um pouco abaixo, mas na mesma faixa de "b".
+    expect(posicoes).toEqual({
+      a: { x: 0, y: 0 },
+      b: { x: 200 + MARGEM_DO_LADO_A_LADO, y: 0 },
+      c: { x: 200 + 400 + 2 * MARGEM_DO_LADO_A_LADO, y: 0 },
+    });
+  });
+
+  it("lado a lado: quatro viram uma grade 2 × 2 na ordem de leitura; a fileira tem a altura da mais alta", () => {
+    const quatro: JanelaNoCanvas[] = [
+      { id: "d", x: 800, y: 900, largura: 100, altura: 100 },
+      { id: "a", x: 50, y: 40, largura: 300, altura: 200 },
+      { id: "c", x: 0, y: 900, largura: 100, altura: 100 },
+      { id: "b", x: 600, y: 0, largura: 100, altura: 400 },
+    ];
+
+    expect(janelasLadoALado(quatro, 10)).toEqual({
+      a: { x: 0, y: 0 },
+      b: { x: 310, y: 0 },
+      c: { x: 0, y: 410 },
+      d: { x: 110, y: 410 },
+    });
+    expect(janelasLadoALado([])).toEqual({});
+  });
+
+  it("lado a lado: cinco a nove ficam em fileiras de três", () => {
+    const cinco: JanelaNoCanvas[] = Array.from({ length: 5 }, (_, indice) => ({
+      id: `j${indice}`,
+      x: indice * 1000,
+      y: 0,
+      largura: 100,
+      altura: 100,
+    }));
+
+    const posicoes = janelasLadoALado(cinco, 0);
+
+    expect(posicoes.j2).toEqual({ x: 200, y: 0 });
+    expect(posicoes.j3).toEqual({ x: 0, y: 100 });
+    expect(posicoes.j4).toEqual({ x: 100, y: 100 });
+  });
+
+  it("lado a lado não começa sobre uma tela fora da seleção: a grade vai inteira para a área livre mais perto", () => {
+    const grupo: JanelaNoCanvas[] = [
+      { id: "p", x: 0, y: 0, largura: 600, altura: 520 },
+      { id: "q", x: 0, y: 2000, largura: 600, altura: 520 },
+    ];
+    // Entre as duas na vista, bem onde "q" pararia ao lado de "p".
+    const fora: Retangulo[] = [{ x: 700, y: 0, largura: 600, altura: 520 }];
+
+    const posicoes = janelasLadoALado(grupo, MARGEM_DO_LADO_A_LADO, fora);
+
+    expect(semSobreposicao(grupo, posicoes, fora)).toBe(true);
+    expect(posicoes.q?.y).toBe(posicoes.p?.y);
+    expect((posicoes.q?.x ?? 0) - (posicoes.p?.x ?? 0)).toBe(600 + MARGEM_DO_LADO_A_LADO);
+  });
+});
+
+describe("desenho no layout", () => {
+  afterEach(() => localStorage.clear());
+
+  const CHAVE = "orquestrador-agentes:canvas:v1";
+  const caneta: TracoDoDesenho = {
+    id: "t1",
+    tipo: "caneta",
+    cor: "laranja",
+    espessura: 3,
+    pontos: [
+      { x: 0, y: 0 },
+      { x: 10.5, y: 4 },
+      { x: 20, y: 12 },
+    ],
+  };
+  const seta: TracoDoDesenho = {
+    id: "t2",
+    tipo: "seta",
+    cor: "azul",
+    espessura: 6,
+    pontos: [
+      { x: 100, y: 100 },
+      { x: 300, y: 180 },
+    ],
+  };
+  const texto: TracoDoDesenho = { id: "t3", tipo: "texto", cor: "claro", espessura: 2, pontos: [{ x: 5, y: 6 }], texto: "API" };
+
+  it("um layout antigo, sem desenho, continua valendo e fica sem o campo", () => {
+    const antigo = JSON.stringify({ terminais: { o1: { x: 0, y: 0, largura: 600, altura: 500 } }, viewport: null });
+
+    const layout = interpretarLayout(antigo);
+
+    expect(layout.desenho).toBeUndefined();
+    expect(Object.keys(layout.terminais)).toEqual(["o1"]);
+  });
+
+  it("grava e lê de volta os traços, na ordem, sem mexer nas janelas nem na câmera", () => {
+    salvarLayout(layoutDosNos([novoTerminal("o1", { x: 10, y: 20 }, 600, 500)], { x: 5, y: 6, zoom: 0.9 }));
+
+    salvarDesenho([caneta, seta, texto]);
+    const lido = lerLayout();
+
+    expect(lido.desenho).toEqual([caneta, seta, texto]);
+    expect(lido.terminais.o1).toEqual({ x: 10, y: 20, largura: 600, altura: 500 });
+    expect(lido.viewport).toEqual({ x: 5, y: 6, zoom: 0.9 });
+  });
+
+  it("gravar o layout das janelas (sem o campo) mantém o desenho já salvo", () => {
+    salvarDesenho([caneta]);
+
+    salvarLayout(layoutDosNos([novoTerminal("o2", { x: 0, y: 0 }, 600, 500)], null));
+
+    expect(lerLayout().desenho).toEqual([caneta]);
+    expect(Object.keys(lerLayout().terminais)).toEqual(["o2"]);
+  });
+
+  it("sem traços (tudo apagado), o campo sai do armazenamento", () => {
+    salvarDesenho([caneta]);
+    salvarDesenho([]);
+
+    expect(lerLayout().desenho).toBeUndefined();
+    expect(JSON.parse(localStorage.getItem(CHAVE) ?? "{}")).not.toHaveProperty("desenho");
+  });
+
+  it("descarta só os traços inválidos, mantendo a ordem dos bons", () => {
+    const invalidos: unknown[] = [
+      { ...caneta, id: "" },
+      { ...caneta, id: "tipo", tipo: "circulo" },
+      { ...caneta, id: "cor", cor: "#ff0000" },
+      { ...caneta, id: "espessura", espessura: 4 },
+      { ...caneta, id: "sem-pontos", pontos: [] },
+      { ...caneta, id: "ponto-ruim", pontos: [{ x: 0, y: "1" }] },
+      { ...caneta, id: "ponto-infinito", pontos: [{ x: 0, y: null }] },
+      { ...seta, id: "seta-de-tres", pontos: [...seta.pontos, { x: 1, y: 1 }] },
+      { ...texto, id: "texto-vazio", texto: "   " },
+      { ...texto, id: "texto-sem-texto", texto: undefined },
+      { ...texto, id: "texto-longo", texto: "a".repeat(501) },
+      "não é traço",
+      null,
+    ];
+    const salvo = JSON.stringify({ desenho: [caneta, ...invalidos, { ...seta, extra: "fora" }, texto] });
+
+    expect(interpretarLayout(salvo).desenho).toEqual([caneta, seta, texto]);
+  });
+
+  it("um desenho que não é lista vale como nenhum", () => {
+    expect(interpretarLayout(JSON.stringify({ desenho: { t1: caneta } })).desenho).toBeUndefined();
   });
 });

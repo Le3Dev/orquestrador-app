@@ -66,6 +66,33 @@ export function resolverInstrucoes(doOrquestrador: string, padrao: string): Inst
   return globais === "" ? null : { texto: globais, origem: "padrao" };
 }
 
+/** Os valores das variáveis que as instruções podem usar (`{{pasta}}` e `{{nome}}`). */
+export interface VariaveisDasInstrucoes {
+  /** A pasta do turno: o worktree, se houver; senão a pasta de trabalho. A mesma que vai ao motor. */
+  pasta: string;
+  /** O nome do Orquestrador. */
+  nome: string;
+}
+
+/** `{{pasta}}` ou `{{nome}}`, com espaços opcionais dentro das chaves. */
+const VARIAVEL = /\{\{\s*(pasta|nome)\s*\}\}/g;
+
+/**
+ * Troca `{{pasta}}` e `{{nome}}` pelos valores do pedido. Outras variáveis
+ * (`{{projeto}}`, `{{ x }}`) ficam como estão. Os valores entram literais:
+ * `$&` ou `$1` num caminho não viram padrões de substituição.
+ */
+export function aplicarVariaveis(
+  instrucoes: InstrucoesAplicadas | null,
+  variaveis: VariaveisDasInstrucoes,
+): InstrucoesAplicadas | null {
+  if (instrucoes === null) {
+    return null;
+  }
+  const texto = instrucoes.texto.replace(VARIAVEL, (_trecho, nome: keyof VariaveisDasInstrucoes) => variaveis[nome]);
+  return { ...instrucoes, texto };
+}
+
 /**
  * O texto do usuário entra como dado: uma tag nossa escrita nele (abrindo ou
  * fechando o bloco do pedido ou o das instruções) é desarmada trocando o `<`

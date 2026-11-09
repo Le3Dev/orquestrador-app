@@ -1,6 +1,6 @@
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { Server } from "node:http";
+import { request as pedidoHttp, Server } from "node:http";
 import { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -9,7 +9,7 @@ import express, { Express } from "express";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { montarAplicacao } from "../root";
-import { acessoSoPeloApp, lerCookie, MENSAGEM_DE_ACESSO_NEGADO, NOME_DO_COOKIE_DE_ACESSO } from "./acessoSoPeloApp";
+import { acessoSoPeloApp, hostDoServidorLocal, lerCookie, MENSAGEM_DE_ACESSO_NEGADO, NOME_DO_COOKIE_DE_ACESSO } from "./acessoSoPeloApp";
 
 const CHAVE = "0123456789abcdef".repeat(4);
 const URL_DE_DOWNLOAD = "https://exemplo.com/baixar";
@@ -53,7 +53,50 @@ describe("lerCookie", () => {
   });
 });
 
+/** Um GET com o cabeçalho Host à escolha (o `fetch` não deixa trocá-lo). */
+function pedirComHost(base: string, host: string | undefined, cabecalhos: Record<string, string>): Promise<number> {
+  const { hostname, port } = new URL(base);
+  return new Promise((resolver, rejeitar) => {
+    const pedido = pedidoHttp(
+      { hostname, port, path: "/api/saude", headers: { ...cabecalhos, ...(host === undefined ? {} : { Host: host }) } },
+      (resposta) => {
+        resposta.resume();
+        resposta.on("end", () => resolver(resposta.statusCode ?? 0));
+      },
+    );
+    pedido.on("error", rejeitar);
+    pedido.end();
+  });
+}
+
+describe("hostDoServidorLocal", () => {
+  it("aceita 127.0.0.1 e localhost só na porta em que a conexão chegou", () => {
+    expect(hostDoServidorLocal("127.0.0.1:3200", 3200)).toBe(true);
+    expect(hostDoServidorLocal("localhost:3200", 3200)).toBe(true);
+    expect(hostDoServidorLocal("LocalHost:3200", 3200)).toBe(true);
+    expect(hostDoServidorLocal("127.0.0.1:3201", 3200)).toBe(false);
+    expect(hostDoServidorLocal("127.0.0.1", 3200)).toBe(false);
+    expect(hostDoServidorLocal("atacante.example.com:3200", 3200)).toBe(false);
+    expect(hostDoServidorLocal("127.0.0.1.atacante.com:3200", 3200)).toBe(false);
+    expect(hostDoServidorLocal("localhost.atacante.com:3200", 3200)).toBe(false);
+    expect(hostDoServidorLocal("[::1]:3200", 3200)).toBe(false);
+    expect(hostDoServidorLocal(undefined, 3200)).toBe(false);
+    expect(hostDoServidorLocal("127.0.0.1:3200", undefined)).toBe(false);
+  });
+});
+
 describe("acessoSoPeloApp", () => {
+  it("com o cookie certo mas o Host de outro nome (DNS rebinding): 403", async () => {
+    const base = await subir(aplicacaoComTrava());
+    const porta = new URL(base).port;
+    const cookie = { Cookie: `${NOME_DO_COOKIE_DE_ACESSO}=${CHAVE}` };
+    expect(await pedirComHost(base, `127.0.0.1:${porta}`, cookie)).toBe(200);
+    expect(await pedirComHost(base, `localhost:${porta}`, cookie)).toBe(200);
+    expect(await pedirComHost(base, `atacante.example.com:${porta}`, cookie)).toBe(403);
+    expect(await pedirComHost(base, "atacante.example.com", cookie)).toBe(403);
+    expect(await pedirComHost(base, `127.0.0.1:${Number(porta) + 1}`, cookie)).toBe(403);
+  });
+
   it("sem cookie, pedindo HTML: 403 com a página do aplicativo", async () => {
     const base = await subir(aplicacaoComTrava());
     const resposta = await fetch(`${base}/`, { headers: { Accept: "text/html,application/xhtml+xml,*/*;q=0.8" } });

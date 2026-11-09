@@ -32,10 +32,24 @@ describe("PreviaDoPromptFinal", () => {
     fireEvent.click(screen.getByRole("button", { name: "Pré-visualizar prompt final" }));
 
     expect(await screen.findByText(/valem as instruções deste orquestrador/)).toBeInTheDocument();
-    expect(previa).toHaveBeenCalledWith(configuracao, "/projetos/painel");
+    expect(previa).toHaveBeenCalledWith(configuracao, "/projetos/painel", "execucao", undefined);
     expect(screen.getByText(/Comece com PIRULITO\./)).toBeInTheDocument();
     expect(screen.getByText("Você é o ORQUESTRADOR desta conversa.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Esconder prompt final" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("manda o nome do orquestrador, para o servidor mostrar {{nome}} na prévia", async () => {
+    const previa = vi.spyOn(api, "previaDoPrompt").mockResolvedValue({
+      instrucoesIniciais: "x",
+      mensagem: "Em /projetos/painel, como Painel.",
+      origemDasInstrucoes: "orquestrador",
+    });
+    render(<PreviaDoPromptFinal configuracao={configuracao} pastaDeTrabalho="/projetos/painel" nome="Painel" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Pré-visualizar prompt final" }));
+
+    expect(await screen.findByText("Em /projetos/painel, como Painel.")).toBeInTheDocument();
+    expect(previa).toHaveBeenCalledWith(configuracao, "/projetos/painel", "execucao", "Painel");
   });
 
   it("sem instruções, diz que o pedido vai como antes", async () => {

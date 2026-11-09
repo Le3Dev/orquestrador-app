@@ -10,6 +10,8 @@
 //     a versão já baixada (instalarAgora, só da janela principal e só na
 //     situação "pronta") e aoMudar (canal "atualizacao:estado"). Fora do app
 //     instalado a situação é sempre "indisponivel".
+//   - previa: vista nativa da Prévia para endereços externos (sessão própria
+//     `persist:previa`); o main só aceita da janela principal e valida tudo.
 //   - primeiraAbertura: usado só pela tela electron/primeiraAbertura.html; o
 //     main recusa essas chamadas vindas de qualquer outra janela.
 
@@ -93,6 +95,27 @@ contextBridge.exposeInMainWorld("electron", {
     // A escuta do áudio do sistema (getDisplayMedia + loopback) só existe no
     // Windows. process.platform faz parte do `process` do preload com sandbox.
     escutaDisponivel: process.platform === "win32",
+  },
+
+  // Vista nativa da Prévia (electron/vistaDaPrevia.js). `id` é o previaId.
+  previa: {
+    // Cria a vista escondida e carrega o endereço (http/https externo). Resolve false se recusou.
+    abrir: (id, url, retangulo) => ipcRenderer.invoke("previa:abrir", { id, url, retangulo }),
+    // Mostra (com foco) ou esconde a vista; `retangulo` é obrigatório ao ativar.
+    ativar: (id, ativa, retangulo) => ipcRenderer.invoke("previa:ativar", { id, ativa, retangulo }),
+    // { x, y, largura, altura, zoom }: onde o corpo da prévia está na tela, a cada mudança.
+    retangulo: (id, retangulo) => ipcRenderer.send("previa:retangulo", { id, retangulo }),
+    recarregar: (id) => ipcRenderer.invoke("previa:recarregar", { id }),
+    fechar: (id) => ipcRenderer.invoke("previa:fechar", { id }),
+    // Apaga o login e os dados da sessão persist:previa e recarrega as vistas abertas.
+    sairDasContas: () => ipcRenderer.invoke("previa:sair-das-contas"),
+    // Eventos: { tipo: "foto", id, foto } | { tipo: "estado", id, carregando, erro, origem } (origem: só protocolo e host da
+    // página atual, ou null) | { tipo: "desativada", id } | { tipo: "sessao-limpa" } (descartar as fotos guardadas).
+    aoMudar: (callback) => {
+      const ouvinte = (_evento, evento) => callback(evento);
+      ipcRenderer.on("previa:evento", ouvinte);
+      return () => ipcRenderer.removeListener("previa:evento", ouvinte);
+    },
   },
 
   primeiraAbertura: {

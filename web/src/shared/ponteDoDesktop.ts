@@ -92,6 +92,46 @@ export interface ApiDoModoInvisivel {
   escutaDisponivel: boolean;
 }
 
+/** Onde o corpo da prévia está na tela (pixels CSS da janela) e a escala do canvas. */
+export interface RetanguloDaPrevia {
+  x: number;
+  y: number;
+  largura: number;
+  altura: number;
+  zoom: number;
+}
+
+/** O que o app desktop avisa sobre uma vista nativa da prévia. */
+export type EventoDaPrevia =
+  /** Foto da página (data URI JPEG), mostrada enquanto a prévia está inativa. */
+  | { tipo: "foto"; id: string; foto: string }
+  /** `origem`: só protocolo e host da página que está aberta agora (muda ao navegar), ou null (ainda sem página). */
+  | { tipo: "estado"; id: string; carregando: boolean; erro: string | null; origem: string | null }
+  /** O app escondeu a vista (janela minimizada, modo invisível, Shift+Esc na página). */
+  | { tipo: "desativada"; id: string }
+  /** "Sair das contas" terminou: a tela descarta as fotos (data URI) que guardou das páginas. */
+  | { tipo: "sessao-limpa" };
+
+/**
+ * Vista nativa da Prévia: endereços externos abrem num WebContentsView com
+ * sessão própria (`persist:previa`), em que o login fica salvo. `id` é o
+ * previaId. O app só aceita endereços http/https externos.
+ */
+export interface ApiDaPrevia {
+  /** Cria a vista (escondida) e carrega o endereço; false se o app recusou. */
+  abrir: (id: string, url: string, retangulo?: RetanguloDaPrevia) => Promise<boolean>;
+  /** Mostra a vista (com o foco da página) ou a esconde; `retangulo` é obrigatório ao ativar. */
+  ativar: (id: string, ativa: boolean, retangulo?: RetanguloDaPrevia) => Promise<boolean>;
+  /** Acompanha o corpo da prévia na tela enquanto ativa. */
+  retangulo: (id: string, retangulo: RetanguloDaPrevia) => void;
+  recarregar: (id: string) => Promise<boolean>;
+  /** Destrói a vista. */
+  fechar: (id: string) => Promise<boolean>;
+  /** Apaga o login e os dados dos sites da sessão da prévia e recarrega as vistas abertas. */
+  sairDasContas: () => Promise<boolean>;
+  aoMudar: (callback: (evento: EventoDaPrevia) => void) => () => void;
+}
+
 interface PonteDoDesktop {
   desktop?: boolean;
   plataforma?: string;
@@ -99,6 +139,7 @@ interface PonteDoDesktop {
   configuracao?: ApiDaConfiguracao;
   atualizacao?: ApiDaAtualizacao;
   modoInvisivel?: ApiDoModoInvisivel;
+  previa?: ApiDaPrevia;
 }
 
 function ponteDoDesktop(): PonteDoDesktop | null {
@@ -126,6 +167,12 @@ export function apiDaAtualizacao(): ApiDaAtualizacao | null {
 export function apiDoModoInvisivel(): ApiDoModoInvisivel | null {
   const ponte = ponteDoDesktop();
   return ponte?.desktop && ponte.modoInvisivel ? ponte.modoInvisivel : null;
+}
+
+/** Devolve a API da vista nativa da prévia, ou null fora do app desktop (no navegador, endereço externo vira "abrir em nova aba"). */
+export function apiDaPrevia(): ApiDaPrevia | null {
+  const ponte = ponteDoDesktop();
+  return ponte?.desktop && ponte.previa ? ponte.previa : null;
 }
 
 /** true quando a tela está rodando dentro do app desktop (Electron). */

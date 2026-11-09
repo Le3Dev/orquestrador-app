@@ -15,6 +15,8 @@ interface Props {
   configuracao: DadosDaConfiguracao;
   /** Sem pasta (rascunho ainda sem projeto), o servidor mostra um marcador no lugar do caminho. */
   pastaDeTrabalho?: string | undefined;
+  /** O nome do orquestrador, para `{{nome}}` nas instruções. Sem ele, o servidor mostra um marcador. */
+  nome?: string | undefined;
   /** Na criação, o botão de abrir é um link discreto abaixo das instruções. */
   comoLink?: boolean;
 }
@@ -25,11 +27,11 @@ interface Props {
  * as instruções personalizadas no fim do bloco. Quem monta o texto é o
  * servidor, com a mesma função usada nos pedidos de verdade.
  */
-export function PreviaDoPromptFinal({ configuracao, pastaDeTrabalho, comoLink = false }: Props) {
+export function PreviaDoPromptFinal({ configuracao, pastaDeTrabalho, nome, comoLink = false }: Props) {
   const [aberta, setAberta] = useState(false);
   const [previa, setPrevia] = useState<PreviaDoPrompt | null>(null);
   const [erro, setErro] = useState<string | null>(null);
-  const chave = JSON.stringify([configuracao, pastaDeTrabalho ?? ""]);
+  const chave = JSON.stringify([configuracao, pastaDeTrabalho ?? "", nome ?? ""]);
 
   useEffect(() => {
     if (!aberta) {
@@ -38,7 +40,7 @@ export function PreviaDoPromptFinal({ configuracao, pastaDeTrabalho, comoLink = 
     let atual = true;
     const espera = setTimeout(() => {
       api
-        .previaDoPrompt(configuracao, pastaDeTrabalho)
+        .previaDoPrompt(configuracao, pastaDeTrabalho, "execucao", nome)
         .then((resposta) => {
           if (atual) {
             setPrevia(resposta);
@@ -55,7 +57,7 @@ export function PreviaDoPromptFinal({ configuracao, pastaDeTrabalho, comoLink = 
       atual = false;
       clearTimeout(espera);
     };
-    // `chave` resume configuração e pasta: objetos novos com o mesmo conteúdo não refazem o pedido.
+    // `chave` resume configuração, pasta e nome: objetos novos com o mesmo conteúdo não refazem o pedido.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aberta, chave]);
 

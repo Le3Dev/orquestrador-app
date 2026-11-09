@@ -17,8 +17,8 @@ const ESCRITA_RECENTE_MS = 60_000;
 const TAMANHO_DO_COMANDO = 80;
 
 export interface OpcoesDoDiagnosticador {
-  /** Todos os processos da máquina (padrão: `ps`). */
-  listarProcessos?: () => Promise<ProcessoListado[]>;
+  /** Todos os processos da máquina (padrão: `ps`); `null` onde o sistema não deixa ver. */
+  listarProcessos?: () => Promise<ProcessoListado[] | null>;
   /** Pasta de configuração do Claude Code, onde ficam as transcrições (padrão: `~/.claude`). */
   pastaDoClaude?: string;
   /** Se o pid existe (padrão: `process.kill(pid, 0)`). */
@@ -90,7 +90,7 @@ interface RetratoDasTranscricoes {
  */
 export class DiagnosticadorDoClaudeNoSistema implements DiagnosticadorDoClaude {
   private readonly anteriores = new Map<string, Map<string, string>>();
-  private readonly listar: () => Promise<ProcessoListado[]>;
+  private readonly listar: () => Promise<ProcessoListado[] | null>;
   private readonly pastaDeConfiguracao: string;
   private readonly processoExiste: (pid: number) => boolean;
   private readonly agora: () => number;
@@ -113,7 +113,7 @@ export class DiagnosticadorDoClaudeNoSistema implements DiagnosticadorDoClaude {
       console.warn("[diagnostico] Diagnóstico falhou:", erro instanceof Error ? erro.message : erro);
       return {
         processoVivo: false,
-        processosVisiveis: false,
+        processosConhecidos: true,
         cpuDoClaude: 0,
         filhos: [],
         transcricoesCrescendo: false,
@@ -137,14 +137,17 @@ export class DiagnosticadorDoClaudeNoSistema implements DiagnosticadorDoClaude {
 
   private async examinarProcesso(
     alvo: AlvoDoDiagnostico,
-  ): Promise<Pick<DiagnosticoDoClaude, "processoVivo" | "processosVisiveis" | "cpuDoClaude" | "filhos">> {
+  ): Promise<Pick<DiagnosticoDoClaude, "processoVivo" | "processosConhecidos" | "cpuDoClaude" | "filhos">> {
     const pid = this.pidDoClaude(alvo);
     if (pid === null) {
-      return { processoVivo: false, processosVisiveis: false, cpuDoClaude: 0, filhos: [] };
+      return { processoVivo: false, processosConhecidos: true, cpuDoClaude: 0, filhos: [] };
     }
     let processos: ProcessoListado[] = [];
+    let processosConhecidos = true;
     try {
-      processos = await this.listar();
+      const listados = await this.listar();
+      processosConhecidos = listados !== null;
+      processos = listados ?? [];
     } catch (erro) {
       console.warn("[diagnostico] Não foi possível listar os processos:", erro instanceof Error ? erro.message : erro);
     }
@@ -160,7 +163,7 @@ export class DiagnosticadorDoClaudeNoSistema implements DiagnosticadorDoClaude {
     const filhos: ProcessoFilho[] = descendentes(pid, processos)
       .sort((a, b) => b.cpu - a.cpu)
       .map((filho) => ({ pid: filho.pid, comando: encurtarComando(filho.comando), cpu: filho.cpu, haMs: filho.haMs }));
-    return { processoVivo, processosVisiveis: processos.length > 0, cpuDoClaude: doClaude?.cpu ?? 0, filhos };
+    return { processoVivo, processosConhecidos, cpuDoClaude: doClaude?.cpu ?? 0, filhos };
   }
 
   private async examinarTranscricoes(

@@ -46,6 +46,8 @@ describe("PredefinicaoDeConfiguracao", () => {
       permitirCommitEPush: true,
       // As instruções personalizadas não fazem parte da predefinição: ficam como estavam.
       instrucoesPersonalizadas: "",
+      // Nem a escolha dos subagentes prontos.
+      subagentesProntos: "todos",
     });
     // A configuração de origem não muda (objeto de valor).
     expect(configuracao.modeloDoOrquestrador).toBe("fable");

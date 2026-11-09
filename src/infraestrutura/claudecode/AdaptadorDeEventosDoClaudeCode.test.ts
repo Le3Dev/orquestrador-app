@@ -319,6 +319,67 @@ describe("AdaptadorDeEventosDoClaudeCode — workflow do esforço ultracode", ()
   });
 });
 
+describe("AdaptadorDeEventosDoClaudeCode — lista de tarefas (TodoWrite)", () => {
+  // Linha no formato real do `stream-json` (Claude Code 2.1), encurtada.
+  const LINHA_DO_TODOWRITE =
+    '{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","id":"toolu_01RsJjCd16Fbd2VSKcTVBfny","name":"TodoWrite","input":{"todos":[{"content":"Explorar o projeto","status":"completed","activeForm":"Explorando o projeto"},{"content":"Rodar os testes","status":"in_progress","activeForm":"Rodando os testes"},{"content":"Escrever o README","status":"pending","activeForm":"Escrevendo o README"}]}}]}}';
+
+  function chamadaDoTodoWrite(input: unknown, parentToolUseId: string | null = null): unknown {
+    return {
+      type: "assistant",
+      parent_tool_use_id: parentToolUseId,
+      message: { content: [{ type: "tool_use", id: "toolu_todo", name: "TodoWrite", input }] },
+    };
+  }
+
+  it("vira tarefas_atualizadas, com o activeForm na tarefa em andamento, e não uma linha de ferramenta", () => {
+    const eventos = new AdaptadorDeEventosDoClaudeCode().traduzir(JSON.parse(LINHA_DO_TODOWRITE));
+
+    expect(eventos).toEqual([
+      {
+        tipo: "tarefas_atualizadas",
+        tarefas: [
+          { texto: "Explorar o projeto", situacao: "concluida" },
+          { texto: "Rodando os testes", situacao: "em_andamento" },
+          { texto: "Escrever o README", situacao: "pendente" },
+        ],
+      },
+    ]);
+  });
+
+  it("sem activeForm, a tarefa em andamento usa o content", () => {
+    const eventos = new AdaptadorDeEventosDoClaudeCode().traduzir(
+      chamadaDoTodoWrite({ todos: [{ content: "Rodar os testes", status: "in_progress" }] }),
+    );
+
+    expect(doTipo(eventos, "tarefas_atualizadas")[0]?.tarefas).toEqual([
+      { texto: "Rodar os testes", situacao: "em_andamento" },
+    ]);
+  });
+
+  it("o TodoWrite de um subagente não mexe nas tarefas do orquestrador", () => {
+    const eventos = new AdaptadorDeEventosDoClaudeCode().traduzir(
+      chamadaDoTodoWrite({ todos: [{ content: "Ler o arquivo", status: "pending", activeForm: "Lendo" }] }, "toolu_pai"),
+    );
+
+    expect(doTipo(eventos, "tarefas_atualizadas")).toEqual([]);
+  });
+
+  it.each([
+    ["lista vazia", { todos: [] }],
+    ["sem todos", {}],
+    ["todos não é lista", { todos: "a fazer" }],
+    ["situação desconhecida", { todos: [{ content: "Rodar", status: "blocked" }] }],
+    ["item sem texto", { todos: [{ content: " ", status: "pending" }] }],
+    ["item que não é objeto", { todos: ["Rodar os testes"] }],
+  ])("malformado (%s) não emite tarefas e segue como ferramenta comum", (_caso, input) => {
+    const eventos = new AdaptadorDeEventosDoClaudeCode().traduzir(chamadaDoTodoWrite(input));
+
+    expect(doTipo(eventos, "tarefas_atualizadas")).toEqual([]);
+    expect(doTipo(eventos, "ferramenta_do_orquestrador").map((evento) => evento.ferramenta)).toEqual(["TodoWrite"]);
+  });
+});
+
 describe("AdaptadorDeEventosDoClaudeCode: endereços locais", () => {
   const VITE = "\n  VITE v6.0.0  ready in 300 ms\n\n  ➜  Local:   http://localhost:\x1b[1m5173\x1b[22m/\n";
 

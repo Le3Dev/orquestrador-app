@@ -147,7 +147,17 @@ describe("lista de processos (ps)", () => {
   it.skipIf(process.platform === "win32")("lista os processos reais da máquina, inclusive este", async () => {
     const processos = await listarProcessos();
 
-    expect(processos.find((processo) => processo.pid === process.pid)?.ppid).toBe(process.ppid);
+    expect(processos?.find((processo) => processo.pid === process.pid)?.ppid).toBe(process.ppid);
+  });
+
+  it("no Windows avisa que não dá para listar (null), em vez de uma lista vazia", async () => {
+    const plataforma = Object.getOwnPropertyDescriptor(process, "platform") as PropertyDescriptor;
+    Object.defineProperty(process, "platform", { ...plataforma, value: "win32" });
+    try {
+      expect(await listarProcessos()).toBeNull();
+    } finally {
+      Object.defineProperty(process, "platform", plataforma);
+    }
   });
 });
 
@@ -173,7 +183,7 @@ function vivo(pid: number): boolean {
 }
 
 async function descendentesDe(pid: number): Promise<number[]> {
-  const processos = await listarProcessos();
+  const processos = (await listarProcessos()) ?? [];
   const achados: number[] = [];
   const fila = [pid];
   while (fila.length > 0) {
@@ -243,7 +253,7 @@ describe.skipIf(process.platform === "win32")("FachadaClaudeCodeCli com um proce
       (linha, origem) => linhas.push(`${origem}:${linha}`),
     );
     expect(await esperarAte(() => linhas.length >= 3)).toBe(true);
-    const pid = (await listarProcessos()).find(
+    const pid = ((await listarProcessos()) ?? []).find(
       (processo) => processo.comando.includes("sleep 30 & sleep 30") && processo.ppid === process.pid,
     )?.pid;
     expect(pid).toBeDefined();

@@ -15,7 +15,11 @@ import { ConsumoDoTurno } from "../orquestracao/ConsumoDoTurno";
 import { ConsultaDeEsforcoHerdado } from "../orquestracao/EsforcoDaMaquina";
 import { EsforcoHerdado } from "../orquestracao/EsforcoHerdado";
 import { EventoDeOrquestracao, EventoDoMotor, EventoRegistrado } from "../orquestracao/EventoDeOrquestracao";
-import { REGRA_DOS_SERVIDORES_UNIX, REGRA_DOS_SERVIDORES_WINDOWS } from "../orquestracao/InstrucoesDoOrquestrador";
+import {
+  PEDIDO_DE_COMMIT_AO_FINAL,
+  REGRA_DOS_SERVIDORES_UNIX,
+  REGRA_DOS_SERVIDORES_WINDOWS,
+} from "../orquestracao/InstrucoesDoOrquestrador";
 import { UsoDeTokens } from "../orquestracao/UsoDeTokens";
 import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "../orquestracao/MotorDeAgentes";
 import { Orquestrador } from "../orquestracao/Orquestrador";
@@ -222,6 +226,37 @@ describe("rotas de orquestradores — modo de planejamento", () => {
     expect(orquestrador.turnoComPlanoPendente).not.toBeNull();
   });
 
+  it("commitarAoFinal com o commit liberado põe o pedido de commit na aprovação", async () => {
+    await servico.alterarConfiguracao(orquestrador.id, { permitirCommitEPush: true });
+    await planejar();
+
+    const resposta = await postar(`/orquestradores/${orquestrador.id}/plano/aprovar`, { commitarAoFinal: true });
+
+    expect(resposta.status).toBe(202);
+    await aguardarOcioso();
+    expect(motor.pedidos.at(-1)?.texto).toContain(PEDIDO_DE_COMMIT_AO_FINAL);
+  });
+
+  it("commitarAoFinal é ignorado quando a configuração não libera commit", async () => {
+    await planejar();
+
+    const resposta = await postar(`/orquestradores/${orquestrador.id}/plano/aprovar`, { commitarAoFinal: true });
+
+    expect(resposta.status).toBe(202);
+    await aguardarOcioso();
+    expect(motor.pedidos.at(-1)?.texto).not.toContain(PEDIDO_DE_COMMIT_AO_FINAL);
+  });
+
+  it("recusa commitarAoFinal que não é verdadeiro ou falso com 400", async () => {
+    await planejar();
+
+    const resposta = await postar(`/orquestradores/${orquestrador.id}/plano/aprovar`, { commitarAoFinal: "sim" });
+
+    expect(resposta.status).toBe(400);
+    expect(await resposta.json()).toEqual({ erro: 'A opção "Commitar ao final" deve ser verdadeira ou falsa.' });
+    expect(orquestrador.turnoComPlanoPendente).not.toBeNull();
+  });
+
   it("o resumo diz se há plano pendente", async () => {
     const resumo = async () =>
       ((await (await fetch(`${base}/orquestradores/${orquestrador.id}`)).json()) as { planoPendente: boolean }).planoPendente;
@@ -243,6 +278,48 @@ describe("rotas de orquestradores — modo de planejamento", () => {
 
   it("responde 404 para orquestrador inexistente", async () => {
     expect((await postar("/orquestradores/nao-existe/plano/aprovar")).status).toBe(404);
+  });
+
+  describe("renomear (PATCH /orquestradores/:id)", () => {
+    async function renomear(id: string, corpo: unknown): Promise<Response> {
+      return fetch(`${base}/orquestradores/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(corpo),
+      });
+    }
+
+    it("troca o nome aparado, responde o detalhe e registra orquestrador_renomeado", async () => {
+      const resposta = await renomear(orquestrador.id, { nome: "  Backlog do app  " });
+
+      expect(resposta.status).toBe(200);
+      const corpo = (await resposta.json()) as { id: string; nome: string; turnos: unknown[] };
+      expect(corpo).toMatchObject({ id: orquestrador.id, nome: "Backlog do app", turnos: [] });
+      expect(orquestrador.nome).toBe("Backlog do app");
+      expect(repositorio.eventos.at(-1)).toMatchObject({ tipo: "orquestrador_renomeado", nome: "Backlog do app" });
+      const lista = (await (await fetch(`${base}/orquestradores`)).json()) as Array<{ id: string; nome: string }>;
+      expect(lista.find((item) => item.id === orquestrador.id)?.nome).toBe("Backlog do app");
+    });
+
+    it.each([
+      [{ nome: "   " }, "Dê um nome ao orquestrador."],
+      [{}, "Dê um nome ao orquestrador."],
+      [{ nome: 42 }, "Dê um nome ao orquestrador."],
+      [{ nome: "x".repeat(61) }, "O nome deve ter até 60 caracteres."],
+    ])("recusa %j com 400 e mantém o nome", async (corpo, mensagem) => {
+      const resposta = await renomear(orquestrador.id, corpo);
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: mensagem });
+      expect(orquestrador.nome).toBe("Painel");
+    });
+
+    it("responde 404 para orquestrador inexistente", async () => {
+      const resposta = await renomear("nao-existe", { nome: "Outro" });
+
+      expect(resposta.status).toBe(404);
+      expect(await resposta.json()).toEqual({ erro: "Orquestrador não encontrado." });
+    });
   });
 
   describe("opção \"Permitir commit e push\"", () => {
@@ -591,6 +668,73 @@ describe("rotas de orquestradores — modo de planejamento", () => {
     });
   });
 
+  describe("itens ligados no canvas", () => {
+    const nota = { tipo: "nota", titulo: "Ideias", conteudo: "usar cache\nmedir antes" };
+    const previa = { tipo: "previa", titulo: "localhost:5173", url: "http://localhost:5173/" };
+
+    it("POST /mensagens leva os itens ao motor, com o arquivo do artefato em caminho absoluto", async () => {
+      const artefato = { tipo: "artefato", titulo: "Relatório", caminho: "orquestradores/o9/relatorio.html" };
+      const resposta = await postar(`/orquestradores/${orquestrador.id}/mensagens`, {
+        texto: "analise",
+        itensLigados: [nota, previa, artefato, { tipo: "artefato", titulo: "Fora", caminho: "../../etc/passwd" }],
+      });
+
+      expect(resposta.status).toBe(202);
+      await aguardarOcioso();
+      expect(motor.pedidos.at(-1)?.itensLigados).toEqual([
+        nota,
+        previa,
+        { ...artefato, caminho: path.join(tmpdir(), "orquestradores", "o9", "relatorio.html") },
+        { tipo: "artefato", titulo: "Fora" },
+      ]);
+      expect(orquestrador.ultimoTurno?.texto).toBe("analise");
+    });
+
+    it("sem o campo, o pedido vai sem itens ligados", async () => {
+      expect((await postar(`/orquestradores/${orquestrador.id}/mensagens`, { texto: "oi" })).status).toBe(202);
+      await aguardarOcioso();
+
+      expect(motor.pedidos.at(-1)?.itensLigados).toEqual([]);
+    });
+
+    it.each<[string, unknown, string]>([
+      ["mais de 10 itens", Array.from({ length: 11 }, () => nota), "Ligue até 10 itens por pedido."],
+      [
+        "texto de nota grande demais",
+        [{ ...nota, conteudo: "a".repeat(4_001) }],
+        "O texto de cada item ligado deve ter até 4000 caracteres.",
+      ],
+      ["tipo desconhecido", [{ tipo: "pasta", titulo: "x" }], "Tipo de item ligado inválido."],
+      [
+        "endereço que não é http",
+        [{ ...previa, url: "file:///etc/passwd" }],
+        "O endereço do item ligado deve começar com http:// ou https://.",
+      ],
+    ])("recusa %s com 400, na mensagem e na fila", async (_caso, itensLigados, mensagem) => {
+      const enviada = await postar(`/orquestradores/${orquestrador.id}/mensagens`, { texto: "oi", itensLigados });
+      const enfileirada = await postar(`/orquestradores/${orquestrador.id}/fila`, { texto: "oi", itensLigados });
+
+      expect(enviada.status).toBe(400);
+      expect(await enviada.json()).toEqual({ erro: mensagem });
+      expect(enfileirada.status).toBe(400);
+      expect(await enfileirada.json()).toEqual({ erro: mensagem });
+      expect(orquestrador.totalDeTurnos).toBe(0);
+      expect(orquestrador.fila).toHaveLength(0);
+    });
+
+    it("POST /fila congela os itens no pedido, que os leva ao motor quando sai da fila", async () => {
+      const resposta = await postar(`/orquestradores/${orquestrador.id}/fila`, { texto: "depois", itensLigados: [nota] });
+      const { pedidoId } = (await resposta.json()) as { pedidoId: string };
+
+      expect(resposta.status).toBe(201);
+      expect(orquestrador.fila[0]?.paraDados()).toMatchObject({ id: pedidoId, itensLigados: [nota] });
+
+      expect((await postar(`/orquestradores/${orquestrador.id}/fila/${pedidoId}/enviar`)).status).toBe(202);
+      await aguardarOcioso();
+      expect(motor.pedidos.at(-1)).toMatchObject({ itensLigados: [nota] });
+    });
+  });
+
   describe("trivial e plano sempre ligados: as opções antigas são ignoradas (ADR-28)", () => {
     async function alterarConfiguracao(corpo: unknown): Promise<Response> {
       return fetch(`${base}/orquestradores/${orquestrador.id}/configuracao`, {
@@ -746,6 +890,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(await (await requisitar("GET", "/preferencias")).json()).toEqual({
         instrucoesPadrao: "",
         subagentesProntos: [],
+        perfisDeInstrucoes: [],
         autorrecuperacao: true,
       });
 
@@ -754,6 +899,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(await resposta.json()).toEqual({
         instrucoesPadrao: "Responda curto.",
         subagentesProntos: [],
+        perfisDeInstrucoes: [],
         autorrecuperacao: true,
       });
       expect(preferencias.atuais().instrucoesPadrao).toBe("Responda curto.");
@@ -771,6 +917,7 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(await resposta.json()).toEqual({
         instrucoesPadrao: "",
         subagentesProntos: [{ ...revisor, modelo: "herdar" }],
+        perfisDeInstrucoes: [],
         autorrecuperacao: true,
       });
 
@@ -779,6 +926,51 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       ).json()) as { mensagem: string };
       expect(previa.mensagem).toContain('  - "revisor": Revisa código.');
     });
+
+    it("o POST e o PATCH aceitam a escolha dos subagentes prontos, e a prévia segue a escolha", async () => {
+      const pronto = (nome: string) => ({ nome, descricao: `Faz ${nome}.`, prompt: "x" });
+      await requisitar("PATCH", "/preferencias", { subagentesProntos: [pronto("revisor"), pronto("testador")] });
+
+      const criado = await postar("/orquestradores", {
+        nome: "Novo",
+        pastaDeTrabalho: raiz,
+        ...configuracaoBasica,
+        subagentesProntos: ["testador"],
+      });
+      expect(criado.status).toBe(201);
+      const corpo = (await criado.json()) as { id: string; configuracao: { subagentesProntos: unknown } };
+      expect(corpo.configuracao.subagentesProntos).toEqual(["testador"]);
+
+      const semCampo = (await (
+        await postar("/orquestradores", { nome: "Antigo", pastaDeTrabalho: raiz, ...configuracaoBasica })
+      ).json()) as { configuracao: { subagentesProntos: unknown } };
+      expect(semCampo.configuracao.subagentesProntos).toBe("todos");
+
+      const editado = await requisitar("PATCH", `/orquestradores/${corpo.id}/configuracao`, { subagentesProntos: "nenhum" });
+      expect(editado.status).toBe(200);
+      expect(((await editado.json()) as { configuracao: { subagentesProntos: unknown } }).configuracao.subagentesProntos).toBe(
+        "nenhum",
+      );
+
+      const previa = async (subagentesProntos: unknown) =>
+        ((await (await postar("/previa-do-prompt", { configuracao: { ...configuracaoBasica, subagentesProntos } })).json()) as {
+          mensagem: string;
+        }).mensagem;
+      expect(await previa("nenhum")).not.toContain("Subagentes prontos");
+      expect(await previa(["testador"])).toContain('  - "testador": Faz testador.');
+      expect(await previa(["testador"])).not.toContain('"revisor"');
+      expect(await previa(undefined)).toContain('  - "revisor": Faz revisor.');
+    });
+
+    it.each<[unknown]>([["alguns"], [42], [[1]], [Array.from({ length: 31 }, (_, i) => `s${i}`)]])(
+      "o PATCH recusa uma escolha de subagentes prontos inválida (%j) com 400",
+      async (subagentesProntos) => {
+        const resposta = await requisitar("PATCH", `/orquestradores/${orquestrador.id}/configuracao`, { subagentesProntos });
+
+        expect(resposta.status).toBe(400);
+        expect(orquestrador.configuracao.subagentesProntos).toBe("todos");
+      },
+    );
 
     it.each([
       [[{ nome: "executor", descricao: "a", prompt: "b" }], 'O nome "executor" é reservado; escolha outro.'],
@@ -790,6 +982,38 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(resposta.status).toBe(400);
       expect(await resposta.json()).toEqual({ erro: mensagem });
       expect(preferencias.atuais().subagentesProntos).toEqual([]);
+    });
+
+    it("PATCH /preferencias grava os perfis de instruções sem mexer no resto", async () => {
+      await requisitar("PATCH", "/preferencias", { instrucoesPadrao: "Curto." });
+      const resposta = await requisitar("PATCH", "/preferencias", {
+        perfisDeInstrucoes: [{ nome: " Backend ", texto: "Use Jest.  \n\n\n\nRode o lint." }],
+      });
+
+      expect(resposta.status).toBe(200);
+      expect(await resposta.json()).toEqual({
+        instrucoesPadrao: "Curto.",
+        subagentesProntos: [],
+        perfisDeInstrucoes: [{ nome: "Backend", texto: "Use Jest.\n\nRode o lint." }],
+        autorrecuperacao: true,
+      });
+      expect(await (await requisitar("GET", "/preferencias")).json()).toMatchObject({
+        perfisDeInstrucoes: [{ nome: "Backend", texto: "Use Jest.\n\nRode o lint." }],
+      });
+    });
+
+    it.each([
+      [[{ nome: "A", texto: "x" }, { nome: "a", texto: "y" }], 'Já existe um perfil de instruções chamado "a".'],
+      [[{ nome: "", texto: "x" }], "Dê um nome ao perfil de instruções 1."],
+      [[{ nome: "A", texto: "" }], 'Preencha o texto do perfil "A".'],
+      [[{ nome: "A" }], "O texto do perfil de instruções deve ser um texto."],
+      ["A", "Os perfis de instruções devem ser uma lista."],
+    ])("PATCH /preferencias recusa perfis de instruções inválidos (%j) com 400", async (perfisDeInstrucoes, mensagem) => {
+      const resposta = await requisitar("PATCH", "/preferencias", { perfisDeInstrucoes });
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: mensagem });
+      expect(preferencias.atuais().perfisDeInstrucoes).toEqual([]);
     });
 
     it("GET e PATCH /preferencias leem e gravam a autorrecuperação, ligada por padrão", async () => {
@@ -850,6 +1074,34 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(previa.origemDasInstrucoes).toBeNull();
       expect(previa.mensagem).not.toContain("instrucoes-do-usuario");
       expect(previa.instrucoesIniciais).toContain("Pasta de trabalho: <pasta de trabalho>");
+    });
+
+    it("a prévia mostra {{pasta}} e {{nome}} com os valores informados", async () => {
+      const resposta = await postar("/previa-do-prompt", {
+        configuracao: { ...configuracaoBasica, instrucoesPersonalizadas: "Em {{pasta}}, como {{ nome }}. {{outra}}" },
+        pastaDeTrabalho: "painel",
+        nome: "  Painel  ",
+      });
+
+      expect(resposta.status).toBe(200);
+      const previa = (await resposta.json()) as { mensagem: string };
+      expect(previa.mensagem).toContain(`Em ${path.join(raiz, "painel")}, como Painel. {{outra}}`);
+    });
+
+    it("a prévia sem pasta nem nome mostra os marcadores no lugar das variáveis, também nas gerais", async () => {
+      preferencias.preferencias = PreferenciasGlobais.de({ instrucoesPadrao: "Em {{pasta}}, como {{nome}}." });
+      const resposta = await postar("/previa-do-prompt", { configuracao: configuracaoBasica });
+
+      const previa = (await resposta.json()) as { mensagem: string; origemDasInstrucoes: string };
+      expect(previa.origemDasInstrucoes).toBe("padrao");
+      expect(previa.mensagem).toContain("Em <pasta de trabalho>, como <nome do orquestrador>.");
+    });
+
+    it("a prévia recusa nome que não é texto com 400", async () => {
+      const resposta = await postar("/previa-do-prompt", { configuracao: configuracaoBasica, nome: 42 });
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: "O nome deve ser um texto." });
     });
 
     it("a prévia aceita pasta fora da pasta dos projetos", async () => {
@@ -1157,9 +1409,11 @@ describe("rotas de orquestradores — economia de tokens", () => {
 /** Os históricos de cada Orquestrador, para a rota de eventos ao vivo. */
 class RepositorioDeHistoricos implements RepositorioDeOrquestradores {
   readonly historicos = new Map<string, EventoRegistrado[]>();
+  /** O que a lista devolve (só a rota do consumo usa). */
+  orquestradores: Orquestrador[] = [];
 
   listar(): readonly Orquestrador[] {
-    return [];
+    return this.orquestradores;
   }
   buscarPorId(id: string): Orquestrador | null {
     return this.historicos.has(id) ? ({ id } as unknown as Orquestrador) : null;
@@ -1287,5 +1541,71 @@ describe("rotas de orquestradores — eventos de vários orquestradores numa con
 
     expect(resposta.status).toBe(400);
     expect(await resposta.json()).toEqual({ erro: mensagem });
+  });
+
+  describe("GET /consumo-dos-orquestradores", () => {
+    const uso = (entrada: number, saida: number) => ({ entrada, criacaoDeCache: 0, leituraDeCache: 0, saida });
+    const medido = (sequencia: number, entrada: number, parcial = false): EventoRegistrado => ({
+      tipo: "consumo_do_turno_medido",
+      turnoId: `t${sequencia}`,
+      consumo: {
+        principal: uso(entrada, 10),
+        subagentes: uso(entrada, 0),
+        subagentesMedidos: 1,
+        parcial,
+        indiceDeCusto: 0,
+        modeloDoPrincipal: null,
+      },
+      sequencia,
+      em: "agora",
+    });
+
+    afterEach(() => {
+      repositorio.orquestradores = [];
+      repositorio.historicos.clear();
+    });
+
+    it("soma os turnos medidos da conversa atual de cada um, do maior índice para o menor, sem quem não tem medição", async () => {
+      repositorio.orquestradores = [
+        { id: "o1", nome: "Painel" },
+        { id: "o2", nome: "Sem pedidos" },
+        { id: "o3", nome: "Backend" },
+      ] as unknown as Orquestrador[];
+      repositorio.historicos.set("o1", [evento(1), medido(2, 100), medido(3, 50, true)]);
+      repositorio.historicos.set("o2", [evento(1)]);
+      repositorio.historicos.set("o3", [medido(1, 1000)]);
+
+      const resposta = await fetch(`${base}/consumo-dos-orquestradores`);
+
+      expect(resposta.status).toBe(200);
+      expect(await resposta.json()).toEqual([
+        {
+          id: "o3",
+          nome: "Backend",
+          turnosMedidos: 1,
+          parcial: false,
+          uso: uso(2000, 10),
+          indiceDeCusto: 2050,
+        },
+        {
+          id: "o1",
+          nome: "Painel",
+          turnosMedidos: 2,
+          parcial: true,
+          uso: uso(300, 20),
+          indiceDeCusto: 400,
+        },
+      ]);
+    });
+
+    it("sem orquestradores ou sem medição, responde a lista vazia", async () => {
+      repositorio.orquestradores = [{ id: "o1", nome: "Painel" }] as unknown as Orquestrador[];
+      repositorio.historicos.set("o1", [evento(1)]);
+
+      const resposta = await fetch(`${base}/consumo-dos-orquestradores`);
+
+      expect(resposta.status).toBe(200);
+      expect(await resposta.json()).toEqual([]);
+    });
   });
 });

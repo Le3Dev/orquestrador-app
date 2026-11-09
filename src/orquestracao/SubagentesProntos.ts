@@ -3,7 +3,7 @@ import { MARCA_DAS_INSTRUCOES, desarmarMarcas, normalizarInstrucoes } from "./In
 import { ehModeloClaude, MODELOS_CLAUDE, ModeloClaude } from "./ModeloClaude";
 
 /** Quantos subagentes prontos a biblioteca guarda. */
-export const MAXIMO_DE_SUBAGENTES_PRONTOS = 10;
+export const MAXIMO_DE_SUBAGENTES_PRONTOS = 30;
 export const TAMANHO_MAXIMO_DO_NOME_DO_SUBAGENTE = 40;
 export const TAMANHO_MAXIMO_DA_DESCRICAO = 300;
 export const TAMANHO_MAXIMO_DO_PROMPT = 4_000;
@@ -103,6 +103,53 @@ export function subagentesProntosValidos(valor: unknown): DadosDoSubagentePronto
     invalido(`Já existe um subagente pronto chamado "${repetido.nome}".`);
   }
   return subagentes;
+}
+
+/**
+ * Quais subagentes prontos da biblioteca um Orquestrador recebe: todos,
+ * nenhum ou só os da lista (por nome). Nomes que saíram da biblioteca são
+ * ignorados.
+ */
+export type SelecaoDeSubagentesProntos = "todos" | "nenhum" | string[];
+
+/**
+ * Valida a seleção vinda de fora (tela, arquivo gravado). Ausente vale
+ * "todos": Orquestradores criados antes da opção seguem recebendo todos. A
+ * lista sai sem nomes repetidos.
+ */
+export function selecaoDeSubagentesProntosValida(valor: unknown): SelecaoDeSubagentesProntos {
+  const selecao: unknown = valor ?? "todos";
+  if (selecao === "todos" || selecao === "nenhum") {
+    return selecao;
+  }
+  if (!Array.isArray(selecao)) {
+    invalido('Os subagentes prontos do orquestrador devem ser "todos", "nenhum" ou uma lista de nomes.');
+  }
+  const nomes = selecao.map((nome: unknown) => {
+    if (typeof nome !== "string" || nome.trim() === "" || nome.length > TAMANHO_MAXIMO_DO_NOME_DO_SUBAGENTE) {
+      invalido("Cada subagente pronto escolhido deve ser o nome de um deles.");
+    }
+    return nome.trim();
+  });
+  const unicos = [...new Set(nomes)];
+  if (unicos.length > MAXIMO_DE_SUBAGENTES_PRONTOS) {
+    invalido(`Escolha no máximo ${MAXIMO_DE_SUBAGENTES_PRONTOS} subagentes prontos.`);
+  }
+  return unicos;
+}
+
+/** Os subagentes da biblioteca que a seleção deixa o Orquestrador receber, na ordem da biblioteca. */
+export function subagentesProntosSelecionados(
+  biblioteca: readonly DadosDoSubagentePronto[],
+  selecao: SelecaoDeSubagentesProntos,
+): readonly DadosDoSubagentePronto[] {
+  if (selecao === "todos") {
+    return biblioteca;
+  }
+  if (selecao === "nenhum") {
+    return [];
+  }
+  return biblioteca.filter((subagente) => selecao.includes(subagente.nome));
 }
 
 /** O modelo com que o subagente roda num Orquestrador. */

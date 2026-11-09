@@ -3,6 +3,7 @@ import type { HandleProps, NodeProps } from "@xyflow/react";
 import type { ReactNode } from "react";
 
 import type { DadosDaConfiguracao, EventoDeOrquestracao, EventoRegistrado } from "../../shared/api/tipos";
+import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
 import { ContextoDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
 import { idDoBixinho, type NoBixinho as TipoDoNo } from "../../shared/canvas/nos";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../../shared/estado/aplicarEvento";
@@ -82,17 +83,19 @@ function doisTrabalhando(): EstadoDaConversa {
   );
 }
 
-function valorDoCanvas(conversa: EstadoDaConversa): ValorDoCanvas {
+function valorDoCanvas(conversa: EstadoDaConversa, bixinhosSaindo?: ReadonlySet<string>): ValorDoCanvas {
   return {
     orquestradores: new Map(),
     conversas: new Map([["o1", conversa]]),
     conexoes: new Map(),
     sinais: new Map(),
     bixinhosLimpos: new Map(),
+    bixinhosSaindo,
     servidor: { conectado: true, caiuEm: null, voltouEm: null, reiniciou: false, memoria: null },
     acoes: {
       abrirTerminal: vi.fn(),
       fecharTerminal: vi.fn(),
+      minimizarOuRestaurarTerminal: vi.fn(),
       limparBixinhos: vi.fn(),
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),
@@ -123,9 +126,15 @@ function propsDoNo(subagenteId: string, selected: boolean, x: number): NodeProps
   };
 }
 
-function tela(conversa: EstadoDaConversa, subagenteId: string, selected = false, x = 0) {
+function tela(
+  conversa: EstadoDaConversa,
+  subagenteId: string,
+  selected = false,
+  x = 0,
+  bixinhosSaindo?: ReadonlySet<string>,
+) {
   return (
-    <ContextoDoCanvas.Provider value={valorDoCanvas(conversa)}>
+    <ContextoDoCanvas.Provider value={valorDoCanvas(conversa, bixinhosSaindo)}>
       <NoBixinho {...propsDoNo(subagenteId, selected, x)} />
     </ContextoDoCanvas.Provider>
   );
@@ -238,6 +247,110 @@ describe("NoBixinho", () => {
       ["esquerda", "target", "left"],
       ["direita", "target", "right"],
     ]);
+  });
+
+  /** O rótulo do nó, embaixo do desenho: nome (com o papel do workflow) e #id. */
+  const rotulo = (container: HTMLElement) => container.querySelector(".no-bixinho > .font-titulo");
+
+  it("subagente pronto: o nome dele é o rótulo, sem o nome do bicho; o bicho fica só como detalhe da ficha", () => {
+    const bicho = aparenciaDoBixinho("s3").nome;
+    const conversa = aplicar(doisTrabalhando(), {
+      tipo: "subagente_iniciado",
+      turnoId: "t1",
+      subagenteId: "s3",
+      descricao: "Revisar",
+      tarefa: "Revise o diff",
+      papel: "revisor",
+    });
+    const { container } = render(tela(conversa, "s3", true));
+
+    expect(rotulo(container)?.textContent).toMatch(/^revisor#/);
+    expect(rotulo(container)).not.toHaveTextContent(bicho);
+    expect(screen.getByTitle(/^revisor · clique para ver a tarefa/)).toBeInTheDocument();
+    const ficha = screen.getByTestId("barra-do-no");
+    expect(ficha.querySelector(".font-titulo")?.textContent).toMatch(new RegExp(`^revisor ${bicho}#`));
+    expect(ficha).not.toHaveTextContent("revisor#");
+  });
+
+  it("subagente pronto de nome longo: o nome corta com reticências e o #id continua visível", () => {
+    const conversa = aplicar(doisTrabalhando(), {
+      tipo: "subagente_iniciado",
+      turnoId: "t1",
+      subagenteId: "s3",
+      descricao: "Roteiro",
+      tarefa: "Escreva o roteiro",
+      papel: "diretor-de-video-institucional",
+    });
+    render(tela(conversa, "s3"));
+
+    const nome = screen.getByText("diretor-de-video-institucional");
+    expect(nome).toHaveClass("min-w-0", "truncate");
+    expect(screen.getByText("#s3")).toHaveClass("shrink-0");
+    expect(screen.getByTitle(/^diretor-de-video-institucional · clique para ver a tarefa/)).toBeInTheDocument();
+  });
+
+  it("workflow: como antes, o nome do bicho com o papel ao lado", () => {
+    const bicho = aparenciaDoBixinho("s3").nome;
+    const conversa = aplicar(doisTrabalhando(), {
+      tipo: "subagente_iniciado",
+      turnoId: "t1",
+      subagenteId: "s3",
+      descricao: "Fluxo",
+      tarefa: "Rode o fluxo",
+      papel: "workflow",
+    });
+    const { container } = render(tela(conversa, "s3", true));
+
+    expect(rotulo(container)?.textContent).toMatch(new RegExp(`^${bicho} · workflow#`));
+    expect(screen.getByTestId("barra-do-no")).toHaveTextContent("workflow#");
+  });
+
+  it("executor: o papel fica no tooltip e na ficha, não no rótulo", () => {
+    const conversa = aplicar(doisTrabalhando(), {
+      tipo: "subagente_iniciado",
+      turnoId: "t1",
+      subagenteId: "s3",
+      descricao: "Ler",
+      tarefa: "Leia o README",
+      papel: "executor",
+    });
+    const { container } = render(tela(conversa, "s3", true));
+
+    expect(rotulo(container)?.textContent).toMatch(new RegExp(`^${aparenciaDoBixinho("s3").nome}#`));
+    expect(screen.queryByText("· executor", { exact: false })).not.toBeInTheDocument();
+    expect(screen.getByTitle(/^executor · clique para ver a tarefa/)).toBeInTheDocument();
+    expect(screen.getByTestId("barra-do-no")).toHaveTextContent("executor#");
+  });
+
+  it("evento antigo, sem papel: como antes (só o nome no rótulo, executor na ficha)", () => {
+    render(tela(doisTrabalhando(), "s1", true));
+
+    expect(screen.getByTitle("Clique para ver a tarefa e o relatório")).toBeInTheDocument();
+    expect(screen.getByTestId("barra-do-no")).toHaveTextContent("executor#");
+  });
+
+  it("saindo sozinho do canvas, ganha a classe da saída (encolhe e some) e mantém a expressão final", () => {
+    const concluiu = aplicar(doisTrabalhando(), {
+      tipo: "subagente_concluido",
+      turnoId: "t1",
+      subagenteId: "s1",
+      situacao: "concluido",
+      resumo: "feito",
+      tokens: 10,
+      duracaoMs: 1000,
+    });
+    const { container, rerender } = render(tela(concluiu, "s1"));
+    const no = () => container.querySelector(".no-bixinho");
+    expect(no()).not.toHaveClass("no-bixinho-saindo");
+
+    rerender(tela(concluiu, "s1", false, 0, new Set([idDoBixinho("o1", "s1")])));
+
+    expect(no()).toHaveClass("no-bixinho", "no-bixinho-concluido", "no-bixinho-saindo");
+    expect(screen.getByText("pronto!")).toBeInTheDocument();
+
+    // Só o próprio: outro bixinho saindo não muda este.
+    rerender(tela(concluiu, "s1", false, 0, new Set([idDoBixinho("o1", "s2")])));
+    expect(no()).not.toHaveClass("no-bixinho-saindo");
   });
 
   it("sem o Subagente na conversa, não desenha nada", () => {

@@ -16,19 +16,25 @@ import {
 } from "../../shared/canvas/layout";
 import { ALCA_DO_TERMINAL, type NoRascunho as TipoDoNo } from "../../shared/canvas/nos";
 import { AVISO_DO_ULTRACODE, ROTULOS_DAS_PERMISSOES } from "../../shared/formatacao";
-import { ajudaDaPredefinicao, useEsforcosHerdados, usePredefinicoes } from "../../shared/hooks/useDadosDaConfiguracao";
-import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
+import {
+  ajudaDaPredefinicao,
+  useEsforcosHerdados,
+  usePredefinicoes,
+  usePreferencias,
+} from "../../shared/hooks/useDadosDaConfiguracao";
+import { DICA_DAS_VARIAVEIS, tamanhoDasInstrucoes } from "../../shared/instrucoes";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
 import { resumoDaConfiguracao } from "../../shared/resumoDaConfiguracao";
 import { IconeAlerta, IconeFechar } from "../Icones";
 import { PreviaDoPromptFinal } from "../PreviaDoPromptFinal";
-import { AvisoDoEsforcoHerdado, IconeDaPermissao, Rotulo } from "./LinhasDaConfiguracao";
+import { AvisoDoEsforcoHerdado, IconeDaPermissao, Rotulo, SeletorDePerfil } from "./LinhasDaConfiguracao";
 import { MenuDeModelo } from "./MenuDeModelo";
 import { NavegadorDePastas } from "./NavegadorDePastas";
 import { QuantidadeDeSubagentes } from "./QuantidadeDeSubagentes";
 
 const TAMANHO_MAXIMO_DO_NOME = 60;
 const PERMISSOES: readonly NivelDePermissao[] = ["leitura", "edicao", "edicao_e_comandos"];
+export const CONFIRMACAO_PARA_DESCARTAR_O_RASCUNHO = "Descartar este rascunho? O que você preencheu será perdido.";
 
 /** Nome exibido para um caminho: a última parte da pasta. */
 function nomeDaPasta(caminho: string): string {
@@ -59,6 +65,8 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
   const [criando, setCriando] = useState(false);
   const predefinicoes = usePredefinicoes();
   const economico = predefinicoes.find((predefinicao) => predefinicao.nome === "economico");
+  // Os perfis de instruções, para o "Aplicar perfil…"; sem eles (ou sem resposta), o select não aparece.
+  const perfis = usePreferencias()?.perfisDeInstrucoes ?? [];
 
   // Tenta de novo quando o servidor volta: aberto com ele fora, o terminal
   // ficaria preso em "carregando pastas…".
@@ -140,6 +148,25 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
             ? "Servidor desconectado."
             : null;
 
+  /**
+   * O usuário preencheu algo que daria trabalho refazer: um nome digitado, uma
+   * configuração fora do padrão ou uma pasta achada pelo "procurar…". Escolher
+   * um projeto da lista, e o nome que vem dele, se refaz num clique e não conta.
+   */
+  const nomeDigitado = nome.trim() !== "" && nome !== nomeDoCaminho(pasta).slice(0, TAMANHO_MAXIMO_DO_NOME);
+  const configuracaoAlterada = (Object.keys(CONFIGURACAO_PADRAO_DO_ORQUESTRADOR) as (keyof DadosDaConfiguracao)[]).some(
+    (campo) => JSON.stringify(configuracao[campo]) !== JSON.stringify(CONFIGURACAO_PADRAO_DO_ORQUESTRADOR[campo]),
+  );
+  const preenchido = nomeDigitado || configuracaoAlterada || pastaExterna !== null;
+
+  /** Sem nada preenchido, descarta direto; com algo, confirma antes de perder. */
+  function descartar(): void {
+    if (preenchido && !window.confirm(CONFIRMACAO_PARA_DESCARTAR_O_RASCUNHO)) {
+      return;
+    }
+    acoes.descartarRascunho(id);
+  }
+
   async function comecar(evento: FormEvent): Promise<void> {
     evento.preventDefault();
     if (motivoParaNaoComecar !== null || criando) {
@@ -183,7 +210,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
             className="botao-icone nodrag"
             title="Descartar"
             aria-label="Descartar rascunho"
-            onClick={() => acoes.descartarRascunho(id)}
+            onClick={descartar}
           >
             <IconeFechar tamanho={16} />
           </button>
@@ -414,10 +441,15 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                 htmlFor={`${idDoCampo}-instrucoes`}
                 titulo="Instruções"
                 dica="Regras só deste orquestrador."
-                explicacao="Entram no prompt dele, por exemplo o jeito de responder ou o que rodar antes de concluir. Vazio, valem as Instruções gerais (botão na barra). Não ampliam a permissão acima."
+                explicacao="Entram no prompt dele, por exemplo o jeito de responder ou o que rodar antes de concluir. Vazio, valem as Instruções gerais (botão na barra). Aplicar perfil copia um texto pronto, criado no mesmo botão. Não ampliam a permissão acima."
                 alinharAoTopo
               />
               <div className="flex min-w-0 flex-col gap-1.5">
+                <SeletorDePerfil
+                  perfis={perfis}
+                  textoAtual={configuracao.instrucoesPersonalizadas}
+                  aoAplicar={(texto) => mudar("instrucoesPersonalizadas", texto)}
+                />
                 <textarea
                   id={`${idDoCampo}-instrucoes`}
                   className="textarea instrucoes-da-criacao custom-scrollbar"
@@ -428,9 +460,15 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                   spellCheck
                   onChange={(evento) => mudar("instrucoesPersonalizadas", evento.target.value)}
                 />
+                <span className="hint">{DICA_DAS_VARIAVEIS}</span>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <PreviaDoPromptFinal configuracao={configuracao} pastaDeTrabalho={pasta || undefined} comoLink />
+                    <PreviaDoPromptFinal
+                      configuracao={configuracao}
+                      pastaDeTrabalho={pasta || undefined}
+                      nome={nome.trim() || undefined}
+                      comoLink
+                    />
                   </div>
                   <span className={`mono shrink-0 text-[11px] ${passouDoLimite ? "text-error" : "text-muted"}`} aria-live="polite">
                     {tamanho.toLocaleString("pt-BR")} / {TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString("pt-BR")}
@@ -466,7 +504,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                 </>
               )}
             </div>
-            <button type="button" className="btn btn-ghost shrink-0" onClick={() => acoes.descartarRascunho(id)}>
+            <button type="button" className="btn btn-ghost shrink-0" onClick={descartar}>
               Descartar
             </button>
             <button

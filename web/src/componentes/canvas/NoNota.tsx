@@ -9,6 +9,7 @@ import { useAcoesDasNotas, useErroAoCarregarNotas, useLojaDasNotas, useNota } fr
 import { escreverPedidoArrastado } from "../../shared/canvas/pedidoArrastado";
 import { alternarItem, linhasDaNota } from "../../shared/checklistDaNota";
 import { type SituacaoDoSalvamento, useEdicaoDaNota } from "../../shared/hooks/useEdicaoDaNota";
+import { rodandoNoDesktop } from "../../shared/ponteDoDesktop";
 import { IconeAlerta, IconeMinimizar, IconeRestaurar } from "../Icones";
 
 export const CONFIRMACAO_PARA_APAGAR = "Apagar esta nota? Isso não pode ser desfeito.";
@@ -285,6 +286,35 @@ function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
       campo.current?.focus({ preventScroll: true });
     }
   }, [loja, notaId]);
+
+  // Fechar a aba logo depois de digitar perderia o que ainda não foi gravado.
+  // Só enquanto há gravação pendente: salva na hora e, no navegador, pede
+  // confirmação. No app desktop não bloqueia (o Electron cancelaria o
+  // fechamento sem perguntar nada): só salva na hora, também no pagehide.
+  const gravacaoPendente = edicao.situacao !== "salvo";
+  const { salvarAgora } = edicao;
+  useEffect(() => {
+    if (!gravacaoPendente) {
+      return;
+    }
+    const noDesktop = rodandoNoDesktop();
+    const aoSair = (evento: BeforeUnloadEvent) => {
+      salvarAgora();
+      if (!noDesktop) {
+        evento.preventDefault();
+        // Navegadores antigos só perguntam com o returnValue preenchido.
+        evento.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", aoSair);
+    if (noDesktop) {
+      window.addEventListener("pagehide", salvarAgora);
+    }
+    return () => {
+      window.removeEventListener("beforeunload", aoSair);
+      window.removeEventListener("pagehide", salvarAgora);
+    };
+  }, [gravacaoPendente, salvarAgora]);
 
   /** Marcar ou desmarcar um item reescreve o texto e salva na hora, como ao perder o foco. */
   function alternarItemDaLista(indiceDaLinha: number): void {

@@ -1,14 +1,16 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { type NodeProps, ReactFlowProvider } from "@xyflow/react";
 
 import { type AcoesDoCanvas, ProvedorDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
 import type { DadosDaPrevia, NoPrevia as TipoDoNo } from "../../shared/canvas/nos";
+import type { ApiDaPrevia, EventoDaPrevia } from "../../shared/ponteDoDesktop";
 import { ENDERECO_INVALIDO, INTERVALO_DA_VERIFICACAO_MS, NoPrevia, TEMPO_ATE_FECHAR_SEM_SERVIDOR_MS } from "./NoPrevia";
 
 function acoesDoCanvas(): AcoesDoCanvas {
   return {
     abrirTerminal: vi.fn(),
     fecharTerminal: vi.fn(),
+    minimizarOuRestaurarTerminal: vi.fn(),
     limparBixinhos: vi.fn(),
     orquestradorCriado: vi.fn(),
     descartarRascunho: vi.fn(),
@@ -597,5 +599,282 @@ describe("NoPrevia confere se o servidor responde", () => {
 
     expect(buscar).not.toHaveBeenCalled();
     expect(acoes.fecharPrevia).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------- Endereço externo: vista nativa (desktop) e nova aba (navegador) ----------------
+
+const SHEETS = "https://docs.google.com/spreadsheets/d/abc/edit";
+
+describe("NoPrevia com endereço externo no navegador comum", () => {
+  it("mostra abrir em nova aba em vez de tentar o iframe, e não confere o servidor", async () => {
+    const buscar = servidorForaDoAr();
+    vi.stubGlobal("fetch", buscar);
+    const { acoes } = renderizar({ url: SHEETS });
+
+    expect(document.querySelector("iframe")).toBeNull();
+    const link = screen.getByRole("link", { name: "abrir em nova aba" });
+    expect(link).toHaveAttribute("href", SHEETS);
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.queryByRole("button", { name: "Menu da prévia" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "O que é a prévia" })).not.toBeInTheDocument();
+
+    // Site externo fora do ar (ou sem rede) não fecha a prévia.
+    vi.useFakeTimers();
+    await avancar(TEMPO_ATE_FECHAR_SEM_SERVIDOR_MS * 2);
+    expect(buscar).not.toHaveBeenCalled();
+    expect(acoes.fecharPrevia).not.toHaveBeenCalled();
+  });
+
+  it("localhost segue no iframe", () => {
+    renderizar();
+    expect(quadro()).toHaveAttribute("src", "http://localhost:5173");
+    expect(screen.queryByRole("link", { name: "abrir em nova aba" })).not.toBeInTheDocument();
+  });
+});
+
+describe("NoPrevia com endereço externo no app desktop", () => {
+  const janelaComPonte = window as unknown as { electron?: unknown };
+  const retanguloDoCorpo = { left: 100, top: 200, width: 360, height: 240, right: 460, bottom: 440, x: 100, y: 200 };
+  let api: { [K in keyof ApiDaPrevia]: ReturnType<typeof vi.fn> };
+  let enviar: ((evento: EventoDaPrevia) => void) | null;
+  let larguraDoLayout: PropertyDescriptor | undefined;
+
+  beforeEach(() => {
+    enviar = null;
+    api = {
+      abrir: vi.fn(async () => true),
+      ativar: vi.fn(async (_id: string, ativa: boolean) => ativa),
+      retangulo: vi.fn(),
+      recarregar: vi.fn(async () => true),
+      fechar: vi.fn(async () => true),
+      sairDasContas: vi.fn(async () => true),
+      aoMudar: vi.fn((retorno: (evento: EventoDaPrevia) => void) => {
+        enviar = retorno;
+        return () => {
+          enviar = null;
+        };
+      }),
+    };
+    janelaComPonte.electron = { desktop: true, janela: {}, previa: api };
+    // O jsdom não calcula layout: o corpo tem 360x240 na tela e 720 de largura sem escala (zoom 0.5).
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(retanguloDoCorpo as DOMRect);
+    larguraDoLayout = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth");
+    Object.defineProperty(HTMLElement.prototype, "offsetWidth", { configurable: true, get: () => 720 });
+  });
+
+  afterEach(() => {
+    delete janelaComPonte.electron;
+    vi.restoreAllMocks();
+    if (larguraDoLayout) {
+      Object.defineProperty(HTMLElement.prototype, "offsetWidth", larguraDoLayout);
+    } else {
+      delete (HTMLElement.prototype as { offsetWidth?: number }).offsetWidth;
+    }
+    delete (document as { elementFromPoint?: unknown }).elementFromPoint;
+  });
+
+  async function ativar(): Promise<void> {
+    fireEvent.click(screen.getByRole("button", { name: "Usar a página" }));
+    await waitFor(() => expect(api.ativar).toHaveBeenCalledWith("p1", true, expect.anything()));
+  }
+
+  it("abre a vista nativa em vez do iframe, com a foto no lugar até a página carregar", () => {
+    renderizar({ url: SHEETS });
+
+    expect(document.querySelector("iframe")).toBeNull();
+    expect(api.abrir).toHaveBeenCalledWith("p1", SHEETS, expect.objectContaining({ zoom: 0.5, largura: 360, altura: 240 }));
+    expect(screen.getByText("Carregando a página…")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Usar a página" })).toBeInTheDocument();
+
+    act(() => enviar?.({ tipo: "foto", id: "p1", foto: "data:image/jpeg;base64,AAAA" }));
+    expect(screen.getByRole("img", { name: `Foto de ${SHEETS}` })).toHaveAttribute("src", "data:image/jpeg;base64,AAAA");
+  });
+
+  it("eventos de outra prévia são ignorados", () => {
+    renderizar({ url: SHEETS });
+    act(() => enviar?.({ tipo: "foto", id: "outra", foto: "data:image/jpeg;base64,AAAA" }));
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("página carregada e ainda sem foto (a foto sai ao desativar): convida a clicar", () => {
+    renderizar({ url: SHEETS });
+    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: null }));
+    expect(screen.getByText("Clique para usar a página.")).toBeInTheDocument();
+  });
+
+  it("a barra mostra o host real e atual da página e destaca quando o domínio registrável muda", () => {
+    renderizar({ url: SHEETS });
+    // Antes da primeira página, nada a mostrar.
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+
+    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://docs.google.com" }));
+    let host = screen.getByRole("note");
+    expect(host).toHaveTextContent("docs.google.com");
+    expect(host).not.toHaveClass("host-atual-da-previa-mudou");
+
+    // Outro host do mesmo domínio (login do Google): sem alerta.
+    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://accounts.google.com" }));
+    host = screen.getByRole("note");
+    expect(host).toHaveTextContent("accounts.google.com");
+    expect(host).not.toHaveClass("host-atual-da-previa-mudou");
+
+    // Outro domínio: o host aparece destacado, com aviso.
+    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://login.exemplo-falso.net" }));
+    host = screen.getByRole("note");
+    expect(host).toHaveTextContent("login.exemplo-falso.net");
+    expect(host).toHaveClass("host-atual-da-previa-mudou");
+    expect(host).toHaveAttribute("aria-label", expect.stringContaining("mudou para outro site"));
+    expect(host).toHaveAttribute("title", expect.stringContaining(SHEETS));
+    // O campo continua com o endereço aberto.
+    expect(screen.getByRole("textbox", { name: "Endereço da prévia" })).toHaveValue(SHEETS);
+
+    // Eventos de outra prévia não mexem na barra.
+    act(() => enviar?.({ tipo: "estado", id: "outra", carregando: false, erro: null, origem: "https://outro.com" }));
+    expect(screen.getByRole("note")).toHaveTextContent("login.exemplo-falso.net");
+  });
+
+  it("recarregar a vista (ou fechá-la) tira o host da barra até a nova página", () => {
+    renderizar({ url: SHEETS });
+    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://docs.google.com" }));
+    expect(screen.getByRole("note")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Recarregar a página" }));
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+  });
+
+  it("sair das contas (sessao-limpa) descarta a foto guardada", () => {
+    renderizar({ url: SHEETS });
+    act(() => enviar?.({ tipo: "foto", id: "p1", foto: "data:image/jpeg;base64,AAAA" }));
+    expect(screen.getByRole("img")).toBeInTheDocument();
+
+    act(() => enviar?.({ tipo: "sessao-limpa" }));
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("mostra o erro de carregamento enquanto não há foto", () => {
+    renderizar({ url: SHEETS });
+    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: "ERR_NAME_NOT_RESOLVED", origem: null }));
+    expect(screen.getByText(`Não foi possível abrir ${SHEETS}: ERR_NAME_NOT_RESOLVED`)).toBeInTheDocument();
+  });
+
+  it("localhost continua no iframe e nem abre vista nativa", () => {
+    renderizar();
+    expect(quadro()).toHaveAttribute("src", "http://localhost:5173");
+    expect(api.abrir).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "O que é a prévia" })).toBeInTheDocument();
+  });
+
+  it("clicar ativa: manda o retângulo e o zoom do canvas; mover o nó manda o retângulo novo", async () => {
+    renderizar({ url: SHEETS });
+    await ativar();
+
+    expect(api.ativar).toHaveBeenCalledWith("p1", true, { x: 100, y: 200, largura: 360, altura: 240, zoom: 0.5 });
+    expect(screen.queryByRole("button", { name: "Usar a página" })).not.toBeInTheDocument();
+
+    // Pan e zoom do canvas: o corpo muda de lugar e de escala.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      ...retanguloDoCorpo,
+      left: 180,
+      top: 150,
+      width: 720,
+      height: 480,
+    } as DOMRect);
+    await waitFor(() =>
+      expect(api.retangulo).toHaveBeenCalledWith("p1", { x: 180, y: 150, largura: 720, altura: 480, zoom: 1 }),
+    );
+  });
+
+  it("clique fora do bloco desativa e esconde a vista; clique dentro dele não", async () => {
+    renderizar({ url: SHEETS });
+    await ativar();
+
+    fireEvent.pointerDown(screen.getByRole("textbox", { name: "Endereço da prévia" }));
+    expect(api.ativar).not.toHaveBeenCalledWith("p1", false);
+
+    fireEvent.pointerDown(document.body);
+    await waitFor(() => expect(api.ativar).toHaveBeenCalledWith("p1", false));
+    expect(screen.getByRole("button", { name: "Usar a página" })).toBeInTheDocument();
+  });
+
+  it("some quando algo da tela cobre a vista (painel, menu)", async () => {
+    renderizar({ url: SHEETS });
+    const painel = document.createElement("div");
+    document.body.append(painel);
+    document.elementFromPoint = vi.fn(() => painel);
+
+    fireEvent.click(screen.getByRole("button", { name: "Usar a página" }));
+    await waitFor(() => expect(api.ativar).toHaveBeenCalledWith("p1", false));
+    expect(api.ativar).not.toHaveBeenCalledWith("p1", true, expect.anything());
+    expect(screen.getByRole("button", { name: "Usar a página" })).toBeInTheDocument();
+    painel.remove();
+  });
+
+  it("some quando o corpo sai da tela ou a prévia é minimizada", async () => {
+    const { tela, valor } = renderizar({ url: SHEETS });
+    await ativar();
+
+    tela.rerender(<Previa valor={valor} no={propsDoNo({ url: SHEETS, minimizada: true })} />);
+    await waitFor(() => expect(api.ativar).toHaveBeenCalledWith("p1", false));
+    expect(screen.getByRole("button", { name: "Restaurar a prévia" })).toBeInTheDocument();
+  });
+
+  it("o app esconder a vista (Shift+Esc, janela minimizada) devolve a foto", async () => {
+    renderizar({ url: SHEETS });
+    await ativar();
+
+    act(() => enviar?.({ tipo: "desativada", id: "p1" }));
+    expect(screen.getByRole("button", { name: "Usar a página" })).toBeInTheDocument();
+  });
+
+  it("fechar a prévia destrói a vista", () => {
+    const { tela } = renderizar({ url: SHEETS });
+    tela.unmount();
+    expect(api.fechar).toHaveBeenCalledWith("p1");
+  });
+
+  it("trocar o endereço destrói a vista e abre outra; recarregar a recria", () => {
+    const { tela, valor } = renderizar({ url: SHEETS });
+    api.fechar.mockClear();
+    api.abrir.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "Recarregar a página" }));
+    expect(api.fechar).toHaveBeenCalledWith("p1");
+    expect(api.abrir).toHaveBeenCalledWith("p1", SHEETS, expect.anything());
+
+    api.abrir.mockClear();
+    tela.rerender(<Previa valor={valor} no={propsDoNo({ url: "https://notion.so/x" })} />);
+    expect(api.abrir).toHaveBeenCalledWith("p1", "https://notion.so/x", expect.anything());
+  });
+
+  it("o menu da prévia tem Sair das contas, com confirmação, e limpa a sessão", async () => {
+    renderizar({ url: SHEETS });
+    fireEvent.click(screen.getByRole("button", { name: "Menu da prévia" }));
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Sair das contas" }));
+    expect(api.sairDasContas).not.toHaveBeenCalled();
+    expect(screen.getByRole("status")).toHaveTextContent("Clique de novo para confirmar");
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Confirmar: sair de todas as contas" }));
+    await waitFor(() => expect(api.sairDasContas).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("recarregadas sem login"));
+  });
+
+  it("com o menu aberto a vista ativa volta a ser foto (o menu fica por cima); Esc fecha o menu", async () => {
+    renderizar({ url: SHEETS });
+    await ativar();
+
+    fireEvent.click(screen.getByRole("button", { name: "Menu da prévia" }));
+    await waitFor(() => expect(api.ativar).toHaveBeenCalledWith("p1", false));
+    expect(screen.getByRole("menu", { name: "Menu da prévia" })).toBeInTheDocument();
+
+    fireEvent.keyDown(screen.getByRole("menuitem", { name: "Sair das contas" }), { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("o menu aparece também com localhost (limpa a sessão das prévias externas de qualquer prévia)", () => {
+    renderizar();
+    expect(screen.getByRole("button", { name: "Menu da prévia" })).toBeInTheDocument();
   });
 });

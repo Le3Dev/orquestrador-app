@@ -77,6 +77,17 @@ describe("useNotas", () => {
     expect(segunda?.position).not.toEqual(primeira?.position);
   });
 
+  it("com dados e posição, a nota nasce com o texto e abre no ponto pedido, e não no centro", async () => {
+    vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+    const criar = vi.spyOn(api, "criarNota").mockResolvedValue(nota("n4"));
+    const { result } = renderizar();
+
+    await act(() => result.current.notas.criarNota({ titulo: "Resposta do chat", texto: "oi" }, { x: 40, y: -20 }));
+
+    expect(criar).toHaveBeenCalledWith({ titulo: "Resposta do chat", texto: "oi" });
+    expect(result.current.nos.find((no) => no.id === idDoNoDaNota("n4"))?.position).toEqual({ x: 40, y: -20 });
+  });
+
   it("a nota criada enquanto a lista carregava não sai do canvas quando a lista chega", async () => {
     let entregarLista: (lista: DadosDaNota[]) => void = () => undefined;
     vi.spyOn(api, "listarNotas").mockReturnValue(new Promise<DadosDaNota[]>((resolver) => (entregarLista = resolver)));

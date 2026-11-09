@@ -109,7 +109,7 @@ describe("BarraDeTituloDoApp", () => {
     const painel = screen.getByRole("menu", { name: "Configurações" });
     expect(painel).toHaveClass("painel-de-configuracoes-direita", "no-drag");
     expect(within(painel).getByRole("group", { name: "Tela" })).toBeInTheDocument();
-    expect(within(painel).getByRole("menuitemcheckbox", { name: /Chat fixo à esquerda/ })).toHaveFocus();
+    expect(within(painel).getByRole("menuitemcheckbox", { name: "Chat fixo" })).toHaveFocus();
     expect(abrirAjustes).not.toHaveBeenCalled();
 
     fireEvent.click(within(painel).getByRole("menuitem", { name: "Pastas e Claude Code…" }));
@@ -123,7 +123,7 @@ describe("BarraDeTituloDoApp", () => {
     renderizar();
     fireEvent.click(botaoDeConfiguracoes());
 
-    fireEvent.keyDown(screen.getByRole("menuitemcheckbox", { name: /Chat fixo à esquerda/ }), { key: "Escape" });
+    fireEvent.keyDown(screen.getByRole("menuitemcheckbox", { name: "Chat fixo" }), { key: "Escape" });
 
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(botaoDeConfiguracoes()).toHaveFocus();
@@ -149,8 +149,8 @@ describe("BarraDeTituloDoApp", () => {
 
     fireEvent.click(botaoDeConfiguracoes());
 
-    // Os dois da Tela e a Autorrecuperação dos orquestradores.
-    expect(screen.getAllByRole("menuitemcheckbox")).toHaveLength(3);
+    // Os três da Tela e a Autorrecuperação dos orquestradores.
+    expect(screen.getAllByRole("menuitemcheckbox")).toHaveLength(4);
     expect(screen.queryByRole("menuitem", { name: /Pastas e Claude Code/ })).not.toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Controles da janela" })).toBeInTheDocument();
   });
@@ -255,9 +255,14 @@ describe("BarraDeTituloDoApp", () => {
     expect(within(barra).getByRole("group", { name: "Controles da janela" })).toBeInTheDocument();
   });
 
-  it("sem a ponte, não desenha botões de janela; ficam a busca e o ⚙", () => {
+  it("sem a ponte, não desenha botões de janela; ficam a busca, os medidores do status (abrem o uso) e o ⚙", () => {
     const { barra } = renderizar();
 
-    expect(within(barra).getAllByRole("button")).toEqual([campoDeBusca(), botaoDeConfiguracoes()]);
+    expect(within(barra).getAllByRole("button")).toEqual([
+      campoDeBusca(),
+      screen.getByRole("button", { name: "Cota de 5 horas: 30%" }),
+      screen.getByTestId("resumo-do-status"),
+      botaoDeConfiguracoes(),
+    ]);
   });
 });

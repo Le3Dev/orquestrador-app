@@ -34,6 +34,7 @@ function turno(ultimaAtividadeEm: string, subagentes: SituacaoDoSubagente[] = []
       id: `s${indice}`,
       descricao: "",
       tarefa: "",
+      papel: null,
       situacao,
       iniciadoEm: em(0),
       encerradoEm: null,

@@ -9,15 +9,18 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 
 import { api, type ImagemParaEnvio, mensagemDeErro } from "../../shared/api/cliente";
 import type {
   AtividadeDaResposta,
+  ImagemDaMensagemDoChat,
   OrigemDaPergunta,
   PreferenciasDoChat,
   ResumoDoOrquestrador,
 } from "../../shared/api/tipos";
 import { comandoDoPrompt, completarComando, dicaDeComando } from "../../shared/comandosDoPrompt";
+import { juntarDitado } from "../../shared/ditado/texto";
 import { useEscuta } from "../../shared/escuta/useEscuta";
 import {
   type EstadoDoChatNaTela,
@@ -26,10 +29,14 @@ import {
   textoParaMostrar,
   ultimoModeloUsado,
 } from "../../shared/estado/aplicarEventoDoChat";
-import { formatarBytes, formatarDuracao } from "../../shared/formatacao";
+import { formatarBytes, formatarDuracao, formatarMomento } from "../../shared/formatacao";
 import { useMelhorarPrompt } from "../../shared/hooks/useMelhorarPrompt";
 import { useModoInvisivel } from "../../shared/hooks/useModoInvisivel";
-import { LARGURA_DO_CHAT_FIXO, limitarLarguraDoChatFixo } from "../../shared/hooks/usePreferenciasDaTela";
+import {
+  LARGURA_DO_CHAT_FIXO,
+  type LadoDoChatFixo,
+  limitarLarguraDoChatFixo,
+} from "../../shared/hooks/usePreferenciasDaTela";
 import {
   ehCapturaDeTela,
   type ImagemAnexada,
@@ -42,12 +49,14 @@ import {
   TIPOS_DE_IMAGEM,
 } from "../../shared/imagens";
 import type { CapturaDeTela } from "../../shared/ponteDoDesktop";
+import { BotaoDeDitado } from "../BotaoDeDitado";
 import { AvisoDaMelhoria, BotaoDeMelhorar } from "../MelhoriaDoPrompt";
 import { TextoFormatado } from "../TextoFormatado";
 import { AvisoDaEscuta } from "./AvisoDaEscuta";
 import { CartaoDeAcao, type PropsDasAcoesDoChat } from "./CartaoDeAcao";
 import { CartaoDeAutorizacao } from "./CartaoDeAutorizacao";
 import { CartaoDePergunta } from "./CartaoDePergunta";
+import { CartaoDeSubagente } from "./CartaoDeSubagente";
 import { FaixaDaEscuta } from "./FaixaDaEscuta";
 import { IndicadorDaEscuta } from "./IndicadorDaEscuta";
 import { SeletorDeModelo } from "./SeletorDeModelo";
@@ -67,12 +76,23 @@ interface Props extends PropsDasAcoesDoChat {
   erroAoCarregar: string | null;
   aoMudarPreferencias: (preferencias: PreferenciasDoChat) => void;
   /**
-   * Fixo à esquerda (a preferência da tela): uma coluna da altura toda, com a
-   * conversa sempre à vista e o campo embaixo. Padrão: flutuante no pé do canvas.
+   * Fixo (a preferência da tela): uma coluna da altura toda ao lado do canvas,
+   * com a conversa sempre à vista e o campo embaixo. Padrão: flutuante no pé do canvas.
    */
   fixo?: boolean;
-  /** Fixa o chat à esquerda (true) ou o solta de volta no pé do canvas (false). Sem ela, não há botão. */
-  aoAlternarFixo?: (fixo: boolean) => void;
+  /** De que lado do canvas fica a coluna fixa (a alça vai na borda virada para o canvas). Padrão: esquerda. */
+  lado?: LadoDoChatFixo;
+  /**
+   * Fixa o chat ao lado do canvas (true) ou o solta de volta no pé dele (false).
+   * `ocultar` (só ao soltar) pede o chat já oculto embaixo: é o "ocultar" da coluna.
+   * Sem ela, não há botão de fixar, soltar nem ocultar na coluna.
+   */
+  aoAlternarFixo?: (fixo: boolean, ocultar?: boolean) => void;
+  /**
+   * Flutuante: monta com a conversa já oculta (só o "mostrar conversa"). O chat é
+   * remontado ao trocar de modo, então o canvas leva por aqui o "ocultar" da coluna.
+   */
+  comecaOculto?: boolean;
   /** Fixo: a largura da coluna (px). Padrão: 360. */
   largura?: number;
   /** Fixo: grava a largura nova (ao soltar a alça, pelo teclado ou nos dois cliques). Sem ela, não há alça. */
@@ -104,14 +124,20 @@ function limitarAgora(largura: number, coluna: HTMLElement | null): number {
 interface PropsDaAlca {
   largura: number;
   aoMudar: (largura: number) => void;
+  /** O lado da coluna: à direita, a alça fica na borda esquerda e o arraste se inverte. */
+  lado: LadoDoChatFixo;
 }
 
 /**
- * A alça da borda direita do chat fixo: arrastar muda a largura ao vivo (só
- * no estilo da coluna, sem re-renderizar a conversa) e grava ao soltar; as
- * setas mudam 16 px, Home/End vão ao mínimo/máximo e dois cliques voltam aos 360.
+ * A alça da borda do chat fixo virada para o canvas (a direita da coluna da
+ * esquerda, a esquerda da coluna da direita): arrastar muda a largura ao vivo
+ * (só no estilo da coluna, sem re-renderizar a conversa) e grava ao soltar; as
+ * setas levam a borda 16 px para o lado delas, Home/End vão ao mínimo/máximo e
+ * dois cliques voltam aos 360.
  */
-function AlcaDaLargura({ largura, aoMudar }: PropsDaAlca) {
+function AlcaDaLargura({ largura, aoMudar, lado }: PropsDaAlca) {
+  // À direita, levar a borda para a esquerda alarga a coluna.
+  const sentido = lado === "direita" ? -1 : 1;
   // Durante o arraste: a largura ao vivo (para o aria-valuenow); nula, a gravada.
   const [aoVivo, setAoVivo] = useState<number | null>(null);
   const arraste = useRef<{ ponteiro: number; inicioX: number; inicio: number; atual: number; coluna: HTMLElement } | null>(
@@ -161,7 +187,7 @@ function AlcaDaLargura({ largura, aoMudar }: PropsDaAlca) {
       return;
     }
     evento.stopPropagation();
-    const nova = limitarAgora(atual.inicio + evento.clientX - atual.inicioX, atual.coluna);
+    const nova = limitarAgora(atual.inicio + sentido * (evento.clientX - atual.inicioX), atual.coluna);
     if (nova !== atual.atual) {
       atual.atual = nova;
       atual.coluna.style.width = `${nova}px`;
@@ -172,8 +198,8 @@ function AlcaDaLargura({ largura, aoMudar }: PropsDaAlca) {
   function aoTeclar(evento: KeyboardEvent<HTMLDivElement>): void {
     const coluna = evento.currentTarget.parentElement;
     const destinos: Readonly<Record<string, number>> = {
-      ArrowLeft: largura - PASSO_DA_LARGURA,
-      ArrowRight: largura + PASSO_DA_LARGURA,
+      ArrowLeft: largura - sentido * PASSO_DA_LARGURA,
+      ArrowRight: largura + sentido * PASSO_DA_LARGURA,
       Home: LARGURA_DO_CHAT_FIXO.minima,
       End: LARGURA_DO_CHAT_FIXO.maxima,
     };
@@ -199,7 +225,7 @@ function AlcaDaLargura({ largura, aoMudar }: PropsDaAlca) {
       aria-valuemax={LARGURA_DO_CHAT_FIXO.maxima}
       tabIndex={0}
       title="Arraste para mudar a largura do chat · dois cliques voltam ao padrão"
-      className={`alca-do-chat-lateral nodrag nopan nowheel ${aoVivo === null ? "" : "alca-arrastando"}`}
+      className={`alca-do-chat-lateral alca-do-chat-lateral-${lado} nodrag nopan nowheel ${aoVivo === null ? "" : "alca-arrastando"}`}
       onPointerDown={aoApertar}
       onPointerMove={aoMover}
       onPointerUp={() => terminar(true)}
@@ -215,10 +241,18 @@ function AlcaDaLargura({ largura, aoMudar }: PropsDaAlca) {
   );
 }
 
-/** Alfinete: fixar o chat à esquerda. */
-function IconeFixar() {
+/** Fixar: uma janela com a coluna do lado em que o chat vai ficar. */
+function IconeFixar({ lado }: { lado: LadoDoChatFixo }) {
   return (
-    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg
+      width={13}
+      height={13}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      // À direita, o mesmo desenho espelhado.
+      style={lado === "direita" ? { transform: "scaleX(-1)" } : undefined}
+    >
       <rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" strokeWidth="1.8" />
       <path d="M9.5 4.5v15" stroke="currentColor" strokeWidth="1.8" />
       <path d="M5.8 9h1.7M5.8 12h1.7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
@@ -226,7 +260,7 @@ function IconeFixar() {
   );
 }
 
-/** Soltar: o chat volta a flutuar no pé do canvas. */
+/** Soltar embaixo: o chat volta a flutuar no pé do canvas (a janela com a barra embaixo). */
 function IconeSoltar() {
   return (
     <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -263,6 +297,86 @@ function descreverAtividade({ ferramenta, detalhe }: AtividadeDaResposta): strin
   return VERBOS_DE_ARQUIVO.has(verbo) ? `${verbo} ${detalhe}…` : `${verbo}: ${detalhe}…`;
 }
 
+/**
+ * O tipo do dado de uma resposta arrastada do chat: o canvas, ao recebê-la,
+ * cria uma nota com o texto onde ela foi solta.
+ */
+export const TIPO_DA_RESPOSTA_DO_CHAT = "application/x-orquestrador-resposta-do-chat";
+
+/** "14:32" para hoje; "08/11, 14:32" para outro dia. Sem data legível, nada. */
+function horaDaMensagem(iso: string): string | null {
+  return Number.isNaN(Date.parse(iso)) ? null : formatarMomento(iso);
+}
+
+/** A hora no pé da bolha; a data e a hora completas no balão. */
+function HoraDaMensagem({ criadaEm }: { criadaEm: string }) {
+  const hora = horaDaMensagem(criadaEm);
+  if (hora === null) {
+    return null;
+  }
+  return (
+    <time className="hora-da-mensagem" dateTime={criadaEm} title={new Date(criadaEm).toLocaleString("pt-BR")}>
+      {hora}
+    </time>
+  );
+}
+
+/** Seis pontos: o lugar de pegar a resposta para arrastá-la. */
+function IconeArrastar() {
+  return (
+    <svg width={12} height={12} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="9" cy="6" r="1.6" />
+      <circle cx="15" cy="6" r="1.6" />
+      <circle cx="9" cy="12" r="1.6" />
+      <circle cx="15" cy="12" r="1.6" />
+      <circle cx="9" cy="18" r="1.6" />
+      <circle cx="15" cy="18" r="1.6" />
+    </svg>
+  );
+}
+
+/**
+ * Uma imagem anexada, em tamanho maior, por cima da tela. Esc, o ✕ ou um
+ * clique fora fecham. Dentro do app (e não numa aba): no aplicativo, o
+ * navegador do sistema não tem acesso ao servidor.
+ */
+function ImagemAmpliada({ imagem, aoFechar }: { imagem: ImagemDaMensagemDoChat; aoFechar: () => void }) {
+  const fechar = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    fechar.current?.focus();
+  }, []);
+
+  return createPortal(
+    <div
+      className="nokey nowheel nodrag fundo-que-esmaece fundo-da-imagem-ampliada"
+      onMouseDown={(evento) => {
+        if (evento.target === evento.currentTarget) {
+          aoFechar();
+        }
+      }}
+      onKeyDown={(evento) => {
+        evento.stopPropagation();
+        if (evento.key === "Escape") {
+          evento.preventDefault();
+          aoFechar();
+        }
+      }}
+    >
+      <figure role="dialog" aria-modal="true" aria-label={imagem.nome} className="surgir imagem-ampliada">
+        <img src={api.enderecoDoAnexoDoChat(imagem.arquivo)} alt={imagem.nome} />
+        <figcaption>
+          <span className="truncate">{imagem.nome}</span>
+          <button ref={fechar} type="button" className="botao-icone" title="Fechar (Esc)" aria-label="Fechar" onClick={aoFechar}>
+            ✕
+          </button>
+        </figcaption>
+      </figure>
+    </div>,
+    document.body,
+  );
+}
+
 interface PropsDaMensagem extends PropsDasAcoesDoChat {
   mensagem: MensagemDoChatNaTela;
   atividade: AtividadeDaResposta | null;
@@ -277,6 +391,9 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
   aoAtualizarOrquestradores,
   orquestradores,
 }: PropsDaMensagem) {
+  // A imagem anexada aberta em tamanho maior; nula, nenhuma.
+  const [ampliada, setAmpliada] = useState<ImagemDaMensagemDoChat | null>(null);
+
   if (mensagem.papel === "usuario") {
     // Capturas de tela seguem para o Claude, mas nunca viram miniatura (só visual).
     const imagensVisiveis = mensagem.imagens.filter((imagem) => !ehCapturaDeTela(imagem.nome));
@@ -285,15 +402,16 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
         {imagensVisiveis.length > 0 && (
           <div className="anexos-do-chat">
             {imagensVisiveis.map((imagem) => (
-              <a
+              <button
                 key={imagem.arquivo}
-                href={api.enderecoDoAnexoDoChat(imagem.arquivo)}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={imagem.nome}
+                type="button"
+                className="miniatura-do-anexo"
+                title={`${imagem.nome} · clique para ampliar`}
+                aria-label={`Ampliar ${imagem.nome}`}
+                onClick={() => setAmpliada(imagem)}
               >
                 <img src={api.enderecoDoAnexoDoChat(imagem.arquivo)} alt={imagem.nome} />
-              </a>
+              </button>
             ))}
           </div>
         )}
@@ -303,12 +421,16 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
             escuta
           </span>
         )}
+        <HoraDaMensagem criadaEm={mensagem.criadaEm} />
+        {ampliada !== null && <ImagemAmpliada imagem={ampliada} aoFechar={() => setAmpliada(null)} />}
       </div>
     );
   }
 
   const respondendo = mensagem.situacao === "respondendo";
   const texto = textoParaMostrar(mensagem.texto, respondendo);
+  // Só a resposta pronta, com texto, vai para o canvas.
+  const arrastavel = mensagem.situacao === "concluida" && texto !== "";
   return (
     <article className="mensagem-do-claude" aria-busy={respondendo}>
       {texto !== "" && (
@@ -337,22 +459,45 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
         </div>
       )}
       {mensagem.situacao === "cancelada" && <p className="mono text-muted">resposta cancelada</p>}
-      {mensagem.acoes.map((acao, indice) => (
-        <CartaoDeAcao
-          key={`${acao.pasta}:${indice}`}
-          acao={acao}
-          aoAbrirTerminal={aoAbrirTerminal}
-          temVagaPara={temVagaPara}
-          aoAtualizarOrquestradores={aoAtualizarOrquestradores}
-          orquestradores={orquestradores}
-        />
-      ))}
-      {mensagem.situacao === "concluida" && mensagem.uso !== null && (
-        <p className="mono text-muted">
-          {formatarDuracao(mensagem.uso.duracaoMs)}
-          {mensagem.uso.modeloUsado === null ? "" : ` · ${mensagem.uso.modeloUsado}`}
-        </p>
+      {/* Um cartão por ação, pelo tipo; a posição na resposta é a chave (as de subagente não têm pasta). */}
+      {mensagem.acoes.map((acao, indice) =>
+        acao.tipo === "abrir_orquestrador" ? (
+          <CartaoDeAcao
+            key={`${acao.tipo}:${indice}`}
+            acao={acao}
+            aoAbrirTerminal={aoAbrirTerminal}
+            temVagaPara={temVagaPara}
+            aoAtualizarOrquestradores={aoAtualizarOrquestradores}
+            orquestradores={orquestradores}
+          />
+        ) : (
+          <CartaoDeSubagente key={`${acao.tipo}:${indice}`} acao={acao} />
+        ),
       )}
+      <footer className="rodape-da-mensagem mono text-muted">
+        <HoraDaMensagem criadaEm={mensagem.criadaEm} />
+        {mensagem.situacao === "concluida" && mensagem.uso !== null && (
+          <span>
+            {formatarDuracao(mensagem.uso.duracaoMs)}
+            {mensagem.uso.modeloUsado === null ? "" : ` · ${mensagem.uso.modeloUsado}`}
+          </span>
+        )}
+        {arrastavel && (
+          <span
+            className="alca-da-resposta"
+            draggable
+            title="Arraste para o canvas: a resposta vira uma nota onde for solta"
+            onDragStart={(evento) => {
+              evento.dataTransfer.setData(TIPO_DA_RESPOSTA_DO_CHAT, texto);
+              evento.dataTransfer.setData("text/plain", texto);
+              evento.dataTransfer.effectAllowed = "copy";
+            }}
+          >
+            <IconeArrastar />
+            arrastar
+          </span>
+        )}
+      </footer>
     </article>
   );
 });
@@ -369,15 +514,19 @@ function assinaturaDaUltima(chat: EstadoDoChatNaTela): string {
  * limpa) e, acima dele, a conversa. Respostas em Markdown, com o cursor
  * enquanto chegam, cartões para as ações que o Claude sugere no app e
  * cartões de pergunta com opções clicáveis (a escolha vai como a próxima pergunta).
+ * O microfone dita a pergunta por voz (Esc, com ele focado, descarta a gravação).
  *
  * Quando o chat precisa editar um arquivo ou rodar um comando sem estar
  * autorizado, a última resposta ganha o cartão de autorização. Autorizado,
  * o selo "alterações autorizadas" fica ao lado do campo até o `/clear`; o ✕
  * dele revoga.
  *
- * Com `fixo`, o mesmo chat vira uma coluna à esquerda do canvas (`<aside>`):
- * conversa em bolhas sempre à vista, campo embaixo e "soltar" no lugar de "ocultar".
- * Com `aoMudarLargura`, a borda direita da coluna ganha a alça de largura.
+ * Com `fixo`, o mesmo chat vira uma coluna ao lado do canvas (`<aside>`, do
+ * `lado` pedido): conversa em bolhas sempre à vista, campo embaixo e, no cabeçalho,
+ * "soltar embaixo" (o chat flutua no pé do canvas) e "ocultar" (o mesmo botão do
+ * flutuante: o chat vai para baixo já oculto, e "mostrar conversa" o reexibe ali).
+ * Com `aoMudarLargura`, a borda da coluna virada para o canvas ganha a alça
+ * de largura.
  *
  * No modo invisível (com a escuta disponível), o áudio do computador é
  * escutado: o indicador fica ao lado do 👁, a faixa da transcrição acima do
@@ -394,7 +543,9 @@ export function ChatRapido({
   aoAtualizarOrquestradores,
   orquestradores,
   fixo = false,
+  lado = "esquerda",
   aoAlternarFixo,
+  comecaOculto = false,
   largura = LARGURA_DO_CHAT_FIXO.padrao,
   aoMudarLargura,
 }: Props) {
@@ -405,7 +556,9 @@ export function ChatRapido({
   const [pedidoDeCancelar, setPedidoDeCancelar] = useState(false);
   const [arrastando, setArrastando] = useState(false);
   // Assinatura da última mensagem quando a conversa foi ocultada; nula = visível.
-  const [ocultaEm, setOcultaEm] = useState<string | null>(null);
+  const [ocultaEm, setOcultaEm] = useState<string | null>(() =>
+    comecaOculto && !fixo ? assinaturaDaUltima(chat) : null,
+  );
   // Composer em uso: o campo ganhou foco e o foco segue dentro do composer.
   const [emUso, setEmUso] = useState(false);
   const [menuAberto, setMenuAberto] = useState(false);
@@ -442,7 +595,7 @@ export function ChatRapido({
   const respondendo = chat.situacao === "respondendo";
   const cancelando = pedidoDeCancelar && respondendo;
   const temMensagens = chat.mensagens.length > 0;
-  // Fixo à esquerda, a conversa nunca se oculta.
+  // Fixo, a conversa nunca se oculta.
   const oculta = !fixo && ocultaEm !== null;
   const novidadeOculta = oculta && ocultaEm !== assinaturaDaUltima(chat);
   const imagensVisiveis = imagens.filter((imagem) => !ehCapturaDeTela(imagem.nome));
@@ -451,7 +604,7 @@ export function ChatRapido({
   const ultima = chat.mensagens.at(-1);
   const pedidoDeAutorizacao = pedidoDeAutorizacaoAtual(chat);
   // Compacto (uma linha) até a pessoa usar; recolhe só sem foco, texto, imagens nem menu aberto.
-  // Fixo à esquerda, fica sempre expandido: a coluna é estreita para tudo numa linha.
+  // Fixo, fica sempre expandido: a coluna é estreita para tudo numa linha.
   const expandido = fixo || emUso || texto !== "" || imagensVisiveis.length > 0 || menuAberto || arrastando;
 
   // Recolhido, o campo volta à altura de uma linha.
@@ -746,6 +899,12 @@ export function ChatRapido({
     }
   }
 
+  function receberDitado(ditado: string): void {
+    setTexto((atual) => juntarDitado(atual, ditado));
+    requestAnimationFrame(ajustarAltura);
+    campo.current?.focus();
+  }
+
   function aoColar(evento: ClipboardEvent<HTMLTextAreaElement>): void {
     const arquivos = [...evento.clipboardData.files].filter((arquivo) => arquivo.type.startsWith("image/"));
     if (arquivos.length > 0) {
@@ -763,17 +922,22 @@ export function ChatRapido({
           "Pergunte ao Claude · / para comandos"
         : "Pergunte qualquer coisa ao Claude · / para comandos";
 
-  // Fixo à esquerda: uma coluna (aside) ao lado do canvas; flutuante: um bloco no painel do pé do canvas.
+  // Fixo: uma coluna (aside) ao lado do canvas; flutuante: um bloco no painel do pé do canvas.
   const Raiz = fixo ? "aside" : "div";
 
   return (
     <Raiz
-      className={`chat-rapido nodrag nowheel nopan ${fixo ? "chat-lateral" : ""} ${respondendo ? "chat-rapido-respondendo" : ""}`}
+      className={`chat-rapido nodrag nowheel nopan ${fixo ? `chat-lateral chat-lateral-${lado}` : ""} ${respondendo ? "chat-rapido-respondendo" : ""}`}
       aria-label={fixo ? "Chat rápido" : undefined}
       style={fixo ? { width: `${largura}px` } : undefined}
       data-testid="chat-rapido"
       {...mouseDaArea}
       onDragOver={(evento) => {
+        // Uma resposta arrastada daqui não cai no próprio chat (nem no canvas por baixo dele).
+        if (evento.dataTransfer.types.includes(TIPO_DA_RESPOSTA_DO_CHAT)) {
+          evento.stopPropagation();
+          return;
+        }
         if (evento.dataTransfer.types.includes("Files")) {
           evento.preventDefault();
           setArrastando(true);
@@ -785,6 +949,10 @@ export function ChatRapido({
         }
       }}
       onDrop={(evento) => {
+        if (evento.dataTransfer.types.includes(TIPO_DA_RESPOSTA_DO_CHAT)) {
+          evento.stopPropagation();
+          return;
+        }
         if (evento.dataTransfer.files.length > 0) {
           evento.preventDefault();
           setArrastando(false);
@@ -793,7 +961,7 @@ export function ChatRapido({
       }}
     >
       {arrastando && <div className="soltar-imagens">solte para anexar as imagens à pergunta</div>}
-      {fixo && aoMudarLargura !== undefined && <AlcaDaLargura largura={largura} aoMudar={aoMudarLargura} />}
+      {fixo && aoMudarLargura !== undefined && <AlcaDaLargura largura={largura} aoMudar={aoMudarLargura} lado={lado} />}
 
       {/* Oculta, a conversa continua montada: os cartões de ação lembram o que já fizeram. */}
       {(temMensagens || fixo) && (
@@ -810,11 +978,11 @@ export function ChatRapido({
               <button
                 type="button"
                 className="botao-icone"
-                aria-label="Fixar o chat à esquerda"
-                title="Fixar o chat à esquerda: uma coluna ao lado do canvas, sempre aberta"
+                aria-label={`Fixar o chat à ${lado}`}
+                title={`Fixar o chat à ${lado}: uma coluna ao lado do canvas, sempre aberta`}
                 onClick={() => aoAlternarFixo(true)}
               >
-                <IconeFixar />
+                <IconeFixar lado={lado} />
               </button>
             )}
             <button
@@ -834,16 +1002,27 @@ export function ChatRapido({
             </button>
             {fixo ? (
               aoAlternarFixo !== undefined && (
-                <button
-                  type="button"
-                  className="btn btn-sm btn-ghost"
-                  aria-label="Soltar o chat"
-                  title="Soltar: o chat volta a flutuar no pé do canvas"
-                  onClick={() => aoAlternarFixo(false)}
-                >
-                  <IconeSoltar />
-                  soltar
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    aria-label="Soltar o chat embaixo"
+                    title="Soltar embaixo: o chat sai da coluna e passa a flutuar no centro de baixo do canvas, ainda aberto"
+                    onClick={() => aoAlternarFixo(false)}
+                  >
+                    <IconeSoltar />
+                    soltar embaixo
+                  </button>
+                  {/* Igual ao do chat inferior: oculta a conversa. Sem coluna para ocultar, o chat sai dela e fica embaixo, oculto. */}
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => aoAlternarFixo(false, true)}
+                    title="Ocultar a conversa: o chat sai da coluna e, ao mostrar de novo, volta embaixo"
+                  >
+                    ocultar
+                  </button>
+                </>
               )
             ) : (
               <button type="button" className="btn btn-sm btn-ghost" onClick={ocultar} title="Ocultar a conversa (esc)">
@@ -875,8 +1054,10 @@ export function ChatRapido({
                   aoAbrirTerminal={aoAbrirTerminal}
                   temVagaPara={temVagaPara}
                   aoAtualizarOrquestradores={aoAtualizarOrquestradores}
-                  // Só quem tem cartões de ação acompanha a lista: as outras não re-renderizam a cada consulta.
-                  orquestradores={mensagem.acoes.length > 0 ? orquestradores : SEM_ORQUESTRADORES}
+                  // Só quem tem cartões de abrir orquestrador acompanha a lista: as outras não re-renderizam a cada consulta.
+                  orquestradores={
+                    mensagem.acoes.some((acao) => acao.tipo === "abrir_orquestrador") ? orquestradores : SEM_ORQUESTRADORES
+                  }
                 />
                 {/* Fora da mensagem memorizada: o cartão depende do estado do chat, não só da mensagem. */}
                 {pedidoDeAutorizacao?.mensagemId === mensagem.id && (
@@ -948,12 +1129,22 @@ export function ChatRapido({
           data-testid="composer-do-chat"
           onClick={(evento) => {
             // Clicar em qualquer parte expande e leva o foco ao campo (menos dentro do menu do modelo).
-            if (!(evento.target instanceof Element && evento.target.closest('[role="menu"]') !== null)) {
-              campo.current?.focus();
+            const alvo = evento.target instanceof Element ? evento.target : null;
+            if (alvo !== null && alvo.closest('[role="menu"]') !== null) {
+              return;
             }
+            // No microfone, expande mas o foco fica nele: o Esc ali descarta o ditado.
+            if (alvo !== null && alvo.closest(".ditado") !== null) {
+              setEmUso(true);
+              return;
+            }
+            campo.current?.focus();
           }}
           onBlur={(evento) => {
-            if (!evento.currentTarget.contains(evento.relatedTarget as Node | null)) {
+            const composer = evento.currentTarget;
+            // Gravando ou transcrevendo, não recolhe: o microfone e o aviso dele seguem à vista.
+            const ditando = composer.querySelector('.ditado [aria-pressed="true"], .ditado [aria-busy="true"]') !== null;
+            if (!composer.contains(evento.relatedTarget as Node | null) && !ditando) {
               setEmUso(false);
             }
           }}
@@ -1045,6 +1236,7 @@ export function ChatRapido({
               melhoria={melhoria}
               desabilitado={texto.trim() === "" || desconectado || respondendo || enviando}
             />
+            <BotaoDeDitado destino="a mensagem" className="ditado-a-direita" aoTranscrever={receberDitado} />
             {respondendo && <span className="etiqueta etiqueta-ativa etiqueta-pulso">respondendo…</span>}
             {chat.alteracoesAutorizadas && (
               <span
