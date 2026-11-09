@@ -46,7 +46,9 @@ import { GerenciadorDeWorktreesGit } from "./infraestrutura/sistema/GerenciadorD
 import { LeitorDeAlteracoesGit } from "./infraestrutura/sistema/LeitorDeAlteracoesGit";
 import { MonitorDeMemoria } from "./infraestrutura/sistema/MonitorDeMemoria";
 import { PtyDoSistema } from "./infraestrutura/sistema/PtyDoSistema";
+import { RastreadorDeProcessosDeixados } from "./infraestrutura/sistema/RastreadorDeProcessosDeixados";
 import { encerrarAgentesOrfaos, RegistroDeProcessos } from "./infraestrutura/sistema/RegistroDeProcessos";
+import { RegistroDeProcessosDeixados } from "./infraestrutura/sistema/RegistroDeProcessosDeixados";
 import { CanalDeEventos } from "./infraestrutura/sse/CanalDeEventos";
 import { ServicoDeNotas } from "./notas/ServicoDeNotas";
 import { ServicoDeAlteracoes } from "./orquestracao/ServicoDeAlteracoes";
@@ -116,6 +118,20 @@ function isolarOrigem(_requisicao: express.Request, resposta: express.Response, 
   proximo();
 }
 
+/** A porta de mensagens do Electron (`utilityProcess`); nula fora do app (`npm run dev`). */
+interface PortaDoProcessoPai {
+  on(evento: "message", ouvinte: (mensagem: { data: unknown }) => void): void;
+}
+
+function portaDoProcessoPai(): PortaDoProcessoPai | null {
+  return (process as NodeJS.Process & { parentPort?: PortaDoProcessoPai }).parentPort ?? null;
+}
+
+/** `{ tipo: "desligar" }`, mandado por `electron/main.js` ao fechar o app. */
+export function ehPedidoDeDesligar(mensagem: unknown): boolean {
+  return typeof mensagem === "object" && mensagem !== null && (mensagem as { tipo?: unknown }).tipo === "desligar";
+}
+
 async function iniciar(): Promise<void> {
   const configuracao = lerConfiguracao();
 
@@ -158,7 +174,21 @@ async function iniciar(): Promise<void> {
     console.warn(`[processos] ${orfaos} agente(s) deixado(s) rodando pelo servidor anterior foram encerrados.`);
   }
   const registro = new RegistroDeProcessos(arquivoDeProcessos);
-  const monitor = new MonitorDeMemoria(registro);
+  // Processos que os agentes deixam rodando depois do turno (ADR-38): o
+  // registro carrega o que o servidor anterior deixou, e o que ainda for o
+  // mesmo processo é encerrado agora (reserva para quando o servidor caiu).
+  const rastreador = new RastreadorDeProcessosDeixados({
+    deixados: new RegistroDeProcessosDeixados(path.join(configuracao.pastaDeDados, "processos-deixados-pelos-agentes.json")),
+    agentes: registro,
+    // Nunca: o próprio servidor e o Electron que o iniciou.
+    protegidos: [process.pid, process.ppid],
+    pidDoServidor: process.pid,
+  });
+  const deixadosAntes = await rastreador.encerrarTodos();
+  if (deixadosAntes > 0) {
+    console.warn(`[processos] ${deixadosAntes} processo(s) deixado(s) pelos agentes antes do reinício foram encerrados.`);
+  }
+  const monitor = new MonitorDeMemoria(registro, undefined, rastreador);
   monitor.iniciar();
 
   const canal = new CanalDeEventos();
@@ -175,9 +205,14 @@ async function iniciar(): Promise<void> {
     console.warn(`[worktrees] ${worktreesOrfaos} worktree(s) órfão(s) do servidor anterior foram removidos.`);
   }
 
+  // Terminais interativos do canvas: shells do usuário num pseudoterminal.
+  const terminais = new ServicoDeTerminais({ pty: new PtyDoSistema(), gerarId: randomUUID, agora: () => new Date() });
+
   const servico = new ServicoDeOrquestracao({
     repositorio,
-    motor: new MotorClaudeCodeCli(new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro)),
+    motor: new MotorClaudeCodeCli(
+      new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro, undefined, rastreador),
+    ),
     execucoes,
     publicador: canal,
     anexos,
@@ -194,6 +229,15 @@ async function iniciar(): Promise<void> {
     // mesmo registro de processos, e as esperas usam o relógio de verdade.
     diagnosticador: new DiagnosticadorDoClaudeNoSistema(registro),
     agendador: agendadorDoRelogio,
+    // Removido o Orquestrador, vão junto os terminais do canvas ligados a ele
+    // e os processos que os agentes dele deixaram rodando.
+    aoRemover: async (orquestradorId) => {
+      const fechados = terminais.encerrarDoOrquestrador(orquestradorId);
+      const encerrados = await rastreador.encerrarDoOrquestrador(orquestradorId);
+      if (fechados + encerrados > 0) {
+        console.log(`[orquestracao] Removido ${orquestradorId}: ${fechados} terminal(is) e ${encerrados} processo(s) encerrados.`);
+      }
+    },
   });
 
   const interrompidos = await servico.interromperTurnosPendentes();
@@ -214,7 +258,10 @@ async function iniciar(): Promise<void> {
   const canalDoChat = new CanalDoChat();
   const servicoDeChat = new ServicoDeChat({
     repositorio: repositorioDoChat,
-    motor: new MotorDeChatClaudeCodeCli(new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro)),
+    // O chat roda comandos como os Orquestradores: o que ele deixar rodando também é acompanhado.
+    motor: new MotorDeChatClaudeCodeCli(
+      new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro, undefined, rastreador),
+    ),
     projetos: projetosDoChat,
     // dados/anexos/chat/: o mesmo armazém dos Orquestradores, com a chave "chat".
     anexos,
@@ -233,6 +280,7 @@ async function iniciar(): Promise<void> {
 
   // Melhorar prompt: chamada curta ao Claude Code (Haiku, sem ferramentas). O
   // mesmo controle dos turnos: ao desligar, a melhoria em andamento é cancelada.
+  // Sem ferramentas não deixa nada rodando: fica fora do rastreador.
   const servicoDeMelhoria = new ServicoDeMelhoriaDePrompt({
     motor: new MotorDeMelhoriaDePromptClaudeCodeCli(new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro)),
     execucoes,
@@ -242,9 +290,6 @@ async function iniciar(): Promise<void> {
 
   // Artefatos: coleta o que os agentes gravam na pasta de entrada e serve na tela.
   const artefatos = await montarArtefatos({ pastaDeDados });
-
-  // Terminais interativos do canvas: shells do usuário num pseudoterminal.
-  const terminais = new ServicoDeTerminais({ pty: new PtyDoSistema(), gerarId: randomUUID, agora: () => new Date() });
 
   // A tela consulta /api/saude a cada poucos segundos para saber se o servidor
   // está no ar. O instante de início denuncia um reinício: os pedidos que
@@ -324,20 +369,44 @@ async function iniciar(): Promise<void> {
   });
   servidor.on("upgrade", conexaoDosTerminais.aoPedirUpgrade);
 
+  let desligando = false;
   const desligar = (sinal: string): void => {
+    if (desligando) {
+      return;
+    }
+    desligando = true;
     const cancelados = execucoes.cancelarTodas();
     console.log(`[${sinal}] Encerrando${cancelados > 0 ? ` e cancelando ${cancelados} turno(s)` : ""}.`);
     terminais.encerrarTodos();
     conexaoDosTerminais.encerrar();
     servidor.close();
+    monitor.parar();
+    rastreador.parar();
     artefatos
       .encerrar()
       .catch((erro: unknown) => console.warn("[artefatos] Falha ao encerrar a coleta:", erro));
-    // Tempo para o taskkill derrubar os processos e o histórico ser gravado.
-    setTimeout(() => process.exit(0), cancelados > 0 ? 2_000 : 200);
+    // Fechar o app derruba o que os agentes deixaram rodando (ADR-38), com um
+    // limite: a listagem no Windows leva 1–2 s.
+    const limite = new Promise<number>((resolver) => setTimeout(() => resolver(0), 5_000));
+    void Promise.race([rastreador.encerrarTodos(), limite])
+      .then((encerrados) => {
+        if (encerrados > 0) {
+          console.log(`[processos] ${encerrados} processo(s) deixado(s) pelos agentes foram encerrados.`);
+        }
+      })
+      .catch((erro: unknown) => console.warn("[processos] Falha ao encerrar os processos deixados:", erro))
+      // Tempo para o taskkill derrubar os processos e o histórico ser gravado.
+      .finally(() => setTimeout(() => process.exit(0), cancelados > 0 ? 2_000 : 200));
   };
   process.once("SIGINT", () => desligar("SIGINT"));
   process.once("SIGTERM", () => desligar("SIGTERM"));
+  // No app, o Electron pede o desligamento por mensagem: no Windows ele não
+  // tem como mandar SIGTERM, e o `taskkill /F` não daria tempo ao `desligar`.
+  portaDoProcessoPai()?.on("message", (evento) => {
+    if (ehPedidoDeDesligar(evento.data)) {
+      desligar("app");
+    }
+  });
 
   // Um erro que escapou de todo tratamento: derruba os agentes (no Windows
   // eles sobreviveriam ao servidor) e sai com código de erro, para o app

@@ -10,13 +10,18 @@ export function ehCapturaDeTela(nome: string): boolean {
   return /^tela-.+\.jpg$/i.test(nome);
 }
 
+/**
+ * Imagem anexada ao prompt e ainda não enviada. Guarda só o arquivo (`Blob`):
+ * o base64 é gerado no envio (`imagensParaEnvio`). A `previa` é uma URL
+ * `blob:` e precisa ser liberada com `liberarImagens` ao sair de uso.
+ */
 export interface ImagemAnexada {
   id: string;
   nome: string;
   tipoDeMidia: TipoDeImagem;
   tamanhoEmBytes: number;
-  base64: string;
-  /** `data:` URL para a miniatura antes do envio. */
+  arquivo: Blob;
+  /** URL `blob:` para a miniatura antes do envio. */
   previa: string;
 }
 
@@ -42,26 +47,74 @@ export function problemaDaImagem(
 }
 
 export function lerImagem(arquivo: File): Promise<ImagemAnexada> {
+  const tipoDeMidia = arquivo.type;
+  if (!ehTipoDeImagem(tipoDeMidia)) {
+    return Promise.reject(new Error(`"${arquivo.name}" não é uma imagem aceita.`));
+  }
+  try {
+    return Promise.resolve({
+      id: crypto.randomUUID(),
+      // Imagens coladas chegam como "image.png"; o nome serve só de rótulo.
+      nome: arquivo.name || "imagem colada",
+      tipoDeMidia,
+      tamanhoEmBytes: arquivo.size,
+      arquivo,
+      previa: URL.createObjectURL(arquivo),
+    });
+  } catch {
+    return Promise.reject(new Error(`Não foi possível ler "${arquivo.name}".`));
+  }
+}
+
+/**
+ * Quadro da captura de tela (chega em base64 pelo IPC do Electron): vira
+ * `Blob` uma vez e a string não fica guardada. No envio, o base64 é refeito
+ * a partir dos mesmos bytes, idêntico ao recebido.
+ */
+export function imagemDaCaptura(captura: { nome: string; tipoDeMidia: TipoDeImagem; base64: string }): ImagemAnexada {
+  const binario = atob(captura.base64);
+  const bytes = new Uint8Array(binario.length);
+  for (let indice = 0; indice < binario.length; indice += 1) {
+    bytes[indice] = binario.charCodeAt(indice);
+  }
+  const arquivo = new Blob([bytes], { type: captura.tipoDeMidia });
+  return {
+    id: crypto.randomUUID(),
+    nome: captura.nome,
+    tipoDeMidia: captura.tipoDeMidia,
+    tamanhoEmBytes: arquivo.size,
+    arquivo,
+    previa: URL.createObjectURL(arquivo),
+  };
+}
+
+/** O conteúdo do arquivo em base64 (sem o prefixo `data:`), como o servidor espera. */
+export function base64DoArquivo(arquivo: Blob, nome: string): Promise<string> {
   return new Promise((resolver, rejeitar) => {
     const leitor = new FileReader();
-    leitor.onerror = () => rejeitar(new Error(`Não foi possível ler "${arquivo.name}".`));
+    leitor.onerror = () => rejeitar(new Error(`Não foi possível ler "${nome}".`));
     leitor.onload = () => {
-      const previa = String(leitor.result);
-      const tipoDeMidia = arquivo.type;
-      if (!ehTipoDeImagem(tipoDeMidia)) {
-        rejeitar(new Error(`"${arquivo.name}" não é uma imagem aceita.`));
-        return;
-      }
-      resolver({
-        id: crypto.randomUUID(),
-        // Imagens coladas chegam como "image.png"; o nome serve só de rótulo.
-        nome: arquivo.name || "imagem colada",
-        tipoDeMidia,
-        tamanhoEmBytes: arquivo.size,
-        base64: previa.slice(previa.indexOf(",") + 1),
-        previa,
-      });
+      const endereco = String(leitor.result);
+      resolver(endereco.slice(endereco.indexOf(",") + 1));
     };
     leitor.readAsDataURL(arquivo);
   });
+}
+
+/** Monta o que vai ao servidor: o base64 só existe a partir daqui, no envio. */
+export function imagensParaEnvio(
+  imagens: readonly ImagemAnexada[],
+): Promise<{ nome: string; tipoDeMidia: TipoDeImagem; base64: string }[]> {
+  return Promise.all(
+    imagens.map(async (imagem) => ({
+      nome: imagem.nome,
+      tipoDeMidia: imagem.tipoDeMidia,
+      base64: await base64DoArquivo(imagem.arquivo, imagem.nome),
+    })),
+  );
+}
+
+/** Libera as miniaturas (URLs `blob:`) das imagens que saíram de uso. */
+export function liberarImagens(imagens: readonly ImagemAnexada[]): void {
+  for (const imagem of imagens) URL.revokeObjectURL(imagem.previa);
 }
