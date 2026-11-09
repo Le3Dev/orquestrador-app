@@ -7,11 +7,17 @@ import {
   type EsforcosHerdados,
   type NivelDePermissao,
   type NomeDaPredefinicao,
+  type SelecaoDeSubagentesProntos,
   TAMANHO_MAXIMO_DAS_INSTRUCOES,
 } from "../shared/api/tipos";
 import { type EscalaDaLetra, OPCOES_DA_ESCALA_DA_LETRA } from "../shared/canvas/layout";
 import { AVISO_DO_ULTRACODE, ROTULOS_DAS_PERMISSOES } from "../shared/formatacao";
-import { ajudaDaPredefinicao, useEsforcosHerdados, usePredefinicoes } from "../shared/hooks/useDadosDaConfiguracao";
+import {
+  ajudaDaPredefinicao,
+  useEsforcosHerdados,
+  usePredefinicoes,
+  useSubagentesProntos,
+} from "../shared/hooks/useDadosDaConfiguracao";
 import { DICA_DAS_VARIAVEIS, tamanhoDasInstrucoes } from "../shared/instrucoes";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../shared/modelos";
 import { ChipDeEsforco, ChipDeQuantidade } from "./canvas/ChipsDaCriacao";
@@ -21,6 +27,14 @@ import { PreviaDoPromptFinal } from "./PreviaDoPromptFinal";
 const PERMISSOES: readonly NivelDePermissao[] = ["leitura", "edicao", "edicao_e_comandos"];
 
 type Menu = "esforcoDoOrquestrador" | "esforcoDosSubagentes" | "quantidade";
+
+type ModoDosProntos = "todos" | "nenhum" | "escolher";
+
+const MODOS_DOS_PRONTOS: readonly { valor: ModoDosProntos; titulo: string }[] = [
+  { valor: "todos", titulo: "Todos" },
+  { valor: "nenhum", titulo: "Nenhum" },
+  { valor: "escolher", titulo: "Escolher" },
+];
 
 interface Props {
   valor: DadosDaConfiguracao;
@@ -51,8 +65,8 @@ interface Props {
 
 /**
  * As linhas da ⚙ do terminal, com a mesma cara da criação (NoRascunho):
- * permissão, modelos com os chips de esforço e quantidade, opções, tamanho da
- * letra e instruções. Pasta e nome não aparecem aqui: a pasta não muda depois
+ * permissão, modelos com os chips de esforço e quantidade, subagentes prontos,
+ * opções, tamanho da letra e instruções. Pasta e nome não aparecem aqui: a pasta não muda depois
  * de criado, e o nome (rota própria) fica no ⚙ do terminal, acima destas linhas.
  * Precisa estar dentro de um `.corpo-da-criacao` (a consulta de contêiner
  * empilha as linhas e os menus dos chips viram de lado pela borda dele).
@@ -71,6 +85,8 @@ export function CamposDaConfiguracao({
   const idDaLetra = useId();
   const predefinicoes = usePredefinicoes();
   const herdados = useEsforcosHerdados(buscarEsforcoHerdado);
+  const biblioteca = useSubagentesProntos();
+  const idDosProntos = useId();
   const [menuAberto, setMenuAberto] = useState<Menu | null>(null);
   const [aplicando, setAplicando] = useState(false);
   const [erroDaPredefinicao, setErroDaPredefinicao] = useState<string | null>(null);
@@ -81,9 +97,38 @@ export function CamposDaConfiguracao({
   const commitSemComandos = valor.permitirCommitEPush && !comandos;
   const tamanho = tamanhoDasInstrucoes(valor.instrucoesPersonalizadas);
   const passouDoLimite = tamanho > TAMANHO_MAXIMO_DAS_INSTRUCOES;
+  // Ausente (orquestrador antigo): recebe todos, como antes da opção.
+  const prontos: SelecaoDeSubagentesProntos = valor.subagentesProntos ?? "todos";
+  const modoDosProntos: ModoDosProntos = Array.isArray(prontos) ? "escolher" : prontos;
 
   function mudar<Campo extends keyof DadosDaConfiguracao>(campo: Campo, novo: DadosDaConfiguracao[Campo]): void {
     aoMudar({ ...valor, [campo]: novo });
+  }
+
+  /** "Escolher" começa do que ele recebe hoje: todos marcados, ou nenhum. */
+  function mudarModoDosProntos(modo: ModoDosProntos): void {
+    if (modo === modoDosProntos) {
+      return;
+    }
+    if (modo !== "escolher") {
+      mudar("subagentesProntos", modo);
+      return;
+    }
+    mudar("subagentesProntos", prontos === "todos" ? (biblioteca ?? []).map((subagente) => subagente.nome) : []);
+  }
+
+  /** Marca ou desmarca um; a lista sai na ordem da biblioteca e sem nomes que já não existem. */
+  function alternarPronto(nome: string, marcado: boolean): void {
+    const escolhidos = new Set(Array.isArray(prontos) ? prontos : []);
+    if (marcado) {
+      escolhidos.add(nome);
+    } else {
+      escolhidos.delete(nome);
+    }
+    mudar(
+      "subagentesProntos",
+      (biblioteca ?? []).map((subagente) => subagente.nome).filter((existente) => escolhidos.has(existente)),
+    );
   }
 
   /** Um menu aberto por vez: abrir um fecha o outro. */
@@ -207,6 +252,51 @@ export function CamposDaConfiguracao({
             />
           </div>
           <AvisoDoEsforcoHerdado esforco={valor.esforcoDosSubagentes} herdado={herdados?.subagentes ?? null} />
+        </div>
+      </div>
+
+      <div className="linha-da-criacao">
+        <Rotulo
+          id={idDosProntos}
+          titulo="Subagentes prontos"
+          dica="Quais ele pode usar."
+          explicacao="Os subagentes prontos são criados no botão Subagentes da barra. Todos inclui os que você criar depois; Nenhum deixa só o subagente padrão; Escolher libera só os marcados. Vale já no próximo pedido."
+          alinharAoTopo
+        />
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <div className="permissoes-da-criacao w-fit" role="radiogroup" aria-labelledby={idDosProntos}>
+            {MODOS_DOS_PRONTOS.map((opcao) => (
+              <label key={opcao.valor} className="opcao-da-permissao">
+                <input
+                  type="radio"
+                  name={`${idDosProntos}-modo`}
+                  value={opcao.valor}
+                  checked={modoDosProntos === opcao.valor}
+                  onChange={() => mudarModoDosProntos(opcao.valor)}
+                />
+                {opcao.titulo}
+              </label>
+            ))}
+          </div>
+          {biblioteca !== null && biblioteca.length === 0 ? (
+            <span className="text-[12px] text-secondary">Nenhum subagente pronto criado ainda.</span>
+          ) : (
+            Array.isArray(prontos) &&
+            biblioteca !== null && (
+              <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1" role="group" aria-label="Subagentes prontos escolhidos">
+                {biblioteca.map((subagente) => (
+                  <label key={subagente.nome} className="flex min-w-0 items-center gap-1.5 text-[12.5px]" title={subagente.descricao}>
+                    <input
+                      type="checkbox"
+                      checked={prontos.includes(subagente.nome)}
+                      onChange={(evento) => alternarPronto(subagente.nome, evento.target.checked)}
+                    />
+                    <span className="mono truncate">{subagente.nome}</span>
+                  </label>
+                ))}
+              </div>
+            )
+          )}
         </div>
       </div>
 

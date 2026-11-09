@@ -270,7 +270,8 @@ function useProximoDaFilaACaminho(ultimoTurno: TurnoNaTela | undefined, temFila:
 
 /**
  * Só os campos que o formulário mudou em relação a `antes`. A quantidade de
- * subagentes é um objeto: compara modo e limite, não a referência.
+ * subagentes é um objeto e a escolha dos subagentes prontos pode ser uma
+ * lista: compara o conteúdo, não a referência.
  */
 function camposAlterados(antes: DadosDaConfiguracao, depois: DadosDaConfiguracao): Partial<DadosDaConfiguracao> {
   const alterados: Partial<DadosDaConfiguracao> = {};
@@ -279,7 +280,9 @@ function camposAlterados(antes: DadosDaConfiguracao, depois: DadosDaConfiguracao
       campo === "quantidadeDeSubagentes"
         ? antes.quantidadeDeSubagentes.modo === depois.quantidadeDeSubagentes.modo &&
           antes.quantidadeDeSubagentes.limite === depois.quantidadeDeSubagentes.limite
-        : antes[campo] === depois[campo];
+        : campo === "subagentesProntos"
+          ? JSON.stringify(antes.subagentesProntos ?? "todos") === JSON.stringify(depois.subagentesProntos ?? "todos")
+          : antes[campo] === depois[campo];
     if (!igual) {
       Object.assign(alterados, { [campo]: depois[campo] });
     }

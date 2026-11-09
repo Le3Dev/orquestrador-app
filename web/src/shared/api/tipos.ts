@@ -36,7 +36,18 @@ export interface DadosDaConfiguracao {
    * por padrão: aí vale o padrão global (`DadosDasPreferencias.instrucoesPadrao`), se houver.
    */
   instrucoesPersonalizadas: string;
+  /**
+   * Quais subagentes prontos (das preferências) o orquestrador recebe. Ausente
+   * (servidores e eventos anteriores à opção) vale "todos".
+   */
+  subagentesProntos?: SelecaoDeSubagentesProntos;
 }
+
+/**
+ * Os subagentes prontos que um orquestrador recebe: todos, nenhum ou só os da
+ * lista (por nome). Nomes que não existem mais nas preferências são ignorados.
+ */
+export type SelecaoDeSubagentesProntos = "todos" | "nenhum" | string[];
 
 /** Limite das instruções personalizadas e das padrão, como o servidor confere (já sem espaço sobrando). */
 export const TAMANHO_MAXIMO_DAS_INSTRUCOES = 4_000;

@@ -2,7 +2,13 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { type ComponentProps, useState } from "react";
 
 import { api, ErroDaApi } from "../shared/api/cliente";
-import type { DadosDaConfiguracao, DadosDaPredefinicao, EsforcosHerdados } from "../shared/api/tipos";
+import type {
+  DadosDaConfiguracao,
+  DadosDaPredefinicao,
+  DadosDasPreferencias,
+  DadosDoSubagentePronto,
+  EsforcosHerdados,
+} from "../shared/api/tipos";
 import { CamposDaConfiguracao } from "./CamposDaConfiguracao";
 
 const configuracao: DadosDaConfiguracao = {
@@ -67,6 +73,8 @@ describe("CamposDaConfiguracao", () => {
   beforeEach(() => {
     // Por padrão as predefinições nunca chegam: os testes que não tratam delas ficam sem o botão.
     vi.spyOn(api, "listarPredefinicoes").mockReturnValue(new Promise<DadosDaPredefinicao[]>(() => undefined));
+    // Idem as preferências: sem a biblioteca, a escolha dos subagentes prontos fica sem caixas.
+    vi.spyOn(api, "lerPreferencias").mockReturnValue(new Promise<DadosDasPreferencias>(() => undefined));
   });
 
   afterEach(() => vi.restoreAllMocks());
@@ -325,6 +333,82 @@ describe("CamposDaConfiguracao", () => {
         "Não foi possível aplicar o modo econômico: Orquestrador não encontrado.",
       );
       expect(aoMudar).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("subagentes prontos", () => {
+    const pronto = (nome: string): DadosDoSubagentePronto => ({
+      nome,
+      descricao: `Faz ${nome}.`,
+      prompt: "x",
+      modelo: "herdar",
+    });
+    const grupo = () => screen.getByRole("radiogroup", { name: "Subagentes prontos" });
+    const caixas = () => screen.getByRole("group", { name: "Subagentes prontos escolhidos" });
+
+    function comBiblioteca(nomes: string[]) {
+      vi.spyOn(api, "lerPreferencias").mockResolvedValue({
+        instrucoesPadrao: "",
+        subagentesProntos: nomes.map(pronto),
+      });
+    }
+
+    it("sem a opção salva (orquestrador antigo), marca Todos e não mostra caixas", async () => {
+      comBiblioteca(["revisor", "testador"]);
+      renderizar();
+
+      expect(within(grupo()).getAllByRole("radio").map((opcao) => opcao.closest("label")?.textContent)).toEqual([
+        "Todos",
+        "Nenhum",
+        "Escolher",
+      ]);
+      expect(within(grupo()).getByRole("radio", { name: "Todos" })).toBeChecked();
+      await act(async () => Promise.resolve());
+      expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    });
+
+    it("Nenhum envia \"nenhum\"", () => {
+      const { aoMudar } = renderizar();
+
+      fireEvent.click(within(grupo()).getByRole("radio", { name: "Nenhum" }));
+      expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, subagentesProntos: "nenhum" });
+    });
+
+    it("Escolher começa com todos marcados e envia só os que ficarem", async () => {
+      comBiblioteca(["revisor", "testador", "documentador"]);
+      const { aoMudar } = renderizar();
+      await act(async () => Promise.resolve());
+
+      fireEvent.click(within(grupo()).getByRole("radio", { name: "Escolher" }));
+      expect(aoMudar).toHaveBeenLastCalledWith({
+        ...configuracao,
+        subagentesProntos: ["revisor", "testador", "documentador"],
+      });
+      expect(within(caixas()).getAllByRole("checkbox")).toHaveLength(3);
+
+      fireEvent.click(within(caixas()).getByRole("checkbox", { name: "testador" }));
+      expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, subagentesProntos: ["revisor", "documentador"] });
+    });
+
+    it("com uma lista salva, marca só os dela; nomes que saíram das preferências somem ao mudar", async () => {
+      comBiblioteca(["revisor", "testador"]);
+      const { aoMudar } = renderizar({ subagentesProntos: ["testador", "apagado"] });
+
+      expect(within(grupo()).getByRole("radio", { name: "Escolher" })).toBeChecked();
+      await screen.findByRole("group", { name: "Subagentes prontos escolhidos" });
+      expect(within(caixas()).getByRole("checkbox", { name: "testador" })).toBeChecked();
+      expect(within(caixas()).getByRole("checkbox", { name: "revisor" })).not.toBeChecked();
+
+      fireEvent.click(within(caixas()).getByRole("checkbox", { name: "revisor" }));
+      expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, subagentesProntos: ["revisor", "testador"] });
+    });
+
+    it("sem nenhum subagente pronto criado, avisa no lugar das caixas", async () => {
+      comBiblioteca([]);
+      renderizar({ subagentesProntos: [] });
+
+      expect(await screen.findByText("Nenhum subagente pronto criado ainda.")).toBeInTheDocument();
+      expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     });
   });
 

@@ -100,6 +100,14 @@ const esquemaDaConfiguracao = z.object({
   // recebem erro, e os campos são ignorados.
   // Opcional também na criação: ausente vale "" (sem instruções próprias).
   instrucoesPersonalizadas: esquemaDeInstrucoes("As instruções personalizadas").optional(),
+  // Opcional também na criação: ausente vale "todos". Os nomes da lista são
+  // conferidos pelo domínio (`selecaoDeSubagentesProntosValida`); os que não
+  // existem mais nas preferências são ignorados no pedido.
+  subagentesProntos: z
+    .union([z.enum(["todos", "nenhum"]), z.array(z.string())], {
+      error: 'Os subagentes prontos do orquestrador devem ser "todos", "nenhum" ou uma lista de nomes.',
+    })
+    .optional(),
 });
 
 const esquemaDoNome = z
@@ -545,7 +553,7 @@ export function criarOrquestradoresRoutes({
           "<pasta de artefatos>",
           instrucoes,
           false,
-          servico.subagentesProntos(),
+          servico.subagentesProntosPara(configuracao),
         ),
         origemDasInstrucoes: instrucoes?.origem ?? null,
       });

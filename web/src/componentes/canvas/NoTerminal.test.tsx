@@ -142,6 +142,7 @@ describe("PainelDeConfiguracao", () => {
     vi.spyOn(api, "listarPredefinicoes").mockReturnValue(new Promise(() => undefined));
     vi.spyOn(api, "lerEsforcoHerdadoDoOrquestrador").mockReturnValue(new Promise(() => undefined));
     vi.spyOn(api, "lerEsforcoHerdado").mockReturnValue(new Promise(() => undefined));
+    vi.spyOn(api, "lerPreferencias").mockReturnValue(new Promise(() => undefined));
   });
 
   afterEach(() => vi.restoreAllMocks());
@@ -182,6 +183,35 @@ describe("PainelDeConfiguracao", () => {
 
     await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
     expect(alterar).toHaveBeenCalledWith("o1", { esforcoDosSubagentes: "baixo" });
+  });
+
+  it("a escolha dos subagentes prontos vai sozinha no PATCH; marcar e desmarcar de volta não envia nada", async () => {
+    vi.spyOn(api, "lerPreferencias").mockResolvedValue({
+      instrucoesPadrao: "",
+      subagentesProntos: [
+        { nome: "revisor", descricao: "Revisa.", prompt: "x", modelo: "herdar" },
+        { nome: "testador", descricao: "Testa.", prompt: "x", modelo: "herdar" },
+      ],
+    });
+    const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+    const { aoFechar } = renderizar(orquestrador({ subagentesProntos: ["revisor"] }));
+    const caixa = async (nome: string) =>
+      within(await screen.findByRole("group", { name: "Subagentes prontos escolhidos" })).getByRole("checkbox", { name: nome });
+
+    fireEvent.click(await caixa("testador"));
+    fireEvent.click(await caixa("testador"));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+    expect(alterar).not.toHaveBeenCalled();
+
+    fireEvent.click(await caixa("revisor"));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(2));
+    expect(alterar).toHaveBeenCalledWith("o1", { subagentesProntos: [] });
+
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Subagentes prontos" })).getByRole("radio", { name: "Nenhum" }));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    await waitFor(() => expect(alterar).toHaveBeenLastCalledWith("o1", { subagentesProntos: "nenhum" }));
   });
 
   it("carrega as instruções salvas e envia no PATCH só as instruções editadas", async () => {

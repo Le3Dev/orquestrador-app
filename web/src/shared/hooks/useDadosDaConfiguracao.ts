@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api/cliente";
-import type { DadosDaPredefinicao, EsforcosHerdados } from "../api/tipos";
+import type { DadosDaPredefinicao, DadosDoSubagentePronto, EsforcosHerdados } from "../api/tipos";
 import { descreverAlteracoesDaConfiguracao } from "../formatacao";
 
 // Usados pela ⚙ do terminal (CamposDaConfiguracao) e pela criação (NoRascunho).
@@ -30,6 +30,29 @@ export function usePredefinicoes(): DadosDaPredefinicao[] {
     };
   }, []);
   return predefinicoes;
+}
+
+/**
+ * Os subagentes prontos das preferências, para escolher os de um orquestrador.
+ * Nulo enquanto carrega ou se a leitura falhar: a escolha segue sem as caixas.
+ */
+export function useSubagentesProntos(): DadosDoSubagentePronto[] | null {
+  const [subagentes, setSubagentes] = useState<DadosDoSubagentePronto[] | null>(null);
+  useEffect(() => {
+    let ativo = true;
+    api
+      .lerPreferencias()
+      .then((preferencias) => {
+        if (ativo) {
+          setSubagentes(preferencias.subagentesProntos);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      ativo = false;
+    };
+  }, []);
+  return subagentes;
 }
 
 /**

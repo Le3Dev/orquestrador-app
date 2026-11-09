@@ -920,6 +920,51 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(previa.mensagem).toContain('  - "revisor": Revisa código.');
     });
 
+    it("o POST e o PATCH aceitam a escolha dos subagentes prontos, e a prévia segue a escolha", async () => {
+      const pronto = (nome: string) => ({ nome, descricao: `Faz ${nome}.`, prompt: "x" });
+      await requisitar("PATCH", "/preferencias", { subagentesProntos: [pronto("revisor"), pronto("testador")] });
+
+      const criado = await postar("/orquestradores", {
+        nome: "Novo",
+        pastaDeTrabalho: raiz,
+        ...configuracaoBasica,
+        subagentesProntos: ["testador"],
+      });
+      expect(criado.status).toBe(201);
+      const corpo = (await criado.json()) as { id: string; configuracao: { subagentesProntos: unknown } };
+      expect(corpo.configuracao.subagentesProntos).toEqual(["testador"]);
+
+      const semCampo = (await (
+        await postar("/orquestradores", { nome: "Antigo", pastaDeTrabalho: raiz, ...configuracaoBasica })
+      ).json()) as { configuracao: { subagentesProntos: unknown } };
+      expect(semCampo.configuracao.subagentesProntos).toBe("todos");
+
+      const editado = await requisitar("PATCH", `/orquestradores/${corpo.id}/configuracao`, { subagentesProntos: "nenhum" });
+      expect(editado.status).toBe(200);
+      expect(((await editado.json()) as { configuracao: { subagentesProntos: unknown } }).configuracao.subagentesProntos).toBe(
+        "nenhum",
+      );
+
+      const previa = async (subagentesProntos: unknown) =>
+        ((await (await postar("/previa-do-prompt", { configuracao: { ...configuracaoBasica, subagentesProntos } })).json()) as {
+          mensagem: string;
+        }).mensagem;
+      expect(await previa("nenhum")).not.toContain("Subagentes prontos");
+      expect(await previa(["testador"])).toContain('  - "testador": Faz testador.');
+      expect(await previa(["testador"])).not.toContain('"revisor"');
+      expect(await previa(undefined)).toContain('  - "revisor": Faz revisor.');
+    });
+
+    it.each<[unknown]>([["alguns"], [42], [[1]], [Array.from({ length: 11 }, (_, i) => `s${i}`)]])(
+      "o PATCH recusa uma escolha de subagentes prontos inválida (%j) com 400",
+      async (subagentesProntos) => {
+        const resposta = await requisitar("PATCH", `/orquestradores/${orquestrador.id}/configuracao`, { subagentesProntos });
+
+        expect(resposta.status).toBe(400);
+        expect(orquestrador.configuracao.subagentesProntos).toBe("todos");
+      },
+    );
+
     it.each([
       [[{ nome: "executor", descricao: "a", prompt: "b" }], 'O nome "executor" é reservado; escolha outro.'],
       [[{ nome: "a-b", descricao: "a" }], "O prompt do subagente pronto deve ser um texto."],

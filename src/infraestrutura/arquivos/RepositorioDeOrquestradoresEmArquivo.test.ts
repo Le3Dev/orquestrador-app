@@ -60,6 +60,24 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
     expect(reaberto.buscarPorId("b")?.registrarInstrucoesDoPedido(false)).toEqual({ revogarAnteriores: false });
   });
 
+  it("reabre a escolha dos subagentes prontos de cada orquestrador", async () => {
+    const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+    const comLista = novoOrquestrador("a");
+    comLista.alterarConfiguracao({ subagentesProntos: ["revisor", "testador"] });
+    const semNenhum = novoOrquestrador("b");
+    semNenhum.alterarConfiguracao({ subagentesProntos: "nenhum" });
+    await repositorio.salvar(comLista);
+    await repositorio.salvar(semNenhum);
+    await repositorio.salvar(novoOrquestrador("c"));
+    await repositorio.aguardarGravacoes();
+
+    const reaberto = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+
+    expect(reaberto.buscarPorId("a")?.configuracao.subagentesProntos).toEqual(["revisor", "testador"]);
+    expect(reaberto.buscarPorId("b")?.configuracao.subagentesProntos).toBe("nenhum");
+    expect(reaberto.buscarPorId("c")?.configuracao.subagentesProntos).toBe("todos");
+  });
+
   it("reabre os orquestradores e os eventos exatamente como ficaram", async () => {
     const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
     const orquestrador = novoOrquestrador("a");
@@ -169,6 +187,8 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
           esforcoDoOrquestrador: "padrao",
           esforcoDosSubagentes: "padrao",
           instrucoesPersonalizadas: "",
+          // Gravado antes da escolha dos subagentes prontos: recebe todos, como antes.
+          subagentesProntos: "todos",
         },
       });
       expect(dados?.turnos[0]).toMatchObject({
@@ -240,6 +260,13 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
       await gravarArquivo("sem-turnos", JSON.stringify(semTurnos));
       await gravarArquivo("tipo-errado", JSON.stringify({ ...arquivoAntigo(), sessaoIniciada: "sim" }));
       await gravarArquivo(
+        "prontos-errados",
+        JSON.stringify({
+          ...arquivoAntigo(),
+          configuracao: { ...(arquivoAntigo().configuracao as object), subagentesProntos: "alguns" },
+        }),
+      );
+      await gravarArquivo(
         "limite-errado",
         JSON.stringify({
           ...arquivoAntigo(),
@@ -255,11 +282,11 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
       const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
 
       expect(repositorio.listar()).toEqual([]);
-      for (const id of ["sem-turnos", "tipo-errado", "limite-errado"]) {
+      for (const id of ["sem-turnos", "tipo-errado", "prontos-errados", "limite-errado"]) {
         expect(existsSync(path.join(pastaDo(id), "orquestrador.json"))).toBe(false);
         expect(existsSync(path.join(pastaDo(id), "orquestrador.ilegivel.json"))).toBe(true);
       }
-      expect(avisos).toHaveBeenCalledTimes(3);
+      expect(avisos).toHaveBeenCalledTimes(4);
       avisos.mockRestore();
 
       // O arquivo renomeado não é lido de novo: reabrir não repete o aviso.

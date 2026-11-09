@@ -11,6 +11,7 @@ import { ehModeloClaude, ModeloClaude } from "./ModeloClaude";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { ehNivelDePermissao, NivelDePermissao } from "./NivelDePermissao";
 import { DadosDaQuantidade, QuantidadeDeSubagentes } from "./QuantidadeDeSubagentes";
+import { SelecaoDeSubagentesProntos, selecaoDeSubagentesProntosValida } from "./SubagentesProntos";
 
 export interface DadosDaConfiguracao {
   modeloDoOrquestrador: ModeloClaude;
@@ -40,6 +41,12 @@ export interface DadosDaConfiguracao {
    * `paraDados` sempre as preenche, já normalizadas.
    */
   instrucoesPersonalizadas?: string | undefined;
+  /**
+   * Quais subagentes prontos das preferências este Orquestrador recebe.
+   * Ausente nas configurações gravadas antes de a opção existir: vale
+   * `"todos"`. `paraDados` sempre a preenche.
+   */
+  subagentesProntos?: SelecaoDeSubagentesProntos | undefined;
 }
 
 /** Só os campos informados mudam; os ausentes mantêm o valor atual. */
@@ -64,6 +71,7 @@ export class ConfiguracaoDoOrquestrador {
     public readonly esforcoDoOrquestrador: EsforcoDeRaciocinio,
     public readonly esforcoDosSubagentes: EsforcoDeRaciocinio,
     public readonly instrucoesPersonalizadas: string,
+    public readonly subagentesProntos: SelecaoDeSubagentesProntos,
   ) {}
 
   static de(dados: DadosDaConfiguracao): ConfiguracaoDoOrquestrador {
@@ -104,6 +112,7 @@ export class ConfiguracaoDoOrquestrador {
       esforcoDoOrquestrador,
       esforcoDosSubagentes,
       instrucoesPersonalizadas,
+      selecaoDeSubagentesProntosValida(dados.subagentesProntos),
     );
   }
 
@@ -138,6 +147,7 @@ export class ConfiguracaoDoOrquestrador {
       esforcoDosSubagentes: alteracoes.esforcoDosSubagentes ?? atual.esforcoDosSubagentes,
       // `""` limpa as instruções: só a ausência mantém as atuais.
       instrucoesPersonalizadas: alteracoes.instrucoesPersonalizadas ?? atual.instrucoesPersonalizadas,
+      subagentesProntos: alteracoes.subagentesProntos ?? atual.subagentesProntos,
     });
   }
 
@@ -151,6 +161,7 @@ export class ConfiguracaoDoOrquestrador {
       esforcoDoOrquestrador: this.esforcoDoOrquestrador,
       esforcoDosSubagentes: this.esforcoDosSubagentes,
       instrucoesPersonalizadas: this.instrucoesPersonalizadas,
+      subagentesProntos: Array.isArray(this.subagentesProntos) ? [...this.subagentesProntos] : this.subagentesProntos,
     };
   }
 }

@@ -1221,6 +1221,27 @@ describe("ServicoDeOrquestracao", () => {
       expect(motor.pedidos.at(-1)?.subagentesProntos).toEqual([revisor]);
     });
 
+    it("o pedido leva só os subagentes prontos que a configuração escolhe", async () => {
+      const pronto = (nome: string) => ({ nome, descricao: `Faz ${nome}.`, prompt: "x", modelo: "herdar" as const });
+      const [revisor, testador, documentador] = [pronto("revisor"), pronto("testador"), pronto("documentador")];
+      preferencias.preferencias = PreferenciasGlobais.de({ subagentesProntos: [revisor, testador, documentador] });
+      const orquestrador = await criar();
+
+      // Sem a escolha (como os orquestradores antigos): todos.
+      expect((await pedidoDoTurno(orquestrador.id)).subagentesProntos).toEqual([revisor, testador, documentador]);
+
+      await servico.alterarConfiguracao(orquestrador.id, { subagentesProntos: "nenhum" });
+      expect((await pedidoDoTurno(orquestrador.id)).subagentesProntos).toEqual([]);
+
+      // Na ordem da biblioteca; o nome que não existe mais é ignorado.
+      await servico.alterarConfiguracao(orquestrador.id, { subagentesProntos: ["documentador", "apagado", "revisor"] });
+      expect((await pedidoDoTurno(orquestrador.id)).subagentesProntos).toEqual([revisor, documentador]);
+
+      await servico.alterarConfiguracao(orquestrador.id, { subagentesProntos: "todos" });
+      expect((await pedidoDoTurno(orquestrador.id)).subagentesProntos).toEqual([revisor, testador, documentador]);
+      preferencias.preferencias = PreferenciasGlobais.vazias();
+    });
+
     it("{{pasta}} vira a pasta do turno (o worktree) e {{nome}} o nome do orquestrador", async () => {
       const orquestrador = await criar();
       const caminho = path.resolve("/dados/worktrees/abc");

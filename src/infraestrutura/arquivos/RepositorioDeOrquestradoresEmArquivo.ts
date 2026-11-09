@@ -47,6 +47,7 @@ const esquemaDoArquivo = z.object({
     esforcoDoOrquestrador: z.enum(ESFORCOS_DE_RACIOCINIO).optional(),
     esforcoDosSubagentes: z.enum(ESFORCOS_DE_RACIOCINIO).optional(),
     instrucoesPersonalizadas: z.string().optional(),
+    subagentesProntos: z.union([z.enum(["todos", "nenhum"]), z.array(z.string())]).optional(),
   }),
   turnos: z.array(
     z.object({

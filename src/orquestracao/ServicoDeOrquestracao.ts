@@ -42,7 +42,7 @@ import {
 } from "./RecuperacaoDoTurno";
 import { RepositorioDeOrquestradores } from "./RepositorioDeOrquestradores";
 import { RepositorioDePreferencias } from "./RepositorioDePreferencias";
-import { DadosDoSubagentePronto } from "./SubagentesProntos";
+import { DadosDoSubagentePronto, subagentesProntosSelecionados } from "./SubagentesProntos";
 import { AgendadorDeTarefas, agendadorDoRelogio, VigiaDoTurno } from "./VigiaDoTurno";
 
 export interface DependenciasDoServico {
@@ -221,9 +221,16 @@ export class ServicoDeOrquestracao {
     );
   }
 
-  /** A biblioteca de subagentes prontos que um pedido receberia agora. */
-  subagentesProntos(): readonly DadosDoSubagentePronto[] {
-    return this.dependencias.preferencias.atuais().subagentesProntos;
+  /**
+   * Os subagentes prontos que um pedido com esta configuração receberia
+   * agora: os da biblioteca das preferências que a seleção do Orquestrador
+   * deixa passar.
+   */
+  subagentesProntosPara(configuracao: ConfiguracaoDoOrquestrador): readonly DadosDoSubagentePronto[] {
+    return subagentesProntosSelecionados(
+      this.dependencias.preferencias.atuais().subagentesProntos,
+      configuracao.subagentesProntos,
+    );
   }
 
   async alterarConfiguracao(id: string, alteracoes: AlteracoesDaConfiguracao): Promise<Orquestrador> {
@@ -458,7 +465,7 @@ export class ServicoDeOrquestracao {
     const execucao = this.executar(orquestrador, turnoId, sinal, configuracaoDoTurno, {
       instrucoes: instrucoesDoTurno,
       revogarInstrucoesAnteriores: revogarAnteriores,
-      subagentesProntos: this.subagentesProntos(),
+      subagentesProntos: this.subagentesProntosPara(configuracaoDoTurno),
       itensLigados,
     }).finally(() => execucoes.encerrar(orquestrador.id));
     const conclusao = execucao.then(() => undefined);

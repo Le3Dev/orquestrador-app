@@ -112,6 +112,8 @@ describe("ConfiguracaoDoOrquestrador", () => {
   const esforcosPadrao = { esforcoDoOrquestrador: "padrao", esforcoDosSubagentes: "padrao" } as const;
   // Sem instruções personalizadas, o campo existe e fica vazio.
   const semInstrucoes = { instrucoesPersonalizadas: "" } as const;
+  // Sem a escolha dos subagentes prontos, recebe todos (como antes da opção).
+  const todosOsProntos = { subagentesProntos: "todos" } as const;
 
   it("nasce com commit e push desligados quando a opção não é informada", () => {
     const configuracao = ConfiguracaoDoOrquestrador.de(dados);
@@ -122,6 +124,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
       permitirCommitEPush: false,
       ...esforcosPadrao,
       ...semInstrucoes,
+      ...todosOsProntos,
     });
   });
 
@@ -139,6 +142,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
       permitirCommitEPush: true,
       ...esforcosPadrao,
       ...semInstrucoes,
+      ...todosOsProntos,
     });
     expect(ligada.com({ nivelDePermissao: "edicao" }).permitirCommitEPush).toBe(true);
     expect(ligada.com({ permitirCommitEPush: undefined }).permitirCommitEPush).toBe(true);
@@ -223,6 +227,42 @@ describe("ConfiguracaoDoOrquestrador", () => {
     });
   });
 
+  describe("subagentes prontos do orquestrador", () => {
+    it("reconstitui dados gravados antes da opção existir recebendo todos", () => {
+      const gravados = JSON.parse(JSON.stringify(dados)) as typeof dados;
+
+      expect(ConfiguracaoDoOrquestrador.de(gravados).subagentesProntos).toBe("todos");
+    });
+
+    it.each<[DadosDaConfiguracao["subagentesProntos"], unknown]>([
+      ["todos", "todos"],
+      ["nenhum", "nenhum"],
+      [[], []],
+      [["revisor", " testador ", "revisor"], ["revisor", "testador"]],
+    ])("aceita %j e guarda %j", (selecao, esperado) => {
+      expect(ConfiguracaoDoOrquestrador.de({ ...dados, subagentesProntos: selecao }).paraDados().subagentesProntos).toEqual(
+        esperado,
+      );
+    });
+
+    it("altera só a escolha informada; a ausência mantém a atual", () => {
+      const lista = ConfiguracaoDoOrquestrador.de(dados).com({ subagentesProntos: ["revisor"] });
+
+      expect(lista.subagentesProntos).toEqual(["revisor"]);
+      expect(lista.com({ nivelDePermissao: "leitura" }).subagentesProntos).toEqual(["revisor"]);
+      expect(lista.com({ subagentesProntos: "nenhum" }).subagentesProntos).toBe("nenhum");
+    });
+
+    it.each<[unknown]>([["alguns"], [3], [[1]], [[""]], [["x".repeat(41)]], [Array.from({ length: 11 }, (_, i) => `s${i}`)]])(
+      "recusa %j com erro de dados inválidos",
+      (selecao) => {
+        const invalidos = { ...dados, subagentesProntos: selecao } as unknown as DadosDaConfiguracao;
+
+        expect(() => ConfiguracaoDoOrquestrador.de(invalidos)).toThrow(ErroDeOrquestracao);
+      },
+    );
+  });
+
   describe("trivial e plano em pedidos grandes, sempre ligados (ADR-28)", () => {
     /** Configuração gravada quando as duas ainda eram opções da tela. */
     function gravadosComAsOpcoesAntigas(trivial: unknown, plano: unknown): DadosDaConfiguracao {
@@ -250,6 +290,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
           "nivelDePermissao",
           "permitirCommitEPush",
           "quantidadeDeSubagentes",
+          "subagentesProntos",
         ].sort(),
       );
     });
@@ -267,6 +308,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
         permitirCommitEPush: true,
         ...esforcosPadrao,
         ...semInstrucoes,
+        ...todosOsProntos,
       });
       expect(configuracao.paraDados()).not.toHaveProperty("permitirTrabalhoDireto");
       expect(configuracao.paraDados()).not.toHaveProperty("proporPlanoEmPedidosGrandes");
