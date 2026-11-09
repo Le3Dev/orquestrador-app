@@ -52,7 +52,8 @@ interface Props {
 /**
  * As linhas da ⚙ do terminal, com a mesma cara da criação (NoRascunho):
  * permissão, modelos com os chips de esforço e quantidade, opções, tamanho da
- * letra e instruções. Pasta e nome não aparecem: não mudam depois de criado.
+ * letra e instruções. Pasta e nome não aparecem aqui: a pasta não muda depois
+ * de criado, e o nome (rota própria) fica no ⚙ do terminal, acima destas linhas.
  * Precisa estar dentro de um `.corpo-da-criacao` (a consulta de contêiner
  * empilha as linhas e os menus dos chips viram de lado pela borda dele).
  */

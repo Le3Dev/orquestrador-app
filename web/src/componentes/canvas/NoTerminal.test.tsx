@@ -358,6 +358,89 @@ describe("PainelDeConfiguracao", () => {
     expect(opcao).toBeChecked();
   });
 
+  describe("Nome", () => {
+    const campoDoNome = () => screen.getByRole("textbox", { name: "Nome" });
+
+    it("abre no topo com o nome atual e o limite de 60; mudado, o Salvar renomeia pela rota do nome, sem PATCH", async () => {
+      const renomear = vi.spyOn(api, "renomearOrquestrador").mockResolvedValue(orquestrador());
+      const alterar = vi.spyOn(api, "alterarConfiguracao");
+      const { aoFechar, acoes } = renderizar(orquestrador());
+
+      expect(campoDoNome()).toHaveValue("Painel de salas");
+      expect(campoDoNome()).toHaveAttribute("maxLength", "60");
+      expect(campoDoNome().closest(".linha-da-criacao")).toBe(document.querySelector(".linha-da-criacao"));
+      fireEvent.change(campoDoNome(), { target: { value: "  Backlog do app  " } });
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+      await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+      expect(renomear).toHaveBeenCalledWith("o1", "Backlog do app");
+      expect(alterar).not.toHaveBeenCalled();
+      expect(acoes.recarregar).toHaveBeenCalled();
+    });
+
+    it("nome e configuração mudados: renomeia e manda no PATCH só o campo alterado", async () => {
+      const renomear = vi.spyOn(api, "renomearOrquestrador").mockResolvedValue(orquestrador());
+      const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+      const { aoFechar, opcao } = renderizar(orquestrador());
+
+      fireEvent.change(campoDoNome(), { target: { value: "Backlog do app" } });
+      fireEvent.click(opcao);
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+      await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+      expect(renomear).toHaveBeenCalledWith("o1", "Backlog do app");
+      expect(alterar).toHaveBeenCalledWith("o1", { permitirCommitEPush: true });
+    });
+
+    it("sem mudança no nome (ou só espaços em volta), a rota do nome não é chamada", async () => {
+      const renomear = vi.spyOn(api, "renomearOrquestrador");
+      const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+      const { aoFechar, opcao } = renderizar(orquestrador());
+
+      fireEvent.change(campoDoNome(), { target: { value: " Painel de salas " } });
+      fireEvent.click(opcao);
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+      await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+      expect(alterar).toHaveBeenCalledWith("o1", { permitirCommitEPush: true });
+      expect(renomear).not.toHaveBeenCalled();
+    });
+
+    it("em branco ou só espaços: o Salvar fica desabilitado e o rodapé diz por quê", () => {
+      const renomear = vi.spyOn(api, "renomearOrquestrador");
+      const { aoFechar } = renderizar(orquestrador());
+
+      fireEvent.change(campoDoNome(), { target: { value: "   " } });
+
+      expect(screen.getByText("Dê um nome ao orquestrador para salvar.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Salvar" })).toBeDisabled();
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+      expect(renomear).not.toHaveBeenCalled();
+      expect(aoFechar).not.toHaveBeenCalled();
+
+      fireEvent.change(campoDoNome(), { target: { value: "Outro" } });
+      expect(screen.getByRole("button", { name: "Salvar" })).toBeEnabled();
+      expect(screen.queryByText("Dê um nome ao orquestrador para salvar.")).not.toBeInTheDocument();
+    });
+
+    it("nome recusado pelo servidor: o erro aparece no rodapé, a configuração não é salva e o painel fica aberto", async () => {
+      vi.spyOn(api, "renomearOrquestrador").mockRejectedValue(new ErroDaApi("O nome deve ter até 60 caracteres.", 400));
+      const alterar = vi.spyOn(api, "alterarConfiguracao");
+      const { aoFechar, opcao } = renderizar(orquestrador());
+
+      fireEvent.change(campoDoNome(), { target: { value: "Novo" } });
+      fireEvent.click(opcao);
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "✗ Não foi possível renomear: O nome deve ter até 60 caracteres.",
+      );
+      expect(alterar).not.toHaveBeenCalled();
+      expect(aoFechar).not.toHaveBeenCalled();
+      expect(campoDoNome()).toHaveValue("Novo");
+    });
+  });
+
   it("excluir fica na linha Conversa, pede confirmação e, confirmado, remove e fecha o terminal", async () => {
     const remover = vi.spyOn(api, "removerOrquestrador").mockResolvedValue(null);
     const confirmar = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
@@ -805,6 +888,9 @@ describe("NoTerminal · renomear pelo nome na barra", () => {
     rerender(<Terminal canvas={{ ...canvas, conversas: new Map([["o1", renomeada]]) }} no={propsDoNo()} />);
 
     expect(nomeNaBarra("Renomeado em outra aba")).toBeInTheDocument();
+    // O ⚙ abre com o nome que a barra mostra, não com o do resumo antigo.
+    fireEvent.click(screen.getByTitle("Configurar"));
+    expect(screen.getByRole("textbox", { name: "Nome" })).toHaveValue("Renomeado em outra aba");
   });
 });
 

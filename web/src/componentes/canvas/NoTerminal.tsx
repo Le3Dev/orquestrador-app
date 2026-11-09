@@ -334,6 +334,8 @@ interface PropsDaConfiguracao {
   aoLimparConversa: () => Promise<void>;
   /** O tamanho da letra deste terminal no canvas: muda na hora, sem o Salvar (não é dado do servidor). */
   tamanhoDaLetra?: { valor: EscalaDaLetra; aoMudar: (escala: EscalaDaLetra) => void };
+  /** O nome como a barra mostra agora (o do evento chega antes do resumo); sem ele, o do resumo. */
+  nome?: string;
 }
 
 export function PainelDeConfiguracao({
@@ -343,15 +345,22 @@ export function PainelDeConfiguracao({
   aoFechar,
   aoLimparConversa,
   tamanhoDaLetra,
+  nome: nomeAtual = orquestrador.nome,
 }: PropsDaConfiguracao) {
   const { acoes } = useCanvas();
+  const idDoNome = useId();
   const [configuracao, setConfiguracao] = useState(orquestrador.configuracao);
   // A configuração com que o formulário abriu (ou a devolvida pela predefinição):
   // o Salvar manda só o que mudou desde ela, para não desfazer o que outra aba salvou.
   const [configuracaoDeOrigem, setConfiguracaoDeOrigem] = useState(orquestrador.configuracao);
+  // O nome tem rota própria: vai só se mudou desde que o painel abriu (ou desde o último renomear).
+  const [nome, setNome] = useState(nomeAtual);
+  const [nomeDeOrigem, setNomeDeOrigem] = useState(nomeAtual);
   const [erro, setErro] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
   const { id: orquestradorId, pastaDeTrabalho } = orquestrador;
+  const nomeAparado = nome.trim();
+  const nomeVazio = nomeAparado === "";
   const { recarregar } = acoes;
   const salvos = orquestrador.configuracao;
 
@@ -379,17 +388,44 @@ export function PainelDeConfiguracao({
     [orquestradorId, recarregar],
   );
 
-  /** Manda só os campos alterados; sem nenhum, não chama o servidor e só fecha. */
-  async function salvar(): Promise<void> {
+  /** Se há o que mandar ao servidor: o nome mudou ou algum campo da configuração. */
+  function temAlteracoes(): boolean {
+    return nomeAparado !== nomeDeOrigem || Object.keys(camposAlterados(configuracaoDeOrigem, configuracao)).length > 0;
+  }
+
+  /**
+   * Manda o que mudou: o nome primeiro, pela rota dele (um nome recusado não
+   * deixa a configuração salva pela metade), e depois só os campos alterados
+   * da configuração. Lança o erro do servidor; o do nome vem com o contexto.
+   */
+  async function salvarAlteracoes(): Promise<void> {
+    if (nomeAparado !== nomeDeOrigem) {
+      try {
+        await api.renomearOrquestrador(orquestradorId, nomeAparado);
+      } catch (falha) {
+        throw new Error(`Não foi possível renomear: ${mensagemDeErro(falha)}`, { cause: falha });
+      }
+      setNomeDeOrigem(nomeAparado);
+    }
     const alteracoes = camposAlterados(configuracaoDeOrigem, configuracao);
-    if (Object.keys(alteracoes).length === 0) {
+    if (Object.keys(alteracoes).length > 0) {
+      await api.alterarConfiguracao(orquestradorId, alteracoes);
+    }
+  }
+
+  /** Manda só o que mudou; sem nada, não chama o servidor e só fecha. Nome em branco não salva. */
+  async function salvar(): Promise<void> {
+    if (nomeVazio) {
+      return;
+    }
+    if (!temAlteracoes()) {
       aoFechar();
       return;
     }
     setErro(null);
     setSalvando(true);
     try {
-      await api.alterarConfiguracao(orquestrador.id, alteracoes);
+      await salvarAlteracoes();
       await acoes.recarregar();
       aoFechar();
     } catch (falha) {
@@ -430,13 +466,13 @@ export function PainelDeConfiguracao({
    * Nova conversa (confirmação antes de tudo; recusada, nada é salvo).
    */
   async function salvarEComecarConversaNova(): Promise<void> {
-    if (!window.confirm("Salvar e começar uma conversa nova? A conversa atual será arquivada.")) {
+    if (nomeVazio || !window.confirm("Salvar e começar uma conversa nova? A conversa atual será arquivada.")) {
       return;
     }
     setErro(null);
     setSalvando(true);
     try {
-      await api.alterarConfiguracao(orquestrador.id, camposAlterados(configuracaoDeOrigem, configuracao));
+      await salvarAlteracoes();
       await aoLimparConversa();
       aoFechar();
     } catch (falha) {
@@ -457,13 +493,30 @@ export function PainelDeConfiguracao({
       <div className="corpo-do-terminal corpo-da-criacao corpo-da-configuracao custom-scrollbar nodrag nowheel">
         <span className="rotulo-tecnico">configuração · vale a partir do próximo pedido</span>
         <div className="mt-2.5">
+          <div className="linha-da-criacao">
+            <Rotulo
+              htmlFor={idDoNome}
+              titulo="Nome"
+              dica="Como ele aparece no canvas."
+              explicacao={`Até ${TAMANHO_MAXIMO_DO_NOME} caracteres. Muda na barra, na doca e nos avisos; a conversa e a pasta continuam as mesmas. Também dá para renomear com clique duplo no nome da barra.`}
+            />
+            <input
+              id={idDoNome}
+              className="input campo-escuro"
+              value={nome}
+              maxLength={TAMANHO_MAXIMO_DO_NOME}
+              onChange={(evento) => setNome(evento.target.value)}
+              placeholder="Ex.: Painel de salas"
+              spellCheck={false}
+            />
+          </div>
           <CamposDaConfiguracao
             valor={configuracao}
             aoMudar={setConfiguracao}
             buscarEsforcoHerdado={buscarEsforcoHerdado}
             aplicarPredefinicao={aplicarPredefinicao}
             pastaDeTrabalho={pastaDeTrabalho}
-            nome={orquestrador.nome}
+            nome={nomeVazio ? nomeDeOrigem : nomeAparado}
             tamanhoDaLetra={tamanhoDaLetra}
           />
           <div className="linha-da-criacao">
@@ -506,6 +559,11 @@ export function PainelDeConfiguracao({
             <p className="mono texto-longo line-clamp-3 text-[11.5px] text-error" role="alert">
               ✗ {erro}
             </p>
+          ) : nomeVazio ? (
+            <span className="flex items-center gap-2 text-[12.5px] text-warning">
+              <IconeAlerta tamanho={15} className="shrink-0" />
+              Dê um nome ao orquestrador para salvar.
+            </span>
           ) : passouDoLimite ? (
             <span className="flex items-center gap-2 text-[12.5px] text-warning">
               <IconeAlerta tamanho={15} className="shrink-0" />
@@ -547,7 +605,7 @@ export function PainelDeConfiguracao({
           type="button"
           className="btn btn-cta shrink-0"
           onClick={() => void salvar()}
-          disabled={salvando || passouDoLimite}
+          disabled={salvando || passouDoLimite || nomeVazio}
         >
           {salvando ? "Salvando…" : "Salvar"}
         </button>
@@ -1699,6 +1757,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
             aoFechar={() => setConfigurando(false)}
             aoLimparConversa={iniciarConversaNova}
             tamanhoDaLetra={tamanhoDaLetra}
+            nome={nome}
           />
         )}
 
