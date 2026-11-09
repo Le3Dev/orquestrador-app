@@ -439,8 +439,8 @@ describe("mensagemParaOOrquestrador", () => {
 
   describe("regra de commit e push", () => {
     const PROIBIDOS = "Commits e push são sempre proibidos.";
-    const QUANDO_PEDIDOS =
-      "Commits e push: permitidos somente quando o usuário pedir explicitamente nesta mensagem. Nunca commitar direto na main; usar branch conforme a política (feature/, fix/, hotfix/, refactor/). Nunca adicionar a linha Co-authored-by.";
+    const POR_FEATURE =
+      "Commits e push: por feature. Ao terminar CADA feature ou correção (testada, com lint e build ok), faça um commit só dela e dê push da branch logo em seguida (git push -u no primeiro). Um commit por feature: não misture features e adicione só os arquivos dela, um a um (nunca git add -A nem git add . às cegas). Antes do primeiro commit, crie ou use uma branch feature/, fix/, hotfix/ ou refactor/ com nome descritivo. Nunca commitar na main, nunca push forçado, nunca a linha Co-authored-by. Mensagem em Conventional Commits, em português. Com subagentes em paralelo, só um faz os commits (você ou um subagente designado na subtarefa), uma feature de cada vez. Abrir PR e mergear continuam proibidos sem pedido explícito do usuário.";
 
     function bloco(permitirCommitEPush: boolean, modo: "execucao" | "planejamento"): string {
       const configuracao = ConfiguracaoDoOrquestrador.de({
@@ -457,21 +457,46 @@ describe("mensagemParaOOrquestrador", () => {
       const texto = bloco(false, "execucao");
 
       expect(texto).toContain(`- Permissões: ${DESCRICAO_DO_NIVEL.edicao_e_comandos}. ${PROIBIDOS}`);
-      expect(texto).not.toContain("permitidos somente");
+      expect(texto).not.toContain("Commits e push: por feature");
     });
 
-    it("com a opção ligada, permite só quando o usuário pedir nesta mensagem", () => {
+    it("com a opção ligada, manda commitar e dar push a cada feature pronta", () => {
       const texto = bloco(true, "execucao");
 
-      expect(texto).toContain(`- Permissões: ${DESCRICAO_DO_NIVEL.edicao_e_comandos}. ${QUANDO_PEDIDOS}`);
+      expect(texto).toContain(`- Permissões: ${DESCRICAO_DO_NIVEL.edicao_e_comandos}. ${POR_FEATURE}`);
       expect(texto).not.toContain(PROIBIDOS);
+      expect(texto).not.toContain("somente quando o usuário pedir");
+    });
+
+    it("com a opção ligada, um commit por feature, push em seguida e sem git add às cegas", () => {
+      const texto = bloco(true, "execucao");
+
+      expect(texto).toContain("Ao terminar CADA feature ou correção (testada, com lint e build ok)");
+      expect(texto).toContain("um commit só dela e dê push da branch logo em seguida");
+      expect(texto).toContain("Um commit por feature: não misture features");
+      expect(texto).toContain("um a um (nunca git add -A nem git add . às cegas)");
+    });
+
+    it("com a opção ligada, só um commita com subagentes em paralelo", () => {
+      const texto = bloco(true, "execucao");
+
+      expect(texto).toContain("Com subagentes em paralelo, só um faz os commits");
+      expect(texto).toContain("uma feature de cada vez");
+    });
+
+    it("com a opção ligada, mantém branch, main, push forçado e Co-authored-by proibidos, e PR e merge só a pedido", () => {
+      const texto = bloco(true, "execucao");
+
+      expect(texto).toContain("feature/, fix/, hotfix/ ou refactor/");
+      expect(texto).toContain("Nunca commitar na main, nunca push forçado, nunca a linha Co-authored-by");
+      expect(texto).toContain("Abrir PR e mergear continuam proibidos sem pedido explícito do usuário");
     });
 
     it("com a opção ligada, no planejamento continua proibindo", () => {
       const texto = bloco(true, "planejamento");
 
       expect(texto).toContain(PROIBIDOS);
-      expect(texto).not.toContain("permitidos somente");
+      expect(texto).not.toContain("Commits e push: por feature");
     });
   });
 });

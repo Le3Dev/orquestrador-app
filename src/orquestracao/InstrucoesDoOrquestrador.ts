@@ -26,8 +26,8 @@ const INICIO_DA_APROVACAO = "Plano aprovado.";
 const COMMIT_E_PUSH_PROIBIDOS = "Commits e push são sempre proibidos.";
 
 /** Regra de commit e push no bloco do pedido, com a opção ligada num turno de execução. */
-const COMMIT_E_PUSH_QUANDO_PEDIDOS =
-  "Commits e push: permitidos somente quando o usuário pedir explicitamente nesta mensagem. Nunca commitar direto na main; usar branch conforme a política (feature/, fix/, hotfix/, refactor/). Nunca adicionar a linha Co-authored-by.";
+const COMMIT_E_PUSH_POR_FEATURE =
+  "Commits e push: por feature. Ao terminar CADA feature ou correção (testada, com lint e build ok), faça um commit só dela e dê push da branch logo em seguida (git push -u no primeiro). Um commit por feature: não misture features e adicione só os arquivos dela, um a um (nunca git add -A nem git add . às cegas). Antes do primeiro commit, crie ou use uma branch feature/, fix/, hotfix/ ou refactor/ com nome descritivo. Nunca commitar na main, nunca push forçado, nunca a linha Co-authored-by. Mensagem em Conventional Commits, em português. Com subagentes em paralelo, só um faz os commits (você ou um subagente designado na subtarefa), uma feature de cada vez. Abrir PR e mergear continuam proibidos sem pedido explícito do usuário.";
 
 /**
  * A plataforma do computador onde os agentes rodam: decide a sintaxe dos
@@ -112,7 +112,7 @@ function regrasDeRapidez(
   modeloDosSubagentes: ModeloClaude,
 ): string[] {
   const comandosDoGit = permiteCommitEPush
-    ? "git status, diff e log, commit, push e abrir PR quando o usuário pedir"
+    ? "git status, diff e log, commit e push de cada feature pronta, e abrir PR só quando o usuário pedir"
     : "git status, diff e log";
   return [
     ...(nivel === "edicao_e_comandos"
@@ -237,7 +237,7 @@ export function mensagemParaOOrquestrador(
   // assim); o nível configurado é o que valerá quando o Plano for executado.
   const nivelDoPedido = planejamento ? "leitura" : configuracao.nivelDePermissao;
   const commitEPushPermitidos = configuracao.permiteCommitEPush(modo);
-  const regraDeCommitEPush = commitEPushPermitidos ? COMMIT_E_PUSH_QUANDO_PEDIDOS : COMMIT_E_PUSH_PROIBIDOS;
+  const regraDeCommitEPush = commitEPushPermitidos ? COMMIT_E_PUSH_POR_FEATURE : COMMIT_E_PUSH_PROIBIDOS;
   const regrasDoPlanejamento = planejamento
     ? [
         "- Modo: PLANEJAMENTO. Neste pedido nada no projeto pode ser alterado: os subagentes só leem e pesquisam, seja qual for a permissão de execução.",
@@ -336,7 +336,7 @@ export function instrucoesDoSubagente(
   plataforma: Plataforma = "unix",
 ): string {
   const regraDeCommitEPush = permiteCommitEPush
-    ? "Commit e push: faça somente se a subtarefa recebida pedir explicitamente — o orquestrador só pede quando o usuário pediu. Nunca na main; use branch conforme a política (feature/, fix/, hotfix/, refactor/). Nunca adicione a linha Co-authored-by."
+    ? "Commit e push: só se a subtarefa recebida o designar como responsável pelos commits; sem essa designação, não faça commit nem push. Sendo o responsável, faça um commit por feature pronta (testada, com lint e build ok), só com os arquivos dela, adicionados um a um (nunca git add -A nem git add . às cegas), e dê push da branch logo em seguida. Use uma branch feature/, fix/, hotfix/ ou refactor/; nunca na main; nunca push forçado; nunca a linha Co-authored-by. Mensagem em Conventional Commits, em português. Abrir PR e mergear são proibidos."
     : "Nunca faça commit nem push.";
   const regraDeArtefatos =
     pastaDeArtefatos === null

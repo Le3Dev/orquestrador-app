@@ -53,7 +53,7 @@ describe("formatacao", () => {
       "Modelo dos subagentes: Sonnet",
       "Esforço dos subagentes: Médio",
       "Quantidade de subagentes: automática, ≤1 agente",
-      "Commit e push quando pedir: desligado",
+      "Commit e push por feature: desligado",
     ]);
     expect(descreverAlteracoesDaConfiguracao({})).toEqual([]);
   });
@@ -105,7 +105,7 @@ describe("formatacao", () => {
 
   it("acrescenta o commit e push à descrição só quando liberados", () => {
     expect(descreverConfiguracao({ ...configuracao, permitirCommitEPush: true })).toBe(
-      "Opus → Sonnet · 2 subagentes · Editar e rodar comandos · commit/push quando pedir",
+      "Opus → Sonnet · 2 subagentes · Editar e rodar comandos · commit/push por feature",
     );
   });
 
