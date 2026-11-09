@@ -322,19 +322,37 @@ describe("AdaptadorDeEventosDoClaudeCode — workflow do esforço ultracode", ()
 describe("AdaptadorDeEventosDoClaudeCode: endereços locais", () => {
   const VITE = "\n  VITE v6.0.0  ready in 300 ms\n\n  ➜  Local:   http://localhost:\x1b[1m5173\x1b[22m/\n";
 
-  it("anuncia o endereço que o Bash do orquestrador imprimiu, mesmo colorido", () => {
-    const eventos = new AdaptadorDeEventosDoClaudeCode().traduzir({
+  it("guarda como candidato, sem anunciar, o endereço que o Bash do orquestrador imprimiu, mesmo colorido", () => {
+    const adaptador = new AdaptadorDeEventosDoClaudeCode();
+    const eventos = adaptador.traduzir({
       type: "user",
       parent_tool_use_id: null,
       message: { content: [{ type: "tool_result", tool_use_id: "chamada-1", content: VITE }] },
       tool_use_result: { stdout: VITE, stderr: "", interrupted: false },
     });
 
-    expect(eventos).toEqual([{ tipo: "endereco_local_detectado", url: "http://localhost:5173" }]);
+    expect(eventos).toEqual([]);
+    expect(adaptador.retirarCandidatos()).toEqual(["http://localhost:5173"]);
   });
 
-  it("anuncia o endereço achado por um subagente, com o retorno em blocos", () => {
-    const eventos = new AdaptadorDeEventosDoClaudeCode().traduzir({
+  it("só anuncia o endereço da saída de um comando quando confirmado, uma vez", () => {
+    const adaptador = new AdaptadorDeEventosDoClaudeCode();
+    adaptador.traduzir({
+      type: "user",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_result", tool_use_id: "chamada-1", content: "" }] },
+      tool_use_result: { stdout: "PRESCRICAO_URL=https://localhost:8510/prescricao/", stderr: "" },
+    });
+
+    const [url] = adaptador.retirarCandidatos();
+    expect(url).toBeDefined();
+    expect(adaptador.confirmarEndereco(url ?? "")).toEqual([{ tipo: "endereco_local_detectado", url }]);
+    expect(adaptador.confirmarEndereco(url ?? "")).toEqual([]);
+  });
+
+  it("guarda como candidato o endereço achado por um subagente, com o retorno em blocos", () => {
+    const adaptador = new AdaptadorDeEventosDoClaudeCode();
+    const eventos = adaptador.traduzir({
       type: "user",
       parent_tool_use_id: "chamada-do-subagente",
       agent_id: "t1",
@@ -349,18 +367,21 @@ describe("AdaptadorDeEventosDoClaudeCode: endereços locais", () => {
       },
     });
 
-    expect(eventos).toEqual([{ tipo: "endereco_local_detectado", url: "http://localhost:3000" }]);
+    expect(eventos).toEqual([]);
+    expect(adaptador.retirarCandidatos()).toEqual(["http://localhost:3000"]);
   });
 
   it("acha o endereço só na saída estruturada, quando o texto não o traz", () => {
-    const eventos = new AdaptadorDeEventosDoClaudeCode().traduzir({
+    const adaptador = new AdaptadorDeEventosDoClaudeCode();
+    const eventos = adaptador.traduzir({
       type: "user",
       parent_tool_use_id: null,
       message: { content: [{ type: "tool_result", tool_use_id: "chamada-3", content: "" }] },
       tool_use_result: { stdout: "", stderr: "Listening on http://127.0.0.1:8080" },
     });
 
-    expect(eventos).toEqual([{ tipo: "endereco_local_detectado", url: "http://localhost:8080" }]);
+    expect(eventos).toEqual([]);
+    expect(adaptador.retirarCandidatos()).toEqual(["http://localhost:8080"]);
   });
 
   it("não repete o mesmo endereço no turno", () => {
@@ -371,11 +392,13 @@ describe("AdaptadorDeEventosDoClaudeCode: endereços locais", () => {
       message: { content: [{ type: "tool_result", tool_use_id: "chamada", content: conteudo }] },
     });
 
-    expect(adaptador.traduzir(retorno(VITE))).toHaveLength(1);
-    expect(adaptador.traduzir(retorno("de novo: http://127.0.0.1:5173/"))).toEqual([]);
-    expect(adaptador.traduzir(retorno("http://localhost:5173 e http://localhost:4173"))).toEqual([
-      { tipo: "endereco_local_detectado", url: "http://localhost:4173" },
-    ]);
+    expect(adaptador.traduzir(retorno(VITE))).toEqual([]);
+    expect(adaptador.retirarCandidatos()).toEqual(["http://localhost:5173"]);
+    expect(adaptador.confirmarEndereco("http://localhost:5173")).toHaveLength(1);
+    adaptador.traduzir(retorno("de novo: http://127.0.0.1:5173/"));
+    expect(adaptador.retirarCandidatos()).toEqual([]);
+    adaptador.traduzir(retorno("http://localhost:5173 e http://localhost:4173"));
+    expect(adaptador.retirarCandidatos()).toEqual(["http://localhost:4173"]);
   });
 
   it("ignora endereço citado num arquivo lido, mas vê o do comando", () => {
@@ -396,10 +419,11 @@ describe("AdaptadorDeEventosDoClaudeCode: endereços locais", () => {
       message: { content: [{ type: "tool_result", tool_use_id: chamada, content: conteudo }] },
     });
 
+    adaptador.retirarCandidatos();
     expect(adaptador.traduzir(retorno("leitura", "Abra http://localhost:3000 no navegador."))).toEqual([]);
-    expect(adaptador.traduzir(retorno("comando", VITE))).toEqual([
-      { tipo: "endereco_local_detectado", url: "http://localhost:5173" },
-    ]);
+    expect(adaptador.retirarCandidatos()).toEqual([]);
+    expect(adaptador.traduzir(retorno("comando", VITE))).toEqual([]);
+    expect(adaptador.retirarCandidatos()).toEqual(["http://localhost:5173"]);
   });
 
   it("vê o endereço na leitura da saída de um comando em segundo plano", () => {
@@ -425,7 +449,8 @@ describe("AdaptadorDeEventosDoClaudeCode: endereços locais", () => {
         parent_tool_use_id: null,
         message: { content: [{ type: "tool_result", tool_use_id: "saida", content: VITE }] },
       }),
-    ).toEqual([{ tipo: "endereco_local_detectado", url: "http://localhost:5173" }]);
+    ).toEqual([]);
+    expect(adaptador.retirarCandidatos()).toEqual(["http://localhost:5173"]);
   });
 
   it("guarda como candidato o endereço citado no comando e na fala, sem anunciar", () => {
@@ -477,6 +502,8 @@ describe("AdaptadorDeEventosDoClaudeCode: endereços locais", () => {
       parent_tool_use_id: null,
       message: { content: [{ type: "tool_result", tool_use_id: "x", content: VITE }] },
     });
+    expect(adaptador.retirarCandidatos()).toEqual(["http://localhost:5173"]);
+    expect(adaptador.confirmarEndereco("http://localhost:5173")).toHaveLength(1);
     adaptador.traduzir({
       type: "assistant",
       parent_tool_use_id: null,

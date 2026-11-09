@@ -313,8 +313,8 @@ export class AdaptadorDeEventosDoClaudeCode {
   /** Nome da ferramenta de cada chamada (`tool_use_id`), do Orquestrador e dos Subagentes. */
   private readonly ferramentaPorChamada = new Map<string, string>();
   /**
-   * Endereços locais citados num comando ou na fala de um agente: ainda não
-   * se sabe se há um servidor neles. O motor confere cada um
+   * Endereços locais citados num comando, na saída dele ou na fala de um
+   * agente: ainda não se sabe se há um servidor neles. O motor confere cada um
    * (`retirarCandidatos`) e anuncia os que respondem (`confirmarEndereco`).
    */
   private readonly candidatos = new Set<string>();
@@ -338,7 +338,7 @@ export class AdaptadorDeEventosDoClaudeCode {
     return novos;
   }
 
-  /** Um endereço citado que respondeu: vira o mesmo anúncio da saída de um comando, uma vez por turno. */
+  /** Um endereço citado que respondeu: vira o anúncio, uma vez por turno. */
   confirmarEndereco(url: string): EventoDoMotor[] {
     if (this.enderecosAnunciados.has(url)) {
       return [];
@@ -518,7 +518,8 @@ export class AdaptadorDeEventosDoClaudeCode {
    * O retorno de qualquer ferramenta também pode citar um endereço local.
    */
   private traduzirRetorno(mensagem: Objeto): EventoDoMotor[] {
-    const eventos = this.detectarEnderecosLocais(mensagem);
+    this.detectarEnderecosLocais(mensagem);
+    const eventos: EventoDoMotor[] = [];
     const estruturado = objeto(mensagem, "tool_use_result");
     if (mensagem["parent_tool_use_id"] !== null || texto(estruturado, "status") !== "completed") {
       return eventos;
@@ -548,9 +549,11 @@ export class AdaptadorDeEventosDoClaudeCode {
   /**
    * Procura endereços locais no retorno das ferramentas do Orquestrador e
    * dos Subagentes (ex.: o `npm run dev` que subiu um servidor), menos as de
-   * ler e escrever arquivos. Cada endereço é anunciado uma vez por turno.
+   * ler e escrever arquivos. Cada endereço vira candidato: uma saída pode só
+   * citar um valor de configuração, então o motor confere se há servidor nele
+   * antes de anunciar.
    */
-  private detectarEnderecosLocais(mensagem: Objeto): EventoDoMotor[] {
+  private detectarEnderecosLocais(mensagem: Objeto): void {
     const textos: string[] = [];
     for (const bloco of objetos(objeto(mensagem, "message"), "content")) {
       if (texto(bloco, "type") !== "tool_result") {
@@ -571,14 +574,7 @@ export class AdaptadorDeEventosDoClaudeCode {
     const estruturado = objeto(mensagem, "tool_use_result");
     textos.push(texto(estruturado, "stdout"), texto(estruturado, "stderr"));
 
-    const eventos: EventoDoMotor[] = [];
-    for (const url of extrairEnderecosLocais(textos.join("\n"))) {
-      if (!this.enderecosAnunciados.has(url)) {
-        this.enderecosAnunciados.add(url);
-        eventos.push({ tipo: "endereco_local_detectado", url });
-      }
-    }
-    return eventos;
+    this.citarEnderecos(textos.join("\n"));
   }
 
   private traduzirCota(mensagem: Objeto): EventoDoMotor[] {
