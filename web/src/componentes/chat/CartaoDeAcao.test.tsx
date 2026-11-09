@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { api, ErroDaApi } from "../../shared/api/cliente";
-import type { AcaoDoApp, ResumoDoOrquestrador } from "../../shared/api/tipos";
+import type { AcaoDeAbrirOrquestrador, ResumoDoOrquestrador } from "../../shared/api/tipos";
 import { AVISO_DO_LIMITE_DE_ORQUESTRADORES } from "../../shared/canvas/limiteDeTerminais";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
 import { CartaoDeAcao } from "./CartaoDeAcao";
@@ -32,7 +32,7 @@ function trabalhando(id: string, pasta: string, texto = "rodar os testes"): Resu
 }
 
 function renderizar(
-  acao: Partial<AcaoDoApp> = {},
+  acao: Partial<AcaoDeAbrirOrquestrador> = {},
   temVagaPara = vi.fn<(id: string | null) => boolean>(() => true),
   orquestradores: ResumoDoOrquestrador[] = [],
 ) {
@@ -255,6 +255,27 @@ describe("CartaoDeAcao", () => {
       expect(screen.getByRole("button", { name: "Criar outro" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "abrir" })).not.toBeInTheDocument();
       expect(listar).not.toHaveBeenCalled();
+    });
+
+    it("a linha de estado quebra em vez de cortar: a fila fica inteira e à vista, mesmo com um pedido longo", () => {
+      const pedidoLongo = "revisar o README e atualizar todos os exemplos de uso do módulo de pagamentos da loja";
+      const ocupado = {
+        ...trabalhando("orquestrador-app", PASTA, pedidoLongo),
+        fila: [
+          { id: "f1", texto: "x", modo: "execucao" as const, enfileiradoEm: "2026-11-04T12:00:00Z" },
+          { id: "f2", texto: "y", modo: "execucao" as const, enfileiradoEm: "2026-11-04T12:00:00Z" },
+        ],
+      };
+      renderizar({ pedido: "rode os testes" }, undefined, [ocupado]);
+
+      const estado = screen.getByTestId("estado-do-escolhido");
+      // Sem "truncate" (corte com reticências): o texto quebra de linha.
+      expect(estado).not.toHaveClass("truncate");
+      expect(estado).toHaveClass("texto-longo");
+      expect(estado).toHaveTextContent(pedidoLongo);
+      // A contagem da fila é um bloco que não parte no meio ("2 na fila" nunca vira "2 na" e "fila").
+      const fila = within(estado).getByText("· 2 na fila");
+      expect(fila).toHaveClass("whitespace-nowrap");
     });
 
     it("plano pendente conta como ocupado", () => {

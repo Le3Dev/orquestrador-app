@@ -4,6 +4,7 @@ import {
   memo,
   type RefObject,
   useCallback,
+  useEffect,
   useImperativeHandle,
   useRef,
   useState,
@@ -154,6 +155,12 @@ interface Props {
   /** "/clear": começa uma conversa nova. Devolve se o servidor aceitou; só então o campo é limpo. */
   aoLimparConversa: () => Promise<boolean>;
   aoCancelar: () => void;
+  /**
+   * O texto com que o campo nasce: o que estava escrito quando o terminal
+   * entrou ou saiu da tela cheia (o prompt é montado de novo). Só vale na
+   * montagem. Padrão: vazio.
+   */
+  textoInicial?: string;
 }
 
 /**
@@ -189,8 +196,11 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
   aoEnviarDaFila,
   aoLimparConversa,
   aoCancelar,
+  textoInicial = "",
 }: Props) {
-  const [texto, setTexto] = useState("");
+  const [texto, setTexto] = useState(textoInicial);
+  // Nasceu com texto: o campo já abre na altura dele.
+  const [nasceuComTexto] = useState(textoInicial !== "");
   const [enviando, setEnviando] = useState(false);
   // Tentou pôr imagens na fila; some quando elas saem ou o pedido acaba.
   const [avisoDasImagens, setAvisoDasImagens] = useState(false);
@@ -214,6 +224,12 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
       elemento.style.height = `${Math.min(elemento.scrollHeight, ALTURA_MAXIMA)}px`;
     }
   }, [campo]);
+
+  useEffect(() => {
+    if (nasceuComTexto) {
+      ajustarAltura();
+    }
+  }, [nasceuComTexto, ajustarAltura]);
 
   useImperativeHandle(
     controle,

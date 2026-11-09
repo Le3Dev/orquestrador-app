@@ -13,6 +13,22 @@ interface Props {
   aoResponder: (texto: string) => Promise<void>;
 }
 
+/** Um balão com um ponto de interrogação: o Claude perguntando. */
+function IconePergunta() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M4.5 5.5A2 2 0 0 1 6.5 3.5h11a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H11l-4.5 4v-4h0A2 2 0 0 1 4.5 14.5Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path d="M10.2 8.4a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.4" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <circle cx="12" cy="13.6" r=".9" fill="currentColor" />
+    </svg>
+  );
+}
+
 /** O que o usuário escolheu numa pergunta: rótulos das opções e o texto do "Outro…", se confirmado. */
 interface Escolha {
   opcoes: readonly string[];
@@ -134,10 +150,15 @@ export function CartaoDePergunta({ perguntas, respondida, desabilitado, aoRespon
       role="group"
       aria-label={perguntas.length === 1 ? "Pergunta do Claude" : "Perguntas do Claude"}
     >
-      <span className="rotulo-tecnico">
-        {perguntas.length === 1 ? "pergunta do claude" : `${perguntas.length} perguntas do claude`}
-        {situacao}
-      </span>
+      <div className="cabecalho-do-cartao">
+        <span className="icone-do-cartao" aria-hidden="true">
+          <IconePergunta />
+        </span>
+        <span className="rotulo-tecnico">
+          {perguntas.length === 1 ? "pergunta do claude" : `${perguntas.length} perguntas do claude`}
+          {situacao}
+        </span>
+      </div>
       {perguntas.map((pergunta, indice) => {
         const escolha = escolhas[indice] ?? SEM_ESCOLHA;
         const rascunho = rascunhos[indice] ?? "";

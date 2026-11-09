@@ -73,3 +73,17 @@ export function aparenciaDoBixinho(subagenteId: string): AparenciaDoBixinho {
   APARENCIAS.set(subagenteId, aparencia);
   return aparencia;
 }
+
+/**
+ * O papel que dá nome ao bixinho: o de um subagente pronto (ou de outro tipo
+ * com papel, como "revisor"). O executor comum, o workflow e os eventos
+ * antigos, sem papel, não têm: o bixinho fica com o nome do bicho.
+ */
+export function papelQueNomeia(papel: string | null): string | null {
+  return papel === null || papel === "executor" || papel === "workflow" ? null : papel;
+}
+
+/** O nome do bixinho no rótulo do nó e no log do terminal: o papel que nomeia ou o nome do bicho. */
+export function nomeDoBixinho(subagenteId: string, papel: string | null): string {
+  return papelQueNomeia(papel) ?? aparenciaDoBixinho(subagenteId).nome;
+}

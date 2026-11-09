@@ -1,8 +1,9 @@
-import { Request, Response, Router } from "express";
-import { z, ZodError } from "zod";
+import { Response, Router } from "express";
+import { z } from "zod";
 
 import { ErroDeNota, MotivoDoErroDeNota } from "../notas/ErroDeNota";
 import { ServicoDeNotas } from "../notas/ServicoDeNotas";
+import { criarRota, responderErroGenerico } from "./respostasHttp";
 
 interface Dependencias {
   servico: ServicoDeNotas;
@@ -30,27 +31,10 @@ function responderErro(resposta: Response, erro: unknown): void {
     resposta.status(STATUS_POR_MOTIVO[erro.motivo]).json({ erro: erro.message });
     return;
   }
-  if (erro instanceof ZodError) {
-    resposta.status(400).json({ erro: erro.issues[0]?.message ?? "Dados inválidos." });
-    return;
-  }
-  console.error("[http] Erro inesperado:", erro);
-  const detalhe = erro instanceof Error ? erro.message : String(erro);
-  resposta.status(500).json({ erro: `Erro inesperado no servidor: ${detalhe}` });
+  responderErroGenerico(resposta, erro, "[http] Erro inesperado:");
 }
 
-type Tratador<Parametros> = (requisicao: Request<Parametros>, resposta: Response) => Promise<void> | void;
-
-/** Envolve cada rota num try/catch que devolve a mensagem de erro pronta para a tela. */
-function rota<Parametros = { id: string }>(tratador: Tratador<Parametros>): Tratador<Parametros> {
-  return async (requisicao, resposta) => {
-    try {
-      await tratador(requisicao, resposta);
-    } catch (erro) {
-      responderErro(resposta, erro);
-    }
-  };
-}
+const rota = criarRota(responderErro);
 
 /**
  * Notas do usuário no canvas. Só o conteúdo passa por aqui: posição, tamanho

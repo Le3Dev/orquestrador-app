@@ -151,6 +151,23 @@ describe("aplicarEvento", () => {
     expect(spawns[1]).toMatch(/^instanciou executor#/);
   });
 
+  it("guarda o papel do subagente para o bixinho; eventos antigos sem o campo ficam sem papel", () => {
+    const [turno] = reproduzir(
+      registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "conte", configuracao },
+        { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "a", descricao: "Contar", tarefa: "x", papel: "contador-de-linhas" },
+        { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "b", descricao: "Ler", tarefa: "y", papel: "executor" },
+        { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "c", descricao: "Antigo", tarefa: "z" },
+      ]),
+    ).turnos;
+
+    expect(turno?.subagentes.map((subagente) => [subagente.id, subagente.papel])).toEqual([
+      ["a", "contador-de-linhas"],
+      ["b", "executor"],
+      ["c", null],
+    ]);
+  });
+
   it("guarda as imagens do pedido e a hora da última atividade", () => {
     const anexo = { id: "a1", nome: "tela.png", tipoDeMidia: "image/png" as const, tamanhoEmBytes: 10, arquivo: "a1.png" };
     const estado = reproduzir(
@@ -284,8 +301,82 @@ describe("aplicarEvento", () => {
     expect(turno?.ferramentasDiretas).toHaveLength(8);
   });
 
+  describe("tarefas do orquestrador", () => {
+    it("guarda a última lista do turno, que substitui a anterior, com uma linha de atividade por atualização", () => {
+      const [turno] = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija o bug", configuracao },
+          {
+            tipo: "tarefas_atualizadas",
+            turnoId: "t1",
+            tarefas: [
+              { texto: "Lendo o código", situacao: "em_andamento" },
+              { texto: "Rodar os testes", situacao: "pendente" },
+            ],
+          },
+          {
+            tipo: "tarefas_atualizadas",
+            turnoId: "t1",
+            tarefas: [
+              { texto: "Ler o código", situacao: "concluida" },
+              { texto: "Rodando os testes", situacao: "em_andamento" },
+              { texto: "Atualizar o README", situacao: "pendente" },
+            ],
+          },
+        ]),
+      ).turnos;
+
+      expect(turno?.tarefas).toEqual([
+        { texto: "Ler o código", situacao: "concluida" },
+        { texto: "Rodando os testes", situacao: "em_andamento" },
+        { texto: "Atualizar o README", situacao: "pendente" },
+      ]);
+      expect(turno?.log.slice(1).map((linha) => [linha.tipo, linha.texto])).toEqual([
+        ["ferramenta", "tarefas: 0 de 2 concluídas · Lendo o código"],
+        ["ferramenta", "tarefas: 1 de 3 concluídas · Rodando os testes"],
+      ]);
+      expect(turno?.ferramentasDiretas).toEqual([]);
+    });
+
+    it("sem o evento (histórico antigo), o turno fica sem tarefas", () => {
+      const [turno] = reproduzir(historico).turnos;
+
+      expect(turno?.tarefas).toEqual([]);
+    });
+  });
+
+  describe("orquestrador renomeado", () => {
+    it("guarda o nome mais recente sem mexer nos turnos, também durante um pedido e depois do /clear", () => {
+      const eventos = registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "analise", configuracao },
+        { tipo: "orquestrador_renomeado", nome: "Primeiro" },
+        { tipo: "orquestrador_renomeado", nome: "Segundo" },
+        { tipo: "turno_cancelado", turnoId: "t1" },
+        { tipo: "conversa_limpa", turnosAnteriores: 1, planoDescartado: false, worktreeComAlteracoes: false },
+      ]);
+
+      const durante = reproduzir(eventos.slice(0, 3));
+      expect(ESTADO_INICIAL.nome).toBeNull();
+      expect(durante.nome).toBe("Segundo");
+      expect(durante.ultimaSequencia).toBe(3);
+      expect(durante.turnos.map((turno) => [turno.id, turno.situacao, turno.log.length])).toEqual([
+        ["t1", "em_andamento", 1],
+      ]);
+      expect(reproduzir(eventos).nome).toBe("Segundo");
+    });
+
+    it("um evento repetido (reconexão) não volta o nome", () => {
+      const [antigo, novo] = registrar([
+        { tipo: "orquestrador_renomeado", nome: "Antigo" },
+        { tipo: "orquestrador_renomeado", nome: "Novo" },
+      ]);
+
+      expect(reproduzir([antigo!, novo!, antigo!]).nome).toBe("Novo");
+    });
+  });
+
   describe("conversa nova (/clear)", () => {
-    const cota = [{ nome: "5 horas", utilizacao: 0.2, renovaEm: null, situacao: "allowed" }];
+    const cota =[{ nome: "5 horas", utilizacao: 0.2, renovaEm: null, situacao: "allowed" }];
     const anterior = registrar([
       { tipo: "turno_iniciado", turnoId: "t1", texto: "um", configuracao },
       { tipo: "uso_da_cota", turnoId: "t1", janelas: cota },
@@ -307,6 +398,32 @@ describe("aplicarEvento", () => {
       expect(estado.ultimaSequencia).toBe(4);
       expect(estado.cota).toEqual(cota);
       expect(estado.conversaIniciadaEm).toBe(anterior[3]?.em);
+      expect(antes.avisosDaConversaNova).toEqual({ worktreeComAlteracoes: false, planoDescartado: false });
+      expect(estado.avisosDaConversaNova).toEqual({ worktreeComAlteracoes: false, planoDescartado: false });
+    });
+
+    it("guarda os avisos do /clear (worktree alterada, plano descartado) até o próximo /clear", () => {
+      const comAvisos = registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "um", configuracao },
+        { tipo: "conversa_limpa", turnosAnteriores: 1, planoDescartado: true, worktreeComAlteracoes: true },
+        { tipo: "turno_iniciado", turnoId: "t2", texto: "dois", configuracao },
+        { tipo: "turno_cancelado", turnoId: "t2" },
+      ]);
+      const segundo: EventoRegistrado = {
+        tipo: "conversa_limpa",
+        turnosAnteriores: 1,
+        planoDescartado: false,
+        worktreeComAlteracoes: true,
+        sequencia: comAvisos.length + 1,
+        em: "2026-10-28T12:10:00Z",
+      };
+
+      const depois = reproduzir(comAvisos);
+      expect(depois.avisosDaConversaNova).toEqual({ worktreeComAlteracoes: true, planoDescartado: true });
+      expect(aplicarEvento(depois, segundo).avisosDaConversaNova).toEqual({
+        worktreeComAlteracoes: true,
+        planoDescartado: false,
+      });
     });
 
     it("o pedido seguinte aparece sozinho na conversa nova", () => {

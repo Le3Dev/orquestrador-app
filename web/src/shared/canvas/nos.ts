@@ -1,15 +1,19 @@
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node, NodeChange } from "@xyflow/react";
 
-import type { SituacaoDoSubagente } from "../api/tipos";
+import type { ResumoDoArtefato } from "../api/artefatos";
+import type { ItemLigadoParaEnvio } from "../api/cliente";
+import type { DadosDaNota, SituacaoDoSubagente } from "../api/tipos";
 import type { EstadoDaConversa, SubagenteNaTela } from "../estado/aplicarEvento";
 import {
   ALTURA_DA_NOTA_MINIMIZADA,
   type BixinhosLimpos,
   ESCALA_DA_LETRA_PADRAO,
   type EscalaDaLetra,
+  type JanelaNoCanvas,
   type LayoutDoCanvas,
   type Ponto,
   posicaoAoLado,
+  posicaoLivrePerto,
   posicoesLivresDosBixinhos,
   type Retangulo,
   sobrepoe,
@@ -24,8 +28,21 @@ import {
   tamanhoNaEscalaDaLetra,
 } from "./layout";
 
-/** Sem `escalaDaLetra`, o cartão (terminal ou rascunho) mostra a letra normal. */
-export type DadosDoTerminal = { orquestradorId: string; escalaDaLetra?: EscalaDaLetra };
+/**
+ * Sem `escalaDaLetra`, o cartão (terminal ou rascunho) mostra a letra normal.
+ * Sem `minimizada`, o terminal está aberto; minimizado (a bolinha amarela do
+ * Mac), o nó tem só a altura da barra, e restaurar volta a `alturaAberta`,
+ * como na nota. `ligados`: os ids dos nós (notas, prévias e artefatos) que o
+ * usuário ligou ao terminal por uma linha, na ordem em que ligou; sem o
+ * campo, nenhum. Vão como contexto no próximo pedido (`itensLigadosParaEnvio`).
+ */
+export type DadosDoTerminal = {
+  orquestradorId: string;
+  escalaDaLetra?: EscalaDaLetra;
+  minimizada?: boolean;
+  alturaAberta?: number;
+  ligados?: readonly string[];
+};
 export type DadosDoRascunho = { escalaDaLetra?: EscalaDaLetra };
 export type DadosDoBixinho = { orquestradorId: string; subagenteId: string };
 /**
@@ -89,12 +106,19 @@ type NoLigadoAoTerminal = NoPrevia | NoShell;
  * a linha notar quando ele conclui e entregar o relatório (o envelope), e
  * quando ele encerrou, para não entregar o que veio do histórico reenviado.
  */
-export type DadosDaArestaDoBixinho = { situacao: SituacaoDoSubagente; encerradoEm: string | null };
+export type DadosDaArestaDoBixinho = {
+  situacao: SituacaoDoSubagente;
+  encerradoEm: string | null;
+  /** O bixinho está saindo sozinho do canvas: a linha se recolhe até o terminal. */
+  saindo?: boolean;
+};
 /** A linha do terminal a um bixinho; `animated` já diz se o Subagente trabalha. */
 export type ArestaDoBixinho = Edge<DadosDaArestaDoBixinho, "bixinho">;
 /** A linha discreta (tracejada) do terminal à prévia (ou ao shell) que saiu dele: a curva padrão do React Flow. */
 export type ArestaDaPrevia = Edge<Record<string, never>, "default">;
-export type ArestaDoCanvas = ArestaDoBixinho | ArestaDaPrevia;
+/** A linha que o usuário puxou de uma nota, prévia ou artefato até o terminal: selecionável, para desligar. */
+export type ArestaDaLigacao = Edge<Record<string, never>, "ligacao">;
+export type ArestaDoCanvas = ArestaDoBixinho | ArestaDaPrevia | ArestaDaLigacao;
 
 /** O `id` de cada âncora das linhas: o lado do nó, no terminal e no bixinho. */
 export type Ancora = "cima" | "baixo" | "esquerda" | "direita";
@@ -119,6 +143,17 @@ export const ALCA_DA_PREVIA = "alca-da-previa";
 export const ALCA_DO_ARTEFATO = "alca-do-artefato";
 /** Idem para o shell: no corpo, o mouse seleciona o texto do terminal. */
 export const ALCA_DO_SHELL = "alca-do-shell";
+/** A alça de onde se puxa a linha que liga uma nota, prévia ou artefato a um terminal. */
+export const ALCA_DE_LIGACAO = "ligacao";
+/** Onde essa linha chega: uma alça que cobre o terminal inteiro, para soltar em qualquer ponto dele. */
+export const CHEGADA_DA_LIGACAO = "chegada";
+/** Quantos itens um terminal leva ligados (o servidor recusa mais de 10 por pedido). */
+export const MAXIMO_DE_ITENS_LIGADOS = 10;
+/** Quanto do texto de uma nota ligada vai no pedido (o servidor aceita até 4.000 caracteres). */
+export const TAMANHO_MAXIMO_DA_NOTA_LIGADA = 4_000;
+/** Os limites do servidor para o título e o endereço de cada item ligado. */
+const TAMANHO_MAXIMO_DO_TITULO_LIGADO = 200;
+const TAMANHO_MAXIMO_DO_ENDERECO_LIGADO = 2_000;
 
 export function ehTerminal(no: NoDoCanvas): no is NoTerminal {
   return no.type === "terminal";
@@ -195,16 +230,23 @@ export function novoTerminal(
   largura: number,
   altura: number,
   escalaDaLetra: EscalaDaLetra = ESCALA_DA_LETRA_PADRAO,
+  minimizada = false,
+  ligados: readonly string[] = [],
 ): NoTerminal {
   return {
     id: orquestradorId,
     type: "terminal",
     position: posicao,
     width: largura,
-    height: altura,
+    height: minimizada ? ALTURA_DA_NOTA_MINIMIZADA : altura,
     dragHandle: `.${ALCA_DO_TERMINAL}`,
-    // A letra normal fica sem o campo, como nos layouts antigos.
-    data: escalaDaLetra === ESCALA_DA_LETRA_PADRAO ? { orquestradorId } : { orquestradorId, escalaDaLetra },
+    // A letra normal, o terminal aberto e sem itens ligados ficam sem o campo, como nos layouts antigos.
+    data: {
+      orquestradorId,
+      ...(escalaDaLetra === ESCALA_DA_LETRA_PADRAO ? {} : { escalaDaLetra }),
+      ...(minimizada ? { minimizada: true, alturaAberta: altura } : {}),
+      ...(ligados.length > 0 ? { ligados: [...ligados] } : {}),
+    },
   };
 }
 
@@ -291,15 +333,24 @@ export function novoShell(
 }
 
 /** As janelas que se minimizam à barra de título. */
-type NoMinimizavel = NoNota | NoPrevia;
+export type NoMinimizavel = NoNota | NoPrevia | NoTerminal;
 
-/** A altura da nota (ou prévia) aberta, esteja ela minimizada ou não. */
+/** A altura da nota (ou prévia, ou terminal) aberta, esteja ela minimizada ou não. */
 function alturaAbertaDaNota(no: NoMinimizavel): number {
-  const padrao = ehNota(no) ? TAMANHO_DA_NOTA.altura : TAMANHO_DA_PREVIA.altura;
-  return no.data.minimizada ? no.data.alturaAberta : (no.height ?? no.measured?.height ?? padrao);
+  const padrao = ehNota(no)
+    ? TAMANHO_DA_NOTA.altura
+    : ehPrevia(no)
+      ? TAMANHO_DA_PREVIA.altura
+      : TAMANHO_DO_TERMINAL.altura;
+  return no.data.minimizada === true
+    ? (no.data.alturaAberta ?? padrao)
+    : (no.height ?? no.measured?.height ?? padrao);
 }
 
-/** Minimiza a nota ou a prévia (fica só a barra de título, no mesmo lugar) ou a restaura ao tamanho de antes. */
+/**
+ * Minimiza a nota, a prévia ou o terminal (fica só a barra de título, no mesmo
+ * lugar) ou os restaura ao tamanho de antes.
+ */
 export function minimizarOuRestaurar<T extends NoMinimizavel>(no: T): T {
   const alturaAberta = Math.round(alturaAbertaDaNota(no));
   const minimizada = !no.data.minimizada;
@@ -339,7 +390,15 @@ export function sincronizarNotas(
 
 export function nosDoLayout(layout: LayoutDoCanvas): NoDoCanvas[] {
   const terminais = Object.entries(layout.terminais).map(([id, retangulo]) =>
-    novoTerminal(id, { x: retangulo.x, y: retangulo.y }, retangulo.largura, retangulo.altura, retangulo.escalaDaLetra),
+    novoTerminal(
+      id,
+      { x: retangulo.x, y: retangulo.y },
+      retangulo.largura,
+      retangulo.altura,
+      retangulo.escalaDaLetra,
+      retangulo.minimizada === true,
+      retangulo.ligados,
+    ),
   );
   // O conteúdo das notas chega do servidor depois; os nós já nascem aqui para
   // a gravação do layout, logo ao abrir, não apagar a posição delas.
@@ -375,15 +434,21 @@ export function nosDoLayout(layout: LayoutDoCanvas): NoDoCanvas[] {
 
 export function layoutDosNos(nos: readonly NoDoCanvas[], viewport: LayoutDoCanvas["viewport"]): LayoutDoCanvas {
   const terminais: LayoutDoCanvas["terminais"] = {};
+  // Só vão as ligações a itens que ainda estão no canvas.
+  const ligaveis = new Set(nos.filter(ehItemLigavel).map((no) => no.id));
   for (const no of nos.filter(ehTerminal)) {
-    const { escalaDaLetra } = no.data;
+    const { escalaDaLetra, minimizada } = no.data;
+    const ligados = (no.data.ligados ?? []).filter((id) => ligaveis.has(id));
     terminais[no.id] = {
       x: Math.round(no.position.x),
       y: Math.round(no.position.y),
       largura: Math.round(no.width ?? no.measured?.width ?? TAMANHO_DO_TERMINAL.largura),
-      altura: Math.round(no.height ?? no.measured?.height ?? TAMANHO_DO_TERMINAL.altura),
-      // A letra normal fica sem o campo, como nos layouts antigos.
+      // Minimizado, vai a altura do terminal aberto, como na nota.
+      altura: Math.round(alturaAbertaDaNota(no)),
+      // A letra normal e o terminal aberto ficam sem o campo, como nos layouts antigos.
       ...(escalaDaLetra !== undefined && escalaDaLetra !== ESCALA_DA_LETRA_PADRAO ? { escalaDaLetra } : {}),
+      ...(minimizada === true ? { minimizada: true } : {}),
+      ...(ligados.length > 0 ? { ligados } : {}),
     };
   }
   const notas: LayoutDoCanvas["notas"] = {};
@@ -465,14 +530,18 @@ export function bixinhosParaLimpar(conversa: EstadoDaConversa | undefined, limpo
 /**
  * Limpa os bixinhos parados de um terminal, somando-os aos já limpos do mesmo
  * pedido. Quem executa fica, e os Subagentes que nascerem depois aparecem
- * normalmente. Nulo quando não há o que limpar.
+ * normalmente. Com `somente`, limpa só os parados desses Subagentes (a saída
+ * sozinha de quem terminou). Nulo quando não há o que limpar.
  */
 export function limparBixinhos(
   conversa: EstadoDaConversa | undefined,
   limpos?: BixinhosLimpos,
+  somente?: ReadonlySet<string>,
 ): BixinhosLimpos | null {
   const turno = conversa?.turnos.at(-1);
-  const novos = bixinhosParaLimpar(conversa, limpos);
+  const novos = bixinhosParaLimpar(conversa, limpos).filter(
+    (subagente) => somente === undefined || somente.has(subagente.id),
+  );
   if (turno === undefined || novos.length === 0) {
     return null;
   }
@@ -480,8 +549,18 @@ export function limparBixinhos(
   return { turnoId: turno.id, subagentes: [...anteriores, ...novos.map((subagente) => subagente.id)] };
 }
 
-/** O tamanho de um nó: o definido, o medido ou o padrão do tipo dele. */
+/**
+ * O tamanho de um nó: o definido, o medido ou o padrão do tipo dele. O
+ * terminal minimizado conta com a altura de aberto: os bixinhos dele (e as
+ * janelas novas) ficam fora do lugar que ele volta a ocupar ao restaurar.
+ */
 function tamanhoDoNo(no: NoDoCanvas): { largura: number; altura: number } {
+  if (ehTerminal(no) && no.data.minimizada === true) {
+    return {
+      largura: no.width ?? no.measured?.width ?? TAMANHO_DO_TERMINAL.largura,
+      altura: alturaAbertaDaNota(no),
+    };
+  }
   const padrao = ehBixinho(no)
     ? TAMANHO_DO_BIXINHO
     : ehNota(no)
@@ -498,6 +577,147 @@ function tamanhoDoNo(no: NoDoCanvas): { largura: number; altura: number } {
   return {
     largura: no.width ?? no.measured?.width ?? padrao.largura,
     altura: no.height ?? no.measured?.height ?? padrao.altura,
+  };
+}
+
+/**
+ * As telas do canvas: tudo menos os bixinhos (terminais, rascunhos, notas,
+ * artefatos, prévias e shells). Só elas entram nas ações do grupo.
+ */
+export function ehTela(no: NoDoCanvas): boolean {
+  return !ehBixinho(no);
+}
+
+/** As telas que se minimizam à barra de título (pela barra do grupo também). */
+export function ehMinimizavel(no: NoDoCanvas): no is NoMinimizavel {
+  return ehNota(no) || ehPrevia(no) || ehTerminal(no);
+}
+
+/**
+ * O lugar que a tela ocupa agora, como aparece: diferente de `tamanhoDoNo`, o
+ * terminal minimizado conta só com a barra. Se o React Flow mediu a tela
+ * desenhada maior que o tamanho definido (o conteúdo a esticou), vale o
+ * medido: as ações do grupo não podem achar que ela é menor do que aparece. É
+ * o que alinhar, distribuir e pôr lado a lado usam, para as telas do grupo e
+ * para as de fora (`outrasTelas`).
+ */
+export function janelaVisivel(no: NoDoCanvas): JanelaNoCanvas {
+  const tamanho =
+    ehTerminal(no) && no.data.minimizada === true
+      ? { largura: tamanhoDoNo(no).largura, altura: no.height ?? ALTURA_DA_NOTA_MINIMIZADA }
+      : tamanhoDoNo(no);
+  return {
+    id: no.id,
+    x: no.position.x,
+    y: no.position.y,
+    largura: Math.max(tamanho.largura, no.measured?.width ?? 0),
+    altura: Math.max(tamanho.altura, no.measured?.height ?? 0),
+  };
+}
+
+/** As telas selecionadas, na ordem dos nós; os bixinhos ficam de fora. */
+export function telasSelecionadas(nos: readonly NoDoCanvas[]): NoDoCanvas[] {
+  return nos.filter((no) => no.selected === true && ehTela(no));
+}
+
+/**
+ * As telas fora da seleção, como aparecem (`janelaVisivel`): o que as ações
+ * do grupo não podem cobrir. Os bixinhos ficam de fora: saem sozinhos de
+ * baixo das telas (`reacomodarBixinhos`).
+ */
+export function outrasTelas(nos: readonly NoDoCanvas[]): JanelaNoCanvas[] {
+  return nos.filter((no) => no.selected !== true && ehTela(no)).map(janelaVisivel);
+}
+
+/** Os nós com as posições novas; os outros (e os que já estão lá) continuam o mesmo objeto, e sem mudança volta o mesmo array. */
+export function comPosicoes(nos: NoDoCanvas[], posicoes: Readonly<Record<string, Ponto>>): NoDoCanvas[] {
+  let mudou = false;
+  const novos = nos.map((no) => {
+    const posicao = posicoes[no.id];
+    if (posicao === undefined || (posicao.x === no.position.x && posicao.y === no.position.y)) {
+      return no;
+    }
+    mudou = true;
+    return { ...no, position: posicao };
+  });
+  return mudou ? novos : nos;
+}
+
+/** Cmd/Ctrl + A: todas as telas selecionadas e nenhum bixinho. Sem mudança, o mesmo array. */
+export function selecionarTodasAsTelas(nos: NoDoCanvas[]): NoDoCanvas[] {
+  let mudou = false;
+  const novos = nos.map((no) => {
+    const selecionar = ehTela(no);
+    if ((no.selected === true) === selecionar) {
+      return no;
+    }
+    mudou = true;
+    return { ...no, selected: selecionar };
+  });
+  return mudou ? novos : nos;
+}
+
+/**
+ * Os bixinhos saem da seleção quando há alguma tela nela (o fim do retângulo
+ * de seleção): eles seguem o terminal e não entram nas ações do grupo. Sem
+ * tela selecionada (o retângulo só pegou bixinhos), fica como está.
+ */
+export function semBixinhosNaSelecao(nos: NoDoCanvas[]): NoDoCanvas[] {
+  if (!nos.some((no) => no.selected === true && ehTela(no)) || !nos.some((no) => no.selected === true && ehBixinho(no))) {
+    return nos;
+  }
+  return nos.map((no) => (ehBixinho(no) && no.selected === true ? { ...no, selected: false } : no));
+}
+
+/**
+ * "Minimizar" da barra do grupo, entre as telas de `ids` que se minimizam
+ * (notas, prévias e terminais): se alguma está aberta, minimiza as abertas;
+ * se todas já estão minimizadas, restaura todas. Sem nenhuma, o mesmo array.
+ */
+export function minimizarOuRestaurarTelas(nos: NoDoCanvas[], ids: ReadonlySet<string>): NoDoCanvas[] {
+  const alvos = nos.filter((no): no is NoMinimizavel => ids.has(no.id) && ehMinimizavel(no));
+  if (alvos.length === 0) {
+    return nos;
+  }
+  const minimizar = alvos.some((no) => no.data.minimizada !== true);
+  const trocar = new Set(alvos.filter((no) => (no.data.minimizada === true) !== minimizar).map((no) => no.id));
+  return nos.map((no) => (trocar.has(no.id) && ehMinimizavel(no) ? minimizarOuRestaurar(no) : no));
+}
+
+/**
+ * As telas que o "Fechar" da barra do grupo tira do canvas, sem apagar dado:
+ * terminais (o orquestrador continua salvo e volta pela Doca), artefatos,
+ * prévias e shells (este encerra o processo, como o ✕ dele). Notas ficam de
+ * fora (o único jeito de tirar uma nota do canvas é apagá-la) e rascunhos
+ * também (descartar perderia o que foi preenchido).
+ */
+export function ehFechavelEmGrupo(no: NoDoCanvas): boolean {
+  return ehTerminal(no) || ehArtefato(no) || ehPrevia(no) || ehShell(no);
+}
+
+/** O que a barra do grupo precisa saber da seleção: só muda quando a seleção (ou o minimizar) muda, não ao arrastar. */
+export interface ResumoDoGrupo {
+  /** As telas selecionadas, na ordem dos nós. */
+  ids: readonly string[];
+  /** Quantas delas se minimizam (notas, prévias e terminais). */
+  minimizaveis: number;
+  /** Todas as minimizáveis já estão minimizadas: o botão vira "Restaurar". */
+  todasMinimizadas: boolean;
+  /** Quantas o "Fechar" tira do canvas (`ehFechavelEmGrupo`). */
+  fechaveis: number;
+  /** Quantas das fecháveis são shells (fechar encerra o processo). */
+  shells: number;
+}
+
+export function resumirGrupo(nos: readonly NoDoCanvas[]): ResumoDoGrupo {
+  const telas = telasSelecionadas(nos);
+  const minimizaveis = telas.filter(ehMinimizavel);
+  return {
+    ids: telas.map((no) => no.id),
+    minimizaveis: minimizaveis.length,
+    todasMinimizadas: minimizaveis.length > 0 && minimizaveis.every((no) => no.data.minimizada === true),
+    fechaveis: telas.filter(ehFechavelEmGrupo).length,
+    shells: telas.filter(ehShell).length,
   };
 }
 
@@ -752,6 +972,27 @@ export function posicaoDaPreviaDoTerminal(
   return posicaoAoLado(retanguloNoCanvas(terminal), tamanho, obstaculos);
 }
 
+/**
+ * Onde abrir o terminal do Orquestrador: nulo se ele já está no canvas (aí só
+ * se leva a câmera até ele); senão, a primeira área livre perto de `inicio`,
+ * sem cobrir nenhuma janela nem bixinho (`posicaoLivrePerto`).
+ */
+export function posicaoDoTerminalNovo(
+  nos: readonly NoDoCanvas[],
+  orquestradorId: string,
+  inicio: Ponto,
+  tamanho: { largura: number; altura: number },
+): Ponto | null {
+  if (nos.some((no) => ehTerminal(no) && no.data.orquestradorId === orquestradorId)) {
+    return null;
+  }
+  return posicaoLivrePerto(
+    inicio,
+    tamanho,
+    areasOcupadas(nos).map((area) => area.retangulo),
+  );
+}
+
 /** O lado do bixinho em relação ao terminal dele; sem o terminal na lista, o padrão (abaixo). */
 function ladoNoTerminal(bixinho: NoBixinho, terminais: ReadonlyMap<string, NoTerminal>): LadoDoBixinho {
   const terminal = terminais.get(bixinho.parentId ?? "");
@@ -767,11 +1008,13 @@ function terminaisPorId(nos: readonly NoDoCanvas[]): Map<string, NoTerminal> {
  * situação do Subagente e a hora do fim em `data` (a entrega do relatório). Sai do
  * lado do terminal voltado para o bixinho e chega no lado do bixinho voltado
  * para o terminal (`ladoDoBixinho`), por isso `nos` precisa trazer também os
- * terminais.
+ * terminais. As dos bixinhos em `saindo` (ids dos nós) ganham a classe que as
+ * recolhe até o terminal.
  */
 export function arestasDosBixinhos(
   nos: readonly NoDoCanvas[],
   conversas: ReadonlyMap<string, EstadoDaConversa>,
+  saindo: ReadonlySet<string> = new Set(),
 ): ArestaDoBixinho[] {
   const terminais = terminaisPorId(nos);
   return nos.filter(ehBixinho).flatMap((bixinho): ArestaDoBixinho[] => {
@@ -791,8 +1034,12 @@ export function arestasDosBixinhos(
         target: bixinho.id,
         targetHandle: ancoras.bixinho,
         animated: subagente.situacao === "executando",
-        className: CLASSE_DA_ARESTA[subagente.situacao],
-        data: { situacao: subagente.situacao, encerradoEm: subagente.encerradoEm },
+        className: saindo.has(bixinho.id)
+          ? `${CLASSE_DA_ARESTA[subagente.situacao]} aresta-bixinho-saindo`
+          : CLASSE_DA_ARESTA[subagente.situacao],
+        data: saindo.has(bixinho.id)
+          ? { situacao: subagente.situacao, encerradoEm: subagente.encerradoEm, saindo: true }
+          : { situacao: subagente.situacao, encerradoEm: subagente.encerradoEm },
         selectable: false,
         focusable: false,
       },
@@ -893,9 +1140,11 @@ function mesmaAresta(anterior: ArestaDoCanvas, nova: ArestaDoCanvas): boolean {
     anterior.targetHandle === nova.targetHandle &&
     anterior.type === nova.type &&
     anterior.animated === nova.animated &&
+    anterior.selected === nova.selected &&
     anterior.className === nova.className &&
     anterior.data?.situacao === nova.data?.situacao &&
-    anterior.data?.encerradoEm === nova.data?.encerradoEm
+    anterior.data?.encerradoEm === nova.data?.encerradoEm &&
+    anterior.data?.saindo === nova.data?.saindo
   );
 }
 
@@ -913,4 +1162,266 @@ export function reaproveitarArestas(anteriores: ArestaDoCanvas[], novas: ArestaD
   });
   const nadaMudou = resultado.length === anteriores.length && resultado.every((aresta, indice) => aresta === anteriores[indice]);
   return nadaMudou ? anteriores : resultado;
+}
+
+/* ---------------- Itens ligados ao terminal ----------------
+ * O usuário puxa uma linha de uma nota, prévia ou artefato até o terminal de
+ * um Orquestrador: o item vai como contexto no próximo pedido dele e, ao
+ * arrastar o terminal, vem junto. A ligação fica no terminal (`ligados`). */
+
+/** As janelas que se ligam a um terminal: notas, prévias e artefatos. */
+export type NoLigavel = NoNota | NoPrevia | NoArtefato;
+
+export function ehItemLigavel(no: NoDoCanvas): no is NoLigavel {
+  return ehNota(no) || ehPrevia(no) || ehArtefato(no);
+}
+
+/** O mínimo de uma conexão do React Flow que a validação lê. */
+export interface ConexaoProposta {
+  source: string;
+  target: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+}
+
+/**
+ * Só vale puxar a linha da alça de ligação de uma nota, prévia ou artefato até
+ * a chegada de um terminal de Orquestrador: nada de terminal a terminal, nem
+ * de shell, bixinho ou rascunho.
+ */
+export function ehLigacaoValida(conexao: ConexaoProposta, nos: readonly NoDoCanvas[]): boolean {
+  if (conexao.sourceHandle !== ALCA_DE_LIGACAO || conexao.targetHandle !== CHEGADA_DA_LIGACAO) {
+    return false;
+  }
+  const origem = nos.find((no) => no.id === conexao.source);
+  const destino = nos.find((no) => no.id === conexao.target);
+  return origem !== undefined && destino !== undefined && ehItemLigavel(origem) && ehTerminal(destino);
+}
+
+/** O terminal com a lista nova; vazia, sem o campo (como nos layouts antigos). */
+function comLigados(terminal: NoTerminal, ligados: readonly string[]): NoTerminal {
+  const dados: DadosDoTerminal = { ...terminal.data };
+  delete dados.ligados;
+  return { ...terminal, data: ligados.length > 0 ? { ...dados, ligados } : dados };
+}
+
+/**
+ * Liga o item ao terminal (no fim da lista). Ligação repetida, conexão
+ * inválida ou terminal já com `MAXIMO_DE_ITENS_LIGADOS` itens: o mesmo array.
+ */
+export function ligarItem(nos: NoDoCanvas[], conexao: ConexaoProposta): NoDoCanvas[] {
+  const terminal = nos.find((no) => no.id === conexao.target);
+  if (!ehLigacaoValida(conexao, nos) || terminal === undefined || !ehTerminal(terminal)) {
+    return nos;
+  }
+  const ligados = terminal.data.ligados ?? [];
+  if (ligados.includes(conexao.source) || ligados.length >= MAXIMO_DE_ITENS_LIGADOS) {
+    return nos;
+  }
+  const ligado = comLigados(terminal, [...ligados, conexao.source]);
+  return nos.map((no) => (no === terminal ? ligado : no));
+}
+
+/** Desliga o item do terminal; sem essa ligação, o mesmo array. */
+export function desligarItem(nos: NoDoCanvas[], terminalId: string, itemId: string): NoDoCanvas[] {
+  const alvo = nos.find((no) => no.id === terminalId);
+  if (alvo === undefined || !ehTerminal(alvo) || !(alvo.data.ligados ?? []).includes(itemId)) {
+    return nos;
+  }
+  return nos.map((no) =>
+    no === alvo && ehTerminal(no) ? comLigados(no, (no.data.ligados ?? []).filter((id) => id !== itemId)) : no,
+  );
+}
+
+/**
+ * As ligações a itens que saíram do canvas (nota apagada, prévia ou artefato
+ * fechados) somem do terminal; sem nenhuma assim, o mesmo array. Fechar o
+ * terminal já leva as ligações dele junto.
+ */
+export function semLigacoesOrfas(nos: NoDoCanvas[]): NoDoCanvas[] {
+  const ligaveis = new Set(nos.filter(ehItemLigavel).map((no) => no.id));
+  const orfas = (no: NoDoCanvas): boolean => ehTerminal(no) && (no.data.ligados ?? []).some((id) => !ligaveis.has(id));
+  if (!nos.some(orfas)) {
+    return nos;
+  }
+  return nos.map((no) =>
+    orfas(no) && ehTerminal(no) ? comLigados(no, (no.data.ligados ?? []).filter((id) => ligaveis.has(id))) : no,
+  );
+}
+
+/** O id da linha entre o terminal e o item ligado: quem a seleciona e apaga lê os dois daqui. */
+export function idDaLigacao(terminalId: string, itemId: string): string {
+  return `ligacao:${terminalId}:${itemId}`;
+}
+
+/** O terminal e o item de uma linha de ligação; nulo para as outras linhas. */
+export function lerIdDaLigacao(
+  arestaId: string,
+  nos: readonly NoDoCanvas[],
+): { terminalId: string; itemId: string } | null {
+  for (const terminal of nos.filter(ehTerminal)) {
+    for (const itemId of terminal.data.ligados ?? []) {
+      if (idDaLigacao(terminal.id, itemId) === arestaId) {
+        return { terminalId: terminal.id, itemId };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Uma linha de cada terminal a cada item ligado a ele, do lado voltado para o
+ * item (a regra dos bixinhos e das prévias). A selecionada (`selecionada`, o
+ * id da linha) vem com `selected`: Delete ou Backspace a desligam.
+ */
+export function arestasDasLigacoes(nos: readonly NoDoCanvas[], selecionada: string | null = null): ArestaDaLigacao[] {
+  const itens = new Map(nos.filter(ehItemLigavel).map((no) => [no.id, no]));
+  return nos.filter(ehTerminal).flatMap((terminal) =>
+    (terminal.data.ligados ?? []).flatMap((itemId): ArestaDaLigacao[] => {
+      const item = itens.get(itemId);
+      if (item === undefined) {
+        return [];
+      }
+      const relativa = { x: item.position.x - terminal.position.x, y: item.position.y - terminal.position.y };
+      const ancoras = ANCORAS_DO_LADO[ladoEmRelacaoAoTerminal(relativa, tamanhoDoNo(item), tamanhoDoNo(terminal))];
+      const id = idDaLigacao(terminal.id, item.id);
+      return [
+        {
+          id,
+          type: "ligacao",
+          source: terminal.id,
+          sourceHandle: ancoras.terminal,
+          target: item.id,
+          targetHandle: ancoras.bixinho,
+          className: "aresta-ligacao",
+          selected: id === selecionada,
+          selectable: true,
+          focusable: false,
+          deletable: false,
+        },
+      ];
+    }),
+  );
+}
+
+/**
+ * Arrastar o terminal leva junto os itens ligados só a ele, com o mesmo
+ * deslocamento. Um item ligado a dois ou mais terminais fica onde está (não
+ * dá para seguir os dois), e um que já se move no mesmo arraste (selecionado
+ * junto) não ganha deslocamento em dobro. `atuais` são os nós antes das
+ * mudanças. Sem terminal movido, as mesmas mudanças.
+ */
+export function comItensLigadosJunto(
+  mudancas: NodeChange<NoDoCanvas>[],
+  atuais: readonly NoDoCanvas[],
+): NodeChange<NoDoCanvas>[] {
+  const porId = new Map(atuais.map((no) => [no.id, no]));
+  const movidos = new Set(mudancas.flatMap((mudanca) => (mudanca.type === "position" ? [mudanca.id] : [])));
+  const terminaisPorItem = new Map<string, number>();
+  for (const terminal of atuais.filter(ehTerminal)) {
+    for (const itemId of terminal.data.ligados ?? []) {
+      terminaisPorItem.set(itemId, (terminaisPorItem.get(itemId) ?? 0) + 1);
+    }
+  }
+  const extras: NodeChange<NoDoCanvas>[] = [];
+  for (const mudanca of mudancas) {
+    if (mudanca.type !== "position" || mudanca.position === undefined) {
+      continue;
+    }
+    const terminal = porId.get(mudanca.id);
+    if (terminal === undefined || !ehTerminal(terminal)) {
+      continue;
+    }
+    const dx = mudanca.position.x - terminal.position.x;
+    const dy = mudanca.position.y - terminal.position.y;
+    if (dx === 0 && dy === 0) {
+      continue;
+    }
+    for (const itemId of terminal.data.ligados ?? []) {
+      const item = porId.get(itemId);
+      if (item === undefined || movidos.has(itemId) || terminaisPorItem.get(itemId) !== 1) {
+        continue;
+      }
+      movidos.add(itemId);
+      // Sem `dragging`: o item só acompanha, e não fica marcado como arrastado depois de soltar.
+      extras.push({ type: "position", id: itemId, position: { x: item.position.x + dx, y: item.position.y + dy } });
+    }
+  }
+  return extras.length === 0 ? mudancas : [...mudancas, ...extras];
+}
+
+/** O que o pedido lê das lojas: a nota e o artefato como o servidor os confirmou. */
+export interface LeitoresDosItensLigados {
+  lerNota: (notaId: string) => DadosDaNota | undefined;
+  lerArtefato: (artefatoId: string) => ResumoDoArtefato | undefined;
+}
+
+/** O texto da nota no pedido: até `TAMANHO_MAXIMO_DA_NOTA_LIGADA` caracteres, com o aviso do corte. */
+export function textoDaNotaLigada(texto: string): string {
+  if (texto.length <= TAMANHO_MAXIMO_DA_NOTA_LIGADA) {
+    return texto;
+  }
+  const aviso = `\n[… nota cortada aqui: ela tem ${texto.length.toLocaleString("pt-BR")} caracteres]`;
+  return texto.slice(0, TAMANHO_MAXIMO_DA_NOTA_LIGADA - aviso.length) + aviso;
+}
+
+/** O host do endereço (o título da prévia no pedido); sem um endereço válido, o próprio texto. */
+function hostDoEndereco(url: string): string {
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Os itens ligados ao terminal como vão no próximo pedido, na ordem em que
+ * foram ligados: a nota com o texto (cortado), a prévia com o endereço (sem
+ * endereço, fica de fora) e o artefato com o arquivo na pasta de entrada (o
+ * servidor troca pelo caminho no disco; o conteúdo não vai). Itens que não
+ * estão no canvas, ou ainda não chegaram do servidor, ficam de fora.
+ */
+export function itensLigadosParaEnvio(
+  nos: readonly NoDoCanvas[],
+  terminalId: string,
+  { lerNota, lerArtefato }: LeitoresDosItensLigados,
+): ItemLigadoParaEnvio[] {
+  const terminal = nos.find((no) => no.id === terminalId);
+  if (terminal === undefined || !ehTerminal(terminal)) {
+    return [];
+  }
+  const porId = new Map(nos.map((no) => [no.id, no]));
+  const itens: ItemLigadoParaEnvio[] = [];
+  for (const itemId of terminal.data.ligados ?? []) {
+    const item = porId.get(itemId);
+    if (item === undefined) {
+      continue;
+    }
+    if (ehNota(item)) {
+      const nota = lerNota(item.data.notaId);
+      if (nota !== undefined) {
+        itens.push({
+          tipo: "nota",
+          titulo: nota.titulo.slice(0, TAMANHO_MAXIMO_DO_TITULO_LIGADO),
+          conteudo: textoDaNotaLigada(nota.texto),
+        });
+      }
+    } else if (ehPrevia(item)) {
+      const { url } = item.data;
+      if (url !== "" && url.length <= TAMANHO_MAXIMO_DO_ENDERECO_LIGADO) {
+        itens.push({ tipo: "previa", titulo: hostDoEndereco(url).slice(0, TAMANHO_MAXIMO_DO_TITULO_LIGADO), url });
+      }
+    } else if (ehArtefato(item)) {
+      const artefato = lerArtefato(item.data.artefatoId);
+      if (artefato !== undefined) {
+        const pasta = artefato.origem.tipo === "chat" ? "chat" : `orquestradores/${artefato.origem.id ?? ""}`;
+        itens.push({
+          tipo: "artefato",
+          titulo: artefato.titulo.slice(0, TAMANHO_MAXIMO_DO_TITULO_LIGADO),
+          caminho: `${pasta}/${artefato.arquivo}`,
+        });
+      }
+    }
+  }
+  return itens.slice(0, MAXIMO_DE_ITENS_LIGADOS);
 }

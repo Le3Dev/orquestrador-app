@@ -46,7 +46,7 @@ class RelogioFalso implements AgendadorDeTarefas {
 
 const parado: DiagnosticoDoClaude = {
   processoVivo: true,
-  processosVisiveis: true,
+  processosConhecidos: true,
   cpuDoClaude: 0,
   filhos: [],
   transcricoesCrescendo: false,
@@ -185,43 +185,31 @@ describe("VigiaDoTurno", () => {
     expect(travamentos).toEqual(["sem saída há 2 min; o processo do Claude terminou sem fechar o turno"]);
   });
 
-  describe("sem enxergar os processos (Windows)", () => {
-    const semProcessos: DiagnosticoDoClaude = { ...parado, processosVisiveis: false };
-    const naoEnxerga = "o app não enxerga os comandos neste sistema";
+  it("sem lista de processos (Windows), só avisa: não trava nem com um silêncio longo", async () => {
+    diagnosticador.diagnostico = { ...parado, processosConhecidos: false };
+    vigia.ligar();
+    await relogio.avancar(30 * MINUTO);
 
-    it("CPU zero e nenhum filho não foram medidos: não trava aos 5 min nem perto dos 15", async () => {
-      diagnosticador.diagnostico = semProcessos;
-      vigia.ligar();
-      await relogio.avancar(5 * MINUTO);
-
-      expect(diagnosticador.alvos.length).toBeGreaterThanOrEqual(3);
-      expect(travamentos).toEqual([]);
-      expect(leituras.at(-1)).toEqual({ situacao: "suspeito", resumo: `sem saída há 5 min; ${naoEnxerga}` });
-
-      await relogio.avancar(9 * MINUTO + 59 * SEGUNDO);
-      expect(travamentos).toEqual([]);
-      expect(leituras.every((leitura) => !leitura.resumo.includes("sem CPU"))).toBe(true);
+    expect(travamentos).toEqual([]);
+    expect(leituras.at(-1)).toEqual({
+      situacao: "suspeito",
+      resumo: "sem saída há 30 min; não dá para ver os processos neste sistema, então o app não encerra o pedido sozinho",
+      semRetomadaAutomatica: true,
     });
+    expect(relogio.pendentes).toBe(1);
 
-    it("trava aos 15 min sem linha, e o resumo não fala em CPU", async () => {
-      diagnosticador.diagnostico = semProcessos;
-      vigia.ligar();
-      await relogio.avancar(15 * MINUTO);
+    // Transcrições crescendo continuam valendo como trabalho.
+    diagnosticador.diagnostico = { ...parado, processosConhecidos: false, transcricoesCrescendo: true };
+    await relogio.avancar(30 * SEGUNDO);
+    expect(leituras.at(-1)).toEqual({ situacao: "trabalhando", resumo: "subagentes escrevendo" });
+  });
 
-      expect(travamentos).toEqual([`sem saída há 15 min e sem transcrição crescendo; ${naoEnxerga}`]);
-      expect(travamentos[0]).not.toContain("sem CPU");
-      expect(leituras.every((leitura) => !leitura.resumo.includes("sem CPU"))).toBe(true);
-      expect(relogio.pendentes).toBe(0);
-    });
+  it("sem lista de processos, o processo do Claude morto ainda trava (ele é visto pelo sinal 0)", async () => {
+    diagnosticador.diagnostico = { ...parado, processosConhecidos: false, processoVivo: false };
+    vigia.ligar();
+    await relogio.avancar(2 * MINUTO);
 
-    it("com transcrição crescendo, está trabalhando", async () => {
-      diagnosticador.diagnostico = { ...semProcessos, transcricoesCrescendo: true };
-      vigia.ligar();
-      await relogio.avancar(20 * MINUTO);
-
-      expect(leituras.at(-1)).toEqual({ situacao: "trabalhando", resumo: "subagentes escrevendo" });
-      expect(travamentos).toEqual([]);
-    });
+    expect(travamentos).toEqual(["sem saída há 2 min; o processo do Claude terminou sem fechar o turno"]);
   });
 
   it("com a autorrecuperação desligada, só diagnostica: não trava", async () => {

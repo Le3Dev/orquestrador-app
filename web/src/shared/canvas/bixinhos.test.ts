@@ -1,4 +1,4 @@
-import { ACESSORIOS, aparenciaDoBixinho, CORES, FORMAS } from "./bixinhos";
+import { ACESSORIOS, aparenciaDoBixinho, CORES, FORMAS, nomeDoBixinho, papelQueNomeia } from "./bixinhos";
 import type { IconeDeFerramenta } from "./iconesDeFerramenta";
 import {
   ACESSORIOS_DESENHADOS,
@@ -35,6 +35,19 @@ describe("aparenciaDoBixinho", () => {
     expect(new Set(aparencias.map((aparencia) => aparencia.forma))).toEqual(new Set(FORMAS));
     expect(new Set(aparencias.map((aparencia) => aparencia.cor))).toEqual(new Set(CORES));
     expect(new Set(aparencias.map((aparencia) => aparencia.acessorio))).toEqual(new Set(ACESSORIOS));
+  });
+});
+
+describe("nomeDoBixinho", () => {
+  it("o subagente pronto dá o nome; executor, workflow e evento sem papel ficam com o nome do bicho", () => {
+    const bicho = aparenciaDoBixinho("a41787646eec07832").nome;
+
+    expect(nomeDoBixinho("a41787646eec07832", "revisor")).toBe("revisor");
+    expect(papelQueNomeia("diretor-de-video")).toBe("diretor-de-video");
+    for (const papel of ["executor", "workflow", null]) {
+      expect(papelQueNomeia(papel)).toBeNull();
+      expect(nomeDoBixinho("a41787646eec07832", papel)).toBe(bicho);
+    }
   });
 });
 

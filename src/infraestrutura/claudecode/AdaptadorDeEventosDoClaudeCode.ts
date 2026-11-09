@@ -2,7 +2,9 @@ import { extrairEnderecosLocais } from "../../orquestracao/EnderecoLocal";
 import {
   EventoDoMotor,
   JanelaDaCota,
+  SituacaoDaTarefa,
   SituacaoFinalDoSubagente,
+  TarefaDoOrquestrador,
   UsoDoTurno,
 } from "../../orquestracao/EventoDeOrquestracao";
 import { NOME_DO_SUBAGENTE } from "../../orquestracao/InstrucoesDoOrquestrador";
@@ -126,6 +128,42 @@ export function nomeDoWorkflow(entrada: Objeto): string {
 /** Resumo da entrada de uma chamada, para a tela: o `Workflow` mostra só o nome, não o script. */
 export function detalheDaChamada(ferramenta: string, entrada: Objeto): string {
   return ferramenta === FERRAMENTA_DE_WORKFLOW ? nomeDoWorkflow(entrada) : resumirEntrada(entrada);
+}
+
+/** Ferramenta com que o Claude Code mantém a lista de tarefas do trabalho. */
+const FERRAMENTA_DE_TAREFAS = "TodoWrite";
+
+const SITUACOES_DAS_TAREFAS: Readonly<Record<string, SituacaoDaTarefa>> = {
+  pending: "pendente",
+  in_progress: "em_andamento",
+  completed: "concluida",
+};
+
+/**
+ * A lista de uma chamada do `TodoWrite` (`{ todos: [{ content, status,
+ * activeForm }] }`). A tarefa em andamento usa o `activeForm` ("Rodando os
+ * testes"), se houver; as demais, o `content`. Nula se a lista vier vazia ou
+ * com algum item sem texto ou com situação desconhecida.
+ */
+export function tarefasDoTodoWrite(entrada: Objeto): TarefaDoOrquestrador[] | null {
+  const todos = entrada["todos"];
+  if (!Array.isArray(todos) || todos.length === 0) {
+    return null;
+  }
+  const tarefas: TarefaDoOrquestrador[] = [];
+  for (const item of todos) {
+    if (!ehObjeto(item)) {
+      return null;
+    }
+    const situacao = SITUACOES_DAS_TAREFAS[texto(item, "status")];
+    const conteudo = texto(item, "content").trim();
+    if (situacao === undefined || conteudo === "") {
+      return null;
+    }
+    const emAndamento = situacao === "em_andamento" ? texto(item, "activeForm").trim() : "";
+    tarefas.push({ texto: (emAndamento || conteudo).slice(0, TAMANHO_DO_DETALHE), situacao });
+  }
+  return tarefas;
 }
 
 /** Papel com que um workflow aparece entre os Subagentes. */
@@ -496,6 +534,16 @@ export class AdaptadorDeEventosDoClaudeCode {
       const tipo = texto(bloco, "type");
       if (tipo === "text" && texto(bloco, "text").trim() !== "") {
         eventos.push({ tipo: "texto_do_orquestrador", texto: texto(bloco, "text") });
+      }
+      // A lista de tarefas do Orquestrador vira progresso na tela, não uma
+      // linha "usando TodoWrite". Malformada, segue como ferramenta comum.
+      const tarefas =
+        tipo === "tool_use" && texto(bloco, "name") === FERRAMENTA_DE_TAREFAS
+          ? tarefasDoTodoWrite(objeto(bloco, "input"))
+          : null;
+      if (tarefas !== null) {
+        eventos.push({ tipo: "tarefas_atualizadas", tarefas });
+        continue;
       }
       if (tipo === "tool_use" && !FERRAMENTAS_DE_SUBAGENTE.has(texto(bloco, "name"))) {
         eventos.push({

@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { AutorizacaoPendente } from "../../shared/api/tipos";
+import { IconeAlerta } from "../Icones";
 
 /** A pergunta que vai depois de autorizar, para o Claude retomar o que parou. */
 export const PERGUNTA_APOS_AUTORIZAR = "Autorizado. Continue de onde parou.";
@@ -61,19 +62,24 @@ export function CartaoDeAutorizacao({ autorizacao, autorizado, desabilitado, aoE
 
   return (
     <div className="cartao-de-autorizacao" role="group" aria-label="Pedido de autorização do chat">
-      <div className="flex min-w-0 flex-col gap-1">
-        <span className="font-titulo text-[12.5px] font-medium text-primary">
-          O chat quer {verbo} <code className="detalhe-da-autorizacao">{autorizacao.detalhe}</code>
+      <div className="flex min-w-0 items-start gap-2.5">
+        <span className="icone-do-cartao" aria-hidden="true">
+          <IconeAlerta tamanho={15} />
         </span>
-        <span className="texto-longo text-[12px] text-secondary">
-          Autorizando, ele poderá editar arquivos e rodar comandos nos projetos sem perguntar de novo, até o próximo
-          /clear.
-        </span>
-        {etapa.tipo === "erro" && (
-          <span className="hint-error texto-longo" role="alert">
-            {etapa.mensagem}
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="titulo-do-cartao">
+            O chat quer {verbo} <code className="detalhe-da-autorizacao">{autorizacao.detalhe}</code>
           </span>
-        )}
+          <span className="texto-longo text-[12px] text-secondary">
+            Autorizando, ele poderá editar arquivos e rodar comandos nos projetos sem perguntar de novo, até o próximo
+            /clear.
+          </span>
+          {etapa.tipo === "erro" && (
+            <span className="hint-error texto-longo" role="alert">
+              {etapa.mensagem}
+            </span>
+          )}
+        </div>
       </div>
       <div className="acoes-da-autorizacao">
         <button

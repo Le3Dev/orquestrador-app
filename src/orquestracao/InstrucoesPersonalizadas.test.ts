@@ -6,6 +6,7 @@ import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { instrucoesDoOrquestrador, mensagemParaOOrquestrador } from "./InstrucoesDoOrquestrador";
 import {
+  aplicarVariaveis,
   INSTRUCOES_REVOGADAS,
   instrucoesValidas,
   linhasDasInstrucoes,
@@ -79,6 +80,37 @@ describe("resolverInstrucoes (precedência: orquestrador sobre padrão global)",
     const aplicadas = resolverInstrucoes("Use Jest.", "Responda curto.");
     expect(aplicadas).toEqual({ texto: "Use Jest.", origem: "orquestrador" });
     expect(aplicadas?.texto).not.toContain("Responda curto.");
+  });
+});
+
+describe("aplicarVariaveis", () => {
+  const variaveis = { pasta: "/dados/worktrees/abc", nome: "Painel" };
+
+  it("troca {{pasta}} e {{nome}}, inclusive repetidas e com espaços dentro das chaves", () => {
+    const aplicadas = aplicarVariaveis(
+      { texto: "Trabalhe em {{pasta}} ({{ pasta }}). Assine como {{nome}} e {{  nome }}.", origem: "orquestrador" },
+      variaveis,
+    );
+    expect(aplicadas).toEqual({
+      texto: "Trabalhe em /dados/worktrees/abc (/dados/worktrees/abc). Assine como Painel e Painel.",
+      origem: "orquestrador",
+    });
+  });
+
+  it("variáveis desconhecidas e chaves incompletas ficam como estão", () => {
+    const texto = "{{projeto}} {{ Pasta }} {pasta} {{pasta} {{nome}}";
+    expect(aplicarVariaveis({ texto, origem: "padrao" }, variaveis)?.texto).toBe(
+      "{{projeto}} {{ Pasta }} {pasta} {{pasta} Painel",
+    );
+  });
+
+  it("os valores entram literais, sem padrões de substituição", () => {
+    const aplicadas = aplicarVariaveis({ texto: "em {{pasta}}", origem: "orquestrador" }, { pasta: "C:\\p\\$&$1", nome: "x" });
+    expect(aplicadas?.texto).toBe("em C:\\p\\$&$1");
+  });
+
+  it("sem instruções, continua sem instruções", () => {
+    expect(aplicarVariaveis(null, variaveis)).toBeNull();
   });
 });
 
@@ -213,6 +245,7 @@ describe("PreferenciasGlobais", () => {
     expect(PreferenciasGlobais.vazias().paraDados()).toEqual({
       instrucoesPadrao: "",
       subagentesProntos: [],
+      perfisDeInstrucoes: [],
       autorrecuperacao: true,
     });
     expect(PreferenciasGlobais.de({}).instrucoesPadrao).toBe("");

@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import { api, ErroDaApi, mensagemDeErro } from "../../shared/api/cliente";
-import { type AcaoDoApp, LIMITE_DA_FILA, type ResumoDoOrquestrador } from "../../shared/api/tipos";
+import { type AcaoDeAbrirOrquestrador, LIMITE_DA_FILA, type ResumoDoOrquestrador } from "../../shared/api/tipos";
 import { AVISO_DO_LIMITE_DE_ORQUESTRADORES } from "../../shared/canvas/limiteDeTerminais";
 import { formatarDecorrido } from "../../shared/formatacao";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
 import { nomeLivre } from "../../shared/nomeLivre";
+import { IconeOrquestrador } from "../Icones";
 
 export interface PropsDasAcoesDoChat {
   /** Abre (ou foca) o terminal do Orquestrador no canvas. */
@@ -25,7 +26,7 @@ export interface PropsDasAcoesDoChat {
 }
 
 interface Props extends PropsDasAcoesDoChat {
-  acao: AcaoDoApp;
+  acao: AcaoDeAbrirOrquestrador;
 }
 
 /** Abrir (como sempre), colocar o pedido na fila de um ocupado ou criar outro. */
@@ -82,11 +83,12 @@ function escolher(
 }
 
 /**
- * Ex.: "ocioso", "trabalhando há 12min 05s em “corrigir…”", "2 na fila",
- * "alterações sem commit". As alterações são aproximadas: um worktree que
- * ficou com o orquestrador parado (o fim do turno remove os limpos).
+ * As partes do estado, na ordem em que aparecem: "ocioso" ou "trabalhando há
+ * 12min 05s em “corrigir…”", depois "2 na fila" e "alterações sem commit". As
+ * alterações são aproximadas: um worktree que ficou com o orquestrador parado
+ * (o fim do turno remove os limpos).
  */
-function descreverEstado(orquestrador: ResumoDoOrquestrador, agora: Date): string {
+function descreverEstado(orquestrador: ResumoDoOrquestrador, agora: Date): string[] {
   const partes: string[] = [];
   if (orquestrador.situacao === "trabalhando") {
     const turno = orquestrador.ultimoTurno;
@@ -107,7 +109,7 @@ function descreverEstado(orquestrador: ResumoDoOrquestrador, agora: Date): strin
   if (orquestrador.situacao === "ocioso" && orquestrador.worktree !== null) {
     partes.push("alterações sem commit");
   }
-  return partes.join(" · ");
+  return partes;
 }
 
 function avisoDeFilaCheia(nome: string): string {
@@ -222,8 +224,11 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
 
   return (
     <div className="cartao-de-acao">
+      <span className="icone-do-cartao" aria-hidden="true">
+        <IconeOrquestrador tamanho={16} />
+      </span>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="font-titulo text-[12.5px] font-medium text-primary">
+        <span className="titulo-do-cartao">
           {novo ? "Novo orquestrador em" : "Abrir orquestrador em"} {acao.projeto}
         </span>
         <span className="mono truncate text-muted" title={acao.pasta}>
@@ -235,9 +240,19 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
             {oferecerFila ? "se criar outro" : "nome"}: {nomeSugerido}
           </span>
         )}
+        {/* Quebra de linha em vez de cortar: a fila e as alterações sem commit nunca somem; cada uma cabe inteira numa linha. */}
         {escolhido !== undefined && etapa.tipo !== "feito" && (
-          <span className="mono truncate text-[11.5px] text-secondary" data-testid="estado-do-escolhido">
-            {escolhido.nome}: {descreverEstado(escolhido, new Date())}
+          <span className="mono texto-longo text-[11.5px] text-secondary" data-testid="estado-do-escolhido">
+            {escolhido.nome}: {descreverEstado(escolhido, new Date()).map((parte, indice) =>
+              indice === 0 ? (
+                parte
+              ) : (
+                <Fragment key={parte}>
+                  {" "}
+                  <span className="whitespace-nowrap">· {parte}</span>
+                </Fragment>
+              ),
+            )}
           </span>
         )}
         {etapa.tipo === "erro" && (

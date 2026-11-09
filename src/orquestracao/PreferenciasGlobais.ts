@@ -1,4 +1,5 @@
 import { instrucoesValidas } from "./InstrucoesPersonalizadas";
+import { DadosDoPerfilDeInstrucoes, perfisDeInstrucoesValidos } from "./PerfisDeInstrucoes";
 import { DadosDoSubagentePronto, subagentesProntosValidos } from "./SubagentesProntos";
 
 export interface DadosDasPreferencias {
@@ -13,6 +14,11 @@ export interface DadosDasPreferencias {
    */
   subagentesProntos?: DadosDoSubagentePronto[] | undefined;
   /**
+   * Textos de instruções com nome, que a tela copia para as instruções de um
+   * Orquestrador. Ausente num arquivo gravado antes de existir: vale lista vazia.
+   */
+  perfisDeInstrucoes?: DadosDoPerfilDeInstrucoes[] | undefined;
+  /**
    * O app encerra o turno parado e o retoma sozinho, e retoma os que caíram
    * por limite de uso, sobrecarga ou rede (ver ADR-36). Ausente num arquivo
    * gravado antes de existir: vale `true`.
@@ -21,12 +27,14 @@ export interface DadosDasPreferencias {
 }
 
 /**
- * Só os campos informados mudam; os ausentes mantêm o valor atual. A lista de
- * subagentes prontos troca inteira e é validada aqui (`subagentesProntosValidos`).
+ * Só os campos informados mudam; os ausentes mantêm o valor atual. As listas
+ * de subagentes prontos e de perfis trocam inteiras e são validadas aqui
+ * (`subagentesProntosValidos`, `perfisDeInstrucoesValidos`).
  */
 export interface AlteracoesDasPreferencias {
   instrucoesPadrao?: string | undefined;
   subagentesProntos?: readonly unknown[] | undefined;
+  perfisDeInstrucoes?: readonly unknown[] | undefined;
   autorrecuperacao?: boolean | undefined;
 }
 
@@ -38,17 +46,19 @@ export class PreferenciasGlobais {
   private constructor(
     public readonly instrucoesPadrao: string,
     public readonly subagentesProntos: readonly DadosDoSubagentePronto[],
+    public readonly perfisDeInstrucoes: readonly DadosDoPerfilDeInstrucoes[],
     public readonly autorrecuperacao: boolean,
   ) {}
 
   static vazias(): PreferenciasGlobais {
-    return new PreferenciasGlobais("", [], true);
+    return new PreferenciasGlobais("", [], [], true);
   }
 
   static de(dados: DadosDasPreferencias | AlteracoesDasPreferencias): PreferenciasGlobais {
     return new PreferenciasGlobais(
       instrucoesValidas(dados.instrucoesPadrao, "As instruções gerais"),
       subagentesProntosValidos(dados.subagentesProntos),
+      perfisDeInstrucoesValidos(dados.perfisDeInstrucoes),
       // Só `false` desliga: ausente (arquivo antigo) ou qualquer outra coisa liga.
       dados.autorrecuperacao !== false,
     );
@@ -58,6 +68,7 @@ export class PreferenciasGlobais {
     return PreferenciasGlobais.de({
       instrucoesPadrao: alteracoes.instrucoesPadrao ?? this.instrucoesPadrao,
       subagentesProntos: alteracoes.subagentesProntos ?? this.subagentesProntos.map((subagente) => ({ ...subagente })),
+      perfisDeInstrucoes: alteracoes.perfisDeInstrucoes ?? this.perfisDeInstrucoes.map((perfil) => ({ ...perfil })),
       autorrecuperacao: alteracoes.autorrecuperacao ?? this.autorrecuperacao,
     });
   }
@@ -66,6 +77,7 @@ export class PreferenciasGlobais {
     return {
       instrucoesPadrao: this.instrucoesPadrao,
       subagentesProntos: this.subagentesProntos.map((subagente) => ({ ...subagente })),
+      perfisDeInstrucoes: this.perfisDeInstrucoes.map((perfil) => ({ ...perfil })),
       autorrecuperacao: this.autorrecuperacao,
     };
   }

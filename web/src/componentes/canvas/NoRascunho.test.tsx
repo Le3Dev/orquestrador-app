@@ -5,7 +5,7 @@ import { api, ErroDaApi } from "../../shared/api/cliente";
 import type { DadosDaPredefinicao, ResumoDoOrquestrador } from "../../shared/api/tipos";
 import { ProvedorDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
 import type { NoRascunho as TipoDoNo } from "../../shared/canvas/nos";
-import { NoRascunho } from "./NoRascunho";
+import { CONFIRMACAO_PARA_DESCARTAR_O_RASCUNHO, NoRascunho } from "./NoRascunho";
 
 const PROPS: NodeProps<TipoDoNo> = {
   id: "rascunho:1",
@@ -40,6 +40,7 @@ function abrir(conectado = true) {
   const acoes = {
     abrirTerminal: vi.fn(),
     fecharTerminal: vi.fn(),
+    minimizarOuRestaurarTerminal: vi.fn(),
     limparBixinhos: vi.fn(),
     orquestradorCriado: vi.fn(),
     descartarRascunho: vi.fn(),
@@ -124,6 +125,7 @@ describe("NoRascunho", () => {
     // Sem resposta por padrão: os testes que dependem delas trocam o retorno.
     vi.spyOn(api, "listarPredefinicoes").mockReturnValue(new Promise(() => undefined));
     vi.spyOn(api, "lerEsforcoHerdado").mockReturnValue(new Promise(() => undefined));
+    vi.spyOn(api, "lerPreferencias").mockReturnValue(new Promise(() => undefined));
   });
 
   afterEach(() => {
@@ -318,6 +320,63 @@ describe("NoRascunho", () => {
     await waitFor(() => expect(acoes.orquestradorCriado).toHaveBeenCalledWith("rascunho:1", criado));
   });
 
+  describe("aplicar perfil de instruções", () => {
+    const seletor = () => screen.getByRole("combobox", { name: "Aplicar perfil de instruções" });
+    const campoDasInstrucoes = () => screen.getByRole("textbox", { name: "Instruções" });
+
+    function comPerfis() {
+      vi.spyOn(api, "lerPreferencias").mockResolvedValue({
+        instrucoesPadrao: "",
+        subagentesProntos: [],
+        perfisDeInstrucoes: [
+          { nome: "Backend", texto: "Use Jest." },
+          { nome: "Front", texto: "Use Vitest." },
+        ],
+      });
+    }
+
+    it("sem perfis, o select não aparece", async () => {
+      vi.spyOn(api, "lerPreferencias").mockResolvedValue({ instrucoesPadrao: "", subagentesProntos: [] });
+      abrir();
+      await screen.findByRole("option", { name: "app" });
+
+      await act(async () => Promise.resolve());
+      expect(screen.queryByRole("combobox", { name: "Aplicar perfil de instruções" })).not.toBeInTheDocument();
+    });
+
+    it("copia o texto do perfil para as instruções, que vão no começar", async () => {
+      comPerfis();
+      const criar = espiarCriacao();
+      await abrirComPasta();
+
+      fireEvent.change(await screen.findByRole("combobox", { name: "Aplicar perfil de instruções" }), {
+        target: { value: "0" },
+      });
+      expect(campoDasInstrucoes()).toHaveValue("Use Jest.");
+      expect(seletor()).toHaveValue("");
+
+      const payload = await criarEPegarPayload(criar);
+      expect(payload).toMatchObject({ instrucoesPersonalizadas: "Use Jest." });
+    });
+
+    it("com outro texto escrito, confirma antes de trocar", async () => {
+      comPerfis();
+      const confirmar = vi.spyOn(window, "confirm").mockReturnValue(false);
+      abrir();
+      fireEvent.change(campoDasInstrucoes(), { target: { value: "Meu texto." } });
+
+      fireEvent.change(await screen.findByRole("combobox", { name: "Aplicar perfil de instruções" }), {
+        target: { value: "1" },
+      });
+      expect(confirmar).toHaveBeenCalledWith(expect.stringContaining('pelas do perfil "Front"'));
+      expect(campoDasInstrucoes()).toHaveValue("Meu texto.");
+
+      confirmar.mockReturnValue(true);
+      fireEvent.change(seletor(), { target: { value: "1" } });
+      expect(campoDasInstrucoes()).toHaveValue("Use Vitest.");
+    });
+  });
+
   it("o tamanho da letra começa no Normal e a troca vai para o nó, não para o servidor", async () => {
     const acoes = abrir();
     await screen.findByRole("option", { name: "app" });
@@ -459,6 +518,20 @@ describe("NoRascunho", () => {
     expect(botaoDeComecar()).toBeDisabled();
   });
 
+  it("as instruções dão a dica das variáveis e a prévia leva a pasta e o nome escolhidos", async () => {
+    const previa = vi
+      .spyOn(api, "previaDoPrompt")
+      .mockResolvedValue({ instrucoesIniciais: "x", mensagem: "y", origemDasInstrucoes: null });
+    await abrirComPasta();
+
+    expect(screen.getByText("Use {{pasta}} e {{nome}} para a pasta e o nome do orquestrador.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pré-visualizar prompt final" }));
+
+    await waitFor(() =>
+      expect(previa).toHaveBeenCalledWith(expect.any(Object), "/p/app", "execucao", "app"),
+    );
+  });
+
   it("sem nome, não começa e diz por quê", async () => {
     await abrirComPasta();
 
@@ -479,6 +552,7 @@ describe("NoRascunho", () => {
   });
 
   it("descartar pelo rodapé e pelo ✕", async () => {
+    const confirmar = vi.spyOn(window, "confirm");
     const acoes = abrir();
     await screen.findByRole("option", { name: "app" });
 
@@ -486,5 +560,51 @@ describe("NoRascunho", () => {
     fireEvent.click(screen.getByRole("button", { name: "Descartar rascunho" }));
     expect(acoes.descartarRascunho).toHaveBeenCalledTimes(2);
     expect(acoes.descartarRascunho).toHaveBeenCalledWith("rascunho:1");
+    expect(confirmar).not.toHaveBeenCalled();
+  });
+
+  it("só a pasta da lista e o nome sugerido por ela descartam sem perguntar", async () => {
+    const confirmar = vi.spyOn(window, "confirm");
+    const acoes = await abrirComPasta();
+    expect(campoDoNome()).toHaveValue("app");
+
+    fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
+
+    expect(confirmar).not.toHaveBeenCalled();
+    expect(acoes.descartarRascunho).toHaveBeenCalledWith("rascunho:1");
+  });
+
+  it.each([
+    ["nome digitado", () => fireEvent.change(campoDoNome(), { target: { value: "API" } })],
+    ["instruções", () => fireEvent.change(screen.getByRole("textbox", { name: "Instruções" }), { target: { value: "Seja breve." } })],
+    ["permissão", () => fireEvent.click(screen.getByRole("radio", { name: "Editar e rodar comandos" }))],
+    ["modelo", () => escolherModelo("dos subagentes", /^Haiku/)],
+  ])("com %s alterado, pergunta antes de descartar e recusar mantém o rascunho", async (_campo, alterar) => {
+    const confirmar = vi.spyOn(window, "confirm").mockReturnValue(false);
+    const acoes = await abrirComPasta();
+    alterar();
+
+    fireEvent.click(screen.getByRole("button", { name: "Descartar rascunho" }));
+    fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
+
+    expect(confirmar).toHaveBeenCalledTimes(2);
+    expect(confirmar).toHaveBeenCalledWith(CONFIRMACAO_PARA_DESCARTAR_O_RASCUNHO);
+    expect(acoes.descartarRascunho).not.toHaveBeenCalled();
+
+    confirmar.mockReturnValue(true);
+    fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
+    expect(acoes.descartarRascunho).toHaveBeenCalledWith("rascunho:1");
+  });
+
+  it("voltar a configuração ao padrão deixa descartar sem perguntar de novo", async () => {
+    const confirmar = vi.spyOn(window, "confirm");
+    const acoes = await abrirComPasta();
+    fireEvent.click(screen.getByRole("radio", { name: "Editar e rodar comandos" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Somente leitura" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
+
+    expect(confirmar).not.toHaveBeenCalled();
+    expect(acoes.descartarRascunho).toHaveBeenCalledTimes(1);
   });
 });

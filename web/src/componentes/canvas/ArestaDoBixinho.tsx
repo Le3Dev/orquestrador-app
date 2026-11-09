@@ -93,6 +93,9 @@ function EnvelopeDaEntrega({ caminho, aoTerminar }: { caminho: string; aoTermina
  * entrega o que encerrou há pouco, `entregaRecente`), ao falhar ou ser
  * cancelado, com o reduzir movimento do sistema nem com o servidor desconectado.
  *
+ * Quando o bixinho sai sozinho do canvas (`data.saindo`), a linha se recolhe
+ * do bixinho até o terminal, junto com a saída dele.
+ *
  * A bolinha e o envelope são SMIL (`animateMotion`), que segue o caminho da
  * curva mesmo quando o terminal ou o bixinho são arrastados.
  *
@@ -116,6 +119,8 @@ export const ArestaDoBixinho = memo(function ArestaDoBixinho({
   const [caminho] = getBezierPath({ sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition });
   const situacao = data?.situacao;
   const encerradoEm = data?.encerradoEm ?? null;
+  // Saindo, a linha mede 1 (pathLength): o CSS a recolhe até o terminal pelo tracejado.
+  const saindo = data?.saindo === true;
   // A situação vista na renderização anterior: começa com a da montagem, então montar já concluído não entrega.
   const situacaoAnterior = useRef(situacao);
   const [entregando, setEntregando] = useState(false);
@@ -133,6 +138,7 @@ export const ArestaDoBixinho = memo(function ArestaDoBixinho({
     <>
       <BaseEdge
         path={caminho}
+        pathLength={saindo ? 1 : undefined}
         style={style}
         markerStart={markerStart}
         markerEnd={markerEnd}

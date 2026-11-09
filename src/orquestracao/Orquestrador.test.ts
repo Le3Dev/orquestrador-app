@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { ConsumoDoTurno } from "./ConsumoDoTurno";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
-import { ErroDeFilaCheia, LIMITE_DA_FILA, Orquestrador } from "./Orquestrador";
+import { ErroDeFilaCheia, LIMITE_DA_FILA, Orquestrador, TAMANHO_MAXIMO_DO_NOME } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { PedidoNaFila } from "./PedidoNaFila";
 import { PredefinicaoDeConfiguracao, predefinicaoPorNome } from "./PredefinicaoDeConfiguracao";
@@ -152,6 +152,44 @@ describe("Orquestrador", () => {
     expect(evento).toEqual({ tipo: "turno_interrompido", turnoId: "t1" });
     expect(reaberto.situacao).toBe("ocioso");
     expect(reaberto.interromperTurnoEmAndamento(agora)).toBeNull();
+  });
+});
+
+describe("Orquestrador ao renomear", () => {
+  it("troca o nome aparado, registra orquestrador_renomeado e o nome sobrevive a reabrir", () => {
+    const orquestrador = novoOrquestrador();
+
+    const evento = orquestrador.renomear("  Backlog do app  ");
+
+    expect(evento).toEqual({ tipo: "orquestrador_renomeado", nome: "Backlog do app" });
+    expect(orquestrador.nome).toBe("Backlog do app");
+    expect(Orquestrador.reconstituir(orquestrador.paraDados()).nome).toBe("Backlog do app");
+  });
+
+  it("recusa nome vazio ou acima do limite e mantém o anterior", () => {
+    const orquestrador = novoOrquestrador();
+
+    expect(capturarErro(() => orquestrador.renomear("   ")).motivo).toBe("dados_invalidos");
+    expect(capturarErro(() => orquestrador.renomear("x".repeat(TAMANHO_MAXIMO_DO_NOME + 1))).motivo).toBe(
+      "dados_invalidos",
+    );
+    expect(orquestrador.nome).toBe("Painel");
+    expect(orquestrador.renomear("x".repeat(TAMANHO_MAXIMO_DO_NOME))).toMatchObject({ tipo: "orquestrador_renomeado" });
+  });
+
+  it("o mesmo nome não conta como alteração", () => {
+    expect(novoOrquestrador().renomear(" Painel ")).toBeNull();
+  });
+
+  it("vale com um turno em andamento, sem mexer nele", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "analise", agora);
+
+    orquestrador.renomear("Outro nome");
+
+    expect(orquestrador.nome).toBe("Outro nome");
+    expect(orquestrador.situacao).toBe("trabalhando");
+    expect(orquestrador.turnoEmAndamento?.id).toBe("t1");
   });
 });
 
@@ -682,5 +720,55 @@ describe("Orquestrador e a fila de pedidos", () => {
 
       expect(orquestrador.proximoDaFilaApos("t1")).toBeNull();
     });
+  });
+});
+
+describe("Orquestrador e a retomada pendente (ADR-36)", () => {
+  const retomada = { deTurnoId: "t1", causa: "silencio" as const, tentativa: 1, retomarEm: "2026-10-28T12:00:30.000Z" };
+
+  function comFalha(): Orquestrador {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "analise", agora);
+    orquestrador.falharTurno("t1", "travou", agora);
+    return orquestrador;
+  }
+
+  it("nasce sem retomada; marcada, é exposta como cópia e sai ao limpar", () => {
+    const orquestrador = comFalha();
+    expect(orquestrador.retomadaPendente).toBeNull();
+    expect(orquestrador.paraDados().retomadaPendente).toBeNull();
+
+    orquestrador.agendarRetomada(retomada);
+    const exposta = orquestrador.retomadaPendente as { tentativa: number };
+    exposta.tentativa = 9;
+
+    expect(orquestrador.retomadaPendente).toEqual(retomada);
+    expect(orquestrador.limparRetomada()).toBe(true);
+    expect(orquestrador.retomadaPendente).toBeNull();
+    expect(orquestrador.limparRetomada()).toBe(false);
+  });
+
+  it("sobrevive a gravar e reabrir; dados antigos sem o campo reabrem sem retomada", () => {
+    const orquestrador = comFalha();
+    orquestrador.agendarRetomada(retomada);
+
+    const dados = orquestrador.paraDados();
+    expect(dados.retomadaPendente).toEqual(retomada);
+    expect(Orquestrador.reconstituir(dados).retomadaPendente).toEqual(retomada);
+
+    const { retomadaPendente: _semOCampo, ...dadosAntigos } = dados;
+    expect(Orquestrador.reconstituir(dadosAntigos).retomadaPendente).toBeNull();
+  });
+
+  it("qualquer turno que começa e a conversa limpa tiram a retomada", () => {
+    const orquestrador = comFalha();
+    orquestrador.agendarRetomada(retomada);
+    orquestrador.iniciarTurno("t2", "continue", agora);
+    expect(orquestrador.retomadaPendente).toBeNull();
+
+    orquestrador.falharTurno("t2", "travou de novo", agora);
+    orquestrador.agendarRetomada({ ...retomada, deTurnoId: "t2", tentativa: 2 });
+    orquestrador.limparConversa("s2");
+    expect(orquestrador.retomadaPendente).toBeNull();
   });
 });

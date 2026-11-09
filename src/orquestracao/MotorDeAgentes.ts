@@ -1,6 +1,7 @@
 import { TipoDeImagem } from "./Anexo";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
+import { ItemLigado } from "./InstrucoesDoOrquestrador";
 import { InstrucoesAplicadas } from "./InstrucoesPersonalizadas";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
@@ -47,6 +48,12 @@ export interface PedidoDeTurno {
    * do pedido. Lista vazia: tudo como antes.
    */
   subagentesProntos: readonly DadosDoSubagentePronto[];
+  /**
+   * Os itens que o usuário ligou ao Orquestrador no canvas (notas, prévias,
+   * artefatos), mandados com o pedido: vão no bloco `<itens-ligados>` da
+   * mensagem. Ausente ou vazio: nenhum.
+   */
+  itensLigados?: readonly ItemLigado[] | undefined;
 }
 
 /** Por que um turno falhou, quando dá para saber. */

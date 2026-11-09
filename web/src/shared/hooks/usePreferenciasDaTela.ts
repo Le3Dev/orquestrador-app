@@ -1,13 +1,32 @@
 import { useSyncExternalStore } from "react";
 
+/** De que lado do canvas fica o chat fixo. */
+export type LadoDoChatFixo = "esquerda" | "direita";
+
 /** Preferências de exibição da tela, guardadas neste computador (localStorage). */
 export type PreferenciasDaTela = {
-  /** O chat rápido vira uma coluna fixa à esquerda do canvas, em vez de flutuar no pé dele. */
+  /**
+   * O chat rápido vira uma coluna fixa ao lado do canvas (o lado vem de
+   * `ladoDoChatFixo`), em vez de flutuar no pé dele. O nome ficou do tempo em
+   * que só havia a esquerda: trocá-lo apagaria a escolha já guardada.
+   */
   chatFixoNaEsquerda: boolean;
+  /** O lado do chat fixo; preferências antigas, sem o campo, valem a esquerda. */
+  ladoDoChatFixo: LadoDoChatFixo;
   /** Mostra o botão Arquivos nos terminais (o visualizador de código). */
   visualizadorDeCodigo: boolean;
-  /** Largura (px) do chat fixo à esquerda, ajustada pela alça da borda dele. */
+  /** Largura (px) do chat fixo, ajustada pela alça da borda dele. */
   larguraDoChatFixo: number;
+  /**
+   * Os bixinhos dos Subagentes que terminam ficam no canvas até o "limpar" do
+   * terminal. Desligada (o padrão), os concluídos e cancelados saem sozinhos.
+   */
+  manterBixinhosAteLimpar: boolean;
+  /**
+   * O minimapa do canto inferior direito aparece. Desligada (o padrão, e o
+   * valor das preferências antigas, sem o campo), só o botão que o mostra fica.
+   */
+  minimapaVisivel: boolean;
 };
 
 export const CHAVE_DAS_PREFERENCIAS_DA_TELA = "orquestrador.preferenciasDaTela";
@@ -17,8 +36,11 @@ export const LARGURA_DO_CHAT_FIXO = { padrao: 360, minima: 280, maxima: 640 } as
 
 const PADRAO: PreferenciasDaTela = {
   chatFixoNaEsquerda: false,
+  ladoDoChatFixo: "esquerda",
   visualizadorDeCodigo: false,
   larguraDoChatFixo: LARGURA_DO_CHAT_FIXO.padrao,
+  manterBixinhosAteLimpar: false,
+  minimapaVisivel: false,
 };
 
 /** Uma largura inteira entre a mínima e a máxima; número inválido (NaN, infinito) vale o padrão. */
@@ -63,14 +85,20 @@ function interpretar(bruto: string | null): PreferenciasDaTela {
     return PADRAO;
   }
   const registro = lido as Record<string, unknown>;
-  const booleano = (campo: "chatFixoNaEsquerda" | "visualizadorDeCodigo"): boolean =>
+  const booleano = (
+    campo: "chatFixoNaEsquerda" | "visualizadorDeCodigo" | "manterBixinhosAteLimpar" | "minimapaVisivel",
+  ): boolean =>
     typeof registro[campo] === "boolean" ? (registro[campo] as boolean) : PADRAO[campo];
   const largura = registro.larguraDoChatFixo;
   return {
     chatFixoNaEsquerda: booleano("chatFixoNaEsquerda"),
+    // Só "direita" muda o lado: ausente (preferência antiga) ou outro valor vale a esquerda.
+    ladoDoChatFixo: registro.ladoDoChatFixo === "direita" ? "direita" : PADRAO.ladoDoChatFixo,
     visualizadorDeCodigo: booleano("visualizadorDeCodigo"),
     // Número fora do intervalo é limitado a ele; outro tipo vale o padrão.
     larguraDoChatFixo: typeof largura === "number" ? limitarLarguraDoChatFixo(largura) : PADRAO.larguraDoChatFixo,
+    manterBixinhosAteLimpar: booleano("manterBixinhosAteLimpar"),
+    minimapaVisivel: booleano("minimapaVisivel"),
   };
 }
 
@@ -116,8 +144,11 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
   novas.larguraDoChatFixo = limitarLarguraDoChatFixo(novas.larguraDoChatFixo);
   if (
     novas.chatFixoNaEsquerda === atuais.chatFixoNaEsquerda &&
+    novas.ladoDoChatFixo === atuais.ladoDoChatFixo &&
     novas.visualizadorDeCodigo === atuais.visualizadorDeCodigo &&
-    novas.larguraDoChatFixo === atuais.larguraDoChatFixo
+    novas.larguraDoChatFixo === atuais.larguraDoChatFixo &&
+    novas.manterBixinhosAteLimpar === atuais.manterBixinhosAteLimpar &&
+    novas.minimapaVisivel === atuais.minimapaVisivel
   ) {
     return;
   }
@@ -133,7 +164,8 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
 }
 
 /**
- * As preferências da tela (chat fixo à esquerda e a largura dele, visualizador de código):
+ * As preferências da tela (chat fixo, o lado e a largura dele, visualizador de
+ * código, manter os bixinhos até limpar, o minimapa visível):
  * mudar num lugar reflete em todos os componentes que usam o hook e nas
  * outras abas abertas.
  */

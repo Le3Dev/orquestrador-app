@@ -1,3 +1,6 @@
+/** As variáveis que o servidor troca nas instruções a cada pedido (`aplicarVariaveis`). */
+export const DICA_DAS_VARIAVEIS = "Use {{pasta}} e {{nome}} para a pasta e o nome do orquestrador.";
+
 /**
  * O tamanho que o servidor vai conferir nas instruções personalizadas: ele tira
  * o espaço sobrando antes de contar (fim das linhas, linhas em branco

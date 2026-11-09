@@ -10,14 +10,23 @@ import type {
   EventoRegistrado,
   ResumoDoOrquestrador,
 } from "../../shared/api/tipos";
+import { criarLojaDosArtefatos, type AcoesDosArtefatos, ProvedorDosArtefatos } from "../../shared/canvas/artefatos";
 import { ContextoDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
 import { DURACAO_DA_ENTREGA_MS, DURACAO_DO_PISCAR_MS } from "../../shared/canvas/entrega";
-import type { NoTerminal as TipoDoNo } from "../../shared/canvas/nos";
+import { novaPrevia, type NoTerminal as TipoDoNo } from "../../shared/canvas/nos";
+import { type AcoesDasNotas, criarLojaDasNotas, ProvedorDasNotas } from "../../shared/canvas/notas";
 import { TIPO_DO_PEDIDO_ARRASTADO } from "../../shared/canvas/pedidoArrastado";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../../shared/estado/aplicarEvento";
 import { NoTerminal, PainelDeConfiguracao } from "./NoTerminal";
 
 const contagem = vi.hoisted(() => ({ analises: 0, transcricoes: 0 }));
+// Fora do app desktop do Mac por padrão; os testes das bolinhas ligam.
+const ponte = vi.hoisted(() => ({ noMac: false }));
+
+vi.mock("../../shared/ponteDoDesktop", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../shared/ponteDoDesktop")>();
+  return { ...original, rodandoNoMac: () => ponte.noMac };
+});
 
 // O botão de alterações tem testes próprios; aqui basta saber que ele está na barra, com o id certo.
 vi.mock("./BotaoDeAlteracoes", async () => {
@@ -79,8 +88,9 @@ function orquestrador(alteracoes: Partial<DadosDaConfiguracao> = {}): ResumoDoOr
   };
 }
 
-function renderizar(resumo: ResumoDoOrquestrador, { trabalhando = false } = {}) {
+function renderizar(resumo: ResumoDoOrquestrador, { trabalhando = false, conversaComTurnos = false } = {}) {
   const aoFechar = vi.fn();
+  const aoLimparConversa = vi.fn(async () => undefined);
   const canvas: ValorDoCanvas = {
     orquestradores: new Map([[resumo.id, resumo]]),
     conversas: new Map(),
@@ -91,6 +101,7 @@ function renderizar(resumo: ResumoDoOrquestrador, { trabalhando = false } = {}) 
     acoes: {
       abrirTerminal: vi.fn(),
       fecharTerminal: vi.fn(),
+      minimizarOuRestaurarTerminal: vi.fn(),
       limparBixinhos: vi.fn(),
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),
@@ -107,12 +118,18 @@ function renderizar(resumo: ResumoDoOrquestrador, { trabalhando = false } = {}) 
       <PainelDeConfiguracao
         orquestrador={resumo}
         trabalhando={trabalhando}
+        conversaComTurnos={conversaComTurnos}
         aoFechar={aoFechar}
-        aoLimparConversa={vi.fn(async () => undefined)}
+        aoLimparConversa={aoLimparConversa}
       />
     </ContextoDoCanvas.Provider>,
   );
-  return { aoFechar, acoes: canvas.acoes, opcao: screen.getByRole("switch", { name: "Commit e push por feature" }) };
+  return {
+    aoFechar,
+    aoLimparConversa,
+    acoes: canvas.acoes,
+    opcao: screen.getByRole("switch", { name: "Commit e push por feature" }),
+  };
 }
 
 const menuDoModelo = (dono: "do orquestrador" | "dos subagentes") =>
@@ -131,11 +148,12 @@ describe("PainelDeConfiguracao", () => {
     vi.spyOn(api, "listarPredefinicoes").mockReturnValue(new Promise(() => undefined));
     vi.spyOn(api, "lerEsforcoHerdadoDoOrquestrador").mockReturnValue(new Promise(() => undefined));
     vi.spyOn(api, "lerEsforcoHerdado").mockReturnValue(new Promise(() => undefined));
+    vi.spyOn(api, "lerPreferencias").mockReturnValue(new Promise(() => undefined));
   });
 
   afterEach(() => vi.restoreAllMocks());
 
-  it("commit e push começam desligados e, ligados, vão no PATCH junto com o resto da configuração", async () => {
+  it("commit e push começam desligados e, ligados, vão sozinhos no PATCH", async () => {
     const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador({ permitirCommitEPush: true }));
     const { aoFechar, opcao } = renderizar(orquestrador());
 
@@ -144,7 +162,7 @@ describe("PainelDeConfiguracao", () => {
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
 
     await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
-    expect(alterar).toHaveBeenCalledWith("o1", { ...configuracao, permitirCommitEPush: true });
+    expect(alterar).toHaveBeenCalledWith("o1", { permitirCommitEPush: true });
   });
 
   it("carrega a opção já ligada e permite desligar", async () => {
@@ -156,10 +174,10 @@ describe("PainelDeConfiguracao", () => {
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
 
     await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
-    expect(alterar).toHaveBeenCalledWith("o1", { ...configuracao, permitirCommitEPush: false });
+    expect(alterar).toHaveBeenCalledWith("o1", { permitirCommitEPush: false });
   });
 
-  it("carrega o esforço salvo e envia o escolhido no PATCH junto com o resto da configuração", async () => {
+  it("carrega o esforço salvo e envia no PATCH só o esforço alterado", async () => {
     const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
     const { aoFechar } = renderizar(orquestrador({ esforcoDoOrquestrador: "alto" }));
 
@@ -169,14 +187,39 @@ describe("PainelDeConfiguracao", () => {
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
 
     await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
-    expect(alterar).toHaveBeenCalledWith("o1", {
-      ...configuracao,
-      esforcoDoOrquestrador: "alto",
-      esforcoDosSubagentes: "baixo",
-    });
+    expect(alterar).toHaveBeenCalledWith("o1", { esforcoDosSubagentes: "baixo" });
   });
 
-  it("carrega as instruções salvas e envia as editadas no PATCH junto com o resto da configuração", async () => {
+  it("a escolha dos subagentes prontos vai sozinha no PATCH; marcar e desmarcar de volta não envia nada", async () => {
+    vi.spyOn(api, "lerPreferencias").mockResolvedValue({
+      instrucoesPadrao: "",
+      subagentesProntos: [
+        { nome: "revisor", descricao: "Revisa.", prompt: "x", modelo: "herdar" },
+        { nome: "testador", descricao: "Testa.", prompt: "x", modelo: "herdar" },
+      ],
+    });
+    const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+    const { aoFechar } = renderizar(orquestrador({ subagentesProntos: ["revisor"] }));
+    const caixa = async (nome: string) =>
+      within(await screen.findByRole("group", { name: "Subagentes prontos escolhidos" })).getByRole("checkbox", { name: nome });
+
+    fireEvent.click(await caixa("testador"));
+    fireEvent.click(await caixa("testador"));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+    expect(alterar).not.toHaveBeenCalled();
+
+    fireEvent.click(await caixa("revisor"));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(2));
+    expect(alterar).toHaveBeenCalledWith("o1", { subagentesProntos: [] });
+
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Subagentes prontos" })).getByRole("radio", { name: "Nenhum" }));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    await waitFor(() => expect(alterar).toHaveBeenLastCalledWith("o1", { subagentesProntos: "nenhum" }));
+  });
+
+  it("carrega as instruções salvas e envia no PATCH só as instruções editadas", async () => {
     const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
     const { aoFechar } = renderizar(orquestrador({ instrucoesPersonalizadas: "Use Jest." }));
 
@@ -186,8 +229,100 @@ describe("PainelDeConfiguracao", () => {
 
     await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
     expect(alterar).toHaveBeenCalledWith("o1", {
-      ...configuracao,
       instrucoesPersonalizadas: "Sempre comece a resposta com a palavra PIRULITO.",
+    });
+  });
+
+  it("aplicar um perfil copia o texto para as instruções e o PATCH envia só elas", async () => {
+    vi.spyOn(api, "lerPreferencias").mockResolvedValue({
+      instrucoesPadrao: "",
+      subagentesProntos: [],
+      perfisDeInstrucoes: [{ nome: "Backend", texto: "Use Jest e rode o lint." }],
+    });
+    const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+    const { aoFechar } = renderizar(orquestrador());
+
+    fireEvent.change(await screen.findByRole("combobox", { name: "Aplicar perfil de instruções" }), {
+      target: { value: "0" },
+    });
+    expect(campoDasInstrucoes()).toHaveValue("Use Jest e rode o lint.");
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+    await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+    expect(alterar).toHaveBeenCalledWith("o1", { instrucoesPersonalizadas: "Use Jest e rode o lint." });
+  });
+
+  describe("instruções apagadas ou muito mudadas com a conversa em andamento", () => {
+    const INSTRUCOES = "Use Jest nos testes e escreva as mensagens de commit em português.";
+    const sugestao = () => screen.queryByRole("button", { name: "Salvar e começar conversa nova" });
+
+    it("apagadas: o rodapé avisa e oferece salvar e começar conversa nova, depois de confirmar", async () => {
+      const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+      const confirmar = vi.spyOn(window, "confirm").mockReturnValue(true);
+      const { aoFechar, aoLimparConversa } = renderizar(orquestrador({ instrucoesPersonalizadas: INSTRUCOES }), {
+        conversaComTurnos: true,
+      });
+      expect(sugestao()).not.toBeInTheDocument();
+
+      fireEvent.change(campoDasInstrucoes(), { target: { value: "" } });
+      expect(screen.getByText("As instruções antigas seguem no histórico.")).toBeInTheDocument();
+      fireEvent.click(sugestao() as HTMLElement);
+
+      await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+      expect(confirmar).toHaveBeenCalledWith("Salvar e começar uma conversa nova? A conversa atual será arquivada.");
+      expect(alterar).toHaveBeenCalledWith("o1", { instrucoesPersonalizadas: "" });
+      expect(aoLimparConversa).toHaveBeenCalledTimes(1);
+      expect(alterar.mock.invocationCallOrder[0]).toBeLessThan(aoLimparConversa.mock.invocationCallOrder[0] ?? 0);
+    });
+
+    it("trocadas por outras: também avisa; recusada a confirmação, nada é salvo", () => {
+      const alterar = vi.spyOn(api, "alterarConfiguracao");
+      vi.spyOn(window, "confirm").mockReturnValue(false);
+      const { aoFechar, aoLimparConversa } = renderizar(orquestrador({ instrucoesPersonalizadas: INSTRUCOES }), {
+        conversaComTurnos: true,
+      });
+
+      fireEvent.change(campoDasInstrucoes(), { target: { value: "Responda sempre em inglês, sem rodeios." } });
+      fireEvent.click(sugestao() as HTMLElement);
+
+      expect(alterar).not.toHaveBeenCalled();
+      expect(aoLimparConversa).not.toHaveBeenCalled();
+      expect(aoFechar).not.toHaveBeenCalled();
+    });
+
+    it("acréscimo ou correção pequena não avisa, e o Salvar continua só salvando", async () => {
+      const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+      const { aoFechar, aoLimparConversa } = renderizar(orquestrador({ instrucoesPersonalizadas: INSTRUCOES }), {
+        conversaComTurnos: true,
+      });
+
+      fireEvent.change(campoDasInstrucoes(), { target: { value: `${INSTRUCOES} Rode o lint antes de entregar.` } });
+      expect(sugestao()).not.toBeInTheDocument();
+      fireEvent.change(campoDasInstrucoes(), { target: { value: INSTRUCOES.replace("Jest", "Vitest") } });
+      expect(sugestao()).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+      await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+      expect(alterar).toHaveBeenCalledWith("o1", { instrucoesPersonalizadas: INSTRUCOES.replace("Jest", "Vitest") });
+      expect(aoLimparConversa).not.toHaveBeenCalled();
+    });
+
+    it("sem pedidos na conversa, ou sem instruções antes, não avisa", () => {
+      renderizar(orquestrador({ instrucoesPersonalizadas: INSTRUCOES }));
+      fireEvent.change(campoDasInstrucoes(), { target: { value: "" } });
+      expect(sugestao()).not.toBeInTheDocument();
+    });
+
+    it("instruções novas, onde não havia nenhuma, não avisam", () => {
+      renderizar(orquestrador(), { conversaComTurnos: true });
+      fireEvent.change(campoDasInstrucoes(), { target: { value: INSTRUCOES } });
+      expect(sugestao()).not.toBeInTheDocument();
+    });
+
+    it("durante um pedido, o botão fica desabilitado", () => {
+      renderizar(orquestrador({ instrucoesPersonalizadas: INSTRUCOES }), { conversaComTurnos: true, trabalhando: true });
+      fireEvent.change(campoDasInstrucoes(), { target: { value: "" } });
+      expect(sugestao()).toBeDisabled();
     });
   });
 
@@ -228,6 +363,41 @@ describe("PainelDeConfiguracao", () => {
     expect(alterar).not.toHaveBeenCalled();
   });
 
+  it("o PATCH leva só o campo alterado: outra aba que mudou outro campo não é desfeita", async () => {
+    const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+    const { aoFechar } = renderizar(orquestrador());
+
+    fireEvent.click(screen.getByRole("radio", { name: "Somente leitura" }));
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+    await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+    expect(alterar).toHaveBeenCalledTimes(1);
+    expect(alterar).toHaveBeenCalledWith("o1", { nivelDePermissao: "leitura" });
+  });
+
+  it("sem nada alterado, o Salvar só fecha, sem chamar o servidor", () => {
+    const alterar = vi.spyOn(api, "alterarConfiguracao");
+    const { aoFechar, acoes } = renderizar(orquestrador());
+
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+    expect(aoFechar).toHaveBeenCalledTimes(1);
+    expect(alterar).not.toHaveBeenCalled();
+    expect(acoes.recarregar).not.toHaveBeenCalled();
+  });
+
+  it("mudar um campo e voltar ao valor salvo conta como sem alteração", () => {
+    const alterar = vi.spyOn(api, "alterarConfiguracao");
+    const { aoFechar, opcao } = renderizar(orquestrador());
+
+    fireEvent.click(opcao);
+    fireEvent.click(opcao);
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+    expect(aoFechar).toHaveBeenCalledTimes(1);
+    expect(alterar).not.toHaveBeenCalled();
+  });
+
   it("se o servidor recusar, o erro aparece no rodapé no lugar do resumo e o painel continua aberto", async () => {
     vi.spyOn(api, "alterarConfiguracao").mockRejectedValue(new Error("Opção de commit e push inválida."));
     const { aoFechar, opcao } = renderizar(orquestrador());
@@ -239,6 +409,89 @@ describe("PainelDeConfiguracao", () => {
     expect(screen.queryByText(/com até 3 subagentes/)).not.toBeInTheDocument();
     expect(aoFechar).not.toHaveBeenCalled();
     expect(opcao).toBeChecked();
+  });
+
+  describe("Nome", () => {
+    const campoDoNome = () => screen.getByRole("textbox", { name: "Nome" });
+
+    it("abre no topo com o nome atual e o limite de 60; mudado, o Salvar renomeia pela rota do nome, sem PATCH", async () => {
+      const renomear = vi.spyOn(api, "renomearOrquestrador").mockResolvedValue(orquestrador());
+      const alterar = vi.spyOn(api, "alterarConfiguracao");
+      const { aoFechar, acoes } = renderizar(orquestrador());
+
+      expect(campoDoNome()).toHaveValue("Painel de salas");
+      expect(campoDoNome()).toHaveAttribute("maxLength", "60");
+      expect(campoDoNome().closest(".linha-da-criacao")).toBe(document.querySelector(".linha-da-criacao"));
+      fireEvent.change(campoDoNome(), { target: { value: "  Backlog do app  " } });
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+      await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+      expect(renomear).toHaveBeenCalledWith("o1", "Backlog do app");
+      expect(alterar).not.toHaveBeenCalled();
+      expect(acoes.recarregar).toHaveBeenCalled();
+    });
+
+    it("nome e configuração mudados: renomeia e manda no PATCH só o campo alterado", async () => {
+      const renomear = vi.spyOn(api, "renomearOrquestrador").mockResolvedValue(orquestrador());
+      const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+      const { aoFechar, opcao } = renderizar(orquestrador());
+
+      fireEvent.change(campoDoNome(), { target: { value: "Backlog do app" } });
+      fireEvent.click(opcao);
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+      await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+      expect(renomear).toHaveBeenCalledWith("o1", "Backlog do app");
+      expect(alterar).toHaveBeenCalledWith("o1", { permitirCommitEPush: true });
+    });
+
+    it("sem mudança no nome (ou só espaços em volta), a rota do nome não é chamada", async () => {
+      const renomear = vi.spyOn(api, "renomearOrquestrador");
+      const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+      const { aoFechar, opcao } = renderizar(orquestrador());
+
+      fireEvent.change(campoDoNome(), { target: { value: " Painel de salas " } });
+      fireEvent.click(opcao);
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+      await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+      expect(alterar).toHaveBeenCalledWith("o1", { permitirCommitEPush: true });
+      expect(renomear).not.toHaveBeenCalled();
+    });
+
+    it("em branco ou só espaços: o Salvar fica desabilitado e o rodapé diz por quê", () => {
+      const renomear = vi.spyOn(api, "renomearOrquestrador");
+      const { aoFechar } = renderizar(orquestrador());
+
+      fireEvent.change(campoDoNome(), { target: { value: "   " } });
+
+      expect(screen.getByText("Dê um nome ao orquestrador para salvar.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Salvar" })).toBeDisabled();
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+      expect(renomear).not.toHaveBeenCalled();
+      expect(aoFechar).not.toHaveBeenCalled();
+
+      fireEvent.change(campoDoNome(), { target: { value: "Outro" } });
+      expect(screen.getByRole("button", { name: "Salvar" })).toBeEnabled();
+      expect(screen.queryByText("Dê um nome ao orquestrador para salvar.")).not.toBeInTheDocument();
+    });
+
+    it("nome recusado pelo servidor: o erro aparece no rodapé, a configuração não é salva e o painel fica aberto", async () => {
+      vi.spyOn(api, "renomearOrquestrador").mockRejectedValue(new ErroDaApi("O nome deve ter até 60 caracteres.", 400));
+      const alterar = vi.spyOn(api, "alterarConfiguracao");
+      const { aoFechar, opcao } = renderizar(orquestrador());
+
+      fireEvent.change(campoDoNome(), { target: { value: "Novo" } });
+      fireEvent.click(opcao);
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "✗ Não foi possível renomear: O nome deve ter até 60 caracteres.",
+      );
+      expect(alterar).not.toHaveBeenCalled();
+      expect(aoFechar).not.toHaveBeenCalled();
+      expect(campoDoNome()).toHaveValue("Novo");
+    });
   });
 
   it("excluir fica na linha Conversa, pede confirmação e, confirmado, remove e fecha o terminal", async () => {
@@ -291,6 +544,11 @@ describe("PainelDeConfiguracao", () => {
     expect(aplicarPredefinicao).toHaveBeenCalledWith("o1", "economico");
     expect(herdado).toHaveBeenCalledWith("o1");
     expect(menuDoModelo("dos subagentes")).toHaveTextContent("esforço médio");
+
+    // A predefinição já foi salva no servidor: o Salvar sem outra mudança não manda nada.
+    const alterar = vi.spyOn(api, "alterarConfiguracao");
+    fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+    expect(alterar).not.toHaveBeenCalled();
   });
 });
 
@@ -346,6 +604,7 @@ function canvasDoTerminal(conversa: EstadoDaConversa, resumo: ResumoDoOrquestrad
     acoes: {
       abrirTerminal: vi.fn(),
       fecharTerminal: vi.fn(),
+      minimizarOuRestaurarTerminal: vi.fn(),
       limparBixinhos: vi.fn(),
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),
@@ -497,7 +756,7 @@ describe("NoTerminal", () => {
     expect(screen.getByText("resuma o projeto")).toBeInTheDocument();
   });
 
-  it("tem uma âncora de saída no meio de cada lado, também enquanto carrega", () => {
+  it("tem uma âncora de saída no meio de cada lado e a chegada das ligações, também enquanto carrega", () => {
     const ancoras = (container: HTMLElement) =>
       [...container.querySelectorAll<HTMLElement>(".react-flow__handle")].map((ancora) => [
         ancora.dataset.handleid,
@@ -509,6 +768,8 @@ describe("NoTerminal", () => {
       ["cima", "top", true],
       ["direita", "right", true],
       ["esquerda", "left", true],
+      // Onde chega a linha puxada de uma nota, prévia ou artefato (cobre o terminal).
+      ["chegada", "left", false],
     ];
 
     const { container, unmount } = render(<Terminal canvas={canvasDoTerminal(conversaDoTerminal())} no={propsDoNo()} />);
@@ -672,6 +933,94 @@ describe("NoTerminal · conversa nova", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("✗ Orquestrador não encontrado.");
     expect(screen.getByRole("button", { name: "Nova conversa" })).toBeInTheDocument();
+  });
+
+  it("instruções apagadas no ⚙ com pedidos na conversa: 'Salvar e começar conversa nova' salva e limpa", async () => {
+    const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+    const limpar = vi.spyOn(api, "limparConversa").mockResolvedValue(orquestrador());
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const resumo = orquestrador({ instrucoesPersonalizadas: "Responda sempre em tópicos curtos." });
+    render(<Terminal canvas={canvasDoTerminal(conversaOciosa(), resumo)} no={propsDoNo()} />);
+    fireEvent.click(screen.getByTitle("Configurar"));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Instruções" }), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar e começar conversa nova" }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Nova conversa" })).not.toBeInTheDocument());
+    expect(alterar).toHaveBeenCalledWith("o1", { instrucoesPersonalizadas: "" });
+    expect(limpar).toHaveBeenCalledWith("o1");
+  });
+});
+
+describe("NoTerminal · renomear pelo nome na barra", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const nomeNaBarra = (nome: string) => screen.getByTitle(`${nome} · clique duplo para renomear`);
+  const campoDoNome = () => screen.getByRole("textbox", { name: "Nome do orquestrador" });
+
+  it("clique duplo abre o campo; Enter salva o nome aparado e recarrega a lista", async () => {
+    const renomear = vi.spyOn(api, "renomearOrquestrador").mockResolvedValue(orquestrador());
+    const canvas = canvasDoTerminal(conversaOciosa());
+    render(<Terminal canvas={canvas} no={propsDoNo()} />);
+
+    fireEvent.doubleClick(nomeNaBarra("Painel de salas"));
+    expect(campoDoNome()).toHaveValue("Painel de salas");
+    expect(campoDoNome()).toHaveAttribute("maxLength", "60");
+    fireEvent.change(campoDoNome(), { target: { value: "  Backlog do app  " } });
+    fireEvent.keyDown(campoDoNome(), { key: "Enter" });
+
+    // Enquanto o servidor responde, a barra já mostra o nome novo.
+    expect(nomeNaBarra("Backlog do app")).toBeInTheDocument();
+    await waitFor(() => expect(canvas.acoes.recarregar).toHaveBeenCalled());
+    expect(renomear).toHaveBeenCalledWith("o1", "Backlog do app");
+    expect(screen.queryByRole("textbox", { name: "Nome do orquestrador" })).not.toBeInTheDocument();
+  });
+
+  it("Esc desiste, e em branco ou sem mudança não chama o servidor", () => {
+    const renomear = vi.spyOn(api, "renomearOrquestrador");
+    render(<Terminal canvas={canvasDoTerminal(conversaOciosa())} no={propsDoNo()} />);
+
+    fireEvent.doubleClick(nomeNaBarra("Painel de salas"));
+    fireEvent.change(campoDoNome(), { target: { value: "Outro nome" } });
+    fireEvent.keyDown(campoDoNome(), { key: "Escape" });
+    expect(nomeNaBarra("Painel de salas")).toBeInTheDocument();
+
+    for (const valor of ["   ", "Painel de salas"]) {
+      fireEvent.doubleClick(nomeNaBarra("Painel de salas"));
+      fireEvent.change(campoDoNome(), { target: { value: valor } });
+      fireEvent.keyDown(campoDoNome(), { key: "Enter" });
+    }
+
+    expect(renomear).not.toHaveBeenCalled();
+    expect(nomeNaBarra("Painel de salas")).toBeInTheDocument();
+  });
+
+  it("se o servidor recusar, o erro aparece no terminal e volta o nome anterior", async () => {
+    vi.spyOn(api, "renomearOrquestrador").mockRejectedValue(
+      new ErroDaApi("O nome deve ter até 60 caracteres.", 400),
+    );
+    render(<Terminal canvas={canvasDoTerminal(conversaOciosa())} no={propsDoNo()} />);
+
+    fireEvent.doubleClick(nomeNaBarra("Painel de salas"));
+    fireEvent.change(campoDoNome(), { target: { value: "Novo" } });
+    fireEvent.keyDown(campoDoNome(), { key: "Enter" });
+
+    expect(await screen.findByText("✗ Não foi possível renomear: O nome deve ter até 60 caracteres.")).toBeInTheDocument();
+    expect(nomeNaBarra("Painel de salas")).toBeInTheDocument();
+  });
+
+  it("o evento orquestrador_renomeado troca o nome na hora, antes da próxima consulta da lista", () => {
+    const conversa = conversaOciosa();
+    const canvas = canvasDoTerminal(conversa);
+    const { rerender } = render(<Terminal canvas={canvas} no={propsDoNo()} />);
+
+    const renomeada = aplicar(conversa, { tipo: "orquestrador_renomeado", nome: "Renomeado em outra aba" });
+    rerender(<Terminal canvas={{ ...canvas, conversas: new Map([["o1", renomeada]]) }} no={propsDoNo()} />);
+
+    expect(nomeNaBarra("Renomeado em outra aba")).toBeInTheDocument();
+    // O ⚙ abre com o nome que a barra mostra, não com o do resumo antigo.
+    fireEvent.click(screen.getByTitle("Configurar"));
+    expect(screen.getByRole("textbox", { name: "Nome" })).toHaveValue("Renomeado em outra aba");
   });
 });
 
@@ -965,6 +1314,245 @@ describe("NoTerminal · nota arrastada para o terminal", () => {
   });
 });
 
+describe("NoTerminal · barra estreita", () => {
+  /** Guarda o aviso do observador: o teste diz quando a barra "mudou de tamanho". */
+  const avisos: (() => void)[] = [];
+  class ObservadorDeTamanhoSimulado {
+    constructor(aviso: () => void) {
+      avisos.push(aviso);
+    }
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+
+  beforeEach(() => {
+    avisos.length = 0;
+    vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoSimulado);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const resumoCheio = (): ResumoDoOrquestrador => ({
+    ...orquestrador(),
+    instrucoesAtivas: "padrao",
+    worktree: { branch: "feature/barra-estreita", caminho: "C:\\projetos\\painel-wt", ativo: true },
+  });
+
+  /** Renderiza o terminal e simula a barra com `largura` px (o jsdom não tem layout). */
+  function renderizarComLargura(largura: number) {
+    const { container } = render(<Terminal canvas={canvasDoTerminal(conversaOciosa(), resumoCheio())} no={propsDoNo()} />);
+    const barra = container.querySelector(".barra-do-terminal");
+    if (!(barra instanceof HTMLElement)) {
+      throw new Error("barra do terminal não encontrada");
+    }
+    Object.defineProperty(barra, "clientWidth", { configurable: true, value: largura });
+    act(() => {
+      for (const aviso of avisos) {
+        aviso();
+      }
+    });
+    return barra;
+  }
+
+  const CONTROLES = ["Limpar bixinhos", "Alterações de o1", "Configurar", "Fechar o terminal"];
+
+  it("larga, todos os chips ficam na barra, cada um com o texto inteiro no title, e não há ⋯", () => {
+    const barra = renderizarComLargura(1400);
+
+    expect(within(barra).getByTitle("C:\\projetos\\painel")).toHaveTextContent("painel");
+    expect(within(barra).getByTitle(/^Branch: feature\/barra-estreita/)).toHaveTextContent("feature/barra-estreita");
+    expect(within(barra).getByTitle(/^Instruções gerais ativas/)).toHaveTextContent("instruções gerais");
+    // A barra não mostra mais a etiqueta de situação nem a RAM (só a borda que brilha indica o pedido).
+    expect(within(barra).queryByTitle(/^Situação/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Mais da barra" })).not.toBeInTheDocument();
+    for (const controle of CONTROLES) {
+      expect(within(barra).getByRole("button", { name: controle })).toBeInTheDocument();
+    }
+  });
+
+  it("estreita, os controles continuam na barra e os chips que sobram vão para o ⋯", () => {
+    const barra = renderizarComLargura(360);
+
+    for (const controle of CONTROLES) {
+      expect(within(barra).getByRole("button", { name: controle })).toBeInTheDocument();
+    }
+    expect(within(barra).queryByText("instruções gerais")).not.toBeInTheDocument();
+    expect(within(barra).getByText("Painel de salas")).toBeInTheDocument();
+
+    const mais = screen.getByRole("button", { name: "Mais da barra" });
+    expect(mais).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(mais);
+
+    const menu = screen.getByRole("group", { name: "O que não coube na barra" });
+    expect(mais).toHaveAttribute("aria-expanded", "true");
+    expect(within(menu).getByTitle(/^Instruções gerais ativas/)).toHaveTextContent("instruções gerais");
+    // Sem a RAM e a situação, a branch ainda cabe na barra a 360 px.
+    expect(within(menu).queryByTitle(/^Branch:/)).not.toBeInTheDocument();
+    expect(within(barra).getByTitle(/^Branch: feature\/barra-estreita/)).toBeInTheDocument();
+    // Os controles não vão para o menu.
+    expect(within(menu).queryByRole("button")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(menu, { key: "Escape" });
+    expect(screen.queryByRole("group", { name: "O que não coube na barra" })).not.toBeInTheDocument();
+  });
+
+  it("a janela que volta a crescer traz os chips de volta e tira o ⋯", () => {
+    const barra = renderizarComLargura(360);
+    expect(screen.getByRole("button", { name: "Mais da barra" })).toBeInTheDocument();
+
+    Object.defineProperty(barra, "clientWidth", { configurable: true, value: 1400 });
+    act(() => {
+      for (const aviso of avisos) {
+        aviso();
+      }
+    });
+
+    expect(screen.queryByRole("button", { name: "Mais da barra" })).not.toBeInTheDocument();
+    expect(within(barra).getByText("instruções gerais")).toBeInTheDocument();
+  });
+
+  it("o ✕ vem depois de um separador, com o tooltip de que o orquestrador continua salvo", () => {
+    const barra = renderizarComLargura(1400);
+    const fechar = within(barra).getByRole("button", { name: "Fechar o terminal" });
+
+    expect(fechar).toHaveAttribute("title", "Fechar o terminal (o orquestrador e o histórico continuam salvos)");
+    expect(fechar.previousElementSibling).toHaveClass("separador-da-barra");
+    expect(fechar.closest(".controles-da-barra")).not.toBeNull();
+  });
+});
+
+describe("NoTerminal · bolinhas da barra", () => {
+  afterEach(() => {
+    ponte.noMac = false;
+    vi.restoreAllMocks();
+  });
+
+  const barraDoTerminal = (container: HTMLElement): HTMLElement => {
+    const barra = container.querySelector(".barra-do-terminal");
+    if (!(barra instanceof HTMLElement)) {
+      throw new Error("barra do terminal não encontrada");
+    }
+    return barra;
+  };
+  const campo = () => screen.getByRole("textbox", { name: "Mensagem para o orquestrador" });
+  const MINIMIZADO = { orquestradorId: "o1", minimizada: true, alturaAberta: 460 };
+
+  it("no Windows e no navegador, as bolinhas são só o desenho e o ✕ fica à direita", () => {
+    const { container } = render(<Terminal canvas={canvasDoTerminal(conversaOciosa())} no={propsDoNo()} />);
+    const barra = barraDoTerminal(container);
+
+    expect(barra.querySelector(".semaforo")).toHaveAttribute("aria-hidden", "true");
+    expect(within(barra).queryByRole("group", { name: "Janela do terminal" })).not.toBeInTheDocument();
+    expect(within(barra).queryByRole("button", { name: "Minimizar" })).not.toBeInTheDocument();
+    expect(within(barra).queryByRole("button", { name: "Tela cheia" })).not.toBeInTheDocument();
+    expect(within(barra).getByRole("button", { name: "Fechar o terminal" })).toHaveClass("botao-fechar-do-terminal");
+  });
+
+  it("no Mac, viram botões (fechar, minimizar, tela cheia) e o ✕ da direita sai", () => {
+    ponte.noMac = true;
+    const canvas = canvasDoTerminal(conversaOciosa());
+    const { container } = render(<Terminal canvas={canvas} no={propsDoNo()} />);
+    const barra = barraDoTerminal(container);
+    const bolinhas = within(barra).getByRole("group", { name: "Janela do terminal" });
+
+    expect(within(bolinhas).getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual([
+      "Fechar o terminal",
+      "Minimizar",
+      "Tela cheia",
+    ]);
+    expect(within(bolinhas).getByRole("button", { name: "Fechar o terminal" })).toHaveAttribute(
+      "title",
+      "Fechar o terminal (o orquestrador continua salvo)",
+    );
+    for (const botao of within(bolinhas).getAllByRole("button")) {
+      expect(botao).toHaveClass("nodrag");
+    }
+    // Um só "Fechar o terminal": o das bolinhas. Nem o ✕ nem o separador ficam.
+    expect(within(barra).getAllByRole("button", { name: "Fechar o terminal" })).toHaveLength(1);
+    expect(barra.querySelector(".botao-fechar-do-terminal")).toBeNull();
+    expect(barra.querySelector(".separador-da-barra")).toBeNull();
+
+    fireEvent.click(within(bolinhas).getByRole("button", { name: "Fechar o terminal" }));
+    expect(canvas.acoes.fecharTerminal).toHaveBeenCalledWith("o1");
+  });
+
+  it("a amarela minimiza; minimizado, fica só a barra, sem perder o prompt, e a amarela ou o duplo clique restauram", () => {
+    ponte.noMac = true;
+    const canvas = canvasDoTerminal(conversaOciosa());
+    const { container, rerender } = render(<Terminal canvas={canvas} no={propsDoNo()} />);
+    fireEvent.change(campo(), { target: { value: "rascunho do pedido" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Minimizar" }));
+    expect(canvas.acoes.minimizarOuRestaurarTerminal).toHaveBeenCalledWith("o1");
+
+    // O canvas troca os dados do nó.
+    rerender(<Terminal canvas={canvas} no={propsDoNo({ data: MINIMIZADO })} />);
+    const barra = barraDoTerminal(container);
+    expect(container.querySelector(".janela-terminal")).toHaveClass("janela-terminal-minimizada");
+    expect(container.querySelector(".conteudo-do-cartao")).toHaveAttribute("hidden");
+    // Escondido (fora da árvore acessível), mas montado, com o texto.
+    expect(screen.queryByRole("textbox", { name: "Mensagem para o orquestrador" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "Mensagem para o orquestrador", hidden: true }),
+    ).toHaveValue("rascunho do pedido");
+
+    fireEvent.click(within(barra).getByRole("button", { name: "Restaurar" }));
+    expect(canvas.acoes.minimizarOuRestaurarTerminal).toHaveBeenCalledTimes(2);
+
+    // Duplo clique no nome restaura (e não abre o renomear); num botão da barra, não.
+    fireEvent.doubleClick(within(barra).getByText("Painel de salas"));
+    expect(canvas.acoes.minimizarOuRestaurarTerminal).toHaveBeenCalledTimes(3);
+    expect(screen.queryByRole("textbox", { name: "Nome do orquestrador" })).not.toBeInTheDocument();
+    fireEvent.doubleClick(within(barra).getByRole("button", { name: "Restaurar" }));
+    expect(canvas.acoes.minimizarOuRestaurarTerminal).toHaveBeenCalledTimes(3);
+
+    rerender(<Terminal canvas={canvas} no={propsDoNo()} />);
+    expect(container.querySelector(".conteudo-do-cartao")).not.toHaveAttribute("hidden");
+    expect(campo()).toHaveValue("rascunho do pedido");
+  });
+
+  it("a verde põe em tela cheia com o mesmo texto no prompt; Esc volta", () => {
+    ponte.noMac = true;
+    render(<Terminal canvas={canvasDoTerminal(conversaOciosa())} no={propsDoNo()} />);
+    fireEvent.change(campo(), { target: { value: "continua aqui" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Tela cheia" }));
+
+    const tela = screen.getByRole("dialog", { name: "Painel de salas em tela cheia" });
+    expect(screen.getByText("em tela cheia · Esc volta")).toBeInTheDocument();
+    expect(within(tela).getByRole("textbox", { name: "Mensagem para o orquestrador" })).toHaveValue("continua aqui");
+    expect(within(tela).getByText("resuma o projeto")).toBeInTheDocument();
+    expect(within(tela).getByRole("button", { name: "Sair da tela cheia" })).toBeInTheDocument();
+
+    fireEvent.keyDown(within(tela).getByRole("textbox", { name: "Mensagem para o orquestrador" }), { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: "Painel de salas em tela cheia" })).not.toBeInTheDocument();
+    expect(screen.queryByText("em tela cheia · Esc volta")).not.toBeInTheDocument();
+    expect(campo()).toHaveValue("continua aqui");
+    expect(screen.getByRole("button", { name: "Tela cheia" })).toBeInTheDocument();
+  });
+
+  it("em tela cheia, a verde também volta, e o Esc que cancela o pedido no prompt não sai dela", () => {
+    ponte.noMac = true;
+    const cancelar = vi.spyOn(api, "cancelar").mockResolvedValue({ cancelando: true });
+    render(<Terminal canvas={canvasDoTerminal(conversaDoTerminal())} no={propsDoNo()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Tela cheia" }));
+    const tela = screen.getByRole("dialog", { name: "Painel de salas em tela cheia" });
+    fireEvent.keyDown(within(tela).getByRole("textbox", { name: "Mensagem para o orquestrador" }), { key: "Escape" });
+
+    expect(cancelar).toHaveBeenCalledWith("o1");
+    expect(screen.getByRole("dialog", { name: "Painel de salas em tela cheia" })).toBeInTheDocument();
+
+    fireEvent.click(within(tela).getByRole("button", { name: "Sair da tela cheia" }));
+    expect(screen.queryByRole("dialog", { name: "Painel de salas em tela cheia" })).not.toBeInTheDocument();
+  });
+});
+
 describe("NoTerminal · borda piscando na entrega do relatório", () => {
   const reduzirMovimento = { ligado: false };
 
@@ -1091,5 +1679,101 @@ describe("NoTerminal · borda piscando na entrega do relatório", () => {
     unmount();
 
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("NoTerminal · itens ligados", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const LIGADOS = ["nota:n1", "previa:p1", "artefato:a1"];
+  const ITENS_PARA_ENVIO = [
+    { tipo: "nota" as const, titulo: "Ideias", conteudo: "comprar café" },
+    { tipo: "previa" as const, titulo: "localhost:5173", url: "http://localhost:5173/" },
+  ];
+
+  function renderizarLigado(conversa: EstadoDaConversa = conversaOciosa(), ligados: readonly string[] = LIGADOS) {
+    const canvas = canvasDoTerminal(conversa);
+    const desligarItem = vi.fn();
+    const lerItensLigados = vi.fn(() => ITENS_PARA_ENVIO);
+    canvas.acoes = { ...canvas.acoes, desligarItem, lerItensLigados };
+    const lojaDasNotas = criarLojaDasNotas();
+    lojaDasNotas.carregar([
+      { id: "n1", titulo: "Ideias", texto: "comprar café", criadaEm: "2026-11-08T12:00:00Z", atualizadaEm: "2026-11-08T12:00:00Z" },
+    ]);
+    const lojaDosArtefatos = criarLojaDosArtefatos();
+    lojaDosArtefatos.publicar({
+      lista: [
+        {
+          id: "a1",
+          titulo: "Relatório da semana",
+          formato: "html",
+          origem: { tipo: "orquestrador", id: "o1" },
+          arquivo: "relatorio.html",
+          criadoEm: "2026-11-08T12:00:00Z",
+          atualizadoEm: "2026-11-08T12:00:00Z",
+          versaoAtual: 1,
+          versoes: [],
+        },
+      ],
+      carregada: true,
+      erro: null,
+    });
+    const previa = novaPrevia("p1", { x: 0, y: 600 }, { url: "http://localhost:5173/", orquestradorId: null });
+    render(
+      <ReactFlowProvider initialNodes={[previa]}>
+        <ContextoDoCanvas.Provider value={canvas}>
+          <ProvedorDasNotas valor={{ loja: lojaDasNotas, acoes: {} as AcoesDasNotas }}>
+            <ProvedorDosArtefatos valor={{ loja: lojaDosArtefatos, acoes: {} as AcoesDosArtefatos }}>
+              <NoTerminal {...propsDoNo({ data: { orquestradorId: "o1", ligados } })} />
+            </ProvedorDosArtefatos>
+          </ProvedorDasNotas>
+        </ContextoDoCanvas.Provider>
+      </ReactFlowProvider>,
+    );
+    return { desligarItem, lerItensLigados };
+  }
+
+  it("mostra um chip por item ligado, acima do prompt, e o × desliga só aquele", () => {
+    const { desligarItem } = renderizarLigado();
+
+    const grupo = screen.getByRole("group", { name: "Itens ligados a este orquestrador" });
+    expect(within(grupo).getByText("Ideias")).toBeInTheDocument();
+    expect(within(grupo).getByText("localhost:5173")).toBeInTheDocument();
+    expect(within(grupo).getByText("Relatório da semana")).toBeInTheDocument();
+
+    fireEvent.click(within(grupo).getByRole("button", { name: "Desligar a prévia localhost:5173" }));
+    expect(desligarItem).toHaveBeenCalledWith("o1", "previa:p1");
+    expect(desligarItem).toHaveBeenCalledTimes(1);
+  });
+
+  it("sem itens ligados, não há a faixa dos chips", () => {
+    render(<Terminal canvas={canvasDoTerminal(conversaOciosa())} no={propsDoNo()} />);
+
+    expect(screen.queryByRole("group", { name: "Itens ligados a este orquestrador" })).not.toBeInTheDocument();
+  });
+
+  it("o próximo pedido leva os itens ligados, lidos na hora do envio", async () => {
+    const enviar = vi.spyOn(api, "enviarMensagem").mockResolvedValue({ turnoId: "t2" });
+    const { lerItensLigados } = renderizarLigado();
+    const campo = campoDoPrompt();
+
+    fireEvent.change(campo, { target: { value: "use a nota" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+
+    await waitFor(() => expect(enviar).toHaveBeenCalledWith("o1", "use a nota", [], "execucao", ITENS_PARA_ENVIO));
+    expect(lerItensLigados).toHaveBeenCalledWith("o1");
+  });
+
+  it("pôr na fila também leva os itens ligados, como estão agora", async () => {
+    const enfileirar = vi.spyOn(api, "enfileirarPedido").mockResolvedValue({ pedidoId: "p9" });
+    renderizarLigado(conversaDoTerminal());
+    const campo = campoDoPrompt();
+
+    fireEvent.change(campo, { target: { value: "depois veja a prévia" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(enfileirar).toHaveBeenCalledWith("o1", "depois veja a prévia", "execucao", ITENS_PARA_ENVIO),
+    );
   });
 });

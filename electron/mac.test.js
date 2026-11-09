@@ -36,13 +36,30 @@ describe("electron/mac", () => {
     expect(papeis).toEqual(expect.arrayContaining(["copy", "paste", "cut", "undo", "selectAll", "quit", "close"]));
   });
 
-  it.runIf(noMac)("no Mac, acha o primeiro claude do PATH sem resolver o link", () => {
-    const existentes = new Set(["/b/claude", "/c/claude"]);
+  it("no Mac, acha o primeiro claude do PATH sem resolver o link", () => {
+    const existentes = new Set(["/b/claude", "/c/claude", "/home/eu/.local/bin/claude"]);
     const ehArquivo = (caminho) => existentes.has(caminho);
 
-    expect(mac.claudeCodeDoPath(ehArquivo, { PATH: "/a::/b:/c" })).toBe("/b/claude");
-    expect(mac.claudeCodeDoPath(ehArquivo, { PATH: "/a" })).toBeNull();
-    expect(mac.claudeCodeDoPath(ehArquivo, {})).toBeNull();
+    expect(mac.claudeCodeDoPath(ehArquivo, { PATH: "/a::/b:/c" }, "darwin")).toBe("/b/claude");
+    // No Mac, o ~/.local/bin já entra no PATH por carregarPathDoShell.
+    expect(mac.claudeCodeDoPath(ehArquivo, { PATH: "/a", HOME: "/home/eu" }, "darwin")).toBeNull();
+    expect(mac.claudeCodeDoPath(ehArquivo, {}, "darwin")).toBeNull();
+  });
+
+  it("no Linux, acha o claude do PATH e, sem ele, o de ~/.local/bin ou /usr/local/bin", () => {
+    const existentes = new Set(["/b/claude", "/home/eu/.local/bin/claude", "/usr/local/bin/claude"]);
+    const ehArquivo = (caminho) => existentes.has(caminho);
+
+    expect(mac.claudeCodeDoPath(ehArquivo, { PATH: "/a:/b", HOME: "/home/eu" }, "linux")).toBe("/b/claude");
+    expect(mac.claudeCodeDoPath(ehArquivo, { PATH: "/usr/bin", HOME: "/home/eu" }, "linux")).toBe(
+      "/home/eu/.local/bin/claude",
+    );
+    expect(mac.claudeCodeDoPath(ehArquivo, {}, "linux")).toBe("/usr/local/bin/claude");
+    expect(mac.claudeCodeDoPath(() => false, { PATH: "/b", HOME: "/home/eu" }, "linux")).toBeNull();
+  });
+
+  it("no Windows, não procura o claude do PATH (vale a detecção do claude.exe)", () => {
+    expect(mac.claudeCodeDoPath(() => true, { PATH: "/b", HOME: "/home/eu" }, "win32")).toBeNull();
   });
 
   it.skipIf(noMac)("fora do Mac, nada muda", () => {
@@ -50,7 +67,6 @@ describe("electron/mac", () => {
     expect(mac.ajustarOpcoesDaJanela(opcoesDoWindows, true)).toBe(opcoesDoWindows);
     expect(mac.ajustarOpcoesDaJanela(opcoesDoWindows, false)).toBe(opcoesDoWindows);
     expect(mac.menuDoApp({ buildFromTemplate: () => "menu" }, "Orquestrador")).toBeNull();
-    expect(mac.claudeCodeDoPath(() => true, { PATH: "/b" })).toBeNull();
   });
 
   it.runIf(noMac)("no Mac, acha o histórico na pasta dados do repositório gravado no pacote", () => {

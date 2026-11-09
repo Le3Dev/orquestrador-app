@@ -25,6 +25,14 @@ export interface JanelaDaCota {
 
 export type SituacaoFinalDoSubagente = "concluido" | "falhou" | "cancelado";
 
+export type SituacaoDaTarefa = "pendente" | "em_andamento" | "concluida";
+
+/** Um item da lista de tarefas que o Orquestrador mantém (`TodoWrite` do Claude Code). */
+export interface TarefaDoOrquestrador {
+  texto: string;
+  situacao: SituacaoDaTarefa;
+}
+
 /** O que o motor observa enquanto executa um turno. */
 export type EventoDoMotor =
   | { tipo: "sessao_iniciada" }
@@ -69,6 +77,11 @@ export type EventoDoMotor =
    * Chega uma vez por endereço em cada turno, já normalizado.
    */
   | { tipo: "endereco_local_detectado"; url: string }
+  /**
+   * O Orquestrador atualizou a lista de tarefas do trabalho (`TodoWrite`):
+   * a lista inteira, que substitui a anterior. Nunca vem vazia.
+   */
+  | { tipo: "tarefas_atualizadas"; tarefas: TarefaDoOrquestrador[] }
   /** O Claude está raciocinando: não muda o turno, só mostra que há vida. */
   | { tipo: "sinal_de_vida"; tokensPensando: number };
 
@@ -156,6 +169,8 @@ export type EventoDeOrquestracao =
       /** A alteração veio de uma predefinição (ex.: "Modo econômico"). Ausente nas alterações campo a campo. */
       predefinicao?: NomeDaPredefinicao;
     }
+  /** O usuário trocou o nome do Orquestrador (já aparado). Não pertence a nenhum turno. */
+  | { tipo: "orquestrador_renomeado"; nome: string }
   /**
    * A conversa foi limpa ("/clear"): o histórico anterior foi arquivado e o
    * próximo turno começa uma sessão nova. É o primeiro evento da conversa
@@ -197,6 +212,8 @@ export interface SinalDeVida {
    * O que a vigia do turno viu quando o Claude ficou sem dar saída (ver
    * ADR-36), ex.: trabalhando "rodando `npm test` há 6 min"; suspeito "sem
    * saída há 3 min, sem CPU". Ausente nos sinais de raciocínio.
+   * `semRetomadaAutomatica`: o sistema não deixa ver os processos (Windows),
+   * e a vigia só avisa, sem encerrar nem retomar o turno.
    */
-  diagnostico?: { situacao: "trabalhando" | "suspeito"; resumo: string };
+  diagnostico?: { situacao: "trabalhando" | "suspeito"; resumo: string; semRetomadaAutomatica?: true };
 }

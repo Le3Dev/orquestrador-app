@@ -73,4 +73,53 @@ describe("CartaoDoPlano", () => {
 
     expect(screen.getByRole("button", { name: "Aprovar e executar" })).toBeDisabled();
   });
+
+  describe("Commitar ao final", () => {
+    const comCommit: DadosDaConfiguracao = {
+      ...configuracao,
+      nivelDePermissao: "edicao_e_comandos",
+      permitirCommitEPush: true,
+    };
+
+    it("com o commit liberado e o terminal, aparece desmarcada e aprova sem commit", async () => {
+      const acoesDoPlano = acoes();
+      render(
+        <CartaoDoPlano turno={turnoDoPlano()} configuracao={comCommit} ultimo desconectado={false} acoes={acoesDoPlano} />,
+      );
+
+      expect(screen.getByRole("checkbox", { name: /Commitar ao final/ })).not.toBeChecked();
+      fireEvent.click(screen.getByRole("button", { name: "Aprovar e executar" }));
+
+      await vi.waitFor(() => expect(acoesDoPlano.aoAprovar).toHaveBeenCalledWith(false));
+    });
+
+    it("marcada, aprova pedindo o commit ao final", async () => {
+      const acoesDoPlano = acoes();
+      render(
+        <CartaoDoPlano turno={turnoDoPlano()} configuracao={comCommit} ultimo desconectado={false} acoes={acoesDoPlano} />,
+      );
+
+      fireEvent.click(screen.getByRole("checkbox", { name: /Commitar ao final/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Aprovar e executar" }));
+
+      await vi.waitFor(() => expect(acoesDoPlano.aoAprovar).toHaveBeenCalledWith(true));
+    });
+
+    it.each<[string, Partial<DadosDaConfiguracao>]>([
+      ["com o commit desligado", { permitirCommitEPush: false }],
+      ["sem o terminal no nível", { nivelDePermissao: "edicao" }],
+    ])("não aparece %s", (_caso, alteracoes) => {
+      render(
+        <CartaoDoPlano
+          turno={turnoDoPlano()}
+          configuracao={{ ...comCommit, ...alteracoes }}
+          ultimo
+          desconectado={false}
+          acoes={acoes()}
+        />,
+      );
+
+      expect(screen.queryByRole("checkbox", { name: /Commitar ao final/ })).not.toBeInTheDocument();
+    });
+  });
 });

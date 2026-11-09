@@ -1,20 +1,31 @@
 import {
   Background,
   BackgroundVariant,
+  BezierEdge,
   ControlButton,
   Controls,
+  Handle,
+  type IsValidConnection,
   MiniMap,
+  type NodeProps,
   Panel,
+  Position,
   ReactFlow,
   ReactFlowProvider,
+  SelectionMode,
   useNodesState,
   useReactFlow,
+  type Connection,
+  type EdgeChange,
   type EdgeTypes,
   type NodeChange,
   type NodeTypes,
 } from "@xyflow/react";
 import {
+  type ComponentType,
   type Dispatch,
+  type DragEvent,
+  memo,
   type SetStateAction,
   useCallback,
   useEffect,
@@ -24,9 +35,11 @@ import {
   useState,
 } from "react";
 
-import { IconeGrade, IconeOrquestrador } from "../componentes/Icones";
-import { ChatRapido } from "../componentes/chat/ChatRapido";
+import { IconeDesenhar, IconeGrade, IconeMinimapa, IconeOrquestrador } from "../componentes/Icones";
+import { ChatRapido, TIPO_DA_RESPOSTA_DO_CHAT } from "../componentes/chat/ChatRapido";
 import { ArestaDoBixinho } from "../componentes/canvas/ArestaDoBixinho";
+import { BarraDoGrupo } from "../componentes/canvas/BarraDoGrupo";
+import { CamadaDeDesenho } from "../componentes/canvas/CamadaDeDesenho";
 import { NoArtefato } from "../componentes/canvas/NoArtefato";
 import { NoBixinho } from "../componentes/canvas/NoBixinho";
 import { NoNota } from "../componentes/canvas/NoNota";
@@ -48,10 +61,11 @@ import {
   StatusDoCanvas,
 } from "../componentes/canvas/PaineisDoCanvas";
 import { PainelDeInstrucoesGerais } from "../componentes/canvas/PainelDeInstrucoesGerais";
+import { DialogoDeNovoModelo, PainelDeModelos } from "../componentes/canvas/PainelDeModelos";
 import { PainelDeSubagentes } from "../componentes/canvas/PainelDeSubagentes";
 import { api, ErroDaApi, mensagemDeErro } from "../shared/api/cliente";
 import type { ResumoDoArtefato } from "../shared/api/artefatos";
-import type { ResumoDoOrquestrador } from "../shared/api/tipos";
+import type { ConteudoDoModeloDeCanvas, ResumoDoOrquestrador } from "../shared/api/tipos";
 import {
   type AcoesDosArtefatos,
   artefatoAberto,
@@ -71,13 +85,21 @@ import {
   ZOOM_MINIMO_DO_ENQUADRAMENTO,
 } from "../shared/canvas/enquadramento";
 import {
+  type Alinhamento,
+  alinharJanelas,
+  distribuirJanelas,
+  type EixoDaDistribuicao,
   ESCALA_DA_LETRA_PADRAO,
   type EscalaDaLetra,
+  type JanelaNoCanvas,
+  janelasLadoALado,
   type JanelaParaOrganizar,
   lerBixinhosLimpos,
   lerLayout,
+  MARGEM_DO_LADO_A_LADO,
   organizarComNotas,
   type Ponto,
+  posicaoLivrePerto,
   posicaoParaNovoTerminal,
   salvarBixinhosLimpos,
   TAMANHO_DA_NOTA,
@@ -90,14 +112,24 @@ import {
 } from "../shared/canvas/layout";
 import { AVISO_DO_LIMITE_DE_ORQUESTRADORES, cabeOutroTerminal } from "../shared/canvas/limiteDeTerminais";
 import {
+  ALCA_DE_LIGACAO,
   ALCA_DO_TERMINAL,
+  type Ancora,
   type ArestaDoCanvas,
+  arestasDasLigacoes,
   arestasDasPrevias,
   arestasDosBixinhos,
   arestasDosShells,
+  areasOcupadas,
   comEscalaDaLetra,
+  comItensLigadosJunto,
+  comPosicoes,
+  desligarItem,
   ehArtefato,
   ehBixinho,
+  ehFechavelEmGrupo,
+  ehItemLigavel,
+  ehLigacaoValida,
   ehNota,
   ehPrevia,
   ehRascunho,
@@ -107,9 +139,14 @@ import {
   idDoNoDaPrevia,
   idDoNoDoArtefato,
   idDoNoDoShell,
+  itensLigadosParaEnvio,
+  janelaVisivel,
+  lerIdDaLigacao,
+  ligarItem,
   limparBixinhos,
   mesmasLigacoes,
   minimizarOuRestaurar,
+  minimizarOuRestaurarTelas,
   type NoDoCanvas,
   type NoPrevia as TipoDaPrevia,
   type NoRascunho as TipoDoRascunho,
@@ -117,13 +154,22 @@ import {
   novaPrevia,
   novoShell,
   novoTerminal,
+  outrasTelas,
   posicaoDaPreviaDoTerminal,
+  posicaoDoTerminalNovo,
   reacomodarBixinhos,
   reaproveitarArestas,
+  type ResumoDoGrupo,
+  resumirGrupo,
+  selecionarTodasAsTelas,
+  semBixinhosNaSelecao,
+  semLigacoesOrfas,
   semTerminal,
   sincronizarBixinhos,
   subagentesVisiveis,
+  telasSelecionadas,
 } from "../shared/canvas/nos";
+import { type ArranjoDaSelecao, arranjoDaSelecao, recriarItens, tamanhoDoArranjo } from "../shared/canvas/modelos";
 import { ProvedorDasNotas } from "../shared/canvas/notas";
 import {
   type AcoesDosShells,
@@ -141,10 +187,60 @@ import { useMovimentoDoCanvas } from "../shared/hooks/useMovimentoDoCanvas";
 import { useNotas } from "../shared/hooks/useNotas";
 import { useOrquestradores } from "../shared/hooks/useOrquestradores";
 import { usePreferenciasDaTela } from "../shared/hooks/usePreferenciasDaTela";
-import { useReaproveitado } from "../shared/hooks/useReaproveitado";
+import { mesmoConteudo, useReaproveitado } from "../shared/hooks/useReaproveitado";
 import { useRodaDoCanvas } from "../shared/hooks/useRodaDoCanvas";
+import { useSaidaDosBixinhos } from "../shared/hooks/useSaidaDosBixinhos";
 import { useServidor } from "../shared/hooks/useServidor";
+import { markdownParaTexto } from "../shared/markdownParaTexto";
+import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../shared/modelos";
+import { nomeLivre } from "../shared/nomeLivre";
 import type { AcaoDaPaleta, FonteDaPaleta, ItemDaPaleta } from "../shared/paletaDeComandos";
+import { aoMudarSubagentesProntos } from "../shared/subagentesProntos";
+
+/** Onde chega a linha do terminal a uma nota ou artefato ligados: o meio de cada lado (a prévia já tem as dela). */
+const ANCORAS_DO_ITEM_LIGADO: readonly { id: Ancora; posicao: Position }[] = [
+  { id: "cima", posicao: Position.Top },
+  { id: "baixo", posicao: Position.Bottom },
+  { id: "esquerda", posicao: Position.Left },
+  { id: "direita", posicao: Position.Right },
+];
+
+/**
+ * A bolinha à direita de uma nota, prévia ou artefato: puxar dela até um
+ * terminal liga o item ao Orquestrador (só começa ligações, não recebe).
+ * Com `comAncoras`, também as âncoras onde a linha chega. Memorizada: o
+ * arraste não a re-renderiza a cada quadro.
+ */
+const AlcaDeLigacao = memo(function AlcaDeLigacao({ comAncoras }: { comAncoras: boolean }) {
+  return (
+    <>
+      {comAncoras &&
+        ANCORAS_DO_ITEM_LIGADO.map(({ id, posicao }) => (
+          <Handle key={id} id={id} type="target" position={posicao} className="ancora" isConnectable={false} />
+        ))}
+      <Handle
+        id={ALCA_DE_LIGACAO}
+        type="source"
+        position={Position.Right}
+        className="alca-de-ligacao"
+        isConnectableEnd={false}
+        title="Arraste até um terminal para ligar a ele (vai como contexto no próximo pedido)"
+      />
+    </>
+  );
+});
+
+/** O nó com a alça de ligação por cima: nota, prévia e artefato se ligam a um terminal. */
+function comAlcaDeLigacao<Props extends NodeProps>(No: ComponentType<Props>, comAncoras: boolean) {
+  return memo(function NoComAlcaDeLigacao(props: Props) {
+    return (
+      <>
+        <AlcaDeLigacao comAncoras={comAncoras} />
+        <No {...props} />
+      </>
+    );
+  });
+}
 
 // Tudo o que vai ao <ReactFlow> é constante ou estável: uma prop nova a cada
 // renderização (e o canvas renderiza a cada quadro do arraste) faz o React
@@ -153,12 +249,13 @@ const TIPOS_DE_NO = {
   terminal: NoTerminal,
   rascunho: NoRascunho,
   bixinho: NoBixinho,
-  nota: NoNota,
-  artefato: NoArtefato,
-  previa: NoPrevia,
+  nota: comAlcaDeLigacao(NoNota, true),
+  artefato: comAlcaDeLigacao(NoArtefato, true),
+  previa: comAlcaDeLigacao(NoPrevia, false),
   shell: NoShell,
 } satisfies NodeTypes;
-const TIPOS_DE_ARESTA = { bixinho: ArestaDoBixinho } satisfies EdgeTypes;
+// A linha de um item ligado é a curva padrão, com a pele em `.aresta-ligacao`; a do bixinho, a própria.
+const TIPOS_DE_ARESTA = { bixinho: ArestaDoBixinho, ligacao: BezierEdge } satisfies EdgeTypes;
 // Enquadrar nunca passa de 100% (o texto dos terminais só fica nítido em zoom
 // inteiro) nem desce de 60% (ver `escolherEnquadramento`).
 /** Folga do enquadramento ao abrir o canvas. */
@@ -172,6 +269,10 @@ const ROTULO_DO_ENQUADRAR = "Fit View";
 const VIEWPORT_PADRAO: Viewport = { x: 0, y: 0, zoom: 1 };
 /** Nome e dica do "Organizar", o 4º botão dos controles do canto inferior esquerdo. */
 const DICA_DO_ORGANIZAR = "Organizar: terminais lado a lado; notas e artefatos à direita";
+/** Dica do "Desenhar", o 5º botão dos controles: abre e fecha a barra de desenho. */
+const DICA_DO_DESENHAR = "Desenhar: caneta, marca-texto, formas e texto por cima do canvas";
+/** Nome e dica do botão do minimapa, no canto inferior direito. */
+const DICA_DO_MINIMAPA = { mostrar: "Mostrar minimapa", esconder: "Esconder minimapa" } as const;
 /**
  * Quanto do pé da área do canvas o chat rápido ocupa (compacto, com a
  * margem): a janela de um artefato aberta "no centro" fica acima dele.
@@ -179,6 +280,14 @@ const DICA_DO_ORGANIZAR = "Organizar: terminais lado a lado; notas e artefatos �
 const ALTURA_RESERVADA_AO_CHAT = 110;
 /** Altura, na área do canvas, da faixa ocupada pela barra do canvas (com folga). */
 const TOPO_LIVRE_DA_TELA_PX = 84;
+/**
+ * Como num editor de design: arrastar no vazio com o botão esquerdo desenha
+ * o retângulo de seleção; o botão do meio (e o espaço segurado, a tecla de
+ * `panActivationKeyCode`) move o canvas, como a roda e o trackpad.
+ */
+const BOTOES_QUE_MOVEM_O_CANVAS = [1];
+/** Shift ou Cmd/Ctrl + clique somam e tiram telas da seleção. */
+const TECLAS_DA_SELECAO_MULTIPLA = ["Shift", "Meta", "Control"];
 
 /** Foco num campo de texto: o atalho é do campo, não do canvas. */
 function focoEmCampoDeTexto(alvo: EventTarget | null): boolean {
@@ -239,6 +348,16 @@ function semSelecao(nos: readonly NoDoCanvas[]): NoDoCanvas[] {
   return nos.map((no) => (no.selected === true ? { ...no, selected: false } : no));
 }
 
+/** Esc: limpa a seleção; sem nada selecionado, o mesmo array. */
+function limparSelecao(nos: NoDoCanvas[]): NoDoCanvas[] {
+  return nos.some((no) => no.selected === true) ? semSelecao(nos) : nos;
+}
+
+/** O resumo anterior enquanto a seleção não muda: arrastar o grupo não re-renderiza a barra. */
+function mesmoResumo(anterior: ResumoDoGrupo, novo: ResumoDoGrupo): ResumoDoGrupo {
+  return mesmoConteudo(anterior, novo) ? anterior : novo;
+}
+
 /** O mesmo array enquanto os ids e a ordem não mudam. */
 function mesmosIds(anteriores: string[], novos: string[]): string[] {
   return anteriores.length === novos.length && anteriores.every((id, indice) => id === novos[indice]) ? anteriores : novos;
@@ -292,7 +411,9 @@ function CanvasVazio({ aoCriar }: { aoCriar: () => void }) {
             bixinho ligado ao terminal. Arraste pela barra de título, redimensione pelas bordas e espalhe quantos quiser.
           </p>
         </div>
-        <p className="mono text-muted">arrastar o fundo move o canvas · ctrl + roda do mouse dá zoom</p>
+        <p className="mono text-muted">
+          arrastar o fundo seleciona · espaço + arrastar ou a roda movem o canvas · ctrl + roda dá zoom
+        </p>
         <button type="button" className="btn btn-cta" onClick={aoCriar}>
           + Novo orquestrador
         </button>
@@ -353,7 +474,8 @@ function Canvas() {
 
   const aoMudarNosEReacomodar = useCallback(
     (mudancas: NodeChange<NoDoCanvas>[]) => {
-      aoMudarNos(mudancas);
+      // Arrastar o terminal leva junto os itens ligados só a ele.
+      aoMudarNos(comItensLigadosJunto(mudancas, fluxo.getNodes()));
       if (mudancas.some((mudanca) => mudanca.type === "dimensions" && mudanca.resizing === true)) {
         setRedimensionando(true);
       }
@@ -363,7 +485,7 @@ function Canvas() {
         reacomodar();
       }
     },
-    [aoMudarNos, reacomodar],
+    [aoMudarNos, reacomodar, fluxo],
   );
 
   // As notas criadas, restauradas ou trazidas do servidor também tiram os
@@ -387,18 +509,44 @@ function Canvas() {
   const { conversas, conexoes, sinais } = useConversas(idsNoCanvas, servidor.conectado);
   const chatAoVivo = useChat(servidor.conectado);
   const { chat } = chatAoVivo;
-  // Chat fixo à esquerda (painel Configurações do ⚙ ou o botão do próprio chat).
+  // Chat fixo à esquerda ou à direita (painel Configurações do ⚙ ou o botão do próprio chat).
   // No modo invisível ele volta a ser o painel flutuante do pé (a coluna da altura
   // toda cobriria os apps de trás); a preferência salva não muda.
   const { preferencias: preferenciasDaTela, mudarPreferencias: mudarPreferenciasDaTela } = usePreferenciasDaTela();
   const chatFixo = preferenciasDaTela.chatFixoNaEsquerda && !modoInvisivel;
+  const ladoDoChatFixo = preferenciasDaTela.ladoDoChatFixo;
   const larguraDoChatFixo = preferenciasDaTela.larguraDoChatFixo;
+  // O minimapa vem recolhido; o botão do canto inferior direito o mostra e esconde.
+  const minimapaVisivel = preferenciasDaTela.minimapaVisivel;
   // Limpar lê as conversas por aqui, para as ações do canvas não mudarem a cada evento.
   const conversasAtuais = useRef(conversas);
 
   useEffect(() => {
     conversasAtuais.current = conversas;
   }, [conversas]);
+
+  // Os bixinhos de quem conclui ou é cancelado saem sozinhos (a menos que a
+  // preferência peça para manter), pelo mesmo caminho do "limpar": os limpos
+  // ficam guardados e não voltam ao recarregar. Depois do efeito acima: a
+  // limpeza feita na hora já lê as conversas deste render.
+  const limparBixinhosQueSairam = useCallback(
+    (orquestradorId: string, subagenteIds: readonly string[]) =>
+      setBixinhosLimpos((atuais) => {
+        const limpos = limparBixinhos(
+          conversasAtuais.current.get(orquestradorId),
+          atuais.get(orquestradorId),
+          new Set(subagenteIds),
+        );
+        return limpos === null ? atuais : new Map(atuais).set(orquestradorId, limpos);
+      }),
+    [],
+  );
+  const bixinhosSaindo = useSaidaDosBixinhos({
+    conversas,
+    bixinhosLimpos,
+    manter: preferenciasDaTela.manterBixinhosAteLimpar,
+    limpar: limparBixinhosQueSairam,
+  });
 
   // A aba do navegador também avisa: o canvas pode estar atrás de outra janela.
   useEffect(() => {
@@ -471,10 +619,69 @@ function Canvas() {
     mesmasLigacoes,
   );
   const arestasCalculadas = useMemo(
-    () => [...arestasDosBixinhos(ligados, conversas), ...arestasDasPrevias(ligados), ...arestasDosShells(ligados)],
-    [ligados, conversas],
+    () => [
+      ...arestasDosBixinhos(ligados, conversas, bixinhosSaindo),
+      ...arestasDasPrevias(ligados),
+      ...arestasDosShells(ligados),
+    ],
+    [ligados, conversas, bixinhosSaindo],
   );
-  const arestas = useReaproveitado(arestasCalculadas, reaproveitarArestas);
+  // As linhas dos itens ligados acompanham o lado de cada item a cada quadro (são poucas); a
+  // reaproveitada só muda quando alguma delas troca de lado, nasce, some ou é selecionada.
+  const [ligacaoSelecionada, setLigacaoSelecionada] = useState<string | null>(null);
+  const arestas = useReaproveitado(
+    [...arestasCalculadas, ...arestasDasLigacoes(nos, ligacaoSelecionada)],
+    reaproveitarArestas,
+  );
+
+  // Puxar a linha de uma nota, prévia ou artefato até um terminal os liga; repetida, nada muda.
+  const aoLigar = useCallback((conexao: Connection) => setNos((atuais) => ligarItem(atuais, conexao)), [setNos]);
+  const ligacaoValida = useCallback<IsValidConnection<ArestaDoCanvas>>(
+    (conexao) => ehLigacaoValida(conexao, fluxo.getNodes()),
+    [fluxo],
+  );
+  // Só as linhas dos itens ligados se selecionam; a seleção fica aqui, porque as linhas são calculadas.
+  const aoMudarArestas = useCallback((mudancas: EdgeChange<ArestaDoCanvas>[]) => {
+    for (const mudanca of mudancas) {
+      if (mudanca.type === "select") {
+        setLigacaoSelecionada((atual) => (mudanca.selected ? mudanca.id : atual === mudanca.id ? null : atual));
+      }
+    }
+  }, []);
+  // Uma nota apagada, ou uma prévia ou um artefato fechados, saem dos terminais a que estavam ligados.
+  const idsLigaveis = nos
+    .filter(ehItemLigavel)
+    .map((no) => no.id)
+    .join("\n");
+  useEffect(() => {
+    setNos(semLigacoesOrfas);
+  }, [idsLigaveis, setNos]);
+  // Delete ou Backspace desligam a linha selecionada (com o foco num campo, a tecla é dele); Esc a desmarca.
+  useEffect(() => {
+    if (ligacaoSelecionada === null) {
+      return;
+    }
+    const aoApertarTecla = (evento: KeyboardEvent) => {
+      if (evento.defaultPrevented || focoEmCampoDeTexto(evento.target)) {
+        return;
+      }
+      if (evento.key === "Escape") {
+        setLigacaoSelecionada(null);
+        return;
+      }
+      if (evento.key !== "Delete" && evento.key !== "Backspace") {
+        return;
+      }
+      evento.preventDefault();
+      const ligacao = lerIdDaLigacao(ligacaoSelecionada, fluxo.getNodes());
+      if (ligacao !== null) {
+        setNos((atuais) => desligarItem(atuais, ligacao.terminalId, ligacao.itemId));
+      }
+      setLigacaoSelecionada(null);
+    };
+    window.addEventListener("keydown", aoApertarTecla);
+    return () => window.removeEventListener("keydown", aoApertarTecla);
+  }, [ligacaoSelecionada, fluxo, setNos]);
 
   // O centro da área do canvas (no desktop, abaixo da barra de título).
   const centroDaTela = useCallback(() => {
@@ -490,6 +697,29 @@ function Canvas() {
   const notas = useNotas(setNosDasNotas, centroDaTela, servidor.conectado);
   const { criarNota, erro: erroDasNotas, descartarErro: descartarErroDasNotas } = notas;
   const novaNota = useCallback(() => void criarNota(), [criarNota]);
+  // Uma resposta do chat arrastada para o canvas vira uma nota com o texto dela
+  // (sem a marcação do Markdown), onde foi solta.
+  const aoArrastarSobreOCanvas = useCallback((evento: DragEvent) => {
+    if (evento.dataTransfer.types.includes(TIPO_DA_RESPOSTA_DO_CHAT)) {
+      evento.preventDefault();
+      evento.dataTransfer.dropEffect = "copy";
+    }
+  }, []);
+  const aoSoltarNoCanvas = useCallback(
+    (evento: DragEvent) => {
+      const texto = evento.dataTransfer.getData(TIPO_DA_RESPOSTA_DO_CHAT);
+      if (texto === "") {
+        return;
+      }
+      evento.preventDefault();
+      void criarNota(
+        // A nota guarda até 100.000 caracteres.
+        { titulo: "Resposta do chat", texto: markdownParaTexto(texto).slice(0, 100_000) },
+        fluxo.screenToFlowPosition({ x: evento.clientX, y: evento.clientY }),
+      );
+    },
+    [criarNota, fluxo],
+  );
 
   const focar = useCallback(
     (id: string) => {
@@ -562,7 +792,7 @@ function Canvas() {
 
   /**
    * O centro da área do canvas acima do chat rápido (que fica no pé da tela).
-   * Com o chat fixo à esquerda, fora da área, é o próprio centro.
+   * Com o chat fixo ao lado, fora da área, é o próprio centro.
    */
   const centroAcimaDoChat = useCallback((): Ponto => {
     const area = areaDoCanvas.current?.getBoundingClientRect();
@@ -840,6 +1070,12 @@ function Canvas() {
     [abrirShell],
   );
 
+  /**
+   * O ponto único de abrir o terminal de um Orquestrador (cartão do chat, Doca
+   * e paleta). Já aberto, só fica selecionado e a câmera vai até ele; fechado,
+   * abre selecionado na primeira área livre perto do centro da vista, sem
+   * cobrir terminais, notas, prévias, artefatos nem bixinhos.
+   */
   const abrirTerminal = useCallback(
     (orquestradorId: string) => {
       // Já aberto sempre cabe: só ganha o foco.
@@ -847,26 +1083,38 @@ function Canvas() {
         return;
       }
       setNos((atuais) => {
-        if (atuais.some((no) => no.id === orquestradorId)) {
-          return atuais;
+        // O lugar de partida: centralizado na vista, com a barra de título abaixo da barra do canvas.
+        const inicio = posicaoNoCentroVisivel([], TAMANHO_DO_TERMINAL);
+        const posicao = posicaoDoTerminalNovo(atuais, orquestradorId, inicio, TAMANHO_DO_TERMINAL);
+        if (posicao === null) {
+          const jaSelecionado = atuais.every((no) => (no.selected === true) === (no.id === orquestradorId));
+          return jaSelecionado
+            ? atuais
+            : atuais.map((no) =>
+                no.id === orquestradorId ? { ...no, selected: true } : no.selected === true ? { ...no, selected: false } : no,
+              );
         }
-        const posicao = posicaoParaNovoTerminal(
-          centroDaTela(),
-          TAMANHO_DO_TERMINAL,
-          atuais.filter(ehTerminal).map((no) => no.position),
-        );
-        return reacomodarBixinhos([
-          ...atuais,
-          novoTerminal(orquestradorId, posicao, TAMANHO_DO_TERMINAL.largura, TAMANHO_DO_TERMINAL.altura),
-        ]);
+        const terminal = novoTerminal(orquestradorId, posicao, TAMANHO_DO_TERMINAL.largura, TAMANHO_DO_TERMINAL.altura);
+        return reacomodarBixinhos([...semSelecao(atuais), { ...terminal, selected: true }]);
       });
       focar(orquestradorId);
     },
-    [centroDaTela, focar, reservarVaga, setNos],
+    [focar, posicaoNoCentroVisivel, reservarVaga, setNos],
   );
 
   const fecharTerminal = useCallback(
     (orquestradorId: string) => setNos((atuais) => semTerminal(atuais, orquestradorId)),
+    [setNos],
+  );
+
+  // Como a nota: o nó fica só com a altura da barra, e as linhas dos bixinhos seguem a âncora.
+  const minimizarOuRestaurarTerminal = useCallback(
+    (orquestradorId: string) =>
+      setNos((atuais) =>
+        reacomodarBixinhos(
+          atuais.map((no) => (ehTerminal(no) && no.id === orquestradorId ? minimizarOuRestaurar(no) : no)),
+        ),
+      ),
     [setNos],
   );
 
@@ -938,6 +1186,64 @@ function Canvas() {
     });
     setTimeout(() => void fluxo.fitView({ duration: 600, padding: 0.12, maxZoom: 1 }), ESPERA_PARA_MEDIR_MS);
   }, [fluxo, setNos]);
+
+  // Fim do retângulo de seleção: os bixinhos pegos junto saem dela (seguem o terminal).
+  const aoTerminarSelecao = useCallback(() => setNos(semBixinhosNaSelecao), [setNos]);
+
+  /**
+   * Move as telas selecionadas para onde `posicionar` mandar, sem cobrir as
+   * telas de fora da seleção (`outras`), e tira os bixinhos de baixo delas.
+   */
+  const moverGrupo = useCallback(
+    (posicionar: (janelas: readonly JanelaNoCanvas[], outras: readonly JanelaNoCanvas[]) => Record<string, Ponto>) =>
+      setNos((atuais) => {
+        const janelas = telasSelecionadas(atuais).map(janelaVisivel);
+        if (janelas.length < 2) {
+          return atuais;
+        }
+        const novos = comPosicoes(atuais, posicionar(janelas, outrasTelas(atuais)));
+        return novos === atuais ? atuais : reacomodarBixinhos(novos);
+      }),
+    [setNos],
+  );
+  const alinharGrupo = useCallback(
+    (como: Alinhamento) => moverGrupo((janelas, outras) => alinharJanelas(janelas, como, outras)),
+    [moverGrupo],
+  );
+  const distribuirGrupo = useCallback(
+    (eixo: EixoDaDistribuicao) => moverGrupo((janelas, outras) => distribuirJanelas(janelas, eixo, outras)),
+    [moverGrupo],
+  );
+  const porGrupoLadoALado = useCallback(
+    () => moverGrupo((janelas, outras) => janelasLadoALado(janelas, MARGEM_DO_LADO_A_LADO, outras)),
+    [moverGrupo],
+  );
+  const minimizarGrupo = useCallback(
+    () =>
+      setNos((atuais) => {
+        const novos = minimizarOuRestaurarTelas(atuais, new Set(telasSelecionadas(atuais).map((no) => no.id)));
+        return novos === atuais ? atuais : reacomodarBixinhos(novos);
+      }),
+    [setNos],
+  );
+  /**
+   * "Fechar" da barra do grupo (a barra já confirmou): cada tela sai pelo
+   * caminho do ✕ dela. Terminais, artefatos e prévias só saem do canvas; o
+   * shell é encerrado. Notas e rascunhos ficam (`ehFechavelEmGrupo`).
+   */
+  const fecharGrupo = useCallback(() => {
+    for (const no of telasSelecionadas(nosAtuais.current).filter(ehFechavelEmGrupo)) {
+      if (ehTerminal(no)) {
+        fecharTerminal(no.id);
+      } else if (ehArtefato(no)) {
+        acoesDosArtefatos.fechar(no.data.artefatoId);
+      } else if (ehPrevia(no)) {
+        fecharPrevia(no.data.previaId);
+      } else if (ehShell(no)) {
+        fecharShell(no.data.shellId);
+      }
+    }
+  }, [acoesDosArtefatos, fecharPrevia, fecharShell, fecharTerminal]);
 
   /** Zoom em 100% (texto nítido) sem sair do lugar: o Ctrl+0 e a paleta. */
   const zoomEmCemPorCento = useCallback(() => {
@@ -1130,10 +1436,25 @@ function Canvas() {
     ],
   );
 
+  // O × do chip no terminal e o que vai no próximo pedido (lido na hora, das lojas e dos nós).
+  const desligarItemDoTerminal = useCallback(
+    (orquestradorId: string, itemId: string) => setNos((atuais) => desligarItem(atuais, orquestradorId, itemId)),
+    [setNos],
+  );
+  const lerItensLigados = useCallback(
+    (orquestradorId: string) =>
+      itensLigadosParaEnvio(fluxo.getNodes(), orquestradorId, {
+        lerNota: lojaDasNotas.ler,
+        lerArtefato: lojaDosArtefatos.ler,
+      }),
+    [fluxo, lojaDasNotas, lojaDosArtefatos],
+  );
+
   const acoes = useMemo<AcoesDoCanvas>(
     () => ({
       abrirTerminal,
       fecharTerminal,
+      minimizarOuRestaurarTerminal,
       limparBixinhos: limparBixinhosDoTerminal,
       orquestradorCriado,
       descartarRascunho,
@@ -1143,10 +1464,13 @@ function Canvas() {
       navegarPrevia,
       minimizarOuRestaurarPrevia,
       fecharPrevia,
+      desligarItem: desligarItemDoTerminal,
+      lerItensLigados,
     }),
     [
       abrirTerminal,
       fecharTerminal,
+      minimizarOuRestaurarTerminal,
       limparBixinhosDoTerminal,
       orquestradorCriado,
       descartarRascunho,
@@ -1156,6 +1480,8 @@ function Canvas() {
       navegarPrevia,
       minimizarOuRestaurarPrevia,
       fecharPrevia,
+      desligarItemDoTerminal,
+      lerItensLigados,
     ],
   );
   // Os nós só leem do servidor a conexão e a memória por Orquestrador: a
@@ -1163,8 +1489,17 @@ function Canvas() {
   const servidorDosNos = useReaproveitado(servidor, servidorParaOsNos);
   // Não depende de `nos`: arrastar e mover o canvas não trocam o valor.
   const valor = useMemo<ValorDoCanvas>(
-    () => ({ orquestradores: porId, conversas, conexoes, sinais, bixinhosLimpos, servidor: servidorDosNos, acoes }),
-    [porId, conversas, conexoes, sinais, bixinhosLimpos, servidorDosNos, acoes],
+    () => ({
+      orquestradores: porId,
+      conversas,
+      conexoes,
+      sinais,
+      bixinhosLimpos,
+      bixinhosSaindo,
+      servidor: servidorDosNos,
+      acoes,
+    }),
+    [porId, conversas, conexoes, sinais, bixinhosLimpos, bixinhosSaindo, servidorDosNos, acoes],
   );
 
   const trabalhando = idsTrabalhando.length;
@@ -1217,6 +1552,178 @@ function Canvas() {
     [],
   );
   const fecharPainel = useCallback(() => setPainelAberto(null), []);
+  // A barra de desenho (o "Desenhar" dos controles); o desenho em si é da `CamadaDeDesenho`.
+  const [desenhoAberto, setDesenhoAberto] = useState(false);
+  const alternarDesenho = useCallback(() => setDesenhoAberto((aberto) => !aberto), []);
+  const fecharDesenho = useCallback(() => setDesenhoAberto(false), []);
+
+  // Cmd/Ctrl + A seleciona todas as telas (sem os bixinhos) e Esc limpa a
+  // seleção; com o foco num campo de texto, os dois são do campo.
+  useEffect(() => {
+    const aoApertarTecla = (evento: KeyboardEvent) => {
+      if (evento.defaultPrevented || focoEmCampoDeTexto(evento.target) || evento.altKey || evento.shiftKey) {
+        return;
+      }
+      const comComando = evento.metaKey || evento.ctrlKey;
+      if (comComando && (evento.code === "KeyA" || evento.key === "a" || evento.key === "A")) {
+        evento.preventDefault();
+        setNos(selecionarTodasAsTelas);
+        return;
+      }
+      // Com um painel da barra ou o navegador de pastas aberto, o Esc é deles.
+      if (evento.key !== "Escape" || comComando || painelAberto !== null || escolhendoPastaDoShell) {
+        return;
+      }
+      // Decide depois de todos os ouvintes: o Esc que um menu, um painel ou a
+      // tela cheia do terminal já usou (preventDefault) não limpa a seleção.
+      setTimeout(() => {
+        if (!evento.defaultPrevented) {
+          setNos(limparSelecao);
+        }
+      }, 0);
+    };
+    window.addEventListener("keydown", aoApertarTecla);
+    return () => window.removeEventListener("keydown", aoApertarTecla);
+  }, [setNos, painelAberto, escolhendoPastaDoShell]);
+
+  // Modelos de canvas (item 35): "Salvar como modelo" na barra do grupo lê a
+  // seleção na hora; o painel Modelos recria um modelo perto do centro da tela.
+  const [arranjoDoModelo, setArranjoDoModelo] = useState<ArranjoDaSelecao | null>(null);
+  // Muda a cada modelo salvo: o painel Modelos remonta e relê a lista.
+  const [versaoDosModelos, setVersaoDosModelos] = useState(0);
+  const salvarComoModelo = useCallback(() => {
+    setArranjoDoModelo(
+      arranjoDaSelecao(nosAtuais.current, {
+        orquestrador: (id) => orquestradoresAtuais.current?.find((orquestrador) => orquestrador.id === id),
+        nota: (notaId) => lojaDasNotas.ler(notaId) ?? null,
+      }),
+    );
+  }, [lojaDasNotas]);
+  const fecharDialogoDoModelo = useCallback(() => setArranjoDoModelo(null), []);
+  const salvarModelo = useCallback(async (conteudo: ConteudoDoModeloDeCanvas) => {
+    await api.criarModeloDeCanvas(conteudo);
+    setArranjoDoModelo(null);
+    setVersaoDosModelos((versao) => versao + 1);
+    setPainelAberto("modelos");
+  }, []);
+
+  const { mostrarNota } = notas;
+  /**
+   * Recria o modelo item a item, com o canto do arranjo no lugar livre mais
+   * perto do centro da tela. Os orquestradores nascem parados (nenhum turno,
+   * nenhuma mensagem) e os terminais abrem o shell na pasta, sem rodar nem
+   * digitar o comando guardado. O erro de um item não para os outros.
+   */
+  const recriarModelo = useCallback(
+    async (modelo: ConteudoDoModeloDeCanvas, pasta: string | null) => {
+      const tamanho = tamanhoDoArranjo(modelo.itens);
+      const centro = centroDaTela();
+      const origem = posicaoLivrePerto(
+        { x: Math.round(centro.x - tamanho.largura / 2), y: Math.round(centro.y - tamanho.altura / 2) },
+        tamanho,
+        areasOcupadas(nosAtuais.current).map((area) => area.retangulo),
+      );
+      // Os terminais abertos agora: a vaga confere com eles antes do próximo render.
+      const terminaisNovos: string[] = [];
+      // Recriar ao lado do original não repete o nome: "API" vira "API 2", como no cartão do chat.
+      const nomesUsados = (orquestradoresAtuais.current ?? []).map((orquestrador) => orquestrador.nome);
+      const resultados = await recriarItens(modelo.itens, origem, pasta, {
+        orquestrador: async (item, lugar, pastaDoItem) => {
+          const atuais = nosAtuais.current;
+          const vaga = cabeOutroTerminal(
+            [...new Set([...atuais.filter(ehTerminal).map((no) => no.data.orquestradorId), ...terminaisNovos])],
+            atuais.filter((no) => no.type === "rascunho").map((no) => no.id),
+            null,
+          );
+          if (!vaga) {
+            throw new Error(AVISO_DO_LIMITE_DE_ORQUESTRADORES);
+          }
+          const nome = nomeLivre(item.nome, nomesUsados);
+          const criado = await api.criarOrquestrador({
+            ...CONFIGURACAO_PADRAO_DO_ORQUESTRADOR,
+            ...item.configuracao,
+            nome,
+            pastaDeTrabalho: pastaDoItem,
+          });
+          nomesUsados.push(nome);
+          criadosAgora.current.add(criado.id);
+          terminaisNovos.push(criado.id);
+          const terminal = novoTerminal(criado.id, lugar, lugar.largura, lugar.altura);
+          setNos((atuais) => [...atuais, terminal]);
+          return terminal.id;
+        },
+        nota: async (item, lugar) => {
+          const nota = await api.criarNota({ titulo: item.titulo, texto: item.texto });
+          return mostrarNota(nota, lugar, lugar);
+        },
+        previa: (item, lugar) => {
+          const previa = novaPrevia(crypto.randomUUID(), lugar, { url: item.url, orquestradorId: null }, lugar.largura, lugar.altura);
+          setNos((atuais) => [...atuais, previa]);
+          return Promise.resolve(previa.id);
+        },
+        terminal: async (_item, lugar, pastaDoItem) => {
+          const criado = await api.criarShell({ pasta: pastaDoItem, ...TAMANHO_INICIAL_DO_SHELL });
+          const shell = novoShell(
+            crypto.randomUUID(),
+            lugar,
+            { terminalId: criado.id, pasta: criado.pasta, orquestradorId: null },
+            lugar.largura,
+            lugar.altura,
+          );
+          setNos((atuais) => [...atuais, shell]);
+          return shell.id;
+        },
+      });
+      const novos = new Set(resultados.flatMap((resultado) => (resultado.noId === null ? [] : [resultado.noId])));
+      if (novos.size > 0) {
+        // Os itens recriados ficam selecionados, prontos para arrastar juntos.
+        setNos((atuais) =>
+          reacomodarBixinhos(
+            atuais.map((no) => (no.selected === true || novos.has(no.id) ? { ...no, selected: novos.has(no.id) } : no)),
+          ),
+        );
+        enquadrarSemAproximar([...novos]);
+      }
+      if (terminaisNovos.length > 0) {
+        void recarregar();
+      }
+      return resultados;
+    },
+    [centroDaTela, enquadrarSemAproximar, mostrarNota, recarregar, setNos],
+  );
+
+  // A barra do grupo, com duas ou mais telas selecionadas: o resumo só muda
+  // com a seleção (ou o minimizar), então arrastar o grupo não a re-renderiza.
+  const resumoDoGrupo = useReaproveitado(resumirGrupo(nos), mesmoResumo);
+  const barraDoGrupo = useMemo(
+    () =>
+      resumoDoGrupo.ids.length < 2 ? null : (
+        <Panel
+          position="top-center"
+          className={`painel-da-barra-do-grupo ${desenhoAberto ? "abaixo-da-barra-de-desenho" : ""}`}
+        >
+          <BarraDoGrupo
+            resumo={resumoDoGrupo}
+            aoAlinhar={alinharGrupo}
+            aoDistribuir={distribuirGrupo}
+            aoPorLadoALado={porGrupoLadoALado}
+            aoMinimizar={minimizarGrupo}
+            aoFechar={fecharGrupo}
+            aoSalvarComoModelo={salvarComoModelo}
+          />
+        </Panel>
+      ),
+    [
+      resumoDoGrupo,
+      alinharGrupo,
+      distribuirGrupo,
+      porGrupoLadoALado,
+      minimizarGrupo,
+      fecharGrupo,
+      salvarComoModelo,
+      desenhoAberto,
+    ],
+  );
 
   // A contagem do botão Subagentes. Com o servidor fora, fica sem número até
   // ele voltar (o efeito roda de novo na reconexão).
@@ -1234,6 +1741,8 @@ function Canvas() {
       setQuantidadeDeSubagentes(null);
     }
   }, [servidor.conectado, lerQuantidadeDeSubagentes]);
+  // A biblioteca também muda pelo cartão do chat, fora dos painéis.
+  useEffect(() => aoMudarSubagentesProntos(lerQuantidadeDeSubagentes), [lerQuantidadeDeSubagentes]);
   // Salvar qualquer um dos painéis: os indicadores dos terminais e a contagem podem ter mudado.
   const aoSalvarPainel = useCallback(() => {
     void recarregar();
@@ -1261,6 +1770,9 @@ function Canvas() {
         {painelAberto === "instrucoes" && (
           <PainelDeInstrucoesGerais aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />
         )}
+        {painelAberto === "modelos" && (
+          <PainelDeModelos key={versaoDosModelos} aoFechar={fecharPainel} aoRecriar={recriarModelo} />
+        )}
         {avisoDoLimite && (
           <ErroDoCanvas erro={AVISO_DO_LIMITE_DE_ORQUESTRADORES} aoFechar={fecharAvisoDoLimite} nivel="aviso" />
         )}
@@ -1269,7 +1781,11 @@ function Canvas() {
         {erroDosShells !== null && (
           <ErroDoCanvas erro={erroDosShells.mensagem} aoFechar={descartarErroDosShells} nivel={erroDosShells.nivel} />
         )}
-        <Doca orquestradores={orquestradores} noCanvas={noCanvas} erro={erro} aoAbrir={abrirTerminal} />
+        {/* Como o aviso do canvas vazio, some enquanto um painel da barra está aberto; escondida
+            (e não desmontada), volta recolhida ou expandida como estava. */}
+        <div hidden={painelAberto !== null}>
+          <Doca orquestradores={orquestradores} noCanvas={noCanvas} erro={erro} aoAbrir={abrirTerminal} />
+        </div>
       </div>
     ),
     [
@@ -1283,6 +1799,8 @@ function Canvas() {
       fecharPainel,
       quantidadeDeSubagentes,
       aoSalvarPainel,
+      versaoDosModelos,
+      recriarModelo,
       avisoDoLimite,
       fecharAvisoDoLimite,
       erroDasNotas,
@@ -1297,8 +1815,8 @@ function Canvas() {
       abrirTerminal,
     ],
   );
-  // Os controles do canto inferior esquerdo: zoom, enquadrar e, em 4º, o
-  // "Organizar". Memorizados: com um filho novo a cada render, o <Controls>
+  // Os controles do canto inferior esquerdo: zoom, enquadrar, em 4º o
+  // "Organizar" e em 5º o "Desenhar". Memorizados: com um filho novo a cada render, o <Controls>
   // re-renderizaria a cada quadro do arraste.
   const controles = useMemo(
     () => (
@@ -1321,10 +1839,53 @@ function Canvas() {
         >
           <IconeGrade />
         </ControlButton>
+        <ControlButton
+          className="botao-de-desenhar"
+          onClick={alternarDesenho}
+          aria-pressed={desenhoAberto}
+          title={DICA_DO_DESENHAR}
+          aria-label="Desenhar"
+        >
+          <IconeDesenhar />
+        </ControlButton>
       </Controls>
     ),
-    [enquadrarTudo, organizar, podeOrganizar],
+    [enquadrarTudo, organizar, podeOrganizar, alternarDesenho, desenhoAberto],
   );
+  // O minimapa (recolhido por padrão) e, no canto, o botão que o mostra e
+  // esconde, com a pele dos controles. O minimapa aberto fica acima do botão.
+  const alternarMinimapa = useCallback(
+    () => mudarPreferenciasDaTela({ minimapaVisivel: !minimapaVisivel }),
+    [mudarPreferenciasDaTela, minimapaVisivel],
+  );
+  const minimapa = useMemo(() => {
+    const dica = minimapaVisivel ? DICA_DO_MINIMAPA.esconder : DICA_DO_MINIMAPA.mostrar;
+    return (
+      <>
+        {minimapaVisivel && (
+          <MiniMap<NoDoCanvas>
+            position="bottom-right"
+            className="minimapa-do-canvas"
+            pannable
+            zoomable
+            nodeClassName={classeDoMinimapa}
+          />
+        )}
+        <Controls
+          position="bottom-right"
+          className="controles-do-minimapa"
+          aria-label="Minimapa"
+          showZoom={false}
+          showFitView={false}
+          showInteractive={false}
+        >
+          <ControlButton onClick={alternarMinimapa} aria-pressed={minimapaVisivel} title={dica} aria-label={dica}>
+            <IconeMinimapa />
+          </ControlButton>
+        </Controls>
+      </>
+    );
+  }, [minimapaVisivel, classeDoMinimapa, alternarMinimapa]);
   const colunaDoCentro = useMemo(
     () => (
       <div className="coluna-do-topo coluna-do-topo-centro">
@@ -1366,10 +1927,21 @@ function Canvas() {
     [desktop, trabalhando, bixinhosAtivos, cota, servidor.memoria, abrirPaleta, pedidosEmAndamento],
   );
   // Fora do viewport: o chat não se move com o canvas e só re-renderiza com novidades dele.
-  // Fixo à esquerda (preferência da tela), vira uma coluna ao lado da área do canvas;
+  // Fixo (preferência da tela), vira uma coluna ao lado da área do canvas, do lado escolhido;
   // senão, fica no painel do centro de baixo, dentro do React Flow.
+  // O "ocultar" da coluna solta o chat embaixo já oculto; o chat é remontado ao trocar de modo, então o pedido vai por prop.
+  const [chatSoltoOculto, setChatSoltoOculto] = useState(false);
+  // Fixado de novo (por qualquer caminho), o pedido de ocultar acaba: um soltar posterior volta com a conversa à vista.
+  useEffect(() => {
+    if (chatFixo) {
+      setChatSoltoOculto(false);
+    }
+  }, [chatFixo]);
   const alternarChatFixo = useCallback(
-    (fixo: boolean) => mudarPreferenciasDaTela({ chatFixoNaEsquerda: fixo }),
+    (fixo: boolean, ocultar = false) => {
+      setChatSoltoOculto(!fixo && ocultar);
+      mudarPreferenciasDaTela({ chatFixoNaEsquerda: fixo });
+    },
     [mudarPreferenciasDaTela],
   );
   // Os cartões de ação do chat mostram o estado de quem vai receber o pedido.
@@ -1392,8 +1964,10 @@ function Canvas() {
         aoAtualizarOrquestradores={atualizarOrquestradoresDoChat}
         orquestradores={orquestradoresDoChat}
         fixo={chatFixo}
+        lado={ladoDoChatFixo}
         // No modo invisível não dá para fixar: o chat fica flutuante até sair dele.
         aoAlternarFixo={modoInvisivel ? undefined : alternarChatFixo}
+        comecaOculto={chatSoltoOculto}
         largura={larguraDoChatFixo}
         aoMudarLargura={mudarLarguraDoChat}
       />
@@ -1409,7 +1983,9 @@ function Canvas() {
       orquestradoresDoChat,
       chatFixo,
       modoInvisivel,
+      ladoDoChatFixo,
       alternarChatFixo,
+      chatSoltoOculto,
       larguraDoChatFixo,
       mudarLarguraDoChat,
     ],
@@ -1433,9 +2009,9 @@ function Canvas() {
               className={`flex h-screen w-screen flex-col ${servidor.conectado ? "" : "canvas-desconectado"} ${movimento.movendo ? "canvas-movendo" : ""} ${redimensionando ? "canvas-redimensionando" : ""} ${modoInvisivel ? "canvas-modo-invisivel" : ""}`}
             >
               {barraDeTitulo}
-              {/* Linha: o chat fixo à esquerda (quando a preferência pede) empurra a área do canvas. */}
+              {/* Linha: o chat fixo (quando a preferência pede) empurra a área do canvas para o outro lado. */}
               <div className="flex min-h-0 w-full flex-1">
-                {chatFixo && chatRapido}
+                {chatFixo && ladoDoChatFixo === "esquerda" && chatRapido}
                 <div ref={areaDoCanvas} className="relative min-h-0 min-w-0 flex-1">
                   <ReactFlow<NoDoCanvas, ArestaDoCanvas>
                     nodes={nos}
@@ -1443,8 +2019,14 @@ function Canvas() {
                     nodeTypes={TIPOS_DE_NO}
                     edgeTypes={TIPOS_DE_ARESTA}
                     onNodesChange={aoMudarNosEReacomodar}
+                    onEdgesChange={aoMudarArestas}
+                    onConnect={aoLigar}
+                    isValidConnection={ligacaoValida}
                     onNodeDragStart={movimento.aoComecarArraste}
                     onNodeDragStop={aoSoltarNo}
+                    onSelectionDragStart={movimento.aoComecarArraste}
+                    onSelectionDragStop={aoSoltarNo}
+                    onSelectionEnd={aoTerminarSelecao}
                     onMoveStart={movimento.aoComecarMovimento}
                     onMoveEnd={movimento.aoTerminarMovimento}
                     colorMode="dark"
@@ -1454,18 +2036,34 @@ function Canvas() {
                     // Como no Excalidraw: a roda do mouse rola o canvas; com Ctrl, dá zoom.
                     panOnScroll
                     zoomActivationKeyCode="Control"
+                    // Arrastar no vazio seleciona (a tela que o retângulo toca já entra); o
+                    // pan fica com a roda, o botão do meio e o espaço segurado.
+                    selectionOnDrag
+                    selectionMode={SelectionMode.Partial}
+                    panOnDrag={BOTOES_QUE_MOVEM_O_CANVAS}
+                    panActivationKeyCode="Space"
+                    multiSelectionKeyCode={TECLAS_DA_SELECAO_MULTIPLA}
                     deleteKeyCode={null}
+                    onDragOver={aoArrastarSobreOCanvas}
+                    onDrop={aoSoltarNoCanvas}
                   >
                     <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} />
+                    {/* Por cima das janelas e abaixo dos painéis; a barra de desenho vem com ela. */}
+                    <CamadaDeDesenho
+                      aberta={desenhoAberto}
+                      aoFechar={fecharDesenho}
+                      tracosIniciais={layoutInicial.desenho}
+                    />
                     {/* Abaixo dos painéis (inclusive o chat); some enquanto um painel da barra está aberto. */}
                     {quantidadeDeJanelas === 0 && painelAberto === null && <CanvasVazio aoCriar={novoOrquestrador} />}
                     {controles}
-                    <MiniMap<NoDoCanvas> position="bottom-right" pannable zoomable nodeClassName={classeDoMinimapa} />
+                    {minimapa}
                     <Panel position="top-left" className="paineis-do-topo">
                       {colunaDaEsquerda}
                       {colunaDoCentro}
                       {colunaDaDireita}
                     </Panel>
+                    {barraDoGrupo}
                     {painelDoChat}
                   </ReactFlow>
                   {/* Fora do <ReactFlow>: não escala com o zoom e cobre só a área do canvas. */}
@@ -1475,11 +2073,15 @@ function Canvas() {
                     aoExecutar={executarItemDaPaleta}
                   />
                 </div>
+                {chatFixo && ladoDoChatFixo === "direita" && chatRapido}
               </div>
             </div>
             {/* "Terminal" do "+ Novo ▾": a pasta é escolhida no mesmo navegador de pastas da criação do orquestrador. */}
             {escolhendoPastaDoShell && (
               <NavegadorDePastas aoEscolher={abrirShellNaPasta} aoFechar={fecharEscolhaDaPastaDoShell} />
+            )}
+            {arranjoDoModelo !== null && (
+              <DialogoDeNovoModelo arranjo={arranjoDoModelo} aoSalvar={salvarModelo} aoFechar={fecharDialogoDoModelo} />
             )}
           </ProvedorDosShells>
         </ProvedorDosArtefatos>

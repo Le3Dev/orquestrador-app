@@ -68,10 +68,15 @@ describe("PainelDeConfiguracoesDoApp", () => {
     expect(botao().parentElement).toContainElement(painel);
     expect(painel).toHaveClass("menu-do-novo", "painel-de-configuracoes", "painel-flutuante", "surgir", "surgir-do-topo");
     const tela = within(painel).getByRole("group", { name: "Tela" });
-    const chat = within(tela).getByRole("menuitemcheckbox", { name: /Chat fixo à esquerda/ });
+    const chat = within(tela).getByRole("menuitemcheckbox", { name: "Chat fixo" });
     const visualizador = within(tela).getByRole("menuitemcheckbox", { name: /Visualizador de código/ });
     expect(chat).toHaveAttribute("aria-checked", "false");
-    expect(chat).toHaveAttribute("title", "O chat rápido vira uma coluna à esquerda do canvas, sempre aberta");
+    expect(chat).toHaveAttribute("title", "O chat rápido vira uma coluna ao lado do canvas, sempre aberta");
+    // Logo abaixo, o lado: esquerda escolhida por padrão.
+    const lado = within(tela).getByRole("group", { name: "Lado" });
+    expect(within(lado).getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual(["esquerda", "direita"]);
+    expect(within(lado).getByRole("menuitemradio", { name: "esquerda" })).toHaveAttribute("aria-checked", "true");
+    expect(within(lado).getByRole("menuitemradio", { name: "direita" })).toHaveAttribute("aria-checked", "false");
     expect(visualizador).toHaveAttribute("aria-checked", "false");
     expect(visualizador).toHaveTextContent("mostra o botão Arquivos nos terminais");
     expect(chat).toHaveClass("item-do-menu", "interruptor");
@@ -98,8 +103,47 @@ describe("PainelDeConfiguracoesDoApp", () => {
     });
     expect(lerLeitor()).toMatchObject({ chatFixoNaEsquerda: false, visualizadorDeCodigo: true });
 
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /Chat fixo à esquerda/ }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Chat fixo" }));
     expect(lerLeitor()).toMatchObject({ chatFixoNaEsquerda: true, visualizadorDeCodigo: true });
+  });
+
+  it("o lado do chat fixo: clicar escolhe, grava junto das outras e não fecha o painel; solto, fica apagado", () => {
+    renderizar();
+    fireEvent.click(botao());
+    const grupo = () => screen.getByRole("group", { name: "Lado" });
+    expect(grupo()).toHaveClass("lado-do-chat-solto");
+
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "direita" }));
+
+    expect(screen.getByRole("menuitemradio", { name: "direita" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("menuitemradio", { name: "esquerda" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("menu", { name: "Configurações" })).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem(CHAVE_DAS_PREFERENCIAS_DA_TELA) ?? "null")).toEqual({
+      chatFixoNaEsquerda: false,
+      ladoDoChatFixo: "direita",
+      visualizadorDeCodigo: false,
+      larguraDoChatFixo: 360,
+      manterBixinhosAteLimpar: false,
+      minimapaVisivel: false,
+    });
+
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Chat fixo" }));
+    expect(grupo()).not.toHaveClass("lado-do-chat-solto");
+    expect(lerLeitor()).toMatchObject({ chatFixoNaEsquerda: true, ladoDoChatFixo: "direita" });
+  });
+
+  it("\"Manter bixinhos até limpar à mão\": desligado por padrão, com a dica à vista; ligar grava a preferência", () => {
+    renderizar();
+    fireEvent.click(botao());
+    const tela = within(screen.getByRole("menu", { name: "Configurações" })).getByRole("group", { name: "Tela" });
+    const manter = within(tela).getByRole("menuitemcheckbox", { name: /Manter bixinhos até limpar à mão/ });
+    expect(manter).toHaveAttribute("aria-checked", "false");
+    expect(manter).toHaveTextContent("desligado, os que terminam saem sozinhos do canvas");
+
+    fireEvent.click(manter);
+
+    expect(manter).toHaveAttribute("aria-checked", "true");
+    expect(lerLeitor()).toMatchObject({ manterBixinhosAteLimpar: true });
   });
 
   it("\"Pastas e Claude Code…\" fecha o painel e abre os Ajustes", () => {
@@ -117,26 +161,43 @@ describe("PainelDeConfiguracoesDoApp", () => {
     renderizar(ajustesFalsos(false));
     fireEvent.click(botao());
 
-    expect(screen.getAllByRole("menuitemcheckbox")).toHaveLength(3);
+    expect(screen.getAllByRole("menuitemcheckbox")).toHaveLength(4);
     expect(screen.queryByRole("menuitem")).not.toBeInTheDocument();
   });
 
   it("teclado como no \"+ Novo ▾\": ↓ abre e navega (com volta), Espaço/Enter alternam ou abrem os Ajustes; Esc fecha", () => {
     const ajustes = renderizar();
     fireEvent.keyDown(botao(), { key: "ArrowDown" });
-    const chat = () => screen.getByRole("menuitemcheckbox", { name: /Chat fixo à esquerda/ });
+    const chat = () => screen.getByRole("menuitemcheckbox", { name: "Chat fixo" });
     const visualizador = () => screen.getByRole("menuitemcheckbox", { name: /Visualizador de código/ });
     const autorrecuperacao = () => screen.getByRole("menuitemcheckbox", { name: /Autorrecuperação/ });
+    const bixinhos = () => screen.getByRole("menuitemcheckbox", { name: /Manter bixinhos até limpar à mão/ });
     const pastas = () => screen.getByRole("menuitem", { name: "Pastas e Claude Code…" });
+    const esquerda = () => screen.getByRole("menuitemradio", { name: "esquerda" });
+    const direita = () => screen.getByRole("menuitemradio", { name: "direita" });
     expect(chat()).toHaveFocus();
 
+    // Depois do "Chat fixo", os dois lados; Enter escolhe o focado.
     fireEvent.keyDown(chat(), { key: "ArrowDown" });
+    expect(esquerda()).toHaveFocus();
+    fireEvent.keyDown(esquerda(), { key: "ArrowDown" });
+    expect(direita()).toHaveFocus();
+    fireEvent.keyDown(direita(), { key: "Enter" });
+    expect(direita()).toHaveAttribute("aria-checked", "true");
+    expect(lerLeitor()).toMatchObject({ ladoDoChatFixo: "direita" });
+    fireEvent.keyDown(direita(), { key: "ArrowUp" });
+    fireEvent.keyDown(esquerda(), { key: " " });
+    expect(esquerda()).toHaveAttribute("aria-checked", "true");
+    fireEvent.keyDown(esquerda(), { key: "ArrowDown" });
+    fireEvent.keyDown(direita(), { key: "ArrowDown" });
     expect(visualizador()).toHaveFocus();
     fireEvent.keyDown(visualizador(), { key: " " });
     expect(visualizador()).toHaveAttribute("aria-checked", "true");
     fireEvent.keyDown(visualizador(), { key: "Enter" });
     expect(visualizador()).toHaveAttribute("aria-checked", "false");
     fireEvent.keyDown(visualizador(), { key: "ArrowDown" });
+    expect(bixinhos()).toHaveFocus();
+    fireEvent.keyDown(bixinhos(), { key: "ArrowDown" });
     expect(autorrecuperacao()).toHaveFocus();
     fireEvent.keyDown(autorrecuperacao(), { key: "ArrowDown" });
     expect(pastas()).toHaveFocus();
@@ -248,7 +309,7 @@ describe("PainelDeConfiguracoesDoApp", () => {
       "aria-checked",
       "true",
     );
-    expect(screen.getByRole("menuitemcheckbox", { name: /Chat fixo à esquerda/ })).toHaveAttribute(
+    expect(screen.getByRole("menuitemcheckbox", { name: "Chat fixo" })).toHaveAttribute(
       "aria-checked",
       "false",
     );

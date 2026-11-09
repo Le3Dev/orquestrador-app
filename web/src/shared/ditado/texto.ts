@@ -21,9 +21,13 @@ export function mensagemDoErroDeDitado(erro: unknown): string {
   if (nome === "NotReadableError") {
     return "O microfone está ocupado por outro programa.";
   }
+  if (nome === "NotSupportedError" || nome === "AbortError") {
+    return "O ditado falhou: este navegador não deu acesso ao microfone.";
+  }
   const mensagem = erro instanceof Error ? erro.message : String(erro);
   if (/fetch|network|Failed to load|download/i.test(mensagem)) {
     return "Não foi possível baixar o modelo de voz. Confira a internet e tente de novo.";
   }
-  return `O ditado falhou: ${mensagem}`;
+  // O resto vem do navegador ou do Whisper, em inglês: não vale mostrar cru.
+  return "O ditado falhou. Tente de novo ou digite o texto.";
 }

@@ -6,11 +6,13 @@ import express, { Express } from "express";
 
 import { ProjetosDoChat } from "./chat/ProjetosDoChat";
 import { ServicoDeChat } from "./chat/ServicoDeChat";
+import { SubagentesDoChat } from "./chat/SubagentesDoChat";
 import { acessoSoPeloApp } from "./controllers/acessoSoPeloApp";
 import { criarAlteracoesRoutes } from "./controllers/alteracoesRoutes";
 import { criarArquivosRoutes } from "./controllers/arquivosRoutes";
 import { CanalDoChat, criarChatRoutes } from "./controllers/chatRoutes";
 import { criarEscutaRoutes } from "./controllers/escutaRoutes";
+import { criarModelosDeCanvasRoutes } from "./controllers/modelosDeCanvasRoutes";
 import { criarNotasRoutes } from "./controllers/notasRoutes";
 import { criarOrquestradoresRoutes } from "./controllers/orquestradoresRoutes";
 import { criarPromptsRoutes } from "./controllers/promptsRoutes";
@@ -24,6 +26,7 @@ import { ServicoDeEscuta } from "./escuta/ServicoDeEscuta";
 import { ArmazemDeAnexosEmArquivo } from "./infraestrutura/arquivos/ArmazemDeAnexosEmArquivo";
 import { PastaDeEntradaDosArtefatos } from "./infraestrutura/arquivos/ColetorDeArtefatosEmPasta";
 import { ExploradorDePastas } from "./infraestrutura/arquivos/ExploradorDePastas";
+import { RepositorioDeModelosDeCanvasEmArquivo } from "./infraestrutura/arquivos/RepositorioDeModelosDeCanvasEmArquivo";
 import { RepositorioDeNotasEmArquivo } from "./infraestrutura/arquivos/RepositorioDeNotasEmArquivo";
 import { RepositorioDeOrquestradoresEmArquivo } from "./infraestrutura/arquivos/RepositorioDeOrquestradoresEmArquivo";
 import { RepositorioDePreferenciasEmArquivo } from "./infraestrutura/arquivos/RepositorioDePreferenciasEmArquivo";
@@ -54,6 +57,7 @@ import { RastreadorDeProcessosDeixados } from "./infraestrutura/sistema/Rastread
 import { encerrarAgentesOrfaos, RegistroDeProcessos } from "./infraestrutura/sistema/RegistroDeProcessos";
 import { RegistroDeProcessosDeixados } from "./infraestrutura/sistema/RegistroDeProcessosDeixados";
 import { CanalDeEventos } from "./infraestrutura/sse/CanalDeEventos";
+import { ServicoDeModelosDeCanvas } from "./modelos/ServicoDeModelosDeCanvas";
 import { ServicoDeNotas } from "./notas/ServicoDeNotas";
 import { Plataforma } from "./orquestracao/InstrucoesDoOrquestrador";
 import { ServicoDeAlteracoes } from "./orquestracao/ServicoDeAlteracoes";
@@ -169,6 +173,7 @@ async function iniciar(): Promise<void> {
   const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(configuracao.pastaDeDados);
   const notas = await RepositorioDeNotasEmArquivo.abrir(configuracao.pastaDeDados);
   const preferencias = await RepositorioDePreferenciasEmArquivo.abrir(configuracao.pastaDeDados);
+  const modelosDeCanvas = await RepositorioDeModelosDeCanvasEmArquivo.abrir(configuracao.pastaDeDados);
   const repositorioDoChat = await RepositorioDoChatEmArquivo.abrir(configuracao.pastaDeDados, randomUUID);
 
   // Antes de registrar processos novos: se o servidor anterior caiu, os
@@ -255,6 +260,11 @@ async function iniciar(): Promise<void> {
   if (interrompidos > 0) {
     console.warn(`[orquestracao] ${interrompidos} turno(s) marcado(s) como interrompido(s) pelo reinício.`);
   }
+  // Depois das interrupções: as retomadas gravadas antes do reinício voltam ao relógio (ADR-36).
+  const reagendadas = await servico.reagendarRetomadasPendentes();
+  if (reagendadas > 0) {
+    console.warn(`[orquestracao] ${reagendadas} retomada(s) automática(s) reagendada(s) após o reinício.`);
+  }
 
   // Adaptador: o chat enxerga projetos pelo nome e pasta, e Orquestradores
   // também pelo estado (ocupado ou não, fila, worktree), sem o agregado.
@@ -280,6 +290,11 @@ async function iniciar(): Promise<void> {
         };
       }),
   };
+  // Adaptador: o chat vê os subagentes prontos sem o prompt, lidos a cada pergunta.
+  const subagentesDoChat: SubagentesDoChat = {
+    listarSubagentesProntos: async () =>
+      preferencias.atuais().subagentesProntos.map(({ nome, descricao, modelo }) => ({ nome, descricao, modelo })),
+  };
   const canalDoChat = new CanalDoChat();
   const servicoDeChat = new ServicoDeChat({
     repositorio: repositorioDoChat,
@@ -288,6 +303,7 @@ async function iniciar(): Promise<void> {
       new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro, undefined, rastreador),
     ),
     projetos: projetosDoChat,
+    subagentes: subagentesDoChat,
     // dados/anexos/chat/: o mesmo armazém dos Orquestradores, com a chave "chat".
     anexos,
     publicador: canalDoChat,
@@ -367,6 +383,17 @@ async function iniciar(): Promise<void> {
       "/api",
       criarNotasRoutes({
         servico: new ServicoDeNotas({ repositorio: notas, gerarId: randomUUID, agora: () => new Date() }),
+      }),
+    );
+    // Modelos de canvas: arranjos salvos para recriar (pela tela, item a item) e compartilhar.
+    rotas.use(
+      "/api",
+      criarModelosDeCanvasRoutes({
+        servico: new ServicoDeModelosDeCanvas({
+          repositorio: modelosDeCanvas,
+          gerarId: randomUUID,
+          agora: () => new Date(),
+        }),
       }),
     );
     rotas.use("/api", criarPromptsRoutes({ servico: servicoDeMelhoria }));

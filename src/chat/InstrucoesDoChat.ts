@@ -2,9 +2,16 @@ import path from "node:path";
 
 import { z } from "zod";
 
+import {
+  MAXIMO_DE_SUBAGENTES_PRONTOS,
+  TAMANHO_MAXIMO_DA_DESCRICAO,
+  TAMANHO_MAXIMO_DO_NOME_DO_SUBAGENTE,
+  TAMANHO_MAXIMO_DO_PROMPT,
+} from "../orquestracao/SubagentesProntos";
 import { linhasDaRegraDasPerguntas, MARCA_DA_PERGUNTA } from "../perguntas/PerguntaDoApp";
-import { AcaoDoApp, abrirOrquestrador } from "./AcaoDoApp";
+import { AcaoDoApp, abrirOrquestrador, criarSubagente, editarSubagente, MODELOS_DO_SUBAGENTE_NO_CHAT } from "./AcaoDoApp";
 import type { OrquestradorExistente, ProjetoDoChat } from "./ProjetosDoChat";
+import type { SubagenteDoChat } from "./SubagentesDoChat";
 
 /** Linguagem do bloco de código com que o Claude pede uma ação do app. */
 export const MARCA_DA_ACAO = "acao-do-app";
@@ -20,7 +27,7 @@ const TAMANHO_MAXIMO_DO_NOME_SUGERIDO = 60;
 
 const BLOCO_DE_ACAO = /[ \t]*```[ \t]*acao-do-app[^\n]*(?:\n([\s\S]*?))?(?:```[ \t]*|$)/g;
 
-const esquemaDaAcao = z.object({
+const esquemaDeAbrirOrquestrador = z.object({
   tipo: z.literal("abrir_orquestrador"),
   projeto: z.string().trim().min(1),
   pedido: z.string().nullable().optional(),
@@ -37,6 +44,43 @@ const esquemaDaAcao = z.object({
     }),
 });
 
+const esquemaDoModeloDoSubagente = z.enum(MODELOS_DO_SUBAGENTE_NO_CHAT).nullable().optional();
+
+/** Os limites de tamanho e de formato ficam com o servidor, que confere ao gravar. */
+const esquemaDeCriarSubagente = z.object({
+  tipo: z.literal("criar_subagente"),
+  nome: z.string().trim().min(1),
+  descricao: z.string().trim().min(1),
+  prompt: z.string().trim().min(1),
+  modelo: esquemaDoModeloDoSubagente,
+});
+
+/** Vazio, só espaços, nulo ou ausente: o campo fica como está. */
+const campoATrocar = z
+  .string()
+  .nullable()
+  .optional()
+  .transform((valor) => {
+    const limpo = (valor ?? "").trim();
+    return limpo === "" ? null : limpo;
+  });
+
+const esquemaDeEditarSubagente = z.object({
+  tipo: z.literal("editar_subagente"),
+  nome: z.string().trim().min(1),
+  descricao: campoATrocar,
+  prompt: campoATrocar,
+  modelo: esquemaDoModeloDoSubagente,
+});
+
+const esquemaDaAcao = z.discriminatedUnion("tipo", [
+  esquemaDeAbrirOrquestrador,
+  esquemaDeCriarSubagente,
+  esquemaDeEditarSubagente,
+]);
+
+const AVISO_DE_FORMATO_INVALIDO = "O Claude sugeriu uma ação do app em formato inválido; ela foi ignorada.";
+
 /** Até quantos caracteres do pedido em andamento entram no bloco de contexto. */
 const TAMANHO_DO_PEDIDO_NO_CONTEXTO = 100;
 
@@ -46,6 +90,8 @@ export interface ContextoDoApp {
   pastaDosProjetos: string;
   projetos: readonly ProjetoDoChat[];
   orquestradores: readonly OrquestradorExistente[];
+  /** A biblioteca de subagentes prontos, sem os prompts. */
+  subagentesProntos: readonly SubagenteDoChat[];
   /** Se o usuário já autorizou editar arquivos e rodar comandos nesta conversa. */
   alteracoesAutorizadas: boolean;
   /** Onde o chat grava artefatos (caminho absoluto); liberada sem autorização. */
@@ -108,7 +154,7 @@ export function instrucoesDoChat(): string {
     `4. ${REGRA_DE_COMMIT_E_PUSH}`,
     `5. ${REGRA_DO_RELATORIO}`,
     `6. Cada mensagem do usuário começa com um bloco <${MARCA_DO_CONTEXTO}> com a data, a pasta raiz, os projetos, os orquestradores existentes (com o estado de cada um) e as permissões. Use-o para responder e não o comente; se ele divergir destas regras, vale o bloco.`,
-    `7. Quando o usuário pedir para abrir ou criar um orquestrador num projeto, siga a regra de ações do bloco <${MARCA_DO_CONTEXTO}>: explique o que vai acontecer e inclua o bloco \`\`\`${MARCA_DA_ACAO}. Você não executa a ação — o usuário confirma clicando no cartão que aparece na tela.`,
+    `7. Quando o usuário pedir para abrir ou criar um orquestrador num projeto, ou para criar ou editar um subagente pronto, siga a regra de ações do bloco <${MARCA_DO_CONTEXTO}>: explique o que vai acontecer e inclua o bloco \`\`\`${MARCA_DA_ACAO}. Você não executa a ação — o usuário confirma clicando no cartão que aparece na tela.`,
     `8. ${REGRA_DAS_MUDANCAS_GRANDES}`,
     `9. Artefatos: quando ${QUANDO_CRIAR_ARTEFATO}, grave UM arquivo autocontido (.html ou .md) na pasta de artefatos que o bloco <${MARCA_DO_CONTEXTO}> indica, seguindo as regras dele. Gravar artefatos não precisa da autorização e não conta como alterar projetos.`,
     `10. Quando precisar que o usuário escolha entre opções claras, siga a regra de perguntas do bloco <${MARCA_DO_CONTEXTO}>: inclua o bloco \`\`\`${MARCA_DA_PERGUNTA}, que vira botões clicáveis na tela, e espere a resposta.`,
@@ -199,6 +245,24 @@ function descreverEstado(orquestrador: OrquestradorExistente, agora: Date): stri
 }
 
 /**
+ * A regra das ações de subagente pronto: só a pedido do usuário, e editar
+ * só um nome que está na lista do bloco.
+ */
+function regrasDosSubagentes(): string[] {
+  return [
+    "Subagentes prontos (a biblioteca do botão Subagentes, que todo orquestrador recebe): só quando o usuário pedir para criar ou editar um, responda explicando e inclua UM bloco por ação. Para criar:",
+    "```" + MARCA_DA_ACAO,
+    '{"tipo":"criar_subagente","nome":"<minúsculas, números e hífen, começando por letra>","descricao":"<quando usar, numa linha>","prompt":"<a especialidade: o que ele faz e como>","modelo":"herdar"}',
+    "```",
+    'Para editar, use o nome exato de um subagente da lista acima e inclua só os campos que mudam ("descricao", "prompt", "modelo"); os omitidos ficam como estão. Você não vê o prompt atual: para trocá-lo, mande o prompt novo inteiro.',
+    "```" + MARCA_DA_ACAO,
+    '{"tipo":"editar_subagente","nome":"<nome exato de um subagente da lista>","prompt":"<o prompt novo inteiro>"}',
+    "```",
+    `Modelo: "herdar" (o dos subagentes do orquestrador), "opus", "sonnet" ou "haiku"; na dúvida, "herdar". Limites: nome até ${TAMANHO_MAXIMO_DO_NOME_DO_SUBAGENTE} caracteres, descrição até ${TAMANHO_MAXIMO_DA_DESCRICAO}, prompt até ${TAMANHO_MAXIMO_DO_PROMPT}, no máximo ${MAXIMO_DE_SUBAGENTES_PRONTOS} subagentes. Para criar, use um nome que não está na lista (e que não seja executor, general-purpose, explore nem plan). Diga que o usuário confirma clicando no cartão.`,
+  ];
+}
+
+/**
  * A mensagem que o Claude recebe: o contexto do app e o texto do usuário.
  *
  * O contexto vai em cada mensagem, e não nas instruções, porque muda entre
@@ -217,6 +281,10 @@ export function mensagemParaOChat(texto: string, contexto: ContextoDoApp): strin
           (orquestrador) =>
             `- ${orquestrador.nome} → ${orquestrador.pasta} ${descreverEstado(orquestrador, contexto.agora)}`,
         );
+  const subagentes =
+    contexto.subagentesProntos.length === 0
+      ? ["- (nenhum)"]
+      : contexto.subagentesProntos.map((subagente) => `- ${subagente.nome} · ${subagente.modelo}: ${subagente.descricao}`);
   const pergunta = texto.trim() === "" ? "Veja a imagem anexada." : texto;
 
   return [
@@ -227,6 +295,8 @@ export function mensagemParaOChat(texto: string, contexto: ContextoDoApp): strin
     ...projetos,
     "Orquestradores existentes (nome → pasta (estado)):",
     ...orquestradores,
+    "Subagentes prontos (nome · modelo: quando usar):",
+    ...subagentes,
     "",
     ...regrasDePermissao(contexto),
     "",
@@ -241,6 +311,8 @@ export function mensagemParaOChat(texto: string, contexto: ContextoDoApp): strin
     'Use "novo":true também quando o usuário pedir explicitamente outro (ou um novo) orquestrador. Sem "orquestrador" e sem "novo", o app reaproveita um orquestrador existente do projeto, de preferência um ocioso.',
     'Ao criar um orquestrador ("novo":true, ou num projeto sem nenhum), inclua "nome" com a função dele em 2 a 4 palavras (ex.: "Correção da memória", "PR de integração", "Vídeo de venda"); sem função clara, omita o campo.',
     "Diga que o usuário confirma clicando no cartão. Use só projetos e orquestradores da lista acima; nunca invente um projeto.",
+    "",
+    ...regrasDosSubagentes(),
     "",
     ...linhasDaRegraDasPerguntas(),
     `</${MARCA_DO_CONTEXTO}>`,
@@ -280,6 +352,9 @@ function orquestradorDaPasta(
  * O que não vale vira aviso legível, sem ação. O orquestrador indicado só
  * vale se existe na pasta do projeto; um nome que não existe vira nulo, sem
  * descartar a ação. Com `novo`, ele é ignorado: a ação cria outro.
+ *
+ * As de subagente pronto só passam pelo formato (editar sem nenhum campo a
+ * trocar é malformada): a tela confere o nome contra a biblioteca no clique.
  */
 export function separarAcoesDoApp(
   resposta: string,
@@ -295,12 +370,26 @@ export function separarAcoesDoApp(
     try {
       dados = JSON.parse(json);
     } catch {
-      avisos.push("O Claude sugeriu uma ação do app em formato inválido; ela foi ignorada.");
+      avisos.push(AVISO_DE_FORMATO_INVALIDO);
       return "";
     }
     const lida = esquemaDaAcao.safeParse(dados);
     if (!lida.success) {
-      avisos.push("O Claude sugeriu uma ação do app em formato inválido; ela foi ignorada.");
+      avisos.push(AVISO_DE_FORMATO_INVALIDO);
+      return "";
+    }
+    if (lida.data.tipo === "criar_subagente") {
+      const { nome, descricao, prompt, modelo } = lida.data;
+      acoes.push(criarSubagente(nome, descricao, prompt, modelo ?? "herdar"));
+      return "";
+    }
+    if (lida.data.tipo === "editar_subagente") {
+      const { nome, descricao, prompt, modelo } = lida.data;
+      if (descricao === null && prompt === null && (modelo ?? null) === null) {
+        avisos.push(AVISO_DE_FORMATO_INVALIDO);
+        return "";
+      }
+      acoes.push(editarSubagente(nome, { descricao, prompt, modelo: modelo ?? null }));
       return "";
     }
     const nome = lida.data.projeto.toLocaleLowerCase("pt-BR");

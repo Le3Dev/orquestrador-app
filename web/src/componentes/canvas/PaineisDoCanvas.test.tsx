@@ -44,13 +44,14 @@ describe("BarraDoCanvas · desktop", () => {
     return { aoCriar, aoCriarNota };
   }
 
-  it("o \"+ Novo ▾\" e os botões de Subagentes e Instruções gerais: sem Preferências, Prévia, Terminal, título, busca, ⚙, notas, organizar nem botões de janela", () => {
+  it("o \"+ Novo ▾\" e os botões de Subagentes, Instruções gerais e Modelos: sem Preferências, Prévia, Terminal, título, busca, ⚙, notas, organizar nem botões de janela", () => {
     renderizar();
 
     expect(screen.getAllByRole("button")).toEqual([
       botaoDoNovo(),
       screen.getByRole("button", { name: "Subagentes" }),
       screen.getByRole("button", { name: "Instruções gerais" }),
+      screen.getByRole("button", { name: "Modelos" }),
     ]);
     expect(screen.queryByRole("button", { name: /Preferências|Configurações/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Prévia|Terminal/ })).not.toBeInTheDocument();
@@ -186,8 +187,8 @@ describe("BarraDoCanvas · navegador", () => {
     fireEvent.click(configuracoes);
 
     const painel = screen.getByRole("menu", { name: "Configurações" });
-    // Os dois da Tela e a Autorrecuperação dos orquestradores.
-    expect(within(painel).getAllByRole("menuitemcheckbox")).toHaveLength(3);
+    // Os três da Tela e a Autorrecuperação dos orquestradores.
+    expect(within(painel).getAllByRole("menuitemcheckbox")).toHaveLength(4);
     expect(within(painel).queryByRole("menuitem", { name: /Pastas e Claude Code/ })).not.toBeInTheDocument();
   });
 
@@ -237,7 +238,7 @@ describe("BarraDoCanvas · navegador", () => {
 });
 
 describe("BarraDoCanvas: Subagentes e Instruções gerais", () => {
-  function barra(painelAberto: "subagentes" | "instrucoes" | null, quantidadeDeSubagentes: number | null = 3) {
+  function barra(painelAberto: "subagentes" | "instrucoes" | "modelos" | null, quantidadeDeSubagentes: number | null = 3) {
     const aoAlternarPainel = vi.fn();
     const resultado = render(
       <BarraDoCanvas
@@ -252,13 +253,14 @@ describe("BarraDoCanvas: Subagentes e Instruções gerais", () => {
     return { aoAlternarPainel, ...resultado };
   }
 
-  it("Subagentes (com a contagem) e Instruções gerais, antes do ⚙ Configurações (no navegador)", () => {
+  it("Subagentes (com a contagem), Instruções gerais e Modelos, antes do ⚙ Configurações (no navegador)", () => {
     const { aoAlternarPainel } = barra(null);
 
     expect(screen.getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual([
       "Novo",
       "Subagentes (3)",
       "Instruções gerais",
+      "Modelos",
       "Configurações",
     ]);
     const subagentes = screen.getByRole("button", { name: /Subagentes/ });
@@ -271,9 +273,15 @@ describe("BarraDoCanvas: Subagentes e Instruções gerais", () => {
       "Instruções que valem para todo orquestrador sem instruções próprias",
     );
 
+    expect(screen.getByRole("button", { name: "Modelos" })).toHaveAttribute(
+      "title",
+      "Modelos de canvas: arranjos salvos para recriar, exportar e importar",
+    );
+
     fireEvent.click(subagentes);
     fireEvent.click(instrucoes);
-    expect(aoAlternarPainel.mock.calls).toEqual([["subagentes"], ["instrucoes"]]);
+    fireEvent.click(screen.getByRole("button", { name: "Modelos" }));
+    expect(aoAlternarPainel.mock.calls).toEqual([["subagentes"], ["instrucoes"], ["modelos"]]);
   });
 
   it("sem a contagem (servidor fora), o botão fica só com o nome", () => {
@@ -364,7 +372,7 @@ describe("BarraDoCanvas: ⚙ Configurações no lugar do menu Preferências", ()
     expect(screen.queryByRole("button", { name: "Preferências" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Configurações" }));
     const painel = screen.getByRole("menu", { name: "Configurações" });
-    const chat = within(painel).getByRole("menuitemcheckbox", { name: /Chat fixo à esquerda/ });
+    const chat = within(painel).getByRole("menuitemcheckbox", { name: "Chat fixo" });
     expect(chat).toHaveFocus();
 
     fireEvent.click(chat);

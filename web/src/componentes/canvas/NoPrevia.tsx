@@ -15,6 +15,8 @@ import { useAcoesDoCanvas } from "../../shared/canvas/contexto";
 import { TAMANHO_MINIMO_DA_PREVIA } from "../../shared/canvas/layout";
 import { ALCA_DA_PREVIA, type Ancora, type NoPrevia as TipoDoNo } from "../../shared/canvas/nos";
 import { enderecoDigitado } from "../../shared/enderecosLocais";
+import { apiDaPrevia } from "../../shared/ponteDoDesktop";
+import { hostDaOrigem, modoDaPrevia, mudouDeDominio } from "../../shared/previaNativa";
 import { Dica } from "../Dica";
 import {
   IconeAbrirFora,
@@ -24,6 +26,8 @@ import {
   IconeRecarregar,
   IconeRestaurar,
 } from "../Icones";
+import { MenuDaPrevia } from "./MenuDaPrevia";
+import { VistaNativaDaPrevia } from "./VistaNativaDaPrevia";
 
 export const ENDERECO_INVALIDO = "Endereço inválido: use http ou https (ex.: localhost:5173).";
 
@@ -466,12 +470,21 @@ interface PropsDaJanela {
 const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada, focarAoAbrir }: PropsDaJanela) {
   const acoes = useAcoesDoCanvas();
   const [versao, setVersao] = useState(0);
+  const [menuAberto, setMenuAberto] = useState(false);
+  // O host real da página que a vista nativa mostra agora (muda ao navegar, sem mudar o endereço aberto).
+  const [origemAtual, setOrigemAtual] = useState<string | null>(null);
   const recarregar = useCallback(() => setVersao((atual) => atual + 1), []);
   const fechar = useCallback(() => acoes.fecharPrevia(previaId), [acoes, previaId]);
-  // Minimizada também confere e fecha: o corpo só fica escondido.
-  const servidor = useServidorForaDoAr(url, recarregar, fechar);
+  // Endereço externo: vista nativa no app desktop (login salvo), "abrir em nova aba" no navegador.
+  const apiNativa = apiDaPrevia();
+  const modo = modoDaPrevia(url, apiNativa !== null);
+  // Minimizada também confere e fecha: o corpo só fica escondido. Só o servidor local
+  // (iframe) é conferido: um site externo fora do ar (ou sem rede) não fecha a prévia.
+  const servidor = useServidorForaDoAr(modo === "iframe" ? url : "", recarregar, fechar);
   const segundos = segundosAteFechar(servidor.fechaEm, servidor.agora);
   const semEndereco = url === "";
+  const hostAtual = modo === "vista-nativa" ? hostDaOrigem(origemAtual) : null;
+  const outroDominio = hostAtual !== null && mudouDeDominio(url, origemAtual);
 
   const navegar = useCallback(
     (destino: string) => {
@@ -490,6 +503,21 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
       <div className={`barra-da-previa ${ALCA_DA_PREVIA}`}>
         <IconeNavegador className="shrink-0 text-info" />
         <CampoDoEndereco url={url} focarAoAbrir={focarAoAbrir} aoNavegar={navegar} />
+        {hostAtual !== null && (
+          <span
+            className={`host-atual-da-previa ${outroDominio ? "host-atual-da-previa-mudou" : ""}`}
+            role="note"
+            title={
+              outroDominio
+                ? `A página agora está em ${hostAtual}, outro site em relação ao endereço aberto (${url}). Confira antes de digitar senhas.`
+                : `Página aberta agora: ${hostAtual}`
+            }
+            aria-label={outroDominio ? `Atenção: a página mudou para outro site, ${hostAtual}` : `Página aberta agora: ${hostAtual}`}
+          >
+            {outroDominio && <span aria-hidden="true">⚠ </span>}
+            {hostAtual}
+          </span>
+        )}
         {/* Minimizada, o anel fica escondido no corpo: a contagem vem para a barra. */}
         {minimizada && segundos !== null && (
           <span
@@ -533,12 +561,15 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
             <IconeAbrirFora />
           </a>
         )}
-        <span className="nodrag flex">
-          <Dica sobre="a prévia" titulo="Ficou em branco?">
-            Alguns sites não aceitam abrir dentro de outra página; use abrir no navegador. Login com cookie também pode
-            não manter a sessão aqui.
-          </Dica>
-        </span>
+        {modo === "iframe" && (
+          <span className="nodrag flex">
+            <Dica sobre="a prévia" titulo="Ficou em branco?">
+              Alguns sites não aceitam abrir dentro de outra página; use abrir no navegador. Login com cookie também
+              pode não manter a sessão aqui.
+            </Dica>
+          </span>
+        )}
+        {apiNativa !== null && <MenuDaPrevia api={apiNativa} aberto={menuAberto} aoMudar={setMenuAberto} />}
         <button
           type="button"
           className="botao-icone nodrag"
@@ -582,6 +613,28 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
                 fechar
               </button>
             )}
+          </div>
+        ) : modo === "vista-nativa" && apiNativa !== null ? (
+          // Trocar o endereço ou recarregar recria a vista (key): ela é destruída e aberta de novo.
+          <VistaNativaDaPrevia
+            key={`${url}#${versao}`}
+            previaId={previaId}
+            url={url}
+            api={apiNativa}
+            suspensa={minimizada || menuAberto}
+            aoMudarOrigem={setOrigemAtual}
+          />
+        ) : modo === "nova-aba" ? (
+          <div className="mensagem-da-previa mensagem-fora-do-ar">
+            <p>Sites com login (Google Sheets, Docs, Notion) não abrem dentro de outra página no navegador.</p>
+            <a
+              className="btn btn-outline btn-sm nodrag"
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              abrir em nova aba
+            </a>
           </div>
         ) : (
           <QuadroAtivavel>{(estilo) => <QuadroDoSite url={url} versao={versao} estilo={estilo} />}</QuadroAtivavel>

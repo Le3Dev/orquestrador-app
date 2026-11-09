@@ -1,10 +1,14 @@
 import type {
+  ArquivoDoModeloDeCanvas,
   ClassificacaoDaEscuta,
+  ConsumoDoOrquestrador,
   ConteudoDoArquivo,
+  ConteudoDoModeloDeCanvas,
   DadosDaConfiguracao,
   DadosDaNota,
   DadosDaPredefinicao,
   DadosDasPreferencias,
+  DadosDoModeloDeCanvas,
   DadosDoShell,
   EsforcosHerdados,
   EstadoDoChat,
@@ -77,6 +81,25 @@ export interface ImagemParaEnvio {
   base64: string;
 }
 
+/**
+ * Uma nota, prévia ou artefato que o usuário ligou ao terminal no canvas: vai
+ * no próximo pedido como contexto. Nota leva o texto (cortado); prévia, o
+ * endereço; artefato, o arquivo na pasta de entrada (`chat/<arquivo>` ou
+ * `orquestradores/<id>/<arquivo>`), que o servidor troca pelo caminho no disco.
+ */
+export interface ItemLigadoParaEnvio {
+  tipo: "nota" | "previa" | "artefato";
+  titulo: string;
+  conteudo?: string;
+  url?: string;
+  caminho?: string;
+}
+
+/** O corpo só leva `itensLigados` quando há algum: sem itens, o pedido é igual ao de antes. */
+function comItensLigados(itensLigados: readonly ItemLigadoParaEnvio[] | undefined): { itensLigados?: readonly ItemLigadoParaEnvio[] } {
+  return itensLigados !== undefined && itensLigados.length > 0 ? { itensLigados } : {};
+}
+
 export interface NovoOrquestrador extends DadosDaConfiguracao {
   nome: string;
   pastaDeTrabalho: string;
@@ -110,8 +133,18 @@ export const api = {
 
   listarOrquestradores: () => requisitar<ResumoDoOrquestrador[]>("/orquestradores"),
 
+  /** O consumo medido de cada orquestrador na conversa atual, do maior índice de custo para o menor. */
+  lerConsumoDosOrquestradores: () => requisitar<ConsumoDoOrquestrador[]>("/consumo-dos-orquestradores"),
+
   criarOrquestrador: (dados: NovoOrquestrador) =>
     requisitar<ResumoDoOrquestrador>("/orquestradores", { method: "POST", body: JSON.stringify(dados) }),
+
+  /** Troca o nome (1 a 60 caracteres, aparado); devolve o orquestrador atualizado. */
+  renomearOrquestrador: (id: string, nome: string) =>
+    requisitar<ResumoDoOrquestrador>(`/orquestradores/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ nome }),
+    }),
 
   alterarConfiguracao: (id: string, configuracao: Partial<DadosDaConfiguracao>) =>
     requisitar<ResumoDoOrquestrador>(`/orquestradores/${encodeURIComponent(id)}/configuracao`, {
@@ -146,21 +179,27 @@ export const api = {
     texto: string,
     imagens: readonly ImagemParaEnvio[] = [],
     modo: ModoDoTurno = "execucao",
+    itensLigados?: readonly ItemLigadoParaEnvio[],
   ) =>
     requisitar<{ turnoId: string }>(`/orquestradores/${encodeURIComponent(id)}/mensagens`, {
       method: "POST",
-      body: JSON.stringify({ texto, imagens, modo }),
+      body: JSON.stringify({ texto, imagens, modo, ...comItensLigados(itensLigados) }),
     }),
 
   /**
-   * Guarda um pedido na fila do Orquestrador (só texto e modo: imagens não
-   * entram). Ele sai sozinho quando o turno atual terminar concluído, ou com
-   * `enviarDaFila`. Recusado (409) com a fila cheia.
+   * Guarda um pedido na fila do Orquestrador (texto, modo e os itens ligados
+   * agora: imagens não entram). Ele sai sozinho quando o turno atual terminar
+   * concluído, ou com `enviarDaFila`. Recusado (409) com a fila cheia.
    */
-  enfileirarPedido: (id: string, texto: string, modo: ModoDoTurno = "execucao") =>
+  enfileirarPedido: (
+    id: string,
+    texto: string,
+    modo: ModoDoTurno = "execucao",
+    itensLigados?: readonly ItemLigadoParaEnvio[],
+  ) =>
     requisitar<{ pedidoId: string }>(`/orquestradores/${encodeURIComponent(id)}/fila`, {
       method: "POST",
-      body: JSON.stringify({ texto, modo }),
+      body: JSON.stringify({ texto, modo, ...comItensLigados(itensLigados) }),
     }),
 
   removerDaFila: (id: string, pedidoId: string) =>
@@ -175,11 +214,17 @@ export const api = {
       { method: "POST" },
     ),
 
-  /** Aprova o plano pendente do último pedido; o servidor já inicia a execução na mesma sessão. */
-  aprovarPlano: (id: string, observacoes = "") =>
+  /**
+   * Aprova o plano pendente do último pedido; o servidor já inicia a execução na mesma sessão.
+   * `commitarAoFinal` pede o commit ao fim, pela regra por feature (o servidor o ignora se a configuração não libera commit).
+   */
+  aprovarPlano: (id: string, observacoes = "", commitarAoFinal = false) =>
     requisitar<{ turnoId: string }>(`/orquestradores/${encodeURIComponent(id)}/plano/aprovar`, {
       method: "POST",
-      body: JSON.stringify(observacoes.trim() === "" ? {} : { observacoes }),
+      body: JSON.stringify({
+        ...(observacoes.trim() === "" ? {} : { observacoes }),
+        ...(commitarAoFinal ? { commitarAoFinal: true } : {}),
+      }),
     }),
 
   descartarPlano: (id: string) =>
@@ -205,6 +250,37 @@ export const api = {
 
   removerNota: (id: string) => requisitar<null>(`/notas/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
+  // ---------------- Modelos de canvas ----------------
+
+  listarModelosDeCanvas: () => requisitar<DadosDoModeloDeCanvas[]>("/modelos-de-canvas"),
+
+  /** Salva um arranjo como modelo. Recusado com 400 (dados inválidos) ou 409 (já há 50 modelos). */
+  criarModeloDeCanvas: (conteudo: ConteudoDoModeloDeCanvas) =>
+    requisitar<DadosDoModeloDeCanvas>("/modelos-de-canvas", { method: "POST", body: JSON.stringify(conteudo) }),
+
+  /** Renomeia (ou troca o ícone ou a cor); os itens não mudam por aqui. */
+  alterarModeloDeCanvas: (id: string, alteracao: Partial<Pick<ConteudoDoModeloDeCanvas, "nome" | "icone" | "cor">>) =>
+    requisitar<DadosDoModeloDeCanvas>(`/modelos-de-canvas/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(alteracao),
+    }),
+
+  removerModeloDeCanvas: (id: string) =>
+    requisitar<null>(`/modelos-de-canvas/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  /** O arquivo para baixar; `semCaminhos` tira pastas, comandos e o que parece segredo. */
+  exportarModeloDeCanvas: (id: string, semCaminhos: boolean) =>
+    requisitar<ArquivoDoModeloDeCanvas>(
+      `/modelos-de-canvas/${encodeURIComponent(id)}/exportar?semCaminhos=${semCaminhos ? "1" : "0"}`,
+    ),
+
+  /** Confere um arquivo exportado e devolve o modelo como seria salvo. Não grava nada. */
+  conferirImportacaoDeModelo: (arquivo: unknown) =>
+    requisitar<ConteudoDoModeloDeCanvas>("/modelos-de-canvas/importacao/conferir", {
+      method: "POST",
+      body: JSON.stringify(arquivo),
+    }),
+
   saude: () => requisitar<SaudeDoServidor>("/saude"),
 
   lerPreferencias: () => requisitar<DadosDasPreferencias>("/preferencias"),
@@ -213,11 +289,24 @@ export const api = {
   alterarPreferencias: (alteracao: Partial<DadosDasPreferencias>) =>
     requisitar<DadosDasPreferencias>("/preferencias", { method: "PATCH", body: JSON.stringify(alteracao) }),
 
-  /** O que o orquestrador receberia com esta configuração (ainda não salva). Não grava nada. */
-  previaDoPrompt: (configuracao: DadosDaConfiguracao, pastaDeTrabalho?: string, modo: ModoDoTurno = "execucao") =>
+  /**
+   * O que o orquestrador receberia com esta configuração (ainda não salva). Não grava nada.
+   * A pasta e o nome também preenchem `{{pasta}}` e `{{nome}}` das instruções.
+   */
+  previaDoPrompt: (
+    configuracao: DadosDaConfiguracao,
+    pastaDeTrabalho?: string,
+    modo: ModoDoTurno = "execucao",
+    nome?: string,
+  ) =>
     requisitar<PreviaDoPrompt>("/previa-do-prompt", {
       method: "POST",
-      body: JSON.stringify({ configuracao, modo, ...(pastaDeTrabalho ? { pastaDeTrabalho } : {}) }),
+      body: JSON.stringify({
+        configuracao,
+        modo,
+        ...(pastaDeTrabalho ? { pastaDeTrabalho } : {}),
+        ...(nome ? { nome } : {}),
+      }),
     }),
 
   /**

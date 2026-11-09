@@ -1,6 +1,11 @@
 import type { ReactNode } from "react";
 
-import type { DadosDoEsforcoHerdado, EsforcoDeRaciocinio, NivelDePermissao } from "../../shared/api/tipos";
+import type {
+  DadosDoEsforcoHerdado,
+  EsforcoDeRaciocinio,
+  NivelDePermissao,
+  PerfilDeInstrucoes,
+} from "../../shared/api/tipos";
 import { ROTULOS_DOS_ESFORCOS } from "../../shared/formatacao";
 import { Dica } from "../Dica";
 
@@ -42,6 +47,59 @@ export function Rotulo({ titulo, dica, explicacao, htmlFor, id, alinharAoTopo = 
         {explicacao}
       </Dica>
     </div>
+  );
+}
+
+/** Pergunta antes de trocar instruções já escritas pelo texto de um perfil. */
+function confirmacaoParaAplicarPerfil(nome: string): string {
+  return `Trocar as instruções deste orquestrador pelas do perfil "${nome}"? O texto atual será substituído.`;
+}
+
+/**
+ * "Aplicar perfil…": copia o texto de um perfil de instruções para o campo
+ * das instruções. Sem vínculo: editar o perfil depois não muda este campo.
+ * Com outro texto já escrito, confirma antes. Sem perfis, não aparece.
+ */
+export function SeletorDePerfil({
+  perfis,
+  textoAtual,
+  aoAplicar,
+}: {
+  perfis: readonly PerfilDeInstrucoes[];
+  textoAtual: string;
+  aoAplicar: (texto: string) => void;
+}) {
+  if (perfis.length === 0) {
+    return null;
+  }
+  return (
+    <select
+      className="select select-compacto select-do-perfil"
+      aria-label="Aplicar perfil de instruções"
+      title="Copia o texto de um perfil para as instruções. Os perfis ficam no botão Instruções da barra."
+      // Sempre no item "Aplicar perfil…": é uma ação, não uma escolha guardada.
+      value=""
+      onChange={(evento) => {
+        const perfil = perfis[Number(evento.target.value)];
+        if (perfil === undefined) {
+          return;
+        }
+        const outroTexto = textoAtual.trim() !== "" && textoAtual.trim() !== perfil.texto.trim();
+        if (outroTexto && !window.confirm(confirmacaoParaAplicarPerfil(perfil.nome))) {
+          return;
+        }
+        aoAplicar(perfil.texto);
+      }}
+    >
+      <option value="" disabled>
+        Aplicar perfil…
+      </option>
+      {perfis.map((perfil, indice) => (
+        <option key={perfil.nome} value={indice}>
+          {perfil.nome}
+        </option>
+      ))}
+    </select>
   );
 }
 

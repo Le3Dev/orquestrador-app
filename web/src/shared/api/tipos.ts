@@ -36,7 +36,18 @@ export interface DadosDaConfiguracao {
    * por padrão: aí vale o padrão global (`DadosDasPreferencias.instrucoesPadrao`), se houver.
    */
   instrucoesPersonalizadas: string;
+  /**
+   * Quais subagentes prontos (das preferências) o orquestrador recebe. Ausente
+   * (servidores e eventos anteriores à opção) vale "todos".
+   */
+  subagentesProntos?: SelecaoDeSubagentesProntos;
 }
+
+/**
+ * Os subagentes prontos que um orquestrador recebe: todos, nenhum ou só os da
+ * lista (por nome). Nomes que não existem mais nas preferências são ignorados.
+ */
+export type SelecaoDeSubagentesProntos = "todos" | "nenhum" | string[];
 
 /** Limite das instruções personalizadas e das padrão, como o servidor confere (já sem espaço sobrando). */
 export const TAMANHO_MAXIMO_DAS_INSTRUCOES = 4_000;
@@ -59,15 +70,32 @@ export interface DadosDoSubagentePronto {
 }
 
 /** Limites dos subagentes prontos, como o servidor confere. */
-export const MAXIMO_DE_SUBAGENTES_PRONTOS = 10;
+export const MAXIMO_DE_SUBAGENTES_PRONTOS = 30;
 export const TAMANHO_MAXIMO_DA_DESCRICAO_DO_SUBAGENTE = 300;
 export const TAMANHO_MAXIMO_DO_PROMPT_DO_SUBAGENTE = 4_000;
+
+/**
+ * Texto de instruções com nome. Aplicar num orquestrador copia o texto para as
+ * instruções personalizadas dele: sem vínculo, editar o perfil depois não muda
+ * quem já o usou.
+ */
+export interface PerfilDeInstrucoes {
+  nome: string;
+  /** Mesmo limite das instruções personalizadas (`TAMANHO_MAXIMO_DAS_INSTRUCOES`). */
+  texto: string;
+}
+
+/** Limites dos perfis de instruções, como o servidor confere. */
+export const MAXIMO_DE_PERFIS_DE_INSTRUCOES = 20;
+export const TAMANHO_MAXIMO_DO_NOME_DO_PERFIL = 40;
 
 /** Preferências que valem para todos os orquestradores. */
 export interface DadosDasPreferencias {
   /** Instruções para os orquestradores sem instruções próprias. */
   instrucoesPadrao: string;
   subagentesProntos: DadosDoSubagentePronto[];
+  /** Falta em servidores anteriores a eles (vale lista vazia). */
+  perfisDeInstrucoes?: PerfilDeInstrucoes[];
   /**
    * Retoma o turno sozinho quando o Claude fica em silêncio (travado) ou a API
    * falha (limite de uso, sobrecarga, rede). Ligada por padrão; falta em
@@ -129,6 +157,8 @@ export interface SinalDeVida {
 export interface DiagnosticoDoSilencio {
   situacao: "trabalhando" | "suspeito";
   resumo: string;
+  /** O servidor não vê os processos neste sistema (Windows): só avisa, não encerra nem retoma o turno sozinho. */
+  semRetomadaAutomatica?: true;
 }
 
 /** Por que o turno precisou de recuperação. */
@@ -174,6 +204,14 @@ export type ModoDoTurno = "execucao" | "planejamento";
 export type DecisaoDoPlano = "pendente" | "aprovado" | "descartado";
 export type SituacaoDoSubagente = "executando" | "concluido" | "falhou" | "cancelado";
 
+export type SituacaoDaTarefa = "pendente" | "em_andamento" | "concluida";
+
+/** Um item da lista de tarefas que o Orquestrador mantém (`TodoWrite` do Claude Code). */
+export interface TarefaDoOrquestrador {
+  texto: string;
+  situacao: SituacaoDaTarefa;
+}
+
 /**
  * Git worktree em que o Orquestrador opera. `null` quando a pasta não é um
  * repositório git (o Orquestrador não usa worktree).
@@ -216,6 +254,21 @@ export interface DadosDoConsumoDoTurno {
   parcial: boolean;
   indiceDeCusto: number;
   modeloDoPrincipal: string | null;
+}
+
+/**
+ * O consumo medido de um Orquestrador na conversa atual (`GET
+ * /consumo-dos-orquestradores`): a soma dos turnos medidos, com o principal e
+ * os Subagentes juntos em `uso`. `parcial`: algum desses turnos foi cancelado
+ * ou falhou.
+ */
+export interface ConsumoDoOrquestrador {
+  id: string;
+  nome: string;
+  turnosMedidos: number;
+  parcial: boolean;
+  uso: DadosDoUso;
+  indiceDeCusto: number;
 }
 
 /** Onde o pedido está sendo escrito: uma pergunta ao chat rápido ou um pedido de trabalho ao orquestrador. */
@@ -394,6 +447,8 @@ type EventoDeTurno =
   // normalizada: "http(s)://localhost:PORTA" e o caminho, sem a barra final solitária.
   | { tipo: "endereco_local_detectado"; url: string }
   | { tipo: "uso_da_cota"; janelas: JanelaDaCota[] }
+  // A lista de tarefas do Orquestrador (`TodoWrite`), inteira: substitui a anterior. Nunca vem vazia.
+  | { tipo: "tarefas_atualizadas"; tarefas: TarefaDoOrquestrador[] }
   // `anexos` e `modo` faltam nos eventos gravados antes de existirem imagens e o Plan Mode.
   | {
       tipo: "turno_iniciado";
@@ -438,6 +493,8 @@ type EventoDeTurno =
 export type EventoDeOrquestracao =
   | (EventoDeTurno & { turnoId: string })
   | { tipo: "configuracao_alterada"; configuracao: DadosDaConfiguracaoGravada }
+  // O usuário trocou o nome do Orquestrador (já aparado; sem `turnoId`: vale também durante um pedido).
+  | { tipo: "orquestrador_renomeado"; nome: string }
   // O usuário começou uma conversa nova (/clear): os pedidos anteriores ficam arquivados no servidor.
   // A fila de pedidos não muda: ela é do Orquestrador, não da conversa.
   | {
@@ -465,8 +522,34 @@ export interface PreferenciasDoChat {
   esforco: EsforcoDeRaciocinio;
 }
 
-/** Ação que o Claude sugere no app; só é executada quando o usuário clica. */
-export interface AcaoDoApp {
+/**
+ * Ação que o Claude sugere no app; só é executada quando o usuário clica.
+ * As mensagens gravadas antes das ações de subagente só têm `abrir_orquestrador`.
+ */
+export type AcaoDoApp = AcaoDeAbrirOrquestrador | AcaoDeCriarSubagente | AcaoDeEditarSubagente;
+
+/** Os modelos que o chat sugere para um subagente pronto: os mesmos do painel Subagentes. */
+export type ModeloDoSubagenteNoChat = "herdar" | "opus" | "sonnet" | "haiku";
+
+/** Acrescentar um subagente pronto à biblioteca (o servidor valida ao gravar). */
+export interface AcaoDeCriarSubagente {
+  tipo: "criar_subagente";
+  nome: string;
+  descricao: string;
+  prompt: string;
+  modelo: ModeloDoSubagenteNoChat;
+}
+
+/** Trocar campos de um subagente pronto existente, pelo nome; nulo fica como está. */
+export interface AcaoDeEditarSubagente {
+  tipo: "editar_subagente";
+  nome: string;
+  descricao: string | null;
+  prompt: string | null;
+  modelo: ModeloDoSubagenteNoChat | null;
+}
+
+export interface AcaoDeAbrirOrquestrador {
   tipo: "abrir_orquestrador";
   projeto: string;
   pasta: string;
@@ -662,4 +745,66 @@ export interface ConteudoDoArquivo {
   /** Bytes. */
   tamanho: number;
   linhas: number;
+}
+
+// ---------------- Modelos de canvas (item 35) ----------------
+
+/** Quantos modelos o servidor guarda, e quantos itens cada um leva. */
+export const MAXIMO_DE_MODELOS_DE_CANVAS = 50;
+export const MAXIMO_DE_ITENS_POR_MODELO = 30;
+export const TAMANHO_MAXIMO_DO_NOME_DO_MODELO = 80;
+
+/**
+ * Onde o item fica, relativo ao canto de cima à esquerda do arranjo. Sem
+ * `largura` e `altura`, a janela abre no tamanho padrão.
+ */
+interface LugarNoModelo {
+  x: number;
+  y: number;
+  largura?: number;
+  altura?: number;
+}
+
+/** Um item de um modelo de canvas: só o que serve para recriar (nunca conversa, worktree ou id). */
+export type ItemDoModelo =
+  | (LugarNoModelo & {
+      tipo: "orquestrador";
+      nome: string;
+      /** Ausente ou vazia (ex.: exportado sem caminhos): a tela pede a pasta ao recriar. */
+      pastaDeTrabalho?: string;
+      configuracao: Partial<DadosDaConfiguracao> &
+        Pick<DadosDaConfiguracao, "modeloDoOrquestrador" | "modeloDosSubagentes" | "quantidadeDeSubagentes" | "nivelDePermissao">;
+    })
+  | (LugarNoModelo & { tipo: "nota"; titulo: string; texto: string })
+  | (LugarNoModelo & { tipo: "previa"; url: string })
+  | (LugarNoModelo & {
+      tipo: "terminal";
+      /** Ausente ou vazia: a tela pede a pasta ao recriar. */
+      pasta?: string;
+      /** Só guardado e mostrado: recriar nunca o executa nem o digita. */
+      comando?: string;
+    });
+
+/** O que se salva num modelo (POST) e o que a importação devolve depois de conferir o arquivo. */
+export interface ConteudoDoModeloDeCanvas {
+  nome: string;
+  /** Um emoji. */
+  icone: string;
+  /** `#rrggbb`. */
+  cor: string;
+  itens: ItemDoModelo[];
+}
+
+export interface DadosDoModeloDeCanvas extends ConteudoDoModeloDeCanvas {
+  id: string;
+  criadoEm: string;
+  atualizadoEm: string;
+}
+
+/** O arquivo `.json` que "Exportar" baixa e "Importar" lê. */
+export interface ArquivoDoModeloDeCanvas {
+  formato: "orquestrador-de-agentes/modelo-de-canvas";
+  versao: 1;
+  exportadoEm: string;
+  modelo: ConteudoDoModeloDeCanvas;
 }

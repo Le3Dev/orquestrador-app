@@ -9,6 +9,7 @@ import { ModoDoTurno } from "../../orquestracao/ModoDoTurno";
 import { PedidoDeTurno } from "../../orquestracao/MotorDeAgentes";
 import { NivelDePermissao } from "../../orquestracao/NivelDePermissao";
 import { PastaDeTrabalho } from "../../orquestracao/PastaDeTrabalho";
+import { SelecaoDeSubagentesProntos, subagentesProntosSelecionados } from "../../orquestracao/SubagentesProntos";
 import {
   comandosProibidosDoTurno,
   configuracoesDaSessao,
@@ -364,6 +365,18 @@ describe("definicaoDosAgentes", () => {
 
     it("sem prontos, só o executor", () => {
       expect(Object.keys(definicaoDosAgentes(pedido(false, "edicao")))).toEqual(["executor"]);
+    });
+
+    it("só os prontos que a configuração do orquestrador escolhe entram nos agentes", () => {
+      const biblioteca = [revisor, { ...revisor, nome: "testador" }];
+      const comEscolha = (selecao: SelecaoDeSubagentesProntos) =>
+        Object.keys(
+          definicaoDosAgentes({ ...pedido(false, "edicao"), subagentesProntos: subagentesProntosSelecionados(biblioteca, selecao) }),
+        );
+
+      expect(comEscolha("todos").sort()).toEqual(["executor", "revisor", "testador"]);
+      expect(comEscolha("nenhum")).toEqual(["executor"]);
+      expect(comEscolha(["testador", "apagado"]).sort()).toEqual(["executor", "testador"]);
     });
 
     it("cada pronto tem as ferramentas e o esforço do executor, sem poder lançar outros agentes", () => {

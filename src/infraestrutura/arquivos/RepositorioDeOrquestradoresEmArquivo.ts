@@ -1,7 +1,15 @@
 import { appendFile, copyFile, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+import { z } from "zod";
+
+import { TIPOS_DE_IMAGEM } from "../../orquestracao/Anexo";
+import { ESFORCOS_DE_RACIOCINIO } from "../../orquestracao/EsforcoDeRaciocinio";
 import { EventoDeOrquestracao, EventoRegistrado } from "../../orquestracao/EventoDeOrquestracao";
+import { TIPOS_DE_ITEM_LIGADO } from "../../orquestracao/InstrucoesDoOrquestrador";
+import { MODELOS_CLAUDE } from "../../orquestracao/ModeloClaude";
+import { MODOS_DO_TURNO } from "../../orquestracao/ModoDoTurno";
+import { NIVEIS_DE_PERMISSAO } from "../../orquestracao/NivelDePermissao";
 import { DadosDoOrquestrador, Orquestrador } from "../../orquestracao/Orquestrador";
 import {
   ConversaArquivada,
@@ -9,8 +17,131 @@ import {
 } from "../../orquestracao/RepositorioDeOrquestradores";
 
 const ARQUIVO_DO_ORQUESTRADOR = "orquestrador.json";
+/** Para onde vai um `orquestrador.json` ilegível: fica ao lado, para consulta, e não volta a ser lido. */
+const ARQUIVO_ILEGIVEL = "orquestrador.ilegivel.json";
 const ARQUIVO_DE_EVENTOS = "eventos.jsonl";
 const PASTA_DO_HISTORICO = "historico";
+
+const dataIso = z.iso.datetime({ offset: true });
+
+/**
+ * O `orquestrador.json` como ele pode estar no disco, inclusive o gravado por
+ * versões antigas: os campos que surgiram depois são opcionais e recebem o
+ * mesmo valor que o agregado já daria à ausência deles. Chaves desconhecidas
+ * (como as opções que a ADR-28 removeu da configuração) são descartadas. As
+ * regras de cada valor (limites, combinações) seguem com o próprio agregado.
+ */
+const esquemaDoArquivo = z.object({
+  id: z.string().min(1),
+  nome: z.string(),
+  pastaDeTrabalho: z.string(),
+  sessaoId: z.string(),
+  sessaoIniciada: z.boolean(),
+  criadoEm: dataIso,
+  configuracao: z.object({
+    modeloDoOrquestrador: z.enum(MODELOS_CLAUDE),
+    modeloDosSubagentes: z.enum(MODELOS_CLAUDE),
+    quantidadeDeSubagentes: z.object({ modo: z.enum(["fixa", "automatica"]), limite: z.number() }),
+    nivelDePermissao: z.enum(NIVEIS_DE_PERMISSAO),
+    permitirCommitEPush: z.boolean().optional(),
+    esforcoDoOrquestrador: z.enum(ESFORCOS_DE_RACIOCINIO).optional(),
+    esforcoDosSubagentes: z.enum(ESFORCOS_DE_RACIOCINIO).optional(),
+    instrucoesPersonalizadas: z.string().optional(),
+    subagentesProntos: z.union([z.enum(["todos", "nenhum"]), z.array(z.string())]).optional(),
+  }),
+  turnos: z.array(
+    z.object({
+      id: z.string(),
+      texto: z.string(),
+      iniciadoEm: dataIso,
+      encerradoEm: dataIso.nullable(),
+      situacao: z.enum(["em_andamento", "concluido", "cancelado", "falhou", "interrompido"]),
+      resposta: z.string(),
+      motivoDaFalha: z.string().nullable(),
+      uso: z
+        .object({
+          duracaoMs: z.number(),
+          tokensDeEntrada: z.number(),
+          tokensDeSaida: z.number(),
+          subagentesLancados: z.number(),
+        })
+        .nullable(),
+      subagentes: z.array(
+        z.object({
+          id: z.string(),
+          descricao: z.string(),
+          situacao: z.enum(["executando", "concluido", "falhou", "cancelado"]),
+          tokens: z.number(),
+          duracaoMs: z.number(),
+          resumo: z.string(),
+        }),
+      ),
+      anexos: z
+        .array(
+          z.object({
+            id: z.string(),
+            nome: z.string(),
+            tipoDeMidia: z.enum(TIPOS_DE_IMAGEM),
+            tamanhoEmBytes: z.number(),
+            arquivo: z.string(),
+          }),
+        )
+        .default([]),
+      modo: z.enum(MODOS_DO_TURNO).default("execucao"),
+      decisaoDoPlano: z.enum(["pendente", "aprovado", "descartado"]).nullable().default(null),
+      perguntas: z
+        .array(
+          z.object({
+            pergunta: z.string(),
+            opcoes: z.array(
+              z.object({
+                rotulo: z.string(),
+                descricao: z
+                  .string()
+                  .nullish()
+                  .transform((descricao) => descricao ?? null),
+              }),
+            ),
+            multipla: z.boolean().default(false),
+          }),
+        )
+        .default([]),
+    }),
+  ),
+  worktree: z.object({ branch: z.string(), caminho: z.string(), ativo: z.boolean() }).nullable().default(null),
+  fila: z
+    .array(
+      z.object({
+        id: z.string(),
+        texto: z.string(),
+        modo: z.enum(MODOS_DO_TURNO),
+        enfileiradoEm: dataIso,
+        // Ausente nos pedidos sem itens ligados (e nos gravados antes deles).
+        itensLigados: z
+          .array(
+            z.object({
+              tipo: z.enum(TIPOS_DE_ITEM_LIGADO),
+              titulo: z.string(),
+              conteudo: z.string().optional(),
+              url: z.string().optional(),
+              caminho: z.string().optional(),
+            }),
+          )
+          .optional(),
+      }),
+    )
+    .default([]),
+  instrucoesNaConversa: z.boolean().default(false),
+  retomadaPendente: z
+    .object({
+      deTurnoId: z.string(),
+      causa: z.enum(["silencio", "limite_de_uso", "sobrecarga", "rede"]),
+      tentativa: z.number().int().min(1),
+      retomarEm: dataIso,
+    })
+    .nullable()
+    .default(null),
+});
 
 async function lerSeExistir(caminho: string): Promise<string | null> {
   try {
@@ -184,11 +315,15 @@ export class RepositorioDeOrquestradoresEmArquivo implements RepositorioDeOrques
    */
   private async carregar(id: string): Promise<void> {
     try {
-      const estado = await lerSeExistir(path.join(this.pastaDo(id), ARQUIVO_DO_ORQUESTRADOR));
+      const caminho = path.join(this.pastaDo(id), ARQUIVO_DO_ORQUESTRADOR);
+      const estado = await lerSeExistir(caminho);
       if (estado === null) {
         return;
       }
-      const orquestrador = Orquestrador.reconstituir(JSON.parse(estado) as DadosDoOrquestrador);
+      const orquestrador = await this.interpretar(caminho, estado);
+      if (orquestrador === null) {
+        return;
+      }
 
       const linhas = (await lerSeExistir(path.join(this.pastaDo(id), ARQUIVO_DE_EVENTOS))) ?? "";
       const historico: EventoRegistrado[] = [];
@@ -207,6 +342,25 @@ export class RepositorioDeOrquestradoresEmArquivo implements RepositorioDeOrques
       this.eventos.set(orquestrador.id, historico);
     } catch (erro) {
       console.error(`[repositorio] Orquestrador "${id}" ignorado: não foi possível ler o histórico.`, erro);
+    }
+  }
+
+  /**
+   * JSON quebrado ou fora do esquema: o arquivo é renomeado ao lado (nunca
+   * apagado), vira aviso no log e o orquestrador fica fora da lista.
+   */
+  private async interpretar(caminho: string, estado: string): Promise<Orquestrador | null> {
+    try {
+      const dados: DadosDoOrquestrador = esquemaDoArquivo.parse(JSON.parse(estado));
+      return Orquestrador.reconstituir(dados);
+    } catch (erro) {
+      const detalhe = erro instanceof Error ? erro.message : String(erro);
+      const ilegivel = path.join(path.dirname(caminho), ARQUIVO_ILEGIVEL);
+      await rename(caminho, ilegivel).catch(() => undefined);
+      console.warn(
+        `[repositorio] "${caminho}" ilegível (${detalhe}); guardado como "${ARQUIVO_ILEGIVEL}" e o orquestrador fica fora da lista.`,
+      );
+      return null;
     }
   }
 }

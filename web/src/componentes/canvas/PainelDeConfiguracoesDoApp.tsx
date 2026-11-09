@@ -1,33 +1,52 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { AjustesDoAplicativo } from "../../shared/hooks/useAjustesDoAplicativo";
 import { definirAutorrecuperacao, useValorDaAutorrecuperacao } from "../../shared/hooks/useAutorrecuperacao";
 import { useMenuDaBarra } from "../../shared/hooks/useMenuDaBarra";
-import { usePreferenciasDaTela } from "../../shared/hooks/usePreferenciasDaTela";
+import { type LadoDoChatFixo, usePreferenciasDaTela } from "../../shared/hooks/usePreferenciasDaTela";
 import "../../theme/preferencias-da-tela.css";
 
 const DICA_DA_AUTORRECUPERACAO = "retoma sozinho quando o Claude trava ou a API falha";
 
-/** Posição do interruptor "Autorrecuperação" na navegação por teclado: logo depois dos da Tela. */
-const INDICE_DA_AUTORRECUPERACAO = 2;
-
 /** As preferências da tela que viram interruptor na seção "Tela". */
-type ChaveDoInterruptor = "chatFixoNaEsquerda" | "visualizadorDeCodigo";
+type ChaveDoInterruptor = "chatFixoNaEsquerda" | "visualizadorDeCodigo" | "manterBixinhosAteLimpar";
 
-/** Os interruptores da seção "Tela", na ordem. */
-const INTERRUPTORES_DA_TELA: readonly { chave: ChaveDoInterruptor; rotulo: string; dica: string }[] = [
-  {
-    chave: "chatFixoNaEsquerda",
-    rotulo: "Chat fixo à esquerda",
-    dica: "O chat rápido vira uma coluna à esquerda do canvas, sempre aberta",
-  },
+/** `dicaVisivel`: a dica aparece também embaixo do rótulo, não só no title. */
+type Interruptor = { chave: ChaveDoInterruptor; rotulo: string; dica: string; dicaVisivel?: boolean };
+
+const INTERRUPTOR_DO_CHAT_FIXO: Interruptor = {
+  chave: "chatFixoNaEsquerda",
+  rotulo: "Chat fixo",
+  dica: "O chat rápido vira uma coluna ao lado do canvas, sempre aberta",
+};
+
+/** Os dois lados do chat fixo, na ordem do controle segmentado (logo abaixo do "Chat fixo"). */
+const LADOS_DO_CHAT_FIXO: readonly LadoDoChatFixo[] = ["esquerda", "direita"];
+
+/** Os interruptores da seção "Tela" depois do lado do chat, na ordem. */
+const OUTROS_INTERRUPTORES_DA_TELA: readonly Interruptor[] = [
   {
     chave: "visualizadorDeCodigo",
     rotulo: "Visualizador de código",
     dica: "mostra o botão Arquivos nos terminais",
+    dicaVisivel: true,
+  },
+  {
+    chave: "manterBixinhosAteLimpar",
+    rotulo: "Manter bixinhos até limpar à mão",
+    dica: "desligado, os que terminam saem sozinhos do canvas",
+    dicaVisivel: true,
   },
 ];
+
+/**
+ * A ordem da navegação por teclado: "Chat fixo" (0), os dois lados (1 e 2),
+ * os outros interruptores da Tela, a "Autorrecuperação" e, no desktop, os Ajustes.
+ */
+const INDICE_DO_PRIMEIRO_LADO = 1;
+const INDICE_DOS_OUTROS_INTERRUPTORES = INDICE_DO_PRIMEIRO_LADO + LADOS_DO_CHAT_FIXO.length;
+const INDICE_DA_AUTORRECUPERACAO = INDICE_DOS_OUTROS_INTERRUPTORES + OUTROS_INTERRUPTORES_DA_TELA.length;
 
 interface PropsDoPainelDeConfiguracoes {
   /** Os Ajustes do app desktop (pastas e Claude Code); quem usa mostra o `erro`. */
@@ -43,7 +62,7 @@ interface PropsDoPainelDeConfiguracoes {
 
 /**
  * O ⚙ Configurações e o painel dele, ancorado no botão: a seção "Tela" (chat
- * fixo à esquerda e visualizador de código), a seção "Orquestradores"
+ * fixo, o lado dele, visualizador de código e manter os bixinhos), a seção "Orquestradores"
  * (autorrecuperação, preferência do servidor) e, no app desktop, "Pastas e
  * Claude Code…", que abre a janela dos Ajustes. Ligar ou desligar não fecha o
  * painel (dá para mexer em vários); a navegação por teclado é a do `+ Novo ▾`.
@@ -56,7 +75,7 @@ export function PainelDeConfiguracoesDoApp({
   classeDaAncora = "",
 }: PropsDoPainelDeConfiguracoes) {
   const { preferencias, mudarPreferencias } = usePreferenciasDaTela();
-  const total = INTERRUPTORES_DA_TELA.length + 1 + (ajustes.disponivel ? 1 : 0);
+  const total = INDICE_DA_AUTORRECUPERACAO + 1 + (ajustes.disponivel ? 1 : 0);
 
   // A autorrecuperação vale para todos os orquestradores: fica no servidor, não no navegador.
   const autorrecuperacao = useValorDaAutorrecuperacao();
@@ -67,6 +86,7 @@ export function PainelDeConfiguracoesDoApp({
   const gravacoes = useRef(0);
 
   const alternar = (chave: ChaveDoInterruptor) => mudarPreferencias({ [chave]: !preferencias[chave] });
+  const escolherLado = (lado: LadoDoChatFixo) => mudarPreferencias({ ladoDoChatFixo: lado });
 
   const alternarAutorrecuperacao = () => {
     if (autorrecuperacao === null || gravando) {
@@ -93,9 +113,14 @@ export function PainelDeConfiguracoesDoApp({
   };
 
   const menu = useMenuDaBarra(total, (indice) => {
-    const item = INTERRUPTORES_DA_TELA[indice];
-    if (item !== undefined) {
-      alternar(item.chave);
+    const lado = LADOS_DO_CHAT_FIXO[indice - INDICE_DO_PRIMEIRO_LADO];
+    const outro = OUTROS_INTERRUPTORES_DA_TELA[indice - INDICE_DOS_OUTROS_INTERRUPTORES];
+    if (indice === 0) {
+      alternar(INTERRUPTOR_DO_CHAT_FIXO.chave);
+    } else if (lado !== undefined) {
+      escolherLado(lado);
+    } else if (outro !== undefined) {
+      alternar(outro.chave);
     } else if (indice === INDICE_DA_AUTORRECUPERACAO) {
       alternarAutorrecuperacao();
     } else if (ajustes.disponivel) {
@@ -161,24 +186,51 @@ export function PainelDeConfiguracoesDoApp({
             <span id={`${menu.idDoMenu}-tela`} className="rotulo-tecnico titulo-da-secao-de-configuracoes">
               Tela
             </span>
-            {INTERRUPTORES_DA_TELA.map((item, indice) => (
-              <button
-                key={item.chave}
-                ref={menu.refDoItem(indice)}
-                type="button"
-                role="menuitemcheckbox"
-                tabIndex={-1}
-                className="item-do-menu interruptor"
-                aria-checked={preferencias[item.chave]}
-                title={item.dica}
-                onClick={() => alternar(item.chave)}
-              >
-                <span className="flex min-w-0 flex-col items-start leading-tight">
-                  <span>{item.rotulo}</span>
-                  {item.chave === "visualizadorDeCodigo" && <span className="mono text-muted">{item.dica}</span>}
-                </span>
-                <span className="interruptor-trilho" aria-hidden="true" />
-              </button>
+            {[INTERRUPTOR_DO_CHAT_FIXO, ...OUTROS_INTERRUPTORES_DA_TELA].map((item, posicao) => (
+              <Fragment key={item.chave}>
+                <button
+                  ref={menu.refDoItem(posicao === 0 ? 0 : INDICE_DOS_OUTROS_INTERRUPTORES + posicao - 1)}
+                  type="button"
+                  role="menuitemcheckbox"
+                  tabIndex={-1}
+                  className="item-do-menu interruptor"
+                  aria-checked={preferencias[item.chave]}
+                  title={item.dica}
+                  onClick={() => alternar(item.chave)}
+                >
+                  <span className="flex min-w-0 flex-col items-start leading-tight">
+                    <span>{item.rotulo}</span>
+                    {item.dicaVisivel === true && <span className="mono text-muted">{item.dica}</span>}
+                  </span>
+                  <span className="interruptor-trilho" aria-hidden="true" />
+                </button>
+                {/* Logo abaixo do "Chat fixo": de que lado a coluna fica (vale ao fixar; dá para escolher antes). */}
+                {posicao === 0 && (
+                  <div
+                    role="group"
+                    aria-labelledby={`${menu.idDoMenu}-lado`}
+                    className={`lado-do-chat-fixo ${preferencias.chatFixoNaEsquerda ? "" : "lado-do-chat-solto"}`}
+                  >
+                    <span id={`${menu.idDoMenu}-lado`}>Lado</span>
+                    <div className="segmentado-do-menu">
+                      {LADOS_DO_CHAT_FIXO.map((lado, indice) => (
+                        <button
+                          key={lado}
+                          ref={menu.refDoItem(INDICE_DO_PRIMEIRO_LADO + indice)}
+                          type="button"
+                          role="menuitemradio"
+                          tabIndex={-1}
+                          aria-checked={preferencias.ladoDoChatFixo === lado}
+                          title={`O chat fixo fica à ${lado} do canvas`}
+                          onClick={() => escolherLado(lado)}
+                        >
+                          {lado}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </Fragment>
             ))}
           </div>
           <hr className="separador-do-menu" />

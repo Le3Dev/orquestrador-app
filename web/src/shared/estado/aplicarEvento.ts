@@ -12,6 +12,7 @@ import type {
   PerguntaDoApp,
   SituacaoDoSubagente,
   SituacaoDoTurno,
+  TarefaDoOrquestrador,
   UsoDoTurno,
 } from "../api/tipos";
 import { CERCA_DE_PERGUNTA, semBlocosDoApp } from "../blocosDoApp";
@@ -22,6 +23,8 @@ export interface SubagenteNaTela {
   id: string;
   descricao: string;
   tarefa: string;
+  /** "executor", "workflow" ou o nome do subagente pronto; nulo nos eventos antigos, sem o campo. */
+  papel: string | null;
   situacao: SituacaoDoSubagente;
   iniciadoEm: string;
   encerradoEm: string | null;
@@ -90,6 +93,11 @@ export interface TurnoNaTela {
   /** Ferramentas que o Orquestrador usou ele mesmo, sem Subagente (leituras, checagens, comandos curtos). */
   ferramentasDiretas: AcaoRegistrada[];
   permissoesNegadas: AcaoRegistrada[];
+  /**
+   * A lista de tarefas mais recente do Orquestrador (`TodoWrite`): cada
+   * atualização substitui a anterior. Vazia, ou ausente, sem lista.
+   */
+  tarefas?: TarefaDoOrquestrador[];
   log: LinhaDoLog[];
   /**
    * A última etapa da autorrecuperação deste turno (travou ou falhou e o app
@@ -121,6 +129,12 @@ export interface EstadoDaConversa {
   /** Quando o usuário começou a conversa atual (/clear); nulo enquanto é a primeira. */
   conversaIniciadaEm: string | null;
   /**
+   * O que o /clear deixou para trás, mostrado junto do separador da conversa
+   * nova: a worktree com as alterações da conversa anterior e o plano pendente
+   * descartado. Tudo falso enquanto é a primeira conversa.
+   */
+  avisosDaConversaNova: AvisosDaConversaNova;
+  /**
    * Pedidos que os eventos puseram na fila e ainda não tiraram, na ordem de
    * chegada. Não é a fila inteira: os pedidos enfileirados antes de um /clear
    * não estão mais no histórico. A fila da tela é `filaDePedidos`.
@@ -139,6 +153,12 @@ export interface EstadoDaConversa {
    * abre a prévia sozinha quando ele acabou de subir (não ao reler o histórico).
    */
   ultimoEnderecoDetectado: EnderecoDetectado | null;
+  /**
+   * O nome mais recente trazido por `orquestrador_renomeado`, que chega na hora;
+   * nulo sem renomeação no histórico (vale o nome do resumo, consultado a cada
+   * poucos segundos). Não muda com o /clear: o nome é do Orquestrador.
+   */
+  nome: string | null;
 }
 
 export interface EnderecoDetectado {
@@ -147,15 +167,25 @@ export interface EnderecoDetectado {
   em: string;
 }
 
+/** Os avisos do evento `conversa_limpa`. */
+export interface AvisosDaConversaNova {
+  worktreeComAlteracoes: boolean;
+  planoDescartado: boolean;
+}
+
+export const SEM_AVISOS_DA_CONVERSA_NOVA: AvisosDaConversaNova = { worktreeComAlteracoes: false, planoDescartado: false };
+
 export const ESTADO_INICIAL: EstadoDaConversa = {
   ultimaSequencia: 0,
   turnos: [],
   cota: null,
   conversaIniciadaEm: null,
+  avisosDaConversaNova: SEM_AVISOS_DA_CONVERSA_NOVA,
   enderecosLocais: [],
   ultimoEnderecoDetectado: null,
   pedidosEnfileirados: [],
   pedidosRetirados: [],
+  nome: null,
 };
 
 /**
@@ -265,6 +295,10 @@ function alteracaoDoTurno(evento: EventoRegistrado): AlteracaoDeTurno | null {
         ferramentasDiretas: [...turno.ferramentasDiretas, { ferramenta: evento.ferramenta, detalhe: evento.detalhe }],
       });
 
+    // A lista chega inteira a cada atualização: a última vale.
+    case "tarefas_atualizadas":
+      return (turno) => ({ ...turno, tarefas: evento.tarefas });
+
     case "permissao_negada":
       return (turno) => ({
         ...turno,
@@ -280,6 +314,7 @@ function alteracaoDoTurno(evento: EventoRegistrado): AlteracaoDeTurno | null {
             id: evento.subagenteId,
             descricao: evento.descricao,
             tarefa: evento.tarefa,
+            papel: evento.papel ?? null,
             situacao: "executando",
             iniciadoEm: evento.em,
             encerradoEm: null,
@@ -446,6 +481,17 @@ export function linhaDoLog(evento: EventoRegistrado, turno: TurnoNaTela): Omit<L
         tipo: "ferramenta",
         texto: atividadeDoOrquestrador(evento.ferramenta, evento.detalhe),
       };
+    // Como as ferramentas, some do histórico quando o pedido termina: o progresso fica na barra.
+    case "tarefas_atualizadas": {
+      const concluidas = evento.tarefas.filter((tarefa) => tarefa.situacao === "concluida").length;
+      const emAndamento = evento.tarefas.find((tarefa) => tarefa.situacao === "em_andamento");
+      const progresso = `tarefas: ${concluidas} de ${evento.tarefas.length} concluídas`;
+      return {
+        origem: "orquestrador",
+        tipo: "ferramenta",
+        texto: emAndamento === undefined ? progresso : `${progresso} · ${primeiraLinha(emAndamento.texto)}`,
+      };
+    }
     case "subagente_iniciado":
       return {
         origem: "orquestrador",
@@ -538,6 +584,7 @@ function novoTurno(evento: Extract<EventoRegistrado, { tipo: "turno_iniciado" }>
     subagentes: [],
     ferramentasDiretas: [],
     permissoesNegadas: [],
+    tarefas: [],
     log: [],
     recuperacao: null,
     retomada: evento.retomada ?? null,
@@ -561,6 +608,9 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
   if (evento.tipo === "configuracao_alterada") {
     return proximo;
   }
+  if (evento.tipo === "orquestrador_renomeado") {
+    return { ...proximo, nome: evento.nome };
+  }
   if (evento.tipo === "conversa_limpa") {
     // Conversa nova (/clear): os pedidos anteriores ficam arquivados no servidor
     // e saem da tela, e os servidores que eles subiram também. A cota fica: é da
@@ -569,10 +619,16 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
     // servidor: quem abrir o terminal depois não verá os eventos de antes do
     // /clear, e um terminal que reconectar depois dele pode ter perdido uma
     // retirada. Os retirados ficam, para filtrar um resumo defasado.
+    // A worktree não é tocada: a conversa nova parte das alterações da anterior,
+    // e o separador avisa (como avisa do plano pendente que se perdeu).
     return {
       ...proximo,
       turnos: [],
       conversaIniciadaEm: evento.em,
+      avisosDaConversaNova: {
+        worktreeComAlteracoes: evento.worktreeComAlteracoes === true,
+        planoDescartado: evento.planoDescartado === true,
+      },
       enderecosLocais: [],
       ultimoEnderecoDetectado: null,
       pedidosEnfileirados: [],

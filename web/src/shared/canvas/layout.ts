@@ -33,9 +33,17 @@ export function ehEscalaDaLetra(valor: unknown): valor is EscalaDaLetra {
   return ESCALAS_DA_LETRA.some((escala) => escala === valor);
 }
 
-/** Onde fica um terminal. Sem `escalaDaLetra` (layouts antigos), a letra é a normal. */
+/**
+ * Onde fica um terminal. Sem `escalaDaLetra` (layouts antigos), a letra é a
+ * normal. Sem `minimizada`, o terminal está aberto; minimizado (as bolinhas
+ * do Mac), mostra só a barra de título, e `altura` continua a do terminal aberto.
+ * `ligados`: os ids dos nós (notas, prévias e artefatos) que o usuário ligou
+ * ao terminal, na ordem em que ligou; sem o campo, nenhum.
+ */
 export interface RetanguloDoTerminal extends Retangulo {
   escalaDaLetra?: EscalaDaLetra;
+  minimizada?: boolean;
+  ligados?: string[];
 }
 
 export interface Viewport extends Ponto {
@@ -72,6 +80,35 @@ export interface RetanguloDoShell extends Retangulo {
   orquestradorId: string | null;
 }
 
+/** O que cada traço do desenho é: mão livre (caneta, marca-texto), forma de dois pontos ou texto solto. */
+export const TIPOS_DE_TRACO = ["caneta", "marca-texto", "linha", "seta", "retangulo", "texto"] as const;
+export type TipoDoTraco = (typeof TIPOS_DE_TRACO)[number];
+/** As cores do desenho, pelo nome: o CSS (`.traco-cor-*`) liga cada uma a um token do tema. */
+export const CORES_DO_DESENHO = ["laranja", "claro", "azul", "verde", "kraft", "vermelho"] as const;
+export type CorDoDesenho = (typeof CORES_DO_DESENHO)[number];
+/** As espessuras do traço, em pontos do canvas (crescem com o zoom, como as janelas). */
+export const ESPESSURAS_DO_DESENHO = [2, 3, 6] as const;
+export type EspessuraDoDesenho = (typeof ESPESSURAS_DO_DESENHO)[number];
+/** Mais pontos que isso num traço de mão livre não vem de um rabisco: o traço salvo é descartado. */
+export const MAXIMO_DE_PONTOS_NO_TRACO = 5000;
+/** O texto solto mais longo que o desenho guarda. */
+export const MAXIMO_DE_CARACTERES_NO_TEXTO = 500;
+
+/**
+ * Um traço do desenho sobre o canvas, em coordenadas do canvas (acompanha o
+ * zoom e o arraste). `pontos`: na mão livre, o caminho já simplificado; na
+ * linha, na seta e no retângulo, o começo e o fim (cantos opostos, no
+ * retângulo); no texto, o canto superior esquerdo, com o `texto`.
+ */
+export interface TracoDoDesenho {
+  id: string;
+  tipo: TipoDoTraco;
+  cor: CorDoDesenho;
+  espessura: EspessuraDoDesenho;
+  pontos: Ponto[];
+  texto?: string;
+}
+
 export interface LayoutDoCanvas {
   /** Terminais abertos no canvas, por id do Orquestrador. */
   terminais: Record<string, RetanguloDoTerminal>;
@@ -88,6 +125,13 @@ export interface LayoutDoCanvas {
   /** Terminais de shell no canvas, pelo id criado na tela. Layouts gravados antes deles não têm o campo: valem como nenhum. */
   shells: Record<string, RetanguloDoShell>;
   viewport: Viewport | null;
+  /**
+   * Os traços do desenho, na ordem em que foram feitos. Sem o campo ao ler,
+   * nenhum (layouts antigos). Ao gravar sem o campo (o layout das janelas,
+   * `layoutDosNos`), o desenho já salvo fica como está: quem grava o desenho
+   * é `salvarDesenho`.
+   */
+  desenho?: TracoDoDesenho[];
 }
 
 /**
@@ -133,8 +177,14 @@ const NOTAS_POR_COLUNA = 4;
 export const MARGEM_DOS_BIXINHOS = 24;
 /** Quantas vezes, no máximo, o grupo desce procurando um lugar livre abaixo do terminal. */
 const TENTATIVAS_DESCENDO = 50;
+/** Folga entre uma janela aberta numa área livre e o que já está no canvas (`posicaoLivrePerto`). */
+const MARGEM_DA_AREA_LIVRE = 40;
+/** Colunas (à direita) e fileiras (abaixo) que `posicaoLivrePerto` testa antes de abrir abaixo de tudo. */
+const PASSOS_DA_VARREDURA = 6;
 
 const CHAVE = "orquestrador-agentes:canvas:v1";
+/** Os nós que se ligam a um terminal (`ligados`), pelo prefixo do id: notas, prévias e artefatos. */
+const PREFIXOS_DOS_ITENS_LIGAVEIS = ["nota:", "previa:", "artefato:"] as const;
 const CHAVE_DOS_BIXINHOS_LIMPOS = `${CHAVE}:bixinhos-limpos`;
 
 function ehNumero(valor: unknown): valor is number {
@@ -250,7 +300,24 @@ function interpretarRetangulos(grupo: unknown): Record<string, Retangulo> {
   return validos;
 }
 
-/** Os terminais válidos do layout salvo; um tamanho da letra fora das opções vale como o normal (sem o campo). */
+/** Os itens ligados válidos de um terminal salvo: ids de nota, prévia ou artefato, sem repetição. */
+function interpretarLigados(ligados: unknown): string[] {
+  if (!Array.isArray(ligados)) {
+    return [];
+  }
+  const validos = ligados.filter(
+    (id): id is string =>
+      typeof id === "string" && PREFIXOS_DOS_ITENS_LIGAVEIS.some((prefixo) => id.startsWith(prefixo) && id.length > prefixo.length),
+  );
+  return [...new Set(validos)];
+}
+
+/**
+ * Os terminais válidos do layout salvo; um tamanho da letra fora das opções
+ * vale como o normal, e sem `minimizada: true` o terminal fica aberto (os dois
+ * sem o campo, como nos layouts antigos). Sem `ligados` (ou só com ids
+ * inválidos), o terminal fica sem itens ligados, e o campo nem aparece.
+ */
 function interpretarTerminais(terminais: unknown): Record<string, RetanguloDoTerminal> {
   const validos: Record<string, RetanguloDoTerminal> = {};
   if (typeof terminais !== "object" || terminais === null) {
@@ -259,14 +326,87 @@ function interpretarTerminais(terminais: unknown): Record<string, RetanguloDoTer
   for (const [id, retangulo] of Object.entries(terminais)) {
     if (ehRetangulo(retangulo)) {
       const { x, y, largura, altura } = retangulo;
-      const { escalaDaLetra } = retangulo as { escalaDaLetra?: unknown };
-      validos[id] =
-        ehEscalaDaLetra(escalaDaLetra) && escalaDaLetra !== ESCALA_DA_LETRA_PADRAO
-          ? { x, y, largura, altura, escalaDaLetra }
-          : { x, y, largura, altura };
+      const { escalaDaLetra, minimizada } = retangulo as { escalaDaLetra?: unknown; minimizada?: unknown };
+      const ligados = interpretarLigados((retangulo as { ligados?: unknown }).ligados);
+      validos[id] = {
+        x,
+        y,
+        largura,
+        altura,
+        ...(ehEscalaDaLetra(escalaDaLetra) && escalaDaLetra !== ESCALA_DA_LETRA_PADRAO ? { escalaDaLetra } : {}),
+        ...(minimizada === true ? { minimizada: true } : {}),
+        ...(ligados.length > 0 ? { ligados } : {}),
+      };
     }
   }
   return validos;
+}
+
+function ehPonto(valor: unknown): valor is Ponto {
+  if (typeof valor !== "object" || valor === null) {
+    return false;
+  }
+  const { x, y } = valor as Record<string, unknown>;
+  return ehNumero(x) && ehNumero(y);
+}
+
+/** Quantos pontos cada tipo de traço precisa: a mão livre, de um ao máximo; as formas, dois; o texto, um. */
+function quantidadeDePontosValida(tipo: TipoDoTraco, quantidade: number): boolean {
+  switch (tipo) {
+    case "caneta":
+    case "marca-texto":
+      return quantidade >= 1 && quantidade <= MAXIMO_DE_PONTOS_NO_TRACO;
+    case "linha":
+    case "seta":
+    case "retangulo":
+      return quantidade === 2;
+    case "texto":
+      return quantidade === 1;
+  }
+}
+
+/** Um traço salvo, só com os campos dele; nulo se algo estiver fora do esperado. */
+function interpretarTraco(valor: unknown): TracoDoDesenho | null {
+  if (typeof valor !== "object" || valor === null) {
+    return null;
+  }
+  const { id, tipo, cor, espessura, pontos, texto } = valor as Record<string, unknown>;
+  const tipoValido = TIPOS_DE_TRACO.find((candidato) => candidato === tipo);
+  const corValida = CORES_DO_DESENHO.find((candidata) => candidata === cor);
+  const espessuraValida = ESPESSURAS_DO_DESENHO.find((candidata) => candidata === espessura);
+  if (
+    typeof id !== "string" ||
+    id === "" ||
+    tipoValido === undefined ||
+    corValida === undefined ||
+    espessuraValida === undefined ||
+    !Array.isArray(pontos) ||
+    !pontos.every(ehPonto) ||
+    !quantidadeDePontosValida(tipoValido, pontos.length)
+  ) {
+    return null;
+  }
+  const traco: TracoDoDesenho = {
+    id,
+    tipo: tipoValido,
+    cor: corValida,
+    espessura: espessuraValida,
+    pontos: pontos.map(({ x, y }) => ({ x, y })),
+  };
+  if (tipoValido !== "texto") {
+    return traco;
+  }
+  return typeof texto === "string" && texto.trim() !== "" && texto.length <= MAXIMO_DE_CARACTERES_NO_TEXTO
+    ? { ...traco, texto }
+    : null;
+}
+
+/** Os traços válidos do desenho salvo, na ordem; o traço corrompido sai, os outros ficam. */
+function interpretarDesenho(desenho: unknown): TracoDoDesenho[] {
+  if (!Array.isArray(desenho)) {
+    return [];
+  }
+  return desenho.map(interpretarTraco).filter((traco): traco is TracoDoDesenho => traco !== null);
 }
 
 function layoutVazio(): LayoutDoCanvas {
@@ -283,7 +423,8 @@ export function interpretarLayout(texto: string | null): LayoutDoCanvas {
     if (typeof salvo !== "object" || salvo === null) {
       return layoutVazio();
     }
-    const { terminais, notas, artefatos, previas, shells, viewport } = salvo as Record<string, unknown>;
+    const { terminais, notas, artefatos, previas, shells, viewport, desenho } = salvo as Record<string, unknown>;
+    const tracos = interpretarDesenho(desenho);
     return {
       terminais: interpretarTerminais(terminais),
       notas: interpretarNotas(notas),
@@ -291,6 +432,8 @@ export function interpretarLayout(texto: string | null): LayoutDoCanvas {
       previas: interpretarPrevias(previas),
       shells: interpretarShells(shells),
       viewport: ehViewport(viewport) ? viewport : null,
+      // Sem traços, sem o campo, como nos layouts antigos.
+      ...(tracos.length > 0 ? { desenho: tracos } : {}),
     };
   } catch {
     return layoutVazio();
@@ -305,11 +448,37 @@ export function lerLayout(): LayoutDoCanvas {
   }
 }
 
+/**
+ * Grava o layout. Sem o campo `desenho` (o layout das janelas, gravado a cada
+ * arraste), mantém os traços que já estavam salvos; sem traços, o campo nem vai.
+ */
 export function salvarLayout(layout: LayoutDoCanvas): void {
   try {
-    localStorage.setItem(CHAVE, JSON.stringify(layout));
+    const { terminais, notas, artefatos, previas, shells, viewport } = layout;
+    const desenho = layout.desenho ?? interpretarLayout(localStorage.getItem(CHAVE)).desenho ?? [];
+    localStorage.setItem(
+      CHAVE,
+      JSON.stringify({
+        terminais,
+        notas,
+        artefatos,
+        previas,
+        shells,
+        viewport,
+        ...(desenho.length > 0 ? { desenho } : {}),
+      }),
+    );
   } catch {
     // Sem armazenamento: o canvas só não é lembrado no próximo acesso.
+  }
+}
+
+/** Grava os traços do desenho junto do layout salvo, sem mexer nas janelas nem na câmera. */
+export function salvarDesenho(desenho: readonly TracoDoDesenho[]): void {
+  try {
+    salvarLayout({ ...interpretarLayout(localStorage.getItem(CHAVE)), desenho: [...desenho] });
+  } catch {
+    // Sem armazenamento: o desenho só não é lembrado no próximo acesso.
   }
 }
 
@@ -482,6 +651,43 @@ export function posicaoParaNovoTerminal(
 }
 
 /**
+ * A primeira área livre para uma janela do tamanho dado, perto de `inicio`
+ * (onde ela abriria, ex.: centralizada na vista): o próprio `inicio` se nada
+ * estiver no caminho (com a folga de `MARGEM_DA_AREA_LIVRE`); senão, varre à
+ * direita e depois as fileiras abaixo, em passos do tamanho da janela mais a
+ * folga. Sem lugar na varredura, abre logo abaixo de tudo, alinhada a
+ * `inicio`. `obstaculos` em coordenadas absolutas (janelas e bixinhos).
+ */
+export function posicaoLivrePerto(
+  inicio: Ponto,
+  tamanho: { largura: number; altura: number },
+  obstaculos: readonly Retangulo[],
+): Ponto {
+  const comFolga = (ponto: Ponto): Retangulo => ({
+    x: ponto.x - MARGEM_DA_AREA_LIVRE,
+    y: ponto.y - MARGEM_DA_AREA_LIVRE,
+    largura: tamanho.largura + 2 * MARGEM_DA_AREA_LIVRE,
+    altura: tamanho.altura + 2 * MARGEM_DA_AREA_LIVRE,
+  });
+  const livre = (ponto: Ponto): boolean => !obstaculos.some((obstaculo) => sobrepoe(comFolga(ponto), obstaculo));
+  const arredondar = ({ x, y }: Ponto): Ponto => ({ x: Math.round(x), y: Math.round(y) });
+
+  for (let fileira = 0; fileira < PASSOS_DA_VARREDURA; fileira++) {
+    for (let coluna = 0; coluna < PASSOS_DA_VARREDURA; coluna++) {
+      const candidato = {
+        x: inicio.x + coluna * (tamanho.largura + MARGEM_DA_AREA_LIVRE),
+        y: inicio.y + fileira * (tamanho.altura + MARGEM_DA_AREA_LIVRE),
+      };
+      if (livre(candidato)) {
+        return arredondar(candidato);
+      }
+    }
+  }
+  const base = Math.max(...obstaculos.map((obstaculo) => obstaculo.y + obstaculo.altura));
+  return arredondar({ x: inicio.x, y: base + MARGEM_DA_AREA_LIVRE });
+}
+
+/**
  * Onde abrir a prévia de um terminal: à direita dele, com o topo alinhado; se
  * algo estiver no caminho, à esquerda, abaixo ou acima; e, sem nenhum lugar
  * livre, à direita mesmo. `terminal` e `obstaculos` em coordenadas absolutas.
@@ -596,4 +802,237 @@ export function organizarComNotas(
     }
   }
   return posicoes;
+}
+
+/** Uma janela do canvas com o lugar que ocupa: o que as ações do grupo (alinhar, distribuir, lado a lado) recebem. */
+export interface JanelaNoCanvas extends Retangulo {
+  id: string;
+}
+
+/** Os lados e os centros pelos quais `alinharJanelas` alinha o grupo. */
+export type Alinhamento = "esquerda" | "centro" | "direita" | "topo" | "meio" | "base";
+/** O eixo em que `distribuirJanelas` reparte o espaço. */
+export type EixoDaDistribuicao = "horizontal" | "vertical";
+
+/**
+ * Folga entre as janelas que a barra do grupo organiza: lado a lado, o vão
+ * mínimo do distribuir e o desvio do alinhar quando duas cairiam uma sobre a outra.
+ */
+export const MARGEM_DO_LADO_A_LADO = 40;
+
+/** O retângulo que envolve todas as janelas (nulo sem nenhuma). */
+function contornoDasJanelas(janelas: readonly Retangulo[]): Retangulo | null {
+  if (janelas.length === 0) {
+    return null;
+  }
+  const x = Math.min(...janelas.map((janela) => janela.x));
+  const y = Math.min(...janelas.map((janela) => janela.y));
+  return {
+    x,
+    y,
+    largura: Math.max(...janelas.map((janela) => janela.x + janela.largura)) - x,
+    altura: Math.max(...janelas.map((janela) => janela.y + janela.altura)) - y,
+  };
+}
+
+/** As janelas nas posições dadas (as sem posição ficam onde estão). */
+function nasPosicoes(janelas: readonly JanelaNoCanvas[], posicoes: Readonly<Record<string, Ponto>>): JanelaNoCanvas[] {
+  return janelas.map((janela) => ({ ...janela, ...posicoes[janela.id] }));
+}
+
+/**
+ * Tira as janelas de cima umas das outras andando só no eixo dado (`y` desce,
+ * `x` vai para a direita): na ordem em que estavam nesse eixo (empate: a
+ * ordem no outro eixo), cada uma que
+ * cairia sobre uma já acomodada passa para logo depois dela, com `margem`. As
+ * que não colidem ficam exatamente onde estão.
+ */
+function semSobreporNoEixo(
+  janelas: readonly JanelaNoCanvas[],
+  posicoes: Readonly<Record<string, Ponto>>,
+  eixo: "x" | "y",
+  margem: number,
+): Record<string, Ponto> {
+  const outroEixo = eixo === "x" ? "y" : "x";
+  // Empatadas no eixo (ex.: a mesma coluna), vai antes a que vinha antes no outro.
+  const ordenadas = [...janelas].sort(
+    (a, b) => a[eixo] - b[eixo] || a[outroEixo] - b[outroEixo] || a.id.localeCompare(b.id),
+  );
+  const acomodadas: Retangulo[] = [];
+  const resultado: Record<string, Ponto> = { ...posicoes };
+  const medida = eixo === "x" ? "largura" : "altura";
+  for (const janela of ordenadas) {
+    const lugar: JanelaNoCanvas = { ...janela, ...posicoes[janela.id] };
+    // Cada passo leva a janela para depois da mais distante que ela cobre; só avança, então termina.
+    let cobertas = acomodadas.filter((outra) => sobrepoe(lugar, outra));
+    while (cobertas.length > 0) {
+      lugar[eixo] = Math.max(...cobertas.map((outra) => outra[eixo] + outra[medida])) + margem;
+      cobertas = acomodadas.filter((outra) => sobrepoe(lugar, outra));
+    }
+    acomodadas.push(lugar);
+    resultado[janela.id] = { x: Math.round(lugar.x), y: Math.round(lugar.y) };
+  }
+  return resultado;
+}
+
+/**
+ * Se alguma janela do grupo, nas posições novas, cair sobre uma das `outras`
+ * (as telas fora da seleção), o grupo inteiro vai para a área livre mais
+ * perto (`posicaoLivrePerto`, a partir do canto do grupo), sem mudar o
+ * arranjo entre elas. Sem colisão, as posições ficam como estão.
+ */
+function foraDasOutras(
+  janelas: readonly JanelaNoCanvas[],
+  posicoes: Record<string, Ponto>,
+  outras: readonly Retangulo[],
+): Record<string, Ponto> {
+  const movidas = nasPosicoes(janelas, posicoes);
+  const contorno = contornoDasJanelas(movidas);
+  if (contorno === null || !movidas.some((janela) => outras.some((outra) => sobrepoe(janela, outra)))) {
+    return posicoes;
+  }
+  const destino = posicaoLivrePerto(contorno, contorno, outras);
+  const dx = destino.x - contorno.x;
+  const dy = destino.y - contorno.y;
+  return Object.fromEntries(
+    movidas.map((janela) => [janela.id, { x: Math.round(janela.x + dx), y: Math.round(janela.y + dy) }]),
+  );
+}
+
+/**
+ * Alinha as janelas pelo contorno do grupo, como num editor de design: à
+ * esquerda, ao centro ou à direita (só muda o x); ao topo, ao meio ou à base
+ * (só muda o y). Duas que cairiam uma sobre a outra (ex.: alinhar ao topo
+ * janelas empilhadas na mesma coluna) se afastam o mínimo no outro eixo, com
+ * `MARGEM_DO_LADO_A_LADO`; e, se o grupo cair sobre uma das `outras` (as telas
+ * fora da seleção), vai inteiro para a área livre mais perto. Devolve a
+ * posição nova de cada uma, arredondada.
+ */
+export function alinharJanelas(
+  janelas: readonly JanelaNoCanvas[],
+  como: Alinhamento,
+  outras: readonly Retangulo[] = [],
+): Record<string, Ponto> {
+  const contorno = contornoDasJanelas(janelas);
+  const posicoes: Record<string, Ponto> = {};
+  if (contorno === null) {
+    return posicoes;
+  }
+  const direita = contorno.x + contorno.largura;
+  const base = contorno.y + contorno.altura;
+  for (const janela of janelas) {
+    const x =
+      como === "esquerda"
+        ? contorno.x
+        : como === "direita"
+          ? direita - janela.largura
+          : como === "centro"
+            ? contorno.x + (contorno.largura - janela.largura) / 2
+            : janela.x;
+    const y =
+      como === "topo"
+        ? contorno.y
+        : como === "base"
+          ? base - janela.altura
+          : como === "meio"
+            ? contorno.y + (contorno.altura - janela.altura) / 2
+            : janela.y;
+    posicoes[janela.id] = { x: Math.round(x), y: Math.round(y) };
+  }
+  // Alinhar na horizontal (muda o x) desvia no y; na vertical, no x.
+  const desvio = como === "esquerda" || como === "centro" || como === "direita" ? "y" : "x";
+  return foraDasOutras(janelas, semSobreporNoEixo(janelas, posicoes, desvio, MARGEM_DO_LADO_A_LADO), outras);
+}
+
+/**
+ * Reparte o espaço do grupo num eixo: a primeira e a última janela (na ordem
+ * do eixo) ficam nas pontas do contorno e as do meio ganham o mesmo vão entre
+ * vizinhas. Se o vão ficaria menor que `MARGEM_DO_LADO_A_LADO` (ou negativo,
+ * quando as medidas somam mais que o contorno), vale a margem, e o grupo
+ * cresce a partir da primeira. O outro eixo não muda; se o grupo cair sobre
+ * uma das `outras`, vai inteiro para a área livre mais perto. Com menos de
+ * três janelas, nada se move.
+ */
+export function distribuirJanelas(
+  janelas: readonly JanelaNoCanvas[],
+  eixo: EixoDaDistribuicao,
+  outras: readonly Retangulo[] = [],
+): Record<string, Ponto> {
+  const posicoes: Record<string, Ponto> = Object.fromEntries(
+    janelas.map((janela) => [janela.id, { x: janela.x, y: janela.y }]),
+  );
+  const contorno = contornoDasJanelas(janelas);
+  if (contorno === null || janelas.length < 3) {
+    return posicoes;
+  }
+  const horizontal = eixo === "horizontal";
+  const inicio = (janela: Retangulo): number => (horizontal ? janela.x : janela.y);
+  const medida = (janela: Retangulo): number => (horizontal ? janela.largura : janela.altura);
+  const ordenadas = [...janelas].sort((a, b) => inicio(a) - inicio(b) || a.id.localeCompare(b.id));
+  const total = horizontal ? contorno.largura : contorno.altura;
+  const vao = Math.max(
+    MARGEM_DO_LADO_A_LADO,
+    (total - ordenadas.reduce((soma, janela) => soma + medida(janela), 0)) / (ordenadas.length - 1),
+  );
+  let cursor = horizontal ? contorno.x : contorno.y;
+  for (const janela of ordenadas) {
+    const lugar = Math.round(cursor);
+    posicoes[janela.id] = horizontal ? { x: lugar, y: janela.y } : { x: janela.x, y: lugar };
+    cursor += medida(janela) + vao;
+  }
+  return foraDasOutras(janelas, posicoes, outras);
+}
+
+/**
+ * As janelas na ordem de leitura: em faixas de cima para baixo (uma janela
+ * que começa antes da metade da primeira da faixa ainda é da mesma faixa) e,
+ * em cada faixa, da esquerda para a direita.
+ */
+function emOrdemDeLeitura(janelas: readonly JanelaNoCanvas[]): JanelaNoCanvas[] {
+  const porTopo = [...janelas].sort((a, b) => a.y - b.y || a.x - b.x || a.id.localeCompare(b.id));
+  const faixas: JanelaNoCanvas[][] = [];
+  for (const janela of porTopo) {
+    const faixa = faixas.at(-1);
+    const primeira = faixa?.[0];
+    if (faixa !== undefined && primeira !== undefined && janela.y < primeira.y + primeira.altura / 2) {
+      faixa.push(janela);
+    } else {
+      faixas.push([janela]);
+    }
+  }
+  return faixas.flatMap((faixa) => faixa.sort((a, b) => a.x - b.x || a.id.localeCompare(b.id)));
+}
+
+/**
+ * "Lado a lado" da barra do grupo: as janelas numa grade simples a partir do
+ * canto superior esquerdo do grupo, na ordem de leitura atual, com
+ * `MARGEM_DO_LADO_A_LADO` entre elas. Até três ficam numa fileira só; mais
+ * que isso, a grade é quase quadrada (4 viram 2 × 2; 5 a 9, três por
+ * fileira). Cada fileira tem a altura da janela mais alta dela. Se a grade
+ * cair sobre uma das `outras` (as telas fora da seleção), vai inteira para a
+ * área livre mais perto.
+ */
+export function janelasLadoALado(
+  janelas: readonly JanelaNoCanvas[],
+  margem: number = MARGEM_DO_LADO_A_LADO,
+  outras: readonly Retangulo[] = [],
+): Record<string, Ponto> {
+  const posicoes: Record<string, Ponto> = {};
+  const contorno = contornoDasJanelas(janelas);
+  if (contorno === null) {
+    return posicoes;
+  }
+  const colunas = janelas.length <= 3 ? janelas.length : Math.ceil(Math.sqrt(janelas.length));
+  const ordenadas = emOrdemDeLeitura(janelas);
+  let y = contorno.y;
+  for (let inicio = 0; inicio < ordenadas.length; inicio += colunas) {
+    const fileira = ordenadas.slice(inicio, inicio + colunas);
+    let x = contorno.x;
+    for (const janela of fileira) {
+      posicoes[janela.id] = { x: Math.round(x), y: Math.round(y) };
+      x += janela.largura + margem;
+    }
+    y += Math.max(...fileira.map((janela) => janela.altura)) + margem;
+  }
+  return foraDasOutras(janelas, posicoes, outras);
 }

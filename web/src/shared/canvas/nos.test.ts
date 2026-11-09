@@ -4,26 +4,38 @@ import {
   arestasDasPrevias,
   arestasDosBixinhos,
   bixinhosParaLimpar,
+  comPosicoes,
+  ehFechavelEmGrupo,
   ehNota,
   idDoBixinho,
   idDoNoDaNota,
+  janelaVisivel,
   ladoDoBixinho,
   layoutDosNos,
   limparBixinhos,
   mesmasLigacoes,
   minimizarOuRestaurar,
+  minimizarOuRestaurarTelas,
   type NoBixinho,
   type NoDoCanvas,
   novaNota,
   novaPrevia,
+  novoNoDeArtefato,
+  novoShell,
   novoTerminal,
+  outrasTelas,
   posicaoDaPreviaDoTerminal,
+  posicaoDoTerminalNovo,
   reacomodarBixinhos,
   reaproveitarArestas,
+  resumirGrupo,
+  selecionarTodasAsTelas,
+  semBixinhosNaSelecao,
   semTerminal,
   sincronizarBixinhos,
   sincronizarNotas,
   subagentesVisiveis,
+  telasSelecionadas,
 } from "./nos";
 import { ALTURA_DA_NOTA_MINIMIZADA, type BixinhosLimpos, type Retangulo, sobrepoe, TAMANHO_DO_BIXINHO } from "./layout";
 
@@ -293,6 +305,23 @@ describe("arestasDosBixinhos", () => {
     ]);
   });
 
+  it("a linha do bixinho saindo ganha a classe e o dado que a recolhem; as outras não mudam", () => {
+    const nos = sincronizarBixinhos([terminal], conversas);
+    const antes = arestasDosBixinhos(nos, conversas);
+    const saindo = arestasDosBixinhos(nos, conversas, new Set([idDoBixinho("o1", "s1")]));
+
+    expect(saindo[0]).toMatchObject({
+      className: "aresta-concluido aresta-bixinho-saindo",
+      data: { situacao: "concluido", saindo: true },
+    });
+    expect(saindo[1]).toEqual(antes[1]);
+    expect(antes[0]?.data).not.toHaveProperty("saindo");
+    // A troca chega ao React Flow: não reaproveita a linha de antes.
+    const reaproveitadas = reaproveitarArestas(antes, saindo);
+    expect(reaproveitadas[0]).toBe(saindo[0]);
+    expect(reaproveitadas[1]).toBe(antes[1]);
+  });
+
   it("liga os lados voltados um para o outro, bixinho a bixinho", () => {
     const nos = comBixinhoEm(comBixinhoEm(sincronizarBixinhos([terminal], conversas), "s1", 225, -250), "s2", 680, 0);
 
@@ -552,6 +581,22 @@ describe("limparBixinhos", () => {
     expect(limparBixinhos(s2Terminou, primeira)).toEqual({ turnoId: "t1", subagentes: ["s1", "s2"] });
   });
 
+  it("com `somente`, limpa só os parados desses Subagentes (a saída sozinha de quem terminou)", () => {
+    const s2Terminou = depois(doisSubagentes, {
+      tipo: "subagente_concluido",
+      turnoId: "t1",
+      subagenteId: "s2",
+      situacao: "falhou",
+      resumo: "",
+      tokens: 1,
+      duracaoMs: 1,
+    });
+
+    expect(limparBixinhos(s2Terminou, undefined, new Set(["s1"]))).toEqual({ turnoId: "t1", subagentes: ["s1"] });
+    // Pedir um que ainda executa (ou que não existe) não limpa nada.
+    expect(limparBixinhos(doisSubagentes, undefined, new Set(["s2", "s9"]))).toBeNull();
+  });
+
   it("não há o que limpar quando todos executam ou já foram limpos", () => {
     const soTrabalhando = conversa([
       { tipo: "turno_iniciado", turnoId: "t1", texto: "analise", configuracao },
@@ -688,5 +733,164 @@ describe("prévias no canvas", () => {
       sobrepoe({ ...(posicao ?? { x: 0, y: 0 }), largura: 720, altura: 520 }, { x: 660, y: 0, largura: 600, altura: 500 }),
     ).toBe(false);
     expect(posicaoDaPreviaDoTerminal([vizinho], "o1", { largura: 720, altura: 520 })).toBeNull();
+  });
+});
+
+describe("posicaoDoTerminalNovo", () => {
+  const tamanho = { largura: 600, altura: 520 };
+  const inicio = { x: 1000, y: 500 };
+  const ocupa = (no: NoDoCanvas): Retangulo => retanguloDe(no);
+  const cobre = (posicao: { x: number; y: number }, retangulos: readonly Retangulo[]) =>
+    retangulos.some((retangulo) => sobrepoe({ ...posicao, ...tamanho }, retangulo));
+
+  it("sem nós no canvas, abre no lugar de partida", () => {
+    expect(posicaoDoTerminalNovo([], "o9", inicio, tamanho)).toEqual(inicio);
+  });
+
+  it("com terminal, nota e prévia ocupando a vista, abre numa área livre sem cobrir nenhum", () => {
+    const naVista = novoTerminal("o1", { x: 1000, y: 500 }, 600, 500);
+    const nota = novaNota("n1", { x: 1640, y: 500 });
+    const previa = novaPrevia("p1", { x: 2000, y: 500 }, { url: "", orquestradorId: null });
+    const nos: NoDoCanvas[] = [naVista, nota, previa];
+
+    const posicao = posicaoDoTerminalNovo(nos, "o9", inicio, tamanho);
+
+    expect(posicao).not.toBeNull();
+    expect(cobre(posicao ?? inicio, nos.map(ocupa))).toBe(false);
+    expect(posicao?.y).toBe(inicio.y);
+  });
+
+  it("também não cobre os bixinhos de outro terminal", () => {
+    // O terminal fica acima da vista; os bixinhos dele descem até o lugar de partida.
+    const acima = novoTerminal("o1", { x: 1000, y: -100 }, 600, 500);
+    const bixinho = bixinhoEm(100, 620);
+    const nos: NoDoCanvas[] = [acima, bixinho];
+
+    const posicao = posicaoDoTerminalNovo(nos, "o9", inicio, tamanho);
+
+    expect(posicao).not.toEqual(inicio);
+    expect(algumPorCima(bixinhosNoCanvas(nos), [{ ...(posicao ?? inicio), ...tamanho }])).toBe(false);
+  });
+
+  it("com a tela do orquestrador já no canvas, não abre outra: nulo (só foca)", () => {
+    const aberto = novoTerminal("o9", { x: -2000, y: -2000 }, 600, 500);
+
+    expect(posicaoDoTerminalNovo([aberto], "o9", inicio, tamanho)).toBeNull();
+  });
+});
+
+describe("seleção e ações do grupo", () => {
+  const selecionado = <T extends NoDoCanvas>(no: T): T => ({ ...no, selected: true });
+  const terminal = novoTerminal("o1", { x: 0, y: 0 }, 600, 500);
+  const nota = novaNota("n1", { x: 700, y: 0 });
+  const previa = novaPrevia("p1", { x: 0, y: 700 }, { url: "", orquestradorId: null });
+  const artefato = novoNoDeArtefato("a1", { x: 1200, y: 0 });
+  const shell = novoShell("s1", { x: 1200, y: 700 }, { terminalId: "t1", pasta: "/p", orquestradorId: null });
+  const rascunho: NoDoCanvas = { id: "rascunho:1", type: "rascunho", position: { x: 2000, y: 0 }, width: 760, height: 720, data: {} };
+
+  it("as telas selecionadas deixam os bixinhos de fora", () => {
+    const nos: NoDoCanvas[] = [selecionado(terminal), selecionado(bixinhoEm(0, 600)), nota, selecionado(previa)];
+
+    expect(telasSelecionadas(nos).map((no) => no.id)).toEqual(["o1", previa.id]);
+  });
+
+  it("o lugar visível do terminal minimizado é só a barra; o aberto, o tamanho dele", () => {
+    const minimizado = minimizarOuRestaurar(terminal);
+
+    expect(janelaVisivel(terminal)).toEqual({ id: "o1", x: 0, y: 0, largura: 600, altura: 500 });
+    expect(janelaVisivel(minimizado)).toEqual({ id: "o1", x: 0, y: 0, largura: 600, altura: ALTURA_DA_NOTA_MINIMIZADA });
+  });
+
+  it("o lugar visível usa o tamanho medido pelo React Flow quando a tela desenhada é maior que a definida", () => {
+    const esticada: NoDoCanvas = { ...nota, measured: { width: 360, height: 410 } };
+    const medidaMenor: NoDoCanvas = { ...nota, measured: { width: 0, height: 0 } };
+
+    expect(janelaVisivel(esticada)).toMatchObject({ largura: 360, altura: 410 });
+    expect(janelaVisivel(medidaMenor)).toMatchObject({ largura: 320, altura: 280 });
+  });
+
+  it("as outras telas são as de fora da seleção, como aparecem, sem os bixinhos", () => {
+    const minimizado = minimizarOuRestaurar(terminal);
+    const nos: NoDoCanvas[] = [minimizado, bixinhoEm(0, 600), selecionado(nota), artefato];
+
+    expect(outrasTelas(nos)).toEqual([
+      { id: "o1", x: 0, y: 0, largura: 600, altura: ALTURA_DA_NOTA_MINIMIZADA },
+      { id: artefato.id, x: 1200, y: 0, largura: 640, altura: 480 },
+    ]);
+  });
+
+  it("comPosicoes troca só os nós que mudam de lugar; sem mudança, o mesmo array", () => {
+    const nos: NoDoCanvas[] = [terminal, nota];
+
+    expect(comPosicoes(nos, { o1: { x: 0, y: 0 } })).toBe(nos);
+    const movidos = comPosicoes(nos, { o1: { x: 10, y: 20 } });
+    expect(movidos[0]?.position).toEqual({ x: 10, y: 20 });
+    expect(movidos[1]).toBe(nota);
+  });
+
+  it("Cmd+A seleciona todas as telas e tira os bixinhos; tudo já assim, o mesmo array", () => {
+    const nos: NoDoCanvas[] = [terminal, selecionado(bixinhoEm(0, 600)), nota];
+
+    const todas = selecionarTodasAsTelas(nos);
+
+    expect(todas.map((no) => no.selected === true)).toEqual([true, false, true]);
+    expect(selecionarTodasAsTelas(todas)).toBe(todas);
+  });
+
+  it("no fim do retângulo, os bixinhos saem da seleção se alguma tela entrou; só bixinhos, ficam", () => {
+    const comTela: NoDoCanvas[] = [selecionado(terminal), selecionado(bixinhoEm(0, 600))];
+    const soBixinho: NoDoCanvas[] = [terminal, selecionado(bixinhoEm(0, 600))];
+
+    expect(semBixinhosNaSelecao(comTela).map((no) => no.selected === true)).toEqual([true, false]);
+    expect(semBixinhosNaSelecao(soBixinho)).toBe(soBixinho);
+    const semBixinho: NoDoCanvas[] = [selecionado(terminal), nota];
+    expect(semBixinhosNaSelecao(semBixinho)).toBe(semBixinho);
+  });
+
+  it("minimizar o grupo minimiza as abertas; com todas minimizadas, restaura; o resto não muda", () => {
+    const nos: NoDoCanvas[] = [terminal, minimizarOuRestaurar(nota), previa, artefato];
+    const ids = new Set(["o1", nota.id, previa.id, artefato.id]);
+
+    const minimizados = minimizarOuRestaurarTelas(nos, ids);
+
+    expect(minimizados.map((no) => no.height)).toEqual([
+      ALTURA_DA_NOTA_MINIMIZADA,
+      ALTURA_DA_NOTA_MINIMIZADA,
+      ALTURA_DA_NOTA_MINIMIZADA,
+      artefato.height,
+    ]);
+    // A nota já minimizada continua o mesmo objeto; o artefato não se minimiza.
+    expect(minimizados[1]).toBe(nos[1]);
+    expect(minimizados[3]).toBe(artefato);
+
+    const restaurados = minimizarOuRestaurarTelas(minimizados, ids);
+    expect(restaurados.map((no) => no.height)).toEqual([500, nota.height, previa.height, artefato.height]);
+    expect(minimizarOuRestaurarTelas([artefato], new Set([artefato.id]))).toEqual([artefato]);
+  });
+
+  it("fecham em grupo terminais, artefatos, prévias e shells; notas e rascunhos não", () => {
+    expect([terminal, artefato, previa, shell].every(ehFechavelEmGrupo)).toBe(true);
+    expect([nota, rascunho].some(ehFechavelEmGrupo)).toBe(false);
+  });
+
+  it("o resumo do grupo conta as telas, as minimizáveis, as fecháveis e os shells", () => {
+    const nos: NoDoCanvas[] = [
+      selecionado(terminal),
+      selecionado(minimizarOuRestaurar(nota)),
+      selecionado(shell),
+      selecionado(rascunho),
+      selecionado(bixinhoEm(0, 600)),
+      artefato,
+    ];
+
+    expect(resumirGrupo(nos)).toEqual({
+      ids: ["o1", nota.id, shell.id, "rascunho:1"],
+      minimizaveis: 2,
+      todasMinimizadas: false,
+      fechaveis: 2,
+      shells: 1,
+    });
+    expect(resumirGrupo([selecionado(minimizarOuRestaurar(nota))]).todasMinimizadas).toBe(true);
+    expect(resumirGrupo([selecionado(shell)]).todasMinimizadas).toBe(false);
   });
 });

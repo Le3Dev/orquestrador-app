@@ -1,7 +1,7 @@
 import { Handle, type NodeProps, NodeToolbar, Position } from "@xyflow/react";
 import { memo } from "react";
 
-import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
+import { aparenciaDoBixinho, papelQueNomeia } from "../../shared/canvas/bixinhos";
 import { useCanvas } from "../../shared/canvas/contexto";
 import { iconeDaFerramenta } from "../../shared/canvas/iconesDeFerramenta";
 import { type Ancora, type NoBixinho as TipoDoNo, subagentesVisiveis } from "../../shared/canvas/nos";
@@ -12,15 +12,33 @@ import { Etiqueta } from "../Etiqueta";
 import { TextoFormatado } from "../TextoFormatado";
 import { Bixinho, IconeDaFerramenta } from "./Bixinho";
 
-function Ficha({ subagente, nome, agora }: { subagente: SubagenteNaTela; nome: string; agora: Date }) {
+/**
+ * A ficha do bixinho selecionado. Com um subagente pronto, o título é o nome
+ * dele e o nome do bicho fica só como detalhe; senão, o título é o nome do
+ * bicho e o detalhe, o papel (executor nos eventos antigos).
+ */
+function Ficha({
+  subagente,
+  nomeDoBicho,
+  papelNoTitulo,
+  agora,
+}: {
+  subagente: SubagenteNaTela;
+  nomeDoBicho: string;
+  papelNoTitulo: string | null;
+  agora: Date;
+}) {
   const executando = subagente.situacao === "executando";
   const conteudo = subagente.resultado || subagente.textos.join("\n\n") || subagente.resumo;
 
   return (
     <div className="ficha-do-bixinho nowheel nodrag">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-titulo text-[13px] font-semibold">
-          {nome} <span className="mono text-muted">executor#{idCurto(subagente.id)}</span>
+        <span className="font-titulo min-w-0 truncate text-[13px] font-semibold">
+          {papelNoTitulo ?? nomeDoBicho}{" "}
+          <span className="mono text-muted">
+            {papelNoTitulo === null ? (subagente.papel ?? "executor") : nomeDoBicho}#{idCurto(subagente.id)}
+          </span>
         </span>
         <Etiqueta situacao={subagente.situacao} />
       </div>
@@ -58,6 +76,8 @@ const ANCORAS_DO_BIXINHO: readonly { id: Ancora; posicao: Position; classe: stri
 interface PropsDoConteudo {
   subagente: SubagenteNaTela;
   selecionado: boolean;
+  /** Saindo sozinho do canvas (o Subagente terminou): encolhe e some com fade. */
+  saindo?: boolean;
 }
 
 /**
@@ -66,7 +86,11 @@ interface PropsDoConteudo {
  * quando é selecionado — e não a cada evento de outro Subagente nem a cada
  * quadro em que o terminal é arrastado. O relógio só corre executando.
  */
-export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({ subagente, selecionado }: PropsDoConteudo) {
+export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
+  subagente,
+  selecionado,
+  saindo = false,
+}: PropsDoConteudo) {
   const executando = subagente.situacao === "executando";
   const agora = useRelogio(executando);
   const aparencia = aparenciaDoBixinho(subagente.id);
@@ -79,6 +103,14 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({ subagente, se
       : subagente.situacao === "falhou"
         ? "deu ruim…"
         : "zzz";
+  // Um subagente pronto (ou outro tipo com papel) dá o nome ao bixinho, no
+  // lugar do nome do bicho; o desenho continua o mesmo. O workflow segue com o
+  // bicho e o papel ao lado; o executor comum, que é a maioria, só no tooltip e
+  // na ficha, para não repetir em todo bixinho.
+  const papelQueDaNome = papelQueNomeia(subagente.papel);
+  const papelNoRotulo =
+    papelQueDaNome === null && subagente.papel !== null && subagente.papel !== "executor" ? subagente.papel : null;
+  const dica = "Clique para ver a tarefa e o relatório";
 
   return (
     <>
@@ -89,22 +121,26 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({ subagente, se
           cada quadro de pan/zoom e varre todos os nós a cada atualização. */}
       {selecionado && (
         <NodeToolbar isVisible position={Position.Right} offset={14}>
-          <Ficha subagente={subagente} nome={aparencia.nome} agora={agora} />
+          <Ficha subagente={subagente} nomeDoBicho={aparencia.nome} papelNoTitulo={papelQueDaNome} agora={agora} />
         </NodeToolbar>
       )}
 
       <div
-        className={`no-bixinho no-bixinho-${subagente.situacao} ${selecionado ? "no-bixinho-selecionado" : ""}`}
-        title="Clique para ver a tarefa e o relatório"
+        className={`no-bixinho no-bixinho-${subagente.situacao} ${selecionado ? "no-bixinho-selecionado" : ""} ${saindo ? "no-bixinho-saindo" : ""}`}
+        title={subagente.papel === null ? dica : `${subagente.papel} · ${dica.toLowerCase()}`}
       >
         <div className="balao-do-bixinho">
           <span className={executando ? "cursor" : ""}>{fala}</span>
         </div>
         {icone !== null && <IconeDaFerramenta icone={icone} />}
         <Bixinho aparencia={aparencia} situacao={subagente.situacao} />
-        <span className="font-titulo text-[12px] font-semibold leading-none">
-          {aparencia.nome}
-          <span className="mono ml-1 font-normal text-muted">#{idCurto(subagente.id)}</span>
+        {/* Nome longo corta com reticências; o #id fica sempre visível (o nome inteiro, no tooltip). */}
+        <span className="font-titulo flex max-w-full items-baseline text-[12px] font-semibold leading-none">
+          <span className="min-w-0 truncate">
+            {papelQueDaNome ?? aparencia.nome}
+            {papelNoRotulo !== null && <span className="font-normal"> · {papelNoRotulo}</span>}
+          </span>
+          <span className="mono ml-1 shrink-0 font-normal text-muted">#{idCurto(subagente.id)}</span>
         </span>
         <span className="mono text-muted">
           {formatarDecorrido(subagente.iniciadoEm, subagente.encerradoEm, agora)} · {formatarTokens(subagente.tokens)} tok
@@ -117,14 +153,15 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({ subagente, se
 /**
  * Um Subagente no canvas. Fica preso ao terminal do Orquestrador (move junto
  * com ele), mas pode ser arrastado; clicando, abre a ficha com a tarefa e o
- * relatório.
+ * relatório. Quando o Subagente conclui ou é cancelado, sai sozinho depois de
+ * alguns segundos (`useSaidaDosBixinhos`), com a classe `no-bixinho-saindo`.
  *
  * Esta é só a casca: lê o contexto do canvas, que muda a cada evento de
  * qualquer conversa, e acha o próprio Subagente. O desenho fica no
  * `ConteudoDoBixinho`.
  */
-export function NoBixinho({ data, selected }: NodeProps<TipoDoNo>) {
-  const { conversas } = useCanvas();
+export function NoBixinho({ id, data, selected }: NodeProps<TipoDoNo>) {
+  const { conversas, bixinhosSaindo } = useCanvas();
   const subagente = subagentesVisiveis(conversas.get(data.orquestradorId)).find(
     (candidato) => candidato.id === data.subagenteId,
   );
@@ -133,5 +170,5 @@ export function NoBixinho({ data, selected }: NodeProps<TipoDoNo>) {
     return null;
   }
 
-  return <ConteudoDoBixinho subagente={subagente} selecionado={selected} />;
+  return <ConteudoDoBixinho subagente={subagente} selecionado={selected} saindo={bixinhosSaindo?.has(id) === true} />;
 }
