@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { abrirOrquestrador } from "./AcaoDoApp";
-import { ConversaDoChat, MOTIVO_DA_INTERRUPCAO, NovaPergunta } from "./ConversaDoChat";
+import { ConversaDoChat, DadosDaConversaDoChat, MOTIVO_DA_INTERRUPCAO, NovaPergunta } from "./ConversaDoChat";
 import { ErroDoChat } from "./ErroDoChat";
 import { UsoDaResposta } from "./MotorDeChat";
 import { PreferenciasDoChat } from "./PreferenciasDoChat";
@@ -266,6 +266,68 @@ describe("ConversaDoChat — autorização para alterar", () => {
 
     expect(conversa.concluir("ok", [], [], uso, null)).toMatchObject({ autorizacaoPendente: null });
     expect(conversa.mensagens[1]?.autorizacaoPendente).toBeNull();
+  });
+});
+
+describe("ConversaDoChat — origem da pergunta", () => {
+  it("pergunta da escuta leva a origem à mensagem e ao evento, e ela sobrevive a reabrir", () => {
+    const conversa = ConversaDoChat.nova("s1");
+
+    const evento = conversa.perguntar(pergunta("Qual o prazo do projeto?", { origem: "escuta" }));
+
+    expect(evento).toMatchObject({ tipo: "pergunta_enviada", mensagemDoUsuario: { id: "u1", origem: "escuta" } });
+    expect(evento.tipo === "pergunta_enviada" && "origem" in evento.mensagemDoClaude).toBe(false);
+    expect(conversa.mensagens[0]?.origem).toBe("escuta");
+
+    const reaberta = ConversaDoChat.reconstituir(JSON.parse(JSON.stringify(conversa.paraDados())));
+    expect(reaberta.mensagens[0]?.origem).toBe("escuta");
+    expect(reaberta.mensagens[1]).not.toHaveProperty("origem");
+  });
+
+  it("pergunta digitada não tem o campo origem", () => {
+    const conversa = ConversaDoChat.nova("s1");
+
+    const evento = conversa.perguntar(pergunta("oi"));
+
+    expect(evento.tipo === "pergunta_enviada" && "origem" in evento.mensagemDoUsuario).toBe(false);
+    expect(conversa.mensagens.every((mensagem) => !("origem" in mensagem))).toBe(true);
+  });
+
+  it("mensagens gravadas antes do campo continuam iguais ao reabrir", () => {
+    const gravadaAntes = {
+      sessaoId: "s1",
+      sessaoIniciada: true,
+      alteracoesAutorizadas: false,
+      mensagens: [
+        { id: "u1", papel: "usuario", texto: "oi", imagens: [], criadaEm: agora.toISOString(), situacao: "concluida", acoes: [], perguntas: [], avisos: [], uso: null, autorizacaoPendente: null },
+        { id: "c1", papel: "claude", texto: "olá", imagens: [], criadaEm: agora.toISOString(), situacao: "concluida", acoes: [], perguntas: [], avisos: [], uso, autorizacaoPendente: null },
+      ],
+    } as const;
+
+    const reaberta = ConversaDoChat.reconstituir(JSON.parse(JSON.stringify(gravadaAntes)));
+
+    expect(reaberta.paraDados()).toEqual(gravadaAntes);
+  });
+
+  it("origem desconhecida no arquivo vira ausente", () => {
+    const conversa = ConversaDoChat.nova("s1");
+    conversa.perguntar(pergunta("oi"));
+    conversa.concluir("ok", [], [], uso);
+    const dados = JSON.parse(JSON.stringify(conversa.paraDados())) as Record<string, unknown> & {
+      mensagens: Record<string, unknown>[];
+    };
+    const comOrigensInvalidas = {
+      ...dados,
+      mensagens: [
+        { ...dados.mensagens[0], origem: "teclado" },
+        { ...dados.mensagens[1], origem: 42 },
+      ],
+    };
+
+    const reaberta = ConversaDoChat.reconstituir(comOrigensInvalidas as unknown as DadosDaConversaDoChat);
+
+    expect(reaberta.mensagens[0]).not.toHaveProperty("origem");
+    expect(reaberta.mensagens[1]).not.toHaveProperty("origem");
   });
 });
 

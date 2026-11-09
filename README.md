@@ -329,6 +329,19 @@ Casos de teste do **Mac** (ver ADR-34):
 - **`electron/mac.test.js`:** junta PATHs sem repetir pasta e mantendo a ordem; no Mac, a janela perde o `titleBarOverlay` e ganha as bolinhas em `{ x: 14, y: 11 }` na principal (barra de 36 px) e `{ x: 14, y: 13 }` nas pequenas (faixa de 40 px); o menu tem copiar, colar, recortar, desfazer, selecionar tudo, fechar e sair; acha o primeiro `claude` do PATH sem resolver o link; fora do Mac nada muda (as opções voltam intactas, o menu é `null` e não procura o `claude`).
 - **Tela (`BarraDeTituloDoApp`):** no Mac, a barra reserva 80 px à esquerda para as bolinhas e não desenha ─ ☐ ✕ (o ⚙ fica); no Windows, nada muda.
 
+Casos de teste da **escuta no modo invisível** (ver ADR-38):
+- **Electron (`electron/escutaDoModoInvisivel.test.js`):** a origem do pedido é comparada por `processId` + `routingId` do frame principal; no caso válido, responde com a fonte do monitor da janela e `audio: "loopback"` (sem silenciar) e, sem ela, com a primeira tela; recusa com `null` fora do modo invisível, fora do Windows, de outra janela ou de um subframe, sem áudio, com falha no `getSources`, sem fonte de tela e quando o modo foi desligado durante a busca; não responde duas vezes se o callback lançar.
+- **Serviço (`ServicoDeEscuta`):** trecho e contexto aparados vão com a instrução fixa; contexto vazio vira nulo; 4.000 caracteres de trecho e 12.000 de contexto passam (um a mais é recusado); a pergunta é limitada a 2.000; falha do classificador vira `falha_do_motor`; o cliente desistir ou o servidor desligar vira `cancelada`; 30 s sem resposta aborta e vira `falha_do_motor`.
+- **Classificador (`ClassificadorDePerguntaClaudeCodeCli`):** trecho e contexto entre marcadores, com o aviso de que são dados, e um marcador dentro da fala não fecha o bloco; roda o Haiku com `--effort low`, sem ferramentas, a instrução em arquivo e a mensagem pelo stdin; limite de uso, `result` com erro, saída sem `result` e falha ao iniciar viram motivo legível; sinal abortado resolve como cancelada e apaga a pasta temporária.
+- **Rotas:** `POST /escuta/classificar` → 200 com a pergunta ou com `ehPergunta: false`; 400 para corpo inválido; 502 para falha do Claude Code, JSON inválido ou fora do formato; 500 para erro inesperado; o cliente desistir aborta a chamada. `POST /chat/mensagens` aceita `origem: "escuta"` e recusa outra com 400 `Origem da mensagem inválida.`; a mensagem guarda a origem só quando ela existe.
+- **Tela (`web/`):**
+  - *Lógica pura:* `CortadorDeTrechos` (700 ms de silêncio corta e 650 ms não; no máximo 15 s sem perder amostras; menos de 400 ms de voz é descartado; o limiar acompanha o ruído); `DetectorDePergunta` (interrogação, pedidos em português e inglês, termos técnicos, palavra inteira, alucinações conhecidas nunca são candidatas); `ControleDeDisparos` (19.999 ms recusa e 20.000 ms passa; repetidas com outra pontuação, acento ou parecidas demais são descartadas; só a pendente mais recente fica; recentes esquecidas depois de 10 min); `JanelaDeTranscricao` (2 min e 60 s de contexto); `mensagemDaEscuta` (trecho entre aspas triplas como fala de terceiros, corte do começo do contexto no limite).
+  - *`transcritor`:* um pedido por vez no worker; o ditado passa na frente da escuta; a escuta deixa no máximo 2 esperando e o mais antigo é descartado (`TranscricaoDescartada`); idioma automático manda `idioma: null`.
+  - *`capturaDoAudio`:* pede tela com áudio, para o vídeo na hora e liga o worklet a 16 kHz mono; sem trilha de áudio, captura recusada e sem `getDisplayMedia` viram mensagens claras; parar desliga tudo.
+  - *`sessaoDaEscuta`:* candidata → classificação → envio com o contexto dos 60 s anteriores; com alterações autorizadas, vai para o campo; 409 devolve a pergunta à pendente e não entra em laço; automático desligado só transcreve; aviso da primeira vez antes de capturar; pausar e retomar; sair do modo esquece tudo, e voltar antes de 1 s mantém a captura.
+  - *Componentes:* `IndicadorDaEscuta` (rótulo, pausar e retomar, tentar de novo no erro); `FaixaDaEscuta` (últimas linhas, recolher guardado no `localStorage`, chave *Automático*, progresso do download, erro com fechar, última pergunta); `AvisoDaEscuta` (foco no cartão, Esc recusa); `ChatRapido` (selo **escuta** só nas perguntas com origem; o envio da escuta leva o print e `{ origem: "escuta" }`; com alterações autorizadas, a pergunta vai para o campo com a nota, sem apagar um rascunho digitado); `api.perguntarNoChat` só manda `origem` quando há uma, e `api.classificarNaEscuta` devolve a classificação ou um `ErroDaApi` com status e mensagem.
+- **Conferência manual (app aberto, Windows):** entrar no modo invisível mostra o aviso e nada é capturado antes de *Começar a escutar*; com um vídeo tocando uma pergunta (*"como inverter uma lista ligada?"*), a transcrição aparece na faixa, em português ou em inglês, e a pergunta chega ao chat com o print e o selo **escuta**; o som do vídeo continua saindo; pausar para a transcrição e retomar volta; com alterações autorizadas, a pergunta vai para o campo; sair do modo (👁 ou Ctrl+Shift+I) desliga a captura em cerca de 1 s; o ditado continua funcionando com a escuta ligada.
+
 ## Tecnologias
 
 - **Aplicativo desktop:** **Electron 33** (processo principal em `electron/`, servidor em `utilityProcess`), **electron-builder** (instalador NSIS para Windows x64, publicado nas Releases do GitHub) e **electron-updater** (atualização automática do instalado, ver ADR-29). Licença via Lemon Squeezy, só no instalado e hoje desligada (`exigirLicenca: false`, fase de testes).
@@ -470,7 +483,7 @@ src/
   chat/                      domínio do chat rápido — contexto próprio (ver ADR-17)
     ConversaDoChat.ts          raiz do agregado (a conversa única, sessão do Claude Code)
     MensagemDoChat.ts          interno do agregado (pergunta ou resposta)
-    AcaoDoApp, PreferenciasDoChat   objetos de valor
+    AcaoDoApp, PreferenciasDoChat, OrigemDaPergunta   objetos de valor
     EventoDoChat.ts            eventos gravados + sinais passageiros (trecho, atividade)
     ErroDoChat.ts              dados_invalidos · em_andamento · sem_resposta_em_andamento
     InstrucoesDoChat.ts        regras fixas, bloco <contexto-do-app> e separarAcoesDoApp
@@ -478,6 +491,11 @@ src/
     MotorDeChat.ts, RepositorioDoChat.ts, ProjetosDoChat.ts   portas
   prompts/                   melhorar prompt: ServicoDeMelhoriaDePrompt (instrução fixa, validação,
                              limpeza da resposta), ErroDeMelhoriaDePrompt e a porta MotorDeMelhoriaDePrompt
+  escuta/                    escuta no modo invisível — contexto próprio (ver ADR-38)
+    ServicoDeEscuta.ts         casos de uso (stateless): validar o trecho, classificar com tempo-limite, ler o JSON
+    InstrucoesDaEscuta.ts      instrução fixa da classificação
+    ErroDeEscuta.ts            dados_invalidos · falha_do_motor · cancelada
+    ClassificadorDePergunta.ts porta
   artefatos/                 domínio dos artefatos — contexto próprio (ver ADR-26)
     Artefato.ts                raiz do agregado (página HTML ou documento Markdown, com as versões)
     VersaoDoArtefato, OrigemDoArtefato   objetos de valor (imutáveis)
@@ -487,7 +505,9 @@ src/
     RepositorioDeArtefatos.ts, EntradaDeArtefatos.ts   portas
   infraestrutura/
     claudecode/                camada anticorrupção: Fachada (processo), Adaptador
-                               (stream-json → eventos do domínio), Argumentos, Motor
+                               (stream-json → eventos do domínio), Argumentos, Motor,
+                               ChamadaCurtaDoClaudeCode.ts (núcleo das chamadas curtas: melhoria
+                               de prompt e escuta) e ClassificadorDePerguntaClaudeCodeCli.ts
     arquivos/                  repositório JSON/JSONL dos Orquestradores, repositório das
                                notas (um JSON por nota), repositório do chat, listagem de pastas,
                                repositório dos artefatos (uma pasta por artefato) e a pasta de
@@ -498,12 +518,13 @@ src/
                                memória e processos do Claude
   controllers/                 REST + SSE, validação (zod), erros → HTTP
                                (orquestradoresRoutes.ts, notasRoutes.ts,
-                               chatRoutes.ts com o CanalDoChat, promptsRoutes.ts,
+                               chatRoutes.ts com o CanalDoChat, promptsRoutes.ts, escutaRoutes.ts,
                                artefatosRoutes.ts com o CanalDosArtefatos)
 electron/                      aplicativo desktop (CommonJS): main.js (janelas, servidor no
                                utilityProcess, religar, cookie), preload.js (window.electron),
-                               licença, configuração local, primeira abertura e atualização
-                               automática (atualizacao.js); testes *.test.js
+                               licença, configuração local, primeira abertura, atualização
+                               automática (atualizacao.js), modo invisível (mouseDoModoInvisivel.js,
+                               capturaDeTela.js) e a escuta (escutaDoModoInvisivel.js); testes *.test.js
 web/src/
   paginas/CanvasDeOrquestradores.tsx   canvas (React Flow): nós, linhas, painéis, layout salvo
   componentes/canvas/                  NoTerminal (terminal do Orquestrador), NoRascunho (configuração),
@@ -511,6 +532,11 @@ web/src/
                                        ArestaDoBixinho (linha com a bolinha de troca), NoNota (nota),
                                        NoArtefato (janela do artefato: iframe isolado ou Markdown),
                                        painéis flutuantes
+  componentes/chat/                    ChatRapido e a escuta: IndicadorDaEscuta, FaixaDaEscuta, AvisoDaEscuta
+  shared/ditado/                       transcritor (fila serial do Whisper; o ditado passa na frente) e o worker
+  shared/escuta/                       escuta no modo invisível (ver ADR-38): capturaDoAudio, CortadorDeTrechos (VAD),
+                                       JanelaDeTranscricao, DetectorDePergunta, ControleDeDisparos,
+                                       mensagemDaEscuta, sessaoDaEscuta (singleton) e useEscuta
   shared/estado/                       aplicarEvento (reducer da conversa + log), faseDoTurno
   shared/canvas/                       nós e linhas a partir das conversas, layout, aparência e desenhos dos bixinhos,
                                        notas.ts (loja das notas, separada do contexto do canvas),
@@ -1212,6 +1238,32 @@ flowchart TD
 - **Indicador permanente.** Não há faixa extra: a única barra visível no modo é a do próprio composer. Enquanto o modo estiver ativo, o **👁** fica no estado ativo (vermelho, com um ponto pulsante) e seu balão diz "Tela sendo vista — clique para voltar ao modo normal (Ctrl+Shift+I)"; clicar nele de novo volta ao modo normal. Com `contentProtection`, a janela do app não aparece em gravações e compartilhamentos de tela.
 - **Atalho Ctrl+Shift+I** só sai do modo (não entra nele), de qualquer lugar, mesmo sem clicar na janela. O processo principal avisa cada mudança (`aoMudar`), e todos os componentes acompanham por ele.
 - **Plano B.** Se a transparência não funcionar em alguma máquina (fundo preto ou opaco ao entrar), a alternativa é criar a janela principal com `transparent: true` (o que exige reabrir a janela e perde a barra de redimensionamento nativa).
+- **Atualização pelo ADR-38.** Antes, a tela era vista só quando o usuário perguntava. Agora a escuta também envia perguntas sozinha, cada uma com um print. A captura da tela continua sendo uma por pergunta, nunca contínua; o que é contínuo é o **áudio** do computador, enquanto o modo está ligado.
+
+**ADR-38 — Escuta no modo invisível: perguntas ouvidas no áudio do computador vão sozinhas ao chat rápido.** Atualiza os ADR-32 e ADR-37.
+- *Contexto:*
+  - no modo invisível (ADR-37), uma pergunta que se ouve no computador (numa chamada, numa aula, num vídeo) precisava ser digitada à mão, enquanto a conversa seguia;
+  - o Chromium só entrega o áudio do sistema pelo `getDisplayMedia`, que normalmente abre um seletor de tela; e o Whisper do ditado (ADR-32) atendia um pedido por vez, em português fixo.
+- *Decisão:*
+  - **captura loopback pelo processo principal** (`electron/escutaDoModoInvisivel.js`): `session.defaultSession.setDisplayMediaRequestHandler(..., { useSystemPicker: false })` responde ao `getDisplayMedia` com a fonte `screen` do monitor da janela e `audio: "loopback"` (o som continua saindo; `loopbackWithMute` deixaria o usuário sem som), **só** quando três coisas valem ao mesmo tempo: o modo invisível está ativo, a plataforma é Windows e o pedido vem do frame principal da janela principal (comparado por `processId` + `routingId`). Qualquer outro pedido, ou um erro, é recusado com `responder(null)`, e o motivo vai para o log (`[escuta]`). A tela **descarta o vídeo** na hora e passa o áudio por um `AudioContext` a 16 kHz com um `AudioWorklet` inline, num Blob (`capturaDoAudio.ts`);
+  - **ponte:** o preload expõe `escutaDisponivel` (`process.platform === "win32"`) e `estaAtivo()`, pelo IPC novo `modo-invisivel:consultar`. O `useModoInvisivel` consulta o estado ao montar: o chat rápido remonta ao alternar entre fixo e flutuante e, antes, "esquecia" o modo;
+  - **transcrição contínua com o Whisper do ditado** (`web/src/shared/ditado/transcritor.ts`): o mesmo worker da tela toda, agora com **fila serial** (um pedido por vez, porque pedidos simultâneos disputam a CPU). O ditado passa na frente dos pedidos da escuta que ainda não começaram, e a escuta guarda no máximo 2 esperando; o mais antigo é descartado em silêncio. O **cortador de trechos** (`CortadorDeTrechos.ts`) é um VAD de energia em quadros de 30 ms, com o limiar acompanhando o ruído de fundo: corta depois de 700 ms de silêncio ou aos 15 s e descarta trechos com menos de 400 ms de voz;
+  - **idioma detectado à mão** no worker, só na escuta: o transformers.js 4.3.1 não detecta o idioma do Whisper e, sem `language`, força o inglês. Um passo do decodificador, só com `<|startoftranscript|>`, escolhe o token de idioma mais provável; se falhar, vale o português. O ditado continua em português fixo;
+  - **detecção em duas etapas:**
+    1. a **regra local** (`DetectorDePergunta.ts`) marca como candidato o trecho que termina em `?`, tem uma expressão de pedido (*como faço*, *explique*, *can you*…) ou um termo técnico (*lista ligada*, *two sum*…), e descarta as alucinações conhecidas do Whisper (*Obrigado.*, *Legendas pela comunidade Amara.org*…). Ela prefere deixar passar a mais;
+    2. o candidato vai, com os 60 s anteriores como contexto, à rota nova `POST /api/escuta/classificar`, e o **Haiku** (`--effort low`, sem ferramentas, dono `escuta` no registro de processos) responde `{ ehPergunta, pergunta }`, com a pergunta reescrita para ser entendida sozinha. Trecho e contexto vão como dados, entre os marcadores `<trecho>` e `<contexto>`, com o aviso de que não são ordens. A chamada reaproveita o núcleo da melhoria de prompt, extraído para `ChamadaCurtaDoClaudeCode.ts`, com tempo-limite de 30 s. Há uma classificação por vez: um candidato novo substitui o que esperava e, depois de uma falha, o que esperava é descartado;
+  - **controle de disparos** (`ControleDeDisparos.ts`, imutável): no mínimo **20 s** entre dois envios; uma pergunta igual ou parecida demais com as dos últimos 10 min é descartada; com o chat ocupado ou dentro do intervalo, a pergunta vira a **pendente única** (só a mais recente fica) e sai quando o chat fica livre e o intervalo vence. Um **409** do servidor (outra resposta em andamento que a tela ainda não viu) devolve a pergunta à pendente, sem contar como enviada; ela sai quando o chat fica livre ou depois de 5 s;
+  - **mensagem ao chat** (`mensagemDaEscuta.ts`): a pergunta, o trecho transcrito dos últimos **60 s** entre aspas triplas, rotulado como fala de terceiros só para contexto, e a instrução de resposta (até 8.000 caracteres; corta o começo do contexto). Vai com o print da tela, como uma pergunta digitada no modo invisível, e com `origem: "escuta"`: a mensagem guarda a origem, e a tela mostra o selo **escuta**;
+  - **com alterações autorizadas (ADR-25)**, nada sai sozinho: a pergunta vai para o campo de mensagem, com a nota *Pergunta da escuta: confira e aperte Enter*. Ela só troca um campo vazio ou a pergunta anterior da escuta; um rascunho digitado fica, e a pergunta continua na faixa como *última pergunta*;
+  - **ciclo de vida:** a escuta liga sozinha ao entrar no modo invisível e, na primeira vez, um aviso pede confirmação antes de capturar. A `sessaoDaEscuta` é um singleton fora do React, para sobreviver à remontagem do chat rápido; por isso a captura só para **1 s** depois de sair do modo, e o áudio desse intervalo é ignorado. O aviso visto e o *Automático* (ligado por padrão) ficam no `localStorage` (`orquestrador.preferenciasDaEscuta`);
+  - **privacidade:** o áudio nunca vai para o disco nem sai da máquina. O texto transcrito fica só na memória, numa janela de até 2 min, e é esquecido ao sair do modo. Saem da máquina só os trechos candidatos, com o contexto, que vão ao Haiku, e, quando há pergunta, a mensagem e o print que vão ao chat (e ficam no histórico dele, como qualquer pergunta).
+- *Consequências:*
+  - **CPU:** o Whisper roda sem parar enquanto há fala, e cada trecho passa duas vezes pelo codificador (uma para o idioma, outra para transcrever). Num computador lento, trechos da escuta são descartados, e o ditado mantém a prioridade;
+  - **cota:** uma chamada ao Haiku por candidato da regra local, além da resposta do chat a cada pergunta enviada;
+  - **só no Windows:** no Mac e no navegador, `escutaDisponivel` é falso e a escuta não aparece;
+  - **alucinações do Whisper** em silêncio ou música: o filtro tira as conhecidas e o Haiku descarta o resto, mas uma pergunta ainda pode sair de um trecho mal transcrito;
+  - o `getDisplayMedia` exige um **gesto do usuário**: se a captura cair ou não for liberada, ela só volta com um clique (*retomar* no indicador);
+  - **atraso de 1 s ao sair:** a captura ainda roda nesse intervalo, mas o áudio é ignorado.
 
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
@@ -1231,7 +1283,7 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 - **404:** não encontrado;
 - **409:** já existe pedido em andamento (inclusive ao excluir, limpar a conversa ou mandar um pedido da fila), não há pedido para cancelar, não há plano pendente para aprovar/descartar (motivo `sem_plano_pendente`), ou a fila de pedidos está cheia;
 - **500:** erro inesperado;
-- **502:** o Claude Code falhou numa chamada feita pelo próprio servidor (hoje só em `/prompts/melhorar`);
+- **502:** o Claude Code falhou numa chamada feita pelo próprio servidor (hoje só em `/prompts/melhorar` e `/escuta/classificar`);
 - **503:** a chamada foi cancelada pelo desligamento do servidor (idem).
 
 | Método | Rota | Entrada | Resposta |
@@ -1268,13 +1320,14 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | DELETE | `/notas/:id` | — | 204 (404 `Nota não encontrada.`) |
 | GET | `/chat` | — | `{ sessaoId, situacao: "ocioso" \| "respondendo", alteracoesAutorizadas: boolean, preferencias: { modelo, esforco }, mensagens: [MensagemDoChat], ultimaSequencia, cota: [{ nome, utilizacao, renovaEm, situacao }] \| null }`. A resposta em andamento já traz o texto parcial acumulado; use `ultimaSequencia` no `?desde=` do SSE. `alteracoesAutorizadas`: o chat pode editar arquivos e rodar comandos até o próximo `/clear` (ver ADR-25) |
 | GET | `/chat/eventos` | cabeçalho opcional `Last-Event-ID` ou `?desde=` | `text/event-stream`: eventos gravados da conversa atual desde a sequência (sem nenhum dos dois, todos) + novos; `trecho` e `atividade` como eventos nomeados, sem id |
-| POST | `/chat/mensagens` | `{ texto: string, imagens?: [{ nome, tipoDeMidia: image/png\|jpeg\|gif\|webp, base64 }] }` (até 5 imagens de 5 MB; texto pode ser vazio se houver imagem) | 202 `{ mensagemId }` — o id da **resposta do Claude**, que recebe os trechos. 409 `Já há uma resposta em andamento.`; 400 `Escreva uma mensagem ou anexe uma imagem.` e erros de imagem |
+| POST | `/chat/mensagens` | `{ texto: string, imagens?: [{ nome, tipoDeMidia: image/png\|jpeg\|gif\|webp, base64 }], origem?: "escuta" }` (até 5 imagens de 5 MB; texto pode ser vazio se houver imagem; `origem` só nas perguntas que não foram digitadas: `"escuta"` = detectada pela escuta no modo invisível, ver ADR-38) | 202 `{ mensagemId }` — o id da **resposta do Claude**, que recebe os trechos. 409 `Já há uma resposta em andamento.`; 400 `Escreva uma mensagem ou anexe uma imagem.`, `Origem da mensagem inválida.` (qualquer outra origem) e erros de imagem |
 | PATCH | `/chat/preferencias` | `{ modelo?, esforco? }` | 200 `{ modelo, esforco }`; vale a partir da próxima pergunta. 400 `Modelo inválido.` / `Esforço inválido.` |
 | PATCH | `/chat/autorizacao` | `{ autorizado: boolean }` | 200 `{ autorizado }`: `true` autoriza o chat a editar arquivos e rodar comandos até o próximo `/clear`; `false` revoga. Aceito também durante uma resposta (vale a partir da próxima pergunta); repetir o estado atual não gera evento. Confirmado pelo evento `alteracoes_autorizadas` ou `autorizacao_revogada`. 400 `A autorização deve ser verdadeira ou falsa.` (ver ADR-25) |
 | POST | `/chat/cancelar` | — | 202 `{ cancelando: true }`; 409 `Não há resposta em andamento.` |
 | POST | `/chat/limpar` | — | 200 `{ totalDeMensagens: 0 }`: arquiva em `dados/chat/historico/conversa-<N>/` e a próxima pergunta abre outra sessão; as preferências ficam. 409 durante uma resposta (`Aguarde a resposta terminar ou cancele antes de limpar a conversa.`) |
 | GET | `/chat/anexos/:arquivo` | — | a imagem anexada a uma pergunta (404 `Anexo não encontrado.` para nome inválido ou inexistente) |
 | POST | `/prompts/melhorar` | `{ texto: string, onde: "chat" \| "orquestrador", pasta?: string }` (`pasta`: só o nome da pasta do projeto, contexto opcional, usado só com `"orquestrador"`) | 200 `{ texto, uso: { entrada, criacaoDeCache, leituraDeCache, saida }, indiceDeCusto, duracaoMs }`: o pedido reescrito (objetivo, contexto, restrições e critério de pronto, no idioma do pedido), sem aspas nem cerca de código em volta. Uma chamada `claude -p` curta e barata: Haiku com `--effort low`, `--tools ""` (nenhuma ferramenta), sem MCP, sem skills, `--no-session-persistence`, instrução em `--system-prompt-file`, texto pelo stdin, numa pasta temporária e sem CLAUDE.md nem memória (`CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`). `indiceDeCusto` é o mesmo índice dos turnos (entrada + 1,25 × criação de cache + 0,1 × leitura de cache + 5 × saída). Não grava nada. 400 `Escreva o pedido para melhorar.` / `O pedido deve ter até 20000 caracteres para ser melhorado.` / `Destino do pedido inválido.` / `Envie o texto do pedido.` / `A pasta deve ser um texto.`; 502 com o motivo do Claude Code (ex.: `Limite de uso da assinatura do Claude atingido; …`, `O Claude Code encerrou sem devolver o pedido melhorado (código N): …`, `O Claude devolveu uma resposta vazia. Tente melhorar o pedido de novo.`); 503 `A melhoria do pedido foi cancelada.` (servidor desligando). Se o cliente fechar a conexão antes do fim, o processo do Claude é encerrado e nada é respondido |
+| POST | `/escuta/classificar` | `{ trecho: string, contexto?: string }` (`trecho`: o pedaço da transcrição do áudio que a regra local da tela marcou, até 4.000 caracteres depois de aparar; `contexto`: a transcrição dos 60 s anteriores, até 12.000) | 200 `{ ehPergunta: boolean, pergunta: string \| null }`: se o trecho é uma pergunta ou um pedido a responder e, sendo, a pergunta reescrita para ser entendida sozinha (até 2.000 caracteres; `null` quando não é). A mesma chamada curta do `/prompts/melhorar` (Haiku, `--effort low`, sem ferramentas, sem MCP, sem CLAUDE.md, numa pasta temporária; dono `escuta` no registro de processos), com a instrução fixa da escuta; trecho e contexto vão ao modelo como dados, entre os marcadores `<trecho>` e `<contexto>`. Não grava nada e não envia nada ao chat (ver ADR-38). 400 `Envie o trecho da escuta para classificar.` / `O trecho deve ter até 4000 caracteres para ser classificado.` / `O contexto deve ter até 12000 caracteres.` / `Envie o trecho da escuta.` / `O contexto deve ser um texto.`; 502 com o motivo do Claude Code, `O Claude devolveu uma classificação que não é um JSON válido. Tente de novo.`, `O Claude devolveu uma classificação fora do formato esperado…` ou `A classificação da escuta demorou demais (mais de 30 s).`; 503 `A classificação da escuta foi cancelada.` (servidor desligando); 500 para erro inesperado. Se o cliente fechar a conexão antes do fim, o processo do Claude é encerrado e nada é respondido |
 | GET | `/artefatos` | — | 200 `[ResumoDoArtefato]`, do atualizado mais recentemente para o mais antigo (ver ADR-26). Não há `POST`: os artefatos nascem só pela pasta de entrada |
 | GET | `/artefatos/:id` | — | 200 `ResumoDoArtefato`; 404 `Artefato não encontrado.` |
 | GET | `/artefatos/:id/versoes/:numero` | — | 200 com o conteúdo bruto da versão, `text/html; charset=utf-8` ou `text/markdown; charset=utf-8`, com `Content-Security-Policy: sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:` e `X-Content-Type-Options: nosniff`. 404 `Artefato não encontrado.` / `Versão não encontrada.` (também para número fora do formato, ex.: `0`, `01`, `abc`) |
@@ -1383,10 +1436,11 @@ Erros 400 das notas:
   "acoes": [{ "tipo": "abrir_orquestrador", "projeto": "painel-app", "pasta": "C:\\…\\painel-app", "pedido": "rodar os testes", "novo": false }],
   "avisos": ["O projeto \"x\" não existe na pasta raiz; a ação foi ignorada."],
   "uso": { "duracaoMs": 4200, "tokensDeEntrada": 31000, "tokensDeSaida": 180, "modeloUsado": "claude-…" },
-  "autorizacaoPendente": { "acao": "editar | rodar_comando", "detalhe": "src/x.ts | npm test" } }
+  "autorizacaoPendente": { "acao": "editar | rodar_comando", "detalhe": "src/x.ts | npm test" },
+  "origem": "escuta" }
 ```
 
-Perguntas do usuário vêm sempre `concluida`, sem ações. Numa resposta que falhou, o motivo está em `avisos` (ex.: `interrompida`, quando o servidor reiniciou no meio). `autorizacaoPendente` é `null`, a menos que a resposta tenha parado porque o chat quis editar um arquivo ou rodar um comando sem autorização (`detalhe` é o arquivo ou o comando); a tela mostra o pedido só na última resposta. Mensagens gravadas antes da autorização não têm o campo: vale `null` (ver ADR-25).
+Perguntas do usuário vêm sempre `concluida`, sem ações. `origem` é opcional: só aparece numa pergunta que não foi digitada (`"escuta"`, detectada pela escuta no modo invisível; ver ADR-38); falta nas digitadas, nas respostas e nas mensagens gravadas antes do campo. Numa resposta que falhou, o motivo está em `avisos` (ex.: `interrompida`, quando o servidor reiniciou no meio). `autorizacaoPendente` é `null`, a menos que a resposta tenha parado porque o chat quis editar um arquivo ou rodar um comando sem autorização (`detalhe` é o arquivo ou o comando); a tela mostra o pedido só na última resposta. Mensagens gravadas antes da autorização não têm o campo: vale `null` (ver ADR-25).
 
 **Eventos SSE do chat** (`/chat/eventos`). Os gravados vêm com `id: <sequencia>` e JSON `{ tipo, sequencia, em, … }`:
 
@@ -1451,7 +1505,7 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 
 **Barra de título:** no topo da janela fica a barra do aplicativo: à esquerda o nome; no meio, o campo **Buscar ou executar…** (`Ctrl+K`), que abre a paleta de comandos (veja *Navegar no canvas*); à direita o status (quem está trabalhando, cotas e RAM) e, logo depois, o **⚙** (pastas e Claude Code: reabre os Ajustes da primeira abertura; se não abrirem, aparece a mensagem logo abaixo da barra, fechável no ✕) e os botões do próprio app: **minimizar**, **maximizar/restaurar** (o ícone muda conforme a janela) e **fechar** (fica vermelho ao passar o mouse). Também dá para usá-los pelo teclado (Tab até eles e Enter). Arraste a janela por qualquer ponto vazio da barra, inclusive em volta da busca; clique duplo maximiza ou restaura; arrastar para as bordas da tela, Win+setas e Win+Z encaixam a janela como em qualquer programa. O menu de layouts que o Windows 11 mostra ao parar o mouse sobre o maximizar nativo não aparece (use Win+Z). Se a tela travar, **Alt+F4** fecha o aplicativo. As janelas de ativação e de primeira abertura/Ajustes continuam com os botões do Windows. Quando há uma versão nova do app, a barra também mostra o aviso da atualização (item 15). **No Mac**, no lugar dos botões ─ ☐ ✕ ficam as 3 bolinhas nativas, no canto esquerdo da barra, e valem os atalhos do sistema (Cmd+W fecha a janela, Cmd+Q fecha o app; ver ADR-34).
 
-**Modo invisível (app desktop):** o botão **👁** do chat rápido (na linha de baixo do composer, ao lado do modelo) deixa a janela transparente e mostra só o chat rápido (a barra de título some); o resto (canvas, terminais, notas) fica escondido e os cliques fora do chat atravessam para os programas de trás. A cada pergunta no chat, o app tira **uma foto da tela** (do monitor onde está a janela) e a envia junto; se a captura falhar, a pergunta não é enviada. Enquanto o modo está ligado, o próprio **👁** fica vermelho e pulsante (**tela sendo vista**); clique nele de novo para voltar ao modo normal (ou use **Ctrl+Shift+I**, de qualquer lugar). Ver ADR-37.
+**Modo invisível (app desktop):** o botão **👁** do chat rápido (na linha de baixo do composer, ao lado do modelo) deixa a janela transparente e mostra só o chat rápido (a barra de título some); o resto (canvas, terminais, notas) fica escondido e os cliques fora do chat atravessam para os programas de trás. A cada pergunta no chat, o app tira **uma foto da tela** (do monitor onde está a janela) e a envia junto; se a captura falhar, a pergunta não é enviada. No Windows, enquanto o modo está ligado, o app também **escuta o áudio do computador** e manda sozinho ao chat as perguntas que ouvir, cada uma com a foto da tela (item 20). Enquanto o modo está ligado, o próprio **👁** fica vermelho e pulsante (**tela sendo vista**); clique nele de novo para voltar ao modo normal (ou use **Ctrl+Shift+I**, de qualquer lugar). Ver ADR-37 e ADR-38.
 
 **Janela estreita:** na barra de título, o status divide a largura com a busca e encurta antes: abaixo de 1440 px as cotas aparecem como *5h* e *7d* (sem o "· agentes"); abaixo de 1280 px, o status mostra só a situação e um medidor resumido (passe o mouse para ver tudo). Abaixo de 1100 px, a busca vira só a lupa **⌕**, o `+ Novo ▾` fica só com o **+** (passe o mouse para ver o nome) e o minimapa some. A situação (quem está trabalhando) nunca some. No navegador, a barra do canvas e o status seguem os passos de 1280 px (rótulos curtos) e 1100 px (só ícones e o resumo). Abrir o endereço do servidor no navegador mostra só o aviso de que o Orquestrador roda no aplicativo.
 
@@ -1645,6 +1699,16 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
     - Roda com o **shell do usuário** (no Mac e no Linux, o `$SHELL` como login shell, que carrega o PATH do perfil; no Windows, o PowerShell), com o seu login e sem as variáveis internas do app.
     - Até **6 terminais** abertos ao mesmo tempo. Mova e redimensione como os outros; fechar no ✕ encerra o shell e tudo o que estiver rodando nele. Fechar o app também encerra todos.
     - Por baixo, o servidor usa o `node-pty`. No Mac, o `spawn-helper` dele vem do npm sem permissão de execução (versão 1.1.0) e todo terminal falharia com *posix_spawnp failed*: o `postinstall` (`scripts/permissaoDoPty.cjs`) corrige isso depois de cada `npm install`, e o `dist:mac` roda o mesmo script antes de empacotar. No app empacotado, o `node-pty` fica fora do `app.asar` (`build.asarUnpack`), porque binários não executam lá dentro.
+20. **Escuta no modo invisível** (ver ADR-38; só no app desktop, no Windows): com o modo invisível ligado, o app ouve o áudio do computador (uma chamada, uma aula, um vídeo), transcreve no próprio computador e manda sozinho ao chat rápido as perguntas que detectar, com a foto da tela.
+    - **Primeira vez:** ao entrar no modo invisível, um aviso no chat explica o que a escuta faz. Nada é capturado antes de **Começar a escutar**; **Agora não** (ou Esc) deixa a escuta pausada só desta vez. Depois disso, ela liga sozinha sempre que você entra no modo e para quando você sai.
+    - **Indicador:** ao lado do **👁**, um ponto pulsante com *escutando* (ou *baixando o modelo N%* na primeira vez, cerca de 250 MB, o mesmo modelo do ditado). O botão **❚❚** pausa (nada é transcrito) e o **▶** retoma; com erro, o **↻** tenta de novo.
+    - **Faixa da transcrição:** acima do campo, mostra as últimas linhas transcritas, o progresso do download, o erro da escuta (com *fechar*) e a *última pergunta* detectada. O cabeçalho recolhe e abre a faixa; a escolha fica guardada neste computador.
+    - **Automático:** a chave na faixa, ligada por padrão. Desligada, a escuta só transcreve: nada é avaliado nem enviado.
+    - **Como a pergunta é escolhida:** frases com cara de pergunta (terminam em *?*, pedem algo, citam um termo de programação) vão ao Claude Haiku, que confirma se é mesmo uma pergunta e a reescreve para ser entendida sozinha. A pergunta vai ao chat com os últimos 60 s de transcrição como contexto. Sai no máximo uma a cada 20 s, e repetidas são ignoradas; se o chat estiver respondendo, a mais recente espera a vez.
+    - **Selo:** no chat, as perguntas que vieram da escuta têm o selo **escuta**.
+    - **Com alterações autorizadas** (item 12): nada é enviado sozinho. A pergunta vai para o campo, com a nota *Pergunta da escuta: confira e aperte Enter*; você revisa, ajusta e envia. Se você estiver digitando algo, o campo não é trocado, e a pergunta fica só na faixa, como *última pergunta*.
+    - **Privacidade:** o áudio não é gravado e não sai do computador. Só os últimos 2 min de texto ficam na memória e são esquecidos ao sair do modo. Saem do computador só as frases candidatas (para o Haiku) e as perguntas enviadas ao chat, com o print.
+    - Cada frase candidata usa um pouco de cota (uma chamada ao Haiku) e a transcrição usa a CPU enquanto há fala. O ditado (item 17) continua funcionando e passa na frente da escuta.
 
 **Avisos que podem aparecer:**
 - *"orquestrador lendo …"*, *"orquestrador executando …"* (no log do terminal): não é erro. O Orquestrador está fazendo um trivial ele mesmo (ver ADR-14). Isso vale sempre e não tem opção para desligar (ver ADR-28); se quiser que ele delegue algo específico, peça no texto do pedido.
@@ -1661,3 +1725,7 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 - *"Este artefato não existe mais."* (numa janela de artefato): ele foi apagado (em outra aba, por exemplo). Feche a janela no ✕.
 - *"A versão N não existe mais."*: o conteúdo daquela versão sumiu do disco; use *ver a versão atual*. *"Não foi possível carregar a versão N."*: falha ao falar com o servidor; use *tentar de novo*.
 - Um artefato maior que 5 MB não aparece: o servidor o ignora e registra o motivo no log (`logs\servidor.log`). Peça ao agente uma página mais leve.
+- *"A captura do áudio não foi liberada…"* ou *"…precisa de um clique…"* (na faixa da escuta): o Windows ou o app recusaram a captura (por exemplo, o modo invisível foi desligado no meio). Clique em **↻** ou **▶** no indicador ao lado do 👁; o motivo da recusa fica no log (`logs\servidor.log`, linhas `[escuta]`).
+- *"O áudio do computador não veio na captura."* ou *"A captura do áudio do computador terminou…"*: a captura subiu sem som ou parou sozinha. Retome no indicador; se repetir, confira se há um dispositivo de saída de áudio ativo no Windows.
+- *"A escuta não conseguiu avaliar a pergunta: …"*: a confirmação pelo Haiku falhou (limite de uso, Claude Code fora do ar, resposta fora do formato ou mais de 30 s). A escuta continua; a próxima frase candidata tenta de novo.
+- *"Não foi possível baixar o modelo de voz da escuta…"*: sem internet no primeiro uso; a escuta tenta de novo no próximo trecho.

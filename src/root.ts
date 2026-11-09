@@ -10,6 +10,7 @@ import { acessoSoPeloApp } from "./controllers/acessoSoPeloApp";
 import { criarAlteracoesRoutes } from "./controllers/alteracoesRoutes";
 import { criarArquivosRoutes } from "./controllers/arquivosRoutes";
 import { CanalDoChat, criarChatRoutes } from "./controllers/chatRoutes";
+import { criarEscutaRoutes } from "./controllers/escutaRoutes";
 import { criarNotasRoutes } from "./controllers/notasRoutes";
 import { criarOrquestradoresRoutes } from "./controllers/orquestradoresRoutes";
 import { criarPromptsRoutes } from "./controllers/promptsRoutes";
@@ -19,6 +20,7 @@ import {
   criarTerminaisRoutes,
   origensPermitidas,
 } from "./controllers/terminaisRoutes";
+import { ServicoDeEscuta } from "./escuta/ServicoDeEscuta";
 import { ArmazemDeAnexosEmArquivo } from "./infraestrutura/arquivos/ArmazemDeAnexosEmArquivo";
 import { PastaDeEntradaDosArtefatos } from "./infraestrutura/arquivos/ColetorDeArtefatosEmPasta";
 import { ExploradorDePastas } from "./infraestrutura/arquivos/ExploradorDePastas";
@@ -27,6 +29,7 @@ import { RepositorioDeOrquestradoresEmArquivo } from "./infraestrutura/arquivos/
 import { RepositorioDePreferenciasEmArquivo } from "./infraestrutura/arquivos/RepositorioDePreferenciasEmArquivo";
 import { RepositorioDoChatEmArquivo } from "./infraestrutura/arquivos/RepositorioDoChatEmArquivo";
 import { SistemaDeArquivosEmDisco } from "./infraestrutura/arquivos/SistemaDeArquivosEmDisco";
+import { ClassificadorDePerguntaClaudeCodeCli } from "./infraestrutura/claudecode/ClassificadorDePerguntaClaudeCodeCli";
 import { ConfiguracoesDeEsforcoDoClaudeCode } from "./infraestrutura/claudecode/ConfiguracoesDeEsforcoDoClaudeCode";
 import { FachadaClaudeCodeCli } from "./infraestrutura/claudecode/FachadaClaudeCodeCli";
 import { MedidorDeConsumoPorTranscricoes } from "./infraestrutura/claudecode/MedidorDeConsumoPorTranscricoes";
@@ -240,6 +243,17 @@ async function iniciar(): Promise<void> {
     agora: () => new Date(),
   });
 
+  // Escuta no modo invisível: confirma com uma chamada curta ao Claude Code
+  // (Haiku, sem ferramentas) se um trecho do áudio transcrito é uma pergunta.
+  // O mesmo controle dos turnos: ao desligar, a classificação é cancelada.
+  const servicoDeEscuta = new ServicoDeEscuta({
+    classificador: new ClassificadorDePerguntaClaudeCodeCli(
+      new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro),
+    ),
+    execucoes,
+    gerarId: randomUUID,
+  });
+
   // Artefatos: coleta o que os agentes gravam na pasta de entrada e serve na tela.
   const artefatos = await montarArtefatos({ pastaDeDados });
 
@@ -288,6 +302,7 @@ async function iniciar(): Promise<void> {
       }),
     );
     rotas.use("/api", criarPromptsRoutes({ servico: servicoDeMelhoria }));
+    rotas.use("/api", criarEscutaRoutes({ servico: servicoDeEscuta }));
     rotas.use("/api", artefatos.rotas);
     rotas.use(
       "/api",

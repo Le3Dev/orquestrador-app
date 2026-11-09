@@ -4,6 +4,12 @@ export interface PedidoDeTranscricao {
   id: number;
   /** Áudio mono a 16 kHz, como o Whisper espera. */
   audio: Float32Array;
+  /**
+   * Idioma da fala. `"portuguese"` fixa o português (o ditado); `null` pede ao
+   * worker que detecte o idioma antes de transcrever (a escuta, que ouve
+   * vídeos e chamadas em qualquer língua).
+   */
+  idioma: "portuguese" | null;
 }
 
 export type RespostaDoTranscritor =

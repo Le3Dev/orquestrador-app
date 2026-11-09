@@ -5,6 +5,7 @@ import { ErroDoChat } from "./ErroDoChat";
 import type { EventoDoChat } from "./EventoDoChat";
 import { AutorizacaoPendente, DadosDaMensagemDoChat, ImagemDaMensagem, MensagemDoChat } from "./MensagemDoChat";
 import type { UsoDaResposta } from "./MotorDeChat";
+import type { OrigemDaPergunta } from "./OrigemDaPergunta";
 
 export const TAMANHO_MAXIMO_DA_PERGUNTA = 50_000;
 
@@ -27,6 +28,8 @@ export interface NovaPergunta {
   texto: string;
   imagens: readonly ImagemDaMensagem[];
   agora: Date;
+  /** De onde veio a pergunta, quando não foi digitada (ex.: "escuta"). */
+  origem?: OrigemDaPergunta;
 }
 
 /**
@@ -126,7 +129,13 @@ export class ConversaDoChat {
       throw new ErroDoChat("em_andamento", "Já há uma resposta em andamento.");
     }
 
-    const doUsuario = MensagemDoChat.pergunta(pergunta.mensagemDoUsuarioId, texto, pergunta.imagens, pergunta.agora);
+    const doUsuario = MensagemDoChat.pergunta(
+      pergunta.mensagemDoUsuarioId,
+      texto,
+      pergunta.imagens,
+      pergunta.agora,
+      pergunta.origem,
+    );
     const doClaude = MensagemDoChat.resposta(pergunta.mensagemDoClaudeId, pergunta.agora);
     this.mensagensAtuais.push(doUsuario, doClaude);
     return { tipo: "pergunta_enviada", mensagemDoUsuario: doUsuario.paraDados(), mensagemDoClaude: doClaude.paraDados() };

@@ -219,6 +219,23 @@ describe("ServicoDeChat", () => {
     expect(motor.perguntas[1]).toMatchObject({ sessaoId: "sessao-1", sessaoIniciada: true });
   });
 
+  it("a origem da pergunta vai para a mensagem do usuário e para o evento pergunta_enviada", async () => {
+    await servico.perguntar({ texto: "Qual o prazo?", origem: "escuta" });
+    await aguardarMotor();
+
+    expect(publicados[0]).toMatchObject({ tipo: "pergunta_enviada", mensagemDoUsuario: { origem: "escuta" } });
+    expect(servico.estado().mensagens[0]?.origem).toBe("escuta");
+    expect(servico.estado().mensagens[1]).not.toHaveProperty("origem");
+    // O texto que vai ao Claude é o mesmo de uma pergunta digitada.
+    expect(motor.perguntas[0]?.mensagem).toMatch(/Qual o prazo\?$/);
+  });
+
+  it("pergunta sem origem não ganha o campo", async () => {
+    await servico.perguntar({ texto: "oi" });
+
+    expect(servico.estado().mensagens[0]).not.toHaveProperty("origem");
+  });
+
   it("recusa outra pergunta durante a resposta", async () => {
     await servico.perguntar({ texto: "oi" });
     await expect(servico.perguntar({ texto: "de novo" })).rejects.toThrow("Já há uma resposta em andamento.");

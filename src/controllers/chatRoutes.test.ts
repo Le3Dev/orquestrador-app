@@ -167,6 +167,47 @@ describe("rotas do chat", () => {
     expect(formato.status).toBe(400);
   });
 
+  it("POST /chat/mensagens aceita origem 'escuta', grava na mensagem e manda no SSE", async () => {
+    const resposta = await enviar("/chat/mensagens", "POST", { texto: "Qual o prazo?", origem: "escuta" });
+    expect(resposta.status).toBe(202);
+    await expect.poll(() => motor.perguntas.length).toBe(1);
+
+    const estado = (await (await fetch(`${base}/chat`)).json()) as { mensagens: Record<string, unknown>[] };
+    expect(estado.mensagens[0]).toMatchObject({ papel: "usuario", texto: "Qual o prazo?", origem: "escuta" });
+    expect(estado.mensagens[1]).not.toHaveProperty("origem");
+
+    const recebido = await lerSse(`${base}/chat/eventos`, (texto) => texto.includes("pergunta_enviada"));
+    expect(recebido).toContain('"origem":"escuta"');
+
+    motor.terminar(sucesso("Sexta."));
+    await aguardarOcioso();
+    await repositorio.aguardarGravacoes();
+    // Gravada em conversa.json e em eventos.jsonl: sobrevive a reabrir o chat.
+    const reaberto = await RepositorioDoChatEmArquivo.abrir(pasta, () => "outra");
+    expect(reaberto.conversa().mensagens[0]?.origem).toBe("escuta");
+    expect(reaberto.lerEventos(0)[0]).toMatchObject({ tipo: "pergunta_enviada", mensagemDoUsuario: { origem: "escuta" } });
+  });
+
+  it("POST /chat/mensagens sem origem não grava o campo", async () => {
+    await enviar("/chat/mensagens", "POST", { texto: "oi" });
+    await expect.poll(() => motor.perguntas.length).toBe(1);
+
+    const estado = (await (await fetch(`${base}/chat`)).json()) as { mensagens: Record<string, unknown>[] };
+    expect(estado.mensagens[0]).not.toHaveProperty("origem");
+
+    motor.terminar(sucesso("ok"));
+    await aguardarOcioso();
+  });
+
+  it("POST /chat/mensagens recusa outra origem com 400", async () => {
+    for (const origem of ["teclado", "", 1, null]) {
+      const resposta = await enviar("/chat/mensagens", "POST", { texto: "oi", origem });
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: "Origem da mensagem inválida." });
+    }
+    expect(motor.perguntas).toHaveLength(0);
+  });
+
   it("aceita só imagem e serve o anexo em GET /chat/anexos/:arquivo, protegendo o caminho", async () => {
     const resposta = await enviar("/chat/mensagens", "POST", {
       texto: "",

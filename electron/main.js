@@ -63,6 +63,7 @@ const {
   utilityProcess,
 } = require("electron");
 const { capturarTela } = require("./capturaDeTela");
+const { criarRespostaAoPedidoDeMidia } = require("./escutaDoModoInvisivel");
 const { iniciarRastreioDoMouse } = require("./mouseDoModoInvisivel");
 const { criarMaximizacao } = require("./maximizacao");
 const { execFileSync, spawn } = require("node:child_process");
@@ -997,6 +998,12 @@ ipcMain.handle("modo-invisivel:sair", (evento) => {
   exigirJanelaPrincipal(evento);
   sairDoModoInvisivel();
 });
+// A tela consulta ao montar (o ChatRapido remonta ao alternar fixo/flutuante e
+// perderia o estado, que antes só chegava pelo aviso "modo-invisivel:estado").
+ipcMain.handle("modo-invisivel:consultar", (evento) => {
+  exigirJanelaPrincipal(evento);
+  return modoInvisivel !== null;
+});
 ipcMain.handle("modo-invisivel:capturar-mouse", (evento, capturar) => {
   exigirJanelaPrincipal(evento);
   if (!modoInvisivel) return;
@@ -1025,6 +1032,29 @@ app.on("will-quit", () => {
   sairDoModoInvisivel();
   globalShortcut.unregisterAll();
 });
+
+// Escuta no modo invisível (electron/escutaDoModoInvisivel.js): responde ao
+// getDisplayMedia da tela principal com a tela do monitor da janela e o áudio
+// do sistema ("loopback", só no Windows). Recusa todo o resto. Sem permission
+// handlers: o getUserMedia do microfone (ditado) segue o padrão do Electron.
+function registrarEscutaDoModoInvisivel() {
+  try {
+    session.defaultSession.setDisplayMediaRequestHandler(
+      criarRespostaAoPedidoDeMidia({
+        desktopCapturer,
+        screen,
+        obterJanelaPrincipal: () => janelaPrincipal,
+        modoInvisivelAtivo: () => modoInvisivel !== null,
+        plataforma: process.platform,
+        registrar: (texto) => registrarNoLog("escuta", texto),
+      }),
+      // O seletor do sistema (só macOS 15+) ignoraria o handler; aqui não é usado.
+      { useSystemPicker: false },
+    );
+  } catch (erro) {
+    registrarNoLog("escuta", `Falha ao registrar a escuta do modo invisível: ${erro.message || erro}`);
+  }
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // IPC — configuração (usado pela tela principal).
@@ -1211,6 +1241,8 @@ if (!conseguiuLock) {
     // No Mac o ícone da janela não vale: o do Dock vem daqui fora do app empacotado.
     if (mac.ehMac && app.dock) app.dock.setIcon(path.join(__dirname, "icones", "icone.png"));
     licenca.iniciar(pastaDoUsuario());
+    // Antes de abrir a janela principal (a sessão só existe depois do ready).
+    registrarEscutaDoModoInvisivel();
     // Sem atualização o app ainda abre: a falha só vai para o log.
     try {
       prepararAtualizacao();

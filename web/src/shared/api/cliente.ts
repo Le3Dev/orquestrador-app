@@ -1,4 +1,5 @@
 import type {
+  ClassificacaoDaEscuta,
   ConteudoDoArquivo,
   DadosDaConfiguracao,
   DadosDaNota,
@@ -13,7 +14,9 @@ import type {
   NavegacaoDePastas,
   NomeDaPredefinicao,
   NovoShell,
+  OrigemDaPergunta,
   PastaDeProjeto,
+  PedidoDeClassificacaoDaEscuta,
   PedidoDeMelhoria,
   PreferenciasDoChat,
   PreviaDoPrompt,
@@ -245,11 +248,38 @@ export const api = {
   /** O chat inteiro; a resposta em andamento já vem com o texto acumulado. */
   lerChat: () => requisitar<EstadoDoChat>("/chat"),
 
-  /** Pergunta nova; a resposta chega pelos eventos. Recusada (409) durante outra resposta. */
-  perguntarNoChat: (texto: string, imagens: readonly ImagemParaEnvio[] = []) =>
+  /**
+   * Pergunta nova; a resposta chega pelos eventos. Recusada (409) durante outra resposta.
+   * `origem`: só nas perguntas que não foram digitadas (ex.: "escuta"); a mensagem a guarda.
+   */
+  perguntarNoChat: (
+    texto: string,
+    imagens: readonly ImagemParaEnvio[] = [],
+    opcoes: { origem?: OrigemDaPergunta } = {},
+  ) =>
     requisitar<{ mensagemId: string }>("/chat/mensagens", {
       method: "POST",
-      body: JSON.stringify(imagens.length > 0 ? { texto, imagens } : { texto }),
+      body: JSON.stringify({
+        texto,
+        ...(imagens.length > 0 ? { imagens } : {}),
+        ...(opcoes.origem !== undefined ? { origem: opcoes.origem } : {}),
+      }),
+    }),
+
+  /**
+   * Diz se o trecho transcrito pela escuta é uma pergunta e, sendo, devolve a
+   * pergunta pronta para o chat. Não envia nada ao chat. Recusado com 400
+   * (trecho inválido); 502 e 503 quando o Claude Code falha ou não está
+   * disponível. Abortar o `sinal` cancela.
+   */
+  classificarNaEscuta: (pedido: PedidoDeClassificacaoDaEscuta, sinal?: AbortSignal) =>
+    requisitar<ClassificacaoDaEscuta>("/escuta/classificar", {
+      method: "POST",
+      body: JSON.stringify({
+        trecho: pedido.trecho,
+        ...(pedido.contexto !== undefined ? { contexto: pedido.contexto } : {}),
+      }),
+      ...(sinal ? { signal: sinal } : {}),
     }),
 
   /** Modelo e/ou esforço do chat; a escolha vira o padrão das próximas perguntas. */
