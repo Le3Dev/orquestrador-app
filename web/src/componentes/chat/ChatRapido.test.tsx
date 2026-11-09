@@ -2,12 +2,33 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 
 import { api } from "../../shared/api/cliente";
 import type { MensagemDoChat } from "../../shared/api/tipos";
+import type { FaseDoDitado } from "../../shared/ditado/useDitado";
 import {
   ESTADO_INICIAL_DO_CHAT,
   type EstadoDoChatNaTela,
   type MensagemDoChatNaTela,
 } from "../../shared/estado/aplicarEventoDoChat";
 import { ChatRapido } from "./ChatRapido";
+
+/** O ditado sem microfone nem Whisper: o clique alterna a gravação e o teste entrega o texto transcrito. */
+const ditadoFalso = vi.hoisted(() => ({ entregar: null as ((texto: string) => void) | null }));
+vi.mock("../../shared/ditado/useDitado", async () => {
+  const { useState } = await import("react");
+  return {
+    useDitado: (aoTranscrever: (texto: string) => void) => {
+      const [fase, setFase] = useState<FaseDoDitado>("parado");
+      ditadoFalso.entregar = aoTranscrever;
+      return {
+        fase,
+        baixando: null,
+        erro: null,
+        alternar: () => setFase((atual) => (atual === "gravando" ? "parado" : "gravando")),
+        descartar: () => setFase("parado"),
+        fecharErro: () => undefined,
+      };
+    },
+  };
+});
 
 function mensagem(
   id: string,
@@ -409,6 +430,78 @@ describe("ChatRapido", () => {
       fireEvent.keyDown(campo, { key: "Enter" });
       expect(perguntar).toHaveBeenCalledWith("Oi", []);
       await waitFor(() => expect(composer()).toHaveClass("composer-compacto"));
+    });
+  });
+
+  describe("ditado por voz", () => {
+    const composer = () => screen.getByTestId("composer-do-chat");
+    const microfone = () => screen.getByRole("button", { name: "Ditar a mensagem por voz" });
+
+    it("flutuante: o microfone fica na linha do composer; o ditado entra no campo e dá para enviar", async () => {
+      const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+      const { campo } = renderizar();
+
+      expect(microfone().closest(".linha-do-composer")).not.toBeNull();
+      fireEvent.change(campo, { target: { value: "Revise" } });
+      fireEvent.click(microfone());
+      expect(screen.getByRole("button", { name: "Parar e transformar em texto" })).toHaveAttribute("aria-pressed", "true");
+
+      act(() => ditadoFalso.entregar?.("o módulo do chat"));
+      expect(campo).toHaveValue("Revise o módulo do chat");
+      expect(campo).toHaveFocus();
+
+      fireEvent.keyDown(campo, { key: "Enter" });
+      expect(perguntar).toHaveBeenCalledWith("Revise o módulo do chat", []);
+      await waitFor(() => expect(campo).toHaveValue(""));
+    });
+
+    it("fixo: o microfone também fica no composer da coluna", () => {
+      render(
+        <ChatRapido
+          chat={OCIOSO}
+          desconectado={false}
+          erroAoCarregar={null}
+          aoMudarPreferencias={vi.fn()}
+          aoAbrirTerminal={vi.fn()}
+          temVagaPara={vi.fn().mockReturnValue(true)}
+          aoAtualizarOrquestradores={vi.fn().mockResolvedValue(undefined)}
+          orquestradores={[]}
+          fixo
+        />,
+      );
+
+      const lateral = screen.getByRole("complementary", { name: "Chat rápido" });
+      expect(lateral).toContainElement(microfone());
+      act(() => ditadoFalso.entregar?.("abra o painel"));
+      expect(screen.getByRole("textbox", { name: "Pergunta para o Claude" })).toHaveValue("abra o painel");
+    });
+
+    it("gravando: o foco fica no microfone, o composer não recolhe e o Esc descarta sem ocultar a conversa", () => {
+      renderizar({
+        ...OCIOSO,
+        mensagens: [mensagem("u1", "usuario", { texto: "oi" }), mensagem("c1", "claude", { texto: "Olá!" })],
+      });
+      expect(composer()).toHaveClass("composer-compacto");
+
+      const botao = microfone();
+      act(() => botao.focus());
+      fireEvent.click(botao);
+      expect(botao).toHaveFocus();
+      expect(botao).toHaveAttribute("aria-pressed", "true");
+      expect(composer()).toHaveClass("composer-expandido");
+
+      // O foco sai do chat no meio da gravação: o composer continua expandido.
+      act(() => botao.blur());
+      expect(composer()).toHaveClass("composer-expandido");
+
+      act(() => botao.focus());
+      fireEvent.keyDown(botao, { key: "Escape" });
+      expect(botao).toHaveAttribute("aria-pressed", "false");
+      expect(screen.getByRole("region", { name: "Conversa com o Claude" })).toBeVisible();
+
+      // Sem gravar, perder o foco vazio recolhe como antes.
+      act(() => botao.blur());
+      expect(composer()).toHaveClass("composer-compacto");
     });
   });
 

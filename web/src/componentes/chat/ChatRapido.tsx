@@ -13,6 +13,7 @@ import {
 import { api, type ImagemParaEnvio, mensagemDeErro } from "../../shared/api/cliente";
 import type { AtividadeDaResposta, PreferenciasDoChat, ResumoDoOrquestrador } from "../../shared/api/tipos";
 import { comandoDoPrompt, completarComando, dicaDeComando } from "../../shared/comandosDoPrompt";
+import { juntarDitado } from "../../shared/ditado/texto";
 import {
   type EstadoDoChatNaTela,
   type MensagemDoChatNaTela,
@@ -30,6 +31,7 @@ import {
 } from "../../shared/hooks/usePreferenciasDaTela";
 import { ehCapturaDeTela, type ImagemAnexada, lerImagem, MAXIMO_DE_IMAGENS, problemaDaImagem, TIPOS_DE_IMAGEM } from "../../shared/imagens";
 import type { CapturaDeTela } from "../../shared/ponteDoDesktop";
+import { BotaoDeDitado } from "../BotaoDeDitado";
 import { AvisoDaMelhoria, BotaoDeMelhorar } from "../MelhoriaDoPrompt";
 import { TextoFormatado } from "../TextoFormatado";
 import { CartaoDeAcao, type PropsDasAcoesDoChat } from "./CartaoDeAcao";
@@ -375,6 +377,7 @@ function assinaturaDaUltima(chat: EstadoDoChatNaTela): string {
  * limpa) e, acima dele, a conversa. Respostas em Markdown, com o cursor
  * enquanto chegam, cartões para as ações que o Claude sugere no app e
  * cartões de pergunta com opções clicáveis (a escolha vai como a próxima pergunta).
+ * O microfone dita a pergunta por voz (Esc, com ele focado, descarta a gravação).
  *
  * Quando o chat precisa editar um arquivo ou rodar um comando sem estar
  * autorizado, a última resposta ganha o cartão de autorização. Autorizado,
@@ -640,6 +643,12 @@ export function ChatRapido({
     }
   }
 
+  function receberDitado(ditado: string): void {
+    setTexto((atual) => juntarDitado(atual, ditado));
+    requestAnimationFrame(ajustarAltura);
+    campo.current?.focus();
+  }
+
   function aoColar(evento: ClipboardEvent<HTMLTextAreaElement>): void {
     const arquivos = [...evento.clipboardData.files].filter((arquivo) => arquivo.type.startsWith("image/"));
     if (arquivos.length > 0) {
@@ -859,12 +868,22 @@ export function ChatRapido({
           data-testid="composer-do-chat"
           onClick={(evento) => {
             // Clicar em qualquer parte expande e leva o foco ao campo (menos dentro do menu do modelo).
-            if (!(evento.target instanceof Element && evento.target.closest('[role="menu"]') !== null)) {
-              campo.current?.focus();
+            const alvo = evento.target instanceof Element ? evento.target : null;
+            if (alvo !== null && alvo.closest('[role="menu"]') !== null) {
+              return;
             }
+            // No microfone, expande mas o foco fica nele: o Esc ali descarta o ditado.
+            if (alvo !== null && alvo.closest(".ditado") !== null) {
+              setEmUso(true);
+              return;
+            }
+            campo.current?.focus();
           }}
           onBlur={(evento) => {
-            if (!evento.currentTarget.contains(evento.relatedTarget as Node | null)) {
+            const composer = evento.currentTarget;
+            // Gravando ou transcrevendo, não recolhe: o microfone e o aviso dele seguem à vista.
+            const ditando = composer.querySelector('.ditado [aria-pressed="true"], .ditado [aria-busy="true"]') !== null;
+            if (!composer.contains(evento.relatedTarget as Node | null) && !ditando) {
               setEmUso(false);
             }
           }}
@@ -944,6 +963,7 @@ export function ChatRapido({
               melhoria={melhoria}
               desabilitado={texto.trim() === "" || desconectado || respondendo || enviando}
             />
+            <BotaoDeDitado destino="a mensagem" className="ditado-a-direita" aoTranscrever={receberDitado} />
             {respondendo && <span className="etiqueta etiqueta-ativa etiqueta-pulso">respondendo…</span>}
             {chat.alteracoesAutorizadas && (
               <span

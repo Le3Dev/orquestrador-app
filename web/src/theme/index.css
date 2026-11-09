@@ -3502,3 +3502,5 @@ html.modo-invisivel .barra-de-titulo * {
 .balao-do-ditado-erro { border-color: var(--error); color: var(--error); padding-right: 4px; }
 /* Dentro de caixas com rolagem (instruções), o balão abre para baixo. */
 .ditado-abaixo .balao-do-ditado { top: calc(100% + 6px); bottom: auto; }
+/* No chat rápido o microfone fica perto da borda esquerda (na coluna fixa, a da tela): o balão abre para a direita. */
+.ditado-a-direita .balao-do-ditado { left: 0; right: auto; }
