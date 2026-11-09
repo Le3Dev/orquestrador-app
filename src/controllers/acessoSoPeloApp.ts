@@ -130,13 +130,32 @@ function querHtml(requisicao: Request): boolean {
 }
 
 /**
+ * O cabeçalho `Host` é o do próprio servidor local (`127.0.0.1:<porta>` ou
+ * `localhost:<porta>`, com a porta em que a conexão chegou)? Defesa contra DNS
+ * rebinding: um site que aponte o próprio nome para 127.0.0.1 continua mandando
+ * o nome dele no `Host`. O proxy do Vite (`changeOrigin`) reescreve o `Host`
+ * para o do servidor, então o `desktop:dev` também passa.
+ */
+export function hostDoServidorLocal(host: string | undefined, portaLocal: number | undefined): boolean {
+  if (host === undefined || portaLocal === undefined) {
+    return false;
+  }
+  const encontrado = /^(?:127\.0\.0\.1|localhost):(\d{1,5})$/i.exec(host.trim());
+  return encontrado !== null && Number(encontrado[1]) === portaLocal;
+}
+
+/**
  * Trava: o servidor só atende o aplicativo desktop, que manda a chave da
- * abertura no cookie `orquestrador_acesso`. Deve ser o primeiro middleware.
+ * abertura no cookie `orquestrador_acesso` e fala com ele pelo endereço local
+ * (cabeçalho `Host`). Deve ser o primeiro middleware.
  */
 export function acessoSoPeloApp(opcoes: OpcoesDoAcesso): RequestHandler {
   const { chave, urlDeDownload } = opcoes;
   return (requisicao: Request, resposta: Response, proximo: NextFunction): void => {
-    if (temChaveDoApp(requisicao.headers.cookie, chave)) {
+    if (
+      hostDoServidorLocal(requisicao.headers.host, requisicao.socket.localPort) &&
+      temChaveDoApp(requisicao.headers.cookie, chave)
+    ) {
       proximo();
       return;
     }

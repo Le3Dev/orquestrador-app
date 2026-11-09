@@ -61,6 +61,7 @@ const {
   session,
   shell,
   utilityProcess,
+  WebContentsView,
 } = require("electron");
 const { capturarTela } = require("./capturaDeTela");
 const { criarMaximizacao } = require("./maximizacao");
@@ -85,6 +86,7 @@ const {
   validarConfiguracao,
 } = require("./configuracaoLocal");
 const { importarHistorico, localizarHistoricoAntigo } = require("./importacaoDoHistorico");
+const { criarVistasDaPrevia } = require("./vistaDaPrevia");
 // Ajustes só do macOS; fora dele cada função devolve o comportamento de antes.
 const mac = require("./mac");
 
@@ -744,6 +746,7 @@ async function abrirJanelaPrincipal() {
   janela.on("closed", () => {
     if (janelaPrincipal === janela) janelaPrincipal = null;
   });
+  vistasDaPrevia.anexar(janela);
   maximizacoes.set(
     janela,
     criarMaximizacao(janela, screen, (maximizada) => {
@@ -852,6 +855,33 @@ ipcMain.handle("licenca:deactivate", () => licenca.deactivate());
 ipcMain.handle("licenca:status", () => licenca.status());
 
 // ──────────────────────────────────────────────────────────────────────────
+// Vista nativa da prévia (electron/vistaDaPrevia.js): endereços externos num
+// WebContentsView com a sessão `persist:previa`. Os IPC só valem se vierem do
+// quadro principal da janela principal.
+// ──────────────────────────────────────────────────────────────────────────
+const vistasDaPrevia = criarVistasDaPrevia({
+  WebContentsView,
+  session,
+  shell,
+  janelaPrincipal: () => janelaPrincipal,
+  eDaJanelaPrincipal: (evento) =>
+    Boolean(janelaPrincipal) &&
+    !janelaPrincipal.isDestroyed() &&
+    evento.sender === janelaPrincipal.webContents &&
+    evento.senderFrame === janelaPrincipal.webContents.mainFrame,
+  bloqueada: () => modoInvisivel !== null,
+  nomeDoApp: app.getName(),
+  registrar: (texto) => registrarNoLog("previa", texto),
+});
+
+ipcMain.handle("previa:abrir", (evento, dados) => vistasDaPrevia.aoAbrir(evento, dados));
+ipcMain.on("previa:retangulo", (evento, dados) => vistasDaPrevia.aoMoverRetangulo(evento, dados));
+ipcMain.handle("previa:ativar", (evento, dados) => vistasDaPrevia.aoAtivar(evento, dados));
+ipcMain.handle("previa:recarregar", (evento, dados) => vistasDaPrevia.aoRecarregar(evento, dados));
+ipcMain.handle("previa:fechar", (evento, dados) => vistasDaPrevia.aoFechar(evento, dados));
+ipcMain.handle("previa:sair-das-contas", (evento) => vistasDaPrevia.aoSairDasContas(evento));
+
+// ──────────────────────────────────────────────────────────────────────────
 // IPC — atualização automática (tela principal). Fora do app instalado,
 // obter/verificar devolvem situacao "indisponivel" com a versão atual.
 // ──────────────────────────────────────────────────────────────────────────
@@ -912,6 +942,8 @@ function entrarNoModoInvisivel() {
     skipTaskbar: false, // a janela principal nunca nasce com skipTaskbar (o Electron não tem getter)
   };
   modoInvisivel = { janela, anterior };
+  // A vista nativa da prévia é uma camada por cima da tela: some no modo invisível.
+  vistasDaPrevia.desativarTodas();
   // Maximizada fica como está (cobre o monitor); os bounds só são restaurados se não estava.
   janela.setAlwaysOnTop(true, "screen-saver");
   janela.setContentProtection(true);

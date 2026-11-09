@@ -1591,6 +1591,30 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .campo-do-endereco::placeholder { color: var(--placeholder); }
 .campo-do-endereco-invalido, .campo-do-endereco-invalido:focus { border-color: var(--error); }
 
+/* O host real da página na vista nativa; muda de cor quando o domínio registrável não é mais o do endereço aberto. */
+.host-atual-da-previa {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 38%;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-family: var(--fonte-mono);
+  font-size: 10.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+}
+.host-atual-da-previa-mudou {
+  border-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 16%, var(--surface));
+  color: var(--warning);
+  font-weight: 700;
+}
+
 .corpo-da-previa {
   position: relative;
   flex: 1;
@@ -1653,6 +1677,50 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 }
 .camada-de-ativar:hover .dica-da-camada,
 .camada-de-ativar:focus-visible .dica-da-camada { display: block; }
+
+/* Endereço externo no app desktop (VistaNativaDaPrevia): inativa, o corpo mostra a
+ * foto da página; ativa, a vista nativa do Electron cobre o corpo por cima do DOM. */
+.vista-nativa-da-previa {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: white;
+}
+.foto-da-previa {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top left;
+  user-select: none;
+}
+.vista-nativa-da-previa > .mensagem-da-previa { background: var(--surface); }
+
+/* O menu "⋯" da barra da prévia (Sair das contas). */
+.menu-da-previa {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 260px;
+  padding: 4px;
+  cursor: default;
+  font-size: 12px;
+  transform-origin: top right;
+  animation: surgir-mola var(--tempo-de-surgir) var(--curva-de-mola) backwards;
+}
+.aviso-do-menu-da-previa {
+  margin: 0;
+  padding: 2px 10px 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
 
 .mensagem-da-previa {
   display: grid;
@@ -2971,7 +3039,7 @@ html.modo-invisivel .barra-de-titulo * {
 .fundo-que-esmaece { animation: esmaecer-fundo var(--tempo-de-surgir) ease-out backwards; }
 /* O canvas em movimento e o servidor fora pausam as animações (acima): a
  * entrada ficaria congelada no começo, invisível. O que surge vai até o fim. */
-.canvas-movendo .react-flow__node :is(.surgir, .menu-da-criacao, .menu-de-versoes, .menu-da-barra-do-terminal, .painel-da-configuracao),
+.canvas-movendo .react-flow__node :is(.surgir, .menu-da-criacao, .menu-de-versoes, .menu-da-previa, .menu-da-barra-do-terminal, .painel-da-configuracao),
 .canvas-desconectado .chat-rapido :is(.surgir, .menu-do-seletor, .submenu-do-seletor, .menu-da-criacao) {
   animation-play-state: running !important;
 }
