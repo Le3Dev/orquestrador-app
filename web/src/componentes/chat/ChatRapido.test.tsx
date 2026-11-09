@@ -11,7 +11,12 @@ import {
 import { ChatRapido, TIPO_DA_RESPOSTA_DO_CHAT } from "./ChatRapido";
 
 /** O ditado sem microfone nem Whisper: o clique alterna a gravação e o teste entrega o texto transcrito. */
-const ditadoFalso = vi.hoisted(() => ({ entregar: null as ((texto: string) => void) | null }));
+const ditadoFalso = vi.hoisted(() => ({
+  entregar: null as ((texto: string) => void) | null,
+  /** Ligado, o clique passa por "pedindo-microfone" (a permissão do navegador) e só `gravar()` chega a "gravando". */
+  pedirPermissao: false,
+  gravar: null as (() => void) | null,
+}));
 vi.mock("../../shared/ditado/useDitado", async () => {
   const { useState } = await import("react");
   return {
@@ -22,7 +27,14 @@ vi.mock("../../shared/ditado/useDitado", async () => {
         fase,
         baixando: null,
         erro: null,
-        alternar: () => setFase((atual) => (atual === "gravando" ? "parado" : "gravando")),
+        alternar: () => {
+          if (ditadoFalso.pedirPermissao && fase === "parado") {
+            setFase("pedindo-microfone");
+            ditadoFalso.gravar = () => setFase("gravando");
+            return;
+          }
+          setFase((atual) => (atual === "gravando" ? "parado" : "gravando"));
+        },
         descartar: () => setFase("parado"),
         fecharErro: () => undefined,
       };
@@ -474,6 +486,52 @@ describe("ChatRapido", () => {
       expect(lateral).toContainElement(microfone());
       act(() => ditadoFalso.entregar?.("abra o painel"));
       expect(screen.getByRole("textbox", { name: "Pergunta para o Claude" })).toHaveValue("abra o painel");
+    });
+
+    it("depois do clique, com a permissão do microfone pendente, o botão não perde o foco e o Esc descarta a gravação", () => {
+      ditadoFalso.pedirPermissao = true;
+      // Como o Chromium: um botão focado que passa a `disabled` deixa de ter o foco (o Esc iria para o corpo da página).
+      const observador = new MutationObserver((registros) => {
+        for (const registro of registros) {
+          const alvo = registro.target as HTMLButtonElement;
+          if (alvo.disabled && alvo === document.activeElement) {
+            alvo.blur();
+          }
+        }
+      });
+      observador.observe(document.body, { attributes: true, attributeFilter: ["disabled"], subtree: true });
+      try {
+        renderizar({
+          ...OCIOSO,
+          mensagens: [mensagem("u1", "usuario", { texto: "oi" }), mensagem("c1", "claude", { texto: "Olá!" })],
+        });
+
+        const botao = microfone();
+        act(() => botao.focus());
+        fireEvent.click(botao);
+        // Pedindo a permissão: o botão segue focado (marcado como ocupado, sem `disabled`) e o composer expandido.
+        expect(botao).toHaveAttribute("aria-busy", "true");
+        expect(botao).toHaveAttribute("aria-disabled", "true");
+        expect(botao).not.toBeDisabled();
+        expect(botao).toHaveFocus();
+        expect(composer()).toHaveClass("composer-expandido");
+
+        // Outro clique no meio do pedido não faz nada.
+        fireEvent.click(botao);
+        expect(botao).toHaveAttribute("aria-busy", "true");
+
+        act(() => ditadoFalso.gravar?.());
+        const gravando = screen.getByRole("button", { name: "Parar e transformar em texto" });
+        expect(gravando).toHaveAttribute("aria-pressed", "true");
+        expect(gravando).toHaveFocus();
+
+        fireEvent.keyDown(gravando, { key: "Escape" });
+        expect(gravando).toHaveAttribute("aria-pressed", "false");
+        expect(screen.getByRole("region", { name: "Conversa com o Claude" })).toBeVisible();
+      } finally {
+        observador.disconnect();
+        ditadoFalso.pedirPermissao = false;
+      }
     });
 
     it("gravando: o foco fica no microfone, o composer não recolhe e o Esc descarta sem ocultar a conversa", () => {

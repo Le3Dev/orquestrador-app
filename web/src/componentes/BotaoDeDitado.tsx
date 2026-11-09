@@ -14,7 +14,10 @@ interface Props {
 /**
  * Microfone: clica para falar, clica de novo para virar texto. A
  * transcrição roda no próprio computador (Whisper), e o áudio não sai dele.
- * Esc, com o botão focado, descarta a gravação.
+ * Esc, com o botão focado, descarta a gravação. Por isso o botão nunca fica
+ * `disabled` (o navegador tira o foco de um botão focado que desabilita, e o
+ * Esc iria para o corpo da página): enquanto pede o microfone ou transcreve, ele
+ * fica `aria-disabled` e o clique é ignorado.
  */
 export function BotaoDeDitado({ aoTranscrever, destino, className = "" }: Props) {
   const { fase, baixando, erro, alternar, descartar, fecharErro } = useDitado(aoTranscrever);
@@ -46,8 +49,12 @@ export function BotaoDeDitado({ aoTranscrever, destino, className = "" }: Props)
         aria-label={gravando ? "Parar e transformar em texto" : `Ditar ${destino} por voz`}
         aria-pressed={gravando}
         aria-busy={ocupado}
-        disabled={ocupado}
-        onClick={alternar}
+        aria-disabled={ocupado}
+        onClick={() => {
+          if (!ocupado) {
+            alternar();
+          }
+        }}
         onKeyDown={aoTeclar}
       >
         {ocupado ? <span className="girador-do-ditado" aria-hidden="true" /> : <IconeMicrofone />}

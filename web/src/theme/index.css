@@ -1115,6 +1115,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 }
 
 .botao-icone:disabled { opacity: .45; cursor: not-allowed; }
+/* O microfone do ditado não desabilita (perderia o foco e o Esc): o mesmo aspecto, por aria-disabled. */
+.ditado .botao-icone[aria-disabled="true"] { opacity: .45; cursor: progress; }
 .botao-icone-perigo:not(:disabled):hover { color: var(--error); }
 
 /* Botão com cara de link (ex.: "tentar de novo"). */
