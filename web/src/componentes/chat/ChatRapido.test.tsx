@@ -2,12 +2,68 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 
 import { api } from "../../shared/api/cliente";
 import type { MensagemDoChat } from "../../shared/api/tipos";
+import type { EscutaNaTela, OpcoesDaEscuta, SituacaoDaEscuta } from "../../shared/escuta/useEscuta";
 import {
   ESTADO_INICIAL_DO_CHAT,
   type EstadoDoChatNaTela,
   type MensagemDoChatNaTela,
 } from "../../shared/estado/aplicarEventoDoChat";
 import { ChatRapido } from "./ChatRapido";
+
+/**
+ * A escuta simulada: guarda as opções que o chat passou (para chamar o `enviar`
+ * e o `preencherComposer` como a escuta faria) e devolve a situação pedida
+ * enquanto o modo invisível estiver ligado com a escuta disponível.
+ */
+const escutaSimulada = vi.hoisted(() => ({
+  opcoes: null as OpcoesDaEscuta | null,
+  situacaoNoModo: "escutando" as SituacaoDaEscuta,
+  confirmarAviso: vi.fn(),
+  recusarAviso: vi.fn(),
+  pausar: vi.fn(),
+}));
+
+vi.mock("../../shared/escuta/useEscuta", () => ({
+  useEscuta: (opcoes: OpcoesDaEscuta): EscutaNaTela => {
+    escutaSimulada.opcoes = opcoes;
+    const situacao: SituacaoDaEscuta = !opcoes.escutaDisponivel
+      ? "indisponivel"
+      : opcoes.modoInvisivelAtivo
+        ? escutaSimulada.situacaoNoModo
+        : "desligada";
+    return {
+      situacao,
+      progressoDoDownload: null,
+      linhas: ["qual é a complexidade disso?"],
+      automatico: true,
+      alternarAutomatico: () => undefined,
+      pausar: escutaSimulada.pausar,
+      retomar: () => undefined,
+      erro: null,
+      descartarErro: () => undefined,
+      precisaDoAviso: situacao === "aguardando-aviso",
+      confirmarAviso: escutaSimulada.confirmarAviso,
+      recusarAviso: escutaSimulada.recusarAviso,
+      ultimaPergunta: null,
+    };
+  },
+}));
+
+beforeEach(() => {
+  escutaSimulada.opcoes = null;
+  escutaSimulada.situacaoNoModo = "escutando";
+  escutaSimulada.confirmarAviso = vi.fn();
+  escutaSimulada.recusarAviso = vi.fn();
+  escutaSimulada.pausar = vi.fn();
+});
+
+/** As opções que o chat passou à escuta no último render. */
+function opcoesDaEscuta(): OpcoesDaEscuta {
+  if (escutaSimulada.opcoes === null) {
+    throw new Error("o chat não chamou o useEscuta");
+  }
+  return escutaSimulada.opcoes;
+}
 
 function mensagem(
   id: string,
@@ -74,11 +130,12 @@ describe("ChatRapido · modo invisível", () => {
 
   const QUADRO = { nome: "tela-2026-11-08T10-00-00-000Z.jpg", tipoDeMidia: "image/jpeg" as const, base64: "QUJD" };
 
-  function ponteAtiva(capturarTela = vi.fn().mockResolvedValue(FOTO)) {
+  function ponteAtiva(capturarTela = vi.fn().mockResolvedValue(FOTO), escutaDisponivel = false) {
     let ouvinte: ((ativo: boolean) => void) | null = null;
     let ouvinteDeQuadro: ((captura: typeof QUADRO) => void) | null = null;
     const cancelarQuadro = vi.fn();
     const modoInvisivel = {
+      escutaDisponivel,
       entrar: vi.fn(),
       sair: vi.fn(),
       capturarMouse: vi.fn().mockResolvedValue(undefined),
@@ -319,6 +376,191 @@ describe("ChatRapido · modo invisível", () => {
     expect(modoInvisivel.capturarMouse).toHaveBeenLastCalledWith(true);
     fireEvent.mouseLeave(screen.getByTestId("chat-rapido"));
     expect(modoInvisivel.capturarMouse).toHaveBeenLastCalledWith(false);
+  });
+
+  describe("escuta do áudio", () => {
+    const indicador = () => screen.queryByTestId("indicador-da-escuta");
+    const faixa = () => screen.queryByTestId("faixa-da-escuta");
+
+    it("o indicador aparece ao lado do 👁 com o modo ativo e some ao desligar; a faixa vem junto", () => {
+      const { ativar, desativar } = ponteAtiva(undefined, true);
+      renderizar();
+      expect(indicador()).not.toBeInTheDocument();
+      expect(faixa()).not.toBeInTheDocument();
+
+      ativar();
+      const olho = screen.getByRole("button", { name: "Modo invisível" });
+      expect(olho.nextElementSibling).toBe(indicador());
+      expect(indicador()).toHaveTextContent("escutando");
+      expect(screen.getByTestId("chat-rapido")).toContainElement(faixa());
+      expect(faixa()).toHaveTextContent("qual é a complexidade disso?");
+
+      fireEvent.click(screen.getByRole("button", { name: "Pausar a escuta" }));
+      expect(escutaSimulada.pausar).toHaveBeenCalledTimes(1);
+
+      desativar();
+      expect(indicador()).not.toBeInTheDocument();
+      expect(faixa()).not.toBeInTheDocument();
+    });
+
+    it("sem a escuta disponível, o modo ativo não mostra indicador nem faixa", () => {
+      const { ativar } = ponteAtiva();
+      renderizar();
+      ativar();
+      expect(opcoesDaEscuta().escutaDisponivel).toBe(false);
+      expect(indicador()).not.toBeInTheDocument();
+      expect(faixa()).not.toBeInTheDocument();
+    });
+
+    it("na primeira vez, o aviso aparece dentro do chat e só o botão liga a escuta", () => {
+      escutaSimulada.situacaoNoModo = "aguardando-aviso";
+      const { ativar } = ponteAtiva(undefined, true);
+      renderizar();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      ativar();
+      const aviso = screen.getByRole("dialog", { name: "Escutar o áudio do computador?" });
+      expect(screen.getByTestId("chat-rapido")).toContainElement(aviso);
+      expect(indicador()).not.toBeInTheDocument();
+
+      fireEvent.click(within(aviso).getByRole("button", { name: "Começar a escutar" }));
+      expect(escutaSimulada.confirmarAviso).toHaveBeenCalledTimes(1);
+      fireEvent.click(within(aviso).getByRole("button", { name: "Agora não" }));
+      expect(escutaSimulada.recusarAviso).toHaveBeenCalledTimes(1);
+    });
+
+    it("passa ao hook o modo, a escuta disponível, o chat livre e a autorização", () => {
+      const { ativar } = ponteAtiva(undefined, true);
+      const { rerender } = renderizar({ ...OCIOSO, alteracoesAutorizadas: true });
+      expect(opcoesDaEscuta()).toMatchObject({
+        modoInvisivelAtivo: false,
+        escutaDisponivel: true,
+        chatLivre: true,
+        autorizacaoAtiva: true,
+      });
+
+      ativar();
+      expect(opcoesDaEscuta().modoInvisivelAtivo).toBe(true);
+
+      rerender(RESPONDENDO);
+      expect(opcoesDaEscuta()).toMatchObject({ chatLivre: false, autorizacaoAtiva: false });
+    });
+
+    it("desconectado, o chat não está livre para a escuta", () => {
+      ponteAtiva(undefined, true);
+      renderizar(OCIOSO, true);
+      expect(opcoesDaEscuta().chatLivre).toBe(false);
+    });
+
+    it("o enviar da escuta manda a pergunta com o print e a origem \"escuta\"", async () => {
+      const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+      const { ativar } = ponteAtiva(undefined, true);
+      renderizar();
+      ativar();
+
+      await act(() => opcoesDaEscuta().enviar("Qual a complexidade?"));
+
+      expect(perguntar).toHaveBeenCalledWith("Qual a complexidade?", [FOTO], { origem: "escuta" });
+    });
+
+    it("o enviar da escuta rejeita com o erro original (ex.: o 409) e não o mostra no composer", async () => {
+      const recusa = new Error("Já existe uma resposta em andamento.");
+      vi.spyOn(api, "perguntarNoChat").mockRejectedValue(recusa);
+      ponteAtiva(undefined, true);
+      renderizar();
+
+      await act(async () => {
+        await expect(opcoesDaEscuta().enviar("Qual a complexidade?")).rejects.toBe(recusa);
+      });
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+});
+
+describe("ChatRapido · escuta no composer e selo", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("o selo \"escuta\" aparece só nas perguntas enviadas pela escuta", () => {
+    renderizar({
+      ...OCIOSO,
+      mensagens: [
+        mensagem("u1", "usuario", { texto: "Qual a complexidade?", origem: "escuta" }),
+        mensagem("c1", "claude", { texto: "O(n)." }),
+        mensagem("u2", "usuario", { texto: "E o espaço?" }),
+      ],
+    });
+
+    const daEscuta = screen.getByText("Qual a complexidade?").closest(".mensagem-do-usuario");
+    const digitada = screen.getByText("E o espaço?").closest(".mensagem-do-usuario");
+    expect(within(daEscuta as HTMLElement).getByText("escuta")).toHaveClass("selo-da-escuta");
+    expect(digitada?.querySelector(".selo-da-escuta")).toBeNull();
+    expect(document.querySelectorAll(".selo-da-escuta")).toHaveLength(1);
+  });
+
+  it("o preencherComposer põe a pergunta no campo com a nota; o Enter envia com a origem e limpa a marca", async () => {
+    const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+    const { campo } = renderizar({ ...OCIOSO, alteracoesAutorizadas: true });
+    expect(screen.queryByTestId("nota-da-escuta")).not.toBeInTheDocument();
+
+    act(() => opcoesDaEscuta().preencherComposer("Como inverter a lista?"));
+    expect(campo).toHaveValue("Como inverter a lista?");
+    expect(screen.getByTestId("nota-da-escuta")).toHaveTextContent("Pergunta da escuta: confira e aperte Enter");
+    expect(perguntar).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(campo, { key: "Enter" });
+    expect(perguntar).toHaveBeenCalledWith("Como inverter a lista?", [], { origem: "escuta" });
+    await waitFor(() => expect(campo).toHaveValue(""));
+    expect(screen.queryByTestId("nota-da-escuta")).not.toBeInTheDocument();
+
+    // A próxima, digitada, vai sem origem.
+    fireEvent.change(campo, { target: { value: "Obrigado" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+    expect(perguntar).toHaveBeenLastCalledWith("Obrigado", []);
+    await waitFor(() => expect(campo).toHaveValue(""));
+  });
+
+  it("apagar o campo tira a marca da escuta: o que for escrito depois vai sem origem", async () => {
+    const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+    const { campo } = renderizar({ ...OCIOSO, alteracoesAutorizadas: true });
+
+    act(() => opcoesDaEscuta().preencherComposer("Como inverter a lista?"));
+    fireEvent.change(campo, { target: { value: "" } });
+    expect(screen.queryByTestId("nota-da-escuta")).not.toBeInTheDocument();
+
+    fireEvent.change(campo, { target: { value: "Outra coisa" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+    expect(perguntar).toHaveBeenCalledWith("Outra coisa", []);
+    await waitFor(() => expect(campo).toHaveValue(""));
+  });
+
+  it("retocar a pergunta da escuta mantém a marca e a origem", async () => {
+    const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+    const { campo } = renderizar({ ...OCIOSO, alteracoesAutorizadas: true });
+
+    act(() => opcoesDaEscuta().preencherComposer("Como inverter a lista"));
+    fireEvent.change(campo, { target: { value: "Como inverter a lista ligada?" } });
+    expect(screen.getByTestId("nota-da-escuta")).toBeInTheDocument();
+
+    fireEvent.keyDown(campo, { key: "Enter" });
+    expect(perguntar).toHaveBeenCalledWith("Como inverter a lista ligada?", [], { origem: "escuta" });
+    await waitFor(() => expect(campo).toHaveValue(""));
+  });
+
+  it("o preencherComposer não apaga um rascunho digitado; troca só a pergunta que a própria escuta pôs", () => {
+    const { campo } = renderizar({ ...OCIOSO, alteracoesAutorizadas: true });
+
+    fireEvent.change(campo, { target: { value: "Meu rascunho" } });
+    act(() => opcoesDaEscuta().preencherComposer("Como inverter a lista?"));
+    expect(campo).toHaveValue("Meu rascunho");
+    expect(screen.queryByTestId("nota-da-escuta")).not.toBeInTheDocument();
+
+    // Campo vazio: a pergunta entra; a seguinte, também da escuta, substitui a anterior.
+    fireEvent.change(campo, { target: { value: "" } });
+    act(() => opcoesDaEscuta().preencherComposer("Como inverter a lista?"));
+    expect(campo).toHaveValue("Como inverter a lista?");
+    act(() => opcoesDaEscuta().preencherComposer("E a lista dupla?"));
+    expect(campo).toHaveValue("E a lista dupla?");
+    expect(screen.getByTestId("nota-da-escuta")).toBeInTheDocument();
   });
 });
 

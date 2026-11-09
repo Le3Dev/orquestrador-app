@@ -9,6 +9,7 @@ import type { EventoDoChat, EventoDoChatRegistrado, PublicadorDoChat } from "./E
 import { instrucoesDoChat, mensagemParaOChat, separarAcoesDoApp } from "./InstrucoesDoChat";
 import type { DadosDaMensagemDoChat, ImagemDaMensagem } from "./MensagemDoChat";
 import type { EventoDoMotorDeChat, MotorDeChat, ResultadoDaResposta } from "./MotorDeChat";
+import type { OrigemDaPergunta } from "./OrigemDaPergunta";
 import { AlteracoesDasPreferenciasDoChat, DadosDasPreferenciasDoChat, PreferenciasDoChat } from "./PreferenciasDoChat";
 import type { OrquestradorExistente, ProjetoDoChat, ProjetosDoChat } from "./ProjetosDoChat";
 import type { RepositorioDoChat } from "./RepositorioDoChat";
@@ -49,6 +50,8 @@ export interface ImagemRecebidaNoChat {
 export interface PerguntaDoUsuario {
   texto: string;
   imagens?: readonly ImagemRecebidaNoChat[];
+  /** De onde veio a pergunta, quando não foi digitada (ex.: "escuta"); vai junto na mensagem. */
+  origem?: OrigemDaPergunta;
 }
 
 export interface PerguntaEnviada {
@@ -123,6 +126,7 @@ export class ServicoDeChat {
       texto: pergunta.texto,
       imagens,
       agora: agora(),
+      ...(pergunta.origem === undefined ? {} : { origem: pergunta.origem }),
     });
     // Valem do começo ao fim desta resposta, mesmo que o usuário as troque no meio.
     const preferencias = repositorio.preferencias();

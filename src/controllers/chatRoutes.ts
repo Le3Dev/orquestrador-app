@@ -4,6 +4,7 @@ import { z, ZodError } from "zod";
 import { TAMANHO_MAXIMO_DA_PERGUNTA } from "../chat/ConversaDoChat";
 import { ErroDoChat, MotivoDoErroDoChat } from "../chat/ErroDoChat";
 import { EventoDoChatRegistrado, PublicadorDoChat, SinalDoChat } from "../chat/EventoDoChat";
+import { ORIGENS_DA_PERGUNTA } from "../chat/OrigemDaPergunta";
 import { ID_DO_CHAT, ServicoDeChat } from "../chat/ServicoDeChat";
 import { ArmazemDeAnexosEmArquivo, ehNomeDeAnexoValido } from "../infraestrutura/arquivos/ArmazemDeAnexosEmArquivo";
 import { MAXIMO_DE_IMAGENS_POR_MENSAGEM, TAMANHO_MAXIMO_DA_IMAGEM, TIPOS_DE_IMAGEM } from "../orquestracao/Anexo";
@@ -75,6 +76,8 @@ const esquemaDaPergunta = z.object({
     )
     .max(MAXIMO_DE_IMAGENS_POR_MENSAGEM, { error: `Anexe até ${MAXIMO_DE_IMAGENS_POR_MENSAGEM} imagens por mensagem.` })
     .default([]),
+  /** Só nas perguntas que não foram digitadas: "escuta" vem do modo invisível. */
+  origem: z.enum(ORIGENS_DA_PERGUNTA, { error: "Origem da mensagem inválida." }).optional(),
 });
 
 const esquemaDasPreferencias = z.object({
@@ -139,7 +142,7 @@ export function criarChatRoutes({ servico, canal, anexos }: Dependencias): Route
   rotas.post(
     "/chat/mensagens",
     rota(async (requisicao, resposta) => {
-      const { texto, imagens } = esquemaDaPergunta.parse(requisicao.body ?? {});
+      const { texto, imagens, origem } = esquemaDaPergunta.parse(requisicao.body ?? {});
       if (texto === "" && imagens.length === 0) {
         throw new ErroDoChat("dados_invalidos", "Escreva uma mensagem ou anexe uma imagem.");
       }
@@ -150,6 +153,7 @@ export function criarChatRoutes({ servico, canal, anexos }: Dependencias): Route
           tipoDeMidia: imagem.tipoDeMidia,
           conteudo: Buffer.from(imagem.base64, "base64"),
         })),
+        ...(origem === undefined ? {} : { origem }),
       });
       resposta.status(202).json({ mensagemId });
     }),

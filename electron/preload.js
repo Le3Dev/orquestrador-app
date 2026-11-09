@@ -66,7 +66,8 @@ contextBridge.exposeInMainWorld("electron", {
   },
 
   // Modo invisível da janela principal (transparente, sempre no topo, fora de
-  // capturas). Sai também pelo atalho global Ctrl+Shift+I.
+  // capturas). Sai também pelo atalho global Ctrl+Shift+I. Enquanto ativo, a
+  // tela escuta o áudio do sistema (electron/escutaDoModoInvisivel.js).
   modoInvisivel: {
     entrar: () => ipcRenderer.invoke("modo-invisivel:entrar").then(() => undefined),
     sair: () => ipcRenderer.invoke("modo-invisivel:sair").then(() => undefined),
@@ -87,6 +88,11 @@ contextBridge.exposeInMainWorld("electron", {
       ipcRenderer.on("modo-invisivel:estado", ouvinte);
       return () => ipcRenderer.removeListener("modo-invisivel:estado", ouvinte);
     },
+    // Estado atual (para a tela que monta com o modo já ligado).
+    estaAtivo: () => ipcRenderer.invoke("modo-invisivel:consultar").then(Boolean),
+    // A escuta do áudio do sistema (getDisplayMedia + loopback) só existe no
+    // Windows. process.platform faz parte do `process` do preload com sandbox.
+    escutaDisponivel: process.platform === "win32",
   },
 
   primeiraAbertura: {

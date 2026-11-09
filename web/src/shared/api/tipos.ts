@@ -502,6 +502,12 @@ export interface AutorizacaoPendente {
   detalhe: string;
 }
 
+/**
+ * De onde veio uma pergunta que não foi digitada: `escuta` é a detectada na
+ * transcrição do áudio do computador, com o modo invisível ligado.
+ */
+export type OrigemDaPergunta = "escuta";
+
 export interface MensagemDoChat {
   id: string;
   papel: PapelNoChat;
@@ -516,6 +522,20 @@ export interface MensagemDoChat {
   uso: UsoDaResposta | null;
   /** Falta nas mensagens gravadas antes da autorização (vale `null`). */
   autorizacaoPendente?: AutorizacaoPendente | null;
+  /** Só nas perguntas enviadas sozinhas (ex.: pela escuta); falta nas digitadas e nas antigas. */
+  origem?: OrigemDaPergunta;
+}
+
+/** O trecho transcrito pela escuta e, opcionalmente, o que veio logo antes, para dar sentido a ele. */
+export interface PedidoDeClassificacaoDaEscuta {
+  trecho: string;
+  contexto?: string;
+}
+
+/** Se o trecho é uma pergunta e, sendo, a pergunta já pronta para enviar ao chat (nula quando não é). */
+export interface ClassificacaoDaEscuta {
+  ehPergunta: boolean;
+  pergunta: string | null;
 }
 
 export type SituacaoDoChat = "ocioso" | "respondendo";

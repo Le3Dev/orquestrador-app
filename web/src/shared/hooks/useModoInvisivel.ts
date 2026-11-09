@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { apiDoModoInvisivel, type CapturaDeTela } from "../ponteDoDesktop";
+import { apiDoModoInvisivel, type ApiDoModoInvisivel, type CapturaDeTela } from "../ponteDoDesktop";
 
 export interface MouseDaArea {
   onMouseEnter: () => void;
@@ -11,6 +11,8 @@ export interface ModoInvisivel {
   /** O app desktop oferece o modo invisível (no navegador, não). */
   disponivel: boolean;
   ativo: boolean;
+  /** A escuta do áudio do sistema funciona aqui (só no app desktop no Windows). */
+  escutaDisponivel: boolean;
   /** Se entrar ou sair falhar, preenche `erro`. */
   entrar: () => Promise<void>;
   sair: () => Promise<void>;
@@ -31,10 +33,20 @@ export interface ModoInvisivel {
 
 const SEM_EFEITO: MouseDaArea = { onMouseEnter: () => undefined, onMouseLeave: () => undefined };
 
+/** Estado atual do modo; uma ponte sem a consulta (ou um mock antigo) conta como desligado. */
+async function consultarEstado(api: ApiDoModoInvisivel): Promise<boolean> {
+  if (typeof api.estaAtivo !== "function") {
+    return false;
+  }
+  return (await api.estaAtivo()) === true;
+}
+
 /**
  * O modo invisível do app desktop. O estado vem do aviso do processo principal
  * (que também avisa a saída pelo atalho Ctrl+Shift+I), então todas as telas que
- * usam o hook ficam em sincronia. Fora do desktop, nada faz efeito.
+ * usam o hook ficam em sincronia. Ao montar, consulta o estado atual: quem
+ * remonta com o modo já ligado (o chat rápido ao alternar fixo/flutuante) não
+ * perde o aviso. Fora do desktop, nada faz efeito.
  */
 export function useModoInvisivel(): ModoInvisivel {
   const [api] = useState(apiDoModoInvisivel);
@@ -45,7 +57,27 @@ export function useModoInvisivel(): ModoInvisivel {
     if (api === null) {
       return undefined;
     }
-    return api.aoMudar(setAtivo);
+    let montado = true;
+    // Um aviso que chegue antes da resposta da consulta é mais recente: ele vence.
+    let avisado = false;
+    const cancelar = api.aoMudar((valor) => {
+      avisado = true;
+      setAtivo(valor);
+    });
+    consultarEstado(api)
+      .then((valor) => {
+        // Sem aviso, `ativo` ainda é o false inicial: só muda se a consulta disser que está ligado.
+        if (montado && !avisado && valor) {
+          setAtivo(true);
+        }
+      })
+      .catch(() => {
+        // Falha na consulta: fica desligado até o próximo aviso do processo principal.
+      });
+    return () => {
+      montado = false;
+      cancelar();
+    };
   }, [api]);
 
   const entrar = useCallback(async () => {
@@ -108,6 +140,7 @@ export function useModoInvisivel(): ModoInvisivel {
   return {
     disponivel: api !== null,
     ativo,
+    escutaDisponivel: api !== null && api.escutaDisponivel === true,
     entrar,
     sair,
     erro,
