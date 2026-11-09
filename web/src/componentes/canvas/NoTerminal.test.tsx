@@ -112,7 +112,7 @@ function renderizar(resumo: ResumoDoOrquestrador, { trabalhando = false } = {}) 
       />
     </ContextoDoCanvas.Provider>,
   );
-  return { aoFechar, acoes: canvas.acoes, opcao: screen.getByRole("switch", { name: "Commit e push quando eu pedir" }) };
+  return { aoFechar, acoes: canvas.acoes, opcao: screen.getByRole("switch", { name: "Commit e push por feature" }) };
 }
 
 const menuDoModelo = (dono: "do orquestrador" | "dos subagentes") =>

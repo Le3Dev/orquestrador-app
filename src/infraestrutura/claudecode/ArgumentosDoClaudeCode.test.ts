@@ -229,13 +229,38 @@ describe("montarArgumentos", () => {
       expect(definicaoDosAgentes(planejamento).executor?.prompt).toContain("Nunca faça commit nem push.");
     });
 
-    it("o executor só commita quando a subtarefa pedir, fora da main e sem Co-authored-by", () => {
+    it("o executor só commita quando a subtarefa o designar, fora da main e sem Co-authored-by", () => {
       const prompt = definicaoDosAgentes(pedido(true, "edicao_e_comandos", "execucao", true)).executor?.prompt ?? "";
 
       expect(prompt).not.toContain("Nunca faça commit nem push.");
-      expect(prompt).toContain("somente se a subtarefa recebida pedir explicitamente");
-      expect(prompt).toContain("Nunca na main");
-      expect(prompt).toContain("Nunca adicione a linha Co-authored-by");
+      expect(prompt).toContain("só se a subtarefa recebida o designar como responsável pelos commits");
+      expect(prompt).toContain("sem essa designação, não faça commit nem push");
+      expect(prompt).toContain("nunca na main");
+      expect(prompt).toContain("nunca a linha Co-authored-by");
+    });
+
+    it("o executor responsável faz um commit por feature, push em seguida e sem git add às cegas", () => {
+      const prompt = definicaoDosAgentes(pedido(true, "edicao_e_comandos", "execucao", true)).executor?.prompt ?? "";
+
+      expect(prompt).toContain("um commit por feature pronta (testada, com lint e build ok)");
+      expect(prompt).toContain("adicionados um a um (nunca git add -A nem git add . às cegas)");
+      expect(prompt).toContain("dê push da branch logo em seguida");
+      expect(prompt).toContain("feature/, fix/, hotfix/ ou refactor/");
+      expect(prompt).toContain("nunca push forçado");
+      expect(prompt).toContain("Conventional Commits, em português");
+    });
+
+    it("o executor não abre PR nem mergeia", () => {
+      const prompt = definicaoDosAgentes(pedido(true, "edicao_e_comandos", "execucao", true)).executor?.prompt ?? "";
+
+      expect(prompt).toContain("Abrir PR e mergear são proibidos");
+    });
+
+    it("com a opção desligada, o executor continua proibido de commitar e não recebe a regra por feature", () => {
+      const prompt = definicaoDosAgentes(pedido(true, "edicao_e_comandos", "execucao", false)).executor?.prompt ?? "";
+
+      expect(prompt).toContain("Nunca faça commit nem push.");
+      expect(prompt).not.toContain("um commit por feature");
     });
   });
 
@@ -368,8 +393,10 @@ describe("definicaoDosAgentes", () => {
     it("seguem a regra de commit e push do turno", () => {
       const agentes = definicaoDosAgentes(comProntos(pedido(true, "edicao_e_comandos", "execucao", true)));
       expect(agentes.revisor?.prompt).toContain(
-        "Commit e push: faça somente se a subtarefa recebida pedir explicitamente",
+        "Commit e push: só se a subtarefa recebida o designar como responsável pelos commits",
       );
+      expect(agentes.revisor?.prompt).toContain("um commit por feature pronta");
+      expect(agentes.revisor?.prompt).toContain("Abrir PR e mergear são proibidos");
     });
 
     it("no Windows, o executor e os prontos levam a regra dos servidores do Windows", () => {

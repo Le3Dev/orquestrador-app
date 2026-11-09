@@ -55,7 +55,7 @@ export const ROTULOS_DAS_PERMISSOES: Readonly<Record<NivelDePermissao, { nome: s
   },
   edicao_e_comandos: {
     nome: "Editar e rodar comandos",
-    descricao: "Também executa comandos no terminal (testes, builds). Commit e push só com a opção abaixo ligada.",
+    descricao: "Também executa comandos no terminal (testes, builds). Commit e push por feature só com a opção abaixo ligada.",
   },
 };
 
@@ -66,7 +66,7 @@ function descreverModelo(modelo: ModeloClaude, esforco: EsforcoDeRaciocinio): st
 }
 
 /**
- * Ex.: "Opus → Sonnet · até 3 subagentes · Somente leitura" (+ " · commit/push quando pedir", se liberado).
+ * Ex.: "Opus → Sonnet · até 3 subagentes · Somente leitura" (+ " · commit/push por feature", se liberado).
  * Com esforço escolhido (diferente de "padrao"): "Opus (esforço alto) → Sonnet (esforço médio) · …".
  * Com instruções personalizadas próprias, termina com " · instruções próprias".
  */
@@ -80,7 +80,7 @@ export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string
     `${orquestrador} → ${subagentes}`,
     quantidade,
     ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome,
-    ...(configuracao.permitirCommitEPush ? ["commit/push quando pedir"] : []),
+    ...(configuracao.permitirCommitEPush ? ["commit/push por feature"] : []),
     ...(configuracao.instrucoesPersonalizadas.trim() === "" ? [] : ["instruções próprias"]),
   ].join(" · ");
 }
@@ -115,7 +115,7 @@ export function descreverAlteracoesDaConfiguracao(alteracoes: Partial<DadosDaCon
     itens.push(`Permissões: ${ROTULOS_DAS_PERMISSOES[alteracoes.nivelDePermissao].nome}`);
   }
   if (alteracoes.permitirCommitEPush !== undefined) {
-    itens.push(`Commit e push quando pedir: ${ligado(alteracoes.permitirCommitEPush)}`);
+    itens.push(`Commit e push por feature: ${ligado(alteracoes.permitirCommitEPush)}`);
   }
   return itens;
 }

@@ -834,6 +834,73 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     }
   });
 
+  it("com o chat fixo à esquerda, o modo invisível usa o chat flutuante sem mudar a preferência, e a coluna volta ao sair", async () => {
+    localStorage.setItem(
+      "orquestrador.preferenciasDaTela",
+      JSON.stringify({ chatFixoNaEsquerda: true, visualizadorDeCodigo: false, larguraDoChatFixo: 360 }),
+    );
+    const ouvintes: Array<(ativo: boolean) => void> = [];
+    const capturarMouse = vi.fn().mockResolvedValue(undefined);
+    janelaComPonte.electron = {
+      desktop: true,
+      janela: {
+        minimizar: vi.fn(),
+        maximizar: vi.fn(),
+        fechar: vi.fn(),
+        estaMaximizada: vi.fn().mockResolvedValue(false),
+        aoMudarMaximizada: vi.fn(() => () => undefined),
+      },
+      modoInvisivel: {
+        entrar: vi.fn(),
+        sair: vi.fn(),
+        capturarMouse,
+        capturarTela: vi.fn(),
+        capturarAgora: vi.fn(),
+        aoCapturarQuadro: vi.fn(() => () => undefined),
+        aoMudar: vi.fn((callback: (ativo: boolean) => void) => {
+          ouvintes.push(callback);
+          return () => undefined;
+        }),
+      },
+    };
+    render(<CanvasDeOrquestradores />);
+    await screen.findByRole("complementary", { name: "Chat rápido" });
+
+    act(() => [...ouvintes].forEach((ouvinte) => ouvinte(true)));
+
+    // A coluna da altura toda cobriria os apps de trás: o chat vai para o painel do pé.
+    expect(screen.queryByRole("complementary", { name: "Chat rápido" })).not.toBeInTheDocument();
+    const chat = screen.getByTestId("chat-rapido");
+    expect(chat.closest(".react-flow__panel")).toHaveClass("painel-do-chat");
+    // O chat remontado já nasce no modo (sem a faixa, que o upstream removeu) e a janela volta a deixar os cliques passarem.
+    expect(within(chat).queryByTestId("faixa-modo-invisivel")).not.toBeInTheDocument();
+    await waitFor(() => expect(capturarMouse).toHaveBeenLastCalledWith(false));
+    expect(screen.queryByRole("button", { name: "Fixar o chat à esquerda" })).not.toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem("orquestrador.preferenciasDaTela") ?? "null")).toMatchObject({
+      chatFixoNaEsquerda: true,
+    });
+
+    act(() => [...ouvintes].forEach((ouvinte) => ouvinte(false)));
+
+    expect(await screen.findByRole("complementary", { name: "Chat rápido" })).toBeInTheDocument();
+    expect(document.querySelector(".painel-do-chat")).toBeNull();
+  });
+
+  it("o fundo opaco da tela fica no #root, nunca no html nem no body (no macOS ele prende na janela)", () => {
+    const css = readFileSync(resolve(__dirname, "../theme/index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const regras = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, seletores = "", corpo = ""]) => ({
+      seletores: seletores.split(",").map((seletor) => seletor.trim()),
+      corpo,
+    }));
+    const daRaiz = regras.filter(({ seletores }) => seletores.some((seletor) => seletor === "html" || seletor === "body"));
+    expect(daRaiz.length).toBeGreaterThan(0);
+    for (const { seletores, corpo } of daRaiz) {
+      expect(corpo, seletores.join(", ")).not.toMatch(/background/);
+    }
+    const doRoot = regras.find(({ seletores }) => seletores.includes("#root"));
+    expect(doRoot?.corpo).toMatch(/background-color:\s*var\(--screen-bg\)/);
+  });
+
   it("a paleta oferece \"Procurar atualizações\" com a versão; escolher verifica e ela, aberta, mostra o resultado", async () => {
     const atualizacao = ponteComAtualizacao(
       estadoDaAtualizacao(),

@@ -38,7 +38,7 @@ function Controlado({ inicial, aoMudar, ...extras }: Extras & { inicial: DadosDa
 function renderizar(alteracoes: Partial<DadosDaConfiguracao> = {}, extras: Extras = {}) {
   const aoMudar = vi.fn();
   render(<Controlado inicial={{ ...configuracao, ...alteracoes }} aoMudar={aoMudar} {...extras} />);
-  return { aoMudar, commit: screen.getByRole("switch", { name: "Commit e push quando eu pedir" }) };
+  return { aoMudar, commit: screen.getByRole("switch", { name: "Commit e push por feature" }) };
 }
 
 type Dono = "do orquestrador" | "dos subagentes";
@@ -255,6 +255,17 @@ describe("CamposDaConfiguracao", () => {
       fireEvent.click(commit);
       expect(aoMudar).toHaveBeenCalledWith({ ...configuracao, permitirCommitEPush: true });
       expect(commit).toBeChecked();
+    });
+
+    it("a explicação diz que cada feature pronta vira um commit com push, e PR e merge só a pedido", () => {
+      renderizar();
+
+      const balao = screen.getByRole("button", { name: "O que é Opções" }).getAttribute("aria-describedby");
+      const texto = document.getElementById(balao ?? "")?.textContent ?? "";
+      expect(texto).toContain("cada feature ou correção pronta (testada, com lint e build ok) vira um commit próprio com push da branch em seguida");
+      expect(texto).toContain("feature/, fix/, hotfix/ ou refactor/");
+      expect(texto).toContain("PR e merge só quando você pedir");
+      expect(texto).toContain("Precisa da permissão de rodar comandos");
     });
 
     it("ligado sem permissão de rodar comandos, avisa sem bloquear; com ela, não avisa", () => {

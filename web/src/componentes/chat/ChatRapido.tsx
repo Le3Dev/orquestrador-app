@@ -11,7 +11,12 @@ import {
 } from "react";
 
 import { api, type ImagemParaEnvio, mensagemDeErro } from "../../shared/api/cliente";
-import type { AtividadeDaResposta, OrigemDaPergunta, PreferenciasDoChat } from "../../shared/api/tipos";
+import type {
+  AtividadeDaResposta,
+  OrigemDaPergunta,
+  PreferenciasDoChat,
+  ResumoDoOrquestrador,
+} from "../../shared/api/tipos";
 import { comandoDoPrompt, completarComando, dicaDeComando } from "../../shared/comandosDoPrompt";
 import { useEscuta } from "../../shared/escuta/useEscuta";
 import {
@@ -49,6 +54,8 @@ import { SeletorDeModelo } from "./SeletorDeModelo";
 import "../../theme/chat-lateral.css";
 
 const ALTURA_MAXIMA_DO_CAMPO = 140;
+/** Para as mensagens sem ações: a mesma lista sempre, para a memorização delas valer. */
+const SEM_ORQUESTRADORES: readonly ResumoDoOrquestrador[] = [];
 /** Distância do fim (px) em que a conversa ainda acompanha o texto que chega. */
 const MARGEM_DE_ACOMPANHAMENTO = 80;
 
@@ -268,6 +275,7 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
   aoAbrirTerminal,
   temVagaPara,
   aoAtualizarOrquestradores,
+  orquestradores,
 }: PropsDaMensagem) {
   if (mensagem.papel === "usuario") {
     // Capturas de tela seguem para o Claude, mas nunca viram miniatura (só visual).
@@ -336,6 +344,7 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
           aoAbrirTerminal={aoAbrirTerminal}
           temVagaPara={temVagaPara}
           aoAtualizarOrquestradores={aoAtualizarOrquestradores}
+          orquestradores={orquestradores}
         />
       ))}
       {mensagem.situacao === "concluida" && mensagem.uso !== null && (
@@ -383,6 +392,7 @@ export function ChatRapido({
   aoAbrirTerminal,
   temVagaPara,
   aoAtualizarOrquestradores,
+  orquestradores,
   fixo = false,
   aoAlternarFixo,
   largura = LARGURA_DO_CHAT_FIXO.padrao,
@@ -865,6 +875,8 @@ export function ChatRapido({
                   aoAbrirTerminal={aoAbrirTerminal}
                   temVagaPara={temVagaPara}
                   aoAtualizarOrquestradores={aoAtualizarOrquestradores}
+                  // Só quem tem cartões de ação acompanha a lista: as outras não re-renderizam a cada consulta.
+                  orquestradores={mensagem.acoes.length > 0 ? orquestradores : SEM_ORQUESTRADORES}
                 />
                 {/* Fora da mensagem memorizada: o cartão depende do estado do chat, não só da mensagem. */}
                 {pedidoDeAutorizacao?.mensagemId === mensagem.id && (

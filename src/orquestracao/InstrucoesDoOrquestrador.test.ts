@@ -182,7 +182,7 @@ describe("regras de rapidez no bloco <configuracao-do-pedido> (ADR-39)", () => {
     const semCommit = blocoDeRapidez({ permitirCommitEPush: false });
 
     expect(comCommit).toContain(
-      `${COMANDOS_CURTOS} git status, diff e log, commit, push e abrir PR quando o usuário pedir, e reiniciar o app ou o servidor`,
+      `${COMANDOS_CURTOS} git status, diff e log, commit e push de cada feature pronta, e abrir PR só quando o usuário pedir, e reiniciar o app ou o servidor`,
     );
     expect(semCommit).toContain(COMANDOS_CURTOS);
     expect(semCommit).not.toContain("abrir PR");

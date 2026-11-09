@@ -140,7 +140,19 @@ describe("ServicoDeChat", () => {
       motor,
       projetos: {
         listarProjetos: async () => [{ nome: "painel-app", caminho: path.join(raiz, "painel-app") }],
-        listarOrquestradores: async () => [{ nome: "Painel", pasta: path.join(raiz, "painel-app") }],
+        listarOrquestradores: async () => [
+          {
+            nome: "Painel",
+            pasta: path.join(raiz, "painel-app"),
+            situacao: "trabalhando",
+            pedidoAtual: "rodar os testes",
+            turnoIniciadoEm: new Date("2026-11-04T11:55:00Z"),
+            tamanhoDaFila: 1,
+            planoPendente: false,
+            branch: "orquestrador/abc",
+            alteracoesSemCommit: null,
+          },
+        ],
       },
       anexos: armazem,
       publicador: { publicar: (evento) => publicados.push(evento), sinalizar: (sinal) => sinais.push(sinal) },
@@ -176,6 +188,9 @@ describe("ServicoDeChat", () => {
     });
     expect(enviada?.mensagem).toMatch(/^<contexto-do-app>[\s\S]*- painel-app[\s\S]*Abra o painel$/);
     expect(enviada?.mensagem).toContain("grave UM arquivo autocontido na pasta /dados/artefatos/entrada/chat");
+    expect(enviada?.mensagem).toContain(
+      `- Painel → ${path.join(raiz, "painel-app")} (trabalhando há 5 min em "rodar os testes", 1 na fila, branch orquestrador/abc)`,
+    );
 
     motor.emitir({ tipo: "trecho_da_resposta", texto: "Vou " });
     motor.emitir({ tipo: "ferramenta_do_chat", ferramenta: "WebSearch", detalhe: "node lts" });
@@ -198,7 +213,17 @@ describe("ServicoDeChat", () => {
     expect(publicados[1]).toMatchObject({
       mensagemId,
       texto: "Vou abrir.",
-      acoes: [{ tipo: "abrir_orquestrador", projeto: "painel-app", pasta: path.join(raiz, "painel-app"), pedido: null, novo: false }],
+      acoes: [
+        {
+          tipo: "abrir_orquestrador",
+          projeto: "painel-app",
+          pasta: path.join(raiz, "painel-app"),
+          pedido: null,
+          novo: false,
+          orquestrador: null,
+          nome: null,
+        },
+      ],
       avisos: [],
       uso,
     });
@@ -206,6 +231,34 @@ describe("ServicoDeChat", () => {
     expect(estado.situacao).toBe("ocioso");
     expect(estado.mensagens[1]).toMatchObject({ situacao: "concluida", texto: "Vou abrir." });
     expect(estado.ultimaSequencia).toBe(2);
+  });
+
+  it("valida o orquestrador indicado na ação contra os orquestradores da pasta", async () => {
+    const { conclusao } = await servico.perguntar({ texto: "Commite no painel" });
+    await aguardarMotor();
+    motor.concluir(
+      sucesso(
+        [
+          "Entra na fila do Painel.",
+          "```acao-do-app",
+          '{"tipo":"abrir_orquestrador","projeto":"painel-app","orquestrador":"painel","pedido":"commitar"}',
+          "```",
+          "```acao-do-app",
+          '{"tipo":"abrir_orquestrador","projeto":"painel-app","orquestrador":"Inventado","pedido":"outro"}',
+          "```",
+        ].join("\n"),
+      ),
+    );
+    await conclusao;
+
+    expect(publicados.at(-1)).toMatchObject({
+      tipo: "resposta_concluida",
+      acoes: [
+        { pedido: "commitar", orquestrador: "Painel" },
+        { pedido: "outro", orquestrador: null },
+      ],
+      avisos: [],
+    });
   });
 
   it("a segunda pergunta retoma a sessão", async () => {

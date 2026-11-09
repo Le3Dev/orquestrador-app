@@ -194,8 +194,8 @@ export function CamposDaConfiguracao({
       <div className="linha-da-criacao">
         <Rotulo
           titulo="Opções"
-          dica="Commit e push ficam travados."
-          explicacao="Só acontecem quando você pedir na mensagem, e só com a permissão de rodar comandos. O Modo econômico troca modelos e esforço por outros que gastam menos cota e já vale, sem o Salvar; os campos continuam editáveis."
+          dica="Cada feature pronta vira um commit com push."
+          explicacao="Ligado, cada feature ou correção pronta (testada, com lint e build ok) vira um commit próprio com push da branch em seguida, numa branch feature/, fix/, hotfix/ ou refactor/. PR e merge só quando você pedir. Precisa da permissão de rodar comandos. O Modo econômico troca modelos e esforço por outros que gastam menos cota e já vale, sem o Salvar; os campos continuam editáveis."
           alinharAoTopo
         />
         <div className="flex min-w-0 flex-col gap-1">
@@ -208,7 +208,7 @@ export function CamposDaConfiguracao({
               onClick={() => mudar("permitirCommitEPush", !valor.permitirCommitEPush)}
             >
               <span className={`interruptor-trilho ${commitSemComandos ? "interruptor-sem-efeito" : ""}`} aria-hidden="true" />
-              Commit e push quando eu pedir
+              Commit e push por feature
             </button>
             {economico !== undefined && (
               <button

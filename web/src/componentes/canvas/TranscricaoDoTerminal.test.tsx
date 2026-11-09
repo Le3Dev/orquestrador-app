@@ -342,6 +342,29 @@ describe("TranscricaoDoTerminal", () => {
       ).toBeInTheDocument();
     });
 
+    it("silêncio longo sem diagnóstico do servidor: a mesma orientação, conforme a preferência", async () => {
+      vi.setSystemTime(new Date("2026-10-28T12:03:00Z"));
+      const lerPreferencias = vi
+        .spyOn(api, "lerPreferencias")
+        .mockResolvedValue({ instrucoesPadrao: "", subagentesProntos: [], autorrecuperacao: true });
+      const { unmount } = render(<Transcricao conversa={emAndamento()} />);
+      await act(async () => undefined);
+
+      const ligada = "sem notícias do Claude há 3min 00s — pode ter travado. O app retoma sozinho se travar.";
+      expect(linhaDoSinal(ligada)).toHaveClass("linha-erro");
+      expect(screen.queryByText(/reenvie/)).not.toBeInTheDocument();
+      unmount();
+
+      esquecerAutorrecuperacao();
+      lerPreferencias.mockResolvedValue({ instrucoesPadrao: "", subagentesProntos: [], autorrecuperacao: false });
+      render(<Transcricao conversa={emAndamento()} />);
+      await act(async () => undefined);
+
+      expect(
+        screen.getByText("sem notícias do Claude há 3min 00s — pode ter travado. Se continuar assim, cancele (esc) e reenvie."),
+      ).toBeInTheDocument();
+    });
+
     const aguardando = () =>
       aplicar(
         emAndamento(),

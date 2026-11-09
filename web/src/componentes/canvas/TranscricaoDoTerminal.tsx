@@ -67,15 +67,17 @@ const LinhaDoTerminal = memo(function LinhaDoTerminal({ linha }: { linha: LinhaD
 });
 
 /**
- * O servidor desconfia que o Claude travou. Com a autorrecuperação ligada, o
- * app retoma sozinho; desligada, vale a orientação de cancelar e reenviar.
+ * O Claude pode ter travado (pelo diagnóstico do servidor ou só pelo tempo de
+ * silêncio). Com a autorrecuperação ligada, o app retoma sozinho; desligada,
+ * vale a orientação de cancelar e reenviar. A preferência só é lida aqui, com
+ * o aviso na tela.
  */
-function AvisoDeSuspeita({ silencioMs, resumo }: { silencioMs: number; resumo: string }) {
+function AvisoDeSuspeita({ aviso }: { aviso: string }) {
   const autorrecuperacao = useAutorrecuperacao();
   const orientacao = autorrecuperacao
     ? "O app retoma sozinho se travar."
     : "Se continuar assim, cancele (esc) e reenvie.";
-  return <>{`sem notícias do Claude há ${formatarDuracao(silencioMs)}: ${resumo}. ${orientacao}`}</>;
+  return <>{`${aviso} ${orientacao}`}</>;
 }
 
 /** O texto do sinal de vida: o diagnóstico do servidor, quando há, ou o tempo de silêncio. */
@@ -85,13 +87,19 @@ function TextoDoSinal({ vida }: { vida: EstadoDeVida }) {
     return <>{vida.diagnostico.resumo}</>;
   }
   if (vida.diagnostico?.situacao === "suspeito") {
-    return <AvisoDeSuspeita silencioMs={vida.ultimoSinalHaMs} resumo={vida.diagnostico.resumo} />;
+    return (
+      <AvisoDeSuspeita
+        aviso={`sem notícias do Claude há ${formatarDuracao(vida.ultimoSinalHaMs)}: ${vida.diagnostico.resumo}.`}
+      />
+    );
+  }
+  if (vida.preocupante) {
+    // Sem diagnóstico do servidor: só o tempo de silêncio, com a mesma orientação.
+    return <AvisoDeSuspeita aviso={`sem notícias do Claude há ${formatarDuracao(vida.ultimoSinalHaMs)} — pode ter travado.`} />;
   }
   return (
     <>
-      {vida.preocupante
-        ? `sem notícias do Claude há ${formatarDuracao(vida.ultimoSinalHaMs)} — pode ter travado. Se continuar assim, cancele (esc) e reenvie.`
-        : `${vida.tokensPensando === null ? "" : `pensando · ~${formatarTokens(vida.tokensPensando)} tokens de raciocínio · `}último sinal há ${formatarDuracao(vida.ultimoSinalHaMs)}`}
+      {`${vida.tokensPensando === null ? "" : `pensando · ~${formatarTokens(vida.tokensPensando)} tokens de raciocínio · `}último sinal há ${formatarDuracao(vida.ultimoSinalHaMs)}`}
     </>
   );
 }

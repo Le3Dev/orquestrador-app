@@ -388,8 +388,10 @@ function Canvas() {
   const chatAoVivo = useChat(servidor.conectado);
   const { chat } = chatAoVivo;
   // Chat fixo à esquerda (painel Configurações do ⚙ ou o botão do próprio chat).
+  // No modo invisível ele volta a ser o painel flutuante do pé (a coluna da altura
+  // toda cobriria os apps de trás); a preferência salva não muda.
   const { preferencias: preferenciasDaTela, mudarPreferencias: mudarPreferenciasDaTela } = usePreferenciasDaTela();
-  const chatFixo = preferenciasDaTela.chatFixoNaEsquerda;
+  const chatFixo = preferenciasDaTela.chatFixoNaEsquerda && !modoInvisivel;
   const larguraDoChatFixo = preferenciasDaTela.larguraDoChatFixo;
   // Limpar lê as conversas por aqui, para as ações do canvas não mudarem a cada evento.
   const conversasAtuais = useRef(conversas);
@@ -1370,6 +1372,8 @@ function Canvas() {
     (fixo: boolean) => mudarPreferenciasDaTela({ chatFixoNaEsquerda: fixo }),
     [mudarPreferenciasDaTela],
   );
+  // Os cartões de ação do chat mostram o estado de quem vai receber o pedido.
+  const orquestradoresDoChat = useMemo(() => orquestradores ?? [], [orquestradores]);
   // A alça da borda do chat fixo grava a largura ao soltar; a área do canvas
   // (flex-1) acompanha e o React Flow se remede pelo observador de tamanho dele.
   const mudarLarguraDoChat = useCallback(
@@ -1386,8 +1390,10 @@ function Canvas() {
         aoAbrirTerminal={abrirTerminal}
         temVagaPara={temVagaPara}
         aoAtualizarOrquestradores={atualizarOrquestradoresDoChat}
+        orquestradores={orquestradoresDoChat}
         fixo={chatFixo}
-        aoAlternarFixo={alternarChatFixo}
+        // No modo invisível não dá para fixar: o chat fica flutuante até sair dele.
+        aoAlternarFixo={modoInvisivel ? undefined : alternarChatFixo}
         largura={larguraDoChatFixo}
         aoMudarLargura={mudarLarguraDoChat}
       />
@@ -1400,7 +1406,9 @@ function Canvas() {
       abrirTerminal,
       temVagaPara,
       atualizarOrquestradoresDoChat,
+      orquestradoresDoChat,
       chatFixo,
+      modoInvisivel,
       alternarChatFixo,
       larguraDoChatFixo,
       mudarLarguraDoChat,

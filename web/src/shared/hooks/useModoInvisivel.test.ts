@@ -109,6 +109,36 @@ describe("useModoInvisivel", () => {
     expect(modoInvisivel.capturarMouse).toHaveBeenLastCalledWith(false);
   });
 
+  it("quem monta com o modo já ativo (o chat que trocou de lugar) começa ativo e solta o mouse", async () => {
+    const { modoInvisivel, avisar } = ponte();
+    const primeiro = renderHook(() => useModoInvisivel());
+    avisar(true);
+    expect(primeiro.result.current.ativo).toBe(true);
+    expect(modoInvisivel.capturarMouse).not.toHaveBeenCalled();
+
+    const depois = renderHook(() => useModoInvisivel());
+
+    expect(depois.result.current.ativo).toBe(true);
+    await waitFor(() => expect(modoInvisivel.capturarMouse).toHaveBeenLastCalledWith(false));
+    expect(modoInvisivel.capturarMouse).not.toHaveBeenCalledWith(true);
+  });
+
+  it("entrar não captura o mouse se o componente desmontou antes da resposta", async () => {
+    let liberar: () => void = () => undefined;
+    const { modoInvisivel } = ponte({
+      entrar: vi.fn(() => new Promise<void>((resolve) => (liberar = resolve))),
+    });
+    const { result, unmount } = renderHook(() => useModoInvisivel());
+
+    const entrada = result.current.entrar();
+    unmount();
+    liberar();
+    await entrada;
+
+    expect(modoInvisivel.entrar).toHaveBeenCalledTimes(1);
+    expect(modoInvisivel.capturarMouse).not.toHaveBeenCalled();
+  });
+
   it("remontado com o modo já ligado, começa ativo pela consulta ao processo principal", async () => {
     const { avisar, modoInvisivel } = ponte();
     const primeiro = renderHook(() => useModoInvisivel());

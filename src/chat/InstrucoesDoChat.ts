@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { z } from "zod";
 
 import { linhasDaRegraDasPerguntas, MARCA_DA_PERGUNTA } from "../perguntas/PerguntaDoApp";
@@ -13,6 +15,9 @@ const MARCA_DO_CONTEXTO = "contexto-do-app";
  * Um bloco ```acao-do-app … ```, inclusive sem o fechamento (até o fim do
  * texto): mesmo malformado, ele sai da resposta.
  */
+/** O limite do nome de um orquestrador no servidor (`TAMANHO_MAXIMO_DO_NOME`). */
+const TAMANHO_MAXIMO_DO_NOME_SUGERIDO = 60;
+
 const BLOCO_DE_ACAO = /[ \t]*```[ \t]*acao-do-app[^\n]*(?:\n([\s\S]*?))?(?:```[ \t]*|$)/g;
 
 const esquemaDaAcao = z.object({
@@ -20,7 +25,20 @@ const esquemaDaAcao = z.object({
   projeto: z.string().trim().min(1),
   pedido: z.string().nullable().optional(),
   novo: z.boolean().optional(),
+  orquestrador: z.string().nullable().optional(),
+  // Cortado em vez de recusado: um nome longo demais não derruba a ação.
+  nome: z
+    .string()
+    .nullable()
+    .optional()
+    .transform((nome) => {
+      const limpo = (nome ?? "").trim().slice(0, TAMANHO_MAXIMO_DO_NOME_SUGERIDO).trim();
+      return limpo === "" ? null : limpo;
+    }),
 });
+
+/** Até quantos caracteres do pedido em andamento entram no bloco de contexto. */
+const TAMANHO_DO_PEDIDO_NO_CONTEXTO = 100;
 
 /** Contexto do app que acompanha cada pergunta. */
 export interface ContextoDoApp {
@@ -89,7 +107,7 @@ export function instrucoesDoChat(): string {
     `3. Editar arquivos e rodar comandos exige uma autorização única do usuário, que vale até o próximo /clear. O bloco <${MARCA_DO_CONTEXTO}> diz se ela já foi dada. Sem ela, quando precisar editar ou rodar um comando, use a ferramenta mesmo assim: o app pede a autorização ao usuário. ${REGRA_DA_NEGACAO}`,
     `4. ${REGRA_DE_COMMIT_E_PUSH}`,
     `5. ${REGRA_DO_RELATORIO}`,
-    `6. Cada mensagem do usuário começa com um bloco <${MARCA_DO_CONTEXTO}> com a data, a pasta raiz, os projetos, os orquestradores existentes e as permissões. Use-o para responder e não o comente; se ele divergir destas regras, vale o bloco.`,
+    `6. Cada mensagem do usuário começa com um bloco <${MARCA_DO_CONTEXTO}> com a data, a pasta raiz, os projetos, os orquestradores existentes (com o estado de cada um) e as permissões. Use-o para responder e não o comente; se ele divergir destas regras, vale o bloco.`,
     `7. Quando o usuário pedir para abrir ou criar um orquestrador num projeto, siga a regra de ações do bloco <${MARCA_DO_CONTEXTO}>: explique o que vai acontecer e inclua o bloco \`\`\`${MARCA_DA_ACAO}. Você não executa a ação — o usuário confirma clicando no cartão que aparece na tela.`,
     `8. ${REGRA_DAS_MUDANCAS_GRANDES}`,
     `9. Artefatos: quando ${QUANDO_CRIAR_ARTEFATO}, grave UM arquivo autocontido (.html ou .md) na pasta de artefatos que o bloco <${MARCA_DO_CONTEXTO}> indica, seguindo as regras dele. Gravar artefatos não precisa da autorização e não conta como alterar projetos.`,
@@ -130,6 +148,56 @@ function descreverData(agora: Date): string {
   }
 }
 
+/** Ex.: "menos de 1 min", "12 min", "2 h", "1 h 05 min". */
+function descreverDuracao(inicio: Date, agora: Date): string {
+  const minutos = Math.max(0, Math.floor((agora.getTime() - inicio.getTime()) / 60_000));
+  if (minutos < 1) {
+    return "menos de 1 min";
+  }
+  if (minutos < 60) {
+    return `${minutos} min`;
+  }
+  const horas = Math.floor(minutos / 60);
+  const resto = minutos % 60;
+  return resto === 0 ? `${horas} h` : `${horas} h ${String(resto).padStart(2, "0")} min`;
+}
+
+/** O pedido numa linha só, cortado para o bloco de contexto. */
+function resumirPedido(texto: string): string {
+  const linha = texto.replace(/\s+/g, " ").trim();
+  return linha.length > TAMANHO_DO_PEDIDO_NO_CONTEXTO
+    ? `${linha.slice(0, TAMANHO_DO_PEDIDO_NO_CONTEXTO).trimEnd()}…`
+    : linha;
+}
+
+/**
+ * O estado do orquestrador entre parênteses, compacto: ocupado ou não (um
+ * Plano à espera da aprovação também ocupa), fila, branch e alterações.
+ * "Alterações sem commit" só aparece quando se sabe (fora do turno).
+ */
+function descreverEstado(orquestrador: OrquestradorExistente, agora: Date): string {
+  const partes: string[] = [];
+  if (orquestrador.situacao === "trabalhando") {
+    const ha = orquestrador.turnoIniciadoEm === null ? "" : ` há ${descreverDuracao(orquestrador.turnoIniciadoEm, agora)}`;
+    const pedido = orquestrador.pedidoAtual === null ? "" : ` em "${resumirPedido(orquestrador.pedidoAtual)}"`;
+    partes.push(`trabalhando${ha}${pedido}`);
+  } else if (orquestrador.planoPendente) {
+    partes.push("aguardando aprovação do plano");
+  } else {
+    partes.push("ocioso");
+  }
+  if (orquestrador.tamanhoDaFila > 0) {
+    partes.push(`${orquestrador.tamanhoDaFila} na fila`);
+  }
+  if (orquestrador.branch !== null) {
+    partes.push(`branch ${orquestrador.branch}`);
+  }
+  if (orquestrador.alteracoesSemCommit === true) {
+    partes.push("alterações sem commit");
+  }
+  return `(${partes.join(", ")})`;
+}
+
 /**
  * A mensagem que o Claude recebe: o contexto do app e o texto do usuário.
  *
@@ -145,7 +213,10 @@ export function mensagemParaOChat(texto: string, contexto: ContextoDoApp): strin
   const orquestradores =
     contexto.orquestradores.length === 0
       ? ["- (nenhum)"]
-      : contexto.orquestradores.map((orquestrador) => `- ${orquestrador.nome} → ${orquestrador.pasta}`);
+      : contexto.orquestradores.map(
+          (orquestrador) =>
+            `- ${orquestrador.nome} → ${orquestrador.pasta} ${descreverEstado(orquestrador, contexto.agora)}`,
+        );
   const pergunta = texto.trim() === "" ? "Veja a imagem anexada." : texto;
 
   return [
@@ -154,7 +225,7 @@ export function mensagemParaOChat(texto: string, contexto: ContextoDoApp): strin
     `Pasta raiz dos projetos: ${contexto.pastaDosProjetos}`,
     "Projetos (nome da pasta):",
     ...projetos,
-    "Orquestradores existentes (nome → pasta):",
+    "Orquestradores existentes (nome → pasta (estado)):",
     ...orquestradores,
     "",
     ...regrasDePermissao(contexto),
@@ -163,10 +234,13 @@ export function mensagemParaOChat(texto: string, contexto: ContextoDoApp): strin
     "",
     "Ações do app: quando o usuário pedir para abrir ou criar um orquestrador num projeto (opcionalmente com um pedido para ele), responda explicando e inclua UM bloco por ação, exatamente assim:",
     "```" + MARCA_DA_ACAO,
-    '{"tipo":"abrir_orquestrador","projeto":"<nome exato da pasta>","pedido":"<texto do pedido ou null>","novo":false}',
+    '{"tipo":"abrir_orquestrador","projeto":"<nome exato da pasta>","orquestrador":"<nome de um orquestrador ocioso do projeto, ou omita>","pedido":"<texto do pedido ou null>","novo":false,"nome":"<função do orquestrador criado, ou omita>"}',
     "```",
-    'Use "novo":true só quando o usuário pedir explicitamente outro (ou um novo) orquestrador num projeto que já tem um; caso contrário, omita o campo ou use false, e o app reaproveita o orquestrador existente.',
-    "Diga que o usuário confirma clicando no cartão. Use só projetos da lista acima; nunca invente um projeto.",
+    'Para onde vai o pedido: um pedido novo e independente vai para um orquestrador ocioso do projeto (indique o nome dele em "orquestrador", exatamente como na lista); se nenhum do projeto estiver ocioso, use "novo":true. Trabalhando ou aguardando aprovação do plano conta como ocupado.',
+    'Só mande para um orquestrador ocupado quando o pedido depender do trabalho dele (ex.: commitar o que está na worktree dele); aí indique-o em "orquestrador" e avise na resposta que o pedido entra na fila dele.',
+    'Use "novo":true também quando o usuário pedir explicitamente outro (ou um novo) orquestrador. Sem "orquestrador" e sem "novo", o app reaproveita um orquestrador existente do projeto, de preferência um ocioso.',
+    'Ao criar um orquestrador ("novo":true, ou num projeto sem nenhum), inclua "nome" com a função dele em 2 a 4 palavras (ex.: "Correção da memória", "PR de integração", "Vídeo de venda"); sem função clara, omita o campo.',
+    "Diga que o usuário confirma clicando no cartão. Use só projetos e orquestradores da lista acima; nunca invente um projeto.",
     "",
     ...linhasDaRegraDasPerguntas(),
     `</${MARCA_DO_CONTEXTO}>`,
@@ -175,12 +249,43 @@ export function mensagemParaOChat(texto: string, contexto: ContextoDoApp): strin
   ].join("\n");
 }
 
+/** Compara pastas sem diferenciar maiúsculas, separadores nem a barra final. */
+function mesmaPasta(a: string, b: string): boolean {
+  const normalizar = (pasta: string) => path.resolve(pasta).replace(/\\/g, "/").toLocaleLowerCase("pt-BR");
+  return normalizar(a) === normalizar(b);
+}
+
+/**
+ * O nome real do orquestrador indicado pelo Claude, se ele existe na pasta
+ * do projeto (sem diferenciar maiúsculas); senão nulo, e a tela escolhe.
+ */
+function orquestradorDaPasta(
+  nome: string | null | undefined,
+  pasta: string,
+  orquestradores: readonly OrquestradorExistente[],
+): string | null {
+  const procurado = (nome ?? "").trim().toLocaleLowerCase("pt-BR");
+  if (procurado === "") {
+    return null;
+  }
+  const achado = orquestradores.find(
+    (candidato) => mesmaPasta(candidato.pasta, pasta) && candidato.nome.toLocaleLowerCase("pt-BR") === procurado,
+  );
+  return achado?.nome ?? null;
+}
+
 /**
  * Tira da resposta todos os blocos ```acao-do-app (inclusive os malformados)
  * e devolve as ações válidas, com a pasta resolvida pela lista de projetos.
- * O que não vale vira aviso legível, sem ação.
+ * O que não vale vira aviso legível, sem ação. O orquestrador indicado só
+ * vale se existe na pasta do projeto; um nome que não existe vira nulo, sem
+ * descartar a ação. Com `novo`, ele é ignorado: a ação cria outro.
  */
-export function separarAcoesDoApp(resposta: string, projetos: readonly ProjetoDoChat[]): RespostaSeparada {
+export function separarAcoesDoApp(
+  resposta: string,
+  projetos: readonly ProjetoDoChat[],
+  orquestradores: readonly OrquestradorExistente[] = [],
+): RespostaSeparada {
   const acoes: AcaoDoApp[] = [];
   const avisos: string[] = [];
 
@@ -204,7 +309,10 @@ export function separarAcoesDoApp(resposta: string, projetos: readonly ProjetoDo
       avisos.push(`O projeto "${lida.data.projeto}" não existe na pasta raiz; a ação foi ignorada.`);
       return "";
     }
-    acoes.push(abrirOrquestrador(projeto.nome, projeto.caminho, lida.data.pedido ?? null, lida.data.novo ?? false));
+    const novo = lida.data.novo ?? false;
+    const orquestrador = novo ? null : orquestradorDaPasta(lida.data.orquestrador, projeto.caminho, orquestradores);
+    const pedido = lida.data.pedido ?? null;
+    acoes.push(abrirOrquestrador(projeto.nome, projeto.caminho, pedido, novo, orquestrador, lida.data.nome ?? null));
     return "";
   });
 

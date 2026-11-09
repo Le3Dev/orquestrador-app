@@ -4,13 +4,27 @@ import { describe, expect, it } from "vitest";
 
 import { linhasDaRegraDasPerguntas, separarPerguntasDoApp } from "../perguntas/PerguntaDoApp";
 import { instrucoesDoChat, mensagemParaOChat, separarAcoesDoApp } from "./InstrucoesDoChat";
-import { ProjetoDoChat } from "./ProjetosDoChat";
+import { OrquestradorExistente, ProjetoDoChat } from "./ProjetosDoChat";
 
 const raiz = path.resolve("/projetos");
 const projetos: ProjetoDoChat[] = [
   { nome: "painel-app", caminho: path.join(raiz, "painel-app") },
   { nome: "Financeiro", caminho: path.join(raiz, "Financeiro") },
 ];
+
+function ocioso(nome: string, pasta: string): OrquestradorExistente {
+  return {
+    nome,
+    pasta,
+    situacao: "ocioso",
+    pedidoAtual: null,
+    turnoIniciadoEm: null,
+    tamanhoDaFila: 0,
+    planoPendente: false,
+    branch: null,
+    alteracoesSemCommit: false,
+  };
+}
 
 function bloco(json: string): string {
   return ["```acao-do-app", json, "```"].join("\n");
@@ -37,6 +51,8 @@ describe("separarAcoesDoApp", () => {
           pasta: path.join(raiz, "painel-app"),
           pedido: "rodar os testes",
           novo: false,
+          orquestrador: null,
+          nome: null,
         },
       ],
       avisos: [],
@@ -64,7 +80,15 @@ describe("separarAcoesDoApp", () => {
     const { acoes } = separarAcoesDoApp(bloco('{"tipo":"abrir_orquestrador","projeto":"PAINEL-APP","pedido":""}'), projetos);
 
     expect(acoes).toEqual([
-      { tipo: "abrir_orquestrador", projeto: "painel-app", pasta: path.join(raiz, "painel-app"), pedido: null, novo: false },
+      {
+        tipo: "abrir_orquestrador",
+        projeto: "painel-app",
+        pasta: path.join(raiz, "painel-app"),
+        pedido: null,
+        novo: false,
+        orquestrador: null,
+        nome: null,
+      },
     ]);
   });
 
@@ -75,7 +99,15 @@ describe("separarAcoesDoApp", () => {
     );
 
     expect(acoes).toEqual([
-      { tipo: "abrir_orquestrador", projeto: "painel-app", pasta: path.join(raiz, "painel-app"), pedido: "revisar o login", novo: true },
+      {
+        tipo: "abrir_orquestrador",
+        projeto: "painel-app",
+        pasta: path.join(raiz, "painel-app"),
+        pedido: "revisar o login",
+        novo: true,
+        orquestrador: null,
+        nome: null,
+      },
     ]);
     expect(avisos).toEqual([]);
   });
@@ -134,6 +166,103 @@ describe("separarAcoesDoApp", () => {
     expect(avisos[0]).toMatch(/formato inválido/);
   });
 
+  describe("nome do orquestrador criado", () => {
+    function nomeDa(json: string): string | null | undefined {
+      return separarAcoesDoApp(bloco(json), projetos).acoes[0]?.nome;
+    }
+
+    it("vem limpo, com a função sugerida", () => {
+      expect(nomeDa('{"tipo":"abrir_orquestrador","projeto":"painel-app","novo":true,"nome":"  Correção da memória  "}')).toBe(
+        "Correção da memória",
+      );
+    });
+
+    it("vazio, só espaços, nulo ou ausente vira null", () => {
+      expect(nomeDa('{"tipo":"abrir_orquestrador","projeto":"painel-app","nome":""}')).toBeNull();
+      expect(nomeDa('{"tipo":"abrir_orquestrador","projeto":"painel-app","nome":"   "}')).toBeNull();
+      expect(nomeDa('{"tipo":"abrir_orquestrador","projeto":"painel-app","nome":null}')).toBeNull();
+      expect(nomeDa('{"tipo":"abrir_orquestrador","projeto":"painel-app"}')).toBeNull();
+    });
+
+    it("longo demais é cortado em 60 caracteres, sem descartar a ação", () => {
+      const longo = `PR de integração ${"x".repeat(80)}`;
+      const { acoes, avisos } = separarAcoesDoApp(
+        bloco(`{"tipo":"abrir_orquestrador","projeto":"painel-app","novo":true,"nome":"${longo}"}`),
+        projetos,
+      );
+
+      expect(acoes).toHaveLength(1);
+      expect(acoes[0]?.nome).toBe(longo.slice(0, 60));
+      expect(avisos).toEqual([]);
+    });
+
+    it("nome com tipo errado vira aviso de formato inválido", () => {
+      const { acoes, avisos } = separarAcoesDoApp(bloco('{"tipo":"abrir_orquestrador","projeto":"painel-app","nome":7}'), projetos);
+
+      expect(acoes).toEqual([]);
+      expect(avisos).toEqual(["O Claude sugeriu uma ação do app em formato inválido; ela foi ignorada."]);
+    });
+  });
+
+  describe("orquestrador indicado", () => {
+    const orquestradores: OrquestradorExistente[] = [
+      ocioso("Painel", path.join(raiz, "painel-app")),
+      ocioso("Painel 2", path.join(raiz, "painel-app")),
+      ocioso("Contas", path.join(raiz, "Financeiro")),
+    ];
+
+    it("um nome que existe na pasta do projeto vale, com o nome real", () => {
+      const { acoes, avisos } = separarAcoesDoApp(
+        bloco('{"tipo":"abrir_orquestrador","projeto":"painel-app","orquestrador":"painel 2","pedido":"rodar os testes"}'),
+        projetos,
+        orquestradores,
+      );
+
+      expect(acoes.map((acao) => acao.orquestrador)).toEqual(["Painel 2"]);
+      expect(avisos).toEqual([]);
+    });
+
+    it("nome inexistente, de outra pasta, vazio ou nulo vira null, sem descartar a ação nem avisar", () => {
+      const resposta = [
+        bloco('{"tipo":"abrir_orquestrador","projeto":"painel-app","orquestrador":"Inventado","pedido":"a"}'),
+        bloco('{"tipo":"abrir_orquestrador","projeto":"painel-app","orquestrador":"Contas","pedido":"b"}'),
+        bloco('{"tipo":"abrir_orquestrador","projeto":"painel-app","orquestrador":"  ","pedido":"c"}'),
+        bloco('{"tipo":"abrir_orquestrador","projeto":"painel-app","orquestrador":null,"pedido":"d"}'),
+      ].join("\n");
+
+      const { acoes, avisos } = separarAcoesDoApp(resposta, projetos, orquestradores);
+
+      expect(acoes.map((acao) => [acao.pedido, acao.orquestrador])).toEqual([
+        ["a", null],
+        ["b", null],
+        ["c", null],
+        ["d", null],
+      ]);
+      expect(avisos).toEqual([]);
+    });
+
+    it("com novo, o orquestrador indicado é ignorado", () => {
+      const { acoes } = separarAcoesDoApp(
+        bloco('{"tipo":"abrir_orquestrador","projeto":"painel-app","orquestrador":"Painel","novo":true}'),
+        projetos,
+        orquestradores,
+      );
+
+      expect(acoes).toMatchObject([{ novo: true, orquestrador: null }]);
+    });
+
+    it("orquestrador com tipo errado vira aviso de formato inválido", () => {
+      const { acoes, avisos } = separarAcoesDoApp(
+        bloco('{"tipo":"abrir_orquestrador","projeto":"painel-app","orquestrador":3}'),
+        projetos,
+        orquestradores,
+      );
+
+      expect(acoes).toEqual([]);
+      expect(avisos).toEqual(["O Claude sugeriu uma ação do app em formato inválido; ela foi ignorada."]);
+    });
+  });
+
   it("as ações devolvidas são imutáveis", () => {
     const { acoes } = separarAcoesDoApp(bloco('{"tipo":"abrir_orquestrador","projeto":"painel-app"}'), projetos);
     expect(Object.isFrozen(acoes[0])).toBe(true);
@@ -145,7 +274,7 @@ describe("mensagemParaOChat", () => {
     agora: new Date("2026-11-04T15:30:00Z"),
     pastaDosProjetos: raiz,
     projetos,
-    orquestradores: [{ nome: "Painel", pasta: path.join(raiz, "painel-app") }],
+    orquestradores: [ocioso("Painel", path.join(raiz, "painel-app"))],
     alteracoesAutorizadas: false,
     pastaDeArtefatos: path.resolve("/dados/artefatos/entrada/chat"),
   };
@@ -164,11 +293,76 @@ describe("mensagemParaOChat", () => {
     expect(mensagem).toContain("2026-11-04T15:30:00.000Z");
     expect(mensagem).toContain(`Pasta raiz dos projetos: ${raiz}`);
     expect(mensagem).toContain("- painel-app\n- Financeiro");
-    expect(mensagem).toContain(`- Painel → ${path.join(raiz, "painel-app")}`);
-    expect(mensagem).toContain("```acao-do-app\n" + '{"tipo":"abrir_orquestrador","projeto":"<nome exato da pasta>","pedido":"<texto do pedido ou null>","novo":false}\n```');
-    expect(mensagem).toContain('Use "novo":true só quando o usuário pedir explicitamente outro (ou um novo) orquestrador');
-    expect(mensagem).toContain("o app reaproveita o orquestrador existente");
+    expect(mensagem).toContain(`- Painel → ${path.join(raiz, "painel-app")} (ocioso)`);
+    expect(mensagem).toContain(
+      "```acao-do-app\n" +
+        '{"tipo":"abrir_orquestrador","projeto":"<nome exato da pasta>","orquestrador":"<nome de um orquestrador ocioso do projeto, ou omita>","pedido":"<texto do pedido ou null>","novo":false,"nome":"<função do orquestrador criado, ou omita>"}\n```',
+    );
+    expect(mensagem).toContain('Use "novo":true também quando o usuário pedir explicitamente outro (ou um novo) orquestrador');
+    expect(mensagem).toContain("o app reaproveita um orquestrador existente do projeto, de preferência um ocioso");
     expect(mensagem).toMatch(/nunca invente um projeto/);
+  });
+
+  it("cada orquestrador traz o estado: trabalhando há quanto tempo e em quê, fila, branch e alterações", () => {
+    const pasta = path.join(raiz, "painel-app");
+    const pedidoLongo = `corrigir memória\n${"x".repeat(120)}`;
+    const mensagem = mensagemParaOChat("oi", {
+      ...contexto,
+      orquestradores: [
+        {
+          ...ocioso("Ocupado", pasta),
+          situacao: "trabalhando",
+          pedidoAtual: "corrigir a memória do chat",
+          turnoIniciadoEm: new Date("2026-11-04T15:18:00Z"),
+          tamanhoDaFila: 2,
+          branch: "orquestrador/abc",
+          alteracoesSemCommit: null,
+        },
+        {
+          ...ocioso("Longo", pasta),
+          situacao: "trabalhando",
+          pedidoAtual: pedidoLongo,
+          turnoIniciadoEm: new Date("2026-11-04T14:25:00Z"),
+        },
+        { ...ocioso("Recente", pasta), situacao: "trabalhando", pedidoAtual: "a", turnoIniciadoEm: new Date("2026-11-04T15:29:40Z") },
+        { ...ocioso("Plano", pasta), planoPendente: true },
+        { ...ocioso("Parado", pasta), branch: "orquestrador/def", alteracoesSemCommit: true },
+      ],
+    });
+
+    expect(mensagem).toContain(
+      `- Ocupado → ${pasta} (trabalhando há 12 min em "corrigir a memória do chat", 2 na fila, branch orquestrador/abc)`,
+    );
+    expect(mensagem).toContain(`- Longo → ${pasta} (trabalhando há 1 h 05 min em "corrigir memória ${"x".repeat(83)}…")`);
+    expect(mensagem).toContain(`- Recente → ${pasta} (trabalhando há menos de 1 min em "a")`);
+    expect(mensagem).toContain(`- Plano → ${pasta} (aguardando aprovação do plano)`);
+    expect(mensagem).toContain(`- Parado → ${pasta} (ocioso, branch orquestrador/def, alterações sem commit)`);
+    expect(mensagem).toContain("Orquestradores existentes (nome → pasta (estado)):");
+  });
+
+  it("regra de para onde vai o pedido: ocioso pelo nome, novo se todos ocupados, ocupado só quando depende dele", () => {
+    const bloco = blocoDeContexto(false);
+
+    expect(bloco).toContain(
+      'um pedido novo e independente vai para um orquestrador ocioso do projeto (indique o nome dele em "orquestrador", exatamente como na lista); se nenhum do projeto estiver ocioso, use "novo":true',
+    );
+    expect(bloco).toContain("Trabalhando ou aguardando aprovação do plano conta como ocupado.");
+    expect(bloco).toContain(
+      "Só mande para um orquestrador ocupado quando o pedido depender do trabalho dele (ex.: commitar o que está na worktree dele)",
+    );
+    expect(bloco).toContain("avise na resposta que o pedido entra na fila dele");
+  });
+
+  it("regra do nome: ao criar, a função em 2 a 4 palavras; sem função clara, omite", () => {
+    expect(blocoDeContexto(false)).toContain(
+      'Ao criar um orquestrador ("novo":true, ou num projeto sem nenhum), inclua "nome" com a função dele em 2 a 4 palavras (ex.: "Correção da memória", "PR de integração", "Vídeo de venda"); sem função clara, omita o campo.',
+    );
+  });
+
+  it("o exemplo do bloco de ação no contexto é um bloco válido", () => {
+    const exemplo = blocoDeContexto(false).replace("<nome exato da pasta>", "painel-app");
+
+    expect(separarAcoesDoApp(exemplo, projetos).acoes).toHaveLength(1);
   });
 
   it("indica listas vazias e pergunta só com imagem", () => {

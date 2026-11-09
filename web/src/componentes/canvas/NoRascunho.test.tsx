@@ -140,7 +140,7 @@ describe("NoRascunho", () => {
     expect(menuDoModelo("do orquestrador")).toHaveTextContent("esforço padrão");
     expect(screen.getByRole("radio", { name: /Automática/ })).toBeChecked();
     expect(screen.getByLabelText("Máximo")).toHaveValue(3);
-    expect(screen.getByRole("switch", { name: "Commit e push quando eu pedir" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("switch", { name: "Commit e push por feature" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("textbox", { name: "Instruções" })).toBeInTheDocument();
     expect(screen.getAllByRole("switch")).toHaveLength(1);
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
@@ -435,7 +435,7 @@ describe("NoRascunho", () => {
   it("commit e push avisam quando falta a permissão de rodar comandos", async () => {
     const criar = espiarCriacao();
     await abrirComPasta();
-    const commit = screen.getByRole("switch", { name: "Commit e push quando eu pedir" });
+    const commit = screen.getByRole("switch", { name: "Commit e push por feature" });
 
     fireEvent.click(commit);
     expect(commit).toHaveAttribute("aria-checked", "true");

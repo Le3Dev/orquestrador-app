@@ -110,6 +110,7 @@ function renderizar(chat: EstadoDoChatNaTela = OCIOSO, desconectado = false) {
     aoAbrirTerminal: vi.fn(),
     temVagaPara: vi.fn().mockReturnValue(true),
     aoAtualizarOrquestradores: vi.fn().mockResolvedValue(undefined),
+    orquestradores: [],
   };
   const resultado = render(<ChatRapido chat={chat} {...props} />);
   return {
@@ -1057,6 +1058,7 @@ describe("ChatRapido", () => {
         aoAbrirTerminal: vi.fn(),
         temVagaPara: vi.fn().mockReturnValue(true),
         aoAtualizarOrquestradores: vi.fn().mockResolvedValue(undefined),
+        orquestradores: [],
       };
       render(<ChatRapido chat={chat} {...props} fixo aoAlternarFixo={aoAlternarFixo} />);
       return { aoAlternarFixo };
@@ -1120,6 +1122,7 @@ describe("ChatRapido", () => {
           aoAbrirTerminal: vi.fn(),
           temVagaPara: vi.fn().mockReturnValue(true),
           aoAtualizarOrquestradores: vi.fn().mockResolvedValue(undefined),
+          orquestradores: [],
         };
         const resultado = render(
           <ChatRapido chat={CONVERSA} {...props} fixo largura={largura} aoMudarLargura={aoMudarLargura} />,
@@ -1245,6 +1248,7 @@ describe("ChatRapido", () => {
           aoAbrirTerminal={vi.fn()}
           temVagaPara={vi.fn().mockReturnValue(true)}
           aoAtualizarOrquestradores={vi.fn().mockResolvedValue(undefined)}
+          orquestradores={[]}
           aoAlternarFixo={aoAlternarFixo}
         />,
       );
