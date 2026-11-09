@@ -326,6 +326,56 @@ describe("terminal minimizado no layout", () => {
   });
 });
 
+describe("itens ligados no layout", () => {
+  afterEach(() => localStorage.clear());
+
+  const retangulo = { x: 10, y: 20, largura: 600, altura: 500 };
+
+  it("grava e lê de volta os itens ligados de cada terminal, na ordem; sem itens, sem o campo", () => {
+    const ligado = novoTerminal("o1", { x: 0, y: 0 }, 600, 500, undefined, false, ["nota:n1", "previa:p1"]);
+    const nos = [
+      ligado,
+      novoTerminal("o2", { x: 800, y: 0 }, 600, 500),
+      novaNota("n1", { x: 0, y: 700 }),
+      novaPrevia("p1", { x: 700, y: 700 }, { url: "http://localhost:5173/", orquestradorId: null }),
+    ];
+
+    salvarLayout(layoutDosNos(nos, null));
+    const lido = lerLayout();
+
+    expect(lido.terminais.o1).toEqual({ x: 0, y: 0, largura: 600, altura: 500, ligados: ["nota:n1", "previa:p1"] });
+    expect(lido.terminais.o2).toEqual({ x: 800, y: 0, largura: 600, altura: 500 });
+    expect(nosDoLayout(lido).filter(ehTerminal).find((no) => no.id === "o1")?.data).toEqual({
+      orquestradorId: "o1",
+      ligados: ["nota:n1", "previa:p1"],
+    });
+  });
+
+  it("não grava a ligação a um item que saiu do canvas", () => {
+    const terminal = novoTerminal("o1", { x: 0, y: 0 }, 600, 500, undefined, false, ["nota:n1", "artefato:a1"]);
+
+    expect(layoutDosNos([terminal, novaNota("n1", { x: 0, y: 700 })], null).terminais.o1?.ligados).toEqual(["nota:n1"]);
+    // Sem nenhum item no canvas, o campo nem aparece.
+    expect(layoutDosNos([terminal], null).terminais.o1).toEqual({ x: 0, y: 0, largura: 600, altura: 500 });
+  });
+
+  it("um layout antigo, sem o campo, vale como sem itens ligados", () => {
+    const texto = JSON.stringify({ terminais: { o1: retangulo } });
+
+    expect(interpretarLayout(texto).terminais.o1).toEqual(retangulo);
+    expect(nosDoLayout(interpretarLayout(texto)).filter(ehTerminal)[0]?.data.ligados).toBeUndefined();
+  });
+
+  it("descarta ids inválidos e repetidos (shell, terminal, bixinho, não texto)", () => {
+    const ligados = ["nota:n1", "nota:n1", "shell:s1", "o2", "o1::s1", "nota:", 3, null, "artefato:a1"];
+    const texto = JSON.stringify({ terminais: { o1: { ...retangulo, ligados }, o2: { ...retangulo, ligados: "nota:n1" } } });
+
+    const lido = interpretarLayout(texto);
+    expect(lido.terminais.o1?.ligados).toEqual(["nota:n1", "artefato:a1"]);
+    expect(lido.terminais.o2).toEqual(retangulo);
+  });
+});
+
 describe("tamanhoNaEscalaDaLetra", () => {
   const padrao = TAMANHO_DO_TERMINAL;
   const minimo = TAMANHO_MINIMO_DO_TERMINAL;

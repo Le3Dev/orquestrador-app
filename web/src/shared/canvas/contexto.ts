@@ -9,6 +9,7 @@ import {
   useSyncExternalStore,
 } from "react";
 
+import type { ItemLigadoParaEnvio } from "../api/cliente";
 import type { ResumoDoOrquestrador, SinalDeVida } from "../api/tipos";
 import type { EstadoDaConversa } from "../estado/aplicarEvento";
 import type { SituacaoDaConexao } from "../hooks/useConversas";
@@ -43,6 +44,10 @@ export interface AcoesDoCanvas {
   minimizarOuRestaurarPrevia: (previaId: string) => void;
   /** Tira a prévia do canvas e, com isso, do layout. */
   fecharPrevia: (previaId: string) => void;
+  /** Desliga do terminal uma nota, prévia ou artefato (pelo id do nó): o × do chip. Fica no layout do canvas. */
+  desligarItem?: (orquestradorId: string, itemId: string) => void;
+  /** Os itens ligados ao terminal agora, como vão no próximo pedido (enviar ou pôr na fila). */
+  lerItensLigados?: (orquestradorId: string) => ItemLigadoParaEnvio[];
 }
 
 /**

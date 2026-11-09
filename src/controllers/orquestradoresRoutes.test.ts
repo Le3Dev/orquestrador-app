@@ -664,6 +664,73 @@ describe("rotas de orquestradores — modo de planejamento", () => {
     });
   });
 
+  describe("itens ligados no canvas", () => {
+    const nota = { tipo: "nota", titulo: "Ideias", conteudo: "usar cache\nmedir antes" };
+    const previa = { tipo: "previa", titulo: "localhost:5173", url: "http://localhost:5173/" };
+
+    it("POST /mensagens leva os itens ao motor, com o arquivo do artefato em caminho absoluto", async () => {
+      const artefato = { tipo: "artefato", titulo: "Relatório", caminho: "orquestradores/o9/relatorio.html" };
+      const resposta = await postar(`/orquestradores/${orquestrador.id}/mensagens`, {
+        texto: "analise",
+        itensLigados: [nota, previa, artefato, { tipo: "artefato", titulo: "Fora", caminho: "../../etc/passwd" }],
+      });
+
+      expect(resposta.status).toBe(202);
+      await aguardarOcioso();
+      expect(motor.pedidos.at(-1)?.itensLigados).toEqual([
+        nota,
+        previa,
+        { ...artefato, caminho: path.join(tmpdir(), "orquestradores", "o9", "relatorio.html") },
+        { tipo: "artefato", titulo: "Fora" },
+      ]);
+      expect(orquestrador.ultimoTurno?.texto).toBe("analise");
+    });
+
+    it("sem o campo, o pedido vai sem itens ligados", async () => {
+      expect((await postar(`/orquestradores/${orquestrador.id}/mensagens`, { texto: "oi" })).status).toBe(202);
+      await aguardarOcioso();
+
+      expect(motor.pedidos.at(-1)?.itensLigados).toEqual([]);
+    });
+
+    it.each<[string, unknown, string]>([
+      ["mais de 10 itens", Array.from({ length: 11 }, () => nota), "Ligue até 10 itens por pedido."],
+      [
+        "texto de nota grande demais",
+        [{ ...nota, conteudo: "a".repeat(4_001) }],
+        "O texto de cada item ligado deve ter até 4000 caracteres.",
+      ],
+      ["tipo desconhecido", [{ tipo: "pasta", titulo: "x" }], "Tipo de item ligado inválido."],
+      [
+        "endereço que não é http",
+        [{ ...previa, url: "file:///etc/passwd" }],
+        "O endereço do item ligado deve começar com http:// ou https://.",
+      ],
+    ])("recusa %s com 400, na mensagem e na fila", async (_caso, itensLigados, mensagem) => {
+      const enviada = await postar(`/orquestradores/${orquestrador.id}/mensagens`, { texto: "oi", itensLigados });
+      const enfileirada = await postar(`/orquestradores/${orquestrador.id}/fila`, { texto: "oi", itensLigados });
+
+      expect(enviada.status).toBe(400);
+      expect(await enviada.json()).toEqual({ erro: mensagem });
+      expect(enfileirada.status).toBe(400);
+      expect(await enfileirada.json()).toEqual({ erro: mensagem });
+      expect(orquestrador.totalDeTurnos).toBe(0);
+      expect(orquestrador.fila).toHaveLength(0);
+    });
+
+    it("POST /fila congela os itens no pedido, que os leva ao motor quando sai da fila", async () => {
+      const resposta = await postar(`/orquestradores/${orquestrador.id}/fila`, { texto: "depois", itensLigados: [nota] });
+      const { pedidoId } = (await resposta.json()) as { pedidoId: string };
+
+      expect(resposta.status).toBe(201);
+      expect(orquestrador.fila[0]?.paraDados()).toMatchObject({ id: pedidoId, itensLigados: [nota] });
+
+      expect((await postar(`/orquestradores/${orquestrador.id}/fila/${pedidoId}/enviar`)).status).toBe(202);
+      await aguardarOcioso();
+      expect(motor.pedidos.at(-1)).toMatchObject({ itensLigados: [nota] });
+    });
+  });
+
   describe("trivial e plano sempre ligados: as opções antigas são ignoradas (ADR-28)", () => {
     async function alterarConfiguracao(corpo: unknown): Promise<Response> {
       return fetch(`${base}/orquestradores/${orquestrador.id}/configuracao`, {

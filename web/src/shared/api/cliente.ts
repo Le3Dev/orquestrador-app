@@ -75,6 +75,25 @@ export interface ImagemParaEnvio {
   base64: string;
 }
 
+/**
+ * Uma nota, prévia ou artefato que o usuário ligou ao terminal no canvas: vai
+ * no próximo pedido como contexto. Nota leva o texto (cortado); prévia, o
+ * endereço; artefato, o arquivo na pasta de entrada (`chat/<arquivo>` ou
+ * `orquestradores/<id>/<arquivo>`), que o servidor troca pelo caminho no disco.
+ */
+export interface ItemLigadoParaEnvio {
+  tipo: "nota" | "previa" | "artefato";
+  titulo: string;
+  conteudo?: string;
+  url?: string;
+  caminho?: string;
+}
+
+/** O corpo só leva `itensLigados` quando há algum: sem itens, o pedido é igual ao de antes. */
+function comItensLigados(itensLigados: readonly ItemLigadoParaEnvio[] | undefined): { itensLigados?: readonly ItemLigadoParaEnvio[] } {
+  return itensLigados !== undefined && itensLigados.length > 0 ? { itensLigados } : {};
+}
+
 export interface NovoOrquestrador extends DadosDaConfiguracao {
   nome: string;
   pastaDeTrabalho: string;
@@ -154,21 +173,27 @@ export const api = {
     texto: string,
     imagens: readonly ImagemParaEnvio[] = [],
     modo: ModoDoTurno = "execucao",
+    itensLigados?: readonly ItemLigadoParaEnvio[],
   ) =>
     requisitar<{ turnoId: string }>(`/orquestradores/${encodeURIComponent(id)}/mensagens`, {
       method: "POST",
-      body: JSON.stringify({ texto, imagens, modo }),
+      body: JSON.stringify({ texto, imagens, modo, ...comItensLigados(itensLigados) }),
     }),
 
   /**
-   * Guarda um pedido na fila do Orquestrador (só texto e modo: imagens não
-   * entram). Ele sai sozinho quando o turno atual terminar concluído, ou com
-   * `enviarDaFila`. Recusado (409) com a fila cheia.
+   * Guarda um pedido na fila do Orquestrador (texto, modo e os itens ligados
+   * agora: imagens não entram). Ele sai sozinho quando o turno atual terminar
+   * concluído, ou com `enviarDaFila`. Recusado (409) com a fila cheia.
    */
-  enfileirarPedido: (id: string, texto: string, modo: ModoDoTurno = "execucao") =>
+  enfileirarPedido: (
+    id: string,
+    texto: string,
+    modo: ModoDoTurno = "execucao",
+    itensLigados?: readonly ItemLigadoParaEnvio[],
+  ) =>
     requisitar<{ pedidoId: string }>(`/orquestradores/${encodeURIComponent(id)}/fila`, {
       method: "POST",
-      body: JSON.stringify({ texto, modo }),
+      body: JSON.stringify({ texto, modo, ...comItensLigados(itensLigados) }),
     }),
 
   removerDaFila: (id: string, pedidoId: string) =>

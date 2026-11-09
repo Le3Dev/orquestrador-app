@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { separarPerguntasDoApp } from "../perguntas/PerguntaDoApp";
 import { Anexo } from "./Anexo";
 import { ArmazemDeAnexos } from "./ArmazemDeAnexos";
@@ -17,7 +19,7 @@ import {
   EventoDeOrquestracao,
   EventoDoMotor,
 } from "./EventoDeOrquestracao";
-import { mensagemDeAprovacaoDoPlano, separarPropostaDePlano } from "./InstrucoesDoOrquestrador";
+import { ItemLigado, mensagemDeAprovacaoDoPlano, separarPropostaDePlano } from "./InstrucoesDoOrquestrador";
 import { aplicarVariaveis, InstrucoesAplicadas, resolverInstrucoes } from "./InstrucoesPersonalizadas";
 import { MedidorDeConsumo, PeriodoDoTurno } from "./MedidorDeConsumo";
 import { ModeloClaude } from "./ModeloClaude";
@@ -160,6 +162,13 @@ export interface MensagemEnviada {
 export interface PedidoEnfileirado {
   pedidoId: string;
 }
+
+/**
+ * O arquivo de um artefato como a tela o conhece: relativo à pasta de entrada
+ * dos artefatos, onde os agentes o gravaram (`orquestradores/<id>/<arquivo>`
+ * ou `chat/<arquivo>`). Só um nível de pasta e nada de ".." no nome.
+ */
+const ARQUIVO_DE_ARTEFATO_NA_ENTRADA = /^(?:chat|orquestradores\/[A-Za-z0-9_-]{1,100})\/[^/\\.][^/\\]*$/;
 
 function descreverErro(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro);
@@ -306,18 +315,33 @@ export class ServicoDeOrquestracao {
     texto: string,
     imagens: readonly ImagemRecebida[] = [],
     modo: ModoDoTurno = "execucao",
+    itensLigados: readonly ItemLigado[] = [],
   ): Promise<MensagemEnviada> {
-    return this.iniciarTurno(this.buscar(id), texto, imagens, modo, null);
+    const orquestrador = this.buscar(id);
+    const itens = this.itensComCaminhos(orquestrador, itensLigados);
+    return this.iniciarTurno(orquestrador, texto, imagens, modo, null, null, itens);
   }
 
   /**
    * Guarda um pedido na fila do Orquestrador, com ou sem turno em andamento.
-   * Ele sai sozinho quando um turno terminar bem, ou com `enviarDaFila`.
+   * Ele sai sozinho quando um turno terminar bem, ou com `enviarDaFila`. Os
+   * itens ligados vão congelados no pedido, como estavam ao enfileirar.
    */
-  async enfileirarPedido(id: string, texto: string, modo: ModoDoTurno = "execucao"): Promise<PedidoEnfileirado> {
+  async enfileirarPedido(
+    id: string,
+    texto: string,
+    modo: ModoDoTurno = "execucao",
+    itensLigados: readonly ItemLigado[] = [],
+  ): Promise<PedidoEnfileirado> {
     const { repositorio, gerarId, agora } = this.dependencias;
     const orquestrador = this.buscar(id);
-    const pedido = PedidoNaFila.criar({ id: gerarId(), texto, modo, enfileiradoEm: agora() });
+    const pedido = PedidoNaFila.criar({
+      id: gerarId(),
+      texto,
+      modo,
+      enfileiradoEm: agora(),
+      itensLigados: this.itensComCaminhos(orquestrador, itensLigados),
+    });
     this.publicar(orquestrador, orquestrador.enfileirarPedido(pedido));
     await repositorio.salvar(orquestrador);
     return { pedidoId: pedido.id };
@@ -337,7 +361,26 @@ export class ServicoDeOrquestracao {
   async enviarDaFila(id: string, pedidoId: string): Promise<MensagemEnviada> {
     const orquestrador = this.buscar(id);
     const pedido = orquestrador.pedidoDaFila(pedidoId);
-    return this.iniciarTurno(orquestrador, pedido.texto, [], pedido.modo, pedido);
+    return this.iniciarTurno(orquestrador, pedido.texto, [], pedido.modo, pedido, null, pedido.itensLigados);
+  }
+
+  /**
+   * Os itens ligados com o arquivo de cada artefato em caminho absoluto: a
+   * tela o manda relativo à pasta de entrada dos artefatos (a mãe de
+   * `orquestradores/<id>`, a pasta de artefatos de cada Orquestrador). Um
+   * caminho fora desse formato sai do item.
+   */
+  private itensComCaminhos(orquestrador: Orquestrador, itens: readonly ItemLigado[]): ItemLigado[] {
+    const entrada = path.dirname(path.dirname(this.dependencias.pastaDeArtefatos(orquestrador.id)));
+    return itens.map((item) => {
+      if (item.tipo !== "artefato" || item.caminho === undefined) {
+        return item;
+      }
+      const { caminho, ...semCaminho } = item;
+      return ARQUIVO_DE_ARTEFATO_NA_ENTRADA.test(caminho)
+        ? { ...semCaminho, caminho: path.join(entrada, ...caminho.split("/")) }
+        : semCaminho;
+    });
   }
 
   /**
@@ -353,6 +396,9 @@ export class ServicoDeOrquestracao {
    * `retomada`: o turno é o app retomando sozinho um que travou ou falhou
    * (ver ADR-36). Qualquer outro turno que começa cancela a retomada que
    * estivesse agendada: o usuário assumiu.
+   *
+   * `itensLigados`: o contexto que o usuário ligou ao Orquestrador no canvas;
+   * vai só na mensagem deste turno ao motor, não no histórico.
    */
   private async iniciarTurno(
     orquestrador: Orquestrador,
@@ -361,6 +407,7 @@ export class ServicoDeOrquestracao {
     modo: ModoDoTurno,
     pedidoDaFila: PedidoNaFila | null,
     retomada: { deTurnoId: string; tentativa: number } | null = null,
+    itensLigados: readonly ItemLigado[] = [],
   ): Promise<MensagemEnviada> {
     const { repositorio, execucoes, anexos, gerarId, agora } = this.dependencias;
     const turnoId = gerarId();
@@ -412,6 +459,7 @@ export class ServicoDeOrquestracao {
       instrucoes: instrucoesDoTurno,
       revogarInstrucoesAnteriores: revogarAnteriores,
       subagentesProntos: this.subagentesProntos(),
+      itensLigados,
     }).finally(() => execucoes.encerrar(orquestrador.id));
     const conclusao = execucao.then(() => undefined);
     // Em segundo plano, depois do fim do turno: não segura a resposta nem o
@@ -632,7 +680,10 @@ export class ServicoDeOrquestracao {
     turnoId: string,
     sinal: AbortSignal,
     configuracaoDoTurno: ConfiguracaoDoOrquestrador,
-    instrucoesDoTurno: Pick<PedidoDeTurno, "instrucoes" | "revogarInstrucoesAnteriores" | "subagentesProntos">,
+    instrucoesDoTurno: Pick<
+      PedidoDeTurno,
+      "instrucoes" | "revogarInstrucoesAnteriores" | "subagentesProntos" | "itensLigados"
+    >,
   ): Promise<TurnoEncerrado | null> {
     const { motor, repositorio, anexos, worktrees, pastaDeArtefatos, agora } = this.dependencias;
     const turno = orquestrador.turnoEmAndamento;

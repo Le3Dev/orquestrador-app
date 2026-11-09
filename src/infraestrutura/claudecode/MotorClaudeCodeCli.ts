@@ -108,6 +108,7 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
         pedido.instrucoes,
         pedido.revogarInstrucoesAnteriores,
         pedido.subagentesProntos,
+        pedido.itensLigados ?? [],
       );
 
       const adaptador = new AdaptadorDeEventosDoClaudeCode();

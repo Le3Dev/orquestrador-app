@@ -15,7 +15,15 @@ import {
   ULTRACODE_NOS_SUBAGENTES,
 } from "../orquestracao/EsforcoDeRaciocinio";
 import { EventoRegistrado } from "../orquestracao/EventoDeOrquestracao";
-import { instrucoesDoOrquestrador, mensagemParaOOrquestrador } from "../orquestracao/InstrucoesDoOrquestrador";
+import {
+  instrucoesDoOrquestrador,
+  MAXIMO_DE_ITENS_LIGADOS,
+  mensagemParaOOrquestrador,
+  TAMANHO_MAXIMO_DO_CONTEUDO_LIGADO,
+  TAMANHO_MAXIMO_DO_ENDERECO_LIGADO,
+  TAMANHO_MAXIMO_DO_TITULO_LIGADO,
+  TIPOS_DE_ITEM_LIGADO,
+} from "../orquestracao/InstrucoesDoOrquestrador";
 import {
   aplicarVariaveis,
   InstrucoesAplicadas,
@@ -144,6 +152,41 @@ const esquemaDaPrevia = z.object({
 /** O que a pré-visualização põe no lugar do pedido do usuário. */
 export const PEDIDO_DE_EXEMPLO = "(aqui entra a sua mensagem)";
 
+/**
+ * Um item que o usuário ligou ao Orquestrador no canvas: a nota com o texto
+ * (a tela o corta antes do limite), a prévia com o endereço e o artefato com o
+ * caminho do arquivo, relativo à pasta de entrada dos artefatos.
+ */
+const esquemaDoItemLigado = z.object({
+  tipo: z.enum(TIPOS_DE_ITEM_LIGADO, { error: "Tipo de item ligado inválido." }),
+  titulo: z
+    .string({ error: "O título do item ligado deve ser um texto." })
+    .max(TAMANHO_MAXIMO_DO_TITULO_LIGADO, {
+      error: `O título de cada item ligado deve ter até ${TAMANHO_MAXIMO_DO_TITULO_LIGADO} caracteres.`,
+    }),
+  conteudo: z
+    .string({ error: "O texto do item ligado deve ser um texto." })
+    .max(TAMANHO_MAXIMO_DO_CONTEUDO_LIGADO, {
+      error: `O texto de cada item ligado deve ter até ${TAMANHO_MAXIMO_DO_CONTEUDO_LIGADO} caracteres.`,
+    })
+    .optional(),
+  url: z
+    .string({ error: "O endereço do item ligado deve ser um texto." })
+    .max(TAMANHO_MAXIMO_DO_ENDERECO_LIGADO, { error: "O endereço do item ligado é longo demais." })
+    .regex(/^https?:\/\//i, { error: "O endereço do item ligado deve começar com http:// ou https://." })
+    .optional(),
+  caminho: z
+    .string({ error: "O caminho do item ligado deve ser um texto." })
+    .max(TAMANHO_MAXIMO_DO_ENDERECO_LIGADO, { error: "O caminho do item ligado é longo demais." })
+    .optional(),
+});
+
+/** Opcional: ausente (clientes antigos) vale nenhum item ligado. */
+const esquemaDosItensLigados = z
+  .array(esquemaDoItemLigado, { error: "Os itens ligados devem ser uma lista." })
+  .max(MAXIMO_DE_ITENS_LIGADOS, { error: `Ligue até ${MAXIMO_DE_ITENS_LIGADOS} itens por pedido.` })
+  .default([]);
+
 const esquemaDeMensagem = z.object({
   texto: z
     .string({ error: "Escreva uma mensagem." })
@@ -166,9 +209,10 @@ const esquemaDeMensagem = z.object({
     .max(MAXIMO_DE_IMAGENS_POR_MENSAGEM, { error: `Anexe até ${MAXIMO_DE_IMAGENS_POR_MENSAGEM} imagens por mensagem.` })
     .default([]),
   modo: z.enum(MODOS_DO_TURNO, { error: "Modo do pedido inválido." }).default("execucao"),
+  itensLigados: esquemaDosItensLigados,
 });
 
-/** Pedido para a fila: só texto e modo (imagens não entram na fila). */
+/** Pedido para a fila: só texto, modo e os itens ligados (imagens não entram na fila). */
 const esquemaDoPedidoNaFila = z.object({
   texto: z
     .string({ error: "Escreva o pedido." })
@@ -183,6 +227,8 @@ const esquemaDoPedidoNaFila = z.object({
     .array(z.unknown())
     .max(0, { error: "A fila aceita só texto: envie as imagens quando o orquestrador estiver livre." })
     .optional(),
+  // Congelados no pedido: ele sai mais tarde com o contexto ligado na hora de enfileirar.
+  itensLigados: esquemaDosItensLigados,
 });
 
 const esquemaDeAprovacaoDoPlano = z.object({
@@ -553,7 +599,7 @@ export function criarOrquestradoresRoutes({
   rotas.post(
     "/orquestradores/:id/mensagens",
     rota(async (requisicao, resposta) => {
-      const { texto, imagens, modo } = esquemaDeMensagem.parse(requisicao.body);
+      const { texto, imagens, modo, itensLigados } = esquemaDeMensagem.parse(requisicao.body);
       const { turnoId } = await servico.enviarMensagem(
         requisicao.params.id,
         texto,
@@ -563,6 +609,7 @@ export function criarOrquestradoresRoutes({
           conteudo: Buffer.from(imagem.base64, "base64"),
         })),
         modo,
+        itensLigados,
       );
       resposta.status(202).json({ turnoId });
     }),
@@ -575,8 +622,8 @@ export function criarOrquestradoresRoutes({
   rotas.post(
     "/orquestradores/:id/fila",
     rota(async (requisicao, resposta) => {
-      const { texto, modo } = esquemaDoPedidoNaFila.parse(requisicao.body ?? {});
-      const { pedidoId } = await servico.enfileirarPedido(requisicao.params.id, texto, modo);
+      const { texto, modo, itensLigados } = esquemaDoPedidoNaFila.parse(requisicao.body ?? {});
+      const { pedidoId } = await servico.enfileirarPedido(requisicao.params.id, texto, modo, itensLigados);
       resposta.status(201).json({ pedidoId });
     }),
   );

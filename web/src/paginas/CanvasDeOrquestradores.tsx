@@ -1,21 +1,30 @@
 import {
   Background,
   BackgroundVariant,
+  BezierEdge,
   ControlButton,
   Controls,
+  Handle,
+  type IsValidConnection,
   MiniMap,
+  type NodeProps,
   Panel,
+  Position,
   ReactFlow,
   ReactFlowProvider,
   SelectionMode,
   useNodesState,
   useReactFlow,
+  type Connection,
+  type EdgeChange,
   type EdgeTypes,
   type NodeChange,
   type NodeTypes,
 } from "@xyflow/react";
 import {
+  type ComponentType,
   type Dispatch,
+  memo,
   type SetStateAction,
   useCallback,
   useEffect,
@@ -98,16 +107,23 @@ import {
 } from "../shared/canvas/layout";
 import { AVISO_DO_LIMITE_DE_ORQUESTRADORES, cabeOutroTerminal } from "../shared/canvas/limiteDeTerminais";
 import {
+  ALCA_DE_LIGACAO,
   ALCA_DO_TERMINAL,
+  type Ancora,
   type ArestaDoCanvas,
+  arestasDasLigacoes,
   arestasDasPrevias,
   arestasDosBixinhos,
   arestasDosShells,
   comEscalaDaLetra,
+  comItensLigadosJunto,
   comPosicoes,
+  desligarItem,
   ehArtefato,
   ehBixinho,
   ehFechavelEmGrupo,
+  ehItemLigavel,
+  ehLigacaoValida,
   ehNota,
   ehPrevia,
   ehRascunho,
@@ -117,7 +133,10 @@ import {
   idDoNoDaPrevia,
   idDoNoDoArtefato,
   idDoNoDoShell,
+  itensLigadosParaEnvio,
   janelaVisivel,
+  lerIdDaLigacao,
+  ligarItem,
   limparBixinhos,
   mesmasLigacoes,
   minimizarOuRestaurar,
@@ -137,6 +156,7 @@ import {
   resumirGrupo,
   selecionarTodasAsTelas,
   semBixinhosNaSelecao,
+  semLigacoesOrfas,
   semTerminal,
   sincronizarBixinhos,
   subagentesVisiveis,
@@ -165,6 +185,51 @@ import { useSaidaDosBixinhos } from "../shared/hooks/useSaidaDosBixinhos";
 import { useServidor } from "../shared/hooks/useServidor";
 import type { AcaoDaPaleta, FonteDaPaleta, ItemDaPaleta } from "../shared/paletaDeComandos";
 
+/** Onde chega a linha do terminal a uma nota ou artefato ligados: o meio de cada lado (a prévia já tem as dela). */
+const ANCORAS_DO_ITEM_LIGADO: readonly { id: Ancora; posicao: Position }[] = [
+  { id: "cima", posicao: Position.Top },
+  { id: "baixo", posicao: Position.Bottom },
+  { id: "esquerda", posicao: Position.Left },
+  { id: "direita", posicao: Position.Right },
+];
+
+/**
+ * A bolinha à direita de uma nota, prévia ou artefato: puxar dela até um
+ * terminal liga o item ao Orquestrador (só começa ligações, não recebe).
+ * Com `comAncoras`, também as âncoras onde a linha chega. Memorizada: o
+ * arraste não a re-renderiza a cada quadro.
+ */
+const AlcaDeLigacao = memo(function AlcaDeLigacao({ comAncoras }: { comAncoras: boolean }) {
+  return (
+    <>
+      {comAncoras &&
+        ANCORAS_DO_ITEM_LIGADO.map(({ id, posicao }) => (
+          <Handle key={id} id={id} type="target" position={posicao} className="ancora" isConnectable={false} />
+        ))}
+      <Handle
+        id={ALCA_DE_LIGACAO}
+        type="source"
+        position={Position.Right}
+        className="alca-de-ligacao"
+        isConnectableEnd={false}
+        title="Arraste até um terminal para ligar a ele (vai como contexto no próximo pedido)"
+      />
+    </>
+  );
+});
+
+/** O nó com a alça de ligação por cima: nota, prévia e artefato se ligam a um terminal. */
+function comAlcaDeLigacao<Props extends NodeProps>(No: ComponentType<Props>, comAncoras: boolean) {
+  return memo(function NoComAlcaDeLigacao(props: Props) {
+    return (
+      <>
+        <AlcaDeLigacao comAncoras={comAncoras} />
+        <No {...props} />
+      </>
+    );
+  });
+}
+
 // Tudo o que vai ao <ReactFlow> é constante ou estável: uma prop nova a cada
 // renderização (e o canvas renderiza a cada quadro do arraste) faz o React
 // Flow atualizar o estado interno e re-renderizar por dentro.
@@ -172,12 +237,13 @@ const TIPOS_DE_NO = {
   terminal: NoTerminal,
   rascunho: NoRascunho,
   bixinho: NoBixinho,
-  nota: NoNota,
-  artefato: NoArtefato,
-  previa: NoPrevia,
+  nota: comAlcaDeLigacao(NoNota, true),
+  artefato: comAlcaDeLigacao(NoArtefato, true),
+  previa: comAlcaDeLigacao(NoPrevia, false),
   shell: NoShell,
 } satisfies NodeTypes;
-const TIPOS_DE_ARESTA = { bixinho: ArestaDoBixinho } satisfies EdgeTypes;
+// A linha de um item ligado é a curva padrão, com a pele em `.aresta-ligacao`; a do bixinho, a própria.
+const TIPOS_DE_ARESTA = { bixinho: ArestaDoBixinho, ligacao: BezierEdge } satisfies EdgeTypes;
 // Enquadrar nunca passa de 100% (o texto dos terminais só fica nítido em zoom
 // inteiro) nem desce de 60% (ver `escolherEnquadramento`).
 /** Folga do enquadramento ao abrir o canvas. */
@@ -392,7 +458,8 @@ function Canvas() {
 
   const aoMudarNosEReacomodar = useCallback(
     (mudancas: NodeChange<NoDoCanvas>[]) => {
-      aoMudarNos(mudancas);
+      // Arrastar o terminal leva junto os itens ligados só a ele.
+      aoMudarNos(comItensLigadosJunto(mudancas, fluxo.getNodes()));
       if (mudancas.some((mudanca) => mudanca.type === "dimensions" && mudanca.resizing === true)) {
         setRedimensionando(true);
       }
@@ -402,7 +469,7 @@ function Canvas() {
         reacomodar();
       }
     },
-    [aoMudarNos, reacomodar],
+    [aoMudarNos, reacomodar, fluxo],
   );
 
   // As notas criadas, restauradas ou trazidas do servidor também tiram os
@@ -539,7 +606,62 @@ function Canvas() {
     ],
     [ligados, conversas, bixinhosSaindo],
   );
-  const arestas = useReaproveitado(arestasCalculadas, reaproveitarArestas);
+  // As linhas dos itens ligados acompanham o lado de cada item a cada quadro (são poucas); a
+  // reaproveitada só muda quando alguma delas troca de lado, nasce, some ou é selecionada.
+  const [ligacaoSelecionada, setLigacaoSelecionada] = useState<string | null>(null);
+  const arestas = useReaproveitado(
+    [...arestasCalculadas, ...arestasDasLigacoes(nos, ligacaoSelecionada)],
+    reaproveitarArestas,
+  );
+
+  // Puxar a linha de uma nota, prévia ou artefato até um terminal os liga; repetida, nada muda.
+  const aoLigar = useCallback((conexao: Connection) => setNos((atuais) => ligarItem(atuais, conexao)), [setNos]);
+  const ligacaoValida = useCallback<IsValidConnection<ArestaDoCanvas>>(
+    (conexao) => ehLigacaoValida(conexao, fluxo.getNodes()),
+    [fluxo],
+  );
+  // Só as linhas dos itens ligados se selecionam; a seleção fica aqui, porque as linhas são calculadas.
+  const aoMudarArestas = useCallback((mudancas: EdgeChange<ArestaDoCanvas>[]) => {
+    for (const mudanca of mudancas) {
+      if (mudanca.type === "select") {
+        setLigacaoSelecionada((atual) => (mudanca.selected ? mudanca.id : atual === mudanca.id ? null : atual));
+      }
+    }
+  }, []);
+  // Uma nota apagada, ou uma prévia ou um artefato fechados, saem dos terminais a que estavam ligados.
+  const idsLigaveis = nos
+    .filter(ehItemLigavel)
+    .map((no) => no.id)
+    .join("\n");
+  useEffect(() => {
+    setNos(semLigacoesOrfas);
+  }, [idsLigaveis, setNos]);
+  // Delete ou Backspace desligam a linha selecionada (com o foco num campo, a tecla é dele); Esc a desmarca.
+  useEffect(() => {
+    if (ligacaoSelecionada === null) {
+      return;
+    }
+    const aoApertarTecla = (evento: KeyboardEvent) => {
+      if (evento.defaultPrevented || focoEmCampoDeTexto(evento.target)) {
+        return;
+      }
+      if (evento.key === "Escape") {
+        setLigacaoSelecionada(null);
+        return;
+      }
+      if (evento.key !== "Delete" && evento.key !== "Backspace") {
+        return;
+      }
+      evento.preventDefault();
+      const ligacao = lerIdDaLigacao(ligacaoSelecionada, fluxo.getNodes());
+      if (ligacao !== null) {
+        setNos((atuais) => desligarItem(atuais, ligacao.terminalId, ligacao.itemId));
+      }
+      setLigacaoSelecionada(null);
+    };
+    window.addEventListener("keydown", aoApertarTecla);
+    return () => window.removeEventListener("keydown", aoApertarTecla);
+  }, [ligacaoSelecionada, fluxo, setNos]);
 
   // O centro da área do canvas (no desktop, abaixo da barra de título).
   const centroDaTela = useCallback(() => {
@@ -1265,6 +1387,20 @@ function Canvas() {
     ],
   );
 
+  // O × do chip no terminal e o que vai no próximo pedido (lido na hora, das lojas e dos nós).
+  const desligarItemDoTerminal = useCallback(
+    (orquestradorId: string, itemId: string) => setNos((atuais) => desligarItem(atuais, orquestradorId, itemId)),
+    [setNos],
+  );
+  const lerItensLigados = useCallback(
+    (orquestradorId: string) =>
+      itensLigadosParaEnvio(fluxo.getNodes(), orquestradorId, {
+        lerNota: lojaDasNotas.ler,
+        lerArtefato: lojaDosArtefatos.ler,
+      }),
+    [fluxo, lojaDasNotas, lojaDosArtefatos],
+  );
+
   const acoes = useMemo<AcoesDoCanvas>(
     () => ({
       abrirTerminal,
@@ -1279,6 +1415,8 @@ function Canvas() {
       navegarPrevia,
       minimizarOuRestaurarPrevia,
       fecharPrevia,
+      desligarItem: desligarItemDoTerminal,
+      lerItensLigados,
     }),
     [
       abrirTerminal,
@@ -1293,6 +1431,8 @@ function Canvas() {
       navegarPrevia,
       minimizarOuRestaurarPrevia,
       fecharPrevia,
+      desligarItemDoTerminal,
+      lerItensLigados,
     ],
   );
   // Os nós só leem do servidor a conexão e a memória por Orquestrador: a
@@ -1638,6 +1778,9 @@ function Canvas() {
                     nodeTypes={TIPOS_DE_NO}
                     edgeTypes={TIPOS_DE_ARESTA}
                     onNodesChange={aoMudarNosEReacomodar}
+                    onEdgesChange={aoMudarArestas}
+                    onConnect={aoLigar}
+                    isValidConnection={ligacaoValida}
                     onNodeDragStart={movimento.aoComecarArraste}
                     onNodeDragStop={aoSoltarNo}
                     onSelectionDragStart={movimento.aoComecarArraste}

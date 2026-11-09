@@ -1740,6 +1740,74 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .faixa-de-servidores-item { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .faixa-de-servidores .botao-de-texto { color: var(--info); font-size: inherit; }
 
+/* ---------------- Itens ligados ao terminal ----------------
+ * A bolinha à direita da nota, da prévia e do artefato (puxar dela até um
+ * terminal liga o item), a chegada que cobre o terminal durante a ligação, a
+ * linha (cheia, para não confundir com a tracejada da prévia que saiu do
+ * terminal) e os chips logo acima do prompt. */
+.react-flow__handle.alca-de-ligacao {
+  width: 12px;
+  height: 12px;
+  background: var(--surface-2);
+  border: 1.5px solid color-mix(in srgb, var(--info) 80%, transparent);
+  opacity: 0;
+  transition: opacity .12s ease, background-color .12s ease;
+  z-index: 6;
+}
+.react-flow__node:hover .alca-de-ligacao,
+.react-flow__node.selected .alca-de-ligacao,
+.react-flow__handle.alca-de-ligacao.connectingfrom { opacity: 1; }
+.react-flow__handle.alca-de-ligacao:hover,
+.react-flow__handle.alca-de-ligacao.connectingfrom { background: var(--info); }
+.react-flow__handle.chegada-da-ligacao {
+  inset: 0;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  transform: none;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  z-index: 5;
+}
+.react-flow__handle.chegada-da-ligacao.connectionindicator { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--info) 35%, transparent); }
+.react-flow__handle.chegada-da-ligacao.connectingto.valid {
+  box-shadow: inset 0 0 0 2px var(--info);
+  background: color-mix(in srgb, var(--info) 8%, transparent);
+}
+.react-flow__connection-path { stroke: var(--info); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.react-flow__edge.aresta-ligacao .react-flow__edge-path { stroke: color-mix(in srgb, var(--info) 55%, transparent); stroke-width: 1.5; }
+.react-flow__edge.aresta-ligacao:hover .react-flow__edge-path { stroke: color-mix(in srgb, var(--info) 80%, transparent); }
+.react-flow__edge.aresta-ligacao.selected .react-flow__edge-path { stroke: var(--info); stroke-width: 2.5; }
+.itens-ligados {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 6px;
+  flex-shrink: 0;
+  padding: 3px 14px;
+  border-top: 1px solid var(--border);
+  font-family: var(--fonte-mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+.chip-item-ligado { gap: 4px; max-width: 14rem; padding-right: 2px; }
+.chip-item-ligado-nota { color: var(--warning); }
+.chip-item-ligado-previa,
+.chip-item-ligado-artefato { color: var(--info); }
+.chip-item-ligado > .truncate { color: var(--secondary); }
+.desligar-item-ligado {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  color: var(--muted);
+}
+.desligar-item-ligado:hover { color: var(--primary); background: var(--surface-2); }
+
 /* ---------------- Bixinhos (Subagentes) ---------------- */
 
 .no-bixinho {

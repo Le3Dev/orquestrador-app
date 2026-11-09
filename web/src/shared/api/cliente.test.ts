@@ -35,3 +35,39 @@ describe("api.lerConsumoDosOrquestradores", () => {
     await expect(falha).rejects.toThrow("Erro inesperado no servidor: x");
   });
 });
+
+describe("itens ligados no pedido", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const itens = [{ tipo: "nota" as const, titulo: "Ideias", conteudo: "comprar café" }];
+
+  function corpoEnviado(buscar: { mock: { calls: unknown[][] } }): unknown {
+    const opcoes = buscar.mock.calls[0]?.[1] as RequestInit | undefined;
+    return JSON.parse(String(opcoes?.body));
+  }
+
+  it("a mensagem leva `itensLigados` só quando há algum", async () => {
+    const buscar = vi.spyOn(globalThis, "fetch").mockResolvedValue(respostaJson({ turnoId: "t1" }));
+
+    await api.enviarMensagem("o1", "olá", [], "execucao", itens);
+    expect(corpoEnviado(buscar)).toEqual({ texto: "olá", imagens: [], modo: "execucao", itensLigados: itens });
+
+    buscar.mockClear();
+    await api.enviarMensagem("o1", "olá", [], "execucao", []);
+    expect(corpoEnviado(buscar)).toEqual({ texto: "olá", imagens: [], modo: "execucao" });
+  });
+
+  it("o pedido na fila também", async () => {
+    const buscar = vi.spyOn(globalThis, "fetch").mockResolvedValue(respostaJson({ pedidoId: "p1" }));
+
+    await api.enfileirarPedido("o1", "depois", "planejamento", itens);
+    expect(buscar.mock.calls[0]?.[0]).toBe("/api/orquestradores/o1/fila");
+    expect(corpoEnviado(buscar)).toEqual({ texto: "depois", modo: "planejamento", itensLigados: itens });
+
+    buscar.mockClear();
+    await api.enfileirarPedido("o1", "depois");
+    expect(corpoEnviado(buscar)).toEqual({ texto: "depois", modo: "execucao" });
+  });
+});

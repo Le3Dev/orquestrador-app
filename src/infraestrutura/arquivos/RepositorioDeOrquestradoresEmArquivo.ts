@@ -6,6 +6,7 @@ import { z } from "zod";
 import { TIPOS_DE_IMAGEM } from "../../orquestracao/Anexo";
 import { ESFORCOS_DE_RACIOCINIO } from "../../orquestracao/EsforcoDeRaciocinio";
 import { EventoDeOrquestracao, EventoRegistrado } from "../../orquestracao/EventoDeOrquestracao";
+import { TIPOS_DE_ITEM_LIGADO } from "../../orquestracao/InstrucoesDoOrquestrador";
 import { MODELOS_CLAUDE } from "../../orquestracao/ModeloClaude";
 import { MODOS_DO_TURNO } from "../../orquestracao/ModoDoTurno";
 import { NIVEIS_DE_PERMISSAO } from "../../orquestracao/NivelDePermissao";
@@ -108,7 +109,26 @@ const esquemaDoArquivo = z.object({
   ),
   worktree: z.object({ branch: z.string(), caminho: z.string(), ativo: z.boolean() }).nullable().default(null),
   fila: z
-    .array(z.object({ id: z.string(), texto: z.string(), modo: z.enum(MODOS_DO_TURNO), enfileiradoEm: dataIso }))
+    .array(
+      z.object({
+        id: z.string(),
+        texto: z.string(),
+        modo: z.enum(MODOS_DO_TURNO),
+        enfileiradoEm: dataIso,
+        // Ausente nos pedidos sem itens ligados (e nos gravados antes deles).
+        itensLigados: z
+          .array(
+            z.object({
+              tipo: z.enum(TIPOS_DE_ITEM_LIGADO),
+              titulo: z.string(),
+              conteudo: z.string().optional(),
+              url: z.string().optional(),
+              caminho: z.string().optional(),
+            }),
+          )
+          .optional(),
+      }),
+    )
     .default([]),
   instrucoesNaConversa: z.boolean().default(false),
   retomadaPendente: z

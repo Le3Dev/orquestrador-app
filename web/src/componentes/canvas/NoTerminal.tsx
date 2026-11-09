@@ -1,4 +1,4 @@
-import { Handle, type NodeProps, NodeResizer, Position } from "@xyflow/react";
+import { Handle, type NodeProps, NodeResizer, Position, useNodesData } from "@xyflow/react";
 import {
   Fragment,
   type KeyboardEvent as EventoDeTecladoDoReact,
@@ -37,11 +37,19 @@ import {
   prefereMovimentoReduzido,
 } from "../../shared/canvas/entrega";
 import { ESCALA_DA_LETRA_PADRAO, type EscalaDaLetra, TAMANHO_MINIMO_DO_TERMINAL } from "../../shared/canvas/layout";
-import { ALCA_DO_TERMINAL, type Ancora, type NoTerminal as TipoDoNo } from "../../shared/canvas/nos";
+import { useArtefato } from "../../shared/canvas/artefatos";
+import {
+  ALCA_DO_TERMINAL,
+  type Ancora,
+  CHEGADA_DA_LIGACAO,
+  type NoPrevia,
+  type NoTerminal as TipoDoNo,
+} from "../../shared/canvas/nos";
+import { useNota } from "../../shared/canvas/notas";
 import { lerPedidoArrastado, temPedidoArrastado } from "../../shared/canvas/pedidoArrastado";
 import { registrarPromptDoTerminal } from "../../shared/canvas/promptsDosTerminais";
 import { useAcoesDosShellsSeHouver } from "../../shared/canvas/shells";
-import { abrirPreviaSozinha } from "../../shared/enderecosLocais";
+import { abrirPreviaSozinha, enderecoCurto } from "../../shared/enderecosLocais";
 import {
   ESTADO_INICIAL,
   filaDePedidos,
@@ -57,7 +65,15 @@ import { resumoDaConfiguracao } from "../../shared/resumoDaConfiguracao";
 import { CamposDaConfiguracao } from "../CamposDaConfiguracao";
 import { Etiqueta } from "../Etiqueta";
 import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
-import { IconeAlerta, IconeEngrenagem, IconeFechar, IconeOrquestrador, IconePasta, IconeShell } from "../Icones";
+import {
+  IconeAlerta,
+  IconeEngrenagem,
+  IconeFechar,
+  IconeNavegador,
+  IconeOrquestrador,
+  IconePasta,
+  IconeShell,
+} from "../Icones";
 import { BotaoDeAlteracoes } from "./BotaoDeAlteracoes";
 import { BotaoDeArquivos } from "./BotaoDeArquivos";
 import { BotaoDeLimparBixinhos } from "./BotaoDeLimparBixinhos";
@@ -107,6 +123,7 @@ function marcarAbertoSozinho(orquestradorId: string, sequencia: number): void {
 const ESPERA_DO_PROXIMO_DA_FILA_MS = 5_000;
 
 const SEM_FILA: readonly DadosDoPedidoNaFila[] = [];
+const SEM_ITENS_LIGADOS: readonly string[] = [];
 const SEM_SUBAGENTES: readonly SubagenteNaTela[] = [];
 
 /** A fila anterior enquanto o conteúdo não muda: o prompt (memorizado) não re-renderiza à toa. */
@@ -600,7 +617,155 @@ const AncorasDoTerminal = memo(function AncorasDoTerminal() {
       {ANCORAS_DO_TERMINAL.map(({ id, posicao }) => (
         <Handle key={id} id={id} type="source" position={posicao} className="ancora" isConnectable={false} />
       ))}
+      {/* Onde chega a linha puxada de uma nota, prévia ou artefato: cobre o terminal
+          inteiro e só recebe o mouse durante a ligação (daqui não se puxa nada). */}
+      <Handle
+        id={CHEGADA_DA_LIGACAO}
+        type="target"
+        position={Position.Left}
+        className="chegada-da-ligacao"
+        isConnectableStart={false}
+      />
     </>
+  );
+});
+
+type TipoDoItemLigado = "nota" | "previa" | "artefato";
+
+const ROTULO_DO_ITEM_LIGADO: Readonly<Record<TipoDoItemLigado, string>> = {
+  nota: "a nota",
+  previa: "a prévia",
+  artefato: "o artefato",
+};
+
+/** O ícone do chip: a folha da nota, o navegador da prévia e o documento do artefato. */
+function IconeDoItemLigado({ tipo }: { tipo: TipoDoItemLigado }) {
+  if (tipo === "previa") {
+    return <IconeNavegador tamanho={11} className="shrink-0" />;
+  }
+  return (
+    <svg width={11} height={11} viewBox="0 0 24 24" fill="none" aria-hidden="true" className="shrink-0">
+      {tipo === "nota" ? (
+        <path
+          d="M5 4h14v11l-5 5H5zM14 20v-5h5M8 9h8M8 13h5"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+      ) : (
+        <path
+          d="M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+      )}
+    </svg>
+  );
+}
+
+function ChipDoItemLigado({
+  tipo,
+  titulo,
+  dica,
+  aoDesligar,
+}: {
+  tipo: TipoDoItemLigado;
+  titulo: string;
+  dica: string;
+  aoDesligar: () => void;
+}) {
+  return (
+    <span className={`chip chip-item-ligado chip-item-ligado-${tipo}`} title={dica}>
+      <IconeDoItemLigado tipo={tipo} />
+      <span className="min-w-0 truncate">{titulo}</span>
+      <button
+        type="button"
+        className="desligar-item-ligado nodrag"
+        aria-label={`Desligar ${ROTULO_DO_ITEM_LIGADO[tipo]} ${titulo}`}
+        title="Desligar deste orquestrador"
+        onClick={aoDesligar}
+      >
+        <IconeFechar tamanho={10} />
+      </button>
+    </span>
+  );
+}
+
+function ChipDaNotaLigada({ notaId, aoDesligar }: { notaId: string; aoDesligar: () => void }) {
+  const nota = useNota(notaId);
+  const titulo = nota?.titulo ?? "nota";
+  return (
+    <ChipDoItemLigado
+      tipo="nota"
+      titulo={titulo}
+      dica={`Nota "${titulo}": o texto vai como contexto no próximo pedido`}
+      aoDesligar={aoDesligar}
+    />
+  );
+}
+
+function ChipDaPreviaLigada({ itemId, aoDesligar }: { itemId: string; aoDesligar: () => void }) {
+  const url = useNodesData<NoPrevia>(itemId)?.data.url ?? "";
+  return (
+    <ChipDoItemLigado
+      tipo="previa"
+      titulo={url === "" ? "prévia sem endereço" : enderecoCurto(url).replace(/\/$/, "")}
+      dica={url === "" ? "Prévia sem endereço: não vai no pedido" : `Prévia ${url}: o endereço vai no próximo pedido`}
+      aoDesligar={aoDesligar}
+    />
+  );
+}
+
+function ChipDoArtefatoLigado({ artefatoId, aoDesligar }: { artefatoId: string; aoDesligar: () => void }) {
+  const artefato = useArtefato(artefatoId);
+  const titulo = artefato?.titulo ?? "artefato";
+  return (
+    <ChipDoItemLigado
+      tipo="artefato"
+      titulo={titulo}
+      dica={`Artefato "${titulo}": o caminho do arquivo vai no próximo pedido`}
+      aoDesligar={aoDesligar}
+    />
+  );
+}
+
+/**
+ * Os itens ligados ao terminal (notas, prévias e artefatos), logo acima do
+ * prompt: um chip por item, com o × que desliga. É o que vai como contexto no
+ * próximo pedido. Memorizados: só mudam quando a lista muda.
+ */
+const ItensLigados = memo(function ItensLigados({
+  ligados,
+  aoDesligar,
+}: {
+  ligados: readonly string[];
+  aoDesligar: (itemId: string) => void;
+}) {
+  if (ligados.length === 0) {
+    return null;
+  }
+  return (
+    <div className="itens-ligados nodrag" role="group" aria-label="Itens ligados a este orquestrador">
+      <span className="text-muted">ligados</span>
+      {ligados.map((itemId) => {
+        const desligar = () => aoDesligar(itemId);
+        if (itemId.startsWith("nota:")) {
+          return <ChipDaNotaLigada key={itemId} notaId={itemId.slice("nota:".length)} aoDesligar={desligar} />;
+        }
+        if (itemId.startsWith("previa:")) {
+          return <ChipDaPreviaLigada key={itemId} itemId={itemId} aoDesligar={desligar} />;
+        }
+        if (itemId.startsWith("artefato:")) {
+          return (
+            <ChipDoArtefatoLigado key={itemId} artefatoId={itemId.slice("artefato:".length)} aoDesligar={desligar} />
+          );
+        }
+        return null;
+      })}
+    </div>
   );
 });
 
@@ -904,6 +1069,7 @@ export function NoTerminal({ data, selected }: NodeProps<TipoDoNo>) {
         orquestrador={orquestrador}
         escalaDaLetra={data.escalaDaLetra ?? ESCALA_DA_LETRA_PADRAO}
         minimizada={minimizada}
+        ligados={data.ligados ?? SEM_ITENS_LIGADOS}
       />
     </>
   );
@@ -926,10 +1092,13 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   orquestrador,
   escalaDaLetra,
   minimizada,
+  ligados,
 }: {
   orquestrador: ResumoDoOrquestrador;
   escalaDaLetra: EscalaDaLetra;
   minimizada: boolean;
+  /** Os ids dos nós ligados a este terminal (`DadosDoTerminal.ligados`). */
+  ligados: readonly string[];
 }) {
   const { conversas, conexoes, sinais, servidor, acoes } = useCanvas();
   const orquestradorId = orquestrador.id;
@@ -992,7 +1161,11 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   }, [telaCheiaEm]);
 
   // Começo e fim de pedido atualizam a doca e a barra de status na hora.
-  const { recarregar } = acoes;
+  const { recarregar, lerItensLigados, desligarItem } = acoes;
+  const aoDesligarItem = useCallback(
+    (itemId: string) => desligarItem?.(orquestradorId, itemId),
+    [desligarItem, orquestradorId],
+  );
   useEffect(() => {
     void recarregar();
   }, [trabalhando, recarregar]);
@@ -1040,12 +1213,16 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
       try {
         // Só imagens, sem texto: o servidor exige uma mensagem, então vai uma padrão.
         const mensagem = texto.trim() === "" ? "Analise as imagens anexadas." : texto;
-        await api.enviarMensagem(
-          orquestradorId,
-          mensagem,
-          imagens.map((imagem) => ({ nome: imagem.nome, tipoDeMidia: imagem.tipoDeMidia, base64: imagem.base64 })),
-          modo,
-        );
+        const imagensParaEnvio = imagens.map((imagem) => ({
+          nome: imagem.nome,
+          tipoDeMidia: imagem.tipoDeMidia,
+          base64: imagem.base64,
+        }));
+        // Os itens ligados vão lidos na hora do envio; sem nenhum, o pedido é igual ao de antes.
+        const itensLigados = lerItensLigados?.(orquestradorId) ?? [];
+        await (itensLigados.length > 0
+          ? api.enviarMensagem(orquestradorId, mensagem, imagensParaEnvio, modo, itensLigados)
+          : api.enviarMensagem(orquestradorId, mensagem, imagensParaEnvio, modo));
         setImagens([]);
         acompanhando.current = true;
         setCancelamentoPedido(false);
@@ -1055,7 +1232,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
         return false;
       }
     },
-    [orquestradorId, imagens, modo],
+    [orquestradorId, imagens, modo, lerItensLigados],
   );
 
   /**
@@ -1068,14 +1245,18 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
     async (texto: string): Promise<boolean> => {
       setErro(null);
       try {
-        await api.enfileirarPedido(orquestradorId, texto, modo);
+        // A fila guarda os itens ligados como estão agora.
+        const itensLigados = lerItensLigados?.(orquestradorId) ?? [];
+        await (itensLigados.length > 0
+          ? api.enfileirarPedido(orquestradorId, texto, modo, itensLigados)
+          : api.enfileirarPedido(orquestradorId, texto, modo));
         return true;
       } catch (falha) {
         setErro(mensagemDeErro(falha));
         return false;
       }
     },
-    [orquestradorId, modo],
+    [orquestradorId, modo, lerItensLigados],
   );
 
   const removerDaFila = useCallback(
@@ -1550,6 +1731,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
         </div>
 
         <FaixaDeServidores enderecos={conversa.enderecosLocais} aoAbrir={aoAbrirPrevia} />
+        <ItensLigados ligados={ligados} aoDesligar={aoDesligarItem} />
         <PromptDoTerminal
           pasta={orquestrador.nomeDaPasta}
           desconectado={!servidor.conectado}

@@ -10,9 +10,11 @@ import type {
   EventoRegistrado,
   ResumoDoOrquestrador,
 } from "../../shared/api/tipos";
+import { criarLojaDosArtefatos, type AcoesDosArtefatos, ProvedorDosArtefatos } from "../../shared/canvas/artefatos";
 import { ContextoDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
 import { DURACAO_DA_ENTREGA_MS, DURACAO_DO_PISCAR_MS } from "../../shared/canvas/entrega";
-import type { NoTerminal as TipoDoNo } from "../../shared/canvas/nos";
+import { novaPrevia, type NoTerminal as TipoDoNo } from "../../shared/canvas/nos";
+import { type AcoesDasNotas, criarLojaDasNotas, ProvedorDasNotas } from "../../shared/canvas/notas";
 import { TIPO_DO_PEDIDO_ARRASTADO } from "../../shared/canvas/pedidoArrastado";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../../shared/estado/aplicarEvento";
 import { NoTerminal, PainelDeConfiguracao } from "./NoTerminal";
@@ -618,7 +620,7 @@ describe("NoTerminal", () => {
     expect(screen.getByText("resuma o projeto")).toBeInTheDocument();
   });
 
-  it("tem uma âncora de saída no meio de cada lado, também enquanto carrega", () => {
+  it("tem uma âncora de saída no meio de cada lado e a chegada das ligações, também enquanto carrega", () => {
     const ancoras = (container: HTMLElement) =>
       [...container.querySelectorAll<HTMLElement>(".react-flow__handle")].map((ancora) => [
         ancora.dataset.handleid,
@@ -630,6 +632,8 @@ describe("NoTerminal", () => {
       ["cima", "top", true],
       ["direita", "right", true],
       ["esquerda", "left", true],
+      // Onde chega a linha puxada de uma nota, prévia ou artefato (cobre o terminal).
+      ["chegada", "left", false],
     ];
 
     const { container, unmount } = render(<Terminal canvas={canvasDoTerminal(conversaDoTerminal())} no={propsDoNo()} />);
@@ -1456,5 +1460,101 @@ describe("NoTerminal · borda piscando na entrega do relatório", () => {
     unmount();
 
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe("NoTerminal · itens ligados", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const LIGADOS = ["nota:n1", "previa:p1", "artefato:a1"];
+  const ITENS_PARA_ENVIO = [
+    { tipo: "nota" as const, titulo: "Ideias", conteudo: "comprar café" },
+    { tipo: "previa" as const, titulo: "localhost:5173", url: "http://localhost:5173/" },
+  ];
+
+  function renderizarLigado(conversa: EstadoDaConversa = conversaOciosa(), ligados: readonly string[] = LIGADOS) {
+    const canvas = canvasDoTerminal(conversa);
+    const desligarItem = vi.fn();
+    const lerItensLigados = vi.fn(() => ITENS_PARA_ENVIO);
+    canvas.acoes = { ...canvas.acoes, desligarItem, lerItensLigados };
+    const lojaDasNotas = criarLojaDasNotas();
+    lojaDasNotas.carregar([
+      { id: "n1", titulo: "Ideias", texto: "comprar café", criadaEm: "2026-11-08T12:00:00Z", atualizadaEm: "2026-11-08T12:00:00Z" },
+    ]);
+    const lojaDosArtefatos = criarLojaDosArtefatos();
+    lojaDosArtefatos.publicar({
+      lista: [
+        {
+          id: "a1",
+          titulo: "Relatório da semana",
+          formato: "html",
+          origem: { tipo: "orquestrador", id: "o1" },
+          arquivo: "relatorio.html",
+          criadoEm: "2026-11-08T12:00:00Z",
+          atualizadoEm: "2026-11-08T12:00:00Z",
+          versaoAtual: 1,
+          versoes: [],
+        },
+      ],
+      carregada: true,
+      erro: null,
+    });
+    const previa = novaPrevia("p1", { x: 0, y: 600 }, { url: "http://localhost:5173/", orquestradorId: null });
+    render(
+      <ReactFlowProvider initialNodes={[previa]}>
+        <ContextoDoCanvas.Provider value={canvas}>
+          <ProvedorDasNotas valor={{ loja: lojaDasNotas, acoes: {} as AcoesDasNotas }}>
+            <ProvedorDosArtefatos valor={{ loja: lojaDosArtefatos, acoes: {} as AcoesDosArtefatos }}>
+              <NoTerminal {...propsDoNo({ data: { orquestradorId: "o1", ligados } })} />
+            </ProvedorDosArtefatos>
+          </ProvedorDasNotas>
+        </ContextoDoCanvas.Provider>
+      </ReactFlowProvider>,
+    );
+    return { desligarItem, lerItensLigados };
+  }
+
+  it("mostra um chip por item ligado, acima do prompt, e o × desliga só aquele", () => {
+    const { desligarItem } = renderizarLigado();
+
+    const grupo = screen.getByRole("group", { name: "Itens ligados a este orquestrador" });
+    expect(within(grupo).getByText("Ideias")).toBeInTheDocument();
+    expect(within(grupo).getByText("localhost:5173")).toBeInTheDocument();
+    expect(within(grupo).getByText("Relatório da semana")).toBeInTheDocument();
+
+    fireEvent.click(within(grupo).getByRole("button", { name: "Desligar a prévia localhost:5173" }));
+    expect(desligarItem).toHaveBeenCalledWith("o1", "previa:p1");
+    expect(desligarItem).toHaveBeenCalledTimes(1);
+  });
+
+  it("sem itens ligados, não há a faixa dos chips", () => {
+    render(<Terminal canvas={canvasDoTerminal(conversaOciosa())} no={propsDoNo()} />);
+
+    expect(screen.queryByRole("group", { name: "Itens ligados a este orquestrador" })).not.toBeInTheDocument();
+  });
+
+  it("o próximo pedido leva os itens ligados, lidos na hora do envio", async () => {
+    const enviar = vi.spyOn(api, "enviarMensagem").mockResolvedValue({ turnoId: "t2" });
+    const { lerItensLigados } = renderizarLigado();
+    const campo = campoDoPrompt();
+
+    fireEvent.change(campo, { target: { value: "use a nota" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+
+    await waitFor(() => expect(enviar).toHaveBeenCalledWith("o1", "use a nota", [], "execucao", ITENS_PARA_ENVIO));
+    expect(lerItensLigados).toHaveBeenCalledWith("o1");
+  });
+
+  it("pôr na fila também leva os itens ligados, como estão agora", async () => {
+    const enfileirar = vi.spyOn(api, "enfileirarPedido").mockResolvedValue({ pedidoId: "p9" });
+    renderizarLigado(conversaDoTerminal());
+    const campo = campoDoPrompt();
+
+    fireEvent.change(campo, { target: { value: "depois veja a prévia" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(enfileirar).toHaveBeenCalledWith("o1", "depois veja a prévia", "execucao", ITENS_PARA_ENVIO),
+    );
   });
 });

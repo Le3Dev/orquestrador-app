@@ -73,4 +73,18 @@ describe("PedidoNaFila", () => {
     expect(dados).toEqual({ id: "p1", texto: "oi", modo: "planejamento", enfileiradoEm: "2026-11-05T10:00:00.000Z" });
     expect(PedidoNaFila.reconstituir(dados).paraDados()).toEqual(dados);
   });
+
+  it("congela os itens ligados como estavam ao enfileirar e os leva no paraDados e no reconstituir", () => {
+    const itens = [{ tipo: "nota" as const, titulo: "Ideias", conteudo: "usar cache" }];
+    const pedido = PedidoNaFila.criar({ id: "p1", texto: "oi", modo: "execucao", enfileiradoEm, itensLigados: itens });
+    itens[0]!.conteudo = "mudou depois";
+
+    expect(pedido.itensLigados).toEqual([{ tipo: "nota", titulo: "Ideias", conteudo: "usar cache" }]);
+    expect(Object.isFrozen(pedido.itensLigados[0])).toBe(true);
+    const dados = pedido.paraDados();
+    expect(dados.itensLigados).toEqual([{ tipo: "nota", titulo: "Ideias", conteudo: "usar cache" }]);
+    expect(PedidoNaFila.reconstituir(dados).paraDados()).toEqual(dados);
+    // Gravado antes dos itens ligados: nenhum.
+    expect(PedidoNaFila.reconstituir({ id: "p2", texto: "oi", modo: "execucao", enfileiradoEm: "2026-11-05T10:00:00.000Z" }).itensLigados).toEqual([]);
+  });
 });

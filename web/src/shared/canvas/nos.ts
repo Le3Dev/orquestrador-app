@@ -1,6 +1,8 @@
-import type { Edge, Node } from "@xyflow/react";
+import type { Edge, Node, NodeChange } from "@xyflow/react";
 
-import type { SituacaoDoSubagente } from "../api/tipos";
+import type { ResumoDoArtefato } from "../api/artefatos";
+import type { ItemLigadoParaEnvio } from "../api/cliente";
+import type { DadosDaNota, SituacaoDoSubagente } from "../api/tipos";
 import type { EstadoDaConversa, SubagenteNaTela } from "../estado/aplicarEvento";
 import {
   ALTURA_DA_NOTA_MINIMIZADA,
@@ -30,13 +32,16 @@ import {
  * Sem `escalaDaLetra`, o cartão (terminal ou rascunho) mostra a letra normal.
  * Sem `minimizada`, o terminal está aberto; minimizado (a bolinha amarela do
  * Mac), o nó tem só a altura da barra, e restaurar volta a `alturaAberta`,
- * como na nota.
+ * como na nota. `ligados`: os ids dos nós (notas, prévias e artefatos) que o
+ * usuário ligou ao terminal por uma linha, na ordem em que ligou; sem o
+ * campo, nenhum. Vão como contexto no próximo pedido (`itensLigadosParaEnvio`).
  */
 export type DadosDoTerminal = {
   orquestradorId: string;
   escalaDaLetra?: EscalaDaLetra;
   minimizada?: boolean;
   alturaAberta?: number;
+  ligados?: readonly string[];
 };
 export type DadosDoRascunho = { escalaDaLetra?: EscalaDaLetra };
 export type DadosDoBixinho = { orquestradorId: string; subagenteId: string };
@@ -111,7 +116,9 @@ export type DadosDaArestaDoBixinho = {
 export type ArestaDoBixinho = Edge<DadosDaArestaDoBixinho, "bixinho">;
 /** A linha discreta (tracejada) do terminal à prévia (ou ao shell) que saiu dele: a curva padrão do React Flow. */
 export type ArestaDaPrevia = Edge<Record<string, never>, "default">;
-export type ArestaDoCanvas = ArestaDoBixinho | ArestaDaPrevia;
+/** A linha que o usuário puxou de uma nota, prévia ou artefato até o terminal: selecionável, para desligar. */
+export type ArestaDaLigacao = Edge<Record<string, never>, "ligacao">;
+export type ArestaDoCanvas = ArestaDoBixinho | ArestaDaPrevia | ArestaDaLigacao;
 
 /** O `id` de cada âncora das linhas: o lado do nó, no terminal e no bixinho. */
 export type Ancora = "cima" | "baixo" | "esquerda" | "direita";
@@ -136,6 +143,17 @@ export const ALCA_DA_PREVIA = "alca-da-previa";
 export const ALCA_DO_ARTEFATO = "alca-do-artefato";
 /** Idem para o shell: no corpo, o mouse seleciona o texto do terminal. */
 export const ALCA_DO_SHELL = "alca-do-shell";
+/** A alça de onde se puxa a linha que liga uma nota, prévia ou artefato a um terminal. */
+export const ALCA_DE_LIGACAO = "ligacao";
+/** Onde essa linha chega: uma alça que cobre o terminal inteiro, para soltar em qualquer ponto dele. */
+export const CHEGADA_DA_LIGACAO = "chegada";
+/** Quantos itens um terminal leva ligados (o servidor recusa mais de 10 por pedido). */
+export const MAXIMO_DE_ITENS_LIGADOS = 10;
+/** Quanto do texto de uma nota ligada vai no pedido (o servidor aceita até 4.000 caracteres). */
+export const TAMANHO_MAXIMO_DA_NOTA_LIGADA = 4_000;
+/** Os limites do servidor para o título e o endereço de cada item ligado. */
+const TAMANHO_MAXIMO_DO_TITULO_LIGADO = 200;
+const TAMANHO_MAXIMO_DO_ENDERECO_LIGADO = 2_000;
 
 export function ehTerminal(no: NoDoCanvas): no is NoTerminal {
   return no.type === "terminal";
@@ -213,6 +231,7 @@ export function novoTerminal(
   altura: number,
   escalaDaLetra: EscalaDaLetra = ESCALA_DA_LETRA_PADRAO,
   minimizada = false,
+  ligados: readonly string[] = [],
 ): NoTerminal {
   return {
     id: orquestradorId,
@@ -221,11 +240,12 @@ export function novoTerminal(
     width: largura,
     height: minimizada ? ALTURA_DA_NOTA_MINIMIZADA : altura,
     dragHandle: `.${ALCA_DO_TERMINAL}`,
-    // A letra normal e o terminal aberto ficam sem o campo, como nos layouts antigos.
+    // A letra normal, o terminal aberto e sem itens ligados ficam sem o campo, como nos layouts antigos.
     data: {
       orquestradorId,
       ...(escalaDaLetra === ESCALA_DA_LETRA_PADRAO ? {} : { escalaDaLetra }),
       ...(minimizada ? { minimizada: true, alturaAberta: altura } : {}),
+      ...(ligados.length > 0 ? { ligados: [...ligados] } : {}),
     },
   };
 }
@@ -377,6 +397,7 @@ export function nosDoLayout(layout: LayoutDoCanvas): NoDoCanvas[] {
       retangulo.altura,
       retangulo.escalaDaLetra,
       retangulo.minimizada === true,
+      retangulo.ligados,
     ),
   );
   // O conteúdo das notas chega do servidor depois; os nós já nascem aqui para
@@ -413,8 +434,11 @@ export function nosDoLayout(layout: LayoutDoCanvas): NoDoCanvas[] {
 
 export function layoutDosNos(nos: readonly NoDoCanvas[], viewport: LayoutDoCanvas["viewport"]): LayoutDoCanvas {
   const terminais: LayoutDoCanvas["terminais"] = {};
+  // Só vão as ligações a itens que ainda estão no canvas.
+  const ligaveis = new Set(nos.filter(ehItemLigavel).map((no) => no.id));
   for (const no of nos.filter(ehTerminal)) {
     const { escalaDaLetra, minimizada } = no.data;
+    const ligados = (no.data.ligados ?? []).filter((id) => ligaveis.has(id));
     terminais[no.id] = {
       x: Math.round(no.position.x),
       y: Math.round(no.position.y),
@@ -424,6 +448,7 @@ export function layoutDosNos(nos: readonly NoDoCanvas[], viewport: LayoutDoCanva
       // A letra normal e o terminal aberto ficam sem o campo, como nos layouts antigos.
       ...(escalaDaLetra !== undefined && escalaDaLetra !== ESCALA_DA_LETRA_PADRAO ? { escalaDaLetra } : {}),
       ...(minimizada === true ? { minimizada: true } : {}),
+      ...(ligados.length > 0 ? { ligados } : {}),
     };
   }
   const notas: LayoutDoCanvas["notas"] = {};
@@ -1097,6 +1122,7 @@ function mesmaAresta(anterior: ArestaDoCanvas, nova: ArestaDoCanvas): boolean {
     anterior.targetHandle === nova.targetHandle &&
     anterior.type === nova.type &&
     anterior.animated === nova.animated &&
+    anterior.selected === nova.selected &&
     anterior.className === nova.className &&
     anterior.data?.situacao === nova.data?.situacao &&
     anterior.data?.encerradoEm === nova.data?.encerradoEm &&
@@ -1118,4 +1144,266 @@ export function reaproveitarArestas(anteriores: ArestaDoCanvas[], novas: ArestaD
   });
   const nadaMudou = resultado.length === anteriores.length && resultado.every((aresta, indice) => aresta === anteriores[indice]);
   return nadaMudou ? anteriores : resultado;
+}
+
+/* ---------------- Itens ligados ao terminal ----------------
+ * O usuário puxa uma linha de uma nota, prévia ou artefato até o terminal de
+ * um Orquestrador: o item vai como contexto no próximo pedido dele e, ao
+ * arrastar o terminal, vem junto. A ligação fica no terminal (`ligados`). */
+
+/** As janelas que se ligam a um terminal: notas, prévias e artefatos. */
+export type NoLigavel = NoNota | NoPrevia | NoArtefato;
+
+export function ehItemLigavel(no: NoDoCanvas): no is NoLigavel {
+  return ehNota(no) || ehPrevia(no) || ehArtefato(no);
+}
+
+/** O mínimo de uma conexão do React Flow que a validação lê. */
+export interface ConexaoProposta {
+  source: string;
+  target: string;
+  sourceHandle?: string | null;
+  targetHandle?: string | null;
+}
+
+/**
+ * Só vale puxar a linha da alça de ligação de uma nota, prévia ou artefato até
+ * a chegada de um terminal de Orquestrador: nada de terminal a terminal, nem
+ * de shell, bixinho ou rascunho.
+ */
+export function ehLigacaoValida(conexao: ConexaoProposta, nos: readonly NoDoCanvas[]): boolean {
+  if (conexao.sourceHandle !== ALCA_DE_LIGACAO || conexao.targetHandle !== CHEGADA_DA_LIGACAO) {
+    return false;
+  }
+  const origem = nos.find((no) => no.id === conexao.source);
+  const destino = nos.find((no) => no.id === conexao.target);
+  return origem !== undefined && destino !== undefined && ehItemLigavel(origem) && ehTerminal(destino);
+}
+
+/** O terminal com a lista nova; vazia, sem o campo (como nos layouts antigos). */
+function comLigados(terminal: NoTerminal, ligados: readonly string[]): NoTerminal {
+  const dados: DadosDoTerminal = { ...terminal.data };
+  delete dados.ligados;
+  return { ...terminal, data: ligados.length > 0 ? { ...dados, ligados } : dados };
+}
+
+/**
+ * Liga o item ao terminal (no fim da lista). Ligação repetida, conexão
+ * inválida ou terminal já com `MAXIMO_DE_ITENS_LIGADOS` itens: o mesmo array.
+ */
+export function ligarItem(nos: NoDoCanvas[], conexao: ConexaoProposta): NoDoCanvas[] {
+  const terminal = nos.find((no) => no.id === conexao.target);
+  if (!ehLigacaoValida(conexao, nos) || terminal === undefined || !ehTerminal(terminal)) {
+    return nos;
+  }
+  const ligados = terminal.data.ligados ?? [];
+  if (ligados.includes(conexao.source) || ligados.length >= MAXIMO_DE_ITENS_LIGADOS) {
+    return nos;
+  }
+  const ligado = comLigados(terminal, [...ligados, conexao.source]);
+  return nos.map((no) => (no === terminal ? ligado : no));
+}
+
+/** Desliga o item do terminal; sem essa ligação, o mesmo array. */
+export function desligarItem(nos: NoDoCanvas[], terminalId: string, itemId: string): NoDoCanvas[] {
+  const alvo = nos.find((no) => no.id === terminalId);
+  if (alvo === undefined || !ehTerminal(alvo) || !(alvo.data.ligados ?? []).includes(itemId)) {
+    return nos;
+  }
+  return nos.map((no) =>
+    no === alvo && ehTerminal(no) ? comLigados(no, (no.data.ligados ?? []).filter((id) => id !== itemId)) : no,
+  );
+}
+
+/**
+ * As ligações a itens que saíram do canvas (nota apagada, prévia ou artefato
+ * fechados) somem do terminal; sem nenhuma assim, o mesmo array. Fechar o
+ * terminal já leva as ligações dele junto.
+ */
+export function semLigacoesOrfas(nos: NoDoCanvas[]): NoDoCanvas[] {
+  const ligaveis = new Set(nos.filter(ehItemLigavel).map((no) => no.id));
+  const orfas = (no: NoDoCanvas): boolean => ehTerminal(no) && (no.data.ligados ?? []).some((id) => !ligaveis.has(id));
+  if (!nos.some(orfas)) {
+    return nos;
+  }
+  return nos.map((no) =>
+    orfas(no) && ehTerminal(no) ? comLigados(no, (no.data.ligados ?? []).filter((id) => ligaveis.has(id))) : no,
+  );
+}
+
+/** O id da linha entre o terminal e o item ligado: quem a seleciona e apaga lê os dois daqui. */
+export function idDaLigacao(terminalId: string, itemId: string): string {
+  return `ligacao:${terminalId}:${itemId}`;
+}
+
+/** O terminal e o item de uma linha de ligação; nulo para as outras linhas. */
+export function lerIdDaLigacao(
+  arestaId: string,
+  nos: readonly NoDoCanvas[],
+): { terminalId: string; itemId: string } | null {
+  for (const terminal of nos.filter(ehTerminal)) {
+    for (const itemId of terminal.data.ligados ?? []) {
+      if (idDaLigacao(terminal.id, itemId) === arestaId) {
+        return { terminalId: terminal.id, itemId };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Uma linha de cada terminal a cada item ligado a ele, do lado voltado para o
+ * item (a regra dos bixinhos e das prévias). A selecionada (`selecionada`, o
+ * id da linha) vem com `selected`: Delete ou Backspace a desligam.
+ */
+export function arestasDasLigacoes(nos: readonly NoDoCanvas[], selecionada: string | null = null): ArestaDaLigacao[] {
+  const itens = new Map(nos.filter(ehItemLigavel).map((no) => [no.id, no]));
+  return nos.filter(ehTerminal).flatMap((terminal) =>
+    (terminal.data.ligados ?? []).flatMap((itemId): ArestaDaLigacao[] => {
+      const item = itens.get(itemId);
+      if (item === undefined) {
+        return [];
+      }
+      const relativa = { x: item.position.x - terminal.position.x, y: item.position.y - terminal.position.y };
+      const ancoras = ANCORAS_DO_LADO[ladoEmRelacaoAoTerminal(relativa, tamanhoDoNo(item), tamanhoDoNo(terminal))];
+      const id = idDaLigacao(terminal.id, item.id);
+      return [
+        {
+          id,
+          type: "ligacao",
+          source: terminal.id,
+          sourceHandle: ancoras.terminal,
+          target: item.id,
+          targetHandle: ancoras.bixinho,
+          className: "aresta-ligacao",
+          selected: id === selecionada,
+          selectable: true,
+          focusable: false,
+          deletable: false,
+        },
+      ];
+    }),
+  );
+}
+
+/**
+ * Arrastar o terminal leva junto os itens ligados só a ele, com o mesmo
+ * deslocamento. Um item ligado a dois ou mais terminais fica onde está (não
+ * dá para seguir os dois), e um que já se move no mesmo arraste (selecionado
+ * junto) não ganha deslocamento em dobro. `atuais` são os nós antes das
+ * mudanças. Sem terminal movido, as mesmas mudanças.
+ */
+export function comItensLigadosJunto(
+  mudancas: NodeChange<NoDoCanvas>[],
+  atuais: readonly NoDoCanvas[],
+): NodeChange<NoDoCanvas>[] {
+  const porId = new Map(atuais.map((no) => [no.id, no]));
+  const movidos = new Set(mudancas.flatMap((mudanca) => (mudanca.type === "position" ? [mudanca.id] : [])));
+  const terminaisPorItem = new Map<string, number>();
+  for (const terminal of atuais.filter(ehTerminal)) {
+    for (const itemId of terminal.data.ligados ?? []) {
+      terminaisPorItem.set(itemId, (terminaisPorItem.get(itemId) ?? 0) + 1);
+    }
+  }
+  const extras: NodeChange<NoDoCanvas>[] = [];
+  for (const mudanca of mudancas) {
+    if (mudanca.type !== "position" || mudanca.position === undefined) {
+      continue;
+    }
+    const terminal = porId.get(mudanca.id);
+    if (terminal === undefined || !ehTerminal(terminal)) {
+      continue;
+    }
+    const dx = mudanca.position.x - terminal.position.x;
+    const dy = mudanca.position.y - terminal.position.y;
+    if (dx === 0 && dy === 0) {
+      continue;
+    }
+    for (const itemId of terminal.data.ligados ?? []) {
+      const item = porId.get(itemId);
+      if (item === undefined || movidos.has(itemId) || terminaisPorItem.get(itemId) !== 1) {
+        continue;
+      }
+      movidos.add(itemId);
+      // Sem `dragging`: o item só acompanha, e não fica marcado como arrastado depois de soltar.
+      extras.push({ type: "position", id: itemId, position: { x: item.position.x + dx, y: item.position.y + dy } });
+    }
+  }
+  return extras.length === 0 ? mudancas : [...mudancas, ...extras];
+}
+
+/** O que o pedido lê das lojas: a nota e o artefato como o servidor os confirmou. */
+export interface LeitoresDosItensLigados {
+  lerNota: (notaId: string) => DadosDaNota | undefined;
+  lerArtefato: (artefatoId: string) => ResumoDoArtefato | undefined;
+}
+
+/** O texto da nota no pedido: até `TAMANHO_MAXIMO_DA_NOTA_LIGADA` caracteres, com o aviso do corte. */
+export function textoDaNotaLigada(texto: string): string {
+  if (texto.length <= TAMANHO_MAXIMO_DA_NOTA_LIGADA) {
+    return texto;
+  }
+  const aviso = `\n[… nota cortada aqui: ela tem ${texto.length.toLocaleString("pt-BR")} caracteres]`;
+  return texto.slice(0, TAMANHO_MAXIMO_DA_NOTA_LIGADA - aviso.length) + aviso;
+}
+
+/** O host do endereço (o título da prévia no pedido); sem um endereço válido, o próprio texto. */
+function hostDoEndereco(url: string): string {
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
+}
+
+/**
+ * Os itens ligados ao terminal como vão no próximo pedido, na ordem em que
+ * foram ligados: a nota com o texto (cortado), a prévia com o endereço (sem
+ * endereço, fica de fora) e o artefato com o arquivo na pasta de entrada (o
+ * servidor troca pelo caminho no disco; o conteúdo não vai). Itens que não
+ * estão no canvas, ou ainda não chegaram do servidor, ficam de fora.
+ */
+export function itensLigadosParaEnvio(
+  nos: readonly NoDoCanvas[],
+  terminalId: string,
+  { lerNota, lerArtefato }: LeitoresDosItensLigados,
+): ItemLigadoParaEnvio[] {
+  const terminal = nos.find((no) => no.id === terminalId);
+  if (terminal === undefined || !ehTerminal(terminal)) {
+    return [];
+  }
+  const porId = new Map(nos.map((no) => [no.id, no]));
+  const itens: ItemLigadoParaEnvio[] = [];
+  for (const itemId of terminal.data.ligados ?? []) {
+    const item = porId.get(itemId);
+    if (item === undefined) {
+      continue;
+    }
+    if (ehNota(item)) {
+      const nota = lerNota(item.data.notaId);
+      if (nota !== undefined) {
+        itens.push({
+          tipo: "nota",
+          titulo: nota.titulo.slice(0, TAMANHO_MAXIMO_DO_TITULO_LIGADO),
+          conteudo: textoDaNotaLigada(nota.texto),
+        });
+      }
+    } else if (ehPrevia(item)) {
+      const { url } = item.data;
+      if (url !== "" && url.length <= TAMANHO_MAXIMO_DO_ENDERECO_LIGADO) {
+        itens.push({ tipo: "previa", titulo: hostDoEndereco(url).slice(0, TAMANHO_MAXIMO_DO_TITULO_LIGADO), url });
+      }
+    } else if (ehArtefato(item)) {
+      const artefato = lerArtefato(item.data.artefatoId);
+      if (artefato !== undefined) {
+        const pasta = artefato.origem.tipo === "chat" ? "chat" : `orquestradores/${artefato.origem.id ?? ""}`;
+        itens.push({
+          tipo: "artefato",
+          titulo: artefato.titulo.slice(0, TAMANHO_MAXIMO_DO_TITULO_LIGADO),
+          caminho: `${pasta}/${artefato.arquivo}`,
+        });
+      }
+    }
+  }
+  return itens.slice(0, MAXIMO_DE_ITENS_LIGADOS);
 }

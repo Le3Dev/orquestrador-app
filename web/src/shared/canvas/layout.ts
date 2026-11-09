@@ -37,10 +37,13 @@ export function ehEscalaDaLetra(valor: unknown): valor is EscalaDaLetra {
  * Onde fica um terminal. Sem `escalaDaLetra` (layouts antigos), a letra é a
  * normal. Sem `minimizada`, o terminal está aberto; minimizado (as bolinhas
  * do Mac), mostra só a barra de título, e `altura` continua a do terminal aberto.
+ * `ligados`: os ids dos nós (notas, prévias e artefatos) que o usuário ligou
+ * ao terminal, na ordem em que ligou; sem o campo, nenhum.
  */
 export interface RetanguloDoTerminal extends Retangulo {
   escalaDaLetra?: EscalaDaLetra;
   minimizada?: boolean;
+  ligados?: string[];
 }
 
 export interface Viewport extends Ponto {
@@ -144,6 +147,8 @@ const MARGEM_DA_AREA_LIVRE = 40;
 const PASSOS_DA_VARREDURA = 6;
 
 const CHAVE = "orquestrador-agentes:canvas:v1";
+/** Os nós que se ligam a um terminal (`ligados`), pelo prefixo do id: notas, prévias e artefatos. */
+const PREFIXOS_DOS_ITENS_LIGAVEIS = ["nota:", "previa:", "artefato:"] as const;
 const CHAVE_DOS_BIXINHOS_LIMPOS = `${CHAVE}:bixinhos-limpos`;
 
 function ehNumero(valor: unknown): valor is number {
@@ -259,10 +264,23 @@ function interpretarRetangulos(grupo: unknown): Record<string, Retangulo> {
   return validos;
 }
 
+/** Os itens ligados válidos de um terminal salvo: ids de nota, prévia ou artefato, sem repetição. */
+function interpretarLigados(ligados: unknown): string[] {
+  if (!Array.isArray(ligados)) {
+    return [];
+  }
+  const validos = ligados.filter(
+    (id): id is string =>
+      typeof id === "string" && PREFIXOS_DOS_ITENS_LIGAVEIS.some((prefixo) => id.startsWith(prefixo) && id.length > prefixo.length),
+  );
+  return [...new Set(validos)];
+}
+
 /**
  * Os terminais válidos do layout salvo; um tamanho da letra fora das opções
  * vale como o normal, e sem `minimizada: true` o terminal fica aberto (os dois
- * sem o campo, como nos layouts antigos).
+ * sem o campo, como nos layouts antigos). Sem `ligados` (ou só com ids
+ * inválidos), o terminal fica sem itens ligados, e o campo nem aparece.
  */
 function interpretarTerminais(terminais: unknown): Record<string, RetanguloDoTerminal> {
   const validos: Record<string, RetanguloDoTerminal> = {};
@@ -273,6 +291,7 @@ function interpretarTerminais(terminais: unknown): Record<string, RetanguloDoTer
     if (ehRetangulo(retangulo)) {
       const { x, y, largura, altura } = retangulo;
       const { escalaDaLetra, minimizada } = retangulo as { escalaDaLetra?: unknown; minimizada?: unknown };
+      const ligados = interpretarLigados((retangulo as { ligados?: unknown }).ligados);
       validos[id] = {
         x,
         y,
@@ -280,6 +299,7 @@ function interpretarTerminais(terminais: unknown): Record<string, RetanguloDoTer
         altura,
         ...(ehEscalaDaLetra(escalaDaLetra) && escalaDaLetra !== ESCALA_DA_LETRA_PADRAO ? { escalaDaLetra } : {}),
         ...(minimizada === true ? { minimizada: true } : {}),
+        ...(ligados.length > 0 ? { ligados } : {}),
       };
     }
   }
