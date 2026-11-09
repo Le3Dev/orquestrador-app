@@ -529,6 +529,33 @@ describe("NoTerminal", () => {
 
     expect(screen.getByRole("button", { name: "Nova conversa" })).toBeDisabled();
   });
+
+  it("trabalhando, a barra do terminal não mostra RAM nem etiqueta de situação; a borda brilha", () => {
+    const canvas: ValorDoCanvas = {
+      ...canvasDoTerminal(conversaDoTerminal()),
+      servidor: {
+        conectado: true,
+        caiuEm: null,
+        voltouEm: null,
+        reiniciou: false,
+        memoria: {
+          totalBytes: 32 * 1024 ** 3,
+          livreBytes: 16 * 1024 ** 3,
+          servidorBytes: 0,
+          agentesBytes: 224 * 1024 ** 2,
+          porOrquestrador: { o1: 224 * 1024 ** 2 },
+          lidaEm: "2026-10-28T12:00:05Z",
+        },
+      },
+    };
+    const { container } = render(<Terminal canvas={canvas} no={propsDoNo()} />);
+
+    const barra = container.querySelector<HTMLElement>(".barra-do-terminal");
+    expect(barra).not.toBeNull();
+    expect(barra).not.toHaveTextContent(/RAM/);
+    expect(barra).not.toHaveTextContent(/trabalhando|ocioso/i);
+    expect(container.querySelector(".janela-terminal")).toHaveClass("janela-terminal-ativa");
+  });
 });
 
 describe("NoTerminal · conversa nova", () => {

@@ -31,13 +31,11 @@ import {
   type SubagenteNaTela,
   type TurnoNaTela,
 } from "../../shared/estado/aplicarEvento";
-import { formatarBytes } from "../../shared/formatacao";
 import { mesmoConteudo, useReaproveitado } from "../../shared/hooks/useReaproveitado";
 import { type ImagemAnexada, lerImagem, problemaDaImagem } from "../../shared/imagens";
 import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
 import { resumoDaConfiguracao } from "../../shared/resumoDaConfiguracao";
 import { CamposDaConfiguracao } from "../CamposDaConfiguracao";
-import { Etiqueta } from "../Etiqueta";
 import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
 import { IconeAlerta, IconeEngrenagem, IconeFechar, IconeOrquestrador, IconePasta, IconeShell } from "../Icones";
 import { BotaoDeAlteracoes } from "./BotaoDeAlteracoes";
@@ -503,7 +501,6 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   const [arraste, setArraste] = useState<Arraste | null>(null);
   // Modo do próximo pedido; "planejamento" é o Plan Mode (Shift+Tab no prompt).
   const [modo, setModo] = useState<ModoDoTurno>("execucao");
-  const memoriaDoProcesso = servidor.memoria?.porOrquestrador[orquestradorId] ?? 0;
   const configuracao = useConfiguracaoEstavel(orquestrador.configuracao);
   const rolagem = useRef<HTMLDivElement>(null);
   const campoDoPrompt = useRef<HTMLTextAreaElement>(null);
@@ -851,13 +848,6 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
         {servidor.conectado && conexoes.get(orquestradorId) === "reconectando" && (
           <span className="mono text-error">reconectando…</span>
         )}
-        {/* A medição é a cada 5 s: fora de um pedido, o número seria de um processo que já acabou. */}
-        {trabalhando && memoriaDoProcesso > 0 && (
-          <span className="chip" title="Memória usada agora pelo processo do Claude deste orquestrador (com os subagentes)">
-            RAM {formatarBytes(memoriaDoProcesso)}
-          </span>
-        )}
-        <Etiqueta situacao={trabalhando ? "trabalhando" : "ocioso"} />
         <BotaoDeLimparBixinhos orquestradorId={orquestradorId} />
         <BotaoDeAlteracoes orquestradorId={orquestradorId} />
         <BotaoDeArquivos orquestradorId={orquestradorId} nomeDoOrquestrador={orquestrador.nome} />
