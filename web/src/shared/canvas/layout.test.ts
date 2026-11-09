@@ -1,9 +1,14 @@
 import {
+  alinharJanelas,
   ALTURA_DA_NOTA_MINIMIZADA,
+  distribuirJanelas,
   interpretarBixinhosLimpos,
   interpretarLayout,
+  type JanelaNoCanvas,
+  janelasLadoALado,
   lerBixinhosLimpos,
   lerLayout,
+  MARGEM_DO_LADO_A_LADO,
   MARGEM_DOS_BIXINHOS,
   organizarComNotas,
   organizarEmGrade,
@@ -663,5 +668,108 @@ describe("shells no layout", () => {
       bom: { x: 0, y: 0, largura: 640, altura: 400, terminalId: "t1", pasta: "/p", orquestradorId: null },
     });
     expect(interpretarLayout(JSON.stringify({ shells: 5 })).shells).toEqual({});
+  });
+});
+
+describe("ações da barra do grupo", () => {
+  // Três janelas espalhadas: a de cima à esquerda, a larga no meio e a baixa à direita.
+  const janelas: JanelaNoCanvas[] = [
+    { id: "a", x: 0, y: 100, largura: 200, altura: 100 },
+    { id: "b", x: 300, y: 0, largura: 400, altura: 300 },
+    { id: "c", x: 900, y: 50, largura: 100, altura: 50 },
+  ];
+
+  it("alinha à esquerda, ao centro e à direita do contorno do grupo, sem mexer no y", () => {
+    expect(alinharJanelas(janelas, "esquerda")).toEqual({ a: { x: 0, y: 100 }, b: { x: 0, y: 0 }, c: { x: 0, y: 50 } });
+    // O contorno vai de 0 a 1000: o centro é 500.
+    expect(alinharJanelas(janelas, "centro")).toEqual({ a: { x: 400, y: 100 }, b: { x: 300, y: 0 }, c: { x: 450, y: 50 } });
+    expect(alinharJanelas(janelas, "direita")).toEqual({ a: { x: 800, y: 100 }, b: { x: 600, y: 0 }, c: { x: 900, y: 50 } });
+  });
+
+  it("alinha ao topo, ao meio e à base do contorno, sem mexer no x", () => {
+    expect(alinharJanelas(janelas, "topo")).toEqual({ a: { x: 0, y: 0 }, b: { x: 300, y: 0 }, c: { x: 900, y: 0 } });
+    // O contorno vai de 0 a 300: o meio é 150.
+    expect(alinharJanelas(janelas, "meio")).toEqual({ a: { x: 0, y: 100 }, b: { x: 300, y: 0 }, c: { x: 900, y: 125 } });
+    expect(alinharJanelas(janelas, "base")).toEqual({ a: { x: 0, y: 200 }, b: { x: 300, y: 0 }, c: { x: 900, y: 250 } });
+  });
+
+  it("arredonda o centro e devolve vazio sem janelas", () => {
+    const impares: JanelaNoCanvas[] = [
+      { id: "a", x: 0, y: 0, largura: 101, altura: 10 },
+      { id: "b", x: 0, y: 20, largura: 50, altura: 10 },
+    ];
+
+    expect(alinharJanelas(impares, "centro").b).toEqual({ x: 26, y: 20 });
+    expect(alinharJanelas([], "esquerda")).toEqual({});
+  });
+
+  it("distribui na horizontal: as pontas ficam e os vãos entre vizinhas ficam iguais", () => {
+    // Espaço total 1000, larguras somam 700: dois vãos de 150.
+    const posicoes = distribuirJanelas(janelas, "horizontal");
+
+    expect(posicoes).toEqual({ a: { x: 0, y: 100 }, b: { x: 350, y: 0 }, c: { x: 900, y: 50 } });
+  });
+
+  it("distribui na vertical pela ordem do topo, sem mexer no x", () => {
+    const empilhadas: JanelaNoCanvas[] = [
+      { id: "a", x: 10, y: 0, largura: 100, altura: 100 },
+      { id: "b", x: 20, y: 500, largura: 100, altura: 100 },
+      { id: "c", x: 30, y: 120, largura: 100, altura: 200 },
+    ];
+
+    // De 0 a 600, alturas somam 400: dois vãos de 100. A ordem é a, c, b.
+    expect(distribuirJanelas(empilhadas, "vertical")).toEqual({
+      a: { x: 10, y: 0 },
+      c: { x: 30, y: 200 },
+      b: { x: 20, y: 500 },
+    });
+  });
+
+  it("com menos de três janelas, distribuir não move nada", () => {
+    expect(distribuirJanelas(janelas.slice(0, 2), "horizontal")).toEqual({ a: { x: 0, y: 100 }, b: { x: 300, y: 0 } });
+  });
+
+  it("lado a lado: até três numa fileira, a partir do canto do grupo, na ordem da esquerda para a direita", () => {
+    const posicoes = janelasLadoALado(janelas);
+
+    // O canto do grupo é (0, 0); "a" está um pouco abaixo, mas na mesma faixa de "b".
+    expect(posicoes).toEqual({
+      a: { x: 0, y: 0 },
+      b: { x: 200 + MARGEM_DO_LADO_A_LADO, y: 0 },
+      c: { x: 200 + 400 + 2 * MARGEM_DO_LADO_A_LADO, y: 0 },
+    });
+  });
+
+  it("lado a lado: quatro viram uma grade 2 × 2 na ordem de leitura; a fileira tem a altura da mais alta", () => {
+    const quatro: JanelaNoCanvas[] = [
+      { id: "d", x: 800, y: 900, largura: 100, altura: 100 },
+      { id: "a", x: 50, y: 40, largura: 300, altura: 200 },
+      { id: "c", x: 0, y: 900, largura: 100, altura: 100 },
+      { id: "b", x: 600, y: 0, largura: 100, altura: 400 },
+    ];
+
+    expect(janelasLadoALado(quatro, 10)).toEqual({
+      a: { x: 0, y: 0 },
+      b: { x: 310, y: 0 },
+      c: { x: 0, y: 410 },
+      d: { x: 110, y: 410 },
+    });
+    expect(janelasLadoALado([])).toEqual({});
+  });
+
+  it("lado a lado: cinco a nove ficam em fileiras de três", () => {
+    const cinco: JanelaNoCanvas[] = Array.from({ length: 5 }, (_, indice) => ({
+      id: `j${indice}`,
+      x: indice * 1000,
+      y: 0,
+      largura: 100,
+      altura: 100,
+    }));
+
+    const posicoes = janelasLadoALado(cinco, 0);
+
+    expect(posicoes.j2).toEqual({ x: 200, y: 0 });
+    expect(posicoes.j3).toEqual({ x: 0, y: 100 });
+    expect(posicoes.j4).toEqual({ x: 100, y: 100 });
   });
 });

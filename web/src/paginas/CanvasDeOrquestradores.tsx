@@ -7,6 +7,7 @@ import {
   Panel,
   ReactFlow,
   ReactFlowProvider,
+  SelectionMode,
   useNodesState,
   useReactFlow,
   type EdgeTypes,
@@ -27,6 +28,7 @@ import {
 import { IconeGrade, IconeOrquestrador } from "../componentes/Icones";
 import { ChatRapido } from "../componentes/chat/ChatRapido";
 import { ArestaDoBixinho } from "../componentes/canvas/ArestaDoBixinho";
+import { BarraDoGrupo } from "../componentes/canvas/BarraDoGrupo";
 import { NoArtefato } from "../componentes/canvas/NoArtefato";
 import { NoBixinho } from "../componentes/canvas/NoBixinho";
 import { NoNota } from "../componentes/canvas/NoNota";
@@ -71,8 +73,14 @@ import {
   ZOOM_MINIMO_DO_ENQUADRAMENTO,
 } from "../shared/canvas/enquadramento";
 import {
+  type Alinhamento,
+  alinharJanelas,
+  distribuirJanelas,
+  type EixoDaDistribuicao,
   ESCALA_DA_LETRA_PADRAO,
   type EscalaDaLetra,
+  type JanelaNoCanvas,
+  janelasLadoALado,
   type JanelaParaOrganizar,
   lerBixinhosLimpos,
   lerLayout,
@@ -96,8 +104,10 @@ import {
   arestasDosBixinhos,
   arestasDosShells,
   comEscalaDaLetra,
+  comPosicoes,
   ehArtefato,
   ehBixinho,
+  ehFechavelEmGrupo,
   ehNota,
   ehPrevia,
   ehRascunho,
@@ -107,9 +117,11 @@ import {
   idDoNoDaPrevia,
   idDoNoDoArtefato,
   idDoNoDoShell,
+  janelaVisivel,
   limparBixinhos,
   mesmasLigacoes,
   minimizarOuRestaurar,
+  minimizarOuRestaurarTelas,
   type NoDoCanvas,
   type NoPrevia as TipoDaPrevia,
   type NoRascunho as TipoDoRascunho,
@@ -121,9 +133,14 @@ import {
   posicaoDoTerminalNovo,
   reacomodarBixinhos,
   reaproveitarArestas,
+  type ResumoDoGrupo,
+  resumirGrupo,
+  selecionarTodasAsTelas,
+  semBixinhosNaSelecao,
   semTerminal,
   sincronizarBixinhos,
   subagentesVisiveis,
+  telasSelecionadas,
 } from "../shared/canvas/nos";
 import { ProvedorDasNotas } from "../shared/canvas/notas";
 import {
@@ -142,7 +159,7 @@ import { useMovimentoDoCanvas } from "../shared/hooks/useMovimentoDoCanvas";
 import { useNotas } from "../shared/hooks/useNotas";
 import { useOrquestradores } from "../shared/hooks/useOrquestradores";
 import { usePreferenciasDaTela } from "../shared/hooks/usePreferenciasDaTela";
-import { useReaproveitado } from "../shared/hooks/useReaproveitado";
+import { mesmoConteudo, useReaproveitado } from "../shared/hooks/useReaproveitado";
 import { useRodaDoCanvas } from "../shared/hooks/useRodaDoCanvas";
 import { useSaidaDosBixinhos } from "../shared/hooks/useSaidaDosBixinhos";
 import { useServidor } from "../shared/hooks/useServidor";
@@ -181,6 +198,14 @@ const DICA_DO_ORGANIZAR = "Organizar: terminais lado a lado; notas e artefatos �
 const ALTURA_RESERVADA_AO_CHAT = 110;
 /** Altura, na área do canvas, da faixa ocupada pela barra do canvas (com folga). */
 const TOPO_LIVRE_DA_TELA_PX = 84;
+/**
+ * Como num editor de design: arrastar no vazio com o botão esquerdo desenha
+ * o retângulo de seleção; o botão do meio (e o espaço segurado, a tecla de
+ * `panActivationKeyCode`) move o canvas, como a roda e o trackpad.
+ */
+const BOTOES_QUE_MOVEM_O_CANVAS = [1];
+/** Shift ou Cmd/Ctrl + clique somam e tiram telas da seleção. */
+const TECLAS_DA_SELECAO_MULTIPLA = ["Shift", "Meta", "Control"];
 
 /** Foco num campo de texto: o atalho é do campo, não do canvas. */
 function focoEmCampoDeTexto(alvo: EventTarget | null): boolean {
@@ -241,6 +266,16 @@ function semSelecao(nos: readonly NoDoCanvas[]): NoDoCanvas[] {
   return nos.map((no) => (no.selected === true ? { ...no, selected: false } : no));
 }
 
+/** Esc: limpa a seleção; sem nada selecionado, o mesmo array. */
+function limparSelecao(nos: NoDoCanvas[]): NoDoCanvas[] {
+  return nos.some((no) => no.selected === true) ? semSelecao(nos) : nos;
+}
+
+/** O resumo anterior enquanto a seleção não muda: arrastar o grupo não re-renderiza a barra. */
+function mesmoResumo(anterior: ResumoDoGrupo, novo: ResumoDoGrupo): ResumoDoGrupo {
+  return mesmoConteudo(anterior, novo) ? anterior : novo;
+}
+
 /** O mesmo array enquanto os ids e a ordem não mudam. */
 function mesmosIds(anteriores: string[], novos: string[]): string[] {
   return anteriores.length === novos.length && anteriores.every((id, indice) => id === novos[indice]) ? anteriores : novos;
@@ -294,7 +329,9 @@ function CanvasVazio({ aoCriar }: { aoCriar: () => void }) {
             bixinho ligado ao terminal. Arraste pela barra de título, redimensione pelas bordas e espalhe quantos quiser.
           </p>
         </div>
-        <p className="mono text-muted">arrastar o fundo move o canvas · ctrl + roda do mouse dá zoom</p>
+        <p className="mono text-muted">
+          arrastar o fundo seleciona · espaço + arrastar ou a roda movem o canvas · ctrl + roda dá zoom
+        </p>
         <button type="button" className="btn btn-cta" onClick={aoCriar}>
           + Novo orquestrador
         </button>
@@ -985,6 +1022,58 @@ function Canvas() {
     setTimeout(() => void fluxo.fitView({ duration: 600, padding: 0.12, maxZoom: 1 }), ESPERA_PARA_MEDIR_MS);
   }, [fluxo, setNos]);
 
+  // Fim do retângulo de seleção: os bixinhos pegos junto saem dela (seguem o terminal).
+  const aoTerminarSelecao = useCallback(() => setNos(semBixinhosNaSelecao), [setNos]);
+
+  /** Move as telas selecionadas para onde `posicionar` mandar e tira os bixinhos de baixo delas. */
+  const moverGrupo = useCallback(
+    (posicionar: (janelas: readonly JanelaNoCanvas[]) => Record<string, Ponto>) =>
+      setNos((atuais) => {
+        const janelas = telasSelecionadas(atuais).map(janelaVisivel);
+        if (janelas.length < 2) {
+          return atuais;
+        }
+        const novos = comPosicoes(atuais, posicionar(janelas));
+        return novos === atuais ? atuais : reacomodarBixinhos(novos);
+      }),
+    [setNos],
+  );
+  const alinharGrupo = useCallback(
+    (como: Alinhamento) => moverGrupo((janelas) => alinharJanelas(janelas, como)),
+    [moverGrupo],
+  );
+  const distribuirGrupo = useCallback(
+    (eixo: EixoDaDistribuicao) => moverGrupo((janelas) => distribuirJanelas(janelas, eixo)),
+    [moverGrupo],
+  );
+  const porGrupoLadoALado = useCallback(() => moverGrupo((janelas) => janelasLadoALado(janelas)), [moverGrupo]);
+  const minimizarGrupo = useCallback(
+    () =>
+      setNos((atuais) => {
+        const novos = minimizarOuRestaurarTelas(atuais, new Set(telasSelecionadas(atuais).map((no) => no.id)));
+        return novos === atuais ? atuais : reacomodarBixinhos(novos);
+      }),
+    [setNos],
+  );
+  /**
+   * "Fechar" da barra do grupo (a barra já confirmou): cada tela sai pelo
+   * caminho do ✕ dela. Terminais, artefatos e prévias só saem do canvas; o
+   * shell é encerrado. Notas e rascunhos ficam (`ehFechavelEmGrupo`).
+   */
+  const fecharGrupo = useCallback(() => {
+    for (const no of telasSelecionadas(nosAtuais.current).filter(ehFechavelEmGrupo)) {
+      if (ehTerminal(no)) {
+        fecharTerminal(no.id);
+      } else if (ehArtefato(no)) {
+        acoesDosArtefatos.fechar(no.data.artefatoId);
+      } else if (ehPrevia(no)) {
+        fecharPrevia(no.data.previaId);
+      } else if (ehShell(no)) {
+        fecharShell(no.data.shellId);
+      }
+    }
+  }, [acoesDosArtefatos, fecharPrevia, fecharShell, fecharTerminal]);
+
   /** Zoom em 100% (texto nítido) sem sair do lugar: o Ctrl+0 e a paleta. */
   const zoomEmCemPorCento = useCallback(() => {
     const area = areaDoCanvas.current?.getBoundingClientRect();
@@ -1275,6 +1364,55 @@ function Canvas() {
   );
   const fecharPainel = useCallback(() => setPainelAberto(null), []);
 
+  // Cmd/Ctrl + A seleciona todas as telas (sem os bixinhos) e Esc limpa a
+  // seleção; com o foco num campo de texto, os dois são do campo.
+  useEffect(() => {
+    const aoApertarTecla = (evento: KeyboardEvent) => {
+      if (evento.defaultPrevented || focoEmCampoDeTexto(evento.target) || evento.altKey || evento.shiftKey) {
+        return;
+      }
+      const comComando = evento.metaKey || evento.ctrlKey;
+      if (comComando && (evento.code === "KeyA" || evento.key === "a" || evento.key === "A")) {
+        evento.preventDefault();
+        setNos(selecionarTodasAsTelas);
+        return;
+      }
+      // Com um painel da barra ou o navegador de pastas aberto, o Esc é deles.
+      if (evento.key !== "Escape" || comComando || painelAberto !== null || escolhendoPastaDoShell) {
+        return;
+      }
+      // Decide depois de todos os ouvintes: o Esc que um menu, um painel ou a
+      // tela cheia do terminal já usou (preventDefault) não limpa a seleção.
+      setTimeout(() => {
+        if (!evento.defaultPrevented) {
+          setNos(limparSelecao);
+        }
+      }, 0);
+    };
+    window.addEventListener("keydown", aoApertarTecla);
+    return () => window.removeEventListener("keydown", aoApertarTecla);
+  }, [setNos, painelAberto, escolhendoPastaDoShell]);
+
+  // A barra do grupo, com duas ou mais telas selecionadas: o resumo só muda
+  // com a seleção (ou o minimizar), então arrastar o grupo não a re-renderiza.
+  const resumoDoGrupo = useReaproveitado(resumirGrupo(nos), mesmoResumo);
+  const barraDoGrupo = useMemo(
+    () =>
+      resumoDoGrupo.ids.length < 2 ? null : (
+        <Panel position="top-center" className="painel-da-barra-do-grupo">
+          <BarraDoGrupo
+            resumo={resumoDoGrupo}
+            aoAlinhar={alinharGrupo}
+            aoDistribuir={distribuirGrupo}
+            aoPorLadoALado={porGrupoLadoALado}
+            aoMinimizar={minimizarGrupo}
+            aoFechar={fecharGrupo}
+          />
+        </Panel>
+      ),
+    [resumoDoGrupo, alinharGrupo, distribuirGrupo, porGrupoLadoALado, minimizarGrupo, fecharGrupo],
+  );
+
   // A contagem do botão Subagentes. Com o servidor fora, fica sem número até
   // ele voltar (o efeito roda de novo na reconexão).
   const [quantidadeDeSubagentes, setQuantidadeDeSubagentes] = useState<number | null>(null);
@@ -1502,6 +1640,9 @@ function Canvas() {
                     onNodesChange={aoMudarNosEReacomodar}
                     onNodeDragStart={movimento.aoComecarArraste}
                     onNodeDragStop={aoSoltarNo}
+                    onSelectionDragStart={movimento.aoComecarArraste}
+                    onSelectionDragStop={aoSoltarNo}
+                    onSelectionEnd={aoTerminarSelecao}
                     onMoveStart={movimento.aoComecarMovimento}
                     onMoveEnd={movimento.aoTerminarMovimento}
                     colorMode="dark"
@@ -1511,6 +1652,13 @@ function Canvas() {
                     // Como no Excalidraw: a roda do mouse rola o canvas; com Ctrl, dá zoom.
                     panOnScroll
                     zoomActivationKeyCode="Control"
+                    // Arrastar no vazio seleciona (a tela que o retângulo toca já entra); o
+                    // pan fica com a roda, o botão do meio e o espaço segurado.
+                    selectionOnDrag
+                    selectionMode={SelectionMode.Partial}
+                    panOnDrag={BOTOES_QUE_MOVEM_O_CANVAS}
+                    panActivationKeyCode="Space"
+                    multiSelectionKeyCode={TECLAS_DA_SELECAO_MULTIPLA}
                     deleteKeyCode={null}
                   >
                     <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} />
@@ -1523,6 +1671,7 @@ function Canvas() {
                       {colunaDoCentro}
                       {colunaDaDireita}
                     </Panel>
+                    {barraDoGrupo}
                     {painelDoChat}
                   </ReactFlow>
                   {/* Fora do <ReactFlow>: não escala com o zoom e cobre só a área do canvas. */}

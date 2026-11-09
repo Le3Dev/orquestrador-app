@@ -513,6 +513,32 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 }
 .react-flow__controls { border-radius: var(--radius-input); overflow: hidden; border: 1px solid var(--border); }
 
+/* ---------------- Seleção múltipla ----------------
+ * Arrastar no vazio desenha o retângulo de seleção, tracejado na cor ativa,
+ * com a seta normal (o padrão do React Flow é a mãozinha). O retângulo que o
+ * React Flow deixa sobre o grupo depois de selecionar fica escondido: por
+ * cima das telas, roubaria o clique e a digitação. Cada tela selecionada já
+ * brilha, e arrastar uma delas pela barra move o grupo inteiro. */
+.react-flow {
+  --xy-selection-background-color: color-mix(in srgb, var(--active) 8%, transparent);
+  --xy-selection-border: 1px dashed color-mix(in srgb, var(--active) 70%, transparent);
+}
+.react-flow__pane.selection { cursor: default; }
+.react-flow__nodesselection { display: none; }
+
+/* A barra do grupo: no alto do canvas, centralizada, logo abaixo da faixa da barra do canvas. */
+.react-flow__panel.painel-da-barra-do-grupo { margin-top: 72px; }
+.barra-do-grupo {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  transform-origin: top center;
+  animation: surgir-mola var(--tempo-de-surgir) var(--curva-de-mola) backwards;
+}
+.barra-do-grupo .botao-icone { width: 28px; height: 28px; }
+.contagem-do-grupo { padding: 0 6px; font-size: 11px; color: var(--secondary); white-space: nowrap; }
+
 /* Nós sem a moldura padrão do React Flow: cada tipo desenha a própria. */
 .react-flow__node-terminal,
 .react-flow__node-rascunho,

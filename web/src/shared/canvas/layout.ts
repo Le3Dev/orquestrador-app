@@ -651,3 +651,145 @@ export function organizarComNotas(
   }
   return posicoes;
 }
+
+/** Uma janela do canvas com o lugar que ocupa: o que as ações do grupo (alinhar, distribuir, lado a lado) recebem. */
+export interface JanelaNoCanvas extends Retangulo {
+  id: string;
+}
+
+/** Os lados e os centros pelos quais `alinharJanelas` alinha o grupo. */
+export type Alinhamento = "esquerda" | "centro" | "direita" | "topo" | "meio" | "base";
+/** O eixo em que `distribuirJanelas` reparte o espaço. */
+export type EixoDaDistribuicao = "horizontal" | "vertical";
+
+/** Folga entre as janelas organizadas lado a lado pela barra do grupo. */
+export const MARGEM_DO_LADO_A_LADO = 40;
+
+/** O retângulo que envolve todas as janelas (nulo sem nenhuma). */
+function contornoDasJanelas(janelas: readonly Retangulo[]): Retangulo | null {
+  if (janelas.length === 0) {
+    return null;
+  }
+  const x = Math.min(...janelas.map((janela) => janela.x));
+  const y = Math.min(...janelas.map((janela) => janela.y));
+  return {
+    x,
+    y,
+    largura: Math.max(...janelas.map((janela) => janela.x + janela.largura)) - x,
+    altura: Math.max(...janelas.map((janela) => janela.y + janela.altura)) - y,
+  };
+}
+
+/**
+ * Alinha as janelas pelo contorno do grupo, como num editor de design: à
+ * esquerda, ao centro ou à direita (só muda o x); ao topo, ao meio ou à base
+ * (só muda o y). Devolve a posição nova de cada uma, arredondada.
+ */
+export function alinharJanelas(janelas: readonly JanelaNoCanvas[], como: Alinhamento): Record<string, Ponto> {
+  const contorno = contornoDasJanelas(janelas);
+  const posicoes: Record<string, Ponto> = {};
+  if (contorno === null) {
+    return posicoes;
+  }
+  const direita = contorno.x + contorno.largura;
+  const base = contorno.y + contorno.altura;
+  for (const janela of janelas) {
+    const x =
+      como === "esquerda"
+        ? contorno.x
+        : como === "direita"
+          ? direita - janela.largura
+          : como === "centro"
+            ? contorno.x + (contorno.largura - janela.largura) / 2
+            : janela.x;
+    const y =
+      como === "topo"
+        ? contorno.y
+        : como === "base"
+          ? base - janela.altura
+          : como === "meio"
+            ? contorno.y + (contorno.altura - janela.altura) / 2
+            : janela.y;
+    posicoes[janela.id] = { x: Math.round(x), y: Math.round(y) };
+  }
+  return posicoes;
+}
+
+/**
+ * Reparte o espaço do grupo num eixo: a primeira e a última janela (na ordem
+ * do eixo) ficam nas pontas do contorno e as do meio ganham o mesmo vão entre
+ * vizinhas. O outro eixo não muda. Com menos de três janelas, nada se move.
+ */
+export function distribuirJanelas(janelas: readonly JanelaNoCanvas[], eixo: EixoDaDistribuicao): Record<string, Ponto> {
+  const posicoes: Record<string, Ponto> = Object.fromEntries(
+    janelas.map((janela) => [janela.id, { x: janela.x, y: janela.y }]),
+  );
+  const contorno = contornoDasJanelas(janelas);
+  if (contorno === null || janelas.length < 3) {
+    return posicoes;
+  }
+  const horizontal = eixo === "horizontal";
+  const inicio = (janela: Retangulo): number => (horizontal ? janela.x : janela.y);
+  const medida = (janela: Retangulo): number => (horizontal ? janela.largura : janela.altura);
+  const ordenadas = [...janelas].sort((a, b) => inicio(a) - inicio(b) || a.id.localeCompare(b.id));
+  const total = horizontal ? contorno.largura : contorno.altura;
+  const vao = (total - ordenadas.reduce((soma, janela) => soma + medida(janela), 0)) / (ordenadas.length - 1);
+  let cursor = horizontal ? contorno.x : contorno.y;
+  for (const janela of ordenadas) {
+    const lugar = Math.round(cursor);
+    posicoes[janela.id] = horizontal ? { x: lugar, y: janela.y } : { x: janela.x, y: lugar };
+    cursor += medida(janela) + vao;
+  }
+  return posicoes;
+}
+
+/**
+ * As janelas na ordem de leitura: em faixas de cima para baixo (uma janela
+ * que começa antes da metade da primeira da faixa ainda é da mesma faixa) e,
+ * em cada faixa, da esquerda para a direita.
+ */
+function emOrdemDeLeitura(janelas: readonly JanelaNoCanvas[]): JanelaNoCanvas[] {
+  const porTopo = [...janelas].sort((a, b) => a.y - b.y || a.x - b.x || a.id.localeCompare(b.id));
+  const faixas: JanelaNoCanvas[][] = [];
+  for (const janela of porTopo) {
+    const faixa = faixas.at(-1);
+    const primeira = faixa?.[0];
+    if (faixa !== undefined && primeira !== undefined && janela.y < primeira.y + primeira.altura / 2) {
+      faixa.push(janela);
+    } else {
+      faixas.push([janela]);
+    }
+  }
+  return faixas.flatMap((faixa) => faixa.sort((a, b) => a.x - b.x || a.id.localeCompare(b.id)));
+}
+
+/**
+ * "Lado a lado" da barra do grupo: as janelas numa grade simples a partir do
+ * canto superior esquerdo do grupo, na ordem de leitura atual, com
+ * `MARGEM_DO_LADO_A_LADO` entre elas. Até três ficam numa fileira só; mais
+ * que isso, a grade é quase quadrada (4 viram 2 × 2; 5 a 9, três por
+ * fileira). Cada fileira tem a altura da janela mais alta dela.
+ */
+export function janelasLadoALado(
+  janelas: readonly JanelaNoCanvas[],
+  margem: number = MARGEM_DO_LADO_A_LADO,
+): Record<string, Ponto> {
+  const posicoes: Record<string, Ponto> = {};
+  const contorno = contornoDasJanelas(janelas);
+  if (contorno === null) {
+    return posicoes;
+  }
+  const colunas = janelas.length <= 3 ? janelas.length : Math.ceil(Math.sqrt(janelas.length));
+  const ordenadas = emOrdemDeLeitura(janelas);
+  let y = contorno.y;
+  for (let inicio = 0; inicio < ordenadas.length; inicio += colunas) {
+    const fileira = ordenadas.slice(inicio, inicio + colunas);
+    let x = contorno.x;
+    for (const janela of fileira) {
+      posicoes[janela.id] = { x: Math.round(x), y: Math.round(y) };
+      x += janela.largura + margem;
+    }
+    y += Math.max(...fileira.map((janela) => janela.altura)) + margem;
+  }
+  return posicoes;
+}

@@ -7,6 +7,7 @@ import {
   type BixinhosLimpos,
   ESCALA_DA_LETRA_PADRAO,
   type EscalaDaLetra,
+  type JanelaNoCanvas,
   type LayoutDoCanvas,
   type Ponto,
   posicaoAoLado,
@@ -312,7 +313,7 @@ export function novoShell(
 }
 
 /** As janelas que se minimizam à barra de título. */
-type NoMinimizavel = NoNota | NoPrevia | NoTerminal;
+export type NoMinimizavel = NoNota | NoPrevia | NoTerminal;
 
 /** A altura da nota (ou prévia, ou terminal) aberta, esteja ela minimizada ou não. */
 function alturaAbertaDaNota(no: NoMinimizavel): number {
@@ -551,6 +552,129 @@ function tamanhoDoNo(no: NoDoCanvas): { largura: number; altura: number } {
   return {
     largura: no.width ?? no.measured?.width ?? padrao.largura,
     altura: no.height ?? no.measured?.height ?? padrao.altura,
+  };
+}
+
+/**
+ * As telas do canvas: tudo menos os bixinhos (terminais, rascunhos, notas,
+ * artefatos, prévias e shells). Só elas entram nas ações do grupo.
+ */
+export function ehTela(no: NoDoCanvas): boolean {
+  return !ehBixinho(no);
+}
+
+/** As telas que se minimizam à barra de título (pela barra do grupo também). */
+export function ehMinimizavel(no: NoDoCanvas): no is NoMinimizavel {
+  return ehNota(no) || ehPrevia(no) || ehTerminal(no);
+}
+
+/**
+ * O lugar que a tela ocupa agora, como aparece: diferente de `tamanhoDoNo`, o
+ * terminal minimizado conta só com a barra. É o que alinhar, distribuir e pôr
+ * lado a lado usam.
+ */
+export function janelaVisivel(no: NoDoCanvas): JanelaNoCanvas {
+  const tamanho =
+    ehTerminal(no) && no.data.minimizada === true
+      ? { largura: tamanhoDoNo(no).largura, altura: no.height ?? ALTURA_DA_NOTA_MINIMIZADA }
+      : tamanhoDoNo(no);
+  return { id: no.id, x: no.position.x, y: no.position.y, ...tamanho };
+}
+
+/** As telas selecionadas, na ordem dos nós; os bixinhos ficam de fora. */
+export function telasSelecionadas(nos: readonly NoDoCanvas[]): NoDoCanvas[] {
+  return nos.filter((no) => no.selected === true && ehTela(no));
+}
+
+/** Os nós com as posições novas; os outros (e os que já estão lá) continuam o mesmo objeto, e sem mudança volta o mesmo array. */
+export function comPosicoes(nos: NoDoCanvas[], posicoes: Readonly<Record<string, Ponto>>): NoDoCanvas[] {
+  let mudou = false;
+  const novos = nos.map((no) => {
+    const posicao = posicoes[no.id];
+    if (posicao === undefined || (posicao.x === no.position.x && posicao.y === no.position.y)) {
+      return no;
+    }
+    mudou = true;
+    return { ...no, position: posicao };
+  });
+  return mudou ? novos : nos;
+}
+
+/** Cmd/Ctrl + A: todas as telas selecionadas e nenhum bixinho. Sem mudança, o mesmo array. */
+export function selecionarTodasAsTelas(nos: NoDoCanvas[]): NoDoCanvas[] {
+  let mudou = false;
+  const novos = nos.map((no) => {
+    const selecionar = ehTela(no);
+    if ((no.selected === true) === selecionar) {
+      return no;
+    }
+    mudou = true;
+    return { ...no, selected: selecionar };
+  });
+  return mudou ? novos : nos;
+}
+
+/**
+ * Os bixinhos saem da seleção quando há alguma tela nela (o fim do retângulo
+ * de seleção): eles seguem o terminal e não entram nas ações do grupo. Sem
+ * tela selecionada (o retângulo só pegou bixinhos), fica como está.
+ */
+export function semBixinhosNaSelecao(nos: NoDoCanvas[]): NoDoCanvas[] {
+  if (!nos.some((no) => no.selected === true && ehTela(no)) || !nos.some((no) => no.selected === true && ehBixinho(no))) {
+    return nos;
+  }
+  return nos.map((no) => (ehBixinho(no) && no.selected === true ? { ...no, selected: false } : no));
+}
+
+/**
+ * "Minimizar" da barra do grupo, entre as telas de `ids` que se minimizam
+ * (notas, prévias e terminais): se alguma está aberta, minimiza as abertas;
+ * se todas já estão minimizadas, restaura todas. Sem nenhuma, o mesmo array.
+ */
+export function minimizarOuRestaurarTelas(nos: NoDoCanvas[], ids: ReadonlySet<string>): NoDoCanvas[] {
+  const alvos = nos.filter((no): no is NoMinimizavel => ids.has(no.id) && ehMinimizavel(no));
+  if (alvos.length === 0) {
+    return nos;
+  }
+  const minimizar = alvos.some((no) => no.data.minimizada !== true);
+  const trocar = new Set(alvos.filter((no) => (no.data.minimizada === true) !== minimizar).map((no) => no.id));
+  return nos.map((no) => (trocar.has(no.id) && ehMinimizavel(no) ? minimizarOuRestaurar(no) : no));
+}
+
+/**
+ * As telas que o "Fechar" da barra do grupo tira do canvas, sem apagar dado:
+ * terminais (o orquestrador continua salvo e volta pela Doca), artefatos,
+ * prévias e shells (este encerra o processo, como o ✕ dele). Notas ficam de
+ * fora (o único jeito de tirar uma nota do canvas é apagá-la) e rascunhos
+ * também (descartar perderia o que foi preenchido).
+ */
+export function ehFechavelEmGrupo(no: NoDoCanvas): boolean {
+  return ehTerminal(no) || ehArtefato(no) || ehPrevia(no) || ehShell(no);
+}
+
+/** O que a barra do grupo precisa saber da seleção: só muda quando a seleção (ou o minimizar) muda, não ao arrastar. */
+export interface ResumoDoGrupo {
+  /** As telas selecionadas, na ordem dos nós. */
+  ids: readonly string[];
+  /** Quantas delas se minimizam (notas, prévias e terminais). */
+  minimizaveis: number;
+  /** Todas as minimizáveis já estão minimizadas: o botão vira "Restaurar". */
+  todasMinimizadas: boolean;
+  /** Quantas o "Fechar" tira do canvas (`ehFechavelEmGrupo`). */
+  fechaveis: number;
+  /** Quantas das fecháveis são shells (fechar encerra o processo). */
+  shells: number;
+}
+
+export function resumirGrupo(nos: readonly NoDoCanvas[]): ResumoDoGrupo {
+  const telas = telasSelecionadas(nos);
+  const minimizaveis = telas.filter(ehMinimizavel);
+  return {
+    ids: telas.map((no) => no.id),
+    minimizaveis: minimizaveis.length,
+    todasMinimizadas: minimizaveis.length > 0 && minimizaveis.every((no) => no.data.minimizada === true),
+    fechaveis: telas.filter(ehFechavelEmGrupo).length,
+    shells: telas.filter(ehShell).length,
   };
 }
 
