@@ -1,6 +1,7 @@
 import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { type AlteracaoDaNota, api, mensagemDeErro } from "../api/cliente";
+import type { DadosDaNota } from "../api/tipos";
 import { type Ponto, posicaoParaNovoTerminal, TAMANHO_DA_NOTA } from "../canvas/layout";
 import { ehNota, minimizarOuRestaurar, type NoDoCanvas, novaNota, sincronizarNotas } from "../canvas/nos";
 import { type AcoesDasNotas, criarLojaDasNotas, type ValorDasNotas } from "../canvas/notas";
@@ -14,6 +15,12 @@ export interface NotasDoCanvas {
    * canvas), abre ali, e não no centro.
    */
   criarNota: (dados?: AlteracaoDaNota, posicao?: Ponto) => Promise<void>;
+  /**
+   * Põe no canvas uma nota que já foi criada no servidor, no lugar e no
+   * tamanho dados, sem foco e sem mexer na seleção (é como um modelo de
+   * canvas recria as notas dele). Devolve o id do nó.
+   */
+  mostrarNota: (nota: DadosDaNota, posicao: Ponto, tamanho?: { largura: number; altura: number }) => string;
   /** Por que a última nota não pôde ser criada. */
   erro: string | null;
   descartarErro: () => void;
@@ -94,6 +101,17 @@ export function useNotas(
     }
   }, [centroDaTela, loja, setNos]);
 
+  const mostrarNota = useCallback(
+    (nota: DadosDaNota, posicao: Ponto, tamanho?: { largura: number; altura: number }): string => {
+      criadasAgora.current.add(nota.id);
+      loja.guardar(nota);
+      const no = novaNota(nota.id, posicao, tamanho?.largura, tamanho?.altura);
+      setNos((atuais) => [...atuais, no]);
+      return no.id;
+    },
+    [loja, setNos],
+  );
+
   const acoes = useMemo<AcoesDasNotas>(
     () => ({
       minimizarOuRestaurar: (notaId) =>
@@ -112,5 +130,5 @@ export function useNotas(
   const valor = useMemo<ValorDasNotas>(() => ({ loja, acoes }), [loja, acoes]);
   const descartarErro = useCallback(() => setErro(null), []);
 
-  return { valor, criarNota, erro, descartarErro };
+  return { valor, criarNota, mostrarNota, erro, descartarErro };
 }

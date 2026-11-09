@@ -19,6 +19,7 @@ import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
 import {
   IconeAlerta,
   IconeFechar,
+  IconeModelo,
   IconeNavegador,
   IconeOrquestrador,
   IconePasta,
@@ -113,7 +114,7 @@ interface PropsDaBarra {
 }
 
 /** Os painéis que abrem logo abaixo da barra do canvas. */
-export type PainelDaBarra = "subagentes" | "instrucoes";
+export type PainelDaBarra = "subagentes" | "instrucoes" | "modelos";
 
 interface PropsDoRotulo {
   /** Texto inteiro (≥ 1280 px). */
@@ -297,8 +298,8 @@ function MenuDoNovo({ aoCriar, aoCriarNota, aoCriarPrevia, aoCriarShell }: Props
  * que também tem a identidade do app. No navegador (sem barra de título
  * própria), a barra também mostra a identidade, o "Buscar" e o ⚙
  * Configurações, para nada ficar inacessível. O "Organizar" fica nos controles
- * do canto inferior esquerdo. Nos dois, os Subagentes e as Instruções gerais
- * seguem à vista como botões.
+ * do canto inferior esquerdo. Nos dois, os Subagentes, as Instruções gerais
+ * e os Modelos (arranjos salvos do canvas) seguem à vista como botões.
  */
 export function BarraDoCanvas({
   aoCriar,
@@ -370,6 +371,16 @@ export function BarraDoCanvas({
         title="Instruções que valem para todo orquestrador sem instruções próprias"
       >
         <RotuloResponsivo completo="Instruções gerais" curto="Instruções" icone="¶" />
+      </button>
+      <button
+        type="button"
+        className="btn btn-sm btn-outline botao-de-painel"
+        onClick={() => aoAlternarPainel("modelos")}
+        aria-expanded={painelAberto === "modelos"}
+        aria-label="Modelos"
+        title="Modelos de canvas: arranjos salvos para recriar, exportar e importar"
+      >
+        <RotuloResponsivo completo="Modelos" curto="Modelos" icone={<IconeModelo />} />
       </button>
       {!desktop && (
         <PainelDeConfiguracoesDoApp

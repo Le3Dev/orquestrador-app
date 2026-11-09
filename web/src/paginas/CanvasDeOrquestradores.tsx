@@ -61,10 +61,11 @@ import {
   StatusDoCanvas,
 } from "../componentes/canvas/PaineisDoCanvas";
 import { PainelDeInstrucoesGerais } from "../componentes/canvas/PainelDeInstrucoesGerais";
+import { DialogoDeNovoModelo, PainelDeModelos } from "../componentes/canvas/PainelDeModelos";
 import { PainelDeSubagentes } from "../componentes/canvas/PainelDeSubagentes";
 import { api, ErroDaApi, mensagemDeErro } from "../shared/api/cliente";
 import type { ResumoDoArtefato } from "../shared/api/artefatos";
-import type { ResumoDoOrquestrador } from "../shared/api/tipos";
+import type { ConteudoDoModeloDeCanvas, ResumoDoOrquestrador } from "../shared/api/tipos";
 import {
   type AcoesDosArtefatos,
   artefatoAberto,
@@ -98,6 +99,7 @@ import {
   MARGEM_DO_LADO_A_LADO,
   organizarComNotas,
   type Ponto,
+  posicaoLivrePerto,
   posicaoParaNovoTerminal,
   salvarBixinhosLimpos,
   TAMANHO_DA_NOTA,
@@ -118,6 +120,7 @@ import {
   arestasDasPrevias,
   arestasDosBixinhos,
   arestasDosShells,
+  areasOcupadas,
   comEscalaDaLetra,
   comItensLigadosJunto,
   comPosicoes,
@@ -166,6 +169,7 @@ import {
   subagentesVisiveis,
   telasSelecionadas,
 } from "../shared/canvas/nos";
+import { type ArranjoDaSelecao, arranjoDaSelecao, recriarItens, tamanhoDoArranjo } from "../shared/canvas/modelos";
 import { ProvedorDasNotas } from "../shared/canvas/notas";
 import {
   type AcoesDosShells,
@@ -187,6 +191,8 @@ import { mesmoConteudo, useReaproveitado } from "../shared/hooks/useReaproveitad
 import { useRodaDoCanvas } from "../shared/hooks/useRodaDoCanvas";
 import { useSaidaDosBixinhos } from "../shared/hooks/useSaidaDosBixinhos";
 import { useServidor } from "../shared/hooks/useServidor";
+import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../shared/modelos";
+import { nomeLivre } from "../shared/nomeLivre";
 import type { AcaoDaPaleta, FonteDaPaleta, ItemDaPaleta } from "../shared/paletaDeComandos";
 
 /** Onde chega a linha do terminal a uma nota ou artefato ligados: o meio de cada lado (a prévia já tem as dela). */
@@ -1575,6 +1581,112 @@ function Canvas() {
     return () => window.removeEventListener("keydown", aoApertarTecla);
   }, [setNos, painelAberto, escolhendoPastaDoShell]);
 
+  // Modelos de canvas (item 35): "Salvar como modelo" na barra do grupo lê a
+  // seleção na hora; o painel Modelos recria um modelo perto do centro da tela.
+  const [arranjoDoModelo, setArranjoDoModelo] = useState<ArranjoDaSelecao | null>(null);
+  // Muda a cada modelo salvo: o painel Modelos remonta e relê a lista.
+  const [versaoDosModelos, setVersaoDosModelos] = useState(0);
+  const salvarComoModelo = useCallback(() => {
+    setArranjoDoModelo(
+      arranjoDaSelecao(nosAtuais.current, {
+        orquestrador: (id) => orquestradoresAtuais.current?.find((orquestrador) => orquestrador.id === id),
+        nota: (notaId) => lojaDasNotas.ler(notaId) ?? null,
+      }),
+    );
+  }, [lojaDasNotas]);
+  const fecharDialogoDoModelo = useCallback(() => setArranjoDoModelo(null), []);
+  const salvarModelo = useCallback(async (conteudo: ConteudoDoModeloDeCanvas) => {
+    await api.criarModeloDeCanvas(conteudo);
+    setArranjoDoModelo(null);
+    setVersaoDosModelos((versao) => versao + 1);
+    setPainelAberto("modelos");
+  }, []);
+
+  const { mostrarNota } = notas;
+  /**
+   * Recria o modelo item a item, com o canto do arranjo no lugar livre mais
+   * perto do centro da tela. Os orquestradores nascem parados (nenhum turno,
+   * nenhuma mensagem) e os terminais abrem o shell na pasta, sem rodar nem
+   * digitar o comando guardado. O erro de um item não para os outros.
+   */
+  const recriarModelo = useCallback(
+    async (modelo: ConteudoDoModeloDeCanvas, pasta: string | null) => {
+      const tamanho = tamanhoDoArranjo(modelo.itens);
+      const centro = centroDaTela();
+      const origem = posicaoLivrePerto(
+        { x: Math.round(centro.x - tamanho.largura / 2), y: Math.round(centro.y - tamanho.altura / 2) },
+        tamanho,
+        areasOcupadas(nosAtuais.current).map((area) => area.retangulo),
+      );
+      // Os terminais abertos agora: a vaga confere com eles antes do próximo render.
+      const terminaisNovos: string[] = [];
+      // Recriar ao lado do original não repete o nome: "API" vira "API 2", como no cartão do chat.
+      const nomesUsados = (orquestradoresAtuais.current ?? []).map((orquestrador) => orquestrador.nome);
+      const resultados = await recriarItens(modelo.itens, origem, pasta, {
+        orquestrador: async (item, lugar, pastaDoItem) => {
+          const atuais = nosAtuais.current;
+          const vaga = cabeOutroTerminal(
+            [...new Set([...atuais.filter(ehTerminal).map((no) => no.data.orquestradorId), ...terminaisNovos])],
+            atuais.filter((no) => no.type === "rascunho").map((no) => no.id),
+            null,
+          );
+          if (!vaga) {
+            throw new Error(AVISO_DO_LIMITE_DE_ORQUESTRADORES);
+          }
+          const nome = nomeLivre(item.nome, nomesUsados);
+          const criado = await api.criarOrquestrador({
+            ...CONFIGURACAO_PADRAO_DO_ORQUESTRADOR,
+            ...item.configuracao,
+            nome,
+            pastaDeTrabalho: pastaDoItem,
+          });
+          nomesUsados.push(nome);
+          criadosAgora.current.add(criado.id);
+          terminaisNovos.push(criado.id);
+          const terminal = novoTerminal(criado.id, lugar, lugar.largura, lugar.altura);
+          setNos((atuais) => [...atuais, terminal]);
+          return terminal.id;
+        },
+        nota: async (item, lugar) => {
+          const nota = await api.criarNota({ titulo: item.titulo, texto: item.texto });
+          return mostrarNota(nota, lugar, lugar);
+        },
+        previa: (item, lugar) => {
+          const previa = novaPrevia(crypto.randomUUID(), lugar, { url: item.url, orquestradorId: null }, lugar.largura, lugar.altura);
+          setNos((atuais) => [...atuais, previa]);
+          return Promise.resolve(previa.id);
+        },
+        terminal: async (_item, lugar, pastaDoItem) => {
+          const criado = await api.criarShell({ pasta: pastaDoItem, ...TAMANHO_INICIAL_DO_SHELL });
+          const shell = novoShell(
+            crypto.randomUUID(),
+            lugar,
+            { terminalId: criado.id, pasta: criado.pasta, orquestradorId: null },
+            lugar.largura,
+            lugar.altura,
+          );
+          setNos((atuais) => [...atuais, shell]);
+          return shell.id;
+        },
+      });
+      const novos = new Set(resultados.flatMap((resultado) => (resultado.noId === null ? [] : [resultado.noId])));
+      if (novos.size > 0) {
+        // Os itens recriados ficam selecionados, prontos para arrastar juntos.
+        setNos((atuais) =>
+          reacomodarBixinhos(
+            atuais.map((no) => (no.selected === true || novos.has(no.id) ? { ...no, selected: novos.has(no.id) } : no)),
+          ),
+        );
+        enquadrarSemAproximar([...novos]);
+      }
+      if (terminaisNovos.length > 0) {
+        void recarregar();
+      }
+      return resultados;
+    },
+    [centroDaTela, enquadrarSemAproximar, mostrarNota, recarregar, setNos],
+  );
+
   // A barra do grupo, com duas ou mais telas selecionadas: o resumo só muda
   // com a seleção (ou o minimizar), então arrastar o grupo não a re-renderiza.
   const resumoDoGrupo = useReaproveitado(resumirGrupo(nos), mesmoResumo);
@@ -1592,10 +1704,20 @@ function Canvas() {
             aoPorLadoALado={porGrupoLadoALado}
             aoMinimizar={minimizarGrupo}
             aoFechar={fecharGrupo}
+            aoSalvarComoModelo={salvarComoModelo}
           />
         </Panel>
       ),
-    [resumoDoGrupo, alinharGrupo, distribuirGrupo, porGrupoLadoALado, minimizarGrupo, fecharGrupo, desenhoAberto],
+    [
+      resumoDoGrupo,
+      alinharGrupo,
+      distribuirGrupo,
+      porGrupoLadoALado,
+      minimizarGrupo,
+      fecharGrupo,
+      salvarComoModelo,
+      desenhoAberto,
+    ],
   );
 
   // A contagem do botão Subagentes. Com o servidor fora, fica sem número até
@@ -1641,6 +1763,9 @@ function Canvas() {
         {painelAberto === "instrucoes" && (
           <PainelDeInstrucoesGerais aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />
         )}
+        {painelAberto === "modelos" && (
+          <PainelDeModelos key={versaoDosModelos} aoFechar={fecharPainel} aoRecriar={recriarModelo} />
+        )}
         {avisoDoLimite && (
           <ErroDoCanvas erro={AVISO_DO_LIMITE_DE_ORQUESTRADORES} aoFechar={fecharAvisoDoLimite} nivel="aviso" />
         )}
@@ -1667,6 +1792,8 @@ function Canvas() {
       fecharPainel,
       quantidadeDeSubagentes,
       aoSalvarPainel,
+      versaoDosModelos,
+      recriarModelo,
       avisoDoLimite,
       fecharAvisoDoLimite,
       erroDasNotas,
@@ -1930,6 +2057,9 @@ function Canvas() {
             {/* "Terminal" do "+ Novo ▾": a pasta é escolhida no mesmo navegador de pastas da criação do orquestrador. */}
             {escolhendoPastaDoShell && (
               <NavegadorDePastas aoEscolher={abrirShellNaPasta} aoFechar={fecharEscolhaDaPastaDoShell} />
+            )}
+            {arranjoDoModelo !== null && (
+              <DialogoDeNovoModelo arranjo={arranjoDoModelo} aoSalvar={salvarModelo} aoFechar={fecharDialogoDoModelo} />
             )}
           </ProvedorDosShells>
         </ProvedorDosArtefatos>

@@ -108,4 +108,25 @@ describe("BarraDoGrupo", () => {
       "Fechar 2 telas? Os orquestradores continuam salvos e voltam pela Doca. O terminal de shell é encerrado. Notas e rascunhos ficam no canvas.",
     );
   });
+
+  it("\"Salvar como modelo\" só aparece com a ação, e o clique a chama", () => {
+    const { barra } = renderizar();
+    expect(within(barra).queryByRole("button", { name: "Salvar como modelo" })).not.toBeInTheDocument();
+
+    const aoSalvarComoModelo = vi.fn();
+    render(
+      <BarraDoGrupo
+        resumo={tresTerminais}
+        aoAlinhar={vi.fn()}
+        aoDistribuir={vi.fn()}
+        aoPorLadoALado={vi.fn()}
+        aoMinimizar={vi.fn()}
+        aoFechar={vi.fn()}
+        aoSalvarComoModelo={aoSalvarComoModelo}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Salvar como modelo" }));
+
+    expect(aoSalvarComoModelo).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1311,11 +1311,12 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     }
 
     // A barra do canvas fica com o "+ Novo ▾" (que tem a Prévia e o Terminal) e os botões de
-    // Subagentes e Instruções gerais; o ⚙ Configurações vai para a barra de título.
+    // Subagentes, Instruções gerais e Modelos; o ⚙ Configurações vai para a barra de título.
     expect(within(barraDoCanvas).getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual([
       "Novo",
       "Subagentes",
       "Instruções gerais",
+      "Modelos",
     ]);
     expect(within(barra).getByRole("button", { name: "Configurações" })).toBeInTheDocument();
 
@@ -1876,5 +1877,113 @@ describe("CanvasDeOrquestradores · seleção múltipla e barra do grupo", { tim
     fireEvent.click(within(barra).getByRole("button", { name: "Restaurar" }));
     await waitFor(() => expect(lerLayout().terminais.o1?.minimizada).toBeUndefined());
     expect(lerLayout().terminais.o2?.minimizada).toBeUndefined();
+  });
+
+  it("\"Salvar como modelo\" guarda as telas selecionadas com posições relativas e abre o painel Modelos", async () => {
+    layoutCom({ o1: { x: 100, y: 200 }, o2: { x: 900, y: 300 } });
+    vi.spyOn(api, "listarModelosDeCanvas").mockResolvedValue([]);
+    const criar = vi.spyOn(api, "criarModeloDeCanvas").mockImplementation(async (conteudo) => ({
+      ...conteudo,
+      id: "m1",
+      criadoEm: "2026-11-09T12:00:00Z",
+      atualizadoEm: "2026-11-09T12:00:00Z",
+    }));
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o2")).toBeInTheDocument());
+    selecionarTudo(window);
+    const barra = await screen.findByRole("toolbar", { name: "Ações do grupo" });
+
+    fireEvent.click(within(barra).getByRole("button", { name: "Salvar como modelo" }));
+    const dialogo = await screen.findByRole("dialog", { name: "Salvar como modelo" });
+    expect(dialogo).toHaveTextContent("2 orquestradores");
+    fireEvent.change(within(dialogo).getByRole("textbox", { name: "Nome" }), { target: { value: "Dupla" } });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Salvar modelo" }));
+
+    await screen.findByRole("region", { name: "Modelos de canvas" });
+    expect(screen.queryByRole("dialog", { name: "Salvar como modelo" })).not.toBeInTheDocument();
+    expect(criar).toHaveBeenCalledWith({
+      nome: "Dupla",
+      icone: "🧩",
+      cor: "#d97757",
+      itens: [
+        {
+          tipo: "orquestrador",
+          x: 0,
+          y: 0,
+          largura: 600,
+          altura: 520,
+          nome: "Orquestrador o1",
+          pastaDeTrabalho: "C:\\projetos\\o1",
+          configuracao,
+        },
+        {
+          tipo: "orquestrador",
+          x: 800,
+          y: 100,
+          largura: 600,
+          altura: 520,
+          nome: "Orquestrador o2",
+          pastaDeTrabalho: "C:\\projetos\\o2",
+          configuracao,
+        },
+      ],
+    });
+  });
+
+  it("Recriar cria cada item pela API no mesmo arranjo, com o orquestrador parado e o shell sem comando", async () => {
+    vi.spyOn(api, "listarModelosDeCanvas").mockResolvedValue([
+      {
+        id: "m1",
+        nome: "Backend",
+        icone: "🧩",
+        cor: "#d97757",
+        itens: [
+          { tipo: "orquestrador", x: 0, y: 0, largura: 600, altura: 520, nome: "API", pastaDeTrabalho: "/projetos/api", configuracao },
+          { tipo: "nota", x: 640, y: 0, titulo: "Pendências", texto: "- [ ] revisar" },
+          { tipo: "terminal", x: 0, y: 560, pasta: "/projetos/api", comando: "npm run dev" },
+          { tipo: "previa", x: 700, y: 600, url: "https://exemplo.com" },
+        ],
+        criadoEm: "2026-11-09T12:00:00Z",
+        atualizadoEm: "2026-11-09T12:00:00Z",
+      },
+    ]);
+    const criarOrquestrador = vi.spyOn(api, "criarOrquestrador").mockResolvedValue(orquestrador("novo"));
+    const criarNota = vi
+      .spyOn(api, "criarNota")
+      .mockResolvedValue(nota("n1", { titulo: "Pendências", texto: "- [ ] revisar" }));
+    const criarShell = vi
+      .spyOn(api, "criarShell")
+      .mockResolvedValue({ id: "t1", pasta: "/projetos/api", orquestradorId: null, criadoEm: "2026-11-09T12:00:00Z" });
+    const enviar = vi.spyOn(api, "enviarMensagem");
+    // O original continua existindo: o recriado ganha um nome livre.
+    simulados.orquestradores.orquestradores = [{ ...orquestrador("o1"), nome: "API" }];
+    render(<CanvasDeOrquestradores />);
+    await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Modelos" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Recriar Backend" }));
+
+    const resultado = await screen.findByRole("status", { name: "Resultado da recriação" });
+    expect(resultado).toHaveTextContent('"Backend": 4 de 4 itens recriados, parados (nenhum pedido foi enviado).');
+    expect(criarOrquestrador).toHaveBeenCalledWith(
+      expect.objectContaining({ ...configuracao, nome: "API 2", pastaDeTrabalho: "/projetos/api" }),
+    );
+    expect(criarNota).toHaveBeenCalledWith({ titulo: "Pendências", texto: "- [ ] revisar" });
+    expect(criarShell).toHaveBeenCalledWith({ pasta: "/projetos/api", colunas: 80, linhas: 24 });
+    expect(enviar).not.toHaveBeenCalled();
+
+    // O mesmo arranjo, a partir do canto do orquestrador recriado.
+    await waitFor(() => expect(noNaTela("novo")).toBeInTheDocument());
+    const origem = posicaoNaTela("novo");
+    expect(posicaoNaTela("nota:n1")).toEqual({ x: origem.x + 640, y: origem.y });
+    await waitFor(() => expect(Object.values(lerLayout().shells)).toHaveLength(1));
+    expect(Object.values(lerLayout().shells)[0]).toMatchObject({ x: origem.x, y: origem.y + 560, terminalId: "t1" });
+    expect(Object.values(lerLayout().previas)[0]).toMatchObject({
+      x: origem.x + 700,
+      y: origem.y + 600,
+      url: "https://exemplo.com",
+    });
+    // Os recriados ficam selecionados juntos.
+    await waitFor(() => expect(barraDoGrupo()).toHaveTextContent("4 telas"));
   });
 });

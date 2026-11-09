@@ -2,7 +2,7 @@ import { memo, type ReactNode } from "react";
 
 import type { Alinhamento, EixoDaDistribuicao } from "../../shared/canvas/layout";
 import type { ResumoDoGrupo } from "../../shared/canvas/nos";
-import { IconeFechar, IconeGrade, IconeMinimizar, IconeRestaurar } from "../Icones";
+import { IconeFechar, IconeGrade, IconeMinimizar, IconeModelo, IconeRestaurar } from "../Icones";
 
 /** Um ícone de 24 × 24 em traço, na cor do botão. */
 function Quadro({ children }: { children: ReactNode }) {
@@ -131,6 +131,8 @@ interface PropsDaBarraDoGrupo {
   aoPorLadoALado: () => void;
   aoMinimizar: () => void;
   aoFechar: () => void;
+  /** "Salvar como modelo": guarda o arranjo das telas para recriar depois. Sem ela, o botão não aparece. */
+  aoSalvarComoModelo?: () => void;
 }
 
 function BotaoDoGrupo({
@@ -165,8 +167,8 @@ function BotaoDoGrupo({
 /**
  * A barra das ações sobre as telas selecionadas, centralizada no alto do
  * canvas, logo abaixo da barra do canvas (o canvas só a mostra com duas ou
- * mais telas selecionadas): alinhar, distribuir, lado a lado, minimizar e
- * fechar. Os bixinhos não contam: seguem o terminal deles.
+ * mais telas selecionadas): alinhar, distribuir, lado a lado, minimizar,
+ * fechar e salvar como modelo. Os bixinhos não contam: seguem o terminal deles.
  */
 export const BarraDoGrupo = memo(function BarraDoGrupo({
   resumo,
@@ -175,6 +177,7 @@ export const BarraDoGrupo = memo(function BarraDoGrupo({
   aoPorLadoALado,
   aoMinimizar,
   aoFechar,
+  aoSalvarComoModelo,
 }: PropsDaBarraDoGrupo) {
   const quantidade = resumo.ids.length;
   const fechar = () => {
@@ -244,6 +247,20 @@ export const BarraDoGrupo = memo(function BarraDoGrupo({
       >
         <IconeFechar tamanho={15} />
       </BotaoDoGrupo>
+      {aoSalvarComoModelo !== undefined && (
+        <>
+          <span className="separador-da-barra" aria-hidden="true" />
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost gap-1.5 whitespace-nowrap"
+            title="Salvar como modelo: guarda o arranjo (orquestradores, notas, prévias e terminais) para recriar depois"
+            onClick={aoSalvarComoModelo}
+          >
+            <IconeModelo tamanho={14} />
+            Salvar como modelo
+          </button>
+        </>
+      )}
     </div>
   );
 });

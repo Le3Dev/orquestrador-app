@@ -392,3 +392,17 @@ export function IconeDesfazer({ tamanho = 16, className = "" }: PropsDoIcone) {
     </Quadro>
   );
 }
+
+/**
+ * Três janelas num arranjo, com a de baixo pontilhada: um modelo de canvas
+ * (o arranjo salvo para recriar). Na barra do grupo e no botão "Modelos".
+ */
+export function IconeModelo({ tamanho = 14, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <rect x="3.5" y="4" width="9" height="7" rx="1.4" {...TRACO} />
+      <rect x="14.5" y="4" width="6" height="7" rx="1.4" {...TRACO} />
+      <rect x="3.5" y="13.5" width="17" height="6.5" rx="1.4" {...TRACO} strokeDasharray="2.2 2.4" />
+    </Quadro>
+  );
+}
