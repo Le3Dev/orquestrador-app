@@ -905,6 +905,17 @@ function Canvas() {
     [setNos],
   );
 
+  // Como a nota: o nó fica só com a altura da barra, e as linhas dos bixinhos seguem a âncora.
+  const minimizarOuRestaurarTerminal = useCallback(
+    (orquestradorId: string) =>
+      setNos((atuais) =>
+        reacomodarBixinhos(
+          atuais.map((no) => (ehTerminal(no) && no.id === orquestradorId ? minimizarOuRestaurar(no) : no)),
+        ),
+      ),
+    [setNos],
+  );
+
   const limparBixinhosDoTerminal = useCallback(
     (orquestradorId: string) =>
       setBixinhosLimpos((atuais) => {
@@ -1169,6 +1180,7 @@ function Canvas() {
     () => ({
       abrirTerminal,
       fecharTerminal,
+      minimizarOuRestaurarTerminal,
       limparBixinhos: limparBixinhosDoTerminal,
       orquestradorCriado,
       descartarRascunho,
@@ -1182,6 +1194,7 @@ function Canvas() {
     [
       abrirTerminal,
       fecharTerminal,
+      minimizarOuRestaurarTerminal,
       limparBixinhosDoTerminal,
       orquestradorCriado,
       descartarRascunho,

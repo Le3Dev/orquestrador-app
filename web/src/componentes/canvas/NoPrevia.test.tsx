@@ -9,6 +9,7 @@ function acoesDoCanvas(): AcoesDoCanvas {
   return {
     abrirTerminal: vi.fn(),
     fecharTerminal: vi.fn(),
+    minimizarOuRestaurarTerminal: vi.fn(),
     limparBixinhos: vi.fn(),
     orquestradorCriado: vi.fn(),
     descartarRascunho: vi.fn(),

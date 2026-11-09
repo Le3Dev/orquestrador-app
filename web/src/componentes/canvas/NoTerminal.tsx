@@ -3,8 +3,10 @@ import {
   Fragment,
   type KeyboardEvent as EventoDeTecladoDoReact,
   memo,
+  type MouseEvent as EventoDeMouseDoReact,
   type ReactNode,
   type RefObject,
+  type SyntheticEvent,
   useCallback,
   useEffect,
   useId,
@@ -13,6 +15,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import {
@@ -49,6 +52,7 @@ import { formatarBytes } from "../../shared/formatacao";
 import { mesmoConteudo, useReaproveitado } from "../../shared/hooks/useReaproveitado";
 import { type ImagemAnexada, lerImagem, problemaDaImagem } from "../../shared/imagens";
 import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
+import { rodandoNoMac } from "../../shared/ponteDoDesktop";
 import { resumoDaConfiguracao } from "../../shared/resumoDaConfiguracao";
 import { CamposDaConfiguracao } from "../CamposDaConfiguracao";
 import { Etiqueta } from "../Etiqueta";
@@ -622,6 +626,8 @@ const Redimensionador = memo(function Redimensionador({ visivel }: { visivel: bo
 function useLargurasDaBarra(
   barra: RefObject<HTMLDivElement | null>,
   controles: RefObject<HTMLDivElement | null>,
+  /** Muda quando a barra é montada de novo (a tela cheia): o observador passa para a barra nova. */
+  montagem: unknown,
 ): { barra: number; controles: number } {
   const [larguraDaBarra, setLarguraDaBarra] = useState(0);
   const [larguraDosControles, setLarguraDosControles] = useState(0);
@@ -640,7 +646,7 @@ function useLargurasDaBarra(
     observador.observe(elementoDaBarra);
     observador.observe(elementoDosControles);
     return () => observador.disconnect();
-  }, [barra, controles]);
+  }, [barra, controles, montagem]);
 
   return { barra: larguraDaBarra, controles: larguraDosControles };
 }
@@ -709,6 +715,163 @@ function MaisDaBarra({ itens }: { itens: readonly ItemDaBarra[] }) {
   );
 }
 
+/** O que uma bolinha da barra faz no Mac. */
+type AcaoDaBolinha = "fechar" | "minimizar" | "telaCheia";
+
+/**
+ * As bolinhas do Mac, na ordem da barra (vermelha, amarela, verde): o padrão
+ * do Mac, em que a amarela minimiza e a verde põe em tela cheia. Para trocar
+ * o que cada uma faz (ex.: amarela tela cheia, verde minimizar), basta
+ * reordenar: a cor segue a posição, o glifo e o rótulo seguem a ação.
+ */
+const ACOES_DAS_BOLINHAS: readonly AcaoDaBolinha[] = ["fechar", "minimizar", "telaCheia"];
+
+/** Os glifos que aparecem nas bolinhas com o mouse sobre o grupo, como no Mac: ×, − e as setas. */
+const GLIFOS_DAS_BOLINHAS: Readonly<Record<AcaoDaBolinha, string>> = {
+  fechar: "M3.2 3.2l3.6 3.6M6.8 3.2l-3.6 3.6",
+  minimizar: "M2.6 5h4.8",
+  telaCheia: "M2.6 2.6h3.2L2.6 5.8zM7.4 7.4H4.2l3.2-3.2z",
+};
+
+function GlifoDaBolinha({ acao }: { acao: AcaoDaBolinha }) {
+  const preenchido = acao === "telaCheia";
+  return (
+    <svg width={8} height={8} viewBox="0 0 10 10" aria-hidden="true">
+      <path
+        d={GLIFOS_DAS_BOLINHAS[acao]}
+        fill={preenchido ? "currentColor" : "none"}
+        stroke={preenchido ? "none" : "currentColor"}
+        strokeWidth={1.4}
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/**
+ * No app desktop do Mac, as três bolinhas da barra são botões de verdade
+ * (`ACOES_DAS_BOLINHAS`): fechar o terminal, minimizar à barra e tela cheia.
+ * `nodrag`: clicar nelas não arrasta o nó.
+ */
+function BolinhasDoMac({
+  minimizada,
+  emTelaCheia,
+  aoFechar,
+  aoMinimizar,
+  aoAlternarTelaCheia,
+}: {
+  minimizada: boolean;
+  emTelaCheia: boolean;
+  aoFechar: () => void;
+  aoMinimizar: () => void;
+  aoAlternarTelaCheia: () => void;
+}) {
+  const botoes: Readonly<Record<AcaoDaBolinha, { rotulo: string; dica: string; aoClicar: () => void }>> = {
+    fechar: {
+      rotulo: "Fechar o terminal",
+      dica: "Fechar o terminal (o orquestrador continua salvo)",
+      aoClicar: aoFechar,
+    },
+    minimizar: {
+      rotulo: minimizada ? "Restaurar" : "Minimizar",
+      dica: minimizada ? "Restaurar" : "Minimizar",
+      aoClicar: aoMinimizar,
+    },
+    telaCheia: {
+      rotulo: emTelaCheia ? "Sair da tela cheia" : "Tela cheia",
+      dica: emTelaCheia ? "Sair da tela cheia (Esc)" : "Tela cheia",
+      aoClicar: aoAlternarTelaCheia,
+    },
+  };
+  return (
+    <span className="semaforo semaforo-do-mac nodrag" role="group" aria-label="Janela do terminal">
+      {ACOES_DAS_BOLINHAS.map((acao) => (
+        <button
+          key={acao}
+          type="button"
+          className="bolinha nodrag"
+          aria-label={botoes[acao].rotulo}
+          title={botoes[acao].dica}
+          onClick={botoes[acao].aoClicar}
+        >
+          <GlifoDaBolinha acao={acao} />
+        </button>
+      ))}
+    </span>
+  );
+}
+
+/** Eventos da tela cheia não sobem até o nó: o React Flow não arrasta nem seleciona por baixo. */
+function naoPropagar(evento: SyntheticEvent): void {
+  evento.stopPropagation();
+}
+
+/**
+ * O terminal em tela cheia (a bolinha verde do Mac): um painel flutuante
+ * sobre a área do canvas (no `.react-flow`, fora do viewport: não escala com
+ * o zoom), como o artefato ampliado. Esc e um clique na margem voltam; o Esc
+ * que alguém lá dentro já usou (cancelar o pedido no prompt, fechar um menu,
+ * desistir do nome) não.
+ */
+function TerminalEmTelaCheia({
+  nome,
+  alvo,
+  aoSair,
+  children,
+}: {
+  nome: string;
+  alvo: HTMLElement;
+  aoSair: () => void;
+  children: ReactNode;
+}) {
+  // Esc com o foco fora de qualquer campo (no corpo da página) também volta.
+  useEffect(() => {
+    const aoTeclar = (evento: KeyboardEvent) => {
+      if (evento.key === "Escape" && !evento.defaultPrevented && evento.target === document.body) {
+        evento.preventDefault();
+        aoSair();
+      }
+    };
+    window.addEventListener("keydown", aoTeclar);
+    return () => window.removeEventListener("keydown", aoTeclar);
+  }, [aoSair]);
+
+  const aoTeclar = (evento: EventoDeTecladoDoReact<HTMLDivElement>) => {
+    evento.stopPropagation();
+    if (evento.key === "Escape" && !evento.defaultPrevented && !(evento.target instanceof HTMLInputElement)) {
+      evento.preventDefault();
+      aoSair();
+    }
+  };
+
+  const aoPressionarOFundo = (evento: EventoDeMouseDoReact<HTMLDivElement>) => {
+    evento.stopPropagation();
+    if (evento.target === evento.currentTarget) {
+      aoSair();
+    }
+  };
+
+  return createPortal(
+    <div
+      data-testid="fundo-do-terminal-em-tela-cheia"
+      className="fundo-do-terminal-em-tela-cheia fundo-que-esmaece nodrag nopan nowheel nokey"
+      onMouseDown={aoPressionarOFundo}
+      onClick={naoPropagar}
+      onDoubleClick={naoPropagar}
+      onPointerDown={naoPropagar}
+      onContextMenu={naoPropagar}
+      onWheel={naoPropagar}
+      onKeyDown={aoTeclar}
+      onKeyUp={naoPropagar}
+    >
+      <div role="dialog" aria-label={`${nome} em tela cheia`} className="painel-flutuante surgir terminal-em-tela-cheia">
+        {children}
+      </div>
+    </div>,
+    alvo,
+  );
+}
+
 /**
  * Um Orquestrador no canvas: uma janela de terminal que se arrasta pela barra
  * de título e se redimensiona pelas bordas quando selecionada. Os bixinhos dos
@@ -732,11 +895,16 @@ export function NoTerminal({ data, selected }: NodeProps<TipoDoNo>) {
     );
   }
 
+  const minimizada = data.minimizada === true;
   return (
     <>
-      <Redimensionador visivel={selected} />
+      <Redimensionador visivel={selected && !minimizada} />
       <AncorasDoTerminal />
-      <JanelaDoTerminal orquestrador={orquestrador} escalaDaLetra={data.escalaDaLetra ?? ESCALA_DA_LETRA_PADRAO} />
+      <JanelaDoTerminal
+        orquestrador={orquestrador}
+        escalaDaLetra={data.escalaDaLetra ?? ESCALA_DA_LETRA_PADRAO}
+        minimizada={minimizada}
+      />
     </>
   );
 }
@@ -746,17 +914,34 @@ export function NoTerminal({ data, selected }: NodeProps<TipoDoNo>) {
  * com novidades do canvas, nunca no arraste; e a transcrição e o prompt,
  * memorizados e com props estáveis, só quando o que eles mostram muda. O
  * tamanho da letra (`escalaDaLetra`) vale para tudo abaixo da barra de título.
+ *
+ * No app desktop do Mac, as bolinhas da barra fecham, minimizam e põem em
+ * tela cheia (`BolinhasDoMac`), e o ✕ da direita sai; no Windows e no
+ * navegador, elas são só o desenho, e o ✕ fica. Minimizado, o conteúdo fica
+ * montado e escondido (o prompt não perde o texto). Em tela cheia, a janela
+ * vai para um portal e o conteúdo é montado de novo: a conversa vem do
+ * canvas, e o texto do prompt passa pelo `textoInicial`.
  */
 const JanelaDoTerminal = memo(function JanelaDoTerminal({
   orquestrador,
   escalaDaLetra,
+  minimizada,
 }: {
   orquestrador: ResumoDoOrquestrador;
   escalaDaLetra: EscalaDaLetra;
+  minimizada: boolean;
 }) {
   const { conversas, conexoes, sinais, servidor, acoes } = useCanvas();
   const orquestradorId = orquestrador.id;
   const conversa = conversas.get(orquestradorId) ?? ESTADO_INICIAL;
+  const noMac = rodandoNoMac();
+  // Onde a tela cheia é desenhada (a área do canvas); nulo fora dela.
+  const [telaCheiaEm, setTelaCheiaEm] = useState<HTMLElement | null>(null);
+  const emTelaCheia = telaCheiaEm !== null;
+  // Em tela cheia o conteúdo aparece mesmo com o nó minimizado no canvas.
+  const escondido = minimizada && !emTelaCheia;
+  // O texto do prompt na hora de entrar ou sair da tela cheia, para o prompt novo nascer com ele.
+  const [textoDoPrompt, setTextoDoPrompt] = useState("");
   const [erro, setErro] = useState<string | null>(null);
   const [configurando, setConfigurando] = useState(false);
   const [editandoNome, setEditandoNome] = useState(false);
@@ -774,7 +959,8 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   const acompanhando = useRef(true);
   const barra = useRef<HTMLDivElement>(null);
   const controlesDaBarra = useRef<HTMLDivElement>(null);
-  const larguras = useLargurasDaBarra(barra, controlesDaBarra);
+  // Entrar ou sair da tela cheia monta a barra de novo: as medidas recomeçam nela.
+  const larguras = useLargurasDaBarra(barra, controlesDaBarra, telaCheiaEm);
 
   // O nome do evento chega na hora; o do resumo, na próxima consulta da lista.
   const nome = nomePendente ?? conversa.nome ?? orquestrador.nome;
@@ -790,12 +976,20 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   );
   const proximoDaFilaACaminho = useProximoDaFilaACaminho(ultimoTurno, fila.length > 0);
 
+  // Também ao entrar e sair da tela cheia: a transcrição montada de novo começa do topo.
   useEffect(() => {
     const elemento = rolagem.current;
     if (elemento !== null && acompanhando.current) {
       elemento.scrollTop = elemento.scrollHeight;
     }
-  }, [conversa.ultimaSequencia, erro]);
+  }, [conversa.ultimaSequencia, erro, telaCheiaEm]);
+
+  // Em tela cheia, já dá para escrever.
+  useEffect(() => {
+    if (telaCheiaEm !== null) {
+      campoDoPrompt.current?.focus({ preventScroll: true });
+    }
+  }, [telaCheiaEm]);
 
   // Começo e fim de pedido atualizam a doca e a barra de status na hora.
   const { recarregar } = acoes;
@@ -1022,6 +1216,30 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
     }
   }
 
+  /** Sai da tela cheia; o prompt montado de novo nasce com o texto que estava escrito. */
+  const sairDaTelaCheia = useCallback(() => {
+    setTextoDoPrompt(campoDoPrompt.current?.value ?? "");
+    setTelaCheiaEm(null);
+  }, []);
+
+  /** A bolinha verde: a tela cheia cobre a área do canvas (o `.react-flow` em volta do nó). */
+  function alternarTelaCheia(): void {
+    if (emTelaCheia) {
+      sairDaTelaCheia();
+      return;
+    }
+    setTextoDoPrompt(campoDoPrompt.current?.value ?? "");
+    setTelaCheiaEm(barra.current?.closest<HTMLElement>(".react-flow") ?? document.body);
+  }
+
+  /** A bolinha amarela e o duplo clique na barra minimizada; em tela cheia, sai dela antes de minimizar. */
+  function minimizarOuRestaurar(): void {
+    if (emTelaCheia) {
+      sairDaTelaCheia();
+    }
+    acoes.minimizarOuRestaurarTerminal(orquestradorId);
+  }
+
   /** "abrir prévia" na faixa dos servidores: a prévia nasce ligada a este terminal. */
   const { abrirPrevia } = acoes;
   const aoAbrirPrevia = useCallback((url: string) => abrirPrevia(orquestradorId, url), [abrirPrevia, orquestradorId]);
@@ -1145,9 +1363,16 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   const naBarra = (chip: ItemDaBarra): boolean => !noMenu.has(chip.id);
   const foraDaBarra = [...chipsDaEsquerda, ...chipsDaDireita].filter((chip) => noMenu.has(chip.id));
 
-  return (
+  /** Minimizado, o duplo clique na barra restaura (menos nos botões dela). */
+  const aoDuploCliqueNaBarra = (evento: EventoDeMouseDoReact<HTMLDivElement>) => {
+    if (!(evento.target instanceof Element && evento.target.closest("button, input") !== null)) {
+      minimizarOuRestaurar();
+    }
+  };
+
+  const janela = (
     <div
-      className={`janela-terminal ${trabalhando ? "janela-terminal-ativa" : ""} ${modo === "planejamento" ? "janela-terminal-planejando" : ""} ${piscando ? "janela-terminal-entrega" : ""}`}
+      className={`janela-terminal ${trabalhando ? "janela-terminal-ativa" : ""} ${modo === "planejamento" ? "janela-terminal-planejando" : ""} ${piscando ? "janela-terminal-entrega" : ""} ${escondido ? "janela-terminal-minimizada" : ""}`}
       onDragOver={(evento) => {
         // Uma linha ou uma nota arrastada vira texto no prompt; arquivos, imagens anexadas.
         if (temPedidoArrastado(evento.dataTransfer)) {
@@ -1188,20 +1413,36 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
       {arraste === "pedido" && (
         <div className="soltar-imagens">solte para escrever no prompt — nada é enviado até você apertar enter</div>
       )}
-      <div ref={barra} className={`barra-do-terminal ${ALCA_DO_TERMINAL}`}>
-        <span className="semaforo" aria-hidden="true">
-          <i />
-          <i />
-          <i />
-        </span>
+      <div
+        ref={barra}
+        className={`barra-do-terminal ${ALCA_DO_TERMINAL}`}
+        onDoubleClick={escondido ? aoDuploCliqueNaBarra : undefined}
+      >
+        {/* No Mac desktop, botões de verdade; no Windows e no navegador, só o desenho. */}
+        {noMac ? (
+          <BolinhasDoMac
+            minimizada={minimizada}
+            emTelaCheia={emTelaCheia}
+            aoFechar={() => acoes.fecharTerminal(orquestradorId)}
+            aoMinimizar={minimizarOuRestaurar}
+            aoAlternarTelaCheia={alternarTelaCheia}
+          />
+        ) : (
+          <span className="semaforo" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+        )}
         <IconeOrquestrador tamanho={14} className="shrink-0 text-active" />
         {editandoNome ? (
           <CampoDoNome nome={nome} aoConcluir={(novo) => void concluirNome(novo)} />
         ) : (
+          // Minimizado, o clique duplo é da barra (restaurar), e não do renomear.
           <strong
             className="truncate font-titulo text-[12.5px] font-semibold"
-            title={`${nome} · clique duplo para renomear`}
-            onDoubleClick={() => setEditandoNome(true)}
+            title={escondido ? `${nome} · clique duplo para restaurar` : `${nome} · clique duplo para renomear`}
+            onDoubleClick={escondido ? undefined : () => setEditandoNome(true)}
           >
             {nome}
           </strong>
@@ -1236,25 +1477,39 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
             title="Configurar"
             aria-label="Configurar"
             aria-pressed={configurando}
-            onClick={() => setConfigurando((atual) => !atual)}
+            onClick={() => {
+              // Minimizado, o ⚙ restaura o terminal e já abre a configuração.
+              if (escondido) {
+                minimizarOuRestaurar();
+                setConfigurando(true);
+              } else {
+                setConfigurando((atual) => !atual);
+              }
+            }}
           >
             <IconeEngrenagem />
           </button>
-          {/* Separado das funções e sem o círculo vermelho: não é o fechar da janela do sistema. */}
-          <span className="separador-da-barra" aria-hidden="true" />
-          <button
-            type="button"
-            className="botao-icone botao-fechar-do-terminal nodrag"
-            title="Fechar o terminal (o orquestrador e o histórico continuam salvos)"
-            aria-label="Fechar o terminal"
-            onClick={() => acoes.fecharTerminal(orquestradorId)}
-          >
-            <IconeFechar tamanho={14} />
-          </button>
+          {/* No Mac, quem fecha é a bolinha vermelha. Nos outros, o ✕ fica separado
+              das funções e sem o círculo vermelho: não é o fechar da janela do sistema. */}
+          {!noMac && (
+            <>
+              <span className="separador-da-barra" aria-hidden="true" />
+              <button
+                type="button"
+                className="botao-icone botao-fechar-do-terminal nodrag"
+                title="Fechar o terminal (o orquestrador e o histórico continuam salvos)"
+                aria-label="Fechar o terminal"
+                onClick={() => acoes.fecharTerminal(orquestradorId)}
+              >
+                <IconeFechar tamanho={14} />
+              </button>
+            </>
+          )}
         </div>
       </div>
 
-      <div className="conteudo-do-cartao" style={{ zoom: escalaDaLetra }}>
+      {/* Minimizado, fica montado e escondido: o prompt e a rolagem não se perdem. */}
+      <div className="conteudo-do-cartao" style={{ zoom: escalaDaLetra }} hidden={escondido}>
         {configurando && (
           <PainelDeConfiguracao
             orquestrador={orquestrador}
@@ -1315,9 +1570,23 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
           aoEnviarDaFila={aoEnviarDaFila}
           aoLimparConversa={limparConversa}
           aoCancelar={aoCancelar}
+          textoInicial={textoDoPrompt}
         />
       </div>
       {trabalhando && servidor.conectado && <div className="faixa-de-progresso" />}
     </div>
+  );
+
+  if (telaCheiaEm === null) {
+    return janela;
+  }
+  // Em tela cheia, o nó fica no canvas só como o lugar para onde a janela volta.
+  return (
+    <>
+      <div className="janela-terminal grid place-items-center mono text-muted">em tela cheia · Esc volta</div>
+      <TerminalEmTelaCheia nome={nome} alvo={telaCheiaEm} aoSair={sairDaTelaCheia}>
+        {janela}
+      </TerminalEmTelaCheia>
+    </>
   );
 });

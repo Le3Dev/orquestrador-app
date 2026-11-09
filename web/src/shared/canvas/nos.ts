@@ -25,8 +25,18 @@ import {
   tamanhoNaEscalaDaLetra,
 } from "./layout";
 
-/** Sem `escalaDaLetra`, o cartão (terminal ou rascunho) mostra a letra normal. */
-export type DadosDoTerminal = { orquestradorId: string; escalaDaLetra?: EscalaDaLetra };
+/**
+ * Sem `escalaDaLetra`, o cartão (terminal ou rascunho) mostra a letra normal.
+ * Sem `minimizada`, o terminal está aberto; minimizado (a bolinha amarela do
+ * Mac), o nó tem só a altura da barra, e restaurar volta a `alturaAberta`,
+ * como na nota.
+ */
+export type DadosDoTerminal = {
+  orquestradorId: string;
+  escalaDaLetra?: EscalaDaLetra;
+  minimizada?: boolean;
+  alturaAberta?: number;
+};
 export type DadosDoRascunho = { escalaDaLetra?: EscalaDaLetra };
 export type DadosDoBixinho = { orquestradorId: string; subagenteId: string };
 /**
@@ -201,16 +211,21 @@ export function novoTerminal(
   largura: number,
   altura: number,
   escalaDaLetra: EscalaDaLetra = ESCALA_DA_LETRA_PADRAO,
+  minimizada = false,
 ): NoTerminal {
   return {
     id: orquestradorId,
     type: "terminal",
     position: posicao,
     width: largura,
-    height: altura,
+    height: minimizada ? ALTURA_DA_NOTA_MINIMIZADA : altura,
     dragHandle: `.${ALCA_DO_TERMINAL}`,
-    // A letra normal fica sem o campo, como nos layouts antigos.
-    data: escalaDaLetra === ESCALA_DA_LETRA_PADRAO ? { orquestradorId } : { orquestradorId, escalaDaLetra },
+    // A letra normal e o terminal aberto ficam sem o campo, como nos layouts antigos.
+    data: {
+      orquestradorId,
+      ...(escalaDaLetra === ESCALA_DA_LETRA_PADRAO ? {} : { escalaDaLetra }),
+      ...(minimizada ? { minimizada: true, alturaAberta: altura } : {}),
+    },
   };
 }
 
@@ -297,15 +312,24 @@ export function novoShell(
 }
 
 /** As janelas que se minimizam à barra de título. */
-type NoMinimizavel = NoNota | NoPrevia;
+type NoMinimizavel = NoNota | NoPrevia | NoTerminal;
 
-/** A altura da nota (ou prévia) aberta, esteja ela minimizada ou não. */
+/** A altura da nota (ou prévia, ou terminal) aberta, esteja ela minimizada ou não. */
 function alturaAbertaDaNota(no: NoMinimizavel): number {
-  const padrao = ehNota(no) ? TAMANHO_DA_NOTA.altura : TAMANHO_DA_PREVIA.altura;
-  return no.data.minimizada ? no.data.alturaAberta : (no.height ?? no.measured?.height ?? padrao);
+  const padrao = ehNota(no)
+    ? TAMANHO_DA_NOTA.altura
+    : ehPrevia(no)
+      ? TAMANHO_DA_PREVIA.altura
+      : TAMANHO_DO_TERMINAL.altura;
+  return no.data.minimizada === true
+    ? (no.data.alturaAberta ?? padrao)
+    : (no.height ?? no.measured?.height ?? padrao);
 }
 
-/** Minimiza a nota ou a prévia (fica só a barra de título, no mesmo lugar) ou a restaura ao tamanho de antes. */
+/**
+ * Minimiza a nota, a prévia ou o terminal (fica só a barra de título, no mesmo
+ * lugar) ou os restaura ao tamanho de antes.
+ */
 export function minimizarOuRestaurar<T extends NoMinimizavel>(no: T): T {
   const alturaAberta = Math.round(alturaAbertaDaNota(no));
   const minimizada = !no.data.minimizada;
@@ -345,7 +369,14 @@ export function sincronizarNotas(
 
 export function nosDoLayout(layout: LayoutDoCanvas): NoDoCanvas[] {
   const terminais = Object.entries(layout.terminais).map(([id, retangulo]) =>
-    novoTerminal(id, { x: retangulo.x, y: retangulo.y }, retangulo.largura, retangulo.altura, retangulo.escalaDaLetra),
+    novoTerminal(
+      id,
+      { x: retangulo.x, y: retangulo.y },
+      retangulo.largura,
+      retangulo.altura,
+      retangulo.escalaDaLetra,
+      retangulo.minimizada === true,
+    ),
   );
   // O conteúdo das notas chega do servidor depois; os nós já nascem aqui para
   // a gravação do layout, logo ao abrir, não apagar a posição delas.
@@ -382,14 +413,16 @@ export function nosDoLayout(layout: LayoutDoCanvas): NoDoCanvas[] {
 export function layoutDosNos(nos: readonly NoDoCanvas[], viewport: LayoutDoCanvas["viewport"]): LayoutDoCanvas {
   const terminais: LayoutDoCanvas["terminais"] = {};
   for (const no of nos.filter(ehTerminal)) {
-    const { escalaDaLetra } = no.data;
+    const { escalaDaLetra, minimizada } = no.data;
     terminais[no.id] = {
       x: Math.round(no.position.x),
       y: Math.round(no.position.y),
       largura: Math.round(no.width ?? no.measured?.width ?? TAMANHO_DO_TERMINAL.largura),
-      altura: Math.round(no.height ?? no.measured?.height ?? TAMANHO_DO_TERMINAL.altura),
-      // A letra normal fica sem o campo, como nos layouts antigos.
+      // Minimizado, vai a altura do terminal aberto, como na nota.
+      altura: Math.round(alturaAbertaDaNota(no)),
+      // A letra normal e o terminal aberto ficam sem o campo, como nos layouts antigos.
       ...(escalaDaLetra !== undefined && escalaDaLetra !== ESCALA_DA_LETRA_PADRAO ? { escalaDaLetra } : {}),
+      ...(minimizada === true ? { minimizada: true } : {}),
     };
   }
   const notas: LayoutDoCanvas["notas"] = {};
@@ -490,8 +523,18 @@ export function limparBixinhos(
   return { turnoId: turno.id, subagentes: [...anteriores, ...novos.map((subagente) => subagente.id)] };
 }
 
-/** O tamanho de um nó: o definido, o medido ou o padrão do tipo dele. */
+/**
+ * O tamanho de um nó: o definido, o medido ou o padrão do tipo dele. O
+ * terminal minimizado conta com a altura de aberto: os bixinhos dele (e as
+ * janelas novas) ficam fora do lugar que ele volta a ocupar ao restaurar.
+ */
 function tamanhoDoNo(no: NoDoCanvas): { largura: number; altura: number } {
+  if (ehTerminal(no) && no.data.minimizada === true) {
+    return {
+      largura: no.width ?? no.measured?.width ?? TAMANHO_DO_TERMINAL.largura,
+      altura: alturaAbertaDaNota(no),
+    };
+  }
   const padrao = ehBixinho(no)
     ? TAMANHO_DO_BIXINHO
     : ehNota(no)

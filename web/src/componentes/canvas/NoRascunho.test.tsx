@@ -40,6 +40,7 @@ function abrir(conectado = true) {
   const acoes = {
     abrirTerminal: vi.fn(),
     fecharTerminal: vi.fn(),
+    minimizarOuRestaurarTerminal: vi.fn(),
     limparBixinhos: vi.fn(),
     orquestradorCriado: vi.fn(),
     descartarRascunho: vi.fn(),

@@ -264,6 +264,63 @@ describe("tamanho da letra no layout", () => {
   });
 });
 
+describe("terminal minimizado no layout", () => {
+  afterEach(() => localStorage.clear());
+
+  const retangulo = { x: 10, y: 20, largura: 600, altura: 500 };
+
+  it("grava e lê de volta o terminal minimizado, com a altura de aberto; o aberto fica sem o campo", () => {
+    const minimizado = minimizarOuRestaurar(novoTerminal("o1", { x: 0, y: 0 }, 600, 500));
+    expect(minimizado.height).toBe(ALTURA_DA_NOTA_MINIMIZADA);
+
+    salvarLayout(layoutDosNos([minimizado, novoTerminal("o2", { x: 800, y: 0 }, 640, 460)], null));
+    const lido = lerLayout();
+
+    expect(lido.terminais.o1).toEqual({ x: 0, y: 0, largura: 600, altura: 500, minimizada: true });
+    expect(lido.terminais.o2).toEqual({ x: 800, y: 0, largura: 640, altura: 460 });
+
+    // De volta ao canvas: só a barra, e restaurar volta à altura de antes.
+    const o1 = nosDoLayout(lido).filter(ehTerminal).find((no) => no.id === "o1");
+    expect(o1?.height).toBe(ALTURA_DA_NOTA_MINIMIZADA);
+    expect(o1?.data).toEqual({ orquestradorId: "o1", minimizada: true, alturaAberta: 500 });
+    const restaurado = o1 === undefined ? null : minimizarOuRestaurar(o1);
+    expect(restaurado?.height).toBe(500);
+    expect(restaurado === null ? null : layoutDosNos([restaurado], null).terminais.o1).toEqual({
+      x: 0,
+      y: 0,
+      largura: 600,
+      altura: 500,
+    });
+  });
+
+  it("um layout antigo, sem o campo, vale como aberto", () => {
+    const texto = JSON.stringify({ terminais: { o1: retangulo } });
+
+    expect(interpretarLayout(texto).terminais.o1).toEqual(retangulo);
+    const no = nosDoLayout(interpretarLayout(texto)).filter(ehTerminal)[0];
+    expect(no?.height).toBe(500);
+    expect(no?.data).toEqual({ orquestradorId: "o1" });
+  });
+
+  it.each([false, "sim", 1, null])("descarta um valor que não é true (%s), mantendo o terminal aberto", (valor) => {
+    const texto = JSON.stringify({ terminais: { o1: { ...retangulo, minimizada: valor } } });
+
+    expect(interpretarLayout(texto).terminais.o1).toEqual(retangulo);
+  });
+
+  it("guarda junto com o tamanho da letra", () => {
+    const texto = JSON.stringify({ terminais: { o1: { ...retangulo, escalaDaLetra: 1.15, minimizada: true } } });
+
+    expect(interpretarLayout(texto).terminais.o1).toEqual({ ...retangulo, escalaDaLetra: 1.15, minimizada: true });
+    expect(nosDoLayout(interpretarLayout(texto)).filter(ehTerminal)[0]?.data).toEqual({
+      orquestradorId: "o1",
+      escalaDaLetra: 1.15,
+      minimizada: true,
+      alturaAberta: 500,
+    });
+  });
+});
+
 describe("tamanhoNaEscalaDaLetra", () => {
   const padrao = TAMANHO_DO_TERMINAL;
   const minimo = TAMANHO_MINIMO_DO_TERMINAL;

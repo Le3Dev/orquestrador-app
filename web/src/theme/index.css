@@ -682,10 +682,56 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 }
 
 .semaforo { display: inline-flex; gap: 6px; margin-right: 4px; }
-.semaforo i { width: 10px; height: 10px; border-radius: 50%; background: var(--surface-3); }
-.semaforo i:nth-child(1) { background: color-mix(in srgb, var(--error) 80%, var(--surface-3)); }
-.semaforo i:nth-child(2) { background: color-mix(in srgb, var(--warning) 80%, var(--surface-3)); }
-.semaforo i:nth-child(3) { background: color-mix(in srgb, var(--success) 80%, var(--surface-3)); }
+.semaforo :is(i, .bolinha) { width: 10px; height: 10px; border-radius: 50%; background: var(--surface-3); }
+.semaforo :is(i, .bolinha):nth-child(1) { background: color-mix(in srgb, var(--error) 80%, var(--surface-3)); }
+.semaforo :is(i, .bolinha):nth-child(2) { background: color-mix(in srgb, var(--warning) 80%, var(--surface-3)); }
+.semaforo :is(i, .bolinha):nth-child(3) { background: color-mix(in srgb, var(--success) 80%, var(--surface-3)); }
+/* No Mac desktop, as bolinhas são botões (fechar, minimizar, tela cheia): um
+ * pouco maiores, para o clique, e o glifo (× − setas) aparece com o mouse
+ * sobre o grupo ou o foco do teclado, como nos botões da janela do Mac. */
+.semaforo-do-mac { gap: 7px; cursor: default; }
+.semaforo .bolinha {
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  flex-shrink: 0;
+  color: rgba(0, 0, 0, .62);
+  cursor: default;
+}
+.semaforo .bolinha svg { opacity: 0; transition: opacity .12s; }
+.semaforo-do-mac:hover .bolinha svg, .semaforo-do-mac:focus-within .bolinha svg { opacity: 1; }
+.semaforo .bolinha:active { filter: brightness(.82); }
+.semaforo .bolinha:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+
+/* Terminal minimizado (a bolinha amarela): só a barra e a borda, como a nota
+ * (ALTURA_DA_NOTA_MINIMIZADA); o conteúdo fica montado e escondido. */
+.janela-terminal-minimizada .barra-do-terminal { border-bottom: 0; }
+.conteudo-do-cartao[hidden] { display: none; }
+
+/* Terminal em tela cheia (a bolinha verde): um painel flutuante sobre a área
+ * do canvas, fora do zoom, como o artefato ampliado. Acima dos painéis do
+ * React Flow (z-index 5); a paleta, fora do canvas, continua por cima. */
+.fundo-do-terminal-em-tela-cheia {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  padding: 16px;
+  background: color-mix(in srgb, var(--screen-bg) 70%, transparent);
+}
+.terminal-em-tela-cheia {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  background: none;
+  outline: none;
+}
+.terminal-em-tela-cheia > .janela-terminal { flex: 1; }
+.terminal-em-tela-cheia .barra-do-terminal, .terminal-em-tela-cheia .barra-do-terminal:active { cursor: default; }
 
 .botao-icone {
   display: grid;

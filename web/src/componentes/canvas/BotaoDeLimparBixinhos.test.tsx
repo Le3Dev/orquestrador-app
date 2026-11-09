@@ -47,6 +47,7 @@ function renderizar(estado: EstadoDaConversa, limpos?: BixinhosLimpos) {
     acoes: {
       abrirTerminal: vi.fn(),
       fecharTerminal: vi.fn(),
+      minimizarOuRestaurarTerminal: vi.fn(),
       limparBixinhos,
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),

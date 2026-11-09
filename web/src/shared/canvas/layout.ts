@@ -33,9 +33,14 @@ export function ehEscalaDaLetra(valor: unknown): valor is EscalaDaLetra {
   return ESCALAS_DA_LETRA.some((escala) => escala === valor);
 }
 
-/** Onde fica um terminal. Sem `escalaDaLetra` (layouts antigos), a letra é a normal. */
+/**
+ * Onde fica um terminal. Sem `escalaDaLetra` (layouts antigos), a letra é a
+ * normal. Sem `minimizada`, o terminal está aberto; minimizado (as bolinhas
+ * do Mac), mostra só a barra de título, e `altura` continua a do terminal aberto.
+ */
 export interface RetanguloDoTerminal extends Retangulo {
   escalaDaLetra?: EscalaDaLetra;
+  minimizada?: boolean;
 }
 
 export interface Viewport extends Ponto {
@@ -254,7 +259,11 @@ function interpretarRetangulos(grupo: unknown): Record<string, Retangulo> {
   return validos;
 }
 
-/** Os terminais válidos do layout salvo; um tamanho da letra fora das opções vale como o normal (sem o campo). */
+/**
+ * Os terminais válidos do layout salvo; um tamanho da letra fora das opções
+ * vale como o normal, e sem `minimizada: true` o terminal fica aberto (os dois
+ * sem o campo, como nos layouts antigos).
+ */
 function interpretarTerminais(terminais: unknown): Record<string, RetanguloDoTerminal> {
   const validos: Record<string, RetanguloDoTerminal> = {};
   if (typeof terminais !== "object" || terminais === null) {
@@ -263,11 +272,15 @@ function interpretarTerminais(terminais: unknown): Record<string, RetanguloDoTer
   for (const [id, retangulo] of Object.entries(terminais)) {
     if (ehRetangulo(retangulo)) {
       const { x, y, largura, altura } = retangulo;
-      const { escalaDaLetra } = retangulo as { escalaDaLetra?: unknown };
-      validos[id] =
-        ehEscalaDaLetra(escalaDaLetra) && escalaDaLetra !== ESCALA_DA_LETRA_PADRAO
-          ? { x, y, largura, altura, escalaDaLetra }
-          : { x, y, largura, altura };
+      const { escalaDaLetra, minimizada } = retangulo as { escalaDaLetra?: unknown; minimizada?: unknown };
+      validos[id] = {
+        x,
+        y,
+        largura,
+        altura,
+        ...(ehEscalaDaLetra(escalaDaLetra) && escalaDaLetra !== ESCALA_DA_LETRA_PADRAO ? { escalaDaLetra } : {}),
+        ...(minimizada === true ? { minimizada: true } : {}),
+      };
     }
   }
   return validos;

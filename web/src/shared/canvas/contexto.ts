@@ -19,6 +19,8 @@ import type { BixinhosLimpos, EscalaDaLetra } from "./layout";
 export interface AcoesDoCanvas {
   abrirTerminal: (orquestradorId: string) => void;
   fecharTerminal: (orquestradorId: string) => void;
+  /** Minimiza o terminal à barra de título (a bolinha amarela do Mac) ou o restaura. Fica no layout do canvas. */
+  minimizarOuRestaurarTerminal: (orquestradorId: string) => void;
   /** Tira do canvas os bixinhos do terminal que não estão executando. Só visual: o histórico continua. */
   limparBixinhos: (orquestradorId: string) => void;
   /** O rascunho de configuração virou um Orquestrador de verdade: troca pelo terminal, no mesmo lugar. */
