@@ -20,6 +20,7 @@ import {
   posicoesLivresDosBixinhos,
   type Retangulo,
   salvarBixinhosLimpos,
+  salvarDesenho,
   salvarLayout,
   sobrepoe,
   TAMANHO_DA_PREVIA,
@@ -28,6 +29,7 @@ import {
   TAMANHO_DO_TERMINAL,
   TAMANHO_MINIMO_DO_TERMINAL,
   tamanhoNaEscalaDaLetra,
+  type TracoDoDesenho,
 } from "./layout";
 import {
   ehNota,
@@ -953,5 +955,95 @@ describe("ações da barra do grupo", () => {
     expect(semSobreposicao(grupo, posicoes, fora)).toBe(true);
     expect(posicoes.q?.y).toBe(posicoes.p?.y);
     expect((posicoes.q?.x ?? 0) - (posicoes.p?.x ?? 0)).toBe(600 + MARGEM_DO_LADO_A_LADO);
+  });
+});
+
+describe("desenho no layout", () => {
+  afterEach(() => localStorage.clear());
+
+  const CHAVE = "orquestrador-agentes:canvas:v1";
+  const caneta: TracoDoDesenho = {
+    id: "t1",
+    tipo: "caneta",
+    cor: "laranja",
+    espessura: 3,
+    pontos: [
+      { x: 0, y: 0 },
+      { x: 10.5, y: 4 },
+      { x: 20, y: 12 },
+    ],
+  };
+  const seta: TracoDoDesenho = {
+    id: "t2",
+    tipo: "seta",
+    cor: "azul",
+    espessura: 6,
+    pontos: [
+      { x: 100, y: 100 },
+      { x: 300, y: 180 },
+    ],
+  };
+  const texto: TracoDoDesenho = { id: "t3", tipo: "texto", cor: "claro", espessura: 2, pontos: [{ x: 5, y: 6 }], texto: "API" };
+
+  it("um layout antigo, sem desenho, continua valendo e fica sem o campo", () => {
+    const antigo = JSON.stringify({ terminais: { o1: { x: 0, y: 0, largura: 600, altura: 500 } }, viewport: null });
+
+    const layout = interpretarLayout(antigo);
+
+    expect(layout.desenho).toBeUndefined();
+    expect(Object.keys(layout.terminais)).toEqual(["o1"]);
+  });
+
+  it("grava e lê de volta os traços, na ordem, sem mexer nas janelas nem na câmera", () => {
+    salvarLayout(layoutDosNos([novoTerminal("o1", { x: 10, y: 20 }, 600, 500)], { x: 5, y: 6, zoom: 0.9 }));
+
+    salvarDesenho([caneta, seta, texto]);
+    const lido = lerLayout();
+
+    expect(lido.desenho).toEqual([caneta, seta, texto]);
+    expect(lido.terminais.o1).toEqual({ x: 10, y: 20, largura: 600, altura: 500 });
+    expect(lido.viewport).toEqual({ x: 5, y: 6, zoom: 0.9 });
+  });
+
+  it("gravar o layout das janelas (sem o campo) mantém o desenho já salvo", () => {
+    salvarDesenho([caneta]);
+
+    salvarLayout(layoutDosNos([novoTerminal("o2", { x: 0, y: 0 }, 600, 500)], null));
+
+    expect(lerLayout().desenho).toEqual([caneta]);
+    expect(Object.keys(lerLayout().terminais)).toEqual(["o2"]);
+  });
+
+  it("sem traços (tudo apagado), o campo sai do armazenamento", () => {
+    salvarDesenho([caneta]);
+    salvarDesenho([]);
+
+    expect(lerLayout().desenho).toBeUndefined();
+    expect(JSON.parse(localStorage.getItem(CHAVE) ?? "{}")).not.toHaveProperty("desenho");
+  });
+
+  it("descarta só os traços inválidos, mantendo a ordem dos bons", () => {
+    const invalidos: unknown[] = [
+      { ...caneta, id: "" },
+      { ...caneta, id: "tipo", tipo: "circulo" },
+      { ...caneta, id: "cor", cor: "#ff0000" },
+      { ...caneta, id: "espessura", espessura: 4 },
+      { ...caneta, id: "sem-pontos", pontos: [] },
+      { ...caneta, id: "ponto-ruim", pontos: [{ x: 0, y: "1" }] },
+      { ...caneta, id: "ponto-infinito", pontos: [{ x: 0, y: null }] },
+      { ...seta, id: "seta-de-tres", pontos: [...seta.pontos, { x: 1, y: 1 }] },
+      { ...texto, id: "texto-vazio", texto: "   " },
+      { ...texto, id: "texto-sem-texto", texto: undefined },
+      { ...texto, id: "texto-longo", texto: "a".repeat(501) },
+      "não é traço",
+      null,
+    ];
+    const salvo = JSON.stringify({ desenho: [caneta, ...invalidos, { ...seta, extra: "fora" }, texto] });
+
+    expect(interpretarLayout(salvo).desenho).toEqual([caneta, seta, texto]);
+  });
+
+  it("um desenho que não é lista vale como nenhum", () => {
+    expect(interpretarLayout(JSON.stringify({ desenho: { t1: caneta } })).desenho).toBeUndefined();
   });
 });

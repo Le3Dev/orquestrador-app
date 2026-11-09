@@ -291,3 +291,104 @@ export function IconeShell({ tamanho = 14, className = "" }: PropsDoIcone) {
     </Quadro>
   );
 }
+
+/**
+ * Lápis riscando: o botão "Desenhar" dos controles do canvas. Preenchido,
+ * como os outros ícones dos controles.
+ */
+export function IconeDesenhar({ tamanho = 12, className = "" }: PropsDoIcone) {
+  return (
+    <svg width={tamanho} height={tamanho} viewBox="0 0 12 12" className={className} aria-hidden="true">
+      <path d="M8.3 1.2a1.1 1.1 0 0 1 1.6 0l.9.9a1.1 1.1 0 0 1 0 1.6L5 9.5 2.4 10.1 3 7.5l5.3-6.3Z" fill="currentColor" />
+      <rect x="6.2" y="10.4" width="5.3" height="1.1" rx=".55" fill="currentColor" />
+    </svg>
+  );
+}
+
+// Ferramentas da barra de desenho: o mesmo traço de 1.8 num quadro de 24.
+
+/** Seta do mouse: selecionar (o canvas volta a funcionar como sempre). */
+export function IconeSelecionar({ tamanho = 16, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path d="M6 3.5 18.5 11l-5.6 1.4-2.7 5.6L6 3.5Z" {...TRACO} />
+    </Quadro>
+  );
+}
+
+/** Rabisco: a caneta, à mão livre. */
+export function IconeCaneta({ tamanho = 16, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path d="M3.5 16.5c2.2-4.5 4.4-5 5.4-1.8s3 3.2 4.9-.6 3.6-5.4 6.7-3.6" {...TRACO} />
+    </Quadro>
+  );
+}
+
+/** Ponta chanfrada e uma faixa larga: o marca-texto. */
+export function IconeMarcaTexto({ tamanho = 16, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path d="m14.5 3.5 5 5-7 7H8v-4.5l6.5-7.5Z" {...TRACO} />
+      <path d="M4 20.5h11" {...TRACO} strokeWidth={3} opacity={0.55} />
+    </Quadro>
+  );
+}
+
+/** Linha reta. */
+export function IconeLinha({ tamanho = 16, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path d="M5 19 19 5" {...TRACO} />
+    </Quadro>
+  );
+}
+
+/** Seta reta, para o canto de cima. */
+export function IconeSeta({ tamanho = 16, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path d="M5 19 19 5M10.5 5H19v8.5" {...TRACO} />
+    </Quadro>
+  );
+}
+
+/** Retângulo vazado. */
+export function IconeRetangulo({ tamanho = 16, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <rect x="4" y="6" width="16" height="12" rx="1.5" {...TRACO} />
+    </Quadro>
+  );
+}
+
+/** Letra T: o texto solto. */
+export function IconeTexto({ tamanho = 16, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path d="M5.5 7V4.5h13V7M12 4.5v15M9 19.5h6" {...TRACO} />
+    </Quadro>
+  );
+}
+
+/** Borracha: apaga o traço inteiro que tocar. */
+export function IconeBorracha({ tamanho = 16, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path
+        d="M9 19.5h10.5M5 14.6l8.6-8.6a2 2 0 0 1 2.8 0l2.6 2.6a2 2 0 0 1 0 2.8l-7.9 7.9H9.3L5 15.9a.9.9 0 0 1 0-1.3Z"
+        {...TRACO}
+      />
+      <path d="m9.6 10 5.4 5.4" {...TRACO} />
+    </Quadro>
+  );
+}
+
+/** Seta que volta: desfazer. */
+export function IconeDesfazer({ tamanho = 16, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path d="M9 14 4.5 9.5 9 5M4.5 9.5h10a5 5 0 0 1 0 10H11" {...TRACO} />
+    </Quadro>
+  );
+}

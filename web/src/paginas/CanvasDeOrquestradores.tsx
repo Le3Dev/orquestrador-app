@@ -35,10 +35,11 @@ import {
   useState,
 } from "react";
 
-import { IconeGrade, IconeMinimapa, IconeOrquestrador } from "../componentes/Icones";
+import { IconeDesenhar, IconeGrade, IconeMinimapa, IconeOrquestrador } from "../componentes/Icones";
 import { ChatRapido, TIPO_DA_RESPOSTA_DO_CHAT } from "../componentes/chat/ChatRapido";
 import { ArestaDoBixinho } from "../componentes/canvas/ArestaDoBixinho";
 import { BarraDoGrupo } from "../componentes/canvas/BarraDoGrupo";
+import { CamadaDeDesenho } from "../componentes/canvas/CamadaDeDesenho";
 import { NoArtefato } from "../componentes/canvas/NoArtefato";
 import { NoBixinho } from "../componentes/canvas/NoBixinho";
 import { NoNota } from "../componentes/canvas/NoNota";
@@ -260,6 +261,8 @@ const ROTULO_DO_ENQUADRAR = "Fit View";
 const VIEWPORT_PADRAO: Viewport = { x: 0, y: 0, zoom: 1 };
 /** Nome e dica do "Organizar", o 4º botão dos controles do canto inferior esquerdo. */
 const DICA_DO_ORGANIZAR = "Organizar: terminais lado a lado; notas e artefatos à direita";
+/** Dica do "Desenhar", o 5º botão dos controles: abre e fecha a barra de desenho. */
+const DICA_DO_DESENHAR = "Desenhar: caneta, marca-texto, formas e texto por cima do canvas";
 /** Nome e dica do botão do minimapa, no canto inferior direito. */
 const DICA_DO_MINIMAPA = { mostrar: "Mostrar minimapa", esconder: "Esconder minimapa" } as const;
 /**
@@ -1538,6 +1541,10 @@ function Canvas() {
     [],
   );
   const fecharPainel = useCallback(() => setPainelAberto(null), []);
+  // A barra de desenho (o "Desenhar" dos controles); o desenho em si é da `CamadaDeDesenho`.
+  const [desenhoAberto, setDesenhoAberto] = useState(false);
+  const alternarDesenho = useCallback(() => setDesenhoAberto((aberto) => !aberto), []);
+  const fecharDesenho = useCallback(() => setDesenhoAberto(false), []);
 
   // Cmd/Ctrl + A seleciona todas as telas (sem os bixinhos) e Esc limpa a
   // seleção; com o foco num campo de texto, os dois são do campo.
@@ -1574,7 +1581,10 @@ function Canvas() {
   const barraDoGrupo = useMemo(
     () =>
       resumoDoGrupo.ids.length < 2 ? null : (
-        <Panel position="top-center" className="painel-da-barra-do-grupo">
+        <Panel
+          position="top-center"
+          className={`painel-da-barra-do-grupo ${desenhoAberto ? "abaixo-da-barra-de-desenho" : ""}`}
+        >
           <BarraDoGrupo
             resumo={resumoDoGrupo}
             aoAlinhar={alinharGrupo}
@@ -1585,7 +1595,7 @@ function Canvas() {
           />
         </Panel>
       ),
-    [resumoDoGrupo, alinharGrupo, distribuirGrupo, porGrupoLadoALado, minimizarGrupo, fecharGrupo],
+    [resumoDoGrupo, alinharGrupo, distribuirGrupo, porGrupoLadoALado, minimizarGrupo, fecharGrupo, desenhoAberto],
   );
 
   // A contagem do botão Subagentes. Com o servidor fora, fica sem número até
@@ -1671,8 +1681,8 @@ function Canvas() {
       abrirTerminal,
     ],
   );
-  // Os controles do canto inferior esquerdo: zoom, enquadrar e, em 4º, o
-  // "Organizar". Memorizados: com um filho novo a cada render, o <Controls>
+  // Os controles do canto inferior esquerdo: zoom, enquadrar, em 4º o
+  // "Organizar" e em 5º o "Desenhar". Memorizados: com um filho novo a cada render, o <Controls>
   // re-renderizaria a cada quadro do arraste.
   const controles = useMemo(
     () => (
@@ -1695,9 +1705,18 @@ function Canvas() {
         >
           <IconeGrade />
         </ControlButton>
+        <ControlButton
+          className="botao-de-desenhar"
+          onClick={alternarDesenho}
+          aria-pressed={desenhoAberto}
+          title={DICA_DO_DESENHAR}
+          aria-label="Desenhar"
+        >
+          <IconeDesenhar />
+        </ControlButton>
       </Controls>
     ),
-    [enquadrarTudo, organizar, podeOrganizar],
+    [enquadrarTudo, organizar, podeOrganizar, alternarDesenho, desenhoAberto],
   );
   // O minimapa (recolhido por padrão) e, no canto, o botão que o mostra e
   // esconde, com a pele dos controles. O minimapa aberto fica acima do botão.
@@ -1880,6 +1899,12 @@ function Canvas() {
                     onDrop={aoSoltarNoCanvas}
                   >
                     <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} />
+                    {/* Por cima das janelas e abaixo dos painéis; a barra de desenho vem com ela. */}
+                    <CamadaDeDesenho
+                      aberta={desenhoAberto}
+                      aoFechar={fecharDesenho}
+                      tracosIniciais={layoutInicial.desenho}
+                    />
                     {/* Abaixo dos painéis (inclusive o chat); some enquanto um painel da barra está aberto. */}
                     {quantidadeDeJanelas === 0 && painelAberto === null && <CanvasVazio aoCriar={novoOrquestrador} />}
                     {controles}

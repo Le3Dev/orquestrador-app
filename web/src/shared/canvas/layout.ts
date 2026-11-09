@@ -80,6 +80,35 @@ export interface RetanguloDoShell extends Retangulo {
   orquestradorId: string | null;
 }
 
+/** O que cada traço do desenho é: mão livre (caneta, marca-texto), forma de dois pontos ou texto solto. */
+export const TIPOS_DE_TRACO = ["caneta", "marca-texto", "linha", "seta", "retangulo", "texto"] as const;
+export type TipoDoTraco = (typeof TIPOS_DE_TRACO)[number];
+/** As cores do desenho, pelo nome: o CSS (`.traco-cor-*`) liga cada uma a um token do tema. */
+export const CORES_DO_DESENHO = ["laranja", "claro", "azul", "verde", "kraft", "vermelho"] as const;
+export type CorDoDesenho = (typeof CORES_DO_DESENHO)[number];
+/** As espessuras do traço, em pontos do canvas (crescem com o zoom, como as janelas). */
+export const ESPESSURAS_DO_DESENHO = [2, 3, 6] as const;
+export type EspessuraDoDesenho = (typeof ESPESSURAS_DO_DESENHO)[number];
+/** Mais pontos que isso num traço de mão livre não vem de um rabisco: o traço salvo é descartado. */
+export const MAXIMO_DE_PONTOS_NO_TRACO = 5000;
+/** O texto solto mais longo que o desenho guarda. */
+export const MAXIMO_DE_CARACTERES_NO_TEXTO = 500;
+
+/**
+ * Um traço do desenho sobre o canvas, em coordenadas do canvas (acompanha o
+ * zoom e o arraste). `pontos`: na mão livre, o caminho já simplificado; na
+ * linha, na seta e no retângulo, o começo e o fim (cantos opostos, no
+ * retângulo); no texto, o canto superior esquerdo, com o `texto`.
+ */
+export interface TracoDoDesenho {
+  id: string;
+  tipo: TipoDoTraco;
+  cor: CorDoDesenho;
+  espessura: EspessuraDoDesenho;
+  pontos: Ponto[];
+  texto?: string;
+}
+
 export interface LayoutDoCanvas {
   /** Terminais abertos no canvas, por id do Orquestrador. */
   terminais: Record<string, RetanguloDoTerminal>;
@@ -96,6 +125,13 @@ export interface LayoutDoCanvas {
   /** Terminais de shell no canvas, pelo id criado na tela. Layouts gravados antes deles não têm o campo: valem como nenhum. */
   shells: Record<string, RetanguloDoShell>;
   viewport: Viewport | null;
+  /**
+   * Os traços do desenho, na ordem em que foram feitos. Sem o campo ao ler,
+   * nenhum (layouts antigos). Ao gravar sem o campo (o layout das janelas,
+   * `layoutDosNos`), o desenho já salvo fica como está: quem grava o desenho
+   * é `salvarDesenho`.
+   */
+  desenho?: TracoDoDesenho[];
 }
 
 /**
@@ -306,6 +342,73 @@ function interpretarTerminais(terminais: unknown): Record<string, RetanguloDoTer
   return validos;
 }
 
+function ehPonto(valor: unknown): valor is Ponto {
+  if (typeof valor !== "object" || valor === null) {
+    return false;
+  }
+  const { x, y } = valor as Record<string, unknown>;
+  return ehNumero(x) && ehNumero(y);
+}
+
+/** Quantos pontos cada tipo de traço precisa: a mão livre, de um ao máximo; as formas, dois; o texto, um. */
+function quantidadeDePontosValida(tipo: TipoDoTraco, quantidade: number): boolean {
+  switch (tipo) {
+    case "caneta":
+    case "marca-texto":
+      return quantidade >= 1 && quantidade <= MAXIMO_DE_PONTOS_NO_TRACO;
+    case "linha":
+    case "seta":
+    case "retangulo":
+      return quantidade === 2;
+    case "texto":
+      return quantidade === 1;
+  }
+}
+
+/** Um traço salvo, só com os campos dele; nulo se algo estiver fora do esperado. */
+function interpretarTraco(valor: unknown): TracoDoDesenho | null {
+  if (typeof valor !== "object" || valor === null) {
+    return null;
+  }
+  const { id, tipo, cor, espessura, pontos, texto } = valor as Record<string, unknown>;
+  const tipoValido = TIPOS_DE_TRACO.find((candidato) => candidato === tipo);
+  const corValida = CORES_DO_DESENHO.find((candidata) => candidata === cor);
+  const espessuraValida = ESPESSURAS_DO_DESENHO.find((candidata) => candidata === espessura);
+  if (
+    typeof id !== "string" ||
+    id === "" ||
+    tipoValido === undefined ||
+    corValida === undefined ||
+    espessuraValida === undefined ||
+    !Array.isArray(pontos) ||
+    !pontos.every(ehPonto) ||
+    !quantidadeDePontosValida(tipoValido, pontos.length)
+  ) {
+    return null;
+  }
+  const traco: TracoDoDesenho = {
+    id,
+    tipo: tipoValido,
+    cor: corValida,
+    espessura: espessuraValida,
+    pontos: pontos.map(({ x, y }) => ({ x, y })),
+  };
+  if (tipoValido !== "texto") {
+    return traco;
+  }
+  return typeof texto === "string" && texto.trim() !== "" && texto.length <= MAXIMO_DE_CARACTERES_NO_TEXTO
+    ? { ...traco, texto }
+    : null;
+}
+
+/** Os traços válidos do desenho salvo, na ordem; o traço corrompido sai, os outros ficam. */
+function interpretarDesenho(desenho: unknown): TracoDoDesenho[] {
+  if (!Array.isArray(desenho)) {
+    return [];
+  }
+  return desenho.map(interpretarTraco).filter((traco): traco is TracoDoDesenho => traco !== null);
+}
+
 function layoutVazio(): LayoutDoCanvas {
   return { terminais: {}, notas: {}, artefatos: {}, previas: {}, shells: {}, viewport: null };
 }
@@ -320,7 +423,8 @@ export function interpretarLayout(texto: string | null): LayoutDoCanvas {
     if (typeof salvo !== "object" || salvo === null) {
       return layoutVazio();
     }
-    const { terminais, notas, artefatos, previas, shells, viewport } = salvo as Record<string, unknown>;
+    const { terminais, notas, artefatos, previas, shells, viewport, desenho } = salvo as Record<string, unknown>;
+    const tracos = interpretarDesenho(desenho);
     return {
       terminais: interpretarTerminais(terminais),
       notas: interpretarNotas(notas),
@@ -328,6 +432,8 @@ export function interpretarLayout(texto: string | null): LayoutDoCanvas {
       previas: interpretarPrevias(previas),
       shells: interpretarShells(shells),
       viewport: ehViewport(viewport) ? viewport : null,
+      // Sem traços, sem o campo, como nos layouts antigos.
+      ...(tracos.length > 0 ? { desenho: tracos } : {}),
     };
   } catch {
     return layoutVazio();
@@ -342,11 +448,37 @@ export function lerLayout(): LayoutDoCanvas {
   }
 }
 
+/**
+ * Grava o layout. Sem o campo `desenho` (o layout das janelas, gravado a cada
+ * arraste), mantém os traços que já estavam salvos; sem traços, o campo nem vai.
+ */
 export function salvarLayout(layout: LayoutDoCanvas): void {
   try {
-    localStorage.setItem(CHAVE, JSON.stringify(layout));
+    const { terminais, notas, artefatos, previas, shells, viewport } = layout;
+    const desenho = layout.desenho ?? interpretarLayout(localStorage.getItem(CHAVE)).desenho ?? [];
+    localStorage.setItem(
+      CHAVE,
+      JSON.stringify({
+        terminais,
+        notas,
+        artefatos,
+        previas,
+        shells,
+        viewport,
+        ...(desenho.length > 0 ? { desenho } : {}),
+      }),
+    );
   } catch {
     // Sem armazenamento: o canvas só não é lembrado no próximo acesso.
+  }
+}
+
+/** Grava os traços do desenho junto do layout salvo, sem mexer nas janelas nem na câmera. */
+export function salvarDesenho(desenho: readonly TracoDoDesenho[]): void {
+  try {
+    salvarLayout({ ...interpretarLayout(localStorage.getItem(CHAVE)), desenho: [...desenho] });
+  } catch {
+    // Sem armazenamento: o desenho só não é lembrado no próximo acesso.
   }
 }
 

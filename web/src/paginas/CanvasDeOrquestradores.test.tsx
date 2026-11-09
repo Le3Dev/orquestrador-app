@@ -990,8 +990,10 @@ describe("CanvasDeOrquestradores · Ctrl+N e Organizar nos controles", () => {
     expect(organizar).toHaveAttribute("title", ORGANIZAR);
     expect(organizar).toBeEnabled();
     expect(organizar.closest(".react-flow__controls")).not.toBeNull();
-    expect(organizar.parentElement?.children).toHaveLength(4);
-    expect(organizar.parentElement?.lastElementChild).toBe(organizar);
+    // Depois dele, só o "Desenhar" (5º).
+    expect(organizar.parentElement?.children).toHaveLength(5);
+    expect(organizar.parentElement?.children[3]).toBe(organizar);
+    expect(organizar.parentElement?.lastElementChild).toBe(screen.getByRole("button", { name: "Desenhar" }));
     // Saiu da barra do canvas.
     expect(organizar.closest(".barra-do-canvas")).toBeNull();
 
@@ -1007,6 +1009,25 @@ describe("CanvasDeOrquestradores · Ctrl+N e Organizar nos controles", () => {
     await waitFor(() => expect(posicaoNaTela("o2")).toEqual(esperado.o2));
     expect(posicaoNaTela("o1")).toEqual(esperado.o1);
     expect(esperado.o2).not.toEqual({ x: 1500, y: 0 });
+  });
+
+  it("o \"Desenhar\" dos controles abre e fecha a barra de desenho", async () => {
+    layoutCom(["o1"]);
+    render(<CanvasDeOrquestradores />);
+    const desenhar = await screen.findByRole("button", { name: "Desenhar" });
+    expect(desenhar.closest(".react-flow__controls")).not.toBeNull();
+    expect(screen.queryByRole("toolbar", { name: "Desenho" })).not.toBeInTheDocument();
+
+    fireEvent.click(desenhar);
+
+    expect(desenhar).toHaveAttribute("aria-pressed", "true");
+    const barra = screen.getByRole("toolbar", { name: "Desenho" });
+    expect(within(barra).getByRole("button", { name: "Caneta" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(desenhar);
+
+    expect(desenhar).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByRole("toolbar", { name: "Desenho" })).not.toBeInTheDocument();
   });
 
   it("com uma janela só, o \"Organizar\" fica desabilitado", async () => {
