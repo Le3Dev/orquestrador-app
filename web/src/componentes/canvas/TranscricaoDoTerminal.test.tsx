@@ -7,6 +7,7 @@ import type {
   SinalDeVida,
 } from "../../shared/api/tipos";
 import { api } from "../../shared/api/cliente";
+import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../../shared/estado/aplicarEvento";
 import { esquecerAutorrecuperacao } from "../../shared/hooks/useAutorrecuperacao";
 import type { AcoesDoPlano } from "./CartaoDoPlano";
@@ -165,6 +166,49 @@ describe("TranscricaoDoTerminal", () => {
 
     expect(screen.getByText("Corrigido.")).toBeInTheDocument();
     expect(screen.queryByText("plano proposto")).not.toBeInTheDocument();
+  });
+
+  it("no log, o subagente pronto aparece pelo nome dele; executor, workflow e evento antigo, pelo nome do bicho", () => {
+    const concluiu = (subagenteId: string): EventoDeOrquestracao => ({
+      tipo: "subagente_concluido",
+      turnoId: "t1",
+      subagenteId,
+      situacao: "concluido",
+      resumo: "feito",
+      tokens: 10,
+      duracaoMs: 1000,
+    });
+    const iniciou = (subagenteId: string, papel?: string): EventoDeOrquestracao => ({
+      tipo: "subagente_iniciado",
+      turnoId: "t1",
+      subagenteId,
+      descricao: "parte",
+      tarefa: "faça a parte",
+      ...(papel === undefined ? {} : { papel }),
+    });
+    const conversa = aplicar(
+      ESTADO_INICIAL,
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "faça o vídeo", configuracao },
+      iniciou("sub-aaaa", "diretor-de-video"),
+      iniciou("sub-bbbb", "executor"),
+      iniciou("sub-cccc", "workflow"),
+      iniciou("sub-dddd"),
+      concluiu("sub-aaaa"),
+      concluiu("sub-bbbb"),
+      concluiu("sub-cccc"),
+      concluiu("sub-dddd"),
+    );
+    const { container } = render(<Transcricao conversa={conversa} />);
+
+    const origens = [...container.querySelectorAll(".linha-origem-bixinho")].map((origem) => origem.textContent);
+    expect(origens).toEqual([
+      "diretor-de-video#aaaa",
+      `${aparenciaDoBixinho("sub-bbbb").nome}#bbbb`,
+      `${aparenciaDoBixinho("sub-cccc").nome}#cccc`,
+      `${aparenciaDoBixinho("sub-dddd").nome}#dddd`,
+    ]);
+    // O nome inteiro fica no title: um nome longo corta com reticências.
+    expect(screen.getByText("diretor-de-video#aaaa")).toHaveAttribute("title", "diretor-de-video#aaaa");
   });
 
   it("o custo do turno só aparece depois de medido, no fim do pedido", () => {

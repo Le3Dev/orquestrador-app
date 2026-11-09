@@ -1,7 +1,7 @@
 import { Handle, type NodeProps, NodeToolbar, Position } from "@xyflow/react";
 import { memo } from "react";
 
-import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
+import { aparenciaDoBixinho, papelQueNomeia } from "../../shared/canvas/bixinhos";
 import { useCanvas } from "../../shared/canvas/contexto";
 import { iconeDaFerramenta } from "../../shared/canvas/iconesDeFerramenta";
 import { type Ancora, type NoBixinho as TipoDoNo, subagentesVisiveis } from "../../shared/canvas/nos";
@@ -12,17 +12,32 @@ import { Etiqueta } from "../Etiqueta";
 import { TextoFormatado } from "../TextoFormatado";
 import { Bixinho, IconeDaFerramenta } from "./Bixinho";
 
-function Ficha({ subagente, nome, agora }: { subagente: SubagenteNaTela; nome: string; agora: Date }) {
+/**
+ * A ficha do bixinho selecionado. Com um subagente pronto, o título é o nome
+ * dele e o nome do bicho fica só como detalhe; senão, o título é o nome do
+ * bicho e o detalhe, o papel (executor nos eventos antigos).
+ */
+function Ficha({
+  subagente,
+  nomeDoBicho,
+  papelNoTitulo,
+  agora,
+}: {
+  subagente: SubagenteNaTela;
+  nomeDoBicho: string;
+  papelNoTitulo: string | null;
+  agora: Date;
+}) {
   const executando = subagente.situacao === "executando";
   const conteudo = subagente.resultado || subagente.textos.join("\n\n") || subagente.resumo;
 
   return (
     <div className="ficha-do-bixinho nowheel nodrag">
       <div className="flex items-center justify-between gap-2">
-        <span className="font-titulo text-[13px] font-semibold">
-          {nome}{" "}
+        <span className="font-titulo min-w-0 truncate text-[13px] font-semibold">
+          {papelNoTitulo ?? nomeDoBicho}{" "}
           <span className="mono text-muted">
-            {subagente.papel ?? "executor"}#{idCurto(subagente.id)}
+            {papelNoTitulo === null ? (subagente.papel ?? "executor") : nomeDoBicho}#{idCurto(subagente.id)}
           </span>
         </span>
         <Etiqueta situacao={subagente.situacao} />
@@ -88,9 +103,13 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
       : subagente.situacao === "falhou"
         ? "deu ruim…"
         : "zzz";
-  // O papel (subagente pronto, workflow) vai no rótulo; o executor comum, que é
-  // a maioria, só no tooltip e na ficha, para não repetir em todo bixinho.
-  const papelNoRotulo = subagente.papel !== null && subagente.papel !== "executor" ? subagente.papel : null;
+  // Um subagente pronto (ou outro tipo com papel) dá o nome ao bixinho, no
+  // lugar do nome do bicho; o desenho continua o mesmo. O workflow segue com o
+  // bicho e o papel ao lado; o executor comum, que é a maioria, só no tooltip e
+  // na ficha, para não repetir em todo bixinho.
+  const papelQueDaNome = papelQueNomeia(subagente.papel);
+  const papelNoRotulo =
+    papelQueDaNome === null && subagente.papel !== null && subagente.papel !== "executor" ? subagente.papel : null;
   const dica = "Clique para ver a tarefa e o relatório";
 
   return (
@@ -102,7 +121,7 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
           cada quadro de pan/zoom e varre todos os nós a cada atualização. */}
       {selecionado && (
         <NodeToolbar isVisible position={Position.Right} offset={14}>
-          <Ficha subagente={subagente} nome={aparencia.nome} agora={agora} />
+          <Ficha subagente={subagente} nomeDoBicho={aparencia.nome} papelNoTitulo={papelQueDaNome} agora={agora} />
         </NodeToolbar>
       )}
 
@@ -115,10 +134,13 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
         </div>
         {icone !== null && <IconeDaFerramenta icone={icone} />}
         <Bixinho aparencia={aparencia} situacao={subagente.situacao} />
-        <span className="font-titulo max-w-full truncate text-[12px] font-semibold leading-none">
-          {aparencia.nome}
-          {papelNoRotulo !== null && <span className="font-normal"> · {papelNoRotulo}</span>}
-          <span className="mono ml-1 font-normal text-muted">#{idCurto(subagente.id)}</span>
+        {/* Nome longo corta com reticências; o #id fica sempre visível (o nome inteiro, no tooltip). */}
+        <span className="font-titulo flex max-w-full items-baseline text-[12px] font-semibold leading-none">
+          <span className="min-w-0 truncate">
+            {papelQueDaNome ?? aparencia.nome}
+            {papelNoRotulo !== null && <span className="font-normal"> · {papelNoRotulo}</span>}
+          </span>
+          <span className="mono ml-1 shrink-0 font-normal text-muted">#{idCurto(subagente.id)}</span>
         </span>
         <span className="mono text-muted">
           {formatarDecorrido(subagente.iniciadoEm, subagente.encerradoEm, agora)} · {formatarTokens(subagente.tokens)} tok

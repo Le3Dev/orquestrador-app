@@ -846,7 +846,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 }
 .linha-simbolo { text-align: center; color: var(--muted); }
 .linha-origem-orquestrador { color: var(--active); }
-.linha-origem-bixinho { color: var(--info); white-space: nowrap; }
+/* O nome de um subagente pronto pode ser longo: corta com reticências (inteiro no title). */
+.linha-origem-bixinho { max-width: 160px; overflow: hidden; text-overflow: ellipsis; color: var(--info); white-space: nowrap; }
 .linha-texto { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--caption); }
 .linha-spawn .linha-simbolo, .linha-spawn .linha-texto { color: var(--active); }
 .linha-fim .linha-simbolo, .linha-fim .linha-texto { color: var(--success); }

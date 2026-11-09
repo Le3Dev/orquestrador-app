@@ -3,6 +3,7 @@ import type { HandleProps, NodeProps } from "@xyflow/react";
 import type { ReactNode } from "react";
 
 import type { DadosDaConfiguracao, EventoDeOrquestracao, EventoRegistrado } from "../../shared/api/tipos";
+import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
 import { ContextoDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
 import { idDoBixinho, type NoBixinho as TipoDoNo } from "../../shared/canvas/nos";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../../shared/estado/aplicarEvento";
@@ -248,7 +249,11 @@ describe("NoBixinho", () => {
     ]);
   });
 
-  it("subagente pronto: o papel aparece no rótulo, no tooltip e na ficha", () => {
+  /** O rótulo do nó, embaixo do desenho: nome (com o papel do workflow) e #id. */
+  const rotulo = (container: HTMLElement) => container.querySelector(".no-bixinho > .font-titulo");
+
+  it("subagente pronto: o nome dele é o rótulo, sem o nome do bicho; o bicho fica só como detalhe da ficha", () => {
+    const bicho = aparenciaDoBixinho("s3").nome;
     const conversa = aplicar(doisTrabalhando(), {
       tipo: "subagente_iniciado",
       turnoId: "t1",
@@ -257,11 +262,47 @@ describe("NoBixinho", () => {
       tarefa: "Revise o diff",
       papel: "revisor",
     });
-    render(tela(conversa, "s3", true));
+    const { container } = render(tela(conversa, "s3", true));
 
-    expect(screen.getByText("· revisor", { exact: false })).toBeInTheDocument();
+    expect(rotulo(container)?.textContent).toMatch(/^revisor#/);
+    expect(rotulo(container)).not.toHaveTextContent(bicho);
     expect(screen.getByTitle(/^revisor · clique para ver a tarefa/)).toBeInTheDocument();
-    expect(screen.getByTestId("barra-do-no")).toHaveTextContent("revisor#");
+    const ficha = screen.getByTestId("barra-do-no");
+    expect(ficha.querySelector(".font-titulo")?.textContent).toMatch(new RegExp(`^revisor ${bicho}#`));
+    expect(ficha).not.toHaveTextContent("revisor#");
+  });
+
+  it("subagente pronto de nome longo: o nome corta com reticências e o #id continua visível", () => {
+    const conversa = aplicar(doisTrabalhando(), {
+      tipo: "subagente_iniciado",
+      turnoId: "t1",
+      subagenteId: "s3",
+      descricao: "Roteiro",
+      tarefa: "Escreva o roteiro",
+      papel: "diretor-de-video-institucional",
+    });
+    render(tela(conversa, "s3"));
+
+    const nome = screen.getByText("diretor-de-video-institucional");
+    expect(nome).toHaveClass("min-w-0", "truncate");
+    expect(screen.getByText("#s3")).toHaveClass("shrink-0");
+    expect(screen.getByTitle(/^diretor-de-video-institucional · clique para ver a tarefa/)).toBeInTheDocument();
+  });
+
+  it("workflow: como antes, o nome do bicho com o papel ao lado", () => {
+    const bicho = aparenciaDoBixinho("s3").nome;
+    const conversa = aplicar(doisTrabalhando(), {
+      tipo: "subagente_iniciado",
+      turnoId: "t1",
+      subagenteId: "s3",
+      descricao: "Fluxo",
+      tarefa: "Rode o fluxo",
+      papel: "workflow",
+    });
+    const { container } = render(tela(conversa, "s3", true));
+
+    expect(rotulo(container)?.textContent).toMatch(new RegExp(`^${bicho} · workflow#`));
+    expect(screen.getByTestId("barra-do-no")).toHaveTextContent("workflow#");
   });
 
   it("executor: o papel fica no tooltip e na ficha, não no rótulo", () => {
@@ -273,8 +314,9 @@ describe("NoBixinho", () => {
       tarefa: "Leia o README",
       papel: "executor",
     });
-    render(tela(conversa, "s3", true));
+    const { container } = render(tela(conversa, "s3", true));
 
+    expect(rotulo(container)?.textContent).toMatch(new RegExp(`^${aparenciaDoBixinho("s3").nome}#`));
     expect(screen.queryByText("· executor", { exact: false })).not.toBeInTheDocument();
     expect(screen.getByTitle(/^executor · clique para ver a tarefa/)).toBeInTheDocument();
     expect(screen.getByTestId("barra-do-no")).toHaveTextContent("executor#");

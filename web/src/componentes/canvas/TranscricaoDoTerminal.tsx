@@ -2,7 +2,7 @@ import { memo, type ReactNode, useEffect, useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { DadosDaConfiguracao, NomeDaPredefinicao, SinalDeVida } from "../../shared/api/tipos";
-import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
+import { nomeDoBixinho } from "../../shared/canvas/bixinhos";
 import {
   type AvisosDaConversaNova,
   CAUSAS_LEGIVEIS,
@@ -53,15 +53,24 @@ function Girador() {
   return <span className="text-active">{QUADROS_DO_GIRADOR[quadro]}</span>;
 }
 
-/** Memorizada: as linhas do log não mudam depois de criadas, só chegam novas. */
-const LinhaDoTerminal = memo(function LinhaDoTerminal({ linha }: { linha: LinhaDoLog }) {
+/**
+ * Memorizada: as linhas do log não mudam depois de criadas, só chegam novas.
+ * `papel` é o do Subagente da linha: um subagente pronto aparece pelo nome
+ * dele, como o bixinho no canvas; os outros, pelo nome do bicho.
+ */
+const LinhaDoTerminal = memo(function LinhaDoTerminal({ linha, papel }: { linha: LinhaDoLog; papel: string | null }) {
   const doOrquestrador = linha.origem === "orquestrador";
-  const origem = doOrquestrador ? "orquestrador" : `${aparenciaDoBixinho(linha.origem).nome}#${idCurto(linha.origem)}`;
+  const origem = doOrquestrador ? "orquestrador" : `${nomeDoBixinho(linha.origem, papel)}#${idCurto(linha.origem)}`;
   return (
     <div className={`linha-do-terminal linha-${linha.tipo}`}>
       <span className="text-muted">{formatarHora(linha.em)}</span>
       <span className="linha-simbolo">{SIMBOLOS[linha.tipo]}</span>
-      <span className={doOrquestrador ? "linha-origem-orquestrador" : "linha-origem-bixinho"}>{origem}</span>
+      <span
+        className={doOrquestrador ? "linha-origem-orquestrador" : "linha-origem-bixinho"}
+        title={doOrquestrador ? undefined : origem}
+      >
+        {origem}
+      </span>
       <span className="linha-texto" title={linha.texto}>
         {linha.texto}
       </span>
@@ -260,6 +269,8 @@ const Turno = memo(function Turno({
   const retomada = turno.retomada ?? null;
   // Como o sinal de vida, o progresso só interessa enquanto o pedido roda.
   const tarefas = emAndamento ? (turno.tarefas ?? []) : [];
+  // O papel de cada Subagente do pedido, para o nome na origem das linhas.
+  const papeis = new Map(turno.subagentes.map((subagente) => [subagente.id, subagente.papel]));
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -298,7 +309,7 @@ const Turno = memo(function Turno({
       )}
       <div className="flex flex-col">
         {linhas.map((linha) => (
-          <LinhaDoTerminal key={linha.sequencia} linha={linha} />
+          <LinhaDoTerminal key={linha.sequencia} linha={linha} papel={papeis.get(linha.origem) ?? null} />
         ))}
       </div>
       {tarefas.length > 0 && <ProgressoDasTarefas tarefas={tarefas} />}
