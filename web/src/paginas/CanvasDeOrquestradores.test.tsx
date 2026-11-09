@@ -441,9 +441,25 @@ describe("CanvasDeOrquestradores · notas", () => {
       return fireEvent(fluxo, evento);
     }
 
-    it("soltar cria uma nota com o texto da resposta, no ponto onde foi solta", async () => {
+    it("soltar cria uma nota com o texto da resposta, sem a marcação, no ponto onde foi solta", async () => {
       vi.spyOn(api, "listarNotas").mockResolvedValue([]);
-      const texto = "| a | b |\n|---|---|\n| 1 | 2 |";
+      const resposta = [
+        "## Resumo",
+        "",
+        "Isto é **importante** e _claro_.",
+        "",
+        "- primeiro",
+        "- segundo",
+        "",
+        "| a | b |",
+        "|---|---|",
+        "| 1 | 2 |",
+        "",
+        "```ts",
+        "const x = **1**;",
+        "```",
+      ].join("\n");
+      const texto = "Resumo\n\nIsto é importante e claro.\n\n• primeiro\n• segundo\n\na | b\n1 | 2\n\nconst x = **1**;";
       const criar = vi
         .spyOn(api, "criarNota")
         .mockResolvedValue(nota("n1", { titulo: "Resposta do chat", texto }));
@@ -451,8 +467,8 @@ describe("CanvasDeOrquestradores · notas", () => {
       await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
 
       // Sobre o canvas, o arraste é aceito (o padrão impedido); depois, solto em (300, 200).
-      expect(arrastarNoCanvas("dragOver", { [TIPO_DA_RESPOSTA_DO_CHAT]: texto })).toBe(false);
-      arrastarNoCanvas("drop", { [TIPO_DA_RESPOSTA_DO_CHAT]: texto, "text/plain": texto }, 300, 200);
+      expect(arrastarNoCanvas("dragOver", { [TIPO_DA_RESPOSTA_DO_CHAT]: resposta })).toBe(false);
+      arrastarNoCanvas("drop", { [TIPO_DA_RESPOSTA_DO_CHAT]: resposta, "text/plain": resposta }, 300, 200);
 
       await waitFor(() => expect(criar).toHaveBeenCalledWith({ titulo: "Resposta do chat", texto }));
       expect(await screen.findByRole("textbox", { name: "Texto da nota" })).toHaveValue(texto);

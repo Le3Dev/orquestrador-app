@@ -191,6 +191,7 @@ import { mesmoConteudo, useReaproveitado } from "../shared/hooks/useReaproveitad
 import { useRodaDoCanvas } from "../shared/hooks/useRodaDoCanvas";
 import { useSaidaDosBixinhos } from "../shared/hooks/useSaidaDosBixinhos";
 import { useServidor } from "../shared/hooks/useServidor";
+import { markdownParaTexto } from "../shared/markdownParaTexto";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../shared/modelos";
 import { nomeLivre } from "../shared/nomeLivre";
 import type { AcaoDaPaleta, FonteDaPaleta, ItemDaPaleta } from "../shared/paletaDeComandos";
@@ -694,7 +695,8 @@ function Canvas() {
   const notas = useNotas(setNosDasNotas, centroDaTela, servidor.conectado);
   const { criarNota, erro: erroDasNotas, descartarErro: descartarErroDasNotas } = notas;
   const novaNota = useCallback(() => void criarNota(), [criarNota]);
-  // Uma resposta do chat arrastada para o canvas vira uma nota com o texto dela, onde foi solta.
+  // Uma resposta do chat arrastada para o canvas vira uma nota com o texto dela
+  // (sem a marcação do Markdown), onde foi solta.
   const aoArrastarSobreOCanvas = useCallback((evento: DragEvent) => {
     if (evento.dataTransfer.types.includes(TIPO_DA_RESPOSTA_DO_CHAT)) {
       evento.preventDefault();
@@ -710,7 +712,7 @@ function Canvas() {
       evento.preventDefault();
       void criarNota(
         // A nota guarda até 100.000 caracteres.
-        { titulo: "Resposta do chat", texto: texto.slice(0, 100_000) },
+        { titulo: "Resposta do chat", texto: markdownParaTexto(texto).slice(0, 100_000) },
         fluxo.screenToFlowPosition({ x: evento.clientX, y: evento.clientY }),
       );
     },
