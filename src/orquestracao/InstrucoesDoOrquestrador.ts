@@ -1,6 +1,7 @@
 import { linhasDaRegraDasPerguntas } from "../perguntas/PerguntaDoApp";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { InstrucoesAplicadas, linhasDasInstrucoes } from "./InstrucoesPersonalizadas";
+import { ModeloClaude } from "./ModeloClaude";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { DESCRICAO_DO_NIVEL, NivelDePermissao, TRABALHO_DIRETO_NO_NIVEL } from "./NivelDePermissao";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
@@ -29,14 +30,36 @@ const COMMIT_E_PUSH_QUANDO_PEDIDOS =
   "Commits e push: permitidos somente quando o usuário pedir explicitamente nesta mensagem. Nunca commitar direto na main; usar branch conforme a política (feature/, fix/, hotfix/, refactor/). Nunca adicionar a linha Co-authored-by.";
 
 /**
+ * A plataforma do computador onde os agentes rodam: decide a sintaxe dos
+ * comandos ensinados a eles. Quem sabe é a infraestrutura; o domínio só a recebe.
+ */
+export type Plataforma = "windows" | "unix";
+
+/**
  * Servidor de desenvolvimento (npm run dev, vite...) não pode ir para o
  * segundo plano do Claude Code: o processo do pedido só termina quando ele
  * para, e o pedido ficaria "trabalhando" para sempre. Desacoplado, ele segue
  * no ar depois do pedido, e o endereço impresso no log aparece na saída do
  * comando, onde a tela o detecta para a prévia ao vivo.
  */
-export const REGRA_DOS_SERVIDORES =
+export const REGRA_DOS_SERVIDORES_UNIX =
   "Servidor que deve continuar no ar (npm run dev, vite, next dev e afins): não use a execução em segundo plano da ferramenta (run_in_background), que prende o pedido até o servidor parar. Suba desacoplado, com a saída num log fora do projeto, e mostre o começo do log para o endereço aparecer, por exemplo: `nohup npm run dev > /tmp/servidor-<nome>.log 2>&1 & sleep 4; tail -n 20 /tmp/servidor-<nome>.log`. Ele continua rodando depois do pedido; para parar, use kill no processo. Não abra o navegador do computador (open, xdg-open, start): o aplicativo já mostra a página numa prévia ao vivo quando o endereço aparece; para conferir, use curl e cite o endereço completo na resposta.";
+
+/**
+ * No Windows o Claude Code roda os comandos no PowerShell, e o `nohup … &` não
+ * existe. Com `-NoNewWindow` ou `-RedirectStandard*`, o servidor herda o handle
+ * do pipe da ferramenta, que só fecha quando ele para: o pedido fica preso. O
+ * `Start-Process -WindowStyle Hidden cmd /c` usa o ShellExecute, que não herda
+ * handles; o `cmd` grava o log. Para parar, `taskkill /T` derruba a árvore:
+ * `Stop-Process` só mata o `cmd` e deixa o `node` órfão, ainda no ar.
+ */
+export const REGRA_DOS_SERVIDORES_WINDOWS =
+  "Servidor que deve continuar no ar (npm run dev, vite, next dev e afins): não use a execução em segundo plano da ferramenta (run_in_background), que prende o pedido até o servidor parar. Neste computador (Windows), suba pela ferramenta PowerShell, desacoplado e com a saída num log em `$env:TEMP`, esperando o endereço aparecer: `$log = \"$env:TEMP\\servidor-<nome>.log\"; $p = Start-Process -WindowStyle Hidden cmd -ArgumentList '/c', ('npm run dev > \"{0}\" 2>&1' -f $log) -PassThru; $fim = (Get-Date).AddSeconds(30); do { Start-Sleep -Milliseconds 500 } until (((Test-Path $log) -and (Select-String -Path $log -Pattern 'https?://' -Quiet)) -or $p.HasExited -or (Get-Date) -gt $fim); Get-Content $log -Tail 20; \"PID $($p.Id)\"`. Não use -RedirectStandardOutput, -RedirectStandardError nem -NoNewWindow, que prendem a ferramenta; nem Start-Job ou `&`, que derrubam o servidor junto com o shell. Ele continua rodando depois do pedido; para parar, `taskkill /PID <PID> /T /F` (Stop-Process sozinho deixa o node no ar). Não abra o navegador do computador (start, Start-Process ou explorer com um endereço): o aplicativo já mostra a página numa prévia ao vivo quando o endereço aparece; para conferir, use curl.exe e cite o endereço completo na resposta.";
+
+/** Como subir um servidor que deve continuar no ar, na sintaxe da plataforma. */
+export function regraDosServidores(plataforma: Plataforma): string {
+  return plataforma === "windows" ? REGRA_DOS_SERVIDORES_WINDOWS : REGRA_DOS_SERVIDORES_UNIX;
+}
 
 /**
  * O marcador como o Orquestrador pode escrevê-lo: com espaços em volta, um
@@ -65,6 +88,45 @@ function regrasDeDelegacao(nivel: NivelDePermissao): string[] {
     `- Faça você mesmo o trivial: ${TRABALHO_DIRETO_NO_NIVEL[nivel]}. Cada subagente custa dezenas de milhares de tokens só para começar.`,
     `- Delegue a subagentes "${NOME_DO_SUBAGENTE}" quando houver alteração de arquivos, quando o trabalho exigir ler muitos arquivos ou rodar comandos demorados (build, testes), ou quando der para dividir em partes paralelas. Não use subagente para conferir o próprio trabalho.`,
     `- Você não edita arquivos: toda alteração no projeto vai para um subagente "${NOME_DO_SUBAGENTE}". A única exceção são os artefatos (abaixo), que não são arquivos do projeto.`,
+  ];
+}
+
+/** Modelos lentos o bastante para valer sugerir o Sonnet nas subtarefas mecânicas. */
+const MODELOS_LENTOS: readonly ModeloClaude[] = ["opus", "fable"];
+
+/**
+ * Como o Orquestrador evita esperas (ADR-39). Na investigação de 09/11,
+ * subagentes Opus lançados só para commit e push levavam ~3 min cada, os
+ * planos rodavam em levas sequenciais (a do README por último) e cada
+ * subagente refazia a busca que o Orquestrador já tinha feito.
+ *
+ * Vai no bloco, e não nas instruções fixas, porque o Claude Code ignora
+ * instruções novas ao retomar a sessão (`--resume`). Os comandos curtos só
+ * valem quando o pedido permite rodar comandos; commit, push e PR só entram
+ * com commit permitido. O `model: "sonnet"` só é sugerido com subagentes
+ * Opus ou Fable: com Sonnet ou Haiku não há o que ganhar.
+ */
+function regrasDeRapidez(
+  nivel: NivelDePermissao,
+  permiteCommitEPush: boolean,
+  modeloDosSubagentes: ModeloClaude,
+): string[] {
+  const comandosDoGit = permiteCommitEPush
+    ? "git status, diff e log, commit, push e abrir PR quando o usuário pedir"
+    : "git status, diff e log";
+  return [
+    ...(nivel === "edicao_e_comandos"
+      ? [
+          `- Comandos curtos são seus, sem subagente: ${comandosDoGit}, e reiniciar o app ou o servidor (seguindo a regra dos servidores abaixo). Lançar um subagente só para isso custa minutos.`,
+        ]
+      : []),
+    "- Ao delegar, uma leva só: todas as subtarefas independentes na mesma mensagem. A atualização do README (ou de outra documentação) vai dentro da subtarefa que mais mexe no assunto, não numa leva final só para ela.",
+    "- No pedido a cada subagente, passe os caminhos e as linhas que você já localizou, para ele não refazer a busca.",
+    ...(MODELOS_LENTOS.includes(modeloDosSubagentes)
+      ? [
+          '- Em subtarefas mecânicas (atualizar o README, renomear, rodar build ou testes), você pode passar model: "sonnet" na ferramenta Agent para terminar mais rápido; nas de implementação ou análise, mantenha o modelo configurado.',
+        ]
+      : []),
   ];
 }
 
@@ -156,6 +218,8 @@ export function instrucoesDoOrquestrador(pasta: PastaDeTrabalho): string {
  * As instruções personalizadas do usuário (`resolverInstrucoes`) vão no fim
  * do bloco pelo mesmo motivo: editadas no meio da conversa, valem já no
  * pedido seguinte. Sem elas, o bloco fica exatamente como antes.
+ *
+ * A `plataforma` decide a sintaxe da regra dos servidores (`regraDosServidores`).
  */
 export function mensagemParaOOrquestrador(
   texto: string,
@@ -166,14 +230,14 @@ export function mensagemParaOOrquestrador(
   instrucoes: InstrucoesAplicadas | null = null,
   revogarInstrucoesAnteriores = false,
   subagentesProntos: readonly DadosDoSubagentePronto[] = [],
+  plataforma: Plataforma = "unix",
 ): string {
   const planejamento = modo === "planejamento";
   // No planejamento os agentes só leem (as ferramentas já vêm travadas
   // assim); o nível configurado é o que valerá quando o Plano for executado.
   const nivelDoPedido = planejamento ? "leitura" : configuracao.nivelDePermissao;
-  const regraDeCommitEPush = configuracao.permiteCommitEPush(modo)
-    ? COMMIT_E_PUSH_QUANDO_PEDIDOS
-    : COMMIT_E_PUSH_PROIBIDOS;
+  const commitEPushPermitidos = configuracao.permiteCommitEPush(modo);
+  const regraDeCommitEPush = commitEPushPermitidos ? COMMIT_E_PUSH_QUANDO_PEDIDOS : COMMIT_E_PUSH_PROIBIDOS;
   const regrasDoPlanejamento = planejamento
     ? [
         "- Modo: PLANEJAMENTO. Neste pedido nada no projeto pode ser alterado: os subagentes só leem e pesquisam, seja qual for a permissão de execução.",
@@ -199,10 +263,11 @@ export function mensagemParaOOrquestrador(
     ...regrasDeDelegacao(nivelDoPedido),
     `- Subagentes: ${regraDaQuantidade(configuracao.quantidadeDeSubagentes)}`,
     ...linhasDosSubagentesProntos(subagentesProntos, NOME_DO_SUBAGENTE, MARCA_DA_CONFIGURACAO),
+    ...regrasDeRapidez(nivelDoPedido, commitEPushPermitidos, configuracao.modeloDosSubagentes),
     `- Permissões: ${DESCRICAO_DO_NIVEL[nivelDoPedido]}. ${regraDeCommitEPush}`,
     ...regrasDoPlanejamento,
     ...regrasDoTamanho,
-    ...(nivelDoPedido === "edicao_e_comandos" ? [`- ${REGRA_DOS_SERVIDORES}`] : []),
+    ...(nivelDoPedido === "edicao_e_comandos" ? [`- ${regraDosServidores(plataforma)}`] : []),
     ...(pastaDeArtefatos === null ? [] : regrasDeArtefatos(pastaDeArtefatos)),
     ...regrasDasPerguntas(),
     ...imagens,
@@ -240,6 +305,18 @@ export function mensagemDeAprovacaoDoPlano(observacoes: string): string {
 }
 
 /**
+ * Como o Subagente gasta menos contexto e tempo (ADR-39). Na investigação de
+ * 09/11, subagentes liam o README inteiro (~80 mil tokens) e chegavam a
+ * contextos de 190 a 375 mil tokens, refaziam buscas já feitas pelo
+ * Orquestrador e rodavam a suíte inteira sem que fosse pedido.
+ */
+const REGRAS_DE_RAPIDEZ_DO_SUBAGENTE: readonly string[] = [
+  "Leia por trecho: localize com Grep e abra com Read usando offset e limit. Arquivo grande, como um README extenso, nunca inteiro: ache a seção com Grep e leia e edite só ela.",
+  "Não refaça a busca do que a subtarefa já informou (caminhos e linhas): comece por eles.",
+  "Rode só os testes e verificações do que você alterou; build ou suíte completa só se a subtarefa pedir.",
+];
+
+/**
  * As regras de cada Subagente: fazer só a subtarefa recebida e prestar contas.
  *
  * Vai na definição dos agentes, refeita a cada turno: por isso pode levar a
@@ -248,12 +325,15 @@ export function mensagemDeAprovacaoDoPlano(observacoes: string): string {
  *
  * Um subagente pronto (`especialidade`) recebe as mesmas regras, com o nome
  * dele, e a especialidade definida pelo usuário no fim.
+ *
+ * A `plataforma` decide a sintaxe da regra dos servidores (`regraDosServidores`).
  */
 export function instrucoesDoSubagente(
   pasta: PastaDeTrabalho,
   permiteCommitEPush = false,
   pastaDeArtefatos: string | null = null,
   especialidade: DadosDoSubagentePronto | null = null,
+  plataforma: Plataforma = "unix",
 ): string {
   const regraDeCommitEPush = permiteCommitEPush
     ? "Commit e push: faça somente se a subtarefa recebida pedir explicitamente — o orquestrador só pede quando o usuário pediu. Nunca na main; use branch conforme a política (feature/, fix/, hotfix/, refactor/). Nunca adicione a linha Co-authored-by."
@@ -269,8 +349,9 @@ export function instrucoesDoSubagente(
     `Você é um subagente ${papel}, coordenado por um orquestrador.`,
     `Faça somente a subtarefa recebida, dentro da pasta ${pasta.caminho}. Seja objetivo.`,
     ...regraDeArtefatos,
-    "Ao terminar, devolva: o que fez, os arquivos que alterou (se houver) e o resultado.",
-    REGRA_DOS_SERVIDORES,
+    "Ao terminar, devolva uma resposta curta: o que fez, os arquivos que alterou (se houver) e o resultado, inclusive dos testes.",
+    ...REGRAS_DE_RAPIDEZ_DO_SUBAGENTE,
+    regraDosServidores(plataforma),
     `${regraDeCommitEPush} Responda em português.`,
     ...(especialidade === null ? [] : linhasDaEspecialidade(especialidade)),
   ].join("\n");

@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { EventoDoMotor } from "../../orquestracao/EventoDeOrquestracao";
-import { instrucoesDoOrquestrador, mensagemParaOOrquestrador } from "../../orquestracao/InstrucoesDoOrquestrador";
+import {
+  instrucoesDoOrquestrador,
+  mensagemParaOOrquestrador,
+  Plataforma,
+} from "../../orquestracao/InstrucoesDoOrquestrador";
 import { ABORTO_POR_SILENCIO, MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "../../orquestracao/MotorDeAgentes";
 import { AdaptadorDeEventosDoClaudeCode, falhaComCausa } from "./AdaptadorDeEventosDoClaudeCode";
 import {
@@ -63,11 +67,15 @@ function descreverSaidaSemResultado(saida: SaidaDoClaudeCode): string {
  * temporária própria, apagada ao final — dois Orquestradores rodando ao mesmo
  * tempo nunca compartilham arquivos. A pasta de artefatos do Orquestrador, ao
  * contrário, é permanente: o motor só a cria, se faltar.
+ *
+ * A `plataforma` do computador decide a sintaxe dos comandos ensinados aos
+ * agentes (regra dos servidores).
  */
 export class MotorClaudeCodeCli implements MotorDeAgentes {
   constructor(
     private readonly fachada: FachadaClaudeCodeCli,
     private readonly sondar: SondaDeEndereco = sondarEnderecoLocal,
+    private readonly plataforma: Plataforma = "unix",
   ) {}
 
   async executarTurno(
@@ -86,7 +94,7 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
     try {
       await mkdir(pastaTemporaria, { recursive: true });
       const pedido = { ...pedidoRecebido, pastaDeArtefatos: await prepararPastaDeArtefatos(pedidoRecebido.pastaDeArtefatos) };
-      await writeFile(arquivos.agentes, JSON.stringify(definicaoDosAgentes(pedido)), "utf8");
+      await writeFile(arquivos.agentes, JSON.stringify(definicaoDosAgentes(pedido, this.plataforma)), "utf8");
       await writeFile(arquivos.instrucoes, instrucoesDoOrquestrador(pedido.pastaDeTrabalho), "utf8");
       const configuracoes = configuracoesDaSessao(pedido);
       if (configuracoes !== null) {
@@ -108,6 +116,7 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
         pedido.instrucoes,
         pedido.revogarInstrucoesAnteriores,
         pedido.subagentesProntos,
+        this.plataforma,
       );
 
       const adaptador = new AdaptadorDeEventosDoClaudeCode();

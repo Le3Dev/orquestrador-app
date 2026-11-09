@@ -66,7 +66,8 @@ contextBridge.exposeInMainWorld("electron", {
   },
 
   // Modo invisível da janela principal (transparente, sempre no topo, fora de
-  // capturas). Sai também pelo atalho global Ctrl+Shift+I.
+  // capturas). Sai também pelo atalho global Ctrl+Shift+I. Enquanto ativo, a
+  // tela escuta o áudio do sistema (electron/escutaDoModoInvisivel.js).
   modoInvisivel: {
     entrar: () => ipcRenderer.invoke("modo-invisivel:entrar").then(() => undefined),
     sair: () => ipcRenderer.invoke("modo-invisivel:sair").then(() => undefined),
@@ -74,11 +75,24 @@ contextBridge.exposeInMainWorld("electron", {
     capturarMouse: (capturar) => ipcRenderer.invoke("modo-invisivel:capturar-mouse", Boolean(capturar)).then(() => undefined),
     // { nome, tipoDeMidia: "image/jpeg", base64 }; rejeita fora do modo.
     capturarTela: () => ipcRenderer.invoke("tela:capturar"),
+    // Botão "capturar agora": devolve o quadro atual (mesmo formato).
+    capturarAgora: () => ipcRenderer.invoke("modo-invisivel:capturar-agora"),
+    // Quadros capturados pelo atalho global Ctrl+Shift+S; devolve o cancelamento.
+    aoCapturarQuadro: (callback) => {
+      const ouvinte = (_evento, captura) => callback(captura);
+      ipcRenderer.on("modo-invisivel:quadro-capturado", ouvinte);
+      return () => ipcRenderer.removeListener("modo-invisivel:quadro-capturado", ouvinte);
+    },
     aoMudar: (callback) => {
       const ouvinte = (_evento, ativo) => callback(Boolean(ativo));
       ipcRenderer.on("modo-invisivel:estado", ouvinte);
       return () => ipcRenderer.removeListener("modo-invisivel:estado", ouvinte);
     },
+    // Estado atual (para a tela que monta com o modo já ligado).
+    estaAtivo: () => ipcRenderer.invoke("modo-invisivel:consultar").then(Boolean),
+    // A escuta do áudio do sistema (getDisplayMedia + loopback) só existe no
+    // Windows. process.platform faz parte do `process` do preload com sandbox.
+    escutaDisponivel: process.platform === "win32",
   },
 
   primeiraAbertura: {

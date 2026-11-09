@@ -51,6 +51,7 @@ describe("DiagnosticadorDoClaudeNoSistema", () => {
     const diagnostico = await diagnosticador.diagnosticar(ALVO);
 
     expect(diagnostico.processoVivo).toBe(true);
+    expect(diagnostico.processosVisiveis).toBe(true);
     expect(diagnostico.cpuDoClaude).toBe(3.5);
     expect(diagnostico.filhos).toEqual([
       { pid: 300, comando: "node vitest run", cpu: 95, haMs: 110_000 },
@@ -106,6 +107,7 @@ describe("DiagnosticadorDoClaudeNoSistema", () => {
 
     await expect(diagnosticador.diagnosticar(ALVO)).resolves.toEqual({
       processoVivo: false,
+      processosVisiveis: false,
       cpuDoClaude: 0,
       filhos: [],
       transcricoesCrescendo: false,
@@ -113,14 +115,33 @@ describe("DiagnosticadorDoClaudeNoSistema", () => {
     });
   });
 
-  it("sem ps, decide se o processo vive pelo sinal 0", async () => {
+  it("sem ps (lista vazia, como no Windows), decide se o processo vive pelo sinal 0 e não enxerga os processos", async () => {
+    let existe = true;
     const diagnosticador = new DiagnosticadorDoClaudeNoSistema(registro, {
       listarProcessos: async () => [],
+      pastaDoClaude,
+      processoExiste: (pid) => existe && pid === 100,
+    });
+
+    expect(await diagnosticador.diagnosticar(ALVO)).toMatchObject({
+      processoVivo: true,
+      processosVisiveis: false,
+      cpuDoClaude: 0,
+      filhos: [],
+    });
+
+    existe = false;
+    expect(await diagnosticador.diagnosticar(ALVO)).toMatchObject({ processoVivo: false, processosVisiveis: false });
+  });
+
+  it("listagem que falha: não enxerga os processos, mas o sinal 0 ainda diz se o Claude vive", async () => {
+    const diagnosticador = new DiagnosticadorDoClaudeNoSistema(registro, {
+      listarProcessos: () => Promise.reject(new Error("ps sumiu")),
       pastaDoClaude,
       processoExiste: (pid) => pid === 100,
     });
 
-    expect((await diagnosticador.diagnosticar(ALVO)).processoVivo).toBe(true);
+    expect(await diagnosticador.diagnosticar(ALVO)).toMatchObject({ processoVivo: true, processosVisiveis: false });
   });
 
   it("um Orquestrador sem processo registrado não está vivo", async () => {
@@ -131,7 +152,7 @@ describe("DiagnosticadorDoClaudeNoSistema", () => {
 
     const diagnostico = await diagnosticador.diagnosticar({ ...ALVO, orquestradorId: "o3" });
 
-    expect(diagnostico).toMatchObject({ processoVivo: false, cpuDoClaude: 0, filhos: [] });
+    expect(diagnostico).toMatchObject({ processoVivo: false, processosVisiveis: false, cpuDoClaude: 0, filhos: [] });
   });
 });
 

@@ -200,6 +200,17 @@ export class ServicoDeTerminais {
     this.matar(terminal);
   }
 
+  /** Ao remover um Orquestrador: só os terminais ligados a ele. Devolve quantos foram encerrados. */
+  encerrarDoOrquestrador(orquestradorId: string): number {
+    const doOrquestrador = [...this.terminais.values()].filter(
+      (terminal) => terminal.dados.orquestradorId === orquestradorId,
+    );
+    for (const terminal of doOrquestrador) {
+      this.matar(terminal);
+    }
+    return doOrquestrador.length;
+  }
+
   /** No desligamento do servidor. Devolve quantos estavam abertos. */
   encerrarTodos(): number {
     const abertos = [...this.terminais.values()];

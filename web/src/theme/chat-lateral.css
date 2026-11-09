@@ -115,3 +115,177 @@ body.redimensionando-chat-lateral * {
   user-select: none !important;
 }
 body.redimensionando-chat-lateral iframe { pointer-events: none; }
+
+/* ---------------- Escuta do áudio (modo invisível) ----------------
+ * Tudo fica dentro do .chat-rapido (a única área que recebe cliques no modo
+ * invisível) e em tamanho compacto. O tom é o azul (--info), para não se
+ * confundir com o vermelho do 👁 (tela vista). O ponto reaproveita o
+ * `pulso-tela-vista` do 👁 e fica parado com movimento reduzido. */
+
+/* Indicador ao lado do 👁: ponto, rótulo e o botão pausar/retomar. */
+.indicador-da-escuta {
+  --cor-da-escuta: var(--info);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 2px 0 7px;
+  border-radius: 999px;
+  font-family: var(--fonte-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--cor-da-escuta);
+  background: color-mix(in srgb, var(--cor-da-escuta) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--cor-da-escuta) 45%, transparent);
+  cursor: default;
+}
+/* Sem botão, o rótulo não encosta na borda. */
+.indicador-da-escuta:not(:has(.botao-da-escuta)) { padding-right: 8px; }
+.indicador-da-escuta-pausada,
+.indicador-da-escuta-iniciando { --cor-da-escuta: var(--secondary); }
+.indicador-da-escuta-erro { --cor-da-escuta: var(--error); }
+.ponto-da-escuta { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--cor-da-escuta); }
+.indicador-da-escuta-escutando .ponto-da-escuta { animation: pulso-tela-vista 1.4s ease-in-out infinite; }
+.rotulo-da-escuta { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.botao-da-escuta {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 8px;
+  letter-spacing: -.1em;
+  color: var(--cor-da-escuta);
+  cursor: pointer;
+}
+.botao-da-escuta:hover { background: color-mix(in srgb, var(--cor-da-escuta) 22%, transparent); color: var(--primary); }
+.botao-da-escuta:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+
+/* Selo "escuta" na pergunta que a escuta enviou (no estilo do "alterações autorizadas"). */
+.selo-da-escuta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 17px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-family: var(--fonte-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--info) 45%, transparent);
+  cursor: default;
+}
+.selo-da-escuta::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--info); }
+
+/* A nota no composer enquanto o campo guarda a pergunta da escuta. */
+.nota-da-escuta { display: flex; align-items: center; gap: 6px; color: var(--info); }
+.nota-da-escuta::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--info); }
+
+/* Faixa recolhível acima do composer: transcrição, download, automático e erro. */
+.faixa-da-escuta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 3px 6px 5px 4px;
+  border-radius: var(--radius-card);
+  border: 1px solid color-mix(in srgb, var(--info) 30%, var(--border));
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  font-size: 11.5px;
+}
+.cabecalho-da-faixa-da-escuta { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.alternar-faixa-da-escuta {
+  display: inline-flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 4px;
+  border-radius: 6px;
+  color: var(--secondary);
+  text-align: left;
+  cursor: pointer;
+}
+.alternar-faixa-da-escuta:hover { background: var(--surface-3); color: var(--primary); }
+.alternar-faixa-da-escuta:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.seta-da-faixa-da-escuta { flex: none; width: 10px; font-size: 10px; color: var(--muted); }
+.resumo-da-faixa-da-escuta {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--caption);
+}
+.interruptor.interruptor-da-escuta { flex: none; height: 24px; gap: 6px; font-size: 11.5px; }
+.corpo-da-faixa-da-escuta { display: flex; flex-direction: column; gap: 4px; padding: 0 4px; }
+.corpo-da-faixa-da-escuta[hidden] { display: none; }
+.linhas-da-escuta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 96px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  line-height: 1.4;
+  color: var(--secondary);
+  user-select: text;
+}
+/* A linha mais nova em destaque; as anteriores apagadas. */
+.linhas-da-escuta > li:last-child { color: var(--caption); }
+.download-da-escuta { display: flex; flex-direction: column; gap: 3px; }
+.trilho-do-download-da-escuta { height: 4px; border-radius: 2px; overflow: hidden; background: var(--surface-3); }
+.barra-do-download-da-escuta { display: block; height: 100%; background: var(--info); transition: width .2s ease-out; }
+.ultima-pergunta-da-escuta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--primary);
+}
+.erro-da-escuta { padding: 0 4px; }
+
+/* Aviso da primeira vez: um cartão compacto acima do composer. */
+.aviso-da-escuta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-color: color-mix(in srgb, var(--info) 45%, var(--border));
+  font-size: 12px;
+  outline: none;
+}
+.titulo-do-aviso-da-escuta { font-family: var(--fonte-titulo); font-size: 12.5px; font-weight: 500; color: var(--primary); }
+.itens-do-aviso-da-escuta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding-left: 16px;
+  list-style: disc;
+  line-height: 1.45;
+  color: var(--caption);
+}
+.itens-do-aviso-da-escuta > li::marker { color: var(--info); }
+.botoes-do-aviso-da-escuta { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Fixo à esquerda (coluna sem gap): um respiro acima do campo. */
+.chat-lateral .faixa-da-escuta,
+.chat-lateral .aviso-da-escuta { flex: none; margin-top: 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .indicador-da-escuta-escutando .ponto-da-escuta { animation: none; }
+  .barra-do-download-da-escuta { transition: none; }
+}

@@ -24,6 +24,12 @@ export const INTERVALO_DO_DIAGNOSTICO_MS = 30_000;
 export const SILENCIO_PARA_TRAVADO_MS = 5 * 60_000;
 /** Com um comando aberto (mas sem CPU), a vigia tolera mais: ele pode estar esperando E/S. */
 export const SILENCIO_PARA_TRAVADO_COM_COMANDO_MS = 15 * 60_000;
+/**
+ * Sem enxergar os processos (Windows, ou a listagem falhou), CPU e comandos não
+ * dizem nada: a vigia só tem as linhas e as transcrições, e tolera tanto quanto
+ * com um comando aberto.
+ */
+export const SILENCIO_PARA_TRAVADO_SEM_PROCESSOS_MS = 15 * 60_000;
 /** Diagnósticos seguidos sem sinal de trabalho para dar o turno como travado. */
 export const DIAGNOSTICOS_PARADOS_PARA_TRAVADO = 3;
 /** Diagnósticos seguidos com o processo morto: um só pode ser um `ps` que falhou. */
@@ -58,7 +64,9 @@ export interface OpcoesDaVigia {
  *
  * O Claude esperando a resposta da API tem CPU perto de zero, por isso o
  * critério principal é a falta de linhas e de transcrição crescendo, por
- * vários diagnósticos seguidos, e não a CPU sozinha.
+ * vários diagnósticos seguidos, e não a CPU sozinha. Onde o app não enxerga
+ * os processos (Windows), CPU e comandos ficam de fora e o limite é o
+ * tolerante (`SILENCIO_PARA_TRAVADO_SEM_PROCESSOS_MS`).
  */
 export class VigiaDoTurno {
   private ligada = false;
@@ -158,6 +166,23 @@ export class VigiaDoTurno {
       };
     }
     this.semProcesso = 0;
+
+    if (!diagnostico.processosVisiveis) {
+      // Sem a lista de processos, CPU zero e nenhum filho não foram medidos: não dizem nada.
+      if (diagnostico.transcricoesCrescendo) {
+        this.parados = 0;
+        return { leitura: { situacao: "trabalhando", resumo: "subagentes escrevendo" }, travado: null };
+      }
+      this.parados += 1;
+      const travou =
+        this.parados >= DIAGNOSTICOS_PARADOS_PARA_TRAVADO && silencioMs >= SILENCIO_PARA_TRAVADO_SEM_PROCESSOS_MS;
+      return {
+        leitura: { situacao: "suspeito", resumo: `${semSaida}; o app não enxerga os comandos neste sistema` },
+        travado: travou
+          ? `${semSaida} e sem transcrição crescendo; o app não enxerga os comandos neste sistema`
+          : null,
+      };
+    }
 
     const comandoOcupado = diagnostico.filhos.find((filho) => filho.cpu >= CPU_DE_TRABALHO);
     if (comandoOcupado !== undefined) {

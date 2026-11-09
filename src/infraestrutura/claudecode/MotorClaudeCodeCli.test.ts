@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { ConfiguracaoDoOrquestrador } from "../../orquestracao/ConfiguracaoDoOrquestrador";
+import { REGRA_DOS_SERVIDORES_UNIX, REGRA_DOS_SERVIDORES_WINDOWS } from "../../orquestracao/InstrucoesDoOrquestrador";
 import { InstrucoesAplicadas } from "../../orquestracao/InstrucoesPersonalizadas";
 import { ModoDoTurno } from "../../orquestracao/ModoDoTurno";
 import { PedidoDeTurno } from "../../orquestracao/MotorDeAgentes";
@@ -118,6 +119,42 @@ describe("MotorClaudeCodeCli — artefatos", () => {
     const texto = entrada.message.content[0]?.text ?? "";
     expect(texto).toContain(`UM arquivo autocontido gravado na pasta ${realpathSync.native(pastaDeArtefatos)}`);
     expect(texto.endsWith("monte um relatório")).toBe(true);
+  });
+});
+
+describe("MotorClaudeCodeCli e a plataforma", () => {
+  const textoDaMensagem = (fachada: FachadaFalsa): string => {
+    const entrada = JSON.parse(fachada.gravado?.execucao.entrada ?? "{}") as { message: { content: { text: string }[] } };
+    return entrada.message.content[0]?.text ?? "";
+  };
+
+  it("criado para o Windows, ensina a regra dos servidores do Windows aos agentes e ao Orquestrador", async () => {
+    const fachada = new FachadaFalsa();
+    const motor = new MotorClaudeCodeCli(fachada, async () => false, "windows");
+
+    await motor.executarTurno(
+      pedido(path.join(pastaDoTeste, "artefatos-windows"), "edicao_e_comandos"),
+      () => undefined,
+      new AbortController().signal,
+    );
+
+    expect(fachada.gravado?.agentes.executor.prompt).toContain(REGRA_DOS_SERVIDORES_WINDOWS);
+    expect(fachada.gravado?.agentes.executor.prompt).not.toContain(REGRA_DOS_SERVIDORES_UNIX);
+    expect(textoDaMensagem(fachada)).toContain(`- ${REGRA_DOS_SERVIDORES_WINDOWS}`);
+    expect(textoDaMensagem(fachada)).not.toContain(REGRA_DOS_SERVIDORES_UNIX);
+  });
+
+  it("sem a plataforma, usa a regra do unix", async () => {
+    const fachada = new FachadaFalsa();
+
+    await new MotorClaudeCodeCli(fachada).executarTurno(
+      pedido(path.join(pastaDoTeste, "artefatos-unix"), "edicao_e_comandos"),
+      () => undefined,
+      new AbortController().signal,
+    );
+
+    expect(fachada.gravado?.agentes.executor.prompt).toContain(REGRA_DOS_SERVIDORES_UNIX);
+    expect(textoDaMensagem(fachada)).toContain(`- ${REGRA_DOS_SERVIDORES_UNIX}`);
   });
 });
 
@@ -272,7 +309,55 @@ describe("MotorClaudeCodeCli e os servidores citados", () => {
     expect(resultado.sucesso).toBe(true);
     expect(enderecos(eventos)).toEqual([]);
   });
+
+  it.each<[boolean, unknown[]]>([
+    [false, []],
+    [true, [{ tipo: "endereco_local_detectado", url: "http://localhost:8530/health" }]],
+  ])("o endereço na saída de um comando só é anunciado se responde (responde: %s)", async (responde, esperado) => {
+    const sondados: string[] = [];
+    const fachada = new FachadaQueImprimeEndereco();
+    const motor = new MotorClaudeCodeCli(fachada as unknown as FachadaClaudeCodeCli, async (url) => {
+      sondados.push(url);
+      return responde;
+    });
+    const eventos: unknown[] = [];
+
+    const resultado = await motor.executarTurno(pedidoComInstrucoes(null), (evento) => eventos.push(evento), new AbortController().signal);
+
+    expect(resultado.sucesso).toBe(true);
+    expect(sondados).toEqual(["http://localhost:8530/health"]);
+    expect(enderecos(eventos)).toEqual(esperado);
+  });
 });
+
+/** Um turno em que a saída de um comando (um `cat` de docker-compose) cita um endereço. */
+class FachadaQueImprimeEndereco {
+  async executar(
+    _execucao: ExecucaoDoClaudeCode,
+    aoReceberMensagem: (mensagem: unknown) => void,
+  ): Promise<SaidaDoClaudeCode> {
+    aoReceberMensagem({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_use", id: "c1", name: "Bash", input: { command: "cat docker-compose.yml" } }] },
+    });
+    aoReceberMensagem({
+      type: "user",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_result", tool_use_id: "c1", content: "" }] },
+      tool_use_result: { stdout: "test: curl -f http://localhost:8530/health", stderr: "" },
+    });
+    aoReceberMensagem({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "feito",
+      duration_ms: 1,
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    return { codigoDeSaida: 0, erroPadrao: "" };
+  }
+}
 
 /** Fachada que roda um roteiro: recebe o que a fachada real receberia e devolve a saída dada. */
 function fachadaComRoteiro(

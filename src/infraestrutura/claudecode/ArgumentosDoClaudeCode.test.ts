@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { ConfiguracaoDoOrquestrador } from "../../orquestracao/ConfiguracaoDoOrquestrador";
 import { EsforcoDeRaciocinio } from "../../orquestracao/EsforcoDeRaciocinio";
+import { REGRA_DOS_SERVIDORES_UNIX, REGRA_DOS_SERVIDORES_WINDOWS } from "../../orquestracao/InstrucoesDoOrquestrador";
 import { ModoDoTurno } from "../../orquestracao/ModoDoTurno";
 import { PedidoDeTurno } from "../../orquestracao/MotorDeAgentes";
 import { NivelDePermissao } from "../../orquestracao/NivelDePermissao";
@@ -369,6 +370,23 @@ describe("definicaoDosAgentes", () => {
       expect(agentes.revisor?.prompt).toContain(
         "Commit e push: faça somente se a subtarefa recebida pedir explicitamente",
       );
+    });
+
+    it("no Windows, o executor e os prontos levam a regra dos servidores do Windows", () => {
+      const agentes = definicaoDosAgentes(comProntos(pedido(false, "edicao_e_comandos")), "windows");
+
+      for (const nome of ["executor", "revisor", "testador"]) {
+        expect(agentes[nome]?.prompt).toContain(REGRA_DOS_SERVIDORES_WINDOWS);
+        expect(agentes[nome]?.prompt).not.toContain(REGRA_DOS_SERVIDORES_UNIX);
+      }
+    });
+
+    it("sem a plataforma, todos levam a regra do unix", () => {
+      const agentes = definicaoDosAgentes(comProntos(pedido(false, "edicao_e_comandos")));
+
+      for (const nome of ["executor", "revisor", "testador"]) {
+        expect(agentes[nome]?.prompt).toContain(REGRA_DOS_SERVIDORES_UNIX);
+      }
     });
   });
 });

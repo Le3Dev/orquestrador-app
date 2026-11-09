@@ -31,13 +31,17 @@ import {
   type SubagenteNaTela,
   type TurnoNaTela,
 } from "../../shared/estado/aplicarEvento";
-import { formatarBytes } from "../../shared/formatacao";
 import { mesmoConteudo, useReaproveitado } from "../../shared/hooks/useReaproveitado";
-import { type ImagemAnexada, lerImagem, problemaDaImagem } from "../../shared/imagens";
+import {
+  type ImagemAnexada,
+  imagensParaEnvio,
+  lerImagem,
+  liberarImagens,
+  problemaDaImagem,
+} from "../../shared/imagens";
 import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
 import { resumoDaConfiguracao } from "../../shared/resumoDaConfiguracao";
 import { CamposDaConfiguracao } from "../CamposDaConfiguracao";
-import { Etiqueta } from "../Etiqueta";
 import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
 import { IconeAlerta, IconeEngrenagem, IconeFechar, IconeOrquestrador, IconePasta, IconeShell } from "../Icones";
 import { BotaoDeAlteracoes } from "./BotaoDeAlteracoes";
@@ -294,7 +298,7 @@ export function PainelDeConfiguracao({
     <div className="painel-da-configuracao nodrag">
       <div className="corpo-do-terminal corpo-da-criacao corpo-da-configuracao custom-scrollbar nodrag nowheel">
         <span className="rotulo-tecnico">configuração · vale a partir do próximo pedido</span>
-        <div className="mt-2.5">
+        <div className="linhas-da-configuracao mt-2.5">
           <CamposDaConfiguracao
             valor={configuracao}
             aoMudar={setConfiguracao}
@@ -500,10 +504,13 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   const [configurando, setConfigurando] = useState(false);
   const [cancelamentoPedido, setCancelamentoPedido] = useState(false);
   const [imagens, setImagens] = useState<ImagemAnexada[]>([]);
+  // As anexadas agora, para liberar as miniaturas ao remover e ao desmontar.
+  const imagensAtuais = useRef(imagens);
+  imagensAtuais.current = imagens;
+  useEffect(() => () => liberarImagens(imagensAtuais.current), []);
   const [arraste, setArraste] = useState<Arraste | null>(null);
   // Modo do próximo pedido; "planejamento" é o Plan Mode (Shift+Tab no prompt).
   const [modo, setModo] = useState<ModoDoTurno>("execucao");
-  const memoriaDoProcesso = servidor.memoria?.porOrquestrador[orquestradorId] ?? 0;
   const configuracao = useConfiguracaoEstavel(orquestrador.configuracao);
   const rolagem = useRef<HTMLDivElement>(null);
   const campoDoPrompt = useRef<HTMLTextAreaElement>(null);
@@ -562,10 +569,10 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
 
   const aoAnexar = useCallback((arquivos: File[]) => void anexar(arquivos), [anexar]);
 
-  const aoRemoverImagem = useCallback(
-    (id: string) => setImagens((atuais) => atuais.filter((imagem) => imagem.id !== id)),
-    [],
-  );
+  const aoRemoverImagem = useCallback((id: string) => {
+    liberarImagens(imagensAtuais.current.filter((imagem) => imagem.id === id));
+    setImagens((atuais) => atuais.filter((imagem) => imagem.id !== id));
+  }, []);
 
   const aoAlternarModo = useCallback(
     () => setModo((atual) => (atual === "planejamento" ? "execucao" : "planejamento")),
@@ -578,12 +585,11 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
       try {
         // Só imagens, sem texto: o servidor exige uma mensagem, então vai uma padrão.
         const mensagem = texto.trim() === "" ? "Analise as imagens anexadas." : texto;
-        await api.enviarMensagem(
-          orquestradorId,
-          mensagem,
-          imagens.map((imagem) => ({ nome: imagem.nome, tipoDeMidia: imagem.tipoDeMidia, base64: imagem.base64 })),
-          modo,
-        );
+        // O base64 só nasce aqui, no envio.
+        const anexos = imagens.length === 0 ? [] : await imagensParaEnvio(imagens);
+        await api.enviarMensagem(orquestradorId, mensagem, anexos, modo);
+        // As enviadas (e as que chegaram durante o envio, que também saem) liberam a miniatura.
+        liberarImagens(imagensAtuais.current);
         setImagens([]);
         acompanhando.current = true;
         setCancelamentoPedido(false);
@@ -851,13 +857,6 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
         {servidor.conectado && conexoes.get(orquestradorId) === "reconectando" && (
           <span className="mono text-error">reconectando…</span>
         )}
-        {/* A medição é a cada 5 s: fora de um pedido, o número seria de um processo que já acabou. */}
-        {trabalhando && memoriaDoProcesso > 0 && (
-          <span className="chip" title="Memória usada agora pelo processo do Claude deste orquestrador (com os subagentes)">
-            RAM {formatarBytes(memoriaDoProcesso)}
-          </span>
-        )}
-        <Etiqueta situacao={trabalhando ? "trabalhando" : "ocioso"} />
         <BotaoDeLimparBixinhos orquestradorId={orquestradorId} />
         <BotaoDeAlteracoes orquestradorId={orquestradorId} />
         <BotaoDeArquivos orquestradorId={orquestradorId} nomeDoOrquestrador={orquestrador.nome} />

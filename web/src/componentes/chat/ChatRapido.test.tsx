@@ -2,12 +2,68 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 
 import { api } from "../../shared/api/cliente";
 import type { MensagemDoChat } from "../../shared/api/tipos";
+import type { EscutaNaTela, OpcoesDaEscuta, SituacaoDaEscuta } from "../../shared/escuta/useEscuta";
 import {
   ESTADO_INICIAL_DO_CHAT,
   type EstadoDoChatNaTela,
   type MensagemDoChatNaTela,
 } from "../../shared/estado/aplicarEventoDoChat";
 import { ChatRapido } from "./ChatRapido";
+
+/**
+ * A escuta simulada: guarda as opções que o chat passou (para chamar o `enviar`
+ * e o `preencherComposer` como a escuta faria) e devolve a situação pedida
+ * enquanto o modo invisível estiver ligado com a escuta disponível.
+ */
+const escutaSimulada = vi.hoisted(() => ({
+  opcoes: null as OpcoesDaEscuta | null,
+  situacaoNoModo: "escutando" as SituacaoDaEscuta,
+  confirmarAviso: vi.fn(),
+  recusarAviso: vi.fn(),
+  pausar: vi.fn(),
+}));
+
+vi.mock("../../shared/escuta/useEscuta", () => ({
+  useEscuta: (opcoes: OpcoesDaEscuta): EscutaNaTela => {
+    escutaSimulada.opcoes = opcoes;
+    const situacao: SituacaoDaEscuta = !opcoes.escutaDisponivel
+      ? "indisponivel"
+      : opcoes.modoInvisivelAtivo
+        ? escutaSimulada.situacaoNoModo
+        : "desligada";
+    return {
+      situacao,
+      progressoDoDownload: null,
+      linhas: ["qual é a complexidade disso?"],
+      automatico: true,
+      alternarAutomatico: () => undefined,
+      pausar: escutaSimulada.pausar,
+      retomar: () => undefined,
+      erro: null,
+      descartarErro: () => undefined,
+      precisaDoAviso: situacao === "aguardando-aviso",
+      confirmarAviso: escutaSimulada.confirmarAviso,
+      recusarAviso: escutaSimulada.recusarAviso,
+      ultimaPergunta: null,
+    };
+  },
+}));
+
+beforeEach(() => {
+  escutaSimulada.opcoes = null;
+  escutaSimulada.situacaoNoModo = "escutando";
+  escutaSimulada.confirmarAviso = vi.fn();
+  escutaSimulada.recusarAviso = vi.fn();
+  escutaSimulada.pausar = vi.fn();
+});
+
+/** As opções que o chat passou à escuta no último render. */
+function opcoesDaEscuta(): OpcoesDaEscuta {
+  if (escutaSimulada.opcoes === null) {
+    throw new Error("o chat não chamou o useEscuta");
+  }
+  return escutaSimulada.opcoes;
+}
 
 function mensagem(
   id: string,
@@ -73,31 +129,95 @@ describe("ChatRapido · modo invisível", () => {
     vi.restoreAllMocks();
   });
 
-  function ponteAtiva(capturarTela = vi.fn().mockResolvedValue(FOTO)) {
+  const QUADRO = { nome: "tela-2026-11-08T10-00-00-000Z.jpg", tipoDeMidia: "image/jpeg" as const, base64: "QUJD" };
+
+  function ponteAtiva(capturarTela = vi.fn().mockResolvedValue(FOTO), escutaDisponivel = false) {
     let ouvinte: ((ativo: boolean) => void) | null = null;
+    let ouvinteDeQuadro: ((captura: typeof QUADRO) => void) | null = null;
+    const cancelarQuadro = vi.fn();
     const modoInvisivel = {
+      escutaDisponivel,
       entrar: vi.fn(),
       sair: vi.fn(),
       capturarMouse: vi.fn().mockResolvedValue(undefined),
       capturarTela,
+      capturarAgora: vi.fn().mockResolvedValue(QUADRO),
+      aoCapturarQuadro: vi.fn((callback: (captura: typeof QUADRO) => void) => {
+        ouvinteDeQuadro = callback;
+        return cancelarQuadro;
+      }),
       aoMudar: vi.fn((callback: (ativo: boolean) => void) => {
         ouvinte = callback;
         return () => undefined;
       }),
     };
     janelaComPonte.electron = { desktop: true, janela: {}, modoInvisivel };
-    return { modoInvisivel, ativar: () => act(() => ouvinte?.(true)) };
+    return {
+      modoInvisivel,
+      cancelarQuadro,
+      ativar: () => act(() => ouvinte?.(true)),
+      desativar: () => act(() => ouvinte?.(false)),
+      quadroDoAtalho: (captura = QUADRO) => act(() => ouvinteDeQuadro?.(captura)),
+    };
   }
 
-  it("ativo, fotografa a tela a cada pergunta e a anexa; o composer avisa que a tela vai junto", async () => {
+  describe("capturar agora", () => {
+    it("o atalho guarda o quadro como anexo pendente e o envio não tira outro print", async () => {
+      const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+      const { modoInvisivel, ativar, quadroDoAtalho } = ponteAtiva();
+      const { campo } = renderizar();
+      expect(screen.queryByRole("button", { name: /capturar agora/ })).not.toBeInTheDocument();
+      ativar();
+      expect(screen.queryByRole("button", { name: /capturar agora/ })).not.toBeInTheDocument();
+
+      quadroDoAtalho();
+      expect(screen.queryAllByRole("img")).toHaveLength(0);
+
+      fireEvent.change(campo, { target: { value: "Veja" } });
+      fireEvent.keyDown(campo, { key: "Enter" });
+      await waitFor(() => expect(perguntar).toHaveBeenCalledWith("Veja", [QUADRO]));
+      expect(modoInvisivel.capturarTela).not.toHaveBeenCalled();
+    });
+
+    it("o atalho global adiciona o quadro aos pendentes e a assinatura é cancelada ao sair do modo", async () => {
+      const { cancelarQuadro, ativar, desativar, quadroDoAtalho } = ponteAtiva();
+      renderizar();
+      ativar();
+
+      quadroDoAtalho();
+      quadroDoAtalho({ ...QUADRO, nome: "tela-2.jpg" });
+      // Pendentes, mas sem miniatura: a captura nunca aparece.
+      expect(screen.queryAllByRole("img")).toHaveLength(0);
+      expect(document.querySelector(".miniaturas-do-prompt")).toBeNull();
+
+      desativar();
+      expect(cancelarQuadro).toHaveBeenCalled();
+    });
+
+    it("respeita o limite de 5 imagens e avisa", async () => {
+      const { ativar, quadroDoAtalho } = ponteAtiva();
+      renderizar();
+      ativar();
+
+      for (let i = 0; i < 6; i += 1) {
+        quadroDoAtalho({ ...QUADRO, nome: `tela-${i}.jpg` });
+      }
+      expect(screen.queryAllByRole("img")).toHaveLength(0);
+      expect(screen.getByRole("alert")).toHaveTextContent("até 5 imagens");
+    });
+  });
+
+  it("ativo, fotografa a tela a cada pergunta e a anexa; não há mais faixa do modo", async () => {
     const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
     const { modoInvisivel, ativar } = ponteAtiva();
     const { campo } = renderizar();
 
-    expect(screen.queryByText(/a tela vai junto/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Modo invisível" })).toHaveAttribute("aria-pressed", "false");
     ativar();
-    expect(screen.getByText(/a tela vai junto/)).toBeInTheDocument();
-    expect(screen.getByTestId("faixa-modo-invisivel")).toHaveTextContent("Tela sendo vista");
+    expect(screen.getByRole("button", { name: "Modo invisível" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByTestId("faixa-modo-invisivel")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Modo invisível" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Voltar ao modo normal" })).not.toBeInTheDocument();
 
     fireEvent.change(campo, { target: { value: "O que é isso?" } });
     fireEvent.keyDown(campo, { key: "Enter" });
@@ -108,6 +228,24 @@ describe("ChatRapido · modo invisível", () => {
     fireEvent.keyDown(campo, { key: "Enter" });
     await waitFor(() => expect(perguntar).toHaveBeenCalledTimes(2));
     expect(modoInvisivel.capturarTela).toHaveBeenCalledTimes(2);
+  });
+
+  it("o mesmo botão 👁 entra e sai do modo, com aria-pressed refletindo o estado", () => {
+    const { modoInvisivel, ativar } = ponteAtiva();
+    renderizar();
+
+    const botao = screen.getByRole("button", { name: "Modo invisível" });
+    expect(botao).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(botao);
+    expect(modoInvisivel.entrar).toHaveBeenCalledTimes(1);
+
+    ativar();
+    const ativo = screen.getByRole("button", { name: "Modo invisível" });
+    expect(ativo).toHaveAttribute("aria-pressed", "true");
+    expect(ativo).toHaveAttribute("title", expect.stringContaining("clique para voltar ao modo normal"));
+    expect(screen.queryByTestId("faixa-modo-invisivel")).not.toBeInTheDocument();
+    fireEvent.click(ativo);
+    expect(modoInvisivel.sair).toHaveBeenCalledTimes(1);
   });
 
   it("se a captura falhar, mostra o erro, não envia e mantém o texto", async () => {
@@ -151,30 +289,35 @@ describe("ChatRapido · modo invisível", () => {
       ],
     });
 
-    it("ativo, esconde a captura de tela e mantém a imagem manual", () => {
+    it("esconde a captura de tela e mantém a imagem manual, no modo normal e no invisível", () => {
       const { ativar } = ponteAtiva();
       renderizar(chatComImagens([CAPTURA, MANUAL]));
-      expect(screen.getByAltText(CAPTURA.nome)).toBeInTheDocument();
+      expect(screen.queryByAltText(CAPTURA.nome)).not.toBeInTheDocument();
+      expect(screen.getByAltText(MANUAL.nome)).toBeInTheDocument();
       ativar();
       expect(screen.queryByAltText(CAPTURA.nome)).not.toBeInTheDocument();
       expect(screen.getByAltText(MANUAL.nome)).toBeInTheDocument();
     });
 
-    it("ativo, sem imagens visíveis não renderiza o contêiner", () => {
-      const { ativar } = ponteAtiva();
-      renderizar(chatComImagens([CAPTURA]));
-      ativar();
-      expect(document.querySelector(".anexos-do-chat")).toBeNull();
-    });
-
-    it("fora do modo, a captura aparece", () => {
+    it("só com captura, não renderiza o contêiner (sem espaço vazio) e o texto continua", () => {
       ponteAtiva();
       renderizar(chatComImagens([CAPTURA]));
-      expect(screen.getByAltText(CAPTURA.nome)).toBeInTheDocument();
+      expect(document.querySelector(".anexos-do-chat")).toBeNull();
+      expect(screen.getByText("Veja")).toBeInTheDocument();
+    });
+
+    it("nos anexos pendentes, a captura não aparece e a imagem comum sim", () => {
+      const { quadroDoAtalho, ativar } = ponteAtiva();
+      renderizar();
+      quadroDoAtalho();
+      expect(document.querySelector(".miniaturas-do-prompt")).toBeNull();
+      ativar();
+      quadroDoAtalho({ ...QUADRO, nome: "tela-9.jpg" });
+      expect(document.querySelector(".miniaturas-do-prompt")).toBeNull();
     });
   });
 
-  it("o 👁 fica na linha de baixo do composer, entra no modo e some quando ativo", async () => {
+  it("o 👁 fica na linha de baixo do composer, entra no modo e continua (pressionado) quando ativo", async () => {
     const { modoInvisivel, ativar } = ponteAtiva();
     renderizar();
 
@@ -186,7 +329,7 @@ describe("ChatRapido · modo invisível", () => {
     await waitFor(() => expect(modoInvisivel.capturarMouse).toHaveBeenCalledWith(true));
 
     ativar();
-    expect(screen.queryByRole("button", { name: "Modo invisível" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Modo invisível" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("sem a ponte do modo invisível (navegador), não desenha o 👁", () => {
@@ -203,15 +346,14 @@ describe("ChatRapido · modo invisível", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível entrar no modo invisível: sem janela");
   });
 
-  it("ativo, o indicador e o botão de voltar ficam dentro do chat; clicar sai do modo", () => {
+  it("ativo, o 👁 dentro do chat é o indicador e a saída; clicar sai do modo", () => {
     const { modoInvisivel, ativar } = ponteAtiva();
     renderizar();
-    expect(screen.queryByRole("button", { name: "Voltar ao modo normal" })).not.toBeInTheDocument();
     ativar();
 
     const chat = screen.getByTestId("chat-rapido");
-    expect(within(chat).getByText("Tela sendo vista")).toBeInTheDocument();
-    fireEvent.click(within(chat).getByRole("button", { name: "Voltar ao modo normal" }));
+    expect(within(chat).queryByText("Tela sendo vista")).not.toBeInTheDocument();
+    fireEvent.click(within(chat).getByRole("button", { name: "Modo invisível", pressed: true }));
     expect(modoInvisivel.sair).toHaveBeenCalledTimes(1);
   });
 
@@ -221,7 +363,7 @@ describe("ChatRapido · modo invisível", () => {
     renderizar();
     ativar();
 
-    fireEvent.click(screen.getByRole("button", { name: "Voltar ao modo normal" }));
+    fireEvent.click(screen.getByRole("button", { name: "Modo invisível" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível sair do modo invisível: janela ocupada");
   });
 
@@ -235,6 +377,191 @@ describe("ChatRapido · modo invisível", () => {
     expect(modoInvisivel.capturarMouse).toHaveBeenLastCalledWith(true);
     fireEvent.mouseLeave(screen.getByTestId("chat-rapido"));
     expect(modoInvisivel.capturarMouse).toHaveBeenLastCalledWith(false);
+  });
+
+  describe("escuta do áudio", () => {
+    const indicador = () => screen.queryByTestId("indicador-da-escuta");
+    const faixa = () => screen.queryByTestId("faixa-da-escuta");
+
+    it("o indicador aparece ao lado do 👁 com o modo ativo e some ao desligar; a faixa vem junto", () => {
+      const { ativar, desativar } = ponteAtiva(undefined, true);
+      renderizar();
+      expect(indicador()).not.toBeInTheDocument();
+      expect(faixa()).not.toBeInTheDocument();
+
+      ativar();
+      const olho = screen.getByRole("button", { name: "Modo invisível" });
+      expect(olho.nextElementSibling).toBe(indicador());
+      expect(indicador()).toHaveTextContent("escutando");
+      expect(screen.getByTestId("chat-rapido")).toContainElement(faixa());
+      expect(faixa()).toHaveTextContent("qual é a complexidade disso?");
+
+      fireEvent.click(screen.getByRole("button", { name: "Pausar a escuta" }));
+      expect(escutaSimulada.pausar).toHaveBeenCalledTimes(1);
+
+      desativar();
+      expect(indicador()).not.toBeInTheDocument();
+      expect(faixa()).not.toBeInTheDocument();
+    });
+
+    it("sem a escuta disponível, o modo ativo não mostra indicador nem faixa", () => {
+      const { ativar } = ponteAtiva();
+      renderizar();
+      ativar();
+      expect(opcoesDaEscuta().escutaDisponivel).toBe(false);
+      expect(indicador()).not.toBeInTheDocument();
+      expect(faixa()).not.toBeInTheDocument();
+    });
+
+    it("na primeira vez, o aviso aparece dentro do chat e só o botão liga a escuta", () => {
+      escutaSimulada.situacaoNoModo = "aguardando-aviso";
+      const { ativar } = ponteAtiva(undefined, true);
+      renderizar();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      ativar();
+      const aviso = screen.getByRole("dialog", { name: "Escutar o áudio do computador?" });
+      expect(screen.getByTestId("chat-rapido")).toContainElement(aviso);
+      expect(indicador()).not.toBeInTheDocument();
+
+      fireEvent.click(within(aviso).getByRole("button", { name: "Começar a escutar" }));
+      expect(escutaSimulada.confirmarAviso).toHaveBeenCalledTimes(1);
+      fireEvent.click(within(aviso).getByRole("button", { name: "Agora não" }));
+      expect(escutaSimulada.recusarAviso).toHaveBeenCalledTimes(1);
+    });
+
+    it("passa ao hook o modo, a escuta disponível, o chat livre e a autorização", () => {
+      const { ativar } = ponteAtiva(undefined, true);
+      const { rerender } = renderizar({ ...OCIOSO, alteracoesAutorizadas: true });
+      expect(opcoesDaEscuta()).toMatchObject({
+        modoInvisivelAtivo: false,
+        escutaDisponivel: true,
+        chatLivre: true,
+        autorizacaoAtiva: true,
+      });
+
+      ativar();
+      expect(opcoesDaEscuta().modoInvisivelAtivo).toBe(true);
+
+      rerender(RESPONDENDO);
+      expect(opcoesDaEscuta()).toMatchObject({ chatLivre: false, autorizacaoAtiva: false });
+    });
+
+    it("desconectado, o chat não está livre para a escuta", () => {
+      ponteAtiva(undefined, true);
+      renderizar(OCIOSO, true);
+      expect(opcoesDaEscuta().chatLivre).toBe(false);
+    });
+
+    it("o enviar da escuta manda a pergunta com o print e a origem \"escuta\"", async () => {
+      const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+      const { ativar } = ponteAtiva(undefined, true);
+      renderizar();
+      ativar();
+
+      await act(() => opcoesDaEscuta().enviar("Qual a complexidade?"));
+
+      expect(perguntar).toHaveBeenCalledWith("Qual a complexidade?", [FOTO], { origem: "escuta" });
+    });
+
+    it("o enviar da escuta rejeita com o erro original (ex.: o 409) e não o mostra no composer", async () => {
+      const recusa = new Error("Já existe uma resposta em andamento.");
+      vi.spyOn(api, "perguntarNoChat").mockRejectedValue(recusa);
+      ponteAtiva(undefined, true);
+      renderizar();
+
+      await act(async () => {
+        await expect(opcoesDaEscuta().enviar("Qual a complexidade?")).rejects.toBe(recusa);
+      });
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+});
+
+describe("ChatRapido · escuta no composer e selo", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("o selo \"escuta\" aparece só nas perguntas enviadas pela escuta", () => {
+    renderizar({
+      ...OCIOSO,
+      mensagens: [
+        mensagem("u1", "usuario", { texto: "Qual a complexidade?", origem: "escuta" }),
+        mensagem("c1", "claude", { texto: "O(n)." }),
+        mensagem("u2", "usuario", { texto: "E o espaço?" }),
+      ],
+    });
+
+    const daEscuta = screen.getByText("Qual a complexidade?").closest(".mensagem-do-usuario");
+    const digitada = screen.getByText("E o espaço?").closest(".mensagem-do-usuario");
+    expect(within(daEscuta as HTMLElement).getByText("escuta")).toHaveClass("selo-da-escuta");
+    expect(digitada?.querySelector(".selo-da-escuta")).toBeNull();
+    expect(document.querySelectorAll(".selo-da-escuta")).toHaveLength(1);
+  });
+
+  it("o preencherComposer põe a pergunta no campo com a nota; o Enter envia com a origem e limpa a marca", async () => {
+    const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+    const { campo } = renderizar({ ...OCIOSO, alteracoesAutorizadas: true });
+    expect(screen.queryByTestId("nota-da-escuta")).not.toBeInTheDocument();
+
+    act(() => opcoesDaEscuta().preencherComposer("Como inverter a lista?"));
+    expect(campo).toHaveValue("Como inverter a lista?");
+    expect(screen.getByTestId("nota-da-escuta")).toHaveTextContent("Pergunta da escuta: confira e aperte Enter");
+    expect(perguntar).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(campo, { key: "Enter" });
+    expect(perguntar).toHaveBeenCalledWith("Como inverter a lista?", [], { origem: "escuta" });
+    await waitFor(() => expect(campo).toHaveValue(""));
+    expect(screen.queryByTestId("nota-da-escuta")).not.toBeInTheDocument();
+
+    // A próxima, digitada, vai sem origem.
+    fireEvent.change(campo, { target: { value: "Obrigado" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+    expect(perguntar).toHaveBeenLastCalledWith("Obrigado", []);
+    await waitFor(() => expect(campo).toHaveValue(""));
+  });
+
+  it("apagar o campo tira a marca da escuta: o que for escrito depois vai sem origem", async () => {
+    const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+    const { campo } = renderizar({ ...OCIOSO, alteracoesAutorizadas: true });
+
+    act(() => opcoesDaEscuta().preencherComposer("Como inverter a lista?"));
+    fireEvent.change(campo, { target: { value: "" } });
+    expect(screen.queryByTestId("nota-da-escuta")).not.toBeInTheDocument();
+
+    fireEvent.change(campo, { target: { value: "Outra coisa" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+    expect(perguntar).toHaveBeenCalledWith("Outra coisa", []);
+    await waitFor(() => expect(campo).toHaveValue(""));
+  });
+
+  it("retocar a pergunta da escuta mantém a marca e a origem", async () => {
+    const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+    const { campo } = renderizar({ ...OCIOSO, alteracoesAutorizadas: true });
+
+    act(() => opcoesDaEscuta().preencherComposer("Como inverter a lista"));
+    fireEvent.change(campo, { target: { value: "Como inverter a lista ligada?" } });
+    expect(screen.getByTestId("nota-da-escuta")).toBeInTheDocument();
+
+    fireEvent.keyDown(campo, { key: "Enter" });
+    expect(perguntar).toHaveBeenCalledWith("Como inverter a lista ligada?", [], { origem: "escuta" });
+    await waitFor(() => expect(campo).toHaveValue(""));
+  });
+
+  it("o preencherComposer não apaga um rascunho digitado; troca só a pergunta que a própria escuta pôs", () => {
+    const { campo } = renderizar({ ...OCIOSO, alteracoesAutorizadas: true });
+
+    fireEvent.change(campo, { target: { value: "Meu rascunho" } });
+    act(() => opcoesDaEscuta().preencherComposer("Como inverter a lista?"));
+    expect(campo).toHaveValue("Meu rascunho");
+    expect(screen.queryByTestId("nota-da-escuta")).not.toBeInTheDocument();
+
+    // Campo vazio: a pergunta entra; a seguinte, também da escuta, substitui a anterior.
+    fireEvent.change(campo, { target: { value: "" } });
+    act(() => opcoesDaEscuta().preencherComposer("Como inverter a lista?"));
+    expect(campo).toHaveValue("Como inverter a lista?");
+    act(() => opcoesDaEscuta().preencherComposer("E a lista dupla?"));
+    expect(campo).toHaveValue("E a lista dupla?");
+    expect(screen.getByTestId("nota-da-escuta")).toBeInTheDocument();
   });
 });
 
@@ -391,6 +718,33 @@ describe("ChatRapido", () => {
       expect(await screen.findByRole("button", { name: "Remover tela.png" })).toBeInTheDocument();
       act(() => campo.blur());
       expect(composer()).toHaveClass("composer-expandido");
+    });
+
+    it("remover a imagem libera a URL da miniatura", async () => {
+      const criar = vi.spyOn(URL, "createObjectURL");
+      const revogar = vi.spyOn(URL, "revokeObjectURL");
+      const { campo } = renderizar();
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["png"], "tela.png", { type: "image/png" })] } });
+      fireEvent.click(await screen.findByRole("button", { name: "Remover tela.png" }));
+      expect(revogar).toHaveBeenCalledWith(criar.mock.results[0]?.value);
+      expect(screen.queryByAltText("tela.png")).not.toBeInTheDocument();
+    });
+
+    it("o envio gera o base64 igual ao do arquivo e libera a URL depois", async () => {
+      const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+      const criar = vi.spyOn(URL, "createObjectURL");
+      const revogar = vi.spyOn(URL, "revokeObjectURL");
+      const { campo } = renderizar();
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["png"], "tela.png", { type: "image/png" })] } });
+      await screen.findByAltText("tela.png");
+      fireEvent.change(campo, { target: { value: "Veja" } });
+      fireEvent.keyDown(campo, { key: "Enter" });
+
+      // "cG5n" é o base64 de "png".
+      await waitFor(() =>
+        expect(perguntar).toHaveBeenCalledWith("Veja", [{ nome: "tela.png", tipoDeMidia: "image/png", base64: "cG5n" }]),
+      );
+      await waitFor(() => expect(revogar).toHaveBeenCalledWith(criar.mock.results[0]?.value));
     });
 
     it("menu do modelo aberto não recolhe", () => {

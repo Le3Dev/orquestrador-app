@@ -74,8 +74,22 @@ export interface ApiDoModoInvisivel {
   /** true: a janela recebe os cliques; false: eles atravessam para os apps de trás. */
   capturarMouse: (capturar: boolean) => Promise<void>;
   capturarTela: () => Promise<CapturaDeTela>;
+  /** Botão "capturar agora": o quadro atual da tela. */
+  capturarAgora: () => Promise<CapturaDeTela>;
+  /** Quadros capturados pelo atalho global Ctrl+Shift+S; devolve a função que cancela. */
+  aoCapturarQuadro: (callback: (captura: CapturaDeTela) => void) => () => void;
   /** Avisa a cada entrar/sair (inclusive pelo atalho Ctrl+Shift+I); devolve a função que cancela o aviso. */
   aoMudar: (callback: (ativo: boolean) => void) => () => void;
+  /**
+   * Consulta se o modo invisível está ligado agora (para a tela que monta com o
+   * modo já ativo, como o chat rápido ao alternar entre fixo e flutuante).
+   */
+  estaAtivo(): Promise<boolean>;
+  /**
+   * true quando a escuta do áudio do sistema (getDisplayMedia com loopback)
+   * funciona nesta plataforma: hoje só no Windows.
+   */
+  escutaDisponivel: boolean;
 }
 
 interface PonteDoDesktop {

@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
 
+import { lerArvoreDoPs, lerArvoreDoWindows, ProcessoNaArvore } from "./ArvoreDeProcessos";
+
 export function executar(comando: string, argumentos: readonly string[]): Promise<string> {
   return new Promise((resolver, rejeitar) => {
     execFile(comando, [...argumentos], { windowsHide: true, maxBuffer: 4 * 1024 * 1024 }, (erro, saida) => {
@@ -102,14 +104,19 @@ export function lerTasklistCsv(texto: string): Map<number, number> {
   return memoria;
 }
 
-/** Memória em uso (bytes) dos processos do Claude Code pedidos. */
+/**
+ * Memória em uso (bytes) dos processos pedidos: os Claude Code e o que eles
+ * abriram (pwsh, cmd, conhost, node...). No Windows, um `tasklist` sem
+ * filtro, que é barato; quem pede escolhe os pids pela árvore.
+ */
 export async function memoriaDosProcessos(pids: readonly number[]): Promise<Map<number, number>> {
   if (pids.length === 0) {
     return new Map();
   }
   if (process.platform === "win32") {
-    const todos = lerTasklistCsv(await executar("tasklist", ["/FO", "CSV", "/NH", "/FI", "IMAGENAME eq claude.exe"]));
-    return new Map([...todos].filter(([pid]) => pids.includes(pid)));
+    const pedidos = new Set(pids);
+    const todos = lerTasklistCsv(await executar("tasklist", ["/FO", "CSV", "/NH"]));
+    return new Map([...todos].filter(([pid]) => pedidos.has(pid)));
   }
   const saida = await executar("ps", ["-o", "pid=,rss=", "-p", pids.join(",")]);
   const memoria = new Map<number, number>();
@@ -174,13 +181,53 @@ export function lerListaDeProcessos(texto: string): ProcessoListado[] {
 
 /**
  * Todos os processos da máquina com pai, CPU e idade, numa única chamada ao
- * `ps`. No Windows devolve lista vazia: não há um equivalente barato (o
- * `Get-CimInstance` leva segundos e não dá a CPU do momento), e quem usa trata
- * a lista vazia como "não deu para saber".
+ * `ps`. No Windows devolve lista vazia: não há um equivalente barato. Medido,
+ * `Get-CimInstance Win32_PerfFormattedData_PerfProc_Process` aberto do zero
+ * leva 3,2–8,1 s com `powershell` e 3,9–4,3 s com `pwsh` (só abrir o
+ * `powershell` custa 1,4 s; o `pwsh`, 2,6 s): caro demais a cada 30 s. Com a
+ * lista vazia, o diagnóstico marca `processosVisiveis: false` e a vigia do
+ * turno ignora CPU e comandos e usa o limite tolerante.
  */
 export async function listarProcessos(): Promise<ProcessoListado[]> {
   if (process.platform === "win32") {
     return [];
   }
   return lerListaDeProcessos(await executar("ps", ["-A", "-o", "pid=,ppid=,pcpu=,etime=,args="]));
+}
+
+/**
+ * Comando do Windows que lista a árvore (pid, ppid, criação, nome e linha de
+ * comando) em JSON. Leva de 1 a 2 s: só no fim de um turno, a cada 30 s
+ * enquanto há turno rodando e ao encerrar processos — nunca em intervalo curto.
+ */
+const LISTAGEM_DA_ARVORE_NO_WINDOWS =
+  "[Console]::OutputEncoding = [Text.Encoding]::UTF8; " +
+  "Get-CimInstance Win32_Process | ForEach-Object { [pscustomobject]@{ " +
+  "p = [int]$_.ProcessId; pp = [int]$_.ParentProcessId; " +
+  "c = $(if ($_.CreationDate) { $_.CreationDate.ToUniversalTime().ToString('o') } else { '' }); " +
+  "n = $_.Name; l = $_.CommandLine } } | ConvertTo-Json -Compress";
+
+/** Todos os processos da máquina com pai, criação e linha de comando (ver `ArvoreDeProcessos`). */
+export async function listarArvore(): Promise<ProcessoNaArvore[]> {
+  if (process.platform === "win32") {
+    return lerArvoreDoWindows(
+      await executar("powershell", ["-NoProfile", "-NonInteractive", "-Command", LISTAGEM_DA_ARVORE_NO_WINDOWS]),
+    );
+  }
+  return lerArvoreDoPs(await executar("ps", ["-A", "-o", "pid=,ppid=,pgid=,etime=,args="]), Date.now());
+}
+
+/**
+ * Encerra um único processo (sem a árvore: no Windows o `taskkill /T` segue o
+ * ppid, que pode apontar para um PID reaproveitado). Quem chama já conferiu
+ * que o pid ainda é o mesmo processo e encerra os descendentes um a um.
+ */
+export function encerrarProcesso(pid: number): Promise<void> {
+  if (process.platform !== "win32") {
+    sinalizar(pid, "SIGTERM");
+    return Promise.resolve();
+  }
+  return new Promise((resolver) => {
+    execFile("taskkill", ["/PID", String(pid), "/F"], { windowsHide: true }, () => resolver());
+  });
 }

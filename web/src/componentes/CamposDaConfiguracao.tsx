@@ -13,14 +13,12 @@ import { type EscalaDaLetra, OPCOES_DA_ESCALA_DA_LETRA } from "../shared/canvas/
 import { AVISO_DO_ULTRACODE, ROTULOS_DAS_PERMISSOES } from "../shared/formatacao";
 import { ajudaDaPredefinicao, useEsforcosHerdados, usePredefinicoes } from "../shared/hooks/useDadosDaConfiguracao";
 import { tamanhoDasInstrucoes } from "../shared/instrucoes";
-import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../shared/modelos";
-import { ChipDeEsforco, ChipDeQuantidade } from "./canvas/ChipsDaCriacao";
-import { AvisoDoEsforcoHerdado, IconeDaPermissao, Rotulo, SeletorDeModelo } from "./canvas/LinhasDaConfiguracao";
+import { AvisoDoEsforcoHerdado, IconeDaPermissao, Rotulo } from "./canvas/LinhasDaConfiguracao";
+import { MenuDeModelo } from "./canvas/MenuDeModelo";
+import { QuantidadeDeSubagentes } from "./canvas/QuantidadeDeSubagentes";
 import { PreviaDoPromptFinal } from "./PreviaDoPromptFinal";
 
 const PERMISSOES: readonly NivelDePermissao[] = ["leitura", "edicao", "edicao_e_comandos"];
-
-type Menu = "esforcoDoOrquestrador" | "esforcoDosSubagentes" | "quantidade";
 
 interface Props {
   valor: DadosDaConfiguracao;
@@ -49,10 +47,10 @@ interface Props {
 
 /**
  * As linhas da ⚙ do terminal, com a mesma cara da criação (NoRascunho):
- * permissão, modelos com os chips de esforço e quantidade, opções, tamanho da
+ * permissão, modelos com o menu de esforço, quantidade, opções, tamanho da
  * letra e instruções. Pasta e nome não aparecem: não mudam depois de criado.
  * Precisa estar dentro de um `.corpo-da-criacao` (a consulta de contêiner
- * empilha as linhas e os menus dos chips viram de lado pela borda dele).
+ * empilha as linhas).
  */
 export function CamposDaConfiguracao({
   valor,
@@ -67,7 +65,6 @@ export function CamposDaConfiguracao({
   const idDaLetra = useId();
   const predefinicoes = usePredefinicoes();
   const herdados = useEsforcosHerdados(buscarEsforcoHerdado);
-  const [menuAberto, setMenuAberto] = useState<Menu | null>(null);
   const [aplicando, setAplicando] = useState(false);
   const [erroDaPredefinicao, setErroDaPredefinicao] = useState<string | null>(null);
   const economico = predefinicoes.find((predefinicao) => predefinicao.nome === "economico");
@@ -80,15 +77,6 @@ export function CamposDaConfiguracao({
 
   function mudar<Campo extends keyof DadosDaConfiguracao>(campo: Campo, novo: DadosDaConfiguracao[Campo]): void {
     aoMudar({ ...valor, [campo]: novo });
-  }
-
-  /** Um menu aberto por vez: abrir um fecha o outro. */
-  function controleDoMenu(menu: Menu) {
-    return {
-      aberto: menuAberto === menu,
-      aoMudarAberto: (aberto: boolean) =>
-        setMenuAberto((atual) => (aberto ? menu : atual === menu ? null : atual)),
-    };
   }
 
   async function usarPredefinicao(predefinicao: DadosDaPredefinicao): Promise<void> {
@@ -157,20 +145,15 @@ export function CamposDaConfiguracao({
           alinharAoTopo
         />
         <div className="flex min-w-0 flex-col gap-1.5">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <SeletorDeModelo
-              id={`${idDoCampo}-orquestrador`}
-              valor={valor.modeloDoOrquestrador}
-              aoEscolher={(modelo) => mudar("modeloDoOrquestrador", modelo)}
-            />
-            <ChipDeEsforco
-              dono="do orquestrador"
-              valor={valor.esforcoDoOrquestrador}
-              aoEscolher={(esforco) => mudar("esforcoDoOrquestrador", esforco)}
-              comUltracode
-              {...controleDoMenu("esforcoDoOrquestrador")}
-            />
-          </div>
+          <MenuDeModelo
+            id={`${idDoCampo}-orquestrador`}
+            rotulo="Modelo do orquestrador"
+            modelo={valor.modeloDoOrquestrador}
+            esforco={valor.esforcoDoOrquestrador}
+            comUltracode
+            aoEscolherModelo={(modelo) => mudar("modeloDoOrquestrador", modelo)}
+            aoEscolherEsforco={(esforco) => mudar("esforcoDoOrquestrador", esforco)}
+          />
           <AvisoDoEsforcoHerdado esforco={valor.esforcoDoOrquestrador} herdado={herdados?.orquestrador ?? null} />
           {valor.esforcoDoOrquestrador === "ultracode" && <span className="hint-warning">{AVISO_DO_ULTRACODE}</span>}
         </div>
@@ -183,27 +166,29 @@ export function CamposDaConfiguracao({
           alinharAoTopo
         />
         <div className="flex min-w-0 flex-col gap-1.5">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <SeletorDeModelo
-              id={`${idDoCampo}-subagentes`}
-              valor={valor.modeloDosSubagentes}
-              aoEscolher={(modelo) => mudar("modeloDosSubagentes", modelo)}
-            />
-            <ChipDeEsforco
-              dono="dos subagentes"
-              valor={valor.esforcoDosSubagentes}
-              aoEscolher={(esforco) => mudar("esforcoDosSubagentes", esforco)}
-              {...controleDoMenu("esforcoDosSubagentes")}
-            />
-            <ChipDeQuantidade
-              valor={valor.quantidadeDeSubagentes}
-              padrao={CONFIGURACAO_PADRAO_DO_ORQUESTRADOR.quantidadeDeSubagentes}
-              aoMudar={(quantidade) => mudar("quantidadeDeSubagentes", quantidade)}
-              {...controleDoMenu("quantidade")}
-            />
-          </div>
+          <MenuDeModelo
+            id={`${idDoCampo}-subagentes`}
+            rotulo="Modelo dos subagentes"
+            modelo={valor.modeloDosSubagentes}
+            esforco={valor.esforcoDosSubagentes}
+            aoEscolherModelo={(modelo) => mudar("modeloDosSubagentes", modelo)}
+            aoEscolherEsforco={(esforco) => mudar("esforcoDosSubagentes", esforco)}
+          />
           <AvisoDoEsforcoHerdado esforco={valor.esforcoDosSubagentes} herdado={herdados?.subagentes ?? null} />
         </div>
+      </div>
+
+      <div className="linha-da-criacao">
+        <Rotulo
+          titulo="Quantidade"
+          dica="Quantos ao mesmo tempo."
+          explicacao="Automática: o orquestrador decide quantos subagentes usar, até o máximo escolhido (no padrão, até 3 ao mesmo tempo). Fixa: ele usa sempre essa quantidade. Cada subagente consome a cota da sua assinatura do Claude."
+          alinharAoTopo
+        />
+        <QuantidadeDeSubagentes
+          valor={valor.quantidadeDeSubagentes}
+          aoMudar={(quantidade) => mudar("quantidadeDeSubagentes", quantidade)}
+        />
       </div>
 
       <div className="linha-da-criacao">
@@ -275,7 +260,7 @@ export function CamposDaConfiguracao({
         </div>
       )}
 
-      <div className="linha-da-criacao">
+      <div className="linha-da-criacao linha-instrucoes">
         <Rotulo
           htmlFor={`${idDoCampo}-instrucoes`}
           titulo="Instruções"
@@ -287,7 +272,6 @@ export function CamposDaConfiguracao({
           <textarea
             id={`${idDoCampo}-instrucoes`}
             className="textarea instrucoes-da-criacao custom-scrollbar"
-            rows={7}
             value={valor.instrucoesPersonalizadas}
             placeholder="Opcional. Ex.: Responda em tópicos curtos. Rode os testes antes de concluir."
             aria-invalid={passouDoLimite}

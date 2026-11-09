@@ -22,14 +22,13 @@ import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
 import { resumoDaConfiguracao } from "../../shared/resumoDaConfiguracao";
 import { IconeAlerta, IconeFechar } from "../Icones";
 import { PreviaDoPromptFinal } from "../PreviaDoPromptFinal";
-import { ChipDeEsforco, ChipDeQuantidade } from "./ChipsDaCriacao";
-import { AvisoDoEsforcoHerdado, IconeDaPermissao, Rotulo, SeletorDeModelo } from "./LinhasDaConfiguracao";
+import { AvisoDoEsforcoHerdado, IconeDaPermissao, Rotulo } from "./LinhasDaConfiguracao";
+import { MenuDeModelo } from "./MenuDeModelo";
 import { NavegadorDePastas } from "./NavegadorDePastas";
+import { QuantidadeDeSubagentes } from "./QuantidadeDeSubagentes";
 
 const TAMANHO_MAXIMO_DO_NOME = 60;
 const PERMISSOES: readonly NivelDePermissao[] = ["leitura", "edicao", "edicao_e_comandos"];
-
-type Menu = "esforcoDoOrquestrador" | "esforcoDosSubagentes" | "quantidade";
 
 /** Nome exibido para um caminho: a última parte da pasta. */
 function nomeDaPasta(caminho: string): string {
@@ -56,7 +55,6 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
   // Pasta escolhida pelo navegador do computador, fora da lista de projetos.
   const [pastaExterna, setPastaExterna] = useState<PastaDeProjeto | null>(null);
   const [navegando, setNavegando] = useState(false);
-  const [menuAberto, setMenuAberto] = useState<Menu | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [criando, setCriando] = useState(false);
   const predefinicoes = usePredefinicoes();
@@ -88,15 +86,6 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
 
   function mudar<Campo extends keyof DadosDaConfiguracao>(campo: Campo, novo: DadosDaConfiguracao[Campo]): void {
     setConfiguracao((atual) => ({ ...atual, [campo]: novo }));
-  }
-
-  /** Um menu aberto por vez: abrir um fecha o outro. */
-  function controleDoMenu(menu: Menu) {
-    return {
-      aberto: menuAberto === menu,
-      aoMudarAberto: (aberto: boolean) =>
-        setMenuAberto((atual) => (aberto ? menu : atual === menu ? null : atual)),
-    };
   }
 
   /** O nome de um caminho entre as opções: os projetos da raiz ou a pasta escolhida à mão. */
@@ -310,20 +299,15 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                 alinharAoTopo
               />
               <div className="flex min-w-0 flex-col gap-1.5">
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <SeletorDeModelo
-                    id={`${idDoCampo}-orquestrador`}
-                    valor={configuracao.modeloDoOrquestrador}
-                    aoEscolher={(modelo) => mudar("modeloDoOrquestrador", modelo)}
-                  />
-                  <ChipDeEsforco
-                    dono="do orquestrador"
-                    valor={configuracao.esforcoDoOrquestrador}
-                    aoEscolher={(esforco) => mudar("esforcoDoOrquestrador", esforco)}
-                    comUltracode
-                    {...controleDoMenu("esforcoDoOrquestrador")}
-                  />
-                </div>
+                <MenuDeModelo
+                  id={`${idDoCampo}-orquestrador`}
+                  rotulo="Modelo do orquestrador"
+                  modelo={configuracao.modeloDoOrquestrador}
+                  esforco={configuracao.esforcoDoOrquestrador}
+                  comUltracode
+                  aoEscolherModelo={(modelo) => mudar("modeloDoOrquestrador", modelo)}
+                  aoEscolherEsforco={(esforco) => mudar("esforcoDoOrquestrador", esforco)}
+                />
                 <AvisoDoEsforcoHerdado esforco={configuracao.esforcoDoOrquestrador} herdado={herdados?.orquestrador ?? null} />
                 {configuracao.esforcoDoOrquestrador === "ultracode" && (
                   <span className="hint-warning">{AVISO_DO_ULTRACODE}</span>
@@ -338,27 +322,29 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                 alinharAoTopo
               />
               <div className="flex min-w-0 flex-col gap-1.5">
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <SeletorDeModelo
-                    id={`${idDoCampo}-subagentes`}
-                    valor={configuracao.modeloDosSubagentes}
-                    aoEscolher={(modelo) => mudar("modeloDosSubagentes", modelo)}
-                  />
-                  <ChipDeEsforco
-                    dono="dos subagentes"
-                    valor={configuracao.esforcoDosSubagentes}
-                    aoEscolher={(esforco) => mudar("esforcoDosSubagentes", esforco)}
-                    {...controleDoMenu("esforcoDosSubagentes")}
-                  />
-                  <ChipDeQuantidade
-                    valor={configuracao.quantidadeDeSubagentes}
-                    padrao={CONFIGURACAO_PADRAO_DO_ORQUESTRADOR.quantidadeDeSubagentes}
-                    aoMudar={(quantidade) => mudar("quantidadeDeSubagentes", quantidade)}
-                    {...controleDoMenu("quantidade")}
-                  />
-                </div>
+                <MenuDeModelo
+                  id={`${idDoCampo}-subagentes`}
+                  rotulo="Modelo dos subagentes"
+                  modelo={configuracao.modeloDosSubagentes}
+                  esforco={configuracao.esforcoDosSubagentes}
+                  aoEscolherModelo={(modelo) => mudar("modeloDosSubagentes", modelo)}
+                  aoEscolherEsforco={(esforco) => mudar("esforcoDosSubagentes", esforco)}
+                />
                 <AvisoDoEsforcoHerdado esforco={configuracao.esforcoDosSubagentes} herdado={herdados?.subagentes ?? null} />
               </div>
+            </div>
+
+            <div className="linha-da-criacao">
+              <Rotulo
+                titulo="Quantidade"
+                dica="Quantos ao mesmo tempo."
+                explicacao="Automática: o orquestrador decide quantos subagentes usar, até o máximo escolhido (no padrão, até 3 ao mesmo tempo). Fixa: ele usa sempre essa quantidade. Cada subagente consome a cota da sua assinatura do Claude."
+                alinharAoTopo
+              />
+              <QuantidadeDeSubagentes
+                valor={configuracao.quantidadeDeSubagentes}
+                aoMudar={(quantidade) => mudar("quantidadeDeSubagentes", quantidade)}
+              />
             </div>
 
             <div className="linha-da-criacao">

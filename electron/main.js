@@ -63,6 +63,8 @@ const {
   utilityProcess,
 } = require("electron");
 const { capturarTela } = require("./capturaDeTela");
+const { criarRespostaAoPedidoDeMidia } = require("./escutaDoModoInvisivel");
+const { iniciarRastreioDoMouse } = require("./mouseDoModoInvisivel");
 const { criarMaximizacao } = require("./maximizacao");
 const { execFileSync, spawn } = require("node:child_process");
 const crypto = require("node:crypto");
@@ -481,6 +483,44 @@ function pararServidor() {
   });
 }
 
+// Ao fechar o app, primeiro o servidor se desliga sozinho (mensagem
+// "desligar"): cancela os turnos e encerra os processos que os agentes
+// deixaram rodando (ADR-38). Só depois do limite, taskkill na árvore.
+const ESPERA_DO_DESLIGAMENTO_MS = 8_000;
+let desligamentoDoServidor = null;
+
+function desligarServidorComCalma() {
+  if (desligamentoDoServidor) return desligamentoDoServidor;
+  appFechando = true;
+  clearTimeout(servidor.timerReligar);
+  servidor.timerReligar = null;
+  const filho = servidor.filho;
+  if (!filho) {
+    desligamentoDoServidor = Promise.resolve();
+    return desligamentoDoServidor;
+  }
+  desligamentoDoServidor = new Promise((resolver) => {
+    const forcar = () => {
+      filho.removeListener("exit", saiu);
+      encerrarServidorAoFechar();
+      resolver();
+    };
+    const limite = setTimeout(forcar, ESPERA_DO_DESLIGAMENTO_MS);
+    function saiu() {
+      clearTimeout(limite);
+      resolver();
+    }
+    filho.once("exit", saiu);
+    try {
+      filho.postMessage({ tipo: "desligar" });
+    } catch {
+      clearTimeout(limite);
+      forcar();
+    }
+  });
+  return desligamentoDoServidor;
+}
+
 // Ao fechar o app: encerra de vez e não religa.
 function encerrarServidorAoFechar() {
   appFechando = true;
@@ -741,6 +781,16 @@ async function abrirJanelaPrincipal() {
   });
   janelaPrincipal = janela;
   janela.on("close", () => sairDoModoInvisivel());
+  // Página recarregou/travou: o estado React volta a "normal", então o main
+  // também precisa sair do modo invisível (senão o usuário fica preso).
+  janela.webContents.on("did-start-navigation", (evento, _url, mesmoDoc, ehFramePrincipal) => {
+    const principal = evento?.isMainFrame ?? ehFramePrincipal;
+    const mesmo = evento?.isSameDocument ?? mesmoDoc;
+    if (principal && !mesmo && modoInvisivel?.janela === janela) sairDoModoInvisivel();
+  });
+  janela.webContents.on("render-process-gone", () => {
+    if (modoInvisivel?.janela === janela) sairDoModoInvisivel();
+  });
   janela.on("closed", () => {
     if (janelaPrincipal === janela) janelaPrincipal = null;
   });
@@ -896,7 +946,22 @@ ipcMain.handle("atualizacao:instalar-agora", async (evento) => {
 // normal vem do CSS (html/body/#root), e o modo invisível só o torna transparente.
 // ──────────────────────────────────────────────────────────────────────────
 const ATALHO_DO_MODO_INVISIVEL = "CommandOrControl+Shift+I";
+const ATALHO_CAPTURAR_AGORA = "CommandOrControl+Shift+S";
 let modoInvisivel = null; // { janela, anterior } enquanto ativo
+
+// Atalho global: não rouba o foco do app de trás; manda o quadro à tela.
+async function capturarAgoraPorAtalho() {
+  const atual = modoInvisivel;
+  if (!atual) return;
+  try {
+    const captura = await capturarQuadroAtual();
+    if (atual.janela && !atual.janela.isDestroyed()) {
+      atual.janela.webContents.send("modo-invisivel:quadro-capturado", captura);
+    }
+  } catch (erro) {
+    registrarNoLog("captura", `Falha ao capturar pelo atalho: ${erro.message || erro}`);
+  }
+}
 
 function avisarModoInvisivel(janela, ativo) {
   if (janela && !janela.isDestroyed()) janela.webContents.send("modo-invisivel:estado", ativo);
@@ -919,6 +984,10 @@ function entrarNoModoInvisivel() {
   // (não há API JS dedicada para janela-ferramenta sem módulo nativo).
   janela.setSkipTaskbar(true);
   janela.setIgnoreMouseEvents(true, { forward: true });
+  // O encaminhamento de mouse do Electron não entrega mouseenter no Windows: o main
+  // decide pela posição do cursor se a janela recebe o clique (ver mouseDoModoInvisivel.js).
+  modoInvisivel.rastreio = iniciarRastreioDoMouse({ janela, screen });
+  modoInvisivel.rastreio.definir(false);
   try {
     if (!globalShortcut.register(ATALHO_DO_MODO_INVISIVEL, sairDoModoInvisivel)) {
       registrarNoLog("app", "Não foi possível registrar o atalho do modo invisível.");
@@ -926,16 +995,25 @@ function entrarNoModoInvisivel() {
   } catch (erro) {
     registrarNoLog("app", `Falha ao registrar o atalho do modo invisível: ${erro.message || erro}`);
   }
+  try {
+    if (!globalShortcut.register(ATALHO_CAPTURAR_AGORA, capturarAgoraPorAtalho)) {
+      registrarNoLog("app", "Não foi possível registrar o atalho de capturar agora.");
+    }
+  } catch (erro) {
+    registrarNoLog("app", `Falha ao registrar o atalho de capturar agora: ${erro.message || erro}`);
+  }
   registrarNoLog("app", "Modo invisível ligado.");
   avisarModoInvisivel(janela, true);
 }
 
 function sairDoModoInvisivel() {
   if (!modoInvisivel) return;
-  const { janela, anterior } = modoInvisivel;
+  const { janela, anterior, rastreio } = modoInvisivel;
   modoInvisivel = null;
+  if (rastreio) rastreio.parar();
   try {
     globalShortcut.unregister(ATALHO_DO_MODO_INVISIVEL);
+    globalShortcut.unregister(ATALHO_CAPTURAR_AGORA);
   } catch {
     /* ignora */
   }
@@ -958,14 +1036,19 @@ ipcMain.handle("modo-invisivel:sair", (evento) => {
   exigirJanelaPrincipal(evento);
   sairDoModoInvisivel();
 });
+// A tela consulta ao montar (o ChatRapido remonta ao alternar fixo/flutuante e
+// perderia o estado, que antes só chegava pelo aviso "modo-invisivel:estado").
+ipcMain.handle("modo-invisivel:consultar", (evento) => {
+  exigirJanelaPrincipal(evento);
+  return modoInvisivel !== null;
+});
 ipcMain.handle("modo-invisivel:capturar-mouse", (evento, capturar) => {
   exigirJanelaPrincipal(evento);
   if (!modoInvisivel) return;
-  if (capturar) modoInvisivel.janela.setIgnoreMouseEvents(false);
-  else modoInvisivel.janela.setIgnoreMouseEvents(true, { forward: true });
+  // O rastreio pelo cursor é quem decide; o pedido da tela só o mantém em sincronia.
+  modoInvisivel.rastreio.definir(capturar);
 });
-ipcMain.handle("tela:capturar", (evento) => {
-  exigirJanelaPrincipal(evento);
+function capturarQuadroAtual() {
   if (!modoInvisivel) throw new Error("A captura de tela só funciona com o modo invisível ativo.");
   return capturarTela({
     desktopCapturer,
@@ -974,11 +1057,42 @@ ipcMain.handle("tela:capturar", (evento) => {
     janelaProtegida: process.platform === "win32" || process.platform === "darwin",
     registrar: (texto) => registrarNoLog("captura", texto),
   });
+}
+ipcMain.handle("tela:capturar", (evento) => {
+  exigirJanelaPrincipal(evento);
+  return capturarQuadroAtual();
+});
+ipcMain.handle("modo-invisivel:capturar-agora", (evento) => {
+  exigirJanelaPrincipal(evento);
+  return capturarQuadroAtual();
 });
 app.on("will-quit", () => {
   sairDoModoInvisivel();
   globalShortcut.unregisterAll();
 });
+
+// Escuta no modo invisível (electron/escutaDoModoInvisivel.js): responde ao
+// getDisplayMedia da tela principal com a tela do monitor da janela e o áudio
+// do sistema ("loopback", só no Windows). Recusa todo o resto. Sem permission
+// handlers: o getUserMedia do microfone (ditado) segue o padrão do Electron.
+function registrarEscutaDoModoInvisivel() {
+  try {
+    session.defaultSession.setDisplayMediaRequestHandler(
+      criarRespostaAoPedidoDeMidia({
+        desktopCapturer,
+        screen,
+        obterJanelaPrincipal: () => janelaPrincipal,
+        modoInvisivelAtivo: () => modoInvisivel !== null,
+        plataforma: process.platform,
+        registrar: (texto) => registrarNoLog("escuta", texto),
+      }),
+      // O seletor do sistema (só macOS 15+) ignoraria o handler; aqui não é usado.
+      { useSystemPicker: false },
+    );
+  } catch (erro) {
+    registrarNoLog("escuta", `Falha ao registrar a escuta do modo invisível: ${erro.message || erro}`);
+  }
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // IPC — configuração (usado pela tela principal).
@@ -1165,6 +1279,8 @@ if (!conseguiuLock) {
     // No Mac o ícone da janela não vale: o do Dock vem daqui fora do app empacotado.
     if (mac.ehMac && app.dock) app.dock.setIcon(path.join(__dirname, "icones", "icone.png"));
     licenca.iniciar(pastaDoUsuario());
+    // Antes de abrir a janela principal (a sessão só existe depois do ready).
+    registrarEscutaDoModoInvisivel();
     // Sem atualização o app ainda abre: a falha só vai para o log.
     try {
       prepararAtualizacao();
@@ -1195,10 +1311,23 @@ if (!conseguiuLock) {
   app.on("window-all-closed", () => {
     // No macOS o app continua vivo sem janelas; o before-quit encerra depois.
     if (process.platform === "darwin") return;
-    encerrarServidorAoFechar();
     app.quit();
   });
 
-  app.on("before-quit", encerrarServidorAoFechar);
+  // Segura o fechamento até o servidor se desligar (ou o limite passar); as
+  // janelas somem na hora. O "quit" fica como garantia.
+  let servidorDesligado = false;
+  app.on("before-quit", (evento) => {
+    if (servidorDesligado || !servidor.filho) {
+      encerrarServidorAoFechar();
+      return;
+    }
+    evento.preventDefault();
+    for (const janela of BrowserWindow.getAllWindows()) janela.hide();
+    desligarServidorComCalma().finally(() => {
+      servidorDesligado = true;
+      app.quit();
+    });
+  });
   app.on("quit", encerrarServidorAoFechar);
 }

@@ -2,6 +2,7 @@ import type { TipoDeImagem } from "../orquestracao/Anexo";
 import { copiarPergunta, PerguntaDoApp } from "../perguntas/PerguntaDoApp";
 import type { AcaoDoApp } from "./AcaoDoApp";
 import type { UsoDaResposta } from "./MotorDeChat";
+import { ehOrigemDaPergunta, OrigemDaPergunta } from "./OrigemDaPergunta";
 
 export type PapelNaConversa = "usuario" | "claude";
 
@@ -42,6 +43,11 @@ export interface DadosDaMensagemDoChat {
   uso: UsoDaResposta | null;
   /** Só numa resposta concluída; nulo em mensagens gravadas antes do campo. */
   autorizacaoPendente: AutorizacaoPendente | null;
+  /**
+   * Só numa pergunta que não foi digitada (ex.: detectada pela escuta). Ausente
+   * nas digitadas, nas respostas e nas mensagens gravadas antes do campo.
+   */
+  origem?: OrigemDaPergunta;
 }
 
 /**
@@ -64,10 +70,31 @@ export class MensagemDoChat {
     private avisosAtuais: readonly string[],
     private usoAtual: UsoDaResposta | null,
     private autorizacaoPendenteAtual: AutorizacaoPendente | null,
+    /** De onde veio a pergunta, quando não foi digitada; ausente nas demais mensagens. */
+    public readonly origem?: OrigemDaPergunta,
   ) {}
 
-  static pergunta(id: string, texto: string, imagens: readonly ImagemDaMensagem[], agora: Date): MensagemDoChat {
-    return new MensagemDoChat(id, "usuario", texto, [...imagens], agora.getTime(), "concluida", [], [], [], null, null);
+  static pergunta(
+    id: string,
+    texto: string,
+    imagens: readonly ImagemDaMensagem[],
+    agora: Date,
+    origem?: OrigemDaPergunta,
+  ): MensagemDoChat {
+    return new MensagemDoChat(
+      id,
+      "usuario",
+      texto,
+      [...imagens],
+      agora.getTime(),
+      "concluida",
+      [],
+      [],
+      [],
+      null,
+      null,
+      ehOrigemDaPergunta(origem) ? origem : undefined,
+    );
   }
 
   static resposta(id: string, agora: Date): MensagemDoChat {
@@ -87,6 +114,8 @@ export class MensagemDoChat {
       dados.avisos ?? [],
       dados.uso ?? null,
       copiarAutorizacaoPendente(dados.autorizacaoPendente ?? null),
+      // O arquivo pode trazer qualquer coisa: só uma origem conhecida sobrevive.
+      ehOrigemDaPergunta(dados.origem) ? dados.origem : undefined,
     );
   }
 
@@ -155,6 +184,8 @@ export class MensagemDoChat {
       avisos: [...this.avisosAtuais],
       uso: this.usoAtual === null ? null : { ...this.usoAtual },
       autorizacaoPendente: this.autorizacaoPendenteAtual === null ? null : { ...this.autorizacaoPendenteAtual },
+      // Só quando existe: as mensagens sem origem continuam com o mesmo formato de antes.
+      ...(this.origem === undefined ? {} : { origem: this.origem }),
     };
   }
 }

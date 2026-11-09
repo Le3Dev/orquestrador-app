@@ -115,8 +115,14 @@ function renderizar(resumo: ResumoDoOrquestrador, { trabalhando = false } = {}) 
   return { aoFechar, acoes: canvas.acoes, opcao: screen.getByRole("switch", { name: "Commit e push quando eu pedir" }) };
 }
 
-const chipDoEsforco = (dono: "do orquestrador" | "dos subagentes") =>
-  screen.getByRole("button", { name: new RegExp(`^Esforço ${dono}:`) });
+const menuDoModelo = (dono: "do orquestrador" | "dos subagentes") =>
+  screen.getByRole("button", { name: new RegExp(`^Modelo ${dono}:`) });
+/** Abre o menu do modelo, entra em "Esforço" e escolhe o nível (o menu continua aberto). */
+function escolherEsforco(dono: "do orquestrador" | "dos subagentes", nivel: string): void {
+  fireEvent.click(menuDoModelo(dono));
+  fireEvent.click(screen.getByRole("menuitem", { name: /^Esforço/ }));
+  fireEvent.click(screen.getByRole("menuitemradio", { name: nivel }));
+}
 const campoDasInstrucoes = () => screen.getByRole("textbox", { name: "Instruções" });
 
 describe("PainelDeConfiguracao", () => {
@@ -157,10 +163,9 @@ describe("PainelDeConfiguracao", () => {
     const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
     const { aoFechar } = renderizar(orquestrador({ esforcoDoOrquestrador: "alto" }));
 
-    expect(chipDoEsforco("do orquestrador")).toHaveTextContent("esforço alto");
-    expect(chipDoEsforco("dos subagentes")).toHaveTextContent("esforço automático");
-    fireEvent.click(chipDoEsforco("dos subagentes"));
-    fireEvent.click(screen.getByRole("option", { name: "Baixo" }));
+    expect(menuDoModelo("do orquestrador")).toHaveTextContent("esforço alto");
+    expect(menuDoModelo("dos subagentes")).toHaveTextContent("esforço padrão");
+    escolherEsforco("dos subagentes", "Baixo");
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
 
     await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
@@ -207,8 +212,7 @@ describe("PainelDeConfiguracao", () => {
     expect(screen.getByText("configuração · vale a partir do próximo pedido")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("radio", { name: "Somente leitura" }));
-    fireEvent.click(chipDoEsforco("do orquestrador"));
-    fireEvent.click(screen.getByRole("option", { name: "Alto" }));
+    escolherEsforco("do orquestrador", "Alto");
 
     expect(screen.getByText("Somente leitura, Opus (esforço alto) com até 3 subagentes Sonnet.")).toBeInTheDocument();
   });
@@ -283,10 +287,10 @@ describe("PainelDeConfiguracao", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Modo econômico" }));
 
-    await waitFor(() => expect(chipDoEsforco("do orquestrador")).toHaveTextContent("esforço médio"));
+    await waitFor(() => expect(menuDoModelo("do orquestrador")).toHaveTextContent("esforço médio"));
     expect(aplicarPredefinicao).toHaveBeenCalledWith("o1", "economico");
     expect(herdado).toHaveBeenCalledWith("o1");
-    expect(chipDoEsforco("dos subagentes")).toHaveTextContent("esforço médio");
+    expect(menuDoModelo("dos subagentes")).toHaveTextContent("esforço médio");
   });
 });
 
@@ -525,6 +529,33 @@ describe("NoTerminal", () => {
 
     expect(screen.getByRole("button", { name: "Nova conversa" })).toBeDisabled();
   });
+
+  it("trabalhando, a barra do terminal não mostra RAM nem etiqueta de situação; a borda brilha", () => {
+    const canvas: ValorDoCanvas = {
+      ...canvasDoTerminal(conversaDoTerminal()),
+      servidor: {
+        conectado: true,
+        caiuEm: null,
+        voltouEm: null,
+        reiniciou: false,
+        memoria: {
+          totalBytes: 32 * 1024 ** 3,
+          livreBytes: 16 * 1024 ** 3,
+          servidorBytes: 0,
+          agentesBytes: 224 * 1024 ** 2,
+          porOrquestrador: { o1: 224 * 1024 ** 2 },
+          lidaEm: "2026-10-28T12:00:05Z",
+        },
+      },
+    };
+    const { container } = render(<Terminal canvas={canvas} no={propsDoNo()} />);
+
+    const barra = container.querySelector<HTMLElement>(".barra-do-terminal");
+    expect(barra).not.toBeNull();
+    expect(barra).not.toHaveTextContent(/RAM/);
+    expect(barra).not.toHaveTextContent(/trabalhando|ocioso/i);
+    expect(container.querySelector(".janela-terminal")).toHaveClass("janela-terminal-ativa");
+  });
 });
 
 describe("NoTerminal · conversa nova", () => {
@@ -535,6 +566,56 @@ describe("NoTerminal · conversa nova", () => {
     render(<Terminal canvas={canvas} no={propsDoNo()} />);
     return { canvas, campo: screen.getByRole("textbox", { name: "Mensagem para o orquestrador" }) };
   }
+
+  describe("imagens anexadas", () => {
+    it("guarda o arquivo com miniatura blob: e libera a URL ao remover", async () => {
+      const criar = vi.spyOn(URL, "createObjectURL");
+      const revogar = vi.spyOn(URL, "revokeObjectURL");
+      const { campo } = renderizarOcioso();
+
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["png"], "tela.png", { type: "image/png" })] } });
+      const remover = await screen.findByRole("button", { name: "Remover tela.png" });
+      const previa = criar.mock.results[0]?.value as string;
+      expect(screen.getByAltText("tela.png")).toHaveAttribute("src", previa);
+      expect(revogar).not.toHaveBeenCalled();
+
+      fireEvent.click(remover);
+      expect(revogar).toHaveBeenCalledWith(previa);
+      expect(screen.queryByAltText("tela.png")).not.toBeInTheDocument();
+    });
+
+    it("gera o base64 só no envio, igual ao do arquivo, e libera a URL depois", async () => {
+      const enviar = vi.spyOn(api, "enviarMensagem").mockResolvedValue({ turnoId: "t1" });
+      const criar = vi.spyOn(URL, "createObjectURL");
+      const revogar = vi.spyOn(URL, "revokeObjectURL");
+      const { campo } = renderizarOcioso();
+
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["png"], "tela.png", { type: "image/png" })] } });
+      await screen.findByAltText("tela.png");
+      fireEvent.change(campo, { target: { value: "Veja" } });
+      fireEvent.keyDown(campo, { key: "Enter" });
+
+      // "cG5n" é o base64 de "png", como o FileReader gerava antes.
+      await waitFor(() =>
+        expect(enviar).toHaveBeenCalledWith("o1", "Veja", [{ nome: "tela.png", tipoDeMidia: "image/png", base64: "cG5n" }], "execucao"),
+      );
+      await waitFor(() => expect(revogar).toHaveBeenCalledWith(criar.mock.results[0]?.value));
+      await waitFor(() => expect(screen.queryByAltText("tela.png")).not.toBeInTheDocument());
+    });
+
+    it("libera as URLs ao desmontar", async () => {
+      const criar = vi.spyOn(URL, "createObjectURL");
+      const revogar = vi.spyOn(URL, "revokeObjectURL");
+      const canvas = canvasDoTerminal(conversaOciosa());
+      const { unmount } = render(<Terminal canvas={canvas} no={propsDoNo()} />);
+      const campo = screen.getByRole("textbox", { name: "Mensagem para o orquestrador" });
+
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["png"], "tela.png", { type: "image/png" })] } });
+      await screen.findByAltText("tela.png");
+      unmount();
+      expect(revogar).toHaveBeenCalledWith(criar.mock.results[0]?.value);
+    });
+  });
 
   it("/clear no prompt pede a conversa nova ao servidor, recarrega a lista e esvazia o campo", async () => {
     const limpar = vi.spyOn(api, "limparConversa").mockResolvedValue(orquestrador());

@@ -185,6 +185,8 @@ describe("BarraDeTituloDoApp", () => {
         sair: vi.fn().mockResolvedValue(undefined),
         capturarMouse: vi.fn().mockResolvedValue(undefined),
         capturarTela: vi.fn(),
+        capturarAgora: vi.fn(),
+        aoCapturarQuadro: vi.fn(() => () => undefined),
         aoMudar: vi.fn((callback: (ativo: boolean) => void) => {
           ouvinte = callback;
           return () => undefined;

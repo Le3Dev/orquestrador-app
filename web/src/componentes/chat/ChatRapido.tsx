@@ -11,8 +11,14 @@ import {
 } from "react";
 
 import { api, type ImagemParaEnvio, mensagemDeErro } from "../../shared/api/cliente";
-import type { AtividadeDaResposta, PreferenciasDoChat, ResumoDoOrquestrador } from "../../shared/api/tipos";
+import type {
+  AtividadeDaResposta,
+  OrigemDaPergunta,
+  PreferenciasDoChat,
+  ResumoDoOrquestrador,
+} from "../../shared/api/tipos";
 import { comandoDoPrompt, completarComando, dicaDeComando } from "../../shared/comandosDoPrompt";
+import { useEscuta } from "../../shared/escuta/useEscuta";
 import {
   type EstadoDoChatNaTela,
   type MensagemDoChatNaTela,
@@ -24,13 +30,26 @@ import { formatarBytes, formatarDuracao } from "../../shared/formatacao";
 import { useMelhorarPrompt } from "../../shared/hooks/useMelhorarPrompt";
 import { useModoInvisivel } from "../../shared/hooks/useModoInvisivel";
 import { LARGURA_DO_CHAT_FIXO, limitarLarguraDoChatFixo } from "../../shared/hooks/usePreferenciasDaTela";
-import { ehCapturaDeTela, type ImagemAnexada, lerImagem, MAXIMO_DE_IMAGENS, problemaDaImagem, TIPOS_DE_IMAGEM } from "../../shared/imagens";
+import {
+  ehCapturaDeTela,
+  type ImagemAnexada,
+  imagemDaCaptura,
+  imagensParaEnvio,
+  lerImagem,
+  liberarImagens,
+  MAXIMO_DE_IMAGENS,
+  problemaDaImagem,
+  TIPOS_DE_IMAGEM,
+} from "../../shared/imagens";
 import type { CapturaDeTela } from "../../shared/ponteDoDesktop";
 import { AvisoDaMelhoria, BotaoDeMelhorar } from "../MelhoriaDoPrompt";
 import { TextoFormatado } from "../TextoFormatado";
+import { AvisoDaEscuta } from "./AvisoDaEscuta";
 import { CartaoDeAcao, type PropsDasAcoesDoChat } from "./CartaoDeAcao";
 import { CartaoDeAutorizacao } from "./CartaoDeAutorizacao";
 import { CartaoDePergunta } from "./CartaoDePergunta";
+import { FaixaDaEscuta } from "./FaixaDaEscuta";
+import { IndicadorDaEscuta } from "./IndicadorDaEscuta";
 import { SeletorDeModelo } from "./SeletorDeModelo";
 import "../../theme/chat-lateral.css";
 
@@ -247,24 +266,20 @@ function descreverAtividade({ ferramenta, detalhe }: AtividadeDaResposta): strin
 interface PropsDaMensagem extends PropsDasAcoesDoChat {
   mensagem: MensagemDoChatNaTela;
   atividade: AtividadeDaResposta | null;
-  /** Modo invisível ativo: esconde as miniaturas das capturas de tela (só visual). */
-  ocultarCapturas: boolean;
 }
 
 /** Uma mensagem da conversa. Memorizada: só a resposta em andamento re-renderiza a cada trecho. */
 const MensagemNaConversa = memo(function MensagemNaConversa({
   mensagem,
   atividade,
-  ocultarCapturas,
   aoAbrirTerminal,
   temVagaPara,
   aoAtualizarOrquestradores,
   orquestradores,
 }: PropsDaMensagem) {
   if (mensagem.papel === "usuario") {
-    const imagensVisiveis = ocultarCapturas
-      ? mensagem.imagens.filter((imagem) => !ehCapturaDeTela(imagem.nome))
-      : mensagem.imagens;
+    // Capturas de tela seguem para o Claude, mas nunca viram miniatura (só visual).
+    const imagensVisiveis = mensagem.imagens.filter((imagem) => !ehCapturaDeTela(imagem.nome));
     return (
       <div className="mensagem-do-usuario">
         {imagensVisiveis.length > 0 && (
@@ -283,6 +298,11 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
           </div>
         )}
         {mensagem.texto !== "" && <p className="texto-longo">{mensagem.texto}</p>}
+        {mensagem.origem === "escuta" && (
+          <span className="selo-da-escuta" title="Pergunta detectada pela escuta do áudio, no modo invisível">
+            escuta
+          </span>
+        )}
       </div>
     );
   }
@@ -358,6 +378,11 @@ function assinaturaDaUltima(chat: EstadoDoChatNaTela): string {
  * Com `fixo`, o mesmo chat vira uma coluna à esquerda do canvas (`<aside>`):
  * conversa em bolhas sempre à vista, campo embaixo e "soltar" no lugar de "ocultar".
  * Com `aoMudarLargura`, a borda direita da coluna ganha a alça de largura.
+ *
+ * No modo invisível (com a escuta disponível), o áudio do computador é
+ * escutado: o indicador fica ao lado do 👁, a faixa da transcrição acima do
+ * composer e o aviso da primeira vez dentro do chat. As perguntas da escuta
+ * levam o selo "escuta"; com alterações autorizadas, vão para o campo.
  */
 export function ChatRapido({
   chat,
@@ -385,16 +410,30 @@ export function ChatRapido({
   const [emUso, setEmUso] = useState(false);
   const [menuAberto, setMenuAberto] = useState(false);
   const [revogando, setRevogando] = useState(false);
+  // De onde veio o texto do composer: "escuta" quando a escuta o pôs ali (chat com alterações autorizadas).
+  const [origemDoComposer, setOrigemDoComposer] = useState<OrigemDaPergunta | null>(null);
+  // Leitura síncrona do campo para a escuta: o callback dela é estável e não vê o estado novo.
+  const composerAtual = useRef({ texto, origem: origemDoComposer });
+  composerAtual.current = { texto, origem: origemDoComposer };
   const {
     disponivel: modoDisponivel,
     ativo: modoAtivo,
+    escutaDisponivel,
     entrar: entrarNoModo,
     capturarTela,
+    aoCapturarQuadro,
     mouseDaArea,
     sair: sairDoModo,
     erro: erroDoModo,
     descartarErro: descartarErroDoModo,
   } = useModoInvisivel();
+  // Contagem síncrona dos anexos pendentes: vários quadros podem chegar antes de renderizar.
+  const quantidadeDeImagens = useRef(0);
+  quantidadeDeImagens.current = imagens.length;
+  // As anexadas agora, para liberar as miniaturas (URLs `blob:`) ao enviar e ao desmontar.
+  const imagensAtuais = useRef(imagens);
+  imagensAtuais.current = imagens;
+  useEffect(() => () => liberarImagens(imagensAtuais.current), []);
   const campo = useRef<HTMLTextAreaElement>(null);
   const seletorDeArquivos = useRef<HTMLInputElement>(null);
   const rolagem = useRef<HTMLDivElement>(null);
@@ -406,13 +445,14 @@ export function ChatRapido({
   // Fixo à esquerda, a conversa nunca se oculta.
   const oculta = !fixo && ocultaEm !== null;
   const novidadeOculta = oculta && ocultaEm !== assinaturaDaUltima(chat);
+  const imagensVisiveis = imagens.filter((imagem) => !ehCapturaDeTela(imagem.nome));
   const temConteudo = texto.trim() !== "" || imagens.length > 0;
   const dica = dicaDeComando(texto, respondendo);
   const ultima = chat.mensagens.at(-1);
   const pedidoDeAutorizacao = pedidoDeAutorizacaoAtual(chat);
   // Compacto (uma linha) até a pessoa usar; recolhe só sem foco, texto, imagens nem menu aberto.
   // Fixo à esquerda, fica sempre expandido: a coluna é estreita para tudo numa linha.
-  const expandido = fixo || emUso || texto !== "" || imagens.length > 0 || menuAberto || arrastando;
+  const expandido = fixo || emUso || texto !== "" || imagensVisiveis.length > 0 || menuAberto || arrastando;
 
   // Recolhido, o campo volta à altura de uma linha.
   useEffect(() => {
@@ -439,6 +479,7 @@ export function ChatRapido({
 
   function limparCampo(): void {
     setTexto("");
+    setOrigemDoComposer(null);
     requestAnimationFrame(ajustarAltura);
   }
 
@@ -474,6 +515,33 @@ export function ChatRapido({
     [imagens.length],
   );
 
+  /** Guarda um quadro capturado (botão ou atalho) como anexo pendente, respeitando o limite. */
+  const adicionarQuadro = useCallback((captura: CapturaDeTela): void => {
+    if (quantidadeDeImagens.current >= MAXIMO_DE_IMAGENS) {
+      setErro(`Dá para anexar até ${MAXIMO_DE_IMAGENS} imagens por mensagem: o quadro não foi guardado.`);
+      return;
+    }
+    quantidadeDeImagens.current += 1;
+    setErro(null);
+    let imagem: ImagemAnexada;
+    try {
+      imagem = imagemDaCaptura(captura);
+    } catch (falha) {
+      quantidadeDeImagens.current -= 1;
+      setErro(`Não foi possível guardar o quadro: ${mensagemDeErro(falha)}`);
+      return;
+    }
+    setImagens((atuais) => [...atuais, imagem]);
+  }, []);
+
+  // Quadros do atalho global Ctrl+Shift+S (o app de trás mantém o foco).
+  useEffect(() => {
+    if (!modoAtivo) {
+      return undefined;
+    }
+    return aoCapturarQuadro(adicionarQuadro);
+  }, [modoAtivo, aoCapturarQuadro, adicionarQuadro]);
+
   async function limparConversa(): Promise<void> {
     // Durante a resposta o servidor recusaria: a dica já avisa.
     if (respondendo || enviando || desconectado) {
@@ -493,16 +561,23 @@ export function ChatRapido({
   }
 
   /**
-   * O envio de uma pergunta, do campo ou do cartão de autorização: mostra a
-   * conversa e volta a acompanhar o fim. Lança se o servidor recusar.
+   * O envio de uma pergunta, do campo, do cartão de autorização ou da escuta:
+   * mostra a conversa e volta a acompanhar o fim. Lança se o servidor recusar
+   * (o erro original, ex.: o 409 de outra resposta em andamento).
+   * `origem`: só nas perguntas que não foram digitadas (ex.: "escuta").
    */
   const enviarPergunta = useCallback(
-    async (pergunta: string, anexos: readonly ImagemParaEnvio[] = []): Promise<void> => {
+    async (
+      pergunta: string,
+      anexos: readonly ImagemParaEnvio[] = [],
+      opcoes: { origem?: OrigemDaPergunta } = {},
+    ): Promise<void> => {
       setEnviando(true);
       try {
         let todosOsAnexos = anexos;
-        // Modo invisível: a tela vai junto, fotografada agora. Sem a foto, nada é enviado.
-        if (modoAtivo) {
+        // Modo invisível: a tela vai junto, fotografada agora — a menos que já haja um quadro
+        // capturado (botão/atalho) entre os anexos. Sem a foto, nada é enviado.
+        if (modoAtivo && !anexos.some((anexo) => ehCapturaDeTela(anexo.nome))) {
           if (anexos.length >= MAXIMO_DE_IMAGENS) {
             throw new Error(
               `No modo invisível a tela ocupa uma das ${MAXIMO_DE_IMAGENS} imagens: remova uma imagem anexada.`,
@@ -519,7 +594,12 @@ export function ChatRapido({
             { nome: captura.nome, tipoDeMidia: captura.tipoDeMidia, base64: captura.base64 },
           ];
         }
-        await api.perguntarNoChat(pergunta, todosOsAnexos);
+        // Sem origem, a chamada segue como sempre (sem o terceiro argumento).
+        if (opcoes.origem === undefined) {
+          await api.perguntarNoChat(pergunta, todosOsAnexos);
+        } else {
+          await api.perguntarNoChat(pergunta, todosOsAnexos, { origem: opcoes.origem });
+        }
         setOcultaEm(null);
         setPedidoDeCancelar(false);
         acompanhando.current = true;
@@ -529,6 +609,45 @@ export function ChatRapido({
     },
     [modoAtivo, capturarTela],
   );
+
+  /** A pergunta detectada pela escuta vai como a do campo, com o print e a origem; rejeita com o erro original. */
+  const enviarDaEscuta = useCallback(
+    (pergunta: string): Promise<void> => enviarPergunta(pergunta, [], { origem: "escuta" }),
+    [enviarPergunta],
+  );
+
+  /**
+   * Com alterações autorizadas, a pergunta da escuta só vai para o campo: o usuário confere e aperta Enter.
+   * Não apaga um rascunho digitado: só troca o campo vazio ou o que a própria escuta pôs ali
+   * (a pergunta segue visível na faixa como "última pergunta").
+   */
+  const preencherComposerDaEscuta = useCallback((pergunta: string): void => {
+    const atual = composerAtual.current;
+    if (atual.texto.trim() !== "" && atual.origem !== "escuta") {
+      return;
+    }
+    composerAtual.current = { texto: pergunta, origem: "escuta" };
+    setTexto(pergunta);
+    setOrigemDoComposer("escuta");
+    requestAnimationFrame(() => {
+      const elemento = campo.current;
+      if (elemento !== null) {
+        elemento.style.height = "auto";
+        elemento.style.height = `${Math.min(elemento.scrollHeight, ALTURA_MAXIMA_DO_CAMPO)}px`;
+      }
+    });
+  }, []);
+
+  // A escuta do áudio liga sozinha no modo invisível (depois do aviso da primeira vez) e para ao sair.
+  const escuta = useEscuta({
+    modoInvisivelAtivo: modoAtivo,
+    escutaDisponivel,
+    chatLivre: !respondendo && !enviando && !desconectado && !melhoria.melhorando,
+    autorizacaoAtiva: chat.alteracoesAutorizadas,
+    enviar: enviarDaEscuta,
+    preencherComposer: preencherComposerDaEscuta,
+  });
+  const comEscuta = modoAtivo && escutaDisponivel;
 
   async function enviar(): Promise<void> {
     // "/clear" é um comando, não uma pergunta.
@@ -543,11 +662,26 @@ export function ChatRapido({
     try {
       // Só imagens, sem texto: o servidor exige uma pergunta, então vai uma padrão.
       const pergunta = texto.trim() === "" ? "Analise as imagens anexadas." : texto;
+      // O base64 só nasce aqui; o "enviando" já vale enquanto ele é gerado.
+      let anexos: ImagemParaEnvio[] = [];
+      if (imagens.length > 0) {
+        setEnviando(true);
+        try {
+          anexos = await imagensParaEnvio(imagens);
+        } catch (falha) {
+          setEnviando(false);
+          throw falha;
+        }
+      }
       await enviarPergunta(
         pergunta,
-        imagens.map((imagem) => ({ nome: imagem.nome, tipoDeMidia: imagem.tipoDeMidia, base64: imagem.base64 })),
+        anexos,
+        // A pergunta que a escuta pôs no campo leva o selo, mesmo que o usuário a tenha retocado.
+        origemDoComposer === null ? {} : { origem: origemDoComposer },
       );
       limparCampo();
+      // As enviadas (e as que chegaram durante o envio, que também saem) liberam a miniatura.
+      liberarImagens(imagensAtuais.current);
       setImagens([]);
     } catch (falha) {
       setErro(mensagemDeErro(falha));
@@ -737,7 +871,6 @@ export function ChatRapido({
               <Fragment key={mensagem.id}>
                 <MensagemNaConversa
                   mensagem={mensagem}
-                  ocultarCapturas={modoAtivo}
                   atividade={mensagem.situacao === "respondendo" ? chat.atividade : null}
                   aoAbrirTerminal={aoAbrirTerminal}
                   temVagaPara={temVagaPara}
@@ -783,44 +916,30 @@ export function ChatRapido({
         </button>
       )}
 
-      {modoAtivo && (
-        <div className="faixa-modo-invisivel" data-testid="faixa-modo-invisivel">
-          <span
-            className="indicador-tela-vista"
-            role="status"
-            title="O Claude vê a sua tela a cada pergunta do chat: uma foto dela vai junto"
-          >
-            <span className="ponto-tela-vista" aria-hidden="true" />
-            Tela sendo vista
-          </span>
-          <span className="selo-tela-junto">a tela vai junto</span>
-          <span className="flex-1" />
-          <button
-            type="button"
-            className="botao-modo-invisivel botao-modo-invisivel-ativo"
-            onClick={() => void sairDoModo()}
-            title="Voltar ao modo normal (Ctrl+Shift+I)"
-          >
-            Voltar ao modo normal
-          </button>
-          {erroDoModo !== null && (
-            <p className="hint-error texto-longo faixa-modo-invisivel-erro" role="alert">
-              {erroDoModo}{" "}
-              <button type="button" className="btn btn-sm btn-ghost" onClick={descartarErroDoModo}>
-                fechar
-              </button>
-            </p>
-          )}
-        </div>
-      )}
-
-      {!modoAtivo && erroDoModo !== null && (
+      {erroDoModo !== null && (
         <p className="hint-error texto-longo" role="alert">
           {erroDoModo}{" "}
           <button type="button" className="btn btn-sm btn-ghost" onClick={descartarErroDoModo}>
             fechar
           </button>
         </p>
+      )}
+
+      {/* Escuta do áudio: dentro do .chat-rapido, a única área que recebe cliques no modo invisível. */}
+      {comEscuta && escuta.precisaDoAviso && (
+        <AvisoDaEscuta aoConfirmar={escuta.confirmarAviso} aoRecusar={escuta.recusarAviso} />
+      )}
+      {comEscuta && (
+        <FaixaDaEscuta
+          situacao={escuta.situacao}
+          progressoDoDownload={escuta.progressoDoDownload}
+          linhas={escuta.linhas}
+          automatico={escuta.automatico}
+          alternarAutomatico={escuta.alternarAutomatico}
+          erro={escuta.erro}
+          descartarErro={escuta.descartarErro}
+          ultimaPergunta={escuta.ultimaPergunta}
+        />
       )}
 
       <div className="moldura-do-composer">
@@ -840,9 +959,9 @@ export function ChatRapido({
           }}
         >
           {respondendo && !desconectado && <div className="faixa-de-progresso" />}
-          {imagens.length > 0 && (
+          {imagensVisiveis.length > 0 && (
             <div className="miniaturas-do-prompt">
-              {imagens.map((imagem) => (
+              {imagensVisiveis.map((imagem) => (
                 <figure
                   key={imagem.id}
                   className="miniatura"
@@ -853,7 +972,10 @@ export function ChatRapido({
                     type="button"
                     className="miniatura-remover"
                     aria-label={`Remover ${imagem.nome}`}
-                    onClick={() => setImagens((atuais) => atuais.filter((item) => item.id !== imagem.id))}
+                    onClick={() => {
+                      liberarImagens([imagem]);
+                      setImagens((atuais) => atuais.filter((item) => item.id !== imagem.id));
+                    }}
                   >
                     ✕
                   </button>
@@ -870,6 +992,10 @@ export function ChatRapido({
             aria-busy={melhoria.melhorando}
             onChange={(evento) => {
               setTexto(evento.target.value);
+              // Apagar o campo tira a marca da escuta: o que for escrito depois é do usuário.
+              if (evento.target.value === "") {
+                setOrigemDoComposer(null);
+              }
               ajustarAltura();
             }}
             onFocus={() => setEmUso(true)}
@@ -881,6 +1007,11 @@ export function ChatRapido({
           {dica !== null && (
             <p className="mono hint px-3" role="status">
               {dica}
+            </p>
+          )}
+          {origemDoComposer === "escuta" && (
+            <p className="hint nota-da-escuta px-3" data-testid="nota-da-escuta">
+              Pergunta da escuta: confira e aperte Enter
             </p>
           )}
           <AvisoDaMelhoria melhoria={melhoria} className="px-3" />
@@ -934,16 +1065,31 @@ export function ChatRapido({
               </span>
             )}
             <span className="flex-1" />
-            {modoDisponivel && !modoAtivo && (
+            {modoDisponivel && (
               <button
                 type="button"
                 className="botao-icone botao-entrar-modo-invisivel"
                 aria-label="Modo invisível"
-                title="Modo invisível: janela transparente, só o chat rápido; o Claude vê a tela a cada pergunta (Ctrl+Shift+I para sair)"
-                onClick={() => void entrarNoModo()}
+                aria-pressed={modoAtivo}
+                title={
+                  modoAtivo
+                    ? "Tela sendo vista — clique para voltar ao modo normal (Ctrl+Shift+I)"
+                    : "Modo invisível: janela transparente, só o chat rápido; o Claude vê a tela a cada pergunta (Ctrl+Shift+I para sair)"
+                }
+                onClick={() => void (modoAtivo ? sairDoModo() : entrarNoModo())}
               >
                 👁
+                {modoAtivo && <span className="ponto-tela-vista" aria-hidden="true" />}
               </button>
+            )}
+            {comEscuta && (
+              <IndicadorDaEscuta
+                situacao={escuta.situacao}
+                progressoDoDownload={escuta.progressoDoDownload}
+                erro={escuta.erro}
+                pausar={escuta.pausar}
+                retomar={escuta.retomar}
+              />
             )}
             <SeletorDeModelo
               preferencias={chat.preferencias}

@@ -18,10 +18,14 @@ describe("useModoInvisivel", () => {
       sair: vi.fn().mockResolvedValue(undefined),
       capturarMouse: vi.fn().mockResolvedValue(undefined),
       capturarTela: vi.fn().mockResolvedValue({ nome: "tela.jpg", tipoDeMidia: "image/jpeg", base64: "AAA" }),
+      capturarAgora: vi.fn().mockResolvedValue({ nome: "tela-agora.jpg", tipoDeMidia: "image/jpeg", base64: "BBB" }),
+      aoCapturarQuadro: vi.fn(() => () => undefined),
       aoMudar: vi.fn((callback: (ativo: boolean) => void) => {
         ouvinte = callback;
         return cancelar;
       }),
+      estaAtivo: vi.fn().mockResolvedValue(false),
+      escutaDisponivel: true,
       ...sobrescritas,
     };
     janelaComPonte.electron = { desktop: true, janela: {}, modoInvisivel };
@@ -33,10 +37,23 @@ describe("useModoInvisivel", () => {
 
     expect(result.current.disponivel).toBe(false);
     expect(result.current.ativo).toBe(false);
+    expect(result.current.escutaDisponivel).toBe(false);
     await act(() => result.current.entrar());
     expect(result.current.erro).toBeNull();
     result.current.mouseDaArea.onMouseEnter();
     await expect(result.current.capturarTela()).rejects.toThrow();
+    await expect(result.current.capturarAgora()).rejects.toThrow();
+    expect(result.current.aoCapturarQuadro(vi.fn())()).toBeUndefined();
+  });
+
+  it("capturarAgora e aoCapturarQuadro repassam à ponte", async () => {
+    const { modoInvisivel } = ponte();
+    const { result } = renderHook(() => useModoInvisivel());
+
+    await expect(result.current.capturarAgora()).resolves.toMatchObject({ base64: "BBB" });
+    const callback = vi.fn();
+    result.current.aoCapturarQuadro(callback);
+    expect(modoInvisivel.aoCapturarQuadro).toHaveBeenCalledWith(callback);
   });
 
   it("acompanha o aviso do processo principal (inclusive a saída pelo atalho) e cancela ao desmontar", () => {
@@ -120,6 +137,83 @@ describe("useModoInvisivel", () => {
 
     expect(modoInvisivel.entrar).toHaveBeenCalledTimes(1);
     expect(modoInvisivel.capturarMouse).not.toHaveBeenCalled();
+  });
+
+  it("remontado com o modo já ligado, começa ativo pela consulta ao processo principal", async () => {
+    const { avisar, modoInvisivel } = ponte();
+    const primeiro = renderHook(() => useModoInvisivel());
+    avisar(true);
+    expect(primeiro.result.current.ativo).toBe(true);
+    primeiro.unmount();
+
+    // O chat rápido remonta (fixo ↔ flutuante) sem receber novo aviso.
+    modoInvisivel.estaAtivo.mockResolvedValue(true);
+    const { result } = renderHook(() => useModoInvisivel());
+
+    await waitFor(() => expect(result.current.ativo).toBe(true));
+    expect(modoInvisivel.estaAtivo).toHaveBeenCalledTimes(2);
+  });
+
+  it("o aviso que chega antes da resposta da consulta vence", async () => {
+    let responderConsulta: (ativo: boolean) => void = () => undefined;
+    const consulta = new Promise<boolean>((resolver) => {
+      responderConsulta = resolver;
+    });
+    const { avisar } = ponte({ estaAtivo: vi.fn(() => consulta) });
+    const { result } = renderHook(() => useModoInvisivel());
+
+    avisar(true);
+    avisar(false);
+    // A consulta foi feita antes da saída e responde depois, já desatualizada.
+    await act(async () => {
+      responderConsulta(true);
+      await consulta;
+    });
+
+    expect(result.current.ativo).toBe(false);
+  });
+
+  it("erro na consulta (assíncrono ou síncrono) mantém desligado sem quebrar o hook", async () => {
+    const assincrono = ponte({ estaAtivo: vi.fn().mockRejectedValue(new Error("sem janela principal")) });
+    const { result, unmount } = renderHook(() => useModoInvisivel());
+    await waitFor(() => expect(assincrono.modoInvisivel.estaAtivo).toHaveBeenCalled());
+    await act(async () => undefined);
+    expect(result.current.ativo).toBe(false);
+    expect(result.current.erro).toBeNull();
+    unmount();
+
+    const sincrono = ponte({
+      estaAtivo: vi.fn(() => {
+        throw new Error("canal ausente");
+      }),
+    });
+    const segundo = renderHook(() => useModoInvisivel());
+    await act(async () => undefined);
+    expect(segundo.result.current.ativo).toBe(false);
+    sincrono.avisar(true);
+    expect(segundo.result.current.ativo).toBe(true);
+  });
+
+  it("ponte sem a consulta (mock antigo) conta como desligado, e o aviso continua valendo", async () => {
+    const { avisar } = ponte({ estaAtivo: undefined, escutaDisponivel: undefined });
+    const { result } = renderHook(() => useModoInvisivel());
+
+    await act(async () => undefined);
+    expect(result.current.ativo).toBe(false);
+    expect(result.current.escutaDisponivel).toBe(false);
+    avisar(true);
+    expect(result.current.ativo).toBe(true);
+  });
+
+  it("escutaDisponivel repassa a ponte (só o Windows tem a escuta)", () => {
+    ponte({ escutaDisponivel: false });
+    const semEscuta = renderHook(() => useModoInvisivel());
+    expect(semEscuta.result.current.escutaDisponivel).toBe(false);
+    semEscuta.unmount();
+
+    ponte();
+    const comEscuta = renderHook(() => useModoInvisivel());
+    expect(comEscuta.result.current.escutaDisponivel).toBe(true);
   });
 
   it("capturarTela devolve a foto da ponte", async () => {

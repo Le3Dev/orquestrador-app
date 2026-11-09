@@ -15,6 +15,7 @@ import { ConsumoDoTurno } from "../orquestracao/ConsumoDoTurno";
 import { ConsultaDeEsforcoHerdado } from "../orquestracao/EsforcoDaMaquina";
 import { EsforcoHerdado } from "../orquestracao/EsforcoHerdado";
 import { EventoDeOrquestracao, EventoDoMotor, EventoRegistrado } from "../orquestracao/EventoDeOrquestracao";
+import { REGRA_DOS_SERVIDORES_UNIX, REGRA_DOS_SERVIDORES_WINDOWS } from "../orquestracao/InstrucoesDoOrquestrador";
 import { UsoDeTokens } from "../orquestracao/UsoDeTokens";
 import { MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "../orquestracao/MotorDeAgentes";
 import { Orquestrador } from "../orquestracao/Orquestrador";
@@ -858,6 +859,46 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(resposta.status).toBe(200);
       const previa = (await resposta.json()) as { instrucoesIniciais: string };
       expect(previa.instrucoesIniciais).toContain(`Pasta de trabalho: ${fora}`);
+    });
+
+    it("a prévia mostra a regra dos servidores da plataforma do computador", async () => {
+      const comComandos = { ...configuracaoBasica, nivelDePermissao: "edicao_e_comandos" };
+      const aplicacao = express();
+      aplicacao.use(express.json());
+      aplicacao.use(
+        "/api",
+        criarOrquestradoresRoutes({
+          servico,
+          repositorio,
+          canal: new CanalDeEventos(),
+          explorador,
+          anexos: new ArmazemDeAnexosEmArquivo(path.join(tmpdir(), "orquestrador-rotas-teste")),
+          preferencias,
+          pastaRaiz: raiz,
+          plataforma: "windows",
+        }),
+      );
+      const noWindows = aplicacao.listen(0, "127.0.0.1");
+      await once(noWindows, "listening");
+      try {
+        const resposta = await fetch(`http://127.0.0.1:${(noWindows.address() as AddressInfo).port}/api/previa-do-prompt`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ configuracao: comComandos }),
+        });
+        const previa = (await resposta.json()) as { mensagem: string };
+        expect(previa.mensagem).toContain(`- ${REGRA_DOS_SERVIDORES_WINDOWS}`);
+        expect(previa.mensagem).not.toContain(REGRA_DOS_SERVIDORES_UNIX);
+      } finally {
+        noWindows.close();
+        await once(noWindows, "close");
+      }
+
+      // Sem a plataforma nas dependências, vale a do unix.
+      const padrao = (await (await postar("/previa-do-prompt", { configuracao: comComandos })).json()) as {
+        mensagem: string;
+      };
+      expect(padrao.mensagem).toContain(`- ${REGRA_DOS_SERVIDORES_UNIX}`);
     });
   });
 });

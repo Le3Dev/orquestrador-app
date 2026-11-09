@@ -15,6 +15,17 @@ function tamanhoReduzido(tamanho) {
   return { width: LARGURA_MAXIMA, height: Math.max(1, Math.round((altura * LARGURA_MAXIMA) / largura)) };
 }
 
+// O monitor onde está a janela (o que tem a maior área em comum com ela).
+function monitorDaJanela(screen, janela) {
+  return screen.getDisplayMatching(janela.getBounds());
+}
+
+// A fonte "screen" do desktopCapturer que corresponde ao monitor, ou null.
+function fonteDoMonitor(fontes, monitor) {
+  const alvo = String(monitor.id);
+  return (fontes || []).find((f) => String(f.display_id) === alvo) || null;
+}
+
 function paraJpeg(imagem) {
   let buffer = imagem.toJPEG(QUALIDADE_INICIAL);
   for (const qualidade of QUALIDADES_REDUZIDAS) {
@@ -34,7 +45,7 @@ function paraJpeg(imagem) {
  * @param {() => Date} [p.agora]
  */
 async function capturarTela({ desktopCapturer, screen, janela, janelaProtegida, registrar, agora = () => new Date() }) {
-  const display = screen.getDisplayMatching(janela.getBounds());
+  const display = monitorDaJanela(screen, janela);
   const tamanho = tamanhoReduzido(display.size || display.bounds);
 
   const esconder = !janelaProtegida && typeof janela.setOpacity === "function";
@@ -47,7 +58,7 @@ async function capturarTela({ desktopCapturer, screen, janela, janelaProtegida, 
   }
 
   const alvo = String(display.id);
-  const fonte = (fontes || []).find((f) => String(f.display_id) === alvo);
+  const fonte = fonteDoMonitor(fontes, display);
   if (!fonte) throw new Error("Não foi possível capturar a tela onde a janela está.");
   if (!fonte.thumbnail || fonte.thumbnail.isEmpty?.()) throw new Error("A captura da tela veio vazia.");
 
@@ -58,4 +69,4 @@ async function capturarTela({ desktopCapturer, screen, janela, janelaProtegida, 
   return { nome: `tela-${carimbo}.jpg`, tipoDeMidia: "image/jpeg", base64: buffer.toString("base64") };
 }
 
-module.exports = { capturarTela, tamanhoReduzido, LARGURA_MAXIMA, LIMITE_DE_BYTES };
+module.exports = { capturarTela, tamanhoReduzido, monitorDaJanela, fonteDoMonitor, LARGURA_MAXIMA, LIMITE_DE_BYTES };

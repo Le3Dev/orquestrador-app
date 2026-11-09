@@ -41,9 +41,20 @@ function renderizar(alteracoes: Partial<DadosDaConfiguracao> = {}, extras: Extra
   return { aoMudar, commit: screen.getByRole("switch", { name: "Commit e push quando eu pedir" }) };
 }
 
-const chipDoEsforco = (dono: "do orquestrador" | "dos subagentes") =>
-  screen.getByRole("button", { name: new RegExp(`^Esforço ${dono}:`) });
-const chipDaQuantidade = () => screen.getByRole("button", { name: /^Subagentes:/ });
+type Dono = "do orquestrador" | "dos subagentes";
+const menuDoModelo = (dono: Dono) => screen.getByRole("button", { name: new RegExp(`^Modelo ${dono}:`) });
+/** Abre o menu do modelo e escolhe o modelo (o menu fecha). */
+function escolherModelo(dono: Dono, nome: RegExp): void {
+  fireEvent.click(menuDoModelo(dono));
+  fireEvent.click(screen.getByRole("menuitemradio", { name: nome }));
+}
+/** Abre o menu do modelo, entra em "Esforço" e escolhe o nível (o menu continua aberto). */
+function escolherEsforco(dono: Dono, nivel: string): void {
+  fireEvent.click(menuDoModelo(dono));
+  fireEvent.click(screen.getByRole("menuitem", { name: /^Esforço/ }));
+  fireEvent.click(screen.getByRole("menuitemradio", { name: nivel }));
+  fireEvent.keyDown(document, { key: "Escape" });
+}
 
 const ECONOMICO: DadosDaPredefinicao = {
   nome: "economico",
@@ -75,11 +86,13 @@ describe("CamposDaConfiguracao", () => {
     renderizar();
 
     expect(screen.getByRole("radiogroup", { name: "Permissão" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Orquestrador" })).toHaveValue("opus");
-    expect(screen.getByRole("combobox", { name: "Subagentes" })).toHaveValue("sonnet");
-    expect(chipDoEsforco("do orquestrador")).toHaveTextContent("esforço automático");
-    expect(chipDoEsforco("dos subagentes")).toHaveTextContent("esforço automático");
-    expect(chipDaQuantidade()).toHaveTextContent("até 3 por vez");
+    expect(menuDoModelo("do orquestrador")).toHaveTextContent("Opus 5.5");
+    expect(menuDoModelo("dos subagentes")).toHaveTextContent("Sonnet 5.5");
+    expect(menuDoModelo("do orquestrador")).toHaveTextContent("esforço padrão");
+    expect(menuDoModelo("dos subagentes")).toHaveTextContent("esforço padrão");
+    expect(screen.getByRole("radiogroup", { name: "Quantidade de subagentes" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Máximo")).toHaveValue(3);
+    expect(screen.getByRole("textbox", { name: "Instruções" }).closest(".linha-da-criacao")).toHaveClass("linha-instrucoes");
     expect(screen.getByRole("textbox", { name: "Instruções" })).toBeInTheDocument();
     expect(screen.queryByRole("combobox", { name: "Pasta de trabalho" })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Nome" })).not.toBeInTheDocument();
@@ -115,49 +128,50 @@ describe("CamposDaConfiguracao", () => {
   });
 
   describe("modelo", () => {
-    it("oferece Fable, Opus, Sonnet e Haiku nos dois seletores, e muda só aquele modelo", () => {
+    it("oferece Fable, Opus, Sonnet e Haiku nos dois menus, e muda só aquele modelo", () => {
       const { aoMudar } = renderizar();
 
-      for (const nome of ["Orquestrador", "Subagentes"]) {
-        expect(
-          within(screen.getByRole("combobox", { name: nome }))
-            .getAllByRole("option")
-            .map((opcao) => opcao.getAttribute("value")),
-        ).toEqual(["fable", "opus", "sonnet", "haiku"]);
+      for (const dono of ["do orquestrador", "dos subagentes"] as const) {
+        fireEvent.click(menuDoModelo(dono));
+        expect(screen.getAllByRole("menuitemradio")).toHaveLength(4);
+        fireEvent.keyDown(document, { key: "Escape" });
       }
 
-      fireEvent.change(screen.getByRole("combobox", { name: "Orquestrador" }), { target: { value: "fable" } });
+      escolherModelo("do orquestrador", /^Fable/);
       expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, modeloDoOrquestrador: "fable" });
 
-      fireEvent.change(screen.getByRole("combobox", { name: "Subagentes" }), { target: { value: "haiku" } });
+      escolherModelo("dos subagentes", /^Haiku/);
       expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, modeloDoOrquestrador: "fable", modeloDosSubagentes: "haiku" });
     });
   });
 
   describe("esforço", () => {
-    it("mostra o esforço já escolhido nos chips", () => {
+    it("mostra o esforço já escolhido no botão do menu", () => {
       renderizar({ esforcoDoOrquestrador: "extra_alto", esforcoDosSubagentes: "baixo" });
 
-      expect(chipDoEsforco("do orquestrador")).toHaveTextContent("esforço extra alto");
-      expect(chipDoEsforco("dos subagentes")).toHaveTextContent("esforço baixo");
+      expect(menuDoModelo("do orquestrador")).toHaveTextContent("esforço extra alto");
+      expect(menuDoModelo("dos subagentes")).toHaveTextContent("esforço baixo");
     });
 
     it("Ultracode só no menu do orquestrador; escolher muda só o esforço correspondente", () => {
       const { aoMudar } = renderizar();
 
-      fireEvent.click(chipDoEsforco("do orquestrador"));
-      const doOrquestrador = screen.getByRole("listbox", { name: "Esforço do orquestrador" });
-      expect(within(doOrquestrador).getAllByRole("option")).toHaveLength(7);
-      expect(within(doOrquestrador).getAllByRole("option").at(-1)).toHaveTextContent("Ultracode");
-      fireEvent.click(within(doOrquestrador).getByRole("option", { name: "Máximo" }));
+      fireEvent.click(menuDoModelo("do orquestrador"));
+      fireEvent.click(screen.getByRole("menuitem", { name: /^Esforço/ }));
+      const doOrquestrador = screen.getByRole("menu", { name: "Esforço" });
+      expect(within(doOrquestrador).getAllByRole("menuitemradio")).toHaveLength(7);
+      expect(within(doOrquestrador).getAllByRole("menuitemradio").at(-1)).toHaveTextContent("Ultracode");
+      fireEvent.click(within(doOrquestrador).getByRole("menuitemradio", { name: "Máximo" }));
       expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, esforcoDoOrquestrador: "maximo" });
-      expect(chipDoEsforco("do orquestrador")).toHaveTextContent("esforço máximo");
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(menuDoModelo("do orquestrador")).toHaveTextContent("esforço máximo");
 
-      fireEvent.click(chipDoEsforco("dos subagentes"));
-      const dosSubagentes = screen.getByRole("listbox", { name: "Esforço dos subagentes" });
-      expect(within(dosSubagentes).getAllByRole("option")).toHaveLength(6);
-      expect(within(dosSubagentes).queryByRole("option", { name: "Ultracode" })).not.toBeInTheDocument();
-      fireEvent.click(within(dosSubagentes).getByRole("option", { name: "Médio" }));
+      fireEvent.click(menuDoModelo("dos subagentes"));
+      fireEvent.click(screen.getByRole("menuitem", { name: /^Esforço/ }));
+      const dosSubagentes = screen.getByRole("menu", { name: "Esforço" });
+      expect(within(dosSubagentes).getAllByRole("menuitemradio")).toHaveLength(6);
+      expect(within(dosSubagentes).queryByRole("menuitemradio", { name: "Ultracode" })).not.toBeInTheDocument();
+      fireEvent.click(within(dosSubagentes).getByRole("menuitemradio", { name: "Médio" }));
       expect(aoMudar).toHaveBeenLastCalledWith({
         ...configuracao,
         esforcoDoOrquestrador: "maximo",
@@ -165,51 +179,36 @@ describe("CamposDaConfiguracao", () => {
       });
     });
 
-    it("com Ultracode escolhido, avisa do custo; o × volta ao automático", () => {
+    it("com Ultracode escolhido, avisa do custo; voltar ao Padrão tira o aviso", () => {
       const { aoMudar } = renderizar();
 
       expect(screen.queryByText(/Ultracode dispara workflows/)).not.toBeInTheDocument();
-      fireEvent.click(chipDoEsforco("do orquestrador"));
-      fireEvent.click(screen.getByRole("option", { name: "Ultracode" }));
+      escolherEsforco("do orquestrador", "Ultracode");
 
       expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, esforcoDoOrquestrador: "ultracode" });
       expect(screen.getByText(/Ultracode dispara workflows com vários agentes em paralelo/)).toHaveClass("hint-warning");
 
-      fireEvent.click(screen.getByRole("button", { name: "Voltar o esforço do orquestrador ao automático" }));
+      escolherEsforco("do orquestrador", "Padrão");
       expect(aoMudar).toHaveBeenLastCalledWith(configuracao);
       expect(screen.queryByText(/Ultracode dispara workflows/)).not.toBeInTheDocument();
     });
-
-    it("só um menu fica aberto por vez", () => {
-      renderizar();
-
-      fireEvent.click(chipDoEsforco("do orquestrador"));
-      fireEvent.click(chipDoEsforco("dos subagentes"));
-      expect(screen.getAllByRole("listbox")).toHaveLength(1);
-      expect(screen.getByRole("listbox", { name: "Esforço dos subagentes" })).toBeInTheDocument();
-
-      fireEvent.click(chipDaQuantidade());
-      expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
-      expect(screen.getByRole("dialog", { name: "Quantos subagentes" })).toBeInTheDocument();
-    });
   });
 
-  it("quantidade: fixa ou automática, de 1 a 10, e o × volta ao padrão", () => {
+  it("quantidade: automática ou fixa, de 1 a 10", () => {
     const { aoMudar } = renderizar();
 
-    fireEvent.click(chipDaQuantidade());
-    fireEvent.click(screen.getByRole("button", { name: "Sempre" }));
+    fireEvent.click(screen.getByRole("radio", { name: /Fixa/ }));
     expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, quantidadeDeSubagentes: { modo: "fixa", limite: 3 } });
-    fireEvent.click(screen.getByRole("button", { name: "Mais subagentes" }));
-    expect(chipDaQuantidade()).toHaveTextContent("sempre 4");
+    fireEvent.click(screen.getByRole("button", { name: "Aumentar" }));
+    expect(screen.getByLabelText("Quantidade")).toHaveValue(4);
     for (let i = 0; i < 12; i++) {
-      fireEvent.click(screen.getByRole("button", { name: "Mais subagentes" }));
+      fireEvent.click(screen.getByRole("button", { name: "Aumentar" }));
     }
-    expect(screen.getByRole("button", { name: "Mais subagentes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Aumentar" })).toBeDisabled();
     expect(aoMudar).toHaveBeenLastCalledWith({ ...configuracao, quantidadeDeSubagentes: { modo: "fixa", limite: 10 } });
 
-    fireEvent.click(screen.getByRole("button", { name: "Voltar a quantidade ao padrão, até 3 por vez" }));
-    expect(chipDaQuantidade()).toHaveTextContent("até 3 por vez");
+    fireEvent.click(screen.getByRole("radio", { name: /Automática/ }));
+    expect(screen.getByLabelText("Máximo")).toHaveValue(10);
   });
 
   describe("aviso de esforço herdado", () => {
@@ -222,11 +221,11 @@ describe("CamposDaConfiguracao", () => {
       expect(texto).toHaveTextContent("Extra alto");
       expect(texto).toHaveTextContent("~/.claude/settings.json");
       expect(screen.getAllByText(aviso)).toHaveLength(1);
-      // O aviso fica na coluna do orquestrador, junto do chip dele.
-      expect(within(texto.parentElement!).getByRole("button", { name: /^Esforço do orquestrador:/ })).toBeInTheDocument();
+      // O aviso fica na coluna do orquestrador, junto do menu dele.
+      expect(within(texto.parentElement!).getByRole("button", { name: /^Modelo do orquestrador:/ })).toBeInTheDocument();
     });
 
-    it("com um nível escolhido no chip, não avisa", async () => {
+    it("com um nível escolhido, não avisa", async () => {
       const buscar = vi.fn(async () => HERDADO_EXTRA_ALTO);
       renderizar({ esforcoDoOrquestrador: "medio" }, { buscarEsforcoHerdado: buscar });
 
@@ -307,8 +306,8 @@ describe("CamposDaConfiguracao", () => {
 
       await act(async () => responder(devolvida));
       expect(aoMudar).toHaveBeenCalledWith(devolvida);
-      expect(chipDoEsforco("do orquestrador")).toHaveTextContent("esforço médio");
-      expect(chipDaQuantidade()).toHaveTextContent("até 1 por vez");
+      expect(menuDoModelo("do orquestrador")).toHaveTextContent("esforço médio");
+      expect(screen.getByLabelText("Máximo")).toHaveValue(1);
       expect(screen.getByRole("button", { name: "Modo econômico" })).toBeEnabled();
     });
 

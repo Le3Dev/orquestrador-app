@@ -7,11 +7,15 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   publicar:
     runs-on: windows-latest
     steps:
-      - name: Checkout (com tags, para a guarda de versão)
+      - name: Checkout (com tags, para calcular a versão)
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -21,30 +25,30 @@ jobs:
         with:
           node-version: 22
 
-      - name: Guarda de versão (só publica versão nova)
-        id: guarda
-        shell: bash
-        run: |
-          V=$(node -p "require('./package.json').version")
-          TAG="v$V"
-          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "A tag $TAG já existe; nada a publicar."
-            echo "publicar=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "Versão nova ($TAG); vai compilar e publicar."
-            echo "publicar=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Instalar dependências (raiz)
-        if: steps.guarda.outputs.publicar == 'true'
         run: npm ci
 
       - name: Instalar dependências (web)
-        if: steps.guarda.outputs.publicar == 'true'
         run: npm --prefix web ci
 
+      # A versão é aplicada só no runner (sem commit de volta no repositório).
+      - name: Calcular versão
+        id: versao
+        shell: bash
+        run: |
+          git fetch --tags --force
+          V=$(node scripts/proximaVersao.cjs)
+          npm version "$V" --no-git-tag-version --allow-same-version
+          echo "Versão a publicar: $V"
+          echo "versao=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Testes
+        run: npm test
+
       - name: Compilar e publicar no GitHub Releases
-        if: steps.guarda.outputs.publicar == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run release:win
