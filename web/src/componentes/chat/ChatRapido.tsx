@@ -9,9 +9,15 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 
 import { api, type ImagemParaEnvio, mensagemDeErro } from "../../shared/api/cliente";
-import type { AtividadeDaResposta, PreferenciasDoChat, ResumoDoOrquestrador } from "../../shared/api/tipos";
+import type {
+  AtividadeDaResposta,
+  ImagemDaMensagemDoChat,
+  PreferenciasDoChat,
+  ResumoDoOrquestrador,
+} from "../../shared/api/tipos";
 import { comandoDoPrompt, completarComando, dicaDeComando } from "../../shared/comandosDoPrompt";
 import { juntarDitado } from "../../shared/ditado/texto";
 import {
@@ -21,7 +27,7 @@ import {
   textoParaMostrar,
   ultimoModeloUsado,
 } from "../../shared/estado/aplicarEventoDoChat";
-import { formatarBytes, formatarDuracao } from "../../shared/formatacao";
+import { formatarBytes, formatarDuracao, formatarMomento } from "../../shared/formatacao";
 import { useMelhorarPrompt } from "../../shared/hooks/useMelhorarPrompt";
 import { useModoInvisivel } from "../../shared/hooks/useModoInvisivel";
 import {
@@ -267,6 +273,86 @@ function descreverAtividade({ ferramenta, detalhe }: AtividadeDaResposta): strin
   return VERBOS_DE_ARQUIVO.has(verbo) ? `${verbo} ${detalhe}…` : `${verbo}: ${detalhe}…`;
 }
 
+/**
+ * O tipo do dado de uma resposta arrastada do chat: o canvas, ao recebê-la,
+ * cria uma nota com o texto onde ela foi solta.
+ */
+export const TIPO_DA_RESPOSTA_DO_CHAT = "application/x-orquestrador-resposta-do-chat";
+
+/** "14:32" para hoje; "08/11, 14:32" para outro dia. Sem data legível, nada. */
+function horaDaMensagem(iso: string): string | null {
+  return Number.isNaN(Date.parse(iso)) ? null : formatarMomento(iso);
+}
+
+/** A hora no pé da bolha; a data e a hora completas no balão. */
+function HoraDaMensagem({ criadaEm }: { criadaEm: string }) {
+  const hora = horaDaMensagem(criadaEm);
+  if (hora === null) {
+    return null;
+  }
+  return (
+    <time className="hora-da-mensagem" dateTime={criadaEm} title={new Date(criadaEm).toLocaleString("pt-BR")}>
+      {hora}
+    </time>
+  );
+}
+
+/** Seis pontos: o lugar de pegar a resposta para arrastá-la. */
+function IconeArrastar() {
+  return (
+    <svg width={12} height={12} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="9" cy="6" r="1.6" />
+      <circle cx="15" cy="6" r="1.6" />
+      <circle cx="9" cy="12" r="1.6" />
+      <circle cx="15" cy="12" r="1.6" />
+      <circle cx="9" cy="18" r="1.6" />
+      <circle cx="15" cy="18" r="1.6" />
+    </svg>
+  );
+}
+
+/**
+ * Uma imagem anexada, em tamanho maior, por cima da tela. Esc, o ✕ ou um
+ * clique fora fecham. Dentro do app (e não numa aba): no aplicativo, o
+ * navegador do sistema não tem acesso ao servidor.
+ */
+function ImagemAmpliada({ imagem, aoFechar }: { imagem: ImagemDaMensagemDoChat; aoFechar: () => void }) {
+  const fechar = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    fechar.current?.focus();
+  }, []);
+
+  return createPortal(
+    <div
+      className="nokey nowheel nodrag fundo-que-esmaece fundo-da-imagem-ampliada"
+      onMouseDown={(evento) => {
+        if (evento.target === evento.currentTarget) {
+          aoFechar();
+        }
+      }}
+      onKeyDown={(evento) => {
+        evento.stopPropagation();
+        if (evento.key === "Escape") {
+          evento.preventDefault();
+          aoFechar();
+        }
+      }}
+    >
+      <figure role="dialog" aria-modal="true" aria-label={imagem.nome} className="surgir imagem-ampliada">
+        <img src={api.enderecoDoAnexoDoChat(imagem.arquivo)} alt={imagem.nome} />
+        <figcaption>
+          <span className="truncate">{imagem.nome}</span>
+          <button ref={fechar} type="button" className="botao-icone" title="Fechar (Esc)" aria-label="Fechar" onClick={aoFechar}>
+            ✕
+          </button>
+        </figcaption>
+      </figure>
+    </div>,
+    document.body,
+  );
+}
+
 interface PropsDaMensagem extends PropsDasAcoesDoChat {
   mensagem: MensagemDoChatNaTela;
   atividade: AtividadeDaResposta | null;
@@ -284,6 +370,9 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
   aoAtualizarOrquestradores,
   orquestradores,
 }: PropsDaMensagem) {
+  // A imagem anexada aberta em tamanho maior; nula, nenhuma.
+  const [ampliada, setAmpliada] = useState<ImagemDaMensagemDoChat | null>(null);
+
   if (mensagem.papel === "usuario") {
     const imagensVisiveis = ocultarCapturas
       ? mensagem.imagens.filter((imagem) => !ehCapturaDeTela(imagem.nome))
@@ -293,25 +382,30 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
         {imagensVisiveis.length > 0 && (
           <div className="anexos-do-chat">
             {imagensVisiveis.map((imagem) => (
-              <a
+              <button
                 key={imagem.arquivo}
-                href={api.enderecoDoAnexoDoChat(imagem.arquivo)}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={imagem.nome}
+                type="button"
+                className="miniatura-do-anexo"
+                title={`${imagem.nome} · clique para ampliar`}
+                aria-label={`Ampliar ${imagem.nome}`}
+                onClick={() => setAmpliada(imagem)}
               >
                 <img src={api.enderecoDoAnexoDoChat(imagem.arquivo)} alt={imagem.nome} />
-              </a>
+              </button>
             ))}
           </div>
         )}
         {mensagem.texto !== "" && <p className="texto-longo">{mensagem.texto}</p>}
+        <HoraDaMensagem criadaEm={mensagem.criadaEm} />
+        {ampliada !== null && <ImagemAmpliada imagem={ampliada} aoFechar={() => setAmpliada(null)} />}
       </div>
     );
   }
 
   const respondendo = mensagem.situacao === "respondendo";
   const texto = textoParaMostrar(mensagem.texto, respondendo);
+  // Só a resposta pronta, com texto, vai para o canvas.
+  const arrastavel = mensagem.situacao === "concluida" && texto !== "";
   return (
     <article className="mensagem-do-claude" aria-busy={respondendo}>
       {texto !== "" && (
@@ -355,12 +449,30 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
           <CartaoDeSubagente key={`${acao.tipo}:${indice}`} acao={acao} />
         ),
       )}
-      {mensagem.situacao === "concluida" && mensagem.uso !== null && (
-        <p className="mono text-muted">
-          {formatarDuracao(mensagem.uso.duracaoMs)}
-          {mensagem.uso.modeloUsado === null ? "" : ` · ${mensagem.uso.modeloUsado}`}
-        </p>
-      )}
+      <footer className="rodape-da-mensagem mono text-muted">
+        <HoraDaMensagem criadaEm={mensagem.criadaEm} />
+        {mensagem.situacao === "concluida" && mensagem.uso !== null && (
+          <span>
+            {formatarDuracao(mensagem.uso.duracaoMs)}
+            {mensagem.uso.modeloUsado === null ? "" : ` · ${mensagem.uso.modeloUsado}`}
+          </span>
+        )}
+        {arrastavel && (
+          <span
+            className="alca-da-resposta"
+            draggable
+            title="Arraste para o canvas: a resposta vira uma nota onde for solta"
+            onDragStart={(evento) => {
+              evento.dataTransfer.setData(TIPO_DA_RESPOSTA_DO_CHAT, texto);
+              evento.dataTransfer.setData("text/plain", texto);
+              evento.dataTransfer.effectAllowed = "copy";
+            }}
+          >
+            <IconeArrastar />
+            arrastar
+          </span>
+        )}
+      </footer>
     </article>
   );
 });
@@ -677,6 +789,11 @@ export function ChatRapido({
       data-testid="chat-rapido"
       {...mouseDaArea}
       onDragOver={(evento) => {
+        // Uma resposta arrastada daqui não cai no próprio chat (nem no canvas por baixo dele).
+        if (evento.dataTransfer.types.includes(TIPO_DA_RESPOSTA_DO_CHAT)) {
+          evento.stopPropagation();
+          return;
+        }
         if (evento.dataTransfer.types.includes("Files")) {
           evento.preventDefault();
           setArrastando(true);
@@ -688,6 +805,10 @@ export function ChatRapido({
         }
       }}
       onDrop={(evento) => {
+        if (evento.dataTransfer.types.includes(TIPO_DA_RESPOSTA_DO_CHAT)) {
+          evento.stopPropagation();
+          return;
+        }
         if (evento.dataTransfer.files.length > 0) {
           evento.preventDefault();
           setArrastando(false);

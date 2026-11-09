@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { apiDosArtefatos, type EventoDeArtefato, type ResumoDoArtefato } from "../shared/api/artefatos";
 import { api } from "../shared/api/cliente";
@@ -27,6 +27,7 @@ import { ESTADO_INICIAL_DO_CHAT, type EstadoDoChatNaTela } from "../shared/estad
 import type { ArtefatosAoVivo } from "../shared/hooks/useArtefatos";
 import type { EstadoDaAtualizacao } from "../shared/ponteDoDesktop";
 import { ErroDaApi } from "../shared/api/cliente";
+import { TIPO_DA_RESPOSTA_DO_CHAT } from "../componentes/chat/ChatRapido";
 import { CanvasDeOrquestradores } from "./CanvasDeOrquestradores";
 
 // O canvas sem servidor: nenhum orquestrador, conectado, sem conversas e sem artefatos.
@@ -354,6 +355,53 @@ describe("CanvasDeOrquestradores · notas", () => {
     expect(screen.queryByRole("textbox", { name: "Texto da nota" })).not.toBeInTheDocument();
     await waitFor(() => expect(Object.keys(lerLayout().notas)).toEqual(["n1"]));
     expect(lerLayout().notas.n1).toMatchObject({ minimizada: true, altura: 280 });
+  });
+
+  describe("arrastar uma resposta do chat para o canvas", () => {
+    /** Um arraste (sobre ou soltar) no canvas, com o ponto da tela; o jsdom não tem DragEvent nem DataTransfer. */
+    function arrastarNoCanvas(tipo: "dragOver" | "drop", dados: Record<string, string>, clientX = 0, clientY = 0): boolean {
+      const fluxo = document.querySelector(".react-flow");
+      if (fluxo === null) {
+        throw new Error("o canvas não está na tela");
+      }
+      const evento = createEvent[tipo](fluxo, {
+        dataTransfer: { types: Object.keys(dados), getData: (formato: string) => dados[formato] ?? "", dropEffect: "none" },
+      });
+      Object.defineProperty(evento, "clientX", { value: clientX });
+      Object.defineProperty(evento, "clientY", { value: clientY });
+      return fireEvent(fluxo, evento);
+    }
+
+    it("soltar cria uma nota com o texto da resposta, no ponto onde foi solta", async () => {
+      vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+      const texto = "| a | b |\n|---|---|\n| 1 | 2 |";
+      const criar = vi
+        .spyOn(api, "criarNota")
+        .mockResolvedValue(nota("n1", { titulo: "Resposta do chat", texto }));
+      render(<CanvasDeOrquestradores />);
+      await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+
+      // Sobre o canvas, o arraste é aceito (o padrão impedido); depois, solto em (300, 200).
+      expect(arrastarNoCanvas("dragOver", { [TIPO_DA_RESPOSTA_DO_CHAT]: texto })).toBe(false);
+      arrastarNoCanvas("drop", { [TIPO_DA_RESPOSTA_DO_CHAT]: texto, "text/plain": texto }, 300, 200);
+
+      await waitFor(() => expect(criar).toHaveBeenCalledWith({ titulo: "Resposta do chat", texto }));
+      expect(await screen.findByRole("textbox", { name: "Texto da nota" })).toHaveValue(texto);
+      // Viewport sem pan e com zoom 1: o ponto da tela é o do canvas.
+      await waitFor(() => expect(lerLayout().notas.n1).toMatchObject({ x: 300, y: 200 }));
+    });
+
+    it("outro arraste (um arquivo, um texto qualquer) não é aceito nem cria nota", async () => {
+      vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+      const criar = vi.spyOn(api, "criarNota");
+      render(<CanvasDeOrquestradores />);
+      await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+
+      expect(arrastarNoCanvas("dragOver", { "text/plain": "oi" })).toBe(true);
+      arrastarNoCanvas("drop", { "text/plain": "oi" });
+
+      expect(criar).not.toHaveBeenCalled();
+    });
   });
 });
 

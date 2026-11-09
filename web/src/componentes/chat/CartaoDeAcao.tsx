@@ -6,6 +6,7 @@ import { AVISO_DO_LIMITE_DE_ORQUESTRADORES } from "../../shared/canvas/limiteDeT
 import { formatarDecorrido } from "../../shared/formatacao";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
 import { nomeLivre } from "../../shared/nomeLivre";
+import { IconeOrquestrador } from "../Icones";
 
 export interface PropsDasAcoesDoChat {
   /** Abre (ou foca) o terminal do Orquestrador no canvas. */
@@ -222,8 +223,11 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
 
   return (
     <div className="cartao-de-acao">
+      <span className="icone-do-cartao" aria-hidden="true">
+        <IconeOrquestrador tamanho={16} />
+      </span>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="font-titulo text-[12.5px] font-medium text-primary">
+        <span className="titulo-do-cartao">
           {novo ? "Novo orquestrador em" : "Abrir orquestrador em"} {acao.projeto}
         </span>
         <span className="mono truncate text-muted" title={acao.pasta}>

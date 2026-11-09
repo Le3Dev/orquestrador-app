@@ -1,4 +1,4 @@
-import { memo, type ReactNode, useEffect, useRef, useState } from "react";
+import { isValidElement, memo, type ReactNode, useEffect, useRef, useState } from "react";
 import Markdown, { type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -20,10 +20,18 @@ const ROTULOS_DA_COPIA: Readonly<Record<EstadoDaCopia, string>> = {
   falhou: "não copiou",
 };
 
+/** A linguagem da cerca (```ts vira a classe `language-ts` no `code`); sem ela, nula. */
+function linguagemDo(codigo: ReactNode): string | null {
+  if (!isValidElement<{ className?: string }>(codigo)) {
+    return null;
+  }
+  return /(?:^|\s)language-(\S+)/.exec(codigo.props.className ?? "")?.[1] ?? null;
+}
+
 /**
- * Bloco de código com um botão "copiar" no canto. O botão fica fora do `pre`,
- * então o texto copiado é só o do código (sem a quebra de linha final que o
- * Markdown sempre deixa).
+ * Bloco de código com uma faixa em cima: a linguagem (ou "código") e o botão
+ * "copiar". A faixa fica fora do `pre`, então o texto copiado é só o do
+ * código (sem a quebra de linha final que o Markdown sempre deixa).
  */
 function BlocoDeCodigo({ children }: { children?: ReactNode }) {
   const pre = useRef<HTMLPreElement>(null);
@@ -60,17 +68,20 @@ function BlocoDeCodigo({ children }: { children?: ReactNode }) {
 
   return (
     <div className="bloco-de-codigo">
+      <div className="faixa-do-codigo">
+        <span className="linguagem-do-codigo">{linguagemDo(children) ?? "código"}</span>
+        <button
+          type="button"
+          className="botao-de-copiar"
+          data-estado={estado}
+          title="Copiar o código"
+          aria-live="polite"
+          onClick={() => void copiar()}
+        >
+          {ROTULOS_DA_COPIA[estado]}
+        </button>
+      </div>
       <pre ref={pre}>{children}</pre>
-      <button
-        type="button"
-        className="botao-de-copiar"
-        data-estado={estado}
-        title="Copiar o código"
-        aria-live="polite"
-        onClick={() => void copiar()}
-      >
-        {ROTULOS_DA_COPIA[estado]}
-      </button>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { api, mensagemDeErro } from "../api/cliente";
+import { type AlteracaoDaNota, api, mensagemDeErro } from "../api/cliente";
 import { type Ponto, posicaoParaNovoTerminal, TAMANHO_DA_NOTA } from "../canvas/layout";
 import { ehNota, minimizarOuRestaurar, type NoDoCanvas, novaNota, sincronizarNotas } from "../canvas/nos";
 import { type AcoesDasNotas, criarLojaDasNotas, type ValorDasNotas } from "../canvas/notas";
@@ -8,8 +8,12 @@ import { type AcoesDasNotas, criarLojaDasNotas, type ValorDasNotas } from "../ca
 export interface NotasDoCanvas {
   /** Para o `ProvedorDasNotas`. Estável: nunca re-renderiza as notas. */
   valor: ValorDasNotas;
-  /** "+ notas": cria a nota no servidor e a abre no centro da tela, com o foco no texto. */
-  criarNota: () => Promise<void>;
+  /**
+   * "+ notas": cria a nota no servidor e a abre no centro da tela, com o foco
+   * no texto. Com `dados`, ela já nasce com título e texto; com `posicao` (no
+   * canvas), abre ali, e não no centro.
+   */
+  criarNota: (dados?: AlteracaoDaNota, posicao?: Ponto) => Promise<void>;
   /** Por que a última nota não pôde ser criada. */
   erro: string | null;
   descartarErro: () => void;
@@ -66,22 +70,24 @@ export function useNotas(
     };
   }, [carregadas, conectado, loja, setNos, centroDaTela]);
 
-  const criarNota = useCallback(async (): Promise<void> => {
+  const criarNota = useCallback(async (dados?: AlteracaoDaNota, posicao?: Ponto): Promise<void> => {
     setErro(null);
     try {
-      const nota = await api.criarNota();
+      const nota = await api.criarNota(dados);
       criadasAgora.current.add(nota.id);
       loja.guardar(nota);
       loja.pedirFoco(nota.id);
       setNos((atuais) => {
-        const posicao = posicaoParaNovoTerminal(
-          centroDaTela(),
-          TAMANHO_DA_NOTA,
-          atuais.filter(ehNota).map((no) => no.position),
-        );
+        const onde =
+          posicao ??
+          posicaoParaNovoTerminal(
+            centroDaTela(),
+            TAMANHO_DA_NOTA,
+            atuais.filter(ehNota).map((no) => no.position),
+          );
         // Só os selecionados mudam: os outros nós continuam o mesmo objeto e não re-renderizam.
         const anteriores = atuais.map((no) => (no.selected === true ? { ...no, selected: false } : no));
-        return [...anteriores, { ...novaNota(nota.id, posicao), selected: true }];
+        return [...anteriores, { ...novaNota(nota.id, onde), selected: true }];
       });
     } catch (falha) {
       setErro(`Não foi possível criar a nota: ${mensagemDeErro(falha)}`);

@@ -8,7 +8,7 @@ import {
   type EstadoDoChatNaTela,
   type MensagemDoChatNaTela,
 } from "../../shared/estado/aplicarEventoDoChat";
-import { ChatRapido } from "./ChatRapido";
+import { ChatRapido, TIPO_DA_RESPOSTA_DO_CHAT } from "./ChatRapido";
 
 /** O ditado sem microfone nem Whisper: o clique alterna a gravação e o teste entrega o texto transcrito. */
 const ditadoFalso = vi.hoisted(() => ({ entregar: null as ((texto: string) => void) | null }));
@@ -1065,5 +1065,123 @@ describe("ChatRapido", () => {
         "Fixar o chat à direita: uma coluna ao lado do canvas, sempre aberta",
       );
     });
+  });
+});
+
+describe("ChatRapido · bolhas", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("cada bolha mostra a hora; a data só aparece quando a mensagem não é de hoje", () => {
+    const agora = new Date();
+    const hoje = agora.toISOString();
+    const horaDeHoje = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(agora);
+    renderizar({
+      ...OCIOSO,
+      mensagens: [
+        mensagem("u1", "usuario", { texto: "Bom dia", criadaEm: hoje }),
+        mensagem("c1", "claude", {
+          texto: "Olá!",
+          criadaEm: hoje,
+          uso: { duracaoMs: 12_000, tokensDeEntrada: 1, tokensDeSaida: 1, modeloUsado: "claude-opus-5-5" },
+        }),
+        mensagem("u2", "usuario", { texto: "De antes", criadaEm: "2026-11-04T12:00:00Z" }),
+      ],
+    });
+
+    const horas = Array.from(document.querySelectorAll("time.hora-da-mensagem"));
+    expect(horas.map((hora) => hora.textContent)).toEqual([
+      horaDeHoje,
+      horaDeHoje,
+      new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(
+        new Date("2026-11-04T12:00:00Z"),
+      ),
+    ]);
+    expect(horas[2]?.textContent).toContain("04/11");
+    expect(horas[0]).toHaveAttribute("datetime", hoje);
+    expect(horas[0]?.closest(".mensagem-do-usuario")).toHaveTextContent("Bom dia");
+    // Na resposta, a hora fica no pé, junto da duração e do modelo.
+    const rodape = horas[1]?.closest(".rodape-da-mensagem");
+    expect(rodape?.closest(".mensagem-do-claude")).not.toBeNull();
+    expect(rodape).toHaveTextContent("12s · claude-opus-5-5");
+  });
+
+  it("sem data legível (dado antigo), a bolha fica sem hora, sem quebrar", () => {
+    renderizar({ ...OCIOSO, mensagens: [mensagem("u1", "usuario", { texto: "oi", criadaEm: "" })] });
+
+    expect(screen.getByText("oi")).toBeInTheDocument();
+    expect(document.querySelector("time.hora-da-mensagem")).toBeNull();
+  });
+
+  it("a resposta tem tabela e bloco de código com o botão copiar", () => {
+    renderizar({
+      ...OCIOSO,
+      mensagens: [
+        mensagem("c1", "claude", {
+          texto: ["| Item | Valor |", "|---|---|", "| a | 1 |", "", "```sh", "npm test", "```"].join("\n"),
+        }),
+      ],
+    });
+
+    const resposta = document.querySelector(".mensagem-do-claude") as HTMLElement;
+    expect(within(resposta).getByRole("table")).toBeInTheDocument();
+    expect(within(resposta).getAllByRole("columnheader").map((celula) => celula.textContent)).toEqual(["Item", "Valor"]);
+    const copiar = within(resposta).getByRole("button", { name: "copiar" });
+    expect(copiar.closest(".faixa-do-codigo")).toHaveTextContent("sh");
+  });
+
+  it("a imagem anexada aparece como miniatura; o clique a abre maior, e Esc fecha", () => {
+    renderizar({
+      ...OCIOSO,
+      mensagens: [mensagem("u1", "usuario", { texto: "Veja", imagens: [{ arquivo: "b.png", nome: "foto.png", tipoDeMidia: "image/png" }] })],
+    });
+
+    const miniatura = screen.getByRole("button", { name: "Ampliar foto.png" });
+    expect(within(miniatura).getByAltText("foto.png")).toHaveAttribute("src", "/api/chat/anexos/b.png");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    fireEvent.click(miniatura);
+    const ampliada = screen.getByRole("dialog", { name: "foto.png" });
+    expect(within(ampliada).getByAltText("foto.png")).toHaveAttribute("src", "/api/chat/anexos/b.png");
+    expect(within(ampliada).getByRole("button", { name: "Fechar" })).toHaveFocus();
+
+    fireEvent.keyDown(ampliada, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    fireEvent.click(miniatura);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Fechar" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("a resposta pronta se arrasta com o texto dela (sem os blocos do app); a que ainda chega, não", () => {
+    const { rerender } = renderizar({
+      ...OCIOSO,
+      mensagens: [
+        mensagem("c1", "claude", {
+          texto: "Resumo **pronto**.\n\n```acao-do-app\n{\"tipo\":\"abrir_orquestrador\"}\n```",
+        }),
+      ],
+    });
+
+    const alca = screen.getByTitle(/Arraste para o canvas/);
+    expect(alca).toHaveAttribute("draggable", "true");
+    const setData = vi.fn();
+    const dataTransfer = { setData, effectAllowed: "all" };
+    fireEvent.dragStart(alca, { dataTransfer });
+    expect(setData).toHaveBeenCalledWith(TIPO_DA_RESPOSTA_DO_CHAT, "Resumo **pronto**.");
+    expect(setData).toHaveBeenCalledWith("text/plain", "Resumo **pronto**.");
+    expect(dataTransfer.effectAllowed).toBe("copy");
+
+    rerender({ ...RESPONDENDO });
+    expect(screen.queryByTitle(/Arraste para o canvas/)).not.toBeInTheDocument();
+  });
+
+  it("solta sobre o próprio chat, a resposta arrastada não é aceita nem vira anexo", () => {
+    renderizar({ ...OCIOSO, mensagens: [mensagem("c1", "claude", { texto: "Olá" })] });
+    const chat = screen.getByTestId("chat-rapido");
+
+    const aceito = !fireEvent.dragOver(chat, { dataTransfer: { types: [TIPO_DA_RESPOSTA_DO_CHAT, "text/plain"] } });
+
+    expect(aceito).toBe(false);
+    expect(screen.queryByText(/solte para anexar/)).not.toBeInTheDocument();
   });
 });

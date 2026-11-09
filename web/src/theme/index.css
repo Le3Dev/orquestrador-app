@@ -2003,11 +2003,24 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .markdown-terminal { font-family: var(--fonte-mono); font-size: 12px; line-height: 1.65; }
 .markdown > * + * { margin-top: 9px; }
 .markdown h1, .markdown h2, .markdown h3, .markdown h4 { font-family: var(--fonte-titulo); font-size: 13px; font-weight: 600; margin-top: 14px; }
+.markdown h1 { font-size: 15px; }
+.markdown h2 { font-size: 14px; }
+/* O título fica perto do que ele abre. */
+.markdown > :is(h1, h2, h3, h4) + * { margin-top: 5px; }
+/* Começando por um título, a resposta não ganha o respiro de cima dele. */
+.markdown > :first-child { margin-top: 0; }
 .markdown strong { font-weight: 600; color: var(--claude-claro); }
+/* Listas: o marcador laranja, um respiro entre os itens e as listas de dentro
+ * (e os parágrafos de um item) com o mesmo espaço, sem a margem do bloco. */
 .markdown ul { list-style: disc; padding-left: 22px; }
 .markdown ol { list-style: decimal; padding-left: 22px; }
-.markdown li + li { margin-top: 3px; }
+.markdown ul ul { list-style: circle; }
+.markdown li { padding-left: 2px; }
+.markdown li + li { margin-top: 4px; }
+.markdown li > * + *,
+.markdown li > :is(ul, ol) { margin-top: 4px; }
 .markdown li::marker { color: var(--active); }
+.markdown ol > li::marker { font-family: var(--fonte-mono); font-size: .9em; }
 .markdown code {
   font-family: var(--fonte-mono);
   font-size: .92em;
@@ -2016,65 +2029,94 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   color: var(--claude-cinza-claro);
   background: var(--surface-3);
 }
-/* Bloco de código: quebra a linha em vez de cortar o texto na horizontal
- * (a janela é estreita e rolar de lado no canvas não funciona bem). */
+/* Bloco de código: uma caixa com a faixa (linguagem e "copiar") em cima e o
+ * código embaixo. Quebra a linha em vez de cortar o texto na horizontal (a
+ * janela é estreita e rolar de lado no canvas não funciona bem). */
+.bloco-de-codigo {
+  overflow: hidden;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--border-forte);
+  background: color-mix(in srgb, var(--claude-escuro) 70%, black);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--claude-claro) 4%, transparent) inset;
+}
+.faixa-do-codigo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 5px 3px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.linguagem-do-codigo {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--fonte-mono);
+  font-size: 10.5px;
+  letter-spacing: .04em;
+  text-transform: lowercase;
+  color: var(--muted);
+}
 .markdown pre {
   padding: 10px 12px;
-  border-radius: var(--radius-input);
-  background: color-mix(in srgb, var(--claude-escuro) 70%, black);
-  border: 1px solid var(--border);
   font-family: var(--fonte-mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 .markdown pre code { padding: 0; background: none; white-space: inherit; overflow-wrap: anywhere; }
-/* O bloco vem num contêiner com o botão "copiar" no canto. O botão some até o
- * mouse passar pelo bloco, mas continua na ordem do Tab e aparece com o foco. */
-.bloco-de-codigo { position: relative; }
-/* Reserva o canto do botão só na primeira linha: um float vazio da altura de
- * uma linha empurra o começo do texto para a esquerda, e as linhas de baixo
- * continuam com a largura toda. A largura cobre o rótulo mais longo ("não copiou"). */
-.bloco-de-codigo > pre::before { content: ""; float: right; width: 80px; height: 1lh; }
 .botao-de-copiar {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  padding: 2px 8px;
+  flex-shrink: 0;
+  padding: 1px 8px;
   border-radius: 6px;
-  border: 1px solid var(--border-forte);
-  background: var(--surface-2);
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--secondary);
   font-family: var(--fonte-mono);
   font-size: 11px;
   line-height: 1.5;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity .12s ease-out, color .12s, border-color .12s;
+  transition: color .12s, border-color .12s, background-color .12s;
 }
-.bloco-de-codigo:hover .botao-de-copiar,
-.botao-de-copiar:focus-visible,
-.botao-de-copiar[data-estado="copiado"],
-.botao-de-copiar[data-estado="falhou"] { opacity: 1; }
-.botao-de-copiar:hover, .botao-de-copiar:focus-visible { color: var(--primary); border-color: var(--active); outline: none; }
+.botao-de-copiar:hover, .botao-de-copiar:focus-visible { color: var(--primary); border-color: var(--active); background: var(--surface-3); outline: none; }
 .botao-de-copiar[data-estado="copiado"] { color: var(--success); border-color: color-mix(in srgb, var(--success) 55%, var(--border-forte)); }
 .botao-de-copiar[data-estado="falhou"] { color: var(--error); border-color: color-mix(in srgb, var(--error) 55%, var(--border-forte)); }
-/* Sem mouse (tela de toque), não há hover: o botão fica sempre à vista. */
-@media (hover: none) { .botao-de-copiar { opacity: 1; } }
 .markdown a { color: var(--active); text-decoration: underline; text-underline-offset: 2px; }
-.markdown blockquote { border-left: 2px solid var(--border-forte); padding-left: 12px; color: var(--secondary); }
+/* Citação: a barra laranja apagada, um fundo leve e o mesmo respiro por dentro. */
+.markdown blockquote {
+  padding: 6px 12px;
+  border-left: 3px solid color-mix(in srgb, var(--active) 55%, var(--border-forte));
+  border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--claude-claro) 3%, transparent);
+  color: var(--secondary);
+}
+.markdown blockquote > * + * { margin-top: 6px; }
 .markdown hr { border-color: var(--border); }
-/* Tabelas (GFM). O contêiner rola na horizontal quando a tabela não cabe; as
+/* Tabelas (GFM). O contêiner tem a borda e os cantos e rola na horizontal
+   quando a tabela não cabe (as bordas de fora das células somem, `hidden`); as
    células só quebram entre palavras, para não picotar URLs e código. */
-.markdown-tabela { max-width: 100%; overflow-x: auto; }
-.markdown table { border-collapse: collapse; font-size: .95em; line-height: 1.5; }
-.markdown th, .markdown td {
-  padding: 4px 10px;
+.markdown-tabela {
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
   border: 1px solid var(--border-forte);
+  border-radius: var(--radius-input);
+}
+.markdown table { border-collapse: collapse; border-style: hidden; font-size: .95em; line-height: 1.5; }
+.markdown th, .markdown td {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
   text-align: start;
   vertical-align: top;
   overflow-wrap: normal;
 }
-.markdown th { font-weight: 600; color: var(--primary); background: var(--surface-2); }
+.markdown th {
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--surface-2);
+  border-bottom-color: var(--border-forte);
+}
 .markdown tbody tr:nth-child(even) { background: color-mix(in srgb, var(--claude-claro) 3%, transparent); }
 .markdown .task-list-item { list-style: none; }
 .markdown .task-list-item input { margin-right: 6px; accent-color: var(--active); }
@@ -2154,20 +2196,85 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   font-size: 13px;
 }
 
+/* A hora no pé de cada bolha (a data só quando não é de hoje). */
+.hora-da-mensagem { font-family: var(--fonte-mono); font-size: 10.5px; line-height: 1.2; color: var(--muted); cursor: default; }
+.mensagem-do-usuario > .hora-da-mensagem { margin-top: -2px; }
+
+/* Imagens anexadas: miniaturas que, no clique, abrem maiores por cima da tela. */
 .anexos-do-chat { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.anexos-do-chat a {
+.miniatura-do-anexo {
   display: block;
-  width: 72px;
-  height: 52px;
-  border-radius: 6px;
+  width: 88px;
+  height: 64px;
+  padding: 0;
+  border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--border-forte);
+  background: var(--surface-2);
+  cursor: zoom-in;
+  transition: border-color .12s, transform .12s ease-out;
 }
-.anexos-do-chat a:hover { border-color: var(--active); }
-.anexos-do-chat img { width: 100%; height: 100%; object-fit: cover; }
+.miniatura-do-anexo:hover { border-color: var(--active); transform: translateY(-1px); }
+.miniatura-do-anexo:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
+.miniatura-do-anexo img { width: 100%; height: 100%; object-fit: cover; }
+.fundo-da-imagem-ampliada {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: color-mix(in srgb, var(--screen-bg) 78%, transparent);
+  cursor: zoom-out;
+}
+.imagem-ampliada {
+  display: flex;
+  flex-direction: column;
+  max-width: min(1200px, 100%);
+  max-height: 100%;
+  overflow: hidden;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border-forte);
+  background: var(--surface);
+  box-shadow: 0 24px 64px -20px rgba(0, 0, 0, .9);
+  cursor: auto;
+}
+.imagem-ampliada img { min-height: 0; max-height: calc(100vh - 120px); object-fit: contain; background: var(--claude-escuro); }
+.imagem-ampliada figcaption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 14px;
+  border-top: 1px solid var(--border);
+  font-family: var(--fonte-mono);
+  font-size: 11.5px;
+  color: var(--secondary);
+}
+.imagem-ampliada figcaption > .truncate { flex: 1; min-width: 0; }
 
 /* Resposta do Claude: Markdown em Lora, com o cursor no fim enquanto chega texto. */
 .mensagem-do-claude { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* Pé da resposta: hora, duração e modelo; à direita, a alça de arrastar para o canvas. */
+.rodape-da-mensagem { display: flex; align-items: center; gap: 8px; min-height: 18px; font-size: 10.5px; }
+.rodape-da-mensagem > :not(.alca-da-resposta) + :not(.alca-da-resposta)::before { content: "·"; margin-right: 8px; color: var(--muted); }
+.alca-da-resposta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+  padding: 1px 6px 1px 3px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  color: var(--muted);
+  cursor: grab;
+  user-select: none;
+  opacity: .55;
+  transition: opacity .12s, color .12s, border-color .12s;
+}
+.mensagem-do-claude:hover .alca-da-resposta { opacity: 1; }
+.alca-da-resposta:hover { color: var(--active); border-color: color-mix(in srgb, var(--active) 45%, transparent); }
+.alca-da-resposta:active { cursor: grabbing; }
 /* Se o último bloco é código, o cursor vai dentro do pre, e não abaixo do contêiner. */
 .texto-respondendo > .markdown > :last-child:not(.bloco-de-codigo)::after,
 .texto-respondendo > .markdown > .bloco-de-codigo:last-child > pre::after {
@@ -2178,15 +2285,35 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   animation: piscar 1s steps(1) infinite;
 }
 
+/* Cartões do chat (ação, subagente, pergunta e autorização): a mesma caixa,
+ * com o ícone num quadrado de canto arredondado, o título em Poppins e a sombra
+ * dos cartões. O laranja é de ação; o kraft, de aviso (autorização). */
 .cartao-de-acao {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 12px;
   border-radius: var(--radius-card);
   border: 1px solid color-mix(in srgb, var(--active) 40%, var(--border));
-  background: color-mix(in srgb, var(--active) 6%, var(--surface-2));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--active) 9%, var(--surface-2)), color-mix(in srgb, var(--active) 4%, var(--surface-2)));
+  box-shadow: var(--shadow-card);
 }
+/* O botão (ou a dupla fila/outro) fica no meio da altura, à direita. */
+.cartao-de-acao > :last-child { align-self: center; }
+.icone-do-cartao {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--active);
+  background: color-mix(in srgb, var(--active) 14%, var(--surface-3));
+  border: 1px solid color-mix(in srgb, var(--active) 32%, transparent);
+}
+.cabecalho-do-cartao { display: flex; align-items: center; gap: 9px; }
+.cabecalho-do-cartao .icone-do-cartao { width: 24px; height: 24px; border-radius: 7px; }
+.titulo-do-cartao { font-family: var(--fonte-titulo); font-size: 13px; font-weight: 500; line-height: 1.4; color: var(--primary); }
 
 /* Prompt no cartão de subagente do chat: recolhido, com rolagem própria. */
 .prompt-do-subagente { color: var(--muted); font-size: 11.5px; }
@@ -2207,10 +2334,12 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   padding: 12px 14px;
   border-radius: var(--radius-card);
   border: 1px solid color-mix(in srgb, var(--active) 40%, var(--border));
-  background: color-mix(in srgb, var(--active) 6%, var(--surface-2));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--active) 9%, var(--surface-2)), color-mix(in srgb, var(--active) 4%, var(--surface-2)));
+  box-shadow: var(--shadow-card);
   font-family: var(--fonte-texto);
 }
-.cartao-de-pergunta-respondida { border-color: var(--border); background: var(--surface-2); }
+.cartao-de-pergunta-respondida { border-color: var(--border); background: var(--surface-2); box-shadow: none; }
+.cartao-de-pergunta-respondida .icone-do-cartao { color: var(--muted); background: var(--surface-3); border-color: var(--border); }
 .pergunta-do-cartao { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .texto-da-pergunta { font-family: var(--fonte-titulo); font-size: 12.5px; font-weight: 500; color: var(--primary); }
 .opcoes-da-pergunta { display: flex; flex-direction: column; gap: 6px; }
@@ -2252,11 +2381,19 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 11px 12px;
   border-radius: var(--radius-card);
   border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border));
-  background: color-mix(in srgb, var(--warning) 7%, var(--surface-2));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--warning) 10%, var(--surface-2)), color-mix(in srgb, var(--warning) 5%, var(--surface-2)));
+  box-shadow: var(--shadow-card);
 }
+.cartao-de-autorizacao .icone-do-cartao {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, var(--surface-3));
+  border-color: color-mix(in srgb, var(--warning) 32%, transparent);
+}
+/* Os botões alinham com o texto, e não com o ícone. */
+.acoes-da-autorizacao { padding-left: 38px; }
 .detalhe-da-autorizacao {
   padding: 1px 5px;
   border-radius: 4px;

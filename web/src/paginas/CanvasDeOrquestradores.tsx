@@ -24,6 +24,7 @@ import {
 import {
   type ComponentType,
   type Dispatch,
+  type DragEvent,
   memo,
   type SetStateAction,
   useCallback,
@@ -35,7 +36,7 @@ import {
 } from "react";
 
 import { IconeGrade, IconeMinimapa, IconeOrquestrador } from "../componentes/Icones";
-import { ChatRapido } from "../componentes/chat/ChatRapido";
+import { ChatRapido, TIPO_DA_RESPOSTA_DO_CHAT } from "../componentes/chat/ChatRapido";
 import { ArestaDoBixinho } from "../componentes/canvas/ArestaDoBixinho";
 import { BarraDoGrupo } from "../componentes/canvas/BarraDoGrupo";
 import { NoArtefato } from "../componentes/canvas/NoArtefato";
@@ -683,6 +684,28 @@ function Canvas() {
   const notas = useNotas(setNosDasNotas, centroDaTela, servidor.conectado);
   const { criarNota, erro: erroDasNotas, descartarErro: descartarErroDasNotas } = notas;
   const novaNota = useCallback(() => void criarNota(), [criarNota]);
+  // Uma resposta do chat arrastada para o canvas vira uma nota com o texto dela, onde foi solta.
+  const aoArrastarSobreOCanvas = useCallback((evento: DragEvent) => {
+    if (evento.dataTransfer.types.includes(TIPO_DA_RESPOSTA_DO_CHAT)) {
+      evento.preventDefault();
+      evento.dataTransfer.dropEffect = "copy";
+    }
+  }, []);
+  const aoSoltarNoCanvas = useCallback(
+    (evento: DragEvent) => {
+      const texto = evento.dataTransfer.getData(TIPO_DA_RESPOSTA_DO_CHAT);
+      if (texto === "") {
+        return;
+      }
+      evento.preventDefault();
+      void criarNota(
+        // A nota guarda até 100.000 caracteres.
+        { titulo: "Resposta do chat", texto: texto.slice(0, 100_000) },
+        fluxo.screenToFlowPosition({ x: evento.clientX, y: evento.clientY }),
+      );
+    },
+    [criarNota, fluxo],
+  );
 
   const focar = useCallback(
     (id: string) => {
@@ -1853,6 +1876,8 @@ function Canvas() {
                     panActivationKeyCode="Space"
                     multiSelectionKeyCode={TECLAS_DA_SELECAO_MULTIPLA}
                     deleteKeyCode={null}
+                    onDragOver={aoArrastarSobreOCanvas}
+                    onDrop={aoSoltarNoCanvas}
                   >
                     <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} />
                     {/* Abaixo dos painéis (inclusive o chat); some enquanto um painel da barra está aberto. */}

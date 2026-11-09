@@ -8,6 +8,7 @@ import type {
   ModeloDoSubagentePronto,
 } from "../../shared/api/tipos";
 import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
+import { IconePessoas } from "../Icones";
 
 interface Props {
   acao: AcaoDeCriarSubagente | AcaoDeEditarSubagente;
@@ -105,8 +106,11 @@ export function CartaoDeSubagente({ acao }: Props) {
 
   return (
     <div className="cartao-de-acao">
+      <span className="icone-do-cartao" aria-hidden="true">
+        <IconePessoas tamanho={16} />
+      </span>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="font-titulo text-[12.5px] font-medium text-primary">
+        <span className="titulo-do-cartao">
           {editar ? "Editar subagente pronto" : "Novo subagente pronto"}
         </span>
         <span className="flex min-w-0 items-center gap-1.5">

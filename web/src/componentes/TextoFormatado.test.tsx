@@ -149,6 +149,17 @@ describe("TextoFormatado", () => {
       expect(container.querySelector("p code")?.closest(".bloco-de-codigo")).toBeNull();
     });
 
+    it("a faixa do bloco mostra a linguagem da cerca (sem ela, \"código\") e o botão fica nela, fora do código", () => {
+      const { container } = render(
+        <TextoFormatado texto={["```ts", "const a = 1;", "```", "", "```", "texto solto", "```"].join("\n")} />,
+      );
+
+      const faixas = Array.from(container.querySelectorAll(".bloco-de-codigo > .faixa-do-codigo"));
+      expect(faixas.map((faixa) => faixa.querySelector(".linguagem-do-codigo")?.textContent)).toEqual(["ts", "código"]);
+      expect(faixas.map((faixa) => faixa.querySelector("button")?.textContent)).toEqual(["copiar", "copiar"]);
+      expect(container.querySelector("pre button")).toBeNull();
+    });
+
     it("sem bloco de código, nenhum botão", () => {
       render(<TextoFormatado texto="só `inline` aqui" />);
 
