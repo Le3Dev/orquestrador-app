@@ -1922,8 +1922,19 @@ function Canvas() {
   // Fora do viewport: o chat não se move com o canvas e só re-renderiza com novidades dele.
   // Fixo (preferência da tela), vira uma coluna ao lado da área do canvas, do lado escolhido;
   // senão, fica no painel do centro de baixo, dentro do React Flow.
+  // O "ocultar" da coluna solta o chat embaixo já oculto; o chat é remontado ao trocar de modo, então o pedido vai por prop.
+  const [chatSoltoOculto, setChatSoltoOculto] = useState(false);
+  // Fixado de novo (por qualquer caminho), o pedido de ocultar acaba: um soltar posterior volta com a conversa à vista.
+  useEffect(() => {
+    if (chatFixo) {
+      setChatSoltoOculto(false);
+    }
+  }, [chatFixo]);
   const alternarChatFixo = useCallback(
-    (fixo: boolean) => mudarPreferenciasDaTela({ chatFixoNaEsquerda: fixo }),
+    (fixo: boolean, ocultar = false) => {
+      setChatSoltoOculto(!fixo && ocultar);
+      mudarPreferenciasDaTela({ chatFixoNaEsquerda: fixo });
+    },
     [mudarPreferenciasDaTela],
   );
   // Os cartões de ação do chat mostram o estado de quem vai receber o pedido.
@@ -1948,6 +1959,7 @@ function Canvas() {
         fixo={chatFixo}
         lado={ladoDoChatFixo}
         aoAlternarFixo={alternarChatFixo}
+        comecaOculto={chatSoltoOculto}
         largura={larguraDoChatFixo}
         aoMudarLargura={mudarLarguraDoChat}
       />
@@ -1964,6 +1976,7 @@ function Canvas() {
       chatFixo,
       ladoDoChatFixo,
       alternarChatFixo,
+      chatSoltoOculto,
       larguraDoChatFixo,
       mudarLarguraDoChat,
     ],

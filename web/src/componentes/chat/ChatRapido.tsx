@@ -67,8 +67,17 @@ interface Props extends PropsDasAcoesDoChat {
   fixo?: boolean;
   /** De que lado do canvas fica a coluna fixa (a alça vai na borda virada para o canvas). Padrão: esquerda. */
   lado?: LadoDoChatFixo;
-  /** Fixa o chat ao lado do canvas (true) ou o solta de volta no pé dele (false). Sem ela, não há botão. */
-  aoAlternarFixo?: (fixo: boolean) => void;
+  /**
+   * Fixa o chat ao lado do canvas (true) ou o solta de volta no pé dele (false).
+   * `ocultar` (só ao soltar) pede o chat já oculto embaixo: é o "ocultar" da coluna.
+   * Sem ela, não há botão de fixar, soltar nem ocultar na coluna.
+   */
+  aoAlternarFixo?: (fixo: boolean, ocultar?: boolean) => void;
+  /**
+   * Flutuante: monta com a conversa já oculta (só o "mostrar conversa"). O chat é
+   * remontado ao trocar de modo, então o canvas leva por aqui o "ocultar" da coluna.
+   */
+  comecaOculto?: boolean;
   /** Fixo: a largura da coluna (px). Padrão: 360. */
   largura?: number;
   /** Fixo: grava a largura nova (ao soltar a alça, pelo teclado ou nos dois cliques). Sem ela, não há alça. */
@@ -236,7 +245,7 @@ function IconeFixar({ lado }: { lado: LadoDoChatFixo }) {
   );
 }
 
-/** Soltar: o chat volta a flutuar no pé do canvas. */
+/** Soltar embaixo: o chat volta a flutuar no pé do canvas (a janela com a barra embaixo). */
 function IconeSoltar() {
   return (
     <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -497,8 +506,9 @@ function assinaturaDaUltima(chat: EstadoDoChatNaTela): string {
  * dele revoga.
  *
  * Com `fixo`, o mesmo chat vira uma coluna ao lado do canvas (`<aside>`, do
- * `lado` pedido): conversa em bolhas sempre à vista, campo embaixo e "soltar"
- * no lugar de "ocultar". Com `aoMudarLargura`, a borda da coluna virada para o
+ * `lado` pedido): conversa em bolhas sempre à vista, campo embaixo e, no cabeçalho,
+ * "soltar embaixo" (o chat flutua no pé do canvas) e "ocultar" (o mesmo botão do
+ * flutuante: o chat vai para baixo já oculto, e "mostrar conversa" o reexibe ali). Com `aoMudarLargura`, a borda da coluna virada para o
  * canvas ganha a alça de largura.
  */
 export function ChatRapido({
@@ -513,6 +523,7 @@ export function ChatRapido({
   fixo = false,
   lado = "esquerda",
   aoAlternarFixo,
+  comecaOculto = false,
   largura = LARGURA_DO_CHAT_FIXO.padrao,
   aoMudarLargura,
 }: Props) {
@@ -523,7 +534,9 @@ export function ChatRapido({
   const [pedidoDeCancelar, setPedidoDeCancelar] = useState(false);
   const [arrastando, setArrastando] = useState(false);
   // Assinatura da última mensagem quando a conversa foi ocultada; nula = visível.
-  const [ocultaEm, setOcultaEm] = useState<string | null>(null);
+  const [ocultaEm, setOcultaEm] = useState<string | null>(() =>
+    comecaOculto && !fixo ? assinaturaDaUltima(chat) : null,
+  );
   // Composer em uso: o campo ganhou foco e o foco segue dentro do composer.
   const [emUso, setEmUso] = useState(false);
   const [menuAberto, setMenuAberto] = useState(false);
@@ -858,16 +871,27 @@ export function ChatRapido({
             </button>
             {fixo ? (
               aoAlternarFixo !== undefined && (
-                <button
-                  type="button"
-                  className="btn btn-sm btn-ghost"
-                  aria-label="Soltar o chat"
-                  title="Soltar: o chat volta a flutuar no pé do canvas"
-                  onClick={() => aoAlternarFixo(false)}
-                >
-                  <IconeSoltar />
-                  soltar
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    aria-label="Soltar o chat embaixo"
+                    title="Soltar embaixo: o chat sai da coluna e passa a flutuar no centro de baixo do canvas, ainda aberto"
+                    onClick={() => aoAlternarFixo(false)}
+                  >
+                    <IconeSoltar />
+                    soltar embaixo
+                  </button>
+                  {/* Igual ao do chat inferior: oculta a conversa. Sem coluna para ocultar, o chat sai dela e fica embaixo, oculto. */}
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-ghost"
+                    onClick={() => aoAlternarFixo(false, true)}
+                    title="Ocultar a conversa: o chat sai da coluna e, ao mostrar de novo, volta embaixo"
+                  >
+                    ocultar
+                  </button>
+                </>
               )
             ) : (
               <button type="button" className="btn btn-sm btn-ghost" onClick={ocultar} title="Ocultar a conversa (esc)">

@@ -227,11 +227,62 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
       chatFixoNaEsquerda: true,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Soltar o chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Soltar o chat embaixo" }));
 
     await waitFor(() => expect(screen.queryByRole("complementary", { name: "Chat rápido" })).not.toBeInTheDocument());
     const campo = screen.getByRole("textbox", { name: "Pergunta para o Claude" });
     expect(campo.closest(".react-flow__panel")).toHaveClass("painel-do-chat");
+  });
+
+  it("\"ocultar\" na coluna da direita solta o chat embaixo, oculto; \"mostrar conversa\" o reexibe embaixo, como no chat inferior", async () => {
+    localStorage.setItem(
+      "orquestrador.preferenciasDaTela",
+      JSON.stringify({ chatFixoNaEsquerda: true, ladoDoChatFixo: "direita", visualizadorDeCodigo: false, larguraDoChatFixo: 360 }),
+    );
+    simulados.chat = {
+      ...ESTADO_INICIAL_DO_CHAT,
+      carregado: true,
+      mensagens: [
+        {
+          id: "c1",
+          papel: "claude",
+          texto: "Resposta de exemplo.",
+          imagens: [],
+          criadaEm: "2026-11-08T12:00:00Z",
+          situacao: "concluida",
+          acoes: [],
+          avisos: [],
+          uso: null,
+          motivoDaFalha: null,
+          autorizacaoPendente: null,
+          perguntas: [],
+        },
+      ],
+    };
+    try {
+      render(<CanvasDeOrquestradores />);
+      const lateral = await screen.findByRole("complementary", { name: "Chat rápido" });
+
+      fireEvent.click(within(lateral).getByRole("button", { name: "ocultar" }));
+
+      // Saiu da coluna e a preferência de fixo desligou; embaixo, só o "mostrar conversa".
+      await waitFor(() => expect(screen.queryByRole("complementary", { name: "Chat rápido" })).not.toBeInTheDocument());
+      expect(JSON.parse(localStorage.getItem("orquestrador.preferenciasDaTela") ?? "null")).toMatchObject({
+        chatFixoNaEsquerda: false,
+      });
+      const painel = document.querySelector(".painel-do-chat");
+      expect(painel).not.toBeNull();
+      expect(screen.queryByRole("region", { name: "Conversa com o Claude" })).not.toBeInTheDocument();
+      fireEvent.click(within(painel as HTMLElement).getByRole("button", { name: /mostrar conversa/ }));
+
+      // Reexibido: o chat inferior, com a conversa à vista (e o ocultar dele de volta).
+      expect(screen.getByRole("region", { name: "Conversa com o Claude" })).toBeVisible();
+      expect(screen.getByText("Resposta de exemplo.")).toBeVisible();
+      expect(within(painel as HTMLElement).getByRole("button", { name: "ocultar" })).toBeInTheDocument();
+      expect(screen.queryByRole("complementary", { name: "Chat rápido" })).not.toBeInTheDocument();
+    } finally {
+      simulados.chat = null;
+    }
   });
 
   it("o chat fixo abre com a largura guardada; a alça da borda muda e grava a preferência", async () => {

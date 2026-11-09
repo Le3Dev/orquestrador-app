@@ -911,16 +911,53 @@ describe("ChatRapido", () => {
       expect(screen.getByText(/a conversa aparece aqui/)).toBeInTheDocument();
     });
 
-    it("não oculta: sem o botão ocultar e o Esc não esconde a conversa; \"soltar\" desliga a preferência", () => {
+    it("o Esc não esconde a conversa da coluna; \"soltar embaixo\" desliga a preferência e deixa a conversa à vista", () => {
       const { aoAlternarFixo } = renderizarFixo();
 
-      expect(screen.queryByRole("button", { name: "ocultar" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Fixar o chat à esquerda" })).not.toBeInTheDocument();
       fireEvent.keyDown(screen.getByRole("textbox", { name: "Pergunta para o Claude" }), { key: "Escape" });
       expect(screen.getByRole("region", { name: "Conversa com o Claude" })).toBeVisible();
 
-      fireEvent.click(screen.getByRole("button", { name: "Soltar o chat" }));
+      const soltar = screen.getByRole("button", { name: "Soltar o chat embaixo" });
+      // O rótulo e a dica dizem para onde o chat vai.
+      expect(soltar).toHaveTextContent("soltar embaixo");
+      expect(soltar).toHaveAttribute("title", expect.stringContaining("centro de baixo do canvas"));
+      fireEvent.click(soltar);
       expect(aoAlternarFixo).toHaveBeenCalledWith(false);
+    });
+
+    it("tem o mesmo botão ocultar do chat inferior, depois do soltar: sai da coluna e pede o chat oculto embaixo", () => {
+      const { aoAlternarFixo } = renderizarFixo();
+
+      const cabecalho = screen.getByRole("region", { name: "Conversa com o Claude" }).querySelector("header")!;
+      const botoes = within(cabecalho).getAllByRole("button");
+      expect(botoes.map((botao) => botao.textContent?.trim())).toEqual(["limpar", "soltar embaixo", "ocultar"]);
+
+      fireEvent.click(within(cabecalho).getByRole("button", { name: "ocultar" }));
+      expect(aoAlternarFixo).toHaveBeenCalledWith(false, true);
+    });
+
+    it("o chat inferior montado com `comecaOculto` (o ocultar da coluna) mostra só o \"mostrar conversa\", que o reexibe embaixo", () => {
+      render(
+        <ChatRapido
+          chat={CONVERSA}
+          desconectado={false}
+          erroAoCarregar={null}
+          aoMudarPreferencias={vi.fn()}
+          aoAbrirTerminal={vi.fn()}
+          temVagaPara={vi.fn().mockReturnValue(true)}
+          aoAtualizarOrquestradores={vi.fn().mockResolvedValue(undefined)}
+          orquestradores={[]}
+          aoAlternarFixo={vi.fn()}
+          comecaOculto
+        />,
+      );
+
+      expect(screen.queryByRole("complementary", { name: "Chat rápido" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Conversa com o Claude" })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /mostrar conversa/ }));
+      expect(screen.getByRole("region", { name: "Conversa com o Claude" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "ocultar" })).toBeInTheDocument();
     });
 
     describe("alça de largura", () => {
