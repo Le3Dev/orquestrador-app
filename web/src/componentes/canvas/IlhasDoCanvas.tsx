@@ -59,12 +59,12 @@ export function IlhaDoNome(props: PropsDoMenuNovo) {
 interface PropsDoAnel {
   /** Quanto do arco fica preenchido, de 0 a 1. */
   usada: number;
-  /** O anel de uso da cota (com o número no meio) ou o da memória (com o chip). */
-  classe: "anel-de-memoria" | "anel-de-uso";
+  /** O anel de memória (com o chip no meio). */
+  classe: "anel-de-memoria";
   children: ReactNode;
 }
 
-/** O desenho dos dois anéis da ilha: a trilha, o arco que cresce com o uso e o que fica no meio. */
+/** O desenho do anel de memória: a trilha, o arco que cresce com o uso e o que fica no meio. */
 function Anel({ usada, classe, children }: PropsDoAnel) {
   const tamanho = 26;
   const traco = 2.2;
@@ -121,9 +121,11 @@ function nivelDaJanela(janela: JanelaDaCota): NivelDaCota {
 const aPercentual = (utilizacao: number) => Math.min(100, Math.max(0, Math.round(utilizacao * 100)));
 
 interface ResumoDaCota {
-  /** A janela do arco: a da sessão (5 horas) ou, sem ela, a mais usada; nulo sem leitura. */
-  principal: JanelaDaCota | null;
-  /** A pior situação entre todas as janelas (é ela que dá a cor e o texto). */
+  /** O anel de fora: a janela da sessão (5 horas, a de maior utilização); nulo se faltar. */
+  sessao: JanelaDaCota | null;
+  /** O anel de dentro: a janela da semana (7 dias, a de maior utilização, mesmo as por modelo); nulo se faltar. */
+  semana: JanelaDaCota | null;
+  /** A pior situação entre todas as janelas (é ela que dá a cor do botão e o texto). */
   nivel: NivelDaCota;
   /** A frase única do `title` e do `aria-label`. */
   rotulo: string;
@@ -132,38 +134,98 @@ interface ResumoDaCota {
 /** "Cota da sessão" vira "sessão"; "Cota de 30 dias" vira "30 dias". */
 const nomeCurtoDaJanela = (nome: string) => nomeLegivelDaCota(nome).replace(/^Cota (?:da|de) /, "");
 
+/** A janela mais usada entre as que passam no filtro; nulo se nenhuma passa. */
+function maisUsada(janelas: JanelaDaCota[], filtro: (janela: JanelaDaCota) => boolean): JanelaDaCota | null {
+  return janelas
+    .filter(filtro)
+    .reduce<JanelaDaCota | null>((maior, janela) => (maior === null || janela.utilizacao > maior.utilizacao ? janela : maior), null);
+}
+
+/** "semana (Opus) 55%, renova em 3 dias" com a marca do anel: "semana (anel de dentro, Opus) 55%, ...". */
+function trechoDoAnel(janela: JanelaDaCota, anel: string, agora: Date): string {
+  const [, base = "", modelo] = /^(.*?)(?: \((.+)\))?$/.exec(nomeCurtoDaJanela(janela.nome)) ?? [];
+  const renovacao = janela.renovaEm === null ? "" : `, ${descreverRenovacao(janela.renovaEm, agora)}`;
+  return `${base} (${anel}${modelo === undefined ? "" : `, ${modelo}`}) ${aPercentual(janela.utilizacao)}%${renovacao}`;
+}
+
 function resumirCota(cota: JanelaDaCota[] | null, agora: Date): ResumoDaCota {
   const janelas = cota ?? [];
-  const mais = janelas.reduce<JanelaDaCota | null>(
-    (maior, janela) => (maior === null || janela.utilizacao > maior.utilizacao ? janela : maior),
-    null,
-  );
-  const principal = janelas.find((janela) => nomeLegivelDaCota(janela.nome) === "Cota da sessão") ?? mais;
-  if (principal === null) {
-    return { principal, nivel: "normal", rotulo: "Uso do Claude: sem leitura ainda" };
+  if (janelas.length === 0) {
+    return { sessao: null, semana: null, nivel: "normal", rotulo: "Uso do Claude: sem leitura ainda. Abrir Configurações, Conta" };
   }
+  const sessao = maisUsada(janelas, (janela) => nomeLegivelDaCota(janela.nome).startsWith("Cota da sessão"));
+  const semana = maisUsada(janelas, (janela) => nomeLegivelDaCota(janela.nome).startsWith("Cota da semana"));
   const nivel = janelas.reduce<NivelDaCota>((pior, janela) => {
     const dela = nivelDaJanela(janela);
     return PESO_DO_NIVEL_DA_COTA[dela] > PESO_DO_NIVEL_DA_COTA[pior] ? dela : pior;
   }, "normal");
-  const renovacao = principal.renovaEm === null ? "" : `, ${descreverRenovacao(principal.renovaEm, agora)}`;
   const partes = [
-    `${nomeCurtoDaJanela(principal.nome)} ${aPercentual(principal.utilizacao)}%${renovacao}`,
+    ...(sessao === null ? [] : [trechoDoAnel(sessao, "anel de fora", agora)]),
+    ...(semana === null ? [] : [trechoDoAnel(semana, "anel de dentro", agora)]),
+    // As demais janelas (30 dias e afins) não têm anel: entram só na frase.
     ...janelas
-      .filter((janela) => janela !== principal)
+      .filter((janela) => janela !== sessao && janela !== semana)
       .map((janela) => `${nomeCurtoDaJanela(janela.nome)} ${aPercentual(janela.utilizacao)}%`),
   ];
   const aviso = nivel === "normal" ? "" : ` ${TEXTO_DO_NIVEL_DA_COTA[nivel]}.`;
-  return { principal, nivel, rotulo: `Uso do Claude: ${partes.join("; ")}.${aviso} Abrir Configurações, Conta` };
+  return { sessao, semana, nivel, rotulo: `Uso do Claude: ${partes.join("; ")}.${aviso} Abrir Configurações, Conta` };
 }
 
-/** O anel de uso da cota do Claude: o arco é a janela principal e o número no meio, o percentual dela. */
-function AnelDeUso({ principal }: { principal: JanelaDaCota | null }) {
-  const percentual = principal === null ? null : aPercentual(principal.utilizacao);
+const TRACO_DO_ANEL_DE_FORA = 2.2;
+const TRACO_DO_ANEL_DE_DENTRO = 1.8;
+
+interface PropsDoArco {
+  /** A janela do arco; nulo deixa só a trilha. */
+  janela: JanelaDaCota | null;
+  raio: number;
+  traco: number;
+  /** Qual anel é (para os testes e a folha de estilo). */
+  qual: "sessao" | "semana";
+}
+
+/** Uma trilha e, por cima, o arco da janela na cor do nível dela. */
+function ArcoDeUso({ janela, raio, traco, qual }: PropsDoArco) {
+  const centro = 13;
+  const usada = janela === null ? 0 : aPercentual(janela.utilizacao) / 100;
+  const circunferencia = 2 * Math.PI * raio;
   return (
-    <Anel usada={percentual === null ? 0 : percentual / 100} classe="anel-de-uso">
-      <span className={`valor-do-anel ${percentual === 100 ? "valor-do-anel-cheio" : ""}`}>{percentual ?? "–"}</span>
-    </Anel>
+    <>
+      <circle className="trilha-do-anel" cx={centro} cy={centro} r={raio} fill="none" strokeWidth={traco} />
+      {usada > 0 && janela !== null && (
+        <circle
+          className={`arco-do-anel arco-do-anel-${nivelDaJanela(janela)}`}
+          data-anel={qual}
+          cx={centro}
+          cy={centro}
+          r={raio}
+          fill="none"
+          strokeWidth={traco}
+          strokeLinecap="round"
+          strokeDasharray={`${circunferencia * usada} ${circunferencia}`}
+          transform={`rotate(-90 ${centro} ${centro})`}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * O anel de uso da cota do Claude, no mesmo tamanho do de memória: dois anéis concêntricos, o de fora é a
+ * sessão (5 horas) e o de dentro, mais fino e com um respiro entre os dois, a semana (7 dias). Cada arco
+ * tem a cor do próprio nível. Sem número no meio: o valor vai no `title` e no `aria-label` do botão.
+ */
+function AnelDeUso({ sessao, semana }: { sessao: JanelaDaCota | null; semana: JanelaDaCota | null }) {
+  const tamanho = 26;
+  const raioDeFora = (tamanho - TRACO_DO_ANEL_DE_FORA) / 2;
+  // Borda de dentro do anel de fora, menos 2 px de respiro e meio traço do anel de dentro.
+  const raioDeDentro = raioDeFora - TRACO_DO_ANEL_DE_FORA / 2 - 2 - TRACO_DO_ANEL_DE_DENTRO / 2;
+  return (
+    <span className="anel-de-uso" aria-hidden="true">
+      <svg width={tamanho} height={tamanho} viewBox={`0 0 ${tamanho} ${tamanho}`}>
+        <ArcoDeUso janela={sessao} raio={raioDeFora} traco={TRACO_DO_ANEL_DE_FORA} qual="sessao" />
+        <ArcoDeUso janela={semana} raio={raioDeDentro} traco={TRACO_DO_ANEL_DE_DENTRO} qual="semana" />
+      </svg>
+    </span>
   );
 }
 
@@ -249,7 +311,7 @@ export function IlhaDaDireita({
         data-testid="anel-de-uso"
         onClick={() => aoAlternarConfiguracoes("conta")}
       >
-        <AnelDeUso principal={resumoDaCota.principal} />
+        <AnelDeUso sessao={resumoDaCota.sessao} semana={resumoDaCota.semana} />
         {textoDaCota !== "" && <span className="texto-do-anel">{textoDaCota}</span>}
       </button>
       <button

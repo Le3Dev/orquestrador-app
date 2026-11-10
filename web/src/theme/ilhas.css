@@ -291,18 +291,13 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
 .trilha-do-anel { stroke: color-mix(in srgb, var(--primary) 16%, transparent); }
 .arco-do-anel { stroke: currentColor; }
 .chip-do-anel { position: absolute; top: 6.5px; left: 6.5px; }
-/* O percentual no meio do anel de uso: número pequeno, de largura fixa, sem o sinal de %. */
-.valor-do-anel {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font: 500 10px/1 var(--fonte-mono);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.04em;
-}
-.valor-do-anel-cheio { font-size: 8.5px; }
+/* Anel de uso da cota: dois anéis (fora, sessão; dentro, semana), cada arco na cor do próprio nível.
+ * Cada arco tem a sua cor, independente da do botão (que segue a pior janela): o normal é o cinza de
+ * sempre (e acende no hover e com a aba aberta, como o texto do botão); alto e crítico têm a sua. */
+.arco-do-anel-normal { stroke: var(--secondary); }
+.anel-da-ilha:hover .arco-do-anel-normal, .anel-da-ilha[aria-pressed="true"] .arco-do-anel-normal { stroke: var(--primary); }
+.arco-do-anel-alta { stroke: var(--warning); }
+.arco-do-anel-critica { stroke: var(--error); }
 
 /* Windows e Linux desktop: ─ ☐ ✕ no fim da ilha da direita, depois de um divisor; fechar fica vermelho no hover. */
 .ilha-da-direita .controles-da-janela { gap: 2px; }

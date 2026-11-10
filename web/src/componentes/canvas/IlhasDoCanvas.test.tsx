@@ -88,7 +88,7 @@ describe("IlhaDaDireita", () => {
     const ilha = screen.getByRole("group", { name: "Busca, status e configurações" });
     expect(within(ilha).getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual([
       "Buscar (Ctrl+K)",
-      "Uso do Claude: sem leitura ainda",
+      "Uso do Claude: sem leitura ainda. Abrir Configurações, Conta",
       "Memória do computador: 38% em uso. Abrir Configurações, Sistema",
       "Configurações",
     ]);
@@ -239,7 +239,19 @@ describe("IlhaDaDireita", () => {
       vi.useRealTimers();
     });
 
-    it("sem leitura (cota nula ou vazia): arco vazio, traço no centro e a frase diz isso", () => {
+    /** A fração desenhada (0 a 1) de um dos dois arcos; nulo se o arco não existe (só a trilha). */
+    const fracaoDoArco = (anel: HTMLElement, qual: "sessao" | "semana") => {
+      const arco = anel.querySelector(`[data-anel="${qual}"]`);
+      if (arco === null) {
+        return null;
+      }
+      const [cheio = 0, total = 1] = (arco.getAttribute("stroke-dasharray") ?? "").split(" ").map(Number);
+      return cheio / total;
+    };
+    const raioDe = (anel: HTMLElement, indice: number) =>
+      Number(anel.querySelectorAll(".trilha-do-anel")[indice]?.getAttribute("r"));
+
+    it("sem leitura (cota nula ou vazia): duas trilhas vazias, sem número e a frase diz isso", () => {
       const { unmount } = render(
         <IlhaDaDireita
           aoBuscar={vi.fn()}
@@ -252,81 +264,124 @@ describe("IlhaDaDireita", () => {
         />,
       );
       const anel = screen.getByTestId("anel-de-uso");
-      expect(anel).toHaveAttribute("aria-label", "Uso do Claude: sem leitura ainda");
-      expect(anel).toHaveAttribute("title", "Uso do Claude: sem leitura ainda");
-      expect(anel).toHaveTextContent("–");
+      const frase = "Uso do Claude: sem leitura ainda. Abrir Configurações, Conta";
+      expect(anel).toHaveAttribute("aria-label", frase);
+      expect(anel).toHaveAttribute("title", frase);
+      expect(anel).toHaveTextContent("");
       expect(anel).toHaveClass("anel-da-ilha-normal");
-      expect(anel.querySelector(".trilha-do-anel")).not.toBeNull();
+      expect(anel.querySelectorAll(".trilha-do-anel")).toHaveLength(2);
       expect(anel.querySelector(".arco-do-anel")).toBeNull();
       unmount();
 
       montar({ cota: [] });
-      expect(screen.getByTestId("anel-de-uso")).toHaveAccessibleName("Uso do Claude: sem leitura ainda");
+      expect(screen.getByTestId("anel-de-uso")).toHaveAccessibleName(frase);
+      expect(screen.getByTestId("anel-de-uso").querySelector(".arco-do-anel")).toBeNull();
     });
 
-    it("mostra o percentual da sessão no centro e resume sessão, renovação e semana na frase", () => {
-      montar({ cota: [janela("7 dias", 0.18), janela("5 horas", 0.42, { renovaEm: emMinutos(130) })] });
+    it("desenha dois anéis: o de fora é a sessão e o de dentro, a semana, mais fino e com respiro", () => {
+      montar({
+        cota: [janela("7 dias", 0.18, { renovaEm: emMinutos(3 * 24 * 60) }), janela("5 horas", 0.42, { renovaEm: emMinutos(130) })],
+      });
 
       const anel = screen.getByTestId("anel-de-uso");
-      expect(anel).toHaveTextContent("42");
-      expect(anel).not.toHaveTextContent("%");
+      expect(anel).toHaveTextContent("");
       expect(anel).toHaveClass("anel-da-ilha-normal");
-      const frase = "Uso do Claude: sessão 42%, renova em 2 h 10 min; semana 18%. Abrir Configurações, Conta";
-      expect(anel).toHaveAttribute("aria-label", frase);
-      expect(anel).toHaveAttribute("title", frase);
-      // O arco acompanha a sessão: 42% da circunferência.
-      const [cheio = 0, total = 1] = (anel.querySelector(".arco-do-anel")?.getAttribute("stroke-dasharray") ?? "")
-        .split(" ")
-        .map(Number);
-      expect(cheio / total).toBeCloseTo(0.42, 2);
+      expect(fracaoDoArco(anel, "sessao")).toBeCloseTo(0.42, 2);
+      expect(fracaoDoArco(anel, "semana")).toBeCloseTo(0.18, 2);
+      const [fora, dentro] = [raioDe(anel, 0), raioDe(anel, 1)];
+      expect(fora).toBeGreaterThan(dentro);
+      // Respiro: o vão entre os dois traços é de pelo menos 1,5 px.
+      const traco = (indice: number) => Number(anel.querySelectorAll(".trilha-do-anel")[indice]?.getAttribute("stroke-width"));
+      expect(traco(1)).toBeLessThan(traco(0));
+      expect(fora - traco(0) / 2 - (dentro + traco(1) / 2)).toBeGreaterThanOrEqual(1.5);
+      // De um dia em diante a renovação sai como data e hora (o formato do resto do app).
+      const frase = /^Uso do Claude: sessão \(anel de fora\) 42%, renova em 2 h 10 min; semana \(anel de dentro\) 18%, renova em \d{2}\/\d{2}, \d{2}:\d{2}\. Abrir Configurações, Conta$/;
+      expect(anel.getAttribute("aria-label")).toMatch(frase);
+      expect(anel.getAttribute("title")).toMatch(frase);
     });
 
-    it("sem a janela de 5 horas, o centro mostra a mais usada", () => {
-      montar({ cota: [janela("7 dias", 0.3), janela("7 dias (Opus)", 0.55)] });
+    it("com várias semanais (uma por modelo), o anel de dentro usa a de maior utilização", () => {
+      montar({ cota: [janela("5 horas", 0.1), janela("7 dias", 0.3), janela("7 dias (Opus)", 0.55)] });
 
-      expect(screen.getByTestId("anel-de-uso")).toHaveTextContent("55");
-      expect(screen.getByTestId("anel-de-uso")).toHaveAccessibleName(
-        "Uso do Claude: semana (Opus) 55%; semana 30%. Abrir Configurações, Conta",
+      const anel = screen.getByTestId("anel-de-uso");
+      expect(fracaoDoArco(anel, "semana")).toBeCloseTo(0.55, 2);
+      expect(anel).toHaveAccessibleName(
+        "Uso do Claude: sessão (anel de fora) 10%; semana (anel de dentro, Opus) 55%; semana 30%. Abrir Configurações, Conta",
       );
     });
 
-    it("a partir de 80% o anel fica âmbar e ganha o texto Cota alta", () => {
-      montar({ cota: [janela("5 horas", 0.85)] });
-
-      const anel = screen.getByTestId("anel-de-uso");
-      expect(anel).toHaveClass("anel-da-ilha-alta");
-      expect(anel).toHaveTextContent("85");
-      expect(anel).toHaveTextContent("Cota alta");
-      expect(anel).toHaveAccessibleName("Uso do Claude: sessão 85%. Cota alta. Abrir Configurações, Conta");
-    });
-
-    it("a partir de 95% ou com a situação rejected, o anel fica vermelho e diz Cota no limite", () => {
+    it("falta uma das janelas: o anel dela fica só com a trilha", () => {
       const { unmount } = render(
         <IlhaDaDireita
           aoBuscar={vi.fn()}
           trabalhando={0}
           memoria={memoria(10)}
-          cota={[janela("5 horas", 0.97)]}
+          cota={[janela("5 horas", 0.42)]}
           aoAlternarConfiguracoes={vi.fn()}
           configuracoesAbertas={false}
           abaAberta={null}
         />,
       );
-      expect(screen.getByTestId("anel-de-uso")).toHaveClass("anel-da-ilha-critica");
-      expect(screen.getByTestId("anel-de-uso")).toHaveTextContent("Cota no limite");
+      let anel = screen.getByTestId("anel-de-uso");
+      expect(anel.querySelectorAll(".trilha-do-anel")).toHaveLength(2);
+      expect(fracaoDoArco(anel, "sessao")).toBeCloseTo(0.42, 2);
+      expect(fracaoDoArco(anel, "semana")).toBeNull();
+      expect(anel).toHaveAccessibleName("Uso do Claude: sessão (anel de fora) 42%. Abrir Configurações, Conta");
+      unmount();
+
+      montar({ cota: [janela("7 dias", 0.3)] });
+      anel = screen.getByTestId("anel-de-uso");
+      expect(anel.querySelectorAll(".trilha-do-anel")).toHaveLength(2);
+      expect(fracaoDoArco(anel, "sessao")).toBeNull();
+      expect(fracaoDoArco(anel, "semana")).toBeCloseTo(0.3, 2);
+      expect(anel).toHaveAccessibleName("Uso do Claude: semana (anel de dentro) 30%. Abrir Configurações, Conta");
+    });
+
+    it("a partir de 80% o arco fica âmbar e o botão ganha o texto Cota alta", () => {
+      montar({ cota: [janela("5 horas", 0.85)] });
+
+      const anel = screen.getByTestId("anel-de-uso");
+      expect(anel).toHaveClass("anel-da-ilha-alta");
+      expect(anel.querySelector('[data-anel="sessao"]')).toHaveClass("arco-do-anel-alta");
+      expect(anel).toHaveTextContent("Cota alta");
+      expect(anel).toHaveAccessibleName("Uso do Claude: sessão (anel de fora) 85%. Cota alta. Abrir Configurações, Conta");
+    });
+
+    it("a partir de 95% ou com a situação rejected, o arco fica vermelho e o botão diz Cota no limite", () => {
+      const { unmount } = render(
+        <IlhaDaDireita
+          aoBuscar={vi.fn()}
+          trabalhando={0}
+          memoria={memoria(10)}
+          cota={[janela("5 horas", 0.97), janela("7 dias", 0.6)]}
+          aoAlternarConfiguracoes={vi.fn()}
+          configuracoesAbertas={false}
+          abaAberta={null}
+        />,
+      );
+      let anel = screen.getByTestId("anel-de-uso");
+      expect(anel).toHaveClass("anel-da-ilha-critica");
+      expect(anel).toHaveTextContent("Cota no limite");
+      expect(anel.querySelector('[data-anel="sessao"]')).toHaveClass("arco-do-anel-critica");
+      expect(anel.querySelector('[data-anel="semana"]')).toHaveClass("arco-do-anel-normal");
       unmount();
 
       montar({ cota: [janela("5 horas", 0.4), janela("7 dias", 0.6, { situacao: "rejected" })] });
-      expect(screen.getByTestId("anel-de-uso")).toHaveClass("anel-da-ilha-critica");
-      expect(screen.getByTestId("anel-de-uso")).toHaveTextContent("Cota no limite");
+      anel = screen.getByTestId("anel-de-uso");
+      expect(anel).toHaveClass("anel-da-ilha-critica");
+      expect(anel).toHaveTextContent("Cota no limite");
+      expect(anel.querySelector('[data-anel="sessao"]')).toHaveClass("arco-do-anel-normal");
+      expect(anel.querySelector('[data-anel="semana"]')).toHaveClass("arco-do-anel-critica");
     });
 
-    it("o nível e o texto vêm da pior janela, mesmo que a da sessão esteja folgada", () => {
+    it("cada arco tem a cor do próprio nível, e o botão fica no da pior janela", () => {
       montar({ cota: [janela("5 horas", 0.2), janela("7 dias", 0.9)] });
 
-      expect(screen.getByTestId("anel-de-uso")).toHaveTextContent("20");
-      expect(screen.getByTestId("anel-de-uso")).toHaveClass("anel-da-ilha-alta");
-      expect(screen.getByTestId("anel-de-uso")).toHaveTextContent("Cota alta");
+      const anel = screen.getByTestId("anel-de-uso");
+      expect(anel.querySelector('[data-anel="sessao"]')).toHaveClass("arco-do-anel-normal");
+      expect(anel.querySelector('[data-anel="semana"]')).toHaveClass("arco-do-anel-alta");
+      expect(anel).toHaveClass("anel-da-ilha-alta");
+      expect(anel).toHaveTextContent("Cota alta");
     });
 
     it("o clique abre as Configurações na aba Conta", () => {
