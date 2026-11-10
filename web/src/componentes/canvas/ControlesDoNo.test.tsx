@@ -1,5 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 
+import {
+  CHAVE_DAS_PREFERENCIAS_DA_TELA,
+  type EstiloDosControlesDasJanelas,
+  usePreferenciasDaTela,
+} from "../../shared/hooks/usePreferenciasDaTela";
 import { ControlesDoNo, type PropsDosControlesDoNo } from "./ControlesDoNo";
 
 const ponte = vi.hoisted(() => ({ noMac: false }));
@@ -29,6 +34,7 @@ function Cabecalho(props: Omit<PropsDosControlesDoNo, "lado">) {
 describe("ControlesDoNo", () => {
   afterEach(() => {
     ponte.noMac = false;
+    localStorage.clear();
   });
 
   describe("no Windows, no Linux e no navegador", () => {
@@ -122,6 +128,80 @@ describe("ControlesDoNo", () => {
     it("minimizada e ampliada: os mesmos rótulos do Windows", () => {
       render(<Cabecalho objeto="o terminal" {...acoes()} minimizada ampliada />);
       expect(rotulos()).toEqual(["Fechar o terminal", "Restaurar o terminal", "Sair da tela cheia"]);
+    });
+  });
+
+  describe("preferência \"Controles das janelas\"", () => {
+    const guardar = (estilo: unknown) =>
+      localStorage.setItem(CHAVE_DAS_PREFERENCIAS_DA_TELA, JSON.stringify({ controlesDasJanelas: estilo }));
+    const estilos = (container: HTMLElement) => ({
+      bolinhas: container.querySelectorAll(".bolinha-do-no").length,
+      botoes: container.querySelectorAll(".botao-do-no").length,
+    });
+
+    it("Automático (o padrão) segue o sistema: bolinhas no Mac, botões no Windows", () => {
+      ponte.noMac = true;
+      const mac = render(<Cabecalho objeto="o terminal" {...acoes()} />);
+      expect(estilos(mac.container)).toEqual({ bolinhas: 3, botoes: 0 });
+      mac.unmount();
+
+      guardar("automatico");
+      ponte.noMac = false;
+      const windows = render(<Cabecalho objeto="o terminal" {...acoes()} />);
+      expect(estilos(windows.container)).toEqual({ bolinhas: 0, botoes: 3 });
+    });
+
+    it("Estilo Mac põe as bolinhas à esquerda, mesmo no Windows", () => {
+      guardar("mac");
+      ponte.noMac = false;
+      const { container } = render(<Cabecalho objeto="o terminal" {...acoes()} />);
+
+      expect(estilos(container)).toEqual({ bolinhas: 3, botoes: 0 });
+      expect(rotulos()).toEqual(["Fechar o terminal", "Minimizar o terminal", "Ampliar o terminal"]);
+      expect(screen.getByRole("group", { name: "Controles da janela" }).nextElementSibling).toHaveTextContent("título");
+    });
+
+    it("Estilo Windows põe os botões à direita, mesmo no Mac", () => {
+      guardar("windows");
+      ponte.noMac = true;
+      const { container } = render(<Cabecalho objeto="o terminal" {...acoes()} />);
+
+      expect(estilos(container)).toEqual({ bolinhas: 0, botoes: 3 });
+      expect(rotulos()).toEqual(["Minimizar o terminal", "Ampliar o terminal", "Fechar o terminal"]);
+      expect(screen.getByRole("group", { name: "Controles da janela" }).previousElementSibling).toHaveTextContent("título");
+    });
+
+    it("valor guardado inválido vale Automático", () => {
+      guardar("linux");
+      ponte.noMac = true;
+      const { container } = render(<Cabecalho objeto="o terminal" {...acoes()} />);
+      expect(estilos(container)).toEqual({ bolinhas: 3, botoes: 0 });
+    });
+
+    it("trocar a preferência muda todas as janelas na hora, sem remontar", () => {
+      let mudarEstilo: (estilo: EstiloDosControlesDasJanelas) => void = () => undefined;
+      function Troca() {
+        const { mudarPreferencias } = usePreferenciasDaTela();
+        mudarEstilo = (estilo) => mudarPreferencias({ controlesDasJanelas: estilo });
+        return null;
+      }
+      const { container } = render(
+        <>
+          <Troca />
+          <Cabecalho objeto="o terminal" {...acoes()} />
+          <Cabecalho objeto="a nota" aoFechar={vi.fn()} />
+        </>,
+      );
+      expect(estilos(container)).toEqual({ bolinhas: 0, botoes: 4 });
+
+      act(() => mudarEstilo("mac"));
+      expect(estilos(container)).toEqual({ bolinhas: 4, botoes: 0 });
+
+      act(() => mudarEstilo("windows"));
+      expect(estilos(container)).toEqual({ bolinhas: 0, botoes: 4 });
+
+      act(() => mudarEstilo("automatico"));
+      expect(estilos(container)).toEqual({ bolinhas: 0, botoes: 4 });
     });
   });
 });

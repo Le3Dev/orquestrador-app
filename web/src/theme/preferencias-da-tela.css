@@ -3,7 +3,7 @@
  * `.interruptor`, à direita de cada item) e, no desktop, "Pastas e Claude
  * Code…". Três classes nos itens: vence o `.interruptor` do tema qualquer que
  * seja a ordem dos arquivos. */
-.painel-de-configuracoes { min-width: 270px; }
+.menu-do-novo.painel-de-configuracoes { min-width: 330px; }
 /* Na barra de título (36 px, sem o respiro da barra do canvas): logo abaixo
  * do ⚙, alinhado pela direita, crescendo do canto dele. */
 .painel-de-configuracoes.painel-de-configuracoes-direita {
@@ -25,6 +25,32 @@
 }
 .painel-de-configuracoes .item-do-menu.interruptor .mono { font-size: 10.5px; margin-top: 2px; }
 .painel-de-configuracoes .item-do-menu.interruptor:focus-visible { outline: none; background: var(--surface-3); }
+/* O controle segmentado dos menus (esquerda · direita; Automático · Mac ·
+ * Windows): colunas iguais lado a lado. A regra-base saiu do index.css junto
+ * com o cartão que a usava, e o "Lado" ficou sem estilo. */
+.painel-de-configuracoes .segmentado-do-menu {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(max-content, 1fr);
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-input);
+  background: var(--screen-bg);
+}
+.painel-de-configuracoes .segmentado-do-menu button {
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--secondary);
+  font-family: var(--fonte-titulo);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.painel-de-configuracoes .segmentado-do-menu button:hover { color: var(--primary); }
+.painel-de-configuracoes .segmentado-do-menu button:focus-visible { outline: 2px solid var(--active); outline-offset: -2px; }
 /* "Lado" do chat fixo, logo abaixo do interruptor: o controle segmentado dos
  * menus (esquerda · direita), alinhado à direita como o trilho. Com o chat
  * solto, fica mais apagado: a escolha vale quando ele for fixado. */
@@ -46,3 +72,21 @@
   font-weight: 600;
 }
 .painel-de-configuracoes .lado-do-chat-fixo.lado-do-chat-solto { opacity: 0.7; }
+/* "Controles das janelas": o rótulo e, embaixo, o segmentado de três opções
+ * ocupando a largura do painel (não cabe ao lado do rótulo, como o "Lado"). */
+.painel-de-configuracoes .controles-das-janelas {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 10px 8px;
+  font-size: 12.5px;
+  color: var(--primary);
+}
+.painel-de-configuracoes .controles-das-janelas .segmentado-do-menu { width: 100%; padding: 2px; }
+.painel-de-configuracoes .controles-das-janelas .segmentado-do-menu button { height: 24px; padding: 0 6px; white-space: nowrap; }
+.painel-de-configuracoes .controles-das-janelas .segmentado-do-menu button[aria-checked="true"] {
+  border-color: var(--border-forte);
+  background: var(--surface-3);
+  color: var(--primary);
+  font-weight: 600;
+}

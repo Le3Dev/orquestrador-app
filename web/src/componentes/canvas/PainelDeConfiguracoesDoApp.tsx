@@ -4,7 +4,11 @@ import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { AjustesDoAplicativo } from "../../shared/hooks/useAjustesDoAplicativo";
 import { definirAutorrecuperacao, useValorDaAutorrecuperacao } from "../../shared/hooks/useAutorrecuperacao";
 import { useMenuDaBarra } from "../../shared/hooks/useMenuDaBarra";
-import { type LadoDoChatFixo, usePreferenciasDaTela } from "../../shared/hooks/usePreferenciasDaTela";
+import {
+  type EstiloDosControlesDasJanelas,
+  type LadoDoChatFixo,
+  usePreferenciasDaTela,
+} from "../../shared/hooks/usePreferenciasDaTela";
 import "../../theme/preferencias-da-tela.css";
 
 const DICA_DA_AUTORRECUPERACAO = "retoma sozinho quando o Claude trava ou a API falha";
@@ -40,13 +44,22 @@ const OUTROS_INTERRUPTORES_DA_TELA: readonly Interruptor[] = [
   },
 ];
 
+/** Os estilos dos controles das janelas do canvas, na ordem do controle segmentado (o último item da seção "Tela"). */
+const ESTILOS_DOS_CONTROLES: readonly { estilo: EstiloDosControlesDasJanelas; rotulo: string; dica: string }[] = [
+  { estilo: "automatico", rotulo: "Automático", dica: "Os controles das janelas seguem o sistema" },
+  { estilo: "mac", rotulo: "Estilo Mac", dica: "Bolinhas à esquerda do cabeçalho das janelas" },
+  { estilo: "windows", rotulo: "Estilo Windows", dica: "Botões à direita do cabeçalho das janelas" },
+];
+
 /**
  * A ordem da navegação por teclado: "Chat fixo" (0), os dois lados (1 e 2),
- * os outros interruptores da Tela, a "Autorrecuperação" e, no desktop, os Ajustes.
+ * os outros interruptores da Tela, os três estilos dos controles das janelas,
+ * a "Autorrecuperação" e, no desktop, os Ajustes.
  */
 const INDICE_DO_PRIMEIRO_LADO = 1;
 const INDICE_DOS_OUTROS_INTERRUPTORES = INDICE_DO_PRIMEIRO_LADO + LADOS_DO_CHAT_FIXO.length;
-const INDICE_DA_AUTORRECUPERACAO = INDICE_DOS_OUTROS_INTERRUPTORES + OUTROS_INTERRUPTORES_DA_TELA.length;
+const INDICE_DO_PRIMEIRO_ESTILO = INDICE_DOS_OUTROS_INTERRUPTORES + OUTROS_INTERRUPTORES_DA_TELA.length;
+const INDICE_DA_AUTORRECUPERACAO = INDICE_DO_PRIMEIRO_ESTILO + ESTILOS_DOS_CONTROLES.length;
 
 interface PropsDoPainelDeConfiguracoes {
   /** Os Ajustes do app desktop (pastas e Claude Code); quem usa mostra o `erro`. */
@@ -62,7 +75,8 @@ interface PropsDoPainelDeConfiguracoes {
 
 /**
  * O ⚙ Configurações e o painel dele, ancorado no botão: a seção "Tela" (chat
- * fixo, o lado dele, visualizador de código e manter os bixinhos), a seção "Orquestradores"
+ * fixo, o lado dele, visualizador de código, manter os bixinhos e o estilo dos
+ * controles das janelas), a seção "Orquestradores"
  * (autorrecuperação, preferência do servidor) e, no app desktop, "Pastas e
  * Claude Code…", que abre a janela dos Ajustes. Ligar ou desligar não fecha o
  * painel (dá para mexer em vários); a navegação por teclado é a do `+ Novo ▾`.
@@ -87,6 +101,7 @@ export function PainelDeConfiguracoesDoApp({
 
   const alternar = (chave: ChaveDoInterruptor) => mudarPreferencias({ [chave]: !preferencias[chave] });
   const escolherLado = (lado: LadoDoChatFixo) => mudarPreferencias({ ladoDoChatFixo: lado });
+  const escolherEstilo = (estilo: EstiloDosControlesDasJanelas) => mudarPreferencias({ controlesDasJanelas: estilo });
 
   const alternarAutorrecuperacao = () => {
     if (autorrecuperacao === null || gravando) {
@@ -115,12 +130,15 @@ export function PainelDeConfiguracoesDoApp({
   const menu = useMenuDaBarra(total, (indice) => {
     const lado = LADOS_DO_CHAT_FIXO[indice - INDICE_DO_PRIMEIRO_LADO];
     const outro = OUTROS_INTERRUPTORES_DA_TELA[indice - INDICE_DOS_OUTROS_INTERRUPTORES];
+    const estilo = ESTILOS_DOS_CONTROLES[indice - INDICE_DO_PRIMEIRO_ESTILO];
     if (indice === 0) {
       alternar(INTERRUPTOR_DO_CHAT_FIXO.chave);
     } else if (lado !== undefined) {
       escolherLado(lado);
     } else if (outro !== undefined) {
       alternar(outro.chave);
+    } else if (estilo !== undefined) {
+      escolherEstilo(estilo.estilo);
     } else if (indice === INDICE_DA_AUTORRECUPERACAO) {
       alternarAutorrecuperacao();
     } else if (ajustes.disponivel) {
@@ -232,6 +250,26 @@ export function PainelDeConfiguracoesDoApp({
                 )}
               </Fragment>
             ))}
+            {/* Como as janelas do canvas desenham fechar, minimizar e ampliar; troca na hora, em todas. */}
+            <div role="group" aria-labelledby={`${menu.idDoMenu}-controles`} className="controles-das-janelas">
+              <span id={`${menu.idDoMenu}-controles`}>Controles das janelas</span>
+              <div className="segmentado-do-menu">
+                {ESTILOS_DOS_CONTROLES.map((item, indice) => (
+                  <button
+                    key={item.estilo}
+                    ref={menu.refDoItem(INDICE_DO_PRIMEIRO_ESTILO + indice)}
+                    type="button"
+                    role="menuitemradio"
+                    tabIndex={-1}
+                    aria-checked={preferencias.controlesDasJanelas === item.estilo}
+                    title={item.dica}
+                    onClick={() => escolherEstilo(item.estilo)}
+                  >
+                    {item.rotulo}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
           <hr className="separador-do-menu" />
           <div role="group" aria-labelledby={`${menu.idDoMenu}-orquestradores`}>

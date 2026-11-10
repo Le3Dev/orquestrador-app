@@ -1,3 +1,4 @@
+import { usePreferenciasDaTela } from "../../shared/hooks/usePreferenciasDaTela";
 import { rodandoNoMac } from "../../shared/ponteDoDesktop";
 import "../../theme/controles-de-janela.css";
 
@@ -6,7 +7,9 @@ import "../../theme/controles-de-janela.css";
  * prévia): minimizar, ampliar (tela cheia) e fechar, iguais nos quatro. Cada
  * ação é opcional: só aparece o botão de quem recebe a função.
  *
- * O visual segue o sistema, como a barra de título do app: no Mac, as bolinhas
+ * O visual segue o sistema por padrão, como a barra de título do app (a
+ * preferência "Controles das janelas" troca para um dos dois estilos, na hora,
+ * em todas as janelas; a barra de título do app não muda): no Mac, as bolinhas
  * (vermelha fecha, amarela minimiza, verde amplia) no começo do cabeçalho, com o
  * símbolo no hover do grupo; no Windows, no Linux e no navegador, os botões
  * minimizar, maximizar e fechar no fim do cabeçalho, com ícones finos e o fechar
@@ -106,7 +109,9 @@ export function ControlesDoNo({
   ampliada = false,
   ampliarDesabilitado = false,
 }: PropsDosControlesDoNo) {
-  const noMac = rodandoNoMac();
+  const { preferencias } = usePreferenciasDaTela();
+  // "Automático" segue o sistema; "Estilo Mac" e "Estilo Windows" ignoram-no.
+  const noMac = preferencias.controlesDasJanelas === "automatico" ? rodandoNoMac() : preferencias.controlesDasJanelas === "mac";
   if ((lado === "inicio") !== noMac) {
     return null;
   }
