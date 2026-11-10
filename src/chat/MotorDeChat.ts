@@ -50,6 +50,8 @@ export interface PerguntaAoMotorDeChat {
 
 /** O que acontece enquanto o motor responde, para a tela acompanhar ao vivo. */
 export type EventoDoMotorDeChat =
+  /** A sessão foi aberta (já existe em disco), mesmo antes de qualquer texto. */
+  | { tipo: "sessao_aberta" }
   /** Pedaço de texto da resposta, na ordem em que é gerado. */
   | { tipo: "trecho_da_resposta"; texto: string }
   /** O motor usou uma ferramenta (pesquisa na web, leitura, edição, comando…); `detalhe` é um resumo curto da entrada. */

@@ -338,6 +338,16 @@ describe("AdaptadorDeEventosDoChat — linhas sintéticas", () => {
     expect(adaptador.resultado).toBeNull();
   });
 
+  it("system/init gera sessao_aberta; os outros system não geram evento", () => {
+    const { eventos } = traduzirTudo([
+      { type: "system", subtype: "init", session_id: "abc" },
+      { type: "system", subtype: "task_started" },
+      { type: "system", subtype: "background_tasks_changed" },
+    ]);
+
+    expect(eventos).toEqual([{ tipo: "sessao_aberta" }]);
+  });
+
   it("resume Read pelo caminho e Glob/Grep pelo padrão", () => {
     const { eventos } = traduzirTudo([
       {

@@ -359,6 +359,19 @@ describe("ServicoDeChat", () => {
     expect(servico.estado().situacao).toBe("ocioso");
   });
 
+  it("cancelar após só a abertura da sessão deixa a sessão como iniciada", async () => {
+    const { conclusao } = await servico.perguntar({ texto: "oi" });
+    await aguardarMotor();
+    motor.emitir({ tipo: "sessao_aberta" });
+
+    await servico.cancelar();
+    await conclusao;
+    await servico.perguntar({ texto: "de novo" });
+    await aguardarMotor(2);
+
+    expect(motor.perguntas[1]).toMatchObject({ sessaoId: "sessao-1", sessaoIniciada: true });
+  });
+
   it("cancelar sem resposta em andamento é recusado", async () => {
     await expect(servico.cancelar()).rejects.toMatchObject({ motivo: "sem_resposta_em_andamento" });
   });
