@@ -1,7 +1,14 @@
 /** Mensagens trocadas entre a tela e o worker que roda o Whisper. */
 
+/** Os modelos do Whisper que o worker sabe carregar (um pipeline por modelo, no primeiro uso). */
+export const MODELO_DO_DITADO = "onnx-community/whisper-small";
+/** Menor e mais rápido: serve à escuta, que transcreve quase ao vivo. */
+export const MODELO_DA_ESCUTA = "onnx-community/whisper-base";
+
 export interface PedidoDeTranscricao {
   id: number;
+  /** Qual modelo do Whisper usa: o ditado, o `whisper-small`; a escuta, o `whisper-base`. */
+  modelo: string;
   /** Áudio mono a 16 kHz, como o Whisper espera. */
   audio: Float32Array;
   /**

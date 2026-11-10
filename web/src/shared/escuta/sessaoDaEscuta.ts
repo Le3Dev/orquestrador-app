@@ -3,17 +3,24 @@ import type { ClassificacaoDaEscuta, PedidoDeClassificacaoDaEscuta } from "../ap
 import { TranscricaoDescartada, type Transcrever, transcrever as transcreverNoWhisper } from "../ditado/transcritor";
 import { type CapturaDoAudio, iniciarCapturaDoAudio, type OuvintesDaCaptura } from "./capturaDoAudio";
 import { ControleDeDisparos } from "./ControleDeDisparos";
-import { CortadorDeTrechos, type TrechoDeAudio } from "./CortadorDeTrechos";
+import { CortadorDeTrechos, TAXA_DE_AMOSTRAGEM, type TrechoDeAudio } from "./CortadorDeTrechos";
 import { DetectorDePergunta } from "./DetectorDePergunta";
 import { DURACAO_DO_CONTEXTO_MS, JanelaDeTranscricao } from "./JanelaDeTranscricao";
 import { mensagemDaEscuta } from "./mensagemDaEscuta";
 import { PerguntaDetectada } from "./PerguntaDetectada";
 import { type ArmazenamentoDasPreferencias, type PreferenciasDaEscuta, preferenciasNoNavegador } from "./preferenciasDaEscuta";
 import { TrechoTranscrito } from "./TrechoTranscrito";
-import type { OpcoesDaEscuta, SituacaoDaEscuta } from "./useEscuta";
+import type { OpcoesDaEscuta, SituacaoDaEscuta, TrechoNaTela } from "./useEscuta";
 
 /** Quantas linhas da transcrição a tela mostra. */
 export const LINHAS_NA_TELA = 6;
+
+/** Quantos trechos finais a sessão guarda para a conversa; passando disto, os mais antigos saem. */
+export const MAXIMO_DE_TRECHOS_NA_TELA = 200;
+
+/** A cada tanto de áudio novo num trecho em andamento, pede-se uma transcrição provisória dele. */
+export const INTERVALO_DA_PROVISORIA_MS = 1_500;
+const AMOSTRAS_ENTRE_PROVISORIAS = (INTERVALO_DA_PROVISORIA_MS * TAXA_DE_AMOSTRAGEM) / 1000;
 
 /**
  * Ao sair do modo invisível, a captura espera isto antes de ser desligada (o
@@ -36,6 +43,9 @@ export interface EstadoDaEscuta {
   readonly situacao: SituacaoDaEscuta;
   readonly progressoDoDownload: number | null;
   readonly linhas: readonly string[];
+  /** O que está sendo dito agora, ainda provisório; null quando o trecho fecha. */
+  readonly linhaProvisoria: string | null;
+  readonly trechos: readonly TrechoNaTela[];
   readonly automatico: boolean;
   readonly erro: string | null;
   readonly ultimaPergunta: string | null;
@@ -140,6 +150,15 @@ export class SessaoDaEscuta {
 
   private janela = JanelaDeTranscricao.vazia();
   private linhas: readonly string[] = Object.freeze([]);
+  private trechosNaTela: readonly TrechoNaTela[] = Object.freeze([]);
+  private proximoIdDoTrecho = 1;
+  private linhaProvisoria: string | null = null;
+  /** Época do trecho a que a linha provisória pertence. */
+  private epocaDaLinha = 0;
+  /** Sobe a cada trecho fechado: provisórias de um trecho já fechado são ignoradas. */
+  private epocaDoTrecho = 0;
+  private provisoriaEmVoo = false;
+  private amostrasDesdeAProvisoria = 0;
   private controle = ControleDeDisparos.inicial();
   private readonly cortador = new CortadorDeTrechos();
 
@@ -192,8 +211,13 @@ export class SessaoDaEscuta {
   // ---- Ações da tela ----
 
   readonly alternarAutomatico = (): void => {
-    const automatico = !this.preferencias.automatico;
-    this.guardarPreferencias({ ...this.preferencias, automatico });
+    // Atua na preferência do contexto atual: modo invisível ou escuta manual.
+    const automatico = !this.automaticoAtual();
+    this.guardarPreferencias(
+      this.contextoInvisivel()
+        ? { ...this.preferencias, automatico }
+        : { ...this.preferencias, automaticoManual: automatico },
+    );
     if (!automatico) {
       // Desligado, nada é classificado nem enviado: o que estava a caminho para aqui.
       this.cancelarClassificacao();
@@ -270,7 +294,7 @@ export class SessaoDaEscuta {
     }, ESPERA_PARA_DESLIGAR_MS);
   }
 
-  /** Fora do modo invisível: para tudo e esquece a transcrição. */
+  /** Com a escuta desligada: para tudo e esquece a janela de 2 min (os trechos da conversa ficam até `limparTrechos`). */
   private desligarTudo(): void {
     this.pararCaptura();
     this.fase = "parada";
@@ -330,6 +354,8 @@ export class SessaoDaEscuta {
       // Já estava parada.
     }
     this.cortador.reiniciar();
+    this.linhaProvisoria = null;
+    this.amostrasDesdeAProvisoria = 0;
     this.cancelarClassificacao();
     this.cancelarTimer();
     this.controle = controleSemPendente(this.controle);
@@ -342,15 +368,69 @@ export class SessaoDaEscuta {
     // Na espera para desligar (modo já desligado), o áudio não é ouvido.
     if (geracao !== this.geracao || this.fase !== "escutando" || !this.modoEstaAtivo()) return;
     let trechos: TrechoDeAudio[];
+    const estavaEmAndamento = this.cortador.emAndamento;
     try {
       trechos = this.cortador.adicionar(amostras);
     } catch {
       return;
     }
-    for (const trecho of trechos) void this.transcreverTrecho(trecho, geracao);
+    // Cada trecho fechado encerra uma época; o trecho final leva a sua, para limpar a linha certa.
+    for (const trecho of trechos) {
+      const epoca = this.epocaDoTrecho++;
+      this.amostrasDesdeAProvisoria = 0;
+      void this.transcreverTrecho(trecho, geracao, epoca);
+    }
+    if (trechos.length === 0 && estavaEmAndamento && !this.cortador.emAndamento) {
+      // O trecho fechou sem voz suficiente (nenhum final virá): a linha provisória some.
+      this.epocaDoTrecho++;
+      this.amostrasDesdeAProvisoria = 0;
+      this.linhaProvisoria = null;
+      this.emitir();
+      return;
+    }
+    if (this.cortador.emAndamento) {
+      this.amostrasDesdeAProvisoria += amostras.length;
+      if (this.amostrasDesdeAProvisoria >= AMOSTRAS_ENTRE_PROVISORIAS) this.pedirProvisoria(geracao);
+    }
   }
 
-  private async transcreverTrecho(trecho: TrechoDeAudio, geracao: number): Promise<void> {
+  /** Pede ao Whisper o texto provisório do trecho em andamento; pula se já há uma provisória em voo. */
+  private pedirProvisoria(geracao: number): void {
+    if (this.provisoriaEmVoo) return;
+    const parcial = this.cortador.parcialEmAndamento();
+    if (parcial === null) return;
+    this.amostrasDesdeAProvisoria = 0;
+    this.provisoriaEmVoo = true;
+    void this.transcreverProvisoria(parcial, geracao, this.epocaDoTrecho);
+  }
+
+  private async transcreverProvisoria(parcial: TrechoDeAudio, geracao: number, epoca: number): Promise<void> {
+    try {
+      const texto = await this.dependencias.transcrever(parcial.amostras, undefined, {
+        idioma: "automatico",
+        origem: "escuta",
+        provisoria: true,
+      });
+      // Atrasada: o trecho já fechou ou a captura é outra.
+      if (geracao !== this.geracao || epoca !== this.epocaDoTrecho) return;
+      const limpo = texto.replace(/\s+/g, " ").trim();
+      if (limpo === "" || DetectorDePergunta.ehAlucinacao(limpo) || limpo === this.linhaProvisoria) return;
+      this.linhaProvisoria = limpo;
+      this.epocaDaLinha = epoca;
+      this.emitir();
+    } catch {
+      // A provisória é um extra: descartada ou com falha, o trecho final cuida do resto.
+    } finally {
+      this.provisoriaEmVoo = false;
+    }
+  }
+
+  /** O trecho final chegou (ou falhou): a linha provisória dele, e só a dele, sai. */
+  private fecharLinhaProvisoria(epoca: number): void {
+    if (this.linhaProvisoria !== null && this.epocaDaLinha <= epoca) this.linhaProvisoria = null;
+  }
+
+  private async transcreverTrecho(trecho: TrechoDeAudio, geracao: number, epoca: number): Promise<void> {
     const inicioMs = this.inicioDaCapturaMs + trecho.inicioMs;
     const fimMs = this.inicioDaCapturaMs + trecho.fimMs;
     let texto: string;
@@ -360,8 +440,13 @@ export class SessaoDaEscuta {
         origem: "escuta",
       });
     } catch (erro) {
+      if (geracao !== this.geracao) return;
+      this.fecharLinhaProvisoria(epoca);
       // Descartada: a fila da escuta encheu e chegaram trechos mais novos; não é falha.
-      if (erro instanceof TranscricaoDescartada || geracao !== this.geracao) return;
+      if (erro instanceof TranscricaoDescartada) {
+        this.emitir();
+        return;
+      }
       this.progresso = null;
       this.erro = mensagemDoErroDeTranscricao(erro);
       this.emitir();
@@ -369,6 +454,7 @@ export class SessaoDaEscuta {
     }
     if (geracao !== this.geracao) return;
     this.progresso = null;
+    this.fecharLinhaProvisoria(epoca);
     this.registrarTexto(texto, inicioMs, fimMs);
     this.emitir();
   }
@@ -391,7 +477,13 @@ export class SessaoDaEscuta {
     // O contexto da classificação é o que veio antes do trecho, não ele mesmo.
     const contextoAnterior = this.janela.contexto(DURACAO_DO_CONTEXTO_MS, inicioMs);
     this.trocarJanela(this.janela.com(trecho).semAntigos(this.dependencias.agora()));
-    if (this.preferencias.automatico && DetectorDePergunta.avaliar(limpo).candidata) {
+    this.trechosNaTela = Object.freeze(
+      [...this.trechosNaTela, { id: `trecho-${this.proximoIdDoTrecho++}`, texto: limpo, inicioMs, fimMs }].slice(
+        -MAXIMO_DE_TRECHOS_NA_TELA,
+      ),
+    );
+    // Só o texto final classifica; o provisório nunca chega aqui.
+    if (this.automaticoAtual() && DetectorDePergunta.avaliar(limpo).candidata) {
       this.pedirClassificacao({ trecho: limpo, contexto: contextoAnterior });
     }
   }
@@ -416,7 +508,7 @@ export class SessaoDaEscuta {
       const pedido: PedidoDeClassificacaoDaEscuta =
         candidata.contexto === "" ? { trecho: candidata.trecho } : { trecho: candidata.trecho, contexto: candidata.contexto };
       const resposta = await this.dependencias.classificar(pedido, controlador.signal);
-      if (controlador.signal.aborted || geracao !== this.geracao || !this.preferencias.automatico) return;
+      if (controlador.signal.aborted || geracao !== this.geracao || !this.automaticoAtual()) return;
       if (resposta.ehPergunta) {
         const reescrita = resposta.pergunta?.trim() ?? "";
         const pergunta = PerguntaDetectada.criar({
@@ -438,7 +530,7 @@ export class SessaoDaEscuta {
         const proxima = this.candidataEsperando;
         this.candidataEsperando = null;
         // Depois de uma falha (ex.: 502), não tenta de novo em seguida: a que esperava é descartada.
-        if (proxima !== null && !falhou && this.preferencias.automatico) void this.classificar(proxima);
+        if (proxima !== null && !falhou && this.automaticoAtual()) void this.classificar(proxima);
       }
     }
   }
@@ -462,7 +554,7 @@ export class SessaoDaEscuta {
   /** Manda a pendente se já pode; senão agenda a próxima tentativa (ou espera o chat ficar livre). */
   private readonly tentarPendente = (): void => {
     this.cancelarTimer();
-    if (this.controle.pendente === null || !this.preferencias.automatico || this.fase === "parada" || !this.modoEstaAtivo()) {
+    if (this.controle.pendente === null || !this.automaticoAtual() || this.fase === "parada" || !this.modoEstaAtivo()) {
       return;
     }
     const agora = this.dependencias.agora();
@@ -536,6 +628,23 @@ export class SessaoDaEscuta {
 
   // ---- Auxiliares ----
 
+  /** O modo invisível tem prioridade: com ele ligado, vale a preferência dele mesmo com a escuta manual ligada. */
+  private contextoInvisivel(): boolean {
+    return this.opcoes?.modoInvisivelAtivo === true || this.opcoes === null;
+  }
+
+  /** O automático do contexto atual (modo invisível ou escuta manual). */
+  private automaticoAtual(): boolean {
+    return this.contextoInvisivel() ? this.preferencias.automatico : this.preferencias.automaticoManual;
+  }
+
+  /** Esquece os trechos da conversa (a tela chama no /clear). A janela de 2 min não muda. */
+  readonly limparTrechos = (): void => {
+    if (this.trechosNaTela.length === 0) return;
+    this.trechosNaTela = Object.freeze([]);
+    this.emitir();
+  };
+
   private modoEstaAtivo(): boolean {
     return this.opcoes !== null && modoAtivo(this.opcoes);
   }
@@ -567,7 +676,7 @@ export class SessaoDaEscuta {
   private situacao(): SituacaoDaEscuta {
     const opcoes = this.opcoes;
     if (opcoes === null || !opcoes.escutaDisponivel) return "indisponivel";
-    if (!opcoes.modoInvisivelAtivo) return "desligada";
+    if (!modoAtivo(opcoes)) return "desligada";
     switch (this.fase) {
       case "parada":
         return "desligada";
@@ -583,7 +692,9 @@ export class SessaoDaEscuta {
       situacao: this.situacao(),
       progressoDoDownload: this.progresso,
       linhas: this.linhas,
-      automatico: this.preferencias.automatico,
+      linhaProvisoria: this.linhaProvisoria,
+      trechos: this.trechosNaTela,
+      automatico: this.automaticoAtual(),
       erro: this.erro,
       ultimaPergunta: this.ultimaPergunta,
     });
@@ -597,6 +708,8 @@ export class SessaoDaEscuta {
       novo.situacao === atual.situacao &&
       novo.progressoDoDownload === atual.progressoDoDownload &&
       novo.linhas === atual.linhas &&
+      novo.linhaProvisoria === atual.linhaProvisoria &&
+      novo.trechos === atual.trechos &&
       novo.automatico === atual.automatico &&
       novo.erro === atual.erro &&
       novo.ultimaPergunta === atual.ultimaPergunta
@@ -609,7 +722,7 @@ export class SessaoDaEscuta {
 }
 
 function modoAtivo(opcoes: OpcoesDaEscuta): boolean {
-  return opcoes.modoInvisivelAtivo && opcoes.escutaDisponivel;
+  return opcoes.escutaDisponivel && (opcoes.modoInvisivelAtivo || opcoes.escutaManualLigada);
 }
 
 /** A escuta da tela: uma só, que sobrevive à remontagem do chat rápido (como o worker do ditado). */

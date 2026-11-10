@@ -9,13 +9,13 @@ export const AMOSTRAS_POR_QUADRO = (TAXA_DE_AMOSTRAGEM * DURACAO_DO_QUADRO_MS) /
 
 /**
  * Silêncio seguido que encerra o trecho. Medido em quadros inteiros: o corte
- * acontece no 23º quadro seguido sem voz (690 ms, o múltiplo de 30 ms mais
- * perto de 700 ms).
+ * acontece no 17º quadro seguido sem voz (510 ms, o múltiplo de 30 ms mais
+ * perto de 500 ms). Curto, para a fala aparecer logo na conversa.
  */
-export const SILENCIO_PARA_CORTAR_MS = 700;
+export const SILENCIO_PARA_CORTAR_MS = 500;
 
-/** Nenhum trecho passa disto; aos 15 s ele é entregue e o seguinte continua sem perder amostras. */
-export const DURACAO_MAXIMA_DO_TRECHO_MS = 15_000;
+/** Nenhum trecho passa disto; aos 8 s ele é entregue e o seguinte continua sem perder amostras. */
+export const DURACAO_MAXIMA_DO_TRECHO_MS = 8_000;
 
 /** Áudio guardado antes da primeira voz do trecho (7 quadros), para não cortar o começo da palavra. */
 export const PRE_ROLL_MS = 210;
@@ -71,8 +71,8 @@ function rms(quadro: Float32Array): number {
  *   `max(LIMIAR_MINIMO, piso de ruído × 3)`; o piso de ruído é uma média
  *   móvel lenta dos quadros sem voz.
  * - O trecho começa na primeira voz, com ~200 ms de áudio anterior (pre-roll).
- * - Termina com ~700 ms de silêncio (fica só `CAUDA_MS` dele) ou ao chegar a
- *   15 s; nesse caso o trecho seguinte começa na amostra seguinte.
+ * - Termina com ~500 ms de silêncio (fica só `CAUDA_MS` dele) ou ao chegar a
+ *   8 s; nesse caso o trecho seguinte começa na amostra seguinte.
  * - Trechos com menos de `VOZ_MINIMA_MS` de voz são descartados.
  */
 export class CortadorDeTrechos {
@@ -122,6 +122,18 @@ export class CortadorDeTrechos {
       }
     }
     return prontos;
+  }
+
+  /**
+   * Uma cópia do que já se ouviu do trecho em andamento (para a transcrição
+   * provisória), sem alterar o cortador. Null sem trecho, ou com voz ainda
+   * abaixo de `VOZ_MINIMA_MS`.
+   */
+  parcialEmAndamento(): TrechoDeAudio | null {
+    if (this.quadros === null || this.indiceDaUltimaVoz < 0) return null;
+    if (this.quadrosDeVoz * DURACAO_DO_QUADRO_MS < VOZ_MINIMA_MS) return null;
+    const corte = Math.min(this.quadros.length, this.indiceDaUltimaVoz + 1 + QUADROS_DE_CAUDA);
+    return montarTrecho(this.quadros.slice(0, corte), null, this.amostraDeInicio);
   }
 
   /**

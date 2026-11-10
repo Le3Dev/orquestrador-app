@@ -67,8 +67,8 @@ describe("CortadorDeTrechos", () => {
   it("constantes combinadas", () => {
     expect(TAXA_DE_AMOSTRAGEM).toBe(16_000);
     expect(AMOSTRAS_POR_QUADRO).toBe(480);
-    expect(SILENCIO_PARA_CORTAR_MS).toBe(700);
-    expect(DURACAO_MAXIMA_DO_TRECHO_MS).toBe(15_000);
+    expect(SILENCIO_PARA_CORTAR_MS).toBe(500);
+    expect(DURACAO_MAXIMA_DO_TRECHO_MS).toBe(8_000);
     expect(LIMIAR_MINIMO).toBeCloseTo(0.01);
   });
 
@@ -77,8 +77,9 @@ describe("CortadorDeTrechos", () => {
     expect(cortarTudo(ruido(5_000, 0.005))).toEqual([]);
   });
 
-  it("voz seguida de 700 ms de silêncio gera um trecho, com os tempos certos", () => {
-    const entrada = juntar(silencio(990), senoide(1_200), silencio(SILENCIO_PARA_CORTAR_MS));
+  it("voz seguida de 500 ms de silêncio gera um trecho, com os tempos certos", () => {
+    // O corte vem no 17º quadro sem voz (510 ms), o múltiplo de 30 ms mais perto de 500 ms.
+    const entrada = juntar(silencio(990), senoide(1_200), silencio(SILENCIO_PARA_CORTAR_MS + 10));
     const cortador = new CortadorDeTrechos();
     const trechos = cortador.adicionar(entrada);
 
@@ -95,9 +96,9 @@ describe("CortadorDeTrechos", () => {
     expect(cortador.encerrar()).toEqual([]);
   });
 
-  it("650 ms de silêncio não corta", () => {
+  it("450 ms de silêncio não corta", () => {
     const cortador = new CortadorDeTrechos();
-    expect(cortador.adicionar(juntar(silencio(990), senoide(1_200), silencio(650)))).toEqual([]);
+    expect(cortador.adicionar(juntar(silencio(990), senoide(1_200), silencio(450)))).toEqual([]);
     expect(cortador.emAndamento).toBe(true);
   });
 
@@ -109,18 +110,42 @@ describe("CortadorDeTrechos", () => {
     ]);
   });
 
-  it("voz contínua de 40 s gera trechos de no máximo 15 s, sem perder amostras", () => {
+  it("voz contínua de 40 s gera trechos de no máximo 8 s, sem perder amostras", () => {
     const entrada = juntar(senoide(40_000), silencio(1_000));
     const trechos = cortarTudo(entrada);
+    // 8 s em quadros inteiros de 30 ms são 266 quadros (7,98 s).
+    const MAXIMO = 7_980;
 
-    expect(trechos.length).toBe(3);
+    expect(trechos.length).toBe(5);
     for (const trecho of trechos) expect(trecho.fimMs - trecho.inicioMs).toBeLessThanOrEqual(DURACAO_MAXIMA_DO_TRECHO_MS);
-    expect(trechos.map((t) => t.inicioMs)).toEqual([0, 15_000, 30_000]);
-    expect(trechos[0]?.fimMs).toBe(15_000);
-    expect(trechos[1]?.fimMs).toBe(30_000);
-    // Os dois primeiros, colados, são exatamente os primeiros 30 s da entrada.
+    expect(trechos.map((t) => t.inicioMs)).toEqual([0, MAXIMO, 2 * MAXIMO, 3 * MAXIMO, 4 * MAXIMO]);
+    expect(trechos[0]?.fimMs).toBe(MAXIMO);
+    expect(trechos[1]?.fimMs).toBe(2 * MAXIMO);
+    // Os dois primeiros, colados, são exatamente o começo da entrada.
     const colados = juntar(...trechos.slice(0, 2).map((t) => t.amostras));
-    expect(mesmasAmostras(colados, entrada.slice(0, 30_000 * AMOSTRAS_POR_MS))).toBe(true);
+    expect(mesmasAmostras(colados, entrada.slice(0, 2 * MAXIMO * AMOSTRAS_POR_MS))).toBe(true);
+  });
+
+  it("parcialEmAndamento devolve uma cópia do que já se ouviu do trecho, sem mexer no cortador", () => {
+    const cortador = new CortadorDeTrechos();
+    expect(cortador.parcialEmAndamento()).toBeNull();
+    // Pouca voz ainda: nada a transcrever.
+    cortador.adicionar(juntar(silencio(510), senoide(240)));
+    expect(cortador.parcialEmAndamento()).toBeNull();
+
+    const entrada = juntar(senoide(1_500), silencio(120));
+    cortador.adicionar(entrada);
+    expect(cortador.emAndamento).toBe(true);
+    const parcial = cortador.parcialEmAndamento();
+    expect(parcial).not.toBeNull();
+    // Do começo do trecho (voz de 240 ms + o que veio) até a voz mais a cauda disponível.
+    expect(parcial?.inicioMs).toBe(510 - PRE_ROLL_MS);
+    expect(parcial?.fimMs).toBe(510 + 240 + 1_500 + 120);
+    // É uma cópia: alterar não afeta o trecho que sai depois.
+    parcial?.amostras.fill(0);
+    const [final] = cortador.adicionar(silencio(SILENCIO_PARA_CORTAR_MS)) as [TrechoDeAudio];
+    expect(final.amostras.some((valor) => valor !== 0)).toBe(true);
+    expect(cortador.parcialEmAndamento()).toBeNull();
   });
 
   it("ruído curto (menos de 400 ms de voz) é descartado", () => {

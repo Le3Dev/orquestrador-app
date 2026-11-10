@@ -2,13 +2,19 @@
 export interface PreferenciasDaEscuta {
   /** Ligada: a escuta classifica e envia as perguntas sozinha. Desligada: só transcreve. */
   readonly automatico: boolean;
+  /** O mesmo, mas para a escuta ligada à mão (botão 🎧), fora do modo invisível. Começa desligado. */
+  readonly automaticoManual: boolean;
   /** A pessoa já confirmou o aviso da primeira vez. */
   readonly avisoVisto: boolean;
 }
 
 export const CHAVE_DAS_PREFERENCIAS_DA_ESCUTA = "orquestrador.preferenciasDaEscuta";
 
-export const PREFERENCIAS_PADRAO_DA_ESCUTA: PreferenciasDaEscuta = Object.freeze({ automatico: true, avisoVisto: false });
+export const PREFERENCIAS_PADRAO_DA_ESCUTA: PreferenciasDaEscuta = Object.freeze({
+  automatico: true,
+  automaticoManual: false,
+  avisoVisto: false,
+});
 
 /** Onde a sessão lê e grava as preferências (um falso nos testes). */
 export interface ArmazenamentoDasPreferencias {
@@ -30,6 +36,10 @@ export function interpretarPreferenciasDaEscuta(bruto: string | null): Preferenc
   return Object.freeze({
     automatico:
       typeof registro.automatico === "boolean" ? registro.automatico : PREFERENCIAS_PADRAO_DA_ESCUTA.automatico,
+    automaticoManual:
+      typeof registro.automaticoManual === "boolean"
+        ? registro.automaticoManual
+        : PREFERENCIAS_PADRAO_DA_ESCUTA.automaticoManual,
     avisoVisto:
       typeof registro.avisoVisto === "boolean" ? registro.avisoVisto : PREFERENCIAS_PADRAO_DA_ESCUTA.avisoVisto,
   });
