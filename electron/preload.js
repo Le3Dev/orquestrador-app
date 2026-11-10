@@ -99,6 +99,18 @@ contextBridge.exposeInMainWorld("electron", {
     definirEscutaLigada: (ligada) => ipcRenderer.invoke("escuta:definir-ligada", Boolean(ligada)).then(() => undefined),
   },
 
+  // Motor nativo de transcrição (electron/transcricaoNativa.js). `disponivel`:
+  // o binário do onnxruntime-node desta plataforma existe (o main avisa pelo
+  // argumento da janela; o preload com sandbox não lê o disco). `conectar`
+  // pede a porta do motor, que chega por window.postMessage com
+  // { tipo: "orquestrador:porta-da-transcricao" } e a porta em `ports[0]`
+  // (pode chegar de novo depois: a nova substitui a antiga). Rejeita fora da
+  // janela principal ou com o motor desligado (aí a tela usa o navegador).
+  transcricaoNativa: {
+    disponivel: process.argv.includes("--transcricao-nativa-disponivel"),
+    conectar: () => ipcRenderer.invoke("transcricao:conectar").then(() => undefined),
+  },
+
   // Vista nativa da Prévia (electron/vistaDaPrevia.js). `id` é o previaId.
   previa: {
     // Cria a vista escondida e carrega o endereço (http/https externo). Resolve false se recusou.
@@ -126,4 +138,10 @@ contextBridge.exposeInMainWorld("electron", {
     escolherClaudeCode: (atual) => ipcRenderer.invoke("primeira-abertura:escolher-claude-code", atual),
     salvar: (dados) => ipcRenderer.invoke("primeira-abertura:salvar", dados),
   },
+});
+
+// O contextBridge não passa MessagePort: a porta do motor nativo vai à página
+// pelo window.postMessage (padrão da documentação do Electron).
+ipcRenderer.on("transcricao:porta", (evento) => {
+  window.postMessage({ tipo: "orquestrador:porta-da-transcricao" }, "*", evento.ports);
 });

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { comecarGravacao, type Gravacao } from "./gravacao";
 import { AMOSTRAS_MINIMAS, mensagemDoErroDeDitado } from "./texto";
-import { transcrever } from "./transcritor";
+import { motorDeTranscricao } from "./motor";
 
 export type FaseDoDitado = "parado" | "pedindo-microfone" | "gravando" | "transcrevendo";
 
@@ -19,8 +19,10 @@ export interface Ditado {
 }
 
 /**
- * Ditado por voz: grava do microfone e transcreve com o Whisper local.
- * O texto chega por `aoTranscrever`, quando a transcrição termina.
+ * Ditado por voz: grava do microfone e transcreve com o Whisper local
+ * (`motorDeTranscricao`: o nativo do app ou a reserva no navegador; o ditado
+ * passa na frente da escuta). O texto chega por `aoTranscrever`, quando a
+ * transcrição termina.
  */
 export function useDitado(aoTranscrever: (texto: string) => void): Ditado {
   const [fase, setFase] = useState<FaseDoDitado>("parado");
@@ -77,9 +79,17 @@ export function useDitado(aoTranscrever: (texto: string) => void): Ditado {
       try {
         const audio = await atual.parar();
         if (audio.length < AMOSTRAS_MINIMAS) return;
-        const texto = await transcrever(audio, (progresso) => {
-          if (montado.current) setBaixando(progresso < 100 ? progresso : null);
+        // Só o download do modelo do ditado (o da escuta não é deste botão).
+        const pararDeOuvir = motorDeTranscricao.aoBaixar((origem, progresso) => {
+          if (origem !== "ditado" || !montado.current) return;
+          setBaixando(progresso !== null && progresso.progresso < 100 ? progresso.progresso : null);
         });
+        let texto: string;
+        try {
+          ({ texto } = await motorDeTranscricao.transcrever(audio, { origem: "ditado", idioma: "portuguese" }));
+        } finally {
+          pararDeOuvir();
+        }
         if (montado.current && texto !== "") entregar.current(texto);
       } catch (motivo) {
         if (montado.current) setErro(mensagemDoErroDeDitado(motivo));

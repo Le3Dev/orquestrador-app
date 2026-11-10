@@ -1,11 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  codigoDoIdioma,
+  emMegabytes,
   MODELO_DA_ESCUTA,
   MODELO_DO_DITADO,
+  type PedidoAoTranscritor,
   type PedidoDeTranscricao,
   type RespostaDoTranscritor,
+  segmentosDaSaida,
 } from "./mensagens";
+import type { OpcoesDaPassada, ResultadoDaTranscricao, SegmentoTranscrito } from "./motor";
 import {
   criarTranscritor,
   MAXIMO_DE_PEDIDOS_DA_ESCUTA_ESPERANDO,
@@ -18,36 +23,51 @@ import {
 class TrabalhadorFalso implements TrabalhadorDoTranscritor {
   onmessage: ((evento: MessageEvent<RespostaDoTranscritor>) => void) | null = null;
   onerror: ((evento: ErrorEvent) => void) | null = null;
-  readonly pedidos: PedidoDeTranscricao[] = [];
+  readonly mensagens: PedidoAoTranscritor[] = [];
   readonly terminate = vi.fn(() => {
     this.encerrado = true;
   });
   encerrado = false;
 
-  postMessage(pedido: PedidoDeTranscricao): void {
-    this.pedidos.push(pedido);
+  /** Só os pedidos de transcrição (sem os de preparo). */
+  get pedidos(): PedidoDeTranscricao[] {
+    return this.mensagens.filter((mensagem): mensagem is PedidoDeTranscricao => mensagem.tipo === "transcrever");
+  }
+
+  /** O que foi transferido em cada `postMessage`. */
+  readonly transferidos: Transferable[][] = [];
+
+  postMessage(pedido: PedidoAoTranscritor, transferir: Transferable[]): void {
+    this.mensagens.push(pedido);
+    this.transferidos.push(transferir);
   }
 
   responder(resposta: RespostaDoTranscritor): void {
     this.onmessage?.({ data: resposta } as MessageEvent<RespostaDoTranscritor>);
   }
 
-  /** Responde o último pedido recebido com um texto. */
-  concluirUltimo(texto: string): void {
+  /** Responde o último pedido de transcrição recebido com um texto. */
+  concluirUltimo(texto: string, segmentos: SegmentoTranscrito[] = [], idioma = "pt"): void {
     const ultimo = this.pedidos.at(-1);
     if (ultimo === undefined) throw new Error("nenhum pedido para concluir");
-    this.responder({ tipo: "texto", id: ultimo.id, texto });
+    this.responder({ tipo: "resultado", id: ultimo.id, texto, segmentos, idioma, duracaoDaPassadaMs: 12 });
   }
 }
 
 function montar() {
   const trabalhador = new TrabalhadorFalso();
   let criados = 0;
-  const transcrever = criarTranscritor(() => {
+  const motor = criarTranscritor(() => {
     criados++;
     return trabalhador;
   });
-  return { trabalhador, transcrever, criados: () => criados };
+  /** A passada inteira, como o motor devolve. */
+  const passada = (amostras: Float32Array, opcoes: OpcoesDaPassada = { origem: "ditado" }) =>
+    motor.transcrever(amostras, opcoes);
+  /** Só o texto da passada (a maioria dos testes de fila só olha a ordem). */
+  const transcrever = (amostras: Float32Array, opcoes: OpcoesDaPassada = { origem: "ditado" }) =>
+    passada(amostras, opcoes).then((resultado) => resultado.texto);
+  return { trabalhador, motor, passada, transcrever, criados: () => criados };
 }
 
 const audio = (valor = 0) => new Float32Array([valor, valor, valor]);
@@ -55,7 +75,7 @@ const audio = (valor = 0) => new Float32Array([valor, valor, valor]);
 /** Deixa as promessas resolvidas rodarem os seus `then`. */
 const esvaziar = () => new Promise<void>((resolver) => setTimeout(resolver, 0));
 
-describe("transcritor", () => {
+describe("transcritor (reserva no navegador)", () => {
   it("só cria o worker no primeiro pedido e manda um pedido por vez, na ordem", async () => {
     const { trabalhador, transcrever, criados } = montar();
     expect(criados()).toBe(0);
@@ -75,22 +95,57 @@ describe("transcritor", () => {
     await expect(segundo).resolves.toBe("dois");
   });
 
-  it("por padrão pede português; com idioma automático, manda idioma nulo", () => {
+  it("idioma: português fixo por padrão, sem detecção; 'automatico' pede a detecção; um código vai como veio", async () => {
     const { trabalhador, transcrever } = montar();
     void transcrever(audio());
     expect(trabalhador.pedidos[0]?.idioma).toBe("portuguese");
 
     trabalhador.concluirUltimo("ok");
-    void transcrever(audio(), undefined, { idioma: "automatico", origem: "escuta" });
-    return esvaziar().then(() => {
-      expect(trabalhador.pedidos[1]?.idioma).toBeNull();
-    });
+    void transcrever(audio(), { origem: "escuta", idioma: "automatico" });
+    await esvaziar();
+    expect(trabalhador.pedidos[1]?.idioma).toBeNull();
+
+    trabalhador.concluirUltimo("ok");
+    void transcrever(audio(), { origem: "escuta", idioma: "en" });
+    await esvaziar();
+    expect(trabalhador.pedidos[2]?.idioma).toBe("en");
+  });
+
+  it("devolve os segmentos com tempos, o idioma detectado e a duração da passada", async () => {
+    const { trabalhador, passada } = montar();
+    const resultado = passada(audio(), { origem: "escuta", idioma: "automatico" });
+    const segmentos: SegmentoTranscrito[] = [
+      { texto: "Hello there.", inicioS: 0, fimS: 1.2 },
+      { texto: "How are you?", inicioS: 1.2, fimS: 2.5 },
+    ];
+    trabalhador.concluirUltimo("Hello there. How are you?", segmentos, "en");
+    const esperado: ResultadoDaTranscricao = {
+      texto: "Hello there. How are you?",
+      segmentos,
+      idioma: "en",
+      duracaoDaPassadaMs: 12,
+    };
+    await expect(resultado).resolves.toEqual(esperado);
+  });
+
+  it("o áudio só é transferido ao worker quando o pedido começa (na fila, ainda é de quem pediu)", async () => {
+    const { trabalhador, transcrever } = montar();
+    const primeiro = audio(1);
+    const segundo = audio(2);
+    const p1 = transcrever(primeiro);
+    void transcrever(segundo);
+    expect(trabalhador.transferidos).toHaveLength(1);
+    expect(trabalhador.transferidos[0]?.[0]).toBe(primeiro.buffer);
+    trabalhador.concluirUltimo("1");
+    await p1;
+    expect(trabalhador.transferidos).toHaveLength(2);
+    expect(trabalhador.transferidos[1]?.[0]).toBe(segundo.buffer);
   });
 
   it("o modelo vai pela origem: ditado com whisper-small, escuta com whisper-base", async () => {
     const { trabalhador, transcrever } = montar();
     const ditado = transcrever(audio(1));
-    const escuta = transcrever(audio(2), undefined, { origem: "escuta" });
+    const escuta = transcrever(audio(2), { origem: "escuta" });
     expect(trabalhador.pedidos[0]?.modelo).toBe(MODELO_DO_DITADO);
     expect(MODELO_DO_DITADO).toBe("onnx-community/whisper-small");
     trabalhador.concluirUltimo("d");
@@ -101,30 +156,30 @@ describe("transcritor", () => {
     await escuta;
   });
 
-  it("a provisória só entra com a fila vazia: havendo pedido esperando, é descartada sem enfileirar", async () => {
+  it("a descartável só entra com a fila vazia: havendo pedido esperando, é descartada sem enfileirar", async () => {
     const { trabalhador, transcrever } = montar();
-    const final1 = transcrever(audio(1), undefined, { origem: "escuta" });
-    const provisoria1 = transcrever(audio(2), undefined, { origem: "escuta", provisoria: true });
-    // Há um pedido em andamento, mas a fila está vazia: a provisória espera.
-    const provisoria2 = transcrever(audio(3), undefined, { origem: "escuta", provisoria: true });
-    await expect(provisoria2).rejects.toBeInstanceOf(TranscricaoDescartada);
+    const final1 = transcrever(audio(1), { origem: "escuta" });
+    const descartavel1 = transcrever(audio(2), { origem: "escuta", descartavel: true });
+    // Há um pedido em andamento, mas a fila está vazia: a descartável espera.
+    const descartavel2 = transcrever(audio(3), { origem: "escuta", descartavel: true });
+    await expect(descartavel2).rejects.toBeInstanceOf(TranscricaoDescartada);
 
     trabalhador.concluirUltimo("1");
     await expect(final1).resolves.toBe("1");
     expect(trabalhador.pedidos[1]?.audio[0]).toBe(2);
     trabalhador.concluirUltimo("p");
-    await expect(provisoria1).resolves.toBe("p");
+    await expect(descartavel1).resolves.toBe("p");
   });
 
-  it("um trecho final descarta a provisória que esperava e nunca é descartado por ela", async () => {
+  it("um trecho final descarta a descartável que esperava e nunca é descartado por ela", async () => {
     const { trabalhador, transcrever } = montar();
-    const emAndamento = transcrever(audio(1), undefined, { origem: "escuta" });
-    const provisoria = transcrever(audio(2), undefined, { origem: "escuta", provisoria: true });
-    const final1 = transcrever(audio(3), undefined, { origem: "escuta" });
-    const final2 = transcrever(audio(4), undefined, { origem: "escuta" });
-    await expect(provisoria).rejects.toBeInstanceOf(TranscricaoDescartada);
+    const emAndamento = transcrever(audio(1), { origem: "escuta" });
+    const descartavel = transcrever(audio(2), { origem: "escuta", descartavel: true });
+    const final1 = transcrever(audio(3), { origem: "escuta" });
+    const final2 = transcrever(audio(4), { origem: "escuta" });
+    await expect(descartavel).rejects.toBeInstanceOf(TranscricaoDescartada);
 
-    // Os dois finais esperando cabem no limite: nada foi descartado por causa da provisória.
+    // Os dois finais esperando cabem no limite: nada foi descartado por causa da descartável.
     trabalhador.concluirUltimo("0");
     await expect(emAndamento).resolves.toBe("0");
     trabalhador.concluirUltimo("1");
@@ -133,10 +188,23 @@ describe("transcritor", () => {
     await expect(final2).resolves.toBe("2");
   });
 
+  it("o ditado nunca é descartável, mesmo pedindo", async () => {
+    const { trabalhador, transcrever } = montar();
+    const primeiro = transcrever(audio(1));
+    const segundo = transcrever(audio(2), { origem: "ditado", descartavel: true });
+    const terceiro = transcrever(audio(3), { origem: "ditado", descartavel: true });
+    trabalhador.concluirUltimo("1");
+    await expect(primeiro).resolves.toBe("1");
+    trabalhador.concluirUltimo("2");
+    await expect(segundo).resolves.toBe("2");
+    trabalhador.concluirUltimo("3");
+    await expect(terceiro).resolves.toBe("3");
+  });
+
   it("o ditado passa na frente dos pedidos da escuta que ainda não começaram", async () => {
     const { trabalhador, transcrever } = montar();
-    const escuta1 = transcrever(audio(1), undefined, { idioma: "automatico", origem: "escuta" });
-    const escuta2 = transcrever(audio(2), undefined, { idioma: "automatico", origem: "escuta" });
+    const escuta1 = transcrever(audio(1), { origem: "escuta", idioma: "automatico" });
+    const escuta2 = transcrever(audio(2), { origem: "escuta", idioma: "automatico" });
     const ditado = transcrever(audio(3));
 
     // O primeiro da escuta já estava no worker: não é interrompido.
@@ -154,8 +222,8 @@ describe("transcritor", () => {
 
   it("dois ditados esperando ficam na ordem em que chegaram, ambos antes da escuta", async () => {
     const { trabalhador, transcrever } = montar();
-    void transcrever(audio(1), undefined, { origem: "escuta" });
-    void transcrever(audio(2), undefined, { origem: "escuta" });
+    void transcrever(audio(1), { origem: "escuta" });
+    void transcrever(audio(2), { origem: "escuta" });
     void transcrever(audio(3));
     void transcrever(audio(4));
 
@@ -170,10 +238,10 @@ describe("transcritor", () => {
 
   it(`a escuta deixa no máximo ${MAXIMO_DE_PEDIDOS_DA_ESCUTA_ESPERANDO} esperando: o mais antigo é descartado`, async () => {
     const { trabalhador, transcrever } = montar();
-    const emAndamento = transcrever(audio(1), undefined, { origem: "escuta" });
-    const esperando1 = transcrever(audio(2), undefined, { origem: "escuta" });
-    const esperando2 = transcrever(audio(3), undefined, { origem: "escuta" });
-    const esperando3 = transcrever(audio(4), undefined, { origem: "escuta" });
+    const emAndamento = transcrever(audio(1), { origem: "escuta" });
+    const esperando1 = transcrever(audio(2), { origem: "escuta" });
+    const esperando2 = transcrever(audio(3), { origem: "escuta" });
+    const esperando3 = transcrever(audio(4), { origem: "escuta" });
 
     await expect(esperando1).rejects.toBeInstanceOf(TranscricaoDescartada);
 
@@ -189,8 +257,8 @@ describe("transcritor", () => {
   it("um ditado esperando não conta no limite da escuta", async () => {
     const { trabalhador, transcrever } = montar();
     void transcrever(audio(1));
-    const e1 = transcrever(audio(2), undefined, { origem: "escuta" });
-    const e2 = transcrever(audio(3), undefined, { origem: "escuta" });
+    const e1 = transcrever(audio(2), { origem: "escuta" });
+    const e2 = transcrever(audio(3), { origem: "escuta" });
     const d = transcrever(audio(4));
     trabalhador.concluirUltimo("d0");
     await esvaziar();
@@ -214,25 +282,80 @@ describe("transcritor", () => {
     await expect(seguinte).resolves.toBe("ok");
   });
 
-  it("se o worker não sobe, todos os pedidos (em andamento e na fila) são rejeitados", async () => {
-    const { trabalhador, transcrever } = montar();
+  it("se o worker não sobe, todos os pedidos (em andamento, na fila e preparos) são rejeitados", async () => {
+    const { trabalhador, motor, transcrever } = montar();
     const a = transcrever(audio(1));
-    const b = transcrever(audio(2), undefined, { origem: "escuta" });
+    const b = transcrever(audio(2), { origem: "escuta" });
+    const preparo = motor.preparar("escuta");
     trabalhador.onerror?.({ message: "script não carregou" } as ErrorEvent);
     await expect(a).rejects.toThrow("script não carregou");
     await expect(b).rejects.toThrow("script não carregou");
+    await expect(preparo).rejects.toThrow("script não carregou");
     expect(trabalhador.encerrado).toBe(true);
   });
 
-  it("o progresso do download chega a quem espera e para depois que o pedido termina", async () => {
-    const { trabalhador, transcrever } = montar();
-    const progressos: number[] = [];
-    const pedido = transcrever(audio(), (progresso) => progressos.push(progresso));
-    trabalhador.responder({ tipo: "baixando", progresso: 40 });
+  it("o progresso do download chega por origem, com o total em MB, e termina com null", async () => {
+    const { trabalhador, motor, transcrever } = montar();
+    const avisos: [string, unknown][] = [];
+    motor.aoBaixar((origem, progresso) => avisos.push([origem, progresso]));
+    const pedido = transcrever(audio());
+    trabalhador.responder({ tipo: "baixando", modelo: MODELO_DO_DITADO, progresso: 40, totalMb: 243.5 });
+    trabalhador.responder({ tipo: "baixando", modelo: MODELO_DA_ESCUTA, progresso: 10, totalMb: null });
     trabalhador.concluirUltimo("ok");
     await pedido;
-    trabalhador.responder({ tipo: "baixando", progresso: 90 });
-    expect(progressos).toEqual([40]);
+    expect(avisos).toEqual([
+      ["ditado", { progresso: 40, totalMb: 243.5 }],
+      ["escuta", { progresso: 10, totalMb: null }],
+      ["ditado", null],
+    ]);
+  });
+
+  it("preparar carrega o modelo da origem, informa o motor (wasm, não nativo) e resolve no 'pronto'", async () => {
+    const { trabalhador, motor } = montar();
+    const mudancas: unknown[] = [];
+    motor.aoMudarMotor((origem, descricao) => mudancas.push([origem, descricao]));
+    expect(motor.motorAtual("escuta")).toBeNull();
+
+    const preparo = motor.preparar("escuta");
+    const mensagem = trabalhador.mensagens[0];
+    expect(mensagem).toMatchObject({ tipo: "preparar", modelo: MODELO_DA_ESCUTA });
+    const esperado = { dispositivo: "wasm", modelo: MODELO_DA_ESCUTA, precisao: "q8", nativo: false };
+    expect(mudancas).toEqual([["escuta", esperado]]);
+
+    trabalhador.responder({ tipo: "pronto", id: mensagem?.id ?? -1 });
+    await expect(preparo).resolves.toEqual(esperado);
+    expect(motor.motorAtual("escuta")).toEqual(esperado);
+    expect(motor.motorAtual("ditado")).toBeNull();
+  });
+});
+
+describe("mensagens do worker", () => {
+  it("o idioma devolvido é sempre um código: 'portuguese' vira 'pt', um detectado fica como veio", () => {
+    expect(codigoDoIdioma("portuguese")).toBe("pt");
+    expect(codigoDoIdioma("en")).toBe("en");
+  });
+
+  it("os segmentos saem dos trechos com tempo; sem fim, vão até o fim do áudio; vazios saem", () => {
+    expect(
+      segmentosDaSaida(
+        [
+          { text: " Olá. ", timestamp: [0, 1.5] },
+          { text: "  ", timestamp: [1.5, 2] },
+          { text: " Tudo bem?", timestamp: [2, null] },
+        ],
+        3.2,
+      ),
+    ).toEqual([
+      { texto: "Olá.", inicioS: 0, fimS: 1.5 },
+      { texto: "Tudo bem?", inicioS: 2, fimS: 3.2 },
+    ]);
+  });
+
+  it("o total do download vai em MB, com uma casa; sem total, null", () => {
+    expect(emMegabytes(255_852_544)).toBe(244);
+    expect(emMegabytes(1_572_864)).toBe(1.5);
+    expect(emMegabytes(0)).toBeNull();
+    expect(emMegabytes(undefined)).toBeNull();
   });
 });
 
@@ -240,11 +363,13 @@ describe("transcritor · descarga do modelo ocioso", () => {
   /** Um worker novo a cada criação, para ver o encerramento e a recriação. */
   function montarComRecriacao() {
     const criados: TrabalhadorFalso[] = [];
-    const transcrever = criarTranscritor(() => {
+    const motor = criarTranscritor(() => {
       const novo = new TrabalhadorFalso();
       criados.push(novo);
       return novo;
     });
+    const transcrever = (amostras: Float32Array, opcoes: OpcoesDaPassada = { origem: "ditado" }) =>
+      motor.transcrever(amostras, opcoes).then((resultado) => resultado.texto);
     return { criados, transcrever };
   }
 
@@ -297,8 +422,8 @@ describe("transcritor · descarga do modelo ocioso", () => {
   it("não encerra com pedidos da escuta ainda na fila", async () => {
     const { criados, transcrever } = montarComRecriacao();
 
-    const emAndamento = transcrever(audio(1), undefined, { origem: "escuta" });
-    const esperando = transcrever(audio(2), undefined, { origem: "escuta" });
+    const emAndamento = transcrever(audio(1), { origem: "escuta" });
+    const esperando = transcrever(audio(2), { origem: "escuta" });
     const [worker] = criados;
 
     worker?.concluirUltimo("1");
