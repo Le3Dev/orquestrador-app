@@ -140,6 +140,12 @@ function nota(id: string, alteracoes: Partial<DadosDaNota> = {}): DadosDaNota {
   };
 }
 
+/** Abre o `+ Novo ▾` e escolhe o item de um painel da barra. */
+function abrirPainelPeloMenu(nome: string | RegExp) {
+  fireEvent.click(screen.getByRole("button", { name: "Novo" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: nome }));
+}
+
 describe("CanvasDeOrquestradores · chat rápido", () => {
   beforeEach(() => {
     vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoFalso);
@@ -178,7 +184,7 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
     expect(camada!.compareDocumentPosition(painelDoChat!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("a contagem do botão Subagentes acompanha a biblioteca quando o chat cria um subagente pronto", async () => {
+  it("a contagem do item Subagentes do menu Novo acompanha a biblioteca quando o chat cria um subagente pronto", async () => {
     const pronto = (nome: string) => ({ nome, descricao: "Faz algo", prompt: "Faça.", modelo: "herdar" as const });
     const preferencias = (nomes: string[]) => ({
       instrucoesPadrao: "",
@@ -187,40 +193,51 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
     });
     const ler = vi.spyOn(api, "lerPreferencias").mockResolvedValue(preferencias(["a", "b"]));
     render(<CanvasDeOrquestradores />);
-    expect(await screen.findByRole("button", { name: "Subagentes (2)" })).toBeInTheDocument();
+    const contagem = async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Novo" }));
+      const item = screen.getByRole("menuitem", { name: /Subagentes/ });
+      const texto = item.querySelector(".mono")?.textContent ?? null;
+      fireEvent.keyDown(item, { key: "Escape" });
+      return texto;
+    };
+    await waitFor(async () => expect(await contagem()).toBe("2"));
 
     // O cartão do chat grava a lista nova e avisa; a barra relê sem reabrir nada.
     ler.mockResolvedValue(preferencias(["a", "b", "c"]));
     act(() => avisarSubagentesProntosMudaram());
-    expect(await screen.findByRole("button", { name: "Subagentes (3)" })).toBeInTheDocument();
+    await waitFor(async () => expect(await contagem()).toBe("3"));
   });
 
   it("com um painel da barra aberto, a lista de orquestradores some como o quadro vazio e volta como estava", async () => {
     vi.spyOn(api, "lerPreferencias").mockRejectedValue(new Error("sem servidor"));
     render(<CanvasDeOrquestradores />);
     await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
-    const lista = () => screen.getByRole("button", { name: /orquestradores · 0/, hidden: true });
+    const botaoDaLista = () => screen.getByRole("button", { name: "Orquestradores (0)" });
+    const lista = () => screen.getByText("Nenhum orquestrador ainda.", { exact: false });
     expect(lista()).toBeVisible();
-    expect(lista()).toHaveAttribute("aria-expanded", "true");
+    expect(botaoDaLista()).toHaveAttribute("aria-expanded", "true");
+    // O botão da barra esconde e mostra a lista.
+    fireEvent.click(botaoDaLista());
+    expect(screen.queryByText("Nenhum orquestrador ainda.")).not.toBeInTheDocument();
+    expect(botaoDaLista()).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(botaoDaLista());
 
     // Expandida: some com o painel e volta expandida ao fechar.
-    fireEvent.click(screen.getByRole("button", { name: "Subagentes" }));
+    abrirPainelPeloMenu(/Subagentes/);
     await screen.findByRole("region", { name: "Subagentes prontos" });
     expect(lista()).not.toBeVisible();
     expect(screen.queryByRole("heading", { name: "Seu canvas de agentes" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Fechar subagentes" }));
     expect(lista()).toBeVisible();
-    expect(lista()).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("heading", { name: "Seu canvas de agentes" })).toBeInTheDocument();
 
     // Recolhida: escondida, e não desmontada, volta recolhida.
-    fireEvent.click(lista());
-    expect(lista()).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(screen.getByRole("button", { name: "Subagentes" }));
-    expect(lista()).not.toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Subagentes" }));
-    expect(lista()).toBeVisible();
-    expect(lista()).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(botaoDaLista());
+    expect(botaoDaLista()).toHaveAttribute("aria-expanded", "false");
+    abrirPainelPeloMenu(/Subagentes/);
+    abrirPainelPeloMenu(/Subagentes/);
+    expect(botaoDaLista()).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Nenhum orquestrador ainda.")).not.toBeInTheDocument();
   });
 
   it("com \"Chat fixo à esquerda\", o chat vira uma coluna ao lado do canvas; \"soltar\" o devolve ao pé", async () => {
@@ -1468,12 +1485,11 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     }
 
     // A barra do canvas fica com o "+ Novo ▾" (que tem a Prévia e o Terminal) e os botões de
-    // Subagentes, Instruções gerais e Modelos; o ⚙ Configurações vai para a barra de título.
+    // Subagentes, Instruções gerais e Modelos como itens do menu; o botão de orquestradores vem
+    // antes; o ⚙ Configurações vai para a barra de título.
     expect(within(barraDoCanvas).getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual([
+      "Orquestradores (0)",
       "Novo",
-      "Subagentes",
-      "Instruções gerais",
-      "Modelos",
     ]);
     expect(within(barra).getByRole("button", { name: "Configurações" })).toBeInTheDocument();
 
@@ -2118,7 +2134,7 @@ describe("CanvasDeOrquestradores · seleção múltipla e barra do grupo", { tim
     render(<CanvasDeOrquestradores />);
     await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Modelos" }));
+    abrirPainelPeloMenu("Modelos");
     fireEvent.click(await screen.findByRole("button", { name: "Recriar Backend" }));
 
     const resultado = await screen.findByRole("status", { name: "Resultado da recriação" });

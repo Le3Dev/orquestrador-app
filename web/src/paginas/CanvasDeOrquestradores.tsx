@@ -1728,6 +1728,8 @@ function Canvas() {
   // A contagem do botão Subagentes. Com o servidor fora, fica sem número até
   // ele voltar (o efeito roda de novo na reconexão).
   const [quantidadeDeSubagentes, setQuantidadeDeSubagentes] = useState<number | null>(null);
+  const [listaAberta, setListaAberta] = useState(true);
+  const alternarLista = useCallback(() => setListaAberta((atual) => !atual), []);
   const lerQuantidadeDeSubagentes = useCallback(() => {
     api
       .lerPreferencias()
@@ -1765,6 +1767,9 @@ function Canvas() {
           aoAlternarPainel={alternarPainel}
           painelAberto={painelAberto}
           quantidadeDeSubagentes={quantidadeDeSubagentes}
+          quantidadeDeOrquestradores={orquestradores?.length ?? 0}
+          listaAberta={listaAberta}
+          aoAlternarLista={alternarLista}
         />
         {painelAberto === "subagentes" && <PainelDeSubagentes aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />}
         {painelAberto === "instrucoes" && (
@@ -1784,7 +1789,13 @@ function Canvas() {
         {/* Como o aviso do canvas vazio, some enquanto um painel da barra está aberto; escondida
             (e não desmontada), volta recolhida ou expandida como estava. */}
         <div hidden={painelAberto !== null}>
-          <Doca orquestradores={orquestradores} noCanvas={noCanvas} erro={erro} aoAbrir={abrirTerminal} />
+          <Doca
+            orquestradores={orquestradores}
+            noCanvas={noCanvas}
+            erro={erro}
+            aoAbrir={abrirTerminal}
+            aberta={listaAberta}
+          />
         </div>
       </div>
     ),
@@ -1798,6 +1809,8 @@ function Canvas() {
       alternarPainel,
       fecharPainel,
       quantidadeDeSubagentes,
+      listaAberta,
+      alternarLista,
       aoSalvarPainel,
       versaoDosModelos,
       recriarModelo,

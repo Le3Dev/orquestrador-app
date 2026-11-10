@@ -3143,6 +3143,8 @@ html.modo-invisivel .barra-de-titulo * {
 .item-com-icone { display: inline-flex; align-items: center; gap: 9px; min-width: 0; }
 .icone-do-item { display: grid; place-items: center; width: 16px; flex-shrink: 0; font-size: 13px; color: var(--secondary); }
 .icone-do-item-ativo { color: var(--active); }
+.separador-do-menu { height: 1px; margin: 4px 2px; background: var(--border); }
+.menu-do-novo .item-do-menu-aberto { background: var(--surface-3); box-shadow: inset 2px 0 0 var(--active); }
 .atalho-do-item { flex-shrink: 0; font-family: var(--fonte-mono); font-size: 10.5px; color: var(--muted); }
 
 /* ---------------- Larguras da janela ----------------

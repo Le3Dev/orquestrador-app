@@ -21,6 +21,9 @@ const extrasDaBarra = {
   aoAlternarPainel: vi.fn(),
   painelAberto: null,
   quantidadeDeSubagentes: null,
+  quantidadeDeOrquestradores: 0,
+  listaAberta: true,
+  aoAlternarLista: vi.fn(),
 } as const;
 
 const botaoDoNovo = () => screen.getByRole("button", { name: "Novo" });
@@ -44,14 +47,12 @@ describe("BarraDoCanvas · desktop", () => {
     return { aoCriar, aoCriarNota };
   }
 
-  it("o \"+ Novo ▾\" e os botões de Subagentes, Instruções gerais e Modelos: sem Preferências, Prévia, Terminal, título, busca, ⚙, notas, organizar nem botões de janela", () => {
+  it("o botão de orquestradores e o \"+ Novo ▾\": sem Preferências, Prévia, Terminal, título, busca, ⚙, notas, organizar nem botões de janela", () => {
     renderizar();
 
     expect(screen.getAllByRole("button")).toEqual([
+      screen.getByRole("button", { name: "Orquestradores (0)" }),
       botaoDoNovo(),
-      screen.getByRole("button", { name: "Subagentes" }),
-      screen.getByRole("button", { name: "Instruções gerais" }),
-      screen.getByRole("button", { name: "Modelos" }),
     ]);
     expect(screen.queryByRole("button", { name: /Preferências|Configurações/ })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Prévia|Terminal/ })).not.toBeInTheDocument();
@@ -83,11 +84,16 @@ describe("BarraDoCanvas · desktop", () => {
     // Sem aoCriarShell, o "Terminal" não aparece. O atalho fica à direita de cada item
     // (fora do nome acessível, que tem aria-keyshortcuts); a Prévia não tem atalho.
     expect(itensDoMenu()).toEqual(
-      ["Orquestrador", "Nota", "Prévia"].map((nome) => screen.getByRole("menuitem", { name: nome })),
+      ["Orquestrador", "Nota", "Prévia", /Subagentes/, "Instruções gerais", "Modelos"].map((nome) =>
+        screen.getByRole("menuitem", { name: nome }),
+      ),
     );
     expect(itensDoMenu().map((item) => item.querySelector("kbd")?.textContent ?? null)).toEqual([
       "Ctrl+N",
       "Ctrl+Shift+N",
+      null,
+      null,
+      null,
       null,
     ]);
     expect(screen.getByRole("menuitem", { name: "Orquestrador" })).toHaveAttribute("aria-keyshortcuts", "Control+N");
@@ -99,11 +105,15 @@ describe("BarraDoCanvas · desktop", () => {
     expect(itensDoMenu()[1]).toHaveFocus();
     fireEvent.keyDown(itensDoMenu()[1] as HTMLElement, { key: "ArrowDown" });
     expect(itensDoMenu()[2]).toHaveFocus();
-    fireEvent.keyDown(itensDoMenu()[2] as HTMLElement, { key: "ArrowDown" });
+    for (const indice of [2, 3, 4, 5]) {
+      fireEvent.keyDown(itensDoMenu()[indice] as HTMLElement, { key: "ArrowDown" });
+    }
     expect(itensDoMenu()[0]).toHaveFocus();
     fireEvent.keyDown(itensDoMenu()[0] as HTMLElement, { key: "ArrowUp" });
-    expect(itensDoMenu()[2]).toHaveFocus();
-    fireEvent.keyDown(itensDoMenu()[2] as HTMLElement, { key: "ArrowUp" });
+    expect(itensDoMenu()[5]).toHaveFocus();
+    for (const indice of [5, 4, 3, 2]) {
+      fireEvent.keyDown(itensDoMenu()[indice] as HTMLElement, { key: "ArrowUp" });
+    }
     expect(itensDoMenu()[1]).toHaveFocus();
 
     fireEvent.keyDown(itensDoMenu()[1] as HTMLElement, { key: "Enter" });
@@ -135,7 +145,7 @@ describe("BarraDoCanvas · desktop", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
 
     fireEvent.keyDown(botaoDoNovo(), { key: "ArrowUp" });
-    expect(itensDoMenu()[2]).toHaveFocus();
+    expect(itensDoMenu()[5]).toHaveFocus();
   });
 
   it("Esc fecha sem escolher e o foco volta ao botão", () => {
@@ -237,81 +247,118 @@ describe("BarraDoCanvas · navegador", () => {
   });
 });
 
-describe("BarraDoCanvas: Subagentes e Instruções gerais", () => {
-  function barra(painelAberto: "subagentes" | "instrucoes" | "modelos" | null, quantidadeDeSubagentes: number | null = 3) {
+describe("BarraDoCanvas: Subagentes, Instruções gerais e Modelos no \"+ Novo ▾\"", () => {
+  function barra(
+    painelAberto: "subagentes" | "instrucoes" | "modelos" | null,
+    quantidadeDeSubagentes: number | null = 3,
+    extras: { listaAberta?: boolean; quantidadeDeOrquestradores?: number } = {},
+  ) {
     const aoAlternarPainel = vi.fn();
-    const resultado = render(
-      <BarraDoCanvas
-        aoCriar={vi.fn()}
-        aoCriarNota={vi.fn()}
-        aoCriarPrevia={vi.fn()}
-        aoAlternarPainel={aoAlternarPainel}
-        painelAberto={painelAberto}
-        quantidadeDeSubagentes={quantidadeDeSubagentes}
-      />,
-    );
-    return { aoAlternarPainel, ...resultado };
+    const aoAlternarLista = vi.fn();
+    const propriedades = {
+      aoCriar: vi.fn(),
+      aoCriarNota: vi.fn(),
+      aoCriarPrevia: vi.fn(),
+      aoAlternarPainel,
+      quantidadeDeSubagentes,
+      quantidadeDeOrquestradores: extras.quantidadeDeOrquestradores ?? 2,
+      listaAberta: extras.listaAberta ?? true,
+      aoAlternarLista,
+    };
+    const resultado = render(<BarraDoCanvas {...propriedades} painelAberto={painelAberto} />);
+    return { aoAlternarPainel, aoAlternarLista, propriedades, ...resultado };
   }
 
-  it("Subagentes (com a contagem), Instruções gerais e Modelos, antes do ⚙ Configurações (no navegador)", () => {
-    const { aoAlternarPainel } = barra(null);
+  it("a barra tem orquestradores, Novo, Buscar não (sem aoBuscar) e ⚙ Configurações, nessa ordem (no navegador)", () => {
+    barra(null);
 
     expect(screen.getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual([
+      "Orquestradores (2)",
       "Novo",
-      "Subagentes (3)",
-      "Instruções gerais",
-      "Modelos",
       "Configurações",
     ]);
-    const subagentes = screen.getByRole("button", { name: /Subagentes/ });
-    const instrucoes = screen.getByRole("button", { name: "Instruções gerais" });
-    expect(subagentes).toHaveAccessibleName("Subagentes (3)");
-    expect(subagentes.querySelector(".rotulo-completo")).toHaveTextContent("Subagentes 3");
-    expect(subagentes).toHaveClass("btn", "btn-sm", "btn-outline");
-    expect(instrucoes).toHaveAttribute(
+    expect(screen.queryByRole("button", { name: /Subagentes|Instruções|Modelos/ })).not.toBeInTheDocument();
+  });
+
+  it("o menu tem os itens novos depois de um separador, com ícone, dicas e a contagem de subagentes", () => {
+    const { aoAlternarPainel } = barra(null);
+    fireEvent.click(botaoDoNovo());
+
+    expect(itensDoMenu()).toEqual(
+      ["Orquestrador", "Nota", "Prévia", /Subagentes/, "Instruções gerais", "Modelos"].map((nome) =>
+        screen.getByRole("menuitem", { name: nome }),
+      ),
+    );
+    expect(screen.getByRole("separator")).toBeInTheDocument();
+    const subagentes = screen.getByRole("menuitem", { name: /Subagentes/ });
+    expect(subagentes.querySelector(".mono")).toHaveTextContent("3");
+    expect(subagentes).toHaveAttribute("title", "Ajudantes prontos que todo orquestrador pode chamar");
+    expect(screen.getByRole("menuitem", { name: "Instruções gerais" })).toHaveAttribute(
       "title",
       "Instruções que valem para todo orquestrador sem instruções próprias",
     );
-
-    expect(screen.getByRole("button", { name: "Modelos" })).toHaveAttribute(
+    expect(screen.getByRole("menuitem", { name: "Modelos" })).toHaveAttribute(
       "title",
       "Modelos de canvas: arranjos salvos para recriar, exportar e importar",
     );
+    for (const nome of [/Subagentes/, "Instruções gerais", "Modelos"]) {
+      expect(screen.getByRole("menuitem", { name: nome }).querySelector(".icone-do-item")).not.toBeEmpty();
+    }
 
     fireEvent.click(subagentes);
-    fireEvent.click(instrucoes);
-    fireEvent.click(screen.getByRole("button", { name: "Modelos" }));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    fireEvent.click(botaoDoNovo());
+    fireEvent.click(screen.getByRole("menuitem", { name: "Instruções gerais" }));
+    fireEvent.click(botaoDoNovo());
+    fireEvent.click(screen.getByRole("menuitem", { name: "Modelos" }));
     expect(aoAlternarPainel.mock.calls).toEqual([["subagentes"], ["instrucoes"], ["modelos"]]);
   });
 
-  it("sem a contagem (servidor fora), o botão fica só com o nome", () => {
+  it("sem a contagem (servidor fora), o item Subagentes fica só com o nome", () => {
     barra(null, null);
+    fireEvent.click(botaoDoNovo());
 
-    const subagentes = screen.getByRole("button", { name: "Subagentes" });
-    expect(subagentes.querySelector(".rotulo-completo")).toHaveTextContent(/^Subagentes$/);
+    const subagentes = screen.getByRole("menuitem", { name: "Subagentes" });
+    expect(subagentes.querySelector(".mono")).toBeNull();
   });
 
-  it("aria-expanded marca só o painel aberto", () => {
-    const { rerender } = barra("subagentes");
-    const subagentes = () => screen.getByRole("button", { name: /Subagentes/ });
-    const instrucoes = () => screen.getByRole("button", { name: "Instruções gerais" });
+  it("o item do painel aberto é marcado", () => {
+    barra("instrucoes");
+    fireEvent.click(botaoDoNovo());
 
-    expect(subagentes()).toHaveAttribute("aria-expanded", "true");
-    expect(instrucoes()).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("menuitem", { name: "Instruções gerais" })).toHaveClass("item-do-menu-aberto");
+    expect(screen.getByRole("menuitem", { name: /Subagentes/ })).not.toHaveClass("item-do-menu-aberto");
+  });
 
-    rerender(
-      <BarraDoCanvas
-        aoCriar={vi.fn()}
-        aoCriarNota={vi.fn()}
-        aoCriarPrevia={vi.fn()}
-        aoAlternarPainel={vi.fn()}
-        painelAberto="instrucoes"
-        quantidadeDeSubagentes={3}
-      />,
+  it("↓ chega aos itens novos e Enter escolhe o painel", () => {
+    const { aoAlternarPainel } = barra(null);
+    fireEvent.click(botaoDoNovo());
+    const itens = itensDoMenu();
+
+    for (let passo = 0; passo < 5; passo += 1) {
+      fireEvent.keyDown(document.activeElement as HTMLElement, { key: "ArrowDown" });
+    }
+    expect(itens[5]).toHaveFocus();
+    fireEvent.click(itens[5] as HTMLElement);
+    expect(aoAlternarPainel).toHaveBeenCalledWith("modelos");
+  });
+
+  it("o botão de orquestradores mostra a contagem, o estado e alterna a lista; compacto vira ícone + número", () => {
+    const { aoAlternarLista, propriedades, rerender } = barra(null, 3, { listaAberta: true });
+    const botao = screen.getByRole("button", { name: "Orquestradores (2)" });
+
+    expect(botao).toHaveAttribute("aria-expanded", "true");
+    expect(botao.querySelector(".rotulo-completo")).toHaveTextContent("orquestradores · 2 ▾");
+    expect(botao.querySelector(".rotulo-icone svg")).not.toBeNull();
+    expect(botao.querySelector(".rotulo-icone")).toHaveTextContent("2");
+    fireEvent.click(botao);
+    expect(aoAlternarLista).toHaveBeenCalledTimes(1);
+
+    rerender(<BarraDoCanvas {...propriedades} listaAberta={false} painelAberto={null} />);
+    expect(screen.getByRole("button", { name: "Orquestradores (2)" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "Orquestradores (2)" }).querySelector(".rotulo-completo")).toHaveTextContent(
+      "orquestradores · 2 ▸",
     );
-
-    expect(subagentes()).toHaveAttribute("aria-expanded", "false");
-    expect(instrucoes()).toHaveAttribute("aria-expanded", "true");
   });
 });
 
@@ -319,7 +366,15 @@ describe("BarraDoCanvas: Terminal e Prévia no \"+ Novo ▾\"", () => {
   function renderizar() {
     const chamadas = { aoCriar: vi.fn(), aoCriarNota: vi.fn(), aoCriarPrevia: vi.fn(), aoCriarShell: vi.fn() };
     render(
-      <BarraDoCanvas {...chamadas} aoAlternarPainel={vi.fn()} painelAberto={null} quantidadeDeSubagentes={null} />,
+      <BarraDoCanvas
+        {...chamadas}
+        aoAlternarPainel={vi.fn()}
+        painelAberto={null}
+        quantidadeDeSubagentes={null}
+        quantidadeDeOrquestradores={0}
+        listaAberta
+        aoAlternarLista={vi.fn()}
+      />,
     );
     return chamadas;
   }
@@ -332,7 +387,9 @@ describe("BarraDoCanvas: Terminal e Prévia no \"+ Novo ▾\"", () => {
     fireEvent.click(botaoDoNovo());
 
     expect(itensDoMenu()).toEqual(
-      ["Orquestrador", "Nota", "Terminal", "Prévia"].map((nome) => screen.getByRole("menuitem", { name: nome })),
+      ["Orquestrador", "Nota", "Terminal", "Prévia", /Subagentes/, "Instruções gerais", "Modelos"].map((nome) =>
+        screen.getByRole("menuitem", { name: nome }),
+      ),
     );
     for (const nome of ["Terminal", "Prévia"]) {
       const item = screen.getByRole("menuitem", { name: nome });
@@ -350,9 +407,9 @@ describe("BarraDoCanvas: Terminal e Prévia no \"+ Novo ▾\"", () => {
     expect(aoCriarShell).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
 
-    // Pelo teclado: ↑ no botão abre no último item (Prévia) e Enter escolhe.
+    // Pelo teclado: ↑ no botão abre no último item (Modelos); Enter, na Prévia, escolhe.
     fireEvent.keyDown(botaoDoNovo(), { key: "ArrowUp" });
-    expect(screen.getByRole("menuitem", { name: "Prévia" })).toHaveFocus();
+    expect(screen.getByRole("menuitem", { name: "Modelos" })).toHaveFocus();
     fireEvent.keyDown(screen.getByRole("menuitem", { name: "Prévia" }), { key: "Enter" });
 
     expect(aoCriarPrevia).toHaveBeenCalledTimes(1);

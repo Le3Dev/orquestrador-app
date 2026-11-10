@@ -111,6 +111,11 @@ interface PropsDaBarra {
   painelAberto: PainelDaBarra | null;
   /** Quantos subagentes prontos existem; nulo enquanto não se sabe (ex.: servidor fora). */
   quantidadeDeSubagentes: number | null;
+  /** Quantos orquestradores existem (o número do botão "orquestradores · N"). */
+  quantidadeDeOrquestradores: number;
+  /** A lista de orquestradores (a `Doca`) está aberta. */
+  listaAberta: boolean;
+  aoAlternarLista: () => void;
 }
 
 /** Os painéis que abrem logo abaixo da barra do canvas. */
@@ -188,6 +193,32 @@ const ITENS_DO_NOVO: readonly {
   },
 ];
 
+/** Os itens que abrem painéis da barra, depois do separador do `+ Novo ▾`. */
+const ITENS_DE_PAINEL: readonly { painel: PainelDaBarra; rotulo: string; dica: string }[] = [
+  { painel: "subagentes", rotulo: "Subagentes", dica: "Ajudantes prontos que todo orquestrador pode chamar" },
+  {
+    painel: "instrucoes",
+    rotulo: "Instruções gerais",
+    dica: "Instruções que valem para todo orquestrador sem instruções próprias",
+  },
+  {
+    painel: "modelos",
+    rotulo: "Modelos",
+    dica: "Modelos de canvas: arranjos salvos para recriar, exportar e importar",
+  },
+];
+
+function IconeDoPainel({ painel }: { painel: PainelDaBarra }) {
+  switch (painel) {
+    case "subagentes":
+      return <IconePessoas />;
+    case "instrucoes":
+      return "¶";
+    case "modelos":
+      return <IconeModelo />;
+  }
+}
+
 /** O ícone de cada item do `+ Novo ▾`. */
 function IconeDoNovo({ escolha }: { escolha: EscolhaDoNovo }) {
   switch (escolha) {
@@ -208,11 +239,31 @@ interface PropsDoMenuDoNovo {
   aoCriarPrevia: () => void;
   /** Sem ela, o item "Terminal" não aparece. */
   aoCriarShell?: () => void;
+  aoAlternarPainel: (painel: PainelDaBarra) => void;
+  painelAberto: PainelDaBarra | null;
+  quantidadeDeSubagentes: number | null;
 }
 
-/** O botão `+ Novo ▾` e o menu dele (Orquestrador · Nota · Terminal · Prévia). */
-function MenuDoNovo({ aoCriar, aoCriarNota, aoCriarPrevia, aoCriarShell }: PropsDoMenuDoNovo) {
+/**
+ * O botão `+ Novo ▾` e o menu dele (Orquestrador · Nota · Terminal · Prévia ·
+ * separador · Subagentes · Instruções gerais · Modelos).
+ */
+function MenuDoNovo({
+  aoCriar,
+  aoCriarNota,
+  aoCriarPrevia,
+  aoCriarShell,
+  aoAlternarPainel,
+  painelAberto,
+  quantidadeDeSubagentes,
+}: PropsDoMenuDoNovo) {
   const itensDoMenu = ITENS_DO_NOVO.filter((item) => item.escolha !== "terminal" || aoCriarShell !== undefined);
+  const totalDeItens = itensDoMenu.length + ITENS_DE_PAINEL.length;
+
+  const escolherPainel = (painel: PainelDaBarra) => {
+    menu.fechar(true);
+    aoAlternarPainel(painel);
+  };
 
   const escolher = (escolha: EscolhaDoNovo) => {
     menu.fechar(true);
@@ -232,10 +283,15 @@ function MenuDoNovo({ aoCriar, aoCriarNota, aoCriarPrevia, aoCriarShell }: Props
     }
   };
 
-  const menu = useMenuDaBarra(itensDoMenu.length, (indice) => {
+  const menu = useMenuDaBarra(totalDeItens, (indice) => {
     const item = itensDoMenu[indice];
     if (item !== undefined) {
       escolher(item.escolha);
+      return;
+    }
+    const doPainel = ITENS_DE_PAINEL[indice - itensDoMenu.length];
+    if (doPainel !== undefined) {
+      escolherPainel(doPainel.painel);
     }
   });
 
@@ -286,6 +342,29 @@ function MenuDoNovo({ aoCriar, aoCriarNota, aoCriarPrevia, aoCriarShell }: Props
               )}
             </button>
           ))}
+          <div role="separator" className="separador-do-menu" />
+          {ITENS_DE_PAINEL.map((item, posicao) => (
+            <button
+              key={item.painel}
+              ref={menu.refDoItem(itensDoMenu.length + posicao)}
+              type="button"
+              role="menuitem"
+              tabIndex={-1}
+              className={`item-do-menu ${painelAberto === item.painel ? "item-do-menu-aberto" : ""}`}
+              title={item.dica}
+              onClick={() => escolherPainel(item.painel)}
+            >
+              <span className="item-com-icone">
+                <span className="icone-do-item" aria-hidden="true">
+                  <IconeDoPainel painel={item.painel} />
+                </span>
+                {item.rotulo}
+              </span>
+              {item.painel === "subagentes" && quantidadeDeSubagentes !== null && (
+                <span className="mono text-muted">{quantidadeDeSubagentes}</span>
+              )}
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -310,11 +389,12 @@ export function BarraDoCanvas({
   aoAlternarPainel,
   painelAberto,
   quantidadeDeSubagentes,
+  quantidadeDeOrquestradores,
+  listaAberta,
+  aoAlternarLista,
 }: PropsDaBarra) {
   const [desktop] = useState(rodandoNoDesktop);
   const ajustes = useAjustesDoAplicativo();
-  const contagem =
-    quantidadeDeSubagentes === null ? null : <span className="mono text-muted"> {quantidadeDeSubagentes}</span>;
 
   return (
     <div className="barra-do-canvas painel-flutuante flex items-center gap-2 px-2.5 py-2">
@@ -330,11 +410,42 @@ export function BarraDoCanvas({
           <span className="mx-1 h-8 w-px shrink-0 bg-border" />
         </>
       )}
+      <button
+        type="button"
+        className="btn btn-sm btn-outline botao-de-painel"
+        onClick={aoAlternarLista}
+        aria-expanded={listaAberta}
+        aria-label={`Orquestradores (${quantidadeDeOrquestradores})`}
+        title="Mostra ou esconde a lista de orquestradores"
+      >
+        <RotuloResponsivo
+          completo={
+            <>
+              <span className="rotulo-tecnico">orquestradores · {quantidadeDeOrquestradores}</span>{" "}
+              <span className="mono text-muted">{listaAberta ? "▾" : "▸"}</span>
+            </>
+          }
+          curto={
+            <>
+              <span className="rotulo-tecnico">orquestradores · {quantidadeDeOrquestradores}</span>{" "}
+              <span className="mono text-muted">{listaAberta ? "▾" : "▸"}</span>
+            </>
+          }
+          icone={
+            <>
+              <IconeOrquestrador tamanho={14} /> <span className="mono">{quantidadeDeOrquestradores}</span>
+            </>
+          }
+        />
+      </button>
       <MenuDoNovo
         aoCriar={aoCriar}
         aoCriarNota={aoCriarNota}
         aoCriarPrevia={aoCriarPrevia}
         aoCriarShell={aoCriarShell}
+        aoAlternarPainel={aoAlternarPainel}
+        painelAberto={painelAberto}
+        quantidadeDeSubagentes={quantidadeDeSubagentes}
       />
       {!desktop && aoBuscar !== undefined && (
         <button
@@ -348,40 +459,6 @@ export function BarraDoCanvas({
           <RotuloResponsivo completo="Buscar (Ctrl+K)" curto="Buscar" icone="⌕" />
         </button>
       )}
-      <button
-        type="button"
-        className="btn btn-sm btn-outline botao-de-painel"
-        onClick={() => aoAlternarPainel("subagentes")}
-        aria-expanded={painelAberto === "subagentes"}
-        aria-label={quantidadeDeSubagentes === null ? "Subagentes" : `Subagentes (${quantidadeDeSubagentes})`}
-        title="Ajudantes prontos que todo orquestrador pode chamar"
-      >
-        <RotuloResponsivo
-          completo={<>Subagentes{contagem}</>}
-          curto={<>Subagentes{contagem}</>}
-          icone={<IconePessoas />}
-        />
-      </button>
-      <button
-        type="button"
-        className="btn btn-sm btn-outline botao-de-painel"
-        onClick={() => aoAlternarPainel("instrucoes")}
-        aria-expanded={painelAberto === "instrucoes"}
-        aria-label="Instruções gerais"
-        title="Instruções que valem para todo orquestrador sem instruções próprias"
-      >
-        <RotuloResponsivo completo="Instruções gerais" curto="Instruções" icone="¶" />
-      </button>
-      <button
-        type="button"
-        className="btn btn-sm btn-outline botao-de-painel"
-        onClick={() => aoAlternarPainel("modelos")}
-        aria-expanded={painelAberto === "modelos"}
-        aria-label="Modelos"
-        title="Modelos de canvas: arranjos salvos para recriar, exportar e importar"
-      >
-        <RotuloResponsivo completo="Modelos" curto="Modelos" icone={<IconeModelo />} />
-      </button>
       {!desktop && (
         <PainelDeConfiguracoesDoApp
           ajustes={ajustes}
@@ -426,25 +503,16 @@ interface PropsDaDoca {
   noCanvas: ReadonlySet<string>;
   erro: string | null;
   aoAbrir: (id: string) => void;
+  /** Aberta ou recolhida; o botão que alterna fica na `BarraDoCanvas`. */
+  aberta: boolean;
 }
 
 /** Lista de todos os Orquestradores: clicar abre (ou encontra) o terminal no canvas. */
-export function Doca({ orquestradores, noCanvas, erro, aoAbrir }: PropsDaDoca) {
-  const [recolhida, setRecolhida] = useState(false);
-
+export function Doca({ orquestradores, noCanvas, erro, aoAbrir, aberta }: PropsDaDoca) {
   return (
-    <div className="painel-flutuante mt-2 flex w-72 flex-col">
-      <button
-        type="button"
-        className="flex cursor-pointer items-center justify-between px-3 py-2"
-        aria-expanded={!recolhida}
-        onClick={() => setRecolhida((atual) => !atual)}
-      >
-        <span className="rotulo-tecnico">orquestradores · {orquestradores?.length ?? 0}</span>
-        <span className="mono text-muted">{recolhida ? "▸" : "▾"}</span>
-      </button>
-      {!recolhida && (
-        <div className="custom-scrollbar max-h-[50vh] overflow-y-auto border-t border-border p-1.5">
+    <div className="mt-2 flex w-72 flex-col">
+      {aberta && (
+        <div className="painel-flutuante custom-scrollbar max-h-[50vh] overflow-y-auto p-1.5">
           {erro !== null && <div className="alert alert-error m-1">{erro}</div>}
           {orquestradores === null ? (
             <p className="mono text-muted px-2 py-1.5">carregando…</p>
