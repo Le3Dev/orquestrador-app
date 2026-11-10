@@ -72,6 +72,7 @@ describe("IlhaDaDireita", () => {
         aoBuscar={aoBuscar}
         trabalhando={0}
         memoria={memoria(10)}
+        cota={null}
         aoAlternarConfiguracoes={aoAlternarConfiguracoes}
         configuracoesAbertas={false}
         abaAberta={null}
@@ -81,12 +82,13 @@ describe("IlhaDaDireita", () => {
     return { aoBuscar, aoAlternarConfiguracoes };
   }
 
-  it("tem, nesta ordem, a lupa, o anel de memória e a engrenagem; sem ninguém trabalhando, não há contador", () => {
+  it("tem, nesta ordem, a lupa, o anel de uso, o anel de memória e a engrenagem; sem ninguém trabalhando, não há contador", () => {
     montar();
 
     const ilha = screen.getByRole("group", { name: "Busca, status e configurações" });
     expect(within(ilha).getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual([
       "Buscar (Ctrl+K)",
+      "Uso do Claude: sem leitura ainda",
       "Memória do computador: 38% em uso. Abrir Configurações, Sistema",
       "Configurações",
     ]);
@@ -173,6 +175,7 @@ describe("IlhaDaDireita", () => {
         aoBuscar={vi.fn()}
         trabalhando={0}
         memoria={memoria(1.2)}
+        cota={null}
         aoAlternarConfiguracoes={vi.fn()}
         configuracoesAbertas={false}
         abaAberta={null}
@@ -192,6 +195,7 @@ describe("IlhaDaDireita", () => {
         aoBuscar={vi.fn()}
         trabalhando={0}
         memoria={memoria(0.4)}
+        cota={null}
         aoAlternarConfiguracoes={vi.fn()}
         configuracoesAbertas={false}
         abaAberta={null}
@@ -216,12 +220,145 @@ describe("IlhaDaDireita", () => {
     );
   });
 
+  describe("anel de uso da cota", () => {
+    const AGORA = new Date("2026-11-10T12:00:00Z");
+    const emMinutos = (minutos: number) => new Date(AGORA.getTime() + minutos * 60_000).toISOString();
+    const janela = (nome: string, utilizacao: number, extras: Partial<JanelaDaCota> = {}): JanelaDaCota => ({
+      nome,
+      utilizacao,
+      renovaEm: null,
+      situacao: "allowed",
+      ...extras,
+    });
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(AGORA);
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("sem leitura (cota nula ou vazia): arco vazio, traço no centro e a frase diz isso", () => {
+      const { unmount } = render(
+        <IlhaDaDireita
+          aoBuscar={vi.fn()}
+          trabalhando={0}
+          memoria={memoria(10)}
+          cota={null}
+          aoAlternarConfiguracoes={vi.fn()}
+          configuracoesAbertas={false}
+          abaAberta={null}
+        />,
+      );
+      const anel = screen.getByTestId("anel-de-uso");
+      expect(anel).toHaveAttribute("aria-label", "Uso do Claude: sem leitura ainda");
+      expect(anel).toHaveAttribute("title", "Uso do Claude: sem leitura ainda");
+      expect(anel).toHaveTextContent("–");
+      expect(anel).toHaveClass("anel-da-ilha-normal");
+      expect(anel.querySelector(".trilha-do-anel")).not.toBeNull();
+      expect(anel.querySelector(".arco-do-anel")).toBeNull();
+      unmount();
+
+      montar({ cota: [] });
+      expect(screen.getByTestId("anel-de-uso")).toHaveAccessibleName("Uso do Claude: sem leitura ainda");
+    });
+
+    it("mostra o percentual da sessão no centro e resume sessão, renovação e semana na frase", () => {
+      montar({ cota: [janela("7 dias", 0.18), janela("5 horas", 0.42, { renovaEm: emMinutos(130) })] });
+
+      const anel = screen.getByTestId("anel-de-uso");
+      expect(anel).toHaveTextContent("42");
+      expect(anel).not.toHaveTextContent("%");
+      expect(anel).toHaveClass("anel-da-ilha-normal");
+      const frase = "Uso do Claude: sessão 42%, renova em 2 h 10 min; semana 18%. Abrir Configurações, Conta";
+      expect(anel).toHaveAttribute("aria-label", frase);
+      expect(anel).toHaveAttribute("title", frase);
+      // O arco acompanha a sessão: 42% da circunferência.
+      const [cheio = 0, total = 1] = (anel.querySelector(".arco-do-anel")?.getAttribute("stroke-dasharray") ?? "")
+        .split(" ")
+        .map(Number);
+      expect(cheio / total).toBeCloseTo(0.42, 2);
+    });
+
+    it("sem a janela de 5 horas, o centro mostra a mais usada", () => {
+      montar({ cota: [janela("7 dias", 0.3), janela("7 dias (Opus)", 0.55)] });
+
+      expect(screen.getByTestId("anel-de-uso")).toHaveTextContent("55");
+      expect(screen.getByTestId("anel-de-uso")).toHaveAccessibleName(
+        "Uso do Claude: semana (Opus) 55%; semana 30%. Abrir Configurações, Conta",
+      );
+    });
+
+    it("a partir de 80% o anel fica âmbar e ganha o texto Cota alta", () => {
+      montar({ cota: [janela("5 horas", 0.85)] });
+
+      const anel = screen.getByTestId("anel-de-uso");
+      expect(anel).toHaveClass("anel-da-ilha-alta");
+      expect(anel).toHaveTextContent("85");
+      expect(anel).toHaveTextContent("Cota alta");
+      expect(anel).toHaveAccessibleName("Uso do Claude: sessão 85%. Cota alta. Abrir Configurações, Conta");
+    });
+
+    it("a partir de 95% ou com a situação rejected, o anel fica vermelho e diz Cota no limite", () => {
+      const { unmount } = render(
+        <IlhaDaDireita
+          aoBuscar={vi.fn()}
+          trabalhando={0}
+          memoria={memoria(10)}
+          cota={[janela("5 horas", 0.97)]}
+          aoAlternarConfiguracoes={vi.fn()}
+          configuracoesAbertas={false}
+          abaAberta={null}
+        />,
+      );
+      expect(screen.getByTestId("anel-de-uso")).toHaveClass("anel-da-ilha-critica");
+      expect(screen.getByTestId("anel-de-uso")).toHaveTextContent("Cota no limite");
+      unmount();
+
+      montar({ cota: [janela("5 horas", 0.4), janela("7 dias", 0.6, { situacao: "rejected" })] });
+      expect(screen.getByTestId("anel-de-uso")).toHaveClass("anel-da-ilha-critica");
+      expect(screen.getByTestId("anel-de-uso")).toHaveTextContent("Cota no limite");
+    });
+
+    it("o nível e o texto vêm da pior janela, mesmo que a da sessão esteja folgada", () => {
+      montar({ cota: [janela("5 horas", 0.2), janela("7 dias", 0.9)] });
+
+      expect(screen.getByTestId("anel-de-uso")).toHaveTextContent("20");
+      expect(screen.getByTestId("anel-de-uso")).toHaveClass("anel-da-ilha-alta");
+      expect(screen.getByTestId("anel-de-uso")).toHaveTextContent("Cota alta");
+    });
+
+    it("o clique abre as Configurações na aba Conta", () => {
+      const { aoAlternarConfiguracoes } = montar({ cota: [janela("5 horas", 0.42)] });
+
+      fireEvent.click(screen.getByTestId("anel-de-uso"));
+
+      expect(aoAlternarConfiguracoes).toHaveBeenCalledWith("conta");
+    });
+
+    it("aria-pressed fica ativo só com a aba Conta aberta, e a engrenagem não fica junto", () => {
+      montar({ configuracoesAbertas: true, abaAberta: "conta" });
+
+      expect(screen.getByTestId("anel-de-uso")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByTestId("anel-de-memoria")).toHaveAttribute("aria-pressed", "false");
+      expect(screen.getByRole("button", { name: "Configurações" })).toHaveAttribute("aria-pressed", "false");
+    });
+
+    it("com as Configurações fechadas ou em outra aba, o anel de uso não fica pressionado", () => {
+      montar({ configuracoesAbertas: true, abaAberta: "sistema" });
+
+      expect(screen.getByTestId("anel-de-uso")).toHaveAttribute("aria-pressed", "false");
+    });
+  });
+
   it("aria-pressed marca só o botão da aba aberta: o anel no Sistema, a engrenagem nas outras", () => {
     const { unmount } = render(
       <IlhaDaDireita
         aoBuscar={vi.fn()}
         trabalhando={0}
         memoria={memoria(10)}
+        cota={null}
         aoAlternarConfiguracoes={vi.fn()}
         configuracoesAbertas
         abaAberta="sistema"
@@ -236,6 +373,7 @@ describe("IlhaDaDireita", () => {
         aoBuscar={vi.fn()}
         trabalhando={0}
         memoria={memoria(10)}
+        cota={null}
         aoAlternarConfiguracoes={vi.fn()}
         configuracoesAbertas
         abaAberta={null}

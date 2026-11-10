@@ -2,7 +2,7 @@ import { useReactFlow, useStore } from "@xyflow/react";
 import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import type { JanelaDaCota, LeituraDeMemoria } from "../../shared/api/tipos";
-import { formatarMomento, formatarPercentual } from "../../shared/formatacao";
+import { descreverRenovacao, formatarMomento, formatarPercentual } from "../../shared/formatacao";
 import { useAtualizacao } from "../../shared/hooks/useAtualizacao";
 import { nivelDaMemoria, type NivelDaMemoria } from "../../shared/memoria";
 import { IconeAlerta, IconeDesenhar, IconeEngrenagem, IconeGrade, IconeOrquestrador } from "../Icones";
@@ -19,6 +19,7 @@ import {
 } from "./IconesDasIlhas";
 import { MenuNovo, type PropsDoMenuNovo } from "./MenuNovo";
 import { COTA_ALTA } from "./PopoverDoUso";
+import { nomeLegivelDaCota } from "./usoDoSistema";
 import "../../theme/ilhas.css";
 
 /** Nome e dica do "Organizar" e do "Desenhar" na ilha de ferramentas (os mesmos dos antigos controles). */
@@ -56,39 +57,115 @@ export function IlhaDoNome(props: PropsDoMenuNovo) {
 }
 
 interface PropsDoAnel {
-  memoria: LeituraDeMemoria | null;
-  nivel: NivelDaMemoria;
+  /** Quanto do arco fica preenchido, de 0 a 1. */
+  usada: number;
+  /** O anel de uso da cota (com o número no meio) ou o da memória (com o chip). */
+  classe: "anel-de-memoria" | "anel-de-uso";
+  children: ReactNode;
 }
 
-/** O anel de uso da memória: o arco cresce com o uso e o chip fica no meio. */
-function AnelDeMemoria({ memoria }: Pick<PropsDoAnel, "memoria">) {
+/** O desenho dos dois anéis da ilha: a trilha, o arco que cresce com o uso e o que fica no meio. */
+function Anel({ usada, classe, children }: PropsDoAnel) {
   const tamanho = 26;
   const traco = 2.2;
   const raio = (tamanho - traco) / 2;
   const circunferencia = 2 * Math.PI * raio;
-  const usada = memoria === null ? 0 : Math.min(1, Math.max(0, 1 - memoria.livreBytes / memoria.totalBytes));
   return (
-    <span className="anel-de-memoria" aria-hidden="true">
+    <span className={classe} aria-hidden="true">
       <svg width={tamanho} height={tamanho} viewBox={`0 0 ${tamanho} ${tamanho}`}>
         <circle className="trilha-do-anel" cx={tamanho / 2} cy={tamanho / 2} r={raio} fill="none" strokeWidth={traco} />
-        <circle
-          className="arco-do-anel"
-          cx={tamanho / 2}
-          cy={tamanho / 2}
-          r={raio}
-          fill="none"
-          strokeWidth={traco}
-          strokeLinecap="round"
-          strokeDasharray={`${circunferencia * usada} ${circunferencia}`}
-          transform={`rotate(-90 ${tamanho / 2} ${tamanho / 2})`}
-        />
+        {usada > 0 && (
+          <circle
+            className="arco-do-anel"
+            cx={tamanho / 2}
+            cy={tamanho / 2}
+            r={raio}
+            fill="none"
+            strokeWidth={traco}
+            strokeLinecap="round"
+            strokeDasharray={`${circunferencia * usada} ${circunferencia}`}
+            transform={`rotate(-90 ${tamanho / 2} ${tamanho / 2})`}
+          />
+        )}
       </svg>
-      <IconeMemoria className="chip-do-anel" />
+      {children}
     </span>
   );
 }
 
+/** O anel de uso da memória: o arco cresce com o uso e o chip fica no meio. */
+function AnelDeMemoria({ memoria }: { memoria: LeituraDeMemoria | null }) {
+  const usada = memoria === null ? 0 : Math.min(1, Math.max(0, 1 - memoria.livreBytes / memoria.totalBytes));
+  return (
+    <Anel usada={usada} classe="anel-de-memoria">
+      <IconeMemoria className="chip-do-anel" />
+    </Anel>
+  );
+}
+
 const TEXTO_DO_NIVEL: Record<NivelDaMemoria, string> = { normal: "", baixa: "Memória baixa", critica: "Memória crítica" };
+
+type NivelDaCota = "normal" | "alta" | "critica";
+/** Daqui para cima a cota está no limite (a partir de `COTA_ALTA`, que é o aviso, ela está alta). */
+const COTA_NO_LIMITE = 0.95;
+const TEXTO_DO_NIVEL_DA_COTA: Record<NivelDaCota, string> = { normal: "", alta: "Cota alta", critica: "Cota no limite" };
+const PESO_DO_NIVEL_DA_COTA: Record<NivelDaCota, number> = { normal: 0, alta: 1, critica: 2 };
+
+function nivelDaJanela(janela: JanelaDaCota): NivelDaCota {
+  if (janela.situacao === "rejected" || janela.utilizacao >= COTA_NO_LIMITE) {
+    return "critica";
+  }
+  return janela.utilizacao >= COTA_ALTA ? "alta" : "normal";
+}
+
+const aPercentual = (utilizacao: number) => Math.min(100, Math.max(0, Math.round(utilizacao * 100)));
+
+interface ResumoDaCota {
+  /** A janela do arco: a da sessão (5 horas) ou, sem ela, a mais usada; nulo sem leitura. */
+  principal: JanelaDaCota | null;
+  /** A pior situação entre todas as janelas (é ela que dá a cor e o texto). */
+  nivel: NivelDaCota;
+  /** A frase única do `title` e do `aria-label`. */
+  rotulo: string;
+}
+
+/** "Cota da sessão" vira "sessão"; "Cota de 30 dias" vira "30 dias". */
+const nomeCurtoDaJanela = (nome: string) => nomeLegivelDaCota(nome).replace(/^Cota (?:da|de) /, "");
+
+function resumirCota(cota: JanelaDaCota[] | null, agora: Date): ResumoDaCota {
+  const janelas = cota ?? [];
+  const mais = janelas.reduce<JanelaDaCota | null>(
+    (maior, janela) => (maior === null || janela.utilizacao > maior.utilizacao ? janela : maior),
+    null,
+  );
+  const principal = janelas.find((janela) => nomeLegivelDaCota(janela.nome) === "Cota da sessão") ?? mais;
+  if (principal === null) {
+    return { principal, nivel: "normal", rotulo: "Uso do Claude: sem leitura ainda" };
+  }
+  const nivel = janelas.reduce<NivelDaCota>((pior, janela) => {
+    const dela = nivelDaJanela(janela);
+    return PESO_DO_NIVEL_DA_COTA[dela] > PESO_DO_NIVEL_DA_COTA[pior] ? dela : pior;
+  }, "normal");
+  const renovacao = principal.renovaEm === null ? "" : `, ${descreverRenovacao(principal.renovaEm, agora)}`;
+  const partes = [
+    `${nomeCurtoDaJanela(principal.nome)} ${aPercentual(principal.utilizacao)}%${renovacao}`,
+    ...janelas
+      .filter((janela) => janela !== principal)
+      .map((janela) => `${nomeCurtoDaJanela(janela.nome)} ${aPercentual(janela.utilizacao)}%`),
+  ];
+  const aviso = nivel === "normal" ? "" : ` ${TEXTO_DO_NIVEL_DA_COTA[nivel]}.`;
+  return { principal, nivel, rotulo: `Uso do Claude: ${partes.join("; ")}.${aviso} Abrir Configurações, Conta` };
+}
+
+/** O anel de uso da cota do Claude: o arco é a janela principal e o número no meio, o percentual dela. */
+function AnelDeUso({ principal }: { principal: JanelaDaCota | null }) {
+  const percentual = principal === null ? null : aPercentual(principal.utilizacao);
+  return (
+    <Anel usada={percentual === null ? 0 : percentual / 100} classe="anel-de-uso">
+      <span className={`valor-do-anel ${percentual === 100 ? "valor-do-anel-cheio" : ""}`}>{percentual ?? "–"}</span>
+    </Anel>
+  );
+}
 
 interface PropsDaIlhaDaDireita {
   /** Abre a paleta de comandos (o mesmo do Ctrl+K). */
@@ -96,8 +173,10 @@ interface PropsDaIlhaDaDireita {
   /** Orquestradores trabalhando agora. */
   trabalhando: number;
   memoria: LeituraDeMemoria | null;
+  /** As janelas da cota do Claude (a leitura mais recente); nulo ou vazio até o primeiro pedido. */
+  cota: JanelaDaCota[] | null;
   /** Abre as Configurações (ou fecha, se já estavam na mesma aba); sem aba, na aba padrão. */
-  aoAlternarConfiguracoes: (aba?: "sistema") => void;
+  aoAlternarConfiguracoes: (aba?: "sistema" | "conta") => void;
   configuracoesAbertas: boolean;
   /** Em qual aba as Configurações estão; nulo com elas fechadas. */
   abaAberta: string | null;
@@ -110,14 +189,16 @@ interface PropsDaIlhaDaDireita {
 
 /**
  * Ilha do canto superior direito: a lupa (paleta de comandos), o contador de
- * quem está trabalhando, o anel de memória (abre Configurações na aba
- * Sistema) e a engrenagem (abre Configurações). No app desktop o fundo dela
- * arrasta a janela (`ilha-arrasta`); o que é clicável é `no-drag`.
+ * quem está trabalhando, o anel de uso da cota do Claude (abre Configurações
+ * na aba Conta), o anel de memória (abre na aba Sistema) e a engrenagem (abre
+ * Configurações). No app desktop o fundo dela arrasta a janela
+ * (`ilha-arrasta`); o que é clicável é `no-drag`.
  */
 export function IlhaDaDireita({
   aoBuscar,
   trabalhando,
   memoria,
+  cota,
   aoAlternarConfiguracoes,
   configuracoesAbertas,
   abaAberta,
@@ -126,6 +207,8 @@ export function IlhaDaDireita({
   const nivel = memoria === null ? "normal" : nivelDaMemoria(memoria);
   const percentual = memoria === null ? null : Math.round((1 - memoria.livreBytes / memoria.totalBytes) * 100);
   const texto = TEXTO_DO_NIVEL[nivel];
+  const resumoDaCota = resumirCota(cota, new Date());
+  const textoDaCota = TEXTO_DO_NIVEL_DA_COTA[resumoDaCota.nivel];
   const rotuloDoAnel =
     percentual === null
       ? "Memória do computador: sem leitura ainda. Abrir Configurações, Sistema"
@@ -159,6 +242,18 @@ export function IlhaDaDireita({
       )}
       <button
         type="button"
+        className={`anel-da-ilha anel-da-ilha-${resumoDaCota.nivel} no-drag`}
+        aria-pressed={configuracoesAbertas && abaAberta === "conta"}
+        aria-label={resumoDaCota.rotulo}
+        title={resumoDaCota.rotulo}
+        data-testid="anel-de-uso"
+        onClick={() => aoAlternarConfiguracoes("conta")}
+      >
+        <AnelDeUso principal={resumoDaCota.principal} />
+        {textoDaCota !== "" && <span className="texto-do-anel">{textoDaCota}</span>}
+      </button>
+      <button
+        type="button"
         className={`anel-da-ilha anel-da-ilha-${nivel} no-drag`}
         aria-pressed={configuracoesAbertas && abaAberta === "sistema"}
         aria-label={rotuloDoAnel}
@@ -172,7 +267,7 @@ export function IlhaDaDireita({
       <button
         type="button"
         className="botao-da-ilha no-drag"
-        aria-pressed={configuracoesAbertas && abaAberta !== "sistema"}
+        aria-pressed={configuracoesAbertas && abaAberta !== "sistema" && abaAberta !== "conta"}
         aria-label="Configurações"
         title="Configurações"
         onClick={() => aoAlternarConfiguracoes()}

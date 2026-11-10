@@ -281,16 +281,28 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   cursor: pointer;
 }
 .anel-da-ilha:hover, .anel-da-ilha[aria-pressed="true"] { background: var(--surface-3); color: var(--primary); }
-.anel-da-ilha-baixa { color: var(--warning); padding-right: 10px; }
+.anel-da-ilha-baixa, .anel-da-ilha-alta { color: var(--warning); padding-right: 10px; }
 .anel-da-ilha-critica {
   color: var(--error);
   padding-right: 10px;
   background: color-mix(in srgb, var(--error) 10%, transparent);
 }
-.anel-de-memoria { position: relative; display: inline-flex; width: 26px; height: 26px; flex-shrink: 0; }
+.anel-de-memoria, .anel-de-uso { position: relative; display: inline-flex; width: 26px; height: 26px; flex-shrink: 0; }
 .trilha-do-anel { stroke: color-mix(in srgb, var(--primary) 16%, transparent); }
 .arco-do-anel { stroke: currentColor; }
 .chip-do-anel { position: absolute; top: 6.5px; left: 6.5px; }
+/* O percentual no meio do anel de uso: número pequeno, de largura fixa, sem o sinal de %. */
+.valor-do-anel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 500 10px/1 var(--fonte-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.04em;
+}
+.valor-do-anel-cheio { font-size: 8.5px; }
 
 /* Windows e Linux desktop: ─ ☐ ✕ no fim da ilha da direita, depois de um divisor; fechar fica vermelho no hover. */
 .ilha-da-direita .controles-da-janela { gap: 2px; }
