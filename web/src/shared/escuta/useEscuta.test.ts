@@ -132,24 +132,24 @@ describe("useEscuta", () => {
     const { result } = renderHook(() => useEscuta(opcoes({ modoInvisivelAtivo: true }), sessao));
     await act(async () => undefined);
     expect(result.current).toMatchObject({
-      legenda: { frases: [], parcial: null },
+      legenda: { frases: [], emAndamento: null },
       motor: MOTOR,
       download: null,
       ultimaPerguntaEnviada: null,
-      preferenciasDaTela: { idioma: "portuguese", prioridadeDoMotor: "velocidade", aparencia: APARENCIA_PADRAO_DA_ESCUTA },
+      preferenciasDaTela: { idioma: "automatico", prioridadeDoMotor: "velocidade", aparencia: APARENCIA_PADRAO_DA_ESCUTA },
     });
 
-    act(() => result.current.mudarIdioma("automatico"));
+    act(() => result.current.mudarIdioma("portuguese"));
     act(() => result.current.mudarAparencia({ tamanhoDaFonte: 18, compacto: true }));
     await act(async () => {
       result.current.mudarPrioridadeDoMotor("precisao");
     });
     expect(result.current.preferenciasDaTela).toEqual({
-      idioma: "automatico",
+      idioma: "portuguese",
       prioridadeDoMotor: "precisao",
       aparencia: { tamanhoDaFonte: 18, opacidade: APARENCIA_PADRAO_DA_ESCUTA.opacidade, compacto: true },
     });
-    expect(preferencias()).toMatchObject({ idioma: "automatico", prioridadeDoMotor: "precisao" });
+    expect(preferencias()).toMatchObject({ idioma: "portuguese", prioridadeDoMotor: "precisao" });
   });
 
   it("as funções devolvidas são estáveis entre renders", () => {

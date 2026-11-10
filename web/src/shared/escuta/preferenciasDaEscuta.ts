@@ -28,6 +28,13 @@ export interface PreferenciasDaEscuta {
 
 export const CHAVE_DAS_PREFERENCIAS_DA_ESCUTA = "orquestrador.preferenciasDaEscuta";
 
+/**
+ * Versão do formato gravado. Na 2, o idioma padrão passou de português para o
+ * automático: dados sem versão (ou de versão anterior) podem ter "portuguese"
+ * só porque era o padrão, então o idioma deles é lido como o automático.
+ */
+export const VERSAO_DAS_PREFERENCIAS_DA_ESCUTA = 2;
+
 export const LIMITES_DO_TAMANHO_DA_FONTE = Object.freeze({ minimo: 12, maximo: 22 });
 export const LIMITES_DA_OPACIDADE = Object.freeze({ minimo: 0.4, maximo: 1 });
 
@@ -41,7 +48,7 @@ export const PREFERENCIAS_PADRAO_DA_ESCUTA: PreferenciasDaEscuta = Object.freeze
   automatico: true,
   automaticoManual: false,
   avisoVisto: false,
-  idioma: "portuguese",
+  idioma: "automatico",
   prioridadeDoMotor: "velocidade",
   aparencia: APARENCIA_PADRAO_DA_ESCUTA,
 });
@@ -85,7 +92,23 @@ function prioridadeValida(bruta: unknown): PrioridadeDoMotor {
   return bruta === "velocidade" || bruta === "precisao" ? bruta : PREFERENCIAS_PADRAO_DA_ESCUTA.prioridadeDoMotor;
 }
 
-/** Tolerante: JSON inválido, outro formato ou campo de outro tipo valem o padrão. */
+/** O idioma gravado vale só a partir da versão atual do formato; antes dela, vale o padrão (automático). */
+function idiomaDaVersao(registro: Record<string, unknown>): IdiomaDaEscuta {
+  const versao = registro.versao;
+  const atual = typeof versao === "number" && versao >= VERSAO_DAS_PREFERENCIAS_DA_ESCUTA;
+  return atual ? idiomaValido(registro.idioma) : PREFERENCIAS_PADRAO_DA_ESCUTA.idioma;
+}
+
+/** O texto gravado no localStorage: as preferências com a versão do formato. */
+export function serializarPreferenciasDaEscuta(preferencias: PreferenciasDaEscuta): string {
+  return JSON.stringify({ versao: VERSAO_DAS_PREFERENCIAS_DA_ESCUTA, ...preferencias });
+}
+
+/**
+ * Tolerante: JSON inválido, outro formato ou campo de outro tipo valem o
+ * padrão. Dados sem versão ou de versão anterior à atual mantêm as outras
+ * preferências, mas o idioma vira o automático (o padrão novo).
+ */
 export function interpretarPreferenciasDaEscuta(bruto: string | null): PreferenciasDaEscuta {
   if (bruto === null) return PREFERENCIAS_PADRAO_DA_ESCUTA;
   let lido: unknown;
@@ -106,7 +129,7 @@ export function interpretarPreferenciasDaEscuta(bruto: string | null): Preferenc
         : PREFERENCIAS_PADRAO_DA_ESCUTA.automaticoManual,
     avisoVisto:
       typeof registro.avisoVisto === "boolean" ? registro.avisoVisto : PREFERENCIAS_PADRAO_DA_ESCUTA.avisoVisto,
-    idioma: idiomaValido(registro.idioma),
+    idioma: idiomaDaVersao(registro),
     prioridadeDoMotor: prioridadeValida(registro.prioridadeDoMotor),
     aparencia:
       typeof aparencia === "object" && aparencia !== null && !Array.isArray(aparencia)
@@ -126,7 +149,7 @@ export const preferenciasNoNavegador: ArmazenamentoDasPreferencias = Object.free
   },
   gravar(preferencias: PreferenciasDaEscuta): void {
     try {
-      localStorage.setItem(CHAVE_DAS_PREFERENCIAS_DA_ESCUTA, JSON.stringify(preferencias));
+      localStorage.setItem(CHAVE_DAS_PREFERENCIAS_DA_ESCUTA, serializarPreferenciasDaEscuta(preferencias));
     } catch {
       // Sem localStorage gravável: vale só enquanto a tela estiver aberta.
     }

@@ -62,11 +62,9 @@ const escutaSimulada = vi.hoisted(() => ({
   erro: null as string | null,
   descartarErro: vi.fn(),
   ultimaPergunta: null as string | null,
-  legenda: { frases: [], parcial: null } as EscutaNaTela["legenda"],
+  legenda: { frases: [], emAndamento: null } as EscutaNaTela["legenda"],
   motor: null as EscutaNaTela["motor"],
   download: null as EscutaNaTela["download"],
-  compacto: false,
-  mudarAparencia: vi.fn(),
   mudarIdioma: vi.fn(),
   mudarPrioridadeDoMotor: vi.fn(),
 }));
@@ -103,11 +101,11 @@ vi.mock("../../shared/escuta/useEscuta", () => ({
       preferenciasDaTela: {
         idioma: "portuguese",
         prioridadeDoMotor: "velocidade",
-        aparencia: { tamanhoDaFonte: 14, opacidade: 0.92, compacto: escutaSimulada.compacto },
+        aparencia: { tamanhoDaFonte: 14, opacidade: 0.92, compacto: false },
       },
       mudarIdioma: escutaSimulada.mudarIdioma,
       mudarPrioridadeDoMotor: escutaSimulada.mudarPrioridadeDoMotor,
-      mudarAparencia: escutaSimulada.mudarAparencia,
+      mudarAparencia: () => undefined,
     };
   },
 }));
@@ -126,11 +124,9 @@ beforeEach(() => {
   escutaSimulada.erro = null;
   escutaSimulada.descartarErro = vi.fn();
   escutaSimulada.ultimaPergunta = null;
-  escutaSimulada.legenda = { frases: [], parcial: null };
+  escutaSimulada.legenda = { frases: [], emAndamento: null };
   escutaSimulada.motor = null;
   escutaSimulada.download = null;
-  escutaSimulada.compacto = false;
-  escutaSimulada.mudarAparencia = vi.fn();
   escutaSimulada.mudarIdioma = vi.fn();
   escutaSimulada.mudarPrioridadeDoMotor = vi.fn();
 });
@@ -141,6 +137,12 @@ function opcoesDaEscuta(): OpcoesDaEscuta {
     throw new Error("o chat não chamou o useEscuta");
   }
   return escutaSimulada.opcoes;
+}
+
+/** Uma frase fechada da legenda da escuta, começando no horário ISO dado. */
+function frase(id: string, texto: string, inicio: string, pergunta = false): EscutaNaTela["legenda"]["frases"][number] {
+  const inicioMs = Date.parse(inicio);
+  return { id, texto, inicioMs, fimMs: inicioMs + 2_000, pergunta };
 }
 
 function mensagem(
@@ -459,26 +461,24 @@ describe("ChatRapido · modo invisível", () => {
 
   describe("escuta do áudio", () => {
     const indicador = () => screen.queryByTestId("indicador-da-escuta");
-    const faixa = () => screen.queryByTestId("faixa-da-escuta");
 
-    it("o indicador aparece ao lado do 👁 com o modo ativo e some ao desligar; a faixa vem junto", () => {
+    it("o indicador aparece ao lado do 👁 com o modo ativo e some ao desligar; não há caixa à parte", () => {
       const { ativar, desativar } = ponteAtiva(undefined, true);
       renderizar();
       expect(indicador()).not.toBeInTheDocument();
-      expect(faixa()).not.toBeInTheDocument();
 
       ativar();
       const olho = screen.getByRole("button", { name: "Modo invisível" });
       expect(olho.nextElementSibling).toBe(indicador());
       expect(indicador()).toHaveTextContent("escutando");
-      expect(screen.getByTestId("chat-rapido")).toContainElement(faixa());
+      expect(screen.queryByTestId("painel-da-escuta")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("faixa-da-escuta")).not.toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Pausar a escuta" }));
       expect(escutaSimulada.pausar).toHaveBeenCalledTimes(1);
 
       desativar();
       expect(indicador()).not.toBeInTheDocument();
-      expect(faixa()).not.toBeInTheDocument();
     });
 
     it("o botão 🎧 liga a escuta fora do modo: avisa a ponte e só depois marca o estado", async () => {
@@ -506,7 +506,6 @@ describe("ChatRapido · modo invisível", () => {
       expect(opcoesDaEscuta().escutaManualLigada).toBe(true);
       expect(screen.getByRole("button", { name: "Escuta do áudio" })).toHaveAttribute("aria-pressed", "true");
       expect(indicador()).toBeInTheDocument();
-      expect(faixa()).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Escuta do áudio" }));
       await waitFor(() => expect(opcoesDaEscuta().escutaManualLigada).toBe(false));
@@ -520,48 +519,23 @@ describe("ChatRapido · modo invisível", () => {
       expect(screen.queryByRole("button", { name: "Escuta do áudio" })).not.toBeInTheDocument();
     });
 
-    it("os trechos ouvidos entram na conversa pelo horário, com a provisória no fim", () => {
-      escutaSimulada.trechos = [
-        { id: "t1", texto: "antes de tudo", inicioMs: Date.parse("2026-11-04T11:59:00Z"), fimMs: 0 },
-        { id: "t2", texto: "entre as mensagens", inicioMs: Date.parse("2026-11-04T12:00:30Z"), fimMs: 0 },
-      ];
-      escutaSimulada.linhaProvisoria = "dizendo agora";
-      renderizar({
-        ...OCIOSO,
-        mensagens: [
-          mensagem("u1", "usuario", { texto: "primeira", criadaEm: "2026-11-04T12:00:00Z" }),
-          mensagem("c1", "claude", { texto: "resposta", criadaEm: "2026-11-04T12:01:00Z" }),
-        ],
-      });
-
-      const secao = screen.getByRole("region", { name: "Conversa com o Claude" });
-      const texto = secao.textContent ?? "";
-      expect(texto.indexOf("antes de tudo")).toBeLessThan(texto.indexOf("primeira"));
-      expect(texto.indexOf("primeira")).toBeLessThan(texto.indexOf("entre as mensagens"));
-      expect(texto.indexOf("entre as mensagens")).toBeLessThan(texto.indexOf("resposta"));
-      expect(texto.indexOf("resposta")).toBeLessThan(texto.indexOf("dizendo agora"));
-      expect(screen.getByTestId("trecho-provisorio")).toHaveAttribute("aria-live", "polite");
-      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(2);
-    });
-
-    it("com trechos e sem mensagens, a conversa aparece; /clear limpa os trechos", async () => {
+    it("com frases ouvidas e sem mensagens, a conversa aparece; /clear limpa os trechos", async () => {
       vi.spyOn(api, "limparChat").mockResolvedValue(undefined as never);
-      escutaSimulada.trechos = [{ id: "t1", texto: "só áudio", inicioMs: 1, fimMs: 2 }];
+      escutaSimulada.legenda = { frases: [frase("f1", "só áudio", "2026-11-04T12:00:00Z")], emAndamento: null };
       const { campo } = renderizar();
-      expect(screen.getByText("só áudio")).toBeInTheDocument();
+      expect(screen.getByRole("region", { name: "Conversa com o Claude" })).toHaveTextContent("só áudio");
 
       fireEvent.change(campo, { target: { value: "/clear" } });
       fireEvent.keyDown(campo, { key: "Enter" });
       await waitFor(() => expect(escutaSimulada.limparTrechos).toHaveBeenCalled());
     });
 
-    it("sem a escuta disponível, o modo ativo não mostra indicador nem faixa", () => {
+    it("sem a escuta disponível, o modo ativo não mostra o indicador", () => {
       const { ativar } = ponteAtiva();
       renderizar();
       ativar();
       expect(opcoesDaEscuta().escutaDisponivel).toBe(false);
       expect(indicador()).not.toBeInTheDocument();
-      expect(faixa()).not.toBeInTheDocument();
     });
 
     it("na primeira vez, o aviso aparece dentro do chat e só o botão liga a escuta", () => {
@@ -628,148 +602,195 @@ describe("ChatRapido · modo invisível", () => {
     });
   });
 
-  describe("painel da escuta", () => {
-    const painel = () => screen.queryByTestId("painel-da-escuta");
+  describe("escuta na conversa", () => {
     const indicador = () => screen.getByTestId("indicador-da-escuta");
+    const conversa = () => screen.getByRole("region", { name: "Conversa com o Claude" });
+    const DUAS_MENSAGENS: EstadoDoChatNaTela = {
+      ...OCIOSO,
+      mensagens: [
+        mensagem("u1", "usuario", { texto: "primeira", criadaEm: "2026-11-04T12:00:00Z" }),
+        mensagem("c1", "claude", { texto: "resposta", criadaEm: "2026-11-04T12:01:00Z" }),
+      ],
+    };
 
-    it("aparece acima do campo com a legenda; o parcial fica só nele, não na conversa", () => {
+    it("cada frase fechada vira um balão \"ouvido\", intercalado com as mensagens pelo horário", () => {
       escutaSimulada.legenda = {
-        frases: [{ id: "f1", texto: "Bom dia a todos.", inicioMs: 1, fimMs: 2, pergunta: false }],
-        parcial: "dizendo agora",
+        frases: [
+          frase("f1", "antes de tudo", "2026-11-04T11:59:00Z"),
+          frase("f2", "entre as mensagens", "2026-11-04T12:00:30Z"),
+          frase("f3", "depois de tudo", "2026-11-04T12:02:00Z"),
+        ],
+        emAndamento: null,
       };
-      escutaSimulada.trechos = [{ id: "t1", texto: "Bom dia a todos.", inicioMs: 1, fimMs: 2 }];
-      escutaSimulada.linhaProvisoria = "dizendo agora";
-      const { ativar, desativar } = ponteAtiva(undefined, true);
-      renderizar();
-      expect(painel()).not.toBeInTheDocument();
-      // Sem o painel, o parcial aparece na conversa.
-      expect(screen.getByTestId("trecho-provisorio")).toHaveTextContent("dizendo agora");
+      renderizar(DUAS_MENSAGENS);
 
-      ativar();
-      const elemento = painel() as HTMLElement;
-      expect(screen.getByTestId("chat-rapido")).toContainElement(elemento);
-      expect(
-        elemento.compareDocumentPosition(screen.getByTestId("composer-do-chat")) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy();
-      expect(within(elemento).getByText("dizendo agora")).toHaveClass("legenda-parcial");
-      expect(within(elemento).getByText("Bom dia a todos.")).toBeInTheDocument();
-      expect(within(elemento).getByTestId("faixa-da-escuta")).toBeInTheDocument();
-      // A fala confirmada continua na conversa; o parcial, não.
+      const baloes = screen.getAllByTestId("trecho-ouvido");
+      expect(baloes).toHaveLength(3);
+      for (const balao of baloes) {
+        expect(balao).toHaveClass("trecho-ouvido");
+        expect(within(balao).getByText("ouvido")).toBeInTheDocument();
+      }
+      const texto = conversa().textContent ?? "";
+      expect(texto.indexOf("antes de tudo")).toBeLessThan(texto.indexOf("primeira"));
+      expect(texto.indexOf("primeira")).toBeLessThan(texto.indexOf("entre as mensagens"));
+      expect(texto.indexOf("entre as mensagens")).toBeLessThan(texto.indexOf("resposta"));
+      expect(texto.indexOf("resposta")).toBeLessThan(texto.indexOf("depois de tudo"));
       expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
+    });
+
+    it("a frase com pergunta ganha a marca \"pergunta\" e o destaque; as outras, não", () => {
+      escutaSimulada.legenda = {
+        frases: [
+          frase("f1", "Bom dia a todos.", "2026-11-04T12:00:00Z"),
+          frase("f2", "Qual o prazo do projeto?", "2026-11-04T12:00:05Z", true),
+        ],
+        emAndamento: null,
+      };
+      renderizar();
+
+      const [comum, pergunta] = screen.getAllByTestId("trecho-ouvido");
+      expect(pergunta).toHaveClass("trecho-ouvido-pergunta");
+      expect(pergunta).toHaveTextContent("Qual o prazo do projeto?");
+      expect(within(pergunta as HTMLElement).getByRole("img", { name: "Pergunta detectada na escuta" })).toHaveTextContent(
+        "pergunta",
+      );
+      expect(comum).not.toHaveClass("trecho-ouvido-pergunta");
+      expect(within(comum as HTMLElement).queryByRole("img")).not.toBeInTheDocument();
+    });
+
+    it("a frase em andamento fica num balão provisório no fim: o confirmado no tom normal e o parcial apagado", () => {
+      escutaSimulada.legenda = {
+        frases: [frase("f1", "Bom dia a todos.", "2026-11-04T12:02:00Z")],
+        emAndamento: { confirmado: "vamos falar do", parcial: "orçamento de", inicioMs: Date.parse("2026-11-04T12:02:03Z") },
+      };
+      renderizar(DUAS_MENSAGENS);
+
+      const provisorio = screen.getByTestId("trecho-provisorio");
+      expect(provisorio).toHaveAttribute("aria-live", "polite");
+      expect(provisorio).toHaveClass("trecho-ouvido", "trecho-ouvido-provisorio");
+      expect(within(provisorio).getByText("vamos falar do")).toHaveClass("trecho-ouvido-confirmado");
+      expect(within(provisorio).getByText("orçamento de")).toHaveClass("trecho-ouvido-parcial");
+      expect(provisorio).toHaveTextContent("vamos falar do orçamento de");
+      // Fica no fim da conversa, depois das mensagens e das frases fechadas.
+      expect(provisorio.nextElementSibling).toBeNull();
+      const texto = conversa().textContent ?? "";
+      expect(texto.indexOf("resposta")).toBeLessThan(texto.indexOf("Bom dia a todos."));
+      expect(texto.indexOf("Bom dia a todos.")).toBeLessThan(texto.indexOf("vamos falar do"));
+      // A frase em andamento não é um balão fechado.
       expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(1);
-
-      desativar();
-      expect(painel()).not.toBeInTheDocument();
     });
 
-    it("também com o 🎧, fora do modo invisível", async () => {
-      const { modoInvisivel } = ponteAtiva(undefined, true);
-      Object.assign(modoInvisivel, { definirEscutaLigada: vi.fn().mockResolvedValue(undefined) });
-      renderizar();
-      expect(painel()).not.toBeInTheDocument();
+    it("em andamento só com o parcial, o balão mostra só a cauda; sem texto, não aparece", () => {
+      escutaSimulada.legenda = { frases: [], emAndamento: { confirmado: "", parcial: "dizendo", inicioMs: 1 } };
+      const { rerender } = renderizar();
+      const provisorio = screen.getByTestId("trecho-provisorio");
+      expect(within(provisorio).getByText("dizendo")).toHaveClass("trecho-ouvido-parcial");
+      expect(provisorio.querySelector(".trecho-ouvido-confirmado")).toBeNull();
 
-      fireEvent.click(screen.getByRole("button", { name: "Escuta do áudio" }));
-      await waitFor(() => expect(painel()).toBeInTheDocument());
+      escutaSimulada.legenda = { frases: [], emAndamento: { confirmado: "  ", parcial: "", inicioMs: 1 } };
+      rerender({ ...OCIOSO });
+      expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
     });
 
-    it("não aparece enquanto o aviso da primeira vez está na tela", () => {
-      escutaSimulada.situacaoNoModo = "aguardando-aviso";
+    it("a rolagem acompanha os balões novos e a frase em andamento", () => {
+      const { rerender } = renderizar(DUAS_MENSAGENS);
+      const rolagem = conversa().querySelector(".mensagens-do-chat") as HTMLElement;
+      let topo = 0;
+      Object.defineProperty(rolagem, "scrollHeight", { configurable: true, get: () => 900 });
+      Object.defineProperty(rolagem, "scrollTop", {
+        configurable: true,
+        get: () => topo,
+        set: (valor: number) => {
+          topo = valor;
+        },
+      });
+
+      const frases = [frase("f1", "nova frase", "2026-11-04T12:02:00Z")];
+      escutaSimulada.legenda = { frases, emAndamento: null };
+      rerender({ ...DUAS_MENSAGENS });
+      expect(topo).toBe(900);
+
+      topo = 0;
+      escutaSimulada.legenda = { frases, emAndamento: { confirmado: "e agora", parcial: "mais", inicioMs: 1 } };
+      rerender({ ...DUAS_MENSAGENS });
+      expect(topo).toBe(900);
+    });
+
+    it("sem caixa nem cartão: a resposta à pergunta da escuta aparece só como mensagem do chat", () => {
+      escutaSimulada.legenda = {
+        frases: [frase("f1", "Qual a complexidade?", "2026-11-04T11:59:58Z", true)],
+        emAndamento: null,
+      };
+      escutaSimulada.ultimaPergunta = "Qual a complexidade?";
       const { ativar } = ponteAtiva(undefined, true);
-      renderizar();
-      ativar();
-      expect(screen.getByRole("dialog", { name: "Escutar o áudio do computador?" })).toBeInTheDocument();
-      expect(painel()).not.toBeInTheDocument();
-    });
-
-    it("a aparência vai para a escuta", () => {
-      const { ativar } = ponteAtiva(undefined, true);
-      renderizar();
+      renderizar({
+        ...OCIOSO,
+        mensagens: [
+          mensagem("u1", "usuario", { texto: "Qual a complexidade?", origem: "escuta", criadaEm: "2026-11-04T12:00:00Z" }),
+          mensagem("c1", "claude", { texto: "O(n log n) no pior caso", criadaEm: "2026-11-04T12:00:05Z" }),
+        ],
+      });
       ativar();
 
-      fireEvent.click(screen.getByRole("button", { name: "Aumentar a fonte" }));
-      expect(escutaSimulada.mudarAparencia).toHaveBeenLastCalledWith({ tamanhoDaFonte: 15, opacidade: 0.92, compacto: false });
-      fireEvent.click(screen.getByRole("button", { name: "Compactar a escuta" }));
-      expect(escutaSimulada.mudarAparencia).toHaveBeenLastCalledWith({ tamanhoDaFonte: 14, opacidade: 0.92, compacto: true });
+      expect(screen.queryByTestId("painel-da-escuta")).not.toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Escuta ao vivo" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Resposta da escuta" })).not.toBeInTheDocument();
+      expect(screen.queryByText("última pergunta")).not.toBeInTheDocument();
+      expect(screen.getAllByText("O(n log n) no pior caso")).toHaveLength(1);
+      // A pergunta ouvida fica destacada no balão, antes da pergunta que a escuta mandou.
+      const texto = conversa().textContent ?? "";
+      expect(texto.indexOf("pergunta")).toBeLessThan(texto.indexOf("O(n log n)"));
+      expect(screen.getByTestId("trecho-ouvido")).toHaveClass("trecho-ouvido-pergunta");
     });
 
-    it("o erro aparece no painel e o fechar o descarta", () => {
-      escutaSimulada.situacaoNoModo = "erro";
-      escutaSimulada.erro = "a captura do áudio parou";
-      const { ativar } = ponteAtiva(undefined, true);
-      renderizar();
-      ativar();
-
-      const alerta = within(painel() as HTMLElement).getByRole("alert");
-      expect(alerta).toHaveTextContent("a captura do áudio parou");
-      fireEvent.click(within(alerta).getByRole("button", { name: "fechar" }));
-      expect(escutaSimulada.descartarErro).toHaveBeenCalledTimes(1);
-    });
-
-    it("no pé do painel: a chave Automático e os ajustes de idioma e motor", () => {
+    it("o menu do indicador tem o Automático, o idioma e a prioridade, e chama a escuta sem levar o foco ao campo", () => {
       escutaSimulada.automatico = false;
       const { ativar } = ponteAtiva(undefined, true);
-      renderizar();
+      const { campo } = renderizar();
       ativar();
-      const pe = within(screen.getByTestId("faixa-da-escuta"));
 
-      const chave = pe.getByRole("switch", { name: "Automático" });
+      fireEvent.click(within(indicador()).getByRole("button", { name: "Controles da escuta" }));
+      const menu = within(screen.getByRole("group", { name: "Controles da escuta" }));
+      const chave = menu.getByRole("switch", { name: "Automático" });
       expect(chave).toHaveAttribute("aria-checked", "false");
       fireEvent.click(chave);
       expect(escutaSimulada.alternarAutomatico).toHaveBeenCalledTimes(1);
 
-      fireEvent.click(pe.getByRole("button", { name: "Ajustes da escuta" }));
-      const ajustes = within(screen.getByRole("group", { name: "Ajustes da escuta" }));
-      expect(ajustes.getByRole("radio", { name: "Português" })).toBeChecked();
-      expect(ajustes.getByRole("radio", { name: "Velocidade" })).toBeChecked();
-      fireEvent.click(ajustes.getByRole("radio", { name: "Automático" }));
+      expect(menu.getByRole("radio", { name: "Português" })).toBeChecked();
+      expect(menu.getByRole("radio", { name: "Velocidade" })).toBeChecked();
+      fireEvent.click(menu.getByRole("radio", { name: "Automático" }));
       expect(escutaSimulada.mudarIdioma).toHaveBeenCalledWith("automatico");
-      fireEvent.click(ajustes.getByRole("radio", { name: "Precisão" }));
+      fireEvent.click(menu.getByRole("radio", { name: "Precisão" }));
       expect(escutaSimulada.mudarPrioridadeDoMotor).toHaveBeenCalledWith("precisao");
+      expect(campo).not.toHaveFocus();
     });
 
-    it("o cartão mostra a resposta à última pergunta da escuta, vinda das mensagens", () => {
+    it("o erro da escuta aparece numa linha acima do campo e o fechar o descarta", () => {
+      escutaSimulada.situacaoNoModo = "erro";
+      escutaSimulada.erro = "a captura do áudio parou";
       const { ativar } = ponteAtiva(undefined, true);
-      const pergunta = mensagem("u1", "usuario", { texto: "Qual a complexidade?", origem: "escuta" });
-      const { rerender } = renderizar({
-        ...OCIOSO,
-        situacao: "respondendo",
-        mensagens: [pergunta, mensagem("c1", "claude", { situacao: "respondendo", texto: "" })],
-      });
+      renderizar();
+      // Com a escuta desligada, nada dela aparece.
+      expect(screen.queryByTestId("erro-da-escuta")).not.toBeInTheDocument();
+
       ativar();
-
-      const cartao = () => screen.getByRole("region", { name: "Resposta da escuta" });
-      expect(cartao()).toHaveAttribute("aria-busy", "true");
-      expect(within(cartao()).getByText("Qual a complexidade?")).toBeInTheDocument();
-      expect(within(cartao()).getByRole("status")).toHaveTextContent("preparando a resposta…");
-
-      rerender({
-        ...OCIOSO,
-        mensagens: [pergunta, mensagem("c1", "claude", { texto: "- O(n log n) no pior caso" })],
-      });
-      expect(cartao()).toHaveAttribute("aria-busy", "false");
-      expect(within(cartao()).getByRole("listitem")).toHaveTextContent("O(n log n) no pior caso");
+      const alerta = screen.getByTestId("erro-da-escuta");
+      expect(alerta).toHaveAttribute("role", "alert");
+      expect(alerta).toHaveTextContent("a captura do áudio parou");
+      expect(screen.getByTestId("chat-rapido")).toContainElement(alerta);
+      expect(
+        alerta.compareDocumentPosition(screen.getByTestId("composer-do-chat")) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      fireEvent.click(within(alerta).getByRole("button", { name: "fechar" }));
+      expect(escutaSimulada.descartarErro).toHaveBeenCalledTimes(1);
     });
 
-    it("a última pergunta sai da faixa quando o cartão já a mostra; a posta no campo continua", () => {
-      escutaSimulada.ultimaPergunta = "Qual a complexidade?";
+    it("sem erro, não há aviso da escuta", () => {
       const { ativar } = ponteAtiva(undefined, true);
-      const conversa: EstadoDoChatNaTela = {
-        ...OCIOSO,
-        mensagens: [
-          mensagem("u1", "usuario", { texto: "Qual a complexidade?", origem: "escuta" }),
-          mensagem("c1", "claude", { texto: "O(n)." }),
-        ],
-      };
-      const { rerender } = renderizar(conversa);
+      renderizar();
       ativar();
-      expect(within(screen.getByTestId("faixa-da-escuta")).queryByText("última pergunta")).not.toBeInTheDocument();
-
-      escutaSimulada.ultimaPergunta = "E o espaço?";
-      rerender({ ...conversa });
-      expect(within(screen.getByTestId("faixa-da-escuta")).getByText("E o espaço?", { exact: false })).toHaveAttribute(
-        "title",
-        "E o espaço?",
-      );
+      expect(screen.queryByTestId("erro-da-escuta")).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
 
     it("o indicador mostra o selo do motor e o download com o total real", () => {
@@ -782,8 +803,6 @@ describe("ChatRapido · modo invisível", () => {
 
       expect(within(indicador()).getByText("baixando o modelo 45% de 199 MB")).toBeInTheDocument();
       expect(within(indicador()).getByTestId("selo-do-motor")).toHaveTextContent("GPU · base · q4");
-      // O painel mostra o mesmo download, na barra dele.
-      expect(within(painel() as HTMLElement).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "45");
     });
   });
 });

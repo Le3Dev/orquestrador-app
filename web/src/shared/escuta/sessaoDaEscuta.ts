@@ -75,7 +75,12 @@ export interface EstadoDaEscuta {
   readonly automatico: boolean;
   readonly erro: string | null;
   readonly ultimaPergunta: string | null;
-  readonly legenda: { readonly frases: readonly FraseDaLegenda[]; readonly parcial: string | null };
+  readonly legenda: {
+    /** Só as frases já FECHADAS, da mais antiga à mais nova (máx. 200). */
+    readonly frases: readonly FraseDaLegenda[];
+    /** A frase aberta da fala atual: o texto já confirmado e a cauda ainda não confirmada; null sem frase aberta. */
+    readonly emAndamento: { readonly confirmado: string; readonly parcial: string; readonly inicioMs: number } | null;
+  };
   readonly motor: { readonly dispositivo: "webgpu" | "dml" | "cpu" | "wasm"; readonly modelo: string; readonly precisao: string; readonly nativo: boolean } | null;
   readonly download: { readonly progresso: number; readonly totalMb: number | null } | null;
   readonly ultimaPerguntaEnviada: { readonly pergunta: string; readonly enviadaEmMs: number } | null;
@@ -140,11 +145,17 @@ interface FalaEmAndamento {
   fimDaUltimaPassadaMs: number;
 }
 
-const LEGENDA_VAZIA: EstadoDaEscuta["legenda"] = Object.freeze({ frases: Object.freeze([]), parcial: null });
+const LEGENDA_VAZIA: EstadoDaEscuta["legenda"] = Object.freeze({ frases: Object.freeze([]), emAndamento: null });
 
 const msParaAmostras = (ms: number): number => Math.max(0, Math.round((ms * TAXA_DE_AMOSTRAGEM) / 1000));
 
 const limparTexto = (texto: string): string => texto.replace(/\s+/g, " ").trim();
+
+/** O texto sem a palavra (ou frase) `fim` no final, quando termina nela. */
+function semNoFim(texto: string, fim: string): string {
+  if (texto === fim) return "";
+  return texto.endsWith(` ${fim}`) ? texto.slice(0, texto.length - fim.length).trimEnd() : texto;
+}
 
 function mensagemDe(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro);
@@ -202,10 +213,11 @@ export function controleSemPendente(
  * A escuta do áudio do computador em tempo real: captura (pedaços de 100 ms)
  * → VAD Silero → cortador de fala → buffer da fala → motor de transcrição
  * (passadas parciais a cada ~1 s de áudio novo e uma final no fim da fala) →
- * confirmador por concordância → legenda (frases confirmadas e parcial),
- * janela de transcrição e trechos da conversa → (com o automático) detector
- * de pergunta, a cada frase que fecha → atalho do sinal forte ou classificação
- * no servidor → controle de disparos → chat rápido.
+ * confirmador por concordância → legenda (frases fechadas por pontuação, fim
+ * da fala ou a cada 5 s, e a frase em andamento), janela de transcrição e
+ * trechos da conversa → (com o automático) detector de pergunta, a cada frase
+ * que fecha (sozinha ou junto com a anterior cortada por tempo) → atalho do
+ * sinal forte ou classificação no servidor → controle de disparos → chat rápido.
  *
  * Vive fora do React (há uma instância do módulo, `sessaoDaEscuta`), para
  * sobreviver à remontagem do chat rápido; a tela a observa por `assinar` e
@@ -399,10 +411,15 @@ export class SessaoDaEscuta {
     this.emitir();
   };
 
-  /** Esquece os trechos da conversa (a tela chama no /clear). A janela de 2 min e a legenda não mudam. */
+  /**
+   * Esquece os trechos da conversa e as frases fechadas da legenda (a tela
+   * chama no /clear). A janela de 2 min e a frase em andamento não mudam.
+   */
   readonly limparTrechos = (): void => {
-    if (this.trechosNaTela.length === 0) return;
-    this.trechosNaTela = Object.freeze([]);
+    const legenda = this.legenda.semFrases();
+    if (this.trechosNaTela.length === 0 && legenda === this.legenda) return;
+    if (this.trechosNaTela.length > 0) this.trechosNaTela = Object.freeze([]);
+    this.trocarLegenda(legenda);
     this.emitir();
   };
 
@@ -768,9 +785,11 @@ export class SessaoDaEscuta {
   // ---- Frases → pergunta ----
 
   /**
-   * Cada frase que fecha entra na janela de transcrição e, com o automático,
-   * é avaliada na hora (sem esperar o fim da fala): com o sinal forte vira
-   * pergunta direto; senão, se for candidata, vai ao servidor.
+   * Cada frase que fecha (por pontuação, fim da fala ou a cada 5 s) entra na
+   * janela de transcrição e, com o automático, é avaliada na hora (sem esperar
+   * o fim da fala): com o sinal forte vira pergunta direto; senão, se for
+   * candidata, vai ao servidor. A que não é candidata sozinha ainda pode ser
+   * o fim de uma pergunta partida pelo corte de tempo (`avaliarJuncao`).
    */
   private aoFecharFrases(frases: readonly FraseDaLegenda[]): void {
     for (const frase of frases) {
@@ -786,10 +805,31 @@ export class SessaoDaEscuta {
       this.trocarJanela(this.janela.com(trecho).semAntigos(this.dependencias.agora()));
       if (!this.automaticoAtual()) continue;
       const avaliacao = DetectorDePergunta.avaliar(frase.texto);
-      if (!avaliacao.candidata) continue;
-      if (avaliacao.sinalForte) this.perguntaDetectada(frase.texto, frase.id);
-      else this.pedirClassificacao({ trecho: frase.texto, contexto: contextoAnterior, idDaFrase: frase.id });
+      if (avaliacao.candidata) this.seguirCandidata(frase.texto, contextoAnterior, frase.id, avaliacao.sinalForte);
+      else this.avaliarJuncao(frase, contextoAnterior);
     }
+  }
+
+  /** Candidata com o sinal forte vira pergunta direto; sem ele, vai à classificação no servidor. */
+  private seguirCandidata(texto: string, contexto: string, idDaFrase: string, sinalForte: boolean): void {
+    if (sinalForte) this.perguntaDetectada(texto, idDaFrase);
+    else this.pedirClassificacao({ trecho: texto, contexto, idDaFrase });
+  }
+
+  /**
+   * Pergunta partida ao meio pelo corte de 5 s: a frase que não é candidata
+   * sozinha é avaliada junto com a anterior, se a anterior fechou por tempo e
+   * não foi pergunta. Sendo candidata, a pergunta é o texto junto, e a frase
+   * marcada é a atual. O contexto é o que veio antes da anterior.
+   */
+  private avaliarJuncao(frase: FraseDaLegenda, contextoAnterior: string): void {
+    const anterior = this.legenda.fraseAnterior(frase.id);
+    if (anterior === null || anterior.motivo !== "tempo" || anterior.pergunta) return;
+    if (DetectorDePergunta.ehAlucinacaoConhecida(anterior.texto)) return;
+    const juntas = `${anterior.texto} ${frase.texto}`;
+    const avaliacao = DetectorDePergunta.avaliar(juntas);
+    if (!avaliacao.candidata) return;
+    this.seguirCandidata(juntas, semNoFim(contextoAnterior, anterior.texto), frase.id, avaliacao.sinalForte);
   }
 
   /** Marca a frase na legenda e leva a pergunta ao controle de disparos. */
@@ -985,9 +1025,9 @@ export class SessaoDaEscuta {
     if (legenda === this.legenda) return;
     this.legenda = legenda;
     this.legendaNaTela =
-      legenda.frases.length === 0 && legenda.parcial === null
+      legenda.frases.length === 0 && legenda.emAndamento === null
         ? LEGENDA_VAZIA
-        : Object.freeze({ frases: legenda.frases, parcial: legenda.parcial });
+        : Object.freeze({ frases: legenda.frases, emAndamento: legenda.emAndamento });
   }
 
   private guardarPreferencias(preferencias: PreferenciasDaEscuta): void {

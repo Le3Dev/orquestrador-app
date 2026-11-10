@@ -22,7 +22,7 @@ import type {
 } from "../../shared/api/tipos";
 import { comandoDoPrompt, completarComando, dicaDeComando } from "../../shared/comandosDoPrompt";
 import { juntarDitado } from "../../shared/ditado/texto";
-import { type TrechoNaTela, useEscuta } from "../../shared/escuta/useEscuta";
+import { type EscutaNaTela, useEscuta } from "../../shared/escuta/useEscuta";
 import {
   type EstadoDoChatNaTela,
   type MensagemDoChatNaTela,
@@ -51,8 +51,6 @@ import {
 } from "../../shared/imagens";
 import type { CapturaDeTela } from "../../shared/ponteDoDesktop";
 import { BotaoDeDitado } from "../BotaoDeDitado";
-import { PainelDaEscuta } from "../escuta/PainelDaEscuta";
-import { painelVisivel, ultimaPerguntaForaDoCartao, visaoDaEscuta } from "../escuta/visaoDaEscuta";
 import { AvisoDaMelhoria, BotaoDeMelhorar } from "../MelhoriaDoPrompt";
 import { TextoFormatado } from "../TextoFormatado";
 import { AvisoDaEscuta } from "./AvisoDaEscuta";
@@ -60,7 +58,6 @@ import { CartaoDeAcao, type PropsDasAcoesDoChat } from "./CartaoDeAcao";
 import { CartaoDeAutorizacao } from "./CartaoDeAutorizacao";
 import { CartaoDePergunta } from "./CartaoDePergunta";
 import { CartaoDeSubagente } from "./CartaoDeSubagente";
-import { FaixaDaEscuta } from "./FaixaDaEscuta";
 import { IndicadorDaEscuta } from "./IndicadorDaEscuta";
 import { SeletorDeModelo } from "./SeletorDeModelo";
 import "../../theme/chat-lateral.css";
@@ -70,6 +67,9 @@ const ALTURA_MAXIMA_DO_CAMPO = 140;
 const SEM_ORQUESTRADORES: readonly ResumoDoOrquestrador[] = [];
 /** Distância do fim (px) em que a conversa ainda acompanha o texto que chega. */
 const MARGEM_DE_ACOMPANHAMENTO = 80;
+
+/** Uma frase fechada da escuta: vira um balão "ouvido" na conversa. */
+type FraseOuvida = EscutaNaTela["legenda"]["frases"][number];
 
 interface Props extends PropsDasAcoesDoChat {
   chat: EstadoDoChatNaTela;
@@ -532,9 +532,12 @@ function assinaturaDaUltima(chat: EstadoDoChatNaTela): string {
  * de largura.
  *
  * No modo invisível (com a escuta disponível), o áudio do computador é
- * escutado: o indicador fica ao lado do 👁, a faixa da transcrição acima do
- * composer e o aviso da primeira vez dentro do chat. As perguntas da escuta
- * levam o selo "escuta"; com alterações autorizadas, vão para o campo.
+ * escutado: a transcrição entra na própria conversa (um balão "ouvido" por
+ * frase, a pergunta destacada, e a frase em andamento num balão provisório no
+ * fim); o indicador fica ao lado do 👁 e abre o menu da escuta (Automático,
+ * idioma e prioridade do motor); o aviso da primeira vez e o erro ficam
+ * dentro do chat. As perguntas da escuta levam o selo "escuta"; com
+ * alterações autorizadas, vão para o campo.
  */
 export function ChatRapido({
   chat,
@@ -770,7 +773,7 @@ export function ChatRapido({
   /**
    * Com alterações autorizadas, a pergunta da escuta só vai para o campo: o usuário confere e aperta Enter.
    * Não apaga um rascunho digitado: só troca o campo vazio ou o que a própria escuta pôs ali
-   * (a pergunta segue visível na faixa como "última pergunta").
+   * (a pergunta segue destacada no balão "ouvido" da conversa).
    */
   const preencherComposerDaEscuta = useCallback((pergunta: string): void => {
     const atual = composerAtual.current;
@@ -800,67 +803,64 @@ export function ChatRapido({
     preencherComposer: preencherComposerDaEscuta,
   });
   const comEscuta = escutaDisponivel && (modoAtivo || escutaManualLigada);
-  // O painel da escuta (legenda ao vivo e cartão da resposta), acima do campo, com a escuta ligada.
-  const comPainel = comEscuta && painelVisivel(escuta.situacao);
-  const visao = useMemo(
-    () =>
-      visaoDaEscuta(
-        {
-          situacao: escuta.situacao,
-          progressoDoDownload: escuta.progressoDoDownload,
-          erro: escuta.erro,
-          legenda: escuta.legenda,
-          motor: escuta.motor,
-          download: escuta.download,
-        },
-        chat.mensagens,
-      ),
-    [
-      escuta.situacao,
-      escuta.progressoDoDownload,
-      escuta.erro,
-      escuta.legenda,
-      escuta.motor,
-      escuta.download,
-      chat.mensagens,
-    ],
-  );
-  const aparenciaDaEscuta = escuta.preferenciasDaTela.aparencia;
 
-  // A transcrição entra na conversa, intercalada com as mensagens pelo horário. O parcial (o que
-  // está sendo dito agora) fica só no painel quando ele está à vista: na conversa ele duplicaria a
-  // legenda e a faria pular a cada atualização; ali entram só as falas confirmadas.
-  const linhaProvisoriaNaConversa = comPainel ? null : escuta.linhaProvisoria;
-  const temOuvido = escuta.trechos.length > 0 || linhaProvisoriaNaConversa !== null;
-  const { trechosAntes, trechosNoFim } = useMemo(() => {
-    const antes = new Map<string, TrechoNaTela[]>();
-    const noFim: TrechoNaTela[] = [];
+  // A escuta é parte da conversa: cada frase fechada vira um balão "ouvido", intercalado com as
+  // mensagens pelo horário, e a frase em andamento fica num balão provisório no fim.
+  const frasesOuvidas = escuta.legenda.frases;
+  const emAndamento = escuta.legenda.emAndamento;
+  const confirmadoEmAndamento = emAndamento?.confirmado.trim() ?? "";
+  const parcialEmAndamento = emAndamento?.parcial.trim() ?? "";
+  const comFraseEmAndamento = confirmadoEmAndamento !== "" || parcialEmAndamento !== "";
+  const temOuvido = frasesOuvidas.length > 0 || comFraseEmAndamento;
+  const { frasesAntes, frasesNoFim } = useMemo(() => {
+    const antes = new Map<string, FraseOuvida[]>();
+    const noFim: FraseOuvida[] = [];
     const horarios = chat.mensagens.map((mensagem) => Date.parse(mensagem.criadaEm));
-    for (const trecho of escuta.trechos) {
-      const indice = horarios.findIndex((horario) => horario > trecho.inicioMs);
+    for (const frase of frasesOuvidas) {
+      const indice = horarios.findIndex((horario) => horario > frase.inicioMs);
       const id = indice === -1 ? undefined : chat.mensagens[indice]?.id;
       if (id === undefined) {
-        noFim.push(trecho);
+        noFim.push(frase);
       } else {
-        antes.set(id, [...(antes.get(id) ?? []), trecho]);
+        antes.set(id, [...(antes.get(id) ?? []), frase]);
       }
     }
-    return { trechosAntes: antes, trechosNoFim: noFim };
-  }, [chat.mensagens, escuta.trechos]);
-  const blocoOuvido = (trecho: TrechoNaTela) => (
-    <p key={trecho.id} className="trecho-ouvido" data-testid="trecho-ouvido">
-      <span className="rotulo-tecnico">ouvido</span>
-      <span className="trecho-ouvido-texto">{trecho.texto}</span>
+    return { frasesAntes: antes, frasesNoFim: noFim };
+  }, [chat.mensagens, frasesOuvidas]);
+  const balaoOuvido = (frase: FraseOuvida) => (
+    <p
+      key={frase.id}
+      className={frase.pergunta ? "trecho-ouvido trecho-ouvido-pergunta" : "trecho-ouvido"}
+      data-testid="trecho-ouvido"
+    >
+      <span className="rotulos-do-trecho-ouvido">
+        <span className="rotulo-tecnico">ouvido</span>
+        {frase.pergunta && (
+          <span className="marca-da-pergunta-ouvida" role="img" aria-label="Pergunta detectada na escuta">
+            pergunta
+          </span>
+        )}
+      </span>
+      <span className="trecho-ouvido-texto">{frase.texto}</span>
     </p>
   );
 
-  // Acompanha o fim enquanto chega texto, a menos que o usuário tenha rolado para cima.
+  // Acompanha o fim enquanto chega texto (das respostas e da escuta), a menos que o usuário tenha rolado para cima.
   useEffect(() => {
     const elemento = rolagem.current;
     if (elemento !== null && acompanhando.current) {
       elemento.scrollTop = elemento.scrollHeight;
     }
-  }, [chat.mensagens.length, ultima?.texto, ultima?.situacao, chat.atividade, oculta, escuta.trechos.length, linhaProvisoriaNaConversa]);
+  }, [
+    chat.mensagens.length,
+    ultima?.texto,
+    ultima?.situacao,
+    chat.atividade,
+    oculta,
+    frasesOuvidas,
+    confirmadoEmAndamento,
+    parcialEmAndamento,
+  ]);
 
   async function enviar(): Promise<void> {
     // "/clear" é um comando, não uma pergunta.
@@ -1108,7 +1108,7 @@ export function ChatRapido({
             )}
             {chat.mensagens.map((mensagem, indice) => (
               <Fragment key={mensagem.id}>
-                {(trechosAntes.get(mensagem.id) ?? []).map(blocoOuvido)}
+                {(frasesAntes.get(mensagem.id) ?? []).map(balaoOuvido)}
                 <MensagemNaConversa
                   mensagem={mensagem}
                   atividade={mensagem.situacao === "respondendo" ? chat.atividade : null}
@@ -1140,11 +1140,15 @@ export function ChatRapido({
                 )}
               </Fragment>
             ))}
-            {trechosNoFim.map(blocoOuvido)}
-            {linhaProvisoriaNaConversa !== null && (
+            {frasesNoFim.map(balaoOuvido)}
+            {comFraseEmAndamento && (
               <p className="trecho-ouvido trecho-ouvido-provisorio" aria-live="polite" data-testid="trecho-provisorio">
                 <span className="rotulo-tecnico">ouvindo</span>
-                <span className="trecho-ouvido-texto">{linhaProvisoriaNaConversa}</span>
+                <span className="trecho-ouvido-texto">
+                  {confirmadoEmAndamento !== "" && <span className="trecho-ouvido-confirmado">{confirmadoEmAndamento}</span>}
+                  {confirmadoEmAndamento !== "" && parcialEmAndamento !== "" && " "}
+                  {parcialEmAndamento !== "" && <span className="trecho-ouvido-parcial">{parcialEmAndamento}</span>}
+                </span>
               </p>
             )}
           </div>
@@ -1178,27 +1182,14 @@ export function ChatRapido({
       {comEscuta && escuta.precisaDoAviso && (
         <AvisoDaEscuta aoConfirmar={escuta.confirmarAviso} aoRecusar={escuta.recusarAviso} />
       )}
-      {comPainel && (
-        <PainelDaEscuta
-          visao={visao}
-          aparencia={aparenciaDaEscuta}
-          aoMudarAparencia={escuta.mudarAparencia}
-          aoDescartarErro={escuta.descartarErro}
-          rodape={
-            <FaixaDaEscuta
-              automatico={escuta.automatico}
-              alternarAutomatico={escuta.alternarAutomatico}
-              ultimaPergunta={ultimaPerguntaForaDoCartao(
-                escuta.ultimaPergunta,
-                visao.resposta,
-                aparenciaDaEscuta.compacto,
-              )}
-              preferenciasDaTela={escuta.preferenciasDaTela}
-              mudarIdioma={escuta.mudarIdioma}
-              mudarPrioridadeDoMotor={escuta.mudarPrioridadeDoMotor}
-            />
-          }
-        />
+      {/* A escuta não tem caixa à parte: só o erro, numa linha com "fechar", acima do campo. */}
+      {comEscuta && escuta.erro !== null && (
+        <p className="hint-error texto-longo erro-da-escuta" role="alert" data-testid="erro-da-escuta">
+          {escuta.erro}{" "}
+          <button type="button" className="btn btn-sm btn-ghost" onClick={escuta.descartarErro}>
+            fechar
+          </button>
+        </p>
       )}
 
       <div className="moldura-do-composer">
@@ -1206,9 +1197,10 @@ export function ChatRapido({
           className={`composer-do-chat ${expandido ? "composer-expandido" : "composer-compacto"}`}
           data-testid="composer-do-chat"
           onClick={(evento) => {
-            // Clicar em qualquer parte expande e leva o foco ao campo (menos dentro do menu do modelo).
+            // Clicar em qualquer parte expande e leva o foco ao campo (menos no menu do modelo e no indicador da
+            // escuta, cujo menu precisa do foco para fechar no Esc).
             const alvo = evento.target instanceof Element ? evento.target : null;
-            if (alvo !== null && alvo.closest('[role="menu"]') !== null) {
+            if (alvo !== null && alvo.closest('[role="menu"], .indicador-da-escuta') !== null) {
               return;
             }
             // No microfone, expande mas o foco fica nele: o Esc ali descarta o ditado.
@@ -1377,6 +1369,11 @@ export function ChatRapido({
                 erro={escuta.erro}
                 pausar={escuta.pausar}
                 retomar={escuta.retomar}
+                automatico={escuta.automatico}
+                alternarAutomatico={escuta.alternarAutomatico}
+                preferenciasDaTela={escuta.preferenciasDaTela}
+                mudarIdioma={escuta.mudarIdioma}
+                mudarPrioridadeDoMotor={escuta.mudarPrioridadeDoMotor}
               />
             )}
             <SeletorDeModelo

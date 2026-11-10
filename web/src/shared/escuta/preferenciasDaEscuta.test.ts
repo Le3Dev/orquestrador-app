@@ -7,6 +7,7 @@ import {
   LIMITES_DO_TAMANHO_DA_FONTE,
   PREFERENCIAS_PADRAO_DA_ESCUTA,
   preferenciasNoNavegador,
+  VERSAO_DAS_PREFERENCIAS_DA_ESCUTA,
 } from "./preferenciasDaEscuta";
 
 describe("preferências da escuta", () => {
@@ -14,12 +15,12 @@ describe("preferências da escuta", () => {
     localStorage.clear();
   });
 
-  it("padrões: automático no modo invisível, português, velocidade e a aparência combinada", () => {
+  it("padrões: automático no modo invisível, idioma automático, velocidade e a aparência combinada", () => {
     expect(PREFERENCIAS_PADRAO_DA_ESCUTA).toEqual({
       automatico: true,
       automaticoManual: false,
       avisoVisto: false,
-      idioma: "portuguese",
+      idioma: "automatico",
       prioridadeDoMotor: "velocidade",
       aparencia: { tamanhoDaFonte: 14, opacidade: 0.92, compacto: false },
     });
@@ -44,23 +45,55 @@ describe("preferências da escuta", () => {
       automatico: false,
       automaticoManual: true,
       avisoVisto: true,
-      idioma: "portuguese",
+      idioma: "automatico",
       prioridadeDoMotor: "velocidade",
       aparencia: APARENCIA_PADRAO_DA_ESCUTA,
     });
     expect(Object.isFrozen(lidas)).toBe(true);
   });
 
+  it(`migração: dados sem versão ou de versão anterior à ${VERSAO_DAS_PREFERENCIAS_DA_ESCUTA} com "portuguese" passam ao automático, e o resto fica`, () => {
+    expect(VERSAO_DAS_PREFERENCIAS_DA_ESCUTA).toBe(2);
+    const antigas = {
+      automatico: false,
+      automaticoManual: true,
+      avisoVisto: true,
+      idioma: "portuguese",
+      prioridadeDoMotor: "precisao",
+      aparencia: { tamanhoDaFonte: 18, opacidade: 0.6, compacto: true },
+    };
+    const esperadas = { ...antigas, idioma: "automatico" };
+    expect(interpretarPreferenciasDaEscuta(JSON.stringify(antigas))).toEqual(esperadas);
+    expect(interpretarPreferenciasDaEscuta(JSON.stringify({ ...antigas, versao: 1 }))).toEqual(esperadas);
+    expect(interpretarPreferenciasDaEscuta(JSON.stringify({ ...antigas, versao: "2" }))).toEqual(esperadas);
+  });
+
+  it("escolha gravada na versão atual é respeitada: português fica português", () => {
+    expect(
+      interpretarPreferenciasDaEscuta(JSON.stringify({ versao: VERSAO_DAS_PREFERENCIAS_DA_ESCUTA, idioma: "portuguese" })).idioma,
+    ).toBe("portuguese");
+    expect(
+      interpretarPreferenciasDaEscuta(JSON.stringify({ versao: VERSAO_DAS_PREFERENCIAS_DA_ESCUTA, idioma: "automatico" })).idioma,
+    ).toBe("automatico");
+  });
+
   it("lê os campos novos e troca valor desconhecido ou de outro tipo pelo padrão", () => {
     expect(
       interpretarPreferenciasDaEscuta(
-        JSON.stringify({ idioma: "automatico", prioridadeDoMotor: "precisao", aparencia: { tamanhoDaFonte: 18, opacidade: 0.6, compacto: true } }),
+        JSON.stringify({
+          versao: VERSAO_DAS_PREFERENCIAS_DA_ESCUTA,
+          idioma: "portuguese",
+          prioridadeDoMotor: "precisao",
+          aparencia: { tamanhoDaFonte: 18, opacidade: 0.6, compacto: true },
+        }),
       ),
-    ).toMatchObject({ idioma: "automatico", prioridadeDoMotor: "precisao", aparencia: { tamanhoDaFonte: 18, opacidade: 0.6, compacto: true } });
+    ).toMatchObject({ idioma: "portuguese", prioridadeDoMotor: "precisao", aparencia: { tamanhoDaFonte: 18, opacidade: 0.6, compacto: true } });
 
     expect(
-      interpretarPreferenciasDaEscuta(JSON.stringify({ idioma: "klingon", prioridadeDoMotor: 3, aparencia: [14], automatico: "sim" })),
-    ).toMatchObject({ idioma: "portuguese", prioridadeDoMotor: "velocidade", aparencia: APARENCIA_PADRAO_DA_ESCUTA, automatico: true });
+      interpretarPreferenciasDaEscuta(
+        JSON.stringify({ versao: VERSAO_DAS_PREFERENCIAS_DA_ESCUTA, idioma: "klingon", prioridadeDoMotor: 3, aparencia: [14], automatico: "sim" }),
+      ),
+    ).toMatchObject({ idioma: "automatico", prioridadeDoMotor: "velocidade", aparencia: APARENCIA_PADRAO_DA_ESCUTA, automatico: true });
   });
 
   it("aparência guardada fora dos limites vai para a borda", () => {
@@ -101,7 +134,7 @@ describe("preferências da escuta", () => {
     });
   });
 
-  it("no navegador, grava no localStorage e lê de volta", () => {
+  it("no navegador, grava no localStorage com a versão do formato e lê de volta", () => {
     const preferencias = {
       ...PREFERENCIAS_PADRAO_DA_ESCUTA,
       avisoVisto: true,
@@ -109,8 +142,19 @@ describe("preferências da escuta", () => {
       aparencia: { tamanhoDaFonte: 20, opacidade: 0.5, compacto: true },
     };
     preferenciasNoNavegador.gravar(preferencias);
-    expect(JSON.parse(localStorage.getItem(CHAVE_DAS_PREFERENCIAS_DA_ESCUTA) ?? "null")).toEqual(preferencias);
+    expect(JSON.parse(localStorage.getItem(CHAVE_DAS_PREFERENCIAS_DA_ESCUTA) ?? "null")).toEqual({
+      versao: VERSAO_DAS_PREFERENCIAS_DA_ESCUTA,
+      ...preferencias,
+    });
     expect(preferenciasNoNavegador.ler()).toEqual(preferencias);
+  });
+
+  it("no navegador, a escolha nova de português é gravada e respeitada; o dado antigo com português lê o automático", () => {
+    localStorage.setItem(CHAVE_DAS_PREFERENCIAS_DA_ESCUTA, JSON.stringify({ ...PREFERENCIAS_PADRAO_DA_ESCUTA, idioma: "portuguese" }));
+    expect(preferenciasNoNavegador.ler().idioma).toBe("automatico");
+
+    preferenciasNoNavegador.gravar({ ...PREFERENCIAS_PADRAO_DA_ESCUTA, idioma: "portuguese" });
+    expect(preferenciasNoNavegador.ler().idioma).toBe("portuguese");
   });
 
   it("no navegador, sem nada guardado, lê o padrão", () => {
