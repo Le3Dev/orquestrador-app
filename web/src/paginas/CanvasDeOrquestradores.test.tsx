@@ -1857,16 +1857,17 @@ describe("CanvasDeOrquestradores · seleção múltipla e barra do grupo", { tim
     localStorage.clear();
   });
 
-  it("arrastar no vazio seleciona (parcial); o pan fica com a roda, o botão do meio e o espaço", async () => {
+  it("arrastar no vazio move o canvas (mouse e trackpad); shift + arrastar seleciona (parcial)", async () => {
     layoutCom({ o1: { x: 0, y: 0 } });
     render(<CanvasDeOrquestradores />);
     await waitFor(() => expect(noNaTela("o1")).toBeInTheDocument());
 
     const props = simulados.propsDoFluxo;
+    expect(props?.selectionOnDrag).toBeUndefined();
     expect(props).toMatchObject({
-      selectionOnDrag: true,
+      selectionKeyCode: "Shift",
       selectionMode: "partial",
-      panOnDrag: [1],
+      panOnDrag: [0, 1],
       panOnScroll: true,
       panActivationKeyCode: "Space",
       zoomActivationKeyCode: "Control",
@@ -1877,10 +1878,10 @@ describe("CanvasDeOrquestradores · seleção múltipla e barra do grupo", { tim
     expect(props?.onSelectionDragStop).toBe(props?.onNodeDragStop);
     expect(props?.onSelectionDragStart).toBe(props?.onNodeDragStart);
     expect(props?.onSelectionEnd).toEqual(expect.any(Function));
-    // O fundo desenha a seleção com o botão esquerdo e não arrasta o canvas.
+    // O fundo arrasta o canvas com o botão esquerdo; sem o Shift, não desenha a seleção.
     const fundo = document.querySelector(".react-flow__pane");
-    expect(fundo).toHaveClass("selection");
-    expect(fundo).not.toHaveClass("draggable");
+    expect(fundo).toHaveClass("draggable");
+    expect(fundo).not.toHaveClass("selection");
   });
 
   it("Cmd+A (ou Ctrl+A) seleciona todas as telas e mostra a barra do grupo; num campo de texto, não", async () => {
