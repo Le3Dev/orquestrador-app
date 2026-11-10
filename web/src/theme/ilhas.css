@@ -117,15 +117,15 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   height: 32px;
   padding: 0 10px 0 8px;
   border-radius: 9px;
-  background: color-mix(in srgb, var(--active) 22%, var(--surface));
+  background: var(--active);
   border: 1px solid var(--active);
-  color: var(--active);
+  color: var(--claude-escuro);
   font: 600 12.5px/1 var(--fonte-titulo);
   white-space: nowrap;
   cursor: pointer;
 }
 .icone-do-botao-novo { color: inherit; }
-.botao-novo:hover, .botao-novo[aria-expanded="true"] { background: color-mix(in srgb, var(--active) 34%, var(--surface)); border-color: var(--active); }
+.botao-novo:hover, .botao-novo[aria-expanded="true"] { background: var(--active-forte); border-color: var(--active-forte); }
 .botao-novo:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 /* O menu cai para baixo da ilha; o submenu abre à direita do item. */
