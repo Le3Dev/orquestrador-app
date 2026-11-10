@@ -1034,7 +1034,7 @@ describe("NoTerminal · servidor no ar", () => {
     const canvas = canvasDoTerminal(conversa);
     render(<Terminal canvas={canvas} no={propsDoNo()} />);
 
-    expect(screen.getByText("servidor no ar")).toBeInTheDocument();
+    expect(screen.getByText("Servidores")).toBeInTheDocument();
     expect(screen.getByText("localhost:5173")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Abrir prévia de http://localhost:5173" }));
 
@@ -1044,7 +1044,7 @@ describe("NoTerminal · servidor no ar", () => {
   it("sem servidores, não há faixa", () => {
     render(<Terminal canvas={canvasDoTerminal(ESTADO_INICIAL)} no={propsDoNo()} />);
 
-    expect(screen.queryByText("servidor no ar")).not.toBeInTheDocument();
+    expect(screen.queryByText("Servidores")).not.toBeInTheDocument();
   });
 });
 

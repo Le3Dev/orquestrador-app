@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { extrairEnderecosLocais } from "./EnderecoLocal";
+import { extrairEnderecosLocais, normalizarEnderecoDePrevia, normalizarEnderecoLocal } from "./EnderecoLocal";
 
 describe("extrairEnderecosLocais", () => {
   it("lê o endereço do Vite mesmo com a porta colorida", () => {
@@ -52,5 +52,53 @@ describe("extrairEnderecosLocais", () => {
     );
     expect(extrairEnderecosLocais("Nada para ver aqui: localhost:5173 sem esquema.")).toEqual([]);
     expect(extrairEnderecosLocais("http://localhost:99999 e http://localhost:5173abc")).toEqual([]);
+  });
+
+  it("recusa o endereço inteiro quando o trecho tem lixo de template literal", () => {
+    expect(
+      extrairEnderecosLocais("fetch(`http://localhost:4391/ilha-teste-tmp.html?v=${v}`)"),
+    ).toEqual([]);
+    expect(extrairEnderecosLocais("http://localhost:4391/ilha-teste-tmp.html?v=${v")).toEqual([]);
+    expect(extrairEnderecosLocais("const u = `http://localhost:${porta}/app`")).toEqual([]);
+    expect(extrairEnderecosLocais("http://localhost:4391${caminho}")).toEqual([]);
+    expect(extrairEnderecosLocais("http://localhost:3000/a}b")).toEqual([]);
+  });
+
+  it("mantém o endereço bom que aparece junto do quebrado", () => {
+    expect(extrairEnderecosLocais("http://localhost:4391/x?v=${v e depois http://localhost:5173/")).toEqual([
+      "http://localhost:5173",
+    ]);
+  });
+});
+
+describe("normalizarEnderecoLocal", () => {
+  it("normaliza o endereço local com porta", () => {
+    expect(normalizarEnderecoLocal(" http://127.0.0.1:5173/ ")).toBe("http://localhost:5173");
+    expect(normalizarEnderecoLocal("HTTPS://[::1]:8443/painel?a=1")).toBe("https://localhost:8443/painel?a=1");
+    expect(normalizarEnderecoLocal("http://0.0.0.0:3000/app/")).toBe("http://localhost:3000/app/");
+  });
+
+  it("recusa host externo, endereço sem porta, porta inválida e texto qualquer", () => {
+    expect(normalizarEnderecoLocal("https://exemplo.com:443")).toBeNull();
+    expect(normalizarEnderecoLocal("http://192.168.0.2:3000")).toBeNull();
+    expect(normalizarEnderecoLocal("http://localhost/")).toBeNull();
+    expect(normalizarEnderecoLocal("http://localhost:99999")).toBeNull();
+    expect(normalizarEnderecoLocal("http://localhost:3000@exemplo.com")).toBeNull();
+    expect(normalizarEnderecoLocal("localhost:5173")).toBeNull();
+    expect(normalizarEnderecoLocal("ftp://localhost:21")).toBeNull();
+    expect(normalizarEnderecoLocal("")).toBeNull();
+    expect(normalizarEnderecoLocal(`http://localhost:3000/${"a".repeat(2_000)}`)).toBeNull();
+  });
+
+  it("recusa lixo de template literal", () => {
+    expect(normalizarEnderecoLocal("http://localhost:4391/ilha-teste-tmp.html?v=${v")).toBeNull();
+    expect(normalizarEnderecoLocal("http://localhost:${porta}")).toBeNull();
+  });
+});
+
+describe("normalizarEnderecoDePrevia", () => {
+  it("recusa o endereço local com lixo de template literal", () => {
+    expect(normalizarEnderecoDePrevia("http://localhost:4391/x?v=${v")).toBeNull();
+    expect(normalizarEnderecoDePrevia("http://localhost:5173/")).toBe("http://localhost:5173");
   });
 });

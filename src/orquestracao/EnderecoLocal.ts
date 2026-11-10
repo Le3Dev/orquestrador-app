@@ -8,14 +8,20 @@ const CODIGOS_ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
 
 /** Só hosts da própria máquina, sempre com porta; o caminho é opcional. */
 const ENDERECO_LOCAL =
-  /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):\d{1,5}(?![\w-])(?:\/[^\s"'<>`]*)?/gi;
+  /\bhttps?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\]):\d{1,5}(?![\w$-])(?:\/[^\s"'<>`]*)?/gi;
 
 /** Pontuação que fecha a frase (ou o negrito e o código do Markdown) em volta do endereço, não faz parte dele. */
 const PONTUACAO_FINAL = /[.,;:!?)\]}'"*~]+$/;
 
+/** Lixo de template literal (`${v}`) de um trecho de código: o endereço inteiro é recusado. */
+const LIXO_DE_TEMPLATE = /[${}]/;
+
 const HOSTS_DA_MAQUINA = /^(https?:\/\/)(?:127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?=:)/i;
 
 function normalizar(endereco: string): string | null {
+  if (LIXO_DE_TEMPLATE.test(endereco)) {
+    return null;
+  }
   const semPontuacao = endereco.replace(PONTUACAO_FINAL, "");
   const comLocalhost = semPontuacao.replace(HOSTS_DA_MAQUINA, "$1localhost");
   const [, esquema = "", host = "", porta = "", caminho = ""] =
@@ -33,6 +39,19 @@ const SO_ENDERECO_LOCAL = new RegExp(`^${ENDERECO_LOCAL.source}$`, "i");
 
 /** O tamanho máximo de um endereço de prévia (o mesmo dos itens ligados). */
 const TAMANHO_MAXIMO_DO_ENDERECO_DE_PREVIA = 2_000;
+
+/**
+ * Normaliza um endereço informado como local (ex.: na consulta da faixa de
+ * servidores): só http ou https em localhost, 127.0.0.1, 0.0.0.0 ou [::1], com
+ * porta, sai como em `extrairEnderecosLocais`. Qualquer outra coisa vira nulo.
+ */
+export function normalizarEnderecoLocal(endereco: string): string | null {
+  const texto = endereco.trim();
+  if (texto === "" || texto.length > TAMANHO_MAXIMO_DO_ENDERECO_DE_PREVIA || !SO_ENDERECO_LOCAL.test(texto)) {
+    return null;
+  }
+  return normalizar(texto);
+}
 
 /**
  * Normaliza um endereço de prévia dito pelo agente (ex.: para fechá-la): o

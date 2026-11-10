@@ -196,7 +196,13 @@ export interface SaudeDoServidor {
   memoria: LeituraDeMemoria | null;
 }
 
-export type SituacaoDoOrquestrador = "ocioso" | "trabalhando";
+/** Se um servidor de desenvolvimento local responde agora (`GET /servidores-locais/situacao`). */
+export interface SituacaoDoServidorLocal {
+  url: string;
+  noAr: boolean;
+}
+
+export type SituacaoDoOrquestrador ="ocioso" | "trabalhando";
 export type SituacaoDoTurno = "em_andamento" | "concluido" | "cancelado" | "falhou" | "interrompido";
 
 /**

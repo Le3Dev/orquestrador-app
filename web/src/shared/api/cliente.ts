@@ -24,6 +24,7 @@ import type {
   PromptMelhorado,
   ResumoDoOrquestrador,
   SaudeDoServidor,
+  SituacaoDoServidorLocal,
   TipoDeImagem,
 } from "./tipos";
 
@@ -270,6 +271,15 @@ export const api = {
   removerNota: (id: string) => requisitar<null>(`/notas/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   saude: () => requisitar<SaudeDoServidor>("/saude"),
+
+  /** Confere se cada servidor local (até 10 endereços) responde agora; o servidor recusa o que não for endereço local. */
+  lerSituacaoDosServidores: (urls: readonly string[]) => {
+    const parametros = new URLSearchParams();
+    for (const url of urls) {
+      parametros.append("url", url);
+    }
+    return requisitar<{ situacoes: SituacaoDoServidorLocal[] }>(`/servidores-locais/situacao?${parametros.toString()}`);
+  },
 
   lerPreferencias: () => requisitar<DadosDasPreferencias>("/preferencias"),
 

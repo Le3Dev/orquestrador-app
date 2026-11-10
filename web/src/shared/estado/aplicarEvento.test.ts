@@ -729,6 +729,30 @@ describe("aplicarEvento", () => {
       expect(estado.turnos[0]?.enderecosDaResposta).toBeUndefined();
     });
 
+    it("guarda a sequência do último anúncio de cada endereço, e só dos que seguem na lista", () => {
+      const eventos = registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "suba", configuracao },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:3000" },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173" },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:3000" },
+      ]);
+      const estado = reproduzir(eventos);
+
+      expect(estado.sequenciasDosEnderecos).toEqual({
+        "http://localhost:3000": eventos[3]?.sequencia,
+        "http://localhost:5173": eventos[2]?.sequencia,
+      });
+
+      const limpa = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "suba", configuracao },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:3000" },
+          { tipo: "conversa_limpa", turnosAnteriores: 1, planoDescartado: false, worktreeComAlteracoes: false },
+        ]),
+      );
+      expect(limpa.sequenciasDosEnderecos).toEqual({});
+    });
+
     it("uma ferramenta depois da citação na resposta não apaga a abertura automática", () => {
       const estado = reproduzir(
         registrar([

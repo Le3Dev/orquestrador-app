@@ -155,6 +155,12 @@ export interface EstadoDaConversa {
    */
   enderecosLocais: readonly string[];
   /**
+   * A sequência do último evento que anunciou cada endereço de `enderecosLocais`.
+   * A faixa de servidores usa para saber se um servidor que o usuário tirou da
+   * lista foi anunciado de novo depois (e então volta).
+   */
+  sequenciasDosEnderecos: Readonly<Record<string, number>>;
+  /**
    * O último endereço que o agente citou na resposta final (evento com
    * `origem: "resposta"`), com a sequência e a hora do evento: a tela abre a
    * prévia sozinha quando ele acabou de ser citado (não ao reler o histórico).
@@ -208,6 +214,7 @@ export const ESTADO_INICIAL: EstadoDaConversa = {
   conversaIniciadaEm: null,
   avisosDaConversaNova: SEM_AVISOS_DA_CONVERSA_NOVA,
   enderecosLocais: [],
+  sequenciasDosEnderecos: {},
   ultimoEnderecoDaResposta: null,
   ultimoFimDeTurno: null,
   pedidosEnfileirados: [],
@@ -593,6 +600,17 @@ function enderecosDoEvento(evento: EventoRegistrado): string[] {
   return url === null ? [] : [url];
 }
 
+/** As sequências dos anúncios depois de `url` ser anunciado na `sequencia`; só guarda os endereços que ainda estão na lista. */
+function sequenciasAposAnuncio(
+  atuais: Readonly<Record<string, number>>,
+  enderecos: readonly string[],
+  url: string,
+  sequencia: number,
+): Readonly<Record<string, number>> {
+  const todas = { ...atuais, [url]: sequencia };
+  return Object.fromEntries(enderecos.map((endereco) => [endereco, todas[endereco] ?? 0]));
+}
+
 /**
  * O fim do turno que o evento encerra (concluído, cancelado ou falho), com o
  * que a tela precisa para fechar as prévias que o agente abriu. Nulo para os
@@ -695,6 +713,7 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
         planoDescartado: evento.planoDescartado === true,
       },
       enderecosLocais: [],
+      sequenciasDosEnderecos: {},
       ultimoEnderecoDaResposta: null,
       ultimoFimDeTurno: null,
       pedidosEnfileirados: [],
@@ -732,10 +751,15 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
   // Só o endereço citado na resposta abre a prévia sozinho; sem `origem`, é de ferramenta.
   const citadoNaResposta = evento.tipo === "endereco_local_detectado" && evento.origem === "resposta";
   const alteracao = alteracaoDoTurno(evento);
+  const enderecosLocais = juntarEnderecos(estado.enderecosLocais, enderecosDoEvento(evento));
 
   return {
     ...proximo,
-    enderecosLocais: juntarEnderecos(estado.enderecosLocais, enderecosDoEvento(evento)),
+    enderecosLocais,
+    sequenciasDosEnderecos:
+      detectado === undefined
+        ? estado.sequenciasDosEnderecos
+        : sequenciasAposAnuncio(estado.sequenciasDosEnderecos, enderecosLocais, detectado, evento.sequencia),
     ultimoEnderecoDaResposta:
       detectado === undefined || !citadoNaResposta
         ? estado.ultimoEnderecoDaResposta

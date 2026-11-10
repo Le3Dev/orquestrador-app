@@ -15,6 +15,7 @@ import { criarEscutaRoutes } from "./controllers/escutaRoutes";
 import { criarNotasRoutes } from "./controllers/notasRoutes";
 import { criarOrquestradoresRoutes } from "./controllers/orquestradoresRoutes";
 import { criarPromptsRoutes } from "./controllers/promptsRoutes";
+import { criarServidoresLocaisRoutes } from "./controllers/servidoresLocaisRoutes";
 import {
   acessoDoUpgrade,
   criarConexaoDosTerminais,
@@ -383,6 +384,8 @@ async function iniciar(): Promise<void> {
     );
     rotas.use("/api", criarPromptsRoutes({ servico: servicoDeMelhoria }));
     rotas.use("/api", criarEscutaRoutes({ servico: servicoDeEscuta }));
+    // Faixa de servidores: confere se os endereços locais citados pelos agentes ainda respondem.
+    rotas.use("/api", criarServidoresLocaisRoutes({ sondar: sondarEnderecoLocal }));
     rotas.use("/api", artefatos.rotas);
     rotas.use(
       "/api",

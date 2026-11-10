@@ -1680,7 +1680,12 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
           {erro !== null && <p className="mono texto-longo mt-3 text-error">✗ {erro}</p>}
         </div>
 
-        <FaixaDeServidores enderecos={conversa.enderecosLocais} aoAbrir={aoAbrirPrevia} />
+        <FaixaDeServidores
+          orquestradorId={orquestradorId}
+          enderecos={conversa.enderecosLocais}
+          sequencias={conversa.sequenciasDosEnderecos}
+          aoAbrir={aoAbrirPrevia}
+        />
         <ItensLigados ligados={ligados} aoDesligar={aoDesligarItem} />
         <PromptDoTerminal
           pasta={orquestrador.nomeDaPasta}
