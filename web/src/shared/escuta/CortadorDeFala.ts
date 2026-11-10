@@ -13,9 +13,11 @@ export const LIMIAR_DE_FIM_DA_FALA = 0.35;
 
 /**
  * Silêncio seguido (abaixo do limiar de fim) que encerra a fala. Medido em
- * janelas inteiras: o fim acontece na 11ª janela seguida sem voz (352 ms).
+ * janelas inteiras: o fim acontece na 16ª janela seguida sem voz (512 ms).
+ * A fala curta só serve às passadas do motor; quem junta as falas de uma
+ * frase inteira é o enunciado da legenda (`PAUSA_DO_ENUNCIADO_MS`).
  */
-export const SILENCIO_PARA_FIM_MS = 350;
+export const SILENCIO_PARA_FIM_MS = 500;
 
 /** Áudio guardado antes da primeira janela de voz, para não cortar o começo da palavra. */
 export const PRE_ROLL_MS = 200;

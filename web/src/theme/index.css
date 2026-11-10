@@ -3823,12 +3823,13 @@ html.modo-invisivel .barra-de-titulo * {
 
 /* ── Escuta: a transcrição na conversa e o menu do indicador ────────────── */
 /* A escuta não tem caixa à parte: é como se você tivesse dito cada frase no
- * chat. Cada frase fechada é uma mensagem sua (.mensagem-do-usuario com o
- * modificador .mensagem-ouvida), com a marca pequena "ouvido" no lugar do selo
- * e, na pergunta detectada, a marca "pergunta" no tom de aviso (--warning). A
- * frase em andamento é uma mensagem provisória no fim (a borda tracejada fica
- * em chat-lateral.css): o confirmado no tom normal e a cauda ainda não
- * confirmada apagada, em itálico. Os controles (Automático, idioma e
+ * chat. Cada enunciado é um balão só (BalaoOuvido): uma mensagem sua
+ * (.mensagem-do-usuario com o modificador .mensagem-ouvida), com a marca
+ * pequena "ouvido" no lugar do selo e, na pergunta detectada, a marca
+ * "pergunta" no tom de aviso (--warning). Enquanto ele é dito, o mesmo balão
+ * fica no fim com a marca "ouvindo" e a borda tracejada (em chat-lateral.css):
+ * o confirmado no tom normal e a cauda ainda não confirmada apagada, em
+ * itálico. Os controles (Automático, idioma e
  * prioridade do motor) ficam no menu do indicador, no composer; o erro, numa
  * linha acima do campo. O tom da escuta é o azul (--info), o do indicador. */
 

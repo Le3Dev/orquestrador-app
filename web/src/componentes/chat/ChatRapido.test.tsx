@@ -665,11 +665,17 @@ describe("ChatRapido · modo invisível", () => {
     it("a frase em andamento fica numa mensagem sua provisória no fim: o confirmado no tom normal e o parcial apagado", () => {
       escutaSimulada.legenda = {
         frases: [frase("f1", "Bom dia a todos.", "2026-11-04T12:02:00Z")],
-        emAndamento: { confirmado: "vamos falar do", parcial: "orçamento de", inicioMs: Date.parse("2026-11-04T12:02:03Z") },
+        emAndamento: {
+          id: "e2",
+          confirmado: "vamos falar do",
+          parcial: "orçamento de",
+          inicioMs: Date.parse("2026-11-04T12:02:03Z"),
+        },
       };
       renderizar(DUAS_MENSAGENS);
 
       const provisorio = screen.getByTestId("trecho-provisorio");
+      expect(provisorio).toHaveAttribute("data-enunciado", "e2");
       expect(provisorio).toHaveAttribute("aria-live", "polite");
       expect(provisorio).toHaveClass("mensagem-do-usuario", "mensagem-ouvida", "mensagem-ouvida-provisoria");
       expect(within(provisorio).getByText("ouvindo")).toHaveClass("marca-ouvida");
@@ -686,15 +692,93 @@ describe("ChatRapido · modo invisível", () => {
     });
 
     it("em andamento só com o parcial, o balão mostra só a cauda; sem texto, não aparece", () => {
-      escutaSimulada.legenda = { frases: [], emAndamento: { confirmado: "", parcial: "dizendo", inicioMs: 1 } };
+      escutaSimulada.legenda = { frases: [], emAndamento: { id: "e1", confirmado: "", parcial: "dizendo", inicioMs: 1 } };
       const { rerender } = renderizar();
       const provisorio = screen.getByTestId("trecho-provisorio");
       expect(within(provisorio).getByText("dizendo")).toHaveClass("ouvido-parcial");
       expect(provisorio.querySelector(".ouvido-confirmado")).toBeNull();
 
-      escutaSimulada.legenda = { frases: [], emAndamento: { confirmado: "  ", parcial: "", inicioMs: 1 } };
+      escutaSimulada.legenda = { frases: [], emAndamento: { id: "e1", confirmado: "  ", parcial: "", inicioMs: 1 } };
       rerender({ ...OCIOSO });
       expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
+    });
+
+    it("um balão por enunciado: o aberto cresce no lugar e, ao fechar, o mesmo elemento vira o balão fechado", () => {
+      const inicioMs = Date.parse("2026-11-04T12:02:00Z");
+      escutaSimulada.legenda = { frases: [], emAndamento: { id: "e7", confirmado: "", parcial: "qual o", inicioMs } };
+      const { rerender } = renderizar(DUAS_MENSAGENS);
+      const balao = screen.getByTestId("trecho-provisorio");
+
+      // O texto cresce no mesmo balão.
+      escutaSimulada.legenda = {
+        frases: [],
+        emAndamento: { id: "e7", confirmado: "qual o prazo", parcial: "do projeto", inicioMs },
+      };
+      rerender({ ...DUAS_MENSAGENS });
+      expect(screen.getByTestId("trecho-provisorio")).toBe(balao);
+      expect(balao).toHaveTextContent("qual o prazo do projeto");
+      expect(within(balao).getByText("ouvindo")).toBeInTheDocument();
+
+      // Fechado: o mesmo elemento, agora com "ouvido" e "pergunta", sem a borda tracejada e sem outra cópia.
+      escutaSimulada.legenda = {
+        frases: [{ id: "e7", texto: "Qual o prazo do projeto?", inicioMs, fimMs: inicioMs + 3_000, pergunta: true }],
+        emAndamento: null,
+      };
+      rerender({ ...DUAS_MENSAGENS });
+      expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
+      const fechado = screen.getByTestId("trecho-ouvido");
+      expect(fechado).toBe(balao);
+      expect(fechado).toHaveAttribute("data-enunciado", "e7");
+      expect(fechado).not.toHaveClass("mensagem-ouvida-provisoria");
+      expect(within(fechado).getByText("ouvido")).toBeInTheDocument();
+      expect(within(fechado).getByRole("img", { name: "Pergunta detectada na escuta" })).toBeInTheDocument();
+      expect(screen.getAllByText("Qual o prazo do projeto?")).toHaveLength(1);
+    });
+
+    it("com o id do aberto já fechado na legenda, vale o fechado: o enunciado não aparece duas vezes", () => {
+      const inicioMs = Date.parse("2026-11-04T12:02:00Z");
+      escutaSimulada.legenda = {
+        frases: [{ id: "e8", texto: "Bom dia a todos.", inicioMs, fimMs: inicioMs + 2_000, pergunta: false }],
+        emAndamento: { id: "e8", confirmado: "Bom dia", parcial: "a todos", inicioMs },
+      };
+      renderizar(DUAS_MENSAGENS);
+
+      expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
+      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(1);
+      expect(screen.getByTestId("trecho-ouvido")).toHaveTextContent("Bom dia a todos.");
+      expect(conversa()).not.toHaveTextContent("Bom dia a todos a todos");
+    });
+
+    it("o aberto fica no fim mesmo tendo começado antes da última mensagem, à parte do fechado anterior", () => {
+      escutaSimulada.legenda = {
+        frases: [frase("e1", "Bom dia a todos.", "2026-11-04T12:00:10Z")],
+        emAndamento: { id: "e2", confirmado: "e o prazo", parcial: "", inicioMs: Date.parse("2026-11-04T12:00:20Z") },
+      };
+      renderizar(DUAS_MENSAGENS);
+
+      const provisorio = screen.getByTestId("trecho-provisorio");
+      expect(provisorio.nextElementSibling).toBeNull();
+      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(1);
+      const texto = conversa().textContent ?? "";
+      expect(texto.indexOf("Bom dia a todos.")).toBeLessThan(texto.indexOf("resposta"));
+      expect(texto.indexOf("resposta")).toBeLessThan(texto.indexOf("e o prazo"));
+    });
+
+    it("o fechado da pergunta enviada some; o aberto de mesmo id também não aparece", () => {
+      const inicioMs = Date.parse("2026-11-04T11:59:55Z");
+      escutaSimulada.legenda = {
+        frases: [{ id: "e9", texto: "Qual o prazo do projeto?", inicioMs, fimMs: inicioMs + 2_000, pergunta: true }],
+        emAndamento: { id: "e9", confirmado: "Qual o prazo", parcial: "do projeto", inicioMs },
+      };
+      const enviada = "Pergunta detectada na escuta: Qual o prazo do projeto?\n\nResponda direto e curto.";
+      renderizar({
+        ...OCIOSO,
+        mensagens: [mensagem("u1", "usuario", { texto: enviada, origem: "escuta", criadaEm: "2026-11-04T11:59:58Z" })],
+      });
+
+      expect(screen.queryByTestId("trecho-ouvido")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
+      expect(screen.getAllByText("Qual o prazo do projeto?")).toHaveLength(1);
     });
 
     it("a rolagem acompanha os balões novos e a frase em andamento", () => {
@@ -716,7 +800,13 @@ describe("ChatRapido · modo invisível", () => {
       expect(topo).toBe(900);
 
       topo = 0;
-      escutaSimulada.legenda = { frases, emAndamento: { confirmado: "e agora", parcial: "mais", inicioMs: 1 } };
+      escutaSimulada.legenda = { frases, emAndamento: { id: "e2", confirmado: "e agora", parcial: "mais", inicioMs: 1 } };
+      rerender({ ...DUAS_MENSAGENS });
+      expect(topo).toBe(900);
+
+      // O texto do aberto cresce: continua acompanhando o fim.
+      topo = 0;
+      escutaSimulada.legenda = { frases, emAndamento: { id: "e2", confirmado: "e agora mais", parcial: "um", inicioMs: 1 } };
       rerender({ ...DUAS_MENSAGENS });
       expect(topo).toBe(900);
     });

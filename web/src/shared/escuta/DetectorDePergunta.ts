@@ -83,7 +83,9 @@ export const MINIMO_DE_PALAVRAS = 2;
 /**
  * Palavras e expressões que abrem uma pergunta, em português e inglês. Uma
  * frase com "?" que começa por uma delas (e tem `MINIMO_DE_PALAVRAS_DO_SINAL_FORTE`)
- * é pergunta sem precisar do servidor.
+ * é pergunta sem precisar do servidor. Em qualquer posição (com o mesmo mínimo
+ * de palavras), a frase é candidata: o Whisper quase não pontua fala corrida,
+ * e a pergunta pode vir no meio do enunciado ("pessoal, qual a melhor forma").
  */
 export const PALAVRAS_INTERROGATIVAS: readonly string[] = Object.freeze([
   // português
@@ -96,12 +98,17 @@ export const PALAVRAS_INTERROGATIVAS: readonly string[] = Object.freeze([
 /** Com menos palavras que isto, nem uma frase interrogativa é sinal forte (pode ser só "Como assim?"). */
 export const MINIMO_DE_PALAVRAS_DO_SINAL_FORTE = 4;
 
-export type MotivoDaCandidata = "interrogacao" | "pedido" | "termo_tecnico";
+/**
+ * Por que o texto é candidato: termina em "?" (`interrogacao`), tem uma
+ * expressão de pedido, um termo técnico ou uma palavra interrogativa em
+ * qualquer posição (`interrogativa`).
+ */
+export type MotivoDaCandidata = "interrogacao" | "pedido" | "termo_tecnico" | "interrogativa";
 
 export interface AvaliacaoDoTexto {
   /** true quando vale perguntar ao servidor se é um pedido. */
   readonly candidata: boolean;
-  /** Primeira regra que casou (nesta ordem: interrogacao, pedido, termo_tecnico). */
+  /** Primeira regra que casou (nesta ordem: interrogacao, pedido, termo_tecnico, interrogativa). */
   readonly motivo: MotivoDaCandidata | null;
   /** true quando é pergunta com certeza (`sinalForte`): a escuta dispensa o servidor. */
   readonly sinalForte: boolean;
@@ -112,6 +119,7 @@ const POR_INTERROGACAO: AvaliacaoDoTexto = Object.freeze({ candidata: true, moti
 const POR_INTERROGACAO_FORTE: AvaliacaoDoTexto = Object.freeze({ candidata: true, motivo: "interrogacao", sinalForte: true });
 const POR_PEDIDO: AvaliacaoDoTexto = Object.freeze({ candidata: true, motivo: "pedido", sinalForte: false });
 const POR_TERMO_TECNICO: AvaliacaoDoTexto = Object.freeze({ candidata: true, motivo: "termo_tecnico", sinalForte: false });
+const POR_INTERROGATIVA: AvaliacaoDoTexto = Object.freeze({ candidata: true, motivo: "interrogativa", sinalForte: false });
 
 const normalizarLista = (lista: readonly string[]): readonly string[] =>
   Object.freeze([...new Set(lista.map(normalizarTexto).filter((termo) => termo !== ""))]);
@@ -124,6 +132,11 @@ const INTERROGATIVAS_NORMALIZADAS = normalizarLista(PALAVRAS_INTERROGATIVAS);
 
 /** Termina com "?" (ou "？"), ignorando espaços e aspas no fim. */
 const TERMINA_EM_INTERROGACAO = /[?？][\s"'“”‘’«»]*$/;
+
+/** true quando o texto termina com "?" (ou "？"), ignorando espaços e aspas no fim. */
+export function terminaEmInterrogacao(texto: string): boolean {
+  return TERMINA_EM_INTERROGACAO.test(texto.trim());
+}
 
 /** Marcações que o Whisper põe no lugar de som que não é fala: "[Música]", "(risos)", "*aplausos*". */
 const MARCACAO_DE_SOM = /\[[^\]]*\]|\([^)]*\)|\*[^*]*\*/g;
@@ -166,7 +179,7 @@ export function ehAlucinacaoConhecida(texto: string): boolean {
  * `PALAVRAS_INTERROGATIVAS` ("Qual a complexidade do quicksort?").
  */
 export function sinalForte(texto: string): boolean {
-  if (ehAlucinacao(texto) || !TERMINA_EM_INTERROGACAO.test(texto.trim())) return false;
+  if (ehAlucinacao(texto) || !terminaEmInterrogacao(texto)) return false;
   const normalizado = normalizarTexto(texto);
   if (normalizado.split(" ").length < MINIMO_DE_PALAVRAS_DO_SINAL_FORTE) return false;
   return INTERROGATIVAS_NORMALIZADAS.some((termo) => `${normalizado} `.startsWith(`${termo} `));
@@ -174,17 +187,24 @@ export function sinalForte(texto: string): boolean {
 
 /**
  * Diz se um trecho transcrito pode ser um pedido, e se é pergunta com
- * certeza (`sinalForte`). Alucinação nunca é candidata. Função pura: o mesmo
- * texto dá sempre a mesma resposta.
+ * certeza (`sinalForte`). É candidato o texto que termina em "?", tem uma
+ * expressão de pedido, um termo técnico ou, com ao menos
+ * `MINIMO_DE_PALAVRAS_DO_SINAL_FORTE` palavras, uma das
+ * `PALAVRAS_INTERROGATIVAS` em qualquer posição (palavra inteira).
+ * Alucinação nunca é candidata. Função pura: o mesmo texto dá sempre a mesma
+ * resposta.
  */
 export function avaliar(texto: string): AvaliacaoDoTexto {
   if (ehAlucinacao(texto)) return NAO_CANDIDATA;
-  if (TERMINA_EM_INTERROGACAO.test(texto.trim())) return sinalForte(texto) ? POR_INTERROGACAO_FORTE : POR_INTERROGACAO;
+  if (terminaEmInterrogacao(texto)) return sinalForte(texto) ? POR_INTERROGACAO_FORTE : POR_INTERROGACAO;
   const normalizado = normalizarTexto(texto);
   if (contemTermo(normalizado, PEDIDOS_NORMALIZADOS)) return POR_PEDIDO;
   if (contemTermo(normalizado, TERMOS_NORMALIZADOS)) return POR_TERMO_TECNICO;
+  if (normalizado.split(" ").length >= MINIMO_DE_PALAVRAS_DO_SINAL_FORTE && contemTermo(normalizado, INTERROGATIVAS_NORMALIZADAS)) {
+    return POR_INTERROGATIVA;
+  }
   return NAO_CANDIDATA;
 }
 
 /** Serviço sem estado: as mesmas funções, agrupadas. */
-export const DetectorDePergunta = Object.freeze({ avaliar, ehAlucinacao, ehAlucinacaoConhecida, sinalForte });
+export const DetectorDePergunta = Object.freeze({ avaliar, ehAlucinacao, ehAlucinacaoConhecida, sinalForte, terminaEmInterrogacao });

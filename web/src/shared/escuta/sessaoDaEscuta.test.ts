@@ -16,7 +16,7 @@ import type { CapturaDoAudio, OuvintesDaCaptura } from "./capturaDoAudio";
 import { ControleDeDisparos, INTERVALO_MINIMO_MS } from "./ControleDeDisparos";
 import { DURACAO_MAXIMA_DA_FALA_MS } from "./CortadorDeFala";
 import { AMOSTRAS_POR_JANELA_DO_VAD, type DetectorDeVoz, type JanelasAnalisadas, TAXA_DE_AMOSTRAGEM } from "./DetectorDeVoz";
-import { DURACAO_MAXIMA_DA_FRASE_MS } from "./LegendaDaEscuta";
+import { DURACAO_MAXIMA_DO_ENUNCIADO_MS, PAUSA_DO_ENUNCIADO_MS } from "./LegendaDaEscuta";
 import { mensagemDaEscuta } from "./mensagemDaEscuta";
 import { PerguntaDetectada } from "./PerguntaDetectada";
 import {
@@ -29,6 +29,7 @@ import {
 import {
   AUDIO_NOVO_PARA_PASSADA_MS,
   controleSemPendente,
+  type DependenciasDaSessao,
   ESPERA_APOS_CONFLITO_MS,
   ESPERA_PARA_DESLIGAR_MS,
   MAXIMO_DE_TRECHOS_NA_TELA,
@@ -41,6 +42,8 @@ import type { OpcoesDaEscuta } from "./useEscuta";
 const AMOSTRAS_POR_MS = TAXA_DE_AMOSTRAGEM / 1000;
 /** A captura de verdade entrega pedaços de 100 ms. */
 const MS_POR_PEDACO = 100;
+/** Silêncio que fecha a fala curta no cortador (16 janelas de 32 ms = 512 ms), com folga. */
+const SILENCIO_DO_FIM_DA_FALA_MS = 600;
 
 const voz = (ms: number): Float32Array => new Float32Array(ms * AMOSTRAS_POR_MS).fill(0.3);
 const silencio = (ms: number): Float32Array => new Float32Array(ms * AMOSTRAS_POR_MS);
@@ -190,6 +193,8 @@ interface OpcoesDoTeste {
   readonly automaticoManual?: boolean;
   readonly idioma?: IdiomaDaEscuta;
   readonly falhaNaCaptura?: Error;
+  /** Agendador próprio; sem ele, vale o padrão (setTimeout, falso no vi.useFakeTimers). */
+  readonly agendar?: DependenciasDaSessao["agendar"];
 }
 
 function montar(opcoes: OpcoesDoTeste = {}) {
@@ -244,6 +249,7 @@ function montar(opcoes: OpcoesDoTeste = {}) {
     classificar,
     agora: () => Date.now(),
     preferencias: armazenamento,
+    ...(opcoes.agendar === undefined ? {} : { agendar: opcoes.agendar }),
   });
 
   let atuais: OpcoesDaEscuta = {
@@ -278,20 +284,34 @@ function montar(opcoes: OpcoesDoTeste = {}) {
     }
   };
 
-  /** Uma fala curta em que o motor ouve `texto`: 1 s de voz (uma passada parcial) e 0,5 s de silêncio (a final). */
-  const falar = async (texto: string) => {
+  /**
+   * Uma fala curta em que o motor ouve `texto`: 1 s de voz (uma passada
+   * parcial) e o silêncio que fecha a fala (a final). O enunciado continua
+   * aberto: a próxima fala entra nele.
+   */
+  const falarSemPausa = async (texto: string) => {
     motor.texto = texto;
     await tocar(voz(1_000));
-    await tocar(silencio(500));
+    await tocar(silencio(SILENCIO_DO_FIM_DA_FALA_MS));
   };
 
-  /** A mesma fala entregue de uma vez, sem o relógio andar (para muitas falas seguidas). */
+  /** A fala curta seguida da pausa que fecha o enunciado: cada `falar` é um enunciado. */
+  const falar = async (texto: string) => {
+    await falarSemPausa(texto);
+    await tocar(silencio(PAUSA_DO_ENUNCIADO_MS));
+  };
+
+  /**
+   * A fala entregue de uma vez, sem o relógio andar (para muitas falas
+   * seguidas), com silêncio bastante depois para a próxima fala abrir outro
+   * enunciado. O último fica aberto até o relógio andar a pausa.
+   */
   const falarDeUmaVez = async (texto: string) => {
     motor.texto = texto;
     const { ouvintes } = ultimaCaptura();
-    audioEntregueMs += 1_500;
+    audioEntregueMs += 3_500;
     ouvintes.aoReceberAmostras(voz(1_000));
-    ouvintes.aoReceberAmostras(silencio(500));
+    ouvintes.aoReceberAmostras(silencio(2_500));
     await vi.advanceTimersByTimeAsync(0);
   };
 
@@ -317,6 +337,7 @@ function montar(opcoes: OpcoesDoTeste = {}) {
     opcoesDaTela,
     tocar,
     falar,
+    falarSemPausa,
     falarDeUmaVez,
     entrar,
   };
@@ -424,7 +445,7 @@ describe("SessaoDaEscuta", () => {
       });
     });
 
-    it("confirmação por concordância: o confirmado vira frases de ids estáveis, o resto é o parcial e o buffer é aparado", async () => {
+    it("confirmação por concordância: o confirmado cresce no enunciado (sem dividir na pontuação), o resto é o parcial e o buffer é aparado", async () => {
       const t = montar({ automatico: false });
       await t.entrar();
       t.motor.roteiro = () => "esperar";
@@ -440,7 +461,7 @@ describe("SessaoDaEscuta", () => {
         linhas: [],
       });
 
-      // 2ª: concorda nas três primeiras palavras, que ficam confirmadas (a frase ainda está aberta).
+      // 2ª: concorda nas três primeiras palavras, que ficam confirmadas (o enunciado continua aberto).
       await t.tocar(voz(1_100));
       t.motor.proximaEsperando().resolver(
         resultado("Hoje vamos falar de listas. E depois", {
@@ -452,7 +473,7 @@ describe("SessaoDaEscuta", () => {
       expect(estado.legenda.frases).toEqual([]);
       expect(estado.legenda.emAndamento).toMatchObject({ confirmado: "Hoje vamos falar", parcial: "de listas. E depois" });
 
-      // 3ª: a primeira frase fecha na pontuação e a segunda começa, ainda aberta.
+      // 3ª: o ponto final não fecha nada; todo o confirmado fica no enunciado aberto.
       await t.tocar(voz(1_100));
       const terceira = t.motor.proximaEsperando();
       terceira.resolver(
@@ -462,13 +483,15 @@ describe("SessaoDaEscuta", () => {
       );
       await vi.advanceTimersByTimeAsync(0);
       estado = t.sessao.instantaneo();
-      expect(estado.legenda.frases.map((frase) => [frase.id, frase.texto, frase.motivo])).toEqual([
-        ["frase-1-1", "Hoje vamos falar de listas.", "pontuacao"],
-      ]);
-      expect(estado.legenda.emAndamento).toMatchObject({ confirmado: "E depois", parcial: "filas" });
+      expect(estado.legenda.frases).toEqual([]);
+      expect(estado.legenda.emAndamento).toEqual({
+        id: "enunciado-1",
+        confirmado: "Hoje vamos falar de listas. E depois",
+        parcial: "filas",
+        inicioMs: 1_000_000,
+      });
       expect(estado.linhaProvisoria).toBe("Hoje vamos falar de listas. E depois filas");
-      expect(estado.linhas).toEqual(["Hoje vamos falar de listas."]);
-      const primeiraFrase = estado.legenda.frases[0];
+      expect(estado.linhas).toEqual([]);
 
       // O primeiro segmento ficou todo confirmado: o buffer perde os 1,6 s dele e a 4ª passada só leva o resto.
       await t.tocar(voz(1_100));
@@ -477,7 +500,7 @@ describe("SessaoDaEscuta", () => {
       expect(duracaoMs(quarta.audio)).toBeCloseTo(quarta.audioEntregueMs - 1_600, -2);
 
       // A fala acaba: a passada final (não descartável) leva o que restou depois do aparo.
-      await t.tocar(silencio(500));
+      await t.tocar(silencio(SILENCIO_DO_FIM_DA_FALA_MS));
       const final = t.motor.proximaEsperando();
       expect(final.opcoes).toEqual({ origem: "escuta", idioma: "portuguese", descartavel: false });
       expect(duracaoMs(final.audio)).toBeGreaterThan(duracaoMs(quarta.audio));
@@ -488,29 +511,34 @@ describe("SessaoDaEscuta", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(t.sessao.instantaneo().legenda.emAndamento?.parcial).toBe("filas");
 
-      // O texto final confirma o resto: as frases fecham, o parcial some e a fala vira um trecho.
+      // O texto final confirma o resto: o parcial some, a fala vira um trecho e o enunciado espera a pausa.
       final.resolver(resultado("E depois filas e pilhas.", { fimS: 3.2 }));
       await vi.advanceTimersByTimeAsync(0);
+      const completo = "Hoje vamos falar de listas. E depois filas e pilhas.";
       estado = t.sessao.instantaneo();
-      expect(estado.legenda.frases.map((frase) => [frase.id, frase.texto])).toEqual([
-        ["frase-1-1", "Hoje vamos falar de listas."],
-        ["frase-1-2", "E depois filas e pilhas."],
-      ]);
-      expect(estado.legenda.frases[0]).toBe(primeiraFrase);
+      expect(estado.legenda.frases).toEqual([]);
+      expect(estado.legenda.emAndamento).toMatchObject({ id: "enunciado-1", confirmado: completo, parcial: "" });
+      expect(estado.linhaProvisoria).toBe(completo);
+      expect(estado.trechos.map((trecho) => trecho.texto)).toEqual([completo]);
+      expect(estado.linhas).toEqual([]);
+
+      // A pausa fecha o enunciado, com o mesmo id, e ele entra na janela.
+      await vi.advanceTimersByTimeAsync(PAUSA_DO_ENUNCIADO_MS);
+      estado = t.sessao.instantaneo();
+      expect(estado.legenda.frases.map((frase) => [frase.id, frase.texto])).toEqual([["enunciado-1", completo]]);
       expect(estado.legenda.emAndamento).toBeNull();
       expect(estado.linhaProvisoria).toBeNull();
-      expect(estado.trechos.map((trecho) => trecho.texto)).toEqual(["Hoje vamos falar de listas. E depois filas e pilhas."]);
-      expect(estado.linhas).toEqual(["Hoje vamos falar de listas.", "E depois filas e pilhas."]);
+      expect(estado.linhas).toEqual([completo]);
     });
 
-    it("no fim da fala, a passada final (não descartável) fecha as frases e alimenta trechos e linhas", async () => {
+    it("no fim da fala, a passada final (não descartável) completa o enunciado; a pausa o fecha e alimenta trechos e linhas", async () => {
       const t = montar({ automatico: false });
       await t.entrar();
       await t.falar("Bom dia a todos, vamos começar.");
       expect(t.motor.finais).toHaveLength(1);
       expect(t.motor.finais[0]?.opcoes).toEqual({ origem: "escuta", idioma: "portuguese", descartavel: false });
       const estado = t.sessao.instantaneo();
-      expect(estado.legenda).toMatchObject({ frases: [{ id: "frase-1-1", texto: "Bom dia a todos, vamos começar." }], emAndamento: null });
+      expect(estado.legenda).toMatchObject({ frases: [{ id: "enunciado-1", texto: "Bom dia a todos, vamos começar." }], emAndamento: null });
       expect(estado.trechos.map((trecho) => trecho.texto)).toEqual(["Bom dia a todos, vamos começar."]);
       expect(estado.linhas).toEqual(["Bom dia a todos, vamos começar."]);
     });
@@ -533,7 +561,7 @@ describe("SessaoDaEscuta", () => {
       t.motor.texto = "We will talk about linked lists today";
       await t.tocar(voz(2_500));
       expect(t.motor.parciais.map((passada) => passada.opcoes.idioma)).toEqual(["automatico", "en"]);
-      await t.tocar(silencio(500));
+      await t.tocar(silencio(SILENCIO_DO_FIM_DA_FALA_MS));
       expect(t.motor.finais.map((passada) => passada.opcoes.idioma)).toEqual(["en"]);
 
       // Na fala seguinte, detecta de novo.
@@ -561,50 +589,118 @@ describe("SessaoDaEscuta", () => {
     });
   });
 
-  describe("frases de no máximo 5 s", () => {
-    it("numa fala longa sem pontuação, a frase fecha por tempo aos ~5 s, sem esperar o fim da fala nem cortar palavra", async () => {
+  describe("enunciados (falas completas entre pausas)", () => {
+    it("fala longa sem pontuação fica num enunciado só, sem dividir por tempo nem cortar palavra, e fecha na pausa", async () => {
       const t = montar({ automatico: false });
       await t.entrar();
       // Fala de ~7,4 s: cabe numa fala só (até DURACAO_MAXIMA_DA_FALA_MS, 8 s, com o silêncio do fim).
       const palavras = Array.from({ length: 24 }, (_, posicao) => `palavra${posicao + 1}`);
       ouvirAoLongo(t.motor, ditas(palavras.join(" "), 300));
       await t.tocar(voz(6_500));
-      // No meio da fala: a frase em andamento começa onde a última fechada terminou.
       const noMeio = t.sessao.instantaneo().legenda;
-      expect(noMeio.frases.length).toBeGreaterThanOrEqual(1);
-      expect(noMeio.emAndamento?.inicioMs).toBe(noMeio.frases.at(-1)?.fimMs);
+      expect(noMeio.frases).toEqual([]);
+      expect(noMeio.emAndamento).toMatchObject({ id: "enunciado-1", inicioMs: 1_000_000 });
       await t.tocar(voz(900));
+      await t.tocar(silencio(SILENCIO_DO_FIM_DA_FALA_MS));
 
       let estado = t.sessao.instantaneo();
-      expect(estado.trechos).toEqual([]); // a fala nem terminou
-      expect(estado.legenda.frases.length).toBeGreaterThanOrEqual(1);
-      for (const frase of estado.legenda.frases) {
-        expect(frase.motivo).toBe("tempo");
-        expect(frase.fimMs - frase.inicioMs).toBeGreaterThanOrEqual(DURACAO_MAXIMA_DA_FRASE_MS);
-        expect(frase.fimMs - frase.inicioMs).toBeLessThanOrEqual(DURACAO_MAXIMA_DA_FRASE_MS + AUDIO_NOVO_PARA_PASSADA_MS + 200);
-      }
-      // Cada frase começa onde a anterior terminou.
-      estado.legenda.frases.slice(1).forEach((frase, posicao) => {
-        expect(frase.inicioMs).toBe(estado.legenda.frases[posicao]?.fimMs);
-      });
+      expect(estado.trechos.map((trecho) => trecho.texto)).toEqual([palavras.join(" ")]);
+      expect(estado.legenda.frases).toEqual([]);
+      expect(estado.legenda.emAndamento).toMatchObject({ id: "enunciado-1", confirmado: palavras.join(" "), parcial: "" });
 
-      await t.tocar(silencio(500));
+      await t.tocar(silencio(PAUSA_DO_ENUNCIADO_MS));
       estado = t.sessao.instantaneo();
       expect(estado.legenda.emAndamento).toBeNull();
-      expect(estado.legenda.frases.slice(0, -1).every((frase) => frase.motivo === "tempo")).toBe(true);
       // Nenhuma palavra cortada, perdida ou repetida.
-      expect(estado.legenda.frases.map((frase) => frase.texto).join(" ")).toBe(palavras.join(" "));
-      expect(estado.trechos.map((trecho) => trecho.texto)).toEqual([palavras.join(" ")]);
+      expect(estado.legenda.frases).toMatchObject([{ id: "enunciado-1", texto: palavras.join(" "), pergunta: false }]);
     });
 
-    it("fala contínua de mais de 8 s é cortada em falas de até 8 s: os trechos chegam sem esperar o silêncio", async () => {
+    it("falas seguidas (pausa menor que a do enunciado) entram no mesmo enunciado; cada fala continua um trecho", async () => {
+      const t = montar({ automatico: false });
+      await t.entrar();
+      await t.falarSemPausa("Pessoal, eu queria saber");
+      await t.falarSemPausa("como funciona um heap");
+      let estado = t.sessao.instantaneo();
+      expect(estado.legenda.frases).toEqual([]);
+      expect(estado.legenda.emAndamento).toMatchObject({ id: "enunciado-1", confirmado: "Pessoal, eu queria saber como funciona um heap" });
+      expect(estado.trechos.map((trecho) => trecho.texto)).toEqual(["Pessoal, eu queria saber", "como funciona um heap"]);
+
+      await t.tocar(silencio(PAUSA_DO_ENUNCIADO_MS));
+      estado = t.sessao.instantaneo();
+      expect(estado.legenda.frases.map((frase) => [frase.id, frase.texto])).toEqual([
+        ["enunciado-1", "Pessoal, eu queria saber como funciona um heap"],
+      ]);
+      expect(estado.linhas).toEqual(["Pessoal, eu queria saber como funciona um heap"]);
+
+      // Depois da pausa, a fala seguinte abre outro enunciado.
+      await t.falar("Vamos para o próximo assunto.");
+      expect(t.sessao.instantaneo().legenda.frases.map((frase) => frase.id)).toEqual(["enunciado-1", "enunciado-3"]);
+    });
+
+    it("a pausa do enunciado é agendada pelo agendar da sessão e cancelada quando uma fala nova começa", async () => {
+      const agendados: { readonly acao: () => void; readonly ms: number; cancelado: boolean }[] = [];
+      const agendar: DependenciasDaSessao["agendar"] = (acao, ms) => {
+        const agendado = { acao, ms, cancelado: false };
+        agendados.push(agendado);
+        return () => {
+          agendado.cancelado = true;
+        };
+      };
+      const pausas = () => agendados.filter((agendado) => agendado.ms === PAUSA_DO_ENUNCIADO_MS);
+      const t = montar({ automatico: false, agendar });
+      await t.entrar();
+
+      await t.falarSemPausa("Bom dia a todos");
+      expect(pausas()).toHaveLength(1);
+      expect(pausas()[0]?.cancelado).toBe(false);
+      // A fala seguinte cancela a pausa da anterior.
+      await t.falarSemPausa("vamos começar");
+      expect(pausas()).toHaveLength(2);
+      expect(pausas()[0]?.cancelado).toBe(true);
+      expect(pausas()[1]?.cancelado).toBe(false);
+
+      // O relógio andando não fecha nada: quem fecha é o agendar.
+      await t.tocar(silencio(3_000));
+      expect(t.sessao.instantaneo().legenda.frases).toEqual([]);
+      pausas()[1]?.acao();
+      expect(t.sessao.instantaneo().legenda).toEqual({
+        frases: [expect.objectContaining({ id: "enunciado-1", texto: "Bom dia a todos vamos começar" })],
+        emAndamento: null,
+      });
+    });
+
+    it("só fecha depois da passada final: se a pausa vence antes do resultado, fecha assim que ele chega", async () => {
+      const t = montar({ automatico: false });
+      await t.entrar();
+      t.motor.roteiro = (passada) =>
+        passada.opcoes.descartavel === true ? resultado("Bom dia a todos", { fimS: duracaoMs(passada.audio) / 1000 }) : "esperar";
+      await t.falarSemPausa("Bom dia a todos");
+      const final = t.motor.proximaEsperando();
+
+      await t.tocar(silencio(PAUSA_DO_ENUNCIADO_MS + 500));
+      let estado = t.sessao.instantaneo();
+      expect(estado.legenda.frases).toEqual([]);
+      expect(estado.legenda.emAndamento).toMatchObject({ id: "enunciado-1", confirmado: "", parcial: "Bom dia a todos" });
+
+      final.resolver(resultado("Bom dia a todos."));
+      await vi.advanceTimersByTimeAsync(0);
+      estado = t.sessao.instantaneo();
+      expect(estado.legenda.frases).toMatchObject([{ id: "enunciado-1", texto: "Bom dia a todos." }]);
+      expect(estado.legenda.emAndamento).toBeNull();
+      expect(estado.linhas).toEqual(["Bom dia a todos."]);
+    });
+
+    it("fala contínua: as falas curtas (até 8 s, cada uma um trecho) ficam no mesmo enunciado até a duração máxima", async () => {
       const t = montar({ automatico: false });
       await t.entrar();
       t.motor.texto = "fala corrida sem pausa";
-      await t.tocar(voz(20_000));
+      await t.tocar(voz(15_000));
+      // Já houve corte de fala, mas o enunciado continua um só.
+      expect(t.sessao.instantaneo().trechos.length).toBeGreaterThanOrEqual(2);
+      expect(t.sessao.instantaneo().legenda.frases).toEqual([]);
 
-      const trechos = t.sessao.instantaneo().trechos;
-      expect(trechos.length).toBeGreaterThanOrEqual(2);
+      await t.tocar(voz(13_000));
+      const { trechos, legenda } = t.sessao.instantaneo();
       for (const trecho of trechos) {
         expect(trecho.fimMs - trecho.inicioMs).toBeLessThanOrEqual(DURACAO_MAXIMA_DA_FALA_MS);
       }
@@ -612,11 +708,20 @@ describe("SessaoDaEscuta", () => {
       trechos.slice(1).forEach((trecho, posicao) => {
         expect(trecho.inicioMs).toBe(trechos[posicao]?.fimMs);
       });
-      // Uma fala de até 8 s fecha no máximo duas frases (a de 5 s e o resto).
-      expect(DURACAO_MAXIMA_DA_FALA_MS).toBeLessThan(2 * DURACAO_MAXIMA_DA_FRASE_MS);
+      // O enunciado fechou no fim da fala que passou da duração máxima, com o texto de todas as falas dele.
+      const [enunciado] = legenda.frases;
+      expect(legenda.frases).toHaveLength(1);
+      if (enunciado === undefined) throw new Error("o enunciado não fechou");
+      expect(enunciado.fimMs - enunciado.inicioMs).toBeGreaterThanOrEqual(DURACAO_MAXIMA_DO_ENUNCIADO_MS);
+      expect(enunciado.fimMs - enunciado.inicioMs).toBeLessThan(DURACAO_MAXIMA_DO_ENUNCIADO_MS + DURACAO_MAXIMA_DA_FALA_MS);
+      const falasDoEnunciado = trechos.filter((trecho) => trecho.fimMs <= enunciado.fimMs);
+      expect(falasDoEnunciado.length).toBeGreaterThanOrEqual(3);
+      expect(enunciado.texto).toBe(falasDoEnunciado.map((trecho) => trecho.texto).join(" "));
+      // A fala seguinte já está noutro enunciado.
+      expect(legenda.emAndamento?.id).not.toBe(enunciado.id);
     });
 
-    it("a frase em andamento mostra o confirmado e o parcial da frase aberta", async () => {
+    it("o enunciado em andamento mostra o confirmado e o parcial", async () => {
       const t = montar({ automatico: false });
       await t.entrar();
       ouvirAoLongo(t.motor, ditas("hoje vamos falar de estruturas de dados", 300));
@@ -715,7 +820,7 @@ describe("SessaoDaEscuta", () => {
   });
 
   describe("pergunta", () => {
-    it("candidata sem o sinal forte → classificação → envio do texto de mensagemDaEscuta; a frase fica marcada", async () => {
+    it("candidata sem o sinal forte → classificação → envio do texto de mensagemDaEscuta; o enunciado fica marcado", async () => {
       const t = montar();
       await t.entrar();
       t.respostas.push(pergunta(PERGUNTA));
@@ -732,11 +837,13 @@ describe("SessaoDaEscuta", () => {
       expect(estado.legenda.frases).toMatchObject([{ texto: CANDIDATA, pergunta: true }]);
     });
 
-    it("frase com o sinal forte vira pergunta na hora, sem o servidor e sem esperar o fim da fala", async () => {
+    it("enunciado que passa a terminar em ? com o sinal forte vira pergunta na hora, sem o servidor e sem esperar a pausa", async () => {
       const t = montar();
       await t.entrar();
-      t.motor.texto = "Qual a complexidade do quicksort? E";
-      // Duas passadas parciais: a segunda confirma a frase, que fecha no "?".
+      const hipoteses = ["Qual a complexidade do quicksort?"];
+      t.motor.roteiro = (passada) =>
+        resultado(hipoteses.shift() ?? "Qual a complexidade do quicksort? E o", { fimS: duracaoMs(passada.audio) / 1000 });
+      // Duas passadas parciais: a segunda confirma até o "?" (o resto ainda é parcial).
       await t.tocar(voz(2_300));
 
       expect(t.classificar).not.toHaveBeenCalled();
@@ -744,76 +851,87 @@ describe("SessaoDaEscuta", () => {
       expect(t.enviar).toHaveBeenCalledWith(
         mensagemEsperada("Qual a complexidade do quicksort?", "Qual a complexidade do quicksort?"),
       );
-      const estado = t.sessao.instantaneo();
+      let estado = t.sessao.instantaneo();
       expect(estado.trechos).toEqual([]); // a fala nem terminou
-      expect(estado.linhaProvisoria).toBe("Qual a complexidade do quicksort? E");
-      expect(estado.legenda.frases).toHaveLength(1);
-      expect(estado.legenda.frases).toMatchObject([{ texto: "Qual a complexidade do quicksort?", pergunta: true }]);
-      expect(estado.legenda.emAndamento).toMatchObject({ confirmado: "E" });
+      expect(estado.linhaProvisoria).toBe("Qual a complexidade do quicksort? E o");
+      expect(estado.legenda.frases).toEqual([]);
+      expect(estado.legenda.emAndamento).toMatchObject({ id: "enunciado-1", confirmado: "Qual a complexidade do quicksort?", parcial: "E o" });
       expect(estado.ultimaPerguntaEnviada).toEqual({
         pergunta: "Qual a complexidade do quicksort?",
         enviadaEmMs: t.instantesDosEnvios[0],
       });
-    });
 
-    it("a frase cortada por tempo é avaliada na hora, sem esperar o fim da fala", async () => {
-      const t = montar();
-      await t.entrar();
-      t.respostas.push(pergunta("Como funciona um heap na prática?"));
-      ouvirAoLongo(t.motor, [
-        ...ditas("me explica como funciona um heap na prática", 300),
-        ...ditas("e depois seguimos com o resto", 6_500),
-      ]);
-      await t.tocar(voz(6_200));
-
-      expect(t.classificar).toHaveBeenCalledTimes(1);
-      expect(t.classificar).toHaveBeenCalledWith({ trecho: "me explica como funciona um heap na prática" }, expect.any(AbortSignal));
-      expect(t.enviar).toHaveBeenCalledWith(
-        mensagemEsperada("Como funciona um heap na prática?", "me explica como funciona um heap na prática"),
-      );
-      const estado = t.sessao.instantaneo();
-      expect(estado.trechos).toEqual([]); // a fala continua
+      // O texto continua sem terminar em "?": no fechamento, não é avaliado de novo; a marca de pergunta fica.
+      await t.tocar(silencio(SILENCIO_DO_FIM_DA_FALA_MS + PAUSA_DO_ENUNCIADO_MS));
+      estado = t.sessao.instantaneo();
       expect(estado.legenda.frases).toMatchObject([
-        { texto: "me explica como funciona um heap na prática", motivo: "tempo", pergunta: true },
+        { id: "enunciado-1", texto: "Qual a complexidade do quicksort? E o", pergunta: true },
       ]);
-    });
-
-    it("pergunta partida pelo corte de 5 s: a frase que não é candidata sozinha é avaliada junto com a anterior", async () => {
-      // Uma fala tem até 8 s: a primeira frase fecha por tempo e a segunda, no fim da fala.
-      const t = montar();
-      await t.entrar();
-      const juntas = "pessoal agora eu queria saber qual a melhor forma de fazer isso";
-      t.respostas.push(pergunta("Qual a melhor forma de fazer isso?"));
-      ouvirAoLongo(t.motor, [
-        ...ditas("pessoal agora eu queria saber qual", 300),
-        ...ditas("a melhor forma de fazer isso", 5_600),
-      ]);
-      await t.tocar(voz(7_400));
-      // A segunda frase ainda está aberta: nada foi avaliado.
-      expect(t.classificar).not.toHaveBeenCalled();
-
-      await t.tocar(silencio(500));
-      // Nenhuma das duas é candidata sozinha; juntas, são ("qual a").
-      expect(t.classificar).toHaveBeenCalledTimes(1);
-      expect(t.classificar).toHaveBeenCalledWith({ trecho: juntas }, expect.any(AbortSignal));
       expect(t.enviar).toHaveBeenCalledTimes(1);
-      expect(t.enviar).toHaveBeenCalledWith(mensagemEsperada("Qual a melhor forma de fazer isso?", juntas));
-      expect(t.sessao.instantaneo().legenda.frases).toMatchObject([
-        { texto: "pessoal agora eu queria saber qual", motivo: "tempo", pergunta: false },
-        { texto: "a melhor forma de fazer isso", motivo: "fim_da_fala", pergunta: true },
-      ]);
-    });
-
-    it("sem corte por tempo na anterior, não há junção", async () => {
-      const t = montar();
-      await t.entrar();
-      await t.falar("pessoal agora eu queria saber qual");
-      await t.falar("a melhor forma de fazer isso");
-      expect(t.sessao.instantaneo().legenda.frases.map((frase) => frase.motivo)).toEqual(["fim_da_fala", "fim_da_fala"]);
       expect(t.classificar).not.toHaveBeenCalled();
     });
 
-    it("manda à classificação o contexto dos 60 s anteriores à frase, e nada mais antigo", async () => {
+    it("a pergunta é avaliada no texto inteiro do enunciado ao fechar: falas seguidas viram uma pergunta só", async () => {
+      const t = montar();
+      await t.entrar();
+      const inteiro = "pessoal agora eu queria saber qual a melhor forma de fazer isso";
+      t.respostas.push(pergunta("Qual a melhor forma de fazer isso?"));
+      await t.falarSemPausa("pessoal agora eu queria saber");
+      await t.falarSemPausa("qual a melhor forma de fazer isso");
+      // O enunciado ainda está aberto (e não termina em "?"): nada foi avaliado.
+      expect(t.classificar).not.toHaveBeenCalled();
+
+      await t.tocar(silencio(PAUSA_DO_ENUNCIADO_MS));
+      expect(t.classificar).toHaveBeenCalledTimes(1);
+      expect(t.classificar).toHaveBeenCalledWith({ trecho: inteiro }, expect.any(AbortSignal));
+      expect(t.enviar).toHaveBeenCalledTimes(1);
+      expect(t.enviar).toHaveBeenCalledWith(mensagemEsperada("Qual a melhor forma de fazer isso?", inteiro));
+      expect(t.sessao.instantaneo().legenda.frases).toMatchObject([{ id: "enunciado-1", texto: inteiro, pergunta: true }]);
+    });
+
+    it("interrogativa no meio, sem ?, também vai ao servidor no fechamento", async () => {
+      const t = montar();
+      await t.entrar();
+      t.respostas.push(pergunta("Quando sai a versão nova?"));
+      await t.falar("pessoal eu queria saber quando sai a versão nova");
+      expect(t.classificar).toHaveBeenCalledWith({ trecho: "pessoal eu queria saber quando sai a versão nova" }, expect.any(AbortSignal));
+      expect(t.enviar).toHaveBeenCalledTimes(1);
+    });
+
+    it("o ? antecipa a avaliação, sem repetir no fechamento; o texto que continua só é avaliado de novo se também terminar em ?", async () => {
+      const t = montar();
+      await t.entrar();
+      await t.falarSemPausa(CANDIDATA);
+      // Terminou em "?": vai ao servidor sem esperar a pausa.
+      expect(t.classificar).toHaveBeenCalledTimes(1);
+      expect(t.classificar).toHaveBeenLastCalledWith({ trecho: CANDIDATA }, expect.any(AbortSignal));
+
+      await t.falarSemPausa("e depois a gente vê isso");
+      expect(t.classificar).toHaveBeenCalledTimes(1);
+
+      await t.falarSemPausa("E o que é um heap?");
+      const inteiro = `${CANDIDATA} e depois a gente vê isso E o que é um heap?`;
+      expect(t.classificar).toHaveBeenCalledTimes(2);
+      expect(t.classificar).toHaveBeenLastCalledWith({ trecho: inteiro }, expect.any(AbortSignal));
+
+      await t.tocar(silencio(PAUSA_DO_ENUNCIADO_MS));
+      expect(t.classificar).toHaveBeenCalledTimes(2);
+      expect(t.sessao.instantaneo().legenda.frases).toMatchObject([{ id: "enunciado-1", texto: inteiro }]);
+    });
+
+    it("enunciados separados por uma pausa longa são avaliados cada um sozinho", async () => {
+      const t = montar();
+      await t.entrar();
+      await t.falar("pessoal agora eu queria saber se");
+      await t.falar("a melhor forma de fazer isso");
+      expect(t.sessao.instantaneo().legenda.frases.map((frase) => frase.texto)).toEqual([
+        "pessoal agora eu queria saber se",
+        "a melhor forma de fazer isso",
+      ]);
+      expect(t.classificar).not.toHaveBeenCalled();
+    });
+
+    it("o enunciado fechado vira contexto: manda à classificação os 60 s anteriores ao enunciado, e nada mais antigo", async () => {
       const t = montar();
       await t.entrar();
       await t.falar("Vamos falar de estruturas de dados hoje.");
@@ -862,7 +980,8 @@ describe("SessaoDaEscuta", () => {
       const t = montar();
       await t.entrar();
       t.enviar.mockRejectedValueOnce(new ErroDaApi("ocupado", 409));
-      await t.falar(PERGUNTA);
+      // Termina em "?": a pergunta sai no fim da fala, sem esperar a pausa do enunciado.
+      await t.falarSemPausa(PERGUNTA);
       expect(t.enviar).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(ESPERA_APOS_CONFLITO_MS - 1_000);
       expect(t.enviar).toHaveBeenCalledTimes(1);
@@ -1066,16 +1185,17 @@ describe("SessaoDaEscuta", () => {
       expect(depois.legenda.frases).toEqual([]);
       expect(depois.legenda.emAndamento).toEqual(antes.legenda.emAndamento);
 
-      // Sem fala em andamento, a legenda fica vazia.
-      await t.tocar(silencio(500));
+      // Sem fala em andamento (a pausa fechou o enunciado), a legenda fica vazia.
+      await t.tocar(silencio(SILENCIO_DO_FIM_DA_FALA_MS + PAUSA_DO_ENUNCIADO_MS));
       t.sessao.limparTrechos();
       expect(t.sessao.instantaneo().legenda).toEqual({ frases: [], emAndamento: null });
     });
 
-    it("guarda no máximo 200 trechos e 200 frases: os mais antigos saem", async () => {
+    it("guarda no máximo 200 trechos e 200 enunciados: os mais antigos saem", async () => {
       const t = montar({ automatico: false });
       await t.entrar();
       for (let i = 0; i < 202; i++) await t.falarDeUmaVez(`Trecho número ${i} da aula de hoje.`);
+      await vi.advanceTimersByTimeAsync(PAUSA_DO_ENUNCIADO_MS);
       const { trechos, legenda } = t.sessao.instantaneo();
       expect(trechos).toHaveLength(MAXIMO_DE_TRECHOS_NA_TELA);
       expect(trechos[0]?.texto).toBe("Trecho número 2 da aula de hoje.");
@@ -1274,6 +1394,25 @@ describe("SessaoDaEscuta", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(t.iniciarCaptura).toHaveBeenCalledTimes(2);
       expect(t.sessao.instantaneo().situacao).toBe("escutando");
+    });
+
+    it("pausar fecha o enunciado aberto como está (na legenda e na janela), sem avaliar a pergunta", async () => {
+      const t = montar();
+      await t.entrar();
+      await t.falarSemPausa("pessoal eu queria saber qual a melhor forma");
+      expect(t.sessao.instantaneo().legenda.emAndamento).toMatchObject({ id: "enunciado-1" });
+
+      t.sessao.pausar();
+      const estado = t.sessao.instantaneo();
+      expect(estado.legenda).toEqual({
+        frases: [expect.objectContaining({ id: "enunciado-1", texto: "pessoal eu queria saber qual a melhor forma", pergunta: false })],
+        emAndamento: null,
+      });
+      expect(estado.linhas).toEqual(["pessoal eu queria saber qual a melhor forma"]);
+      // A pausa que estava agendada não fecha nada de novo nem avalia depois.
+      await vi.advanceTimersByTimeAsync(PAUSA_DO_ENUNCIADO_MS * 2);
+      expect(t.sessao.instantaneo().legenda.frases).toHaveLength(1);
+      expect(t.classificar).not.toHaveBeenCalled();
     });
 
     it("só avisa os assinantes quando o retrato muda, e o retrato é estável entre mudanças", async () => {

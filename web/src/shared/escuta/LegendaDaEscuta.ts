@@ -1,199 +1,196 @@
-import { dividirEmFrases } from "./SegmentadorDeFrases";
-
-/** Quantas frases a legenda guarda; passando disto, as mais antigas saem. */
+/** Quantos enunciados a legenda guarda; passando disto, os mais antigos saem. */
 export const MAXIMO_DE_FRASES_NA_LEGENDA = 200;
 
 /**
- * A frase aberta fecha, mesmo sem pontuação, na primeira passada cujo relógio
- * passe isto desde o começo dela. O Whisper quase não pontua fala corrida: sem
- * o corte, a fala toda ficaria numa frase só, e a pergunta nunca seria avaliada.
+ * A pausa que separa dois enunciados. A fala curta seguinte que começa até
+ * isto depois do fim da anterior entra no mesmo enunciado; sem fala nova
+ * nesse tempo, a sessão fecha o enunciado (`semEnunciadoAberto`).
  */
-export const DURACAO_MAXIMA_DA_FRASE_MS = 5_000;
+export const PAUSA_DO_ENUNCIADO_MS = 1_200;
 
-/** Por que a frase fechou: pontuação final, fim da fala ou a duração máxima da frase. */
-export type MotivoDoFechamento = "pontuacao" | "fim_da_fala" | "tempo";
+/**
+ * Duração máxima do enunciado, contada desde o começo dele: a fala que
+ * termina com o enunciado já nesta duração o fecha na hora, e a fala que
+ * começa depois disto abre outro. Como cada fala curta tem até 8 s, o
+ * enunciado nunca passa de uns 28 s, mesmo com alguém falando sem pausa.
+ */
+export const DURACAO_MAXIMA_DO_ENUNCIADO_MS = 20_000;
 
-/** Uma frase fechada da legenda: um pedaço do texto confirmado de uma fala. */
+/**
+ * Um enunciado fechado da legenda: o texto confirmado de uma fala completa,
+ * entre pausas (uma ou mais falas curtas do cortador, unidas por espaço). Um
+ * enunciado não se divide por pontuação nem por tempo. O nome "frase" ficou
+ * da versão em que a legenda fatiava a fala em frases de até 5 s.
+ */
 export interface FraseDaLegenda {
+  /** `enunciado-<número da primeira fala>`: o mesmo que ele tinha em `emAndamento`. */
   readonly id: string;
   readonly texto: string;
   readonly inicioMs: number;
   readonly fimMs: number;
   readonly pergunta: boolean;
-  /** Por que fechou. A legenda sempre o preenche; é opcional só para frases montadas fora dela. */
-  readonly motivo?: MotivoDoFechamento;
 }
 
-/** Qual fala da escuta: o número (único na sessão) e o começo dela, em ms de relógio. */
+/** Qual fala curta da escuta: o número (único na sessão) e o começo dela, em ms de relógio. */
 export interface FalaDaLegenda {
   readonly numero: number;
   readonly inicioMs: number;
 }
 
-/** A frase aberta da fala atual, como a tela a mostra. Imutável. */
-export interface FraseEmAndamento {
-  /** O texto já confirmado da frase ("" quando só há o parcial). */
+/** O enunciado aberto, como a tela o mostra. Imutável. */
+export interface EnunciadoEmAndamento {
+  /** O id que o enunciado terá ao fechar. */
+  readonly id: string;
+  /** Todo o texto já confirmado do enunciado ("" quando só há o parcial). */
   readonly confirmado: string;
-  /** A cauda ainda não confirmada da fala ("" sem nenhuma). */
+  /** A cauda ainda não confirmada da fala em andamento ("" sem nenhuma). */
   readonly parcial: string;
-  /** Onde a frase começa, em ms de relógio. */
+  /** Onde o enunciado começa (o começo da primeira fala), em ms de relógio. */
   readonly inicioMs: number;
 }
 
-/** A fala ainda em andamento: quanto dela já virou frase fechada e a frase aberta. */
-interface FalaAberta extends FalaDaLegenda {
+/** A fala curta ainda em andamento dentro do enunciado aberto. */
+interface FalaAberta {
+  readonly numero: number;
   /** Todo o texto confirmado da fala até aqui (palavras separadas por um espaço). */
   readonly confirmado: string;
   /** Até onde (ms de relógio) ia a passada em que o confirmado cresceu pela última vez. */
   readonly fimDoConfirmadoMs: number;
-  /** Quantas palavras do confirmado já estão em frases fechadas. */
-  readonly palavrasFechadas: number;
-  /** Quantas frases da fala já fecharam: a próxima é a `frase-<fala>-<fechadas + 1>`. */
-  readonly frasesFechadas: number;
-  /** O texto confirmado da frase aberta ("" sem nenhum). */
-  readonly textoDaFrase: string;
-  /** Onde a frase aberta começa: o fim da última frase fechada da fala ou, antes dela, o começo da fala. */
-  readonly inicioDaFraseMs: number;
+}
+
+/** O enunciado ainda aberto: as falas que já terminaram e a que está em andamento. */
+interface EnunciadoAberto {
+  readonly id: string;
+  readonly inicioMs: number;
+  /** O confirmado das falas que já terminaram, unido por espaço ("" sem nenhuma). */
+  readonly confirmadoDasFalas: string;
+  /** O fim da última fala que terminou; antes dela, o começo do enunciado. */
+  readonly fimDasFalasMs: number;
+  /** A fala em andamento; null entre uma fala e outra. */
+  readonly fala: FalaAberta | null;
+  readonly pergunta: boolean;
 }
 
 /** O resultado de uma mudança na legenda. */
 export interface MudancaNaLegenda {
   /** A legenda nova (a mesma, quando nada mudou). */
   readonly legenda: LegendaDaEscuta;
-  /** As frases que fecharam nesta mudança, na ordem, cada uma com o `motivo`: são as que podem ser perguntas. */
+  /** Os enunciados que fecharam nesta mudança, na ordem: são os que podem ser perguntas. */
   readonly fechadasAgora: readonly FraseDaLegenda[];
 }
 
 const NENHUMA_FRASE: readonly FraseDaLegenda[] = Object.freeze([]);
 
-const idDaFrase = (numeroDaFala: number, posicao: number): string => `frase-${numeroDaFala}-${posicao + 1}`;
+const idDoEnunciado = (numeroDaPrimeiraFala: number): string => `enunciado-${numeroDaPrimeiraFala}`;
 
-function palavrasDe(texto: string): readonly string[] {
-  const limpo = texto.replace(/\s+/g, " ").trim();
-  return limpo === "" ? [] : limpo.split(" ");
-}
+const limpo = (texto: string | null): string => texto?.replace(/\s+/g, " ").trim() ?? "";
 
 function semVazio(texto: string | null): string | null {
-  const limpo = texto?.replace(/\s+/g, " ").trim() ?? "";
-  return limpo === "" ? null : limpo;
+  const resultado = limpo(texto);
+  return resultado === "" ? null : resultado;
 }
+
+const unir = (antes: string, depois: string): string => (antes === "" ? depois : depois === "" ? antes : `${antes} ${depois}`);
+
+const textoDe = (enunciado: EnunciadoAberto): string => unir(enunciado.confirmadoDasFalas, enunciado.fala?.confirmado ?? "");
 
 function comAsNovas(frases: readonly FraseDaLegenda[], novas: readonly FraseDaLegenda[]): readonly FraseDaLegenda[] {
   return novas.length === 0 ? frases : Object.freeze([...frases, ...novas].slice(-MAXIMO_DE_FRASES_NA_LEGENDA));
 }
 
-function falaNova(fala: FalaDaLegenda): FalaAberta {
+function enunciadoNovo(fala: FalaDaLegenda): EnunciadoAberto {
   return Object.freeze({
-    numero: fala.numero,
+    id: idDoEnunciado(fala.numero),
     inicioMs: fala.inicioMs,
-    confirmado: "",
-    fimDoConfirmadoMs: fala.inicioMs,
-    palavrasFechadas: 0,
-    frasesFechadas: 0,
-    textoDaFrase: "",
-    inicioDaFraseMs: fala.inicioMs,
+    confirmadoDasFalas: "",
+    fimDasFalasMs: fala.inicioMs,
+    fala: null,
+    pergunta: false,
   });
 }
 
-const mesmaFala = (a: FalaAberta, b: FalaAberta): boolean =>
-  a.numero === b.numero &&
-  a.confirmado === b.confirmado &&
-  a.palavrasFechadas === b.palavrasFechadas &&
-  a.frasesFechadas === b.frasesFechadas &&
-  a.textoDaFrase === b.textoDaFrase &&
-  a.inicioDaFraseMs === b.inicioDaFraseMs;
-
-/**
- * Avança a fala com o texto confirmado dela (que só cresce no fim). Fecham,
- * nesta ordem: as frases que terminam em pontuação (`SegmentadorDeFrases`) e
- * o resto, se a fala terminou (`fimDaFala`) ou se o relógio da passada já
- * passou `DURACAO_MAXIMA_DA_FRASE_MS` desde o começo da frase aberta. Nesse
- * caso todo o texto confirmado entra na frase que fecha, sem cortar palavra;
- * o que for confirmado depois abre a próxima, que começa onde esta terminou.
- */
-function avancar(
-  aberta: FalaAberta,
-  confirmado: string,
-  fimMs: number,
-  fimDaFala: boolean,
-): { fala: FalaAberta; fechadasAgora: readonly FraseDaLegenda[] } {
-  const palavras = palavrasDe(confirmado);
-  const resto = palavras.slice(aberta.palavrasFechadas).join(" ");
-  const { fechadas, aberta: semPontuacao } = dividirEmFrases(resto);
-  const passouDoTempo = fimMs - aberta.inicioDaFraseMs >= DURACAO_MAXIMA_DA_FRASE_MS;
-
-  const fechadasAgora: FraseDaLegenda[] = [];
-  let palavrasFechadas = aberta.palavrasFechadas;
-  let inicioMs = aberta.inicioDaFraseMs;
-  let cursor = 0;
-  /** Fecha a frase `texto`, que vai até o caractere `ate` do resto (os pedaços sem palavra antes dela também saem). */
-  const fechar = (texto: string, motivo: MotivoDoFechamento, ate: number): void => {
-    const frase: FraseDaLegenda = Object.freeze({
-      id: idDaFrase(aberta.numero, aberta.frasesFechadas + fechadasAgora.length),
-      texto,
-      inicioMs,
-      fimMs: Math.max(fimMs, inicioMs),
-      pergunta: false,
-      motivo,
-    });
-    fechadasAgora.push(frase);
-    palavrasFechadas += palavrasDe(resto.slice(cursor, ate)).length;
-    cursor = ate;
-    inicioMs = frase.fimMs;
-  };
-
-  for (const texto of fechadas) {
-    const posicao = resto.indexOf(texto, cursor);
-    fechar(texto, "pontuacao", posicao < 0 ? resto.length : posicao + texto.length);
-  }
-  let textoDaFrase = semPontuacao;
-  if (semPontuacao !== "" && (fimDaFala || passouDoTempo)) {
-    fechar(semPontuacao, fimDaFala ? "fim_da_fala" : "tempo", resto.length);
-    textoDaFrase = "";
-  }
-
-  const confirmadoNovo = palavras.join(" ");
-  return {
-    fala: Object.freeze({
-      ...aberta,
-      confirmado: confirmadoNovo,
-      fimDoConfirmadoMs: confirmadoNovo === aberta.confirmado ? aberta.fimDoConfirmadoMs : fimMs,
-      palavrasFechadas,
-      frasesFechadas: aberta.frasesFechadas + fechadasAgora.length,
-      textoDaFrase,
-      inicioDaFraseMs: inicioMs,
-    }),
-    fechadasAgora: Object.freeze(fechadasAgora),
-  };
+/** A fala em andamento termina como está: o confirmado dela passa às falas terminadas. */
+function semFalaEmAndamento(enunciado: EnunciadoAberto): EnunciadoAberto {
+  const fala = enunciado.fala;
+  if (fala === null) return enunciado;
+  return Object.freeze({
+    ...enunciado,
+    confirmadoDasFalas: unir(enunciado.confirmadoDasFalas, fala.confirmado),
+    fimDasFalasMs: Math.max(enunciado.fimDasFalasMs, fala.fimDoConfirmadoMs),
+    fala: null,
+  });
 }
 
+/** O enunciado como frase fechada; null se ele não tem texto confirmado. */
+function fechado(enunciado: EnunciadoAberto): FraseDaLegenda | null {
+  const comAFala = semFalaEmAndamento(enunciado);
+  if (comAFala.confirmadoDasFalas === "") return null;
+  return Object.freeze({
+    id: comAFala.id,
+    texto: comAFala.confirmadoDasFalas,
+    inicioMs: comAFala.inicioMs,
+    fimMs: Math.max(comAFala.fimDasFalasMs, comAFala.inicioMs),
+    pergunta: comAFala.pergunta,
+  });
+}
+
+/** A fala cabe no enunciado: começou até a pausa depois da última fala terminada e antes da duração máxima. */
+const cabeNoEnunciado = (enunciado: EnunciadoAberto, fala: FalaDaLegenda): boolean =>
+  fala.inicioMs - enunciado.fimDasFalasMs <= PAUSA_DO_ENUNCIADO_MS &&
+  fala.inicioMs - enunciado.inicioMs < DURACAO_MAXIMA_DO_ENUNCIADO_MS;
+
 /**
- * Objeto de valor: a legenda ao vivo da escuta. As `frases` são só as já
- * FECHADAS, com ids estáveis (`frase-<fala>-<posição>`) e o motivo do
- * fechamento: pontuação final, fim da fala ou a duração máxima da frase
- * (`DURACAO_MAXIMA_DA_FRASE_MS`). A frase aberta da fala atual (o texto já
- * confirmado e a cauda ainda não confirmada) fica em `emAndamento`.
+ * O enunciado em que a fala entra, e o que fechou para isso. Se outra fala
+ * estava em andamento, ela termina como está. Se a fala não cabe no enunciado
+ * aberto (pausa longa ou duração máxima), ele fecha e outro abre com ela; um
+ * enunciado sem nenhum texto confirmado é só esquecido.
+ */
+function enunciadoDaFala(
+  aberto: EnunciadoAberto | null,
+  fala: FalaDaLegenda,
+): { readonly enunciado: EnunciadoAberto; readonly fechadoAgora: FraseDaLegenda | null } {
+  if (aberto !== null && aberto.fala?.numero === fala.numero) return { enunciado: aberto, fechadoAgora: null };
+  const anterior = aberto === null ? null : semFalaEmAndamento(aberto);
+  if (anterior === null || anterior.confirmadoDasFalas === "") return { enunciado: enunciadoNovo(fala), fechadoAgora: null };
+  if (cabeNoEnunciado(anterior, fala)) return { enunciado: anterior, fechadoAgora: null };
+  return { enunciado: enunciadoNovo(fala), fechadoAgora: fechado(anterior) };
+}
+
+const semMudanca = (legenda: LegendaDaEscuta): MudancaNaLegenda => Object.freeze({ legenda, fechadasAgora: NENHUMA_FRASE });
+
+/**
+ * Objeto de valor: a legenda ao vivo da escuta, em enunciados. Um enunciado
+ * é uma fala completa entre pausas: as falas curtas do cortador (até 8 s,
+ * para as passadas do motor serem rápidas) entram no mesmo enunciado enquanto
+ * a seguinte começa até `PAUSA_DO_ENUNCIADO_MS` depois do fim da anterior, e
+ * o texto confirmado delas é unido por espaço. O enunciado não se divide:
+ * fecha quando a sessão vê a pausa passar (`semEnunciadoAberto`), quando
+ * chega a `DURACAO_MAXIMA_DO_ENUNCIADO_MS` no fim de uma fala, ou quando a
+ * fala seguinte começa depois da pausa ou da duração máxima.
  *
- * Guarda as últimas `MAXIMO_DE_FRASES_NA_LEGENDA` frases. Imutável: cada
- * mudança devolve uma legenda nova, ou a mesma quando nada muda.
+ * As `frases` são só os enunciados já FECHADOS; o aberto (com o id que terá
+ * ao fechar) fica em `emAndamento`. Guarda os últimos
+ * `MAXIMO_DE_FRASES_NA_LEGENDA`. Imutável: cada mudança devolve uma legenda
+ * nova, ou a mesma quando nada muda.
  */
 export class LegendaDaEscuta {
   private static readonly VAZIA = new LegendaDaEscuta(NENHUMA_FRASE, null, null);
 
-  /** A frase aberta da fala atual; null sem frase aberta. */
-  readonly emAndamento: FraseEmAndamento | null;
+  /** O enunciado aberto; null sem enunciado aberto ou sem nada a mostrar dele. */
+  readonly emAndamento: EnunciadoEmAndamento | null;
 
   private constructor(
-    /** As frases fechadas, da mais antiga à mais nova (até o máximo). */
+    /** Os enunciados fechados, do mais antigo ao mais novo (até o máximo). */
     readonly frases: readonly FraseDaLegenda[],
-    private readonly aberta: FalaAberta | null,
+    private readonly aberto: EnunciadoAberto | null,
     /** A cauda não confirmada da fala em andamento, ou null. */
     private readonly parcial: string | null,
   ) {
+    const confirmado = aberto === null ? "" : textoDe(aberto);
     this.emAndamento =
-      aberta === null || (aberta.textoDaFrase === "" && parcial === null)
+      aberto === null || (confirmado === "" && parcial === null)
         ? null
-        : Object.freeze({ confirmado: aberta.textoDaFrase, parcial: parcial ?? "", inicioMs: aberta.inicioDaFraseMs });
+        : Object.freeze({ id: aberto.id, confirmado, parcial: parcial ?? "", inicioMs: aberto.inicioMs });
     Object.freeze(this);
   }
 
@@ -201,91 +198,96 @@ export class LegendaDaEscuta {
     return LegendaDaEscuta.VAZIA;
   }
 
-  /** O que está sendo dito agora: todo o confirmado da fala em andamento mais o parcial; null sem nada. */
+  /** O que está sendo dito no enunciado aberto: o confirmado dele mais o parcial; null sem nada. */
   get falaEmAndamento(): string | null {
-    return this.aberta === null ? null : semVazio(`${this.aberta.confirmado} ${this.parcial ?? ""}`);
+    return this.aberto === null ? null : semVazio(`${textoDe(this.aberto)} ${this.parcial ?? ""}`);
   }
 
   /**
-   * Uma passada da fala: `confirmado` é todo o texto confirmado dela até aqui
-   * (só cresce), `parcial` a cauda provisória e `fimMs` até onde (em ms de
-   * relógio) foi o áudio transcrito. Devolve as frases que fecharam agora
-   * (por pontuação ou por tempo). Se outra fala estava aberta, ela é
-   * encerrada como está.
+   * Uma passada parcial da fala: `confirmado` é todo o texto confirmado dela
+   * até aqui (só cresce), `parcial` a cauda provisória e `fimMs` até onde (em
+   * ms de relógio) foi o áudio transcrito. A fala entra no enunciado aberto
+   * (ou abre um); se o aberto não a comporta, ele fecha e volta em
+   * `fechadasAgora`.
    */
   comConfirmado(fala: FalaDaLegenda, confirmado: string, parcial: string | null, fimMs: number): MudancaNaLegenda {
-    const base = this.aberta !== null && this.aberta.numero !== fala.numero ? this.semFalaAberta() : this;
-    const { fala: aberta, fechadasAgora } = avancar(base.aberta ?? falaNova(fala), confirmado, fimMs, false);
+    const { enunciado, fechadoAgora } = enunciadoDaFala(this.aberto, fala);
+    const falaAtual: FalaAberta =
+      enunciado.fala ?? Object.freeze({ numero: fala.numero, confirmado: "", fimDoConfirmadoMs: fala.inicioMs });
+    const confirmadoNovo = limpo(confirmado);
+    const falaNova =
+      confirmadoNovo === falaAtual.confirmado ? falaAtual : Object.freeze({ ...falaAtual, confirmado: confirmadoNovo, fimDoConfirmadoMs: fimMs });
     const parcialNovo = semVazio(parcial);
-    if (
-      base === this &&
-      this.aberta !== null &&
-      fechadasAgora.length === 0 &&
-      mesmaFala(aberta, this.aberta) &&
-      parcialNovo === this.parcial
-    ) {
-      return Object.freeze({ legenda: this, fechadasAgora: NENHUMA_FRASE });
+    if (fechadoAgora === null && enunciado === this.aberto && falaNova === enunciado.fala && parcialNovo === this.parcial) {
+      return semMudanca(this);
     }
-    return Object.freeze({ legenda: new LegendaDaEscuta(comAsNovas(base.frases, fechadasAgora), aberta, parcialNovo), fechadasAgora });
+    const fechadas = fechadoAgora === null ? NENHUMA_FRASE : Object.freeze([fechadoAgora]);
+    const aberto = falaNova === enunciado.fala ? enunciado : Object.freeze({ ...enunciado, fala: falaNova });
+    return Object.freeze({ legenda: new LegendaDaEscuta(comAsNovas(this.frases, fechadas), aberto, parcialNovo), fechadasAgora: fechadas });
   }
 
   /**
-   * Fim da fala: com o texto confirmado final, o que ainda não tinha fechado
-   * fecha (a última frase, mesmo sem pontuação, pelo motivo "fim_da_fala") e
-   * o parcial some.
+   * Fim da fala, com o texto confirmado final dela: ele passa ao enunciado e
+   * o parcial some. O enunciado continua aberto, esperando a próxima fala ou
+   * a pausa, a não ser que já tenha chegado a `DURACAO_MAXIMA_DO_ENUNCIADO_MS`
+   * (aí fecha agora). Um enunciado ainda sem texto é esquecido.
    */
   comFimDaFala(fala: FalaDaLegenda, confirmado: string, fimMs: number): MudancaNaLegenda {
-    const base = this.aberta !== null && this.aberta.numero !== fala.numero ? this.semFalaAberta() : this;
-    const { fechadasAgora } = avancar(base.aberta ?? falaNova(fala), confirmado, fimMs, true);
-    if (this.aberta === null && fechadasAgora.length === 0) {
-      return Object.freeze({ legenda: this, fechadasAgora: NENHUMA_FRASE });
+    const { enunciado, fechadoAgora } = enunciadoDaFala(this.aberto, fala);
+    const fechadas: FraseDaLegenda[] = fechadoAgora === null ? [] : [fechadoAgora];
+    const texto = unir(enunciado.confirmadoDasFalas, limpo(confirmado));
+    let aberto: EnunciadoAberto | null =
+      texto === ""
+        ? null
+        : Object.freeze({ ...enunciado, confirmadoDasFalas: texto, fimDasFalasMs: Math.max(enunciado.fimDasFalasMs, fimMs), fala: null });
+    if (aberto !== null && aberto.fimDasFalasMs - aberto.inicioMs >= DURACAO_MAXIMA_DO_ENUNCIADO_MS) {
+      const frase = fechado(aberto);
+      if (frase !== null) fechadas.push(frase);
+      aberto = null;
     }
-    return Object.freeze({ legenda: new LegendaDaEscuta(comAsNovas(base.frases, fechadasAgora), null, null), fechadasAgora });
+    if (fechadas.length === 0 && aberto === null && this.aberto === null) return semMudanca(this);
+    const frases = comAsNovas(this.frases, fechadas);
+    const legenda = frases.length === 0 && aberto === null ? LegendaDaEscuta.VAZIA : new LegendaDaEscuta(frases, aberto, null);
+    return Object.freeze({ legenda, fechadasAgora: Object.freeze(fechadas) });
   }
 
   /**
-   * Encerra a fala em andamento como está (a escuta parou no meio dela): o
-   * confirmado da frase aberta vira uma frase fechada ("fim_da_fala") e o
-   * parcial some.
+   * Fecha o enunciado aberto como está: a pausa passou, ou a escuta pausou,
+   * parou ou saiu do modo. O confirmado (com o da fala em andamento) vira um
+   * enunciado fechado e o parcial some. Sem texto confirmado, nada fecha.
    */
-  semFalaAberta(): LegendaDaEscuta {
-    const aberta = this.aberta;
-    if (aberta === null) return this;
-    const sobra: readonly FraseDaLegenda[] =
-      aberta.textoDaFrase === ""
-        ? NENHUMA_FRASE
-        : [
-            Object.freeze({
-              id: idDaFrase(aberta.numero, aberta.frasesFechadas),
-              texto: aberta.textoDaFrase,
-              inicioMs: aberta.inicioDaFraseMs,
-              fimMs: Math.max(aberta.fimDoConfirmadoMs, aberta.inicioDaFraseMs),
-              pergunta: false,
-              motivo: "fim_da_fala",
-            }),
-          ];
-    const frases = comAsNovas(this.frases, sobra);
-    return frases.length === 0 ? LegendaDaEscuta.VAZIA : new LegendaDaEscuta(frases, null, null);
+  semEnunciadoAberto(): MudancaNaLegenda {
+    const aberto = this.aberto;
+    if (aberto === null) return semMudanca(this);
+    const frase = fechado(aberto);
+    const fechadas = frase === null ? NENHUMA_FRASE : Object.freeze([frase]);
+    const frases = comAsNovas(this.frases, fechadas);
+    return Object.freeze({
+      legenda: frases.length === 0 ? LegendaDaEscuta.VAZIA : new LegendaDaEscuta(frases, null, null),
+      fechadasAgora: fechadas,
+    });
   }
 
-  /** Esquece as frases fechadas (o /clear da conversa); a frase aberta continua. */
+  /** Esquece os enunciados fechados (o /clear da conversa); o aberto continua. */
   semFrases(): LegendaDaEscuta {
     if (this.frases.length === 0) return this;
-    return this.aberta === null ? LegendaDaEscuta.VAZIA : new LegendaDaEscuta(NENHUMA_FRASE, this.aberta, this.parcial);
+    return this.aberto === null ? LegendaDaEscuta.VAZIA : new LegendaDaEscuta(NENHUMA_FRASE, this.aberto, this.parcial);
   }
 
-  /** Marca a frase como pergunta detectada. Frase que já saiu da legenda (ou já marcada) não muda nada. */
+  /**
+   * Marca o enunciado (aberto ou fechado) como pergunta detectada; o aberto
+   * leva a marca ao fechar. Enunciado que já saiu da legenda (ou já marcado)
+   * não muda nada.
+   */
   comPergunta(id: string): LegendaDaEscuta {
+    const aberto = this.aberto;
+    if (aberto !== null && aberto.id === id) {
+      return aberto.pergunta ? this : new LegendaDaEscuta(this.frases, Object.freeze({ ...aberto, pergunta: true }), this.parcial);
+    }
     if (!this.frases.some((frase) => frase.id === id && !frase.pergunta)) return this;
     const frases = Object.freeze(
       this.frases.map((frase) => (frase.id === id ? Object.freeze({ ...frase, pergunta: true }) : frase)),
     );
-    return new LegendaDaEscuta(frases, this.aberta, this.parcial);
-  }
-
-  /** A frase fechada logo antes da frase `id`; null se ela é a primeira ou não está na legenda. */
-  fraseAnterior(id: string): FraseDaLegenda | null {
-    const posicao = this.frases.findIndex((frase) => frase.id === id);
-    return posicao > 0 ? (this.frases[posicao - 1] ?? null) : null;
+    return new LegendaDaEscuta(frases, aberto, this.parcial);
   }
 }

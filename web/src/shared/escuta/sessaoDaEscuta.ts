@@ -17,7 +17,13 @@ import { DetectorDePergunta } from "./DetectorDePergunta";
 import { type DetectorDeVoz, type JanelasAnalisadas, TAXA_DE_AMOSTRAGEM } from "./DetectorDeVoz";
 import { DetectorDeVozSilero } from "./DetectorDeVozSilero";
 import { DURACAO_DO_CONTEXTO_MS, JanelaDeTranscricao } from "./JanelaDeTranscricao";
-import { type FalaDaLegenda, type FraseDaLegenda, LegendaDaEscuta } from "./LegendaDaEscuta";
+import {
+  type FalaDaLegenda,
+  type FraseDaLegenda,
+  LegendaDaEscuta,
+  type MudancaNaLegenda,
+  PAUSA_DO_ENUNCIADO_MS,
+} from "./LegendaDaEscuta";
 import { mensagemDaEscuta } from "./mensagemDaEscuta";
 import { PerguntaDetectada } from "./PerguntaDetectada";
 import {
@@ -68,18 +74,24 @@ export interface EstadoDaEscuta {
   readonly situacao: SituacaoDaEscuta;
   readonly progressoDoDownload: number | null;
   readonly linhas: readonly string[];
-  /** A fala em andamento: o confirmado dela mais o parcial; null quando não há fala em andamento. */
+  /** O enunciado em andamento: o confirmado dele mais o parcial; null quando não há fala em andamento. */
   readonly linhaProvisoria: string | null;
   /** As falas confirmadas. */
   readonly trechos: readonly TrechoNaTela[];
   readonly automatico: boolean;
   readonly erro: string | null;
   readonly ultimaPergunta: string | null;
+  /**
+   * A legenda em enunciados: cada item de `frases` é um enunciado inteiro (uma
+   * fala completa entre pausas de `PAUSA_DO_ENUNCIADO_MS`, até
+   * `DURACAO_MAXIMA_DO_ENUNCIADO_MS`), não mais uma fatia de 5 s da fala. O
+   * nome `frases` ficou para não mexer na tela.
+   */
   readonly legenda: {
-    /** Só as frases já FECHADAS, da mais antiga à mais nova (máx. 200). */
+    /** Enunciados já fechados (uma fala completa entre pausas cada), da mais antiga à mais nova, no máximo 200. */
     readonly frases: readonly FraseDaLegenda[];
-    /** A frase aberta da fala atual: o texto já confirmado e a cauda ainda não confirmada; null sem frase aberta. */
-    readonly emAndamento: { readonly confirmado: string; readonly parcial: string; readonly inicioMs: number } | null;
+    /** O enunciado aberto: id estável (o mesmo que ele terá ao fechar), o confirmado, a cauda parcial e o início; null sem fala em andamento. */
+    readonly emAndamento: { readonly id: string; readonly confirmado: string; readonly parcial: string; readonly inicioMs: number } | null;
   };
   readonly motor: { readonly dispositivo: "webgpu" | "dml" | "cpu" | "wasm"; readonly modelo: string; readonly precisao: string; readonly nativo: boolean } | null;
   readonly download: { readonly progresso: number; readonly totalMb: number | null } | null;
@@ -119,12 +131,12 @@ function dependenciasPadrao(): DependenciasDaSessao {
 /** Em que pé está a captura (o modo invisível e a disponibilidade vêm das opções). */
 type Fase = "parada" | "aguardando-aviso" | "iniciando" | "escutando" | "pausada" | "erro";
 
-/** Uma frase que pode ser pedido, esperando a vez de ir ao servidor. */
+/** Um enunciado que pode ser pedido, esperando a vez de ir ao servidor. */
 interface Candidata {
   readonly trecho: string;
-  /** A transcrição dos 60 s antes da frase (o servidor a usa para dar sentido a ela). */
+  /** A transcrição dos 60 s antes do enunciado (o servidor a usa para dar sentido a ele). */
   readonly contexto: string;
-  /** A frase da legenda, para marcá-la se for pergunta. */
+  /** O enunciado da legenda (aberto ou fechado), para marcá-lo se for pergunta. */
   readonly idDaFrase: string;
 }
 
@@ -150,12 +162,6 @@ const LEGENDA_VAZIA: EstadoDaEscuta["legenda"] = Object.freeze({ frases: Object.
 const msParaAmostras = (ms: number): number => Math.max(0, Math.round((ms * TAXA_DE_AMOSTRAGEM) / 1000));
 
 const limparTexto = (texto: string): string => texto.replace(/\s+/g, " ").trim();
-
-/** O texto sem a palavra (ou frase) `fim` no final, quando termina nela. */
-function semNoFim(texto: string, fim: string): string {
-  if (texto === fim) return "";
-  return texto.endsWith(` ${fim}`) ? texto.slice(0, texto.length - fim.length).trimEnd() : texto;
-}
 
 function mensagemDe(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro);
@@ -213,18 +219,19 @@ export function controleSemPendente(
  * A escuta do áudio do computador em tempo real: captura (pedaços de 100 ms)
  * → VAD Silero → cortador de fala → buffer da fala → motor de transcrição
  * (passadas parciais a cada ~1 s de áudio novo e uma final no fim da fala) →
- * confirmador por concordância → legenda (frases fechadas por pontuação, fim
- * da fala ou a cada 5 s, e a frase em andamento), janela de transcrição e
- * trechos da conversa → (com o automático) detector de pergunta, a cada frase
- * que fecha (sozinha ou junto com a anterior cortada por tempo) → atalho do
+ * confirmador por concordância → legenda em enunciados (as falas curtas
+ * seguidas, até a pausa de `PAUSA_DO_ENUNCIADO_MS` ou a duração máxima, e o
+ * enunciado em andamento), janela de transcrição e trechos da conversa → (com
+ * o automático) detector de pergunta no texto inteiro do enunciado, quando ele
+ * fecha (ou antes, quando o confirmado passa a terminar em "?") → atalho do
  * sinal forte ou classificação no servidor → controle de disparos → chat rápido.
  *
  * Vive fora do React (há uma instância do módulo, `sessaoDaEscuta`), para
  * sobreviver à remontagem do chat rápido; a tela a observa por `assinar` e
  * `instantaneo` (compatíveis com `useSyncExternalStore`) e lhe passa as opções
  * mais recentes por `atualizarOpcoes`. Nenhum áudio vai para o disco; da
- * transcrição, ficam na memória a janela dos últimos 2 min, as últimas 200
- * frases da legenda e os trechos da conversa.
+ * transcrição, ficam na memória a janela dos últimos 2 min, os últimos 200
+ * enunciados da legenda e os trechos da conversa.
  */
 export class SessaoDaEscuta {
   private readonly dependencias: DependenciasDaSessao;
@@ -263,6 +270,17 @@ export class SessaoDaEscuta {
    * áudio até aqui (relógio do cortador) já foi confirmado na anterior.
    */
   private continuacaoMs: number | null = null;
+
+  /** Cancela o temporizador da pausa que fecha o enunciado; null sem temporizador. */
+  private cancelarPausaDoEnunciado: (() => void) | null = null;
+  /** A época da última fala que terminou (evento "fim"). */
+  private ultimaFalaEncerrada = 0;
+  /** A época da última fala cuja passada final já chegou (ou falhou). */
+  private ultimaFalaConcluida = 0;
+  /** A pausa venceu antes da passada final desta fala: o enunciado fecha assim que ela chegar. */
+  private fecharEnunciadoAposFala: number | null = null;
+  /** O enunciado aberto já avaliado como pergunta, e com qual texto (para não avaliar o mesmo de novo). */
+  private avaliacaoDoEnunciado: { readonly id: string; readonly texto: string } | null = null;
 
   /** Muda a cada parada: respostas atrasadas de uma captura anterior são ignoradas. */
   private geracao = 0;
@@ -412,8 +430,9 @@ export class SessaoDaEscuta {
   };
 
   /**
-   * Esquece os trechos da conversa e as frases fechadas da legenda (a tela
-   * chama no /clear). A janela de 2 min e a frase em andamento não mudam.
+   * Esquece os trechos da conversa e os enunciados fechados da legenda (a
+   * tela chama no /clear). A janela de 2 min e o enunciado em andamento não
+   * mudam.
    */
   readonly limparTrechos = (): void => {
     const legenda = this.legenda.semFrases();
@@ -534,9 +553,10 @@ export class SessaoDaEscuta {
 
   /**
    * Desliga a captura e tudo o que dependia dela: VAD, cortador, fala em
-   * andamento, classificação, timer e pendente. Passadas já no motor
-   * terminam, mas são ignoradas; o que a fala em andamento já tinha
-   * confirmado fica na legenda.
+   * andamento, pausa do enunciado, classificação, timer e pendente. Passadas
+   * já no motor terminam, mas são ignoradas. O enunciado aberto fecha como
+   * está (o que já tinha confirmado fica na legenda e na janela), sem ser
+   * avaliado: com a escuta parada, nada vai ao chat.
    */
   private pararCaptura(): void {
     this.geracao++;
@@ -557,7 +577,12 @@ export class SessaoDaEscuta {
     this.passadasEmVoo = 0;
     this.ultimaFinal = Promise.resolve();
     this.continuacaoMs = null;
-    this.trocarLegenda(this.legenda.semFalaAberta());
+    this.cancelarPausa();
+    this.fecharEnunciadoAposFala = null;
+    const mudanca = this.legenda.semEnunciadoAberto();
+    this.trocarLegenda(mudanca.legenda);
+    for (const frase of mudanca.fechadasAgora) this.registrarNaJanela(frase);
+    this.avaliacaoDoEnunciado = null;
     this.cancelarClassificacao();
     this.cancelarTimer();
     this.controle = controleSemPendente(this.controle);
@@ -617,8 +642,13 @@ export class SessaoDaEscuta {
     }
   }
 
-  /** "inicio": buffer e confirmador novos. O áudio da fala entra no buffer logo depois (`completarBuffer`). */
+  /**
+   * "inicio": buffer e confirmador novos. O áudio da fala entra no buffer logo
+   * depois (`completarBuffer`). A fala nova cancela a pausa do enunciado (se
+   * ela ainda não venceu): as duas entram no mesmo enunciado.
+   */
   private abrirFala(emMs: number): void {
+    this.cancelarPausa();
     const continuacao = this.continuacaoMs;
     this.continuacaoMs = null;
     const inicioDoBufferMs = continuacao !== null && continuacao > emMs ? continuacao : emMs;
@@ -702,20 +732,21 @@ export class SessaoDaEscuta {
       passada.parcial,
       this.relogio(fimDoAudioMs),
     );
-    this.trocarLegenda(mudanca.legenda);
-    this.aoFecharFrases(mudanca.fechadasAgora);
+    this.aplicarNaLegenda(mudanca);
     this.emitir();
   }
 
   /**
    * "fim": passada final (não descartável) com o que restou no buffer, tirado
    * do áudio do evento (que vai até o fim de verdade da fala). As finais
-   * terminam na ordem das falas.
+   * terminam na ordem das falas. A pausa do enunciado começa a contar aqui.
    */
   private fecharFala(evento: Extract<EventoDeFala, { tipo: "fim" }>, geracao: number): void {
     const fala = this.fala;
     this.fala = null;
     if (fala === null) return;
+    this.ultimaFalaEncerrada = fala.epoca;
+    this.agendarPausaDoEnunciado(geracao);
     const inicioDoRestoMs = Math.min(Math.max(fala.buffer.inicioMs, evento.inicioMs), evento.emMs);
     const resto = evento.audio.slice(msParaAmostras(inicioDoRestoMs - evento.inicioMs));
     if (evento.motivo === "duracao_maxima") this.continuacaoMs = Math.max(evento.emMs, fala.buffer.inicioMs);
@@ -748,7 +779,11 @@ export class SessaoDaEscuta {
     })();
   }
 
-  /** O texto final confirma o resto da fala: as frases fecham e a fala vira um trecho da conversa. */
+  /**
+   * O texto final confirma o resto da fala: ele passa ao enunciado e a fala
+   * vira um trecho da conversa. Se a pausa já venceu esperando por esta
+   * passada, o enunciado fecha agora.
+   */
   private concluirFala(
     fala: FalaEmAndamento,
     evento: Extract<EventoDeFala, { tipo: "fim" }>,
@@ -765,10 +800,55 @@ export class SessaoDaEscuta {
     const fimMs = this.relogio(evento.emMs);
 
     const mudanca = this.legenda.comFimDaFala(this.falaNaLegenda(fala), confirmado, fimMs);
-    this.trocarLegenda(mudanca.legenda);
     this.registrarTrecho(confirmado, inicioMs, fimMs);
-    this.aoFecharFrases(mudanca.fechadasAgora);
+    this.aplicarNaLegenda(mudanca);
+    this.ultimaFalaConcluida = Math.max(this.ultimaFalaConcluida, fala.epoca);
+    if (this.fecharEnunciadoAposFala !== null && fala.epoca >= this.fecharEnunciadoAposFala) {
+      this.fecharEnunciadoAposFala = null;
+      this.fecharEnunciado();
+    }
     this.emitir();
+  }
+
+  // ---- Falas → enunciado ----
+
+  /**
+   * Conta a pausa do enunciado a partir do fim da fala. Sem fala nova até ela
+   * vencer, o enunciado fecha, mas só depois que a passada final da última
+   * fala chegar (ou falhar): se ela ainda não chegou, fecha logo em seguida.
+   */
+  private agendarPausaDoEnunciado(geracao: number): void {
+    this.cancelarPausa();
+    this.cancelarPausaDoEnunciado = this.dependencias.agendar(() => {
+      this.cancelarPausaDoEnunciado = null;
+      if (geracao !== this.geracao) return;
+      if (this.ultimaFalaConcluida >= this.ultimaFalaEncerrada) {
+        this.fecharEnunciado();
+        this.emitir();
+      } else {
+        this.fecharEnunciadoAposFala = this.ultimaFalaEncerrada;
+      }
+    }, PAUSA_DO_ENUNCIADO_MS);
+  }
+
+  private cancelarPausa(): void {
+    this.cancelarPausaDoEnunciado?.();
+    this.cancelarPausaDoEnunciado = null;
+  }
+
+  /** Fecha o enunciado aberto como está e o leva à janela e à avaliação da pergunta. */
+  private fecharEnunciado(): void {
+    this.aplicarNaLegenda(this.legenda.semEnunciadoAberto());
+  }
+
+  /**
+   * Uma mudança na legenda: os enunciados que fecharam vão à janela e à
+   * avaliação, e o aberto é avaliado se o confirmado passou a terminar em "?".
+   */
+  private aplicarNaLegenda(mudanca: MudancaNaLegenda): void {
+    this.trocarLegenda(mudanca.legenda);
+    this.aoFecharEnunciados(mudanca.fechadasAgora);
+    this.avaliarEnunciadoAberto();
   }
 
   /** A fala vira um trecho da conversa (o bloco "ouvido"), se não for alucinação. */
@@ -782,32 +862,64 @@ export class SessaoDaEscuta {
     );
   }
 
-  // ---- Frases → pergunta ----
+  // ---- Enunciados → pergunta ----
 
   /**
-   * Cada frase que fecha (por pontuação, fim da fala ou a cada 5 s) entra na
-   * janela de transcrição e, com o automático, é avaliada na hora (sem esperar
-   * o fim da fala): com o sinal forte vira pergunta direto; senão, se for
-   * candidata, vai ao servidor. A que não é candidata sozinha ainda pode ser
-   * o fim de uma pergunta partida pelo corte de tempo (`avaliarJuncao`).
+   * Cada enunciado que fecha entra na janela de transcrição e, com o
+   * automático, o texto inteiro dele é avaliado: com o sinal forte vira
+   * pergunta direto; senão, se for candidato, vai ao servidor. O enunciado já
+   * avaliado antes de fechar (terminava em "?") só é avaliado de novo se o
+   * texto mudou e também termina em "?".
    */
-  private aoFecharFrases(frases: readonly FraseDaLegenda[]): void {
+  private aoFecharEnunciados(frases: readonly FraseDaLegenda[]): void {
     for (const frase of frases) {
-      if (DetectorDePergunta.ehAlucinacaoConhecida(frase.texto)) continue;
-      let trecho: TrechoTranscrito;
-      try {
-        trecho = TrechoTranscrito.criar({ texto: frase.texto, inicioMs: frase.inicioMs, fimMs: frase.fimMs });
-      } catch {
-        continue;
-      }
-      // O contexto da classificação é o que veio antes da frase, não ela mesma.
-      const contextoAnterior = this.janela.contexto(DURACAO_DO_CONTEXTO_MS, frase.inicioMs);
-      this.trocarJanela(this.janela.com(trecho).semAntigos(this.dependencias.agora()));
-      if (!this.automaticoAtual()) continue;
+      const avaliada = this.avaliacaoDoEnunciado?.id === frase.id ? this.avaliacaoDoEnunciado.texto : null;
+      if (avaliada !== null) this.avaliacaoDoEnunciado = null;
+      const contextoAnterior = this.registrarNaJanela(frase);
+      if (contextoAnterior === null || !this.automaticoAtual()) continue;
+      if (avaliada === frase.texto) continue;
+      if (avaliada !== null && !DetectorDePergunta.terminaEmInterrogacao(frase.texto)) continue;
       const avaliacao = DetectorDePergunta.avaliar(frase.texto);
       if (avaliacao.candidata) this.seguirCandidata(frase.texto, contextoAnterior, frase.id, avaliacao.sinalForte);
-      else this.avaliarJuncao(frase, contextoAnterior);
     }
+  }
+
+  /**
+   * O enunciado entra na janela de transcrição (o contexto de 60 s). Devolve
+   * o contexto de antes dele (o da classificação, que não inclui o próprio
+   * enunciado), ou null se ele não entrou (alucinação ou vazio).
+   */
+  private registrarNaJanela(frase: FraseDaLegenda): string | null {
+    if (DetectorDePergunta.ehAlucinacaoConhecida(frase.texto)) return null;
+    let trecho: TrechoTranscrito;
+    try {
+      trecho = TrechoTranscrito.criar({ texto: frase.texto, inicioMs: frase.inicioMs, fimMs: frase.fimMs });
+    } catch {
+      return null;
+    }
+    const contextoAnterior = this.janela.contexto(DURACAO_DO_CONTEXTO_MS, frase.inicioMs);
+    this.trocarJanela(this.janela.com(trecho).semAntigos(this.dependencias.agora()));
+    return contextoAnterior;
+  }
+
+  /**
+   * Antes de fechar: quando o confirmado do enunciado aberto passa a terminar
+   * em "?" e é candidato, a pergunta é avaliada na hora, sem esperar a pausa.
+   * O texto avaliado fica guardado, para não repetir a avaliação (nem no
+   * fechamento) enquanto ele não mudar.
+   */
+  private avaliarEnunciadoAberto(): void {
+    const aberto = this.legenda.emAndamento;
+    if (aberto === null || !this.automaticoAtual()) return;
+    const texto = aberto.confirmado;
+    if (!DetectorDePergunta.terminaEmInterrogacao(texto)) return;
+    const anterior = this.avaliacaoDoEnunciado;
+    if (anterior !== null && anterior.id === aberto.id && anterior.texto === texto) return;
+    const avaliacao = DetectorDePergunta.avaliar(texto);
+    if (!avaliacao.candidata) return;
+    this.avaliacaoDoEnunciado = Object.freeze({ id: aberto.id, texto });
+    const contexto = this.janela.contexto(DURACAO_DO_CONTEXTO_MS, aberto.inicioMs);
+    this.seguirCandidata(texto, contexto, aberto.id, avaliacao.sinalForte);
   }
 
   /** Candidata com o sinal forte vira pergunta direto; sem ele, vai à classificação no servidor. */
@@ -816,30 +928,21 @@ export class SessaoDaEscuta {
     else this.pedirClassificacao({ trecho: texto, contexto, idDaFrase });
   }
 
-  /**
-   * Pergunta partida ao meio pelo corte de 5 s: a frase que não é candidata
-   * sozinha é avaliada junto com a anterior, se a anterior fechou por tempo e
-   * não foi pergunta. Sendo candidata, a pergunta é o texto junto, e a frase
-   * marcada é a atual. O contexto é o que veio antes da anterior.
-   */
-  private avaliarJuncao(frase: FraseDaLegenda, contextoAnterior: string): void {
-    const anterior = this.legenda.fraseAnterior(frase.id);
-    if (anterior === null || anterior.motivo !== "tempo" || anterior.pergunta) return;
-    if (DetectorDePergunta.ehAlucinacaoConhecida(anterior.texto)) return;
-    const juntas = `${anterior.texto} ${frase.texto}`;
-    const avaliacao = DetectorDePergunta.avaliar(juntas);
-    if (!avaliacao.candidata) return;
-    this.seguirCandidata(juntas, semNoFim(contextoAnterior, anterior.texto), frase.id, avaliacao.sinalForte);
-  }
-
-  /** Marca a frase na legenda e leva a pergunta ao controle de disparos. */
+  /** Marca o enunciado na legenda e leva a pergunta ao controle de disparos. */
   private perguntaDetectada(texto: string, idDaFrase: string): void {
     this.trocarLegenda(this.legenda.comPergunta(idDaFrase));
+    // O enunciado ainda aberto não está na janela: o contexto da mensagem o leva no fim.
+    const janela = this.janela.contexto(DURACAO_DO_CONTEXTO_MS);
+    const aberto = this.legenda.emAndamento;
+    const contexto =
+      aberto === null || aberto.id !== idDaFrase || aberto.confirmado === ""
+        ? janela
+        : limparTexto(`${janela} ${aberto.confirmado}`);
     let pergunta: PerguntaDetectada;
     try {
       pergunta = PerguntaDetectada.criar({
         pergunta: texto,
-        contexto: this.janela.contexto(DURACAO_DO_CONTEXTO_MS),
+        contexto,
         detectadaEmMs: this.dependencias.agora(),
       });
     } catch {

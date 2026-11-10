@@ -31,7 +31,7 @@ import {
   textoParaMostrar,
   ultimoModeloUsado,
 } from "../../shared/estado/aplicarEventoDoChat";
-import { formatarBytes, formatarDuracao, formatarMomento } from "../../shared/formatacao";
+import { formatarBytes, formatarDuracao } from "../../shared/formatacao";
 import { useMelhorarPrompt } from "../../shared/hooks/useMelhorarPrompt";
 import { useModoInvisivel } from "../../shared/hooks/useModoInvisivel";
 import {
@@ -55,11 +55,13 @@ import { BotaoDeDitado } from "../BotaoDeDitado";
 import { AvisoDaMelhoria, BotaoDeMelhorar } from "../MelhoriaDoPrompt";
 import { TextoFormatado } from "../TextoFormatado";
 import { AvisoDaEscuta } from "./AvisoDaEscuta";
+import { BalaoOuvido } from "./BalaoOuvido";
 import { CartaoDeAcao, type PropsDasAcoesDoChat } from "./CartaoDeAcao";
 import { CartaoDeAutorizacao } from "./CartaoDeAutorizacao";
 import { CartaoDePergunta } from "./CartaoDePergunta";
 import { CartaoDeSubagente } from "./CartaoDeSubagente";
 import { frasesSemAsEnviadas } from "./frasesOuvidas";
+import { HoraDaMensagem } from "./HoraDaMensagem";
 import { IndicadorDaEscuta } from "./IndicadorDaEscuta";
 import { SeletorDeModelo } from "./SeletorDeModelo";
 import "../../theme/chat-lateral.css";
@@ -307,24 +309,6 @@ function descreverAtividade({ ferramenta, detalhe }: AtividadeDaResposta): strin
  * cria uma nota com o texto onde ela foi solta.
  */
 export const TIPO_DA_RESPOSTA_DO_CHAT = "application/x-orquestrador-resposta-do-chat";
-
-/** "14:32" para hoje; "08/11, 14:32" para outro dia. Sem data legível, nada. */
-function horaDaMensagem(iso: string): string | null {
-  return Number.isNaN(Date.parse(iso)) ? null : formatarMomento(iso);
-}
-
-/** A hora no pé da bolha; a data e a hora completas no balão. */
-function HoraDaMensagem({ criadaEm }: { criadaEm: string }) {
-  const hora = horaDaMensagem(criadaEm);
-  if (hora === null) {
-    return null;
-  }
-  return (
-    <time className="hora-da-mensagem" dateTime={criadaEm} title={new Date(criadaEm).toLocaleString("pt-BR")}>
-      {hora}
-    </time>
-  );
-}
 
 /** Seis pontos: o lugar de pegar a resposta para arrastá-la. */
 function IconeArrastar() {
@@ -809,19 +793,24 @@ export function ChatRapido({
   });
   const comEscuta = escutaDisponivel && (modoAtivo || escutaManualLigada);
 
-  // A escuta é parte da conversa, como se você tivesse dito cada frase no chat: cada frase fechada vira
-  // uma mensagem sua com a marca "ouvido", intercalada com as outras pelo horário, e a frase em andamento
-  // fica numa mensagem provisória no fim. A pergunta que a escuta enviou some daqui: ela já é a mensagem.
+  // A escuta é parte da conversa, como se você tivesse dito cada fala no chat: um balão por enunciado.
+  // O aberto fica no fim e cresce no lugar; ao fechar, o mesmo balão (mesmo id) vira uma mensagem sua com
+  // a marca "ouvido", intercalada com as outras pelo horário. A pergunta que a escuta enviou some daqui:
+  // ela já é a mensagem.
   const frasesDaLegenda = escuta.legenda.frases;
   const frasesOuvidas = useMemo(
     () => frasesSemAsEnviadas(frasesDaLegenda, chat.mensagens),
     [frasesDaLegenda, chat.mensagens],
   );
   const emAndamento = escuta.legenda.emAndamento;
-  const confirmadoEmAndamento = emAndamento?.confirmado.trim() ?? "";
-  const parcialEmAndamento = emAndamento?.parcial.trim() ?? "";
-  const comFraseEmAndamento = confirmadoEmAndamento !== "" || parcialEmAndamento !== "";
-  const temOuvido = frasesOuvidas.length > 0 || comFraseEmAndamento;
+  // Nunca o mesmo enunciado duas vezes: se a legenda já o tem fechado (mesmo id), vale o fechado.
+  const enunciadoAberto =
+    emAndamento !== null &&
+    (emAndamento.confirmado.trim() !== "" || emAndamento.parcial.trim() !== "") &&
+    !frasesDaLegenda.some((frase) => frase.id === emAndamento.id)
+      ? emAndamento
+      : null;
+  const temOuvido = frasesOuvidas.length > 0 || enunciadoAberto !== null;
   const { frasesAntes, frasesNoFim } = useMemo(() => {
     const antes = new Map<string, FraseOuvida[]>();
     const noFim: FraseOuvida[] = [];
@@ -838,21 +827,33 @@ export function ChatRapido({
     return { frasesAntes: antes, frasesNoFim: noFim };
   }, [chat.mensagens, frasesOuvidas]);
   const balaoOuvido = (frase: FraseOuvida) => (
-    <div key={frase.id} className="mensagem-do-usuario mensagem-ouvida" data-testid="trecho-ouvido">
-      <p className="texto-longo">{frase.texto}</p>
-      <span className="marcas-da-mensagem-ouvida">
-        <span className="marca-ouvida" title="Frase ouvida pela escuta do áudio">
-          ouvido
-        </span>
-        {frase.pergunta && (
-          <span className="marca-da-pergunta-ouvida" role="img" aria-label="Pergunta detectada na escuta">
-            pergunta
-          </span>
-        )}
-      </span>
-      {Number.isFinite(frase.fimMs) && <HoraDaMensagem criadaEm={new Date(frase.fimMs).toISOString()} />}
-    </div>
+    <BalaoOuvido
+      key={frase.id}
+      id={frase.id}
+      texto={frase.texto}
+      inicioMs={frase.inicioMs}
+      fimMs={frase.fimMs}
+      pergunta={frase.pergunta}
+      aberto={false}
+    />
   );
+  // O aberto vai no MESMO array das frases do fim e com a chave que terá fechado: quando ele fecha depois
+  // das mensagens (o caso comum), o React reaproveita o elemento, sem piscar nem duplicar.
+  const baloesNoFim =
+    enunciadoAberto === null
+      ? frasesNoFim.map(balaoOuvido)
+      : [
+          ...frasesNoFim.map(balaoOuvido),
+          <BalaoOuvido
+            key={enunciadoAberto.id}
+            id={enunciadoAberto.id}
+            texto={enunciadoAberto.confirmado}
+            parcial={enunciadoAberto.parcial}
+            inicioMs={enunciadoAberto.inicioMs}
+            pergunta={false}
+            aberto
+          />,
+        ];
 
   // Acompanha o fim enquanto chega texto (das respostas e da escuta), a menos que o usuário tenha rolado para cima.
   useEffect(() => {
@@ -867,8 +868,8 @@ export function ChatRapido({
     chat.atividade,
     oculta,
     frasesOuvidas,
-    confirmadoEmAndamento,
-    parcialEmAndamento,
+    enunciadoAberto?.confirmado,
+    enunciadoAberto?.parcial,
   ]);
 
   async function enviar(): Promise<void> {
@@ -1149,25 +1150,7 @@ export function ChatRapido({
                 )}
               </Fragment>
             ))}
-            {frasesNoFim.map(balaoOuvido)}
-            {comFraseEmAndamento && (
-              <div
-                className="mensagem-do-usuario mensagem-ouvida mensagem-ouvida-provisoria"
-                aria-live="polite"
-                data-testid="trecho-provisorio"
-              >
-                <p className="texto-longo">
-                  {confirmadoEmAndamento !== "" && <span className="ouvido-confirmado">{confirmadoEmAndamento}</span>}
-                  {confirmadoEmAndamento !== "" && parcialEmAndamento !== "" && " "}
-                  {parcialEmAndamento !== "" && <span className="ouvido-parcial">{parcialEmAndamento}</span>}
-                </p>
-                <span className="marcas-da-mensagem-ouvida">
-                  <span className="marca-ouvida" title="Frase sendo ouvida agora pela escuta do áudio">
-                    ouvindo
-                  </span>
-                </span>
-              </div>
-            )}
+            {baloesNoFim}
           </div>
         </section>
       )}

@@ -52,7 +52,7 @@ export interface EscutaNaTela {
   confirmarAviso: () => void;
   recusarAviso: () => void; // não escuta nesta entrada no modo invisível
   ultimaPergunta: string | null; // última pergunta enviada ou posta no composer
-  legenda: EstadoDaEscuta["legenda"]; // frases fechadas (até 200) e a frase em andamento (confirmado e parcial)
+  legenda: EstadoDaEscuta["legenda"]; // enunciados fechados (até 200; cada um, uma fala completa entre pausas) e o enunciado em andamento (id, confirmado e parcial)
   motor: EstadoDaEscuta["motor"]; // o motor de transcrição em uso; null antes de preparar
   download: EstadoDaEscuta["download"]; // o modelo baixando; null fora disso
   ultimaPerguntaEnviada: EstadoDaEscuta["ultimaPerguntaEnviada"]; // a última enviada ou posta no composer, com o instante

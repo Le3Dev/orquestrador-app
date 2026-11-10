@@ -8,6 +8,7 @@ import {
   MINIMO_DE_PALAVRAS_DO_SINAL_FORTE,
   PALAVRAS_INTERROGATIVAS,
   sinalForte,
+  terminaEmInterrogacao,
   TERMOS_TECNICOS,
 } from "./DetectorDePergunta";
 
@@ -15,7 +16,33 @@ describe("DetectorDePergunta.avaliar", () => {
   it("interrogação no fim, mesmo com espaços e aspas depois", () => {
     expect(avaliar("Você já trabalhou com Kubernetes?")).toEqual({ candidata: true, motivo: "interrogacao", sinalForte: false });
     expect(avaliar('Ele disse "isso escala?"  ')).toEqual({ candidata: true, motivo: "interrogacao", sinalForte: false });
-    expect(avaliar("Será? Acho que não.")).toEqual({ candidata: false, motivo: null, sinalForte: false });
+    // O "?" no meio não conta como interrogação; aqui a frase passa pela interrogativa ("será").
+    expect(avaliar("Será? Acho que não.")).toEqual({ candidata: true, motivo: "interrogativa", sinalForte: false });
+    expect(avaliar("Sério? Acho que não.")).toEqual({ candidata: false, motivo: null, sinalForte: false });
+  });
+
+  it("palavra interrogativa em qualquer posição, com 4+ palavras, é candidata (motivo interrogativa)", () => {
+    for (const texto of [
+      "pessoal agora eu queria saber quem vai apresentar hoje",
+      "e aí quando a gente sobe o servidor",
+      "então você sabe onde fica o arquivo de configuração",
+      "so tell me what you think about it",
+      "Quando a gente sobe o servidor", // no começo, sem "?"
+    ]) {
+      expect(avaliar(texto)).toEqual({ candidata: true, motivo: "interrogativa", sinalForte: false });
+    }
+  });
+
+  it("a interrogativa precisa ser palavra inteira e o texto ter ao menos 4 palavras", () => {
+    expect(MINIMO_DE_PALAVRAS_DO_SINAL_FORTE).toBe(4);
+    expect(avaliar("saber quem foi")).toEqual({ candidata: false, motivo: null, sinalForte: false }); // 3 palavras
+    expect(avaliar("uma comoção geral no evento")).toEqual({ candidata: false, motivo: null, sinalForte: false }); // "como" só como pedaço
+    expect(avaliar("a qualidade ficou ótima hoje")).toEqual({ candidata: false, motivo: null, sinalForte: false }); // "qual" só como pedaço
+  });
+
+  it("pedido e termo técnico vêm antes da interrogativa na ordem dos motivos", () => {
+    expect(avaliar("Como faço pra subir o servidor")).toEqual({ candidata: true, motivo: "pedido", sinalForte: false });
+    expect(avaliar("onde fica o array de inteiros")).toEqual({ candidata: true, motivo: "termo_tecnico", sinalForte: false });
   });
 
   it("pedidos em português, com e sem acento, sem diferenciar maiúsculas", () => {
@@ -77,10 +104,20 @@ describe("DetectorDePergunta.avaliar", () => {
     expect(avaliar("Obrigado.")).toEqual({ candidata: false, motivo: null, sinalForte: false });
     expect(avaliar("Qual?")).toEqual({ candidata: false, motivo: null, sinalForte: false });
     expect(avaliar("[Música]")).toEqual({ candidata: false, motivo: null, sinalForte: false });
+    expect(avaliar("Legendas pela comunidade Amara.org, qual é a próxima")).toEqual({ candidata: false, motivo: null, sinalForte: false });
   });
 
   it("pergunta com o sinal forte sai marcada na avaliação", () => {
     expect(avaliar("Qual a complexidade do quicksort?")).toEqual({ candidata: true, motivo: "interrogacao", sinalForte: true });
+  });
+
+  it("a interrogativa no meio não dá sinal forte, nem com o ? no fim", () => {
+    expect(avaliar("pessoal queria saber qual a complexidade do quicksort?")).toEqual({
+      candidata: true,
+      motivo: "interrogacao",
+      sinalForte: false,
+    });
+    expect(avaliar("pessoal queria saber qual a complexidade do quicksort").sinalForte).toBe(false);
   });
 
   it("o objeto do serviço expõe as mesmas funções", () => {
@@ -88,6 +125,17 @@ describe("DetectorDePergunta.avaliar", () => {
     expect(DetectorDePergunta.ehAlucinacao).toBe(ehAlucinacao);
     expect(DetectorDePergunta.ehAlucinacaoConhecida).toBe(ehAlucinacaoConhecida);
     expect(DetectorDePergunta.sinalForte).toBe(sinalForte);
+    expect(DetectorDePergunta.terminaEmInterrogacao).toBe(terminaEmInterrogacao);
+  });
+});
+
+describe("DetectorDePergunta.terminaEmInterrogacao", () => {
+  it("termina em ? (ou ？), ignorando espaços e aspas no fim; o ? no meio não conta", () => {
+    expect(terminaEmInterrogacao("Qual a complexidade?")).toBe(true);
+    expect(terminaEmInterrogacao('Ele disse "isso escala?"  ')).toBe(true);
+    expect(terminaEmInterrogacao("Tudo bem？")).toBe(true);
+    expect(terminaEmInterrogacao("Será? Acho que não.")).toBe(false);
+    expect(terminaEmInterrogacao("")).toBe(false);
   });
 });
 

@@ -63,7 +63,7 @@ describe("CortadorDeFala", () => {
   it("constantes combinadas", () => {
     expect(LIMIAR_DE_INICIO_DA_FALA).toBe(0.5);
     expect(LIMIAR_DE_FIM_DA_FALA).toBe(0.35);
-    expect(SILENCIO_PARA_FIM_MS).toBe(350);
+    expect(SILENCIO_PARA_FIM_MS).toBe(500);
     expect(PRE_ROLL_MS).toBe(200);
     expect(VOZ_MINIMA_MS).toBe(250);
     expect(DURACAO_MAXIMA_DA_FALA_MS).toBe(8_000);
@@ -77,15 +77,15 @@ describe("CortadorDeFala", () => {
     expect(cortador.encerrar()).toEqual([]);
   });
 
-  it("histerese: começa com p ≥ 0,5, continua com p ≥ 0,35 e termina após 350 ms abaixo disso", () => {
+  it("histerese: começa com p ≥ 0,5, continua com p ≥ 0,35 e termina após 500 ms abaixo disso", () => {
     const cortador = new CortadorDeFala();
     const fonte = new Fonte();
-    // 10 janelas de silêncio, 1 a 0,6, 20 a 0,4 (só a histerese segura) e 11 de silêncio.
-    const eventos = alimentar(cortador, fonte, [...repetir(0.1, 10), 0.6, ...repetir(0.4, 20), ...repetir(0.1, 11)]);
-    // Começo: janela 10 (320 ms) menos 200 ms de pre-roll; fim: depois da 11ª janela de silêncio.
+    // 10 janelas de silêncio, 1 a 0,6, 20 a 0,4 (só a histerese segura) e 16 de silêncio.
+    const eventos = alimentar(cortador, fonte, [...repetir(0.1, 10), 0.6, ...repetir(0.4, 20), ...repetir(0.1, 16)]);
+    // Começo: janela 10 (320 ms) menos 200 ms de pre-roll; fim: depois da 16ª janela de silêncio (512 ms).
     expect(resumo(eventos)).toEqual([
       { tipo: "inicio", emMs: 120 },
-      { tipo: "fim", motivo: "silencio", inicioMs: 120, emMs: 42 * MS, amostras: (42 * MS - 120) * AMOSTRAS_POR_MS },
+      { tipo: "fim", motivo: "silencio", inicioMs: 120, emMs: 47 * MS, amostras: (47 * MS - 120) * AMOSTRAS_POR_MS },
     ]);
     const fim = fins(eventos)[0];
     expect(fim !== undefined && ehContinuo(fim.audio, 120 * AMOSTRAS_POR_MS)).toBe(true);
@@ -139,25 +139,25 @@ describe("CortadorDeFala", () => {
     expect(alimentar(cortador, fonte, [...repetir(0.1, 10), ...repetir(0.9, 7), ...repetir(0.1, 30)])).toEqual([]);
     expect(cortador.emAndamento).toBe(false);
     // A seguinte funciona normalmente, com pre-roll tirado do silêncio depois da descartada.
-    const eventos = alimentar(cortador, fonte, [...repetir(0.9, 10), ...repetir(0.1, 11)]);
+    const eventos = alimentar(cortador, fonte, [...repetir(0.9, 10), ...repetir(0.1, 16)]);
     expect(resumo(eventos)).toEqual([
       { tipo: "inicio", emMs: 47 * MS - PRE_ROLL_MS },
-      { tipo: "fim", motivo: "silencio", inicioMs: 47 * MS - PRE_ROLL_MS, emMs: 68 * MS, amostras: (68 * MS - 47 * MS + PRE_ROLL_MS) * AMOSTRAS_POR_MS },
+      { tipo: "fim", motivo: "silencio", inicioMs: 47 * MS - PRE_ROLL_MS, emMs: 73 * MS, amostras: (73 * MS - 47 * MS + PRE_ROLL_MS) * AMOSTRAS_POR_MS },
     ]);
   });
 
-  it("silêncio de 320 ms no meio não corta a fala; o de 352 ms corta", () => {
+  it("silêncio de 480 ms no meio não corta a fala; o de 512 ms corta", () => {
     const cortador = new CortadorDeFala();
     const eventos = alimentar(cortador, new Fonte(), [
       ...repetir(0.1, 10),
       ...repetir(0.9, 20),
-      ...repetir(0.1, 10),
+      ...repetir(0.1, 15),
       ...repetir(0.9, 20),
-      ...repetir(0.1, 10),
+      ...repetir(0.1, 15),
     ]);
     expect(resumo(eventos)).toEqual([{ tipo: "inicio", emMs: 120 }]);
     expect(cortador.emAndamento).toBe(true);
-    expect(resumo(cortador.adicionar(new Fonte().janelas([0.1])))).toMatchObject([{ tipo: "fim", motivo: "silencio", emMs: 71 * MS }]);
+    expect(resumo(cortador.adicionar(new Fonte().janelas([0.1])))).toMatchObject([{ tipo: "fim", motivo: "silencio", emMs: 81 * MS }]);
   });
 
   it("fala longa é cortada na janela de menor probabilidade dos últimos 2 s, sem perder amostras", () => {
@@ -181,10 +181,10 @@ describe("CortadorDeFala", () => {
     expect(cortador.inicioDaFalaMs).toBe(221 * MS);
     expect(ehContinuo(cortador.audioDaFala(), 221 * N)).toBe(true);
     expect(cortador.audioDaFala().length).toBe(33 * N);
-    const resto = alimentar(cortador, fonte, [...repetir(0.9, 5), ...repetir(0.1, 11)]);
+    const resto = alimentar(cortador, fonte, [...repetir(0.9, 5), ...repetir(0.1, 16)]);
     const segunda = fins(resto)[0];
     expect(resumo(resto)).toEqual([
-      { tipo: "fim", motivo: "silencio", inicioMs: 221 * MS, emMs: 270 * MS, amostras: 49 * N },
+      { tipo: "fim", motivo: "silencio", inicioMs: 221 * MS, emMs: 275 * MS, amostras: 54 * N },
     ]);
     expect(segunda !== undefined && ehContinuo(segunda.audio, 221 * N)).toBe(true);
   });
