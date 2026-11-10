@@ -3,10 +3,12 @@ import {
   ALTURA_DA_NOTA_MINIMIZADA,
   distribuirJanelas,
   interpretarBixinhosLimpos,
+  interpretarDesenhosDasTelasCheias,
   interpretarLayout,
   type JanelaNoCanvas,
   janelasLadoALado,
   lerBixinhosLimpos,
+  lerDesenhoDaTelaCheia,
   lerLayout,
   MARGEM_DO_LADO_A_LADO,
   MARGEM_DOS_BIXINHOS,
@@ -21,6 +23,7 @@ import {
   type Retangulo,
   salvarBixinhosLimpos,
   salvarDesenho,
+  salvarDesenhoDaTelaCheia,
   salvarLayout,
   sobrepoe,
   TAMANHO_DA_PREVIA,
@@ -1045,5 +1048,70 @@ describe("desenho no layout", () => {
 
   it("um desenho que não é lista vale como nenhum", () => {
     expect(interpretarLayout(JSON.stringify({ desenho: { t1: caneta } })).desenho).toBeUndefined();
+  });
+});
+
+describe("desenho da tela cheia no armazenamento", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  const CHAVE = "orquestrador-agentes:canvas:v1:desenho-da-tela-cheia";
+  const seta: TracoDoDesenho = {
+    id: "t1",
+    tipo: "seta",
+    cor: "azul",
+    espessura: 3,
+    pontos: [
+      { x: 20, y: 80 },
+      { x: 120, y: 80 },
+    ],
+  };
+  const retangulo: TracoDoDesenho = { ...seta, id: "t2", tipo: "retangulo" };
+
+  it("guarda por artefato, sem misturar nem tocar o desenho do canvas", () => {
+    salvarDesenhoDaTelaCheia("a1", [seta]);
+    salvarDesenhoDaTelaCheia("a2", [retangulo]);
+
+    expect(lerDesenhoDaTelaCheia("a1")).toEqual([seta]);
+    expect(lerDesenhoDaTelaCheia("a2")).toEqual([retangulo]);
+    expect(lerDesenhoDaTelaCheia("a3")).toEqual([]);
+    expect(Object.keys(JSON.parse(localStorage.getItem(CHAVE) ?? "{}"))).toEqual(["a1", "a2"]);
+    expect(localStorage.getItem("orquestrador-agentes:canvas:v1")).toBeNull();
+  });
+
+  it("sem traços, o artefato sai do armazenamento", () => {
+    salvarDesenhoDaTelaCheia("a1", [seta]);
+    salvarDesenhoDaTelaCheia("a2", [retangulo]);
+    salvarDesenhoDaTelaCheia("a1", []);
+
+    expect(Object.keys(JSON.parse(localStorage.getItem(CHAVE) ?? "{}"))).toEqual(["a2"]);
+  });
+
+  it.each([null, "", "não é json", "[]", "5"])("ignora conteúdo corrompido: %s", (texto) => {
+    expect(interpretarDesenhosDasTelasCheias(texto)).toEqual(new Map());
+  });
+
+  it("descarta o traço corrompido e o artefato sem nenhum traço válido; o resto fica", () => {
+    const texto = JSON.stringify({
+      bom: [seta, { ...seta, id: "x", cor: "roxo" }, "não é traço"],
+      ruim: [{ ...seta, pontos: [] }],
+      lixo: "não é lista",
+    });
+
+    expect(interpretarDesenhosDasTelasCheias(texto)).toEqual(new Map([["bom", [seta]]]));
+  });
+
+  it("não quebra a tela sem armazenamento", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("localStorage bloqueado");
+    });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("cota excedida");
+    });
+
+    expect(lerDesenhoDaTelaCheia("a1")).toEqual([]);
+    expect(() => salvarDesenhoDaTelaCheia("a1", [seta])).not.toThrow();
   });
 });

@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { ReactFlowProvider } from "@xyflow/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { useState } from "react";
 
 import { lerLayout, salvarDesenho, type TracoDoDesenho } from "../../shared/canvas/layout";
@@ -228,5 +230,19 @@ describe("CamadaDeDesenho", () => {
     fireEvent.pointerDown(areaDeDesenho(), { button: 0, pointerId: 1, clientX: 90, clientY: 90 });
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Texto solto" }), { key: "Enter" });
     expect(camada().querySelectorAll("text")).toHaveLength(1);
+  });
+
+  it("com uma ferramenta na mão, a página do artefato e da prévia fica sem o mouse (o CSS é lido do arquivo)", () => {
+    const css = readFileSync(resolve(__dirname, "../../theme/index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const regras = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, seletores = "", corpo = ""]) => ({
+      seletores: seletores.split(",").map((seletor) => seletor.trim()),
+      corpo,
+    }));
+    for (const alvo of [".corpo-do-artefato-html", ".quadro-da-previa"]) {
+      const regra = regras.find(({ seletores }) =>
+        seletores.includes(`.react-flow:has(.camada-de-desenho-ativa) ${alvo}`),
+      );
+      expect(regra?.corpo, alvo).toMatch(/pointer-events:\s*none/);
+    }
   });
 });
