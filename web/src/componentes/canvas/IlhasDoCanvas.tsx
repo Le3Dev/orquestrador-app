@@ -56,50 +56,31 @@ export function IlhaDoNome(props: PropsDoMenuNovo) {
   );
 }
 
-interface PropsDoAnel {
-  /** Quanto do arco fica preenchido, de 0 a 1. */
-  usada: number;
-  /** O anel de memória (com o chip no meio). */
-  classe: "anel-de-memoria";
-  children: ReactNode;
-}
-
-/** O desenho do anel de memória: a trilha, o arco que cresce com o uso e o que fica no meio. */
-function Anel({ usada, classe, children }: PropsDoAnel) {
+/** O anel de uso da memória: o arco cresce com o uso e o chip fica no meio. */
+function AnelDeMemoria({ memoria }: { memoria: LeituraDeMemoria | null }) {
   const tamanho = 26;
   const traco = 2.2;
   const raio = (tamanho - traco) / 2;
   const circunferencia = 2 * Math.PI * raio;
-  return (
-    <span className={classe} aria-hidden="true">
-      <svg width={tamanho} height={tamanho} viewBox={`0 0 ${tamanho} ${tamanho}`}>
-        <circle className="trilha-do-anel" cx={tamanho / 2} cy={tamanho / 2} r={raio} fill="none" strokeWidth={traco} />
-        {usada > 0 && (
-          <circle
-            className="arco-do-anel"
-            cx={tamanho / 2}
-            cy={tamanho / 2}
-            r={raio}
-            fill="none"
-            strokeWidth={traco}
-            strokeLinecap="round"
-            strokeDasharray={`${circunferencia * usada} ${circunferencia}`}
-            transform={`rotate(-90 ${tamanho / 2} ${tamanho / 2})`}
-          />
-        )}
-      </svg>
-      {children}
-    </span>
-  );
-}
-
-/** O anel de uso da memória: o arco cresce com o uso e o chip fica no meio. */
-function AnelDeMemoria({ memoria }: { memoria: LeituraDeMemoria | null }) {
   const usada = memoria === null ? 0 : Math.min(1, Math.max(0, 1 - memoria.livreBytes / memoria.totalBytes));
   return (
-    <Anel usada={usada} classe="anel-de-memoria">
+    <span className="anel-de-memoria" aria-hidden="true">
+      <svg width={tamanho} height={tamanho} viewBox={`0 0 ${tamanho} ${tamanho}`}>
+        <circle className="trilha-do-anel" cx={tamanho / 2} cy={tamanho / 2} r={raio} fill="none" strokeWidth={traco} />
+        <circle
+          className="arco-do-anel"
+          cx={tamanho / 2}
+          cy={tamanho / 2}
+          r={raio}
+          fill="none"
+          strokeWidth={traco}
+          strokeLinecap="round"
+          strokeDasharray={`${circunferencia * usada} ${circunferencia}`}
+          transform={`rotate(-90 ${tamanho / 2} ${tamanho / 2})`}
+        />
+      </svg>
       <IconeMemoria className="chip-do-anel" />
-    </Anel>
+    </span>
   );
 }
 
@@ -121,9 +102,9 @@ function nivelDaJanela(janela: JanelaDaCota): NivelDaCota {
 const aPercentual = (utilizacao: number) => Math.min(100, Math.max(0, Math.round(utilizacao * 100)));
 
 interface ResumoDaCota {
-  /** O anel de fora: a janela da sessão (5 horas, a de maior utilização); nulo se faltar. */
+  /** A barra de cima (5h): a janela da sessão (5 horas, a de maior utilização); nulo se faltar. */
   sessao: JanelaDaCota | null;
-  /** O anel de dentro: a janela da semana (7 dias, a de maior utilização, mesmo as por modelo); nulo se faltar. */
+  /** A barra de baixo (7d): a janela da semana (7 dias, a de maior utilização, mesmo as por modelo); nulo se faltar. */
   semana: JanelaDaCota | null;
   /** A pior situação entre todas as janelas (é ela que dá a cor do botão e o texto). */
   nivel: NivelDaCota;
@@ -141,11 +122,12 @@ function maisUsada(janelas: JanelaDaCota[], filtro: (janela: JanelaDaCota) => bo
     .reduce<JanelaDaCota | null>((maior, janela) => (maior === null || janela.utilizacao > maior.utilizacao ? janela : maior), null);
 }
 
-/** "semana (Opus) 55%, renova em 3 dias" com a marca do anel: "semana (anel de dentro, Opus) 55%, ...". */
-function trechoDoAnel(janela: JanelaDaCota, anel: string, agora: Date): string {
+/** "sessão de 5 h 42%, renova em 2 h 10 min"; "semana (Opus) 55%, renova em 13/11, 09:00". */
+function trechoDaBarra(janela: JanelaDaCota, agora: Date): string {
   const [, base = "", modelo] = /^(.*?)(?: \((.+)\))?$/.exec(nomeCurtoDaJanela(janela.nome)) ?? [];
+  const nome = base === "sessão" ? "sessão de 5 h" : base;
   const renovacao = janela.renovaEm === null ? "" : `, ${descreverRenovacao(janela.renovaEm, agora)}`;
-  return `${base} (${anel}${modelo === undefined ? "" : `, ${modelo}`}) ${aPercentual(janela.utilizacao)}%${renovacao}`;
+  return `${nome}${modelo === undefined ? "" : ` (${modelo})`} ${aPercentual(janela.utilizacao)}%${renovacao}`;
 }
 
 function resumirCota(cota: JanelaDaCota[] | null, agora: Date): ResumoDaCota {
@@ -160,9 +142,9 @@ function resumirCota(cota: JanelaDaCota[] | null, agora: Date): ResumoDaCota {
     return PESO_DO_NIVEL_DA_COTA[dela] > PESO_DO_NIVEL_DA_COTA[pior] ? dela : pior;
   }, "normal");
   const partes = [
-    ...(sessao === null ? [] : [trechoDoAnel(sessao, "anel de fora", agora)]),
-    ...(semana === null ? [] : [trechoDoAnel(semana, "anel de dentro", agora)]),
-    // As demais janelas (30 dias e afins) não têm anel: entram só na frase.
+    ...(sessao === null ? [] : [trechoDaBarra(sessao, agora)]),
+    ...(semana === null ? [] : [trechoDaBarra(semana, agora)]),
+    // As demais janelas (30 dias e afins) não têm barra: entram só na frase.
     ...janelas
       .filter((janela) => janela !== sessao && janela !== semana)
       .map((janela) => `${nomeCurtoDaJanela(janela.nome)} ${aPercentual(janela.utilizacao)}%`),
@@ -171,60 +153,44 @@ function resumirCota(cota: JanelaDaCota[] | null, agora: Date): ResumoDaCota {
   return { sessao, semana, nivel, rotulo: `Uso do Claude: ${partes.join("; ")}.${aviso} Abrir Configurações, Conta` };
 }
 
-const TRACO_DO_ANEL_DE_FORA = 2.2;
-const TRACO_DO_ANEL_DE_DENTRO = 1.8;
-
-interface PropsDoArco {
-  /** A janela do arco; nulo deixa só a trilha. */
+interface PropsDaBarra {
+  /** O rótulo curto à esquerda ("5h" ou "7d"). */
+  rotulo: string;
+  /** A janela da barra; nulo deixa só a trilha. */
   janela: JanelaDaCota | null;
-  raio: number;
-  traco: number;
-  /** Qual anel é (para os testes e a folha de estilo). */
+  /** Qual barra é (para os testes). */
   qual: "sessao" | "semana";
 }
 
-/** Uma trilha e, por cima, o arco da janela na cor do nível dela. */
-function ArcoDeUso({ janela, raio, traco, qual }: PropsDoArco) {
-  const centro = 13;
-  const usada = janela === null ? 0 : aPercentual(janela.utilizacao) / 100;
-  const circunferencia = 2 * Math.PI * raio;
+/** Um rótulo, a trilha e, por cima, o preenchimento da janela na cor do nível dela. */
+function BarraDeUso({ rotulo, janela, qual }: PropsDaBarra) {
+  const percentual = janela === null ? 0 : aPercentual(janela.utilizacao);
   return (
-    <>
-      <circle className="trilha-do-anel" cx={centro} cy={centro} r={raio} fill="none" strokeWidth={traco} />
-      {usada > 0 && janela !== null && (
-        <circle
-          className={`arco-do-anel arco-do-anel-${nivelDaJanela(janela)}`}
-          data-anel={qual}
-          cx={centro}
-          cy={centro}
-          r={raio}
-          fill="none"
-          strokeWidth={traco}
-          strokeLinecap="round"
-          strokeDasharray={`${circunferencia * usada} ${circunferencia}`}
-          transform={`rotate(-90 ${centro} ${centro})`}
-        />
-      )}
-    </>
+    <span className="linha-de-uso">
+      <span className="rotulo-de-uso">{rotulo}</span>
+      <span className="trilha-de-uso">
+        {janela !== null && percentual > 0 && (
+          <span
+            className={`preenchimento-de-uso preenchimento-de-uso-${nivelDaJanela(janela)}`}
+            data-barra={qual}
+            style={{ width: `${percentual}%` }}
+          />
+        )}
+      </span>
+    </span>
   );
 }
 
 /**
- * O anel de uso da cota do Claude, no mesmo tamanho do de memória: dois anéis concêntricos, o de fora é a
- * sessão (5 horas) e o de dentro, mais fino e com um respiro entre os dois, a semana (7 dias). Cada arco
- * tem a cor do próprio nível. Sem número no meio: o valor vai no `title` e no `aria-label` do botão.
+ * O indicador de uso da cota do Claude: duas barras horizontais com rótulo, a de cima é a sessão (5h) e a
+ * de baixo, a semana (7d). Cada barra tem a cor do próprio nível. Sem número: o valor vai no `title` e no
+ * `aria-label` do botão.
  */
-function AnelDeUso({ sessao, semana }: { sessao: JanelaDaCota | null; semana: JanelaDaCota | null }) {
-  const tamanho = 26;
-  const raioDeFora = (tamanho - TRACO_DO_ANEL_DE_FORA) / 2;
-  // Borda de dentro do anel de fora, menos 2 px de respiro e meio traço do anel de dentro.
-  const raioDeDentro = raioDeFora - TRACO_DO_ANEL_DE_FORA / 2 - 2 - TRACO_DO_ANEL_DE_DENTRO / 2;
+function BarrasDeUso({ sessao, semana }: { sessao: JanelaDaCota | null; semana: JanelaDaCota | null }) {
   return (
-    <span className="anel-de-uso" aria-hidden="true">
-      <svg width={tamanho} height={tamanho} viewBox={`0 0 ${tamanho} ${tamanho}`}>
-        <ArcoDeUso janela={sessao} raio={raioDeFora} traco={TRACO_DO_ANEL_DE_FORA} qual="sessao" />
-        <ArcoDeUso janela={semana} raio={raioDeDentro} traco={TRACO_DO_ANEL_DE_DENTRO} qual="semana" />
-      </svg>
+    <span className="indicador-de-uso" aria-hidden="true">
+      <BarraDeUso rotulo="5h" janela={sessao} qual="sessao" />
+      <BarraDeUso rotulo="7d" janela={semana} qual="semana" />
     </span>
   );
 }
@@ -251,7 +217,7 @@ interface PropsDaIlhaDaDireita {
 
 /**
  * Ilha do canto superior direito: a lupa (paleta de comandos), o contador de
- * quem está trabalhando, o anel de uso da cota do Claude (abre Configurações
+ * quem está trabalhando, as barras de uso da cota do Claude (abrem Configurações
  * na aba Conta), o anel de memória (abre na aba Sistema) e a engrenagem (abre
  * Configurações). No app desktop o fundo dela arrasta a janela
  * (`ilha-arrasta`); o que é clicável é `no-drag`.
@@ -308,10 +274,10 @@ export function IlhaDaDireita({
         aria-pressed={configuracoesAbertas && abaAberta === "conta"}
         aria-label={resumoDaCota.rotulo}
         title={resumoDaCota.rotulo}
-        data-testid="anel-de-uso"
+        data-testid="indicador-de-uso"
         onClick={() => aoAlternarConfiguracoes("conta")}
       >
-        <AnelDeUso sessao={resumoDaCota.sessao} semana={resumoDaCota.semana} />
+        <BarrasDeUso sessao={resumoDaCota.sessao} semana={resumoDaCota.semana} />
         {textoDaCota !== "" && <span className="texto-do-anel">{textoDaCota}</span>}
       </button>
       <button

@@ -237,7 +237,7 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
 .situacao-no-canvas { flex-shrink: 0; font-size: 12px; color: var(--secondary); }
 .situacao-no-canvas-aberto { color: var(--caption); }
 
-/* ---------- Canto superior direito: lupa, contador, anel e engrenagem ---------- */
+/* ---------- Canto superior direito: lupa, contador, uso do Claude, anel de memória e engrenagem ---------- */
 .ilha-da-direita { position: absolute; top: 16px; right: 16px; z-index: 2; }
 .botao-da-ilha {
   display: inline-flex;
@@ -287,17 +287,22 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   padding-right: 10px;
   background: color-mix(in srgb, var(--error) 10%, transparent);
 }
-.anel-de-memoria, .anel-de-uso { position: relative; display: inline-flex; width: 26px; height: 26px; flex-shrink: 0; }
+.anel-de-memoria { position: relative; display: inline-flex; width: 26px; height: 26px; flex-shrink: 0; }
 .trilha-do-anel { stroke: color-mix(in srgb, var(--primary) 16%, transparent); }
 .arco-do-anel { stroke: currentColor; }
 .chip-do-anel { position: absolute; top: 6.5px; left: 6.5px; }
-/* Anel de uso da cota: dois anéis (fora, sessão; dentro, semana), cada arco na cor do próprio nível.
- * Cada arco tem a sua cor, independente da do botão (que segue a pior janela): o normal é o cinza de
- * sempre (e acende no hover e com a aba aberta, como o texto do botão); alto e crítico têm a sua. */
-.arco-do-anel-normal { stroke: var(--secondary); }
-.anel-da-ilha:hover .arco-do-anel-normal, .anel-da-ilha[aria-pressed="true"] .arco-do-anel-normal { stroke: var(--primary); }
-.arco-do-anel-alta { stroke: var(--warning); }
-.arco-do-anel-critica { stroke: var(--error); }
+/* Indicador de uso da cota: duas barras com rótulo (5h em cima, 7d embaixo), 38x26 (a altura é a do anel de memória).
+ * Cada barra tem a cor do próprio nível, independente da do botão (que segue a pior janela): o normal é o
+ * cinza de sempre (e acende no hover e com a aba aberta, como o texto do botão); alto e crítico têm a sua. */
+.indicador-de-uso { display: inline-flex; flex-direction: column; justify-content: center; gap: 5px; width: 38px; height: 26px; flex-shrink: 0; }
+.linha-de-uso { display: flex; align-items: center; gap: 2px; height: 8px; }
+.rotulo-de-uso { width: 12px; flex-shrink: 0; font-size: 9px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: 0; color: var(--secondary); }
+.anel-da-ilha:hover .rotulo-de-uso, .anel-da-ilha[aria-pressed="true"] .rotulo-de-uso { color: var(--primary); }
+.trilha-de-uso { position: relative; flex: 1; height: 4px; border-radius: 2px; background: color-mix(in srgb, var(--primary) 16%, transparent); overflow: hidden; }
+.preenchimento-de-uso { position: absolute; inset: 0 auto 0 0; min-width: 2px; border-radius: 2px; background: var(--secondary); }
+.anel-da-ilha:hover .preenchimento-de-uso-normal, .anel-da-ilha[aria-pressed="true"] .preenchimento-de-uso-normal { background: var(--primary); }
+.preenchimento-de-uso-alta { background: var(--warning); }
+.preenchimento-de-uso-critica { background: var(--error); }
 
 /* Windows e Linux desktop: ─ ☐ ✕ no fim da ilha da direita, depois de um divisor; fechar fica vermelho no hover. */
 .ilha-da-direita .controles-da-janela { gap: 2px; }
