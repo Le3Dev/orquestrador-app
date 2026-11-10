@@ -11,6 +11,7 @@ import {
   ProvedorDosArtefatos,
 } from "../../shared/canvas/artefatos";
 import type { NoArtefato as TipoDoNo } from "../../shared/canvas/nos";
+import { TAG_DO_SCRIPT_DE_NAVEGACAO } from "../../shared/navegacaoDoArtefato";
 import {
   CONFIRMACAO_PARA_APAGAR_O_ARTEFATO,
   DURACAO_DO_DESTAQUE_MS,
@@ -18,7 +19,8 @@ import {
   POLITICA_DO_ARTEFATO,
 } from "./NoArtefato";
 
-const META = `<meta http-equiv="Content-Security-Policy" content="${POLITICA_DO_ARTEFATO}">`;
+/** A política de segurança e o script de voltar e avançar, que entram juntos no começo da página. */
+const META = `<meta http-equiv="Content-Security-Policy" content="${POLITICA_DO_ARTEFATO}">${TAG_DO_SCRIPT_DE_NAVEGACAO}`;
 
 function versao(numero: number, tamanho = 2150) {
   return { numero, criadaEm: `2026-11-0${numero}T12:00:00Z`, tamanho };
@@ -165,6 +167,95 @@ describe("NoArtefato", () => {
     const modal = screen.getByRole("dialog", { name: "Relatório de vendas" });
     expect(within(modal).queryByRole("button", { name: "Usar a página" })).not.toBeInTheDocument();
     expect(within(modal).getByTitle("Conteúdo do artefato: Relatório de vendas")).not.toHaveStyle({ pointerEvents: "none" });
+  });
+
+  describe("voltar e avançar dentro da página", () => {
+    const AVISO = { origem: "orquestrador-artefato", suportado: true, podeVoltar: true, podeAvancar: false };
+
+    /** A mensagem chega à janela do app, como a do iframe (`source` é a janela dele). */
+    function avisar(de: Window | null, dados: unknown): void {
+      act(() => {
+        window.dispatchEvent(new MessageEvent("message", { data: dados, source: de }));
+      });
+    }
+
+    async function abrir(alteracoes: Partial<ResumoDoArtefato> = {}) {
+      vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("<p>x</p>");
+      const { tela } = preparar(artefato("a1", alteracoes));
+      render(tela(<NoArtefato {...propsDoNo("a1")} />));
+      const pagina = (await iframe()) as HTMLIFrameElement;
+      return { pagina, janelaDaPagina: pagina.contentWindow as Window };
+    }
+
+    it("sem o aviso da página, não há ← nem →; com o aviso, aparecem e seguem o estado dela", async () => {
+      const { janelaDaPagina } = await abrir();
+      expect(screen.queryByRole("button", { name: "Voltar" })).not.toBeInTheDocument();
+
+      avisar(janelaDaPagina, AVISO);
+      expect(screen.getByRole("button", { name: "Voltar" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Avançar" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Voltar" })).toHaveClass("nodrag");
+
+      avisar(janelaDaPagina, { ...AVISO, podeVoltar: false, podeAvancar: true });
+      expect(screen.getByRole("button", { name: "Voltar" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Avançar" })).toBeEnabled();
+    });
+
+    it("só vale a mensagem que vem da janela do iframe, no formato certo", async () => {
+      const { janelaDaPagina } = await abrir();
+
+      avisar(window, AVISO);
+      avisar(null, AVISO);
+      avisar(janelaDaPagina, { ...AVISO, origem: "outra" });
+      avisar(janelaDaPagina, { ...AVISO, podeVoltar: "sim" });
+      avisar(janelaDaPagina, "voltar");
+      avisar(janelaDaPagina, null);
+      expect(screen.queryByRole("button", { name: "Voltar" })).not.toBeInTheDocument();
+    });
+
+    it("cada botão manda o comando só para a janela do iframe", async () => {
+      const { janelaDaPagina } = await abrir();
+      const enviar = vi.spyOn(janelaDaPagina, "postMessage").mockImplementation(() => undefined);
+      avisar(janelaDaPagina, { ...AVISO, podeAvancar: true });
+
+      fireEvent.click(screen.getByRole("button", { name: "Voltar" }));
+      expect(enviar).toHaveBeenLastCalledWith({ origem: "orquestrador-app", acao: "voltar" }, "*");
+      fireEvent.click(screen.getByRole("button", { name: "Avançar" }));
+      expect(enviar).toHaveBeenLastCalledWith({ origem: "orquestrador-app", acao: "avancar" }, "*");
+    });
+
+    it("quando a página carrega, o app pede o estado (a mensagem inicial dela pode ter chegado antes)", async () => {
+      const { pagina, janelaDaPagina } = await abrir();
+      const enviar = vi.spyOn(janelaDaPagina, "postMessage").mockImplementation(() => undefined);
+
+      fireEvent.load(pagina);
+      expect(enviar).toHaveBeenCalledWith({ origem: "orquestrador-app", acao: "estado" }, "*");
+    });
+
+    it("Markdown não tem histórico: sem ← e →", async () => {
+      vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("# Plano");
+      const { tela } = preparar(artefato("a1", { formato: "markdown", arquivo: "plano.md" }));
+      render(tela(<NoArtefato {...propsDoNo("a1")} />));
+      await screen.findByRole("heading", { name: "Plano" });
+
+      avisar(window, AVISO);
+      expect(screen.queryByRole("button", { name: "Voltar" })).not.toBeInTheDocument();
+    });
+
+    it("em tela cheia, a página nova avisa e a barra do modal ganha os botões", async () => {
+      const { janelaDaPagina } = await abrir();
+      avisar(janelaDaPagina, AVISO);
+      fireEvent.click(screen.getByRole("button", { name: "Ampliar o artefato" }));
+
+      const modal = screen.getByRole("dialog", { name: "Relatório de vendas" });
+      // O iframe do canvas saiu: o histórico dele não vale mais.
+      expect(within(modal).queryByRole("button", { name: "Voltar" })).not.toBeInTheDocument();
+
+      const noModal = within(modal).getByTitle("Conteúdo do artefato: Relatório de vendas") as HTMLIFrameElement;
+      avisar(noModal.contentWindow, AVISO);
+      expect(within(modal).getByRole("button", { name: "Voltar" })).toBeEnabled();
+      expect(within(modal).getByRole("button", { name: "Avançar" })).toBeDisabled();
+    });
   });
 
   it("sem <head>, a política entra no começo do documento (depois do DOCTYPE)", async () => {

@@ -235,3 +235,11 @@ export function mudouDeDominio(enderecoAberto: string, origemAtual: string | nul
     return false;
   }
 }
+
+/** Se o histórico da vista nativa tem para onde ir: os botões ← e → da barra da prévia. */
+export interface HistoricoDaVista {
+  podeVoltar: boolean;
+  podeAvancar: boolean;
+}
+
+export const SEM_HISTORICO: HistoricoDaVista = { podeVoltar: false, podeAvancar: false };

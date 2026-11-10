@@ -933,6 +933,8 @@ ipcMain.handle("previa:abrir", (evento, dados) => vistasDaPrevia.aoAbrir(evento,
 ipcMain.on("previa:retangulo", (evento, dados) => vistasDaPrevia.aoMoverRetangulo(evento, dados));
 ipcMain.handle("previa:ativar", (evento, dados) => vistasDaPrevia.aoAtivar(evento, dados));
 ipcMain.handle("previa:recarregar", (evento, dados) => vistasDaPrevia.aoRecarregar(evento, dados));
+ipcMain.handle("previa:voltar", (evento, dados) => vistasDaPrevia.aoVoltar(evento, dados));
+ipcMain.handle("previa:avancar", (evento, dados) => vistasDaPrevia.aoAvancar(evento, dados));
 ipcMain.handle("previa:fechar", (evento, dados) => vistasDaPrevia.aoFechar(evento, dados));
 ipcMain.handle("previa:sair-das-contas", (evento) => vistasDaPrevia.aoSairDasContas(evento));
 

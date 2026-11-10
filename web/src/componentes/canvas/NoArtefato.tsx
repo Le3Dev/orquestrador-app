@@ -30,7 +30,9 @@ import {
 } from "../../shared/canvas/artefatos";
 import { TAMANHO_MINIMO_DO_ARTEFATO } from "../../shared/canvas/layout";
 import { ALCA_DO_ARTEFATO, type NoArtefato as TipoDoNo } from "../../shared/canvas/nos";
+import { TAG_DO_SCRIPT_DE_NAVEGACAO, useNavegacaoDoQuadro } from "../../shared/navegacaoDoArtefato";
 import { TextoFormatado } from "../TextoFormatado";
+import { BotoesDeNavegacao } from "./BotoesDeNavegacao";
 import { ControlesDoNo } from "./ControlesDoNo";
 import { QuadroAtivavel } from "./NoPrevia";
 
@@ -59,7 +61,8 @@ const EXTENSAO: Readonly<Record<FormatoDoArtefato, string>> = { html: "html", ma
 const ESPERA_PARA_LIBERAR_O_DOWNLOAD_MS = 1_000;
 
 /**
- * A página com a política de segurança no começo do `<head>`; sem `<head>`,
+ * A página com a política de segurança e o script de voltar e avançar
+ * (`navegacaoDoArtefato.ts`) no começo do `<head>`; sem `<head>`,
  * no começo do documento (depois do `<!DOCTYPE>`, para não cair no modo de
  * compatibilidade) — o navegador cria o `<head>` em volta dela.
  */
@@ -67,7 +70,7 @@ function comPoliticaDeSeguranca(html: string): string {
   const head = /<head(?:\s[^>]*)?>/i.exec(html);
   const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
   const ponto = head !== null ? head.index + head[0].length : (doctype?.[0].length ?? 0);
-  return `${html.slice(0, ponto)}${META_DA_POLITICA}${html.slice(ponto)}`;
+  return `${html.slice(0, ponto)}${META_DA_POLITICA}${TAG_DO_SCRIPT_DE_NAVEGACAO}${html.slice(ponto)}`;
 }
 
 /** O nome do arquivo baixado: o do artefato; numa versão antiga, com "-v2" antes da extensão. */
@@ -235,16 +238,23 @@ const CorpoPronto = memo(function CorpoPronto({
   titulo,
   texto,
   noCanvas,
+  ligarQuadro,
+  aoCarregarQuadro,
 }: {
   formato: FormatoDoArtefato;
   titulo: string;
   texto: string;
   noCanvas: boolean;
+  /** `ref` e `onLoad` do iframe: o histórico da página (voltar e avançar) vem dele. */
+  ligarQuadro: (quadro: HTMLIFrameElement | null) => void;
+  aoCarregarQuadro: () => void;
 }) {
   const pagina = useMemo(() => (formato === "html" ? comPoliticaDeSeguranca(texto) : ""), [formato, texto]);
   if (formato === "html") {
     const quadro = (estilo?: CSSProperties) => (
       <iframe
+        ref={ligarQuadro}
+        onLoad={aoCarregarQuadro}
         title={`Conteúdo do artefato: ${titulo}`}
         className="corpo-do-artefato-html nodrag nowheel"
         style={estilo}
@@ -270,6 +280,8 @@ function CorpoDoArtefato({
   aoTentarDeNovo,
   aoVerAtual,
   noCanvas,
+  ligarQuadro,
+  aoCarregarQuadro,
 }: {
   artefato: ResumoDoArtefato;
   numero: number;
@@ -278,6 +290,8 @@ function CorpoDoArtefato({
   aoVerAtual: () => void;
   /** Na janela do canvas (e não em tela cheia): a página só pega o mouse depois de ativada. */
   noCanvas: boolean;
+  ligarQuadro: (quadro: HTMLIFrameElement | null) => void;
+  aoCarregarQuadro: () => void;
 }) {
   switch (conteudo.situacao) {
     case "carregando":
@@ -304,7 +318,14 @@ function CorpoDoArtefato({
       );
     case "pronto":
       return (
-        <CorpoPronto formato={artefato.formato} titulo={artefato.titulo} texto={conteudo.texto} noCanvas={noCanvas} />
+        <CorpoPronto
+          formato={artefato.formato}
+          titulo={artefato.titulo}
+          texto={conteudo.texto}
+          noCanvas={noCanvas}
+          ligarQuadro={ligarQuadro}
+          aoCarregarQuadro={aoCarregarQuadro}
+        />
       );
   }
 }
@@ -435,11 +456,14 @@ function ArtefatoAmpliado({
   artefato,
   numero,
   aoFechar,
+  navegacao,
   children,
 }: {
   artefato: ResumoDoArtefato;
   numero: number;
   aoFechar: () => void;
+  /** Os botões de voltar e avançar da página, quando ela os tem. */
+  navegacao: ReactNode;
   /** O corpo: a página, o documento ou o estado da versão (carregando, erro…). */
   children: ReactNode;
 }) {
@@ -499,6 +523,7 @@ function ArtefatoAmpliado({
           </h2>
           <span className="chip">v{numero}</span>
           <span className="flex-1" />
+          {navegacao}
           <span className="text-support">Esc fecha</span>
           <ControlesDoNo lado="fim" objeto="a tela cheia" aoFechar={aoFechar} dicaDoFechar="Fechar a tela cheia (Esc)" />
         </div>
@@ -621,6 +646,17 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
   const { conteudo, tentarDeNovo } = useConteudoDaVersao(artefato.id, escolhida, existe);
   const titulo = tituloPendente ?? artefato.titulo;
   const pronto = conteudo.situacao === "pronto";
+  const historico = useNavegacaoDoQuadro();
+  // Só a página HTML pronta tem histórico (o Markdown não navega) e só depois que o script dela avisou.
+  const navegacao =
+    pronto && artefato.formato === "html" && historico.estado.suportado ? (
+      <BotoesDeNavegacao
+        podeVoltar={historico.estado.podeVoltar}
+        podeAvancar={historico.estado.podeAvancar}
+        aoVoltar={historico.voltar}
+        aoAvancar={historico.avancar}
+      />
+    ) : null;
   const fecharAmpliado = useCallback(() => setAmpliado(false), []);
   const verAtual = useCallback(() => setEscolhida(artefato.versaoAtual), [artefato.versaoAtual]);
 
@@ -684,6 +720,8 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
       aoTentarDeNovo={tentarDeNovo}
       aoVerAtual={verAtual}
       noCanvas={noCanvas}
+      ligarQuadro={historico.ligarQuadro}
+      aoCarregarQuadro={historico.aoCarregarQuadro}
     />
   );
 
@@ -705,6 +743,7 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
           </span>
         )}
         <span className="flex-1" />
+        {navegacao}
         <SeletorDeVersao versoes={artefato.versoes} escolhida={escolhida} atual={artefato.versaoAtual} aoEscolher={setEscolhida} />
         <button
           type="button"
@@ -741,7 +780,7 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
       )}
 
       {ampliado && (
-        <ArtefatoAmpliado artefato={artefato} numero={escolhida} aoFechar={fecharAmpliado}>
+        <ArtefatoAmpliado artefato={artefato} numero={escolhida} aoFechar={fecharAmpliado} navegacao={navegacao}>
           {corpo(false)}
         </ArtefatoAmpliado>
       )}

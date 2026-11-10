@@ -648,6 +648,8 @@ describe("NoPrevia com endereço externo no app desktop", () => {
       ativar: vi.fn(async (_id: string, ativa: boolean) => ativa),
       retangulo: vi.fn(),
       recarregar: vi.fn(async () => true),
+      voltar: vi.fn(async () => true),
+      avancar: vi.fn(async () => true),
       fechar: vi.fn(async () => true),
       sairDasContas: vi.fn(async () => true),
       aoMudar: vi.fn((retorno: (evento: EventoDaPrevia) => void) => {
@@ -700,7 +702,7 @@ describe("NoPrevia com endereço externo no app desktop", () => {
 
   it("página carregada e ainda sem foto (a foto sai ao desativar): convida a clicar", () => {
     renderizar({ url: SHEETS });
-    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: null }));
+    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: null, podeVoltar: false, podeAvancar: false }));
     expect(screen.getByText("Clique para usar a página.")).toBeInTheDocument();
   });
 
@@ -709,19 +711,19 @@ describe("NoPrevia com endereço externo no app desktop", () => {
     // Antes da primeira página, nada a mostrar.
     expect(screen.queryByRole("note")).not.toBeInTheDocument();
 
-    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://docs.google.com" }));
+    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://docs.google.com", podeVoltar: false, podeAvancar: false }));
     let host = screen.getByRole("note");
     expect(host).toHaveTextContent("docs.google.com");
     expect(host).not.toHaveClass("host-atual-da-previa-mudou");
 
     // Outro host do mesmo domínio (login do Google): sem alerta.
-    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://accounts.google.com" }));
+    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://accounts.google.com", podeVoltar: false, podeAvancar: false }));
     host = screen.getByRole("note");
     expect(host).toHaveTextContent("accounts.google.com");
     expect(host).not.toHaveClass("host-atual-da-previa-mudou");
 
     // Outro domínio: o host aparece destacado, com aviso.
-    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://login.exemplo-falso.net" }));
+    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://login.exemplo-falso.net", podeVoltar: false, podeAvancar: false }));
     host = screen.getByRole("note");
     expect(host).toHaveTextContent("login.exemplo-falso.net");
     expect(host).toHaveClass("host-atual-da-previa-mudou");
@@ -731,13 +733,13 @@ describe("NoPrevia com endereço externo no app desktop", () => {
     expect(screen.getByRole("textbox", { name: "Endereço da prévia" })).toHaveValue(SHEETS);
 
     // Eventos de outra prévia não mexem na barra.
-    act(() => enviar?.({ tipo: "estado", id: "outra", carregando: false, erro: null, origem: "https://outro.com" }));
+    act(() => enviar?.({ tipo: "estado", id: "outra", carregando: false, erro: null, origem: "https://outro.com", podeVoltar: false, podeAvancar: false }));
     expect(screen.getByRole("note")).toHaveTextContent("login.exemplo-falso.net");
   });
 
   it("recarregar a vista (ou fechá-la) tira o host da barra até a nova página", () => {
     renderizar({ url: SHEETS });
-    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://docs.google.com" }));
+    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://docs.google.com", podeVoltar: false, podeAvancar: false }));
     expect(screen.getByRole("note")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Recarregar a página" }));
@@ -755,8 +757,41 @@ describe("NoPrevia com endereço externo no app desktop", () => {
 
   it("mostra o erro de carregamento enquanto não há foto", () => {
     renderizar({ url: SHEETS });
-    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: "ERR_NAME_NOT_RESOLVED", origem: null }));
+    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: "ERR_NAME_NOT_RESOLVED", origem: null, podeVoltar: false, podeAvancar: false }));
     expect(screen.getByText(`Não foi possível abrir ${SHEETS}: ERR_NAME_NOT_RESOLVED`)).toBeInTheDocument();
+  });
+
+  it("a vista nativa tem ← e →: desabilitados sem histórico, e cada um manda o comando para a vista", () => {
+    renderizar({ url: SHEETS });
+    const voltar = screen.getByRole("button", { name: "Voltar" });
+    const avancar = screen.getByRole("button", { name: "Avançar" });
+    expect(voltar).toBeDisabled();
+    expect(avancar).toBeDisabled();
+    expect(voltar).toHaveClass("nodrag");
+
+    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://docs.google.com", podeVoltar: true, podeAvancar: false }));
+    expect(voltar).toBeEnabled();
+    expect(avancar).toBeDisabled();
+    fireEvent.click(voltar);
+    expect(api.voltar).toHaveBeenCalledWith("p1");
+
+    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://docs.google.com", podeVoltar: true, podeAvancar: true }));
+    fireEvent.click(avancar);
+    expect(api.avancar).toHaveBeenCalledWith("p1");
+
+    // Eventos de outra prévia não mexem neles.
+    act(() => enviar?.({ tipo: "estado", id: "outra", carregando: false, erro: null, origem: null, podeVoltar: false, podeAvancar: false }));
+    expect(voltar).toBeEnabled();
+  });
+
+  it("recarregar a vista zera o histórico dos botões até a nova página", () => {
+    renderizar({ url: SHEETS });
+    act(() => enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://docs.google.com", podeVoltar: true, podeAvancar: true }));
+    expect(screen.getByRole("button", { name: "Voltar" })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Recarregar a página" }));
+    expect(screen.getByRole("button", { name: "Voltar" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Avançar" })).toBeDisabled();
   });
 
   it("localhost continua no iframe e nem abre vista nativa", () => {
@@ -764,6 +799,9 @@ describe("NoPrevia com endereço externo no app desktop", () => {
     expect(quadro()).toHaveAttribute("src", "http://localhost:5173");
     expect(api.abrir).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "O que é a prévia" })).toBeInTheDocument();
+    // O iframe é de outra origem: sem acesso ao histórico, sem ← e →.
+    expect(screen.queryByRole("button", { name: "Voltar" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Avançar" })).not.toBeInTheDocument();
   });
 
   it("clicar ativa: manda o retângulo e o zoom do canvas; mover o nó manda o retângulo novo", async () => {

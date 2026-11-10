@@ -24,7 +24,8 @@
 // vista), permissões negadas (só colar/copiar pelo clipboard sanitizado é
 // liberado), navegação só http/https e nunca para endereço local (também
 // cancelado na sessão, pedido a pedido), downloads só da vista ativa e um por vez.
-// A tela mostra o host real e atual da página (evento `estado`, só a origem).
+// A tela mostra o host real e atual da página (evento `estado`, só a origem) e se dá
+// para voltar e avançar (`podeVoltar` e `podeAvancar`, do histórico da própria vista).
 // Os IPC só valem se vierem do quadro principal da janela principal e têm todos
 // os campos validados aqui.
 
@@ -234,6 +235,16 @@ function navegacaoPermitida(url, ehQuadroPrincipal) {
   return /^(about:blank|blob:|data:)/i.test(String(url));
 }
 
+/**
+ * "Sair das contas" larga a página (about:blank) antes de limpar a sessão, e esse about:blank fica no
+ * começo do histórico: voltar levaria a uma página em branco. Tira a entrada, se houver e não for a atual.
+ */
+function descartarAboutBlankDoInicio(historico) {
+  if (historico.length() > 1 && historico.getActiveIndex() > 0 && /^about:blank/i.test(historico.getEntryAtIndex(0)?.url ?? "")) {
+    historico.removeEntryAtIndex(0);
+  }
+}
+
 /** Para o log: só a origem (protocolo e host). O caminho e a query podem carregar token ou dado pessoal. */
 function origemParaLog(url) {
   try {
@@ -421,8 +432,15 @@ function criarVistasDaPrevia({
     conteudo.on("will-redirect", barrar);
 
     // O estado que a tela mostra: carregando, erro e a ORIGEM real da página agora (só protocolo e host).
-    const estado = { carregando: true, erro: null, origem: null };
-    const avisarEstado = () => avisar({ tipo: "estado", id, ...estado });
+    const estado = { carregando: true, erro: null, origem: null, podeVoltar: false, podeAvancar: false };
+    const avisarEstado = () => {
+      // O histórico é lido na hora de avisar: toda navegação (e o voltar e avançar) passa por aqui.
+      const historico = conteudo.navigationHistory;
+      if (historico) descartarAboutBlankDoInicio(historico);
+      estado.podeVoltar = historico ? historico.canGoBack() : false;
+      estado.podeAvancar = historico ? historico.canGoForward() : false;
+      avisar({ tipo: "estado", id, ...estado });
+    };
     const mudouDePagina = (url, quadroPrincipal = true) => {
       if (!quadroPrincipal) return;
       estado.origem = origemDaPagina(url);
@@ -598,6 +616,26 @@ function criarVistasDaPrevia({
     return true;
   }
 
+  /** Volta ou avança no histórico da vista, se houver para onde ir. O estado novo chega pelo evento `estado`. */
+  function navegarNoHistorico(evento, dados, direcao) {
+    exigirPrincipal(evento);
+    const id = validarId(dados?.id);
+    const vista = id === null ? undefined : vistas.get(id);
+    const historico = vista?.view.webContents.navigationHistory;
+    if (!historico) return false;
+    if (direcao === "voltar") {
+      if (!historico.canGoBack()) return false;
+      historico.goBack();
+    } else {
+      if (!historico.canGoForward()) return false;
+      historico.goForward();
+    }
+    return true;
+  }
+
+  const aoVoltar = (evento, dados) => navegarNoHistorico(evento, dados, "voltar");
+  const aoAvancar = (evento, dados) => navegarNoHistorico(evento, dados, "avancar");
+
   function aoFechar(evento, dados) {
     exigirPrincipal(evento);
     const id = validarId(dados?.id);
@@ -656,6 +694,8 @@ function criarVistasDaPrevia({
     aoMoverRetangulo,
     aoAtivar,
     aoRecarregar,
+    aoVoltar,
+    aoAvancar,
     aoFechar,
     aoSairDasContas,
     anexar,
@@ -677,6 +717,7 @@ module.exports = {
   validarRetangulo,
   calcularLimites,
   navegacaoPermitida,
+  descartarAboutBlankDoInicio,
   permissaoLiberada,
   userAgentDeNavegador,
   criarVistasDaPrevia,

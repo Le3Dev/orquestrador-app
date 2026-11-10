@@ -16,9 +16,16 @@ import { TAMANHO_MINIMO_DA_PREVIA } from "../../shared/canvas/layout";
 import { ALCA_DA_PREVIA, type Ancora, type NoPrevia as TipoDoNo } from "../../shared/canvas/nos";
 import { enderecoDigitado } from "../../shared/enderecosLocais";
 import { apiDaPrevia } from "../../shared/ponteDoDesktop";
-import { hostDaOrigem, modoDaPrevia, mudouDeDominio } from "../../shared/previaNativa";
+import {
+  type HistoricoDaVista,
+  hostDaOrigem,
+  modoDaPrevia,
+  mudouDeDominio,
+  SEM_HISTORICO,
+} from "../../shared/previaNativa";
 import { Dica } from "../Dica";
 import { IconeAbrirFora, IconeNavegador, IconeRecarregar } from "../Icones";
+import { BotoesDeNavegacao } from "./BotoesDeNavegacao";
 import { ControlesDoNo } from "./ControlesDoNo";
 import { MenuDaPrevia } from "./MenuDaPrevia";
 import { VistaNativaDaPrevia } from "./VistaNativaDaPrevia";
@@ -467,6 +474,8 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
   const [menuAberto, setMenuAberto] = useState(false);
   // O host real da página que a vista nativa mostra agora (muda ao navegar, sem mudar o endereço aberto).
   const [origemAtual, setOrigemAtual] = useState<string | null>(null);
+  // Se a vista nativa tem para onde voltar e avançar (só ela: o iframe é de outra origem e não mostra o histórico).
+  const [historico, setHistorico] = useState<HistoricoDaVista>(SEM_HISTORICO);
   const recarregar = useCallback(() => setVersao((atual) => atual + 1), []);
   const fechar = useCallback(() => acoes.fecharPrevia(previaId), [acoes, previaId]);
   // Endereço externo: vista nativa no app desktop (login salvo), "abrir em nova aba" no navegador.
@@ -531,6 +540,14 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
           >
             {segundos}
           </span>
+        )}
+        {modo === "vista-nativa" && apiNativa !== null && (
+          <BotoesDeNavegacao
+            podeVoltar={historico.podeVoltar}
+            podeAvancar={historico.podeAvancar}
+            aoVoltar={() => void apiNativa.voltar(previaId)}
+            aoAvancar={() => void apiNativa.avancar(previaId)}
+          />
         )}
         <button
           type="button"
@@ -609,6 +626,7 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
             api={apiNativa}
             suspensa={minimizada || menuAberto}
             aoMudarOrigem={setOrigemAtual}
+            aoMudarHistorico={setHistorico}
           />
         ) : modo === "nova-aba" ? (
           <div className="mensagem-da-previa mensagem-fora-do-ar">
