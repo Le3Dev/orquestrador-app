@@ -1,0 +1,38 @@
+Silero VAD v5 (silero_vad_v5.onnx)
+
+Origem do arquivo:
+  https://huggingface.co/onnx-community/silero-vad/resolve/main/onnx/model.onnx
+  (exportação ONNX do Silero VAD v5; baixado em 2026-11-10)
+  SHA-256: a4a068cd6cf1ea8355b84327595838ca748ec29a25bc91fc82e6c299ccdc5808
+Projeto original: https://github.com/snakers4/silero-vad
+
+Entradas do modelo: input float32 [lote, 576] (64 amostras de contexto + 512
+de janela, 16 kHz), state float32 [2, lote, 128], sr int64 escalar (16000).
+Saídas: output float32 [lote, 1] (probabilidade de voz), stateN float32
+[2, lote, 128].
+
+O modelo é distribuído sob a licença MIT, reproduzida abaixo.
+
+-------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2020-present Silero Team
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
