@@ -9,9 +9,6 @@ import arquivoWasm from "onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm?ur
 
 import type { PedidoDeTranscricao, RespostaDoTranscritor } from "./mensagens";
 
-/** Multilíngue e bom em português; em q8 são cerca de 250 MB. */
-const MODELO = "onnx-community/whisper-small";
-
 /** O Whisper olha no máximo 30 s de áudio de uma vez (16 kHz). */
 const AMOSTRAS_NA_JANELA_DO_WHISPER = 30 * 16_000;
 
@@ -28,10 +25,13 @@ function responder(resposta: RespostaDoTranscritor): void {
   self.postMessage(resposta);
 }
 
-let carregando: Promise<AutomaticSpeechRecognitionPipeline> | null = null;
+/** Um pipeline por modelo, criado só no primeiro pedido que o usa. */
+const carregando = new Map<string, Promise<AutomaticSpeechRecognitionPipeline>>();
 
-function transcritor(): Promise<AutomaticSpeechRecognitionPipeline> {
-  carregando ??= pipeline("automatic-speech-recognition", MODELO, {
+function transcritor(modelo: string): Promise<AutomaticSpeechRecognitionPipeline> {
+  const existente = carregando.get(modelo);
+  if (existente !== undefined) return existente;
+  const novo = pipeline("automatic-speech-recognition", modelo, {
     device: "wasm",
     dtype: "q8",
     progress_callback: (info) => {
@@ -41,10 +41,11 @@ function transcritor(): Promise<AutomaticSpeechRecognitionPipeline> {
     },
   }).catch((erro: unknown) => {
     // Sem isto, uma falha de rede no primeiro download valeria para sempre.
-    carregando = null;
+    carregando.delete(modelo);
     throw erro;
   });
-  return carregando;
+  carregando.set(modelo, novo);
+  return novo;
 }
 
 function ehRegistro(valor: unknown): valor is Record<string, unknown> {
@@ -98,9 +99,9 @@ async function detectarIdioma(asr: AutomaticSpeechRecognitionPipeline, audio: Fl
 }
 
 self.onmessage = async (evento: MessageEvent<PedidoDeTranscricao>) => {
-  const { id, audio, idioma } = evento.data;
+  const { id, audio, idioma, modelo } = evento.data;
   try {
-    const transcrever = await transcritor();
+    const transcrever = await transcritor(modelo);
     let language: string = idioma ?? IDIOMA_RESERVA;
     if (idioma === null) {
       try {

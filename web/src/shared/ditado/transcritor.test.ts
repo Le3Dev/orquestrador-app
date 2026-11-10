@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { PedidoDeTranscricao, RespostaDoTranscritor } from "./mensagens";
+import {
+  MODELO_DA_ESCUTA,
+  MODELO_DO_DITADO,
+  type PedidoDeTranscricao,
+  type RespostaDoTranscritor,
+} from "./mensagens";
 import {
   criarTranscritor,
   MAXIMO_DE_PEDIDOS_DA_ESCUTA_ESPERANDO,
@@ -80,6 +85,52 @@ describe("transcritor", () => {
     return esvaziar().then(() => {
       expect(trabalhador.pedidos[1]?.idioma).toBeNull();
     });
+  });
+
+  it("o modelo vai pela origem: ditado com whisper-small, escuta com whisper-base", async () => {
+    const { trabalhador, transcrever } = montar();
+    const ditado = transcrever(audio(1));
+    const escuta = transcrever(audio(2), undefined, { origem: "escuta" });
+    expect(trabalhador.pedidos[0]?.modelo).toBe(MODELO_DO_DITADO);
+    expect(MODELO_DO_DITADO).toBe("onnx-community/whisper-small");
+    trabalhador.concluirUltimo("d");
+    await ditado;
+    expect(trabalhador.pedidos[1]?.modelo).toBe(MODELO_DA_ESCUTA);
+    expect(MODELO_DA_ESCUTA).toBe("onnx-community/whisper-base");
+    trabalhador.concluirUltimo("e");
+    await escuta;
+  });
+
+  it("a provisória só entra com a fila vazia: havendo pedido esperando, é descartada sem enfileirar", async () => {
+    const { trabalhador, transcrever } = montar();
+    const final1 = transcrever(audio(1), undefined, { origem: "escuta" });
+    const provisoria1 = transcrever(audio(2), undefined, { origem: "escuta", provisoria: true });
+    // Há um pedido em andamento, mas a fila está vazia: a provisória espera.
+    const provisoria2 = transcrever(audio(3), undefined, { origem: "escuta", provisoria: true });
+    await expect(provisoria2).rejects.toBeInstanceOf(TranscricaoDescartada);
+
+    trabalhador.concluirUltimo("1");
+    await expect(final1).resolves.toBe("1");
+    expect(trabalhador.pedidos[1]?.audio[0]).toBe(2);
+    trabalhador.concluirUltimo("p");
+    await expect(provisoria1).resolves.toBe("p");
+  });
+
+  it("um trecho final descarta a provisória que esperava e nunca é descartado por ela", async () => {
+    const { trabalhador, transcrever } = montar();
+    const emAndamento = transcrever(audio(1), undefined, { origem: "escuta" });
+    const provisoria = transcrever(audio(2), undefined, { origem: "escuta", provisoria: true });
+    const final1 = transcrever(audio(3), undefined, { origem: "escuta" });
+    const final2 = transcrever(audio(4), undefined, { origem: "escuta" });
+    await expect(provisoria).rejects.toBeInstanceOf(TranscricaoDescartada);
+
+    // Os dois finais esperando cabem no limite: nada foi descartado por causa da provisória.
+    trabalhador.concluirUltimo("0");
+    await expect(emAndamento).resolves.toBe("0");
+    trabalhador.concluirUltimo("1");
+    await expect(final1).resolves.toBe("1");
+    trabalhador.concluirUltimo("2");
+    await expect(final2).resolves.toBe("2");
   });
 
   it("o ditado passa na frente dos pedidos da escuta que ainda não começaram", async () => {

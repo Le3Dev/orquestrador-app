@@ -7,7 +7,7 @@ import { SessaoDaEscuta } from "./sessaoDaEscuta";
 import { type OpcoesDaEscuta, useEscuta } from "./useEscuta";
 
 function montarSessao(avisoVisto: boolean) {
-  let preferencias: PreferenciasDaEscuta = { automatico: true, avisoVisto };
+  let preferencias: PreferenciasDaEscuta = { automatico: true, automaticoManual: false, avisoVisto };
   const parar = vi.fn();
   const iniciarCaptura = vi.fn(async (): Promise<CapturaDoAudio> => ({ parar }));
   const sessao = new SessaoDaEscuta({
@@ -26,6 +26,7 @@ function montarSessao(avisoVisto: boolean) {
 
 const opcoes = (mudanca: Partial<OpcoesDaEscuta> = {}): OpcoesDaEscuta => ({
   modoInvisivelAtivo: false,
+  escutaManualLigada: false,
   escutaDisponivel: true,
   chatLivre: true,
   autorizacaoAtiva: false,
@@ -45,8 +46,10 @@ describe("useEscuta", () => {
     rerender(opcoes());
     expect(result.current.situacao).toBe("desligada");
     expect(result.current).toMatchObject({
-      automatico: true,
+      automatico: false, // fora do modo invisível, a escuta manual começa sem o automático
       linhas: [],
+      linhaProvisoria: null,
+      trechos: [],
       erro: null,
       progressoDoDownload: null,
       precisaDoAviso: false,

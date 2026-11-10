@@ -64,7 +64,7 @@ const {
   WebContentsView,
 } = require("electron");
 const { capturarTela } = require("./capturaDeTela");
-const { criarRespostaAoPedidoDeMidia } = require("./escutaDoModoInvisivel");
+const { criarRespostaAoPedidoDeMidia, vemDaJanelaPrincipal } = require("./escutaDoModoInvisivel");
 const { iniciarRastreioDoMouse } = require("./mouseDoModoInvisivel");
 const { criarMaximizacao } = require("./maximizacao");
 const { execFileSync, spawn } = require("node:child_process");
@@ -170,6 +170,7 @@ const urlDoServidor = () => `http://127.0.0.1:${PORTA}`;
 const urlDaTela = () => URL_DA_TELA_DE_DESENVOLVIMENTO || urlDoServidor();
 
 let janelaPrincipal = null;
+let escutaManualLigada = false; // escuta ligada pelo botão, fora do modo invisível
 let janelaAtivacao = null;
 let janelaConfiguracao = null;
 let modoDaConfiguracao = "primeira"; // "primeira" | "ajustes"
@@ -789,11 +790,15 @@ async function abrirJanelaPrincipal() {
     const principal = evento?.isMainFrame ?? ehFramePrincipal;
     const mesmo = evento?.isSameDocument ?? mesmoDoc;
     if (principal && !mesmo && modoInvisivel?.janela === janela) sairDoModoInvisivel();
+    // A tela recarregou: o estado React da escuta manual voltou a "desligada".
+    if (principal && !mesmo) escutaManualLigada = false;
   });
   janela.webContents.on("render-process-gone", () => {
+    escutaManualLigada = false;
     if (modoInvisivel?.janela === janela) sairDoModoInvisivel();
   });
   janela.on("closed", () => {
+    escutaManualLigada = false;
     if (janelaPrincipal === janela) janelaPrincipal = null;
   });
   vistasDaPrevia.anexar(janela);
@@ -1107,6 +1112,15 @@ app.on("will-quit", () => {
 // getDisplayMedia da tela principal com a tela do monitor da janela e o áudio
 // do sistema ("loopback", só no Windows). Recusa todo o resto. Sem permission
 // handlers: o getUserMedia do microfone (ditado) segue o padrão do Electron.
+// Escuta ligada pelo botão da tela, fora do modo invisível. Só o frame
+// principal da janela principal pode ligar/desligar.
+ipcMain.handle("escuta:definir-ligada", (evento, ligada) => {
+  exigirJanelaPrincipal(evento);
+  if (!vemDaJanelaPrincipal(evento.senderFrame, janelaPrincipal)) {
+    throw new Error("Operação permitida só no frame principal da janela principal.");
+  }
+  escutaManualLigada = ligada === true;
+});
 function registrarEscutaDoModoInvisivel() {
   try {
     session.defaultSession.setDisplayMediaRequestHandler(
@@ -1115,6 +1129,7 @@ function registrarEscutaDoModoInvisivel() {
         screen,
         obterJanelaPrincipal: () => janelaPrincipal,
         modoInvisivelAtivo: () => modoInvisivel !== null,
+        escutaManualLigada: () => escutaManualLigada,
         plataforma: process.platform,
         registrar: (texto) => registrarNoLog("escuta", texto),
       }),

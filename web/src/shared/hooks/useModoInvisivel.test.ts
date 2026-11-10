@@ -216,6 +216,30 @@ describe("useModoInvisivel", () => {
     expect(comEscuta.result.current.escutaDisponivel).toBe(true);
   });
 
+  it("alternarEscutaManual avisa a ponte e só depois marca o estado; desligar marca e avisa", async () => {
+    const definirEscutaLigada = vi.fn().mockResolvedValue(undefined);
+    ponte({ definirEscutaLigada });
+    const { result } = renderHook(() => useModoInvisivel());
+    expect(result.current.escutaManualLigada).toBe(false);
+
+    await act(() => result.current.alternarEscutaManual());
+    expect(definirEscutaLigada).toHaveBeenLastCalledWith(true);
+    expect(result.current.escutaManualLigada).toBe(true);
+
+    await act(() => result.current.alternarEscutaManual());
+    expect(definirEscutaLigada).toHaveBeenLastCalledWith(false);
+    expect(result.current.escutaManualLigada).toBe(false);
+  });
+
+  it("se a ponte recusar ligar a escuta, o estado fica desligado e o erro aparece", async () => {
+    ponte({ definirEscutaLigada: vi.fn().mockRejectedValue(new Error("recusado")) });
+    const { result } = renderHook(() => useModoInvisivel());
+
+    await act(() => result.current.alternarEscutaManual());
+    expect(result.current.escutaManualLigada).toBe(false);
+    expect(result.current.erro).toContain("recusado");
+  });
+
   it("capturarTela devolve a foto da ponte", async () => {
     ponte();
     const { result } = renderHook(() => useModoInvisivel());

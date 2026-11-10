@@ -17,6 +17,7 @@ export type SituacaoDaEscuta =
 /** O que a tela informa à escuta, sempre com os valores mais recentes. */
 export interface OpcoesDaEscuta {
   modoInvisivelAtivo: boolean;
+  escutaManualLigada: boolean; // o usuário ligou a escuta pelo botão 🎧, fora do modo invisível
   escutaDisponivel: boolean;
   chatLivre: boolean;
   autorizacaoAtiva: boolean;
@@ -24,11 +25,22 @@ export interface OpcoesDaEscuta {
   preencherComposer: (texto: string) => void;
 }
 
+/** Um trecho final transcrito, para a conversa. Tempos em ms de relógio (Date.now). */
+export interface TrechoNaTela {
+  readonly id: string;
+  readonly texto: string;
+  readonly inicioMs: number;
+  readonly fimMs: number;
+}
+
 /** O que a tela recebe da escuta para desenhar o indicador e o aviso. */
 export interface EscutaNaTela {
   situacao: SituacaoDaEscuta;
   progressoDoDownload: number | null; // 0–100 enquanto baixa; null fora disso
   linhas: readonly string[]; // últimas linhas da transcrição (até 6)
+  linhaProvisoria: string | null; // o que está sendo dito agora, ainda provisório
+  trechos: readonly TrechoNaTela[]; // trechos finais transcritos, em ordem (até 200, os mais antigos saem)
+  limparTrechos: () => void; // a tela chama no /clear
   automatico: boolean;
   alternarAutomatico: () => void;
   pausar: () => void;
@@ -54,6 +66,7 @@ export function useEscuta(
 
   const {
     modoInvisivelAtivo,
+    escutaManualLigada,
     escutaDisponivel,
     chatLivre,
     autorizacaoAtiva,
@@ -65,6 +78,7 @@ export function useEscuta(
   useEffect(() => {
     sessao.atualizarOpcoes({
       modoInvisivelAtivo,
+      escutaManualLigada,
       escutaDisponivel,
       chatLivre,
       autorizacaoAtiva,
@@ -74,6 +88,7 @@ export function useEscuta(
   }, [
     sessao,
     modoInvisivelAtivo,
+    escutaManualLigada,
     escutaDisponivel,
     chatLivre,
     autorizacaoAtiva,
@@ -85,6 +100,9 @@ export function useEscuta(
     situacao: estado.situacao,
     progressoDoDownload: estado.progressoDoDownload,
     linhas: estado.linhas,
+    linhaProvisoria: estado.linhaProvisoria,
+    trechos: estado.trechos,
+    limparTrechos: sessao.limparTrechos,
     automatico: estado.automatico,
     alternarAutomatico: sessao.alternarAutomatico,
     pausar: sessao.pausar,

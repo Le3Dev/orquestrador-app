@@ -6,6 +6,7 @@ import {
   type PointerEvent as EventoDePonteiro,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -21,7 +22,7 @@ import type {
 } from "../../shared/api/tipos";
 import { comandoDoPrompt, completarComando, dicaDeComando } from "../../shared/comandosDoPrompt";
 import { juntarDitado } from "../../shared/ditado/texto";
-import { useEscuta } from "../../shared/escuta/useEscuta";
+import { type TrechoNaTela, useEscuta } from "../../shared/escuta/useEscuta";
 import {
   type EstadoDoChatNaTela,
   type MensagemDoChatNaTela,
@@ -572,6 +573,8 @@ export function ChatRapido({
     disponivel: modoDisponivel,
     ativo: modoAtivo,
     escutaDisponivel,
+    escutaManualLigada,
+    alternarEscutaManual,
     entrar: entrarNoModo,
     capturarTela,
     aoCapturarQuadro,
@@ -613,14 +616,6 @@ export function ChatRapido({
       campo.current.style.height = "";
     }
   }, [expandido]);
-
-  // Acompanha o fim enquanto chega texto, a menos que o usuário tenha rolado para cima.
-  useEffect(() => {
-    const elemento = rolagem.current;
-    if (elemento !== null && acompanhando.current) {
-      elemento.scrollTop = elemento.scrollHeight;
-    }
-  }, [chat.mensagens.length, ultima?.texto, ultima?.situacao, chat.atividade, oculta]);
 
   function ajustarAltura(): void {
     const elemento = campo.current;
@@ -704,6 +699,7 @@ export function ChatRapido({
     setEnviando(true);
     try {
       await api.limparChat();
+      escuta.limparTrechos();
       limparCampo();
       setOcultaEm(null);
     } catch (falha) {
@@ -794,13 +790,46 @@ export function ChatRapido({
   // A escuta do áudio liga sozinha no modo invisível (depois do aviso da primeira vez) e para ao sair.
   const escuta = useEscuta({
     modoInvisivelAtivo: modoAtivo,
+    escutaManualLigada,
     escutaDisponivel,
     chatLivre: !respondendo && !enviando && !desconectado && !melhoria.melhorando,
     autorizacaoAtiva: chat.alteracoesAutorizadas,
     enviar: enviarDaEscuta,
     preencherComposer: preencherComposerDaEscuta,
   });
-  const comEscuta = modoAtivo && escutaDisponivel;
+  const comEscuta = escutaDisponivel && (modoAtivo || escutaManualLigada);
+
+  // A transcrição entra na conversa, intercalada com as mensagens pelo horário.
+  const temOuvido = escuta.trechos.length > 0 || escuta.linhaProvisoria !== null;
+  const { trechosAntes, trechosNoFim } = useMemo(() => {
+    const antes = new Map<string, TrechoNaTela[]>();
+    const noFim: TrechoNaTela[] = [];
+    const horarios = chat.mensagens.map((mensagem) => Date.parse(mensagem.criadaEm));
+    for (const trecho of escuta.trechos) {
+      const indice = horarios.findIndex((horario) => horario > trecho.inicioMs);
+      const id = indice === -1 ? undefined : chat.mensagens[indice]?.id;
+      if (id === undefined) {
+        noFim.push(trecho);
+      } else {
+        antes.set(id, [...(antes.get(id) ?? []), trecho]);
+      }
+    }
+    return { trechosAntes: antes, trechosNoFim: noFim };
+  }, [chat.mensagens, escuta.trechos]);
+  const blocoOuvido = (trecho: TrechoNaTela) => (
+    <p key={trecho.id} className="trecho-ouvido" data-testid="trecho-ouvido">
+      <span className="rotulo-tecnico">ouvido</span>
+      <span className="trecho-ouvido-texto">{trecho.texto}</span>
+    </p>
+  );
+
+  // Acompanha o fim enquanto chega texto, a menos que o usuário tenha rolado para cima.
+  useEffect(() => {
+    const elemento = rolagem.current;
+    if (elemento !== null && acompanhando.current) {
+      elemento.scrollTop = elemento.scrollHeight;
+    }
+  }, [chat.mensagens.length, ultima?.texto, ultima?.situacao, chat.atividade, oculta, escuta.trechos.length, escuta.linhaProvisoria]);
 
   async function enviar(): Promise<void> {
     // "/clear" é um comando, não uma pergunta.
@@ -964,7 +993,7 @@ export function ChatRapido({
       {fixo && aoMudarLargura !== undefined && <AlcaDaLargura largura={largura} aoMudar={aoMudarLargura} lado={lado} />}
 
       {/* Oculta, a conversa continua montada: os cartões de ação lembram o que já fizeram. */}
-      {(temMensagens || fixo) && (
+      {(temMensagens || fixo || temOuvido) && (
         <section
           className={`conversa-do-chat ${fixo ? "conversa-lateral" : "painel-flutuante"}`}
           hidden={oculta}
@@ -1041,13 +1070,14 @@ export function ChatRapido({
               }
             }}
           >
-            {!temMensagens && (
+            {!temMensagens && escuta.trechos.length === 0 && escuta.linhaProvisoria === null && (
               <p className="vazio-do-chat-lateral text-support">
                 Pergunte qualquer coisa ao Claude: a conversa aparece aqui, ao lado do canvas.
               </p>
             )}
             {chat.mensagens.map((mensagem, indice) => (
               <Fragment key={mensagem.id}>
+                {(trechosAntes.get(mensagem.id) ?? []).map(blocoOuvido)}
                 <MensagemNaConversa
                   mensagem={mensagem}
                   atividade={mensagem.situacao === "respondendo" ? chat.atividade : null}
@@ -1079,6 +1109,13 @@ export function ChatRapido({
                 )}
               </Fragment>
             ))}
+            {trechosNoFim.map(blocoOuvido)}
+            {escuta.linhaProvisoria !== null && (
+              <p className="trecho-ouvido trecho-ouvido-provisorio" aria-live="polite" data-testid="trecho-provisorio">
+                <span className="rotulo-tecnico">ouvindo</span>
+                <span className="trecho-ouvido-texto">{escuta.linhaProvisoria}</span>
+              </p>
+            )}
           </div>
         </section>
       )}
@@ -1114,7 +1151,6 @@ export function ChatRapido({
         <FaixaDaEscuta
           situacao={escuta.situacao}
           progressoDoDownload={escuta.progressoDoDownload}
-          linhas={escuta.linhas}
           automatico={escuta.automatico}
           alternarAutomatico={escuta.alternarAutomatico}
           erro={escuta.erro}
@@ -1272,6 +1308,22 @@ export function ChatRapido({
               >
                 👁
                 {modoAtivo && <span className="ponto-tela-vista" aria-hidden="true" />}
+              </button>
+            )}
+            {escutaDisponivel && !modoAtivo && (
+              <button
+                type="button"
+                className="botao-icone botao-de-escuta-manual"
+                aria-label="Escuta do áudio"
+                aria-pressed={escutaManualLigada}
+                title={
+                  escutaManualLigada
+                    ? "Escutando o áudio do sistema — clique para parar"
+                    : "Escutar o áudio do sistema: transcreve o que toca no computador e mostra na conversa (nada é gravado)"
+                }
+                onClick={() => void alternarEscutaManual()}
+              >
+                🎧
               </button>
             )}
             {comEscuta && (

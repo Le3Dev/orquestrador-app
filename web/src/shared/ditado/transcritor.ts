@@ -1,4 +1,9 @@
-import type { PedidoDeTranscricao, RespostaDoTranscritor } from "./mensagens";
+import {
+  MODELO_DA_ESCUTA,
+  MODELO_DO_DITADO,
+  type PedidoDeTranscricao,
+  type RespostaDoTranscritor,
+} from "./mensagens";
 
 /** Em que idioma transcrever: português fixo (o ditado) ou detectado pelo Whisper (a escuta). */
 export type IdiomaDaTranscricao = "portuguese" | "automatico";
@@ -11,6 +16,12 @@ export interface OpcoesDaTranscricao {
   idioma?: IdiomaDaTranscricao;
   /** Padrão: `"ditado"`. */
   origem?: OrigemDaTranscricao;
+  /**
+   * Só vale na escuta: pedido provisório (trecho ainda em andamento). Só entra
+   * na fila se ela estiver vazia, e é descartado quando
+   * chega um trecho final; não conta no limite de pedidos da escuta.
+   */
+  provisoria?: boolean;
 }
 
 /** A escuta deixa no máximo isto de pedidos esperando; o mais antigo sai quando chega outro. */
@@ -47,6 +58,8 @@ interface PedidoNaFila {
   readonly audio: Float32Array;
   readonly idioma: PedidoDeTranscricao["idioma"];
   readonly origem: OrigemDaTranscricao;
+  /** Transcrição provisória do trecho parcial da escuta: descartável e de menor prioridade. */
+  readonly provisoria: boolean;
   readonly resolver: (texto: string) => void;
   readonly rejeitar: (erro: Error) => void;
 }
@@ -132,7 +145,12 @@ export function criarTranscritor(criarTrabalhador: () => TrabalhadorDoTranscrito
       const proximo = fila.shift();
       if (proximo === undefined) return;
       try {
-        const pedido: PedidoDeTranscricao = { id: proximo.id, audio: proximo.audio, idioma: proximo.idioma };
+        const pedido: PedidoDeTranscricao = {
+          id: proximo.id,
+          audio: proximo.audio,
+          idioma: proximo.idioma,
+          modelo: proximo.origem === "escuta" ? MODELO_DA_ESCUTA : MODELO_DO_DITADO,
+        };
         // O buffer só é transferido aqui, quando o pedido começa: na fila ele ainda é de quem pediu.
         obterTrabalhador().postMessage(pedido, [proximo.audio.buffer]);
         emAndamento = proximo;
@@ -152,6 +170,18 @@ export function criarTranscritor(criarTrabalhador: () => TrabalhadorDoTranscrito
       else fila.splice(primeiroDaEscuta, 0, pedido);
       return;
     }
+    if (pedido.provisoria) {
+      // Descartável: só entra com a fila vazia; havendo qualquer pedido esperando, pula (não enfileira).
+      if (fila.length > 0) pedido.rejeitar(new TranscricaoDescartada());
+      else fila.push(pedido);
+      return;
+    }
+    // Um trecho final da escuta nunca espera atrás de uma provisória que ainda não começou.
+    const provisorias = fila.filter((item) => item.provisoria);
+    if (provisorias.length > 0) {
+      fila = fila.filter((item) => !item.provisoria);
+      for (const provisoria of provisorias) provisoria.rejeitar(new TranscricaoDescartada());
+    }
     fila.push(pedido);
     const daEscuta = fila.filter((item) => item.origem === "escuta");
     if (daEscuta.length > MAXIMO_DE_PEDIDOS_DA_ESCUTA_ESPERANDO) {
@@ -165,13 +195,15 @@ export function criarTranscritor(criarTrabalhador: () => TrabalhadorDoTranscrito
 
   return (audio, aoBaixar, opcoes = {}) => {
     const id = proximoId++;
+    const origem = opcoes.origem ?? "ditado";
     if (aoBaixar !== undefined) ouvintesDoDownload.add(aoBaixar);
     return new Promise<string>((resolver, rejeitar) => {
       enfileirar({
         id,
         audio,
         idioma: (opcoes.idioma ?? "portuguese") === "automatico" ? null : "portuguese",
-        origem: opcoes.origem ?? "ditado",
+        origem,
+        provisoria: origem === "escuta" && opcoes.provisoria === true,
         resolver,
         rejeitar,
       });

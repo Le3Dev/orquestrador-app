@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 
 import type { EscutaNaTela } from "../../shared/escuta/useEscuta";
-import { CHAVE_DA_FAIXA_DA_ESCUTA_RECOLHIDA, FaixaDaEscuta } from "./FaixaDaEscuta";
+import { FaixaDaEscuta } from "./FaixaDaEscuta";
 
 type PropsDaFaixa = Parameters<typeof FaixaDaEscuta>[0];
 
@@ -9,7 +9,6 @@ function props(alteracoes: Partial<EscutaNaTela> = {}): PropsDaFaixa {
   return {
     situacao: "escutando",
     progressoDoDownload: null,
-    linhas: [],
     automatico: true,
     alternarAutomatico: vi.fn(),
     erro: null,
@@ -19,11 +18,8 @@ function props(alteracoes: Partial<EscutaNaTela> = {}): PropsDaFaixa {
   };
 }
 
-const alternador = () => screen.getByRole("button", { name: /transcrição/ });
-
 describe("FaixaDaEscuta", () => {
   afterEach(() => {
-    localStorage.clear();
     vi.restoreAllMocks();
   });
 
@@ -32,57 +28,10 @@ describe("FaixaDaEscuta", () => {
     expect(screen.queryByTestId("faixa-da-escuta")).not.toBeInTheDocument();
   });
 
-  it("mostra as últimas linhas, com a mais nova por último", () => {
-    render(<FaixaDaEscuta {...props({ linhas: ["primeira linha", "segunda linha"] })} />);
-
-    const lista = screen.getByRole("list", { name: "Últimas linhas transcritas" });
-    const itens = screen.getAllByRole("listitem");
-    expect(lista).toBeInTheDocument();
-    expect(itens.map((item) => item.textContent)).toEqual(["primeira linha", "segunda linha"]);
-  });
-
-  it("sem linhas, um texto discreto conforme a situação", () => {
-    const { rerender } = render(<FaixaDaEscuta {...props()} />);
-    expect(screen.getByText("Nada transcrito ainda.")).toBeInTheDocument();
-
-    rerender(<FaixaDaEscuta {...props({ situacao: "pausada" })} />);
-    expect(screen.getByText("Escuta pausada.")).toBeInTheDocument();
-  });
-
-  it("recolhe e abre pelo cabeçalho e guarda a escolha no localStorage", () => {
-    const { unmount } = render(<FaixaDaEscuta {...props({ linhas: ["olá", "qual a complexidade disso?"] })} />);
-
-    expect(alternador()).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("list", { name: "Últimas linhas transcritas" })).toBeVisible();
-
-    fireEvent.click(alternador());
-    expect(alternador()).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("list", { name: "Últimas linhas transcritas" })).not.toBeInTheDocument();
-    // Recolhida, a última linha aparece resumida no cabeçalho.
-    expect(alternador()).toHaveTextContent("qual a complexidade disso?");
-    expect(localStorage.getItem(CHAVE_DA_FAIXA_DA_ESCUTA_RECOLHIDA)).toBe("true");
-
-    // Ao montar de novo, continua recolhida.
-    unmount();
-    render(<FaixaDaEscuta {...props()} />);
-    expect(alternador()).toHaveAttribute("aria-expanded", "false");
-
-    fireEvent.click(alternador());
-    expect(localStorage.getItem(CHAVE_DA_FAIXA_DA_ESCUTA_RECOLHIDA)).toBe("false");
-  });
-
-  it("sem localStorage (bloqueado), abre e recolhe do mesmo jeito", () => {
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
-      throw new Error("bloqueado");
-    });
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("bloqueado");
-    });
-    render(<FaixaDaEscuta {...props()} />);
-
-    expect(alternador()).toHaveAttribute("aria-expanded", "true");
-    fireEvent.click(alternador());
-    expect(alternador()).toHaveAttribute("aria-expanded", "false");
+  it("não mostra mais as linhas da transcrição (elas vão para a conversa)", () => {
+    render(<FaixaDaEscuta {...props({ linhas: ["primeira linha"] })} />);
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    expect(screen.queryByText("primeira linha")).not.toBeInTheDocument();
   });
 
   it("a chave Automático reflete o estado e alterna", () => {
@@ -106,8 +55,7 @@ describe("FaixaDaEscuta", () => {
     expect(screen.getByText("baixando o modelo de transcrição 42%")).toBeInTheDocument();
   });
 
-  it("o erro aparece mesmo recolhida e o fechar o descarta", () => {
-    localStorage.setItem(CHAVE_DA_FAIXA_DA_ESCUTA_RECOLHIDA, "true");
+  it("o erro aparece e o fechar o descarta", () => {
     const descartarErro = vi.fn();
     render(<FaixaDaEscuta {...props({ situacao: "erro", erro: "a captura do áudio parou", descartarErro })} />);
 

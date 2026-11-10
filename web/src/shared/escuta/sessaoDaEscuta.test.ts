@@ -17,9 +17,12 @@ const SILENCIO = new Float32Array(16_000);
 
 type Transcricao = { resolver: (texto: string) => void; rejeitar: (erro: Error) => void; aoBaixar?: (p: number) => void };
 
-function montar(opcoes: { avisoVisto?: boolean; automatico?: boolean; falhaNaCaptura?: Error } = {}) {
+function montar(
+  opcoes: { avisoVisto?: boolean; automatico?: boolean; automaticoManual?: boolean; falhaNaCaptura?: Error } = {},
+) {
   let preferencias: PreferenciasDaEscuta = {
     automatico: opcoes.automatico ?? true,
+    automaticoManual: opcoes.automaticoManual ?? false,
     avisoVisto: opcoes.avisoVisto ?? true,
   };
   const armazenamento: ArmazenamentoDasPreferencias = {
@@ -72,6 +75,7 @@ function montar(opcoes: { avisoVisto?: boolean; automatico?: boolean; falhaNaCap
 
   let atuais: OpcoesDaEscuta = {
     modoInvisivelAtivo: false,
+    escutaManualLigada: false,
     escutaDisponivel: true,
     chatLivre: true,
     autorizacaoAtiva: false,
@@ -280,6 +284,198 @@ describe("SessaoDaEscuta", () => {
     expect(t.sessao.instantaneo().linhas).toEqual(["Qual a complexidade da busca binária?"]);
     expect(t.classificar).not.toHaveBeenCalled();
     expect(t.enviar).not.toHaveBeenCalled();
+  });
+
+  it("a escuta manual liga a escuta fora do modo invisível, com o automático desligado de início", async () => {
+    const t = montar();
+    t.opcoesDaTela({ escutaManualLigada: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.sessao.instantaneo()).toMatchObject({ situacao: "escutando", automatico: false });
+
+    // Sem o automático da escuta manual, só transcreve.
+    t.respostas.push(pergunta(PERGUNTA));
+    await t.falar("Me explica como inverter uma lista ligada?");
+    expect(t.classificar).not.toHaveBeenCalled();
+    expect(t.sessao.instantaneo().linhas).toEqual(["Me explica como inverter uma lista ligada?"]);
+
+    t.opcoesDaTela({ escutaManualLigada: false });
+    await vi.advanceTimersByTimeAsync(ESPERA_PARA_DESLIGAR_MS);
+    expect(t.sessao.instantaneo().situacao).toBe("desligada");
+  });
+
+  it("escutaManualLigada sem escuta disponível não escuta", async () => {
+    const t = montar();
+    t.opcoesDaTela({ escutaManualLigada: true, escutaDisponivel: false });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(t.sessao.instantaneo().situacao).toBe("indisponivel");
+    expect(t.iniciarCaptura).not.toHaveBeenCalled();
+  });
+
+  it("o automático é separado por contexto, e o modo invisível tem prioridade", async () => {
+    const t = montar();
+    t.opcoesDaTela({ escutaManualLigada: true });
+    t.sessao.alternarAutomatico();
+    expect(t.sessao.instantaneo().automatico).toBe(true);
+    expect(t.preferencias()).toMatchObject({ automatico: true, automaticoManual: true });
+
+    // No modo invisível vale a preferência dele; alternar mexe só nela.
+    t.opcoesDaTela({ modoInvisivelAtivo: true });
+    t.sessao.alternarAutomatico();
+    expect(t.sessao.instantaneo().automatico).toBe(false);
+    expect(t.preferencias()).toMatchObject({ automatico: false, automaticoManual: true });
+
+    // Com o modo invisível ligado junto da manual, o automático da manual não classifica por ele.
+    t.opcoesDaTela({ modoInvisivelAtivo: false });
+    expect(t.sessao.instantaneo().automatico).toBe(true);
+  });
+
+  it("a escuta manual com o automático ligado classifica e envia", async () => {
+    const t = montar({ automaticoManual: true });
+    t.opcoesDaTela({ escutaManualLigada: true });
+    await vi.advanceTimersByTimeAsync(0);
+    t.respostas.push(pergunta(PERGUNTA));
+    await t.falar("Me explica como inverter uma lista ligada?");
+    expect(t.enviar).toHaveBeenCalledTimes(1);
+  });
+
+  it("o aviso da primeira vez vale também para a escuta manual", async () => {
+    const t = montar({ avisoVisto: false });
+    t.opcoesDaTela({ escutaManualLigada: true });
+    expect(t.sessao.instantaneo().situacao).toBe("aguardando-aviso");
+    expect(t.iniciarCaptura).not.toHaveBeenCalled();
+  });
+
+  it("trechos finais vão para a conversa, ficam ao desligar e só limparTrechos os apaga", async () => {
+    const t = montar();
+    await t.entrar();
+    await t.falar("Bom dia a todos, vamos começar.");
+    await t.falar("Hoje falamos de listas ligadas.");
+    const { trechos } = t.sessao.instantaneo();
+    expect(trechos.map((x) => x.texto)).toEqual(["Bom dia a todos, vamos começar.", "Hoje falamos de listas ligadas."]);
+    expect(new Set(trechos.map((x) => x.id)).size).toBe(2);
+    expect(trechos[0]?.inicioMs).toBeGreaterThanOrEqual(1_000_000);
+    expect(trechos[0]?.fimMs).toBeGreaterThan(trechos[0]?.inicioMs ?? 0);
+
+    t.opcoesDaTela({ modoInvisivelAtivo: false });
+    await vi.advanceTimersByTimeAsync(ESPERA_PARA_DESLIGAR_MS);
+    expect(t.sessao.instantaneo()).toMatchObject({ situacao: "desligada", linhas: [] });
+    expect(t.sessao.instantaneo().trechos).toHaveLength(2);
+
+    t.sessao.limparTrechos();
+    expect(t.sessao.instantaneo().trechos).toEqual([]);
+  });
+
+  it("guarda no máximo 200 trechos: os mais antigos saem", async () => {
+    const t = montar();
+    await t.entrar();
+    for (let i = 0; i < 202; i++) await t.falar(`Trecho número ${i} da aula de hoje.`);
+    const { trechos } = t.sessao.instantaneo();
+    expect(trechos).toHaveLength(200);
+    expect(trechos[0]?.texto).toBe("Trecho número 2 da aula de hoje.");
+  });
+
+  describe("transcrição provisória", () => {
+    /** 1,5 s de voz seguida (o trecho continua aberto): pede a provisória. */
+    const falarSemFechar = async (t: ReturnType<typeof montar>) => {
+      const { ouvintes } = t.ultimaCaptura();
+      ouvintes.aoReceberAmostras(VOZ);
+      ouvintes.aoReceberAmostras(VOZ.subarray(0, 8_000));
+      await vi.advanceTimersByTimeAsync(0);
+    };
+    const provisorias = (t: ReturnType<typeof montar>) =>
+      t.transcrever.mock.calls.filter(([, , opcoes]) => opcoes?.provisoria === true);
+
+    it("a cada 1,5 s de áudio novo pede o texto provisório, que vai para linhaProvisoria", async () => {
+      const t = montar();
+      await t.entrar();
+      t.textos.push("Me explica como");
+      await falarSemFechar(t);
+
+      expect(provisorias(t)).toHaveLength(1);
+      expect(t.transcrever).toHaveBeenCalledWith(expect.any(Float32Array), undefined, {
+        idioma: "automatico",
+        origem: "escuta",
+        provisoria: true,
+      });
+      expect(t.sessao.instantaneo().linhaProvisoria).toBe("Me explica como");
+      expect(t.sessao.instantaneo().trechos).toEqual([]);
+      expect(t.sessao.instantaneo().linhas).toEqual([]);
+      expect(t.classificar).not.toHaveBeenCalled();
+    });
+
+    it("no máximo uma provisória em voo: com uma rodando, as seguintes são puladas", async () => {
+      const t = montar();
+      await t.entrar();
+      await falarSemFechar(t); // fica pendente
+      await falarSemFechar(t);
+      await falarSemFechar(t);
+      expect(provisorias(t)).toHaveLength(1);
+
+      t.pendentes.shift()?.resolver("primeira");
+      await vi.advanceTimersByTimeAsync(0);
+      await falarSemFechar(t);
+      expect(provisorias(t)).toHaveLength(2);
+    });
+
+    it("o trecho final troca a provisória pelo trecho definitivo e só ele classifica", async () => {
+      const t = montar({ automatico: true });
+      await t.entrar();
+      t.textos.push("Me explica como inverter");
+      await falarSemFechar(t);
+      expect(t.sessao.instantaneo().linhaProvisoria).toBe("Me explica como inverter");
+
+      t.respostas.push(pergunta(PERGUNTA));
+      t.textos.push("Me explica como inverter uma lista ligada?");
+      t.ultimaCaptura().ouvintes.aoReceberAmostras(SILENCIO);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const estado = t.sessao.instantaneo();
+      expect(estado.linhaProvisoria).toBeNull();
+      expect(estado.trechos.map((x) => x.texto)).toEqual(["Me explica como inverter uma lista ligada?"]);
+      expect(t.classificar).toHaveBeenCalledTimes(1);
+      expect(t.classificar).toHaveBeenCalledWith({ trecho: "Me explica como inverter uma lista ligada?" }, expect.any(AbortSignal));
+    });
+
+    it("provisória atrasada, de trecho já fechado, é ignorada", async () => {
+      const t = montar();
+      await t.entrar();
+      await falarSemFechar(t); // provisória pendente
+      t.textos.push("Texto final do trecho.");
+      t.ultimaCaptura().ouvintes.aoReceberAmostras(SILENCIO);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.sessao.instantaneo().trechos).toHaveLength(1);
+
+      t.pendentes.shift()?.resolver("texto provisório velho");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.sessao.instantaneo().linhaProvisoria).toBeNull();
+    });
+
+    it("provisória de uma captura anterior (geração antiga) é ignorada", async () => {
+      const t = montar();
+      await t.entrar();
+      await falarSemFechar(t);
+      t.sessao.pausar();
+      t.pendentes.shift()?.resolver("texto velho");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.sessao.instantaneo().linhaProvisoria).toBeNull();
+    });
+
+    it("provisória descartada ou com falha não gera erro na tela", async () => {
+      const t = montar();
+      await t.entrar();
+      t.textos.push(new TranscricaoDescartada());
+      await falarSemFechar(t);
+      expect(t.sessao.instantaneo()).toMatchObject({ linhaProvisoria: null, erro: null });
+    });
+
+    it("a provisória não classifica nem entra nos trechos mesmo com o automático ligado", async () => {
+      const t = montar({ automatico: true });
+      await t.entrar();
+      t.textos.push("Qual a complexidade da busca binária?");
+      await falarSemFechar(t);
+      expect(t.classificar).not.toHaveBeenCalled();
+      expect(t.sessao.instantaneo().trechos).toEqual([]);
+    });
   });
 
   it("desligar o automático durante a classificação não envia a resposta dela", async () => {
