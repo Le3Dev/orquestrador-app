@@ -19,6 +19,7 @@ import { createPortal } from "react-dom";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import {
+  type CategoriaDoAnexo,
   type DadosDaConfiguracao,
   type DadosDoPedidoNaFila,
   type ModoDoTurno,
@@ -58,11 +59,12 @@ import {
 } from "../../shared/estado/aplicarEvento";
 import { mesmoConteudo, useReaproveitado } from "../../shared/hooks/useReaproveitado";
 import {
+  categoriaDoArquivo,
   type ImagemAnexada,
   imagensParaEnvio,
   lerImagem,
   liberarImagens,
-  problemaDaImagem,
+  problemaDoAnexo,
 } from "../../shared/imagens";
 import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
 import { resumoDaConfiguracao } from "../../shared/resumoDaConfiguracao";
@@ -1159,14 +1161,15 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   const anexar = useCallback(
     async (arquivos: File[]): Promise<void> => {
       setErro(null);
-      let quantidade = imagens.length;
+      const contadas: { categoria: CategoriaDoAnexo }[] = [...imagens];
       for (const arquivo of arquivos) {
-        const problema = problemaDaImagem(arquivo, quantidade);
+        const problema = problemaDoAnexo(arquivo, contadas);
         if (problema !== null) {
           setErro(problema);
           continue;
         }
-        quantidade += 1;
+        const categoria = categoriaDoArquivo(arquivo);
+        if (categoria !== null) contadas.push({ categoria });
         try {
           const imagem = await lerImagem(arquivo);
           setImagens((atuais) => [...atuais, imagem]);
@@ -1175,7 +1178,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
         }
       }
     },
-    [imagens.length],
+    [imagens],
   );
 
   const aoAnexar = useCallback((arquivos: File[]) => void anexar(arquivos), [anexar]);
@@ -1195,7 +1198,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
       setErro(null);
       try {
         // Só imagens, sem texto: o servidor exige uma mensagem, então vai uma padrão.
-        const mensagem = texto.trim() === "" ? "Analise as imagens anexadas." : texto;
+        const mensagem = texto.trim() === "" ? "Analise os anexos." : texto;
         // O base64 só nasce aqui, no envio.
         const anexos = imagens.length === 0 ? [] : await imagensParaEnvio(imagens);
         // Os itens ligados vão lidos na hora do envio; sem nenhum, o pedido é igual ao de antes.
@@ -1542,7 +1545,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
       }}
     >
       {arraste === "imagens" && (
-        <div className="soltar-imagens">solte para anexar as imagens a este orquestrador</div>
+        <div className="soltar-imagens">solte para anexar imagens ou documentos a este orquestrador</div>
       )}
       {arraste === "pedido" && (
         <div className="soltar-imagens">solte para escrever no prompt — nada é enviado até você apertar enter</div>

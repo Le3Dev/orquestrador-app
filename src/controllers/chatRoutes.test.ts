@@ -156,10 +156,10 @@ describe("rotas do chat", () => {
     await aguardarOcioso();
   });
 
-  it("POST /chat/mensagens recusa texto vazio sem imagens e imagem de formato inválido com 400", async () => {
+  it("POST /chat/mensagens recusa texto vazio sem anexos e imagem de formato inválido com 400", async () => {
     const vazio = await enviar("/chat/mensagens", "POST", { texto: "   " });
     expect(vazio.status).toBe(400);
-    expect(await vazio.json()).toEqual({ erro: "Escreva uma mensagem ou anexe uma imagem." });
+    expect(await vazio.json()).toEqual({ erro: "Escreva uma mensagem ou anexe um arquivo." });
 
     const formato = await enviar("/chat/mensagens", "POST", {
       texto: "oi",
@@ -222,12 +222,65 @@ describe("rotas do chat", () => {
     const imagem = await fetch(`${base}/chat/anexos/${arquivo}`);
     expect(imagem.status).toBe(200);
     expect(Buffer.from(await imagem.arrayBuffer()).toString("base64")).toBe(PNG);
+    expect(imagem.headers.get("content-type")).toBe("image/png");
+    expect(imagem.headers.get("content-disposition")).toMatch(/^inline/);
+    expect(imagem.headers.get("x-content-type-options")).toBe("nosniff");
 
     expect((await fetch(`${base}/chat/anexos/..%5C..%5Cconversa.json`)).status).toBe(404);
     expect((await fetch(`${base}/chat/anexos/nao-existe.png`)).status).toBe(404);
 
     motor.terminar(sucesso("ok"));
     await aguardarOcioso();
+  });
+
+  it("aceita documento com tipo vazio, extrai o texto e serve original e texto como download", async () => {
+    const csv = "nome,valor\nmesa,10\n";
+    const resposta = await enviar("/chat/mensagens", "POST", {
+      texto: "some",
+      imagens: [{ nome: "vendas.csv", tipoDeMidia: "", base64: Buffer.from(csv).toString("base64") }],
+    });
+    expect(resposta.status).toBe(202);
+    await expect.poll(() => motor.perguntas.length).toBe(1);
+    const estado = (await (await fetch(`${base}/chat`)).json()) as {
+      mensagens: { imagens: { arquivo: string; categoria: string; tipoDeMidia: string }[] }[];
+    };
+    const anexo = estado.mensagens[0]?.imagens[0];
+    expect(anexo).toMatchObject({ categoria: "documento", tipoDeMidia: "text/csv" });
+    const arquivo = anexo?.arquivo ?? "";
+    expect(arquivo).toMatch(/\.csv$/);
+
+    const original = await fetch(`${base}/chat/anexos/${arquivo}`);
+    expect(original.status).toBe(200);
+    expect(await original.text()).toBe(csv);
+    expect(original.headers.get("content-type")).toMatch(/^text\/csv/);
+    expect(original.headers.get("content-disposition")).toMatch(/^attachment/);
+    expect(original.headers.get("x-content-type-options")).toBe("nosniff");
+
+    const texto = await fetch(`${base}/chat/anexos/${arquivo.replace(/\.csv$/, ".texto.txt")}`);
+    expect(texto.status).toBe(200);
+    expect(await texto.text()).toBe(csv);
+    expect(texto.headers.get("content-disposition")).toMatch(/^attachment/);
+
+    expect(motor.perguntas[0]?.mensagem).toContain('"vendas.csv": texto extraído em');
+
+    motor.terminar(sucesso("ok"));
+    await aguardarOcioso();
+  });
+
+  it("recusa executável e mais de 5 documentos com 400", async () => {
+    const exe = await enviar("/chat/mensagens", "POST", {
+      texto: "oi",
+      imagens: [{ nome: "setup.exe", tipoDeMidia: "application/x-msdownload", base64: PNG }],
+    });
+    expect(exe.status).toBe(400);
+
+    const base64 = Buffer.from("x").toString("base64");
+    const muitos = await enviar("/chat/mensagens", "POST", {
+      texto: "oi",
+      imagens: Array.from({ length: 6 }, (_, indice) => ({ nome: `d${indice}.txt`, tipoDeMidia: "text/plain", base64 })),
+    });
+    expect(muitos.status).toBe(400);
+    expect(((await muitos.json()) as { erro: string }).erro).toMatch(/até 5 documentos/);
   });
 
   it("PATCH /chat/preferencias altera e valida", async () => {

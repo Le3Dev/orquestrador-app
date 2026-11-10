@@ -183,6 +183,24 @@ describe("aplicarEvento", () => {
     expect(turno?.ultimaAtividadeEm).toBe("2026-10-28T12:00:01Z");
   });
 
+  it("guarda documentos do pedido com a categoria, e anexos antigos seguem sem ela", () => {
+    const documento = {
+      id: "a2",
+      nome: "contrato.pdf",
+      categoria: "documento" as const,
+      tipoDeMidia: "application/pdf",
+      tamanhoEmBytes: 2048,
+      arquivo: "a2.pdf",
+    };
+    const antigo = { id: "a1", nome: "tela.png", tipoDeMidia: "image/png", tamanhoEmBytes: 10, arquivo: "a1.png" };
+    const [turno] = reproduzir(
+      registrar([{ tipo: "turno_iniciado", turnoId: "t1", texto: "leia", configuracao, anexos: [antigo, documento] }]),
+    ).turnos;
+
+    expect(turno?.anexos).toEqual([antigo, documento]);
+    expect(turno?.anexos[0]?.categoria).toBeUndefined();
+  });
+
   it("lê pedidos gravados antes de existirem imagens", () => {
     const [turno] = reproduzir(registrar([{ tipo: "turno_iniciado", turnoId: "t1", texto: "antigo", configuracao }])).turnos;
 

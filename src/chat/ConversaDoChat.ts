@@ -1,4 +1,4 @@
-import { MAXIMO_DE_IMAGENS_POR_MENSAGEM } from "../orquestracao/Anexo";
+import { categoriaDoTipo, erroDaQuantidadeDeAnexos } from "../orquestracao/Anexo";
 import { copiarPergunta, PerguntaDoApp } from "../perguntas/PerguntaDoApp";
 import type { AcaoDoApp } from "./AcaoDoApp";
 import { ErroDoChat } from "./ErroDoChat";
@@ -111,7 +111,7 @@ export class ConversaDoChat {
   perguntar(pergunta: NovaPergunta): EventoDoChat {
     const texto = pergunta.texto.trim();
     if (texto === "" && pergunta.imagens.length === 0) {
-      throw new ErroDoChat("dados_invalidos", "Escreva uma mensagem ou anexe uma imagem.");
+      throw new ErroDoChat("dados_invalidos", "Escreva uma mensagem ou anexe um arquivo.");
     }
     if (texto.length > TAMANHO_MAXIMO_DA_PERGUNTA) {
       throw new ErroDoChat(
@@ -119,11 +119,11 @@ export class ConversaDoChat {
         `A mensagem deve ter até ${TAMANHO_MAXIMO_DA_PERGUNTA} caracteres.`,
       );
     }
-    if (pergunta.imagens.length > MAXIMO_DE_IMAGENS_POR_MENSAGEM) {
-      throw new ErroDoChat(
-        "dados_invalidos",
-        `Anexe até ${MAXIMO_DE_IMAGENS_POR_MENSAGEM} imagens por mensagem.`,
-      );
+    const erroDosAnexos = erroDaQuantidadeDeAnexos(
+      pergunta.imagens.map((imagem) => ({ categoria: imagem.categoria ?? categoriaDoTipo(imagem.tipoDeMidia) })),
+    );
+    if (erroDosAnexos !== null) {
+      throw new ErroDoChat("dados_invalidos", erroDosAnexos);
     }
     if (this.respostaEmAndamento !== null) {
       throw new ErroDoChat("em_andamento", "Já há uma resposta em andamento.");

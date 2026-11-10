@@ -1,5 +1,6 @@
 import { linhasDaRegraDasPerguntas } from "../perguntas/PerguntaDoApp";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
+import { DocumentoDoPedido, linhasDosDocumentos } from "./DocumentosAnexados";
 import { desarmarMarcas, InstrucoesAplicadas, linhasDasInstrucoes } from "./InstrucoesPersonalizadas";
 import { ModeloClaude } from "./ModeloClaude";
 import { ModoDoTurno } from "./ModoDoTurno";
@@ -319,6 +320,7 @@ export function mensagemParaOOrquestrador(
   subagentesProntos: readonly DadosDoSubagentePronto[] = [],
   plataforma: Plataforma = "unix",
   itensLigados: readonly ItemLigado[] = [],
+  documentos: readonly DocumentoDoPedido[] = [],
 ): string {
   const planejamento = modo === "planejamento";
   // No planejamento os agentes só leem (as ferramentas já vêm travadas
@@ -360,6 +362,7 @@ export function mensagemParaOOrquestrador(
     ...(configuracao.permitirArtefatosOnline && !planejamento ? [REGRA_DE_ARTEFATOS_ONLINE] : []),
     ...regrasDasPerguntas(),
     ...imagens,
+    ...linhasDosDocumentos(documentos),
     ...linhasDasInstrucoes(instrucoes, MARCA_DA_CONFIGURACAO, revogarInstrucoesAnteriores),
     `</${MARCA_DA_CONFIGURACAO}>`,
     ...linhasDosItensLigados(itensLigados),

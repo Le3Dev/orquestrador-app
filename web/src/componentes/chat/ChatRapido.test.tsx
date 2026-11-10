@@ -258,7 +258,7 @@ describe("ChatRapido · modo invisível", () => {
 
       fireEvent.change(campo, { target: { value: "Veja" } });
       fireEvent.keyDown(campo, { key: "Enter" });
-      await waitFor(() => expect(perguntar).toHaveBeenCalledWith("Veja", [QUADRO]));
+      await waitFor(() => expect(perguntar).toHaveBeenCalledWith("Veja", [{ ...QUADRO, categoria: "imagem" }]));
       expect(modoInvisivel.capturarTela).not.toHaveBeenCalled();
     });
 
@@ -1278,7 +1278,7 @@ describe("ChatRapido", () => {
 
       // "cG5n" é o base64 de "png".
       await waitFor(() =>
-        expect(perguntar).toHaveBeenCalledWith("Veja", [{ nome: "tela.png", tipoDeMidia: "image/png", base64: "cG5n" }]),
+        expect(perguntar).toHaveBeenCalledWith("Veja", [{ nome: "tela.png", tipoDeMidia: "image/png", categoria: "imagem", base64: "cG5n" }]),
       );
       await waitFor(() => expect(revogar).toHaveBeenCalledWith(criar.mock.results[0]?.value));
     });
@@ -2211,6 +2211,38 @@ describe("ChatRapido · bolhas", () => {
     fireEvent.click(miniatura);
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Fechar" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("documento anexado aparece como chip de download, sem miniatura de imagem", () => {
+    renderizar({
+      ...OCIOSO,
+      mensagens: [
+        mensagem("u1", "usuario", {
+          texto: "Leia",
+          imagens: [
+            { arquivo: "d.pdf", nome: "contrato.pdf", tipoDeMidia: "application/pdf", categoria: "documento", tamanhoEmBytes: 2 * 1024 * 1024 },
+          ],
+        }),
+      ],
+    });
+    const link = screen.getByRole("link", { name: /contrato\.pdf/ });
+    expect(link).toHaveAttribute("href", "/api/chat/anexos/d.pdf");
+    expect(link).toHaveTextContent("2,0 MB");
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("anexa documento pelo seletor (por extensão), mostra o chip e o envia como documento", async () => {
+    const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+    const { campo } = renderizar();
+    fireEvent.paste(campo, { clipboardData: { files: [new File(["abc"], "dados.csv", { type: "" })] } });
+    await screen.findByRole("button", { name: "Remover dados.csv" });
+    fireEvent.change(campo, { target: { value: "Veja" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+    await waitFor(() =>
+      expect(perguntar).toHaveBeenCalledWith("Veja", [
+        { nome: "dados.csv", tipoDeMidia: "text/csv", categoria: "documento", base64: "YWJj" },
+      ]),
+    );
   });
 
   it("a resposta pronta se arrasta com o texto dela (sem os blocos do app); a que ainda chega, não", () => {

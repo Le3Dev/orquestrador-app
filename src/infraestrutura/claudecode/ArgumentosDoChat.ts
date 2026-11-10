@@ -146,7 +146,8 @@ export function montarArgumentosDoChat(pergunta: PerguntaAoMotorDeChat, arquivos
     pergunta.pastaDosProjetos,
     "--add-dir",
     pergunta.pastaDeArtefatos,
-    ...(pergunta.imagens.length > 0 && pergunta.pastaDasImagens !== null ? ["--add-dir", pergunta.pastaDasImagens] : []),
+    // A pasta dos anexos (imagens e documentos) só entra quando a pergunta leva algum.
+    ...(pergunta.pastaDasImagens !== null ? ["--add-dir", pergunta.pastaDasImagens] : []),
     ...(pergunta.sessaoIniciada ? ["--resume", pergunta.sessaoId] : ["--session-id", pergunta.sessaoId]),
     "--model",
     pergunta.modelo,

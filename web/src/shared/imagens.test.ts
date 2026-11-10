@@ -1,13 +1,19 @@
 import { formatarBytes } from "./formatacao";
 import {
+  categoriaDoArquivo,
   ehCapturaDeTela,
   imagemDaCaptura,
   imagensParaEnvio,
   lerImagem,
   liberarImagens,
+  MAXIMO_DE_DOCUMENTOS,
   MAXIMO_DE_IMAGENS,
   problemaDaImagem,
+  problemaDoAnexo,
   TAMANHO_MAXIMO_DA_IMAGEM,
+  TAMANHO_MAXIMO_DO_DOCUMENTO,
+  tamanhoLegivel,
+  tipoDoDocumento,
 } from "./imagens";
 import { nivelDaMemoria } from "./memoria";
 
@@ -31,9 +37,45 @@ describe("problemaDaImagem", () => {
   });
 
   it("explica por que recusa", () => {
-    expect(problemaDaImagem({ ...png, name: "doc.pdf", type: "application/pdf" }, 0)).toMatch(/não é PNG/);
+    expect(problemaDaImagem({ ...png, name: "prog.exe", type: "application/x-msdownload" }, 0)).toMatch(/não é um tipo aceito/);
     expect(problemaDaImagem({ ...png, size: TAMANHO_MAXIMO_DA_IMAGEM + 1 }, 0)).toMatch(/5 MB/);
     expect(problemaDaImagem(png, MAXIMO_DE_IMAGENS)).toMatch(/até 5 imagens/);
+  });
+});
+
+describe("documentos", () => {
+  const doc = (name: string, type = "", size = 1024) => ({ name, type, size });
+
+  it("aceita PDF, Word, Excel, CSV, TXT e MD, também só pela extensão", () => {
+    for (const nome of ["a.pdf", "a.doc", "a.DOCX", "a.xls", "a.xlsx", "a.csv", "a.txt", "a.md"]) {
+      expect(problemaDoAnexo(doc(nome), [])).toBeNull();
+      expect(categoriaDoArquivo(doc(nome))).toBe("documento");
+    }
+    expect(tipoDoDocumento(doc("a.xlsx"))).toContain("spreadsheetml");
+  });
+
+  it("limita a 30 MB e a 5 documentos, sem misturar com o limite das imagens", () => {
+    expect(problemaDoAnexo(doc("a.pdf", "", TAMANHO_MAXIMO_DO_DOCUMENTO + 1), [])).toMatch(/30 MB/);
+    const cinco = Array.from({ length: MAXIMO_DE_DOCUMENTOS }, () => ({ categoria: "documento" as const }));
+    expect(problemaDoAnexo(doc("a.pdf"), cinco)).toMatch(/até 5 documentos/);
+    expect(problemaDoAnexo({ name: "a.png", type: "image/png", size: 1 }, cinco)).toBeNull();
+  });
+
+  it("recusa tipo desconhecido e formata o tamanho", () => {
+    expect(problemaDoAnexo(doc("a.exe"), [])).toMatch(/não é um tipo aceito/);
+    expect(tamanhoLegivel(1536)).toBe("2 KB");
+    expect(tamanhoLegivel(5 * 1024 * 1024)).toBe("5,0 MB");
+  });
+
+  it("lerImagem de documento não cria miniatura e o envio leva a categoria", async () => {
+    const criar = vi.spyOn(URL, "createObjectURL");
+    const imagem = await lerImagem(new File(["abc"], "a.md", { type: "" }));
+    expect(imagem).toMatchObject({ categoria: "documento", tipoDeMidia: "text/markdown", previa: "" });
+    expect(criar).not.toHaveBeenCalled();
+    expect(await imagensParaEnvio([imagem])).toEqual([
+      { nome: "a.md", tipoDeMidia: "text/markdown", categoria: "documento", base64: "YWJj" },
+    ]);
+    vi.restoreAllMocks();
   });
 });
 
@@ -60,8 +102,8 @@ describe("imagens anexadas sem base64 guardado", () => {
   });
 
   it("lerImagem recusa tipo não aceito com a mesma mensagem", async () => {
-    await expect(lerImagem(new File(["x"], "doc.pdf", { type: "application/pdf" }))).rejects.toThrow(
-      '"doc.pdf" não é uma imagem aceita.',
+    await expect(lerImagem(new File(["x"], "prog.exe", { type: "application/x-msdownload" }))).rejects.toThrow(
+      '"prog.exe" não é um tipo de arquivo aceito.',
     );
   });
 
@@ -69,7 +111,7 @@ describe("imagens anexadas sem base64 guardado", () => {
     const bytes = new Uint8Array(1000).map((_, indice) => (indice * 37) % 256);
     const arquivo = new File([bytes], "foto.jpg", { type: "image/jpeg" });
     const [enviada] = await imagensParaEnvio([await lerImagem(arquivo)]);
-    expect(enviada).toEqual({ nome: "foto.jpg", tipoDeMidia: "image/jpeg", base64: await base64PeloLeitor(arquivo) });
+    expect(enviada).toEqual({ nome: "foto.jpg", tipoDeMidia: "image/jpeg", categoria: "imagem", base64: await base64PeloLeitor(arquivo) });
   });
 
   it("a captura de tela vira Blob e volta ao mesmo base64 no envio", async () => {
@@ -78,7 +120,7 @@ describe("imagens anexadas sem base64 guardado", () => {
     const imagem = imagemDaCaptura(captura);
     expect(imagem).not.toHaveProperty("base64");
     expect(imagem.tamanhoEmBytes).toBe(301);
-    expect(await imagensParaEnvio([imagem])).toEqual([captura]);
+    expect(await imagensParaEnvio([imagem])).toEqual([{ ...captura, categoria: "imagem" }]);
   });
 
   it("liberarImagens revoga as URLs das miniaturas", async () => {

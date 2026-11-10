@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { z } from "zod";
 
+import { type DocumentoDoPedido, linhasDosDocumentos } from "../orquestracao/DocumentosAnexados";
 import {
   MAXIMO_DE_SUBAGENTES_PRONTOS,
   TAMANHO_MAXIMO_DA_DESCRICAO,
@@ -276,7 +277,11 @@ function regrasDosSubagentes(): string[] {
  * perguntas (projetos e orquestradores novos) e porque o Claude Code ignora
  * instruções novas ao retomar a sessão.
  */
-export function mensagemParaOChat(texto: string, contexto: ContextoDoApp): string {
+export function mensagemParaOChat(
+  texto: string,
+  contexto: ContextoDoApp,
+  documentos: readonly DocumentoDoPedido[] = [],
+): string {
   const projetos =
     contexto.projetos.length === 0
       ? ["- (nenhum projeto na pasta raiz)"]
@@ -292,7 +297,7 @@ export function mensagemParaOChat(texto: string, contexto: ContextoDoApp): strin
     contexto.subagentesProntos.length === 0
       ? ["- (nenhum)"]
       : contexto.subagentesProntos.map((subagente) => `- ${subagente.nome} · ${subagente.modelo}: ${subagente.descricao}`);
-  const pergunta = texto.trim() === "" ? "Veja a imagem anexada." : texto;
+  const pergunta = texto.trim() === "" ? (documentos.length > 0 ? "Veja o anexo." : "Veja a imagem anexada.") : texto;
 
   return [
     `<${MARCA_DO_CONTEXTO}>`,
@@ -322,6 +327,7 @@ export function mensagemParaOChat(texto: string, contexto: ContextoDoApp): strin
     ...regrasDosSubagentes(),
     "",
     ...linhasDaRegraDasPerguntas(),
+    ...linhasDosDocumentos(documentos),
     `</${MARCA_DO_CONTEXTO}>`,
     "",
     pergunta,

@@ -1,5 +1,5 @@
 import { copiarPergunta, PerguntaDoApp } from "../perguntas/PerguntaDoApp";
-import { DadosDoAnexo } from "./Anexo";
+import { categoriaDoTipo, DadosDoAnexo } from "./Anexo";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
 import { DecisaoDoPlano, ModoDoTurno } from "./ModoDoTurno";
@@ -73,7 +73,8 @@ export class Turno {
       dados.uso,
       dados.subagentes.map((subagente) => Subagente.reconstituir(subagente)),
       // Turnos gravados antes de existirem anexos não têm o campo.
-      dados.anexos ?? [],
+      // Anexos anteriores aos documentos não têm `categoria`: eram só imagens.
+      (dados.anexos ?? []).map((anexo) => ({ ...anexo, categoria: anexo.categoria ?? categoriaDoTipo(anexo.tipoDeMidia) })),
       // Nem os gravados antes do modo de planejamento: eram todos de execução.
       dados.modo ?? "execucao",
       dados.decisaoDoPlano ?? null,

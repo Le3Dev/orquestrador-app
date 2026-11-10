@@ -1,4 +1,5 @@
 import type {
+  CategoriaDoAnexo,
   ClassificacaoDaEscuta,
   ConsumoDoOrquestrador,
   ConteudoDoArquivo,
@@ -24,7 +25,6 @@ import type {
   PromptMelhorado,
   ResumoDoOrquestrador,
   SaudeDoServidor,
-  TipoDeImagem,
 } from "./tipos";
 
 function extrairMensagem(corpo: unknown): string | null {
@@ -74,7 +74,8 @@ export function mensagemDeErro(erro: unknown): string {
 /** Imagem pronta para envio: o conteúdo vai em base64 dentro do JSON da mensagem. */
 export interface ImagemParaEnvio {
   nome: string;
-  tipoDeMidia: TipoDeImagem;
+  tipoDeMidia: string;
+  categoria?: CategoriaDoAnexo;
   base64: string;
 }
 

@@ -1,6 +1,8 @@
-import { Anexo, ehTipoDeImagem, TAMANHO_MAXIMO_DA_IMAGEM } from "../orquestracao/Anexo";
+import { Anexo, categoriaDoTipo, ehTipoDeImagem, idDoArquivo } from "../orquestracao/Anexo";
 import type { ArmazemDeAnexos } from "../orquestracao/ArmazemDeAnexos";
 import type { ControleDeExecucoes } from "../orquestracao/ControleDeExecucoes";
+import type { DocumentoDoPedido } from "../orquestracao/DocumentosAnexados";
+import { ErroDeOrquestracao } from "../orquestracao/ErroDeOrquestracao";
 import type { JanelaDaCota } from "../orquestracao/EventoDeOrquestracao";
 import { separarPerguntasDoApp } from "../perguntas/PerguntaDoApp";
 import { ConversaDoChat, SituacaoDaConversa } from "./ConversaDoChat";
@@ -17,8 +19,6 @@ import type { SubagenteDoChat, SubagentesDoChat } from "./SubagentesDoChat";
 
 /** Chave do chat no controle de execuções e no armazém de anexos. */
 export const ID_DO_CHAT = "chat";
-
-const TAMANHO_MAXIMO_DO_NOME_DA_IMAGEM = 200;
 
 export interface DependenciasDoServicoDeChat {
   repositorio: RepositorioDoChat;
@@ -120,6 +120,7 @@ export class ServicoDeChat {
       arquivo: anexo.arquivo,
       nome: anexo.nome,
       tipoDeMidia: anexo.tipoDeMidia,
+      categoria: anexo.categoria,
     }));
     const mensagemId = gerarId();
     const inicio = conversa.perguntar({
@@ -249,27 +250,42 @@ export class ServicoDeChat {
 
     try {
       const contexto = await this.lerContexto();
+      const imagensDaPergunta = imagens.flatMap((imagem) =>
+        ehTipoDeImagem(imagem.tipoDeMidia)
+          ? [{ caminho: anexos.caminhoDe(ID_DO_CHAT, imagem.arquivo), tipoDeMidia: imagem.tipoDeMidia }]
+          : [],
+      );
+      const documentos: DocumentoDoPedido[] = await Promise.all(
+        imagens
+          .filter((anexo) => (anexo.categoria ?? categoriaDoTipo(anexo.tipoDeMidia)) === "documento")
+          .map(async (anexo) => ({
+            nome: anexo.nome,
+            caminho: anexos.caminhoDe(ID_DO_CHAT, anexo.arquivo),
+            caminhoDoTexto: await anexos.caminhoDoTexto(ID_DO_CHAT, idDoArquivo(anexo.arquivo)),
+          })),
+      );
       projetos = contexto.projetos;
       orquestradores = contexto.orquestradores;
       resultado = await motor.responder(
         {
           sessaoId: conversa.sessaoId,
           sessaoIniciada: conversa.sessaoIniciada,
-          mensagem: mensagemParaOChat(textoDaPergunta, {
-            agora: agora(),
-            pastaDosProjetos,
-            projetos: contexto.projetos,
-            orquestradores: contexto.orquestradores,
-            subagentesProntos: contexto.subagentesProntos,
-            alteracoesAutorizadas,
-            pastaDeArtefatos,
-            permitirArtefatosOnline: preferencias.permitirArtefatosOnline,
-          }),
+          mensagem: mensagemParaOChat(
+            textoDaPergunta,
+            {
+              agora: agora(),
+              pastaDosProjetos,
+              projetos: contexto.projetos,
+              orquestradores: contexto.orquestradores,
+              subagentesProntos: contexto.subagentesProntos,
+              alteracoesAutorizadas,
+              pastaDeArtefatos,
+              permitirArtefatosOnline: preferencias.permitirArtefatosOnline,
+            },
+            documentos,
+          ),
           instrucoes: instrucoesDoChat(),
-          imagens: imagens.map((imagem) => ({
-            caminho: anexos.caminhoDe(ID_DO_CHAT, imagem.arquivo),
-            tipoDeMidia: imagem.tipoDeMidia,
-          })),
+          imagens: imagensDaPergunta,
           pastaDasImagens: imagens.length > 0 ? anexos.pastaDe(ID_DO_CHAT) : null,
           pastaDaSessao,
           pastaDosProjetos,
@@ -375,20 +391,19 @@ export class ServicoDeChat {
   }
 
   private validarImagem(imagem: ImagemRecebidaNoChat, id: string): Anexo {
-    const nome = imagem.nome.trim().slice(0, TAMANHO_MAXIMO_DO_NOME_DA_IMAGEM) || "imagem";
-    if (!ehTipoDeImagem(imagem.tipoDeMidia)) {
-      throw new ErroDoChat("dados_invalidos", "Só dá para anexar imagens PNG, JPEG, GIF ou WebP.");
+    try {
+      return Anexo.de({
+        id,
+        nome: imagem.nome,
+        tipoDeMidia: imagem.tipoDeMidia,
+        tamanhoEmBytes: imagem.conteudo.byteLength,
+      });
+    } catch (erro) {
+      if (erro instanceof ErroDeOrquestracao) {
+        throw new ErroDoChat("dados_invalidos", erro.message);
+      }
+      throw erro;
     }
-    if (imagem.conteudo.byteLength <= 0) {
-      throw new ErroDoChat("dados_invalidos", `A imagem "${nome}" está vazia.`);
-    }
-    if (imagem.conteudo.byteLength > TAMANHO_MAXIMO_DA_IMAGEM) {
-      throw new ErroDoChat(
-        "dados_invalidos",
-        `A imagem "${nome}" passa de ${TAMANHO_MAXIMO_DA_IMAGEM / 1024 / 1024} MB, o limite do Claude por imagem.`,
-      );
-    }
-    return Anexo.de({ id, nome, tipoDeMidia: imagem.tipoDeMidia, tamanhoEmBytes: imagem.conteudo.byteLength });
   }
 
   private publicar(evento: EventoDoChat): void {
