@@ -33,6 +33,10 @@
 }
 .chat-lateral .cabecalho-do-chat { min-height: 44px; padding: 6px 8px 6px 14px; background: var(--surface); }
 .chat-lateral .cabecalho-do-chat .btn { gap: 5px; }
+/* Controles do cabeçalho: botões de ícone no padrão dos das janelas (.botao-do-no, em
+ * controles-de-janela.css); o ocultar é o último, no canto direito. */
+.controles-do-chat { display: inline-flex; align-items: center; flex-shrink: 0; gap: 2px; }
+.cabecalho-do-chat > .botao-do-no { flex-shrink: 0; }
 
 .chat-lateral .mensagens-do-chat {
   flex: 1 1 0;

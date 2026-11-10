@@ -37,6 +37,7 @@ import {
   LARGURA_DO_CHAT_FIXO,
   type LadoDoChatFixo,
   limitarLarguraDoChatFixo,
+  usePreferenciasDaTela,
 } from "../../shared/hooks/usePreferenciasDaTela";
 import {
   ehCapturaDeTela,
@@ -62,6 +63,7 @@ import { FaixaDaEscuta } from "./FaixaDaEscuta";
 import { IndicadorDaEscuta } from "./IndicadorDaEscuta";
 import { SeletorDeModelo } from "./SeletorDeModelo";
 import "../../theme/chat-lateral.css";
+import "../../theme/controles-de-janela.css";
 
 const ALTURA_MAXIMA_DO_CAMPO = 140;
 /** Para as mensagens sem ações: a mesma lista sempre, para a memorização delas valer. */
@@ -242,21 +244,30 @@ function AlcaDaLargura({ largura, aoMudar, lado }: PropsDaAlca) {
   );
 }
 
+/** Os ícones dos controles do chat: traço fino, do tamanho dos botões das janelas do canvas. */
+const PROPS_DO_ICONE_DO_CHAT = {
+  width: 14,
+  height: 14,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  "aria-hidden": true,
+} as const;
+
 /** Fixar: uma janela com a coluna do lado em que o chat vai ficar. */
 function IconeFixar({ lado }: { lado: LadoDoChatFixo }) {
   return (
     <svg
-      width={13}
-      height={13}
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
+      {...PROPS_DO_ICONE_DO_CHAT}
       // À direita, o mesmo desenho espelhado.
       style={lado === "direita" ? { transform: "scaleX(-1)" } : undefined}
     >
-      <rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M9.5 4.5v15" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M5.8 9h1.7M5.8 12h1.7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <path d="M9.5 4.5v15" />
+      <path d="M5.8 9h1.7M5.8 12h1.7" />
     </svg>
   );
 }
@@ -264,9 +275,38 @@ function IconeFixar({ lado }: { lado: LadoDoChatFixo }) {
 /** Soltar embaixo: o chat volta a flutuar no pé do canvas (a janela com a barra embaixo). */
 function IconeSoltar() {
   return (
-    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M7.5 16h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    <svg {...PROPS_DO_ICONE_DO_CHAT}>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <path d="M3.5 14h17" />
+    </svg>
+  );
+}
+
+/** Limpar conversa: uma vassoura. */
+function IconeLimpar() {
+  return (
+    <svg {...PROPS_DO_ICONE_DO_CHAT}>
+      <path d="M18.5 3.5 13 10.5" />
+      <path d="M9.5 10.5h6l2 3.5-.8 6H8.3L7.5 14Z" />
+      <path d="M10.5 16.5v3M13.5 16.5v3" />
+    </svg>
+  );
+}
+
+/** Mover para o outro lado: duas setas em sentidos opostos. */
+function IconeMover() {
+  return (
+    <svg {...PROPS_DO_ICONE_DO_CHAT}>
+      <path d="M5 8h13l-3-3M19 16H6l3 3" />
+    </svg>
+  );
+}
+
+/** Ocultar o chat: o traço do minimizar das janelas. */
+function IconeOcultar() {
+  return (
+    <svg {...PROPS_DO_ICONE_DO_CHAT}>
+      <path d="M5 12h14" />
     </svg>
   );
 }
@@ -524,8 +564,9 @@ function assinaturaDaUltima(chat: EstadoDoChatNaTela): string {
  *
  * Com `fixo`, o mesmo chat vira uma coluna ao lado do canvas (`<aside>`, do
  * `lado` pedido): conversa em bolhas sempre à vista, campo embaixo e, no cabeçalho,
- * "soltar embaixo" (o chat flutua no pé do canvas) e "ocultar" (o mesmo botão do
- * flutuante: o chat vai para baixo já oculto, e "mostrar conversa" o reexibe ali).
+ * quatro botões de ícone iguais aos das janelas: limpar a conversa, mover para o outro
+ * lado (a preferência do lado), soltar embaixo (o chat flutua no pé do canvas) e,
+ * no canto direito, ocultar (o chat vai para baixo já oculto, e "mostrar conversa" o reexibe ali).
  * Com `aoMudarLargura`, a borda da coluna virada para o canvas ganha a alça
  * de largura.
  *
@@ -550,6 +591,7 @@ export function ChatRapido({
   largura = LARGURA_DO_CHAT_FIXO.padrao,
   aoMudarLargura,
 }: Props) {
+  const { mudarPreferencias } = usePreferenciasDaTela();
   const [texto, setTexto] = useState("");
   const [imagens, setImagens] = useState<ImagemAnexada[]>([]);
   const [erro, setErro] = useState<string | null>(null);
@@ -951,6 +993,9 @@ export function ChatRapido({
           "Pergunte ao Claude · / para comandos"
         : "Pergunte qualquer coisa ao Claude · / para comandos";
 
+  // O lado oposto ao atual: para onde o "mover" leva a coluna.
+  const outroLado: LadoDoChatFixo = lado === "esquerda" ? "direita" : "esquerda";
+
   // Fixo: uma coluna (aside) ao lado do canvas; flutuante: um bloco no painel do pé do canvas.
   const Raiz = fixo ? "aside" : "div";
 
@@ -1003,60 +1048,89 @@ export function ChatRapido({
             <span className="rotulo-tecnico">chat rápido</span>
             {respondendo && <span className="etiqueta etiqueta-ativa etiqueta-pulso">respondendo…</span>}
             <span className="flex-1" />
-            {!fixo && aoAlternarFixo !== undefined && (
-              <button
-                type="button"
-                className="botao-icone"
-                aria-label={`Fixar o chat à ${lado}`}
-                title={`Fixar o chat à ${lado}: uma coluna ao lado do canvas, sempre aberta`}
-                onClick={() => aoAlternarFixo(true)}
-              >
-                <IconeFixar lado={lado} />
-              </button>
-            )}
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost"
-              onClick={() => void limparConversa()}
-              disabled={respondendo || enviando || desconectado}
-              title={
-                respondendo
-                  ? "Cancele a resposta antes de limpar."
-                  : chat.alteracoesAutorizadas
-                    ? "Começa uma conversa nova (/clear) e desfaz a autorização de alterações"
-                    : "Começa uma conversa nova (/clear)"
-              }
-            >
-              limpar
-            </button>
             {fixo ? (
-              aoAlternarFixo !== undefined && (
-                <>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-ghost"
-                    aria-label="Soltar o chat embaixo"
-                    title="Soltar embaixo: o chat sai da coluna e passa a flutuar no centro de baixo do canvas, ainda aberto"
-                    onClick={() => aoAlternarFixo(false)}
-                  >
-                    <IconeSoltar />
-                    soltar embaixo
-                  </button>
-                  {/* Igual ao do chat inferior: oculta a conversa. Sem coluna para ocultar, o chat sai dela e fica embaixo, oculto. */}
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-ghost"
-                    onClick={() => aoAlternarFixo(false, true)}
-                    title="Ocultar a conversa: o chat sai da coluna e, ao mostrar de novo, volta embaixo"
-                  >
-                    ocultar
-                  </button>
-                </>
-              )
+              <span className="controles-do-chat" role="group" aria-label="Controles do chat">
+                <button
+                  type="button"
+                  className="botao-do-no"
+                  aria-label="Limpar conversa"
+                  title={
+                    respondendo
+                      ? "Cancele a resposta antes de limpar."
+                      : chat.alteracoesAutorizadas
+                        ? "Limpar conversa: começa uma nova (/clear) e desfaz a autorização de alterações"
+                        : "Limpar conversa: começa uma nova (/clear)"
+                  }
+                  disabled={respondendo || enviando || desconectado}
+                  onClick={() => void limparConversa()}
+                >
+                  <IconeLimpar />
+                </button>
+                <button
+                  type="button"
+                  className="botao-do-no"
+                  aria-label={`Mover o chat para a ${outroLado}`}
+                  title={`Mover o chat para a ${outroLado}`}
+                  onClick={() => mudarPreferencias({ ladoDoChatFixo: outroLado })}
+                >
+                  <IconeMover />
+                </button>
+                {aoAlternarFixo !== undefined && (
+                  <>
+                    <button
+                      type="button"
+                      className="botao-do-no"
+                      aria-label="Soltar embaixo"
+                      title="Soltar embaixo: o chat sai da coluna e passa a flutuar no centro de baixo do canvas, ainda aberto"
+                      onClick={() => aoAlternarFixo(false)}
+                    >
+                      <IconeSoltar />
+                    </button>
+                    {/* Igual ao minimizar das janelas, sempre no canto direito: o chat sai da coluna e fica embaixo, oculto. */}
+                    <button
+                      type="button"
+                      className="botao-do-no"
+                      aria-label="Ocultar o chat"
+                      title="Ocultar o chat: ele sai da coluna e, ao mostrar de novo, volta embaixo"
+                      onClick={() => aoAlternarFixo(false, true)}
+                    >
+                      <IconeOcultar />
+                    </button>
+                  </>
+                )}
+              </span>
             ) : (
-              <button type="button" className="btn btn-sm btn-ghost" onClick={ocultar} title="Ocultar a conversa (esc)">
-                ocultar
-              </button>
+              <>
+                {aoAlternarFixo !== undefined && (
+                  <button
+                    type="button"
+                    className="botao-do-no"
+                    aria-label={`Fixar o chat à ${lado}`}
+                    title={`Fixar o chat à ${lado}: uma coluna ao lado do canvas, sempre aberta`}
+                    onClick={() => aoAlternarFixo(true)}
+                  >
+                    <IconeFixar lado={lado} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => void limparConversa()}
+                  disabled={respondendo || enviando || desconectado}
+                  title={
+                    respondendo
+                      ? "Cancele a resposta antes de limpar."
+                      : chat.alteracoesAutorizadas
+                        ? "Começa uma conversa nova (/clear) e desfaz a autorização de alterações"
+                        : "Começa uma conversa nova (/clear)"
+                  }
+                >
+                  limpar
+                </button>
+                <button type="button" className="btn btn-sm btn-ghost" onClick={ocultar} title="Ocultar a conversa (esc)">
+                  ocultar
+                </button>
+              </>
             )}
           </header>
           <div
