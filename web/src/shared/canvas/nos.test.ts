@@ -598,6 +598,76 @@ describe("limparBixinhos", () => {
     expect(limparBixinhos(doisSubagentes, undefined, new Set(["s2", "s9"]))).toBeNull();
   });
 
+  describe("fechar um bixinho (o × do nó)", () => {
+    function falhou(subagenteId: string): EventoDeOrquestracao {
+      return {
+        tipo: "subagente_concluido",
+        turnoId: "t1",
+        subagenteId,
+        situacao: "falhou",
+        resumo: "erro ao rodar",
+        tokens: 1,
+        duracaoMs: 1,
+      };
+    }
+
+    function doisQueFalharamUmTrabalhando(): EstadoDaConversa {
+      const inicio = conversa([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "analise", configuracao },
+        { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "s1", descricao: "A", tarefa: "" },
+        { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "s2", descricao: "B", tarefa: "" },
+        { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "s3", descricao: "C", tarefa: "" },
+      ]);
+      return depois(depois(inicio, falhou("s1")), falhou("s2"));
+    }
+
+    it("tira só aquele Subagente e mantém os outros, inclusive o que também falhou", () => {
+      const estado = doisQueFalharamUmTrabalhando();
+      const limpos = limparBixinhos(estado, undefined, new Set(["s1"]));
+
+      expect(limpos).toEqual({ turnoId: "t1", subagentes: ["s1"] });
+      const nos = sincronizarBixinhos(
+        sincronizarBixinhos([terminal], new Map([["o1", estado]])),
+        new Map([["o1", estado]]),
+        new Map([["o1", limpos as BixinhosLimpos]]),
+      );
+      expect(idsDosBixinhos(nos)).toEqual([idDoBixinho("o1", "s2"), idDoBixinho("o1", "s3")]);
+    });
+
+    it("o fechado não volta ao reprocessar a conversa, com eventos novos nem com o canvas recarregado", () => {
+      const estado = doisQueFalharamUmTrabalhando();
+      const limpos = new Map([["o1", limparBixinhos(estado, undefined, new Set(["s1"])) as BixinhosLimpos]]);
+
+      const comEventoNovo = depois(estado, progressoDoS3());
+      for (const conversaAtual of [estado, comEventoNovo]) {
+        const nos = sincronizarBixinhos([terminal], new Map([["o1", conversaAtual]]), limpos);
+        expect(idsDosBixinhos(nos)).not.toContain(idDoBixinho("o1", "s1"));
+      }
+      // Fechar o segundo soma ao primeiro.
+      expect(limparBixinhos(comEventoNovo, limpos.get("o1"), new Set(["s2"]))).toEqual({
+        turnoId: "t1",
+        subagentes: ["s1", "s2"],
+      });
+    });
+
+    it("quem ainda executa não fecha", () => {
+      expect(limparBixinhos(doisQueFalharamUmTrabalhando(), undefined, new Set(["s3"]))).toBeNull();
+    });
+
+    function progressoDoS3(): EventoDeOrquestracao {
+      return {
+        tipo: "progresso_do_subagente",
+        turnoId: "t1",
+        subagenteId: "s3",
+        atividade: "lendo",
+        ultimaFerramenta: "Read",
+        tokens: 5,
+        ferramentasUsadas: 1,
+        duracaoMs: 10,
+      };
+    }
+  });
+
   it("não há o que limpar quando todos executam ou já foram limpos", () => {
     const soTrabalhando = conversa([
       { tipo: "turno_iniciado", turnoId: "t1", texto: "analise", configuracao },

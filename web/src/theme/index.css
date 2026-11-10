@@ -2022,6 +2022,30 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 
 .no-bixinho-selecionado .bixinho-sprite { filter: drop-shadow(0 0 10px color-mix(in srgb, var(--active) 80%, transparent)); }
 
+/* × para fechar o bixinho parado: aparece ao passar o mouse ou focar; quando falhou, fica sempre à vista
+ * (o erro só some se o usuário fechar). Fica no canto do desenho, abaixo do balão. */
+.fechar-do-bixinho {
+  position: absolute;
+  top: 36px;
+  right: 14px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-forte);
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s ease, color .15s ease, background-color .15s ease;
+}
+.no-bixinho:hover .fechar-do-bixinho,
+.fechar-do-bixinho:focus-visible { opacity: 1; }
+.no-bixinho-falhou .fechar-do-bixinho { opacity: 1; }
+.fechar-do-bixinho:hover { color: var(--error); background: var(--surface-3); }
+
 /* Balão de fala acima do bixinho: o que ele está fazendo agora. */
 .balao-do-bixinho {
   position: absolute;

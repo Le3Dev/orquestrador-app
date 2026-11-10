@@ -50,6 +50,7 @@ function renderizar(estado: EstadoDaConversa, limpos?: BixinhosLimpos) {
       fecharTerminal: vi.fn(),
       minimizarOuRestaurarTerminal: vi.fn(),
       limparBixinhos,
+      fecharBixinho: vi.fn(),
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),
       mudarEscalaDaLetra: vi.fn(),
