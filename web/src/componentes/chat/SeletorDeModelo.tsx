@@ -112,11 +112,22 @@ export function SeletorDeModelo({
         disabled={desabilitado || salvando}
         onClick={() => (aberto ? fechar() : setAberto(true))}
       >
-        <span className="font-titulo font-medium text-primary">{nomeDoModelo}</span>
-        <span className="text-secondary">{esforco}</span>
-        <span aria-hidden="true" className="text-muted">
-          ⌃
-        </span>
+        {/* Como no protótipo: o modelo em cinza, o esforço em destaque e a seta para baixo. */}
+        <span>{nomeDoModelo}</span>
+        <b>{esforco}</b>
+        <svg
+          width={14}
+          height={14}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="m7 10 5 5 5-5" />
+        </svg>
       </button>
 
       {aberto && (
