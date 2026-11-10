@@ -2,9 +2,11 @@ import type { PerguntaAoMotorDeChat } from "../../chat/MotorDeChat";
 import type { EsforcoDeRaciocinio } from "../../orquestracao/EsforcoDeRaciocinio";
 import {
   ambienteSemSessaoPai,
+  comVariaveisDeArtefatoOnline,
   caminhoParaRegraDePermissao,
   COMANDOS_DE_PUSH_FORCADO,
   type ConfiguracoesDaSessao,
+  ferramentasDeArtefatoOnline,
   ferramentasDoEsforco,
   liberadasComArtefatos,
   nivelDeEsforcoDoClaudeCode,
@@ -106,6 +108,10 @@ export interface ArquivosDoChat {
  * edição ou o comando sem autorização é negado (e vira o pedido de
  * autorização na tela), em vez de esperar por alguém no terminal.
  *
+ * Com a opção de artefatos online ligada, `Artifact`, `ArtifactCheck` e
+ * `ArtifactData` entram nas duas listas, com ou sem autorização: publicar é
+ * uma decisão do usuário ao ligar a opção.
+ *
  * Com esforço `ultracode`, o `Workflow` entra nas duas listas, com ou sem
  * autorização (`ferramentasDoEsforco`): ele só orquestra agentes, e os
  * agentes dele seguem as mesmas permissões da sessão.
@@ -120,10 +126,13 @@ export interface ArquivosDoChat {
  */
 export function montarArgumentosDoChat(pergunta: PerguntaAoMotorDeChat, arquivos: ArquivosDoChat): string[] {
   const esforco = nivelDeEsforcoDoClaudeCode(pergunta.esforco);
-  const doEsforco = ferramentasDoEsforco(pergunta.esforco);
+  const adicionais = [
+    ...ferramentasDoEsforco(pergunta.esforco),
+    ...ferramentasDeArtefatoOnline(pergunta.permitirArtefatosOnline),
+  ];
   const liberadas = [
     ...ferramentasLiberadasDoChat(pergunta.alteracoesAutorizadas, pergunta.pastaDeArtefatos),
-    ...doEsforco,
+    ...adicionais,
   ];
   return [
     "-p",
@@ -151,7 +160,7 @@ export function montarArgumentosDoChat(pergunta: PerguntaAoMotorDeChat, arquivos
     "dontAsk",
     "--tools",
     ...FERRAMENTAS_DO_CHAT,
-    ...doEsforco,
+    ...adicionais,
     "--allowedTools",
     ...liberadas,
     "--disallowedTools",
@@ -162,12 +171,17 @@ export function montarArgumentosDoChat(pergunta: PerguntaAoMotorDeChat, arquivos
 /**
  * Ambiente do processo do chat: sem as variáveis de uma sessão pai do Claude
  * Code e, com esforço escolhido, sem `CLAUDE_CODE_EFFORT_LEVEL`, que venceria
- * o `--effort`.
+ * o `--effort`. Com artefatos online ligados, acrescenta as variáveis que os
+ * habilitam em `claude -p` (`comVariaveisDeArtefatoOnline`).
  */
-export function montarAmbienteDoChat(base: NodeJS.ProcessEnv, esforco: EsforcoDeRaciocinio): NodeJS.ProcessEnv {
+export function montarAmbienteDoChat(
+  base: NodeJS.ProcessEnv,
+  esforco: EsforcoDeRaciocinio,
+  permitirArtefatosOnline = false,
+): NodeJS.ProcessEnv {
   const ambiente = ambienteSemSessaoPai(base);
   if (esforco !== "padrao") {
     delete ambiente[VARIAVEL_DE_ESFORCO];
   }
-  return ambiente;
+  return comVariaveisDeArtefatoOnline(ambiente, permitirArtefatosOnline);
 }

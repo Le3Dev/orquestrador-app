@@ -130,7 +130,7 @@ describe("rotas do chat", () => {
       sessaoId: "sessao-1",
       situacao: "ocioso",
       alteracoesAutorizadas: false,
-      preferencias: { modelo: "opus", esforco: "alto" },
+      preferencias: { modelo: "opus", esforco: "alto", permitirArtefatosOnline: false },
       mensagens: [],
       ultimaSequencia: 0,
       cota: null,
@@ -233,7 +233,7 @@ describe("rotas do chat", () => {
   it("PATCH /chat/preferencias altera e valida", async () => {
     const ok = await enviar("/chat/preferencias", "PATCH", { modelo: "fable" });
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ modelo: "fable", esforco: "alto" });
+    expect(await ok.json()).toEqual({ modelo: "fable", esforco: "alto", permitirArtefatosOnline: false });
 
     const modelo = await enviar("/chat/preferencias", "PATCH", { modelo: "gpt" });
     expect(modelo.status).toBe(400);
@@ -242,6 +242,26 @@ describe("rotas do chat", () => {
     const esforco = await enviar("/chat/preferencias", "PATCH", { esforco: "enorme" });
     expect(esforco.status).toBe(400);
     expect(await esforco.json()).toEqual({ erro: "Esforço inválido." });
+  });
+
+  it("PATCH /chat/preferencias liga e desliga os artefatos online, mantém o resto e recusa o que não é booleano", async () => {
+    const ligar = await enviar("/chat/preferencias", "PATCH", { permitirArtefatosOnline: true });
+    expect(ligar.status).toBe(200);
+    expect(await ligar.json()).toEqual({ modelo: "opus", esforco: "alto", permitirArtefatosOnline: true });
+
+    const outroCampo = await enviar("/chat/preferencias", "PATCH", { modelo: "fable" });
+    expect(await outroCampo.json()).toEqual({ modelo: "fable", esforco: "alto", permitirArtefatosOnline: true });
+
+    const desligar = await enviar("/chat/preferencias", "PATCH", { permitirArtefatosOnline: false });
+    expect(await desligar.json()).toEqual({ modelo: "fable", esforco: "alto", permitirArtefatosOnline: false });
+
+    for (const valor of ["sim", 1, null]) {
+      const invalido = await enviar("/chat/preferencias", "PATCH", { permitirArtefatosOnline: valor });
+      expect(invalido.status).toBe(400);
+      expect(await invalido.json()).toEqual({
+        erro: 'A opção "Publicar artefatos no claude.ai" deve ser verdadeira ou falsa.',
+      });
+    }
   });
 
   it("PATCH /chat/autorizacao autoriza e revoga, e o GET /chat mostra o campo", async () => {

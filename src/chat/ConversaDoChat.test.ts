@@ -333,14 +333,22 @@ describe("ConversaDoChat — origem da pergunta", () => {
 
 describe("PreferenciasDoChat", () => {
   it("nasce com opus e esforço alto", () => {
-    expect(PreferenciasDoChat.padrao().paraDados()).toEqual({ modelo: "opus", esforco: "alto" });
+    expect(PreferenciasDoChat.padrao().paraDados()).toEqual({
+      modelo: "opus",
+      esforco: "alto",
+      permitirArtefatosOnline: false,
+    });
   });
 
   it("com() cria outra e não altera a original", () => {
     const original = PreferenciasDoChat.padrao();
     const alterada = original.com({ modelo: "fable" });
 
-    expect(alterada.paraDados()).toEqual({ modelo: "fable", esforco: "alto" });
+    expect(alterada.paraDados()).toEqual({
+      modelo: "fable",
+      esforco: "alto",
+      permitirArtefatosOnline: false,
+    });
     expect(original.modelo).toBe("opus");
     expect(Object.isFrozen(original)).toBe(true);
   });
@@ -354,6 +362,19 @@ describe("PreferenciasDoChat", () => {
     expect(PreferenciasDoChat.padrao().com({ esforco: "ultracode" }).paraDados()).toEqual({
       modelo: "opus",
       esforco: "ultracode",
+      permitirArtefatosOnline: false,
     });
+  });
+
+  it("a opção de artefatos online nasce desligada, liga com com() e recusa o que não é booleano", () => {
+    expect(PreferenciasDoChat.padrao().permitirArtefatosOnline).toBe(false);
+    expect(PreferenciasDoChat.padrao().com({ permitirArtefatosOnline: true }).permitirArtefatosOnline).toBe(true);
+    expect(() => PreferenciasDoChat.de({ modelo: "opus", esforco: "alto", permitirArtefatosOnline: "sim" })).toThrow(
+      "A opção de artefatos online deve ser verdadeira ou falsa.",
+    );
+  });
+
+  it("dados gravados antes da opção (sem o campo) valem desligado", () => {
+    expect(PreferenciasDoChat.de({ modelo: "opus", esforco: "alto" }).permitirArtefatosOnline).toBe(false);
   });
 });

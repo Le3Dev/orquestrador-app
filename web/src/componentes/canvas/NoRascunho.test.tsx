@@ -143,8 +143,9 @@ describe("NoRascunho", () => {
     expect(screen.getByRole("radio", { name: /Automática/ })).toBeChecked();
     expect(screen.getByLabelText("Máximo")).toHaveValue(3);
     expect(screen.getByRole("switch", { name: "Commit e push por feature" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("switch", { name: "Publicar artefatos no claude.ai" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("textbox", { name: "Instruções" })).toBeInTheDocument();
-    expect(screen.getAllByRole("switch")).toHaveLength(1);
+    expect(screen.getAllByRole("switch")).toHaveLength(2);
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(screen.getByText("Escolha uma pasta para começar.")).toBeInTheDocument();
     expect(botaoDeComecar()).toBeDisabled();
@@ -315,9 +316,21 @@ describe("NoRascunho", () => {
       quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
       nivelDePermissao: "leitura",
       permitirCommitEPush: false,
+      permitirArtefatosOnline: false,
       instrucoesPersonalizadas: "Seja breve.",
     });
     await waitFor(() => expect(acoes.orquestradorCriado).toHaveBeenCalledWith("rascunho:1", criado));
+  });
+
+  it("o interruptor de artefatos online liga, aparece no resumo e vai no pedido de criação", async () => {
+    const criar = espiarCriacao();
+    await abrirComPasta();
+
+    fireEvent.click(screen.getByRole("switch", { name: "Publicar artefatos no claude.ai" }));
+
+    expect(screen.getByRole("switch", { name: "Publicar artefatos no claude.ai" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("/p/app · artefatos online · instruções gerais")).toBeInTheDocument();
+    expect(await criarEPegarPayload(criar)).toMatchObject({ permitirArtefatosOnline: true });
   });
 
   describe("aplicar perfil de instruções", () => {

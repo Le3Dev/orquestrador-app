@@ -79,7 +79,7 @@ export class MotorDeChatClaudeCodeCli implements MotorDeChat {
         {
           argumentos: montarArgumentosDoChat({ ...pergunta, pastaDeArtefatos }, arquivos),
           pasta: pergunta.pastaDaSessao,
-          ambiente: montarAmbienteDoChat(this.ambienteBase, pergunta.esforco),
+          ambiente: montarAmbienteDoChat(this.ambienteBase, pergunta.esforco, pergunta.permitirArtefatosOnline),
           entrada: linhaDeEntrada(pergunta.mensagem, imagens),
           dono: { orquestradorId: DONO_DOS_PROCESSOS_DO_CHAT, sessaoId: pergunta.sessaoId },
         },

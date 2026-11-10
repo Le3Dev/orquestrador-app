@@ -11,7 +11,12 @@ import {
   TAMANHO_MAXIMO_DAS_INSTRUCOES,
 } from "../shared/api/tipos";
 import { type EscalaDaLetra, OPCOES_DA_ESCALA_DA_LETRA } from "../shared/canvas/layout";
-import { AVISO_DO_ULTRACODE, ROTULOS_DAS_PERMISSOES } from "../shared/formatacao";
+import {
+  AJUDA_DOS_ARTEFATOS_ONLINE,
+  AVISO_DO_ULTRACODE,
+  ROTULO_DOS_ARTEFATOS_ONLINE,
+  ROTULOS_DAS_PERMISSOES,
+} from "../shared/formatacao";
 import {
   ajudaDaPredefinicao,
   useEsforcosHerdados,
@@ -291,8 +296,8 @@ export function CamposDaConfiguracao({
       <div className="linha-da-criacao">
         <Rotulo
           titulo="Opções"
-          dica="Cada feature pronta vira um commit com push."
-          explicacao="Ligado, cada feature ou correção pronta (testada, com lint e build ok) vira um commit próprio com push da branch em seguida, numa branch feature/, fix/, hotfix/ ou refactor/. PR e merge só quando você pedir. Precisa da permissão de rodar comandos. O Modo econômico troca modelos e esforço por outros que gastam menos cota e já vale, sem o Salvar; os campos continuam editáveis."
+          dica="Commit e push por feature; publicar artefatos online."
+          explicacao={`Commit e push por feature: ligado, cada feature ou correção pronta (testada, com lint e build ok) vira um commit próprio com push da branch em seguida, numa branch feature/, fix/, hotfix/ ou refactor/. PR e merge só quando você pedir. Precisa da permissão de rodar comandos. ${ROTULO_DOS_ARTEFATOS_ONLINE}: ${AJUDA_DOS_ARTEFATOS_ONLINE} O Modo econômico troca modelos e esforço por outros que gastam menos cota e já vale, sem o Salvar; os campos continuam editáveis.`}
           alinharAoTopo
         />
         <div className="flex min-w-0 flex-col gap-1">
@@ -306,6 +311,17 @@ export function CamposDaConfiguracao({
             >
               <span className={`interruptor-trilho ${commitSemComandos ? "interruptor-sem-efeito" : ""}`} aria-hidden="true" />
               Commit e push por feature
+            </button>
+            <button
+              type="button"
+              role="switch"
+              className="interruptor"
+              title={AJUDA_DOS_ARTEFATOS_ONLINE}
+              aria-checked={valor.permitirArtefatosOnline}
+              onClick={() => mudar("permitirArtefatosOnline", !valor.permitirArtefatosOnline)}
+            >
+              <span className="interruptor-trilho" aria-hidden="true" />
+              {ROTULO_DOS_ARTEFATOS_ONLINE}
             </button>
             {economico !== undefined && (
               <button

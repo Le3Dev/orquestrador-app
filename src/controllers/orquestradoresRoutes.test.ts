@@ -364,6 +364,48 @@ describe("rotas de orquestradores — modo de planejamento", () => {
     });
   });
 
+  describe('opção "Publicar artefatos no claude.ai"', () => {
+    async function alterarConfiguracao(corpo: unknown): Promise<Response> {
+      return fetch(`${base}/orquestradores/${orquestrador.id}/configuracao`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(corpo),
+      });
+    }
+
+    it("nasce desligada e aparece nos dados do orquestrador", async () => {
+      const resposta = await fetch(`${base}/orquestradores/${orquestrador.id}`);
+
+      expect(((await resposta.json()) as { configuracao: unknown }).configuracao).toMatchObject({
+        permitirArtefatosOnline: false,
+      });
+    });
+
+    it("o PATCH liga a opção e um PATCH sem ela a mantém", async () => {
+      const ligar = await alterarConfiguracao({ permitirArtefatosOnline: true });
+      const outroCampo = await alterarConfiguracao({ nivelDePermissao: "edicao" });
+
+      expect(ligar.status).toBe(200);
+      expect(((await ligar.json()) as { configuracao: unknown }).configuracao).toMatchObject({
+        permitirArtefatosOnline: true,
+      });
+      expect(((await outroCampo.json()) as { configuracao: unknown }).configuracao).toMatchObject({
+        nivelDePermissao: "edicao",
+        permitirArtefatosOnline: true,
+      });
+    });
+
+    it.each([["sim"], [1], [null]])("recusa %j com 400 e mensagem clara", async (valor) => {
+      const resposta = await alterarConfiguracao({ permitirArtefatosOnline: valor });
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({
+        erro: 'A opção "Publicar artefatos no claude.ai" deve ser verdadeira ou falsa.',
+      });
+      expect(orquestrador.configuracao.permitirArtefatosOnline).toBe(false);
+    });
+  });
+
   describe("esforço de raciocínio", () => {
     async function alterarConfiguracao(corpo: unknown): Promise<Response> {
       return fetch(`${base}/orquestradores/${orquestrador.id}/configuracao`, {

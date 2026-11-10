@@ -22,6 +22,7 @@ function turno(ultimaAtividadeEm: string, subagentes: SituacaoDoSubagente[] = []
       quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
       nivelDePermissao: "leitura",
       permitirCommitEPush: false,
+      permitirArtefatosOnline: false,
       instrucoesPersonalizadas: "",
     },
     modo: "execucao",

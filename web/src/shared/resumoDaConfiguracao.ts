@@ -9,6 +9,7 @@ export function modeloComEsforco(modelo: ModeloClaude, esforco: EsforcoDeRacioci
 /**
  * A configuração numa frase, para o rodapé da criação e da ⚙ do terminal.
  * Ex.: "Somente leitura, Opus (esforço automático) com até 3 subagentes Opus."
+ * Com a publicação de artefatos online ligada, termina com " Artefatos online ligados."
  */
 export function resumoDaConfiguracao(configuracao: DadosDaConfiguracao): string {
   const { quantidadeDeSubagentes: quantidade } = configuracao;
@@ -21,6 +22,7 @@ export function resumoDaConfiguracao(configuracao: DadosDaConfiguracao): string 
   return (
     `${ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome}, ` +
     `${modeloComEsforco(configuracao.modeloDoOrquestrador, configuracao.esforcoDoOrquestrador)} ` +
-    `com ${contagem} ${subagentes} ${modeloDosSubagentes}.`
+    `com ${contagem} ${subagentes} ${modeloDosSubagentes}.` +
+    (configuracao.permitirArtefatosOnline ? " Artefatos online ligados." : "")
   );
 }

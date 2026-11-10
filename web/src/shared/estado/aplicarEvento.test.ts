@@ -16,6 +16,7 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
+  permitirArtefatosOnline: false,
   instrucoesPersonalizadas: "",
 };
 
@@ -241,6 +242,7 @@ describe("aplicarEvento", () => {
     expect(antigo?.configuracao).toEqual({
       ...configuracaoAntiga,
       permitirCommitEPush: false,
+      permitirArtefatosOnline: false,
       esforcoDoOrquestrador: "padrao",
       esforcoDosSubagentes: "padrao",
       instrucoesPersonalizadas: "",

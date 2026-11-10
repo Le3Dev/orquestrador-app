@@ -17,6 +17,7 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "fixa", limite: 2 },
   nivelDePermissao: "edicao_e_comandos",
   permitirCommitEPush: false,
+  permitirArtefatosOnline: false,
   instrucoesPersonalizadas: "",
 };
 
@@ -54,6 +55,9 @@ describe("formatacao", () => {
       "Esforço dos subagentes: Médio",
       "Quantidade de subagentes: automática, ≤1 agente",
       "Commit e push por feature: desligado",
+    ]);
+    expect(descreverAlteracoesDaConfiguracao({ permitirArtefatosOnline: true })).toEqual([
+      "Artefatos online no claude.ai: ligado",
     ]);
     expect(descreverAlteracoesDaConfiguracao({})).toEqual([]);
   });
@@ -106,6 +110,13 @@ describe("formatacao", () => {
   it("acrescenta o commit e push à descrição só quando liberados", () => {
     expect(descreverConfiguracao({ ...configuracao, permitirCommitEPush: true })).toBe(
       "Opus → Sonnet · 2 subagentes · Editar e rodar comandos · commit/push por feature",
+    );
+  });
+
+  it("acrescenta os artefatos online à descrição só quando ligados", () => {
+    expect(descreverConfiguracao(configuracao)).not.toContain("artefatos online");
+    expect(descreverConfiguracao({ ...configuracao, permitirArtefatosOnline: true })).toBe(
+      "Opus → Sonnet · 2 subagentes · Editar e rodar comandos · artefatos online",
     );
   });
 

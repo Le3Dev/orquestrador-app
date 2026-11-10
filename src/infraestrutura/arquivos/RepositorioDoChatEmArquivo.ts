@@ -208,8 +208,12 @@ export class RepositorioDoChatEmArquivo implements RepositorioDoChat {
     }
 
     const preferencias = await this.lerArquivo(ARQUIVO_DAS_PREFERENCIAS, (conteudo) => {
-      const dados = JSON.parse(conteudo) as { modelo?: unknown; esforco?: unknown };
-      return PreferenciasDoChat.de({ modelo: dados.modelo, esforco: dados.esforco });
+      const dados = JSON.parse(conteudo) as { modelo?: unknown; esforco?: unknown; permitirArtefatosOnline?: unknown };
+      return PreferenciasDoChat.de({
+        modelo: dados.modelo,
+        esforco: dados.esforco,
+        permitirArtefatosOnline: dados.permitirArtefatosOnline,
+      });
     });
     if (preferencias !== null) {
       this.preferenciasAtuais = preferencias;

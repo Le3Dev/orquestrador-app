@@ -184,6 +184,8 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
         retomadaPendente: null,
         configuracao: {
           permitirCommitEPush: false,
+          // Gravado antes da opção de artefatos online: desligada.
+          permitirArtefatosOnline: false,
           esforcoDoOrquestrador: "padrao",
           esforcoDosSubagentes: "padrao",
           instrucoesPersonalizadas: "",
@@ -201,6 +203,21 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
       expect(dados).not.toHaveProperty("campoQueNaoExisteMais");
       expect(dados?.configuracao).not.toHaveProperty("proporPlanoEmPedidosGrandes");
       expect(existsSync(path.join(pastaDo("antigo"), "orquestrador.ilegivel.json"))).toBe(false);
+    });
+
+    it("preserva a opção de artefatos online ligada ao reabrir", async () => {
+      const antigo = arquivoAntigo();
+      await gravarArquivo(
+        "antigo",
+        JSON.stringify({
+          ...antigo,
+          configuracao: { ...(antigo.configuracao as object), permitirArtefatosOnline: true },
+        }),
+      );
+
+      const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+
+      expect(repositorio.buscarPorId("antigo")?.paraDados().configuracao.permitirArtefatosOnline).toBe(true);
     });
 
     it("reabre a retomada automática pendente gravada antes do reinício", async () => {
