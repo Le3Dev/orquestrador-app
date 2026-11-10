@@ -79,7 +79,6 @@ import {
 } from "../Icones";
 import { BotaoDeAlteracoes } from "./BotaoDeAlteracoes";
 import { BotaoDeArquivos } from "./BotaoDeArquivos";
-import { BotaoDeLimparBixinhos } from "./BotaoDeLimparBixinhos";
 import type { AcoesDoPlano } from "./CartaoDoPlano";
 import { ControlesDoNo } from "./ControlesDoNo";
 import { FaixaDeServidores } from "./FaixaDeServidores";
@@ -1465,25 +1464,8 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
     });
   }
   const chipsDaDireita: ItemDaBarra[] = [];
-  if (orquestrador.instrucoesAtivas !== null) {
-    chipsDaDireita.push({
-      id: "instrucoes",
-      elemento: (
-        <span
-          className="chip chip-instrucoes min-w-0 overflow-hidden"
-          title={
-            orquestrador.instrucoesAtivas === "orquestrador"
-              ? "Instruções personalizadas deste orquestrador ativas (na engrenagem, para ver ou editar)"
-              : "Instruções gerais ativas (botão Instruções gerais, na barra do canvas)"
-          }
-        >
-          <span className="min-w-0 truncate">
-            {orquestrador.instrucoesAtivas === "orquestrador" ? "instruções" : "instruções gerais"}
-          </span>
-        </span>
-      ),
-    });
-  }
+  // As instruções (do orquestrador e as gerais) não têm chip na barra: ficam na
+  // engrenagem desta janela e em Configurações, aba Padrões.
   if (servidor.conectado && conexoes.get(orquestradorId) === "reconectando") {
     chipsDaDireita.push({
       id: "reconectando",
@@ -1592,7 +1574,6 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
         {foraDaBarra.length > 0 && <MaisDaBarra itens={foraDaBarra} />}
         {/* Os controles nunca encolhem nem saem da barra: quem cede espaço são os chips. */}
         <div ref={controlesDaBarra} className="controles-da-barra">
-          <BotaoDeLimparBixinhos orquestradorId={orquestradorId} />
           <BotaoDeAlteracoes orquestradorId={orquestradorId} />
           <BotaoDeArquivos orquestradorId={orquestradorId} nomeDoOrquestrador={nome} />
           {acoesDosShells !== null && (
