@@ -50,6 +50,7 @@ import { NoShell } from "../componentes/canvas/NoShell";
 import { NoTerminal } from "../componentes/canvas/NoTerminal";
 import { type AbaDasConfiguracoes, ConfiguracoesDoApp } from "../componentes/canvas/ConfiguracoesDoApp";
 import {
+  FaixaDeArrasto,
   IlhaDaDireita,
   IlhaDeFerramentas,
   IlhaDoNome,
@@ -2025,6 +2026,8 @@ function Canvas() {
       <ProvedorDasNotas valor={notas.valor}>
         <ProvedorDosArtefatos valor={valorDosArtefatos}>
           <ProvedorDosShells valor={valorDosShells}>
+            {/* App desktop: faixa invisível que arrasta a janela; antes de tudo no DOM para o no-drag dos demais recortá-la. */}
+            {desktop && <FaixaDeArrasto />}
             <div
               className={`flex h-screen w-screen flex-col ${servidor.conectado ? "" : "canvas-desconectado"} ${movimento.movendo ? "canvas-movendo" : ""} ${redimensionando ? "canvas-redimensionando" : ""} ${modoInvisivel ? "canvas-modo-invisivel" : ""}`}
             >

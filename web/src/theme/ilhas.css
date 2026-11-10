@@ -54,6 +54,54 @@
  * contador (tem balão), controles da janela e o menu Novo (com o submenu) não arrastam e recebem o clique. */
 .ilha-arrasta { -webkit-app-region: drag; user-select: none; }
 .ilha-arrasta :is(button, .no-drag, .controles-da-janela, .menu-novo, .submenu-novo) { -webkit-app-region: no-drag; }
+/* Faixa invisível no topo da janela (só no desktop; montada antes de tudo no DOM). A região de arraste
+ * vale por ordem do DOM e não por z-index: o `no-drag` de quem vem depois a recorta, mesmo sem cobri-la.
+ * Fixa, sem fundo, borda nem sombra; fica por baixo do canvas e das ilhas (sem z-index, vem antes no DOM). */
+.faixa-de-arrasto {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  -webkit-app-region: drag;
+}
+/* No modo invisível a janela deixa os cliques passarem para o que está atrás: a faixa não captura nada. */
+html.modo-invisivel .faixa-de-arrasto { display: none; }
+/* O que cai na altura da faixa e precisa de clique: janelas do canvas, painéis, chat, ferramentas,
+ * aviso de conexão, Configurações, paleta, menus e popovers (inclusive os portados para o <body>). */
+:is(
+  .react-flow__node,
+  .react-flow__panel,
+  .react-flow__controls,
+  .react-flow__minimap,
+  .chat-rapido,
+  .ilha-de-ferramentas,
+  .aviso-de-conexao-das-ilhas,
+  .camada-das-configuracoes *,
+  [data-testid="fundo-da-paleta"],
+  [data-testid="fundo-da-paleta"] *,
+  [role="menu"],
+  [role="menu"] *,
+  [role="dialog"],
+  [role="dialog"] *,
+  [role="listbox"],
+  [role="tooltip"],
+  .dica-balao,
+  .popover-do-uso,
+  .menu-da-barra-do-terminal,
+  .menu-da-previa,
+  .menu-do-seletor,
+  .submenu-do-seletor,
+  .menu-do-novo,
+  .menu-de-modelo-lista,
+  .cartao-da-atualizacao,
+  .no-drag
+) { -webkit-app-region: no-drag; }
+/* Os que vão para o <body> (portais) não ficam dentro de nenhum desses contêineres. */
+body > :not(#root) * { -webkit-app-region: no-drag; }
 /* Mac desktop: as bolinhas nativas (x 16, 52 de largura, centro em y 40) ficam à esquerda da ilha do nome. */
 .coluna-da-ilha-esquerda-mac { left: 84px; max-width: calc(100% - 100px); }
 .ilha-do-nome { position: relative; padding: 6px 6px 6px 12px; flex-shrink: 0; }

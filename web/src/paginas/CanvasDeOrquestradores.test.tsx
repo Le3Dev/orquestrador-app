@@ -1361,6 +1361,39 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     expect(document.querySelector(".painel-do-chat")).toBeNull();
   });
 
+  it("no desktop há uma faixa invisível de 36 px que arrasta a janela; no navegador ela não existe", async () => {
+    janelaComPonte.electron = {
+      desktop: true,
+      janela: {
+        minimizar: vi.fn(),
+        maximizar: vi.fn(),
+        fechar: vi.fn(),
+        estaMaximizada: vi.fn().mockResolvedValue(false),
+        aoMudarMaximizada: vi.fn(() => () => undefined),
+      },
+    };
+    const { unmount } = render(<CanvasDeOrquestradores />);
+    await screen.findByTestId("ilha-do-nome");
+    const faixa = screen.getByTestId("faixa-de-arrasto");
+    expect(faixa).toHaveClass("faixa-de-arrasto");
+    // Vem antes de tudo no DOM: o no-drag das ilhas, janelas e menus a recorta.
+    expect(faixa.compareDocumentPosition(screen.getByTestId("ilha-do-nome")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Invisível, de 36 px e arrastável (o CSS é lido do arquivo, o jsdom não o aplica).
+    const css = readFileSync(resolve(__dirname, "../theme/ilhas.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const regra = /\.faixa-de-arrasto\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(regra).toMatch(/height:\s*36px/);
+    expect(regra).toMatch(/-webkit-app-region:\s*drag/);
+    expect(regra).toMatch(/background:\s*transparent/);
+    expect(regra).toMatch(/border:\s*0/);
+    expect(regra).toMatch(/box-shadow:\s*none/);
+    unmount();
+
+    delete janelaComPonte.electron;
+    render(<CanvasDeOrquestradores />);
+    await screen.findByTestId("ilha-do-nome");
+    expect(screen.queryByTestId("faixa-de-arrasto")).not.toBeInTheDocument();
+  });
+
   it("o fundo opaco da tela fica no #root, nunca no html nem no body (no macOS ele prende na janela)", () => {
     const css = readFileSync(resolve(__dirname, "../theme/index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
     const regras = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, seletores = "", corpo = ""]) => ({

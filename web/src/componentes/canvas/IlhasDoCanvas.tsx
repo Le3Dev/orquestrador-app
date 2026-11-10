@@ -26,6 +26,16 @@ export const DICA_DO_ORGANIZAR = "Organizar: terminais lado a lado; notas e arte
 export const DICA_DO_DESENHAR = "Desenhar: caneta, marca-texto, formas e texto por cima do canvas";
 
 /**
+ * App desktop: a faixa invisível de 36 px no topo da janela, de ponta a ponta, que a arrasta (e, com
+ * duplo clique, maximiza ou restaura, como a barra nativa). Sem fundo, borda nem sombra: o canvas
+ * aparece por baixo. Só existe no Electron; no navegador não é montada. Tem de vir ANTES, no DOM, de
+ * tudo o que precisa receber clique, porque o `no-drag` de quem vem depois é o que a recorta.
+ */
+export function FaixaDeArrasto() {
+  return <div className="faixa-de-arrasto" data-testid="faixa-de-arrasto" aria-hidden="true" />;
+}
+
+/**
  * Ilha do canto superior esquerdo: o ícone e o nome do app, um divisor e o
  * botão `+ Novo` com o menu (ver `MenuNovo`). No app desktop o fundo dela
  * arrasta a janela (`ilha-arrasta`); o botão, o menu e o submenu são `no-drag`.
