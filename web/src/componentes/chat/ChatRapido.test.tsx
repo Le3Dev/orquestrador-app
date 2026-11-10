@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { api } from "../../shared/api/cliente";
 import type { MensagemDoChat } from "../../shared/api/tipos";
@@ -9,6 +9,7 @@ import {
   type EstadoDoChatNaTela,
   type MensagemDoChatNaTela,
 } from "../../shared/estado/aplicarEventoDoChat";
+import { CHAVE_DAS_PREFERENCIAS_DA_TELA } from "../../shared/hooks/usePreferenciasDaTela";
 import { ChatRapido, TIPO_DA_RESPOSTA_DO_CHAT } from "./ChatRapido";
 
 /** O ditado sem microfone nem Whisper: o clique alterna a gravação e o teste entrega o texto transcrito. */
@@ -1295,6 +1296,9 @@ describe("ChatRapido", () => {
   });
 
   describe("fixo à esquerda", () => {
+    beforeEach(() => localStorage.removeItem(CHAVE_DAS_PREFERENCIAS_DA_TELA));
+    afterEach(() => localStorage.removeItem(CHAVE_DAS_PREFERENCIAS_DA_TELA));
+
     const CONVERSA: EstadoDoChatNaTela = {
       ...OCIOSO,
       mensagens: [
@@ -1309,7 +1313,7 @@ describe("ChatRapido", () => {
       ],
     };
 
-    function renderizarFixo(chat: EstadoDoChatNaTela = CONVERSA) {
+    function renderizarFixo(chat: EstadoDoChatNaTela = CONVERSA, lado: "esquerda" | "direita" = "esquerda") {
       const aoAlternarFixo = vi.fn();
       const props = {
         desconectado: false,
@@ -1320,7 +1324,7 @@ describe("ChatRapido", () => {
         aoAtualizarOrquestradores: vi.fn().mockResolvedValue(undefined),
         orquestradores: [],
       };
-      render(<ChatRapido chat={chat} {...props} fixo aoAlternarFixo={aoAlternarFixo} />);
+      render(<ChatRapido chat={chat} {...props} fixo lado={lado} aoAlternarFixo={aoAlternarFixo} />);
       return { aoAlternarFixo };
     }
 
@@ -1339,7 +1343,7 @@ describe("ChatRapido", () => {
       expect(screen.getByTestId("composer-do-chat")).toHaveClass("composer-expandido");
       expect(screen.getByRole("button", { name: "Anexar imagens" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /Modelo:/ })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "limpar" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Limpar conversa" })).toBeInTheDocument();
     });
 
     it("sem mensagens, a conversa continua à vista, com o convite", () => {
@@ -1356,23 +1360,107 @@ describe("ChatRapido", () => {
       fireEvent.keyDown(screen.getByRole("textbox", { name: "Pergunta para o Claude" }), { key: "Escape" });
       expect(screen.getByRole("region", { name: "Conversa com o Claude" })).toBeVisible();
 
-      const soltar = screen.getByRole("button", { name: "Soltar o chat embaixo" });
-      // O rótulo e a dica dizem para onde o chat vai.
-      expect(soltar).toHaveTextContent("soltar embaixo");
+      const soltar = screen.getByRole("button", { name: "Soltar embaixo" });
+      // A dica diz para onde o chat vai; o botão é só o ícone.
+      expect(soltar).toHaveTextContent("");
       expect(soltar).toHaveAttribute("title", expect.stringContaining("centro de baixo do canvas"));
       fireEvent.click(soltar);
       expect(aoAlternarFixo).toHaveBeenCalledWith(false);
     });
 
-    it("tem o mesmo botão ocultar do chat inferior, depois do soltar: sai da coluna e pede o chat oculto embaixo", () => {
-      const { aoAlternarFixo } = renderizarFixo();
+    it.each(["esquerda", "direita"] as const)(
+      "%s: quatro botões de ícone no cabeçalho, na ordem limpar, mover, soltar e ocultar (o ocultar no canto direito)",
+      (lado) => {
+        renderizarFixo(CONVERSA, lado);
 
-      const cabecalho = screen.getByRole("region", { name: "Conversa com o Claude" }).querySelector("header")!;
-      const botoes = within(cabecalho).getAllByRole("button");
-      expect(botoes.map((botao) => botao.textContent?.trim())).toEqual(["limpar", "soltar embaixo", "ocultar"]);
+        const cabecalho = screen.getByRole("region", { name: "Conversa com o Claude" }).querySelector("header")!;
+        const botoes = within(cabecalho).getAllByRole("button");
+        expect(botoes.map((botao) => botao.getAttribute("aria-label"))).toEqual([
+          "Limpar conversa",
+          `Mover o chat para a ${lado === "esquerda" ? "direita" : "esquerda"}`,
+          "Soltar embaixo",
+          "Ocultar o chat",
+        ]);
+        for (const botao of botoes) {
+          // No padrão dos botões das janelas, só ícone, com dica.
+          expect(botao).toHaveClass("botao-do-no");
+          expect(botao).toHaveTextContent("");
+          expect(botao.querySelector("svg")).not.toBeNull();
+          expect(botao).toHaveAttribute("title");
+        }
+        expect(botoes.at(-1)).toHaveAttribute("aria-label", "Ocultar o chat");
+      },
+    );
 
-      fireEvent.click(within(cabecalho).getByRole("button", { name: "ocultar" }));
+    it.each(["esquerda", "direita"] as const)("%s: ocultar sai da coluna e pede o chat oculto embaixo", (lado) => {
+      const { aoAlternarFixo } = renderizarFixo(CONVERSA, lado);
+
+      fireEvent.click(screen.getByRole("button", { name: "Ocultar o chat" }));
+      expect(aoAlternarFixo).toHaveBeenCalledTimes(1);
       expect(aoAlternarFixo).toHaveBeenCalledWith(false, true);
+    });
+
+    it.each(["esquerda", "direita"] as const)("%s: soltar embaixo chama aoAlternarFixo(false) sem ocultar", (lado) => {
+      const { aoAlternarFixo } = renderizarFixo(CONVERSA, lado);
+
+      fireEvent.click(screen.getByRole("button", { name: "Soltar embaixo" }));
+      expect(aoAlternarFixo).toHaveBeenCalledTimes(1);
+      expect(aoAlternarFixo).toHaveBeenCalledWith(false);
+    });
+
+    it.each(["esquerda", "direita"] as const)("%s: limpar conversa pede ao servidor que limpe o chat", async (lado) => {
+      const limpar = vi.spyOn(api, "limparChat").mockResolvedValue(null);
+      renderizarFixo(CONVERSA, lado);
+
+      fireEvent.click(screen.getByRole("button", { name: "Limpar conversa" }));
+      await waitFor(() => expect(limpar).toHaveBeenCalledTimes(1));
+    });
+
+    it("limpar conversa fica desabilitado enquanto o Claude responde, com a dica do motivo", () => {
+      const limpar = vi.spyOn(api, "limparChat").mockResolvedValue(null);
+      renderizarFixo(RESPONDENDO);
+
+      const botao = screen.getByRole("button", { name: "Limpar conversa" });
+      expect(botao).toBeDisabled();
+      expect(botao).toHaveAttribute("title", "Cancele a resposta antes de limpar.");
+      fireEvent.click(botao);
+      expect(limpar).not.toHaveBeenCalled();
+    });
+
+    it("mover para o outro lado troca a preferência do lado, nos dois sentidos, sem chamar aoAlternarFixo", () => {
+      const esquerda = renderizarFixo(CONVERSA, "esquerda");
+      fireEvent.click(screen.getByRole("button", { name: "Mover o chat para a direita" }));
+      expect(JSON.parse(localStorage.getItem(CHAVE_DAS_PREFERENCIAS_DA_TELA) ?? "{}")).toMatchObject({
+        ladoDoChatFixo: "direita",
+      });
+      expect(esquerda.aoAlternarFixo).not.toHaveBeenCalled();
+      cleanup();
+
+      renderizarFixo(CONVERSA, "direita");
+      fireEvent.click(screen.getByRole("button", { name: "Mover o chat para a esquerda" }));
+      expect(JSON.parse(localStorage.getItem(CHAVE_DAS_PREFERENCIAS_DA_TELA) ?? "{}")).toMatchObject({
+        ladoDoChatFixo: "esquerda",
+      });
+    });
+
+    it("sem aoAlternarFixo, a coluna só tem limpar e mover (sem soltar nem ocultar)", () => {
+      render(
+        <ChatRapido
+          chat={CONVERSA}
+          desconectado={false}
+          erroAoCarregar={null}
+          aoMudarPreferencias={vi.fn()}
+          aoAbrirTerminal={vi.fn()}
+          temVagaPara={vi.fn().mockReturnValue(true)}
+          aoAtualizarOrquestradores={vi.fn().mockResolvedValue(undefined)}
+          orquestradores={[]}
+          fixo
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: "Limpar conversa" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Soltar embaixo" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Ocultar o chat" })).not.toBeInTheDocument();
     });
 
     it("o chat inferior montado com `comecaOculto` (o ocultar da coluna) mostra só o \"mostrar conversa\", que o reexibe embaixo", () => {
@@ -1573,7 +1661,13 @@ describe("ChatRapido", () => {
 
       expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "ocultar" })).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Fixar o chat à esquerda" }));
+      expect(screen.queryByRole("button", { name: "Soltar embaixo" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Mover o chat para a direita" })).not.toBeInTheDocument();
+      const fixar = screen.getByRole("button", { name: "Fixar o chat à esquerda" });
+      // O mesmo padrão de ícone dos botões das janelas.
+      expect(fixar).toHaveClass("botao-do-no");
+      expect(fixar).toHaveTextContent("");
+      fireEvent.click(fixar);
       expect(aoAlternarFixo).toHaveBeenCalledWith(true);
     });
 
