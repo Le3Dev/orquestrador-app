@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 
 import { api } from "../../shared/api/cliente";
-import type { DadosDasPreferencias } from "../../shared/api/tipos";
+import type { DadosDasPreferencias, JanelaDaCota, LeituraDeMemoria } from "../../shared/api/tipos";
 import type { AjustesDoAplicativo } from "../../shared/hooks/useAjustesDoAplicativo";
 import { esquecerAutorrecuperacao } from "../../shared/hooks/useAutorrecuperacao";
 import { CHAVE_DAS_PREFERENCIAS_DA_TELA, usePreferenciasDaTela } from "../../shared/hooks/usePreferenciasDaTela";
@@ -27,9 +27,18 @@ interface OpcoesDoRender {
   aberto?: boolean;
   abaInicial?: AbaDasConfiguracoes;
   pedidosEmAndamento?: number;
+  memoria?: LeituraDeMemoria | null;
+  cota?: JanelaDaCota[] | null;
 }
 
-function renderizar({ ajustes = ajustesFalsos(), aberto = true, abaInicial, pedidosEmAndamento }: OpcoesDoRender = {}) {
+function renderizar({
+  ajustes = ajustesFalsos(),
+  aberto = true,
+  abaInicial,
+  pedidosEmAndamento,
+  memoria,
+  cota,
+}: OpcoesDoRender = {}) {
   const aoFechar = vi.fn();
   const aoSalvarInstrucoes = vi.fn();
   const elemento = (abertoAgora: boolean) => (
@@ -41,6 +50,8 @@ function renderizar({ ajustes = ajustesFalsos(), aberto = true, abaInicial, pedi
         aoFechar={aoFechar}
         abaInicial={abaInicial}
         pedidosEmAndamento={pedidosEmAndamento}
+        memoria={memoria}
+        cota={cota}
         aoSalvarInstrucoes={aoSalvarInstrucoes}
         sistema={<div data-testid="status-do-sistema">Memória tranquila</div>}
       />
@@ -81,7 +92,7 @@ describe("ConfiguracoesDoApp", () => {
       expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
     });
 
-    it("aberto: painel posicionado à direita, abaixo da ilha, e quatro abas (sem Conta, que não tem dado real)", async () => {
+    it("aberto: painel posicionado à direita, abaixo da ilha, e cinco abas", async () => {
       renderizar();
       await esperar();
 
@@ -89,8 +100,7 @@ describe("ConfiguracoesDoApp", () => {
       expect(painel).toHaveClass("configuracoes-do-app");
       expect(painel).toHaveStyle({ top: "72px" });
       const abas = within(screen.getByRole("tablist", { name: "Seções de Configurações" })).getAllByRole("tab");
-      expect(abas.map((item) => item.textContent)).toEqual(["Padrões", "Sistema", "Atualização", "Aparência"]);
-      expect(screen.queryByRole("tab", { name: "Conta" })).not.toBeInTheDocument();
+      expect(abas.map((item) => item.textContent)).toEqual(["Padrões", "Sistema", "Conta", "Atualização", "Aparência"]);
       expect(aba("Padrões")).toHaveAttribute("aria-selected", "true");
       expect(aba("Padrões")).toHaveAttribute("tabindex", "0");
       expect(aba("Sistema")).toHaveAttribute("tabindex", "-1");
@@ -102,7 +112,7 @@ describe("ConfiguracoesDoApp", () => {
       expect(screen.getByRole("region", { name: "Configurações" })).toHaveStyle({ top: "180px" });
     });
 
-    it("abaInicial escolhe a aba; Conta (sem dado) e valor desconhecido caem em Padrões", async () => {
+    it("abaInicial escolhe a aba", async () => {
       const primeira = renderizar({ abaInicial: "aparencia" });
       expect(aba("Aparência")).toHaveAttribute("aria-selected", "true");
       expect(screen.getByRole("tabpanel", { name: "Aparência" })).toBeInTheDocument();
@@ -111,8 +121,15 @@ describe("ConfiguracoesDoApp", () => {
       await esperar();
     });
 
-    it("abaInicial 'conta' vale Padrões", async () => {
+    it("abaInicial 'conta' abre a aba Conta", async () => {
       renderizar({ abaInicial: "conta" });
+      await esperar();
+      expect(aba("Conta")).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tabpanel", { name: "Conta" })).toBeInTheDocument();
+    });
+
+    it("abaInicial desconhecida cai em Padrões", async () => {
+      renderizar({ abaInicial: "nada" as AbaDasConfiguracoes });
       await esperar();
       expect(aba("Padrões")).toHaveAttribute("aria-selected", "true");
     });
@@ -126,6 +143,8 @@ describe("ConfiguracoesDoApp", () => {
       expect(aba("Sistema")).toHaveAttribute("aria-selected", "true");
       expect(aba("Sistema")).toHaveFocus();
       fireEvent.keyDown(aba("Sistema"), { key: "ArrowRight" });
+      expect(aba("Conta")).toHaveFocus();
+      fireEvent.keyDown(aba("Conta"), { key: "ArrowRight" });
       expect(aba("Atualização")).toHaveFocus();
       fireEvent.keyDown(aba("Atualização"), { key: "ArrowRight" });
       expect(aba("Aparência")).toHaveFocus();
@@ -332,6 +351,25 @@ describe("ConfiguracoesDoApp", () => {
       expect(ajustes.abrir).toHaveBeenCalledTimes(1);
     });
 
+    it("com a leitura de memória, mostra o cartão no lugar do status antigo, a tabela e o limite de abertos", async () => {
+      renderizar({
+        abaInicial: "sistema",
+        memoria: {
+          totalBytes: 16 * 1024 ** 3,
+          livreBytes: 6 * 1024 ** 3,
+          servidorBytes: 0.2 * 1024 ** 3,
+          agentesBytes: 1.4 * 1024 ** 3,
+          porOrquestrador: {},
+          lidaEm: "2026-11-10T12:00:00Z",
+        },
+      });
+      await esperar();
+      expect(screen.getByTestId("cartao-de-memoria")).toBeInTheDocument();
+      expect(screen.queryByTestId("status-do-sistema")).not.toBeInTheDocument();
+      expect(screen.getByText("Abertos ao mesmo tempo")).toBeInTheDocument();
+      expect(screen.getByText("Até 20")).toBeInTheDocument();
+    });
+
     it("se a gravação falhar, volta ao valor anterior e mostra o erro no lugar da dica", async () => {
       vi.spyOn(api, "alterarPreferencias").mockRejectedValue(new Error("Sem conexão."));
       renderizar({ abaInicial: "sistema" });
@@ -348,6 +386,22 @@ describe("ConfiguracoesDoApp", () => {
       renderizar({ abaInicial: "sistema", ajustes: ajustesFalsos(false) });
       await esperar();
       expect(screen.queryByRole("button", { name: "Pastas e Claude Code…" })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("aba Conta", () => {
+    it("mostra as janelas da cota e, sem cota, a mensagem de que o uso vem depois do primeiro pedido", async () => {
+      const cota: JanelaDaCota[] = [{ nome: "5 horas", utilizacao: 0.42, renovaEm: null, situacao: "allowed" }];
+      const { reabrir } = renderizar({ abaInicial: "conta", cota });
+      await esperar();
+      expect(screen.getByRole("meter", { name: "Cota da sessão" })).toHaveAttribute("aria-valuenow", "42");
+      reabrir(false);
+    });
+
+    it("sem cota: mensagem curta", async () => {
+      renderizar({ abaInicial: "conta" });
+      await esperar();
+      expect(screen.getByText("O uso aparece depois do primeiro pedido.")).toBeInTheDocument();
     });
   });
 

@@ -179,3 +179,73 @@
 }
 .cfgapp-acoes-botoes { display: flex; gap: 8px; }
 .cfgapp-acoes-botoes[data-oculto] { visibility: hidden; }
+
+/* Sistema: cartão de memória, como no protótipo aprovado. O nível pinta o
+ * anel (amarelo na baixa, vermelho na crítica) e, na crítica, a borda do cartão. */
+.cfgapp-memoria-cartao.cfgapp-critico { border-color: color-mix(in srgb, var(--error) 55%, transparent); }
+.cfgapp-memoria {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 16px;
+}
+.cfgapp-anel { position: relative; width: 92px; height: 92px; color: var(--secondary); }
+.cfgapp-anel-baixa { color: var(--warning); }
+.cfgapp-anel-critica { color: var(--error); }
+.cfgapp-anel-trilha { stroke: var(--surface-3); }
+.cfgapp-anel-arco { stroke: currentColor; }
+.cfgapp-anel b {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font: 600 19px/1.1 var(--fonte-titulo);
+  color: var(--primary);
+}
+.cfgapp-anel b small { font: 12px var(--fonte-texto); color: var(--secondary); }
+.cfgapp-memoria-texto { min-width: 0; }
+.cfgapp-memoria h4 { margin: 0 0 2px; font: 600 14.5px/1.3 var(--fonte-titulo); }
+.cfgapp-memoria h4.cfgapp-critico-titulo { color: var(--error); }
+.cfgapp-memoria p { margin: 0 0 8px; color: var(--secondary); font-size: 12.5px; line-height: 1.4; }
+.cfgapp-empilhada { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--surface-3); }
+.cfgapp-empilhada i { display: block; height: 100%; }
+.cfgapp-agentes { background: var(--active); }
+.cfgapp-app { background: var(--info); }
+.cfgapp-outros { background: var(--secondary); }
+.cfgapp-legenda { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 12px; color: var(--secondary); }
+.cfgapp-legenda span { display: inline-flex; align-items: center; gap: 6px; }
+.cfgapp-legenda i { display: inline-block; width: 9px; height: 9px; border-radius: 3px; }
+
+/* Uso por orquestrador. */
+.cfgapp-tabela { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.cfgapp-tabela th {
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  color: var(--secondary);
+}
+.cfgapp-tabela td { padding: 6px 14px; border-bottom: 1px solid var(--border); color: var(--caption); }
+.cfgapp-tabela tr:last-child td { border-bottom: 0; }
+.cfgapp-tabela .cfgapp-tabela-nome { font-weight: 500; color: var(--primary); overflow-wrap: anywhere; }
+.cfgapp-tabela .cfgapp-numero,
+.cfgapp-numero { text-align: right; white-space: nowrap; }
+.cfgapp-tabela td.cfgapp-numero { font-family: var(--fonte-mono); font-size: 12px; }
+.cfgapp-vazio { margin: 0; padding: 10px 14px; font-size: 12px; color: var(--secondary); }
+.cfgapp-valor { flex: none; font-family: var(--fonte-mono); font-size: 12px; color: var(--caption); }
+
+/* Conta: a barra de cada janela da cota. */
+.cfgapp-linha-texto .cfgapp-barra {
+  height: 6px;
+  margin: 6px 0 4px;
+  border-radius: 3px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.cfgapp-barra i { display: block; height: 100%; border-radius: 3px; background: var(--secondary); }
+.cfgapp-barra-alta i { background: var(--error); }
+.cfgapp-no-limite { font-style: normal; color: var(--error); }

@@ -1,17 +1,18 @@
 import { type KeyboardEvent as EventoDeTeclado, type ReactNode, useEffect, useId, useRef, useState } from "react";
 
-import { api, mensagemDeErro } from "../../shared/api/cliente";
 import { avisoDosPedidosEmAndamento, percentualDoDownload } from "../../shared/atualizacao";
+import type { JanelaDaCota, LeituraDeMemoria, SituacaoDoOrquestrador } from "../../shared/api/tipos";
 import type { AjustesDoAplicativo } from "../../shared/hooks/useAjustesDoAplicativo";
 import { useAtualizacao } from "../../shared/hooks/useAtualizacao";
-import { definirAutorrecuperacao, useValorDaAutorrecuperacao } from "../../shared/hooks/useAutorrecuperacao";
 import {
   type EstiloDosControlesDasJanelas,
   usePreferenciasDaTela,
 } from "../../shared/hooks/usePreferenciasDaTela";
 import "../../theme/configuracoes-do-app.css";
 import { IconeFechar } from "../Icones";
+import { AbaDaConta } from "./AbaDaConta";
 import { AbaDePadroesDasConfiguracoes } from "./AbaDePadroesDasConfiguracoes";
+import { AbaDoSistema } from "./AbaDoSistema";
 import {
   InterruptorDaConfiguracao,
   LinhaDaConfiguracao,
@@ -21,14 +22,11 @@ import {
 
 export type AbaDasConfiguracoes = "padroes" | "sistema" | "conta" | "atualizacao" | "aparencia";
 
-/**
- * As abas que existem, na ordem. "conta" está no tipo (o contrato das ilhas),
- * mas o app não tem dado real de conta (e-mail, plano, cota por conta): sem
- * dado, a aba não aparece. Quando houver, entra aqui.
- */
+/** As abas, na ordem do protótipo. */
 const ABAS: readonly { aba: AbaDasConfiguracoes; rotulo: string }[] = [
   { aba: "padroes", rotulo: "Padrões" },
   { aba: "sistema", rotulo: "Sistema" },
+  { aba: "conta", rotulo: "Conta" },
   { aba: "atualizacao", rotulo: "Atualização" },
   { aba: "aparencia", rotulo: "Aparência" },
 ];
@@ -41,10 +39,16 @@ interface Props {
   ajustes: AjustesDoAplicativo;
   aberto: boolean;
   aoFechar: () => void;
-  /** A aba que abre selecionada; "conta" (sem dado) e o que não existe valem Padrões. */
+  /** A aba que abre selecionada; o que não existe vale Padrões. */
   abaInicial?: AbaDasConfiguracoes;
-  /** O status de memória, cota e bixinhos que a aba Sistema mostra no topo. */
+  /** Fallback da aba Sistema: o status antigo, mostrado no topo quando não há `memoria`. */
   sistema?: ReactNode;
+  /** A leitura de memória do servidor (anel, nível e barra da aba Sistema). */
+  memoria?: LeituraDeMemoria | null;
+  /** As janelas da cota do Claude (aba Conta); nulo até o primeiro pedido. */
+  cota?: JanelaDaCota[] | null;
+  /** Os orquestradores da tabela de uso da aba Sistema. */
+  orquestradores?: { id: string; nome: string; situacao: SituacaoDoOrquestrador }[];
   /** Pedidos rodando agora: reiniciar para instalar a atualização os cancela. */
   pedidosEmAndamento?: number;
   /** Depois de salvar as instruções gerais: a página recarrega o que depende delas. */
@@ -54,8 +58,8 @@ interface Props {
 }
 
 /**
- * Configurações do app como painel com abas (Padrões, Sistema, Atualização e
- * Aparência), à direita da área do canvas: o contêiner é `relative` e o painel
+ * Configurações do app como painel com abas (Padrões, Sistema, Conta,
+ * Atualização e Aparência), à direita da área do canvas: o contêiner é `relative` e o painel
  * se posiciona sozinho, com 540 px, abaixo da ilha da direita. Esc e o botão
  * fechar chamam `aoFechar`; o foco vai para a aba ao abrir e volta para quem
  * abriu ao fechar. Fechado, não renderiza nada.
@@ -69,6 +73,9 @@ function PainelAberto({
   aoFechar,
   abaInicial,
   sistema,
+  memoria = null,
+  cota = null,
+  orquestradores,
   pedidosEmAndamento = 0,
   aoSalvarInstrucoes,
   topo = TOPO_PADRAO,
@@ -197,7 +204,17 @@ function PainelAberto({
             aria-labelledby={idDaAba("sistema")}
             className="configuracoes-do-app-aba"
           >
-            <AbaDeSistema ajustes={ajustes} sistema={sistema} />
+            <AbaDoSistema ajustes={ajustes} sistema={sistema} memoria={memoria} orquestradores={orquestradores} />
+          </div>
+        )}
+        {aba === "conta" && (
+          <div
+            role="tabpanel"
+            id={idDoPainelDaAba("conta")}
+            aria-labelledby={idDaAba("conta")}
+            className="configuracoes-do-app-aba"
+          >
+            <AbaDaConta cota={cota} />
           </div>
         )}
         {aba === "atualizacao" && (
@@ -222,93 +239,6 @@ function PainelAberto({
         )}
       </div>
     </section>
-  );
-}
-
-// ---------------- Sistema ----------------
-
-const DICA_DA_AUTORRECUPERACAO = "Retoma sozinho quando o Claude trava ou a API falha.";
-
-function AbaDeSistema({ ajustes, sistema }: { ajustes: AjustesDoAplicativo; sistema?: ReactNode }) {
-  // A autorrecuperação vale para todos os orquestradores: fica no servidor, não no navegador.
-  const autorrecuperacao = useValorDaAutorrecuperacao();
-  const [lendo, setLendo] = useState(true);
-  const [gravando, setGravando] = useState(false);
-  const [erro, setErro] = useState<string | null>(null);
-  // Uma gravação começada depois da leitura vence a resposta dela.
-  const gravacoes = useRef(0);
-
-  // Relê a cada vez que a aba abre: outra janela pode ter mudado.
-  useEffect(() => {
-    let vivo = true;
-    const gravacoesAntes = gravacoes.current;
-    api
-      .lerPreferencias()
-      .then((lidas) => {
-        if (vivo && gravacoes.current === gravacoesAntes) {
-          definirAutorrecuperacao(lidas.autorrecuperacao);
-        }
-      })
-      .catch((falha: unknown) => {
-        if (vivo) {
-          setErro(mensagemDeErro(falha));
-        }
-      })
-      .finally(() => {
-        if (vivo) {
-          setLendo(false);
-        }
-      });
-    return () => {
-      vivo = false;
-    };
-  }, []);
-
-  const alternarAutorrecuperacao = () => {
-    if (autorrecuperacao === null || gravando) {
-      return;
-    }
-    const nova = !autorrecuperacao;
-    gravacoes.current += 1;
-    setErro(null);
-    setGravando(true);
-    definirAutorrecuperacao(nova);
-    api
-      .alterarPreferencias({ autorrecuperacao: nova })
-      .then((gravadas) => definirAutorrecuperacao(gravadas.autorrecuperacao ?? nova))
-      .catch((falha: unknown) => {
-        definirAutorrecuperacao(!nova);
-        setErro(mensagemDeErro(falha));
-      })
-      .finally(() => setGravando(false));
-  };
-
-  const situacao =
-    erro ?? (autorrecuperacao === null ? (lendo ? "Carregando…" : "Não deu para ler.") : DICA_DA_AUTORRECUPERACAO);
-
-  return (
-    <>
-      {sistema}
-      <h3 className="cfgapp-titulo">Orquestradores</h3>
-      <div className="cfgapp-cartao">
-        <InterruptorDaConfiguracao
-          titulo="Autorrecuperação"
-          descricao={situacao}
-          comErro={erro !== null}
-          ligado={autorrecuperacao ?? false}
-          indisponivel={autorrecuperacao === null || gravando}
-          ocupado={lendo || gravando}
-          aoAlternar={alternarAutorrecuperacao}
-        />
-        {ajustes.disponivel && (
-          <LinhaDaConfiguracao titulo="Pastas e Claude Code" descricao="Pasta dos projetos e o executável do Claude Code.">
-            <button type="button" className="btn btn-sm btn-outline" onClick={() => void ajustes.abrir()}>
-              Pastas e Claude Code…
-            </button>
-          </LinhaDaConfiguracao>
-        )}
-      </div>
-    </>
   );
 }
 
