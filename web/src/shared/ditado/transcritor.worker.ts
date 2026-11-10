@@ -1,5 +1,6 @@
 /**
- * Worker do ditado e da escuta: roda o Whisper no próprio computador, fora da
+ * Worker do ditado e da escuta (a reserva no navegador, quando o motor nativo
+ * do app não está disponível): roda o Whisper no próprio computador, fora da
  * thread da tela. O modelo é baixado do Hugging Face na primeira vez e fica no
  * cache do navegador (ou do app); o áudio nunca sai da máquina.
  */
@@ -7,10 +8,18 @@ import { type AutomaticSpeechRecognitionPipeline, env, pipeline, Tensor } from "
 import arquivoMjs from "onnxruntime-web/ort-wasm-simd-threaded.asyncify.mjs?url";
 import arquivoWasm from "onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm?url";
 
-import type { PedidoDeTranscricao, RespostaDoTranscritor } from "./mensagens";
+import {
+  AMOSTRAS_POR_SEGUNDO,
+  codigoDoIdioma,
+  emMegabytes,
+  PRECISAO_NO_NAVEGADOR,
+  type PedidoAoTranscritor,
+  type RespostaDoTranscritor,
+  segmentosDaSaida,
+} from "./mensagens";
 
 /** O Whisper olha no máximo 30 s de áudio de uma vez (16 kHz). */
-const AMOSTRAS_NA_JANELA_DO_WHISPER = 30 * 16_000;
+const AMOSTRAS_NA_JANELA_DO_WHISPER = 30 * AMOSTRAS_POR_SEGUNDO;
 
 /** Sem conseguir detectar o idioma, a escuta transcreve como o ditado: em português. */
 const IDIOMA_RESERVA = "portuguese";
@@ -33,10 +42,15 @@ function transcritor(modelo: string): Promise<AutomaticSpeechRecognitionPipeline
   if (existente !== undefined) return existente;
   const novo = pipeline("automatic-speech-recognition", modelo, {
     device: "wasm",
-    dtype: "q8",
+    dtype: PRECISAO_NO_NAVEGADOR,
     progress_callback: (info) => {
       if (info.status === "progress_total") {
-        responder({ tipo: "baixando", progresso: Math.round(info.progress) });
+        responder({
+          tipo: "baixando",
+          modelo,
+          progresso: Math.round(info.progress),
+          totalMb: emMegabytes(info.total),
+        });
       }
     },
   }).catch((erro: unknown) => {
@@ -76,7 +90,9 @@ function lerTokensDeIdioma(config: unknown): { inicio: number; idiomas: Map<numb
  * detection", avisa "No language specified - defaulting to English (en)." e
  * força `<|en|>`; com fala em português isso sai traduzido ou truncado.
  *
- * Custa uma passada a mais do codificador por trecho (o pipeline refaz a sua).
+ * Custa uma passada a mais do codificador por trecho (o pipeline refaz a sua):
+ * por isso só roda com `idioma: null` (a escuta pede no começo de cada fala e
+ * repassa o código nas passadas seguintes); o padrão é português fixo.
  */
 async function detectarIdioma(asr: AutomaticSpeechRecognitionPipeline, audio: Float32Array): Promise<string> {
   const tokens = lerTokensDeIdioma(asr.model.generation_config);
@@ -98,28 +114,49 @@ async function detectarIdioma(asr: AutomaticSpeechRecognitionPipeline, audio: Fl
   return melhor?.codigo ?? IDIOMA_RESERVA;
 }
 
-self.onmessage = async (evento: MessageEvent<PedidoDeTranscricao>) => {
-  const { id, audio, idioma, modelo } = evento.data;
+self.onmessage = async (evento: MessageEvent<PedidoAoTranscritor>) => {
+  const pedido = evento.data;
   try {
-    const transcrever = await transcritor(modelo);
+    const asr = await transcritor(pedido.modelo);
+    if (pedido.tipo === "preparar") {
+      responder({ tipo: "pronto", id: pedido.id });
+      return;
+    }
+    const { id, audio, idioma } = pedido;
+    // A passada conta a partir do modelo carregado: o download não entra.
+    const inicio = performance.now();
     let language: string = idioma ?? IDIOMA_RESERVA;
     if (idioma === null) {
       try {
-        language = await detectarIdioma(transcrever, audio);
+        language = await detectarIdioma(asr, audio);
       } catch {
         // A detecção é um extra: se falhar, transcreve em português, como o ditado.
         language = IDIOMA_RESERVA;
       }
     }
-    const saida = await transcrever(audio, {
+    const saida = await asr(audio, {
       language,
       task: "transcribe",
       chunk_length_s: 30,
       stride_length_s: 5,
+      return_timestamps: true,
     });
-    const texto = (Array.isArray(saida) ? saida.map((parte) => parte.text).join(" ") : saida.text).trim();
-    responder({ tipo: "texto", id, texto });
+    const partes = Array.isArray(saida) ? saida : [saida];
+    responder({
+      tipo: "resultado",
+      id,
+      texto: partes
+        .map((parte) => parte.text)
+        .join(" ")
+        .trim(),
+      segmentos: segmentosDaSaida(
+        partes.flatMap((parte) => parte.chunks ?? []),
+        audio.length / AMOSTRAS_POR_SEGUNDO,
+      ),
+      idioma: codigoDoIdioma(language),
+      duracaoDaPassadaMs: Math.round(performance.now() - inicio),
+    });
   } catch (erro) {
-    responder({ tipo: "erro", id, mensagem: erro instanceof Error ? erro.message : String(erro) });
+    responder({ tipo: "erro", id: pedido.id, mensagem: erro instanceof Error ? erro.message : String(erro) });
   }
 };

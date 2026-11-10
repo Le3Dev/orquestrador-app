@@ -1,18 +1,41 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import type { DescricaoDoMotor, MotorDeTranscricao } from "../ditado/motor";
 import type { CapturaDoAudio } from "./capturaDoAudio";
-import type { PreferenciasDaEscuta } from "./preferenciasDaEscuta";
+import type { DetectorDeVoz } from "./DetectorDeVoz";
+import { APARENCIA_PADRAO_DA_ESCUTA, PREFERENCIAS_PADRAO_DA_ESCUTA, type PreferenciasDaEscuta } from "./preferenciasDaEscuta";
 import { SessaoDaEscuta } from "./sessaoDaEscuta";
 import { type OpcoesDaEscuta, useEscuta } from "./useEscuta";
 
+const MOTOR: DescricaoDoMotor = { dispositivo: "cpu", modelo: "whisper-base", precisao: "q8", nativo: true };
+
+/** Motor falso: prepara na hora e nunca é chamado a transcrever (nenhum áudio chega nestes testes). */
+function motorFalso(): MotorDeTranscricao {
+  return {
+    transcrever: vi.fn(async () => ({ texto: "", segmentos: [], idioma: "pt", duracaoDaPassadaMs: 0 })),
+    preparar: vi.fn(async () => MOTOR),
+    motorAtual: () => null,
+    aoMudarMotor: () => () => undefined,
+    aoBaixar: () => () => undefined,
+  };
+}
+
+/** VAD falso: nenhum áudio chega nestes testes. */
+const detectorFalso = (): DetectorDeVoz => ({
+  analisar: vi.fn(async () => ({ amostras: new Float32Array(0), probabilidades: [] })),
+  reiniciar: vi.fn(),
+  encerrar: vi.fn(),
+});
+
 function montarSessao(avisoVisto: boolean) {
-  let preferencias: PreferenciasDaEscuta = { automatico: true, automaticoManual: false, avisoVisto };
+  let preferencias: PreferenciasDaEscuta = { ...PREFERENCIAS_PADRAO_DA_ESCUTA, avisoVisto };
   const parar = vi.fn();
   const iniciarCaptura = vi.fn(async (): Promise<CapturaDoAudio> => ({ parar }));
   const sessao = new SessaoDaEscuta({
     iniciarCaptura,
-    transcrever: vi.fn(async () => ""),
+    detectorDeVoz: detectorFalso(),
+    motor: motorFalso(),
     classificar: vi.fn(async () => ({ ehPergunta: false, pergunta: null })),
     preferencias: {
       ler: () => preferencias,
@@ -46,7 +69,7 @@ describe("useEscuta", () => {
     rerender(opcoes());
     expect(result.current.situacao).toBe("desligada");
     expect(result.current).toMatchObject({
-      automatico: false, // fora do modo invisível, a escuta manual começa sem o automático
+      automatico: true, // fora do modo invisível, a escuta manual também começa com o automático
       linhas: [],
       linhaProvisoria: null,
       trechos: [],
@@ -104,6 +127,31 @@ describe("useEscuta", () => {
     expect(result.current.situacao).toBe("pausada");
   });
 
+  it("mostra a legenda, o motor, o download e as preferências da tela, e as mudanças chegam à sessão", async () => {
+    const { sessao, preferencias } = montarSessao(true);
+    const { result } = renderHook(() => useEscuta(opcoes({ modoInvisivelAtivo: true }), sessao));
+    await act(async () => undefined);
+    expect(result.current).toMatchObject({
+      legenda: { frases: [], emAndamento: null },
+      motor: MOTOR,
+      download: null,
+      ultimaPerguntaEnviada: null,
+      preferenciasDaTela: { idioma: "portuguese", prioridadeDoMotor: "velocidade", aparencia: APARENCIA_PADRAO_DA_ESCUTA },
+    });
+
+    act(() => result.current.mudarIdioma("automatico"));
+    act(() => result.current.mudarAparencia({ tamanhoDaFonte: 18, compacto: true }));
+    await act(async () => {
+      result.current.mudarPrioridadeDoMotor("precisao");
+    });
+    expect(result.current.preferenciasDaTela).toEqual({
+      idioma: "automatico",
+      prioridadeDoMotor: "precisao",
+      aparencia: { tamanhoDaFonte: 18, opacidade: APARENCIA_PADRAO_DA_ESCUTA.opacidade, compacto: true },
+    });
+    expect(preferencias()).toMatchObject({ idioma: "automatico", prioridadeDoMotor: "precisao" });
+  });
+
   it("as funções devolvidas são estáveis entre renders", () => {
     const { sessao } = montarSessao(true);
     const { result, rerender } = renderHook(() => useEscuta(opcoes(), sessao));
@@ -112,5 +160,8 @@ describe("useEscuta", () => {
     expect(result.current.pausar).toBe(antes.pausar);
     expect(result.current.retomar).toBe(antes.retomar);
     expect(result.current.confirmarAviso).toBe(antes.confirmarAviso);
+    expect(result.current.mudarIdioma).toBe(antes.mudarIdioma);
+    expect(result.current.mudarPrioridadeDoMotor).toBe(antes.mudarPrioridadeDoMotor);
+    expect(result.current.mudarAparencia).toBe(antes.mudarAparencia);
   });
 });

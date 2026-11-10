@@ -152,6 +152,24 @@ export interface ApiDaPrevia {
   aoMudar: (callback: (evento: EventoDaPrevia) => void) => () => void;
 }
 
+/**
+ * Transcrição nativa: o Whisper no `onnxruntime-node`, num `utilityProcess` do
+ * app (GPU com DirectML quando houver). A tela conversa com ele por uma
+ * `MessagePort` própria; sem esta API (navegador ou app antigo), a tela usa a
+ * reserva no navegador (worker WASM).
+ */
+export interface ApiDaTranscricaoNativa {
+  /** true quando o app consegue rodar o motor nativo nesta máquina. */
+  disponivel: boolean;
+  /**
+   * Pede ao app uma porta para o utilitário (subindo-o, se preciso). A porta
+   * não vem no retorno: chega por `window.postMessage` (o preload), num
+   * `message` com `data.tipo === "orquestrador:porta-da-transcricao"` e a porta
+   * em `event.ports[0]`. Chame de novo para reconectar depois que a porta fechar.
+   */
+  conectar(): Promise<void>;
+}
+
 interface PonteDoDesktop {
   desktop?: boolean;
   plataforma?: string;
@@ -160,6 +178,7 @@ interface PonteDoDesktop {
   atualizacao?: ApiDaAtualizacao;
   modoInvisivel?: ApiDoModoInvisivel;
   previa?: ApiDaPrevia;
+  transcricaoNativa?: ApiDaTranscricaoNativa;
 }
 
 function ponteDoDesktop(): PonteDoDesktop | null {
@@ -193,6 +212,11 @@ export function apiDoModoInvisivel(): ApiDoModoInvisivel | null {
 export function apiDaPrevia(): ApiDaPrevia | null {
   const ponte = ponteDoDesktop();
   return ponte?.desktop && ponte.previa ? ponte.previa : null;
+}
+
+/** Devolve a API da transcrição nativa, ou null quando a ponte não a expõe (navegador ou app antigo). */
+export function apiDaTranscricaoNativa(): ApiDaTranscricaoNativa | null {
+  return ponteDoDesktop()?.transcricaoNativa ?? null;
 }
 
 /** true quando a tela está rodando dentro do app desktop (Electron). */

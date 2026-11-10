@@ -30,9 +30,11 @@
     "postinstall": "node scripts/permissaoDoPty.cjs"
   },
   "dependencies": {
+    "@huggingface/transformers": "4.3.1",
     "electron-updater": "~6.3.9",
     "express": "^5.2.1",
     "node-pty": "^1.1.0",
+    "onnxruntime-node": "1.30.0",
     "ws": "^8.22.1",
     "zod": "^4.6.1"
   },
@@ -61,16 +63,24 @@
       "!dist/**/*.test.d.ts",
       "!dist/**/fixtures/**",
       "web/dist/**/*",
-      "package.json"
+      "package.json",
+      "!node_modules/onnxruntime-web/**",
+      "!node_modules/@huggingface/transformers/dist/transformers.js",
+      "!node_modules/@huggingface/transformers/dist/transformers.min.js",
+      "!node_modules/@huggingface/transformers/dist/transformers.web*.js",
+      "!node_modules/@huggingface/transformers/dist/*.map",
+      "!node_modules/node-pty/prebuilds/!(${platform})-*/**",
+      "!node_modules/onnxruntime-node/bin/napi-v6/!(${platform})/**",
+      "!node_modules/onnxruntime-node/bin/napi-v6/${platform}/!(${arch})/**"
     ],
     "asarUnpack": [
-      "node_modules/node-pty/**"
+      "node_modules/node-pty/**",
+      "node_modules/onnxruntime-node/bin/**",
+      "node_modules/sharp/**",
+      "node_modules/@img/**"
     ],
     "npmRebuild": false,
     "win": {
-      "files": [
-        "!node_modules/node-pty/prebuilds/darwin-*/**"
-      ],
       "icon": "electron/icones/icone.ico",
       "target": [
         {
@@ -82,9 +92,6 @@
       ]
     },
     "mac": {
-      "files": [
-        "!node_modules/node-pty/prebuilds/win32-*/**"
-      ],
       "icon": "electron/icones/icone.png",
       "category": "public.app-category.developer-tools",
       "identity": null,

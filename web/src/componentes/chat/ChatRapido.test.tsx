@@ -60,6 +60,16 @@ const escutaSimulada = vi.hoisted(() => ({
   linhaProvisoria: null as string | null,
   trechos: [] as readonly { id: string; texto: string; inicioMs: number; fimMs: number }[],
   limparTrechos: vi.fn(),
+  automatico: true,
+  alternarAutomatico: vi.fn(),
+  erro: null as string | null,
+  descartarErro: vi.fn(),
+  ultimaPergunta: null as string | null,
+  legenda: { frases: [], emAndamento: null } as EscutaNaTela["legenda"],
+  motor: null as EscutaNaTela["motor"],
+  download: null as EscutaNaTela["download"],
+  mudarIdioma: vi.fn(),
+  mudarPrioridadeDoMotor: vi.fn(),
 }));
 
 vi.mock("../../shared/escuta/useEscuta", () => ({
@@ -77,16 +87,28 @@ vi.mock("../../shared/escuta/useEscuta", () => ({
       linhaProvisoria: escutaSimulada.linhaProvisoria,
       trechos: escutaSimulada.trechos,
       limparTrechos: escutaSimulada.limparTrechos,
-      automatico: true,
-      alternarAutomatico: () => undefined,
+      automatico: escutaSimulada.automatico,
+      alternarAutomatico: escutaSimulada.alternarAutomatico,
       pausar: escutaSimulada.pausar,
       retomar: () => undefined,
-      erro: null,
-      descartarErro: () => undefined,
+      erro: escutaSimulada.erro,
+      descartarErro: escutaSimulada.descartarErro,
       precisaDoAviso: situacao === "aguardando-aviso",
       confirmarAviso: escutaSimulada.confirmarAviso,
       recusarAviso: escutaSimulada.recusarAviso,
-      ultimaPergunta: null,
+      ultimaPergunta: escutaSimulada.ultimaPergunta,
+      legenda: escutaSimulada.legenda,
+      motor: escutaSimulada.motor,
+      download: escutaSimulada.download,
+      ultimaPerguntaEnviada: null,
+      preferenciasDaTela: {
+        idioma: "portuguese",
+        prioridadeDoMotor: "velocidade",
+        aparencia: { tamanhoDaFonte: 14, opacidade: 0.92, compacto: false },
+      },
+      mudarIdioma: escutaSimulada.mudarIdioma,
+      mudarPrioridadeDoMotor: escutaSimulada.mudarPrioridadeDoMotor,
+      mudarAparencia: () => undefined,
     };
   },
 }));
@@ -100,6 +122,16 @@ beforeEach(() => {
   escutaSimulada.linhaProvisoria = null;
   escutaSimulada.trechos = [];
   escutaSimulada.limparTrechos = vi.fn();
+  escutaSimulada.automatico = true;
+  escutaSimulada.alternarAutomatico = vi.fn();
+  escutaSimulada.erro = null;
+  escutaSimulada.descartarErro = vi.fn();
+  escutaSimulada.ultimaPergunta = null;
+  escutaSimulada.legenda = { frases: [], emAndamento: null };
+  escutaSimulada.motor = null;
+  escutaSimulada.download = null;
+  escutaSimulada.mudarIdioma = vi.fn();
+  escutaSimulada.mudarPrioridadeDoMotor = vi.fn();
 });
 
 /** As opções que o chat passou à escuta no último render. */
@@ -108,6 +140,12 @@ function opcoesDaEscuta(): OpcoesDaEscuta {
     throw new Error("o chat não chamou o useEscuta");
   }
   return escutaSimulada.opcoes;
+}
+
+/** Uma frase fechada da legenda da escuta, começando no horário ISO dado. */
+function frase(id: string, texto: string, inicio: string, pergunta = false): EscutaNaTela["legenda"]["frases"][number] {
+  const inicioMs = Date.parse(inicio);
+  return { id, texto, inicioMs, fimMs: inicioMs + 2_000, pergunta };
 }
 
 function mensagem(
@@ -446,26 +484,24 @@ describe("ChatRapido · modo invisível", () => {
 
   describe("escuta do áudio", () => {
     const indicador = () => screen.queryByTestId("indicador-da-escuta");
-    const faixa = () => screen.queryByTestId("faixa-da-escuta");
 
-    it("o indicador aparece ao lado do olho com o modo ativo e some ao desligar; a faixa vem junto", () => {
+    it("o indicador aparece ao lado do olho com o modo ativo e some ao desligar; não há caixa à parte", () => {
       const { ativar, desativar } = ponteAtiva(undefined, true);
       renderizar();
       expect(indicador()).not.toBeInTheDocument();
-      expect(faixa()).not.toBeInTheDocument();
 
       ativar();
       const olho = screen.getByRole("button", { name: "Modo invisível" });
       expect(olho.nextElementSibling).toBe(indicador());
       expect(indicador()).toHaveTextContent("escutando");
-      expect(screen.getByTestId("chat-rapido")).toContainElement(faixa());
+      expect(screen.queryByTestId("painel-da-escuta")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("faixa-da-escuta")).not.toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Pausar a escuta" }));
       expect(escutaSimulada.pausar).toHaveBeenCalledTimes(1);
 
       desativar();
       expect(indicador()).not.toBeInTheDocument();
-      expect(faixa()).not.toBeInTheDocument();
     });
 
     it("o botão dos fones (um ícone de traço) liga a escuta fora do modo: avisa a ponte e só depois marca o estado", async () => {
@@ -495,7 +531,6 @@ describe("ChatRapido · modo invisível", () => {
       expect(opcoesDaEscuta().escutaManualLigada).toBe(true);
       expect(screen.getByRole("button", { name: "Escuta do áudio" })).toHaveAttribute("aria-pressed", "true");
       expect(indicador()).toBeInTheDocument();
-      expect(faixa()).toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Escuta do áudio" }));
       await waitFor(() => expect(opcoesDaEscuta().escutaManualLigada).toBe(false));
@@ -509,48 +544,23 @@ describe("ChatRapido · modo invisível", () => {
       expect(screen.queryByRole("button", { name: "Escuta do áudio" })).not.toBeInTheDocument();
     });
 
-    it("os trechos ouvidos entram na conversa pelo horário, com a provisória no fim", () => {
-      escutaSimulada.trechos = [
-        { id: "t1", texto: "antes de tudo", inicioMs: Date.parse("2026-11-04T11:59:00Z"), fimMs: 0 },
-        { id: "t2", texto: "entre as mensagens", inicioMs: Date.parse("2026-11-04T12:00:30Z"), fimMs: 0 },
-      ];
-      escutaSimulada.linhaProvisoria = "dizendo agora";
-      renderizar({
-        ...OCIOSO,
-        mensagens: [
-          mensagem("u1", "usuario", { texto: "primeira", criadaEm: "2026-11-04T12:00:00Z" }),
-          mensagem("c1", "claude", { texto: "resposta", criadaEm: "2026-11-04T12:01:00Z" }),
-        ],
-      });
-
-      const secao = screen.getByRole("region", { name: "Conversa com o Claude" });
-      const texto = secao.textContent ?? "";
-      expect(texto.indexOf("antes de tudo")).toBeLessThan(texto.indexOf("primeira"));
-      expect(texto.indexOf("primeira")).toBeLessThan(texto.indexOf("entre as mensagens"));
-      expect(texto.indexOf("entre as mensagens")).toBeLessThan(texto.indexOf("resposta"));
-      expect(texto.indexOf("resposta")).toBeLessThan(texto.indexOf("dizendo agora"));
-      expect(screen.getByTestId("trecho-provisorio")).toHaveAttribute("aria-live", "polite");
-      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(2);
-    });
-
-    it("com trechos e sem mensagens, a conversa aparece; /clear limpa os trechos", async () => {
+    it("com frases ouvidas e sem mensagens, a conversa aparece; /clear limpa os trechos", async () => {
       vi.spyOn(api, "limparChat").mockResolvedValue(undefined as never);
-      escutaSimulada.trechos = [{ id: "t1", texto: "só áudio", inicioMs: 1, fimMs: 2 }];
+      escutaSimulada.legenda = { frases: [frase("f1", "só áudio", "2026-11-04T12:00:00Z")], emAndamento: null };
       const { campo } = renderizar();
-      expect(screen.getByText("só áudio")).toBeInTheDocument();
+      expect(screen.getByRole("region", { name: "Conversa com o Claude" })).toHaveTextContent("só áudio");
 
       fireEvent.change(campo, { target: { value: "/clear" } });
       fireEvent.keyDown(campo, { key: "Enter" });
       await waitFor(() => expect(escutaSimulada.limparTrechos).toHaveBeenCalled());
     });
 
-    it("sem a escuta disponível, o modo ativo não mostra indicador nem faixa", () => {
+    it("sem a escuta disponível, o modo ativo não mostra o indicador", () => {
       const { ativar } = ponteAtiva();
       renderizar();
       ativar();
       expect(opcoesDaEscuta().escutaDisponivel).toBe(false);
       expect(indicador()).not.toBeInTheDocument();
-      expect(faixa()).not.toBeInTheDocument();
     });
 
     it("na primeira vez, o aviso aparece dentro do chat e só o botão liga a escuta", () => {
@@ -614,6 +624,363 @@ describe("ChatRapido · modo invisível", () => {
         await expect(opcoesDaEscuta().enviar("Qual a complexidade?")).rejects.toBe(recusa);
       });
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("escuta na conversa", () => {
+    const indicador = () => screen.getByTestId("indicador-da-escuta");
+    const conversa = () => screen.getByRole("region", { name: "Conversa com o Claude" });
+    const DUAS_MENSAGENS: EstadoDoChatNaTela = {
+      ...OCIOSO,
+      mensagens: [
+        mensagem("u1", "usuario", { texto: "primeira", criadaEm: "2026-11-04T12:00:00Z" }),
+        mensagem("c1", "claude", { texto: "resposta", criadaEm: "2026-11-04T12:01:00Z" }),
+      ],
+    };
+
+    it("cada frase fechada vira uma mensagem sua com a marca \"ouvido\", intercalada pelo horário", () => {
+      escutaSimulada.legenda = {
+        frases: [
+          frase("f1", "antes de tudo", "2026-11-04T11:59:00Z"),
+          frase("f2", "entre as mensagens", "2026-11-04T12:00:30Z"),
+          frase("f3", "depois de tudo", "2026-11-04T12:02:00Z"),
+        ],
+        emAndamento: null,
+      };
+      renderizar(DUAS_MENSAGENS);
+
+      const baloes = screen.getAllByTestId("trecho-ouvido");
+      expect(baloes).toHaveLength(3);
+      for (const balao of baloes) {
+        // O mesmo visual da mensagem do usuário, com a marca "ouvido" no lugar do selo "escuta".
+        expect(balao).toHaveClass("mensagem-do-usuario", "mensagem-ouvida");
+        expect(within(balao).getByText("ouvido")).toHaveClass("marca-ouvida");
+        expect(balao.querySelector(".selo-da-escuta")).toBeNull();
+        expect(balao.querySelector("time.hora-da-mensagem")).not.toBeNull();
+      }
+      expect(baloes[0]).toHaveTextContent("antes de tudo");
+      const texto = conversa().textContent ?? "";
+      expect(texto.indexOf("antes de tudo")).toBeLessThan(texto.indexOf("primeira"));
+      expect(texto.indexOf("primeira")).toBeLessThan(texto.indexOf("entre as mensagens"));
+      expect(texto.indexOf("entre as mensagens")).toBeLessThan(texto.indexOf("resposta"));
+      expect(texto.indexOf("resposta")).toBeLessThan(texto.indexOf("depois de tudo"));
+      expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
+    });
+
+    it("a frase com pergunta ganha a marca \"pergunta\" ao lado do \"ouvido\"; as outras, não", () => {
+      escutaSimulada.legenda = {
+        frases: [
+          frase("f1", "Bom dia a todos.", "2026-11-04T12:00:00Z"),
+          frase("f2", "Qual o prazo do projeto?", "2026-11-04T12:00:05Z", true),
+        ],
+        emAndamento: null,
+      };
+      renderizar();
+
+      const [comum, pergunta] = screen.getAllByTestId("trecho-ouvido");
+      expect(pergunta).toHaveClass("mensagem-do-usuario", "mensagem-ouvida");
+      expect(pergunta).toHaveTextContent("Qual o prazo do projeto?");
+      expect(within(pergunta as HTMLElement).getByText("ouvido")).toBeInTheDocument();
+      expect(within(pergunta as HTMLElement).getByRole("img", { name: "Pergunta detectada na escuta" })).toHaveTextContent(
+        "pergunta",
+      );
+      expect(within(comum as HTMLElement).queryByRole("img")).not.toBeInTheDocument();
+    });
+
+    it("a frase em andamento fica numa mensagem sua provisória no fim: o confirmado no tom normal e o parcial apagado", () => {
+      escutaSimulada.legenda = {
+        frases: [frase("f1", "Bom dia a todos.", "2026-11-04T12:02:00Z")],
+        emAndamento: {
+          id: "e2",
+          confirmado: "vamos falar do",
+          parcial: "orçamento de",
+          inicioMs: Date.parse("2026-11-04T12:02:03Z"),
+        },
+      };
+      renderizar(DUAS_MENSAGENS);
+
+      const provisorio = screen.getByTestId("trecho-provisorio");
+      expect(provisorio).toHaveAttribute("data-enunciado", "e2");
+      expect(provisorio).toHaveAttribute("aria-live", "polite");
+      expect(provisorio).toHaveClass("mensagem-do-usuario", "mensagem-ouvida", "mensagem-ouvida-provisoria");
+      expect(within(provisorio).getByText("ouvindo")).toHaveClass("marca-ouvida");
+      expect(within(provisorio).getByText("vamos falar do")).toHaveClass("ouvido-confirmado");
+      expect(within(provisorio).getByText("orçamento de")).toHaveClass("ouvido-parcial");
+      expect(provisorio).toHaveTextContent("vamos falar do orçamento de");
+      // Fica no fim da conversa, depois das mensagens e das frases fechadas.
+      expect(provisorio.nextElementSibling).toBeNull();
+      const texto = conversa().textContent ?? "";
+      expect(texto.indexOf("resposta")).toBeLessThan(texto.indexOf("Bom dia a todos."));
+      expect(texto.indexOf("Bom dia a todos.")).toBeLessThan(texto.indexOf("vamos falar do"));
+      // A frase em andamento não é um balão fechado.
+      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(1);
+    });
+
+    it("em andamento só com o parcial, o balão mostra só a cauda; sem texto, não aparece", () => {
+      escutaSimulada.legenda = { frases: [], emAndamento: { id: "e1", confirmado: "", parcial: "dizendo", inicioMs: 1 } };
+      const { rerender } = renderizar();
+      const provisorio = screen.getByTestId("trecho-provisorio");
+      expect(within(provisorio).getByText("dizendo")).toHaveClass("ouvido-parcial");
+      expect(provisorio.querySelector(".ouvido-confirmado")).toBeNull();
+
+      escutaSimulada.legenda = { frases: [], emAndamento: { id: "e1", confirmado: "  ", parcial: "", inicioMs: 1 } };
+      rerender({ ...OCIOSO });
+      expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
+    });
+
+    it("um balão por enunciado: o aberto cresce no lugar e, ao fechar, o mesmo elemento vira o balão fechado", () => {
+      const inicioMs = Date.parse("2026-11-04T12:02:00Z");
+      escutaSimulada.legenda = { frases: [], emAndamento: { id: "e7", confirmado: "", parcial: "qual o", inicioMs } };
+      const { rerender } = renderizar(DUAS_MENSAGENS);
+      const balao = screen.getByTestId("trecho-provisorio");
+
+      // O texto cresce no mesmo balão.
+      escutaSimulada.legenda = {
+        frases: [],
+        emAndamento: { id: "e7", confirmado: "qual o prazo", parcial: "do projeto", inicioMs },
+      };
+      rerender({ ...DUAS_MENSAGENS });
+      expect(screen.getByTestId("trecho-provisorio")).toBe(balao);
+      expect(balao).toHaveTextContent("qual o prazo do projeto");
+      expect(within(balao).getByText("ouvindo")).toBeInTheDocument();
+
+      // Fechado: o mesmo elemento, agora com "ouvido" e "pergunta", sem a borda tracejada e sem outra cópia.
+      escutaSimulada.legenda = {
+        frases: [{ id: "e7", texto: "Qual o prazo do projeto?", inicioMs, fimMs: inicioMs + 3_000, pergunta: true }],
+        emAndamento: null,
+      };
+      rerender({ ...DUAS_MENSAGENS });
+      expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
+      const fechado = screen.getByTestId("trecho-ouvido");
+      expect(fechado).toBe(balao);
+      expect(fechado).toHaveAttribute("data-enunciado", "e7");
+      expect(fechado).not.toHaveClass("mensagem-ouvida-provisoria");
+      expect(within(fechado).getByText("ouvido")).toBeInTheDocument();
+      expect(within(fechado).getByRole("img", { name: "Pergunta detectada na escuta" })).toBeInTheDocument();
+      expect(screen.getAllByText("Qual o prazo do projeto?")).toHaveLength(1);
+    });
+
+    it("com o id do aberto já fechado na legenda, vale o fechado: o enunciado não aparece duas vezes", () => {
+      const inicioMs = Date.parse("2026-11-04T12:02:00Z");
+      escutaSimulada.legenda = {
+        frases: [{ id: "e8", texto: "Bom dia a todos.", inicioMs, fimMs: inicioMs + 2_000, pergunta: false }],
+        emAndamento: { id: "e8", confirmado: "Bom dia", parcial: "a todos", inicioMs },
+      };
+      renderizar(DUAS_MENSAGENS);
+
+      expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
+      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(1);
+      expect(screen.getByTestId("trecho-ouvido")).toHaveTextContent("Bom dia a todos.");
+      expect(conversa()).not.toHaveTextContent("Bom dia a todos a todos");
+    });
+
+    it("o aberto fica no fim mesmo tendo começado antes da última mensagem, à parte do fechado anterior", () => {
+      escutaSimulada.legenda = {
+        frases: [frase("e1", "Bom dia a todos.", "2026-11-04T12:00:10Z")],
+        emAndamento: { id: "e2", confirmado: "e o prazo", parcial: "", inicioMs: Date.parse("2026-11-04T12:00:20Z") },
+      };
+      renderizar(DUAS_MENSAGENS);
+
+      const provisorio = screen.getByTestId("trecho-provisorio");
+      expect(provisorio.nextElementSibling).toBeNull();
+      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(1);
+      const texto = conversa().textContent ?? "";
+      expect(texto.indexOf("Bom dia a todos.")).toBeLessThan(texto.indexOf("resposta"));
+      expect(texto.indexOf("resposta")).toBeLessThan(texto.indexOf("e o prazo"));
+    });
+
+    it("o fechado da pergunta enviada some; o aberto de mesmo id também não aparece", () => {
+      const inicioMs = Date.parse("2026-11-04T11:59:55Z");
+      escutaSimulada.legenda = {
+        frases: [{ id: "e9", texto: "Qual o prazo do projeto?", inicioMs, fimMs: inicioMs + 2_000, pergunta: true }],
+        emAndamento: { id: "e9", confirmado: "Qual o prazo", parcial: "do projeto", inicioMs },
+      };
+      const enviada = "Pergunta detectada na escuta: Qual o prazo do projeto?\n\nResponda direto e curto.";
+      renderizar({
+        ...OCIOSO,
+        mensagens: [mensagem("u1", "usuario", { texto: enviada, origem: "escuta", criadaEm: "2026-11-04T11:59:58Z" })],
+      });
+
+      expect(screen.queryByTestId("trecho-ouvido")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
+      expect(screen.getAllByText("Qual o prazo do projeto?")).toHaveLength(1);
+    });
+
+    it("a rolagem acompanha os balões novos e a frase em andamento", () => {
+      const { rerender } = renderizar(DUAS_MENSAGENS);
+      const rolagem = conversa().querySelector(".mensagens-do-chat") as HTMLElement;
+      let topo = 0;
+      Object.defineProperty(rolagem, "scrollHeight", { configurable: true, get: () => 900 });
+      Object.defineProperty(rolagem, "scrollTop", {
+        configurable: true,
+        get: () => topo,
+        set: (valor: number) => {
+          topo = valor;
+        },
+      });
+
+      const frases = [frase("f1", "nova frase", "2026-11-04T12:02:00Z")];
+      escutaSimulada.legenda = { frases, emAndamento: null };
+      rerender({ ...DUAS_MENSAGENS });
+      expect(topo).toBe(900);
+
+      topo = 0;
+      escutaSimulada.legenda = { frases, emAndamento: { id: "e2", confirmado: "e agora", parcial: "mais", inicioMs: 1 } };
+      rerender({ ...DUAS_MENSAGENS });
+      expect(topo).toBe(900);
+
+      // O texto do aberto cresce: continua acompanhando o fim.
+      topo = 0;
+      escutaSimulada.legenda = { frases, emAndamento: { id: "e2", confirmado: "e agora mais", parcial: "um", inicioMs: 1 } };
+      rerender({ ...DUAS_MENSAGENS });
+      expect(topo).toBe(900);
+    });
+
+    it("sem caixa nem cartão: a resposta à pergunta da escuta aparece só como mensagem do chat", () => {
+      escutaSimulada.legenda = {
+        frases: [frase("f1", "Qual a complexidade?", "2026-11-04T11:59:58Z", true)],
+        emAndamento: null,
+      };
+      escutaSimulada.ultimaPergunta = "Qual a complexidade?";
+      const { ativar } = ponteAtiva(undefined, true);
+      renderizar({
+        ...OCIOSO,
+        mensagens: [
+          mensagem("u1", "usuario", { texto: "Qual a complexidade?", origem: "escuta", criadaEm: "2026-11-04T12:00:00Z" }),
+          mensagem("c1", "claude", { texto: "O(n log n) no pior caso", criadaEm: "2026-11-04T12:00:05Z" }),
+        ],
+      });
+      ativar();
+
+      expect(screen.queryByTestId("painel-da-escuta")).not.toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Escuta ao vivo" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Resposta da escuta" })).not.toBeInTheDocument();
+      expect(screen.queryByText("última pergunta")).not.toBeInTheDocument();
+      expect(screen.getAllByText("O(n log n) no pior caso")).toHaveLength(1);
+      // A pergunta enviada já é a mensagem do chat: o balão "ouvido" dela some.
+      expect(screen.getAllByText("Qual a complexidade?")).toHaveLength(1);
+      expect(screen.queryByTestId("trecho-ouvido")).not.toBeInTheDocument();
+    });
+
+    it("a mensagem enviada pela escuta mostra só a pergunta, como se fosse digitada, com o selo", () => {
+      const enviada =
+        "Pergunta detectada na escuta: Qual o prazo do projeto?\n\n" +
+        'Trecho transcrito dos últimos 60 s do áudio do computador.\n"""\nBom dia a todos.\n"""\n\n' +
+        "Responda direto e curto, em até 5 tópicos objetivos.";
+      renderizar({
+        ...OCIOSO,
+        mensagens: [mensagem("u1", "usuario", { texto: enviada, origem: "escuta" })],
+      });
+
+      const balao = screen.getByText("Qual o prazo do projeto?").closest(".mensagem-do-usuario") as HTMLElement;
+      expect(within(balao).getByText("Qual o prazo do projeto?")).toHaveClass("texto-longo");
+      expect(within(balao).getByText("escuta")).toHaveClass("selo-da-escuta");
+      expect(conversa()).not.toHaveTextContent("Pergunta detectada na escuta");
+      expect(conversa()).not.toHaveTextContent("Bom dia a todos.");
+      expect(conversa()).not.toHaveTextContent("Responda direto");
+    });
+
+    it("a digitada com o mesmo começo aparece inteira: só a da escuta é resumida", () => {
+      const digitada = "Pergunta detectada na escuta: teste\n\nresto do texto";
+      renderizar({ ...OCIOSO, mensagens: [mensagem("u1", "usuario", { texto: digitada })] });
+      expect(conversa()).toHaveTextContent("Pergunta detectada na escuta: teste");
+      expect(conversa()).toHaveTextContent("resto do texto");
+    });
+
+    it("a frase pergunta some quando há a mensagem da escuta dela e fica quando não há", () => {
+      escutaSimulada.legenda = {
+        frases: [
+          frase("f1", "Bom dia a todos.", "2026-11-04T11:59:50Z"),
+          frase("f2", "Qual o prazo do projeto?", "2026-11-04T11:59:55Z", true),
+        ],
+        emAndamento: null,
+      };
+      const enviada = "Pergunta detectada na escuta: Qual o prazo do projeto?\n\nResponda direto e curto.";
+      const { rerender } = renderizar({
+        ...OCIOSO,
+        mensagens: [mensagem("u1", "usuario", { texto: enviada, origem: "escuta", criadaEm: "2026-11-04T11:59:58Z" })],
+      });
+      // Enviada: só a mensagem do chat (com o selo) e a frase comum ouvida.
+      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(1);
+      expect(screen.getByTestId("trecho-ouvido")).toHaveTextContent("Bom dia a todos.");
+      expect(screen.getAllByText("Qual o prazo do projeto?")).toHaveLength(1);
+      expect(screen.queryByRole("img", { name: "Pergunta detectada na escuta" })).not.toBeInTheDocument();
+
+      // Sem a mensagem da escuta (ex.: posta só no campo, com alterações autorizadas), a frase fica, com a marca.
+      rerender({ ...OCIOSO, mensagens: [mensagem("u1", "usuario", { texto: "outra coisa", criadaEm: "2026-11-04T11:59:58Z" })] });
+      const baloes = screen.getAllByTestId("trecho-ouvido");
+      expect(baloes).toHaveLength(2);
+      expect(baloes[1]).toHaveTextContent("Qual o prazo do projeto?");
+      expect(within(baloes[1] as HTMLElement).getByRole("img", { name: "Pergunta detectada na escuta" })).toBeInTheDocument();
+
+      // A mensagem da escuta mais de 60 s depois do fim da frase não é o envio dela.
+      rerender({
+        ...OCIOSO,
+        mensagens: [mensagem("u1", "usuario", { texto: enviada, origem: "escuta", criadaEm: "2026-11-04T12:01:00Z" })],
+      });
+      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(2);
+    });
+
+    it("o menu do indicador tem o Automático, o idioma e a prioridade, e chama a escuta sem levar o foco ao campo", () => {
+      escutaSimulada.automatico = false;
+      const { ativar } = ponteAtiva(undefined, true);
+      const { campo } = renderizar();
+      ativar();
+
+      fireEvent.click(within(indicador()).getByRole("button", { name: "Controles da escuta" }));
+      const menu = within(screen.getByRole("group", { name: "Controles da escuta" }));
+      const chave = menu.getByRole("switch", { name: "Automático" });
+      expect(chave).toHaveAttribute("aria-checked", "false");
+      fireEvent.click(chave);
+      expect(escutaSimulada.alternarAutomatico).toHaveBeenCalledTimes(1);
+
+      expect(menu.getByRole("radio", { name: "Português" })).toBeChecked();
+      expect(menu.getByRole("radio", { name: "Velocidade" })).toBeChecked();
+      fireEvent.click(menu.getByRole("radio", { name: "Automático" }));
+      expect(escutaSimulada.mudarIdioma).toHaveBeenCalledWith("automatico");
+      fireEvent.click(menu.getByRole("radio", { name: "Precisão" }));
+      expect(escutaSimulada.mudarPrioridadeDoMotor).toHaveBeenCalledWith("precisao");
+      expect(campo).not.toHaveFocus();
+    });
+
+    it("o erro da escuta aparece numa linha acima do campo e o fechar o descarta", () => {
+      escutaSimulada.situacaoNoModo = "erro";
+      escutaSimulada.erro = "a captura do áudio parou";
+      const { ativar } = ponteAtiva(undefined, true);
+      renderizar();
+      // Com a escuta desligada, nada dela aparece.
+      expect(screen.queryByTestId("erro-da-escuta")).not.toBeInTheDocument();
+
+      ativar();
+      const alerta = screen.getByTestId("erro-da-escuta");
+      expect(alerta).toHaveAttribute("role", "alert");
+      expect(alerta).toHaveTextContent("a captura do áudio parou");
+      expect(screen.getByTestId("chat-rapido")).toContainElement(alerta);
+      expect(
+        alerta.compareDocumentPosition(screen.getByTestId("composer-do-chat")) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      fireEvent.click(within(alerta).getByRole("button", { name: "fechar" }));
+      expect(escutaSimulada.descartarErro).toHaveBeenCalledTimes(1);
+    });
+
+    it("sem erro, não há aviso da escuta", () => {
+      const { ativar } = ponteAtiva(undefined, true);
+      renderizar();
+      ativar();
+      expect(screen.queryByTestId("erro-da-escuta")).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("o indicador mostra o selo do motor e o download com o total real", () => {
+      escutaSimulada.situacaoNoModo = "baixando-modelo";
+      escutaSimulada.motor = { dispositivo: "webgpu", modelo: "onnx-community/whisper-base", precisao: "q4", nativo: false };
+      escutaSimulada.download = { progresso: 45, totalMb: 199 };
+      const { ativar } = ponteAtiva(undefined, true);
+      renderizar();
+      ativar();
+
+      expect(within(indicador()).getByText("baixando o modelo 45% de 199 MB")).toBeInTheDocument();
+      expect(within(indicador()).getByTestId("selo-do-motor")).toHaveTextContent("GPU · base · q4");
     });
   });
 });

@@ -3845,7 +3845,7 @@ html.modo-invisivel .barra-de-titulo * {
 .ditado-a-direita .painel-do-ditado { left: 0; right: auto; }
 
 /* Painel de retorno do ditado: permissão, gravando, download do modelo, transcrevendo e "texto adicionado".
- * O tom é o vermelho de gravar (--error) só no ponto e nas ondas; o resto segue o painel da escuta (azul para o download). */
+ * O tom é o vermelho de gravar (--error) só no ponto e nas ondas; o resto segue o tom da escuta (azul para o download). */
 .painel-do-ditado {
   position: absolute;
   right: 0;
@@ -3943,4 +3943,126 @@ textarea[data-ditado="inserido"] { animation: destaque-do-ditado 1.6s ease-out; 
   .painel-do-ditado-inserido { animation: none; }
   .barra-da-onda, .barra-do-download-do-ditado { transition: none; }
   .girador-do-ditado { animation-duration: 2.4s; }
+}
+
+/* ── Escuta: a transcrição na conversa e o menu do indicador ────────────── */
+/* A escuta não tem caixa à parte: é como se você tivesse dito cada frase no
+ * chat. Cada enunciado é um balão só (BalaoOuvido): uma mensagem sua
+ * (.mensagem-do-usuario com o modificador .mensagem-ouvida), com a marca
+ * pequena "ouvido" no lugar do selo e, na pergunta detectada, a marca
+ * "pergunta" no tom de aviso (--warning). Enquanto ele é dito, o mesmo balão
+ * fica no fim com a marca "ouvindo" e a borda tracejada (em chat-lateral.css):
+ * o confirmado no tom normal e a cauda ainda não confirmada apagada, em
+ * itálico. Os controles (Automático, idioma e
+ * prioridade do motor) ficam no menu do indicador, no composer; o erro, numa
+ * linha acima do campo. O tom da escuta é o azul (--info), o do indicador. */
+
+/* As marcas da mensagem ouvida, numa linha, no lugar do selo. */
+.marcas-da-mensagem-ouvida { display: inline-flex; align-items: center; gap: 4px; }
+.marca-ouvida,
+.marca-da-pergunta-ouvida {
+  display: inline-flex;
+  align-items: center;
+  height: 15px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-family: var(--fonte-mono);
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: .06em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+  cursor: default;
+}
+.marca-ouvida {
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--info) 45%, transparent);
+}
+.marca-da-pergunta-ouvida {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 55%, transparent);
+}
+/* A frase em andamento: o confirmado no tom da mensagem; o parcial apagado e em itálico. */
+.ouvido-confirmado { color: inherit; }
+.ouvido-parcial { color: var(--muted); font-style: italic; }
+
+/* O erro da escuta, com o "fechar" na mesma linha, acima do campo. */
+.erro-da-escuta { margin: 0; overflow-wrap: anywhere; }
+.erro-da-escuta .btn { margin-left: 4px; vertical-align: baseline; }
+
+/* O selo do indicador é o botão que abre o menu: herda o visual do indicador. */
+.abrir-menu-da-escuta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.abrir-menu-da-escuta:hover .rotulo-da-escuta,
+.abrir-menu-da-escuta[aria-expanded="true"] .rotulo-da-escuta { color: var(--primary); }
+.abrir-menu-da-escuta:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
+
+/* Menu da escuta: pequeno, abre para cima, sobre a conversa. */
+.menu-da-escuta {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 190px;
+  padding: 8px 10px;
+  border-radius: var(--radius-card);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--primary) 18%, transparent);
+  font-family: var(--fonte-texto);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: normal;
+  color: var(--primary);
+  cursor: default;
+  animation: subir var(--tempo-de-surgir) var(--curva-de-mola);
+}
+.menu-da-escuta .interruptor-da-escuta { align-self: flex-start; }
+.grupo-do-menu-da-escuta { display: flex; flex-direction: column; gap: 3px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.grupo-do-menu-da-escuta > legend { margin-bottom: 2px; padding: 0; }
+.opcao-do-menu-da-escuta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--primary); cursor: pointer; }
+.opcao-do-menu-da-escuta > input { margin: 0; accent-color: var(--info); cursor: pointer; }
+
+/* O selo do motor dentro do indicador da escuta (ao lado do 👁): discreto, some primeiro se faltar espaço. */
+.selo-do-motor-no-indicador {
+  flex-shrink: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 5px;
+  border-left: 1px solid color-mix(in srgb, var(--cor-da-escuta, var(--info)) 35%, transparent);
+  font-size: 9.5px;
+  letter-spacing: .03em;
+  text-transform: none;
+  color: var(--success);
+}
+.selo-do-motor-no-indicador-cpu { color: var(--secondary); }
+
+/* Fixo à esquerda (coluna sem gap): um respiro acima do campo, como o aviso da escuta. */
+.chat-lateral .erro-da-escuta { flex: none; margin-top: 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .menu-da-escuta { animation: none; }
 }

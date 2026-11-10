@@ -3,15 +3,46 @@ import {
   avaliar,
   DetectorDePergunta,
   ehAlucinacao,
+  ehAlucinacaoConhecida,
   EXPRESSOES_DE_PEDIDO,
+  MINIMO_DE_PALAVRAS_DO_SINAL_FORTE,
+  PALAVRAS_INTERROGATIVAS,
+  sinalForte,
+  terminaEmInterrogacao,
   TERMOS_TECNICOS,
 } from "./DetectorDePergunta";
 
 describe("DetectorDePergunta.avaliar", () => {
   it("interrogação no fim, mesmo com espaços e aspas depois", () => {
-    expect(avaliar("Você já trabalhou com Kubernetes?")).toEqual({ candidata: true, motivo: "interrogacao" });
-    expect(avaliar('Ele disse "isso escala?"  ')).toEqual({ candidata: true, motivo: "interrogacao" });
-    expect(avaliar("Será? Acho que não.")).toEqual({ candidata: false, motivo: null });
+    expect(avaliar("Você já trabalhou com Kubernetes?")).toEqual({ candidata: true, motivo: "interrogacao", sinalForte: false });
+    expect(avaliar('Ele disse "isso escala?"  ')).toEqual({ candidata: true, motivo: "interrogacao", sinalForte: false });
+    // O "?" no meio não conta como interrogação; aqui a frase passa pela interrogativa ("será").
+    expect(avaliar("Será? Acho que não.")).toEqual({ candidata: true, motivo: "interrogativa", sinalForte: false });
+    expect(avaliar("Sério? Acho que não.")).toEqual({ candidata: false, motivo: null, sinalForte: false });
+  });
+
+  it("palavra interrogativa em qualquer posição, com 4+ palavras, é candidata (motivo interrogativa)", () => {
+    for (const texto of [
+      "pessoal agora eu queria saber quem vai apresentar hoje",
+      "e aí quando a gente sobe o servidor",
+      "então você sabe onde fica o arquivo de configuração",
+      "so tell me what you think about it",
+      "Quando a gente sobe o servidor", // no começo, sem "?"
+    ]) {
+      expect(avaliar(texto)).toEqual({ candidata: true, motivo: "interrogativa", sinalForte: false });
+    }
+  });
+
+  it("a interrogativa precisa ser palavra inteira e o texto ter ao menos 4 palavras", () => {
+    expect(MINIMO_DE_PALAVRAS_DO_SINAL_FORTE).toBe(4);
+    expect(avaliar("saber quem foi")).toEqual({ candidata: false, motivo: null, sinalForte: false }); // 3 palavras
+    expect(avaliar("uma comoção geral no evento")).toEqual({ candidata: false, motivo: null, sinalForte: false }); // "como" só como pedaço
+    expect(avaliar("a qualidade ficou ótima hoje")).toEqual({ candidata: false, motivo: null, sinalForte: false }); // "qual" só como pedaço
+  });
+
+  it("pedido e termo técnico vêm antes da interrogativa na ordem dos motivos", () => {
+    expect(avaliar("Como faço pra subir o servidor")).toEqual({ candidata: true, motivo: "pedido", sinalForte: false });
+    expect(avaliar("onde fica o array de inteiros")).toEqual({ candidata: true, motivo: "termo_tecnico", sinalForte: false });
   });
 
   it("pedidos em português, com e sem acento, sem diferenciar maiúsculas", () => {
@@ -27,7 +58,7 @@ describe("DetectorDePergunta.avaliar", () => {
       "a gente precisa resolver esse bug hoje",
       "crie uma tabela de usuários",
     ]) {
-      expect(avaliar(texto)).toEqual({ candidata: true, motivo: "pedido" });
+      expect(avaliar(texto)).toEqual({ candidata: true, motivo: "pedido", sinalForte: false });
     }
   });
 
@@ -41,7 +72,7 @@ describe("DetectorDePergunta.avaliar", () => {
       "Can you walk me through it",
       "Write a function that returns the sum",
     ]) {
-      expect(avaliar(texto)).toEqual({ candidata: true, motivo: "pedido" });
+      expect(avaliar(texto)).toEqual({ candidata: true, motivo: "pedido", sinalForte: false });
     }
   });
 
@@ -54,30 +85,112 @@ describe("DetectorDePergunta.avaliar", () => {
       "a árvore binária precisa estar balanceada",
       "the classic two sum problem",
     ]) {
-      expect(avaliar(texto)).toEqual({ candidata: true, motivo: "termo_tecnico" });
+      expect(avaliar(texto)).toEqual({ candidata: true, motivo: "termo_tecnico", sinalForte: false });
     }
   });
 
   it("casa por palavra inteira, não por pedaço de palavra", () => {
-    expect(avaliar("eu criei o projeto ontem")).toEqual({ candidata: false, motivo: null });
-    expect(avaliar("resolvido o problema da reunião")).toEqual({ candidata: false, motivo: null });
-    expect(avaliar("o arrayzinho ficou bonito")).toEqual({ candidata: false, motivo: null });
+    expect(avaliar("eu criei o projeto ontem")).toEqual({ candidata: false, motivo: null, sinalForte: false });
+    expect(avaliar("resolvido o problema da reunião")).toEqual({ candidata: false, motivo: null, sinalForte: false });
+    expect(avaliar("o arrayzinho ficou bonito")).toEqual({ candidata: false, motivo: null, sinalForte: false });
   });
 
   it("conversa comum não é candidata", () => {
-    expect(avaliar("Bom dia, pessoal, vamos começar a reunião.")).toEqual({ candidata: false, motivo: null });
-    expect(avaliar("Ontem choveu bastante aqui em São Paulo.")).toEqual({ candidata: false, motivo: null });
+    expect(avaliar("Bom dia, pessoal, vamos começar a reunião.")).toEqual({ candidata: false, motivo: null, sinalForte: false });
+    expect(avaliar("Ontem choveu bastante aqui em São Paulo.")).toEqual({ candidata: false, motivo: null, sinalForte: false });
   });
 
   it("alucinação nunca é candidata, mesmo com interrogação", () => {
-    expect(avaliar("Obrigado.")).toEqual({ candidata: false, motivo: null });
-    expect(avaliar("Qual?")).toEqual({ candidata: false, motivo: null });
-    expect(avaliar("[Música]")).toEqual({ candidata: false, motivo: null });
+    expect(avaliar("Obrigado.")).toEqual({ candidata: false, motivo: null, sinalForte: false });
+    expect(avaliar("Qual?")).toEqual({ candidata: false, motivo: null, sinalForte: false });
+    expect(avaliar("[Música]")).toEqual({ candidata: false, motivo: null, sinalForte: false });
+    expect(avaliar("Legendas pela comunidade Amara.org, qual é a próxima")).toEqual({ candidata: false, motivo: null, sinalForte: false });
+  });
+
+  it("pergunta com o sinal forte sai marcada na avaliação", () => {
+    expect(avaliar("Qual a complexidade do quicksort?")).toEqual({ candidata: true, motivo: "interrogacao", sinalForte: true });
+  });
+
+  it("a interrogativa no meio não dá sinal forte, nem com o ? no fim", () => {
+    expect(avaliar("pessoal queria saber qual a complexidade do quicksort?")).toEqual({
+      candidata: true,
+      motivo: "interrogacao",
+      sinalForte: false,
+    });
+    expect(avaliar("pessoal queria saber qual a complexidade do quicksort").sinalForte).toBe(false);
   });
 
   it("o objeto do serviço expõe as mesmas funções", () => {
     expect(DetectorDePergunta.avaliar).toBe(avaliar);
     expect(DetectorDePergunta.ehAlucinacao).toBe(ehAlucinacao);
+    expect(DetectorDePergunta.ehAlucinacaoConhecida).toBe(ehAlucinacaoConhecida);
+    expect(DetectorDePergunta.sinalForte).toBe(sinalForte);
+    expect(DetectorDePergunta.terminaEmInterrogacao).toBe(terminaEmInterrogacao);
+  });
+});
+
+describe("DetectorDePergunta.terminaEmInterrogacao", () => {
+  it("termina em ? (ou ？), ignorando espaços e aspas no fim; o ? no meio não conta", () => {
+    expect(terminaEmInterrogacao("Qual a complexidade?")).toBe(true);
+    expect(terminaEmInterrogacao('Ele disse "isso escala?"  ')).toBe(true);
+    expect(terminaEmInterrogacao("Tudo bem？")).toBe(true);
+    expect(terminaEmInterrogacao("Será? Acho que não.")).toBe(false);
+    expect(terminaEmInterrogacao("")).toBe(false);
+  });
+});
+
+describe("DetectorDePergunta.sinalForte", () => {
+  it("termina em ?, tem 4+ palavras e começa por palavra interrogativa, em português ou inglês", () => {
+    expect(MINIMO_DE_PALAVRAS_DO_SINAL_FORTE).toBe(4);
+    for (const texto of [
+      "Qual a complexidade do quicksort?",
+      "Como inverter uma lista ligada?",
+      "Por que isso acontece aqui?",
+      "O que é uma closure?",
+      "Quanto tempo leva isso?",
+      "Será que dá pra otimizar?",
+      "What is a closure exactly?",
+      "How does the event loop work?",
+      "Can you explain dynamic programming?",
+      "  qual é a diferença entre eles?  ",
+    ]) {
+      expect(sinalForte(texto)).toBe(true);
+    }
+  });
+
+  it("sem o ?, com menos de 4 palavras ou sem começar por interrogativa, não é sinal forte", () => {
+    for (const texto of [
+      "Qual a complexidade do quicksort", // sem "?"
+      "Como assim, cara?", // 3 palavras
+      "Qual é?",
+      "Você já trabalhou com Kubernetes?", // não começa por interrogativa
+      "Me explica como inverter uma lista ligada?",
+      "E como funciona um heap?",
+      "Comoção geral no evento hoje?", // "como" só como pedaço de palavra
+    ]) {
+      expect(sinalForte(texto)).toBe(false);
+    }
+  });
+
+  it("alucinação nunca é sinal forte", () => {
+    expect(sinalForte("Legendas pela comunidade Amara.org, qual é?")).toBe(false);
+  });
+
+  it("a lista de interrogativas é congelada e tem português e inglês", () => {
+    expect(Object.isFrozen(PALAVRAS_INTERROGATIVAS)).toBe(true);
+    expect(PALAVRAS_INTERROGATIVAS).toEqual(expect.arrayContaining(["qual", "como", "por que", "what", "how"]));
+  });
+});
+
+describe("DetectorDePergunta.ehAlucinacaoConhecida", () => {
+  it("só as invenções conhecidas, sem a regra do texto curto (uma passada pode estar começando)", () => {
+    for (const texto of ["Obrigado.", "Thanks for watching!", "[Música]", "♪", "...", "", "Legendas pela comunidade Amara.org"]) {
+      expect(ehAlucinacaoConhecida(texto)).toBe(true);
+    }
+    expect(ehAlucinacaoConhecida("Bom")).toBe(false);
+    expect(ehAlucinacao("Bom")).toBe(true);
+    expect(ehAlucinacaoConhecida("la la la")).toBe(false);
+    expect(ehAlucinacao("la la la")).toBe(true);
   });
 });
 

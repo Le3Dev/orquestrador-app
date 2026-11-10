@@ -1,16 +1,44 @@
 import { api, ErroDaApi } from "../api/cliente";
 import type { ClassificacaoDaEscuta, PedidoDeClassificacaoDaEscuta } from "../api/tipos";
-import { TranscricaoDescartada, type Transcrever, transcrever as transcreverNoWhisper } from "../ditado/transcritor";
+import {
+  type DescricaoDoMotor,
+  type MotorDeTranscricao,
+  motorDeTranscricao,
+  type ProgressoDoDownload,
+  type ResultadoDaTranscricao,
+  TranscricaoDescartada,
+} from "../ditado/motor";
+import { BufferDaFala } from "./BufferDaFala";
 import { type CapturaDoAudio, iniciarCapturaDoAudio, type OuvintesDaCaptura } from "./capturaDoAudio";
+import { ConfirmadorDeTranscricao, fimDoUltimoSegmentoConfirmado } from "./ConfirmadorDeTranscricao";
 import { ControleDeDisparos } from "./ControleDeDisparos";
-import { CortadorDeTrechos, TAXA_DE_AMOSTRAGEM, type TrechoDeAudio } from "./CortadorDeTrechos";
+import { CortadorDeFala, type EventoDeFala } from "./CortadorDeFala";
 import { DetectorDePergunta } from "./DetectorDePergunta";
+import { type DetectorDeVoz, type JanelasAnalisadas, TAXA_DE_AMOSTRAGEM } from "./DetectorDeVoz";
+import { DetectorDeVozSilero } from "./DetectorDeVozSilero";
 import { DURACAO_DO_CONTEXTO_MS, JanelaDeTranscricao } from "./JanelaDeTranscricao";
+import {
+  type FalaDaLegenda,
+  type FraseDaLegenda,
+  LegendaDaEscuta,
+  type MudancaNaLegenda,
+  PAUSA_DO_ENUNCIADO_MS,
+} from "./LegendaDaEscuta";
 import { mensagemDaEscuta } from "./mensagemDaEscuta";
 import { PerguntaDetectada } from "./PerguntaDetectada";
-import { type ArmazenamentoDasPreferencias, type PreferenciasDaEscuta, preferenciasNoNavegador } from "./preferenciasDaEscuta";
+import {
+  type AparenciaDaEscuta,
+  aparenciaValida,
+  type ArmazenamentoDasPreferencias,
+  type IdiomaDaEscuta,
+  type PreferenciasDaEscuta,
+  preferenciasNoNavegador,
+  type PrioridadeDoMotor,
+} from "./preferenciasDaEscuta";
 import { TrechoTranscrito } from "./TrechoTranscrito";
 import type { OpcoesDaEscuta, SituacaoDaEscuta, TrechoNaTela } from "./useEscuta";
+
+export type { FraseDaLegenda } from "./LegendaDaEscuta";
 
 /** Quantas linhas da transcrição a tela mostra. */
 export const LINHAS_NA_TELA = 6;
@@ -18,9 +46,12 @@ export const LINHAS_NA_TELA = 6;
 /** Quantos trechos finais a sessão guarda para a conversa; passando disto, os mais antigos saem. */
 export const MAXIMO_DE_TRECHOS_NA_TELA = 200;
 
-/** A cada tanto de áudio novo num trecho em andamento, pede-se uma transcrição provisória dele. */
-export const INTERVALO_DA_PROVISORIA_MS = 1_500;
-const AMOSTRAS_ENTRE_PROVISORIAS = (INTERVALO_DA_PROVISORIA_MS * TAXA_DE_AMOSTRAGEM) / 1000;
+/**
+ * Durante a fala, uma passada parcial (descartável) sai quando há ao menos
+ * isto de áudio novo desde a anterior e nenhuma passada está em andamento:
+ * a cadência se adapta à velocidade do motor.
+ */
+export const AUDIO_NOVO_PARA_PASSADA_MS = 1_000;
 
 /**
  * Ao sair do modo invisível, a captura espera isto antes de ser desligada (o
@@ -43,18 +74,37 @@ export interface EstadoDaEscuta {
   readonly situacao: SituacaoDaEscuta;
   readonly progressoDoDownload: number | null;
   readonly linhas: readonly string[];
-  /** O que está sendo dito agora, ainda provisório; null quando o trecho fecha. */
+  /** O enunciado em andamento: o confirmado dele mais o parcial; null quando não há fala em andamento. */
   readonly linhaProvisoria: string | null;
+  /** As falas confirmadas. */
   readonly trechos: readonly TrechoNaTela[];
   readonly automatico: boolean;
   readonly erro: string | null;
   readonly ultimaPergunta: string | null;
+  /**
+   * A legenda em enunciados: cada item de `frases` é um enunciado inteiro (uma
+   * fala completa entre pausas de `PAUSA_DO_ENUNCIADO_MS`, até
+   * `DURACAO_MAXIMA_DO_ENUNCIADO_MS`), não mais uma fatia de 5 s da fala. O
+   * nome `frases` ficou para não mexer na tela.
+   */
+  readonly legenda: {
+    /** Enunciados já fechados (uma fala completa entre pausas cada), da mais antiga à mais nova, no máximo 200. */
+    readonly frases: readonly FraseDaLegenda[];
+    /** O enunciado aberto: id estável (o mesmo que ele terá ao fechar), o confirmado, a cauda parcial e o início; null sem fala em andamento. */
+    readonly emAndamento: { readonly id: string; readonly confirmado: string; readonly parcial: string; readonly inicioMs: number } | null;
+  };
+  readonly motor: { readonly dispositivo: "webgpu" | "dml" | "cpu" | "wasm"; readonly modelo: string; readonly precisao: string; readonly nativo: boolean } | null;
+  readonly download: { readonly progresso: number; readonly totalMb: number | null } | null;
+  readonly ultimaPerguntaEnviada: { readonly pergunta: string; readonly enviadaEmMs: number } | null;
+  readonly preferenciasDaTela: { readonly idioma: "portuguese" | "automatico"; readonly prioridadeDoMotor: "velocidade" | "precisao"; readonly aparencia: { readonly tamanhoDaFonte: number; readonly opacidade: number; readonly compacto: boolean } };
 }
 
 /** O que a sessão usa de fora; os testes trocam por falsos. */
 export interface DependenciasDaSessao {
   iniciarCaptura(ouvintes: OuvintesDaCaptura): Promise<CapturaDoAudio>;
-  transcrever: Transcrever;
+  /** O VAD (Silero), que dá a probabilidade de voz de cada janela do áudio. */
+  detectorDeVoz: DetectorDeVoz;
+  motor: MotorDeTranscricao;
   classificar(pedido: PedidoDeClassificacaoDaEscuta, sinal?: AbortSignal): Promise<ClassificacaoDaEscuta>;
   /** Relógio em ms (o mesmo para os trechos e para o controle de disparos). */
   agora(): number;
@@ -66,7 +116,8 @@ export interface DependenciasDaSessao {
 function dependenciasPadrao(): DependenciasDaSessao {
   return {
     iniciarCaptura: (ouvintes) => iniciarCapturaDoAudio(ouvintes),
-    transcrever: transcreverNoWhisper,
+    detectorDeVoz: new DetectorDeVozSilero(),
+    motor: motorDeTranscricao,
     classificar: (pedido, sinal) => api.classificarNaEscuta(pedido, sinal),
     agora: () => Date.now(),
     agendar: (acao, ms) => {
@@ -80,23 +131,62 @@ function dependenciasPadrao(): DependenciasDaSessao {
 /** Em que pé está a captura (o modo invisível e a disponibilidade vêm das opções). */
 type Fase = "parada" | "aguardando-aviso" | "iniciando" | "escutando" | "pausada" | "erro";
 
-/** Um trecho que pode ser pedido, esperando a vez de ir ao servidor. */
+/** Um enunciado que pode ser pedido, esperando a vez de ir ao servidor. */
 interface Candidata {
   readonly trecho: string;
-  /** A transcrição dos 60 s antes do trecho (o servidor a usa para dar sentido a ele). */
+  /** A transcrição dos 60 s antes do enunciado (o servidor a usa para dar sentido a ele). */
   readonly contexto: string;
+  /** O enunciado da legenda (aberto ou fechado), para marcá-lo se for pergunta. */
+  readonly idDaFrase: string;
 }
+
+/**
+ * A fala que o cortador anunciou e ainda não fechou. Os tempos são no relógio
+ * do cortador (ms de áudio desde o começo da captura).
+ */
+interface FalaEmAndamento {
+  /** Sobe a cada fala: resultados de uma fala que já fechou são ignorados. */
+  readonly epoca: number;
+  readonly inicioMs: number;
+  /** O áudio da fala que ainda vai para o motor (o começo confirmado é aparado). */
+  readonly buffer: BufferDaFala;
+  confirmador: ConfirmadorDeTranscricao;
+  /** O idioma que a primeira passada detectou (com o idioma automático); null antes dela. */
+  idioma: string | null;
+  /** Até onde ia o áudio da última passada pedida. */
+  fimDaUltimaPassadaMs: number;
+}
+
+const LEGENDA_VAZIA: EstadoDaEscuta["legenda"] = Object.freeze({ frases: Object.freeze([]), emAndamento: null });
+
+const msParaAmostras = (ms: number): number => Math.max(0, Math.round((ms * TAXA_DE_AMOSTRAGEM) / 1000));
+
+const limparTexto = (texto: string): string => texto.replace(/\s+/g, " ").trim();
 
 function mensagemDe(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro);
 }
 
-function mensagemDoErroDeTranscricao(erro: unknown): string {
+function mensagemDoErroDeTranscricao(erro: unknown, prefixo = "A transcrição da escuta falhou"): string {
   const mensagem = mensagemDe(erro);
   if (/fetch|network|Failed to load|download/i.test(mensagem)) {
-    return "Não foi possível baixar o modelo de voz da escuta. Confira a internet; a escuta tenta de novo no próximo trecho.";
+    return "Não foi possível baixar o modelo de voz da escuta. Confira a internet; a escuta tenta de novo na próxima fala.";
   }
-  return `A transcrição da escuta falhou: ${mensagem}`;
+  return `${prefixo}: ${mensagem}`;
+}
+
+/** O download como a tela mostra: null quando acabou (100%) ou não há. */
+function downloadNaTela(progresso: ProgressoDoDownload | null): EstadoDaEscuta["download"] {
+  if (progresso === null || !(progresso.progresso < 100)) return null;
+  return Object.freeze({ progresso: Math.max(0, progresso.progresso), totalMb: progresso.totalMb });
+}
+
+function preferenciasDaTelaDe(preferencias: PreferenciasDaEscuta): EstadoDaEscuta["preferenciasDaTela"] {
+  return Object.freeze({
+    idioma: preferencias.idioma,
+    prioridadeDoMotor: preferencias.prioridadeDoMotor,
+    aparencia: preferencias.aparencia,
+  });
 }
 
 /**
@@ -126,15 +216,22 @@ export function controleSemPendente(
 }
 
 /**
- * A escuta do áudio do computador no modo invisível: captura → cortador de
- * trechos → Whisper → janela de transcrição → (com o automático) detector e
- * classificação no servidor → controle de disparos → chat rápido.
+ * A escuta do áudio do computador em tempo real: captura (pedaços de 100 ms)
+ * → VAD Silero → cortador de fala → buffer da fala → motor de transcrição
+ * (passadas parciais a cada ~1 s de áudio novo e uma final no fim da fala) →
+ * confirmador por concordância → legenda em enunciados (as falas curtas
+ * seguidas, até a pausa de `PAUSA_DO_ENUNCIADO_MS` ou a duração máxima, e o
+ * enunciado em andamento), janela de transcrição e trechos da conversa → (com
+ * o automático) detector de pergunta no texto inteiro do enunciado, quando ele
+ * fecha (ou antes, quando o confirmado passa a terminar em "?") → atalho do
+ * sinal forte ou classificação no servidor → controle de disparos → chat rápido.
  *
  * Vive fora do React (há uma instância do módulo, `sessaoDaEscuta`), para
  * sobreviver à remontagem do chat rápido; a tela a observa por `assinar` e
  * `instantaneo` (compatíveis com `useSyncExternalStore`) e lhe passa as opções
  * mais recentes por `atualizarOpcoes`. Nenhum áudio vai para o disco; da
- * transcrição, só a janela dos últimos 2 min fica na memória.
+ * transcrição, ficam na memória a janela dos últimos 2 min, os últimos 200
+ * enunciados da legenda e os trechos da conversa.
  */
 export class SessaoDaEscuta {
   private readonly dependencias: DependenciasDaSessao;
@@ -144,23 +241,46 @@ export class SessaoDaEscuta {
   private opcoes: OpcoesDaEscuta | null = null;
   private fase: Fase = "parada";
   private preferencias: PreferenciasDaEscuta;
+  private preferenciasDaTela: EstadoDaEscuta["preferenciasDaTela"];
   private erro: string | null = null;
-  private progresso: number | null = null;
   private ultimaPergunta: string | null = null;
+  private ultimaPerguntaEnviada: EstadoDaEscuta["ultimaPerguntaEnviada"] = null;
+  private motor: DescricaoDoMotor | null = null;
+  private download: EstadoDaEscuta["download"] = null;
+  /** Sobe a cada `preparar`: a resposta de um preparo antigo não sobrescreve a do mais novo. */
+  private preparo = 0;
 
   private janela = JanelaDeTranscricao.vazia();
   private linhas: readonly string[] = Object.freeze([]);
   private trechosNaTela: readonly TrechoNaTela[] = Object.freeze([]);
   private proximoIdDoTrecho = 1;
-  private linhaProvisoria: string | null = null;
-  /** Época do trecho a que a linha provisória pertence. */
-  private epocaDaLinha = 0;
-  /** Sobe a cada trecho fechado: provisórias de um trecho já fechado são ignoradas. */
-  private epocaDoTrecho = 0;
-  private provisoriaEmVoo = false;
-  private amostrasDesdeAProvisoria = 0;
+  private legenda = LegendaDaEscuta.vazia();
+  private legendaNaTela: EstadoDaEscuta["legenda"] = LEGENDA_VAZIA;
   private controle = ControleDeDisparos.inicial();
-  private readonly cortador = new CortadorDeTrechos();
+
+  private readonly cortador = new CortadorDeFala();
+  private fala: FalaEmAndamento | null = null;
+  private proximaEpoca = 1;
+  /** Passadas da geração atual ainda no motor; a parcial só sai com zero. */
+  private passadasEmVoo = 0;
+  /** As passadas finais terminam na ordem das falas: cada uma espera a anterior. */
+  private ultimaFinal: Promise<void> = Promise.resolve();
+  /**
+   * Fala cortada por duração máxima: a seguinte começa no mesmo ms, mas o
+   * áudio até aqui (relógio do cortador) já foi confirmado na anterior.
+   */
+  private continuacaoMs: number | null = null;
+
+  /** Cancela o temporizador da pausa que fecha o enunciado; null sem temporizador. */
+  private cancelarPausaDoEnunciado: (() => void) | null = null;
+  /** A época da última fala que terminou (evento "fim"). */
+  private ultimaFalaEncerrada = 0;
+  /** A época da última fala cuja passada final já chegou (ou falhou). */
+  private ultimaFalaConcluida = 0;
+  /** A pausa venceu antes da passada final desta fala: o enunciado fecha assim que ela chegar. */
+  private fecharEnunciadoAposFala: number | null = null;
+  /** O enunciado aberto já avaliado como pergunta, e com qual texto (para não avaliar o mesmo de novo). */
+  private avaliacaoDoEnunciado: { readonly id: string; readonly texto: string } | null = null;
 
   /** Muda a cada parada: respostas atrasadas de uma captura anterior são ignoradas. */
   private geracao = 0;
@@ -177,6 +297,22 @@ export class SessaoDaEscuta {
   constructor(dependencias: Partial<DependenciasDaSessao> = {}) {
     this.dependencias = { ...dependenciasPadrao(), ...dependencias };
     this.preferencias = this.dependencias.preferencias.ler();
+    this.preferenciasDaTela = preferenciasDaTelaDe(this.preferencias);
+    try {
+      this.motor = this.dependencias.motor.motorAtual("escuta");
+      this.dependencias.motor.aoMudarMotor((origem, motor) => {
+        if (origem !== "escuta") return;
+        this.motor = motor;
+        this.emitir();
+      });
+      this.dependencias.motor.aoBaixar((origem, progresso) => {
+        if (origem !== "escuta") return;
+        this.download = downloadNaTela(progresso);
+        this.emitir();
+      });
+    } catch {
+      // Sem os avisos do motor, a tela só não mostra qual motor está em uso nem o download.
+    }
     this.estado = this.montarEstado();
   }
 
@@ -227,6 +363,32 @@ export class SessaoDaEscuta {
     this.emitir();
   };
 
+  /** Português fixo ou idioma detectado a cada fala; vale a partir da próxima passada. */
+  readonly mudarIdioma = (idioma: IdiomaDaEscuta): void => {
+    if (idioma === this.preferencias.idioma) return;
+    this.guardarPreferencias({ ...this.preferencias, idioma });
+    this.emitir();
+  };
+
+  /** Velocidade ou precisão; escutando, o motor é preparado de novo com a nova prioridade. */
+  readonly mudarPrioridadeDoMotor = (prioridadeDoMotor: PrioridadeDoMotor): void => {
+    if (prioridadeDoMotor === this.preferencias.prioridadeDoMotor) return;
+    this.guardarPreferencias({ ...this.preferencias, prioridadeDoMotor });
+    if (this.fase === "escutando" || this.fase === "iniciando") this.prepararMotor();
+    this.emitir();
+  };
+
+  /** Muda parte da aparência da legenda; valores fora dos limites vão para a borda. */
+  readonly mudarAparencia = (aparencia: Partial<AparenciaDaEscuta>): void => {
+    const nova = aparenciaValida({ ...this.preferencias.aparencia, ...aparencia });
+    const atual = this.preferencias.aparencia;
+    if (nova.tamanhoDaFonte === atual.tamanhoDaFonte && nova.opacidade === atual.opacidade && nova.compacto === atual.compacto) {
+      return;
+    }
+    this.guardarPreferencias({ ...this.preferencias, aparencia: nova });
+    this.emitir();
+  };
+
   readonly pausar = (): void => {
     if (this.fase !== "escutando" && this.fase !== "iniciando") return;
     this.pararCaptura();
@@ -267,6 +429,19 @@ export class SessaoDaEscuta {
     this.emitir();
   };
 
+  /**
+   * Esquece os trechos da conversa e os enunciados fechados da legenda (a
+   * tela chama no /clear). A janela de 2 min e o enunciado em andamento não
+   * mudam.
+   */
+  readonly limparTrechos = (): void => {
+    const legenda = this.legenda.semFrases();
+    if (this.trechosNaTela.length === 0 && legenda === this.legenda) return;
+    if (this.trechosNaTela.length > 0) this.trechosNaTela = Object.freeze([]);
+    this.trocarLegenda(legenda);
+    this.emitir();
+  };
+
   // ---- Ciclo de vida ----
 
   private aoEntrarNoModo(): void {
@@ -294,13 +469,23 @@ export class SessaoDaEscuta {
     }, ESPERA_PARA_DESLIGAR_MS);
   }
 
-  /** Com a escuta desligada: para tudo e esquece a janela de 2 min (os trechos da conversa ficam até `limparTrechos`). */
+  /**
+   * Com a escuta desligada: para tudo, libera o VAD e esquece a janela de
+   * 2 min e a legenda (os trechos da conversa ficam até `limparTrechos`).
+   */
   private desligarTudo(): void {
     this.pararCaptura();
+    try {
+      this.dependencias.detectorDeVoz.encerrar();
+    } catch {
+      // Já estava encerrado.
+    }
     this.fase = "parada";
     this.trocarJanela(JanelaDeTranscricao.vazia());
+    this.trocarLegenda(LegendaDaEscuta.vazia());
     this.erro = null;
     this.ultimaPergunta = null;
+    this.ultimaPerguntaEnviada = null;
     this.ocupadoPorConflito = false;
   }
 
@@ -310,6 +495,8 @@ export class SessaoDaEscuta {
     this.fase = "iniciando";
     this.erro = null;
     this.emitir();
+    // O motor carrega e aquece enquanto a captura sobe.
+    this.prepararMotor();
     try {
       const captura = await this.dependencias.iniciarCaptura({
         aoReceberAmostras: (amostras) => this.receberAmostras(amostras, geracao),
@@ -332,6 +519,30 @@ export class SessaoDaEscuta {
     this.emitir();
   }
 
+  /** Pede ao motor que carregue o modelo da escuta com a prioridade escolhida. */
+  private prepararMotor(): void {
+    const preparo = ++this.preparo;
+    let preparando: Promise<DescricaoDoMotor>;
+    try {
+      preparando = this.dependencias.motor.preparar("escuta", this.preferencias.prioridadeDoMotor);
+    } catch (erro) {
+      preparando = Promise.reject(erro instanceof Error ? erro : new Error(String(erro)));
+    }
+    preparando.then(
+      (motor) => {
+        if (preparo !== this.preparo) return;
+        this.motor = motor;
+        this.emitir();
+      },
+      (erro: unknown) => {
+        // Parada, pausada ou já com erro (ex.: a captura falhou), a mensagem do motor não substitui a da tela.
+        if (preparo !== this.preparo || (this.fase !== "iniciando" && this.fase !== "escutando")) return;
+        this.erro = mensagemDoErroDeTranscricao(erro, "O motor de transcrição da escuta não pôde ser preparado");
+        this.emitir();
+      },
+    );
+  }
+
   private aoEncerrarCaptura(motivo: string, geracao: number): void {
     if (geracao !== this.geracao) return;
     this.pararCaptura();
@@ -341,8 +552,11 @@ export class SessaoDaEscuta {
   }
 
   /**
-   * Desliga a captura e tudo o que dependia dela: cortador, classificação,
-   * timer e pendente. Transcrições já no Whisper terminam, mas são ignoradas.
+   * Desliga a captura e tudo o que dependia dela: VAD, cortador, fala em
+   * andamento, pausa do enunciado, classificação, timer e pendente. Passadas
+   * já no motor terminam, mas são ignoradas. O enunciado aberto fecha como
+   * está (o que já tinha confirmado fica na legenda e na janela), sem ser
+   * avaliado: com a escuta parada, nada vai ao chat.
    */
   private pararCaptura(): void {
     this.geracao++;
@@ -353,142 +567,389 @@ export class SessaoDaEscuta {
     } catch {
       // Já estava parada.
     }
+    try {
+      this.dependencias.detectorDeVoz.reiniciar();
+    } catch {
+      // Sem o VAD de pé, não há o que zerar.
+    }
     this.cortador.reiniciar();
-    this.linhaProvisoria = null;
-    this.amostrasDesdeAProvisoria = 0;
+    this.fala = null;
+    this.passadasEmVoo = 0;
+    this.ultimaFinal = Promise.resolve();
+    this.continuacaoMs = null;
+    this.cancelarPausa();
+    this.fecharEnunciadoAposFala = null;
+    const mudanca = this.legenda.semEnunciadoAberto();
+    this.trocarLegenda(mudanca.legenda);
+    for (const frase of mudanca.fechadasAgora) this.registrarNaJanela(frase);
+    this.avaliacaoDoEnunciado = null;
     this.cancelarClassificacao();
     this.cancelarTimer();
     this.controle = controleSemPendente(this.controle);
-    this.progresso = null;
   }
 
-  // ---- Áudio → texto ----
+  // ---- Áudio → falas ----
+
+  /** A captura (ou o VAD) é desta geração e a escuta está de fato ouvindo. */
+  private ouvindo(geracao: number): boolean {
+    // Na espera para desligar (modo já desligado), o áudio não é ouvido.
+    return geracao === this.geracao && this.fase === "escutando" && this.modoEstaAtivo();
+  }
 
   private receberAmostras(amostras: Float32Array, geracao: number): void {
-    // Na espera para desligar (modo já desligado), o áudio não é ouvido.
-    if (geracao !== this.geracao || this.fase !== "escutando" || !this.modoEstaAtivo()) return;
-    let trechos: TrechoDeAudio[];
-    const estavaEmAndamento = this.cortador.emAndamento;
+    if (!this.ouvindo(geracao)) return;
+    let analise: Promise<JanelasAnalisadas>;
     try {
-      trechos = this.cortador.adicionar(amostras);
-    } catch {
-      return;
-    }
-    // Cada trecho fechado encerra uma época; o trecho final leva a sua, para limpar a linha certa.
-    for (const trecho of trechos) {
-      const epoca = this.epocaDoTrecho++;
-      this.amostrasDesdeAProvisoria = 0;
-      void this.transcreverTrecho(trecho, geracao, epoca);
-    }
-    if (trechos.length === 0 && estavaEmAndamento && !this.cortador.emAndamento) {
-      // O trecho fechou sem voz suficiente (nenhum final virá): a linha provisória some.
-      this.epocaDoTrecho++;
-      this.amostrasDesdeAProvisoria = 0;
-      this.linhaProvisoria = null;
-      this.emitir();
-      return;
-    }
-    if (this.cortador.emAndamento) {
-      this.amostrasDesdeAProvisoria += amostras.length;
-      if (this.amostrasDesdeAProvisoria >= AMOSTRAS_ENTRE_PROVISORIAS) this.pedirProvisoria(geracao);
-    }
-  }
-
-  /** Pede ao Whisper o texto provisório do trecho em andamento; pula se já há uma provisória em voo. */
-  private pedirProvisoria(geracao: number): void {
-    if (this.provisoriaEmVoo) return;
-    const parcial = this.cortador.parcialEmAndamento();
-    if (parcial === null) return;
-    this.amostrasDesdeAProvisoria = 0;
-    this.provisoriaEmVoo = true;
-    void this.transcreverProvisoria(parcial, geracao, this.epocaDoTrecho);
-  }
-
-  private async transcreverProvisoria(parcial: TrechoDeAudio, geracao: number, epoca: number): Promise<void> {
-    try {
-      const texto = await this.dependencias.transcrever(parcial.amostras, undefined, {
-        idioma: "automatico",
-        origem: "escuta",
-        provisoria: true,
-      });
-      // Atrasada: o trecho já fechou ou a captura é outra.
-      if (geracao !== this.geracao || epoca !== this.epocaDoTrecho) return;
-      const limpo = texto.replace(/\s+/g, " ").trim();
-      if (limpo === "" || DetectorDePergunta.ehAlucinacao(limpo) || limpo === this.linhaProvisoria) return;
-      this.linhaProvisoria = limpo;
-      this.epocaDaLinha = epoca;
-      this.emitir();
-    } catch {
-      // A provisória é um extra: descartada ou com falha, o trecho final cuida do resto.
-    } finally {
-      this.provisoriaEmVoo = false;
-    }
-  }
-
-  /** O trecho final chegou (ou falhou): a linha provisória dele, e só a dele, sai. */
-  private fecharLinhaProvisoria(epoca: number): void {
-    if (this.linhaProvisoria !== null && this.epocaDaLinha <= epoca) this.linhaProvisoria = null;
-  }
-
-  private async transcreverTrecho(trecho: TrechoDeAudio, geracao: number, epoca: number): Promise<void> {
-    const inicioMs = this.inicioDaCapturaMs + trecho.inicioMs;
-    const fimMs = this.inicioDaCapturaMs + trecho.fimMs;
-    let texto: string;
-    try {
-      texto = await this.dependencias.transcrever(trecho.amostras, (progresso) => this.aoBaixar(progresso, geracao), {
-        idioma: "automatico",
-        origem: "escuta",
-      });
+      analise = this.dependencias.detectorDeVoz.analisar(amostras);
     } catch (erro) {
-      if (geracao !== this.geracao) return;
-      this.fecharLinhaProvisoria(epoca);
-      // Descartada: a fila da escuta encheu e chegaram trechos mais novos; não é falha.
-      if (erro instanceof TranscricaoDescartada) {
-        this.emitir();
-        return;
-      }
-      this.progresso = null;
-      this.erro = mensagemDoErroDeTranscricao(erro);
-      this.emitir();
+      this.falhaNoDetector(erro, geracao);
       return;
     }
+    // O VAD responde na ordem dos pedidos: as janelas chegam ao cortador em sequência.
+    analise.then(
+      (janelas) => this.receberJanelas(janelas, geracao),
+      (erro: unknown) => this.falhaNoDetector(erro, geracao),
+    );
+  }
+
+  /** Sem VAD não há escuta: para a captura e mostra o erro; retomar tenta de novo (com um VAD novo). */
+  private falhaNoDetector(erro: unknown, geracao: number): void {
     if (geracao !== this.geracao) return;
-    this.progresso = null;
-    this.fecharLinhaProvisoria(epoca);
-    this.registrarTexto(texto, inicioMs, fimMs);
+    this.pararCaptura();
+    this.fase = "erro";
+    this.erro = `O detector de voz da escuta falhou: ${mensagemDe(erro)}`;
     this.emitir();
   }
 
-  private aoBaixar(progresso: number, geracao: number): void {
-    if (geracao !== this.geracao) return;
-    this.progresso = progresso < 100 ? Math.max(0, Math.round(progresso)) : null;
-    this.emitir();
-  }
-
-  private registrarTexto(texto: string, inicioMs: number, fimMs: number): void {
-    const limpo = texto.replace(/\s+/g, " ").trim();
-    if (limpo === "" || DetectorDePergunta.ehAlucinacao(limpo)) return;
-    let trecho: TrechoTranscrito;
+  private receberJanelas(janelas: JanelasAnalisadas, geracao: number): void {
+    if (!this.ouvindo(geracao)) return;
+    const antesMs = this.cortador.agoraMs;
+    let eventos: readonly EventoDeFala[];
     try {
-      trecho = TrechoTranscrito.criar({ texto: limpo, inicioMs, fimMs });
+      eventos = this.cortador.adicionar(janelas);
     } catch {
       return;
     }
-    // O contexto da classificação é o que veio antes do trecho, não ele mesmo.
-    const contextoAnterior = this.janela.contexto(DURACAO_DO_CONTEXTO_MS, inicioMs);
-    this.trocarJanela(this.janela.com(trecho).semAntigos(this.dependencias.agora()));
+    for (const evento of eventos) {
+      if (evento.tipo === "inicio") this.abrirFala(evento.emMs);
+      else this.fecharFala(evento, geracao);
+    }
+    const fala = this.fala;
+    if (fala === null || !this.cortador.emAndamento) return;
+    this.completarBuffer(fala, janelas.amostras, antesMs);
+    if (this.passadasEmVoo === 0 && fala.buffer.fimMs - fala.fimDaUltimaPassadaMs >= AUDIO_NOVO_PARA_PASSADA_MS) {
+      void this.passadaParcial(fala, geracao);
+    }
+  }
+
+  /**
+   * "inicio": buffer e confirmador novos. O áudio da fala entra no buffer logo
+   * depois (`completarBuffer`). A fala nova cancela a pausa do enunciado (se
+   * ela ainda não venceu): as duas entram no mesmo enunciado.
+   */
+  private abrirFala(emMs: number): void {
+    this.cancelarPausa();
+    const continuacao = this.continuacaoMs;
+    this.continuacaoMs = null;
+    const inicioDoBufferMs = continuacao !== null && continuacao > emMs ? continuacao : emMs;
+    this.fala = {
+      epoca: this.proximaEpoca++,
+      inicioMs: emMs,
+      buffer: new BufferDaFala(inicioDoBufferMs),
+      confirmador: ConfirmadorDeTranscricao.vazio(),
+      idioma: null,
+      fimDaUltimaPassadaMs: inicioDoBufferMs,
+    };
+  }
+
+  /**
+   * Leva ao buffer o áudio da fala até o relógio do cortador: do lote que
+   * acabou de chegar ou, logo depois do "inicio" (cujo começo, com o
+   * pre-roll, ficou em lotes anteriores), de todo o áudio da fala.
+   */
+  private completarBuffer(fala: FalaEmAndamento, lote: Float32Array, antesMs: number): void {
+    const desdeMs = fala.buffer.fimMs;
+    if (desdeMs >= this.cortador.agoraMs) return;
+    if (desdeMs >= antesMs) {
+      fala.buffer.acrescentar(lote.subarray(msParaAmostras(desdeMs - antesMs)));
+      return;
+    }
+    const inicioDaFalaMs = this.cortador.inicioDaFalaMs ?? desdeMs;
+    fala.buffer.acrescentar(this.cortador.audioDaFala().subarray(msParaAmostras(desdeMs - inicioDaFalaMs)));
+  }
+
+  /** O idioma de uma passada: português fixo, ou "automatico" até a primeira passada da fala detectar um. */
+  private idiomaDaPassada(fala: FalaEmAndamento): string {
+    if (this.preferencias.idioma !== "automatico") return "portuguese";
+    return fala.idioma ?? "automatico";
+  }
+
+  private lembrarIdioma(fala: FalaEmAndamento, idioma: string): void {
+    const codigo = idioma.trim();
+    if (this.preferencias.idioma !== "automatico" || fala.idioma !== null) return;
+    if (codigo === "" || codigo === "automatico") return;
+    fala.idioma = codigo;
+  }
+
+  /**
+   * Passada parcial (descartável) sobre o buffer: a hipótese vai ao
+   * confirmador, o confirmado à legenda e o buffer é aparado até o fim do
+   * último segmento todo confirmado. Descartada ou com falha, nada muda: a
+   * próxima passada (ou a final) cuida do resto.
+   */
+  private async passadaParcial(fala: FalaEmAndamento, geracao: number): Promise<void> {
+    const audio = fala.buffer.audio();
+    const inicioDoAudioMs = fala.buffer.inicioMs;
+    const fimDoAudioMs = fala.buffer.fimMs;
+    fala.fimDaUltimaPassadaMs = fimDoAudioMs;
+    this.passadasEmVoo++;
+    let resultado: ResultadoDaTranscricao | null = null;
+    try {
+      resultado = await this.dependencias.motor.transcrever(audio, {
+        origem: "escuta",
+        idioma: this.idiomaDaPassada(fala),
+        descartavel: true,
+      });
+    } catch {
+      // Descartada (chegou áudio mais novo na fila) ou com falha: a passada final cuida do resto.
+    }
+    if (geracao !== this.geracao) return;
+    this.passadasEmVoo--;
+    // Atrasada: a fala já fechou (a final vale por ela).
+    if (resultado === null || this.fala !== fala) return;
+
+    const texto = limparTexto(resultado.texto);
+    if (DetectorDePergunta.ehAlucinacaoConhecida(texto)) return;
+    this.lembrarIdioma(fala, resultado.idioma);
+    const passada = fala.confirmador.comHipotese(texto);
+    fala.confirmador = passada.confirmador;
+    const fimS = fimDoUltimoSegmentoConfirmado(resultado.segmentos, passada.confirmadoNaHipotese);
+    if (fimS !== null) fala.buffer.apararAte(inicioDoAudioMs + fimS * 1000);
+
+    const mudanca = this.legenda.comConfirmado(
+      this.falaNaLegenda(fala),
+      passada.confirmador.confirmado,
+      passada.parcial,
+      this.relogio(fimDoAudioMs),
+    );
+    this.aplicarNaLegenda(mudanca);
+    this.emitir();
+  }
+
+  /**
+   * "fim": passada final (não descartável) com o que restou no buffer, tirado
+   * do áudio do evento (que vai até o fim de verdade da fala). As finais
+   * terminam na ordem das falas. A pausa do enunciado começa a contar aqui.
+   */
+  private fecharFala(evento: Extract<EventoDeFala, { tipo: "fim" }>, geracao: number): void {
+    const fala = this.fala;
+    this.fala = null;
+    if (fala === null) return;
+    this.ultimaFalaEncerrada = fala.epoca;
+    this.agendarPausaDoEnunciado(geracao);
+    const inicioDoRestoMs = Math.min(Math.max(fala.buffer.inicioMs, evento.inicioMs), evento.emMs);
+    const resto = evento.audio.slice(msParaAmostras(inicioDoRestoMs - evento.inicioMs));
+    if (evento.motivo === "duracao_maxima") this.continuacaoMs = Math.max(evento.emMs, fala.buffer.inicioMs);
+
+    type Desfecho = { readonly resultado: ResultadoDaTranscricao | null; readonly erro: unknown };
+    let transcricao: Promise<Desfecho>;
+    if (resto.length === 0) {
+      transcricao = Promise.resolve({ resultado: null, erro: null });
+    } else {
+      try {
+        transcricao = this.dependencias.motor
+          .transcrever(resto, { origem: "escuta", idioma: this.idiomaDaPassada(fala), descartavel: false })
+          .then(
+            (resultado): Desfecho => ({ resultado, erro: null }),
+            (erro: unknown): Desfecho => ({ resultado: null, erro }),
+          );
+      } catch (erro) {
+        transcricao = Promise.resolve({ resultado: null, erro });
+      }
+    }
+
+    this.passadasEmVoo++;
+    const anterior = this.ultimaFinal;
+    this.ultimaFinal = (async () => {
+      const desfecho = await transcricao;
+      await anterior;
+      if (geracao !== this.geracao) return;
+      this.passadasEmVoo--;
+      this.concluirFala(fala, evento, desfecho.resultado, desfecho.erro);
+    })();
+  }
+
+  /**
+   * O texto final confirma o resto da fala: ele passa ao enunciado e a fala
+   * vira um trecho da conversa. Se a pausa já venceu esperando por esta
+   * passada, o enunciado fecha agora.
+   */
+  private concluirFala(
+    fala: FalaEmAndamento,
+    evento: Extract<EventoDeFala, { tipo: "fim" }>,
+    resultado: ResultadoDaTranscricao | null,
+    erro: unknown,
+  ): void {
+    // Descartada não é falha (a final não deveria ser); com falha, fica o que já estava confirmado.
+    if (erro !== null && !(erro instanceof TranscricaoDescartada)) this.erro = mensagemDoErroDeTranscricao(erro);
+    const texto = resultado === null ? "" : limparTexto(resultado.texto);
+    const final = fala.confirmador.finalizar(DetectorDePergunta.ehAlucinacaoConhecida(texto) ? "" : texto);
+    fala.confirmador = final.confirmador.paraNovaFala();
+    const confirmado = final.confirmador.confirmado;
+    const inicioMs = this.relogio(evento.inicioMs);
+    const fimMs = this.relogio(evento.emMs);
+
+    const mudanca = this.legenda.comFimDaFala(this.falaNaLegenda(fala), confirmado, fimMs);
+    this.registrarTrecho(confirmado, inicioMs, fimMs);
+    this.aplicarNaLegenda(mudanca);
+    this.ultimaFalaConcluida = Math.max(this.ultimaFalaConcluida, fala.epoca);
+    if (this.fecharEnunciadoAposFala !== null && fala.epoca >= this.fecharEnunciadoAposFala) {
+      this.fecharEnunciadoAposFala = null;
+      this.fecharEnunciado();
+    }
+    this.emitir();
+  }
+
+  // ---- Falas → enunciado ----
+
+  /**
+   * Conta a pausa do enunciado a partir do fim da fala. Sem fala nova até ela
+   * vencer, o enunciado fecha, mas só depois que a passada final da última
+   * fala chegar (ou falhar): se ela ainda não chegou, fecha logo em seguida.
+   */
+  private agendarPausaDoEnunciado(geracao: number): void {
+    this.cancelarPausa();
+    this.cancelarPausaDoEnunciado = this.dependencias.agendar(() => {
+      this.cancelarPausaDoEnunciado = null;
+      if (geracao !== this.geracao) return;
+      if (this.ultimaFalaConcluida >= this.ultimaFalaEncerrada) {
+        this.fecharEnunciado();
+        this.emitir();
+      } else {
+        this.fecharEnunciadoAposFala = this.ultimaFalaEncerrada;
+      }
+    }, PAUSA_DO_ENUNCIADO_MS);
+  }
+
+  private cancelarPausa(): void {
+    this.cancelarPausaDoEnunciado?.();
+    this.cancelarPausaDoEnunciado = null;
+  }
+
+  /** Fecha o enunciado aberto como está e o leva à janela e à avaliação da pergunta. */
+  private fecharEnunciado(): void {
+    this.aplicarNaLegenda(this.legenda.semEnunciadoAberto());
+  }
+
+  /**
+   * Uma mudança na legenda: os enunciados que fecharam vão à janela e à
+   * avaliação, e o aberto é avaliado se o confirmado passou a terminar em "?".
+   */
+  private aplicarNaLegenda(mudanca: MudancaNaLegenda): void {
+    this.trocarLegenda(mudanca.legenda);
+    this.aoFecharEnunciados(mudanca.fechadasAgora);
+    this.avaliarEnunciadoAberto();
+  }
+
+  /** A fala vira um trecho da conversa (o bloco "ouvido"), se não for alucinação. */
+  private registrarTrecho(texto: string, inicioMs: number, fimMs: number): void {
+    const limpo = limparTexto(texto);
+    if (limpo === "" || DetectorDePergunta.ehAlucinacao(limpo)) return;
     this.trechosNaTela = Object.freeze(
       [...this.trechosNaTela, { id: `trecho-${this.proximoIdDoTrecho++}`, texto: limpo, inicioMs, fimMs }].slice(
         -MAXIMO_DE_TRECHOS_NA_TELA,
       ),
     );
-    // Só o texto final classifica; o provisório nunca chega aqui.
-    if (this.automaticoAtual() && DetectorDePergunta.avaliar(limpo).candidata) {
-      this.pedirClassificacao({ trecho: limpo, contexto: contextoAnterior });
+  }
+
+  // ---- Enunciados → pergunta ----
+
+  /**
+   * Cada enunciado que fecha entra na janela de transcrição e, com o
+   * automático, o texto inteiro dele é avaliado: com o sinal forte vira
+   * pergunta direto; senão, se for candidato, vai ao servidor. O enunciado já
+   * avaliado antes de fechar (terminava em "?") só é avaliado de novo se o
+   * texto mudou e também termina em "?".
+   */
+  private aoFecharEnunciados(frases: readonly FraseDaLegenda[]): void {
+    for (const frase of frases) {
+      const avaliada = this.avaliacaoDoEnunciado?.id === frase.id ? this.avaliacaoDoEnunciado.texto : null;
+      if (avaliada !== null) this.avaliacaoDoEnunciado = null;
+      const contextoAnterior = this.registrarNaJanela(frase);
+      if (contextoAnterior === null || !this.automaticoAtual()) continue;
+      if (avaliada === frase.texto) continue;
+      if (avaliada !== null && !DetectorDePergunta.terminaEmInterrogacao(frase.texto)) continue;
+      const avaliacao = DetectorDePergunta.avaliar(frase.texto);
+      if (avaliacao.candidata) this.seguirCandidata(frase.texto, contextoAnterior, frase.id, avaliacao.sinalForte);
     }
   }
 
-  // ---- Texto → pergunta ----
+  /**
+   * O enunciado entra na janela de transcrição (o contexto de 60 s). Devolve
+   * o contexto de antes dele (o da classificação, que não inclui o próprio
+   * enunciado), ou null se ele não entrou (alucinação ou vazio).
+   */
+  private registrarNaJanela(frase: FraseDaLegenda): string | null {
+    if (DetectorDePergunta.ehAlucinacaoConhecida(frase.texto)) return null;
+    let trecho: TrechoTranscrito;
+    try {
+      trecho = TrechoTranscrito.criar({ texto: frase.texto, inicioMs: frase.inicioMs, fimMs: frase.fimMs });
+    } catch {
+      return null;
+    }
+    const contextoAnterior = this.janela.contexto(DURACAO_DO_CONTEXTO_MS, frase.inicioMs);
+    this.trocarJanela(this.janela.com(trecho).semAntigos(this.dependencias.agora()));
+    return contextoAnterior;
+  }
+
+  /**
+   * Antes de fechar: quando o confirmado do enunciado aberto passa a terminar
+   * em "?" e é candidato, a pergunta é avaliada na hora, sem esperar a pausa.
+   * O texto avaliado fica guardado, para não repetir a avaliação (nem no
+   * fechamento) enquanto ele não mudar.
+   */
+  private avaliarEnunciadoAberto(): void {
+    const aberto = this.legenda.emAndamento;
+    if (aberto === null || !this.automaticoAtual()) return;
+    const texto = aberto.confirmado;
+    if (!DetectorDePergunta.terminaEmInterrogacao(texto)) return;
+    const anterior = this.avaliacaoDoEnunciado;
+    if (anterior !== null && anterior.id === aberto.id && anterior.texto === texto) return;
+    const avaliacao = DetectorDePergunta.avaliar(texto);
+    if (!avaliacao.candidata) return;
+    this.avaliacaoDoEnunciado = Object.freeze({ id: aberto.id, texto });
+    const contexto = this.janela.contexto(DURACAO_DO_CONTEXTO_MS, aberto.inicioMs);
+    this.seguirCandidata(texto, contexto, aberto.id, avaliacao.sinalForte);
+  }
+
+  /** Candidata com o sinal forte vira pergunta direto; sem ele, vai à classificação no servidor. */
+  private seguirCandidata(texto: string, contexto: string, idDaFrase: string, sinalForte: boolean): void {
+    if (sinalForte) this.perguntaDetectada(texto, idDaFrase);
+    else this.pedirClassificacao({ trecho: texto, contexto, idDaFrase });
+  }
+
+  /** Marca o enunciado na legenda e leva a pergunta ao controle de disparos. */
+  private perguntaDetectada(texto: string, idDaFrase: string): void {
+    this.trocarLegenda(this.legenda.comPergunta(idDaFrase));
+    // O enunciado ainda aberto não está na janela: o contexto da mensagem o leva no fim.
+    const janela = this.janela.contexto(DURACAO_DO_CONTEXTO_MS);
+    const aberto = this.legenda.emAndamento;
+    const contexto =
+      aberto === null || aberto.id !== idDaFrase || aberto.confirmado === ""
+        ? janela
+        : limparTexto(`${janela} ${aberto.confirmado}`);
+    let pergunta: PerguntaDetectada;
+    try {
+      pergunta = PerguntaDetectada.criar({
+        pergunta: texto,
+        contexto,
+        detectadaEmMs: this.dependencias.agora(),
+      });
+    } catch {
+      return;
+    }
+    this.decidir(pergunta);
+  }
 
   /** No máximo uma classificação por vez; uma candidata nova substitui a que esperava. */
   private pedirClassificacao(candidata: Candidata): void {
@@ -511,12 +972,8 @@ export class SessaoDaEscuta {
       if (controlador.signal.aborted || geracao !== this.geracao || !this.automaticoAtual()) return;
       if (resposta.ehPergunta) {
         const reescrita = resposta.pergunta?.trim() ?? "";
-        const pergunta = PerguntaDetectada.criar({
-          pergunta: reescrita !== "" ? reescrita : candidata.trecho,
-          contexto: this.janela.contexto(DURACAO_DO_CONTEXTO_MS),
-          detectadaEmMs: this.dependencias.agora(),
-        });
-        this.decidir(pergunta);
+        this.perguntaDetectada(reescrita !== "" ? reescrita : candidata.trecho, candidata.idDaFrase);
+        this.emitir();
       }
     } catch (erro) {
       if (controlador.signal.aborted || geracao !== this.geracao) return;
@@ -583,6 +1040,7 @@ export class SessaoDaEscuta {
     if (opcoes === null) return;
     const texto = mensagemDaEscuta(pergunta);
     this.ultimaPergunta = pergunta.pergunta;
+    this.ultimaPerguntaEnviada = Object.freeze({ pergunta: pergunta.pergunta, enviadaEmMs });
     this.emitir();
 
     if (opcoes.autorizacaoAtiva) {
@@ -638,19 +1096,21 @@ export class SessaoDaEscuta {
     return this.contextoInvisivel() ? this.preferencias.automatico : this.preferencias.automaticoManual;
   }
 
-  /** Esquece os trechos da conversa (a tela chama no /clear). A janela de 2 min não muda. */
-  readonly limparTrechos = (): void => {
-    if (this.trechosNaTela.length === 0) return;
-    this.trechosNaTela = Object.freeze([]);
-    this.emitir();
-  };
-
   private modoEstaAtivo(): boolean {
     return this.opcoes !== null && modoAtivo(this.opcoes);
   }
 
   private chatLivre(): boolean {
     return this.opcoes?.chatLivre === true && !this.ocupadoPorConflito && this.modoEstaAtivo();
+  }
+
+  /** Um instante do relógio do cortador (ms de áudio desde o começo da captura) no relógio da sessão. */
+  private relogio(msDoCortador: number): number {
+    return this.inicioDaCapturaMs + msDoCortador;
+  }
+
+  private falaNaLegenda(fala: FalaEmAndamento): FalaDaLegenda {
+    return { numero: fala.epoca, inicioMs: this.relogio(fala.inicioMs) };
   }
 
   private cancelarTimer(): void {
@@ -664,8 +1124,18 @@ export class SessaoDaEscuta {
     this.linhas = Object.freeze([...janela.ultimasLinhas(LINHAS_NA_TELA)]);
   }
 
+  private trocarLegenda(legenda: LegendaDaEscuta): void {
+    if (legenda === this.legenda) return;
+    this.legenda = legenda;
+    this.legendaNaTela =
+      legenda.frases.length === 0 && legenda.emAndamento === null
+        ? LEGENDA_VAZIA
+        : Object.freeze({ frases: legenda.frases, emAndamento: legenda.emAndamento });
+  }
+
   private guardarPreferencias(preferencias: PreferenciasDaEscuta): void {
     this.preferencias = Object.freeze({ ...preferencias });
+    this.preferenciasDaTela = preferenciasDaTelaDe(this.preferencias);
     try {
       this.dependencias.preferencias.gravar(this.preferencias);
     } catch {
@@ -681,7 +1151,7 @@ export class SessaoDaEscuta {
       case "parada":
         return "desligada";
       case "escutando":
-        return this.progresso !== null ? "baixando-modelo" : "escutando";
+        return this.download !== null ? "baixando-modelo" : "escutando";
       default:
         return this.fase;
     }
@@ -690,13 +1160,18 @@ export class SessaoDaEscuta {
   private montarEstado(): EstadoDaEscuta {
     return Object.freeze({
       situacao: this.situacao(),
-      progressoDoDownload: this.progresso,
+      progressoDoDownload: this.download === null ? null : Math.round(this.download.progresso),
       linhas: this.linhas,
-      linhaProvisoria: this.linhaProvisoria,
+      linhaProvisoria: this.legenda.falaEmAndamento,
       trechos: this.trechosNaTela,
       automatico: this.automaticoAtual(),
       erro: this.erro,
       ultimaPergunta: this.ultimaPergunta,
+      legenda: this.legendaNaTela,
+      motor: this.motor,
+      download: this.download,
+      ultimaPerguntaEnviada: this.ultimaPerguntaEnviada,
+      preferenciasDaTela: this.preferenciasDaTela,
     });
   }
 
@@ -704,18 +1179,8 @@ export class SessaoDaEscuta {
   private emitir(): void {
     const novo = this.montarEstado();
     const atual = this.estado;
-    if (
-      novo.situacao === atual.situacao &&
-      novo.progressoDoDownload === atual.progressoDoDownload &&
-      novo.linhas === atual.linhas &&
-      novo.linhaProvisoria === atual.linhaProvisoria &&
-      novo.trechos === atual.trechos &&
-      novo.automatico === atual.automatico &&
-      novo.erro === atual.erro &&
-      novo.ultimaPergunta === atual.ultimaPergunta
-    ) {
-      return;
-    }
+    const campos = Object.keys(novo) as (keyof EstadoDaEscuta)[];
+    if (campos.every((campo) => novo[campo] === atual[campo])) return;
     this.estado = novo;
     for (const ouvinte of [...this.ouvintes]) ouvinte();
   }

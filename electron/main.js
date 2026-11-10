@@ -33,6 +33,10 @@
 //      não, a versão baixada é instalada quando o app fecha.
 //   6. Ao fechar o app, derruba a árvore inteira do servidor (os claude.exe
 //      dos agentes morrem junto).
+//   7. Motor nativo de transcrição (electron/transcricaoNativa.js): Whisper no
+//      onnxruntime-node num segundo utilityProcess, sob demanda; a tela recebe
+//      uma porta ("transcricao:conectar") e o principal repassa as mensagens;
+//      modelos baixados com net.fetch.
 //
 // Janela principal: titleBarStyle 'hidden' SEM titleBarOverlay — no Windows a
 // barra e os botões nativos somem ("otherwise no window controls will be
@@ -59,6 +63,9 @@ const {
   globalShortcut,
   ipcMain,
   Menu,
+  MessageChannelMain,
+  // `net` do Node já é usado aqui (portas); o do Electron baixa os modelos.
+  net: redeDoElectron,
   screen,
   session,
   shell,
@@ -91,6 +98,12 @@ const {
 } = require("./configuracaoLocal");
 const { importarHistorico, localizarHistoricoAntigo } = require("./importacaoDoHistorico");
 const { criarVistasDaPrevia } = require("./vistaDaPrevia");
+const { baixarModelo, pastaDosModelos } = require("./modelosDaTranscricao");
+const {
+  ARGUMENTO_DA_TRANSCRICAO_NATIVA,
+  binarioDoOnnxDisponivel,
+  criarTranscricaoNativa,
+} = require("./transcricaoNativa");
 // Ajustes só do macOS; fora dele cada função devolve o comportamento de antes.
 const mac = require("./mac");
 
@@ -180,6 +193,10 @@ let avisoDaConfiguracao = null; // mostrado na janela de configuração ao abrir
 let appFechando = false;
 let salvandoConfiguracao = false;
 let servicoDeAtualizacao = null; // criado no `ready` (prepararAtualizacao)
+let transcricaoNativa = null; // criada no `ready` (prepararTranscricaoNativa)
+// O binário N-API do onnxruntime-node desta plataforma existe? Vai ao preload
+// como argumento da janela (o preload com sandbox não lê o disco).
+const TRANSCRICAO_NATIVA_DISPONIVEL = binarioDoOnnxDisponivel();
 
 // ──────────────────────────────────────────────────────────────────────────
 // Utilidades de arquivo.
@@ -714,6 +731,7 @@ function criarJanela({ botoesNativos = true, transparente = false, ...opcoes } =
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      additionalArguments: TRANSCRICAO_NATIVA_DISPONIVEL ? [ARGUMENTO_DA_TRANSCRICAO_NATIVA] : [],
     },
     // Mascote do app (gerado por `npm run icones`); sem ele, aparece o átomo do Electron.
     icon: path.join(__dirname, "icones", process.platform === "win32" ? "icone.ico" : "icone.png"),
@@ -1125,6 +1143,35 @@ ipcMain.handle("escuta:definir-ligada", (evento, ligada) => {
   }
   escutaManualLigada = ligada === true;
 });
+// Motor nativo de transcrição (electron/transcricaoNativa.js): Whisper no
+// onnxruntime-node dentro de um utilityProcess. A tela pede a porta; o principal
+// repassa as mensagens ao utilitário (que sobe sob demanda e sai quando ocioso
+// sem fechar a porta). Só o frame principal da janela principal conecta.
+function prepararTranscricaoNativa() {
+  transcricaoNativa = criarTranscricaoNativa({
+    utilityProcess,
+    MessageChannelMain,
+    caminhoDoTranscritor: path.join(__dirname, "transcritorNativo.js"),
+    pastaDosModelos: pastaDosModelos(pastaDoUsuario()),
+    // Nunca dentro do app.asar (o Electron não aceita cwd lá dentro).
+    pastaDeTrabalho: pastaDoUsuario(),
+    disponivel: TRANSCRICAO_NATIVA_DISPONIVEL,
+    // net.fetch usa os certificados do sistema (o fetch do Node falha atrás do proxy corporativo).
+    baixarModelo: (pedido) => baixarModelo({ ...pedido, buscar: (url, opcoes) => redeDoElectron.fetch(url, opcoes) }),
+    registrar: (texto) => registrarNoLog("transcricao", texto),
+  });
+  if (!TRANSCRICAO_NATIVA_DISPONIVEL) {
+    registrarNoLog("transcricao", `Motor nativo indisponível: sem o binário do onnxruntime-node para ${process.platform}-${process.arch}.`);
+  }
+}
+ipcMain.handle("transcricao:conectar", (evento) => {
+  if (!transcricaoNativa) throw new Error("O motor nativo de transcrição ainda não foi preparado.");
+  return transcricaoNativa.conectar(evento, janelaPrincipal);
+});
+app.on("quit", () => {
+  if (transcricaoNativa) transcricaoNativa.encerrar();
+});
+
 function registrarEscutaDoModoInvisivel() {
   try {
     session.defaultSession.setDisplayMediaRequestHandler(
@@ -1332,6 +1379,11 @@ if (!conseguiuLock) {
     licenca.iniciar(pastaDoUsuario());
     // Antes de abrir a janela principal (a sessão só existe depois do ready).
     registrarEscutaDoModoInvisivel();
+    try {
+      prepararTranscricaoNativa();
+    } catch (erro) {
+      registrarNoLog("transcricao", `Falha ao preparar o motor nativo de transcrição: ${erro.message || erro}`);
+    }
     // Sem atualização o app ainda abre: a falha só vai para o log.
     try {
       prepararAtualizacao();

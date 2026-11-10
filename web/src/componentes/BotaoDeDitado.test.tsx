@@ -12,7 +12,25 @@ vi.mock("../shared/ditado/gravacao", async (importar) => ({
   ...(await importar<typeof import("../shared/ditado/gravacao")>()),
   comecarGravacao: falso.comecar,
 }));
-vi.mock("../shared/ditado/transcritor", () => ({ transcrever: falso.transcrever }));
+// O ditado transcreve pelo motor de transcrição (o nativo do app ou a reserva no navegador): o falso dele
+// repassa ao `falso.transcrever(audio, aoBaixar)` e avisa o download do modelo como sendo do ditado.
+vi.mock("../shared/ditado/motor", () => {
+  let ouvinte: ((origem: "ditado", progresso: { progresso: number; totalMb: null }) => void) | null = null;
+  return {
+    motorDeTranscricao: {
+      aoBaixar: (novo: typeof ouvinte) => {
+        ouvinte = novo;
+        return () => {
+          ouvinte = null;
+        };
+      },
+      transcrever: (audio: Float32Array) =>
+        (falso.transcrever(audio, (progresso: number) => ouvinte?.("ditado", { progresso, totalMb: null })) as Promise<string>).then(
+          (texto) => ({ texto }),
+        ),
+    },
+  };
+});
 
 function gravacaoFalsa(): Gravacao & {
   nivel: ReturnType<typeof vi.fn<() => number | null>>;

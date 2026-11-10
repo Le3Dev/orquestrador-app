@@ -61,6 +61,11 @@
   border: 1px solid color-mix(in srgb, var(--active) 30%, transparent);
   color: var(--primary);
 }
+/* A escuta fala por você: a frase ouvida é a mesma bolha; a que está sendo dita agora, com a borda tracejada.
+ * Duas classes e depois da regra acima, para valer também na coluna fixa (e na janela solta, sem borda). */
+.mensagem-do-usuario.mensagem-ouvida-provisoria {
+  border: 1px dashed color-mix(in srgb, var(--active) 30%, var(--border));
+}
 .chat-lateral .mensagem-do-claude {
   align-self: flex-start;
   max-width: 92%;
@@ -186,11 +191,13 @@ body.redimensionando-chat-lateral iframe { pointer-events: none; }
  * confundir com o vermelho do olho (tela vista). O ponto reaproveita o
  * `pulso-tela-vista` do olho e fica parado com movimento reduzido. */
 
-/* Indicador ao lado do olho: o ponto e o botão pausar/retomar, numa pílula pequena. O rótulo
- * ("escutando", "baixando o modelo 40%"…) continua no DOM, só para quem usa leitor de tela: a barra
- * é estreita e o balão (title) e a faixa da escuta acima dela dizem o resto. */
+/* Indicador ao lado do olho: o ponto, o selo do motor e o botão pausar/retomar, numa pílula pequena (o menu
+ * da escuta abre a partir dela). O rótulo ("escutando", "pausada"…) continua no DOM, só para quem usa leitor
+ * de tela: a barra é estreita e o balão (title) diz o resto. Baixando o modelo, o rótulo aparece: sem a
+ * faixa da escuta, é o único lugar do progresso ("baixando o modelo 45% de 199 MB"). */
 .indicador-da-escuta {
   --cor-da-escuta: var(--info);
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -219,6 +226,7 @@ body.redimensionando-chat-lateral iframe { pointer-events: none; }
   clip-path: inset(50%);
   white-space: nowrap;
 }
+.indicador-da-escuta-baixando-modelo .rotulo-da-escuta { position: static; width: auto; height: auto; clip-path: none; font-size: 11px; }
 .botao-da-escuta {
   display: grid;
   place-items: center;
@@ -257,47 +265,9 @@ body.redimensionando-chat-lateral iframe { pointer-events: none; }
 .nota-da-escuta { display: flex; align-items: center; gap: 6px; color: var(--info); }
 .nota-da-escuta::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--info); }
 
-/* Faixa recolhível acima do composer: transcrição, download, automático e erro. */
-.faixa-da-escuta {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 3px 6px 5px 4px;
-  border-radius: var(--radius-card);
-  border: 1px solid color-mix(in srgb, var(--info) 30%, var(--border));
-  background: color-mix(in srgb, var(--surface) 96%, transparent);
-  font-size: 11.5px;
-}
-.cabecalho-da-faixa-da-escuta { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.cabecalho-da-faixa-da-escuta { padding: 0 4px; }
+/* A chave Automático, no menu da escuta. */
 .interruptor.interruptor-da-escuta { flex: none; height: 24px; gap: 6px; font-size: 11.5px; }
 
-/* Transcrição da escuta dentro da conversa: blocos discretos, diferentes da bolha do usuário. */
-.trecho-ouvido {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 4px 8px;
-  border-radius: var(--radius-card);
-  border: 1px dashed color-mix(in srgb, var(--info) 40%, var(--border));
-  font-size: 11.5px;
-  line-height: 1.4;
-  color: var(--secondary);
-  user-select: text;
-}
-.trecho-ouvido-texto { margin: 0; overflow-wrap: anywhere; }
-/* O que está sendo dito agora: provisório, muda ao vivo. */
-.trecho-ouvido-provisorio { border-style: dotted; color: var(--caption); font-style: italic; opacity: .85; }
-.download-da-escuta { display: flex; flex-direction: column; gap: 3px; }
-.trilho-do-download-da-escuta { height: 4px; border-radius: 2px; overflow: hidden; background: var(--surface-3); }
-.barra-do-download-da-escuta { display: block; height: 100%; background: var(--info); transition: width .2s ease-out; }
-.ultima-pergunta-da-escuta {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--primary);
-}
 .erro-da-escuta { padding: 0 4px; }
 
 /* Aviso da primeira vez: um cartão compacto acima do composer. */
@@ -325,10 +295,8 @@ body.redimensionando-chat-lateral iframe { pointer-events: none; }
 .botoes-do-aviso-da-escuta { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* Fixo à esquerda (coluna sem gap): um respiro acima do campo. */
-.chat-lateral .faixa-da-escuta,
 .chat-lateral .aviso-da-escuta { flex: none; margin-top: 8px; }
 
 @media (prefers-reduced-motion: reduce) {
   .indicador-da-escuta-escutando .ponto-da-escuta { animation: none; }
-  .barra-do-download-da-escuta { transition: none; }
 }
