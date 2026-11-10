@@ -175,13 +175,29 @@ export const FERRAMENTAS_DE_ARTEFATO_ONLINE: readonly string[] = ["Artifact", "A
 export const VARIAVEL_DOS_ARTEFATOS_ONLINE = "CLAUDE_CODE_ARTIFACT";
 const VARIAVEL_DE_ABERTURA_AUTOMATICA = "CLAUDE_CODE_ARTIFACT_AUTO_OPEN";
 
-/** Acrescenta ao ambiente as variáveis dos artefatos online, se a opção estiver ligada; respeita a abertura automática já definida. */
+/**
+ * Com a opção ligada, acrescenta ao ambiente as variáveis dos artefatos online
+ * e força a abertura automática desligada (nem uma herdada do servidor abre o
+ * navegador). Desligada, apaga a `CLAUDE_CODE_ARTIFACT` herdada: um valor
+ * deixado no ambiente do servidor não pode publicar contra a escolha da tela.
+ */
 export function comVariaveisDeArtefatoOnline(ambiente: NodeJS.ProcessEnv, permitido: boolean): NodeJS.ProcessEnv {
   if (permitido) {
     ambiente[VARIAVEL_DOS_ARTEFATOS_ONLINE] = "1";
-    ambiente[VARIAVEL_DE_ABERTURA_AUTOMATICA] ??= "0";
+    ambiente[VARIAVEL_DE_ABERTURA_AUTOMATICA] = "0";
+  } else {
+    delete ambiente[VARIAVEL_DOS_ARTEFATOS_ONLINE];
   }
   return ambiente;
+}
+
+/**
+ * O turno pode publicar online? A opção ligada e fora do planejamento: no
+ * planejamento nada sai do computador. O nível `leitura` publica: o usuário
+ * ligou a opção explicitamente.
+ */
+export function publicaOnlineNoTurno(pedido: PedidoDeTurno): boolean {
+  return pedido.configuracao.permitirArtefatosOnline && pedido.modo !== "planejamento";
 }
 
 /** As ferramentas de artefato online, se a opção estiver ligada; senão nenhuma. */
@@ -340,7 +356,7 @@ export function ferramentasDoTurno(pedido: PedidoDeTurno): readonly string[] {
 function ferramentasDoSubagente(pedido: PedidoDeTurno, podePublicarOnline: boolean): string[] {
   return [
     ...comFerramentasDeArtefato(ferramentasDoTurno(pedido)),
-    ...ferramentasDeArtefatoOnline(podePublicarOnline && pedido.configuracao.permitirArtefatosOnline),
+    ...ferramentasDeArtefatoOnline(podePublicarOnline && publicaOnlineNoTurno(pedido)),
   ];
 }
 
@@ -390,7 +406,7 @@ export function definicaoDosAgentes(
         pedido.pastaDeArtefatos,
         null,
         plataforma,
-        pedido.configuracao.permitirArtefatosOnline,
+        publicaOnlineNoTurno(pedido),
       ),
       tools: ferramentasDoSubagente(pedido, true),
       model: pedido.configuracao.modeloDosSubagentes,
@@ -431,14 +447,15 @@ export function definicaoDosAgentes(
  * `Workflow` entra em `--tools` e em `--allowedTools` (`ferramentasDoEsforco`).
  *
  * Com a opção de artefatos online ligada, `Artifact`, `ArtifactCheck` e
- * `ArtifactData` entram nas duas listas (`ferramentasDeArtefatoOnline`).
+ * `ArtifactData` entram nas duas listas (`ferramentasDeArtefatoOnline`), menos
+ * no planejamento (`publicaOnlineNoTurno`).
  */
 export function montarArgumentos(pedido: PedidoDeTurno, arquivos: ArquivosDoTurno): string[] {
   const doNivel = [
     ...ferramentasDoTurno(pedido),
     FERRAMENTA_DE_SUBAGENTES,
     ...ferramentasDoEsforco(pedido.configuracao.esforcoDoOrquestrador),
-    ...ferramentasDeArtefatoOnline(pedido.configuracao.permitirArtefatosOnline),
+    ...ferramentasDeArtefatoOnline(publicaOnlineNoTurno(pedido)),
   ];
   const ferramentas = comFerramentasDeArtefato(doNivel);
   const liberadas = liberadasComArtefatos(doNivel, pedido.pastaDeArtefatos);
@@ -512,5 +529,5 @@ export function montarAmbiente(base: NodeJS.ProcessEnv, pedido: PedidoDeTurno): 
   ambiente.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS = String(
     pedido.configuracao.quantidadeDeSubagentes.limite,
   );
-  return comVariaveisDeArtefatoOnline(ambiente, pedido.configuracao.permitirArtefatosOnline);
+  return comVariaveisDeArtefatoOnline(ambiente, publicaOnlineNoTurno(pedido));
 }

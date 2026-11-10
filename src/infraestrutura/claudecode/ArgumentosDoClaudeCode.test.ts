@@ -725,8 +725,51 @@ describe("artefatos online no claude.ai", () => {
     expect(ambiente.CLAUDE_CODE_ARTIFACT_AUTO_OPEN).toBe("0");
   });
 
-  it("ligada, respeita a abertura automática que o usuário já definiu", () => {
-    expect(montarAmbiente({ CLAUDE_CODE_ARTIFACT_AUTO_OPEN: "1" }, comOpcao()).CLAUDE_CODE_ARTIFACT_AUTO_OPEN).toBe("1");
+  it("ligada, força a abertura automática desligada, mesmo que o ambiente herdado a ligue", () => {
+    expect(montarAmbiente({ CLAUDE_CODE_ARTIFACT_AUTO_OPEN: "1" }, comOpcao()).CLAUDE_CODE_ARTIFACT_AUTO_OPEN).toBe("0");
+  });
+
+  it("desligada, apaga a CLAUDE_CODE_ARTIFACT herdada do ambiente", () => {
+    const ambiente = montarAmbiente({ PATH: "x", CLAUDE_CODE_ARTIFACT: "1" }, pedido(false, "edicao_e_comandos"));
+
+    expect(ambiente).not.toHaveProperty("CLAUDE_CODE_ARTIFACT");
+    expect(ambiente.PATH).toBe("x");
+  });
+
+  describe("no planejamento", () => {
+    it("com a opção ligada, nenhuma ferramenta online entra na sessão", () => {
+      const argumentos = montarArgumentos(comOpcao("leitura", "planejamento"), arquivos);
+
+      expect(argumentos.join(" ")).not.toContain("Artifact");
+    });
+
+    it("o executor não recebe as ferramentas online nem a linha de instrução", () => {
+      const agentes = definicaoDosAgentes(comOpcao("edicao_e_comandos", "planejamento"));
+
+      for (const ferramenta of ONLINE) {
+        expect(agentes.executor?.tools).not.toContain(ferramenta);
+      }
+      expect(agentes.executor?.prompt).not.toContain("Artifact");
+      expect(agentes.executor?.prompt).not.toContain("claude.ai");
+    });
+
+    it("o ambiente não leva a CLAUDE_CODE_ARTIFACT, nem a herdada", () => {
+      const ambiente = montarAmbiente({ CLAUDE_CODE_ARTIFACT: "1" }, comOpcao("leitura", "planejamento"));
+
+      expect(ambiente).not.toHaveProperty("CLAUDE_CODE_ARTIFACT");
+    });
+
+    it("no nível leitura, fora do planejamento, a publicação continua valendo", () => {
+      const argumentos = montarArgumentos(comOpcao("leitura", "execucao"), arquivos);
+
+      expect(valoresDe(argumentos, "--tools")).toEqual(expect.arrayContaining(ONLINE));
+    });
+  });
+
+  it("o prompt do executor traz a salvaguarda contra publicar segredos", () => {
+    const executor = definicaoDosAgentes(comOpcao()).executor;
+
+    expect(executor?.prompt).toContain("Nunca publique segredos (.env, chaves, tokens)");
   });
 
   it("desligada, o ambiente do turno não leva as variáveis dos artefatos online", () => {

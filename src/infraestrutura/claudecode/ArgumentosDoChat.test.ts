@@ -196,6 +196,13 @@ describe("montarArgumentosDoChat", () => {
       expect(desligado).not.toHaveProperty("CLAUDE_CODE_ARTIFACT_AUTO_OPEN");
     });
 
+    it("desligado apaga a CLAUDE_CODE_ARTIFACT herdada; ligado força o AUTO_OPEN em 0", () => {
+      const herdado = { PATH: "x", CLAUDE_CODE_ARTIFACT: "1", CLAUDE_CODE_ARTIFACT_AUTO_OPEN: "1" };
+
+      expect(montarAmbienteDoChat(herdado, "padrao")).not.toHaveProperty("CLAUDE_CODE_ARTIFACT");
+      expect(montarAmbienteDoChat(herdado, "padrao", true).CLAUDE_CODE_ARTIFACT_AUTO_OPEN).toBe("0");
+    });
+
     it("com ultracode, o Workflow vem antes das ferramentas online", () => {
       const argumentos = montarArgumentosDoChat(pergunta({ esforco: "ultracode", permitirArtefatosOnline: true }), arquivos);
 

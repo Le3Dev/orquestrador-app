@@ -123,7 +123,7 @@ describe("SeletorDeModelo", () => {
     fireEvent.click(botao());
     const item = screen.getByRole("menuitemcheckbox", { name: /Publicar artefatos no claude\.ai/ });
     expect(item).toHaveAttribute("aria-checked", "false");
-    expect(item).toHaveAttribute("title", expect.stringContaining("O que for publicado sai do computador"));
+    expect(item).toHaveAttribute("title", expect.stringContaining("o conteúdo sai do computador"));
     fireEvent.click(item);
 
     expect(alterar).toHaveBeenCalledWith({ permitirArtefatosOnline: true });

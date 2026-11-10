@@ -25,9 +25,9 @@ export const AVISO_DO_ULTRACODE =
 /** Nome e ajuda do interruptor que liga a publicação de artefatos online (orquestrador e chat). */
 export const ROTULO_DOS_ARTEFATOS_ONLINE = "Publicar artefatos no claude.ai";
 export const AJUDA_DOS_ARTEFATOS_ONLINE =
-  "O orquestrador e os subagentes dele podem publicar páginas online na sua conta do claude.ai e devolver o link. O que for publicado sai do computador; deixe desligado em projetos com dados sensíveis.";
+  "O orquestrador e o executor dele podem publicar páginas online e devolver o link. A publicação fica na sua conta do claude.ai e o conteúdo sai do computador; não vale no planejamento. Deixe desligado em projetos com dados sensíveis.";
 export const AJUDA_DOS_ARTEFATOS_ONLINE_DO_CHAT =
-  "O chat pode publicar páginas online na sua conta do claude.ai e devolver o link. O que for publicado sai do computador; deixe desligado em projetos com dados sensíveis.";
+  "O chat pode publicar páginas online e devolver o link. A publicação fica na sua conta do claude.ai e o conteúdo sai do computador. Deixe desligado em projetos com dados sensíveis.";
 
 /** Na criação, "padrao" se chama Automático: o app não força nada e vale o padrão do Claude Code. */
 export function rotuloDoEsforcoNaCriacao(esforco: EsforcoDeRaciocinio): string {
