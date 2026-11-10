@@ -18,14 +18,8 @@ import { enderecoDigitado } from "../../shared/enderecosLocais";
 import { apiDaPrevia } from "../../shared/ponteDoDesktop";
 import { hostDaOrigem, modoDaPrevia, mudouDeDominio } from "../../shared/previaNativa";
 import { Dica } from "../Dica";
-import {
-  IconeAbrirFora,
-  IconeFechar,
-  IconeMinimizar,
-  IconeNavegador,
-  IconeRecarregar,
-  IconeRestaurar,
-} from "../Icones";
+import { IconeAbrirFora, IconeNavegador, IconeRecarregar } from "../Icones";
+import { ControlesDoNo } from "./ControlesDoNo";
 import { MenuDaPrevia } from "./MenuDaPrevia";
 import { VistaNativaDaPrevia } from "./VistaNativaDaPrevia";
 
@@ -498,9 +492,18 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
     [acoes, previaId, url, recarregar],
   );
 
+  // A prévia não tem tela cheia: o que existe hoje é minimizar e fechar.
+  const controlesDaJanela = {
+    objeto: "a prévia",
+    aoMinimizar: () => acoes.minimizarOuRestaurarPrevia(previaId),
+    minimizada,
+    aoFechar: () => acoes.fecharPrevia(previaId),
+  };
+
   return (
     <div className={`janela-previa ${minimizada ? "janela-previa-minimizada" : ""}`}>
       <div className={`barra-da-previa ${ALCA_DA_PREVIA}`}>
+        <ControlesDoNo lado="inicio" {...controlesDaJanela} />
         <IconeNavegador className="shrink-0 text-info" />
         <CampoDoEndereco url={url} focarAoAbrir={focarAoAbrir} aoNavegar={navegar} />
         {hostAtual !== null && (
@@ -570,24 +573,7 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
           </span>
         )}
         {apiNativa !== null && <MenuDaPrevia api={apiNativa} aberto={menuAberto} aoMudar={setMenuAberto} />}
-        <button
-          type="button"
-          className="botao-icone nodrag"
-          title={minimizada ? "Restaurar a prévia" : "Minimizar a prévia"}
-          aria-label={minimizada ? "Restaurar a prévia" : "Minimizar a prévia"}
-          onClick={() => acoes.minimizarOuRestaurarPrevia(previaId)}
-        >
-          {minimizada ? <IconeRestaurar /> : <IconeMinimizar />}
-        </button>
-        <button
-          type="button"
-          className="botao-icone nodrag"
-          title="Fechar a prévia"
-          aria-label="Fechar a prévia"
-          onClick={() => acoes.fecharPrevia(previaId)}
-        >
-          <IconeFechar tamanho={14} />
-        </button>
+        <ControlesDoNo lado="fim" {...controlesDaJanela} />
       </div>
       {/* Minimizada, o site continua carregado (só escondido): restaurar não o recarrega. */}
       <div className="corpo-da-previa" hidden={minimizada}>

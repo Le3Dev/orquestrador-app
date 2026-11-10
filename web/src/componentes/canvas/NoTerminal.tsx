@@ -65,7 +65,6 @@ import {
   problemaDaImagem,
 } from "../../shared/imagens";
 import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
-import { rodandoNoMac } from "../../shared/ponteDoDesktop";
 import { resumoDaConfiguracao } from "../../shared/resumoDaConfiguracao";
 import { CamposDaConfiguracao } from "../CamposDaConfiguracao";
 import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
@@ -82,6 +81,7 @@ import { BotaoDeAlteracoes } from "./BotaoDeAlteracoes";
 import { BotaoDeArquivos } from "./BotaoDeArquivos";
 import { BotaoDeLimparBixinhos } from "./BotaoDeLimparBixinhos";
 import type { AcoesDoPlano } from "./CartaoDoPlano";
+import { ControlesDoNo } from "./ControlesDoNo";
 import { FaixaDeServidores } from "./FaixaDeServidores";
 import { Rotulo } from "./LinhasDaConfiguracao";
 import { type ControleDoPrompt, PromptDoTerminal } from "./PromptDoTerminal";
@@ -945,92 +945,6 @@ function MaisDaBarra({ itens }: { itens: readonly ItemDaBarra[] }) {
   );
 }
 
-/** O que uma bolinha da barra faz no Mac. */
-type AcaoDaBolinha = "fechar" | "minimizar" | "telaCheia";
-
-/**
- * As bolinhas do Mac, na ordem da barra (vermelha, amarela, verde): o padrão
- * do Mac, em que a amarela minimiza e a verde põe em tela cheia. Para trocar
- * o que cada uma faz (ex.: amarela tela cheia, verde minimizar), basta
- * reordenar: a cor segue a posição, o glifo e o rótulo seguem a ação.
- */
-const ACOES_DAS_BOLINHAS: readonly AcaoDaBolinha[] = ["fechar", "minimizar", "telaCheia"];
-
-/** Os glifos que aparecem nas bolinhas com o mouse sobre o grupo, como no Mac: ×, − e as setas. */
-const GLIFOS_DAS_BOLINHAS: Readonly<Record<AcaoDaBolinha, string>> = {
-  fechar: "M3.2 3.2l3.6 3.6M6.8 3.2l-3.6 3.6",
-  minimizar: "M2.6 5h4.8",
-  telaCheia: "M2.6 2.6h3.2L2.6 5.8zM7.4 7.4H4.2l3.2-3.2z",
-};
-
-function GlifoDaBolinha({ acao }: { acao: AcaoDaBolinha }) {
-  const preenchido = acao === "telaCheia";
-  return (
-    <svg width={8} height={8} viewBox="0 0 10 10" aria-hidden="true">
-      <path
-        d={GLIFOS_DAS_BOLINHAS[acao]}
-        fill={preenchido ? "currentColor" : "none"}
-        stroke={preenchido ? "none" : "currentColor"}
-        strokeWidth={1.4}
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-/**
- * No app desktop do Mac, as três bolinhas da barra são botões de verdade
- * (`ACOES_DAS_BOLINHAS`): fechar o terminal, minimizar à barra e tela cheia.
- * `nodrag`: clicar nelas não arrasta o nó.
- */
-function BolinhasDoMac({
-  minimizada,
-  emTelaCheia,
-  aoFechar,
-  aoMinimizar,
-  aoAlternarTelaCheia,
-}: {
-  minimizada: boolean;
-  emTelaCheia: boolean;
-  aoFechar: () => void;
-  aoMinimizar: () => void;
-  aoAlternarTelaCheia: () => void;
-}) {
-  const botoes: Readonly<Record<AcaoDaBolinha, { rotulo: string; dica: string; aoClicar: () => void }>> = {
-    fechar: {
-      rotulo: "Fechar o terminal",
-      dica: "Fechar o terminal (o orquestrador continua salvo)",
-      aoClicar: aoFechar,
-    },
-    minimizar: {
-      rotulo: minimizada ? "Restaurar" : "Minimizar",
-      dica: minimizada ? "Restaurar" : "Minimizar",
-      aoClicar: aoMinimizar,
-    },
-    telaCheia: {
-      rotulo: emTelaCheia ? "Sair da tela cheia" : "Tela cheia",
-      dica: emTelaCheia ? "Sair da tela cheia (Esc)" : "Tela cheia",
-      aoClicar: aoAlternarTelaCheia,
-    },
-  };
-  return (
-    <span className="semaforo semaforo-do-mac nodrag" role="group" aria-label="Janela do terminal">
-      {ACOES_DAS_BOLINHAS.map((acao) => (
-        <button
-          key={acao}
-          type="button"
-          className="bolinha nodrag"
-          aria-label={botoes[acao].rotulo}
-          title={botoes[acao].dica}
-          onClick={botoes[acao].aoClicar}
-        >
-          <GlifoDaBolinha acao={acao} />
-        </button>
-      ))}
-    </span>
-  );
-}
-
 /** Eventos da tela cheia não sobem até o nó: o React Flow não arrasta nem seleciona por baixo. */
 function naoPropagar(evento: SyntheticEvent): void {
   evento.stopPropagation();
@@ -1168,7 +1082,6 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   const { conversas, conexoes, sinais, servidor, acoes } = useCanvas();
   const orquestradorId = orquestrador.id;
   const conversa = conversas.get(orquestradorId) ?? ESTADO_INICIAL;
-  const noMac = rodandoNoMac();
   // Onde a tela cheia é desenhada (a área do canvas); nulo fora dela.
   const [telaCheiaEm, setTelaCheiaEm] = useState<HTMLElement | null>(null);
   const emTelaCheia = telaCheiaEm !== null;
@@ -1596,6 +1509,16 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
     }
   };
 
+  const controlesDaJanela = {
+    objeto: "o terminal",
+    aoFechar: () => acoes.fecharTerminal(orquestradorId),
+    dicaDoFechar: "Fechar o terminal (o orquestrador e o histórico continuam salvos)",
+    aoMinimizar: minimizarOuRestaurar,
+    minimizada,
+    aoAmpliar: alternarTelaCheia,
+    ampliada: emTelaCheia,
+  };
+
   const janela = (
     <div
       className={`janela-terminal ${trabalhando ? "janela-terminal-ativa" : ""} ${modo === "planejamento" ? "janela-terminal-planejando" : ""} ${piscando ? "janela-terminal-entrega" : ""} ${escondido ? "janela-terminal-minimizada" : ""}`}
@@ -1644,22 +1567,8 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
         className={`barra-do-terminal ${ALCA_DO_TERMINAL}`}
         onDoubleClick={escondido ? aoDuploCliqueNaBarra : undefined}
       >
-        {/* No Mac desktop, botões de verdade; no Windows e no navegador, só o desenho. */}
-        {noMac ? (
-          <BolinhasDoMac
-            minimizada={minimizada}
-            emTelaCheia={emTelaCheia}
-            aoFechar={() => acoes.fecharTerminal(orquestradorId)}
-            aoMinimizar={minimizarOuRestaurar}
-            aoAlternarTelaCheia={alternarTelaCheia}
-          />
-        ) : (
-          <span className="semaforo" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </span>
-        )}
+        {/* Os mesmos controles dos outros nós: bolinhas no Mac, botões à direita nos demais. */}
+        <ControlesDoNo lado="inicio" {...controlesDaJanela} />
         <IconeOrquestrador tamanho={14} className="shrink-0 text-active" />
         {editandoNome ? (
           <CampoDoNome nome={nome} aoConcluir={(novo) => void concluirNome(novo)} />
@@ -1715,22 +1624,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
           >
             <IconeEngrenagem />
           </button>
-          {/* No Mac, quem fecha é a bolinha vermelha. Nos outros, o ✕ fica separado
-              das funções e sem o círculo vermelho: não é o fechar da janela do sistema. */}
-          {!noMac && (
-            <>
-              <span className="separador-da-barra" aria-hidden="true" />
-              <button
-                type="button"
-                className="botao-icone botao-fechar-do-terminal nodrag"
-                title="Fechar o terminal (o orquestrador e o histórico continuam salvos)"
-                aria-label="Fechar o terminal"
-                onClick={() => acoes.fecharTerminal(orquestradorId)}
-              >
-                <IconeFechar tamanho={14} />
-              </button>
-            </>
-          )}
+          <ControlesDoNo lado="fim" {...controlesDaJanela} />
         </div>
       </div>
 

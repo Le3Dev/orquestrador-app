@@ -125,6 +125,7 @@ describe("PainelDeConfiguracoesDoApp", () => {
       larguraDoChatFixo: 360,
       manterBixinhosAteLimpar: false,
       minimapaVisivel: false,
+      controlesDasJanelas: "automatico",
     });
 
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Chat fixo" }));
@@ -146,6 +147,32 @@ describe("PainelDeConfiguracoesDoApp", () => {
     expect(lerLeitor()).toMatchObject({ manterBixinhosAteLimpar: true });
   });
 
+  it("\"Controles das janelas\": três opções, Automático por padrão; escolher grava, reflete em outro componente e não fecha o painel", () => {
+    renderizar();
+    fireEvent.click(botao());
+    const grupo = within(screen.getByRole("menu", { name: "Configurações" })).getByRole("group", { name: "Controles das janelas" });
+    expect(within(grupo).getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
+      "Automático",
+      "Estilo Mac",
+      "Estilo Windows",
+    ]);
+    expect(within(grupo).getByRole("menuitemradio", { name: "Automático" })).toHaveAttribute("aria-checked", "true");
+    expect(within(grupo).getByRole("menuitemradio", { name: "Estilo Mac" })).toHaveAttribute("aria-checked", "false");
+
+    fireEvent.click(within(grupo).getByRole("menuitemradio", { name: "Estilo Windows" }));
+
+    expect(within(grupo).getByRole("menuitemradio", { name: "Estilo Windows" })).toHaveAttribute("aria-checked", "true");
+    expect(within(grupo).getByRole("menuitemradio", { name: "Automático" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("menu", { name: "Configurações" })).toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem(CHAVE_DAS_PREFERENCIAS_DA_TELA) ?? "null")).toMatchObject({
+      controlesDasJanelas: "windows",
+    });
+    expect(lerLeitor()).toMatchObject({ controlesDasJanelas: "windows" });
+
+    fireEvent.click(within(grupo).getByRole("menuitemradio", { name: "Estilo Mac" }));
+    expect(lerLeitor()).toMatchObject({ controlesDasJanelas: "mac" });
+  });
+
   it("\"Pastas e Claude Code…\" fecha o painel e abre os Ajustes", () => {
     const ajustes = renderizar();
     fireEvent.click(botao());
@@ -162,6 +189,7 @@ describe("PainelDeConfiguracoesDoApp", () => {
     fireEvent.click(botao());
 
     expect(screen.getAllByRole("menuitemcheckbox")).toHaveLength(4);
+    expect(screen.getAllByRole("menuitemradio")).toHaveLength(5);
     expect(screen.queryByRole("menuitem")).not.toBeInTheDocument();
   });
 
@@ -173,6 +201,9 @@ describe("PainelDeConfiguracoesDoApp", () => {
     const autorrecuperacao = () => screen.getByRole("menuitemcheckbox", { name: /Autorrecuperação/ });
     const bixinhos = () => screen.getByRole("menuitemcheckbox", { name: /Manter bixinhos até limpar à mão/ });
     const pastas = () => screen.getByRole("menuitem", { name: "Pastas e Claude Code…" });
+    const automatico = () => screen.getByRole("menuitemradio", { name: "Automático" });
+    const estiloMac = () => screen.getByRole("menuitemradio", { name: "Estilo Mac" });
+    const estiloWindows = () => screen.getByRole("menuitemradio", { name: "Estilo Windows" });
     const esquerda = () => screen.getByRole("menuitemradio", { name: "esquerda" });
     const direita = () => screen.getByRole("menuitemradio", { name: "direita" });
     expect(chat()).toHaveFocus();
@@ -198,6 +229,17 @@ describe("PainelDeConfiguracoesDoApp", () => {
     fireEvent.keyDown(visualizador(), { key: "ArrowDown" });
     expect(bixinhos()).toHaveFocus();
     fireEvent.keyDown(bixinhos(), { key: "ArrowDown" });
+    // Depois dos interruptores, os três estilos dos controles das janelas; Enter escolhe o focado.
+    expect(automatico()).toHaveFocus();
+    fireEvent.keyDown(automatico(), { key: "ArrowDown" });
+    expect(estiloMac()).toHaveFocus();
+    fireEvent.keyDown(estiloMac(), { key: "Enter" });
+    expect(estiloMac()).toHaveAttribute("aria-checked", "true");
+    expect(lerLeitor()).toMatchObject({ controlesDasJanelas: "mac" });
+    fireEvent.keyDown(estiloMac(), { key: "ArrowDown" });
+    fireEvent.keyDown(estiloWindows(), { key: " " });
+    expect(estiloWindows()).toHaveAttribute("aria-checked", "true");
+    fireEvent.keyDown(estiloWindows(), { key: "ArrowDown" });
     expect(autorrecuperacao()).toHaveFocus();
     fireEvent.keyDown(autorrecuperacao(), { key: "ArrowDown" });
     expect(pastas()).toHaveFocus();

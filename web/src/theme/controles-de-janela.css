@@ -1,0 +1,56 @@
+/*
+ * Controles de janela dos nós do canvas (ControlesDoNo.tsx): artefato, nota,
+ * terminal e prévia. No Mac, as bolinhas no começo do cabeçalho; no Windows, no
+ * Linux e no navegador, os botões minimizar, maximizar e fechar no fim.
+ */
+
+.controles-do-no { display: inline-flex; align-items: center; flex-shrink: 0; }
+
+/* ---------------- Mac: bolinhas ---------------- */
+
+.controles-do-no-mac { gap: 7px; margin-right: 4px; cursor: default; }
+.bolinha-do-no {
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  flex-shrink: 0;
+  color: rgba(0, 0, 0, .62);
+  cursor: default;
+}
+.bolinha-do-no-fechar { background: color-mix(in srgb, var(--error) 80%, var(--surface-3)); }
+.bolinha-do-no-minimizar { background: color-mix(in srgb, var(--warning) 80%, var(--surface-3)); }
+.bolinha-do-no-ampliar { background: color-mix(in srgb, var(--success) 80%, var(--surface-3)); }
+/* O símbolo (×, − e as setas) aparece com o mouse sobre o grupo ou o foco do teclado nele. */
+.bolinha-do-no svg { opacity: 0; transition: opacity .12s; }
+.controles-do-no-mac:hover .bolinha-do-no svg, .controles-do-no-mac:focus-within .bolinha-do-no svg { opacity: 1; }
+.bolinha-do-no:active { filter: brightness(.82); }
+.bolinha-do-no:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.bolinha-do-no:disabled { background: var(--surface-3); cursor: not-allowed; }
+.bolinha-do-no:disabled svg { opacity: 0; }
+
+/* ---------------- Windows e Linux: botões à direita ---------------- */
+
+.controles-do-no-windows { gap: 2px; margin-left: 2px; }
+.separador-dos-controles-do-no { width: 1px; height: 16px; margin: 0 4px 0 2px; flex-shrink: 0; background: var(--border-forte); }
+.botao-do-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--secondary);
+  cursor: pointer;
+  transition: background-color .12s ease, color .12s ease;
+}
+.botao-do-no:hover:not(:disabled) { background: var(--surface-3); color: var(--primary); }
+.botao-do-no-fechar:hover:not(:disabled) { background: var(--error); color: var(--primary); }
+.botao-do-no:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.botao-do-no:disabled { opacity: .45; cursor: not-allowed; }

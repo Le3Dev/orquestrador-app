@@ -10,7 +10,8 @@ import { escreverPedidoArrastado } from "../../shared/canvas/pedidoArrastado";
 import { alternarItem, linhasDaNota } from "../../shared/checklistDaNota";
 import { type SituacaoDoSalvamento, useEdicaoDaNota } from "../../shared/hooks/useEdicaoDaNota";
 import { rodandoNoDesktop } from "../../shared/ponteDoDesktop";
-import { IconeAlerta, IconeMinimizar, IconeRestaurar } from "../Icones";
+import { IconeAlerta } from "../Icones";
+import { ControlesDoNo } from "./ControlesDoNo";
 
 export const CONFIRMACAO_PARA_APAGAR = "Apagar esta nota? Isso não pode ser desfeito.";
 const TAMANHO_MAXIMO_DO_TITULO = 120;
@@ -354,9 +355,17 @@ function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
 
   const problema = edicao.situacao === "erro" ? `Erro ao salvar: ${edicao.erro ?? ""}` : erroAoApagar;
 
+  // A nota só minimiza: apagar (a lixeira) é outra ação, e ela não tem tela cheia nem um "fechar" que a tire do canvas sem apagar.
+  const controlesDaJanela = {
+    objeto: "a nota",
+    aoMinimizar: () => acoes.minimizarOuRestaurar(notaId),
+    minimizada,
+  };
+
   return (
     <div className={`janela-nota ${minimizada ? "janela-nota-minimizada" : ""}`}>
       <div className={`barra-da-nota ${ALCA_DA_NOTA}`}>
+        <ControlesDoNo lado="inicio" {...controlesDaJanela} />
         {editandoTitulo ? (
           <CampoDoTitulo titulo={edicao.titulo} aoConcluir={concluirTitulo} />
         ) : (
@@ -406,15 +415,6 @@ function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
         )}
         <button
           type="button"
-          className="botao-icone nodrag"
-          title={minimizada ? "Restaurar a nota" : "Minimizar a nota"}
-          aria-label={minimizada ? "Restaurar a nota" : "Minimizar a nota"}
-          onClick={() => acoes.minimizarOuRestaurar(notaId)}
-        >
-          {minimizada ? <IconeRestaurar /> : <IconeMinimizar />}
-        </button>
-        <button
-          type="button"
           className="botao-icone botao-icone-perigo nodrag"
           title="Apagar a nota"
           aria-label="Apagar a nota"
@@ -423,6 +423,7 @@ function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
         >
           <IconeLixeira />
         </button>
+        <ControlesDoNo lado="fim" {...controlesDaJanela} />
       </div>
 
       {!minimizada && (

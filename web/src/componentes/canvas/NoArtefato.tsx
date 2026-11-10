@@ -31,6 +31,7 @@ import {
 import { TAMANHO_MINIMO_DO_ARTEFATO } from "../../shared/canvas/layout";
 import { ALCA_DO_ARTEFATO, type NoArtefato as TipoDoNo } from "../../shared/canvas/nos";
 import { TextoFormatado } from "../TextoFormatado";
+import { ControlesDoNo } from "./ControlesDoNo";
 import { QuadroAtivavel } from "./NoPrevia";
 
 export const CONFIRMACAO_PARA_APAGAR_O_ARTEFATO = "Apagar este artefato? Isso não pode ser desfeito.";
@@ -126,20 +127,6 @@ function naoPropagar(evento: SyntheticEvent): void {
 
 // ---------------- Ícones ----------------
 
-function IconeAmpliar() {
-  return (
-    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
 function IconeSalvar() {
   return (
     <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -177,19 +164,7 @@ function IconeDoFormato({ formato }: { formato: FormatoDoArtefato }) {
   );
 }
 
-function BotaoDeFechar({ aoFechar }: { aoFechar: () => void }) {
-  return (
-    <button
-      type="button"
-      className="botao-icone nodrag"
-      title="Fechar (o artefato continua salvo; reabra pela paleta, Ctrl+K)"
-      aria-label="Fechar o artefato"
-      onClick={aoFechar}
-    >
-      ✕
-    </button>
-  );
-}
+const DICA_DE_FECHAR_O_ARTEFATO = "Fechar (o artefato continua salvo; reabra pela paleta, Ctrl+K)";
 
 // ---------------- Conteúdo de uma versão ----------------
 
@@ -517,6 +492,7 @@ function ArtefatoAmpliado({
         className="painel-flutuante surgir artefato-ampliado outline-none"
       >
         <div className="barra-do-artefato-ampliado">
+          <ControlesDoNo lado="inicio" objeto="a tela cheia" aoFechar={aoFechar} dicaDoFechar="Fechar a tela cheia (Esc)" />
           <IconeDoFormato formato={artefato.formato} />
           <h2 id={idDoTitulo} className="titulo-do-artefato">
             {artefato.titulo || "Sem título"}
@@ -524,9 +500,7 @@ function ArtefatoAmpliado({
           <span className="chip">v{numero}</span>
           <span className="flex-1" />
           <span className="text-support">Esc fecha</span>
-          <button type="button" className="botao-icone" title="Fechar a tela cheia (Esc)" aria-label="Fechar a tela cheia" onClick={aoFechar}>
-            ✕
-          </button>
+          <ControlesDoNo lado="fim" objeto="a tela cheia" aoFechar={aoFechar} dicaDoFechar="Fechar a tela cheia (Esc)" />
         </div>
         <div className="corpo-do-artefato">{children}</div>
       </div>
@@ -588,6 +562,7 @@ const JanelaDoArtefato = memo(function JanelaDoArtefato({ artefatoId }: { artefa
   const carregada = useListaDeArtefatosCarregada();
   const erroAoCarregar = useErroAoCarregarArtefatos();
   const acoes = useAcoesDosArtefatos();
+  const aoFecharVazio = () => acoes.fechar(artefatoId);
 
   if (artefato === undefined) {
     const mensagem =
@@ -599,9 +574,10 @@ const JanelaDoArtefato = memo(function JanelaDoArtefato({ artefatoId }: { artefa
     return (
       <div className="janela-artefato">
         <div className={`barra-do-artefato ${ALCA_DO_ARTEFATO}`}>
+          <ControlesDoNo lado="inicio" objeto="o artefato" aoFechar={aoFecharVazio} dicaDoFechar={DICA_DE_FECHAR_O_ARTEFATO} />
           <span className="titulo-do-artefato text-muted">artefato</span>
           <span className="flex-1" />
-          <BotaoDeFechar aoFechar={() => acoes.fechar(artefatoId)} />
+          <ControlesDoNo lado="fim" objeto="o artefato" aoFechar={aoFecharVazio} dicaDoFechar={DICA_DE_FECHAR_O_ARTEFATO} />
         </div>
         <p className={`estado-do-artefato ${erroAoCarregar === null ? "text-muted" : "text-error"}`}>{mensagem}</p>
       </div>
@@ -692,6 +668,14 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
     }
   }
 
+  const controlesDaJanela = {
+    objeto: "o artefato",
+    aoFechar: () => acoes.fechar(artefato.id),
+    dicaDoFechar: DICA_DE_FECHAR_O_ARTEFATO,
+    aoAmpliar: () => setAmpliado(true),
+    ampliarDesabilitado: !pronto,
+  };
+
   const corpo = (noCanvas: boolean) => (
     <CorpoDoArtefato
       artefato={artefato}
@@ -706,6 +690,7 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
   return (
     <div className="janela-artefato">
       <div className={`barra-do-artefato ${ALCA_DO_ARTEFATO}`}>
+        <ControlesDoNo lado="inicio" {...controlesDaJanela} />
         <IconeDoFormato formato={artefato.formato} />
         {editandoTitulo ? (
           <CampoDoTitulo titulo={titulo} aoConcluir={(novo) => void concluirTitulo(novo)} />
@@ -721,16 +706,6 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
         )}
         <span className="flex-1" />
         <SeletorDeVersao versoes={artefato.versoes} escolhida={escolhida} atual={artefato.versaoAtual} aoEscolher={setEscolhida} />
-        <button
-          type="button"
-          className="botao-icone nodrag"
-          title="Ampliar (tela cheia)"
-          aria-label="Ampliar o artefato"
-          disabled={!pronto}
-          onClick={() => setAmpliado(true)}
-        >
-          <IconeAmpliar />
-        </button>
         <button
           type="button"
           className="botao-icone nodrag"
@@ -751,7 +726,7 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
         >
           <IconeLixeira />
         </button>
-        <BotaoDeFechar aoFechar={() => acoes.fechar(artefato.id)} />
+        <ControlesDoNo lado="fim" {...controlesDaJanela} />
       </div>
 
       {/* Em tela cheia, a página roda só no modal: duas cópias rodariam os scripts dela duas vezes. */}

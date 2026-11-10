@@ -3,6 +3,9 @@ import { useSyncExternalStore } from "react";
 /** De que lado do canvas fica o chat fixo. */
 export type LadoDoChatFixo = "esquerda" | "direita";
 
+/** O estilo dos controles das janelas do canvas: o do sistema, as bolinhas do Mac ou os botões do Windows. */
+export type EstiloDosControlesDasJanelas = "automatico" | "mac" | "windows";
+
 /** Preferências de exibição da tela, guardadas neste computador (localStorage). */
 export type PreferenciasDaTela = {
   /**
@@ -27,6 +30,13 @@ export type PreferenciasDaTela = {
    * valor das preferências antigas, sem o campo), só o botão que o mostra fica.
    */
   minimapaVisivel: boolean;
+  /**
+   * Os controles (fechar, minimizar, ampliar) das janelas do canvas. "automatico"
+   * (o padrão, e o valor das preferências antigas, sem o campo) segue o sistema;
+   * "mac" põe as bolinhas à esquerda e "windows" os botões à direita. A barra de
+   * título do app não entra: ela segue sempre o sistema.
+   */
+  controlesDasJanelas: EstiloDosControlesDasJanelas;
 };
 
 export const CHAVE_DAS_PREFERENCIAS_DA_TELA = "orquestrador.preferenciasDaTela";
@@ -41,6 +51,7 @@ const PADRAO: PreferenciasDaTela = {
   larguraDoChatFixo: LARGURA_DO_CHAT_FIXO.padrao,
   manterBixinhosAteLimpar: false,
   minimapaVisivel: false,
+  controlesDasJanelas: "automatico",
 };
 
 /** Uma largura inteira entre a mínima e a máxima; número inválido (NaN, infinito) vale o padrão. */
@@ -99,6 +110,11 @@ function interpretar(bruto: string | null): PreferenciasDaTela {
     larguraDoChatFixo: typeof largura === "number" ? limitarLarguraDoChatFixo(largura) : PADRAO.larguraDoChatFixo,
     manterBixinhosAteLimpar: booleano("manterBixinhosAteLimpar"),
     minimapaVisivel: booleano("minimapaVisivel"),
+    // Só "mac" e "windows" mudam o estilo: ausente ou outro valor segue o sistema.
+    controlesDasJanelas:
+      registro.controlesDasJanelas === "mac" || registro.controlesDasJanelas === "windows"
+        ? registro.controlesDasJanelas
+        : PADRAO.controlesDasJanelas,
   };
 }
 
@@ -148,7 +164,8 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
     novas.visualizadorDeCodigo === atuais.visualizadorDeCodigo &&
     novas.larguraDoChatFixo === atuais.larguraDoChatFixo &&
     novas.manterBixinhosAteLimpar === atuais.manterBixinhosAteLimpar &&
-    novas.minimapaVisivel === atuais.minimapaVisivel
+    novas.minimapaVisivel === atuais.minimapaVisivel &&
+    novas.controlesDasJanelas === atuais.controlesDasJanelas
   ) {
     return;
   }
@@ -165,7 +182,8 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
 
 /**
  * As preferências da tela (chat fixo, o lado e a largura dele, visualizador de
- * código, manter os bixinhos até limpar, o minimapa visível):
+ * código, manter os bixinhos até limpar, o minimapa visível, o estilo dos
+ * controles das janelas):
  * mudar num lugar reflete em todos os componentes que usam o hook e nas
  * outras abas abertas.
  */
