@@ -6,7 +6,7 @@
  * abaixo da ilha da direita. Tudo mora na área do canvas (ao lado do chat
  * fixo, quando há), dentro do <ReactFlow>, mas fora do viewport: não escala
  * com o zoom. Medidas do protótipo aprovado: topo e lados a 16 px, ilhas de
- * 48 de altura e raio 14, menu de 296, submenu de 340, notificação de 400.
+ * 42 de altura e raio 12 (eram 48 e 14, antes de encolher ~12%), menu de 296, submenu de 340, notificação de 400.
  * No app desktop não há faixa de título: o fundo das duas ilhas do topo arrasta
  * a janela (`ilha-arrasta`) e os controles dentro delas são `no-drag`. */
 
@@ -26,11 +26,11 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  height: 48px;
-  padding: 6px;
+  height: 42px;
+  padding: 5px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 12px;
   box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7);
 }
 
@@ -104,23 +104,23 @@ html.modo-invisivel .faixa-de-arrasto { display: none; }
 body > :not(#root) * { -webkit-app-region: no-drag; }
 /* Mac desktop: as bolinhas nativas (x 16, 52 de largura, centro em y 40) ficam à esquerda da ilha do nome. */
 .coluna-da-ilha-esquerda-mac { left: 84px; max-width: calc(100% - 100px); }
-.ilha-do-nome { position: relative; padding: 6px 6px 6px 12px; flex-shrink: 0; }
-.nome-do-app { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
-.nome-do-app h1 { font-size: 13.5px; color: var(--caption); }
+.ilha-do-nome { position: relative; padding: 5px 5px 5px 10px; flex-shrink: 0; }
+.nome-do-app { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.nome-do-app h1 { font-size: 13px; color: var(--caption); }
 .icone-do-app { display: inline-flex; color: var(--active); }
-.divisor-da-ilha { width: 1px; height: 24px; margin: 0 4px; background: var(--border-forte); flex-shrink: 0; }
+.divisor-da-ilha { width: 1px; height: 20px; margin: 0 4px; background: var(--border-forte); flex-shrink: 0; }
 .ancora-do-menu-novo { display: flex; }
 .botao-novo {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 12px 0 10px;
-  border-radius: 10px;
+  gap: 5px;
+  height: 32px;
+  padding: 0 10px 0 8px;
+  border-radius: 9px;
   background: var(--surface-2);
   border: 1px solid var(--border-forte);
   color: var(--primary);
-  font: 600 13px/1 var(--fonte-titulo);
+  font: 600 12.5px/1 var(--fonte-titulo);
   white-space: nowrap;
   cursor: pointer;
 }
@@ -243,10 +243,10 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   flex-shrink: 0;
-  border-radius: 8px;
+  border-radius: 7px;
   color: var(--secondary);
   cursor: pointer;
 }
@@ -255,12 +255,12 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
 .contador-da-ilha {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 10px;
-  border-radius: 8px;
+  gap: 5px;
+  height: 32px;
+  padding: 0 9px;
+  border-radius: 7px;
   color: var(--active);
-  font: 600 13px/1 var(--fonte-mono);
+  font: 600 12.5px/1 var(--fonte-mono);
   white-space: nowrap;
 }
 .giro-do-contador { animation: giro-do-selo 1.6s linear infinite; }
@@ -269,29 +269,30 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  height: 36px;
-  min-width: 36px;
-  padding: 0 7px;
-  border-radius: 8px;
+  gap: 7px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0 6px;
+  border-radius: 7px;
   color: var(--secondary);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
 }
 .anel-da-ilha:hover, .anel-da-ilha[aria-pressed="true"] { background: var(--surface-3); color: var(--primary); }
-.anel-da-ilha-baixa, .anel-da-ilha-alta { color: var(--warning); padding-right: 10px; }
+.anel-da-ilha-baixa, .anel-da-ilha-alta { color: var(--warning); padding-right: 9px; }
 .anel-da-ilha-critica {
   color: var(--error);
-  padding-right: 10px;
+  padding-right: 9px;
   background: color-mix(in srgb, var(--error) 10%, transparent);
 }
-.anel-de-memoria { position: relative; display: inline-flex; width: 26px; height: 26px; flex-shrink: 0; }
+.anel-de-memoria { position: relative; display: inline-flex; width: 24px; height: 24px; flex-shrink: 0; }
 .trilha-do-anel { stroke: color-mix(in srgb, var(--primary) 16%, transparent); }
 .arco-do-anel { stroke: currentColor; }
-.chip-do-anel { position: absolute; top: 6.5px; left: 6.5px; }
-.anel-de-uso { position: relative; display: inline-flex; width: 26px; height: 26px; flex-shrink: 0; }
+/* O chip (13 px) no centro do anel de 24: (24 - 13) / 2. */
+.chip-do-anel { position: absolute; top: 5.5px; left: 5.5px; }
+.anel-de-uso { position: relative; display: inline-flex; width: 24px; height: 24px; flex-shrink: 0; }
 /* O anel de uso da cota: o arco e o número no meio seguem a cor do nível da janela mostrada (a do botão, que
  * segue a pior janela, fica no texto ao lado). O normal é o cinza de sempre e acende no hover e com a aba aberta. */
 .anel-de-uso-normal { color: var(--secondary); }
@@ -305,15 +306,15 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   display: flex;
   align-items: center;
   justify-content: center;
-  font: 600 10.5px/1 var(--fonte-mono);
+  font: 600 10px/1 var(--fonte-mono);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.05em;
 }
-.valor-do-anel-cheio { font-size: 8.5px; }
+.valor-do-anel-cheio { font-size: 8px; }
 
 /* Windows e Linux desktop: ─ ☐ ✕ no fim da ilha da direita, depois de um divisor; fechar fica vermelho no hover. */
 .ilha-da-direita .controles-da-janela { gap: 2px; }
-.ilha-da-direita .botao-da-janela { width: 36px; height: 36px; border-radius: 8px; }
+.ilha-da-direita .botao-da-janela { width: 32px; height: 32px; border-radius: 7px; }
 .ilha-da-direita .botao-da-janela-fechar:hover { background: var(--error); color: var(--primary); }
 
 /* ---------- Canto inferior esquerdo: a ilha vertical de ferramentas ---------- */
@@ -322,7 +323,7 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   bottom: 16px;
   left: 16px;
   z-index: 2;
-  width: 48px;
+  width: 42px;
   height: auto;
   flex-direction: column;
   align-items: stretch;
@@ -334,9 +335,9 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
   color: var(--secondary);
   cursor: pointer;
 }
@@ -346,8 +347,8 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   content: "";
   position: absolute;
   top: -1px;
-  left: 6px;
-  right: 6px;
+  left: 5px;
+  right: 5px;
   height: 1px;
   background: var(--border);
 }
@@ -362,18 +363,19 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
 .botao-da-ilha-vertical[aria-pressed="true"]::before,
 .botao-da-ilha-vertical[aria-pressed="true"] + .botao-da-ilha-vertical::before { opacity: 0; }
 
-/* A barra de desenho abre numa ilha ao lado da vertical (esquerda 72, base 16). */
+/* A barra de desenho abre numa ilha ao lado da vertical (esquerda 66 = 16 + 42 + 8 de respiro, base 16). */
 .react-flow__panel.painel-da-barra-de-desenho.bottom.left {
   position: absolute;
   bottom: 16px;
-  left: 72px;
+  left: 66px;
   margin: 0;
   z-index: 6;
 }
+/* Os botões da barra (30 px) seguem iguais: 42 - 2 de borda - 2 x 5 de respiro = 30, e a largura não muda. */
 .painel-da-barra-de-desenho .barra-de-desenho {
-  height: 48px;
-  padding: 6px;
-  border-radius: 14px;
+  height: 42px;
+  padding: 5px 6px;
+  border-radius: 12px;
   background: var(--surface);
   border-color: var(--border);
   transform-origin: bottom left;
@@ -383,9 +385,9 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
 .react-flow__panel.painel-do-chat.painel-do-chat-com-desenho.bottom.center {
   --largura-da-barra-de-desenho: 641px;
   /* A margem de 15px do painel do React Flow completa o vão de 16px. */
-  left: calc(72px + var(--largura-da-barra-de-desenho) + 1px);
+  left: calc(66px + var(--largura-da-barra-de-desenho) + 1px);
   transform: none;
-  width: min(680px, calc(100% - (72px + var(--largura-da-barra-de-desenho) + 16px) - 231px));
+  width: min(680px, calc(100% - (66px + var(--largura-da-barra-de-desenho) + 16px) - 231px));
 }
 /* Sem espaço ao lado: o chat sobe, acima da ilha de desenho. */
 @media (width < 1360px) {
@@ -393,14 +395,14 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
     left: 50%;
     transform: translateX(-50%);
     width: min(680px, calc(100vw - 2 * 64px));
-    margin-bottom: 79px;
+    margin-bottom: 73px;
   }
 }
 
 /* ---------- Notificações: abaixo da ilha da direita, alinhadas à borda ---------- */
 .notificacoes-do-canvas {
   position: absolute;
-  top: 72px;
+  top: 66px;
   right: 16px;
   z-index: 2;
   display: flex;

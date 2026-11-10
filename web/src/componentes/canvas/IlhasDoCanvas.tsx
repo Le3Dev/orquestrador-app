@@ -46,7 +46,7 @@ export function IlhaDoNome(props: PropsDoMenuNovo) {
     <header className="ilha ilha-arrasta ilha-do-nome nodrag nopan nowheel" data-testid="ilha-do-nome">
       <span className="nome-do-app">
         <span className="icone-do-app">
-          <IconeOrquestrador tamanho={22} />
+          <IconeOrquestrador tamanho={20} />
         </span>
         <h1>Orquestrador de Agentes</h1>
       </span>
@@ -68,7 +68,7 @@ interface PropsDoAnel {
 
 /** O desenho dos dois anéis da ilha: a trilha, o arco que cresce com o uso e o que fica no meio. */
 function Anel({ usada, classe, omitirArcoVazio = false, children }: PropsDoAnel) {
-  const tamanho = 26;
+  const tamanho = 24;
   const traco = 2.2;
   const raio = (tamanho - traco) / 2;
   const circunferencia = 2 * Math.PI * raio;
@@ -246,7 +246,7 @@ export function IlhaDaDireita({
         aria-keyshortcuts="Control+K"
         title="Paleta de comandos: ações, orquestradores, notas e pedidos (Ctrl+K)"
       >
-        <IconeLupa tamanho={20} />
+        <IconeLupa tamanho={18} />
       </button>
       {trabalhando > 0 && (
         <span
@@ -295,7 +295,7 @@ export function IlhaDaDireita({
         title="Configurações"
         onClick={() => aoAlternarConfiguracoes()}
       >
-        <IconeEngrenagem tamanho={20} />
+        <IconeEngrenagem tamanho={18} />
       </button>
       {controlesDaJanela && (
         <>
@@ -346,7 +346,7 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
         aria-label="Aproximar"
         title="Aproximar"
       >
-        <IconeMais tamanho={20} />
+        <IconeMais tamanho={18} />
       </button>
       <button
         type="button"
@@ -356,7 +356,7 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
         aria-label="Afastar"
         title="Afastar"
       >
-        <IconeMenos tamanho={20} />
+        <IconeMenos tamanho={18} />
       </button>
       <button
         type="button"
@@ -365,7 +365,7 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
         aria-label="Ajustar à tela"
         title="Ajustar à tela: mostra tudo o que está no canvas"
       >
-        <IconeEnquadrar tamanho={18} />
+        <IconeEnquadrar tamanho={16} />
       </button>
       <button
         type="button"
@@ -375,7 +375,7 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
         aria-label="Organizar janelas"
         title={DICA_DO_ORGANIZAR}
       >
-        <IconeGrade tamanho={18} />
+        <IconeGrade tamanho={16} />
       </button>
       <button
         type="button"
@@ -385,14 +385,14 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
         aria-label="Desenhar"
         title={DICA_DO_DESENHAR}
       >
-        <IconeDesenhar tamanho={18} />
+        <IconeDesenhar tamanho={16} />
       </button>
     </div>
   );
 });
 
-/** Onde a pilha de notificações começa: abaixo da ilha da direita (16 de margem, 48 de altura e 8 de respiro). */
-const TOPO_DAS_NOTIFICACOES_PX = 72;
+/** Onde a pilha de notificações começa: abaixo da ilha da direita (16 de margem, 42 de altura e 8 de respiro). */
+const TOPO_DAS_NOTIFICACOES_PX = 66;
 
 const AVISO_DA_MEMORIA = {
   baixa: "Memória baixa: novos pedidos (sobretudo com Opus nos subagentes) podem deixar o computador lento.",

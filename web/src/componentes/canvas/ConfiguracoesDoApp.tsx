@@ -31,8 +31,8 @@ const ABAS: readonly { aba: AbaDasConfiguracoes; rotulo: string }[] = [
   { aba: "aparencia", rotulo: "Aparência" },
 ];
 
-/** O topo do painel por padrão: logo abaixo da ilha da direita (topo 16 + altura 48 + respiro). */
-const TOPO_PADRAO = 72;
+/** O topo do painel por padrão: logo abaixo da ilha da direita (topo 16 + altura 42 + respiro de 8). */
+const TOPO_PADRAO = 66;
 
 interface Props {
   /** Os Ajustes do app desktop (pastas e Claude Code). */
