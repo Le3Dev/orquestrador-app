@@ -1,3 +1,18 @@
+/** Em que idioma a escuta transcreve: português fixo ou detectado a cada fala. */
+export type IdiomaDaEscuta = "portuguese" | "automatico";
+
+/** O que pesa na escolha do motor de transcrição: rapidez ou acerto. */
+export type PrioridadeDoMotor = "velocidade" | "precisao";
+
+/** Como a legenda da escuta aparece na tela. Imutável. */
+export interface AparenciaDaEscuta {
+  /** Em px, de 12 a 22. */
+  readonly tamanhoDaFonte: number;
+  /** De 0,4 a 1. */
+  readonly opacidade: number;
+  readonly compacto: boolean;
+}
+
 /** Preferências da escuta, guardadas neste computador (localStorage). */
 export interface PreferenciasDaEscuta {
   /** Ligada: a escuta classifica e envia as perguntas sozinha. Desligada: só transcreve. */
@@ -6,20 +21,68 @@ export interface PreferenciasDaEscuta {
   readonly automaticoManual: boolean;
   /** A pessoa já confirmou o aviso da primeira vez. */
   readonly avisoVisto: boolean;
+  readonly idioma: IdiomaDaEscuta;
+  readonly prioridadeDoMotor: PrioridadeDoMotor;
+  readonly aparencia: AparenciaDaEscuta;
 }
 
 export const CHAVE_DAS_PREFERENCIAS_DA_ESCUTA = "orquestrador.preferenciasDaEscuta";
+
+export const LIMITES_DO_TAMANHO_DA_FONTE = Object.freeze({ minimo: 12, maximo: 22 });
+export const LIMITES_DA_OPACIDADE = Object.freeze({ minimo: 0.4, maximo: 1 });
+
+export const APARENCIA_PADRAO_DA_ESCUTA: AparenciaDaEscuta = Object.freeze({
+  tamanhoDaFonte: 14,
+  opacidade: 0.92,
+  compacto: false,
+});
 
 export const PREFERENCIAS_PADRAO_DA_ESCUTA: PreferenciasDaEscuta = Object.freeze({
   automatico: true,
   automaticoManual: false,
   avisoVisto: false,
+  idioma: "portuguese",
+  prioridadeDoMotor: "velocidade",
+  aparencia: APARENCIA_PADRAO_DA_ESCUTA,
 });
 
 /** Onde a sessão lê e grava as preferências (um falso nos testes). */
 export interface ArmazenamentoDasPreferencias {
   ler(): PreferenciasDaEscuta;
   gravar(preferencias: PreferenciasDaEscuta): void;
+}
+
+function limitar(valor: number, minimo: number, maximo: number): number {
+  return Math.min(maximo, Math.max(minimo, valor));
+}
+
+/**
+ * Uma aparência dentro dos limites: número fora da faixa vai para a borda;
+ * campo ausente ou de outro tipo vale o padrão.
+ */
+export function aparenciaValida(bruta: Partial<Record<keyof AparenciaDaEscuta, unknown>>): AparenciaDaEscuta {
+  const padrao = APARENCIA_PADRAO_DA_ESCUTA;
+  const fonte = bruta.tamanhoDaFonte;
+  const opacidade = bruta.opacidade;
+  return Object.freeze({
+    tamanhoDaFonte:
+      typeof fonte === "number" && Number.isFinite(fonte)
+        ? limitar(Math.round(fonte), LIMITES_DO_TAMANHO_DA_FONTE.minimo, LIMITES_DO_TAMANHO_DA_FONTE.maximo)
+        : padrao.tamanhoDaFonte,
+    opacidade:
+      typeof opacidade === "number" && Number.isFinite(opacidade)
+        ? limitar(opacidade, LIMITES_DA_OPACIDADE.minimo, LIMITES_DA_OPACIDADE.maximo)
+        : padrao.opacidade,
+    compacto: typeof bruta.compacto === "boolean" ? bruta.compacto : padrao.compacto,
+  });
+}
+
+function idiomaValido(bruto: unknown): IdiomaDaEscuta {
+  return bruto === "automatico" || bruto === "portuguese" ? bruto : PREFERENCIAS_PADRAO_DA_ESCUTA.idioma;
+}
+
+function prioridadeValida(bruta: unknown): PrioridadeDoMotor {
+  return bruta === "velocidade" || bruta === "precisao" ? bruta : PREFERENCIAS_PADRAO_DA_ESCUTA.prioridadeDoMotor;
 }
 
 /** Tolerante: JSON inválido, outro formato ou campo de outro tipo valem o padrão. */
@@ -33,6 +96,7 @@ export function interpretarPreferenciasDaEscuta(bruto: string | null): Preferenc
   }
   if (typeof lido !== "object" || lido === null || Array.isArray(lido)) return PREFERENCIAS_PADRAO_DA_ESCUTA;
   const registro = lido as Record<string, unknown>;
+  const aparencia = registro.aparencia;
   return Object.freeze({
     automatico:
       typeof registro.automatico === "boolean" ? registro.automatico : PREFERENCIAS_PADRAO_DA_ESCUTA.automatico,
@@ -42,6 +106,12 @@ export function interpretarPreferenciasDaEscuta(bruto: string | null): Preferenc
         : PREFERENCIAS_PADRAO_DA_ESCUTA.automaticoManual,
     avisoVisto:
       typeof registro.avisoVisto === "boolean" ? registro.avisoVisto : PREFERENCIAS_PADRAO_DA_ESCUTA.avisoVisto,
+    idioma: idiomaValido(registro.idioma),
+    prioridadeDoMotor: prioridadeValida(registro.prioridadeDoMotor),
+    aparencia:
+      typeof aparencia === "object" && aparencia !== null && !Array.isArray(aparencia)
+        ? aparenciaValida(aparencia as Record<string, unknown>)
+        : APARENCIA_PADRAO_DA_ESCUTA,
   });
 }
 

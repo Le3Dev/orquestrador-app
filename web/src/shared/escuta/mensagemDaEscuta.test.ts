@@ -18,6 +18,13 @@ describe("mensagemDaEscuta", () => {
     expect(mensagem).toMatch(/Responda direto/);
   });
 
+  it("a instrução pede resposta curta, em até 5 tópicos, e mantém a regra do problema de código", () => {
+    const mensagem = mensagemDaEscuta(pergunta("Qual a complexidade do quicksort?", ""));
+    expect(mensagem).toContain("Responda direto e curto, em até 5 tópicos objetivos");
+    expect(mensagem).toMatch(/captura de tela anexada/);
+    expect(mensagem).toMatch(/Se for um problema de código, dê a abordagem, o código e a complexidade de tempo e de espaço\.$/);
+  });
+
   it("sem contexto, omite o bloco do trecho", () => {
     const mensagem = mensagemDaEscuta(pergunta("Qual a complexidade do quicksort?", "   "));
     expect(mensagem).not.toContain('"""');

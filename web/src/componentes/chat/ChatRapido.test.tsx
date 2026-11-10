@@ -57,6 +57,18 @@ const escutaSimulada = vi.hoisted(() => ({
   linhaProvisoria: null as string | null,
   trechos: [] as readonly { id: string; texto: string; inicioMs: number; fimMs: number }[],
   limparTrechos: vi.fn(),
+  automatico: true,
+  alternarAutomatico: vi.fn(),
+  erro: null as string | null,
+  descartarErro: vi.fn(),
+  ultimaPergunta: null as string | null,
+  legenda: { frases: [], parcial: null } as EscutaNaTela["legenda"],
+  motor: null as EscutaNaTela["motor"],
+  download: null as EscutaNaTela["download"],
+  compacto: false,
+  mudarAparencia: vi.fn(),
+  mudarIdioma: vi.fn(),
+  mudarPrioridadeDoMotor: vi.fn(),
 }));
 
 vi.mock("../../shared/escuta/useEscuta", () => ({
@@ -74,16 +86,28 @@ vi.mock("../../shared/escuta/useEscuta", () => ({
       linhaProvisoria: escutaSimulada.linhaProvisoria,
       trechos: escutaSimulada.trechos,
       limparTrechos: escutaSimulada.limparTrechos,
-      automatico: true,
-      alternarAutomatico: () => undefined,
+      automatico: escutaSimulada.automatico,
+      alternarAutomatico: escutaSimulada.alternarAutomatico,
       pausar: escutaSimulada.pausar,
       retomar: () => undefined,
-      erro: null,
-      descartarErro: () => undefined,
+      erro: escutaSimulada.erro,
+      descartarErro: escutaSimulada.descartarErro,
       precisaDoAviso: situacao === "aguardando-aviso",
       confirmarAviso: escutaSimulada.confirmarAviso,
       recusarAviso: escutaSimulada.recusarAviso,
-      ultimaPergunta: null,
+      ultimaPergunta: escutaSimulada.ultimaPergunta,
+      legenda: escutaSimulada.legenda,
+      motor: escutaSimulada.motor,
+      download: escutaSimulada.download,
+      ultimaPerguntaEnviada: null,
+      preferenciasDaTela: {
+        idioma: "portuguese",
+        prioridadeDoMotor: "velocidade",
+        aparencia: { tamanhoDaFonte: 14, opacidade: 0.92, compacto: escutaSimulada.compacto },
+      },
+      mudarIdioma: escutaSimulada.mudarIdioma,
+      mudarPrioridadeDoMotor: escutaSimulada.mudarPrioridadeDoMotor,
+      mudarAparencia: escutaSimulada.mudarAparencia,
     };
   },
 }));
@@ -97,6 +121,18 @@ beforeEach(() => {
   escutaSimulada.linhaProvisoria = null;
   escutaSimulada.trechos = [];
   escutaSimulada.limparTrechos = vi.fn();
+  escutaSimulada.automatico = true;
+  escutaSimulada.alternarAutomatico = vi.fn();
+  escutaSimulada.erro = null;
+  escutaSimulada.descartarErro = vi.fn();
+  escutaSimulada.ultimaPergunta = null;
+  escutaSimulada.legenda = { frases: [], parcial: null };
+  escutaSimulada.motor = null;
+  escutaSimulada.download = null;
+  escutaSimulada.compacto = false;
+  escutaSimulada.mudarAparencia = vi.fn();
+  escutaSimulada.mudarIdioma = vi.fn();
+  escutaSimulada.mudarPrioridadeDoMotor = vi.fn();
 });
 
 /** As opções que o chat passou à escuta no último render. */
@@ -589,6 +625,165 @@ describe("ChatRapido · modo invisível", () => {
         await expect(opcoesDaEscuta().enviar("Qual a complexidade?")).rejects.toBe(recusa);
       });
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("painel da escuta", () => {
+    const painel = () => screen.queryByTestId("painel-da-escuta");
+    const indicador = () => screen.getByTestId("indicador-da-escuta");
+
+    it("aparece acima do campo com a legenda; o parcial fica só nele, não na conversa", () => {
+      escutaSimulada.legenda = {
+        frases: [{ id: "f1", texto: "Bom dia a todos.", inicioMs: 1, fimMs: 2, pergunta: false }],
+        parcial: "dizendo agora",
+      };
+      escutaSimulada.trechos = [{ id: "t1", texto: "Bom dia a todos.", inicioMs: 1, fimMs: 2 }];
+      escutaSimulada.linhaProvisoria = "dizendo agora";
+      const { ativar, desativar } = ponteAtiva(undefined, true);
+      renderizar();
+      expect(painel()).not.toBeInTheDocument();
+      // Sem o painel, o parcial aparece na conversa.
+      expect(screen.getByTestId("trecho-provisorio")).toHaveTextContent("dizendo agora");
+
+      ativar();
+      const elemento = painel() as HTMLElement;
+      expect(screen.getByTestId("chat-rapido")).toContainElement(elemento);
+      expect(
+        elemento.compareDocumentPosition(screen.getByTestId("composer-do-chat")) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
+      expect(within(elemento).getByText("dizendo agora")).toHaveClass("legenda-parcial");
+      expect(within(elemento).getByText("Bom dia a todos.")).toBeInTheDocument();
+      expect(within(elemento).getByTestId("faixa-da-escuta")).toBeInTheDocument();
+      // A fala confirmada continua na conversa; o parcial, não.
+      expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
+      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(1);
+
+      desativar();
+      expect(painel()).not.toBeInTheDocument();
+    });
+
+    it("também com o 🎧, fora do modo invisível", async () => {
+      const { modoInvisivel } = ponteAtiva(undefined, true);
+      Object.assign(modoInvisivel, { definirEscutaLigada: vi.fn().mockResolvedValue(undefined) });
+      renderizar();
+      expect(painel()).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Escuta do áudio" }));
+      await waitFor(() => expect(painel()).toBeInTheDocument());
+    });
+
+    it("não aparece enquanto o aviso da primeira vez está na tela", () => {
+      escutaSimulada.situacaoNoModo = "aguardando-aviso";
+      const { ativar } = ponteAtiva(undefined, true);
+      renderizar();
+      ativar();
+      expect(screen.getByRole("dialog", { name: "Escutar o áudio do computador?" })).toBeInTheDocument();
+      expect(painel()).not.toBeInTheDocument();
+    });
+
+    it("a aparência vai para a escuta", () => {
+      const { ativar } = ponteAtiva(undefined, true);
+      renderizar();
+      ativar();
+
+      fireEvent.click(screen.getByRole("button", { name: "Aumentar a fonte" }));
+      expect(escutaSimulada.mudarAparencia).toHaveBeenLastCalledWith({ tamanhoDaFonte: 15, opacidade: 0.92, compacto: false });
+      fireEvent.click(screen.getByRole("button", { name: "Compactar a escuta" }));
+      expect(escutaSimulada.mudarAparencia).toHaveBeenLastCalledWith({ tamanhoDaFonte: 14, opacidade: 0.92, compacto: true });
+    });
+
+    it("o erro aparece no painel e o fechar o descarta", () => {
+      escutaSimulada.situacaoNoModo = "erro";
+      escutaSimulada.erro = "a captura do áudio parou";
+      const { ativar } = ponteAtiva(undefined, true);
+      renderizar();
+      ativar();
+
+      const alerta = within(painel() as HTMLElement).getByRole("alert");
+      expect(alerta).toHaveTextContent("a captura do áudio parou");
+      fireEvent.click(within(alerta).getByRole("button", { name: "fechar" }));
+      expect(escutaSimulada.descartarErro).toHaveBeenCalledTimes(1);
+    });
+
+    it("no pé do painel: a chave Automático e os ajustes de idioma e motor", () => {
+      escutaSimulada.automatico = false;
+      const { ativar } = ponteAtiva(undefined, true);
+      renderizar();
+      ativar();
+      const pe = within(screen.getByTestId("faixa-da-escuta"));
+
+      const chave = pe.getByRole("switch", { name: "Automático" });
+      expect(chave).toHaveAttribute("aria-checked", "false");
+      fireEvent.click(chave);
+      expect(escutaSimulada.alternarAutomatico).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(pe.getByRole("button", { name: "Ajustes da escuta" }));
+      const ajustes = within(screen.getByRole("group", { name: "Ajustes da escuta" }));
+      expect(ajustes.getByRole("radio", { name: "Português" })).toBeChecked();
+      expect(ajustes.getByRole("radio", { name: "Velocidade" })).toBeChecked();
+      fireEvent.click(ajustes.getByRole("radio", { name: "Automático" }));
+      expect(escutaSimulada.mudarIdioma).toHaveBeenCalledWith("automatico");
+      fireEvent.click(ajustes.getByRole("radio", { name: "Precisão" }));
+      expect(escutaSimulada.mudarPrioridadeDoMotor).toHaveBeenCalledWith("precisao");
+    });
+
+    it("o cartão mostra a resposta à última pergunta da escuta, vinda das mensagens", () => {
+      const { ativar } = ponteAtiva(undefined, true);
+      const pergunta = mensagem("u1", "usuario", { texto: "Qual a complexidade?", origem: "escuta" });
+      const { rerender } = renderizar({
+        ...OCIOSO,
+        situacao: "respondendo",
+        mensagens: [pergunta, mensagem("c1", "claude", { situacao: "respondendo", texto: "" })],
+      });
+      ativar();
+
+      const cartao = () => screen.getByRole("region", { name: "Resposta da escuta" });
+      expect(cartao()).toHaveAttribute("aria-busy", "true");
+      expect(within(cartao()).getByText("Qual a complexidade?")).toBeInTheDocument();
+      expect(within(cartao()).getByRole("status")).toHaveTextContent("preparando a resposta…");
+
+      rerender({
+        ...OCIOSO,
+        mensagens: [pergunta, mensagem("c1", "claude", { texto: "- O(n log n) no pior caso" })],
+      });
+      expect(cartao()).toHaveAttribute("aria-busy", "false");
+      expect(within(cartao()).getByRole("listitem")).toHaveTextContent("O(n log n) no pior caso");
+    });
+
+    it("a última pergunta sai da faixa quando o cartão já a mostra; a posta no campo continua", () => {
+      escutaSimulada.ultimaPergunta = "Qual a complexidade?";
+      const { ativar } = ponteAtiva(undefined, true);
+      const conversa: EstadoDoChatNaTela = {
+        ...OCIOSO,
+        mensagens: [
+          mensagem("u1", "usuario", { texto: "Qual a complexidade?", origem: "escuta" }),
+          mensagem("c1", "claude", { texto: "O(n)." }),
+        ],
+      };
+      const { rerender } = renderizar(conversa);
+      ativar();
+      expect(within(screen.getByTestId("faixa-da-escuta")).queryByText("última pergunta")).not.toBeInTheDocument();
+
+      escutaSimulada.ultimaPergunta = "E o espaço?";
+      rerender({ ...conversa });
+      expect(within(screen.getByTestId("faixa-da-escuta")).getByText("E o espaço?", { exact: false })).toHaveAttribute(
+        "title",
+        "E o espaço?",
+      );
+    });
+
+    it("o indicador mostra o selo do motor e o download com o total real", () => {
+      escutaSimulada.situacaoNoModo = "baixando-modelo";
+      escutaSimulada.motor = { dispositivo: "webgpu", modelo: "onnx-community/whisper-base", precisao: "q4", nativo: false };
+      escutaSimulada.download = { progresso: 45, totalMb: 199 };
+      const { ativar } = ponteAtiva(undefined, true);
+      renderizar();
+      ativar();
+
+      expect(within(indicador()).getByText("baixando o modelo 45% de 199 MB")).toBeInTheDocument();
+      expect(within(indicador()).getByTestId("selo-do-motor")).toHaveTextContent("GPU · base · q4");
+      // O painel mostra o mesmo download, na barra dele.
+      expect(within(painel() as HTMLElement).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "45");
     });
   });
 });

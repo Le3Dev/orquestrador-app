@@ -1,4 +1,4 @@
-import { TAXA_DE_AMOSTRAGEM } from "./CortadorDeTrechos";
+import { TAXA_DE_AMOSTRAGEM } from "./DetectorDeVoz";
 
 /** Quem recebe o áudio capturado e o aviso de que a captura acabou sozinha. */
 export interface OuvintesDaCaptura {

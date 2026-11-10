@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
-import { sessaoDaEscuta, type SessaoDaEscuta } from "./sessaoDaEscuta";
+import type { AparenciaDaEscuta, IdiomaDaEscuta, PrioridadeDoMotor } from "./preferenciasDaEscuta";
+import { type EstadoDaEscuta, sessaoDaEscuta, type SessaoDaEscuta } from "./sessaoDaEscuta";
 
 /**
  * Em que pé está a escuta do áudio do computador no modo invisível.
@@ -51,6 +52,14 @@ export interface EscutaNaTela {
   confirmarAviso: () => void;
   recusarAviso: () => void; // não escuta nesta entrada no modo invisível
   ultimaPergunta: string | null; // última pergunta enviada ou posta no composer
+  legenda: EstadoDaEscuta["legenda"]; // frases confirmadas (até 200) e o parcial da fala atual
+  motor: EstadoDaEscuta["motor"]; // o motor de transcrição em uso; null antes de preparar
+  download: EstadoDaEscuta["download"]; // o modelo baixando; null fora disso
+  ultimaPerguntaEnviada: EstadoDaEscuta["ultimaPerguntaEnviada"]; // a última enviada ou posta no composer, com o instante
+  preferenciasDaTela: EstadoDaEscuta["preferenciasDaTela"];
+  mudarIdioma: (idioma: IdiomaDaEscuta) => void;
+  mudarPrioridadeDoMotor: (prioridade: PrioridadeDoMotor) => void;
+  mudarAparencia: (aparencia: Partial<AparenciaDaEscuta>) => void; // fora dos limites, vai para a borda
 }
 
 /**
@@ -113,5 +122,13 @@ export function useEscuta(
     confirmarAviso: sessao.confirmarAviso,
     recusarAviso: sessao.recusarAviso,
     ultimaPergunta: estado.ultimaPergunta,
+    legenda: estado.legenda,
+    motor: estado.motor,
+    download: estado.download,
+    ultimaPerguntaEnviada: estado.ultimaPerguntaEnviada,
+    preferenciasDaTela: estado.preferenciasDaTela,
+    mudarIdioma: sessao.mudarIdioma,
+    mudarPrioridadeDoMotor: sessao.mudarPrioridadeDoMotor,
+    mudarAparencia: sessao.mudarAparencia,
   };
 }

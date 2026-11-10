@@ -20,8 +20,9 @@ function enviada(texto: string, agoraMs = 0): ControleDeDisparos {
 
 describe("ControleDeDisparos", () => {
   it("constantes combinadas com o usuário", () => {
-    expect(INTERVALO_MINIMO_MS).toBe(20_000);
+    expect(INTERVALO_MINIMO_MS).toBe(8_000);
     expect(LIMITE_DE_SIMILARIDADE).toBe(0.8);
+    expect(VALIDADE_DAS_RECENTES_MS).toBe(10 * 60_000);
   });
 
   it("a primeira pergunta com o chat livre é enviada e registrada", () => {
@@ -35,17 +36,19 @@ describe("ControleDeDisparos", () => {
     expect(Object.isFrozen(controle)).toBe(true);
   });
 
-  it("intervalo: 19.999 ms recusa e 20.000 ms passa", () => {
+  it("intervalo: 7.999 ms recusa e 8.000 ms passa", () => {
     const controle = enviada("Como inverter uma lista ligada?", 0);
-    const cedo = controle.avaliar(pergunta("Explique programação dinâmica"), 19_999, true);
+    const cedo = controle.avaliar(pergunta("Explique programação dinâmica"), 7_999, true);
     expect(cedo.decisao).toBe("aguardar_intervalo");
     expect(cedo.controle.pendente?.pergunta).toBe("Explique programação dinâmica");
-    expect(controle.msAteLiberar(19_999)).toBe(1);
+    expect(controle.msAteLiberar(7_999)).toBe(1);
+    expect(controle.msAteLiberar(3_000)).toBe(5_000);
+    expect(controle.intervaloVencido(7_999)).toBe(false);
 
-    const naHora = controle.avaliar(pergunta("Explique programação dinâmica"), 20_000, true);
+    const naHora = controle.avaliar(pergunta("Explique programação dinâmica"), 8_000, true);
     expect(naHora.decisao).toBe("enviar");
-    expect(controle.msAteLiberar(20_000)).toBe(0);
-    expect(controle.intervaloVencido(20_000)).toBe(true);
+    expect(controle.msAteLiberar(8_000)).toBe(0);
+    expect(controle.intervaloVencido(8_000)).toBe(true);
   });
 
   it("msAteLiberar é 0 antes do primeiro envio", () => {
@@ -97,17 +100,17 @@ describe("ControleDeDisparos", () => {
     let controle = enviada("Como inverter uma lista ligada?", 0);
     controle = controle.avaliar(pergunta("Explique o event loop"), 5_000, false).controle;
 
-    const cedo = controle.retirarPendente(10_000, true);
+    const cedo = controle.retirarPendente(7_000, true);
     expect(cedo.pergunta).toBeNull();
     expect(cedo.controle).toBe(controle);
 
-    const ocupado = controle.retirarPendente(25_000, false);
+    const ocupado = controle.retirarPendente(9_000, false);
     expect(ocupado.pergunta).toBeNull();
 
-    const livre = controle.retirarPendente(25_000, true);
+    const livre = controle.retirarPendente(9_000, true);
     expect(livre.pergunta?.pergunta).toBe("Explique o event loop");
     expect(livre.controle.pendente).toBeNull();
-    expect(livre.controle.ultimoDisparoMs).toBe(25_000);
+    expect(livre.controle.ultimoDisparoMs).toBe(9_000);
     expect(livre.controle.recentes.map((r) => r.normalizada)).toContain("explique o event loop");
 
     expect(livre.controle.retirarPendente(60_000, true).pergunta).toBeNull();

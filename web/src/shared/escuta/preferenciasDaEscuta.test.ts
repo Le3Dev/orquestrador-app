@@ -1,0 +1,119 @@
+import {
+  APARENCIA_PADRAO_DA_ESCUTA,
+  aparenciaValida,
+  CHAVE_DAS_PREFERENCIAS_DA_ESCUTA,
+  interpretarPreferenciasDaEscuta,
+  LIMITES_DA_OPACIDADE,
+  LIMITES_DO_TAMANHO_DA_FONTE,
+  PREFERENCIAS_PADRAO_DA_ESCUTA,
+  preferenciasNoNavegador,
+} from "./preferenciasDaEscuta";
+
+describe("preferências da escuta", () => {
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("padrões: automático no modo invisível, português, velocidade e a aparência combinada", () => {
+    expect(PREFERENCIAS_PADRAO_DA_ESCUTA).toEqual({
+      automatico: true,
+      automaticoManual: false,
+      avisoVisto: false,
+      idioma: "portuguese",
+      prioridadeDoMotor: "velocidade",
+      aparencia: { tamanhoDaFonte: 14, opacidade: 0.92, compacto: false },
+    });
+    expect(LIMITES_DO_TAMANHO_DA_FONTE).toEqual({ minimo: 12, maximo: 22 });
+    expect(LIMITES_DA_OPACIDADE).toEqual({ minimo: 0.4, maximo: 1 });
+    expect(Object.isFrozen(PREFERENCIAS_PADRAO_DA_ESCUTA)).toBe(true);
+    expect(Object.isFrozen(APARENCIA_PADRAO_DA_ESCUTA)).toBe(true);
+  });
+
+  it("sem nada guardado, JSON inválido ou outro formato valem o padrão", () => {
+    expect(interpretarPreferenciasDaEscuta(null)).toBe(PREFERENCIAS_PADRAO_DA_ESCUTA);
+    expect(interpretarPreferenciasDaEscuta("{quebrado")).toBe(PREFERENCIAS_PADRAO_DA_ESCUTA);
+    expect(interpretarPreferenciasDaEscuta("[1, 2]")).toBe(PREFERENCIAS_PADRAO_DA_ESCUTA);
+    expect(interpretarPreferenciasDaEscuta('"texto"')).toBe(PREFERENCIAS_PADRAO_DA_ESCUTA);
+  });
+
+  it("dados antigos, sem os campos novos, mantêm o que tinham e ganham os padrões novos", () => {
+    const lidas = interpretarPreferenciasDaEscuta(
+      JSON.stringify({ automatico: false, automaticoManual: true, avisoVisto: true }),
+    );
+    expect(lidas).toEqual({
+      automatico: false,
+      automaticoManual: true,
+      avisoVisto: true,
+      idioma: "portuguese",
+      prioridadeDoMotor: "velocidade",
+      aparencia: APARENCIA_PADRAO_DA_ESCUTA,
+    });
+    expect(Object.isFrozen(lidas)).toBe(true);
+  });
+
+  it("lê os campos novos e troca valor desconhecido ou de outro tipo pelo padrão", () => {
+    expect(
+      interpretarPreferenciasDaEscuta(
+        JSON.stringify({ idioma: "automatico", prioridadeDoMotor: "precisao", aparencia: { tamanhoDaFonte: 18, opacidade: 0.6, compacto: true } }),
+      ),
+    ).toMatchObject({ idioma: "automatico", prioridadeDoMotor: "precisao", aparencia: { tamanhoDaFonte: 18, opacidade: 0.6, compacto: true } });
+
+    expect(
+      interpretarPreferenciasDaEscuta(JSON.stringify({ idioma: "klingon", prioridadeDoMotor: 3, aparencia: [14], automatico: "sim" })),
+    ).toMatchObject({ idioma: "portuguese", prioridadeDoMotor: "velocidade", aparencia: APARENCIA_PADRAO_DA_ESCUTA, automatico: true });
+  });
+
+  it("aparência guardada fora dos limites vai para a borda", () => {
+    expect(
+      interpretarPreferenciasDaEscuta(JSON.stringify({ aparencia: { tamanhoDaFonte: 99, opacidade: 0.05 } })).aparencia,
+    ).toEqual({ tamanhoDaFonte: 22, opacidade: 0.4, compacto: false });
+  });
+
+  describe("aparenciaValida", () => {
+    it("limita a fonte de 12 a 22 (inteira) e a opacidade de 0,4 a 1", () => {
+      expect(aparenciaValida({ tamanhoDaFonte: 5, opacidade: 2, compacto: true })).toEqual({
+        tamanhoDaFonte: 12,
+        opacidade: 1,
+        compacto: true,
+      });
+      expect(aparenciaValida({ tamanhoDaFonte: 30, opacidade: 0.1, compacto: false })).toEqual({
+        tamanhoDaFonte: 22,
+        opacidade: 0.4,
+        compacto: false,
+      });
+      expect(aparenciaValida({ tamanhoDaFonte: 16.6, opacidade: 0.75, compacto: false })).toEqual({
+        tamanhoDaFonte: 17,
+        opacidade: 0.75,
+        compacto: false,
+      });
+    });
+
+    it("campo ausente, não numérico ou não finito vale o padrão", () => {
+      expect(aparenciaValida({})).toEqual(APARENCIA_PADRAO_DA_ESCUTA);
+      expect(aparenciaValida({ tamanhoDaFonte: Number.NaN, opacidade: Number.POSITIVE_INFINITY, compacto: "sim" })).toEqual(
+        APARENCIA_PADRAO_DA_ESCUTA,
+      );
+      expect(aparenciaValida({ tamanhoDaFonte: "18" })).toEqual(APARENCIA_PADRAO_DA_ESCUTA);
+    });
+
+    it("devolve um objeto congelado", () => {
+      expect(Object.isFrozen(aparenciaValida({ tamanhoDaFonte: 18 }))).toBe(true);
+    });
+  });
+
+  it("no navegador, grava no localStorage e lê de volta", () => {
+    const preferencias = {
+      ...PREFERENCIAS_PADRAO_DA_ESCUTA,
+      avisoVisto: true,
+      idioma: "automatico" as const,
+      aparencia: { tamanhoDaFonte: 20, opacidade: 0.5, compacto: true },
+    };
+    preferenciasNoNavegador.gravar(preferencias);
+    expect(JSON.parse(localStorage.getItem(CHAVE_DAS_PREFERENCIAS_DA_ESCUTA) ?? "null")).toEqual(preferencias);
+    expect(preferenciasNoNavegador.ler()).toEqual(preferencias);
+  });
+
+  it("no navegador, sem nada guardado, lê o padrão", () => {
+    expect(preferenciasNoNavegador.ler()).toBe(PREFERENCIAS_PADRAO_DA_ESCUTA);
+  });
+});

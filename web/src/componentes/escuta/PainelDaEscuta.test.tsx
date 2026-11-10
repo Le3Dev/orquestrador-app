@@ -175,5 +175,58 @@ describe("PainelDaEscuta", () => {
       renderizar();
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
+
+    it("com aoDescartarErro, o erro ganha o fechar", () => {
+      const aoDescartarErro = vi.fn();
+      render(
+        <PainelDaEscuta
+          visao={visao({ situacao: "erro", erro: "a captura do áudio parou" })}
+          aparencia={APARENCIA_PADRAO}
+          aoMudarAparencia={vi.fn()}
+          aoDescartarErro={aoDescartarErro}
+        />,
+      );
+
+      expect(screen.getByRole("alert")).toHaveTextContent("a captura do áudio parou");
+      fireEvent.click(screen.getByRole("button", { name: "fechar" }));
+      expect(aoDescartarErro).toHaveBeenCalledTimes(1);
+    });
+
+    it("sem aoDescartarErro, o erro não tem fechar", () => {
+      renderizar({ situacao: "erro", erro: "a captura do áudio parou" });
+      expect(screen.queryByRole("button", { name: "fechar" })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("rodapé", () => {
+    it("aparece no pé do painel, também no compacto", () => {
+      const { container, rerender } = render(
+        <PainelDaEscuta
+          visao={visao()}
+          aparencia={APARENCIA_PADRAO}
+          aoMudarAparencia={vi.fn()}
+          rodape={<button type="button">Automático</button>}
+        />,
+      );
+      const rodape = container.querySelector(".rodape-do-painel-da-escuta");
+      expect(rodape).not.toBeNull();
+      expect(rodape).toContainElement(screen.getByRole("button", { name: "Automático" }));
+      expect(screen.getByTestId("painel-da-escuta").lastElementChild).toBe(rodape);
+
+      rerender(
+        <PainelDaEscuta
+          visao={visao()}
+          aparencia={{ ...APARENCIA_PADRAO, compacto: true }}
+          aoMudarAparencia={vi.fn()}
+          rodape={<button type="button">Automático</button>}
+        />,
+      );
+      expect(screen.getByRole("button", { name: "Automático" })).toBeInTheDocument();
+    });
+
+    it("sem rodapé, sem o pé", () => {
+      const { container } = renderizar();
+      expect(container.querySelector(".rodape-do-painel-da-escuta")).toBeNull();
+    });
   });
 });

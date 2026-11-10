@@ -1,15 +1,24 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 
-import type { SituacaoDaEscuta } from "../../shared/escuta/useEscuta";
+import type { EscutaNaTela, SituacaoDaEscuta } from "../../shared/escuta/useEscuta";
 import { IndicadorDaEscuta } from "./IndicadorDaEscuta";
 
-function renderizar(situacao: SituacaoDaEscuta, extras: { progressoDoDownload?: number | null; erro?: string | null } = {}) {
+interface Extras {
+  progressoDoDownload?: number | null;
+  download?: EscutaNaTela["download"];
+  motor?: EscutaNaTela["motor"];
+  erro?: string | null;
+}
+
+function renderizar(situacao: SituacaoDaEscuta, extras: Extras = {}) {
   const pausar = vi.fn();
   const retomar = vi.fn();
   render(
     <IndicadorDaEscuta
       situacao={situacao}
       progressoDoDownload={extras.progressoDoDownload ?? null}
+      download={extras.download ?? null}
+      motor={extras.motor ?? null}
       erro={extras.erro ?? null}
       pausar={pausar}
       retomar={retomar}
@@ -53,15 +62,50 @@ describe("IndicadorDaEscuta", () => {
     expect(pausar).not.toHaveBeenCalled();
   });
 
-  it("baixando o modelo: mostra a porcentagem, sem o botão de pausar", () => {
+  it("baixando o modelo: a porcentagem e o total real, sem o botão de pausar", () => {
+    const { indicador } = renderizar("baixando-modelo", {
+      progressoDoDownload: 45,
+      download: { progresso: 45.4, totalMb: 198.6 },
+    });
+    expect(screen.getByText("baixando o modelo 45% de 199 MB")).toBeInTheDocument();
+    expect(indicador).toHaveAttribute("title", "Baixando o modelo de transcrição (só na primeira vez, 199 MB)");
+    expect(indicador).not.toHaveTextContent("250");
+    expect(screen.queryByRole("button", { name: "Pausar a escuta" })).not.toBeInTheDocument();
+  });
+
+  it("baixando sem o total: só a porcentagem", () => {
+    renderizar("baixando-modelo", { download: { progresso: 12, totalMb: null } });
+    expect(screen.getByText("baixando o modelo 12%")).toBeInTheDocument();
+  });
+
+  it("baixando com só a porcentagem antiga (sem o download novo): ainda mostra o progresso", () => {
     renderizar("baixando-modelo", { progressoDoDownload: 42.4 });
     expect(screen.getByText("baixando o modelo 42%")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Pausar a escuta" })).not.toBeInTheDocument();
   });
 
   it("baixando sem progresso conhecido: reticências", () => {
     renderizar("baixando-modelo");
     expect(screen.getByText("baixando o modelo…")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["webgpu", "GPU"],
+    ["dml", "GPU"],
+    ["wasm", "CPU"],
+    ["cpu", "CPU"],
+  ] as const)("o selo do motor em %s: %s · modelo · precisão, com o modelo inteiro no title", (dispositivo, tipo) => {
+    renderizar("escutando", {
+      motor: { dispositivo, modelo: "onnx-community/whisper-base", precisao: "q4", nativo: false },
+    });
+    const selo = screen.getByTestId("selo-do-motor");
+    expect(selo).toHaveTextContent(`${tipo} · base · q4`);
+    expect(selo).toHaveClass(`selo-do-motor-no-indicador-${tipo.toLowerCase()}`);
+    expect(selo.getAttribute("title")).toContain("onnx-community/whisper-base");
+  });
+
+  it("sem motor, sem selo", () => {
+    renderizar("escutando");
+    expect(screen.queryByTestId("selo-do-motor")).not.toBeInTheDocument();
   });
 
   it("erro: estado de erro com o motivo no title e o botão de tentar de novo", () => {

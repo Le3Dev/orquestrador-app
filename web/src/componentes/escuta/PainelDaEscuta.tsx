@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 import { CartaoDeResposta } from "./CartaoDeResposta";
 import { LegendaAoVivo } from "./LegendaAoVivo";
@@ -19,6 +19,10 @@ interface Props {
   readonly visao: VisaoDaEscuta;
   readonly aparencia: AparenciaDaEscuta;
   readonly aoMudarAparencia: (aparencia: AparenciaDaEscuta) => void;
+  /** Com ele, o erro ganha um "fechar" que o descarta. */
+  readonly aoDescartarErro?: () => void;
+  /** Uma linha de controles no pé do painel (ex.: a chave Automático e os ajustes), também no compacto. */
+  readonly rodape?: ReactNode;
 }
 
 const ROTULOS_DA_SITUACAO: Readonly<Record<SituacaoDoPainel, string>> = {
@@ -40,7 +44,7 @@ const { tamanhoDaFonte: LIMITE_DA_FONTE, opacidade: LIMITE_DA_OPACIDADE } = LIMI
  * A transparência vale só para o fundo (variável --opacidade-da-escuta): o
  * texto continua opaco e legível.
  */
-export function PainelDaEscuta({ visao, aparencia, aoMudarAparencia }: Props) {
+export function PainelDaEscuta({ visao, aparencia, aoMudarAparencia, aoDescartarErro, rodape }: Props) {
   const atual = ajustarAparencia(aparencia);
   const { tamanhoDaFonte, opacidade, compacto } = atual;
 
@@ -138,6 +142,14 @@ export function PainelDaEscuta({ visao, aparencia, aoMudarAparencia }: Props) {
       {visao.erro !== null && (
         <p className="erro-do-painel-da-escuta" role="alert">
           {visao.erro}
+          {aoDescartarErro !== undefined && (
+            <>
+              {" "}
+              <button type="button" className="btn btn-sm btn-ghost" onClick={aoDescartarErro}>
+                fechar
+              </button>
+            </>
+          )}
         </p>
       )}
 
@@ -145,6 +157,8 @@ export function PainelDaEscuta({ visao, aparencia, aoMudarAparencia }: Props) {
         <LegendaAoVivo confirmados={visao.confirmados} parcial={visao.parcial} tamanhoDaFonte={tamanhoDaFonte} />
         {!compacto && <CartaoDeResposta resposta={visao.resposta} tamanhoDaFonte={tamanhoDaFonte} />}
       </div>
+
+      {rodape !== undefined && <footer className="rodape-do-painel-da-escuta">{rodape}</footer>}
     </section>
   );
 }

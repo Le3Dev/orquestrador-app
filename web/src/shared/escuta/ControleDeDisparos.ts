@@ -1,7 +1,7 @@
 import { normalizarTexto, type PerguntaDetectada } from "./PerguntaDetectada";
 
 /** Intervalo mínimo entre dois envios da escuta ao chat. */
-export const INTERVALO_MINIMO_MS = 20_000;
+export const INTERVALO_MINIMO_MS = 8_000;
 
 /** A partir desta similaridade de Jaccard (palavras normalizadas), duas perguntas são a mesma. */
 export const LIMITE_DE_SIMILARIDADE = 0.8;
@@ -16,7 +16,7 @@ export const VALIDADE_DAS_RECENTES_MS = 10 * 60_000;
  * O que fazer com uma pergunta detectada:
  * - `enviar`: mandar ao chat agora;
  * - `guardar`: o chat está ocupado; virou a pendente (só a mais recente fica);
- * - `aguardar_intervalo`: ainda não passaram 20 s do último envio; virou a pendente;
+ * - `aguardar_intervalo`: ainda não passaram 8 s do último envio; virou a pendente;
  * - `descartar_repetida`: igual ou parecida demais com uma recente ou com a pendente.
  */
 export type DecisaoDeDisparo = "enviar" | "guardar" | "aguardar_intervalo" | "descartar_repetida";
@@ -67,7 +67,7 @@ const NENHUMA_RECENTE: readonly PerguntaRecente[] = Object.freeze([]);
 
 /**
  * Objeto de valor com a política de envio da escuta ao chat: intervalo mínimo
- * de 20 s, descarte de repetidas e uma única pendente (a mais recente) para
+ * de 8 s, descarte de repetidas e uma única pendente (a mais recente) para
  * quando o chat estiver ocupado ou o intervalo não tiver vencido.
  *
  * Imutável: `avaliar` e `retirarPendente` devolvem um controle novo, que deve
@@ -112,7 +112,7 @@ export class ControleDeDisparos {
    * 1. `descartar_repetida` — igual ou parecida (≥ `LIMITE_DE_SIMILARIDADE`)
    *    com uma recente ou com a pendente; nada muda além da poda das recentes;
    * 2. `guardar` — o chat não está livre: ela substitui a pendente;
-   * 3. `aguardar_intervalo` — menos de 20 s do último envio: ela substitui a
+   * 3. `aguardar_intervalo` — menos de 8 s do último envio: ela substitui a
    *    pendente, para sair quando o intervalo vencer;
    * 4. `enviar` — registra o envio e a pergunta nas recentes. Uma pendente
    *    mais antiga é descartada: fica valendo só a mais recente.
