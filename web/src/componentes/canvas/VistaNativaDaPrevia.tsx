@@ -1,4 +1,5 @@
 import { type MouseEvent, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { ApiDaPrevia, RetanguloDaPrevia } from "../../shared/ponteDoDesktop";
 import {
@@ -58,12 +59,18 @@ function medirCorpo(corpo: HTMLElement): { retangulo: RetanguloDaPrevia; coberta
  * liga ou o usuário aperta Shift+Esc dentro da página (o Esc sozinho é da
  * página). A vista é destruída quando a prévia fecha ou o endereço muda (o
  * pai troca a `key`).
+ *
+ * Em tela cheia (`corpoAmpliado`, o corpo do modal em `document.body`), o corpo
+ * da prévia (foto, camada de ativar) passa para lá, e a vista segue esse corpo,
+ * recortado pela janela inteira (fora do canvas não há `.react-flow`). É a mesma
+ * vista: nada é recriado, só muda o que ela acompanha; ao sair, volta ao canvas.
  */
 export function VistaNativaDaPrevia({
   previaId,
   url,
   api,
   suspensa,
+  corpoAmpliado,
   aoMudarOrigem,
   aoMudarHistorico,
 }: {
@@ -72,6 +79,8 @@ export function VistaNativaDaPrevia({
   api: ApiDaPrevia;
   /** Algo da prévia (o menu) vai ficar por cima da vista, ou ela está minimizada. */
   suspensa: boolean;
+  /** O corpo da tela cheia, quando a prévia está ampliada e o modal já existe; senão, `null`. */
+  corpoAmpliado: HTMLElement | null;
   /**
    * A origem real (só protocolo e host) da página que está aberta agora, a cada navegação; `null` até a
    * primeira página e ao desmontar. A barra da prévia mostra o host e destaca a troca de domínio.
@@ -169,7 +178,7 @@ export function VistaNativaDaPrevia({
 
     // O bloco inteiro (barra incluída): clicar nele não desativa. Um clique fora dele
     // chega à tela mesmo com a vista ativa (a vista só cobre o corpo da prévia).
-    const bloco = corpo.closest(".react-flow__node") ?? corpo.closest(".janela-previa") ?? corpo;
+    const bloco = corpo.closest(".react-flow__node") ?? corpo.closest(".janela-previa, .janela-em-tela-cheia") ?? corpo;
     const aoPressionar = (evento: PointerEvent) => {
       if (evento.target instanceof Node && !bloco.contains(evento.target)) {
         setAtiva(false);
@@ -181,7 +190,8 @@ export function VistaNativaDaPrevia({
       document.removeEventListener("pointerdown", aoPressionar, true);
       void api.ativar(previaId, false);
     };
-  }, [api, previaId, ativa]);
+  // Trocar de corpo (ampliar, sair da tela cheia) refaz o acompanhamento no corpo novo.
+  }, [api, previaId, ativa, corpoAmpliado]);
 
   function aoClicar(evento: MouseEvent<HTMLButtonElement>): void {
     const inicio = inicioDoClique.current;
@@ -196,7 +206,7 @@ export function VistaNativaDaPrevia({
     setAtiva(true);
   }
 
-  return (
+  const vista = (
     <div ref={raiz} className="vista-nativa-da-previa">
       {foto !== null ? (
         <img className="foto-da-previa" src={foto} alt={`Foto de ${url}`} draggable={false} />
@@ -226,4 +236,5 @@ export function VistaNativaDaPrevia({
       )}
     </div>
   );
+  return corpoAmpliado === null ? vista : createPortal(vista, corpoAmpliado);
 }

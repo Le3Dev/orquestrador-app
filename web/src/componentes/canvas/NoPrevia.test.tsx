@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type NodeProps, ReactFlowProvider } from "@xyflow/react";
 
 import { type AcoesDoCanvas, ProvedorDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
@@ -312,6 +312,58 @@ describe("NoPrevia", () => {
 
     expect(quadro().closest(".corpo-da-previa")).toHaveAttribute("hidden");
     expect(screen.getByRole("button", { name: "Restaurar a prévia" })).toBeInTheDocument();
+  });
+  describe("tela cheia", () => {
+    it("ampliar abre um modal fora do canvas com o site (e só nele), a URL e o fechar; Esc e o clique no fundo fecham", () => {
+      const { tela } = renderizar();
+      const { container } = tela;
+
+      fireEvent.click(screen.getByRole("button", { name: "Ampliar a prévia" }));
+
+      const modal = screen.getByRole("dialog", { name: "http://localhost:5173" });
+      expect(modal).toHaveAttribute("aria-modal", "true");
+      expect(container.contains(modal)).toBe(false);
+      // Um site só: no modal, sem a camada de ativar; o canvas avisa.
+      expect(document.querySelectorAll("iframe")).toHaveLength(1);
+      expect(modal.contains(quadro())).toBe(true);
+      expect(quadro()).toHaveAttribute("sandbox", expect.stringContaining("allow-scripts"));
+      expect(quadro()).not.toHaveStyle({ pointerEvents: "none" });
+      expect(within(modal).queryByRole("button", { name: "Usar a página" })).not.toBeInTheDocument();
+      expect(within(container).getByText("Aberta em tela cheia.")).toBeInTheDocument();
+      // Só o fechar nos controles do modal, com a dica do Esc.
+      expect(within(modal).getByRole("button", { name: "Fechar a tela cheia" })).toHaveAttribute("title", "Fechar a tela cheia (Esc)");
+      expect(within(modal).queryByRole("button", { name: /Minimizar|Ampliar/ })).not.toBeInTheDocument();
+
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(container.contains(quadro())).toBe(true);
+
+      fireEvent.click(screen.getByRole("button", { name: "Ampliar a prévia" }));
+      fireEvent.mouseDown(screen.getByTestId("fundo-da-tela-cheia"));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Ampliar a prévia" }));
+      fireEvent.click(screen.getByRole("button", { name: "Fechar a tela cheia" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("ampliar fica desabilitado sem endereço", () => {
+      renderizar({ url: "" });
+      expect(screen.getByRole("button", { name: "Ampliar a prévia" })).toBeDisabled();
+    });
+
+    it("o modal começa abaixo da barra de título do app", () => {
+      const barra = document.createElement("header");
+      barra.className = "barra-de-titulo";
+      barra.getBoundingClientRect = () => ({ bottom: 36 }) as DOMRect;
+      document.body.append(barra);
+      renderizar();
+
+      fireEvent.click(screen.getByRole("button", { name: "Ampliar a prévia" }));
+
+      expect(screen.getByTestId("fundo-da-tela-cheia")).toHaveStyle({ top: "36px" });
+      barra.remove();
+    });
   });
 });
 
@@ -627,6 +679,11 @@ describe("NoPrevia com endereço externo no navegador comum", () => {
     expect(acoes.fecharPrevia).not.toHaveBeenCalled();
   });
 
+  it("ampliar fica desabilitado: não há site para mostrar em tela cheia", () => {
+    renderizar({ url: SHEETS });
+    expect(screen.getByRole("button", { name: "Ampliar a prévia" })).toBeDisabled();
+  });
+
   it("localhost segue no iframe", () => {
     renderizar();
     expect(quadro()).toHaveAttribute("src", "http://localhost:5173");
@@ -909,6 +966,80 @@ describe("NoPrevia com endereço externo no app desktop", () => {
 
     fireEvent.keyDown(screen.getByRole("menuitem", { name: "Sair das contas" }), { key: "Escape" });
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  describe("tela cheia", () => {
+    /** O jsdom não tem layout: o corpo do modal ocupa a janela (menos a barra), o do canvas segue no retângulo de antes. */
+    function medirOModalNaJanela(): void {
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+        return (
+          this.closest(".janela-em-tela-cheia") === null
+            ? retanguloDoCorpo
+            : { left: 17, top: 100, width: 720, height: 600, right: 737, bottom: 700, x: 17, y: 100 }
+        ) as DOMRect;
+      });
+    }
+
+    it("a mesma vista segue o corpo do modal, sem ser recriada, e volta ao canvas ao sair", async () => {
+      renderizar({ url: SHEETS });
+      await ativar();
+      api.abrir.mockClear();
+      api.fechar.mockClear();
+      api.ativar.mockClear();
+      medirOModalNaJanela();
+
+      fireEvent.click(screen.getByRole("button", { name: "Ampliar a prévia" }));
+
+      const modal = screen.getByRole("dialog", { name: SHEETS });
+      // A vista (foto e camada de ativar) mora no corpo do modal; o canvas só avisa.
+      expect(modal.querySelector(".vista-nativa-da-previa")).not.toBeNull();
+      expect(document.querySelectorAll(".vista-nativa-da-previa")).toHaveLength(1);
+      expect(screen.getByText("Aberta em tela cheia.")).toBeInTheDocument();
+      await waitFor(() =>
+        expect(api.ativar).toHaveBeenCalledWith("p1", true, { x: 17, y: 100, largura: 720, altura: 600, zoom: 1 }),
+      );
+      // Uma vista só: nada foi aberto nem destruído ao ampliar.
+      expect(api.abrir).not.toHaveBeenCalled();
+      expect(api.fechar).not.toHaveBeenCalled();
+
+      // Clicar na barra do modal (← →) não desativa a vista.
+      api.ativar.mockClear();
+      fireEvent.pointerDown(within(modal).getByRole("button", { name: "Voltar" }));
+      expect(api.ativar).not.toHaveBeenCalledWith("p1", false);
+
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(document.querySelectorAll(".vista-nativa-da-previa")).toHaveLength(1);
+      await waitFor(() =>
+        expect(api.ativar).toHaveBeenCalledWith("p1", true, { x: 100, y: 200, largura: 360, altura: 240, zoom: 0.5 }),
+      );
+      expect(api.abrir).not.toHaveBeenCalled();
+      expect(api.fechar).not.toHaveBeenCalled();
+    });
+
+    it("o modal tem ← e →, que mandam o comando para a vista, e o host atual", () => {
+      renderizar({ url: SHEETS });
+      act(() =>
+        enviar?.({ tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://docs.google.com", podeVoltar: true, podeAvancar: false }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Ampliar a prévia" }));
+      const modal = screen.getByRole("dialog", { name: SHEETS });
+
+      expect(within(modal).getByRole("note")).toHaveTextContent("docs.google.com");
+      expect(within(modal).getByRole("button", { name: "Avançar" })).toBeDisabled();
+      fireEvent.click(within(modal).getByRole("button", { name: "Voltar" }));
+      expect(api.voltar).toHaveBeenCalledWith("p1");
+    });
+
+    it("fechar a prévia com a tela cheia aberta destrói a vista uma vez só", () => {
+      const { tela } = renderizar({ url: SHEETS });
+      fireEvent.click(screen.getByRole("button", { name: "Ampliar a prévia" }));
+      api.fechar.mockClear();
+
+      tela.unmount();
+
+      expect(api.fechar).toHaveBeenCalledTimes(1);
+    });
   });
 
   it("o menu aparece também com localhost (limpa a sessão das prévias externas de qualquer prévia)", () => {
