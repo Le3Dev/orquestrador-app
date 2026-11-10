@@ -1358,15 +1358,16 @@ describe("NoTerminal · barra estreita", () => {
     return barra;
   }
 
-  const CONTROLES = ["Limpar bixinhos", "Alterações de o1", "Configurar", "Fechar o terminal"];
+  const CONTROLES = ["Alterações de o1", "Configurar", "Fechar o terminal"];
 
-  it("larga, todos os chips ficam na barra, cada um com o texto inteiro no title, e não há ⋯", () => {
+  it("larga, os chips ficam na barra, cada um com o texto inteiro no title, e não há ⋯", () => {
     const barra = renderizarComLargura(1400);
 
     expect(within(barra).getByTitle("C:\\projetos\\painel")).toHaveTextContent("painel");
     expect(within(barra).getByTitle(/^Branch: feature\/barra-estreita/)).toHaveTextContent("feature/barra-estreita");
-    expect(within(barra).getByTitle(/^Instruções gerais ativas/)).toHaveTextContent("instruções gerais");
-    // A barra não mostra mais a etiqueta de situação nem a RAM (só a borda que brilha indica o pedido).
+    // A barra não tem chip de instruções, etiqueta de situação, RAM nem o limpar (só a borda que brilha indica o pedido).
+    expect(within(barra).queryByText(/instruções/)).not.toBeInTheDocument();
+    expect(within(barra).queryByRole("button", { name: "Limpar bixinhos" })).not.toBeInTheDocument();
     expect(within(barra).queryByTitle(/^Situação/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Mais da barra" })).not.toBeInTheDocument();
     for (const controle of CONTROLES) {
@@ -1374,13 +1375,30 @@ describe("NoTerminal · barra estreita", () => {
     }
   });
 
+  it("mesmo com \"manter bixinhos até limpar\" ligado e um bixinho parado, a barra não tem o limpar", () => {
+    localStorage.setItem("orquestrador.preferenciasDaTela", JSON.stringify({ manterBixinhosAteLimpar: true }));
+    try {
+      const parado = aplicar(
+        ESTADO_INICIAL,
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "analise", configuracao },
+        { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "s1", descricao: "Testes", tarefa: "rode" },
+        { tipo: "subagente_concluido", turnoId: "t1", subagenteId: "s1", situacao: "concluido", resumo: "ok", tokens: 1, duracaoMs: 1 },
+      );
+      const { container } = render(<Terminal canvas={canvasDoTerminal(parado, resumoCheio())} no={propsDoNo()} />);
+      expect(screen.queryByRole("button", { name: "Limpar bixinhos" })).not.toBeInTheDocument();
+      expect(container.querySelector(".barra-do-terminal")).not.toHaveTextContent(/limpar/);
+    } finally {
+      localStorage.removeItem("orquestrador.preferenciasDaTela");
+    }
+  });
+
   it("estreita, os controles continuam na barra e os chips que sobram vão para o ⋯", () => {
-    const barra = renderizarComLargura(360);
+    const barra = renderizarComLargura(300);
 
     for (const controle of CONTROLES) {
       expect(within(barra).getByRole("button", { name: controle })).toBeInTheDocument();
     }
-    expect(within(barra).queryByText("instruções gerais")).not.toBeInTheDocument();
+    expect(within(barra).queryByTitle("C:\\projetos\\painel")).not.toBeInTheDocument();
     expect(within(barra).getByText("Painel de salas")).toBeInTheDocument();
 
     const mais = screen.getByRole("button", { name: "Mais da barra" });
@@ -1389,8 +1407,8 @@ describe("NoTerminal · barra estreita", () => {
 
     const menu = screen.getByRole("group", { name: "O que não coube na barra" });
     expect(mais).toHaveAttribute("aria-expanded", "true");
-    expect(within(menu).getByTitle(/^Instruções gerais ativas/)).toHaveTextContent("instruções gerais");
-    // Sem a RAM e a situação, a branch ainda cabe na barra a 360 px.
+    expect(within(menu).getByTitle("C:\\projetos\\painel")).toHaveTextContent("painel");
+    // A pasta sai primeiro; a branch ainda cabe na barra a 300 px.
     expect(within(menu).queryByTitle(/^Branch:/)).not.toBeInTheDocument();
     expect(within(barra).getByTitle(/^Branch: feature\/barra-estreita/)).toBeInTheDocument();
     // Os controles não vão para o menu.
@@ -1401,7 +1419,7 @@ describe("NoTerminal · barra estreita", () => {
   });
 
   it("a janela que volta a crescer traz os chips de volta e tira o ⋯", () => {
-    const barra = renderizarComLargura(360);
+    const barra = renderizarComLargura(300);
     expect(screen.getByRole("button", { name: "Mais da barra" })).toBeInTheDocument();
 
     Object.defineProperty(barra, "clientWidth", { configurable: true, value: 1400 });
@@ -1412,7 +1430,7 @@ describe("NoTerminal · barra estreita", () => {
     });
 
     expect(screen.queryByRole("button", { name: "Mais da barra" })).not.toBeInTheDocument();
-    expect(within(barra).getByText("instruções gerais")).toBeInTheDocument();
+    expect(within(barra).getByTitle("C:\\projetos\\painel")).toBeInTheDocument();
   });
 
   it("os controles de janela ficam no fim da barra, com o tooltip de que o orquestrador continua salvo", () => {

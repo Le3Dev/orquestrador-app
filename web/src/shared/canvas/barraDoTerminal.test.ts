@@ -1,7 +1,7 @@
 import { type ChipDaBarra, chipsParaOMenu, ORDEM_DE_SAIDA } from "./barraDoTerminal";
 
-const TODOS: readonly ChipDaBarra[] = ["pasta", "branch", "instrucoes", "reconectando", "memoria", "situacao"];
-const COMUNS: readonly ChipDaBarra[] = ["pasta", "branch", "instrucoes", "situacao"];
+const TODOS: readonly ChipDaBarra[] = ["pasta", "branch", "reconectando", "memoria", "situacao"];
+const COMUNS: readonly ChipDaBarra[] = ["pasta", "branch", "situacao"];
 const CONTROLES = 240;
 
 describe("chipsParaOMenu", () => {
@@ -13,13 +13,13 @@ describe("chipsParaOMenu", () => {
     expect(chipsParaOMenu(1200, CONTROLES, TODOS).size).toBe(0);
   });
 
-  it("apertada, os chips saem na ordem: primeiro as instruções", () => {
-    expect([...chipsParaOMenu(706, CONTROLES, COMUNS)]).toEqual(["instrucoes"]);
-    expect([...chipsParaOMenu(600, CONTROLES, COMUNS)]).toEqual(["instrucoes", "pasta", "branch"]);
+  it("apertada, os chips saem na ordem: primeiro a pasta", () => {
+    expect([...chipsParaOMenu(640, CONTROLES, COMUNS)]).toEqual(["pasta"]);
+    expect([...chipsParaOMenu(600, CONTROLES, COMUNS)]).toEqual(["pasta", "branch"]);
   });
 
   it("conta a largura medida dos controles: com mais controles, sai mais", () => {
-    expect(chipsParaOMenu(706, 300, COMUNS).size).toBeGreaterThan(chipsParaOMenu(706, CONTROLES, COMUNS).size);
+    expect(chipsParaOMenu(640, 300, COMUNS).size).toBeGreaterThan(chipsParaOMenu(640, CONTROLES, COMUNS).size);
   });
 
   it("muito estreita, todos vão para o menu, na ordem de saída", () => {

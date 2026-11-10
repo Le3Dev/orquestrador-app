@@ -847,7 +847,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 }
 .botao-icone:hover, .botao-icone[aria-pressed="true"] { background: var(--surface-3); color: var(--primary); }
 
-/* Barra do terminal estreita: os chips (pasta, branch, instruções, RAM)
+/* Barra do terminal estreita: os chips (pasta, branch)
  * encolhem e cortam com reticências, o texto inteiro no `title`; os que nem
  * assim cabem vão para o "⋯" (barraDoTerminal.ts). Os controles nunca
  * encolhem. O ✕ fica depois de um separador, sem o círculo vermelho: não se
@@ -2791,11 +2791,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   line-height: 1.45;
   font-family: var(--fonte-mono);
   font-size: 12px;
-}
-
-.chip-instrucoes {
-  color: var(--active);
-  background: color-mix(in srgb, var(--active) 14%, transparent);
 }
 
 .previa-do-prompt-texto {

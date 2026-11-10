@@ -1,5 +1,5 @@
 /**
- * O que cabe na barra de título do terminal. Os controles (limpar, alterações,
+ * O que cabe na barra de título do terminal. Os controles (alterações,
  * arquivos, terminal, ⚙ e ✕) nunca encolhem nem saem: isso é do CSS. Os chips
  * encolhem com reticências e, se nem cortados couberem, vão para o menu "⋯",
  * um por vez, na ordem de `ORDEM_DE_SAIDA`. O nome do orquestrador fica sempre.
@@ -8,11 +8,10 @@
  * (cortado): os chips do menu não estão na barra para serem medidos.
  */
 
-export type ChipDaBarra = "pasta" | "branch" | "instrucoes" | "reconectando" | "memoria" | "situacao";
+export type ChipDaBarra = "pasta" | "branch" | "reconectando" | "memoria" | "situacao";
 
-/** Quem vai primeiro para o "⋯": as instruções ativas; por último, o aviso de reconexão. */
+/** Quem vai primeiro para o "⋯": a memória; por último, o aviso de reconexão. */
 export const ORDEM_DE_SAIDA: readonly ChipDaBarra[] = [
-  "instrucoes",
   "memoria",
   "pasta",
   "branch",
@@ -24,7 +23,6 @@ export const ORDEM_DE_SAIDA: readonly ChipDaBarra[] = [
 export const LARGURA_MINIMA_DO_CHIP: Readonly<Record<ChipDaBarra, number>> = {
   pasta: 56,
   branch: 64,
-  instrucoes: 56,
   reconectando: 64,
   memoria: 56,
   situacao: 100,
