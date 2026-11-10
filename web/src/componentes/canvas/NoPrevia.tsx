@@ -93,10 +93,12 @@ interface PropsDoCampo {
   /** Recém-criada sem endereço: o campo já nasce com o foco. Só vale na montagem. */
   focarAoAbrir: boolean;
   aoNavegar: (url: string) => void;
+  /** O usuário digitou no campo (ainda sem Enter): conta como mexer na prévia. */
+  aoDigitar: () => void;
 }
 
 /** A barra de endereço: Enter navega (só http e https), Esc volta ao endereço aberto. */
-function CampoDoEndereco({ url, focarAoAbrir, aoNavegar }: PropsDoCampo) {
+function CampoDoEndereco({ url, focarAoAbrir, aoNavegar, aoDigitar }: PropsDoCampo) {
   const [texto, setTexto] = useState(url);
   const [invalido, setInvalido] = useState(false);
   const [focarNaMontagem] = useState(focarAoAbrir);
@@ -148,6 +150,7 @@ function CampoDoEndereco({ url, focarAoAbrir, aoNavegar }: PropsDoCampo) {
       onChange={(evento) => {
         setTexto(evento.target.value);
         setInvalido(false);
+        aoDigitar();
       }}
       onKeyDown={aoTeclar}
     />
@@ -174,7 +177,14 @@ const DISTANCIA_MAXIMA_DO_CLIQUE_PX = 5;
  *
  * `children` recebe o estilo do iframe: sem `pointer-events` enquanto inativo.
  */
-export function QuadroAtivavel({ children }: { children: (estilo: CSSProperties | undefined) => ReactNode }) {
+export function QuadroAtivavel({
+  children,
+  aoAtivar,
+}: {
+  children: (estilo: CSSProperties | undefined) => ReactNode;
+  /** O usuário ativou a página (clique, Enter ou Espaço): a prévia do agente passa a ser dele. */
+  aoAtivar?: () => void;
+}) {
   const [ativo, setAtivo] = useState(false);
   const raiz = useRef<HTMLDivElement>(null);
   const inicioDoClique = useRef<{ x: number; y: number } | null>(null);
@@ -216,6 +226,7 @@ export function QuadroAtivavel({ children }: { children: (estilo: CSSProperties 
       return;
     }
     setAtivo(true);
+    aoAtivar?.();
   }
 
   return (
@@ -234,6 +245,7 @@ export function QuadroAtivavel({ children }: { children: (estilo: CSSProperties 
             if (evento.key === "Enter" || evento.key === " ") {
               evento.preventDefault();
               setAtivo(true);
+              aoAtivar?.();
             }
           }}
         >
@@ -481,6 +493,12 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
   const [ampliada, setAmpliada] = useState(false);
   const [corpoDaTelaCheia, setCorpoDaTelaCheia] = useState<HTMLDivElement | null>(null);
   const recarregar = useCallback(() => setVersao((atual) => atual + 1), []);
+  // O usuário mexeu na prévia: se o agente a abriu, ela passa a ser dele e não fecha sozinha.
+  const tocar = useCallback(() => acoes.tocarPrevia?.(previaId), [acoes, previaId]);
+  const recarregarPeloUsuario = useCallback(() => {
+    tocar();
+    recarregar();
+  }, [tocar, recarregar]);
   const fechar = useCallback(() => acoes.fecharPrevia(previaId), [acoes, previaId]);
   const fecharAmpliada = useCallback(() => setAmpliada(false), []);
   // Endereço externo: vista nativa no app desktop (login salvo), "abrir em nova aba" no navegador.
@@ -498,12 +516,12 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
     (destino: string) => {
       // O mesmo endereço de novo: o usuário quer ver a página outra vez.
       if (destino === url) {
-        recarregar();
+        recarregarPeloUsuario();
       } else {
         acoes.navegarPrevia(previaId, destino);
       }
     },
-    [acoes, previaId, url, recarregar],
+    [acoes, previaId, url, recarregarPeloUsuario],
   );
 
   // Sem endereço, fora do ar ou "abrir em nova aba" não há site para mostrar em tela cheia.
@@ -512,7 +530,10 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
     aoMinimizar: () => acoes.minimizarOuRestaurarPrevia(previaId),
     minimizada,
     aoFechar: () => acoes.fecharPrevia(previaId),
-    aoAmpliar: () => setAmpliada(true),
+    aoAmpliar: () => {
+      tocar();
+      setAmpliada(true);
+    },
     ampliarDesabilitado: semEndereco || servidor.fora || modo === "nova-aba",
   };
 
@@ -569,7 +590,7 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
       <div className={`barra-da-previa ${ALCA_DA_PREVIA}`}>
         <ControlesDoNo lado="inicio" {...controlesDaJanela} />
         <IconeNavegador className="shrink-0 text-info" />
-        <CampoDoEndereco url={url} focarAoAbrir={focarAoAbrir} aoNavegar={navegar} />
+        <CampoDoEndereco url={url} focarAoAbrir={focarAoAbrir} aoNavegar={navegar} aoDigitar={tocar} />
         {seloDoHost}
         {/* Minimizada, o anel fica escondido no corpo: a contagem vem para a barra. */}
         {minimizada && segundos !== null && (
@@ -589,7 +610,7 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
           title="Recarregar a página"
           aria-label="Recarregar a página"
           disabled={semEndereco}
-          onClick={recarregar}
+          onClick={recarregarPeloUsuario}
         >
           <IconeRecarregar />
         </button>
@@ -665,7 +686,9 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
             </a>
           </div>
         ) : (
-          <QuadroAtivavel>{(estilo) => <QuadroDoSite url={url} versao={versao} estilo={estilo} />}</QuadroAtivavel>
+          <QuadroAtivavel aoAtivar={tocar}>
+            {(estilo) => <QuadroDoSite url={url} versao={versao} estilo={estilo} />}
+          </QuadroAtivavel>
         )}
       </div>
       {ampliada && (

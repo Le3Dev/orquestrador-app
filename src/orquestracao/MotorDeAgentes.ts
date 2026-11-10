@@ -54,6 +54,12 @@ export interface PedidoDeTurno {
    * mensagem. Ausente ou vazio: nenhum.
    */
   itensLigados?: readonly ItemLigado[] | undefined;
+  /**
+   * Os endereços das prévias ao vivo abertas no canvas quando o pedido saiu:
+   * entram numa linha da mensagem, para o Orquestrador fechar as que não
+   * servem mais. Ausente ou vazio: nenhuma linha.
+   */
+  previasAbertas?: readonly string[] | undefined;
 }
 
 /** Por que um turno falhou, quando dá para saber. */

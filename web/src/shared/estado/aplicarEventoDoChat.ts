@@ -10,7 +10,7 @@ import type {
   SituacaoDoChat,
   TrechoDaResposta,
 } from "../api/tipos";
-import { CERCA_DE_ACAO, CERCA_DE_PERGUNTA, semBlocosDoApp } from "../blocosDoApp";
+import { CERCA_DE_ACAO, CERCA_DE_PERGUNTA, CERCA_DE_PREVIA, semBlocosDoApp } from "../blocosDoApp";
 import { PREFERENCIAS_PADRAO_DO_CHAT } from "../modelos";
 
 /** Uma mensagem como a tela a mostra: a do servidor e, se falhou, o motivo. */
@@ -199,7 +199,7 @@ export function aplicarAtividadeDoChat(
   return alvo === undefined || alvo.situacao !== "respondendo" ? estado : { ...estado, atividade };
 }
 
-const CERCAS_DO_CHAT = [CERCA_DE_ACAO, CERCA_DE_PERGUNTA] as const;
+const CERCAS_DO_CHAT = [CERCA_DE_ACAO, CERCA_DE_PERGUNTA, CERCA_DE_PREVIA] as const;
 
 /**
  * O texto da resposta sem os blocos ```` ```acao-do-app ```` e

@@ -1,4 +1,5 @@
 import { linhasDaRegraDasPerguntas } from "../perguntas/PerguntaDoApp";
+import { linhasDaRegraDaPrevia, linhasDasPreviasAbertas, REGRA_DA_PREVIA_NO_SUBAGENTE } from "../previas/PreviaDoApp";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { desarmarMarcas, InstrucoesAplicadas, linhasDasInstrucoes } from "./InstrucoesPersonalizadas";
 import { ModeloClaude } from "./ModeloClaude";
@@ -76,10 +77,11 @@ export const PEDIDO_DE_COMMIT_AO_FINAL =
  * segundo plano do Claude Code: o processo do pedido só termina quando ele
  * para, e o pedido ficaria "trabalhando" para sempre. Desacoplado, ele segue
  * no ar depois do pedido, e o endereço impresso no log aparece na saída do
- * comando, onde a tela o detecta para a prévia ao vivo.
+ * comando. A prévia ao vivo só abre quando a resposta final cita o endereço
+ * (ver `regrasDaPrevia`): na saída de um comando ele não basta.
  */
 export const REGRA_DOS_SERVIDORES_UNIX =
-  "Servidor que deve continuar no ar (npm run dev, vite, next dev e afins): não use a execução em segundo plano da ferramenta (run_in_background), que prende o pedido até o servidor parar. Suba desacoplado, com a saída num log fora do projeto, e mostre o começo do log para o endereço aparecer, por exemplo: `nohup npm run dev > /tmp/servidor-<nome>.log 2>&1 & sleep 4; tail -n 20 /tmp/servidor-<nome>.log`. Ele continua rodando depois do pedido; para parar, use kill no processo. Não abra o navegador do computador (open, xdg-open, start): o aplicativo já mostra a página numa prévia ao vivo quando o endereço aparece; para conferir, use curl e cite o endereço completo na resposta.";
+  "Servidor que deve continuar no ar (npm run dev, vite, next dev e afins): não use a execução em segundo plano da ferramenta (run_in_background), que prende o pedido até o servidor parar. Suba desacoplado, com a saída num log fora do projeto, e mostre o começo do log para o endereço aparecer, por exemplo: `nohup npm run dev > /tmp/servidor-<nome>.log 2>&1 & sleep 4; tail -n 20 /tmp/servidor-<nome>.log`. Ele continua rodando depois do pedido; para parar, use kill no processo. Não abra o navegador do computador (open, xdg-open, start): o aplicativo mostra a página numa prévia ao vivo só quando a resposta final cita o endereço; para conferir, use curl e não cite o endereço na resposta, a não ser que o usuário deva ver a página.";
 
 /**
  * No Windows o Claude Code roda os comandos no PowerShell, e o `nohup … &` não
@@ -90,7 +92,7 @@ export const REGRA_DOS_SERVIDORES_UNIX =
  * `Stop-Process` só mata o `cmd` e deixa o `node` órfão, ainda no ar.
  */
 export const REGRA_DOS_SERVIDORES_WINDOWS =
-  "Servidor que deve continuar no ar (npm run dev, vite, next dev e afins): não use a execução em segundo plano da ferramenta (run_in_background), que prende o pedido até o servidor parar. Neste computador (Windows), suba pela ferramenta PowerShell, desacoplado e com a saída num log em `$env:TEMP`, esperando o endereço aparecer: `$log = \"$env:TEMP\\servidor-<nome>.log\"; $p = Start-Process -WindowStyle Hidden cmd -ArgumentList '/c', ('npm run dev > \"{0}\" 2>&1' -f $log) -PassThru; $fim = (Get-Date).AddSeconds(30); do { Start-Sleep -Milliseconds 500 } until (((Test-Path $log) -and (Select-String -Path $log -Pattern 'https?://' -Quiet)) -or $p.HasExited -or (Get-Date) -gt $fim); Get-Content $log -Tail 20; \"PID $($p.Id)\"`. Não use -RedirectStandardOutput, -RedirectStandardError nem -NoNewWindow, que prendem a ferramenta; nem Start-Job ou `&`, que derrubam o servidor junto com o shell. Ele continua rodando depois do pedido; para parar, `taskkill /PID <PID> /T /F` (Stop-Process sozinho deixa o node no ar). Não abra o navegador do computador (start, Start-Process ou explorer com um endereço): o aplicativo já mostra a página numa prévia ao vivo quando o endereço aparece; para conferir, use curl.exe e cite o endereço completo na resposta.";
+  "Servidor que deve continuar no ar (npm run dev, vite, next dev e afins): não use a execução em segundo plano da ferramenta (run_in_background), que prende o pedido até o servidor parar. Neste computador (Windows), suba pela ferramenta PowerShell, desacoplado e com a saída num log em `$env:TEMP`, esperando o endereço aparecer: `$log = \"$env:TEMP\\servidor-<nome>.log\"; $p = Start-Process -WindowStyle Hidden cmd -ArgumentList '/c', ('npm run dev > \"{0}\" 2>&1' -f $log) -PassThru; $fim = (Get-Date).AddSeconds(30); do { Start-Sleep -Milliseconds 500 } until (((Test-Path $log) -and (Select-String -Path $log -Pattern 'https?://' -Quiet)) -or $p.HasExited -or (Get-Date) -gt $fim); Get-Content $log -Tail 20; \"PID $($p.Id)\"`. Não use -RedirectStandardOutput, -RedirectStandardError nem -NoNewWindow, que prendem a ferramenta; nem Start-Job ou `&`, que derrubam o servidor junto com o shell. Ele continua rodando depois do pedido; para parar, `taskkill /PID <PID> /T /F` (Stop-Process sozinho deixa o node no ar). Não abra o navegador do computador (start, Start-Process ou explorer com um endereço): o aplicativo mostra a página numa prévia ao vivo só quando a resposta final cita o endereço; para conferir, use curl.exe e não cite o endereço na resposta, a não ser que o usuário deva ver a página.";
 
 /** Como subir um servidor que deve continuar no ar, na sintaxe da plataforma. */
 export function regraDosServidores(plataforma: Plataforma): string {
@@ -210,6 +212,20 @@ function regrasDasPerguntas(): string[] {
 }
 
 /**
+ * A prévia ao vivo (```previa-do-app): vai em todo pedido, em qualquer modo,
+ * porque o Claude Code não relê as instruções ao retomar a sessão. Quem abre a
+ * prévia é a resposta final do Orquestrador, nunca a dos Subagentes.
+ */
+function regrasDaPrevia(): string[] {
+  const [primeira = "", ...resto] = linhasDaRegraDaPrevia();
+  return [
+    `- ${primeira}`,
+    ...resto.map((linha) => `  ${linha}`),
+    "  Subagentes não abrem nem fecham prévias: se um deles disser um endereço no relatório, cite-o na sua resposta só se o usuário deva ver a página.",
+  ];
+}
+
+/**
  * Em todo turno de execução, o Orquestrador mede o pedido antes de mexer em
  * algo: se for grande, só investiga e devolve um Plano marcado com
  * `MARCADOR_DE_PLANO`, para o usuário aprovar (ADR-15, ADR-28).
@@ -307,6 +323,10 @@ function linhasDosItensLigados(itens: readonly ItemLigado[]): string[] {
  *
  * Os itens que o usuário ligou ao Orquestrador no canvas (`itensLigados`)
  * vão num bloco `<itens-ligados>` próprio, entre a configuração e o pedido.
+ *
+ * As prévias ao vivo abertas no canvas (`previasAbertas`) viram uma linha no
+ * fim da configuração, para o Orquestrador fechar as desnecessárias antes de
+ * encerrar; sem prévias abertas, nenhuma linha.
  */
 export function mensagemParaOOrquestrador(
   texto: string,
@@ -319,6 +339,7 @@ export function mensagemParaOOrquestrador(
   subagentesProntos: readonly DadosDoSubagentePronto[] = [],
   plataforma: Plataforma = "unix",
   itensLigados: readonly ItemLigado[] = [],
+  previasAbertas: readonly string[] = [],
 ): string {
   const planejamento = modo === "planejamento";
   // No planejamento os agentes só leem (as ferramentas já vêm travadas
@@ -359,6 +380,10 @@ export function mensagemParaOOrquestrador(
     ...(pastaDeArtefatos === null ? [] : regrasDeArtefatos(pastaDeArtefatos)),
     ...(configuracao.permitirArtefatosOnline && !planejamento ? [REGRA_DE_ARTEFATOS_ONLINE] : []),
     ...regrasDasPerguntas(),
+    ...regrasDaPrevia(),
+    ...linhasDasPreviasAbertas(previasAbertas, [MARCA_DA_CONFIGURACAO, MARCA_DOS_ITENS_LIGADOS]).map(
+      (linha) => `- ${linha}`,
+    ),
     ...imagens,
     ...linhasDasInstrucoes(instrucoes, MARCA_DA_CONFIGURACAO, revogarInstrucoesAnteriores),
     `</${MARCA_DA_CONFIGURACAO}>`,
@@ -454,6 +479,7 @@ export function instrucoesDoSubagente(
     "Ao terminar, devolva uma resposta curta: o que fez, os arquivos que alterou (se houver) e o resultado, inclusive dos testes.",
     ...REGRAS_DE_RAPIDEZ_DO_SUBAGENTE,
     regraDosServidores(plataforma),
+    REGRA_DA_PREVIA_NO_SUBAGENTE,
     `${regraDeCommitEPush} Responda em português.`,
     ...(especialidade === null ? [] : linhasDaEspecialidade(especialidade)),
   ].join("\n");

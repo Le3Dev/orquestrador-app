@@ -61,11 +61,16 @@ export interface RetanguloDaNota extends Retangulo {
 /**
  * Uma prévia ao vivo (um navegador dentro do canvas): onde fica, o endereço
  * aberto (vazio enquanto o usuário não digita um) e o Orquestrador de cujo
- * terminal ela saiu (nulo quando foi aberta pela barra do canvas).
+ * terminal ela saiu (nulo quando foi aberta pela barra do canvas). Os três
+ * últimos campos só existem nas prévias que o agente abriu sozinho, ou que o
+ * usuário tocou depois (layouts salvos antes deles não os têm).
  */
 export interface RetanguloDaPrevia extends RetanguloDaNota {
   url: string;
   orquestradorId: string | null;
+  abertaPeloAgente?: boolean;
+  abertaEm?: number;
+  tocadaPeloUsuario?: boolean;
 }
 
 /**
@@ -237,7 +242,14 @@ function interpretarPrevias(previas: unknown): Record<string, RetanguloDaPrevia>
   for (const [id, retangulo] of Object.entries(previas)) {
     if (ehRetangulo(retangulo)) {
       const { x, y, largura, altura } = retangulo;
-      const { minimizada, url, orquestradorId } = retangulo as { minimizada?: unknown; url?: unknown; orquestradorId?: unknown };
+      const { minimizada, url, orquestradorId, abertaPeloAgente, abertaEm, tocadaPeloUsuario } = retangulo as {
+        minimizada?: unknown;
+        url?: unknown;
+        orquestradorId?: unknown;
+        abertaPeloAgente?: unknown;
+        abertaEm?: unknown;
+        tocadaPeloUsuario?: unknown;
+      };
       validas[id] = {
         x,
         y,
@@ -246,6 +258,9 @@ function interpretarPrevias(previas: unknown): Record<string, RetanguloDaPrevia>
         minimizada: minimizada === true,
         url: typeof url === "string" && /^https?:\/\//i.test(url) ? url : "",
         orquestradorId: typeof orquestradorId === "string" ? orquestradorId : null,
+        ...(abertaPeloAgente === true ? { abertaPeloAgente: true } : {}),
+        ...(abertaPeloAgente === true && typeof abertaEm === "number" && Number.isFinite(abertaEm) ? { abertaEm } : {}),
+        ...(tocadaPeloUsuario === true ? { tocadaPeloUsuario: true } : {}),
       };
     }
   }

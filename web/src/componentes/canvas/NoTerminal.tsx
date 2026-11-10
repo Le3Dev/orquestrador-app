@@ -17,7 +17,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import { api, mensagemDeErro } from "../../shared/api/cliente";
+import { api, argumentosDoContexto, mensagemDeErro } from "../../shared/api/cliente";
 import {
   type DadosDaConfiguracao,
   type DadosDoPedidoNaFila,
@@ -49,7 +49,7 @@ import { useNota } from "../../shared/canvas/notas";
 import { lerPedidoArrastado, temPedidoArrastado } from "../../shared/canvas/pedidoArrastado";
 import { registrarPromptDoTerminal } from "../../shared/canvas/promptsDosTerminais";
 import { useAcoesDosShellsSeHouver } from "../../shared/canvas/shells";
-import { abrirPreviaSozinha, enderecoCurto } from "../../shared/enderecosLocais";
+import { abrirPreviaSozinha, enderecoCurto, eventoAoVivo } from "../../shared/enderecosLocais";
 import {
   ESTADO_INICIAL,
   filaDePedidos,
@@ -90,9 +90,9 @@ import { TranscricaoDoTerminal } from "./TranscricaoDoTerminal";
 const MARGEM_DE_ACOMPANHAMENTO = 120;
 
 /**
- * Anúncios de servidor que já abriram a prévia sozinhos, por orquestrador e
+ * Eventos que já abriram (ou fecharam) prévias sozinhos, por orquestrador e
  * sequência do evento: guardados na sessão para que recarregar a tela não
- * reabra uma prévia que o usuário fechou.
+ * reabra uma prévia que o usuário fechou, nem refaça um fechamento.
  */
 const CHAVE_DAS_PREVIAS_ABERTAS = "previas-abertas-sozinhas";
 const previasAbertasSozinhas = new Set<string>(lerPreviasAbertas());
@@ -106,12 +106,18 @@ function lerPreviasAbertas(): string[] {
   }
 }
 
-function jaAbertoSozinho(orquestradorId: string, sequencia: number): boolean {
-  return previasAbertasSozinhas.has(`${orquestradorId}:${sequencia}`);
+type AcaoDaPrevia = "abrir" | "fechar";
+
+function chaveDaPrevia(orquestradorId: string, sequencia: number, acao: AcaoDaPrevia): string {
+  return acao === "abrir" ? `${orquestradorId}:${sequencia}` : `${orquestradorId}:${acao}:${sequencia}`;
 }
 
-function marcarAbertoSozinho(orquestradorId: string, sequencia: number): void {
-  previasAbertasSozinhas.add(`${orquestradorId}:${sequencia}`);
+function jaAbertoSozinho(orquestradorId: string, sequencia: number, acao: AcaoDaPrevia = "abrir"): boolean {
+  return previasAbertasSozinhas.has(chaveDaPrevia(orquestradorId, sequencia, acao));
+}
+
+function marcarAbertoSozinho(orquestradorId: string, sequencia: number, acao: AcaoDaPrevia = "abrir"): void {
+  previasAbertasSozinhas.add(chaveDaPrevia(orquestradorId, sequencia, acao));
   try {
     sessionStorage.setItem(CHAVE_DAS_PREVIAS_ABERTAS, JSON.stringify([...previasAbertasSozinhas].slice(-200)));
   } catch {
@@ -1144,7 +1150,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   }, [telaCheiaEm]);
 
   // Começo e fim de pedido atualizam a doca e a barra de status na hora.
-  const { recarregar, lerItensLigados, desligarItem } = acoes;
+  const { recarregar, lerItensLigados, lerPreviasAbertas, desligarItem } = acoes;
   const aoDesligarItem = useCallback(
     (itemId: string) => desligarItem?.(orquestradorId, itemId),
     [desligarItem, orquestradorId],
@@ -1200,9 +1206,9 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
         const anexos = imagens.length === 0 ? [] : await imagensParaEnvio(imagens);
         // Os itens ligados vão lidos na hora do envio; sem nenhum, o pedido é igual ao de antes.
         const itensLigados = lerItensLigados?.(orquestradorId) ?? [];
-        await (itensLigados.length > 0
-          ? api.enviarMensagem(orquestradorId, mensagem, anexos, modo, itensLigados)
-          : api.enviarMensagem(orquestradorId, mensagem, anexos, modo));
+        // As prévias abertas deste Orquestrador vão junto: o agente sabe quais pode pedir para fechar.
+        const previasAbertas = lerPreviasAbertas?.(orquestradorId) ?? [];
+        await api.enviarMensagem(orquestradorId, mensagem, anexos, modo, ...argumentosDoContexto(itensLigados, previasAbertas));
         // As enviadas (e as que chegaram durante o envio, que também saem) liberam a miniatura.
         liberarImagens(imagensAtuais.current);
         setImagens([]);
@@ -1214,7 +1220,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
         return false;
       }
     },
-    [orquestradorId, imagens, modo, lerItensLigados],
+    [orquestradorId, imagens, modo, lerItensLigados, lerPreviasAbertas],
   );
 
   /**
@@ -1229,16 +1235,15 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
       try {
         // A fila guarda os itens ligados como estão agora.
         const itensLigados = lerItensLigados?.(orquestradorId) ?? [];
-        await (itensLigados.length > 0
-          ? api.enfileirarPedido(orquestradorId, texto, modo, itensLigados)
-          : api.enfileirarPedido(orquestradorId, texto, modo));
+        const previasAbertas = lerPreviasAbertas?.(orquestradorId) ?? [];
+        await api.enfileirarPedido(orquestradorId, texto, modo, ...argumentosDoContexto(itensLigados, previasAbertas));
         return true;
       } catch (falha) {
         setErro(mensagemDeErro(falha));
         return false;
       }
     },
-    [orquestradorId, modo, lerItensLigados],
+    [orquestradorId, modo, lerItensLigados, lerPreviasAbertas],
   );
 
   const removerDaFila = useCallback(
@@ -1417,18 +1422,39 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
     [escalaDaLetra, mudarEscalaDaLetra, orquestradorId],
   );
 
-  // Um agente acabou de subir um servidor: a prévia abre sozinha, ao lado
-  // deste terminal e selecionada. Cada anúncio abre uma vez só.
-  const detectado = conversa.ultimoEnderecoDetectado;
+  // O agente citou um endereço local na resposta final (mostrar algo ao usuário,
+  // login): a prévia abre sozinha, ao lado deste terminal e selecionada. Cada
+  // citação abre uma vez só. O que só apareceu na saída de uma ferramenta (log de
+  // API, curl) não chega aqui: fica na faixa de servidores, para abrir com um clique.
+  const detectado = conversa.ultimoEnderecoDaResposta;
   useEffect(() => {
     if (detectado === null || jaAbertoSozinho(orquestradorId, detectado.sequencia)) {
       return;
     }
     marcarAbertoSozinho(orquestradorId, detectado.sequencia);
     if (abrirPreviaSozinha(detectado, Date.now(), window.location.origin)) {
-      abrirPrevia(orquestradorId, detectado.url);
+      abrirPrevia(orquestradorId, detectado.url, { peloAgente: true });
     }
   }, [abrirPrevia, detectado, orquestradorId]);
+
+  // O turno terminou: fecham as prévias que o agente pediu para fechar e, como
+  // rede de segurança, as que ele abriu em turnos anteriores e não citou de novo.
+  // As que o usuário tocou nunca fecham aqui. Só vale para o fim de turno recente
+  // (reler o histórico ao abrir a tela não fecha nada).
+  const fimDoTurno = conversa.ultimoFimDeTurno;
+  const { fecharPreviasDoAgente } = acoes;
+  useEffect(() => {
+    if (fimDoTurno === null || jaAbertoSozinho(orquestradorId, fimDoTurno.sequencia, "fechar")) {
+      return;
+    }
+    marcarAbertoSozinho(orquestradorId, fimDoTurno.sequencia, "fechar");
+    if (eventoAoVivo(fimDoTurno.em, Date.now())) {
+      fecharPreviasDoAgente?.(orquestradorId, {
+        enderecos: fimDoTurno.previasParaFechar,
+        doTurno: { iniciadoEm: Date.parse(fimDoTurno.iniciadoEm), citados: fimDoTurno.enderecosCitados },
+      });
+    }
+  }, [fecharPreviasDoAgente, fimDoTurno, orquestradorId]);
 
   // O bloco "Terminal" ligado a este Orquestrador escreve no prompt por aqui (o "enviar ao orquestrador").
   useEffect(

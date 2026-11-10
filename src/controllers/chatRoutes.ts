@@ -11,6 +11,7 @@ import { MAXIMO_DE_IMAGENS_POR_MENSAGEM, TAMANHO_MAXIMO_DA_IMAGEM, TIPOS_DE_IMAG
 import { ErroDeOrquestracao } from "../orquestracao/ErroDeOrquestracao";
 import { ESFORCOS_DE_RACIOCINIO } from "../orquestracao/EsforcoDeRaciocinio";
 import { MODELOS_CLAUDE } from "../orquestracao/ModeloClaude";
+import { esquemaDasPreviasAbertas } from "../previas/PreviaDoApp";
 import { criarRota, responderErroGenerico } from "./respostasHttp";
 
 export interface AssinanteDoChat {
@@ -79,6 +80,7 @@ const esquemaDaPergunta = z.object({
     .default([]),
   /** Só nas perguntas que não foram digitadas: "escuta" vem do modo invisível. */
   origem: z.enum(ORIGENS_DA_PERGUNTA, { error: "Origem da mensagem inválida." }).optional(),
+  previasAbertas: esquemaDasPreviasAbertas,
 });
 
 const esquemaDasPreferencias = z.object({
@@ -129,7 +131,7 @@ export function criarChatRoutes({ servico, canal, anexos }: Dependencias): Route
   rotas.post(
     "/chat/mensagens",
     rota(async (requisicao, resposta) => {
-      const { texto, imagens, origem } = esquemaDaPergunta.parse(requisicao.body ?? {});
+      const { texto, imagens, origem, previasAbertas } = esquemaDaPergunta.parse(requisicao.body ?? {});
       if (texto === "" && imagens.length === 0) {
         throw new ErroDoChat("dados_invalidos", "Escreva uma mensagem ou anexe uma imagem.");
       }
@@ -141,6 +143,7 @@ export function criarChatRoutes({ servico, canal, anexos }: Dependencias): Route
           conteudo: Buffer.from(imagem.base64, "base64"),
         })),
         ...(origem === undefined ? {} : { origem }),
+        previasAbertas,
       });
       resposta.status(202).json({ mensagemId });
     }),

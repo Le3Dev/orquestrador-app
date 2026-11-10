@@ -204,6 +204,9 @@ export type SituacaoDoTurno = "em_andamento" | "concluido" | "cancelado" | "falh
  * que espera a aprovação do usuário antes de qualquer alteração.
  */
 export type ModoDoTurno = "execucao" | "planejamento";
+
+/** De onde veio um endereço local detectado: da resposta final do agente ou da saída de uma ferramenta. */
+export type OrigemDoEndereco = "resposta" | "ferramenta";
 export type DecisaoDoPlano = "pendente" | "aprovado" | "descartado";
 export type SituacaoDoSubagente = "executando" | "concluido" | "falhou" | "cancelado";
 
@@ -448,7 +451,10 @@ type EventoDeTurno =
   | { tipo: "permissao_negada"; ferramenta: string; detalhe: string }
   // Um servidor de desenvolvimento subiu (ex.: "npm run dev"). Uma vez por endereço por turno; `url` já
   // normalizada: "http(s)://localhost:PORTA" e o caminho, sem a barra final solitária.
-  | { tipo: "endereco_local_detectado"; url: string }
+  // `origem`: "resposta" é o endereço citado na resposta final do agente (a única que abre a prévia sozinha);
+  // "ferramenta" (e a falta do campo, nos eventos antigos) é o que apareceu na saída de uma ferramenta:
+  // só entra na faixa de servidores, para abrir com um clique.
+  | { tipo: "endereco_local_detectado"; url: string; origem?: OrigemDoEndereco }
   | { tipo: "uso_da_cota"; janelas: JanelaDaCota[] }
   // A lista de tarefas do Orquestrador (`TodoWrite`), inteira: substitui a anterior. Nunca vem vazia.
   | { tipo: "tarefas_atualizadas"; tarefas: TarefaDoOrquestrador[] }
@@ -477,12 +483,15 @@ type EventoDeTurno =
   // `planoPendente`: o turno terminou com um plano à espera de decisão — no Plan Mode ou num pedido
   // de execução em que o Orquestrador propôs um plano antes de alterar. Falta nos eventos gravados antes.
   // `perguntas`: o Orquestrador terminou perguntando, com opções para o usuário escolher. Falta nos eventos antigos.
+  // `previasParaFechar`: endereços (normalizados) das prévias que o Orquestrador pediu para fechar, no bloco
+  // ```previa-do-app que o servidor já tirou da resposta. Falta, ou vem vazio, quando não pediu nenhuma.
   | {
       tipo: "turno_concluido";
       resposta: string;
       uso: UsoDoTurno;
       planoPendente?: boolean;
       perguntas?: PerguntaDoApp[];
+      previasParaFechar?: string[];
     }
   | { tipo: "turno_cancelado" }
   | { tipo: "turno_falhou"; motivo: string }

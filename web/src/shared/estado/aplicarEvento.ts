@@ -15,7 +15,7 @@ import type {
   TarefaDoOrquestrador,
   UsoDoTurno,
 } from "../api/tipos";
-import { CERCA_DE_PERGUNTA, semBlocosDoApp } from "../blocosDoApp";
+import { CERCAS_DO_ORQUESTRADOR, semBlocosDoApp } from "../blocosDoApp";
 import { juntarEnderecos, normalizarEndereco } from "../enderecosLocais";
 import { formatarDuracao, formatarMomento, formatarTokens, idCurto } from "../formatacao";
 
@@ -109,6 +109,12 @@ export interface TurnoNaTela {
    * de retomada, não um pedido do usuário. Nula, ou ausente, nos pedidos comuns.
    */
   retomada?: DadosDaRetomada | null;
+  /**
+   * Os endereços locais que o agente citou na resposta deste turno (evento com
+   * `origem: "resposta"`). Citado de novo, o endereço mantém a prévia aberta
+   * quando o turno termina. Vazia, ou ausente, sem citação.
+   */
+  enderecosDaResposta?: string[];
 }
 
 /** O evento `recuperacao_do_turno` mais recente do turno, como a tela o mostra. */
@@ -149,10 +155,18 @@ export interface EstadoDaConversa {
    */
   enderecosLocais: readonly string[];
   /**
-   * O último servidor anunciado, com a sequência e a hora do evento: a tela
-   * abre a prévia sozinha quando ele acabou de subir (não ao reler o histórico).
+   * O último endereço que o agente citou na resposta final (evento com
+   * `origem: "resposta"`), com a sequência e a hora do evento: a tela abre a
+   * prévia sozinha quando ele acabou de ser citado (não ao reler o histórico).
+   * O que veio de uma ferramenta (log de API subindo, curl) fica só em
+   * `enderecosLocais`, para abrir com um clique.
    */
-  ultimoEnderecoDetectado: EnderecoDetectado | null;
+  ultimoEnderecoDaResposta: EnderecoDetectado | null;
+  /**
+   * Como o último turno terminou, para a tela fechar as prévias que o agente
+   * abriu e não são mais precisas (a tela só age em eventos recentes).
+   */
+  ultimoFimDeTurno: FimDeTurno | null;
   /**
    * O nome mais recente trazido por `orquestrador_renomeado`, que chega na hora;
    * nulo sem renomeação no histórico (vale o nome do resumo, consultado a cada
@@ -165,6 +179,18 @@ export interface EnderecoDetectado {
   url: string;
   sequencia: number;
   em: string;
+}
+
+/** O fim de um turno (concluído, cancelado ou falho), com o que decide quais prévias do agente fecham. */
+export interface FimDeTurno {
+  sequencia: number;
+  em: string;
+  /** Quando o turno começou: prévias abertas depois disso são do turno e ficam até o fim do próximo. */
+  iniciadoEm: string;
+  /** Os endereços citados na resposta do turno: as prévias deles ficam. */
+  enderecosCitados: readonly string[];
+  /** As prévias que o agente pediu para fechar (bloco `previa-do-app`); só o turno concluído traz. */
+  previasParaFechar: readonly string[];
 }
 
 /** Os avisos do evento `conversa_limpa`. */
@@ -182,7 +208,8 @@ export const ESTADO_INICIAL: EstadoDaConversa = {
   conversaIniciadaEm: null,
   avisosDaConversaNova: SEM_AVISOS_DA_CONVERSA_NOVA,
   enderecosLocais: [],
-  ultimoEnderecoDetectado: null,
+  ultimoEnderecoDaResposta: null,
+  ultimoFimDeTurno: null,
   pedidosEnfileirados: [],
   pedidosRetirados: [],
   nome: null,
@@ -239,11 +266,13 @@ function encerrar(turno: TurnoNaTela, situacao: SituacaoDoTurno, em: string): Tu
 }
 
 /**
- * O texto do Orquestrador sem os blocos ```pergunta-do-app: as perguntas
- * chegam prontas no fim do turno e viram cartão.
+ * O texto do Orquestrador sem os blocos ```pergunta-do-app e ```previa-do-app
+ * (inclusive uma cerca ainda pela metade, com `respondendo`):
+ * as perguntas chegam prontas no fim do turno e viram cartão, e as prévias a
+ * fechar chegam em `previasParaFechar`. Os dois blocos nunca aparecem na tela.
  */
-function semBlocoDePergunta(texto: string): string {
-  return semBlocosDoApp(texto, [CERCA_DE_PERGUNTA], false);
+export function semBlocosDoOrquestrador(texto: string, respondendo = false): string {
+  return semBlocosDoApp(texto, CERCAS_DO_ORQUESTRADOR, respondendo);
 }
 
 function primeiraLinha(texto: string, limite = 110): string {
@@ -283,7 +312,7 @@ function atividadeDoOrquestrador(ferramenta: string, detalhe: string): string {
 function alteracaoDoTurno(evento: EventoRegistrado): AlteracaoDeTurno | null {
   switch (evento.tipo) {
     case "texto_do_orquestrador": {
-      const texto = semBlocoDePergunta(evento.texto);
+      const texto = semBlocosDoOrquestrador(evento.texto);
       return texto.trim() === ""
         ? null
         : (turno) => ({ ...turno, textosDoOrquestrador: [...turno.textosDoOrquestrador, texto] });
@@ -304,6 +333,17 @@ function alteracaoDoTurno(evento: EventoRegistrado): AlteracaoDeTurno | null {
         ...turno,
         permissoesNegadas: [...turno.permissoesNegadas, { ferramenta: evento.ferramenta, detalhe: evento.detalhe }],
       });
+
+    // O endereço citado na resposta fica no turno: a prévia dele não fecha quando o turno termina.
+    case "endereco_local_detectado": {
+      const url = evento.origem === "resposta" ? normalizarEndereco(evento.url) : null;
+      return url === null
+        ? null
+        : (turno) => ({
+            ...turno,
+            enderecosDaResposta: [...(turno.enderecosDaResposta ?? []).filter((citado) => citado !== url), url],
+          });
+    }
 
     case "subagente_iniciado":
       return (turno) => ({
@@ -470,7 +510,7 @@ export function linhaDoLog(evento: EventoRegistrado, turno: TurnoNaTela): Omit<L
       return { origem: "orquestrador", tipo: "sistema", texto: "sessão do claude code conectada" };
     case "texto_do_orquestrador": {
       // O bloco cru da pergunta não aparece no log: ela vira cartão no fim do turno.
-      const texto = semBlocoDePergunta(evento.texto);
+      const texto = semBlocosDoOrquestrador(evento.texto);
       return texto.trim() === "" ? null : { origem: "orquestrador", tipo: "texto", texto: primeiraLinha(texto) };
     }
     // Atividade normal: o Orquestrador pode ler e rodar comandos curtos sozinho.
@@ -553,6 +593,29 @@ function enderecosDoEvento(evento: EventoRegistrado): string[] {
   return url === null ? [] : [url];
 }
 
+/**
+ * O fim do turno que o evento encerra (concluído, cancelado ou falho), com o
+ * que a tela precisa para fechar as prévias que o agente abriu. Nulo para os
+ * outros eventos, ou se o turno não está na conversa.
+ */
+function fimDoTurno(estado: EstadoDaConversa, evento: EventoRegistrado): FimDeTurno | null {
+  if (evento.tipo !== "turno_concluido" && evento.tipo !== "turno_cancelado" && evento.tipo !== "turno_falhou") {
+    return null;
+  }
+  const turno = estado.turnos.find((candidato) => candidato.id === evento.turnoId);
+  if (turno === undefined) {
+    return null;
+  }
+  const paraFechar = evento.tipo === "turno_concluido" ? (evento.previasParaFechar ?? []) : [];
+  return {
+    sequencia: evento.sequencia,
+    em: evento.em,
+    iniciadoEm: turno.iniciadoEm,
+    enderecosCitados: turno.enderecosDaResposta ?? [],
+    previasParaFechar: paraFechar.flatMap((url) => normalizarEndereco(url) ?? []),
+  };
+}
+
 function novoTurno(evento: Extract<EventoRegistrado, { tipo: "turno_iniciado" }>): TurnoNaTela {
   return {
     id: evento.turnoId,
@@ -632,7 +695,8 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
         planoDescartado: evento.planoDescartado === true,
       },
       enderecosLocais: [],
-      ultimoEnderecoDetectado: null,
+      ultimoEnderecoDaResposta: null,
+      ultimoFimDeTurno: null,
       pedidosEnfileirados: [],
     };
   }
@@ -665,15 +729,18 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
 
   const turnos = evento.tipo === "turno_iniciado" ? [...estado.turnos, novoTurno(evento)] : estado.turnos;
   const [detectado] = enderecosDoEvento(evento);
+  // Só o endereço citado na resposta abre a prévia sozinho; sem `origem`, é de ferramenta.
+  const citadoNaResposta = evento.tipo === "endereco_local_detectado" && evento.origem === "resposta";
   const alteracao = alteracaoDoTurno(evento);
 
   return {
     ...proximo,
     enderecosLocais: juntarEnderecos(estado.enderecosLocais, enderecosDoEvento(evento)),
-    ultimoEnderecoDetectado:
-      detectado === undefined
-        ? estado.ultimoEnderecoDetectado
+    ultimoEnderecoDaResposta:
+      detectado === undefined || !citadoNaResposta
+        ? estado.ultimoEnderecoDaResposta
         : { url: detectado, sequencia: evento.sequencia, em: evento.em },
+    ultimoFimDeTurno: fimDoTurno(estado, evento) ?? estado.ultimoFimDeTurno,
     turnos: turnos.map((turno) => {
       if (turno.id !== evento.turnoId) {
         return turno;

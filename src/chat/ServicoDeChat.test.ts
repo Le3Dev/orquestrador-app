@@ -563,6 +563,46 @@ describe("ServicoDeChat", () => {
     expect(servico.estado().mensagens[1]).toMatchObject({ texto: "Antes, uma decisão.", perguntas });
   });
 
+  it("tira do texto o bloco previa-do-app e o leva ao evento como previasParaFechar, sem gravar na mensagem", async () => {
+    const { conclusao } = await servico.perguntar({ texto: "teste a API" });
+    await aguardarMotor();
+    motor.concluir(
+      sucesso(
+        ["A API na porta 3000 respondeu 200.", "```previa-do-app", '{"fechar":["http://127.0.0.1:5173/"]}', "```"].join("\n"),
+      ),
+    );
+    await conclusao;
+
+    expect(publicados.at(-1)).toMatchObject({
+      tipo: "resposta_concluida",
+      texto: "A API na porta 3000 respondeu 200.",
+      previasParaFechar: ["http://localhost:5173"],
+    });
+    expect(JSON.stringify(servico.estado().mensagens)).not.toContain("previasParaFechar");
+  });
+
+  it("sem bloco previa-do-app, o evento não traz previasParaFechar; com bloco inválido, o turno não quebra", async () => {
+    const { conclusao } = await servico.perguntar({ texto: "oi" });
+    await aguardarMotor();
+    motor.concluir(sucesso("olá\n```previa-do-app\n{quebrado\n```"));
+    await conclusao;
+
+    expect(publicados.at(-1)).toMatchObject({ tipo: "resposta_concluida", texto: "olá" });
+    expect(publicados.at(-1)).not.toHaveProperty("previasParaFechar");
+  });
+
+  it("a pergunta leva a regra da prévia e as prévias abertas ao Claude, só quando houver", async () => {
+    await servico.perguntar({ texto: "oi", previasAbertas: ["http://localhost:5173", "https://exemplo.com"] });
+    await aguardarMotor();
+
+    const mensagem = motor.perguntas[0]?.mensagem ?? "";
+    expect(mensagem).toContain("Prévia ao vivo: o app abre uma prévia");
+    expect(mensagem).toContain(
+      "Prévias abertas no canvas agora: http://localhost:5173, https://exemplo.com. Feche com o bloco previa-do-app as que não forem mais necessárias.",
+    );
+    expect(motor.perguntas[0]?.instrucoes).toContain("Prévia ao vivo");
+  });
+
   it("resposta sem bloco de perguntas conclui com perguntas vazias", async () => {
     const { conclusao } = await servico.perguntar({ texto: "oi" });
     await aguardarMotor();

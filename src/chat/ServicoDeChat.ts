@@ -3,6 +3,7 @@ import type { ArmazemDeAnexos } from "../orquestracao/ArmazemDeAnexos";
 import type { ControleDeExecucoes } from "../orquestracao/ControleDeExecucoes";
 import type { JanelaDaCota } from "../orquestracao/EventoDeOrquestracao";
 import { separarPerguntasDoApp } from "../perguntas/PerguntaDoApp";
+import { separarPreviasDoApp } from "../previas/PreviaDoApp";
 import { ConversaDoChat, SituacaoDaConversa } from "./ConversaDoChat";
 import { ErroDoChat } from "./ErroDoChat";
 import type { EventoDoChat, EventoDoChatRegistrado, PublicadorDoChat } from "./EventoDoChat";
@@ -54,6 +55,8 @@ export interface PerguntaDoUsuario {
   imagens?: readonly ImagemRecebidaNoChat[];
   /** De onde veio a pergunta, quando não foi digitada (ex.: "escuta"); vai junto na mensagem. */
   origem?: OrigemDaPergunta;
+  /** Os endereços das prévias ao vivo abertas no canvas agora; vão só na mensagem deste turno ao Claude. */
+  previasAbertas?: readonly string[];
 }
 
 export interface PerguntaEnviada {
@@ -150,9 +153,15 @@ export class ServicoDeChat {
       throw erro;
     }
 
-    const conclusao = this.responder(conversa, mensagemId, imagens, preferencias, alteracoesAutorizadas, sinal).finally(
-      () => execucoes.encerrar(ID_DO_CHAT),
-    );
+    const conclusao = this.responder(
+      conversa,
+      mensagemId,
+      imagens,
+      preferencias,
+      alteracoesAutorizadas,
+      sinal,
+      pergunta.previasAbertas ?? [],
+    ).finally(() => execucoes.encerrar(ID_DO_CHAT));
     return { mensagemId, conclusao };
   }
 
@@ -238,6 +247,7 @@ export class ServicoDeChat {
     preferencias: PreferenciasDoChat,
     alteracoesAutorizadas: boolean,
     sinal: AbortSignal,
+    previasAbertas: readonly string[] = [],
   ): Promise<void> {
     const { motor, repositorio, anexos, agora, pastaDaSessao, pastaDosProjetos, pastaDeArtefatos } = this.dependencias;
     const textoDaPergunta = conversa.perguntaEmAndamento?.texto ?? "";
@@ -264,6 +274,7 @@ export class ServicoDeChat {
             alteracoesAutorizadas,
             pastaDeArtefatos,
             permitirArtefatosOnline: preferencias.permitirArtefatosOnline,
+            previasAbertas,
           }),
           instrucoes: instrucoesDoChat(),
           imagens: imagens.map((imagem) => ({
@@ -291,15 +302,17 @@ export class ServicoDeChat {
         this.publicar(conversa.cancelar());
       } else if (resultado !== null && resultado.sucesso) {
         const semAcoes = separarAcoesDoApp(resultado.resposta, projetos, orquestradores);
-        const { texto, perguntas, avisos } = separarPerguntasDoApp(semAcoes.texto);
+        const semPerguntas = separarPerguntasDoApp(semAcoes.texto);
+        const { texto, previasParaFechar } = separarPreviasDoApp(semPerguntas.texto);
         this.publicar(
           conversa.concluir(
             texto,
             semAcoes.acoes,
-            [...resultado.avisos, ...semAcoes.avisos, ...avisos],
+            [...resultado.avisos, ...semAcoes.avisos, ...semPerguntas.avisos],
             resultado.uso,
             resultado.autorizacaoPendente,
-            perguntas,
+            semPerguntas.perguntas,
+            previasParaFechar,
           ),
         );
       } else {
