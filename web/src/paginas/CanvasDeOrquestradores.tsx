@@ -48,7 +48,6 @@ import { NavegadorDePastas } from "../componentes/canvas/NavegadorDePastas";
 import { NoRascunho } from "../componentes/canvas/NoRascunho";
 import { NoShell } from "../componentes/canvas/NoShell";
 import { NoTerminal } from "../componentes/canvas/NoTerminal";
-import { BarraDeTituloDoApp } from "../componentes/canvas/BarraDeTituloDoApp";
 import { type AbaDasConfiguracoes, ConfiguracoesDoApp } from "../componentes/canvas/ConfiguracoesDoApp";
 import {
   IlhaDaDireita,
@@ -57,7 +56,7 @@ import {
   NotificacoesDoCanvas,
 } from "../componentes/canvas/IlhasDoCanvas";
 import { type ControleDaPaleta, PaletaDeComandos } from "../componentes/canvas/PaletaDeComandos";
-import { rodandoNoDesktop } from "../shared/ponteDoDesktop";
+import { rodandoNoDesktop, rodandoNoMac } from "../shared/ponteDoDesktop";
 import { AvisoDeConexao, ErroDoCanvas, StatusDoCanvas } from "../componentes/canvas/PaineisDoCanvas";
 import { DialogoDeNovoModelo, PainelDeModelos } from "../componentes/canvas/PainelDeModelos";
 import { PainelDeSubagentes } from "../componentes/canvas/PainelDeSubagentes";
@@ -413,8 +412,10 @@ function Canvas() {
   // Enquadra só ao abrir com terminais (notas, artefatos ou prévias) salvos e sem posição de
   // câmera salva. Com o canvas vazio, o React Flow enquadraria o primeiro
   // terminal criado depois, com zoom exagerado.
-  // Dentro do app desktop, a barra de título é da tela (com o status).
+  // No app desktop não há faixa de título: o fundo das ilhas do topo arrasta a janela. No Mac as
+  // bolinhas nativas flutuam à esquerda da ilha do nome; no Windows e no Linux ─ ☐ ✕ vão para a ilha da direita.
   const [desktop] = useState(rodandoNoDesktop);
+  const [mac] = useState(rodandoNoMac);
   const areaDoCanvas = useRef<HTMLDivElement>(null);
   // Modo invisível: só o header e o chat rápido ficam; o resto é escondido por CSS (nada é desmontado).
   const { ativo: modoInvisivel } = useModoInvisivel();
@@ -668,7 +669,7 @@ function Canvas() {
     return () => window.removeEventListener("keydown", aoApertarTecla);
   }, [ligacaoSelecionada, fluxo, setNos]);
 
-  // O centro da área do canvas (no desktop, abaixo da barra de título).
+  // O centro da área do canvas.
   const centroDaTela = useCallback(() => {
     const area = areaDoCanvas.current?.getBoundingClientRect();
     return fluxo.screenToFlowPosition(
@@ -1771,7 +1772,7 @@ function Canvas() {
   // e, logo abaixo, os painéis que abriam da barra antiga (subagentes e modelos) e os avisos.
   const colunaDaEsquerda = useMemo(
     () => (
-      <div className="coluna-da-ilha-esquerda">
+      <div className={`coluna-da-ilha-esquerda ${mac ? "coluna-da-ilha-esquerda-mac" : ""}`}>
         <IlhaDoNome
           aoCriar={novoOrquestrador}
           aoCriarNota={novaNota}
@@ -1802,6 +1803,7 @@ function Canvas() {
       </div>
     ),
     [
+      mac,
       novoOrquestrador,
       novaNota,
       novaPreviaVazia,
@@ -1893,6 +1895,7 @@ function Canvas() {
           aoAlternarConfiguracoes={alternarConfiguracoes}
           configuracoesAbertas={configuracoes !== null}
           abaAberta={configuracoes?.aba ?? null}
+          controlesDaJanela={desktop && !mac}
         />
         <NotificacoesDoCanvas
           memoria={servidor.memoria}
@@ -1912,6 +1915,8 @@ function Canvas() {
       cota,
       verSistema,
       pedidosEmAndamento,
+      desktop,
+      mac,
     ],
   );
   // Todas as ilhas moram na área do canvas, dentro do <ReactFlow> mas fora do viewport.
@@ -1932,8 +1937,11 @@ function Canvas() {
     ),
     [trabalhando, bixinhosAtivos, cota, servidor.memoria],
   );
-  // A barra de título do app desktop só tem o que é da janela; o resto vive nas ilhas.
-  const barraDeTitulo = useMemo(() => (desktop ? <BarraDeTituloDoApp /> : null), [desktop]);
+  // Os orquestradores como a aba Sistema das Configurações os lista (a tabela de memória por orquestrador).
+  const orquestradoresDasConfiguracoes = useMemo(
+    () => (orquestradores ?? []).map(({ id, nome, situacao }) => ({ id, nome, situacao })),
+    [orquestradores],
+  );
   // Fora do viewport: o chat não se move com o canvas e só re-renderiza com novidades dele.
   // Fixo (preferência da tela), vira uma coluna ao lado da área do canvas, do lado escolhido;
   // senão, fica no painel do centro de baixo, dentro do React Flow.
@@ -2020,7 +2028,6 @@ function Canvas() {
             <div
               className={`flex h-screen w-screen flex-col ${servidor.conectado ? "" : "canvas-desconectado"} ${movimento.movendo ? "canvas-movendo" : ""} ${redimensionando ? "canvas-redimensionando" : ""} ${modoInvisivel ? "canvas-modo-invisivel" : ""}`}
             >
-              {barraDeTitulo}
               {/* Linha: o chat fixo (quando a preferência pede) empurra a área do canvas para o outro lado. */}
               <div className="flex min-h-0 w-full flex-1">
                 {chatFixo && ladoDoChatFixo === "esquerda" && chatRapido}
@@ -2082,6 +2089,9 @@ function Canvas() {
                       aoFechar={fecharConfiguracoes}
                       abaInicial={configuracoes?.aba}
                       sistema={sistemaDasConfiguracoes}
+                      memoria={servidor.memoria}
+                      cota={cota}
+                      orquestradores={orquestradoresDasConfiguracoes}
                       pedidosEmAndamento={pedidosEmAndamento}
                       aoSalvarInstrucoes={aoSalvarPainel}
                       topo={topoDasConfiguracoes ?? undefined}

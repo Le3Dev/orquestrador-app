@@ -5,7 +5,8 @@ import { apiDaJanela } from "../../shared/ponteDoDesktop";
 /*
  * Botões ─ ☐ ✕ da janela do app desktop. A janela principal não tem botões
  * nativos (titleBarStyle 'hidden' sem titleBarOverlay, em electron/main.js):
- * a tela desenha estes na BarraDeTituloDoApp.
+ * a tela desenha estes no fim da ilha da direita (Windows e Linux; no Mac as
+ * bolinhas são nativas).
  */
 
 const PROPS_DO_ICONE = {

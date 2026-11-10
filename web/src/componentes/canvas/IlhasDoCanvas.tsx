@@ -7,6 +7,7 @@ import { useAtualizacao } from "../../shared/hooks/useAtualizacao";
 import { nivelDaMemoria, type NivelDaMemoria } from "../../shared/memoria";
 import { IconeAlerta, IconeDesenhar, IconeEngrenagem, IconeGrade, IconeOrquestrador } from "../Icones";
 import { AvisoDeAtualizacao } from "./AvisoDeAtualizacao";
+import { ControlesDaJanela } from "./ControlesDaJanela";
 import {
   IconeEnquadrar,
   IconeInfo,
@@ -26,11 +27,12 @@ export const DICA_DO_DESENHAR = "Desenhar: caneta, marca-texto, formas e texto p
 
 /**
  * Ilha do canto superior esquerdo: o ícone e o nome do app, um divisor e o
- * botão `+ Novo` com o menu (ver `MenuNovo`).
+ * botão `+ Novo` com o menu (ver `MenuNovo`). No app desktop o fundo dela
+ * arrasta a janela (`ilha-arrasta`); o botão, o menu e o submenu são `no-drag`.
  */
 export function IlhaDoNome(props: PropsDoMenuNovo) {
   return (
-    <header className="ilha ilha-do-nome nodrag nopan nowheel" data-testid="ilha-do-nome">
+    <header className="ilha ilha-arrasta ilha-do-nome nodrag nopan nowheel" data-testid="ilha-do-nome">
       <span className="nome-do-app">
         <span className="icone-do-app">
           <IconeOrquestrador tamanho={22} />
@@ -89,12 +91,18 @@ interface PropsDaIlhaDaDireita {
   configuracoesAbertas: boolean;
   /** Em qual aba as Configurações estão; nulo com elas fechadas. */
   abaAberta: string | null;
+  /**
+   * Windows e Linux no app desktop: a janela não tem botões nativos, então ─ ☐ ✕ vão para o fim
+   * da ilha, depois de um divisor. No Mac (bolinhas nativas) e no navegador, fica falso.
+   */
+  controlesDaJanela?: boolean;
 }
 
 /**
  * Ilha do canto superior direito: a lupa (paleta de comandos), o contador de
  * quem está trabalhando, o anel de memória (abre Configurações na aba
- * Sistema) e a engrenagem (abre Configurações).
+ * Sistema) e a engrenagem (abre Configurações). No app desktop o fundo dela
+ * arrasta a janela (`ilha-arrasta`); o que é clicável é `no-drag`.
  */
 export function IlhaDaDireita({
   aoBuscar,
@@ -103,6 +111,7 @@ export function IlhaDaDireita({
   aoAlternarConfiguracoes,
   configuracoesAbertas,
   abaAberta,
+  controlesDaJanela = false,
 }: PropsDaIlhaDaDireita) {
   const nivel = memoria === null ? "normal" : nivelDaMemoria(memoria);
   const percentual = memoria === null ? null : Math.round((1 - memoria.livreBytes / memoria.totalBytes) * 100);
@@ -112,10 +121,10 @@ export function IlhaDaDireita({
       ? "Memória do computador: sem leitura ainda. Abrir Configurações, Sistema"
       : `Memória do computador: ${percentual}% em uso${texto === "" ? "" : `, ${texto.toLowerCase()}`}. Abrir Configurações, Sistema`;
   return (
-    <div className="ilha ilha-da-direita nodrag nopan nowheel" role="group" aria-label="Busca, status e configurações">
+    <div className="ilha ilha-arrasta ilha-da-direita nodrag nopan nowheel" role="group" aria-label="Busca, status e configurações">
       <button
         type="button"
-        className="botao-da-ilha"
+        className="botao-da-ilha no-drag"
         onClick={aoBuscar}
         aria-label="Buscar (Ctrl+K)"
         aria-keyshortcuts="Control+K"
@@ -125,7 +134,7 @@ export function IlhaDaDireita({
       </button>
       {trabalhando > 0 && (
         <span
-          className="contador-da-ilha"
+          className="contador-da-ilha no-drag"
           role="status"
           aria-label={`${trabalhando} trabalhando agora`}
           title={`${trabalhando} trabalhando agora`}
@@ -140,7 +149,7 @@ export function IlhaDaDireita({
       )}
       <button
         type="button"
-        className={`anel-da-ilha anel-da-ilha-${nivel}`}
+        className={`anel-da-ilha anel-da-ilha-${nivel} no-drag`}
         aria-pressed={configuracoesAbertas && abaAberta === "sistema"}
         aria-label={rotuloDoAnel}
         title={percentual === null ? "Memória: sem leitura ainda. Abre Configurações, Sistema" : `Memória ${percentual}% em uso. Abre Configurações, Sistema`}
@@ -152,7 +161,7 @@ export function IlhaDaDireita({
       </button>
       <button
         type="button"
-        className="botao-da-ilha"
+        className="botao-da-ilha no-drag"
         aria-pressed={configuracoesAbertas && abaAberta !== "sistema"}
         aria-label="Configurações"
         title="Configurações"
@@ -160,6 +169,12 @@ export function IlhaDaDireita({
       >
         <IconeEngrenagem tamanho={20} />
       </button>
+      {controlesDaJanela && (
+        <>
+          <span className="divisor-da-ilha" aria-hidden="true" />
+          <ControlesDaJanela />
+        </>
+      )}
     </div>
   );
 }

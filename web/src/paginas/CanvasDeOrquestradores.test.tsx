@@ -180,7 +180,7 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
     render(<CanvasDeOrquestradores />);
 
     const campo = await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
-    expect(campo).toHaveAttribute("placeholder", "Pergunte qualquer coisa ao Claude · / para comandos");
+    expect(campo).toHaveAttribute("placeholder", "Pergunte ao Claude");
     const painel = campo.closest(".react-flow__panel");
     expect(painel).toHaveClass("bottom", "center", "painel-do-chat");
     expect(screen.getByTestId("chat-rapido")).toHaveClass("nodrag", "nowheel", "nopan");
@@ -1241,7 +1241,6 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     expect(raiz).toHaveClass("canvas-modo-invisivel");
     // Nada é desmontado: o canvas continua no DOM, só escondido por CSS.
     expect(container.querySelector(".react-flow__renderer")).not.toBeNull();
-    expect(screen.getByTestId("barra-de-titulo")).toBeInTheDocument();
     expect(screen.getByTestId("chat-rapido")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Modo invisível" })).toHaveAttribute("aria-pressed", "true");
 
@@ -1251,7 +1250,7 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     expect(raiz).not.toHaveClass("canvas-modo-invisivel");
   });
 
-  it("no modo invisível, o CSS esconde as ilhas, o minimapa, os controles e os nós, e mantém a barra e o chat visíveis", async () => {
+  it("no modo invisível, o CSS esconde as ilhas, o minimapa, os controles e os nós, e mantém só o chat visível", async () => {
     const ouvintes: Array<(ativo: boolean) => void> = [];
     janelaComPonte.electron = {
       desktop: true,
@@ -1298,10 +1297,8 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
       }
       expect(visibilidade(screen.getByTestId("chat-rapido"))).toBe("visible");
       expect(visibilidade(painelDoChat)).toBe("visible");
-      // A barra inteira fica escondida e sem mouse; o botão 👁 (que também volta) fica no chat, visível.
-      const barra = screen.getByTestId("barra-de-titulo");
-      expect(visibilidade(barra)).toBe("hidden");
-      expect(getComputedStyle(barra).pointerEvents).toBe("none");
+      // As ilhas (que arrastam a janela) somem de vez, sem mouse; o botão 👁 (que também volta) fica no chat, visível.
+      expect(getComputedStyle(paineis as Element).display).toBe("none");
       expect(screen.queryByTestId("faixa-modo-invisivel")).not.toBeInTheDocument();
       const botao = screen.getByRole("button", { name: "Modo invisível" });
       expect(botao).toHaveAttribute("aria-pressed", "true");
@@ -1442,32 +1439,55 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     expect(transformacao()).toBe("translate(100px,50px) scale(0.5)");
   });
 
-  it("no navegador não há barra de título; no desktop ela é só a faixa de arrastar acima do canvas, e o status não fica na tela", () => {
-    const { unmount } = render(<CanvasDeOrquestradores />);
-    expect(screen.queryByTestId("barra-de-titulo")).not.toBeInTheDocument();
-    // O status vive na aba Sistema das Configurações (fechadas por padrão).
-    expect(screen.queryByTestId("status-do-canvas")).not.toBeInTheDocument();
-    unmount();
+  describe("sem faixa de título", () => {
+    function ponteDaJanela(plataforma?: string) {
+      janelaComPonte.electron = {
+        desktop: true,
+        ...(plataforma ? { plataforma } : {}),
+        janela: {
+          minimizar: vi.fn(),
+          maximizar: vi.fn(),
+          fechar: vi.fn(),
+          estaMaximizada: vi.fn().mockResolvedValue(false),
+          aoMudarMaximizada: vi.fn(() => () => undefined),
+        },
+      };
+    }
+    const controles = () => screen.queryByRole("group", { name: "Controles da janela" });
 
-    janelaComPonte.electron = {
-      desktop: true,
-      janela: {
-        minimizar: vi.fn(),
-        maximizar: vi.fn(),
-        fechar: vi.fn(),
-        estaMaximizada: vi.fn().mockResolvedValue(false),
-        aoMudarMaximizada: vi.fn(() => () => undefined),
-      },
-    };
-    render(<CanvasDeOrquestradores />);
-    const barra = screen.getByTestId("barra-de-titulo");
-    expect(within(barra).getByRole("group", { name: "Controles da janela" })).toBeInTheDocument();
-    expect(within(barra).queryByRole("button", { name: /Buscar/ })).not.toBeInTheDocument();
-    expect(screen.queryByTestId("status-do-canvas")).not.toBeInTheDocument();
-    // A barra fica fora do canvas, acima dele; as ilhas flutuam dentro da área do canvas.
-    const area = barra.nextElementSibling;
-    expect(area?.querySelector(".react-flow")).not.toBeNull();
-    expect(area).toContainElement(screen.getByTestId("ilha-do-nome"));
+    it("no navegador, sem controles de janela, sem arraste reservado e com a ilha do nome em esquerda 16", () => {
+      render(<CanvasDeOrquestradores />);
+
+      expect(controles()).not.toBeInTheDocument();
+      expect(document.querySelector(".barra-de-titulo")).toBeNull();
+      expect(screen.getByTestId("ilha-do-nome").parentElement).not.toHaveClass("coluna-da-ilha-esquerda-mac");
+      // O status vive na aba Sistema das Configurações (fechadas por padrão).
+      expect(screen.queryByTestId("status-do-canvas")).not.toBeInTheDocument();
+    });
+
+    it("no Windows, ─ ☐ ✕ ficam no fim da ilha da direita, depois de um divisor; o canvas começa no topo da janela", () => {
+      ponteDaJanela("win32");
+      const { container } = render(<CanvasDeOrquestradores />);
+
+      const ilha = screen.getByRole("group", { name: "Busca, status e configurações" });
+      expect(ilha).toHaveClass("ilha-arrasta");
+      const grupo = within(ilha).getByRole("group", { name: "Controles da janela" });
+      expect(ilha.lastElementChild).toBe(grupo);
+      expect(grupo.previousElementSibling).toHaveClass("divisor-da-ilha");
+      expect(document.querySelector(".barra-de-titulo")).toBeNull();
+      // A área do canvas é a primeira coisa da tela: nenhuma faixa acima dela.
+      expect(container.querySelector(".h-screen")?.firstElementChild?.firstElementChild).toHaveClass("area-do-canvas");
+      expect(screen.getByTestId("ilha-do-nome").parentElement).not.toHaveClass("coluna-da-ilha-esquerda-mac");
+    });
+
+    it("no Mac desktop, as bolinhas são nativas: sem ─ ☐ ✕ e com a ilha do nome deslocada para a direita", () => {
+      ponteDaJanela("darwin");
+      render(<CanvasDeOrquestradores />);
+
+      expect(controles()).not.toBeInTheDocument();
+      expect(screen.getByTestId("ilha-do-nome")).toHaveClass("ilha-arrasta");
+      expect(screen.getByTestId("ilha-do-nome").parentElement).toHaveClass("coluna-da-ilha-esquerda-mac");
+    });
   });
 
   it("a busca e o ⚙ ficam na ilha da direita; a paleta oferece \"Pastas e Claude Code\" só no desktop", () => {

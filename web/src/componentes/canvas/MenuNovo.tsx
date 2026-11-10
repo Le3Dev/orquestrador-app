@@ -513,7 +513,7 @@ export function MenuNovo({
   let posicao = 0;
 
   return (
-    <div ref={ancora} className="ancora-do-menu-novo">
+    <div ref={ancora} className="ancora-do-menu-novo no-drag">
       <button
         ref={botao}
         type="button"

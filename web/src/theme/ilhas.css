@@ -6,7 +6,9 @@
  * abaixo da ilha da direita. Tudo mora na área do canvas (ao lado do chat
  * fixo, quando há), dentro do <ReactFlow>, mas fora do viewport: não escala
  * com o zoom. Medidas do protótipo aprovado: topo e lados a 16 px, ilhas de
- * 48 de altura e raio 14, menu de 296, submenu de 340, notificação de 400. */
+ * 48 de altura e raio 14, menu de 296, submenu de 340, notificação de 400.
+ * No app desktop não há faixa de título: o fundo das duas ilhas do topo arrasta
+ * a janela (`ilha-arrasta`) e os controles dentro delas são `no-drag`. */
 
 .ilhas-do-canvas {
   position: absolute;
@@ -48,6 +50,12 @@
 .coluna-da-ilha-esquerda > * { pointer-events: auto; }
 /* O painel de subagentes prontos, sob a ilha: 640 de largura, como no protótipo. */
 .coluna-da-ilha-esquerda .painel-de-subagentes { width: 640px; }
+/* Arraste da janela (Electron): só o fundo das ilhas do topo, nunca uma faixa sobre o canvas. Botões,
+ * contador (tem balão), controles da janela e o menu Novo (com o submenu) não arrastam e recebem o clique. */
+.ilha-arrasta { -webkit-app-region: drag; user-select: none; }
+.ilha-arrasta :is(button, .no-drag, .controles-da-janela, .menu-novo, .submenu-novo) { -webkit-app-region: no-drag; }
+/* Mac desktop: as bolinhas nativas (x 16, 52 de largura, centro em y 40) ficam à esquerda da ilha do nome. */
+.coluna-da-ilha-esquerda-mac { left: 84px; max-width: calc(100% - 100px); }
 .ilha-do-nome { position: relative; padding: 6px 6px 6px 12px; flex-shrink: 0; }
 .nome-do-app { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .nome-do-app h1 { font-size: 13.5px; color: var(--caption); }
@@ -236,6 +244,11 @@
 .arco-do-anel { stroke: currentColor; }
 .chip-do-anel { position: absolute; top: 6.5px; left: 6.5px; }
 
+/* Windows e Linux desktop: ─ ☐ ✕ no fim da ilha da direita, depois de um divisor; fechar fica vermelho no hover. */
+.ilha-da-direita .controles-da-janela { gap: 2px; }
+.ilha-da-direita .botao-da-janela { width: 36px; height: 36px; border-radius: 8px; }
+.ilha-da-direita .botao-da-janela-fechar:hover { background: var(--error); color: var(--primary); }
+
 /* ---------- Canto inferior esquerdo: a ilha vertical de ferramentas ---------- */
 .ilha-de-ferramentas {
   position: absolute;
@@ -399,6 +412,3 @@
 @media (width < 700px) {
   .texto-do-anel { display: none; }
 }
-
-/* Barra de título do app desktop: só o vão que arrasta a janela e, no Windows, os botões dela. */
-.vao-da-barra-de-titulo { flex: 1 1 auto; align-self: stretch; }

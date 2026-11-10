@@ -49,6 +49,9 @@ describe("IlhaDoNome", () => {
     expect(ilha.querySelector(".divisor-da-ilha")).not.toBeNull();
     // Não arrasta nem move o canvas por baixo.
     expect(ilha).toHaveClass("nodrag", "nopan", "nowheel");
+    // O fundo arrasta a janela (Electron); o botão Novo (com o menu e o submenu) não.
+    expect(ilha).toHaveClass("ilha-arrasta");
+    expect(within(ilha).getByRole("button", { name: "Novo" }).closest(".ancora-do-menu-novo")).toHaveClass("no-drag");
 
     fireEvent.click(within(ilha).getByRole("button", { name: "Novo" }));
     fireEvent.click(within(ilha).getByRole("menuitem", { name: "Nota" }));
@@ -57,6 +60,10 @@ describe("IlhaDoNome", () => {
 });
 
 describe("IlhaDaDireita", () => {
+  afterEach(() => {
+    delete janelaComPonte.electron;
+  });
+
   function montar(extras: Partial<Parameters<typeof IlhaDaDireita>[0]> = {}) {
     const aoBuscar = vi.fn();
     const aoAlternarConfiguracoes = vi.fn();
@@ -84,6 +91,51 @@ describe("IlhaDaDireita", () => {
       "Configurações",
     ]);
     expect(screen.queryByTestId("contador-trabalhando")).not.toBeInTheDocument();
+  });
+
+  it("o fundo da ilha arrasta a janela e todos os controles dela são no-drag", () => {
+    montar({ trabalhando: 2 });
+
+    const ilha = screen.getByRole("group", { name: "Busca, status e configurações" });
+    expect(ilha).toHaveClass("ilha-arrasta");
+    for (const botao of within(ilha).getAllByRole("button")) expect(botao).toHaveClass("no-drag");
+    expect(screen.getByTestId("contador-trabalhando")).toHaveClass("no-drag");
+  });
+
+  it("sem controlesDaJanela (Mac e navegador), a ilha não tem ─ ☐ ✕", () => {
+    montar();
+
+    expect(screen.queryByRole("group", { name: "Controles da janela" })).not.toBeInTheDocument();
+  });
+
+  it("com controlesDaJanela (Windows e Linux desktop), ─ ☐ ✕ ficam no fim, depois de um divisor, e agem na janela", async () => {
+    const janela = {
+      minimizar: vi.fn().mockResolvedValue(undefined),
+      maximizar: vi.fn().mockResolvedValue(undefined),
+      fechar: vi.fn().mockResolvedValue(undefined),
+      estaMaximizada: vi.fn().mockResolvedValue(true),
+      aoMudarMaximizada: vi.fn(() => () => undefined),
+    };
+    janelaComPonte.electron = { desktop: true, plataforma: "win32", janela };
+    montar({ controlesDaJanela: true });
+
+    const ilha = screen.getByRole("group", { name: "Busca, status e configurações" });
+    const controles = within(ilha).getByRole("group", { name: "Controles da janela" });
+    expect(ilha.lastElementChild).toBe(controles);
+    expect(controles.previousElementSibling).toHaveClass("divisor-da-ilha");
+    expect(controles).toHaveClass("no-drag");
+    expect(within(controles).getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual([
+      "Minimizar",
+      expect.stringMatching(/Maximizar|Restaurar/),
+      "Fechar",
+    ]);
+    // Mantém o estado de maximizada: a janela abriu maximizada, o ícone é o de restaurar.
+    expect(await within(controles).findByRole("button", { name: "Restaurar" })).toBeInTheDocument();
+
+    fireEvent.click(within(controles).getByRole("button", { name: "Minimizar" }));
+    fireEvent.click(within(controles).getByRole("button", { name: "Fechar" }));
+    expect(janela.minimizar).toHaveBeenCalledTimes(1);
+    expect(janela.fechar).toHaveBeenCalledTimes(1);
   });
 
   it("a lupa abre a paleta (Ctrl+K) e a engrenagem abre as Configurações na aba padrão", () => {
@@ -128,6 +180,11 @@ describe("IlhaDaDireita", () => {
     );
     expect(screen.getByTestId("anel-de-memoria")).toHaveClass("anel-da-ilha-baixa");
     expect(screen.getByTestId("anel-de-memoria")).toHaveTextContent("Memória baixa");
+    // A % em uso fica no rótulo e na dica (o anel só desenha o arco).
+    expect(screen.getByTestId("anel-de-memoria")).toHaveAttribute(
+      "aria-label",
+      "Memória do computador: 93% em uso, memória baixa. Abrir Configurações, Sistema",
+    );
     unmount();
 
     render(
@@ -142,6 +199,13 @@ describe("IlhaDaDireita", () => {
     );
     expect(screen.getByTestId("anel-de-memoria")).toHaveClass("anel-da-ilha-critica");
     expect(screen.getByTestId("anel-de-memoria")).toHaveTextContent("Memória crítica");
+  });
+
+  it("com a memória normal, o anel não tem texto ao lado", () => {
+    montar({ memoria: memoria(10) });
+
+    expect(screen.getByTestId("anel-de-memoria")).toHaveClass("anel-da-ilha-normal");
+    expect(screen.getByTestId("anel-de-memoria")).toHaveTextContent("");
   });
 
   it("sem leitura de memória, o anel continua e diz isso", () => {
