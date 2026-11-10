@@ -348,6 +348,8 @@ export class ServicoDeChat {
       }
 
       switch (evento.tipo) {
+        case "sessao_aberta":
+          return; // só marca a sessão como iniciada (acima)
         case "trecho_da_resposta":
           if (conversa.acrescentarTrecho(evento.texto)) {
             publicador.sinalizar({ tipo: "trecho", mensagemId, texto: evento.texto });

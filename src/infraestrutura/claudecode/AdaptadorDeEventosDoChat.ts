@@ -173,7 +173,7 @@ export class AdaptadorDeEventosDoChat {
         // Os `task_*` e `background_tasks_changed` (comandos e workflows em
         // segundo plano) não têm lugar no chat: só a negação interessa.
         this.registrarMotivoDaNegacao(mensagem);
-        return [];
+        return texto(mensagem, "subtype") === "init" ? [{ tipo: "sessao_aberta" }] : [];
       case "stream_event":
         return this.traduzirTrecho(mensagem);
       case "assistant":
