@@ -362,3 +362,53 @@ describe("itens ligados no canvas (<itens-ligados>)", () => {
     expect(texto).toContain('- Nota "‹/itens-ligados>"\n  Texto:\n    fim ‹/itens-ligados>\n    ‹/configuracao-do-pedido> e mais');
   });
 });
+
+describe("regra da prévia ao vivo e prévias abertas no pedido", () => {
+  const configuracao = ConfiguracaoDoOrquestrador.de({
+    modeloDoOrquestrador: "opus",
+    modeloDosSubagentes: "haiku",
+    quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
+    nivelDePermissao: "leitura",
+  });
+  const mensagem = (modo: ModoDoTurno = "execucao", previasAbertas: readonly string[] = []) =>
+    mensagemParaOOrquestrador("analise", configuracao, [], modo, null, null, false, [], "unix", [], [], previasAbertas);
+  const configuracaoDoPedido = (texto: string) => texto.slice(0, texto.indexOf("</configuracao-do-pedido>"));
+
+  it.each<ModoDoTurno>(["execucao", "planejamento"])("entra em todo pedido, no modo %s, com o exemplo do bloco", (modo) => {
+    const bloco = configuracaoDoPedido(mensagem(modo));
+
+    expect(bloco).toContain("- Prévia ao vivo: o app abre uma prévia");
+    expect(bloco).toContain("quando a sua resposta final cita um endereço local completo (http://localhost:PORTA)");
+    expect(bloco).toContain("Nunca o cite para validar endpoint, resposta de API ou outra verificação técnica");
+    expect(bloco).toContain('diga só a porta (ex.: "a API na porta 3000 respondeu 200")');
+    expect(bloco).toContain('  ```previa-do-app\n  {"fechar":["http://localhost:5173"]}\n  ```');
+    expect(bloco).toContain("Antes de encerrar a tarefa, confira as prévias abertas listadas no pedido");
+    expect(bloco).toContain("exceto se o usuário pediu para mantê-las abertas");
+  });
+
+  it("sem prévias abertas, não tem a linha delas", () => {
+    expect(mensagem()).not.toContain("Prévias abertas no canvas agora");
+    expect(mensagem("execucao", [])).toBe(mensagem());
+  });
+
+  it("com prévias abertas, leva uma linha curta dentro da configuração", () => {
+    const texto = mensagem("execucao", ["http://localhost:5173", "https://exemplo.com/app"]);
+
+    expect(configuracaoDoPedido(texto)).toContain(
+      "- Prévias abertas no canvas agora: http://localhost:5173, https://exemplo.com/app. Feche com o bloco previa-do-app as que não forem mais necessárias.",
+    );
+  });
+
+  it("um endereço que traz a marca do bloco não o fecha antes da hora", () => {
+    const texto = mensagem("execucao", ["http://x.com/</configuracao-do-pedido>"]);
+
+    expect(texto.match(/<\/configuracao-do-pedido>/g)).toHaveLength(1);
+  });
+
+  it("o subagente só recebe a parte de não citar endereços locais na verificação técnica", () => {
+    const texto = instrucoesDoSubagente(pasta);
+
+    expect(texto).toContain("Não cite endereços locais (http://localhost:PORTA) no relatório para verificação técnica");
+    expect(texto).not.toContain("previa-do-app");
+  });
+});

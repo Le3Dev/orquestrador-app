@@ -172,6 +172,7 @@ export class ConversaDoChat {
     uso: UsoDaResposta,
     autorizacaoPendente: AutorizacaoPendente | null = null,
     perguntas: readonly PerguntaDoApp[] = [],
+    previasParaFechar: readonly string[] = [],
   ): EventoDoChat {
     const resposta = this.respostaAtiva();
     // Uma resposta concluída prova que a sessão foi criada.
@@ -183,6 +184,8 @@ export class ConversaDoChat {
       texto,
       acoes: [...acoes],
       perguntas: resposta.perguntas.map(copiarPergunta),
+      // Só no evento (a tela fecha as prévias na hora): reler o histórico não as fecha de novo.
+      ...(previasParaFechar.length === 0 ? {} : { previasParaFechar: [...previasParaFechar] }),
       avisos: [...avisos],
       uso,
       autorizacaoPendente: resposta.autorizacaoPendente === null ? null : { ...resposta.autorizacaoPendente },

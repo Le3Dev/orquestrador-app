@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import { separarPerguntasDoApp } from "../perguntas/PerguntaDoApp";
+import { separarPreviasDoApp } from "../previas/PreviaDoApp";
 import { Anexo, categoriaDoTipo, ehTipoDeImagem } from "./Anexo";
 import { ArmazemDeAnexos } from "./ArmazemDeAnexos";
 import {
@@ -331,22 +332,25 @@ export class ServicoDeOrquestracao {
     imagens: readonly ImagemRecebida[] = [],
     modo: ModoDoTurno = "execucao",
     itensLigados: readonly ItemLigado[] = [],
+    previasAbertas: readonly string[] = [],
   ): Promise<MensagemEnviada> {
     const orquestrador = this.buscar(id);
     const itens = this.itensComCaminhos(orquestrador, itensLigados);
-    return this.iniciarTurno(orquestrador, texto, imagens, modo, null, null, itens);
+    return this.iniciarTurno(orquestrador, texto, imagens, modo, null, null, itens, previasAbertas);
   }
 
   /**
    * Guarda um pedido na fila do Orquestrador, com ou sem turno em andamento.
    * Ele sai sozinho quando um turno terminar bem, ou com `enviarDaFila`. Os
-   * itens ligados vão congelados no pedido, como estavam ao enfileirar.
+   * itens ligados e as prévias abertas vão congelados no pedido, como estavam
+   * ao enfileirar.
    */
   async enfileirarPedido(
     id: string,
     texto: string,
     modo: ModoDoTurno = "execucao",
     itensLigados: readonly ItemLigado[] = [],
+    previasAbertas: readonly string[] = [],
   ): Promise<PedidoEnfileirado> {
     const { repositorio, gerarId, agora } = this.dependencias;
     const orquestrador = this.buscar(id);
@@ -356,6 +360,7 @@ export class ServicoDeOrquestracao {
       modo,
       enfileiradoEm: agora(),
       itensLigados: this.itensComCaminhos(orquestrador, itensLigados),
+      previasAbertas,
     });
     this.publicar(orquestrador, orquestrador.enfileirarPedido(pedido));
     await repositorio.salvar(orquestrador);
@@ -376,7 +381,7 @@ export class ServicoDeOrquestracao {
   async enviarDaFila(id: string, pedidoId: string): Promise<MensagemEnviada> {
     const orquestrador = this.buscar(id);
     const pedido = orquestrador.pedidoDaFila(pedidoId);
-    return this.iniciarTurno(orquestrador, pedido.texto, [], pedido.modo, pedido, null, pedido.itensLigados);
+    return this.iniciarTurno(orquestrador, pedido.texto, [], pedido.modo, pedido, null, pedido.itensLigados, pedido.previasAbertas);
   }
 
   /**
@@ -414,6 +419,9 @@ export class ServicoDeOrquestracao {
    *
    * `itensLigados`: o contexto que o usuário ligou ao Orquestrador no canvas;
    * vai só na mensagem deste turno ao motor, não no histórico.
+   *
+   * `previasAbertas`: os endereços das prévias ao vivo abertas no canvas
+   * quando o pedido saiu; também só na mensagem deste turno ao motor.
    */
   private async iniciarTurno(
     orquestrador: Orquestrador,
@@ -423,6 +431,7 @@ export class ServicoDeOrquestracao {
     pedidoDaFila: PedidoNaFila | null,
     retomada: { deTurnoId: string; tentativa: number } | null = null,
     itensLigados: readonly ItemLigado[] = [],
+    previasAbertas: readonly string[] = [],
   ): Promise<MensagemEnviada> {
     const { repositorio, execucoes, anexos, gerarId, agora } = this.dependencias;
     const turnoId = gerarId();
@@ -475,6 +484,7 @@ export class ServicoDeOrquestracao {
       revogarInstrucoesAnteriores: revogarAnteriores,
       subagentesProntos: this.subagentesProntosPara(configuracaoDoTurno),
       itensLigados,
+      previasAbertas,
     }).finally(() => execucoes.encerrar(orquestrador.id));
     const conclusao = execucao.then(() => undefined);
     // Em segundo plano, depois do fim do turno: não segura a resposta nem o
@@ -700,7 +710,7 @@ export class ServicoDeOrquestracao {
     configuracaoDoTurno: ConfiguracaoDoOrquestrador,
     instrucoesDoTurno: Pick<
       PedidoDeTurno,
-      "instrucoes" | "revogarInstrucoesAnteriores" | "subagentesProntos" | "itensLigados"
+      "instrucoes" | "revogarInstrucoesAnteriores" | "subagentesProntos" | "itensLigados" | "previasAbertas"
     >,
   ): Promise<TurnoEncerrado | null> {
     const { motor, repositorio, anexos, worktrees, pastaDeArtefatos, agora } = this.dependencias;
@@ -834,11 +844,21 @@ export class ServicoDeOrquestracao {
         }
         // O marcador sai sempre da resposta; só vira Plano pendente num turno
         // de execução (no planejamento, o turno já termina em Plano).
-        const { resposta, planoProposto } = separarPropostaDePlano(semPerguntas.texto);
+        // O bloco das prévias a fechar também sai sempre; não tem aviso, o turno nunca quebra por ele.
+        const semPrevias = separarPreviasDoApp(semPerguntas.texto);
+        const { resposta, planoProposto } = separarPropostaDePlano(semPrevias.texto);
         const planoPendente = planoProposto && configuracaoDoTurno.propoePlanoEmPedidosGrandes(modo);
         this.publicar(
           orquestrador,
-          orquestrador.concluirTurno(turnoId, resposta, resultado.uso, agora(), planoPendente, semPerguntas.perguntas),
+          orquestrador.concluirTurno(
+            turnoId,
+            resposta,
+            resultado.uso,
+            agora(),
+            planoPendente,
+            semPerguntas.perguntas,
+            semPrevias.previasParaFechar,
+          ),
         );
       } else {
         encerrado.falha =

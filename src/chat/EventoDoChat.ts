@@ -27,6 +27,12 @@ export type EventoDoChat =
        * texto. Ausente nos eventos gravados antes do campo: valem [].
        */
       perguntas: PerguntaDoApp[];
+      /**
+       * Endereços das prévias ao vivo que o Claude pediu para fechar (bloco
+       * ```previa-do-app), normalizados e já fora do texto: até 10. Ausente
+       * ou vazio quando não pediu.
+       */
+      previasParaFechar?: string[];
       avisos: string[];
       uso: UsoDaResposta;
       /** A primeira edição ou comando negado por falta de autorização; nulo se não houve. */

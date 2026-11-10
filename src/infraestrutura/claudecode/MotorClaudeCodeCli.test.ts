@@ -295,7 +295,11 @@ describe("MotorClaudeCodeCli e os servidores citados", () => {
 
     expect(resultado.sucesso).toBe(true);
     expect(sondados).toEqual(["http://localhost:4173", "http://localhost:9000"]);
-    expect(enderecos(eventos)).toEqual([{ tipo: "endereco_local_detectado", url: "http://localhost:4173" }]);
+    // Citado no comando (ferramenta) e na resposta final: a conferência do comando ainda
+    // roda quando a resposta chega, e o anúncio sai uma vez só, com a origem "resposta".
+    expect(enderecos(eventos)).toEqual([
+      { tipo: "endereco_local_detectado", url: "http://localhost:4173", origem: "resposta" },
+    ]);
   });
 
   it("uma sonda que falha não derruba o turno", async () => {
@@ -312,7 +316,7 @@ describe("MotorClaudeCodeCli e os servidores citados", () => {
 
   it.each<[boolean, unknown[]]>([
     [false, []],
-    [true, [{ tipo: "endereco_local_detectado", url: "http://localhost:8530/health" }]],
+    [true, [{ tipo: "endereco_local_detectado", url: "http://localhost:8530/health", origem: "ferramenta" }]],
   ])("o endereço na saída de um comando só é anunciado se responde (responde: %s)", async (responde, esperado) => {
     const sondados: string[] = [];
     const fachada = new FachadaQueImprimeEndereco();

@@ -61,11 +61,16 @@ export interface RetanguloDaNota extends Retangulo {
 /**
  * Uma prévia ao vivo (um navegador dentro do canvas): onde fica, o endereço
  * aberto (vazio enquanto o usuário não digita um) e o Orquestrador de cujo
- * terminal ela saiu (nulo quando foi aberta pela barra do canvas).
+ * terminal ela saiu (nulo quando foi aberta pela barra do canvas). Os três
+ * últimos campos só existem nas prévias que o agente abriu sozinho, ou que o
+ * usuário tocou depois (layouts salvos antes deles não os têm).
  */
 export interface RetanguloDaPrevia extends RetanguloDaNota {
   url: string;
   orquestradorId: string | null;
+  abertaPeloAgente?: boolean;
+  abertaEm?: number;
+  tocadaPeloUsuario?: boolean;
 }
 
 /**
@@ -237,7 +242,14 @@ function interpretarPrevias(previas: unknown): Record<string, RetanguloDaPrevia>
   for (const [id, retangulo] of Object.entries(previas)) {
     if (ehRetangulo(retangulo)) {
       const { x, y, largura, altura } = retangulo;
-      const { minimizada, url, orquestradorId } = retangulo as { minimizada?: unknown; url?: unknown; orquestradorId?: unknown };
+      const { minimizada, url, orquestradorId, abertaPeloAgente, abertaEm, tocadaPeloUsuario } = retangulo as {
+        minimizada?: unknown;
+        url?: unknown;
+        orquestradorId?: unknown;
+        abertaPeloAgente?: unknown;
+        abertaEm?: unknown;
+        tocadaPeloUsuario?: unknown;
+      };
       validas[id] = {
         x,
         y,
@@ -246,6 +258,9 @@ function interpretarPrevias(previas: unknown): Record<string, RetanguloDaPrevia>
         minimizada: minimizada === true,
         url: typeof url === "string" && /^https?:\/\//i.test(url) ? url : "",
         orquestradorId: typeof orquestradorId === "string" ? orquestradorId : null,
+        ...(abertaPeloAgente === true ? { abertaPeloAgente: true } : {}),
+        ...(abertaPeloAgente === true && typeof abertaEm === "number" && Number.isFinite(abertaEm) ? { abertaEm } : {}),
+        ...(tocadaPeloUsuario === true ? { tocadaPeloUsuario: true } : {}),
       };
     }
   }
@@ -581,6 +596,74 @@ export function salvarBixinhosLimpos(limpezas: ReadonlyMap<string, BixinhosLimpo
     localStorage.setItem(CHAVE_DOS_BIXINHOS_LIMPOS, JSON.stringify(Object.fromEntries(limpezas)));
   } catch {
     // Sem armazenamento: os bixinhos limpos só voltam no próximo acesso.
+  }
+}
+
+/**
+ * Os servidores que o usuário tirou da faixa de servidores, por Orquestrador:
+ * o endereço e a sequência do último anúncio dele no momento em que foi tirado.
+ * Um anúncio com sequência maior (o agente subiu o servidor de novo) o traz de
+ * volta. Fica numa chave própria, como os bixinhos limpos: o layout das janelas
+ * é regravado inteiro a cada arraste, e isto não é posição de nada.
+ */
+export type ServidoresTirados = Readonly<Record<string, number>>;
+
+const CHAVE_DOS_SERVIDORES_TIRADOS = `${CHAVE}:servidores-tirados`;
+/** Quantos endereços tirados cada Orquestrador guarda (os mais recentes): a lista não cresce sem limite. */
+const LIMITE_DOS_SERVIDORES_TIRADOS = 50;
+
+/** Lê os servidores tirados de todos os Orquestradores, descartando o que estiver corrompido. */
+export function interpretarServidoresTirados(texto: string | null): Map<string, ServidoresTirados> {
+  const validos = new Map<string, ServidoresTirados>();
+  if (texto === null) {
+    return validos;
+  }
+  try {
+    const salvo: unknown = JSON.parse(texto);
+    if (typeof salvo !== "object" || salvo === null || Array.isArray(salvo)) {
+      return validos;
+    }
+    for (const [orquestradorId, tirados] of Object.entries(salvo)) {
+      if (typeof tirados !== "object" || tirados === null || Array.isArray(tirados)) {
+        continue;
+      }
+      const enderecos = Object.entries(tirados).filter(
+        (entrada): entrada is [string, number] => ehNumero(entrada[1]) && entrada[1] >= 0,
+      );
+      if (enderecos.length > 0) {
+        validos.set(orquestradorId, Object.fromEntries(enderecos));
+      }
+    }
+    return validos;
+  } catch {
+    return new Map();
+  }
+}
+
+/** Os servidores que o usuário tirou da faixa deste Orquestrador (nenhum se não há nada salvo). */
+export function lerServidoresTirados(orquestradorId: string): ServidoresTirados {
+  try {
+    return interpretarServidoresTirados(localStorage.getItem(CHAVE_DOS_SERVIDORES_TIRADOS)).get(orquestradorId) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/** Grava os servidores tirados deste Orquestrador, sem mexer nos dos outros; guarda só os `LIMITE_DOS_SERVIDORES_TIRADOS` de anúncio mais recente. */
+export function salvarServidoresTirados(orquestradorId: string, tirados: ServidoresTirados): void {
+  try {
+    const todos = interpretarServidoresTirados(localStorage.getItem(CHAVE_DOS_SERVIDORES_TIRADOS));
+    const recentes = Object.entries(tirados)
+      .sort((a, b) => a[1] - b[1])
+      .slice(-LIMITE_DOS_SERVIDORES_TIRADOS);
+    if (recentes.length === 0) {
+      todos.delete(orquestradorId);
+    } else {
+      todos.set(orquestradorId, Object.fromEntries(recentes));
+    }
+    localStorage.setItem(CHAVE_DOS_SERVIDORES_TIRADOS, JSON.stringify(Object.fromEntries(todos)));
+  } catch {
+    // Sem armazenamento: os servidores tirados só voltam no próximo acesso.
   }
 }
 

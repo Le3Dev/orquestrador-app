@@ -118,20 +118,27 @@ export function enderecoCurto(endereco: string): string {
 export const JANELA_DA_ABERTURA_AUTOMATICA_MS = 2 * 60_000;
 
 /**
- * Se a prévia deve abrir sozinha para o servidor anunciado: só quando o
- * anúncio é recente (reler o histórico ao abrir a tela não reabre prévias que
- * o usuário fechou) e não é a própria tela.
+ * Se o evento (`em`, ISO) é recente: acabou de acontecer, e não é histórico
+ * relido ao abrir a tela. A tela só age sozinha (abrir ou fechar prévias) em
+ * eventos assim.
+ */
+export function eventoAoVivo(em: string, agora: number): boolean {
+  const idade = agora - Date.parse(em);
+  return idade >= -JANELA_DA_ABERTURA_AUTOMATICA_MS && idade <= JANELA_DA_ABERTURA_AUTOMATICA_MS;
+}
+
+/**
+ * Se a prévia deve abrir sozinha para o servidor que o agente citou na
+ * resposta (`EstadoDaConversa.ultimoEnderecoDaResposta`): só quando a citação
+ * é recente (reler o histórico ao abrir a tela não reabre prévias que o
+ * usuário fechou) e não é a própria tela.
  */
 export function abrirPreviaSozinha(
   detectado: { url: string; em: string } | null,
   agora: number,
   origemDaTela: string,
 ): boolean {
-  if (detectado === null) {
-    return false;
-  }
-  const idade = agora - Date.parse(detectado.em);
-  if (!(idade >= -JANELA_DA_ABERTURA_AUTOMATICA_MS && idade <= JANELA_DA_ABERTURA_AUTOMATICA_MS)) {
+  if (detectado === null || !eventoAoVivo(detectado.em, agora)) {
     return false;
   }
   return enderecosParaPrevia([detectado.url], origemDaTela).length === 1;

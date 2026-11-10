@@ -867,6 +867,55 @@ describe("ServicoDeOrquestracao", () => {
       expect(publicados.at(-1)).toMatchObject({ tipo: "turno_concluido", resposta: "feito", perguntas: [] });
     });
 
+    it("o bloco previa-do-app sai da resposta e vira previasParaFechar só no evento final", async () => {
+      const orquestrador = await criar();
+      motor.resultado = resultadoComResposta(
+        [
+          "A API na porta 3000 respondeu 200.",
+          "```previa-do-app",
+          '{"fechar":["http://127.0.0.1:5173/","javascript:alert(1)"]}',
+          "```",
+        ].join("\n"),
+      );
+
+      await executar(orquestrador);
+
+      expect(publicados.at(-1)).toMatchObject({
+        tipo: "turno_concluido",
+        resposta: "A API na porta 3000 respondeu 200.",
+        previasParaFechar: ["http://localhost:5173"],
+      });
+      expect(orquestrador.ultimoTurno?.resposta).toBe("A API na porta 3000 respondeu 200.");
+      expect(JSON.stringify(repositorio.buscarPorId(orquestrador.id)?.paraDados())).not.toContain("previasParaFechar");
+    });
+
+    it("sem o bloco, ou com ele inválido, o evento final não traz previasParaFechar e o turno não quebra", async () => {
+      const orquestrador = await criar();
+      motor.resultado = resultadoComResposta("feito\n```previa-do-app\n{quebrado\n```");
+
+      await executar(orquestrador);
+
+      const concluido = publicados.at(-1);
+      expect(concluido).toMatchObject({ tipo: "turno_concluido", resposta: "feito" });
+      expect(concluido).not.toHaveProperty("previasParaFechar");
+    });
+
+    it("as prévias abertas do pedido vão ao motor, na mensagem e vindas da fila", async () => {
+      const orquestrador = await criar();
+
+      const { conclusao } = await servico.enviarMensagem(orquestrador.id, "oi", [], "execucao", [], ["http://localhost:5173"]);
+      motor.terminar();
+      await conclusao;
+      expect(motor.pedidos.at(-1)?.previasAbertas).toEqual(["http://localhost:5173"]);
+
+      const { pedidoId } = await servico.enfileirarPedido(orquestrador.id, "depois", "execucao", [], ["http://localhost:4173"]);
+      expect(orquestrador.fila[0]?.paraDados().previasAbertas).toEqual(["http://localhost:4173"]);
+      const { conclusao: daFila } = await servico.enviarDaFila(orquestrador.id, pedidoId);
+      motor.terminar();
+      await daFila;
+      expect(motor.pedidos.at(-1)?.previasAbertas).toEqual(["http://localhost:4173"]);
+    });
+
     it("sem o marcador, o turno de execução conclui sem plano pendente", async () => {
       const orquestrador = await criar();
       motor.resultado = resultadoComResposta("feito");

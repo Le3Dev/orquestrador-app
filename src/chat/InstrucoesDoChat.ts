@@ -10,6 +10,7 @@ import {
   TAMANHO_MAXIMO_DO_PROMPT,
 } from "../orquestracao/SubagentesProntos";
 import { linhasDaRegraDasPerguntas, MARCA_DA_PERGUNTA } from "../perguntas/PerguntaDoApp";
+import { linhasDaRegraDaPrevia, linhasDasPreviasAbertas, MARCA_DA_PREVIA } from "../previas/PreviaDoApp";
 import { AcaoDoApp, abrirOrquestrador, criarSubagente, editarSubagente, MODELOS_DO_SUBAGENTE_NO_CHAT } from "./AcaoDoApp";
 import type { OrquestradorExistente, ProjetoDoChat } from "./ProjetosDoChat";
 import type { SubagenteDoChat } from "./SubagentesDoChat";
@@ -99,6 +100,8 @@ export interface ContextoDoApp {
   pastaDeArtefatos: string;
   /** Se o usuário ligou a publicação de artefatos online no claude.ai (ferramenta `Artifact`). */
   permitirArtefatosOnline?: boolean;
+  /** Os endereços das prévias ao vivo abertas no canvas agora; vazio ou ausente: nenhuma linha no bloco. */
+  previasAbertas?: readonly string[];
 }
 
 /** Branches em que o chat pode commitar, pela política do time. */
@@ -166,6 +169,7 @@ export function instrucoesDoChat(): string {
     `8. ${REGRA_DAS_MUDANCAS_GRANDES}`,
     `9. Artefatos: quando ${QUANDO_CRIAR_ARTEFATO}, grave UM arquivo autocontido (.html ou .md) na pasta de artefatos que o bloco <${MARCA_DO_CONTEXTO}> indica, seguindo as regras dele. Gravar artefatos não precisa da autorização e não conta como alterar projetos.`,
     `10. Quando precisar que o usuário escolha entre opções claras, siga a regra de perguntas do bloco <${MARCA_DO_CONTEXTO}>: inclua o bloco \`\`\`${MARCA_DA_PERGUNTA}, que vira botões clicáveis na tela, e espere a resposta.`,
+    `11. Prévia ao vivo: o app abre uma prévia quando a sua resposta cita um endereço local completo. Siga a regra de prévia do bloco <${MARCA_DO_CONTEXTO}>: cite o endereço só quando o usuário deva ver a página, nunca para verificação técnica (use curl e diga só a porta), e feche as prévias desnecessárias com o bloco \`\`\`${MARCA_DA_PREVIA}.`,
   ].join("\n");
 }
 
@@ -328,6 +332,9 @@ export function mensagemParaOChat(
     "",
     ...linhasDaRegraDasPerguntas(),
     ...linhasDosDocumentos(documentos),
+    "",
+    ...linhasDaRegraDaPrevia(),
+    ...linhasDasPreviasAbertas(contexto.previasAbertas ?? [], [MARCA_DO_CONTEXTO]),
     `</${MARCA_DO_CONTEXTO}>`,
     "",
     pergunta,

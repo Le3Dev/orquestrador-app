@@ -321,6 +321,12 @@ describe("textoParaMostrar", () => {
     ).toBe("A\nB\nC");
   });
 
+  it("esconde o bloco de prévias a fechar, inclusive pela metade durante a resposta", () => {
+    expect(textoParaMostrar("Feito.\n\n```previa-do-app\n{\"fechar\":[", true)).toBe("Feito.");
+    expect(textoParaMostrar("Feito.\n```previa-do-app\n{}\n```\nFim", false)).toBe("Feito.\nFim");
+    expect(textoParaMostrar("Texto\n```previa", true)).toBe("Texto");
+  });
+
   it("não mexe em outros blocos de código", () => {
     const texto = "```ts\nconst a = 1;\n```";
     expect(textoParaMostrar(texto, false)).toBe(texto);

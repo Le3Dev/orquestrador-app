@@ -46,6 +46,7 @@ import { RepositorioDeOrquestradores } from "../orquestracao/RepositorioDeOrques
 import { RepositorioDePreferencias } from "../orquestracao/RepositorioDePreferencias";
 import { EsforcoHerdadoDosPapeis, ServicoDeOrquestracao } from "../orquestracao/ServicoDeOrquestracao";
 import { UsoDeTokens } from "../orquestracao/UsoDeTokens";
+import { esquemaDasPreviasAbertas } from "../previas/PreviaDoApp";
 import { enviarAnexo, esquemaDoAnexoRecebido } from "./anexosHttp";
 import { criarRota, responderErroGenerico, STATUS_DA_ORQUESTRACAO } from "./respostasHttp";
 
@@ -235,6 +236,7 @@ const esquemaDeMensagem = z.object({
     .default([]),
   modo: z.enum(MODOS_DO_TURNO, { error: "Modo do pedido inválido." }).default("execucao"),
   itensLigados: esquemaDosItensLigados,
+  previasAbertas: esquemaDasPreviasAbertas,
 });
 
 /** Pedido para a fila: só texto, modo e os itens ligados (imagens não entram na fila). */
@@ -254,6 +256,7 @@ const esquemaDoPedidoNaFila = z.object({
     .optional(),
   // Congelados no pedido: ele sai mais tarde com o contexto ligado na hora de enfileirar.
   itensLigados: esquemaDosItensLigados,
+  previasAbertas: esquemaDasPreviasAbertas,
 });
 
 const esquemaDeAprovacaoDoPlano = z.object({
@@ -626,7 +629,7 @@ export function criarOrquestradoresRoutes({
   rotas.post(
     "/orquestradores/:id/mensagens",
     rota(async (requisicao, resposta) => {
-      const { texto, imagens, modo, itensLigados } = esquemaDeMensagem.parse(requisicao.body);
+      const { texto, imagens, modo, itensLigados, previasAbertas } = esquemaDeMensagem.parse(requisicao.body);
       const { turnoId } = await servico.enviarMensagem(
         requisicao.params.id,
         texto,
@@ -637,6 +640,7 @@ export function criarOrquestradoresRoutes({
         })),
         modo,
         itensLigados,
+        previasAbertas,
       );
       resposta.status(202).json({ turnoId });
     }),
@@ -649,8 +653,14 @@ export function criarOrquestradoresRoutes({
   rotas.post(
     "/orquestradores/:id/fila",
     rota(async (requisicao, resposta) => {
-      const { texto, modo, itensLigados } = esquemaDoPedidoNaFila.parse(requisicao.body ?? {});
-      const { pedidoId } = await servico.enfileirarPedido(requisicao.params.id, texto, modo, itensLigados);
+      const { texto, modo, itensLigados, previasAbertas } = esquemaDoPedidoNaFila.parse(requisicao.body ?? {});
+      const { pedidoId } = await servico.enfileirarPedido(
+        requisicao.params.id,
+        texto,
+        modo,
+        itensLigados,
+        previasAbertas,
+      );
       resposta.status(201).json({ pedidoId });
     }),
   );
