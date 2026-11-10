@@ -27,6 +27,7 @@ import { Dica } from "../Dica";
 import { IconeAbrirFora, IconeNavegador, IconeRecarregar } from "../Icones";
 import { BotoesDeNavegacao } from "./BotoesDeNavegacao";
 import { ControlesDoNo } from "./ControlesDoNo";
+import { JanelaEmTelaCheia } from "./JanelaEmTelaCheia";
 import { MenuDaPrevia } from "./MenuDaPrevia";
 import { VistaNativaDaPrevia } from "./VistaNativaDaPrevia";
 
@@ -476,8 +477,12 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
   const [origemAtual, setOrigemAtual] = useState<string | null>(null);
   // Se a vista nativa tem para onde voltar e avançar (só ela: o iframe é de outra origem e não mostra o histórico).
   const [historico, setHistorico] = useState<HistoricoDaVista>(SEM_HISTORICO);
+  // Tela cheia: o corpo do modal, onde a vista nativa se encaixa (ela não é recriada ao ampliar).
+  const [ampliada, setAmpliada] = useState(false);
+  const [corpoDaTelaCheia, setCorpoDaTelaCheia] = useState<HTMLDivElement | null>(null);
   const recarregar = useCallback(() => setVersao((atual) => atual + 1), []);
   const fechar = useCallback(() => acoes.fecharPrevia(previaId), [acoes, previaId]);
+  const fecharAmpliada = useCallback(() => setAmpliada(false), []);
   // Endereço externo: vista nativa no app desktop (login salvo), "abrir em nova aba" no navegador.
   const apiNativa = apiDaPrevia();
   const modo = modoDaPrevia(url, apiNativa !== null);
@@ -501,13 +506,63 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
     [acoes, previaId, url, recarregar],
   );
 
-  // A prévia não tem tela cheia: o que existe hoje é minimizar e fechar.
+  // Sem endereço, fora do ar ou "abrir em nova aba" não há site para mostrar em tela cheia.
   const controlesDaJanela = {
     objeto: "a prévia",
     aoMinimizar: () => acoes.minimizarOuRestaurarPrevia(previaId),
     minimizada,
     aoFechar: () => acoes.fecharPrevia(previaId),
+    aoAmpliar: () => setAmpliada(true),
+    ampliarDesabilitado: semEndereco || servidor.fora || modo === "nova-aba",
   };
+
+  // O host real da página (só na vista nativa): na tela cheia também, para a troca de site não passar batida.
+  const seloDoHost =
+    hostAtual !== null ? (
+      <span
+        className={`host-atual-da-previa ${outroDominio ? "host-atual-da-previa-mudou" : ""}`}
+        role="note"
+        title={
+          outroDominio
+            ? `A página agora está em ${hostAtual}, outro site em relação ao endereço aberto (${url}). Confira antes de digitar senhas.`
+            : `Página aberta agora: ${hostAtual}`
+        }
+        aria-label={outroDominio ? `Atenção: a página mudou para outro site, ${hostAtual}` : `Página aberta agora: ${hostAtual}`}
+      >
+        {outroDominio && <span aria-hidden="true">⚠ </span>}
+        {hostAtual}
+      </span>
+    ) : null;
+  const navegacaoDaVista =
+    modo === "vista-nativa" && apiNativa !== null ? (
+      <BotoesDeNavegacao
+        podeVoltar={historico.podeVoltar}
+        podeAvancar={historico.podeAvancar}
+        aoVoltar={() => void apiNativa.voltar(previaId)}
+        aoAvancar={() => void apiNativa.avancar(previaId)}
+      />
+    ) : null;
+  const avisoForaDoAr = (
+    // Com prazo, o anel conta os segundos; mantida aberta, só o aviso e o fechar à mão.
+    <div className="mensagem-da-previa mensagem-fora-do-ar">
+      {segundos !== null && <AnelDaContagem segundos={segundos} />}
+      {segundos !== null ? (
+        <p>Nada respondendo em {url}. A prévia fecha sozinha se o servidor não subir.</p>
+      ) : (
+        <p>Nada respondendo em {url}.</p>
+      )}
+      {segundos !== null ? (
+        <button type="button" className="btn btn-outline btn-sm nodrag" onClick={servidor.manterAberta}>
+          manter aberta
+        </button>
+      ) : (
+        <button type="button" className="btn btn-outline btn-sm nodrag" onClick={fechar}>
+          fechar
+        </button>
+      )}
+    </div>
+  );
+  const avisoDeTelaCheia = <p className="mensagem-da-previa">Aberta em tela cheia.</p>;
 
   return (
     <div className={`janela-previa ${minimizada ? "janela-previa-minimizada" : ""}`}>
@@ -515,21 +570,7 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
         <ControlesDoNo lado="inicio" {...controlesDaJanela} />
         <IconeNavegador className="shrink-0 text-info" />
         <CampoDoEndereco url={url} focarAoAbrir={focarAoAbrir} aoNavegar={navegar} />
-        {hostAtual !== null && (
-          <span
-            className={`host-atual-da-previa ${outroDominio ? "host-atual-da-previa-mudou" : ""}`}
-            role="note"
-            title={
-              outroDominio
-                ? `A página agora está em ${hostAtual}, outro site em relação ao endereço aberto (${url}). Confira antes de digitar senhas.`
-                : `Página aberta agora: ${hostAtual}`
-            }
-            aria-label={outroDominio ? `Atenção: a página mudou para outro site, ${hostAtual}` : `Página aberta agora: ${hostAtual}`}
-          >
-            {outroDominio && <span aria-hidden="true">⚠ </span>}
-            {hostAtual}
-          </span>
-        )}
+        {seloDoHost}
         {/* Minimizada, o anel fica escondido no corpo: a contagem vem para a barra. */}
         {minimizada && segundos !== null && (
           <span
@@ -541,14 +582,7 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
             {segundos}
           </span>
         )}
-        {modo === "vista-nativa" && apiNativa !== null && (
-          <BotoesDeNavegacao
-            podeVoltar={historico.podeVoltar}
-            podeAvancar={historico.podeAvancar}
-            aoVoltar={() => void apiNativa.voltar(previaId)}
-            aoAvancar={() => void apiNativa.avancar(previaId)}
-          />
-        )}
+        {navegacaoDaVista}
         <button
           type="button"
           className="botao-icone nodrag"
@@ -598,36 +632,26 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
           <p className="mensagem-da-previa">
             Digite acima o endereço do servidor de desenvolvimento (por exemplo, localhost:5173) e pressione Enter.
           </p>
-        ) : servidor.fora ? (
-          // Com prazo, o anel conta os segundos; mantida aberta, só o aviso e o fechar à mão.
-          <div className="mensagem-da-previa mensagem-fora-do-ar">
-            {segundos !== null && <AnelDaContagem segundos={segundos} />}
-            {segundos !== null ? (
-              <p>Nada respondendo em {url}. A prévia fecha sozinha se o servidor não subir.</p>
-            ) : (
-              <p>Nada respondendo em {url}.</p>
-            )}
-            {segundos !== null ? (
-              <button type="button" className="btn btn-outline btn-sm nodrag" onClick={servidor.manterAberta}>
-                manter aberta
-              </button>
-            ) : (
-              <button type="button" className="btn btn-outline btn-sm nodrag" onClick={fechar}>
-                fechar
-              </button>
-            )}
-          </div>
         ) : modo === "vista-nativa" && apiNativa !== null ? (
           // Trocar o endereço ou recarregar recria a vista (key): ela é destruída e aberta de novo.
-          <VistaNativaDaPrevia
-            key={`${url}#${versao}`}
-            previaId={previaId}
-            url={url}
-            api={apiNativa}
-            suspensa={minimizada || menuAberto}
-            aoMudarOrigem={setOrigemAtual}
-            aoMudarHistorico={setHistorico}
-          />
+          // Em tela cheia ela segue o corpo do modal, sem ser recriada (a mesma vista, só noutro lugar).
+          <>
+            <VistaNativaDaPrevia
+              key={`${url}#${versao}`}
+              previaId={previaId}
+              url={url}
+              api={apiNativa}
+              suspensa={(minimizada && !ampliada) || menuAberto}
+              corpoAmpliado={ampliada ? corpoDaTelaCheia : null}
+              aoMudarOrigem={setOrigemAtual}
+              aoMudarHistorico={setHistorico}
+            />
+            {ampliada && avisoDeTelaCheia}
+          </>
+        ) : ampliada ? (
+          avisoDeTelaCheia
+        ) : servidor.fora ? (
+          avisoForaDoAr
         ) : modo === "nova-aba" ? (
           <div className="mensagem-da-previa mensagem-fora-do-ar">
             <p>Sites com login (Google Sheets, Docs, Notion) não abrem dentro de outra página no navegador.</p>
@@ -644,6 +668,23 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
           <QuadroAtivavel>{(estilo) => <QuadroDoSite url={url} versao={versao} estilo={estilo} />}</QuadroAtivavel>
         )}
       </div>
+      {ampliada && (
+        <JanelaEmTelaCheia
+          titulo={url}
+          icone={<IconeNavegador className="shrink-0 text-info" />}
+          selo={seloDoHost}
+          navegacao={navegacaoDaVista}
+          aoFechar={fecharAmpliada}
+          corpoRef={setCorpoDaTelaCheia}
+        >
+          {/* A vista nativa entra aqui por conta própria; o iframe, que não sobrevive a uma troca de lugar, recarrega. */}
+          {modo === "vista-nativa" ? null : servidor.fora ? (
+            avisoForaDoAr
+          ) : (
+            <QuadroDoSite url={url} versao={versao} estilo={undefined} />
+          )}
+        </JanelaEmTelaCheia>
+      )}
     </div>
   );
 });

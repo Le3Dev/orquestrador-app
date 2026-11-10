@@ -3,9 +3,6 @@ import {
   type CSSProperties,
   type KeyboardEvent as EventoDeTecladoDoReact,
   memo,
-  type MouseEvent as EventoDeMouseDoReact,
-  type ReactNode,
-  type SyntheticEvent,
   useCallback,
   useEffect,
   useId,
@@ -13,7 +10,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 
 import {
   apiDosArtefatos,
@@ -34,6 +30,7 @@ import { TAG_DO_SCRIPT_DE_NAVEGACAO, useNavegacaoDoQuadro } from "../../shared/n
 import { TextoFormatado } from "../TextoFormatado";
 import { BotoesDeNavegacao } from "./BotoesDeNavegacao";
 import { ControlesDoNo } from "./ControlesDoNo";
+import { JanelaEmTelaCheia } from "./JanelaEmTelaCheia";
 import { QuadroAtivavel } from "./NoPrevia";
 
 export const CONFIRMACAO_PARA_APAGAR_O_ARTEFATO = "Apagar este artefato? Isso não pode ser desfeito.";
@@ -121,11 +118,6 @@ function formatarTamanho(bytes: number): string {
     return `${quilo.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} kB`;
   }
   return `${(quilo / 1024).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB`;
-}
-
-/** Eventos do modal não sobem até o nó: o React Flow não arrasta nem seleciona por baixo. */
-function naoPropagar(evento: SyntheticEvent): void {
-  evento.stopPropagation();
 }
 
 // ---------------- Ícones ----------------
@@ -446,94 +438,6 @@ function SeletorDeVersao({
   );
 }
 
-// ---------------- Tela cheia ----------------
-
-/**
- * O artefato em tela cheia: um modal no `document.body`, fora do viewport do
- * React Flow (não escala com o zoom). Esc, o ✕ e um clique fora fecham.
- */
-function ArtefatoAmpliado({
-  artefato,
-  numero,
-  aoFechar,
-  navegacao,
-  children,
-}: {
-  artefato: ResumoDoArtefato;
-  numero: number;
-  aoFechar: () => void;
-  /** Os botões de voltar e avançar da página, quando ela os tem. */
-  navegacao: ReactNode;
-  /** O corpo: a página, o documento ou o estado da versão (carregando, erro…). */
-  children: ReactNode;
-}) {
-  const caixa = useRef<HTMLDivElement>(null);
-  const idDoTitulo = useId();
-
-  useEffect(() => {
-    caixa.current?.focus({ preventScroll: true });
-  }, []);
-
-  // Esc de qualquer lugar da janela (menos de dentro da página, que é outro documento).
-  useEffect(() => {
-    const aoTeclar = (evento: KeyboardEvent) => {
-      if (evento.key === "Escape") {
-        evento.preventDefault();
-        evento.stopPropagation();
-        aoFechar();
-      }
-    };
-    window.addEventListener("keydown", aoTeclar, true);
-    return () => window.removeEventListener("keydown", aoTeclar, true);
-  }, [aoFechar]);
-
-  const aoPressionarOFundo = (evento: EventoDeMouseDoReact<HTMLDivElement>) => {
-    evento.stopPropagation();
-    if (evento.target === evento.currentTarget) {
-      aoFechar();
-    }
-  };
-
-  return createPortal(
-    <div
-      data-testid="fundo-do-artefato-ampliado"
-      className="nokey fundo-que-esmaece fixed inset-0 z-50 flex items-stretch justify-center bg-screen-bg/70 p-6"
-      onMouseDown={aoPressionarOFundo}
-      onClick={naoPropagar}
-      onDoubleClick={naoPropagar}
-      onPointerDown={naoPropagar}
-      onContextMenu={naoPropagar}
-      onWheel={naoPropagar}
-      onKeyDown={naoPropagar}
-      onKeyUp={naoPropagar}
-    >
-      <div
-        ref={caixa}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={idDoTitulo}
-        tabIndex={-1}
-        className="painel-flutuante surgir artefato-ampliado outline-none"
-      >
-        <div className="barra-do-artefato-ampliado">
-          <ControlesDoNo lado="inicio" objeto="a tela cheia" aoFechar={aoFechar} dicaDoFechar="Fechar a tela cheia (Esc)" />
-          <IconeDoFormato formato={artefato.formato} />
-          <h2 id={idDoTitulo} className="titulo-do-artefato">
-            {artefato.titulo || "Sem título"}
-          </h2>
-          <span className="chip">v{numero}</span>
-          <span className="flex-1" />
-          {navegacao}
-          <span className="text-support">Esc fecha</span>
-          <ControlesDoNo lado="fim" objeto="a tela cheia" aoFechar={aoFechar} dicaDoFechar="Fechar a tela cheia (Esc)" />
-        </div>
-        <div className="corpo-do-artefato">{children}</div>
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
 // ---------------- Janela ----------------
 
 /** As alças de redimensionar. Memorizadas: o arraste não as re-renderiza a cada quadro. */
@@ -780,9 +684,15 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
       )}
 
       {ampliado && (
-        <ArtefatoAmpliado artefato={artefato} numero={escolhida} aoFechar={fecharAmpliado} navegacao={navegacao}>
+        <JanelaEmTelaCheia
+          titulo={artefato.titulo || "Sem título"}
+          icone={<IconeDoFormato formato={artefato.formato} />}
+          selo={<span className="chip">v{escolhida}</span>}
+          navegacao={navegacao}
+          aoFechar={fecharAmpliado}
+        >
           {corpo(false)}
-        </ArtefatoAmpliado>
+        </JanelaEmTelaCheia>
       )}
     </div>
   );

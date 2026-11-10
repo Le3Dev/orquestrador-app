@@ -1512,15 +1512,18 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   overflow-wrap: anywhere;
 }
 
-/* Tela cheia (modal no document.body, fora do zoom do canvas). */
-.artefato-ampliado {
+/* Tela cheia do artefato e da prévia (JanelaEmTelaCheia: modal no document.body,
+ * fora do zoom do canvas). Cantos retos: com `overflow: hidden` e o raio do
+ * painel, o canto da página (um botão, uma faixa) saía cortado em curva. */
+.janela-em-tela-cheia {
   display: flex;
   flex-direction: column;
   width: 100%;
   max-width: 1400px;
   overflow: hidden;
+  border-radius: 0;
 }
-.barra-do-artefato-ampliado {
+.barra-da-tela-cheia {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1528,6 +1531,14 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   padding: 8px 10px 8px 14px;
   border-bottom: 1px solid var(--border);
 }
+.corpo-da-tela-cheia {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.corpo-da-tela-cheia > .vista-nativa-da-previa { flex: 1; }
 
 /* ---------------- Prévia ao vivo (navegador no canvas) ----------------
  * A moldura da nota, no azul de informação, com o site num iframe. O fundo

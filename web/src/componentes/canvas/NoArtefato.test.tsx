@@ -519,6 +519,28 @@ describe("NoArtefato", () => {
     expect(await within(container).findByTitle("Conteúdo do artefato: Relatório de vendas")).toBeInTheDocument();
   });
 
+  it("o clique no fundo também fecha a tela cheia, que começa abaixo da barra de título do app", async () => {
+    vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("<p>x</p>");
+    const barra = document.createElement("header");
+    barra.className = "barra-de-titulo";
+    barra.getBoundingClientRect = () => ({ bottom: 36 }) as DOMRect;
+    document.body.append(barra);
+    const { tela } = preparar(artefato("a1"));
+    render(tela(<NoArtefato {...propsDoNo("a1")} />));
+    await iframe();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ampliar o artefato" }));
+    const fundo = screen.getByTestId("fundo-da-tela-cheia");
+    expect(fundo).toHaveStyle({ top: "36px" });
+
+    // Clicar dentro da caixa não fecha; no fundo, sim.
+    fireEvent.mouseDown(screen.getByRole("dialog", { name: "Relatório de vendas" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.mouseDown(fundo);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    barra.remove();
+  });
+
   it("enquanto o resumo não chega, avisa; se a lista falhar, mostra o motivo", () => {
     const loja = criarLojaDosArtefatos();
     const acoes: AcoesDosArtefatos = { renomear: vi.fn(), apagar: vi.fn(), fechar: vi.fn() };
