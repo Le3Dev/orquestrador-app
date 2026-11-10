@@ -145,7 +145,7 @@ interface Props {
  * Com a ferramenta Selecionar (ou a barra fechada), a camada não pega nenhum
  * clique: o canvas funciona como sempre. Com outra ferramenta, ela pega o
  * ponteiro do canvas inteiro (o arraste desenha em vez de mover a tela); a
- * roda e a pinça seguem para o canvas. Esc volta para Selecionar; Ctrl/Cmd+Z
+ * roda e a pinça seguem para o canvas. Esc volta para Selecionar e, de novo, fecha a barra; Ctrl/Cmd+Z
  * desfaz o último passo (traço, texto ou apagada). Cada mudança vai para o
  * layout salvo (`salvarDesenho`).
  */
@@ -365,6 +365,10 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
           gesto.current = null;
           setRascunho(null);
           setFerramentaEscolhida("selecionar");
+        } else {
+          // Já em Selecionar, o Esc fecha a barra (o desenho continua no canvas).
+          evento.preventDefault();
+          fechar();
         }
         return;
       }
@@ -376,7 +380,7 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
     };
     window.addEventListener("keydown", aoApertarTecla);
     return () => window.removeEventListener("keydown", aoApertarTecla);
-  }, [aberta, ferramentaEscolhida, desfazer]);
+  }, [aberta, ferramentaEscolhida, desfazer, fechar]);
 
   // A roda e a pinça sobre a camada seguem para o canvas (zoom e pan), como fora dela; o
   // preventDefault segura o zoom da página no Ctrl+roda.
@@ -451,7 +455,7 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
         )}
       </div>
       {aberta && (
-        <Panel position="top-center" className="painel-da-barra-de-desenho">
+        <Panel position="bottom-left" className="painel-da-barra-de-desenho">
           <BarraDeDesenho
             ferramenta={ferramenta}
             cor={cor}

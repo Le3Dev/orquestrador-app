@@ -35,7 +35,7 @@ import {
   useState,
 } from "react";
 
-import { IconeDesenhar, IconeGrade, IconeMinimapa, IconeOrquestrador } from "../componentes/Icones";
+import { IconeMinimapa, IconeOrquestrador } from "../componentes/Icones";
 import { ChatRapido, TIPO_DA_RESPOSTA_DO_CHAT } from "../componentes/chat/ChatRapido";
 import { ArestaDoBixinho } from "../componentes/canvas/ArestaDoBixinho";
 import { BarraDoGrupo } from "../componentes/canvas/BarraDoGrupo";
@@ -49,23 +49,21 @@ import { NoRascunho } from "../componentes/canvas/NoRascunho";
 import { NoShell } from "../componentes/canvas/NoShell";
 import { NoTerminal } from "../componentes/canvas/NoTerminal";
 import { BarraDeTituloDoApp } from "../componentes/canvas/BarraDeTituloDoApp";
+import { type AbaDasConfiguracoes, ConfiguracoesDoApp } from "../componentes/canvas/ConfiguracoesDoApp";
+import {
+  IlhaDaDireita,
+  IlhaDeFerramentas,
+  IlhaDoNome,
+  NotificacoesDoCanvas,
+} from "../componentes/canvas/IlhasDoCanvas";
 import { type ControleDaPaleta, PaletaDeComandos } from "../componentes/canvas/PaletaDeComandos";
 import { rodandoNoDesktop } from "../shared/ponteDoDesktop";
-import {
-  AvisoDeConexao,
-  AvisoDeMemoria,
-  BarraDoCanvas,
-  Doca,
-  ErroDoCanvas,
-  type PainelDaBarra,
-  StatusDoCanvas,
-} from "../componentes/canvas/PaineisDoCanvas";
-import { PainelDeInstrucoesGerais } from "../componentes/canvas/PainelDeInstrucoesGerais";
+import { AvisoDeConexao, ErroDoCanvas, StatusDoCanvas } from "../componentes/canvas/PaineisDoCanvas";
 import { DialogoDeNovoModelo, PainelDeModelos } from "../componentes/canvas/PainelDeModelos";
 import { PainelDeSubagentes } from "../componentes/canvas/PainelDeSubagentes";
 import { api, ErroDaApi, mensagemDeErro } from "../shared/api/cliente";
 import type { ResumoDoArtefato } from "../shared/api/artefatos";
-import type { ConteudoDoModeloDeCanvas, ResumoDoOrquestrador } from "../shared/api/tipos";
+import type { ConteudoDoModeloDeCanvas, DadosDoSubagentePronto, ResumoDoOrquestrador } from "../shared/api/tipos";
 import {
   type AcoesDosArtefatos,
   artefatoAberto,
@@ -264,13 +262,9 @@ const FOLGA_AO_ABRIR = 0.15;
 const FOLGA_DO_ENQUADRAMENTO = 0.12;
 /** Os limites de zoom do canvas: do <ReactFlow> e do zoom por cima das caixas. */
 const LIMITES_DO_ZOOM = { minZoom: 0.1, maxZoom: 2 };
-/** O nome do botão de enquadrar dos controles: o mesmo do botão padrão do React Flow. */
-const ROTULO_DO_ENQUADRAR = "Fit View";
 const VIEWPORT_PADRAO: Viewport = { x: 0, y: 0, zoom: 1 };
-/** Nome e dica do "Organizar", o 4º botão dos controles do canto inferior esquerdo. */
-const DICA_DO_ORGANIZAR = "Organizar: terminais lado a lado; notas e artefatos à direita";
-/** Dica do "Desenhar", o 5º botão dos controles: abre e fecha a barra de desenho. */
-const DICA_DO_DESENHAR = "Desenhar: caneta, marca-texto, formas e texto por cima do canvas";
+/** Os painéis que abrem logo abaixo da ilha do canto superior esquerdo; só um fica aberto por vez. */
+type PainelDaBarra = "subagentes" | "modelos";
 /** Nome e dica do botão do minimapa, no canto inferior direito. */
 const DICA_DO_MINIMAPA = { mostrar: "Mostrar minimapa", esconder: "Esconder minimapa" } as const;
 /**
@@ -380,15 +374,6 @@ function useMaisRecente<Valor>(a: Valor | null, b: Valor | null): Valor | null {
 
 /** Atraso para o React Flow medir um nó recém-criado antes de enquadrá-lo. */
 const ESPERA_PARA_MEDIR_MS = 80;
-
-/** O ícone do enquadrar: o mesmo do botão padrão dos controles do React Flow. */
-function IconeDoEnquadrar() {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 30">
-      <path d="M3.692 4.63c0-.53.4-.938.939-.938h5.215V0H4.708C2.13 0 0 2.054 0 4.63v5.216h3.692V4.631zM27.354 0h-5.2v3.692h5.17c.53 0 .984.4.984.939v5.215H32V4.631A4.624 4.624 0 0027.354 0zm.954 24.83c0 .532-.4.94-.939.94h-5.215v3.768h5.215c2.577 0 4.631-2.13 4.631-4.707v-5.139h-3.692v5.139zm-23.677.94c-.531 0-.939-.4-.939-.94v-5.138H0v5.139c0 2.577 2.13 4.707 4.708 4.707h5.138V25.77H4.631z" />
-    </svg>
-  );
-}
 
 /**
  * O quadro do canvas sem janelas. Mora dentro do <ReactFlow>, na camada 4 (a
@@ -1342,13 +1327,14 @@ function Canvas() {
     return () => window.removeEventListener("keydown", aoApertarTecla);
   }, [novoOrquestrador, novaNota]);
 
-  // Os Ajustes do app desktop, pela paleta; a falha aparece abaixo da barra do canvas.
+  // Os Ajustes do app desktop, pela paleta e pelas Configurações; a falha aparece abaixo da ilha do canto superior esquerdo.
+  const ajustes = useAjustesDoAplicativo();
   const {
     disponivel: ajustesDisponiveis,
     abrir: abrirAjustes,
     erro: erroDosAjustes,
     descartarErro: descartarErroDosAjustes,
-  } = useAjustesDoAplicativo();
+  } = ajustes;
 
   // Paleta de comandos (Ctrl+K): o estado é dela; o canvas só entrega o que
   // listar (lido na hora de abrir) e executa o escolhido. Tudo estável, para a
@@ -1547,11 +1533,25 @@ function Canvas() {
   const fecharAvisoDoLimite = useCallback(() => setAvisoDoLimite(false), []);
 
   const [painelAberto, setPainelAberto] = useState<PainelDaBarra | null>(null);
-  const alternarPainel = useCallback(
-    (painel: PainelDaBarra) => setPainelAberto((aberto) => (aberto === painel ? null : painel)),
-    [],
-  );
+  const abrirPainel = useCallback((painel: PainelDaBarra) => setPainelAberto(painel), []);
   const fecharPainel = useCallback(() => setPainelAberto(null), []);
+  // As Configurações (painel de 540 px à direita): a aba pedida e um número por pedido, que remonta o painel na aba certa.
+  // O topo das Configurações: abaixo das notificações empilhadas (null: sem pilha, o padrão do painel).
+  const [topoDasConfiguracoes, setTopoDasConfiguracoes] = useState<number | null>(null);
+  const [configuracoes, setConfiguracoes] = useState<{ aba: AbaDasConfiguracoes | undefined; pedido: number } | null>(
+    null,
+  );
+  const abrirConfiguracoes = useCallback((aba?: AbaDasConfiguracoes) => {
+    setConfiguracoes((atual) => ({ aba, pedido: (atual?.pedido ?? 0) + 1 }));
+  }, []);
+  /** A engrenagem e o anel de memória: abrem as Configurações; um segundo clique na mesma aba as fecha. */
+  const alternarConfiguracoes = useCallback((aba?: AbaDasConfiguracoes) => {
+    setConfiguracoes((atual) =>
+      atual !== null && atual.aba === aba ? null : { aba, pedido: (atual?.pedido ?? 0) + 1 },
+    );
+  }, []);
+  const fecharConfiguracoes = useCallback(() => setConfiguracoes(null), []);
+  const verSistema = useCallback(() => abrirConfiguracoes("sistema"), [abrirConfiguracoes]);
   // A barra de desenho (o "Desenhar" dos controles); o desenho em si é da `CamadaDeDesenho`.
   const [desenhoAberto, setDesenhoAberto] = useState(false);
   const alternarDesenho = useCallback(() => setDesenhoAberto((aberto) => !aberto), []);
@@ -1700,7 +1700,7 @@ function Canvas() {
       resumoDoGrupo.ids.length < 2 ? null : (
         <Panel
           position="top-center"
-          className={`painel-da-barra-do-grupo ${desenhoAberto ? "abaixo-da-barra-de-desenho" : ""}`}
+          className="painel-da-barra-do-grupo"
         >
           <BarraDoGrupo
             resumo={resumoDoGrupo}
@@ -1721,55 +1721,73 @@ function Canvas() {
       minimizarGrupo,
       fecharGrupo,
       salvarComoModelo,
-      desenhoAberto,
     ],
   );
 
-  // A contagem do botão Subagentes. Com o servidor fora, fica sem número até
-  // ele voltar (o efeito roda de novo na reconexão).
-  const [quantidadeDeSubagentes, setQuantidadeDeSubagentes] = useState<number | null>(null);
-  const lerQuantidadeDeSubagentes = useCallback(() => {
+  // Os subagentes prontos do submenu "Subagentes ›". Com o servidor fora, a lista
+  // fica vazia de dados até ele voltar (o efeito roda de novo na reconexão).
+  const [subagentesProntos, setSubagentesProntos] = useState<DadosDoSubagentePronto[] | null>(null);
+  const lerSubagentesProntos = useCallback(() => {
     api
       .lerPreferencias()
-      .then((preferencias) => setQuantidadeDeSubagentes(preferencias.subagentesProntos.length))
+      .then((preferencias) => setSubagentesProntos(preferencias.subagentesProntos))
       .catch(() => undefined);
   }, []);
   useEffect(() => {
     if (servidor.conectado) {
-      lerQuantidadeDeSubagentes();
+      lerSubagentesProntos();
     } else {
-      setQuantidadeDeSubagentes(null);
+      setSubagentesProntos(null);
     }
-  }, [servidor.conectado, lerQuantidadeDeSubagentes]);
+  }, [servidor.conectado, lerSubagentesProntos]);
   // A biblioteca também muda pelo cartão do chat, fora dos painéis.
-  useEffect(() => aoMudarSubagentesProntos(lerQuantidadeDeSubagentes), [lerQuantidadeDeSubagentes]);
-  // Salvar qualquer um dos painéis: os indicadores dos terminais e a contagem podem ter mudado.
+  useEffect(() => aoMudarSubagentesProntos(lerSubagentesProntos), [lerSubagentesProntos]);
+  // Salvar qualquer um dos painéis: os indicadores dos terminais e a lista podem ter mudado.
   const aoSalvarPainel = useCallback(() => {
     void recarregar();
-    lerQuantidadeDeSubagentes();
-  }, [recarregar, lerQuantidadeDeSubagentes]);
+    lerSubagentesProntos();
+  }, [recarregar, lerSubagentesProntos]);
+
+  /** Escolher no submenu Orquestradores: abre se preciso, leva a câmera, seleciona, traz para frente e foca o pedido. */
+  const focarOrquestrador = useCallback(
+    (orquestradorId: string) => {
+      abrirTerminal(orquestradorId);
+      // O nó pode acabar de nascer: espera o React Flow medi-lo, como o `focar`.
+      setTimeout(() => {
+        const campo = document.querySelector<HTMLTextAreaElement>(
+          `.react-flow__node[data-id="${CSS.escape(orquestradorId)}"] .prompt-do-terminal textarea`,
+        );
+        campo?.focus({ preventScroll: true });
+      }, ESPERA_PARA_MEDIR_MS + 60);
+    },
+    [abrirTerminal],
+  );
+  const abrirPainelDeSubagentes = useCallback(() => abrirPainel("subagentes"), [abrirPainel]);
+  const abrirPainelDeModelos = useCallback(() => abrirPainel("modelos"), [abrirPainel]);
+  const abrirConfiguracoesPadrao = useCallback(() => abrirConfiguracoes(), [abrirConfiguracoes]);
 
   // Os painéis não dependem da posição dos nós: memorizados, não re-renderizam
-  // a cada quadro do arraste. Os do topo ficam num só painel em linha
-  // (esquerda · centro · direita), para se acomodarem juntos em qualquer
-  // largura, sem um bloco absoluto cobrir o outro.
+  // a cada quadro do arraste. A coluna da esquerda é a ilha do nome com o `+ Novo`
+  // e, logo abaixo, os painéis que abriam da barra antiga (subagentes e modelos) e os avisos.
   const colunaDaEsquerda = useMemo(
     () => (
-      <div className="coluna-do-topo coluna-do-topo-esquerda">
-        <BarraDoCanvas
+      <div className="coluna-da-ilha-esquerda">
+        <IlhaDoNome
           aoCriar={novoOrquestrador}
           aoCriarNota={novaNota}
-          aoBuscar={abrirPaleta}
           aoCriarPrevia={novaPreviaVazia}
           aoCriarShell={pedirPastaDoShell}
-          aoAlternarPainel={alternarPainel}
-          painelAberto={painelAberto}
-          quantidadeDeSubagentes={quantidadeDeSubagentes}
+          aoAbrirModelos={abrirPainelDeModelos}
+          aoBuscar={abrirPaleta}
+          aoAbrirConfiguracoes={abrirConfiguracoesPadrao}
+          orquestradores={orquestradores}
+          erroDosOrquestradores={erro}
+          noCanvas={noCanvas}
+          aoEscolherOrquestrador={focarOrquestrador}
+          subagentes={subagentesProntos}
+          aoAbrirSubagentes={abrirPainelDeSubagentes}
         />
         {painelAberto === "subagentes" && <PainelDeSubagentes aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />}
-        {painelAberto === "instrucoes" && (
-          <PainelDeInstrucoesGerais aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />
-        )}
         {painelAberto === "modelos" && (
           <PainelDeModelos key={versaoDosModelos} aoFechar={fecharPainel} aoRecriar={recriarModelo} />
         )}
@@ -1781,23 +1799,24 @@ function Canvas() {
         {erroDosShells !== null && (
           <ErroDoCanvas erro={erroDosShells.mensagem} aoFechar={descartarErroDosShells} nivel={erroDosShells.nivel} />
         )}
-        {/* Como o aviso do canvas vazio, some enquanto um painel da barra está aberto; escondida
-            (e não desmontada), volta recolhida ou expandida como estava. */}
-        <div hidden={painelAberto !== null}>
-          <Doca orquestradores={orquestradores} noCanvas={noCanvas} erro={erro} aoAbrir={abrirTerminal} />
-        </div>
       </div>
     ),
     [
       novoOrquestrador,
       novaNota,
-      abrirPaleta,
       novaPreviaVazia,
       pedirPastaDoShell,
+      abrirPainelDeModelos,
+      abrirPaleta,
+      abrirConfiguracoesPadrao,
+      orquestradores,
+      erro,
+      noCanvas,
+      focarOrquestrador,
+      subagentesProntos,
+      abrirPainelDeSubagentes,
       painelAberto,
-      alternarPainel,
       fecharPainel,
-      quantidadeDeSubagentes,
       aoSalvarPainel,
       versaoDosModelos,
       recriarModelo,
@@ -1809,46 +1828,20 @@ function Canvas() {
       descartarErroDosAjustes,
       erroDosShells,
       descartarErroDosShells,
-      orquestradores,
-      noCanvas,
-      erro,
-      abrirTerminal,
     ],
   );
-  // Os controles do canto inferior esquerdo: zoom, enquadrar, em 4º o
-  // "Organizar" e em 5º o "Desenhar". Memorizados: com um filho novo a cada render, o <Controls>
-  // re-renderizaria a cada quadro do arraste.
-  const controles = useMemo(
+  // A ilha vertical do canto inferior esquerdo (zoom, ajustar, organizar e desenhar): as
+  // mesmas funções dos antigos controles do React Flow. Memorizada: com uma prop nova a
+  // cada render, ela re-renderizaria a cada quadro do arraste.
+  const ilhaDeFerramentas = useMemo(
     () => (
-      // O enquadrar padrão do React Flow encolheria tudo até ficar ilegível:
-      // o botão (mesmo ícone e nome) usa o `enquadrarTudo` com piso de 60%.
-      <Controls position="bottom-left" showInteractive={false} showFitView={false}>
-        <ControlButton
-          className="react-flow__controls-fitview"
-          onClick={enquadrarTudo}
-          title={ROTULO_DO_ENQUADRAR}
-          aria-label={ROTULO_DO_ENQUADRAR}
-        >
-          <IconeDoEnquadrar />
-        </ControlButton>
-        <ControlButton
-          onClick={organizar}
-          disabled={!podeOrganizar}
-          title={DICA_DO_ORGANIZAR}
-          aria-label={DICA_DO_ORGANIZAR}
-        >
-          <IconeGrade />
-        </ControlButton>
-        <ControlButton
-          className="botao-de-desenhar"
-          onClick={alternarDesenho}
-          aria-pressed={desenhoAberto}
-          title={DICA_DO_DESENHAR}
-          aria-label="Desenhar"
-        >
-          <IconeDesenhar />
-        </ControlButton>
-      </Controls>
+      <IlhaDeFerramentas
+        aoEnquadrar={enquadrarTudo}
+        aoOrganizar={organizar}
+        podeOrganizar={podeOrganizar}
+        aoAlternarDesenho={alternarDesenho}
+        desenhoAberto={desenhoAberto}
+      />
     ),
     [enquadrarTudo, organizar, podeOrganizar, alternarDesenho, desenhoAberto],
   );
@@ -1886,46 +1879,61 @@ function Canvas() {
       </>
     );
   }, [minimapaVisivel, classeDoMinimapa, alternarMinimapa]);
-  const colunaDoCentro = useMemo(
+  // A ilha do canto superior direito e as notificações abaixo dela.
+  const ilhaDaDireita = useMemo(
     () => (
-      <div className="coluna-do-topo coluna-do-topo-centro">
-        <AvisoDeConexao servidor={servidor} />
-      </div>
-    ),
-    [servidor],
-  );
-  // No desktop o status está na barra de título; aqui fica só o alerta de memória.
-  const colunaDaDireita = useMemo(
-    () => (
-      <div className="coluna-do-topo coluna-do-topo-direita">
-        {desktop ? (
-          <AvisoDeMemoria memoria={servidor.memoria} />
-        ) : (
-          <StatusDoCanvas
-            trabalhando={trabalhando}
-            bixinhosAtivos={bixinhosAtivos}
-            cota={cota}
-            memoria={servidor.memoria}
-          />
-        )}
-      </div>
-    ),
-    [desktop, trabalhando, bixinhosAtivos, cota, servidor.memoria],
-  );
-  const barraDeTitulo = useMemo(
-    () =>
-      desktop ? (
-        <BarraDeTituloDoApp
-          trabalhando={trabalhando}
-          bixinhosAtivos={bixinhosAtivos}
-          cota={cota}
-          memoria={servidor.memoria}
+      <>
+        <div className="aviso-de-conexao-das-ilhas">
+          <AvisoDeConexao servidor={servidor} />
+        </div>
+        <IlhaDaDireita
           aoBuscar={abrirPaleta}
-          pedidosEmAndamento={pedidosEmAndamento}
+          trabalhando={trabalhando}
+          memoria={servidor.memoria}
+          aoAlternarConfiguracoes={alternarConfiguracoes}
+          configuracoesAbertas={configuracoes !== null}
+          abaAberta={configuracoes?.aba ?? null}
         />
-      ) : null,
-    [desktop, trabalhando, bixinhosAtivos, cota, servidor.memoria, abrirPaleta, pedidosEmAndamento],
+        <NotificacoesDoCanvas
+          memoria={servidor.memoria}
+          cota={cota}
+          aoVerSistema={verSistema}
+          pedidosEmAndamento={pedidosEmAndamento}
+          aoMedirTopoLivre={setTopoDasConfiguracoes}
+        />
+      </>
+    ),
+    [
+      servidor,
+      abrirPaleta,
+      trabalhando,
+      alternarConfiguracoes,
+      configuracoes,
+      cota,
+      verSistema,
+      pedidosEmAndamento,
+    ],
   );
+  // Todas as ilhas moram na área do canvas, dentro do <ReactFlow> mas fora do viewport.
+  const ilhas = useMemo(
+    () => (
+      <div className="ilhas-do-canvas">
+        {colunaDaEsquerda}
+        {ilhaDaDireita}
+        {ilhaDeFerramentas}
+      </div>
+    ),
+    [colunaDaEsquerda, ilhaDaDireita, ilhaDeFerramentas],
+  );
+  // O conteúdo da aba Sistema das Configurações: situação, cotas e RAM.
+  const sistemaDasConfiguracoes = useMemo(
+    () => (
+      <StatusDoCanvas trabalhando={trabalhando} bixinhosAtivos={bixinhosAtivos} cota={cota} memoria={servidor.memoria} />
+    ),
+    [trabalhando, bixinhosAtivos, cota, servidor.memoria],
+  );
+  // A barra de título do app desktop só tem o que é da janela; o resto vive nas ilhas.
+  const barraDeTitulo = useMemo(() => (desktop ? <BarraDeTituloDoApp /> : null), [desktop]);
   // Fora do viewport: o chat não se move com o canvas e só re-renderiza com novidades dele.
   // Fixo (preferência da tela), vira uma coluna ao lado da área do canvas, do lado escolhido;
   // senão, fica no painel do centro de baixo, dentro do React Flow.
@@ -1993,11 +2001,15 @@ function Canvas() {
   const painelDoChat = useMemo(
     () =>
       chatFixo ? null : (
-        <Panel position="bottom-center" className="painel-do-chat">
+        // Com o desenho ativo, a barra de chat sai da frente da ilha de desenho (CSS).
+        <Panel
+          position="bottom-center"
+          className={`painel-do-chat ${desenhoAberto ? "painel-do-chat-com-desenho" : ""}`}
+        >
           {chatRapido}
         </Panel>
       ),
-    [chatFixo, chatRapido],
+    [chatFixo, chatRapido, desenhoAberto],
   );
 
   return (
@@ -2012,7 +2024,7 @@ function Canvas() {
               {/* Linha: o chat fixo (quando a preferência pede) empurra a área do canvas para o outro lado. */}
               <div className="flex min-h-0 w-full flex-1">
                 {chatFixo && ladoDoChatFixo === "esquerda" && chatRapido}
-                <div ref={areaDoCanvas} className="relative min-h-0 min-w-0 flex-1">
+                <div ref={areaDoCanvas} className="area-do-canvas relative min-h-0 min-w-0 flex-1">
                   <ReactFlow<NoDoCanvas, ArestaDoCanvas>
                     nodes={nos}
                     edges={arestas}
@@ -2056,16 +2068,25 @@ function Canvas() {
                     />
                     {/* Abaixo dos painéis (inclusive o chat); some enquanto um painel da barra está aberto. */}
                     {quantidadeDeJanelas === 0 && painelAberto === null && <CanvasVazio aoCriar={novoOrquestrador} />}
-                    {controles}
                     {minimapa}
-                    <Panel position="top-left" className="paineis-do-topo">
-                      {colunaDaEsquerda}
-                      {colunaDoCentro}
-                      {colunaDaDireita}
-                    </Panel>
+                    {ilhas}
                     {barraDoGrupo}
                     {painelDoChat}
                   </ReactFlow>
+                  {/* As Configurações se posicionam sozinhas à direita da área do canvas, abaixo das notificações. */}
+                  <div className="camada-das-configuracoes">
+                    <ConfiguracoesDoApp
+                      key={configuracoes?.pedido ?? 0}
+                      ajustes={ajustes}
+                      aberto={configuracoes !== null}
+                      aoFechar={fecharConfiguracoes}
+                      abaInicial={configuracoes?.aba}
+                      sistema={sistemaDasConfiguracoes}
+                      pedidosEmAndamento={pedidosEmAndamento}
+                      aoSalvarInstrucoes={aoSalvarPainel}
+                      topo={topoDasConfiguracoes ?? undefined}
+                    />
+                  </div>
                   {/* Fora do <ReactFlow>: não escala com o zoom e cobre só a área do canvas. */}
                   <PaletaDeComandos
                     controle={controleDaPaleta}
