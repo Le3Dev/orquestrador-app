@@ -247,122 +247,157 @@ describe("IlhaDaDireita", () => {
       vi.useRealTimers();
     });
 
-    /** O preenchimento de uma das duas barras; nulo se ela não existe (só a trilha). */
-    const preenchimento = (indicador: HTMLElement, qual: "sessao" | "semana") =>
-      indicador.querySelector<HTMLElement>(`[data-barra="${qual}"]`);
-    /** A largura desenhada (em % da trilha) de uma das barras; nulo se só há a trilha. */
-    const larguraDa = (indicador: HTMLElement, qual: "sessao" | "semana") => preenchimento(indicador, qual)?.style.width ?? null;
+    /** O arco desenhado do anel de uso; nulo se há só a trilha. */
+    const arco = (indicador: HTMLElement) => indicador.querySelector<SVGCircleElement>(".anel-de-uso .arco-do-anel");
+    /** O comprimento do traço do arco, em fração (0 a 1) da circunferência. */
+    const fracaoDoArco = (indicador: HTMLElement) => {
+      const [traco = "0", total = "1"] = (arco(indicador)?.getAttribute("stroke-dasharray") ?? "0 1").split(" ");
+      return Number(traco) / Number(total);
+    };
+    const numeroDoAnel = (indicador: HTMLElement) => indicador.querySelector(".valor-do-anel")?.textContent;
 
-    it("sem leitura (cota nula ou vazia): duas trilhas vazias com os rótulos 5h e 7d, e a frase diz isso", () => {
+    it("sem leitura (cota nula ou vazia): número \"–\", só a trilha, sem texto de alerta e a frase diz isso", () => {
       const { unmount } = render(<IlhaDaDireita {...propsSemCota} cota={null} />);
       const indicador = screen.getByTestId("indicador-de-uso");
       const frase = "Uso do Claude: sem leitura ainda. Abrir Configurações, Conta";
       expect(indicador).toHaveAttribute("aria-label", frase);
       expect(indicador).toHaveAttribute("title", frase);
-      expect(indicador).toHaveTextContent("5h7d");
       expect(indicador).toHaveClass("anel-da-ilha-normal");
-      expect(indicador.querySelectorAll(".trilha-de-uso")).toHaveLength(2);
-      expect(indicador.querySelector(".preenchimento-de-uso")).toBeNull();
+      expect(numeroDoAnel(indicador)).toBe("–");
+      expect(indicador.querySelector(".anel-de-uso .trilha-do-anel")).not.toBeNull();
+      expect(arco(indicador)).toBeNull();
+      expect(indicador).toHaveTextContent("–");
       unmount();
 
       montar({ cota: [] });
       expect(screen.getByTestId("indicador-de-uso")).toHaveAccessibleName(frase);
-      expect(screen.getByTestId("indicador-de-uso").querySelector(".preenchimento-de-uso")).toBeNull();
+      expect(numeroDoAnel(screen.getByTestId("indicador-de-uso"))).toBe("–");
+      expect(arco(screen.getByTestId("indicador-de-uso"))).toBeNull();
     });
 
-    it("desenha duas barras com rótulo: a de cima é a sessão (5h) e a de baixo, a semana (7d), com a largura da utilização", () => {
-      montar({
-        cota: [janela("7 dias", 0.18, { renovaEm: emMinutos(3 * 24 * 60) }), janela("5 horas", 0.42, { renovaEm: emMinutos(130) })],
-      });
+    it("o anel mostra a semana: arco com a utilização, número inteiro no meio e o rótulo com a renovação", () => {
+      montar({ cota: [janela("7 dias", 0.38, { renovaEm: emMinutos(6 * 24 * 60) })] });
 
       const indicador = screen.getByTestId("indicador-de-uso");
       expect(indicador).toHaveClass("anel-da-ilha-normal");
-      const linhas = [...indicador.querySelectorAll(".linha-de-uso")];
-      expect(linhas.map((linha) => linha.querySelector(".rotulo-de-uso")?.textContent)).toEqual(["5h", "7d"]);
-      expect(linhas[0]?.querySelector("[data-barra]")).toHaveAttribute("data-barra", "sessao");
-      expect(linhas[1]?.querySelector("[data-barra]")).toHaveAttribute("data-barra", "semana");
-      expect(larguraDa(indicador, "sessao")).toBe("42%");
-      expect(larguraDa(indicador, "semana")).toBe("18%");
+      expect(numeroDoAnel(indicador)).toBe("38");
+      expect(fracaoDoArco(indicador)).toBeCloseTo(0.38, 5);
       // De um dia em diante a renovação sai como data e hora (o formato do resto do app).
-      const frase = /^Uso do Claude: sessão de 5 h 42%, renova em 2 h 10 min; semana 18%, renova em \d{2}\/\d{2}, \d{2}:\d{2}\. Abrir Configurações, Conta$/;
+      const frase = /^Uso do Claude: semana 38%, renova em \d{2}\/\d{2}, \d{2}:\d{2}\. Abrir Configurações, Conta$/;
       expect(indicador.getAttribute("aria-label")).toMatch(frase);
       expect(indicador.getAttribute("title")).toMatch(frase);
+      // Nada de barras nem de rótulo 5h ou 7d.
+      expect(indicador.querySelector(".trilha-de-uso, .linha-de-uso")).toBeNull();
+      expect(indicador).not.toHaveTextContent(/5h|7d/);
     });
 
-    it("a largura acompanha a utilização, limitada a 100%", () => {
-      montar({ cota: [janela("5 horas", 1.3), janela("7 dias", 0.07)] });
-
-      const indicador = screen.getByTestId("indicador-de-uso");
-      expect(larguraDa(indicador, "sessao")).toBe("100%");
-      expect(larguraDa(indicador, "semana")).toBe("7%");
-    });
-
-    it("com várias semanais (uma por modelo), a barra de baixo usa a de maior utilização", () => {
-      montar({ cota: [janela("5 horas", 0.1), janela("7 dias", 0.3), janela("7 dias (Opus)", 0.55)] });
-
-      const indicador = screen.getByTestId("indicador-de-uso");
-      expect(larguraDa(indicador, "semana")).toBe("55%");
-      expect(indicador).toHaveAccessibleName(
-        "Uso do Claude: sessão de 5 h 10%; semana (Opus) 55%; semana 30%. Abrir Configurações, Conta",
-      );
-    });
-
-    it("falta uma das janelas: a barra dela fica só com a trilha", () => {
-      const { unmount } = render(<IlhaDaDireita {...propsSemCota} cota={[janela("5 horas", 0.42)]} />);
-      let indicador = screen.getByTestId("indicador-de-uso");
-      expect(indicador.querySelectorAll(".trilha-de-uso")).toHaveLength(2);
-      expect(larguraDa(indicador, "sessao")).toBe("42%");
-      expect(preenchimento(indicador, "semana")).toBeNull();
-      expect(indicador).toHaveAccessibleName("Uso do Claude: sessão de 5 h 42%. Abrir Configurações, Conta");
+    it("o número é o percentual arredondado, de 0 a 100", () => {
+      const { unmount } = render(<IlhaDaDireita {...propsSemCota} cota={[janela("7 dias", 0.376)]} />);
+      expect(numeroDoAnel(screen.getByTestId("indicador-de-uso"))).toBe("38");
       unmount();
 
-      montar({ cota: [janela("7 dias", 0.3)] });
-      indicador = screen.getByTestId("indicador-de-uso");
-      expect(indicador.querySelectorAll(".trilha-de-uso")).toHaveLength(2);
-      expect(preenchimento(indicador, "sessao")).toBeNull();
-      expect(larguraDa(indicador, "semana")).toBe("30%");
-      expect(indicador).toHaveAccessibleName("Uso do Claude: semana 30%. Abrir Configurações, Conta");
+      const cheio = render(<IlhaDaDireita {...propsSemCota} cota={[janela("7 dias", 1.3)]} />);
+      expect(numeroDoAnel(screen.getByTestId("indicador-de-uso"))).toBe("100");
+      expect(fracaoDoArco(screen.getByTestId("indicador-de-uso"))).toBeCloseTo(1, 5);
+      cheio.unmount();
+
+      montar({ cota: [janela("7 dias", 0)] });
+      expect(numeroDoAnel(screen.getByTestId("indicador-de-uso"))).toBe("0");
+      expect(arco(screen.getByTestId("indicador-de-uso"))).toBeNull();
     });
 
-    it("a partir de 80% a barra fica âmbar e o botão ganha o texto Cota alta", () => {
-      montar({ cota: [janela("5 horas", 0.85)] });
+    it("com semana geral e por modelo, o anel usa a geral e o rótulo traz as outras, separadas por ponto e vírgula", () => {
+      montar({
+        cota: [janela("7 dias (Opus)", 0.55), janela("7 dias", 0.3, { renovaEm: emMinutos(3 * 60) })],
+      });
+
+      const indicador = screen.getByTestId("indicador-de-uso");
+      expect(numeroDoAnel(indicador)).toBe("30");
+      expect(indicador).toHaveAccessibleName("Uso do Claude: semana 30%, renova em 3 h; semana (Opus) 55%. Abrir Configurações, Conta");
+    });
+
+    it("sem a semana geral, o anel usa a semanal de maior utilização", () => {
+      montar({ cota: [janela("7 dias (Sonnet)", 0.2), janela("7 dias (Opus)", 0.55)] });
+
+      const indicador = screen.getByTestId("indicador-de-uso");
+      expect(numeroDoAnel(indicador)).toBe("55");
+      expect(indicador).toHaveAccessibleName("Uso do Claude: semana (Opus) 55%; semana (Sonnet) 20%. Abrir Configurações, Conta");
+    });
+
+    it("sem semanal, o anel usa a de maior utilização entre as que vierem", () => {
+      montar({ cota: [janela("30 dias", 0.1), janela("90 dias", 0.45)] });
+
+      const indicador = screen.getByTestId("indicador-de-uso");
+      expect(numeroDoAnel(indicador)).toBe("45");
+      expect(indicador).toHaveAccessibleName("Uso do Claude: 90 dias 45%; 30 dias 10%. Abrir Configurações, Conta");
+    });
+
+    it("a janela de 5 horas nunca tem desenho próprio: só entra no rótulo e no alerta", () => {
+      montar({ cota: [janela("5 horas", 0.42), janela("7 dias", 0.18)] });
+
+      const indicador = screen.getByTestId("indicador-de-uso");
+      expect(numeroDoAnel(indicador)).toBe("18");
+      expect(fracaoDoArco(indicador)).toBeCloseTo(0.18, 5);
+      expect(indicador).not.toHaveTextContent(/5h/);
+      expect(indicador).toHaveAccessibleName("Uso do Claude: semana 18%; sessão de 5 h 42%. Abrir Configurações, Conta");
+    });
+
+    it("só com a janela de 5 horas, o anel fica sem leitura, mas o rótulo e o alerta contam", () => {
+      montar({ cota: [janela("5 horas", 0.97)] });
+
+      const indicador = screen.getByTestId("indicador-de-uso");
+      expect(numeroDoAnel(indicador)).toBe("–");
+      expect(arco(indicador)).toBeNull();
+      expect(indicador).toHaveClass("anel-da-ilha-critica");
+      expect(indicador).toHaveTextContent("Cota no limite");
+      expect(indicador).toHaveAccessibleName("Uso do Claude: sessão de 5 h 97%. Cota no limite. Abrir Configurações, Conta");
+    });
+
+    it("abaixo de 80% o anel é normal e o botão não tem texto de alerta", () => {
+      montar({ cota: [janela("7 dias", 0.38)] });
+
+      const indicador = screen.getByTestId("indicador-de-uso");
+      expect(indicador.querySelector(".anel-de-uso")).toHaveClass("anel-de-uso-normal");
+      expect(indicador).not.toHaveTextContent(/Cota/);
+    });
+
+    it("a partir de 80% o anel fica âmbar e o botão ganha o texto Cota alta", () => {
+      montar({ cota: [janela("7 dias", 0.85)] });
 
       const indicador = screen.getByTestId("indicador-de-uso");
       expect(indicador).toHaveClass("anel-da-ilha-alta");
-      expect(preenchimento(indicador, "sessao")).toHaveClass("preenchimento-de-uso-alta");
+      expect(indicador.querySelector(".anel-de-uso")).toHaveClass("anel-de-uso-alta");
       expect(indicador).toHaveTextContent("Cota alta");
-      expect(indicador).toHaveAccessibleName("Uso do Claude: sessão de 5 h 85%. Cota alta. Abrir Configurações, Conta");
+      expect(indicador).toHaveAccessibleName("Uso do Claude: semana 85%. Cota alta. Abrir Configurações, Conta");
     });
 
-    it("a partir de 95% ou com a situação rejected, a barra fica vermelha e o botão diz Cota no limite", () => {
-      const { unmount } = render(<IlhaDaDireita {...propsSemCota} cota={[janela("5 horas", 0.97), janela("7 dias", 0.6)]} />);
+    it("a partir de 95% ou com a situação rejected, o anel fica vermelho e o botão diz Cota no limite", () => {
+      const { unmount } = render(<IlhaDaDireita {...propsSemCota} cota={[janela("7 dias", 0.97)]} />);
       let indicador = screen.getByTestId("indicador-de-uso");
       expect(indicador).toHaveClass("anel-da-ilha-critica");
       expect(indicador).toHaveTextContent("Cota no limite");
-      expect(preenchimento(indicador, "sessao")).toHaveClass("preenchimento-de-uso-critica");
-      expect(preenchimento(indicador, "semana")).toHaveClass("preenchimento-de-uso-normal");
+      expect(indicador.querySelector(".anel-de-uso")).toHaveClass("anel-de-uso-critica");
       unmount();
 
-      montar({ cota: [janela("5 horas", 0.4), janela("7 dias", 0.6, { situacao: "rejected" })] });
+      montar({ cota: [janela("7 dias", 0.6, { situacao: "rejected" })] });
       indicador = screen.getByTestId("indicador-de-uso");
       expect(indicador).toHaveClass("anel-da-ilha-critica");
       expect(indicador).toHaveTextContent("Cota no limite");
-      expect(preenchimento(indicador, "sessao")).toHaveClass("preenchimento-de-uso-normal");
-      expect(preenchimento(indicador, "semana")).toHaveClass("preenchimento-de-uso-critica");
+      expect(indicador.querySelector(".anel-de-uso")).toHaveClass("anel-de-uso-critica");
     });
 
-    it("cada barra tem a cor do próprio nível, e o botão fica no da pior janela", () => {
-      montar({ cota: [janela("5 horas", 0.2), janela("7 dias", 0.9)] });
+    it("o anel tem a cor da janela mostrada, e o botão e o texto seguem a pior janela", () => {
+      montar({ cota: [janela("7 dias", 0.2), janela("7 dias (Opus)", 0.9)] });
 
       const indicador = screen.getByTestId("indicador-de-uso");
-      expect(preenchimento(indicador, "sessao")).toHaveClass("preenchimento-de-uso-normal");
-      expect(preenchimento(indicador, "semana")).toHaveClass("preenchimento-de-uso-alta");
+      expect(numeroDoAnel(indicador)).toBe("20");
+      expect(indicador.querySelector(".anel-de-uso")).toHaveClass("anel-de-uso-normal");
       expect(indicador).toHaveClass("anel-da-ilha-alta");
       expect(indicador).toHaveTextContent("Cota alta");
     });
 
     it("o clique abre as Configurações na aba Conta", () => {
-      const { aoAlternarConfiguracoes } = montar({ cota: [janela("5 horas", 0.42)] });
+      const { aoAlternarConfiguracoes } = montar({ cota: [janela("7 dias", 0.42)] });
 
       fireEvent.click(screen.getByTestId("indicador-de-uso"));
 
