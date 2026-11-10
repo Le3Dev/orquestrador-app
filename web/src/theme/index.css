@@ -2282,7 +2282,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 
 .painel-do-chat {
   --folga-lateral-do-chat: 231px; /* minimapa (200) + margem (15) + respiro (16) */
-  width: min(680px, calc(100vw - 2 * var(--folga-lateral-do-chat)));
+  width: min(600px, calc(100vw - 2 * var(--folga-lateral-do-chat)));
 }
 
 /* Abaixo de 1100 px o minimapa some: a folga só precisa dos controles de zoom
@@ -2308,6 +2308,13 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   animation: subir .2s ease-out both;
 }
 .conversa-do-chat[hidden] { display: none; }
+/* Flutuante, a conversa tem a pele das ilhas do canvas: fundo, borda, raio 14 e a mesma sombra. */
+.conversa-do-chat.painel-flutuante {
+  border-radius: 14px;
+  border-color: var(--border-forte);
+  background: var(--surface);
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7);
+}
 @keyframes subir { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 .cabecalho-do-chat {
@@ -2556,78 +2563,81 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .botao-de-autorizar { background: var(--warning); color: var(--claude-escuro); }
 .botao-de-autorizar:not(:disabled):hover { background: color-mix(in srgb, var(--warning) 85%, var(--claude-claro)); }
 
-/* Selo "alterações autorizadas" ao lado do campo do chat; o ✕ revoga. */
+/* Indicador das alterações autorizadas, na barra do chat: só um escudo na cor do aviso (o
+ * texto vai no balão e no rótulo). O ✕ que revoga aparece como um selinho no canto, ao passar
+ * o mouse ou ao focar pelo teclado; nunca muda a largura da barra. */
 .selo-de-autorizacao {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
   flex-shrink: 0;
-  height: 22px;
-  padding: 0 2px 0 8px;
-  border-radius: 999px;
-  font-family: var(--fonte-mono);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: .04em;
-  text-transform: uppercase;
-  white-space: nowrap;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
   color: var(--warning);
   background: color-mix(in srgb, var(--warning) 13%, transparent);
   border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
   cursor: default;
 }
-.selo-de-autorizacao::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--warning); }
 .revogar-autorizacao {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  z-index: 1;
   display: grid;
   place-items: center;
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  font-size: 10px;
-  color: var(--warning);
+  font-size: 9px;
+  line-height: 1;
+  color: var(--claude-escuro);
+  background: var(--warning);
+  opacity: 0;
   cursor: pointer;
 }
-.revogar-autorizacao:not(:disabled):hover { background: color-mix(in srgb, var(--warning) 22%, transparent); color: var(--primary); }
+.selo-de-autorizacao:hover .revogar-autorizacao,
+.selo-de-autorizacao:focus-within .revogar-autorizacao { opacity: 1; }
+.revogar-autorizacao:not(:disabled):hover { background: color-mix(in srgb, var(--warning) 80%, var(--claude-claro)); }
 .revogar-autorizacao:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
 .revogar-autorizacao:disabled { opacity: .45; cursor: not-allowed; }
 
-.mostrar-conversa { align-self: center; gap: 6px; cursor: pointer; }
-.mostrar-conversa:hover { color: var(--primary); border-color: var(--border-forte); }
+/* "mostrar conversa (N)": uma pílula pequena na pele das ilhas, acima da barra. */
+.chat-rapido .mostrar-conversa {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border-forte);
+  background: var(--surface);
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7);
+  color: var(--secondary);
+  font: 500 12px/1 var(--fonte-texto);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.chat-rapido .mostrar-conversa:hover { background: var(--surface-3); color: var(--primary); }
+.chat-rapido .mostrar-conversa:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
 
-/* Borda laranja que gira devagar em volta do composer (a moldura é o gradiente;
- * o composer, por cima, deixa só 1px dele à mostra). Respondendo, gira mais
- * rápido e acende. */
+/* A moldura da barra: o contorno de 1 px da ilha (a mesma pele das ilhas do canvas). Respondendo, o
+ * contorno acende em laranja. Na coluna fixa, a moldura é a borda laranja que gira (chat-lateral.css). */
 .moldura-do-composer {
   position: relative;
   padding: 1px;
   border-radius: 14px;
-  background: conic-gradient(
-    from var(--angulo-da-borda, 0deg),
-    var(--border-forte) 0%,
-    color-mix(in srgb, var(--active) 45%, var(--border-forte)) 10%,
-    var(--border-forte) 22%,
-    var(--border-forte) 50%,
-    color-mix(in srgb, var(--active) 30%, var(--border-forte)) 62%,
-    var(--border-forte) 74%,
-    var(--border-forte) 100%
-  );
-  box-shadow: 0 18px 44px -18px rgba(0, 0, 0, .85);
-  animation: girar-a-borda 8s linear infinite;
+  background: var(--border-forte);
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7);
 }
 .chat-rapido-respondendo .moldura-do-composer {
-  background: conic-gradient(
-    from var(--angulo-da-borda, 0deg),
-    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 0%,
-    var(--active) 12%,
-    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 28%,
-    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 50%,
-    color-mix(in srgb, var(--active) 80%, var(--border-forte)) 62%,
-    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 78%,
-    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 100%
-  );
-  box-shadow: 0 18px 44px -18px rgba(0, 0, 0, .85), 0 0 28px -10px color-mix(in srgb, var(--active) 60%, transparent);
-  animation-duration: 2s;
+  background: color-mix(in srgb, var(--active) 70%, var(--border-forte));
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7), 0 0 24px -10px color-mix(in srgb, var(--active) 60%, transparent);
 }
+/* Foco no campo: o contorno da barra esquenta (o campo em si não tem outline). */
+.moldura-do-composer:has(.campo-do-chat:focus-visible) { background: color-mix(in srgb, var(--active) 55%, var(--border-forte)); }
 @keyframes girar-a-borda { to { --angulo-da-borda: 360deg; } }
 
 .composer-do-chat {
@@ -2635,75 +2645,66 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   display: flex;
   flex-direction: column;
   gap: 4px;
+  padding: 5px 5px 5px 7px;
   border-radius: 13px;
   background: var(--surface);
 }
 /* Sem `overflow: hidden` no composer: o menu do modelo sai por cima dele. */
 .composer-do-chat > .faixa-de-progresso { position: absolute; inset: 0 12px auto; }
-.composer-do-chat .miniaturas-do-prompt { padding: 10px 12px 0; }
+.composer-do-chat .miniaturas-do-prompt { padding: 4px 4px 0; }
+
+/* A linha da barra: + · campo · ✦ · microfone · indicadores · olho · modelo · enviar · fixar. Todo botão
+ * de ícone mede 36 px, com o ícone de traço fino, como os das ilhas. O campo cresce ao digitar. */
+.linha-do-composer { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.linha-do-composer .botao-icone {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-button);
+  background: transparent;
+  color: var(--secondary);
+}
+.linha-do-composer .botao-icone:not(:disabled):hover,
+.linha-do-composer .botao-icone[aria-pressed="true"] { background: var(--surface-3); color: var(--primary); }
+.linha-do-composer .botao-icone:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.linha-do-composer .botao-icone:disabled { background: transparent; color: var(--muted); opacity: 1; }
+.linha-do-composer .botao-icone.botao-ditado-gravando { color: var(--error); background: color-mix(in srgb, var(--error) 16%, transparent); }
+.espaco-do-composer { display: none; }
 
 .campo-do-chat {
+  flex: 1 1 0;
   width: 100%;
-  min-height: 44px;
+  min-width: 0;
+  min-height: 36px;
   max-height: 140px;
   resize: none;
-  padding: 12px 14px 4px;
+  padding: 8px 4px;
   border: 0;
   outline: none;
   background: transparent;
   color: var(--primary);
   font-family: var(--fonte-texto);
   font-size: 13.5px;
-  line-height: 1.55;
+  line-height: 20px;
 }
-.campo-do-chat::placeholder { color: var(--placeholder); }
-
-.linha-do-composer { display: flex; align-items: center; gap: 8px; padding: 4px 8px 8px; }
-.botao-de-anexar { width: 30px; height: 30px; font-size: 18px; line-height: 1; }
-
-/* Compacto (padrão): tudo numa linha só — "+" · campo · modelo · enviar. Ao
- * usar, expande: o campo sobe e os botões descem para a linha de baixo. */
-.campo-do-chat { transition: min-height .18s ease-out, padding .18s ease-out; }
-.composer-compacto {
-  flex-direction: row;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  cursor: text;
-}
-.composer-compacto .linha-do-composer { display: contents; }
-.composer-compacto .botao-de-anexar { order: -1; }
-.composer-compacto .linha-do-composer > .flex-1,
-.composer-compacto .linha-do-composer > .etiqueta { display: none; }
-.composer-compacto > .hint,
-.composer-compacto > .hint-error { order: 1; flex-basis: 100%; }
-.composer-compacto .campo-do-chat {
-  flex: 1 1 0;
-  min-width: 0;
-  min-height: 30px;
-  padding: 4px 4px;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.composer-compacto .campo-do-chat::placeholder { white-space: nowrap; text-overflow: ellipsis; }
-.composer-expandido .linha-do-composer { animation: subir .18s ease-out both; }
+.campo-do-chat::placeholder { color: var(--placeholder); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Seletor de modelo e esforço: o menu abre para cima. */
 .seletor-de-modelo { position: relative; }
+/* "Opus 5.5 Alto ⌄": o modelo em cinza, o esforço em destaque (o .modelo do protótipo). */
 .botao-do-seletor {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 8px;
+  gap: 4px;
+  height: 32px;
+  padding: 0 10px;
   border-radius: var(--radius-button);
-  font-size: 12px;
+  color: var(--secondary);
+  font-size: 12.5px;
   cursor: pointer;
   white-space: nowrap;
 }
-.botao-do-seletor:not(:disabled):hover, .botao-do-seletor[aria-expanded="true"] { background: var(--surface-3); }
+.botao-do-seletor b { color: var(--primary); font-weight: 600; }
+.botao-do-seletor:not(:disabled):hover, .botao-do-seletor[aria-expanded="true"] { background: var(--surface-3); color: var(--primary); }
 .botao-do-seletor:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
 .botao-do-seletor:disabled { opacity: .45; cursor: not-allowed; }
 
@@ -2773,9 +2774,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   .janela-terminal.janela-terminal-entrega { animation: none; outline: none; }
   /* A borda do chat fica parada (a cor de "respondendo" continua). */
   .moldura-do-composer { animation: none !important; }
-  /* O composer troca de compacto para expandido sem transição. */
-  .campo-do-chat { transition: none; }
-  .composer-expandido .linha-do-composer { animation: none; }
   /* O brilho da seleção acende e apaga na hora; a dica abre e fecha sem
    * crescer; o anel da contagem da prévia anda aos saltos, um por segundo.
    * As entradas (surgir-mola, esmaecer-fundo) já caem na regra geral acima.
@@ -2969,21 +2967,23 @@ html.modo-invisivel .barra-de-titulo * {
   pointer-events: none !important;
   -webkit-app-region: no-drag !important;
 }
-/* 👁 do composer: único botão do modo invisível (liga e desliga). */
-.botao-entrar-modo-invisivel { position: relative; width: 28px; height: 28px; font-size: 14px; opacity: .75; }
-.botao-entrar-modo-invisivel:hover, .botao-entrar-modo-invisivel:focus-visible { opacity: 1; }
-/* Ativo: é o indicador permanente de que a tela está sendo vista. */
-.botao-entrar-modo-invisivel[aria-pressed="true"] {
-  opacity: 1;
-  border: 1px solid var(--error);
-  background: color-mix(in srgb, var(--error) 22%, var(--surface-2));
+/* O olho do composer: único botão do modo invisível (liga e desliga). Traço fino; ligado (olho cortado),
+ * ganha fundo e contorno de destaque, o mesmo das ferramentas ligadas das ilhas. */
+.linha-do-composer .botao-entrar-modo-invisivel,
+.linha-do-composer .botao-de-escuta-manual { position: relative; width: 32px; height: 32px; }
+.linha-do-composer .botao-entrar-modo-invisivel[aria-pressed="true"],
+.linha-do-composer .botao-de-escuta-manual[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--active) 18%, transparent);
+  color: var(--active);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--active) 55%, transparent) inset;
 }
+/* Ativo: o pontinho que pulsa é o indicador permanente de que a tela está sendo vista. */
 .ponto-tela-vista {
   position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 7px;
-  height: 7px;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: var(--error);
   animation: pulso-tela-vista 1.4s ease-in-out infinite;

@@ -47,6 +47,9 @@
     var(--screen-bg);
 }
 
+/* A conversa gruda no campo (como no protótipo): o primeiro item empurra o resto para baixo e, com
+ * mensagens demais, a lista rola normalmente (justify-content: flex-end esconderia o começo dela). */
+.chat-lateral .mensagens-do-chat > :first-child { margin-top: auto; }
 .vazio-do-chat-lateral { margin: auto; max-width: 240px; text-align: center; line-height: 1.5; }
 
 /* Bolhas: a sua à direita, com o tom laranja do app; a do Claude à esquerda. */
@@ -70,12 +73,59 @@
 .chat-lateral .mensagens-do-chat > .cartao-de-pergunta,
 .chat-lateral .mensagens-do-chat > .cartao-de-autorizacao { align-self: stretch; }
 
-/* O campo embaixo, sempre expandido; o menu do modelo abre para cima, dentro da coluna. */
-.chat-lateral .moldura-do-composer { flex: none; margin-top: 10px; box-shadow: none; }
-/* O texto de ajuda do campo fica numa linha só; se a coluna estreitar, termina em reticências. */
-.chat-lateral .campo-do-chat::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.chat-lateral .linha-do-composer { flex-wrap: wrap; row-gap: 6px; }
-.chat-lateral .seletor-de-modelo { min-width: 0; }
+/* O campo embaixo, numa moldura (o .moldura-comp do protótipo): a borda laranja que gira devagar em
+ * volta do composer (a moldura é o gradiente; o composer, por cima, deixa só 1 px dele à mostra).
+ * Respondendo, gira mais rápido e acende. O menu do modelo abre para cima, dentro da coluna. */
+.chat-rapido.chat-lateral .moldura-do-composer {
+  flex: none;
+  margin-top: 10px;
+  box-shadow: none;
+  background: conic-gradient(
+    from var(--angulo-da-borda, 0deg),
+    var(--border-forte) 0%,
+    color-mix(in srgb, var(--active) 45%, var(--border-forte)) 10%,
+    var(--border-forte) 22%,
+    var(--border-forte) 50%,
+    color-mix(in srgb, var(--active) 30%, var(--border-forte)) 62%,
+    var(--border-forte) 74%,
+    var(--border-forte) 100%
+  );
+  animation: girar-a-borda 8s linear infinite;
+}
+.chat-rapido.chat-lateral.chat-rapido-respondendo .moldura-do-composer {
+  background: conic-gradient(
+    from var(--angulo-da-borda, 0deg),
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 0%,
+    var(--active) 12%,
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 28%,
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 50%,
+    color-mix(in srgb, var(--active) 80%, var(--border-forte)) 62%,
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 78%,
+    color-mix(in srgb, var(--active) 25%, var(--border-forte)) 100%
+  );
+  box-shadow: 0 0 28px -10px color-mix(in srgb, var(--active) 60%, transparent);
+  animation-duration: 2s;
+}
+/* Dentro da moldura: o campo em cima (largura toda) e, embaixo, a linha de ícones:
+ * + · ✦ · microfone · espaço · olho · modelo · enviar (o .comp do protótipo). */
+.chat-lateral .composer-do-chat { padding: 0; gap: 4px; }
+/* Foco no campo: um filete laranja por dentro da moldura. */
+.chat-lateral .composer-do-chat:has(.campo-do-chat:focus-visible) { box-shadow: 0 0 0 1px color-mix(in srgb, var(--active) 60%, transparent) inset; }
+.chat-lateral .linha-do-composer { flex-wrap: wrap; gap: 4px; padding: 0 8px 8px; }
+.chat-lateral .campo-do-chat { order: -1; flex: 1 0 100%; min-height: 44px; padding: 12px 14px 4px; line-height: 1.55; }
+/* O espaço empurra o olho, o modelo e o enviar para a direita; a margem negativa desconta os dois gaps dele. */
+.chat-lateral .espaco-do-composer { display: block; flex: 1 1 0; min-width: 0; margin: 0 -4px; }
+.chat-lateral .linha-do-composer .botao-icone { width: 30px; height: 30px; border-radius: 7px; }
+/* O microfone e o escudo, um pouco menores, para a linha caber na coluna de 360 px. */
+.chat-lateral .linha-do-composer .ditado .botao-icone { width: 28px; height: 28px; }
+.chat-lateral .selo-de-autorizacao { width: 28px; height: 28px; }
+.chat-lateral .linha-do-composer .botao-entrar-modo-invisivel,
+.chat-lateral .linha-do-composer .botao-de-escuta-manual { width: 32px; height: 32px; border-radius: 8px; }
+.chat-lateral .botao-do-seletor { height: 28px; gap: 5px; padding: 0 6px; font-size: 12px; }
+/* Se a linha de ícones quebrar (várias coisas ligadas ao mesmo tempo), modelo e enviar vão para a direita. */
+.chat-lateral .seletor-de-modelo { min-width: 0; margin-left: auto; }
+.chat-lateral .linha-do-composer > .btn { margin-left: auto; }
+.chat-lateral .composer-do-chat .miniaturas-do-prompt { padding: 10px 12px 0; }
 
 /* ---------------- Alça de largura ----------------
  * Na borda da coluna virada para o canvas (a direita da coluna da esquerda, a
@@ -133,48 +183,49 @@ body.redimensionando-chat-lateral iframe { pointer-events: none; }
 /* ---------------- Escuta do áudio (modo invisível) ----------------
  * Tudo fica dentro do .chat-rapido (a única área que recebe cliques no modo
  * invisível) e em tamanho compacto. O tom é o azul (--info), para não se
- * confundir com o vermelho do 👁 (tela vista). O ponto reaproveita o
- * `pulso-tela-vista` do 👁 e fica parado com movimento reduzido. */
+ * confundir com o vermelho do olho (tela vista). O ponto reaproveita o
+ * `pulso-tela-vista` do olho e fica parado com movimento reduzido. */
 
-/* Indicador ao lado do 👁: ponto, rótulo e o botão pausar/retomar. */
+/* Indicador ao lado do olho: o ponto e o botão pausar/retomar, numa pílula pequena. O rótulo
+ * ("escutando", "baixando o modelo 40%"…) continua no DOM, só para quem usa leitor de tela: a barra
+ * é estreita e o balão (title) e a faixa da escuta acima dela dizem o resto. */
 .indicador-da-escuta {
   --cor-da-escuta: var(--info);
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  flex-shrink: 1;
-  min-width: 0;
-  height: 22px;
-  padding: 0 2px 0 7px;
-  border-radius: 999px;
-  font-family: var(--fonte-mono);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: .04em;
-  text-transform: uppercase;
+  gap: 4px;
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 4px 0 9px;
+  border-radius: 8px;
   white-space: nowrap;
   color: var(--cor-da-escuta);
   background: color-mix(in srgb, var(--cor-da-escuta) 13%, transparent);
   border: 1px solid color-mix(in srgb, var(--cor-da-escuta) 45%, transparent);
   cursor: default;
 }
-/* Sem botão, o rótulo não encosta na borda. */
-.indicador-da-escuta:not(:has(.botao-da-escuta)) { padding-right: 8px; }
+/* Sem botão, o ponto fica no meio. */
+.indicador-da-escuta:not(:has(.botao-da-escuta)) { padding: 0 9px; }
 .indicador-da-escuta-pausada,
 .indicador-da-escuta-iniciando { --cor-da-escuta: var(--secondary); }
 .indicador-da-escuta-erro { --cor-da-escuta: var(--error); }
 .ponto-da-escuta { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--cor-da-escuta); }
 .indicador-da-escuta-escutando .ponto-da-escuta { animation: pulso-tela-vista 1.4s ease-in-out infinite; }
-.rotulo-da-escuta { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rotulo-da-escuta {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .botao-da-escuta {
   display: grid;
   place-items: center;
   flex: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  font-size: 8px;
-  letter-spacing: -.1em;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
   color: var(--cor-da-escuta);
   cursor: pointer;
 }

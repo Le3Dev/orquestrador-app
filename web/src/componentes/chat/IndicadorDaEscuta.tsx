@@ -5,6 +5,32 @@ type Props = Pick<EscutaNaTela, "situacao" | "progressoDoDownload" | "erro" | "p
 /** Situações em que não há escuta para indicar (fora do modo, recusada ou com o aviso na tela). */
 const SEM_INDICADOR: ReadonlySet<SituacaoDaEscuta> = new Set(["indisponivel", "desligada", "aguardando-aviso"]);
 
+/** Os ícones do botão do indicador: pausar (duas barras), retomar (triângulo) e tentar de novo (seta circular). */
+function IconeDoIndicador({ tipo }: { tipo: "pausar" | "retomar" | "repetir" }) {
+  return (
+    <svg
+      width={12}
+      height={12}
+      viewBox="0 0 24 24"
+      fill={tipo === "repetir" ? "none" : "currentColor"}
+      stroke="currentColor"
+      strokeWidth={tipo === "repetir" ? 2 : 0}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {tipo === "pausar" && (
+        <>
+          <rect x="6" y="5" width="4" height="14" rx="1" />
+          <rect x="14" y="5" width="4" height="14" rx="1" />
+        </>
+      )}
+      {tipo === "retomar" && <path d="M8 5.5v13a.8.8 0 0 0 1.2.7l10-6.5a.8.8 0 0 0 0-1.4l-10-6.5A.8.8 0 0 0 8 5.5Z" />}
+      {tipo === "repetir" && <path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v4.5h-4.5" />}
+    </svg>
+  );
+}
+
 /** O rótulo curto ao lado do ponto. */
 function rotuloDa(situacao: SituacaoDaEscuta, progresso: number | null): string {
   switch (situacao) {
@@ -42,9 +68,10 @@ function explicacaoDa(situacao: SituacaoDaEscuta, erro: string | null): string {
 }
 
 /**
- * Ao lado do 👁, com o modo invisível ligado: o ponto pulsa enquanto o áudio
- * do computador é escutado e fica parado na pausa. O botão alterna pausar e
- * retomar (aria-pressed = pausada); com erro, ele tenta de novo.
+ * Ao lado do olho, com o modo invisível ligado: uma pílula pequena em que o ponto
+ * pulsa enquanto o áudio do computador é escutado e fica parado na pausa. O botão
+ * alterna pausar e retomar (aria-pressed = pausada); com erro, ele tenta de novo.
+ * O rótulo ("escutando"…) fica só para leitor de tela: a barra do chat é estreita.
  */
 export function IndicadorDaEscuta({ situacao, progressoDoDownload, erro, pausar, retomar }: Props) {
   if (SEM_INDICADOR.has(situacao)) {
@@ -71,7 +98,7 @@ export function IndicadorDaEscuta({ situacao, progressoDoDownload, erro, pausar,
           title={pausada ? "Retomar a escuta" : "Pausar a escuta"}
           onClick={pausada ? retomar : pausar}
         >
-          <span aria-hidden="true">{pausada ? "▶" : "❚❚"}</span>
+          <IconeDoIndicador tipo={pausada ? "retomar" : "pausar"} />
         </button>
       )}
       {situacao === "erro" && (
@@ -82,7 +109,7 @@ export function IndicadorDaEscuta({ situacao, progressoDoDownload, erro, pausar,
           title="Tentar escutar de novo"
           onClick={retomar}
         >
-          <span aria-hidden="true">↻</span>
+          <IconeDoIndicador tipo="repetir" />
         </button>
       )}
     </span>
