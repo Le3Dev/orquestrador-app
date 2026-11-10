@@ -111,8 +111,19 @@ export interface RetanguloDaPrevia {
 export type EventoDaPrevia =
   /** Foto da página (data URI JPEG), mostrada enquanto a prévia está inativa. */
   | { tipo: "foto"; id: string; foto: string }
-  /** `origem`: só protocolo e host da página que está aberta agora (muda ao navegar), ou null (ainda sem página). */
-  | { tipo: "estado"; id: string; carregando: boolean; erro: string | null; origem: string | null }
+  /**
+   * `origem`: só protocolo e host da página que está aberta agora (muda ao navegar), ou null (ainda sem página).
+   * `podeVoltar` e `podeAvancar`: o histórico da vista tem para onde ir.
+   */
+  | {
+      tipo: "estado";
+      id: string;
+      carregando: boolean;
+      erro: string | null;
+      origem: string | null;
+      podeVoltar: boolean;
+      podeAvancar: boolean;
+    }
   /** O app escondeu a vista (janela minimizada, modo invisível, Shift+Esc na página). */
   | { tipo: "desativada"; id: string }
   /** "Sair das contas" terminou: a tela descarta as fotos (data URI) que guardou das páginas. */
@@ -131,6 +142,9 @@ export interface ApiDaPrevia {
   /** Acompanha o corpo da prévia na tela enquanto ativa. */
   retangulo: (id: string, retangulo: RetanguloDaPrevia) => void;
   recarregar: (id: string) => Promise<boolean>;
+  /** Volta e avança no histórico da vista; false se não há para onde ir. O estado novo chega em `aoMudar`. */
+  voltar: (id: string) => Promise<boolean>;
+  avancar: (id: string) => Promise<boolean>;
   /** Destrói a vista. */
   fechar: (id: string) => Promise<boolean>;
   /** Apaga o login e os dados dos sites da sessão da prévia e recarrega as vistas abertas. */

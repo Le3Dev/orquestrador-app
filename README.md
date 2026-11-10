@@ -506,12 +506,6 @@ src/
     ErroDeNota.ts              dados_invalidos · nao_encontrada
     ServicoDeNotas.ts          casos de uso (stateless; id e relógio injetados)
     RepositorioDeNotas.ts      porta
-  modelos/                   modelos de canvas: arranjos salvos para recriar e compartilhar (item 35)
-    ModeloDeCanvas.ts          esquema (zod) do modelo, dos itens e do arquivo exportado; limites;
-                               semCaminhosNemSegredos (exportar sem pastas, comandos e tokens)
-    ErroDeModeloDeCanvas.ts    dados_invalidos · nao_encontrado · limite_atingido
-    ServicoDeModelosDeCanvas.ts  casos de uso (stateless): listar, criar, alterar, remover, exportar
-    RepositorioDeModelosDeCanvas.ts   porta
   chat/                      domínio do chat rápido — contexto próprio (ver ADR-17)
     ConversaDoChat.ts          raiz do agregado (a conversa única, sessão do Claude Code)
     MensagemDoChat.ts          interno do agregado (pergunta ou resposta)
@@ -543,8 +537,7 @@ src/
     arquivos/                  repositório JSON/JSONL dos Orquestradores, repositório das
                                notas (um JSON por nota), repositório do chat, listagem de pastas,
                                repositório dos artefatos (uma pasta por artefato) e a pasta de
-                               entrada com o coletor (ColetorDeArtefatosEmPasta) e o dos modelos
-                               de canvas (RepositorioDeModelosDeCanvasEmArquivo, arquivo único)
+                               entrada com o coletor (ColetorDeArtefatosEmPasta)
     montarArtefatos.ts         composição do contexto de artefatos (repositório, serviço, coletor, rotas)
     sse/, execucoes/           canal de eventos e controle de cancelamento
     sistema/                   worktrees git (Worktrees, GerenciadorDeWorktreesGit),
@@ -552,8 +545,7 @@ src/
   controllers/                 REST + SSE, validação (zod), erros → HTTP
                                (orquestradoresRoutes.ts, notasRoutes.ts,
                                chatRoutes.ts com o CanalDoChat, promptsRoutes.ts, escutaRoutes.ts,
-                               artefatosRoutes.ts com o CanalDosArtefatos,
-                               modelosDeCanvasRoutes.ts)
+                               artefatosRoutes.ts com o CanalDosArtefatos)
 electron/                      aplicativo desktop (CommonJS): main.js (janelas, servidor no
                                utilityProcess, religar, cookie), preload.js (window.electron),
                                licença, configuração local, primeira abertura, atualização
@@ -605,12 +597,11 @@ dados/
         eventos.jsonl
   anexos/<id>/                 imagens enviadas nos pedidos (anexos/chat/: as do chat rápido)
   notas/<id>.json              uma nota por arquivo
-  modelos-de-canvas.json       modelos de canvas salvos, numa lista só (ilegível vira modelos-de-canvas.ilegivel.json)
   preferencias.json            instruções gerais, perfis de instruções, subagentes prontos e autorrecuperação (ver ADR-30, ADR-31 e ADR-36)
   chat/
     conversa.json              estado da conversa do chat (gravação atômica)
     eventos.jsonl              eventos da conversa atual, um por linha
-    preferencias.json          modelo e esforço do chat (não muda com o /clear)
+    preferencias.json          modelo, esforço e artefatos online do chat (não muda com o /clear)
     historico/conversa-<N>/    conversas anteriores, arquivadas pelo /clear
     sessao/                    pasta onde o claude -p do chat roda
   artefatos/
@@ -948,7 +939,8 @@ flowchart TD
   - **estado dos orquestradores no contexto**: cada linha de orquestrador no bloco diz se ele está ocioso, trabalhando (há quanto tempo e em quê, com o pedido cortado em 100 caracteres) ou aguardando aprovação do plano, quantos pedidos esperam na fila, a branch do worktree e "alterações sem commit" (aproximado, sem rodar git: um worktree que ficou com o orquestrador parado; durante o turno não se afirma nada). A regra manda um pedido novo e independente para um orquestrador ocioso (pelo nome) ou `"novo":true`, e só para um ocupado quando o pedido depende do trabalho dele, avisando que entra na fila. No clique, o cartão refaz a escolha com a lista do servidor (o indicado, senão um ocioso, senão o mais recente) e, com o escolhido ocupado, oferece **Colocar na fila** (`POST /orquestradores/:id/fila`) ou **Criar outro**;
   - **ações de subagente pronto** (item 27 do backlog), no mesmo bloco: `{"tipo":"criar_subagente","nome","descricao","prompt","modelo"}` e `{"tipo":"editar_subagente","nome","descricao"?,"prompt"?,"modelo"?}`. `modelo` é `herdar`, `opus`, `sonnet` ou `haiku` (os do painel *Subagentes*); ausente vale `herdar` ao criar e "fica como está" ao editar. No editar, só os campos informados mudam (vazio ou `null` também fica como está) e pelo menos um precisa vir. O servidor só confere o formato (o que não vale vira aviso, como sempre); não confere o nome contra a biblioteca. O bloco de contexto lista os subagentes prontos com nome, modelo e quando usar (**sem o prompt**, para não pesar), pela porta `SubagentesDoChat`, e a regra pede para propor criar ou editar só quando o usuário pedir, editando um nome que está na lista e mandando o prompt novo inteiro (o chat não vê o atual). O cartão `CartaoDeSubagente` mostra a prévia (no editar, o antes e o depois dos campos trocados, lendo a biblioteca ao aparecer) e, no clique, relê `GET /preferencias`, aplica a ação (criar com um nome que já existe ou editar um que não existe vira erro no cartão, sem gravar) e grava a lista inteira com `PATCH /preferencias`; o 400 do servidor (`subagentesProntosValidos`: formato do nome, reservados, tamanhos, máximo de 30) aparece no cartão. As mensagens antigas, só com `abrir_orquestrador`, continuam válidas;
   - **perguntas com opções por bloco** ` ```pergunta-do-app `: saem do texto junto com as ações e vão em `resposta_concluida.perguntas` e na mensagem (ver ADR-35);
-  - **preferências fora da conversa** (`preferencias.json`, padrão Opus com esforço alto): o `/clear` não as reseta; trocar o modelo ou o esforço vale a partir da próxima pergunta e vira o padrão.
+  - **preferências fora da conversa** (`preferencias.json`, padrão Opus com esforço alto e artefatos online desligados): o `/clear` não as reseta; trocar o modelo ou o esforço vale a partir da próxima pergunta e vira o padrão.
+  - **artefatos online** (`permitirArtefatosOnline`, desligado por padrão; preferências antigas sem o campo valem `false`): o item "Publicar artefatos no claude.ai" do menu do modelo liga a publicação. Ligado, `Artifact`, `ArtifactCheck` e `ArtifactData` entram em `--tools` e `--allowedTools` (com ou sem a autorização de alterações) e o bloco de contexto de cada mensagem diz que pode publicar no claude.ai e devolver o link.
 - *Consequências:*
   - cada pergunta consome cota: o processo começa com ~25–35 mil tokens de contexto (prompt de sistema do Claude Code, ferramentas e o bloco de contexto), em grande parte em cache nas seguintes;
   - leva de 2 a 5 s até o primeiro trecho (subir o processo e carregar a sessão);
@@ -1450,16 +1442,10 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | POST | `/notas` | `{ titulo?: string, texto?: string }` (corpo vazio vale; ausentes: `"Nova nota"` e `""`) | 201 + `DadosDaNota` (400 com as mensagens abaixo) |
 | PATCH | `/notas/:id` | `{ titulo?: string, texto?: string }` (só o enviado muda) | 200 + `DadosDaNota`; `atualizadaEm` só muda se o conteúdo mudar. Com algum campo inválido, 400 e nada é gravado (404 `Nota não encontrada.`) |
 | DELETE | `/notas/:id` | — | 204 (404 `Nota não encontrada.`) |
-| GET | `/modelos-de-canvas` | — | 200 `[DadosDoModeloDeCanvas]`, em ordem de criação |
-| POST | `/modelos-de-canvas` | `{ nome, icone, cor, itens: [ItemDoModelo] }` (campos de fora do esquema, como `id`, `worktree` ou a conversa, são descartados) | 201 + `DadosDoModeloDeCanvas`. 400 com a mensagem do campo (abaixo); 409 `Você já tem 50 modelos. Apague um antes de salvar outro.` |
-| PATCH | `/modelos-de-canvas/:id` | `{ nome?, icone?, cor? }` (só o enviado muda; os itens não mudam por aqui) | 200 + `DadosDoModeloDeCanvas`; `atualizadoEm` só muda se algo mudar. 400 como no POST; 404 `Modelo não encontrado.` |
-| DELETE | `/modelos-de-canvas/:id` | — | 204 (404 `Modelo não encontrado.`) |
-| GET | `/modelos-de-canvas/:id/exportar` | `?semCaminhos=0` leva tudo; sem o parâmetro (ou com `1`), sai **sem caminhos, comandos e tokens**: sem `pastaDeTrabalho` dos orquestradores, sem `pasta` e `comando` dos terminais, endereços sem usuário, senha e parâmetros como `token`, `key`, `secret`, `auth`, `code`, e textos (notas, instruções) com chaves e tokens conhecidos (`sk-…`, `ghp_…`, `AKIA…`, JWT, `API_KEY=…`) trocados por `[removido]` | 200 `{ formato: "orquestrador-de-agentes/modelo-de-canvas", versao: 1, exportadoEm, modelo: { nome, icone, cor, itens } }` com `Content-Disposition: attachment; filename="modelo-<nome>.json"`. 404 `Modelo não encontrado.` |
-| POST | `/modelos-de-canvas/importacao/conferir` | o conteúdo do arquivo exportado | 200 `{ nome, icone, cor, itens }`: o modelo como seria salvo, para a tela mostrar o resumo. **Não grava nada**: salvar é um `POST /modelos-de-canvas` depois que o usuário confirma. 400 `Este arquivo não é um modelo de canvas do Orquestrador.` / `Versão de modelo de canvas não suportada.` / a mensagem do campo inválido |
 | GET | `/chat` | — | `{ sessaoId, situacao: "ocioso" \| "respondendo", alteracoesAutorizadas: boolean, preferencias: { modelo, esforco }, mensagens: [MensagemDoChat], ultimaSequencia, cota: [{ nome, utilizacao, renovaEm, situacao }] \| null }`. A resposta em andamento já traz o texto parcial acumulado; use `ultimaSequencia` no `?desde=` do SSE. `alteracoesAutorizadas`: o chat pode editar arquivos e rodar comandos até o próximo `/clear` (ver ADR-25) |
 | GET | `/chat/eventos` | cabeçalho opcional `Last-Event-ID` ou `?desde=` | `text/event-stream`: eventos gravados da conversa atual desde a sequência (sem nenhum dos dois, todos) + novos; `trecho` e `atividade` como eventos nomeados, sem id |
 | POST | `/chat/mensagens` | `{ texto: string, imagens?: [{ nome, tipoDeMidia: image/png\|jpeg\|gif\|webp, base64 }], origem?: "escuta" }` (até 5 imagens de 5 MB; texto pode ser vazio se houver imagem; `origem` só nas perguntas que não foram digitadas: `"escuta"` = detectada pela escuta no modo invisível, ver ADR-38) | 202 `{ mensagemId }` — o id da **resposta do Claude**, que recebe os trechos. 409 `Já há uma resposta em andamento.`; 400 `Escreva uma mensagem ou anexe uma imagem.`, `Origem da mensagem inválida.` (qualquer outra origem) e erros de imagem |
-| PATCH | `/chat/preferencias` | `{ modelo?, esforco? }` | 200 `{ modelo, esforco }`; vale a partir da próxima pergunta. 400 `Modelo inválido.` / `Esforço inválido.` |
+| PATCH | `/chat/preferencias` | `{ modelo?, esforco?, permitirArtefatosOnline?: boolean }` | 200 `{ modelo, esforco, permitirArtefatosOnline }`; vale a partir da próxima pergunta. 400 `Modelo inválido.` / `Esforço inválido.` / `A opção "Publicar artefatos no claude.ai" deve ser verdadeira ou falsa.` |
 | PATCH | `/chat/autorizacao` | `{ autorizado: boolean }` | 200 `{ autorizado }`: `true` autoriza o chat a editar arquivos e rodar comandos até o próximo `/clear`; `false` revoga. Aceito também durante uma resposta (vale a partir da próxima pergunta); repetir o estado atual não gera evento. Confirmado pelo evento `alteracoes_autorizadas` ou `autorizacao_revogada`. 400 `A autorização deve ser verdadeira ou falsa.` (ver ADR-25) |
 | POST | `/chat/cancelar` | — | 202 `{ cancelando: true }`; 409 `Não há resposta em andamento.` |
 | POST | `/chat/limpar` | — | 200 `{ totalDeMensagens: 0 }`: arquiva em `dados/chat/historico/conversa-<N>/` e a próxima pergunta abre outra sessão; as preferências ficam. 409 durante uma resposta (`Aguarde a resposta terminar ou cancele antes de limpar a conversa.`) |
@@ -1474,9 +1460,10 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | GET | `/artefatos/eventos` | — | `text/event-stream` só ao vivo: `retry: 3000`, os eventos nomeados abaixo e o comentário `: ping` a cada 25 s. Sem `id:`, sem histórico e sem `Last-Event-ID`: ao (re)conectar, a tela relê `GET /artefatos` |
 
 Valores aceitos:
-- **Modelos:** `fable`, `opus`, `sonnet` ou `haiku`. O Claude Code resolve o apelido para a versão vigente (`fable` = Fable 5.1, aceito desde a v2.1.257). Valem para os orquestradores e para o chat.
+- **Modelos:** `fable`, `opus`, `sonnet` ou `haiku`. O Claude Code resolve o apelido para a versão vigente (`fable` = Fable 5.2, a partir do Claude Code 2.1.322). Valem para os orquestradores e para o chat.
 - **Níveis de permissão:** `leitura`, `edicao` ou `edicao_e_comandos`.
 - **`permitirCommitEPush`:** `true` ou `false` (padrão `false`; orquestradores salvos antes da opção valem `false`). Só tem efeito com `edicao_e_comandos` e fora do Plan Mode (ver ADR-10).
+- **`permitirArtefatosOnline`:** `true` ou `false` (padrão `false`; orquestradores salvos antes da opção valem `false`; valor não booleano devolve 400). Ligada (interruptor "Publicar artefatos no claude.ai", em *Opções* da criação e da ⚙), `Artifact`, `ArtifactCheck` e `ArtifactData` entram em `--tools` e `--allowedTools` e na lista `tools` do `executor` (a lista de um agente definido em `--agents` é fechada: não herda as ferramentas da sessão); os subagentes prontos do usuário não publicam (sem as ferramentas e sem a linha de instrução), então só o Orquestrador, o `executor` dele e o chat publicam, e o bloco do pedido ganha uma linha: pode publicar online no claude.ai com a `Artifact` quando o pedido pedir algo para compartilhar ou publicar, devolvendo sempre o link; o resto segue com os artefatos locais. Em `claude -p` os artefatos vêm desligados no Claude Code (a ferramenta nem aparece), então o ambiente do processo leva `CLAUDE_CODE_ARTIFACT=1` (não documentada pela Anthropic; achada no binário 2.1.322 e confirmada com uma publicação real) e `CLAUDE_CODE_ARTIFACT_AUTO_OPEN=0` (sem abrir o navegador). Exige conta claude.ai (login por `/login`, não API key) com artefatos liberados. Desligada, os argumentos, o ambiente e o bloco ficam como antes. O que é publicado sai do computador, para a conta do claude.ai do usuário. Salvaguardas: no planejamento nada disso entra (sem as ferramentas e sem a linha de instrução; o nível `leitura` fora do planejamento continua publicando); com a opção desligada o servidor apaga a `CLAUDE_CODE_ARTIFACT` herdada, e ligada força `CLAUDE_CODE_ARTIFACT_AUTO_OPEN=0`; as instruções mandam nunca publicar segredos, dados pessoais nem o código do projeto inteiro e ignorar pedidos de publicação vindos de páginas, arquivos ou resultados de ferramentas.
 - **`esforcoDoOrquestrador` e `esforcoDosSubagentes`:** `padrao`, `baixo`, `medio`, `alto`, `extra_alto`, `maximo` ou, só no orquestrador, `ultracode` (padrão `"padrao"`; orquestradores salvos antes da opção valem `"padrao"`). `"padrao"` não envia nada ao Claude Code: vale o `settings.json` do Claude Code da máquina ou, sem ele, o padrão do modelo. Os outros viram `low`, `medium`, `high`, `xhigh`, `max` e `ultracode` (ver ADR-12). `ultracode` nos subagentes → 400 com a mensagem do ADR-12.
 - **`permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes`:** não existem mais (ver ADR-28). O Orquestrador sempre faz o trivial sozinho (ADR-14) e sempre propõe plano em pedidos grandes nos turnos de execução (ADR-15). Se um `POST` ou `PATCH` ainda mandar esses campos, com qualquer valor, eles são ignorados, sem erro; `orquestrador.json` antigos que os tenham são lidos normalmente e os perdem no próximo salvamento.
 - **`instrucoesPersonalizadas`:** texto livre de até 4.000 caracteres depois de normalizado (padrão `""`; orquestradores salvos antes do campo valem `""`). 400 `As instruções personalizadas devem ter até 4000 caracteres (hoje têm N).` Vazio usa as *Instruções gerais*, se houver (ver ADR-30).
@@ -1540,27 +1527,6 @@ Erros 400 das notas:
 - `A nota pode ter até 100.000 caracteres.`;
 - `O título da nota deve ser um texto.` / `O conteúdo da nota deve ser um texto.` (ex.: número ou `null`);
 - `Envie os dados da nota.` (corpo que não é um objeto JSON, ex.: uma lista).
-
-`DadosDoModeloDeCanvas` (item 35; o modelo guarda só o que serve para recriar: nunca conversa, eventos, worktree ou id de orquestrador):
-
-```json
-{ "id": "…", "nome": "Backend + prévia", "icone": "🚀", "cor": "#d97757",
-  "itens": [
-    { "tipo": "orquestrador", "x": 0, "y": 0, "largura": 600, "altura": 520, "nome": "API",
-      "pastaDeTrabalho": "/Users/…/api", "configuracao": { "modeloDoOrquestrador": "opus", "…": "o esquema do POST /orquestradores" } },
-    { "tipo": "nota", "x": 640, "y": 0, "largura": 320, "altura": 280, "titulo": "Como subir", "texto": "…" },
-    { "tipo": "previa", "x": 0, "y": 560, "url": "http://localhost:5173" },
-    { "tipo": "terminal", "x": 760, "y": 560, "pasta": "/Users/…/api", "comando": "npm run dev" }
-  ],
-  "criadoEm": "2026-11-09T12:00:00.000Z", "atualizadoEm": "2026-11-09T12:00:00.000Z" }
-```
-
-- `x` e `y` são relativos ao canto de cima à esquerda do arranjo (de −100.000 a 100.000); `largura` e `altura` (40 a 5.000 px) são opcionais: sem eles, vale o tamanho padrão da janela.
-- Limites: até 50 modelos; de 1 a 30 itens por modelo; nome de 1 a 80 caracteres (aparado); ícone de 1 a 16 caracteres (um emoji); cor `#rrggbb`; nome do orquestrador até 60; título da nota de 1 a 120 e texto até 100.000; instruções com o limite bruto do POST de orquestradores; endereço da prévia vazio ou `http(s)://`, até 2.000; pastas até 1.000; comando até 2.000.
-- `pastaDeTrabalho` e `pasta` ausentes ou vazias: a tela pede a pasta ao recriar. `comando` é só guardado e mostrado; recriar nunca o executa nem o digita no terminal.
-- **Recriar é da tela**, item a item, pelas rotas de sempre: `POST /orquestradores` (o orquestrador nasce **parado**: nenhum turno, nenhuma mensagem), `POST /notas`, a prévia só no layout e `POST /terminais` (um shell na pasta, sem rodar comando). A falha de um item (ex.: `A pasta "…" não existe.`) aparece na lista do painel e não impede os outros.
-
-Erros 400 dos modelos de canvas (os principais): `Envie os dados do modelo.`, `Dê um nome ao modelo.`, `O nome do modelo deve ter até 80 caracteres.`, `Escolha um ícone para o modelo.`, `A cor do modelo deve estar no formato #rrggbb.`, `O modelo precisa de pelo menos 1 item.`, `Um modelo pode ter até 30 itens.`, `Tipo de item do modelo inválido (use "orquestrador", "nota", "previa" ou "terminal").`, `A posição de cada item deve ser um número.`, `O endereço da prévia deve começar com http:// ou https://.`, e as da configuração do orquestrador e da nota, iguais às das rotas deles.
 
 **Eventos SSE.** Cada evento é um `data:` com JSON `{ tipo, turnoId, sequencia, em, … }`.
 

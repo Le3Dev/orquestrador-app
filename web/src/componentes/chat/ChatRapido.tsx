@@ -4,6 +4,7 @@ import {
   type KeyboardEvent,
   memo,
   type PointerEvent as EventoDePonteiro,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -38,6 +39,7 @@ import {
   LARGURA_DO_CHAT_FIXO,
   type LadoDoChatFixo,
   limitarLarguraDoChatFixo,
+  usePreferenciasDaTela,
 } from "../../shared/hooks/usePreferenciasDaTela";
 import {
   ehCapturaDeTela,
@@ -65,6 +67,7 @@ import { HoraDaMensagem } from "./HoraDaMensagem";
 import { IndicadorDaEscuta } from "./IndicadorDaEscuta";
 import { SeletorDeModelo } from "./SeletorDeModelo";
 import "../../theme/chat-lateral.css";
+import "../../theme/controles-de-janela.css";
 
 const ALTURA_MAXIMA_DO_CAMPO = 140;
 /** Para as mensagens sem ações: a mesma lista sempre, para a memorização delas valer. */
@@ -248,31 +251,139 @@ function AlcaDaLargura({ largura, aoMudar, lado }: PropsDaAlca) {
   );
 }
 
-/** Fixar: uma janela com a coluna do lado em que o chat vai ficar. */
+/** Os ícones dos controles do chat: traço fino, do tamanho dos botões das janelas do canvas. */
+const PROPS_DO_ICONE_DO_CHAT = {
+  width: 14,
+  height: 14,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  "aria-hidden": true,
+} as const;
+
+/** Fixar ao lado: uma janela com a coluna no lado em que o chat vai ficar (o desenho é o da coluna à direita). */
 function IconeFixar({ lado }: { lado: LadoDoChatFixo }) {
   return (
     <svg
-      width={13}
-      height={13}
+      {...PROPS_DO_ICONE_DO_CHAT}
+      width={16}
+      height={16}
+      // À esquerda, o mesmo desenho espelhado.
+      style={lado === "esquerda" ? { transform: "scaleX(-1)" } : undefined}
+    >
+      <rect x="3.5" y="4" width="17" height="16" rx="2.5" />
+      <path d="M14.5 4v16" />
+    </svg>
+  );
+}
+
+/** Os ícones da barra do chat: traço de 1,8, como os das ilhas do canvas (o tamanho muda de um para outro). */
+function IconeDaBarra({ tamanho = 18, children }: { tamanho?: number; children: ReactNode }) {
+  return (
+    <svg
+      width={tamanho}
+      height={tamanho}
       viewBox="0 0 24 24"
       fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
       aria-hidden="true"
-      // À direita, o mesmo desenho espelhado.
-      style={lado === "direita" ? { transform: "scaleX(-1)" } : undefined}
     >
-      <rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M9.5 4.5v15" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M5.8 9h1.7M5.8 12h1.7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      {children}
     </svg>
+  );
+}
+
+/** Anexar imagens: um "+". */
+function IconeAnexar() {
+  return (
+    <IconeDaBarra>
+      <path d="M12 5v14M5 12h14" />
+    </IconeDaBarra>
+  );
+}
+
+/** Modo invisível: o olho; ligado, o olho cortado. */
+function IconeOlho({ cortado }: { cortado: boolean }) {
+  return (
+    <IconeDaBarra>
+      {cortado ? (
+        <>
+          <path d="M10.6 5.7c.45-.1.93-.2 1.4-.2 6 0 9.5 6.5 9.5 6.5s-.9 1.7-2.5 3.4M6.6 7.1C3.9 8.9 2.5 12 2.5 12s3.5 6.5 9.5 6.5c1.6 0 3-.4 4.2-1" />
+          <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+          <path d="m4 4 16 16" />
+        </>
+      ) : (
+        <>
+          <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
+          <circle cx="12" cy="12" r="3" />
+        </>
+      )}
+    </IconeDaBarra>
+  );
+}
+
+/** Escuta do áudio (sem o modo invisível): fones de ouvido. */
+function IconeFones() {
+  return (
+    <IconeDaBarra>
+      <path d="M4.5 15v-3a7.5 7.5 0 0 1 15 0v3" />
+      <rect x="3.5" y="14" width="4" height="6" rx="1.6" />
+      <rect x="16.5" y="14" width="4" height="6" rx="1.6" />
+    </IconeDaBarra>
+  );
+}
+
+/** Alterações autorizadas: um escudo com o visto. */
+function IconeEscudo() {
+  return (
+    <IconeDaBarra tamanho={16}>
+      <path d="M12 3.5 5 6v5.5c0 4.2 2.9 7.6 7 9 4.1-1.4 7-4.8 7-9V6l-7-2.5Z" />
+      <path d="m9 12 2.2 2.2L15.5 10" />
+    </IconeDaBarra>
   );
 }
 
 /** Soltar embaixo: o chat volta a flutuar no pé do canvas (a janela com a barra embaixo). */
 function IconeSoltar() {
   return (
-    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="3.5" y="4.5" width="17" height="15" rx="2" stroke="currentColor" strokeWidth="1.8" />
-      <path d="M7.5 16h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    <svg {...PROPS_DO_ICONE_DO_CHAT}>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+      <path d="M3.5 14h17" />
+    </svg>
+  );
+}
+
+/** Limpar conversa: uma vassoura. */
+function IconeLimpar() {
+  return (
+    <svg {...PROPS_DO_ICONE_DO_CHAT}>
+      <path d="M18.5 3.5 13 10.5" />
+      <path d="M9.5 10.5h6l2 3.5-.8 6H8.3L7.5 14Z" />
+      <path d="M10.5 16.5v3M13.5 16.5v3" />
+    </svg>
+  );
+}
+
+/** Mover para o outro lado: duas setas em sentidos opostos. */
+function IconeMover() {
+  return (
+    <svg {...PROPS_DO_ICONE_DO_CHAT}>
+      <path d="M5 8h13l-3-3M19 16H6l3 3" />
+    </svg>
+  );
+}
+
+/** Ocultar o chat: o traço do minimizar das janelas. */
+function IconeOcultar() {
+  return (
+    <svg {...PROPS_DO_ICONE_DO_CHAT}>
+      <path d="M5 12h14" />
     </svg>
   );
 }
@@ -510,20 +621,24 @@ function assinaturaDaUltima(chat: EstadoDoChatNaTela): string {
  *
  * Quando o chat precisa editar um arquivo ou rodar um comando sem estar
  * autorizado, a última resposta ganha o cartão de autorização. Autorizado,
- * o selo "alterações autorizadas" fica ao lado do campo até o `/clear`; o ✕
- * dele revoga.
+ * um indicador pequeno (um escudo na cor do aviso) fica na barra até o `/clear`;
+ * o ✕ que aparece nele, ao passar o mouse ou ao focar, revoga.
+ *
+ * Flutuante, a barra é uma ilha de uma linha (a mesma pele das ilhas do canvas):
+ * + · campo · ✦ · microfone · olho · modelo · enviar · fixar ao lado.
  *
  * Com `fixo`, o mesmo chat vira uma coluna ao lado do canvas (`<aside>`, do
  * `lado` pedido): conversa em bolhas sempre à vista, campo embaixo e, no cabeçalho,
- * "soltar embaixo" (o chat flutua no pé do canvas) e "ocultar" (o mesmo botão do
- * flutuante: o chat vai para baixo já oculto, e "mostrar conversa" o reexibe ali).
+ * quatro botões de ícone iguais aos das janelas: limpar a conversa, mover para o outro
+ * lado (a preferência do lado), soltar embaixo (o chat flutua no pé do canvas) e,
+ * no canto direito, ocultar (o chat vai para baixo já oculto, e "mostrar conversa" o reexibe ali).
  * Com `aoMudarLargura`, a borda da coluna virada para o canvas ganha a alça
  * de largura.
  *
  * No modo invisível (com a escuta disponível), o áudio do computador é
  * escutado: a transcrição entra na própria conversa (um balão "ouvido" por
  * frase, a pergunta destacada, e a frase em andamento num balão provisório no
- * fim); o indicador fica ao lado do 👁 e abre o menu da escuta (Automático,
+ * fim); o indicador fica ao lado do olho e abre o menu da escuta (Automático,
  * idioma e prioridade do motor); o aviso da primeira vez e o erro ficam
  * dentro do chat. As perguntas da escuta levam o selo "escuta"; com
  * alterações autorizadas, vão para o campo.
@@ -544,6 +659,7 @@ export function ChatRapido({
   largura = LARGURA_DO_CHAT_FIXO.padrao,
   aoMudarLargura,
 }: Props) {
+  const { mudarPreferencias } = usePreferenciasDaTela();
   const [texto, setTexto] = useState("");
   const [imagens, setImagens] = useState<ImagemAnexada[]>([]);
   const [erro, setErro] = useState<string | null>(null);
@@ -554,9 +670,6 @@ export function ChatRapido({
   const [ocultaEm, setOcultaEm] = useState<string | null>(() =>
     comecaOculto && !fixo ? assinaturaDaUltima(chat) : null,
   );
-  // Composer em uso: o campo ganhou foco e o foco segue dentro do composer.
-  const [emUso, setEmUso] = useState(false);
-  const [menuAberto, setMenuAberto] = useState(false);
   const [revogando, setRevogando] = useState(false);
   // De onde veio o texto do composer: "escuta" quando a escuta o pôs ali (chat com alterações autorizadas).
   const [origemDoComposer, setOrigemDoComposer] = useState<OrigemDaPergunta | null>(null);
@@ -600,17 +713,6 @@ export function ChatRapido({
   const dica = dicaDeComando(texto, respondendo);
   const ultima = chat.mensagens.at(-1);
   const pedidoDeAutorizacao = pedidoDeAutorizacaoAtual(chat);
-  // Compacto (uma linha) até a pessoa usar; recolhe só sem foco, texto, imagens nem menu aberto.
-  // Fixo, fica sempre expandido: a coluna é estreita para tudo numa linha.
-  const expandido = fixo || emUso || texto !== "" || imagensVisiveis.length > 0 || menuAberto || arrastando;
-
-  // Recolhido, o campo volta à altura de uma linha.
-  useEffect(() => {
-    if (!expandido && campo.current !== null) {
-      campo.current.style.height = "";
-    }
-  }, [expandido]);
-
   function ajustarAltura(): void {
     const elemento = campo.current;
     if (elemento !== null) {
@@ -983,14 +1085,21 @@ export function ChatRapido({
     }
   }
 
+  // Textos curtos: o campo da barra é estreito e o placeholder fica numa linha só.
   const placeholder = desconectado
-    ? "servidor desconectado — dá para escrever, o envio volta quando ele voltar"
+    ? "Servidor desconectado"
     : respondendo
-      ? "respondendo… (esc cancela) — já pode escrever a próxima"
-      : fixo
-        ? // Na coluna, o texto inteiro quebraria linha: a versão curta cabe numa só.
-          "Pergunte ao Claude · / para comandos"
-        : "Pergunte qualquer coisa ao Claude · / para comandos";
+      ? "Respondendo… esc cancela"
+      : "Pergunte ao Claude";
+  // O que o placeholder curto não diz: a dica no balão do campo.
+  const dicaDoCampo = desconectado
+    ? "Servidor desconectado: dá para escrever, o envio volta quando ele voltar"
+    : respondendo
+      ? "Respondendo: esc cancela, e já dá para escrever a próxima pergunta"
+      : "Enter envia, Shift+Enter quebra a linha, / para comandos";
+
+  // O lado oposto ao atual: para onde o "mover" leva a coluna.
+  const outroLado: LadoDoChatFixo = lado === "esquerda" ? "direita" : "esquerda";
 
   // Fixo: uma coluna (aside) ao lado do canvas; flutuante: um bloco no painel do pé do canvas.
   const Raiz = fixo ? "aside" : "div";
@@ -1044,60 +1153,78 @@ export function ChatRapido({
             <span className="rotulo-tecnico">chat rápido</span>
             {respondendo && <span className="etiqueta etiqueta-ativa etiqueta-pulso">respondendo…</span>}
             <span className="flex-1" />
-            {!fixo && aoAlternarFixo !== undefined && (
-              <button
-                type="button"
-                className="botao-icone"
-                aria-label={`Fixar o chat à ${lado}`}
-                title={`Fixar o chat à ${lado}: uma coluna ao lado do canvas, sempre aberta`}
-                onClick={() => aoAlternarFixo(true)}
-              >
-                <IconeFixar lado={lado} />
-              </button>
-            )}
-            <button
-              type="button"
-              className="btn btn-sm btn-ghost"
-              onClick={() => void limparConversa()}
-              disabled={respondendo || enviando || desconectado}
-              title={
-                respondendo
-                  ? "Cancele a resposta antes de limpar."
-                  : chat.alteracoesAutorizadas
-                    ? "Começa uma conversa nova (/clear) e desfaz a autorização de alterações"
-                    : "Começa uma conversa nova (/clear)"
-              }
-            >
-              limpar
-            </button>
             {fixo ? (
-              aoAlternarFixo !== undefined && (
-                <>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-ghost"
-                    aria-label="Soltar o chat embaixo"
-                    title="Soltar embaixo: o chat sai da coluna e passa a flutuar no centro de baixo do canvas, ainda aberto"
-                    onClick={() => aoAlternarFixo(false)}
-                  >
-                    <IconeSoltar />
-                    soltar embaixo
-                  </button>
-                  {/* Igual ao do chat inferior: oculta a conversa. Sem coluna para ocultar, o chat sai dela e fica embaixo, oculto. */}
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-ghost"
-                    onClick={() => aoAlternarFixo(false, true)}
-                    title="Ocultar a conversa: o chat sai da coluna e, ao mostrar de novo, volta embaixo"
-                  >
-                    ocultar
-                  </button>
-                </>
-              )
+              <span className="controles-do-chat" role="group" aria-label="Controles do chat">
+                <button
+                  type="button"
+                  className="botao-do-no"
+                  aria-label="Limpar conversa"
+                  title={
+                    respondendo
+                      ? "Cancele a resposta antes de limpar."
+                      : chat.alteracoesAutorizadas
+                        ? "Limpar conversa: começa uma nova (/clear) e desfaz a autorização de alterações"
+                        : "Limpar conversa: começa uma nova (/clear)"
+                  }
+                  disabled={respondendo || enviando || desconectado}
+                  onClick={() => void limparConversa()}
+                >
+                  <IconeLimpar />
+                </button>
+                <button
+                  type="button"
+                  className="botao-do-no"
+                  aria-label={`Mover o chat para a ${outroLado}`}
+                  title={`Mover o chat para a ${outroLado}`}
+                  onClick={() => mudarPreferencias({ ladoDoChatFixo: outroLado })}
+                >
+                  <IconeMover />
+                </button>
+                {aoAlternarFixo !== undefined && (
+                  <>
+                    <button
+                      type="button"
+                      className="botao-do-no"
+                      aria-label="Soltar embaixo"
+                      title="Soltar embaixo: o chat sai da coluna e passa a flutuar no centro de baixo do canvas, ainda aberto"
+                      onClick={() => aoAlternarFixo(false)}
+                    >
+                      <IconeSoltar />
+                    </button>
+                    {/* Igual ao minimizar das janelas, sempre no canto direito: o chat sai da coluna e fica embaixo, oculto. */}
+                    <button
+                      type="button"
+                      className="botao-do-no"
+                      aria-label="Ocultar o chat"
+                      title="Ocultar o chat: ele sai da coluna e, ao mostrar de novo, volta embaixo"
+                      onClick={() => aoAlternarFixo(false, true)}
+                    >
+                      <IconeOcultar />
+                    </button>
+                  </>
+                )}
+              </span>
             ) : (
-              <button type="button" className="btn btn-sm btn-ghost" onClick={ocultar} title="Ocultar a conversa (esc)">
-                ocultar
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => void limparConversa()}
+                  disabled={respondendo || enviando || desconectado}
+                  title={
+                    respondendo
+                      ? "Cancele a resposta antes de limpar."
+                      : chat.alteracoesAutorizadas
+                        ? "Começa uma conversa nova (/clear) e desfaz a autorização de alterações"
+                        : "Começa uma conversa nova (/clear)"
+                  }
+                >
+                  limpar
+                </button>
+                <button type="button" className="btn btn-sm btn-ghost" onClick={ocultar} title="Ocultar a conversa (esc)">
+                  ocultar
+                </button>
+              </>
             )}
           </header>
           <div
@@ -1158,7 +1285,7 @@ export function ChatRapido({
       {temMensagens && oculta && (
         <button
           type="button"
-          className="chip mostrar-conversa"
+          className="mostrar-conversa"
           onClick={() => {
             acompanhando.current = true;
             setOcultaEm(null);
@@ -1194,29 +1321,20 @@ export function ChatRapido({
 
       <div className="moldura-do-composer">
         <div
-          className={`composer-do-chat ${expandido ? "composer-expandido" : "composer-compacto"}`}
+          className="composer-do-chat"
           data-testid="composer-do-chat"
           onClick={(evento) => {
-            // Clicar em qualquer parte expande e leva o foco ao campo (menos no menu do modelo e no indicador da
+            // Clicar em qualquer parte leva o foco ao campo (menos no menu do modelo e no indicador da
             // escuta, cujo menu precisa do foco para fechar no Esc).
             const alvo = evento.target instanceof Element ? evento.target : null;
             if (alvo !== null && alvo.closest('[role="menu"], .indicador-da-escuta') !== null) {
               return;
             }
-            // No microfone, expande mas o foco fica nele: o Esc ali descarta o ditado.
+            // No microfone o foco fica nele: o Esc ali descarta o ditado.
             if (alvo !== null && alvo.closest(".ditado") !== null) {
-              setEmUso(true);
               return;
             }
             campo.current?.focus();
-          }}
-          onBlur={(evento) => {
-            const composer = evento.currentTarget;
-            // Gravando ou transcrevendo, não recolhe: o microfone e o aviso dele seguem à vista.
-            const ditando = composer.querySelector('.ditado [aria-pressed="true"], .ditado [aria-busy="true"]') !== null;
-            if (!composer.contains(evento.relatedTarget as Node | null) && !ditando) {
-              setEmUso(false);
-            }
           }}
         >
           {respondendo && !desconectado && <div className="faixa-de-progresso" />}
@@ -1244,43 +1362,7 @@ export function ChatRapido({
               ))}
             </div>
           )}
-          <textarea
-            ref={campo}
-            rows={1}
-            className="campo-do-chat"
-            value={texto}
-            readOnly={melhoria.melhorando}
-            aria-busy={melhoria.melhorando}
-            onChange={(evento) => {
-              setTexto(evento.target.value);
-              // Apagar o campo tira a marca da escuta: o que for escrito depois é do usuário.
-              if (evento.target.value === "") {
-                setOrigemDoComposer(null);
-              }
-              ajustarAltura();
-            }}
-            onFocus={() => setEmUso(true)}
-            onKeyDown={aoTeclar}
-            onPaste={aoColar}
-            placeholder={placeholder}
-            aria-label="Pergunta para o Claude"
-          />
-          {dica !== null && (
-            <p className="mono hint px-3" role="status">
-              {dica}
-            </p>
-          )}
-          {origemDoComposer === "escuta" && (
-            <p className="hint nota-da-escuta px-3" data-testid="nota-da-escuta">
-              Pergunta da escuta: confira e aperte Enter
-            </p>
-          )}
-          <AvisoDaMelhoria melhoria={melhoria} className="px-3" />
-          {(erro ?? erroAoCarregar) !== null && (
-            <p className="hint-error texto-longo px-3" role="alert">
-              {erro ?? `Não foi possível carregar o chat: ${erroAoCarregar}`}
-            </p>
-          )}
+          {/* A barra: + · campo · ✦ · microfone · indicadores · olho · modelo · enviar · fixar. Na coluna, o campo vai para a linha de cima (CSS). */}
           <div className="linha-do-composer">
             <input
               ref={seletorDeArquivos}
@@ -1300,20 +1382,42 @@ export function ChatRapido({
               title="Anexar imagens (também dá para colar com Ctrl+V ou arrastar para o chat)"
               onClick={() => seletorDeArquivos.current?.click()}
             >
-              +
+              <IconeAnexar />
             </button>
+            <textarea
+              ref={campo}
+              rows={1}
+              className="campo-do-chat"
+              value={texto}
+              readOnly={melhoria.melhorando}
+              aria-busy={melhoria.melhorando}
+              onChange={(evento) => {
+                setTexto(evento.target.value);
+                // Apagar o campo tira a marca da escuta: o que for escrito depois é do usuário.
+                if (evento.target.value === "") {
+                  setOrigemDoComposer(null);
+                }
+                ajustarAltura();
+              }}
+              onKeyDown={aoTeclar}
+              onPaste={aoColar}
+              placeholder={placeholder}
+              title={dicaDoCampo}
+              aria-label="Pergunta para o Claude"
+            />
             <BotaoDeMelhorar
               melhoria={melhoria}
               desabilitado={texto.trim() === "" || desconectado || respondendo || enviando}
             />
             <BotaoDeDitado destino="a mensagem" className="ditado-a-direita" aoTranscrever={receberDitado} />
-            {respondendo && <span className="etiqueta etiqueta-ativa etiqueta-pulso">respondendo…</span>}
             {chat.alteracoesAutorizadas && (
               <span
                 className="selo-de-autorizacao"
-                title="Até o próximo /clear, o chat edita arquivos e roda comandos sem perguntar"
+                role="group"
+                aria-label="Alterações autorizadas"
+                title="Alterações autorizadas até o /clear: o chat edita arquivos e roda comandos sem perguntar"
               >
-                alterações autorizadas
+                <IconeEscudo />
                 <button
                   type="button"
                   className="revogar-autorizacao"
@@ -1326,7 +1430,7 @@ export function ChatRapido({
                 </button>
               </span>
             )}
-            <span className="flex-1" />
+            <span className="espaco-do-composer" />
             {modoDisponivel && (
               <button
                 type="button"
@@ -1335,12 +1439,12 @@ export function ChatRapido({
                 aria-pressed={modoAtivo}
                 title={
                   modoAtivo
-                    ? "Tela sendo vista — clique para voltar ao modo normal (Ctrl+Shift+I)"
+                    ? "Tela sendo vista: clique para voltar ao modo normal (Ctrl+Shift+I)"
                     : "Modo invisível: janela transparente, só o chat rápido; o Claude vê a tela a cada pergunta (Ctrl+Shift+I para sair)"
                 }
                 onClick={() => void (modoAtivo ? sairDoModo() : entrarNoModo())}
               >
-                👁
+                <IconeOlho cortado={modoAtivo} />
                 {modoAtivo && <span className="ponto-tela-vista" aria-hidden="true" />}
               </button>
             )}
@@ -1352,12 +1456,12 @@ export function ChatRapido({
                 aria-pressed={escutaManualLigada}
                 title={
                   escutaManualLigada
-                    ? "Escutando o áudio do sistema — clique para parar"
+                    ? "Escutando o áudio do sistema: clique para parar"
                     : "Escutar o áudio do sistema: transcreve o que toca no computador e mostra na conversa (nada é gravado)"
                 }
                 onClick={() => void alternarEscutaManual()}
               >
-                🎧
+                <IconeFones />
               </button>
             )}
             {comEscuta && (
@@ -1383,7 +1487,6 @@ export function ChatRapido({
               campo={campo}
               aoAlterar={aoMudarPreferencias}
               aoFalhar={setErro}
-              aoAlternarMenu={setMenuAberto}
             />
             {respondendo ? (
               <button
@@ -1404,7 +1507,35 @@ export function ChatRapido({
                 {enviando ? "…" : "enviar ⏎"}
               </button>
             )}
+            {/* Flutuante: fixar ao lado, no fim da barra (a coluna tem os controles no cabeçalho). */}
+            {!fixo && aoAlternarFixo !== undefined && (
+              <button
+                type="button"
+                className="botao-icone botao-de-fixar"
+                aria-label={`Fixar o chat à ${lado}`}
+                title={`Fixar o chat à ${lado}: uma coluna ao lado do canvas, sempre aberta`}
+                onClick={() => aoAlternarFixo(true)}
+              >
+                <IconeFixar lado={lado} />
+              </button>
+            )}
           </div>
+          {dica !== null && (
+            <p className="mono hint px-3" role="status">
+              {dica}
+            </p>
+          )}
+          {origemDoComposer === "escuta" && (
+            <p className="hint nota-da-escuta px-3" data-testid="nota-da-escuta">
+              Pergunta da escuta: confira e aperte Enter
+            </p>
+          )}
+          <AvisoDaMelhoria melhoria={melhoria} className="px-3" />
+          {(erro ?? erroAoCarregar) !== null && (
+            <p className="hint-error texto-longo px-3" role="alert">
+              {erro ?? `Não foi possível carregar o chat: ${erroAoCarregar}`}
+            </p>
+          )}
         </div>
       </div>
     </Raiz>

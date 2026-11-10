@@ -10,7 +10,7 @@ export interface ModeloNoSeletor {
 }
 
 export const MODELOS_DO_CHAT: readonly ModeloNoSeletor[] = [
-  { modelo: "fable", nome: "Fable", versao: "5.1", descricao: "Para seus desafios mais difíceis" },
+  { modelo: "fable", nome: "Fable", versao: "5.2", descricao: "Para seus desafios mais difíceis" },
   { modelo: "opus", nome: "Opus", versao: "5.5", descricao: "Para trabalhos complexos e tarefas do dia a dia" },
   { modelo: "sonnet", nome: "Sonnet", versao: "5.5", descricao: "Mais eficiente para tarefas mais simples" },
   { modelo: "haiku", nome: "Haiku", versao: "5.5", descricao: "Mais rápido para respostas rápidas" },
@@ -26,7 +26,11 @@ export const ESFORCOS_DO_CHAT: readonly { esforco: EsforcoDeRaciocinio; rotulo: 
   { esforco: "ultracode", rotulo: "Ultracode" },
 ];
 
-export const PREFERENCIAS_PADRAO_DO_CHAT: PreferenciasDoChat = { modelo: "opus", esforco: "alto" };
+export const PREFERENCIAS_PADRAO_DO_CHAT: PreferenciasDoChat = {
+  modelo: "opus",
+  esforco: "alto",
+  permitirArtefatosOnline: false,
+};
 
 /**
  * A configuração com que um Orquestrador nasce — a mesma do formulário de
@@ -40,6 +44,7 @@ export const CONFIGURACAO_PADRAO_DO_ORQUESTRADOR: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
+  permitirArtefatosOnline: false,
   instrucoesPersonalizadas: "",
 };
 

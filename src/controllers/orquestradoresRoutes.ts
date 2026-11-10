@@ -89,6 +89,10 @@ const esquemaDaConfiguracao = z.object({
   permitirCommitEPush: z
     .boolean({ error: 'A opção "Permitir commit e push" deve ser verdadeira ou falsa.' })
     .optional(),
+  // Opcional também na criação: ausente vale `false` (desligada).
+  permitirArtefatosOnline: z
+    .boolean({ error: 'A opção "Publicar artefatos no claude.ai" deve ser verdadeira ou falsa.' })
+    .optional(),
   // Opcionais também na criação: ausentes valem "padrao".
   esforcoDoOrquestrador: z
     .enum(ESFORCOS_DE_RACIOCINIO, { error: "Esforço do orquestrador inválido." })

@@ -84,6 +84,9 @@ const esquemaDaPergunta = z.object({
 const esquemaDasPreferencias = z.object({
   modelo: z.enum(MODELOS_CLAUDE, { error: "Modelo inválido." }).optional(),
   esforco: z.enum(ESFORCOS_DE_RACIOCINIO, { error: "Esforço inválido." }).optional(),
+  permitirArtefatosOnline: z
+    .boolean({ error: 'A opção "Publicar artefatos no claude.ai" deve ser verdadeira ou falsa.' })
+    .optional(),
 });
 
 const MENSAGEM_DA_AUTORIZACAO_INVALIDA = "A autorização deve ser verdadeira ou falsa.";
@@ -146,10 +149,11 @@ export function criarChatRoutes({ servico, canal, anexos }: Dependencias): Route
   rotas.patch(
     "/chat/preferencias",
     rota(async (requisicao, resposta) => {
-      const { modelo, esforco } = esquemaDasPreferencias.parse(requisicao.body ?? {});
+      const { modelo, esforco, permitirArtefatosOnline } = esquemaDasPreferencias.parse(requisicao.body ?? {});
       const preferencias = await servico.alterarPreferencias({
         ...(modelo === undefined ? {} : { modelo }),
         ...(esforco === undefined ? {} : { esforco }),
+        ...(permitirArtefatosOnline === undefined ? {} : { permitirArtefatosOnline }),
       });
       resposta.json(preferencias);
     }),

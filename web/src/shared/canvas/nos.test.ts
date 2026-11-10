@@ -47,6 +47,7 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "fixa", limite: 2 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
+  permitirArtefatosOnline: false,
   instrucoesPersonalizadas: "",
 };
 

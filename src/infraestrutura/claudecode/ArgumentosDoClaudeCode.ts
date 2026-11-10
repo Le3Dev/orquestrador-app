@@ -156,6 +156,56 @@ export function liberadasComArtefatos(liberadas: readonly string[], pastaDeArtef
 }
 
 /**
+ * Ferramentas do Claude Code que publicam artefatos online na conta do
+ * claude.ai: `Artifact` publica, atualiza e lista; `ArtifactCheck` confere o
+ * HTML antes; `ArtifactData` lê os dados de um artefato. Só entram na sessão
+ * com a opção "Publicar artefatos no claude.ai" ligada (Orquestrador e chat).
+ * `ArtifactComments` e o `watch` não existem em sessões como as do app.
+ */
+export const FERRAMENTAS_DE_ARTEFATO_ONLINE: readonly string[] = ["Artifact", "ArtifactCheck", "ArtifactData"];
+
+/**
+ * Variáveis que ligam os artefatos online numa sessão `claude -p`. Nelas o
+ * Claude Code os deixa desligados (a documentação diz "off by default" com
+ * `-p`) e a ferramenta nem aparece, mesmo em `--tools`. `CLAUDE_CODE_ARTIFACT=1`
+ * é o interruptor (não documentado; achado no binário 2.1.322 e confirmado
+ * com uma publicação real). `CLAUDE_CODE_ARTIFACT_AUTO_OPEN=0` (documentada)
+ * impede abrir o navegador do computador: o link volta na resposta.
+ */
+export const VARIAVEL_DOS_ARTEFATOS_ONLINE = "CLAUDE_CODE_ARTIFACT";
+const VARIAVEL_DE_ABERTURA_AUTOMATICA = "CLAUDE_CODE_ARTIFACT_AUTO_OPEN";
+
+/**
+ * Com a opção ligada, acrescenta ao ambiente as variáveis dos artefatos online
+ * e força a abertura automática desligada (nem uma herdada do servidor abre o
+ * navegador). Desligada, apaga a `CLAUDE_CODE_ARTIFACT` herdada: um valor
+ * deixado no ambiente do servidor não pode publicar contra a escolha da tela.
+ */
+export function comVariaveisDeArtefatoOnline(ambiente: NodeJS.ProcessEnv, permitido: boolean): NodeJS.ProcessEnv {
+  if (permitido) {
+    ambiente[VARIAVEL_DOS_ARTEFATOS_ONLINE] = "1";
+    ambiente[VARIAVEL_DE_ABERTURA_AUTOMATICA] = "0";
+  } else {
+    delete ambiente[VARIAVEL_DOS_ARTEFATOS_ONLINE];
+  }
+  return ambiente;
+}
+
+/**
+ * O turno pode publicar online? A opção ligada e fora do planejamento: no
+ * planejamento nada sai do computador. O nível `leitura` publica: o usuário
+ * ligou a opção explicitamente.
+ */
+export function publicaOnlineNoTurno(pedido: PedidoDeTurno): boolean {
+  return pedido.configuracao.permitirArtefatosOnline && pedido.modo !== "planejamento";
+}
+
+/** As ferramentas de artefato online, se a opção estiver ligada; senão nenhuma. */
+export function ferramentasDeArtefatoOnline(permitido: boolean): readonly string[] {
+  return permitido ? FERRAMENTAS_DE_ARTEFATO_ONLINE : [];
+}
+
+/**
  * Negados em qualquer nível enquanto a opção "Permitir commit e push" não os
  * libera no turno (desligada, ou turno de planejamento).
  */
@@ -231,11 +281,30 @@ const VARIAVEIS_DA_SESSAO_PAI = [
   "AI_AGENT",
 ];
 
-/** Cópia do ambiente sem as variáveis que amarrariam o processo a uma sessão do Claude Code já aberta. */
+/**
+ * Variáveis do próprio app que um agente não deve ver: a chave de acesso
+ * (`ORQUESTRADOR_*`, com a qual um agente com Bash chamaria a API local para
+ * mudar a própria configuração), a porta e a pasta de dados. Nada no fluxo dos
+ * agentes usa a porta nem a pasta de dados: eles não chamam o app e as pastas
+ * de artefatos chegam por caminho absoluto nas instruções.
+ */
+const VARIAVEIS_DO_APP_OCULTAS_DOS_AGENTES = ["PORTA", "PASTA_DADOS"];
+const PREFIXO_DAS_VARIAVEIS_DO_APP = "ORQUESTRADOR_";
+
+/**
+ * Cópia do ambiente sem as variáveis que amarrariam o processo a uma sessão do
+ * Claude Code já aberta e sem as do app (`ORQUESTRADOR_*`, porta e pasta de dados).
+ */
 export function ambienteSemSessaoPai(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const ambiente: NodeJS.ProcessEnv = { ...base };
   for (const variavel of VARIAVEIS_DA_SESSAO_PAI) {
     delete ambiente[variavel];
+  }
+  for (const variavel of VARIAVEIS_DO_APP_OCULTAS_DOS_AGENTES) {
+    delete ambiente[variavel];
+  }
+  for (const variavel of Object.keys(ambiente)) {
+    if (variavel.startsWith(PREFIXO_DAS_VARIAVEIS_DO_APP)) delete ambiente[variavel];
   }
   return ambiente;
 }
@@ -279,10 +348,24 @@ export function ferramentasDoTurno(pedido: PedidoDeTurno): readonly string[] {
  * que libera a edição.
  */
 /**
+ * As ferramentas de um subagente: as do turno, as de artefato local e, só se
+ * `podePublicarOnline` e a opção estiver ligada, as de artefato online. Elas
+ * precisam estar aqui porque o `tools` de um agente definido em `--agents` é
+ * uma lista fechada: o subagente não herda as ferramentas da sessão.
+ */
+function ferramentasDoSubagente(pedido: PedidoDeTurno, podePublicarOnline: boolean): string[] {
+  return [
+    ...comFerramentasDeArtefato(ferramentasDoTurno(pedido)),
+    ...ferramentasDeArtefatoOnline(podePublicarOnline && publicaOnlineNoTurno(pedido)),
+  ];
+}
+
+/**
  * O executor e os subagentes prontos do usuário. Os prontos têm as mesmas
  * ferramentas, esforço e regra de commit do executor: nunca mais permissão
  * que o turno; só mudam a descrição, a especialidade e, se escolhido, o modelo.
- * O `Workflow` do `ultracode` nunca entra no `tools` deles.
+ * O `Workflow` do `ultracode` nunca entra no `tools` deles. Só o `executor`
+ * publica artefato online; os prontos não (nem ferramenta, nem instrução).
  * A `plataforma` decide a sintaxe da regra dos servidores de todos eles.
  */
 export function definicaoDosAgentes(
@@ -306,7 +389,7 @@ export function definicaoDosAgentes(
           subagente,
           plataforma,
         ),
-        tools: comFerramentasDeArtefato(ferramentasDoTurno(pedido)),
+        tools: ferramentasDoSubagente(pedido, false),
         model: modeloDoSubagentePronto(subagente, pedido.configuracao.modeloDosSubagentes),
         ...(esforco === null ? {} : { effort: esforco }),
       },
@@ -317,8 +400,15 @@ export function definicaoDosAgentes(
     [NOME_DO_SUBAGENTE]: {
       description:
         "Executa uma subtarefa delegada pelo orquestrador e devolve um resultado objetivo.",
-      prompt: instrucoesDoSubagente(pedido.pastaDeTrabalho, permiteCommitEPush, pedido.pastaDeArtefatos, null, plataforma),
-      tools: comFerramentasDeArtefato(ferramentasDoTurno(pedido)),
+      prompt: instrucoesDoSubagente(
+        pedido.pastaDeTrabalho,
+        permiteCommitEPush,
+        pedido.pastaDeArtefatos,
+        null,
+        plataforma,
+        publicaOnlineNoTurno(pedido),
+      ),
+      tools: ferramentasDoSubagente(pedido, true),
       model: pedido.configuracao.modeloDosSubagentes,
       ...(esforco === null ? {} : { effort: esforco }),
     },
@@ -355,12 +445,17 @@ export function definicaoDosAgentes(
  * `max` e `ultracode`, que as chaves de configuração não aceitam. Vale só
  * para este processo: cada turno a recebe de novo. Com `ultracode`, o
  * `Workflow` entra em `--tools` e em `--allowedTools` (`ferramentasDoEsforco`).
+ *
+ * Com a opção de artefatos online ligada, `Artifact`, `ArtifactCheck` e
+ * `ArtifactData` entram nas duas listas (`ferramentasDeArtefatoOnline`), menos
+ * no planejamento (`publicaOnlineNoTurno`).
  */
 export function montarArgumentos(pedido: PedidoDeTurno, arquivos: ArquivosDoTurno): string[] {
   const doNivel = [
     ...ferramentasDoTurno(pedido),
     FERRAMENTA_DE_SUBAGENTES,
     ...ferramentasDoEsforco(pedido.configuracao.esforcoDoOrquestrador),
+    ...ferramentasDeArtefatoOnline(publicaOnlineNoTurno(pedido)),
   ];
   const ferramentas = comFerramentasDeArtefato(doNivel);
   const liberadas = liberadasComArtefatos(doNivel, pedido.pastaDeArtefatos);
@@ -434,5 +529,5 @@ export function montarAmbiente(base: NodeJS.ProcessEnv, pedido: PedidoDeTurno): 
   ambiente.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS = String(
     pedido.configuracao.quantidadeDeSubagentes.limite,
   );
-  return ambiente;
+  return comVariaveisDeArtefatoOnline(ambiente, publicaOnlineNoTurno(pedido));
 }

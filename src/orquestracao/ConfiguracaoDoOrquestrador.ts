@@ -25,6 +25,13 @@ export interface DadosDaConfiguracao {
    */
   permitirCommitEPush?: boolean | undefined;
   /**
+   * Se o Orquestrador (e os subagentes lançados por ele) podem publicar
+   * artefatos online na conta do claude.ai (ferramenta `Artifact`). Ausente
+   * nas configurações gravadas antes de a opção existir: vale `false`.
+   * `paraDados` sempre o preenche.
+   */
+  permitirArtefatosOnline?: boolean | undefined;
+  /**
    * Esforço de raciocínio de cada papel. Ausentes nas configurações gravadas
    * antes de a opção existir: vale `padrao`. `paraDados` sempre os preenche.
    */
@@ -68,6 +75,7 @@ export class ConfiguracaoDoOrquestrador {
     public readonly quantidadeDeSubagentes: QuantidadeDeSubagentes,
     public readonly nivelDePermissao: NivelDePermissao,
     public readonly permitirCommitEPush: boolean,
+    public readonly permitirArtefatosOnline: boolean,
     public readonly esforcoDoOrquestrador: EsforcoDeRaciocinio,
     public readonly esforcoDosSubagentes: EsforcoDeRaciocinio,
     public readonly instrucoesPersonalizadas: string,
@@ -86,6 +94,13 @@ export class ConfiguracaoDoOrquestrador {
       throw new ErroDeOrquestracao(
         "dados_invalidos",
         'A opção "Permitir commit e push" deve ser verdadeira ou falsa.',
+      );
+    }
+    const permitirArtefatosOnline: unknown = dados.permitirArtefatosOnline ?? false;
+    if (typeof permitirArtefatosOnline !== "boolean") {
+      throw new ErroDeOrquestracao(
+        "dados_invalidos",
+        'A opção "Publicar artefatos no claude.ai" deve ser verdadeira ou falsa.',
       );
     }
     const esforcoDoOrquestrador: unknown = dados.esforcoDoOrquestrador ?? ESFORCO_PADRAO;
@@ -109,6 +124,7 @@ export class ConfiguracaoDoOrquestrador {
       QuantidadeDeSubagentes.de(dados.quantidadeDeSubagentes),
       dados.nivelDePermissao,
       permitirCommitEPush,
+      permitirArtefatosOnline,
       esforcoDoOrquestrador,
       esforcoDosSubagentes,
       instrucoesPersonalizadas,
@@ -143,6 +159,7 @@ export class ConfiguracaoDoOrquestrador {
       quantidadeDeSubagentes: alteracoes.quantidadeDeSubagentes ?? atual.quantidadeDeSubagentes,
       nivelDePermissao: alteracoes.nivelDePermissao ?? atual.nivelDePermissao,
       permitirCommitEPush: alteracoes.permitirCommitEPush ?? atual.permitirCommitEPush,
+      permitirArtefatosOnline: alteracoes.permitirArtefatosOnline ?? atual.permitirArtefatosOnline,
       esforcoDoOrquestrador: alteracoes.esforcoDoOrquestrador ?? atual.esforcoDoOrquestrador,
       esforcoDosSubagentes: alteracoes.esforcoDosSubagentes ?? atual.esforcoDosSubagentes,
       // `""` limpa as instruções: só a ausência mantém as atuais.
@@ -158,6 +175,7 @@ export class ConfiguracaoDoOrquestrador {
       quantidadeDeSubagentes: this.quantidadeDeSubagentes.paraDados(),
       nivelDePermissao: this.nivelDePermissao,
       permitirCommitEPush: this.permitirCommitEPush,
+      permitirArtefatosOnline: this.permitirArtefatosOnline,
       esforcoDoOrquestrador: this.esforcoDoOrquestrador,
       esforcoDosSubagentes: this.esforcoDosSubagentes,
       instrucoesPersonalizadas: this.instrucoesPersonalizadas,

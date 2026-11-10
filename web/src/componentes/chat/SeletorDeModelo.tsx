@@ -2,7 +2,11 @@ import { type RefObject, useEffect, useId, useRef, useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { PreferenciasDoChat } from "../../shared/api/tipos";
-import { AVISO_DO_ULTRACODE } from "../../shared/formatacao";
+import {
+  AJUDA_DOS_ARTEFATOS_ONLINE_DO_CHAT,
+  AVISO_DO_ULTRACODE,
+  ROTULO_DOS_ARTEFATOS_ONLINE,
+} from "../../shared/formatacao";
 import { ESFORCOS_DO_CHAT, MODELOS_DO_CHAT, nomeComVersao, rotuloDoEsforco } from "../../shared/modelos";
 
 interface Props {
@@ -21,8 +25,9 @@ interface Props {
 
 /**
  * Modelo e esforço do chat, num menu que abre para cima: os modelos com nome,
- * descrição e ✓ no escolhido; abaixo, "Esforço" com um submenu. Escolher grava
- * no servidor, e a escolha vira o padrão das próximas perguntas.
+ * descrição e ✓ no escolhido; abaixo, "Esforço" com um submenu e o interruptor
+ * "Publicar artefatos no claude.ai". Escolher grava no servidor, e a escolha
+ * vira o padrão das próximas perguntas.
  */
 export function SeletorDeModelo({
   preferencias,
@@ -86,7 +91,9 @@ export function SeletorDeModelo({
     fechar();
     if (
       (alteracao.modelo === undefined || alteracao.modelo === preferencias.modelo) &&
-      (alteracao.esforco === undefined || alteracao.esforco === preferencias.esforco)
+      (alteracao.esforco === undefined || alteracao.esforco === preferencias.esforco) &&
+      (alteracao.permitirArtefatosOnline === undefined ||
+        alteracao.permitirArtefatosOnline === preferencias.permitirArtefatosOnline)
     ) {
       return;
     }
@@ -94,7 +101,7 @@ export function SeletorDeModelo({
     try {
       aoAlterar(await api.alterarPreferenciasDoChat(alteracao));
     } catch (falha) {
-      aoFalhar(`Não foi possível trocar o modelo: ${mensagemDeErro(falha)}`);
+      aoFalhar(`Não foi possível salvar a escolha: ${mensagemDeErro(falha)}`);
     } finally {
       setSalvando(false);
     }
@@ -112,11 +119,22 @@ export function SeletorDeModelo({
         disabled={desabilitado || salvando}
         onClick={() => (aberto ? fechar() : setAberto(true))}
       >
-        <span className="font-titulo font-medium text-primary">{nomeDoModelo}</span>
-        <span className="text-secondary">{esforco}</span>
-        <span aria-hidden="true" className="text-muted">
-          ⌃
-        </span>
+        {/* Como no protótipo: o modelo em cinza, o esforço em destaque e a seta para baixo. */}
+        <span>{nomeDoModelo}</span>
+        <b>{esforco}</b>
+        <svg
+          width={14}
+          height={14}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="m7 10 5 5 5-5" />
+        </svg>
       </button>
 
       {aberto && (
@@ -185,6 +203,23 @@ export function SeletorDeModelo({
               </div>
             )}
           </div>
+          <hr className="separador-do-menu" />
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={preferencias.permitirArtefatosOnline}
+            title={AJUDA_DOS_ARTEFATOS_ONLINE_DO_CHAT}
+            className="item-do-menu"
+            onClick={() => void escolher({ permitirArtefatosOnline: !preferencias.permitirArtefatosOnline })}
+          >
+            <span className="flex min-w-0 flex-col">
+              <span className="font-titulo text-[12.5px] font-medium text-primary">{ROTULO_DOS_ARTEFATOS_ONLINE}</span>
+              <span className="text-[11px] text-secondary">Publica páginas na sua conta e devolve o link.</span>
+            </span>
+            <span aria-hidden="true" className="marca-do-item">
+              {preferencias.permitirArtefatosOnline ? "✓" : ""}
+            </span>
+          </button>
         </div>
       )}
     </div>

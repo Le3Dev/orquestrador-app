@@ -52,7 +52,7 @@ function estado(ultimaSequencia: number, texto = "Olá"): EstadoDoChat {
   return {
     sessaoId: "s1",
     situacao: "respondendo",
-    preferencias: { modelo: "opus", esforco: "alto" },
+    preferencias: { modelo: "opus", esforco: "alto", permitirArtefatosOnline: false },
     mensagens: [resposta(texto)],
     ultimaSequencia,
     cota: null,

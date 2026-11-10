@@ -51,7 +51,7 @@ export function AvisoDaEscuta({ aoConfirmar, aoRecusar }: Props) {
           A pergunta vai sozinha ao chat, com o print da tela. Com alterações autorizadas, ela vai para o campo, para
           você conferir antes de enviar.
         </li>
-        <li>Dá para pausar no indicador ao lado do 👁 e desligar o automático na faixa da transcrição.</li>
+        <li>Dá para pausar no indicador ao lado do olho e desligar o automático na faixa da transcrição.</li>
       </ul>
       <div className="botoes-do-aviso-da-escuta">
         <button type="button" className="btn btn-sm btn-ghost" onClick={aoRecusar}>

@@ -39,6 +39,8 @@ export interface PerguntaAoMotorDeChat {
   pastaDeArtefatos: string;
   modelo: ModeloClaude;
   esforco: EsforcoDeRaciocinio;
+  /** Se o chat pode publicar artefatos online no claude.ai (ferramenta `Artifact`). */
+  permitirArtefatosOnline: boolean;
   /**
    * Se o usuário autorizou editar arquivos e rodar comandos nesta conversa.
    * Sem autorização, a tentativa é negada e volta como `autorizacaoPendente`.

@@ -426,7 +426,7 @@ describe("ServicoDeChat", () => {
     const estado = servico.estado();
     expect(estado.sessaoId).not.toBe("sessao-1");
     expect(estado.mensagens).toEqual([]);
-    expect(estado.preferencias).toEqual({ modelo: "fable", esforco: "alto" });
+    expect(estado.preferencias).toEqual({ modelo: "fable", esforco: "alto", permitirArtefatosOnline: false });
     expect(estado.alteracoesAutorizadas).toBe(false);
   });
 
@@ -439,7 +439,11 @@ describe("ServicoDeChat", () => {
   });
 
   it("alterarPreferencias publica o evento e vale para a próxima pergunta", async () => {
-    expect(await servico.alterarPreferencias({ esforco: "maximo" })).toEqual({ modelo: "opus", esforco: "maximo" });
+    expect(await servico.alterarPreferencias({ esforco: "maximo" })).toEqual({
+      modelo: "opus",
+      esforco: "maximo",
+      permitirArtefatosOnline: false,
+    });
     expect(publicados.at(-1)).toMatchObject({ tipo: "preferencias_alteradas", preferencias: { esforco: "maximo" } });
 
     await servico.perguntar({ texto: "oi" });

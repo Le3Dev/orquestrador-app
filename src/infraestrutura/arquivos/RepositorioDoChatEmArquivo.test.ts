@@ -41,7 +41,11 @@ describe("RepositorioDoChatEmArquivo", () => {
     expect(repositorio.pastaDaSessao).toBe(path.join(pasta, "chat", "sessao"));
     expect(repositorio.conversa().sessaoId).toBe("sessao-1");
     expect(repositorio.conversa().totalDeMensagens).toBe(0);
-    expect(repositorio.preferencias().paraDados()).toEqual({ modelo: "opus", esforco: "alto" });
+    expect(repositorio.preferencias().paraDados()).toEqual({
+      modelo: "opus",
+      esforco: "alto",
+      permitirArtefatosOnline: false,
+    });
     expect(repositorio.ultimaSequencia()).toBe(0);
     expect(repositorio.ultimaCota()).toBeNull();
   });
@@ -72,6 +76,19 @@ describe("RepositorioDoChatEmArquivo", () => {
     expect(reaberto.ultimaSequencia()).toBe(3);
     expect(reaberto.ultimaCota()?.[0]?.utilizacao).toBe(0.2);
     expect(reaberto.preferencias().modelo).toBe("fable");
+  });
+
+  it("grava e relê a opção de artefatos online; preferências antigas, sem o campo, valem desligado", async () => {
+    const repositorio = await RepositorioDoChatEmArquivo.abrir(pasta, gerarSessao);
+    await repositorio.salvarPreferencias(repositorio.preferencias().com({ permitirArtefatosOnline: true }));
+    await repositorio.aguardarGravacoes();
+
+    expect((await RepositorioDoChatEmArquivo.abrir(pasta, gerarSessao)).preferencias().permitirArtefatosOnline).toBe(true);
+
+    await writeFile(path.join(pasta, "chat", "preferencias.json"), '{"modelo":"sonnet","esforco":"baixo"}', "utf8");
+    const antigas = (await RepositorioDoChatEmArquivo.abrir(pasta, gerarSessao)).preferencias();
+
+    expect(antigas.paraDados()).toEqual({ modelo: "sonnet", esforco: "baixo", permitirArtefatosOnline: false });
   });
 
   it("/clear arquiva a conversa em historico/conversa-<N>, continua a sequência e mantém as preferências", async () => {

@@ -125,6 +125,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
     expect(configuracao.paraDados()).toEqual({
       ...dados,
       permitirCommitEPush: false,
+      permitirArtefatosOnline: false,
       ...esforcosPadrao,
       ...semInstrucoes,
       ...todosOsProntos,
@@ -143,6 +144,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
     expect(ligada.paraDados()).toEqual({
       ...dados,
       permitirCommitEPush: true,
+      permitirArtefatosOnline: false,
       ...esforcosPadrao,
       ...semInstrucoes,
       ...todosOsProntos,
@@ -155,6 +157,31 @@ describe("ConfiguracaoDoOrquestrador", () => {
     const invalido = { ...dados, permitirCommitEPush: "sim" as unknown as boolean };
 
     expect(() => ConfiguracaoDoOrquestrador.de(invalido)).toThrow(ErroDeOrquestracao);
+  });
+
+  describe("publicar artefatos online no claude.ai", () => {
+    it("nasce desligada quando a opção não é informada e dados antigos (sem o campo) valem false", () => {
+      expect(ConfiguracaoDoOrquestrador.de(dados).permitirArtefatosOnline).toBe(false);
+      expect(ConfiguracaoDoOrquestrador.de(dados).paraDados().permitirArtefatosOnline).toBe(false);
+    });
+
+    it("com() liga só ela, mantém o resto e a ausência mantém o valor atual", () => {
+      const ligada = ConfiguracaoDoOrquestrador.de({ ...dados, permitirCommitEPush: true }).com({
+        permitirArtefatosOnline: true,
+      });
+
+      expect(ligada.permitirArtefatosOnline).toBe(true);
+      expect(ligada.permitirCommitEPush).toBe(true);
+      expect(ligada.com({ nivelDePermissao: "edicao" }).permitirArtefatosOnline).toBe(true);
+      expect(ligada.com({ permitirArtefatosOnline: undefined }).permitirArtefatosOnline).toBe(true);
+      expect(ligada.com({ permitirArtefatosOnline: false }).permitirArtefatosOnline).toBe(false);
+    });
+
+    it("recusa valor que não é verdadeiro ou falso", () => {
+      const invalido = { ...dados, permitirArtefatosOnline: "sim" as unknown as boolean };
+
+      expect(() => ConfiguracaoDoOrquestrador.de(invalido)).toThrow(ErroDeOrquestracao);
+    });
   });
 
   it("só libera commit e push com a opção ligada e num turno de execução", () => {
@@ -291,6 +318,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
           "modeloDoOrquestrador",
           "modeloDosSubagentes",
           "nivelDePermissao",
+          "permitirArtefatosOnline",
           "permitirCommitEPush",
           "quantidadeDeSubagentes",
           "subagentesProntos",
@@ -309,6 +337,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
       expect(configuracao.paraDados()).toEqual({
         ...dados,
         permitirCommitEPush: true,
+        permitirArtefatosOnline: false,
         ...esforcosPadrao,
         ...semInstrucoes,
         ...todosOsProntos,

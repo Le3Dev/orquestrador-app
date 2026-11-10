@@ -120,11 +120,14 @@ contextBridge.exposeInMainWorld("electron", {
     // { x, y, largura, altura, zoom }: onde o corpo da prévia está na tela, a cada mudança.
     retangulo: (id, retangulo) => ipcRenderer.send("previa:retangulo", { id, retangulo }),
     recarregar: (id) => ipcRenderer.invoke("previa:recarregar", { id }),
+    // Voltar e avançar no histórico da vista; resolvem false se não há para onde ir.
+    voltar: (id) => ipcRenderer.invoke("previa:voltar", { id }),
+    avancar: (id) => ipcRenderer.invoke("previa:avancar", { id }),
     fechar: (id) => ipcRenderer.invoke("previa:fechar", { id }),
     // Apaga o login e os dados da sessão persist:previa e recarrega as vistas abertas.
     sairDasContas: () => ipcRenderer.invoke("previa:sair-das-contas"),
-    // Eventos: { tipo: "foto", id, foto } | { tipo: "estado", id, carregando, erro, origem } (origem: só protocolo e host da
-    // página atual, ou null) | { tipo: "desativada", id } | { tipo: "sessao-limpa" } (descartar as fotos guardadas).
+    // Eventos: { tipo: "foto", id, foto } | { tipo: "estado", id, carregando, erro, origem, podeVoltar, podeAvancar } (origem: só
+    // protocolo e host da página atual, ou null; podeVoltar e podeAvancar: o histórico da vista) | { tipo: "desativada", id } | { tipo: "sessao-limpa" } (descartar as fotos guardadas).
     aoMudar: (callback) => {
       const ouvinte = (_evento, evento) => callback(evento);
       ipcRenderer.on("previa:evento", ouvinte);

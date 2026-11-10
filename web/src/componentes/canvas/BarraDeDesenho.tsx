@@ -73,6 +73,11 @@ const NOMES_DAS_ESPESSURAS: Readonly<Record<EspessuraDoDesenho, string>> = {
   6: "Grossa",
 };
 
+const FECHAR_DO_CANVAS = {
+  nome: "Fechar a barra de desenho",
+  dica: "Fechar a barra de desenho (o desenho continua no canvas)",
+};
+
 interface Props {
   ferramenta: FerramentaDeDesenho;
   cor: CorDoDesenho;
@@ -83,6 +88,12 @@ interface Props {
   aoEscolherEspessura: (espessura: EspessuraDoDesenho) => void;
   aoDesfazer: () => void;
   aoFechar: () => void;
+  /** Só estas ferramentas, na ordem da barra (a tela cheia do artefato usa uma barra compacta). Sem isso, todas. */
+  ferramentas?: readonly FerramentaDeDesenho[];
+  /** Mostra o grupo da espessura (padrão). */
+  comEspessura?: boolean;
+  /** O nome e a dica do botão de fechar, quando a barra não é a do canvas. */
+  fechar?: { nome: string; dica: string };
 }
 
 /**
@@ -99,11 +110,15 @@ export function BarraDeDesenho({
   aoEscolherEspessura,
   aoDesfazer,
   aoFechar,
+  ferramentas,
+  comEspessura = true,
+  fechar = FECHAR_DO_CANVAS,
 }: Props) {
+  const itens = ferramentas === undefined ? FERRAMENTAS : FERRAMENTAS.filter((item) => ferramentas.includes(item.ferramenta));
   return (
     <div className="barra-de-desenho painel-flutuante" role="toolbar" aria-label="Desenho">
       <div className="grupo-da-barra-de-desenho" role="group" aria-label="Ferramenta">
-        {FERRAMENTAS.map((item) => (
+        {itens.map((item) => (
           <button
             key={item.ferramenta}
             type="button"
@@ -133,22 +148,26 @@ export function BarraDeDesenho({
           </button>
         ))}
       </div>
-      <span className="separador-da-barra" aria-hidden="true" />
-      <div className="grupo-da-barra-de-desenho" role="group" aria-label="Espessura">
-        {ESPESSURAS_DO_DESENHO.map((opcao) => (
-          <button
-            key={opcao}
-            type="button"
-            className="botao-icone"
-            aria-label={`Espessura ${NOMES_DAS_ESPESSURAS[opcao].toLowerCase()} (${opcao} pt)`}
-            aria-pressed={espessura === opcao}
-            title={`${NOMES_DAS_ESPESSURAS[opcao]} (${opcao} pt)`}
-            onClick={() => aoEscolherEspessura(opcao)}
-          >
-            <span className="amostra-de-espessura" style={{ height: opcao }} aria-hidden="true" />
-          </button>
-        ))}
-      </div>
+      {comEspessura && (
+        <>
+          <span className="separador-da-barra" aria-hidden="true" />
+          <div className="grupo-da-barra-de-desenho" role="group" aria-label="Espessura">
+            {ESPESSURAS_DO_DESENHO.map((opcao) => (
+              <button
+                key={opcao}
+                type="button"
+                className="botao-icone"
+                aria-label={`Espessura ${NOMES_DAS_ESPESSURAS[opcao].toLowerCase()} (${opcao} pt)`}
+                aria-pressed={espessura === opcao}
+                title={`${NOMES_DAS_ESPESSURAS[opcao]} (${opcao} pt)`}
+                onClick={() => aoEscolherEspessura(opcao)}
+              >
+                <span className="amostra-de-espessura" style={{ height: opcao }} aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+        </>
+      )}
       <span className="separador-da-barra" aria-hidden="true" />
       <button
         type="button"
@@ -164,8 +183,8 @@ export function BarraDeDesenho({
       <button
         type="button"
         className="botao-icone"
-        aria-label="Fechar a barra de desenho"
-        title="Fechar a barra de desenho (o desenho continua no canvas)"
+        aria-label={fechar.nome}
+        title={fechar.dica}
         onClick={aoFechar}
       >
         <IconeFechar tamanho={14} />

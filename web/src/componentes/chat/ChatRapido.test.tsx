@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { api } from "../../shared/api/cliente";
 import type { MensagemDoChat } from "../../shared/api/tipos";
@@ -9,6 +9,7 @@ import {
   type EstadoDoChatNaTela,
   type MensagemDoChatNaTela,
 } from "../../shared/estado/aplicarEventoDoChat";
+import { CHAVE_DAS_PREFERENCIAS_DA_TELA } from "../../shared/hooks/usePreferenciasDaTela";
 import { ChatRapido, TIPO_DA_RESPOSTA_DO_CHAT } from "./ChatRapido";
 
 /** O ditado sem microfone nem Whisper: o clique alterna a gravação e o teste entrega o texto transcrito. */
@@ -27,7 +28,9 @@ vi.mock("../../shared/ditado/useDitado", async () => {
       return {
         fase,
         baixando: null,
+        segundosDeAudio: null,
         erro: null,
+        lerNivel: () => null,
         alternar: () => {
           if (ditadoFalso.pedirPermissao && fase === "parado") {
             setFase("pedindo-microfone");
@@ -310,7 +313,7 @@ describe("ChatRapido · modo invisível", () => {
     expect(modoInvisivel.capturarTela).toHaveBeenCalledTimes(2);
   });
 
-  it("o mesmo botão 👁 entra e sai do modo, com aria-pressed refletindo o estado", () => {
+  it("o mesmo botão do olho entra e sai do modo, com aria-pressed refletindo o estado", () => {
     const { modoInvisivel, ativar } = ponteAtiva();
     renderizar();
 
@@ -397,7 +400,27 @@ describe("ChatRapido · modo invisível", () => {
     });
   });
 
-  it("o 👁 fica na linha de baixo do composer, entra no modo e continua (pressionado) quando ativo", async () => {
+  it("o olho é um ícone de traço (SVG, sem emoji): olho aberto desligado, olho cortado e pressionado quando ativo", () => {
+    const { ativar } = ponteAtiva();
+    renderizar();
+
+    const desligado = screen.getByRole("button", { name: "Modo invisível" });
+    expect(desligado).toHaveAttribute("aria-pressed", "false");
+    expect(desligado).toHaveTextContent("");
+    expect(desligado.querySelector("svg circle")).not.toBeNull();
+    expect(desligado.querySelector('svg path[d="m4 4 16 16"]')).toBeNull();
+    expect(desligado.querySelector(".ponto-tela-vista")).toBeNull();
+
+    ativar();
+    const ligado = screen.getByRole("button", { name: "Modo invisível" });
+    expect(ligado).toHaveAttribute("aria-pressed", "true");
+    expect(ligado).toHaveTextContent("");
+    expect(ligado.querySelector("svg circle")).toBeNull();
+    expect(ligado.querySelector('svg path[d="m4 4 16 16"]')).not.toBeNull();
+    expect(ligado.querySelector(".ponto-tela-vista")).not.toBeNull();
+  });
+
+  it("o olho fica na linha do composer, entra no modo e continua (pressionado) quando ativo", async () => {
     const { modoInvisivel, ativar } = ponteAtiva();
     renderizar();
 
@@ -412,7 +435,7 @@ describe("ChatRapido · modo invisível", () => {
     expect(screen.getByRole("button", { name: "Modo invisível" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("sem a ponte do modo invisível (navegador), não desenha o 👁", () => {
+  it("sem a ponte do modo invisível (navegador), não desenha o olho", () => {
     renderizar();
     expect(screen.queryByRole("button", { name: "Modo invisível" })).not.toBeInTheDocument();
   });
@@ -426,7 +449,7 @@ describe("ChatRapido · modo invisível", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível entrar no modo invisível: sem janela");
   });
 
-  it("ativo, o 👁 dentro do chat é o indicador e a saída; clicar sai do modo", () => {
+  it("ativo, o olho dentro do chat é o indicador e a saída; clicar sai do modo", () => {
     const { modoInvisivel, ativar } = ponteAtiva();
     renderizar();
     ativar();
@@ -462,7 +485,7 @@ describe("ChatRapido · modo invisível", () => {
   describe("escuta do áudio", () => {
     const indicador = () => screen.queryByTestId("indicador-da-escuta");
 
-    it("o indicador aparece ao lado do 👁 com o modo ativo e some ao desligar; não há caixa à parte", () => {
+    it("o indicador aparece ao lado do olho com o modo ativo e some ao desligar; não há caixa à parte", () => {
       const { ativar, desativar } = ponteAtiva(undefined, true);
       renderizar();
       expect(indicador()).not.toBeInTheDocument();
@@ -481,7 +504,7 @@ describe("ChatRapido · modo invisível", () => {
       expect(indicador()).not.toBeInTheDocument();
     });
 
-    it("o botão 🎧 liga a escuta fora do modo: avisa a ponte e só depois marca o estado", async () => {
+    it("o botão dos fones (um ícone de traço) liga a escuta fora do modo: avisa a ponte e só depois marca o estado", async () => {
       let resolver: () => void = () => undefined;
       const { modoInvisivel } = ponteAtiva(undefined, true);
       const definirEscutaLigada = vi.fn(
@@ -494,6 +517,8 @@ describe("ChatRapido · modo invisível", () => {
       renderizar();
       const botao = screen.getByRole("button", { name: "Escuta do áudio" });
       expect(botao).toHaveAttribute("aria-pressed", "false");
+      expect(botao).toHaveTextContent("");
+      expect(botao.querySelector("svg")).not.toBeNull();
       expect(opcoesDaEscuta().escutaManualLigada).toBe(false);
       expect(indicador()).not.toBeInTheDocument();
 
@@ -513,7 +538,7 @@ describe("ChatRapido · modo invisível", () => {
       resolver();
     });
 
-    it("sem a escuta disponível, não há botão 🎧", () => {
+    it("sem a escuta disponível, não há botão dos fones", () => {
       ponteAtiva();
       renderizar();
       expect(screen.queryByRole("button", { name: "Escuta do áudio" })).not.toBeInTheDocument();
@@ -1141,7 +1166,10 @@ describe("ChatRapido", () => {
 
     fireEvent.keyDown(campo, { key: "Escape" });
     expect(screen.queryByRole("region", { name: "Conversa com o Claude" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "mostrar conversa (2)" })).toBeInTheDocument();
+    const pilula = screen.getByRole("button", { name: "mostrar conversa (2)" });
+    // Uma pílula pequena (sem a caixa do chip antigo).
+    expect(pilula).toHaveClass("mostrar-conversa");
+    expect(pilula).not.toHaveClass("chip");
 
     rerender({
       ...conversa,
@@ -1151,55 +1179,81 @@ describe("ChatRapido", () => {
     expect(screen.getByText("Nova")).toBeVisible();
   });
 
-  describe("composer compacto e expandido", () => {
+  describe("a barra do composer", () => {
     const composer = () => screen.getByTestId("composer-do-chat");
+    /** `a` vem antes de `b` no documento. */
+    const vemAntes = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 
-    it("começa compacto, numa linha só: +, campo, modelo e enviar", () => {
-      renderizar();
-      expect(composer()).toHaveClass("composer-compacto");
-      expect(composer()).not.toHaveClass("composer-expandido");
-      expect(screen.getByRole("button", { name: "Anexar imagens" })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /^Modelo:/ })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "enviar ⏎" })).toBeInTheDocument();
+    it("é uma linha só, na ordem: +, campo, ✦, microfone, modelo e enviar", () => {
+      const { campo } = renderizar();
+      const linha = composer().querySelector(".linha-do-composer");
+      expect(linha).not.toBeNull();
+      const anexar = screen.getByRole("button", { name: "Anexar imagens" });
+      const melhorar = screen.getByRole("button", { name: "Melhorar o pedido" });
+      const microfone = screen.getByRole("button", { name: "Ditar a mensagem por voz" });
+      const modelo = screen.getByRole("button", { name: /^Modelo:/ });
+      const enviar = screen.getByRole("button", { name: "enviar ⏎" });
+      for (const elemento of [anexar, campo, melhorar, microfone, modelo, enviar]) {
+        expect(linha).toContainElement(elemento);
+      }
+      expect(vemAntes(anexar, campo)).toBe(true);
+      expect(vemAntes(campo, melhorar)).toBe(true);
+      expect(vemAntes(melhorar, microfone)).toBe(true);
+      expect(vemAntes(microfone, modelo)).toBe(true);
+      expect(vemAntes(modelo, enviar)).toBe(true);
+      expect(composer()).not.toHaveClass("composer-compacto", "composer-expandido");
     });
 
-    it("clicar no composer expande e leva o foco ao campo", () => {
+    it("o campo diz \"Pergunte ao Claude\" e os botões de ícone são SVG, sem emoji nem texto", () => {
+      const { campo } = renderizar();
+      expect(campo).toHaveAttribute("placeholder", "Pergunte ao Claude");
+      for (const nome of ["Anexar imagens", "Melhorar o pedido", "Ditar a mensagem por voz"]) {
+        const botao = screen.getByRole("button", { name: nome });
+        expect(botao).toHaveTextContent("");
+        expect(botao.querySelector("svg")).not.toBeNull();
+      }
+    });
+
+    it("o modelo mostra o nome em cinza, o esforço em destaque e a seta como SVG", () => {
+      renderizar();
+      const modelo = screen.getByRole("button", { name: /^Modelo:/ });
+      expect(modelo.querySelector("b")).toHaveTextContent("Alto");
+      expect(modelo.querySelector("svg")).not.toBeNull();
+      expect(modelo).not.toHaveTextContent("⌃");
+    });
+
+    it("clicar na barra leva o foco ao campo", () => {
       const { campo } = renderizar();
       fireEvent.click(composer());
       expect(campo).toHaveFocus();
-      expect(composer()).toHaveClass("composer-expandido");
     });
 
-    it("focar o campo (teclado) expande; perder o foco vazio recolhe", () => {
-      const { campo } = renderizar();
-      act(() => campo.focus());
-      expect(composer()).toHaveClass("composer-expandido");
-      act(() => campo.blur());
-      expect(composer()).toHaveClass("composer-compacto");
+    it("o fixar ao lado está na barra mesmo sem conversa; sem aoAlternarFixo não há botão", () => {
+      const props = {
+        chat: OCIOSO,
+        desconectado: false,
+        erroAoCarregar: null,
+        aoMudarPreferencias: vi.fn(),
+        aoAbrirTerminal: vi.fn(),
+        temVagaPara: vi.fn().mockReturnValue(true),
+        aoAtualizarOrquestradores: vi.fn().mockResolvedValue(undefined),
+        orquestradores: [],
+      };
+      const { rerender } = render(<ChatRapido {...props} />);
+      expect(screen.queryByRole("button", { name: /^Fixar o chat/ })).not.toBeInTheDocument();
+
+      rerender(<ChatRapido {...props} aoAlternarFixo={vi.fn()} />);
+      expect(screen.getByRole("button", { name: "Fixar o chat à esquerda" })).toBeInTheDocument();
     });
 
-    it("foco indo para um botão do composer não recolhe", () => {
-      const { campo } = renderizar();
-      act(() => campo.focus());
-      act(() => screen.getByRole("button", { name: "Anexar imagens" }).focus());
-      expect(composer()).toHaveClass("composer-expandido");
-    });
-
-    it("com texto continua expandido mesmo sem foco", () => {
-      const { campo } = renderizar();
-      act(() => campo.focus());
-      fireEvent.change(campo, { target: { value: "Oi" } });
-      act(() => campo.blur());
-      expect(composer()).toHaveClass("composer-expandido");
-    });
-
-    it("com imagem anexada continua expandido mesmo sem foco", async () => {
+    it("com imagem anexada, a miniatura aparece acima da linha da barra", async () => {
       const { campo } = renderizar();
       const imagem = new File(["png"], "tela.png", { type: "image/png" });
       fireEvent.paste(campo, { clipboardData: { files: [imagem] } });
-      expect(await screen.findByRole("button", { name: "Remover tela.png" })).toBeInTheDocument();
-      act(() => campo.blur());
-      expect(composer()).toHaveClass("composer-expandido");
+      const remover = await screen.findByRole("button", { name: "Remover tela.png" });
+      const miniaturas = remover.closest(".miniaturas-do-prompt")!;
+      expect(composer()).toContainElement(miniaturas as HTMLElement);
+      expect(vemAntes(miniaturas, campo)).toBe(true);
     });
 
     it("remover a imagem libera a URL da miniatura", async () => {
@@ -1229,28 +1283,35 @@ describe("ChatRapido", () => {
       await waitFor(() => expect(revogar).toHaveBeenCalledWith(criar.mock.results[0]?.value));
     });
 
-    it("menu do modelo aberto não recolhe", () => {
-      const { campo } = renderizar();
+    it("o menu do modelo abre ao clicar no botão do modelo", () => {
+      renderizar();
       fireEvent.click(screen.getByRole("button", { name: /^Modelo:/ }));
       expect(screen.getByRole("menu", { name: "Modelo do chat" })).toBeInTheDocument();
-      act(() => campo.blur());
-      expect(composer()).toHaveClass("composer-expandido");
     });
 
-    it("Enter envia mesmo no compacto", async () => {
+    it("Enter envia da barra e o campo volta vazio", async () => {
       const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
       const { campo } = renderizar();
-      expect(composer()).toHaveClass("composer-compacto");
       fireEvent.change(campo, { target: { value: "Oi" } });
       fireEvent.keyDown(campo, { key: "Enter" });
       expect(perguntar).toHaveBeenCalledWith("Oi", []);
-      await waitFor(() => expect(composer()).toHaveClass("composer-compacto"));
+      await waitFor(() => expect(campo).toHaveValue(""));
     });
   });
 
   describe("ditado por voz", () => {
-    const composer = () => screen.getByTestId("composer-do-chat");
     const microfone = () => screen.getByRole("button", { name: "Ditar a mensagem por voz" });
+
+    it("o microfone é um ícone de traço (SVG, sem texto) com o mesmo botão de ícone dos outros da barra", () => {
+      renderizar();
+
+      expect(microfone()).toHaveClass("botao-icone");
+      expect(microfone()).toHaveTextContent("");
+      expect(microfone().querySelector("svg")).not.toBeNull();
+      expect(microfone().closest(".linha-do-composer")).not.toBeNull();
+      expect(screen.getByRole("button", { name: "Anexar imagens" })).toHaveClass("botao-icone");
+      expect(screen.getByRole("button", { name: "Melhorar o pedido" })).toHaveClass("botao-icone");
+    });
 
     it("flutuante: o microfone fica na linha do composer; o ditado entra no campo e dá para enviar", async () => {
       const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
@@ -1312,12 +1373,11 @@ describe("ChatRapido", () => {
         const botao = microfone();
         act(() => botao.focus());
         fireEvent.click(botao);
-        // Pedindo a permissão: o botão segue focado (marcado como ocupado, sem `disabled`) e o composer expandido.
+        // Pedindo a permissão: o botão segue focado (marcado como ocupado, sem `disabled`).
         expect(botao).toHaveAttribute("aria-busy", "true");
         expect(botao).toHaveAttribute("aria-disabled", "true");
         expect(botao).not.toBeDisabled();
         expect(botao).toHaveFocus();
-        expect(composer()).toHaveClass("composer-expandido");
 
         // Outro clique no meio do pedido não faz nada.
         fireEvent.click(botao);
@@ -1337,32 +1397,22 @@ describe("ChatRapido", () => {
       }
     });
 
-    it("gravando: o foco fica no microfone, o composer não recolhe e o Esc descarta sem ocultar a conversa", () => {
-      renderizar({
+    it("gravando: o foco fica no microfone (o clique na barra não o tira dali) e o Esc descarta sem ocultar a conversa", () => {
+      const { campo } = renderizar({
         ...OCIOSO,
         mensagens: [mensagem("u1", "usuario", { texto: "oi" }), mensagem("c1", "claude", { texto: "Olá!" })],
       });
-      expect(composer()).toHaveClass("composer-compacto");
 
       const botao = microfone();
       act(() => botao.focus());
       fireEvent.click(botao);
       expect(botao).toHaveFocus();
       expect(botao).toHaveAttribute("aria-pressed", "true");
-      expect(composer()).toHaveClass("composer-expandido");
+      expect(campo).not.toHaveFocus();
 
-      // O foco sai do chat no meio da gravação: o composer continua expandido.
-      act(() => botao.blur());
-      expect(composer()).toHaveClass("composer-expandido");
-
-      act(() => botao.focus());
       fireEvent.keyDown(botao, { key: "Escape" });
       expect(botao).toHaveAttribute("aria-pressed", "false");
       expect(screen.getByRole("region", { name: "Conversa com o Claude" })).toBeVisible();
-
-      // Sem gravar, perder o foco vazio recolhe como antes.
-      act(() => botao.blur());
-      expect(composer()).toHaveClass("composer-compacto");
     });
   });
 
@@ -1472,33 +1522,47 @@ describe("ChatRapido", () => {
       expect(screen.getByRole("button", { name: AUTORIZAR })).toBeDisabled();
     });
 
-    it("o selo aparece com o chat autorizado, explica no title e o ✕ revoga", async () => {
+    it("autorizado, um indicador pequeno (só ícone, sem texto) explica no title e o ✕ revoga", async () => {
       const revogar = vi.spyOn(api, "autorizarAlteracoesDoChat").mockResolvedValue({ autorizado: false });
       const { rerender } = renderizar({ ...OCIOSO, alteracoesAutorizadas: true });
 
-      const selo = screen.getByText("alterações autorizadas");
+      const selo = screen.getByRole("group", { name: "Alterações autorizadas" });
       expect(selo).toHaveClass("selo-de-autorizacao");
+      expect(selo.closest(".linha-do-composer")).not.toBeNull();
       expect(selo).toHaveAttribute(
         "title",
-        "Até o próximo /clear, o chat edita arquivos e roda comandos sem perguntar",
+        "Alterações autorizadas até o /clear: o chat edita arquivos e roda comandos sem perguntar",
       );
+      // Sem o selo de texto em caixa alta: o ícone e o ✕ (que fica acessível pelo foco e pelo mouse).
+      expect(selo.querySelector("svg")).not.toBeNull();
+      expect(selo).toHaveTextContent(/^✕$/);
+      expect(screen.queryByText("alterações autorizadas")).not.toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Revogar a autorização de alterações" }));
       await waitFor(() => expect(revogar).toHaveBeenCalledWith(false));
 
-      // O evento `autorizacao_revogada` (ou o `/clear`) zera o estado: o selo some.
+      // O evento `autorizacao_revogada` (ou o `/clear`) zera o estado: o indicador some.
       rerender({ ...OCIOSO, alteracoesAutorizadas: false });
-      expect(screen.queryByText("alterações autorizadas")).not.toBeInTheDocument();
+      expect(screen.queryByRole("group", { name: "Alterações autorizadas" })).not.toBeInTheDocument();
     });
 
-    it("falha ao revogar aparece no composer e o selo continua", async () => {
+    it("o ✕ do indicador é alcançável pelo teclado", () => {
+      renderizar({ ...OCIOSO, alteracoesAutorizadas: true });
+
+      const revogar = screen.getByRole("button", { name: "Revogar a autorização de alterações" });
+      expect(revogar).not.toBeDisabled();
+      act(() => revogar.focus());
+      expect(revogar).toHaveFocus();
+    });
+
+    it("falha ao revogar aparece no composer e o indicador continua", async () => {
       vi.spyOn(api, "autorizarAlteracoesDoChat").mockRejectedValue(new Error("fora do ar"));
       renderizar({ ...OCIOSO, alteracoesAutorizadas: true });
 
       fireEvent.click(screen.getByRole("button", { name: "Revogar a autorização de alterações" }));
 
       expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível revogar a autorização: fora do ar");
-      expect(screen.getByText("alterações autorizadas")).toBeInTheDocument();
+      expect(screen.getByRole("group", { name: "Alterações autorizadas" })).toBeInTheDocument();
     });
 
     it("a atividade descreve edições e comandos", () => {
@@ -1512,9 +1576,9 @@ describe("ChatRapido", () => {
       expect(screen.getByText(/rodando: npm test…/)).toBeInTheDocument();
     });
 
-    it("sem autorização não há selo", () => {
+    it("sem autorização não há indicador", () => {
       renderizar();
-      expect(screen.queryByText("alterações autorizadas")).not.toBeInTheDocument();
+      expect(screen.queryByRole("group", { name: "Alterações autorizadas" })).not.toBeInTheDocument();
     });
   });
 
@@ -1660,6 +1724,9 @@ describe("ChatRapido", () => {
   });
 
   describe("fixo à esquerda", () => {
+    beforeEach(() => localStorage.removeItem(CHAVE_DAS_PREFERENCIAS_DA_TELA));
+    afterEach(() => localStorage.removeItem(CHAVE_DAS_PREFERENCIAS_DA_TELA));
+
     const CONVERSA: EstadoDoChatNaTela = {
       ...OCIOSO,
       mensagens: [
@@ -1674,7 +1741,7 @@ describe("ChatRapido", () => {
       ],
     };
 
-    function renderizarFixo(chat: EstadoDoChatNaTela = CONVERSA) {
+    function renderizarFixo(chat: EstadoDoChatNaTela = CONVERSA, lado: "esquerda" | "direita" = "esquerda") {
       const aoAlternarFixo = vi.fn();
       const props = {
         desconectado: false,
@@ -1685,11 +1752,11 @@ describe("ChatRapido", () => {
         aoAtualizarOrquestradores: vi.fn().mockResolvedValue(undefined),
         orquestradores: [],
       };
-      render(<ChatRapido chat={chat} {...props} fixo aoAlternarFixo={aoAlternarFixo} />);
+      render(<ChatRapido chat={chat} {...props} fixo lado={lado} aoAlternarFixo={aoAlternarFixo} />);
       return { aoAlternarFixo };
     }
 
-    it("vira um aside com as mensagens em bolhas, os cartões e o campo embaixo, sempre expandido", () => {
+    it("vira um aside com as mensagens em bolhas, os cartões e o campo embaixo", () => {
       renderizarFixo();
 
       const lateral = screen.getByRole("complementary", { name: "Chat rápido" });
@@ -1701,10 +1768,10 @@ describe("ChatRapido", () => {
       expect(screen.getByRole("group", { name: "Pergunta do Claude" })).toBeInTheDocument();
       const campo = screen.getByRole("textbox", { name: "Pergunta para o Claude" });
       expect(lateral).toContainElement(campo);
-      expect(screen.getByTestId("composer-do-chat")).toHaveClass("composer-expandido");
+      expect(screen.getByTestId("composer-do-chat")).toContainElement(campo);
       expect(screen.getByRole("button", { name: "Anexar imagens" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /Modelo:/ })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "limpar" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Limpar conversa" })).toBeInTheDocument();
     });
 
     it("sem mensagens, a conversa continua à vista, com o convite", () => {
@@ -1721,23 +1788,107 @@ describe("ChatRapido", () => {
       fireEvent.keyDown(screen.getByRole("textbox", { name: "Pergunta para o Claude" }), { key: "Escape" });
       expect(screen.getByRole("region", { name: "Conversa com o Claude" })).toBeVisible();
 
-      const soltar = screen.getByRole("button", { name: "Soltar o chat embaixo" });
-      // O rótulo e a dica dizem para onde o chat vai.
-      expect(soltar).toHaveTextContent("soltar embaixo");
+      const soltar = screen.getByRole("button", { name: "Soltar embaixo" });
+      // A dica diz para onde o chat vai; o botão é só o ícone.
+      expect(soltar).toHaveTextContent("");
       expect(soltar).toHaveAttribute("title", expect.stringContaining("centro de baixo do canvas"));
       fireEvent.click(soltar);
       expect(aoAlternarFixo).toHaveBeenCalledWith(false);
     });
 
-    it("tem o mesmo botão ocultar do chat inferior, depois do soltar: sai da coluna e pede o chat oculto embaixo", () => {
-      const { aoAlternarFixo } = renderizarFixo();
+    it.each(["esquerda", "direita"] as const)(
+      "%s: quatro botões de ícone no cabeçalho, na ordem limpar, mover, soltar e ocultar (o ocultar no canto direito)",
+      (lado) => {
+        renderizarFixo(CONVERSA, lado);
 
-      const cabecalho = screen.getByRole("region", { name: "Conversa com o Claude" }).querySelector("header")!;
-      const botoes = within(cabecalho).getAllByRole("button");
-      expect(botoes.map((botao) => botao.textContent?.trim())).toEqual(["limpar", "soltar embaixo", "ocultar"]);
+        const cabecalho = screen.getByRole("region", { name: "Conversa com o Claude" }).querySelector("header")!;
+        const botoes = within(cabecalho).getAllByRole("button");
+        expect(botoes.map((botao) => botao.getAttribute("aria-label"))).toEqual([
+          "Limpar conversa",
+          `Mover o chat para a ${lado === "esquerda" ? "direita" : "esquerda"}`,
+          "Soltar embaixo",
+          "Ocultar o chat",
+        ]);
+        for (const botao of botoes) {
+          // No padrão dos botões das janelas, só ícone, com dica.
+          expect(botao).toHaveClass("botao-do-no");
+          expect(botao).toHaveTextContent("");
+          expect(botao.querySelector("svg")).not.toBeNull();
+          expect(botao).toHaveAttribute("title");
+        }
+        expect(botoes.at(-1)).toHaveAttribute("aria-label", "Ocultar o chat");
+      },
+    );
 
-      fireEvent.click(within(cabecalho).getByRole("button", { name: "ocultar" }));
+    it.each(["esquerda", "direita"] as const)("%s: ocultar sai da coluna e pede o chat oculto embaixo", (lado) => {
+      const { aoAlternarFixo } = renderizarFixo(CONVERSA, lado);
+
+      fireEvent.click(screen.getByRole("button", { name: "Ocultar o chat" }));
+      expect(aoAlternarFixo).toHaveBeenCalledTimes(1);
       expect(aoAlternarFixo).toHaveBeenCalledWith(false, true);
+    });
+
+    it.each(["esquerda", "direita"] as const)("%s: soltar embaixo chama aoAlternarFixo(false) sem ocultar", (lado) => {
+      const { aoAlternarFixo } = renderizarFixo(CONVERSA, lado);
+
+      fireEvent.click(screen.getByRole("button", { name: "Soltar embaixo" }));
+      expect(aoAlternarFixo).toHaveBeenCalledTimes(1);
+      expect(aoAlternarFixo).toHaveBeenCalledWith(false);
+    });
+
+    it.each(["esquerda", "direita"] as const)("%s: limpar conversa pede ao servidor que limpe o chat", async (lado) => {
+      const limpar = vi.spyOn(api, "limparChat").mockResolvedValue(null);
+      renderizarFixo(CONVERSA, lado);
+
+      fireEvent.click(screen.getByRole("button", { name: "Limpar conversa" }));
+      await waitFor(() => expect(limpar).toHaveBeenCalledTimes(1));
+    });
+
+    it("limpar conversa fica desabilitado enquanto o Claude responde, com a dica do motivo", () => {
+      const limpar = vi.spyOn(api, "limparChat").mockResolvedValue(null);
+      renderizarFixo(RESPONDENDO);
+
+      const botao = screen.getByRole("button", { name: "Limpar conversa" });
+      expect(botao).toBeDisabled();
+      expect(botao).toHaveAttribute("title", "Cancele a resposta antes de limpar.");
+      fireEvent.click(botao);
+      expect(limpar).not.toHaveBeenCalled();
+    });
+
+    it("mover para o outro lado troca a preferência do lado, nos dois sentidos, sem chamar aoAlternarFixo", () => {
+      const esquerda = renderizarFixo(CONVERSA, "esquerda");
+      fireEvent.click(screen.getByRole("button", { name: "Mover o chat para a direita" }));
+      expect(JSON.parse(localStorage.getItem(CHAVE_DAS_PREFERENCIAS_DA_TELA) ?? "{}")).toMatchObject({
+        ladoDoChatFixo: "direita",
+      });
+      expect(esquerda.aoAlternarFixo).not.toHaveBeenCalled();
+      cleanup();
+
+      renderizarFixo(CONVERSA, "direita");
+      fireEvent.click(screen.getByRole("button", { name: "Mover o chat para a esquerda" }));
+      expect(JSON.parse(localStorage.getItem(CHAVE_DAS_PREFERENCIAS_DA_TELA) ?? "{}")).toMatchObject({
+        ladoDoChatFixo: "esquerda",
+      });
+    });
+
+    it("sem aoAlternarFixo, a coluna só tem limpar e mover (sem soltar nem ocultar)", () => {
+      render(
+        <ChatRapido
+          chat={CONVERSA}
+          desconectado={false}
+          erroAoCarregar={null}
+          aoMudarPreferencias={vi.fn()}
+          aoAbrirTerminal={vi.fn()}
+          temVagaPara={vi.fn().mockReturnValue(true)}
+          aoAtualizarOrquestradores={vi.fn().mockResolvedValue(undefined)}
+          orquestradores={[]}
+          fixo
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: "Limpar conversa" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Soltar embaixo" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Ocultar o chat" })).not.toBeInTheDocument();
     });
 
     it("o chat inferior montado com `comecaOculto` (o ocultar da coluna) mostra só o \"mostrar conversa\", que o reexibe embaixo", () => {
@@ -1920,7 +2071,7 @@ describe("ChatRapido", () => {
       });
     });
 
-    it("flutuante, o cabeçalho tem o botão de fixar à esquerda (e o ocultar)", () => {
+    it("flutuante, o botão de fixar fica no fim da barra, depois do enviar (e o cabeçalho tem o ocultar)", () => {
       const aoAlternarFixo = vi.fn();
       render(
         <ChatRapido
@@ -1938,7 +2089,19 @@ describe("ChatRapido", () => {
 
       expect(screen.queryByRole("complementary")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "ocultar" })).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "Fixar o chat à esquerda" }));
+      expect(screen.queryByRole("button", { name: "Soltar embaixo" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Mover o chat para a direita" })).not.toBeInTheDocument();
+      const fixar = screen.getByRole("button", { name: "Fixar o chat à esquerda" });
+      // Só o ícone, no fim da linha da barra (depois do enviar), e não mais no cabeçalho da conversa.
+      expect(fixar).toHaveClass("botao-icone", "botao-de-fixar");
+      expect(fixar).toHaveTextContent("");
+      expect(fixar.querySelector("svg")).not.toBeNull();
+      expect(fixar.closest(".linha-do-composer")).not.toBeNull();
+      expect(fixar.closest("header")).toBeNull();
+      expect(
+        Boolean(screen.getByRole("button", { name: "enviar ⏎" }).compareDocumentPosition(fixar) & Node.DOCUMENT_POSITION_FOLLOWING),
+      ).toBe(true);
+      fireEvent.click(fixar);
       expect(aoAlternarFixo).toHaveBeenCalledWith(true);
     });
 

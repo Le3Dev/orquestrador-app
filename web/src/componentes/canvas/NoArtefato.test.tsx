@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type NodeProps, ReactFlowProvider } from "@xyflow/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { Profiler, type ReactNode } from "react";
 
 import { apiDosArtefatos, type ResumoDoArtefato } from "../../shared/api/artefatos";
@@ -11,6 +13,7 @@ import {
   ProvedorDosArtefatos,
 } from "../../shared/canvas/artefatos";
 import type { NoArtefato as TipoDoNo } from "../../shared/canvas/nos";
+import { TAG_DO_SCRIPT_DE_NAVEGACAO } from "../../shared/navegacaoDoArtefato";
 import {
   CONFIRMACAO_PARA_APAGAR_O_ARTEFATO,
   DURACAO_DO_DESTAQUE_MS,
@@ -18,7 +21,8 @@ import {
   POLITICA_DO_ARTEFATO,
 } from "./NoArtefato";
 
-const META = `<meta http-equiv="Content-Security-Policy" content="${POLITICA_DO_ARTEFATO}">`;
+/** A política de segurança e o script de voltar e avançar, que entram juntos no começo da página. */
+const META = `<meta http-equiv="Content-Security-Policy" content="${POLITICA_DO_ARTEFATO}">${TAG_DO_SCRIPT_DE_NAVEGACAO}`;
 
 function versao(numero: number, tamanho = 2150) {
   return { numero, criadaEm: `2026-11-0${numero}T12:00:00Z`, tamanho };
@@ -165,6 +169,95 @@ describe("NoArtefato", () => {
     const modal = screen.getByRole("dialog", { name: "Relatório de vendas" });
     expect(within(modal).queryByRole("button", { name: "Usar a página" })).not.toBeInTheDocument();
     expect(within(modal).getByTitle("Conteúdo do artefato: Relatório de vendas")).not.toHaveStyle({ pointerEvents: "none" });
+  });
+
+  describe("voltar e avançar dentro da página", () => {
+    const AVISO = { origem: "orquestrador-artefato", suportado: true, podeVoltar: true, podeAvancar: false };
+
+    /** A mensagem chega à janela do app, como a do iframe (`source` é a janela dele). */
+    function avisar(de: Window | null, dados: unknown): void {
+      act(() => {
+        window.dispatchEvent(new MessageEvent("message", { data: dados, source: de }));
+      });
+    }
+
+    async function abrir(alteracoes: Partial<ResumoDoArtefato> = {}) {
+      vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("<p>x</p>");
+      const { tela } = preparar(artefato("a1", alteracoes));
+      render(tela(<NoArtefato {...propsDoNo("a1")} />));
+      const pagina = (await iframe()) as HTMLIFrameElement;
+      return { pagina, janelaDaPagina: pagina.contentWindow as Window };
+    }
+
+    it("sem o aviso da página, não há ← nem →; com o aviso, aparecem e seguem o estado dela", async () => {
+      const { janelaDaPagina } = await abrir();
+      expect(screen.queryByRole("button", { name: "Voltar" })).not.toBeInTheDocument();
+
+      avisar(janelaDaPagina, AVISO);
+      expect(screen.getByRole("button", { name: "Voltar" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Avançar" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Voltar" })).toHaveClass("nodrag");
+
+      avisar(janelaDaPagina, { ...AVISO, podeVoltar: false, podeAvancar: true });
+      expect(screen.getByRole("button", { name: "Voltar" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Avançar" })).toBeEnabled();
+    });
+
+    it("só vale a mensagem que vem da janela do iframe, no formato certo", async () => {
+      const { janelaDaPagina } = await abrir();
+
+      avisar(window, AVISO);
+      avisar(null, AVISO);
+      avisar(janelaDaPagina, { ...AVISO, origem: "outra" });
+      avisar(janelaDaPagina, { ...AVISO, podeVoltar: "sim" });
+      avisar(janelaDaPagina, "voltar");
+      avisar(janelaDaPagina, null);
+      expect(screen.queryByRole("button", { name: "Voltar" })).not.toBeInTheDocument();
+    });
+
+    it("cada botão manda o comando só para a janela do iframe", async () => {
+      const { janelaDaPagina } = await abrir();
+      const enviar = vi.spyOn(janelaDaPagina, "postMessage").mockImplementation(() => undefined);
+      avisar(janelaDaPagina, { ...AVISO, podeAvancar: true });
+
+      fireEvent.click(screen.getByRole("button", { name: "Voltar" }));
+      expect(enviar).toHaveBeenLastCalledWith({ origem: "orquestrador-app", acao: "voltar" }, "*");
+      fireEvent.click(screen.getByRole("button", { name: "Avançar" }));
+      expect(enviar).toHaveBeenLastCalledWith({ origem: "orquestrador-app", acao: "avancar" }, "*");
+    });
+
+    it("quando a página carrega, o app pede o estado (a mensagem inicial dela pode ter chegado antes)", async () => {
+      const { pagina, janelaDaPagina } = await abrir();
+      const enviar = vi.spyOn(janelaDaPagina, "postMessage").mockImplementation(() => undefined);
+
+      fireEvent.load(pagina);
+      expect(enviar).toHaveBeenCalledWith({ origem: "orquestrador-app", acao: "estado" }, "*");
+    });
+
+    it("Markdown não tem histórico: sem ← e →", async () => {
+      vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("# Plano");
+      const { tela } = preparar(artefato("a1", { formato: "markdown", arquivo: "plano.md" }));
+      render(tela(<NoArtefato {...propsDoNo("a1")} />));
+      await screen.findByRole("heading", { name: "Plano" });
+
+      avisar(window, AVISO);
+      expect(screen.queryByRole("button", { name: "Voltar" })).not.toBeInTheDocument();
+    });
+
+    it("em tela cheia, a página nova avisa e a barra do modal ganha os botões", async () => {
+      const { janelaDaPagina } = await abrir();
+      avisar(janelaDaPagina, AVISO);
+      fireEvent.click(screen.getByRole("button", { name: "Ampliar o artefato" }));
+
+      const modal = screen.getByRole("dialog", { name: "Relatório de vendas" });
+      // O iframe do canvas saiu: o histórico dele não vale mais.
+      expect(within(modal).queryByRole("button", { name: "Voltar" })).not.toBeInTheDocument();
+
+      const noModal = within(modal).getByTitle("Conteúdo do artefato: Relatório de vendas") as HTMLIFrameElement;
+      avisar(noModal.contentWindow, AVISO);
+      expect(within(modal).getByRole("button", { name: "Voltar" })).toBeEnabled();
+      expect(within(modal).getByRole("button", { name: "Avançar" })).toBeDisabled();
+    });
   });
 
   it("sem <head>, a política entra no começo do documento (depois do DOCTYPE)", async () => {
@@ -426,6 +519,233 @@ describe("NoArtefato", () => {
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(await within(container).findByTitle("Conteúdo do artefato: Relatório de vendas")).toBeInTheDocument();
+  });
+
+  it("o clique no fundo também fecha a tela cheia, que começa abaixo da faixa de arraste do app", async () => {
+    vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("<p>x</p>");
+    const faixa = document.createElement("div");
+    faixa.className = "faixa-de-arrasto";
+    faixa.getBoundingClientRect = () => ({ bottom: 36 }) as DOMRect;
+    document.body.append(faixa);
+    const { tela } = preparar(artefato("a1"));
+    render(tela(<NoArtefato {...propsDoNo("a1")} />));
+    await iframe();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ampliar o artefato" }));
+    const fundo = screen.getByTestId("fundo-da-tela-cheia");
+    expect(fundo).toHaveStyle({ top: "36px" });
+
+    // Clicar dentro da caixa não fecha; no fundo, sim.
+    fireEvent.mouseDown(screen.getByRole("dialog", { name: "Relatório de vendas" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.mouseDown(fundo);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    faixa.remove();
+  });
+
+  it("a barra da tela cheia não leva o rótulo solto \"Esc fecha\"; o fechar guarda a dica do Esc e, no navegador, o topo é o da janela", async () => {
+    vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("<p>x</p>");
+    const { tela } = preparar(artefato("a1"));
+    render(tela(<NoArtefato {...propsDoNo("a1")} />));
+    await iframe();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ampliar o artefato" }));
+
+    const modal = screen.getByRole("dialog", { name: "Relatório de vendas" });
+    expect(within(modal).queryByText("Esc fecha")).not.toBeInTheDocument();
+    expect(within(modal).getByRole("button", { name: "Fechar a tela cheia" })).toHaveAttribute("title", "Fechar a tela cheia (Esc)");
+    // Sem faixa de arraste (navegador), a tela cheia começa no topo.
+    expect(screen.getByTestId("fundo-da-tela-cheia")).toHaveStyle({ top: "0px" });
+  });
+
+  describe("desenho na tela cheia", () => {
+    // O jsdom não tem PointerEvent: sem ele, o fireEvent manda um Event sem botão, clientX nem pointerId.
+    class EventoDePonteiroFalso extends MouseEvent {
+      readonly pointerId: number;
+      constructor(tipo: string, inicio: PointerEventInit = {}) {
+        super(tipo, inicio);
+        this.pointerId = inicio.pointerId ?? 0;
+      }
+    }
+    beforeEach(() => vi.stubGlobal("PointerEvent", EventoDePonteiroFalso));
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      localStorage.clear();
+    });
+
+    async function abrirEmTelaCheia(id = "a1") {
+      vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("<p>x</p>");
+      const { tela } = preparar(artefato(id));
+      render(tela(<NoArtefato {...propsDoNo(id)} />));
+      await iframe();
+      fireEvent.click(screen.getByRole("button", { name: "Ampliar o artefato" }));
+      return screen.getByRole("dialog", { name: "Relatório de vendas" });
+    }
+
+    const caneta = () => screen.getByRole("button", { name: "Desenhar sobre a página" });
+    const camada = () => screen.getByTestId("desenho-da-tela-cheia");
+    const paginaDoModal = () => screen.getByTitle("Conteúdo do artefato: Relatório de vendas");
+    const barra = () => screen.queryByRole("toolbar", { name: "Desenho" });
+
+    function arrastar(pontos: readonly [number, number][]) {
+      const [primeiro, ...resto] = pontos;
+      const svg = camada().querySelector("svg") as SVGSVGElement;
+      fireEvent.pointerDown(svg, { button: 0, pointerId: 1, clientX: primeiro?.[0], clientY: primeiro?.[1] });
+      for (const [x, y] of resto) {
+        fireEvent.pointerMove(svg, { pointerId: 1, clientX: x, clientY: y });
+      }
+      const ultimo = resto.at(-1) ?? primeiro;
+      fireEvent.pointerUp(svg, { pointerId: 1, clientX: ultimo?.[0], clientY: ultimo?.[1] });
+    }
+
+    it("o botão da caneta existe só na tela cheia e liga e desliga o modo, com a barrinha de ferramentas", async () => {
+      vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("<p>x</p>");
+      const { tela } = preparar(artefato("a1"));
+      render(tela(<NoArtefato {...propsDoNo("a1")} />));
+      await iframe();
+      expect(screen.queryByRole("button", { name: "Desenhar sobre a página" })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Ampliar o artefato" }));
+      expect(caneta()).toHaveAttribute("aria-pressed", "false");
+      expect(barra()).not.toBeInTheDocument();
+      expect(camada()).toHaveAttribute("data-ligado", "false");
+
+      fireEvent.click(caneta());
+      expect(caneta()).toHaveAttribute("aria-pressed", "true");
+      expect(camada()).toHaveAttribute("data-ligado", "true");
+      const ferramentas = within(barra() as HTMLElement);
+      for (const nome of ["Caneta", "Seta", "Retângulo", "Texto", "Borracha", "Desfazer"]) {
+        expect(ferramentas.getByRole("button", { name: nome })).toBeInTheDocument();
+      }
+      expect(ferramentas.getAllByRole("button", { name: /^Cor / })).toHaveLength(6);
+      expect(ferramentas.queryByRole("button", { name: "Marca-texto" })).not.toBeInTheDocument();
+
+      fireEvent.click(caneta());
+      expect(barra()).not.toBeInTheDocument();
+      expect(camada()).toHaveAttribute("data-ligado", "false");
+
+      // O fechar da barrinha também desliga.
+      fireEvent.click(caneta());
+      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Desligar o desenho" }));
+      expect(barra()).not.toBeInTheDocument();
+    });
+
+    it("o traço feito aparece, fica visível com o modo desligado e o Desfazer o tira", async () => {
+      await abrirEmTelaCheia();
+      fireEvent.click(caneta());
+
+      arrastar([[10, 10], [50, 30], [90, 20]]);
+      expect(camada().querySelectorAll('[data-traco="caneta"]')).toHaveLength(1);
+
+      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Seta" }));
+      arrastar([[20, 80], [120, 80]]);
+      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Retângulo" }));
+      arrastar([[30, 30], [100, 70]]);
+      expect(camada().querySelectorAll("[data-traco]")).toHaveLength(3);
+
+      fireEvent.click(caneta());
+      expect(camada().querySelectorAll("[data-traco]")).toHaveLength(3);
+
+      fireEvent.click(caneta());
+      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Desfazer" }));
+      expect(camada().querySelector('[data-traco="retangulo"]')).not.toBeInTheDocument();
+      expect(camada().querySelectorAll("[data-traco]")).toHaveLength(2);
+    });
+
+    it("o texto solto vira traço com Enter", async () => {
+      await abrirEmTelaCheia();
+      fireEvent.click(caneta());
+      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Texto" }));
+      fireEvent.pointerDown(camada().querySelector("svg") as SVGSVGElement, { button: 0, pointerId: 1, clientX: 40, clientY: 50 });
+      const campo = screen.getByRole("textbox", { name: "Texto solto" });
+      fireEvent.change(campo, { target: { value: "Ver aqui" } });
+      fireEvent.keyDown(campo, { key: "Enter" });
+      expect(camada().querySelector("text")).toHaveTextContent("Ver aqui");
+    });
+
+    it("grava por artefato e, ao reabrir a tela cheia, os traços voltam (os de outro artefato não)", async () => {
+      await abrirEmTelaCheia("a1");
+      fireEvent.click(caneta());
+      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Seta" }));
+      arrastar([[20, 80], [120, 80]]);
+
+      const salvo = JSON.parse(localStorage.getItem("orquestrador-agentes:canvas:v1:desenho-da-tela-cheia") ?? "{}") as Record<
+        string,
+        { tipo: string; pontos: { x: number; y: number }[] }[]
+      >;
+      expect(Object.keys(salvo)).toEqual(["a1"]);
+      expect(salvo.a1?.[0]).toMatchObject({ tipo: "seta", pontos: [{ x: 20, y: 80 }, { x: 120, y: 80 }] });
+      // O desenho do canvas não é tocado.
+      expect(localStorage.getItem("orquestrador-agentes:canvas:v1")).toBeNull();
+
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Fechar a tela cheia" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Ampliar o artefato" }));
+      expect(camada().querySelectorAll('[data-traco="seta"]')).toHaveLength(1);
+      // Reaberta, começa desligada.
+      expect(camada()).toHaveAttribute("data-ligado", "false");
+      expect(barra()).not.toBeInTheDocument();
+    });
+
+    it("um desenho corrompido no armazenamento é descartado, sem derrubar a tela cheia", async () => {
+      localStorage.setItem("orquestrador-agentes:canvas:v1:desenho-da-tela-cheia", "{isso não é json");
+      await abrirEmTelaCheia();
+      expect(camada().querySelectorAll("[data-traco]")).toHaveLength(0);
+    });
+
+    it("Esc com o desenho ligado só o desliga; desligado, fecha a tela cheia", async () => {
+      await abrirEmTelaCheia();
+      fireEvent.click(caneta());
+
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(caneta()).toHaveAttribute("aria-pressed", "false");
+      expect(barra()).not.toBeInTheDocument();
+
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("Esc com um texto em edição desliga o desenho, descarta o texto e não fecha a tela cheia", async () => {
+      await abrirEmTelaCheia();
+      fireEvent.click(caneta());
+      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Texto" }));
+      fireEvent.pointerDown(camada().querySelector("svg") as SVGSVGElement, { button: 0, pointerId: 1, clientX: 40, clientY: 50 });
+      fireEvent.change(screen.getByRole("textbox", { name: "Texto solto" }), { target: { value: "rascunho" } });
+
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Texto solto" }), { key: "Escape" });
+
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(screen.queryByRole("textbox", { name: "Texto solto" })).not.toBeInTheDocument();
+      expect(camada().querySelector("text")).not.toBeInTheDocument();
+      expect(barra()).not.toBeInTheDocument();
+    });
+
+    it("a página fica sem ponteiro só com o modo ligado", async () => {
+      await abrirEmTelaCheia();
+      expect(paginaDoModal()).not.toHaveStyle({ pointerEvents: "none" });
+
+      fireEvent.click(caneta());
+      expect(paginaDoModal()).toHaveStyle({ pointerEvents: "none" });
+      expect(camada()).toHaveClass("camada-de-desenho-ativa");
+
+      fireEvent.click(caneta());
+      expect(paginaDoModal()).not.toHaveStyle({ pointerEvents: "none" });
+      expect(camada()).not.toHaveClass("camada-de-desenho-ativa");
+    });
+
+    it("sem o modo ligado, a camada não tem como pegar o mouse (o CSS é lido do arquivo)", () => {
+      const css = readFileSync(resolve(__dirname, "../../theme/index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      const regras = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, seletores = "", corpo = ""]) => ({
+        seletores: seletores.split(",").map((seletor) => seletor.trim()),
+        corpo,
+      }));
+      const base = regras.find(({ seletores }) => seletores.includes(".camada-de-desenho"));
+      const ativa = regras.find(({ seletores }) => seletores.includes(".camada-de-desenho-ativa .camada-de-desenho-svg"));
+      expect(base?.corpo).toMatch(/pointer-events:\s*none/);
+      expect(ativa?.corpo).toMatch(/pointer-events:\s*auto/);
+    });
   });
 
   it("enquanto o resumo não chega, avisa; se a lista falhar, mostra o motivo", () => {

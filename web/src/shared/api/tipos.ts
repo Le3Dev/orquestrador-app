@@ -31,6 +31,8 @@ export interface DadosDaConfiguracao {
   nivelDePermissao: NivelDePermissao;
   /** Libera `git commit`/`git push` só quando o usuário pede na mensagem. Desligado por padrão. */
   permitirCommitEPush: boolean;
+  /** O orquestrador e os subagentes podem publicar artefatos online no claude.ai. Desligado por padrão. */
+  permitirArtefatosOnline: boolean;
   /**
    * Instruções do usuário acrescentadas ao fim do bloco de cada pedido. Vazias
    * por padrão: aí vale o padrão global (`DadosDasPreferencias.instrucoesPadrao`), se houver.
@@ -116,6 +118,7 @@ export interface PreviaDoPrompt {
 /** Campos que faltam nos eventos gravados antes de existirem. */
 type CamposPosterioresDaConfiguracao =
   | "permitirCommitEPush"
+  | "permitirArtefatosOnline"
   | "esforcoDoOrquestrador"
   | "esforcoDosSubagentes"
   | "instrucoesPersonalizadas";
@@ -520,6 +523,8 @@ export type EventoRegistrado = EventoDeOrquestracao & { sequencia: number; em: s
 export interface PreferenciasDoChat {
   modelo: ModeloClaude;
   esforco: EsforcoDeRaciocinio;
+  /** O chat pode publicar artefatos online no claude.ai. Desligado por padrão. */
+  permitirArtefatosOnline: boolean;
 }
 
 /**
@@ -745,66 +750,4 @@ export interface ConteudoDoArquivo {
   /** Bytes. */
   tamanho: number;
   linhas: number;
-}
-
-// ---------------- Modelos de canvas (item 35) ----------------
-
-/** Quantos modelos o servidor guarda, e quantos itens cada um leva. */
-export const MAXIMO_DE_MODELOS_DE_CANVAS = 50;
-export const MAXIMO_DE_ITENS_POR_MODELO = 30;
-export const TAMANHO_MAXIMO_DO_NOME_DO_MODELO = 80;
-
-/**
- * Onde o item fica, relativo ao canto de cima à esquerda do arranjo. Sem
- * `largura` e `altura`, a janela abre no tamanho padrão.
- */
-interface LugarNoModelo {
-  x: number;
-  y: number;
-  largura?: number;
-  altura?: number;
-}
-
-/** Um item de um modelo de canvas: só o que serve para recriar (nunca conversa, worktree ou id). */
-export type ItemDoModelo =
-  | (LugarNoModelo & {
-      tipo: "orquestrador";
-      nome: string;
-      /** Ausente ou vazia (ex.: exportado sem caminhos): a tela pede a pasta ao recriar. */
-      pastaDeTrabalho?: string;
-      configuracao: Partial<DadosDaConfiguracao> &
-        Pick<DadosDaConfiguracao, "modeloDoOrquestrador" | "modeloDosSubagentes" | "quantidadeDeSubagentes" | "nivelDePermissao">;
-    })
-  | (LugarNoModelo & { tipo: "nota"; titulo: string; texto: string })
-  | (LugarNoModelo & { tipo: "previa"; url: string })
-  | (LugarNoModelo & {
-      tipo: "terminal";
-      /** Ausente ou vazia: a tela pede a pasta ao recriar. */
-      pasta?: string;
-      /** Só guardado e mostrado: recriar nunca o executa nem o digita. */
-      comando?: string;
-    });
-
-/** O que se salva num modelo (POST) e o que a importação devolve depois de conferir o arquivo. */
-export interface ConteudoDoModeloDeCanvas {
-  nome: string;
-  /** Um emoji. */
-  icone: string;
-  /** `#rrggbb`. */
-  cor: string;
-  itens: ItemDoModelo[];
-}
-
-export interface DadosDoModeloDeCanvas extends ConteudoDoModeloDeCanvas {
-  id: string;
-  criadoEm: string;
-  atualizadoEm: string;
-}
-
-/** O arquivo `.json` que "Exportar" baixa e "Importar" lê. */
-export interface ArquivoDoModeloDeCanvas {
-  formato: "orquestrador-de-agentes/modelo-de-canvas";
-  versao: 1;
-  exportadoEm: string;
-  modelo: ConteudoDoModeloDeCanvas;
 }

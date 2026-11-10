@@ -33,6 +33,7 @@ function pergunta(alteracoes: Partial<PerguntaAoMotorDeChat> = {}): PerguntaAoMo
     pastaDeArtefatos: PASTA_DE_ARTEFATOS,
     modelo: "haiku",
     esforco: "padrao",
+    permitirArtefatosOnline: false,
     alteracoesAutorizadas: false,
     ...alteracoes,
   };
@@ -167,6 +168,48 @@ describe("montarArgumentosDoChat", () => {
     expect(valoresDe(montarArgumentosDoChat(pergunta({ esforco: "maximo" }), arquivos), "--effort")).toEqual(["max"]);
   });
 
+  describe("artefatos online no claude.ai", () => {
+    const ONLINE = ["Artifact", "ArtifactCheck", "ArtifactData"];
+
+    it("desligada, nenhuma ferramenta online entra", () => {
+      for (const alteracoesAutorizadas of [false, true]) {
+        expect(montarArgumentosDoChat(pergunta({ alteracoesAutorizadas }), arquivos).join(" ")).not.toContain("Artifact");
+      }
+    });
+
+    it("ligada, entram em --tools e em --allowedTools, com ou sem autorização", () => {
+      const sem = montarArgumentosDoChat(pergunta({ permitirArtefatosOnline: true }), arquivos);
+      const com = montarArgumentosDoChat(pergunta({ permitirArtefatosOnline: true, alteracoesAutorizadas: true }), arquivos);
+
+      expect(valoresDe(sem, "--tools")).toEqual([...TODAS, ...ONLINE]);
+      expect(valoresDe(sem, "--allowedTools")).toEqual([...LEITURA, ...REGRAS_DE_ARTEFATO, ...ONLINE]);
+      expect(valoresDe(com, "--allowedTools")).toEqual([...TODAS, ...ONLINE]);
+    });
+
+    it("o ambiente leva as variáveis que habilitam os artefatos em claude -p só com a opção ligada", () => {
+      const ligado = montarAmbienteDoChat({ PATH: "x" }, "padrao", true);
+      const desligado = montarAmbienteDoChat({ PATH: "x" }, "padrao");
+
+      expect(ligado.CLAUDE_CODE_ARTIFACT).toBe("1");
+      expect(ligado.CLAUDE_CODE_ARTIFACT_AUTO_OPEN).toBe("0");
+      expect(desligado).not.toHaveProperty("CLAUDE_CODE_ARTIFACT");
+      expect(desligado).not.toHaveProperty("CLAUDE_CODE_ARTIFACT_AUTO_OPEN");
+    });
+
+    it("desligado apaga a CLAUDE_CODE_ARTIFACT herdada; ligado força o AUTO_OPEN em 0", () => {
+      const herdado = { PATH: "x", CLAUDE_CODE_ARTIFACT: "1", CLAUDE_CODE_ARTIFACT_AUTO_OPEN: "1" };
+
+      expect(montarAmbienteDoChat(herdado, "padrao")).not.toHaveProperty("CLAUDE_CODE_ARTIFACT");
+      expect(montarAmbienteDoChat(herdado, "padrao", true).CLAUDE_CODE_ARTIFACT_AUTO_OPEN).toBe("0");
+    });
+
+    it("com ultracode, o Workflow vem antes das ferramentas online", () => {
+      const argumentos = montarArgumentosDoChat(pergunta({ esforco: "ultracode", permitirArtefatosOnline: true }), arquivos);
+
+      expect(valoresDe(argumentos, "--tools")).toEqual([...TODAS, "Workflow", ...ONLINE]);
+    });
+  });
+
   describe("com esforço ultracode", () => {
     it("manda --effort ultracode e acrescenta o Workflow às ferramentas da sessão", () => {
       const argumentos = montarArgumentosDoChat(pergunta({ esforco: "ultracode" }), arquivos);
@@ -240,6 +283,25 @@ describe("montarAmbienteDoChat", () => {
     expect(ambiente.CLAUDECODE).toBeUndefined();
     expect(ambiente.CLAUDE_CODE_ENTRYPOINT).toBeUndefined();
     expect(ambiente.CLAUDE_CODE_SESSION_ID).toBeUndefined();
+    expect(ambiente.PATH).toBe("x");
+  });
+
+  it("não repassa a chave de acesso do app, a porta nem a pasta de dados", () => {
+    const ambiente = montarAmbienteDoChat(
+      {
+        ...base,
+        ORQUESTRADOR_CHAVE_DE_ACESSO: "a".repeat(64),
+        ORQUESTRADOR_URL_DE_DOWNLOAD: "https://x",
+        PORTA: "3200",
+        PASTA_DADOS: "/dados",
+      },
+      "padrao",
+    );
+
+    expect(ambiente.ORQUESTRADOR_CHAVE_DE_ACESSO).toBeUndefined();
+    expect(ambiente.ORQUESTRADOR_URL_DE_DOWNLOAD).toBeUndefined();
+    expect(ambiente.PORTA).toBeUndefined();
+    expect(ambiente.PASTA_DADOS).toBeUndefined();
     expect(ambiente.PATH).toBe("x");
   });
 

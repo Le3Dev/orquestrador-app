@@ -32,13 +32,13 @@ import {
 import { BarraDeDesenho } from "./BarraDeDesenho";
 
 /** Distância mínima, em pixels da tela, entre dois pontos seguidos da mão livre. */
-const DISTANCIA_MINIMA_ENTRE_PONTOS_PX = 2;
+export const DISTANCIA_MINIMA_ENTRE_PONTOS_PX = 2;
 /** Quanto a mão livre pode se desviar (em pixels da tela) ao simplificar os pontos no fim do traço. */
-const TOLERANCIA_DA_SIMPLIFICACAO_PX = 0.8;
+export const TOLERANCIA_DA_SIMPLIFICACAO_PX = 0.8;
 /** O raio da borracha, em pixels da tela. */
-const RAIO_DA_BORRACHA_PX = 8;
+export const RAIO_DA_BORRACHA_PX = 8;
 /** Quantos passos o desfazer guarda. */
-const LIMITE_DO_DESFAZER = 100;
+export const LIMITE_DO_DESFAZER = 100;
 
 /** Foco num campo de texto (o texto solto, um terminal, uma nota): a tecla é do campo, não do desenho. */
 function focoEmCampoDeTexto(alvo: EventTarget | null): boolean {
@@ -57,7 +57,7 @@ function distancia(a: Ponto, b: Ponto): number {
 }
 
 /** Um traço desenhado. Memorizado: mover o canvas só troca a transformação do grupo, não cada traço. */
-const TracoDesenhado = memo(function TracoDesenhado({ traco }: { traco: TracoDoDesenho }) {
+export const TracoDesenhado = memo(function TracoDesenhado({ traco }: { traco: TracoDoDesenho }) {
   const classe = `traco traco-${traco.tipo} traco-cor-${traco.cor}`;
   const [de, ate] = traco.pontos;
   if (de === undefined) {
@@ -115,7 +115,7 @@ const TracoDesenhado = memo(function TracoDesenhado({ traco }: { traco: TracoDoD
 });
 
 /** O texto solto sendo digitado: onde começa e com que cor e espessura. */
-interface TextoEmEdicao {
+export interface TextoEmEdicao {
   em: Ponto;
   valor: string;
   cor: CorDoDesenho;
@@ -145,7 +145,7 @@ interface Props {
  * Com a ferramenta Selecionar (ou a barra fechada), a camada não pega nenhum
  * clique: o canvas funciona como sempre. Com outra ferramenta, ela pega o
  * ponteiro do canvas inteiro (o arraste desenha em vez de mover a tela); a
- * roda e a pinça seguem para o canvas. Esc volta para Selecionar; Ctrl/Cmd+Z
+ * roda e a pinça seguem para o canvas. Esc volta para Selecionar e, de novo, fecha a barra; Ctrl/Cmd+Z
  * desfaz o último passo (traço, texto ou apagada). Cada mudança vai para o
  * layout salvo (`salvarDesenho`).
  */
@@ -365,6 +365,10 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
           gesto.current = null;
           setRascunho(null);
           setFerramentaEscolhida("selecionar");
+        } else {
+          // Já em Selecionar, o Esc fecha a barra (o desenho continua no canvas).
+          evento.preventDefault();
+          fechar();
         }
         return;
       }
@@ -376,7 +380,7 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
     };
     window.addEventListener("keydown", aoApertarTecla);
     return () => window.removeEventListener("keydown", aoApertarTecla);
-  }, [aberta, ferramentaEscolhida, desfazer]);
+  }, [aberta, ferramentaEscolhida, desfazer, fechar]);
 
   // A roda e a pinça sobre a camada seguem para o canvas (zoom e pan), como fora dela; o
   // preventDefault segura o zoom da página no Ctrl+roda.
@@ -451,7 +455,7 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
         )}
       </div>
       {aberta && (
-        <Panel position="top-center" className="painel-da-barra-de-desenho">
+        <Panel position="bottom-left" className="painel-da-barra-de-desenho">
           <BarraDeDesenho
             ferramenta={ferramenta}
             cor={cor}

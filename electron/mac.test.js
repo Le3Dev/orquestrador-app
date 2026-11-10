@@ -16,14 +16,14 @@ describe("electron/mac", () => {
     expect(mac.juntarPaths(null, "/usr/bin")).toBe("/usr/bin");
   });
 
-  it.runIf(noMac)("no Mac, troca os botões pintados pelas bolinhas nativas, centradas na barra", () => {
+  it.runIf(noMac)("no Mac, troca os botões pintados pelas bolinhas nativas, centradas com as ilhas do topo", () => {
     const principal = mac.ajustarOpcoesDaJanela(opcoesDoWindows, true);
     const pequena = mac.ajustarOpcoesDaJanela(opcoesDoWindows, false);
 
     expect(principal).not.toHaveProperty("titleBarOverlay");
     expect(principal.titleBarStyle).toBe("hidden");
-    // Barra de título do app com 36px: (36 - 14) / 2 = 11.
-    expect(principal.trafficLightPosition).toEqual({ x: 14, y: 11 });
+    // Sem barra de título: ilhas do topo com 16px de margem e 48px de altura (centro em 40): 40 - 14 / 2 = 33.
+    expect(principal.trafficLightPosition).toEqual({ x: 16, y: 33 });
     // Faixa de 40px das janelas de ativação e de configuração.
     expect(pequena.trafficLightPosition).toEqual({ x: 14, y: 13 });
     expect(principal.backgroundColor).toBe("#141413");

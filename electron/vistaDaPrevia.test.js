@@ -14,6 +14,7 @@ const {
   validarRetangulo,
   calcularLimites,
   navegacaoPermitida,
+  descartarAboutBlankDoInicio,
   permissaoLiberada,
   userAgentDeNavegador,
   criarVistasDaPrevia,
@@ -310,7 +311,28 @@ function montar({ bloqueada = false, registrar = undefined } = {}) {
       this.bounds = null;
       this.visivel = null;
       this.ouvintes = {};
+      // O histórico da vista: `entradas` e o índice da atual (`ativo`); os testes o mexem à mão.
+      const historico = { entradas: [], ativo: -1 };
+      this.historico = historico;
       this.webContents = {
+        navigationHistory: {
+          length: () => historico.entradas.length,
+          getActiveIndex: () => historico.ativo,
+          getEntryAtIndex: (indice) => ({ url: historico.entradas[indice] }),
+          removeEntryAtIndex: vi.fn((indice) => {
+            historico.entradas.splice(indice, 1);
+            if (indice < historico.ativo) historico.ativo -= 1;
+            return true;
+          }),
+          canGoBack: () => historico.ativo > 0,
+          canGoForward: () => historico.ativo < historico.entradas.length - 1,
+          goBack: vi.fn(() => {
+            historico.ativo -= 1;
+          }),
+          goForward: vi.fn(() => {
+            historico.ativo += 1;
+          }),
+        },
         isDestroyed: () => false,
         setUserAgent: vi.fn(),
         setWindowOpenHandler: vi.fn((fn) => {
@@ -387,6 +409,8 @@ describe("criarVistasDaPrevia: IPC", () => {
     expect(() => servico.aoAbrir(intruso, { id: "p1", url: "https://notion.so" })).toThrow(/só na janela principal/);
     await expect(servico.aoAtivar(intruso, { id: "p1", ativa: true })).rejects.toThrow(/só na janela principal/);
     expect(() => servico.aoRecarregar(intruso, { id: "p1" })).toThrow();
+    expect(() => servico.aoVoltar(intruso, { id: "p1" })).toThrow(/só na janela principal/);
+    expect(() => servico.aoAvancar(intruso, { id: "p1" })).toThrow(/só na janela principal/);
     expect(() => servico.aoFechar(intruso, { id: "p1" })).toThrow();
     await expect(servico.aoSairDasContas(intruso)).rejects.toThrow();
     // O envio de retângulo não responde: ignora em silêncio.
@@ -522,6 +546,8 @@ describe("criarVistasDaPrevia: IPC", () => {
       carregando: false,
       erro: null,
       origem: null,
+      podeVoltar: false,
+      podeAvancar: false,
     });
   });
 
@@ -660,13 +686,88 @@ describe("criarVistasDaPrevia: IPC", () => {
     ouvintes["did-finish-load"]();
 
     const estados = janelaWc.send.mock.calls.map(([, evento]) => evento);
+    const sem = { podeVoltar: false, podeAvancar: false };
     expect(estados).toEqual([
-      { tipo: "estado", id: "p1", carregando: true, erro: null, origem: "https://github.com" },
-      { tipo: "estado", id: "p1", carregando: true, erro: null, origem: "https://github.com" },
-      { tipo: "estado", id: "p1", carregando: true, erro: null, origem: "https://accounts.google.com" },
-      { tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://accounts.google.com" },
+      { tipo: "estado", id: "p1", carregando: true, erro: null, origem: "https://github.com", ...sem },
+      { tipo: "estado", id: "p1", carregando: true, erro: null, origem: "https://github.com", ...sem },
+      { tipo: "estado", id: "p1", carregando: true, erro: null, origem: "https://accounts.google.com", ...sem },
+      { tipo: "estado", id: "p1", carregando: false, erro: null, origem: "https://accounts.google.com", ...sem },
     ]);
     expect(JSON.stringify(estados)).not.toMatch(/segredo|client_id|login/);
+  });
+
+  it("o estado leva podeVoltar e podeAvancar do histórico da vista, a cada navegação", () => {
+    const { servico, principal, vistas, janelaWc } = montar();
+    servico.aoAbrir(principal, { id: "p1", url: "https://github.com" });
+    const [vista] = vistas;
+    const ultimoEstado = () => janelaWc.send.mock.calls.map(([, evento]) => evento).findLast((evento) => evento.tipo === "estado");
+
+    vista.historico.entradas = ["https://github.com/"];
+    vista.historico.ativo = 0;
+    vista.ouvintes["did-navigate"]({}, "https://github.com/");
+    expect(ultimoEstado()).toMatchObject({ podeVoltar: false, podeAvancar: false });
+
+    vista.historico.entradas.push("https://github.com/a");
+    vista.historico.ativo = 1;
+    vista.ouvintes["did-navigate"]({}, "https://github.com/a");
+    expect(ultimoEstado()).toMatchObject({ podeVoltar: true, podeAvancar: false });
+
+    vista.historico.ativo = 0;
+    vista.ouvintes["did-navigate-in-page"]({}, "https://github.com/", true);
+    expect(ultimoEstado()).toMatchObject({ podeVoltar: false, podeAvancar: true });
+  });
+
+  it("voltar e avançar andam no histórico da vista e recusam quando não há para onde ir", () => {
+    const { servico, principal, vistas } = montar();
+    servico.aoAbrir(principal, { id: "p1", url: "https://github.com" });
+    const [vista] = vistas;
+    const { goBack, goForward } = vista.webContents.navigationHistory;
+    vista.historico.entradas = ["https://github.com/", "https://github.com/a"];
+    vista.historico.ativo = 1;
+
+    expect(servico.aoAvancar(principal, { id: "p1" })).toBe(false);
+    expect(goForward).not.toHaveBeenCalled();
+    expect(servico.aoVoltar(principal, { id: "p1" })).toBe(true);
+    expect(goBack).toHaveBeenCalledTimes(1);
+    expect(servico.aoVoltar(principal, { id: "p1" })).toBe(false);
+    expect(goBack).toHaveBeenCalledTimes(1);
+    expect(servico.aoAvancar(principal, { id: "p1" })).toBe(true);
+    expect(goForward).toHaveBeenCalledTimes(1);
+  });
+
+  it("voltar e avançar validam o id e ignoram vista que não existe", () => {
+    const { servico, principal } = montar();
+    expect(servico.aoVoltar(principal, { id: "p 1" })).toBe(false);
+    expect(servico.aoVoltar(principal, { id: "nao-existe" })).toBe(false);
+    expect(servico.aoAvancar(principal, undefined)).toBe(false);
+    expect(servico.aoAvancar(principal, "texto")).toBe(false);
+  });
+
+  it("descartarAboutBlankDoInicio tira o about:blank que o 'sair das contas' deixa no começo do histórico", () => {
+    const { servico, principal, vistas, janelaWc } = montar();
+    servico.aoAbrir(principal, { id: "p1", url: "https://github.com" });
+    const [vista] = vistas;
+    vista.historico.entradas = ["about:blank", "https://github.com/"];
+    vista.historico.ativo = 1;
+    janelaWc.send.mockClear();
+
+    vista.ouvintes["did-finish-load"]();
+
+    expect(vista.historico.entradas).toEqual(["https://github.com/"]);
+    expect(janelaWc.send.mock.calls.at(-1)[1]).toMatchObject({ podeVoltar: false });
+
+    // Se o about:blank é a página atual, ou a única, a entrada fica.
+    const remover = vi.fn();
+    const falso = (entradas, ativo) => ({
+      length: () => entradas.length,
+      getActiveIndex: () => ativo,
+      getEntryAtIndex: (indice) => ({ url: entradas[indice] }),
+      removeEntryAtIndex: remover,
+    });
+    descartarAboutBlankDoInicio(falso(["about:blank"], 0));
+    descartarAboutBlankDoInicio(falso(["about:blank", "https://github.com/"], 0));
+    descartarAboutBlankDoInicio(falso(["https://github.com/", "https://github.com/a"], 1));
+    expect(remover).not.toHaveBeenCalled();
   });
 
   it("a ativação não vale se o modo invisível ligou enquanto a outra vista desativava (corrida)", async () => {

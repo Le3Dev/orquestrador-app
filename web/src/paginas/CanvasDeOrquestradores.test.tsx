@@ -118,10 +118,33 @@ class ObservadorDeTamanhoFalso {
   disconnect(): void {}
 }
 
-/** Escolhe um item do "+ Novo ▾" da barra do canvas. */
+/** Escolhe um item do menu "+ Novo" da ilha do canto superior esquerdo. */
 function escolherNoNovo(item: "Orquestrador" | "Nota" | "Terminal" | "Prévia"): void {
   fireEvent.click(screen.getByRole("button", { name: "Novo" }));
-  fireEvent.click(screen.getByRole("menuitem", { name: item }));
+  fireEvent.click(screen.getByRole("menuitem", { name: item === "Orquestrador" ? "Novo orquestrador" : item }));
+}
+
+/** Abre o menu Novo e, nele, o submenu Orquestradores (a lista que era a Doca). */
+function abrirListaDeOrquestradores(): void {
+  fireEvent.click(screen.getByRole("button", { name: "Novo" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: /^Orquestradores/ }));
+}
+
+/** O orquestrador na lista do submenu (aberto por `abrirListaDeOrquestradores`). */
+function itemDaLista(id: string): HTMLElement {
+  const item = document.querySelector<HTMLElement>(
+    `[role="menu"][aria-label="Orquestradores"] [data-orquestrador="${id}"]`,
+  );
+  if (item === null) {
+    throw new Error(`${id} não está na lista`);
+  }
+  return item;
+}
+
+/** Escolhe um orquestrador pelo submenu: abre o menu, o submenu e clica nele. */
+function escolherNaLista(id: string): void {
+  abrirListaDeOrquestradores();
+  fireEvent.click(itemDaLista(id));
 }
 
 /** Ctrl+N (novo orquestrador) ou Ctrl+Shift+N (nova nota); devolve false se o padrão foi impedido. */
@@ -157,7 +180,7 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
     render(<CanvasDeOrquestradores />);
 
     const campo = await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
-    expect(campo).toHaveAttribute("placeholder", "Pergunte qualquer coisa ao Claude · / para comandos");
+    expect(campo).toHaveAttribute("placeholder", "Pergunte ao Claude");
     const painel = campo.closest(".react-flow__panel");
     expect(painel).toHaveClass("bottom", "center", "painel-do-chat");
     expect(screen.getByTestId("chat-rapido")).toHaveClass("nodrag", "nowheel", "nopan");
@@ -178,7 +201,7 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
     expect(camada!.compareDocumentPosition(painelDoChat!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("a contagem do botão Subagentes acompanha a biblioteca quando o chat cria um subagente pronto", async () => {
+  it("a lista e a contagem do submenu Subagentes acompanham a biblioteca quando o chat cria um subagente pronto", async () => {
     const pronto = (nome: string) => ({ nome, descricao: "Faz algo", prompt: "Faça.", modelo: "herdar" as const });
     const preferencias = (nomes: string[]) => ({
       instrucoesPadrao: "",
@@ -187,48 +210,44 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
     });
     const ler = vi.spyOn(api, "lerPreferencias").mockResolvedValue(preferencias(["a", "b"]));
     render(<CanvasDeOrquestradores />);
-    expect(await screen.findByRole("button", { name: "Subagentes (2)" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Novo" }));
+    const pai = screen.getByRole("menuitem", { name: /^Subagentes/ });
+    await waitFor(() => expect(pai).toHaveTextContent("2"));
+    fireEvent.click(pai);
+    expect(within(screen.getByRole("menu", { name: "Subagentes" })).getByText("2 subagentes prontos")).toBeInTheDocument();
 
-    // O cartão do chat grava a lista nova e avisa; a barra relê sem reabrir nada.
+    // O cartão do chat grava a lista nova e avisa; o menu relê sem reabrir nada.
     ler.mockResolvedValue(preferencias(["a", "b", "c"]));
     act(() => avisarSubagentesProntosMudaram());
-    expect(await screen.findByRole("button", { name: "Subagentes (3)" })).toBeInTheDocument();
+    expect(await screen.findByText("3 subagentes prontos")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "c: Faz algo" })).toBeInTheDocument();
   });
 
-  it("com um painel da barra aberto, a lista de orquestradores some como o quadro vazio e volta como estava", async () => {
+  it("Gerenciar subagentes abre o painel de subagentes prontos sob a ilha, no lugar do quadro vazio, e fechar o devolve", async () => {
     vi.spyOn(api, "lerPreferencias").mockRejectedValue(new Error("sem servidor"));
     render(<CanvasDeOrquestradores />);
     await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
-    const lista = () => screen.getByRole("button", { name: /orquestradores · 0/, hidden: true });
-    expect(lista()).toBeVisible();
-    expect(lista()).toHaveAttribute("aria-expanded", "true");
-
-    // Expandida: some com o painel e volta expandida ao fechar.
-    fireEvent.click(screen.getByRole("button", { name: "Subagentes" }));
-    await screen.findByRole("region", { name: "Subagentes prontos" });
-    expect(lista()).not.toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Seu canvas de agentes" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Fechar subagentes" }));
-    expect(lista()).toBeVisible();
-    expect(lista()).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("heading", { name: "Seu canvas de agentes" })).toBeInTheDocument();
 
-    // Recolhida: escondida, e não desmontada, volta recolhida.
-    fireEvent.click(lista());
-    expect(lista()).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(screen.getByRole("button", { name: "Subagentes" }));
-    expect(lista()).not.toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Subagentes" }));
-    expect(lista()).toBeVisible();
-    expect(lista()).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Novo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Subagentes/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Gerenciar subagentes" }));
+
+    const painel = await screen.findByRole("region", { name: "Subagentes prontos" });
+    // Flutua logo abaixo da ilha do nome, na mesma coluna.
+    expect(painel.parentElement).toHaveClass("coluna-da-ilha-esquerda");
+    expect(painel.previousElementSibling).toBe(screen.getByTestId("ilha-do-nome"));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Seu canvas de agentes" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Fechar subagentes" }));
+    expect(screen.queryByRole("region", { name: "Subagentes prontos" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Seu canvas de agentes" })).toBeInTheDocument();
   });
 
   it("com \"Chat fixo à esquerda\", o chat vira uma coluna ao lado do canvas; \"soltar\" o devolve ao pé", async () => {
+    localStorage.setItem("orquestrador.preferenciasDaTela", JSON.stringify({ chatFixoNaEsquerda: true }));
     render(<CanvasDeOrquestradores />);
-    await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
-
-    fireEvent.click(screen.getByRole("button", { name: "Configurações" }));
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Chat fixo" }));
 
     const lateral = await screen.findByRole("complementary", { name: "Chat rápido" });
     const fluxo = document.querySelector(".react-flow");
@@ -245,7 +264,7 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
       chatFixoNaEsquerda: true,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Soltar o chat embaixo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Soltar embaixo" }));
 
     await waitFor(() => expect(screen.queryByRole("complementary", { name: "Chat rápido" })).not.toBeInTheDocument());
     const campo = screen.getByRole("textbox", { name: "Pergunta para o Claude" });
@@ -281,7 +300,7 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
       render(<CanvasDeOrquestradores />);
       const lateral = await screen.findByRole("complementary", { name: "Chat rápido" });
 
-      fireEvent.click(within(lateral).getByRole("button", { name: "ocultar" }));
+      fireEvent.click(within(lateral).getByRole("button", { name: "Ocultar o chat" }));
 
       // Saiu da coluna e a preferência de fixo desligou; embaixo, só o "mostrar conversa".
       await waitFor(() => expect(screen.queryByRole("complementary", { name: "Chat rápido" })).not.toBeInTheDocument());
@@ -351,12 +370,11 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
       larguraDoChatFixo: 436,
     });
 
-    // Pelas Configurações, de volta à esquerda: a coluna passa para antes da área.
-    fireEvent.click(screen.getByRole("button", { name: "Configurações" }));
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "esquerda" }));
-    const naEsquerda = await screen.findByRole("complementary", { name: "Chat rápido" });
-    await waitFor(() => expect(naEsquerda.nextElementSibling).toBe(area));
-    expect(naEsquerda).toHaveClass("chat-lateral-esquerda");
+    // Com a coluna à direita, o canvas e todas as ilhas ficam dentro da área ao lado dela, sem sobrepor.
+    expect(area).toContainElement(screen.getByTestId("ilha-do-nome"));
+    expect(area).toContainElement(screen.getByRole("group", { name: "Busca, status e configurações" }));
+    expect(area).toContainElement(screen.getByTestId("ilha-de-ferramentas"));
+    expect(lateral).not.toContainElement(screen.getByTestId("ilha-do-nome"));
   });
 });
 
@@ -498,6 +516,7 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "fixa", limite: 2 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
+  permitirArtefatosOnline: false,
   instrucoesPersonalizadas: "",
 };
 
@@ -836,21 +855,6 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
 
   const rascunhosNaTela = () => document.querySelectorAll(".react-flow__node-rascunho").length;
 
-  /** O item do Orquestrador na lista da esquerda (Doca). */
-  function itemDaDoca(id: string): HTMLElement {
-    const item = screen
-      .getAllByRole("button")
-      .find(
-        (botao) =>
-          ["Ir até o terminal", "Abrir o terminal no canvas"].includes(botao.title) &&
-          botao.textContent?.startsWith(`Orquestrador ${id}`) === true,
-      );
-    if (item === undefined) {
-      throw new Error(`${id} não está na lista`);
-    }
-    return item;
-  }
-
   const fecharAviso = () => fireEvent.click(within(screen.getByText(AVISO).parentElement as HTMLElement).getByTitle("Fechar aviso"));
 
   it("no limite, \"+ Novo ▾\" › Orquestrador mostra o aviso e não abre o formulário", async () => {
@@ -882,23 +886,25 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
     render(<CanvasDeOrquestradores />);
     await waitFor(() => expect(noNaTela(ULTIMO)).toBeInTheDocument());
 
-    fireEvent.click(itemDaDoca(FORA));
+    escolherNaLista(FORA);
     expect(await screen.findByText(AVISO)).toBeInTheDocument();
     expect(document.querySelector(`.react-flow__node[data-id="${FORA}"]`)).toBeNull();
 
     // Já aberto não conta: não recusa (e não deixa aviso).
-    fireEvent.click(itemDaDoca("o2"));
+    escolherNaLista("o2");
     expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
 
     // Recusa de novo e fecha o terminal o1 no ✕: o aviso some sozinho e a vaga volta.
-    fireEvent.click(itemDaDoca(FORA));
+    escolherNaLista(FORA);
     expect(await screen.findByText(AVISO)).toBeInTheDocument();
     fireEvent.click(within(noNaTela("o1")).getByTitle("Fechar o terminal (o orquestrador e o histórico continuam salvos)"));
     await waitFor(() => expect(screen.queryByText(AVISO)).not.toBeInTheDocument());
     // O1 continua na lista: nada foi excluído.
-    expect(itemDaDoca("o1")).toHaveAttribute("title", "Abrir o terminal no canvas");
+    abrirListaDeOrquestradores();
+    expect(itemDaLista("o1")).toHaveAttribute("title", "Abrir o terminal no canvas");
+    fireEvent.click(screen.getByRole("button", { name: "Novo" }));
 
-    fireEvent.click(itemDaDoca(FORA));
+    escolherNaLista(FORA);
     await waitFor(() => expect(noNaTela(FORA)).toBeInTheDocument());
     expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
   });
@@ -949,7 +955,7 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
     await waitFor(() => expect(rascunhosNaTela()).toBe(1));
     expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
 
-    fireEvent.click(itemDaDoca(FORA));
+    escolherNaLista(FORA);
     expect(await screen.findByText(AVISO)).toBeInTheDocument();
     expect(document.querySelector(`.react-flow__node[data-id="${FORA}"]`)).toBeNull();
   });
@@ -996,9 +1002,10 @@ describe("CanvasDeOrquestradores · minimapa", () => {
     expect(JSON.parse(localStorage.getItem("orquestrador.preferenciasDaTela") ?? "null")).toMatchObject({
       minimapaVisivel: true,
     });
-    // Os controles de zoom continuam no canto esquerdo; o botão do minimapa fica no direito.
+    // O zoom mora na ilha vertical do canto esquerdo; o botão do minimapa fica nos controles do direito.
     expect(esconder.closest(".react-flow__controls")).toHaveClass("bottom", "right");
-    expect(screen.getByRole("button", { name: "Fit View" }).closest(".react-flow__controls")).toHaveClass("bottom", "left");
+    expect(within(screen.getByTestId("ilha-de-ferramentas")).getByRole("button", { name: "Ajustar à tela" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Fit View" })).not.toBeInTheDocument();
 
     // Ao abrir de novo, volta como foi deixado.
     unmount();
@@ -1021,8 +1028,8 @@ describe("CanvasDeOrquestradores · minimapa", () => {
   });
 });
 
-describe("CanvasDeOrquestradores · Ctrl+N e Organizar nos controles", () => {
-  const ORGANIZAR = "Organizar: terminais lado a lado; notas e artefatos à direita";
+describe("CanvasDeOrquestradores · Ctrl+N e Organizar na ilha de ferramentas", () => {
+  const ORGANIZAR = "Organizar janelas";
   const rascunhosNaTela = () => document.querySelectorAll(".react-flow__node-rascunho").length;
 
   function layoutCom(ids: string[]): void {
@@ -1066,21 +1073,20 @@ describe("CanvasDeOrquestradores · Ctrl+N e Organizar nos controles", () => {
     await waitFor(() => expect(rascunhosNaTela()).toBe(1));
   });
 
-  it("o \"Organizar\" é o 4º botão dos controles e põe os terminais lado a lado", async () => {
+  it("o \"Organizar\" é o 4º botão da ilha de ferramentas e põe os terminais lado a lado", async () => {
     layoutCom(["o1", "o2"]);
     render(<CanvasDeOrquestradores />);
     await waitFor(() => expect(posicaoNaTela("o2")).toEqual({ x: 1500, y: 0 }));
     const organizar = screen.getByRole("button", { name: ORGANIZAR });
 
-    expect(organizar).toHaveAttribute("title", ORGANIZAR);
-    expect(organizar).toBeEnabled();
-    expect(organizar.closest(".react-flow__controls")).not.toBeNull();
+        expect(organizar).toBeEnabled();
+    expect(organizar).toHaveAttribute("title", "Organizar: terminais lado a lado; notas e artefatos à direita");
+    const ilha = screen.getByTestId("ilha-de-ferramentas");
+    expect(ilha).toContainElement(organizar);
     // Depois dele, só o "Desenhar" (5º).
-    expect(organizar.parentElement?.children).toHaveLength(5);
-    expect(organizar.parentElement?.children[3]).toBe(organizar);
-    expect(organizar.parentElement?.lastElementChild).toBe(screen.getByRole("button", { name: "Desenhar" }));
-    // Saiu da barra do canvas.
-    expect(organizar.closest(".barra-do-canvas")).toBeNull();
+    expect(ilha.querySelectorAll("button")).toHaveLength(5);
+    expect(ilha.querySelectorAll("button")[3]).toBe(organizar);
+    expect(ilha.querySelectorAll("button")[4]).toBe(screen.getByRole("button", { name: "Desenhar" }));
 
     fireEvent.click(organizar);
 
@@ -1096,11 +1102,11 @@ describe("CanvasDeOrquestradores · Ctrl+N e Organizar nos controles", () => {
     expect(esperado.o2).not.toEqual({ x: 1500, y: 0 });
   });
 
-  it("o \"Desenhar\" dos controles abre e fecha a barra de desenho", async () => {
+  it("o \"Desenhar\" da ilha abre e fecha a barra de desenho, que abre numa ilha ao lado; Esc fecha", async () => {
     layoutCom(["o1"]);
     render(<CanvasDeOrquestradores />);
     const desenhar = await screen.findByRole("button", { name: "Desenhar" });
-    expect(desenhar.closest(".react-flow__controls")).not.toBeNull();
+    expect(screen.getByTestId("ilha-de-ferramentas")).toContainElement(desenhar);
     expect(screen.queryByRole("toolbar", { name: "Desenho" })).not.toBeInTheDocument();
 
     fireEvent.click(desenhar);
@@ -1113,6 +1119,15 @@ describe("CanvasDeOrquestradores · Ctrl+N e Organizar nos controles", () => {
 
     expect(desenhar).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByRole("toolbar", { name: "Desenho" })).not.toBeInTheDocument();
+
+    fireEvent.click(desenhar);
+    expect(screen.getByRole("toolbar", { name: "Desenho" }).closest(".painel-da-barra-de-desenho")).not.toBeNull();
+    // O primeiro Esc volta da caneta para Selecionar; o segundo fecha a barra.
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByRole("toolbar", { name: "Desenho" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("toolbar", { name: "Desenho" })).not.toBeInTheDocument();
+    expect(desenhar).toHaveAttribute("aria-pressed", "false");
   });
 
   it("com uma janela só, o \"Organizar\" fica desabilitado", async () => {
@@ -1216,7 +1231,6 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     expect(raiz).toHaveClass("canvas-modo-invisivel");
     // Nada é desmontado: o canvas continua no DOM, só escondido por CSS.
     expect(container.querySelector(".react-flow__renderer")).not.toBeNull();
-    expect(screen.getByTestId("barra-de-titulo")).toBeInTheDocument();
     expect(screen.getByTestId("chat-rapido")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Modo invisível" })).toHaveAttribute("aria-pressed", "true");
 
@@ -1226,7 +1240,7 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     expect(raiz).not.toHaveClass("canvas-modo-invisivel");
   });
 
-  it("no modo invisível, o CSS esconde painéis, minimapa, controles e nós, e mantém a barra e o chat visíveis", async () => {
+  it("no modo invisível, o CSS esconde as ilhas, o minimapa, os controles e os nós, e mantém só o chat visível", async () => {
     const ouvintes: Array<(ativo: boolean) => void> = [];
     janelaComPonte.electron = {
       desktop: true,
@@ -1250,14 +1264,15 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
         }),
       },
     };
-    const css = readFileSync(resolve(__dirname, "../theme/index.css"), "utf8");
+    // As ilhas trazem o CSS do modo invisível no próprio arquivo (ilhas.css).
+    const css = ["index.css", "ilhas.css"].map((arquivo) => readFileSync(resolve(__dirname, "../theme", arquivo), "utf8")).join("\n");
     const estilo = document.createElement("style");
     estilo.textContent = css;
     document.head.appendChild(estilo);
     try {
       const { container } = render(<CanvasDeOrquestradores />);
       const visibilidade = (el: Element | null) => (el ? getComputedStyle(el).visibility : "ausente");
-      const paineis = container.querySelector(".paineis-do-topo");
+      const paineis = container.querySelector(".ilhas-do-canvas");
       const painelDoChat = container.querySelector(".painel-do-chat");
       expect(paineis).not.toBeNull();
       expect(painelDoChat).not.toBeNull();
@@ -1272,10 +1287,8 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
       }
       expect(visibilidade(screen.getByTestId("chat-rapido"))).toBe("visible");
       expect(visibilidade(painelDoChat)).toBe("visible");
-      // A barra inteira fica escondida e sem mouse; o botão 👁 (que também volta) fica no chat, visível.
-      const barra = screen.getByTestId("barra-de-titulo");
-      expect(visibilidade(barra)).toBe("hidden");
-      expect(getComputedStyle(barra).pointerEvents).toBe("none");
+      // As ilhas (que arrastam a janela) somem de vez, sem mouse; o botão 👁 (que também volta) fica no chat, visível.
+      expect(getComputedStyle(paineis as Element).display).toBe("none");
       expect(screen.queryByTestId("faixa-modo-invisivel")).not.toBeInTheDocument();
       const botao = screen.getByRole("button", { name: "Modo invisível" });
       expect(botao).toHaveAttribute("aria-pressed", "true");
@@ -1338,6 +1351,39 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     expect(document.querySelector(".painel-do-chat")).toBeNull();
   });
 
+  it("no desktop há uma faixa invisível de 36 px que arrasta a janela; no navegador ela não existe", async () => {
+    janelaComPonte.electron = {
+      desktop: true,
+      janela: {
+        minimizar: vi.fn(),
+        maximizar: vi.fn(),
+        fechar: vi.fn(),
+        estaMaximizada: vi.fn().mockResolvedValue(false),
+        aoMudarMaximizada: vi.fn(() => () => undefined),
+      },
+    };
+    const { unmount } = render(<CanvasDeOrquestradores />);
+    await screen.findByTestId("ilha-do-nome");
+    const faixa = screen.getByTestId("faixa-de-arrasto");
+    expect(faixa).toHaveClass("faixa-de-arrasto");
+    // Vem antes de tudo no DOM: o no-drag das ilhas, janelas e menus a recorta.
+    expect(faixa.compareDocumentPosition(screen.getByTestId("ilha-do-nome")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Invisível, de 36 px e arrastável (o CSS é lido do arquivo, o jsdom não o aplica).
+    const css = readFileSync(resolve(__dirname, "../theme/ilhas.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    const regra = /\.faixa-de-arrasto\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(regra).toMatch(/height:\s*36px/);
+    expect(regra).toMatch(/-webkit-app-region:\s*drag/);
+    expect(regra).toMatch(/background:\s*transparent/);
+    expect(regra).toMatch(/border:\s*0/);
+    expect(regra).toMatch(/box-shadow:\s*none/);
+    unmount();
+
+    delete janelaComPonte.electron;
+    render(<CanvasDeOrquestradores />);
+    await screen.findByTestId("ilha-do-nome");
+    expect(screen.queryByTestId("faixa-de-arrasto")).not.toBeInTheDocument();
+  });
+
   it("o fundo opaco da tela fica no #root, nunca no html nem no body (no macOS ele prende na janela)", () => {
     const css = readFileSync(resolve(__dirname, "../theme/index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
     const regras = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, seletores = "", corpo = ""]) => ({
@@ -1361,7 +1407,7 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     render(<CanvasDeOrquestradores />);
 
     // Aberta antes da resposta do app: a ação entra assim que ele responde.
-    fireEvent.click(screen.getByRole("button", { name: "Buscar ou executar (Ctrl+K)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Buscar (Ctrl+K)" }));
     const opcao = await screen.findByRole("option", { name: /Procurar atualizações/ });
     expect(opcao).toHaveTextContent("Versão 0.2.0 — você está na versão mais recente");
 
@@ -1374,24 +1420,25 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
         "Versão 0.2.0 — não foi possível verificar: sem internet",
       ),
     );
-    // O erro fica só na paleta: nada na barra de título.
-    expect(within(screen.getByTestId("barra-de-titulo")).queryByRole("alert")).not.toBeInTheDocument();
+    // O erro fica só na paleta: nenhuma notificação.
+    expect(screen.queryByRole("region", { name: "Notificações" })).not.toBeInTheDocument();
   });
 
   it("com a atualização pronta, reiniciar com Orquestradores trabalhando pede confirmação", async () => {
     simulados.orquestradores.orquestradores = [orquestrador("o1"), { ...orquestrador("o2"), situacao: "ocioso" }];
     const atualizacao = ponteComAtualizacao(estadoDaAtualizacao({ situacao: "pronta", versaoNova: "0.2.1" }));
     render(<CanvasDeOrquestradores />);
-    const barra = screen.getByTestId("barra-de-titulo");
+    // O aviso de atualização entra na pilha de notificações do canto superior direito.
+    const pilha = await screen.findByRole("region", { name: "Notificações" });
 
-    fireEvent.click(await within(barra).findByRole("button", { name: "Atualização pronta (v0.2.1)" }));
-    fireEvent.click(within(barra).getByRole("button", { name: "Reiniciar agora" }));
+    fireEvent.click(await within(pilha).findByRole("button", { name: "Atualização pronta (v0.2.1)" }));
+    fireEvent.click(within(pilha).getByRole("button", { name: "Reiniciar agora" }));
 
-    expect(within(barra).getByRole("alert")).toHaveTextContent(
+    expect(within(pilha).getByRole("alert")).toHaveTextContent(
       "Há 1 pedido em andamento; reiniciar agora vai cancelá-lo.",
     );
     expect(atualizacao.instalarAgora).not.toHaveBeenCalled();
-    fireEvent.click(within(barra).getByRole("button", { name: "Reiniciar mesmo assim" }));
+    fireEvent.click(within(pilha).getByRole("button", { name: "Reiniciar mesmo assim" }));
     expect(atualizacao.instalarAgora).toHaveBeenCalledTimes(1);
   });
 
@@ -1415,33 +1462,59 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     expect(transformacao()).toBe("translate(100px,50px) scale(0.5)");
   });
 
-  it("no navegador o status fica no painel do topo; no desktop, na barra de título", () => {
-    const { unmount } = render(<CanvasDeOrquestradores />);
-    expect(screen.queryByTestId("barra-de-titulo")).not.toBeInTheDocument();
-    expect(screen.getByTestId("status-do-canvas").closest(".paineis-do-topo")).not.toBeNull();
-    unmount();
+  describe("sem faixa de título", () => {
+    function ponteDaJanela(plataforma?: string) {
+      janelaComPonte.electron = {
+        desktop: true,
+        ...(plataforma ? { plataforma } : {}),
+        janela: {
+          minimizar: vi.fn(),
+          maximizar: vi.fn(),
+          fechar: vi.fn(),
+          estaMaximizada: vi.fn().mockResolvedValue(false),
+          aoMudarMaximizada: vi.fn(() => () => undefined),
+        },
+      };
+    }
+    const controles = () => screen.queryByRole("group", { name: "Controles da janela" });
 
-    janelaComPonte.electron = {
-      desktop: true,
-      janela: {
-        minimizar: vi.fn(),
-        maximizar: vi.fn(),
-        fechar: vi.fn(),
-        estaMaximizada: vi.fn().mockResolvedValue(false),
-        aoMudarMaximizada: vi.fn(() => () => undefined),
-      },
-    };
-    render(<CanvasDeOrquestradores />);
-    const barra = screen.getByTestId("barra-de-titulo");
-    expect(within(barra).getByTestId("status-do-canvas")).toHaveTextContent("todos ociosos");
-    expect(within(barra).getByRole("group", { name: "Controles da janela" })).toBeInTheDocument();
-    expect(screen.getAllByTestId("status-do-canvas")).toHaveLength(1);
-    // A barra fica fora do canvas, acima dele.
-    expect(barra.nextElementSibling?.querySelector(".react-flow")).not.toBeNull();
+    it("no navegador, sem controles de janela, sem arraste reservado e com a ilha do nome em esquerda 16", () => {
+      render(<CanvasDeOrquestradores />);
+
+      expect(controles()).not.toBeInTheDocument();
+      expect(document.querySelector(".barra-de-titulo")).toBeNull();
+      expect(screen.getByTestId("ilha-do-nome").parentElement).not.toHaveClass("coluna-da-ilha-esquerda-mac");
+      // O status vive na aba Sistema das Configurações (fechadas por padrão).
+      expect(screen.queryByTestId("status-do-canvas")).not.toBeInTheDocument();
+    });
+
+    it("no Windows, ─ ☐ ✕ ficam no fim da ilha da direita, depois de um divisor; o canvas começa no topo da janela", () => {
+      ponteDaJanela("win32");
+      const { container } = render(<CanvasDeOrquestradores />);
+
+      const ilha = screen.getByRole("group", { name: "Busca, status e configurações" });
+      expect(ilha).toHaveClass("ilha-arrasta");
+      const grupo = within(ilha).getByRole("group", { name: "Controles da janela" });
+      expect(ilha.lastElementChild).toBe(grupo);
+      expect(grupo.previousElementSibling).toHaveClass("divisor-da-ilha");
+      expect(document.querySelector(".barra-de-titulo")).toBeNull();
+      // A área do canvas é a primeira coisa da tela: nenhuma faixa acima dela.
+      expect(container.querySelector(".h-screen")?.firstElementChild?.firstElementChild).toHaveClass("area-do-canvas");
+      expect(screen.getByTestId("ilha-do-nome").parentElement).not.toHaveClass("coluna-da-ilha-esquerda-mac");
+    });
+
+    it("no Mac desktop, as bolinhas são nativas: sem ─ ☐ ✕ e com a ilha do nome deslocada para a direita", () => {
+      ponteDaJanela("darwin");
+      render(<CanvasDeOrquestradores />);
+
+      expect(controles()).not.toBeInTheDocument();
+      expect(screen.getByTestId("ilha-do-nome")).toHaveClass("ilha-arrasta");
+      expect(screen.getByTestId("ilha-do-nome").parentElement).toHaveClass("coluna-da-ilha-esquerda-mac");
+    });
   });
 
-  it("no desktop, a busca e o ⚙ ficam na barra de título; a paleta oferece \"Pastas e Claude Code\" só nele", () => {
-    // Navegador: busca e ⚙ (sem a ponte, não há ⚙) na barra do canvas; a paleta não tem a ação.
+  it("a busca e o ⚙ ficam na ilha da direita; a paleta oferece \"Pastas e Claude Code\" só no desktop", () => {
+    // Navegador: a ilha tem a busca e a engrenagem; a paleta não tem a ação.
     const { unmount } = render(<CanvasDeOrquestradores />);
     fireEvent.click(screen.getByRole("button", { name: "Buscar (Ctrl+K)" }));
     expect(screen.getByRole("dialog", { name: "Paleta de comandos" })).toBeInTheDocument();
@@ -1461,23 +1534,10 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
       configuracao: { obter: vi.fn(), abrirAjustes },
     };
     render(<CanvasDeOrquestradores />);
-    const barra = screen.getByTestId("barra-de-titulo");
-    const barraDoCanvas = document.querySelector<HTMLElement>(".barra-do-canvas");
-    if (barraDoCanvas === null) {
-      throw new Error("barra do canvas não encontrada");
-    }
+    const ilha = screen.getByRole("group", { name: "Busca, status e configurações" });
+    expect(within(ilha).getByRole("button", { name: "Configurações" })).toBeInTheDocument();
 
-    // A barra do canvas fica com o "+ Novo ▾" (que tem a Prévia e o Terminal) e os botões de
-    // Subagentes, Instruções gerais e Modelos; o ⚙ Configurações vai para a barra de título.
-    expect(within(barraDoCanvas).getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual([
-      "Novo",
-      "Subagentes",
-      "Instruções gerais",
-      "Modelos",
-    ]);
-    expect(within(barra).getByRole("button", { name: "Configurações" })).toBeInTheDocument();
-
-    fireEvent.click(within(barra).getByRole("button", { name: "Buscar ou executar (Ctrl+K)" }));
+    fireEvent.click(within(ilha).getByRole("button", { name: "Buscar (Ctrl+K)" }));
     fireEvent.click(screen.getByRole("option", { name: /Pastas e Claude Code/ }));
 
     expect(abrirAjustes).toHaveBeenCalledTimes(1);
@@ -1659,7 +1719,7 @@ describe("CanvasDeOrquestradores · artefatos", { timeout: 20_000 }, () => {
     const id = idDoNoDoArtefato("a1");
     await waitFor(() => expect(noNaTela(id)).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: "Organizar: terminais lado a lado; notas e artefatos à direita" }));
+    fireEvent.click(screen.getByRole("button", { name: "Organizar janelas" }));
 
     const esperado = organizarComNotas(
       [
@@ -2035,113 +2095,5 @@ describe("CanvasDeOrquestradores · seleção múltipla e barra do grupo", { tim
     fireEvent.click(within(barra).getByRole("button", { name: "Restaurar" }));
     await waitFor(() => expect(lerLayout().terminais.o1?.minimizada).toBeUndefined());
     expect(lerLayout().terminais.o2?.minimizada).toBeUndefined();
-  });
-
-  it("\"Salvar como modelo\" guarda as telas selecionadas com posições relativas e abre o painel Modelos", async () => {
-    layoutCom({ o1: { x: 100, y: 200 }, o2: { x: 900, y: 300 } });
-    vi.spyOn(api, "listarModelosDeCanvas").mockResolvedValue([]);
-    const criar = vi.spyOn(api, "criarModeloDeCanvas").mockImplementation(async (conteudo) => ({
-      ...conteudo,
-      id: "m1",
-      criadoEm: "2026-11-09T12:00:00Z",
-      atualizadoEm: "2026-11-09T12:00:00Z",
-    }));
-    render(<CanvasDeOrquestradores />);
-    await waitFor(() => expect(noNaTela("o2")).toBeInTheDocument());
-    selecionarTudo(window);
-    const barra = await screen.findByRole("toolbar", { name: "Ações do grupo" });
-
-    fireEvent.click(within(barra).getByRole("button", { name: "Salvar como modelo" }));
-    const dialogo = await screen.findByRole("dialog", { name: "Salvar como modelo" });
-    expect(dialogo).toHaveTextContent("2 orquestradores");
-    fireEvent.change(within(dialogo).getByRole("textbox", { name: "Nome" }), { target: { value: "Dupla" } });
-    fireEvent.click(within(dialogo).getByRole("button", { name: "Salvar modelo" }));
-
-    await screen.findByRole("region", { name: "Modelos de canvas" });
-    expect(screen.queryByRole("dialog", { name: "Salvar como modelo" })).not.toBeInTheDocument();
-    expect(criar).toHaveBeenCalledWith({
-      nome: "Dupla",
-      icone: "🧩",
-      cor: "#d97757",
-      itens: [
-        {
-          tipo: "orquestrador",
-          x: 0,
-          y: 0,
-          largura: 600,
-          altura: 520,
-          nome: "Orquestrador o1",
-          pastaDeTrabalho: "C:\\projetos\\o1",
-          configuracao,
-        },
-        {
-          tipo: "orquestrador",
-          x: 800,
-          y: 100,
-          largura: 600,
-          altura: 520,
-          nome: "Orquestrador o2",
-          pastaDeTrabalho: "C:\\projetos\\o2",
-          configuracao,
-        },
-      ],
-    });
-  });
-
-  it("Recriar cria cada item pela API no mesmo arranjo, com o orquestrador parado e o shell sem comando", async () => {
-    vi.spyOn(api, "listarModelosDeCanvas").mockResolvedValue([
-      {
-        id: "m1",
-        nome: "Backend",
-        icone: "🧩",
-        cor: "#d97757",
-        itens: [
-          { tipo: "orquestrador", x: 0, y: 0, largura: 600, altura: 520, nome: "API", pastaDeTrabalho: "/projetos/api", configuracao },
-          { tipo: "nota", x: 640, y: 0, titulo: "Pendências", texto: "- [ ] revisar" },
-          { tipo: "terminal", x: 0, y: 560, pasta: "/projetos/api", comando: "npm run dev" },
-          { tipo: "previa", x: 700, y: 600, url: "https://exemplo.com" },
-        ],
-        criadoEm: "2026-11-09T12:00:00Z",
-        atualizadoEm: "2026-11-09T12:00:00Z",
-      },
-    ]);
-    const criarOrquestrador = vi.spyOn(api, "criarOrquestrador").mockResolvedValue(orquestrador("novo"));
-    const criarNota = vi
-      .spyOn(api, "criarNota")
-      .mockResolvedValue(nota("n1", { titulo: "Pendências", texto: "- [ ] revisar" }));
-    const criarShell = vi
-      .spyOn(api, "criarShell")
-      .mockResolvedValue({ id: "t1", pasta: "/projetos/api", orquestradorId: null, criadoEm: "2026-11-09T12:00:00Z" });
-    const enviar = vi.spyOn(api, "enviarMensagem");
-    // O original continua existindo: o recriado ganha um nome livre.
-    simulados.orquestradores.orquestradores = [{ ...orquestrador("o1"), nome: "API" }];
-    render(<CanvasDeOrquestradores />);
-    await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
-
-    fireEvent.click(screen.getByRole("button", { name: "Modelos" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Recriar Backend" }));
-
-    const resultado = await screen.findByRole("status", { name: "Resultado da recriação" });
-    expect(resultado).toHaveTextContent('"Backend": 4 de 4 itens recriados, parados (nenhum pedido foi enviado).');
-    expect(criarOrquestrador).toHaveBeenCalledWith(
-      expect.objectContaining({ ...configuracao, nome: "API 2", pastaDeTrabalho: "/projetos/api" }),
-    );
-    expect(criarNota).toHaveBeenCalledWith({ titulo: "Pendências", texto: "- [ ] revisar" });
-    expect(criarShell).toHaveBeenCalledWith({ pasta: "/projetos/api", colunas: 80, linhas: 24 });
-    expect(enviar).not.toHaveBeenCalled();
-
-    // O mesmo arranjo, a partir do canto do orquestrador recriado.
-    await waitFor(() => expect(noNaTela("novo")).toBeInTheDocument());
-    const origem = posicaoNaTela("novo");
-    expect(posicaoNaTela("nota:n1")).toEqual({ x: origem.x + 640, y: origem.y });
-    await waitFor(() => expect(Object.values(lerLayout().shells)).toHaveLength(1));
-    expect(Object.values(lerLayout().shells)[0]).toMatchObject({ x: origem.x, y: origem.y + 560, terminalId: "t1" });
-    expect(Object.values(lerLayout().previas)[0]).toMatchObject({
-      x: origem.x + 700,
-      y: origem.y + 600,
-      url: "https://exemplo.com",
-    });
-    // Os recriados ficam selecionados juntos.
-    await waitFor(() => expect(barraDoGrupo()).toHaveTextContent("4 telas"));
   });
 });

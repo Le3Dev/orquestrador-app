@@ -8,9 +8,9 @@
 //   1. Menu do app com os papéis nativos. Sem ele, Cmd+C, Cmd+V, Cmd+Z, Cmd+A
 //      e Cmd+Q não funcionam (no Mac quem faz isso é o menu, não a página).
 //   2. Janelas com as 3 bolinhas nativas. O titleBarOverlay (botões nativos
-//      pintados no Windows) sai; na janela principal as bolinhas ficam
-//      centradas na barra de título do app (36px), e a tela não desenha os
-//      botões ─ ☐ ✕ (BarraDeTituloDoApp).
+//      pintados no Windows) sai; na janela principal não há barra de título:
+//      as bolinhas flutuam no canto superior esquerdo, centradas com as ilhas
+//      do topo da tela, e a tela não desenha os botões ─ ☐ ✕.
 //   3. PATH do shell de login: aberto pelo Finder ou pelo Dock, o app recebe
 //      um PATH mínimo, e o Claude Code (que precisa do `node`, via nvm ou
 //      Homebrew) não rodaria.
@@ -26,9 +26,11 @@ const path = require("node:path");
 
 const ehMac = process.platform === "darwin";
 
-// Bolinhas (cerca de 14px de altura) centradas na faixa de cima, à esquerda.
-// Janela principal: barra de título do app com 36px (BarraDeTituloDoApp).
-const SEMAFORO_DA_JANELA_PRINCIPAL = { x: 14, y: 11 };
+// Bolinhas (cerca de 14px de altura) no canto superior esquerdo.
+// Janela principal: sem barra de título; as ilhas do topo têm 48px de altura a
+// 16px da borda (centro em y = 40), então as bolinhas ficam em y = 40 - 7 = 33,
+// e a ilha do nome anda para a direita para não encostar nelas (ilhas.css).
+const SEMAFORO_DA_JANELA_PRINCIPAL = { x: 16, y: 33 };
 // Ativação e primeira abertura: faixa arrastável de 40px no topo.
 const SEMAFORO_DAS_JANELAS_PEQUENAS = { x: 14, y: 13 };
 

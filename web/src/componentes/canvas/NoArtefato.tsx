@@ -3,9 +3,6 @@ import {
   type CSSProperties,
   type KeyboardEvent as EventoDeTecladoDoReact,
   memo,
-  type MouseEvent as EventoDeMouseDoReact,
-  type ReactNode,
-  type SyntheticEvent,
   useCallback,
   useEffect,
   useId,
@@ -13,7 +10,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 
 import {
   apiDosArtefatos,
@@ -30,7 +26,13 @@ import {
 } from "../../shared/canvas/artefatos";
 import { TAMANHO_MINIMO_DO_ARTEFATO } from "../../shared/canvas/layout";
 import { ALCA_DO_ARTEFATO, type NoArtefato as TipoDoNo } from "../../shared/canvas/nos";
+import { TAG_DO_SCRIPT_DE_NAVEGACAO, useNavegacaoDoQuadro } from "../../shared/navegacaoDoArtefato";
+import { IconeCaneta } from "../Icones";
 import { TextoFormatado } from "../TextoFormatado";
+import { BotoesDeNavegacao } from "./BotoesDeNavegacao";
+import { ControlesDoNo } from "./ControlesDoNo";
+import { DesenhoDaTelaCheia } from "./DesenhoDaTelaCheia";
+import { JanelaEmTelaCheia } from "./JanelaEmTelaCheia";
 import { QuadroAtivavel } from "./NoPrevia";
 
 export const CONFIRMACAO_PARA_APAGAR_O_ARTEFATO = "Apagar este artefato? Isso não pode ser desfeito.";
@@ -58,7 +60,8 @@ const EXTENSAO: Readonly<Record<FormatoDoArtefato, string>> = { html: "html", ma
 const ESPERA_PARA_LIBERAR_O_DOWNLOAD_MS = 1_000;
 
 /**
- * A página com a política de segurança no começo do `<head>`; sem `<head>`,
+ * A página com a política de segurança e o script de voltar e avançar
+ * (`navegacaoDoArtefato.ts`) no começo do `<head>`; sem `<head>`,
  * no começo do documento (depois do `<!DOCTYPE>`, para não cair no modo de
  * compatibilidade) — o navegador cria o `<head>` em volta dela.
  */
@@ -66,7 +69,7 @@ function comPoliticaDeSeguranca(html: string): string {
   const head = /<head(?:\s[^>]*)?>/i.exec(html);
   const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
   const ponto = head !== null ? head.index + head[0].length : (doctype?.[0].length ?? 0);
-  return `${html.slice(0, ponto)}${META_DA_POLITICA}${html.slice(ponto)}`;
+  return `${html.slice(0, ponto)}${META_DA_POLITICA}${TAG_DO_SCRIPT_DE_NAVEGACAO}${html.slice(ponto)}`;
 }
 
 /** O nome do arquivo baixado: o do artefato; numa versão antiga, com "-v2" antes da extensão. */
@@ -119,26 +122,7 @@ function formatarTamanho(bytes: number): string {
   return `${(quilo / 1024).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB`;
 }
 
-/** Eventos do modal não sobem até o nó: o React Flow não arrasta nem seleciona por baixo. */
-function naoPropagar(evento: SyntheticEvent): void {
-  evento.stopPropagation();
-}
-
 // ---------------- Ícones ----------------
-
-function IconeAmpliar() {
-  return (
-    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"
-        stroke="currentColor"
-        strokeWidth="1.9"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 function IconeSalvar() {
   return (
@@ -177,19 +161,7 @@ function IconeDoFormato({ formato }: { formato: FormatoDoArtefato }) {
   );
 }
 
-function BotaoDeFechar({ aoFechar }: { aoFechar: () => void }) {
-  return (
-    <button
-      type="button"
-      className="botao-icone nodrag"
-      title="Fechar (o artefato continua salvo; reabra pela paleta, Ctrl+K)"
-      aria-label="Fechar o artefato"
-      onClick={aoFechar}
-    >
-      ✕
-    </button>
-  );
-}
+const DICA_DE_FECHAR_O_ARTEFATO = "Fechar (o artefato continua salvo; reabra pela paleta, Ctrl+K)";
 
 // ---------------- Conteúdo de uma versão ----------------
 
@@ -260,16 +232,26 @@ const CorpoPronto = memo(function CorpoPronto({
   titulo,
   texto,
   noCanvas,
+  semPonteiro,
+  ligarQuadro,
+  aoCarregarQuadro,
 }: {
   formato: FormatoDoArtefato;
   titulo: string;
   texto: string;
   noCanvas: boolean;
+  /** Com o desenho da tela cheia ligado, a página não pega o mouse: o traço passa por cima dela. */
+  semPonteiro: boolean;
+  /** `ref` e `onLoad` do iframe: o histórico da página (voltar e avançar) vem dele. */
+  ligarQuadro: (quadro: HTMLIFrameElement | null) => void;
+  aoCarregarQuadro: () => void;
 }) {
   const pagina = useMemo(() => (formato === "html" ? comPoliticaDeSeguranca(texto) : ""), [formato, texto]);
   if (formato === "html") {
     const quadro = (estilo?: CSSProperties) => (
       <iframe
+        ref={ligarQuadro}
+        onLoad={aoCarregarQuadro}
         title={`Conteúdo do artefato: ${titulo}`}
         className="corpo-do-artefato-html nodrag nowheel"
         style={estilo}
@@ -279,7 +261,7 @@ const CorpoPronto = memo(function CorpoPronto({
         srcDoc={pagina}
       />
     );
-    return noCanvas ? <QuadroAtivavel>{quadro}</QuadroAtivavel> : quadro();
+    return noCanvas ? <QuadroAtivavel>{quadro}</QuadroAtivavel> : quadro(semPonteiro ? { pointerEvents: "none" } : undefined);
   }
   return (
     <div className="corpo-do-artefato-markdown custom-scrollbar nodrag nowheel" data-testid="documento-do-artefato">
@@ -295,6 +277,9 @@ function CorpoDoArtefato({
   aoTentarDeNovo,
   aoVerAtual,
   noCanvas,
+  semPonteiro,
+  ligarQuadro,
+  aoCarregarQuadro,
 }: {
   artefato: ResumoDoArtefato;
   numero: number;
@@ -303,6 +288,10 @@ function CorpoDoArtefato({
   aoVerAtual: () => void;
   /** Na janela do canvas (e não em tela cheia): a página só pega o mouse depois de ativada. */
   noCanvas: boolean;
+  /** Em tela cheia, com o desenho ligado: a página fica sem o mouse (ver `CorpoPronto`). */
+  semPonteiro: boolean;
+  ligarQuadro: (quadro: HTMLIFrameElement | null) => void;
+  aoCarregarQuadro: () => void;
 }) {
   switch (conteudo.situacao) {
     case "carregando":
@@ -329,7 +318,15 @@ function CorpoDoArtefato({
       );
     case "pronto":
       return (
-        <CorpoPronto formato={artefato.formato} titulo={artefato.titulo} texto={conteudo.texto} noCanvas={noCanvas} />
+        <CorpoPronto
+          formato={artefato.formato}
+          titulo={artefato.titulo}
+          texto={conteudo.texto}
+          noCanvas={noCanvas}
+          semPonteiro={semPonteiro}
+          ligarQuadro={ligarQuadro}
+          aoCarregarQuadro={aoCarregarQuadro}
+        />
       );
   }
 }
@@ -450,91 +447,6 @@ function SeletorDeVersao({
   );
 }
 
-// ---------------- Tela cheia ----------------
-
-/**
- * O artefato em tela cheia: um modal no `document.body`, fora do viewport do
- * React Flow (não escala com o zoom). Esc, o ✕ e um clique fora fecham.
- */
-function ArtefatoAmpliado({
-  artefato,
-  numero,
-  aoFechar,
-  children,
-}: {
-  artefato: ResumoDoArtefato;
-  numero: number;
-  aoFechar: () => void;
-  /** O corpo: a página, o documento ou o estado da versão (carregando, erro…). */
-  children: ReactNode;
-}) {
-  const caixa = useRef<HTMLDivElement>(null);
-  const idDoTitulo = useId();
-
-  useEffect(() => {
-    caixa.current?.focus({ preventScroll: true });
-  }, []);
-
-  // Esc de qualquer lugar da janela (menos de dentro da página, que é outro documento).
-  useEffect(() => {
-    const aoTeclar = (evento: KeyboardEvent) => {
-      if (evento.key === "Escape") {
-        evento.preventDefault();
-        evento.stopPropagation();
-        aoFechar();
-      }
-    };
-    window.addEventListener("keydown", aoTeclar, true);
-    return () => window.removeEventListener("keydown", aoTeclar, true);
-  }, [aoFechar]);
-
-  const aoPressionarOFundo = (evento: EventoDeMouseDoReact<HTMLDivElement>) => {
-    evento.stopPropagation();
-    if (evento.target === evento.currentTarget) {
-      aoFechar();
-    }
-  };
-
-  return createPortal(
-    <div
-      data-testid="fundo-do-artefato-ampliado"
-      className="nokey fundo-que-esmaece fixed inset-0 z-50 flex items-stretch justify-center bg-screen-bg/70 p-6"
-      onMouseDown={aoPressionarOFundo}
-      onClick={naoPropagar}
-      onDoubleClick={naoPropagar}
-      onPointerDown={naoPropagar}
-      onContextMenu={naoPropagar}
-      onWheel={naoPropagar}
-      onKeyDown={naoPropagar}
-      onKeyUp={naoPropagar}
-    >
-      <div
-        ref={caixa}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={idDoTitulo}
-        tabIndex={-1}
-        className="painel-flutuante surgir artefato-ampliado outline-none"
-      >
-        <div className="barra-do-artefato-ampliado">
-          <IconeDoFormato formato={artefato.formato} />
-          <h2 id={idDoTitulo} className="titulo-do-artefato">
-            {artefato.titulo || "Sem título"}
-          </h2>
-          <span className="chip">v{numero}</span>
-          <span className="flex-1" />
-          <span className="text-support">Esc fecha</span>
-          <button type="button" className="botao-icone" title="Fechar a tela cheia (Esc)" aria-label="Fechar a tela cheia" onClick={aoFechar}>
-            ✕
-          </button>
-        </div>
-        <div className="corpo-do-artefato">{children}</div>
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
 // ---------------- Janela ----------------
 
 /** As alças de redimensionar. Memorizadas: o arraste não as re-renderiza a cada quadro. */
@@ -588,6 +500,7 @@ const JanelaDoArtefato = memo(function JanelaDoArtefato({ artefatoId }: { artefa
   const carregada = useListaDeArtefatosCarregada();
   const erroAoCarregar = useErroAoCarregarArtefatos();
   const acoes = useAcoesDosArtefatos();
+  const aoFecharVazio = () => acoes.fechar(artefatoId);
 
   if (artefato === undefined) {
     const mensagem =
@@ -599,9 +512,10 @@ const JanelaDoArtefato = memo(function JanelaDoArtefato({ artefatoId }: { artefa
     return (
       <div className="janela-artefato">
         <div className={`barra-do-artefato ${ALCA_DO_ARTEFATO}`}>
+          <ControlesDoNo lado="inicio" objeto="o artefato" aoFechar={aoFecharVazio} dicaDoFechar={DICA_DE_FECHAR_O_ARTEFATO} />
           <span className="titulo-do-artefato text-muted">artefato</span>
           <span className="flex-1" />
-          <BotaoDeFechar aoFechar={() => acoes.fechar(artefatoId)} />
+          <ControlesDoNo lado="fim" objeto="o artefato" aoFechar={aoFecharVazio} dicaDoFechar={DICA_DE_FECHAR_O_ARTEFATO} />
         </div>
         <p className={`estado-do-artefato ${erroAoCarregar === null ? "text-muted" : "text-error"}`}>{mensagem}</p>
       </div>
@@ -620,6 +534,8 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
   const [editandoTitulo, setEditandoTitulo] = useState(false);
   const [tituloPendente, setTituloPendente] = useState<string | null>(null);
   const [ampliado, setAmpliado] = useState(false);
+  // O modo de desenho da tela cheia: vale por abertura (fechar a tela cheia o desliga; os traços ficam salvos).
+  const [desenhando, setDesenhando] = useState(false);
   const [apagando, setApagando] = useState(false);
   const [problema, setProblema] = useState<string | null>(null);
 
@@ -645,7 +561,30 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
   const { conteudo, tentarDeNovo } = useConteudoDaVersao(artefato.id, escolhida, existe);
   const titulo = tituloPendente ?? artefato.titulo;
   const pronto = conteudo.situacao === "pronto";
-  const fecharAmpliado = useCallback(() => setAmpliado(false), []);
+  const historico = useNavegacaoDoQuadro();
+  // Só a página HTML pronta tem histórico (o Markdown não navega) e só depois que o script dela avisou.
+  const navegacao =
+    pronto && artefato.formato === "html" && historico.estado.suportado ? (
+      <BotoesDeNavegacao
+        podeVoltar={historico.estado.podeVoltar}
+        podeAvancar={historico.estado.podeAvancar}
+        aoVoltar={historico.voltar}
+        aoAvancar={historico.avancar}
+      />
+    ) : null;
+  const fecharAmpliado = useCallback(() => {
+    setAmpliado(false);
+    setDesenhando(false);
+  }, []);
+  const desligarODesenho = useCallback(() => setDesenhando(false), []);
+  // Esc com o desenho ligado só o desliga; desligado, fecha a tela cheia.
+  const aoApertarEscNaTelaCheia = useCallback(() => {
+    if (!desenhando) {
+      return false;
+    }
+    setDesenhando(false);
+    return true;
+  }, [desenhando]);
   const verAtual = useCallback(() => setEscolhida(artefato.versaoAtual), [artefato.versaoAtual]);
 
   async function concluirTitulo(novo: string | null): Promise<void> {
@@ -692,6 +631,14 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
     }
   }
 
+  const controlesDaJanela = {
+    objeto: "o artefato",
+    aoFechar: () => acoes.fechar(artefato.id),
+    dicaDoFechar: DICA_DE_FECHAR_O_ARTEFATO,
+    aoAmpliar: () => setAmpliado(true),
+    ampliarDesabilitado: !pronto,
+  };
+
   const corpo = (noCanvas: boolean) => (
     <CorpoDoArtefato
       artefato={artefato}
@@ -700,12 +647,16 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
       aoTentarDeNovo={tentarDeNovo}
       aoVerAtual={verAtual}
       noCanvas={noCanvas}
+      semPonteiro={desenhando}
+      ligarQuadro={historico.ligarQuadro}
+      aoCarregarQuadro={historico.aoCarregarQuadro}
     />
   );
 
   return (
     <div className="janela-artefato">
       <div className={`barra-do-artefato ${ALCA_DO_ARTEFATO}`}>
+        <ControlesDoNo lado="inicio" {...controlesDaJanela} />
         <IconeDoFormato formato={artefato.formato} />
         {editandoTitulo ? (
           <CampoDoTitulo titulo={titulo} aoConcluir={(novo) => void concluirTitulo(novo)} />
@@ -720,17 +671,8 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
           </span>
         )}
         <span className="flex-1" />
+        {navegacao}
         <SeletorDeVersao versoes={artefato.versoes} escolhida={escolhida} atual={artefato.versaoAtual} aoEscolher={setEscolhida} />
-        <button
-          type="button"
-          className="botao-icone nodrag"
-          title="Ampliar (tela cheia)"
-          aria-label="Ampliar o artefato"
-          disabled={!pronto}
-          onClick={() => setAmpliado(true)}
-        >
-          <IconeAmpliar />
-        </button>
         <button
           type="button"
           className="botao-icone nodrag"
@@ -751,7 +693,7 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
         >
           <IconeLixeira />
         </button>
-        <BotaoDeFechar aoFechar={() => acoes.fechar(artefato.id)} />
+        <ControlesDoNo lado="fim" {...controlesDaJanela} />
       </div>
 
       {/* Em tela cheia, a página roda só no modal: duas cópias rodariam os scripts dela duas vezes. */}
@@ -766,9 +708,29 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
       )}
 
       {ampliado && (
-        <ArtefatoAmpliado artefato={artefato} numero={escolhida} aoFechar={fecharAmpliado}>
+        <JanelaEmTelaCheia
+          titulo={artefato.titulo || "Sem título"}
+          icone={<IconeDoFormato formato={artefato.formato} />}
+          selo={<span className="chip">v{escolhida}</span>}
+          navegacao={navegacao}
+          acoes={
+            <button
+              type="button"
+              className="botao-icone"
+              title={desenhando ? "Desligar o desenho sobre a página (Esc)" : "Desenhar sobre a página"}
+              aria-label="Desenhar sobre a página"
+              aria-pressed={desenhando}
+              onClick={() => setDesenhando((atual) => !atual)}
+            >
+              <IconeCaneta />
+            </button>
+          }
+          aoApertarEsc={aoApertarEscNaTelaCheia}
+          aoFechar={fecharAmpliado}
+        >
           {corpo(false)}
-        </ArtefatoAmpliado>
+          <DesenhoDaTelaCheia artefatoId={artefato.id} ligado={desenhando} aoDesligar={desligarODesenho} />
+        </JanelaEmTelaCheia>
       )}
     </div>
   );

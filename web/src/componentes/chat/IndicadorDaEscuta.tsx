@@ -47,6 +47,32 @@ function downloadDe({ download, progressoDoDownload }: Pick<Props, "download" | 
   return progressoDoDownload === null ? null : { progresso: progressoDoDownload, totalMb: null };
 }
 
+/** Os ícones do botão do indicador: pausar (duas barras), retomar (triângulo) e tentar de novo (seta circular). */
+function IconeDoIndicador({ tipo }: { tipo: "pausar" | "retomar" | "repetir" }) {
+  return (
+    <svg
+      width={12}
+      height={12}
+      viewBox="0 0 24 24"
+      fill={tipo === "repetir" ? "none" : "currentColor"}
+      stroke="currentColor"
+      strokeWidth={tipo === "repetir" ? 2 : 0}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {tipo === "pausar" && (
+        <>
+          <rect x="6" y="5" width="4" height="14" rx="1" />
+          <rect x="14" y="5" width="4" height="14" rx="1" />
+        </>
+      )}
+      {tipo === "retomar" && <path d="M8 5.5v13a.8.8 0 0 0 1.2.7l10-6.5a.8.8 0 0 0 0-1.4l-10-6.5A.8.8 0 0 0 8 5.5Z" />}
+      {tipo === "repetir" && <path d="M20 12a8 8 0 1 1-2.6-5.9M20 4v4.5h-4.5" />}
+    </svg>
+  );
+}
+
 /** O rótulo curto ao lado do ponto. */
 function rotuloDa(situacao: SituacaoDaEscuta, download: DownloadDoModelo | null): string {
   switch (situacao) {
@@ -150,13 +176,14 @@ function MenuDaEscuta({
 }
 
 /**
- * No composer, com a escuta ligada: o ponto pulsa enquanto o áudio do
- * computador é escutado e fica parado na pausa; ao lado, o selo do motor
- * ("GPU · base · q4") e, baixando, o progresso com o total ("baixando o
- * modelo 45% de 199 MB"). Clicar no selo abre o menu da escuta (Automático,
- * idioma e prioridade do motor), que fecha no Esc, ao clicar fora ou no
- * próprio selo. O botão ao lado alterna pausar e retomar (aria-pressed =
- * pausada); com erro, ele tenta de novo.
+ * Ao lado do olho, com a escuta ligada: uma pílula pequena em que o ponto
+ * pulsa enquanto o áudio do computador é escutado e fica parado na pausa; ao
+ * lado, o selo do motor ("GPU · base · q4"). O rótulo ("escutando"…) fica só
+ * para leitor de tela (a barra do chat é estreita), menos baixando, quando
+ * mostra o progresso com o total ("baixando o modelo 45% de 199 MB"). Clicar
+ * no selo abre o menu da escuta (Automático, idioma e prioridade do motor),
+ * que fecha no Esc, ao clicar fora ou no próprio selo. O botão ao lado alterna
+ * pausar e retomar (aria-pressed = pausada); com erro, ele tenta de novo.
  */
 export function IndicadorDaEscuta({
   situacao,
@@ -248,7 +275,7 @@ export function IndicadorDaEscuta({
           title={pausada ? "Retomar a escuta" : "Pausar a escuta"}
           onClick={pausada ? retomar : pausar}
         >
-          <span aria-hidden="true">{pausada ? "▶" : "❚❚"}</span>
+          <IconeDoIndicador tipo={pausada ? "retomar" : "pausar"} />
         </button>
       )}
       {situacao === "erro" && (
@@ -259,7 +286,7 @@ export function IndicadorDaEscuta({
           title="Tentar escutar de novo"
           onClick={retomar}
         >
-          <span aria-hidden="true">↻</span>
+          <IconeDoIndicador tipo="repetir" />
         </button>
       )}
       {aberto && (

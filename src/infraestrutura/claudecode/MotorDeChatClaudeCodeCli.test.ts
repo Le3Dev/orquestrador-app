@@ -57,6 +57,7 @@ function pergunta(alteracoes: Partial<PerguntaAoMotorDeChat> = {}): PerguntaAoMo
     pastaDeArtefatos: path.join(pastaDoTeste, "artefatos", "entrada", "chat"),
     modelo: "haiku",
     esforco: "baixo",
+    permitirArtefatosOnline: false,
     alteracoesAutorizadas: false,
     ...alteracoes,
   };
@@ -111,6 +112,27 @@ describe("MotorDeChatClaudeCodeCli", () => {
       { type: "text", text: "Qual a versão do Node?" },
       { type: "image", source: { type: "base64", media_type: "image/png", data: "AQID" } },
     ]);
+  });
+
+  it("com artefatos online ligados, leva as ferramentas e as variáveis que os habilitam; desligado, não", async () => {
+    const fachada = new FachadaFalsa(async (_execucao, aoReceber) => {
+      aoReceber(RESULTADO);
+      return { codigoDeSaida: 0, erroPadrao: "" };
+    });
+    const eventos: EventoDoMotorDeChat[] = [];
+    const sinal = new AbortController().signal;
+
+    await new MotorDeChatClaudeCodeCli(fachada, { PATH: "x" }).responder(
+      pergunta({ permitirArtefatosOnline: true }),
+      (evento) => eventos.push(evento),
+      sinal,
+    );
+    expect(fachada.execucao?.argumentos).toContain("Artifact");
+    expect(fachada.execucao?.ambiente.CLAUDE_CODE_ARTIFACT).toBe("1");
+
+    await new MotorDeChatClaudeCodeCli(fachada, { PATH: "x" }).responder(pergunta(), (evento) => eventos.push(evento), sinal);
+    expect(fachada.execucao?.argumentos).not.toContain("Artifact");
+    expect(fachada.execucao?.ambiente.CLAUDE_CODE_ARTIFACT).toBeUndefined();
   });
 
   it("grava o --settings sem a atribuição Co-authored-by e apaga os temporários ao final", async () => {
