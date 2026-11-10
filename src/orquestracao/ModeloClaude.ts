@@ -3,8 +3,8 @@
  *
  * Guarda o apelido (`fable`, `opus`, `sonnet`, `haiku`) e não o ID completo: o
  * Claude Code resolve o apelido para a versão vigente, e assim o histórico
- * salvo não fica preso a um modelo que um dia será aposentado. `fable` (Fable
- * 5.1) é aceito pelo Claude Code desde a v2.1.257.
+ * salvo não fica preso a um modelo que um dia será aposentado. `fable` aponta
+ * para o Fable 5.2 desde o Claude Code v2.1.322 (era o 5.1 desde a v2.1.257).
  */
 export const MODELOS_CLAUDE = ["fable", "opus", "sonnet", "haiku"] as const;
 

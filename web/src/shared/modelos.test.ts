@@ -12,7 +12,7 @@ describe("modelos do chat", () => {
   it("monta o nome com a versão usada ou a da tabela", () => {
     expect(nomeComVersao("opus", "claude-opus-5-6")).toBe("Opus 5.6");
     expect(nomeComVersao("opus", "claude-sonnet-5-6")).toBe("Opus 5.5");
-    expect(nomeComVersao("fable", null)).toBe("Fable 5.1");
+    expect(nomeComVersao("fable", null)).toBe("Fable 5.2");
   });
 
   it("rotula os esforços", () => {

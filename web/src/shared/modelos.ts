@@ -10,7 +10,7 @@ export interface ModeloNoSeletor {
 }
 
 export const MODELOS_DO_CHAT: readonly ModeloNoSeletor[] = [
-  { modelo: "fable", nome: "Fable", versao: "5.1", descricao: "Para seus desafios mais difíceis" },
+  { modelo: "fable", nome: "Fable", versao: "5.2", descricao: "Para seus desafios mais difíceis" },
   { modelo: "opus", nome: "Opus", versao: "5.5", descricao: "Para trabalhos complexos e tarefas do dia a dia" },
   { modelo: "sonnet", nome: "Sonnet", versao: "5.5", descricao: "Mais eficiente para tarefas mais simples" },
   { modelo: "haiku", nome: "Haiku", versao: "5.5", descricao: "Mais rápido para respostas rápidas" },

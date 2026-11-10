@@ -42,7 +42,7 @@ describe("SeletorDeModelo", () => {
     const menu = screen.getByRole("menu", { name: "Modelo do chat" });
     const itens = within(menu).getAllByRole("menuitemradio");
     expect(itens.map((item) => item.textContent?.replace("✓", ""))).toEqual([
-      "Fable 5.1Para seus desafios mais difíceis",
+      "Fable 5.2Para seus desafios mais difíceis",
       "Opus 5.5Para trabalhos complexos e tarefas do dia a dia",
       "Sonnet 5.5Mais eficiente para tarefas mais simples",
       "Haiku 5.5Mais rápido para respostas rápidas",
@@ -57,7 +57,7 @@ describe("SeletorDeModelo", () => {
     const { aoAlterar, campo } = renderizar();
 
     fireEvent.click(botao());
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /Fable 5\.1/ }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Fable 5\.2/ }));
 
     expect(alterar).toHaveBeenCalledWith({ modelo: "fable" });
     await waitFor(() => expect(aoAlterar).toHaveBeenCalledWith({ modelo: "fable", esforco: "alto" }));

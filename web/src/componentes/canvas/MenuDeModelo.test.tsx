@@ -65,7 +65,7 @@ describe("MenuDeModelo", () => {
     expect(menu).toHaveClass("menu-de-modelo-lista", "nodrag", "nowheel");
     const modelos = within(menu).getAllByRole("menuitemradio");
     expect(modelos.map((item) => item.querySelector(".menu-de-modelo-titulo")?.textContent)).toEqual([
-      "Fable 5.1",
+      "Fable 5.2",
       "Opus 5.5",
       "Sonnet 5.5",
       "Haiku 5.5",
