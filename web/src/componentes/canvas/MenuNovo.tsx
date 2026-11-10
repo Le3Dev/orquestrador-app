@@ -514,7 +514,7 @@ export function MenuNovo({
         onClick={() => (aberto ? fechar(false) : abrir(0))}
         onKeyDown={aoTeclarNoBotao}
       >
-        <IconeMais tamanho={16} className="icone-do-botao-novo" />
+        <IconeMais tamanho={14} className="icone-do-botao-novo" />
         Novo
       </button>
       {aberto && (

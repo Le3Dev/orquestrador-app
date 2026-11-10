@@ -560,8 +560,8 @@ describe("NotificacoesDoCanvas", () => {
     const propriedades = { cota: null, aoVerSistema: vi.fn(), pedidosEmAndamento: 0, aoMedirTopoLivre };
     const { rerender } = render(<NotificacoesDoCanvas memoria={memoria(0.4)} {...propriedades} />);
 
-    // 72 de topo + altura da pilha (0 no jsdom) + 8 de respiro.
-    expect(aoMedirTopoLivre).toHaveBeenLastCalledWith(80);
+    // 66 de topo + altura da pilha (0 no jsdom) + 8 de respiro.
+    expect(aoMedirTopoLivre).toHaveBeenLastCalledWith(74);
 
     rerender(<NotificacoesDoCanvas memoria={memoria(10)} {...propriedades} />);
     expect(aoMedirTopoLivre).toHaveBeenLastCalledWith(null);

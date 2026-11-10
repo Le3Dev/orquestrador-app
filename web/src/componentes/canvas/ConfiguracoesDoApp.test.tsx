@@ -98,7 +98,7 @@ describe("ConfiguracoesDoApp", () => {
 
       const painel = screen.getByRole("region", { name: "Configurações" });
       expect(painel).toHaveClass("configuracoes-do-app");
-      expect(painel).toHaveStyle({ top: "72px" });
+      expect(painel).toHaveStyle({ top: "66px" });
       const abas = within(screen.getByRole("tablist", { name: "Seções de Configurações" })).getAllByRole("tab");
       expect(abas.map((item) => item.textContent)).toEqual(["Padrões", "Sistema", "Conta", "Atualização", "Aparência"]);
       expect(aba("Padrões")).toHaveAttribute("aria-selected", "true");
