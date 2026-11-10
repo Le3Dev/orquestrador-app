@@ -237,7 +237,7 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
 .situacao-no-canvas { flex-shrink: 0; font-size: 12px; color: var(--secondary); }
 .situacao-no-canvas-aberto { color: var(--caption); }
 
-/* ---------- Canto superior direito: lupa, contador, anel e engrenagem ---------- */
+/* ---------- Canto superior direito: lupa, contador, uso do Claude, anel de memória e engrenagem ---------- */
 .ilha-da-direita { position: absolute; top: 16px; right: 16px; z-index: 2; }
 .botao-da-ilha {
   display: inline-flex;
@@ -281,7 +281,7 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   cursor: pointer;
 }
 .anel-da-ilha:hover, .anel-da-ilha[aria-pressed="true"] { background: var(--surface-3); color: var(--primary); }
-.anel-da-ilha-baixa { color: var(--warning); padding-right: 10px; }
+.anel-da-ilha-baixa, .anel-da-ilha-alta { color: var(--warning); padding-right: 10px; }
 .anel-da-ilha-critica {
   color: var(--error);
   padding-right: 10px;
@@ -291,6 +291,25 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
 .trilha-do-anel { stroke: color-mix(in srgb, var(--primary) 16%, transparent); }
 .arco-do-anel { stroke: currentColor; }
 .chip-do-anel { position: absolute; top: 6.5px; left: 6.5px; }
+.anel-de-uso { position: relative; display: inline-flex; width: 26px; height: 26px; flex-shrink: 0; }
+/* O anel de uso da cota: o arco e o número no meio seguem a cor do nível da janela mostrada (a do botão, que
+ * segue a pior janela, fica no texto ao lado). O normal é o cinza de sempre e acende no hover e com a aba aberta. */
+.anel-de-uso-normal { color: var(--secondary); }
+.anel-da-ilha:hover .anel-de-uso-normal, .anel-da-ilha[aria-pressed="true"] .anel-de-uso-normal { color: var(--primary); }
+.anel-de-uso-alta { color: var(--warning); }
+.anel-de-uso-critica { color: var(--error); }
+/* O percentual no meio do anel de uso: número inteiro, sem o sinal de %. */
+.valor-do-anel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 600 10.5px/1 var(--fonte-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.05em;
+}
+.valor-do-anel-cheio { font-size: 8.5px; }
 
 /* Windows e Linux desktop: ─ ☐ ✕ no fim da ilha da direita, depois de um divisor; fechar fica vermelho no hover. */
 .ilha-da-direita .controles-da-janela { gap: 2px; }

@@ -1540,7 +1540,7 @@ function Canvas() {
   const abrirConfiguracoes = useCallback((aba?: AbaDasConfiguracoes) => {
     setConfiguracoes((atual) => ({ aba, pedido: (atual?.pedido ?? 0) + 1 }));
   }, []);
-  /** A engrenagem e o anel de memória: abrem as Configurações; um segundo clique na mesma aba as fecha. */
+  /** A engrenagem e os anéis de uso e de memória: abrem as Configurações; um segundo clique na mesma aba as fecha. */
   const alternarConfiguracoes = useCallback((aba?: AbaDasConfiguracoes) => {
     setConfiguracoes((atual) =>
       atual !== null && atual.aba === aba ? null : { aba, pedido: (atual?.pedido ?? 0) + 1 },
@@ -1771,6 +1771,7 @@ function Canvas() {
           aoBuscar={abrirPaleta}
           trabalhando={trabalhando}
           memoria={servidor.memoria}
+          cota={cota}
           aoAlternarConfiguracoes={alternarConfiguracoes}
           configuracoesAbertas={configuracoes !== null}
           abaAberta={configuracoes?.aba ?? null}
