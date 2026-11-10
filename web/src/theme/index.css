@@ -3820,3 +3820,230 @@ html.modo-invisivel .barra-de-titulo * {
 .ditado-abaixo .balao-do-ditado { top: calc(100% + 6px); bottom: auto; }
 /* No chat rápido o microfone fica perto da borda esquerda (na coluna fixa, a da tela): o balão abre para a direita. */
 .ditado-a-direita .balao-do-ditado { left: 0; right: auto; }
+
+/* ── Escuta: legenda ao vivo (componentes/escuta) ───────────────────────── */
+/* Janela compacta do modo invisível: legenda corrida e cartão da resposta.
+ * A transparência escolhida vale só para os fundos (--opacidade-da-escuta,
+ * em %, vinda do PainelDaEscuta); o texto continua opaco, com uma sombra leve
+ * para ler sobre o que estiver atrás. O tom da escuta é o azul (--info), o
+ * mesmo do indicador; a pergunta detectada vai no tom de aviso (--warning). */
+.painel-da-escuta {
+  --cor-do-painel-da-escuta: var(--info);
+  --opacidade-da-escuta: 92%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px 10px;
+  border-radius: var(--radius-card);
+  border: 1px solid color-mix(in srgb, var(--info) 30%, var(--border));
+  background: color-mix(in srgb, var(--surface) var(--opacidade-da-escuta), transparent);
+  color: var(--primary);
+  font-family: var(--fonte-texto);
+  font-size: 12px;
+}
+.painel-da-escuta-pausada,
+.painel-da-escuta-iniciando,
+.painel-da-escuta-parada { --cor-do-painel-da-escuta: var(--secondary); }
+.painel-da-escuta-erro { --cor-do-painel-da-escuta: var(--error); }
+
+/* Cabeçalho: estado, motor, download e os controles de aparência. */
+.cabecalho-do-painel-da-escuta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
+.estado-do-painel-da-escuta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--fonte-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--cor-do-painel-da-escuta);
+}
+.ponto-do-painel-da-escuta { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--cor-do-painel-da-escuta); }
+.painel-da-escuta-escutando .ponto-do-painel-da-escuta { animation: pulso-tela-vista 1.4s ease-in-out infinite; }
+.selo-do-motor {
+  --cor-do-selo: var(--success);
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-family: var(--fonte-mono);
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: .03em;
+  white-space: nowrap;
+  color: var(--cor-do-selo);
+  background: color-mix(in srgb, var(--cor-do-selo) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--cor-do-selo) 40%, transparent);
+  cursor: default;
+}
+.selo-do-motor-cpu { --cor-do-selo: var(--secondary); }
+.download-do-painel-da-escuta {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-family: var(--fonte-mono);
+  font-size: 10px;
+  color: var(--secondary);
+}
+.texto-do-download-do-painel { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.trilho-do-download-do-painel { display: block; height: 3px; border-radius: 2px; overflow: hidden; background: var(--surface-3); }
+.barra-do-download-do-painel { display: block; height: 100%; background: var(--info); transition: width .2s ease-out; }
+.espaco-do-painel-da-escuta { flex: 1; }
+.controles-do-painel-da-escuta { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+.botao-do-painel-da-escuta {
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: var(--radius-button);
+  font-family: var(--fonte-mono);
+  font-size: 11px;
+  color: var(--secondary);
+  cursor: pointer;
+}
+.botao-do-painel-da-escuta:not(:disabled):hover,
+.botao-do-painel-da-escuta[aria-pressed="true"] { background: var(--surface-3); color: var(--primary); }
+.botao-do-painel-da-escuta:disabled { opacity: .4; cursor: not-allowed; }
+.botao-do-painel-da-escuta:focus-visible,
+.opacidade-do-painel-da-escuta:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.opacidade-do-painel-da-escuta { width: 64px; height: 16px; margin: 0 4px; accent-color: var(--info); cursor: pointer; }
+.erro-do-painel-da-escuta {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-input);
+  border: 1px solid color-mix(in srgb, var(--error) 35%, transparent);
+  border-left: 3px solid var(--error);
+  background: color-mix(in srgb, var(--error) 12%, var(--surface-2));
+  color: var(--error);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+/* Corpo: legenda e cartão lado a lado; quebra (empilha) quando estreito. */
+.corpo-do-painel-da-escuta { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; min-width: 0; }
+
+/* Legenda corrida: confirmados no tom normal, o parcial apagado no fim. A
+ * altura é em linhas (1.5em cada, na fonte escolhida): 6, ou 3 no compacto. */
+.legenda-ao-vivo {
+  position: relative;
+  flex: 3 1 260px;
+  min-width: 0;
+  line-height: 1.5;
+  text-shadow: 0 1px 2px color-mix(in srgb, var(--screen-bg) 70%, transparent);
+}
+.painel-da-escuta-compacto .legenda-ao-vivo { flex-basis: 100%; }
+.rolagem-da-legenda {
+  --linhas-da-legenda: 6;
+  max-height: calc(var(--linhas-da-legenda) * 1.5em);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.painel-da-escuta-compacto .rolagem-da-legenda { --linhas-da-legenda: 3; }
+.texto-da-legenda,
+.legenda-vazia { margin: 0; overflow-wrap: anywhere; user-select: text; }
+.legenda-confirmada { color: var(--primary); }
+.legenda-parcial { color: var(--secondary); font-style: italic; }
+.legenda-vazia { color: var(--muted); font-size: .86em; }
+.legenda-pergunta {
+  padding: 0 3px;
+  border-radius: calc(var(--radius-input) / 2);
+  color: inherit;
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--warning) 60%, transparent);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.marca-de-pergunta {
+  display: inline-block;
+  padding: 0 4px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--warning) 55%, transparent);
+  font-family: var(--fonte-mono);
+  font-size: .62em;
+  font-style: normal;
+  font-weight: 500;
+  letter-spacing: .06em;
+  line-height: 1.5;
+  text-transform: uppercase;
+  vertical-align: .15em;
+  color: var(--warning);
+}
+.botao-ao-vivo {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--info) 50%, transparent);
+  font-family: var(--fonte-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  text-shadow: none;
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 18%, var(--surface-2));
+  cursor: pointer;
+  animation: subir var(--tempo-de-surgir) var(--curva-de-mola);
+}
+.botao-ao-vivo:hover { background: color-mix(in srgb, var(--info) 28%, var(--surface-2)); color: var(--primary); }
+.botao-ao-vivo:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+
+/* Cartão da resposta: a pergunta numa linha e a resposta em tópicos curtos. */
+.cartao-de-resposta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 2 1 220px;
+  min-width: 0;
+  padding: 7px 10px 8px;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) var(--opacidade-da-escuta, 100%), transparent);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.pergunta-do-cartao-de-resposta { display: flex; align-items: baseline; gap: 6px; min-width: 0; margin: 0; }
+.pergunta-do-cartao-de-resposta .rotulo-tecnico { flex: none; color: var(--warning); }
+.texto-da-pergunta-do-cartao {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: .9em;
+  color: var(--caption);
+}
+.cartao-de-resposta .texto-do-cartao-de-resposta {
+  max-height: calc(8 * 1.5em);
+  overflow-y: auto;
+  font-family: var(--fonte-texto);
+  font-size: inherit;
+  line-height: 1.5;
+}
+.cartao-de-resposta .texto-do-cartao-de-resposta > * + * { margin-top: 6px; }
+.cartao-de-resposta .texto-do-cartao-de-resposta :is(ul, ol) { padding-left: 18px; }
+.cartao-de-resposta .texto-do-cartao-de-resposta li + li { margin-top: 2px; }
+.cartao-de-resposta-vazio { margin: 0; color: var(--muted); font-size: .86em; }
+.espera-do-cartao-de-resposta { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 11px; color: var(--secondary); }
+.pontos-de-espera { display: inline-flex; gap: 3px; }
+.pontos-de-espera > span { width: 4px; height: 4px; border-radius: 50%; background: var(--info); animation: pulso-tela-vista 1.2s ease-in-out infinite; }
+.pontos-de-espera > span:nth-child(2) { animation-delay: .2s; }
+.pontos-de-espera > span:nth-child(3) { animation-delay: .4s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .painel-da-escuta-escutando .ponto-do-painel-da-escuta,
+  .pontos-de-espera > span,
+  .botao-ao-vivo { animation: none; }
+  .barra-do-download-do-painel { transition: none; }
+}
