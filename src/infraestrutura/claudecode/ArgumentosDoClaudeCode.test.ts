@@ -637,3 +637,83 @@ describe("esforço ultracode", () => {
     expect(configuracoesDaSessao(comCommit)).toEqual({ attribution: { commit: "", pr: "" } });
   });
 });
+
+describe("artefatos online no claude.ai", () => {
+  const ONLINE = ["Artifact", "ArtifactCheck", "ArtifactData"];
+  const REVISOR = { nome: "revisor", descricao: "Revisa.", prompt: "Revise.", modelo: "herdar" as const };
+  const comOpcao = (nivel: NivelDePermissao = "edicao_e_comandos", modo: ModoDoTurno = "execucao"): PedidoDeTurno => {
+    const base = pedido(false, nivel, modo);
+    return { ...base, configuracao: base.configuracao.com({ permitirArtefatosOnline: true }) };
+  };
+
+  it("desligada (o padrão), nenhuma ferramenta online entra e os argumentos não mudam", () => {
+    const argumentos = montarArgumentos(pedido(false, "edicao_e_comandos"), arquivos);
+
+    expect(argumentos.join(" ")).not.toContain("Artifact");
+    expect(valoresDe(argumentos, "--tools")).toEqual([
+      ...FERRAMENTAS_POR_NIVEL.edicao_e_comandos,
+      "Agent",
+    ]);
+  });
+
+  it("ligada, entram em --tools e em --allowedTools, depois do Agent", () => {
+    const argumentos = montarArgumentos(comOpcao(), arquivos);
+
+    expect(valoresDe(argumentos, "--tools")).toEqual([...FERRAMENTAS_POR_NIVEL.edicao_e_comandos, "Agent", ...ONLINE]);
+    expect(valoresDe(argumentos, "--allowedTools")).toEqual([
+      ...FERRAMENTAS_POR_NIVEL.edicao_e_comandos,
+      "Agent",
+      ...ONLINE,
+    ]);
+  });
+
+  it("no nível só de leitura, entram antes das regras da pasta de artefatos locais", () => {
+    const argumentos = montarArgumentos(comOpcao("leitura"), arquivos);
+
+    expect(valoresDe(argumentos, "--allowedTools")).toEqual([
+      ...FERRAMENTAS_POR_NIVEL.leitura,
+      "Agent",
+      ...ONLINE,
+      ...REGRAS_DE_ARTEFATO,
+    ]);
+  });
+
+  it("com a opção ligada, só o executor recebe as ferramentas online e a linha de publicação", () => {
+    const ligado = definicaoDosAgentes({ ...comOpcao(), subagentesProntos: [REVISOR] });
+
+    expect(ligado.executor?.tools).toEqual(expect.arrayContaining(ONLINE));
+    expect(ligado.executor?.prompt).toContain("ferramenta Artifact");
+    for (const ferramenta of ONLINE) {
+      expect(ligado.revisor?.tools).not.toContain(ferramenta);
+    }
+    expect(ligado.revisor?.prompt).not.toContain("Artifact");
+    expect(ligado.revisor?.prompt).not.toContain("claude.ai");
+  });
+
+  it("desligada, nem o executor nem os prontos recebem as ferramentas online ou a linha", () => {
+    const desligado = definicaoDosAgentes({ ...pedido(false, "edicao_e_comandos"), subagentesProntos: [REVISOR] });
+
+    for (const nome of ["executor", "revisor"]) {
+      expect(desligado[nome]?.tools).not.toContain("Artifact");
+      expect(desligado[nome]?.prompt).not.toContain("Artifact");
+    }
+  });
+
+  it("ligada, o ambiente do turno habilita os artefatos online em claude -p e não abre o navegador", () => {
+    const ambiente = montarAmbiente({ PATH: "x" }, comOpcao());
+
+    expect(ambiente.CLAUDE_CODE_ARTIFACT).toBe("1");
+    expect(ambiente.CLAUDE_CODE_ARTIFACT_AUTO_OPEN).toBe("0");
+  });
+
+  it("ligada, respeita a abertura automática que o usuário já definiu", () => {
+    expect(montarAmbiente({ CLAUDE_CODE_ARTIFACT_AUTO_OPEN: "1" }, comOpcao()).CLAUDE_CODE_ARTIFACT_AUTO_OPEN).toBe("1");
+  });
+
+  it("desligada, o ambiente do turno não leva as variáveis dos artefatos online", () => {
+    const ambiente = montarAmbiente({ PATH: "x" }, pedido(false, "edicao_e_comandos"));
+
+    expect(ambiente).not.toHaveProperty("CLAUDE_CODE_ARTIFACT");
+    expect(ambiente).not.toHaveProperty("CLAUDE_CODE_ARTIFACT_AUTO_OPEN");
+  });
+});

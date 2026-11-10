@@ -44,6 +44,8 @@ describe("PredefinicaoDeConfiguracao", () => {
       quantidadeDeSubagentes: { modo: "automatica", limite: 1 },
       nivelDePermissao: "edicao_e_comandos",
       permitirCommitEPush: true,
+      // Nem os artefatos online: seguem como estavam.
+      permitirArtefatosOnline: false,
       // As instruções personalizadas não fazem parte da predefinição: ficam como estavam.
       instrucoesPersonalizadas: "",
       // Nem a escolha dos subagentes prontos.

@@ -111,12 +111,12 @@ describe("aplicarEventoDoChat", () => {
       pergunta,
       { tipo: "resposta_cancelada", mensagemId: "c1" },
       { tipo: "conversa_limpa" },
-      { tipo: "preferencias_alteradas", preferencias: { modelo: "haiku", esforco: "baixo" } },
+      { tipo: "preferencias_alteradas", preferencias: { modelo: "haiku", esforco: "baixo", permitirArtefatosOnline: false } },
       { tipo: "uso_da_cota", janelas: [{ nome: "5 horas", utilizacao: 0.4, renovaEm: null, situacao: "ok" }] },
     ]);
 
     expect(estado.mensagens).toEqual([]);
-    expect(estado.preferencias).toEqual({ modelo: "haiku", esforco: "baixo" });
+    expect(estado.preferencias).toEqual({ modelo: "haiku", esforco: "baixo", permitirArtefatosOnline: false });
     expect(estado.cota?.[0]?.utilizacao).toBe(0.4);
     expect(estado.ultimaSequencia).toBe(5);
   });
@@ -133,7 +133,7 @@ describe("aplicarEventoDoChat", () => {
     const estado = carregarEstadoDoChat({
       sessaoId: "s",
       situacao: "respondendo",
-      preferencias: { modelo: "fable", esforco: "maximo" },
+      preferencias: { modelo: "fable", esforco: "maximo", permitirArtefatosOnline: false },
       mensagens: [mensagem("c9", "claude", { texto: "já veio" })],
       ultimaSequencia: 42,
       cota: null,
@@ -147,7 +147,7 @@ describe("aplicarEventoDoChat", () => {
     const estado = carregarEstadoDoChat({
       sessaoId: "s",
       situacao: "ocioso",
-      preferencias: { modelo: "opus", esforco: "alto" },
+      preferencias: { modelo: "opus", esforco: "alto", permitirArtefatosOnline: false },
       mensagens: [mensagem("c1", "claude", { situacao: "falhou", avisos: ["ação ignorada", "sem cota"] })],
       ultimaSequencia: 3,
       cota: null,
@@ -171,7 +171,7 @@ describe("aplicarEventoDoChat", () => {
       const base = {
         sessaoId: "s",
         situacao: "ocioso" as const,
-        preferencias: { modelo: "opus" as const, esforco: "alto" as const },
+        preferencias: { modelo: "opus" as const, esforco: "alto" as const, permitirArtefatosOnline: false },
         ultimaSequencia: 4,
         cota: null,
       };
@@ -284,7 +284,7 @@ describe("perguntas com opções", () => {
     const estado = carregarEstadoDoChat({
       sessaoId: "s",
       situacao: "ocioso",
-      preferencias: { modelo: "opus", esforco: "alto" },
+      preferencias: { modelo: "opus", esforco: "alto", permitirArtefatosOnline: false },
       ultimaSequencia: 2,
       cota: null,
       mensagens: [

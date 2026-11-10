@@ -567,6 +567,8 @@ function novoTurno(evento: Extract<EventoRegistrado, { tipo: "turno_iniciado" }>
       // Pedidos gravados antes da opção de commit e push rodaram com eles bloqueados;
       // e os anteriores à escolha do esforço, com o padrão do modelo.
       permitirCommitEPush: evento.configuracao.permitirCommitEPush ?? false,
+      // Os anteriores à opção de artefatos online rodaram sem as ferramentas de publicação.
+      permitirArtefatosOnline: evento.configuracao.permitirArtefatosOnline ?? false,
       esforcoDoOrquestrador: evento.configuracao.esforcoDoOrquestrador ?? "padrao",
       esforcoDosSubagentes: evento.configuracao.esforcoDosSubagentes ?? "padrao",
       // Os anteriores às instruções personalizadas rodaram sem elas.

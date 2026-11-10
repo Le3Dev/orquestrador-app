@@ -15,7 +15,12 @@ import {
   TAMANHO_MINIMO_DO_TERMINAL,
 } from "../../shared/canvas/layout";
 import { ALCA_DO_TERMINAL, type NoRascunho as TipoDoNo } from "../../shared/canvas/nos";
-import { AVISO_DO_ULTRACODE, ROTULOS_DAS_PERMISSOES } from "../../shared/formatacao";
+import {
+  AJUDA_DOS_ARTEFATOS_ONLINE,
+  AVISO_DO_ULTRACODE,
+  ROTULO_DOS_ARTEFATOS_ONLINE,
+  ROTULOS_DAS_PERMISSOES,
+} from "../../shared/formatacao";
 import {
   ajudaDaPredefinicao,
   useEsforcosHerdados,
@@ -377,12 +382,12 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
             <div className="linha-da-criacao">
               <Rotulo
                 titulo="Opções"
-                dica="Cada feature pronta vira um commit com push."
-                explicacao="Ligado, cada feature ou correção pronta (testada, com lint e build ok) vira um commit próprio com push da branch em seguida, numa branch feature/, fix/, hotfix/ ou refactor/. PR e merge só quando você pedir. Precisa da permissão de rodar comandos. O Modo econômico troca modelos e esforço por outros que gastam menos cota; os campos continuam editáveis."
+                dica="Commit e push por feature; publicar artefatos online."
+                explicacao={`Commit e push por feature: ligado, cada feature ou correção pronta (testada, com lint e build ok) vira um commit próprio com push da branch em seguida, numa branch feature/, fix/, hotfix/ ou refactor/. PR e merge só quando você pedir. Precisa da permissão de rodar comandos. ${ROTULO_DOS_ARTEFATOS_ONLINE}: ${AJUDA_DOS_ARTEFATOS_ONLINE} O Modo econômico troca modelos e esforço por outros que gastam menos cota; os campos continuam editáveis.`}
                 alinharAoTopo
               />
               <div className="flex min-w-0 flex-col gap-1">
-                <div className="flex min-w-0 items-center gap-3">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
                   <button
                     type="button"
                     role="switch"
@@ -392,6 +397,17 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                   >
                     <span className={`interruptor-trilho ${commitSemComandos ? "interruptor-sem-efeito" : ""}`} aria-hidden="true" />
                     Commit e push por feature
+                  </button>
+                  <button
+                    type="button"
+                    role="switch"
+                    className="interruptor"
+                    title={AJUDA_DOS_ARTEFATOS_ONLINE}
+                    aria-checked={configuracao.permitirArtefatosOnline}
+                    onClick={() => mudar("permitirArtefatosOnline", !configuracao.permitirArtefatosOnline)}
+                  >
+                    <span className="interruptor-trilho" aria-hidden="true" />
+                    {ROTULO_DOS_ARTEFATOS_ONLINE}
                   </button>
                   {economico !== undefined && (
                     <button
@@ -537,6 +553,7 @@ function detalhes(configuracao: DadosDaConfiguracao, pasta: string): string {
   return [
     pasta,
     ...(configuracao.permitirCommitEPush && configuracao.nivelDePermissao === "edicao_e_comandos" ? ["commit e push"] : []),
+    ...(configuracao.permitirArtefatosOnline ? ["artefatos online"] : []),
     configuracao.instrucoesPersonalizadas.trim() === "" ? "instruções gerais" : "instruções próprias",
   ].join(" · ");
 }

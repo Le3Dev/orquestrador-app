@@ -5,7 +5,7 @@ import { api } from "../../shared/api/cliente";
 import type { PreferenciasDoChat } from "../../shared/api/tipos";
 import { SeletorDeModelo } from "./SeletorDeModelo";
 
-function renderizar(preferencias: PreferenciasDoChat = { modelo: "opus", esforco: "alto" }, modeloUsado: string | null = null) {
+function renderizar(preferencias: PreferenciasDoChat = { modelo: "opus", esforco: "alto", permitirArtefatosOnline: false }, modeloUsado: string | null = null) {
   const aoAlterar = vi.fn();
   const aoFalhar = vi.fn();
   const campo = createRef<HTMLTextAreaElement>();
@@ -53,20 +53,20 @@ describe("SeletorDeModelo", () => {
   });
 
   it("escolher um modelo chama o PATCH e devolve o foco ao campo", async () => {
-    const alterar = vi.spyOn(api, "alterarPreferenciasDoChat").mockResolvedValue({ modelo: "fable", esforco: "alto" });
+    const alterar = vi.spyOn(api, "alterarPreferenciasDoChat").mockResolvedValue({ modelo: "fable", esforco: "alto", permitirArtefatosOnline: false });
     const { aoAlterar, campo } = renderizar();
 
     fireEvent.click(botao());
     fireEvent.click(screen.getByRole("menuitemradio", { name: /Fable 5\.2/ }));
 
     expect(alterar).toHaveBeenCalledWith({ modelo: "fable" });
-    await waitFor(() => expect(aoAlterar).toHaveBeenCalledWith({ modelo: "fable", esforco: "alto" }));
+    await waitFor(() => expect(aoAlterar).toHaveBeenCalledWith({ modelo: "fable", esforco: "alto", permitirArtefatosOnline: false }));
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(campo.current).toHaveFocus();
   });
 
   it("o submenu de esforço lista os níveis com ✓ e escolher chama o PATCH", async () => {
-    const alterar = vi.spyOn(api, "alterarPreferenciasDoChat").mockResolvedValue({ modelo: "opus", esforco: "maximo" });
+    const alterar = vi.spyOn(api, "alterarPreferenciasDoChat").mockResolvedValue({ modelo: "opus", esforco: "maximo", permitirArtefatosOnline: false });
     const { aoAlterar } = renderizar();
 
     fireEvent.click(botao());
@@ -91,18 +91,18 @@ describe("SeletorDeModelo", () => {
   });
 
   it("Ultracode é a última opção do esforço e escolher chama o PATCH", async () => {
-    const alterar = vi.spyOn(api, "alterarPreferenciasDoChat").mockResolvedValue({ modelo: "opus", esforco: "ultracode" });
+    const alterar = vi.spyOn(api, "alterarPreferenciasDoChat").mockResolvedValue({ modelo: "opus", esforco: "ultracode", permitirArtefatosOnline: false });
     const { aoAlterar } = renderizar();
 
     fireEvent.click(botao());
     fireEvent.click(screen.getByRole("menuitem", { name: /Esforço/ }));
     fireEvent.click(screen.getByRole("menuitemradio", { name: /Ultracode/ }));
     expect(alterar).toHaveBeenCalledWith({ esforco: "ultracode" });
-    await waitFor(() => expect(aoAlterar).toHaveBeenCalledWith({ modelo: "opus", esforco: "ultracode" }));
+    await waitFor(() => expect(aoAlterar).toHaveBeenCalledWith({ modelo: "opus", esforco: "ultracode", permitirArtefatosOnline: false }));
   });
 
   it("com Ultracode escolhido, o botão mostra o nível e o submenu traz o aviso de custo", () => {
-    renderizar({ modelo: "opus", esforco: "ultracode" });
+    renderizar({ modelo: "opus", esforco: "ultracode", permitirArtefatosOnline: false });
 
     expect(botao()).toHaveTextContent("Opus 5.5Ultracode");
     fireEvent.click(botao());
@@ -112,6 +112,40 @@ describe("SeletorDeModelo", () => {
     expect(within(submenu).getByText(/Ultracode dispara workflows com vários agentes em paralelo/)).toHaveClass(
       "hint-warning",
     );
+  });
+
+  it("o menu traz o interruptor de artefatos online e escolher chama o PATCH só com esse campo", async () => {
+    const alterar = vi
+      .spyOn(api, "alterarPreferenciasDoChat")
+      .mockResolvedValue({ modelo: "opus", esforco: "alto", permitirArtefatosOnline: true });
+    const { aoAlterar, campo } = renderizar();
+
+    fireEvent.click(botao());
+    const item = screen.getByRole("menuitemcheckbox", { name: /Publicar artefatos no claude\.ai/ });
+    expect(item).toHaveAttribute("aria-checked", "false");
+    expect(item).toHaveAttribute("title", expect.stringContaining("O que for publicado sai do computador"));
+    fireEvent.click(item);
+
+    expect(alterar).toHaveBeenCalledWith({ permitirArtefatosOnline: true });
+    await waitFor(() =>
+      expect(aoAlterar).toHaveBeenCalledWith({ modelo: "opus", esforco: "alto", permitirArtefatosOnline: true }),
+    );
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(campo.current).toHaveFocus();
+  });
+
+  it("com a opção ligada, o item vem marcado e desligar chama o PATCH com false", () => {
+    const alterar = vi
+      .spyOn(api, "alterarPreferenciasDoChat")
+      .mockResolvedValue({ modelo: "opus", esforco: "alto", permitirArtefatosOnline: false });
+    renderizar({ modelo: "opus", esforco: "alto", permitirArtefatosOnline: true });
+
+    fireEvent.click(botao());
+    const item = screen.getByRole("menuitemcheckbox", { name: /Publicar artefatos no claude\.ai/ });
+    expect(item).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(item);
+
+    expect(alterar).toHaveBeenCalledWith({ permitirArtefatosOnline: false });
   });
 
   it("Esc e clique fora fecham o menu", () => {
@@ -128,7 +162,7 @@ describe("SeletorDeModelo", () => {
   });
 
   it("o rótulo usa a versão do modelo da última resposta, se for da mesma família", () => {
-    renderizar({ modelo: "opus", esforco: "padrao" }, "claude-opus-5-6");
+    renderizar({ modelo: "opus", esforco: "padrao", permitirArtefatosOnline: false }, "claude-opus-5-6");
     expect(botao()).toHaveTextContent("Opus 5.6Padrão");
   });
 
@@ -139,6 +173,6 @@ describe("SeletorDeModelo", () => {
     fireEvent.click(botao());
     fireEvent.click(screen.getByRole("menuitemradio", { name: /Haiku/ }));
 
-    await waitFor(() => expect(aoFalhar).toHaveBeenCalledWith("Não foi possível trocar o modelo: fora do ar"));
+    await waitFor(() => expect(aoFalhar).toHaveBeenCalledWith("Não foi possível salvar a escolha: fora do ar"));
   });
 });

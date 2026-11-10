@@ -33,6 +33,7 @@ function pergunta(alteracoes: Partial<PerguntaAoMotorDeChat> = {}): PerguntaAoMo
     pastaDeArtefatos: PASTA_DE_ARTEFATOS,
     modelo: "haiku",
     esforco: "padrao",
+    permitirArtefatosOnline: false,
     alteracoesAutorizadas: false,
     ...alteracoes,
   };
@@ -165,6 +166,41 @@ describe("montarArgumentosDoChat", () => {
     expect(montarArgumentosDoChat(pergunta(), arquivos)).not.toContain("--effort");
     expect(valoresDe(montarArgumentosDoChat(pergunta({ esforco: "baixo" }), arquivos), "--effort")).toEqual(["low"]);
     expect(valoresDe(montarArgumentosDoChat(pergunta({ esforco: "maximo" }), arquivos), "--effort")).toEqual(["max"]);
+  });
+
+  describe("artefatos online no claude.ai", () => {
+    const ONLINE = ["Artifact", "ArtifactCheck", "ArtifactData"];
+
+    it("desligada, nenhuma ferramenta online entra", () => {
+      for (const alteracoesAutorizadas of [false, true]) {
+        expect(montarArgumentosDoChat(pergunta({ alteracoesAutorizadas }), arquivos).join(" ")).not.toContain("Artifact");
+      }
+    });
+
+    it("ligada, entram em --tools e em --allowedTools, com ou sem autorização", () => {
+      const sem = montarArgumentosDoChat(pergunta({ permitirArtefatosOnline: true }), arquivos);
+      const com = montarArgumentosDoChat(pergunta({ permitirArtefatosOnline: true, alteracoesAutorizadas: true }), arquivos);
+
+      expect(valoresDe(sem, "--tools")).toEqual([...TODAS, ...ONLINE]);
+      expect(valoresDe(sem, "--allowedTools")).toEqual([...LEITURA, ...REGRAS_DE_ARTEFATO, ...ONLINE]);
+      expect(valoresDe(com, "--allowedTools")).toEqual([...TODAS, ...ONLINE]);
+    });
+
+    it("o ambiente leva as variáveis que habilitam os artefatos em claude -p só com a opção ligada", () => {
+      const ligado = montarAmbienteDoChat({ PATH: "x" }, "padrao", true);
+      const desligado = montarAmbienteDoChat({ PATH: "x" }, "padrao");
+
+      expect(ligado.CLAUDE_CODE_ARTIFACT).toBe("1");
+      expect(ligado.CLAUDE_CODE_ARTIFACT_AUTO_OPEN).toBe("0");
+      expect(desligado).not.toHaveProperty("CLAUDE_CODE_ARTIFACT");
+      expect(desligado).not.toHaveProperty("CLAUDE_CODE_ARTIFACT_AUTO_OPEN");
+    });
+
+    it("com ultracode, o Workflow vem antes das ferramentas online", () => {
+      const argumentos = montarArgumentosDoChat(pergunta({ esforco: "ultracode", permitirArtefatosOnline: true }), arquivos);
+
+      expect(valoresDe(argumentos, "--tools")).toEqual([...TODAS, "Workflow", ...ONLINE]);
+    });
   });
 
   describe("com esforço ultracode", () => {

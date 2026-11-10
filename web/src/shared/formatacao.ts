@@ -22,6 +22,13 @@ export const ROTULOS_DOS_ESFORCOS: Readonly<Record<EsforcoDeRaciocinio, string>>
 export const AVISO_DO_ULTRACODE =
   "Ultracode dispara workflows com vários agentes em paralelo: custa bem mais e pesa na memória. Num teste, uma tarefa pequena custou US$ 3,24 em 4,5 min.";
 
+/** Nome e ajuda do interruptor que liga a publicação de artefatos online (orquestrador e chat). */
+export const ROTULO_DOS_ARTEFATOS_ONLINE = "Publicar artefatos no claude.ai";
+export const AJUDA_DOS_ARTEFATOS_ONLINE =
+  "O orquestrador e os subagentes dele podem publicar páginas online na sua conta do claude.ai e devolver o link. O que for publicado sai do computador; deixe desligado em projetos com dados sensíveis.";
+export const AJUDA_DOS_ARTEFATOS_ONLINE_DO_CHAT =
+  "O chat pode publicar páginas online na sua conta do claude.ai e devolver o link. O que for publicado sai do computador; deixe desligado em projetos com dados sensíveis.";
+
 /** Na criação, "padrao" se chama Automático: o app não força nada e vale o padrão do Claude Code. */
 export function rotuloDoEsforcoNaCriacao(esforco: EsforcoDeRaciocinio): string {
   return esforco === "padrao" ? "Automático" : ROTULOS_DOS_ESFORCOS[esforco];
@@ -81,6 +88,7 @@ export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string
     quantidade,
     ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome,
     ...(configuracao.permitirCommitEPush ? ["commit/push por feature"] : []),
+    ...(configuracao.permitirArtefatosOnline ? ["artefatos online"] : []),
     ...(configuracao.instrucoesPersonalizadas.trim() === "" ? [] : ["instruções próprias"]),
   ].join(" · ");
 }
@@ -116,6 +124,9 @@ export function descreverAlteracoesDaConfiguracao(alteracoes: Partial<DadosDaCon
   }
   if (alteracoes.permitirCommitEPush !== undefined) {
     itens.push(`Commit e push por feature: ${ligado(alteracoes.permitirCommitEPush)}`);
+  }
+  if (alteracoes.permitirArtefatosOnline !== undefined) {
+    itens.push(`Artefatos online no claude.ai: ${ligado(alteracoes.permitirArtefatosOnline)}`);
   }
   return itens;
 }

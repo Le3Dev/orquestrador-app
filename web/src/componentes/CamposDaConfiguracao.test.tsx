@@ -19,6 +19,7 @@ const configuracao: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "edicao_e_comandos",
   permitirCommitEPush: false,
+  permitirArtefatosOnline: false,
   instrucoesPersonalizadas: "",
 };
 
@@ -105,7 +106,7 @@ describe("CamposDaConfiguracao", () => {
     expect(screen.queryByRole("combobox", { name: "Pasta de trabalho" })).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Nome" })).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("switch")).toHaveLength(1);
+    expect(screen.getAllByRole("switch")).toHaveLength(2);
   });
 
   describe("permissão", () => {

@@ -263,6 +263,7 @@ export class ServicoDeChat {
             subagentesProntos: contexto.subagentesProntos,
             alteracoesAutorizadas,
             pastaDeArtefatos,
+            permitirArtefatosOnline: preferencias.permitirArtefatosOnline,
           }),
           instrucoes: instrucoesDoChat(),
           imagens: imagens.map((imagem) => ({
@@ -275,6 +276,7 @@ export class ServicoDeChat {
           pastaDeArtefatos,
           modelo: preferencias.modelo,
           esforco: preferencias.esforco,
+          permitirArtefatosOnline: preferencias.permitirArtefatosOnline,
           alteracoesAutorizadas,
         },
         (evento) => this.observar(conversa, mensagemId, evento),

@@ -31,6 +31,8 @@ export interface DadosDaConfiguracao {
   nivelDePermissao: NivelDePermissao;
   /** Libera `git commit`/`git push` só quando o usuário pede na mensagem. Desligado por padrão. */
   permitirCommitEPush: boolean;
+  /** O orquestrador e os subagentes podem publicar artefatos online no claude.ai. Desligado por padrão. */
+  permitirArtefatosOnline: boolean;
   /**
    * Instruções do usuário acrescentadas ao fim do bloco de cada pedido. Vazias
    * por padrão: aí vale o padrão global (`DadosDasPreferencias.instrucoesPadrao`), se houver.
@@ -116,6 +118,7 @@ export interface PreviaDoPrompt {
 /** Campos que faltam nos eventos gravados antes de existirem. */
 type CamposPosterioresDaConfiguracao =
   | "permitirCommitEPush"
+  | "permitirArtefatosOnline"
   | "esforcoDoOrquestrador"
   | "esforcoDosSubagentes"
   | "instrucoesPersonalizadas";
@@ -520,6 +523,8 @@ export type EventoRegistrado = EventoDeOrquestracao & { sequencia: number; em: s
 export interface PreferenciasDoChat {
   modelo: ModeloClaude;
   esforco: EsforcoDeRaciocinio;
+  /** O chat pode publicar artefatos online no claude.ai. Desligado por padrão. */
+  permitirArtefatosOnline: boolean;
 }
 
 /**

@@ -96,6 +96,8 @@ export interface ContextoDoApp {
   alteracoesAutorizadas: boolean;
   /** Onde o chat grava artefatos (caminho absoluto); liberada sem autorização. */
   pastaDeArtefatos: string;
+  /** Se o usuário ligou a publicação de artefatos online no claude.ai (ferramenta `Artifact`). */
+  permitirArtefatosOnline?: boolean;
 }
 
 /** Branches em que o chat pode commitar, pela política do time. */
@@ -116,18 +118,23 @@ const REGRA_DA_NEGACAO =
 const QUANDO_CRIAR_ARTEFATO =
   "o usuário pedir uma visualização, relatório, diagrama, protótipo, dashboard ou página, ou quando a resposta ficar melhor como página do que como texto";
 
+/** Regra do bloco de cada mensagem com a opção "Publicar artefatos no claude.ai" ligada. */
+const REGRA_DE_ARTEFATOS_ONLINE =
+  "- Artefatos online: pode publicar artefatos online no claude.ai com a ferramenta Artifact quando o pedido pedir algo para compartilhar ou publicar; devolva sempre o link. Para o resto, continue com os artefatos locais.";
+
 /**
  * Quando e como gravar um artefato, no bloco de cada mensagem: a pasta vai
  * aqui, com o caminho exato, porque o Claude Code não troca as instruções ao
  * retomar a sessão. Gravar nela é sempre permitido, então não pede autorização.
  */
-function regrasDeArtefatos(pastaDeArtefatos: string): string[] {
+function regrasDeArtefatos(pastaDeArtefatos: string, artefatosOnline: boolean): string[] {
   return [
     "Artefatos (liberados sempre, sem autorização; não contam como alterar projetos):",
     `- Quando ${QUANDO_CRIAR_ARTEFATO}, grave UM arquivo autocontido na pasta ${pastaDeArtefatos}`,
     "- Formato: .html com CSS e JS inline, sem CDN nem recursos externos (a rede é bloqueada) e imagens como data URI; ou .md. Até 5 MB. Nome do arquivo curto e descritivo, porque vira o título (ex.: comparativo-de-precos.html).",
     "- Para atualizar um artefato, regrave o MESMO arquivo: ele vira uma nova versão.",
     "- Na resposta, cite pelo nome o artefato criado ou atualizado.",
+    ...(artefatosOnline ? [REGRA_DE_ARTEFATOS_ONLINE] : []),
   ];
 }
 
@@ -300,7 +307,7 @@ export function mensagemParaOChat(texto: string, contexto: ContextoDoApp): strin
     "",
     ...regrasDePermissao(contexto),
     "",
-    ...regrasDeArtefatos(contexto.pastaDeArtefatos),
+    ...regrasDeArtefatos(contexto.pastaDeArtefatos, contexto.permitirArtefatosOnline === true),
     "",
     "Ações do app: quando o usuário pedir para abrir ou criar um orquestrador num projeto (opcionalmente com um pedido para ele), responda explicando e inclua UM bloco por ação, exatamente assim:",
     "```" + MARCA_DA_ACAO,

@@ -26,7 +26,11 @@ export const ESFORCOS_DO_CHAT: readonly { esforco: EsforcoDeRaciocinio; rotulo: 
   { esforco: "ultracode", rotulo: "Ultracode" },
 ];
 
-export const PREFERENCIAS_PADRAO_DO_CHAT: PreferenciasDoChat = { modelo: "opus", esforco: "alto" };
+export const PREFERENCIAS_PADRAO_DO_CHAT: PreferenciasDoChat = {
+  modelo: "opus",
+  esforco: "alto",
+  permitirArtefatosOnline: false,
+};
 
 /**
  * A configuração com que um Orquestrador nasce — a mesma do formulário de
@@ -40,6 +44,7 @@ export const CONFIGURACAO_PADRAO_DO_ORQUESTRADOR: DadosDaConfiguracao = {
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
+  permitirArtefatosOnline: false,
   instrucoesPersonalizadas: "",
 };
 

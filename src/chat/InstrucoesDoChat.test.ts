@@ -360,6 +360,17 @@ describe("mensagemParaOChat", () => {
     return mensagem.slice(0, mensagem.indexOf("</contexto-do-app>"));
   }
 
+  it("com artefatos online ligados, o bloco traz a linha de publicação; desligados, não fala deles", () => {
+    const ligado = mensagemParaOChat("pergunta", { ...contexto, permitirArtefatosOnline: true });
+    const desligado = mensagemParaOChat("pergunta", { ...contexto, permitirArtefatosOnline: false });
+
+    expect(ligado).toContain(
+      "- Artefatos online: pode publicar artefatos online no claude.ai com a ferramenta Artifact quando o pedido pedir algo para compartilhar ou publicar; devolva sempre o link. Para o resto, continue com os artefatos locais.",
+    );
+    expect(desligado).not.toContain("Artifact");
+    expect(mensagemParaOChat("pergunta", contexto)).toBe(desligado);
+  });
+
   it("antecede o texto com o bloco <contexto-do-app> completo", () => {
     const mensagem = mensagemParaOChat("Abra o painel", contexto);
 
