@@ -1,4 +1,4 @@
-import { juntarDitado, mensagemDoErroDeDitado } from "./texto";
+import { anuncioDoDitado, formatarCronometro, juntarDitado, mensagemDoErroDeDitado } from "./texto";
 
 describe("juntarDitado", () => {
   it("campo vazio recebe só o ditado, sem espaços sobrando", () => {
@@ -38,5 +38,34 @@ describe("mensagemDoErroDeDitado", () => {
     expect(mensagemDoErroDeDitado(new Error("Not supported"))).toBe(generica);
     expect(mensagemDoErroDeDitado(new DOMException("Unknown", "UnknownError"))).toBe(generica);
     expect(mensagemDoErroDeDitado("qualquer coisa")).toBe(generica);
+  });
+});
+
+describe("formatarCronometro", () => {
+  it("formata em mm:ss", () => {
+    expect(formatarCronometro(0)).toBe("00:00");
+    expect(formatarCronometro(7.9)).toBe("00:07");
+    expect(formatarCronometro(65)).toBe("01:05");
+    expect(formatarCronometro(600)).toBe("10:00");
+    expect(formatarCronometro(-3)).toBe("00:00");
+  });
+});
+
+describe("anuncioDoDitado", () => {
+  it("anuncia cada fase para o leitor de tela", () => {
+    expect(anuncioDoDitado("parado", null, false)).toBe("");
+    expect(anuncioDoDitado("pedindo-microfone", null, false)).toMatch(/Permita o acesso ao microfone/);
+    expect(anuncioDoDitado("gravando", null, false)).toMatch(/Enter conclui, Esc descarta/);
+    expect(anuncioDoDitado("transcrevendo", null, false)).toMatch(/Transcrevendo/);
+    expect(anuncioDoDitado("transcrevendo", 30, false)).toMatch(/Baixando o modelo/);
+    expect(anuncioDoDitado("parado", null, true)).toMatch(/Texto adicionado/);
+  });
+});
+
+describe("mensagem de microfone negado", () => {
+  it("diz onde liberar no Mac", () => {
+    expect(mensagemDoErroDeDitado(new DOMException("x", "NotAllowedError"))).toMatch(
+      /Ajustes do Sistema › Privacidade e Segurança › Microfone/,
+    );
   });
 });
