@@ -1,14 +1,11 @@
 import type {
-  ArquivoDoModeloDeCanvas,
   ClassificacaoDaEscuta,
   ConsumoDoOrquestrador,
   ConteudoDoArquivo,
-  ConteudoDoModeloDeCanvas,
   DadosDaConfiguracao,
   DadosDaNota,
   DadosDaPredefinicao,
   DadosDasPreferencias,
-  DadosDoModeloDeCanvas,
   DadosDoShell,
   EsforcosHerdados,
   EstadoDoChat,
@@ -249,37 +246,6 @@ export const api = {
     requisitar<DadosDaNota>(`/notas/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(alteracao) }),
 
   removerNota: (id: string) => requisitar<null>(`/notas/${encodeURIComponent(id)}`, { method: "DELETE" }),
-
-  // ---------------- Modelos de canvas ----------------
-
-  listarModelosDeCanvas: () => requisitar<DadosDoModeloDeCanvas[]>("/modelos-de-canvas"),
-
-  /** Salva um arranjo como modelo. Recusado com 400 (dados inválidos) ou 409 (já há 50 modelos). */
-  criarModeloDeCanvas: (conteudo: ConteudoDoModeloDeCanvas) =>
-    requisitar<DadosDoModeloDeCanvas>("/modelos-de-canvas", { method: "POST", body: JSON.stringify(conteudo) }),
-
-  /** Renomeia (ou troca o ícone ou a cor); os itens não mudam por aqui. */
-  alterarModeloDeCanvas: (id: string, alteracao: Partial<Pick<ConteudoDoModeloDeCanvas, "nome" | "icone" | "cor">>) =>
-    requisitar<DadosDoModeloDeCanvas>(`/modelos-de-canvas/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      body: JSON.stringify(alteracao),
-    }),
-
-  removerModeloDeCanvas: (id: string) =>
-    requisitar<null>(`/modelos-de-canvas/${encodeURIComponent(id)}`, { method: "DELETE" }),
-
-  /** O arquivo para baixar; `semCaminhos` tira pastas, comandos e o que parece segredo. */
-  exportarModeloDeCanvas: (id: string, semCaminhos: boolean) =>
-    requisitar<ArquivoDoModeloDeCanvas>(
-      `/modelos-de-canvas/${encodeURIComponent(id)}/exportar?semCaminhos=${semCaminhos ? "1" : "0"}`,
-    ),
-
-  /** Confere um arquivo exportado e devolve o modelo como seria salvo. Não grava nada. */
-  conferirImportacaoDeModelo: (arquivo: unknown) =>
-    requisitar<ConteudoDoModeloDeCanvas>("/modelos-de-canvas/importacao/conferir", {
-      method: "POST",
-      body: JSON.stringify(arquivo),
-    }),
 
   saude: () => requisitar<SaudeDoServidor>("/saude"),
 

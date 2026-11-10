@@ -10,7 +10,7 @@ import {
 } from "react";
 
 import type { DadosDoSubagentePronto, ResumoDoOrquestrador } from "../../shared/api/tipos";
-import { IconeEngrenagem, IconeModelo, IconeNavegador, IconeOrquestrador, IconePessoas, IconeShell } from "../Icones";
+import { IconeEngrenagem, IconeNavegador, IconeOrquestrador, IconePessoas, IconeShell } from "../Icones";
 import {
   IconeLista,
   IconeLupa,
@@ -55,8 +55,6 @@ export interface PropsDoMenuNovo {
   aoCriarPrevia: () => void;
   /** Sem ela, o item "Terminal" não aparece. */
   aoCriarShell?: () => void;
-  /** Abre o painel de modelos de canvas. */
-  aoAbrirModelos: () => void;
   /** Abre a paleta de comandos (o mesmo do Ctrl+K). */
   aoBuscar: () => void;
   aoAbrirConfiguracoes: () => void;
@@ -88,7 +86,7 @@ function plural(total: number, singular: string, pluralDoTermo: string): string 
  * do menu do Excalidraw: cai para baixo, com ícone, rótulo e atalho à direita
  * e divisores entre os grupos. Grupo 1: o que criar. Grupo 2: "Orquestradores ›"
  * e "Subagentes ›", que abrem um segundo painel à direita (ao passar o mouse,
- * clicar ou com →). Grupo 3: modelos de canvas, busca e configurações.
+ * clicar ou com →). Grupo 3: busca e configurações.
  *
  * Teclado: ↓ ou Enter no botão abrem; ↑/↓ (e Home/End) navegam; → entra no
  * submenu e ← (ou Esc) volta dele; Enter ativa; Esc, Tab e clique fora fecham.
@@ -98,7 +96,6 @@ export function MenuNovo({
   aoCriarNota,
   aoCriarPrevia,
   aoCriarShell,
-  aoAbrirModelos,
   aoBuscar,
   aoAbrirConfiguracoes,
   orquestradores,
@@ -192,14 +189,6 @@ export function MenuNovo({
     const outros: ItemDoMenu[] = [
       {
         tipo: "acao",
-        id: "modelos",
-        rotulo: "Modelos de canvas",
-        icone: <IconeModelo tamanho={18} />,
-        dica: "Modelos de canvas: arranjos salvos para recriar, exportar e importar",
-        executar: aoAbrirModelos,
-      },
-      {
-        tipo: "acao",
         id: "buscar",
         rotulo: "Buscar",
         icone: <IconeLupa tamanho={18} />,
@@ -223,7 +212,6 @@ export function MenuNovo({
     aoCriarNota,
     aoCriarShell,
     aoCriarPrevia,
-    aoAbrirModelos,
     aoBuscar,
     aoAbrirConfiguracoes,
     orquestradores,

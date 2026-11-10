@@ -39,7 +39,6 @@ function acoes() {
     aoCriarNota: vi.fn(),
     aoCriarPrevia: vi.fn(),
     aoCriarShell: vi.fn(),
-    aoAbrirModelos: vi.fn(),
     aoBuscar: vi.fn(),
     aoAbrirConfiguracoes: vi.fn(),
     aoEscolherOrquestrador: vi.fn(),
@@ -94,7 +93,6 @@ describe("MenuNovo", () => {
       "Prévia",
       "Orquestradores",
       "Subagentes",
-      "Modelos de canvas",
       "Buscar",
       "Configurações",
     ]);
@@ -130,7 +128,6 @@ describe("MenuNovo", () => {
     ["Nota", "aoCriarNota"],
     ["Terminal", "aoCriarShell"],
     ["Prévia", "aoCriarPrevia"],
-    ["Modelos de canvas", "aoAbrirModelos"],
     ["Buscar", "aoBuscar"],
     ["Configurações", "aoAbrirConfiguracoes"],
   ] as const)("clicar em %s chama %s, fecha o menu e devolve o foco ao botão", (rotulo, acao) => {
