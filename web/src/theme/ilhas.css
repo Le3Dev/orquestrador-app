@@ -1,0 +1,404 @@
+/* ---------------- Ilhas flutuantes do canvas ----------------
+ * O que flutua em volta do canvas, como no Excalidraw: uma ilha no canto
+ * superior esquerdo (nome do app e `+ Novo`), uma no superior direito (busca,
+ * quem trabalha, memória e configurações), uma vertical no canto inferior
+ * esquerdo (zoom, ajustar, organizar e desenhar) e as notificações logo
+ * abaixo da ilha da direita. Tudo mora na área do canvas (ao lado do chat
+ * fixo, quando há), dentro do <ReactFlow>, mas fora do viewport: não escala
+ * com o zoom. Medidas do protótipo aprovado: topo e lados a 16 px, ilhas de
+ * 48 de altura e raio 14, menu de 296, submenu de 340, notificação de 400. */
+
+.ilhas-do-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+}
+.ilhas-do-canvas > * { pointer-events: auto; }
+/* Modo invisível: as ilhas somem com o resto do canvas (e as Configurações, que moram fora do <ReactFlow>). */
+.canvas-modo-invisivel .ilhas-do-canvas,
+.canvas-modo-invisivel .camada-das-configuracoes { display: none !important; }
+.camada-das-configuracoes { display: contents; }
+
+.ilha {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 48px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7);
+}
+
+/* ---------- Canto superior esquerdo: nome, divisor e + Novo ---------- */
+.coluna-da-ilha-esquerda {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: calc(100% - 32px);
+  min-width: 0;
+  pointer-events: none;
+}
+.coluna-da-ilha-esquerda > * { pointer-events: auto; }
+/* O painel de subagentes prontos, sob a ilha: 640 de largura, como no protótipo. */
+.coluna-da-ilha-esquerda .painel-de-subagentes { width: 640px; }
+.ilha-do-nome { position: relative; padding: 6px 6px 6px 12px; flex-shrink: 0; }
+.nome-do-app { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.nome-do-app h1 { font-size: 13.5px; color: var(--caption); }
+.icone-do-app { display: inline-flex; color: var(--active); }
+.divisor-da-ilha { width: 1px; height: 24px; margin: 0 4px; background: var(--border-forte); flex-shrink: 0; }
+.ancora-do-menu-novo { display: flex; }
+.botao-novo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px 0 10px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-forte);
+  color: var(--primary);
+  font: 600 13px/1 var(--fonte-titulo);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.icone-do-botao-novo { color: var(--active); }
+.botao-novo:hover, .botao-novo[aria-expanded="true"] { background: var(--surface-3); }
+.botao-novo:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
+
+/* O menu cai para baixo da ilha; o submenu abre à direita do item. */
+.menu-novo, .submenu-novo {
+  position: absolute;
+  z-index: 31;
+  background: var(--surface);
+  border: 1px solid var(--border-forte);
+  border-radius: 12px;
+  box-shadow: 0 18px 50px -18px rgba(0, 0, 0, .9);
+  padding: 6px;
+  animation: surgir-mola var(--tempo-de-surgir) var(--curva-de-mola) backwards;
+}
+.menu-novo { top: calc(100% + 8px); left: 0; width: 296px; transform-origin: top left; }
+.submenu-novo {
+  top: -7px;
+  left: calc(100% + 8px);
+  width: 340px;
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+  transform-origin: top left;
+}
+/* Cobre o vão de 8 px entre o item e o submenu: o mouse atravessa sem fechar. */
+.submenu-novo::before { content: ""; position: absolute; top: 0; bottom: 0; left: -10px; width: 10px; }
+.pai-de-submenu { position: relative; display: block; }
+.divisor-do-menu-novo { height: 1px; margin: 6px 4px; background: var(--border); }
+
+.item-do-menu-novo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--primary);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.item-do-menu-novo:hover,
+.item-do-menu-novo:focus-visible,
+.item-do-menu-novo[aria-expanded="true"] { background: var(--surface-3); outline: none; }
+.item-do-menu-novo:focus-visible { box-shadow: inset 0 0 0 2px var(--active); }
+.icone-do-menu-novo { display: inline-flex; align-items: center; justify-content: center; width: 18px; flex-shrink: 0; color: var(--secondary); }
+.glifo-do-menu { font-size: 15px; line-height: 1; }
+.rotulo-do-menu-novo { flex: 1; min-width: 0; white-space: nowrap; }
+.atalho-do-menu-novo { flex-shrink: 0; font: 12px/1 var(--fonte-mono); color: var(--muted); }
+.contagem-do-menu-novo { flex-shrink: 0; font-size: 12px; color: var(--muted); }
+.seta-do-menu-novo { flex-shrink: 0; margin-right: -2px; color: var(--secondary); }
+
+.titulo-do-submenu { padding: 6px 10px 4px; font-size: 12px; color: var(--muted); }
+.texto-do-submenu { margin: 0; padding: 6px 10px 8px; font-size: 12.5px; color: var(--secondary); }
+.rodape-do-submenu {
+  margin: 4px 0 0;
+  padding: 8px 10px 4px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}
+.acoes-do-submenu { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border); }
+.item-de-lista-do-menu {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+.item-de-lista-do-menu:hover, .item-de-lista-do-menu:focus-visible { background: var(--surface-3); outline: none; }
+.item-de-lista-do-menu:focus-visible { box-shadow: inset 0 0 0 2px var(--active); }
+.selo-do-item {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.selo-do-item-ativo { color: var(--active); }
+.selo-do-item-ativo svg { animation: giro-do-selo 1.6s linear infinite; }
+@keyframes giro-do-selo { to { transform: rotate(360deg); } }
+.texto-do-item { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.texto-do-item strong {
+  font: 600 13.5px/1.3 var(--fonte-titulo);
+  color: var(--primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.texto-do-item > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--secondary);
+  white-space: nowrap;
+}
+.texto-do-item .mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.descricao-do-subagente { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.situacao-no-canvas { flex-shrink: 0; font-size: 12px; color: var(--secondary); }
+.situacao-no-canvas-aberto { color: var(--caption); }
+
+/* ---------- Canto superior direito: lupa, contador, anel e engrenagem ---------- */
+.ilha-da-direita { position: absolute; top: 16px; right: 16px; z-index: 2; }
+.botao-da-ilha {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  color: var(--secondary);
+  cursor: pointer;
+}
+.botao-da-ilha:hover, .botao-da-ilha[aria-pressed="true"] { background: var(--surface-3); color: var(--primary); }
+.botao-da-ilha:focus-visible, .anel-da-ilha:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.contador-da-ilha {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--active);
+  font: 600 13px/1 var(--fonte-mono);
+  white-space: nowrap;
+}
+.giro-do-contador { animation: giro-do-selo 1.6s linear infinite; }
+.texto-do-contador { font-weight: 500; font-size: 12px; }
+.anel-da-ilha {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  min-width: 36px;
+  padding: 0 7px;
+  border-radius: 8px;
+  color: var(--secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.anel-da-ilha:hover, .anel-da-ilha[aria-pressed="true"] { background: var(--surface-3); color: var(--primary); }
+.anel-da-ilha-baixa { color: var(--warning); padding-right: 10px; }
+.anel-da-ilha-critica {
+  color: var(--error);
+  padding-right: 10px;
+  background: color-mix(in srgb, var(--error) 10%, transparent);
+}
+.anel-de-memoria { position: relative; display: inline-flex; width: 26px; height: 26px; flex-shrink: 0; }
+.trilha-do-anel { stroke: color-mix(in srgb, var(--primary) 16%, transparent); }
+.arco-do-anel { stroke: currentColor; }
+.chip-do-anel { position: absolute; top: 6.5px; left: 6.5px; }
+
+/* ---------- Canto inferior esquerdo: a ilha vertical de ferramentas ---------- */
+.ilha-de-ferramentas {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  z-index: 2;
+  width: 48px;
+  height: auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 3px;
+}
+.botao-da-ilha-vertical {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  color: var(--secondary);
+  cursor: pointer;
+}
+/* O fio de 1 px entre um botão e o seguinte. */
+.botao-da-ilha-vertical + .botao-da-ilha-vertical { margin-top: 1px; }
+.botao-da-ilha-vertical + .botao-da-ilha-vertical::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 6px;
+  right: 6px;
+  height: 1px;
+  background: var(--border);
+}
+.botao-da-ilha-vertical:hover { background: var(--surface-3); color: var(--primary); }
+.botao-da-ilha-vertical:focus-visible { outline: 2px solid var(--active); outline-offset: -2px; }
+.botao-da-ilha-vertical:disabled { color: var(--muted); background: none; cursor: not-allowed; }
+.botao-da-ilha-vertical[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--active) 18%, transparent);
+  color: var(--active);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--active) 55%, transparent) inset;
+}
+.botao-da-ilha-vertical[aria-pressed="true"]::before,
+.botao-da-ilha-vertical[aria-pressed="true"] + .botao-da-ilha-vertical::before { opacity: 0; }
+
+/* A barra de desenho abre numa ilha ao lado da vertical (esquerda 72, base 16). */
+.react-flow__panel.painel-da-barra-de-desenho.bottom.left {
+  position: absolute;
+  bottom: 16px;
+  left: 72px;
+  margin: 0;
+  z-index: 6;
+}
+.painel-da-barra-de-desenho .barra-de-desenho {
+  height: 48px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--surface);
+  border-color: var(--border);
+  transform-origin: bottom left;
+}
+
+/* Chat embaixo com o desenho ativo: a barra de chat sai da frente da ilha de desenho, para a direita. */
+.react-flow__panel.painel-do-chat.painel-do-chat-com-desenho.bottom.center {
+  --largura-da-barra-de-desenho: 641px;
+  /* A margem de 15px do painel do React Flow completa o vão de 16px. */
+  left: calc(72px + var(--largura-da-barra-de-desenho) + 1px);
+  transform: none;
+  width: min(680px, calc(100% - (72px + var(--largura-da-barra-de-desenho) + 16px) - 231px));
+}
+/* Sem espaço ao lado: o chat sobe, acima da ilha de desenho. */
+@media (width < 1360px) {
+  .react-flow__panel.painel-do-chat.painel-do-chat-com-desenho.bottom.center {
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(680px, calc(100vw - 2 * 64px));
+    margin-bottom: 79px;
+  }
+}
+
+/* ---------- Notificações: abaixo da ilha da direita, alinhadas à borda ---------- */
+.notificacoes-do-canvas {
+  position: absolute;
+  top: 72px;
+  right: 16px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  width: 400px;
+  max-width: calc(100% - 32px);
+  pointer-events: none;
+}
+.notificacoes-do-canvas > * { pointer-events: auto; }
+.notificacao {
+  --cor-da-notificacao: var(--error);
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 12px 10px 14px;
+  background: color-mix(in srgb, var(--cor-da-notificacao) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--cor-da-notificacao) 50%, transparent);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7);
+  color: var(--primary);
+  font-size: 13px;
+  animation: surgir-mola var(--tempo-de-surgir) var(--curva-de-mola) backwards;
+}
+.notificacao-baixa { --cor-da-notificacao: var(--warning); }
+.notificacao-cota { --cor-da-notificacao: var(--info); }
+.icone-da-notificacao { margin-top: 1px; color: var(--cor-da-notificacao); flex-shrink: 0; }
+.corpo-da-notificacao { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.corpo-da-notificacao p { margin: 0; line-height: 1.4; }
+.acoes-da-notificacao { display: flex; gap: 8px; justify-content: flex-end; }
+.botao-da-notificacao {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-button);
+  background: var(--surface-2);
+  border: 1px solid var(--border-forte);
+  color: var(--primary);
+  font: 500 12.5px/1 var(--fonte-titulo);
+  cursor: pointer;
+}
+.botao-da-notificacao:hover { background: var(--surface-3); }
+.botao-da-notificacao:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
+.notificacao-da-atualizacao {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7);
+}
+
+/* O aviso de conexão (servidor caiu ou voltou): no alto, centralizado entre as ilhas. */
+.aviso-de-conexao-das-ilhas {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  z-index: 2;
+  width: max-content;
+  max-width: max(300px, min(560px, calc(100% - 760px)));
+  transform: translateX(-50%);
+}
+
+/* O conteúdo do status (situação, cotas e RAM) dentro de Configurações, aba Sistema: sempre completo. */
+.status-do-sistema { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-width: 0; }
+.status-do-sistema .status-detalhe { display: flex; }
+.status-do-sistema .status-resumo { display: none; }
+.status-do-sistema .rotulo-completo { display: inline; }
+.status-do-sistema .rotulo-curto { display: none; }
+
+/* Janelas estreitas: a ilha esquerda perde o nome e a da direita, o texto do contador. */
+@media (width < 1100px) {
+  .nome-do-app h1, .texto-do-contador { display: none; }
+}
+@media (width < 700px) {
+  .texto-do-anel { display: none; }
+}
+
+/* Barra de título do app desktop: só o vão que arrasta a janela e, no Windows, os botões dela. */
+.vao-da-barra-de-titulo { flex: 1 1 auto; align-self: stretch; }

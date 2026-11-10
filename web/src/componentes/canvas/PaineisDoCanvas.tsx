@@ -1,35 +1,18 @@
-import { type MouseEvent as EventoDeMouseDoReact, type ReactNode, useCallback, useEffect, useId, useState } from "react";
+import { type MouseEvent as EventoDeMouseDoReact, useCallback, useEffect, useId, useState } from "react";
 
-import type { JanelaDaCota, LeituraDeMemoria, ResumoDoOrquestrador } from "../../shared/api/tipos";
+import type { JanelaDaCota, LeituraDeMemoria } from "../../shared/api/tipos";
 import {
-  descreverQuantidade,
   formatarBytes,
   formatarDuracao,
   formatarMomento,
   formatarPercentual,
-  ROTULOS_DOS_MODELOS,
   rotuloCurtoDaCota,
 } from "../../shared/formatacao";
-import { useAjustesDoAplicativo } from "../../shared/hooks/useAjustesDoAplicativo";
-import { useMenuDaBarra } from "../../shared/hooks/useMenuDaBarra";
 import { useRelogio } from "../../shared/hooks/useRelogio";
 import type { EstadoDoServidor } from "../../shared/hooks/useServidor";
-import { nivelDaMemoria, type NivelDaMemoria } from "../../shared/memoria";
-import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
-import {
-  IconeAlerta,
-  IconeFechar,
-  IconeModelo,
-  IconeNavegador,
-  IconeOrquestrador,
-  IconePasta,
-  IconePessoas,
-  IconeShell,
-} from "../Icones";
-import { rodandoNoDesktop } from "../../shared/ponteDoDesktop";
-import { PainelDeConfiguracoesDoApp } from "./PainelDeConfiguracoesDoApp";
+import { nivelDaMemoria } from "../../shared/memoria";
+import { IconeFechar } from "../Icones";
 import { ATRIBUTO_DO_GATILHO, COTA_ALTA, PopoverDoUso } from "./PopoverDoUso";
-import "../../theme/topo-do-canvas.css";
 
 /** Por quanto tempo o aviso de "reconectado" fica na tela. */
 const DURACAO_DO_AVISO_DE_VOLTA_MS = 10_000;
@@ -94,310 +77,6 @@ export function AvisoDeConexao({ servidor }: { servidor: EstadoDoServidor }) {
   return null;
 }
 
-interface PropsDaBarra {
-  aoCriar: () => void;
-  aoCriarNota: () => void;
-  /**
-   * Abre a paleta de comandos (o mesmo do Ctrl+K). Só no navegador: no
-   * desktop, a busca fica na barra de título. Sem ela, "Buscar" não aparece.
-   */
-  aoBuscar?: () => void;
-  /** Abre uma prévia ao vivo vazia no centro da tela, com o campo de endereço focado ("Prévia" do `+ Novo ▾`). */
-  aoCriarPrevia: () => void;
-  /** Pede a pasta e abre um terminal (shell) nela. Sem ela, "Terminal" não aparece no `+ Novo ▾`. */
-  aoCriarShell?: () => void;
-  /** Abre um dos painéis da barra (ou fecha, se já estava aberto). Só um fica aberto por vez. */
-  aoAlternarPainel: (painel: PainelDaBarra) => void;
-  painelAberto: PainelDaBarra | null;
-  /** Quantos subagentes prontos existem; nulo enquanto não se sabe (ex.: servidor fora). */
-  quantidadeDeSubagentes: number | null;
-}
-
-/** Os painéis que abrem logo abaixo da barra do canvas. */
-export type PainelDaBarra = "subagentes" | "instrucoes" | "modelos";
-
-interface PropsDoRotulo {
-  /** Texto inteiro (≥ 1280 px). */
-  completo: ReactNode;
-  /** Entre 1100 e 1280 px. */
-  curto: ReactNode;
-  /** Abaixo de 1100 px: o botão fica só com o ícone e a dica (`title`). */
-  icone: ReactNode;
-}
-
-/**
- * O rótulo de um botão em três tamanhos; o CSS (`.rotulo-*`, pela largura da
- * janela) mostra um só. O nome acessível vem do `aria-label` do botão.
- */
-function RotuloResponsivo({ completo, curto, icone }: PropsDoRotulo) {
-  return (
-    <>
-      <span className="rotulo-completo" aria-hidden="true">
-        {completo}
-      </span>
-      <span className="rotulo-curto" aria-hidden="true">
-        {curto}
-      </span>
-      <span className="rotulo-icone" aria-hidden="true">
-        {icone}
-      </span>
-    </>
-  );
-}
-
-type EscolhaDoNovo = "orquestrador" | "nota" | "terminal" | "previa";
-
-/**
- * Os itens do `+ Novo ▾`, com o atalho de teclado de cada um (o mesmo do
- * canvas); sem atalho, `atalho` e `teclas` ficam vazios.
- */
-const ITENS_DO_NOVO: readonly {
-  escolha: EscolhaDoNovo;
-  rotulo: string;
-  atalho: string;
-  teclas: string;
-  dica: string;
-}[] = [
-  {
-    escolha: "orquestrador",
-    rotulo: "Orquestrador",
-    atalho: "Ctrl+N",
-    teclas: "Control+N",
-    dica: "Abre o formulário de um terminal novo",
-  },
-  {
-    escolha: "nota",
-    rotulo: "Nota",
-    atalho: "Ctrl+Shift+N",
-    teclas: "Control+Shift+N",
-    dica: "Cria uma nota no centro da tela (bloco de notas, salvo automaticamente)",
-  },
-  {
-    escolha: "terminal",
-    rotulo: "Terminal",
-    atalho: "",
-    teclas: "",
-    dica: "Abre um terminal de verdade (o shell do computador) numa pasta escolhida",
-  },
-  {
-    escolha: "previa",
-    rotulo: "Prévia",
-    atalho: "",
-    teclas: "",
-    dica: "Abre uma prévia ao vivo: um navegador no canvas para ver o site que os agentes estão fazendo",
-  },
-];
-
-/** O ícone de cada item do `+ Novo ▾`. */
-function IconeDoNovo({ escolha }: { escolha: EscolhaDoNovo }) {
-  switch (escolha) {
-    case "orquestrador":
-      return <IconeOrquestrador tamanho={14} />;
-    case "nota":
-      return "✎";
-    case "terminal":
-      return <IconeShell />;
-    case "previa":
-      return <IconeNavegador />;
-  }
-}
-
-interface PropsDoMenuDoNovo {
-  aoCriar: () => void;
-  aoCriarNota: () => void;
-  aoCriarPrevia: () => void;
-  /** Sem ela, o item "Terminal" não aparece. */
-  aoCriarShell?: () => void;
-}
-
-/** O botão `+ Novo ▾` e o menu dele (Orquestrador · Nota · Terminal · Prévia). */
-function MenuDoNovo({ aoCriar, aoCriarNota, aoCriarPrevia, aoCriarShell }: PropsDoMenuDoNovo) {
-  const itensDoMenu = ITENS_DO_NOVO.filter((item) => item.escolha !== "terminal" || aoCriarShell !== undefined);
-
-  const escolher = (escolha: EscolhaDoNovo) => {
-    menu.fechar(true);
-    switch (escolha) {
-      case "orquestrador":
-        aoCriar();
-        break;
-      case "nota":
-        aoCriarNota();
-        break;
-      case "terminal":
-        aoCriarShell?.();
-        break;
-      case "previa":
-        aoCriarPrevia();
-        break;
-    }
-  };
-
-  const menu = useMenuDaBarra(itensDoMenu.length, (indice) => {
-    const item = itensDoMenu[indice];
-    if (item !== undefined) {
-      escolher(item.escolha);
-    }
-  });
-
-  return (
-    <div ref={menu.ancora} className="ancora-do-menu">
-      <button
-        {...menu.propsDoBotao}
-        type="button"
-        className="btn btn-sm btn-cta"
-        aria-label="Novo"
-        title="Novo orquestrador (Ctrl+N), nota (Ctrl+Shift+N), terminal ou prévia"
-      >
-        <RotuloResponsivo completo="+ Novo ▾" curto="+ Novo ▾" icone="+" />
-      </button>
-      {menu.aberto && (
-        <div
-          id={menu.idDoMenu}
-          role="menu"
-          aria-label="Novo"
-          className="menu-do-novo painel-flutuante"
-          onKeyDown={menu.aoTeclarNoMenu}
-        >
-          {itensDoMenu.map((item, indice) => (
-            <button
-              key={item.escolha}
-              ref={menu.refDoItem(indice)}
-              type="button"
-              role="menuitem"
-              tabIndex={-1}
-              className="item-do-menu"
-              aria-keyshortcuts={item.teclas === "" ? undefined : item.teclas}
-              title={item.dica}
-              onClick={() => escolher(item.escolha)}
-            >
-              <span className="item-com-icone">
-                <span
-                  className={`icone-do-item ${item.escolha === "orquestrador" ? "icone-do-item-ativo" : ""}`}
-                  aria-hidden="true"
-                >
-                  <IconeDoNovo escolha={item.escolha} />
-                </span>
-                {item.rotulo}
-              </span>
-              {item.atalho !== "" && (
-                <kbd className="atalho-do-item" aria-hidden="true">
-                  {item.atalho}
-                </kbd>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Canto superior esquerdo: o `+ Novo ▾` (Orquestrador, nota, terminal ou
- * prévia). No desktop, a busca e o ⚙ Configurações ficam na barra de título,
- * que também tem a identidade do app. No navegador (sem barra de título
- * própria), a barra também mostra a identidade, o "Buscar" e o ⚙
- * Configurações, para nada ficar inacessível. O "Organizar" fica nos controles
- * do canto inferior esquerdo. Nos dois, os Subagentes, as Instruções gerais
- * e os Modelos (arranjos salvos do canvas) seguem à vista como botões.
- */
-export function BarraDoCanvas({
-  aoCriar,
-  aoCriarNota,
-  aoBuscar,
-  aoCriarPrevia,
-  aoCriarShell,
-  aoAlternarPainel,
-  painelAberto,
-  quantidadeDeSubagentes,
-}: PropsDaBarra) {
-  const [desktop] = useState(rodandoNoDesktop);
-  const ajustes = useAjustesDoAplicativo();
-  const contagem =
-    quantidadeDeSubagentes === null ? null : <span className="mono text-muted"> {quantidadeDeSubagentes}</span>;
-
-  return (
-    <div className="barra-do-canvas painel-flutuante flex items-center gap-2 px-2.5 py-2">
-      {!desktop && (
-        <>
-          <div className="no-orquestrador-icone h-8 w-8 shrink-0">
-            <IconeOrquestrador tamanho={18} />
-          </div>
-          <div className="identidade-da-barra flex flex-col leading-tight">
-            <h1 className="text-[14px] whitespace-nowrap">Orquestrador de agentes</h1>
-            <span className="subtitulo-da-barra mono text-muted whitespace-nowrap">claude code · canvas · local</span>
-          </div>
-          <span className="mx-1 h-8 w-px shrink-0 bg-border" />
-        </>
-      )}
-      <MenuDoNovo
-        aoCriar={aoCriar}
-        aoCriarNota={aoCriarNota}
-        aoCriarPrevia={aoCriarPrevia}
-        aoCriarShell={aoCriarShell}
-      />
-      {!desktop && aoBuscar !== undefined && (
-        <button
-          type="button"
-          className="btn btn-sm btn-outline"
-          onClick={aoBuscar}
-          aria-label="Buscar (Ctrl+K)"
-          aria-keyshortcuts="Control+K"
-          title="Paleta de comandos: ações, orquestradores, notas e pedidos (Ctrl+K)"
-        >
-          <RotuloResponsivo completo="Buscar (Ctrl+K)" curto="Buscar" icone="⌕" />
-        </button>
-      )}
-      <button
-        type="button"
-        className="btn btn-sm btn-outline botao-de-painel"
-        onClick={() => aoAlternarPainel("subagentes")}
-        aria-expanded={painelAberto === "subagentes"}
-        aria-label={quantidadeDeSubagentes === null ? "Subagentes" : `Subagentes (${quantidadeDeSubagentes})`}
-        title="Ajudantes prontos que todo orquestrador pode chamar"
-      >
-        <RotuloResponsivo
-          completo={<>Subagentes{contagem}</>}
-          curto={<>Subagentes{contagem}</>}
-          icone={<IconePessoas />}
-        />
-      </button>
-      <button
-        type="button"
-        className="btn btn-sm btn-outline botao-de-painel"
-        onClick={() => aoAlternarPainel("instrucoes")}
-        aria-expanded={painelAberto === "instrucoes"}
-        aria-label="Instruções gerais"
-        title="Instruções que valem para todo orquestrador sem instruções próprias"
-      >
-        <RotuloResponsivo completo="Instruções gerais" curto="Instruções" icone="¶" />
-      </button>
-      <button
-        type="button"
-        className="btn btn-sm btn-outline botao-de-painel"
-        onClick={() => aoAlternarPainel("modelos")}
-        aria-expanded={painelAberto === "modelos"}
-        aria-label="Modelos"
-        title="Modelos de canvas: arranjos salvos para recriar, exportar e importar"
-      >
-        <RotuloResponsivo completo="Modelos" curto="Modelos" icone={<IconeModelo />} />
-      </button>
-      {!desktop && (
-        <PainelDeConfiguracoesDoApp
-          ajustes={ajustes}
-          alinhamento="esquerda"
-          classeDoBotao="btn btn-sm btn-outline"
-          conteudoDoBotao={<RotuloResponsivo completo="⚙ Configurações" curto="⚙" icone="⚙" />}
-        />
-      )}
-      {!desktop && ajustes.erro !== null && (
-        <span className="mono text-error max-w-64" role="alert">
-          {ajustes.erro}
-        </span>
-      )}
-    </div>
-  );
-}
 
 interface PropsDoErroDoCanvas {
   erro: string;
@@ -421,76 +100,6 @@ export function ErroDoCanvas({ erro, aoFechar, nivel = "erro" }: PropsDoErroDoCa
   );
 }
 
-interface PropsDaDoca {
-  orquestradores: ResumoDoOrquestrador[] | null;
-  noCanvas: ReadonlySet<string>;
-  erro: string | null;
-  aoAbrir: (id: string) => void;
-}
-
-/** Lista de todos os Orquestradores: clicar abre (ou encontra) o terminal no canvas. */
-export function Doca({ orquestradores, noCanvas, erro, aoAbrir }: PropsDaDoca) {
-  const [recolhida, setRecolhida] = useState(false);
-
-  return (
-    <div className="painel-flutuante mt-2 flex w-72 flex-col">
-      <button
-        type="button"
-        className="flex cursor-pointer items-center justify-between px-3 py-2"
-        aria-expanded={!recolhida}
-        onClick={() => setRecolhida((atual) => !atual)}
-      >
-        <span className="rotulo-tecnico">orquestradores · {orquestradores?.length ?? 0}</span>
-        <span className="mono text-muted">{recolhida ? "▸" : "▾"}</span>
-      </button>
-      {!recolhida && (
-        <div className="custom-scrollbar max-h-[50vh] overflow-y-auto border-t border-border p-1.5">
-          {erro !== null && <div className="alert alert-error m-1">{erro}</div>}
-          {orquestradores === null ? (
-            <p className="mono text-muted px-2 py-1.5">carregando…</p>
-          ) : orquestradores.length === 0 ? (
-            <p className="text-support px-2 py-1.5">Nenhum orquestrador ainda.</p>
-          ) : (
-            orquestradores.map((orquestrador) => {
-              const trabalhando = orquestrador.situacao === "trabalhando";
-              const aberto = noCanvas.has(orquestrador.id);
-              return (
-                <button
-                  key={orquestrador.id}
-                  type="button"
-                  className="flex w-full cursor-pointer flex-col gap-0.5 rounded-md px-2 py-1.5 text-left hover:bg-surface-3"
-                  onClick={() => aoAbrir(orquestrador.id)}
-                  title={aberto ? "Ir até o terminal" : "Abrir o terminal no canvas"}
-                >
-                  <span className="flex items-center gap-2">
-                    <span className={`ponto-de-status ${trabalhando ? "ponto-de-status-ativo" : ""}`} />
-                    <strong className="truncate font-titulo text-[12px] font-medium">{orquestrador.nome}</strong>
-                    {!aberto && <span className="mono ml-auto text-muted">abrir</span>}
-                  </span>
-                  <span className="flex items-center gap-1 pl-4 mono text-muted">
-                    <IconePasta className="shrink-0" />
-                    <span className="truncate">{orquestrador.nomeDaPasta}</span>
-                    <span className="shrink-0">
-                      · {ROTULOS_DOS_MODELOS[orquestrador.configuracao.modeloDoOrquestrador].nome.toLowerCase()} ·{" "}
-                      {descreverQuantidade(orquestrador.configuracao.quantidadeDeSubagentes)}
-                    </span>
-                  </span>
-                  {orquestrador.worktree !== null && (
-                    <span className="flex min-w-0 items-center pl-4">
-                      <EtiquetaDeWorktree worktree={orquestrador.worktree} className="max-w-full" />
-                    </span>
-                  )}
-                </button>
-              );
-            })
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-
 interface PropsDoStatus {
   trabalhando: number;
   bixinhosAtivos: number;
@@ -498,11 +107,6 @@ interface PropsDoStatus {
   memoria: LeituraDeMemoria | null;
 }
 
-const AVISO_DA_MEMORIA = {
-  baixa: "Memória baixa: novos pedidos (sobretudo com Opus nos subagentes) podem deixar o computador lento.",
-  critica:
-    "Memória quase esgotada: espere os pedidos em andamento terminarem, feche programas ou use Haiku/Sonnet nos subagentes.",
-} as const;
 
 function descreverMemoria(memoria: LeituraDeMemoria): string {
   return `Livre: ${formatarBytes(memoria.livreBytes)} de ${formatarBytes(memoria.totalBytes)}. Agentes: ${formatarBytes(memoria.agentesBytes)}. Servidor: ${formatarBytes(memoria.servidorBytes)}.`;
@@ -677,67 +281,15 @@ function ConteudoDoStatus({ trabalhando, bixinhosAtivos, cota, memoria }: PropsD
   );
 }
 
-/** Alerta de memória baixa/crítica: abaixo do status (navegador) ou no canto direito do canvas (desktop). */
-export function AvisoDeMemoria({ memoria }: { memoria: LeituraDeMemoria | null }) {
-  const nivel = memoria === null ? "normal" : nivelDaMemoria(memoria);
-  // Fechar esconde o aviso daquele nível. Ele volta se a memória piorar
-  // (baixa → crítica) ou se normalizar e apertar de novo; o medidor fica.
-  const [dispensado, setDispensado] = useState<NivelDaMemoria | null>(null);
-  if (nivel === "normal" && dispensado !== null) {
-    setDispensado(null);
-  }
-  const aviso = nivel === "normal" || dispensado === "critica" || dispensado === nivel ? null : nivel;
-  if (aviso === null) {
-    return null;
-  }
-  return (
-    <div
-      className={`aviso-de-memoria flex items-start gap-2 ${aviso === "critica" ? "aviso-de-memoria-critica" : ""}`}
-      role="status"
-    >
-      <IconeAlerta className="mt-0.5 shrink-0" />
-      <span className="flex-1">{AVISO_DA_MEMORIA[aviso]}</span>
-      <button
-        type="button"
-        className="botao-icone shrink-0"
-        title="Fechar aviso"
-        aria-label="Fechar aviso de memória"
-        onClick={() => setDispensado(aviso)}
-      >
-        <IconeFechar tamanho={14} />
-      </button>
-    </div>
-  );
-}
-
-interface PropsDoStatusDoCanvas extends PropsDoStatus {
-  /** No desktop, o status vai na barra de título: sem moldura e sem o alerta de memória. */
-  naBarraDeTitulo?: boolean;
-}
-
 /**
- * Quem está trabalhando agora, a cota da assinatura e a RAM. No navegador, é
- * o painel do canto superior direito; no desktop, fica na barra de título. A
- * largura da janela decide o detalhe (CSS): rótulos curtos abaixo de 1280 px
- * e só a situação com um medidor resumido abaixo de 1100 px. Na barra de
- * título, que divide a largura com a busca, cada passo vem antes: 1440 px e
- * 1280 px. No painel, a largura do canvas também conta (`topo-do-canvas.css`):
- * com o chat fixo à esquerda, ele compacta antes e nunca quebra linha.
+ * Situação, agentes ativos, cotas e RAM, para a aba Sistema das Configurações
+ * (abre pelo anel de memória da ilha da direita). Cada medidor da cota abre o
+ * popover do uso. Sempre completo: não depende da largura da janela.
  */
-export function StatusDoCanvas({ naBarraDeTitulo = false, ...status }: PropsDoStatusDoCanvas) {
-  if (naBarraDeTitulo) {
-    return (
-      <div className="status-do-canvas status-na-barra-de-titulo no-drag" data-testid="status-do-canvas">
-        <ConteudoDoStatus {...status} />
-      </div>
-    );
-  }
+export function StatusDoCanvas(status: PropsDoStatus) {
   return (
-    <div className="flex min-w-0 flex-col items-end gap-2">
-      <div className="status-do-canvas painel-flutuante px-3 py-2" data-testid="status-do-canvas">
-        <ConteudoDoStatus {...status} />
-      </div>
-      <AvisoDeMemoria memoria={status.memoria} />
+    <div className="status-do-canvas status-do-sistema" data-testid="status-do-canvas">
+      <ConteudoDoStatus {...status} />
     </div>
   );
 }

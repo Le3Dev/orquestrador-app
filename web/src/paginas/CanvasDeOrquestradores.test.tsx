@@ -118,10 +118,33 @@ class ObservadorDeTamanhoFalso {
   disconnect(): void {}
 }
 
-/** Escolhe um item do "+ Novo ▾" da barra do canvas. */
+/** Escolhe um item do menu "+ Novo" da ilha do canto superior esquerdo. */
 function escolherNoNovo(item: "Orquestrador" | "Nota" | "Terminal" | "Prévia"): void {
   fireEvent.click(screen.getByRole("button", { name: "Novo" }));
-  fireEvent.click(screen.getByRole("menuitem", { name: item }));
+  fireEvent.click(screen.getByRole("menuitem", { name: item === "Orquestrador" ? "Novo orquestrador" : item }));
+}
+
+/** Abre o menu Novo e, nele, o submenu Orquestradores (a lista que era a Doca). */
+function abrirListaDeOrquestradores(): void {
+  fireEvent.click(screen.getByRole("button", { name: "Novo" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: /^Orquestradores/ }));
+}
+
+/** O orquestrador na lista do submenu (aberto por `abrirListaDeOrquestradores`). */
+function itemDaLista(id: string): HTMLElement {
+  const item = document.querySelector<HTMLElement>(
+    `[role="menu"][aria-label="Orquestradores"] [data-orquestrador="${id}"]`,
+  );
+  if (item === null) {
+    throw new Error(`${id} não está na lista`);
+  }
+  return item;
+}
+
+/** Escolhe um orquestrador pelo submenu: abre o menu, o submenu e clica nele. */
+function escolherNaLista(id: string): void {
+  abrirListaDeOrquestradores();
+  fireEvent.click(itemDaLista(id));
 }
 
 /** Ctrl+N (novo orquestrador) ou Ctrl+Shift+N (nova nota); devolve false se o padrão foi impedido. */
@@ -178,7 +201,7 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
     expect(camada!.compareDocumentPosition(painelDoChat!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("a contagem do botão Subagentes acompanha a biblioteca quando o chat cria um subagente pronto", async () => {
+  it("a lista e a contagem do submenu Subagentes acompanham a biblioteca quando o chat cria um subagente pronto", async () => {
     const pronto = (nome: string) => ({ nome, descricao: "Faz algo", prompt: "Faça.", modelo: "herdar" as const });
     const preferencias = (nomes: string[]) => ({
       instrucoesPadrao: "",
@@ -187,48 +210,55 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
     });
     const ler = vi.spyOn(api, "lerPreferencias").mockResolvedValue(preferencias(["a", "b"]));
     render(<CanvasDeOrquestradores />);
-    expect(await screen.findByRole("button", { name: "Subagentes (2)" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Novo" }));
+    const pai = screen.getByRole("menuitem", { name: /^Subagentes/ });
+    await waitFor(() => expect(pai).toHaveTextContent("2"));
+    fireEvent.click(pai);
+    expect(within(screen.getByRole("menu", { name: "Subagentes" })).getByText("2 subagentes prontos")).toBeInTheDocument();
 
-    // O cartão do chat grava a lista nova e avisa; a barra relê sem reabrir nada.
+    // O cartão do chat grava a lista nova e avisa; o menu relê sem reabrir nada.
     ler.mockResolvedValue(preferencias(["a", "b", "c"]));
     act(() => avisarSubagentesProntosMudaram());
-    expect(await screen.findByRole("button", { name: "Subagentes (3)" })).toBeInTheDocument();
+    expect(await screen.findByText("3 subagentes prontos")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "c: Faz algo" })).toBeInTheDocument();
   });
 
-  it("com um painel da barra aberto, a lista de orquestradores some como o quadro vazio e volta como estava", async () => {
+  it("Gerenciar subagentes abre o painel de subagentes prontos sob a ilha, no lugar do quadro vazio, e fechar o devolve", async () => {
     vi.spyOn(api, "lerPreferencias").mockRejectedValue(new Error("sem servidor"));
     render(<CanvasDeOrquestradores />);
     await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
-    const lista = () => screen.getByRole("button", { name: /orquestradores · 0/, hidden: true });
-    expect(lista()).toBeVisible();
-    expect(lista()).toHaveAttribute("aria-expanded", "true");
-
-    // Expandida: some com o painel e volta expandida ao fechar.
-    fireEvent.click(screen.getByRole("button", { name: "Subagentes" }));
-    await screen.findByRole("region", { name: "Subagentes prontos" });
-    expect(lista()).not.toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Seu canvas de agentes" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Fechar subagentes" }));
-    expect(lista()).toBeVisible();
-    expect(lista()).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("heading", { name: "Seu canvas de agentes" })).toBeInTheDocument();
 
-    // Recolhida: escondida, e não desmontada, volta recolhida.
-    fireEvent.click(lista());
-    expect(lista()).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(screen.getByRole("button", { name: "Subagentes" }));
-    expect(lista()).not.toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Subagentes" }));
-    expect(lista()).toBeVisible();
-    expect(lista()).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Novo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Subagentes/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Gerenciar subagentes" }));
+
+    const painel = await screen.findByRole("region", { name: "Subagentes prontos" });
+    // Flutua logo abaixo da ilha do nome, na mesma coluna.
+    expect(painel.parentElement).toHaveClass("coluna-da-ilha-esquerda");
+    expect(painel.previousElementSibling).toBe(screen.getByTestId("ilha-do-nome"));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Seu canvas de agentes" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Fechar subagentes" }));
+    expect(screen.queryByRole("region", { name: "Subagentes prontos" })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Seu canvas de agentes" })).toBeInTheDocument();
   });
 
-  it("com \"Chat fixo à esquerda\", o chat vira uma coluna ao lado do canvas; \"soltar\" o devolve ao pé", async () => {
+  it("\"Modelos de canvas\" do menu abre o painel de modelos sob a ilha", async () => {
     render(<CanvasDeOrquestradores />);
     await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Configurações" }));
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Chat fixo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Novo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Modelos de canvas" }));
+
+    const painel = await screen.findByRole("region", { name: "Modelos de canvas" });
+    expect(painel.parentElement).toHaveClass("coluna-da-ilha-esquerda");
+  });
+
+  it("com \"Chat fixo à esquerda\", o chat vira uma coluna ao lado do canvas; \"soltar\" o devolve ao pé", async () => {
+    localStorage.setItem("orquestrador.preferenciasDaTela", JSON.stringify({ chatFixoNaEsquerda: true }));
+    render(<CanvasDeOrquestradores />);
 
     const lateral = await screen.findByRole("complementary", { name: "Chat rápido" });
     const fluxo = document.querySelector(".react-flow");
@@ -245,7 +275,7 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
       chatFixoNaEsquerda: true,
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Soltar o chat embaixo" }));
+    fireEvent.click(screen.getByRole("button", { name: "Soltar embaixo" }));
 
     await waitFor(() => expect(screen.queryByRole("complementary", { name: "Chat rápido" })).not.toBeInTheDocument());
     const campo = screen.getByRole("textbox", { name: "Pergunta para o Claude" });
@@ -281,7 +311,7 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
       render(<CanvasDeOrquestradores />);
       const lateral = await screen.findByRole("complementary", { name: "Chat rápido" });
 
-      fireEvent.click(within(lateral).getByRole("button", { name: "ocultar" }));
+      fireEvent.click(within(lateral).getByRole("button", { name: "Ocultar o chat" }));
 
       // Saiu da coluna e a preferência de fixo desligou; embaixo, só o "mostrar conversa".
       await waitFor(() => expect(screen.queryByRole("complementary", { name: "Chat rápido" })).not.toBeInTheDocument());
@@ -351,12 +381,11 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
       larguraDoChatFixo: 436,
     });
 
-    // Pelas Configurações, de volta à esquerda: a coluna passa para antes da área.
-    fireEvent.click(screen.getByRole("button", { name: "Configurações" }));
-    fireEvent.click(screen.getByRole("menuitemradio", { name: "esquerda" }));
-    const naEsquerda = await screen.findByRole("complementary", { name: "Chat rápido" });
-    await waitFor(() => expect(naEsquerda.nextElementSibling).toBe(area));
-    expect(naEsquerda).toHaveClass("chat-lateral-esquerda");
+    // Com a coluna à direita, o canvas e todas as ilhas ficam dentro da área ao lado dela, sem sobrepor.
+    expect(area).toContainElement(screen.getByTestId("ilha-do-nome"));
+    expect(area).toContainElement(screen.getByRole("group", { name: "Busca, status e configurações" }));
+    expect(area).toContainElement(screen.getByTestId("ilha-de-ferramentas"));
+    expect(lateral).not.toContainElement(screen.getByTestId("ilha-do-nome"));
   });
 });
 
@@ -836,21 +865,6 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
 
   const rascunhosNaTela = () => document.querySelectorAll(".react-flow__node-rascunho").length;
 
-  /** O item do Orquestrador na lista da esquerda (Doca). */
-  function itemDaDoca(id: string): HTMLElement {
-    const item = screen
-      .getAllByRole("button")
-      .find(
-        (botao) =>
-          ["Ir até o terminal", "Abrir o terminal no canvas"].includes(botao.title) &&
-          botao.textContent?.startsWith(`Orquestrador ${id}`) === true,
-      );
-    if (item === undefined) {
-      throw new Error(`${id} não está na lista`);
-    }
-    return item;
-  }
-
   const fecharAviso = () => fireEvent.click(within(screen.getByText(AVISO).parentElement as HTMLElement).getByTitle("Fechar aviso"));
 
   it("no limite, \"+ Novo ▾\" › Orquestrador mostra o aviso e não abre o formulário", async () => {
@@ -882,23 +896,25 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
     render(<CanvasDeOrquestradores />);
     await waitFor(() => expect(noNaTela(ULTIMO)).toBeInTheDocument());
 
-    fireEvent.click(itemDaDoca(FORA));
+    escolherNaLista(FORA);
     expect(await screen.findByText(AVISO)).toBeInTheDocument();
     expect(document.querySelector(`.react-flow__node[data-id="${FORA}"]`)).toBeNull();
 
     // Já aberto não conta: não recusa (e não deixa aviso).
-    fireEvent.click(itemDaDoca("o2"));
+    escolherNaLista("o2");
     expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
 
     // Recusa de novo e fecha o terminal o1 no ✕: o aviso some sozinho e a vaga volta.
-    fireEvent.click(itemDaDoca(FORA));
+    escolherNaLista(FORA);
     expect(await screen.findByText(AVISO)).toBeInTheDocument();
     fireEvent.click(within(noNaTela("o1")).getByTitle("Fechar o terminal (o orquestrador e o histórico continuam salvos)"));
     await waitFor(() => expect(screen.queryByText(AVISO)).not.toBeInTheDocument());
     // O1 continua na lista: nada foi excluído.
-    expect(itemDaDoca("o1")).toHaveAttribute("title", "Abrir o terminal no canvas");
+    abrirListaDeOrquestradores();
+    expect(itemDaLista("o1")).toHaveAttribute("title", "Abrir o terminal no canvas");
+    fireEvent.click(screen.getByRole("button", { name: "Novo" }));
 
-    fireEvent.click(itemDaDoca(FORA));
+    escolherNaLista(FORA);
     await waitFor(() => expect(noNaTela(FORA)).toBeInTheDocument());
     expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
   });
@@ -949,7 +965,7 @@ describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout
     await waitFor(() => expect(rascunhosNaTela()).toBe(1));
     expect(screen.queryByText(AVISO)).not.toBeInTheDocument();
 
-    fireEvent.click(itemDaDoca(FORA));
+    escolherNaLista(FORA);
     expect(await screen.findByText(AVISO)).toBeInTheDocument();
     expect(document.querySelector(`.react-flow__node[data-id="${FORA}"]`)).toBeNull();
   });
@@ -996,9 +1012,10 @@ describe("CanvasDeOrquestradores · minimapa", () => {
     expect(JSON.parse(localStorage.getItem("orquestrador.preferenciasDaTela") ?? "null")).toMatchObject({
       minimapaVisivel: true,
     });
-    // Os controles de zoom continuam no canto esquerdo; o botão do minimapa fica no direito.
+    // O zoom mora na ilha vertical do canto esquerdo; o botão do minimapa fica nos controles do direito.
     expect(esconder.closest(".react-flow__controls")).toHaveClass("bottom", "right");
-    expect(screen.getByRole("button", { name: "Fit View" }).closest(".react-flow__controls")).toHaveClass("bottom", "left");
+    expect(within(screen.getByTestId("ilha-de-ferramentas")).getByRole("button", { name: "Ajustar à tela" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Fit View" })).not.toBeInTheDocument();
 
     // Ao abrir de novo, volta como foi deixado.
     unmount();
@@ -1021,8 +1038,8 @@ describe("CanvasDeOrquestradores · minimapa", () => {
   });
 });
 
-describe("CanvasDeOrquestradores · Ctrl+N e Organizar nos controles", () => {
-  const ORGANIZAR = "Organizar: terminais lado a lado; notas e artefatos à direita";
+describe("CanvasDeOrquestradores · Ctrl+N e Organizar na ilha de ferramentas", () => {
+  const ORGANIZAR = "Organizar janelas";
   const rascunhosNaTela = () => document.querySelectorAll(".react-flow__node-rascunho").length;
 
   function layoutCom(ids: string[]): void {
@@ -1066,21 +1083,20 @@ describe("CanvasDeOrquestradores · Ctrl+N e Organizar nos controles", () => {
     await waitFor(() => expect(rascunhosNaTela()).toBe(1));
   });
 
-  it("o \"Organizar\" é o 4º botão dos controles e põe os terminais lado a lado", async () => {
+  it("o \"Organizar\" é o 4º botão da ilha de ferramentas e põe os terminais lado a lado", async () => {
     layoutCom(["o1", "o2"]);
     render(<CanvasDeOrquestradores />);
     await waitFor(() => expect(posicaoNaTela("o2")).toEqual({ x: 1500, y: 0 }));
     const organizar = screen.getByRole("button", { name: ORGANIZAR });
 
-    expect(organizar).toHaveAttribute("title", ORGANIZAR);
-    expect(organizar).toBeEnabled();
-    expect(organizar.closest(".react-flow__controls")).not.toBeNull();
+        expect(organizar).toBeEnabled();
+    expect(organizar).toHaveAttribute("title", "Organizar: terminais lado a lado; notas e artefatos à direita");
+    const ilha = screen.getByTestId("ilha-de-ferramentas");
+    expect(ilha).toContainElement(organizar);
     // Depois dele, só o "Desenhar" (5º).
-    expect(organizar.parentElement?.children).toHaveLength(5);
-    expect(organizar.parentElement?.children[3]).toBe(organizar);
-    expect(organizar.parentElement?.lastElementChild).toBe(screen.getByRole("button", { name: "Desenhar" }));
-    // Saiu da barra do canvas.
-    expect(organizar.closest(".barra-do-canvas")).toBeNull();
+    expect(ilha.querySelectorAll("button")).toHaveLength(5);
+    expect(ilha.querySelectorAll("button")[3]).toBe(organizar);
+    expect(ilha.querySelectorAll("button")[4]).toBe(screen.getByRole("button", { name: "Desenhar" }));
 
     fireEvent.click(organizar);
 
@@ -1096,11 +1112,11 @@ describe("CanvasDeOrquestradores · Ctrl+N e Organizar nos controles", () => {
     expect(esperado.o2).not.toEqual({ x: 1500, y: 0 });
   });
 
-  it("o \"Desenhar\" dos controles abre e fecha a barra de desenho", async () => {
+  it("o \"Desenhar\" da ilha abre e fecha a barra de desenho, que abre numa ilha ao lado; Esc fecha", async () => {
     layoutCom(["o1"]);
     render(<CanvasDeOrquestradores />);
     const desenhar = await screen.findByRole("button", { name: "Desenhar" });
-    expect(desenhar.closest(".react-flow__controls")).not.toBeNull();
+    expect(screen.getByTestId("ilha-de-ferramentas")).toContainElement(desenhar);
     expect(screen.queryByRole("toolbar", { name: "Desenho" })).not.toBeInTheDocument();
 
     fireEvent.click(desenhar);
@@ -1113,6 +1129,15 @@ describe("CanvasDeOrquestradores · Ctrl+N e Organizar nos controles", () => {
 
     expect(desenhar).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByRole("toolbar", { name: "Desenho" })).not.toBeInTheDocument();
+
+    fireEvent.click(desenhar);
+    expect(screen.getByRole("toolbar", { name: "Desenho" }).closest(".painel-da-barra-de-desenho")).not.toBeNull();
+    // O primeiro Esc volta da caneta para Selecionar; o segundo fecha a barra.
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByRole("toolbar", { name: "Desenho" })).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("toolbar", { name: "Desenho" })).not.toBeInTheDocument();
+    expect(desenhar).toHaveAttribute("aria-pressed", "false");
   });
 
   it("com uma janela só, o \"Organizar\" fica desabilitado", async () => {
@@ -1226,7 +1251,7 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     expect(raiz).not.toHaveClass("canvas-modo-invisivel");
   });
 
-  it("no modo invisível, o CSS esconde painéis, minimapa, controles e nós, e mantém a barra e o chat visíveis", async () => {
+  it("no modo invisível, o CSS esconde as ilhas, o minimapa, os controles e os nós, e mantém a barra e o chat visíveis", async () => {
     const ouvintes: Array<(ativo: boolean) => void> = [];
     janelaComPonte.electron = {
       desktop: true,
@@ -1250,14 +1275,15 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
         }),
       },
     };
-    const css = readFileSync(resolve(__dirname, "../theme/index.css"), "utf8");
+    // As ilhas trazem o CSS do modo invisível no próprio arquivo (ilhas.css).
+    const css = ["index.css", "ilhas.css"].map((arquivo) => readFileSync(resolve(__dirname, "../theme", arquivo), "utf8")).join("\n");
     const estilo = document.createElement("style");
     estilo.textContent = css;
     document.head.appendChild(estilo);
     try {
       const { container } = render(<CanvasDeOrquestradores />);
       const visibilidade = (el: Element | null) => (el ? getComputedStyle(el).visibility : "ausente");
-      const paineis = container.querySelector(".paineis-do-topo");
+      const paineis = container.querySelector(".ilhas-do-canvas");
       const painelDoChat = container.querySelector(".painel-do-chat");
       expect(paineis).not.toBeNull();
       expect(painelDoChat).not.toBeNull();
@@ -1361,7 +1387,7 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     render(<CanvasDeOrquestradores />);
 
     // Aberta antes da resposta do app: a ação entra assim que ele responde.
-    fireEvent.click(screen.getByRole("button", { name: "Buscar ou executar (Ctrl+K)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Buscar (Ctrl+K)" }));
     const opcao = await screen.findByRole("option", { name: /Procurar atualizações/ });
     expect(opcao).toHaveTextContent("Versão 0.2.0 — você está na versão mais recente");
 
@@ -1374,24 +1400,25 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
         "Versão 0.2.0 — não foi possível verificar: sem internet",
       ),
     );
-    // O erro fica só na paleta: nada na barra de título.
-    expect(within(screen.getByTestId("barra-de-titulo")).queryByRole("alert")).not.toBeInTheDocument();
+    // O erro fica só na paleta: nenhuma notificação.
+    expect(screen.queryByRole("region", { name: "Notificações" })).not.toBeInTheDocument();
   });
 
   it("com a atualização pronta, reiniciar com Orquestradores trabalhando pede confirmação", async () => {
     simulados.orquestradores.orquestradores = [orquestrador("o1"), { ...orquestrador("o2"), situacao: "ocioso" }];
     const atualizacao = ponteComAtualizacao(estadoDaAtualizacao({ situacao: "pronta", versaoNova: "0.2.1" }));
     render(<CanvasDeOrquestradores />);
-    const barra = screen.getByTestId("barra-de-titulo");
+    // O aviso de atualização entra na pilha de notificações do canto superior direito.
+    const pilha = await screen.findByRole("region", { name: "Notificações" });
 
-    fireEvent.click(await within(barra).findByRole("button", { name: "Atualização pronta (v0.2.1)" }));
-    fireEvent.click(within(barra).getByRole("button", { name: "Reiniciar agora" }));
+    fireEvent.click(await within(pilha).findByRole("button", { name: "Atualização pronta (v0.2.1)" }));
+    fireEvent.click(within(pilha).getByRole("button", { name: "Reiniciar agora" }));
 
-    expect(within(barra).getByRole("alert")).toHaveTextContent(
+    expect(within(pilha).getByRole("alert")).toHaveTextContent(
       "Há 1 pedido em andamento; reiniciar agora vai cancelá-lo.",
     );
     expect(atualizacao.instalarAgora).not.toHaveBeenCalled();
-    fireEvent.click(within(barra).getByRole("button", { name: "Reiniciar mesmo assim" }));
+    fireEvent.click(within(pilha).getByRole("button", { name: "Reiniciar mesmo assim" }));
     expect(atualizacao.instalarAgora).toHaveBeenCalledTimes(1);
   });
 
@@ -1415,10 +1442,11 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     expect(transformacao()).toBe("translate(100px,50px) scale(0.5)");
   });
 
-  it("no navegador o status fica no painel do topo; no desktop, na barra de título", () => {
+  it("no navegador não há barra de título; no desktop ela é só a faixa de arrastar acima do canvas, e o status não fica na tela", () => {
     const { unmount } = render(<CanvasDeOrquestradores />);
     expect(screen.queryByTestId("barra-de-titulo")).not.toBeInTheDocument();
-    expect(screen.getByTestId("status-do-canvas").closest(".paineis-do-topo")).not.toBeNull();
+    // O status vive na aba Sistema das Configurações (fechadas por padrão).
+    expect(screen.queryByTestId("status-do-canvas")).not.toBeInTheDocument();
     unmount();
 
     janelaComPonte.electron = {
@@ -1433,15 +1461,17 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     };
     render(<CanvasDeOrquestradores />);
     const barra = screen.getByTestId("barra-de-titulo");
-    expect(within(barra).getByTestId("status-do-canvas")).toHaveTextContent("todos ociosos");
     expect(within(barra).getByRole("group", { name: "Controles da janela" })).toBeInTheDocument();
-    expect(screen.getAllByTestId("status-do-canvas")).toHaveLength(1);
-    // A barra fica fora do canvas, acima dele.
-    expect(barra.nextElementSibling?.querySelector(".react-flow")).not.toBeNull();
+    expect(within(barra).queryByRole("button", { name: /Buscar/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("status-do-canvas")).not.toBeInTheDocument();
+    // A barra fica fora do canvas, acima dele; as ilhas flutuam dentro da área do canvas.
+    const area = barra.nextElementSibling;
+    expect(area?.querySelector(".react-flow")).not.toBeNull();
+    expect(area).toContainElement(screen.getByTestId("ilha-do-nome"));
   });
 
-  it("no desktop, a busca e o ⚙ ficam na barra de título; a paleta oferece \"Pastas e Claude Code\" só nele", () => {
-    // Navegador: busca e ⚙ (sem a ponte, não há ⚙) na barra do canvas; a paleta não tem a ação.
+  it("a busca e o ⚙ ficam na ilha da direita; a paleta oferece \"Pastas e Claude Code\" só no desktop", () => {
+    // Navegador: a ilha tem a busca e a engrenagem; a paleta não tem a ação.
     const { unmount } = render(<CanvasDeOrquestradores />);
     fireEvent.click(screen.getByRole("button", { name: "Buscar (Ctrl+K)" }));
     expect(screen.getByRole("dialog", { name: "Paleta de comandos" })).toBeInTheDocument();
@@ -1461,23 +1491,10 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
       configuracao: { obter: vi.fn(), abrirAjustes },
     };
     render(<CanvasDeOrquestradores />);
-    const barra = screen.getByTestId("barra-de-titulo");
-    const barraDoCanvas = document.querySelector<HTMLElement>(".barra-do-canvas");
-    if (barraDoCanvas === null) {
-      throw new Error("barra do canvas não encontrada");
-    }
+    const ilha = screen.getByRole("group", { name: "Busca, status e configurações" });
+    expect(within(ilha).getByRole("button", { name: "Configurações" })).toBeInTheDocument();
 
-    // A barra do canvas fica com o "+ Novo ▾" (que tem a Prévia e o Terminal) e os botões de
-    // Subagentes, Instruções gerais e Modelos; o ⚙ Configurações vai para a barra de título.
-    expect(within(barraDoCanvas).getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual([
-      "Novo",
-      "Subagentes",
-      "Instruções gerais",
-      "Modelos",
-    ]);
-    expect(within(barra).getByRole("button", { name: "Configurações" })).toBeInTheDocument();
-
-    fireEvent.click(within(barra).getByRole("button", { name: "Buscar ou executar (Ctrl+K)" }));
+    fireEvent.click(within(ilha).getByRole("button", { name: "Buscar (Ctrl+K)" }));
     fireEvent.click(screen.getByRole("option", { name: /Pastas e Claude Code/ }));
 
     expect(abrirAjustes).toHaveBeenCalledTimes(1);
@@ -1659,7 +1676,7 @@ describe("CanvasDeOrquestradores · artefatos", { timeout: 20_000 }, () => {
     const id = idDoNoDoArtefato("a1");
     await waitFor(() => expect(noNaTela(id)).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole("button", { name: "Organizar: terminais lado a lado; notas e artefatos à direita" }));
+    fireEvent.click(screen.getByRole("button", { name: "Organizar janelas" }));
 
     const esperado = organizarComNotas(
       [
@@ -2118,7 +2135,8 @@ describe("CanvasDeOrquestradores · seleção múltipla e barra do grupo", { tim
     render(<CanvasDeOrquestradores />);
     await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
 
-    fireEvent.click(screen.getByRole("button", { name: "Modelos" }));
+    fireEvent.click(screen.getByRole("button", { name: "Novo" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Modelos de canvas" }));
     fireEvent.click(await screen.findByRole("button", { name: "Recriar Backend" }));
 
     const resultado = await screen.findByRole("status", { name: "Resultado da recriação" });
