@@ -2297,7 +2297,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 
 .painel-do-chat {
   --folga-lateral-do-chat: 231px; /* minimapa (200) + margem (15) + respiro (16) */
-  width: min(480px, calc(100vw - 2 * var(--folga-lateral-do-chat)));
+  width: min(720px, calc(100vw - 2 * var(--folga-lateral-do-chat)));
 }
 
 /* Abaixo de 1100 px o minimapa some: a folga só precisa dos controles de zoom
@@ -2318,7 +2318,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .conversa-do-chat {
   display: flex;
   flex-direction: column;
-  max-height: 62vh;
+  max-height: 36vh;
   overflow: hidden;
   animation: subir .2s ease-out both;
 }

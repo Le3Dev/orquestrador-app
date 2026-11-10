@@ -387,14 +387,14 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   /* A margem de 15px do painel do React Flow completa o vão de 16px. */
   left: calc(66px + var(--largura-da-barra-de-desenho) + 1px);
   transform: none;
-  width: min(680px, calc(100% - (66px + var(--largura-da-barra-de-desenho) + 16px) - 231px));
+  width: min(720px, calc(100% - (66px + var(--largura-da-barra-de-desenho) + 16px) - 231px));
 }
 /* Sem espaço ao lado: o chat sobe, acima da ilha de desenho. */
 @media (width < 1360px) {
   .react-flow__panel.painel-do-chat.painel-do-chat-com-desenho.bottom.center {
     left: 50%;
     transform: translateX(-50%);
-    width: min(680px, calc(100vw - 2 * 64px));
+    width: min(720px, calc(100vw - 2 * 64px));
     margin-bottom: 73px;
   }
 }
