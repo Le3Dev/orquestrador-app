@@ -52,7 +52,7 @@ const VARIAVEL_DE_ESFORCO = "CLAUDE_CODE_EFFORT_LEVEL";
  * apelidos da doc). Usado só quando o modelo real não é conhecido.
  */
 const ID_PADRAO_DO_APELIDO: Readonly<Record<ModeloClaude, string>> = {
-  fable: "claude-fable-5-1",
+  fable: "claude-fable-5-2",
   opus: "claude-opus-5-5",
   sonnet: "claude-sonnet-5-5",
   haiku: "claude-haiku-5-5",

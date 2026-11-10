@@ -159,7 +159,7 @@ describe("NoRascunho", () => {
       fireEvent.click(menuDoModelo(dono));
       const itens = screen.getAllByRole("menuitemradio");
       expect(itens.map((item) => item.textContent)).toEqual([
-        expect.stringMatching(/^Fable 5\.1/),
+        expect.stringMatching(/^Fable 5\.2/),
         expect.stringMatching(/^Opus 5\.5/),
         expect.stringMatching(/^Sonnet 5\.5/),
         expect.stringMatching(/^Haiku 5\.5/),
@@ -167,7 +167,7 @@ describe("NoRascunho", () => {
       fireEvent.keyDown(document, { key: "Escape" });
     }
     escolherModelo("do orquestrador", /^Fable/);
-    expect(menuDoModelo("do orquestrador")).toHaveTextContent("Fable 5.1");
+    expect(menuDoModelo("do orquestrador")).toHaveTextContent("Fable 5.2");
   });
 
   it("escolher a pasta da lista dá o nome, o título e o resumo de pronto", async () => {
@@ -471,7 +471,7 @@ describe("NoRascunho", () => {
     fireEvent.click(menuDoModelo("do orquestrador"));
     fireEvent.click(screen.getByRole("menuitemradio", { name: /^Fable/ }));
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
-    expect(menuDoModelo("do orquestrador")).toHaveTextContent("Fable 5.1");
+    expect(menuDoModelo("do orquestrador")).toHaveTextContent("Fable 5.2");
   });
 
   it("quantidade fixa ou automática, com os limites de 1 a 10", async () => {
