@@ -39,14 +39,16 @@
 // shown", doc do BaseWindowOptions), mas a borda, a sombra, o redimensionamento
 // e o encaixe nas bordas da tela continuam (ao contrário de frame:false). A
 // tela desenha a própria barra (área de arraste) e os botões ─ ☐ ✕ (IPC
-// janela:*); o estado de maximizada chega por "janela:maximizada".
+// janela:*, no fim da ilha da direita); o estado de maximizada chega por
+// "janela:maximizada". Não há faixa de título: o arraste é o fundo das ilhas
+// do topo (-webkit-app-region), e o canvas começa na borda da janela.
 // Janelas de ativação e de configuração: pequenas e sem botão de fechar
 // próprio, mantêm o titleBarOverlay (botões nativos na cor do tema).
 //
 // macOS (electron/mac.js, tudo atrás de process.platform === "darwin"): menu
 // nativo (Cmd+C/V/Z/Q), PATH do shell de login (aberto pelo Finder ou pelo
-// Dock), as 3 bolinhas nativas no lugar do overlay (na principal, centradas na
-// barra de título do app), o `claude` do PATH na primeira abertura e nada de
+// Dock), as 3 bolinhas nativas no lugar do overlay (na principal, flutuando no
+// canto superior esquerdo, centradas com as ilhas do topo), o `claude` do PATH na primeira abertura e nada de
 // atualização automática (sem assinatura da Apple ela não funciona).
 
 const {
