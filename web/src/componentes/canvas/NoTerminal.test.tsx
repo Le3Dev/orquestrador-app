@@ -1415,12 +1415,12 @@ describe("NoTerminal · barra estreita", () => {
     expect(within(barra).getByText("instruções gerais")).toBeInTheDocument();
   });
 
-  it("o ✕ vem depois de um separador, com o tooltip de que o orquestrador continua salvo", () => {
+  it("os controles de janela ficam no fim da barra, com o tooltip de que o orquestrador continua salvo", () => {
     const barra = renderizarComLargura(1400);
     const fechar = within(barra).getByRole("button", { name: "Fechar o terminal" });
 
     expect(fechar).toHaveAttribute("title", "Fechar o terminal (o orquestrador e o histórico continuam salvos)");
-    expect(fechar.previousElementSibling).toHaveClass("separador-da-barra");
+    expect(fechar.closest(".controles-do-no")?.previousElementSibling).toHaveAttribute("aria-label", "Configurar");
     expect(fechar.closest(".controles-da-barra")).not.toBeNull();
   });
 });
@@ -1441,15 +1441,22 @@ describe("NoTerminal · bolinhas da barra", () => {
   const campo = () => screen.getByRole("textbox", { name: "Mensagem para o orquestrador" });
   const MINIMIZADO = { orquestradorId: "o1", minimizada: true, alturaAberta: 460 };
 
-  it("no Windows e no navegador, as bolinhas são só o desenho e o ✕ fica à direita", () => {
-    const { container } = render(<Terminal canvas={canvasDoTerminal(conversaOciosa())} no={propsDoNo()} />);
+  it("no Windows e no navegador, minimizar, ampliar e fechar ficam à direita, sem bolinhas", () => {
+    const canvas = canvasDoTerminal(conversaOciosa());
+    const { container } = render(<Terminal canvas={canvas} no={propsDoNo()} />);
     const barra = barraDoTerminal(container);
+    const controles = within(barra).getByRole("group", { name: "Controles da janela" });
 
-    expect(barra.querySelector(".semaforo")).toHaveAttribute("aria-hidden", "true");
-    expect(within(barra).queryByRole("group", { name: "Janela do terminal" })).not.toBeInTheDocument();
-    expect(within(barra).queryByRole("button", { name: "Minimizar" })).not.toBeInTheDocument();
-    expect(within(barra).queryByRole("button", { name: "Tela cheia" })).not.toBeInTheDocument();
-    expect(within(barra).getByRole("button", { name: "Fechar o terminal" })).toHaveClass("botao-fechar-do-terminal");
+    expect(barra.querySelector(".bolinha-do-no")).toBeNull();
+    expect(barra.querySelector(".semaforo")).toBeNull();
+    expect(controles.closest(".controles-da-barra")).not.toBeNull();
+    expect(within(controles).getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual([
+      "Minimizar o terminal",
+      "Ampliar o terminal",
+      "Fechar o terminal",
+    ]);
+    fireEvent.click(within(controles).getByRole("button", { name: "Fechar o terminal" }));
+    expect(canvas.acoes.fecharTerminal).toHaveBeenCalledWith("o1");
   });
 
   it("no Mac, viram botões (fechar, minimizar, tela cheia) e o ✕ da direita sai", () => {
@@ -1457,24 +1464,25 @@ describe("NoTerminal · bolinhas da barra", () => {
     const canvas = canvasDoTerminal(conversaOciosa());
     const { container } = render(<Terminal canvas={canvas} no={propsDoNo()} />);
     const barra = barraDoTerminal(container);
-    const bolinhas = within(barra).getByRole("group", { name: "Janela do terminal" });
+    const bolinhas = within(barra).getByRole("group", { name: "Controles da janela" });
 
+    expect(bolinhas.nextElementSibling).toBeInstanceOf(SVGElement);
     expect(within(bolinhas).getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual([
       "Fechar o terminal",
-      "Minimizar",
-      "Tela cheia",
+      "Minimizar o terminal",
+      "Ampliar o terminal",
     ]);
     expect(within(bolinhas).getByRole("button", { name: "Fechar o terminal" })).toHaveAttribute(
       "title",
-      "Fechar o terminal (o orquestrador continua salvo)",
+      "Fechar o terminal (o orquestrador e o histórico continuam salvos)",
     );
     for (const botao of within(bolinhas).getAllByRole("button")) {
       expect(botao).toHaveClass("nodrag");
     }
-    // Um só "Fechar o terminal": o das bolinhas. Nem o ✕ nem o separador ficam.
+    // Um só "Fechar o terminal": o das bolinhas. Os botões da direita não existem no Mac.
     expect(within(barra).getAllByRole("button", { name: "Fechar o terminal" })).toHaveLength(1);
-    expect(barra.querySelector(".botao-fechar-do-terminal")).toBeNull();
-    expect(barra.querySelector(".separador-da-barra")).toBeNull();
+    expect(barra.querySelector(".botao-do-no")).toBeNull();
+    expect(barra.querySelector(".separador-dos-controles-do-no")).toBeNull();
 
     fireEvent.click(within(bolinhas).getByRole("button", { name: "Fechar o terminal" }));
     expect(canvas.acoes.fecharTerminal).toHaveBeenCalledWith("o1");
@@ -1486,7 +1494,7 @@ describe("NoTerminal · bolinhas da barra", () => {
     const { container, rerender } = render(<Terminal canvas={canvas} no={propsDoNo()} />);
     fireEvent.change(campo(), { target: { value: "rascunho do pedido" } });
 
-    fireEvent.click(screen.getByRole("button", { name: "Minimizar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Minimizar o terminal" }));
     expect(canvas.acoes.minimizarOuRestaurarTerminal).toHaveBeenCalledWith("o1");
 
     // O canvas troca os dados do nó.
@@ -1500,14 +1508,14 @@ describe("NoTerminal · bolinhas da barra", () => {
       screen.getByRole("textbox", { name: "Mensagem para o orquestrador", hidden: true }),
     ).toHaveValue("rascunho do pedido");
 
-    fireEvent.click(within(barra).getByRole("button", { name: "Restaurar" }));
+    fireEvent.click(within(barra).getByRole("button", { name: "Restaurar o terminal" }));
     expect(canvas.acoes.minimizarOuRestaurarTerminal).toHaveBeenCalledTimes(2);
 
     // Duplo clique no nome restaura (e não abre o renomear); num botão da barra, não.
     fireEvent.doubleClick(within(barra).getByText("Painel de salas"));
     expect(canvas.acoes.minimizarOuRestaurarTerminal).toHaveBeenCalledTimes(3);
     expect(screen.queryByRole("textbox", { name: "Nome do orquestrador" })).not.toBeInTheDocument();
-    fireEvent.doubleClick(within(barra).getByRole("button", { name: "Restaurar" }));
+    fireEvent.doubleClick(within(barra).getByRole("button", { name: "Restaurar o terminal" }));
     expect(canvas.acoes.minimizarOuRestaurarTerminal).toHaveBeenCalledTimes(3);
 
     rerender(<Terminal canvas={canvas} no={propsDoNo()} />);
@@ -1520,7 +1528,7 @@ describe("NoTerminal · bolinhas da barra", () => {
     render(<Terminal canvas={canvasDoTerminal(conversaOciosa())} no={propsDoNo()} />);
     fireEvent.change(campo(), { target: { value: "continua aqui" } });
 
-    fireEvent.click(screen.getByRole("button", { name: "Tela cheia" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ampliar o terminal" }));
 
     const tela = screen.getByRole("dialog", { name: "Painel de salas em tela cheia" });
     expect(screen.getByText("em tela cheia · Esc volta")).toBeInTheDocument();
@@ -1533,7 +1541,7 @@ describe("NoTerminal · bolinhas da barra", () => {
     expect(screen.queryByRole("dialog", { name: "Painel de salas em tela cheia" })).not.toBeInTheDocument();
     expect(screen.queryByText("em tela cheia · Esc volta")).not.toBeInTheDocument();
     expect(campo()).toHaveValue("continua aqui");
-    expect(screen.getByRole("button", { name: "Tela cheia" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ampliar o terminal" })).toBeInTheDocument();
   });
 
   it("em tela cheia, a verde também volta, e o Esc que cancela o pedido no prompt não sai dela", () => {
@@ -1541,7 +1549,7 @@ describe("NoTerminal · bolinhas da barra", () => {
     const cancelar = vi.spyOn(api, "cancelar").mockResolvedValue({ cancelando: true });
     render(<Terminal canvas={canvasDoTerminal(conversaDoTerminal())} no={propsDoNo()} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Tela cheia" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ampliar o terminal" }));
     const tela = screen.getByRole("dialog", { name: "Painel de salas em tela cheia" });
     fireEvent.keyDown(within(tela).getByRole("textbox", { name: "Mensagem para o orquestrador" }), { key: "Escape" });
 
