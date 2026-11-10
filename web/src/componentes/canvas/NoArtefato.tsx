@@ -27,9 +27,11 @@ import {
 import { TAMANHO_MINIMO_DO_ARTEFATO } from "../../shared/canvas/layout";
 import { ALCA_DO_ARTEFATO, type NoArtefato as TipoDoNo } from "../../shared/canvas/nos";
 import { TAG_DO_SCRIPT_DE_NAVEGACAO, useNavegacaoDoQuadro } from "../../shared/navegacaoDoArtefato";
+import { IconeCaneta } from "../Icones";
 import { TextoFormatado } from "../TextoFormatado";
 import { BotoesDeNavegacao } from "./BotoesDeNavegacao";
 import { ControlesDoNo } from "./ControlesDoNo";
+import { DesenhoDaTelaCheia } from "./DesenhoDaTelaCheia";
 import { JanelaEmTelaCheia } from "./JanelaEmTelaCheia";
 import { QuadroAtivavel } from "./NoPrevia";
 
@@ -230,6 +232,7 @@ const CorpoPronto = memo(function CorpoPronto({
   titulo,
   texto,
   noCanvas,
+  semPonteiro,
   ligarQuadro,
   aoCarregarQuadro,
 }: {
@@ -237,6 +240,8 @@ const CorpoPronto = memo(function CorpoPronto({
   titulo: string;
   texto: string;
   noCanvas: boolean;
+  /** Com o desenho da tela cheia ligado, a página não pega o mouse: o traço passa por cima dela. */
+  semPonteiro: boolean;
   /** `ref` e `onLoad` do iframe: o histórico da página (voltar e avançar) vem dele. */
   ligarQuadro: (quadro: HTMLIFrameElement | null) => void;
   aoCarregarQuadro: () => void;
@@ -256,7 +261,7 @@ const CorpoPronto = memo(function CorpoPronto({
         srcDoc={pagina}
       />
     );
-    return noCanvas ? <QuadroAtivavel>{quadro}</QuadroAtivavel> : quadro();
+    return noCanvas ? <QuadroAtivavel>{quadro}</QuadroAtivavel> : quadro(semPonteiro ? { pointerEvents: "none" } : undefined);
   }
   return (
     <div className="corpo-do-artefato-markdown custom-scrollbar nodrag nowheel" data-testid="documento-do-artefato">
@@ -272,6 +277,7 @@ function CorpoDoArtefato({
   aoTentarDeNovo,
   aoVerAtual,
   noCanvas,
+  semPonteiro,
   ligarQuadro,
   aoCarregarQuadro,
 }: {
@@ -282,6 +288,8 @@ function CorpoDoArtefato({
   aoVerAtual: () => void;
   /** Na janela do canvas (e não em tela cheia): a página só pega o mouse depois de ativada. */
   noCanvas: boolean;
+  /** Em tela cheia, com o desenho ligado: a página fica sem o mouse (ver `CorpoPronto`). */
+  semPonteiro: boolean;
   ligarQuadro: (quadro: HTMLIFrameElement | null) => void;
   aoCarregarQuadro: () => void;
 }) {
@@ -315,6 +323,7 @@ function CorpoDoArtefato({
           titulo={artefato.titulo}
           texto={conteudo.texto}
           noCanvas={noCanvas}
+          semPonteiro={semPonteiro}
           ligarQuadro={ligarQuadro}
           aoCarregarQuadro={aoCarregarQuadro}
         />
@@ -525,6 +534,8 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
   const [editandoTitulo, setEditandoTitulo] = useState(false);
   const [tituloPendente, setTituloPendente] = useState<string | null>(null);
   const [ampliado, setAmpliado] = useState(false);
+  // O modo de desenho da tela cheia: vale por abertura (fechar a tela cheia o desliga; os traços ficam salvos).
+  const [desenhando, setDesenhando] = useState(false);
   const [apagando, setApagando] = useState(false);
   const [problema, setProblema] = useState<string | null>(null);
 
@@ -561,7 +572,19 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
         aoAvancar={historico.avancar}
       />
     ) : null;
-  const fecharAmpliado = useCallback(() => setAmpliado(false), []);
+  const fecharAmpliado = useCallback(() => {
+    setAmpliado(false);
+    setDesenhando(false);
+  }, []);
+  const desligarODesenho = useCallback(() => setDesenhando(false), []);
+  // Esc com o desenho ligado só o desliga; desligado, fecha a tela cheia.
+  const aoApertarEscNaTelaCheia = useCallback(() => {
+    if (!desenhando) {
+      return false;
+    }
+    setDesenhando(false);
+    return true;
+  }, [desenhando]);
   const verAtual = useCallback(() => setEscolhida(artefato.versaoAtual), [artefato.versaoAtual]);
 
   async function concluirTitulo(novo: string | null): Promise<void> {
@@ -624,6 +647,7 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
       aoTentarDeNovo={tentarDeNovo}
       aoVerAtual={verAtual}
       noCanvas={noCanvas}
+      semPonteiro={desenhando}
       ligarQuadro={historico.ligarQuadro}
       aoCarregarQuadro={historico.aoCarregarQuadro}
     />
@@ -689,9 +713,23 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
           icone={<IconeDoFormato formato={artefato.formato} />}
           selo={<span className="chip">v{escolhida}</span>}
           navegacao={navegacao}
+          acoes={
+            <button
+              type="button"
+              className="botao-icone"
+              title={desenhando ? "Desligar o desenho sobre a página (Esc)" : "Desenhar sobre a página"}
+              aria-label="Desenhar sobre a página"
+              aria-pressed={desenhando}
+              onClick={() => setDesenhando((atual) => !atual)}
+            >
+              <IconeCaneta />
+            </button>
+          }
+          aoApertarEsc={aoApertarEscNaTelaCheia}
           aoFechar={fecharAmpliado}
         >
           {corpo(false)}
+          <DesenhoDaTelaCheia artefatoId={artefato.id} ligado={desenhando} aoDesligar={desligarODesenho} />
         </JanelaEmTelaCheia>
       )}
     </div>

@@ -32,13 +32,13 @@ import {
 import { BarraDeDesenho } from "./BarraDeDesenho";
 
 /** Distância mínima, em pixels da tela, entre dois pontos seguidos da mão livre. */
-const DISTANCIA_MINIMA_ENTRE_PONTOS_PX = 2;
+export const DISTANCIA_MINIMA_ENTRE_PONTOS_PX = 2;
 /** Quanto a mão livre pode se desviar (em pixels da tela) ao simplificar os pontos no fim do traço. */
-const TOLERANCIA_DA_SIMPLIFICACAO_PX = 0.8;
+export const TOLERANCIA_DA_SIMPLIFICACAO_PX = 0.8;
 /** O raio da borracha, em pixels da tela. */
-const RAIO_DA_BORRACHA_PX = 8;
+export const RAIO_DA_BORRACHA_PX = 8;
 /** Quantos passos o desfazer guarda. */
-const LIMITE_DO_DESFAZER = 100;
+export const LIMITE_DO_DESFAZER = 100;
 
 /** Foco num campo de texto (o texto solto, um terminal, uma nota): a tecla é do campo, não do desenho. */
 function focoEmCampoDeTexto(alvo: EventTarget | null): boolean {
@@ -57,7 +57,7 @@ function distancia(a: Ponto, b: Ponto): number {
 }
 
 /** Um traço desenhado. Memorizado: mover o canvas só troca a transformação do grupo, não cada traço. */
-const TracoDesenhado = memo(function TracoDesenhado({ traco }: { traco: TracoDoDesenho }) {
+export const TracoDesenhado = memo(function TracoDesenhado({ traco }: { traco: TracoDoDesenho }) {
   const classe = `traco traco-${traco.tipo} traco-cor-${traco.cor}`;
   const [de, ate] = traco.pontos;
   if (de === undefined) {
@@ -115,7 +115,7 @@ const TracoDesenhado = memo(function TracoDesenhado({ traco }: { traco: TracoDoD
 });
 
 /** O texto solto sendo digitado: onde começa e com que cor e espessura. */
-interface TextoEmEdicao {
+export interface TextoEmEdicao {
   em: Ponto;
   valor: string;
   cor: CorDoDesenho;

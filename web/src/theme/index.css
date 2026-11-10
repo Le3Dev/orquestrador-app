@@ -1542,6 +1542,17 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   min-height: 0;
 }
 .corpo-da-tela-cheia > .vista-nativa-da-previa { flex: 1; }
+/* O desenho sobre a página do artefato em tela cheia: a camada (a mesma classe do canvas) cobre o corpo.
+ * Desligado, os traços se veem mas a camada não pega o mouse (a regra `.camada-de-desenho`). A barrinha
+ * fica no alto, centrada; o wrapper leva o transform, para a animação da barra não o sobrescrever. */
+.desenho-da-tela-cheia { outline: none; }
+.barra-do-desenho-da-tela-cheia {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  z-index: 5;
+  transform: translateX(-50%);
+}
 
 /* ---------------- Prévia ao vivo (navegador no canvas) ----------------
  * A moldura da nota, no azul de informação, com o site num iframe. O fundo

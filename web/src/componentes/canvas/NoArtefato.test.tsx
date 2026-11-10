@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type NodeProps, ReactFlowProvider } from "@xyflow/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { Profiler, type ReactNode } from "react";
 
 import { apiDosArtefatos, type ResumoDoArtefato } from "../../shared/api/artefatos";
@@ -554,6 +556,196 @@ describe("NoArtefato", () => {
     expect(within(modal).getByRole("button", { name: "Fechar a tela cheia" })).toHaveAttribute("title", "Fechar a tela cheia (Esc)");
     // Sem faixa de arraste (navegador), a tela cheia começa no topo.
     expect(screen.getByTestId("fundo-da-tela-cheia")).toHaveStyle({ top: "0px" });
+  });
+
+  describe("desenho na tela cheia", () => {
+    // O jsdom não tem PointerEvent: sem ele, o fireEvent manda um Event sem botão, clientX nem pointerId.
+    class EventoDePonteiroFalso extends MouseEvent {
+      readonly pointerId: number;
+      constructor(tipo: string, inicio: PointerEventInit = {}) {
+        super(tipo, inicio);
+        this.pointerId = inicio.pointerId ?? 0;
+      }
+    }
+    beforeEach(() => vi.stubGlobal("PointerEvent", EventoDePonteiroFalso));
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      localStorage.clear();
+    });
+
+    async function abrirEmTelaCheia(id = "a1") {
+      vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("<p>x</p>");
+      const { tela } = preparar(artefato(id));
+      render(tela(<NoArtefato {...propsDoNo(id)} />));
+      await iframe();
+      fireEvent.click(screen.getByRole("button", { name: "Ampliar o artefato" }));
+      return screen.getByRole("dialog", { name: "Relatório de vendas" });
+    }
+
+    const caneta = () => screen.getByRole("button", { name: "Desenhar sobre a página" });
+    const camada = () => screen.getByTestId("desenho-da-tela-cheia");
+    const paginaDoModal = () => screen.getByTitle("Conteúdo do artefato: Relatório de vendas");
+    const barra = () => screen.queryByRole("toolbar", { name: "Desenho" });
+
+    function arrastar(pontos: readonly [number, number][]) {
+      const [primeiro, ...resto] = pontos;
+      const svg = camada().querySelector("svg") as SVGSVGElement;
+      fireEvent.pointerDown(svg, { button: 0, pointerId: 1, clientX: primeiro?.[0], clientY: primeiro?.[1] });
+      for (const [x, y] of resto) {
+        fireEvent.pointerMove(svg, { pointerId: 1, clientX: x, clientY: y });
+      }
+      const ultimo = resto.at(-1) ?? primeiro;
+      fireEvent.pointerUp(svg, { pointerId: 1, clientX: ultimo?.[0], clientY: ultimo?.[1] });
+    }
+
+    it("o botão da caneta existe só na tela cheia e liga e desliga o modo, com a barrinha de ferramentas", async () => {
+      vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("<p>x</p>");
+      const { tela } = preparar(artefato("a1"));
+      render(tela(<NoArtefato {...propsDoNo("a1")} />));
+      await iframe();
+      expect(screen.queryByRole("button", { name: "Desenhar sobre a página" })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Ampliar o artefato" }));
+      expect(caneta()).toHaveAttribute("aria-pressed", "false");
+      expect(barra()).not.toBeInTheDocument();
+      expect(camada()).toHaveAttribute("data-ligado", "false");
+
+      fireEvent.click(caneta());
+      expect(caneta()).toHaveAttribute("aria-pressed", "true");
+      expect(camada()).toHaveAttribute("data-ligado", "true");
+      const ferramentas = within(barra() as HTMLElement);
+      for (const nome of ["Caneta", "Seta", "Retângulo", "Texto", "Borracha", "Desfazer"]) {
+        expect(ferramentas.getByRole("button", { name: nome })).toBeInTheDocument();
+      }
+      expect(ferramentas.getAllByRole("button", { name: /^Cor / })).toHaveLength(6);
+      expect(ferramentas.queryByRole("button", { name: "Marca-texto" })).not.toBeInTheDocument();
+
+      fireEvent.click(caneta());
+      expect(barra()).not.toBeInTheDocument();
+      expect(camada()).toHaveAttribute("data-ligado", "false");
+
+      // O fechar da barrinha também desliga.
+      fireEvent.click(caneta());
+      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Desligar o desenho" }));
+      expect(barra()).not.toBeInTheDocument();
+    });
+
+    it("o traço feito aparece, fica visível com o modo desligado e o Desfazer o tira", async () => {
+      await abrirEmTelaCheia();
+      fireEvent.click(caneta());
+
+      arrastar([[10, 10], [50, 30], [90, 20]]);
+      expect(camada().querySelectorAll('[data-traco="caneta"]')).toHaveLength(1);
+
+      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Seta" }));
+      arrastar([[20, 80], [120, 80]]);
+      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Retângulo" }));
+      arrastar([[30, 30], [100, 70]]);
+      expect(camada().querySelectorAll("[data-traco]")).toHaveLength(3);
+
+      fireEvent.click(caneta());
+      expect(camada().querySelectorAll("[data-traco]")).toHaveLength(3);
+
+      fireEvent.click(caneta());
+      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Desfazer" }));
+      expect(camada().querySelector('[data-traco="retangulo"]')).not.toBeInTheDocument();
+      expect(camada().querySelectorAll("[data-traco]")).toHaveLength(2);
+    });
+
+    it("o texto solto vira traço com Enter", async () => {
+      await abrirEmTelaCheia();
+      fireEvent.click(caneta());
+      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Texto" }));
+      fireEvent.pointerDown(camada().querySelector("svg") as SVGSVGElement, { button: 0, pointerId: 1, clientX: 40, clientY: 50 });
+      const campo = screen.getByRole("textbox", { name: "Texto solto" });
+      fireEvent.change(campo, { target: { value: "Ver aqui" } });
+      fireEvent.keyDown(campo, { key: "Enter" });
+      expect(camada().querySelector("text")).toHaveTextContent("Ver aqui");
+    });
+
+    it("grava por artefato e, ao reabrir a tela cheia, os traços voltam (os de outro artefato não)", async () => {
+      await abrirEmTelaCheia("a1");
+      fireEvent.click(caneta());
+      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Seta" }));
+      arrastar([[20, 80], [120, 80]]);
+
+      const salvo = JSON.parse(localStorage.getItem("orquestrador-agentes:canvas:v1:desenho-da-tela-cheia") ?? "{}") as Record<
+        string,
+        { tipo: string; pontos: { x: number; y: number }[] }[]
+      >;
+      expect(Object.keys(salvo)).toEqual(["a1"]);
+      expect(salvo.a1?.[0]).toMatchObject({ tipo: "seta", pontos: [{ x: 20, y: 80 }, { x: 120, y: 80 }] });
+      // O desenho do canvas não é tocado.
+      expect(localStorage.getItem("orquestrador-agentes:canvas:v1")).toBeNull();
+
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Fechar a tela cheia" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Ampliar o artefato" }));
+      expect(camada().querySelectorAll('[data-traco="seta"]')).toHaveLength(1);
+      // Reaberta, começa desligada.
+      expect(camada()).toHaveAttribute("data-ligado", "false");
+      expect(barra()).not.toBeInTheDocument();
+    });
+
+    it("um desenho corrompido no armazenamento é descartado, sem derrubar a tela cheia", async () => {
+      localStorage.setItem("orquestrador-agentes:canvas:v1:desenho-da-tela-cheia", "{isso não é json");
+      await abrirEmTelaCheia();
+      expect(camada().querySelectorAll("[data-traco]")).toHaveLength(0);
+    });
+
+    it("Esc com o desenho ligado só o desliga; desligado, fecha a tela cheia", async () => {
+      await abrirEmTelaCheia();
+      fireEvent.click(caneta());
+
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(caneta()).toHaveAttribute("aria-pressed", "false");
+      expect(barra()).not.toBeInTheDocument();
+
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("Esc com um texto em edição desliga o desenho, descarta o texto e não fecha a tela cheia", async () => {
+      await abrirEmTelaCheia();
+      fireEvent.click(caneta());
+      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Texto" }));
+      fireEvent.pointerDown(camada().querySelector("svg") as SVGSVGElement, { button: 0, pointerId: 1, clientX: 40, clientY: 50 });
+      fireEvent.change(screen.getByRole("textbox", { name: "Texto solto" }), { target: { value: "rascunho" } });
+
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Texto solto" }), { key: "Escape" });
+
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+      expect(screen.queryByRole("textbox", { name: "Texto solto" })).not.toBeInTheDocument();
+      expect(camada().querySelector("text")).not.toBeInTheDocument();
+      expect(barra()).not.toBeInTheDocument();
+    });
+
+    it("a página fica sem ponteiro só com o modo ligado", async () => {
+      await abrirEmTelaCheia();
+      expect(paginaDoModal()).not.toHaveStyle({ pointerEvents: "none" });
+
+      fireEvent.click(caneta());
+      expect(paginaDoModal()).toHaveStyle({ pointerEvents: "none" });
+      expect(camada()).toHaveClass("camada-de-desenho-ativa");
+
+      fireEvent.click(caneta());
+      expect(paginaDoModal()).not.toHaveStyle({ pointerEvents: "none" });
+      expect(camada()).not.toHaveClass("camada-de-desenho-ativa");
+    });
+
+    it("sem o modo ligado, a camada não tem como pegar o mouse (o CSS é lido do arquivo)", () => {
+      const css = readFileSync(resolve(__dirname, "../../theme/index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+      const regras = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, seletores = "", corpo = ""]) => ({
+        seletores: seletores.split(",").map((seletor) => seletor.trim()),
+        corpo,
+      }));
+      const base = regras.find(({ seletores }) => seletores.includes(".camada-de-desenho"));
+      const ativa = regras.find(({ seletores }) => seletores.includes(".camada-de-desenho-ativa .camada-de-desenho-svg"));
+      expect(base?.corpo).toMatch(/pointer-events:\s*none/);
+      expect(ativa?.corpo).toMatch(/pointer-events:\s*auto/);
+    });
   });
 
   it("enquanto o resumo não chega, avisa; se a lista falhar, mostra o motivo", () => {

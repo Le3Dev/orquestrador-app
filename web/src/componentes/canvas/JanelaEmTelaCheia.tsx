@@ -30,7 +30,7 @@ function topoDaTelaCheia(): number {
 /**
  * A janela em tela cheia de um artefato ou de uma prévia: um modal no
  * `document.body`, fora do viewport do React Flow (não escala com o zoom). Esc,
- * o fechar da barra e um clique no fundo fecham.
+ * o fechar da barra e um clique no fundo fecham (o Esc antes passa por `aoApertarEsc`).
  *
  * A barra leva o ícone, o título, o selo (ex.: "v2"), a navegação (voltar e
  * avançar, quando existe) e, nos dois cantos, os controles de janela com só o
@@ -42,6 +42,8 @@ export function JanelaEmTelaCheia({
   icone,
   selo,
   navegacao,
+  acoes,
+  aoApertarEsc,
   aoFechar,
   corpoRef,
   children,
@@ -51,6 +53,13 @@ export function JanelaEmTelaCheia({
   selo?: ReactNode;
   /** Os botões de voltar e avançar, quando a página os tem. */
   navegacao?: ReactNode;
+  /** Botões extras da barra, entre a navegação e o fechar (ex.: a caneta do artefato). */
+  acoes?: ReactNode;
+  /**
+   * Quem tem algo para desfazer com o Esc (ex.: o modo de desenho) o trata aqui e devolve `true`:
+   * a tela cheia então não fecha. Devolvendo `false`, o Esc fecha como sempre.
+   */
+  aoApertarEsc?: () => boolean;
   aoFechar: () => void;
   corpoRef?: Ref<HTMLDivElement>;
   children: ReactNode;
@@ -69,12 +78,14 @@ export function JanelaEmTelaCheia({
       if (evento.key === "Escape") {
         evento.preventDefault();
         evento.stopPropagation();
-        aoFechar();
+        if (aoApertarEsc?.() !== true) {
+          aoFechar();
+        }
       }
     };
     window.addEventListener("keydown", aoTeclar, true);
     return () => window.removeEventListener("keydown", aoTeclar, true);
-  }, [aoFechar]);
+  }, [aoFechar, aoApertarEsc]);
 
   const aoPressionarOFundo = (evento: EventoDeMouseDoReact<HTMLDivElement>) => {
     evento.stopPropagation();
@@ -114,6 +125,7 @@ export function JanelaEmTelaCheia({
           {selo}
           <span className="flex-1" />
           {navegacao}
+          {acoes}
           <ControlesDoNo lado="fim" objeto="a tela cheia" aoFechar={aoFechar} dicaDoFechar="Fechar a tela cheia (Esc)" />
         </div>
         <div ref={corpoRef} className="corpo-da-tela-cheia">

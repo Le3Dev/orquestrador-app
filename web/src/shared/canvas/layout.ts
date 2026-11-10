@@ -186,6 +186,8 @@ const CHAVE = "orquestrador-agentes:canvas:v1";
 /** Os nós que se ligam a um terminal (`ligados`), pelo prefixo do id: notas, prévias e artefatos. */
 const PREFIXOS_DOS_ITENS_LIGAVEIS = ["nota:", "previa:", "artefato:"] as const;
 const CHAVE_DOS_BIXINHOS_LIMPOS = `${CHAVE}:bixinhos-limpos`;
+/** O desenho sobre a página de cada artefato em tela cheia, por id do artefato (em px do corpo da tela cheia). */
+const CHAVE_DO_DESENHO_DA_TELA_CHEIA = `${CHAVE}:desenho-da-tela-cheia`;
 
 function ehNumero(valor: unknown): valor is number {
   return typeof valor === "number" && Number.isFinite(valor);
@@ -479,6 +481,56 @@ export function salvarDesenho(desenho: readonly TracoDoDesenho[]): void {
     salvarLayout({ ...interpretarLayout(localStorage.getItem(CHAVE)), desenho: [...desenho] });
   } catch {
     // Sem armazenamento: o desenho só não é lembrado no próximo acesso.
+  }
+}
+
+/**
+ * Lê o desenho da tela cheia, por id do artefato: o traço corrompido sai e o
+ * artefato sem traço nenhum válido some do resultado. Texto ilegível vira vazio.
+ */
+export function interpretarDesenhosDasTelasCheias(texto: string | null): Map<string, TracoDoDesenho[]> {
+  const validos = new Map<string, TracoDoDesenho[]>();
+  if (texto === null) {
+    return validos;
+  }
+  try {
+    const salvo: unknown = JSON.parse(texto);
+    if (typeof salvo !== "object" || salvo === null || Array.isArray(salvo)) {
+      return validos;
+    }
+    for (const [artefatoId, desenho] of Object.entries(salvo)) {
+      const tracos = interpretarDesenho(desenho);
+      if (tracos.length > 0) {
+        validos.set(artefatoId, tracos);
+      }
+    }
+    return validos;
+  } catch {
+    return new Map();
+  }
+}
+
+/** Os traços que o artefato tem na tela cheia (vazio se não há ou se o salvo estiver ilegível). */
+export function lerDesenhoDaTelaCheia(artefatoId: string): TracoDoDesenho[] {
+  try {
+    return interpretarDesenhosDasTelasCheias(localStorage.getItem(CHAVE_DO_DESENHO_DA_TELA_CHEIA)).get(artefatoId) ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Grava os traços do artefato na tela cheia, sem mexer no desenho dos outros; sem traço, o artefato sai do salvo. */
+export function salvarDesenhoDaTelaCheia(artefatoId: string, desenho: readonly TracoDoDesenho[]): void {
+  try {
+    const todos = interpretarDesenhosDasTelasCheias(localStorage.getItem(CHAVE_DO_DESENHO_DA_TELA_CHEIA));
+    if (desenho.length === 0) {
+      todos.delete(artefatoId);
+    } else {
+      todos.set(artefatoId, [...desenho]);
+    }
+    localStorage.setItem(CHAVE_DO_DESENHO_DA_TELA_CHEIA, JSON.stringify(Object.fromEntries(todos)));
+  } catch {
+    // Sem armazenamento: o desenho só não é lembrado na próxima vez que a tela cheia abrir.
   }
 }
 
