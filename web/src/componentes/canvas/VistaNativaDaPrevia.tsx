@@ -1,7 +1,13 @@
 import { type MouseEvent, useEffect, useRef, useState } from "react";
 
 import type { ApiDaPrevia, RetanguloDaPrevia } from "../../shared/ponteDoDesktop";
-import { calcularRetangulo, mesmoRetangulo, pontosDeAmostra } from "../../shared/previaNativa";
+import {
+  calcularRetangulo,
+  type HistoricoDaVista,
+  mesmoRetangulo,
+  pontosDeAmostra,
+  SEM_HISTORICO,
+} from "../../shared/previaNativa";
 
 /** Quanto o ponteiro pode andar entre apertar e soltar para ainda contar como clique (e não arraste). */
 const DISTANCIA_MAXIMA_DO_CLIQUE_PX = 5;
@@ -59,6 +65,7 @@ export function VistaNativaDaPrevia({
   api,
   suspensa,
   aoMudarOrigem,
+  aoMudarHistorico,
 }: {
   previaId: string;
   url: string;
@@ -70,6 +77,8 @@ export function VistaNativaDaPrevia({
    * primeira página e ao desmontar. A barra da prévia mostra o host e destaca a troca de domínio.
    */
   aoMudarOrigem: (origem: string | null) => void;
+  /** Se dá para voltar e avançar, a cada navegação; sem histórico ao desmontar. */
+  aoMudarHistorico: (historico: HistoricoDaVista) => void;
 }) {
   const raiz = useRef<HTMLDivElement>(null);
   const inicioDoClique = useRef<{ x: number; y: number } | null>(null);
@@ -91,8 +100,10 @@ export function VistaNativaDaPrevia({
 
   // O pai guarda a origem; a referência evita reassinar o aviso do app quando o callback troca de identidade.
   const avisarOrigem = useRef(aoMudarOrigem);
+  const avisarHistorico = useRef(aoMudarHistorico);
   useEffect(() => {
     avisarOrigem.current = aoMudarOrigem;
+    avisarHistorico.current = aoMudarHistorico;
   });
 
   useEffect(
@@ -111,6 +122,7 @@ export function VistaNativaDaPrevia({
         } else if (evento.tipo === "estado") {
           setPagina({ carregando: evento.carregando, erro: evento.erro });
           avisarOrigem.current(evento.origem ?? null);
+          avisarHistorico.current({ podeVoltar: evento.podeVoltar === true, podeAvancar: evento.podeAvancar === true });
         } else {
           setAtiva(false);
         }
@@ -119,7 +131,13 @@ export function VistaNativaDaPrevia({
   );
 
   // Ao sair (fechar, trocar o endereço, recarregar), a barra deixa de mostrar o host desta vista.
-  useEffect(() => () => avisarOrigem.current(null), []);
+  useEffect(
+    () => () => {
+      avisarOrigem.current(null);
+      avisarHistorico.current(SEM_HISTORICO);
+    },
+    [],
+  );
 
   // Ativa: mostra a vista e a faz seguir o corpo; ao desativar (por qualquer motivo), esconde.
   useEffect(() => {
