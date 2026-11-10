@@ -279,6 +279,25 @@ describe("montarAmbienteDoChat", () => {
     expect(ambiente.PATH).toBe("x");
   });
 
+  it("não repassa a chave de acesso do app, a porta nem a pasta de dados", () => {
+    const ambiente = montarAmbienteDoChat(
+      {
+        ...base,
+        ORQUESTRADOR_CHAVE_DE_ACESSO: "a".repeat(64),
+        ORQUESTRADOR_URL_DE_DOWNLOAD: "https://x",
+        PORTA: "3200",
+        PASTA_DADOS: "/dados",
+      },
+      "padrao",
+    );
+
+    expect(ambiente.ORQUESTRADOR_CHAVE_DE_ACESSO).toBeUndefined();
+    expect(ambiente.ORQUESTRADOR_URL_DE_DOWNLOAD).toBeUndefined();
+    expect(ambiente.PORTA).toBeUndefined();
+    expect(ambiente.PASTA_DADOS).toBeUndefined();
+    expect(ambiente.PATH).toBe("x");
+  });
+
   it("tira CLAUDE_CODE_EFFORT_LEVEL só com esforço escolhido", () => {
     expect(montarAmbienteDoChat(base, "padrao").CLAUDE_CODE_EFFORT_LEVEL).toBe("high");
     expect(montarAmbienteDoChat(base, "baixo").CLAUDE_CODE_EFFORT_LEVEL).toBeUndefined();

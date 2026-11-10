@@ -265,11 +265,30 @@ const VARIAVEIS_DA_SESSAO_PAI = [
   "AI_AGENT",
 ];
 
-/** Cópia do ambiente sem as variáveis que amarrariam o processo a uma sessão do Claude Code já aberta. */
+/**
+ * Variáveis do próprio app que um agente não deve ver: a chave de acesso
+ * (`ORQUESTRADOR_*`, com a qual um agente com Bash chamaria a API local para
+ * mudar a própria configuração), a porta e a pasta de dados. Nada no fluxo dos
+ * agentes usa a porta nem a pasta de dados: eles não chamam o app e as pastas
+ * de artefatos chegam por caminho absoluto nas instruções.
+ */
+const VARIAVEIS_DO_APP_OCULTAS_DOS_AGENTES = ["PORTA", "PASTA_DADOS"];
+const PREFIXO_DAS_VARIAVEIS_DO_APP = "ORQUESTRADOR_";
+
+/**
+ * Cópia do ambiente sem as variáveis que amarrariam o processo a uma sessão do
+ * Claude Code já aberta e sem as do app (`ORQUESTRADOR_*`, porta e pasta de dados).
+ */
 export function ambienteSemSessaoPai(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const ambiente: NodeJS.ProcessEnv = { ...base };
   for (const variavel of VARIAVEIS_DA_SESSAO_PAI) {
     delete ambiente[variavel];
+  }
+  for (const variavel of VARIAVEIS_DO_APP_OCULTAS_DOS_AGENTES) {
+    delete ambiente[variavel];
+  }
+  for (const variavel of Object.keys(ambiente)) {
+    if (variavel.startsWith(PREFIXO_DAS_VARIAVEIS_DO_APP)) delete ambiente[variavel];
   }
   return ambiente;
 }

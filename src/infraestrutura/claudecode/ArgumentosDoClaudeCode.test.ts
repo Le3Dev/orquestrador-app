@@ -445,6 +445,25 @@ describe("montarAmbiente", () => {
     expect(ambiente.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS).toBe("4");
   });
 
+  it("não repassa a chave de acesso do app, a porta nem a pasta de dados", () => {
+    const ambiente = montarAmbiente(
+      {
+        PATH: "x",
+        ORQUESTRADOR_CHAVE_DE_ACESSO: "a".repeat(64),
+        ORQUESTRADOR_PERMITIR_NAVEGADOR: "1",
+        PORTA: "3200",
+        PASTA_DADOS: "/dados",
+      },
+      pedido(false),
+    );
+
+    expect(ambiente.ORQUESTRADOR_CHAVE_DE_ACESSO).toBeUndefined();
+    expect(ambiente.ORQUESTRADOR_PERMITIR_NAVEGADOR).toBeUndefined();
+    expect(ambiente.PORTA).toBeUndefined();
+    expect(ambiente.PASTA_DADOS).toBeUndefined();
+    expect(ambiente.PATH).toBe("x");
+  });
+
   it("com os dois esforços em padrão, mantém a variável de esforço herdada", () => {
     const ambiente = montarAmbiente({ PATH: "x", CLAUDE_CODE_EFFORT_LEVEL: "low" }, pedido(false));
 
