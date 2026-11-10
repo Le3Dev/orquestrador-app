@@ -66,8 +66,8 @@ describe("CortadorDeFala", () => {
     expect(SILENCIO_PARA_FIM_MS).toBe(350);
     expect(PRE_ROLL_MS).toBe(200);
     expect(VOZ_MINIMA_MS).toBe(250);
-    expect(DURACAO_MAXIMA_DA_FALA_MS).toBe(25_000);
-    expect(BUSCA_DO_CORTE_MS).toBe(3_000);
+    expect(DURACAO_MAXIMA_DA_FALA_MS).toBe(8_000);
+    expect(BUSCA_DO_CORTE_MS).toBe(2_000);
     expect(MS).toBe(32);
   });
 
@@ -160,42 +160,42 @@ describe("CortadorDeFala", () => {
     expect(resumo(cortador.adicionar(new Fonte().janelas([0.1])))).toMatchObject([{ tipo: "fim", motivo: "silencio", emMs: 71 * MS }]);
   });
 
-  it("fala longa é cortada na janela de menor probabilidade dos últimos 3 s, sem perder amostras", () => {
+  it("fala longa é cortada na janela de menor probabilidade dos últimos 2 s, sem perder amostras", () => {
     const cortador = new CortadorDeFala();
     const fonte = new Fonte();
-    // A fala começa na janela 10 (áudio desde 1_920, com o pre-roll) e passa de 25 s na janela 785.
-    const probabilidades = [...repetir(0.1, 10), ...repetir(0.9, 776)];
-    probabilidades[600] = 0.01; // vale mais fundo, mas fora dos últimos 3 s: não serve
-    probabilidades[750] = 0.2; // o vale dentro dos últimos 3 s
-    probabilidades[770] = 0.3;
+    // A fala começa na janela 10 (áudio desde 1_920, com o pre-roll) e passa de 8 s na janela 253.
+    const probabilidades = [...repetir(0.1, 10), ...repetir(0.9, 244)];
+    probabilidades[150] = 0.01; // vale mais fundo, mas fora dos últimos 2 s: não serve
+    probabilidades[220] = 0.2; // o vale dentro dos últimos 2 s
+    probabilidades[240] = 0.3;
     const eventos = alimentar(cortador, fonte, probabilidades, 7);
     expect(resumo(eventos)).toEqual([
       { tipo: "inicio", emMs: 120 },
-      { tipo: "fim", motivo: "duracao_maxima", inicioMs: 120, emMs: 751 * MS, amostras: 751 * N - 1_920 },
-      { tipo: "inicio", emMs: 751 * MS },
+      { tipo: "fim", motivo: "duracao_maxima", inicioMs: 120, emMs: 221 * MS, amostras: 221 * N - 1_920 },
+      { tipo: "inicio", emMs: 221 * MS },
     ]);
     const primeira = fins(eventos)[0];
     expect(primeira !== undefined && ehContinuo(primeira.audio, 1_920)).toBe(true);
 
-    // A fala seguinte já tem as janelas 751 a 785 e segue até o silêncio.
-    expect(cortador.inicioDaFalaMs).toBe(751 * MS);
-    expect(ehContinuo(cortador.audioDaFala(), 751 * N)).toBe(true);
-    expect(cortador.audioDaFala().length).toBe(35 * N);
+    // A fala seguinte já tem as janelas 221 a 253 e segue até o silêncio.
+    expect(cortador.inicioDaFalaMs).toBe(221 * MS);
+    expect(ehContinuo(cortador.audioDaFala(), 221 * N)).toBe(true);
+    expect(cortador.audioDaFala().length).toBe(33 * N);
     const resto = alimentar(cortador, fonte, [...repetir(0.9, 5), ...repetir(0.1, 11)]);
     const segunda = fins(resto)[0];
     expect(resumo(resto)).toEqual([
-      { tipo: "fim", motivo: "silencio", inicioMs: 751 * MS, emMs: 802 * MS, amostras: 51 * N },
+      { tipo: "fim", motivo: "silencio", inicioMs: 221 * MS, emMs: 270 * MS, amostras: 49 * N },
     ]);
-    expect(segunda !== undefined && ehContinuo(segunda.audio, 751 * N)).toBe(true);
+    expect(segunda !== undefined && ehContinuo(segunda.audio, 221 * N)).toBe(true);
   });
 
-  it("fala longa sem vale corta no começo da busca e nunca passa de 25 s", () => {
+  it("fala longa sem vale corta no começo da busca e nunca passa de 8 s", () => {
     const cortador = new CortadorDeFala();
     const eventos = alimentar(cortador, new Fonte(), repetir(0.9, 2_000), 50);
     const cortes = fins(eventos);
     expect(cortes.length).toBeGreaterThanOrEqual(2);
-    // Passa de 25 s na janela 781; sem vale, corta depois da primeira janela da busca (781 − 93 + 1 = 689).
-    expect(cortes[0]?.emMs).toBe(690 * MS);
+    // Passa de 8 s na janela 250; sem vale, corta depois da primeira janela da busca (250 − 62 + 1 = 189).
+    expect(cortes[0]?.emMs).toBe(190 * MS);
     for (const corte of cortes) {
       expect(corte.motivo).toBe("duracao_maxima");
       expect(corte.emMs - corte.inicioMs).toBeLessThanOrEqual(DURACAO_MAXIMA_DA_FALA_MS + MS);

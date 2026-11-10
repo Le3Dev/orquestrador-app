@@ -1,4 +1,4 @@
-import { LIMITE_DA_MENSAGEM, mensagemDaEscuta } from "./mensagemDaEscuta";
+import { LIMITE_DA_MENSAGEM, mensagemDaEscuta, perguntaDaMensagemDaEscuta } from "./mensagemDaEscuta";
 import { PerguntaDetectada } from "./PerguntaDetectada";
 
 const pergunta = (texto: string, contexto: string): PerguntaDetectada =>
@@ -25,14 +25,16 @@ describe("mensagemDaEscuta", () => {
     expect(mensagem).toMatch(/Se for um problema de código, dê a abordagem, o código e a complexidade de tempo e de espaço\.$/);
   });
 
-  it("pergunta em inglês: pede a resposta primeiro em inglês e depois em português, com até 5 tópicos em cada idioma", () => {
+  it("pede a resposta no idioma da pergunta, sem tradução automática", () => {
     const mensagem = mensagemDaEscuta(pergunta("How would you reverse a linked list?", ""));
-    expect(mensagem).toContain(
-      "Se a pergunta estiver em inglês, responda primeiro em inglês e depois repita a resposta em português (até 5 tópicos em cada idioma).",
-    );
-    // O limite de tópicos e a regra do problema de código continuam.
+    expect(mensagem).toContain("Responda no mesmo idioma da pergunta; só traduza se for pedido.");
+    expect(mensagem).not.toMatch(/responda primeiro em inglês/);
+    expect(mensagem).not.toMatch(/em cada idioma/);
+    expect(mensagem).not.toMatch(/repita a resposta em português/);
+    // O limite de tópicos, a captura de tela e a regra do problema de código continuam.
     expect(mensagem).toContain("em até 5 tópicos objetivos");
-    expect(mensagem.indexOf("Se a pergunta estiver em inglês")).toBeLessThan(mensagem.indexOf("Se for um problema de código"));
+    expect(mensagem).toMatch(/captura de tela anexada/);
+    expect(mensagem.indexOf("Responda no mesmo idioma")).toBeLessThan(mensagem.indexOf("Se for um problema de código"));
     expect(mensagem.endsWith("dê a abordagem, o código e a complexidade de tempo e de espaço.")).toBe(true);
   });
 
@@ -74,5 +76,44 @@ describe("mensagemDaEscuta", () => {
     expect(mensagem.length).toBe(LIMITE_DA_MENSAGEM);
     expect(mensagem).toContain("…");
     expect(mensagem.endsWith("complexidade de tempo e de espaço.")).toBe(true);
+  });
+});
+
+describe("perguntaDaMensagemDaEscuta", () => {
+  it("devolve a pergunta da mensagem com contexto, sem o trecho nem a instrução", () => {
+    const mensagem = mensagemDaEscuta(
+      pergunta("Como inverter uma lista ligada?", "Bom, agora o próximo problema. Como inverter uma lista ligada?"),
+    );
+    expect(perguntaDaMensagemDaEscuta(mensagem)).toBe("Como inverter uma lista ligada?");
+  });
+
+  it("devolve a pergunta da mensagem sem contexto", () => {
+    const mensagem = mensagemDaEscuta(pergunta("Qual a complexidade do quicksort?", ""));
+    expect(perguntaDaMensagemDaEscuta(mensagem)).toBe("Qual a complexidade do quicksort?");
+  });
+
+  it("apara espaços e aceita linha em branco com espaços", () => {
+    expect(perguntaDaMensagemDaEscuta("Pergunta detectada na escuta:   O que é um heap?  \n  \nResponda direto")).toBe(
+      "O que é um heap?",
+    );
+  });
+
+  it("texto que não veio da escuta devolve null", () => {
+    expect(perguntaDaMensagemDaEscuta("Como inverter uma lista ligada?")).toBeNull();
+    expect(perguntaDaMensagemDaEscuta("")).toBeNull();
+    expect(perguntaDaMensagemDaEscuta(" Pergunta detectada na escuta: Qual a saída?")).toBeNull();
+  });
+
+  it("mensagem cortada pelo limite devolve a pergunta que coube", () => {
+    const enorme = mensagemDaEscuta(pergunta("a".repeat(10_000), ""));
+    const lida = perguntaDaMensagemDaEscuta(enorme);
+    expect(lida?.startsWith("aaa")).toBe(true);
+    expect(lida?.endsWith("…")).toBe(true);
+    expect(lida).not.toContain("Responda");
+
+    // Limite tão curto que nem a instrução coube: sem linha em branco, vale o resto do texto.
+    const truncada = mensagemDaEscuta(pergunta("a".repeat(500), ""), 100);
+    expect(truncada.length).toBe(100);
+    expect(perguntaDaMensagemDaEscuta(truncada)).toBe("a".repeat(100 - "Pergunta detectada na escuta: ".length));
   });
 });

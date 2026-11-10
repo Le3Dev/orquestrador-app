@@ -17,7 +17,7 @@ export interface AparenciaDaEscuta {
 export interface PreferenciasDaEscuta {
   /** Ligada: a escuta classifica e envia as perguntas sozinha. Desligada: só transcreve. */
   readonly automatico: boolean;
-  /** O mesmo, mas para a escuta ligada à mão (botão 🎧), fora do modo invisível. Começa desligado. */
+  /** O mesmo, mas para a escuta ligada à mão (botão 🎧), fora do modo invisível. Começa ligado. */
   readonly automaticoManual: boolean;
   /** A pessoa já confirmou o aviso da primeira vez. */
   readonly avisoVisto: boolean;
@@ -29,11 +29,13 @@ export interface PreferenciasDaEscuta {
 export const CHAVE_DAS_PREFERENCIAS_DA_ESCUTA = "orquestrador.preferenciasDaEscuta";
 
 /**
- * Versão do formato gravado. Na 2, o idioma padrão passou de português para o
- * automático: dados sem versão (ou de versão anterior) podem ter "portuguese"
- * só porque era o padrão, então o idioma deles é lido como o automático.
+ * Versão do formato gravado. Na 2, o idioma padrão foi o automático, que
+ * detectava errado (português saía como inglês); na 3, o padrão volta a ser
+ * português e o Automático do 🎧 passa a começar ligado. Dados sem versão (ou
+ * de versão anterior) têm o idioma e o `automaticoManual` só porque eram o
+ * padrão daquela época, então são lidos como os padrões novos.
  */
-export const VERSAO_DAS_PREFERENCIAS_DA_ESCUTA = 2;
+export const VERSAO_DAS_PREFERENCIAS_DA_ESCUTA = 3;
 
 export const LIMITES_DO_TAMANHO_DA_FONTE = Object.freeze({ minimo: 12, maximo: 22 });
 export const LIMITES_DA_OPACIDADE = Object.freeze({ minimo: 0.4, maximo: 1 });
@@ -46,9 +48,9 @@ export const APARENCIA_PADRAO_DA_ESCUTA: AparenciaDaEscuta = Object.freeze({
 
 export const PREFERENCIAS_PADRAO_DA_ESCUTA: PreferenciasDaEscuta = Object.freeze({
   automatico: true,
-  automaticoManual: false,
+  automaticoManual: true,
   avisoVisto: false,
-  idioma: "automatico",
+  idioma: "portuguese",
   prioridadeDoMotor: "velocidade",
   aparencia: APARENCIA_PADRAO_DA_ESCUTA,
 });
@@ -92,11 +94,23 @@ function prioridadeValida(bruta: unknown): PrioridadeDoMotor {
   return bruta === "velocidade" || bruta === "precisao" ? bruta : PREFERENCIAS_PADRAO_DA_ESCUTA.prioridadeDoMotor;
 }
 
-/** O idioma gravado vale só a partir da versão atual do formato; antes dela, vale o padrão (automático). */
-function idiomaDaVersao(registro: Record<string, unknown>): IdiomaDaEscuta {
+/** O registro foi gravado na versão atual do formato (ou numa mais nova). */
+function daVersaoAtual(registro: Record<string, unknown>): boolean {
   const versao = registro.versao;
-  const atual = typeof versao === "number" && versao >= VERSAO_DAS_PREFERENCIAS_DA_ESCUTA;
-  return atual ? idiomaValido(registro.idioma) : PREFERENCIAS_PADRAO_DA_ESCUTA.idioma;
+  return typeof versao === "number" && versao >= VERSAO_DAS_PREFERENCIAS_DA_ESCUTA;
+}
+
+/** O idioma gravado vale só a partir da versão atual do formato; antes dela, vale o padrão (português). */
+function idiomaDaVersao(registro: Record<string, unknown>): IdiomaDaEscuta {
+  return daVersaoAtual(registro) ? idiomaValido(registro.idioma) : PREFERENCIAS_PADRAO_DA_ESCUTA.idioma;
+}
+
+/** O Automático do 🎧 gravado vale só a partir da versão atual; antes dela, desligado era o padrão, não escolha. */
+function automaticoManualDaVersao(registro: Record<string, unknown>): boolean {
+  const gravado = registro.automaticoManual;
+  return daVersaoAtual(registro) && typeof gravado === "boolean"
+    ? gravado
+    : PREFERENCIAS_PADRAO_DA_ESCUTA.automaticoManual;
 }
 
 /** O texto gravado no localStorage: as preferências com a versão do formato. */
@@ -107,7 +121,8 @@ export function serializarPreferenciasDaEscuta(preferencias: PreferenciasDaEscut
 /**
  * Tolerante: JSON inválido, outro formato ou campo de outro tipo valem o
  * padrão. Dados sem versão ou de versão anterior à atual mantêm as outras
- * preferências, mas o idioma vira o automático (o padrão novo).
+ * preferências, mas o idioma vira português e o Automático do 🎧 vira ligado
+ * (os padrões novos).
  */
 export function interpretarPreferenciasDaEscuta(bruto: string | null): PreferenciasDaEscuta {
   if (bruto === null) return PREFERENCIAS_PADRAO_DA_ESCUTA;
@@ -123,10 +138,7 @@ export function interpretarPreferenciasDaEscuta(bruto: string | null): Preferenc
   return Object.freeze({
     automatico:
       typeof registro.automatico === "boolean" ? registro.automatico : PREFERENCIAS_PADRAO_DA_ESCUTA.automatico,
-    automaticoManual:
-      typeof registro.automaticoManual === "boolean"
-        ? registro.automaticoManual
-        : PREFERENCIAS_PADRAO_DA_ESCUTA.automaticoManual,
+    automaticoManual: automaticoManualDaVersao(registro),
     avisoVisto:
       typeof registro.avisoVisto === "boolean" ? registro.avisoVisto : PREFERENCIAS_PADRAO_DA_ESCUTA.avisoVisto,
     idioma: idiomaDaVersao(registro),

@@ -613,7 +613,7 @@ describe("ChatRapido · modo invisível", () => {
       ],
     };
 
-    it("cada frase fechada vira um balão \"ouvido\", intercalado com as mensagens pelo horário", () => {
+    it("cada frase fechada vira uma mensagem sua com a marca \"ouvido\", intercalada pelo horário", () => {
       escutaSimulada.legenda = {
         frases: [
           frase("f1", "antes de tudo", "2026-11-04T11:59:00Z"),
@@ -627,9 +627,13 @@ describe("ChatRapido · modo invisível", () => {
       const baloes = screen.getAllByTestId("trecho-ouvido");
       expect(baloes).toHaveLength(3);
       for (const balao of baloes) {
-        expect(balao).toHaveClass("trecho-ouvido");
-        expect(within(balao).getByText("ouvido")).toBeInTheDocument();
+        // O mesmo visual da mensagem do usuário, com a marca "ouvido" no lugar do selo "escuta".
+        expect(balao).toHaveClass("mensagem-do-usuario", "mensagem-ouvida");
+        expect(within(balao).getByText("ouvido")).toHaveClass("marca-ouvida");
+        expect(balao.querySelector(".selo-da-escuta")).toBeNull();
+        expect(balao.querySelector("time.hora-da-mensagem")).not.toBeNull();
       }
+      expect(baloes[0]).toHaveTextContent("antes de tudo");
       const texto = conversa().textContent ?? "";
       expect(texto.indexOf("antes de tudo")).toBeLessThan(texto.indexOf("primeira"));
       expect(texto.indexOf("primeira")).toBeLessThan(texto.indexOf("entre as mensagens"));
@@ -638,7 +642,7 @@ describe("ChatRapido · modo invisível", () => {
       expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
     });
 
-    it("a frase com pergunta ganha a marca \"pergunta\" e o destaque; as outras, não", () => {
+    it("a frase com pergunta ganha a marca \"pergunta\" ao lado do \"ouvido\"; as outras, não", () => {
       escutaSimulada.legenda = {
         frases: [
           frase("f1", "Bom dia a todos.", "2026-11-04T12:00:00Z"),
@@ -649,16 +653,16 @@ describe("ChatRapido · modo invisível", () => {
       renderizar();
 
       const [comum, pergunta] = screen.getAllByTestId("trecho-ouvido");
-      expect(pergunta).toHaveClass("trecho-ouvido-pergunta");
+      expect(pergunta).toHaveClass("mensagem-do-usuario", "mensagem-ouvida");
       expect(pergunta).toHaveTextContent("Qual o prazo do projeto?");
+      expect(within(pergunta as HTMLElement).getByText("ouvido")).toBeInTheDocument();
       expect(within(pergunta as HTMLElement).getByRole("img", { name: "Pergunta detectada na escuta" })).toHaveTextContent(
         "pergunta",
       );
-      expect(comum).not.toHaveClass("trecho-ouvido-pergunta");
       expect(within(comum as HTMLElement).queryByRole("img")).not.toBeInTheDocument();
     });
 
-    it("a frase em andamento fica num balão provisório no fim: o confirmado no tom normal e o parcial apagado", () => {
+    it("a frase em andamento fica numa mensagem sua provisória no fim: o confirmado no tom normal e o parcial apagado", () => {
       escutaSimulada.legenda = {
         frases: [frase("f1", "Bom dia a todos.", "2026-11-04T12:02:00Z")],
         emAndamento: { confirmado: "vamos falar do", parcial: "orçamento de", inicioMs: Date.parse("2026-11-04T12:02:03Z") },
@@ -667,9 +671,10 @@ describe("ChatRapido · modo invisível", () => {
 
       const provisorio = screen.getByTestId("trecho-provisorio");
       expect(provisorio).toHaveAttribute("aria-live", "polite");
-      expect(provisorio).toHaveClass("trecho-ouvido", "trecho-ouvido-provisorio");
-      expect(within(provisorio).getByText("vamos falar do")).toHaveClass("trecho-ouvido-confirmado");
-      expect(within(provisorio).getByText("orçamento de")).toHaveClass("trecho-ouvido-parcial");
+      expect(provisorio).toHaveClass("mensagem-do-usuario", "mensagem-ouvida", "mensagem-ouvida-provisoria");
+      expect(within(provisorio).getByText("ouvindo")).toHaveClass("marca-ouvida");
+      expect(within(provisorio).getByText("vamos falar do")).toHaveClass("ouvido-confirmado");
+      expect(within(provisorio).getByText("orçamento de")).toHaveClass("ouvido-parcial");
       expect(provisorio).toHaveTextContent("vamos falar do orçamento de");
       // Fica no fim da conversa, depois das mensagens e das frases fechadas.
       expect(provisorio.nextElementSibling).toBeNull();
@@ -684,8 +689,8 @@ describe("ChatRapido · modo invisível", () => {
       escutaSimulada.legenda = { frases: [], emAndamento: { confirmado: "", parcial: "dizendo", inicioMs: 1 } };
       const { rerender } = renderizar();
       const provisorio = screen.getByTestId("trecho-provisorio");
-      expect(within(provisorio).getByText("dizendo")).toHaveClass("trecho-ouvido-parcial");
-      expect(provisorio.querySelector(".trecho-ouvido-confirmado")).toBeNull();
+      expect(within(provisorio).getByText("dizendo")).toHaveClass("ouvido-parcial");
+      expect(provisorio.querySelector(".ouvido-confirmado")).toBeNull();
 
       escutaSimulada.legenda = { frases: [], emAndamento: { confirmado: "  ", parcial: "", inicioMs: 1 } };
       rerender({ ...OCIOSO });
@@ -737,10 +742,68 @@ describe("ChatRapido · modo invisível", () => {
       expect(screen.queryByRole("region", { name: "Resposta da escuta" })).not.toBeInTheDocument();
       expect(screen.queryByText("última pergunta")).not.toBeInTheDocument();
       expect(screen.getAllByText("O(n log n) no pior caso")).toHaveLength(1);
-      // A pergunta ouvida fica destacada no balão, antes da pergunta que a escuta mandou.
-      const texto = conversa().textContent ?? "";
-      expect(texto.indexOf("pergunta")).toBeLessThan(texto.indexOf("O(n log n)"));
-      expect(screen.getByTestId("trecho-ouvido")).toHaveClass("trecho-ouvido-pergunta");
+      // A pergunta enviada já é a mensagem do chat: o balão "ouvido" dela some.
+      expect(screen.getAllByText("Qual a complexidade?")).toHaveLength(1);
+      expect(screen.queryByTestId("trecho-ouvido")).not.toBeInTheDocument();
+    });
+
+    it("a mensagem enviada pela escuta mostra só a pergunta, como se fosse digitada, com o selo", () => {
+      const enviada =
+        "Pergunta detectada na escuta: Qual o prazo do projeto?\n\n" +
+        'Trecho transcrito dos últimos 60 s do áudio do computador.\n"""\nBom dia a todos.\n"""\n\n' +
+        "Responda direto e curto, em até 5 tópicos objetivos.";
+      renderizar({
+        ...OCIOSO,
+        mensagens: [mensagem("u1", "usuario", { texto: enviada, origem: "escuta" })],
+      });
+
+      const balao = screen.getByText("Qual o prazo do projeto?").closest(".mensagem-do-usuario") as HTMLElement;
+      expect(within(balao).getByText("Qual o prazo do projeto?")).toHaveClass("texto-longo");
+      expect(within(balao).getByText("escuta")).toHaveClass("selo-da-escuta");
+      expect(conversa()).not.toHaveTextContent("Pergunta detectada na escuta");
+      expect(conversa()).not.toHaveTextContent("Bom dia a todos.");
+      expect(conversa()).not.toHaveTextContent("Responda direto");
+    });
+
+    it("a digitada com o mesmo começo aparece inteira: só a da escuta é resumida", () => {
+      const digitada = "Pergunta detectada na escuta: teste\n\nresto do texto";
+      renderizar({ ...OCIOSO, mensagens: [mensagem("u1", "usuario", { texto: digitada })] });
+      expect(conversa()).toHaveTextContent("Pergunta detectada na escuta: teste");
+      expect(conversa()).toHaveTextContent("resto do texto");
+    });
+
+    it("a frase pergunta some quando há a mensagem da escuta dela e fica quando não há", () => {
+      escutaSimulada.legenda = {
+        frases: [
+          frase("f1", "Bom dia a todos.", "2026-11-04T11:59:50Z"),
+          frase("f2", "Qual o prazo do projeto?", "2026-11-04T11:59:55Z", true),
+        ],
+        emAndamento: null,
+      };
+      const enviada = "Pergunta detectada na escuta: Qual o prazo do projeto?\n\nResponda direto e curto.";
+      const { rerender } = renderizar({
+        ...OCIOSO,
+        mensagens: [mensagem("u1", "usuario", { texto: enviada, origem: "escuta", criadaEm: "2026-11-04T11:59:58Z" })],
+      });
+      // Enviada: só a mensagem do chat (com o selo) e a frase comum ouvida.
+      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(1);
+      expect(screen.getByTestId("trecho-ouvido")).toHaveTextContent("Bom dia a todos.");
+      expect(screen.getAllByText("Qual o prazo do projeto?")).toHaveLength(1);
+      expect(screen.queryByRole("img", { name: "Pergunta detectada na escuta" })).not.toBeInTheDocument();
+
+      // Sem a mensagem da escuta (ex.: posta só no campo, com alterações autorizadas), a frase fica, com a marca.
+      rerender({ ...OCIOSO, mensagens: [mensagem("u1", "usuario", { texto: "outra coisa", criadaEm: "2026-11-04T11:59:58Z" })] });
+      const baloes = screen.getAllByTestId("trecho-ouvido");
+      expect(baloes).toHaveLength(2);
+      expect(baloes[1]).toHaveTextContent("Qual o prazo do projeto?");
+      expect(within(baloes[1] as HTMLElement).getByRole("img", { name: "Pergunta detectada na escuta" })).toBeInTheDocument();
+
+      // A mensagem da escuta mais de 60 s depois do fim da frase não é o envio dela.
+      rerender({
+        ...OCIOSO,
+        mensagens: [mensagem("u1", "usuario", { texto: enviada, origem: "escuta", criadaEm: "2026-11-04T12:01:00Z" })],
+      });
+      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(2);
     });
 
     it("o menu do indicador tem o Automático, o idioma e a prioridade, e chama a escuta sem levar o foco ao campo", () => {

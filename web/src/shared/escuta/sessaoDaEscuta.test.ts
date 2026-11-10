@@ -14,6 +14,7 @@ import {
 } from "../ditado/motor";
 import type { CapturaDoAudio, OuvintesDaCaptura } from "./capturaDoAudio";
 import { ControleDeDisparos, INTERVALO_MINIMO_MS } from "./ControleDeDisparos";
+import { DURACAO_MAXIMA_DA_FALA_MS } from "./CortadorDeFala";
 import { AMOSTRAS_POR_JANELA_DO_VAD, type DetectorDeVoz, type JanelasAnalisadas, TAXA_DE_AMOSTRAGEM } from "./DetectorDeVoz";
 import { DURACAO_MAXIMA_DA_FRASE_MS } from "./LegendaDaEscuta";
 import { mensagemDaEscuta } from "./mensagemDaEscuta";
@@ -561,21 +562,22 @@ describe("SessaoDaEscuta", () => {
   });
 
   describe("frases de no máximo 5 s", () => {
-    it("numa fala longa sem pontuação, as frases fecham por tempo a cada ~5 s, sem esperar o fim da fala nem cortar palavra", async () => {
+    it("numa fala longa sem pontuação, a frase fecha por tempo aos ~5 s, sem esperar o fim da fala nem cortar palavra", async () => {
       const t = montar({ automatico: false });
       await t.entrar();
-      const palavras = Array.from({ length: 50 }, (_, posicao) => `palavra${posicao + 1}`);
+      // Fala de ~7,4 s: cabe numa fala só (até DURACAO_MAXIMA_DA_FALA_MS, 8 s, com o silêncio do fim).
+      const palavras = Array.from({ length: 24 }, (_, posicao) => `palavra${posicao + 1}`);
       ouvirAoLongo(t.motor, ditas(palavras.join(" "), 300));
-      await t.tocar(voz(12_000));
+      await t.tocar(voz(6_500));
       // No meio da fala: a frase em andamento começa onde a última fechada terminou.
       const noMeio = t.sessao.instantaneo().legenda;
-      expect(noMeio.frases.length).toBeGreaterThanOrEqual(2);
+      expect(noMeio.frases.length).toBeGreaterThanOrEqual(1);
       expect(noMeio.emAndamento?.inicioMs).toBe(noMeio.frases.at(-1)?.fimMs);
-      await t.tocar(voz(4_000));
+      await t.tocar(voz(900));
 
       let estado = t.sessao.instantaneo();
       expect(estado.trechos).toEqual([]); // a fala nem terminou
-      expect(estado.legenda.frases.length).toBeGreaterThanOrEqual(2);
+      expect(estado.legenda.frases.length).toBeGreaterThanOrEqual(1);
       for (const frase of estado.legenda.frases) {
         expect(frase.motivo).toBe("tempo");
         expect(frase.fimMs - frase.inicioMs).toBeGreaterThanOrEqual(DURACAO_MAXIMA_DA_FRASE_MS);
@@ -593,6 +595,25 @@ describe("SessaoDaEscuta", () => {
       // Nenhuma palavra cortada, perdida ou repetida.
       expect(estado.legenda.frases.map((frase) => frase.texto).join(" ")).toBe(palavras.join(" "));
       expect(estado.trechos.map((trecho) => trecho.texto)).toEqual([palavras.join(" ")]);
+    });
+
+    it("fala contínua de mais de 8 s é cortada em falas de até 8 s: os trechos chegam sem esperar o silêncio", async () => {
+      const t = montar({ automatico: false });
+      await t.entrar();
+      t.motor.texto = "fala corrida sem pausa";
+      await t.tocar(voz(20_000));
+
+      const trechos = t.sessao.instantaneo().trechos;
+      expect(trechos.length).toBeGreaterThanOrEqual(2);
+      for (const trecho of trechos) {
+        expect(trecho.fimMs - trecho.inicioMs).toBeLessThanOrEqual(DURACAO_MAXIMA_DA_FALA_MS);
+      }
+      // Cada fala começa onde a anterior foi cortada.
+      trechos.slice(1).forEach((trecho, posicao) => {
+        expect(trecho.inicioMs).toBe(trechos[posicao]?.fimMs);
+      });
+      // Uma fala de até 8 s fecha no máximo duas frases (a de 5 s e o resto).
+      expect(DURACAO_MAXIMA_DA_FALA_MS).toBeLessThan(2 * DURACAO_MAXIMA_DA_FRASE_MS);
     });
 
     it("a frase em andamento mostra o confirmado e o parcial da frase aberta", async () => {
@@ -758,45 +779,29 @@ describe("SessaoDaEscuta", () => {
     });
 
     it("pergunta partida pelo corte de 5 s: a frase que não é candidata sozinha é avaliada junto com a anterior", async () => {
+      // Uma fala tem até 8 s: a primeira frase fecha por tempo e a segunda, no fim da fala.
       const t = montar();
       await t.entrar();
       const juntas = "pessoal agora eu queria saber qual a melhor forma de fazer isso";
       t.respostas.push(pergunta("Qual a melhor forma de fazer isso?"));
       ouvirAoLongo(t.motor, [
         ...ditas("pessoal agora eu queria saber qual", 300),
-        ...ditas("a melhor forma de fazer isso", 6_500),
+        ...ditas("a melhor forma de fazer isso", 5_600),
       ]);
-      await t.tocar(voz(11_500));
+      await t.tocar(voz(7_400));
+      // A segunda frase ainda está aberta: nada foi avaliado.
+      expect(t.classificar).not.toHaveBeenCalled();
 
+      await t.tocar(silencio(500));
       // Nenhuma das duas é candidata sozinha; juntas, são ("qual a").
       expect(t.classificar).toHaveBeenCalledTimes(1);
       expect(t.classificar).toHaveBeenCalledWith({ trecho: juntas }, expect.any(AbortSignal));
       expect(t.enviar).toHaveBeenCalledTimes(1);
       expect(t.enviar).toHaveBeenCalledWith(mensagemEsperada("Qual a melhor forma de fazer isso?", juntas));
-      const estado = t.sessao.instantaneo();
-      expect(estado.trechos).toEqual([]);
-      expect(estado.legenda.frases).toMatchObject([
+      expect(t.sessao.instantaneo().legenda.frases).toMatchObject([
         { texto: "pessoal agora eu queria saber qual", motivo: "tempo", pergunta: false },
-        { texto: "a melhor forma de fazer isso", motivo: "tempo", pergunta: true },
+        { texto: "a melhor forma de fazer isso", motivo: "fim_da_fala", pergunta: true },
       ]);
-    });
-
-    it("a junção vale também quando a frase atual fecha no fim da fala", async () => {
-      const t = montar();
-      await t.entrar();
-      ouvirAoLongo(t.motor, [
-        ...ditas("pessoal agora eu queria saber qual", 300),
-        ...ditas("a melhor forma de fazer isso", 6_500),
-      ]);
-      await t.tocar(voz(8_500));
-      expect(t.classificar).not.toHaveBeenCalled();
-
-      await t.tocar(silencio(500));
-      expect(t.sessao.instantaneo().legenda.frases.map((frase) => frase.motivo)).toEqual(["tempo", "fim_da_fala"]);
-      expect(t.classificar).toHaveBeenCalledWith(
-        { trecho: "pessoal agora eu queria saber qual a melhor forma de fazer isso" },
-        expect.any(AbortSignal),
-      );
     });
 
     it("sem corte por tempo na anterior, não há junção", async () => {

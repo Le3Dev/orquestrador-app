@@ -54,6 +54,11 @@
   border: 1px solid color-mix(in srgb, var(--active) 30%, transparent);
   color: var(--primary);
 }
+/* A escuta fala por você: a frase ouvida é a mesma bolha; a que está sendo dita agora, com a borda tracejada.
+ * Duas classes e depois da regra acima, para valer também na coluna fixa (e na janela solta, sem borda). */
+.mensagem-do-usuario.mensagem-ouvida-provisoria {
+  border: 1px dashed color-mix(in srgb, var(--active) 30%, var(--border));
+}
 .chat-lateral .mensagem-do-claude {
   align-self: flex-start;
   max-width: 92%;
@@ -206,23 +211,6 @@ body.redimensionando-chat-lateral iframe { pointer-events: none; }
 /* A chave Automático, no menu da escuta. */
 .interruptor.interruptor-da-escuta { flex: none; height: 24px; gap: 6px; font-size: 11.5px; }
 
-/* Transcrição da escuta dentro da conversa: blocos discretos, diferentes da bolha do usuário. */
-.trecho-ouvido {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 4px 8px;
-  border-radius: var(--radius-card);
-  border: 1px dashed color-mix(in srgb, var(--info) 40%, var(--border));
-  font-size: 11.5px;
-  line-height: 1.4;
-  color: var(--secondary);
-  user-select: text;
-}
-.trecho-ouvido-texto { margin: 0; overflow-wrap: anywhere; }
-/* A frase que está sendo dita agora: provisória, muda ao vivo (o confirmado e o parcial ganham tons próprios). */
-.trecho-ouvido-provisorio { border-style: dotted; }
 .erro-da-escuta { padding: 0 4px; }
 
 /* Aviso da primeira vez: um cartão compacto acima do composer. */

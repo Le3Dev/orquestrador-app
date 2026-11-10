@@ -15,12 +15,12 @@ describe("preferências da escuta", () => {
     localStorage.clear();
   });
 
-  it("padrões: automático no modo invisível, idioma automático, velocidade e a aparência combinada", () => {
+  it("padrões: automático no modo invisível e no 🎧, idioma português, velocidade e a aparência combinada", () => {
     expect(PREFERENCIAS_PADRAO_DA_ESCUTA).toEqual({
       automatico: true,
-      automaticoManual: false,
+      automaticoManual: true,
       avisoVisto: false,
-      idioma: "automatico",
+      idioma: "portuguese",
       prioridadeDoMotor: "velocidade",
       aparencia: { tamanhoDaFonte: 14, opacidade: 0.92, compacto: false },
     });
@@ -39,42 +39,45 @@ describe("preferências da escuta", () => {
 
   it("dados antigos, sem os campos novos, mantêm o que tinham e ganham os padrões novos", () => {
     const lidas = interpretarPreferenciasDaEscuta(
-      JSON.stringify({ automatico: false, automaticoManual: true, avisoVisto: true }),
+      JSON.stringify({ automatico: false, automaticoManual: false, avisoVisto: true }),
     );
     expect(lidas).toEqual({
       automatico: false,
       automaticoManual: true,
       avisoVisto: true,
-      idioma: "automatico",
+      idioma: "portuguese",
       prioridadeDoMotor: "velocidade",
       aparencia: APARENCIA_PADRAO_DA_ESCUTA,
     });
     expect(Object.isFrozen(lidas)).toBe(true);
   });
 
-  it(`migração: dados sem versão ou de versão anterior à ${VERSAO_DAS_PREFERENCIAS_DA_ESCUTA} com "portuguese" passam ao automático, e o resto fica`, () => {
-    expect(VERSAO_DAS_PREFERENCIAS_DA_ESCUTA).toBe(2);
+  it(`migração: dados sem versão ou de versão anterior à ${VERSAO_DAS_PREFERENCIAS_DA_ESCUTA} passam a português e ao Automático do 🎧 ligado, e o resto fica`, () => {
+    expect(VERSAO_DAS_PREFERENCIAS_DA_ESCUTA).toBe(3);
     const antigas = {
       automatico: false,
-      automaticoManual: true,
+      automaticoManual: false,
       avisoVisto: true,
-      idioma: "portuguese",
+      idioma: "automatico",
       prioridadeDoMotor: "precisao",
       aparencia: { tamanhoDaFonte: 18, opacidade: 0.6, compacto: true },
     };
-    const esperadas = { ...antigas, idioma: "automatico" };
+    const esperadas = { ...antigas, idioma: "portuguese", automaticoManual: true };
+    // Versão 2: o automático era o padrão e detectava errado; o manual desligado também era só o padrão.
+    expect(interpretarPreferenciasDaEscuta(JSON.stringify({ ...antigas, versao: 2 }))).toEqual(esperadas);
     expect(interpretarPreferenciasDaEscuta(JSON.stringify(antigas))).toEqual(esperadas);
     expect(interpretarPreferenciasDaEscuta(JSON.stringify({ ...antigas, versao: 1 }))).toEqual(esperadas);
-    expect(interpretarPreferenciasDaEscuta(JSON.stringify({ ...antigas, versao: "2" }))).toEqual(esperadas);
+    expect(interpretarPreferenciasDaEscuta(JSON.stringify({ ...antigas, versao: "3" }))).toEqual(esperadas);
   });
 
-  it("escolha gravada na versão atual é respeitada: português fica português", () => {
-    expect(
-      interpretarPreferenciasDaEscuta(JSON.stringify({ versao: VERSAO_DAS_PREFERENCIAS_DA_ESCUTA, idioma: "portuguese" })).idioma,
-    ).toBe("portuguese");
-    expect(
-      interpretarPreferenciasDaEscuta(JSON.stringify({ versao: VERSAO_DAS_PREFERENCIAS_DA_ESCUTA, idioma: "automatico" })).idioma,
-    ).toBe("automatico");
+  it("escolha gravada na versão atual é respeitada: idioma e Automático do 🎧", () => {
+    const atual = VERSAO_DAS_PREFERENCIAS_DA_ESCUTA;
+    expect(interpretarPreferenciasDaEscuta(JSON.stringify({ versao: atual, idioma: "portuguese" })).idioma).toBe("portuguese");
+    expect(interpretarPreferenciasDaEscuta(JSON.stringify({ versao: atual, idioma: "automatico" })).idioma).toBe("automatico");
+    expect(interpretarPreferenciasDaEscuta(JSON.stringify({ versao: atual, automaticoManual: false })).automaticoManual).toBe(false);
+    expect(interpretarPreferenciasDaEscuta(JSON.stringify({ versao: atual, automaticoManual: true })).automaticoManual).toBe(true);
+    // Na versão atual, campo ausente ou de outro tipo vale o padrão (ligado).
+    expect(interpretarPreferenciasDaEscuta(JSON.stringify({ versao: atual, automaticoManual: "não" })).automaticoManual).toBe(true);
   });
 
   it("lê os campos novos e troca valor desconhecido ou de outro tipo pelo padrão", () => {
@@ -93,7 +96,7 @@ describe("preferências da escuta", () => {
       interpretarPreferenciasDaEscuta(
         JSON.stringify({ versao: VERSAO_DAS_PREFERENCIAS_DA_ESCUTA, idioma: "klingon", prioridadeDoMotor: 3, aparencia: [14], automatico: "sim" }),
       ),
-    ).toMatchObject({ idioma: "automatico", prioridadeDoMotor: "velocidade", aparencia: APARENCIA_PADRAO_DA_ESCUTA, automatico: true });
+    ).toMatchObject({ idioma: "portuguese", prioridadeDoMotor: "velocidade", aparencia: APARENCIA_PADRAO_DA_ESCUTA, automatico: true });
   });
 
   it("aparência guardada fora dos limites vai para a borda", () => {
@@ -149,12 +152,15 @@ describe("preferências da escuta", () => {
     expect(preferenciasNoNavegador.ler()).toEqual(preferencias);
   });
 
-  it("no navegador, a escolha nova de português é gravada e respeitada; o dado antigo com português lê o automático", () => {
-    localStorage.setItem(CHAVE_DAS_PREFERENCIAS_DA_ESCUTA, JSON.stringify({ ...PREFERENCIAS_PADRAO_DA_ESCUTA, idioma: "portuguese" }));
-    expect(preferenciasNoNavegador.ler().idioma).toBe("automatico");
+  it("no navegador, a escolha nova do automático é gravada e respeitada; o dado da versão 2 com automático lê português", () => {
+    localStorage.setItem(
+      CHAVE_DAS_PREFERENCIAS_DA_ESCUTA,
+      JSON.stringify({ ...PREFERENCIAS_PADRAO_DA_ESCUTA, versao: 2, idioma: "automatico", automaticoManual: false }),
+    );
+    expect(preferenciasNoNavegador.ler()).toMatchObject({ idioma: "portuguese", automaticoManual: true });
 
-    preferenciasNoNavegador.gravar({ ...PREFERENCIAS_PADRAO_DA_ESCUTA, idioma: "portuguese" });
-    expect(preferenciasNoNavegador.ler().idioma).toBe("portuguese");
+    preferenciasNoNavegador.gravar({ ...PREFERENCIAS_PADRAO_DA_ESCUTA, idioma: "automatico", automaticoManual: false });
+    expect(preferenciasNoNavegador.ler()).toMatchObject({ idioma: "automatico", automaticoManual: false });
   });
 
   it("no navegador, sem nada guardado, lê o padrão", () => {

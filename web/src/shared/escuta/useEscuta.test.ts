@@ -69,7 +69,7 @@ describe("useEscuta", () => {
     rerender(opcoes());
     expect(result.current.situacao).toBe("desligada");
     expect(result.current).toMatchObject({
-      automatico: false, // fora do modo invisível, a escuta manual começa sem o automático
+      automatico: true, // fora do modo invisível, a escuta manual também começa com o automático
       linhas: [],
       linhaProvisoria: null,
       trechos: [],
@@ -136,20 +136,20 @@ describe("useEscuta", () => {
       motor: MOTOR,
       download: null,
       ultimaPerguntaEnviada: null,
-      preferenciasDaTela: { idioma: "automatico", prioridadeDoMotor: "velocidade", aparencia: APARENCIA_PADRAO_DA_ESCUTA },
+      preferenciasDaTela: { idioma: "portuguese", prioridadeDoMotor: "velocidade", aparencia: APARENCIA_PADRAO_DA_ESCUTA },
     });
 
-    act(() => result.current.mudarIdioma("portuguese"));
+    act(() => result.current.mudarIdioma("automatico"));
     act(() => result.current.mudarAparencia({ tamanhoDaFonte: 18, compacto: true }));
     await act(async () => {
       result.current.mudarPrioridadeDoMotor("precisao");
     });
     expect(result.current.preferenciasDaTela).toEqual({
-      idioma: "portuguese",
+      idioma: "automatico",
       prioridadeDoMotor: "precisao",
       aparencia: { tamanhoDaFonte: 18, opacidade: APARENCIA_PADRAO_DA_ESCUTA.opacidade, compacto: true },
     });
-    expect(preferencias()).toMatchObject({ idioma: "portuguese", prioridadeDoMotor: "precisao" });
+    expect(preferencias()).toMatchObject({ idioma: "automatico", prioridadeDoMotor: "precisao" });
   });
 
   it("as funções devolvidas são estáveis entre renders", () => {

@@ -3822,29 +3822,25 @@ html.modo-invisivel .barra-de-titulo * {
 .ditado-a-direita .balao-do-ditado { left: 0; right: auto; }
 
 /* ── Escuta: a transcrição na conversa e o menu do indicador ────────────── */
-/* A escuta não tem caixa à parte: cada frase fechada é um balão "ouvido" na
- * própria conversa (a base do balão fica em chat-lateral.css); a pergunta
- * detectada ganha um destaque suave no tom de aviso (--warning) e a frase em
- * andamento mostra o confirmado no tom normal e a cauda ainda não confirmada
- * apagada, em itálico. Os controles (Automático, idioma e prioridade do
- * motor) ficam no menu do indicador, no composer; o erro, numa linha acima
- * do campo. O tom da escuta é o azul (--info), o mesmo do indicador. */
+/* A escuta não tem caixa à parte: é como se você tivesse dito cada frase no
+ * chat. Cada frase fechada é uma mensagem sua (.mensagem-do-usuario com o
+ * modificador .mensagem-ouvida), com a marca pequena "ouvido" no lugar do selo
+ * e, na pergunta detectada, a marca "pergunta" no tom de aviso (--warning). A
+ * frase em andamento é uma mensagem provisória no fim (a borda tracejada fica
+ * em chat-lateral.css): o confirmado no tom normal e a cauda ainda não
+ * confirmada apagada, em itálico. Os controles (Automático, idioma e
+ * prioridade do motor) ficam no menu do indicador, no composer; o erro, numa
+ * linha acima do campo. O tom da escuta é o azul (--info), o do indicador. */
 
-/* Balão "ouvido": o rótulo e, na pergunta, a marca, numa linha. */
-.rotulos-do-trecho-ouvido { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.trecho-ouvido-pergunta {
-  border-style: solid;
-  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
-  background: color-mix(in srgb, var(--warning) 8%, transparent);
-  color: var(--primary);
-}
+/* As marcas da mensagem ouvida, numa linha, no lugar do selo. */
+.marcas-da-mensagem-ouvida { display: inline-flex; align-items: center; gap: 4px; }
+.marca-ouvida,
 .marca-da-pergunta-ouvida {
   display: inline-flex;
   align-items: center;
   height: 15px;
   padding: 0 5px;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--warning) 55%, transparent);
   font-family: var(--fonte-mono);
   font-size: 9px;
   font-weight: 500;
@@ -3852,12 +3848,21 @@ html.modo-invisivel .barra-de-titulo * {
   line-height: 1;
   text-transform: uppercase;
   white-space: nowrap;
+  cursor: default;
+}
+.marca-ouvida {
+  color: var(--info);
+  background: color-mix(in srgb, var(--info) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--info) 45%, transparent);
+}
+.marca-da-pergunta-ouvida {
   color: var(--warning);
   background: color-mix(in srgb, var(--warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 55%, transparent);
 }
-/* A frase em andamento: o confirmado no tom do balão; o parcial apagado e em itálico. */
-.trecho-ouvido-confirmado { color: var(--secondary); }
-.trecho-ouvido-parcial { color: var(--muted); font-style: italic; }
+/* A frase em andamento: o confirmado no tom da mensagem; o parcial apagado e em itálico. */
+.ouvido-confirmado { color: inherit; }
+.ouvido-parcial { color: var(--muted); font-style: italic; }
 
 /* O erro da escuta, com o "fechar" na mesma linha, acima do campo. */
 .erro-da-escuta { margin: 0; overflow-wrap: anywhere; }

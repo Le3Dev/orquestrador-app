@@ -22,6 +22,7 @@ import type {
 } from "../../shared/api/tipos";
 import { comandoDoPrompt, completarComando, dicaDeComando } from "../../shared/comandosDoPrompt";
 import { juntarDitado } from "../../shared/ditado/texto";
+import { perguntaDaMensagemDaEscuta } from "../../shared/escuta/mensagemDaEscuta";
 import { type EscutaNaTela, useEscuta } from "../../shared/escuta/useEscuta";
 import {
   type EstadoDoChatNaTela,
@@ -58,6 +59,7 @@ import { CartaoDeAcao, type PropsDasAcoesDoChat } from "./CartaoDeAcao";
 import { CartaoDeAutorizacao } from "./CartaoDeAutorizacao";
 import { CartaoDePergunta } from "./CartaoDePergunta";
 import { CartaoDeSubagente } from "./CartaoDeSubagente";
+import { frasesSemAsEnviadas } from "./frasesOuvidas";
 import { IndicadorDaEscuta } from "./IndicadorDaEscuta";
 import { SeletorDeModelo } from "./SeletorDeModelo";
 import "../../theme/chat-lateral.css";
@@ -68,7 +70,7 @@ const SEM_ORQUESTRADORES: readonly ResumoDoOrquestrador[] = [];
 /** Distância do fim (px) em que a conversa ainda acompanha o texto que chega. */
 const MARGEM_DE_ACOMPANHAMENTO = 80;
 
-/** Uma frase fechada da escuta: vira um balão "ouvido" na conversa. */
+/** Uma frase fechada da escuta: vira uma mensagem sua, com a marca "ouvido", na conversa. */
 type FraseOuvida = EscutaNaTela["legenda"]["frases"][number];
 
 interface Props extends PropsDasAcoesDoChat {
@@ -400,6 +402,9 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
   if (mensagem.papel === "usuario") {
     // Capturas de tela seguem para o Claude, mas nunca viram miniatura (só visual).
     const imagensVisiveis = mensagem.imagens.filter((imagem) => !ehCapturaDeTela(imagem.nome));
+    // A da escuta aparece como se fosse digitada: só a pergunta (o contexto e a instrução seguem só para o Claude).
+    const textoVisivel =
+      mensagem.origem === "escuta" ? (perguntaDaMensagemDaEscuta(mensagem.texto) ?? mensagem.texto) : mensagem.texto;
     return (
       <div className="mensagem-do-usuario">
         {imagensVisiveis.length > 0 && (
@@ -418,7 +423,7 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
             ))}
           </div>
         )}
-        {mensagem.texto !== "" && <p className="texto-longo">{mensagem.texto}</p>}
+        {textoVisivel !== "" && <p className="texto-longo">{textoVisivel}</p>}
         {mensagem.origem === "escuta" && (
           <span className="selo-da-escuta" title="Pergunta detectada pela escuta do áudio, no modo invisível">
             escuta
@@ -804,9 +809,14 @@ export function ChatRapido({
   });
   const comEscuta = escutaDisponivel && (modoAtivo || escutaManualLigada);
 
-  // A escuta é parte da conversa: cada frase fechada vira um balão "ouvido", intercalado com as
-  // mensagens pelo horário, e a frase em andamento fica num balão provisório no fim.
-  const frasesOuvidas = escuta.legenda.frases;
+  // A escuta é parte da conversa, como se você tivesse dito cada frase no chat: cada frase fechada vira
+  // uma mensagem sua com a marca "ouvido", intercalada com as outras pelo horário, e a frase em andamento
+  // fica numa mensagem provisória no fim. A pergunta que a escuta enviou some daqui: ela já é a mensagem.
+  const frasesDaLegenda = escuta.legenda.frases;
+  const frasesOuvidas = useMemo(
+    () => frasesSemAsEnviadas(frasesDaLegenda, chat.mensagens),
+    [frasesDaLegenda, chat.mensagens],
+  );
   const emAndamento = escuta.legenda.emAndamento;
   const confirmadoEmAndamento = emAndamento?.confirmado.trim() ?? "";
   const parcialEmAndamento = emAndamento?.parcial.trim() ?? "";
@@ -828,21 +838,20 @@ export function ChatRapido({
     return { frasesAntes: antes, frasesNoFim: noFim };
   }, [chat.mensagens, frasesOuvidas]);
   const balaoOuvido = (frase: FraseOuvida) => (
-    <p
-      key={frase.id}
-      className={frase.pergunta ? "trecho-ouvido trecho-ouvido-pergunta" : "trecho-ouvido"}
-      data-testid="trecho-ouvido"
-    >
-      <span className="rotulos-do-trecho-ouvido">
-        <span className="rotulo-tecnico">ouvido</span>
+    <div key={frase.id} className="mensagem-do-usuario mensagem-ouvida" data-testid="trecho-ouvido">
+      <p className="texto-longo">{frase.texto}</p>
+      <span className="marcas-da-mensagem-ouvida">
+        <span className="marca-ouvida" title="Frase ouvida pela escuta do áudio">
+          ouvido
+        </span>
         {frase.pergunta && (
           <span className="marca-da-pergunta-ouvida" role="img" aria-label="Pergunta detectada na escuta">
             pergunta
           </span>
         )}
       </span>
-      <span className="trecho-ouvido-texto">{frase.texto}</span>
-    </p>
+      {Number.isFinite(frase.fimMs) && <HoraDaMensagem criadaEm={new Date(frase.fimMs).toISOString()} />}
+    </div>
   );
 
   // Acompanha o fim enquanto chega texto (das respostas e da escuta), a menos que o usuário tenha rolado para cima.
@@ -1142,14 +1151,22 @@ export function ChatRapido({
             ))}
             {frasesNoFim.map(balaoOuvido)}
             {comFraseEmAndamento && (
-              <p className="trecho-ouvido trecho-ouvido-provisorio" aria-live="polite" data-testid="trecho-provisorio">
-                <span className="rotulo-tecnico">ouvindo</span>
-                <span className="trecho-ouvido-texto">
-                  {confirmadoEmAndamento !== "" && <span className="trecho-ouvido-confirmado">{confirmadoEmAndamento}</span>}
+              <div
+                className="mensagem-do-usuario mensagem-ouvida mensagem-ouvida-provisoria"
+                aria-live="polite"
+                data-testid="trecho-provisorio"
+              >
+                <p className="texto-longo">
+                  {confirmadoEmAndamento !== "" && <span className="ouvido-confirmado">{confirmadoEmAndamento}</span>}
                   {confirmadoEmAndamento !== "" && parcialEmAndamento !== "" && " "}
-                  {parcialEmAndamento !== "" && <span className="trecho-ouvido-parcial">{parcialEmAndamento}</span>}
+                  {parcialEmAndamento !== "" && <span className="ouvido-parcial">{parcialEmAndamento}</span>}
+                </p>
+                <span className="marcas-da-mensagem-ouvida">
+                  <span className="marca-ouvida" title="Frase sendo ouvida agora pela escuta do áudio">
+                    ouvindo
+                  </span>
                 </span>
-              </p>
+              </div>
             )}
           </div>
         </section>

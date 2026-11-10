@@ -27,11 +27,15 @@ export const PRE_ROLL_MS = 200;
  */
 export const VOZ_MINIMA_MS = 250;
 
-/** Nenhuma fala passa disto: é cortada no vale de probabilidade dos últimos `BUSCA_DO_CORTE_MS`. */
-export const DURACAO_MAXIMA_DA_FALA_MS = 25_000;
+/**
+ * Nenhuma fala passa disto: é cortada no vale de probabilidade dos últimos
+ * `BUSCA_DO_CORTE_MS`. Curta para que a passada final de cada fala chegue
+ * logo, sem esperar a pessoa parar de falar.
+ */
+export const DURACAO_MAXIMA_DA_FALA_MS = 8_000;
 
-/** Onde a fala longa procura o ponto de corte: os últimos 3 s, na janela de menor probabilidade. */
-export const BUSCA_DO_CORTE_MS = 3_000;
+/** Onde a fala longa procura o ponto de corte: os últimos 2 s, na janela de menor probabilidade. */
+export const BUSCA_DO_CORTE_MS = 2_000;
 
 const N = AMOSTRAS_POR_JANELA_DO_VAD;
 const JANELAS_DE_SILENCIO_PARA_FIM = Math.ceil(SILENCIO_PARA_FIM_MS / DURACAO_DA_JANELA_DO_VAD_MS);
@@ -102,7 +106,7 @@ function juntar(partes: readonly Float32Array[]): Float32Array {
  * - Só é anunciada com `VOZ_MINIMA_MS` de voz; antes disso, se acabar, é
  *   descartada sem nenhum evento.
  * - Ao passar de `DURACAO_MAXIMA_DA_FALA_MS`, é cortada logo depois da janela
- *   de menor probabilidade dos últimos 3 s (o espaço entre palavras) e a fala
+ *   de menor probabilidade dos últimos 2 s (o espaço entre palavras) e a fala
  *   seguinte começa ali, sem perder amostras ("fim" e "inicio" no mesmo ms).
  */
 export class CortadorDeFala {
@@ -230,7 +234,7 @@ export class CortadorDeFala {
     eventos.push(Object.freeze({ tipo: "inicio", emMs: amostrasParaMs(fala.inicio) }));
   }
 
-  /** Corta logo depois da janela de menor probabilidade dos últimos 3 s; o resto vira a fala seguinte. */
+  /** Corta logo depois da janela de menor probabilidade dos últimos 2 s; o resto vira a fala seguinte. */
   private cortarFalaLonga(fala: Fala, eventos: EventoDeFala[]): void {
     const inicioDaBusca = Math.max(0, fala.janelas.length - JANELAS_NA_BUSCA_DO_CORTE);
     let vale = inicioDaBusca;
