@@ -281,11 +281,11 @@ const ALTURA_RESERVADA_AO_CHAT = 110;
 /** Altura, na área do canvas, da faixa ocupada pela barra do canvas (com folga). */
 const TOPO_LIVRE_DA_TELA_PX = 84;
 /**
- * Como num editor de design: arrastar no vazio com o botão esquerdo desenha
- * o retângulo de seleção; o botão do meio (e o espaço segurado, a tecla de
- * `panActivationKeyCode`) move o canvas, como a roda e o trackpad.
+ * Arrastar no vazio com o botão esquerdo (ou o do meio) move o canvas, como a
+ * roda e o trackpad: só a seleção pelo trackpad deixava o mouse sem pan. O
+ * retângulo de seleção sai com o Shift segurado (`selectionKeyCode`).
  */
-const BOTOES_QUE_MOVEM_O_CANVAS = [1];
+const BOTOES_QUE_MOVEM_O_CANVAS = [0, 1];
 /** Shift ou Cmd/Ctrl + clique somam e tiram telas da seleção. */
 const TECLAS_DA_SELECAO_MULTIPLA = ["Shift", "Meta", "Control"];
 
@@ -412,7 +412,7 @@ function CanvasVazio({ aoCriar }: { aoCriar: () => void }) {
           </p>
         </div>
         <p className="mono text-muted">
-          arrastar o fundo seleciona · espaço + arrastar ou a roda movem o canvas · ctrl + roda dá zoom
+          arrastar o fundo move o canvas · shift + arrastar seleciona · ctrl + roda dá zoom
         </p>
         <button type="button" className="btn btn-cta" onClick={aoCriar}>
           + Novo orquestrador
@@ -2036,9 +2036,9 @@ function Canvas() {
                     // Como no Excalidraw: a roda do mouse rola o canvas; com Ctrl, dá zoom.
                     panOnScroll
                     zoomActivationKeyCode="Control"
-                    // Arrastar no vazio seleciona (a tela que o retângulo toca já entra); o
-                    // pan fica com a roda, o botão do meio e o espaço segurado.
-                    selectionOnDrag
+                    // Arrastar no vazio move o canvas; com o Shift segurado, desenha o
+                    // retângulo de seleção (a tela que ele toca já entra).
+                    selectionKeyCode="Shift"
                     selectionMode={SelectionMode.Partial}
                     panOnDrag={BOTOES_QUE_MOVEM_O_CANVAS}
                     panActivationKeyCode="Space"
