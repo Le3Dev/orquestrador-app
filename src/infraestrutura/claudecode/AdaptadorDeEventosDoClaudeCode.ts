@@ -2,6 +2,7 @@ import { extrairEnderecosLocais } from "../../orquestracao/EnderecoLocal";
 import {
   EventoDoMotor,
   JanelaDaCota,
+  OrigemDoEnderecoLocal,
   SituacaoDaTarefa,
   SituacaoFinalDoSubagente,
   TarefaDoOrquestrador,
@@ -9,6 +10,7 @@ import {
 } from "../../orquestracao/EventoDeOrquestracao";
 import { NOME_DO_SUBAGENTE } from "../../orquestracao/InstrucoesDoOrquestrador";
 import { CausaDaFalha, ResultadoDoTurno } from "../../orquestracao/MotorDeAgentes";
+import { semBlocosDePrevia } from "../../previas/PreviaDoApp";
 
 type Objeto = Record<string, unknown>;
 
@@ -347,7 +349,10 @@ export class AdaptadorDeEventosDoClaudeCode {
   private resultadoDoTurno: ResultadoDoTurno | null = null;
   private usoAcumulado: UsoDoTurno | null = null;
   private sessaoAnunciada = false;
-  private readonly enderecosAnunciados = new Set<string>();
+  /** Com que origem cada endereço já foi anunciado neste turno. */
+  private readonly enderecosAnunciados = new Map<string, OrigemDoEnderecoLocal>();
+  /** A origem mais forte com que cada endereço foi citado: "resposta" vale mais que "ferramenta". */
+  private readonly origemDaCitacao = new Map<string, OrigemDoEnderecoLocal>();
   /** Nome da ferramenta de cada chamada (`tool_use_id`), do Orquestrador e dos Subagentes. */
   private readonly ferramentaPorChamada = new Map<string, string>();
   /**
@@ -369,25 +374,46 @@ export class AdaptadorDeEventosDoClaudeCode {
     return this.pistas;
   }
 
-  /** Os endereços citados desde a última retirada que ainda não foram anunciados. */
+  /**
+   * Os endereços citados desde a última retirada que ainda não foram
+   * anunciados. Um já anunciado como "ferramenta" volta quando a resposta final
+   * o cita: é o anúncio com a origem "resposta", que o usuário lê como pedido
+   * de abrir a prévia.
+   */
   retirarCandidatos(): string[] {
-    const novos = [...this.candidatos].filter((url) => !this.enderecosAnunciados.has(url));
+    const novos = [...this.candidatos].filter((url) => {
+      const anunciado = this.enderecosAnunciados.get(url);
+      return anunciado === undefined || (anunciado === "ferramenta" && this.origemDaCitacao.get(url) === "resposta");
+    });
     this.candidatos.clear();
     return novos;
   }
 
-  /** Um endereço citado que respondeu: vira o anúncio, uma vez por turno. */
+  /**
+   * Um endereço citado que respondeu: vira o anúncio, uma vez por turno e por
+   * origem. A origem é "resposta" se a resposta final o citou (mesmo que a
+   * conferência tenha terminado depois), senão "ferramenta".
+   */
   confirmarEndereco(url: string): EventoDoMotor[] {
-    if (this.enderecosAnunciados.has(url)) {
+    const origem = this.origemDaCitacao.get(url) ?? "ferramenta";
+    const anunciado = this.enderecosAnunciados.get(url);
+    if (anunciado === "resposta" || anunciado === origem) {
       return [];
     }
-    this.enderecosAnunciados.add(url);
-    return [{ tipo: "endereco_local_detectado", url }];
+    this.enderecosAnunciados.set(url, origem);
+    return [{ tipo: "endereco_local_detectado", url, origem }];
   }
 
-  private citarEnderecos(texto: string): void {
-    for (const url of extrairEnderecosLocais(texto)) {
+  /**
+   * O bloco ```previa-do-app só lista prévias a fechar: os endereços dele não
+   * contam como citação.
+   */
+  private citarEnderecos(texto: string, origem: OrigemDoEnderecoLocal = "ferramenta"): void {
+    for (const url of extrairEnderecosLocais(semBlocosDePrevia(texto))) {
       this.candidatos.add(url);
+      if (origem === "resposta" || !this.origemDaCitacao.has(url)) {
+        this.origemDaCitacao.set(url, origem);
+      }
     }
   }
 
@@ -645,7 +671,8 @@ export class AdaptadorDeEventosDoClaudeCode {
     const uso = somarUso(this.usoAcumulado, this.extrairUso(mensagem));
     this.usoAcumulado = uso;
     const resposta = texto(mensagem, "result");
-    this.citarEnderecos(resposta);
+    // Só a resposta final do orquestrador pede a prévia; o resto é "ferramenta".
+    this.citarEnderecos(resposta, "resposta");
     const sucesso = texto(mensagem, "subtype") === "success" && mensagem["is_error"] !== true;
 
     this.resultadoDoTurno = sucesso

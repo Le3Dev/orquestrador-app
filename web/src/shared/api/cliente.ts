@@ -24,6 +24,7 @@ import type {
   PromptMelhorado,
   ResumoDoOrquestrador,
   SaudeDoServidor,
+  SituacaoDoServidorLocal,
   TipoDeImagem,
 } from "./tipos";
 
@@ -95,6 +96,26 @@ export interface ItemLigadoParaEnvio {
 /** O corpo só leva `itensLigados` quando há algum: sem itens, o pedido é igual ao de antes. */
 function comItensLigados(itensLigados: readonly ItemLigadoParaEnvio[] | undefined): { itensLigados?: readonly ItemLigadoParaEnvio[] } {
   return itensLigados !== undefined && itensLigados.length > 0 ? { itensLigados } : {};
+}
+
+/** O corpo só leva `previasAbertas` quando há alguma (até 10 endereços http/https das prévias abertas no canvas). */
+function comPreviasAbertas(previasAbertas: readonly string[] | undefined): { previasAbertas?: readonly string[] } {
+  return previasAbertas !== undefined && previasAbertas.length > 0 ? { previasAbertas } : {};
+}
+
+/**
+ * Os argumentos de contexto do fim de `enviarMensagem` e `enfileirarPedido`
+ * (itens ligados, prévias abertas), só os que têm conteúdo: sem nenhum, o
+ * pedido é igual ao de antes.
+ */
+export function argumentosDoContexto(
+  itensLigados: readonly ItemLigadoParaEnvio[],
+  previasAbertas: readonly string[],
+): [itensLigados?: readonly ItemLigadoParaEnvio[], previasAbertas?: readonly string[]] {
+  if (previasAbertas.length > 0) {
+    return [itensLigados, previasAbertas];
+  }
+  return itensLigados.length > 0 ? [itensLigados] : [];
 }
 
 export interface NovoOrquestrador extends DadosDaConfiguracao {
@@ -177,15 +198,16 @@ export const api = {
     imagens: readonly ImagemParaEnvio[] = [],
     modo: ModoDoTurno = "execucao",
     itensLigados?: readonly ItemLigadoParaEnvio[],
+    previasAbertas?: readonly string[],
   ) =>
     requisitar<{ turnoId: string }>(`/orquestradores/${encodeURIComponent(id)}/mensagens`, {
       method: "POST",
-      body: JSON.stringify({ texto, imagens, modo, ...comItensLigados(itensLigados) }),
+      body: JSON.stringify({ texto, imagens, modo, ...comItensLigados(itensLigados), ...comPreviasAbertas(previasAbertas) }),
     }),
 
   /**
    * Guarda um pedido na fila do Orquestrador (texto, modo e os itens ligados
-   * agora: imagens não entram). Ele sai sozinho quando o turno atual terminar
+   * agora e as prévias abertas: imagens não entram). Ele sai sozinho quando o turno atual terminar
    * concluído, ou com `enviarDaFila`. Recusado (409) com a fila cheia.
    */
   enfileirarPedido: (
@@ -193,10 +215,11 @@ export const api = {
     texto: string,
     modo: ModoDoTurno = "execucao",
     itensLigados?: readonly ItemLigadoParaEnvio[],
+    previasAbertas?: readonly string[],
   ) =>
     requisitar<{ pedidoId: string }>(`/orquestradores/${encodeURIComponent(id)}/fila`, {
       method: "POST",
-      body: JSON.stringify({ texto, modo, ...comItensLigados(itensLigados) }),
+      body: JSON.stringify({ texto, modo, ...comItensLigados(itensLigados), ...comPreviasAbertas(previasAbertas) }),
     }),
 
   removerDaFila: (id: string, pedidoId: string) =>
@@ -248,6 +271,15 @@ export const api = {
   removerNota: (id: string) => requisitar<null>(`/notas/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   saude: () => requisitar<SaudeDoServidor>("/saude"),
+
+  /** Confere se cada servidor local (até 10 endereços) responde agora; o servidor recusa o que não for endereço local. */
+  lerSituacaoDosServidores: (urls: readonly string[]) => {
+    const parametros = new URLSearchParams();
+    for (const url of urls) {
+      parametros.append("url", url);
+    }
+    return requisitar<{ situacoes: SituacaoDoServidorLocal[] }>(`/servidores-locais/situacao?${parametros.toString()}`);
+  },
 
   lerPreferencias: () => requisitar<DadosDasPreferencias>("/preferencias"),
 

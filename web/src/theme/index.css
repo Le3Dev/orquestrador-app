@@ -1894,23 +1894,93 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   stroke-dasharray: 5 6;
 }
 
-/* Faixa "servidor no ar" logo acima do prompt do terminal. */
+/* Faixa de servidores logo acima do prompt do terminal: uma linha, um chip por
+ * servidor (ponto de status, endereço, "abrir" e o ×). Com o "+N" aberto, quebra. */
 .faixa-de-servidores {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 2px 8px;
+  gap: 4px 5px;
   flex-shrink: 0;
-  padding: 3px 14px;
+  padding: 5px 10px;
   border-top: 1px solid var(--border);
   background: color-mix(in srgb, var(--info) 6%, var(--surface));
   font-family: var(--fonte-mono);
   font-size: 10.5px;
   line-height: 1.5;
 }
-.faixa-de-servidores .ponto-de-status { width: 6px; height: 6px; background: var(--success); }
-.faixa-de-servidores-item { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
-.faixa-de-servidores .botao-de-texto { color: var(--info); font-size: inherit; }
+.faixa-de-servidores-aberta { flex-wrap: wrap; }
+/* Terminal estreito (o padrão tem 600px): a palavra "abrir" cede lugar ao endereço (o chip todo
+ * continua abrindo a prévia) e a letra encolhe um pouco, para três chips caberem na linha. */
+.faixa-de-servidores { container-type: inline-size; }
+@container (max-width: 640px) {
+  .faixa-chip { font-size: 10px; }
+  .faixa-chip:not([data-situacao="parado"]) .faixa-chip-acao { display: none; }
+}
+.faixa-de-servidores-rotulo { flex-shrink: 0; color: var(--muted); font-family: var(--fonte-texto); font-size: 11px; }
+
+.faixa-chip {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  height: 22px;
+  border: 1px solid var(--border-forte);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--primary);
+}
+.faixa-chip:hover { border-color: color-mix(in srgb, var(--info) 45%, var(--border-forte)); background: var(--surface-3); }
+.faixa-chip[data-situacao="parado"] { opacity: .62; }
+.faixa-chip button { font: inherit; color: inherit; background: transparent; border: 0; cursor: pointer; }
+.faixa-chip button:focus-visible,
+.faixa-de-servidores-mais:focus-visible,
+.faixa-de-servidores-limpar:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.faixa-chip-abrir {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 2px 0 7px;
+  border-radius: 6px 0 0 6px;
+}
+.faixa-chip-endereco { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.faixa-chip-acao { flex-shrink: 0; padding: 0 2px; font-family: var(--fonte-texto); font-size: 10.5px; color: var(--info); }
+.faixa-chip[data-situacao="parado"] .faixa-chip-acao { color: var(--muted); }
+.faixa-chip-ponto { width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: var(--muted); }
+.faixa-chip[data-situacao="no-ar"] .faixa-chip-ponto {
+  background: var(--success);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 20%, transparent);
+}
+.faixa-chip[data-situacao="desconhecida"] .faixa-chip-ponto { background: transparent; border: 1.5px solid var(--muted); }
+.faixa-chip-tirar {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin-right: 1px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--muted);
+}
+.faixa-chip .faixa-chip-tirar:hover { background: var(--border-forte); color: var(--primary); }
+
+.faixa-de-servidores-mais,
+.faixa-de-servidores-limpar {
+  flex-shrink: 0;
+  font: inherit;
+  font-family: var(--fonte-texto);
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+.faixa-de-servidores-mais { height: 22px; padding: 0 6px; border: 1px dashed var(--border-forte); border-radius: 7px; }
+.faixa-de-servidores-limpar { margin-left: auto; padding: 1px 4px; border: 0; border-radius: 5px; }
+.faixa-de-servidores-mais:hover,
+.faixa-de-servidores-limpar:hover { color: var(--primary); background: var(--surface-3); }
 
 /* ---------------- Itens ligados ao terminal ----------------
  * A bolinha à direita da nota, da prévia e do artefato (puxar dela até um

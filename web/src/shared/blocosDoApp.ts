@@ -2,6 +2,14 @@
 export const CERCA_DE_ACAO = "```acao-do-app";
 /** Bloco em que o Claude faz perguntas com opções (vira o cartão de pergunta). */
 export const CERCA_DE_PERGUNTA = "```pergunta-do-app";
+/**
+ * Bloco em que o Orquestrador diz quais prévias já cumpriram o papel e podem
+ * fechar (`{"fechar":[...]}`). O servidor o lê e entrega o resultado no fim do
+ * turno; na tela ele nunca aparece.
+ */
+export const CERCA_DE_PREVIA = "```previa-do-app";
+/** Os blocos que o Orquestrador escreve para o app e que a transcrição esconde. */
+export const CERCAS_DO_ORQUESTRADOR = [CERCA_DE_PERGUNTA, CERCA_DE_PREVIA] as const;
 
 /**
  * O texto sem os blocos das `cercas` (da abertura até a cerca de fechamento

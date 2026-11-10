@@ -129,6 +129,8 @@ const esquemaDoArquivo = z.object({
             }),
           )
           .optional(),
+        // Ausente nos pedidos sem prévias abertas (e nos gravados antes do campo).
+        previasAbertas: z.array(z.string()).optional(),
       }),
     )
     .default([]),

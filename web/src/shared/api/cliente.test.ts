@@ -1,4 +1,4 @@
-import { api, ErroDaApi } from "./cliente";
+import { api, argumentosDoContexto, ErroDaApi } from "./cliente";
 
 type Buscar = (url: string, opcoes?: RequestInit) => Promise<Response>;
 
@@ -130,5 +130,27 @@ describe("itens ligados no pedido", () => {
     buscar.mockClear();
     await api.enfileirarPedido("o1", "depois");
     expect(corpoEnviado(buscar)).toEqual({ texto: "depois", modo: "execucao" });
+  });
+
+  it("a mensagem e a fila levam `previasAbertas` só quando há alguma", async () => {
+    const buscar = vi.spyOn(globalThis, "fetch").mockResolvedValue(respostaJson({ turnoId: "t1" }));
+    const previas = ["http://localhost:5173"];
+
+    await api.enviarMensagem("o1", "olá", [], "execucao", [], previas);
+    expect(corpoEnviado(buscar)).toEqual({ texto: "olá", imagens: [], modo: "execucao", previasAbertas: previas });
+
+    buscar.mockClear();
+    await api.enviarMensagem("o1", "olá", [], "execucao", itens, []);
+    expect(corpoEnviado(buscar)).toEqual({ texto: "olá", imagens: [], modo: "execucao", itensLigados: itens });
+
+    buscar.mockClear();
+    await api.enfileirarPedido("o1", "depois", "execucao", itens, previas);
+    expect(corpoEnviado(buscar)).toEqual({ texto: "depois", modo: "execucao", itensLigados: itens, previasAbertas: previas });
+  });
+
+  it("argumentosDoContexto monta só o que tem conteúdo", () => {
+    expect(argumentosDoContexto([], [])).toEqual([]);
+    expect(argumentosDoContexto(itens, [])).toEqual([itens]);
+    expect(argumentosDoContexto([], ["http://localhost:5173"])).toEqual([[], ["http://localhost:5173"]]);
   });
 });

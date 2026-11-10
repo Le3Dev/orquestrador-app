@@ -209,6 +209,22 @@ describe("rotas do chat", () => {
     expect(motor.perguntas).toHaveLength(0);
   });
 
+  it("POST /chat/mensagens leva as prévias abertas ao Claude e recusa as inválidas com 400", async () => {
+    const aberta = ["http://localhost:5173"];
+    const resposta = await enviar("/chat/mensagens", "POST", { texto: "oi", previasAbertas: aberta });
+    expect(resposta.status).toBe(202);
+    await expect.poll(() => motor.perguntas.length).toBe(1);
+    expect(motor.perguntas[0]?.mensagem).toContain("Prévias abertas no canvas agora: http://localhost:5173.");
+    motor.terminar(sucesso("ok"));
+    await aguardarOcioso();
+
+    for (const previasAbertas of [["file:///etc/passwd"], Array.from({ length: 11 }, () => "http://localhost:5173"), "http://x"]) {
+      const invalida = await enviar("/chat/mensagens", "POST", { texto: "oi", previasAbertas });
+      expect(invalida.status).toBe(400);
+    }
+    expect(motor.perguntas).toHaveLength(1);
+  });
+
   it("aceita só imagem e serve o anexo em GET /chat/anexos/:arquivo, protegendo o caminho", async () => {
     const resposta = await enviar("/chat/mensagens", "POST", {
       texto: "",

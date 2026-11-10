@@ -697,7 +697,7 @@ describe("mensagemParaOOrquestrador: delegação e pedidos grandes", () => {
 describe("regraDosServidores", () => {
   it("no unix é o texto de sempre, com nohup e /tmp", () => {
     expect(regraDosServidores("unix")).toBe(
-      "Servidor que deve continuar no ar (npm run dev, vite, next dev e afins): não use a execução em segundo plano da ferramenta (run_in_background), que prende o pedido até o servidor parar. Suba desacoplado, com a saída num log fora do projeto, e mostre o começo do log para o endereço aparecer, por exemplo: `nohup npm run dev > /tmp/servidor-<nome>.log 2>&1 & sleep 4; tail -n 20 /tmp/servidor-<nome>.log`. Ele continua rodando depois do pedido; para parar, use kill no processo. Não abra o navegador do computador (open, xdg-open, start): o aplicativo já mostra a página numa prévia ao vivo quando o endereço aparece; para conferir, use curl e cite o endereço completo na resposta.",
+      "Servidor que deve continuar no ar (npm run dev, vite, next dev e afins): não use a execução em segundo plano da ferramenta (run_in_background), que prende o pedido até o servidor parar. Suba desacoplado, com a saída num log fora do projeto, e mostre o começo do log para o endereço aparecer, por exemplo: `nohup npm run dev > /tmp/servidor-<nome>.log 2>&1 & sleep 4; tail -n 20 /tmp/servidor-<nome>.log`. Ele continua rodando depois do pedido; para parar, use kill no processo. Não abra o navegador do computador (open, xdg-open, start): o aplicativo mostra a página numa prévia ao vivo só quando a resposta final cita o endereço; para conferir, use curl e não cite o endereço na resposta, a não ser que o usuário deva ver a página.",
     );
     expect(regraDosServidores("unix")).toBe(REGRA_DOS_SERVIDORES_UNIX);
   });
@@ -710,7 +710,8 @@ describe("regraDosServidores", () => {
     expect(regra).toContain(String.raw`$env:TEMP\servidor-<nome>.log`);
     expect(regra).toContain("taskkill /PID <PID> /T /F");
     expect(regra).toContain("-NoNewWindow");
-    expect(regra).toContain("curl.exe");
+    expect(regra).toContain("curl.exe e não cite o endereço na resposta, a não ser que o usuário deva ver a página");
+    expect(regra).not.toContain("cite o endereço completo");
     expect(regra).toContain("Não abra o navegador do computador");
     expect(regra).not.toContain("nohup");
     expect(regra).not.toContain("/tmp");
@@ -726,6 +727,16 @@ describe("instrucoesDoSubagente e a plataforma", () => {
     expect(noWindows).toContain(REGRA_DOS_SERVIDORES_WINDOWS);
     expect(noWindows).not.toContain(REGRA_DOS_SERVIDORES_UNIX);
     expect(instrucoesDoSubagente(pasta)).toContain(REGRA_DOS_SERVIDORES_UNIX);
+  });
+
+  it("diz ao subagente para não citar endereços locais na verificação técnica, no unix e no Windows", () => {
+    for (const plataforma of ["unix", "windows"] as const) {
+      const instrucoes = instrucoesDoSubagente(pasta, false, null, null, plataforma);
+
+      expect(instrucoes).toContain("Não cite endereços locais (http://localhost:PORTA) no relatório para verificação técnica");
+      expect(instrucoes).toContain("diga só a porta");
+      expect(instrucoes).not.toContain("cite o endereço completo na resposta");
+    }
   });
 });
 

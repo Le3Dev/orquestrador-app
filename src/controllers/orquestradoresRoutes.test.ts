@@ -777,6 +777,55 @@ describe("rotas de orquestradores — modo de planejamento", () => {
     });
   });
 
+  describe("prévias abertas no canvas", () => {
+    const abertas = ["http://localhost:5173", "https://exemplo.com/app"];
+
+    it("POST /mensagens leva as prévias abertas ao motor", async () => {
+      const resposta = await postar(`/orquestradores/${orquestrador.id}/mensagens`, { texto: "analise", previasAbertas: abertas });
+
+      expect(resposta.status).toBe(202);
+      await aguardarOcioso();
+      expect(motor.pedidos.at(-1)?.previasAbertas).toEqual(abertas);
+    });
+
+    it("sem o campo, o pedido vai sem prévias abertas", async () => {
+      expect((await postar(`/orquestradores/${orquestrador.id}/mensagens`, { texto: "oi" })).status).toBe(202);
+      await aguardarOcioso();
+
+      expect(motor.pedidos.at(-1)?.previasAbertas).toEqual([]);
+    });
+
+    it.each<[string, unknown, string]>([
+      ["mais de 10", Array.from({ length: 11 }, () => "http://localhost:5173"), "Informe até 10 prévias abertas por pedido."],
+      ["endereço que não é http", ["file:///etc/passwd"], "O endereço da prévia aberta deve começar com http:// ou https://."],
+      ["endereço longo demais", [`http://localhost:5173/${"a".repeat(2_000)}`], "O endereço da prévia aberta é longo demais."],
+      ["item que não é texto", [5173], "O endereço da prévia aberta deve ser um texto."],
+      ["valor que não é lista", "http://localhost:5173", "As prévias abertas devem ser uma lista."],
+    ])("recusa %s com 400, na mensagem e na fila", async (_caso, previasAbertas, mensagem) => {
+      const enviada = await postar(`/orquestradores/${orquestrador.id}/mensagens`, { texto: "oi", previasAbertas });
+      const enfileirada = await postar(`/orquestradores/${orquestrador.id}/fila`, { texto: "oi", previasAbertas });
+
+      expect(enviada.status).toBe(400);
+      expect(await enviada.json()).toEqual({ erro: mensagem });
+      expect(enfileirada.status).toBe(400);
+      expect(await enfileirada.json()).toEqual({ erro: mensagem });
+      expect(orquestrador.totalDeTurnos).toBe(0);
+      expect(orquestrador.fila).toHaveLength(0);
+    });
+
+    it("POST /fila congela as prévias no pedido, que as leva ao motor quando sai da fila", async () => {
+      const resposta = await postar(`/orquestradores/${orquestrador.id}/fila`, { texto: "depois", previasAbertas: abertas });
+      const { pedidoId } = (await resposta.json()) as { pedidoId: string };
+
+      expect(resposta.status).toBe(201);
+      expect(orquestrador.fila[0]?.paraDados()).toMatchObject({ id: pedidoId, previasAbertas: abertas });
+
+      expect((await postar(`/orquestradores/${orquestrador.id}/fila/${pedidoId}/enviar`)).status).toBe(202);
+      await aguardarOcioso();
+      expect(motor.pedidos.at(-1)).toMatchObject({ previasAbertas: abertas });
+    });
+  });
+
   describe("trivial e plano sempre ligados: as opções antigas são ignoradas (ADR-28)", () => {
     async function alterarConfiguracao(corpo: unknown): Promise<Response> {
       return fetch(`${base}/orquestradores/${orquestrador.id}/configuracao`, {

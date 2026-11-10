@@ -493,6 +493,11 @@ export class Orquestrador {
    *
    * `perguntas`: as perguntas com opções que o Orquestrador fez na resposta
    * (blocos ```pergunta-do-app), já fora do texto.
+   *
+   * `previasParaFechar`: os endereços das prévias ao vivo que ele pediu para
+   * fechar (bloco ```previa-do-app), já fora do texto. Só vão no evento, para a
+   * tela agir na hora: não ficam no turno, para reler o histórico não fechar
+   * prévias de novo.
    */
   concluirTurno(
     turnoId: string,
@@ -501,6 +506,7 @@ export class Orquestrador {
     agora: Date,
     planoProposto = false,
     perguntas: readonly PerguntaDoApp[] = [],
+    previasParaFechar: readonly string[] = [],
   ): EventoDeOrquestracao {
     const turno = this.turnoAtivo(turnoId);
     turno.concluir(resposta, uso, agora, planoProposto, perguntas);
@@ -511,6 +517,7 @@ export class Orquestrador {
       uso,
       planoPendente: turno.planoPendente,
       perguntas: turno.perguntas.map(copiarPergunta),
+      ...(previasParaFechar.length === 0 ? {} : { previasParaFechar: [...previasParaFechar] }),
     };
   }
 

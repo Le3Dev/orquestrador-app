@@ -1034,7 +1034,7 @@ describe("NoTerminal · servidor no ar", () => {
     const canvas = canvasDoTerminal(conversa);
     render(<Terminal canvas={canvas} no={propsDoNo()} />);
 
-    expect(screen.getByText("servidor no ar")).toBeInTheDocument();
+    expect(screen.getByText("Servidores")).toBeInTheDocument();
     expect(screen.getByText("localhost:5173")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Abrir prévia de http://localhost:5173" }));
 
@@ -1044,7 +1044,7 @@ describe("NoTerminal · servidor no ar", () => {
   it("sem servidores, não há faixa", () => {
     render(<Terminal canvas={canvasDoTerminal(ESTADO_INICIAL)} no={propsDoNo()} />);
 
-    expect(screen.queryByText("servidor no ar")).not.toBeInTheDocument();
+    expect(screen.queryByText("Servidores")).not.toBeInTheDocument();
   });
 });
 
@@ -1802,5 +1802,166 @@ describe("NoTerminal · itens ligados", () => {
     await waitFor(() =>
       expect(enfileirar).toHaveBeenCalledWith("o1", "depois veja a prévia", "execucao", ITENS_PARA_ENVIO),
     );
+  });
+});
+
+describe("NoTerminal · prévias abertas pelo agente", () => {
+  let base = 0;
+
+  /** Cada teste parte de uma sequência própria: os eventos já tratados ficam guardados na sessão. */
+  function conversaDe(...eventos: EventoDeOrquestracao[]): EstadoDaConversa {
+    base += 1000;
+    return aplicar({ ...ESTADO_INICIAL, ultimaSequencia: base }, ...eventos);
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-28T12:00:06Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function renderizarComAcoes(conversa: EstadoDaConversa) {
+    const canvas = canvasDoTerminal(conversa);
+    const fecharPreviasDoAgente = vi.fn();
+    canvas.acoes = { ...canvas.acoes, fecharPreviasDoAgente };
+    render(<Terminal canvas={canvas} no={propsDoNo()} />);
+    return { canvas, fecharPreviasDoAgente };
+  }
+
+  it("o endereço citado na resposta abre a prévia sozinha, marcada como aberta pelo agente", () => {
+    const { canvas } = renderizarComAcoes(
+      conversaDe(
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "mostre o painel", configuracao },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173", origem: "resposta" },
+      ),
+    );
+
+    expect(canvas.acoes.abrirPrevia).toHaveBeenCalledTimes(1);
+    expect(canvas.acoes.abrirPrevia).toHaveBeenCalledWith("o1", "http://localhost:5173", { peloAgente: true });
+  });
+
+  it("o endereço de uma ferramenta, ou sem origem, não abre nada: só aparece na faixa para abrir com um clique", () => {
+    const { canvas } = renderizarComAcoes(
+      conversaDe(
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "teste a API", configuracao },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:4000", origem: "ferramenta" },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173" },
+      ),
+    );
+
+    expect(canvas.acoes.abrirPrevia).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Abrir prévia de http://localhost:4000" }));
+    expect(canvas.acoes.abrirPrevia).toHaveBeenCalledWith("o1", "http://localhost:4000");
+  });
+
+  it("a citação antiga, relida do histórico ao abrir a tela, não abre nada", () => {
+    vi.setSystemTime(new Date("2026-10-29T12:00:00Z"));
+    const { canvas } = renderizarComAcoes(
+      conversaDe(
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "mostre o painel", configuracao },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173", origem: "resposta" },
+      ),
+    );
+
+    expect(canvas.acoes.abrirPrevia).not.toHaveBeenCalled();
+  });
+
+  it("ao fim do turno, pede o fechamento com o que o agente pediu, o início do turno e o que ele citou", () => {
+    const { fecharPreviasDoAgente } = renderizarComAcoes(
+      conversaDe(
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "feche o painel", configuracao },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:3000", origem: "resposta" },
+        { tipo: "turno_concluido", turnoId: "t1", resposta: "Pronto.", uso: USO, previasParaFechar: ["http://localhost:5173"] },
+      ),
+    );
+
+    expect(fecharPreviasDoAgente).toHaveBeenCalledTimes(1);
+    expect(fecharPreviasDoAgente).toHaveBeenCalledWith("o1", {
+      enderecos: ["http://localhost:5173"],
+      doTurno: { iniciadoEm: Date.parse("2026-10-28T12:00:00Z"), citados: ["http://localhost:3000"] },
+    });
+  });
+
+  it("o fim de turno antigo, relido do histórico, não fecha nada", () => {
+    vi.setSystemTime(new Date("2026-10-29T12:00:00Z"));
+    const { fecharPreviasDoAgente } = renderizarComAcoes(
+      conversaDe(
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "feche o painel", configuracao },
+        { tipo: "turno_concluido", turnoId: "t1", resposta: "Pronto.", uso: USO, previasParaFechar: ["http://localhost:5173"] },
+      ),
+    );
+
+    expect(fecharPreviasDoAgente).not.toHaveBeenCalled();
+  });
+
+  it("o mesmo fim de turno não fecha duas vezes quando o terminal renderiza de novo", () => {
+    const conversa = conversaDe(
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "feche o painel", configuracao },
+      { tipo: "turno_concluido", turnoId: "t1", resposta: "Pronto.", uso: USO },
+    );
+    const canvas = canvasDoTerminal(conversa);
+    const fecharPreviasDoAgente = vi.fn();
+    canvas.acoes = { ...canvas.acoes, fecharPreviasDoAgente };
+    const { rerender } = render(<Terminal canvas={canvas} no={propsDoNo()} />);
+
+    rerender(<Terminal canvas={{ ...canvas }} no={propsDoNo({ selected: true })} />);
+
+    expect(fecharPreviasDoAgente).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("NoTerminal · previasAbertas no pedido", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function renderizarComPrevias(conversa: EstadoDaConversa, previas: string[]) {
+    const canvas = canvasDoTerminal(conversa);
+    const lerPreviasAbertas = vi.fn(() => previas);
+    canvas.acoes = { ...canvas.acoes, lerPreviasAbertas };
+    render(<Terminal canvas={canvas} no={propsDoNo()} />);
+    return { lerPreviasAbertas };
+  }
+
+  it("o pedido leva as prévias abertas deste orquestrador, lidas na hora do envio", async () => {
+    const enviar = vi.spyOn(api, "enviarMensagem").mockResolvedValue({ turnoId: "t2" });
+    const { lerPreviasAbertas } = renderizarComPrevias(conversaOciosa(), ["http://localhost:5173"]);
+    const campo = campoDoPrompt();
+
+    fireEvent.change(campo, { target: { value: "ajuste o botão" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(enviar).toHaveBeenCalledWith("o1", "ajuste o botão", [], "execucao", [], ["http://localhost:5173"]),
+    );
+    expect(lerPreviasAbertas).toHaveBeenCalledWith("o1");
+  });
+
+  it("pôr na fila também leva as prévias abertas", async () => {
+    const enfileirar = vi.spyOn(api, "enfileirarPedido").mockResolvedValue({ pedidoId: "p9" });
+    renderizarComPrevias(conversaDoTerminal(), ["http://localhost:5173", "http://localhost:3000"]);
+    const campo = campoDoPrompt();
+
+    fireEvent.change(campo, { target: { value: "depois ajuste o botão" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(enfileirar).toHaveBeenCalledWith("o1", "depois ajuste o botão", "execucao", [], [
+        "http://localhost:5173",
+        "http://localhost:3000",
+      ]),
+    );
+  });
+
+  it("sem prévias abertas, o pedido é igual ao de antes", async () => {
+    const enviar = vi.spyOn(api, "enviarMensagem").mockResolvedValue({ turnoId: "t2" });
+    renderizarComPrevias(conversaOciosa(), []);
+    const campo = campoDoPrompt();
+
+    fireEvent.change(campo, { target: { value: "oi" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+
+    await waitFor(() => expect(enviar).toHaveBeenCalledWith("o1", "oi", [], "execucao"));
   });
 });
