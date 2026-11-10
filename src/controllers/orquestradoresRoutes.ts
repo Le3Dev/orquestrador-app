@@ -6,7 +6,7 @@ import { z } from "zod";
 import { ArmazemDeAnexosEmArquivo, ehNomeDeAnexoValido } from "../infraestrutura/arquivos/ArmazemDeAnexosEmArquivo";
 import { ErroDeCaminho, ExploradorDePastas } from "../infraestrutura/arquivos/ExploradorDePastas";
 import { CanalDeEventos } from "../infraestrutura/sse/CanalDeEventos";
-import { MAXIMO_DE_IMAGENS_POR_MENSAGEM, TAMANHO_MAXIMO_DA_IMAGEM, TIPOS_DE_IMAGEM } from "../orquestracao/Anexo";
+import { MAXIMO_DE_ANEXOS_POR_MENSAGEM } from "../orquestracao/Anexo";
 import { ConfiguracaoDoOrquestrador } from "../orquestracao/ConfiguracaoDoOrquestrador";
 import { ErroDeOrquestracao } from "../orquestracao/ErroDeOrquestracao";
 import {
@@ -47,6 +47,7 @@ import { RepositorioDePreferencias } from "../orquestracao/RepositorioDePreferen
 import { EsforcoHerdadoDosPapeis, ServicoDeOrquestracao } from "../orquestracao/ServicoDeOrquestracao";
 import { UsoDeTokens } from "../orquestracao/UsoDeTokens";
 import { esquemaDasPreviasAbertas } from "../previas/PreviaDoApp";
+import { enviarAnexo, esquemaDoAnexoRecebido } from "./anexosHttp";
 import { criarRota, responderErroGenerico, STATUS_DA_ORQUESTRACAO } from "./respostasHttp";
 
 interface Dependencias {
@@ -228,18 +229,10 @@ const esquemaDeMensagem = z.object({
     .max(TAMANHO_MAXIMO_DA_MENSAGEM, {
       error: `A mensagem deve ter até ${TAMANHO_MAXIMO_DA_MENSAGEM} caracteres.`,
     }),
+  /** Imagens e documentos (o nome do campo vem da época em que só havia imagens). */
   imagens: z
-    .array(
-      z.object({
-        nome: z.string().max(200),
-        tipoDeMidia: z.enum(TIPOS_DE_IMAGEM, { error: "Só dá para anexar imagens PNG, JPEG, GIF ou WebP." }),
-        // Base64 ocupa 4/3 do tamanho original.
-        base64: z.string().max(Math.ceil((TAMANHO_MAXIMO_DA_IMAGEM * 4) / 3) + 16, {
-          error: `Cada imagem pode ter até ${TAMANHO_MAXIMO_DA_IMAGEM / 1024 / 1024} MB.`,
-        }),
-      }),
-    )
-    .max(MAXIMO_DE_IMAGENS_POR_MENSAGEM, { error: `Anexe até ${MAXIMO_DE_IMAGENS_POR_MENSAGEM} imagens por mensagem.` })
+    .array(esquemaDoAnexoRecebido)
+    .max(MAXIMO_DE_ANEXOS_POR_MENSAGEM, { error: "Anexe menos arquivos por mensagem." })
     .default([]),
   modo: z.enum(MODOS_DO_TURNO, { error: "Modo do pedido inválido." }).default("execucao"),
   itensLigados: esquemaDosItensLigados,
@@ -744,11 +737,7 @@ export function criarOrquestradoresRoutes({
       if (repositorio.buscarPorId(id) === null || !ehNomeDeAnexoValido(arquivo)) {
         throw new ErroDeOrquestracao("nao_encontrado", "Anexo não encontrado.");
       }
-      resposta.sendFile(anexos.caminhoDe(id, arquivo), { maxAge: "1d" }, (erro) => {
-        if (erro !== undefined && !resposta.headersSent) {
-          resposta.status(404).json({ erro: "Anexo não encontrado." });
-        }
-      });
+      enviarAnexo(resposta, arquivo, anexos.caminhoDe(id, arquivo));
     }),
   );
 

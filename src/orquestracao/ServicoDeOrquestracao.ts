@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { separarPerguntasDoApp } from "../perguntas/PerguntaDoApp";
 import { separarPreviasDoApp } from "../previas/PreviaDoApp";
-import { Anexo } from "./Anexo";
+import { Anexo, categoriaDoTipo, ehTipoDeImagem } from "./Anexo";
 import { ArmazemDeAnexos } from "./ArmazemDeAnexos";
 import {
   AlteracoesDaConfiguracao,
@@ -11,6 +11,7 @@ import {
 } from "./ConfiguracaoDoOrquestrador";
 import { ControleDeExecucoes, PublicadorDeEventos } from "./ControleDeExecucoes";
 import { DiagnosticadorDoClaude } from "./DiagnosticoDoClaude";
+import type { DocumentoDoPedido } from "./DocumentosAnexados";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { EsforcoDaMaquina } from "./EsforcoDaMaquina";
 import { EsforcoHerdado } from "./EsforcoHerdado";
@@ -746,6 +747,20 @@ export class ServicoDeOrquestracao {
     vigia?.ligar();
 
     try {
+      const imagensDoTurno = anexosDoTurno.flatMap((anexo) =>
+        ehTipoDeImagem(anexo.tipoDeMidia)
+          ? [{ caminho: anexos.caminhoDe(orquestrador.id, anexo.arquivo), tipoDeMidia: anexo.tipoDeMidia }]
+          : [],
+      );
+      const documentosDoTurno: DocumentoDoPedido[] = await Promise.all(
+        anexosDoTurno
+          .filter((anexo) => (anexo.categoria ?? categoriaDoTipo(anexo.tipoDeMidia)) === "documento")
+          .map(async (anexo) => ({
+            nome: anexo.nome,
+            caminho: anexos.caminhoDe(orquestrador.id, anexo.arquivo),
+            caminhoDoTexto: await anexos.caminhoDoTexto(orquestrador.id, anexo.id),
+          })),
+      );
       resultado = await motor.executarTurno(
         {
           orquestradorId: orquestrador.id,
@@ -755,10 +770,8 @@ export class ServicoDeOrquestracao {
           configuracao: configuracaoDoTurno,
           modo,
           pastaDeTrabalho: pastaDoTurno,
-          imagens: anexosDoTurno.map((anexo) => ({
-            caminho: anexos.caminhoDe(orquestrador.id, anexo.arquivo),
-            tipoDeMidia: anexo.tipoDeMidia,
-          })),
+          imagens: imagensDoTurno,
+          documentos: documentosDoTurno,
           pastaDasImagens: anexosDoTurno.length > 0 ? anexos.pastaDe(orquestrador.id) : null,
           // Do Orquestrador, e não do worktree: os artefatos sobrevivem ao turno.
           pastaDeArtefatos: pastaDeArtefatos(orquestrador.id),

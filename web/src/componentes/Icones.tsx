@@ -173,6 +173,16 @@ export function IconeAnexo({ tamanho = 18, className = "" }: PropsDoIcone) {
   );
 }
 
+/** Documento: folha com a dobra no canto e linhas de texto. */
+export function IconeDocumento({ tamanho = 18, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" {...TRACO} />
+      <path d="M14 3v5h5M9 13h6M9 17h6" {...TRACO} />
+    </Quadro>
+  );
+}
+
 /** Microfone: ditar por voz. */
 export function IconeMicrofone({ tamanho = 18, className = "" }: PropsDoIcone) {
   return (

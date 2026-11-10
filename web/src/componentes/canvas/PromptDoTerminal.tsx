@@ -15,7 +15,8 @@ import { comandoDoPrompt, completarComando, dicaDeComando, dicaDePedidoGrande } 
 import { juntarDitado } from "../../shared/ditado/texto";
 import { formatarBytes } from "../../shared/formatacao";
 import { useMelhorarPrompt } from "../../shared/hooks/useMelhorarPrompt";
-import { type ImagemAnexada, TIPOS_DE_IMAGEM } from "../../shared/imagens";
+import { ACEITE_DE_ANEXOS, categoriaDoArquivo, type ImagemAnexada } from "../../shared/imagens";
+import { ChipDeDocumento } from "../ChipDeDocumento";
 import { BotaoDeDitado } from "../BotaoDeDitado";
 import { IconeAnexo, IconeFechar } from "../Icones";
 import { AvisoDaMelhoria, BotaoDeMelhorar } from "../MelhoriaDoPrompt";
@@ -351,7 +352,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
   }
 
   function aoColar(evento: ClipboardEvent<HTMLTextAreaElement>): void {
-    const arquivos = [...evento.clipboardData.files].filter((arquivo) => arquivo.type.startsWith("image/"));
+    const arquivos = [...evento.clipboardData.files].filter((arquivo) => categoriaDoArquivo(arquivo) !== null);
     if (arquivos.length > 0) {
       evento.preventDefault();
       aoAnexar(arquivos);
@@ -372,7 +373,15 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
       )}
       {imagens.length > 0 && (
         <div className="miniaturas-do-prompt">
-          {imagens.map((imagem) => (
+          {imagens.map((imagem) =>
+            imagem.categoria === "documento" ? (
+              <ChipDeDocumento
+                key={imagem.id}
+                nome={imagem.nome}
+                tamanhoEmBytes={imagem.tamanhoEmBytes}
+                aoRemover={() => aoRemoverImagem(imagem.id)}
+              />
+            ) : (
             <figure key={imagem.id} className="miniatura" title={`${imagem.nome} · ${formatarBytes(imagem.tamanhoEmBytes)}`}>
               <img src={imagem.previa} alt={imagem.nome} />
               <button
@@ -384,7 +393,8 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
                 <IconeFechar tamanho={11} />
               </button>
             </figure>
-          ))}
+            ),
+          )}
         </div>
       )}
       <div className="prompt-do-terminal">
@@ -408,14 +418,14 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
                 ? "trabalhando… escreva o próximo e enter põe na fila · esc cancela"
                 : planejando
                   ? "descreva o que planejar — nada é alterado até você aprovar"
-                  : "peça algo e pressione enter · cole ou arraste imagens"
+                  : "peça algo e pressione enter · cole ou arraste imagens e documentos"
           }
           aria-label="Mensagem para o orquestrador"
         />
         <input
           ref={seletor}
           type="file"
-          accept={TIPOS_DE_IMAGEM.join(",")}
+          accept={ACEITE_DE_ANEXOS}
           multiple
           hidden
           onChange={(evento) => {
@@ -431,7 +441,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
         <button
           type="button"
           className="botao-icone"
-          title="Anexar imagens (também dá para colar com Ctrl+V ou arrastar para o terminal)"
+          title="Anexar imagens ou documentos: PDF, Word, Excel, CSV, TXT, MD (também dá para colar com Ctrl+V ou arrastar para o terminal)"
           aria-label="Anexar imagens"
           onClick={() => seletor.current?.click()}
         >

@@ -1,6 +1,7 @@
 import { linhasDaRegraDasPerguntas } from "../perguntas/PerguntaDoApp";
 import { linhasDaRegraDaPrevia, linhasDasPreviasAbertas, REGRA_DA_PREVIA_NO_SUBAGENTE } from "../previas/PreviaDoApp";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
+import { DocumentoDoPedido, linhasDosDocumentos } from "./DocumentosAnexados";
 import { desarmarMarcas, InstrucoesAplicadas, linhasDasInstrucoes } from "./InstrucoesPersonalizadas";
 import { ModeloClaude } from "./ModeloClaude";
 import { ModoDoTurno } from "./ModoDoTurno";
@@ -339,6 +340,7 @@ export function mensagemParaOOrquestrador(
   subagentesProntos: readonly DadosDoSubagentePronto[] = [],
   plataforma: Plataforma = "unix",
   itensLigados: readonly ItemLigado[] = [],
+  documentos: readonly DocumentoDoPedido[] = [],
   previasAbertas: readonly string[] = [],
 ): string {
   const planejamento = modo === "planejamento";
@@ -385,6 +387,7 @@ export function mensagemParaOOrquestrador(
       (linha) => `- ${linha}`,
     ),
     ...imagens,
+    ...linhasDosDocumentos(documentos),
     ...linhasDasInstrucoes(instrucoes, MARCA_DA_CONFIGURACAO, revogarInstrucoesAnteriores),
     `</${MARCA_DA_CONFIGURACAO}>`,
     ...linhasDosItensLigados(itensLigados),

@@ -1,4 +1,4 @@
-import type { TipoDeImagem } from "../orquestracao/Anexo";
+import { categoriaDoTipo, type CategoriaDoAnexo, type TipoDeMidia } from "../orquestracao/Anexo";
 import { copiarPergunta, PerguntaDoApp } from "../perguntas/PerguntaDoApp";
 import type { AcaoDoApp } from "./AcaoDoApp";
 import type { UsoDaResposta } from "./MotorDeChat";
@@ -8,11 +8,16 @@ export type PapelNaConversa = "usuario" | "claude";
 
 export type SituacaoDaMensagem = "respondendo" | "concluida" | "falhou" | "cancelada";
 
-/** Imagem anexada a uma pergunta: o arquivo guardado e o nome original. */
+/**
+ * Anexo de uma pergunta (imagem ou documento; o nome do tipo ficou da época em
+ * que só havia imagens): o arquivo guardado e o nome original.
+ */
 export interface ImagemDaMensagem {
   arquivo: string;
   nome: string;
-  tipoDeMidia: TipoDeImagem;
+  tipoDeMidia: TipoDeMidia;
+  /** Ausente nas mensagens gravadas antes dos documentos: vale "imagem". */
+  categoria?: CategoriaDoAnexo;
 }
 
 /** O que o Claude tentou fazer e precisa da autorização do usuário. */
@@ -106,7 +111,7 @@ export class MensagemDoChat {
       dados.id,
       dados.papel,
       dados.texto,
-      dados.imagens ?? [],
+      (dados.imagens ?? []).map((imagem) => ({ ...imagem, categoria: imagem.categoria ?? categoriaDoTipo(imagem.tipoDeMidia) })),
       Date.parse(dados.criadaEm),
       dados.situacao,
       dados.acoes ?? [],

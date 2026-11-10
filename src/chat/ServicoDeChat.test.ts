@@ -114,6 +114,11 @@ class ArmazemFalso implements ArmazemDeAnexos {
   caminhoDe(id: string, arquivo: string): string {
     return path.join("/dados/anexos", id, arquivo);
   }
+  /** Ids de documentos cujo texto "foi extraído". */
+  readonly comTexto = new Set<string>();
+  async caminhoDoTexto(id: string, anexoId: string): Promise<string | null> {
+    return this.comTexto.has(anexoId) ? path.join("/dados/anexos", id, `${anexoId}.texto.txt`) : null;
+  }
   pastaDe(id: string): string {
     return path.join("/dados/anexos", id);
   }
@@ -413,8 +418,51 @@ describe("ServicoDeChat", () => {
       pastaDasImagens: path.join("/dados/anexos", "chat"),
     });
     expect(servico.estado().mensagens[0]?.imagens).toEqual([
-      { arquivo: "id1.png", nome: "print.png", tipoDeMidia: "image/png" },
+      { arquivo: "id1.png", nome: "print.png", tipoDeMidia: "image/png", categoria: "imagem" },
     ]);
+  });
+
+  it("guarda documentos e cita o original e o texto extraído na mensagem ao motor", async () => {
+    armazem.comTexto.add("id1");
+    await servico.perguntar({
+      texto: "resuma",
+      imagens: [{ nome: "relatorio.pdf", tipoDeMidia: "application/pdf", conteudo: new Uint8Array([1, 2, 3]) }],
+    });
+    await aguardarMotor();
+
+    const pergunta = motor.perguntas[0];
+    expect(armazem.guardados).toEqual(["chat/id1.pdf"]);
+    expect(pergunta?.imagens).toEqual([]);
+    expect(pergunta?.pastaDasImagens).toBe(path.join("/dados/anexos", "chat"));
+    expect(pergunta?.mensagem).toContain(`"relatorio.pdf": texto extraído em ${path.join("/dados/anexos", "chat", "id1.texto.txt")}`);
+    expect(pergunta?.mensagem).toContain(`(original: ${path.join("/dados/anexos", "chat", "id1.pdf")})`);
+    expect(servico.estado().mensagens[0]?.imagens).toEqual([
+      { arquivo: "id1.pdf", nome: "relatorio.pdf", tipoDeMidia: "application/pdf", categoria: "documento" },
+    ]);
+  });
+
+  it("avisa no prompt quando não foi possível extrair o texto, sem derrubar a mensagem", async () => {
+    await servico.perguntar({
+      texto: "veja",
+      imagens: [{ nome: "dados.csv", tipoDeMidia: "", conteudo: new Uint8Array([1]) }],
+    });
+    await aguardarMotor();
+
+    expect(motor.perguntas[0]?.mensagem).toContain('"dados.csv": não foi possível extrair o texto');
+    expect(servico.estado().mensagens[0]?.imagens[0]).toMatchObject({ tipoDeMidia: "text/csv", categoria: "documento" });
+  });
+
+  it("recusa mais de 5 documentos por mensagem", async () => {
+    const documentos = Array.from({ length: 6 }, (_, indice) => ({
+      nome: `d${indice}.txt`,
+      tipoDeMidia: "text/plain",
+      conteudo: new Uint8Array([1]),
+    }));
+
+    await expect(servico.perguntar({ texto: "oi", imagens: documentos })).rejects.toMatchObject({
+      motivo: "dados_invalidos",
+      message: expect.stringMatching(/até 5 documentos/),
+    });
   });
 
   it("recusa imagem de formato não suportado", async () => {
