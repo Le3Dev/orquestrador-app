@@ -16,6 +16,7 @@ function janelaFalsa({ destruida = false, mainFrame = FRAME_PRINCIPAL } = {}) {
 
 function montar({
   ativo = true,
+  manual = false,
   plataforma = "win32",
   janela = janelaFalsa(),
   fontes = [
@@ -32,6 +33,7 @@ function montar({
     screen,
     obterJanelaPrincipal: () => janela,
     modoInvisivelAtivo: () => estado.ativo,
+    escutaManualLigada: () => manual,
     plataforma,
     registrar,
   });
@@ -95,7 +97,26 @@ describe("criarRespostaAoPedidoDeMidia", () => {
 
     expect(responder).toHaveBeenCalledWith(null);
     expect(desktopCapturer.getSources).not.toHaveBeenCalled();
-    expect(registrar).toHaveBeenCalledWith(expect.stringContaining("modo invisível não está ativo"));
+    expect(registrar).toHaveBeenCalledWith(expect.stringContaining("escuta manual estão ativos"));
+  });
+
+  it("atende fora do modo invisível quando a escuta manual está ligada", async () => {
+    const { handler, desktopCapturer } = montar({ ativo: false, manual: true });
+    const responder = vi.fn();
+
+    await handler(pedido(), responder);
+
+    expect(desktopCapturer.getSources).toHaveBeenCalled();
+    expect(responder).toHaveBeenCalledWith({ video: { id: "screen:2:0", name: "Tela 2" }, audio: "loopback" });
+  });
+
+  it("a escuta manual não libera pedido de outra janela", async () => {
+    const { handler } = montar({ ativo: false, manual: true });
+    const responder = vi.fn();
+
+    await handler(pedido({ frame: { processId: 9, routingId: 1 } }), responder);
+
+    expect(responder).toHaveBeenCalledWith(null);
   });
 
   it("recusa fora do Windows", async () => {

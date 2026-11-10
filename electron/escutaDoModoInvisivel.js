@@ -50,6 +50,7 @@ function vemDaJanelaPrincipal(frame, janela) {
  * @param {{getDisplayMatching: Function}} p.screen
  * @param {() => (object|null)} p.obterJanelaPrincipal  BrowserWindow principal ou null
  * @param {() => boolean} p.modoInvisivelAtivo
+ * @param {() => boolean} [p.escutaManualLigada]  escuta ligada pelo botão, fora do modo invisível
  * @param {string} p.plataforma  process.platform
  * @param {(texto: string) => void} [p.registrar]
  * @returns {(pedido: object, responder: Function) => Promise<void>} a Promise
@@ -60,6 +61,7 @@ function criarRespostaAoPedidoDeMidia({
   screen,
   obterJanelaPrincipal,
   modoInvisivelAtivo,
+  escutaManualLigada,
   plataforma,
   registrar,
 }) {
@@ -78,7 +80,8 @@ function criarRespostaAoPedidoDeMidia({
 
   // Devolve o motivo da recusa, ou null quando o pedido pode ser atendido.
   function motivoDaRecusa(pedido, janela) {
-    if (!modoInvisivelAtivo()) return "o modo invisível não está ativo.";
+    const manual = typeof escutaManualLigada === "function" && escutaManualLigada();
+    if (!modoInvisivelAtivo() && !manual) return "nem o modo invisível nem a escuta manual estão ativos.";
     if (plataforma !== PLATAFORMA_DA_ESCUTA) return `a escuta do áudio do sistema só existe no Windows (plataforma: ${plataforma}).`;
     if (!vemDaJanelaPrincipal(pedido?.frame, janela)) return "o pedido não veio da janela principal.";
     if (!pedido.audioRequested) return "o pedido não inclui áudio.";

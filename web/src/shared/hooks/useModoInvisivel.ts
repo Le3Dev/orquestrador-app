@@ -13,6 +13,10 @@ export interface ModoInvisivel {
   ativo: boolean;
   /** A escuta do áudio do sistema funciona aqui (só no app desktop no Windows). */
   escutaDisponivel: boolean;
+  /** O usuário ligou a escuta pelo botão, fora do modo invisível. */
+  escutaManualLigada: boolean;
+  /** Liga/desliga a escuta manual (avisa o processo principal antes de marcar o estado). */
+  alternarEscutaManual: () => Promise<void>;
   /** Se entrar ou sair falhar, preenche `erro`. */
   entrar: () => Promise<void>;
   sair: () => Promise<void>;
@@ -48,6 +52,9 @@ async function consultarEstado(api: ApiDoModoInvisivel): Promise<boolean> {
  */
 const ultimoEstadoAvisado = new WeakMap<ApiDoModoInvisivel, boolean>();
 
+/** Escuta manual ligada, por ponte: sobrevive à remontagem do chat (fixo/flutuante). */
+const escutaManualPorPonte = new WeakMap<ApiDoModoInvisivel, boolean>();
+
 /**
  * O modo invisível do app desktop. O estado vem do aviso do processo principal
  * (que também avisa a saída pelo atalho Ctrl+Shift+I), então todas as telas que
@@ -59,6 +66,9 @@ export function useModoInvisivel(): ModoInvisivel {
   const [api] = useState(apiDoModoInvisivel);
   const [ativo, setAtivo] = useState(() => api !== null && ultimoEstadoAvisado.get(api) === true);
   const [comecouAtivo] = useState(ativo);
+  const [escutaManualLigada, setEscutaManualLigada] = useState(
+    () => api !== null && escutaManualPorPonte.get(api) === true,
+  );
   const [erro, setErro] = useState<string | null>(null);
   const montado = useRef(true);
 
@@ -167,10 +177,35 @@ export function useModoInvisivel(): ModoInvisivel {
 
   const descartarErro = useCallback(() => setErro(null), []);
 
+  // Primeiro avisa o processo principal e só depois marca o estado: a sessão da
+  // escuta pede o getDisplayMedia ao ver o estado, e o clique ainda conta como gesto.
+  const alternarEscutaManual = useCallback(async () => {
+    if (api === null || typeof api.definirEscutaLigada !== "function") {
+      return;
+    }
+    const ligar = !escutaManualLigada;
+    setErro(null);
+    try {
+      if (ligar) {
+        await api.definirEscutaLigada(true);
+        escutaManualPorPonte.set(api, true);
+        if (montado.current) setEscutaManualLigada(true);
+      } else {
+        escutaManualPorPonte.set(api, false);
+        if (montado.current) setEscutaManualLigada(false);
+        await api.definirEscutaLigada(false);
+      }
+    } catch (falha) {
+      setErro(`Não foi possível ${ligar ? "ligar" : "desligar"} a escuta: ${falha instanceof Error ? falha.message : String(falha)}`);
+    }
+  }, [api, escutaManualLigada]);
+
   return {
     disponivel: api !== null,
     ativo,
     escutaDisponivel: api !== null && api.escutaDisponivel === true,
+    escutaManualLigada,
+    alternarEscutaManual,
     entrar,
     sair,
     erro,

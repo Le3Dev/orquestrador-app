@@ -214,48 +214,26 @@ body.redimensionando-chat-lateral iframe { pointer-events: none; }
   font-size: 11.5px;
 }
 .cabecalho-da-faixa-da-escuta { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.alternar-faixa-da-escuta {
-  display: inline-flex;
-  flex: 1 1 auto;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  height: 24px;
-  padding: 0 4px;
-  border-radius: 6px;
-  color: var(--secondary);
-  text-align: left;
-  cursor: pointer;
-}
-.alternar-faixa-da-escuta:hover { background: var(--surface-3); color: var(--primary); }
-.alternar-faixa-da-escuta:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
-.seta-da-faixa-da-escuta { flex: none; width: 10px; font-size: 10px; color: var(--muted); }
-.resumo-da-faixa-da-escuta {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--caption);
-}
+.cabecalho-da-faixa-da-escuta { padding: 0 4px; }
 .interruptor.interruptor-da-escuta { flex: none; height: 24px; gap: 6px; font-size: 11.5px; }
-.corpo-da-faixa-da-escuta { display: flex; flex-direction: column; gap: 4px; padding: 0 4px; }
-.corpo-da-faixa-da-escuta[hidden] { display: none; }
-.linhas-da-escuta {
+
+/* Transcrição da escuta dentro da conversa: blocos discretos, diferentes da bolha do usuário. */
+.trecho-ouvido {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  max-height: 96px;
+  gap: 2px;
   margin: 0;
-  padding: 0;
-  overflow-y: auto;
-  list-style: none;
+  padding: 4px 8px;
+  border-radius: var(--radius-card);
+  border: 1px dashed color-mix(in srgb, var(--info) 40%, var(--border));
+  font-size: 11.5px;
   line-height: 1.4;
   color: var(--secondary);
   user-select: text;
 }
-/* A linha mais nova em destaque; as anteriores apagadas. */
-.linhas-da-escuta > li:last-child { color: var(--caption); }
+.trecho-ouvido-texto { margin: 0; overflow-wrap: anywhere; }
+/* O que está sendo dito agora: provisório, muda ao vivo. */
+.trecho-ouvido-provisorio { border-style: dotted; color: var(--caption); font-style: italic; opacity: .85; }
 .download-da-escuta { display: flex; flex-direction: column; gap: 3px; }
 .trilho-do-download-da-escuta { height: 4px; border-radius: 2px; overflow: hidden; background: var(--surface-3); }
 .barra-do-download-da-escuta { display: block; height: 100%; background: var(--info); transition: width .2s ease-out; }

@@ -54,6 +54,9 @@ const escutaSimulada = vi.hoisted(() => ({
   confirmarAviso: vi.fn(),
   recusarAviso: vi.fn(),
   pausar: vi.fn(),
+  linhaProvisoria: null as string | null,
+  trechos: [] as readonly { id: string; texto: string; inicioMs: number; fimMs: number }[],
+  limparTrechos: vi.fn(),
 }));
 
 vi.mock("../../shared/escuta/useEscuta", () => ({
@@ -61,13 +64,16 @@ vi.mock("../../shared/escuta/useEscuta", () => ({
     escutaSimulada.opcoes = opcoes;
     const situacao: SituacaoDaEscuta = !opcoes.escutaDisponivel
       ? "indisponivel"
-      : opcoes.modoInvisivelAtivo
+      : opcoes.modoInvisivelAtivo || opcoes.escutaManualLigada
         ? escutaSimulada.situacaoNoModo
         : "desligada";
     return {
       situacao,
       progressoDoDownload: null,
-      linhas: ["qual é a complexidade disso?"],
+      linhas: [],
+      linhaProvisoria: escutaSimulada.linhaProvisoria,
+      trechos: escutaSimulada.trechos,
+      limparTrechos: escutaSimulada.limparTrechos,
       automatico: true,
       alternarAutomatico: () => undefined,
       pausar: escutaSimulada.pausar,
@@ -88,6 +94,9 @@ beforeEach(() => {
   escutaSimulada.confirmarAviso = vi.fn();
   escutaSimulada.recusarAviso = vi.fn();
   escutaSimulada.pausar = vi.fn();
+  escutaSimulada.linhaProvisoria = null;
+  escutaSimulada.trechos = [];
+  escutaSimulada.limparTrechos = vi.fn();
 });
 
 /** As opções que o chat passou à escuta no último render. */
@@ -427,7 +436,6 @@ describe("ChatRapido · modo invisível", () => {
       expect(olho.nextElementSibling).toBe(indicador());
       expect(indicador()).toHaveTextContent("escutando");
       expect(screen.getByTestId("chat-rapido")).toContainElement(faixa());
-      expect(faixa()).toHaveTextContent("qual é a complexidade disso?");
 
       fireEvent.click(screen.getByRole("button", { name: "Pausar a escuta" }));
       expect(escutaSimulada.pausar).toHaveBeenCalledTimes(1);
@@ -435,6 +443,80 @@ describe("ChatRapido · modo invisível", () => {
       desativar();
       expect(indicador()).not.toBeInTheDocument();
       expect(faixa()).not.toBeInTheDocument();
+    });
+
+    it("o botão 🎧 liga a escuta fora do modo: avisa a ponte e só depois marca o estado", async () => {
+      let resolver: () => void = () => undefined;
+      const { modoInvisivel } = ponteAtiva(undefined, true);
+      const definirEscutaLigada = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            resolver = resolve;
+          }),
+      );
+      Object.assign(modoInvisivel, { definirEscutaLigada });
+      renderizar();
+      const botao = screen.getByRole("button", { name: "Escuta do áudio" });
+      expect(botao).toHaveAttribute("aria-pressed", "false");
+      expect(opcoesDaEscuta().escutaManualLigada).toBe(false);
+      expect(indicador()).not.toBeInTheDocument();
+
+      fireEvent.click(botao);
+      expect(definirEscutaLigada).toHaveBeenCalledWith(true);
+      // Ainda não resolveu: a sessão não pode pedir o áudio antes da ponte.
+      expect(opcoesDaEscuta().escutaManualLigada).toBe(false);
+
+      await act(async () => resolver());
+      expect(opcoesDaEscuta().escutaManualLigada).toBe(true);
+      expect(screen.getByRole("button", { name: "Escuta do áudio" })).toHaveAttribute("aria-pressed", "true");
+      expect(indicador()).toBeInTheDocument();
+      expect(faixa()).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Escuta do áudio" }));
+      await waitFor(() => expect(opcoesDaEscuta().escutaManualLigada).toBe(false));
+      await waitFor(() => expect(definirEscutaLigada).toHaveBeenLastCalledWith(false));
+      resolver();
+    });
+
+    it("sem a escuta disponível, não há botão 🎧", () => {
+      ponteAtiva();
+      renderizar();
+      expect(screen.queryByRole("button", { name: "Escuta do áudio" })).not.toBeInTheDocument();
+    });
+
+    it("os trechos ouvidos entram na conversa pelo horário, com a provisória no fim", () => {
+      escutaSimulada.trechos = [
+        { id: "t1", texto: "antes de tudo", inicioMs: Date.parse("2026-11-04T11:59:00Z"), fimMs: 0 },
+        { id: "t2", texto: "entre as mensagens", inicioMs: Date.parse("2026-11-04T12:00:30Z"), fimMs: 0 },
+      ];
+      escutaSimulada.linhaProvisoria = "dizendo agora";
+      renderizar({
+        ...OCIOSO,
+        mensagens: [
+          mensagem("u1", "usuario", { texto: "primeira", criadaEm: "2026-11-04T12:00:00Z" }),
+          mensagem("c1", "claude", { texto: "resposta", criadaEm: "2026-11-04T12:01:00Z" }),
+        ],
+      });
+
+      const secao = screen.getByRole("region", { name: "Conversa com o Claude" });
+      const texto = secao.textContent ?? "";
+      expect(texto.indexOf("antes de tudo")).toBeLessThan(texto.indexOf("primeira"));
+      expect(texto.indexOf("primeira")).toBeLessThan(texto.indexOf("entre as mensagens"));
+      expect(texto.indexOf("entre as mensagens")).toBeLessThan(texto.indexOf("resposta"));
+      expect(texto.indexOf("resposta")).toBeLessThan(texto.indexOf("dizendo agora"));
+      expect(screen.getByTestId("trecho-provisorio")).toHaveAttribute("aria-live", "polite");
+      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(2);
+    });
+
+    it("com trechos e sem mensagens, a conversa aparece; /clear limpa os trechos", async () => {
+      vi.spyOn(api, "limparChat").mockResolvedValue(undefined as never);
+      escutaSimulada.trechos = [{ id: "t1", texto: "só áudio", inicioMs: 1, fimMs: 2 }];
+      const { campo } = renderizar();
+      expect(screen.getByText("só áudio")).toBeInTheDocument();
+
+      fireEvent.change(campo, { target: { value: "/clear" } });
+      fireEvent.keyDown(campo, { key: "Enter" });
+      await waitFor(() => expect(escutaSimulada.limparTrechos).toHaveBeenCalled());
     });
 
     it("sem a escuta disponível, o modo ativo não mostra indicador nem faixa", () => {

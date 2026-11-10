@@ -95,6 +95,8 @@ contextBridge.exposeInMainWorld("electron", {
     // A escuta do áudio do sistema (getDisplayMedia + loopback) só existe no
     // Windows. process.platform faz parte do `process` do preload com sandbox.
     escutaDisponivel: process.platform === "win32",
+    // Liga/desliga a escuta fora do modo invisível (botão do chat).
+    definirEscutaLigada: (ligada) => ipcRenderer.invoke("escuta:definir-ligada", Boolean(ligada)).then(() => undefined),
   },
 
   // Vista nativa da Prévia (electron/vistaDaPrevia.js). `id` é o previaId.

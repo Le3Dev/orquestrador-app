@@ -90,6 +90,12 @@ export interface ApiDoModoInvisivel {
    * funciona nesta plataforma: hoje só no Windows.
    */
   escutaDisponivel: boolean;
+  /**
+   * Liga/desliga a escuta fora do modo invisível (botão do chat): o processo
+   * principal passa a atender o getDisplayMedia com o áudio do sistema.
+   * Opcional para pontes antigas.
+   */
+  definirEscutaLigada?(ligada: boolean): Promise<void>;
 }
 
 /** Onde o corpo da prévia está na tela (pixels CSS da janela) e a escala do canvas. */
