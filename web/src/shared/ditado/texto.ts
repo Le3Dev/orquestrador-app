@@ -9,11 +9,35 @@ export function juntarDitado(atual: string, ditado: string): string {
   return /\s$/.test(atual) ? `${atual}${novo}` : `${atual} ${novo}`;
 }
 
+/** Aviso quando o microfone fica sem som por alguns segundos. */
+export const TEXTO_DO_SILENCIO = "Não estou ouvindo nada, confira o microfone";
+
+/** O que o leitor de tela anuncia a cada mudança de fase do ditado (região educada, sempre presente). */
+export function anuncioDoDitado(
+  fase: "parado" | "pedindo-microfone" | "gravando" | "transcrevendo",
+  baixando: number | null,
+  inserido: boolean,
+): string {
+  if (fase === "pedindo-microfone") return "Permita o acesso ao microfone.";
+  if (fase === "gravando") return "Gravando. Enter conclui, Esc descarta.";
+  if (fase === "transcrevendo") {
+    return baixando !== null ? "Baixando o modelo de voz, só na primeira vez." : "Transcrevendo o áudio.";
+  }
+  return inserido ? "Texto adicionado ao campo." : "";
+}
+
+/** Segundos de gravação como "mm:ss" (ex.: 65 vira "01:05"). */
+export function formatarCronometro(segundos: number): string {
+  const total = Math.max(0, Math.floor(segundos));
+  const minutos = Math.floor(total / 60);
+  return `${String(minutos).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
 /** Mensagem para a pessoa a partir do erro do microfone ou do modelo. */
 export function mensagemDoErroDeDitado(erro: unknown): string {
   const nome = erro instanceof DOMException ? erro.name : "";
   if (nome === "NotAllowedError" || nome === "SecurityError") {
-    return "O acesso ao microfone foi negado. Libere em Ajustes do Sistema › Privacidade e Segurança › Microfone.";
+    return "O acesso ao microfone foi negado. No Mac, libere em Ajustes do Sistema › Privacidade e Segurança › Microfone (ative este app) e tente de novo.";
   }
   if (nome === "NotFoundError" || nome === "OverconstrainedError") {
     return "Nenhum microfone encontrado.";

@@ -27,7 +27,9 @@ vi.mock("../../shared/ditado/useDitado", async () => {
       return {
         fase,
         baixando: null,
+        segundosDeAudio: null,
         erro: null,
+        lerNivel: () => null,
         alternar: () => {
           if (ditadoFalso.pedirPermissao && fase === "parado") {
             setFase("pedindo-microfone");
