@@ -18,12 +18,13 @@ function naoPropagar(evento: SyntheticEvent): void {
 }
 
 /**
- * Onde a tela cheia começa: logo abaixo da barra de título do app desktop, que
- * fica inteira e clicável (os botões da janela do sistema, o arraste). No
- * navegador não há barra, e o topo é o da janela.
+ * Onde a tela cheia começa: logo abaixo da faixa de arraste do app desktop (36 px
+ * transparentes no topo, onde o Mac põe as bolinhas da janela), que fica inteira e
+ * livre para arrastar e para os botões do sistema. No navegador não há faixa, e o
+ * topo é o da janela.
  */
 function topoDaTelaCheia(): number {
-  return document.querySelector(".barra-de-titulo")?.getBoundingClientRect().bottom ?? 0;
+  return document.querySelector(".faixa-de-arrasto")?.getBoundingClientRect().bottom ?? 0;
 }
 
 /**
@@ -113,7 +114,6 @@ export function JanelaEmTelaCheia({
           {selo}
           <span className="flex-1" />
           {navegacao}
-          <span className="text-support">Esc fecha</span>
           <ControlesDoNo lado="fim" objeto="a tela cheia" aoFechar={aoFechar} dicaDoFechar="Fechar a tela cheia (Esc)" />
         </div>
         <div ref={corpoRef} className="corpo-da-tela-cheia">

@@ -1481,6 +1481,9 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
  * o mouse: passar por cima do iframe perderia o arraste. */
 .canvas-movendo .corpo-do-artefato-html,
 .moldura-do-artefato-redimensionando .corpo-do-artefato-html { pointer-events: none; }
+/* Com uma ferramenta de desenho na mão, a página também fica sem o mouse: o traço passa por cima
+ * dela, mesmo que ela estivesse ativa (usar a página) quando a caneta foi escolhida pelo teclado. */
+.react-flow:has(.camada-de-desenho-ativa) .corpo-do-artefato-html { pointer-events: none; }
 
 .corpo-do-artefato-markdown {
   flex: 1;
@@ -1650,7 +1653,8 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 /* Um iframe captura o mouse: enquanto algo é arrastado, redimensionado ou o
  * canvas se move, os sites ficam sem eventos para o gesto não se perder. */
 .canvas-movendo .quadro-da-previa,
-.canvas-redimensionando .quadro-da-previa { pointer-events: none; }
+.canvas-redimensionando .quadro-da-previa,
+.react-flow:has(.camada-de-desenho-ativa) .quadro-da-previa { pointer-events: none; }
 
 /* A camada de ativar (QuadroAtivavel) sobre o iframe da prévia e do artefato
  * HTML: transparente, sem `nowheel`, para a roda e a pinça moverem o canvas

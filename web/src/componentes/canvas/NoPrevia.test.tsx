@@ -352,9 +352,9 @@ describe("NoPrevia", () => {
       expect(screen.getByRole("button", { name: "Ampliar a prévia" })).toBeDisabled();
     });
 
-    it("o modal começa abaixo da barra de título do app", () => {
-      const barra = document.createElement("header");
-      barra.className = "barra-de-titulo";
+    it("o modal começa abaixo da faixa de arraste do app", () => {
+      const barra = document.createElement("div");
+      barra.className = "faixa-de-arrasto";
       barra.getBoundingClientRect = () => ({ bottom: 36 }) as DOMRect;
       document.body.append(barra);
       renderizar();
