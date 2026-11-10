@@ -168,7 +168,7 @@ describe("motor nativo (a porta para o utilitário)", () => {
     ]);
   });
 
-  it("transcrever manda uma cópia transferida do áudio e devolve o resultado com segmentos e idioma", async () => {
+  it("transcrever manda o áudio sem transferir o buffer e devolve o resultado com segmentos e idioma", async () => {
     const { conexao, motor } = montar();
     const original = audio(7);
     const resultado = motor.transcrever(original, { origem: "escuta", idioma: "automatico" });
@@ -176,10 +176,11 @@ describe("motor nativo (a porta para o utilitário)", () => {
 
     const [pedido] = conexao.porta.pedidos;
     expect(pedido).toMatchObject({ tipo: "transcrever", origem: "escuta", idioma: "automatico", descartavel: false });
-    // O áudio de quem pediu segue intacto (a reserva pode refazer o pedido).
-    expect(pedido?.audio).not.toBe(original);
     expect(Array.from(pedido?.audio ?? [])).toEqual([7, 7, 7]);
-    expect(conexao.porta.transferidos.at(-1)?.[0]).toBe(pedido?.audio.buffer);
+    // Com um ArrayBuffer na lista de transferência, o Electron entrega `null` ao processo principal
+    // (MessagePortMain) e o pedido some: a lista vai vazia, e o áudio de quem pediu segue intacto.
+    expect(conexao.porta.transferidos.at(-1)).toEqual([]);
+    expect(original.byteLength).toBe(12);
     expect(original[0]).toBe(7);
 
     const esperado: ResultadoDaTranscricao = {

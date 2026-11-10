@@ -320,16 +320,18 @@ export function criarMotorNativo(conexao: ConexaoDaTranscricaoNativa): MotorNati
       if (prioridade !== undefined && !preparadasNaPorta.has(pedido.origem)) {
         enviarPreparo(destino, pedido.origem, prioridade);
       }
-      const copia = pedido.audio.slice();
       const mensagem: MensagemParaOUtilitario = {
         tipo: "transcrever",
         id: pedido.id,
         origem: pedido.origem,
-        audio: copia,
+        audio: pedido.audio,
         idioma: pedido.idioma,
         descartavel: pedido.descartavel,
       };
-      destino.postMessage(mensagem, [copia.buffer]);
+      // Sem lista de transferência: a outra ponta é uma MessagePortMain do processo principal, e o
+      // Electron entrega `null` lá quando a mensagem traz um ArrayBuffer transferido (o pedido sumia
+      // e a fila ficava presa). A porta copia o áudio; o de quem pediu segue intacto para a reserva.
+      destino.postMessage(mensagem, []);
     },
     aoAndar: () => descarga.reiniciar(),
   });
