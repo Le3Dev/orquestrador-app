@@ -124,9 +124,9 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   white-space: nowrap;
   cursor: pointer;
 }
-.icone-do-botao-novo { color: var(--active); }
-.botao-novo:hover, .botao-novo[aria-expanded="true"] { background: var(--surface-3); }
-.botao-novo:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
+.icone-do-botao-novo { color: inherit; }
+.botao-novo:hover, .botao-novo[aria-expanded="true"] { background: var(--active-forte); border-color: var(--active-forte); }
+.botao-novo:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 /* O menu cai para baixo da ilha; o submenu abre à direita do item. */
 .menu-novo, .submenu-novo {
@@ -363,11 +363,11 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
 .botao-da-ilha-vertical[aria-pressed="true"]::before,
 .botao-da-ilha-vertical[aria-pressed="true"] + .botao-da-ilha-vertical::before { opacity: 0; }
 
-/* A barra de desenho abre numa ilha ao lado da vertical (esquerda 66 = 16 + 42 + 8 de respiro, base 16). */
+/* A barra de desenho abre numa ilha ao lado da vertical (esquerda 59 = 16 + 35 + 8 de respiro, base 16). */
 .react-flow__panel.painel-da-barra-de-desenho.bottom.left {
   position: absolute;
   bottom: 16px;
-  left: 66px;
+  left: 59px;
   margin: 0;
   z-index: 6;
 }
