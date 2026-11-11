@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { z } from "zod";
 
-import { TIPOS_DE_IMAGEM } from "../../orquestracao/Anexo";
+import { CATEGORIAS_DO_ANEXO, categoriaPeloTipoDeMidia } from "../../orquestracao/Anexo";
 import { ESFORCOS_DE_RACIOCINIO } from "../../orquestracao/EsforcoDeRaciocinio";
 import { EventoDeOrquestracao, EventoRegistrado } from "../../orquestracao/EventoDeOrquestracao";
 import { TIPOS_DE_ITEM_LIGADO } from "../../orquestracao/InstrucoesDoOrquestrador";
@@ -79,13 +79,20 @@ const esquemaDoArquivo = z.object({
       ),
       anexos: z
         .array(
-          z.object({
-            id: z.string(),
-            nome: z.string(),
-            tipoDeMidia: z.enum(TIPOS_DE_IMAGEM),
-            tamanhoEmBytes: z.number(),
-            arquivo: z.string(),
-          }),
+          z
+            .object({
+              id: z.string(),
+              nome: z.string(),
+              tipoDeMidia: z.string(),
+              tamanhoEmBytes: z.number(),
+              arquivo: z.string(),
+              // Turnos gravados antes dos documentos não têm a categoria: só tinham imagens.
+              categoria: z.enum(CATEGORIAS_DO_ANEXO).optional(),
+            })
+            .transform((anexo) => ({
+              ...anexo,
+              categoria: anexo.categoria ?? categoriaPeloTipoDeMidia(anexo.tipoDeMidia),
+            })),
         )
         .default([]),
       modo: z.enum(MODOS_DO_TURNO).default("execucao"),

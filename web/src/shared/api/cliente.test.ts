@@ -38,6 +38,43 @@ describe("api", () => {
     expect(corpoEnviado(buscar)).toEqual({ texto: "Como inverter a lista?", origem: "escuta" });
   });
 
+  it("perguntarNoChat manda `anexos` (e não `imagens`) só quando há algum, com o tipo vazio se o arquivo não tem", async () => {
+    const buscar = vi.fn<Buscar>(async () => respostaJson({ mensagemId: "m3" }));
+    vi.stubGlobal("fetch", buscar);
+    const anexos = [
+      { nome: "foto.png", tipoDeMidia: "image/png", base64: "cG5n" },
+      { nome: "notas.md", tipoDeMidia: "", base64: "IyBub3Rhcw==" },
+    ];
+
+    await api.perguntarNoChat("Veja", anexos);
+    const corpo = corpoEnviado(buscar);
+    expect(corpo).toEqual({ texto: "Veja", anexos });
+    expect(corpo).not.toHaveProperty("imagens");
+
+    await api.perguntarNoChat("Veja", anexos, { origem: "escuta" });
+    expect(corpoEnviado(buscar)).toEqual({ texto: "Veja", anexos, origem: "escuta" });
+  });
+
+  it("enviarMensagem manda `anexos` no corpo, sempre (vazio se não há), e nunca `imagens`", async () => {
+    const buscar = vi.fn<Buscar>(async () => respostaJson({ turnoId: "t1" }));
+    vi.stubGlobal("fetch", buscar);
+    const anexos = [{ nome: "contrato.pdf", tipoDeMidia: "application/pdf", base64: "cGRm" }];
+
+    await api.enviarMensagem("o1", "Resuma", anexos, "planejamento");
+    expect(buscar.mock.lastCall?.[0]).toBe("/api/orquestradores/o1/mensagens");
+    const corpo = corpoEnviado(buscar);
+    expect(corpo).toEqual({ texto: "Resuma", anexos, modo: "planejamento" });
+    expect(corpo).not.toHaveProperty("imagens");
+
+    await api.enviarMensagem("o1", "Oi");
+    expect(corpoEnviado(buscar)).toEqual({ texto: "Oi", anexos: [], modo: "execucao" });
+  });
+
+  it("os endereços dos anexos de documento e de imagem são os mesmos, com o nome do arquivo codificado", () => {
+    expect(api.enderecoDoAnexo("o1", "a1.pdf")).toBe("/api/orquestradores/o1/anexos/a1.pdf");
+    expect(api.enderecoDoAnexoDoChat("b 2.docx")).toBe("/api/chat/anexos/b%202.docx");
+  });
+
   it("classificarNaEscuta manda o trecho e o contexto e devolve a classificação", async () => {
     const buscar = vi.fn<Buscar>(async () =>
       respostaJson({ ehPergunta: true, pergunta: "Como inverter uma lista ligada?" }),
@@ -113,11 +150,11 @@ describe("itens ligados no pedido", () => {
     const buscar = vi.spyOn(globalThis, "fetch").mockResolvedValue(respostaJson({ turnoId: "t1" }));
 
     await api.enviarMensagem("o1", "olá", [], "execucao", itens);
-    expect(corpoEnviado(buscar)).toEqual({ texto: "olá", imagens: [], modo: "execucao", itensLigados: itens });
+    expect(corpoEnviado(buscar)).toEqual({ texto: "olá", anexos: [], modo: "execucao", itensLigados: itens });
 
     buscar.mockClear();
     await api.enviarMensagem("o1", "olá", [], "execucao", []);
-    expect(corpoEnviado(buscar)).toEqual({ texto: "olá", imagens: [], modo: "execucao" });
+    expect(corpoEnviado(buscar)).toEqual({ texto: "olá", anexos: [], modo: "execucao" });
   });
 
   it("o pedido na fila também", async () => {
@@ -137,11 +174,11 @@ describe("itens ligados no pedido", () => {
     const previas = ["http://localhost:5173"];
 
     await api.enviarMensagem("o1", "olá", [], "execucao", [], previas);
-    expect(corpoEnviado(buscar)).toEqual({ texto: "olá", imagens: [], modo: "execucao", previasAbertas: previas });
+    expect(corpoEnviado(buscar)).toEqual({ texto: "olá", anexos: [], modo: "execucao", previasAbertas: previas });
 
     buscar.mockClear();
     await api.enviarMensagem("o1", "olá", [], "execucao", itens, []);
-    expect(corpoEnviado(buscar)).toEqual({ texto: "olá", imagens: [], modo: "execucao", itensLigados: itens });
+    expect(corpoEnviado(buscar)).toEqual({ texto: "olá", anexos: [], modo: "execucao", itensLigados: itens });
 
     buscar.mockClear();
     await api.enfileirarPedido("o1", "depois", "execucao", itens, previas);

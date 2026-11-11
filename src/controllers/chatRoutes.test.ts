@@ -156,16 +156,48 @@ describe("rotas do chat", () => {
     await aguardarOcioso();
   });
 
-  it("POST /chat/mensagens recusa texto vazio sem imagens e imagem de formato inválido com 400", async () => {
+  it("POST /chat/mensagens recusa texto vazio sem anexos e anexo de formato inválido com 400", async () => {
     const vazio = await enviar("/chat/mensagens", "POST", { texto: "   " });
     expect(vazio.status).toBe(400);
-    expect(await vazio.json()).toEqual({ erro: "Escreva uma mensagem ou anexe uma imagem." });
+    expect(await vazio.json()).toEqual({ erro: "Escreva uma mensagem ou anexe um arquivo." });
+
+    const imagemInvalida = await enviar("/chat/mensagens", "POST", {
+      texto: "oi",
+      anexos: [{ nome: "a.bmp", tipoDeMidia: "image/bmp", base64: PNG }],
+    });
+    expect(imagemInvalida.status).toBe(400);
+    expect(((await imagemInvalida.json()) as { erro: string }).erro).toContain("PNG, JPEG, GIF ou WebP");
 
     const formato = await enviar("/chat/mensagens", "POST", {
       texto: "oi",
-      imagens: [{ nome: "a.bmp", tipoDeMidia: "image/bmp", base64: PNG }],
+      anexos: [{ nome: "programa.exe", tipoDeMidia: "", base64: PNG }],
     });
     expect(formato.status).toBe(400);
+    expect(((await formato.json()) as { erro: string }).erro).toContain("não dá para anexar");
+    expect(motor.perguntas).toHaveLength(0);
+  });
+
+  it("POST /chat/mensagens recusa mais de 10 anexos e a 6ª imagem com a mensagem do domínio", async () => {
+    const documento = { nome: "a.pdf", tipoDeMidia: "application/pdf", base64: PNG };
+    const muitos = await enviar("/chat/mensagens", "POST", { texto: "oi", anexos: Array.from({ length: 11 }, () => documento) });
+    expect(muitos.status).toBe(400);
+    expect(await muitos.json()).toEqual({ erro: "Anexe até 10 arquivos por mensagem." });
+
+    const imagem = { nome: "a.png", tipoDeMidia: "image/png", base64: PNG };
+    const seis = await enviar("/chat/mensagens", "POST", { texto: "oi", anexos: Array.from({ length: 6 }, () => imagem) });
+    expect(seis.status).toBe(400);
+    expect(await seis.json()).toEqual({ erro: "Anexe até 5 imagens por mensagem." });
+    expect(motor.perguntas).toHaveLength(0);
+  });
+
+  it("POST /chat/mensagens ignora o campo antigo `imagens`: só `anexos` vale", async () => {
+    const resposta = await enviar("/chat/mensagens", "POST", {
+      texto: "",
+      imagens: [{ nome: "print.png", tipoDeMidia: "image/png", base64: PNG }],
+    });
+
+    expect(resposta.status).toBe(400);
+    expect(await resposta.json()).toEqual({ erro: "Escreva uma mensagem ou anexe um arquivo." });
   });
 
   it("POST /chat/mensagens aceita origem 'escuta', grava na mensagem e manda no SSE", async () => {
@@ -225,22 +257,75 @@ describe("rotas do chat", () => {
     expect(motor.perguntas).toHaveLength(1);
   });
 
-  it("aceita só imagem e serve o anexo em GET /chat/anexos/:arquivo, protegendo o caminho", async () => {
+  it("aceita só imagem e serve o anexo inline em GET /chat/anexos/:arquivo, protegendo o caminho", async () => {
     const resposta = await enviar("/chat/mensagens", "POST", {
       texto: "",
-      imagens: [{ nome: "print.png", tipoDeMidia: "image/png", base64: PNG }],
+      anexos: [{ nome: "print.png", tipoDeMidia: "image/png", base64: PNG }],
     });
     expect(resposta.status).toBe(202);
     await expect.poll(() => motor.perguntas.length).toBe(1);
-    const estado = (await (await fetch(`${base}/chat`)).json()) as { mensagens: { imagens: { arquivo: string }[] }[] };
-    const arquivo = estado.mensagens[0]?.imagens[0]?.arquivo ?? "";
+    const estado = (await (await fetch(`${base}/chat`)).json()) as { mensagens: { anexos: { arquivo: string }[] }[] };
+    const arquivo = estado.mensagens[0]?.anexos[0]?.arquivo ?? "";
 
     const imagem = await fetch(`${base}/chat/anexos/${arquivo}`);
     expect(imagem.status).toBe(200);
+    expect(imagem.headers.get("content-type")).toBe("image/png");
+    expect(imagem.headers.get("content-disposition")).toBeNull();
     expect(Buffer.from(await imagem.arrayBuffer()).toString("base64")).toBe(PNG);
 
     expect((await fetch(`${base}/chat/anexos/..%5C..%5Cconversa.json`)).status).toBe(404);
     expect((await fetch(`${base}/chat/anexos/nao-existe.png`)).status).toBe(404);
+    expect((await fetch(`${base}/chat/anexos/nao-existe.pdf`)).status).toBe(404);
+
+    motor.terminar(sucesso("ok"));
+    await aguardarOcioso();
+  });
+
+  it("aceita só documentos (com o tipo vazio) e entrega cada um como download, nunca inline", async () => {
+    const html = Buffer.from("<script>alert(1)</script>").toString("base64");
+    const resposta = await enviar("/chat/mensagens", "POST", {
+      texto: "",
+      anexos: [
+        { nome: "pagina.html", tipoDeMidia: "text/html", base64: html },
+        { nome: "notas.md", base64: Buffer.from("# oi").toString("base64") },
+      ],
+    });
+    expect(resposta.status).toBe(202);
+    await expect.poll(() => motor.perguntas.length).toBe(1);
+    const estado = (await (await fetch(`${base}/chat`)).json()) as {
+      mensagens: { anexos: { arquivo: string; nome: string; tipoDeMidia: string; categoria: string; tamanhoEmBytes: number }[] }[];
+    };
+    const [pagina, notas] = estado.mensagens[0]?.anexos ?? [];
+    expect(pagina).toMatchObject({ nome: "pagina.html", tipoDeMidia: "text/html", categoria: "documento", tamanhoEmBytes: 25 });
+    expect(notas).toMatchObject({ nome: "notas.md", tipoDeMidia: "text/markdown", categoria: "documento", tamanhoEmBytes: 4 });
+    expect(estado.mensagens[0]).not.toHaveProperty("imagens");
+
+    const baixado = await fetch(`${base}/chat/anexos/${pagina?.arquivo}`);
+    expect(baixado.status).toBe(200);
+    expect(baixado.headers.get("content-disposition")).toBe("attachment");
+    expect(baixado.headers.get("content-type")).toBe("application/octet-stream");
+    expect(baixado.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(baixado.headers.get("content-security-policy")).toBe("sandbox");
+    expect(await baixado.text()).toBe("<script>alert(1)</script>");
+
+    // O Claude recebe os caminhos; o motor vê os dois documentos e a pasta liberada.
+    expect(motor.perguntas[0]?.anexos.map((anexo) => anexo.categoria)).toEqual(["documento", "documento"]);
+    expect(motor.perguntas[0]?.pastaDosAnexos).toBe(path.join(pasta, "anexos", "chat"));
+
+    motor.terminar(sucesso("ok"));
+    await aguardarOcioso();
+  });
+
+  it("um .docx corrompido segue como anexo, só sem o texto extraído (a extração nunca derruba o envio)", async () => {
+    const resposta = await enviar("/chat/mensagens", "POST", {
+      texto: "resuma",
+      anexos: [{ nome: "contrato.docx", tipoDeMidia: "", base64: Buffer.from("isto nao e um zip").toString("base64") }],
+    });
+    expect(resposta.status).toBe(202);
+    await expect.poll(() => motor.perguntas.length).toBe(1);
+
+    expect(motor.perguntas[0]?.anexos[0]).toMatchObject({ nome: "contrato.docx", rotulo: "Word", caminhoDoTexto: null });
+    expect(motor.perguntas[0]?.mensagem).not.toContain("texto extraído");
 
     motor.terminar(sucesso("ok"));
     await aguardarOcioso();

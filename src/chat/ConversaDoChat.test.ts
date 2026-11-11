@@ -9,8 +9,17 @@ import { PreferenciasDoChat } from "./PreferenciasDoChat";
 const agora = new Date("2026-11-04T12:00:00Z");
 const uso: UsoDaResposta = { duracaoMs: 10, tokensDeEntrada: 100, tokensDeSaida: 20, modeloUsado: "claude-opus" };
 
+const imagem = { arquivo: "a.png", nome: "x", tipoDeMidia: "image/png", categoria: "imagem", tamanhoEmBytes: 10 } as const;
+const documento = {
+  arquivo: "d.pdf",
+  nome: "relatorio.pdf",
+  tipoDeMidia: "application/pdf",
+  categoria: "documento",
+  tamanhoEmBytes: 1024,
+} as const;
+
 function pergunta(texto = "Qual a versão LTS do Node?", extras: Partial<NovaPergunta> = {}): NovaPergunta {
-  return { mensagemDoUsuarioId: "u1", mensagemDoClaudeId: "c1", texto, imagens: [], agora, ...extras };
+  return { mensagemDoUsuarioId: "u1", mensagemDoClaudeId: "c1", texto, anexos: [], agora, ...extras };
 }
 
 describe("ConversaDoChat", () => {
@@ -36,19 +45,66 @@ describe("ConversaDoChat", () => {
     );
   });
 
-  it("recusa texto vazio sem imagens, mas aceita só imagem", () => {
+  it("recusa texto vazio sem anexos, mas aceita só anexo", () => {
     const conversa = ConversaDoChat.nova("s1");
-    expect(() => conversa.perguntar(pergunta("   "))).toThrow(ErroDoChat);
+    expect(() => conversa.perguntar(pergunta("   "))).toThrow("Escreva uma mensagem ou anexe um arquivo.");
 
-    conversa.perguntar(pergunta("", { imagens: [{ arquivo: "a.png", nome: "print", tipoDeMidia: "image/png" }] }));
-    expect(conversa.mensagens[0]?.imagens).toHaveLength(1);
+    conversa.perguntar(
+      pergunta("", { anexos: [{ arquivo: "a.png", nome: "print", tipoDeMidia: "image/png", categoria: "imagem", tamanhoEmBytes: 10 }] }),
+    );
+    expect(conversa.mensagens[0]?.anexos).toHaveLength(1);
+  });
+
+  it("aceita só um documento, sem texto", () => {
+    const conversa = ConversaDoChat.nova("s1");
+
+    conversa.perguntar(pergunta("", { anexos: [{ ...documento, tamanhoEmBytes: 2048 }] }));
+
+    expect(conversa.mensagens[0]?.anexos).toEqual([{ ...documento, tamanhoEmBytes: 2048 }]);
+    expect(conversa.mensagens[0]?.texto).toBe("");
   });
 
   it("recusa mais de 5 imagens", () => {
-    const imagem = { arquivo: "a.png", nome: "x", tipoDeMidia: "image/png" } as const;
     expect(() =>
-      ConversaDoChat.nova("s1").perguntar(pergunta("oi", { imagens: Array.from({ length: 6 }, () => imagem) })),
+      ConversaDoChat.nova("s1").perguntar(pergunta("oi", { anexos: Array.from({ length: 6 }, () => imagem) })),
     ).toThrow(/até 5 imagens/);
+  });
+
+  it("recusa mais de 10 anexos e a soma acima de 100 MB", () => {
+    expect(() =>
+      ConversaDoChat.nova("s1").perguntar(pergunta("oi", { anexos: Array.from({ length: 11 }, () => documento) })),
+    ).toThrow(/até 10 arquivos/);
+
+    const grande = { ...documento, tamanhoEmBytes: 32 * 1024 * 1024 };
+    expect(() =>
+      ConversaDoChat.nova("s1").perguntar(pergunta("oi", { anexos: [grande, grande, grande, grande] })),
+    ).toThrow(/100 MB/);
+  });
+
+  it("abre de novo uma conversa gravada quando só havia imagens, em `imagens`", () => {
+    const gravadaAntes = {
+      sessaoId: "s1",
+      sessaoIniciada: true,
+      mensagens: [
+        {
+          id: "u1",
+          papel: "usuario",
+          texto: "veja",
+          imagens: [{ arquivo: "a.png", nome: "print", tipoDeMidia: "image/png" }],
+          criadaEm: agora.toISOString(),
+          situacao: "concluida",
+          acoes: [],
+          avisos: [],
+          uso: null,
+        },
+      ],
+    };
+
+    const reaberta = ConversaDoChat.reconstituir(JSON.parse(JSON.stringify(gravadaAntes)));
+    const dados = reaberta.mensagens[0];
+
+    expect(dados?.anexos).toEqual([{ arquivo: "a.png", nome: "print", tipoDeMidia: "image/png", categoria: "imagem" }]);
+    expect(dados).not.toHaveProperty("imagens");
   });
 
   it("acumula os trechos da resposta em andamento e ignora trechos sem resposta", () => {
@@ -299,8 +355,8 @@ describe("ConversaDoChat — origem da pergunta", () => {
       sessaoIniciada: true,
       alteracoesAutorizadas: false,
       mensagens: [
-        { id: "u1", papel: "usuario", texto: "oi", imagens: [], criadaEm: agora.toISOString(), situacao: "concluida", acoes: [], perguntas: [], avisos: [], uso: null, autorizacaoPendente: null },
-        { id: "c1", papel: "claude", texto: "olá", imagens: [], criadaEm: agora.toISOString(), situacao: "concluida", acoes: [], perguntas: [], avisos: [], uso, autorizacaoPendente: null },
+        { id: "u1", papel: "usuario", texto: "oi", anexos: [], criadaEm: agora.toISOString(), situacao: "concluida", acoes: [], perguntas: [], avisos: [], uso: null, autorizacaoPendente: null },
+        { id: "c1", papel: "claude", texto: "olá", anexos: [], criadaEm: agora.toISOString(), situacao: "concluida", acoes: [], perguntas: [], avisos: [], uso, autorizacaoPendente: null },
       ],
     } as const;
 

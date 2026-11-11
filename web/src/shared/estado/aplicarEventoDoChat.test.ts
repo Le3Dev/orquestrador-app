@@ -18,7 +18,7 @@ function mensagem(id: string, papel: MensagemDoChat["papel"], alteracoes: Partia
     id,
     papel,
     texto: "",
-    imagens: [],
+    anexos: [],
     criadaEm: EM,
     situacao: papel === "usuario" ? "concluida" : "respondendo",
     acoes: [],

@@ -1,5 +1,5 @@
 import { copiarPergunta, PerguntaDoApp } from "../perguntas/PerguntaDoApp";
-import { Anexo, MAXIMO_DE_IMAGENS_POR_MENSAGEM } from "./Anexo";
+import { Anexo, problemaDosAnexosDaMensagem } from "./Anexo";
 import {
   AlteracoesDaConfiguracao,
   ConfiguracaoDoOrquestrador,
@@ -424,11 +424,9 @@ export class Orquestrador {
         `A mensagem deve ter até ${TAMANHO_MAXIMO_DA_MENSAGEM} caracteres.`,
       );
     }
-    if (anexos.length > MAXIMO_DE_IMAGENS_POR_MENSAGEM) {
-      throw new ErroDeOrquestracao(
-        "dados_invalidos",
-        `Anexe até ${MAXIMO_DE_IMAGENS_POR_MENSAGEM} imagens por mensagem.`,
-      );
+    const problemaDosAnexos = problemaDosAnexosDaMensagem(anexos);
+    if (problemaDosAnexos !== null) {
+      throw new ErroDeOrquestracao("dados_invalidos", problemaDosAnexos);
     }
     if (this.turnoEmAndamento !== null) {
       throw new ErroDeOrquestracao(

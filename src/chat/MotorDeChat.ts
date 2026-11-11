@@ -1,14 +1,23 @@
-import type { TipoDeImagem } from "../orquestracao/Anexo";
+import type { CategoriaDoAnexo } from "../orquestracao/Anexo";
 import type { EsforcoDeRaciocinio } from "../orquestracao/EsforcoDeRaciocinio";
 import type { JanelaDaCota } from "../orquestracao/EventoDeOrquestracao";
 import type { ModeloClaude } from "../orquestracao/ModeloClaude";
 import type { AutorizacaoPendente } from "./MensagemDoChat";
 
-/** Imagem anexada à pergunta, já guardada em disco. */
-export interface ImagemDaPergunta {
-  /** Caminho absoluto do arquivo; o motor lê e envia o conteúdo junto com o texto. */
+/** Arquivo (imagem ou documento) anexado à pergunta, já guardado em disco. */
+export interface AnexoDaPergunta {
+  /** Caminho absoluto do arquivo; do que é imagem, o motor lê e envia o conteúdo junto com o texto. */
   caminho: string;
-  tipoDeMidia: TipoDeImagem;
+  nome: string;
+  categoria: CategoriaDoAnexo;
+  tipoDeMidia: string;
+  /** Nome do formato para o usuário: "Imagem", "PDF", "Excel"... */
+  rotulo: string;
+  tamanhoEmBytes: number;
+  /** Texto extraído (Word, Excel, PowerPoint modernos) gravado ao lado; nulo sem extração. */
+  caminhoDoTexto: string | null;
+  /** Formato binário antigo (.doc, .xls): sem texto extraído. */
+  legado: boolean;
 }
 
 /** Tudo o que o motor precisa para responder uma pergunta do chat rápido. */
@@ -21,9 +30,10 @@ export interface PerguntaAoMotorDeChat {
   mensagem: string;
   /** Instruções fixas do chat, acrescentadas ao prompt de sistema (`--append-system-prompt-file`). */
   instrucoes: string;
-  imagens: readonly ImagemDaPergunta[];
-  /** Pasta onde as imagens estão, liberada para leitura; nula quando não há imagens. */
-  pastaDasImagens: string | null;
+  /** Só as imagens vão inline para o Claude; os documentos ele abre pelo caminho. */
+  anexos: readonly AnexoDaPergunta[];
+  /** Pasta onde os anexos estão, liberada para leitura; nula quando não há anexos. */
+  pastaDosAnexos: string | null;
   /** Pasta de trabalho do processo (cwd); criada se não existir. */
   pastaDaSessao: string;
   /**

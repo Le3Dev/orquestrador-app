@@ -25,7 +25,6 @@ import type {
   ResumoDoOrquestrador,
   SaudeDoServidor,
   SituacaoDoServidorLocal,
-  TipoDeImagem,
 } from "./tipos";
 
 function extrairMensagem(corpo: unknown): string | null {
@@ -72,10 +71,13 @@ export function mensagemDeErro(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro);
 }
 
-/** Imagem pronta para envio: o conteúdo vai em base64 dentro do JSON da mensagem. */
-export interface ImagemParaEnvio {
+/**
+ * Anexo (imagem ou documento) pronto para envio: o conteúdo vai em base64 dentro do JSON da mensagem.
+ * `tipoDeMidia` é o `File.type` e pode ir vazio: o servidor decide pela extensão do nome.
+ */
+export interface AnexoParaEnvio {
   nome: string;
-  tipoDeMidia: TipoDeImagem;
+  tipoDeMidia: string;
   base64: string;
 }
 
@@ -195,19 +197,19 @@ export const api = {
   enviarMensagem: (
     id: string,
     texto: string,
-    imagens: readonly ImagemParaEnvio[] = [],
+    anexos: readonly AnexoParaEnvio[] = [],
     modo: ModoDoTurno = "execucao",
     itensLigados?: readonly ItemLigadoParaEnvio[],
     previasAbertas?: readonly string[],
   ) =>
     requisitar<{ turnoId: string }>(`/orquestradores/${encodeURIComponent(id)}/mensagens`, {
       method: "POST",
-      body: JSON.stringify({ texto, imagens, modo, ...comItensLigados(itensLigados), ...comPreviasAbertas(previasAbertas) }),
+      body: JSON.stringify({ texto, anexos, modo, ...comItensLigados(itensLigados), ...comPreviasAbertas(previasAbertas) }),
     }),
 
   /**
    * Guarda um pedido na fila do Orquestrador (texto, modo e os itens ligados
-   * agora e as prévias abertas: imagens não entram). Ele sai sozinho quando o turno atual terminar
+   * agora e as prévias abertas: anexos não entram). Ele sai sozinho quando o turno atual terminar
    * concluído, ou com `enviarDaFila`. Recusado (409) com a fila cheia.
    */
   enfileirarPedido: (
@@ -341,14 +343,14 @@ export const api = {
    */
   perguntarNoChat: (
     texto: string,
-    imagens: readonly ImagemParaEnvio[] = [],
+    anexos: readonly AnexoParaEnvio[] = [],
     opcoes: { origem?: OrigemDaPergunta } = {},
   ) =>
     requisitar<{ mensagemId: string }>("/chat/mensagens", {
       method: "POST",
       body: JSON.stringify({
         texto,
-        ...(imagens.length > 0 ? { imagens } : {}),
+        ...(anexos.length > 0 ? { anexos } : {}),
         ...(opcoes.origem !== undefined ? { origem: opcoes.origem } : {}),
       }),
     }),

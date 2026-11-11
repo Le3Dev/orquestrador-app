@@ -829,7 +829,85 @@ describe("NoTerminal · conversa nova", () => {
     return { canvas, campo: screen.getByRole("textbox", { name: "Mensagem para o orquestrador" }) };
   }
 
-  describe("imagens anexadas", () => {
+  describe("anexos (imagens e documentos)", () => {
+    it("o documento colado vira etiqueta (sem URL blob:) e some ao remover", async () => {
+      const criar = vi.spyOn(URL, "createObjectURL");
+      const { campo } = renderizarOcioso();
+
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["pdf"], "contrato.pdf", { type: "application/pdf" })] } });
+      const remover = await screen.findByRole("button", { name: "Remover contrato.pdf" });
+      expect(remover.closest(".chip-de-anexo")).toHaveTextContent("PDF");
+      expect(screen.queryByAltText("contrato.pdf")).not.toBeInTheDocument();
+      expect(criar).not.toHaveBeenCalled();
+
+      fireEvent.click(remover);
+      expect(screen.queryByText("contrato.pdf")).not.toBeInTheDocument();
+    });
+
+    it("só com documento, o envio leva o texto padrão e os anexos no corpo", async () => {
+      const enviar = vi.spyOn(api, "enviarMensagem").mockResolvedValue({ turnoId: "t1" });
+      const { campo } = renderizarOcioso();
+
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["pdf"], "contrato.pdf", { type: "application/pdf" })] } });
+      await screen.findByRole("button", { name: "Remover contrato.pdf" });
+      fireEvent.click(screen.getByRole("button", { name: "enviar ⏎" }));
+
+      // "cGRm" é o base64 de "pdf".
+      await waitFor(() =>
+        expect(enviar).toHaveBeenCalledWith(
+          "o1",
+          "Analise os anexos.",
+          [{ nome: "contrato.pdf", tipoDeMidia: "application/pdf", base64: "cGRm" }],
+          "execucao",
+        ),
+      );
+      await waitFor(() => expect(screen.queryByText("contrato.pdf")).not.toBeInTheDocument());
+    });
+
+    it("misturados, imagem e documento vão juntos, na ordem em que foram anexados", async () => {
+      const enviar = vi.spyOn(api, "enviarMensagem").mockResolvedValue({ turnoId: "t1" });
+      const { campo } = renderizarOcioso();
+
+      fireEvent.paste(campo, {
+        clipboardData: {
+          files: [new File(["png"], "tela.png", { type: "image/png" }), new File(["a,b"], "dados.csv", { type: "" })],
+        },
+      });
+      await screen.findByRole("button", { name: "Remover dados.csv" });
+      fireEvent.change(campo, { target: { value: "Compare" } });
+      fireEvent.keyDown(campo, { key: "Enter" });
+
+      await waitFor(() =>
+        expect(enviar).toHaveBeenCalledWith(
+          "o1",
+          "Compare",
+          [
+            { nome: "tela.png", tipoDeMidia: "image/png", base64: "cG5n" },
+            { nome: "dados.csv", tipoDeMidia: "", base64: "YSxi" },
+          ],
+          "execucao",
+        ),
+      );
+    });
+
+    it("respeita os limites do conjunto: 6ª imagem, formato recusado e documento acima de 32 MB", async () => {
+      const { campo } = renderizarOcioso();
+      const imagens = Array.from({ length: 6 }, (_, i) => new File(["x"], `foto${i}.png`, { type: "image/png" }));
+
+      fireEvent.paste(campo, { clipboardData: { files: imagens } });
+      expect(await screen.findByText("✗ Dá para anexar até 5 imagens por mensagem.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Remover foto4.png" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Remover foto5.png" })).not.toBeInTheDocument();
+
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["x"], "app.exe", { type: "" })], getData: () => "" } });
+      expect(await screen.findByText(/✗ "app.exe" tem um formato que não dá para anexar/)).toBeInTheDocument();
+
+      const grande = new File(["x"], "grande.pdf", { type: "application/pdf" });
+      Object.defineProperty(grande, "size", { value: 32 * 1024 * 1024 + 1 });
+      fireEvent.paste(campo, { clipboardData: { files: [grande] } });
+      expect(await screen.findByText('✗ "grande.pdf" passa de 32 MB, o limite por documento.')).toBeInTheDocument();
+    });
+
     it("guarda o arquivo com miniatura blob: e libera a URL ao remover", async () => {
       const criar = vi.spyOn(URL, "createObjectURL");
       const revogar = vi.spyOn(URL, "revokeObjectURL");
@@ -1299,13 +1377,19 @@ describe("NoTerminal · nota arrastada para o terminal", () => {
     expect(enfileirar).not.toHaveBeenCalled();
   });
 
-  it("arquivos continuam com o aviso de anexar imagens", () => {
+  it("arquivos têm o aviso de anexar os arquivos; ao soltar um documento, ele vira anexo pendente", async () => {
     const janela = renderizarTerminal();
 
     fireEvent.dragOver(janela, { dataTransfer: { types: ["Files"], files: [] } });
 
-    expect(screen.getByText("solte para anexar as imagens a este orquestrador")).toBeInTheDocument();
+    expect(screen.getByText("solte para anexar os arquivos a este orquestrador")).toBeInTheDocument();
     expect(screen.queryByText(/solte para escrever no prompt/)).not.toBeInTheDocument();
+
+    const planilha = new File(["a"], "vendas.xlsx", { type: "" });
+    fireEvent.drop(janela, { dataTransfer: { types: ["Files"], files: [planilha] } });
+
+    expect(screen.queryByText(/solte para anexar/)).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Remover vendas.xlsx" })).toBeInTheDocument();
   });
 
   it("o botão de alterações fica na barra do terminal, com o id do orquestrador", () => {

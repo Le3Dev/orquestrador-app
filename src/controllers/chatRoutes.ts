@@ -7,11 +7,11 @@ import { EventoDoChatRegistrado, PublicadorDoChat, SinalDoChat } from "../chat/E
 import { ORIGENS_DA_PERGUNTA } from "../chat/OrigemDaPergunta";
 import { ID_DO_CHAT, ServicoDeChat } from "../chat/ServicoDeChat";
 import { ArmazemDeAnexosEmArquivo, ehNomeDeAnexoValido } from "../infraestrutura/arquivos/ArmazemDeAnexosEmArquivo";
-import { MAXIMO_DE_IMAGENS_POR_MENSAGEM, TAMANHO_MAXIMO_DA_IMAGEM, TIPOS_DE_IMAGEM } from "../orquestracao/Anexo";
 import { ErroDeOrquestracao } from "../orquestracao/ErroDeOrquestracao";
 import { ESFORCOS_DE_RACIOCINIO } from "../orquestracao/EsforcoDeRaciocinio";
 import { MODELOS_CLAUDE } from "../orquestracao/ModeloClaude";
 import { esquemaDasPreviasAbertas } from "../previas/PreviaDoApp";
+import { enviarAnexo, esquemaDosAnexosDaMensagem } from "./anexosHttp";
 import { criarRota, responderErroGenerico } from "./respostasHttp";
 
 export interface AssinanteDoChat {
@@ -65,19 +65,7 @@ const esquemaDaPergunta = z.object({
       error: `A mensagem deve ter até ${TAMANHO_MAXIMO_DA_PERGUNTA} caracteres.`,
     })
     .default(""),
-  imagens: z
-    .array(
-      z.object({
-        nome: z.string().max(200),
-        tipoDeMidia: z.enum(TIPOS_DE_IMAGEM, { error: "Só dá para anexar imagens PNG, JPEG, GIF ou WebP." }),
-        // Base64 ocupa 4/3 do tamanho original.
-        base64: z.string().max(Math.ceil((TAMANHO_MAXIMO_DA_IMAGEM * 4) / 3) + 16, {
-          error: `Cada imagem pode ter até ${TAMANHO_MAXIMO_DA_IMAGEM / 1024 / 1024} MB.`,
-        }),
-      }),
-    )
-    .max(MAXIMO_DE_IMAGENS_POR_MENSAGEM, { error: `Anexe até ${MAXIMO_DE_IMAGENS_POR_MENSAGEM} imagens por mensagem.` })
-    .default([]),
+  anexos: esquemaDosAnexosDaMensagem,
   /** Só nas perguntas que não foram digitadas: "escuta" vem do modo invisível. */
   origem: z.enum(ORIGENS_DA_PERGUNTA, { error: "Origem da mensagem inválida." }).optional(),
   previasAbertas: esquemaDasPreviasAbertas,
@@ -131,16 +119,16 @@ export function criarChatRoutes({ servico, canal, anexos }: Dependencias): Route
   rotas.post(
     "/chat/mensagens",
     rota(async (requisicao, resposta) => {
-      const { texto, imagens, origem, previasAbertas } = esquemaDaPergunta.parse(requisicao.body ?? {});
-      if (texto === "" && imagens.length === 0) {
-        throw new ErroDoChat("dados_invalidos", "Escreva uma mensagem ou anexe uma imagem.");
+      const { texto, anexos: anexosRecebidos, origem, previasAbertas } = esquemaDaPergunta.parse(requisicao.body ?? {});
+      if (texto === "" && anexosRecebidos.length === 0) {
+        throw new ErroDoChat("dados_invalidos", "Escreva uma mensagem ou anexe um arquivo.");
       }
       const { mensagemId } = await servico.perguntar({
         texto,
-        imagens: imagens.map((imagem) => ({
-          nome: imagem.nome,
-          tipoDeMidia: imagem.tipoDeMidia,
-          conteudo: Buffer.from(imagem.base64, "base64"),
+        anexos: anexosRecebidos.map((anexo) => ({
+          nome: anexo.nome,
+          tipoDeMidia: anexo.tipoDeMidia,
+          conteudo: Buffer.from(anexo.base64, "base64"),
         })),
         ...(origem === undefined ? {} : { origem }),
         previasAbertas,
@@ -190,7 +178,10 @@ export function criarChatRoutes({ servico, canal, anexos }: Dependencias): Route
     }),
   );
 
-  /** A imagem anexada a uma pergunta, para as miniaturas do chat. */
+  /**
+   * O arquivo anexado a uma pergunta: a imagem inline, para as miniaturas do
+   * chat; o documento sempre como download (`enviarAnexo`).
+   */
   rotas.get(
     "/chat/anexos/:arquivo",
     rota<{ arquivo: string }>((requisicao, resposta) => {
@@ -200,11 +191,7 @@ export function criarChatRoutes({ servico, canal, anexos }: Dependencias): Route
         resposta.status(404).json({ erro: "Anexo não encontrado." });
         return;
       }
-      resposta.sendFile(anexos.caminhoDe(ID_DO_CHAT, arquivo), { maxAge: "1d" }, (erro) => {
-        if (erro !== undefined && !resposta.headersSent) {
-          resposta.status(404).json({ erro: "Anexo não encontrado." });
-        }
-      });
+      enviarAnexo(resposta, arquivo, anexos.caminhoDe(ID_DO_CHAT, arquivo));
     }),
   );
 

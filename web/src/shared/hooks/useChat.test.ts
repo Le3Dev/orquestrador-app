@@ -39,7 +39,7 @@ function resposta(texto: string): MensagemDoChat {
     id: "c1",
     papel: "claude",
     texto,
-    imagens: [],
+    anexos: [],
     criadaEm: "2026-11-04T12:00:00Z",
     situacao: "respondendo",
     acoes: [],

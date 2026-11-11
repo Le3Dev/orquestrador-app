@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { PerguntaAoMotorDeChat } from "../../chat/MotorDeChat";
+import type { AnexoDaPergunta, PerguntaAoMotorDeChat } from "../../chat/MotorDeChat";
 import {
   caminhoParaRegraDePermissao,
   configuracoesDaSessaoDoChat,
@@ -20,14 +20,27 @@ const REGRAS_DE_ARTEFATO = [
   "Edit(//c/Users/ana/Orquestrador de Agentes/dados/artefatos/entrada/chat/**)",
 ];
 
+function anexoDoPedido(caminho: string, categoria: AnexoDaPergunta["categoria"], tipoDeMidia: string): AnexoDaPergunta {
+  return {
+    caminho,
+    nome: caminho.split("\\").pop() ?? caminho,
+    categoria,
+    tipoDeMidia,
+    rotulo: categoria === "imagem" ? "Imagem" : "PDF",
+    tamanhoEmBytes: 1024,
+    caminhoDoTexto: null,
+    legado: false,
+  };
+}
+
 function pergunta(alteracoes: Partial<PerguntaAoMotorDeChat> = {}): PerguntaAoMotorDeChat {
   return {
     sessaoId: "sessao-1",
     sessaoIniciada: false,
     mensagem: "oi",
     instrucoes: "seja breve",
-    imagens: [],
-    pastaDasImagens: null,
+    anexos: [],
+    pastaDosAnexos: null,
     pastaDaSessao: "C:\\dados\\chat\\sessao-1",
     pastaDosProjetos: "C:\\Users\\ana\\projetos",
     pastaDeArtefatos: PASTA_DE_ARTEFATOS,
@@ -140,16 +153,28 @@ describe("montarArgumentosDoChat", () => {
     expect(valoresDe(argumentos, "--add-dir")).toEqual(["C:\\Users\\ana\\projetos"]);
   });
 
-  it("adiciona a raiz dos projetos e, só com imagens, a pasta das imagens", () => {
-    const semImagens = montarArgumentosDoChat(pergunta({ pastaDasImagens: "C:\\anexos" }), arquivos);
-    expect(valoresDe(semImagens, "--add-dir")).toEqual(["C:\\Users\\ana\\projetos"]);
-    expect(semImagens).not.toContain("C:\\anexos");
+  it("adiciona a raiz dos projetos e, só com anexos, a pasta dos anexos", () => {
+    const semAnexos = montarArgumentosDoChat(pergunta({ pastaDosAnexos: "C:\\anexos" }), arquivos);
+    expect(valoresDe(semAnexos, "--add-dir")).toEqual(["C:\\Users\\ana\\projetos"]);
+    expect(semAnexos).not.toContain("C:\\anexos");
 
-    const comImagens = montarArgumentosDoChat(
-      pergunta({ pastaDasImagens: "C:\\anexos", imagens: [{ caminho: "C:\\anexos\\a.png", tipoDeMidia: "image/png" }] }),
+    const comImagem = montarArgumentosDoChat(
+      pergunta({ pastaDosAnexos: "C:\\anexos", anexos: [anexoDoPedido("C:\\anexos\\a.png", "imagem", "image/png")] }),
       arquivos,
     );
-    expect(pastasLiberadas(comImagens)).toEqual(["C:\\Users\\ana\\projetos", PASTA_DE_ARTEFATOS, "C:\\anexos"]);
+    expect(pastasLiberadas(comImagem)).toEqual(["C:\\Users\\ana\\projetos", PASTA_DE_ARTEFATOS, "C:\\anexos"]);
+  });
+
+  it("libera a pasta dos anexos também quando só há documentos", () => {
+    const comDocumento = montarArgumentosDoChat(
+      pergunta({
+        pastaDosAnexos: "C:\\anexos",
+        anexos: [anexoDoPedido("C:\\anexos\\relatorio.pdf", "documento", "application/pdf")],
+      }),
+      arquivos,
+    );
+
+    expect(pastasLiberadas(comDocumento)).toEqual(["C:\\Users\\ana\\projetos", PASTA_DE_ARTEFATOS, "C:\\anexos"]);
   });
 
   it("cria a sessão na primeira pergunta e retoma nas seguintes", () => {

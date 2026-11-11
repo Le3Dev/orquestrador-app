@@ -66,11 +66,14 @@ export class MotorDeChatClaudeCodeCli implements MotorDeChat {
       // Criada antes do processo e pelo caminho real, para a regra de gravação casar.
       const pastaDeArtefatos = await prepararPastaDeArtefatos(pergunta.pastaDeArtefatos);
 
+      // Só as imagens vão inline; os documentos o Claude abre pelo caminho, citado na mensagem.
       const imagens = await Promise.all(
-        pergunta.imagens.map(async (imagem) => ({
-          tipoDeMidia: imagem.tipoDeMidia,
-          base64: (await readFile(imagem.caminho)).toString("base64"),
-        })),
+        pergunta.anexos
+          .filter((anexo) => anexo.categoria === "imagem")
+          .map(async (imagem) => ({
+            tipoDeMidia: imagem.tipoDeMidia,
+            base64: (await readFile(imagem.caminho)).toString("base64"),
+          })),
       );
 
       const adaptador = new AdaptadorDeEventosDoChat(pergunta.alteracoesAutorizadas);
