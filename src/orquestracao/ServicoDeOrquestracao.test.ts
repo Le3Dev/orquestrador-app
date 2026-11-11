@@ -137,11 +137,6 @@ class ArmazemEmMemoria implements ArmazemDeAnexos {
   caminhoDe(orquestradorId: string, arquivo: string): string {
     return `${this.pastaDe(orquestradorId)}/${arquivo}`;
   }
-  /** Ids de documentos cujo texto "foi extraído". */
-  readonly comTexto = new Set<string>();
-  async caminhoDoTexto(orquestradorId: string, anexoId: string): Promise<string | null> {
-    return this.comTexto.has(anexoId) ? `${this.pastaDe(orquestradorId)}/${anexoId}.texto.txt` : null;
-  }
   pastaDe(orquestradorId: string): string {
     return `/anexos/${orquestradorId}`;
   }
@@ -413,46 +408,20 @@ describe("ServicoDeOrquestracao", () => {
     expect(armazem.guardados.get(`/anexos/${orquestrador.id}/id4.png`)).toBe(conteudo);
     expect(repositorio.eventos[0]).toMatchObject({
       tipo: "turno_iniciado",
-      anexos: [{ nome: "tela.png", tipoDeMidia: "image/png", categoria: "imagem", tamanhoEmBytes: 3, arquivo: "id4.png" }],
+      anexos: [{ nome: "tela.png", tipoDeMidia: "image/png", tamanhoEmBytes: 3, arquivo: "id4.png" }],
     });
   });
 
-  it("recusa formato não suportado antes de iniciar o turno", async () => {
+  it("recusa formato de imagem não suportado antes de iniciar o turno", async () => {
     const orquestrador = await criar();
 
     await expect(
       servico.enviarMensagem(orquestrador.id, "veja", [
-        { nome: "foto.bmp", tipoDeMidia: "image/bmp", conteudo: new Uint8Array([1]) },
+        { nome: "doc.pdf", tipoDeMidia: "application/pdf", conteudo: new Uint8Array([1]) },
       ]),
     ).rejects.toMatchObject({ motivo: "dados_invalidos" });
     expect(orquestrador.situacao).toBe("ocioso");
     expect(armazem.guardados.size).toBe(0);
-  });
-
-  it("guarda documentos e os cita ao motor com o original e o texto extraído", async () => {
-    const orquestrador = await criar();
-    armazem.comTexto.add("id4");
-
-    const { conclusao } = await servico.enviarMensagem(orquestrador.id, "resuma", [
-      { nome: "notas.md", tipoDeMidia: "", conteudo: new Uint8Array([35, 32, 111, 107]) },
-    ]);
-    motor.terminar();
-    await conclusao;
-
-    const pedido = motor.pedidos[0];
-    expect(pedido?.imagens).toEqual([]);
-    expect(pedido?.documentos).toEqual([
-      {
-        nome: "notas.md",
-        caminho: `/anexos/${orquestrador.id}/id4.md`,
-        caminhoDoTexto: `/anexos/${orquestrador.id}/id4.texto.txt`,
-      },
-    ]);
-    expect(pedido?.pastaDasImagens).toBe(`/anexos/${orquestrador.id}`);
-    expect(repositorio.eventos[0]).toMatchObject({
-      tipo: "turno_iniciado",
-      anexos: [{ nome: "notas.md", tipoDeMidia: "text/markdown", categoria: "documento", arquivo: "id4.md" }],
-    });
   });
 
   it("roda o turno no worktree e o remove quando não houve alterações", async () => {

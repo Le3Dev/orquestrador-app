@@ -25,7 +25,6 @@ const FILA: readonly DadosDoPedidoNaFila[] = [
 const IMAGEM: ImagemAnexada = {
   id: "i1",
   nome: "tela.png",
-  categoria: "imagem",
   tipoDeMidia: "image/png",
   tamanhoEmBytes: 10,
   arquivo: new Blob([new Uint8Array(10)], { type: "image/png" }),

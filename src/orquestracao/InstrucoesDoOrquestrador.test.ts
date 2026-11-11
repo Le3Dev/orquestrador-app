@@ -371,7 +371,7 @@ describe("regra da prévia ao vivo e prévias abertas no pedido", () => {
     nivelDePermissao: "leitura",
   });
   const mensagem = (modo: ModoDoTurno = "execucao", previasAbertas: readonly string[] = []) =>
-    mensagemParaOOrquestrador("analise", configuracao, [], modo, null, null, false, [], "unix", [], [], previasAbertas);
+    mensagemParaOOrquestrador("analise", configuracao, [], modo, null, null, false, [], "unix", [], previasAbertas);
   const configuracaoDoPedido = (texto: string) => texto.slice(0, texto.indexOf("</configuracao-do-pedido>"));
 
   it.each<ModoDoTurno>(["execucao", "planejamento"])("entra em todo pedido, no modo %s, com o exemplo do bloco", (modo) => {

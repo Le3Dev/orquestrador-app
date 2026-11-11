@@ -859,44 +859,10 @@ describe("NoTerminal · conversa nova", () => {
 
       // "cG5n" é o base64 de "png", como o FileReader gerava antes.
       await waitFor(() =>
-        expect(enviar).toHaveBeenCalledWith("o1", "Veja", [{ nome: "tela.png", tipoDeMidia: "image/png", categoria: "imagem", base64: "cG5n" }], "execucao"),
+        expect(enviar).toHaveBeenCalledWith("o1", "Veja", [{ nome: "tela.png", tipoDeMidia: "image/png", base64: "cG5n" }], "execucao"),
       );
       await waitFor(() => expect(revogar).toHaveBeenCalledWith(criar.mock.results[0]?.value));
       await waitFor(() => expect(screen.queryByAltText("tela.png")).not.toBeInTheDocument());
-    });
-
-    it("anexa documento como chip (sem miniatura), por extensão, envia categoria documento e remove", async () => {
-      const enviar = vi.spyOn(api, "enviarMensagem").mockResolvedValue({ turnoId: "t1" });
-      const criar = vi.spyOn(URL, "createObjectURL");
-      const { campo } = renderizarOcioso();
-
-      fireEvent.paste(campo, { clipboardData: { files: [new File(["abc"], "relatorio.xlsx", { type: "" })] } });
-      const remover = await screen.findByRole("button", { name: "Remover relatorio.xlsx" });
-      expect(screen.getByText("relatorio.xlsx")).toBeInTheDocument();
-      expect(criar).not.toHaveBeenCalled();
-      fireEvent.click(remover);
-      expect(screen.queryByText("relatorio.xlsx")).not.toBeInTheDocument();
-
-      fireEvent.paste(campo, { clipboardData: { files: [new File(["abc"], "nota.pdf", { type: "application/pdf" })] } });
-      await screen.findByText("nota.pdf");
-      fireEvent.change(campo, { target: { value: "Resuma" } });
-      fireEvent.keyDown(campo, { key: "Enter" });
-      await waitFor(() =>
-        expect(enviar).toHaveBeenCalledWith(
-          "o1",
-          "Resuma",
-          [{ nome: "nota.pdf", tipoDeMidia: "application/pdf", categoria: "documento", base64: "YWJj" }],
-          "execucao",
-        ),
-      );
-    });
-
-    it("recusa documento acima de 30 MB com mensagem clara", async () => {
-      const { campo } = renderizarOcioso();
-      const grande = new File(["x"], "enorme.pdf", { type: "application/pdf" });
-      Object.defineProperty(grande, "size", { value: 31 * 1024 * 1024 });
-      fireEvent.paste(campo, { clipboardData: { files: [grande] } });
-      expect(await screen.findByText(/passa de 30 MB/)).toBeInTheDocument();
     });
 
     it("libera as URLs ao desmontar", async () => {
@@ -1338,7 +1304,7 @@ describe("NoTerminal · nota arrastada para o terminal", () => {
 
     fireEvent.dragOver(janela, { dataTransfer: { types: ["Files"], files: [] } });
 
-    expect(screen.getByText("solte para anexar imagens ou documentos a este orquestrador")).toBeInTheDocument();
+    expect(screen.getByText("solte para anexar as imagens a este orquestrador")).toBeInTheDocument();
     expect(screen.queryByText(/solte para escrever no prompt/)).not.toBeInTheDocument();
   });
 

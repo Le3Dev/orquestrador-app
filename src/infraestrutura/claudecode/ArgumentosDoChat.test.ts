@@ -140,14 +140,10 @@ describe("montarArgumentosDoChat", () => {
     expect(valoresDe(argumentos, "--add-dir")).toEqual(["C:\\Users\\ana\\projetos"]);
   });
 
-  it("adiciona a raiz dos projetos e, só com anexos, a pasta dos anexos", () => {
-    const semImagens = montarArgumentosDoChat(pergunta({ pastaDasImagens: null }), arquivos);
+  it("adiciona a raiz dos projetos e, só com imagens, a pasta das imagens", () => {
+    const semImagens = montarArgumentosDoChat(pergunta({ pastaDasImagens: "C:\\anexos" }), arquivos);
     expect(valoresDe(semImagens, "--add-dir")).toEqual(["C:\\Users\\ana\\projetos"]);
     expect(semImagens).not.toContain("C:\\anexos");
-
-    // Só documentos (sem imagens): a pasta também é liberada para a leitura.
-    const soDocumentos = montarArgumentosDoChat(pergunta({ pastaDasImagens: "C:\\anexos" }), arquivos);
-    expect(pastasLiberadas(soDocumentos)).toContain("C:\\anexos");
 
     const comImagens = montarArgumentosDoChat(
       pergunta({ pastaDasImagens: "C:\\anexos", imagens: [{ caminho: "C:\\anexos\\a.png", tipoDeMidia: "image/png" }] }),

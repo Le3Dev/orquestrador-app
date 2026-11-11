@@ -2,13 +2,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import {
-  Anexo,
-  erroDaQuantidadeDeAnexos,
-  MAXIMO_DE_IMAGENS_POR_MENSAGEM,
-  TAMANHO_MAXIMO_DA_IMAGEM,
-  TAMANHO_MAXIMO_DO_DOCUMENTO,
-} from "./Anexo";
+import { Anexo, MAXIMO_DE_IMAGENS_POR_MENSAGEM, TAMANHO_MAXIMO_DA_IMAGEM } from "./Anexo";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { mensagemParaOOrquestrador } from "./InstrucoesDoOrquestrador";
 import { Orquestrador } from "./Orquestrador";
@@ -24,12 +18,8 @@ describe("Anexo", () => {
     expect(imagem({ tipoDeMidia: "image/webp" }).arquivo).toBe("a1.webp");
   });
 
-  it("recusa formatos não aceitos", () => {
-    expect(() => imagem({ tipoDeMidia: "image/bmp", nome: "a.bmp" })).toThrow(/Tipo de arquivo não aceito/);
-    expect(() => imagem({ tipoDeMidia: "application/x-msdownload", nome: "setup.exe" })).toThrow(/não aceito/);
-    expect(() => imagem({ tipoDeMidia: "image/svg+xml", nome: "a.svg" })).toThrow(/não aceito/);
-    expect(() => imagem({ tipoDeMidia: "application/msword", nome: "a.doc" })).toThrow(/não aceito/);
-    expect(() => imagem({ tipoDeMidia: "", nome: "foto.png" })).toThrow(/não aceito/);
+  it("recusa formatos que o Claude não lê", () => {
+    expect(() => imagem({ tipoDeMidia: "application/pdf" })).toThrow(/PNG, JPEG, GIF ou WebP/);
   });
 
   it("recusa imagem vazia ou acima do limite do Claude", () => {
@@ -40,60 +30,6 @@ describe("Anexo", () => {
 
   it("dá um nome quando a imagem vem sem nome (ex.: colada da área de transferência)", () => {
     expect(imagem({ nome: "   " }).nome).toBe("imagem");
-  });
-
-  it("aceita os documentos pelo tipo e guarda com a extensão do formato", () => {
-    const casos: [string, string, string][] = [
-      ["a.pdf", "application/pdf", "pdf"],
-      ["a.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"],
-      ["a.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"],
-      ["a.xls", "application/vnd.ms-excel", "xls"],
-      ["a.csv", "text/csv", "csv"],
-      ["a.txt", "text/plain", "txt"],
-      ["a.md", "text/markdown", "md"],
-    ];
-    for (const [nome, tipoDeMidia, extensao] of casos) {
-      const anexo = imagem({ nome, tipoDeMidia });
-      expect(anexo.categoria).toBe("documento");
-      expect(anexo.arquivo).toBe(`a1.${extensao}`);
-      expect(anexo.paraDados()).toMatchObject({ categoria: "documento", tipoDeMidia });
-    }
-    expect(imagem().paraDados().categoria).toBe("imagem");
-  });
-
-  it("aceita pela extensão quando o navegador manda tipo vazio ou genérico, normalizando o tipo", () => {
-    expect(imagem({ nome: "notas.md", tipoDeMidia: "" }).tipoDeMidia).toBe("text/markdown");
-    expect(imagem({ nome: "NOTAS.MD", tipoDeMidia: "application/octet-stream" }).tipoDeMidia).toBe("text/markdown");
-    expect(imagem({ nome: "dados.csv", tipoDeMidia: "" }).tipoDeMidia).toBe("text/csv");
-    // O Excel do Windows registra .csv como application/vnd.ms-excel.
-    expect(imagem({ nome: "dados.csv", tipoDeMidia: "application/vnd.ms-excel" }).tipoDeMidia).toBe("text/csv");
-    expect(imagem({ nome: "leia-me.md", tipoDeMidia: "text/plain" }).tipoDeMidia).toBe("text/markdown");
-    expect(imagem({ nome: "dados.csv", tipoDeMidia: "text/csv; charset=utf-8" }).tipoDeMidia).toBe("text/csv");
-  });
-
-  it("recusa tipo que contradiz a extensão", () => {
-    expect(() => imagem({ nome: "virus.exe", tipoDeMidia: "application/pdf" })).toThrow(/não aceito/);
-    expect(imagem({ nome: "sem-extensao", tipoDeMidia: "text/csv" }).arquivo).toBe("a1.csv");
-    expect(() => imagem({ nome: "foto.pdf", tipoDeMidia: "image/png" })).toThrow(/não aceito/);
-    expect(() => imagem({ nome: "planilha.xlsx", tipoDeMidia: "application/pdf" })).toThrow(/não aceito/);
-  });
-
-  it("limita documentos a 30 MB e imagens a 5 MB", () => {
-    const documento = { nome: "a.pdf", tipoDeMidia: "application/pdf" };
-    expect(imagem({ ...documento, tamanhoEmBytes: TAMANHO_MAXIMO_DO_DOCUMENTO }).tamanhoEmBytes).toBe(
-      TAMANHO_MAXIMO_DO_DOCUMENTO,
-    );
-    expect(() => imagem({ ...documento, tamanhoEmBytes: TAMANHO_MAXIMO_DO_DOCUMENTO + 1 })).toThrow(/30 MB/);
-    expect(() => imagem({ ...documento, tamanhoEmBytes: 0 })).toThrow(/documento "a.pdf" está vazio/);
-    expect(() => imagem({ tamanhoEmBytes: 6 * 1024 * 1024 })).toThrow(/5 MB/);
-  });
-
-  it("limita imagens e documentos por mensagem separadamente", () => {
-    const de = (categoria: "imagem" | "documento", quantidade: number) =>
-      Array.from({ length: quantidade }, () => ({ categoria }));
-    expect(erroDaQuantidadeDeAnexos([...de("imagem", 5), ...de("documento", 5)])).toBeNull();
-    expect(erroDaQuantidadeDeAnexos(de("imagem", 6))).toMatch(/até 5 imagens/);
-    expect(erroDaQuantidadeDeAnexos(de("documento", 6))).toMatch(/até 5 documentos/);
   });
 });
 
