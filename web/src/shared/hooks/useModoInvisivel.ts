@@ -33,6 +33,17 @@ export interface ModoInvisivel {
   capturarAgora: () => Promise<CapturaDeTela>;
   /** Assina os quadros do atalho global Ctrl+Shift+S; devolve o cancelamento (no-op no navegador). */
   aoCapturarQuadro: (callback: (captura: CapturaDeTela) => void) => () => void;
+  /** Ctrl+\ : entra no modo ou oculta/mostra o overlay (no-op fora do desktop). */
+  alternar: () => Promise<void>;
+  /**
+   * Torna a janela focável (para digitar no campo) ou não (devolve o teclado ao app de trás).
+   * Nunca lança: sem ponte, ou se falhar, nada acontece.
+   */
+  definirFocavel: (focavel: boolean) => Promise<void>;
+  /** Assina os atalhos globais do modo (mover, rolar, opacidade, responder…); devolve o cancelamento. */
+  aoAtalho: (callback: (acao: string) => void) => () => void;
+  /** Assina o ocultar/mostrar do overlay (Ctrl+\); devolve o cancelamento. */
+  aoMudarOculto: (callback: (oculto: boolean) => void) => () => void;
 }
 
 const SEM_EFEITO: MouseDaArea = { onMouseEnter: () => undefined, onMouseLeave: () => undefined };
@@ -175,6 +186,44 @@ export function useModoInvisivel(): ModoInvisivel {
     [api],
   );
 
+  const alternar = useCallback(async () => {
+    if (api === null || typeof api.alternar !== "function") {
+      return;
+    }
+    setErro(null);
+    try {
+      await api.alternar();
+    } catch (falha) {
+      setErro(`Não foi possível alternar o modo invisível: ${falha instanceof Error ? falha.message : String(falha)}`);
+    }
+  }, [api]);
+
+  const definirFocavel = useCallback(
+    async (focavel: boolean) => {
+      if (api === null || typeof api.definirFocavel !== "function") {
+        return;
+      }
+      try {
+        await api.definirFocavel(focavel);
+      } catch {
+        // Sem poder mudar o foco da janela, o teclado só não chega (ou não volta): nada a avisar.
+      }
+    },
+    [api],
+  );
+
+  const aoAtalho = useCallback(
+    (callback: (acao: string) => void) =>
+      api === null || typeof api.aoAtalho !== "function" ? () => undefined : api.aoAtalho(callback),
+    [api],
+  );
+
+  const aoMudarOculto = useCallback(
+    (callback: (oculto: boolean) => void) =>
+      api === null || typeof api.aoMudarOculto !== "function" ? () => undefined : api.aoMudarOculto(callback),
+    [api],
+  );
+
   const descartarErro = useCallback(() => setErro(null), []);
 
   // Primeiro avisa o processo principal e só depois marca o estado: a sessão da
@@ -214,5 +263,9 @@ export function useModoInvisivel(): ModoInvisivel {
     capturarTela,
     capturarAgora,
     aoCapturarQuadro,
+    alternar,
+    definirFocavel,
+    aoAtalho,
+    aoMudarOculto,
   };
 }

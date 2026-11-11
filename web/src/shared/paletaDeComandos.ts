@@ -17,6 +17,8 @@ export type AcaoDaPaleta =
   | "organizar"
   | "zoom-100"
   | "enquadrar-tudo"
+  | "focar-chat"
+  | "entrar-modo-fantasma"
   | "ajustes-do-aplicativo"
   | "procurar-atualizacoes";
 
@@ -78,6 +80,8 @@ export interface FonteDaPaleta {
   podeOrganizar: boolean;
   /** No app desktop: "Pastas e Claude Code" reabre os Ajustes. */
   podeAbrirAjustes: boolean;
+  /** No app desktop, com o modo fantasma (o invisível) desligado: "Entrar no modo fantasma" entra. Ausente, não entra. */
+  podeEntrarNoModoFantasma?: boolean;
   /** A atualização do app desktop; null sem a ponte (navegador): "Procurar atualizações" não entra. */
   atualizacao: EstadoDaAtualizacao | null;
   /** Todos os Orquestradores, abertos ou não, na ordem da lista. */
@@ -169,6 +173,7 @@ function acoes(
   podeOrganizar: boolean,
   podeAbrirAjustes: boolean,
   atualizacao: EstadoDaAtualizacao | null,
+  podeEntrarNoModoFantasma: boolean,
 ): ItemDeAcao[] {
   const todas: ItemDeAcao[] = [
     {
@@ -227,6 +232,24 @@ function acoes(
     },
     {
       tipo: "acao",
+      id: "acao:focar-chat",
+      acao: "focar-chat",
+      titulo: "Focar o chat rápido",
+      detalhe: "Leva o cursor ao campo do chat (mostra a conversa, se estiver oculta)",
+      busca: "chat conversa perguntar claude escrever mensagem campo",
+      atalho: "Ctrl+J",
+    },
+    {
+      tipo: "acao",
+      id: "acao:entrar-modo-fantasma",
+      acao: "entrar-modo-fantasma",
+      titulo: "Entrar no modo fantasma",
+      detalhe: "Janela transparente com só o chat rápido; o Claude vê a tela a cada pergunta (Ctrl+Shift+I sai)",
+      busca: "invisivel transparente tela escuta espiar",
+      atalho: "Ctrl+\\",
+    },
+    {
+      tipo: "acao",
       id: "acao:ajustes-do-aplicativo",
       acao: "ajustes-do-aplicativo",
       titulo: "Pastas e Claude Code",
@@ -237,7 +260,9 @@ function acoes(
   ];
   const disponiveis = todas.filter(
     (item) =>
-      (podeOrganizar || item.acao !== "organizar") && (podeAbrirAjustes || item.acao !== "ajustes-do-aplicativo"),
+      (podeOrganizar || item.acao !== "organizar") &&
+      (podeAbrirAjustes || item.acao !== "ajustes-do-aplicativo") &&
+      (podeEntrarNoModoFantasma || item.acao !== "entrar-modo-fantasma"),
   );
   return atualizacao === null ? disponiveis : [...disponiveis, acaoDeAtualizacao(atualizacao)];
 }
@@ -324,7 +349,7 @@ export function montarItensDaPaleta(fonte: FonteDaPaleta): ItemDaPaleta[] {
     );
 
   return [
-    ...acoes(fonte.podeOrganizar, fonte.podeAbrirAjustes, fonte.atualizacao),
+    ...acoes(fonte.podeOrganizar, fonte.podeAbrirAjustes, fonte.atualizacao, fonte.podeEntrarNoModoFantasma === true),
     ...orquestradores,
     ...notas,
     ...artefatos,

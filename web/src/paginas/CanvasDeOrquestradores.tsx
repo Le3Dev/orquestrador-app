@@ -189,6 +189,7 @@ import { mesmoConteudo, useReaproveitado } from "../shared/hooks/useReaproveitad
 import { useRodaDoCanvas } from "../shared/hooks/useRodaDoCanvas";
 import { useSaidaDosBixinhos } from "../shared/hooks/useSaidaDosBixinhos";
 import { useServidor } from "../shared/hooks/useServidor";
+import { pedirFocoDoChat } from "../shared/focarChat";
 import { markdownParaTexto } from "../shared/markdownParaTexto";
 import type { AcaoDaPaleta, FonteDaPaleta, ItemDaPaleta } from "../shared/paletaDeComandos";
 import { aoMudarSubagentesProntos } from "../shared/subagentesProntos";
@@ -417,7 +418,7 @@ function Canvas() {
   const [mac] = useState(rodandoNoMac);
   const areaDoCanvas = useRef<HTMLDivElement>(null);
   // Modo invisível: só o header e o chat rápido ficam; o resto é escondido por CSS (nada é desmontado).
-  const { ativo: modoInvisivel } = useModoInvisivel();
+  const { ativo: modoInvisivel, disponivel: modoInvisivelDisponivel, entrar: entrarNoModoInvisivel } = useModoInvisivel();
   useEffect(() => {
     document.documentElement.classList.toggle("modo-invisivel", modoInvisivel);
     return () => document.documentElement.classList.remove("modo-invisivel");
@@ -1381,6 +1382,26 @@ function Canvas() {
     return () => window.removeEventListener("keydown", aoApertarTecla);
   }, [novoOrquestrador, novaNota]);
 
+  // Ctrl+J: leva o cursor ao campo do chat rápido (mostra a conversa, se oculta). Fora de campos de texto,
+  // como o Ctrl+N; não mexe nos atalhos que já existem.
+  useEffect(() => {
+    const aoApertarTecla = (evento: KeyboardEvent) => {
+      if (!evento.ctrlKey || evento.altKey || evento.metaKey || evento.shiftKey || evento.repeat) {
+        return;
+      }
+      if (evento.code !== "KeyJ" && evento.key !== "j" && evento.key !== "J") {
+        return;
+      }
+      if (focoEmCampoDeTexto(evento.target)) {
+        return;
+      }
+      evento.preventDefault();
+      pedirFocoDoChat();
+    };
+    window.addEventListener("keydown", aoApertarTecla);
+    return () => window.removeEventListener("keydown", aoApertarTecla);
+  }, []);
+
   // Os Ajustes do app desktop, pela paleta e pelas Configurações; a falha aparece abaixo da ilha do canto superior esquerdo.
   const ajustes = useAjustesDoAplicativo();
   const {
@@ -1412,6 +1433,7 @@ function Canvas() {
     return {
       podeOrganizar: atuais.filter((no) => !ehBixinho(no)).length > 1,
       podeAbrirAjustes: desktop && ajustesDisponiveis,
+      podeEntrarNoModoFantasma: modoInvisivelDisponivel && !modoInvisivel,
       atualizacao: atualizacaoAtual.current,
       orquestradores: orquestradoresAtuais.current ?? [],
       abertos: new Set(atuais.filter(ehTerminal).map((no) => no.data.orquestradorId)),
@@ -1429,7 +1451,7 @@ function Canvas() {
       // Só as conversas carregadas: as dos terminais abertos, sem as arquivadas (/clear).
       conversas: conversasAtuais.current,
     };
-  }, [lojaDasNotas, desktop, ajustesDisponiveis]);
+  }, [lojaDasNotas, desktop, ajustesDisponiveis, modoInvisivelDisponivel, modoInvisivel]);
   const executarItemDaPaleta = useCallback(
     (item: ItemDaPaleta) => {
       switch (item.tipo) {
@@ -1441,6 +1463,8 @@ function Canvas() {
             organizar,
             "zoom-100": zoomEmCemPorCento,
             "enquadrar-tudo": enquadrarTudo,
+            "focar-chat": pedirFocoDoChat,
+            "entrar-modo-fantasma": () => void entrarNoModoInvisivel(),
             "ajustes-do-aplicativo": () => void abrirAjustes(),
             // A paleta fica aberta: o detalhe da ação mostra "verificando…" e o resultado.
             "procurar-atualizacoes": () => void verificarAtualizacao(),
@@ -1468,6 +1492,7 @@ function Canvas() {
       organizar,
       zoomEmCemPorCento,
       enquadrarTudo,
+      entrarNoModoInvisivel,
       abrirAjustes,
       verificarAtualizacao,
       abrirTerminal,

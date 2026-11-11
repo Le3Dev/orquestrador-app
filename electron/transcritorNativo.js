@@ -33,7 +33,7 @@
 //
 // Escolha da escuta: carrega o base no melhor dispositivo, aquece e mede a
 // mediana de 3 passadas de 5 s (B). Turbo se 7·B ≤ limite, small se 2,9·B ≤
-// limite, senão base; limite de 1.000 ms na prioridade "velocidade" e de
+// limite, senão base; limite de 1.900 ms na prioridade "velocidade" e de
 // 2.500 ms na "precisao". Ditado: nunca o base; reaproveita o da escuta se for
 // small ou turbo, senão small na CPU (fora da GPU que a escuta usa).
 //
@@ -61,7 +61,13 @@ const SEGUNDOS_DA_MEDICAO = 5;
 const TOKENS_DA_MEDICAO = 25;
 const PASSADAS_DA_MEDICAO = 3;
 
-const LIMITE_DA_PRIORIDADE_MS = Object.freeze({ velocidade: 1000, precisao: 2500 });
+// Limite de tempo (ms) que a passada de 5 s de áudio de um modelo pode levar.
+// "velocidade" era 1.000 ms, o que deixava quase toda máquina no "base", de
+// precisão baixa em português. 1.900 ms admite o small (2,9·B) até B ≈ 655 ms
+// (o base em CPU comum fica em 300-600 ms) e ainda assim a passada de 5 s sai
+// antes de a fala seguinte acumular fila; o turbo (7·B) só entra com B ≤ 271 ms,
+// ou seja, com folga de verdade (GPU).
+const LIMITE_DA_PRIORIDADE_MS = Object.freeze({ velocidade: 1900, precisao: 2500 });
 const FATOR_DO_MODELO = Object.freeze({ turbo: 7, small: 2.9 });
 const MODELOS_DO_DITADO = Object.freeze(["small", "turbo"]);
 const PRIORIDADE_PADRAO = "velocidade";

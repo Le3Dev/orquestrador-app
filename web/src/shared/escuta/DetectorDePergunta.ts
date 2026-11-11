@@ -60,6 +60,10 @@ export const ALUCINACOES_CONHECIDAS: readonly string[] = Object.freeze([
   "Legendas pela comunidade Amara.org",
   "Thank you.", "Thank you very much.", "Thanks.", "Thanks for watching!", "Thank you for watching.",
   "Bye.", "Bye bye.", "You.", "Music.", "Applause.", "Silence.",
+  "Obrigado pela atenção.", "Obrigada pela atenção.", "Obrigado a todos.",
+  "Se inscreva.", "Se inscreva no canal.", "Deixe seu like.", "Até o próximo vídeo.", "Nos vemos no próximo vídeo.",
+  "Thank you so much.", "Thanks for listening.", "Please subscribe.", "See you next time.", "See you in the next video.",
+  "Oh.", "Hmm.", "Uh.", "Um.",
 ]);
 
 /**
@@ -75,7 +79,41 @@ export const MARCAS_DE_ALUCINACAO: readonly string[] = Object.freeze([
   "Thanks for watching",
   "Thank you for watching",
   "Obrigado por assistir",
+  "Obrigada por assistir",
+  "Legendado por",
+  "Legendas por",
+  "Tradução e legendas",
+  "Se inscreva no canal",
+  "Curta o vídeo",
+  "Subtitles by",
+  "Like and subscribe",
+  "Please subscribe",
+  "Nos vemos no próximo vídeo",
+  "Até o próximo vídeo",
 ]);
+
+/** Quantas vezes seguidas o mesmo trecho (de 1 a 4 palavras) precisa se repetir, sem mais nada, para ser laço do Whisper. */
+export const REPETICOES_DO_LACO = 3;
+const PALAVRAS_MAXIMAS_NO_TRECHO_DO_LACO = 4;
+
+/**
+ * true quando o texto todo é o mesmo trecho curto repetido em laço
+ * ("Sim. Sim. Sim.", "e aí e aí e aí"): defeito conhecido do Whisper em áudio
+ * sem fala. Não pega repetição no meio de uma fala de verdade.
+ */
+export function ehRepeticaoEmLaco(texto: string): boolean {
+  const palavras = normalizarTexto(texto).split(" ").filter((palavra) => palavra !== "");
+  for (let tamanho = 1; tamanho <= PALAVRAS_MAXIMAS_NO_TRECHO_DO_LACO; tamanho++) {
+    if (palavras.length < tamanho * REPETICOES_DO_LACO || palavras.length % tamanho !== 0) continue;
+    const trecho = palavras.slice(0, tamanho).join(" ");
+    let repetido = true;
+    for (let inicio = tamanho; inicio < palavras.length && repetido; inicio += tamanho) {
+      repetido = palavras.slice(inicio, inicio + tamanho).join(" ") === trecho;
+    }
+    if (repetido) return true;
+  }
+  return false;
+}
 
 /** Menos palavras que isto é curto demais para ser um pedido (ou é alucinação). */
 export const MINIMO_DE_PALAVRAS = 2;
@@ -170,6 +208,7 @@ export function ehAlucinacaoConhecida(texto: string): boolean {
   const semMarcacoes = normalizarTexto(texto.replace(MARCACAO_DE_SOM, " "));
   if (semMarcacoes === "") return true;
   if (ALUCINACOES_NORMALIZADAS.has(semMarcacoes)) return true;
+  if (ehRepeticaoEmLaco(semMarcacoes)) return true;
   return contemTermo(semMarcacoes, MARCAS_NORMALIZADAS);
 }
 
