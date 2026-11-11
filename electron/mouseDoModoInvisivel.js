@@ -9,13 +9,26 @@
 
 const SELETOR_DA_AREA = ".chat-rapido";
 
-// Roda na tela: retângulo do chat em px da viewport, ou null se não houver chat.
-const SCRIPT_DA_AREA = `(() => {
+// Áreas sólidas do chat (cabeçalho, conversa, campo, menus, modais...) levam
+// este atributo; só sobre elas o mouse é capturado, e os vãos transparentes
+// deixam o clique passar. Sem nenhuma marcada na página (tela antiga), vale o
+// retângulo inteiro de `.chat-rapido`.
+const ATRIBUTO_DA_AREA_CLICAVEL = "data-area-clicavel";
+
+// Roda na tela: true se o ponto (px da viewport) deve capturar o mouse.
+function scriptDoPonto(x, y) {
+  return `(() => {
+  const x = ${Number(x)}, y = ${Number(y)};
+  if (document.querySelector("[${ATRIBUTO_DA_AREA_CLICAVEL}]")) {
+    const el = document.elementFromPoint(x, y);
+    return Boolean(el && el.closest("[${ATRIBUTO_DA_AREA_CLICAVEL}]"));
+  }
   const e = document.querySelector(${JSON.stringify(SELETOR_DA_AREA)});
-  if (!e) return null;
+  if (!e) return false;
   const r = e.getBoundingClientRect();
-  return [r.left, r.top, r.right, r.bottom];
+  return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
 })()`;
+}
 
 function dentroDoRetangulo(x, y, retangulo) {
   return Array.isArray(retangulo) && x >= retangulo[0] && x <= retangulo[2] && y >= retangulo[1] && y <= retangulo[3];
@@ -25,6 +38,7 @@ function iniciarRastreioDoMouse({ janela, screen, intervaloMs = 50, agendar = se
   let capturando = null; // null = ainda não decidido
   let consultando = false;
   let parado = false;
+  let pausado = false; // overlay oculto: nada captura o mouse
 
   function aplicar(capturar) {
     if (parado || janela.isDestroyed() || capturando === capturar) return;
@@ -34,7 +48,7 @@ function iniciarRastreioDoMouse({ janela, screen, intervaloMs = 50, agendar = se
   }
 
   async function verificar() {
-    if (parado || consultando || janela.isDestroyed()) return;
+    if (parado || pausado || consultando || janela.isDestroyed()) return;
     const ponto = screen.getCursorScreenPoint();
     const area = janela.getContentBounds();
     const x = ponto.x - area.x;
@@ -45,8 +59,11 @@ function iniciarRastreioDoMouse({ janela, screen, intervaloMs = 50, agendar = se
     }
     consultando = true;
     try {
-      const retangulo = await janela.webContents.executeJavaScript(SCRIPT_DA_AREA);
-      aplicar(dentroDoRetangulo(x, y, retangulo));
+      // O cursor vem em px de tela; a viewport usa px divididos pelo zoom.
+      const zoom = typeof janela.webContents.getZoomFactor === "function" ? janela.webContents.getZoomFactor() : 1;
+      const fator = zoom > 0 && zoom !== 1 ? zoom : 1;
+      const capturar = await janela.webContents.executeJavaScript(scriptDoPonto(x / fator, y / fator));
+      if (!pausado) aplicar(capturar === true);
     } catch {
       /* tela recarregando: tenta de novo no próximo ciclo */
     } finally {
@@ -58,7 +75,13 @@ function iniciarRastreioDoMouse({ janela, screen, intervaloMs = 50, agendar = se
   return {
     // Mantém o estado interno em sincronia com um pedido vindo da tela.
     definir(capturar) {
+      if (pausado) return;
       aplicar(Boolean(capturar));
+    },
+    // Pausado: força os cliques a passarem e ignora o cursor até retomar.
+    pausar(pausar) {
+      pausado = Boolean(pausar);
+      if (pausado) aplicar(false);
     },
     verificar,
     parar() {
@@ -68,4 +91,4 @@ function iniciarRastreioDoMouse({ janela, screen, intervaloMs = 50, agendar = se
   };
 }
 
-module.exports = { iniciarRastreioDoMouse, dentroDoRetangulo, SELETOR_DA_AREA };
+module.exports = { iniciarRastreioDoMouse, dentroDoRetangulo, scriptDoPonto, SELETOR_DA_AREA, ATRIBUTO_DA_AREA_CLICAVEL };

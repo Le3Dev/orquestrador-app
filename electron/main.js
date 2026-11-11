@@ -75,6 +75,7 @@ const {
 const { capturarTela } = require("./capturaDeTela");
 const { criarRespostaAoPedidoDeMidia, vemDaJanelaPrincipal } = require("./escutaDoModoInvisivel");
 const { iniciarRastreioDoMouse } = require("./mouseDoModoInvisivel");
+const { criarAtalhosDoModoInvisivel } = require("./atalhosDoModoInvisivel");
 const { criarMaximizacao } = require("./maximizacao");
 const { execFileSync, spawn } = require("node:child_process");
 const crypto = require("node:crypto");
@@ -997,14 +998,78 @@ ipcMain.handle("atualizacao:instalar-agora", async (evento) => {
 // ──────────────────────────────────────────────────────────────────────────
 // Modo invisível da janela principal: fundo transparente, sempre no topo,
 // fora de capturas de tela, cliques passando para os apps atrás (a tela liga
-// a captura de mouse só sobre seus controles). Sai com Ctrl+Shift+I.
+// a captura de mouse só sobre as áreas `[data-area-clicavel]` do chat; nos
+// vãos transparentes o clique passa). A janela continua cobrindo o monitor.
+//
+// Atalhos globais (tabela em atalhosDoModoInvisivel.js), como no Perssua:
+//  - Ctrl+\ (SEMPRE registrado, do ready ao will-quit): fora do modo, entra; no
+//    modo, oculta/mostra o overlay SEM sair (setOpacity(0) + cliques passando +
+//    rastreio do mouse pausado; não usa hide() para a escuta de áudio da tela
+//    não sofrer backgroundThrottling). Ao sair do modo a opacidade volta a 1.
+//  - Só no modo (e inertes enquanto oculto, menos o de sair): Ctrl+Shift+I sai,
+//    Ctrl+Shift+S captura a tela, Ctrl+Shift+Enter / Space, Ctrl+Alt+setas /
+//    PageUp / PageDown / + / - viram ações enviadas à tela ("modo-invisivel:atalho").
+//
+// Foco: no modo a janela é setFocusable(false), para não ativar nem roubar o
+// teclado do app de trás (no Windows ela ainda recebe cliques do mouse). A tela
+// pede o foco por "modo-invisivel:definir-focavel" (campo de texto) ou pelo
+// Ctrl+Shift+Space. Atenção: setFocusable em tempo de execução tem falhas
+// conhecidas no Windows (o estado pode não refletir de imediato); por isso tudo
+// é defensivo (try/catch + log) e o modo continua funcionando se falhar.
 //
 // A janela principal já nasce `transparent: true`; o fundo opaco do modo
 // normal vem do CSS (html/body/#root), e o modo invisível só o torna transparente.
 // ──────────────────────────────────────────────────────────────────────────
-const ATALHO_DO_MODO_INVISIVEL = "CommandOrControl+Shift+I";
-const ATALHO_CAPTURAR_AGORA = "CommandOrControl+Shift+S";
-let modoInvisivel = null; // { janela, anterior } enquanto ativo
+let modoInvisivel = null; // { janela, anterior, rastreio, oculto } enquanto ativo
+
+function enviarAcaoDoAtalho(acao) {
+  const atual = modoInvisivel;
+  if (atual && !atual.janela.isDestroyed()) atual.janela.webContents.send("modo-invisivel:atalho", acao);
+}
+
+function definirFocavelDoModoInvisivel(focavel) {
+  const atual = modoInvisivel;
+  if (!atual || atual.janela.isDestroyed()) return;
+  const { janela } = atual;
+  try {
+    if (focavel) {
+      janela.setFocusable(true);
+      janela.focus();
+      janela.webContents.focus();
+    } else {
+      janela.setFocusable(false);
+      if (janela.isFocused()) janela.blur();
+    }
+  } catch (erro) {
+    registrarNoLog("app", `Falha ao alterar o foco do modo invisível: ${erro.message || erro}`);
+  }
+}
+
+function definirOcultoDoModoInvisivel(oculto) {
+  const atual = modoInvisivel;
+  if (!atual || atual.janela.isDestroyed() || atual.oculto === oculto) return;
+  atual.oculto = oculto;
+  const { janela, rastreio } = atual;
+  if (oculto) {
+    definirFocavelDoModoInvisivel(false);
+    janela.setOpacity(0);
+    janela.setIgnoreMouseEvents(true, { forward: true });
+    rastreio.pausar(true);
+  } else {
+    janela.setOpacity(1);
+    rastreio.pausar(false);
+  }
+  janela.webContents.send("modo-invisivel:oculto", oculto);
+}
+
+// Ctrl+\ e o botão da tela.
+function alternarModoInvisivel() {
+  if (!modoInvisivel) {
+    entrarNoModoInvisivel();
+    return;
+  }
+  definirOcultoDoModoInvisivel(!modoInvisivel.oculto);
+}
 
 // Atalho global: não rouba o foco do app de trás; manda o quadro à tela.
 async function capturarAgoraPorAtalho() {
@@ -1047,36 +1112,29 @@ function entrarNoModoInvisivel() {
   // decide pela posição do cursor se a janela recebe o clique (ver mouseDoModoInvisivel.js).
   modoInvisivel.rastreio = iniciarRastreioDoMouse({ janela, screen });
   modoInvisivel.rastreio.definir(false);
-  try {
-    if (!globalShortcut.register(ATALHO_DO_MODO_INVISIVEL, sairDoModoInvisivel)) {
-      registrarNoLog("app", "Não foi possível registrar o atalho do modo invisível.");
-    }
-  } catch (erro) {
-    registrarNoLog("app", `Falha ao registrar o atalho do modo invisível: ${erro.message || erro}`);
-  }
-  try {
-    if (!globalShortcut.register(ATALHO_CAPTURAR_AGORA, capturarAgoraPorAtalho)) {
-      registrarNoLog("app", "Não foi possível registrar o atalho de capturar agora.");
-    }
-  } catch (erro) {
-    registrarNoLog("app", `Falha ao registrar o atalho de capturar agora: ${erro.message || erro}`);
-  }
+  modoInvisivel.oculto = false;
+  janela.setOpacity(1);
+  // Não ativa nem rouba o teclado do app de trás (ver comentário do bloco).
+  definirFocavelDoModoInvisivel(false);
+  atalhosDoModoInvisivel.registrarDoModo();
   registrarNoLog("app", "Modo invisível ligado.");
   avisarModoInvisivel(janela, true);
 }
 
 function sairDoModoInvisivel() {
   if (!modoInvisivel) return;
-  const { janela, anterior, rastreio } = modoInvisivel;
+  const { janela, anterior, rastreio, oculto } = modoInvisivel;
   modoInvisivel = null;
   if (rastreio) rastreio.parar();
-  try {
-    globalShortcut.unregister(ATALHO_DO_MODO_INVISIVEL);
-    globalShortcut.unregister(ATALHO_CAPTURAR_AGORA);
-  } catch {
-    /* ignora */
-  }
+  atalhosDoModoInvisivel.desregistrarDoModo();
   if (janela.isDestroyed()) return;
+  janela.setOpacity(1);
+  try {
+    janela.setFocusable(true);
+  } catch (erro) {
+    registrarNoLog("app", `Falha ao devolver o foco à janela: ${erro.message || erro}`);
+  }
+  if (oculto) janela.webContents.send("modo-invisivel:oculto", false);
   janela.setIgnoreMouseEvents(false);
   janela.setContentProtection(false);
   janela.setSkipTaskbar(anterior.skipTaskbar);
@@ -1094,6 +1152,32 @@ ipcMain.handle("modo-invisivel:entrar", (evento) => {
 ipcMain.handle("modo-invisivel:sair", (evento) => {
   exigirJanelaPrincipal(evento);
   sairDoModoInvisivel();
+});
+ipcMain.handle("modo-invisivel:alternar", (evento) => {
+  exigirJanelaPrincipal(evento);
+  alternarModoInvisivel();
+});
+// Só tem efeito no modo invisível.
+ipcMain.handle("modo-invisivel:definir-focavel", (evento, focavel) => {
+  exigirJanelaPrincipal(evento);
+  definirFocavelDoModoInvisivel(focavel === true);
+});
+
+// Instâncias dos atalhos globais (registro permanente no ready; os do modo ao entrar/sair).
+const atalhosDoModoInvisivel = criarAtalhosDoModoInvisivel({
+  globalShortcut,
+  registrarNoLog,
+  tratadores: {
+    alternar: alternarModoInvisivel,
+    sair: sairDoModoInvisivel,
+    capturar: capturarAgoraPorAtalho,
+    focar: () => {
+      definirFocavelDoModoInvisivel(true);
+      enviarAcaoDoAtalho("focar-campo");
+    },
+    enviarAcao: enviarAcaoDoAtalho,
+    estaOculto: () => Boolean(modoInvisivel?.oculto),
+  },
 });
 // A tela consulta ao montar (o ChatRapido remonta ao alternar fixo/flutuante e
 // perderia o estado, que antes só chegava pelo aviso "modo-invisivel:estado").
@@ -1379,6 +1463,8 @@ if (!conseguiuLock) {
     licenca.iniciar(pastaDoUsuario());
     // Antes de abrir a janela principal (a sessão só existe depois do ready).
     registrarEscutaDoModoInvisivel();
+    // Ctrl+\ (alternar o modo invisível) vale do ready até o will-quit.
+    atalhosDoModoInvisivel.registrarPermanentes();
     try {
       prepararTranscricaoNativa();
     } catch (erro) {

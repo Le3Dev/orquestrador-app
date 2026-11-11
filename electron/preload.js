@@ -68,9 +68,30 @@ contextBridge.exposeInMainWorld("electron", {
   },
 
   // Modo invisível da janela principal (transparente, sempre no topo, fora de
-  // capturas). Sai também pelo atalho global Ctrl+Shift+I. Enquanto ativo, a
+  // capturas). Atalhos globais (electron/atalhosDoModoInvisivel.js): Ctrl+\
+  // alterna (entra / oculta / mostra, sempre ativo); no modo: Ctrl+Shift+I sai,
+  // Ctrl+Shift+S captura, e as demais viram ações via `aoAtalho` (responder-agora,
+  // focar-campo, mover-cima/baixo/esquerda/direita, rolar-acima/abaixo,
+  // opacidade-mais/menos). No modo a janela não é focável (não rouba o teclado do
+  // app de trás): `definirFocavel(true)` a foca para digitar. Enquanto ativo, a
   // tela escuta o áudio do sistema (electron/escutaDoModoInvisivel.js).
   modoInvisivel: {
+    // Mesmo efeito do Ctrl+\ (entra no modo, ou oculta/mostra o overlay).
+    alternar: () => ipcRenderer.invoke("modo-invisivel:alternar").then(() => undefined),
+    // true = janela focável e focada (teclado); false = devolve o foco. Só no modo.
+    definirFocavel: (focavel) => ipcRenderer.invoke("modo-invisivel:definir-focavel", Boolean(focavel)).then(() => undefined),
+    // Ações dos atalhos globais (strings listadas acima); devolve o cancelamento.
+    aoAtalho: (callback) => {
+      const ouvinte = (_evento, acao) => callback(String(acao));
+      ipcRenderer.on("modo-invisivel:atalho", ouvinte);
+      return () => ipcRenderer.removeListener("modo-invisivel:atalho", ouvinte);
+    },
+    // true quando o overlay é ocultado (opacidade 0, sem sair do modo); devolve o cancelamento.
+    aoMudarOculto: (callback) => {
+      const ouvinte = (_evento, oculto) => callback(Boolean(oculto));
+      ipcRenderer.on("modo-invisivel:oculto", ouvinte);
+      return () => ipcRenderer.removeListener("modo-invisivel:oculto", ouvinte);
+    },
     entrar: () => ipcRenderer.invoke("modo-invisivel:entrar").then(() => undefined),
     sair: () => ipcRenderer.invoke("modo-invisivel:sair").then(() => undefined),
     // true = a janela recebe cliques; false = cliques passam aos apps atrás.
