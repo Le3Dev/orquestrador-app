@@ -59,7 +59,7 @@ import {
 import { type ControleDaPaleta, PaletaDeComandos } from "../componentes/canvas/PaletaDeComandos";
 import { rodandoNoDesktop, rodandoNoMac } from "../shared/ponteDoDesktop";
 import { AvisoDeConexao, ErroDoCanvas, StatusDoCanvas } from "../componentes/canvas/PaineisDoCanvas";
-import { PainelDeSkills } from "../componentes/canvas/PainelDeSkills";
+import { type AbaDoPainelDeSkills, PainelDeSkills } from "../componentes/canvas/PainelDeSkills";
 import { PainelDeSubagentes } from "../componentes/canvas/PainelDeSubagentes";
 import { api, ErroDaApi, mensagemDeErro } from "../shared/api/cliente";
 import type { ResumoDoArtefato } from "../shared/api/artefatos";
@@ -1690,6 +1690,9 @@ function Canvas() {
   // que os subagentes: ao conectar o servidor, e não a cada abertura do menu.
   const [skills, setSkills] = useState<DadosDaSkill[] | null>(null);
   const [erroDasSkills, setErroDasSkills] = useState<string | null>(null);
+  // Instalar, ligar, desligar ou remover um plugin muda quais skills existem: o painel avisa e a lista relê.
+  const [versaoDasSkills, setVersaoDasSkills] = useState(0);
+  const recarregarSkills = useCallback(() => setVersaoDasSkills((atual) => atual + 1), []);
   useEffect(() => {
     if (!servidor.conectado) {
       setSkills(null);
@@ -1713,7 +1716,7 @@ function Canvas() {
     return () => {
       ativo = false;
     };
-  }, [servidor.conectado]);
+  }, [servidor.conectado, versaoDasSkills]);
   // Salvar qualquer um dos painéis: os indicadores dos terminais e a lista podem ter mudado.
   const aoSalvarPainel = useCallback(() => {
     void recarregar();
@@ -1735,7 +1738,21 @@ function Canvas() {
     [abrirTerminal],
   );
   const abrirPainelDeSubagentes = useCallback(() => abrirPainel("subagentes"), [abrirPainel]);
-  const abrirPainelDeSkills = useCallback(() => abrirPainel("skills"), [abrirPainel]);
+  // O painel de skills abre em Instaladas (uma skill ou "Ver todas") ou em Explorar ("Explorar marketplace").
+  // `abertura` muda a cada pedido: abrir de novo em outra aba reinicia o painel na aba pedida.
+  const [aberturaDeSkills, setAberturaDeSkills] = useState<{ aba: AbaDoPainelDeSkills; abertura: number }>({
+    aba: "instaladas",
+    abertura: 0,
+  });
+  const abrirSkillsNaAba = useCallback(
+    (aba: AbaDoPainelDeSkills) => {
+      setAberturaDeSkills((atual) => ({ aba, abertura: atual.abertura + 1 }));
+      abrirPainel("skills");
+    },
+    [abrirPainel],
+  );
+  const abrirPainelDeSkills = useCallback(() => abrirSkillsNaAba("instaladas"), [abrirSkillsNaAba]);
+  const explorarMarketplace = useCallback(() => abrirSkillsNaAba("explorar"), [abrirSkillsNaAba]);
   // Os orquestradores abertos no canvas: de onde a lista de Skills lê as skills de cada projeto.
   const orquestradoresParaSkills = useMemo(
     () =>
@@ -1768,9 +1785,19 @@ function Canvas() {
           skills={skills}
           erroDasSkills={erroDasSkills}
           aoAbrirSkills={abrirPainelDeSkills}
+          aoExplorarMarketplace={explorarMarketplace}
         />
         {painelAberto === "subagentes" && <PainelDeSubagentes aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />}
-        {painelAberto === "skills" && <PainelDeSkills orquestradores={orquestradoresParaSkills} aoFechar={fecharPainel} />}
+        {painelAberto === "skills" && (
+          <PainelDeSkills
+            key={aberturaDeSkills.abertura}
+            orquestradores={orquestradoresParaSkills}
+            abaInicial={aberturaDeSkills.aba}
+            quantidadeDeSkills={skills?.length ?? null}
+            aoMudarPlugins={recarregarSkills}
+            aoFechar={fecharPainel}
+          />
+        )}
         {avisoDoLimite && (
           <ErroDoCanvas erro={AVISO_DO_LIMITE_DE_ORQUESTRADORES} aoFechar={fecharAvisoDoLimite} nivel="aviso" />
         )}
@@ -1798,6 +1825,9 @@ function Canvas() {
       skills,
       erroDasSkills,
       abrirPainelDeSkills,
+      explorarMarketplace,
+      aberturaDeSkills,
+      recarregarSkills,
       orquestradoresParaSkills,
       painelAberto,
       fecharPainel,

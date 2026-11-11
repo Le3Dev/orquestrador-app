@@ -19,6 +19,7 @@ import {
   IconeSetaDireita,
   IconeTrabalhando,
 } from "./IconesDasIlhas";
+import { IconeExplorar } from "./IconesDoMarketplace";
 import "../../theme/ilhas.css";
 
 /** O submenu aberto ao lado do menu: a lista de orquestradores, a de subagentes prontos ou a de skills. */
@@ -72,8 +73,10 @@ export interface PropsDoMenuNovo {
   /** As skills do Claude Code (do usuário e de plugins). Nulo enquanto a lista não chegou. */
   skills: readonly DadosDaSkill[] | null;
   erroDasSkills: string | null;
-  /** Uma skill da lista e "Ver todas as skills": abrem o painel das skills do Claude Code (só leitura). */
+  /** Uma skill da lista e "Ver todas as skills": abrem o painel das skills do Claude Code, na aba Instaladas. */
   aoAbrirSkills: () => void;
+  /** "Explorar marketplace": abre o mesmo painel já na aba Explorar, o catálogo de plugins. */
+  aoExplorarMarketplace: () => void;
 }
 
 /** O texto de um orquestrador para o leitor de tela. */
@@ -92,7 +95,7 @@ function plural(total: number, singular: string, pluralDoTermo: string): string 
  * e divisores entre os grupos. Grupo 1: o que criar. Grupo 2: "Orquestradores ›",
  * "Subagentes ›" e "Skills ›", cada um com a quantidade à direita, que abrem um segundo
  * painel à direita (ao passar o mouse, clicar ou com →); escolher uma skill ou
- * "Ver todas as skills" abre o painel das skills. Grupo 3: busca e configurações.
+ * "Ver todas as skills" abre o painel das skills, e "Explorar marketplace" o abre no catálogo de plugins. Grupo 3: busca e configurações.
  *
  * Teclado: ↓ ou Enter no botão abrem; ↑/↓ (e Home/End) navegam; → entra no
  * submenu e ← (ou Esc) volta dele; Enter ativa; Esc, Tab e clique fora fecham.
@@ -113,6 +116,7 @@ export function MenuNovo({
   skills,
   erroDasSkills,
   aoAbrirSkills,
+  aoExplorarMarketplace,
 }: PropsDoMenuNovo) {
   const [aberto, setAberto] = useState(false);
   const [submenu, setSubmenu] = useState<IdDoSubmenu | null>(null);
@@ -200,7 +204,7 @@ export function MenuNovo({
         rotulo: "Skills",
         icone: <IconeSkills tamanho={18} />,
         contagem: skills?.length ?? null,
-        dica: "As skills do Claude Code: do usuário e de plugins (só leitura)",
+        dica: "As skills do Claude Code e o marketplace de plugins",
       },
     ];
     const outros: ItemDoMenu[] = [
@@ -293,6 +297,11 @@ export function MenuNovo({
   const abrirSkills = () => {
     fechar(true);
     aoAbrirSkills();
+  };
+
+  const explorarMarketplace = () => {
+    fechar(true);
+    aoExplorarMarketplace();
   };
 
   /** Abre o submenu e, vindo do teclado, leva o foco ao primeiro item dele. */
@@ -500,6 +509,20 @@ export function MenuNovo({
             </button>
           ))}
           <div className="acoes-do-submenu">
+            <button
+              ref={refDoItem()}
+              type="button"
+              role="menuitem"
+              tabIndex={-1}
+              className="item-do-menu-novo is-explorar"
+              title="Procurar e instalar plugins do Claude Code"
+              onClick={explorarMarketplace}
+            >
+              <span className="icone-do-menu-novo" aria-hidden="true">
+                <IconeExplorar tamanho={18} />
+              </span>
+              <span className="rotulo-do-menu-novo">Explorar marketplace</span>
+            </button>
             <button
               ref={refDoItem()}
               type="button"

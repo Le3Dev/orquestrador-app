@@ -44,6 +44,7 @@ function acoes() {
     aoEscolherOrquestrador: vi.fn(),
     aoAbrirSubagentes: vi.fn(),
     aoAbrirSkills: vi.fn(),
+    aoExplorarMarketplace: vi.fn(),
   };
 }
 
@@ -402,7 +403,7 @@ describe("MenuNovo", () => {
   });
 
   describe("submenu Skills", () => {
-    it("lista as skills com nome e descrição, o plugin quando houver, e termina com Ver todas as skills", () => {
+    it("lista as skills com nome e descrição, o plugin quando houver, e termina com Explorar marketplace e Ver todas as skills", () => {
       montar();
       fireEvent.click(botao());
       fireEvent.mouseEnter(item("Skills").parentElement!);
@@ -418,7 +419,22 @@ describe("MenuNovo", () => {
       const nomes = within(submenu)
         .getAllByRole("menuitem")
         .map((elemento) => elemento.getAttribute("aria-label") ?? elemento.textContent);
-      expect(nomes.slice(-1)).toEqual(["Ver todas as skills"]);
+      expect(nomes.slice(-2)).toEqual(["Explorar marketplace", "Ver todas as skills"]);
+    });
+
+    it("Explorar marketplace abre o painel na aba Explorar, fecha o menu e não chama o de Instaladas", () => {
+      const chamadas = montar();
+      fireEvent.click(botao());
+      fireEvent.click(item("Skills"));
+
+      const explorar = screen.getByRole("menuitem", { name: "Explorar marketplace" });
+      expect(explorar).toHaveClass("is-explorar");
+      fireEvent.click(explorar);
+
+      expect(chamadas.aoExplorarMarketplace).toHaveBeenCalledTimes(1);
+      expect(chamadas.aoAbrirSkills).not.toHaveBeenCalled();
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(botao()).toHaveFocus();
     });
 
     it.each(["Ver todas as skills", "relatorio: Monta o relatório semanal."])(
@@ -436,12 +452,13 @@ describe("MenuNovo", () => {
       },
     );
 
-    it("sem skills, mostra o vazio e mantém Ver todas as skills", () => {
+    it("sem skills, mostra o vazio e mantém Explorar marketplace e Ver todas as skills", () => {
       montar({ skills: [] });
       fireEvent.click(botao());
       fireEvent.click(item("Skills"));
 
       expect(screen.getByText("Nenhuma skill encontrada.")).toBeInTheDocument();
+      expect(screen.getByRole("menuitem", { name: "Explorar marketplace" })).toBeInTheDocument();
       expect(screen.getByRole("menuitem", { name: "Ver todas as skills" })).toBeInTheDocument();
     });
 
@@ -467,11 +484,15 @@ describe("MenuNovo", () => {
       item("Skills").focus();
       fireEvent.keyDown(item("Skills"), { key: "ArrowRight" });
       const itens = within(screen.getByRole("menu", { name: "Skills" })).getAllByRole("menuitem");
-      expect(itens).toHaveLength(4);
+      expect(itens).toHaveLength(5);
       expect(itens[0]).toHaveFocus();
 
       fireEvent.keyDown(itens[0]!, { key: "End" });
+      expect(itens[4]).toHaveFocus();
+      expect(itens[4]).toHaveAccessibleName("Ver todas as skills");
+      fireEvent.keyDown(itens[4]!, { key: "ArrowUp" });
       expect(itens[3]).toHaveFocus();
+      expect(itens[3]).toHaveAccessibleName("Explorar marketplace");
       fireEvent.keyDown(itens[3]!, { key: "ArrowLeft" });
       expect(screen.queryByRole("menu", { name: "Skills" })).not.toBeInTheDocument();
       expect(item("Skills")).toHaveFocus();

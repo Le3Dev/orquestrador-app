@@ -43,6 +43,7 @@ describe("IlhaDoNome", () => {
       skills: [],
       erroDasSkills: null,
       aoAbrirSkills: vi.fn(),
+      aoExplorarMarketplace: vi.fn(),
     };
     render(<IlhaDoNome {...comuns} />);
 
@@ -63,6 +64,7 @@ describe("IlhaDoNome", () => {
 
   it("não tem botão solto das Skills: a entrada é o submenu Skills do menu Novo, que abre o painel", () => {
     const aoAbrirSkills = vi.fn();
+    const aoExplorarMarketplace = vi.fn();
     render(
       <IlhaDoNome
         aoCriar={vi.fn()}
@@ -79,6 +81,7 @@ describe("IlhaDoNome", () => {
         skills={[]}
         erroDasSkills={null}
         aoAbrirSkills={aoAbrirSkills}
+        aoExplorarMarketplace={aoExplorarMarketplace}
       />,
     );
     const ilha = screen.getByTestId("ilha-do-nome");
@@ -87,6 +90,13 @@ describe("IlhaDoNome", () => {
     fireEvent.click(within(ilha).getByRole("button", { name: "Novo" }));
     fireEvent.click(within(ilha).getByRole("menuitem", { name: "Skills" }));
     fireEvent.click(within(ilha).getByRole("menuitem", { name: "Ver todas as skills" }));
+    expect(aoAbrirSkills).toHaveBeenCalledTimes(1);
+    expect(aoExplorarMarketplace).not.toHaveBeenCalled();
+
+    fireEvent.click(within(ilha).getByRole("button", { name: "Novo" }));
+    fireEvent.click(within(ilha).getByRole("menuitem", { name: "Skills" }));
+    fireEvent.click(within(ilha).getByRole("menuitem", { name: "Explorar marketplace" }));
+    expect(aoExplorarMarketplace).toHaveBeenCalledTimes(1);
     expect(aoAbrirSkills).toHaveBeenCalledTimes(1);
   });
 });
