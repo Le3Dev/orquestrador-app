@@ -2313,6 +2313,26 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   align-items: stretch;
   gap: 8px;
   cursor: auto;
+  /* A opacidade do chat inteiro (fundo e texto), pela preferência; a coluna fixa não a define. */
+  opacity: var(--opacidade-do-chat, 1);
+}
+
+/* O controle deslizante da opacidade (no cabeçalho da conversa e na barra do chat móvel). */
+.controle-de-opacidade {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  color: var(--muted);
+  cursor: default;
+}
+.controle-de-opacidade:hover { color: var(--primary); }
+.controle-de-opacidade-faixa {
+  width: 72px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--active);
+  cursor: pointer;
 }
 
 .conversa-do-chat {

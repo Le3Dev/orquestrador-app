@@ -47,6 +47,8 @@ import {
   LARGURA_DO_CHAT_FIXO,
   type LadoDoChatFixo,
   limitarLarguraDoChatFixo,
+  limitarOpacidadeDoChat,
+  OPACIDADE_DO_CHAT,
   usePreferenciasDaTela,
 } from "../../shared/hooks/usePreferenciasDaTela";
 import {
@@ -411,6 +413,36 @@ function IconeAlcaDeMover() {
       <circle cx="11" cy="7.5" r="1.3" />
       <circle cx="18" cy="7.5" r="1.3" />
     </svg>
+  );
+}
+
+/** Opacidade: um círculo meio cheio. */
+function IconeOpacidade() {
+  return (
+    <svg {...PROPS_DO_ICONE_DO_CHAT}>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 4v16a8 8 0 0 1 0-16Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+/** O controle deslizante da opacidade do chat inteiro (de 20% a 100%, de 10 em 10). */
+function ControleDeOpacidade({ valor, aoMudar }: { valor: number; aoMudar: (opacidade: number) => void }) {
+  return (
+    <label className="controle-de-opacidade" title="Opacidade (Ctrl+Alt+ + / −)">
+      <IconeOpacidade />
+      <input
+        type="range"
+        className="controle-de-opacidade-faixa"
+        aria-label="Opacidade do chat"
+        aria-valuetext={`${Math.round(valor * 100)}%`}
+        min={OPACIDADE_DO_CHAT.minima}
+        max={OPACIDADE_DO_CHAT.maxima}
+        step={OPACIDADE_DO_CHAT.passo}
+        value={valor}
+        onChange={(evento) => aoMudar(limitarOpacidadeDoChat(Number(evento.target.value)))}
+      />
+    </label>
   );
 }
 
@@ -1004,6 +1036,7 @@ export function ChatRapido({
     base: GeometriaDoChat;
     atual: GeometriaDoChat;
   } | null>(null);
+  const opacidade = preferencias.opacidadeDoChat;
   const geometriaGravada = preferencias.chatNoModoInvisivel;
   // Nunca fora da tela, mesmo que a janela tenha encolhido depois de gravada (a gravada não muda).
   const geometria = geometriaAoVivo ?? (geometriaGravada === null ? null : limitarGeometriaDoChat(geometriaGravada, area));
@@ -1147,6 +1180,11 @@ export function ChatRapido({
       if (elemento !== null) {
         elemento.scrollTop += (acao === "rolar-abaixo" ? 1 : -1) * Math.max(1, elemento.clientHeight * FRACAO_DA_ROLAGEM);
       }
+      return;
+    }
+    if (acao === "opacidade-mais" || acao === "opacidade-menos") {
+      const sentido = acao === "opacidade-mais" ? 1 : -1;
+      mudarPreferencias({ opacidadeDoChat: limitarOpacidadeDoChat(opacidade + sentido * OPACIDADE_DO_CHAT.passo) });
       return;
     }
     if (acao === "focar-campo") {
@@ -1318,6 +1356,11 @@ export function ChatRapido({
       ? { left: geometria.x, top: geometria.y, width: geometria.largura, height: geometria.altura }
       : { left: geometria.x, bottom: area.altura - geometria.y - geometria.altura, width: geometria.largura };
   }
+  // A opacidade vale para o chat inteiro (fundo e texto) e só para o flutuante: a coluna fixa e o resto do app não mudam.
+  const estiloDoChat: CSSProperties | undefined =
+    opacidade === OPACIDADE_DO_CHAT.padrao
+      ? estiloMovel
+      : ({ ...estiloMovel, "--opacidade-do-chat": opacidade } as CSSProperties);
   const classeDoMovel = movel ? `chat-rapido-movel ${geometria === null ? "chat-rapido-movel-padrao" : ""}` : "";
 
   return (
@@ -1327,7 +1370,7 @@ export function ChatRapido({
       }}
       className={`chat-rapido nodrag nowheel nopan ${fixo ? `chat-lateral chat-lateral-${lado}` : ""} ${classeDoMovel} ${respondendo ? "chat-rapido-respondendo" : ""}`}
       aria-label={fixo ? "Chat rápido" : undefined}
-      style={fixo ? { width: `${largura}px` } : estiloMovel}
+      style={fixo ? { width: `${largura}px` } : estiloDoChat}
       data-testid="chat-rapido"
       {...mouseDaArea}
       onBlur={(evento) => {
@@ -1392,6 +1435,7 @@ export function ChatRapido({
           >
             <IconeAlcaDeMover />
           </button>
+          <ControleDeOpacidade valor={opacidade} aoMudar={(valor) => mudarPreferencias({ opacidadeDoChat: valor })} />
           {geometria !== null && (
             <button
               type="button"
@@ -1421,6 +1465,9 @@ export function ChatRapido({
             <span className="rotulo-tecnico">chat rápido</span>
             {respondendo && <span className="etiqueta etiqueta-ativa etiqueta-pulso">respondendo…</span>}
             <span className="flex-1" />
+            {!fixo && !movel && (
+              <ControleDeOpacidade valor={opacidade} aoMudar={(valor) => mudarPreferencias({ opacidadeDoChat: valor })} />
+            )}
             {fixo ? (
               <span className="controles-do-chat" role="group" aria-label="Controles do chat">
                 <button

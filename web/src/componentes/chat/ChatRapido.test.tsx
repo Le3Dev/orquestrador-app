@@ -334,6 +334,52 @@ describe("ChatRapido · modo invisível", () => {
       expect(marcadas).toContain(screen.getByRole("region", { name: "Conversa com o Claude" }));
     });
 
+    it("o controle de opacidade aplica a variável ao chat inteiro e grava; Ctrl+Alt+ + / − ajustam de 0,1 em 0,1", () => {
+      const { ativar, atalho } = ponteAtiva();
+      renderizar();
+      ativar();
+      const chat = screen.getByTestId("chat-rapido");
+      expect(chat.style.getPropertyValue("--opacidade-do-chat")).toBe("");
+
+      fireEvent.change(screen.getByRole("slider", { name: "Opacidade do chat" }), { target: { value: "0.5" } });
+      expect(chat.style.getPropertyValue("--opacidade-do-chat")).toBe("0.5");
+      expect(JSON.parse(localStorage.getItem(CHAVE_DAS_PREFERENCIAS_DA_TELA) ?? "{}")).toMatchObject({
+        opacidadeDoChat: 0.5,
+      });
+
+      atalho("opacidade-mais");
+      expect(chat.style.getPropertyValue("--opacidade-do-chat")).toBe("0.6");
+      atalho("opacidade-menos");
+      atalho("opacidade-menos");
+      atalho("opacidade-menos");
+      atalho("opacidade-menos");
+      atalho("opacidade-menos");
+      expect(chat.style.getPropertyValue("--opacidade-do-chat")).toBe("0.2");
+      for (let i = 0; i < 10; i += 1) atalho("opacidade-mais");
+      // Voltou a 1: sem variável, o chat fica como sempre.
+      expect(chat.style.getPropertyValue("--opacidade-do-chat")).toBe("");
+    });
+
+    it("o chat flutuante normal também tem o controle (no cabeçalho da conversa) e a coluna fixa não", () => {
+      renderizar({ ...OCIOSO, mensagens: [mensagem("u1", "usuario", { texto: "Oi" })] });
+      expect(screen.getByRole("slider", { name: "Opacidade do chat" })).toBeInTheDocument();
+      cleanup();
+      render(
+        <ChatRapido
+          chat={OCIOSO}
+          desconectado={false}
+          erroAoCarregar={null}
+          aoMudarPreferencias={vi.fn()}
+          aoAbrirTerminal={vi.fn()}
+          temVagaPara={vi.fn()}
+          aoAtualizarOrquestradores={vi.fn()}
+          orquestradores={[]}
+          fixo
+        />,
+      );
+      expect(screen.queryByRole("slider", { name: "Opacidade do chat" })).not.toBeInTheDocument();
+    });
+
     it("sem o modo, não há alça de mover nem de redimensionar", () => {
       ponteAtiva();
       renderizar();

@@ -44,6 +44,11 @@ export type PreferenciasDaTela = {
    * redimensionado. Nulo (o padrão): centralizado no rodapé, como sempre.
    */
   chatNoModoInvisivel: GeometriaDoChat | null;
+  /**
+   * A opacidade do chat rápido flutuante (e do modo invisível), de 0,2 a 1 em passos de 0,1: o chat
+   * inteiro, fundo e texto, e só ele. Padrão (e preferências antigas, sem o campo): 1.
+   */
+  opacidadeDoChat: number;
 };
 
 export const CHAVE_DAS_PREFERENCIAS_DA_TELA = "orquestrador.preferenciasDaTela";
@@ -60,7 +65,21 @@ const PADRAO: PreferenciasDaTela = {
   minimapaVisivel: false,
   controlesDasJanelas: "automatico",
   chatNoModoInvisivel: null,
+  opacidadeDoChat: 1,
 };
+
+/** A opacidade do chat: mínima, máxima, passo e padrão. */
+export const OPACIDADE_DO_CHAT = { minima: 0.2, maxima: 1, passo: 0.1, padrao: 1 } as const;
+
+/** Uma opacidade entre 0,2 e 1, num múltiplo de 0,1; número inválido (NaN, infinito) vale o padrão. */
+export function limitarOpacidadeDoChat(opacidade: number): number {
+  if (!Number.isFinite(opacidade)) {
+    return OPACIDADE_DO_CHAT.padrao;
+  }
+  const passos = Math.round(opacidade / OPACIDADE_DO_CHAT.passo);
+  const arredondada = Math.round(passos * OPACIDADE_DO_CHAT.passo * 10) / 10;
+  return Math.min(OPACIDADE_DO_CHAT.maxima, Math.max(OPACIDADE_DO_CHAT.minima, arredondada));
+}
 
 /** Uma largura inteira entre a mínima e a máxima; número inválido (NaN, infinito) vale o padrão. */
 export function limitarLarguraDoChatFixo(largura: number): number {
@@ -125,6 +144,11 @@ function interpretar(bruto: string | null): PreferenciasDaTela {
         : PADRAO.controlesDasJanelas,
     // Geometria inválida (campo ausente, outro tipo, número quebrado) vale o padrão.
     chatNoModoInvisivel: interpretarGeometriaDoChat(registro.chatNoModoInvisivel),
+    // Fora do intervalo é limitada a ele; outro tipo vale o padrão.
+    opacidadeDoChat:
+      typeof registro.opacidadeDoChat === "number"
+        ? limitarOpacidadeDoChat(registro.opacidadeDoChat)
+        : PADRAO.opacidadeDoChat,
   };
 }
 
@@ -175,6 +199,7 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
   const atuais = lerPreferencias();
   const novas: PreferenciasDaTela = { ...atuais, ...parcial };
   novas.larguraDoChatFixo = limitarLarguraDoChatFixo(novas.larguraDoChatFixo);
+  novas.opacidadeDoChat = limitarOpacidadeDoChat(novas.opacidadeDoChat);
   if (
     novas.chatFixoNaEsquerda === atuais.chatFixoNaEsquerda &&
     novas.ladoDoChatFixo === atuais.ladoDoChatFixo &&
@@ -183,7 +208,8 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
     novas.manterBixinhosAteLimpar === atuais.manterBixinhosAteLimpar &&
     novas.minimapaVisivel === atuais.minimapaVisivel &&
     novas.controlesDasJanelas === atuais.controlesDasJanelas &&
-    mesmaGeometria(novas.chatNoModoInvisivel, atuais.chatNoModoInvisivel)
+    mesmaGeometria(novas.chatNoModoInvisivel, atuais.chatNoModoInvisivel) &&
+    novas.opacidadeDoChat === atuais.opacidadeDoChat
   ) {
     return;
   }
@@ -201,7 +227,7 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
 /**
  * As preferências da tela (chat fixo, o lado e a largura dele, visualizador de
  * código, manter os bixinhos até limpar, o minimapa visível, o estilo dos
- * controles das janelas, a posição do chat no modo invisível):
+ * controles das janelas, a posição do chat no modo invisível, a opacidade do chat):
  * mudar num lugar reflete em todos os componentes que usam o hook e nas
  * outras abas abertas.
  */

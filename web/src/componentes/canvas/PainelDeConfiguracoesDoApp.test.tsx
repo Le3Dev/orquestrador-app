@@ -127,6 +127,7 @@ describe("PainelDeConfiguracoesDoApp", () => {
       minimapaVisivel: false,
       controlesDasJanelas: "automatico",
       chatNoModoInvisivel: null,
+      opacidadeDoChat: 1,
     });
 
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Chat fixo" }));
