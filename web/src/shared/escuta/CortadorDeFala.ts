@@ -32,9 +32,11 @@ export const VOZ_MINIMA_MS = 250;
 /**
  * Nenhuma fala passa disto: é cortada no vale de probabilidade dos últimos
  * `BUSCA_DO_CORTE_MS`. Curta para que a passada final de cada fala chegue
- * logo, sem esperar a pessoa parar de falar.
+ * logo, sem esperar a pessoa parar de falar; mas longa o bastante para que
+ * fala corrida não seja cortada no meio de uma frase (cada corte tira o
+ * contexto do Whisper e gera erro na emenda). Era 8 s.
  */
-export const DURACAO_MAXIMA_DA_FALA_MS = 8_000;
+export const DURACAO_MAXIMA_DA_FALA_MS = 15_000;
 
 /** Onde a fala longa procura o ponto de corte: os últimos 2 s, na janela de menor probabilidade. */
 export const BUSCA_DO_CORTE_MS = 2_000;

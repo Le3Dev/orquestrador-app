@@ -49,9 +49,11 @@ export const MAXIMO_DE_TRECHOS_NA_TELA = 200;
 /**
  * Durante a fala, uma passada parcial (descartável) sai quando há ao menos
  * isto de áudio novo desde a anterior e nenhuma passada está em andamento:
- * a cadência se adapta à velocidade do motor.
+ * a cadência se adapta à velocidade do motor. Era 1.000 ms; 700 ms faz o texto
+ * provisório aparecer mais cedo, e como a passada só entra com o motor livre
+ * (`passadasEmVoo === 0`) um motor lento apenas fica no ritmo dele, sem fila.
  */
-export const AUDIO_NOVO_PARA_PASSADA_MS = 1_000;
+export const AUDIO_NOVO_PARA_PASSADA_MS = 700;
 
 /**
  * Ao sair do modo invisível, a captura espera isto antes de ser desligada (o
@@ -710,8 +712,10 @@ export class SessaoDaEscuta {
         idioma: this.idiomaDaPassada(fala),
         descartavel: true,
       });
-    } catch {
-      // Descartada (chegou áudio mais novo na fila) ou com falha: a passada final cuida do resto.
+    } catch (erro) {
+      // Descartada (chegou áudio mais novo na fila) é o esperado e fica quieta; falha de verdade
+      // é registrada. Em ambos os casos a passada final cuida do resto.
+      if (!(erro instanceof TranscricaoDescartada)) console.warn("Passada parcial da escuta falhou:", erro);
     }
     if (geracao !== this.geracao) return;
     this.passadasEmVoo--;

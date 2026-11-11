@@ -4,6 +4,7 @@ import {
   DetectorDePergunta,
   ehAlucinacao,
   ehAlucinacaoConhecida,
+  ehRepeticaoEmLaco,
   EXPRESSOES_DE_PEDIDO,
   MINIMO_DE_PALAVRAS_DO_SINAL_FORTE,
   PALAVRAS_INTERROGATIVAS,
@@ -189,8 +190,41 @@ describe("DetectorDePergunta.ehAlucinacaoConhecida", () => {
     }
     expect(ehAlucinacaoConhecida("Bom")).toBe(false);
     expect(ehAlucinacao("Bom")).toBe(true);
-    expect(ehAlucinacaoConhecida("la la la")).toBe(false);
-    expect(ehAlucinacao("la la la")).toBe(true);
+    expect(ehAlucinacaoConhecida("la la")).toBe(false);
+    expect(ehAlucinacao("la la")).toBe(true);
+  });
+
+  it("repetição em laço: o texto todo é o mesmo trecho curto repetido (3 vezes ou mais)", () => {
+    for (const texto of ["Sim. Sim. Sim.", "la la la", "e aí, e aí, e aí", "Não é isso. Não é isso. Não é isso. Não é isso."]) {
+      expect(ehRepeticaoEmLaco(texto)).toBe(true);
+      expect(ehAlucinacaoConhecida(texto)).toBe(true);
+    }
+  });
+
+  it("repetição que não é laço continua valendo como fala", () => {
+    for (const texto of ["Sim. Sim.", "Sim. Sim. Não.", "Qual a complexidade? Qual a complexidade do quicksort?"]) {
+      expect(ehRepeticaoEmLaco(texto)).toBe(false);
+    }
+    expect(ehAlucinacaoConhecida("Sim. Sim. Não.")).toBe(false);
+  });
+
+  it("variantes pt/en de créditos e despedidas, com acento, caixa e pontuação diferentes", () => {
+    for (const texto of [
+      "OBRIGADO POR ASSISTIR!",
+      "Obrigada por assistir, até a próxima",
+      "Legendas pela comunidade Amara.org.",
+      "Legendado por Fulano de Tal",
+      "Inscreva-se no canal e ative o sininho",
+      "Se inscreva no canal!",
+      "Thank you for watching, see you next time",
+      "Subtitles by the Amara.org community",
+      "Please subscribe.",
+      "Até o próximo vídeo!",
+      "[Música] Obrigado por assistir",
+    ]) {
+      expect(ehAlucinacaoConhecida(texto)).toBe(true);
+    }
+    expect(ehAlucinacaoConhecida("Obrigado pela explicação, ficou claro.")).toBe(false);
   });
 });
 

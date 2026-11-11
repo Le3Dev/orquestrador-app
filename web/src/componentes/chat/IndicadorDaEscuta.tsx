@@ -5,6 +5,7 @@ import type { EscutaNaTela, SituacaoDaEscuta } from "../../shared/escuta/useEscu
 import {
   type DownloadDoModelo,
   explicacaoDoMotor,
+  nomeCurtoDoModelo,
   rotuloDoMotor,
   textoDoDownload,
   tipoDoDispositivo,
@@ -25,6 +26,10 @@ type Props = Pick<
   | "mudarIdioma"
   | "mudarPrioridadeDoMotor"
 >;
+
+/** O modelo "base" erra bastante em português: o indicador avisa, de leve. */
+const AVISO_DE_PRECISAO_BAIXA =
+  "Precisão baixa: o modelo base erra mais em português. Em Precisão, no menu da escuta, o motor tenta um modelo maior";
 
 /** Situações em que não há escuta para indicar (fora do modo, recusada ou com o aviso na tela). */
 const SEM_INDICADOR: ReadonlySet<SituacaoDaEscuta> = new Set(["indisponivel", "desligada", "aguardando-aviso"]);
@@ -263,6 +268,18 @@ export function IndicadorDaEscuta({
             data-testid="selo-do-motor"
           >
             {rotuloDoMotor(motor)}
+          </span>
+        )}
+        {motor !== null && nomeCurtoDoModelo(motor.modelo) === "base" && (
+          <span
+            className="aviso-de-precisao-baixa"
+            style={{ color: "var(--warning)" }}
+            title={AVISO_DE_PRECISAO_BAIXA}
+            aria-label={AVISO_DE_PRECISAO_BAIXA}
+            role="img"
+            data-testid="aviso-de-precisao-baixa"
+          >
+            !
           </span>
         )}
       </button>

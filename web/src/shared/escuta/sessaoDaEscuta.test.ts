@@ -390,14 +390,14 @@ describe("SessaoDaEscuta", () => {
   });
 
   describe("passadas no motor", () => {
-    it("durante a fala, sai uma passada descartável a cada ~1 s de áudio novo", async () => {
+    it("durante a fala, sai uma passada descartável a cada ~0,7 s de áudio novo", async () => {
       const t = montar({ automatico: false });
       await t.entrar();
       t.motor.texto = "um dois três";
       await t.tocar(voz(4_500));
 
       const parciais = t.motor.parciais;
-      expect(parciais).toHaveLength(4);
+      expect(parciais).toHaveLength(5);
       expect(t.motor.finais).toHaveLength(0);
       for (const passada of parciais) {
         expect(passada.opcoes).toEqual({ origem: "escuta", idioma: "portuguese", descartavel: true });
@@ -432,7 +432,7 @@ describe("SessaoDaEscuta", () => {
       t.motor.roteiro = (passada) =>
         falhas.shift() ?? resultado("Hoje vamos falar", { fimS: duracaoMs(passada.audio) / 1000 });
 
-      await t.tocar(voz(2_300));
+      await t.tocar(voz(1_600));
       expect(t.motor.parciais).toHaveLength(2);
       expect(t.sessao.instantaneo()).toMatchObject({ erro: null, linhaProvisoria: null, legenda: { frases: [], emAndamento: null } });
 
@@ -560,7 +560,7 @@ describe("SessaoDaEscuta", () => {
       t.motor.idioma = "en";
       t.motor.texto = "We will talk about linked lists today";
       await t.tocar(voz(2_500));
-      expect(t.motor.parciais.map((passada) => passada.opcoes.idioma)).toEqual(["automatico", "en"]);
+      expect(t.motor.parciais.map((passada) => passada.opcoes.idioma)).toEqual(["automatico", "en", "en"]);
       await t.tocar(silencio(SILENCIO_DO_FIM_DA_FALA_MS));
       expect(t.motor.finais.map((passada) => passada.opcoes.idioma)).toEqual(["en"]);
 
@@ -690,16 +690,16 @@ describe("SessaoDaEscuta", () => {
       expect(estado.linhas).toEqual(["Bom dia a todos."]);
     });
 
-    it("fala contínua: as falas curtas (até 8 s, cada uma um trecho) ficam no mesmo enunciado até a duração máxima", async () => {
+    it("fala contínua: as falas curtas (até 15 s, cada uma um trecho) ficam no mesmo enunciado até a duração máxima", async () => {
       const t = montar({ automatico: false });
       await t.entrar();
       t.motor.texto = "fala corrida sem pausa";
-      await t.tocar(voz(15_000));
+      await t.tocar(voz(17_000));
       // Já houve corte de fala, mas o enunciado continua um só.
-      expect(t.sessao.instantaneo().trechos.length).toBeGreaterThanOrEqual(2);
+      expect(t.sessao.instantaneo().trechos.length).toBeGreaterThanOrEqual(1);
       expect(t.sessao.instantaneo().legenda.frases).toEqual([]);
 
-      await t.tocar(voz(13_000));
+      await t.tocar(voz(15_000));
       const { trechos, legenda } = t.sessao.instantaneo();
       for (const trecho of trechos) {
         expect(trecho.fimMs - trecho.inicioMs).toBeLessThanOrEqual(DURACAO_MAXIMA_DA_FALA_MS);
@@ -715,7 +715,7 @@ describe("SessaoDaEscuta", () => {
       expect(enunciado.fimMs - enunciado.inicioMs).toBeGreaterThanOrEqual(DURACAO_MAXIMA_DO_ENUNCIADO_MS);
       expect(enunciado.fimMs - enunciado.inicioMs).toBeLessThan(DURACAO_MAXIMA_DO_ENUNCIADO_MS + DURACAO_MAXIMA_DA_FALA_MS);
       const falasDoEnunciado = trechos.filter((trecho) => trecho.fimMs <= enunciado.fimMs);
-      expect(falasDoEnunciado.length).toBeGreaterThanOrEqual(3);
+      expect(falasDoEnunciado.length).toBeGreaterThanOrEqual(2);
       expect(enunciado.texto).toBe(falasDoEnunciado.map((trecho) => trecho.texto).join(" "));
       // A fala seguinte já está noutro enunciado.
       expect(legenda.emAndamento?.id).not.toBe(enunciado.id);
