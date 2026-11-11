@@ -118,7 +118,6 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
         pedido.subagentesProntos,
         this.plataforma,
         pedido.itensLigados ?? [],
-        pedido.documentos ?? [],
         pedido.previasAbertas ?? [],
       );
 

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { z } from "zod";
 
-import { TIPOS_DE_MIDIA } from "../../orquestracao/Anexo";
+import { TIPOS_DE_IMAGEM } from "../../orquestracao/Anexo";
 import { ESFORCOS_DE_RACIOCINIO } from "../../orquestracao/EsforcoDeRaciocinio";
 import { EventoDeOrquestracao, EventoRegistrado } from "../../orquestracao/EventoDeOrquestracao";
 import { TIPOS_DE_ITEM_LIGADO } from "../../orquestracao/InstrucoesDoOrquestrador";
@@ -82,9 +82,7 @@ const esquemaDoArquivo = z.object({
           z.object({
             id: z.string(),
             nome: z.string(),
-            tipoDeMidia: z.enum(TIPOS_DE_MIDIA),
-            // Anexos gravados antes dos documentos só podiam ser imagens.
-            categoria: z.enum(["imagem", "documento"]).default("imagem"),
+            tipoDeMidia: z.enum(TIPOS_DE_IMAGEM),
             tamanhoEmBytes: z.number(),
             arquivo: z.string(),
           }),

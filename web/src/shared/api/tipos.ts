@@ -132,14 +132,10 @@ export type DadosDaConfiguracaoGravada = Omit<DadosDaConfiguracao, CamposPosteri
 
 export type TipoDeImagem = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
-export type CategoriaDoAnexo = "imagem" | "documento";
-
 export interface DadosDoAnexo {
   id: string;
   nome: string;
-  /** Ausente nos eventos antigos: eram sempre imagens. */
-  categoria?: CategoriaDoAnexo;
-  tipoDeMidia: string;
+  tipoDeMidia: TipoDeImagem;
   tamanhoEmBytes: number;
   arquivo: string;
 }
@@ -601,8 +597,6 @@ export interface ImagemDaMensagemDoChat {
   arquivo: string;
   nome: string;
   tipoDeMidia: string;
-  categoria?: CategoriaDoAnexo;
-  tamanhoEmBytes?: number;
 }
 
 export type PapelNoChat = "usuario" | "claude";

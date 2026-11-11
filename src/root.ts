@@ -9,7 +9,6 @@ import { ServicoDeChat } from "./chat/ServicoDeChat";
 import { SubagentesDoChat } from "./chat/SubagentesDoChat";
 import { acessoSoPeloApp } from "./controllers/acessoSoPeloApp";
 import { criarAlteracoesRoutes } from "./controllers/alteracoesRoutes";
-import { LIMITE_DO_CORPO_JSON } from "./controllers/anexosHttp";
 import { criarArquivosRoutes } from "./controllers/arquivosRoutes";
 import { CanalDoChat, criarChatRoutes } from "./controllers/chatRoutes";
 import { criarEscutaRoutes } from "./controllers/escutaRoutes";
@@ -92,8 +91,8 @@ export function montarAplicacao(
       acessoSoPeloApp({ chave: configuracao.chaveDeAcesso, urlDeDownload: configuracao.urlDeDownload }),
     );
   }
-  // Mensagens podem levar até 5 imagens de 5 MB e 5 documentos de 30 MB, em base64.
-  aplicacao.use(express.json({ limit: LIMITE_DO_CORPO_JSON }));
+  // Mensagens podem levar até 5 imagens de 5 MB, em base64.
+  aplicacao.use(express.json({ limit: "40mb" }));
 
   registrarRotas(aplicacao);
 

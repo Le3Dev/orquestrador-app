@@ -1,6 +1,5 @@
 import { TipoDeImagem } from "./Anexo";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
-import { DocumentoDoPedido } from "./DocumentosAnexados";
 import { EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
 import { ItemLigado } from "./InstrucoesDoOrquestrador";
 import { InstrucoesAplicadas } from "./InstrucoesPersonalizadas";
@@ -25,9 +24,7 @@ export interface PedidoDeTurno {
   modo: ModoDoTurno;
   pastaDeTrabalho: PastaDeTrabalho;
   imagens: readonly ImagemDoPedido[];
-  /** Documentos anexados (o texto extraído está ao lado do original); citados na mensagem ao Orquestrador. */
-  documentos?: readonly DocumentoDoPedido[];
-  /** Pasta dos anexos (imagens e documentos), liberada para leitura dos Subagentes; nula sem anexos. */
+  /** Pasta das imagens, liberada para leitura dos Subagentes; nula sem imagens. */
   pastaDasImagens: string | null;
   /**
    * Pasta de entrada dos artefatos deste Orquestrador (caminho absoluto): o
