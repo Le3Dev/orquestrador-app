@@ -10,6 +10,7 @@ import type {
   EsforcosHerdados,
   EstadoDoChat,
   ListagemDaPasta,
+  ListagemDeSkills,
   ModeloClaude,
   ModoDoTurno,
   NavegacaoDePastas,
@@ -282,6 +283,12 @@ export const api = {
     }
     return requisitar<{ situacoes: SituacaoDoServidorLocal[] }>(`/servidores-locais/situacao?${parametros.toString()}`);
   },
+
+  /** As skills do Claude Code (do usuário e de plugins); com `orquestradorId`, também as do projeto dele e se o nível as libera. */
+  lerSkills: (orquestradorId?: string) =>
+    requisitar<ListagemDeSkills>(
+      orquestradorId === undefined ? "/skills" : `/skills?orquestrador=${encodeURIComponent(orquestradorId)}`,
+    ),
 
   lerPreferencias: () => requisitar<DadosDasPreferencias>("/preferencias"),
 

@@ -59,6 +59,7 @@ import {
 import { type ControleDaPaleta, PaletaDeComandos } from "../componentes/canvas/PaletaDeComandos";
 import { rodandoNoDesktop, rodandoNoMac } from "../shared/ponteDoDesktop";
 import { AvisoDeConexao, ErroDoCanvas, StatusDoCanvas } from "../componentes/canvas/PaineisDoCanvas";
+import { PainelDeSkills } from "../componentes/canvas/PainelDeSkills";
 import { PainelDeSubagentes } from "../componentes/canvas/PainelDeSubagentes";
 import { api, ErroDaApi, mensagemDeErro } from "../shared/api/cliente";
 import type { ResumoDoArtefato } from "../shared/api/artefatos";
@@ -262,7 +263,7 @@ const FOLGA_DO_ENQUADRAMENTO = 0.12;
 const LIMITES_DO_ZOOM = { minZoom: 0.1, maxZoom: 2 };
 const VIEWPORT_PADRAO: Viewport = { x: 0, y: 0, zoom: 1 };
 /** Os painéis que abrem logo abaixo da ilha do canto superior esquerdo; só um fica aberto por vez. */
-type PainelDaBarra = "subagentes";
+type PainelDaBarra = "subagentes" | "skills";
 /** Nome e dica do botão do minimapa, no canto inferior direito. */
 const DICA_DO_MINIMAPA = { mostrar: "Mostrar minimapa", esconder: "Esconder minimapa" } as const;
 /**
@@ -1705,6 +1706,19 @@ function Canvas() {
     [abrirTerminal],
   );
   const abrirPainelDeSubagentes = useCallback(() => abrirPainel("subagentes"), [abrirPainel]);
+  /** O botão das Skills na ilha: um segundo clique fecha o painel. */
+  const alternarPainelDeSkills = useCallback(
+    () => setPainelAberto((atual) => (atual === "skills" ? null : "skills")),
+    [],
+  );
+  // Os orquestradores abertos no canvas: de onde o painel de Skills lê as skills do projeto.
+  const orquestradoresParaSkills = useMemo(
+    () =>
+      (orquestradores ?? [])
+        .filter((orquestrador) => noCanvas.has(orquestrador.id))
+        .map(({ id, nome }) => ({ id, nome })),
+    [orquestradores, noCanvas],
+  );
   const abrirConfiguracoesPadrao = useCallback(() => abrirConfiguracoes(), [abrirConfiguracoes]);
 
   // Os painéis não dependem da posição dos nós: memorizados, não re-renderizam
@@ -1726,8 +1740,11 @@ function Canvas() {
           aoEscolherOrquestrador={focarOrquestrador}
           subagentes={subagentesProntos}
           aoAbrirSubagentes={abrirPainelDeSubagentes}
+          aoAlternarSkills={alternarPainelDeSkills}
+          skillsAbertas={painelAberto === "skills"}
         />
         {painelAberto === "subagentes" && <PainelDeSubagentes aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />}
+        {painelAberto === "skills" && <PainelDeSkills orquestradores={orquestradoresParaSkills} aoFechar={fecharPainel} />}
         {avisoDoLimite && (
           <ErroDoCanvas erro={AVISO_DO_LIMITE_DE_ORQUESTRADORES} aoFechar={fecharAvisoDoLimite} nivel="aviso" />
         )}
@@ -1752,6 +1769,8 @@ function Canvas() {
       focarOrquestrador,
       subagentesProntos,
       abrirPainelDeSubagentes,
+      alternarPainelDeSkills,
+      orquestradoresParaSkills,
       painelAberto,
       fecharPainel,
       aoSalvarPainel,

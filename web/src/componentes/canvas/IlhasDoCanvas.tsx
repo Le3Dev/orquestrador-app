@@ -5,7 +5,7 @@ import type { JanelaDaCota, LeituraDeMemoria } from "../../shared/api/tipos";
 import { descreverRenovacao, formatarMomento, formatarPercentual } from "../../shared/formatacao";
 import { useAtualizacao } from "../../shared/hooks/useAtualizacao";
 import { nivelDaMemoria, type NivelDaMemoria } from "../../shared/memoria";
-import { IconeAlerta, IconeDesenhar, IconeEngrenagem, IconeGrade, IconeOrquestrador } from "../Icones";
+import { IconeAlerta, IconeDesenhar, IconeEngrenagem, IconeGrade, IconeOrquestrador, IconeSkills } from "../Icones";
 import { AvisoDeAtualizacao } from "./AvisoDeAtualizacao";
 import { ControlesDaJanela } from "./ControlesDaJanela";
 import {
@@ -36,12 +36,19 @@ export function FaixaDeArrasto() {
   return <div className="faixa-de-arrasto" data-testid="faixa-de-arrasto" aria-hidden="true" />;
 }
 
+interface PropsDaIlhaDoNome extends PropsDoMenuNovo {
+  /** Abre (ou fecha, se já estava aberto) o painel de Skills do Claude Code. */
+  aoAlternarSkills: () => void;
+  skillsAbertas: boolean;
+}
+
 /**
- * Ilha do canto superior esquerdo: o ícone e o nome do app, um divisor e o
- * botão `+ Novo` com o menu (ver `MenuNovo`). No app desktop o fundo dela
- * arrasta a janela (`ilha-arrasta`); o botão, o menu e o submenu são `no-drag`.
+ * Ilha do canto superior esquerdo: o ícone e o nome do app, um divisor, o
+ * botão `+ Novo` com o menu (ver `MenuNovo`) e o botão das Skills do Claude
+ * Code. No app desktop o fundo dela arrasta a janela (`ilha-arrasta`); os
+ * botões, o menu e o submenu são `no-drag`.
  */
-export function IlhaDoNome(props: PropsDoMenuNovo) {
+export function IlhaDoNome({ aoAlternarSkills, skillsAbertas, ...menu }: PropsDaIlhaDoNome) {
   return (
     <header className="ilha ilha-arrasta ilha-do-nome nodrag nopan nowheel" data-testid="ilha-do-nome">
       <span className="nome-do-app">
@@ -51,7 +58,17 @@ export function IlhaDoNome(props: PropsDoMenuNovo) {
         <h1>Orquestrador de Agentes</h1>
       </span>
       <span className="divisor-da-ilha" aria-hidden="true" />
-      <MenuNovo {...props} />
+      <MenuNovo {...menu} />
+      <button
+        type="button"
+        className="botao-da-ilha no-drag"
+        aria-pressed={skillsAbertas}
+        aria-label="Skills do Claude Code"
+        title="Skills do Claude Code"
+        onClick={aoAlternarSkills}
+      >
+        <IconeSkills tamanho={18} />
+      </button>
     </header>
   );
 }
