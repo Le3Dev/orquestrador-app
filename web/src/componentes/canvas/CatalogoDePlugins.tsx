@@ -1,4 +1,12 @@
-import { type KeyboardEvent as EventoDeTecladoDoReact, type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  type KeyboardEvent as EventoDeTecladoDoReact,
+  type ReactNode,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 
 import { api, ErroDaApi, mensagemDeErro } from "../../shared/api/cliente";
 import type { OrigemDoCatalogo, PluginDoCatalogo, PluginInstalado } from "../../shared/api/tipos";
@@ -464,6 +472,70 @@ function AcaoDeInstalar({
   );
 }
 
+/** O que o usuário já tem de parecido com o plugin; a ausência do campo (servidor antigo) vale como vazio. */
+function jaTemDe(plugin: PluginDoCatalogo): { skills: string[]; servidoresMcp: string[] } {
+  return { skills: plugin.jaTem?.skills ?? [], servidoresMcp: plugin.jaTem?.servidoresMcp ?? [] };
+}
+
+/** "a, b e c": vírgulas e um "e" antes do último. */
+function juntarNomes(nomes: string[]): ReactNode {
+  return nomes.map((nome, indice) => (
+    <Fragment key={nome}>
+      {indice === 0 ? "" : indice === nomes.length - 1 ? " e " : ", "}
+      <span className="mono">{nome}</span>
+    </Fragment>
+  ));
+}
+
+/**
+ * "a skill x e o servidor MCP y": o que o usuário já tem, no singular ou no plural, só com o que existe.
+ * Nulo quando não há nada parecido.
+ */
+function oQueJaTem(plugin: PluginDoCatalogo): ReactNode {
+  const { skills, servidoresMcp } = jaTemDe(plugin);
+  const partes: ReactNode[] = [];
+  if (skills.length > 0) {
+    partes.push(
+      <Fragment key="skills">
+        {skills.length === 1 ? "a skill " : "as skills "}
+        {juntarNomes(skills)}
+      </Fragment>,
+    );
+  }
+  if (servidoresMcp.length > 0) {
+    partes.push(
+      <Fragment key="mcp">
+        {servidoresMcp.length === 1 ? "o servidor MCP " : "os servidores MCP "}
+        {juntarNomes(servidoresMcp)}
+      </Fragment>,
+    );
+  }
+  if (partes.length === 0) {
+    return null;
+  }
+  return partes.length === 1 ? (
+    partes[0]
+  ) : (
+    <>
+      {partes[0]} e {partes[1]}
+    </>
+  );
+}
+
+/** A etiqueta "Você já tem" ao lado do nome: o detalhe fica para quem usa leitor de tela e para o balão. */
+function EtiquetaJaTem({ plugin }: { plugin: PluginDoCatalogo }) {
+  const que = oQueJaTem(plugin);
+  if (que === null) {
+    return null;
+  }
+  return (
+    <span className="mk-chip mk-ja-tem" title="Instalar este plugin pode duplicar algo que você já tem">
+      Você já tem
+      <span className="sr-only">: {que}</span>
+    </span>
+  );
+}
+
 /** A fonte sem o "https://", para caber na meta da linha. */
 function fonteCurta(fonte: string): string {
   return fonte.replace(/^https?:\/\/(www\.)?/i, "").replace(/\.git$/i, "");
@@ -481,6 +553,7 @@ function LinhaDoCatalogo({
   aoInstalar: () => void;
 }) {
   const estado = situacao?.tipo ?? "padrao";
+  const jaInstalado = situacao?.tipo === "instalado" || (situacao === null && plugin.instalado);
   return (
     // O clique na linha inteira é um atalho de mouse: o teclado e o leitor de tela usam o botão do nome.
     <div className="mk-linha" data-nome={plugin.nome} data-estado={estado} onClick={aoAbrir}>
@@ -491,6 +564,7 @@ function LinhaDoCatalogo({
             {plugin.nome}
           </button>
           {plugin.oficial && <SeloOficial />}
+          {!jaInstalado && <EtiquetaJaTem plugin={plugin} />}
         </div>
         <p className="mk-desc">{plugin.descricao}</p>
         {situacao?.tipo === "instalando" ? (
@@ -547,6 +621,8 @@ function DetalheDoPlugin({
   const voltar = useRef<HTMLButtonElement>(null);
   const link = linkDaFonte(plugin.fonte);
   const instalado = situacao?.tipo === "instalado" || (situacao === null && plugin.instalado);
+  const idDoAviso = useId();
+  const jaTem = instalado ? null : oQueJaTem(plugin);
 
   useEffect(() => {
     voltar.current?.focus();
@@ -579,9 +655,14 @@ function DetalheDoPlugin({
                 Instalado
               </span>
             ) : (
-              <button type="button" className="btn btn-cta" onClick={aoInstalar}>
+              <button
+                type="button"
+                className="btn btn-cta"
+                aria-describedby={jaTem !== null ? idDoAviso : undefined}
+                onClick={aoInstalar}
+              >
                 <IconeBaixar tamanho={15} />
-                {situacao?.tipo === "erro" ? "Tentar de novo" : "Instalar"}
+                {situacao?.tipo === "erro" ? "Tentar de novo" : jaTem !== null ? "Instalar mesmo assim" : "Instalar"}
               </button>
             )}
             {link !== null && (
@@ -591,6 +672,14 @@ function DetalheDoPlugin({
               </a>
             )}
           </div>
+          {jaTem !== null && (
+            <p id={idDoAviso} className="mk-ja-tem-nota" role="note">
+              <IconeInfo tamanho={15} />
+              <span>
+                Você já tem {jaTem}. Este plugin parece trazer o mesmo serviço, e instalar pode duplicar.
+              </span>
+            </p>
+          )}
           {situacao?.tipo === "erro" && (
             <div className="mk-meta erro" role="alert">
               <IconeSemInternet tamanho={13} />

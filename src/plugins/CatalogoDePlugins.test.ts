@@ -215,7 +215,41 @@ describe("catálogo e ciclo de vida dos plugins", () => {
         versao: "6.4.1",
         fonte: "https://github.com/obra/superpowers",
         instalado: false,
+        jaTem: { skills: [], servidoresMcp: [] },
       });
+    });
+
+    it("marca em jaTem as skills e os servidores MCP do usuário com o mesmo nome do plugin", async () => {
+      catalogo = new CatalogoDePlugins({
+        executar: cli.executar,
+        pastaDoClaude: claude,
+        agora: () => agora,
+        pendentes,
+        lerNomesDoUsuario: async () => ({ skills: ["superpowers-skill", "outra"], servidoresMcp: ["Superpowers", "x"] }),
+      });
+
+      const pagina = await catalogo.buscarCatalogo(consulta({ origem: "todos" }));
+      const porNome = new Map(pagina.plugins.map((plugin) => [plugin.nome, plugin.jaTem]));
+
+      expect(porNome.get("superpowers")).toEqual({ skills: ["superpowers-skill"], servidoresMcp: ["Superpowers"] });
+      expect(porNome.get("api-testing")).toEqual({ skills: [], servidoresMcp: [] });
+    });
+
+    it("se o leitor dos nomes do usuário falhar, a listagem segue sem o aviso", async () => {
+      catalogo = new CatalogoDePlugins({
+        executar: cli.executar,
+        pastaDoClaude: claude,
+        agora: () => agora,
+        pendentes,
+        lerNomesDoUsuario: async () => {
+          throw new Error("falha");
+        },
+      });
+
+      const pagina = await catalogo.buscarCatalogo(consulta());
+
+      expect(pagina.total).toBe(3);
+      expect(pagina.plugins[0]?.jaTem).toEqual({ skills: [], servidoresMcp: [] });
     });
 
     it("fonte só quando é URL https; sem contagem nem versão vira nulo; id mal formado fica fora", async () => {

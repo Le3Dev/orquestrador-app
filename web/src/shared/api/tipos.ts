@@ -246,6 +246,11 @@ export interface PluginDoCatalogo {
   /** De onde o plugin vem (repositório); nulo quando o catálogo não informa. */
   fonte: string | null;
   instalado: boolean;
+  /**
+   * Skills avulsas e servidores MCP da conta do usuário com nome parecido com o do plugin (instalar pode
+   * duplicar o serviço). Vazio quando não há nada parecido; ausente em resposta de servidor antigo.
+   */
+  jaTem?: { skills: string[]; servidoresMcp: string[] };
 }
 
 /** Uma página do catálogo, com o total da busca e os totais de cada origem. */

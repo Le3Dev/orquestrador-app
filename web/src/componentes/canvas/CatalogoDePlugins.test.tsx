@@ -371,6 +371,115 @@ describe("CatalogoDePlugins", () => {
     expect(screen.queryByRole("button", { name: /Mostrar mais/ })).not.toBeInTheDocument();
   });
 
+  describe("você já tem", () => {
+    const etiqueta = (nome: string) => within(linha(nome)).queryByText("Você já tem");
+
+    it("a etiqueta aparece na linha com jaTem preenchido, com o que já existe para o leitor de tela", async () => {
+      catalogo.mockResolvedValue(
+        pagina([
+          plugin("context7", { jaTem: { skills: ["context7-mcp"], servidoresMcp: ["context7"] } }),
+          plugin("frontend-design"),
+        ]),
+      );
+      montar();
+      await esperarLista();
+
+      const marca = etiqueta("context7");
+      expect(marca).toBeInTheDocument();
+      expect(marca).toHaveTextContent("Você já tem: a skill context7-mcp e o servidor MCP context7");
+      expect(etiqueta("frontend-design")).not.toBeInTheDocument();
+    });
+
+    it.each([
+      ["vazio", { jaTem: { skills: [], servidoresMcp: [] } }],
+      ["ausente (resposta de servidor antigo)", {}],
+      ["com o plugin já instalado", { instalado: true, jaTem: { skills: ["context7-mcp"], servidoresMcp: [] } }],
+    ])("a etiqueta some com jaTem %s", async (_nome, extras: Partial<PluginDoCatalogo>) => {
+      catalogo.mockResolvedValue(pagina([plugin("context7", extras), plugin("frontend-design")]));
+      montar();
+      await esperarLista();
+
+      expect(etiqueta("context7")).not.toBeInTheDocument();
+    });
+
+    it("depois de instalar, a etiqueta sai da linha", async () => {
+      vi.spyOn(api, "instalarPlugin").mockResolvedValue({ plugin: instalado(OFICIAIS[1]!), precisaConfirmar: false });
+      catalogo.mockResolvedValue(
+        pagina([plugin("context7", { jaTem: { skills: ["context7-mcp"], servidoresMcp: [] } }), plugin("frontend-design")]),
+      );
+      montar();
+      await esperarLista();
+
+      fireEvent.click(screen.getByRole("button", { name: "Instalar context7" }));
+
+      expect(await within(linha("context7")).findByText("Instalado")).toBeInTheDocument();
+      expect(etiqueta("context7")).not.toBeInTheDocument();
+    });
+
+    const abrirDetalhe = async (jaTem: PluginDoCatalogo["jaTem"]) => {
+      catalogo.mockResolvedValue(pagina([plugin("context7", { jaTem }), plugin("frontend-design")]));
+      const chamadas = montar();
+      await esperarLista();
+      fireEvent.click(linha("context7"));
+      await screen.findByRole("heading", { level: 3, name: "context7" });
+      return chamadas;
+    };
+
+    it("com skill e servidor MCP, a frase cita os dois e o botão vira Instalar mesmo assim", async () => {
+      await abrirDetalhe({ skills: ["context7-mcp"], servidoresMcp: ["context7"] });
+
+      const aviso = screen.getByRole("note");
+      expect(aviso).toHaveTextContent(
+        "Você já tem a skill context7-mcp e o servidor MCP context7. Este plugin parece trazer o mesmo serviço, e instalar pode duplicar.",
+      );
+      const botao = screen.getByRole("button", { name: "Instalar mesmo assim" });
+      expect(botao).toHaveAttribute("aria-describedby", aviso.id);
+      expect(screen.queryByRole("button", { name: "Instalar" })).not.toBeInTheDocument();
+    });
+
+    it("só com servidor MCP, a frase fala só do servidor", async () => {
+      await abrirDetalhe({ skills: [], servidoresMcp: ["context7"] });
+
+      expect(screen.getByRole("note")).toHaveTextContent(
+        "Você já tem o servidor MCP context7. Este plugin parece trazer o mesmo serviço, e instalar pode duplicar.",
+      );
+    });
+
+    it("só com skill, a frase fala só da skill", async () => {
+      await abrirDetalhe({ skills: ["context7-mcp"], servidoresMcp: [] });
+
+      expect(screen.getByRole("note")).toHaveTextContent("Você já tem a skill context7-mcp. Este plugin");
+    });
+
+    it("com vários nomes, usa o plural e junta com vírgula e e", async () => {
+      await abrirDetalhe({ skills: ["a-um", "a-dois", "a-tres"], servidoresMcp: ["m-um", "m-dois"] });
+
+      expect(screen.getByRole("note")).toHaveTextContent(
+        "Você já tem as skills a-um, a-dois e a-tres e os servidores MCP m-um e m-dois. Este plugin",
+      );
+    });
+
+    it("sem nada parecido, o detalhe segue com Instalar e sem aviso", async () => {
+      await abrirDetalhe({ skills: [], servidoresMcp: [] });
+
+      expect(screen.queryByRole("note")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Instalar" })).not.toHaveAttribute("aria-describedby");
+      expect(screen.queryByRole("button", { name: "Instalar mesmo assim" })).not.toBeInTheDocument();
+    });
+
+    it("Instalar mesmo assim continua instalando, e o aviso some quando termina", async () => {
+      const instalar = vi.spyOn(api, "instalarPlugin").mockResolvedValue({ plugin: instalado(OFICIAIS[1]!), precisaConfirmar: false });
+      const chamadas = await abrirDetalhe({ skills: ["context7-mcp"], servidoresMcp: [] });
+
+      fireEvent.click(screen.getByRole("button", { name: "Instalar mesmo assim" }));
+
+      expect(await screen.findByText("Instalado")).toBeInTheDocument();
+      expect(instalar).toHaveBeenCalledWith("context7@claude-plugins-official");
+      expect(chamadas.aoMudar).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    });
+  });
+
   describe("detalhe", () => {
     it("clicar na linha abre o detalhe com a ficha, o link do código e o que se sabe antes de instalar", async () => {
       montar();

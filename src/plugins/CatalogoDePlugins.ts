@@ -5,8 +5,10 @@ import { ambienteSemSessaoPai } from "../infraestrutura/claudecode/ArgumentosDoC
 import { cortar, ehObjeto } from "../skills/LeitorDeSkills";
 import { InventarioDoPlugin, lerInventarioDoPlugin, precisaDeConfirmacao } from "./InventarioDoPlugin";
 import { PendentesDePlugins, PendentesEmMemoria } from "./PendentesDePlugins";
+import { JaTemDoPlugin, LeitorDeNomesDoUsuario, semelhantesAoPlugin } from "./SemelhantesDoUsuario";
 
 export type { InventarioDoPlugin } from "./InventarioDoPlugin";
+export type { JaTemDoPlugin } from "./SemelhantesDoUsuario";
 
 /** Um plugin do catálogo dos marketplaces (`claude plugin list --available`). */
 export interface PluginDoCatalogo {
@@ -20,6 +22,8 @@ export interface PluginDoCatalogo {
   /** URL https do repositório, quando o marketplace informa. */
   fonte: string | null;
   instalado: boolean;
+  /** Skills avulsas e servidores MCP do usuário com o mesmo nome do plugin (só dica; nada é bloqueado). */
+  jaTem: JaTemDoPlugin;
 }
 
 /** Um plugin instalado no escopo do usuário, com o que ele traz. */
@@ -138,7 +142,7 @@ const PADRAO_DE_FALHA_DE_REDE =
 
 /** Item do catálogo com o texto da busca já normalizado, para a consulta não refazer isso a cada requisição. */
 interface ItemIndexado {
-  plugin: Omit<PluginDoCatalogo, "instalado">;
+  plugin: Omit<PluginDoCatalogo, "instalado" | "jaTem">;
   texto: string;
 }
 
@@ -158,6 +162,8 @@ export interface OpcoesDoCatalogoDePlugins {
   agora?: () => number;
   /** Plugins instalados pelo app que aguardam confirmação; em memória se não vier (testes). */
   pendentes?: PendentesDePlugins;
+  /** Nomes das skills avulsas e dos servidores MCP do usuário, para o aviso "Você já tem"; sem ele, nada é marcado. */
+  lerNomesDoUsuario?: LeitorDeNomesDoUsuario;
 }
 
 /** Sem acento e sem maiúscula, para comparar a busca com nome e descrição. */
@@ -282,6 +288,7 @@ export class CatalogoDePlugins {
   private readonly pastaDoClaude: string;
   private readonly agora: () => number;
   private readonly pendentes: PendentesDePlugins;
+  private readonly lerNomesDoUsuario: LeitorDeNomesDoUsuario;
 
   private catalogo: { validoAte: number; itens: ItemIndexado[] } | null = null;
   private falhaDoCatalogo: { validoAte: number; erro: ErroDePlugin } | null = null;
@@ -300,6 +307,7 @@ export class CatalogoDePlugins {
     this.pastaDoClaude = opcoes.pastaDoClaude;
     this.agora = opcoes.agora ?? Date.now;
     this.pendentes = opcoes.pendentes ?? new PendentesEmMemoria();
+    this.lerNomesDoUsuario = opcoes.lerNomesDoUsuario ?? (async () => ({ skills: [], servidoresMcp: [] }));
   }
 
   async buscarCatalogo(consulta: ConsultaDoCatalogo): Promise<PaginaDoCatalogo> {
@@ -316,13 +324,26 @@ export class CatalogoDePlugins {
         ? casam
         : casam.filter((item) => item.plugin.oficial === (consulta.origem === "oficial"));
     const instalados = new Set((await this.instaladosDoUsuario(false)).map((entrada) => entrada.id));
+    const pagina = daOrigem.slice(consulta.deslocamento, consulta.deslocamento + consulta.limite);
+    const doUsuario = await this.nomesDoUsuario();
     return {
-      plugins: daOrigem
-        .slice(consulta.deslocamento, consulta.deslocamento + consulta.limite)
-        .map((item) => ({ ...item.plugin, instalado: instalados.has(item.plugin.id) })),
+      plugins: pagina.map((item) => ({
+        ...item.plugin,
+        instalado: instalados.has(item.plugin.id),
+        jaTem: semelhantesAoPlugin(item.plugin.nome, doUsuario),
+      })),
       total: daOrigem.length,
       totais,
     };
+  }
+
+  /** É só uma dica: o leitor já não lança, e se lançar mesmo assim a listagem segue sem o aviso. */
+  private async nomesDoUsuario(): Promise<Awaited<ReturnType<LeitorDeNomesDoUsuario>>> {
+    try {
+      return await this.lerNomesDoUsuario();
+    } catch {
+      return { skills: [], servidoresMcp: [] };
+    }
   }
 
   async listarInstalados(): Promise<PluginInstalado[]> {

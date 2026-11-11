@@ -411,6 +411,24 @@
 .mk-chip.hook, .mk-chip.espera { background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--warning); }
 /* Selo discreto: não conseguimos ler tudo o que vem no plugin. Sem cor de alerta, só um contorno. */
 .mk-chip.nao-verificado { background: transparent; box-shadow: inset 0 0 0 1px var(--border-forte); color: var(--caption); }
+/* "Você já tem": uma skill avulsa ou um servidor MCP com o nome do plugin. Âmbar baixo, só um aviso, nunca vermelho. */
+.mk-chip.mk-ja-tem { background: color-mix(in srgb, var(--warning) 12%, transparent); color: var(--caption); }
+.mk-ja-tem-nota {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  max-width: 520px;
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface));
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--caption);
+}
+.mk-ja-tem-nota svg { margin-top: 2px; color: var(--warning); }
+.mk-ja-tem-nota .mono { font-size: 11.5px; color: var(--primary); }
 .mk-plugin-motivos { margin: 0 10px 6px 64px; padding: 8px 12px 10px; list-style: none; display: flex; flex-direction: column; gap: 6px; border-radius: 10px; background: color-mix(in srgb, var(--warning) 7%, var(--surface)); font-size: 12px; line-height: 1.5; color: var(--secondary); }
 .mk-plugin-motivos li { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 8px; align-items: start; }
 .mk-plugin-motivos svg { margin-top: 2px; color: var(--warning); }

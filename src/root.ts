@@ -67,6 +67,7 @@ import { ServicoDeOrquestracao } from "./orquestracao/ServicoDeOrquestracao";
 import { agendadorDoRelogio } from "./orquestracao/VigiaDoTurno";
 import { CatalogoDePlugins, criarExecutorDoClaude } from "./plugins/CatalogoDePlugins";
 import { PendentesEmArquivo } from "./plugins/PendentesDePlugins";
+import { arquivoDeConfiguracaoDoClaude, criarLeitorDeNomesDoUsuario } from "./plugins/SemelhantesDoUsuario";
 import { ServicoDeMelhoriaDePrompt } from "./prompts/ServicoDeMelhoriaDePrompt";
 import { LeitorDeSkills } from "./skills/LeitorDeSkills";
 import { ServicoDeTerminais } from "./terminais/ServicoDeTerminais";
@@ -401,6 +402,10 @@ async function iniciar(): Promise<void> {
     const catalogoDePlugins = new CatalogoDePlugins({
       executar: criarExecutorDoClaude(configuracao.caminhoDoClaudeCode),
       pastaDoClaude: pastaDoClaude(),
+      lerNomesDoUsuario: criarLeitorDeNomesDoUsuario({
+        pastaDoClaude: pastaDoClaude(),
+        arquivoDeConfiguracao: arquivoDeConfiguracaoDoClaude(),
+      }),
       pendentes: new PendentesEmArquivo(path.join(configuracao.pastaDeDados, "plugins-pendentes-de-confirmacao.json")),
     });
     // No início, desliga o que o app instalou e ficou ligado sem confirmação (o app pode ter fechado no meio).
