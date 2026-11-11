@@ -1706,12 +1706,8 @@ function Canvas() {
     [abrirTerminal],
   );
   const abrirPainelDeSubagentes = useCallback(() => abrirPainel("subagentes"), [abrirPainel]);
-  /** O botão das Skills na ilha: um segundo clique fecha o painel. */
-  const alternarPainelDeSkills = useCallback(
-    () => setPainelAberto((atual) => (atual === "skills" ? null : "skills")),
-    [],
-  );
-  // Os orquestradores abertos no canvas: de onde o painel de Skills lê as skills do projeto.
+  const abrirPainelDeSkills = useCallback(() => abrirPainel("skills"), [abrirPainel]);
+  // Os orquestradores abertos no canvas: de onde a lista de Skills lê as skills de cada projeto.
   const orquestradoresParaSkills = useMemo(
     () =>
       (orquestradores ?? [])
@@ -1740,8 +1736,7 @@ function Canvas() {
           aoEscolherOrquestrador={focarOrquestrador}
           subagentes={subagentesProntos}
           aoAbrirSubagentes={abrirPainelDeSubagentes}
-          aoAlternarSkills={alternarPainelDeSkills}
-          skillsAbertas={painelAberto === "skills"}
+          aoAbrirSkills={abrirPainelDeSkills}
         />
         {painelAberto === "subagentes" && <PainelDeSubagentes aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />}
         {painelAberto === "skills" && <PainelDeSkills orquestradores={orquestradoresParaSkills} aoFechar={fecharPainel} />}
@@ -1769,7 +1764,7 @@ function Canvas() {
       focarOrquestrador,
       subagentesProntos,
       abrirPainelDeSubagentes,
-      alternarPainelDeSkills,
+      abrirPainelDeSkills,
       orquestradoresParaSkills,
       painelAberto,
       fecharPainel,
@@ -2047,6 +2042,7 @@ function Canvas() {
                       memoria={servidor.memoria}
                       cota={cota}
                       orquestradores={orquestradoresDasConfiguracoes}
+                      orquestradoresAbertos={orquestradoresParaSkills}
                       pedidosEmAndamento={pedidosEmAndamento}
                       aoSalvarInstrucoes={aoSalvarPainel}
                       topo={topoDasConfiguracoes ?? undefined}

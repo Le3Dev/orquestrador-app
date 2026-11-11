@@ -40,8 +40,7 @@ describe("IlhaDoNome", () => {
       aoEscolherOrquestrador: vi.fn(),
       subagentes: [],
       aoAbrirSubagentes: vi.fn(),
-      aoAlternarSkills: vi.fn(),
-      skillsAbertas: false,
+      aoAbrirSkills: vi.fn(),
     };
     render(<IlhaDoNome {...comuns} />);
 
@@ -60,32 +59,30 @@ describe("IlhaDoNome", () => {
     expect(comuns.aoCriarNota).toHaveBeenCalledTimes(1);
   });
 
-  it("tem o botão das Skills do Claude Code, que não arrasta a janela, mostra se o painel está aberto e o alterna", () => {
-    const aoAlternarSkills = vi.fn();
-    const propriedades = {
-      aoCriar: vi.fn(),
-      aoCriarNota: vi.fn(),
-      aoCriarPrevia: vi.fn(),
-      aoBuscar: vi.fn(),
-      aoAbrirConfiguracoes: vi.fn(),
-      orquestradores: [],
-      erroDosOrquestradores: null,
-      noCanvas: new Set<string>(),
-      aoEscolherOrquestrador: vi.fn(),
-      subagentes: [],
-      aoAbrirSubagentes: vi.fn(),
-      aoAlternarSkills,
-    };
-    const { rerender } = render(<IlhaDoNome {...propriedades} skillsAbertas={false} />);
+  it("não tem botão solto das Skills: a entrada é o item Skills do menu Novo, que abre o painel", () => {
+    const aoAbrirSkills = vi.fn();
+    render(
+      <IlhaDoNome
+        aoCriar={vi.fn()}
+        aoCriarNota={vi.fn()}
+        aoCriarPrevia={vi.fn()}
+        aoBuscar={vi.fn()}
+        aoAbrirConfiguracoes={vi.fn()}
+        orquestradores={[]}
+        erroDosOrquestradores={null}
+        noCanvas={new Set<string>()}
+        aoEscolherOrquestrador={vi.fn()}
+        subagentes={[]}
+        aoAbrirSubagentes={vi.fn()}
+        aoAbrirSkills={aoAbrirSkills}
+      />,
+    );
+    const ilha = screen.getByTestId("ilha-do-nome");
+    expect(within(ilha).getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual(["Novo"]);
 
-    const botao = screen.getByRole("button", { name: "Skills do Claude Code" });
-    expect(botao).toHaveClass("botao-da-ilha", "no-drag");
-    expect(botao).toHaveAttribute("aria-pressed", "false");
-    fireEvent.click(botao);
-    expect(aoAlternarSkills).toHaveBeenCalledTimes(1);
-
-    rerender(<IlhaDoNome {...propriedades} skillsAbertas />);
-    expect(screen.getByRole("button", { name: "Skills do Claude Code" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(ilha).getByRole("button", { name: "Novo" }));
+    fireEvent.click(within(ilha).getByRole("menuitem", { name: "Skills" }));
+    expect(aoAbrirSkills).toHaveBeenCalledTimes(1);
   });
 });
 

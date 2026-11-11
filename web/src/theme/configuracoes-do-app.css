@@ -72,6 +72,10 @@
 /* Respiro no fim da rolagem, menos na Padrões, cuja barra de ações cola na base. */
 .configuracoes-do-app-aba > :last-child:not(.cfgapp-padroes) { margin-bottom: 16px; }
 .configuracoes-do-app-aba[hidden] { display: none; }
+/* A lista de skills na aba: rola com o corpo das Configurações, sem moldura própria. */
+.configuracoes-do-app-aba .skills-barra { padding: 0 0 10px; border-bottom: 0; }
+.configuracoes-do-app-aba .skills-corpo { min-height: 0; overflow: visible; padding: 0; }
+.configuracoes-do-app-aba .skills-rodape { padding: 10px 0 0; border-top: 1px solid var(--border); }
 
 .cfgapp-titulo {
   margin: 12px 0 6px;

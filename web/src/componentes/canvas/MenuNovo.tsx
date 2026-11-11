@@ -10,7 +10,7 @@ import {
 } from "react";
 
 import type { DadosDoSubagentePronto, ResumoDoOrquestrador } from "../../shared/api/tipos";
-import { IconeEngrenagem, IconeNavegador, IconeOrquestrador, IconePessoas, IconeShell } from "../Icones";
+import { IconeEngrenagem, IconeNavegador, IconeOrquestrador, IconePessoas, IconeShell, IconeSkills } from "../Icones";
 import {
   IconeLista,
   IconeLupa,
@@ -69,6 +69,8 @@ export interface PropsDoMenuNovo {
   subagentes: readonly DadosDoSubagentePronto[] | null;
   /** "Novo subagente", "Gerenciar subagentes" e um subagente da lista: todos abrem o painel de subagentes prontos. */
   aoAbrirSubagentes: () => void;
+  /** O item "Skills": abre o painel das skills do Claude Code (só leitura). */
+  aoAbrirSkills: () => void;
 }
 
 /** O texto de um orquestrador para o leitor de tela. */
@@ -86,7 +88,7 @@ function plural(total: number, singular: string, pluralDoTermo: string): string 
  * do menu do Excalidraw: cai para baixo, com ícone, rótulo e atalho à direita
  * e divisores entre os grupos. Grupo 1: o que criar. Grupo 2: "Orquestradores ›"
  * e "Subagentes ›", que abrem um segundo painel à direita (ao passar o mouse,
- * clicar ou com →). Grupo 3: busca e configurações.
+ * clicar ou com →), e "Skills", que abre o painel das skills. Grupo 3: busca e configurações.
  *
  * Teclado: ↓ ou Enter no botão abrem; ↑/↓ (e Home/End) navegam; → entra no
  * submenu e ← (ou Esc) volta dele; Enter ativa; Esc, Tab e clique fora fecham.
@@ -104,6 +106,7 @@ export function MenuNovo({
   aoEscolherOrquestrador,
   subagentes,
   aoAbrirSubagentes,
+  aoAbrirSkills,
 }: PropsDoMenuNovo) {
   const [aberto, setAberto] = useState(false);
   const [submenu, setSubmenu] = useState<IdDoSubmenu | null>(null);
@@ -185,6 +188,14 @@ export function MenuNovo({
         contagem: subagentes?.length ?? null,
         dica: "Ajudantes prontos que todo orquestrador pode chamar",
       },
+      {
+        tipo: "acao",
+        id: "skills",
+        rotulo: "Skills",
+        icone: <IconeSkills tamanho={18} />,
+        dica: "As skills do Claude Code: do usuário, dos projetos abertos e de plugins (só leitura)",
+        executar: aoAbrirSkills,
+      },
     ];
     const outros: ItemDoMenu[] = [
       {
@@ -214,6 +225,7 @@ export function MenuNovo({
     aoCriarPrevia,
     aoBuscar,
     aoAbrirConfiguracoes,
+    aoAbrirSkills,
     orquestradores,
     subagentes,
   ]);

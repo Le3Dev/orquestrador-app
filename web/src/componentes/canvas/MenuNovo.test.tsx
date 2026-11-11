@@ -43,6 +43,7 @@ function acoes() {
     aoAbrirConfiguracoes: vi.fn(),
     aoEscolherOrquestrador: vi.fn(),
     aoAbrirSubagentes: vi.fn(),
+    aoAbrirSkills: vi.fn(),
   };
 }
 
@@ -93,6 +94,7 @@ describe("MenuNovo", () => {
       "Prévia",
       "Orquestradores",
       "Subagentes",
+      "Skills",
       "Buscar",
       "Configurações",
     ]);
@@ -111,6 +113,7 @@ describe("MenuNovo", () => {
     expect(item("Novo orquestrador")).toHaveAttribute("aria-keyshortcuts", "Control+N");
     expect(item("Nota")).toHaveAttribute("aria-keyshortcuts", "Control+Shift+N");
     expect(item("Buscar")).toHaveAttribute("aria-keyshortcuts", "Control+K");
+    expect(item("Skills")).not.toHaveAttribute("aria-keyshortcuts");
     expect(item("Terminal")).not.toHaveAttribute("aria-keyshortcuts");
     expect(item("Prévia")).not.toHaveAttribute("aria-keyshortcuts");
     expect(item("Configurações")).not.toHaveAttribute("aria-keyshortcuts");
@@ -128,6 +131,7 @@ describe("MenuNovo", () => {
     ["Nota", "aoCriarNota"],
     ["Terminal", "aoCriarShell"],
     ["Prévia", "aoCriarPrevia"],
+    ["Skills", "aoAbrirSkills"],
     ["Buscar", "aoBuscar"],
     ["Configurações", "aoAbrirConfiguracoes"],
   ] as const)("clicar em %s chama %s, fecha o menu e devolve o foco ao botão", (rotulo, acao) => {
@@ -196,6 +200,21 @@ describe("MenuNovo", () => {
     fireEvent.mouseDown(screen.getByRole("textbox", { name: "Campo de fora" }));
 
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("Skills é um item de ação (sem submenu) e o teclado o alcança e o ativa com Enter, como os demais", () => {
+    const chamadas = montar();
+    fireEvent.click(botao());
+    expect(item("Skills")).not.toHaveAttribute("aria-haspopup");
+
+    fireEvent.keyDown(item("Configurações"), { key: "ArrowUp" });
+    fireEvent.keyDown(item("Buscar"), { key: "ArrowUp" });
+    expect(item("Skills")).toHaveFocus();
+    fireEvent.keyDown(item("Skills"), { key: "Enter" });
+
+    expect(chamadas.aoAbrirSkills).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(botao()).toHaveFocus();
   });
 
   describe("submenu Orquestradores", () => {
