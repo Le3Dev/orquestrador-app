@@ -2440,6 +2440,26 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   align-items: stretch;
   gap: 8px;
   cursor: auto;
+  /* A opacidade do chat inteiro (fundo e texto), pela preferência; a coluna fixa não a define. */
+  opacity: var(--opacidade-do-chat, 1);
+}
+
+/* O controle deslizante da opacidade (no cabeçalho da conversa e na barra do chat móvel). */
+.controle-de-opacidade {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  color: var(--muted);
+  cursor: default;
+}
+.controle-de-opacidade:hover { color: var(--primary); }
+.controle-de-opacidade-faixa {
+  width: 72px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--active);
+  cursor: pointer;
 }
 
 .conversa-do-chat {
@@ -2901,6 +2921,49 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
 .separador-do-menu { margin: 4px 6px; border: 0; border-top: 1px solid var(--border); }
 
 /* Servidor fora: o chat congela e a borda perde a cor, como o resto do canvas. */
+/* O painel da transcrição acima da conversa: altura limitada, para a conversa e o campo não sumirem. */
+.painel-da-transcricao-no-chat { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; }
+.painel-da-transcricao-no-chat > .painel-transcricao { max-height: min(240px, 34vh); }
+.chat-lateral .painel-da-transcricao-no-chat { margin: 8px 0 0; }
+.linha-do-composer .botao-da-transcricao { flex-shrink: 0; color: var(--secondary); }
+.linha-do-composer .botao-da-transcricao[aria-pressed="true"] { color: var(--info); background: color-mix(in srgb, var(--info) 13%, transparent); }
+.chat-lateral .linha-do-composer > .btn.botao-da-transcricao { margin-left: 0; }
+
+/* O menu ⋯ da barra: abre para cima, encostado à direita, como o do modelo. */
+.menu-de-mais-acoes { position: relative; flex-shrink: 0; }
+.menu-do-seletor.lista-de-mais-acoes { width: 230px; }
+.botao-de-mais-acoes[aria-expanded="true"] { background: var(--surface-3); color: var(--primary); }
+
+/* A alça do topo da conversa do chat flutuante: arrastar para cima a alonga. */
+.alca-da-altura-da-conversa {
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 14px;
+  z-index: 5;
+  height: 7px;
+  cursor: row-resize;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+}
+.alca-da-altura-da-conversa::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 36px;
+  height: 3px;
+  margin-left: -18px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+.alca-da-altura-da-conversa:hover::before { background: color-mix(in srgb, var(--active) 70%, transparent); transition-delay: 120ms; }
+.alca-da-altura-da-conversa:focus-visible::before,
+.alca-da-altura-da-conversa.alca-arrastando::before { background: var(--active); transition-delay: 0ms; }
+.conversa-do-chat.painel-flutuante { position: relative; }
+
 .canvas-desconectado .chat-rapido *,
 .canvas-desconectado .chat-rapido *::before,
 .canvas-desconectado .chat-rapido *::after { animation-play-state: paused !important; }
@@ -3096,6 +3159,99 @@ html.modo-invisivel .canvas-modo-invisivel .react-flow__background {
 .canvas-modo-invisivel .painel-do-chat { pointer-events: none !important; }
 .canvas-modo-invisivel .painel-do-chat .chat-rapido,
 .canvas-modo-invisivel .painel-do-chat .chat-rapido * { pointer-events: auto !important; }
+/* Chat móvel: no modo invisível o painel do pé vira uma camada sobre a janela toda (a janela cobre o monitor
+ * e é transparente), e o chat se posiciona dentro dela por left/top/width/height (a geometria gravada).
+ * Os vãos continuam transparentes: só as áreas `data-area-clicavel` capturam o mouse (electron/mouseDoModoInvisivel.js). */
+html.modo-invisivel .canvas-modo-invisivel .react-flow__panel.painel-do-chat {
+  position: absolute !important;
+  inset: 0 !important;
+  transform: none !important;
+  margin: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: none !important;
+}
+.chat-rapido.chat-rapido-movel {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  max-height: 100%;
+}
+/* Ainda no lugar padrão (nada gravado): centralizado no rodapé, como no modo normal (sem transform: o
+ * transform viraria o referencial da camada de arraste, que é fixed). */
+.chat-rapido-movel.chat-rapido-movel-padrao {
+  left: 0;
+  right: 0;
+  bottom: 16px;
+  margin-inline: auto;
+  width: min(720px, calc(100vw - 32px));
+}
+/* Movido ou redimensionado: a caixa tem altura própria e a conversa a preenche. */
+.chat-rapido-movel:not(.chat-rapido-movel-padrao) .conversa-do-chat {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+}
+.barra-do-chat-movel {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border-forte);
+  background: var(--surface);
+  box-shadow: 0 6px 18px -10px rgba(0, 0, 0, .7);
+}
+.alca-de-mover-o-chat {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 20px;
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.alca-de-mover-o-chat:hover { color: var(--primary); background: var(--surface-3); }
+.alca-de-mover-o-chat:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.alca-de-mover-o-chat:active { cursor: grabbing; }
+.alca-de-redimensionar-do-chat {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  z-index: 20;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  touch-action: none;
+  user-select: none;
+  background: transparent;
+}
+.alca-de-redimensionar-do-chat::after {
+  content: "";
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  border-bottom-right-radius: 3px;
+}
+.alca-de-redimensionar-do-chat:hover::after,
+.alca-de-redimensionar-do-chat:focus-visible::after { border-color: var(--active); }
+/* Durante o arraste: a tela toda captura o ponteiro, para o chat não "escapar" do mouse (o processo
+ * principal só deixa o clique entrar sobre as áreas marcadas) e o cursor não pisca. */
+.camada-de-gesto-do-chat {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: transparent;
+  user-select: none;
+}
 /* A barra de título inteira some e não captura nada (nem arrasto): no modo
  * invisível só o chat rápido aparece, para não cobrir as abas do navegador. */
 html.modo-invisivel .barra-de-titulo,
@@ -3106,8 +3262,27 @@ html.modo-invisivel .barra-de-titulo * {
 }
 /* O olho do composer: único botão do modo invisível (liga e desliga). Traço fino; ligado (olho cortado),
  * ganha fundo e contorno de destaque, o mesmo das ferramentas ligadas das ilhas. */
-.linha-do-composer .botao-entrar-modo-invisivel,
 .linha-do-composer .botao-de-escuta-manual { position: relative; width: 32px; height: 32px; }
+/* O botão do modo fantasma tem o rótulo à vista ("Fantasma"): ícone + texto, na altura dos outros botões da barra. */
+.linha-do-composer .botao-entrar-modo-invisivel {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  height: 32px;
+  padding: 0 10px 0 8px;
+  border-radius: 8px;
+  color: var(--secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.linha-do-composer .botao-entrar-modo-invisivel:hover { background: var(--surface-3); color: var(--primary); }
+.linha-do-composer .botao-entrar-modo-invisivel:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.rotulo-do-modo-invisivel { line-height: 1; }
+/* O ponto que pulsa, agora no canto do ícone (e não do botão inteiro). */
+.linha-do-composer .botao-entrar-modo-invisivel .ponto-tela-vista { top: 6px; right: auto; left: 17px; }
 .linha-do-composer .botao-entrar-modo-invisivel[aria-pressed="true"],
 .linha-do-composer .botao-de-escuta-manual[aria-pressed="true"] {
   background: color-mix(in srgb, var(--active) 18%, transparent);

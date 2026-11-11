@@ -56,6 +56,48 @@ describe("useModoInvisivel", () => {
     expect(modoInvisivel.aoCapturarQuadro).toHaveBeenCalledWith(callback);
   });
 
+  it("alternar, definirFocavel, aoAtalho e aoMudarOculto repassam à ponte", async () => {
+    const alternar = vi.fn().mockResolvedValue(undefined);
+    const definirFocavel = vi.fn().mockResolvedValue(undefined);
+    const cancelarAtalho = vi.fn();
+    const aoAtalho = vi.fn(() => cancelarAtalho);
+    const aoMudarOculto = vi.fn(() => () => undefined);
+    ponte({ alternar, definirFocavel, aoAtalho, aoMudarOculto });
+    const { result } = renderHook(() => useModoInvisivel());
+
+    await act(() => result.current.alternar());
+    await result.current.definirFocavel(true);
+    expect(alternar).toHaveBeenCalledTimes(1);
+    expect(definirFocavel).toHaveBeenCalledWith(true);
+    const callback = vi.fn();
+    expect(result.current.aoAtalho(callback)).toBe(cancelarAtalho);
+    expect(aoAtalho).toHaveBeenCalledWith(callback);
+    result.current.aoMudarOculto(callback);
+    expect(aoMudarOculto).toHaveBeenCalledWith(callback);
+  });
+
+  it("alternar com falha preenche o erro; definirFocavel nunca lança", async () => {
+    ponte({
+      alternar: vi.fn().mockRejectedValue(new Error("sem janela")),
+      definirFocavel: vi.fn().mockRejectedValue(new Error("falhou")),
+    });
+    const { result } = renderHook(() => useModoInvisivel());
+
+    await act(() => result.current.alternar());
+    expect(result.current.erro).toBe("Não foi possível alternar o modo invisível: sem janela");
+    await expect(result.current.definirFocavel(false)).resolves.toBeUndefined();
+  });
+
+  it("com uma ponte antiga (sem as funções novas) ou sem ponte, tudo degrada sem erro", async () => {
+    ponte();
+    const { result } = renderHook(() => useModoInvisivel());
+    await act(() => result.current.alternar());
+    await result.current.definirFocavel(true);
+    expect(result.current.erro).toBeNull();
+    expect(result.current.aoAtalho(vi.fn())()).toBeUndefined();
+    expect(result.current.aoMudarOculto(vi.fn())()).toBeUndefined();
+  });
+
   it("acompanha o aviso do processo principal (inclusive a saída pelo atalho) e cancela ao desmontar", () => {
     const { avisar, cancelar } = ponte();
     const { result, unmount } = renderHook(() => useModoInvisivel());

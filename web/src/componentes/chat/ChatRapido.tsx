@@ -1,5 +1,6 @@
 import {
   type ClipboardEvent,
+  type CSSProperties,
   Fragment,
   type KeyboardEvent,
   memo,
@@ -7,7 +8,6 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -40,7 +40,8 @@ import type {
 import { comandoDoPrompt, completarComando, dicaDeComando } from "../../shared/comandosDoPrompt";
 import { juntarDitado } from "../../shared/ditado/texto";
 import { perguntaDaMensagemDaEscuta } from "../../shared/escuta/mensagemDaEscuta";
-import { type EscutaNaTela, useEscuta } from "../../shared/escuta/useEscuta";
+import { montarPedidoDeResposta } from "../../shared/escuta/pedidoDeResposta";
+import { useEscuta } from "../../shared/escuta/useEscuta";
 import {
   type EstadoDoChatNaTela,
   type MensagemDoChatNaTela,
@@ -48,13 +49,25 @@ import {
   textoParaMostrar,
   ultimoModeloUsado,
 } from "../../shared/estado/aplicarEventoDoChat";
+import { EVENTO_PARA_FOCAR_O_CHAT } from "../../shared/focarChat";
 import { formatarBytes, formatarDuracao } from "../../shared/formatacao";
+import {
+  type AreaVisivel,
+  type GeometriaDoChat,
+  limitarGeometriaDoChat,
+  moverGeometriaDoChat,
+  PASSO_DE_MOVER_O_CHAT,
+} from "../../shared/geometriaDoChat";
 import { useMelhorarPrompt } from "../../shared/hooks/useMelhorarPrompt";
 import { useModoInvisivel } from "../../shared/hooks/useModoInvisivel";
 import {
+  ALTURA_DA_CONVERSA_DO_CHAT,
   LARGURA_DO_CHAT_FIXO,
   type LadoDoChatFixo,
+  limitarAlturaDaConversaDoChat,
   limitarLarguraDoChatFixo,
+  limitarOpacidadeDoChat,
+  OPACIDADE_DO_CHAT,
   usePreferenciasDaTela,
 } from "../../shared/hooks/usePreferenciasDaTela";
 import type { CapturaDeTela } from "../../shared/ponteDoDesktop";
@@ -63,28 +76,35 @@ import { ChipDeAnexo } from "../ChipDeAnexo";
 import { AvisoDaMelhoria, BotaoDeMelhorar } from "../MelhoriaDoPrompt";
 import { TextoFormatado } from "../TextoFormatado";
 import { AvisoDaEscuta } from "./AvisoDaEscuta";
-import { BalaoOuvido } from "./BalaoOuvido";
 import { CartaoDeAcao, type PropsDasAcoesDoChat } from "./CartaoDeAcao";
 import { CartaoDeAutorizacao } from "./CartaoDeAutorizacao";
 import { CartaoDePergunta } from "./CartaoDePergunta";
 import { CartaoDeSubagente } from "./CartaoDeSubagente";
-import { frasesSemAsEnviadas } from "./frasesOuvidas";
 import { HoraDaMensagem } from "./HoraDaMensagem";
 import { IndicadorDaEscuta } from "./IndicadorDaEscuta";
+import { MenuDeMaisAcoes, type ItemDoMenuDeMaisAcoes } from "./MenuDeMaisAcoes";
+import { PainelDaTranscricao } from "./PainelDaTranscricao";
 import { SeletorDeModelo } from "./SeletorDeModelo";
 import "../../theme/chat-lateral.css";
 import "../../theme/controles-de-janela.css";
 
 const ALTURA_MAXIMA_DO_CAMPO = 140;
+/** A altura (px) que o chat móvel assume ao ser movido pela primeira vez, sem conversa à vista. */
+const ALTURA_PADRAO_DO_CHAT_MOVEL = 420;
+/** Quanto a seta do teclado muda a altura da conversa (px). */
+const PASSO_DA_ALTURA_DA_CONVERSA = 24;
+/** A conversa do chat flutuante não passa desta fração da altura da janela. */
+const FRACAO_MAXIMA_DA_CONVERSA = 0.85;
+/** Sem preferência, a conversa vai até esta fração da altura da janela (o 36vh de sempre). */
+const FRACAO_PADRAO_DA_CONVERSA = 0.36;
+/** Quanto das conversas Ctrl+Alt+PageUp/PageDown rolam (fração da altura visível). */
+const FRACAO_DA_ROLAGEM = 0.8;
 /** Para as mensagens sem ações: a mesma lista sempre, para a memorização delas valer. */
 const SEM_ORQUESTRADORES: readonly ResumoDoOrquestrador[] = [];
 /** Distância do fim (px) em que a conversa ainda acompanha o texto que chega. */
 const MARGEM_DE_ACOMPANHAMENTO = 80;
 /** Quantas mensagens o chat desenha de uma vez; "Mostrar anteriores" revela mais esse tanto. */
 const MENSAGENS_POR_PAGINA = 100;
-
-/** Uma frase fechada da escuta: vira uma mensagem sua, com a marca "ouvido", na conversa. */
-type FraseOuvida = EscutaNaTela["legenda"]["frases"][number];
 
 interface Props extends PropsDasAcoesDoChat {
   chat: EstadoDoChatNaTela;
@@ -272,22 +292,6 @@ const PROPS_DO_ICONE_DO_CHAT = {
   "aria-hidden": true,
 } as const;
 
-/** Fixar ao lado: uma janela com a coluna no lado em que o chat vai ficar (o desenho é o da coluna à direita). */
-function IconeFixar({ lado }: { lado: LadoDoChatFixo }) {
-  return (
-    <svg
-      {...PROPS_DO_ICONE_DO_CHAT}
-      width={16}
-      height={16}
-      // À esquerda, o mesmo desenho espelhado.
-      style={lado === "esquerda" ? { transform: "scaleX(-1)" } : undefined}
-    >
-      <rect x="3.5" y="4" width="17" height="16" rx="2.5" />
-      <path d="M14.5 4v16" />
-    </svg>
-  );
-}
-
 /** Os ícones da barra do chat: traço de 1,8, como os das ilhas do canvas (o tamanho muda de um para outro). */
 function IconeDaBarra({ tamanho = 18, children }: { tamanho?: number; children: ReactNode }) {
   return (
@@ -396,6 +400,50 @@ function IconeOcultar() {
   );
 }
 
+/** Seis pontinhos na horizontal: a alça de mover o chat no modo invisível. */
+function IconeAlcaDeMover() {
+  return (
+    <svg width={22} height={10} viewBox="0 0 22 10" fill="currentColor" aria-hidden="true">
+      <circle cx="4" cy="3" r="1.3" />
+      <circle cx="11" cy="3" r="1.3" />
+      <circle cx="18" cy="3" r="1.3" />
+      <circle cx="4" cy="7.5" r="1.3" />
+      <circle cx="11" cy="7.5" r="1.3" />
+      <circle cx="18" cy="7.5" r="1.3" />
+    </svg>
+  );
+}
+
+/** Opacidade: um círculo meio cheio. */
+function IconeOpacidade() {
+  return (
+    <svg {...PROPS_DO_ICONE_DO_CHAT}>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 4v16a8 8 0 0 1 0-16Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+/** O controle deslizante da opacidade do chat inteiro (de 20% a 100%, de 10 em 10). */
+function ControleDeOpacidade({ valor, aoMudar }: { valor: number; aoMudar: (opacidade: number) => void }) {
+  return (
+    <label className="controle-de-opacidade" title="Opacidade (Ctrl+Alt+ + / −)">
+      <IconeOpacidade />
+      <input
+        type="range"
+        className="controle-de-opacidade-faixa"
+        aria-label="Opacidade do chat"
+        aria-valuetext={`${Math.round(valor * 100)}%`}
+        min={OPACIDADE_DO_CHAT.minima}
+        max={OPACIDADE_DO_CHAT.maxima}
+        step={OPACIDADE_DO_CHAT.passo}
+        value={valor}
+        onChange={(evento) => aoMudar(limitarOpacidadeDoChat(Number(evento.target.value)))}
+      />
+    </label>
+  );
+}
+
 /** Verbos seguidos direto do alvo, sem dois-pontos ("lendo README.md…", "chamando o subagente coach…"). */
 const VERBOS_DE_ARQUIVO: ReadonlySet<string> = new Set([
   "lendo",
@@ -472,6 +520,7 @@ function ImagemAmpliada({ imagem, aoFechar }: { imagem: AnexoDaMensagemDoChat; a
   return createPortal(
     <div
       className="nokey nowheel nodrag fundo-que-esmaece fundo-da-imagem-ampliada"
+      data-area-clicavel
       onMouseDown={(evento) => {
         if (evento.target === evento.currentTarget) {
           aoFechar();
@@ -691,7 +740,7 @@ export function ChatRapido({
   largura = LARGURA_DO_CHAT_FIXO.padrao,
   aoMudarLargura,
 }: Props) {
-  const { mudarPreferencias } = usePreferenciasDaTela();
+  const { preferencias, mudarPreferencias } = usePreferenciasDaTela();
   const [texto, setTexto] = useState("");
   const [anexos, setAnexos] = useState<AnexoPendente[]>([]);
   const [erro, setErro] = useState<string | null>(null);
@@ -718,6 +767,9 @@ export function ChatRapido({
     entrar: entrarNoModo,
     capturarTela,
     aoCapturarQuadro,
+    aoAtalho,
+    aoMudarOculto,
+    definirFocavel,
     mouseDaArea,
     sair: sairDoModo,
     erro: erroDoModo,
@@ -940,71 +992,280 @@ export function ChatRapido({
   });
   const comEscuta = escutaDisponivel && (modoAtivo || escutaManualLigada);
 
-  // A escuta é parte da conversa, como se você tivesse dito cada fala no chat: um balão por enunciado.
-  // O aberto fica no fim e cresce no lugar; ao fechar, o mesmo balão (mesmo id) vira uma mensagem sua com
-  // a marca "ouvido", intercalada com as outras pelo horário. A pergunta que a escuta enviou some daqui:
-  // ela já é a mensagem.
-  const frasesDaLegenda = escuta.legenda.frases;
-  const frasesOuvidas = useMemo(
-    () => frasesSemAsEnviadas(frasesDaLegenda, chat.mensagens),
-    [frasesDaLegenda, chat.mensagens],
-  );
-  const emAndamento = escuta.legenda.emAndamento;
-  // Nunca o mesmo enunciado duas vezes: se a legenda já o tem fechado (mesmo id), vale o fechado.
-  const enunciadoAberto =
-    emAndamento !== null &&
-    (emAndamento.confirmado.trim() !== "" || emAndamento.parcial.trim() !== "") &&
-    !frasesDaLegenda.some((frase) => frase.id === emAndamento.id)
-      ? emAndamento
-      : null;
-  const temOuvido = frasesOuvidas.length > 0 || enunciadoAberto !== null;
-  const { frasesAntes, frasesNoFim } = useMemo(() => {
-    const antes = new Map<string, FraseOuvida[]>();
-    const noFim: FraseOuvida[] = [];
-    const horarios = chat.mensagens.map((mensagem) => Date.parse(mensagem.criadaEm));
-    for (const frase of frasesOuvidas) {
-      const indice = horarios.findIndex((horario) => horario > frase.inicioMs);
-      const id = indice === -1 ? undefined : chat.mensagens[indice]?.id;
-      if (id === undefined) {
-        noFim.push(frase);
-      } else {
-        antes.set(id, [...(antes.get(id) ?? []), frase]);
-      }
+  // A transcrição não entra na conversa: tem painel próprio (PainelDaTranscricao), com "Responder agora".
+  // Abre sozinho ao ligar a escuta; o botão "Transcrição" da barra abre e fecha, e a escolha fica gravada.
+  const transcricaoAberta = escutaDisponivel && preferencias.transcricaoAberta;
+  const escutaLigadaAntes = useRef(comEscuta);
+  useEffect(() => {
+    if (comEscuta && !escutaLigadaAntes.current && !preferencias.transcricaoAberta) {
+      mudarPreferencias({ transcricaoAberta: true });
     }
-    return { frasesAntes: antes, frasesNoFim: noFim };
-  }, [chat.mensagens, frasesOuvidas]);
+    escutaLigadaAntes.current = comEscuta;
+  }, [comEscuta, preferencias.transcricaoAberta, mudarPreferencias]);
   // Só as últimas mensagens são desenhadas (poupa memória); as demais continuam no estado.
   const primeiraVisivel = Math.max(0, chat.mensagens.length - quantasMensagens);
-  const balaoOuvido = (frase: FraseOuvida) => (
-    <BalaoOuvido
-      key={frase.id}
-      id={frase.id}
-      texto={frase.texto}
-      inicioMs={frase.inicioMs}
-      fimMs={frase.fimMs}
-      pergunta={frase.pergunta}
-      aberto={false}
-    />
-  );
-  // O aberto vai no MESMO array das frases do fim e com a chave que terá fechado: quando ele fecha depois
-  // das mensagens (o caso comum), o React reaproveita o elemento, sem piscar nem duplicar.
-  const baloesNoFim =
-    enunciadoAberto === null
-      ? frasesNoFim.map(balaoOuvido)
-      : [
-          ...frasesNoFim.map(balaoOuvido),
-          <BalaoOuvido
-            key={enunciadoAberto.id}
-            id={enunciadoAberto.id}
-            texto={enunciadoAberto.confirmado}
-            parcial={enunciadoAberto.parcial}
-            inicioMs={enunciadoAberto.inicioMs}
-            pergunta={false}
-            aberto
-          />,
-        ];
 
-  // Acompanha o fim enquanto chega texto (das respostas e da escuta), a menos que o usuário tenha rolado para cima.
+  // Um aviso curto e passageiro (ex.: "Nada transcrito ainda."), à parte dos erros.
+  const [aviso, setAviso] = useState<string | null>(null);
+  useEffect(() => {
+    if (aviso === null) {
+      return undefined;
+    }
+    const temporizador = setTimeout(() => setAviso(null), 4000);
+    return () => clearTimeout(temporizador);
+  }, [aviso]);
+
+  /** "Responder agora": o pedido (as falas recentes) vai como uma mensagem sua, pelo fluxo normal (no modo, com o print). */
+  async function responderAgora(pedido: string): Promise<void> {
+    if (respondendo || enviando) {
+      setAviso("Já há uma resposta em andamento.");
+      return;
+    }
+    if (desconectado) {
+      setErro("Servidor desconectado: o pedido não foi enviado.");
+      return;
+    }
+    setErro(null);
+    try {
+      await enviarPergunta(pedido);
+    } catch (falha) {
+      setErro(mensagemDeErro(falha));
+    }
+  }
+
+  /** O atalho Ctrl+Shift+Enter: monta o pedido das falas recentes e envia; sem texto, só avisa. */
+  function responderAgoraPeloAtalho(): void {
+    const pedido = montarPedidoDeResposta(escuta.legenda.frases, escuta.legenda.emAndamento, Date.now());
+    if (pedido === null) {
+      setAviso("Nada transcrito ainda.");
+      return;
+    }
+    void responderAgora(pedido);
+  }
+
+  // ---- Modo invisível: o chat é móvel e redimensionável, e a janela só é focável enquanto se digita ----
+  // Só flutuante e no modo: a coluna fixa não existe nele (o canvas a solta ao entrar).
+  const movel = modoAtivo && !fixo;
+  const conversaVisivel = (temMensagens || fixo) && !oculta;
+  const raiz = useRef<HTMLElement | null>(null);
+  const [area, setArea] = useState<AreaVisivel>(() => ({ largura: window.innerWidth, altura: window.innerHeight }));
+  // A geometria durante um arraste (ao vivo); nula fora dele (vale a gravada).
+  const [geometriaAoVivo, setGeometriaAoVivo] = useState<GeometriaDoChat | null>(null);
+  const [gestoDoChat, setGestoDoChat] = useState<"mover" | "redimensionar" | null>(null);
+  const gesto = useRef<{
+    ponteiro: number;
+    tipo: "mover" | "redimensionar";
+    inicioX: number;
+    inicioY: number;
+    base: GeometriaDoChat;
+    atual: GeometriaDoChat;
+  } | null>(null);
+  const opacidade = preferencias.opacidadeDoChat;
+  const geometriaGravada = preferencias.chatNoModoInvisivel;
+  // Nunca fora da tela, mesmo que a janela tenha encolhido depois de gravada (a gravada não muda).
+  const geometria = geometriaAoVivo ?? (geometriaGravada === null ? null : limitarGeometriaDoChat(geometriaGravada, area));
+
+  // A janela do app redimensionada (outro monitor, resolução): o chat reajusta para caber.
+  useEffect(() => {
+    if (!movel) {
+      return undefined;
+    }
+    const aoRedimensionar = (): void => setArea({ largura: window.innerWidth, altura: window.innerHeight });
+    window.addEventListener("resize", aoRedimensionar);
+    aoRedimensionar();
+    return () => window.removeEventListener("resize", aoRedimensionar);
+  }, [movel]);
+
+  /** A geometria de agora: a gravada ou, no lugar padrão, a medida na tela (para o primeiro arraste). */
+  function geometriaAgora(): GeometriaDoChat {
+    if (geometria !== null) {
+      return geometria;
+    }
+    const medida = raiz.current?.getBoundingClientRect();
+    const temMedida = medida !== undefined && medida.width > 0 && medida.height > 0;
+    const largura = temMedida ? medida.width : Math.min(720, area.largura - 32);
+    const altura = temMedida && conversaVisivel ? medida.height : Math.min(ALTURA_PADRAO_DO_CHAT_MOVEL, area.altura);
+    const fundo = temMedida ? medida.bottom : area.altura - 16;
+    return limitarGeometriaDoChat(
+      { x: temMedida ? medida.left : (area.largura - largura) / 2, y: fundo - altura, largura, altura },
+      area,
+    );
+  }
+
+  function comecarGesto(tipo: "mover" | "redimensionar", evento: EventoDePonteiro<HTMLElement>): void {
+    if (evento.button !== 0) {
+      return;
+    }
+    // Sem seleção de texto nem o canvas entendendo como arrastar o fundo.
+    evento.preventDefault();
+    evento.stopPropagation();
+    if (typeof evento.currentTarget.setPointerCapture === "function") {
+      evento.currentTarget.setPointerCapture(evento.pointerId);
+    }
+    const base = geometriaAgora();
+    gesto.current = { ponteiro: evento.pointerId, tipo, inicioX: evento.clientX, inicioY: evento.clientY, base, atual: base };
+    setGeometriaAoVivo(base);
+    setGestoDoChat(tipo);
+  }
+
+  function andarNoGesto(evento: EventoDePonteiro<HTMLElement>): void {
+    const atual = gesto.current;
+    if (atual === null || atual.ponteiro !== evento.pointerId) {
+      return;
+    }
+    evento.stopPropagation();
+    const dx = evento.clientX - atual.inicioX;
+    const dy = evento.clientY - atual.inicioY;
+    const { base } = atual;
+    const nova =
+      atual.tipo === "mover"
+        ? moverGeometriaDoChat(base, dx, dy, area)
+        : limitarGeometriaDoChat(
+            {
+              ...base,
+              // A borda de baixo e a da direita seguem o mouse, mas o chat não passa da tela.
+              largura: Math.min(base.largura + dx, area.largura - base.x),
+              altura: Math.min(base.altura + dy, area.altura - base.y),
+            },
+            area,
+          );
+    atual.atual = nova;
+    setGeometriaAoVivo(nova);
+  }
+
+  /** Solta o chat: grava a geometria final (a menos que o gesto tenha sido cancelado ou sem movimento). */
+  const terminarGesto = useCallback(
+    (gravar: boolean): void => {
+      const atual = gesto.current;
+      if (atual === null) {
+        return;
+      }
+      gesto.current = null;
+      setGestoDoChat(null);
+      setGeometriaAoVivo(null);
+      if (gravar && atual.atual !== atual.base) {
+        mudarPreferencias({ chatNoModoInvisivel: atual.atual });
+      }
+    },
+    [mudarPreferencias],
+  );
+
+  // O overlay oculto (Ctrl+Barra invertida) ou a saída do modo no meio de um arraste: cancela, sem gravar.
+  useEffect(() => {
+    if (!modoAtivo) {
+      terminarGesto(false);
+      return undefined;
+    }
+    return aoMudarOculto((oculto) => {
+      if (oculto) {
+        terminarGesto(false);
+      }
+    });
+  }, [modoAtivo, aoMudarOculto, terminarGesto]);
+
+  function voltarAoLugarPadrao(): void {
+    mudarPreferencias({ chatNoModoInvisivel: null });
+  }
+
+  /** Deixa a janela focável (a pedido do clique no campo) e leva o teclado ao campo. */
+  async function focarCampo(): Promise<void> {
+    if (modoAtivo) {
+      await definirFocavel(true);
+    }
+    campo.current?.focus();
+  }
+
+  /** Enviou, apertou Esc ou saiu do chat: o teclado volta ao app de trás. */
+  function liberarFoco(): void {
+    if (modoAtivo) {
+      campo.current?.blur();
+      void definirFocavel(false);
+    }
+  }
+
+  // Os atalhos globais do modo (a janela não tem o foco, então chegam pelo processo principal).
+  const tratarAtalho = useRef<(acao: string) => void>(() => undefined);
+  tratarAtalho.current = (acao) => {
+    const passos: Readonly<Record<string, readonly [number, number]>> = {
+      "mover-cima": [0, -PASSO_DE_MOVER_O_CHAT],
+      "mover-baixo": [0, PASSO_DE_MOVER_O_CHAT],
+      "mover-esquerda": [-PASSO_DE_MOVER_O_CHAT, 0],
+      "mover-direita": [PASSO_DE_MOVER_O_CHAT, 0],
+    };
+    const passo = passos[acao];
+    if (passo !== undefined) {
+      if (movel) {
+        mudarPreferencias({ chatNoModoInvisivel: moverGeometriaDoChat(geometriaAgora(), passo[0], passo[1], area) });
+      }
+      return;
+    }
+    if (acao === "rolar-acima" || acao === "rolar-abaixo") {
+      const elemento = rolagem.current;
+      if (elemento !== null) {
+        elemento.scrollTop += (acao === "rolar-abaixo" ? 1 : -1) * Math.max(1, elemento.clientHeight * FRACAO_DA_ROLAGEM);
+      }
+      return;
+    }
+    if (acao === "opacidade-mais" || acao === "opacidade-menos") {
+      const sentido = acao === "opacidade-mais" ? 1 : -1;
+      mudarPreferencias({ opacidadeDoChat: limitarOpacidadeDoChat(opacidade + sentido * OPACIDADE_DO_CHAT.passo) });
+      return;
+    }
+    if (acao === "responder-agora") {
+      responderAgoraPeloAtalho();
+      return;
+    }
+    if (acao === "focar-campo") {
+      campo.current?.focus();
+    }
+  };
+  useEffect(() => {
+    if (!modoAtivo) {
+      return undefined;
+    }
+    return aoAtalho((acao) => tratarAtalho.current(acao));
+  }, [modoAtivo, aoAtalho]);
+
+  // Ctrl+J e "Focar o chat rápido" (paleta): mostra a conversa, se oculta, e leva o cursor ao campo.
+  const pedirFoco = useRef<() => void>(() => undefined);
+  pedirFoco.current = () => {
+    acompanhando.current = true;
+    setOcultaEm(null);
+    void focarCampo();
+  };
+  useEffect(() => {
+    const aoPedirFoco = (): void => pedirFoco.current();
+    window.addEventListener(EVENTO_PARA_FOCAR_O_CHAT, aoPedirFoco);
+    return () => window.removeEventListener(EVENTO_PARA_FOCAR_O_CHAT, aoPedirFoco);
+  }, []);
+
+  // A altura (máxima) da conversa do chat flutuante: a alça do topo dela ajusta ao vivo e grava ao soltar.
+  const [alturaAoVivo, setAlturaAoVivo] = useState<number | null>(null);
+  const gestoDaAltura = useRef<{ ponteiro: number; inicioY: number; inicio: number; atual: number } | null>(null);
+  const alturaGravada = preferencias.alturaDaConversaDoChat;
+  /** A altura de agora, sempre dentro da janela; sem preferência, os 36% de sempre. */
+  function alturaDaConversaAgora(): number {
+    const maxima = Math.max(ALTURA_DA_CONVERSA_DO_CHAT.minima, window.innerHeight * FRACAO_MAXIMA_DA_CONVERSA);
+    const base = alturaAoVivo ?? alturaGravada ?? window.innerHeight * FRACAO_PADRAO_DA_CONVERSA;
+    return Math.round(Math.min(maxima, Math.max(ALTURA_DA_CONVERSA_DO_CHAT.minima, base)));
+  }
+  function limitarAlturaAgora(altura: number): number {
+    const maxima = Math.max(ALTURA_DA_CONVERSA_DO_CHAT.minima, window.innerHeight * FRACAO_MAXIMA_DA_CONVERSA);
+    return Math.round(Math.min(maxima, Math.max(ALTURA_DA_CONVERSA_DO_CHAT.minima, altura)));
+  }
+  function terminarGestoDaAltura(gravar: boolean): void {
+    const atual = gestoDaAltura.current;
+    if (atual === null) {
+      return;
+    }
+    gestoDaAltura.current = null;
+    setAlturaAoVivo(null);
+    if (gravar && atual.atual !== atual.inicio) {
+      mudarPreferencias({ alturaDaConversaDoChat: limitarAlturaDaConversaDoChat(atual.atual) });
+    }
+  }
+
+  // Acompanha o fim enquanto chega texto (das respostas), a menos que o usuário tenha rolado para cima.
   useEffect(() => {
     const elemento = rolagem.current;
     if (elemento !== null && acompanhando.current) {
@@ -1016,9 +1277,6 @@ export function ChatRapido({
     ultima?.situacao,
     chat.atividade,
     oculta,
-    frasesOuvidas,
-    enunciadoAberto?.confirmado,
-    enunciadoAberto?.parcial,
   ]);
 
   async function enviar(): Promise<void> {
@@ -1052,6 +1310,7 @@ export function ChatRapido({
         origemDoComposer === null ? {} : { origem: origemDoComposer },
       );
       limparCampo();
+      liberarFoco();
       // Os enviados (e os que chegaram durante o envio, que também saem) liberam a miniatura.
       liberarAnexos(anexosAtuais.current);
       setAnexos([]);
@@ -1115,6 +1374,8 @@ export function ChatRapido({
         evento.preventDefault();
         ocultar();
       }
+      // No modo invisível o Esc também devolve o teclado ao app de trás.
+      liberarFoco();
     }
   }
 
@@ -1145,19 +1406,80 @@ export function ChatRapido({
       ? "Respondendo: esc cancela, e já dá para escrever a próxima pergunta"
       : "Enter envia, Shift+Enter quebra a linha, / para comandos";
 
+  // O indicador da escuta (estado, motor, pausar e o menu de idioma): na barra, ou no cabeçalho do painel da transcrição.
+  const indicadorDaEscuta = (
+    <IndicadorDaEscuta
+      situacao={escuta.situacao}
+      progressoDoDownload={escuta.progressoDoDownload}
+      download={escuta.download}
+      motor={escuta.motor}
+      erro={escuta.erro}
+      pausar={escuta.pausar}
+      retomar={escuta.retomar}
+      automatico={escuta.automatico}
+      alternarAutomatico={escuta.alternarAutomatico}
+      preferenciasDaTela={escuta.preferenciasDaTela}
+      mudarIdioma={escuta.mudarIdioma}
+      mudarPrioridadeDoMotor={escuta.mudarPrioridadeDoMotor}
+    />
+  );
+
+  // O menu ⋯ da barra: melhorar o pedido e, no flutuante, fixar ao lado.
+  const itensDoMenu: ItemDoMenuDeMaisAcoes[] = [
+    {
+      id: "melhorar",
+      rotulo: "Melhorar o pedido",
+      titulo: "Reescreve o texto do campo num pedido mais claro (dá para desfazer)",
+      desabilitado: texto.trim() === "" || desconectado || respondendo || enviando,
+      aoEscolher: melhoria.melhorar,
+    },
+  ];
+  if (!fixo && !movel && aoAlternarFixo !== undefined) {
+    itensDoMenu.push({
+      id: "fixar",
+      rotulo: `Fixar o chat à ${lado}`,
+      titulo: `Fixar o chat à ${lado}: uma coluna ao lado do canvas, sempre aberta`,
+      aoEscolher: () => aoAlternarFixo(true),
+    });
+  }
+
   // O lado oposto ao atual: para onde o "mover" leva a coluna.
   const outroLado: LadoDoChatFixo = lado === "esquerda" ? "direita" : "esquerda";
 
   // Fixo: uma coluna (aside) ao lado do canvas; flutuante: um bloco no painel do pé do canvas.
   const Raiz = fixo ? "aside" : "div";
 
+  // Móvel e já movido: a caixa fica onde foi gravada. Com a conversa à vista, do topo e com a altura gravada; sem
+  // ela, presa ao fundo da mesma caixa (o campo não pula quando a conversa se oculta).
+  let estiloMovel: CSSProperties | undefined;
+  if (movel && geometria !== null) {
+    estiloMovel = conversaVisivel
+      ? { left: geometria.x, top: geometria.y, width: geometria.largura, height: geometria.altura }
+      : { left: geometria.x, bottom: area.altura - geometria.y - geometria.altura, width: geometria.largura };
+  }
+  // A opacidade vale para o chat inteiro (fundo e texto) e só para o flutuante: a coluna fixa e o resto do app não mudam.
+  const estiloDoChat: CSSProperties | undefined =
+    opacidade === OPACIDADE_DO_CHAT.padrao
+      ? estiloMovel
+      : ({ ...estiloMovel, "--opacidade-do-chat": opacidade } as CSSProperties);
+  const classeDoMovel = movel ? `chat-rapido-movel ${geometria === null ? "chat-rapido-movel-padrao" : ""}` : "";
+
   return (
     <Raiz
-      className={`chat-rapido nodrag nowheel nopan ${fixo ? `chat-lateral chat-lateral-${lado}` : ""} ${respondendo ? "chat-rapido-respondendo" : ""}`}
+      ref={(elemento: HTMLElement | null) => {
+        raiz.current = elemento;
+      }}
+      className={`chat-rapido nodrag nowheel nopan ${fixo ? `chat-lateral chat-lateral-${lado}` : ""} ${classeDoMovel} ${respondendo ? "chat-rapido-respondendo" : ""}`}
       aria-label={fixo ? "Chat rápido" : undefined}
-      style={fixo ? { width: `${largura}px` } : undefined}
+      style={fixo ? { width: `${largura}px` } : estiloDoChat}
       data-testid="chat-rapido"
       {...mouseDaArea}
+      onBlur={(evento) => {
+        // O foco saiu do chat (clicou fora, trocou de app): o teclado volta ao app de trás.
+        if (modoAtivo && !evento.currentTarget.contains(evento.relatedTarget as Node | null)) {
+          void definirFocavel(false);
+        }
+      }}
       onDragOver={(evento) => {
         // Uma resposta arrastada daqui não cai no próprio chat (nem no canvas por baixo dele).
         if (evento.dataTransfer.types.includes(TIPO_DA_RESPOSTA_DO_CHAT)) {
@@ -1186,20 +1508,139 @@ export function ChatRapido({
         }
       }}
     >
-      {arrastando && <div className="soltar-imagens">solte para anexar os arquivos à pergunta</div>}
+      {movel && (
+        <div className="barra-do-chat-movel" data-area-clicavel data-testid="barra-do-chat-movel">
+          <button
+            type="button"
+            className="alca-de-mover-o-chat"
+            aria-label="Mover o chat"
+            title="Arraste para mover o chat (Ctrl+Alt+setas movem 40 px)"
+            onPointerDown={(evento) => comecarGesto("mover", evento)}
+            onPointerMove={andarNoGesto}
+            onPointerUp={() => terminarGesto(true)}
+            onPointerCancel={() => terminarGesto(false)}
+            onLostPointerCapture={() => terminarGesto(true)}
+            onKeyDown={(evento) => {
+              const acoes: Readonly<Record<string, string>> = {
+                ArrowUp: "mover-cima",
+                ArrowDown: "mover-baixo",
+                ArrowLeft: "mover-esquerda",
+                ArrowRight: "mover-direita",
+              };
+              const acao = acoes[evento.key];
+              if (acao !== undefined) {
+                evento.preventDefault();
+                tratarAtalho.current(acao);
+              }
+            }}
+          >
+            <IconeAlcaDeMover />
+          </button>
+          <ControleDeOpacidade valor={opacidade} aoMudar={(valor) => mudarPreferencias({ opacidadeDoChat: valor })} />
+          {geometria !== null && (
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              aria-label="Voltar ao lugar padrão"
+              title="Voltar ao lugar padrão: centralizado no rodapé, com o tamanho de sempre"
+              onClick={voltarAoLugarPadrao}
+            >
+              lugar padrão
+            </button>
+          )}
+        </div>
+      )}
+      {gestoDoChat !== null && <div className="camada-de-gesto-do-chat" data-area-clicavel />}
+      {arrastando && <div className="soltar-imagens" data-area-clicavel>solte para anexar os arquivos à pergunta</div>}
       {fixo && aoMudarLargura !== undefined && <AlcaDaLargura largura={largura} aoMudar={aoMudarLargura} lado={lado} />}
 
       {/* Oculta, a conversa continua montada: os cartões de ação lembram o que já fizeram. */}
-      {(temMensagens || fixo || temOuvido) && (
+      {transcricaoAberta && (
+        <div className="painel-da-transcricao-no-chat">
+          <PainelDaTranscricao
+            legenda={escuta.legenda}
+            escutando={comEscuta}
+            respondendo={respondendo || enviando}
+            aoResponderAgora={(pedido) => void responderAgora(pedido)}
+            aoFechar={() => mudarPreferencias({ transcricaoAberta: false })}
+            indicador={comEscuta ? indicadorDaEscuta : undefined}
+          />
+        </div>
+      )}
+
+      {(temMensagens || fixo) && (
         <section
           className={`conversa-do-chat ${fixo ? "conversa-lateral" : "painel-flutuante"}`}
+          data-area-clicavel
+          // O teto da conversa do flutuante (no móvel já movido, a caixa inteira manda).
+          style={
+            !fixo && !movel && (alturaGravada !== null || alturaAoVivo !== null)
+              ? { maxHeight: `${alturaDaConversaAgora()}px` }
+              : undefined
+          }
           hidden={oculta}
           aria-label="Conversa com o Claude"
         >
+          {!fixo && !movel && (
+            <div
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="Altura da conversa"
+              aria-valuenow={alturaDaConversaAgora()}
+              aria-valuemin={ALTURA_DA_CONVERSA_DO_CHAT.minima}
+              aria-valuemax={Math.round(window.innerHeight * FRACAO_MAXIMA_DA_CONVERSA)}
+              tabIndex={0}
+              title="Arraste para mudar a altura da conversa · dois cliques voltam ao padrão"
+              className={`alca-da-altura-da-conversa nodrag nopan nowheel ${alturaAoVivo === null ? "" : "alca-arrastando"}`}
+              onPointerDown={(evento) => {
+                if (evento.button !== 0) {
+                  return;
+                }
+                evento.preventDefault();
+                evento.stopPropagation();
+                if (typeof evento.currentTarget.setPointerCapture === "function") {
+                  evento.currentTarget.setPointerCapture(evento.pointerId);
+                }
+                const inicio = alturaDaConversaAgora();
+                gestoDaAltura.current = { ponteiro: evento.pointerId, inicioY: evento.clientY, inicio, atual: inicio };
+                setAlturaAoVivo(inicio);
+              }}
+              onPointerMove={(evento) => {
+                const atual = gestoDaAltura.current;
+                if (atual === null || atual.ponteiro !== evento.pointerId) {
+                  return;
+                }
+                evento.stopPropagation();
+                // O chat fica no pé do canvas: subir a alça (clientY menor) cresce a conversa.
+                atual.atual = limitarAlturaAgora(atual.inicio + (atual.inicioY - evento.clientY));
+                setAlturaAoVivo(atual.atual);
+              }}
+              onPointerUp={() => terminarGestoDaAltura(true)}
+              onPointerCancel={() => terminarGestoDaAltura(false)}
+              onLostPointerCapture={() => terminarGestoDaAltura(true)}
+              onKeyDown={(evento) => {
+                const passos: Readonly<Record<string, number>> = {
+                  ArrowUp: PASSO_DA_ALTURA_DA_CONVERSA,
+                  ArrowDown: -PASSO_DA_ALTURA_DA_CONVERSA,
+                };
+                const passo = passos[evento.key];
+                if (passo !== undefined) {
+                  evento.preventDefault();
+                  mudarPreferencias({
+                    alturaDaConversaDoChat: limitarAlturaDaConversaDoChat(limitarAlturaAgora(alturaDaConversaAgora() + passo)),
+                  });
+                }
+              }}
+              onDoubleClick={() => mudarPreferencias({ alturaDaConversaDoChat: null })}
+            />
+          )}
           <header className="cabecalho-do-chat">
             <span className="rotulo-tecnico">chat rápido</span>
             {respondendo && <span className="etiqueta etiqueta-ativa etiqueta-pulso">respondendo…</span>}
             <span className="flex-1" />
+            {!fixo && !movel && (
+              <ControleDeOpacidade valor={opacidade} aoMudar={(valor) => mudarPreferencias({ opacidadeDoChat: valor })} />
+            )}
             {fixo ? (
               <span className="controles-do-chat" role="group" aria-label="Controles do chat">
                 <button
@@ -1285,7 +1726,7 @@ export function ChatRapido({
               }
             }}
           >
-            {!temMensagens && !temOuvido && (
+            {!temMensagens && (
               <p className="vazio-do-chat-lateral text-support">
                 Pergunte qualquer coisa ao Claude: a conversa aparece aqui, ao lado do canvas.
               </p>
@@ -1303,7 +1744,6 @@ export function ChatRapido({
               const indice = primeiraVisivel + posicao;
               return (
               <Fragment key={mensagem.id}>
-                {(frasesAntes.get(mensagem.id) ?? []).map(balaoOuvido)}
                 <MensagemNaConversa
                   mensagem={mensagem}
                   atividade={mensagem.situacao === "respondendo" ? chat.atividade : null}
@@ -1336,7 +1776,6 @@ export function ChatRapido({
               </Fragment>
               );
             })}
-            {baloesNoFim}
           </div>
         </section>
       )}
@@ -1345,6 +1784,7 @@ export function ChatRapido({
         <button
           type="button"
           className="mostrar-conversa"
+          data-area-clicavel
           onClick={() => {
             acompanhando.current = true;
             setOcultaEm(null);
@@ -1356,7 +1796,7 @@ export function ChatRapido({
       )}
 
       {erroDoModo !== null && (
-        <p className="hint-error texto-longo" role="alert">
+        <p className="hint-error texto-longo" role="alert" data-area-clicavel>
           {erroDoModo}{" "}
           <button type="button" className="btn btn-sm btn-ghost" onClick={descartarErroDoModo}>
             fechar
@@ -1370,7 +1810,7 @@ export function ChatRapido({
       )}
       {/* A escuta não tem caixa à parte: só o erro, numa linha com "fechar", acima do campo. */}
       {comEscuta && escuta.erro !== null && (
-        <p className="hint-error texto-longo erro-da-escuta" role="alert" data-testid="erro-da-escuta">
+        <p className="hint-error texto-longo erro-da-escuta" role="alert" data-testid="erro-da-escuta" data-area-clicavel>
           {escuta.erro}{" "}
           <button type="button" className="btn btn-sm btn-ghost" onClick={escuta.descartarErro}>
             fechar
@@ -1378,7 +1818,7 @@ export function ChatRapido({
         </p>
       )}
 
-      <div className="moldura-do-composer">
+      <div className="moldura-do-composer" data-area-clicavel>
         <div
           className="composer-do-chat"
           data-testid="composer-do-chat"
@@ -1386,14 +1826,14 @@ export function ChatRapido({
             // Clicar em qualquer parte leva o foco ao campo (menos no menu do modelo e no indicador da
             // escuta, cujo menu precisa do foco para fechar no Esc).
             const alvo = evento.target instanceof Element ? evento.target : null;
-            if (alvo !== null && alvo.closest('[role="menu"], .indicador-da-escuta') !== null) {
+            if (alvo !== null && alvo.closest('[role="menu"], .indicador-da-escuta, .menu-de-mais-acoes') !== null) {
               return;
             }
             // No microfone o foco fica nele: o Esc ali descarta o ditado.
             if (alvo !== null && alvo.closest(".ditado") !== null) {
               return;
             }
-            campo.current?.focus();
+            void focarCampo();
           }}
         >
           {respondendo && !desconectado && <div className="faixa-de-progresso" />}
@@ -1466,15 +1906,19 @@ export function ChatRapido({
                 ajustarAltura();
               }}
               onKeyDown={aoTeclar}
+              onPointerDown={() => {
+                // Janela não focável: ela precisa virar focável antes de o campo receber o teclado.
+                if (modoAtivo) {
+                  void focarCampo();
+                }
+              }}
               onPaste={aoColar}
               placeholder={placeholder}
               title={dicaDoCampo}
               aria-label="Pergunta para o Claude"
             />
-            <BotaoDeMelhorar
-              melhoria={melhoria}
-              desabilitado={texto.trim() === "" || desconectado || respondendo || enviando}
-            />
+            {/* Melhorando, o "cancelar" fica à vista; o "melhorar" mora no menu ⋯. */}
+            {melhoria.melhorando && <BotaoDeMelhorar melhoria={melhoria} desabilitado={false} />}
             <BotaoDeDitado destino="a mensagem" className="ditado-a-direita" aoTranscrever={receberDitado} />
             {chat.alteracoesAutorizadas && (
               <span
@@ -1500,17 +1944,20 @@ export function ChatRapido({
             {modoDisponivel && (
               <button
                 type="button"
-                className="botao-icone botao-entrar-modo-invisivel"
+                className="botao-entrar-modo-invisivel"
                 aria-label="Modo invisível"
                 aria-pressed={modoAtivo}
                 title={
                   modoAtivo
-                    ? "Tela sendo vista: clique para voltar ao modo normal (Ctrl+Shift+I)"
-                    : "Modo invisível: janela transparente, só o chat rápido; o Claude vê a tela a cada pergunta (Ctrl+Shift+I para sair)"
+                    ? "Tela sendo vista: clique para voltar ao modo normal (Ctrl+\\ oculta ou mostra o chat; Ctrl+Shift+I sai)"
+                    : "Modo invisível (fantasma): janela transparente, só o chat rápido; o Claude vê a tela a cada pergunta (Ctrl+\\ entra e alterna; Ctrl+Shift+I sai)"
                 }
                 onClick={() => void (modoAtivo ? sairDoModo() : entrarNoModo())}
               >
                 <IconeOlho cortado={modoAtivo} />
+                <span className="rotulo-do-modo-invisivel" aria-hidden="true">
+                  Fantasma
+                </span>
                 {modoAtivo && <span className="ponto-tela-vista" aria-hidden="true" />}
               </button>
             )}
@@ -1530,21 +1977,22 @@ export function ChatRapido({
                 <IconeFones />
               </button>
             )}
-            {comEscuta && (
-              <IndicadorDaEscuta
-                situacao={escuta.situacao}
-                progressoDoDownload={escuta.progressoDoDownload}
-                download={escuta.download}
-                motor={escuta.motor}
-                erro={escuta.erro}
-                pausar={escuta.pausar}
-                retomar={escuta.retomar}
-                automatico={escuta.automatico}
-                alternarAutomatico={escuta.alternarAutomatico}
-                preferenciasDaTela={escuta.preferenciasDaTela}
-                mudarIdioma={escuta.mudarIdioma}
-                mudarPrioridadeDoMotor={escuta.mudarPrioridadeDoMotor}
-              />
+            {/* Com o painel da transcrição aberto, o indicador mora no cabeçalho dele. */}
+            {comEscuta && !transcricaoAberta && indicadorDaEscuta}
+            {escutaDisponivel && (
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost botao-da-transcricao"
+                aria-pressed={transcricaoAberta}
+                title={
+                  transcricaoAberta
+                    ? "Fechar o painel da transcrição"
+                    : "Abrir o painel da transcrição: o que o áudio do computador está dizendo, com Responder agora (Ctrl+Shift+Enter)"
+                }
+                onClick={() => mudarPreferencias({ transcricaoAberta: !transcricaoAberta })}
+              >
+                Transcrição
+              </button>
             )}
             <SeletorDeModelo
               preferencias={chat.preferencias}
@@ -1573,18 +2021,8 @@ export function ChatRapido({
                 {enviando ? "…" : "enviar ⏎"}
               </button>
             )}
-            {/* Flutuante: fixar ao lado, no fim da barra (a coluna tem os controles no cabeçalho). */}
-            {!fixo && aoAlternarFixo !== undefined && (
-              <button
-                type="button"
-                className="botao-icone botao-de-fixar"
-                aria-label={`Fixar o chat à ${lado}`}
-                title={`Fixar o chat à ${lado}: uma coluna ao lado do canvas, sempre aberta`}
-                onClick={() => aoAlternarFixo(true)}
-              >
-                <IconeFixar lado={lado} />
-              </button>
-            )}
+            {/* O menu ⋯, no fim da barra: as ações menos usadas (a coluna tem os controles no cabeçalho). */}
+            <MenuDeMaisAcoes itens={itensDoMenu} campo={campo} />
           </div>
           {dica !== null && (
             <p className="mono hint px-3" role="status">
@@ -1597,6 +2035,11 @@ export function ChatRapido({
             </p>
           )}
           <AvisoDaMelhoria melhoria={melhoria} className="px-3" />
+          {aviso !== null && (
+            <p className="hint px-3" role="status" data-testid="aviso-curto-do-chat">
+              {aviso}
+            </p>
+          )}
           {(erro ?? erroAoCarregar) !== null && (
             <p className="hint-error texto-longo px-3" role="alert">
               {erro ?? `Não foi possível carregar o chat: ${erroAoCarregar}`}
@@ -1604,6 +2047,20 @@ export function ChatRapido({
           )}
         </div>
       </div>
+      {movel && (
+        <button
+          type="button"
+          className="alca-de-redimensionar-do-chat"
+          data-area-clicavel
+          aria-label="Redimensionar o chat"
+          title="Arraste para mudar o tamanho do chat"
+          onPointerDown={(evento) => comecarGesto("redimensionar", evento)}
+          onPointerMove={andarNoGesto}
+          onPointerUp={() => terminarGesto(true)}
+          onPointerCancel={() => terminarGesto(false)}
+          onLostPointerCapture={() => terminarGesto(true)}
+        />
+      )}
     </Raiz>
   );
 }

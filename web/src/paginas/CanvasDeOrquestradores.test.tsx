@@ -1073,6 +1073,22 @@ describe("CanvasDeOrquestradores · Ctrl+N e Organizar na ilha de ferramentas", 
     await waitFor(() => expect(rascunhosNaTela()).toBe(1));
   });
 
+  it("Ctrl+J leva o cursor ao campo do chat rápido (impedindo o padrão); com o foco num campo de texto, não", async () => {
+    layoutCom(["o1"]);
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o1")).toBeInTheDocument());
+    const chat = await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+    const ctrlJ = (alvo: Window | Element) => fireEvent.keyDown(alvo, { key: "j", code: "KeyJ", ctrlKey: true });
+
+    expect(chat).not.toHaveFocus();
+    // Fora de um campo de texto: foca o chat e o padrão do navegador é impedido.
+    expect(ctrlJ(window)).toBe(false);
+    await waitFor(() => expect(chat).toHaveFocus());
+
+    // Dentro de um campo de texto (o próprio chat), o atalho é do campo.
+    expect(ctrlJ(chat)).toBe(true);
+  });
+
   it("o \"Organizar\" é o 4º botão da ilha de ferramentas e põe os terminais lado a lado", async () => {
     layoutCom(["o1", "o2"]);
     render(<CanvasDeOrquestradores />);
@@ -1297,7 +1313,8 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     } finally {
       estilo.remove();
     }
-  });
+    // Lê e calcula o CSS do app inteiro no jsdom: com a suíte toda rodando em paralelo, passa dos 5 s padrão.
+  }, 30_000);
 
   it("com o chat fixo à esquerda, o modo invisível usa o chat flutuante sem mudar a preferência, e a coluna volta ao sair", async () => {
     localStorage.setItem(
