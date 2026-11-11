@@ -1660,6 +1660,7 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 | `Ctrl+Alt+setas` | Move o chat de 40 em 40 px |
 | `Ctrl+Alt+PageUp` / `PageDown` | Rola a conversa para cima / para baixo |
 | `Ctrl+Alt+` `+` / `-` | Aumenta / diminui a opacidade do chat (de 20% a 100%, de 10 em 10) |
+| `Ctrl+J` | Dentro do app (fora do modo e de campos de texto): foca o chat rápido |
 
 **Uso da assinatura:** clique num medidor da cota do status (ou no resumo, na janela estreita) para abrir o popover com cada limite (5 horas, 7 dias e os por modelo, se o Claude mandar), a barra em % e quando renova, e o consumo de cada orquestrador na conversa atual pelo índice de custo (rota `GET /consumo-dos-orquestradores`). Antes do primeiro pedido, ele avisa que a cota aparece depois dele. O nome do plano (Pro, Max) não vem nos dados do Claude Code e não aparece. Fecha com Esc, clique fora ou no próprio medidor.
 
@@ -1672,7 +1673,7 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 - os botões no canto inferior esquerdo aproximam, afastam e enquadram tudo; o 4º, com o ícone de grade, é o **Organizar**: põe os terminais lado a lado e, à direita deles, as notas em colunas e, depois delas, os artefatos (fica desabilitado com uma janela só);
 - **Ctrl+N** abre o formulário de um orquestrador novo (o mesmo de *+ Novo ▾ › Orquestrador*, respeitando o limite de 20) e **Ctrl+Shift+N** cria uma nota; com o cursor num campo de texto (prompt, nota, chat), os dois não fazem nada;
 - **Ctrl+K** (ou o campo *Buscar ou executar…* da barra de título; no navegador, o botão *Buscar* na barra do canvas) abre a **paleta de comandos**, de qualquer lugar, inclusive com o cursor num prompt. Digite parte do nome (acentos e maiúsculas não importam; todas as palavras precisam aparecer) para achar:
-  - **ações:** *Novo orquestrador* (Ctrl+N), *Nova nota* (Ctrl+Shift+N), *Organizar* (com mais de uma janela), *Zoom 100%* (Ctrl+0), *Enquadrar tudo* e, no aplicativo, *Pastas e Claude Code* e *Procurar atualizações* (item 15);
+  - **ações:** *Novo orquestrador* (Ctrl+N), *Nova nota* (Ctrl+Shift+N), *Organizar* (com mais de uma janela), *Zoom 100%* (Ctrl+0), *Enquadrar tudo*, *Focar o chat rápido* (Ctrl+J), no aplicativo, *Entrar no modo fantasma* (com o modo desligado), *Pastas e Claude Code* e *Procurar atualizações* (item 15);
   - **orquestradores:** todos, abertos ou não, com a pasta e se estão trabalhando; escolher abre o terminal (respeitando o limite de 20) ou leva até ele;
   - **notas:** pelo título ou pelo texto; escolher centraliza a nota;
   - **artefatos:** todos, abertos ou não, pelo título (ou por "artefato", "html", "md", "pagina"), com o formato, a origem (o Orquestrador ou o chat rápido) e se já estão no canvas; escolher abre a janela, se estiver fechada, e leva até ela (item 14);
@@ -1791,6 +1792,9 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
     O texto das notas fica salvo no servidor (em `dados/notas/`), então volta ao recarregar a página. Posição, tamanho e se está minimizada são lembrados neste navegador, como os terminais. Notas abertas em duas abas não se sincronizam: vale o último salvamento, e a outra aba só vê a mudança ao recarregar.
 12. **Chat rápido:** a caixa no centro, embaixo da tela, para perguntar algo ao Claude sem abrir um terminal.
     - **Compacta por padrão:** fica numa linha só (*+* · campo · modelo · *enviar*). Clique nela (ou foque o campo com Tab) e ela expande; volta a uma linha quando sai o foco e não há texto, imagens nem o menu do modelo aberto.
+    - **Chegar rápido ao chat:** **Ctrl+J** (fora de campos de texto) ou *Focar o chat rápido* na paleta mostram a conversa, se estiver oculta, e levam o cursor ao campo.
+    - **Barra mais limpa:** o botão **Fantasma** (olho + rótulo) liga e desliga o modo fantasma (o balão lembra `Ctrl+\` e `Ctrl+Shift+I`). As ações menos usadas ficam no menu **⋯** (*Mais ações*): *Melhorar o pedido* e *Fixar o chat à esquerda/direita*. O menu abre com Enter, Espaço ou seta para baixo; as setas andam pelos itens; Esc ou um clique fora fecham. Enquanto o pedido está sendo melhorado, o *cancelar* aparece na barra.
+    - **Altura da conversa:** no chat flutuante, arraste a alça fina no topo da conversa (para cima alonga; com o foco nela, ↑/↓ mudam 24 px; dois cliques voltam ao padrão, 36% da janela). A altura fica gravada (de 120 px a 85% da janela).
     - **Perguntar:** escreva e aperte **Enter** (Shift+Enter quebra linha). A resposta aparece aos poucos; enquanto o Claude pesquisa, lê, edita ou roda um comando, aparece a atividade (ex.: *pesquisando "node lts"*, *editando src/x.ts*, *rodando: npm test*). O chat lembra da conversa.
     - **Imagens:** cole, arraste ou anexe, como nos terminais (até 5, PNG/JPEG/GIF/WebP, 5 MB cada). Dá para mandar só a imagem.
     - **Cancelar:** **Esc** durante a resposta. O texto que já chegou fica.

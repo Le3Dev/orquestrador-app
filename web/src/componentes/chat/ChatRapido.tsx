@@ -33,6 +33,7 @@ import {
   textoParaMostrar,
   ultimoModeloUsado,
 } from "../../shared/estado/aplicarEventoDoChat";
+import { EVENTO_PARA_FOCAR_O_CHAT } from "../../shared/focarChat";
 import { formatarBytes, formatarDuracao } from "../../shared/formatacao";
 import {
   type AreaVisivel,
@@ -44,8 +45,10 @@ import {
 import { useMelhorarPrompt } from "../../shared/hooks/useMelhorarPrompt";
 import { useModoInvisivel } from "../../shared/hooks/useModoInvisivel";
 import {
+  ALTURA_DA_CONVERSA_DO_CHAT,
   LARGURA_DO_CHAT_FIXO,
   type LadoDoChatFixo,
+  limitarAlturaDaConversaDoChat,
   limitarLarguraDoChatFixo,
   limitarOpacidadeDoChat,
   OPACIDADE_DO_CHAT,
@@ -75,6 +78,7 @@ import { CartaoDeSubagente } from "./CartaoDeSubagente";
 import { frasesSemAsEnviadas } from "./frasesOuvidas";
 import { HoraDaMensagem } from "./HoraDaMensagem";
 import { IndicadorDaEscuta } from "./IndicadorDaEscuta";
+import { MenuDeMaisAcoes, type ItemDoMenuDeMaisAcoes } from "./MenuDeMaisAcoes";
 import { SeletorDeModelo } from "./SeletorDeModelo";
 import "../../theme/chat-lateral.css";
 import "../../theme/controles-de-janela.css";
@@ -82,6 +86,12 @@ import "../../theme/controles-de-janela.css";
 const ALTURA_MAXIMA_DO_CAMPO = 140;
 /** A altura (px) que o chat móvel assume ao ser movido pela primeira vez, sem conversa à vista. */
 const ALTURA_PADRAO_DO_CHAT_MOVEL = 420;
+/** Quanto a seta do teclado muda a altura da conversa (px). */
+const PASSO_DA_ALTURA_DA_CONVERSA = 24;
+/** A conversa do chat flutuante não passa desta fração da altura da janela. */
+const FRACAO_MAXIMA_DA_CONVERSA = 0.85;
+/** Sem preferência, a conversa vai até esta fração da altura da janela (o 36vh de sempre). */
+const FRACAO_PADRAO_DA_CONVERSA = 0.36;
 /** Quanto das conversas Ctrl+Alt+PageUp/PageDown rolam (fração da altura visível). */
 const FRACAO_DA_ROLAGEM = 0.8;
 /** Para as mensagens sem ações: a mesma lista sempre, para a memorização delas valer. */
@@ -277,22 +287,6 @@ const PROPS_DO_ICONE_DO_CHAT = {
   strokeLinejoin: "round",
   "aria-hidden": true,
 } as const;
-
-/** Fixar ao lado: uma janela com a coluna no lado em que o chat vai ficar (o desenho é o da coluna à direita). */
-function IconeFixar({ lado }: { lado: LadoDoChatFixo }) {
-  return (
-    <svg
-      {...PROPS_DO_ICONE_DO_CHAT}
-      width={16}
-      height={16}
-      // À esquerda, o mesmo desenho espelhado.
-      style={lado === "esquerda" ? { transform: "scaleX(-1)" } : undefined}
-    >
-      <rect x="3.5" y="4" width="17" height="16" rx="2.5" />
-      <path d="M14.5 4v16" />
-    </svg>
-  );
-}
 
 /** Os ícones da barra do chat: traço de 1,8, como os das ilhas do canvas (o tamanho muda de um para outro). */
 function IconeDaBarra({ tamanho = 18, children }: { tamanho?: number; children: ReactNode }) {
@@ -1198,6 +1192,45 @@ export function ChatRapido({
     return aoAtalho((acao) => tratarAtalho.current(acao));
   }, [modoAtivo, aoAtalho]);
 
+  // Ctrl+J e "Focar o chat rápido" (paleta): mostra a conversa, se oculta, e leva o cursor ao campo.
+  const pedirFoco = useRef<() => void>(() => undefined);
+  pedirFoco.current = () => {
+    acompanhando.current = true;
+    setOcultaEm(null);
+    void focarCampo();
+  };
+  useEffect(() => {
+    const aoPedirFoco = (): void => pedirFoco.current();
+    window.addEventListener(EVENTO_PARA_FOCAR_O_CHAT, aoPedirFoco);
+    return () => window.removeEventListener(EVENTO_PARA_FOCAR_O_CHAT, aoPedirFoco);
+  }, []);
+
+  // A altura (máxima) da conversa do chat flutuante: a alça do topo dela ajusta ao vivo e grava ao soltar.
+  const [alturaAoVivo, setAlturaAoVivo] = useState<number | null>(null);
+  const gestoDaAltura = useRef<{ ponteiro: number; inicioY: number; inicio: number; atual: number } | null>(null);
+  const alturaGravada = preferencias.alturaDaConversaDoChat;
+  /** A altura de agora, sempre dentro da janela; sem preferência, os 36% de sempre. */
+  function alturaDaConversaAgora(): number {
+    const maxima = Math.max(ALTURA_DA_CONVERSA_DO_CHAT.minima, window.innerHeight * FRACAO_MAXIMA_DA_CONVERSA);
+    const base = alturaAoVivo ?? alturaGravada ?? window.innerHeight * FRACAO_PADRAO_DA_CONVERSA;
+    return Math.round(Math.min(maxima, Math.max(ALTURA_DA_CONVERSA_DO_CHAT.minima, base)));
+  }
+  function limitarAlturaAgora(altura: number): number {
+    const maxima = Math.max(ALTURA_DA_CONVERSA_DO_CHAT.minima, window.innerHeight * FRACAO_MAXIMA_DA_CONVERSA);
+    return Math.round(Math.min(maxima, Math.max(ALTURA_DA_CONVERSA_DO_CHAT.minima, altura)));
+  }
+  function terminarGestoDaAltura(gravar: boolean): void {
+    const atual = gestoDaAltura.current;
+    if (atual === null) {
+      return;
+    }
+    gestoDaAltura.current = null;
+    setAlturaAoVivo(null);
+    if (gravar && atual.atual !== atual.inicio) {
+      mudarPreferencias({ alturaDaConversaDoChat: limitarAlturaDaConversaDoChat(atual.atual) });
+    }
+  }
+
   // Acompanha o fim enquanto chega texto (das respostas e da escuta), a menos que o usuário tenha rolado para cima.
   useEffect(() => {
     const elemento = rolagem.current;
@@ -1342,6 +1375,25 @@ export function ChatRapido({
       ? "Respondendo: esc cancela, e já dá para escrever a próxima pergunta"
       : "Enter envia, Shift+Enter quebra a linha, / para comandos";
 
+  // O menu ⋯ da barra: melhorar o pedido e, no flutuante, fixar ao lado.
+  const itensDoMenu: ItemDoMenuDeMaisAcoes[] = [
+    {
+      id: "melhorar",
+      rotulo: "Melhorar o pedido",
+      titulo: "Reescreve o texto do campo num pedido mais claro (dá para desfazer)",
+      desabilitado: texto.trim() === "" || desconectado || respondendo || enviando,
+      aoEscolher: melhoria.melhorar,
+    },
+  ];
+  if (!fixo && !movel && aoAlternarFixo !== undefined) {
+    itensDoMenu.push({
+      id: "fixar",
+      rotulo: `Fixar o chat à ${lado}`,
+      titulo: `Fixar o chat à ${lado}: uma coluna ao lado do canvas, sempre aberta`,
+      aoEscolher: () => aoAlternarFixo(true),
+    });
+  }
+
   // O lado oposto ao atual: para onde o "mover" leva a coluna.
   const outroLado: LadoDoChatFixo = lado === "esquerda" ? "direita" : "esquerda";
 
@@ -1458,9 +1510,68 @@ export function ChatRapido({
         <section
           className={`conversa-do-chat ${fixo ? "conversa-lateral" : "painel-flutuante"}`}
           data-area-clicavel
+          // O teto da conversa do flutuante (no móvel já movido, a caixa inteira manda).
+          style={
+            !fixo && !movel && (alturaGravada !== null || alturaAoVivo !== null)
+              ? { maxHeight: `${alturaDaConversaAgora()}px` }
+              : undefined
+          }
           hidden={oculta}
           aria-label="Conversa com o Claude"
         >
+          {!fixo && !movel && (
+            <div
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="Altura da conversa"
+              aria-valuenow={alturaDaConversaAgora()}
+              aria-valuemin={ALTURA_DA_CONVERSA_DO_CHAT.minima}
+              aria-valuemax={Math.round(window.innerHeight * FRACAO_MAXIMA_DA_CONVERSA)}
+              tabIndex={0}
+              title="Arraste para mudar a altura da conversa · dois cliques voltam ao padrão"
+              className={`alca-da-altura-da-conversa nodrag nopan nowheel ${alturaAoVivo === null ? "" : "alca-arrastando"}`}
+              onPointerDown={(evento) => {
+                if (evento.button !== 0) {
+                  return;
+                }
+                evento.preventDefault();
+                evento.stopPropagation();
+                if (typeof evento.currentTarget.setPointerCapture === "function") {
+                  evento.currentTarget.setPointerCapture(evento.pointerId);
+                }
+                const inicio = alturaDaConversaAgora();
+                gestoDaAltura.current = { ponteiro: evento.pointerId, inicioY: evento.clientY, inicio, atual: inicio };
+                setAlturaAoVivo(inicio);
+              }}
+              onPointerMove={(evento) => {
+                const atual = gestoDaAltura.current;
+                if (atual === null || atual.ponteiro !== evento.pointerId) {
+                  return;
+                }
+                evento.stopPropagation();
+                // O chat fica no pé do canvas: subir a alça (clientY menor) cresce a conversa.
+                atual.atual = limitarAlturaAgora(atual.inicio + (atual.inicioY - evento.clientY));
+                setAlturaAoVivo(atual.atual);
+              }}
+              onPointerUp={() => terminarGestoDaAltura(true)}
+              onPointerCancel={() => terminarGestoDaAltura(false)}
+              onLostPointerCapture={() => terminarGestoDaAltura(true)}
+              onKeyDown={(evento) => {
+                const passos: Readonly<Record<string, number>> = {
+                  ArrowUp: PASSO_DA_ALTURA_DA_CONVERSA,
+                  ArrowDown: -PASSO_DA_ALTURA_DA_CONVERSA,
+                };
+                const passo = passos[evento.key];
+                if (passo !== undefined) {
+                  evento.preventDefault();
+                  mudarPreferencias({
+                    alturaDaConversaDoChat: limitarAlturaDaConversaDoChat(limitarAlturaAgora(alturaDaConversaAgora() + passo)),
+                  });
+                }
+              }}
+              onDoubleClick={() => mudarPreferencias({ alturaDaConversaDoChat: null })}
+            />
+          )}
           <header className="cabecalho-do-chat">
             <span className="rotulo-tecnico">chat rápido</span>
             {respondendo && <span className="etiqueta etiqueta-ativa etiqueta-pulso">respondendo…</span>}
@@ -1643,7 +1754,7 @@ export function ChatRapido({
             // Clicar em qualquer parte leva o foco ao campo (menos no menu do modelo e no indicador da
             // escuta, cujo menu precisa do foco para fechar no Esc).
             const alvo = evento.target instanceof Element ? evento.target : null;
-            if (alvo !== null && alvo.closest('[role="menu"], .indicador-da-escuta') !== null) {
+            if (alvo !== null && alvo.closest('[role="menu"], .indicador-da-escuta, .menu-de-mais-acoes') !== null) {
               return;
             }
             // No microfone o foco fica nele: o Esc ali descarta o ditado.
@@ -1727,10 +1838,8 @@ export function ChatRapido({
               title={dicaDoCampo}
               aria-label="Pergunta para o Claude"
             />
-            <BotaoDeMelhorar
-              melhoria={melhoria}
-              desabilitado={texto.trim() === "" || desconectado || respondendo || enviando}
-            />
+            {/* Melhorando, o "cancelar" fica à vista; o "melhorar" mora no menu ⋯. */}
+            {melhoria.melhorando && <BotaoDeMelhorar melhoria={melhoria} desabilitado={false} />}
             <BotaoDeDitado destino="a mensagem" className="ditado-a-direita" aoTranscrever={receberDitado} />
             {chat.alteracoesAutorizadas && (
               <span
@@ -1756,17 +1865,20 @@ export function ChatRapido({
             {modoDisponivel && (
               <button
                 type="button"
-                className="botao-icone botao-entrar-modo-invisivel"
+                className="botao-entrar-modo-invisivel"
                 aria-label="Modo invisível"
                 aria-pressed={modoAtivo}
                 title={
                   modoAtivo
-                    ? "Tela sendo vista: clique para voltar ao modo normal (Ctrl+Shift+I)"
-                    : "Modo invisível: janela transparente, só o chat rápido; o Claude vê a tela a cada pergunta (Ctrl+Shift+I para sair)"
+                    ? "Tela sendo vista: clique para voltar ao modo normal (Ctrl+\\ oculta ou mostra o chat; Ctrl+Shift+I sai)"
+                    : "Modo invisível (fantasma): janela transparente, só o chat rápido; o Claude vê a tela a cada pergunta (Ctrl+\\ entra e alterna; Ctrl+Shift+I sai)"
                 }
                 onClick={() => void (modoAtivo ? sairDoModo() : entrarNoModo())}
               >
                 <IconeOlho cortado={modoAtivo} />
+                <span className="rotulo-do-modo-invisivel" aria-hidden="true">
+                  Fantasma
+                </span>
                 {modoAtivo && <span className="ponto-tela-vista" aria-hidden="true" />}
               </button>
             )}
@@ -1829,18 +1941,8 @@ export function ChatRapido({
                 {enviando ? "…" : "enviar ⏎"}
               </button>
             )}
-            {/* Flutuante: fixar ao lado, no fim da barra (a coluna tem os controles no cabeçalho). */}
-            {!fixo && aoAlternarFixo !== undefined && (
-              <button
-                type="button"
-                className="botao-icone botao-de-fixar"
-                aria-label={`Fixar o chat à ${lado}`}
-                title={`Fixar o chat à ${lado}: uma coluna ao lado do canvas, sempre aberta`}
-                onClick={() => aoAlternarFixo(true)}
-              >
-                <IconeFixar lado={lado} />
-              </button>
-            )}
+            {/* O menu ⋯, no fim da barra: as ações menos usadas (a coluna tem os controles no cabeçalho). */}
+            <MenuDeMaisAcoes itens={itensDoMenu} campo={campo} />
           </div>
           {dica !== null && (
             <p className="mono hint px-3" role="status">

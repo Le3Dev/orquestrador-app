@@ -9,6 +9,7 @@ import {
   type EstadoDoChatNaTela,
   type MensagemDoChatNaTela,
 } from "../../shared/estado/aplicarEventoDoChat";
+import { pedirFocoDoChat } from "../../shared/focarChat";
 import { CHAVE_DAS_PREFERENCIAS_DA_TELA } from "../../shared/hooks/usePreferenciasDaTela";
 import { ChatRapido, TIPO_DA_RESPOSTA_DO_CHAT } from "./ChatRapido";
 
@@ -184,6 +185,15 @@ const RESPONDENDO: EstadoDoChatNaTela = {
   ],
   atividade: { mensagemId: "c1", ferramenta: "Read", detalhe: "README.md" },
 };
+
+/** Abre o menu ⋯ da barra e devolve o item pedido (o "melhorar" e o "fixar" moram nele). */
+function itemDoMenu(nome: string): HTMLElement {
+  const gatilho = screen.getByRole("button", { name: "Mais ações" });
+  if (gatilho.getAttribute("aria-expanded") !== "true") {
+    fireEvent.click(gatilho);
+  }
+  return screen.getByRole("menuitem", { name: nome });
+}
 
 function renderizar(chat: EstadoDoChatNaTela = OCIOSO, desconectado = false) {
   const props = {
@@ -624,7 +634,8 @@ describe("ChatRapido · modo invisível", () => {
 
     const desligado = screen.getByRole("button", { name: "Modo invisível" });
     expect(desligado).toHaveAttribute("aria-pressed", "false");
-    expect(desligado).toHaveTextContent("");
+    // O rótulo "Fantasma" fica à vista, ao lado do ícone.
+    expect(desligado).toHaveTextContent("Fantasma");
     expect(desligado.querySelector("svg circle")).not.toBeNull();
     expect(desligado.querySelector('svg path[d="m4 4 16 16"]')).toBeNull();
     expect(desligado.querySelector(".ponto-tela-vista")).toBeNull();
@@ -632,7 +643,8 @@ describe("ChatRapido · modo invisível", () => {
     ativar();
     const ligado = screen.getByRole("button", { name: "Modo invisível" });
     expect(ligado).toHaveAttribute("aria-pressed", "true");
-    expect(ligado).toHaveTextContent("");
+    expect(ligado).toHaveTextContent("Fantasma");
+    expect(ligado).toHaveAttribute("title", expect.stringContaining("Ctrl+Shift+I"));
     expect(ligado.querySelector("svg circle")).toBeNull();
     expect(ligado.querySelector('svg path[d="m4 4 16 16"]')).not.toBeNull();
     expect(ligado.querySelector(".ponto-tela-vista")).not.toBeNull();
@@ -1402,30 +1414,32 @@ describe("ChatRapido", () => {
     /** `a` vem antes de `b` no documento. */
     const vemAntes = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 
-    it("é uma linha só, na ordem: +, campo, ✦, microfone, modelo e enviar", () => {
+    it("é uma linha só, na ordem: +, campo, microfone, modelo, enviar e o menu ⋯", () => {
       const { campo } = renderizar();
       const linha = composer().querySelector(".linha-do-composer");
       expect(linha).not.toBeNull();
       const anexar = screen.getByRole("button", { name: "Anexar imagens" });
-      const melhorar = screen.getByRole("button", { name: "Melhorar o pedido" });
       const microfone = screen.getByRole("button", { name: "Ditar a mensagem por voz" });
       const modelo = screen.getByRole("button", { name: /^Modelo:/ });
       const enviar = screen.getByRole("button", { name: "enviar ⏎" });
-      for (const elemento of [anexar, campo, melhorar, microfone, modelo, enviar]) {
+      const maisAcoes = screen.getByRole("button", { name: "Mais ações" });
+      for (const elemento of [anexar, campo, microfone, modelo, enviar, maisAcoes]) {
         expect(linha).toContainElement(elemento);
       }
+      // O "melhorar" saiu da barra: mora no menu ⋯.
+      expect(screen.queryByRole("button", { name: "Melhorar o pedido" })).not.toBeInTheDocument();
       expect(vemAntes(anexar, campo)).toBe(true);
-      expect(vemAntes(campo, melhorar)).toBe(true);
-      expect(vemAntes(melhorar, microfone)).toBe(true);
+      expect(vemAntes(campo, microfone)).toBe(true);
       expect(vemAntes(microfone, modelo)).toBe(true);
       expect(vemAntes(modelo, enviar)).toBe(true);
+      expect(vemAntes(enviar, maisAcoes)).toBe(true);
       expect(composer()).not.toHaveClass("composer-compacto", "composer-expandido");
     });
 
     it("o campo diz \"Pergunte ao Claude\" e os botões de ícone são SVG, sem emoji nem texto", () => {
       const { campo } = renderizar();
       expect(campo).toHaveAttribute("placeholder", "Pergunte ao Claude");
-      for (const nome of ["Anexar imagens", "Melhorar o pedido", "Ditar a mensagem por voz"]) {
+      for (const nome of ["Anexar imagens", "Mais ações", "Ditar a mensagem por voz"]) {
         const botao = screen.getByRole("button", { name: nome });
         expect(botao).toHaveTextContent("");
         expect(botao.querySelector("svg")).not.toBeNull();
@@ -1446,7 +1460,7 @@ describe("ChatRapido", () => {
       expect(campo).toHaveFocus();
     });
 
-    it("o fixar ao lado está na barra mesmo sem conversa; sem aoAlternarFixo não há botão", () => {
+    it("o fixar ao lado está no menu ⋯ mesmo sem conversa; sem aoAlternarFixo não há o item", () => {
       const props = {
         chat: OCIOSO,
         desconectado: false,
@@ -1458,10 +1472,11 @@ describe("ChatRapido", () => {
         orquestradores: [],
       };
       const { rerender } = render(<ChatRapido {...props} />);
-      expect(screen.queryByRole("button", { name: /^Fixar o chat/ })).not.toBeInTheDocument();
+      itemDoMenu("Melhorar o pedido");
+      expect(screen.queryByRole("menuitem", { name: /^Fixar o chat/ })).not.toBeInTheDocument();
 
       rerender(<ChatRapido {...props} aoAlternarFixo={vi.fn()} />);
-      expect(screen.getByRole("button", { name: "Fixar o chat à esquerda" })).toBeInTheDocument();
+      expect(screen.getByRole("menuitem", { name: "Fixar o chat à esquerda" })).toBeInTheDocument();
     });
 
     it("com imagem anexada, a miniatura aparece acima da linha da barra", async () => {
@@ -1528,7 +1543,7 @@ describe("ChatRapido", () => {
       expect(microfone().querySelector("svg")).not.toBeNull();
       expect(microfone().closest(".linha-do-composer")).not.toBeNull();
       expect(screen.getByRole("button", { name: "Anexar imagens" })).toHaveClass("botao-icone");
-      expect(screen.getByRole("button", { name: "Melhorar o pedido" })).toHaveClass("botao-icone");
+      expect(screen.getByRole("button", { name: "Mais ações" })).toHaveClass("botao-icone");
     });
 
     it("flutuante: o microfone fica na linha do composer; o ditado entra no campo e dá para enviar", async () => {
@@ -1885,10 +1900,9 @@ describe("ChatRapido", () => {
 
     it("desabilitado com o campo vazio, com o Claude respondendo e com o servidor fora", () => {
       const { campo } = renderizar();
-      const botao = screen.getByRole("button", { name: "Melhorar o pedido" });
-      expect(botao).toBeDisabled();
+      expect(itemDoMenu("Melhorar o pedido")).toBeDisabled();
       fireEvent.change(campo, { target: { value: "usememo x usecallback" } });
-      expect(botao).toBeEnabled();
+      expect(itemDoMenu("Melhorar o pedido")).toBeEnabled();
     });
 
     it.each([
@@ -1897,7 +1911,7 @@ describe("ChatRapido", () => {
     ] as const)("%s: o botão fica desabilitado mesmo com texto", (_nome, chat, desconectado) => {
       const { campo } = renderizar(chat, desconectado);
       fireEvent.change(campo, { target: { value: "usememo x usecallback" } });
-      expect(screen.getByRole("button", { name: "Melhorar o pedido" })).toBeDisabled();
+      expect(itemDoMenu("Melhorar o pedido")).toBeDisabled();
     });
 
     it("manda onde \"chat\" sem pasta, troca o texto sem enviar e editar tira o desfazer", async () => {
@@ -1906,7 +1920,7 @@ describe("ChatRapido", () => {
       const { campo } = renderizar();
       fireEvent.change(campo, { target: { value: "usememo x usecallback" } });
 
-      fireEvent.click(screen.getByRole("button", { name: "Melhorar o pedido" }));
+      fireEvent.click(itemDoMenu("Melhorar o pedido"));
 
       expect(melhorar).toHaveBeenCalledWith(
         { texto: "usememo x usecallback", onde: "chat" },
@@ -1930,7 +1944,7 @@ describe("ChatRapido", () => {
       const { campo } = renderizar();
       fireEvent.change(campo, { target: { value: "usememo x usecallback" } });
 
-      fireEvent.click(screen.getByRole("button", { name: "Melhorar o pedido" }));
+      fireEvent.click(itemDoMenu("Melhorar o pedido"));
       expect(campo).toHaveAttribute("readonly");
       fireEvent.keyDown(campo, { key: "Enter" });
       expect(perguntar).not.toHaveBeenCalled();
@@ -2289,7 +2303,7 @@ describe("ChatRapido", () => {
       });
     });
 
-    it("flutuante, o botão de fixar fica no fim da barra, depois do enviar (e o cabeçalho tem o ocultar)", () => {
+    it("flutuante, o fixar fica no menu ⋯ no fim da barra, depois do enviar (e o cabeçalho tem o ocultar)", () => {
       const aoAlternarFixo = vi.fn();
       render(
         <ChatRapido
@@ -2309,18 +2323,18 @@ describe("ChatRapido", () => {
       expect(screen.getByRole("button", { name: "ocultar" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Soltar embaixo" })).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Mover o chat para a direita" })).not.toBeInTheDocument();
-      const fixar = screen.getByRole("button", { name: "Fixar o chat à esquerda" });
-      // Só o ícone, no fim da linha da barra (depois do enviar), e não mais no cabeçalho da conversa.
-      expect(fixar).toHaveClass("botao-icone", "botao-de-fixar");
-      expect(fixar).toHaveTextContent("");
-      expect(fixar.querySelector("svg")).not.toBeNull();
-      expect(fixar.closest(".linha-do-composer")).not.toBeNull();
-      expect(fixar.closest("header")).toBeNull();
+      const fixar = itemDoMenu("Fixar o chat à esquerda");
+      // O menu ⋯ fica no fim da linha da barra (depois do enviar), e não no cabeçalho da conversa.
+      const gatilho = screen.getByRole("button", { name: "Mais ações" });
+      expect(gatilho.closest(".linha-do-composer")).not.toBeNull();
+      expect(gatilho.closest("header")).toBeNull();
       expect(
-        Boolean(screen.getByRole("button", { name: "enviar ⏎" }).compareDocumentPosition(fixar) & Node.DOCUMENT_POSITION_FOLLOWING),
+        Boolean(screen.getByRole("button", { name: "enviar ⏎" }).compareDocumentPosition(gatilho) & Node.DOCUMENT_POSITION_FOLLOWING),
       ).toBe(true);
       fireEvent.click(fixar);
       expect(aoAlternarFixo).toHaveBeenCalledWith(true);
+      // Escolher fecha o menu.
+      expect(screen.queryByRole("menu", { name: "Mais ações" })).not.toBeInTheDocument();
     });
 
     it("flutuante com o lado direita, o botão de fixar diz à direita", () => {
@@ -2339,11 +2353,147 @@ describe("ChatRapido", () => {
         />,
       );
 
-      expect(screen.getByRole("button", { name: "Fixar o chat à direita" })).toHaveAttribute(
+      expect(itemDoMenu("Fixar o chat à direita")).toHaveAttribute(
         "title",
         "Fixar o chat à direita: uma coluna ao lado do canvas, sempre aberta",
       );
     });
+  });
+});
+
+describe("ChatRapido · acesso rápido", () => {
+  // O jsdom não tem PointerEvent: sem ele, o fireEvent manda um Event sem clientX nem pointerId.
+  class EventoDePonteiroFalso extends MouseEvent {
+    readonly pointerId: number;
+    constructor(tipo: string, inicio: PointerEventInit = {}) {
+      super(tipo, inicio);
+      this.pointerId = inicio.pointerId ?? 0;
+    }
+  }
+  beforeEach(() => vi.stubGlobal("PointerEvent", EventoDePonteiroFalso));
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    localStorage.clear();
+  });
+
+  const COM_MENSAGEM: EstadoDoChatNaTela = { ...OCIOSO, mensagens: [mensagem("u1", "usuario", { texto: "Oi" })] };
+  const guardado = () => JSON.parse(localStorage.getItem(CHAVE_DAS_PREFERENCIAS_DA_TELA) ?? "{}") as { alturaDaConversaDoChat?: number | null };
+
+  it("o pedido de foco (Ctrl+J, paleta) mostra a conversa oculta e leva o cursor ao campo", () => {
+    const { campo } = renderizar(COM_MENSAGEM);
+    fireEvent.click(screen.getByRole("button", { name: "ocultar" }));
+    expect(screen.getByRole("button", { name: /mostrar conversa/ })).toBeInTheDocument();
+    expect(campo).not.toHaveFocus();
+
+    act(() => pedirFocoDoChat());
+
+    expect(campo).toHaveFocus();
+    expect(screen.getByRole("region", { name: "Conversa com o Claude" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /mostrar conversa/ })).not.toBeInTheDocument();
+  });
+
+  it("o menu ⋯ abre pelo teclado, anda com as setas e o Esc fecha devolvendo o foco ao botão", () => {
+    renderizar();
+    const gatilho = screen.getByRole("button", { name: "Mais ações" });
+    expect(gatilho).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("menu", { name: "Mais ações" })).not.toBeInTheDocument();
+
+    fireEvent.keyDown(gatilho, { key: "ArrowDown" });
+    expect(gatilho).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("menu", { name: "Mais ações" })).toBeInTheDocument();
+
+    // O "melhorar" está desabilitado com o campo vazio: o foco vai ao primeiro item habilitado, se houver; sem ele, fica no botão.
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "Mais ações" })).not.toBeInTheDocument();
+    expect(gatilho).toHaveFocus();
+  });
+
+  it("com texto no campo, o foco entra no primeiro item e as setas circulam entre os itens habilitados", () => {
+    const aoAlternarFixo = vi.fn();
+    render(
+      <ChatRapido
+        chat={OCIOSO}
+        desconectado={false}
+        erroAoCarregar={null}
+        aoMudarPreferencias={vi.fn()}
+        aoAbrirTerminal={vi.fn()}
+        temVagaPara={vi.fn()}
+        aoAtualizarOrquestradores={vi.fn()}
+        orquestradores={[]}
+        aoAlternarFixo={aoAlternarFixo}
+      />,
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Pergunta para o Claude" }), { target: { value: "oi" } });
+    fireEvent.click(screen.getByRole("button", { name: "Mais ações" }));
+    const melhorar = screen.getByRole("menuitem", { name: "Melhorar o pedido" });
+    const fixar = screen.getByRole("menuitem", { name: "Fixar o chat à esquerda" });
+    expect(melhorar).toHaveFocus();
+
+    fireEvent.keyDown(melhorar, { key: "ArrowDown" });
+    expect(fixar).toHaveFocus();
+    fireEvent.keyDown(fixar, { key: "ArrowDown" });
+    expect(melhorar).toHaveFocus();
+    fireEvent.keyDown(melhorar, { key: "ArrowUp" });
+    expect(fixar).toHaveFocus();
+  });
+
+  it("clicar fora fecha o menu ⋯", () => {
+    renderizar();
+    fireEvent.click(screen.getByRole("button", { name: "Mais ações" }));
+    expect(screen.getByRole("menu", { name: "Mais ações" })).toBeInTheDocument();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("menu", { name: "Mais ações" })).not.toBeInTheDocument();
+  });
+
+  it("a alça do topo da conversa muda a altura (subir alonga), grava ao soltar e dois cliques voltam ao padrão", () => {
+    renderizar(COM_MENSAGEM);
+    const conversa = screen.getByRole("region", { name: "Conversa com o Claude" });
+    const alca = screen.getByRole("separator", { name: "Altura da conversa" });
+    // Sem preferência, vale o 36vh do CSS.
+    expect(conversa.style.maxHeight).toBe("");
+
+    const inicio = Number(alca.getAttribute("aria-valuenow"));
+    fireEvent.pointerDown(alca, { button: 0, pointerId: 1, clientX: 0, clientY: 500 });
+    fireEvent.pointerMove(alca, { pointerId: 1, clientX: 0, clientY: 400 });
+    expect(conversa.style.maxHeight).toBe(`${inicio + 100}px`);
+    // Ainda não gravou: só ao soltar.
+    expect(guardado().alturaDaConversaDoChat).toBeUndefined();
+    fireEvent.pointerUp(alca, { pointerId: 1 });
+    expect(guardado().alturaDaConversaDoChat).toBe(inicio + 100);
+    expect(conversa.style.maxHeight).toBe(`${inicio + 100}px`);
+
+    fireEvent.doubleClick(alca);
+    expect(guardado().alturaDaConversaDoChat).toBeNull();
+    expect(conversa.style.maxHeight).toBe("");
+  });
+
+  it("as setas da alça mudam a altura de 24 em 24 px, nunca abaixo de 120 nem acima de 85% da janela", () => {
+    renderizar(COM_MENSAGEM);
+    const alca = screen.getByRole("separator", { name: "Altura da conversa" });
+    const inicio = Number(alca.getAttribute("aria-valuenow"));
+    fireEvent.keyDown(alca, { key: "ArrowUp" });
+    expect(guardado().alturaDaConversaDoChat).toBe(inicio + 24);
+    for (let i = 0; i < 80; i += 1) fireEvent.keyDown(alca, { key: "ArrowDown" });
+    expect(guardado().alturaDaConversaDoChat).toBe(120);
+    for (let i = 0; i < 80; i += 1) fireEvent.keyDown(alca, { key: "ArrowUp" });
+    expect(guardado().alturaDaConversaDoChat).toBeLessThanOrEqual(Math.round(window.innerHeight * 0.85));
+  });
+
+  it("a coluna fixa não tem a alça de altura da conversa", () => {
+    render(
+      <ChatRapido
+        chat={COM_MENSAGEM}
+        desconectado={false}
+        erroAoCarregar={null}
+        aoMudarPreferencias={vi.fn()}
+        aoAbrirTerminal={vi.fn()}
+        temVagaPara={vi.fn()}
+        aoAtualizarOrquestradores={vi.fn()}
+        orquestradores={[]}
+        fixo
+      />,
+    );
+    expect(screen.queryByRole("separator", { name: "Altura da conversa" })).not.toBeInTheDocument();
   });
 });
 

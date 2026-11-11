@@ -1073,6 +1073,22 @@ describe("CanvasDeOrquestradores · Ctrl+N e Organizar na ilha de ferramentas", 
     await waitFor(() => expect(rascunhosNaTela()).toBe(1));
   });
 
+  it("Ctrl+J leva o cursor ao campo do chat rápido (impedindo o padrão); com o foco num campo de texto, não", async () => {
+    layoutCom(["o1"]);
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o1")).toBeInTheDocument());
+    const chat = await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+    const ctrlJ = (alvo: Window | Element) => fireEvent.keyDown(alvo, { key: "j", code: "KeyJ", ctrlKey: true });
+
+    expect(chat).not.toHaveFocus();
+    // Fora de um campo de texto: foca o chat e o padrão do navegador é impedido.
+    expect(ctrlJ(window)).toBe(false);
+    await waitFor(() => expect(chat).toHaveFocus());
+
+    // Dentro de um campo de texto (o próprio chat), o atalho é do campo.
+    expect(ctrlJ(chat)).toBe(true);
+  });
+
   it("o \"Organizar\" é o 4º botão da ilha de ferramentas e põe os terminais lado a lado", async () => {
     layoutCom(["o1", "o2"]);
     render(<CanvasDeOrquestradores />);

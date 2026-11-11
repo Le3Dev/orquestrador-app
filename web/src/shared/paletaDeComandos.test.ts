@@ -65,6 +65,7 @@ describe("montarItensDaPaleta", () => {
       "acao",
       "acao",
       "acao",
+      "acao",
       "orquestrador",
       "orquestrador",
       "nota",
@@ -78,6 +79,7 @@ describe("montarItensDaPaleta", () => {
       "Organizar",
       "Zoom 100%",
       "Enquadrar tudo",
+      "Focar o chat rápido",
     ]);
     const pedidos = itens.filter((candidato) => candidato.tipo === "pedido");
     expect(titulos(pedidos)).toEqual(["Corrija a exportação para Excel", "Rode os testes de integração"]);
@@ -101,6 +103,7 @@ describe("montarItensDaPaleta", () => {
       ["Organizar", null],
       ["Zoom 100%", "Ctrl+0"],
       ["Enquadrar tudo", null],
+      ["Focar o chat rápido", "Ctrl+J"],
     ]);
   });
 
@@ -118,10 +121,24 @@ describe("montarItensDaPaleta", () => {
       "Organizar",
       "Zoom 100%",
       "Enquadrar tudo",
+      "Focar o chat rápido",
       "Pastas e Claude Code",
     ]);
     expect(acoesNoDesktop.at(-1)).toMatchObject({ acao: "ajustes-do-aplicativo", atalho: null });
     expect(titulos(buscarNaPaleta(acoesNoDesktop, "pasta claude"))).toEqual(["Pastas e Claude Code"]);
+  });
+
+  it("\"Entrar no modo fantasma\" só entra com o modo disponível e desligado, depois de \"Focar o chat rápido\"", () => {
+    expect(titulos(montarItensDaPaleta(fonte()))).not.toContain("Entrar no modo fantasma");
+    expect(titulos(montarItensDaPaleta(fonte({ podeEntrarNoModoFantasma: false })))).not.toContain("Entrar no modo fantasma");
+
+    const acoesComModo = montarItensDaPaleta(fonte({ podeEntrarNoModoFantasma: true })).filter(
+      (candidato) => candidato.tipo === "acao",
+    );
+    expect(titulos(acoesComModo).slice(-2)).toEqual(["Focar o chat rápido", "Entrar no modo fantasma"]);
+    expect(acoesComModo.at(-1)).toMatchObject({ acao: "entrar-modo-fantasma", atalho: "Ctrl+\\" });
+    expect(titulos(buscarNaPaleta(acoesComModo, "fantasma"))).toEqual(["Entrar no modo fantasma"]);
+    expect(titulos(buscarNaPaleta(acoesComModo, "focar o chat"))).toEqual(["Focar o chat rápido"]);
   });
 
   it("\"Procurar atualizações\" só entra com a ponte do app, por último entre as ações, com a versão e o resultado", () => {
@@ -272,7 +289,8 @@ describe("buscarNaPaleta", () => {
     const resultado = buscarNaPaleta(itens, "   ");
 
     expect(resultado).toHaveLength(itens.length);
-    expect(resultado.slice(0, 8).map((candidato) => candidato.tipo)).toEqual([
+    expect(resultado.slice(0, 9).map((candidato) => candidato.tipo)).toEqual([
+      "acao",
       "acao",
       "acao",
       "acao",

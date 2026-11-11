@@ -2794,6 +2794,41 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .separador-do-menu { margin: 4px 6px; border: 0; border-top: 1px solid var(--border); }
 
 /* Servidor fora: o chat congela e a borda perde a cor, como o resto do canvas. */
+/* O menu ⋯ da barra: abre para cima, encostado à direita, como o do modelo. */
+.menu-de-mais-acoes { position: relative; flex-shrink: 0; }
+.menu-do-seletor.lista-de-mais-acoes { width: 230px; }
+.botao-de-mais-acoes[aria-expanded="true"] { background: var(--surface-3); color: var(--primary); }
+
+/* A alça do topo da conversa do chat flutuante: arrastar para cima a alonga. */
+.alca-da-altura-da-conversa {
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 14px;
+  z-index: 5;
+  height: 7px;
+  cursor: row-resize;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+}
+.alca-da-altura-da-conversa::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: 36px;
+  height: 3px;
+  margin-left: -18px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+.alca-da-altura-da-conversa:hover::before { background: color-mix(in srgb, var(--active) 70%, transparent); transition-delay: 120ms; }
+.alca-da-altura-da-conversa:focus-visible::before,
+.alca-da-altura-da-conversa.alca-arrastando::before { background: var(--active); transition-delay: 0ms; }
+.conversa-do-chat.painel-flutuante { position: relative; }
+
 .canvas-desconectado .chat-rapido *,
 .canvas-desconectado .chat-rapido *::before,
 .canvas-desconectado .chat-rapido *::after { animation-play-state: paused !important; }
@@ -3092,8 +3127,27 @@ html.modo-invisivel .barra-de-titulo * {
 }
 /* O olho do composer: único botão do modo invisível (liga e desliga). Traço fino; ligado (olho cortado),
  * ganha fundo e contorno de destaque, o mesmo das ferramentas ligadas das ilhas. */
-.linha-do-composer .botao-entrar-modo-invisivel,
 .linha-do-composer .botao-de-escuta-manual { position: relative; width: 32px; height: 32px; }
+/* O botão do modo fantasma tem o rótulo à vista ("Fantasma"): ícone + texto, na altura dos outros botões da barra. */
+.linha-do-composer .botao-entrar-modo-invisivel {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  height: 32px;
+  padding: 0 10px 0 8px;
+  border-radius: 8px;
+  color: var(--secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.linha-do-composer .botao-entrar-modo-invisivel:hover { background: var(--surface-3); color: var(--primary); }
+.linha-do-composer .botao-entrar-modo-invisivel:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.rotulo-do-modo-invisivel { line-height: 1; }
+/* O ponto que pulsa, agora no canto do ícone (e não do botão inteiro). */
+.linha-do-composer .botao-entrar-modo-invisivel .ponto-tela-vista { top: 6px; right: auto; left: 17px; }
 .linha-do-composer .botao-entrar-modo-invisivel[aria-pressed="true"],
 .linha-do-composer .botao-de-escuta-manual[aria-pressed="true"] {
   background: color-mix(in srgb, var(--active) 18%, transparent);

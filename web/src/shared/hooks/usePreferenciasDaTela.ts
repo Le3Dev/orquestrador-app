@@ -49,6 +49,11 @@ export type PreferenciasDaTela = {
    * inteiro, fundo e texto, e só ele. Padrão (e preferências antigas, sem o campo): 1.
    */
   opacidadeDoChat: number;
+  /**
+   * A altura máxima (px) da conversa do chat flutuante, ajustada pela alça do topo dela. Nulo (o padrão, e o
+   * valor das preferências antigas): 36% da altura da janela, como sempre.
+   */
+  alturaDaConversaDoChat: number | null;
 };
 
 export const CHAVE_DAS_PREFERENCIAS_DA_TELA = "orquestrador.preferenciasDaTela";
@@ -66,6 +71,7 @@ const PADRAO: PreferenciasDaTela = {
   controlesDasJanelas: "automatico",
   chatNoModoInvisivel: null,
   opacidadeDoChat: 1,
+  alturaDaConversaDoChat: null,
 };
 
 /** A opacidade do chat: mínima, máxima, passo e padrão. */
@@ -79,6 +85,17 @@ export function limitarOpacidadeDoChat(opacidade: number): number {
   const passos = Math.round(opacidade / OPACIDADE_DO_CHAT.passo);
   const arredondada = Math.round(passos * OPACIDADE_DO_CHAT.passo * 10) / 10;
   return Math.min(OPACIDADE_DO_CHAT.maxima, Math.max(OPACIDADE_DO_CHAT.minima, arredondada));
+}
+
+/** A altura da conversa do chat flutuante: a mínima e a máxima (px). */
+export const ALTURA_DA_CONVERSA_DO_CHAT = { minima: 120, maxima: 1200 } as const;
+
+/** Uma altura inteira entre a mínima e a máxima; número inválido (NaN, infinito) vale o padrão (nulo). */
+export function limitarAlturaDaConversaDoChat(altura: number | null): number | null {
+  if (altura === null || !Number.isFinite(altura)) {
+    return null;
+  }
+  return Math.min(ALTURA_DA_CONVERSA_DO_CHAT.maxima, Math.max(ALTURA_DA_CONVERSA_DO_CHAT.minima, Math.round(altura)));
 }
 
 /** Uma largura inteira entre a mínima e a máxima; número inválido (NaN, infinito) vale o padrão. */
@@ -149,6 +166,10 @@ function interpretar(bruto: string | null): PreferenciasDaTela {
       typeof registro.opacidadeDoChat === "number"
         ? limitarOpacidadeDoChat(registro.opacidadeDoChat)
         : PADRAO.opacidadeDoChat,
+    alturaDaConversaDoChat:
+      typeof registro.alturaDaConversaDoChat === "number"
+        ? limitarAlturaDaConversaDoChat(registro.alturaDaConversaDoChat)
+        : PADRAO.alturaDaConversaDoChat,
   };
 }
 
@@ -200,6 +221,7 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
   const novas: PreferenciasDaTela = { ...atuais, ...parcial };
   novas.larguraDoChatFixo = limitarLarguraDoChatFixo(novas.larguraDoChatFixo);
   novas.opacidadeDoChat = limitarOpacidadeDoChat(novas.opacidadeDoChat);
+  novas.alturaDaConversaDoChat = limitarAlturaDaConversaDoChat(novas.alturaDaConversaDoChat);
   if (
     novas.chatFixoNaEsquerda === atuais.chatFixoNaEsquerda &&
     novas.ladoDoChatFixo === atuais.ladoDoChatFixo &&
@@ -209,7 +231,8 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
     novas.minimapaVisivel === atuais.minimapaVisivel &&
     novas.controlesDasJanelas === atuais.controlesDasJanelas &&
     mesmaGeometria(novas.chatNoModoInvisivel, atuais.chatNoModoInvisivel) &&
-    novas.opacidadeDoChat === atuais.opacidadeDoChat
+    novas.opacidadeDoChat === atuais.opacidadeDoChat &&
+    novas.alturaDaConversaDoChat === atuais.alturaDaConversaDoChat
   ) {
     return;
   }
@@ -227,7 +250,7 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
 /**
  * As preferências da tela (chat fixo, o lado e a largura dele, visualizador de
  * código, manter os bixinhos até limpar, o minimapa visível, o estilo dos
- * controles das janelas, a posição do chat no modo invisível, a opacidade do chat):
+ * controles das janelas, a posição do chat no modo invisível, a opacidade do chat, a altura da conversa do chat):
  * mudar num lugar reflete em todos os componentes que usam o hook e nas
  * outras abas abertas.
  */
