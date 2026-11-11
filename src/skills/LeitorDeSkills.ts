@@ -20,10 +20,10 @@ export interface OpcoesDoLeitorDeSkills {
 /** Só o começo do arquivo é lido: o frontmatter fica no topo. */
 const LIMITE_DE_BYTES_POR_ARQUIVO = 64 * 1024;
 const LIMITE_DA_DESCRICAO = 500;
-const LIMITE_DO_NOME = 100;
+export const LIMITE_DO_NOME = 100;
 /** Teto de skills por pasta, para uma pasta enorme não pesar na consulta. */
-const LIMITE_DE_SKILLS_POR_PASTA = 300;
-const ARQUIVO_DA_SKILL = "SKILL.md";
+export const LIMITE_DE_SKILLS_POR_PASTA = 300;
+export const ARQUIVO_DA_SKILL = "SKILL.md";
 
 /** Plugin com o qual o Claude Code nomeia as skills sincronizadas da conta (`anthropic-skills:docx`). */
 const PLUGIN_DAS_SKILLS_SINCRONIZADAS = "anthropic-skills";
@@ -31,20 +31,20 @@ const PASTA_DAS_SKILLS_SINCRONIZADAS = "synced";
 
 const ORDEM_DAS_ORIGENS: Readonly<Record<OrigemDaSkill, number>> = { usuario: 0, projeto: 1, plugin: 2 };
 
-type Objeto = Record<string, unknown>;
+export type Objeto = Record<string, unknown>;
 
-function ehObjeto(valor: unknown): valor is Objeto {
+export function ehObjeto(valor: unknown): valor is Objeto {
   return typeof valor === "object" && valor !== null && !Array.isArray(valor);
 }
 
 /** `alvo` está dentro de `raiz` (e não é a própria raiz). */
-function estaDentro(raiz: string, alvo: string): boolean {
+export function estaDentro(raiz: string, alvo: string): boolean {
   const relativo = path.relative(raiz, alvo);
   return relativo !== "" && !relativo.startsWith("..") && !path.isAbsolute(relativo);
 }
 
 /** A pasta existe e não é um link simbólico (as raízes fixas nunca são links). */
-async function ehPastaReal(caminho: string): Promise<boolean> {
+export async function ehPastaReal(caminho: string): Promise<boolean> {
   try {
     return (await lstat(caminho)).isDirectory();
   } catch {
@@ -52,7 +52,7 @@ async function ehPastaReal(caminho: string): Promise<boolean> {
   }
 }
 
-async function subpastas(raiz: string): Promise<string[]> {
+export async function subpastas(raiz: string): Promise<string[]> {
   try {
     const entradas = await readdir(raiz, { withFileTypes: true });
     return entradas
@@ -64,7 +64,7 @@ async function subpastas(raiz: string): Promise<string[]> {
   }
 }
 
-async function lerComeco(caminho: string): Promise<string> {
+export async function lerComeco(caminho: string): Promise<string> {
   const arquivo = await open(caminho, "r");
   try {
     const buffer = Buffer.alloc(LIMITE_DE_BYTES_POR_ARQUIVO);
@@ -133,7 +133,7 @@ export function lerFrontmatter(conteudo: string): Record<string, string> {
   return campos;
 }
 
-function cortar(descricao: string): string {
+export function cortar(descricao: string): string {
   return descricao.length > LIMITE_DA_DESCRICAO ? `${descricao.slice(0, LIMITE_DA_DESCRICAO - 1).trimEnd()}…` : descricao;
 }
 

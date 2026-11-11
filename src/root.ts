@@ -14,6 +14,7 @@ import { CanalDoChat, criarChatRoutes } from "./controllers/chatRoutes";
 import { criarEscutaRoutes } from "./controllers/escutaRoutes";
 import { criarNotasRoutes } from "./controllers/notasRoutes";
 import { criarOrquestradoresRoutes } from "./controllers/orquestradoresRoutes";
+import { criarPluginsRoutes } from "./controllers/pluginsRoutes";
 import { criarPromptsRoutes } from "./controllers/promptsRoutes";
 import { criarServidoresLocaisRoutes } from "./controllers/servidoresLocaisRoutes";
 import { criarSkillsRoutes } from "./controllers/skillsRoutes";
@@ -64,6 +65,8 @@ import { ServicoDeAlteracoes } from "./orquestracao/ServicoDeAlteracoes";
 import { ServicoDeArquivos } from "./orquestracao/ServicoDeArquivos";
 import { ServicoDeOrquestracao } from "./orquestracao/ServicoDeOrquestracao";
 import { agendadorDoRelogio } from "./orquestracao/VigiaDoTurno";
+import { CatalogoDePlugins, criarExecutorDoClaude } from "./plugins/CatalogoDePlugins";
+import { PendentesEmArquivo } from "./plugins/PendentesDePlugins";
 import { ServicoDeMelhoriaDePrompt } from "./prompts/ServicoDeMelhoriaDePrompt";
 import { LeitorDeSkills } from "./skills/LeitorDeSkills";
 import { ServicoDeTerminais } from "./terminais/ServicoDeTerminais";
@@ -394,6 +397,15 @@ async function iniciar(): Promise<void> {
       "/api",
       criarSkillsRoutes({ leitor: new LeitorDeSkills({ pastaDoClaude: pastaDoClaude() }), repositorio }),
     );
+    // Plugins do marketplace do Claude Code: catálogo, instalar, ligar, desligar e remover (escopo do usuário).
+    const catalogoDePlugins = new CatalogoDePlugins({
+      executar: criarExecutorDoClaude(configuracao.caminhoDoClaudeCode),
+      pastaDoClaude: pastaDoClaude(),
+      pendentes: new PendentesEmArquivo(path.join(configuracao.pastaDeDados, "plugins-pendentes-de-confirmacao.json")),
+    });
+    // No início, desliga o que o app instalou e ficou ligado sem confirmação (o app pode ter fechado no meio).
+    void catalogoDePlugins.reconciliar();
+    rotas.use("/api", criarPluginsRoutes({ catalogo: catalogoDePlugins }));
     rotas.use("/api", artefatos.rotas);
     rotas.use(
       "/api",
