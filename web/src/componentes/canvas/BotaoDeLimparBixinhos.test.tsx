@@ -61,41 +61,43 @@ function renderizar(estado: EstadoDaConversa, limpos?: BixinhosLimpos) {
       fecharPrevia: vi.fn(),
     },
   };
-  render(
+  const { container } = render(
     <ContextoDoCanvas.Provider value={canvas}>
       <BotaoDeLimparBixinhos orquestradorId="o1" />
     </ContextoDoCanvas.Provider>,
   );
-  return { limparBixinhos, botao: screen.getByRole("button", { name: "Limpar bixinhos" }) };
+  return { limparBixinhos, container, botao: screen.queryByRole("button", { name: "Limpar bixinhos" }) };
 }
 
 describe("BotaoDeLimparBixinhos", () => {
   it("mostra quantos bixinhos parados vai limpar e limpa os do próprio orquestrador", () => {
     const { limparBixinhos, botao } = renderizar(umProntoUmTrabalhando);
 
+    expect(botao).toBeInTheDocument();
     expect(botao).toBeEnabled();
     expect(botao).toHaveTextContent("limpar (1)");
-    fireEvent.click(botao);
+    fireEvent.click(botao as HTMLElement);
 
     expect(limparBixinhos).toHaveBeenCalledWith("o1");
   });
 
-  it("fica desabilitado quando todos os bixinhos estão executando", () => {
-    const { botao } = renderizar(soTrabalhando);
+  it("não renderiza nada quando todos os bixinhos estão executando", () => {
+    const { botao, container } = renderizar(soTrabalhando);
 
-    expect(botao).toBeDisabled();
-    expect(botao).toHaveTextContent("limpar");
+    expect(botao).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
   });
 
-  it("fica desabilitado quando os parados já foram limpos", () => {
+  it("não renderiza nada quando os parados já foram limpos", () => {
     const { botao } = renderizar(umProntoUmTrabalhando, { turnoId: "t1", subagentes: ["s1"] });
 
-    expect(botao).toBeDisabled();
+    expect(botao).not.toBeInTheDocument();
   });
 
-  it("fica desabilitado sem conversa", () => {
-    const { botao } = renderizar(ESTADO_INICIAL);
+  it("não renderiza nada sem conversa", () => {
+    const { botao, container } = renderizar(ESTADO_INICIAL);
 
-    expect(botao).toBeDisabled();
+    expect(botao).not.toBeInTheDocument();
+    expect(container).toBeEmptyDOMElement();
   });
 });

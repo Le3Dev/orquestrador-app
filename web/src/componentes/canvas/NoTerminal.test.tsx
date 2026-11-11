@@ -1368,7 +1368,8 @@ describe("NoTerminal · barra estreita", () => {
 
     expect(within(barra).getByTitle("C:\\projetos\\painel")).toHaveTextContent("painel");
     expect(within(barra).getByTitle(/^Branch: feature\/barra-estreita/)).toHaveTextContent("feature/barra-estreita");
-    // A barra não tem chip de instruções, etiqueta de situação, RAM nem o limpar (só a borda que brilha indica o pedido).
+    // A barra não tem chip de instruções, etiqueta de situação nem RAM (só a borda que brilha indica o pedido).
+    // O limpar só aparece com bixinho parado; esta conversa não tem nenhum.
     expect(within(barra).queryByText(/instruções/)).not.toBeInTheDocument();
     expect(within(barra).queryByRole("button", { name: "Limpar bixinhos" })).not.toBeInTheDocument();
     expect(within(barra).queryByTitle(/^Situação/)).not.toBeInTheDocument();
@@ -1378,7 +1379,34 @@ describe("NoTerminal · barra estreita", () => {
     }
   });
 
-  it("mesmo com \"manter bixinhos até limpar\" ligado e um bixinho parado, a barra não tem o limpar", () => {
+  it("com um bixinho executando e nenhum parado, a barra não tem o limpar", () => {
+    const executando = aplicar(
+      ESTADO_INICIAL,
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "analise", configuracao },
+      { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "s1", descricao: "Testes", tarefa: "rode" },
+    );
+    const { container } = render(<Terminal canvas={canvasDoTerminal(executando, resumoCheio())} no={propsDoNo()} />);
+    expect(screen.queryByRole("button", { name: "Limpar bixinhos" })).not.toBeInTheDocument();
+    expect(container.querySelector(".barra-do-terminal")).not.toHaveTextContent(/limpar/);
+  });
+
+  it("com um bixinho parado, a barra mostra \"limpar (1)\" e o clique limpa os bixinhos do orquestrador", () => {
+    const parado = aplicar(
+      ESTADO_INICIAL,
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "analise", configuracao },
+      { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "s1", descricao: "Testes", tarefa: "rode" },
+      { tipo: "subagente_concluido", turnoId: "t1", subagenteId: "s1", situacao: "concluido", resumo: "ok", tokens: 1, duracaoMs: 1 },
+    );
+    const canvas = canvasDoTerminal(parado, resumoCheio());
+    render(<Terminal canvas={canvas} no={propsDoNo()} />);
+
+    const botao = screen.getByRole("button", { name: "Limpar bixinhos" });
+    expect(botao).toHaveTextContent("limpar (1)");
+    fireEvent.click(botao);
+    expect(canvas.acoes.limparBixinhos).toHaveBeenCalledWith("o1");
+  });
+
+  it("mesmo com \"manter bixinhos até limpar\" ligado, o bixinho parado faz o limpar aparecer", () => {
     localStorage.setItem("orquestrador.preferenciasDaTela", JSON.stringify({ manterBixinhosAteLimpar: true }));
     try {
       const parado = aplicar(
@@ -1387,9 +1415,12 @@ describe("NoTerminal · barra estreita", () => {
         { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "s1", descricao: "Testes", tarefa: "rode" },
         { tipo: "subagente_concluido", turnoId: "t1", subagenteId: "s1", situacao: "concluido", resumo: "ok", tokens: 1, duracaoMs: 1 },
       );
-      const { container } = render(<Terminal canvas={canvasDoTerminal(parado, resumoCheio())} no={propsDoNo()} />);
-      expect(screen.queryByRole("button", { name: "Limpar bixinhos" })).not.toBeInTheDocument();
-      expect(container.querySelector(".barra-do-terminal")).not.toHaveTextContent(/limpar/);
+      const canvas = canvasDoTerminal(parado, resumoCheio());
+      render(<Terminal canvas={canvas} no={propsDoNo()} />);
+      const botao = screen.getByRole("button", { name: "Limpar bixinhos" });
+      expect(botao).toHaveTextContent("limpar (1)");
+      fireEvent.click(botao);
+      expect(canvas.acoes.limparBixinhos).toHaveBeenCalledWith("o1");
     } finally {
       localStorage.removeItem("orquestrador.preferenciasDaTela");
     }

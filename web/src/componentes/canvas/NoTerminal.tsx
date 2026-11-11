@@ -79,6 +79,7 @@ import {
 } from "../Icones";
 import { BotaoDeAlteracoes } from "./BotaoDeAlteracoes";
 import { BotaoDeArquivos } from "./BotaoDeArquivos";
+import { BotaoDeLimparBixinhos } from "./BotaoDeLimparBixinhos";
 import type { AcoesDoPlano } from "./CartaoDoPlano";
 import { ControlesDoNo } from "./ControlesDoNo";
 import { FaixaDeServidores } from "./FaixaDeServidores";
@@ -1577,6 +1578,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
         {foraDaBarra.length > 0 && <MaisDaBarra itens={foraDaBarra} />}
         {/* Os controles nunca encolhem nem saem da barra: quem cede espaço são os chips. */}
         <div ref={controlesDaBarra} className="controles-da-barra">
+          <BotaoDeLimparBixinhos orquestradorId={orquestradorId} />
           <BotaoDeAlteracoes orquestradorId={orquestradorId} />
           <BotaoDeArquivos orquestradorId={orquestradorId} nomeDoOrquestrador={nome} />
           {acoesDosShells !== null && (
