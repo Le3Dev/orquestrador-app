@@ -60,6 +60,8 @@ export async function memoriaLivre(): Promise<number> {
   }
 }
 
+const INTERVALO_PADRAO_MS = 15_000;
+
 /**
  * Mede a memória do computador e dos agentes a cada poucos segundos, em
  * segundo plano: a tela consulta a saúde do servidor com frequência, e medir
@@ -72,7 +74,7 @@ export class MonitorDeMemoria {
 
   constructor(
     private readonly registro: RegistroDeProcessos,
-    private readonly intervaloMs = 5_000,
+    private readonly intervaloMs = INTERVALO_PADRAO_MS,
     /** Os descendentes e os processos deixados de cada dono (ver `RastreadorDeProcessosDeixados`). */
     private readonly outrosProcessos: { pidsPorOrquestrador(): Map<string, Set<number>> } | null = null,
     private readonly memoriaPorPid: (pids: readonly number[]) => Promise<Map<number, number>> = memoriaDosProcessos,

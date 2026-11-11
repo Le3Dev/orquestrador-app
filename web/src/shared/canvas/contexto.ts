@@ -25,6 +25,8 @@ export interface AcoesDoCanvas {
   minimizarOuRestaurarTerminal: (orquestradorId: string) => void;
   /** Tira do canvas os bixinhos do terminal que não estão executando. Só visual: o histórico continua. */
   limparBixinhos: (orquestradorId: string) => void;
+  /** Fecha um bixinho parado (falhou, concluiu ou foi cancelado), pelo id do Subagente. Só visual: o histórico continua. */
+  fecharBixinho: (orquestradorId: string, subagenteId: string) => void;
   /** O rascunho de configuração virou um Orquestrador de verdade: troca pelo terminal, no mesmo lugar. */
   orquestradorCriado: (rascunhoId: string, orquestrador: ResumoDoOrquestrador) => void;
   descartarRascunho: (rascunhoId: string) => void;

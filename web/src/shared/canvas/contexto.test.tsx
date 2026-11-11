@@ -28,6 +28,7 @@ function valorDoCanvas(alteracoes: Partial<ValorDoCanvas> = {}): ValorDoCanvas {
       fecharTerminal: vi.fn(),
       minimizarOuRestaurarTerminal: vi.fn(),
       limparBixinhos: vi.fn(),
+      fecharBixinho: vi.fn(),
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),
       mudarEscalaDaLetra: vi.fn(),

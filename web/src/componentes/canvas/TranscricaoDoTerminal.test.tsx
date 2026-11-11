@@ -363,6 +363,28 @@ describe("TranscricaoDoTerminal", () => {
     });
   });
 
+  it("desenha só os últimos 20 pedidos e revela mais 20 a cada clique em \"Mostrar anteriores\"", () => {
+    const eventos: EventoDeOrquestracao[] = Array.from({ length: 45 }, (_, i): EventoDeOrquestracao => ({
+      tipo: "turno_iniciado",
+      turnoId: `t${i + 1}`,
+      texto: `pedido numero ${i + 1}`,
+      configuracao,
+    }));
+    const conversa = aplicar(ESTADO_INICIAL, ...eventos);
+    render(<Transcricao conversa={conversa} />);
+    expect(screen.queryByText("pedido numero 25")).not.toBeInTheDocument();
+    expect(screen.getByText("pedido numero 26")).toBeInTheDocument();
+    expect(screen.getByText("pedido numero 45")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar 20 anteriores" }));
+    expect(screen.getByText("pedido numero 6")).toBeInTheDocument();
+    expect(screen.queryByText("pedido numero 5")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar 5 anteriores" }));
+    expect(screen.getByText("pedido numero 1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /anteriores/ })).not.toBeInTheDocument();
+  });
+
   it("marca a configuração com a etiqueta \"econômico\" só quando ela corresponde ao modo econômico", () => {
     const { rerender } = render(<Transcricao conversa={ESTADO_INICIAL} />);
     expect(screen.queryByText("econômico")).not.toBeInTheDocument();

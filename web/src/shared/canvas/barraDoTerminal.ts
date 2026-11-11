@@ -1,6 +1,7 @@
 /**
- * O que cabe na barra de título do terminal. Os controles (alterações,
- * arquivos, terminal, ⚙ e ✕) nunca encolhem nem saem: isso é do CSS. Os chips
+ * O que cabe na barra de título do terminal. Os controles (limpar, só quando
+ * há bixinho parado; alterações, arquivos, terminal, ⚙ e ✕) nunca encolhem nem
+ * saem: isso é do CSS. Os chips
  * encolhem com reticências e, se nem cortados couberem, vão para o menu "⋯",
  * um por vez, na ordem de `ORDEM_DE_SAIDA`. O nome do orquestrador fica sempre.
  *

@@ -1465,6 +1465,11 @@ Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - imagens só entram com `--input-format stream-json`: a mensagem vira uma linha JSON com blocos `text` e `image`. Documentos não vão nessa linha: o Claude os abre pelo caminho em disco, com a ferramenta de leitura, e por isso a pasta dos anexos vai em `--add-dir` (ver ADR-41);
 - a atualização automática do Claude Code troca o `claude.exe`. Durante alguns segundos o arquivo some (`ENOENT`), então o app tenta iniciar de novo até 6 vezes, com 2 s entre as tentativas.
 
+#### Nota: limites de desenho para poupar memória do renderer
+
+- A transcrição do terminal desenha só os últimos 20 pedidos, e o chat rápido só as últimas 100 mensagens; o botão "Mostrar N anteriores" revela mais 20 e 100 por clique. O estado (`turnos`, `chat.mensagens`) continua completo, então a paleta de comandos e a pesquisa enxergam tudo.
+- O `log` de cada pedido guarda até 300 linhas enquanto ele está em andamento e é encolhido para as últimas 50 quando o pedido termina (`aplicarEvento.ts`). Texto, resposta, uso e anexos não mudam.
+
 ## Manuais e APIs
 
 ### Endpoints

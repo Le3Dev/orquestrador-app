@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { HandleProps, NodeProps } from "@xyflow/react";
 import type { ReactNode } from "react";
 
@@ -15,6 +15,7 @@ const simulados = vi.hoisted(() => ({
   barraDoNo: vi.fn(),
   // Chamado uma vez por desenho das células do bixinho.
   pixelsDoCorpo: vi.fn(),
+  fecharBixinho: vi.fn(),
 }));
 
 vi.mock("../../shared/hooks/useRelogio", () => ({ useRelogio: simulados.useRelogio }));
@@ -98,6 +99,7 @@ function valorDoCanvas(conversa: EstadoDaConversa, bixinhosSaindo?: ReadonlySet<
       fecharTerminal: vi.fn(),
       minimizarOuRestaurarTerminal: vi.fn(),
       limparBixinhos: vi.fn(),
+      fecharBixinho: simulados.fecharBixinho,
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),
       mudarEscalaDaLetra: vi.fn(),
@@ -352,6 +354,77 @@ describe("NoBixinho", () => {
     // Só o próprio: outro bixinho saindo não muda este.
     rerender(tela(concluiu, "s1", false, 0, new Set([idDoBixinho("o1", "s2")])));
     expect(no()).not.toHaveClass("no-bixinho-saindo");
+  });
+
+  describe("fechar (×)", () => {
+    function terminou(estado: EstadoDaConversa, subagenteId: string, situacao: "concluido" | "falhou" | "cancelado") {
+      return aplicar(estado, {
+        tipo: "subagente_concluido",
+        turnoId: "t1",
+        subagenteId,
+        situacao,
+        resumo: "erro ao rodar",
+        tokens: 10,
+        duracaoMs: 1000,
+      });
+    }
+
+    it("falhou: mostra o × com o nome do subagente; executando: sem ×", () => {
+      const conversa = terminou(doisTrabalhando(), "s1", "falhou");
+      const { rerender } = render(tela(conversa, "s1"));
+      expect(screen.getByRole("button", { name: `Fechar subagente ${aparenciaDoBixinho("s1").nome}` })).toHaveAttribute(
+        "title",
+        expect.stringContaining("Fechar subagente"),
+      );
+
+      rerender(tela(conversa, "s2"));
+      expect(screen.queryByRole("button", { name: /^Fechar subagente/ })).not.toBeInTheDocument();
+    });
+
+    it("com papel, o nome no rótulo é o papel", () => {
+      const conversa = terminou(
+        aplicar(doisTrabalhando(), {
+          tipo: "subagente_iniciado",
+          turnoId: "t1",
+          subagenteId: "s3",
+          descricao: "Revisar",
+          tarefa: "Revise o diff",
+          papel: "revisor",
+        }),
+        "s3",
+        "falhou",
+      );
+      render(tela(conversa, "s3"));
+
+      expect(screen.getByRole("button", { name: "Fechar subagente revisor" })).toBeInTheDocument();
+    });
+
+    it("concluído e cancelado também ganham o ×", () => {
+      const concluido = terminou(doisTrabalhando(), "s1", "concluido");
+      const { rerender } = render(tela(concluido, "s1"));
+      expect(screen.getByRole("button", { name: /^Fechar subagente/ })).toBeInTheDocument();
+
+      rerender(tela(terminou(doisTrabalhando(), "s1", "cancelado"), "s1"));
+      expect(screen.getByRole("button", { name: /^Fechar subagente/ })).toBeInTheDocument();
+    });
+
+    it("o clique chama a ação com o orquestrador e o subagente certos e não chega ao nó", () => {
+      const aoClicarNoNo = vi.fn();
+      const conversa = terminou(doisTrabalhando(), "s2", "falhou");
+      render(<div onClick={aoClicarNoNo}>{tela(conversa, "s2")}</div>);
+
+      fireEvent.click(screen.getByRole("button", { name: /^Fechar subagente/ }));
+
+      expect(simulados.fecharBixinho).toHaveBeenCalledTimes(1);
+      expect(simulados.fecharBixinho).toHaveBeenCalledWith("o1", "s2");
+      expect(aoClicarNoNo).not.toHaveBeenCalled();
+    });
+
+    it("o × é nodrag, para não arrastar o nó", () => {
+      render(tela(terminou(doisTrabalhando(), "s1", "falhou"), "s1"));
+
+      expect(screen.getByRole("button", { name: /^Fechar subagente/ })).toHaveClass("nodrag");
+    });
   });
 
   it("sem o Subagente na conversa, não desenha nada", () => {
