@@ -74,6 +74,8 @@ const ALTURA_MAXIMA_DO_CAMPO = 140;
 const SEM_ORQUESTRADORES: readonly ResumoDoOrquestrador[] = [];
 /** Distância do fim (px) em que a conversa ainda acompanha o texto que chega. */
 const MARGEM_DE_ACOMPANHAMENTO = 80;
+/** Quantas mensagens o chat desenha de uma vez; "Mostrar anteriores" revela mais esse tanto. */
+const MENSAGENS_POR_PAGINA = 100;
 
 /** Uma frase fechada da escuta: vira uma mensagem sua, com a marca "ouvido", na conversa. */
 type FraseOuvida = EscutaNaTela["legenda"]["frases"][number];
@@ -664,6 +666,7 @@ export function ChatRapido({
   const [imagens, setImagens] = useState<ImagemAnexada[]>([]);
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
+  const [quantasMensagens, setQuantasMensagens] = useState(MENSAGENS_POR_PAGINA);
   const [pedidoDeCancelar, setPedidoDeCancelar] = useState(false);
   const [arrastando, setArrastando] = useState(false);
   // Assinatura da última mensagem quando a conversa foi ocultada; nula = visível.
@@ -928,6 +931,8 @@ export function ChatRapido({
     }
     return { frasesAntes: antes, frasesNoFim: noFim };
   }, [chat.mensagens, frasesOuvidas]);
+  // Só as últimas mensagens são desenhadas (poupa memória); as demais continuam no estado.
+  const primeiraVisivel = Math.max(0, chat.mensagens.length - quantasMensagens);
   const balaoOuvido = (frase: FraseOuvida) => (
     <BalaoOuvido
       key={frase.id}
@@ -1243,7 +1248,18 @@ export function ChatRapido({
                 Pergunte qualquer coisa ao Claude: a conversa aparece aqui, ao lado do canvas.
               </p>
             )}
-            {chat.mensagens.map((mensagem, indice) => (
+            {primeiraVisivel > 0 && (
+              <button
+                type="button"
+                className="btn btn-sm btn-outline"
+                onClick={() => setQuantasMensagens((atual) => atual + MENSAGENS_POR_PAGINA)}
+              >
+                {`Mostrar ${Math.min(primeiraVisivel, MENSAGENS_POR_PAGINA)} anteriores`}
+              </button>
+            )}
+            {chat.mensagens.slice(primeiraVisivel).map((mensagem, posicao) => {
+              const indice = primeiraVisivel + posicao;
+              return (
               <Fragment key={mensagem.id}>
                 {(frasesAntes.get(mensagem.id) ?? []).map(balaoOuvido)}
                 <MensagemNaConversa
@@ -1276,7 +1292,8 @@ export function ChatRapido({
                   />
                 )}
               </Fragment>
-            ))}
+              );
+            })}
             {baloesNoFim}
           </div>
         </section>

@@ -1075,6 +1075,24 @@ describe("ChatRapido · escuta no composer e selo", () => {
 describe("ChatRapido", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("desenha só as últimas 100 mensagens e revela mais 100 por clique em \"Mostrar anteriores\"", () => {
+    const mensagens = Array.from({ length: 230 }, (_, i) =>
+      mensagem(`m${i + 1}`, i % 2 === 0 ? "usuario" : "claude", { texto: `texto da mensagem ${i + 1}.` }),
+    );
+    renderizar({ ...OCIOSO, mensagens });
+    expect(screen.queryByText("texto da mensagem 130.")).not.toBeInTheDocument();
+    expect(screen.getByText("texto da mensagem 131.")).toBeInTheDocument();
+    expect(screen.getByText("texto da mensagem 230.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar 100 anteriores" }));
+    expect(screen.getByText("texto da mensagem 31.")).toBeInTheDocument();
+    expect(screen.queryByText("texto da mensagem 30.")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar 30 anteriores" }));
+    expect(screen.getByText("texto da mensagem 1.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /anteriores/ })).not.toBeInTheDocument();
+  });
+
   it("Enter envia a pergunta e limpa o campo; Shift+Enter não envia", async () => {
     const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
     const { campo } = renderizar();

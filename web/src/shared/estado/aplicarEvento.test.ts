@@ -72,6 +72,33 @@ describe("aplicarEvento", () => {
     expect(estado.cota?.[0]?.nome).toBe("5 horas");
   });
 
+  it("limita o log a 300 linhas em andamento e o encolhe para 50 ao concluir o turno", () => {
+    const textos: EventoDeOrquestracao[] = Array.from({ length: 320 }, (_, i) => ({
+      tipo: "texto_do_orquestrador",
+      turnoId: "t1",
+      texto: `linha ${i}`,
+    }));
+    const andamento = reproduzir(
+      registrar([{ tipo: "turno_iniciado", turnoId: "t1", texto: "x", configuracao }, ...textos]),
+    );
+    expect(andamento.turnos[0]?.log).toHaveLength(300);
+
+    const concluido = aplicarEvento(andamento, {
+      tipo: "turno_concluido",
+      turnoId: "t1",
+      resposta: "pronto",
+      uso: { duracaoMs: 1, tokensDeEntrada: 1, tokensDeSaida: 1, subagentesLancados: 0 },
+      sequencia: andamento.ultimaSequencia + 1,
+      em: "2026-10-28T12:10:00Z",
+    });
+    const turno = concluido.turnos[0];
+    expect(turno?.situacao).not.toBe("em_andamento");
+    expect(turno?.log).toHaveLength(50);
+    expect(turno?.log.at(-1)?.texto).toContain("tokens");
+    expect(turno?.resposta).toBe("pronto");
+    expect(turno?.textosDoOrquestrador).toHaveLength(320);
+  });
+
   it("ignora eventos repetidos, como na reconexão do SSE", () => {
     const umaVez = reproduzir(historico);
     const duasVezes = reproduzir(historico, umaVez);

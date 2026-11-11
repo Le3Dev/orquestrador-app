@@ -56,6 +56,8 @@ export interface LinhaDoLog {
 
 /** O terminal mostra o fim do log; guardar mais que isso só pesaria a tela. */
 const LIMITE_DO_LOG = 300;
+/** Turno concluído já foi lido: guarda só o fim do log para poupar memória. */
+const LIMITE_DO_LOG_DE_TURNO_CONCLUIDO = 50;
 
 export interface TurnoNaTela {
   id: string;
@@ -680,11 +682,13 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
       }
       const alterado = { ...(alteracao === null ? turno : alteracao(turno)), ultimaAtividadeEm: evento.em };
       const linha = linhaDoLog(evento, turno);
-      if (linha === null) {
+      const log =
+        linha === null ? alterado.log : [...alterado.log, { ...linha, sequencia: evento.sequencia, em: evento.em }];
+      const limite = alterado.situacao === "em_andamento" ? LIMITE_DO_LOG : LIMITE_DO_LOG_DE_TURNO_CONCLUIDO;
+      if (log === alterado.log && log.length <= limite) {
         return alterado;
       }
-      const log = [...alterado.log, { ...linha, sequencia: evento.sequencia, em: evento.em }];
-      return { ...alterado, log: log.length > LIMITE_DO_LOG ? log.slice(-LIMITE_DO_LOG) : log };
+      return { ...alterado, log: log.length > limite ? log.slice(-limite) : log };
     }),
   };
 }
