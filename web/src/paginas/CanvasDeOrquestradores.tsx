@@ -63,7 +63,7 @@ import { PainelDeSkills } from "../componentes/canvas/PainelDeSkills";
 import { PainelDeSubagentes } from "../componentes/canvas/PainelDeSubagentes";
 import { api, ErroDaApi, mensagemDeErro } from "../shared/api/cliente";
 import type { ResumoDoArtefato } from "../shared/api/artefatos";
-import type { DadosDoSubagentePronto, ResumoDoOrquestrador } from "../shared/api/tipos";
+import type { DadosDaSkill, DadosDoSubagentePronto, ResumoDoOrquestrador } from "../shared/api/tipos";
 import {
   type AcoesDosArtefatos,
   artefatoAberto,
@@ -1685,6 +1685,35 @@ function Canvas() {
   }, [servidor.conectado, lerSubagentesProntos]);
   // A biblioteca também muda pelo cartão do chat, fora dos painéis.
   useEffect(() => aoMudarSubagentesProntos(lerSubagentesProntos), [lerSubagentesProntos]);
+
+  // As skills do submenu "Skills ›" (as do usuário e as de plugins), lidas no mesmo momento
+  // que os subagentes: ao conectar o servidor, e não a cada abertura do menu.
+  const [skills, setSkills] = useState<DadosDaSkill[] | null>(null);
+  const [erroDasSkills, setErroDasSkills] = useState<string | null>(null);
+  useEffect(() => {
+    if (!servidor.conectado) {
+      setSkills(null);
+      setErroDasSkills(null);
+      return;
+    }
+    let ativo = true;
+    api
+      .lerSkills()
+      .then((listagem) => {
+        if (ativo) {
+          setSkills(listagem.skills);
+          setErroDasSkills(null);
+        }
+      })
+      .catch((falha: unknown) => {
+        if (ativo) {
+          setErroDasSkills(mensagemDeErro(falha));
+        }
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [servidor.conectado]);
   // Salvar qualquer um dos painéis: os indicadores dos terminais e a lista podem ter mudado.
   const aoSalvarPainel = useCallback(() => {
     void recarregar();
@@ -1736,6 +1765,8 @@ function Canvas() {
           aoEscolherOrquestrador={focarOrquestrador}
           subagentes={subagentesProntos}
           aoAbrirSubagentes={abrirPainelDeSubagentes}
+          skills={skills}
+          erroDasSkills={erroDasSkills}
           aoAbrirSkills={abrirPainelDeSkills}
         />
         {painelAberto === "subagentes" && <PainelDeSubagentes aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />}
@@ -1764,6 +1795,8 @@ function Canvas() {
       focarOrquestrador,
       subagentesProntos,
       abrirPainelDeSubagentes,
+      skills,
+      erroDasSkills,
       abrirPainelDeSkills,
       orquestradoresParaSkills,
       painelAberto,
