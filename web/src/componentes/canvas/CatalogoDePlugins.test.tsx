@@ -372,9 +372,9 @@ describe("CatalogoDePlugins", () => {
   });
 
   describe("você já tem", () => {
-    const etiqueta = (nome: string) => within(linha(nome)).queryByText("Você já tem");
+    const etiqueta = (nome: string) => within(linha(nome)).queryByText("Já tem algo parecido");
 
-    it("a etiqueta aparece na linha com jaTem preenchido, com o que já existe para o leitor de tela", async () => {
+    it("a etiqueta aparece na linha com jaTem preenchido, sem balão, e a linha diz o quê (visível, não só para o leitor de tela)", async () => {
       catalogo.mockResolvedValue(
         pagina([
           plugin("context7", { jaTem: { skills: ["context7-mcp"], servidoresMcp: ["context7"] } }),
@@ -386,8 +386,79 @@ describe("CatalogoDePlugins", () => {
 
       const marca = etiqueta("context7");
       expect(marca).toBeInTheDocument();
-      expect(marca).toHaveTextContent("Você já tem: a skill context7-mcp e o servidor MCP context7");
+      expect(marca).not.toHaveAttribute("title");
+      expect(marca?.querySelector(".sr-only")).toBeNull();
+      const explicacao = within(linha("context7")).getByText(/^Você já tem a skill/);
+      expect(explicacao).toHaveTextContent("Você já tem a skill context7-mcp e o servidor MCP context7.");
+      expect(explicacao.closest(".mk-meta")).toHaveClass("mk-ja-tem-meta");
       expect(etiqueta("frontend-design")).not.toBeInTheDocument();
+      expect(within(linha("frontend-design")).queryByText(/Você já tem/)).not.toBeInTheDocument();
+    });
+
+    describe("os três estados da linha", () => {
+      const jaTem = { skills: ["context7-mcp"], servidoresMcp: ["context7"] };
+
+      it("já tem algo parecido: botão Instalar mesmo assim em contorno neutro, ligado à linha do quê, sem laranja no hover", async () => {
+        catalogo.mockResolvedValue(pagina([plugin("context7", { jaTem }), plugin("frontend-design")]));
+        montar();
+        await esperarLista();
+
+        const botao = within(linha("context7")).getByRole("button", { name: "Instalar context7 mesmo assim" });
+        expect(botao).toHaveTextContent("Instalar mesmo assim");
+        expect(botao).toHaveClass("btn-outline", "mk-instalar-parecido");
+        expect(botao).not.toHaveClass("btn-cta");
+        const explicacao = within(linha("context7")).getByText(/^Você já tem a skill/).closest(".mk-meta") as HTMLElement;
+        expect(botao).toHaveAttribute("aria-describedby", explicacao.id);
+        // O CSS só pinta o botão de laranja no hover de linha sem data-ja-tem: a marca precisa estar na linha.
+        expect(linha("context7")).toHaveAttribute("data-ja-tem");
+        expect(linha("frontend-design")).not.toHaveAttribute("data-ja-tem");
+        expect(within(linha("frontend-design")).getByRole("button", { name: "Instalar frontend-design" })).not.toHaveClass(
+          "mk-instalar-parecido",
+        );
+        // O balão de antes saiu.
+        expect(document.querySelector('[title*="duplicar"]')).toBeNull();
+      });
+
+      it("Instalar mesmo assim ainda instala, e a linha vira Instalado com o aviso de que agora tem os dois", async () => {
+        const instalar = vi.spyOn(api, "instalarPlugin").mockResolvedValue({ plugin: instalado(OFICIAIS[1]!), precisaConfirmar: false });
+        catalogo.mockResolvedValue(pagina([plugin("context7", { jaTem }), plugin("frontend-design")]));
+        const chamadas = montar();
+        await esperarLista();
+
+        fireEvent.click(screen.getByRole("button", { name: "Instalar context7 mesmo assim" }));
+
+        expect(await within(linha("context7")).findByText("Instalado")).toBeInTheDocument();
+        expect(instalar).toHaveBeenCalledWith("context7@claude-plugins-official");
+        expect(chamadas.aoMudar).toHaveBeenCalledTimes(1);
+        expect(within(linha("context7")).getByText("Pronto. Ele já aparece em Instaladas. Você agora tem os dois.")).toBeInTheDocument();
+        expect(within(linha("context7")).queryByRole("button", { name: /mesmo assim/ })).not.toBeInTheDocument();
+      });
+
+      it("instalado vence o já tem: só o ✓ Instalado, sem botão de instalar nem etiqueta, mesmo com jaTem preenchido", async () => {
+        catalogo.mockResolvedValue(pagina([plugin("context7", { instalado: true, jaTem }), plugin("frontend-design")]));
+        montar();
+        await esperarLista();
+
+        const dele = within(linha("context7"));
+        expect(dele.getByText("Instalado")).toBeInTheDocument();
+        expect(dele.getByText("Está em Instaladas.")).toBeInTheDocument();
+        expect(dele.queryByRole("button", { name: /^Instalar / })).not.toBeInTheDocument();
+        expect(dele.queryByText("Já tem algo parecido")).not.toBeInTheDocument();
+        expect(dele.queryByText(/Você já tem/)).not.toBeInTheDocument();
+        expect(linha("context7")).not.toHaveAttribute("data-ja-tem");
+      });
+
+      it("nada a ver: segue como sempre, com Instalar, a contagem de instalações e o hover laranja", async () => {
+        catalogo.mockResolvedValue(pagina([plugin("playwright", { instalacoes: 12045 }), plugin("frontend-design")]));
+        montar();
+        await screen.findByText("playwright");
+
+        const dele = within(linha("playwright"));
+        expect(dele.getByRole("button", { name: "Instalar playwright" })).toHaveTextContent(/^Instalar$/);
+        expect(dele.getByRole("button", { name: "Instalar playwright" })).not.toHaveAttribute("aria-describedby");
+        expect(dele.getByText("12.045 instalações")).toBeInTheDocument();
+        expect(linha("playwright")).not.toHaveAttribute("data-ja-tem");
+      });
     });
 
     it.each([
@@ -410,7 +481,7 @@ describe("CatalogoDePlugins", () => {
       montar();
       await esperarLista();
 
-      fireEvent.click(screen.getByRole("button", { name: "Instalar context7" }));
+      fireEvent.click(screen.getByRole("button", { name: "Instalar context7 mesmo assim" }));
 
       expect(await within(linha("context7")).findByText("Instalado")).toBeInTheDocument();
       expect(etiqueta("context7")).not.toBeInTheDocument();
@@ -434,6 +505,9 @@ describe("CatalogoDePlugins", () => {
       );
       const botao = screen.getByRole("button", { name: "Instalar mesmo assim" });
       expect(botao).toHaveAttribute("aria-describedby", aviso.id);
+      // Contorno neutro: o laranja cheio é do Instalar de quem não tem nada parecido.
+      expect(botao).toHaveClass("btn-outline");
+      expect(botao).not.toHaveClass("btn-cta");
       expect(screen.queryByRole("button", { name: "Instalar" })).not.toBeInTheDocument();
     });
 
@@ -464,6 +538,7 @@ describe("CatalogoDePlugins", () => {
 
       expect(screen.queryByRole("note")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Instalar" })).not.toHaveAttribute("aria-describedby");
+      expect(screen.getByRole("button", { name: "Instalar" })).toHaveClass("btn-cta");
       expect(screen.queryByRole("button", { name: "Instalar mesmo assim" })).not.toBeInTheDocument();
     });
 

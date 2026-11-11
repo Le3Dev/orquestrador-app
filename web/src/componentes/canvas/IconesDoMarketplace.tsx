@@ -114,6 +114,16 @@ export function IconeTentarDeNovo({ tamanho = 14, className = "" }: PropsDoIcone
   );
 }
 
+/** Duas folhas sobrepostas: copiar. */
+export function IconeCopiar({ tamanho = 13, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <rect x="8.5" y="8.5" width="11" height="11" rx="2" {...TRACO} />
+      <path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2" {...TRACO} />
+    </Quadro>
+  );
+}
+
 /** Duas setas verticais: a ordem da lista. */
 export function IconeOrdem({ tamanho = 13, className = "" }: PropsDoIcone) {
   return (

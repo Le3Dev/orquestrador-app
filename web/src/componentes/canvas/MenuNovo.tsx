@@ -19,6 +19,7 @@ import {
   IconeSetaDireita,
   IconeTrabalhando,
 } from "./IconesDasIlhas";
+import { nomeAmigavel } from "./dadosDoPlugin";
 import { IconeExplorar } from "./IconesDoMarketplace";
 import "../../theme/ilhas.css";
 
@@ -504,7 +505,7 @@ export function MenuNovo({
                   <IconeSkills tamanho={16} />
                 </span>
                 <span className="texto-do-item" aria-hidden="true">
-                  <strong>{skill.nome}</strong>
+                  <strong>{nomeAmigavel(skill)}</strong>
                   <span>
                     <span className="descricao-do-subagente">
                       {skill.descricao === "" ? "Sem descrição." : skill.descricao}

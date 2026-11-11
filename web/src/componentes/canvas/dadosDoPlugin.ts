@@ -85,6 +85,85 @@ export function motivosDeConfirmacao(inventario: InventarioDoPlugin): MotivoDeCo
   return motivos;
 }
 
+/** Minúsculas e sem acento, para a busca achar "revisao" em "Revisão". */
+export function normalizarParaBusca(texto: string): string {
+  return texto.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+}
+
+/**
+ * O nome de uma skill sem o prefixo do plugin: "anthropic-skills:docx" vira "docx". Só tira o prefixo quando ele
+ * é mesmo o plugin da skill (um nome declarado pode ter ":" no meio); skill do usuário ou do projeto fica como está.
+ */
+export function nomeAmigavel(skill: { nome: string; plugin: string | null }): string {
+  if (skill.plugin !== null && skill.nome.startsWith(`${skill.plugin}:`) && skill.nome.length > skill.plugin.length + 1) {
+    return skill.nome.slice(skill.plugin.length + 1);
+  }
+  return skill.nome;
+}
+
+/** Aberturas de descrição escritas para o modelo, que não dizem nada na lista. */
+const ABERTURAS_DA_DESCRICAO = [/^Use this skill whenever the user wants to /i, /^Use this skill when the user wants /i];
+
+/** O mais que a linha curta de uma skill guarda; o resto cairia nas reticências da própria linha. */
+const LIMITE_DA_LINHA_CURTA = 170;
+
+/**
+ * A descrição de uma skill reduzida a uma linha: sem a abertura de boilerplate em inglês, sem o "nome (" do
+ * começo e só até a primeira frase. É uma heurística: se nada casa, devolve a descrição original (achatada),
+ * e o texto inteiro continua a um clique. Não traduz.
+ */
+export function linhaCurta(nome: string, descricao: string): string {
+  const original = descricao.replace(/\s+/g, " ").trim();
+  let texto = original;
+  const abertura = ABERTURAS_DA_DESCRICAO.find((regra) => regra.test(texto));
+  if (abertura !== undefined) {
+    texto = texto.replace(abertura, "");
+  } else if (texto.toLowerCase().startsWith(`${nome.toLowerCase()} (`)) {
+    texto = texto.slice(nome.length + 2);
+  }
+  const fimDaFrase = texto.search(/[.!?](\s|$)/);
+  if (fimDaFrase > 20 && fimDaFrase < 200) {
+    texto = texto.slice(0, fimDaFrase + 1);
+  }
+  if (texto === "") {
+    return original.slice(0, LIMITE_DA_LINHA_CURTA);
+  }
+  return `${texto.charAt(0).toUpperCase()}${texto.slice(1)}`.slice(0, LIMITE_DA_LINHA_CURTA);
+}
+
+/** Um texto partido em volta da palavra que a busca achou. */
+export interface TrechoAchado {
+  antes: string;
+  achado: string;
+  depois: string;
+}
+
+/**
+ * Onde o termo aparece no texto (sem ligar para acento nem caixa). Com `margem`, o que vem antes do achado é
+ * cortado para essa quantidade de caracteres, com reticências, para o achado caber na linha. Nulo se não achar,
+ * ou se a normalização mudar o tamanho do texto (aí os índices não valem e o texto segue sem destaque).
+ */
+export function acharNoTexto(texto: string, termo: string, margem = Number.POSITIVE_INFINITY): TrechoAchado | null {
+  const alvo = normalizarParaBusca(termo.trim());
+  if (alvo === "") {
+    return null;
+  }
+  const base = normalizarParaBusca(texto);
+  if (base.length !== texto.length) {
+    return null;
+  }
+  const inicio = base.indexOf(alvo);
+  if (inicio < 0) {
+    return null;
+  }
+  const corte = Math.max(0, inicio - margem);
+  return {
+    antes: `${corte > 0 ? "…" : ""}${texto.slice(corte, inicio)}`,
+    achado: texto.slice(inicio, inicio + alvo.length),
+    depois: texto.slice(inicio + alvo.length),
+  };
+}
+
 /** A linha de resumo do que há dentro de um plugin instalado. Os hooks aparecem no selo, não aqui. */
 export function resumoDoInventario(inventario: InventarioDoPlugin): string {
   const partes = [

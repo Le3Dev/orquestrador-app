@@ -132,16 +132,34 @@ describe("PainelDeSkills: aba Instaladas", () => {
     expect(within(plugins).getByText("Busca documentação atual de bibliotecas")).toBeInTheDocument();
   });
 
-  it("as skills sincronizadas da conta (de plugin que não está instalado) não somem: grupo próprio, sem ações", async () => {
+  it("as skills sincronizadas da conta (de plugin que não está instalado) não somem: grupo aberto, uma linha por skill, sem ações de plugin", async () => {
     montar();
     await screen.findByText("publicar-site");
 
     const conta = screen.getByRole("region", { name: /Da sua conta Claude/ });
-    expect(within(conta).getByText("anthropic-skills:pdf")).toBeInTheDocument();
-    expect(within(conta).getByText("Lê, cria e edita PDFs")).toBeInTheDocument();
+    // O nome vem sem o prefixo e o pacote aparece uma vez, como subtítulo, em vez de uma etiqueta por linha.
+    expect(within(conta).getByText("pdf")).toBeInTheDocument();
+    expect(within(conta).queryByText("anthropic-skills:pdf")).not.toBeInTheDocument();
     expect(within(conta).getByText("anthropic-skills")).toBeInTheDocument();
-    expect(within(conta).queryByRole("button")).not.toBeInTheDocument();
+    expect(within(conta).getByText("Lê, cria e edita PDFs")).toBeInTheDocument();
+    // O único botão é o da própria linha da skill, que abre o resto; nada de interruptor nem lixeira.
+    const botoes = within(conta).getAllByRole("button");
+    expect(botoes).toHaveLength(1);
+    expect(botoes[0]).toHaveAttribute("aria-expanded", "false");
     expect(within(conta).queryByRole("switch")).not.toBeInTheDocument();
+  });
+
+  it("abrir uma skill da conta mostra a descrição inteira, o nome completo com Copiar e a origem", async () => {
+    montar();
+    await screen.findByText("publicar-site");
+    const conta = screen.getByRole("region", { name: /Da sua conta Claude/ });
+
+    fireEvent.click(within(conta).getByRole("button", { name: /^pdf/ }));
+
+    const aberta = within(conta).getByRole("region", { name: /^pdf/ });
+    expect(within(aberta).getByText("anthropic-skills:pdf")).toBeInTheDocument();
+    expect(within(aberta).getByRole("button", { name: "Copiar" })).toBeInTheDocument();
+    expect(within(aberta).getByText("Da sua conta Claude, só leitura")).toBeInTheDocument();
   });
 
   it("não tem seletor de orquestrador", async () => {
@@ -202,26 +220,55 @@ describe("PainelDeSkills: aba Instaladas", () => {
     expect(screen.queryByRole("button", { name: "context7" })).not.toBeInTheDocument();
 
     fireEvent.change(campo, { target: { value: "zzz" } });
-    expect(screen.getByText("Nenhuma skill combina com a busca")).toBeInTheDocument();
+    expect(screen.getByText("Nenhuma skill combina com “zzz”")).toBeInTheDocument();
+    expect(screen.getByText(/As descrições estão em inglês/)).toBeInTheDocument();
   });
 
-  it("avisa no rodapé, uma linha só, quais orquestradores abertos têm as skills desligadas, sem esconder a lista", async () => {
+  it("com a busca, o grupo mostra quantas sobraram, a linha mostra o trecho onde a palavra casou e há um aviso falado", async () => {
+    montar();
+    await screen.findByText("publicar-site");
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Buscar skill por nome ou descrição" }), {
+      target: { value: "edita" },
+    });
+
+    const conta = screen.getByRole("region", { name: /Da sua conta Claude/ });
+    expect(within(conta).getByText("1 de 1")).toBeInTheDocument();
+    // A palavra só casa na descrição: ela ganha destaque dentro da linha.
+    const achado = conta.querySelector("mark.mk-achado");
+    expect(achado).toHaveTextContent("edita");
+    expect(achado?.parentElement).toHaveTextContent("Lê, cria e edita PDFs");
+    expect(screen.getByRole("status")).toHaveTextContent("1 resultado encontrado");
+  });
+
+  it("avisa no rodapé, em uma linha, que há orquestradores abertos com as skills desligadas, e o Entenda abre o resto", async () => {
     leitura.mockImplementation((orquestradorId) => Promise.resolve(listagemDe(orquestradorId, { o1: false, o2: false })));
     montar();
 
-    const aviso = await screen.findByRole("note");
-    expect(aviso).toHaveTextContent(
-      "Skills desligadas em Site da loja, API de pagamentos: o nível de permissão é só leitura. Elas valem nos níveis com edição, fora do planejamento.",
-    );
-    expect(aviso.closest(".mk-skills-rodape")).not.toBeNull();
+    const rodape = (await screen.findByText("Desligadas em 2 orquestradores (só leitura).")).closest(".mk-skills-rodape");
+    expect(rodape).not.toBeNull();
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
     expect(screen.getByText("publicar-site")).toBeInTheDocument();
+
+    const entenda = within(rodape as HTMLElement).getByRole("button", { name: "Entenda" });
+    expect(entenda).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(entenda);
+
+    expect(entenda).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("note")).toHaveTextContent(
+      "Nestes orquestradores (Site da loja, API de pagamentos) o agente não usa skills. Elas valem nos níveis com edição, fora do planejamento.",
+    );
+    fireEvent.click(entenda);
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
   });
 
-  it("o aviso cita só os orquestradores com skills desligadas", async () => {
+  it("o aviso cita pelo nome o único orquestrador com skills desligadas", async () => {
     leitura.mockImplementation((orquestradorId) => Promise.resolve(listagemDe(orquestradorId, { o2: false })));
     montar();
 
-    expect(await screen.findByRole("note")).toHaveTextContent(/^Skills desligadas em API de pagamentos: /);
+    expect(await screen.findByText("Desligadas em API de pagamentos, que está em só leitura.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Entenda" }));
+    expect(screen.getByRole("note")).toHaveTextContent(/^Nesse nível o agente não usa skills/);
   });
 
   it("mostra o erro da leitura das globais", async () => {

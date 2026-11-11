@@ -1,5 +1,15 @@
 import type { InventarioDoPlugin } from "../../shared/api/tipos";
-import { contar, iniciaisDe, linkDaFonte, motivosDeConfirmacao, precisaDeConfirmacao, resumoDoInventario } from "./dadosDoPlugin";
+import {
+  acharNoTexto,
+  contar,
+  iniciaisDe,
+  linhaCurta,
+  linkDaFonte,
+  motivosDeConfirmacao,
+  nomeAmigavel,
+  precisaDeConfirmacao,
+  resumoDoInventario,
+} from "./dadosDoPlugin";
 
 function inventario(extras: Partial<InventarioDoPlugin> = {}): InventarioDoPlugin {
   return { skills: [], subagentes: 0, servidoresMcp: 0, hooks: 0, verificado: true, temBin: false, ...extras };
@@ -82,5 +92,66 @@ describe("precisaDeConfirmacao e motivosDeConfirmacao", () => {
     expect(motivosDeConfirmacao(inventario({ temBin: true }))[0]?.titulo).toBe(
       "Traz programas próprios que o terminal dos agentes pode chamar (pasta bin)",
     );
+  });
+});
+
+describe("nomeAmigavel", () => {
+  it("tira o prefixo do plugin quando ele é mesmo o plugin da skill", () => {
+    expect(nomeAmigavel({ nome: "anthropic-skills:docx", plugin: "anthropic-skills" })).toBe("docx");
+    expect(nomeAmigavel({ nome: "cowork-plugin-management:create-cowork-plugin", plugin: "cowork-plugin-management" })).toBe(
+      "create-cowork-plugin",
+    );
+  });
+
+  it("deixa como está a skill sem plugin, ou com um ':' que não é o prefixo do plugin", () => {
+    expect(nomeAmigavel({ nome: "context7-mcp", plugin: null })).toBe("context7-mcp");
+    expect(nomeAmigavel({ nome: "revisar:pr", plugin: null })).toBe("revisar:pr");
+    expect(nomeAmigavel({ nome: "outro:docx", plugin: "anthropic-skills" })).toBe("outro:docx");
+    expect(nomeAmigavel({ nome: "anthropic-skills:", plugin: "anthropic-skills" })).toBe("anthropic-skills:");
+  });
+});
+
+describe("linhaCurta", () => {
+  it("tira a abertura de boilerplate e fica na primeira frase, com a inicial maiúscula", () => {
+    expect(
+      linhaCurta(
+        "docx",
+        "Use this skill whenever the user wants to create, read, edit, or manipulate Word documents (.docx). Also use when extracting content.",
+      ),
+    ).toBe("Create, read, edit, or manipulate Word documents (.docx).");
+  });
+
+  it("tira o 'nome (' do começo", () => {
+    expect(linhaCurta("docs", "docs (editable docs people share and comment on): making one")).toBe(
+      "Editable docs people share and comment on): making one",
+    );
+  });
+
+  it("não corta num ponto sem espaço depois (.docx, Next.js) e devolve o texto quando nada casa", () => {
+    expect(linhaCurta("x", "Edita arquivos .docx e projetos Next.js sem pontuação final")).toBe(
+      "Edita arquivos .docx e projetos Next.js sem pontuação final",
+    );
+    expect(linhaCurta("x", "  Lê, cria\n e edita PDFs  ")).toBe("Lê, cria e edita PDFs");
+  });
+
+  it("limita o tamanho da linha", () => {
+    expect(linhaCurta("x", "a".repeat(400)).length).toBeLessThanOrEqual(170);
+  });
+});
+
+describe("acharNoTexto", () => {
+  it("acha o termo sem ligar para acento nem caixa, e devolve o texto partido em volta dele", () => {
+    expect(acharNoTexto("Revisão do código", "REVISAO")).toEqual({ antes: "", achado: "Revisão", depois: " do código" });
+  });
+
+  it("corta o que vem antes do achado na margem, com reticências", () => {
+    const trecho = acharNoTexto("uma descrição longa que só no final fala de planilhas", "planilhas", 10);
+    expect(trecho).toEqual({ antes: "…l fala de ", achado: "planilhas", depois: "" });
+  });
+
+  it("devolve nulo sem termo ou quando não acha", () => {
+    expect(acharNoTexto("abc", "")).toBeNull();
+    expect(acharNoTexto("abc", "  ")).toBeNull();
+    expect(acharNoTexto("abc", "z")).toBeNull();
   });
 });

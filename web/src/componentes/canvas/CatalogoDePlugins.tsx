@@ -416,16 +416,23 @@ function ExplicacaoDoRodape() {
   );
 }
 
-/** O que a linha mostra à direita: Instalar, o giro, o visto ou "Tentar de novo". */
+/**
+ * O que a linha mostra à direita: Instalar, o giro, o visto ou "Tentar de novo". Quando o usuário já tem algo
+ * parecido (`idDaExplicacao` é o da linha que diz o quê), o botão vira "Instalar mesmo assim", em contorno
+ * neutro: a ação continua ao alcance, sem o peso de quem não tem nada parecido.
+ */
 function AcaoDeInstalar({
   plugin,
   situacao,
   aoInstalar,
+  idDaExplicacao,
 }: {
   plugin: PluginDoCatalogo;
   situacao: Situacao | null;
   aoInstalar: () => void;
+  idDaExplicacao?: string;
 }) {
+  const parecido = idDaExplicacao !== undefined;
   if (situacao?.tipo === "instalando") {
     return (
       <span className="mk-instalando" role="status">
@@ -460,14 +467,15 @@ function AcaoDeInstalar({
   return (
     <button
       type="button"
-      className="btn btn-sm btn-outline mk-instalar"
-      aria-label={`Instalar ${plugin.nome}`}
+      className={`btn btn-sm btn-outline mk-instalar${parecido ? " mk-instalar-parecido" : ""}`}
+      aria-label={parecido ? `Instalar ${plugin.nome} mesmo assim` : `Instalar ${plugin.nome}`}
+      aria-describedby={idDaExplicacao}
       onClick={(evento) => {
         evento.stopPropagation();
         aoInstalar();
       }}
     >
-      Instalar
+      {parecido ? "Instalar mesmo assim" : "Instalar"}
     </button>
   );
 }
@@ -522,16 +530,15 @@ function oQueJaTem(plugin: PluginDoCatalogo): ReactNode {
   );
 }
 
-/** A etiqueta "Você já tem" ao lado do nome: o detalhe fica para quem usa leitor de tela e para o balão. */
-function EtiquetaJaTem({ plugin }: { plugin: PluginDoCatalogo }) {
-  const que = oQueJaTem(plugin);
-  if (que === null) {
-    return null;
-  }
+/**
+ * A etiqueta "Já tem algo parecido" ao lado do nome. Sem balão: o que o usuário já tem está escrito na linha
+ * (a meta), e é essa meta que o botão de instalar aponta com `aria-describedby`.
+ */
+function EtiquetaJaTem() {
   return (
-    <span className="mk-chip mk-ja-tem" title="Instalar este plugin pode duplicar algo que você já tem">
-      Você já tem
-      <span className="sr-only">: {que}</span>
+    <span className="mk-chip mk-ja-tem">
+      <IconeInfo tamanho={10} />
+      Já tem algo parecido
     </span>
   );
 }
@@ -554,9 +561,19 @@ function LinhaDoCatalogo({
 }) {
   const estado = situacao?.tipo ?? "padrao";
   const jaInstalado = situacao?.tipo === "instalado" || (situacao === null && plugin.instalado);
+  const idDaExplicacao = useId();
+  // Os três estados, por prioridade: instalado, depois "já tem algo parecido", depois nada a ver.
+  const jaTem = jaInstalado ? null : oQueJaTem(plugin);
+  const parecido = jaTem !== null;
   return (
     // O clique na linha inteira é um atalho de mouse: o teclado e o leitor de tela usam o botão do nome.
-    <div className="mk-linha" data-nome={plugin.nome} data-estado={estado} onClick={aoAbrir}>
+    <div
+      className="mk-linha"
+      data-nome={plugin.nome}
+      data-estado={estado}
+      data-ja-tem={parecido ? "" : undefined}
+      onClick={aoAbrir}
+    >
       <AvatarDePlugin nome={plugin.nome} />
       <div className="min-w-0">
         <div className="mk-titulo">
@@ -564,7 +581,7 @@ function LinhaDoCatalogo({
             {plugin.nome}
           </button>
           {plugin.oficial && <SeloOficial />}
-          {!jaInstalado && <EtiquetaJaTem plugin={plugin} />}
+          {parecido && <EtiquetaJaTem />}
         </div>
         <p className="mk-desc">{plugin.descricao}</p>
         {situacao?.tipo === "instalando" ? (
@@ -572,12 +589,24 @@ function LinhaDoCatalogo({
         ) : situacao?.tipo === "instalado" ? (
           <div className="mk-meta">
             <IconeConfirmar tamanho={12} />
-            Pronto. Ele já aparece em Instaladas.
+            {oQueJaTem(plugin) === null
+              ? "Pronto. Ele já aparece em Instaladas."
+              : "Pronto. Ele já aparece em Instaladas. Você agora tem os dois."}
           </div>
         ) : situacao?.tipo === "erro" ? (
           <div className="mk-meta erro" role="alert">
             <IconeSemInternet tamanho={13} />
             {situacao.mensagem}
+          </div>
+        ) : jaInstalado ? (
+          <div className="mk-meta">
+            <IconeConfirmar tamanho={12} />
+            Está em Instaladas.
+          </div>
+        ) : jaTem !== null ? (
+          <div id={idDaExplicacao} className="mk-meta mk-ja-tem-meta">
+            <IconeInfo tamanho={12} />
+            <span>Você já tem {jaTem}.</span>
           </div>
         ) : (
           (plugin.instalacoes !== null || (!plugin.oficial && plugin.fonte !== null)) && (
@@ -599,7 +628,12 @@ function LinhaDoCatalogo({
         )}
       </div>
       <div className="acao">
-        <AcaoDeInstalar plugin={plugin} situacao={situacao} aoInstalar={aoInstalar} />
+        <AcaoDeInstalar
+          plugin={plugin}
+          situacao={situacao}
+          aoInstalar={aoInstalar}
+          idDaExplicacao={parecido && situacao === null ? idDaExplicacao : undefined}
+        />
       </div>
       {situacao?.tipo === "instalando" && <div className="mk-progresso" />}
     </div>
@@ -643,6 +677,14 @@ function DetalheDoPlugin({
             <span className="mono">{plugin.marketplace}</span>
           </div>
           <p className="d">{plugin.descricao}</p>
+          {jaTem !== null && (
+            <p id={idDoAviso} className="mk-ja-tem-nota" role="note">
+              <IconeInfo tamanho={15} />
+              <span>
+                Você já tem {jaTem}. Este plugin parece trazer o mesmo serviço, e instalar pode duplicar.
+              </span>
+            </p>
+          )}
           <div className="acoes">
             {situacao?.tipo === "instalando" ? (
               <span className="mk-instalando" role="status">
@@ -655,9 +697,10 @@ function DetalheDoPlugin({
                 Instalado
               </span>
             ) : (
+              // Com algo parecido já instalado, o botão perde o laranja: a ação segue ao alcance, sem ser a principal.
               <button
                 type="button"
-                className="btn btn-cta"
+                className={jaTem !== null ? "btn btn-outline" : "btn btn-cta"}
                 aria-describedby={jaTem !== null ? idDoAviso : undefined}
                 onClick={aoInstalar}
               >
@@ -672,14 +715,6 @@ function DetalheDoPlugin({
               </a>
             )}
           </div>
-          {jaTem !== null && (
-            <p id={idDoAviso} className="mk-ja-tem-nota" role="note">
-              <IconeInfo tamanho={15} />
-              <span>
-                Você já tem {jaTem}. Este plugin parece trazer o mesmo serviço, e instalar pode duplicar.
-              </span>
-            </p>
-          )}
           {situacao?.tipo === "erro" && (
             <div className="mk-meta erro" role="alert">
               <IconeSemInternet tamanho={13} />

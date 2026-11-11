@@ -173,8 +173,12 @@
   transition: background-color .12s;
 }
 .mk-linha:hover { background: var(--surface-2); }
-.mk-linha:hover .mk-instalar { background: var(--active); border-color: var(--active); color: var(--claude-escuro); }
+/* O laranja no hover é só de quem não tem nada parecido: com "já tem", a ação desaconselhada não chama. */
+.mk-linha:not([data-ja-tem]):hover .mk-instalar { background: var(--active); border-color: var(--active); color: var(--claude-escuro); }
 .mk-linha .acao { align-self: center; min-width: 86px; display: flex; justify-content: flex-end; }
+/* "Instalar mesmo assim": contorno neutro, sem laranja nem no hover. */
+.btn-outline.mk-instalar-parecido { background: transparent; color: var(--secondary); white-space: nowrap; }
+.mk-linha[data-ja-tem] .mk-instalar-parecido:hover { background: var(--surface-3); border-color: var(--secondary); color: var(--primary); }
 .mk-titulo { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .mk-nome {
   font: 600 13.5px/1.3 var(--fonte-titulo);
@@ -200,6 +204,10 @@
 .mk-meta svg { flex: none; }
 .mk-meta.erro { color: var(--caption); }
 .mk-meta.erro svg { color: var(--error); }
+/* "Você já tem a skill x": o que o usuário já tem, escrito na linha (até duas linhas), com o ícone no topo. */
+.mk-meta.mk-ja-tem-meta { align-items: flex-start; line-height: 1.45; color: var(--caption); }
+.mk-meta.mk-ja-tem-meta svg { margin-top: 2px; color: var(--warning); }
+.mk-ja-tem-meta .mono { font-size: 11px; color: var(--primary); }
 .mk-buscando { margin: 0; padding: 0 10px 4px; }
 .mk-avatar {
   display: inline-grid;
@@ -440,17 +448,64 @@
 .mk-remover span.mk-erro-inline { color: var(--caption); }
 .mk-remover-botoes { display: flex; gap: 8px; }
 /* As skills de um plugin aberto, sob a linha dele, alinhadas ao nome. */
-.mk-plugin-skills { margin: 0 0 6px 64px; padding: 0 10px 0 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
-.mk-skills-lista { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
-.mk-skill { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px 9px; border-radius: 10px; }
-.mk-skill:hover { background: var(--surface-2); }
-.mk-skill .mono { font-size: 12px; font-weight: 500; color: var(--primary); }
-.mk-skill .d { font-size: 11.5px; line-height: 1.45; color: var(--secondary); }
-.mk-skills-rodape { flex: none; padding: 10px 20px 14px; font-size: 11.5px; line-height: 1.5; color: var(--secondary); }
+.mk-plugin-skills { --col-nome: 140px; margin: 0 0 6px 64px; padding: 0 10px 0 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.mk-skills-lista { margin: 0; padding: 2px 0 0; list-style: none; display: flex; flex-direction: column; }
+.mk-skill-vazio { padding: 8px 10px 9px; font-size: 11.5px; line-height: 1.45; color: var(--secondary); }
+/* O nome do plugin é um botão que abre as skills: a seta diz isso e gira quando está aberto. */
+.mk-plugin .mk-nome-botao { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
+.mk-chev { flex: none; color: var(--secondary); transition: transform .12s; }
+.mk-plugin .mk-nome-botao[aria-expanded="true"] .mk-chev, .mk-skill-botao[aria-expanded="true"] .mk-chev { transform: rotate(90deg); }
+
+/* Uma skill numa linha: nome amigável, uma linha da descrição e a seta. Aberta, mostra o resto logo abaixo. */
+.mk-skill-linha { border-radius: 10px; }
+.mk-skill-linha[data-aberta="true"] { background: var(--surface-2); }
+.mk-skill-botao {
+  display: grid;
+  grid-template-columns: var(--col-nome, 188px) minmax(0, 1fr) 14px;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color .12s;
+}
+.mk-skill-botao:hover { background: var(--surface-2); }
+.mk-skill-linha[data-aberta="true"] .mk-skill-botao:hover { background: var(--surface-3); }
+/* O foco entra no botão (anel interno), para a rolagem da lista não cortar o contorno. */
+.mk-skill-botao:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--active); }
+.mk-skill-nome { min-width: 0; font: 600 13px/1.3 var(--fonte-titulo); color: var(--primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-skill-resumo { min-width: 0; font-size: 12.5px; line-height: 1.4; color: var(--secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-skill-corpo { padding: 2px 12px 12px 10px; }
+.mk-skill-texto { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--caption); }
+.mk-skill-ficha { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 6px 12px; align-items: center; margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--border); font-size: 11.5px; }
+.mk-skill-ficha dt { color: var(--secondary); }
+.mk-skill-ficha dd { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; color: var(--caption); }
+.mk-skill-ficha .mono { min-width: 0; overflow-wrap: anywhere; font-size: 12px; color: var(--primary); }
+.btn.mk-copiar { height: 24px; padding: 0 8px; gap: 5px; font-size: 11px; }
+/* A palavra que a busca achou: destaque neutro, sem laranja. */
+mark.mk-achado { padding: 0 2px; border-radius: 3px; background: var(--surface-3); color: var(--primary); font-weight: 600; }
+.mk-skill-linha[data-aberta="true"] mark.mk-achado { box-shadow: 0 0 0 1px var(--border-forte); }
+/* Subtítulo discreto do pacote de skills da conta (o prefixo que saiu da linha de cada skill). */
+.mk-pacote { display: flex; align-items: baseline; gap: 8px; padding: 10px 10px 2px; font: 500 10.5px var(--fonte-mono); letter-spacing: .04em; color: var(--secondary); }
+.mk-contador { font: 500 11px var(--fonte-mono); color: var(--secondary); }
+.mk-skills-rodape { flex: none; padding: 9px 20px 12px; border-top: 1px solid var(--border); }
+.mk-skills-rodape .lin { display: flex; align-items: center; gap: 8px; font-size: 11.5px; line-height: 1.5; color: var(--secondary); }
+.mk-skills-rodape .lin svg { flex: none; }
+.mk-entenda { padding: 0; border: 0; border-radius: 3px; background: none; font: inherit; color: var(--caption); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.mk-entenda:hover { color: var(--primary); }
+.mk-entenda:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
+.mk-entenda-txt { margin: 6px 0 0 21px; font-size: 11.5px; line-height: 1.5; color: var(--caption); }
 
 /* ---------- Movimento reduzido: sem giro, brilho nem barra deslizante ---------- */
 @media (prefers-reduced-motion: reduce) {
   .mk-giro, .mk-sk, .mk-dialogo, .mk-progresso::after { animation: none; }
   .mk-progresso::after { width: 60%; left: 0; }
-  .mk-linha, .mk-plugin, .mk-aba, .mk-seg button { transition: none; }
+  .mk-linha, .mk-plugin, .mk-aba, .mk-seg button, .mk-skill-botao, .mk-chev { transition: none; }
 }

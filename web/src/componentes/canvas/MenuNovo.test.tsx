@@ -422,6 +422,21 @@ describe("MenuNovo", () => {
       expect(nomes.slice(-2)).toEqual(["Explorar marketplace", "Ver todas as skills"]);
     });
 
+    it("mostra o nome sem o prefixo do plugin, e o nome acessível segue com o nome completo e a descrição", () => {
+      montar({
+        skills: [
+          { nome: "anthropic-skills:docx", descricao: "Cria documentos Word.", origem: "plugin", plugin: "anthropic-skills" },
+        ],
+      });
+      fireEvent.click(botao());
+      fireEvent.click(item("Skills"));
+
+      const docx = screen.getByRole("menuitem", { name: "anthropic-skills:docx: Cria documentos Word." });
+      expect(within(docx).getByText("docx")).toBeInTheDocument();
+      expect(within(docx).queryByText("anthropic-skills:docx")).not.toBeInTheDocument();
+      expect(docx).toHaveTextContent("· anthropic-skills");
+    });
+
     it("Explorar marketplace abre o painel na aba Explorar, fecha o menu e não chama o de Instaladas", () => {
       const chamadas = montar();
       fireEvent.click(botao());

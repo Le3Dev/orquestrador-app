@@ -74,6 +74,23 @@ describe("LinhaDoPluginInstalado", () => {
     expect(screen.queryByRole("list", { name: "Skills de logo-design" })).not.toBeInTheDocument();
   });
 
+  it("dentro do plugin aberto, cada skill é a mesma linha compacta, que abre o nome completo e a origem", () => {
+    montar();
+    fireEvent.click(screen.getByRole("button", { name: "logo-design" }));
+    const lista = screen.getByRole("list", { name: "Skills de logo-design" });
+
+    const linha = within(lista).getByRole("button", { name: /^criar-logo/ });
+    expect(linha).toHaveAttribute("aria-expanded", "false");
+    expect(within(lista).queryByText("logo-design:criar-logo")).not.toBeInTheDocument();
+    fireEvent.click(linha);
+
+    expect(linha).toHaveAttribute("aria-expanded", "true");
+    expect(within(lista).getByText("logo-design:criar-logo")).toBeInTheDocument();
+    expect(within(lista).getByText("Do plugin logo-design")).toBeInTheDocument();
+    // O botão do plugin segue com o nome acessível exato e aberto.
+    expect(screen.getByRole("button", { name: "logo-design" })).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("um plugin sem skills diz isso ao abrir", () => {
     montar(plugin({ inventario: { skills: [], subagentes: 1, servidoresMcp: 0, hooks: 0, verificado: true, temBin: false } }));
 

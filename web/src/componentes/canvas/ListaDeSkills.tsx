@@ -1,9 +1,11 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { Fragment, useEffect, useId, useMemo, useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { DadosDaSkill, ListagemDeSkills, PluginInstalado } from "../../shared/api/tipos";
 import { IconeSkills } from "../Icones";
-import { IconeLupa } from "./IconesDasIlhas";
+import { contar, nomeAmigavel, normalizarParaBusca as normalizar } from "./dadosDoPlugin";
+import { IconeInfo, IconeLupa } from "./IconesDasIlhas";
+import { ItemDeSkill } from "./ItemDeSkill";
 import { LinhaDoPluginInstalado } from "./PluginInstalado";
 
 /** Um orquestrador aberto no canvas, o suficiente para ler as skills do projeto dele. */
@@ -12,14 +14,32 @@ export interface OrquestradorParaSkills {
   nome: string;
 }
 
-/** O aviso discreto do rodapé: quais orquestradores abertos estão num nível que desliga as skills. */
-function avisoDeSkillsDesligadas(nomes: readonly string[]): string {
-  return `Skills desligadas em ${nomes.join(", ")}: o nível de permissão é só leitura. Elas valem nos níveis com edição, fora do planejamento.`;
+/** A linha do rodapé: quais orquestradores abertos estão num nível que desliga as skills. */
+function avisoCurtoDeSkillsDesligadas(nomes: readonly string[]): string {
+  return nomes.length === 1
+    ? `Desligadas em ${nomes[0] ?? ""}, que está em só leitura.`
+    : `Desligadas em ${nomes.length} orquestradores (só leitura).`;
 }
 
-/** Minúsculas e sem acento, para a busca achar "revisao" em "Revisão". */
-function normalizar(texto: string): string {
-  return texto.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+/** O resto do aviso, que abre em "Entenda". */
+function explicacaoDeSkillsDesligadas(nomes: readonly string[]): string {
+  const onde = nomes.length === 1 ? "Nesse nível" : `Nestes orquestradores (${nomes.join(", ")})`;
+  return `${onde} o agente não usa skills. Elas valem nos níveis com edição, fora do planejamento.`;
+}
+
+/** Os pacotes de skills da conta, em ordem, cada um com as skills dele em ordem alfabética. */
+function porPacote(skills: readonly DadosDaSkill[]): { pacote: string; skills: DadosDaSkill[] }[] {
+  const pacotes = new Map<string, DadosDaSkill[]>();
+  for (const skill of skills) {
+    const chave = skill.plugin ?? "";
+    pacotes.set(chave, [...(pacotes.get(chave) ?? []), skill]);
+  }
+  return [...pacotes.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([pacote, doPacote]) => ({
+      pacote,
+      skills: [...doPacote].sort((a, b) => nomeAmigavel(a).localeCompare(nomeAmigavel(b))),
+    }));
 }
 
 /** O resultado das leituras, preso à consulta que o gerou (para não confundir com a de outra lista de orquestradores). */
@@ -39,6 +59,8 @@ interface Grupo {
   titulo: string;
   /** Uma frase curta à direita do título. */
   nota?: string;
+  /** De onde vêm as skills do grupo, em uma frase: aparece na skill aberta. */
+  origem: string;
   skills: DadosDaSkill[];
 }
 
@@ -57,12 +79,14 @@ interface Props {
  * A aba Instaladas do painel de Skills: a busca e os grupos. Os plugins vêm primeiro, cada um com a própria
  * linha (abre para mostrar as skills dele, liga, desliga e remove). Depois, só leitura, as skills do usuário, as
  * do projeto de cada orquestrador aberto e as sincronizadas da conta Claude (de plugins que não estão nos
- * instalados). Com os estados de carregando, erro e vazio e, se algum orquestrador aberto estiver num nível que
- * desliga as skills, um aviso no rodapé.
+ * instalados). Cada skill é uma linha compacta (`ItemDeSkill`) que abre para mostrar o resto. Com os estados de
+ * carregando, erro e vazio e, se algum orquestrador aberto estiver num nível que desliga as skills, uma linha de
+ * aviso no rodapé, com "Entenda" para o resto.
  */
 export function ListaDeSkills({ orquestradores, versao, aoMudarPlugins, aoPedirConfirmacao }: Props) {
   const id = useId();
   const [busca, setBusca] = useState("");
+  const [entenda, setEntenda] = useState(false);
   const [leitura, setLeitura] = useState<Leitura | null>(null);
 
   const consulta = orquestradores.map((orquestrador) => orquestrador.id).join("\n");
@@ -142,13 +166,24 @@ export function ListaDeSkills({ orquestradores, versao, aoMudarPlugins, aoPedirC
       }
       const skills = listagem.skills.filter((skill) => skill.origem === "projeto");
       if (skills.length > 0) {
-        doProjeto.push({ chave: `projeto:${orquestrador.id}`, titulo: `Do projeto ${orquestrador.nome}`, skills });
+        doProjeto.push({
+          chave: `projeto:${orquestrador.id}`,
+          titulo: `Do projeto ${orquestrador.nome}`,
+          origem: `Do projeto ${orquestrador.nome}`,
+          skills,
+        });
       }
     }
     const completos: Grupo[] = [
-      { chave: "usuario", titulo: "Suas skills", skills: doUsuario },
+      { chave: "usuario", titulo: "Suas skills", origem: "Da pasta de skills do Claude Code", skills: doUsuario },
       ...doProjeto,
-      { chave: "conta", titulo: "Da sua conta Claude", nota: "Sincronizadas pela conta, só leitura", skills: daConta },
+      {
+        chave: "conta",
+        titulo: "Da sua conta Claude",
+        nota: "Sincronizadas pela conta, só leitura",
+        origem: "Da sua conta Claude, só leitura",
+        skills: daConta,
+      },
     ].filter((grupo) => grupo.skills.length > 0);
     return { grupos: completos, desligadosEm: desligados };
   }, [lida, orquestradores]);
@@ -158,8 +193,31 @@ export function ListaDeSkills({ orquestradores, versao, aoMudarPlugins, aoPedirC
   const erroDosPlugins = lida?.erroDosPlugins ?? null;
   const total = plugins.length + grupos.reduce((soma, grupo) => soma + grupo.skills.length, 0);
   const visiveis = grupos
-    .map((grupo) => ({ ...grupo, skills: grupo.skills.filter(combina) }))
+    .map((grupo) => ({ ...grupo, totalDoGrupo: grupo.skills.length, skills: grupo.skills.filter(combina) }))
     .filter((grupo) => grupo.skills.length > 0);
+  const totalVisivelDeSkills = visiveis.reduce((soma, grupo) => soma + grupo.skills.length, 0);
+  const termoDigitado = busca.trim();
+
+  /** O número do grupo; com a busca vira "3 de 13", para ver quanto da lista sobrou. */
+  const contadorDoGrupo = (visiveisNoGrupo: number, totalDoGrupo: number) =>
+    termoDigitado === "" ? (
+      <span className="mono">{visiveisNoGrupo}</span>
+    ) : (
+      <span className="mk-contador">
+        {visiveisNoGrupo} de {totalDoGrupo}
+      </span>
+    );
+
+  const itemDaLista = (skill: DadosDaSkill, origem: string) => (
+    <ItemDeSkill
+      key={`${skill.origem}:${skill.plugin ?? ""}:${skill.nome}`}
+      nome={nomeAmigavel(skill)}
+      nomeCompleto={skill.nome}
+      descricao={skill.descricao}
+      origem={origem}
+      termo={termoDigitado}
+    />
+  );
 
   const trocarPlugins = (troca: (anteriores: PluginInstalado[]) => PluginInstalado[]) => {
     setLeitura((anterior) =>
@@ -177,7 +235,7 @@ export function ListaDeSkills({ orquestradores, versao, aoMudarPlugins, aoPedirC
         <input
           type="search"
           aria-label="Buscar skill por nome ou descrição"
-          placeholder="Buscar por nome ou descrição"
+          placeholder="Buscar por nome ou descrição (em inglês)"
           value={busca}
           spellCheck={false}
           onChange={(evento) => setBusca(evento.target.value)}
@@ -200,8 +258,8 @@ export function ListaDeSkills({ orquestradores, versao, aoMudarPlugins, aoPedirC
           </div>
         ) : pluginsVisiveis.length === 0 && visiveis.length === 0 && erroDosPlugins === null ? (
           <div className="mk-vazio">
-            <h3>Nenhuma skill combina com a busca</h3>
-            <p>Tente outra palavra do nome ou da descrição.</p>
+            <h3>Nenhuma skill combina com “{termoDigitado}”</h3>
+            <p>As descrições estão em inglês: tente spreadsheet no lugar de planilha.</p>
           </div>
         ) : (
           <>
@@ -216,13 +274,14 @@ export function ListaDeSkills({ orquestradores, versao, aoMudarPlugins, aoPedirC
               <section className="mk-grupo" aria-labelledby={`${id}-plugins`}>
                 <h3 id={`${id}-plugins`}>
                   <span className="truncate">Plugins</span>
-                  <span className="mono">{pluginsVisiveis.length}</span>
+                  {contadorDoGrupo(pluginsVisiveis.length, plugins.length)}
                   <span className="nota">Valem no app e no terminal</span>
                 </h3>
                 {pluginsVisiveis.map((plugin) => (
                   <LinhaDoPluginInstalado
                     key={plugin.id}
                     plugin={plugin}
+                    termo={termoDigitado}
                     aoAlterar={(novo) =>
                       trocarPlugins((anteriores) => anteriores.map((item) => (item.id === novo.id ? novo : item)))
                     }
@@ -238,43 +297,60 @@ export function ListaDeSkills({ orquestradores, versao, aoMudarPlugins, aoPedirC
               <section key={grupo.chave} className="mk-grupo" aria-labelledby={`${id}-${grupo.chave}`}>
                 <h3 id={`${id}-${grupo.chave}`}>
                   <span className="truncate">{grupo.titulo}</span>
-                  <span className="mono">{grupo.skills.length}</span>
+                  {contadorDoGrupo(grupo.skills.length, grupo.totalDoGrupo)}
                   {grupo.nota !== undefined && <span className="nota">{grupo.nota}</span>}
                 </h3>
-                <ul className="mk-skills-lista">
-                  {grupo.skills.map((skill) => (
-                    <ItemDeSkill key={`${skill.origem}:${skill.plugin ?? ""}:${skill.nome}`} skill={skill} />
-                  ))}
-                </ul>
+                {grupo.chave === "conta" ? (
+                  // O prefixo saiu da linha da skill: o pacote aparece uma vez, como subtítulo.
+                  porPacote(grupo.skills).map(({ pacote, skills }) => (
+                    <Fragment key={pacote}>
+                      {pacote !== "" && (
+                        <div className="mk-pacote">
+                          <span>{pacote}</span>
+                          <span>{skills.length}</span>
+                        </div>
+                      )}
+                      <ul className="mk-skills-lista" aria-label={pacote === "" ? undefined : `Skills do pacote ${pacote}`}>
+                        {skills.map((skill) => itemDaLista(skill, grupo.origem))}
+                      </ul>
+                    </Fragment>
+                  ))
+                ) : (
+                  <ul className="mk-skills-lista">{grupo.skills.map((skill) => itemDaLista(skill, grupo.origem))}</ul>
+                )}
               </section>
             ))}
           </>
         )}
       </div>
+      {termoDigitado !== "" && atual !== null && erro === null && (
+        <p className="sr-only" role="status">
+          {contar(pluginsVisiveis.length + totalVisivelDeSkills, "resultado encontrado", "resultados encontrados")}
+        </p>
+      )}
 
       {desligadosEm.length > 0 && (
         <div className="mk-skills-rodape">
-          <span role="note">{avisoDeSkillsDesligadas(desligadosEm)}</span>
+          <div className="lin">
+            <IconeInfo tamanho={13} />
+            <span>{avisoCurtoDeSkillsDesligadas(desligadosEm)}</span>
+            <button
+              type="button"
+              className="mk-entenda"
+              aria-expanded={entenda}
+              aria-controls={entenda ? `${id}-entenda` : undefined}
+              onClick={() => setEntenda((aberto) => !aberto)}
+            >
+              Entenda
+            </button>
+          </div>
+          {entenda && (
+            <p id={`${id}-entenda`} className="mk-entenda-txt" role="note">
+              {explicacaoDeSkillsDesligadas(desligadosEm)}
+            </p>
+          )}
         </div>
       )}
     </>
-  );
-}
-
-function ItemDeSkill({ skill }: { skill: DadosDaSkill }) {
-  return (
-    <li className="mk-skill">
-      <span className="flex items-center gap-1.5">
-        <span className="mono truncate">{skill.nome}</span>
-        {skill.origem === "plugin" && skill.plugin !== null && (
-          <span className="chip-de-modelo" title={`Plugin ${skill.plugin}`}>
-            {skill.plugin}
-          </span>
-        )}
-      </span>
-      <span className="d" title={skill.descricao === "" ? undefined : skill.descricao}>
-        {skill.descricao === "" ? "Sem descrição." : skill.descricao}
-      </span>
-    </li>
   );
 }

@@ -5,7 +5,8 @@ import type { PluginInstalado } from "../../shared/api/tipos";
 import { AvatarDePlugin } from "./AvatarDePlugin";
 import { motivosDeConfirmacao, precisaDeConfirmacao, resumoDoInventario } from "./dadosDoPlugin";
 import { IconeHook, IconeLixeira } from "./IconesDoMarketplace";
-import { IconeInfo } from "./IconesDasIlhas";
+import { IconeInfo, IconeSetaDireita } from "./IconesDasIlhas";
+import { ItemDeSkill } from "./ItemDeSkill";
 
 interface Props {
   plugin: PluginInstalado;
@@ -14,15 +15,18 @@ interface Props {
   aoRemovido: (id: string) => void;
   /** Ligar um plugin com hook, pasta bin ou inventário não verificado não liga na hora: o painel mostra a confirmação. */
   aoPedirConfirmacao: (plugin: PluginInstalado) => void;
+  /** O que está no campo de busca da aba: a palavra achada nas skills do plugin aberto ganha destaque. */
+  termo?: string;
 }
 
 /**
  * A linha de um plugin instalado, na aba Instaladas: avatar, nome, o resumo do que há dentro e, à direita, o
- * interruptor e a lixeira. Clicar no nome abre os motivos de pedir confirmação (quando há) e a lista das skills.
+ * interruptor e a lixeira. Clicar no nome abre os motivos de pedir confirmação (quando há) e a lista das skills,
+ * cada uma na mesma linha compacta da lista de Instaladas.
  * Plugin desligado que pede confirmação (hook, pasta bin ou inventário não verificado) mostra "Revisar e ligar"
  * no lugar do interruptor. Remover pede um sim na própria linha.
  */
-export function LinhaDoPluginInstalado({ plugin, aoAlterar, aoRemovido, aoPedirConfirmacao }: Props) {
+export function LinhaDoPluginInstalado({ plugin, aoAlterar, aoRemovido, aoPedirConfirmacao, termo = "" }: Props) {
   const idDasSkills = useId();
   const [aberto, setAberto] = useState(false);
   const [confirmando, setConfirmando] = useState(false);
@@ -131,7 +135,8 @@ export function LinhaDoPluginInstalado({ plugin, aoAlterar, aoRemovido, aoPedirC
                   title={aberto ? "Esconder as skills do plugin" : "Ver as skills do plugin"}
                   onClick={() => setAberto((atual) => !atual)}
                 >
-                  {plugin.nome}
+                  <span className="truncate">{plugin.nome}</span>
+                  <IconeSetaDireita tamanho={13} className="mk-chev" />
                 </button>
                 {comHook && (
                   <span className="mk-chip hook" title="Comando que roda sozinho em toda sessão">
@@ -204,17 +209,18 @@ export function LinhaDoPluginInstalado({ plugin, aoAlterar, aoRemovido, aoPedirC
       {aberto && !confirmando && (
         <ul id={idDasSkills} className="mk-plugin-skills" aria-label={`Skills de ${plugin.nome}`}>
           {inventario.skills.length === 0 ? (
-            <li className="mk-skill">
-              <span className="d">Este plugin não traz skills.</span>
-            </li>
+            <li className="mk-skill-vazio">Este plugin não traz skills.</li>
           ) : (
             inventario.skills.map((skill) => (
-              <li key={skill.nome} className="mk-skill">
-                <span className="mono">{skill.nome}</span>
-                <span className="d" title={skill.descricao === "" ? undefined : skill.descricao}>
-                  {skill.descricao === "" ? "Sem descrição." : skill.descricao}
-                </span>
-              </li>
+              // Dentro do plugin a skill já vem sem prefixo; o nome completo é o que o Claude Code chama.
+              <ItemDeSkill
+                key={skill.nome}
+                nome={skill.nome}
+                nomeCompleto={`${plugin.nome}:${skill.nome}`}
+                descricao={skill.descricao}
+                origem={`Do plugin ${plugin.nome}`}
+                termo={termo}
+              />
             ))
           )}
         </ul>
