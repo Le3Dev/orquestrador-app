@@ -1,5 +1,6 @@
 import {
   type ClipboardEvent,
+  type CSSProperties,
   Fragment,
   type KeyboardEvent,
   memo,
@@ -33,6 +34,13 @@ import {
   ultimoModeloUsado,
 } from "../../shared/estado/aplicarEventoDoChat";
 import { formatarBytes, formatarDuracao } from "../../shared/formatacao";
+import {
+  type AreaVisivel,
+  type GeometriaDoChat,
+  limitarGeometriaDoChat,
+  moverGeometriaDoChat,
+  PASSO_DE_MOVER_O_CHAT,
+} from "../../shared/geometriaDoChat";
 import { useMelhorarPrompt } from "../../shared/hooks/useMelhorarPrompt";
 import { useModoInvisivel } from "../../shared/hooks/useModoInvisivel";
 import {
@@ -70,6 +78,10 @@ import "../../theme/chat-lateral.css";
 import "../../theme/controles-de-janela.css";
 
 const ALTURA_MAXIMA_DO_CAMPO = 140;
+/** A altura (px) que o chat móvel assume ao ser movido pela primeira vez, sem conversa à vista. */
+const ALTURA_PADRAO_DO_CHAT_MOVEL = 420;
+/** Quanto das conversas Ctrl+Alt+PageUp/PageDown rolam (fração da altura visível). */
+const FRACAO_DA_ROLAGEM = 0.8;
 /** Para as mensagens sem ações: a mesma lista sempre, para a memorização delas valer. */
 const SEM_ORQUESTRADORES: readonly ResumoDoOrquestrador[] = [];
 /** Distância do fim (px) em que a conversa ainda acompanha o texto que chega. */
@@ -388,6 +400,20 @@ function IconeOcultar() {
   );
 }
 
+/** Seis pontinhos na horizontal: a alça de mover o chat no modo invisível. */
+function IconeAlcaDeMover() {
+  return (
+    <svg width={22} height={10} viewBox="0 0 22 10" fill="currentColor" aria-hidden="true">
+      <circle cx="4" cy="3" r="1.3" />
+      <circle cx="11" cy="3" r="1.3" />
+      <circle cx="18" cy="3" r="1.3" />
+      <circle cx="4" cy="7.5" r="1.3" />
+      <circle cx="11" cy="7.5" r="1.3" />
+      <circle cx="18" cy="7.5" r="1.3" />
+    </svg>
+  );
+}
+
 /** Verbos seguidos direto do arquivo, sem dois-pontos ("lendo README.md…"). */
 const VERBOS_DE_ARQUIVO: ReadonlySet<string> = new Set(["lendo", "editando", "escrevendo"]);
 
@@ -450,6 +476,7 @@ function ImagemAmpliada({ imagem, aoFechar }: { imagem: ImagemDaMensagemDoChat; 
   return createPortal(
     <div
       className="nokey nowheel nodrag fundo-que-esmaece fundo-da-imagem-ampliada"
+      data-area-clicavel
       onMouseDown={(evento) => {
         if (evento.target === evento.currentTarget) {
           aoFechar();
@@ -659,7 +686,7 @@ export function ChatRapido({
   largura = LARGURA_DO_CHAT_FIXO.padrao,
   aoMudarLargura,
 }: Props) {
-  const { mudarPreferencias } = usePreferenciasDaTela();
+  const { preferencias, mudarPreferencias } = usePreferenciasDaTela();
   const [texto, setTexto] = useState("");
   const [imagens, setImagens] = useState<ImagemAnexada[]>([]);
   const [erro, setErro] = useState<string | null>(null);
@@ -685,6 +712,9 @@ export function ChatRapido({
     entrar: entrarNoModo,
     capturarTela,
     aoCapturarQuadro,
+    aoAtalho,
+    aoMudarOculto,
+    definirFocavel,
     mouseDaArea,
     sair: sairDoModo,
     erro: erroDoModo,
@@ -957,6 +987,179 @@ export function ChatRapido({
           />,
         ];
 
+  // ---- Modo invisível: o chat é móvel e redimensionável, e a janela só é focável enquanto se digita ----
+  // Só flutuante e no modo: a coluna fixa não existe nele (o canvas a solta ao entrar).
+  const movel = modoAtivo && !fixo;
+  const conversaVisivel = (temMensagens || fixo || temOuvido) && !oculta;
+  const raiz = useRef<HTMLElement | null>(null);
+  const [area, setArea] = useState<AreaVisivel>(() => ({ largura: window.innerWidth, altura: window.innerHeight }));
+  // A geometria durante um arraste (ao vivo); nula fora dele (vale a gravada).
+  const [geometriaAoVivo, setGeometriaAoVivo] = useState<GeometriaDoChat | null>(null);
+  const [gestoDoChat, setGestoDoChat] = useState<"mover" | "redimensionar" | null>(null);
+  const gesto = useRef<{
+    ponteiro: number;
+    tipo: "mover" | "redimensionar";
+    inicioX: number;
+    inicioY: number;
+    base: GeometriaDoChat;
+    atual: GeometriaDoChat;
+  } | null>(null);
+  const geometriaGravada = preferencias.chatNoModoInvisivel;
+  // Nunca fora da tela, mesmo que a janela tenha encolhido depois de gravada (a gravada não muda).
+  const geometria = geometriaAoVivo ?? (geometriaGravada === null ? null : limitarGeometriaDoChat(geometriaGravada, area));
+
+  // A janela do app redimensionada (outro monitor, resolução): o chat reajusta para caber.
+  useEffect(() => {
+    if (!movel) {
+      return undefined;
+    }
+    const aoRedimensionar = (): void => setArea({ largura: window.innerWidth, altura: window.innerHeight });
+    window.addEventListener("resize", aoRedimensionar);
+    aoRedimensionar();
+    return () => window.removeEventListener("resize", aoRedimensionar);
+  }, [movel]);
+
+  /** A geometria de agora: a gravada ou, no lugar padrão, a medida na tela (para o primeiro arraste). */
+  function geometriaAgora(): GeometriaDoChat {
+    if (geometria !== null) {
+      return geometria;
+    }
+    const medida = raiz.current?.getBoundingClientRect();
+    const temMedida = medida !== undefined && medida.width > 0 && medida.height > 0;
+    const largura = temMedida ? medida.width : Math.min(720, area.largura - 32);
+    const altura = temMedida && conversaVisivel ? medida.height : Math.min(ALTURA_PADRAO_DO_CHAT_MOVEL, area.altura);
+    const fundo = temMedida ? medida.bottom : area.altura - 16;
+    return limitarGeometriaDoChat(
+      { x: temMedida ? medida.left : (area.largura - largura) / 2, y: fundo - altura, largura, altura },
+      area,
+    );
+  }
+
+  function comecarGesto(tipo: "mover" | "redimensionar", evento: EventoDePonteiro<HTMLElement>): void {
+    if (evento.button !== 0) {
+      return;
+    }
+    // Sem seleção de texto nem o canvas entendendo como arrastar o fundo.
+    evento.preventDefault();
+    evento.stopPropagation();
+    if (typeof evento.currentTarget.setPointerCapture === "function") {
+      evento.currentTarget.setPointerCapture(evento.pointerId);
+    }
+    const base = geometriaAgora();
+    gesto.current = { ponteiro: evento.pointerId, tipo, inicioX: evento.clientX, inicioY: evento.clientY, base, atual: base };
+    setGeometriaAoVivo(base);
+    setGestoDoChat(tipo);
+  }
+
+  function andarNoGesto(evento: EventoDePonteiro<HTMLElement>): void {
+    const atual = gesto.current;
+    if (atual === null || atual.ponteiro !== evento.pointerId) {
+      return;
+    }
+    evento.stopPropagation();
+    const dx = evento.clientX - atual.inicioX;
+    const dy = evento.clientY - atual.inicioY;
+    const { base } = atual;
+    const nova =
+      atual.tipo === "mover"
+        ? moverGeometriaDoChat(base, dx, dy, area)
+        : limitarGeometriaDoChat(
+            {
+              ...base,
+              // A borda de baixo e a da direita seguem o mouse, mas o chat não passa da tela.
+              largura: Math.min(base.largura + dx, area.largura - base.x),
+              altura: Math.min(base.altura + dy, area.altura - base.y),
+            },
+            area,
+          );
+    atual.atual = nova;
+    setGeometriaAoVivo(nova);
+  }
+
+  /** Solta o chat: grava a geometria final (a menos que o gesto tenha sido cancelado ou sem movimento). */
+  const terminarGesto = useCallback(
+    (gravar: boolean): void => {
+      const atual = gesto.current;
+      if (atual === null) {
+        return;
+      }
+      gesto.current = null;
+      setGestoDoChat(null);
+      setGeometriaAoVivo(null);
+      if (gravar && atual.atual !== atual.base) {
+        mudarPreferencias({ chatNoModoInvisivel: atual.atual });
+      }
+    },
+    [mudarPreferencias],
+  );
+
+  // O overlay oculto (Ctrl+Barra invertida) ou a saída do modo no meio de um arraste: cancela, sem gravar.
+  useEffect(() => {
+    if (!modoAtivo) {
+      terminarGesto(false);
+      return undefined;
+    }
+    return aoMudarOculto((oculto) => {
+      if (oculto) {
+        terminarGesto(false);
+      }
+    });
+  }, [modoAtivo, aoMudarOculto, terminarGesto]);
+
+  function voltarAoLugarPadrao(): void {
+    mudarPreferencias({ chatNoModoInvisivel: null });
+  }
+
+  /** Deixa a janela focável (a pedido do clique no campo) e leva o teclado ao campo. */
+  async function focarCampo(): Promise<void> {
+    if (modoAtivo) {
+      await definirFocavel(true);
+    }
+    campo.current?.focus();
+  }
+
+  /** Enviou, apertou Esc ou saiu do chat: o teclado volta ao app de trás. */
+  function liberarFoco(): void {
+    if (modoAtivo) {
+      campo.current?.blur();
+      void definirFocavel(false);
+    }
+  }
+
+  // Os atalhos globais do modo (a janela não tem o foco, então chegam pelo processo principal).
+  const tratarAtalho = useRef<(acao: string) => void>(() => undefined);
+  tratarAtalho.current = (acao) => {
+    const passos: Readonly<Record<string, readonly [number, number]>> = {
+      "mover-cima": [0, -PASSO_DE_MOVER_O_CHAT],
+      "mover-baixo": [0, PASSO_DE_MOVER_O_CHAT],
+      "mover-esquerda": [-PASSO_DE_MOVER_O_CHAT, 0],
+      "mover-direita": [PASSO_DE_MOVER_O_CHAT, 0],
+    };
+    const passo = passos[acao];
+    if (passo !== undefined) {
+      if (movel) {
+        mudarPreferencias({ chatNoModoInvisivel: moverGeometriaDoChat(geometriaAgora(), passo[0], passo[1], area) });
+      }
+      return;
+    }
+    if (acao === "rolar-acima" || acao === "rolar-abaixo") {
+      const elemento = rolagem.current;
+      if (elemento !== null) {
+        elemento.scrollTop += (acao === "rolar-abaixo" ? 1 : -1) * Math.max(1, elemento.clientHeight * FRACAO_DA_ROLAGEM);
+      }
+      return;
+    }
+    if (acao === "focar-campo") {
+      campo.current?.focus();
+    }
+  };
+  useEffect(() => {
+    if (!modoAtivo) {
+      return undefined;
+    }
+    return aoAtalho((acao) => tratarAtalho.current(acao));
+  }, [modoAtivo, aoAtalho]);
+
   // Acompanha o fim enquanto chega texto (das respostas e da escuta), a menos que o usuário tenha rolado para cima.
   useEffect(() => {
     const elemento = rolagem.current;
@@ -1005,6 +1208,7 @@ export function ChatRapido({
         origemDoComposer === null ? {} : { origem: origemDoComposer },
       );
       limparCampo();
+      liberarFoco();
       // As enviadas (e as que chegaram durante o envio, que também saem) liberam a miniatura.
       liberarImagens(imagensAtuais.current);
       setImagens([]);
@@ -1068,6 +1272,8 @@ export function ChatRapido({
         evento.preventDefault();
         ocultar();
       }
+      // No modo invisível o Esc também devolve o teclado ao app de trás.
+      liberarFoco();
     }
   }
 
@@ -1104,13 +1310,32 @@ export function ChatRapido({
   // Fixo: uma coluna (aside) ao lado do canvas; flutuante: um bloco no painel do pé do canvas.
   const Raiz = fixo ? "aside" : "div";
 
+  // Móvel e já movido: a caixa fica onde foi gravada. Com a conversa à vista, do topo e com a altura gravada; sem
+  // ela, presa ao fundo da mesma caixa (o campo não pula quando a conversa se oculta).
+  let estiloMovel: CSSProperties | undefined;
+  if (movel && geometria !== null) {
+    estiloMovel = conversaVisivel
+      ? { left: geometria.x, top: geometria.y, width: geometria.largura, height: geometria.altura }
+      : { left: geometria.x, bottom: area.altura - geometria.y - geometria.altura, width: geometria.largura };
+  }
+  const classeDoMovel = movel ? `chat-rapido-movel ${geometria === null ? "chat-rapido-movel-padrao" : ""}` : "";
+
   return (
     <Raiz
-      className={`chat-rapido nodrag nowheel nopan ${fixo ? `chat-lateral chat-lateral-${lado}` : ""} ${respondendo ? "chat-rapido-respondendo" : ""}`}
+      ref={(elemento: HTMLElement | null) => {
+        raiz.current = elemento;
+      }}
+      className={`chat-rapido nodrag nowheel nopan ${fixo ? `chat-lateral chat-lateral-${lado}` : ""} ${classeDoMovel} ${respondendo ? "chat-rapido-respondendo" : ""}`}
       aria-label={fixo ? "Chat rápido" : undefined}
-      style={fixo ? { width: `${largura}px` } : undefined}
+      style={fixo ? { width: `${largura}px` } : estiloMovel}
       data-testid="chat-rapido"
       {...mouseDaArea}
+      onBlur={(evento) => {
+        // O foco saiu do chat (clicou fora, trocou de app): o teclado volta ao app de trás.
+        if (modoAtivo && !evento.currentTarget.contains(evento.relatedTarget as Node | null)) {
+          void definirFocavel(false);
+        }
+      }}
       onDragOver={(evento) => {
         // Uma resposta arrastada daqui não cai no próprio chat (nem no canvas por baixo dele).
         if (evento.dataTransfer.types.includes(TIPO_DA_RESPOSTA_DO_CHAT)) {
@@ -1139,13 +1364,56 @@ export function ChatRapido({
         }
       }}
     >
-      {arrastando && <div className="soltar-imagens">solte para anexar as imagens à pergunta</div>}
+      {movel && (
+        <div className="barra-do-chat-movel" data-area-clicavel data-testid="barra-do-chat-movel">
+          <button
+            type="button"
+            className="alca-de-mover-o-chat"
+            aria-label="Mover o chat"
+            title="Arraste para mover o chat (Ctrl+Alt+setas movem 40 px)"
+            onPointerDown={(evento) => comecarGesto("mover", evento)}
+            onPointerMove={andarNoGesto}
+            onPointerUp={() => terminarGesto(true)}
+            onPointerCancel={() => terminarGesto(false)}
+            onLostPointerCapture={() => terminarGesto(true)}
+            onKeyDown={(evento) => {
+              const acoes: Readonly<Record<string, string>> = {
+                ArrowUp: "mover-cima",
+                ArrowDown: "mover-baixo",
+                ArrowLeft: "mover-esquerda",
+                ArrowRight: "mover-direita",
+              };
+              const acao = acoes[evento.key];
+              if (acao !== undefined) {
+                evento.preventDefault();
+                tratarAtalho.current(acao);
+              }
+            }}
+          >
+            <IconeAlcaDeMover />
+          </button>
+          {geometria !== null && (
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              aria-label="Voltar ao lugar padrão"
+              title="Voltar ao lugar padrão: centralizado no rodapé, com o tamanho de sempre"
+              onClick={voltarAoLugarPadrao}
+            >
+              lugar padrão
+            </button>
+          )}
+        </div>
+      )}
+      {gestoDoChat !== null && <div className="camada-de-gesto-do-chat" data-area-clicavel />}
+      {arrastando && <div className="soltar-imagens" data-area-clicavel>solte para anexar as imagens à pergunta</div>}
       {fixo && aoMudarLargura !== undefined && <AlcaDaLargura largura={largura} aoMudar={aoMudarLargura} lado={lado} />}
 
       {/* Oculta, a conversa continua montada: os cartões de ação lembram o que já fizeram. */}
       {(temMensagens || fixo || temOuvido) && (
         <section
           className={`conversa-do-chat ${fixo ? "conversa-lateral" : "painel-flutuante"}`}
+          data-area-clicavel
           hidden={oculta}
           aria-label="Conversa com o Claude"
         >
@@ -1286,6 +1554,7 @@ export function ChatRapido({
         <button
           type="button"
           className="mostrar-conversa"
+          data-area-clicavel
           onClick={() => {
             acompanhando.current = true;
             setOcultaEm(null);
@@ -1297,7 +1566,7 @@ export function ChatRapido({
       )}
 
       {erroDoModo !== null && (
-        <p className="hint-error texto-longo" role="alert">
+        <p className="hint-error texto-longo" role="alert" data-area-clicavel>
           {erroDoModo}{" "}
           <button type="button" className="btn btn-sm btn-ghost" onClick={descartarErroDoModo}>
             fechar
@@ -1311,7 +1580,7 @@ export function ChatRapido({
       )}
       {/* A escuta não tem caixa à parte: só o erro, numa linha com "fechar", acima do campo. */}
       {comEscuta && escuta.erro !== null && (
-        <p className="hint-error texto-longo erro-da-escuta" role="alert" data-testid="erro-da-escuta">
+        <p className="hint-error texto-longo erro-da-escuta" role="alert" data-testid="erro-da-escuta" data-area-clicavel>
           {escuta.erro}{" "}
           <button type="button" className="btn btn-sm btn-ghost" onClick={escuta.descartarErro}>
             fechar
@@ -1319,7 +1588,7 @@ export function ChatRapido({
         </p>
       )}
 
-      <div className="moldura-do-composer">
+      <div className="moldura-do-composer" data-area-clicavel>
         <div
           className="composer-do-chat"
           data-testid="composer-do-chat"
@@ -1334,7 +1603,7 @@ export function ChatRapido({
             if (alvo !== null && alvo.closest(".ditado") !== null) {
               return;
             }
-            campo.current?.focus();
+            void focarCampo();
           }}
         >
           {respondendo && !desconectado && <div className="faixa-de-progresso" />}
@@ -1400,6 +1669,12 @@ export function ChatRapido({
                 ajustarAltura();
               }}
               onKeyDown={aoTeclar}
+              onPointerDown={() => {
+                // Janela não focável: ela precisa virar focável antes de o campo receber o teclado.
+                if (modoAtivo) {
+                  void focarCampo();
+                }
+              }}
               onPaste={aoColar}
               placeholder={placeholder}
               title={dicaDoCampo}
@@ -1538,6 +1813,20 @@ export function ChatRapido({
           )}
         </div>
       </div>
+      {movel && (
+        <button
+          type="button"
+          className="alca-de-redimensionar-do-chat"
+          data-area-clicavel
+          aria-label="Redimensionar o chat"
+          title="Arraste para mudar o tamanho do chat"
+          onPointerDown={(evento) => comecarGesto("redimensionar", evento)}
+          onPointerMove={andarNoGesto}
+          onPointerUp={() => terminarGesto(true)}
+          onPointerCancel={() => terminarGesto(false)}
+          onLostPointerCapture={() => terminarGesto(true)}
+        />
+      )}
     </Raiz>
   );
 }

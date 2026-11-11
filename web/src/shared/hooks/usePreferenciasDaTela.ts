@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
 
+import { type GeometriaDoChat, interpretarGeometriaDoChat } from "../geometriaDoChat";
+
 /** De que lado do canvas fica o chat fixo. */
 export type LadoDoChatFixo = "esquerda" | "direita";
 
@@ -37,6 +39,11 @@ export type PreferenciasDaTela = {
    * título do app não entra: ela segue sempre o sistema.
    */
   controlesDasJanelas: EstiloDosControlesDasJanelas;
+  /**
+   * Onde o chat rápido fica (e o tamanho dele) no modo invisível, depois de movido e
+   * redimensionado. Nulo (o padrão): centralizado no rodapé, como sempre.
+   */
+  chatNoModoInvisivel: GeometriaDoChat | null;
 };
 
 export const CHAVE_DAS_PREFERENCIAS_DA_TELA = "orquestrador.preferenciasDaTela";
@@ -52,6 +59,7 @@ const PADRAO: PreferenciasDaTela = {
   manterBixinhosAteLimpar: false,
   minimapaVisivel: false,
   controlesDasJanelas: "automatico",
+  chatNoModoInvisivel: null,
 };
 
 /** Uma largura inteira entre a mínima e a máxima; número inválido (NaN, infinito) vale o padrão. */
@@ -115,6 +123,8 @@ function interpretar(bruto: string | null): PreferenciasDaTela {
       registro.controlesDasJanelas === "mac" || registro.controlesDasJanelas === "windows"
         ? registro.controlesDasJanelas
         : PADRAO.controlesDasJanelas,
+    // Geometria inválida (campo ausente, outro tipo, número quebrado) vale o padrão.
+    chatNoModoInvisivel: interpretarGeometriaDoChat(registro.chatNoModoInvisivel),
   };
 }
 
@@ -154,6 +164,13 @@ function assinar(ouvinte: () => void): () => void {
   };
 }
 
+function mesmaGeometria(a: GeometriaDoChat | null, b: GeometriaDoChat | null): boolean {
+  if (a === null || b === null) {
+    return a === b;
+  }
+  return a.x === b.x && a.y === b.y && a.largura === b.largura && a.altura === b.altura;
+}
+
 function mudar(parcial: Partial<PreferenciasDaTela>): void {
   const atuais = lerPreferencias();
   const novas: PreferenciasDaTela = { ...atuais, ...parcial };
@@ -165,7 +182,8 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
     novas.larguraDoChatFixo === atuais.larguraDoChatFixo &&
     novas.manterBixinhosAteLimpar === atuais.manterBixinhosAteLimpar &&
     novas.minimapaVisivel === atuais.minimapaVisivel &&
-    novas.controlesDasJanelas === atuais.controlesDasJanelas
+    novas.controlesDasJanelas === atuais.controlesDasJanelas &&
+    mesmaGeometria(novas.chatNoModoInvisivel, atuais.chatNoModoInvisivel)
   ) {
     return;
   }
@@ -183,7 +201,7 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
 /**
  * As preferências da tela (chat fixo, o lado e a largura dele, visualizador de
  * código, manter os bixinhos até limpar, o minimapa visível, o estilo dos
- * controles das janelas):
+ * controles das janelas, a posição do chat no modo invisível):
  * mudar num lugar reflete em todos os componentes que usam o hook e nas
  * outras abas abertas.
  */

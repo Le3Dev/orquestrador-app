@@ -96,7 +96,31 @@ export interface ApiDoModoInvisivel {
    * Opcional para pontes antigas.
    */
   definirEscutaLigada?(ligada: boolean): Promise<void>;
+  /** Ctrl+\ (global): entra no modo ou oculta/mostra o overlay sem sair. Opcional para pontes antigas. */
+  alternar?(): Promise<void>;
+  /**
+   * No modo invisível a janela não é focável (não rouba o teclado do app de trás):
+   * true deixa-a focável para digitar no campo; false devolve o foco ao app de trás.
+   */
+  definirFocavel?(focavel: boolean): Promise<void>;
+  /** Atalhos globais do modo (ver `AcaoDeAtalhoDoModo`); devolve a função que cancela. */
+  aoAtalho?(callback: (acao: string) => void): () => void;
+  /** Avisa quando o overlay é ocultado ou mostrado (Ctrl+\); devolve a função que cancela. */
+  aoMudarOculto?(callback: (oculto: boolean) => void): () => void;
 }
+
+/** As ações dos atalhos globais do modo invisível que a tela trata. */
+export type AcaoDeAtalhoDoModo =
+  | "responder-agora"
+  | "focar-campo"
+  | "mover-cima"
+  | "mover-baixo"
+  | "mover-esquerda"
+  | "mover-direita"
+  | "rolar-acima"
+  | "rolar-abaixo"
+  | "opacidade-mais"
+  | "opacidade-menos";
 
 /** Onde o corpo da prévia está na tela (pixels CSS da janela) e a escala do canvas. */
 export interface RetanguloDaPrevia {

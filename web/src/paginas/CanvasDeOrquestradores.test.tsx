@@ -1297,7 +1297,8 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
     } finally {
       estilo.remove();
     }
-  });
+    // Lê e calcula o CSS do app inteiro no jsdom: com a suíte toda rodando em paralelo, passa dos 5 s padrão.
+  }, 30_000);
 
   it("com o chat fixo à esquerda, o modo invisível usa o chat flutuante sem mudar a preferência, e a coluna volta ao sair", async () => {
     localStorage.setItem(

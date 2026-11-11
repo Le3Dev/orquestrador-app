@@ -2969,6 +2969,99 @@ html.modo-invisivel .canvas-modo-invisivel .react-flow__background {
 .canvas-modo-invisivel .painel-do-chat { pointer-events: none !important; }
 .canvas-modo-invisivel .painel-do-chat .chat-rapido,
 .canvas-modo-invisivel .painel-do-chat .chat-rapido * { pointer-events: auto !important; }
+/* Chat móvel: no modo invisível o painel do pé vira uma camada sobre a janela toda (a janela cobre o monitor
+ * e é transparente), e o chat se posiciona dentro dela por left/top/width/height (a geometria gravada).
+ * Os vãos continuam transparentes: só as áreas `data-area-clicavel` capturam o mouse (electron/mouseDoModoInvisivel.js). */
+html.modo-invisivel .canvas-modo-invisivel .react-flow__panel.painel-do-chat {
+  position: absolute !important;
+  inset: 0 !important;
+  transform: none !important;
+  margin: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: none !important;
+}
+.chat-rapido.chat-rapido-movel {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  max-height: 100%;
+}
+/* Ainda no lugar padrão (nada gravado): centralizado no rodapé, como no modo normal (sem transform: o
+ * transform viraria o referencial da camada de arraste, que é fixed). */
+.chat-rapido-movel.chat-rapido-movel-padrao {
+  left: 0;
+  right: 0;
+  bottom: 16px;
+  margin-inline: auto;
+  width: min(720px, calc(100vw - 32px));
+}
+/* Movido ou redimensionado: a caixa tem altura própria e a conversa a preenche. */
+.chat-rapido-movel:not(.chat-rapido-movel-padrao) .conversa-do-chat {
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: none;
+}
+.barra-do-chat-movel {
+  display: flex;
+  align-items: center;
+  align-self: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border-forte);
+  background: var(--surface);
+  box-shadow: 0 6px 18px -10px rgba(0, 0, 0, .7);
+}
+.alca-de-mover-o-chat {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 20px;
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.alca-de-mover-o-chat:hover { color: var(--primary); background: var(--surface-3); }
+.alca-de-mover-o-chat:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.alca-de-mover-o-chat:active { cursor: grabbing; }
+.alca-de-redimensionar-do-chat {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  z-index: 20;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  touch-action: none;
+  user-select: none;
+  background: transparent;
+}
+.alca-de-redimensionar-do-chat::after {
+  content: "";
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  border-bottom-right-radius: 3px;
+}
+.alca-de-redimensionar-do-chat:hover::after,
+.alca-de-redimensionar-do-chat:focus-visible::after { border-color: var(--active); }
+/* Durante o arraste: a tela toda captura o ponteiro, para o chat não "escapar" do mouse (o processo
+ * principal só deixa o clique entrar sobre as áreas marcadas) e o cursor não pisca. */
+.camada-de-gesto-do-chat {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: transparent;
+  user-select: none;
+}
 /* A barra de título inteira some e não captura nada (nem arrasto): no modo
  * invisível só o chat rápido aparece, para não cobrir as abas do navegador. */
 html.modo-invisivel .barra-de-titulo,

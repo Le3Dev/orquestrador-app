@@ -10,7 +10,7 @@ describe("usePreferenciasDaTela", () => {
   it("sem nada guardado, as duas preferências começam desligadas e o chat fixo com 360 px", () => {
     const { result } = renderHook(() => usePreferenciasDaTela());
 
-    expect(result.current.preferencias).toEqual({ chatFixoNaEsquerda: false, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: false, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico" });
+    expect(result.current.preferencias).toEqual({ chatFixoNaEsquerda: false, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: false, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico", chatNoModoInvisivel: null });
     expect(localStorage.getItem(CHAVE_DAS_PREFERENCIAS_DA_TELA)).toBeNull();
   });
 
@@ -20,30 +20,30 @@ describe("usePreferenciasDaTela", () => {
     act(() => result.current.mudarPreferencias({ visualizadorDeCodigo: true }));
     act(() => result.current.mudarPreferencias({ chatFixoNaEsquerda: true }));
 
-    expect(result.current.preferencias).toEqual({ chatFixoNaEsquerda: true, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: true, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico" });
-    expect(lerGuardado()).toEqual({ chatFixoNaEsquerda: true, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: true, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico" });
+    expect(result.current.preferencias).toEqual({ chatFixoNaEsquerda: true, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: true, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico", chatNoModoInvisivel: null });
+    expect(lerGuardado()).toEqual({ chatFixoNaEsquerda: true, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: true, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico", chatNoModoInvisivel: null });
     unmount();
 
     const outra = renderHook(() => usePreferenciasDaTela());
-    expect(outra.result.current.preferencias).toEqual({ chatFixoNaEsquerda: true, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: true, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico" });
+    expect(outra.result.current.preferencias).toEqual({ chatFixoNaEsquerda: true, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: true, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico", chatNoModoInvisivel: null });
   });
 
   it("JSON inválido, outro formato ou campo de outro tipo valem o padrão (campo a campo)", () => {
     localStorage.setItem(CHAVE_DAS_PREFERENCIAS_DA_TELA, "{não é json");
     const { result, rerender } = renderHook(() => usePreferenciasDaTela());
-    expect(result.current.preferencias).toEqual({ chatFixoNaEsquerda: false, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: false, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico" });
+    expect(result.current.preferencias).toEqual({ chatFixoNaEsquerda: false, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: false, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico", chatNoModoInvisivel: null });
 
     localStorage.setItem(CHAVE_DAS_PREFERENCIAS_DA_TELA, "[true]");
     rerender();
-    expect(result.current.preferencias).toEqual({ chatFixoNaEsquerda: false, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: false, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico" });
+    expect(result.current.preferencias).toEqual({ chatFixoNaEsquerda: false, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: false, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico", chatNoModoInvisivel: null });
 
     localStorage.setItem(CHAVE_DAS_PREFERENCIAS_DA_TELA, JSON.stringify({ chatFixoNaEsquerda: "sim", visualizadorDeCodigo: true }));
     rerender();
-    expect(result.current.preferencias).toEqual({ chatFixoNaEsquerda: false, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: true, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico" });
+    expect(result.current.preferencias).toEqual({ chatFixoNaEsquerda: false, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: true, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico", chatNoModoInvisivel: null });
 
     // Mudar a partir de um valor inválido grava um JSON válido.
     act(() => result.current.mudarPreferencias({ chatFixoNaEsquerda: true }));
-    expect(lerGuardado()).toEqual({ chatFixoNaEsquerda: true, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: true, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico" });
+    expect(lerGuardado()).toEqual({ chatFixoNaEsquerda: true, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: true, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico", chatNoModoInvisivel: null });
   });
 
   it("a largura do chat fixo: tipo errado vale o padrão; fora de 280 a 640, é limitada ao intervalo", () => {
@@ -82,8 +82,9 @@ describe("usePreferenciasDaTela", () => {
       manterBixinhosAteLimpar: false,
       minimapaVisivel: false,
       controlesDasJanelas: "automatico",
+      chatNoModoInvisivel: null,
     });
-    expect(lerGuardado()).toEqual({ chatFixoNaEsquerda: false, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: false, larguraDoChatFixo: 480, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico" });
+    expect(lerGuardado()).toEqual({ chatFixoNaEsquerda: false, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: false, larguraDoChatFixo: 480, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico", chatNoModoInvisivel: null });
 
     act(() => result.current.mudarPreferencias({ larguraDoChatFixo: 9999 }));
     expect(result.current.preferencias.larguraDoChatFixo).toBe(640);
@@ -115,6 +116,7 @@ describe("usePreferenciasDaTela", () => {
       manterBixinhosAteLimpar: false,
       minimapaVisivel: false,
       controlesDasJanelas: "automatico",
+      chatNoModoInvisivel: null,
     });
 
     // Gravar o mesmo lado não grava de novo.
@@ -179,6 +181,29 @@ describe("usePreferenciasDaTela", () => {
     gravar.mockRestore();
   });
 
+  it("guarda a posição do chat no modo invisível e descarta geometria inválida", () => {
+    const { result } = renderHook(() => usePreferenciasDaTela());
+    expect(result.current.preferencias.chatNoModoInvisivel).toBeNull();
+
+    const geometria = { x: 10, y: 20, largura: 500, altura: 300 };
+    act(() => result.current.mudarPreferencias({ chatNoModoInvisivel: geometria }));
+    expect(result.current.preferencias.chatNoModoInvisivel).toEqual(geometria);
+    expect(lerGuardado()).toMatchObject({ chatNoModoInvisivel: geometria });
+
+    // A mesma geometria (outro objeto) não grava de novo.
+    const gravar = vi.spyOn(Storage.prototype, "setItem");
+    act(() => result.current.mudarPreferencias({ chatNoModoInvisivel: { ...geometria } }));
+    expect(gravar).not.toHaveBeenCalled();
+    gravar.mockRestore();
+
+    act(() => result.current.mudarPreferencias({ chatNoModoInvisivel: null }));
+    expect(result.current.preferencias.chatNoModoInvisivel).toBeNull();
+
+    localStorage.setItem(CHAVE_DAS_PREFERENCIAS_DA_TELA, JSON.stringify({ chatNoModoInvisivel: { x: "a" } }));
+    const outra = renderHook(() => usePreferenciasDaTela());
+    expect(outra.result.current.preferencias.chatNoModoInvisivel).toBeNull();
+  });
+
   it("o retrato é estável: sem mudança, o mesmo objeto a cada render", () => {
     const { result, rerender } = renderHook(() => usePreferenciasDaTela());
     const primeiro = result.current.preferencias;
@@ -214,7 +239,7 @@ describe("usePreferenciasDaTela", () => {
       window.dispatchEvent(new StorageEvent("storage", { key: CHAVE_DAS_PREFERENCIAS_DA_TELA }));
     });
 
-    expect(result.current.preferencias).toEqual({ chatFixoNaEsquerda: true, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: true, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico" });
+    expect(result.current.preferencias).toEqual({ chatFixoNaEsquerda: true, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: true, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico", chatNoModoInvisivel: null });
 
     // Outra aba limpou tudo (key nula): volta ao padrão.
     act(() => {
@@ -222,6 +247,6 @@ describe("usePreferenciasDaTela", () => {
       window.dispatchEvent(new StorageEvent("storage", { key: null }));
     });
 
-    expect(result.current.preferencias).toEqual({ chatFixoNaEsquerda: false, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: false, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico" });
+    expect(result.current.preferencias).toEqual({ chatFixoNaEsquerda: false, ladoDoChatFixo: "esquerda", visualizadorDeCodigo: false, larguraDoChatFixo: 360, manterBixinhosAteLimpar: false, minimapaVisivel: false, controlesDasJanelas: "automatico", chatNoModoInvisivel: null });
   });
 });

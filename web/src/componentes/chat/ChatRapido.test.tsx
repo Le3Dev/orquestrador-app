@@ -217,6 +217,8 @@ describe("ChatRapido · modo invisível", () => {
   function ponteAtiva(capturarTela = vi.fn().mockResolvedValue(FOTO), escutaDisponivel = false) {
     let ouvinte: ((ativo: boolean) => void) | null = null;
     let ouvinteDeQuadro: ((captura: typeof QUADRO) => void) | null = null;
+    let ouvinteDeAtalho: ((acao: string) => void) | null = null;
+    let ouvinteDeOculto: ((oculto: boolean) => void) | null = null;
     const cancelarQuadro = vi.fn();
     const modoInvisivel = {
       escutaDisponivel,
@@ -233,6 +235,16 @@ describe("ChatRapido · modo invisível", () => {
         ouvinte = callback;
         return () => undefined;
       }),
+      definirFocavel: vi.fn().mockResolvedValue(undefined),
+      alternar: vi.fn().mockResolvedValue(undefined),
+      aoAtalho: vi.fn((callback: (acao: string) => void) => {
+        ouvinteDeAtalho = callback;
+        return () => undefined;
+      }),
+      aoMudarOculto: vi.fn((callback: (oculto: boolean) => void) => {
+        ouvinteDeOculto = callback;
+        return () => undefined;
+      }),
     };
     janelaComPonte.electron = { desktop: true, janela: {}, modoInvisivel };
     return {
@@ -241,8 +253,168 @@ describe("ChatRapido · modo invisível", () => {
       ativar: () => act(() => ouvinte?.(true)),
       desativar: () => act(() => ouvinte?.(false)),
       quadroDoAtalho: (captura = QUADRO) => act(() => ouvinteDeQuadro?.(captura)),
+      atalho: (acao: string) => act(() => ouvinteDeAtalho?.(acao)),
+      mudarOculto: (oculto: boolean) => act(() => ouvinteDeOculto?.(oculto)),
     };
   }
+
+  describe("foco e chat móvel", () => {
+    // O jsdom não tem PointerEvent: sem ele, o fireEvent manda um Event sem clientX nem pointerId.
+    class EventoDePonteiroFalso extends MouseEvent {
+      readonly pointerId: number;
+      constructor(tipo: string, inicio: PointerEventInit = {}) {
+        super(tipo, inicio);
+        this.pointerId = inicio.pointerId ?? 0;
+      }
+    }
+    beforeEach(() => vi.stubGlobal("PointerEvent", EventoDePonteiroFalso));
+    afterEach(() => {
+      vi.unstubAllGlobals();
+      localStorage.clear();
+    });
+
+    const areas = () => [...document.querySelectorAll("[data-area-clicavel]")];
+    const guardado = () =>
+      JSON.parse(localStorage.getItem(CHAVE_DAS_PREFERENCIAS_DA_TELA) ?? "{}") as {
+        chatNoModoInvisivel: { x: number; y: number; largura: number; altura: number } | null;
+      };
+    const gravarGeometria = () =>
+      localStorage.setItem(
+        CHAVE_DAS_PREFERENCIAS_DA_TELA,
+        JSON.stringify({ chatNoModoInvisivel: { x: 100, y: 100, largura: 500, altura: 300 } }),
+      );
+
+    it("clicar no campo deixa a janela focável e envio, Esc e perder o foco a devolvem", async () => {
+      vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+      const { modoInvisivel, ativar } = ponteAtiva();
+      const { campo } = renderizar();
+      ativar();
+
+      fireEvent.pointerDown(campo);
+      await waitFor(() => expect(modoInvisivel.definirFocavel).toHaveBeenCalledWith(true));
+      await waitFor(() => expect(campo).toHaveFocus());
+
+      fireEvent.keyDown(campo, { key: "Escape" });
+      expect(modoInvisivel.definirFocavel).toHaveBeenLastCalledWith(false);
+
+      modoInvisivel.definirFocavel.mockClear();
+      fireEvent.change(campo, { target: { value: "Oi" } });
+      fireEvent.keyDown(campo, { key: "Enter" });
+      await waitFor(() => expect(modoInvisivel.definirFocavel).toHaveBeenCalledWith(false));
+
+      modoInvisivel.definirFocavel.mockClear();
+      fireEvent.blur(campo, { relatedTarget: document.body });
+      expect(modoInvisivel.definirFocavel).toHaveBeenCalledWith(false);
+    });
+
+    it("fora do modo invisível o foco nunca mexe na janela", () => {
+      const { modoInvisivel } = ponteAtiva();
+      const { campo } = renderizar();
+      fireEvent.pointerDown(campo);
+      fireEvent.keyDown(campo, { key: "Escape" });
+      expect(modoInvisivel.definirFocavel).not.toHaveBeenCalled();
+    });
+
+    it("a ação focar-campo foca o campo", () => {
+      const { ativar, atalho } = ponteAtiva();
+      const { campo } = renderizar();
+      ativar();
+      atalho("focar-campo");
+      expect(campo).toHaveFocus();
+    });
+
+    it("marca as áreas sólidas como clicáveis: conversa, barra, campo e alças", () => {
+      const { ativar } = ponteAtiva();
+      renderizar({ ...OCIOSO, mensagens: [mensagem("u1", "usuario", { texto: "Oi" })] });
+      ativar();
+      const marcadas = areas();
+      expect(marcadas).toContain(screen.getByTestId("barra-do-chat-movel"));
+      expect(marcadas).toContain(screen.getByRole("button", { name: "Redimensionar o chat" }));
+      expect(marcadas).toContain(screen.getByTestId("composer-do-chat").parentElement);
+      expect(marcadas).toContain(screen.getByRole("region", { name: "Conversa com o Claude" }));
+    });
+
+    it("sem o modo, não há alça de mover nem de redimensionar", () => {
+      ponteAtiva();
+      renderizar();
+      expect(screen.queryByRole("button", { name: "Mover o chat" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Redimensionar o chat" })).not.toBeInTheDocument();
+    });
+
+    it("Ctrl+Alt+setas movem o chat de 40 em 40 px, o lugar fica gravado e o botão volta ao padrão", () => {
+      const { ativar, atalho } = ponteAtiva();
+      gravarGeometria();
+      renderizar();
+      ativar();
+      const chat = screen.getByTestId("chat-rapido");
+
+      atalho("mover-direita");
+      atalho("mover-direita");
+      atalho("mover-cima");
+      expect(guardado().chatNoModoInvisivel).toEqual({ x: 180, y: 60, largura: 500, altura: 300 });
+      expect(chat.style.left).toBe("180px");
+      expect(chat).not.toHaveClass("chat-rapido-movel-padrao");
+
+      fireEvent.click(screen.getByRole("button", { name: "Voltar ao lugar padrão" }));
+      expect(chat).toHaveClass("chat-rapido-movel-padrao");
+      expect(guardado().chatNoModoInvisivel).toBeNull();
+    });
+
+    it("arrastar a alça move o chat dentro da tela e grava ao soltar; ocultar o overlay cancela o arraste", () => {
+      const { ativar, mudarOculto } = ponteAtiva();
+      gravarGeometria();
+      renderizar({ ...OCIOSO, mensagens: [mensagem("u1", "usuario", { texto: "Oi" })] });
+      ativar();
+      const alca = screen.getByRole("button", { name: "Mover o chat" });
+      const chat = screen.getByTestId("chat-rapido");
+
+      fireEvent.pointerDown(alca, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+      fireEvent.pointerMove(alca, { pointerId: 1, clientX: 60, clientY: 40 });
+      expect(chat.style.left).toBe("150px");
+      fireEvent.pointerUp(alca, { pointerId: 1 });
+      expect(guardado().chatNoModoInvisivel).toEqual({ x: 150, y: 130, largura: 500, altura: 300 });
+
+      // Passando da borda, o chat para na tela.
+      fireEvent.pointerDown(alca, { button: 0, pointerId: 2, clientX: 0, clientY: 0 });
+      fireEvent.pointerMove(alca, { pointerId: 2, clientX: -5000, clientY: -5000 });
+      expect(chat.style.left).toBe("0px");
+      expect(chat.style.top).toBe("0px");
+      // Ocultar o overlay no meio do arraste cancela: o chat volta ao que estava gravado.
+      mudarOculto(true);
+      expect(chat.style.left).toBe("150px");
+      expect(guardado().chatNoModoInvisivel).toEqual({ x: 150, y: 130, largura: 500, altura: 300 });
+    });
+
+    it("redimensionar pela alça do canto muda a largura e a altura, respeitando o mínimo", () => {
+      const { ativar } = ponteAtiva();
+      gravarGeometria();
+      renderizar();
+      ativar();
+      const alca = screen.getByRole("button", { name: "Redimensionar o chat" });
+      fireEvent.pointerDown(alca, { button: 0, pointerId: 1, clientX: 0, clientY: 0 });
+      fireEvent.pointerMove(alca, { pointerId: 1, clientX: 50, clientY: -100 });
+      fireEvent.pointerUp(alca, { pointerId: 1 });
+      expect(guardado().chatNoModoInvisivel).toEqual({ x: 100, y: 100, largura: 550, altura: 200 });
+
+      fireEvent.pointerDown(alca, { button: 0, pointerId: 2, clientX: 0, clientY: 0 });
+      fireEvent.pointerMove(alca, { pointerId: 2, clientX: -900, clientY: -900 });
+      fireEvent.pointerUp(alca, { pointerId: 2 });
+      expect(guardado().chatNoModoInvisivel).toEqual({ x: 100, y: 100, largura: 320, altura: 160 });
+    });
+
+    it("rolar-abaixo e rolar-acima rolam a conversa em 80% da altura visível", () => {
+      const { ativar, atalho } = ponteAtiva();
+      renderizar({ ...OCIOSO, mensagens: [mensagem("u1", "usuario", { texto: "Oi" })] });
+      ativar();
+      const lista = document.querySelector(".mensagens-do-chat") as HTMLElement;
+      Object.defineProperty(lista, "clientHeight", { configurable: true, value: 100 });
+      lista.scrollTop = 0;
+      atalho("rolar-abaixo");
+      expect(lista.scrollTop).toBe(80);
+      atalho("rolar-acima");
+      expect(lista.scrollTop).toBe(0);
+    });
+  });
 
   describe("capturar agora", () => {
     it("o atalho guarda o quadro como anexo pendente e o envio não tira outro print", async () => {
