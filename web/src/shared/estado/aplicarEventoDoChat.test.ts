@@ -18,7 +18,7 @@ function mensagem(id: string, papel: MensagemDoChat["papel"], alteracoes: Partia
     id,
     papel,
     texto: "",
-    imagens: [],
+    anexos: [],
     criadaEm: EM,
     situacao: papel === "usuario" ? "concluida" : "respondendo",
     acoes: [],
@@ -319,6 +319,12 @@ describe("textoParaMostrar", () => {
     expect(
       textoParaMostrar("A\n```acao-do-app\n{}\n```\nB\n```pergunta-do-app\n{}\n```\nC", false),
     ).toBe("A\nB\nC");
+  });
+
+  it("esconde o bloco de prévias a fechar, inclusive pela metade durante a resposta", () => {
+    expect(textoParaMostrar("Feito.\n\n```previa-do-app\n{\"fechar\":[", true)).toBe("Feito.");
+    expect(textoParaMostrar("Feito.\n```previa-do-app\n{}\n```\nFim", false)).toBe("Feito.\nFim");
+    expect(textoParaMostrar("Texto\n```previa", true)).toBe("Texto");
   });
 
   it("não mexe em outros blocos de código", () => {

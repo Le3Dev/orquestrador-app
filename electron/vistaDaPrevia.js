@@ -402,6 +402,7 @@ function criarVistasDaPrevia({
         session: sessao,
         // Sem preload: a página externa não enxerga nada do app.
         nodeIntegration: false,
+        spellcheck: false,
         nodeIntegrationInWorker: false,
         nodeIntegrationInSubFrames: false,
         contextIsolation: true,

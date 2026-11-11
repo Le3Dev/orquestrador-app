@@ -1,5 +1,6 @@
 import { memo, type ReactNode, useEffect, useState } from "react";
 
+import { ehAnexoDeImagem } from "../../shared/anexos";
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { DadosDaConfiguracao, NomeDaPredefinicao, SinalDeVida } from "../../shared/api/tipos";
 import { nomeDoBixinho } from "../../shared/canvas/bixinhos";
@@ -25,6 +26,7 @@ import {
   idCurto,
 } from "../../shared/formatacao";
 import { useRelogio } from "../../shared/hooks/useRelogio";
+import { ChipDeAnexo } from "../ChipDeAnexo";
 import { IconeAlerta, IconeCoracao, IconeOrquestrador, IconeRaio } from "../Icones";
 import { CartaoDePergunta } from "../chat/CartaoDePergunta";
 import { TextoFormatado } from "../TextoFormatado";
@@ -294,17 +296,27 @@ const Turno = memo(function Turno({
       )}
       {turno.anexos.length > 0 && (
         <div className="anexos-do-turno">
-          {turno.anexos.map((anexo) => (
-            <a
-              key={anexo.id}
-              href={api.enderecoDoAnexo(orquestradorId, anexo.arquivo)}
-              target="_blank"
-              rel="noreferrer"
-              title={`${anexo.nome} — abrir em tamanho real`}
-            >
-              <img src={api.enderecoDoAnexo(orquestradorId, anexo.arquivo)} alt={anexo.nome} loading="lazy" />
-            </a>
-          ))}
+          {turno.anexos.map((anexo) =>
+            ehAnexoDeImagem(anexo) ? (
+              <a
+                key={anexo.id}
+                href={api.enderecoDoAnexo(orquestradorId, anexo.arquivo)}
+                target="_blank"
+                rel="noreferrer"
+                title={`${anexo.nome} — abrir em tamanho real`}
+              >
+                <img src={api.enderecoDoAnexo(orquestradorId, anexo.arquivo)} alt={anexo.nome} loading="lazy" />
+              </a>
+            ) : (
+              // Documento: o servidor o entrega como download; o `download` do link devolve o nome original.
+              <ChipDeAnexo
+                key={anexo.id}
+                nome={anexo.nome}
+                tamanhoEmBytes={anexo.tamanhoEmBytes}
+                href={api.enderecoDoAnexo(orquestradorId, anexo.arquivo)}
+              />
+            ),
+          )}
         </div>
       )}
       <div className="flex flex-col">
@@ -395,6 +407,9 @@ interface Props {
  * quando a conversa, o sinal de vida ou os dados deste Orquestrador mudam —
  * não no arraste do terminal nem com eventos de outros Orquestradores.
  */
+/** Quantos pedidos a transcrição desenha de uma vez; "Mostrar anteriores" revela mais esse tanto. */
+const TURNOS_POR_PAGINA = 20;
+
 export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
   orquestradorId,
   nome,
@@ -409,6 +424,9 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
   acoesDoPlano,
   aoResponderPergunta,
 }: Props) {
+  const [quantosTurnos, setQuantosTurnos] = useState(TURNOS_POR_PAGINA);
+  // Só os últimos turnos são desenhados (poupa memória); os demais continuam no estado.
+  const primeiroVisivel = Math.max(0, turnos.length - quantosTurnos);
   const trabalhando = turnos.some((turno) => turno.situacao === "em_andamento");
   const avisos = [
     avisosDaConversaNova.worktreeComAlteracoes ? "a worktree tem alterações da conversa anterior" : null,
@@ -451,7 +469,18 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
           )}
         </div>
       )}
-      {turnos.map((turno, indice) => (
+      {primeiroVisivel > 0 && (
+        <button
+          type="button"
+          className="btn btn-sm btn-outline self-center"
+          onClick={() => setQuantosTurnos((atual) => atual + TURNOS_POR_PAGINA)}
+        >
+          {`Mostrar ${Math.min(primeiroVisivel, TURNOS_POR_PAGINA)} anteriores`}
+        </button>
+      )}
+      {turnos.slice(primeiroVisivel).map((turno, posicao) => {
+        const indice = primeiroVisivel + posicao;
+        return (
         <Turno
           key={turno.id}
           turno={turno}
@@ -466,7 +495,8 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
           acoesDoPlano={acoesDoPlano}
           aoResponderPergunta={aoResponderPergunta}
         />
-      ))}
+        );
+      })}
     </div>
   );
 });

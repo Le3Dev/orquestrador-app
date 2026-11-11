@@ -23,7 +23,10 @@ export interface JanelaDaCota {
   situacao: string;
 }
 
-export type SituacaoFinalDoSubagente = "concluido" | "falhou" | "cancelado";
+/** De onde veio um endereço local anunciado: da resposta final do Orquestrador ou da saída de uma ferramenta. */
+export type OrigemDoEnderecoLocal = "resposta" | "ferramenta";
+
+export type SituacaoFinalDoSubagente ="concluido" | "falhou" | "cancelado";
 
 export type SituacaoDaTarefa = "pendente" | "em_andamento" | "concluida";
 
@@ -73,10 +76,18 @@ export type EventoDoMotor =
   /**
    * Um endereço local (ex.: `http://localhost:5173`) apareceu na saída de uma
    * ferramenta, do Orquestrador ou de um Subagente: em geral, um servidor de
-   * desenvolvimento que acabou de subir. A tela o mostra numa prévia ao vivo.
-   * Chega uma vez por endereço em cada turno, já normalizado.
+   * desenvolvimento que acabou de subir. Chega uma vez por endereço e por
+   * origem em cada turno, já normalizado. Um endereço anunciado como
+   * "ferramenta" e depois citado na resposta final chega de novo, como
+   * "resposta".
+   *
+   * `origem`: "resposta" quando a resposta final do Orquestrador cita o
+   * endereço (o agente quer que o usuário veja a página); "ferramenta" quando
+   * ele veio da saída de uma ferramenta, de um comando ou do relatório de um
+   * Subagente (em geral uma verificação técnica). Ausente nos eventos
+   * gravados antes do campo: vale "ferramenta".
    */
-  | { tipo: "endereco_local_detectado"; url: string }
+  | { tipo: "endereco_local_detectado"; url: string; origem?: OrigemDoEnderecoLocal }
   /**
    * O Orquestrador atualizou a lista de tarefas do trabalho (`TodoWrite`):
    * a lista inteira, que substitui a anterior. Nunca vem vazia.
@@ -121,6 +132,12 @@ export type EventoDeTurno =
        * eventos gravados antes do campo: valem [].
        */
       perguntas: PerguntaDoApp[];
+      /**
+       * Endereços das prévias ao vivo que o Orquestrador pediu para fechar na
+       * resposta final (bloco ```previa-do-app), normalizados e já fora de
+       * `resposta`: até 10. Ausente ou vazio quando não pediu.
+       */
+      previasParaFechar?: string[];
     }
   | { tipo: "turno_cancelado" }
   | { tipo: "turno_falhou"; motivo: string }

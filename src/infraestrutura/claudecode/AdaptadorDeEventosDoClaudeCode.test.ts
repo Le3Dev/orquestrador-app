@@ -407,7 +407,7 @@ describe("AdaptadorDeEventosDoClaudeCode: endereços locais", () => {
 
     const [url] = adaptador.retirarCandidatos();
     expect(url).toBeDefined();
-    expect(adaptador.confirmarEndereco(url ?? "")).toEqual([{ tipo: "endereco_local_detectado", url }]);
+    expect(adaptador.confirmarEndereco(url ?? "")).toEqual([{ tipo: "endereco_local_detectado", url, origem: "ferramenta" }]);
     expect(adaptador.confirmarEndereco(url ?? "")).toEqual([]);
   });
 
@@ -573,9 +573,93 @@ describe("AdaptadorDeEventosDoClaudeCode: endereços locais", () => {
 
     expect(adaptador.retirarCandidatos()).toEqual(["http://localhost:4173"]);
     expect(adaptador.confirmarEndereco("http://localhost:4173")).toEqual([
-      { tipo: "endereco_local_detectado", url: "http://localhost:4173" },
+      { tipo: "endereco_local_detectado", url: "http://localhost:4173", origem: "ferramenta" },
     ]);
     expect(adaptador.confirmarEndereco("http://localhost:4173")).toEqual([]);
+  });
+
+  it("anuncia com a origem ferramenta o endereço da saída de um comando e o do relatório de um subagente", () => {
+    const adaptador = new AdaptadorDeEventosDoClaudeCode();
+    adaptador.traduzir({
+      type: "user",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_result", tool_use_id: "x", content: VITE }] },
+    });
+    adaptador.traduzir({
+      type: "assistant",
+      parent_tool_use_id: "chamada-do-subagente",
+      agent_id: "t1",
+      message: { content: [{ type: "text", text: "A API subiu em http://localhost:3000" }] },
+    });
+    adaptador.traduzir({
+      type: "user",
+      parent_tool_use_id: null,
+      tool_use_result: { status: "completed", agentId: "t1", content: [{ type: "text", text: "Relatório: http://localhost:3001/saude" }] },
+      message: { content: [{ type: "tool_result", tool_use_id: "chamada-do-subagente" }] },
+    });
+
+    const urls = adaptador.retirarCandidatos();
+    expect(urls).toEqual(["http://localhost:5173", "http://localhost:3000"]);
+    for (const url of urls) {
+      expect(adaptador.confirmarEndereco(url)).toEqual([{ tipo: "endereco_local_detectado", url, origem: "ferramenta" }]);
+    }
+  });
+
+  it("anuncia com a origem resposta o endereço citado na resposta final", () => {
+    const adaptador = new AdaptadorDeEventosDoClaudeCode();
+    adaptador.traduzir({ type: "result", subtype: "success", is_error: false, result: "Veja em http://localhost:8080/app" });
+
+    expect(adaptador.retirarCandidatos()).toEqual(["http://localhost:8080/app"]);
+    expect(adaptador.confirmarEndereco("http://localhost:8080/app")).toEqual([
+      { tipo: "endereco_local_detectado", url: "http://localhost:8080/app", origem: "resposta" },
+    ]);
+    expect(adaptador.confirmarEndereco("http://localhost:8080/app")).toEqual([]);
+  });
+
+  it("reanuncia com a origem resposta o endereço já anunciado por ferramenta, uma vez só", () => {
+    const adaptador = new AdaptadorDeEventosDoClaudeCode();
+    adaptador.traduzir({
+      type: "user",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_result", tool_use_id: "x", content: VITE }] },
+    });
+    expect(adaptador.retirarCandidatos()).toEqual(["http://localhost:5173"]);
+    expect(adaptador.confirmarEndereco("http://localhost:5173")).toEqual([
+      { tipo: "endereco_local_detectado", url: "http://localhost:5173", origem: "ferramenta" },
+    ]);
+    // Citado de novo por uma ferramenta: nada de novo.
+    adaptador.traduzir({
+      type: "user",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_result", tool_use_id: "y", content: VITE }] },
+    });
+    expect(adaptador.retirarCandidatos()).toEqual([]);
+
+    adaptador.traduzir({ type: "result", subtype: "success", is_error: false, result: "Abra http://127.0.0.1:5173/ para ver." });
+
+    expect(adaptador.retirarCandidatos()).toEqual(["http://localhost:5173"]);
+    expect(adaptador.confirmarEndereco("http://localhost:5173")).toEqual([
+      { tipo: "endereco_local_detectado", url: "http://localhost:5173", origem: "resposta" },
+    ]);
+    expect(adaptador.confirmarEndereco("http://localhost:5173")).toEqual([]);
+    expect(adaptador.retirarCandidatos()).toEqual([]);
+  });
+
+  it("o bloco previa-do-app da resposta só fecha: os endereços dele não são citados", () => {
+    const adaptador = new AdaptadorDeEventosDoClaudeCode();
+    adaptador.traduzir({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "text", text: 'Feito.\n```previa-do-app\n{"fechar":["http://localhost:5173"]}\n```' }] },
+    });
+    adaptador.traduzir({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: 'A API na porta 3000 respondeu 200.\n```previa-do-app\n{"fechar":["http://localhost:5173"]}\n```',
+    });
+
+    expect(adaptador.retirarCandidatos()).toEqual([]);
   });
 
   it("não vê endereço nos turnos gravados, que não sobem servidor", () => {

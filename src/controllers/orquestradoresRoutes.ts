@@ -6,7 +6,6 @@ import { z } from "zod";
 import { ArmazemDeAnexosEmArquivo, ehNomeDeAnexoValido } from "../infraestrutura/arquivos/ArmazemDeAnexosEmArquivo";
 import { ErroDeCaminho, ExploradorDePastas } from "../infraestrutura/arquivos/ExploradorDePastas";
 import { CanalDeEventos } from "../infraestrutura/sse/CanalDeEventos";
-import { MAXIMO_DE_IMAGENS_POR_MENSAGEM, TAMANHO_MAXIMO_DA_IMAGEM, TIPOS_DE_IMAGEM } from "../orquestracao/Anexo";
 import { ConfiguracaoDoOrquestrador } from "../orquestracao/ConfiguracaoDoOrquestrador";
 import { ErroDeOrquestracao } from "../orquestracao/ErroDeOrquestracao";
 import {
@@ -46,6 +45,8 @@ import { RepositorioDeOrquestradores } from "../orquestracao/RepositorioDeOrques
 import { RepositorioDePreferencias } from "../orquestracao/RepositorioDePreferencias";
 import { EsforcoHerdadoDosPapeis, ServicoDeOrquestracao } from "../orquestracao/ServicoDeOrquestracao";
 import { UsoDeTokens } from "../orquestracao/UsoDeTokens";
+import { esquemaDasPreviasAbertas } from "../previas/PreviaDoApp";
+import { enviarAnexo, esquemaDosAnexosDaMensagem } from "./anexosHttp";
 import { criarRota, responderErroGenerico, STATUS_DA_ORQUESTRACAO } from "./respostasHttp";
 
 interface Dependencias {
@@ -227,24 +228,16 @@ const esquemaDeMensagem = z.object({
     .max(TAMANHO_MAXIMO_DA_MENSAGEM, {
       error: `A mensagem deve ter até ${TAMANHO_MAXIMO_DA_MENSAGEM} caracteres.`,
     }),
-  imagens: z
-    .array(
-      z.object({
-        nome: z.string().max(200),
-        tipoDeMidia: z.enum(TIPOS_DE_IMAGEM, { error: "Só dá para anexar imagens PNG, JPEG, GIF ou WebP." }),
-        // Base64 ocupa 4/3 do tamanho original.
-        base64: z.string().max(Math.ceil((TAMANHO_MAXIMO_DA_IMAGEM * 4) / 3) + 16, {
-          error: `Cada imagem pode ter até ${TAMANHO_MAXIMO_DA_IMAGEM / 1024 / 1024} MB.`,
-        }),
-      }),
-    )
-    .max(MAXIMO_DE_IMAGENS_POR_MENSAGEM, { error: `Anexe até ${MAXIMO_DE_IMAGENS_POR_MENSAGEM} imagens por mensagem.` })
-    .default([]),
+  anexos: esquemaDosAnexosDaMensagem,
   modo: z.enum(MODOS_DO_TURNO, { error: "Modo do pedido inválido." }).default("execucao"),
   itensLigados: esquemaDosItensLigados,
+  previasAbertas: esquemaDasPreviasAbertas,
 });
 
-/** Pedido para a fila: só texto, modo e os itens ligados (imagens não entram na fila). */
+const MENSAGEM_DA_FILA_SEM_ANEXOS =
+  "A fila aceita só texto: envie os anexos quando o orquestrador estiver livre.";
+
+/** Pedido para a fila: só texto, modo e os itens ligados (anexos não entram na fila). */
 const esquemaDoPedidoNaFila = z.object({
   texto: z
     .string({ error: "Escreva o pedido." })
@@ -254,13 +247,12 @@ const esquemaDoPedidoNaFila = z.object({
       error: `O pedido deve ter até ${TAMANHO_MAXIMO_DA_MENSAGEM} caracteres.`,
     }),
   modo: z.enum(MODOS_DO_TURNO, { error: "Modo do pedido inválido." }).default("execucao"),
-  // Recusadas em vez de descartadas em silêncio.
-  imagens: z
-    .array(z.unknown())
-    .max(0, { error: "A fila aceita só texto: envie as imagens quando o orquestrador estiver livre." })
-    .optional(),
+  // Recusados em vez de descartados em silêncio (`imagens` é o nome que clientes antigos usavam).
+  anexos: z.array(z.unknown()).max(0, { error: MENSAGEM_DA_FILA_SEM_ANEXOS }).optional(),
+  imagens: z.array(z.unknown()).max(0, { error: MENSAGEM_DA_FILA_SEM_ANEXOS }).optional(),
   // Congelados no pedido: ele sai mais tarde com o contexto ligado na hora de enfileirar.
   itensLigados: esquemaDosItensLigados,
+  previasAbertas: esquemaDasPreviasAbertas,
 });
 
 const esquemaDeAprovacaoDoPlano = z.object({
@@ -633,17 +625,20 @@ export function criarOrquestradoresRoutes({
   rotas.post(
     "/orquestradores/:id/mensagens",
     rota(async (requisicao, resposta) => {
-      const { texto, imagens, modo, itensLigados } = esquemaDeMensagem.parse(requisicao.body);
+      const { texto, anexos: anexosRecebidos, modo, itensLigados, previasAbertas } = esquemaDeMensagem.parse(
+        requisicao.body,
+      );
       const { turnoId } = await servico.enviarMensagem(
         requisicao.params.id,
         texto,
-        imagens.map((imagem) => ({
-          nome: imagem.nome,
-          tipoDeMidia: imagem.tipoDeMidia,
-          conteudo: Buffer.from(imagem.base64, "base64"),
+        anexosRecebidos.map((anexo) => ({
+          nome: anexo.nome,
+          tipoDeMidia: anexo.tipoDeMidia,
+          conteudo: Buffer.from(anexo.base64, "base64"),
         })),
         modo,
         itensLigados,
+        previasAbertas,
       );
       resposta.status(202).json({ turnoId });
     }),
@@ -656,8 +651,14 @@ export function criarOrquestradoresRoutes({
   rotas.post(
     "/orquestradores/:id/fila",
     rota(async (requisicao, resposta) => {
-      const { texto, modo, itensLigados } = esquemaDoPedidoNaFila.parse(requisicao.body ?? {});
-      const { pedidoId } = await servico.enfileirarPedido(requisicao.params.id, texto, modo, itensLigados);
+      const { texto, modo, itensLigados, previasAbertas } = esquemaDoPedidoNaFila.parse(requisicao.body ?? {});
+      const { pedidoId } = await servico.enfileirarPedido(
+        requisicao.params.id,
+        texto,
+        modo,
+        itensLigados,
+        previasAbertas,
+      );
       resposta.status(201).json({ pedidoId });
     }),
   );
@@ -725,7 +726,10 @@ export function criarOrquestradoresRoutes({
     }),
   );
 
-  /** A imagem anexada a uma mensagem, para as miniaturas do terminal. */
+  /**
+   * O arquivo anexado a uma mensagem: a imagem inline, para as miniaturas do
+   * terminal; o documento sempre como download (`enviarAnexo`).
+   */
   rotas.get(
     "/orquestradores/:id/anexos/:arquivo",
     rota<{ id: string; arquivo: string }>((requisicao, resposta) => {
@@ -734,11 +738,7 @@ export function criarOrquestradoresRoutes({
       if (repositorio.buscarPorId(id) === null || !ehNomeDeAnexoValido(arquivo)) {
         throw new ErroDeOrquestracao("nao_encontrado", "Anexo não encontrado.");
       }
-      resposta.sendFile(anexos.caminhoDe(id, arquivo), { maxAge: "1d" }, (erro) => {
-        if (erro !== undefined && !resposta.headersSent) {
-          resposta.status(404).json({ erro: "Anexo não encontrado." });
-        }
-      });
+      enviarAnexo(resposta, arquivo, anexos.caminhoDe(id, arquivo));
     }),
   );
 

@@ -2,13 +2,14 @@ import { Handle, type NodeProps, NodeToolbar, Position } from "@xyflow/react";
 import { memo } from "react";
 
 import { aparenciaDoBixinho, papelQueNomeia } from "../../shared/canvas/bixinhos";
-import { useCanvas } from "../../shared/canvas/contexto";
+import { type AcoesDoCanvas, useCanvas } from "../../shared/canvas/contexto";
 import { iconeDaFerramenta } from "../../shared/canvas/iconesDeFerramenta";
 import { type Ancora, type NoBixinho as TipoDoNo, subagentesVisiveis } from "../../shared/canvas/nos";
 import type { SubagenteNaTela } from "../../shared/estado/aplicarEvento";
 import { formatarDecorrido, formatarTokens, idCurto } from "../../shared/formatacao";
 import { useRelogio } from "../../shared/hooks/useRelogio";
 import { Etiqueta } from "../Etiqueta";
+import { IconeFechar } from "../Icones";
 import { TextoFormatado } from "../TextoFormatado";
 import { Bixinho, IconeDaFerramenta } from "./Bixinho";
 
@@ -75,6 +76,10 @@ const ANCORAS_DO_BIXINHO: readonly { id: Ancora; posicao: Position; classe: stri
 
 interface PropsDoConteudo {
   subagente: SubagenteNaTela;
+  /** O Orquestrador dono do bixinho: vai junto com o id do Subagente ao fechar. */
+  orquestradorId: string;
+  /** Fecha o bixinho parado (a ação do canvas, estável para o `memo` valer). Só visual: o histórico continua. */
+  aoFechar: AcoesDoCanvas["fecharBixinho"];
   selecionado: boolean;
   /** Saindo sozinho do canvas (o Subagente terminou): encolhe e some com fade. */
   saindo?: boolean;
@@ -88,6 +93,8 @@ interface PropsDoConteudo {
  */
 export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
   subagente,
+  orquestradorId,
+  aoFechar,
   selecionado,
   saindo = false,
 }: PropsDoConteudo) {
@@ -111,6 +118,7 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
   const papelNoRotulo =
     papelQueDaNome === null && subagente.papel !== null && subagente.papel !== "executor" ? subagente.papel : null;
   const dica = "Clique para ver a tarefa e o relatório";
+  const nomeParaFechar = papelQueDaNome ?? aparencia.nome;
 
   return (
     <>
@@ -132,6 +140,22 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
         <div className="balao-do-bixinho">
           <span className={executando ? "cursor" : ""}>{fala}</span>
         </div>
+        {/* Quem ainda executa não fecha. Quem falhou fica até o usuário ver o erro e fechar; o clique não chega
+            ao nó (não abre a ficha) e o `nodrag` impede o arraste. */}
+        {!executando && (
+          <button
+            type="button"
+            className="fechar-do-bixinho nodrag"
+            aria-label={`Fechar subagente ${nomeParaFechar}`}
+            title="Fechar subagente (o histórico continua no terminal)"
+            onClick={(evento) => {
+              evento.stopPropagation();
+              aoFechar(orquestradorId, subagente.id);
+            }}
+          >
+            <IconeFechar tamanho={10} />
+          </button>
+        )}
         {icone !== null && <IconeDaFerramenta icone={icone} />}
         <Bixinho aparencia={aparencia} situacao={subagente.situacao} />
         {/* Nome longo corta com reticências; o #id fica sempre visível (o nome inteiro, no tooltip). */}
@@ -161,7 +185,7 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
  * `ConteudoDoBixinho`.
  */
 export function NoBixinho({ id, data, selected }: NodeProps<TipoDoNo>) {
-  const { conversas, bixinhosSaindo } = useCanvas();
+  const { conversas, bixinhosSaindo, acoes } = useCanvas();
   const subagente = subagentesVisiveis(conversas.get(data.orquestradorId)).find(
     (candidato) => candidato.id === data.subagenteId,
   );
@@ -170,5 +194,13 @@ export function NoBixinho({ id, data, selected }: NodeProps<TipoDoNo>) {
     return null;
   }
 
-  return <ConteudoDoBixinho subagente={subagente} selecionado={selected} saindo={bixinhosSaindo?.has(id) === true} />;
+  return (
+    <ConteudoDoBixinho
+      subagente={subagente}
+      orquestradorId={data.orquestradorId}
+      aoFechar={acoes.fecharBixinho}
+      selecionado={selected}
+      saindo={bixinhosSaindo?.has(id) === true}
+    />
+  );
 }

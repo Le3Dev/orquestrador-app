@@ -12,6 +12,7 @@ function acoesDoCanvas(): AcoesDoCanvas {
     fecharTerminal: vi.fn(),
     minimizarOuRestaurarTerminal: vi.fn(),
     limparBixinhos: vi.fn(),
+    fecharBixinho: vi.fn(),
     orquestradorCriado: vi.fn(),
     descartarRascunho: vi.fn(),
     mudarEscalaDaLetra: vi.fn(),
@@ -1045,5 +1046,55 @@ describe("NoPrevia com endereço externo no app desktop", () => {
   it("o menu aparece também com localhost (limpa a sessão das prévias externas de qualquer prévia)", () => {
     renderizar();
     expect(screen.getByRole("button", { name: "Menu da prévia" })).toBeInTheDocument();
+  });
+});
+
+describe("NoPrevia avisa quando o usuário mexe nela", () => {
+  function renderizarComToque() {
+    const acoes = acoesDoCanvas();
+    const tocarPrevia = vi.fn();
+    acoes.tocarPrevia = tocarPrevia;
+    render(<Previa valor={valorDoCanvas(acoes)} no={propsDoNo({ abertaPeloAgente: true, abertaEm: 1 })} />);
+    return { acoes, tocarPrevia };
+  }
+
+  it("não avisa só por abrir, nem pelas conferências automáticas do servidor", () => {
+    const { tocarPrevia } = renderizarComToque();
+
+    expect(tocarPrevia).not.toHaveBeenCalled();
+  });
+
+  it("clicar para usar a página avisa", () => {
+    const { tocarPrevia } = renderizarComToque();
+
+    fireEvent.click(screen.getByRole("button", { name: "Usar a página" }));
+
+    expect(tocarPrevia).toHaveBeenCalledWith("p1");
+  });
+
+  it("digitar na barra de endereço avisa", () => {
+    const { tocarPrevia } = renderizarComToque();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Endereço da prévia" }), { target: { value: "localhost:3000" } });
+
+    expect(tocarPrevia).toHaveBeenCalledWith("p1");
+  });
+
+  it("recarregar à mão avisa", () => {
+    const { tocarPrevia } = renderizarComToque();
+
+    fireEvent.click(screen.getByRole("button", { name: "Recarregar a página" }));
+
+    expect(tocarPrevia).toHaveBeenCalledWith("p1");
+  });
+
+  it("navegar pela barra segue por navegarPrevia, que marca a prévia como tocada no canvas", () => {
+    const { acoes } = renderizarComToque();
+    const campo = screen.getByRole("textbox", { name: "Endereço da prévia" });
+
+    fireEvent.change(campo, { target: { value: "localhost:3000" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+
+    expect(acoes.navegarPrevia).toHaveBeenCalledWith("p1", "http://localhost:3000");
   });
 });

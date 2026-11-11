@@ -114,6 +114,11 @@ class ArmazemFalso implements ArmazemDeAnexos {
   caminhoDe(id: string, arquivo: string): string {
     return path.join("/dados/anexos", id, arquivo);
   }
+  /** Os arquivos cujo texto foi "extraído": o armazém falso só aponta um `.txt` para eles. */
+  readonly comTextoExtraido = new Set<string>();
+  caminhoDoTextoDe(id: string, arquivo: string): string | null {
+    return this.comTextoExtraido.has(arquivo) ? `${path.join("/dados/anexos", id, arquivo)}.txt` : null;
+  }
   pastaDe(id: string): string {
     return path.join("/dados/anexos", id);
   }
@@ -187,8 +192,8 @@ describe("ServicoDeChat", () => {
       pastaDeArtefatos: "/dados/artefatos/entrada/chat",
       modelo: "opus",
       esforco: "alto",
-      imagens: [],
-      pastaDasImagens: null,
+      anexos: [],
+      pastaDosAnexos: null,
     });
     expect(enviada?.mensagem).toMatch(/^<contexto-do-app>[\s\S]*- painel-app[\s\S]*Abra o painel$/);
     expect(enviada?.mensagem).toContain("grave UM arquivo autocontido na pasta /dados/artefatos/entrada/chat");
@@ -359,6 +364,19 @@ describe("ServicoDeChat", () => {
     expect(servico.estado().situacao).toBe("ocioso");
   });
 
+  it("cancelar após só a abertura da sessão deixa a sessão como iniciada", async () => {
+    const { conclusao } = await servico.perguntar({ texto: "oi" });
+    await aguardarMotor();
+    motor.emitir({ tipo: "sessao_aberta" });
+
+    await servico.cancelar();
+    await conclusao;
+    await servico.perguntar({ texto: "de novo" });
+    await aguardarMotor(2);
+
+    expect(motor.perguntas[1]).toMatchObject({ sessaoId: "sessao-1", sessaoIniciada: true });
+  });
+
   it("cancelar sem resposta em andamento é recusado", async () => {
     await expect(servico.cancelar()).rejects.toMatchObject({ motivo: "sem_resposta_em_andamento" });
   });
@@ -390,25 +408,92 @@ describe("ServicoDeChat", () => {
   it("guarda as imagens no armazém do chat e passa os caminhos ao motor", async () => {
     await servico.perguntar({
       texto: "",
-      imagens: [{ nome: "print.png", tipoDeMidia: "image/png", conteudo: new Uint8Array([1, 2, 3]) }],
+      anexos: [{ nome: "print.png", tipoDeMidia: "image/png", conteudo: new Uint8Array([1, 2, 3]) }],
     });
     await aguardarMotor();
 
     expect(armazem.guardados).toEqual(["chat/id1.png"]);
     expect(motor.perguntas[0]).toMatchObject({
-      imagens: [{ caminho: path.join("/dados/anexos", "chat", "id1.png"), tipoDeMidia: "image/png" }],
-      pastaDasImagens: path.join("/dados/anexos", "chat"),
+      anexos: [
+        {
+          caminho: path.join("/dados/anexos", "chat", "id1.png"),
+          nome: "print.png",
+          categoria: "imagem",
+          tipoDeMidia: "image/png",
+          tamanhoEmBytes: 3,
+          caminhoDoTexto: null,
+          legado: false,
+        },
+      ],
+      pastaDosAnexos: path.join("/dados/anexos", "chat"),
     });
-    expect(servico.estado().mensagens[0]?.imagens).toEqual([
-      { arquivo: "id1.png", nome: "print.png", tipoDeMidia: "image/png" },
+    expect(servico.estado().mensagens[0]?.anexos).toEqual([
+      { arquivo: "id1.png", nome: "print.png", tipoDeMidia: "image/png", categoria: "imagem", tamanhoEmBytes: 3 },
+    ]);
+    // Sem texto na pergunta, o Claude é mandado olhar os anexos.
+    expect(motor.perguntas[0]?.mensagem.endsWith("Veja os anexos.")).toBe(true);
+  });
+
+  it("aceita uma pergunta só com documento e cita o caminho na mensagem ao Claude", async () => {
+    armazem.comTextoExtraido.add("id1.xlsx");
+    await servico.perguntar({
+      texto: "",
+      anexos: [{ nome: "vendas.xlsx", tipoDeMidia: "", conteudo: new Uint8Array([1, 2, 3]) }],
+    });
+    await aguardarMotor();
+
+    const caminho = path.join("/dados/anexos", "chat", "id1.xlsx");
+    expect(armazem.guardados).toEqual(["chat/id1.xlsx"]);
+    expect(motor.perguntas[0]).toMatchObject({
+      anexos: [
+        {
+          caminho,
+          nome: "vendas.xlsx",
+          categoria: "documento",
+          rotulo: "Excel",
+          caminhoDoTexto: `${caminho}.txt`,
+          legado: false,
+        },
+      ],
+      pastaDosAnexos: path.join("/dados/anexos", "chat"),
+    });
+    expect(motor.perguntas[0]?.mensagem).toContain("Arquivos anexados a esta pergunta");
+    expect(motor.perguntas[0]?.mensagem).toContain(`- vendas.xlsx (Excel, 3 B): ${caminho} — texto extraído: ${caminho}.txt`);
+    expect(motor.perguntas[0]?.mensagem.endsWith("Veja os anexos.")).toBe(true);
+    expect(servico.estado().mensagens[0]?.anexos).toEqual([
+      {
+        arquivo: "id1.xlsx",
+        nome: "vendas.xlsx",
+        tipoDeMidia: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        categoria: "documento",
+        tamanhoEmBytes: 3,
+      },
     ]);
   });
 
-  it("recusa imagem de formato não suportado", async () => {
+  it("recusa formato não suportado, com a mensagem do domínio", async () => {
     await expect(
-      servico.perguntar({ texto: "oi", imagens: [{ nome: "a.bmp", tipoDeMidia: "image/bmp", conteudo: new Uint8Array([1]) }] }),
-    ).rejects.toMatchObject({ motivo: "dados_invalidos" });
+      servico.perguntar({ texto: "oi", anexos: [{ nome: "a.bmp", tipoDeMidia: "image/bmp", conteudo: new Uint8Array([1]) }] }),
+    ).rejects.toMatchObject({ motivo: "dados_invalidos", message: expect.stringContaining("PNG, JPEG, GIF ou WebP") });
+    await expect(
+      servico.perguntar({ texto: "oi", anexos: [{ nome: "a.exe", tipoDeMidia: "", conteudo: new Uint8Array([1]) }] }),
+    ).rejects.toMatchObject({ motivo: "dados_invalidos", message: expect.stringContaining("não dá para anexar") });
     expect(publicados).toEqual([]);
+  });
+
+  it("recusa a 6ª imagem e mais de 10 anexos, com o erro do chat", async () => {
+    const imagem = { nome: "a.png", tipoDeMidia: "image/png", conteudo: new Uint8Array([1]) };
+    const documento = { nome: "a.pdf", tipoDeMidia: "application/pdf", conteudo: new Uint8Array([1]) };
+
+    await expect(servico.perguntar({ texto: "oi", anexos: Array.from({ length: 6 }, () => imagem) })).rejects.toMatchObject({
+      motivo: "dados_invalidos",
+      message: "Anexe até 5 imagens por mensagem.",
+    });
+    await expect(servico.perguntar({ texto: "oi", anexos: Array.from({ length: 11 }, () => documento) })).rejects.toMatchObject({
+      motivo: "dados_invalidos",
+      message: "Anexe até 10 arquivos por mensagem.",
+    });
+    expect(armazem.guardados).toEqual([]);
   });
 
   it("limpar arquiva a conversa, troca a sessão e mantém as preferências", async () => {
@@ -563,6 +648,46 @@ describe("ServicoDeChat", () => {
     expect(servico.estado().mensagens[1]).toMatchObject({ texto: "Antes, uma decisão.", perguntas });
   });
 
+  it("tira do texto o bloco previa-do-app e o leva ao evento como previasParaFechar, sem gravar na mensagem", async () => {
+    const { conclusao } = await servico.perguntar({ texto: "teste a API" });
+    await aguardarMotor();
+    motor.concluir(
+      sucesso(
+        ["A API na porta 3000 respondeu 200.", "```previa-do-app", '{"fechar":["http://127.0.0.1:5173/"]}', "```"].join("\n"),
+      ),
+    );
+    await conclusao;
+
+    expect(publicados.at(-1)).toMatchObject({
+      tipo: "resposta_concluida",
+      texto: "A API na porta 3000 respondeu 200.",
+      previasParaFechar: ["http://localhost:5173"],
+    });
+    expect(JSON.stringify(servico.estado().mensagens)).not.toContain("previasParaFechar");
+  });
+
+  it("sem bloco previa-do-app, o evento não traz previasParaFechar; com bloco inválido, o turno não quebra", async () => {
+    const { conclusao } = await servico.perguntar({ texto: "oi" });
+    await aguardarMotor();
+    motor.concluir(sucesso("olá\n```previa-do-app\n{quebrado\n```"));
+    await conclusao;
+
+    expect(publicados.at(-1)).toMatchObject({ tipo: "resposta_concluida", texto: "olá" });
+    expect(publicados.at(-1)).not.toHaveProperty("previasParaFechar");
+  });
+
+  it("a pergunta leva a regra da prévia e as prévias abertas ao Claude, só quando houver", async () => {
+    await servico.perguntar({ texto: "oi", previasAbertas: ["http://localhost:5173", "https://exemplo.com"] });
+    await aguardarMotor();
+
+    const mensagem = motor.perguntas[0]?.mensagem ?? "";
+    expect(mensagem).toContain("Prévia ao vivo: o app abre uma prévia");
+    expect(mensagem).toContain(
+      "Prévias abertas no canvas agora: http://localhost:5173, https://exemplo.com. Feche com o bloco previa-do-app as que não forem mais necessárias.",
+    );
+    expect(motor.perguntas[0]?.instrucoes).toContain("Prévia ao vivo");
+  });
+
   it("resposta sem bloco de perguntas conclui com perguntas vazias", async () => {
     const { conclusao } = await servico.perguntar({ texto: "oi" });
     await aguardarMotor();
@@ -573,7 +698,7 @@ describe("ServicoDeChat", () => {
   });
 
   it("ao subir, marca como interrompida a resposta que ficou em andamento", async () => {
-    repositorio.atual.perguntar({ mensagemDoUsuarioId: "u", mensagemDoClaudeId: "c", texto: "oi", imagens: [], agora: new Date() });
+    repositorio.atual.perguntar({ mensagemDoUsuarioId: "u", mensagemDoClaudeId: "c", texto: "oi", anexos: [], agora: new Date() });
 
     expect(await servico.interromperRespostaPendente()).toBe(true);
     expect(publicados.at(-1)).toMatchObject({ tipo: "resposta_falhou", mensagemId: "c", motivo: "interrompida" });

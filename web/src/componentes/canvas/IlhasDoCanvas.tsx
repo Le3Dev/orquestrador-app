@@ -346,7 +346,7 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
         aria-label="Aproximar"
         title="Aproximar"
       >
-        <IconeMais tamanho={18} />
+        <IconeMais tamanho={15} />
       </button>
       <button
         type="button"
@@ -356,7 +356,7 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
         aria-label="Afastar"
         title="Afastar"
       >
-        <IconeMenos tamanho={18} />
+        <IconeMenos tamanho={15} />
       </button>
       <button
         type="button"
@@ -365,7 +365,7 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
         aria-label="Ajustar à tela"
         title="Ajustar à tela: mostra tudo o que está no canvas"
       >
-        <IconeEnquadrar tamanho={16} />
+        <IconeEnquadrar tamanho={14} />
       </button>
       <button
         type="button"
@@ -375,7 +375,7 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
         aria-label="Organizar janelas"
         title={DICA_DO_ORGANIZAR}
       >
-        <IconeGrade tamanho={16} />
+        <IconeGrade tamanho={14} />
       </button>
       <button
         type="button"
@@ -385,7 +385,7 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
         aria-label="Desenhar"
         title={DICA_DO_DESENHAR}
       >
-        <IconeDesenhar tamanho={16} />
+        <IconeDesenhar tamanho={14} />
       </button>
     </div>
   );

@@ -130,6 +130,7 @@ import {
   ehRascunho,
   ehShell,
   ehTerminal,
+  fecharPreviasDoAgente as fecharPreviasDoAgenteNos,
   idDoNoDaNota,
   idDoNoDaPrevia,
   idDoNoDoArtefato,
@@ -139,6 +140,7 @@ import {
   lerIdDaLigacao,
   ligarItem,
   limparBixinhos,
+  marcarPreviasTocadas,
   mesmasLigacoes,
   minimizarOuRestaurar,
   minimizarOuRestaurarTelas,
@@ -152,8 +154,10 @@ import {
   outrasTelas,
   posicaoDaPreviaDoTerminal,
   posicaoDoTerminalNovo,
+  previasAbertasDoOrquestrador,
   reacomodarBixinhos,
   reaproveitarArestas,
+  type RegraDeFechamentoDePrevias,
   type ResumoDoGrupo,
   resumirGrupo,
   selecionarTodasAsTelas,
@@ -444,6 +448,19 @@ function Canvas() {
   // — nunca a cada quadro do arraste. Sem conflito, o array não muda.
   const reacomodar = useCallback(() => setNos(reacomodarBixinhos), [setNos]);
 
+  // Mover uma prévia que o agente abriu também a torna do usuário (ela não fecha mais sozinha).
+  const { aoComecarArraste } = movimento;
+  // O mesmo tratador serve ao arraste de um nó, `(evento, nó, nós)`, e ao da seleção, `(evento, nós)`.
+  const aoComecarArrasteDosNos = useCallback(
+    (_evento: unknown, noOuNos: NoDoCanvas | NoDoCanvas[], nos?: NoDoCanvas[]) => {
+      aoComecarArraste();
+      const arrastados = Array.isArray(noOuNos) ? noOuNos : (nos ?? [noOuNos]);
+      const ids = arrastados.map((no) => no.id);
+      setNos((atuais) => marcarPreviasTocadas(atuais, ids));
+    },
+    [aoComecarArraste, setNos],
+  );
+
   // O React Flow aplica a posição final do arraste antes de avisar o fim dele.
   const aoSoltarNo = useCallback(() => {
     aoTerminarArraste();
@@ -460,6 +477,11 @@ function Canvas() {
       aoMudarNos(comItensLigadosJunto(mudancas, fluxo.getNodes()));
       if (mudancas.some((mudanca) => mudanca.type === "dimensions" && mudanca.resizing === true)) {
         setRedimensionando(true);
+        // Só o usuário redimensiona com a alça (`resizing`): a prévia do agente que ele ajusta passa a ser dele.
+        const redimensionados = mudancas.flatMap((mudanca) =>
+          mudanca.type === "dimensions" && mudanca.resizing === true ? [mudanca.id] : [],
+        );
+        setNos((atuais) => marcarPreviasTocadas(atuais, redimensionados));
       }
       // Fim de um redimensionamento (o React Flow manda `resizing: false` só ao soltar a alça).
       if (mudancas.some((mudanca) => mudanca.type === "dimensions" && mudanca.resizing === false)) {
@@ -467,7 +489,7 @@ function Canvas() {
         reacomodar();
       }
     },
-    [aoMudarNos, reacomodar, fluxo],
+    [aoMudarNos, reacomodar, fluxo, setNos],
   );
 
   // As notas criadas, restauradas ou trazidas do servidor também tiram os
@@ -910,7 +932,7 @@ function Canvas() {
   }, [posicaoNoCentroVisivel, setNos]);
 
   const abrirPrevia = useCallback(
-    (orquestradorId: string, url: string) => {
+    (orquestradorId: string, url: string, { peloAgente = false }: { peloAgente?: boolean } = {}) => {
       const mesma = (no: NoDoCanvas): no is TipoDaPrevia =>
         ehPrevia(no) && no.data.orquestradorId === orquestradorId && no.data.url === url;
       const previaId = crypto.randomUUID();
@@ -918,15 +940,21 @@ function Canvas() {
       setNos((atuais) => {
         const aberta = atuais.find(mesma);
         if (aberta !== undefined) {
+          // O usuário pediu (faixa de servidores) uma prévia que o agente abrira: agora é dele.
+          const daqui = peloAgente ? atuais : marcarPreviasTocadas(atuais, [aberta.id]);
           return aberta.data.minimizada
-            ? reacomodarBixinhos(atuais.map((no) => (no === aberta ? minimizarOuRestaurar(aberta) : no)))
-            : atuais;
+            ? reacomodarBixinhos(daqui.map((no) => (no.id === aberta.id && ehPrevia(no) ? minimizarOuRestaurar(no) : no)))
+            : daqui;
         }
         // Ao lado do terminal, longe das outras janelas; sem o terminal no canvas, no centro da tela.
         const posicao =
           posicaoDaPreviaDoTerminal(atuais, orquestradorId, TAMANHO_DA_PREVIA) ??
           posicaoNoCentroVisivel(atuais, TAMANHO_DA_PREVIA);
-        const previa = novaPrevia(previaId, posicao, { url, orquestradorId });
+        const previa = novaPrevia(previaId, posicao, {
+          url,
+          orquestradorId,
+          ...(peloAgente ? { abertaPeloAgente: true, abertaEm: Date.now() } : {}),
+        });
         return reacomodarBixinhos([...semSelecao(atuais), { ...previa, selected: true }]);
       });
       enquadrarSemAproximar([orquestradorId, existente?.id ?? idDoNoDaPrevia(previaId)]);
@@ -934,11 +962,26 @@ function Canvas() {
     [fluxo, enquadrarSemAproximar, posicaoNoCentroVisivel, setNos],
   );
 
+  // Quem navega é o usuário (barra de endereço): a prévia que o agente abriu passa a ser dele.
   const navegarPrevia = useCallback(
     (previaId: string, url: string) =>
       setNos((atuais) =>
-        atuais.map((no) => (ehPrevia(no) && no.data.previaId === previaId ? { ...no, data: { ...no.data, url } } : no)),
+        marcarPreviasTocadas(
+          atuais.map((no) => (ehPrevia(no) && no.data.previaId === previaId ? { ...no, data: { ...no.data, url } } : no)),
+          [idDoNoDaPrevia(previaId)],
+        ),
       ),
+    [setNos],
+  );
+
+  const tocarPrevia = useCallback(
+    (previaId: string) => setNos((atuais) => marcarPreviasTocadas(atuais, [idDoNoDaPrevia(previaId)])),
+    [setNos],
+  );
+
+  const fecharPreviasDoAgente = useCallback(
+    (orquestradorId: string, regra: RegraDeFechamentoDePrevias) =>
+      setNos((atuais) => fecharPreviasDoAgenteNos(atuais, orquestradorId, regra)),
     [setNos],
   );
 
@@ -1104,6 +1147,21 @@ function Canvas() {
     (orquestradorId: string) =>
       setBixinhosLimpos((atuais) => {
         const limpos = limparBixinhos(conversasAtuais.current.get(orquestradorId), atuais.get(orquestradorId));
+        return limpos === null ? atuais : new Map(atuais).set(orquestradorId, limpos);
+      }),
+    [],
+  );
+
+  // O × do bixinho: fecha só ele, pelo mesmo caminho do limpar (fica guardado e não volta ao recarregar).
+  // Quem ainda executa não é limpo (`limparBixinhos` só considera os parados).
+  const fecharBixinho = useCallback(
+    (orquestradorId: string, subagenteId: string) =>
+      setBixinhosLimpos((atuais) => {
+        const limpos = limparBixinhos(
+          conversasAtuais.current.get(orquestradorId),
+          atuais.get(orquestradorId),
+          new Set([subagenteId]),
+        );
         return limpos === null ? atuais : new Map(atuais).set(orquestradorId, limpos);
       }),
     [],
@@ -1457,12 +1515,18 @@ function Canvas() {
     [fluxo, lojaDasNotas, lojaDosArtefatos],
   );
 
+  const lerPreviasAbertas = useCallback(
+    (orquestradorId: string) => previasAbertasDoOrquestrador(fluxo.getNodes(), orquestradorId),
+    [fluxo],
+  );
+
   const acoes = useMemo<AcoesDoCanvas>(
     () => ({
       abrirTerminal,
       fecharTerminal,
       minimizarOuRestaurarTerminal,
       limparBixinhos: limparBixinhosDoTerminal,
+      fecharBixinho,
       orquestradorCriado,
       descartarRascunho,
       mudarEscalaDaLetra,
@@ -1471,6 +1535,9 @@ function Canvas() {
       navegarPrevia,
       minimizarOuRestaurarPrevia,
       fecharPrevia,
+      tocarPrevia,
+      fecharPreviasDoAgente,
+      lerPreviasAbertas,
       desligarItem: desligarItemDoTerminal,
       lerItensLigados,
     }),
@@ -1479,6 +1546,7 @@ function Canvas() {
       fecharTerminal,
       minimizarOuRestaurarTerminal,
       limparBixinhosDoTerminal,
+      fecharBixinho,
       orquestradorCriado,
       descartarRascunho,
       mudarEscalaDaLetra,
@@ -1487,6 +1555,9 @@ function Canvas() {
       navegarPrevia,
       minimizarOuRestaurarPrevia,
       fecharPrevia,
+      tocarPrevia,
+      fecharPreviasDoAgente,
+      lerPreviasAbertas,
       desligarItemDoTerminal,
       lerItensLigados,
     ],
@@ -1948,9 +2019,9 @@ function Canvas() {
                     onEdgesChange={aoMudarArestas}
                     onConnect={aoLigar}
                     isValidConnection={ligacaoValida}
-                    onNodeDragStart={movimento.aoComecarArraste}
+                    onNodeDragStart={aoComecarArrasteDosNos}
                     onNodeDragStop={aoSoltarNo}
-                    onSelectionDragStart={movimento.aoComecarArraste}
+                    onSelectionDragStart={aoComecarArrasteDosNos}
                     onSelectionDragStop={aoSoltarNo}
                     onSelectionEnd={aoTerminarSelecao}
                     onMoveStart={movimento.aoComecarMovimento}

@@ -195,6 +195,119 @@ describe("rotas de orquestradores — modo de planejamento", () => {
     expect(orquestrador.ultimoTurno?.modo).toBe("execucao");
   });
 
+  describe("anexos", () => {
+    const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64");
+    const HTML = "<script>alert(1)</script>";
+    const mensagens = () => `/orquestradores/${orquestrador.id}/mensagens`;
+
+    it("POST /mensagens aceita imagem e documentos (tipo vazio) e os entrega ao motor com a categoria", async () => {
+      const resposta = await postar(mensagens(), {
+        texto: "analise",
+        anexos: [
+          { nome: "tela.png", tipoDeMidia: "image/png", base64: PNG },
+          { nome: "pagina.html", tipoDeMidia: "text/html", base64: Buffer.from(HTML).toString("base64") },
+          { nome: "notas.md", base64: Buffer.from("# oi").toString("base64") },
+        ],
+      });
+
+      expect(resposta.status).toBe(202);
+      await aguardarOcioso();
+      const pedido = motor.pedidos.at(-1);
+      expect(pedido?.anexos.map((anexo) => [anexo.nome, anexo.categoria, anexo.tipoDeMidia])).toEqual([
+        ["tela.png", "imagem", "image/png"],
+        ["pagina.html", "documento", "text/html"],
+        ["notas.md", "documento", "text/markdown"],
+      ]);
+      expect(pedido?.pastaDosAnexos).not.toBeNull();
+      expect(orquestrador.ultimoTurno?.anexos.map((anexo) => anexo.categoria)).toEqual(["imagem", "documento", "documento"]);
+      expect(repositorio.eventos.filter((evento) => evento.tipo === "turno_iniciado").at(-1)).toMatchObject({
+        anexos: [
+          { nome: "tela.png", categoria: "imagem", tipoDeMidia: "image/png", tamanhoEmBytes: 4 },
+          { nome: "pagina.html", categoria: "documento", tipoDeMidia: "text/html", tamanhoEmBytes: HTML.length },
+          { nome: "notas.md", categoria: "documento", tipoDeMidia: "text/markdown", tamanhoEmBytes: 4 },
+        ],
+      });
+    });
+
+    it("GET /anexos/:arquivo serve a imagem inline e o documento sempre como download isolado", async () => {
+      await postar(mensagens(), {
+        texto: "analise",
+        anexos: [
+          { nome: "tela.png", tipoDeMidia: "image/png", base64: PNG },
+          { nome: "pagina.html", tipoDeMidia: "text/html", base64: Buffer.from(HTML).toString("base64") },
+        ],
+      });
+      await aguardarOcioso();
+      const [imagem, pagina] = orquestrador.ultimoTurno?.anexos ?? [];
+
+      const inline = await fetch(`${base}/orquestradores/${orquestrador.id}/anexos/${imagem?.arquivo}`);
+      expect(inline.status).toBe(200);
+      expect(inline.headers.get("content-type")).toBe("image/png");
+      expect(inline.headers.get("content-disposition")).toBeNull();
+      expect(inline.headers.get("cache-control")).toContain("max-age=86400");
+      expect(Buffer.from(await inline.arrayBuffer()).toString("base64")).toBe(PNG);
+
+      const baixado = await fetch(`${base}/orquestradores/${orquestrador.id}/anexos/${pagina?.arquivo}`);
+      expect(baixado.status).toBe(200);
+      expect(baixado.headers.get("content-disposition")).toBe("attachment");
+      expect(baixado.headers.get("content-type")).toBe("application/octet-stream");
+      expect(baixado.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(baixado.headers.get("content-security-policy")).toBe("sandbox");
+      expect(await baixado.text()).toBe(HTML);
+    });
+
+    it("GET /anexos/:arquivo responde 404 para nome inválido ou arquivo que não existe", async () => {
+      const raizDosAnexos = `${base}/orquestradores/${orquestrador.id}/anexos`;
+
+      expect((await fetch(`${raizDosAnexos}/..%5C..%5Corquestrador.json`)).status).toBe(404);
+      expect((await fetch(`${raizDosAnexos}/id999.exe`)).status).toBe(404);
+      const inexistente = await fetch(`${raizDosAnexos}/nao-existe.pdf`);
+      expect(inexistente.status).toBe(404);
+      expect(await inexistente.json()).toEqual({ erro: "Anexo não encontrado." });
+    });
+
+    it("POST /mensagens recusa formato fora da lista, a 6ª imagem e mais de 10 anexos com 400", async () => {
+      const formato = await postar(mensagens(), {
+        texto: "oi",
+        anexos: [{ nome: "programa.exe", tipoDeMidia: "", base64: PNG }],
+      });
+      expect(formato.status).toBe(400);
+      expect(((await formato.json()) as { erro: string }).erro).toContain("não dá para anexar");
+
+      const imagem = { nome: "a.png", tipoDeMidia: "image/png", base64: PNG };
+      const seis = await postar(mensagens(), { texto: "oi", anexos: Array.from({ length: 6 }, () => imagem) });
+      expect(seis.status).toBe(400);
+      expect(await seis.json()).toEqual({ erro: "Anexe até 5 imagens por mensagem." });
+
+      const documento = { nome: "a.pdf", tipoDeMidia: "application/pdf", base64: PNG };
+      const onze = await postar(mensagens(), { texto: "oi", anexos: Array.from({ length: 11 }, () => documento) });
+      expect(onze.status).toBe(400);
+      expect(await onze.json()).toEqual({ erro: "Anexe até 10 arquivos por mensagem." });
+      expect(orquestrador.totalDeTurnos).toBe(0);
+    });
+
+    it("POST /mensagens recusa anexo com nome comprido demais ou sem base64 com 400", async () => {
+      const comprido = await postar(mensagens(), {
+        texto: "oi",
+        anexos: [{ nome: `${"a".repeat(201)}.pdf`, tipoDeMidia: "", base64: PNG }],
+      });
+      expect(comprido.status).toBe(400);
+      expect(await comprido.json()).toEqual({ erro: "O nome de um arquivo deve ter até 200 caracteres." });
+
+      const semConteudo = await postar(mensagens(), { texto: "oi", anexos: [{ nome: "a.pdf", tipoDeMidia: "" }] });
+      expect(semConteudo.status).toBe(400);
+      expect(orquestrador.totalDeTurnos).toBe(0);
+    });
+
+    it("POST /mensagens ignora o campo antigo `imagens`: o pedido segue só com o texto", async () => {
+      const resposta = await postar(mensagens(), { texto: "oi", imagens: [{ nome: "a.png", tipoDeMidia: "image/png", base64: PNG }] });
+
+      expect(resposta.status).toBe(202);
+      await aguardarOcioso();
+      expect(motor.pedidos.at(-1)?.anexos).toEqual([]);
+    });
+  });
+
   it("aprovar ou descartar sem plano pendente responde 409", async () => {
     const aprovar = await postar(`/orquestradores/${orquestrador.id}/plano/aprovar`);
     const descartar = await postar(`/orquestradores/${orquestrador.id}/plano/descartar`);
@@ -597,9 +710,14 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       ["com modo inválido", { texto: "oi", modo: "turbo" }, "Modo do pedido inválido."],
       ["com texto longo demais", { texto: "a".repeat(50_001) }, "O pedido deve ter até 50000 caracteres."],
       [
-        "com imagens",
+        "com anexos",
+        { texto: "oi", anexos: [{ nome: "a.pdf", tipoDeMidia: "application/pdf", base64: "AAAA" }] },
+        "A fila aceita só texto: envie os anexos quando o orquestrador estiver livre.",
+      ],
+      [
+        "com o campo antigo imagens",
         { texto: "oi", imagens: [{ nome: "a.png" }] },
-        "A fila aceita só texto: envie as imagens quando o orquestrador estiver livre.",
+        "A fila aceita só texto: envie os anexos quando o orquestrador estiver livre.",
       ],
     ])("POST /fila %s responde 400", async (_caso, corpo, mensagem) => {
       const resposta = await enfileirar(corpo);
@@ -774,6 +892,55 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect((await postar(`/orquestradores/${orquestrador.id}/fila/${pedidoId}/enviar`)).status).toBe(202);
       await aguardarOcioso();
       expect(motor.pedidos.at(-1)).toMatchObject({ itensLigados: [nota] });
+    });
+  });
+
+  describe("prévias abertas no canvas", () => {
+    const abertas = ["http://localhost:5173", "https://exemplo.com/app"];
+
+    it("POST /mensagens leva as prévias abertas ao motor", async () => {
+      const resposta = await postar(`/orquestradores/${orquestrador.id}/mensagens`, { texto: "analise", previasAbertas: abertas });
+
+      expect(resposta.status).toBe(202);
+      await aguardarOcioso();
+      expect(motor.pedidos.at(-1)?.previasAbertas).toEqual(abertas);
+    });
+
+    it("sem o campo, o pedido vai sem prévias abertas", async () => {
+      expect((await postar(`/orquestradores/${orquestrador.id}/mensagens`, { texto: "oi" })).status).toBe(202);
+      await aguardarOcioso();
+
+      expect(motor.pedidos.at(-1)?.previasAbertas).toEqual([]);
+    });
+
+    it.each<[string, unknown, string]>([
+      ["mais de 10", Array.from({ length: 11 }, () => "http://localhost:5173"), "Informe até 10 prévias abertas por pedido."],
+      ["endereço que não é http", ["file:///etc/passwd"], "O endereço da prévia aberta deve começar com http:// ou https://."],
+      ["endereço longo demais", [`http://localhost:5173/${"a".repeat(2_000)}`], "O endereço da prévia aberta é longo demais."],
+      ["item que não é texto", [5173], "O endereço da prévia aberta deve ser um texto."],
+      ["valor que não é lista", "http://localhost:5173", "As prévias abertas devem ser uma lista."],
+    ])("recusa %s com 400, na mensagem e na fila", async (_caso, previasAbertas, mensagem) => {
+      const enviada = await postar(`/orquestradores/${orquestrador.id}/mensagens`, { texto: "oi", previasAbertas });
+      const enfileirada = await postar(`/orquestradores/${orquestrador.id}/fila`, { texto: "oi", previasAbertas });
+
+      expect(enviada.status).toBe(400);
+      expect(await enviada.json()).toEqual({ erro: mensagem });
+      expect(enfileirada.status).toBe(400);
+      expect(await enfileirada.json()).toEqual({ erro: mensagem });
+      expect(orquestrador.totalDeTurnos).toBe(0);
+      expect(orquestrador.fila).toHaveLength(0);
+    });
+
+    it("POST /fila congela as prévias no pedido, que as leva ao motor quando sai da fila", async () => {
+      const resposta = await postar(`/orquestradores/${orquestrador.id}/fila`, { texto: "depois", previasAbertas: abertas });
+      const { pedidoId } = (await resposta.json()) as { pedidoId: string };
+
+      expect(resposta.status).toBe(201);
+      expect(orquestrador.fila[0]?.paraDados()).toMatchObject({ id: pedidoId, previasAbertas: abertas });
+
+      expect((await postar(`/orquestradores/${orquestrador.id}/fila/${pedidoId}/enviar`)).status).toBe(202);
+      await aguardarOcioso();
+      expect(motor.pedidos.at(-1)).toMatchObject({ previasAbertas: abertas });
     });
   });
 

@@ -101,16 +101,19 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
         await writeFile(arquivos.configuracoes, JSON.stringify(configuracoes), "utf8");
       }
 
+      // Só as imagens vão inline; os documentos o agente abre pelo caminho, citado na mensagem.
       const imagens = await Promise.all(
-        pedido.imagens.map(async (imagem) => ({
-          tipoDeMidia: imagem.tipoDeMidia,
-          base64: (await readFile(imagem.caminho)).toString("base64"),
-        })),
+        pedido.anexos
+          .filter((anexo) => anexo.categoria === "imagem")
+          .map(async (imagem) => ({
+            tipoDeMidia: imagem.tipoDeMidia,
+            base64: (await readFile(imagem.caminho)).toString("base64"),
+          })),
       );
       const texto = mensagemParaOOrquestrador(
         pedido.texto,
         pedido.configuracao,
-        pedido.imagens.map((imagem) => imagem.caminho),
+        pedido.anexos,
         pedido.modo,
         pedido.pastaDeArtefatos,
         pedido.instrucoes,
@@ -118,6 +121,7 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
         pedido.subagentesProntos,
         this.plataforma,
         pedido.itensLigados ?? [],
+        pedido.previasAbertas ?? [],
       );
 
       const adaptador = new AdaptadorDeEventosDoClaudeCode();

@@ -16,6 +16,7 @@ import type { SituacaoDaConexao } from "../hooks/useConversas";
 import { mesmoConteudo } from "../hooks/useReaproveitado";
 import type { EstadoDoServidor } from "../hooks/useServidor";
 import type { BixinhosLimpos, EscalaDaLetra } from "./layout";
+import type { RegraDeFechamentoDePrevias } from "./nos";
 
 export interface AcoesDoCanvas {
   abrirTerminal: (orquestradorId: string) => void;
@@ -24,6 +25,8 @@ export interface AcoesDoCanvas {
   minimizarOuRestaurarTerminal: (orquestradorId: string) => void;
   /** Tira do canvas os bixinhos do terminal que não estão executando. Só visual: o histórico continua. */
   limparBixinhos: (orquestradorId: string) => void;
+  /** Fecha um bixinho parado (falhou, concluiu ou foi cancelado), pelo id do Subagente. Só visual: o histórico continua. */
+  fecharBixinho: (orquestradorId: string, subagenteId: string) => void;
   /** O rascunho de configuração virou um Orquestrador de verdade: troca pelo terminal, no mesmo lugar. */
   orquestradorCriado: (rascunhoId: string, orquestrador: ResumoDoOrquestrador) => void;
   descartarRascunho: (rascunhoId: string) => void;
@@ -36,9 +39,16 @@ export interface AcoesDoCanvas {
   /**
    * Abre a prévia ao vivo de um servidor que o Orquestrador subiu: se ela já
    * existe (mesmo terminal, mesmo endereço), restaura e centraliza a vista
-   * nela; senão, cria ao lado do terminal.
+   * nela; senão, cria ao lado do terminal. `peloAgente`: aberta sozinha porque o
+   * agente citou o endereço na resposta; só essas fecham sozinhas depois.
    */
-  abrirPrevia: (orquestradorId: string, url: string) => void;
+  abrirPrevia: (orquestradorId: string, url: string, opcoes?: { peloAgente?: boolean }) => void;
+  /** O usuário mexeu na prévia (clicou, digitou, recarregou, redimensionou): ela deixa de fechar sozinha. */
+  tocarPrevia?: (previaId: string) => void;
+  /** Fecha as prévias que o agente abriu e o usuário não tocou, segundo a regra (pedido do agente ou fim de turno). */
+  fecharPreviasDoAgente?: (orquestradorId: string, regra: RegraDeFechamentoDePrevias) => void;
+  /** Os endereços das prévias abertas deste Orquestrador, como vão no próximo pedido (`previasAbertas`). */
+  lerPreviasAbertas?: (orquestradorId: string) => string[];
   /** Leva a prévia a outro endereço (já validado). */
   navegarPrevia: (previaId: string, url: string) => void;
   minimizarOuRestaurarPrevia: (previaId: string) => void;

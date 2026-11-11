@@ -1,4 +1,4 @@
-import type { TipoDeImagem } from "../orquestracao/Anexo";
+import type { CategoriaDoAnexo } from "../orquestracao/Anexo";
 import { copiarPergunta, PerguntaDoApp } from "../perguntas/PerguntaDoApp";
 import type { AcaoDoApp } from "./AcaoDoApp";
 import type { UsoDaResposta } from "./MotorDeChat";
@@ -8,12 +8,21 @@ export type PapelNaConversa = "usuario" | "claude";
 
 export type SituacaoDaMensagem = "respondendo" | "concluida" | "falhou" | "cancelada";
 
-/** Imagem anexada a uma pergunta: o arquivo guardado e o nome original. */
-export interface ImagemDaMensagem {
+/** Imagem ou documento anexado a uma pergunta: o arquivo guardado e o nome original. */
+export interface AnexoDaMensagem {
   arquivo: string;
   nome: string;
-  tipoDeMidia: TipoDeImagem;
+  tipoDeMidia: string;
+  categoria: CategoriaDoAnexo;
+  /** Ausente nos anexos gravados antes do campo (só imagens). */
+  tamanhoEmBytes?: number;
 }
+
+/**
+ * Dados gravados antes dos documentos: as imagens ficavam em `imagens`, sem
+ * categoria. Só serve para reabrir conversas antigas.
+ */
+type ImagemAntigaDaMensagem = Omit<AnexoDaMensagem, "categoria">;
 
 /** O que o Claude tentou fazer e precisa da autorização do usuário. */
 export type AcaoQuePedeAutorizacao = "editar" | "rodar_comando";
@@ -32,7 +41,9 @@ export interface DadosDaMensagemDoChat {
   id: string;
   papel: PapelNaConversa;
   texto: string;
-  imagens: ImagemDaMensagem[];
+  anexos: AnexoDaMensagem[];
+  /** Só em mensagens gravadas antes dos documentos: o que hoje é `anexos`, só de imagens. Nunca é gravado. */
+  imagens?: ImagemAntigaDaMensagem[];
   criadaEm: string;
   situacao: SituacaoDaMensagem;
   acoes: AcaoDoApp[];
@@ -62,7 +73,7 @@ export class MensagemDoChat {
     public readonly id: string,
     public readonly papel: PapelNaConversa,
     private textoAtual: string,
-    public readonly imagens: readonly ImagemDaMensagem[],
+    public readonly anexos: readonly AnexoDaMensagem[],
     private readonly criadaEmMs: number,
     private situacaoAtual: SituacaoDaMensagem,
     private acoesAtuais: readonly AcaoDoApp[],
@@ -77,7 +88,7 @@ export class MensagemDoChat {
   static pergunta(
     id: string,
     texto: string,
-    imagens: readonly ImagemDaMensagem[],
+    anexos: readonly AnexoDaMensagem[],
     agora: Date,
     origem?: OrigemDaPergunta,
   ): MensagemDoChat {
@@ -85,7 +96,7 @@ export class MensagemDoChat {
       id,
       "usuario",
       texto,
-      [...imagens],
+      anexos.map((anexo) => ({ ...anexo })),
       agora.getTime(),
       "concluida",
       [],
@@ -106,7 +117,8 @@ export class MensagemDoChat {
       dados.id,
       dados.papel,
       dados.texto,
-      dados.imagens ?? [],
+      // Conversas gravadas antes dos documentos guardavam só imagens, em `imagens`.
+      dados.anexos ?? (dados.imagens ?? []).map((imagem) => ({ ...imagem, categoria: "imagem" as const })),
       Date.parse(dados.criadaEm),
       dados.situacao,
       dados.acoes ?? [],
@@ -176,7 +188,7 @@ export class MensagemDoChat {
       id: this.id,
       papel: this.papel,
       texto: this.textoAtual,
-      imagens: this.imagens.map((imagem) => ({ ...imagem })),
+      anexos: this.anexos.map((anexo) => ({ ...anexo })),
       criadaEm: new Date(this.criadaEmMs).toISOString(),
       situacao: this.situacaoAtual,
       acoes: this.acoesAtuais.map((acao) => ({ ...acao })),

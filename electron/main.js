@@ -731,6 +731,7 @@ function criarJanela({ botoesNativos = true, transparente = false, ...opcoes } =
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
+      spellcheck: false,
       sandbox: true,
       additionalArguments: TRANSCRICAO_NATIVA_DISPONIVEL ? [ARGUMENTO_DA_TRANSCRICAO_NATIVA] : [],
     },

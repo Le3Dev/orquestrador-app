@@ -173,6 +173,16 @@ export function IconeAnexo({ tamanho = 18, className = "" }: PropsDoIcone) {
   );
 }
 
+/** Folha com a ponta dobrada e linhas de texto: um documento anexado (PDF, Word, Excel, texto...). */
+export function IconeDocumento({ tamanho = 16, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={`shrink-0 ${className}`}>
+      <path d="M14 3H7.5A1.5 1.5 0 0 0 6 4.5v15A1.5 1.5 0 0 0 7.5 21h9a1.5 1.5 0 0 0 1.5-1.5V7z" {...TRACO} />
+      <path d="M14 3v4h4M9 12.5h6M9 16h6" {...TRACO} />
+    </Quadro>
+  );
+}
+
 /** Microfone: ditar por voz. */
 export function IconeMicrofone({ tamanho = 18, className = "" }: PropsDoIcone) {
   return (

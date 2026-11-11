@@ -158,7 +158,7 @@ function mensagem(
     id,
     papel,
     texto: "",
-    imagens: [],
+    anexos: [],
     criadaEm: "2026-11-04T12:00:00Z",
     situacao: "concluida",
     acoes: [],
@@ -516,6 +516,74 @@ describe("ChatRapido · modo invisível", () => {
       expect(screen.queryAllByRole("img")).toHaveLength(0);
       expect(screen.getByRole("alert")).toHaveTextContent("até 5 imagens");
     });
+
+    it("o quadro também respeita o limite de 10 anexos, contando os documentos", async () => {
+      const { ativar, quadroDoAtalho } = ponteAtiva();
+      const { campo } = renderizar();
+      ativar();
+      const documentos = Array.from({ length: 10 }, (_, i) => new File(["x"], `doc${i}.txt`, { type: "text/plain" }));
+      fireEvent.paste(campo, { clipboardData: { files: documentos } });
+      await screen.findByRole("button", { name: "Remover doc9.txt" });
+
+      quadroDoAtalho();
+      expect(screen.getByRole("alert")).toHaveTextContent("até 10 arquivos");
+      expect(screen.getByRole("alert")).toHaveTextContent("O quadro não foi guardado");
+    });
+  });
+
+  describe("limites com a tela ocupando um lugar entre os anexos", () => {
+    it("com 5 imagens anexadas, o envio no modo invisível pede para remover uma imagem", async () => {
+      const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+      const { modoInvisivel, ativar } = ponteAtiva();
+      const { campo } = renderizar();
+      ativar();
+      const imagens = Array.from({ length: 5 }, (_, i) => new File(["x"], `foto${i}.png`, { type: "image/png" }));
+      fireEvent.paste(campo, { clipboardData: { files: imagens } });
+      await screen.findByRole("button", { name: "Remover foto4.png" });
+
+      fireEvent.change(campo, { target: { value: "Veja" } });
+      fireEvent.keyDown(campo, { key: "Enter" });
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "No modo invisível a tela ocupa uma das 5 imagens: remova uma imagem anexada.",
+      );
+      expect(perguntar).not.toHaveBeenCalled();
+      expect(modoInvisivel.capturarTela).not.toHaveBeenCalled();
+    });
+
+    it("com 10 anexos, o envio no modo invisível pede para remover um arquivo", async () => {
+      const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+      const { modoInvisivel, ativar } = ponteAtiva();
+      const { campo } = renderizar();
+      ativar();
+      const documentos = Array.from({ length: 10 }, (_, i) => new File(["x"], `doc${i}.txt`, { type: "text/plain" }));
+      fireEvent.paste(campo, { clipboardData: { files: documentos } });
+      await screen.findByRole("button", { name: "Remover doc9.txt" });
+
+      fireEvent.change(campo, { target: { value: "Veja" } });
+      fireEvent.keyDown(campo, { key: "Enter" });
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "No modo invisível a tela ocupa um dos 10 anexos: remova um arquivo anexado.",
+      );
+      expect(perguntar).not.toHaveBeenCalled();
+      expect(modoInvisivel.capturarTela).not.toHaveBeenCalled();
+    });
+
+    it("com documentos e a tela, o envio leva os dois e a tela vai por último", async () => {
+      const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+      const { ativar } = ponteAtiva();
+      const { campo } = renderizar();
+      ativar();
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["pdf"], "a.pdf", { type: "application/pdf" })] } });
+      await screen.findByRole("button", { name: "Remover a.pdf" });
+
+      fireEvent.change(campo, { target: { value: "Compare" } });
+      fireEvent.keyDown(campo, { key: "Enter" });
+      await waitFor(() => expect(perguntar).toHaveBeenCalledTimes(1));
+      expect(perguntar).toHaveBeenCalledWith("Compare", [
+        { nome: "a.pdf", tipoDeMidia: "application/pdf", base64: "cGRm" },
+        FOTO,
+      ]);
+    });
   });
 
   it("ativo, fotografa a tela a cada pergunta e a anexa; não há mais faixa do modo", async () => {
@@ -588,16 +656,16 @@ describe("ChatRapido · modo invisível", () => {
   });
 
   describe("miniaturas das capturas no histórico", () => {
-    const CAPTURA = { arquivo: "a.jpg", nome: "tela-2026-11-07T10-00-00-000Z.jpg" };
-    const MANUAL = { arquivo: "b.png", nome: "foto.png" };
-    const chatComImagens = (imagens: unknown[]): EstadoDoChatNaTela => ({
+    const CAPTURA = {
+      arquivo: "a.jpg",
+      nome: "tela-2026-11-07T10-00-00-000Z.jpg",
+      tipoDeMidia: "image/jpeg",
+      categoria: "imagem" as const,
+    };
+    const MANUAL = { arquivo: "b.png", nome: "foto.png", tipoDeMidia: "image/png", categoria: "imagem" as const };
+    const chatComImagens = (anexos: MensagemDoChatNaTela["anexos"]): EstadoDoChatNaTela => ({
       ...OCIOSO,
-      mensagens: [
-        mensagem("u1", "usuario", {
-          texto: "Veja",
-          imagens: imagens as MensagemDoChatNaTela["imagens"],
-        }),
-      ],
+      mensagens: [mensagem("u1", "usuario", { texto: "Veja", anexos })],
     });
 
     it("esconde a captura de tela e mantém a imagem manual, no modo normal e no invisível", () => {
@@ -1244,6 +1312,24 @@ describe("ChatRapido · escuta no composer e selo", () => {
 describe("ChatRapido", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it("desenha só as últimas 100 mensagens e revela mais 100 por clique em \"Mostrar anteriores\"", () => {
+    const mensagens = Array.from({ length: 230 }, (_, i) =>
+      mensagem(`m${i + 1}`, i % 2 === 0 ? "usuario" : "claude", { texto: `texto da mensagem ${i + 1}.` }),
+    );
+    renderizar({ ...OCIOSO, mensagens });
+    expect(screen.queryByText("texto da mensagem 130.")).not.toBeInTheDocument();
+    expect(screen.getByText("texto da mensagem 131.")).toBeInTheDocument();
+    expect(screen.getByText("texto da mensagem 230.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar 100 anteriores" }));
+    expect(screen.getByText("texto da mensagem 31.")).toBeInTheDocument();
+    expect(screen.queryByText("texto da mensagem 30.")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar 30 anteriores" }));
+    expect(screen.getByText("texto da mensagem 1.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /anteriores/ })).not.toBeInTheDocument();
+  });
+
   it("Enter envia a pergunta e limpa o campo; Shift+Enter não envia", async () => {
     const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
     const { campo } = renderizar();
@@ -1357,7 +1443,7 @@ describe("ChatRapido", () => {
       const { campo } = renderizar();
       const linha = composer().querySelector(".linha-do-composer");
       expect(linha).not.toBeNull();
-      const anexar = screen.getByRole("button", { name: "Anexar imagens" });
+      const anexar = screen.getByRole("button", { name: "Anexar arquivos" });
       const microfone = screen.getByRole("button", { name: "Ditar a mensagem por voz" });
       const modelo = screen.getByRole("button", { name: /^Modelo:/ });
       const enviar = screen.getByRole("button", { name: "enviar ⏎" });
@@ -1378,7 +1464,7 @@ describe("ChatRapido", () => {
     it("o campo diz \"Pergunte ao Claude\" e os botões de ícone são SVG, sem emoji nem texto", () => {
       const { campo } = renderizar();
       expect(campo).toHaveAttribute("placeholder", "Pergunte ao Claude");
-      for (const nome of ["Anexar imagens", "Mais ações", "Ditar a mensagem por voz"]) {
+      for (const nome of ["Anexar arquivos", "Mais ações", "Ditar a mensagem por voz"]) {
         const botao = screen.getByRole("button", { name: nome });
         expect(botao).toHaveTextContent("");
         expect(botao.querySelector("svg")).not.toBeNull();
@@ -1455,6 +1541,84 @@ describe("ChatRapido", () => {
       await waitFor(() => expect(revogar).toHaveBeenCalledWith(criar.mock.results[0]?.value));
     });
 
+    it("o documento colado vira etiqueta (sem miniatura) e dá para remover", async () => {
+      const { campo } = renderizar();
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["# notas"], "notas.md", { type: "" })] } });
+      const remover = await screen.findByRole("button", { name: "Remover notas.md" });
+      const etiqueta = remover.closest(".chip-de-anexo");
+      expect(etiqueta).toHaveTextContent("notas.md");
+      expect(etiqueta).toHaveTextContent("Markdown");
+      expect(screen.queryAllByRole("img")).toHaveLength(0);
+
+      fireEvent.click(remover);
+      expect(screen.queryByText("notas.md")).not.toBeInTheDocument();
+    });
+
+    it("o formato antigo (.doc) aparece com o selo e o aviso para salvar como .docx", async () => {
+      const { campo } = renderizar();
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["x"], "contrato.doc", { type: "application/msword" })] } });
+      const remover = await screen.findByRole("button", { name: "Remover contrato.doc" });
+      const selo = within(remover.closest(".chip-de-anexo") as HTMLElement).getByText("Word (formato antigo)");
+      expect(selo).toHaveAttribute("title", expect.stringContaining("Salve como .docx"));
+    });
+
+    it("só com documento, sem texto, envia o texto padrão e o conteúdo em base64", async () => {
+      const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+      const revogar = vi.spyOn(URL, "revokeObjectURL");
+      const { campo } = renderizar();
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["pdf"], "contrato.pdf", { type: "application/pdf" })] } });
+      await screen.findByRole("button", { name: "Remover contrato.pdf" });
+
+      fireEvent.click(screen.getByRole("button", { name: "enviar ⏎" }));
+      // "cGRm" é o base64 de "pdf".
+      await waitFor(() =>
+        expect(perguntar).toHaveBeenCalledWith("Analise os anexos.", [
+          { nome: "contrato.pdf", tipoDeMidia: "application/pdf", base64: "cGRm" },
+        ]),
+      );
+      await waitFor(() => expect(screen.queryByText("contrato.pdf")).not.toBeInTheDocument());
+      // Documento não tem miniatura: não há URL para liberar.
+      expect(revogar).not.toHaveBeenCalled();
+    });
+
+    it("o documento sem tipo (arrastado) segue com o tipo vazio: o servidor decide pela extensão", async () => {
+      const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+      const { campo } = renderizar();
+      const chat = screen.getByTestId("chat-rapido");
+      const arquivo = new File(["a,b"], "dados.CSV", { type: "" });
+      fireEvent.dragOver(chat, { dataTransfer: { types: ["Files"], files: [arquivo] } });
+      expect(screen.getByText("solte para anexar os arquivos à pergunta")).toBeInTheDocument();
+      fireEvent.drop(chat, { dataTransfer: { types: ["Files"], files: [arquivo] } });
+      await screen.findByRole("button", { name: "Remover dados.CSV" });
+
+      fireEvent.change(campo, { target: { value: "Some as colunas" } });
+      fireEvent.keyDown(campo, { key: "Enter" });
+      await waitFor(() =>
+        expect(perguntar).toHaveBeenCalledWith("Some as colunas", [{ nome: "dados.CSV", tipoDeMidia: "", base64: "YSxi" }]),
+      );
+    });
+
+    it("recusa formato não aceito e documento acima de 32 MB, e explica", async () => {
+      const { campo } = renderizar();
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["x"], "app.exe", { type: "application/x-msdownload" })], getData: () => "" } });
+      expect(await screen.findByRole("alert")).toHaveTextContent('"app.exe" tem um formato que não dá para anexar');
+
+      const grande = new File(["x"], "grande.pdf", { type: "application/pdf" });
+      Object.defineProperty(grande, "size", { value: 33 * 1024 * 1024 });
+      fireEvent.paste(campo, { clipboardData: { files: [grande] } });
+      await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent('"grande.pdf" passa de 32 MB'));
+      expect(screen.queryByRole("button", { name: /^Remover/ })).not.toBeInTheDocument();
+    });
+
+    it("o seletor aceita imagens e as extensões dos documentos", () => {
+      renderizar();
+      const seletor = document.querySelector<HTMLInputElement>('input[type="file"]');
+      expect(seletor?.accept).toContain("image/png");
+      expect(seletor?.accept).toContain(".pdf");
+      expect(seletor?.accept).toContain(".docx");
+      expect(seletor?.accept).toContain(".yml");
+    });
+
     it("o menu do modelo abre ao clicar no botão do modelo", () => {
       renderizar();
       fireEvent.click(screen.getByRole("button", { name: /^Modelo:/ }));
@@ -1481,7 +1645,7 @@ describe("ChatRapido", () => {
       expect(microfone()).toHaveTextContent("");
       expect(microfone().querySelector("svg")).not.toBeNull();
       expect(microfone().closest(".linha-do-composer")).not.toBeNull();
-      expect(screen.getByRole("button", { name: "Anexar imagens" })).toHaveClass("botao-icone");
+      expect(screen.getByRole("button", { name: "Anexar arquivos" })).toHaveClass("botao-icone");
       expect(screen.getByRole("button", { name: "Mais ações" })).toHaveClass("botao-icone");
     });
 
@@ -1940,7 +2104,7 @@ describe("ChatRapido", () => {
       const campo = screen.getByRole("textbox", { name: "Pergunta para o Claude" });
       expect(lateral).toContainElement(campo);
       expect(screen.getByTestId("composer-do-chat")).toContainElement(campo);
-      expect(screen.getByRole("button", { name: "Anexar imagens" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Anexar arquivos" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /Modelo:/ })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Limpar conversa" })).toBeInTheDocument();
     });
@@ -2497,10 +2661,65 @@ describe("ChatRapido · bolhas", () => {
     expect(copiar.closest(".faixa-do-codigo")).toHaveTextContent("sh");
   });
 
+  it("o documento anexado aparece como etiqueta que baixa o arquivo com o nome original; sem miniatura", () => {
+    renderizar({
+      ...OCIOSO,
+      mensagens: [
+        mensagem("u1", "usuario", {
+          texto: "Resuma",
+          anexos: [
+            {
+              arquivo: "d1.pdf",
+              nome: "Relatório 2026.pdf",
+              tipoDeMidia: "application/pdf",
+              categoria: "documento",
+              tamanhoEmBytes: 2 * 1024 * 1024,
+            },
+            { arquivo: "d2.xls", nome: "base.xls", tipoDeMidia: "application/vnd.ms-excel", categoria: "documento" },
+          ],
+        }),
+      ],
+    });
+
+    const pdf = screen.getByRole("link", { name: /Relatório 2026\.pdf/ });
+    expect(pdf).toHaveAttribute("href", "/api/chat/anexos/d1.pdf");
+    expect(pdf).toHaveAttribute("download", "Relatório 2026.pdf");
+    expect(pdf).toHaveTextContent("PDF · 2 MB");
+    // O formato antigo leva o selo de aviso.
+    const antigo = screen.getByRole("link", { name: /base\.xls/ });
+    expect(antigo).toHaveAttribute("download", "base.xls");
+    expect(antigo).toHaveTextContent("Excel (formato antigo)");
+    expect(screen.queryByRole("button", { name: /Ampliar/ })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole("img")).toHaveLength(0);
+  });
+
+  it("anexos de imagem e de documento convivem na mensagem; só a imagem amplia", () => {
+    renderizar({
+      ...OCIOSO,
+      mensagens: [
+        mensagem("u1", "usuario", {
+          texto: "Veja",
+          anexos: [
+            { arquivo: "b.png", nome: "foto.png", tipoDeMidia: "image/png", categoria: "imagem" },
+            { arquivo: "d1.docx", nome: "ata.docx", tipoDeMidia: "application/octet-stream", categoria: "documento" },
+          ],
+        }),
+      ],
+    });
+
+    expect(screen.getByRole("button", { name: "Ampliar foto.png" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /ata\.docx/ })).toHaveAttribute("download", "ata.docx");
+  });
+
   it("a imagem anexada aparece como miniatura; o clique a abre maior, e Esc fecha", () => {
     renderizar({
       ...OCIOSO,
-      mensagens: [mensagem("u1", "usuario", { texto: "Veja", imagens: [{ arquivo: "b.png", nome: "foto.png", tipoDeMidia: "image/png" }] })],
+      mensagens: [
+        mensagem("u1", "usuario", {
+          texto: "Veja",
+          anexos: [{ arquivo: "b.png", nome: "foto.png", tipoDeMidia: "image/png", categoria: "imagem" }],
+        }),
+      ],
     });
 
     const miniatura = screen.getByRole("button", { name: "Ampliar foto.png" });

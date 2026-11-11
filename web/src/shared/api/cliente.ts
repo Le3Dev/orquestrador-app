@@ -24,7 +24,7 @@ import type {
   PromptMelhorado,
   ResumoDoOrquestrador,
   SaudeDoServidor,
-  TipoDeImagem,
+  SituacaoDoServidorLocal,
 } from "./tipos";
 
 function extrairMensagem(corpo: unknown): string | null {
@@ -71,10 +71,13 @@ export function mensagemDeErro(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro);
 }
 
-/** Imagem pronta para envio: o conteúdo vai em base64 dentro do JSON da mensagem. */
-export interface ImagemParaEnvio {
+/**
+ * Anexo (imagem ou documento) pronto para envio: o conteúdo vai em base64 dentro do JSON da mensagem.
+ * `tipoDeMidia` é o `File.type` e pode ir vazio: o servidor decide pela extensão do nome.
+ */
+export interface AnexoParaEnvio {
   nome: string;
-  tipoDeMidia: TipoDeImagem;
+  tipoDeMidia: string;
   base64: string;
 }
 
@@ -95,6 +98,26 @@ export interface ItemLigadoParaEnvio {
 /** O corpo só leva `itensLigados` quando há algum: sem itens, o pedido é igual ao de antes. */
 function comItensLigados(itensLigados: readonly ItemLigadoParaEnvio[] | undefined): { itensLigados?: readonly ItemLigadoParaEnvio[] } {
   return itensLigados !== undefined && itensLigados.length > 0 ? { itensLigados } : {};
+}
+
+/** O corpo só leva `previasAbertas` quando há alguma (até 10 endereços http/https das prévias abertas no canvas). */
+function comPreviasAbertas(previasAbertas: readonly string[] | undefined): { previasAbertas?: readonly string[] } {
+  return previasAbertas !== undefined && previasAbertas.length > 0 ? { previasAbertas } : {};
+}
+
+/**
+ * Os argumentos de contexto do fim de `enviarMensagem` e `enfileirarPedido`
+ * (itens ligados, prévias abertas), só os que têm conteúdo: sem nenhum, o
+ * pedido é igual ao de antes.
+ */
+export function argumentosDoContexto(
+  itensLigados: readonly ItemLigadoParaEnvio[],
+  previasAbertas: readonly string[],
+): [itensLigados?: readonly ItemLigadoParaEnvio[], previasAbertas?: readonly string[]] {
+  if (previasAbertas.length > 0) {
+    return [itensLigados, previasAbertas];
+  }
+  return itensLigados.length > 0 ? [itensLigados] : [];
 }
 
 export interface NovoOrquestrador extends DadosDaConfiguracao {
@@ -174,18 +197,19 @@ export const api = {
   enviarMensagem: (
     id: string,
     texto: string,
-    imagens: readonly ImagemParaEnvio[] = [],
+    anexos: readonly AnexoParaEnvio[] = [],
     modo: ModoDoTurno = "execucao",
     itensLigados?: readonly ItemLigadoParaEnvio[],
+    previasAbertas?: readonly string[],
   ) =>
     requisitar<{ turnoId: string }>(`/orquestradores/${encodeURIComponent(id)}/mensagens`, {
       method: "POST",
-      body: JSON.stringify({ texto, imagens, modo, ...comItensLigados(itensLigados) }),
+      body: JSON.stringify({ texto, anexos, modo, ...comItensLigados(itensLigados), ...comPreviasAbertas(previasAbertas) }),
     }),
 
   /**
    * Guarda um pedido na fila do Orquestrador (texto, modo e os itens ligados
-   * agora: imagens não entram). Ele sai sozinho quando o turno atual terminar
+   * agora e as prévias abertas: anexos não entram). Ele sai sozinho quando o turno atual terminar
    * concluído, ou com `enviarDaFila`. Recusado (409) com a fila cheia.
    */
   enfileirarPedido: (
@@ -193,10 +217,11 @@ export const api = {
     texto: string,
     modo: ModoDoTurno = "execucao",
     itensLigados?: readonly ItemLigadoParaEnvio[],
+    previasAbertas?: readonly string[],
   ) =>
     requisitar<{ pedidoId: string }>(`/orquestradores/${encodeURIComponent(id)}/fila`, {
       method: "POST",
-      body: JSON.stringify({ texto, modo, ...comItensLigados(itensLigados) }),
+      body: JSON.stringify({ texto, modo, ...comItensLigados(itensLigados), ...comPreviasAbertas(previasAbertas) }),
     }),
 
   removerDaFila: (id: string, pedidoId: string) =>
@@ -248,6 +273,15 @@ export const api = {
   removerNota: (id: string) => requisitar<null>(`/notas/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   saude: () => requisitar<SaudeDoServidor>("/saude"),
+
+  /** Confere se cada servidor local (até 10 endereços) responde agora; o servidor recusa o que não for endereço local. */
+  lerSituacaoDosServidores: (urls: readonly string[]) => {
+    const parametros = new URLSearchParams();
+    for (const url of urls) {
+      parametros.append("url", url);
+    }
+    return requisitar<{ situacoes: SituacaoDoServidorLocal[] }>(`/servidores-locais/situacao?${parametros.toString()}`);
+  },
 
   lerPreferencias: () => requisitar<DadosDasPreferencias>("/preferencias"),
 
@@ -309,14 +343,14 @@ export const api = {
    */
   perguntarNoChat: (
     texto: string,
-    imagens: readonly ImagemParaEnvio[] = [],
+    anexos: readonly AnexoParaEnvio[] = [],
     opcoes: { origem?: OrigemDaPergunta } = {},
   ) =>
     requisitar<{ mensagemId: string }>("/chat/mensagens", {
       method: "POST",
       body: JSON.stringify({
         texto,
-        ...(imagens.length > 0 ? { imagens } : {}),
+        ...(anexos.length > 0 ? { anexos } : {}),
         ...(opcoes.origem !== undefined ? { origem: opcoes.origem } : {}),
       }),
     }),

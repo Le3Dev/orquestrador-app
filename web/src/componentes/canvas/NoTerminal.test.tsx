@@ -104,6 +104,7 @@ function renderizar(resumo: ResumoDoOrquestrador, { trabalhando = false, convers
       fecharTerminal: vi.fn(),
       minimizarOuRestaurarTerminal: vi.fn(),
       limparBixinhos: vi.fn(),
+      fecharBixinho: vi.fn(),
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),
       mudarEscalaDaLetra: vi.fn(),
@@ -607,6 +608,7 @@ function canvasDoTerminal(conversa: EstadoDaConversa, resumo: ResumoDoOrquestrad
       fecharTerminal: vi.fn(),
       minimizarOuRestaurarTerminal: vi.fn(),
       limparBixinhos: vi.fn(),
+      fecharBixinho: vi.fn(),
       orquestradorCriado: vi.fn(),
       descartarRascunho: vi.fn(),
       mudarEscalaDaLetra: vi.fn(),
@@ -829,7 +831,85 @@ describe("NoTerminal · conversa nova", () => {
     return { canvas, campo: screen.getByRole("textbox", { name: "Mensagem para o orquestrador" }) };
   }
 
-  describe("imagens anexadas", () => {
+  describe("anexos (imagens e documentos)", () => {
+    it("o documento colado vira etiqueta (sem URL blob:) e some ao remover", async () => {
+      const criar = vi.spyOn(URL, "createObjectURL");
+      const { campo } = renderizarOcioso();
+
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["pdf"], "contrato.pdf", { type: "application/pdf" })] } });
+      const remover = await screen.findByRole("button", { name: "Remover contrato.pdf" });
+      expect(remover.closest(".chip-de-anexo")).toHaveTextContent("PDF");
+      expect(screen.queryByAltText("contrato.pdf")).not.toBeInTheDocument();
+      expect(criar).not.toHaveBeenCalled();
+
+      fireEvent.click(remover);
+      expect(screen.queryByText("contrato.pdf")).not.toBeInTheDocument();
+    });
+
+    it("só com documento, o envio leva o texto padrão e os anexos no corpo", async () => {
+      const enviar = vi.spyOn(api, "enviarMensagem").mockResolvedValue({ turnoId: "t1" });
+      const { campo } = renderizarOcioso();
+
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["pdf"], "contrato.pdf", { type: "application/pdf" })] } });
+      await screen.findByRole("button", { name: "Remover contrato.pdf" });
+      fireEvent.click(screen.getByRole("button", { name: "enviar ⏎" }));
+
+      // "cGRm" é o base64 de "pdf".
+      await waitFor(() =>
+        expect(enviar).toHaveBeenCalledWith(
+          "o1",
+          "Analise os anexos.",
+          [{ nome: "contrato.pdf", tipoDeMidia: "application/pdf", base64: "cGRm" }],
+          "execucao",
+        ),
+      );
+      await waitFor(() => expect(screen.queryByText("contrato.pdf")).not.toBeInTheDocument());
+    });
+
+    it("misturados, imagem e documento vão juntos, na ordem em que foram anexados", async () => {
+      const enviar = vi.spyOn(api, "enviarMensagem").mockResolvedValue({ turnoId: "t1" });
+      const { campo } = renderizarOcioso();
+
+      fireEvent.paste(campo, {
+        clipboardData: {
+          files: [new File(["png"], "tela.png", { type: "image/png" }), new File(["a,b"], "dados.csv", { type: "" })],
+        },
+      });
+      await screen.findByRole("button", { name: "Remover dados.csv" });
+      fireEvent.change(campo, { target: { value: "Compare" } });
+      fireEvent.keyDown(campo, { key: "Enter" });
+
+      await waitFor(() =>
+        expect(enviar).toHaveBeenCalledWith(
+          "o1",
+          "Compare",
+          [
+            { nome: "tela.png", tipoDeMidia: "image/png", base64: "cG5n" },
+            { nome: "dados.csv", tipoDeMidia: "", base64: "YSxi" },
+          ],
+          "execucao",
+        ),
+      );
+    });
+
+    it("respeita os limites do conjunto: 6ª imagem, formato recusado e documento acima de 32 MB", async () => {
+      const { campo } = renderizarOcioso();
+      const imagens = Array.from({ length: 6 }, (_, i) => new File(["x"], `foto${i}.png`, { type: "image/png" }));
+
+      fireEvent.paste(campo, { clipboardData: { files: imagens } });
+      expect(await screen.findByText("✗ Dá para anexar até 5 imagens por mensagem.")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Remover foto4.png" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Remover foto5.png" })).not.toBeInTheDocument();
+
+      fireEvent.paste(campo, { clipboardData: { files: [new File(["x"], "app.exe", { type: "" })], getData: () => "" } });
+      expect(await screen.findByText(/✗ "app.exe" tem um formato que não dá para anexar/)).toBeInTheDocument();
+
+      const grande = new File(["x"], "grande.pdf", { type: "application/pdf" });
+      Object.defineProperty(grande, "size", { value: 32 * 1024 * 1024 + 1 });
+      fireEvent.paste(campo, { clipboardData: { files: [grande] } });
+      expect(await screen.findByText('✗ "grande.pdf" passa de 32 MB, o limite por documento.')).toBeInTheDocument();
+    });
+
     it("guarda o arquivo com miniatura blob: e libera a URL ao remover", async () => {
       const criar = vi.spyOn(URL, "createObjectURL");
       const revogar = vi.spyOn(URL, "revokeObjectURL");
@@ -1034,7 +1114,7 @@ describe("NoTerminal · servidor no ar", () => {
     const canvas = canvasDoTerminal(conversa);
     render(<Terminal canvas={canvas} no={propsDoNo()} />);
 
-    expect(screen.getByText("servidor no ar")).toBeInTheDocument();
+    expect(screen.getByText("Servidores")).toBeInTheDocument();
     expect(screen.getByText("localhost:5173")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Abrir prévia de http://localhost:5173" }));
 
@@ -1044,7 +1124,7 @@ describe("NoTerminal · servidor no ar", () => {
   it("sem servidores, não há faixa", () => {
     render(<Terminal canvas={canvasDoTerminal(ESTADO_INICIAL)} no={propsDoNo()} />);
 
-    expect(screen.queryByText("servidor no ar")).not.toBeInTheDocument();
+    expect(screen.queryByText("Servidores")).not.toBeInTheDocument();
   });
 });
 
@@ -1299,13 +1379,19 @@ describe("NoTerminal · nota arrastada para o terminal", () => {
     expect(enfileirar).not.toHaveBeenCalled();
   });
 
-  it("arquivos continuam com o aviso de anexar imagens", () => {
+  it("arquivos têm o aviso de anexar os arquivos; ao soltar um documento, ele vira anexo pendente", async () => {
     const janela = renderizarTerminal();
 
     fireEvent.dragOver(janela, { dataTransfer: { types: ["Files"], files: [] } });
 
-    expect(screen.getByText("solte para anexar as imagens a este orquestrador")).toBeInTheDocument();
+    expect(screen.getByText("solte para anexar os arquivos a este orquestrador")).toBeInTheDocument();
     expect(screen.queryByText(/solte para escrever no prompt/)).not.toBeInTheDocument();
+
+    const planilha = new File(["a"], "vendas.xlsx", { type: "" });
+    fireEvent.drop(janela, { dataTransfer: { types: ["Files"], files: [planilha] } });
+
+    expect(screen.queryByText(/solte para anexar/)).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Remover vendas.xlsx" })).toBeInTheDocument();
   });
 
   it("o botão de alterações fica na barra do terminal, com o id do orquestrador", () => {
@@ -1366,7 +1452,8 @@ describe("NoTerminal · barra estreita", () => {
 
     expect(within(barra).getByTitle("C:\\projetos\\painel")).toHaveTextContent("painel");
     expect(within(barra).getByTitle(/^Branch: feature\/barra-estreita/)).toHaveTextContent("feature/barra-estreita");
-    // A barra não tem chip de instruções, etiqueta de situação, RAM nem o limpar (só a borda que brilha indica o pedido).
+    // A barra não tem chip de instruções, etiqueta de situação nem RAM (só a borda que brilha indica o pedido).
+    // O limpar só aparece com bixinho parado; esta conversa não tem nenhum.
     expect(within(barra).queryByText(/instruções/)).not.toBeInTheDocument();
     expect(within(barra).queryByRole("button", { name: "Limpar bixinhos" })).not.toBeInTheDocument();
     expect(within(barra).queryByTitle(/^Situação/)).not.toBeInTheDocument();
@@ -1376,7 +1463,34 @@ describe("NoTerminal · barra estreita", () => {
     }
   });
 
-  it("mesmo com \"manter bixinhos até limpar\" ligado e um bixinho parado, a barra não tem o limpar", () => {
+  it("com um bixinho executando e nenhum parado, a barra não tem o limpar", () => {
+    const executando = aplicar(
+      ESTADO_INICIAL,
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "analise", configuracao },
+      { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "s1", descricao: "Testes", tarefa: "rode" },
+    );
+    const { container } = render(<Terminal canvas={canvasDoTerminal(executando, resumoCheio())} no={propsDoNo()} />);
+    expect(screen.queryByRole("button", { name: "Limpar bixinhos" })).not.toBeInTheDocument();
+    expect(container.querySelector(".barra-do-terminal")).not.toHaveTextContent(/limpar/);
+  });
+
+  it("com um bixinho parado, a barra mostra \"limpar (1)\" e o clique limpa os bixinhos do orquestrador", () => {
+    const parado = aplicar(
+      ESTADO_INICIAL,
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "analise", configuracao },
+      { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "s1", descricao: "Testes", tarefa: "rode" },
+      { tipo: "subagente_concluido", turnoId: "t1", subagenteId: "s1", situacao: "concluido", resumo: "ok", tokens: 1, duracaoMs: 1 },
+    );
+    const canvas = canvasDoTerminal(parado, resumoCheio());
+    render(<Terminal canvas={canvas} no={propsDoNo()} />);
+
+    const botao = screen.getByRole("button", { name: "Limpar bixinhos" });
+    expect(botao).toHaveTextContent("limpar (1)");
+    fireEvent.click(botao);
+    expect(canvas.acoes.limparBixinhos).toHaveBeenCalledWith("o1");
+  });
+
+  it("mesmo com \"manter bixinhos até limpar\" ligado, o bixinho parado faz o limpar aparecer", () => {
     localStorage.setItem("orquestrador.preferenciasDaTela", JSON.stringify({ manterBixinhosAteLimpar: true }));
     try {
       const parado = aplicar(
@@ -1385,9 +1499,12 @@ describe("NoTerminal · barra estreita", () => {
         { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "s1", descricao: "Testes", tarefa: "rode" },
         { tipo: "subagente_concluido", turnoId: "t1", subagenteId: "s1", situacao: "concluido", resumo: "ok", tokens: 1, duracaoMs: 1 },
       );
-      const { container } = render(<Terminal canvas={canvasDoTerminal(parado, resumoCheio())} no={propsDoNo()} />);
-      expect(screen.queryByRole("button", { name: "Limpar bixinhos" })).not.toBeInTheDocument();
-      expect(container.querySelector(".barra-do-terminal")).not.toHaveTextContent(/limpar/);
+      const canvas = canvasDoTerminal(parado, resumoCheio());
+      render(<Terminal canvas={canvas} no={propsDoNo()} />);
+      const botao = screen.getByRole("button", { name: "Limpar bixinhos" });
+      expect(botao).toHaveTextContent("limpar (1)");
+      fireEvent.click(botao);
+      expect(canvas.acoes.limparBixinhos).toHaveBeenCalledWith("o1");
     } finally {
       localStorage.removeItem("orquestrador.preferenciasDaTela");
     }
@@ -1802,5 +1919,166 @@ describe("NoTerminal · itens ligados", () => {
     await waitFor(() =>
       expect(enfileirar).toHaveBeenCalledWith("o1", "depois veja a prévia", "execucao", ITENS_PARA_ENVIO),
     );
+  });
+});
+
+describe("NoTerminal · prévias abertas pelo agente", () => {
+  let base = 0;
+
+  /** Cada teste parte de uma sequência própria: os eventos já tratados ficam guardados na sessão. */
+  function conversaDe(...eventos: EventoDeOrquestracao[]): EstadoDaConversa {
+    base += 1000;
+    return aplicar({ ...ESTADO_INICIAL, ultimaSequencia: base }, ...eventos);
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-28T12:00:06Z"));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function renderizarComAcoes(conversa: EstadoDaConversa) {
+    const canvas = canvasDoTerminal(conversa);
+    const fecharPreviasDoAgente = vi.fn();
+    canvas.acoes = { ...canvas.acoes, fecharPreviasDoAgente };
+    render(<Terminal canvas={canvas} no={propsDoNo()} />);
+    return { canvas, fecharPreviasDoAgente };
+  }
+
+  it("o endereço citado na resposta abre a prévia sozinha, marcada como aberta pelo agente", () => {
+    const { canvas } = renderizarComAcoes(
+      conversaDe(
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "mostre o painel", configuracao },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173", origem: "resposta" },
+      ),
+    );
+
+    expect(canvas.acoes.abrirPrevia).toHaveBeenCalledTimes(1);
+    expect(canvas.acoes.abrirPrevia).toHaveBeenCalledWith("o1", "http://localhost:5173", { peloAgente: true });
+  });
+
+  it("o endereço de uma ferramenta, ou sem origem, não abre nada: só aparece na faixa para abrir com um clique", () => {
+    const { canvas } = renderizarComAcoes(
+      conversaDe(
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "teste a API", configuracao },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:4000", origem: "ferramenta" },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173" },
+      ),
+    );
+
+    expect(canvas.acoes.abrirPrevia).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Abrir prévia de http://localhost:4000" }));
+    expect(canvas.acoes.abrirPrevia).toHaveBeenCalledWith("o1", "http://localhost:4000");
+  });
+
+  it("a citação antiga, relida do histórico ao abrir a tela, não abre nada", () => {
+    vi.setSystemTime(new Date("2026-10-29T12:00:00Z"));
+    const { canvas } = renderizarComAcoes(
+      conversaDe(
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "mostre o painel", configuracao },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173", origem: "resposta" },
+      ),
+    );
+
+    expect(canvas.acoes.abrirPrevia).not.toHaveBeenCalled();
+  });
+
+  it("ao fim do turno, pede o fechamento com o que o agente pediu, o início do turno e o que ele citou", () => {
+    const { fecharPreviasDoAgente } = renderizarComAcoes(
+      conversaDe(
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "feche o painel", configuracao },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:3000", origem: "resposta" },
+        { tipo: "turno_concluido", turnoId: "t1", resposta: "Pronto.", uso: USO, previasParaFechar: ["http://localhost:5173"] },
+      ),
+    );
+
+    expect(fecharPreviasDoAgente).toHaveBeenCalledTimes(1);
+    expect(fecharPreviasDoAgente).toHaveBeenCalledWith("o1", {
+      enderecos: ["http://localhost:5173"],
+      doTurno: { iniciadoEm: Date.parse("2026-10-28T12:00:00Z"), citados: ["http://localhost:3000"] },
+    });
+  });
+
+  it("o fim de turno antigo, relido do histórico, não fecha nada", () => {
+    vi.setSystemTime(new Date("2026-10-29T12:00:00Z"));
+    const { fecharPreviasDoAgente } = renderizarComAcoes(
+      conversaDe(
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "feche o painel", configuracao },
+        { tipo: "turno_concluido", turnoId: "t1", resposta: "Pronto.", uso: USO, previasParaFechar: ["http://localhost:5173"] },
+      ),
+    );
+
+    expect(fecharPreviasDoAgente).not.toHaveBeenCalled();
+  });
+
+  it("o mesmo fim de turno não fecha duas vezes quando o terminal renderiza de novo", () => {
+    const conversa = conversaDe(
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "feche o painel", configuracao },
+      { tipo: "turno_concluido", turnoId: "t1", resposta: "Pronto.", uso: USO },
+    );
+    const canvas = canvasDoTerminal(conversa);
+    const fecharPreviasDoAgente = vi.fn();
+    canvas.acoes = { ...canvas.acoes, fecharPreviasDoAgente };
+    const { rerender } = render(<Terminal canvas={canvas} no={propsDoNo()} />);
+
+    rerender(<Terminal canvas={{ ...canvas }} no={propsDoNo({ selected: true })} />);
+
+    expect(fecharPreviasDoAgente).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("NoTerminal · previasAbertas no pedido", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  function renderizarComPrevias(conversa: EstadoDaConversa, previas: string[]) {
+    const canvas = canvasDoTerminal(conversa);
+    const lerPreviasAbertas = vi.fn(() => previas);
+    canvas.acoes = { ...canvas.acoes, lerPreviasAbertas };
+    render(<Terminal canvas={canvas} no={propsDoNo()} />);
+    return { lerPreviasAbertas };
+  }
+
+  it("o pedido leva as prévias abertas deste orquestrador, lidas na hora do envio", async () => {
+    const enviar = vi.spyOn(api, "enviarMensagem").mockResolvedValue({ turnoId: "t2" });
+    const { lerPreviasAbertas } = renderizarComPrevias(conversaOciosa(), ["http://localhost:5173"]);
+    const campo = campoDoPrompt();
+
+    fireEvent.change(campo, { target: { value: "ajuste o botão" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(enviar).toHaveBeenCalledWith("o1", "ajuste o botão", [], "execucao", [], ["http://localhost:5173"]),
+    );
+    expect(lerPreviasAbertas).toHaveBeenCalledWith("o1");
+  });
+
+  it("pôr na fila também leva as prévias abertas", async () => {
+    const enfileirar = vi.spyOn(api, "enfileirarPedido").mockResolvedValue({ pedidoId: "p9" });
+    renderizarComPrevias(conversaDoTerminal(), ["http://localhost:5173", "http://localhost:3000"]);
+    const campo = campoDoPrompt();
+
+    fireEvent.change(campo, { target: { value: "depois ajuste o botão" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+
+    await waitFor(() =>
+      expect(enfileirar).toHaveBeenCalledWith("o1", "depois ajuste o botão", "execucao", [], [
+        "http://localhost:5173",
+        "http://localhost:3000",
+      ]),
+    );
+  });
+
+  it("sem prévias abertas, o pedido é igual ao de antes", async () => {
+    const enviar = vi.spyOn(api, "enviarMensagem").mockResolvedValue({ turnoId: "t2" });
+    renderizarComPrevias(conversaOciosa(), []);
+    const campo = campoDoPrompt();
+
+    fireEvent.change(campo, { target: { value: "oi" } });
+    fireEvent.keyDown(campo, { key: "Enter" });
+
+    await waitFor(() => expect(enviar).toHaveBeenCalledWith("o1", "oi", [], "execucao"));
   });
 });

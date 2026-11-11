@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 
 import type {
   DadosDaConfiguracao,
+  DadosDoAnexo,
   EventoDeOrquestracao,
   EventoRegistrado,
   SinalDeVida,
@@ -125,6 +126,74 @@ describe("TranscricaoDoTerminal", () => {
     expect(screen.getByText("lendo o código")).toBeInTheDocument();
     expect(screen.getByText(/120 tokens de raciocínio/)).toBeInTheDocument();
     expect(analises.total).toBe(2);
+  });
+
+  describe("anexos do pedido", () => {
+    const conversaComAnexos = (anexos: DadosDoAnexo[]) =>
+      aplicar(ESTADO_INICIAL, { tipo: "turno_iniciado", turnoId: "t1", texto: "veja", configuracao, anexos });
+
+    it("a imagem é miniatura que abre em tamanho real; o documento é etiqueta que baixa com o nome original", () => {
+      render(
+        <Transcricao
+          conversa={conversaComAnexos([
+            { id: "a1", nome: "tela.png", tipoDeMidia: "image/png", tamanhoEmBytes: 10, arquivo: "a1.png", categoria: "imagem" },
+            {
+              id: "a2",
+              nome: "Relatório 2026.pdf",
+              tipoDeMidia: "application/pdf",
+              tamanhoEmBytes: 2 * 1024 * 1024,
+              arquivo: "a2.pdf",
+              categoria: "documento",
+            },
+          ])}
+        />,
+      );
+
+      const miniatura = screen.getByAltText("tela.png").closest("a");
+      expect(miniatura).toHaveAttribute("href", "/api/orquestradores/o1/anexos/a1.png");
+      expect(miniatura).toHaveAttribute("target", "_blank");
+
+      const documento = screen.getByRole("link", { name: /Relatório 2026\.pdf/ });
+      expect(documento).toHaveAttribute("href", "/api/orquestradores/o1/anexos/a2.pdf");
+      expect(documento).toHaveAttribute("download", "Relatório 2026.pdf");
+      expect(documento).not.toHaveAttribute("target");
+      expect(documento).toHaveTextContent("PDF · 2 MB");
+      expect(documento.querySelector("img")).toBeNull();
+    });
+
+    it("turno antigo, sem categoria: image/* é miniatura e o resto é documento", () => {
+      render(
+        <Transcricao
+          conversa={conversaComAnexos([
+            { id: "a1", nome: "foto.jpg", tipoDeMidia: "image/jpeg", tamanhoEmBytes: 10, arquivo: "a1.jpg" },
+            { id: "a2", nome: "ata.docx", tipoDeMidia: "application/octet-stream", tamanhoEmBytes: 10, arquivo: "a2.docx" },
+          ])}
+        />,
+      );
+
+      expect(screen.getByAltText("foto.jpg")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: /ata\.docx/ })).toHaveAttribute("download", "ata.docx");
+      expect(screen.queryByAltText("ata.docx")).not.toBeInTheDocument();
+    });
+
+    it("o documento em formato antigo mostra o selo de aviso", () => {
+      render(
+        <Transcricao
+          conversa={conversaComAnexos([
+            {
+              id: "a1",
+              nome: "base.xls",
+              tipoDeMidia: "application/vnd.ms-excel",
+              tamanhoEmBytes: 300 * 1024,
+              arquivo: "a1.xls",
+              categoria: "documento",
+            },
+          ])}
+        />,
+      );
+
+      expect(screen.getByText("Excel (formato antigo)")).toHaveAttribute("title", expect.stringContaining("Salve como .docx ou .xlsx"));
+    });
   });
 
   it("decidir o plano troca o rótulo sem re-analisar o plano", () => {
@@ -292,6 +361,28 @@ describe("TranscricaoDoTerminal", () => {
       expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
       expect(screen.queryByText(/de 4 tarefas/)).not.toBeInTheDocument();
     });
+  });
+
+  it("desenha só os últimos 20 pedidos e revela mais 20 a cada clique em \"Mostrar anteriores\"", () => {
+    const eventos: EventoDeOrquestracao[] = Array.from({ length: 45 }, (_, i): EventoDeOrquestracao => ({
+      tipo: "turno_iniciado",
+      turnoId: `t${i + 1}`,
+      texto: `pedido numero ${i + 1}`,
+      configuracao,
+    }));
+    const conversa = aplicar(ESTADO_INICIAL, ...eventos);
+    render(<Transcricao conversa={conversa} />);
+    expect(screen.queryByText("pedido numero 25")).not.toBeInTheDocument();
+    expect(screen.getByText("pedido numero 26")).toBeInTheDocument();
+    expect(screen.getByText("pedido numero 45")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar 20 anteriores" }));
+    expect(screen.getByText("pedido numero 6")).toBeInTheDocument();
+    expect(screen.queryByText("pedido numero 5")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar 5 anteriores" }));
+    expect(screen.getByText("pedido numero 1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /anteriores/ })).not.toBeInTheDocument();
   });
 
   it("marca a configuração com a etiqueta \"econômico\" só quando ela corresponde ao modo econômico", () => {

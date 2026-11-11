@@ -69,7 +69,23 @@ export type DadosDaPrevia = {
   minimizada: boolean;
   /** A altura da prévia aberta, como na nota. */
   alturaAberta: number;
+  /**
+   * Aberta sozinha, porque o agente citou o endereço na resposta. Só essas
+   * fecham sozinhas (`fecharPreviasDoAgente`); as abertas pelo usuário (menu,
+   * barra do canvas, faixa de servidores) não têm o campo.
+   */
+  abertaPeloAgente?: boolean;
+  /** Quando (`Date.now()`) a prévia foi aberta sozinha: a regra de fim de turno compara com o início dele. */
+  abertaEm?: number;
+  /**
+   * O usuário mexeu nela (clicou no corpo, navegou, digitou na barra, recarregou,
+   * redimensionou ou moveu): daí em diante ela é dele e não fecha sozinha.
+   */
+  tocadaPeloUsuario?: boolean;
 };
+
+/** O que `novaPrevia` aceita além do endereço e do terminal: a origem e o uso da prévia. */
+export type OrigemDaPrevia = Pick<DadosDaPrevia, "abertaPeloAgente" | "abertaEm" | "tocadaPeloUsuario">;
 
 /**
  * O bloco "Terminal" (um shell de verdade no canvas). Guarda o que vai para o
@@ -298,7 +314,7 @@ export function novaNota(
 export function novaPrevia(
   previaId: string,
   posicao: Ponto,
-  { url, orquestradorId }: { url: string; orquestradorId: string | null },
+  { url, orquestradorId, abertaPeloAgente, abertaEm, tocadaPeloUsuario }: { url: string; orquestradorId: string | null } & OrigemDaPrevia,
   largura: number = TAMANHO_DA_PREVIA.largura,
   altura: number = TAMANHO_DA_PREVIA.altura,
   minimizada = false,
@@ -310,7 +326,17 @@ export function novaPrevia(
     width: largura,
     height: minimizada ? ALTURA_DA_NOTA_MINIMIZADA : altura,
     dragHandle: `.${ALCA_DA_PREVIA}`,
-    data: { previaId, url, orquestradorId, minimizada, alturaAberta: altura },
+    data: {
+      previaId,
+      url,
+      orquestradorId,
+      minimizada,
+      alturaAberta: altura,
+      // Os campos de origem só existem quando valem: as prévias do usuário ficam como sempre foram.
+      ...(abertaPeloAgente === true ? { abertaPeloAgente } : {}),
+      ...(abertaPeloAgente === true && abertaEm !== undefined ? { abertaEm } : {}),
+      ...(tocadaPeloUsuario === true ? { tocadaPeloUsuario } : {}),
+    },
   };
 }
 
@@ -409,7 +435,13 @@ export function nosDoLayout(layout: LayoutDoCanvas): NoDoCanvas[] {
     novaPrevia(
       previaId,
       { x: retangulo.x, y: retangulo.y },
-      { url: retangulo.url, orquestradorId: retangulo.orquestradorId },
+      {
+        url: retangulo.url,
+        orquestradorId: retangulo.orquestradorId,
+        abertaPeloAgente: retangulo.abertaPeloAgente,
+        abertaEm: retangulo.abertaEm,
+        tocadaPeloUsuario: retangulo.tocadaPeloUsuario,
+      },
       retangulo.largura,
       retangulo.altura,
       retangulo.minimizada,
@@ -480,6 +512,8 @@ export function layoutDosNos(nos: readonly NoDoCanvas[], viewport: LayoutDoCanva
       minimizada: no.data.minimizada,
       url: no.data.url,
       orquestradorId: no.data.orquestradorId,
+      ...(no.data.abertaPeloAgente === true ? { abertaPeloAgente: true, abertaEm: no.data.abertaEm } : {}),
+      ...(no.data.tocadaPeloUsuario === true ? { tocadaPeloUsuario: true } : {}),
     };
   }
   const shells: LayoutDoCanvas["shells"] = {};
@@ -1424,4 +1458,81 @@ export function itensLigadosParaEnvio(
     }
   }
   return itens.slice(0, MAXIMO_DE_ITENS_LIGADOS);
+}
+
+/** Quantas prévias abertas vão no pedido (`previasAbertas`): o servidor aceita até 10. */
+export const MAXIMO_DE_PREVIAS_ABERTAS = 10;
+
+/**
+ * Os endereços das prévias abertas no canvas para este Orquestrador, como vão
+ * em cada pedido: o servidor os coloca no prompt, e o agente sabe quais pode
+ * pedir para fechar. Sem repetição, sem as vazias e só as que cabem no pedido.
+ */
+export function previasAbertasDoOrquestrador(nos: readonly NoDoCanvas[], orquestradorId: string): string[] {
+  const enderecos = new Set<string>();
+  for (const no of nos) {
+    if (
+      ehPrevia(no) &&
+      no.data.orquestradorId === orquestradorId &&
+      no.data.url !== "" &&
+      no.data.url.length <= TAMANHO_MAXIMO_DO_ENDERECO_LIGADO
+    ) {
+      enderecos.add(no.data.url);
+    }
+  }
+  return [...enderecos].slice(0, MAXIMO_DE_PREVIAS_ABERTAS);
+}
+
+/** Quando uma prévia que o agente abriu pode fechar sozinha. */
+export type RegraDeFechamentoDePrevias = {
+  /** As prévias com estes endereços fecham (o agente pediu, no bloco `previa-do-app`). */
+  enderecos?: readonly string[];
+  /**
+   * Fim de turno (rede de segurança): fecham as abertas antes de `iniciadoEm`
+   * (ms) cujo endereço não está em `citados`. As abertas durante o turno ficam
+   * até o fim do próximo.
+   */
+  doTurno?: { iniciadoEm: number; citados: readonly string[] };
+};
+
+/**
+ * Tira do canvas as prévias que o agente abriu, deste Orquestrador, que o
+ * usuário não tocou e que a regra manda fechar. As do usuário nunca saem
+ * daqui, e as do agente que ele tocou passam a ser dele. Devolve o mesmo
+ * array quando nada fecha.
+ */
+export function fecharPreviasDoAgente(
+  nos: NoDoCanvas[],
+  orquestradorId: string,
+  { enderecos = [], doTurno }: RegraDeFechamentoDePrevias,
+): NoDoCanvas[] {
+  const pedidos = new Set(enderecos);
+  const citados = new Set(doTurno?.citados ?? []);
+  const fecha = (no: NoDoCanvas): boolean => {
+    if (
+      !ehPrevia(no) ||
+      no.data.orquestradorId !== orquestradorId ||
+      no.data.abertaPeloAgente !== true ||
+      no.data.tocadaPeloUsuario === true
+    ) {
+      return false;
+    }
+    if (pedidos.has(no.data.url)) {
+      return true;
+    }
+    // Sem a hora de abertura (layout antigo), conta como aberta antes do turno.
+    return doTurno !== undefined && (no.data.abertaEm ?? 0) < doTurno.iniciadoEm && !citados.has(no.data.url);
+  };
+  return nos.some(fecha) ? nos.filter((no) => !fecha(no)) : nos;
+}
+
+/**
+ * Marca como tocadas pelo usuário as prévias que o agente abriu, com estes ids
+ * de nó (as do usuário não precisam: elas já não fecham sozinhas). O mesmo
+ * array quando nada muda.
+ */
+export function marcarPreviasTocadas(nos: NoDoCanvas[], idsDosNos: readonly string[]): NoDoCanvas[] {
+  const alvo = (no: NoDoCanvas): no is NoPrevia =>
+    ehPrevia(no) && no.data.abertaPeloAgente === true && no.data.tocadaPeloUsuario !== true && idsDosNos.includes(no.id);
+  return nos.some(alvo) ? nos.map((no) => (alvo(no) ? { ...no, data: { ...no.data, tocadaPeloUsuario: true } } : no)) : nos;
 }

@@ -3,14 +3,14 @@ import { createRef } from "react";
 
 import { api } from "../../shared/api/cliente";
 import type { DadosDoPedidoNaFila, ModoDoTurno } from "../../shared/api/tipos";
-import type { ImagemAnexada } from "../../shared/imagens";
+import type { AnexoPendente } from "../../shared/anexos";
 import { type ControleDoPrompt, PromptDoTerminal } from "./PromptDoTerminal";
 
 interface Opcoes {
   modo?: ModoDoTurno;
   trabalhando?: boolean;
   desconectado?: boolean;
-  imagens?: readonly ImagemAnexada[];
+  anexos?: readonly AnexoPendente[];
   limpezaAceita?: boolean;
   fila?: readonly DadosDoPedidoNaFila[];
   proximoDaFilaACaminho?: boolean;
@@ -22,26 +22,53 @@ const FILA: readonly DadosDoPedidoNaFila[] = [
   { id: "p2", texto: "planeje a migração", modo: "planejamento", enfileiradoEm: "2026-10-28T12:00:02.000Z" },
 ];
 
-const IMAGEM: ImagemAnexada = {
+const IMAGEM: AnexoPendente = {
   id: "i1",
   nome: "tela.png",
+  categoria: "imagem",
   tipoDeMidia: "image/png",
   tamanhoEmBytes: 10,
   arquivo: new Blob([new Uint8Array(10)], { type: "image/png" }),
   previa: "blob:teste/i1",
+  rotulo: "Imagem",
+  legado: false,
+};
+
+const DOCUMENTO: AnexoPendente = {
+  id: "d1",
+  nome: "relatório de vendas do terceiro trimestre.pdf",
+  categoria: "documento",
+  tipoDeMidia: "application/pdf",
+  tamanhoEmBytes: 3 * 1024 * 1024,
+  arquivo: new Blob([new Uint8Array(10)], { type: "application/pdf" }),
+  previa: null,
+  rotulo: "PDF",
+  legado: false,
+};
+
+const DOCUMENTO_ANTIGO: AnexoPendente = {
+  ...DOCUMENTO,
+  id: "d2",
+  nome: "base.xls",
+  tipoDeMidia: "application/vnd.ms-excel",
+  tamanhoEmBytes: 200 * 1024,
+  rotulo: "Excel (formato antigo)",
+  legado: true,
 };
 
 function renderizar({
   modo = "execucao",
   trabalhando = false,
   desconectado = false,
-  imagens = [],
+  anexos = [],
   limpezaAceita = true,
   fila = [],
   proximoDaFilaACaminho = false,
   enfileiramentoAceito = true,
 }: Opcoes = {}) {
   const aoAlternarModo = vi.fn();
+  const aoRemoverAnexo = vi.fn();
+  const aoAnexar = vi.fn();
   const aoEnviar = vi.fn(async () => true);
   const aoEnfileirar = vi.fn(async () => enfileiramentoAceito);
   const aoRemoverDaFila = vi.fn();
@@ -59,9 +86,9 @@ function renderizar({
       aoAlternarModo={aoAlternarModo}
       campo={campo}
       controle={controle}
-      imagens={imagens}
-      aoAnexar={vi.fn()}
-      aoRemoverImagem={vi.fn()}
+      anexos={anexos}
+      aoAnexar={aoAnexar}
+      aoRemoverAnexo={aoRemoverAnexo}
       aoEnviar={aoEnviar}
       aoEnfileirar={aoEnfileirar}
       fila={fila}
@@ -74,6 +101,8 @@ function renderizar({
   );
   return {
     aoAlternarModo,
+    aoAnexar,
+    aoRemoverAnexo,
     aoEnviar,
     aoEnfileirar,
     aoRemoverDaFila,
@@ -161,7 +190,7 @@ describe("PromptDoTerminal", () => {
     });
 
     it("com imagens anexadas, limpa a conversa sem enviar as imagens", async () => {
-      const { aoEnviar, aoLimparConversa, campo } = renderizar({ imagens: [IMAGEM] });
+      const { aoEnviar, aoLimparConversa, campo } = renderizar({ anexos: [IMAGEM] });
 
       digitarEEnviar(campo, "/clear");
 
@@ -241,14 +270,27 @@ describe("PromptDoTerminal", () => {
     });
 
     it("com imagens anexadas, avisa que elas não entram na fila e não envia nada", () => {
-      const { aoEnviar, aoEnfileirar, campo } = renderizar({ trabalhando: true, imagens: [IMAGEM] });
+      const { aoEnviar, aoEnfileirar, campo } = renderizar({ trabalhando: true, anexos: [IMAGEM] });
 
       digitarEEnviar(campo, "veja a tela");
 
-      expect(screen.getByRole("alert")).toHaveTextContent("imagens não entram na fila");
+      expect(screen.getByRole("alert")).toHaveTextContent("anexos não entram na fila");
       expect(aoEnfileirar).not.toHaveBeenCalled();
       expect(aoEnviar).not.toHaveBeenCalled();
       expect(campo).toHaveValue("veja a tela");
+    });
+
+    it("com um documento anexado, o aviso é o mesmo: não entra na fila e nada é enviado", () => {
+      const { aoEnviar, aoEnfileirar, campo } = renderizar({ trabalhando: true, anexos: [DOCUMENTO] });
+
+      digitarEEnviar(campo, "resuma o relatório");
+
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "anexos não entram na fila — envie quando o orquestrador estiver livre, ou remova os anexos para pôr só o texto na fila",
+      );
+      expect(aoEnfileirar).not.toHaveBeenCalled();
+      expect(aoEnviar).not.toHaveBeenCalled();
+      expect(campo).toHaveValue("resuma o relatório");
     });
 
     it("sem pedido rodando, Enter envia normalmente", async () => {
@@ -323,6 +365,91 @@ describe("PromptDoTerminal", () => {
     });
   });
 
+  describe("anexos (imagens e documentos)", () => {
+    it("a imagem vira miniatura e o documento vira etiqueta, cada um com o seu ✕", () => {
+      const { aoRemoverAnexo } = renderizar({ anexos: [IMAGEM, DOCUMENTO, DOCUMENTO_ANTIGO] });
+
+      expect(screen.getByRole("img", { name: "tela.png" })).toHaveAttribute("src", "blob:teste/i1");
+      const etiqueta = screen.getByRole("button", { name: `Remover ${DOCUMENTO.nome}` }).closest(".chip-de-anexo") as HTMLElement;
+      // Nome inteiro no title, rótulo do formato e tamanho legível; sem <img> para o documento.
+      expect(etiqueta).toHaveAttribute("title", expect.stringContaining(DOCUMENTO.nome));
+      expect(within(etiqueta).getByText(DOCUMENTO.nome)).toHaveClass("chip-de-anexo-nome");
+      expect(etiqueta).toHaveTextContent("PDF · 3 MB");
+      expect(within(etiqueta).queryByRole("img")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: `Remover ${DOCUMENTO.nome}` }));
+      expect(aoRemoverAnexo).toHaveBeenLastCalledWith("d1");
+      fireEvent.click(screen.getByRole("button", { name: "Remover tela.png" }));
+      expect(aoRemoverAnexo).toHaveBeenLastCalledWith("i1");
+    });
+
+    it("o formato antigo (.xls) leva o selo e o aviso para salvar como .xlsx; os atuais não", () => {
+      renderizar({ anexos: [DOCUMENTO, DOCUMENTO_ANTIGO] });
+
+      const antigo = screen.getByRole("button", { name: "Remover base.xls" }).closest(".chip-de-anexo") as HTMLElement;
+      const selo = within(antigo).getByText("Excel (formato antigo)");
+      expect(selo).toHaveClass("chip-de-anexo-selo");
+      expect(selo).toHaveAttribute("title", expect.stringContaining("Salve como .docx ou .xlsx"));
+      expect(antigo).toHaveTextContent("200 KB");
+      expect(document.querySelectorAll(".chip-de-anexo-selo")).toHaveLength(1);
+    });
+
+    it("só com anexos, o botão de enviar vale mesmo sem texto", async () => {
+      const { aoEnviar } = renderizar({ anexos: [DOCUMENTO] });
+
+      fireEvent.click(screen.getByRole("button", { name: "enviar ⏎" }));
+
+      await waitFor(() => expect(aoEnviar).toHaveBeenCalledWith(""));
+    });
+
+    it("o botão + abre o seletor com as imagens e as extensões dos documentos", () => {
+      renderizar();
+
+      const botao = screen.getByRole("button", { name: "Anexar arquivos" });
+      expect(botao).toHaveAttribute(
+        "title",
+        "Anexar arquivos (também dá para colar com Ctrl+V ou arrastar para o terminal)",
+      );
+      const seletor = document.querySelector<HTMLInputElement>('input[type="file"]');
+      expect(seletor).toHaveAttribute("multiple");
+      expect(seletor?.accept.split(",")).toEqual(
+        expect.arrayContaining(["image/png", "image/webp", ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv", ".pptx", ".htm", ".md", ".log"]),
+      );
+    });
+
+    it("o placeholder convida a colar ou arrastar imagens e arquivos", () => {
+      const { campo } = renderizar();
+
+      expect(campo).toHaveAttribute("placeholder", "peça algo e pressione enter · cole ou arraste imagens e arquivos");
+    });
+
+    it("colar um documento (ou imagem) anexa; colar um arquivo de formato não aceito só segue o padrão", () => {
+      const { aoAnexar, campo } = renderizar();
+      const planilha = new File(["a"], "vendas.xlsx", { type: "" });
+      const foto = new File(["b"], "image.png", { type: "image/png" });
+
+      const seguiuPadrao = fireEvent.paste(campo, { clipboardData: { files: [planilha, foto], getData: () => "" } });
+      expect(seguiuPadrao).toBe(false);
+      expect(aoAnexar).toHaveBeenCalledWith([planilha, foto]);
+
+      // Com texto junto, um arquivo recusado não rouba a colagem.
+      aoAnexar.mockClear();
+      const zip = new File(["c"], "dados.zip", { type: "application/zip" });
+      const colou = fireEvent.paste(campo, { clipboardData: { files: [zip], getData: () => "texto colado" } });
+      expect(colou).toBe(true);
+      expect(aoAnexar).not.toHaveBeenCalled();
+    });
+
+    it("colar só um arquivo recusado, sem texto, o entrega para a tela explicar o porquê", () => {
+      const { aoAnexar, campo } = renderizar();
+      const zip = new File(["c"], "dados.zip", { type: "application/zip" });
+
+      fireEvent.paste(campo, { clipboardData: { files: [zip], getData: () => "" } });
+
+      expect(aoAnexar).toHaveBeenCalledWith([zip]);
+    });
+  });
+
   describe("texto vindo de fora (nota arrastada)", () => {
     it("entra no prompt vazio e foca o campo, sem enviar", () => {
       const { aoEnviar, aoEnfileirar, controle, campo } = renderizar();
@@ -378,7 +505,7 @@ describe("PromptDoTerminal", () => {
 
     it("manda onde \"orquestrador\" e a pasta, troca o texto sem enviar e o desfazer volta o original", async () => {
       const melhorar = vi.spyOn(api, "melhorarPrompt").mockResolvedValue(MELHORADO);
-      const { aoEnviar, aoEnfileirar, campo } = renderizar({ imagens: [IMAGEM] });
+      const { aoEnviar, aoEnfileirar, campo } = renderizar({ anexos: [IMAGEM] });
       fireEvent.change(campo, { target: { value: "roda os testes" } });
 
       fireEvent.click(screen.getByRole("button", { name: "Melhorar o pedido" }));
