@@ -1151,6 +1151,21 @@ function Canvas() {
     [],
   );
 
+  // O × do bixinho: fecha só ele, pelo mesmo caminho do limpar (fica guardado e não volta ao recarregar).
+  // Quem ainda executa não é limpo (`limparBixinhos` só considera os parados).
+  const fecharBixinho = useCallback(
+    (orquestradorId: string, subagenteId: string) =>
+      setBixinhosLimpos((atuais) => {
+        const limpos = limparBixinhos(
+          conversasAtuais.current.get(orquestradorId),
+          atuais.get(orquestradorId),
+          new Set([subagenteId]),
+        );
+        return limpos === null ? atuais : new Map(atuais).set(orquestradorId, limpos);
+      }),
+    [],
+  );
+
   const orquestradorCriado = useCallback(
     (rascunhoId: string, orquestrador: ResumoDoOrquestrador) => {
       criadosAgora.current.add(orquestrador.id);
@@ -1486,6 +1501,7 @@ function Canvas() {
       fecharTerminal,
       minimizarOuRestaurarTerminal,
       limparBixinhos: limparBixinhosDoTerminal,
+      fecharBixinho,
       orquestradorCriado,
       descartarRascunho,
       mudarEscalaDaLetra,
@@ -1505,6 +1521,7 @@ function Canvas() {
       fecharTerminal,
       minimizarOuRestaurarTerminal,
       limparBixinhosDoTerminal,
+      fecharBixinho,
       orquestradorCriado,
       descartarRascunho,
       mudarEscalaDaLetra,
