@@ -407,6 +407,9 @@ interface Props {
  * quando a conversa, o sinal de vida ou os dados deste Orquestrador mudam —
  * não no arraste do terminal nem com eventos de outros Orquestradores.
  */
+/** Quantos pedidos a transcrição desenha de uma vez; "Mostrar anteriores" revela mais esse tanto. */
+const TURNOS_POR_PAGINA = 20;
+
 export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
   orquestradorId,
   nome,
@@ -421,6 +424,9 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
   acoesDoPlano,
   aoResponderPergunta,
 }: Props) {
+  const [quantosTurnos, setQuantosTurnos] = useState(TURNOS_POR_PAGINA);
+  // Só os últimos turnos são desenhados (poupa memória); os demais continuam no estado.
+  const primeiroVisivel = Math.max(0, turnos.length - quantosTurnos);
   const trabalhando = turnos.some((turno) => turno.situacao === "em_andamento");
   const avisos = [
     avisosDaConversaNova.worktreeComAlteracoes ? "a worktree tem alterações da conversa anterior" : null,
@@ -463,7 +469,18 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
           )}
         </div>
       )}
-      {turnos.map((turno, indice) => (
+      {primeiroVisivel > 0 && (
+        <button
+          type="button"
+          className="btn btn-sm btn-outline self-center"
+          onClick={() => setQuantosTurnos((atual) => atual + TURNOS_POR_PAGINA)}
+        >
+          {`Mostrar ${Math.min(primeiroVisivel, TURNOS_POR_PAGINA)} anteriores`}
+        </button>
+      )}
+      {turnos.slice(primeiroVisivel).map((turno, posicao) => {
+        const indice = primeiroVisivel + posicao;
+        return (
         <Turno
           key={turno.id}
           turno={turno}
@@ -478,7 +495,8 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
           acoesDoPlano={acoesDoPlano}
           aoResponderPergunta={aoResponderPergunta}
         />
-      ))}
+        );
+      })}
     </div>
   );
 });
