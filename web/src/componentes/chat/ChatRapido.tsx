@@ -8,7 +8,6 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -25,7 +24,8 @@ import type {
 import { comandoDoPrompt, completarComando, dicaDeComando } from "../../shared/comandosDoPrompt";
 import { juntarDitado } from "../../shared/ditado/texto";
 import { perguntaDaMensagemDaEscuta } from "../../shared/escuta/mensagemDaEscuta";
-import { type EscutaNaTela, useEscuta } from "../../shared/escuta/useEscuta";
+import { montarPedidoDeResposta } from "../../shared/escuta/pedidoDeResposta";
+import { useEscuta } from "../../shared/escuta/useEscuta";
 import {
   type EstadoDoChatNaTela,
   type MensagemDoChatNaTela,
@@ -70,15 +70,14 @@ import { BotaoDeDitado } from "../BotaoDeDitado";
 import { AvisoDaMelhoria, BotaoDeMelhorar } from "../MelhoriaDoPrompt";
 import { TextoFormatado } from "../TextoFormatado";
 import { AvisoDaEscuta } from "./AvisoDaEscuta";
-import { BalaoOuvido } from "./BalaoOuvido";
 import { CartaoDeAcao, type PropsDasAcoesDoChat } from "./CartaoDeAcao";
 import { CartaoDeAutorizacao } from "./CartaoDeAutorizacao";
 import { CartaoDePergunta } from "./CartaoDePergunta";
 import { CartaoDeSubagente } from "./CartaoDeSubagente";
-import { frasesSemAsEnviadas } from "./frasesOuvidas";
 import { HoraDaMensagem } from "./HoraDaMensagem";
 import { IndicadorDaEscuta } from "./IndicadorDaEscuta";
 import { MenuDeMaisAcoes, type ItemDoMenuDeMaisAcoes } from "./MenuDeMaisAcoes";
+import { PainelDaTranscricao } from "./PainelDaTranscricao";
 import { SeletorDeModelo } from "./SeletorDeModelo";
 import "../../theme/chat-lateral.css";
 import "../../theme/controles-de-janela.css";
@@ -98,9 +97,6 @@ const FRACAO_DA_ROLAGEM = 0.8;
 const SEM_ORQUESTRADORES: readonly ResumoDoOrquestrador[] = [];
 /** Distância do fim (px) em que a conversa ainda acompanha o texto que chega. */
 const MARGEM_DE_ACOMPANHAMENTO = 80;
-
-/** Uma frase fechada da escuta: vira uma mensagem sua, com a marca "ouvido", na conversa. */
-type FraseOuvida = EscutaNaTela["legenda"]["frases"][number];
 
 interface Props extends PropsDasAcoesDoChat {
   chat: EstadoDoChatNaTela;
@@ -951,72 +947,59 @@ export function ChatRapido({
   });
   const comEscuta = escutaDisponivel && (modoAtivo || escutaManualLigada);
 
-  // A escuta é parte da conversa, como se você tivesse dito cada fala no chat: um balão por enunciado.
-  // O aberto fica no fim e cresce no lugar; ao fechar, o mesmo balão (mesmo id) vira uma mensagem sua com
-  // a marca "ouvido", intercalada com as outras pelo horário. A pergunta que a escuta enviou some daqui:
-  // ela já é a mensagem.
-  const frasesDaLegenda = escuta.legenda.frases;
-  const frasesOuvidas = useMemo(
-    () => frasesSemAsEnviadas(frasesDaLegenda, chat.mensagens),
-    [frasesDaLegenda, chat.mensagens],
-  );
-  const emAndamento = escuta.legenda.emAndamento;
-  // Nunca o mesmo enunciado duas vezes: se a legenda já o tem fechado (mesmo id), vale o fechado.
-  const enunciadoAberto =
-    emAndamento !== null &&
-    (emAndamento.confirmado.trim() !== "" || emAndamento.parcial.trim() !== "") &&
-    !frasesDaLegenda.some((frase) => frase.id === emAndamento.id)
-      ? emAndamento
-      : null;
-  const temOuvido = frasesOuvidas.length > 0 || enunciadoAberto !== null;
-  const { frasesAntes, frasesNoFim } = useMemo(() => {
-    const antes = new Map<string, FraseOuvida[]>();
-    const noFim: FraseOuvida[] = [];
-    const horarios = chat.mensagens.map((mensagem) => Date.parse(mensagem.criadaEm));
-    for (const frase of frasesOuvidas) {
-      const indice = horarios.findIndex((horario) => horario > frase.inicioMs);
-      const id = indice === -1 ? undefined : chat.mensagens[indice]?.id;
-      if (id === undefined) {
-        noFim.push(frase);
-      } else {
-        antes.set(id, [...(antes.get(id) ?? []), frase]);
-      }
+  // A transcrição não entra na conversa: tem painel próprio (PainelDaTranscricao), com "Responder agora".
+  // Abre sozinho ao ligar a escuta; o botão "Transcrição" da barra abre e fecha, e a escolha fica gravada.
+  const transcricaoAberta = escutaDisponivel && preferencias.transcricaoAberta;
+  const escutaLigadaAntes = useRef(comEscuta);
+  useEffect(() => {
+    if (comEscuta && !escutaLigadaAntes.current && !preferencias.transcricaoAberta) {
+      mudarPreferencias({ transcricaoAberta: true });
     }
-    return { frasesAntes: antes, frasesNoFim: noFim };
-  }, [chat.mensagens, frasesOuvidas]);
-  const balaoOuvido = (frase: FraseOuvida) => (
-    <BalaoOuvido
-      key={frase.id}
-      id={frase.id}
-      texto={frase.texto}
-      inicioMs={frase.inicioMs}
-      fimMs={frase.fimMs}
-      pergunta={frase.pergunta}
-      aberto={false}
-    />
-  );
-  // O aberto vai no MESMO array das frases do fim e com a chave que terá fechado: quando ele fecha depois
-  // das mensagens (o caso comum), o React reaproveita o elemento, sem piscar nem duplicar.
-  const baloesNoFim =
-    enunciadoAberto === null
-      ? frasesNoFim.map(balaoOuvido)
-      : [
-          ...frasesNoFim.map(balaoOuvido),
-          <BalaoOuvido
-            key={enunciadoAberto.id}
-            id={enunciadoAberto.id}
-            texto={enunciadoAberto.confirmado}
-            parcial={enunciadoAberto.parcial}
-            inicioMs={enunciadoAberto.inicioMs}
-            pergunta={false}
-            aberto
-          />,
-        ];
+    escutaLigadaAntes.current = comEscuta;
+  }, [comEscuta, preferencias.transcricaoAberta, mudarPreferencias]);
+
+  // Um aviso curto e passageiro (ex.: "Nada transcrito ainda."), à parte dos erros.
+  const [aviso, setAviso] = useState<string | null>(null);
+  useEffect(() => {
+    if (aviso === null) {
+      return undefined;
+    }
+    const temporizador = setTimeout(() => setAviso(null), 4000);
+    return () => clearTimeout(temporizador);
+  }, [aviso]);
+
+  /** "Responder agora": o pedido (as falas recentes) vai como uma mensagem sua, pelo fluxo normal (no modo, com o print). */
+  async function responderAgora(pedido: string): Promise<void> {
+    if (respondendo || enviando) {
+      setAviso("Já há uma resposta em andamento.");
+      return;
+    }
+    if (desconectado) {
+      setErro("Servidor desconectado: o pedido não foi enviado.");
+      return;
+    }
+    setErro(null);
+    try {
+      await enviarPergunta(pedido);
+    } catch (falha) {
+      setErro(mensagemDeErro(falha));
+    }
+  }
+
+  /** O atalho Ctrl+Shift+Enter: monta o pedido das falas recentes e envia; sem texto, só avisa. */
+  function responderAgoraPeloAtalho(): void {
+    const pedido = montarPedidoDeResposta(escuta.legenda.frases, escuta.legenda.emAndamento, Date.now());
+    if (pedido === null) {
+      setAviso("Nada transcrito ainda.");
+      return;
+    }
+    void responderAgora(pedido);
+  }
 
   // ---- Modo invisível: o chat é móvel e redimensionável, e a janela só é focável enquanto se digita ----
   // Só flutuante e no modo: a coluna fixa não existe nele (o canvas a solta ao entrar).
   const movel = modoAtivo && !fixo;
-  const conversaVisivel = (temMensagens || fixo || temOuvido) && !oculta;
+  const conversaVisivel = (temMensagens || fixo) && !oculta;
   const raiz = useRef<HTMLElement | null>(null);
   const [area, setArea] = useState<AreaVisivel>(() => ({ largura: window.innerWidth, altura: window.innerHeight }));
   // A geometria durante um arraste (ao vivo); nula fora dele (vale a gravada).
@@ -1181,6 +1164,10 @@ export function ChatRapido({
       mudarPreferencias({ opacidadeDoChat: limitarOpacidadeDoChat(opacidade + sentido * OPACIDADE_DO_CHAT.passo) });
       return;
     }
+    if (acao === "responder-agora") {
+      responderAgoraPeloAtalho();
+      return;
+    }
     if (acao === "focar-campo") {
       campo.current?.focus();
     }
@@ -1231,7 +1218,7 @@ export function ChatRapido({
     }
   }
 
-  // Acompanha o fim enquanto chega texto (das respostas e da escuta), a menos que o usuário tenha rolado para cima.
+  // Acompanha o fim enquanto chega texto (das respostas), a menos que o usuário tenha rolado para cima.
   useEffect(() => {
     const elemento = rolagem.current;
     if (elemento !== null && acompanhando.current) {
@@ -1243,9 +1230,6 @@ export function ChatRapido({
     ultima?.situacao,
     chat.atividade,
     oculta,
-    frasesOuvidas,
-    enunciadoAberto?.confirmado,
-    enunciadoAberto?.parcial,
   ]);
 
   async function enviar(): Promise<void> {
@@ -1374,6 +1358,24 @@ export function ChatRapido({
     : respondendo
       ? "Respondendo: esc cancela, e já dá para escrever a próxima pergunta"
       : "Enter envia, Shift+Enter quebra a linha, / para comandos";
+
+  // O indicador da escuta (estado, motor, pausar e o menu de idioma): na barra, ou no cabeçalho do painel da transcrição.
+  const indicadorDaEscuta = (
+    <IndicadorDaEscuta
+      situacao={escuta.situacao}
+      progressoDoDownload={escuta.progressoDoDownload}
+      download={escuta.download}
+      motor={escuta.motor}
+      erro={escuta.erro}
+      pausar={escuta.pausar}
+      retomar={escuta.retomar}
+      automatico={escuta.automatico}
+      alternarAutomatico={escuta.alternarAutomatico}
+      preferenciasDaTela={escuta.preferenciasDaTela}
+      mudarIdioma={escuta.mudarIdioma}
+      mudarPrioridadeDoMotor={escuta.mudarPrioridadeDoMotor}
+    />
+  );
 
   // O menu ⋯ da barra: melhorar o pedido e, no flutuante, fixar ao lado.
   const itensDoMenu: ItemDoMenuDeMaisAcoes[] = [
@@ -1506,7 +1508,20 @@ export function ChatRapido({
       {fixo && aoMudarLargura !== undefined && <AlcaDaLargura largura={largura} aoMudar={aoMudarLargura} lado={lado} />}
 
       {/* Oculta, a conversa continua montada: os cartões de ação lembram o que já fizeram. */}
-      {(temMensagens || fixo || temOuvido) && (
+      {transcricaoAberta && (
+        <div className="painel-da-transcricao-no-chat">
+          <PainelDaTranscricao
+            legenda={escuta.legenda}
+            escutando={comEscuta}
+            respondendo={respondendo || enviando}
+            aoResponderAgora={(pedido) => void responderAgora(pedido)}
+            aoFechar={() => mudarPreferencias({ transcricaoAberta: false })}
+            indicador={comEscuta ? indicadorDaEscuta : undefined}
+          />
+        </div>
+      )}
+
+      {(temMensagens || fixo) && (
         <section
           className={`conversa-do-chat ${fixo ? "conversa-lateral" : "painel-flutuante"}`}
           data-area-clicavel
@@ -1664,14 +1679,13 @@ export function ChatRapido({
               }
             }}
           >
-            {!temMensagens && !temOuvido && (
+            {!temMensagens && (
               <p className="vazio-do-chat-lateral text-support">
                 Pergunte qualquer coisa ao Claude: a conversa aparece aqui, ao lado do canvas.
               </p>
             )}
             {chat.mensagens.map((mensagem, indice) => (
               <Fragment key={mensagem.id}>
-                {(frasesAntes.get(mensagem.id) ?? []).map(balaoOuvido)}
                 <MensagemNaConversa
                   mensagem={mensagem}
                   atividade={mensagem.situacao === "respondendo" ? chat.atividade : null}
@@ -1703,7 +1717,6 @@ export function ChatRapido({
                 )}
               </Fragment>
             ))}
-            {baloesNoFim}
           </div>
         </section>
       )}
@@ -1898,21 +1911,22 @@ export function ChatRapido({
                 <IconeFones />
               </button>
             )}
-            {comEscuta && (
-              <IndicadorDaEscuta
-                situacao={escuta.situacao}
-                progressoDoDownload={escuta.progressoDoDownload}
-                download={escuta.download}
-                motor={escuta.motor}
-                erro={escuta.erro}
-                pausar={escuta.pausar}
-                retomar={escuta.retomar}
-                automatico={escuta.automatico}
-                alternarAutomatico={escuta.alternarAutomatico}
-                preferenciasDaTela={escuta.preferenciasDaTela}
-                mudarIdioma={escuta.mudarIdioma}
-                mudarPrioridadeDoMotor={escuta.mudarPrioridadeDoMotor}
-              />
+            {/* Com o painel da transcrição aberto, o indicador mora no cabeçalho dele. */}
+            {comEscuta && !transcricaoAberta && indicadorDaEscuta}
+            {escutaDisponivel && (
+              <button
+                type="button"
+                className="btn btn-sm btn-ghost botao-da-transcricao"
+                aria-pressed={transcricaoAberta}
+                title={
+                  transcricaoAberta
+                    ? "Fechar o painel da transcrição"
+                    : "Abrir o painel da transcrição: o que o áudio do computador está dizendo, com Responder agora (Ctrl+Shift+Enter)"
+                }
+                onClick={() => mudarPreferencias({ transcricaoAberta: !transcricaoAberta })}
+              >
+                Transcrição
+              </button>
             )}
             <SeletorDeModelo
               preferencias={chat.preferencias}
@@ -1955,6 +1969,11 @@ export function ChatRapido({
             </p>
           )}
           <AvisoDaMelhoria melhoria={melhoria} className="px-3" />
+          {aviso !== null && (
+            <p className="hint px-3" role="status" data-testid="aviso-curto-do-chat">
+              {aviso}
+            </p>
+          )}
           {(erro ?? erroAoCarregar) !== null && (
             <p className="hint-error texto-longo px-3" role="alert">
               {erro ?? `Não foi possível carregar o chat: ${erroAoCarregar}`}

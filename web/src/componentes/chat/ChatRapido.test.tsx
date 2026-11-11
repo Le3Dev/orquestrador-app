@@ -721,6 +721,10 @@ describe("ChatRapido · modo invisível", () => {
       expect(indicador()).not.toBeInTheDocument();
 
       ativar();
+      // Ao ligar a escuta, o painel da transcrição abre sozinho e leva o indicador no cabeçalho dele.
+      expect(screen.getByRole("region", { name: "Transcrição" })).toContainElement(indicador());
+      // Fechado o painel, o indicador volta para a barra, ao lado do olho.
+      fireEvent.click(screen.getByRole("button", { name: "Fechar a transcrição" }));
       const olho = screen.getByRole("button", { name: "Modo invisível" });
       expect(olho.nextElementSibling).toBe(indicador());
       expect(indicador()).toHaveTextContent("escutando");
@@ -774,11 +778,14 @@ describe("ChatRapido · modo invisível", () => {
       expect(screen.queryByRole("button", { name: "Escuta do áudio" })).not.toBeInTheDocument();
     });
 
-    it("com frases ouvidas e sem mensagens, a conversa aparece; /clear limpa os trechos", async () => {
+    it("com frases ouvidas e sem mensagens, só o painel aparece (a conversa não); /clear limpa os trechos", async () => {
       vi.spyOn(api, "limparChat").mockResolvedValue(undefined as never);
       escutaSimulada.legenda = { frases: [frase("f1", "só áudio", "2026-11-04T12:00:00Z")], emAndamento: null };
+      const { ativar } = ponteAtiva(undefined, true);
       const { campo } = renderizar();
-      expect(screen.getByRole("region", { name: "Conversa com o Claude" })).toHaveTextContent("só áudio");
+      ativar();
+      expect(screen.getByRole("region", { name: "Transcrição" })).toHaveTextContent("só áudio");
+      expect(screen.queryByRole("region", { name: "Conversa com o Claude" })).not.toBeInTheDocument();
 
       fireEvent.change(campo, { target: { value: "/clear" } });
       fireEvent.keyDown(campo, { key: "Enter" });
@@ -868,202 +875,167 @@ describe("ChatRapido · modo invisível", () => {
       ],
     };
 
-    it("cada frase fechada vira uma mensagem sua com a marca \"ouvido\", intercalada pelo horário", () => {
-      escutaSimulada.legenda = {
-        frases: [
-          frase("f1", "antes de tudo", "2026-11-04T11:59:00Z"),
-          frase("f2", "entre as mensagens", "2026-11-04T12:00:30Z"),
-          frase("f3", "depois de tudo", "2026-11-04T12:02:00Z"),
-        ],
-        emAndamento: null,
-      };
-      renderizar(DUAS_MENSAGENS);
+    describe("painel da transcrição", () => {
+      afterEach(() => localStorage.clear());
 
-      const baloes = screen.getAllByTestId("trecho-ouvido");
-      expect(baloes).toHaveLength(3);
-      for (const balao of baloes) {
-        // O mesmo visual da mensagem do usuário, com a marca "ouvido" no lugar do selo "escuta".
-        expect(balao).toHaveClass("mensagem-do-usuario", "mensagem-ouvida");
-        expect(within(balao).getByText("ouvido")).toHaveClass("marca-ouvida");
-        expect(balao.querySelector(".selo-da-escuta")).toBeNull();
-        expect(balao.querySelector("time.hora-da-mensagem")).not.toBeNull();
-      }
-      expect(baloes[0]).toHaveTextContent("antes de tudo");
-      const texto = conversa().textContent ?? "";
-      expect(texto.indexOf("antes de tudo")).toBeLessThan(texto.indexOf("primeira"));
-      expect(texto.indexOf("primeira")).toBeLessThan(texto.indexOf("entre as mensagens"));
-      expect(texto.indexOf("entre as mensagens")).toBeLessThan(texto.indexOf("resposta"));
-      expect(texto.indexOf("resposta")).toBeLessThan(texto.indexOf("depois de tudo"));
-      expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
-    });
+      const painel = () => screen.getByRole("region", { name: "Transcrição" });
+      const guardado = () =>
+        JSON.parse(localStorage.getItem(CHAVE_DAS_PREFERENCIAS_DA_TELA) ?? "{}") as { transcricaoAberta?: boolean };
+      /** Uma frase fechada de 5 s atrás: dentro da janela de 2 min do "Responder agora". */
+      const fraseRecente = (id: string, texto: string, pergunta = false) =>
+        frase(id, texto, new Date(Date.now() - 5_000).toISOString(), pergunta);
 
-    it("a frase com pergunta ganha a marca \"pergunta\" ao lado do \"ouvido\"; as outras, não", () => {
-      escutaSimulada.legenda = {
-        frases: [
-          frase("f1", "Bom dia a todos.", "2026-11-04T12:00:00Z"),
-          frase("f2", "Qual o prazo do projeto?", "2026-11-04T12:00:05Z", true),
-        ],
-        emAndamento: null,
-      };
-      renderizar();
+      it("as frases ouvidas ficam no painel, com a hora e a pergunta destacada, e não entram na conversa", () => {
+        escutaSimulada.legenda = {
+          frases: [
+            frase("f1", "Bom dia a todos.", "2026-11-04T12:00:00Z"),
+            frase("f2", "Qual o prazo do projeto?", "2026-11-04T12:00:05Z", true),
+          ],
+          emAndamento: null,
+        };
+        const { ativar } = ponteAtiva(undefined, true);
+        renderizar(DUAS_MENSAGENS);
+        ativar();
 
-      const [comum, pergunta] = screen.getAllByTestId("trecho-ouvido");
-      expect(pergunta).toHaveClass("mensagem-do-usuario", "mensagem-ouvida");
-      expect(pergunta).toHaveTextContent("Qual o prazo do projeto?");
-      expect(within(pergunta as HTMLElement).getByText("ouvido")).toBeInTheDocument();
-      expect(within(pergunta as HTMLElement).getByRole("img", { name: "Pergunta detectada na escuta" })).toHaveTextContent(
-        "pergunta",
-      );
-      expect(within(comum as HTMLElement).queryByRole("img")).not.toBeInTheDocument();
-    });
-
-    it("a frase em andamento fica numa mensagem sua provisória no fim: o confirmado no tom normal e o parcial apagado", () => {
-      escutaSimulada.legenda = {
-        frases: [frase("f1", "Bom dia a todos.", "2026-11-04T12:02:00Z")],
-        emAndamento: {
-          id: "e2",
-          confirmado: "vamos falar do",
-          parcial: "orçamento de",
-          inicioMs: Date.parse("2026-11-04T12:02:03Z"),
-        },
-      };
-      renderizar(DUAS_MENSAGENS);
-
-      const provisorio = screen.getByTestId("trecho-provisorio");
-      expect(provisorio).toHaveAttribute("data-enunciado", "e2");
-      expect(provisorio).toHaveAttribute("aria-live", "polite");
-      expect(provisorio).toHaveClass("mensagem-do-usuario", "mensagem-ouvida", "mensagem-ouvida-provisoria");
-      expect(within(provisorio).getByText("ouvindo")).toHaveClass("marca-ouvida");
-      expect(within(provisorio).getByText("vamos falar do")).toHaveClass("ouvido-confirmado");
-      expect(within(provisorio).getByText("orçamento de")).toHaveClass("ouvido-parcial");
-      expect(provisorio).toHaveTextContent("vamos falar do orçamento de");
-      // Fica no fim da conversa, depois das mensagens e das frases fechadas.
-      expect(provisorio.nextElementSibling).toBeNull();
-      const texto = conversa().textContent ?? "";
-      expect(texto.indexOf("resposta")).toBeLessThan(texto.indexOf("Bom dia a todos."));
-      expect(texto.indexOf("Bom dia a todos.")).toBeLessThan(texto.indexOf("vamos falar do"));
-      // A frase em andamento não é um balão fechado.
-      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(1);
-    });
-
-    it("em andamento só com o parcial, o balão mostra só a cauda; sem texto, não aparece", () => {
-      escutaSimulada.legenda = { frases: [], emAndamento: { id: "e1", confirmado: "", parcial: "dizendo", inicioMs: 1 } };
-      const { rerender } = renderizar();
-      const provisorio = screen.getByTestId("trecho-provisorio");
-      expect(within(provisorio).getByText("dizendo")).toHaveClass("ouvido-parcial");
-      expect(provisorio.querySelector(".ouvido-confirmado")).toBeNull();
-
-      escutaSimulada.legenda = { frases: [], emAndamento: { id: "e1", confirmado: "  ", parcial: "", inicioMs: 1 } };
-      rerender({ ...OCIOSO });
-      expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
-    });
-
-    it("um balão por enunciado: o aberto cresce no lugar e, ao fechar, o mesmo elemento vira o balão fechado", () => {
-      const inicioMs = Date.parse("2026-11-04T12:02:00Z");
-      escutaSimulada.legenda = { frases: [], emAndamento: { id: "e7", confirmado: "", parcial: "qual o", inicioMs } };
-      const { rerender } = renderizar(DUAS_MENSAGENS);
-      const balao = screen.getByTestId("trecho-provisorio");
-
-      // O texto cresce no mesmo balão.
-      escutaSimulada.legenda = {
-        frases: [],
-        emAndamento: { id: "e7", confirmado: "qual o prazo", parcial: "do projeto", inicioMs },
-      };
-      rerender({ ...DUAS_MENSAGENS });
-      expect(screen.getByTestId("trecho-provisorio")).toBe(balao);
-      expect(balao).toHaveTextContent("qual o prazo do projeto");
-      expect(within(balao).getByText("ouvindo")).toBeInTheDocument();
-
-      // Fechado: o mesmo elemento, agora com "ouvido" e "pergunta", sem a borda tracejada e sem outra cópia.
-      escutaSimulada.legenda = {
-        frases: [{ id: "e7", texto: "Qual o prazo do projeto?", inicioMs, fimMs: inicioMs + 3_000, pergunta: true }],
-        emAndamento: null,
-      };
-      rerender({ ...DUAS_MENSAGENS });
-      expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
-      const fechado = screen.getByTestId("trecho-ouvido");
-      expect(fechado).toBe(balao);
-      expect(fechado).toHaveAttribute("data-enunciado", "e7");
-      expect(fechado).not.toHaveClass("mensagem-ouvida-provisoria");
-      expect(within(fechado).getByText("ouvido")).toBeInTheDocument();
-      expect(within(fechado).getByRole("img", { name: "Pergunta detectada na escuta" })).toBeInTheDocument();
-      expect(screen.getAllByText("Qual o prazo do projeto?")).toHaveLength(1);
-    });
-
-    it("com o id do aberto já fechado na legenda, vale o fechado: o enunciado não aparece duas vezes", () => {
-      const inicioMs = Date.parse("2026-11-04T12:02:00Z");
-      escutaSimulada.legenda = {
-        frases: [{ id: "e8", texto: "Bom dia a todos.", inicioMs, fimMs: inicioMs + 2_000, pergunta: false }],
-        emAndamento: { id: "e8", confirmado: "Bom dia", parcial: "a todos", inicioMs },
-      };
-      renderizar(DUAS_MENSAGENS);
-
-      expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
-      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(1);
-      expect(screen.getByTestId("trecho-ouvido")).toHaveTextContent("Bom dia a todos.");
-      expect(conversa()).not.toHaveTextContent("Bom dia a todos a todos");
-    });
-
-    it("o aberto fica no fim mesmo tendo começado antes da última mensagem, à parte do fechado anterior", () => {
-      escutaSimulada.legenda = {
-        frases: [frase("e1", "Bom dia a todos.", "2026-11-04T12:00:10Z")],
-        emAndamento: { id: "e2", confirmado: "e o prazo", parcial: "", inicioMs: Date.parse("2026-11-04T12:00:20Z") },
-      };
-      renderizar(DUAS_MENSAGENS);
-
-      const provisorio = screen.getByTestId("trecho-provisorio");
-      expect(provisorio.nextElementSibling).toBeNull();
-      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(1);
-      const texto = conversa().textContent ?? "";
-      expect(texto.indexOf("Bom dia a todos.")).toBeLessThan(texto.indexOf("resposta"));
-      expect(texto.indexOf("resposta")).toBeLessThan(texto.indexOf("e o prazo"));
-    });
-
-    it("o fechado da pergunta enviada some; o aberto de mesmo id também não aparece", () => {
-      const inicioMs = Date.parse("2026-11-04T11:59:55Z");
-      escutaSimulada.legenda = {
-        frases: [{ id: "e9", texto: "Qual o prazo do projeto?", inicioMs, fimMs: inicioMs + 2_000, pergunta: true }],
-        emAndamento: { id: "e9", confirmado: "Qual o prazo", parcial: "do projeto", inicioMs },
-      };
-      const enviada = "Pergunta detectada na escuta: Qual o prazo do projeto?\n\nResponda direto e curto.";
-      renderizar({
-        ...OCIOSO,
-        mensagens: [mensagem("u1", "usuario", { texto: enviada, origem: "escuta", criadaEm: "2026-11-04T11:59:58Z" })],
+        const falas = within(painel()).getAllByTestId("fala-da-transcricao");
+        expect(falas).toHaveLength(2);
+        expect(falas[0]).toHaveTextContent("Bom dia a todos.");
+        expect(falas[0]?.querySelector("time")).not.toBeNull();
+        expect(falas[1]).toHaveClass("painel-transcricao-pergunta");
+        expect(falas[1]).toHaveTextContent("pergunta");
+        // A conversa fica só com as mensagens: nenhum balão "ouvido".
+        expect(conversa()).not.toHaveTextContent("Bom dia a todos.");
+        expect(screen.queryByTestId("trecho-ouvido")).not.toBeInTheDocument();
+        expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
       });
 
-      expect(screen.queryByTestId("trecho-ouvido")).not.toBeInTheDocument();
-      expect(screen.queryByTestId("trecho-provisorio")).not.toBeInTheDocument();
-      expect(screen.getAllByText("Qual o prazo do projeto?")).toHaveLength(1);
-    });
+      it("a frase em andamento aparece na hora: o confirmado em texto normal e o provisório em itálico", () => {
+        escutaSimulada.legenda = {
+          frases: [],
+          emAndamento: { id: "e2", confirmado: "vamos falar do", parcial: "orçamento de", inicioMs: Date.now() },
+        };
+        const { ativar } = ponteAtiva(undefined, true);
+        renderizar();
+        ativar();
 
-    it("a rolagem acompanha os balões novos e a frase em andamento", () => {
-      const { rerender } = renderizar(DUAS_MENSAGENS);
-      const rolagem = conversa().querySelector(".mensagens-do-chat") as HTMLElement;
-      let topo = 0;
-      Object.defineProperty(rolagem, "scrollHeight", { configurable: true, get: () => 900 });
-      Object.defineProperty(rolagem, "scrollTop", {
-        configurable: true,
-        get: () => topo,
-        set: (valor: number) => {
-          topo = valor;
-        },
+        const andamento = within(painel()).getByTestId("fala-em-andamento");
+        expect(within(andamento).getByText("vamos falar do")).toHaveClass("painel-transcricao-confirmado");
+        expect(within(andamento).getByText("orçamento de")).toHaveClass("painel-transcricao-parcial");
       });
 
-      const frases = [frase("f1", "nova frase", "2026-11-04T12:02:00Z")];
-      escutaSimulada.legenda = { frases, emAndamento: null };
-      rerender({ ...DUAS_MENSAGENS });
-      expect(topo).toBe(900);
+      it("abre sozinho ao ligar a escuta; o × fecha, o botão Transcrição reabre, e a escolha fica gravada", () => {
+        const { ativar } = ponteAtiva(undefined, true);
+        renderizar();
+        expect(screen.queryByRole("region", { name: "Transcrição" })).not.toBeInTheDocument();
+        const botao = screen.getByRole("button", { name: "Transcrição" });
+        expect(botao).toHaveAttribute("aria-pressed", "false");
 
-      topo = 0;
-      escutaSimulada.legenda = { frases, emAndamento: { id: "e2", confirmado: "e agora", parcial: "mais", inicioMs: 1 } };
-      rerender({ ...DUAS_MENSAGENS });
-      expect(topo).toBe(900);
+        ativar();
+        expect(painel()).toBeInTheDocument();
+        expect(guardado().transcricaoAberta).toBe(true);
+        expect(screen.getByRole("button", { name: "Transcrição" })).toHaveAttribute("aria-pressed", "true");
 
-      // O texto do aberto cresce: continua acompanhando o fim.
-      topo = 0;
-      escutaSimulada.legenda = { frases, emAndamento: { id: "e2", confirmado: "e agora mais", parcial: "um", inicioMs: 1 } };
-      rerender({ ...DUAS_MENSAGENS });
-      expect(topo).toBe(900);
+        fireEvent.click(screen.getByRole("button", { name: "Fechar a transcrição" }));
+        expect(screen.queryByRole("region", { name: "Transcrição" })).not.toBeInTheDocument();
+        expect(guardado().transcricaoAberta).toBe(false);
+
+        fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+        expect(painel()).toBeInTheDocument();
+        expect(guardado().transcricaoAberta).toBe(true);
+      });
+
+      it("sem a escuta disponível, não há botão nem painel", () => {
+        ponteAtiva();
+        renderizar();
+        expect(screen.queryByRole("button", { name: "Transcrição" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("region", { name: "Transcrição" })).not.toBeInTheDocument();
+      });
+
+      it("o painel é uma área clicável do modo invisível", () => {
+        const { ativar } = ponteAtiva(undefined, true);
+        renderizar();
+        ativar();
+        expect(painel()).toHaveAttribute("data-area-clicavel");
+      });
+
+      it("Responder agora envia as falas recentes como mensagem sua, com o print da tela no modo invisível", async () => {
+        const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+        escutaSimulada.legenda = {
+          frases: [fraseRecente("f1", "Qual é a capital da França?", true)],
+          emAndamento: { id: "e2", confirmado: "e a da", parcial: "Itália", inicioMs: Date.now() },
+        };
+        const { modoInvisivel, ativar } = ponteAtiva(undefined, true);
+        renderizar();
+        ativar();
+
+        fireEvent.click(within(painel()).getByRole("button", { name: "Responder agora" }));
+
+        await waitFor(() => expect(perguntar).toHaveBeenCalledTimes(1));
+        const [pedido, anexos] = perguntar.mock.calls[0] ?? [];
+        expect(pedido).toContain("Transcrição recente:");
+        expect(pedido).toContain("Qual é a capital da França?");
+        expect(pedido).toContain("e a da Itália");
+        expect(anexos).toEqual([FOTO]);
+        expect(modoInvisivel.capturarTela).toHaveBeenCalledTimes(1);
+      });
+
+      it("sem frases, o Responder agora fica desabilitado, e com o Claude respondendo também", () => {
+        const { ativar } = ponteAtiva(undefined, true);
+        const { rerender } = renderizar();
+        ativar();
+        expect(within(painel()).getByRole("button", { name: "Responder agora" })).toBeDisabled();
+
+        escutaSimulada.legenda = { frases: [fraseRecente("f1", "Bom dia a todos.")], emAndamento: null };
+        rerender(OCIOSO);
+        expect(within(painel()).getByRole("button", { name: "Responder agora" })).toBeEnabled();
+
+        rerender(RESPONDENDO);
+        expect(within(painel()).getByRole("button", { name: "Responder agora" })).toBeDisabled();
+      });
+
+      it("o atalho responder-agora (Ctrl+Shift+Enter) envia o pedido das falas recentes", async () => {
+        const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+        escutaSimulada.legenda = { frases: [fraseRecente("f1", "Como inverter uma lista ligada?", true)], emAndamento: null };
+        const { ativar, atalho } = ponteAtiva(undefined, true);
+        renderizar();
+        ativar();
+
+        atalho("responder-agora");
+
+        await waitFor(() => expect(perguntar).toHaveBeenCalledTimes(1));
+        expect(perguntar.mock.calls[0]?.[0]).toContain("Como inverter uma lista ligada?");
+        expect(screen.queryByTestId("aviso-curto-do-chat")).not.toBeInTheDocument();
+      });
+
+      it("o atalho responder-agora sem nada transcrito avisa e não envia", () => {
+        const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+        // Uma frase de 10 min atrás já passou da janela de 2 min.
+        escutaSimulada.legenda = {
+          frases: [frase("f0", "muito antiga", new Date(Date.now() - 600_000).toISOString())],
+          emAndamento: null,
+        };
+        const { ativar, atalho } = ponteAtiva(undefined, true);
+        renderizar();
+        ativar();
+
+        atalho("responder-agora");
+
+        expect(screen.getByTestId("aviso-curto-do-chat")).toHaveTextContent("Nada transcrito ainda.");
+        expect(perguntar).not.toHaveBeenCalled();
+      });
+
+      it("Responder agora com o servidor fora mostra o erro e não envia", () => {
+        const perguntar = vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
+        escutaSimulada.legenda = { frases: [fraseRecente("f1", "Bom dia a todos.")], emAndamento: null };
+        const { ativar } = ponteAtiva(undefined, true);
+        renderizar(OCIOSO, true);
+        ativar();
+
+        fireEvent.click(within(painel()).getByRole("button", { name: "Responder agora" }));
+
+        expect(screen.getByRole("alert")).toHaveTextContent("Servidor desconectado");
+        expect(perguntar).not.toHaveBeenCalled();
+      });
     });
 
     it("sem caixa nem cartão: a resposta à pergunta da escuta aparece só como mensagem do chat", () => {
@@ -1087,8 +1059,9 @@ describe("ChatRapido · modo invisível", () => {
       expect(screen.queryByRole("region", { name: "Resposta da escuta" })).not.toBeInTheDocument();
       expect(screen.queryByText("última pergunta")).not.toBeInTheDocument();
       expect(screen.getAllByText("O(n log n) no pior caso")).toHaveLength(1);
-      // A pergunta enviada já é a mensagem do chat: o balão "ouvido" dela some.
-      expect(screen.getAllByText("Qual a complexidade?")).toHaveLength(1);
+      // A pergunta enviada já é a mensagem do chat; a transcrição tem o painel dela (aberto ao ligar a escuta).
+      expect(screen.getAllByText("Qual a complexidade?")).toHaveLength(2);
+      expect(conversa()).toHaveTextContent("Qual a complexidade?");
       expect(screen.queryByTestId("trecho-ouvido")).not.toBeInTheDocument();
     });
 
@@ -1115,40 +1088,6 @@ describe("ChatRapido · modo invisível", () => {
       renderizar({ ...OCIOSO, mensagens: [mensagem("u1", "usuario", { texto: digitada })] });
       expect(conversa()).toHaveTextContent("Pergunta detectada na escuta: teste");
       expect(conversa()).toHaveTextContent("resto do texto");
-    });
-
-    it("a frase pergunta some quando há a mensagem da escuta dela e fica quando não há", () => {
-      escutaSimulada.legenda = {
-        frases: [
-          frase("f1", "Bom dia a todos.", "2026-11-04T11:59:50Z"),
-          frase("f2", "Qual o prazo do projeto?", "2026-11-04T11:59:55Z", true),
-        ],
-        emAndamento: null,
-      };
-      const enviada = "Pergunta detectada na escuta: Qual o prazo do projeto?\n\nResponda direto e curto.";
-      const { rerender } = renderizar({
-        ...OCIOSO,
-        mensagens: [mensagem("u1", "usuario", { texto: enviada, origem: "escuta", criadaEm: "2026-11-04T11:59:58Z" })],
-      });
-      // Enviada: só a mensagem do chat (com o selo) e a frase comum ouvida.
-      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(1);
-      expect(screen.getByTestId("trecho-ouvido")).toHaveTextContent("Bom dia a todos.");
-      expect(screen.getAllByText("Qual o prazo do projeto?")).toHaveLength(1);
-      expect(screen.queryByRole("img", { name: "Pergunta detectada na escuta" })).not.toBeInTheDocument();
-
-      // Sem a mensagem da escuta (ex.: posta só no campo, com alterações autorizadas), a frase fica, com a marca.
-      rerender({ ...OCIOSO, mensagens: [mensagem("u1", "usuario", { texto: "outra coisa", criadaEm: "2026-11-04T11:59:58Z" })] });
-      const baloes = screen.getAllByTestId("trecho-ouvido");
-      expect(baloes).toHaveLength(2);
-      expect(baloes[1]).toHaveTextContent("Qual o prazo do projeto?");
-      expect(within(baloes[1] as HTMLElement).getByRole("img", { name: "Pergunta detectada na escuta" })).toBeInTheDocument();
-
-      // A mensagem da escuta mais de 60 s depois do fim da frase não é o envio dela.
-      rerender({
-        ...OCIOSO,
-        mensagens: [mensagem("u1", "usuario", { texto: enviada, origem: "escuta", criadaEm: "2026-11-04T12:01:00Z" })],
-      });
-      expect(screen.getAllByTestId("trecho-ouvido")).toHaveLength(2);
     });
 
     it("o menu do indicador tem o Automático, o idioma e a prioridade, e chama a escuta sem levar o foco ao campo", () => {

@@ -2794,6 +2794,14 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .separador-do-menu { margin: 4px 6px; border: 0; border-top: 1px solid var(--border); }
 
 /* Servidor fora: o chat congela e a borda perde a cor, como o resto do canvas. */
+/* O painel da transcrição acima da conversa: altura limitada, para a conversa e o campo não sumirem. */
+.painel-da-transcricao-no-chat { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; }
+.painel-da-transcricao-no-chat > .painel-transcricao { max-height: min(240px, 34vh); }
+.chat-lateral .painel-da-transcricao-no-chat { margin: 8px 0 0; }
+.linha-do-composer .botao-da-transcricao { flex-shrink: 0; color: var(--secondary); }
+.linha-do-composer .botao-da-transcricao[aria-pressed="true"] { color: var(--info); background: color-mix(in srgb, var(--info) 13%, transparent); }
+.chat-lateral .linha-do-composer > .btn.botao-da-transcricao { margin-left: 0; }
+
 /* O menu ⋯ da barra: abre para cima, encostado à direita, como o do modelo. */
 .menu-de-mais-acoes { position: relative; flex-shrink: 0; }
 .menu-do-seletor.lista-de-mais-acoes { width: 230px; }

@@ -54,6 +54,8 @@ export type PreferenciasDaTela = {
    * valor das preferências antigas): 36% da altura da janela, como sempre.
    */
   alturaDaConversaDoChat: number | null;
+  /** O painel da transcrição (o que o áudio do computador diz, com "Responder agora") está aberto no chat. Padrão: fechado. */
+  transcricaoAberta: boolean;
 };
 
 export const CHAVE_DAS_PREFERENCIAS_DA_TELA = "orquestrador.preferenciasDaTela";
@@ -72,6 +74,7 @@ const PADRAO: PreferenciasDaTela = {
   chatNoModoInvisivel: null,
   opacidadeDoChat: 1,
   alturaDaConversaDoChat: null,
+  transcricaoAberta: false,
 };
 
 /** A opacidade do chat: mínima, máxima, passo e padrão. */
@@ -141,7 +144,7 @@ function interpretar(bruto: string | null): PreferenciasDaTela {
   }
   const registro = lido as Record<string, unknown>;
   const booleano = (
-    campo: "chatFixoNaEsquerda" | "visualizadorDeCodigo" | "manterBixinhosAteLimpar" | "minimapaVisivel",
+    campo: "chatFixoNaEsquerda" | "visualizadorDeCodigo" | "manterBixinhosAteLimpar" | "minimapaVisivel" | "transcricaoAberta",
   ): boolean =>
     typeof registro[campo] === "boolean" ? (registro[campo] as boolean) : PADRAO[campo];
   const largura = registro.larguraDoChatFixo;
@@ -166,6 +169,7 @@ function interpretar(bruto: string | null): PreferenciasDaTela {
       typeof registro.opacidadeDoChat === "number"
         ? limitarOpacidadeDoChat(registro.opacidadeDoChat)
         : PADRAO.opacidadeDoChat,
+    transcricaoAberta: booleano("transcricaoAberta"),
     alturaDaConversaDoChat:
       typeof registro.alturaDaConversaDoChat === "number"
         ? limitarAlturaDaConversaDoChat(registro.alturaDaConversaDoChat)
@@ -232,7 +236,8 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
     novas.controlesDasJanelas === atuais.controlesDasJanelas &&
     mesmaGeometria(novas.chatNoModoInvisivel, atuais.chatNoModoInvisivel) &&
     novas.opacidadeDoChat === atuais.opacidadeDoChat &&
-    novas.alturaDaConversaDoChat === atuais.alturaDaConversaDoChat
+    novas.alturaDaConversaDoChat === atuais.alturaDaConversaDoChat &&
+    novas.transcricaoAberta === atuais.transcricaoAberta
   ) {
     return;
   }
@@ -250,7 +255,7 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
 /**
  * As preferências da tela (chat fixo, o lado e a largura dele, visualizador de
  * código, manter os bixinhos até limpar, o minimapa visível, o estilo dos
- * controles das janelas, a posição do chat no modo invisível, a opacidade do chat, a altura da conversa do chat):
+ * controles das janelas, a posição do chat no modo invisível, a opacidade do chat, a altura da conversa do chat, o painel da transcrição aberto):
  * mudar num lugar reflete em todos os componentes que usam o hook e nas
  * outras abas abertas.
  */
