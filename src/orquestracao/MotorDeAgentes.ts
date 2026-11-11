@@ -1,4 +1,4 @@
-import { TipoDeImagem } from "./Anexo";
+import { CategoriaDoAnexo } from "./Anexo";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
 import { ItemLigado } from "./InstrucoesDoOrquestrador";
@@ -7,10 +7,19 @@ import { ModoDoTurno } from "./ModoDoTurno";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { DadosDoSubagentePronto } from "./SubagentesProntos";
 
-/** Imagem anexada ao pedido, já guardada em disco. */
-export interface ImagemDoPedido {
+/** Arquivo (imagem ou documento) anexado ao pedido, já guardado em disco. */
+export interface AnexoDoPedido {
   caminho: string;
-  tipoDeMidia: TipoDeImagem;
+  nome: string;
+  categoria: CategoriaDoAnexo;
+  tipoDeMidia: string;
+  /** Nome do formato para o usuário: "Imagem", "PDF", "Excel"... */
+  rotulo: string;
+  tamanhoEmBytes: number;
+  /** Texto extraído (Word, Excel, PowerPoint modernos) gravado ao lado; nulo sem extração. */
+  caminhoDoTexto: string | null;
+  /** Formato binário antigo (.doc, .xls): sem texto extraído. */
+  legado: boolean;
 }
 
 export interface PedidoDeTurno {
@@ -23,9 +32,10 @@ export interface PedidoDeTurno {
   /** No planejamento, os agentes só leem, seja qual for o nível da configuração. */
   modo: ModoDoTurno;
   pastaDeTrabalho: PastaDeTrabalho;
-  imagens: readonly ImagemDoPedido[];
-  /** Pasta das imagens, liberada para leitura dos Subagentes; nula sem imagens. */
-  pastaDasImagens: string | null;
+  /** Só as imagens vão inline para o Claude; os documentos ele abre pelo caminho. */
+  anexos: readonly AnexoDoPedido[];
+  /** Pasta dos anexos, liberada para leitura dos agentes; nula sem anexos. */
+  pastaDosAnexos: string | null;
   /**
    * Pasta de entrada dos artefatos deste Orquestrador (caminho absoluto): o
    * Orquestrador e os Subagentes podem gravar nela em qualquer nível de

@@ -17,6 +17,14 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import {
+  anexosParaEnvio,
+  type AnexoPendente,
+  lerAnexo,
+  liberarAnexos,
+  problemaDoAnexo,
+  TEXTO_PADRAO_DOS_ANEXOS,
+} from "../../shared/anexos";
 import { api, argumentosDoContexto, mensagemDeErro } from "../../shared/api/cliente";
 import {
   type DadosDaConfiguracao,
@@ -57,13 +65,6 @@ import {
   type TurnoNaTela,
 } from "../../shared/estado/aplicarEvento";
 import { mesmoConteudo, useReaproveitado } from "../../shared/hooks/useReaproveitado";
-import {
-  type ImagemAnexada,
-  imagensParaEnvio,
-  lerImagem,
-  liberarImagens,
-  problemaDaImagem,
-} from "../../shared/imagens";
 import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
 import { resumoDaConfiguracao } from "../../shared/resumoDaConfiguracao";
 import { CamposDaConfiguracao } from "../CamposDaConfiguracao";
@@ -178,7 +179,7 @@ function CampoDoNome({ nome, aoConcluir }: { nome: string; aoConcluir: (novo: st
 }
 
 /** O que está sendo arrastado sobre o terminal, para o aviso de soltar. */
-type Arraste = "imagens" | "pedido";
+type Arraste = "anexos" | "pedido";
 
 /**
  * Se a borda do terminal está piscando: o envelope do relatório de um
@@ -1102,11 +1103,11 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   const [editandoNome, setEditandoNome] = useState(false);
   const [nomePendente, setNomePendente] = useState<string | null>(null);
   const [cancelamentoPedido, setCancelamentoPedido] = useState(false);
-  const [imagens, setImagens] = useState<ImagemAnexada[]>([]);
-  // As anexadas agora, para liberar as miniaturas ao remover e ao desmontar.
-  const imagensAtuais = useRef(imagens);
-  imagensAtuais.current = imagens;
-  useEffect(() => () => liberarImagens(imagensAtuais.current), []);
+  const [anexos, setAnexos] = useState<AnexoPendente[]>([]);
+  // Os anexados agora, para liberar as miniaturas ao remover e ao desmontar.
+  const anexosAtuais = useRef(anexos);
+  anexosAtuais.current = anexos;
+  useEffect(() => () => liberarAnexos(anexosAtuais.current), []);
   const [arraste, setArraste] = useState<Arraste | null>(null);
   // Modo do próximo pedido; "planejamento" é o Plan Mode (Shift+Tab no prompt).
   const [modo, setModo] = useState<ModoDoTurno>("execucao");
@@ -1165,30 +1166,31 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   const anexar = useCallback(
     async (arquivos: File[]): Promise<void> => {
       setErro(null);
-      let quantidade = imagens.length;
+      // Os já anexados mais os aceitos neste lote: os limites valem para a soma.
+      const aceitos: Pick<AnexoPendente, "categoria" | "tamanhoEmBytes">[] = [...anexosAtuais.current];
       for (const arquivo of arquivos) {
-        const problema = problemaDaImagem(arquivo, quantidade);
+        const problema = problemaDoAnexo(arquivo, aceitos);
         if (problema !== null) {
           setErro(problema);
           continue;
         }
-        quantidade += 1;
         try {
-          const imagem = await lerImagem(arquivo);
-          setImagens((atuais) => [...atuais, imagem]);
+          const anexo = await lerAnexo(arquivo);
+          aceitos.push(anexo);
+          setAnexos((atuais) => [...atuais, anexo]);
         } catch (falha) {
           setErro(mensagemDeErro(falha));
         }
       }
     },
-    [imagens.length],
+    [],
   );
 
   const aoAnexar = useCallback((arquivos: File[]) => void anexar(arquivos), [anexar]);
 
-  const aoRemoverImagem = useCallback((id: string) => {
-    liberarImagens(imagensAtuais.current.filter((imagem) => imagem.id === id));
-    setImagens((atuais) => atuais.filter((imagem) => imagem.id !== id));
+  const aoRemoverAnexo = useCallback((id: string) => {
+    liberarAnexos(anexosAtuais.current.filter((anexo) => anexo.id === id));
+    setAnexos((atuais) => atuais.filter((anexo) => anexo.id !== id));
   }, []);
 
   const aoAlternarModo = useCallback(
@@ -1200,18 +1202,18 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
     async (texto: string): Promise<boolean> => {
       setErro(null);
       try {
-        // Só imagens, sem texto: o servidor exige uma mensagem, então vai uma padrão.
-        const mensagem = texto.trim() === "" ? "Analise as imagens anexadas." : texto;
+        // Só anexos, sem texto: o servidor exige uma mensagem, então vai uma padrão.
+        const mensagem = texto.trim() === "" ? TEXTO_PADRAO_DOS_ANEXOS : texto;
         // O base64 só nasce aqui, no envio.
-        const anexos = imagens.length === 0 ? [] : await imagensParaEnvio(imagens);
+        const paraEnvio = anexos.length === 0 ? [] : await anexosParaEnvio(anexos);
         // Os itens ligados vão lidos na hora do envio; sem nenhum, o pedido é igual ao de antes.
         const itensLigados = lerItensLigados?.(orquestradorId) ?? [];
         // As prévias abertas deste Orquestrador vão junto: o agente sabe quais pode pedir para fechar.
         const previasAbertas = lerPreviasAbertas?.(orquestradorId) ?? [];
-        await api.enviarMensagem(orquestradorId, mensagem, anexos, modo, ...argumentosDoContexto(itensLigados, previasAbertas));
-        // As enviadas (e as que chegaram durante o envio, que também saem) liberam a miniatura.
-        liberarImagens(imagensAtuais.current);
-        setImagens([]);
+        await api.enviarMensagem(orquestradorId, mensagem, paraEnvio, modo, ...argumentosDoContexto(itensLigados, previasAbertas));
+        // Os enviados (e os que chegaram durante o envio, que também saem) liberam a miniatura.
+        liberarAnexos(anexosAtuais.current);
+        setAnexos([]);
         acompanhando.current = true;
         setCancelamentoPedido(false);
         return true;
@@ -1220,12 +1222,12 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
         return false;
       }
     },
-    [orquestradorId, imagens, modo, lerItensLigados, lerPreviasAbertas],
+    [orquestradorId, anexos, modo, lerItensLigados, lerPreviasAbertas],
   );
 
   /**
    * Com um pedido rodando, o Enter põe o texto na fila, com o modo escolhido
-   * (o prompt já barra as imagens). O pedido aparece na fila pelo evento
+   * (o prompt já barra os anexos). O pedido aparece na fila pelo evento
    * `pedido_enfileirado`; com a fila cheia, o servidor recusa e o erro aparece
    * no terminal.
    */
@@ -1346,7 +1348,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
 
   /**
    * A escolha nas perguntas do Orquestrador vai como um pedido novo, pelo mesmo
-   * envio do prompt e no modo atual (sem as imagens anexadas no prompt). Lança
+   * envio do prompt e no modo atual (sem os anexos do prompt). Lança
    * o erro do servidor (ex.: 409 com um pedido rodando): o cartão o mostra.
    */
   const responderPergunta = useCallback(
@@ -1534,14 +1536,14 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
     <div
       className={`janela-terminal ${trabalhando ? "janela-terminal-ativa" : ""} ${modo === "planejamento" ? "janela-terminal-planejando" : ""} ${piscando ? "janela-terminal-entrega" : ""} ${escondido ? "janela-terminal-minimizada" : ""}`}
       onDragOver={(evento) => {
-        // Uma linha ou uma nota arrastada vira texto no prompt; arquivos, imagens anexadas.
+        // Uma linha ou uma nota arrastada vira texto no prompt; arquivos, anexos (imagens e documentos).
         if (temPedidoArrastado(evento.dataTransfer)) {
           evento.preventDefault();
           evento.dataTransfer.dropEffect = "copy";
           setArraste("pedido");
         } else if (evento.dataTransfer.types.includes("Files")) {
           evento.preventDefault();
-          setArraste("imagens");
+          setArraste("anexos");
         }
       }}
       onDragLeave={(evento) => {
@@ -1567,8 +1569,8 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
         }
       }}
     >
-      {arraste === "imagens" && (
-        <div className="soltar-imagens">solte para anexar as imagens a este orquestrador</div>
+      {arraste === "anexos" && (
+        <div className="soltar-imagens">solte para anexar os arquivos a este orquestrador</div>
       )}
       {arraste === "pedido" && (
         <div className="soltar-imagens">solte para escrever no prompt — nada é enviado até você apertar enter</div>
@@ -1696,9 +1698,9 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
           aoAlternarModo={aoAlternarModo}
           campo={campoDoPrompt}
           controle={controleDoPrompt}
-          imagens={imagens}
+          anexos={anexos}
           aoAnexar={aoAnexar}
-          aoRemoverImagem={aoRemoverImagem}
+          aoRemoverAnexo={aoRemoverAnexo}
           aoEnviar={enviar}
           aoEnfileirar={enfileirar}
           fila={fila}

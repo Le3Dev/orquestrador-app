@@ -91,8 +91,8 @@ export function montarAplicacao(
       acessoSoPeloApp({ chave: configuracao.chaveDeAcesso, urlDeDownload: configuracao.urlDeDownload }),
     );
   }
-  // Mensagens podem levar até 5 imagens de 5 MB, em base64.
-  aplicacao.use(express.json({ limit: "40mb" }));
+  // Mensagens podem levar até 10 anexos e 100 MB no total, em base64 (4/3 do tamanho).
+  aplicacao.use(express.json({ limit: "150mb" }));
 
   registrarRotas(aplicacao);
 

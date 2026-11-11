@@ -131,8 +131,8 @@ interface RetomadaAgendada {
  */
 export const ATRASO_DA_RETOMADA_APOS_REINICIO_MS = 10_000;
 
-/** Imagem como chega do usuário, antes de virar Anexo. */
-export interface ImagemRecebida {
+/** Arquivo (imagem ou documento) como chega do usuário, antes de virar Anexo. */
+export interface AnexoRecebido {
   nome: string;
   tipoDeMidia: string;
   conteudo: Uint8Array;
@@ -328,14 +328,14 @@ export class ServicoDeOrquestracao {
   async enviarMensagem(
     id: string,
     texto: string,
-    imagens: readonly ImagemRecebida[] = [],
+    anexosRecebidos: readonly AnexoRecebido[] = [],
     modo: ModoDoTurno = "execucao",
     itensLigados: readonly ItemLigado[] = [],
     previasAbertas: readonly string[] = [],
   ): Promise<MensagemEnviada> {
     const orquestrador = this.buscar(id);
     const itens = this.itensComCaminhos(orquestrador, itensLigados);
-    return this.iniciarTurno(orquestrador, texto, imagens, modo, null, null, itens, previasAbertas);
+    return this.iniciarTurno(orquestrador, texto, anexosRecebidos, modo, null, null, itens, previasAbertas);
   }
 
   /**
@@ -425,7 +425,7 @@ export class ServicoDeOrquestracao {
   private async iniciarTurno(
     orquestrador: Orquestrador,
     texto: string,
-    imagens: readonly ImagemRecebida[],
+    anexosRecebidos: readonly AnexoRecebido[],
     modo: ModoDoTurno,
     pedidoDaFila: PedidoNaFila | null,
     retomada: { deTurnoId: string; tentativa: number } | null = null,
@@ -435,12 +435,12 @@ export class ServicoDeOrquestracao {
     const { repositorio, execucoes, anexos, gerarId, agora } = this.dependencias;
     const turnoId = gerarId();
 
-    const anexosDoTurno = imagens.map((imagem) =>
+    const anexosDoTurno = anexosRecebidos.map((recebido) =>
       Anexo.de({
         id: gerarId(),
-        nome: imagem.nome,
-        tipoDeMidia: imagem.tipoDeMidia,
-        tamanhoEmBytes: imagem.conteudo.byteLength,
+        nome: recebido.nome,
+        tipoDeMidia: recebido.tipoDeMidia,
+        tamanhoEmBytes: recebido.conteudo.byteLength,
       }),
     );
     const aceito = orquestrador.iniciarTurno(turnoId, texto, agora(), anexosDoTurno, modo);
@@ -469,7 +469,7 @@ export class ServicoDeOrquestracao {
 
     try {
       for (const [indice, anexo] of anexosDoTurno.entries()) {
-        await anexos.guardar(orquestrador.id, anexo, imagens[indice]?.conteudo ?? new Uint8Array());
+        await anexos.guardar(orquestrador.id, anexo, anexosRecebidos[indice]?.conteudo ?? new Uint8Array());
       }
       await repositorio.salvar(orquestrador);
     } catch (erro) {
@@ -755,11 +755,20 @@ export class ServicoDeOrquestracao {
           configuracao: configuracaoDoTurno,
           modo,
           pastaDeTrabalho: pastaDoTurno,
-          imagens: anexosDoTurno.map((anexo) => ({
-            caminho: anexos.caminhoDe(orquestrador.id, anexo.arquivo),
-            tipoDeMidia: anexo.tipoDeMidia,
-          })),
-          pastaDasImagens: anexosDoTurno.length > 0 ? anexos.pastaDe(orquestrador.id) : null,
+          anexos: anexosDoTurno.map((dados) => {
+            const anexo = Anexo.reconstituir(dados);
+            return {
+              caminho: anexos.caminhoDe(orquestrador.id, anexo.arquivo),
+              nome: anexo.nome,
+              categoria: anexo.categoria,
+              tipoDeMidia: anexo.tipoDeMidia,
+              rotulo: anexo.rotulo,
+              tamanhoEmBytes: anexo.tamanhoEmBytes,
+              caminhoDoTexto: anexos.caminhoDoTextoDe(orquestrador.id, anexo.arquivo),
+              legado: anexo.legado,
+            };
+          }),
+          pastaDosAnexos: anexosDoTurno.length > 0 ? anexos.pastaDe(orquestrador.id) : null,
           // Do Orquestrador, e não do worktree: os artefatos sobrevivem ao turno.
           pastaDeArtefatos: pastaDeArtefatos(orquestrador.id),
           ...instrucoesDoTurno,

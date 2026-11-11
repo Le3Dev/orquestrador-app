@@ -1,9 +1,9 @@
-import { MAXIMO_DE_IMAGENS_POR_MENSAGEM } from "../orquestracao/Anexo";
+import { problemaDosAnexosDaMensagem } from "../orquestracao/Anexo";
 import { copiarPergunta, PerguntaDoApp } from "../perguntas/PerguntaDoApp";
 import type { AcaoDoApp } from "./AcaoDoApp";
 import { ErroDoChat } from "./ErroDoChat";
 import type { EventoDoChat } from "./EventoDoChat";
-import { AutorizacaoPendente, DadosDaMensagemDoChat, ImagemDaMensagem, MensagemDoChat } from "./MensagemDoChat";
+import { AnexoDaMensagem, AutorizacaoPendente, DadosDaMensagemDoChat, MensagemDoChat } from "./MensagemDoChat";
 import type { UsoDaResposta } from "./MotorDeChat";
 import type { OrigemDaPergunta } from "./OrigemDaPergunta";
 
@@ -26,7 +26,8 @@ export interface NovaPergunta {
   mensagemDoUsuarioId: string;
   mensagemDoClaudeId: string;
   texto: string;
-  imagens: readonly ImagemDaMensagem[];
+  /** Numa pergunta nova o tamanho de cada anexo é sempre conhecido: os limites da mensagem dependem dele. */
+  anexos: readonly (AnexoDaMensagem & { tamanhoEmBytes: number })[];
   agora: Date;
   /** De onde veio a pergunta, quando não foi digitada (ex.: "escuta"). */
   origem?: OrigemDaPergunta;
@@ -110,8 +111,8 @@ export class ConversaDoChat {
 
   perguntar(pergunta: NovaPergunta): EventoDoChat {
     const texto = pergunta.texto.trim();
-    if (texto === "" && pergunta.imagens.length === 0) {
-      throw new ErroDoChat("dados_invalidos", "Escreva uma mensagem ou anexe uma imagem.");
+    if (texto === "" && pergunta.anexos.length === 0) {
+      throw new ErroDoChat("dados_invalidos", "Escreva uma mensagem ou anexe um arquivo.");
     }
     if (texto.length > TAMANHO_MAXIMO_DA_PERGUNTA) {
       throw new ErroDoChat(
@@ -119,11 +120,9 @@ export class ConversaDoChat {
         `A mensagem deve ter até ${TAMANHO_MAXIMO_DA_PERGUNTA} caracteres.`,
       );
     }
-    if (pergunta.imagens.length > MAXIMO_DE_IMAGENS_POR_MENSAGEM) {
-      throw new ErroDoChat(
-        "dados_invalidos",
-        `Anexe até ${MAXIMO_DE_IMAGENS_POR_MENSAGEM} imagens por mensagem.`,
-      );
+    const problemaDosAnexos = problemaDosAnexosDaMensagem(pergunta.anexos);
+    if (problemaDosAnexos !== null) {
+      throw new ErroDoChat("dados_invalidos", problemaDosAnexos);
     }
     if (this.respostaEmAndamento !== null) {
       throw new ErroDoChat("em_andamento", "Já há uma resposta em andamento.");
@@ -132,7 +131,7 @@ export class ConversaDoChat {
     const doUsuario = MensagemDoChat.pergunta(
       pergunta.mensagemDoUsuarioId,
       texto,
-      pergunta.imagens,
+      pergunta.anexos,
       pergunta.agora,
       pergunta.origem,
     );

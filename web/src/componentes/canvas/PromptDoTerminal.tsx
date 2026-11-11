@@ -15,15 +15,16 @@ import { comandoDoPrompt, completarComando, dicaDeComando, dicaDePedidoGrande } 
 import { juntarDitado } from "../../shared/ditado/texto";
 import { formatarBytes } from "../../shared/formatacao";
 import { useMelhorarPrompt } from "../../shared/hooks/useMelhorarPrompt";
-import { type ImagemAnexada, TIPOS_DE_IMAGEM } from "../../shared/imagens";
+import { type AnexoPendente, arquivosColados, TIPOS_ACEITOS_NO_SELETOR } from "../../shared/anexos";
 import { BotaoDeDitado } from "../BotaoDeDitado";
+import { ChipDeAnexo } from "../ChipDeAnexo";
 import { IconeAnexo, IconeFechar } from "../Icones";
 import { AvisoDaMelhoria, BotaoDeMelhorar } from "../MelhoriaDoPrompt";
 
 const ALTURA_MAXIMA = 140;
 
-const AVISO_DAS_IMAGENS =
-  "imagens não entram na fila — envie quando o orquestrador estiver livre, ou remova as imagens para pôr só o texto na fila";
+const AVISO_DOS_ANEXOS =
+  "anexos não entram na fila — envie quando o orquestrador estiver livre, ou remova os anexos para pôr só o texto na fila";
 
 /** O que o terminal pode fazer no prompt de fora dele. */
 export interface ControleDoPrompt {
@@ -136,9 +137,10 @@ interface Props {
   campo: RefObject<HTMLTextAreaElement | null>;
   /** Preenchido pelo prompt: o terminal acrescenta texto por ele (ex.: uma nota arrastada). */
   controle?: RefObject<ControleDoPrompt | null>;
-  imagens: readonly ImagemAnexada[];
+  /** Imagens (miniaturas) e documentos (etiquetas) anexados e ainda não enviados. */
+  anexos: readonly AnexoPendente[];
   aoAnexar: (arquivos: File[]) => void;
-  aoRemoverImagem: (id: string) => void;
+  aoRemoverAnexo: (id: string) => void;
   /** Devolve se a mensagem foi aceita; só então o campo é limpo. */
   aoEnviar: (texto: string) => Promise<boolean>;
   /** Com um pedido rodando, o Enter põe o texto na fila. Devolve se o servidor aceitou; só então o campo é limpo. */
@@ -165,10 +167,10 @@ interface Props {
 
 /**
  * Linha de comando do terminal: Enter envia, Shift+Enter quebra linha, Esc
- * cancela o pedido em andamento e Shift+Tab liga/desliga o Plan Mode. Imagens
- * entram colando (Ctrl+V), pelo botão de anexo ou arrastando para o terminal.
+ * cancela o pedido em andamento e Shift+Tab liga/desliga o Plan Mode. Imagens e
+ * documentos entram colando (Ctrl+V), pelo botão de anexo ou arrastando para o terminal.
  * Continua editável durante o trabalho: aí o Enter põe o pedido na fila (com
- * o modo; imagens não entram), que sai sozinha quando o pedido atual termina
+ * o modo; anexos não entram), que sai sozinha quando o pedido atual termina
  * bem. "/clear" sozinho começa uma conversa nova (Tab completa o comando). O
  * microfone dita o pedido por voz. O ✨ reescreve o pedido para ficar mais
  * claro (não envia; "desfazer" volta o texto) e só fica livre sem pedido rodando.
@@ -185,9 +187,9 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
   aoAlternarModo,
   campo,
   controle,
-  imagens,
+  anexos,
   aoAnexar,
-  aoRemoverImagem,
+  aoRemoverAnexo,
   aoEnviar,
   aoEnfileirar,
   fila,
@@ -202,16 +204,16 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
   // Nasceu com texto: o campo já abre na altura dele.
   const [nasceuComTexto] = useState(textoInicial !== "");
   const [enviando, setEnviando] = useState(false);
-  // Tentou pôr imagens na fila; some quando elas saem ou o pedido acaba.
-  const [avisoDasImagens, setAvisoDasImagens] = useState(false);
+  // Tentou pôr anexos na fila; some quando eles saem ou o pedido acaba.
+  const [avisoDosAnexos, setAvisoDosAnexos] = useState(false);
   // O aviso é do pedido em andamento: começou ou acabou um pedido, ele sai.
   const [trabalhandoAntes, setTrabalhandoAntes] = useState(trabalhando);
   if (trabalhando !== trabalhandoAntes) {
     setTrabalhandoAntes(trabalhando);
-    setAvisoDasImagens(false);
+    setAvisoDosAnexos(false);
   }
   const seletor = useRef<HTMLInputElement>(null);
-  const temConteudo = texto.trim() !== "" || imagens.length > 0;
+  const temConteudo = texto.trim() !== "" || anexos.length > 0;
   const planejando = modo === "planejamento";
   const enviandoProximoDaFila = !trabalhando && fila.length > 0 && proximoDaFilaACaminho;
   const filaPausada = !trabalhando && fila.length > 0 && !enviandoProximoDaFila;
@@ -274,10 +276,10 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
     }
   }
 
-  /** Com um pedido rodando: o texto vai para a fila, com o modo. Imagens não entram: avisa e não envia. */
+  /** Com um pedido rodando: o texto vai para a fila, com o modo. Anexos não entram: avisa e não envia. */
   async function enfileirar(): Promise<void> {
-    if (imagens.length > 0) {
-      setAvisoDasImagens(true);
+    if (anexos.length > 0) {
+      setAvisoDosAnexos(true);
       return;
     }
     if (texto.trim() === "") {
@@ -295,8 +297,8 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
   }
 
   async function enviar(): Promise<void> {
-    // Antes da trava do envio: "/clear" é um comando, não um pedido. As imagens
-    // anexadas e o modo ficam para o próximo pedido.
+    // Antes da trava do envio: "/clear" é um comando, não um pedido. Os anexos
+    // e o modo ficam para o próximo pedido.
     if (comandoDoPrompt(texto) === "limpar") {
       await limparConversa();
       return;
@@ -312,7 +314,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
     try {
       if (await aoEnviar(texto)) {
         setTexto("");
-        setAvisoDasImagens(false);
+        setAvisoDosAnexos(false);
         requestAnimationFrame(ajustarAltura);
       }
     } finally {
@@ -351,7 +353,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
   }
 
   function aoColar(evento: ClipboardEvent<HTMLTextAreaElement>): void {
-    const arquivos = [...evento.clipboardData.files].filter((arquivo) => arquivo.type.startsWith("image/"));
+    const arquivos = arquivosColados(evento.clipboardData);
     if (arquivos.length > 0) {
       evento.preventDefault();
       aoAnexar(arquivos);
@@ -370,21 +372,32 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
           aoEnviarAgora={aoEnviarDaFila}
         />
       )}
-      {imagens.length > 0 && (
+      {anexos.length > 0 && (
         <div className="miniaturas-do-prompt">
-          {imagens.map((imagem) => (
-            <figure key={imagem.id} className="miniatura" title={`${imagem.nome} · ${formatarBytes(imagem.tamanhoEmBytes)}`}>
-              <img src={imagem.previa} alt={imagem.nome} />
-              <button
-                type="button"
-                className="miniatura-remover"
-                aria-label={`Remover ${imagem.nome}`}
-                onClick={() => aoRemoverImagem(imagem.id)}
-              >
-                <IconeFechar tamanho={11} />
-              </button>
-            </figure>
-          ))}
+          {anexos.map((anexo) =>
+            anexo.previa !== null ? (
+              <figure key={anexo.id} className="miniatura" title={`${anexo.nome} · ${formatarBytes(anexo.tamanhoEmBytes)}`}>
+                <img src={anexo.previa} alt={anexo.nome} />
+                <button
+                  type="button"
+                  className="miniatura-remover"
+                  aria-label={`Remover ${anexo.nome}`}
+                  onClick={() => aoRemoverAnexo(anexo.id)}
+                >
+                  <IconeFechar tamanho={11} />
+                </button>
+              </figure>
+            ) : (
+              <ChipDeAnexo
+                key={anexo.id}
+                nome={anexo.nome}
+                rotulo={anexo.rotulo}
+                legado={anexo.legado}
+                tamanhoEmBytes={anexo.tamanhoEmBytes}
+                aoRemover={() => aoRemoverAnexo(anexo.id)}
+              />
+            ),
+          )}
         </div>
       )}
       <div className="prompt-do-terminal">
@@ -408,14 +421,14 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
                 ? "trabalhando… escreva o próximo e enter põe na fila · esc cancela"
                 : planejando
                   ? "descreva o que planejar — nada é alterado até você aprovar"
-                  : "peça algo e pressione enter · cole ou arraste imagens"
+                  : "peça algo e pressione enter · cole ou arraste imagens e arquivos"
           }
           aria-label="Mensagem para o orquestrador"
         />
         <input
           ref={seletor}
           type="file"
-          accept={TIPOS_DE_IMAGEM.join(",")}
+          accept={TIPOS_ACEITOS_NO_SELETOR}
           multiple
           hidden
           onChange={(evento) => {
@@ -431,8 +444,8 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
         <button
           type="button"
           className="botao-icone"
-          title="Anexar imagens (também dá para colar com Ctrl+V ou arrastar para o terminal)"
-          aria-label="Anexar imagens"
+          title="Anexar arquivos (também dá para colar com Ctrl+V ou arrastar para o terminal)"
+          aria-label="Anexar arquivos"
           onClick={() => seletor.current?.click()}
         >
           <IconeAnexo />
@@ -457,9 +470,9 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
           </button>
         )}
       </div>
-      {avisoDasImagens && trabalhando && imagens.length > 0 && (
+      {avisoDosAnexos && trabalhando && anexos.length > 0 && (
         <p className="mono hint-warning px-[14px] pb-0.5" role="alert">
-          {AVISO_DAS_IMAGENS}
+          {AVISO_DOS_ANEXOS}
         </p>
       )}
       <AvisoDaMelhoria melhoria={melhoria} className="px-[14px] pb-0.5" />

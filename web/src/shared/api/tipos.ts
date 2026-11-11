@@ -132,12 +132,18 @@ export type DadosDaConfiguracaoGravada = Omit<DadosDaConfiguracao, CamposPosteri
 
 export type TipoDeImagem = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
+/** Imagem (vai ao Claude como imagem) ou documento (o servidor extrai o texto ou o cita pelo caminho). */
+export type CategoriaDoAnexo = "imagem" | "documento";
+
 export interface DadosDoAnexo {
   id: string;
   nome: string;
-  tipoDeMidia: TipoDeImagem;
+  /** O `File.type` do envio: pode ser vazio nos documentos (o servidor decide pela extensão do nome). */
+  tipoDeMidia: string;
   tamanhoEmBytes: number;
   arquivo: string;
+  /** Falta nos turnos gravados antes dos documentos: vale imagem quando `tipoDeMidia` começa com "image/". */
+  categoria?: CategoriaDoAnexo;
 }
 
 /** Sinal passageiro de que o Claude segue trabalhando (evento SSE "sinal", fora do histórico). */
@@ -325,7 +331,7 @@ export const LIMITE_DA_FILA = 10;
 /**
  * Um pedido guardado na fila do Orquestrador, à espera da vez: sai sozinho
  * quando o turno atual termina concluído (sem plano pendente) ou quando o
- * usuário manda "enviar agora". Só texto e modo: imagens não entram na fila.
+ * usuário manda "enviar agora". Só texto e modo: anexos não entram na fila.
  */
 export interface DadosDoPedidoNaFila {
   id: string;
@@ -464,7 +470,7 @@ type EventoDeTurno =
   | { tipo: "uso_da_cota"; janelas: JanelaDaCota[] }
   // A lista de tarefas do Orquestrador (`TodoWrite`), inteira: substitui a anterior. Nunca vem vazia.
   | { tipo: "tarefas_atualizadas"; tarefas: TarefaDoOrquestrador[] }
-  // `anexos` e `modo` faltam nos eventos gravados antes de existirem imagens e o Plan Mode.
+  // `anexos` e `modo` faltam nos eventos gravados antes de existirem anexos e o Plan Mode.
   | {
       tipo: "turno_iniciado";
       texto: string;
@@ -593,10 +599,13 @@ export interface UsoDaResposta {
   modeloUsado: string | null;
 }
 
-export interface ImagemDaMensagemDoChat {
+/** Imagem ou documento anexado a uma mensagem do chat. */
+export interface AnexoDaMensagemDoChat {
   arquivo: string;
   nome: string;
   tipoDeMidia: string;
+  categoria: CategoriaDoAnexo;
+  tamanhoEmBytes?: number;
 }
 
 export type PapelNoChat = "usuario" | "claude";
@@ -624,7 +633,7 @@ export interface MensagemDoChat {
   id: string;
   papel: PapelNoChat;
   texto: string;
-  imagens: ImagemDaMensagemDoChat[];
+  anexos: AnexoDaMensagemDoChat[];
   criadaEm: string;
   situacao: SituacaoDaMensagemDoChat;
   acoes: AcaoDoApp[];

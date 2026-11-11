@@ -423,8 +423,9 @@ export function definicaoDosAgentes(
  * onde aspas e quebras de linha seriam um problema no Windows.
  *
  * A entrada é `stream-json`, e não texto puro, para a mensagem poder levar
- * imagens. A pasta das imagens entra em `--add-dir`: fora da pasta do projeto,
- * os Subagentes não teriam permissão para abri-las.
+ * imagens. A pasta dos anexos (imagens e documentos) entra em `--add-dir`: fora
+ * da pasta do projeto, o Orquestrador e os Subagentes não teriam permissão para
+ * abri-los; só as imagens vão inline, os documentos eles abrem pelo caminho.
  *
  * `--tools` define o que existe na sessão; `--allowedTools` com
  * `--permission-mode dontAsk` faz o resto ser negado em vez de perguntado —
@@ -471,7 +472,7 @@ export function montarArgumentos(pedido: PedidoDeTurno, arquivos: ArquivosDoTurn
     "--verbose",
     "--add-dir",
     pedido.pastaDeArtefatos,
-    ...(pedido.pastaDasImagens === null ? [] : ["--add-dir", pedido.pastaDasImagens]),
+    ...(pedido.pastaDosAnexos === null ? [] : ["--add-dir", pedido.pastaDosAnexos]),
     ...(pedido.sessaoIniciada ? ["--resume", pedido.sessaoId] : ["--session-id", pedido.sessaoId]),
     "--model",
     pedido.configuracao.modeloDoOrquestrador,

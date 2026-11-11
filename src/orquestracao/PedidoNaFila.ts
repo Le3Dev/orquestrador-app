@@ -36,7 +36,7 @@ export interface NovoPedidoNaFila {
 /**
  * Um pedido guardado na fila de um Orquestrador, à espera da vez: sai sozinho
  * quando o turno atual termina bem, ou quando o usuário manda enviar agora.
- * Objeto de valor imutável — só texto e modo (imagens não entram na fila).
+ * Objeto de valor imutável — só texto e modo (anexos não entram na fila).
  *
  * Os itens ligados ao Orquestrador no canvas ficam congelados como estavam
  * ao enfileirar: o pedido sai mais tarde com o contexto que o usuário viu.

@@ -169,8 +169,15 @@ describe("aplicarEvento", () => {
     ]);
   });
 
-  it("guarda as imagens do pedido e a hora da última atividade", () => {
-    const anexo = { id: "a1", nome: "tela.png", tipoDeMidia: "image/png" as const, tamanhoEmBytes: 10, arquivo: "a1.png" };
+  it("guarda os anexos do pedido e a hora da última atividade", () => {
+    const anexo = {
+      id: "a1",
+      nome: "tela.png",
+      tipoDeMidia: "image/png",
+      tamanhoEmBytes: 10,
+      arquivo: "a1.png",
+      categoria: "imagem" as const,
+    };
     const estado = reproduzir(
       registrar([
         { tipo: "turno_iniciado", turnoId: "t1", texto: "veja", configuracao, anexos: [anexo] },
@@ -183,7 +190,37 @@ describe("aplicarEvento", () => {
     expect(turno?.ultimaAtividadeEm).toBe("2026-10-28T12:00:01Z");
   });
 
-  it("lê pedidos gravados antes de existirem imagens", () => {
+  it("guarda o anexo de documento do pedido com a categoria e o tipo que o servidor gravou", () => {
+    const documento = {
+      id: "a2",
+      nome: "Relatório 2026.pdf",
+      tipoDeMidia: "application/pdf",
+      tamanhoEmBytes: 2 * 1024 * 1024,
+      arquivo: "a2.pdf",
+      categoria: "documento" as const,
+    };
+    const imagem = { id: "a3", nome: "tela.png", tipoDeMidia: "image/png", tamanhoEmBytes: 10, arquivo: "a3.png", categoria: "imagem" as const };
+    const [turno] = reproduzir(
+      registrar([{ tipo: "turno_iniciado", turnoId: "t1", texto: "resuma", configuracao, anexos: [documento, imagem] }]),
+    ).turnos;
+
+    expect(turno?.anexos).toEqual([documento, imagem]);
+    expect(turno?.anexos[0]?.categoria).toBe("documento");
+  });
+
+  it("lê turno antigo: anexo sem `categoria` segue sem ela (a tela decide pelo tipo) e sem anexos vira lista vazia", () => {
+    const antigo = { id: "a1", nome: "foto.jpg", tipoDeMidia: "image/jpeg", tamanhoEmBytes: 10, arquivo: "a1.jpg" };
+    const [comAnexo] = reproduzir(
+      registrar([{ tipo: "turno_iniciado", turnoId: "t1", texto: "antigo", configuracao, anexos: [antigo] }]),
+    ).turnos;
+    expect(comAnexo?.anexos).toEqual([antigo]);
+    expect(comAnexo?.anexos[0]).not.toHaveProperty("categoria");
+
+    const [semAnexos] = reproduzir(registrar([{ tipo: "turno_iniciado", turnoId: "t1", texto: "antigo", configuracao }])).turnos;
+    expect(semAnexos?.anexos).toEqual([]);
+  });
+
+  it("lê pedidos gravados antes de existirem anexos", () => {
     const [turno] = reproduzir(registrar([{ tipo: "turno_iniciado", turnoId: "t1", texto: "antigo", configuracao }])).turnos;
 
     expect(turno?.anexos).toEqual([]);

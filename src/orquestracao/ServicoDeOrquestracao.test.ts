@@ -137,6 +137,11 @@ class ArmazemEmMemoria implements ArmazemDeAnexos {
   caminhoDe(orquestradorId: string, arquivo: string): string {
     return `${this.pastaDe(orquestradorId)}/${arquivo}`;
   }
+  /** Os arquivos cujo texto foi "extraído": o armazém em memória só aponta um `.txt` para eles. */
+  readonly comTextoExtraido = new Set<string>();
+  caminhoDoTextoDe(orquestradorId: string, arquivo: string): string | null {
+    return this.comTextoExtraido.has(arquivo) ? `${this.caminhoDe(orquestradorId, arquivo)}.txt` : null;
+  }
   pastaDe(orquestradorId: string): string {
     return `/anexos/${orquestradorId}`;
   }
@@ -403,23 +408,97 @@ describe("ServicoDeOrquestracao", () => {
     await conclusao;
 
     const pedido = motor.pedidos[0];
-    expect(pedido?.imagens).toEqual([{ caminho: `/anexos/${orquestrador.id}/id4.png`, tipoDeMidia: "image/png" }]);
-    expect(pedido?.pastaDasImagens).toBe(`/anexos/${orquestrador.id}`);
+    expect(pedido?.anexos).toEqual([
+      {
+        caminho: `/anexos/${orquestrador.id}/id4.png`,
+        nome: "tela.png",
+        categoria: "imagem",
+        tipoDeMidia: "image/png",
+        rotulo: "Imagem",
+        tamanhoEmBytes: 3,
+        caminhoDoTexto: null,
+        legado: false,
+      },
+    ]);
+    expect(pedido?.pastaDosAnexos).toBe(`/anexos/${orquestrador.id}`);
     expect(armazem.guardados.get(`/anexos/${orquestrador.id}/id4.png`)).toBe(conteudo);
     expect(repositorio.eventos[0]).toMatchObject({
       tipo: "turno_iniciado",
-      anexos: [{ nome: "tela.png", tipoDeMidia: "image/png", tamanhoEmBytes: 3, arquivo: "id4.png" }],
+      anexos: [{ nome: "tela.png", tipoDeMidia: "image/png", tamanhoEmBytes: 3, arquivo: "id4.png", categoria: "imagem" }],
     });
   });
 
-  it("recusa formato de imagem não suportado antes de iniciar o turno", async () => {
+  it("aceita uma mensagem só com documentos e os entrega ao motor com o texto extraído e o aviso de formato antigo", async () => {
+    const orquestrador = await criar();
+    armazem.comTextoExtraido.add("id4.xlsx");
+
+    const { conclusao } = await servico.enviarMensagem(orquestrador.id, "resuma", [
+      { nome: "vendas.xlsx", tipoDeMidia: "", conteudo: new Uint8Array([1, 2, 3, 4]) },
+      { nome: "antigo.doc", tipoDeMidia: "application/msword", conteudo: new Uint8Array([1, 2]) },
+      { nome: "notas.md", tipoDeMidia: "", conteudo: new Uint8Array([1]) },
+    ]);
+    motor.terminar();
+    await conclusao;
+
+    const pasta = `/anexos/${orquestrador.id}`;
+    expect(motor.pedidos[0]?.anexos).toEqual([
+      {
+        caminho: `${pasta}/id4.xlsx`,
+        nome: "vendas.xlsx",
+        categoria: "documento",
+        tipoDeMidia: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        rotulo: "Excel",
+        tamanhoEmBytes: 4,
+        caminhoDoTexto: `${pasta}/id4.xlsx.txt`,
+        legado: false,
+      },
+      {
+        caminho: `${pasta}/id5.doc`,
+        nome: "antigo.doc",
+        categoria: "documento",
+        tipoDeMidia: "application/msword",
+        rotulo: "Word (formato antigo)",
+        tamanhoEmBytes: 2,
+        caminhoDoTexto: null,
+        legado: true,
+      },
+      expect.objectContaining({ caminho: `${pasta}/id6.md`, tipoDeMidia: "text/markdown", rotulo: "Markdown" }),
+    ]);
+    expect(motor.pedidos[0]?.pastaDosAnexos).toBe(pasta);
+    expect([...armazem.guardados.keys()]).toEqual([`${pasta}/id4.xlsx`, `${pasta}/id5.doc`, `${pasta}/id6.md`]);
+    expect(repositorio.eventos[0]).toMatchObject({
+      tipo: "turno_iniciado",
+      anexos: [
+        { arquivo: "id4.xlsx", categoria: "documento" },
+        { arquivo: "id5.doc", categoria: "documento" },
+        { arquivo: "id6.md", categoria: "documento" },
+      ],
+    });
+  });
+
+  it("recusa formato não suportado antes de iniciar o turno", async () => {
     const orquestrador = await criar();
 
     await expect(
       servico.enviarMensagem(orquestrador.id, "veja", [
-        { nome: "doc.pdf", tipoDeMidia: "application/pdf", conteudo: new Uint8Array([1]) },
+        { nome: "programa.exe", tipoDeMidia: "application/x-msdownload", conteudo: new Uint8Array([1]) },
       ]),
-    ).rejects.toMatchObject({ motivo: "dados_invalidos" });
+    ).rejects.toMatchObject({ motivo: "dados_invalidos", message: expect.stringContaining("não dá para anexar") });
+    expect(orquestrador.situacao).toBe("ocioso");
+    expect(armazem.guardados.size).toBe(0);
+  });
+
+  it("recusa mais de 10 anexos e a 6ª imagem antes de iniciar o turno", async () => {
+    const orquestrador = await criar();
+    const documento = { nome: "a.pdf", tipoDeMidia: "application/pdf", conteudo: new Uint8Array([1]) };
+    const imagem = { nome: "a.png", tipoDeMidia: "image/png", conteudo: new Uint8Array([1]) };
+
+    await expect(
+      servico.enviarMensagem(orquestrador.id, "veja", Array.from({ length: 11 }, () => documento)),
+    ).rejects.toMatchObject({ motivo: "dados_invalidos", message: "Anexe até 10 arquivos por mensagem." });
+    await expect(
+      servico.enviarMensagem(orquestrador.id, "veja", Array.from({ length: 6 }, () => imagem)),
+    ).rejects.toMatchObject({ motivo: "dados_invalidos", message: "Anexe até 5 imagens por mensagem." });
     expect(orquestrador.situacao).toBe("ocioso");
     expect(armazem.guardados.size).toBe(0);
   });
@@ -472,14 +551,14 @@ describe("ServicoDeOrquestracao", () => {
     expect(orquestrador.worktree).toBeNull();
   });
 
-  it("sem imagens, o motor não recebe pasta de imagens", async () => {
+  it("sem anexos, o motor não recebe pasta de anexos", async () => {
     const orquestrador = await criar();
 
     const { conclusao } = await servico.enviarMensagem(orquestrador.id, "analise");
     motor.terminar();
     await conclusao;
 
-    expect(motor.pedidos[0]).toMatchObject({ imagens: [], pastaDasImagens: null, orquestradorId: orquestrador.id });
+    expect(motor.pedidos[0]).toMatchObject({ anexos: [], pastaDosAnexos: null, orquestradorId: orquestrador.id });
   });
 
   describe("renomear", () => {

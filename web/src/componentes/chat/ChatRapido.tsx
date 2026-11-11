@@ -13,10 +13,26 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import { api, type ImagemParaEnvio, mensagemDeErro } from "../../shared/api/cliente";
+import {
+  type AnexoPendente,
+  anexosParaEnvio,
+  arquivosColados,
+  categoriaDoArquivo,
+  ehAnexoDeImagem,
+  ehCapturaDeTela,
+  imagemDaCaptura,
+  lerAnexo,
+  liberarAnexos,
+  MAXIMO_DE_ANEXOS,
+  MAXIMO_DE_IMAGENS,
+  problemaDoAnexo,
+  TEXTO_PADRAO_DOS_ANEXOS,
+  TIPOS_ACEITOS_NO_SELETOR,
+} from "../../shared/anexos";
+import { type AnexoParaEnvio, api, mensagemDeErro } from "../../shared/api/cliente";
 import type {
+  AnexoDaMensagemDoChat,
   AtividadeDaResposta,
-  ImagemDaMensagemDoChat,
   OrigemDaPergunta,
   PreferenciasDoChat,
   ResumoDoOrquestrador,
@@ -41,19 +57,9 @@ import {
   limitarLarguraDoChatFixo,
   usePreferenciasDaTela,
 } from "../../shared/hooks/usePreferenciasDaTela";
-import {
-  ehCapturaDeTela,
-  type ImagemAnexada,
-  imagemDaCaptura,
-  imagensParaEnvio,
-  lerImagem,
-  liberarImagens,
-  MAXIMO_DE_IMAGENS,
-  problemaDaImagem,
-  TIPOS_DE_IMAGEM,
-} from "../../shared/imagens";
 import type { CapturaDeTela } from "../../shared/ponteDoDesktop";
 import { BotaoDeDitado } from "../BotaoDeDitado";
+import { ChipDeAnexo } from "../ChipDeAnexo";
 import { AvisoDaMelhoria, BotaoDeMelhorar } from "../MelhoriaDoPrompt";
 import { TextoFormatado } from "../TextoFormatado";
 import { AvisoDaEscuta } from "./AvisoDaEscuta";
@@ -299,7 +305,7 @@ function IconeDaBarra({ tamanho = 18, children }: { tamanho?: number; children: 
   );
 }
 
-/** Anexar imagens: um "+". */
+/** Anexar arquivos (imagens e documentos): um "+". */
 function IconeAnexar() {
   return (
     <IconeDaBarra>
@@ -440,7 +446,7 @@ function IconeArrastar() {
  * clique fora fecham. Dentro do app (e não numa aba): no aplicativo, o
  * navegador do sistema não tem acesso ao servidor.
  */
-function ImagemAmpliada({ imagem, aoFechar }: { imagem: ImagemDaMensagemDoChat; aoFechar: () => void }) {
+function ImagemAmpliada({ imagem, aoFechar }: { imagem: AnexoDaMensagemDoChat; aoFechar: () => void }) {
   const fechar = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -492,30 +498,40 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
   orquestradores,
 }: PropsDaMensagem) {
   // A imagem anexada aberta em tamanho maior; nula, nenhuma.
-  const [ampliada, setAmpliada] = useState<ImagemDaMensagemDoChat | null>(null);
+  const [ampliada, setAmpliada] = useState<AnexoDaMensagemDoChat | null>(null);
 
   if (mensagem.papel === "usuario") {
     // Capturas de tela seguem para o Claude, mas nunca viram miniatura (só visual).
-    const imagensVisiveis = mensagem.imagens.filter((imagem) => !ehCapturaDeTela(imagem.nome));
+    const anexosVisiveis = mensagem.anexos.filter((anexo) => !ehCapturaDeTela(anexo.nome));
     // A da escuta aparece como se fosse digitada: só a pergunta (o contexto e a instrução seguem só para o Claude).
     const textoVisivel =
       mensagem.origem === "escuta" ? (perguntaDaMensagemDaEscuta(mensagem.texto) ?? mensagem.texto) : mensagem.texto;
     return (
       <div className="mensagem-do-usuario">
-        {imagensVisiveis.length > 0 && (
+        {anexosVisiveis.length > 0 && (
           <div className="anexos-do-chat">
-            {imagensVisiveis.map((imagem) => (
-              <button
-                key={imagem.arquivo}
-                type="button"
-                className="miniatura-do-anexo"
-                title={`${imagem.nome} · clique para ampliar`}
-                aria-label={`Ampliar ${imagem.nome}`}
-                onClick={() => setAmpliada(imagem)}
-              >
-                <img src={api.enderecoDoAnexoDoChat(imagem.arquivo)} alt={imagem.nome} />
-              </button>
-            ))}
+            {anexosVisiveis.map((anexo) =>
+              ehAnexoDeImagem(anexo) ? (
+                <button
+                  key={anexo.arquivo}
+                  type="button"
+                  className="miniatura-do-anexo"
+                  title={`${anexo.nome} · clique para ampliar`}
+                  aria-label={`Ampliar ${anexo.nome}`}
+                  onClick={() => setAmpliada(anexo)}
+                >
+                  <img src={api.enderecoDoAnexoDoChat(anexo.arquivo)} alt={anexo.nome} />
+                </button>
+              ) : (
+                // Documento: o servidor o entrega como download; o `download` do link devolve o nome original.
+                <ChipDeAnexo
+                  key={anexo.arquivo}
+                  nome={anexo.nome}
+                  tamanhoEmBytes={anexo.tamanhoEmBytes}
+                  href={api.enderecoDoAnexoDoChat(anexo.arquivo)}
+                />
+              ),
+            )}
           </div>
         )}
         {textoVisivel !== "" && <p className="texto-longo">{textoVisivel}</p>}
@@ -661,7 +677,7 @@ export function ChatRapido({
 }: Props) {
   const { mudarPreferencias } = usePreferenciasDaTela();
   const [texto, setTexto] = useState("");
-  const [imagens, setImagens] = useState<ImagemAnexada[]>([]);
+  const [anexos, setAnexos] = useState<AnexoPendente[]>([]);
   const [erro, setErro] = useState<string | null>(null);
   const [enviando, setEnviando] = useState(false);
   const [pedidoDeCancelar, setPedidoDeCancelar] = useState(false);
@@ -690,13 +706,11 @@ export function ChatRapido({
     erro: erroDoModo,
     descartarErro: descartarErroDoModo,
   } = useModoInvisivel();
-  // Contagem síncrona dos anexos pendentes: vários quadros podem chegar antes de renderizar.
-  const quantidadeDeImagens = useRef(0);
-  quantidadeDeImagens.current = imagens.length;
-  // As anexadas agora, para liberar as miniaturas (URLs `blob:`) ao enviar e ao desmontar.
-  const imagensAtuais = useRef(imagens);
-  imagensAtuais.current = imagens;
-  useEffect(() => () => liberarImagens(imagensAtuais.current), []);
+  // Os anexos pendentes agora, lidos de forma síncrona (vários quadros podem chegar antes de renderizar) e
+  // para liberar as miniaturas (URLs `blob:`) ao enviar e ao desmontar.
+  const anexosAtuais = useRef(anexos);
+  anexosAtuais.current = anexos;
+  useEffect(() => () => liberarAnexos(anexosAtuais.current), []);
   const campo = useRef<HTMLTextAreaElement>(null);
   const seletorDeArquivos = useRef<HTMLInputElement>(null);
   const rolagem = useRef<HTMLDivElement>(null);
@@ -708,8 +722,9 @@ export function ChatRapido({
   // Fixo, a conversa nunca se oculta.
   const oculta = !fixo && ocultaEm !== null;
   const novidadeOculta = oculta && ocultaEm !== assinaturaDaUltima(chat);
-  const imagensVisiveis = imagens.filter((imagem) => !ehCapturaDeTela(imagem.nome));
-  const temConteudo = texto.trim() !== "" || imagens.length > 0;
+  // A captura do modo invisível segue para o Claude, mas nunca aparece entre os pendentes (só visual).
+  const anexosVisiveis = anexos.filter((anexo) => !ehCapturaDeTela(anexo.nome));
+  const temConteudo = texto.trim() !== "" || anexos.length > 0;
   const dica = dicaDeComando(texto, respondendo);
   const ultima = chat.mensagens.at(-1);
   const pedidoDeAutorizacao = pedidoDeAutorizacaoAtual(chat);
@@ -740,42 +755,46 @@ export function ChatRapido({
   const anexar = useCallback(
     async (arquivos: File[]): Promise<void> => {
       setErro(null);
-      let quantidade = imagens.length;
       for (const arquivo of arquivos) {
-        const problema = problemaDaImagem(arquivo, quantidade);
+        // Os limites valem para a soma: os já anexados mais os aceitos neste lote.
+        const problema = problemaDoAnexo(arquivo, anexosAtuais.current);
         if (problema !== null) {
           setErro(problema);
           continue;
         }
-        quantidade += 1;
         try {
-          const imagem = await lerImagem(arquivo);
-          setImagens((atuais) => [...atuais, imagem]);
+          const anexo = await lerAnexo(arquivo);
+          anexosAtuais.current = [...anexosAtuais.current, anexo];
+          setAnexos((atuais) => [...atuais, anexo]);
         } catch (falha) {
           setErro(mensagemDeErro(falha));
         }
       }
     },
-    [imagens.length],
+    [],
   );
 
-  /** Guarda um quadro capturado (botão ou atalho) como anexo pendente, respeitando o limite. */
+  /** Guarda um quadro capturado (botão ou atalho) como anexo pendente, respeitando os limites. */
   const adicionarQuadro = useCallback((captura: CapturaDeTela): void => {
-    if (quantidadeDeImagens.current >= MAXIMO_DE_IMAGENS) {
-      setErro(`Dá para anexar até ${MAXIMO_DE_IMAGENS} imagens por mensagem: o quadro não foi guardado.`);
-      return;
-    }
-    quantidadeDeImagens.current += 1;
     setErro(null);
-    let imagem: ImagemAnexada;
+    let quadro: AnexoPendente;
     try {
-      imagem = imagemDaCaptura(captura);
+      quadro = imagemDaCaptura(captura);
     } catch (falha) {
-      quantidadeDeImagens.current -= 1;
       setErro(`Não foi possível guardar o quadro: ${mensagemDeErro(falha)}`);
       return;
     }
-    setImagens((atuais) => [...atuais, imagem]);
+    const problema = problemaDoAnexo(
+      { name: quadro.nome, type: quadro.tipoDeMidia, size: quadro.tamanhoEmBytes },
+      anexosAtuais.current,
+    );
+    if (problema !== null) {
+      liberarAnexos([quadro]);
+      setErro(`${problema} O quadro não foi guardado.`);
+      return;
+    }
+    anexosAtuais.current = [...anexosAtuais.current, quadro];
+    setAnexos((atuais) => [...atuais, quadro]);
   }, []);
 
   // Quadros do atalho global Ctrl+Shift+S (o app de trás mantém o foco).
@@ -814,7 +833,7 @@ export function ChatRapido({
   const enviarPergunta = useCallback(
     async (
       pergunta: string,
-      anexos: readonly ImagemParaEnvio[] = [],
+      anexos: readonly AnexoParaEnvio[] = [],
       opcoes: { origem?: OrigemDaPergunta } = {},
     ): Promise<void> => {
       setEnviando(true);
@@ -823,9 +842,18 @@ export function ChatRapido({
         // Modo invisível: a tela vai junto, fotografada agora — a menos que já haja um quadro
         // capturado (botão/atalho) entre os anexos. Sem a foto, nada é enviado.
         if (modoAtivo && !anexos.some((anexo) => ehCapturaDeTela(anexo.nome))) {
-          if (anexos.length >= MAXIMO_DE_IMAGENS) {
+          // A foto conta como uma das imagens e um dos anexos da mensagem.
+          const imagensAnexadas = anexos.filter(
+            (anexo) => categoriaDoArquivo({ name: anexo.nome, type: anexo.tipoDeMidia }) === "imagem",
+          ).length;
+          if (imagensAnexadas >= MAXIMO_DE_IMAGENS) {
             throw new Error(
               `No modo invisível a tela ocupa uma das ${MAXIMO_DE_IMAGENS} imagens: remova uma imagem anexada.`,
+            );
+          }
+          if (anexos.length >= MAXIMO_DE_ANEXOS) {
+            throw new Error(
+              `No modo invisível a tela ocupa um dos ${MAXIMO_DE_ANEXOS} anexos: remova um arquivo anexado.`,
             );
           }
           let captura: CapturaDeTela;
@@ -985,14 +1013,14 @@ export function ChatRapido({
     }
     setErro(null);
     try {
-      // Só imagens, sem texto: o servidor exige uma pergunta, então vai uma padrão.
-      const pergunta = texto.trim() === "" ? "Analise as imagens anexadas." : texto;
+      // Só anexos, sem texto: o servidor exige uma pergunta, então vai uma padrão.
+      const pergunta = texto.trim() === "" ? TEXTO_PADRAO_DOS_ANEXOS : texto;
       // O base64 só nasce aqui; o "enviando" já vale enquanto ele é gerado.
-      let anexos: ImagemParaEnvio[] = [];
-      if (imagens.length > 0) {
+      let paraEnvio: AnexoParaEnvio[] = [];
+      if (anexos.length > 0) {
         setEnviando(true);
         try {
-          anexos = await imagensParaEnvio(imagens);
+          paraEnvio = await anexosParaEnvio(anexos);
         } catch (falha) {
           setEnviando(false);
           throw falha;
@@ -1000,14 +1028,14 @@ export function ChatRapido({
       }
       await enviarPergunta(
         pergunta,
-        anexos,
+        paraEnvio,
         // A pergunta que a escuta pôs no campo leva o selo, mesmo que o usuário a tenha retocado.
         origemDoComposer === null ? {} : { origem: origemDoComposer },
       );
       limparCampo();
-      // As enviadas (e as que chegaram durante o envio, que também saem) liberam a miniatura.
-      liberarImagens(imagensAtuais.current);
-      setImagens([]);
+      // Os enviados (e os que chegaram durante o envio, que também saem) liberam a miniatura.
+      liberarAnexos(anexosAtuais.current);
+      setAnexos([]);
     } catch (falha) {
       setErro(mensagemDeErro(falha));
     }
@@ -1078,7 +1106,7 @@ export function ChatRapido({
   }
 
   function aoColar(evento: ClipboardEvent<HTMLTextAreaElement>): void {
-    const arquivos = [...evento.clipboardData.files].filter((arquivo) => arquivo.type.startsWith("image/"));
+    const arquivos = arquivosColados(evento.clipboardData);
     if (arquivos.length > 0) {
       evento.preventDefault();
       void anexar(arquivos);
@@ -1139,7 +1167,7 @@ export function ChatRapido({
         }
       }}
     >
-      {arrastando && <div className="soltar-imagens">solte para anexar as imagens à pergunta</div>}
+      {arrastando && <div className="soltar-imagens">solte para anexar os arquivos à pergunta</div>}
       {fixo && aoMudarLargura !== undefined && <AlcaDaLargura largura={largura} aoMudar={aoMudarLargura} lado={lado} />}
 
       {/* Oculta, a conversa continua montada: os cartões de ação lembram o que já fizeram. */}
@@ -1338,28 +1366,35 @@ export function ChatRapido({
           }}
         >
           {respondendo && !desconectado && <div className="faixa-de-progresso" />}
-          {imagensVisiveis.length > 0 && (
+          {anexosVisiveis.length > 0 && (
             <div className="miniaturas-do-prompt">
-              {imagensVisiveis.map((imagem) => (
-                <figure
-                  key={imagem.id}
-                  className="miniatura"
-                  title={`${imagem.nome} · ${formatarBytes(imagem.tamanhoEmBytes)}`}
-                >
-                  <img src={imagem.previa} alt={imagem.nome} />
-                  <button
-                    type="button"
-                    className="miniatura-remover"
-                    aria-label={`Remover ${imagem.nome}`}
-                    onClick={() => {
-                      liberarImagens([imagem]);
-                      setImagens((atuais) => atuais.filter((item) => item.id !== imagem.id));
-                    }}
+              {anexosVisiveis.map((anexo) => {
+                const remover = (): void => {
+                  liberarAnexos([anexo]);
+                  setAnexos((atuais) => atuais.filter((item) => item.id !== anexo.id));
+                };
+                return anexo.previa !== null ? (
+                  <figure
+                    key={anexo.id}
+                    className="miniatura"
+                    title={`${anexo.nome} · ${formatarBytes(anexo.tamanhoEmBytes)}`}
                   >
-                    ✕
-                  </button>
-                </figure>
-              ))}
+                    <img src={anexo.previa} alt={anexo.nome} />
+                    <button type="button" className="miniatura-remover" aria-label={`Remover ${anexo.nome}`} onClick={remover}>
+                      ✕
+                    </button>
+                  </figure>
+                ) : (
+                  <ChipDeAnexo
+                    key={anexo.id}
+                    nome={anexo.nome}
+                    rotulo={anexo.rotulo}
+                    legado={anexo.legado}
+                    tamanhoEmBytes={anexo.tamanhoEmBytes}
+                    aoRemover={remover}
+                  />
+                );
+              })}
             </div>
           )}
           {/* A barra: + · campo · ✦ · microfone · indicadores · olho · modelo · enviar · fixar. Na coluna, o campo vai para a linha de cima (CSS). */}
@@ -1367,7 +1402,7 @@ export function ChatRapido({
             <input
               ref={seletorDeArquivos}
               type="file"
-              accept={TIPOS_DE_IMAGEM.join(",")}
+              accept={TIPOS_ACEITOS_NO_SELETOR}
               multiple
               hidden
               onChange={(evento) => {
@@ -1378,8 +1413,8 @@ export function ChatRapido({
             <button
               type="button"
               className="botao-icone botao-de-anexar"
-              aria-label="Anexar imagens"
-              title="Anexar imagens (também dá para colar com Ctrl+V ou arrastar para o chat)"
+              aria-label="Anexar arquivos"
+              title="Anexar arquivos (também dá para colar com Ctrl+V ou arrastar para o chat)"
               onClick={() => seletorDeArquivos.current?.click()}
             >
               <IconeAnexar />

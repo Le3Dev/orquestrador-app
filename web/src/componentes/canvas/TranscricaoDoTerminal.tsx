@@ -1,5 +1,6 @@
 import { memo, type ReactNode, useEffect, useState } from "react";
 
+import { ehAnexoDeImagem } from "../../shared/anexos";
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { DadosDaConfiguracao, NomeDaPredefinicao, SinalDeVida } from "../../shared/api/tipos";
 import { nomeDoBixinho } from "../../shared/canvas/bixinhos";
@@ -25,6 +26,7 @@ import {
   idCurto,
 } from "../../shared/formatacao";
 import { useRelogio } from "../../shared/hooks/useRelogio";
+import { ChipDeAnexo } from "../ChipDeAnexo";
 import { IconeAlerta, IconeCoracao, IconeOrquestrador, IconeRaio } from "../Icones";
 import { CartaoDePergunta } from "../chat/CartaoDePergunta";
 import { TextoFormatado } from "../TextoFormatado";
@@ -294,17 +296,27 @@ const Turno = memo(function Turno({
       )}
       {turno.anexos.length > 0 && (
         <div className="anexos-do-turno">
-          {turno.anexos.map((anexo) => (
-            <a
-              key={anexo.id}
-              href={api.enderecoDoAnexo(orquestradorId, anexo.arquivo)}
-              target="_blank"
-              rel="noreferrer"
-              title={`${anexo.nome} — abrir em tamanho real`}
-            >
-              <img src={api.enderecoDoAnexo(orquestradorId, anexo.arquivo)} alt={anexo.nome} loading="lazy" />
-            </a>
-          ))}
+          {turno.anexos.map((anexo) =>
+            ehAnexoDeImagem(anexo) ? (
+              <a
+                key={anexo.id}
+                href={api.enderecoDoAnexo(orquestradorId, anexo.arquivo)}
+                target="_blank"
+                rel="noreferrer"
+                title={`${anexo.nome} — abrir em tamanho real`}
+              >
+                <img src={api.enderecoDoAnexo(orquestradorId, anexo.arquivo)} alt={anexo.nome} loading="lazy" />
+              </a>
+            ) : (
+              // Documento: o servidor o entrega como download; o `download` do link devolve o nome original.
+              <ChipDeAnexo
+                key={anexo.id}
+                nome={anexo.nome}
+                tamanhoEmBytes={anexo.tamanhoEmBytes}
+                href={api.enderecoDoAnexo(orquestradorId, anexo.arquivo)}
+              />
+            ),
+          )}
         </div>
       )}
       <div className="flex flex-col">

@@ -1,6 +1,7 @@
-import { Anexo, ehTipoDeImagem, TAMANHO_MAXIMO_DA_IMAGEM } from "../orquestracao/Anexo";
+import { Anexo } from "../orquestracao/Anexo";
 import type { ArmazemDeAnexos } from "../orquestracao/ArmazemDeAnexos";
 import type { ControleDeExecucoes } from "../orquestracao/ControleDeExecucoes";
+import { ErroDeOrquestracao } from "../orquestracao/ErroDeOrquestracao";
 import type { JanelaDaCota } from "../orquestracao/EventoDeOrquestracao";
 import { separarPerguntasDoApp } from "../perguntas/PerguntaDoApp";
 import { separarPreviasDoApp } from "../previas/PreviaDoApp";
@@ -8,8 +9,8 @@ import { ConversaDoChat, SituacaoDaConversa } from "./ConversaDoChat";
 import { ErroDoChat } from "./ErroDoChat";
 import type { EventoDoChat, EventoDoChatRegistrado, PublicadorDoChat } from "./EventoDoChat";
 import { instrucoesDoChat, mensagemParaOChat, separarAcoesDoApp } from "./InstrucoesDoChat";
-import type { DadosDaMensagemDoChat, ImagemDaMensagem } from "./MensagemDoChat";
-import type { EventoDoMotorDeChat, MotorDeChat, ResultadoDaResposta } from "./MotorDeChat";
+import type { DadosDaMensagemDoChat } from "./MensagemDoChat";
+import type { AnexoDaPergunta, EventoDoMotorDeChat, MotorDeChat, ResultadoDaResposta } from "./MotorDeChat";
 import type { OrigemDaPergunta } from "./OrigemDaPergunta";
 import { AlteracoesDasPreferenciasDoChat, DadosDasPreferenciasDoChat, PreferenciasDoChat } from "./PreferenciasDoChat";
 import type { OrquestradorExistente, ProjetoDoChat, ProjetosDoChat } from "./ProjetosDoChat";
@@ -18,8 +19,6 @@ import type { SubagenteDoChat, SubagentesDoChat } from "./SubagentesDoChat";
 
 /** Chave do chat no controle de execuções e no armazém de anexos. */
 export const ID_DO_CHAT = "chat";
-
-const TAMANHO_MAXIMO_DO_NOME_DA_IMAGEM = 200;
 
 export interface DependenciasDoServicoDeChat {
   repositorio: RepositorioDoChat;
@@ -43,8 +42,8 @@ export interface DependenciasDoServicoDeChat {
   agora: () => Date;
 }
 
-/** Imagem como chega do usuário, antes de ser guardada. */
-export interface ImagemRecebidaNoChat {
+/** Arquivo (imagem ou documento) como chega do usuário, antes de ser guardado. */
+export interface AnexoRecebidoNoChat {
   nome: string;
   tipoDeMidia: string;
   conteudo: Uint8Array;
@@ -52,7 +51,7 @@ export interface ImagemRecebidaNoChat {
 
 export interface PerguntaDoUsuario {
   texto: string;
-  imagens?: readonly ImagemRecebidaNoChat[];
+  anexos?: readonly AnexoRecebidoNoChat[];
   /** De onde veio a pergunta, quando não foi digitada (ex.: "escuta"); vai junto na mensagem. */
   origem?: OrigemDaPergunta;
   /** Os endereços das prévias ao vivo abertas no canvas agora; vão só na mensagem deste turno ao Claude. */
@@ -116,20 +115,22 @@ export class ServicoDeChat {
   async perguntar(pergunta: PerguntaDoUsuario): Promise<PerguntaEnviada> {
     const { repositorio, execucoes, anexos, gerarId, agora } = this.dependencias;
     const conversa = repositorio.conversa();
-    const imagensRecebidas = pergunta.imagens ?? [];
+    const anexosRecebidos = pergunta.anexos ?? [];
 
-    const anexosDaPergunta = imagensRecebidas.map((imagem) => this.validarImagem(imagem, gerarId()));
-    const imagens: ImagemDaMensagem[] = anexosDaPergunta.map((anexo) => ({
+    const anexosDaPergunta = anexosRecebidos.map((recebido) => this.validarAnexo(recebido, gerarId()));
+    const anexosDaMensagem = anexosDaPergunta.map((anexo) => ({
       arquivo: anexo.arquivo,
       nome: anexo.nome,
       tipoDeMidia: anexo.tipoDeMidia,
+      categoria: anexo.categoria,
+      tamanhoEmBytes: anexo.tamanhoEmBytes,
     }));
     const mensagemId = gerarId();
     const inicio = conversa.perguntar({
       mensagemDoUsuarioId: gerarId(),
       mensagemDoClaudeId: mensagemId,
       texto: pergunta.texto,
-      imagens,
+      anexos: anexosDaMensagem,
       agora: agora(),
       ...(pergunta.origem === undefined ? {} : { origem: pergunta.origem }),
     });
@@ -143,7 +144,7 @@ export class ServicoDeChat {
 
     try {
       for (const [indice, anexo] of anexosDaPergunta.entries()) {
-        await anexos.guardar(ID_DO_CHAT, anexo, imagensRecebidas[indice]?.conteudo ?? new Uint8Array());
+        await anexos.guardar(ID_DO_CHAT, anexo, anexosRecebidos[indice]?.conteudo ?? new Uint8Array());
       }
       await repositorio.salvar(conversa);
     } catch (erro) {
@@ -156,7 +157,7 @@ export class ServicoDeChat {
     const conclusao = this.responder(
       conversa,
       mensagemId,
-      imagens,
+      anexosDaPergunta,
       preferencias,
       alteracoesAutorizadas,
       sinal,
@@ -243,7 +244,7 @@ export class ServicoDeChat {
   private async responder(
     conversa: ConversaDoChat,
     mensagemId: string,
-    imagens: readonly ImagemDaMensagem[],
+    anexosDaPergunta: readonly Anexo[],
     preferencias: PreferenciasDoChat,
     alteracoesAutorizadas: boolean,
     sinal: AbortSignal,
@@ -251,6 +252,16 @@ export class ServicoDeChat {
   ): Promise<void> {
     const { motor, repositorio, anexos, agora, pastaDaSessao, pastaDosProjetos, pastaDeArtefatos } = this.dependencias;
     const textoDaPergunta = conversa.perguntaEmAndamento?.texto ?? "";
+    const anexosDoMotor: AnexoDaPergunta[] = anexosDaPergunta.map((anexo) => ({
+      caminho: anexos.caminhoDe(ID_DO_CHAT, anexo.arquivo),
+      nome: anexo.nome,
+      categoria: anexo.categoria,
+      tipoDeMidia: anexo.tipoDeMidia,
+      rotulo: anexo.rotulo,
+      tamanhoEmBytes: anexo.tamanhoEmBytes,
+      caminhoDoTexto: anexos.caminhoDoTextoDe(ID_DO_CHAT, anexo.arquivo),
+      legado: anexo.legado,
+    }));
 
     let projetos: ProjetoDoChat[] = [];
     let orquestradores: OrquestradorExistente[] = [];
@@ -265,23 +276,24 @@ export class ServicoDeChat {
         {
           sessaoId: conversa.sessaoId,
           sessaoIniciada: conversa.sessaoIniciada,
-          mensagem: mensagemParaOChat(textoDaPergunta, {
-            agora: agora(),
-            pastaDosProjetos,
-            projetos: contexto.projetos,
-            orquestradores: contexto.orquestradores,
-            subagentesProntos: contexto.subagentesProntos,
-            alteracoesAutorizadas,
-            pastaDeArtefatos,
-            permitirArtefatosOnline: preferencias.permitirArtefatosOnline,
-            previasAbertas,
-          }),
+          mensagem: mensagemParaOChat(
+            textoDaPergunta,
+            {
+              agora: agora(),
+              pastaDosProjetos,
+              projetos: contexto.projetos,
+              orquestradores: contexto.orquestradores,
+              subagentesProntos: contexto.subagentesProntos,
+              alteracoesAutorizadas,
+              pastaDeArtefatos,
+              permitirArtefatosOnline: preferencias.permitirArtefatosOnline,
+              previasAbertas,
+            },
+            anexosDoMotor,
+          ),
           instrucoes: instrucoesDoChat(),
-          imagens: imagens.map((imagem) => ({
-            caminho: anexos.caminhoDe(ID_DO_CHAT, imagem.arquivo),
-            tipoDeMidia: imagem.tipoDeMidia,
-          })),
-          pastaDasImagens: imagens.length > 0 ? anexos.pastaDe(ID_DO_CHAT) : null,
+          anexos: anexosDoMotor,
+          pastaDosAnexos: anexosDoMotor.length > 0 ? anexos.pastaDe(ID_DO_CHAT) : null,
           pastaDaSessao,
           pastaDosProjetos,
           pastaDeArtefatos,
@@ -387,21 +399,21 @@ export class ServicoDeChat {
     }
   }
 
-  private validarImagem(imagem: ImagemRecebidaNoChat, id: string): Anexo {
-    const nome = imagem.nome.trim().slice(0, TAMANHO_MAXIMO_DO_NOME_DA_IMAGEM) || "imagem";
-    if (!ehTipoDeImagem(imagem.tipoDeMidia)) {
-      throw new ErroDoChat("dados_invalidos", "Só dá para anexar imagens PNG, JPEG, GIF ou WebP.");
+  /** As regras do anexo são as do núcleo compartilhado (`Anexo`): aqui só vira o erro do chat. */
+  private validarAnexo(recebido: AnexoRecebidoNoChat, id: string): Anexo {
+    try {
+      return Anexo.de({
+        id,
+        nome: recebido.nome,
+        tipoDeMidia: recebido.tipoDeMidia,
+        tamanhoEmBytes: recebido.conteudo.byteLength,
+      });
+    } catch (erro) {
+      if (erro instanceof ErroDeOrquestracao) {
+        throw new ErroDoChat("dados_invalidos", erro.message);
+      }
+      throw erro;
     }
-    if (imagem.conteudo.byteLength <= 0) {
-      throw new ErroDoChat("dados_invalidos", `A imagem "${nome}" está vazia.`);
-    }
-    if (imagem.conteudo.byteLength > TAMANHO_MAXIMO_DA_IMAGEM) {
-      throw new ErroDoChat(
-        "dados_invalidos",
-        `A imagem "${nome}" passa de ${TAMANHO_MAXIMO_DA_IMAGEM / 1024 / 1024} MB, o limite do Claude por imagem.`,
-      );
-    }
-    return Anexo.de({ id, nome, tipoDeMidia: imagem.tipoDeMidia, tamanhoEmBytes: imagem.conteudo.byteLength });
   }
 
   private publicar(evento: EventoDoChat): void {
