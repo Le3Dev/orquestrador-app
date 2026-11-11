@@ -7,12 +7,14 @@ import {
   comPosicoes,
   ehFechavelEmGrupo,
   ehNota,
+  fecharPreviasDoAgente,
   idDoBixinho,
   idDoNoDaNota,
   janelaVisivel,
   ladoDoBixinho,
   layoutDosNos,
   limparBixinhos,
+  marcarPreviasTocadas,
   mesmasLigacoes,
   minimizarOuRestaurar,
   minimizarOuRestaurarTelas,
@@ -22,10 +24,12 @@ import {
   novaPrevia,
   novoNoDeArtefato,
   novoShell,
+  nosDoLayout,
   novoTerminal,
   outrasTelas,
   posicaoDaPreviaDoTerminal,
   posicaoDoTerminalNovo,
+  previasAbertasDoOrquestrador,
   reacomodarBixinhos,
   reaproveitarArestas,
   resumirGrupo,
@@ -963,5 +967,132 @@ describe("seleção e ações do grupo", () => {
     });
     expect(resumirGrupo([selecionado(minimizarOuRestaurar(nota))]).todasMinimizadas).toBe(true);
     expect(resumirGrupo([selecionado(shell)]).todasMinimizadas).toBe(false);
+  });
+});
+
+describe("prévias que o agente abriu", () => {
+  const INICIO_DO_TURNO = 10_000;
+  const doAgente = (id: string, url: string, extras: Partial<Parameters<typeof novaPrevia>[2]> = {}, orquestradorId = "o1") =>
+    novaPrevia(id, { x: 0, y: 0 }, { url, orquestradorId, abertaPeloAgente: true, abertaEm: 5_000, ...extras });
+  const doUsuario = (id: string, url: string, orquestradorId = "o1") =>
+    novaPrevia(id, { x: 0, y: 0 }, { url, orquestradorId });
+  const ids = (nos: NoDoCanvas[]) => nos.map((no) => no.id);
+
+  it("a prévia do usuário nasce sem os campos de origem, e a do agente os leva", () => {
+    expect(doUsuario("p1", "http://localhost:5173").data).toEqual({
+      previaId: "p1",
+      url: "http://localhost:5173",
+      orquestradorId: "o1",
+      minimizada: false,
+      alturaAberta: expect.any(Number),
+    });
+    expect(doAgente("p2", "http://localhost:5173").data).toMatchObject({ abertaPeloAgente: true, abertaEm: 5_000 });
+  });
+
+  it("o pedido do agente (previasParaFechar) fecha só a prévia dele com aquele endereço", () => {
+    const nos = [
+      doAgente("p1", "http://localhost:5173"),
+      doUsuario("p2", "http://localhost:5173"),
+      doAgente("p3", "http://localhost:3000"),
+      doAgente("p4", "http://localhost:5173", {}, "o2"),
+    ];
+
+    expect(ids(fecharPreviasDoAgente(nos, "o1", { enderecos: ["http://localhost:5173"] }))).toEqual([
+      "previa:p2",
+      "previa:p3",
+      "previa:p4",
+    ]);
+  });
+
+  it("a prévia tocada pelo usuário não fecha, nem a pedido do agente nem pela rede de segurança", () => {
+    const nos = [doAgente("p1", "http://localhost:5173", { tocadaPeloUsuario: true })];
+
+    expect(fecharPreviasDoAgente(nos, "o1", { enderecos: ["http://localhost:5173"] })).toBe(nos);
+    expect(
+      fecharPreviasDoAgente(nos, "o1", { doTurno: { iniciadoEm: INICIO_DO_TURNO, citados: [] } }),
+    ).toBe(nos);
+  });
+
+  it("rede de segurança: fecha as abertas antes do turno que o agente não citou de novo", () => {
+    const nos = [
+      doAgente("antiga", "http://localhost:5173"),
+      doAgente("citada", "http://localhost:3000"),
+      doAgente("deste-turno", "http://localhost:4000", { abertaEm: INICIO_DO_TURNO + 1 }),
+      doUsuario("do-usuario", "http://localhost:6000"),
+    ];
+
+    const restantes = fecharPreviasDoAgente(nos, "o1", {
+      doTurno: { iniciadoEm: INICIO_DO_TURNO, citados: ["http://localhost:3000"] },
+    });
+
+    expect(ids(restantes)).toEqual(["previa:citada", "previa:deste-turno", "previa:do-usuario"]);
+  });
+
+  it("sem a hora de abertura (layout salvo antes do campo), conta como aberta antes do turno", () => {
+    const nos = [doAgente("p1", "http://localhost:5173", { abertaEm: undefined })];
+
+    expect(
+      ids(fecharPreviasDoAgente(nos, "o1", { doTurno: { iniciadoEm: INICIO_DO_TURNO, citados: [] } })),
+    ).toEqual([]);
+  });
+
+  it("não fecha prévias de outro Orquestrador nem mexe no array quando nada fecha", () => {
+    const nos = [doAgente("p1", "http://localhost:5173", {}, "o2"), doUsuario("p2", "http://localhost:3000")];
+
+    expect(fecharPreviasDoAgente(nos, "o1", { doTurno: { iniciadoEm: INICIO_DO_TURNO, citados: [] } })).toBe(nos);
+    expect(fecharPreviasDoAgente(nos, "o1", {})).toBe(nos);
+  });
+
+  it("tocar marca só a prévia do agente pedida, e o mesmo array quando nada muda", () => {
+    const nos = [doAgente("p1", "http://localhost:5173"), doUsuario("p2", "http://localhost:3000")];
+
+    const tocados = marcarPreviasTocadas(nos, ["previa:p1", "previa:p2"]);
+
+    expect(tocados[0]?.data).toMatchObject({ tocadaPeloUsuario: true });
+    expect(tocados[1]).toBe(nos[1]);
+    expect(marcarPreviasTocadas(tocados, ["previa:p1"])).toBe(tocados);
+  });
+
+  it("as marcas sobrevivem ao layout salvo, e o layout sem elas continua válido", () => {
+    const nos = [
+      doAgente("p1", "http://localhost:5173", { tocadaPeloUsuario: true }),
+      doUsuario("p2", "http://localhost:3000"),
+    ];
+
+    const layout = layoutDosNos(nos, null);
+
+    expect(layout.previas["p1"]).toMatchObject({ abertaPeloAgente: true, abertaEm: 5_000, tocadaPeloUsuario: true });
+    expect(layout.previas["p2"]).not.toHaveProperty("abertaPeloAgente");
+    const refeitos = nosDoLayout(layout);
+    expect(refeitos.find((no) => no.id === "previa:p1")?.data).toMatchObject({
+      abertaPeloAgente: true,
+      abertaEm: 5_000,
+      tocadaPeloUsuario: true,
+    });
+    expect(refeitos.find((no) => no.id === "previa:p2")?.data).not.toHaveProperty("abertaPeloAgente");
+  });
+
+  describe("previasAbertas do pedido", () => {
+    it("lista os endereços das prévias deste Orquestrador, sem vazios nem repetidos", () => {
+      const nos = [
+        doUsuario("p1", "http://localhost:5173"),
+        doAgente("p2", "http://localhost:5173"),
+        doUsuario("p3", ""),
+        doUsuario("p4", "http://localhost:3000"),
+        doUsuario("p5", "http://localhost:9999", "o2"),
+      ];
+
+      expect(previasAbertasDoOrquestrador(nos, "o1")).toEqual(["http://localhost:5173", "http://localhost:3000"]);
+    });
+
+    it("manda no máximo 10", () => {
+      const nos = Array.from({ length: 14 }, (_, indice) => doUsuario(`p${indice}`, `http://localhost:${4000 + indice}`));
+
+      expect(previasAbertasDoOrquestrador(nos, "o1")).toHaveLength(10);
+    });
+
+    it("sem prévias, lista vazia", () => {
+      expect(previasAbertasDoOrquestrador([novoTerminal("o1", { x: 0, y: 0 }, 600, 500)], "o1")).toEqual([]);
+    });
   });
 });

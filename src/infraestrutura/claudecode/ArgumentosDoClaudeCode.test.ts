@@ -50,8 +50,8 @@ function pedido(
 ): PedidoDeTurno {
   return {
     orquestradorId: "o1",
-    imagens: [],
-    pastaDasImagens: null,
+    anexos: [],
+    pastaDosAnexos: null,
     pastaDeArtefatos: PASTA_DE_ARTEFATOS,
     instrucoes: null,
     revogarInstrucoesAnteriores: false,
@@ -277,14 +277,46 @@ describe("montarArgumentos", () => {
     expect(pastasLiberadas(argumentos)).toEqual([PASTA_DE_ARTEFATOS]);
   });
 
-  it("libera a pasta das imagens para os subagentes quando há anexos", () => {
+  it("libera a pasta dos anexos para os agentes quando há imagens", () => {
     const comImagens: PedidoDeTurno = {
       ...pedido(false),
-      imagens: [{ caminho: "C:/dados/anexos/o1/a.png", tipoDeMidia: "image/png" }],
-      pastaDasImagens: "C:/dados/anexos/o1",
+      anexos: [
+        {
+          caminho: "C:/dados/anexos/o1/a.png",
+          nome: "a.png",
+          categoria: "imagem",
+          tipoDeMidia: "image/png",
+          rotulo: "Imagem",
+          tamanhoEmBytes: 10,
+          caminhoDoTexto: null,
+          legado: false,
+        },
+      ],
+      pastaDosAnexos: "C:/dados/anexos/o1",
     };
 
     expect(pastasLiberadas(montarArgumentos(comImagens, arquivos))).toEqual([PASTA_DE_ARTEFATOS, "C:/dados/anexos/o1"]);
+  });
+
+  it("libera a pasta dos anexos também quando só há documentos", () => {
+    const comDocumento: PedidoDeTurno = {
+      ...pedido(false),
+      anexos: [
+        {
+          caminho: "C:/dados/anexos/o1/d.pdf",
+          nome: "relatorio.pdf",
+          categoria: "documento",
+          tipoDeMidia: "application/pdf",
+          rotulo: "PDF",
+          tamanhoEmBytes: 10,
+          caminhoDoTexto: null,
+          legado: false,
+        },
+      ],
+      pastaDosAnexos: "C:/dados/anexos/o1",
+    };
+
+    expect(pastasLiberadas(montarArgumentos(comDocumento, arquivos))).toEqual([PASTA_DE_ARTEFATOS, "C:/dados/anexos/o1"]);
   });
 
   it("no planejamento só libera leitura no projeto, mesmo no nível mais permissivo", () => {

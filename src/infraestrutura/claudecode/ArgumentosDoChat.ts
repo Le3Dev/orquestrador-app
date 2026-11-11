@@ -99,7 +99,8 @@ export interface ArquivosDoChat {
  * Linha de comando do `claude -p` para uma pergunta do chat rápido.
  *
  * Mesmo desenho dos turnos dos Orquestradores: a mensagem vai pelo stdin em
- * `stream-json` (texto e imagens), as instruções em arquivo. A diferença é o
+ * `stream-json` (texto e imagens; os documentos vão pelo caminho, na pasta
+ * liberada por `--add-dir`), as instruções em arquivo. A diferença é o
  * `--include-partial-messages`, que entrega a resposta em pedaços enquanto é
  * gerada.
  *
@@ -146,7 +147,7 @@ export function montarArgumentosDoChat(pergunta: PerguntaAoMotorDeChat, arquivos
     pergunta.pastaDosProjetos,
     "--add-dir",
     pergunta.pastaDeArtefatos,
-    ...(pergunta.imagens.length > 0 && pergunta.pastaDasImagens !== null ? ["--add-dir", pergunta.pastaDasImagens] : []),
+    ...(pergunta.anexos.length > 0 && pergunta.pastaDosAnexos !== null ? ["--add-dir", pergunta.pastaDosAnexos] : []),
     ...(pergunta.sessaoIniciada ? ["--resume", pergunta.sessaoId] : ["--session-id", pergunta.sessaoId]),
     "--model",
     pergunta.modelo,

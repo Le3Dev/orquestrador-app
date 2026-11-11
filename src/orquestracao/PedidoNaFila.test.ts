@@ -87,4 +87,17 @@ describe("PedidoNaFila", () => {
     // Gravado antes dos itens ligados: nenhum.
     expect(PedidoNaFila.reconstituir({ id: "p2", texto: "oi", modo: "execucao", enfileiradoEm: "2026-11-05T10:00:00.000Z" }).itensLigados).toEqual([]);
   });
+
+  it("congela as prévias abertas, as leva no paraDados e no reconstituir, e sem elas o campo nem aparece", () => {
+    const abertas = ["http://localhost:5173"];
+    const pedido = PedidoNaFila.criar({ id: "p1", texto: "oi", modo: "execucao", enfileiradoEm, previasAbertas: abertas });
+    abertas.push("http://localhost:4173");
+
+    expect(pedido.previasAbertas).toEqual(["http://localhost:5173"]);
+    const dados = pedido.paraDados();
+    expect(dados.previasAbertas).toEqual(["http://localhost:5173"]);
+    expect(PedidoNaFila.reconstituir(dados).paraDados()).toEqual(dados);
+    expect(PedidoNaFila.criar({ id: "p2", texto: "oi", modo: "execucao", enfileiradoEm }).paraDados()).not.toHaveProperty("previasAbertas");
+    expect(PedidoNaFila.reconstituir({ id: "p3", texto: "oi", modo: "execucao", enfileiradoEm: "2026-11-05T10:00:00.000Z" }).previasAbertas).toEqual([]);
+  });
 });

@@ -1,5 +1,6 @@
 import {
   abrirPreviaSozinha,
+  eventoAoVivo,
   enderecoCurto,
   enderecoDigitado,
   enderecosParaPrevia,
@@ -114,5 +115,15 @@ describe("abrirPreviaSozinha", () => {
 
   it("hora inválida não abre", () => {
     expect(abrirPreviaSozinha({ url: "http://localhost:4173", em: "ontem" }, agora, origem)).toBe(false);
+  });
+});
+
+describe("eventoAoVivo", () => {
+  const agora = Date.parse("2026-11-06T15:30:00Z");
+
+  it("vale para o evento recente e não para o histórico antigo nem para hora inválida", () => {
+    expect(eventoAoVivo("2026-11-06T15:29:30Z", agora)).toBe(true);
+    expect(eventoAoVivo("2026-11-06T15:20:00Z", agora)).toBe(false);
+    expect(eventoAoVivo("ontem", agora)).toBe(false);
   });
 });

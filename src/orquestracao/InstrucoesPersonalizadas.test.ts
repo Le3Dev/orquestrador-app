@@ -170,13 +170,31 @@ describe("mensagemParaOOrquestrador com instruções personalizadas", () => {
     expect(texto.indexOf("- Permissões:")).toBeLessThan(texto.indexOf("<instrucoes-do-usuario>"));
   });
 
-  it("vale também no planejamento e depois das imagens", () => {
-    const texto = mensagemParaOOrquestrador("planeje", configuracao, ["/tmp/a.png"], "planejamento", null, {
-      texto: "Use tabelas.",
-      origem: "padrao",
-    });
+  it("vale também no planejamento e depois das imagens e dos documentos anexados", () => {
+    const anexo = {
+      caminho: "/tmp/a.png",
+      nome: "a.png",
+      categoria: "imagem" as const,
+      tipoDeMidia: "image/png",
+      rotulo: "Imagem",
+      tamanhoEmBytes: 10,
+      caminhoDoTexto: null,
+      legado: false,
+    };
+    const texto = mensagemParaOOrquestrador(
+      "planeje",
+      configuracao,
+      [anexo, { ...anexo, caminho: "/tmp/b.pdf", nome: "b.pdf", categoria: "documento", tipoDeMidia: "application/pdf", rotulo: "PDF" }],
+      "planejamento",
+      null,
+      {
+        texto: "Use tabelas.",
+        origem: "padrao",
+      },
+    );
     expect(texto).toContain("- Modo: PLANEJAMENTO.");
     expect(texto.indexOf("- /tmp/a.png")).toBeLessThan(texto.indexOf("<instrucoes-do-usuario>"));
+    expect(texto.indexOf("- b.pdf (PDF, 10 B): /tmp/b.pdf")).toBeLessThan(texto.indexOf("<instrucoes-do-usuario>"));
     expect(texto).toContain("Use tabelas.");
   });
 

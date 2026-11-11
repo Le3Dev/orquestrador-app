@@ -54,7 +54,7 @@ describe("RepositorioDoChatEmArquivo", () => {
     const repositorio = await RepositorioDoChatEmArquivo.abrir(pasta, gerarSessao);
     const conversa = repositorio.conversa();
     repositorio.anexarEvento(
-      conversa.perguntar({ mensagemDoUsuarioId: "u1", mensagemDoClaudeId: "c1", texto: "oi", imagens: [], agora: new Date() }),
+      conversa.perguntar({ mensagemDoUsuarioId: "u1", mensagemDoClaudeId: "c1", texto: "oi", anexos: [], agora: new Date() }),
     );
     repositorio.anexarEvento({ tipo: "uso_da_cota", janelas: [{ nome: "5 horas", utilizacao: 0.2, renovaEm: null, situacao: "allowed" }] });
     repositorio.anexarEvento(conversa.concluir("olá", [], [], uso));
@@ -96,7 +96,7 @@ describe("RepositorioDoChatEmArquivo", () => {
     await repositorio.salvarPreferencias(repositorio.preferencias().com({ esforco: "baixo" }));
     const conversa = repositorio.conversa();
     repositorio.anexarEvento(
-      conversa.perguntar({ mensagemDoUsuarioId: "u1", mensagemDoClaudeId: "c1", texto: "oi", imagens: [], agora: new Date() }),
+      conversa.perguntar({ mensagemDoUsuarioId: "u1", mensagemDoClaudeId: "c1", texto: "oi", anexos: [], agora: new Date() }),
     );
     repositorio.anexarEvento(conversa.concluir("olá", [], [], uso));
     await repositorio.salvar(conversa);
@@ -122,7 +122,7 @@ describe("RepositorioDoChatEmArquivo", () => {
     const repositorio = await RepositorioDoChatEmArquivo.abrir(pasta, gerarSessao);
     const conversa = repositorio.conversa();
     repositorio.anexarEvento(
-      conversa.perguntar({ mensagemDoUsuarioId: "u1", mensagemDoClaudeId: "c1", texto: "rode os testes", imagens: [], agora: new Date() }),
+      conversa.perguntar({ mensagemDoUsuarioId: "u1", mensagemDoClaudeId: "c1", texto: "rode os testes", anexos: [], agora: new Date() }),
     );
     repositorio.anexarEvento(autorizar(conversa));
     repositorio.anexarEvento(conversa.concluir("Preciso da autorização.", [], [], uso, { acao: "rodar_comando", detalhe: "npm test" }));

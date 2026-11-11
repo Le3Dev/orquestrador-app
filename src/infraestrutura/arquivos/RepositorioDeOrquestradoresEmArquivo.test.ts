@@ -205,6 +205,40 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
       expect(existsSync(path.join(pastaDo("antigo"), "orquestrador.ilegivel.json"))).toBe(false);
     });
 
+    it("reabre turnos com anexos: a imagem gravada sem categoria vale imagem; o documento mantém a dele", async () => {
+      const antigo = arquivoAntigo();
+      const [turno] = antigo.turnos as Record<string, unknown>[];
+      await gravarArquivo(
+        "antigo",
+        JSON.stringify({
+          ...antigo,
+          turnos: [
+            {
+              ...turno,
+              anexos: [
+                { id: "a1", nome: "tela.png", tipoDeMidia: "image/png", tamanhoEmBytes: 10, arquivo: "a1.png" },
+                {
+                  id: "d1",
+                  nome: "relatorio.pdf",
+                  tipoDeMidia: "application/pdf",
+                  tamanhoEmBytes: 20,
+                  arquivo: "d1.pdf",
+                  categoria: "documento",
+                },
+              ],
+            },
+          ],
+        }),
+      );
+
+      const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+
+      expect(repositorio.buscarPorId("antigo")?.paraDados().turnos[0]?.anexos).toEqual([
+        { id: "a1", nome: "tela.png", tipoDeMidia: "image/png", tamanhoEmBytes: 10, arquivo: "a1.png", categoria: "imagem" },
+        { id: "d1", nome: "relatorio.pdf", tipoDeMidia: "application/pdf", tamanhoEmBytes: 20, arquivo: "d1.pdf", categoria: "documento" },
+      ]);
+    });
+
     it("preserva a opção de artefatos online ligada ao reabrir", async () => {
       const antigo = arquivoAntigo();
       await gravarArquivo(

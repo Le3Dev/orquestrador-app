@@ -1,5 +1,5 @@
 import { copiarPergunta, PerguntaDoApp } from "../perguntas/PerguntaDoApp";
-import { Anexo, MAXIMO_DE_IMAGENS_POR_MENSAGEM } from "./Anexo";
+import { Anexo, problemaDosAnexosDaMensagem } from "./Anexo";
 import {
   AlteracoesDaConfiguracao,
   ConfiguracaoDoOrquestrador,
@@ -424,11 +424,9 @@ export class Orquestrador {
         `A mensagem deve ter até ${TAMANHO_MAXIMO_DA_MENSAGEM} caracteres.`,
       );
     }
-    if (anexos.length > MAXIMO_DE_IMAGENS_POR_MENSAGEM) {
-      throw new ErroDeOrquestracao(
-        "dados_invalidos",
-        `Anexe até ${MAXIMO_DE_IMAGENS_POR_MENSAGEM} imagens por mensagem.`,
-      );
+    const problemaDosAnexos = problemaDosAnexosDaMensagem(anexos);
+    if (problemaDosAnexos !== null) {
+      throw new ErroDeOrquestracao("dados_invalidos", problemaDosAnexos);
     }
     if (this.turnoEmAndamento !== null) {
       throw new ErroDeOrquestracao(
@@ -493,6 +491,11 @@ export class Orquestrador {
    *
    * `perguntas`: as perguntas com opções que o Orquestrador fez na resposta
    * (blocos ```pergunta-do-app), já fora do texto.
+   *
+   * `previasParaFechar`: os endereços das prévias ao vivo que ele pediu para
+   * fechar (bloco ```previa-do-app), já fora do texto. Só vão no evento, para a
+   * tela agir na hora: não ficam no turno, para reler o histórico não fechar
+   * prévias de novo.
    */
   concluirTurno(
     turnoId: string,
@@ -501,6 +504,7 @@ export class Orquestrador {
     agora: Date,
     planoProposto = false,
     perguntas: readonly PerguntaDoApp[] = [],
+    previasParaFechar: readonly string[] = [],
   ): EventoDeOrquestracao {
     const turno = this.turnoAtivo(turnoId);
     turno.concluir(resposta, uso, agora, planoProposto, perguntas);
@@ -511,6 +515,7 @@ export class Orquestrador {
       uso,
       planoPendente: turno.planoPendente,
       perguntas: turno.perguntas.map(copiarPergunta),
+      ...(previasParaFechar.length === 0 ? {} : { previasParaFechar: [...previasParaFechar] }),
     };
   }
 

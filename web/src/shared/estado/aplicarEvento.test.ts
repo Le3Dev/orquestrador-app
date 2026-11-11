@@ -169,8 +169,15 @@ describe("aplicarEvento", () => {
     ]);
   });
 
-  it("guarda as imagens do pedido e a hora da última atividade", () => {
-    const anexo = { id: "a1", nome: "tela.png", tipoDeMidia: "image/png" as const, tamanhoEmBytes: 10, arquivo: "a1.png" };
+  it("guarda os anexos do pedido e a hora da última atividade", () => {
+    const anexo = {
+      id: "a1",
+      nome: "tela.png",
+      tipoDeMidia: "image/png",
+      tamanhoEmBytes: 10,
+      arquivo: "a1.png",
+      categoria: "imagem" as const,
+    };
     const estado = reproduzir(
       registrar([
         { tipo: "turno_iniciado", turnoId: "t1", texto: "veja", configuracao, anexos: [anexo] },
@@ -183,7 +190,37 @@ describe("aplicarEvento", () => {
     expect(turno?.ultimaAtividadeEm).toBe("2026-10-28T12:00:01Z");
   });
 
-  it("lê pedidos gravados antes de existirem imagens", () => {
+  it("guarda o anexo de documento do pedido com a categoria e o tipo que o servidor gravou", () => {
+    const documento = {
+      id: "a2",
+      nome: "Relatório 2026.pdf",
+      tipoDeMidia: "application/pdf",
+      tamanhoEmBytes: 2 * 1024 * 1024,
+      arquivo: "a2.pdf",
+      categoria: "documento" as const,
+    };
+    const imagem = { id: "a3", nome: "tela.png", tipoDeMidia: "image/png", tamanhoEmBytes: 10, arquivo: "a3.png", categoria: "imagem" as const };
+    const [turno] = reproduzir(
+      registrar([{ tipo: "turno_iniciado", turnoId: "t1", texto: "resuma", configuracao, anexos: [documento, imagem] }]),
+    ).turnos;
+
+    expect(turno?.anexos).toEqual([documento, imagem]);
+    expect(turno?.anexos[0]?.categoria).toBe("documento");
+  });
+
+  it("lê turno antigo: anexo sem `categoria` segue sem ela (a tela decide pelo tipo) e sem anexos vira lista vazia", () => {
+    const antigo = { id: "a1", nome: "foto.jpg", tipoDeMidia: "image/jpeg", tamanhoEmBytes: 10, arquivo: "a1.jpg" };
+    const [comAnexo] = reproduzir(
+      registrar([{ tipo: "turno_iniciado", turnoId: "t1", texto: "antigo", configuracao, anexos: [antigo] }]),
+    ).turnos;
+    expect(comAnexo?.anexos).toEqual([antigo]);
+    expect(comAnexo?.anexos[0]).not.toHaveProperty("categoria");
+
+    const [semAnexos] = reproduzir(registrar([{ tipo: "turno_iniciado", turnoId: "t1", texto: "antigo", configuracao }])).turnos;
+    expect(semAnexos?.anexos).toEqual([]);
+  });
+
+  it("lê pedidos gravados antes de existirem anexos", () => {
     const [turno] = reproduzir(registrar([{ tipo: "turno_iniciado", turnoId: "t1", texto: "antigo", configuracao }])).turnos;
 
     expect(turno?.anexos).toEqual([]);
@@ -695,22 +732,172 @@ describe("aplicarEvento", () => {
       );
 
       expect(estado.enderecosLocais).toEqual([]);
-      expect(estado.ultimoEnderecoDetectado).toBeNull();
+      expect(estado.ultimoEnderecoDaResposta).toBeNull();
+      expect(estado.ultimoFimDeTurno).toBeNull();
     });
 
-    it("guarda o último servidor anunciado com a sequência e a hora, para a prévia abrir sozinha", () => {
+    it("só o endereço citado na resposta (origem resposta) vira a abertura automática, com a sequência e a hora", () => {
       const eventos = registrar([
         { tipo: "turno_iniciado", turnoId: "t1", texto: "suba o site", configuracao },
-        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173" },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173", origem: "resposta" },
         { tipo: "texto_do_orquestrador", turnoId: "t1", texto: "Pronto." },
       ]);
       const estado = reproduzir(eventos);
 
-      expect(estado.ultimoEnderecoDetectado).toEqual({
+      expect(estado.ultimoEnderecoDaResposta).toEqual({
         url: "http://localhost:5173",
         sequencia: eventos[1]?.sequencia,
         em: eventos[1]?.em,
       });
+      expect(estado.enderecosLocais).toEqual(["http://localhost:5173"]);
+    });
+
+    it("origem ferramenta e a falta de origem só entram na faixa de servidores, sem abertura automática", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "teste a API", configuracao },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:3000", origem: "ferramenta" },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173" },
+        ]),
+      );
+
+      expect(estado.enderecosLocais).toEqual(["http://localhost:3000", "http://localhost:5173"]);
+      expect(estado.ultimoEnderecoDaResposta).toBeNull();
+      expect(estado.turnos[0]?.enderecosDaResposta).toBeUndefined();
+    });
+
+    it("guarda a sequência do último anúncio de cada endereço, e só dos que seguem na lista", () => {
+      const eventos = registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "suba", configuracao },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:3000" },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173" },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:3000" },
+      ]);
+      const estado = reproduzir(eventos);
+
+      expect(estado.sequenciasDosEnderecos).toEqual({
+        "http://localhost:3000": eventos[3]?.sequencia,
+        "http://localhost:5173": eventos[2]?.sequencia,
+      });
+
+      const limpa = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "suba", configuracao },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:3000" },
+          { tipo: "conversa_limpa", turnosAnteriores: 1, planoDescartado: false, worktreeComAlteracoes: false },
+        ]),
+      );
+      expect(limpa.sequenciasDosEnderecos).toEqual({});
+    });
+
+    it("uma ferramenta depois da citação na resposta não apaga a abertura automática", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "suba o site", configuracao },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173", origem: "resposta" },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:3000", origem: "ferramenta" },
+        ]),
+      );
+
+      expect(estado.ultimoEnderecoDaResposta?.url).toBe("http://localhost:5173");
+    });
+  });
+
+  describe("fim do turno e prévias do agente", () => {
+    const uso = { duracaoMs: 1000, tokensDeEntrada: 10, tokensDeSaida: 5, subagentesLancados: 0 };
+
+    it("guarda o fim do turno com o início, os endereços citados na resposta e as prévias a fechar", () => {
+      const eventos = registrar([
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "mostre o painel", configuracao },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173", origem: "resposta" },
+        { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:3000", origem: "ferramenta" },
+        {
+          tipo: "turno_concluido",
+          turnoId: "t1",
+          resposta: "Pronto.",
+          uso,
+          previasParaFechar: ["http://localhost:4000", "javascript:alert(1)"],
+        },
+      ]);
+      const estado = reproduzir(eventos);
+
+      expect(estado.ultimoFimDeTurno).toEqual({
+        sequencia: eventos[3]?.sequencia,
+        em: eventos[3]?.em,
+        iniciadoEm: eventos[0]?.em,
+        enderecosCitados: ["http://localhost:5173"],
+        previasParaFechar: ["http://localhost:4000"],
+      });
+    });
+
+    it("sem o campo previasParaFechar, o turno concluído não pede fechamento de nenhum endereço", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "oi", configuracao },
+          { tipo: "turno_concluido", turnoId: "t1", resposta: "Olá.", uso },
+        ]),
+      );
+
+      expect(estado.ultimoFimDeTurno).toMatchObject({ enderecosCitados: [], previasParaFechar: [] });
+    });
+
+    it("turno cancelado ou falho também termina o turno, sem prévias a fechar", () => {
+      const cancelado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "oi", configuracao },
+          { tipo: "turno_cancelado", turnoId: "t1" },
+        ]),
+      );
+      const falho = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "oi", configuracao },
+          { tipo: "turno_falhou", turnoId: "t1", motivo: "erro" },
+        ]),
+      );
+
+      expect(cancelado.ultimoFimDeTurno?.previasParaFechar).toEqual([]);
+      expect(falho.ultimoFimDeTurno?.sequencia).toBe(2);
+    });
+
+    it("o endereço citado por um turno não vale para o seguinte", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "mostre", configuracao },
+          { tipo: "endereco_local_detectado", turnoId: "t1", url: "http://localhost:5173", origem: "resposta" },
+          { tipo: "turno_concluido", turnoId: "t1", resposta: "Veja.", uso },
+          { tipo: "turno_iniciado", turnoId: "t2", texto: "ajuste", configuracao },
+          { tipo: "turno_concluido", turnoId: "t2", resposta: "Feito.", uso },
+        ]),
+      );
+
+      expect(estado.ultimoFimDeTurno?.enderecosCitados).toEqual([]);
+      expect(estado.turnos[0]?.enderecosDaResposta).toEqual(["http://localhost:5173"]);
+    });
+
+    it("a conversa nova esquece o fim do turno", () => {
+      const estado = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "oi", configuracao },
+          { tipo: "turno_concluido", turnoId: "t1", resposta: "Olá.", uso },
+          { tipo: "conversa_limpa", turnosAnteriores: 1, planoDescartado: false, worktreeComAlteracoes: false },
+        ]),
+      );
+
+      expect(estado.ultimoFimDeTurno).toBeNull();
+    });
+
+    it("o bloco cru das prévias a fechar não aparece no log nem nos textos do orquestrador", () => {
+      const [turno] = reproduzir(
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "feche a prévia", configuracao },
+          { tipo: "texto_do_orquestrador", turnoId: "t1", texto: "```previa-do-app\n{\"fechar\":[\"http://localhost:5173\"]}\n```" },
+          { tipo: "texto_do_orquestrador", turnoId: "t1", texto: "```previa-do-app\n{\"fechar\":[" },
+          { tipo: "texto_do_orquestrador", turnoId: "t1", texto: "Pronto.\n```previa-do-app\n{}\n```" },
+        ]),
+      ).turnos;
+
+      expect(turno?.textosDoOrquestrador).toEqual(["Pronto."]);
+      expect(turno?.log.some((linha) => linha.texto.includes("previa-do-app"))).toBe(false);
     });
   });
 

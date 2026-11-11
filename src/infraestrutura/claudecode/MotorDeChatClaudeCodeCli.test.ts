@@ -50,8 +50,8 @@ function pergunta(alteracoes: Partial<PerguntaAoMotorDeChat> = {}): PerguntaAoMo
     sessaoIniciada: false,
     mensagem: "Qual a versão do Node?",
     instrucoes: "Responda curto.",
-    imagens: [],
-    pastaDasImagens: null,
+    anexos: [],
+    pastaDosAnexos: null,
     pastaDaSessao: path.join(pastaDoTeste, "sessoes", "sessao-chat"),
     pastaDosProjetos: pastaDoTeste,
     pastaDeArtefatos: path.join(pastaDoTeste, "artefatos", "entrada", "chat"),
@@ -94,7 +94,12 @@ describe("MotorDeChatClaudeCodeCli", () => {
     const eventos: EventoDoMotorDeChat[] = [];
 
     const resultado = await new MotorDeChatClaudeCodeCli(fachada, { CLAUDECODE: "1", PATH: "x" }).responder(
-      pergunta({ imagens: [{ caminho: imagem, tipoDeMidia: "image/png" }], pastaDasImagens: pastaDoTeste }),
+      pergunta({
+        anexos: [
+          { caminho: imagem, nome: "a.png", categoria: "imagem", tipoDeMidia: "image/png", rotulo: "Imagem", tamanhoEmBytes: 3, caminhoDoTexto: null, legado: false },
+        ],
+        pastaDosAnexos: pastaDoTeste,
+      }),
       (evento) => eventos.push(evento),
       new AbortController().signal,
     );
@@ -112,6 +117,30 @@ describe("MotorDeChatClaudeCodeCli", () => {
       { type: "text", text: "Qual a versão do Node?" },
       { type: "image", source: { type: "base64", media_type: "image/png", data: "AQID" } },
     ]);
+  });
+
+  it("só as imagens vão inline: o documento fica só no caminho e a pasta dos anexos é liberada", async () => {
+    const fachada = new FachadaFalsa(async (_execucao, aoReceber) => {
+      aoReceber(RESULTADO);
+      return { codigoDeSaida: 0, erroPadrao: "" };
+    });
+    // Nem o arquivo do documento precisa existir: o motor não o lê, só o cita.
+    const documento = path.join(pastaDoTeste, "relatorio.pdf");
+
+    await new MotorDeChatClaudeCodeCli(fachada, { PATH: "x" }).responder(
+      pergunta({
+        anexos: [
+          { caminho: documento, nome: "relatorio.pdf", categoria: "documento", tipoDeMidia: "application/pdf", rotulo: "PDF", tamanhoEmBytes: 9, caminhoDoTexto: null, legado: false },
+        ],
+        pastaDosAnexos: pastaDoTeste,
+      }),
+      () => undefined,
+      new AbortController().signal,
+    );
+
+    const entrada = JSON.parse(fachada.execucao?.entrada ?? "{}") as { message: { content: unknown[] } };
+    expect(entrada.message.content).toEqual([{ type: "text", text: "Qual a versão do Node?" }]);
+    expect(fachada.execucao?.argumentos).toContain(pastaDoTeste);
   });
 
   it("com artefatos online ligados, leva as ferramentas e as variáveis que os habilitam; desligado, não", async () => {

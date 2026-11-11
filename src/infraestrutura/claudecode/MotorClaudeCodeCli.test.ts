@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -58,8 +58,8 @@ function pedido(pastaDeArtefatos: string, nivelDePermissao: NivelDePermissao = "
       quantidadeDeSubagentes: { modo: "automatica", limite: 2 },
       nivelDePermissao,
     }),
-    imagens: [],
-    pastaDasImagens: null,
+    anexos: [],
+    pastaDosAnexos: null,
     pastaDeArtefatos,
     instrucoes: null,
     revogarInstrucoesAnteriores: false,
@@ -158,6 +158,46 @@ describe("MotorClaudeCodeCli e a plataforma", () => {
   });
 });
 
+describe("MotorClaudeCodeCli — anexos", () => {
+  it("só a imagem vai inline; o documento é citado pelo caminho e a pasta dos anexos é liberada", async () => {
+    const pastaDosAnexos = path.join(pastaDoTeste, "anexos", "o1");
+    mkdirSync(pastaDosAnexos, { recursive: true });
+    const imagem = path.join(pastaDosAnexos, "a1.png");
+    writeFileSync(imagem, Buffer.from([1, 2, 3]));
+    const planilha = path.join(pastaDosAnexos, "d1.xlsx");
+    const fachada = new FachadaFalsa();
+
+    await new MotorClaudeCodeCli(fachada).executarTurno(
+      {
+        ...pedido(path.join(pastaDoTeste, "artefatos-anexos")),
+        anexos: [
+          { caminho: imagem, nome: "tela.png", categoria: "imagem", tipoDeMidia: "image/png", rotulo: "Imagem", tamanhoEmBytes: 3, caminhoDoTexto: null, legado: false },
+          {
+            caminho: planilha,
+            nome: "vendas.xlsx",
+            categoria: "documento",
+            tipoDeMidia: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            rotulo: "Excel",
+            tamanhoEmBytes: 300 * 1024,
+            caminhoDoTexto: `${planilha}.txt`,
+            legado: false,
+          },
+        ],
+        pastaDosAnexos,
+      },
+      () => undefined,
+      new AbortController().signal,
+    );
+
+    const entrada = JSON.parse(fachada.gravado?.execucao.entrada ?? "{}") as { message: { content: { type: string; text?: string }[] } };
+    expect(entrada.message.content.map((bloco) => bloco.type)).toEqual(["text", "image"]);
+    const texto = entrada.message.content[0]?.text ?? "";
+    expect(texto).toContain(`- ${imagem}`);
+    expect(texto).toContain(`- vendas.xlsx (Excel, 300 KB): ${planilha} — texto extraído: ${planilha}.txt`);
+    expect(fachada.gravado?.execucao.argumentos).toContain(pastaDosAnexos);
+  });
+});
+
 /** No lugar do processo `claude -p`: guarda o que receberia e responde com um resultado. */
 class FachadaQueGuardaAEntrada {
   execucao: ExecucaoDoClaudeCode | null = null;
@@ -197,8 +237,8 @@ function pedidoComInstrucoes(instrucoes: InstrucoesAplicadas | null, revogarInst
       quantidadeDeSubagentes: { modo: "automatica", limite: 2 },
       nivelDePermissao: "leitura",
     }),
-    imagens: [],
-    pastaDasImagens: null,
+    anexos: [],
+    pastaDosAnexos: null,
     pastaDeArtefatos: path.join(pastaDoTeste, "artefatos-instrucoes"),
     instrucoes,
     revogarInstrucoesAnteriores,
@@ -295,7 +335,11 @@ describe("MotorClaudeCodeCli e os servidores citados", () => {
 
     expect(resultado.sucesso).toBe(true);
     expect(sondados).toEqual(["http://localhost:4173", "http://localhost:9000"]);
-    expect(enderecos(eventos)).toEqual([{ tipo: "endereco_local_detectado", url: "http://localhost:4173" }]);
+    // Citado no comando (ferramenta) e na resposta final: a conferência do comando ainda
+    // roda quando a resposta chega, e o anúncio sai uma vez só, com a origem "resposta".
+    expect(enderecos(eventos)).toEqual([
+      { tipo: "endereco_local_detectado", url: "http://localhost:4173", origem: "resposta" },
+    ]);
   });
 
   it("uma sonda que falha não derruba o turno", async () => {
@@ -312,7 +356,7 @@ describe("MotorClaudeCodeCli e os servidores citados", () => {
 
   it.each<[boolean, unknown[]]>([
     [false, []],
-    [true, [{ tipo: "endereco_local_detectado", url: "http://localhost:8530/health" }]],
+    [true, [{ tipo: "endereco_local_detectado", url: "http://localhost:8530/health", origem: "ferramenta" }]],
   ])("o endereço na saída de um comando só é anunciado se responde (responde: %s)", async (responde, esperado) => {
     const sondados: string[] = [];
     const fachada = new FachadaQueImprimeEndereco();
