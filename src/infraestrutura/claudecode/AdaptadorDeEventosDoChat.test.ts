@@ -490,3 +490,74 @@ describe("AdaptadorDeEventosDoChat — subagentes (ferramenta Agent)", () => {
     });
   });
 });
+
+describe("AdaptadorDeEventosDoChat — modelo mostrado com subagente de outro modelo", () => {
+  const uso = (entrada: number, saida: number) => ({
+    inputTokens: entrada,
+    outputTokens: saida,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+  });
+  const iniciar = (modelo: string) => ({ type: "system", subtype: "init", model: modelo });
+  const doAgentePrincipal = (modelo: string) => ({
+    type: "assistant",
+    parent_tool_use_id: null,
+    message: { model: modelo, content: [{ type: "text", text: "ok" }] },
+  });
+  const doSubagente = (modelo: string) => ({
+    type: "assistant",
+    parent_tool_use_id: "toolu_a",
+    message: { model: modelo, content: [{ type: "text", text: "interno" }] },
+  });
+  // O subagente (sonnet) gera mais saída que o chat (opus).
+  const resultado = {
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    result: "ok",
+    duration_ms: 10,
+    modelUsage: { "claude-opus-5-5": uso(100, 40), "claude-sonnet-5-5": uso(200, 500) },
+  };
+
+  it("mostra o modelo do agente principal, mesmo com o subagente gerando mais saída, e soma os dois", () => {
+    const { adaptador } = traduzirTudo([
+      iniciar("claude-opus-5-5"),
+      doAgentePrincipal("claude-opus-5-5"),
+      doSubagente("claude-sonnet-5-5"),
+      doAgentePrincipal("claude-opus-5-5"),
+      resultado,
+    ]);
+
+    expect(adaptador.resultado).toMatchObject({
+      uso: { tokensDeEntrada: 300, tokensDeSaida: 540, modeloUsado: "claude-opus-5-5" },
+    });
+  });
+
+  it("sem message.model do agente principal, usa o model do system/init", () => {
+    const { adaptador } = traduzirTudo([
+      iniciar("claude-opus-5-5"),
+      doSubagente("claude-sonnet-5-5"),
+      { type: "assistant", parent_tool_use_id: null, message: { model: "<synthetic>", content: [] } },
+      resultado,
+    ]);
+
+    expect(adaptador.resultado).toMatchObject({ uso: { tokensDeSaida: 540, modeloUsado: "claude-opus-5-5" } });
+  });
+
+  it("sem message.model nem init, cai na regra do modelo com maior saída", () => {
+    const { adaptador } = traduzirTudo([doSubagente("claude-sonnet-5-5"), resultado]);
+
+    expect(adaptador.resultado).toMatchObject({ uso: { modeloUsado: "claude-sonnet-5-5" } });
+  });
+
+  it("com um init repetido (ciclo retomado), o modelo do agente principal continua valendo", () => {
+    const { adaptador } = traduzirTudo([
+      iniciar("claude-opus-5-5"),
+      doAgentePrincipal("claude-opus-5-5"),
+      iniciar("claude-opus-5-5"),
+      resultado,
+    ]);
+
+    expect(adaptador.resultado).toMatchObject({ uso: { modeloUsado: "claude-opus-5-5" } });
+  });
+});

@@ -163,6 +163,10 @@ export class AdaptadorDeEventosDoChat {
   /** Soma dos consumos desde o último `result` de cada ciclo, por modelo. */
   private readonly usoDosCiclos = new Map<string, UsoDoModelo>();
   private algumCicloSemDelta = false;
+  /** Modelo do agente principal em `message.model` da última mensagem `assistant` dele. */
+  private modeloDoAgentePrincipal: string | null = null;
+  /** Modelo da sessão informado no `system`/`init`. */
+  private modeloDoInit: string | null = null;
   /** Na ordem em que aconteceram, sem repetir a mesma chamada. */
   private readonly negacoes: Negacao[] = [];
   /** `tool_use_id` → `decision_reason_type` das mensagens `permission_denied`. */
@@ -195,7 +199,11 @@ export class AdaptadorDeEventosDoChat {
         // Os `task_*` e `background_tasks_changed` (comandos e workflows em
         // segundo plano) não têm lugar no chat: só a negação interessa.
         this.registrarMotivoDaNegacao(mensagem);
-        return texto(mensagem, "subtype") === "init" ? [{ tipo: "sessao_aberta" }] : [];
+        if (texto(mensagem, "subtype") !== "init") {
+          return [];
+        }
+        this.modeloDoInit = modeloValido(texto(mensagem, "model")) ?? this.modeloDoInit;
+        return [{ tipo: "sessao_aberta" }];
       case "stream_event":
         return this.traduzirTrecho(mensagem);
       case "assistant":
@@ -229,6 +237,7 @@ export class AdaptadorDeEventosDoChat {
     if (!ehDoAgentePrincipal(mensagem)) {
       return [];
     }
+    this.modeloDoAgentePrincipal = modeloValido(texto(objeto(mensagem, "message"), "model")) ?? this.modeloDoAgentePrincipal;
     return objetos(objeto(mensagem, "message"), "content")
       .filter((bloco) => texto(bloco, "type") === "tool_use")
       .map((bloco): EventoDoMotorDeChat => {
@@ -312,9 +321,14 @@ export class AdaptadorDeEventosDoChat {
     return { autorizacaoPendente, avisos: [...avisos] };
   }
 
+  /**
+   * Tokens e custo somam todos os modelos, subagentes inclusos. O modelo
+   * mostrado é o do agente principal (`message.model`, depois o `init`); só sem
+   * esses dados vale o de maior saída, que com subagentes pode ser o deles.
+   */
   private extrairUso(ultimo: Objeto): UsoDaResposta {
     const porModelo = this.algumCicloSemDelta ? usoDoAcumulado(ultimo) : this.usoDosCiclos;
-    let modeloUsado: string | null = null;
+    let modeloDeMaiorSaida: string | null = null;
     let maiorSaida = -1;
     let tokensDeEntradaTotal = 0;
     let tokensDeSaidaTotal = 0;
@@ -323,16 +337,22 @@ export class AdaptadorDeEventosDoChat {
       tokensDeSaidaTotal += uso.saida;
       if (uso.saida > maiorSaida) {
         maiorSaida = uso.saida;
-        modeloUsado = modelo;
+        modeloDeMaiorSaida = modelo;
       }
     }
     return {
       duracaoMs: numero(ultimo, "duration_ms"),
       tokensDeEntrada: tokensDeEntradaTotal,
       tokensDeSaida: tokensDeSaidaTotal,
-      modeloUsado,
+      modeloUsado: this.modeloDoAgentePrincipal ?? this.modeloDoInit ?? modeloDeMaiorSaida,
     };
   }
+}
+
+/** Ignora vazio e o `<synthetic>` que o Claude Code põe em mensagens que ele mesmo gera. */
+function modeloValido(modelo: string): string | null {
+  const limpo = modelo.trim();
+  return limpo === "" || limpo === "<synthetic>" ? null : limpo;
 }
 
 function tokensDeEntrada(uso: Objeto): number {
