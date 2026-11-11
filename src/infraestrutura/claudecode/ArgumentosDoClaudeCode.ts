@@ -5,7 +5,7 @@ import { NivelDePermissao } from "../../orquestracao/NivelDePermissao";
 import { modeloDoSubagentePronto } from "../../orquestracao/SubagentesProntos";
 
 /** Ferramenta do Claude Code que lança subagentes (aparece como `Task` em versões antigas). */
-const FERRAMENTA_DE_SUBAGENTES = "Agent";
+export const FERRAMENTA_DE_SUBAGENTES = "Agent";
 
 /**
  * Ferramenta dos workflows dinâmicos do esforço `ultracode`: o agente escreve
@@ -100,6 +100,17 @@ export const FERRAMENTA_DE_SKILL = "Skill";
  */
 export function ferramentasDeSkillQuandoPodeEditar(podeEditar: boolean): readonly string[] {
   return podeEditar ? [FERRAMENTA_DE_SKILL] : [];
+}
+
+/**
+ * `Agent` quando a sessão pode editar; nada senão. Mesma regra da `Skill`: um
+ * subagente usa as ferramentas que ele mesmo declara (o `tools` do frontmatter,
+ * como `Bash`) e não consegue pausar para pedir autorização, então só entra
+ * onde essa liberação já seria concedida de qualquer forma. As regras de
+ * `--disallowedTools` continuam valendo dentro do subagente.
+ */
+export function ferramentasDeSubagentesQuandoPodeEditar(podeEditar: boolean): readonly string[] {
+  return podeEditar ? [FERRAMENTA_DE_SUBAGENTES] : [];
 }
 
 /**

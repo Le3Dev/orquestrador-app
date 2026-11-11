@@ -54,8 +54,8 @@ function pergunta(alteracoes: Partial<PerguntaAoMotorDeChat> = {}): PerguntaAoMo
 
 const LEITURA = ["WebSearch", "WebFetch", "Read", "Glob", "Grep"];
 const TODAS = [...LEITURA, "Edit", "Write", "NotebookEdit", "PowerShell", "Bash"];
-/** O que o chat tem com as alterações autorizadas: as dez mais a `Skill`. */
-const TODAS_E_SKILL = [...TODAS, "Skill"];
+/** O que o chat tem com as alterações autorizadas: as dez mais a `Skill` e o `Agent`. */
+const TODAS_E_SKILL = [...TODAS, "Skill", "Agent"];
 
 /** Valores de uma opção variádica: tudo entre ela e a próxima opção. */
 function valoresDe(argumentos: string[], opcao: string): string[] {
@@ -88,12 +88,13 @@ describe("montarArgumentosDoChat", () => {
     expect(valoresDe(argumentos, "--model")).toEqual(["haiku"]);
   });
 
-  it("--tools traz sempre as dez ferramentas, sem Subagentes, e a Skill só com autorização", () => {
+  it("--tools traz sempre as dez ferramentas, e a Skill e o Agent só com autorização", () => {
     for (const alteracoesAutorizadas of [false, true]) {
       const argumentos = montarArgumentosDoChat(pergunta({ alteracoesAutorizadas }), arquivos);
 
       expect(valoresDe(argumentos, "--tools")).toEqual(alteracoesAutorizadas ? TODAS_E_SKILL : TODAS);
-      expect(argumentos).not.toContain("Agent");
+      expect(argumentos.includes("Agent")).toBe(alteracoesAutorizadas);
+      // O chat não tem o executor dos orquestradores: nunca define agentes por conta própria.
       expect(argumentos).not.toContain("--agents");
     }
     expect([...FERRAMENTAS_DO_CHAT]).toEqual(TODAS);
@@ -119,16 +120,27 @@ describe("montarArgumentosDoChat", () => {
     }
   });
 
-  it("com autorização, --allowedTools libera as dez ferramentas e a Skill", () => {
+  it("com autorização, --allowedTools libera as dez ferramentas, a Skill e o Agent", () => {
     const argumentos = montarArgumentosDoChat(pergunta({ alteracoesAutorizadas: true }), arquivos);
 
     expect(valoresDe(argumentos, "--allowedTools")).toEqual(TODAS_E_SKILL);
   });
 
-  it("sem autorização, a Skill não entra em --tools nem em --allowedTools", () => {
+  it("sem autorização, a Skill e o Agent não entram em --tools nem em --allowedTools", () => {
     const argumentos = montarArgumentosDoChat(pergunta({ alteracoesAutorizadas: false }), arquivos);
 
     expect(argumentos).not.toContain("Skill");
+    expect(argumentos).not.toContain("Agent");
+    expect(valoresDe(argumentos, "--tools")).not.toContain("Agent");
+    expect(valoresDe(argumentos, "--allowedTools")).not.toContain("Agent");
+  });
+
+  it("com autorização, o Agent entra nas duas listas e o chat continua sem --agents", () => {
+    const argumentos = montarArgumentosDoChat(pergunta({ alteracoesAutorizadas: true }), arquivos);
+
+    expect(valoresDe(argumentos, "--tools")).toContain("Agent");
+    expect(valoresDe(argumentos, "--allowedTools")).toContain("Agent");
+    expect(argumentos).not.toContain("--agents");
   });
 
   it("nega sempre .env* e o push forçado, com --disallowedTools por último", () => {
@@ -263,7 +275,7 @@ describe("montarArgumentosDoChat", () => {
         arquivos,
       );
 
-      expect(valoresDe(argumentos, "--allowedTools")).toEqual([...TODAS_E_SKILL.slice(0, -1), "Workflow", "Skill"]);
+      expect(valoresDe(argumentos, "--allowedTools")).toEqual([...TODAS, "Workflow", "Skill", "Agent"]);
     });
 
     it("nos outros esforços, o Workflow não aparece", () => {

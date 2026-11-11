@@ -1740,6 +1740,18 @@ describe("ChatRapido", () => {
       expect(screen.getByText(/rodando: npm test…/)).toBeInTheDocument();
     });
 
+    it("a atividade descreve a chamada de um subagente, com e sem detalhe", () => {
+      const { rerender } = renderizar({
+        ...RESPONDENDO,
+        atividade: { mensagemId: "c1", ferramenta: "Agent", detalhe: "adhd-study-coach" },
+      });
+      expect(screen.getByText(/chamando o subagente adhd-study-coach…/)).toBeInTheDocument();
+
+      rerender({ ...RESPONDENDO, atividade: { mensagemId: "c1", ferramenta: "Agent", detalhe: "" } });
+      expect(screen.getByText(/chamando um subagente…/)).toBeInTheDocument();
+      expect(screen.queryByText(/adhd-study-coach/)).not.toBeInTheDocument();
+    });
+
     it("sem autorização não há indicador", () => {
       renderizar();
       expect(screen.queryByRole("group", { name: "Alterações autorizadas" })).not.toBeInTheDocument();

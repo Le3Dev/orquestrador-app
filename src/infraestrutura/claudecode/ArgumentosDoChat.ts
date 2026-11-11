@@ -8,6 +8,7 @@ import {
   type ConfiguracoesDaSessao,
   ferramentasDeArtefatoOnline,
   ferramentasDeSkillQuandoPodeEditar,
+  ferramentasDeSubagentesQuandoPodeEditar,
   ferramentasDoEsforco,
   liberadasComArtefatos,
   nivelDeEsforcoDoClaudeCode,
@@ -31,8 +32,9 @@ export const FERRAMENTAS_DE_COMANDO_DO_CHAT: readonly string[] = ["PowerShell", 
 
 /**
  * Todas as ferramentas que existem na sessão do chat (`--tools`), com ou sem
- * autorização — sem Subagentes. As de edição e comando existem sempre, para
- * que o Claude tente usá-las e a negação vire o pedido de autorização na tela.
+ * autorização. Ficam de fora `Skill` e `Agent` (subagentes), que só entram com
+ * as alterações autorizadas. As de edição e comando existem sempre, para que o
+ * Claude tente usá-las e a negação vire o pedido de autorização na tela.
  */
 export const FERRAMENTAS_DO_CHAT: readonly string[] = [
   ...FERRAMENTAS_DE_LEITURA_DO_CHAT,
@@ -122,6 +124,12 @@ export interface ArquivosDoChat {
  * `allowed-tools` de uma skill libera ferramentas por conta própria, o que
  * burlaria a espera pela autorização.
  *
+ * O `Agent` (subagentes) segue a mesma regra: um subagente usa as ferramentas
+ * que ele mesmo declara (o `tools` do frontmatter, como `Bash`) e não consegue
+ * pausar para pedir autorização. Com ele, o chat chama pelo nome os subagentes
+ * do Claude Code, os de `~/.claude/agents` e os de plugins; o chat não passa
+ * `--agents`, porque não tem o executor dos Orquestradores.
+ *
  * A raiz dos projetos entra em `--add-dir`: leitura sempre e, autorizado,
  * edição. A pasta de artefatos também entra em `--add-dir`, com gravação
  * liberada sempre (`ferramentasLiberadasDoChat`). `--settings` entra sempre,
@@ -135,6 +143,7 @@ export function montarArgumentosDoChat(pergunta: PerguntaAoMotorDeChat, arquivos
   const adicionais = [
     ...ferramentasDoEsforco(pergunta.esforco),
     ...ferramentasDeSkillQuandoPodeEditar(pergunta.alteracoesAutorizadas),
+    ...ferramentasDeSubagentesQuandoPodeEditar(pergunta.alteracoesAutorizadas),
     ...ferramentasDeArtefatoOnline(pergunta.permitirArtefatosOnline),
   ];
   const liberadas = [

@@ -2,6 +2,7 @@ import type { AcaoQuePedeAutorizacao, AutorizacaoPendente } from "../../chat/Men
 import type { EventoDoMotorDeChat, ResultadoDaResposta, UsoDaResposta } from "../../chat/MotorDeChat";
 import { descreverFalha, detalheDaChamada, janelasDaCota, SINAIS_DE_LIMITE_DE_USO } from "./AdaptadorDeEventosDoClaudeCode";
 import { FERRAMENTAS_DE_COMANDO_DO_CHAT, FERRAMENTAS_DE_EDICAO_DO_CHAT } from "./ArgumentosDoChat";
+import { FERRAMENTA_DE_SUBAGENTES } from "./ArgumentosDoClaudeCode";
 
 type Objeto = Record<string, unknown>;
 
@@ -50,7 +51,28 @@ const CAMPO_DO_DETALHE: Readonly<Record<string, string>> = {
   Bash: "command",
 };
 
+/** `nome:nome`: o prefixo do plugin repetindo o nome do subagente. */
+const PREFIXO_REPETIDO = /^([^:]+):\1$/;
+
+/**
+ * Nome do subagente chamado pela ferramenta `Agent`: o `subagent_type` (um
+ * subagente de plugin chega como `plugin:nome`; quando o prefixo só repete o
+ * nome, como em `adhd-study-coach:adhd-study-coach`, fica `nome`) ou, sem ele,
+ * a `description` da chamada.
+ */
+function nomeDoSubagente(entrada: Objeto): string {
+  const tipo = texto(entrada, "subagent_type").trim();
+  const nome = tipo.replace(PREFIXO_REPETIDO, "$1");
+  return nome !== "" ? nome : texto(entrada, "description").trim();
+}
+
 function detalheDaFerramenta(ferramenta: string, entrada: Objeto, tamanho = TAMANHO_DO_DETALHE): string {
+  if (ferramenta === FERRAMENTA_DE_SUBAGENTES) {
+    const nome = nomeDoSubagente(entrada);
+    if (nome !== "") {
+      return nome.slice(0, tamanho);
+    }
+  }
   const campo = CAMPO_DO_DETALHE[ferramenta];
   const valor = campo === undefined ? "" : texto(entrada, campo);
   // O `Workflow` do `ultracode` traz um script inteiro: mostra só o nome dele.
