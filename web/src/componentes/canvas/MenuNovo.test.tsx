@@ -506,4 +506,99 @@ describe("MenuNovo", () => {
       expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     });
   });
+
+  describe("submenus com listas longas", () => {
+    const MUITAS_SKILLS: DadosDaSkill[] = Array.from({ length: 15 }, (_, i) => ({
+      nome: `skill-${i + 1}`,
+      descricao: `Descrição ${i + 1}.`,
+      origem: "usuario" as const,
+      plugin: null,
+    }));
+    const rolagem = vi.fn();
+
+    beforeEach(() => {
+      rolagem.mockClear();
+      // O jsdom não implementa scrollIntoView.
+      Element.prototype.scrollIntoView = rolagem;
+    });
+
+    afterEach(() => {
+      Reflect.deleteProperty(Element.prototype, "scrollIntoView");
+    });
+
+    it("com 15 skills, só a lista rola e o cabeçalho e o rodapé ficam fora dela", () => {
+      montar({ skills: MUITAS_SKILLS });
+      fireEvent.click(botao());
+      fireEvent.click(item("Skills"));
+
+      const submenu = screen.getByRole("menu", { name: "Skills" });
+      expect(submenu).toHaveTextContent("15 skills");
+      const lista = submenu.querySelector(".lista-do-submenu");
+      expect(lista).not.toBeNull();
+      expect(lista).toHaveClass("custom-scrollbar");
+      expect(within(lista as HTMLElement).getAllByRole("menuitem")).toHaveLength(15);
+
+      const titulo = submenu.querySelector(".titulo-do-submenu");
+      expect(titulo).not.toBeNull();
+      expect(lista).not.toContainElement(titulo as HTMLElement);
+      for (const rotulo of ["Explorar marketplace", "Ver todas as skills"]) {
+        const acao = within(submenu).getByRole("menuitem", { name: rotulo });
+        expect(acao).toBeInTheDocument();
+        expect(lista).not.toContainElement(acao);
+      }
+      // O próprio submenu não rola: quem rola é a lista.
+      expect(submenu).not.toHaveClass("lista-do-submenu");
+    });
+
+    it("↑/↓ e End trazem o item focado para a vista, inclusive o rodapé", () => {
+      montar({ skills: MUITAS_SKILLS });
+      fireEvent.click(botao());
+      item("Skills").focus();
+      fireEvent.keyDown(item("Skills"), { key: "ArrowRight" });
+      const itens = within(screen.getByRole("menu", { name: "Skills" })).getAllByRole("menuitem");
+      expect(itens).toHaveLength(17);
+      rolagem.mockClear();
+
+      fireEvent.keyDown(itens[0]!, { key: "ArrowDown" });
+      expect(itens[1]).toHaveFocus();
+      expect(rolagem).toHaveBeenLastCalledWith({ block: "nearest" });
+      expect(rolagem.mock.contexts.at(-1)).toBe(itens[1]);
+
+      fireEvent.keyDown(itens[1]!, { key: "End" });
+      expect(itens[16]).toHaveFocus();
+      expect(itens[16]).toHaveAccessibleName("Ver todas as skills");
+      expect(rolagem.mock.contexts.at(-1)).toBe(itens[16]);
+
+      fireEvent.keyDown(itens[16]!, { key: "ArrowUp" });
+      expect(itens[15]).toHaveFocus();
+      expect(rolagem.mock.contexts.at(-1)).toBe(itens[15]);
+    });
+
+    it("Orquestradores e Subagentes usam a mesma estrutura: lista que rola e rodapé fora dela", () => {
+      const subagentes: DadosDoSubagentePronto[] = Array.from({ length: 12 }, (_, i) => ({
+        nome: `sub-${i + 1}`,
+        descricao: "Faz algo.",
+        prompt: "…",
+        modelo: "haiku",
+      }));
+      const orquestradores = Array.from({ length: 12 }, (_, i) => orquestrador(`o${i}`, "ocioso"));
+      montar({ subagentes, orquestradores });
+      fireEvent.click(botao());
+
+      fireEvent.click(item(/^Subagentes/));
+      const doSubagentes = screen.getByRole("menu", { name: "Subagentes" });
+      const listaDeSubagentes = doSubagentes.querySelector(".lista-do-submenu") as HTMLElement;
+      expect(within(listaDeSubagentes).getAllByRole("menuitem")).toHaveLength(12);
+      for (const rotulo of ["Novo subagente", "Gerenciar subagentes"]) {
+        expect(listaDeSubagentes).not.toContainElement(within(doSubagentes).getByRole("menuitem", { name: rotulo }));
+      }
+
+      fireEvent.click(item(/^Orquestradores/));
+      const doOrquestradores = screen.getByRole("menu", { name: "Orquestradores" });
+      const listaDeOrquestradores = doOrquestradores.querySelector(".lista-do-submenu") as HTMLElement;
+      expect(within(listaDeOrquestradores).getAllByRole("menuitem")).toHaveLength(12);
+      const rodape = within(doOrquestradores).getByText("Escolher leva até a janela dele no canvas.");
+      expect(listaDeOrquestradores).not.toContainElement(rodape);
+    });
+  });
 });

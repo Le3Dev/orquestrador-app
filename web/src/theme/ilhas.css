@@ -144,9 +144,15 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   top: -7px;
   left: calc(100% + 8px);
   width: 340px;
-  max-height: calc(100vh - 160px);
-  overflow-y: auto;
   transform-origin: top left;
+}
+/* Só a lista rola, por dentro: o cabeçalho ("N skills") e o rodapé (ações) ficam sempre à vista.
+ * Cerca de 6 itens de 52 px; o 440 reserva o que vem acima do submenu (ilha, menu e itens antes dele),
+ * o cabeçalho e o rodapé, e o piso de 104 (2 itens) impede a lista de sumir em janela muito baixa. */
+.lista-do-submenu {
+  max-height: clamp(104px, calc(100vh - 440px), 318px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 /* Cobre o vão de 8 px entre o item e o submenu: o mouse atravessa sem fechar. */
 .submenu-novo::before { content: ""; position: absolute; top: 0; bottom: 0; left: -10px; width: 10px; }
@@ -186,8 +192,7 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   font-size: 12px;
   color: var(--muted);
 }
-.acoes-do-submenu { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border); }
-.item-de-lista-do-menu {
+.acoes-do-submenu { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border); }.item-de-lista-do-menu {
   display: flex;
   align-items: center;
   gap: 12px;
