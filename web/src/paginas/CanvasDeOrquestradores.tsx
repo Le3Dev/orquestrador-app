@@ -2075,7 +2075,6 @@ function Canvas() {
                       memoria={servidor.memoria}
                       cota={cota}
                       orquestradores={orquestradoresDasConfiguracoes}
-                      orquestradoresAbertos={orquestradoresParaSkills}
                       pedidosEmAndamento={pedidosEmAndamento}
                       aoSalvarInstrucoes={aoSalvarPainel}
                       topo={topoDasConfiguracoes ?? undefined}

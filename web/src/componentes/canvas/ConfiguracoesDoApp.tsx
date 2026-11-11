@@ -19,9 +19,8 @@ import {
   type OpcaoDoSegmentado,
   SegmentadoDaConfiguracao,
 } from "./ControlesDasConfiguracoes";
-import { ListaDeSkills, type OrquestradorParaSkills } from "./ListaDeSkills";
 
-export type AbaDasConfiguracoes = "padroes" | "sistema" | "conta" | "atualizacao" | "aparencia" | "skills";
+export type AbaDasConfiguracoes = "padroes" | "sistema" | "conta" | "atualizacao" | "aparencia";
 
 /** As abas, na ordem do protótipo. */
 const ABAS: readonly { aba: AbaDasConfiguracoes; rotulo: string }[] = [
@@ -30,10 +29,7 @@ const ABAS: readonly { aba: AbaDasConfiguracoes; rotulo: string }[] = [
   { aba: "conta", rotulo: "Conta" },
   { aba: "atualizacao", rotulo: "Atualização" },
   { aba: "aparencia", rotulo: "Aparência" },
-  { aba: "skills", rotulo: "Skills" },
 ];
-
-const NENHUM_ABERTO: readonly OrquestradorParaSkills[] = [];
 
 /** O topo do painel por padrão: logo abaixo da ilha da direita (topo 16 + altura 42 + respiro de 8). */
 const TOPO_PADRAO = 66;
@@ -53,8 +49,6 @@ interface Props {
   cota?: JanelaDaCota[] | null;
   /** Os orquestradores da tabela de uso da aba Sistema. */
   orquestradores?: { id: string; nome: string; situacao: SituacaoDoOrquestrador }[];
-  /** Os orquestradores abertos no canvas: a aba Skills mostra as skills do projeto de cada um. */
-  orquestradoresAbertos?: readonly OrquestradorParaSkills[];
   /** Pedidos rodando agora: reiniciar para instalar a atualização os cancela. */
   pedidosEmAndamento?: number;
   /** Depois de salvar as instruções gerais: a página recarrega o que depende delas. */
@@ -65,7 +59,7 @@ interface Props {
 
 /**
  * Configurações do app como painel com abas (Padrões, Sistema, Conta,
- * Atualização, Aparência e Skills), à direita da área do canvas: o contêiner é `relative` e o painel
+ * Atualização e Aparência), à direita da área do canvas: o contêiner é `relative` e o painel
  * se posiciona sozinho, com 540 px, abaixo da ilha da direita. Esc e o botão
  * fechar chamam `aoFechar`; o foco vai para a aba ao abrir e volta para quem
  * abriu ao fechar. Fechado, não renderiza nada.
@@ -82,7 +76,6 @@ function PainelAberto({
   memoria = null,
   cota = null,
   orquestradores,
-  orquestradoresAbertos = NENHUM_ABERTO,
   pedidosEmAndamento = 0,
   aoSalvarInstrucoes,
   topo = TOPO_PADRAO,
@@ -242,16 +235,6 @@ function PainelAberto({
             className="configuracoes-do-app-aba"
           >
             <AbaDeAparencia />
-          </div>
-        )}
-        {aba === "skills" && (
-          <div
-            role="tabpanel"
-            id={idDoPainelDaAba("skills")}
-            aria-labelledby={idDaAba("skills")}
-            className="configuracoes-do-app-aba"
-          >
-            <ListaDeSkills orquestradores={orquestradoresAbertos} />
           </div>
         )}
       </div>

@@ -77,7 +77,6 @@ describe("ConfiguracoesDoApp", () => {
   beforeEach(() => {
     esquecerAutorrecuperacao();
     vi.spyOn(api, "lerPreferencias").mockResolvedValue(preferencias());
-    vi.spyOn(api, "lerSkills").mockResolvedValue({ liberadasNoNivel: null, skills: [] });
   });
 
   afterEach(() => {
@@ -93,7 +92,7 @@ describe("ConfiguracoesDoApp", () => {
       expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
     });
 
-    it("aberto: painel posicionado à direita, abaixo da ilha, e seis abas", async () => {
+    it("aberto: painel posicionado à direita, abaixo da ilha, e cinco abas", async () => {
       renderizar();
       await esperar();
 
@@ -101,7 +100,7 @@ describe("ConfiguracoesDoApp", () => {
       expect(painel).toHaveClass("configuracoes-do-app");
       expect(painel).toHaveStyle({ top: "66px" });
       const abas = within(screen.getByRole("tablist", { name: "Seções de Configurações" })).getAllByRole("tab");
-      expect(abas.map((item) => item.textContent)).toEqual(["Padrões", "Sistema", "Conta", "Atualização", "Aparência", "Skills"]);
+      expect(abas.map((item) => item.textContent)).toEqual(["Padrões", "Sistema", "Conta", "Atualização", "Aparência"]);
       expect(aba("Padrões")).toHaveAttribute("aria-selected", "true");
       expect(aba("Padrões")).toHaveAttribute("tabindex", "0");
       expect(aba("Sistema")).toHaveAttribute("tabindex", "-1");
@@ -150,56 +149,14 @@ describe("ConfiguracoesDoApp", () => {
       fireEvent.keyDown(aba("Atualização"), { key: "ArrowRight" });
       expect(aba("Aparência")).toHaveFocus();
       fireEvent.keyDown(aba("Aparência"), { key: "ArrowRight" });
-      expect(aba("Skills")).toHaveFocus();
-      fireEvent.keyDown(aba("Skills"), { key: "ArrowRight" });
       expect(aba("Padrões")).toHaveFocus();
       expect(aba("Padrões")).toHaveAttribute("aria-selected", "true");
       fireEvent.keyDown(aba("Padrões"), { key: "ArrowLeft" });
-      expect(aba("Skills")).toHaveAttribute("aria-selected", "true");
-      fireEvent.keyDown(aba("Skills"), { key: "Home" });
+      expect(aba("Aparência")).toHaveAttribute("aria-selected", "true");
+      fireEvent.keyDown(aba("Aparência"), { key: "Home" });
       expect(aba("Padrões")).toHaveFocus();
       fireEvent.keyDown(aba("Padrões"), { key: "End" });
-      expect(aba("Skills")).toHaveFocus();
-      await esperar();
-    });
-
-    it("a aba Skills mostra a lista de skills dos orquestradores abertos, com o grupo de cada projeto", async () => {
-      const leitura = vi.mocked(api.lerSkills).mockImplementation((orquestradorId) =>
-        Promise.resolve(
-          orquestradorId === undefined
-            ? { liberadasNoNivel: null, skills: [{ nome: "revisor", descricao: "Revisa o diff", origem: "usuario", plugin: null }] }
-            : {
-                liberadasNoNivel: true,
-                skills: [{ nome: "publicar-site", descricao: "Publica o site", origem: "projeto", plugin: null }],
-              },
-        ),
-      );
-      render(
-        <ConfiguracoesDoApp
-          ajustes={ajustesFalsos()}
-          aberto
-          aoFechar={() => undefined}
-          orquestradoresAbertos={[{ id: "o1", nome: "Site da loja" }]}
-        />,
-      );
-      await esperar();
-      expect(leitura).not.toHaveBeenCalled();
-
-      fireEvent.click(aba("Skills"));
-      expect(await screen.findByText("publicar-site")).toBeInTheDocument();
-
-      const painel = screen.getByRole("tabpanel", { name: "Skills" });
-      expect(within(painel).getByText("revisor")).toBeInTheDocument();
-      expect(within(painel).getByRole("region", { name: /Do projeto Site da loja/ })).toBeInTheDocument();
-      expect(within(painel).queryByRole("combobox")).not.toBeInTheDocument();
-      expect(within(painel).getByRole("searchbox", { name: "Buscar skill por nome ou descrição" })).toBeInTheDocument();
-    });
-
-    it("abaInicial 'skills' abre a aba Skills", async () => {
-      renderizar({ abaInicial: "skills" });
-      await esperar();
-      expect(aba("Skills")).toHaveAttribute("aria-selected", "true");
-      expect(screen.getByText("Nenhuma skill encontrada")).toBeInTheDocument();
+      expect(aba("Aparência")).toHaveFocus();
     });
 
     it("clicar numa aba mostra só o painel dela", async () => {

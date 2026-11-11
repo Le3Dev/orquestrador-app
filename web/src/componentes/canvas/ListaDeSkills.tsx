@@ -39,8 +39,8 @@ interface Props {
 /**
  * A lista das skills do Claude Code, só leitura: a busca, os grupos (as do usuário, as do projeto de cada
  * orquestrador aberto e as de plugins), os estados de carregando, erro e vazio, e no rodapé o total e, se
- * algum orquestrador aberto estiver num nível que desliga as skills, um aviso. Usada no painel da ilha e na
- * aba Skills das Configurações.
+ * algum orquestrador aberto estiver num nível que desliga as skills, um aviso. Usada pelo painel de Skills,
+ * aberto pelo menu Novo.
  */
 export function ListaDeSkills({ orquestradores }: Props) {
   const id = useId();
