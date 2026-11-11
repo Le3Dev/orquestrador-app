@@ -54,6 +54,8 @@ function pergunta(alteracoes: Partial<PerguntaAoMotorDeChat> = {}): PerguntaAoMo
 
 const LEITURA = ["WebSearch", "WebFetch", "Read", "Glob", "Grep"];
 const TODAS = [...LEITURA, "Edit", "Write", "NotebookEdit", "PowerShell", "Bash"];
+/** O que o chat tem com as alterações autorizadas: as dez mais a `Skill`. */
+const TODAS_E_SKILL = [...TODAS, "Skill"];
 
 /** Valores de uma opção variádica: tudo entre ela e a próxima opção. */
 function valoresDe(argumentos: string[], opcao: string): string[] {
@@ -86,11 +88,11 @@ describe("montarArgumentosDoChat", () => {
     expect(valoresDe(argumentos, "--model")).toEqual(["haiku"]);
   });
 
-  it("--tools traz sempre as dez ferramentas, sem Subagentes", () => {
+  it("--tools traz sempre as dez ferramentas, sem Subagentes, e a Skill só com autorização", () => {
     for (const alteracoesAutorizadas of [false, true]) {
       const argumentos = montarArgumentosDoChat(pergunta({ alteracoesAutorizadas }), arquivos);
 
-      expect(valoresDe(argumentos, "--tools")).toEqual(TODAS);
+      expect(valoresDe(argumentos, "--tools")).toEqual(alteracoesAutorizadas ? TODAS_E_SKILL : TODAS);
       expect(argumentos).not.toContain("Agent");
       expect(argumentos).not.toContain("--agents");
     }
@@ -117,10 +119,16 @@ describe("montarArgumentosDoChat", () => {
     }
   });
 
-  it("com autorização, --allowedTools libera as dez ferramentas", () => {
+  it("com autorização, --allowedTools libera as dez ferramentas e a Skill", () => {
     const argumentos = montarArgumentosDoChat(pergunta({ alteracoesAutorizadas: true }), arquivos);
 
-    expect(valoresDe(argumentos, "--allowedTools")).toEqual(TODAS);
+    expect(valoresDe(argumentos, "--allowedTools")).toEqual(TODAS_E_SKILL);
+  });
+
+  it("sem autorização, a Skill não entra em --tools nem em --allowedTools", () => {
+    const argumentos = montarArgumentosDoChat(pergunta({ alteracoesAutorizadas: false }), arquivos);
+
+    expect(argumentos).not.toContain("Skill");
   });
 
   it("nega sempre .env* e o push forçado, com --disallowedTools por último", () => {
@@ -208,7 +216,7 @@ describe("montarArgumentosDoChat", () => {
 
       expect(valoresDe(sem, "--tools")).toEqual([...TODAS, ...ONLINE]);
       expect(valoresDe(sem, "--allowedTools")).toEqual([...LEITURA, ...REGRAS_DE_ARTEFATO, ...ONLINE]);
-      expect(valoresDe(com, "--allowedTools")).toEqual([...TODAS, ...ONLINE]);
+      expect(valoresDe(com, "--allowedTools")).toEqual([...TODAS_E_SKILL, ...ONLINE]);
     });
 
     it("o ambiente leva as variáveis que habilitam os artefatos em claude -p só com a opção ligada", () => {
@@ -255,7 +263,7 @@ describe("montarArgumentosDoChat", () => {
         arquivos,
       );
 
-      expect(valoresDe(argumentos, "--allowedTools")).toEqual([...TODAS, "Workflow"]);
+      expect(valoresDe(argumentos, "--allowedTools")).toEqual([...TODAS_E_SKILL.slice(0, -1), "Workflow", "Skill"]);
     });
 
     it("nos outros esforços, o Workflow não aparece", () => {

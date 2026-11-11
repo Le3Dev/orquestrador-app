@@ -15,6 +15,7 @@ import {
   configuracoesDaSessao,
   definicaoDosAgentes,
   FERRAMENTAS_POR_NIVEL,
+  ferramentasDeSkill,
   ferramentasDoEsforco,
   ferramentasDoTurno,
   linhaDeEntrada,
@@ -24,6 +25,8 @@ import {
   nivelDeEsforcoDoClaudeCode,
   nivelDeEsforcoDosSubagentes,
 } from "./ArgumentosDoClaudeCode";
+
+const PRONTO = { nome: "revisor", descricao: "Revisa.", prompt: "Revise.", modelo: "herdar" as const };
 
 const arquivos = { agentes: "agentes.json", instrucoes: "instrucoes.txt", configuracoes: "configuracoes.json" };
 
@@ -134,6 +137,35 @@ describe("artefatos do Orquestrador e dos Subagentes", () => {
     };
 
     expect(definicao.executor.tools).toEqual(["Read", "Glob", "Grep", "WebSearch", "WebFetch", "Write", "Edit"]);
+  });
+});
+
+describe("Skill do Claude Code", () => {
+  const CASOS: [NivelDePermissao, ModoDoTurno, boolean][] = [
+    ["leitura", "execucao", false],
+    ["edicao", "execucao", true],
+    ["edicao_e_comandos", "execucao", true],
+    ["leitura", "planejamento", false],
+    ["edicao", "planejamento", false],
+    ["edicao_e_comandos", "planejamento", false],
+  ];
+
+  it.each(CASOS)("no nível %s, em %s, a Skill entra: %s", (nivel, modo, entra) => {
+    const turno = pedido(false, nivel, modo);
+    const argumentos = montarArgumentos(turno, arquivos);
+    const agentes = definicaoDosAgentes({ ...turno, subagentesProntos: [PRONTO] });
+
+    expect(ferramentasDeSkill(turno)).toEqual(entra ? ["Skill"] : []);
+    expect(valoresDe(argumentos, "--tools").includes("Skill")).toBe(entra);
+    expect(valoresDe(argumentos, "--allowedTools").includes("Skill")).toBe(entra);
+    expect(agentes.executor?.tools.includes("Skill")).toBe(entra);
+    expect(agentes.revisor?.tools.includes("Skill")).toBe(entra);
+  });
+
+  it("vem logo depois do Agent", () => {
+    const argumentos = montarArgumentos(pedido(false, "edicao"), arquivos);
+
+    expect(valoresDe(argumentos, "--tools")).toEqual([...FERRAMENTAS_POR_NIVEL.edicao, "Agent", "Skill"]);
   });
 });
 
@@ -612,11 +644,17 @@ describe("esforço ultracode", () => {
   it("acrescenta o Workflow em --tools e em --allowedTools, depois do Agent", () => {
     const argumentos = montarArgumentos(ultracode(), arquivos);
 
-    expect(valoresDe(argumentos, "--tools")).toEqual([...FERRAMENTAS_POR_NIVEL.edicao_e_comandos, "Agent", "Workflow"]);
+    expect(valoresDe(argumentos, "--tools")).toEqual([
+      ...FERRAMENTAS_POR_NIVEL.edicao_e_comandos,
+      "Agent",
+      "Workflow",
+      "Skill",
+    ]);
     expect(valoresDe(argumentos, "--allowedTools")).toEqual([
       ...FERRAMENTAS_POR_NIVEL.edicao_e_comandos,
       "Agent",
       "Workflow",
+      "Skill",
     ]);
   });
 
@@ -704,16 +742,23 @@ describe("artefatos online no claude.ai", () => {
     expect(valoresDe(argumentos, "--tools")).toEqual([
       ...FERRAMENTAS_POR_NIVEL.edicao_e_comandos,
       "Agent",
+      "Skill",
     ]);
   });
 
   it("ligada, entram em --tools e em --allowedTools, depois do Agent", () => {
     const argumentos = montarArgumentos(comOpcao(), arquivos);
 
-    expect(valoresDe(argumentos, "--tools")).toEqual([...FERRAMENTAS_POR_NIVEL.edicao_e_comandos, "Agent", ...ONLINE]);
+    expect(valoresDe(argumentos, "--tools")).toEqual([
+      ...FERRAMENTAS_POR_NIVEL.edicao_e_comandos,
+      "Agent",
+      "Skill",
+      ...ONLINE,
+    ]);
     expect(valoresDe(argumentos, "--allowedTools")).toEqual([
       ...FERRAMENTAS_POR_NIVEL.edicao_e_comandos,
       "Agent",
+      "Skill",
       ...ONLINE,
     ]);
   });

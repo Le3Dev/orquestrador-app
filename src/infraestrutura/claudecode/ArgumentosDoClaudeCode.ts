@@ -84,6 +84,36 @@ export function ferramentasDoEsforco(esforco: EsforcoDeRaciocinio): readonly str
 }
 
 /**
+ * Ferramenta do Claude Code que executa as skills cadastradas (do usuário, do
+ * projeto e de plugins). Sem ela em `--tools`, o agente enxerga as skills mas
+ * não consegue usá-las.
+ */
+export const FERRAMENTA_DE_SKILL = "Skill";
+
+/**
+ * `Skill` quando a sessão pode editar; nada senão. O `allowed-tools` do
+ * frontmatter de uma skill libera ferramentas por conta própria (verificado no
+ * Claude Code 2.1.322: uma skill com `allowed-tools: Write` gravou fora da pasta
+ * de artefatos numa sessão que só liberava `Write(<artefatos>/**)`), então só
+ * entra onde essa liberação já seria concedida de qualquer forma. As regras de
+ * `--disallowedTools` continuam valendo dentro da skill.
+ */
+export function ferramentasDeSkillQuandoPodeEditar(podeEditar: boolean): readonly string[] {
+  return podeEditar ? [FERRAMENTA_DE_SKILL] : [];
+}
+
+/**
+ * As ferramentas de skill do turno do Orquestrador e dos Subagentes (`--tools`,
+ * `--allowedTools` e o `tools` dos agentes): `Skill` só nos níveis que liberam
+ * edição do projeto (`edicao` e `edicao_e_comandos`) e fora do planejamento. Em
+ * `leitura` e no planejamento nenhuma.
+ */
+export function ferramentasDeSkill(pedido: PedidoDeTurno): readonly string[] {
+  const nivel = pedido.configuracao.nivelDePermissao;
+  return ferramentasDeSkillQuandoPodeEditar(pedido.modo !== "planejamento" && nivel !== "leitura");
+}
+
+/**
  * Vence o `--effort` e o `effort` dos agentes
  * (https://code.claude.com/docs/en/model-config#adjust-effort-level).
  */
@@ -356,6 +386,7 @@ export function ferramentasDoTurno(pedido: PedidoDeTurno): readonly string[] {
 function ferramentasDoSubagente(pedido: PedidoDeTurno, podePublicarOnline: boolean): string[] {
   return [
     ...comFerramentasDeArtefato(ferramentasDoTurno(pedido)),
+    ...ferramentasDeSkill(pedido),
     ...ferramentasDeArtefatoOnline(podePublicarOnline && publicaOnlineNoTurno(pedido)),
   ];
 }
@@ -447,6 +478,9 @@ export function definicaoDosAgentes(
  * para este processo: cada turno a recebe de novo. Com `ultracode`, o
  * `Workflow` entra em `--tools` e em `--allowedTools` (`ferramentasDoEsforco`).
  *
+ * A `Skill` entra nas duas listas só nos níveis que liberam edição e fora do
+ * planejamento (`ferramentasDeSkill`).
+ *
  * Com a opção de artefatos online ligada, `Artifact`, `ArtifactCheck` e
  * `ArtifactData` entram nas duas listas (`ferramentasDeArtefatoOnline`), menos
  * no planejamento (`publicaOnlineNoTurno`).
@@ -456,6 +490,7 @@ export function montarArgumentos(pedido: PedidoDeTurno, arquivos: ArquivosDoTurn
     ...ferramentasDoTurno(pedido),
     FERRAMENTA_DE_SUBAGENTES,
     ...ferramentasDoEsforco(pedido.configuracao.esforcoDoOrquestrador),
+    ...ferramentasDeSkill(pedido),
     ...ferramentasDeArtefatoOnline(publicaOnlineNoTurno(pedido)),
   ];
   const ferramentas = comFerramentasDeArtefato(doNivel);

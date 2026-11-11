@@ -7,6 +7,7 @@ import {
   COMANDOS_DE_PUSH_FORCADO,
   type ConfiguracoesDaSessao,
   ferramentasDeArtefatoOnline,
+  ferramentasDeSkillQuandoPodeEditar,
   ferramentasDoEsforco,
   liberadasComArtefatos,
   nivelDeEsforcoDoClaudeCode,
@@ -117,6 +118,10 @@ export interface ArquivosDoChat {
  * autorização (`ferramentasDoEsforco`): ele só orquestra agentes, e os
  * agentes dele seguem as mesmas permissões da sessão.
  *
+ * A `Skill` entra nas duas listas só com as alterações autorizadas: o
+ * `allowed-tools` de uma skill libera ferramentas por conta própria, o que
+ * burlaria a espera pela autorização.
+ *
  * A raiz dos projetos entra em `--add-dir`: leitura sempre e, autorizado,
  * edição. A pasta de artefatos também entra em `--add-dir`, com gravação
  * liberada sempre (`ferramentasLiberadasDoChat`). `--settings` entra sempre,
@@ -129,6 +134,7 @@ export function montarArgumentosDoChat(pergunta: PerguntaAoMotorDeChat, arquivos
   const esforco = nivelDeEsforcoDoClaudeCode(pergunta.esforco);
   const adicionais = [
     ...ferramentasDoEsforco(pergunta.esforco),
+    ...ferramentasDeSkillQuandoPodeEditar(pergunta.alteracoesAutorizadas),
     ...ferramentasDeArtefatoOnline(pergunta.permitirArtefatosOnline),
   ];
   const liberadas = [
