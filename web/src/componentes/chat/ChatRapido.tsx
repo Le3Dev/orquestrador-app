@@ -444,10 +444,23 @@ function ControleDeOpacidade({ valor, aoMudar }: { valor: number; aoMudar: (opac
   );
 }
 
-/** Verbos seguidos direto do arquivo, sem dois-pontos ("lendo README.md…"). */
-const VERBOS_DE_ARQUIVO: ReadonlySet<string> = new Set(["lendo", "editando", "escrevendo"]);
+/** Verbos seguidos direto do alvo, sem dois-pontos ("lendo README.md…", "chamando o subagente coach…"). */
+const VERBOS_DE_ARQUIVO: ReadonlySet<string> = new Set([
+  "lendo",
+  "editando",
+  "escrevendo",
+  "chamando o subagente",
+]);
 
-/** Ex.: "pesquisando na web: clima em BH…", "lendo README.md…", "rodando: npm test…". */
+/** O que aparece quando a ferramenta chega sem detalhe e o verbo sozinho não faz sentido. */
+const ATIVIDADES_SEM_DETALHE: Readonly<Record<string, string>> = {
+  Agent: "chamando um subagente",
+};
+
+/**
+ * Ex.: "pesquisando na web: clima em BH…", "lendo README.md…", "rodando: npm test…",
+ * "chamando o subagente adhd-study-coach…".
+ */
 function descreverAtividade({ ferramenta, detalhe }: AtividadeDaResposta): string {
   const verbos: Readonly<Record<string, string>> = {
     WebSearch: "pesquisando na web",
@@ -460,13 +473,14 @@ function descreverAtividade({ ferramenta, detalhe }: AtividadeDaResposta): strin
     Write: "escrevendo",
     PowerShell: "rodando",
     Bash: "rodando",
+    Agent: "chamando o subagente",
   };
   const verbo = verbos[ferramenta];
   if (verbo === undefined) {
     return `${ferramenta}${detalhe === "" ? "" : `: ${detalhe}`}…`;
   }
   if (detalhe === "") {
-    return `${verbo}…`;
+    return `${ATIVIDADES_SEM_DETALHE[ferramenta] ?? verbo}…`;
   }
   return VERBOS_DE_ARQUIVO.has(verbo) ? `${verbo} ${detalhe}…` : `${verbo}: ${detalhe}…`;
 }

@@ -2,6 +2,7 @@ import type { AcaoQuePedeAutorizacao, AutorizacaoPendente } from "../../chat/Men
 import type { EventoDoMotorDeChat, ResultadoDaResposta, UsoDaResposta } from "../../chat/MotorDeChat";
 import { descreverFalha, detalheDaChamada, janelasDaCota, SINAIS_DE_LIMITE_DE_USO } from "./AdaptadorDeEventosDoClaudeCode";
 import { FERRAMENTAS_DE_COMANDO_DO_CHAT, FERRAMENTAS_DE_EDICAO_DO_CHAT } from "./ArgumentosDoChat";
+import { FERRAMENTA_DE_SUBAGENTES } from "./ArgumentosDoClaudeCode";
 
 type Objeto = Record<string, unknown>;
 
@@ -50,7 +51,28 @@ const CAMPO_DO_DETALHE: Readonly<Record<string, string>> = {
   Bash: "command",
 };
 
+/** `nome:nome`: o prefixo do plugin repetindo o nome do subagente. */
+const PREFIXO_REPETIDO = /^([^:]+):\1$/;
+
+/**
+ * Nome do subagente chamado pela ferramenta `Agent`: o `subagent_type` (um
+ * subagente de plugin chega como `plugin:nome`; quando o prefixo só repete o
+ * nome, como em `adhd-study-coach:adhd-study-coach`, fica `nome`) ou, sem ele,
+ * a `description` da chamada.
+ */
+function nomeDoSubagente(entrada: Objeto): string {
+  const tipo = texto(entrada, "subagent_type").trim();
+  const nome = tipo.replace(PREFIXO_REPETIDO, "$1");
+  return nome !== "" ? nome : texto(entrada, "description").trim();
+}
+
 function detalheDaFerramenta(ferramenta: string, entrada: Objeto, tamanho = TAMANHO_DO_DETALHE): string {
+  if (ferramenta === FERRAMENTA_DE_SUBAGENTES) {
+    const nome = nomeDoSubagente(entrada);
+    if (nome !== "") {
+      return nome.slice(0, tamanho);
+    }
+  }
   const campo = CAMPO_DO_DETALHE[ferramenta];
   const valor = campo === undefined ? "" : texto(entrada, campo);
   // O `Workflow` do `ultracode` traz um script inteiro: mostra só o nome dele.
@@ -141,6 +163,10 @@ export class AdaptadorDeEventosDoChat {
   /** Soma dos consumos desde o último `result` de cada ciclo, por modelo. */
   private readonly usoDosCiclos = new Map<string, UsoDoModelo>();
   private algumCicloSemDelta = false;
+  /** Modelo do agente principal em `message.model` da última mensagem `assistant` dele. */
+  private modeloDoAgentePrincipal: string | null = null;
+  /** Modelo da sessão informado no `system`/`init`. */
+  private modeloDoInit: string | null = null;
   /** Na ordem em que aconteceram, sem repetir a mesma chamada. */
   private readonly negacoes: Negacao[] = [];
   /** `tool_use_id` → `decision_reason_type` das mensagens `permission_denied`. */
@@ -173,7 +199,11 @@ export class AdaptadorDeEventosDoChat {
         // Os `task_*` e `background_tasks_changed` (comandos e workflows em
         // segundo plano) não têm lugar no chat: só a negação interessa.
         this.registrarMotivoDaNegacao(mensagem);
-        return texto(mensagem, "subtype") === "init" ? [{ tipo: "sessao_aberta" }] : [];
+        if (texto(mensagem, "subtype") !== "init") {
+          return [];
+        }
+        this.modeloDoInit = modeloValido(texto(mensagem, "model")) ?? this.modeloDoInit;
+        return [{ tipo: "sessao_aberta" }];
       case "stream_event":
         return this.traduzirTrecho(mensagem);
       case "assistant":
@@ -207,6 +237,7 @@ export class AdaptadorDeEventosDoChat {
     if (!ehDoAgentePrincipal(mensagem)) {
       return [];
     }
+    this.modeloDoAgentePrincipal = modeloValido(texto(objeto(mensagem, "message"), "model")) ?? this.modeloDoAgentePrincipal;
     return objetos(objeto(mensagem, "message"), "content")
       .filter((bloco) => texto(bloco, "type") === "tool_use")
       .map((bloco): EventoDoMotorDeChat => {
@@ -290,9 +321,14 @@ export class AdaptadorDeEventosDoChat {
     return { autorizacaoPendente, avisos: [...avisos] };
   }
 
+  /**
+   * Tokens e custo somam todos os modelos, subagentes inclusos. O modelo
+   * mostrado é o do agente principal (`message.model`, depois o `init`); só sem
+   * esses dados vale o de maior saída, que com subagentes pode ser o deles.
+   */
   private extrairUso(ultimo: Objeto): UsoDaResposta {
     const porModelo = this.algumCicloSemDelta ? usoDoAcumulado(ultimo) : this.usoDosCiclos;
-    let modeloUsado: string | null = null;
+    let modeloDeMaiorSaida: string | null = null;
     let maiorSaida = -1;
     let tokensDeEntradaTotal = 0;
     let tokensDeSaidaTotal = 0;
@@ -301,16 +337,22 @@ export class AdaptadorDeEventosDoChat {
       tokensDeSaidaTotal += uso.saida;
       if (uso.saida > maiorSaida) {
         maiorSaida = uso.saida;
-        modeloUsado = modelo;
+        modeloDeMaiorSaida = modelo;
       }
     }
     return {
       duracaoMs: numero(ultimo, "duration_ms"),
       tokensDeEntrada: tokensDeEntradaTotal,
       tokensDeSaida: tokensDeSaidaTotal,
-      modeloUsado,
+      modeloUsado: this.modeloDoAgentePrincipal ?? this.modeloDoInit ?? modeloDeMaiorSaida,
     };
   }
+}
+
+/** Ignora vazio e o `<synthetic>` que o Claude Code põe em mensagens que ele mesmo gera. */
+function modeloValido(modelo: string): string | null {
+  const limpo = modelo.trim();
+  return limpo === "" || limpo === "<synthetic>" ? null : limpo;
 }
 
 function tokensDeEntrada(uso: Objeto): number {

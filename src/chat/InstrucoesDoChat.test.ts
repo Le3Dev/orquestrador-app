@@ -584,6 +584,17 @@ describe("mensagemParaOChat", () => {
     expect(bloco).not.toContain("NÃO autorizadas");
   });
 
+  it("subagentes do Claude Code: chamar pelo nome só com autorização; sem ela, diz que precisa dela", () => {
+    const com = blocoDeContexto(true);
+    const sem = blocoDeContexto(false);
+
+    expect(com).toContain("use a ferramenta Agent com esse nome");
+    expect(com).toContain("repasse a pergunta dele ao usuário e, quando o usuário responder, chame o mesmo subagente de novo com a resposta");
+    expect(sem).toContain("Chamar um subagente pelo nome (ferramenta Agent) precisa da autorização para alterações, que ainda não foi dada");
+    expect(sem).not.toContain("use a ferramenta Agent com esse nome");
+    expect(com).not.toContain("que ainda não foi dada");
+  });
+
   it("commit e push só a pedido, em branch própria, sem main, sem push forçado e sem Co-authored-by", () => {
     for (const autorizado of [false, true]) {
       const bloco = blocoDeContexto(autorizado);
@@ -670,6 +681,16 @@ describe("instrucoesDoChat", () => {
   it("aponta para a regra das perguntas com opções do bloco de contexto", () => {
     expect(instrucoesDoChat()).toContain(
       "10. Quando precisar que o usuário escolha entre opções claras, siga a regra de perguntas do bloco <contexto-do-app>: inclua o bloco ```pergunta-do-app",
+    );
+  });
+
+  it("explica os subagentes do Claude Code: só com autorização, e a ponte com o usuário nos interativos", () => {
+    const instrucoes = instrucoesDoChat();
+
+    expect(instrucoes).toContain("12. Subagentes do Claude Code: com as alterações autorizadas, você pode chamá-los pelo nome com a ferramenta Agent");
+    expect(instrucoes).toContain("sem a autorização, diga que precisa dela");
+    expect(instrucoes).toContain(
+      "repasse a pergunta dele ao usuário e, quando o usuário responder, chame o mesmo subagente de novo com a resposta",
     );
   });
 

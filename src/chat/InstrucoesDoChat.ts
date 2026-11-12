@@ -116,6 +116,22 @@ const REGRA_DO_RELATORIO = "Se você alterou algo, termine a resposta listando o
 const REGRA_DAS_MUDANCAS_GRANDES =
   "Mudanças grandes (vários arquivos, refatoração): não faça pelo chat; sugira abrir um orquestrador no projeto, com o bloco de ação.";
 
+/**
+ * Subagentes do Claude Code (ferramenta Agent): só com as alterações
+ * autorizadas, porque o subagente usa as ferramentas que ele mesmo declara e
+ * não consegue pausar para pedir autorização. Vale para os de plugin, os de
+ * ~/.claude/agents e os embutidos; não confundir com os subagentes prontos do app.
+ */
+const REGRA_DE_CHAMAR_SUBAGENTES_COM_AUTORIZACAO =
+  "Quando o usuário pedir para chamar um subagente pelo nome (de um plugin, de ~/.claude/agents ou embutido), use a ferramenta Agent com esse nome. Esses não aparecem na lista de subagentes prontos, que são os dos orquestradores; não os crie por isso.";
+
+/** Um subagente não guarda a conversa entre chamadas: o chat faz a ponte. */
+const REGRA_DO_SUBAGENTE_INTERATIVO =
+  "Ao conversar com um subagente interativo (tutor, quiz), repasse a pergunta dele ao usuário e, quando o usuário responder, chame o mesmo subagente de novo com a resposta.";
+
+const REGRA_DE_CHAMAR_SUBAGENTES_SEM_AUTORIZACAO =
+  "Chamar um subagente pelo nome (ferramenta Agent) precisa da autorização para alterações, que ainda não foi dada: se o usuário pedir, diga em uma linha que precisa da autorização e pare. Os subagentes de plugin e de ~/.claude/agents não aparecem na lista de subagentes prontos, e isso não é motivo para criá-los.";
+
 const REGRA_DA_NEGACAO =
   "Se uma edição ou um comando for negado, diga em uma linha que precisa da autorização e pare. Não contorne a negação: nada de alterar por outro caminho (outra ferramenta, script, outro comando).";
 
@@ -171,6 +187,7 @@ export function instrucoesDoChat(): string {
     `9. Artefatos: quando ${QUANDO_CRIAR_ARTEFATO}, grave UM arquivo autocontido (.html ou .md) na pasta de artefatos que o bloco <${MARCA_DO_CONTEXTO}> indica, seguindo as regras dele. Gravar artefatos não precisa da autorização e não conta como alterar projetos.`,
     `10. Quando precisar que o usuário escolha entre opções claras, siga a regra de perguntas do bloco <${MARCA_DO_CONTEXTO}>: inclua o bloco \`\`\`${MARCA_DA_PERGUNTA}, que vira botões clicáveis na tela, e espere a resposta.`,
     `11. Prévia ao vivo: o app abre uma prévia quando a sua resposta cita um endereço local completo. Siga a regra de prévia do bloco <${MARCA_DO_CONTEXTO}>: cite o endereço só quando o usuário deva ver a página, nunca para verificação técnica (use curl e diga só a porta), e feche as prévias desnecessárias com o bloco \`\`\`${MARCA_DA_PREVIA}.`,
+    `12. Subagentes do Claude Code: com as alterações autorizadas, você pode chamá-los pelo nome com a ferramenta Agent quando o usuário pedir; sem a autorização, diga que precisa dela. ${REGRA_DO_SUBAGENTE_INTERATIVO}`,
   ].join("\n");
 }
 
@@ -184,10 +201,12 @@ function regrasDePermissao(contexto: ContextoDoApp): string[] {
     ? [
         "- Alterações AUTORIZADAS pelo usuário até o próximo /clear: edite arquivos e rode comandos quando o pedido exigir, sem pedir confirmação.",
         "- Se mesmo assim uma ação for bloqueada, é uma regra fixa do app: avise em uma linha e não contorne.",
+        `- Subagentes: ${REGRA_DE_CHAMAR_SUBAGENTES_COM_AUTORIZACAO} ${REGRA_DO_SUBAGENTE_INTERATIVO}`,
       ]
     : [
         "- Alterações NÃO autorizadas ainda (gravar artefatos não depende disso). Se precisar editar um arquivo de projeto ou rodar um comando, use a ferramenta mesmo assim: o app pede a autorização ao usuário.",
         `- ${REGRA_DA_NEGACAO}`,
+        `- Subagentes: ${REGRA_DE_CHAMAR_SUBAGENTES_SEM_AUTORIZACAO}`,
       ];
   return [
     "Permissões (substituem qualquer regra anterior sobre o que você pode alterar, inclusive as das instruções iniciais):",

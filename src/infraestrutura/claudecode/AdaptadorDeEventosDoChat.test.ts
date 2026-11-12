@@ -402,3 +402,162 @@ describe("AdaptadorDeEventosDoChat — linhas sintéticas", () => {
     expect(adaptador.resultado).toMatchObject({ sucesso: true, resposta: "Feito.", autorizacaoPendente: null, avisos: [] });
   });
 });
+
+describe("AdaptadorDeEventosDoChat — subagentes (ferramenta Agent)", () => {
+  function chamada(entrada: Record<string, unknown>): Record<string, unknown> {
+    return {
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: { content: [{ type: "tool_use", id: "toolu_a", name: "Agent", input: entrada }] },
+    };
+  }
+
+  function detalhes(entrada: Record<string, unknown>): string[] {
+    return doTipo(traduzirTudo([chamada(entrada)]).eventos, "ferramenta_do_chat").map((evento) => evento.detalhe);
+  }
+
+  it("mostra o nome do subagente, sem o prefixo do plugin quando ele repete o nome", () => {
+    expect(detalhes({ subagent_type: "adhd-study-coach:adhd-study-coach", description: "Dizer oi", prompt: "x" })).toEqual([
+      "adhd-study-coach",
+    ]);
+    expect(detalhes({ subagent_type: "general-purpose", description: "Pesquisar", prompt: "x" })).toEqual(["general-purpose"]);
+  });
+
+  it("mantém o prefixo quando o plugin e o subagente têm nomes diferentes", () => {
+    expect(detalhes({ subagent_type: "meu-plugin:revisor", description: "Revisar", prompt: "x" })).toEqual(["meu-plugin:revisor"]);
+  });
+
+  it("sem subagent_type, usa a descrição; sem nada, resume a entrada", () => {
+    expect(detalhes({ description: "Pesquisar o assunto", prompt: "texto longo do prompt" })).toEqual(["Pesquisar o assunto"]);
+    expect(detalhes({ subagent_type: "  ", description: "Pesquisar o assunto" })).toEqual(["Pesquisar o assunto"]);
+    expect(detalhes({ prompt: "só o prompt" })).toEqual([JSON.stringify({ prompt: "só o prompt" })]);
+  });
+
+  it("as mensagens do subagente (texto, ferramentas e prompt) ficam fora da resposta", () => {
+    const { adaptador, eventos } = traduzirTudo([
+      chamada({ subagent_type: "adhd-study-coach:adhd-study-coach", description: "Dizer oi" }),
+      { type: "stream_event", parent_tool_use_id: "toolu_a", event: { type: "content_block_delta", delta: { type: "text_delta", text: "Texto interno do coach" } } },
+      { type: "assistant", parent_tool_use_id: "toolu_a", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "ls ~/.adhd-study-coach" } }] } },
+      { type: "user", parent_tool_use_id: "toolu_a", message: { content: [{ type: "tool_result", content: "interno" }] } },
+      { type: "stream_event", parent_tool_use_id: null, event: { type: "content_block_delta", delta: { type: "text_delta", text: "O coach disse oi." } } },
+      { type: "result", subtype: "success", is_error: false, result: "O coach disse oi.", duration_ms: 10 },
+    ]);
+
+    expect(eventos).toEqual([
+      { tipo: "ferramenta_do_chat", ferramenta: "Agent", detalhe: "adhd-study-coach" },
+      { tipo: "trecho_da_resposta", texto: "O coach disse oi." },
+    ]);
+    expect(adaptador.resultado).toMatchObject({ sucesso: true, resposta: "O coach disse oi.", autorizacaoPendente: null, avisos: [] });
+  });
+
+  it("uma negação dentro do subagente, com alterações autorizadas, vira aviso e não pedido de autorização", () => {
+    const { adaptador } = traduzirTudo(
+      [
+        { type: "system", subtype: "permission_denied", tool_name: "Bash", tool_use_id: "toolu_b", decision_reason_type: "rule", parent_tool_use_id: "toolu_a" },
+        {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "Não consegui.",
+          duration_ms: 1,
+          permission_denials: [{ tool_name: "Bash", tool_use_id: "toolu_b", tool_input: { command: "git push --force" } }],
+        },
+      ],
+      true,
+    );
+
+    expect(adaptador.resultado).toMatchObject({
+      autorizacaoPendente: null,
+      avisos: ["Bloqueado pelas permissões do chat: Bash · git push --force"],
+    });
+  });
+
+  it("o próprio Agent negado vira aviso comum, nunca pedido de autorização", () => {
+    const { adaptador } = traduzirTudo([
+      {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        result: "ok",
+        duration_ms: 1,
+        permission_denials: [{ tool_name: "Agent", tool_use_id: "toolu_a", tool_input: { subagent_type: "x:x" } }],
+      },
+    ]);
+
+    expect(adaptador.resultado).toMatchObject({
+      autorizacaoPendente: null,
+      avisos: ["Bloqueado pelas permissões do chat: Agent · x"],
+    });
+  });
+});
+
+describe("AdaptadorDeEventosDoChat — modelo mostrado com subagente de outro modelo", () => {
+  const uso = (entrada: number, saida: number) => ({
+    inputTokens: entrada,
+    outputTokens: saida,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+  });
+  const iniciar = (modelo: string) => ({ type: "system", subtype: "init", model: modelo });
+  const doAgentePrincipal = (modelo: string) => ({
+    type: "assistant",
+    parent_tool_use_id: null,
+    message: { model: modelo, content: [{ type: "text", text: "ok" }] },
+  });
+  const doSubagente = (modelo: string) => ({
+    type: "assistant",
+    parent_tool_use_id: "toolu_a",
+    message: { model: modelo, content: [{ type: "text", text: "interno" }] },
+  });
+  // O subagente (sonnet) gera mais saída que o chat (opus).
+  const resultado = {
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    result: "ok",
+    duration_ms: 10,
+    modelUsage: { "claude-opus-5-5": uso(100, 40), "claude-sonnet-5-5": uso(200, 500) },
+  };
+
+  it("mostra o modelo do agente principal, mesmo com o subagente gerando mais saída, e soma os dois", () => {
+    const { adaptador } = traduzirTudo([
+      iniciar("claude-opus-5-5"),
+      doAgentePrincipal("claude-opus-5-5"),
+      doSubagente("claude-sonnet-5-5"),
+      doAgentePrincipal("claude-opus-5-5"),
+      resultado,
+    ]);
+
+    expect(adaptador.resultado).toMatchObject({
+      uso: { tokensDeEntrada: 300, tokensDeSaida: 540, modeloUsado: "claude-opus-5-5" },
+    });
+  });
+
+  it("sem message.model do agente principal, usa o model do system/init", () => {
+    const { adaptador } = traduzirTudo([
+      iniciar("claude-opus-5-5"),
+      doSubagente("claude-sonnet-5-5"),
+      { type: "assistant", parent_tool_use_id: null, message: { model: "<synthetic>", content: [] } },
+      resultado,
+    ]);
+
+    expect(adaptador.resultado).toMatchObject({ uso: { tokensDeSaida: 540, modeloUsado: "claude-opus-5-5" } });
+  });
+
+  it("sem message.model nem init, cai na regra do modelo com maior saída", () => {
+    const { adaptador } = traduzirTudo([doSubagente("claude-sonnet-5-5"), resultado]);
+
+    expect(adaptador.resultado).toMatchObject({ uso: { modeloUsado: "claude-sonnet-5-5" } });
+  });
+
+  it("com um init repetido (ciclo retomado), o modelo do agente principal continua valendo", () => {
+    const { adaptador } = traduzirTudo([
+      iniciar("claude-opus-5-5"),
+      doAgentePrincipal("claude-opus-5-5"),
+      iniciar("claude-opus-5-5"),
+      resultado,
+    ]);
+
+    expect(adaptador.resultado).toMatchObject({ uso: { modeloUsado: "claude-opus-5-5" } });
+  });
+});
