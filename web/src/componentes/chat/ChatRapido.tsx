@@ -979,9 +979,10 @@ export function ChatRapido({
   const comEscuta = escutaDisponivel && (modoAtivo || escutaManualLigada);
 
   // A transcrição não entra na conversa: tem painel próprio (PainelDaTranscricao), com "Responder agora".
-  // Abre sozinho ao ligar a escuta; o botão "Transcrição" da barra abre e fecha, e a escolha fica gravada.
+  // Abre sozinho ao ligar a escuta ou o modo fantasma (mesmo que tenha sido fechado antes); o × do painel fecha.
+  // O ref nasce false: ao entrar no modo o chat sai do painel fixo para o flutuante e é remontado já com o modo ligado.
   const transcricaoAberta = escutaDisponivel && preferencias.transcricaoAberta;
-  const escutaLigadaAntes = useRef(comEscuta);
+  const escutaLigadaAntes = useRef(false);
   useEffect(() => {
     if (comEscuta && !escutaLigadaAntes.current && !preferencias.transcricaoAberta) {
       mudarPreferencias({ transcricaoAberta: true });
@@ -1941,9 +1942,6 @@ export function ChatRapido({
                 onClick={() => void (modoAtivo ? sairDoModo() : entrarNoModo())}
               >
                 <IconeOlho cortado={modoAtivo} />
-                <span className="rotulo-do-modo-invisivel" aria-hidden="true">
-                  Fantasma
-                </span>
                 {modoAtivo && <span className="ponto-tela-vista" aria-hidden="true" />}
               </button>
             )}
@@ -1965,21 +1963,6 @@ export function ChatRapido({
             )}
             {/* Com o painel da transcrição aberto, o indicador mora no cabeçalho dele. */}
             {comEscuta && !transcricaoAberta && indicadorDaEscuta}
-            {escutaDisponivel && (
-              <button
-                type="button"
-                className="btn btn-sm btn-ghost botao-da-transcricao"
-                aria-pressed={transcricaoAberta}
-                title={
-                  transcricaoAberta
-                    ? "Fechar o painel da transcrição"
-                    : "Abrir o painel da transcrição: o que o áudio do computador está dizendo, com Responder agora (Ctrl+Shift+Enter)"
-                }
-                onClick={() => mudarPreferencias({ transcricaoAberta: !transcricaoAberta })}
-              >
-                Transcrição
-              </button>
-            )}
             <SeletorDeModelo
               preferencias={chat.preferencias}
               modeloUsado={ultimoModeloUsado(chat)}
