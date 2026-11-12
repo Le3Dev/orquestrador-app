@@ -38,6 +38,7 @@ export function AvisoDaEscuta({ aoConfirmar, aoRecusar }: Props) {
       aria-describedby={idDaExplicacao}
       tabIndex={-1}
       className="aviso-da-escuta painel-flutuante"
+      data-area-clicavel
       onKeyDown={aoTeclar}
     >
       <p id={idDoTitulo} className="titulo-do-aviso-da-escuta">

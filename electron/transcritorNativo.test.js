@@ -36,12 +36,13 @@ describe("dispositivos e precisões", () => {
 });
 
 describe("escolha do modelo da escuta por B", () => {
-  it("velocidade (limite 1.000 ms): turbo se 7·B ≤ 1000, small se 2,9·B ≤ 1000, senão base", () => {
-    expect(LIMITE_DA_PRIORIDADE_MS).toEqual({ velocidade: 1000, precisao: 2500 });
-    expect(escolherModeloDaEscuta(142)).toBe("turbo"); // 994
-    expect(escolherModeloDaEscuta(143)).toBe("small"); // 1001
-    expect(escolherModeloDaEscuta(344, "velocidade")).toBe("small"); // 997,6
-    expect(escolherModeloDaEscuta(345, "velocidade")).toBe("base"); // 1000,5
+  it("velocidade (limite 1.900 ms): turbo se 7·B ≤ 1900, small se 2,9·B ≤ 1900, senão base", () => {
+    expect(LIMITE_DA_PRIORIDADE_MS).toEqual({ velocidade: 1900, precisao: 2500 });
+    expect(escolherModeloDaEscuta(271)).toBe("turbo"); // 1897
+    expect(escolherModeloDaEscuta(272)).toBe("small"); // 1904
+    expect(escolherModeloDaEscuta(500)).toBe("small"); // máquina comum: small, não mais base
+    expect(escolherModeloDaEscuta(655, "velocidade")).toBe("small"); // 1899,5
+    expect(escolherModeloDaEscuta(656, "velocidade")).toBe("base"); // 1902,4
     expect(escolherModeloDaEscuta(2000, "velocidade")).toBe("base");
   });
 
