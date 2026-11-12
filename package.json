@@ -39,6 +39,7 @@
     "zod": "^4.6.1"
   },
   "devDependencies": {
+    "@github/copilot-sdk": "1.0.31",
     "@types/express": "^5.0.6",
     "@types/node": "^24.0.0",
     "@types/ws": "^8.18.2",

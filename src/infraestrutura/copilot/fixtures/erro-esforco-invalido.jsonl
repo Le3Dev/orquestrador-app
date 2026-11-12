@@ -1,0 +1,3 @@
+{"type":"session.error","data":{"errorType":"query","message":"Execution failed: Reasoning effort 'ultra' is not supported for model 'claude-haiku-5.5'."},"id":"bb40de39-0e64-4cbf-96d2-51ab92d2392b","timestamp":"2026-11-12T14:44:34.499Z","parentId":"5eb3655b-3292-4ca9-bbf3-decdde936b19"}
+{"type":"assistant.idle","data":{},"ephemeral":true,"id":"a91acc1f-2079-478e-8941-cd94de0242a0","timestamp":"2026-11-12T14:44:34.500Z","parentId":"bb40de39-0e64-4cbf-96d2-51ab92d2392b"}
+{"type":"session.idle","data":{"mode":"interactive"},"ephemeral":true,"id":"377d9ee8-401f-4b29-a6da-408aae8d69af","timestamp":"2026-11-12T14:44:34.503Z","parentId":"bb40de39-0e64-4cbf-96d2-51ab92d2392b"}

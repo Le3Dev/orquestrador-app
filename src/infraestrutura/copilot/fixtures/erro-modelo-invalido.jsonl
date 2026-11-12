@@ -1,0 +1,3 @@
+{"type":"session.error","data":{"errorType":"query","message":"Execution failed: Model \"modelo-que-nao-existe\" is not available."},"id":"533445a0-b478-4c57-91e9-43a434fa26d3","timestamp":"2026-11-12T14:44:33.759Z","parentId":"788f3104-edf3-4620-8e6f-dde69852571e"}
+{"type":"assistant.idle","data":{},"ephemeral":true,"id":"1a95d47a-f065-4b41-b7a4-84138bae9971","timestamp":"2026-11-12T14:44:33.760Z","parentId":"533445a0-b478-4c57-91e9-43a434fa26d3"}
+{"type":"session.idle","data":{"mode":"interactive"},"ephemeral":true,"id":"f411dc9d-ac37-478d-82bd-fb02fb8f0761","timestamp":"2026-11-12T14:44:33.762Z","parentId":"533445a0-b478-4c57-91e9-43a434fa26d3"}
