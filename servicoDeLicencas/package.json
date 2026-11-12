@@ -1,0 +1,23 @@
+{
+  "name": "servico-de-licencas",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Servico de licencas do Orquestrador de Agentes (Cloudflare Workers + D1).",
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "deploy": "wrangler deploy",
+    "migrar": "wrangler d1 migrations apply BANCO"
+  },
+  "dependencies": {
+    "stripe": "^23.1.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261112.1",
+    "typescript": "^5.9.3",
+    "vitest": "^5.1.0",
+    "wrangler": "^4.161.0"
+  }
+}

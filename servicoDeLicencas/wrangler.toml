@@ -1,0 +1,23 @@
+name = "servico-de-licencas"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "BANCO"
+database_name = "licencas"
+# Substitua pelo id real apos `wrangler d1 create licencas`.
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migracoes"
+
+# Variaveis NAO secretas (valores de exemplo).
+# Secrets (via `wrangler secret put`): STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
+# CHAVE_PRIVADA_DA_LICENCA, RESEND_API_KEY.
+[vars]
+EMAIL_REMETENTE = "Orquestrador de Agentes <licencas@exemplo.com.br>"
+URL_DA_LANDING = "https://orquestrador.exemplo.com.br"
+URL_DE_DOWNLOAD = "https://github.com/Le3Dev/orquestrador-app/releases/latest"
+URL_DO_PORTAL_DO_CLIENTE = "https://billing.stripe.com/p/login/exemplo"
+PRECO_MENSAL_ID = "price_mensal_exemplo"
+PRECO_ANUAL_ID = "price_anual_exemplo"
+MAXIMO_DE_MAQUINAS = "1"
