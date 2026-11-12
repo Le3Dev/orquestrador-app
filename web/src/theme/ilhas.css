@@ -49,7 +49,7 @@
 }
 .coluna-da-ilha-esquerda > * { pointer-events: auto; }
 /* O painel de subagentes prontos, sob a ilha: 640 de largura, como no protótipo. */
-.coluna-da-ilha-esquerda .painel-de-subagentes { width: 640px; }
+.coluna-da-ilha-esquerda .painel-de-subagentes, .coluna-da-ilha-esquerda .painel-de-skills { width: 640px; }
 /* Arraste da janela (Electron): só o fundo das ilhas do topo, nunca uma faixa sobre o canvas. Botões,
  * contador (tem balão), controles da janela e o menu Novo (com o submenu) não arrastam e recebem o clique. */
 .ilha-arrasta { -webkit-app-region: drag; user-select: none; }
@@ -234,6 +234,8 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
 }
 .texto-do-item .mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
 .descricao-do-subagente { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* O nome do plugin da skill não encolhe: quem cede espaço é a descrição. */
+.texto-do-item .plugin-da-skill { flex-shrink: 0; }
 .situacao-no-canvas { flex-shrink: 0; font-size: 12px; color: var(--secondary); }
 .situacao-no-canvas-aberto { color: var(--caption); }
 

@@ -41,7 +41,7 @@ export function FaixaDeArrasto() {
  * botão `+ Novo` com o menu (ver `MenuNovo`). No app desktop o fundo dela
  * arrasta a janela (`ilha-arrasta`); o botão, o menu e o submenu são `no-drag`.
  */
-export function IlhaDoNome(props: PropsDoMenuNovo) {
+export function IlhaDoNome(menu: PropsDoMenuNovo) {
   return (
     <header className="ilha ilha-arrasta ilha-do-nome nodrag nopan nowheel" data-testid="ilha-do-nome">
       <span className="nome-do-app">
@@ -51,7 +51,7 @@ export function IlhaDoNome(props: PropsDoMenuNovo) {
         <h1>Orquestrador de Agentes</h1>
       </span>
       <span className="divisor-da-ilha" aria-hidden="true" />
-      <MenuNovo {...props} />
+      <MenuNovo {...menu} />
     </header>
   );
 }

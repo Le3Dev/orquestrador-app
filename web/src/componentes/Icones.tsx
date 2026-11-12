@@ -108,6 +108,21 @@ export function IconePessoas({ tamanho = 14, className = "" }: PropsDoIcone) {
   );
 }
 
+/** Estrela de quatro pontas e uma faísca: as skills do Claude Code. */
+export function IconeSkills({ tamanho = 18, className = "" }: PropsDoIcone) {
+  return (
+    <svg width={tamanho} height={tamanho} viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <path
+        d="M10 4.5c.5 3.6 1.9 5 5.5 5.5-3.6.5-5 1.9-5.5 5.5-.5-3.6-1.9-5-5.5-5.5C8.1 9.5 9.5 8.1 10 4.5Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path d="M18 14.5v5M15.5 17h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Ícones de ação e de situação. Traço de 1.8 num quadro de 24, para ficarem
 // nítidos de 12 a 18 px. No lugar de emojis, que cada sistema desenha de um

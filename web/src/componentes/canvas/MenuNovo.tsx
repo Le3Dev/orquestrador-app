@@ -9,8 +9,8 @@ import {
   useState,
 } from "react";
 
-import type { DadosDoSubagentePronto, ResumoDoOrquestrador } from "../../shared/api/tipos";
-import { IconeEngrenagem, IconeNavegador, IconeOrquestrador, IconePessoas, IconeShell } from "../Icones";
+import type { DadosDaSkill, DadosDoSubagentePronto, ResumoDoOrquestrador } from "../../shared/api/tipos";
+import { IconeEngrenagem, IconeNavegador, IconeOrquestrador, IconePessoas, IconeShell, IconeSkills } from "../Icones";
 import {
   IconeLista,
   IconeLupa,
@@ -21,8 +21,8 @@ import {
 } from "./IconesDasIlhas";
 import "../../theme/ilhas.css";
 
-/** O submenu aberto ao lado do menu: a lista de orquestradores ou a de subagentes prontos. */
-type IdDoSubmenu = "orquestradores" | "subagentes";
+/** O submenu aberto ao lado do menu: a lista de orquestradores, a de subagentes prontos ou a de skills. */
+type IdDoSubmenu = "orquestradores" | "subagentes" | "skills";
 
 interface ItemDeAcao {
   tipo: "acao";
@@ -69,6 +69,11 @@ export interface PropsDoMenuNovo {
   subagentes: readonly DadosDoSubagentePronto[] | null;
   /** "Novo subagente", "Gerenciar subagentes" e um subagente da lista: todos abrem o painel de subagentes prontos. */
   aoAbrirSubagentes: () => void;
+  /** As skills do Claude Code (do usuário e de plugins). Nulo enquanto a lista não chegou. */
+  skills: readonly DadosDaSkill[] | null;
+  erroDasSkills: string | null;
+  /** Uma skill da lista e "Ver todas as skills": abrem o painel das skills do Claude Code (só leitura). */
+  aoAbrirSkills: () => void;
 }
 
 /** O texto de um orquestrador para o leitor de tela. */
@@ -84,9 +89,10 @@ function plural(total: number, singular: string, pluralDoTermo: string): string 
 /**
  * O botão `+ Novo` da ilha do canto superior esquerdo e o menu dele, no estilo
  * do menu do Excalidraw: cai para baixo, com ícone, rótulo e atalho à direita
- * e divisores entre os grupos. Grupo 1: o que criar. Grupo 2: "Orquestradores ›"
- * e "Subagentes ›", que abrem um segundo painel à direita (ao passar o mouse,
- * clicar ou com →). Grupo 3: busca e configurações.
+ * e divisores entre os grupos. Grupo 1: o que criar. Grupo 2: "Orquestradores ›",
+ * "Subagentes ›" e "Skills ›", cada um com a quantidade à direita, que abrem um segundo
+ * painel à direita (ao passar o mouse, clicar ou com →); escolher uma skill ou
+ * "Ver todas as skills" abre o painel das skills. Grupo 3: busca e configurações.
  *
  * Teclado: ↓ ou Enter no botão abrem; ↑/↓ (e Home/End) navegam; → entra no
  * submenu e ← (ou Esc) volta dele; Enter ativa; Esc, Tab e clique fora fecham.
@@ -104,6 +110,9 @@ export function MenuNovo({
   aoEscolherOrquestrador,
   subagentes,
   aoAbrirSubagentes,
+  skills,
+  erroDasSkills,
+  aoAbrirSkills,
 }: PropsDoMenuNovo) {
   const [aberto, setAberto] = useState(false);
   const [submenu, setSubmenu] = useState<IdDoSubmenu | null>(null);
@@ -185,6 +194,14 @@ export function MenuNovo({
         contagem: subagentes?.length ?? null,
         dica: "Ajudantes prontos que todo orquestrador pode chamar",
       },
+      {
+        tipo: "submenu",
+        id: "skills",
+        rotulo: "Skills",
+        icone: <IconeSkills tamanho={18} />,
+        contagem: skills?.length ?? null,
+        dica: "As skills do Claude Code: do usuário e de plugins (só leitura)",
+      },
     ];
     const outros: ItemDoMenu[] = [
       {
@@ -216,6 +233,7 @@ export function MenuNovo({
     aoAbrirConfiguracoes,
     orquestradores,
     subagentes,
+    skills,
   ]);
   const itens = useMemo(() => grupos.flat(), [grupos]);
 
@@ -270,6 +288,11 @@ export function MenuNovo({
   const abrirSubagentes = () => {
     fechar(true);
     aoAbrirSubagentes();
+  };
+
+  const abrirSkills = () => {
+    fechar(true);
+    aoAbrirSkills();
   };
 
   /** Abre o submenu e, vindo do teclado, leva o foco ao primeiro item dele. */
@@ -431,6 +454,66 @@ export function MenuNovo({
             );
           })}
           <p className="rodape-do-submenu">Escolher leva até a janela dele no canvas.</p>
+        </>
+      );
+    }
+    if (id === "skills") {
+      return (
+        <>
+          <div className="titulo-do-submenu">
+            {skills === null ? "carregando…" : plural(skills.length, "skill", "skills")}
+          </div>
+          {erroDasSkills !== null && (
+            <div className="alert alert-error m-1" role="alert">
+              {erroDasSkills}
+            </div>
+          )}
+          {skills !== null && skills.length === 0 && erroDasSkills === null && (
+            <p className="texto-do-submenu">Nenhuma skill encontrada.</p>
+          )}
+          {(skills ?? []).map((skill) => (
+            <button
+              key={`${skill.origem}:${skill.plugin ?? ""}:${skill.nome}`}
+              ref={refDoItem()}
+              type="button"
+              role="menuitem"
+              tabIndex={-1}
+              className="item-de-lista-do-menu"
+              aria-label={skill.descricao === "" ? skill.nome : `${skill.nome}: ${skill.descricao}`}
+              title={skill.descricao === "" ? "Abrir o painel de skills" : skill.descricao}
+              onClick={abrirSkills}
+            >
+              <span className="selo-do-item" aria-hidden="true">
+                <IconeSkills tamanho={16} />
+              </span>
+              <span className="texto-do-item" aria-hidden="true">
+                <strong>{skill.nome}</strong>
+                <span>
+                  <span className="descricao-do-subagente">
+                    {skill.descricao === "" ? "Sem descrição." : skill.descricao}
+                  </span>
+                  {skill.origem === "plugin" && skill.plugin !== null && (
+                    <span className="mono plugin-da-skill">· {skill.plugin}</span>
+                  )}
+                </span>
+              </span>
+            </button>
+          ))}
+          <div className="acoes-do-submenu">
+            <button
+              ref={refDoItem()}
+              type="button"
+              role="menuitem"
+              tabIndex={-1}
+              className="item-do-menu-novo"
+              onClick={abrirSkills}
+            >
+              <span className="icone-do-menu-novo" aria-hidden="true">
+                <IconeLista tamanho={18} />
+              </span>
+              <span className="rotulo-do-menu-novo">Ver todas as skills</span>
+            </button>
+          </div>
         </>
       );
     }

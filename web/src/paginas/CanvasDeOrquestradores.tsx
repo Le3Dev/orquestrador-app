@@ -59,10 +59,11 @@ import {
 import { type ControleDaPaleta, PaletaDeComandos } from "../componentes/canvas/PaletaDeComandos";
 import { rodandoNoDesktop, rodandoNoMac } from "../shared/ponteDoDesktop";
 import { AvisoDeConexao, ErroDoCanvas, StatusDoCanvas } from "../componentes/canvas/PaineisDoCanvas";
+import { PainelDeSkills } from "../componentes/canvas/PainelDeSkills";
 import { PainelDeSubagentes } from "../componentes/canvas/PainelDeSubagentes";
 import { api, ErroDaApi, mensagemDeErro } from "../shared/api/cliente";
 import type { ResumoDoArtefato } from "../shared/api/artefatos";
-import type { DadosDoSubagentePronto, ResumoDoOrquestrador } from "../shared/api/tipos";
+import type { DadosDaSkill, DadosDoSubagentePronto, ResumoDoOrquestrador } from "../shared/api/tipos";
 import {
   type AcoesDosArtefatos,
   artefatoAberto,
@@ -263,7 +264,7 @@ const FOLGA_DO_ENQUADRAMENTO = 0.12;
 const LIMITES_DO_ZOOM = { minZoom: 0.1, maxZoom: 2 };
 const VIEWPORT_PADRAO: Viewport = { x: 0, y: 0, zoom: 1 };
 /** Os painéis que abrem logo abaixo da ilha do canto superior esquerdo; só um fica aberto por vez. */
-type PainelDaBarra = "subagentes";
+type PainelDaBarra = "subagentes" | "skills";
 /** Nome e dica do botão do minimapa, no canto inferior direito. */
 const DICA_DO_MINIMAPA = { mostrar: "Mostrar minimapa", esconder: "Esconder minimapa" } as const;
 /**
@@ -1726,6 +1727,35 @@ function Canvas() {
   }, [servidor.conectado, lerSubagentesProntos]);
   // A biblioteca também muda pelo cartão do chat, fora dos painéis.
   useEffect(() => aoMudarSubagentesProntos(lerSubagentesProntos), [lerSubagentesProntos]);
+
+  // As skills do submenu "Skills ›" (as do usuário e as de plugins), lidas no mesmo momento
+  // que os subagentes: ao conectar o servidor, e não a cada abertura do menu.
+  const [skills, setSkills] = useState<DadosDaSkill[] | null>(null);
+  const [erroDasSkills, setErroDasSkills] = useState<string | null>(null);
+  useEffect(() => {
+    if (!servidor.conectado) {
+      setSkills(null);
+      setErroDasSkills(null);
+      return;
+    }
+    let ativo = true;
+    api
+      .lerSkills()
+      .then((listagem) => {
+        if (ativo) {
+          setSkills(listagem.skills);
+          setErroDasSkills(null);
+        }
+      })
+      .catch((falha: unknown) => {
+        if (ativo) {
+          setErroDasSkills(mensagemDeErro(falha));
+        }
+      });
+    return () => {
+      ativo = false;
+    };
+  }, [servidor.conectado]);
   // Salvar qualquer um dos painéis: os indicadores dos terminais e a lista podem ter mudado.
   const aoSalvarPainel = useCallback(() => {
     void recarregar();
@@ -1747,6 +1777,15 @@ function Canvas() {
     [abrirTerminal],
   );
   const abrirPainelDeSubagentes = useCallback(() => abrirPainel("subagentes"), [abrirPainel]);
+  const abrirPainelDeSkills = useCallback(() => abrirPainel("skills"), [abrirPainel]);
+  // Os orquestradores abertos no canvas: de onde a lista de Skills lê as skills de cada projeto.
+  const orquestradoresParaSkills = useMemo(
+    () =>
+      (orquestradores ?? [])
+        .filter((orquestrador) => noCanvas.has(orquestrador.id))
+        .map(({ id, nome }) => ({ id, nome })),
+    [orquestradores, noCanvas],
+  );
   const abrirConfiguracoesPadrao = useCallback(() => abrirConfiguracoes(), [abrirConfiguracoes]);
 
   // Os painéis não dependem da posição dos nós: memorizados, não re-renderizam
@@ -1768,8 +1807,12 @@ function Canvas() {
           aoEscolherOrquestrador={focarOrquestrador}
           subagentes={subagentesProntos}
           aoAbrirSubagentes={abrirPainelDeSubagentes}
+          skills={skills}
+          erroDasSkills={erroDasSkills}
+          aoAbrirSkills={abrirPainelDeSkills}
         />
         {painelAberto === "subagentes" && <PainelDeSubagentes aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />}
+        {painelAberto === "skills" && <PainelDeSkills orquestradores={orquestradoresParaSkills} aoFechar={fecharPainel} />}
         {avisoDoLimite && (
           <ErroDoCanvas erro={AVISO_DO_LIMITE_DE_ORQUESTRADORES} aoFechar={fecharAvisoDoLimite} nivel="aviso" />
         )}
@@ -1794,6 +1837,10 @@ function Canvas() {
       focarOrquestrador,
       subagentesProntos,
       abrirPainelDeSubagentes,
+      skills,
+      erroDasSkills,
+      abrirPainelDeSkills,
+      orquestradoresParaSkills,
       painelAberto,
       fecharPainel,
       aoSalvarPainel,

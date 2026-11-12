@@ -16,6 +16,7 @@ import { criarNotasRoutes } from "./controllers/notasRoutes";
 import { criarOrquestradoresRoutes } from "./controllers/orquestradoresRoutes";
 import { criarPromptsRoutes } from "./controllers/promptsRoutes";
 import { criarServidoresLocaisRoutes } from "./controllers/servidoresLocaisRoutes";
+import { criarSkillsRoutes } from "./controllers/skillsRoutes";
 import {
   acessoDoUpgrade,
   criarConexaoDosTerminais,
@@ -39,6 +40,7 @@ import { MotorClaudeCodeCli } from "./infraestrutura/claudecode/MotorClaudeCodeC
 import { MotorDeChatClaudeCodeCli } from "./infraestrutura/claudecode/MotorDeChatClaudeCodeCli";
 import { MotorDeMelhoriaDePromptClaudeCodeCli } from "./infraestrutura/claudecode/MotorDeMelhoriaDePromptClaudeCodeCli";
 import { sondarEnderecoLocal } from "./infraestrutura/claudecode/SondaDeEnderecoLocal";
+import { pastaDoClaude } from "./infraestrutura/claudecode/TranscricoesDoClaudeCode";
 import {
   Configuracao,
   lerConfiguracao,
@@ -63,6 +65,7 @@ import { ServicoDeArquivos } from "./orquestracao/ServicoDeArquivos";
 import { ServicoDeOrquestracao } from "./orquestracao/ServicoDeOrquestracao";
 import { agendadorDoRelogio } from "./orquestracao/VigiaDoTurno";
 import { ServicoDeMelhoriaDePrompt } from "./prompts/ServicoDeMelhoriaDePrompt";
+import { LeitorDeSkills } from "./skills/LeitorDeSkills";
 import { ServicoDeTerminais } from "./terminais/ServicoDeTerminais";
 
 type ConfiguracaoDaMontagem = Pick<
@@ -386,6 +389,11 @@ async function iniciar(): Promise<void> {
     rotas.use("/api", criarEscutaRoutes({ servico: servicoDeEscuta }));
     // Faixa de servidores: confere se os endereços locais citados pelos agentes ainda respondem.
     rotas.use("/api", criarServidoresLocaisRoutes({ sondar: sondarEnderecoLocal }));
+    // Skills do Claude Code (usuário, projeto e plugins): só leitura de nome e descrição.
+    rotas.use(
+      "/api",
+      criarSkillsRoutes({ leitor: new LeitorDeSkills({ pastaDoClaude: pastaDoClaude() }), repositorio }),
+    );
     rotas.use("/api", artefatos.rotas);
     rotas.use(
       "/api",

@@ -208,6 +208,27 @@ export interface SituacaoDoServidorLocal {
   noAr: boolean;
 }
 
+/** De onde vem uma skill do Claude Code: a pasta do usuário, a do projeto ou um plugin instalado. */
+export type OrigemDaSkill = "usuario" | "projeto" | "plugin";
+
+/** Uma skill cadastrada no Claude Code (`GET /skills`). Só leitura. */
+export interface DadosDaSkill {
+  nome: string;
+  descricao: string;
+  origem: OrigemDaSkill;
+  /** O nome do plugin dono da skill; nulo fora da origem "plugin". */
+  plugin: string | null;
+}
+
+export interface ListagemDeSkills {
+  skills: DadosDaSkill[];
+  /**
+   * Com orquestrador: se o nível de permissão dele deixa os agentes usarem skills (só com edição, fora do
+   * planejamento). Nulo quando a consulta não foi feita para um orquestrador.
+   */
+  liberadasNoNivel: boolean | null;
+}
+
 export type SituacaoDoOrquestrador ="ocioso" | "trabalhando";
 export type SituacaoDoTurno = "em_andamento" | "concluido" | "cancelado" | "falhou" | "interrompido";
 

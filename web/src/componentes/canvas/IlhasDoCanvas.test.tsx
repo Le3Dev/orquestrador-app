@@ -40,6 +40,9 @@ describe("IlhaDoNome", () => {
       aoEscolherOrquestrador: vi.fn(),
       subagentes: [],
       aoAbrirSubagentes: vi.fn(),
+      skills: [],
+      erroDasSkills: null,
+      aoAbrirSkills: vi.fn(),
     };
     render(<IlhaDoNome {...comuns} />);
 
@@ -56,6 +59,35 @@ describe("IlhaDoNome", () => {
     fireEvent.click(within(ilha).getByRole("button", { name: "Novo" }));
     fireEvent.click(within(ilha).getByRole("menuitem", { name: "Nota" }));
     expect(comuns.aoCriarNota).toHaveBeenCalledTimes(1);
+  });
+
+  it("não tem botão solto das Skills: a entrada é o submenu Skills do menu Novo, que abre o painel", () => {
+    const aoAbrirSkills = vi.fn();
+    render(
+      <IlhaDoNome
+        aoCriar={vi.fn()}
+        aoCriarNota={vi.fn()}
+        aoCriarPrevia={vi.fn()}
+        aoBuscar={vi.fn()}
+        aoAbrirConfiguracoes={vi.fn()}
+        orquestradores={[]}
+        erroDosOrquestradores={null}
+        noCanvas={new Set<string>()}
+        aoEscolherOrquestrador={vi.fn()}
+        subagentes={[]}
+        aoAbrirSubagentes={vi.fn()}
+        skills={[]}
+        erroDasSkills={null}
+        aoAbrirSkills={aoAbrirSkills}
+      />,
+    );
+    const ilha = screen.getByTestId("ilha-do-nome");
+    expect(within(ilha).getAllByRole("button").map((botao) => botao.getAttribute("aria-label"))).toEqual(["Novo"]);
+
+    fireEvent.click(within(ilha).getByRole("button", { name: "Novo" }));
+    fireEvent.click(within(ilha).getByRole("menuitem", { name: "Skills" }));
+    fireEvent.click(within(ilha).getByRole("menuitem", { name: "Ver todas as skills" }));
+    expect(aoAbrirSkills).toHaveBeenCalledTimes(1);
   });
 });
 

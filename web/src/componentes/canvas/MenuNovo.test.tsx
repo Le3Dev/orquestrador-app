@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 
-import type { DadosDoSubagentePronto, ResumoDoOrquestrador } from "../../shared/api/tipos";
+import type { DadosDaSkill, DadosDoSubagentePronto, ResumoDoOrquestrador } from "../../shared/api/tipos";
 import { MenuNovo, type PropsDoMenuNovo } from "./MenuNovo";
 
 function orquestrador(id: string, situacao: "trabalhando" | "ocioso", nome = `Orquestrador ${id}`): ResumoDoOrquestrador {
@@ -43,8 +43,15 @@ function acoes() {
     aoAbrirConfiguracoes: vi.fn(),
     aoEscolherOrquestrador: vi.fn(),
     aoAbrirSubagentes: vi.fn(),
+    aoAbrirSkills: vi.fn(),
   };
 }
+
+const SKILLS: DadosDaSkill[] = [
+  { nome: "revisar-pr", descricao: "Revisa um pull request.", origem: "usuario", plugin: null },
+  { nome: "deploy", descricao: "", origem: "plugin", plugin: "infra" },
+  { nome: "relatorio", descricao: "Monta o relatório semanal.", origem: "usuario", plugin: null },
+];
 
 function montar(extras: Partial<PropsDoMenuNovo> = {}) {
   const chamadas = acoes();
@@ -54,6 +61,8 @@ function montar(extras: Partial<PropsDoMenuNovo> = {}) {
     erroDosOrquestradores: null,
     noCanvas: new Set(["o1"]),
     subagentes: SUBAGENTES,
+    skills: SKILLS,
+    erroDasSkills: null,
     ...extras,
   };
   render(
@@ -93,6 +102,7 @@ describe("MenuNovo", () => {
       "Prévia",
       "Orquestradores",
       "Subagentes",
+      "Skills",
       "Buscar",
       "Configurações",
     ]);
@@ -111,6 +121,7 @@ describe("MenuNovo", () => {
     expect(item("Novo orquestrador")).toHaveAttribute("aria-keyshortcuts", "Control+N");
     expect(item("Nota")).toHaveAttribute("aria-keyshortcuts", "Control+Shift+N");
     expect(item("Buscar")).toHaveAttribute("aria-keyshortcuts", "Control+K");
+    expect(item("Skills")).not.toHaveAttribute("aria-keyshortcuts");
     expect(item("Terminal")).not.toHaveAttribute("aria-keyshortcuts");
     expect(item("Prévia")).not.toHaveAttribute("aria-keyshortcuts");
     expect(item("Configurações")).not.toHaveAttribute("aria-keyshortcuts");
@@ -196,6 +207,30 @@ describe("MenuNovo", () => {
     fireEvent.mouseDown(screen.getByRole("textbox", { name: "Campo de fora" }));
 
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("Subagentes e Skills têm a flechinha de submenu e a quantidade à direita, como Orquestradores", () => {
+    montar();
+    fireEvent.click(botao());
+
+    for (const [rotulo, total] of [
+      ["Orquestradores", "2"],
+      ["Subagentes", "2"],
+      ["Skills", "3"],
+    ] as const) {
+      const pai = item(rotulo);
+      expect(pai).toHaveAttribute("aria-haspopup", "menu");
+      expect(pai.querySelector(".contagem-do-menu-novo")).toHaveTextContent(total);
+      expect(pai.querySelector(".seta-do-menu-novo")).not.toBeNull();
+    }
+  });
+
+  it("sem a lista de skills ainda, a quantidade não aparece", () => {
+    montar({ skills: null });
+    fireEvent.click(botao());
+
+    expect(item("Skills").querySelector(".contagem-do-menu-novo")).toBeNull();
+    expect(item("Skills").querySelector(".seta-do-menu-novo")).not.toBeNull();
   });
 
   describe("submenu Orquestradores", () => {
@@ -363,6 +398,91 @@ describe("MenuNovo", () => {
 
       expect(screen.queryByRole("menu", { name: "Subagentes" })).not.toBeInTheDocument();
       expect(item(/^Subagentes/)).toHaveFocus();
+    });
+  });
+
+  describe("submenu Skills", () => {
+    it("lista as skills com nome e descrição, o plugin quando houver, e termina com Ver todas as skills", () => {
+      montar();
+      fireEvent.click(botao());
+      fireEvent.mouseEnter(item("Skills").parentElement!);
+
+      const submenu = screen.getByRole("menu", { name: "Skills" });
+      expect(item("Skills")).toHaveAttribute("aria-controls", submenu.id);
+      expect(submenu).toHaveTextContent("3 skills");
+      const revisar = within(submenu).getByRole("menuitem", { name: "revisar-pr: Revisa um pull request." });
+      expect(revisar).toHaveAttribute("title", "Revisa um pull request.");
+      const deploy = within(submenu).getByRole("menuitem", { name: "deploy" });
+      expect(deploy).toHaveTextContent("Sem descrição.");
+      expect(deploy).toHaveTextContent("infra");
+      const nomes = within(submenu)
+        .getAllByRole("menuitem")
+        .map((elemento) => elemento.getAttribute("aria-label") ?? elemento.textContent);
+      expect(nomes.slice(-1)).toEqual(["Ver todas as skills"]);
+    });
+
+    it.each(["Ver todas as skills", "relatorio: Monta o relatório semanal."])(
+      "%s abre o painel de skills e fecha o menu",
+      (rotulo) => {
+        const chamadas = montar();
+        fireEvent.click(botao());
+        fireEvent.click(item("Skills"));
+
+        fireEvent.click(screen.getByRole("menuitem", { name: rotulo }));
+
+        expect(chamadas.aoAbrirSkills).toHaveBeenCalledTimes(1);
+        expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+        expect(botao()).toHaveFocus();
+      },
+    );
+
+    it("sem skills, mostra o vazio e mantém Ver todas as skills", () => {
+      montar({ skills: [] });
+      fireEvent.click(botao());
+      fireEvent.click(item("Skills"));
+
+      expect(screen.getByText("Nenhuma skill encontrada.")).toBeInTheDocument();
+      expect(screen.getByRole("menuitem", { name: "Ver todas as skills" })).toBeInTheDocument();
+    });
+
+    it("com a lista ainda não carregada, o submenu diz que está carregando", () => {
+      montar({ skills: null });
+      fireEvent.click(botao());
+      fireEvent.click(item("Skills"));
+
+      expect(within(screen.getByRole("menu", { name: "Skills" })).getByText("carregando…")).toBeInTheDocument();
+    });
+
+    it("mostra o erro da leitura no lugar do vazio", () => {
+      montar({ skills: [], erroDasSkills: "falhou ao ler" });
+      fireEvent.click(botao());
+      fireEvent.click(item("Skills"));
+      expect(screen.getByRole("alert")).toHaveTextContent("falhou ao ler");
+      expect(screen.queryByText("Nenhuma skill encontrada.")).not.toBeInTheDocument();
+    });
+
+    it("→ abre com o foco na primeira skill, End vai a Ver todas as skills, ← volta ao pai e Enter numa skill abre o painel", () => {
+      const chamadas = montar();
+      fireEvent.click(botao());
+      item("Skills").focus();
+      fireEvent.keyDown(item("Skills"), { key: "ArrowRight" });
+      const itens = within(screen.getByRole("menu", { name: "Skills" })).getAllByRole("menuitem");
+      expect(itens).toHaveLength(4);
+      expect(itens[0]).toHaveFocus();
+
+      fireEvent.keyDown(itens[0]!, { key: "End" });
+      expect(itens[3]).toHaveFocus();
+      fireEvent.keyDown(itens[3]!, { key: "ArrowLeft" });
+      expect(screen.queryByRole("menu", { name: "Skills" })).not.toBeInTheDocument();
+      expect(item("Skills")).toHaveFocus();
+
+      fireEvent.keyDown(item("Skills"), { key: "Enter" });
+      const primeira = within(screen.getByRole("menu", { name: "Skills" })).getAllByRole("menuitem")[0]!;
+      expect(primeira).toHaveFocus();
+      fireEvent.keyDown(primeira, { key: "Enter" });
+
+      expect(chamadas.aoAbrirSkills).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     });
   });
 });
