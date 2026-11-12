@@ -1,27 +1,10 @@
 "use strict";
 
-// Configuração do app desktop (Electron) e da ativação por licença.
+// Configuração do app desktop (Electron) e da licença por assinatura.
 //
-// ──────────────────────────────────────────────────────────────────────────
-// LEMON SQUEEZY — onde o DONO do produto preenche os valores
-// ──────────────────────────────────────────────────────────────────────────
-// A ativação usa a API PÚBLICA de licenças do Lemon Squeezy. Ela NÃO exige um
-// backend próprio nem uma API key secreta: os três endpoints de licença
-// (activate/validate/deactivate) se autenticam apenas com a própria
-// `license_key` que o cliente digita. Portanto NADA secreto fica neste arquivo.
-//
-// Passos no painel do Lemon Squeezy (https://app.lemonsqueezy.com):
-//   1. Crie uma Store e um Product (ex.: "Orquestrador de Agentes").
-//   2. No Product, habilite "License keys" (licenciamento).
-//   3. Em "License key options", defina o nº máximo de ativações por chave.
-//      Para 1 máquina por licença: maxActivations = 1. (Isso é configurado LÁ,
-//      no painel — não aqui. O endpoint de activate retorna erro quando o
-//      limite é atingido; o app apenas mostra a mensagem.)
-//   4. (Opcional) Anote o Store ID e o Product/Variant ID só para conferência;
-//      eles NÃO são necessários para os endpoints de licença, mas deixamos
-//      campos abaixo caso você queira validar/filtrar no futuro.
-//
-// Os endpoints abaixo são fixos da Lemon Squeezy e normalmente não mudam.
+// A licença é emitida por um SERVIÇO DE LICENÇAS próprio (pasta
+// `servicoDeLicencas/`), que assina um token com Ed25519. O app só guarda a
+// chave PÚBLICA: nada secreto fica neste arquivo (o repositório é público).
 
 module.exports = {
   // Exigir licença no app instalado. false durante a fase de testes com os
@@ -31,26 +14,32 @@ module.exports = {
   // os apps instalados, que passam a pedir a chave na abertura seguinte.
   exigirLicenca: false,
 
-  // Endpoints públicos da API de licenças do Lemon Squeezy.
-  endpoints: {
-    activate: "https://api.lemonsqueezy.com/v1/licenses/activate",
-    validate: "https://api.lemonsqueezy.com/v1/licenses/validate",
-    deactivate: "https://api.lemonsqueezy.com/v1/licenses/deactivate",
-  },
+  // ⇩ PREENCHA antes de ligar `exigirLicenca`. Com qualquer um destes dois
+  // vazio (null) e a licença exigida, o app BLOQUEIA ("app sem configuração
+  // de licença").
 
-  // ⇩ PREENCHA (opcional) — apenas conferência. Deixe null se não for usar.
-  // Se você preencher expectedStoreId / expectedProductId, a ativação passa a
-  // EXIGIR que a licença pertença a essa loja/produto (defesa extra contra uso
-  // de chaves de outro produto). Com null, qualquer chave válida é aceita.
-  expectedStoreId: null, // ex.: 123456
-  expectedProductId: null, // ex.: 654321
+  // Endereço do serviço de licenças, sem barra no final. É a URL que o deploy
+  // do serviço devolve (ex.: https://licencas.SEU-DOMINIO.workers.dev).
+  urlDoServicoDeLicencas: null,
 
-  // Dias que o app continua abrindo OFFLINE após a última validação bem
-  // sucedida. Passado esse prazo sem conseguir validar online, bloqueia.
-  gracePeriodDays: 14,
+  // Chave PÚBLICA Ed25519 (formato SPKI PEM, "-----BEGIN PUBLIC KEY-----...").
+  // Gerada junto com a privada por `servicoDeLicencas/scripts/gerarChaves.mjs`;
+  // cole aqui só a pública. A privada vai apenas como segredo do serviço.
+  chavePublicaDaLicenca: null,
 
-  // Tempo máximo (ms) de espera nas chamadas HTTP à Lemon Squeezy.
-  requestTimeoutMs: 15000,
+  // Página de planos da landing, aberta pelo link "Assinar" da tela de ativação.
+  urlParaAssinar: null,
+
+  // Portal do cliente do Stripe (trocar cartão, cancelar, ver faturas), aberto
+  // por "Gerenciar assinatura". Link do portal em Stripe > Configurações >
+  // Billing > Portal do cliente.
+  urlDoPortalDoCliente: null,
+
+  // Tempo máximo (ms) de espera nas chamadas ao serviço de licenças.
+  tempoLimiteDaChamadaMs: 15000,
+
+  // De quanto em quanto tempo (ms) a licença é revalidada com o app aberto.
+  intervaloDeRevalidacaoMs: 24 * 60 * 60 * 1000,
 
   // Identidade do app desktop (também usada pelo electron-builder).
   appId: "com.orquestradoragentes.app",
