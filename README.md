@@ -83,6 +83,16 @@ npm run web:dev   # tela em http://localhost:5173 (repassa /api para a 3200)
 
 > Evite salvar arquivos do backend com um pedido rodando: no Windows, o `tsx watch` reinicia o servidor sem avisar o processo, e o `claude.exe` em andamento continua até terminar sozinho. O turno aparece como "interrompido" e pode ser reenviado.
 
+**Spike do motor Copilot** (só desenvolvimento; o app não usa o Copilot, ver ADR-43): roda os cenários do adaptador contra o **GitHub Copilot SDK real** e regrava as fixtures.
+- **Pré-requisito:** estar logado no Copilot (`copilot login` no Copilot CLI, ou `gh auth login` com acesso ao Copilot, ou `COPILOT_GITHUB_TOKEN`/`GH_TOKEN` no ambiente) e `npm install` (o `@github/copilot-sdk` é dependência de desenvolvimento e traz um runtime nativo de uns 190 MB). **Cada turno gasta AI Credits da conta:** o script usa o modelo mais barato do catálogo com esforço baixo (cerca de 12 turnos cobrados, ≈ 1 crédito no total). Sem login, ele avisa e não executa nenhum cenário com rede.
+- **Comandos:**
+  ```bash
+  npx tsx scripts/spike-copilot.mts --listar          # só login e modelos (não gasta crédito)
+  npx tsx scripts/spike-copilot.mts                   # os 10 cenários
+  npx tsx scripts/spike-copilot.mts --cenarios=3,9    # só alguns
+  ```
+- **Onde ficam:** tudo roda numa pasta temporária (`%TEMP%\spike-copilot`), nunca no repositório. As fixtures (eventos reais, já sem usuário, e-mail, token e caminhos da máquina) vão para `src/infraestrutura/copilot/fixtures/*.jsonl` (as `*.sintetica.jsonl` são montadas à mão); as medições, para um JSON em `%TEMP%\spike-copilot-resultado.json` (ou em `SPIKE_SAIDA`). Os testes (`npm test`) usam as fixtures e não precisam de login nem de rede.
+
 **Empacotar:**
 
 ```bash
@@ -386,6 +396,7 @@ Casos de teste dos **servidores e da vigia no Windows** (ver ADR-33 e ADR-36):
 - **Node 22+ / TypeScript 6** (estrito, `exactOptionalPropertyTypes`), **Express 5**, **zod 4** (validação da API), **vitest**.
 - **Tela:** React 19, Vite 6, Tailwind 4, react-markdown com remark-gfm e **React Flow** (`@xyflow/react` 12) para o canvas (ver ADR-8). Tema escuro com a paleta da Anthropic (ver ADR-7). Fontes empacotadas via `@fontsource`, sem CDN: Poppins, Lora e JetBrains Mono.
 - **Claude Code 2.1.x** (`claude -p --output-format stream-json`) como motor dos agentes.
+- **GitHub Copilot SDK 1.0.31** (`@github/copilot-sdk`, **dependência de desenvolvimento**, versão exata): só no spike do motor Copilot (`src/infraestrutura/copilot/` e `scripts/spike-copilot.mts`), fora do `root.ts` e do instalador (ver ADR-43).
 - **Tempo real:** Server-Sent Events. **Persistência:** arquivos JSON/JSONL.
 
 ## Arquitetura
@@ -549,6 +560,11 @@ src/
                                (stream-json → eventos do domínio), Argumentos, Motor,
                                ChamadaCurtaDoClaudeCode.ts (núcleo das chamadas curtas: melhoria
                                de prompt e escuta) e ClassificadorDePerguntaClaudeCodeCli.ts
+    copilot/                   spike do motor GitHub Copilot (ADR-43), sem ligação ao root.ts:
+                               FachadaCopilotSdk (runtime vivo), AdaptadorDeEventosDoCopilot
+                               (eventos da sessão → eventos do domínio, com fixtures reais),
+                               PoliticaDePermissoesDoCopilot (nível/modo/pastas → decisão) e
+                               MotorCopilotSdk (implementa MotorDeAgentes)
     arquivos/                  repositório JSON/JSONL dos Orquestradores, repositório das
                                notas (um JSON por nota), repositório do chat, listagem de pastas,
                                repositório dos artefatos (uma pasta por artefato) e a pasta de
@@ -1445,6 +1461,52 @@ flowchart TD
   - `setFocusable` em tempo de execução tem falhas conhecidas no Windows: o processo principal é defensivo (`try/catch` com log), e se falhar o chat continua funcionando, só pode roubar o foco ao clicar;
   - o campo só recebe teclas depois do primeiro clique nele (ou do `Ctrl+Shift+Space`); Tab e foco por teclado não valem para a janela não focável;
   - com uma janela cobrindo o monitor, a captura de cliques depende do `data-area-clicavel`: esquecê-lo numa peça nova a deixa "transparente" ao clique.
+
+**ADR-43 — Vários motores atrás de capacidades: Claude Code, GitHub Copilot (SDK) e Codex.** Atualiza os ADR-1, 2, 6, 9, 12 e 36. **Status: aceita; o Copilot está validado por um spike (Fase 0), sem ligação à tela, e o domínio ainda não foi generalizado (Fase 1).**
+- *Contexto:*
+  - o app nasceu com um motor só, o Claude Code headless (ADR-1), e o nome dele vaza pelo domínio: `ModeloClaude`, a cota global, os nomes de ferramenta, o `--resume`, o diagnóstico do `claude.exe`;
+  - o usuário quer usar também o **GitHub Copilot** (Copilot SDK, GA em 06/2026) e o **Codex** (OpenAI). Cada um traz recursos diferentes: o Codex não tem subagentes por API, nem cota no SDK, nem deixa escolher o id da sessão; o Copilot tem os três, mas roda um runtime vivo; só o Claude publica artefatos no claude.ai;
+  - plano, fila, worktree, nível de permissão e autorrecuperação já são do domínio do app (ADR-9, ADR-36), não do motor;
+  - o plano partia de documentação e código-fonte. O **spike** (`scripts/spike-copilot.mts`: 10 cenários, SDK 1.0.31 com o runtime 1.0.109, login real, modelo `claude-haiku-5.5` com esforço baixo, ≈ 1 crédito de IA) trocou as hipóteses do Copilot por fatos (abaixo). O Codex **não** foi executado: continua só em documentação.
+- *Decisão:*
+  - o motor é escolhido por Orquestrador (e por conversa do chat), num campo `motor` da configuração (`claude_code`, `copilot` ou `codex`; ausente, `claude_code`). Trocar de motor limpa a conversa: as sessões dos motores não são compatíveis;
+  - cada motor é um pacote de adaptadores atrás das portas que já existem (`MotorDeAgentes`, `MotorDeChat`, `MedidorDeConsumo?`, `EsforcoDaMaquina?`, `DiagnosticadorDoAgente?`), com a sua camada anticorrupção (ADR-6), e declara as suas `CapacidadesDoMotor`. A tela as recebe por `GET /motores` e esconde o que o motor não suporta. O modelo deixa de ser `ModeloClaude` e vira um id validado pelo catálogo do motor (`listModels` no Copilot); os apelidos do Claude continuam valendo;
+  - o plano continua do domínio (ADR-9): cada motor só garante a trava somente leitura com o que tem (ferramentas no Claude, lista fechada de ferramentas mais o handler de permissões no Copilot, sandbox no Codex);
+  - o Copilot roda **um runtime vivo por app** (`copilot-runtime`, processo filho falando JSON-RPC), e não um processo por turno: exceção ao ADR-2. As sessões vivem dentro dele, com o `sessaoId` do app como `sessionId`. Cancelar é `session.abort()`, com `taskkill` de reserva; o app o encerra no `stop()`;
+  - o Codex entra sem subagentes e sem cota;
+  - fases: **0** (feita) o spike em `src/infraestrutura/copilot/` (`FachadaCopilotSdk`, `AdaptadorDeEventosDoCopilot`, `PoliticaDePermissoesDoCopilot`, `MotorCopilotSdk` e fixtures reais), que nada do app importa; **1** generalizar o domínio (`NomeDoMotor`, `CapacidadesDoMotor`, modelo opaco, validação tolerante dos dados gravados, `GET /motores`); **2** ligar o Copilot (subagentes, instruções, cota, tela); depois o Codex;
+  - **o que o spike provou do Copilot:**
+    - *Retomada.* `resumeSession` com um cliente novo lembrou do assunto, mas tudo precisa ser reenviado: modelo, esforço, ferramentas, pastas, instruções e o handler de permissões. Ao contrário do `--resume` do Claude, o `systemMessage` novo **vale**. A retomada "morna" (sessão já viva no mesmo cliente) é aceita e **não troca** a lista de ferramentas; só soltar a sessão e retomar de novo (fria, ≈ 1,9 s) aplica a configuração nova. Uma sessão interrompida por `stop()` também retoma;
+    - *Cancelamento.* O `abort()` voltou em 24 ms e o `session.idle` com `aborted: true` chegou 36 ms depois; o `pwsh` do comando longo morreu e a sessão seguiu utilizável. O `stop()` com um comando ainda rodando (1,4 s) não deixou processo órfão no Windows 11 (o risco da issue #1804 não se repetiu); o `taskkill /T /F` fica de reserva e `derrubar()` atua se o runtime não responder ao `abort()`;
+    - *Permissões.* Todo pedido de `read`, `write` e `shell` passa pelo `onPermissionRequest`, até a leitura dentro da pasta de trabalho. Isso dá a trava somente leitura (gravar só na pasta de artefatos, ADR-26), a negação de `.env*` e o bloqueio de `git commit`/`git push`: o pedido `shell` traz o `fullCommandText` inteiro (mais `commandSegments` e `possiblePaths`), então a regra pega `git -C pasta push` e `pwsh -c "git push"`, que o `--disallowedTools` do Claude deixa passar. A recusa volta ao modelo como `feedback` e chega como `permission.completed: denied-*`. **Sem handler o pedido fica pendente e o turno trava: o handler é obrigatório.** `coauthorEnabled: false` tira o `Co-authored-by` (política do usuário);
+    - *Caminhos.* O runtime compara o caminho do pedido com as pastas da sessão: o `TEMP` do Windows no nome curto 8.3 (`C:\Users\NOME~1.SOB`) nunca casa e negava até o artefato. As pastas passam por `realpath`, como a de artefatos já passa no Claude;
+    - *Subagentes.* Funcionam: `customAgents` mais a ferramenta `task`. `subagent.started` e `subagent.completed` trazem o `agentId` da instância (também no envelope dos eventos do subagente), o `toolCallId` da chamada, `totalTokens`, `durationMs` e `totalToolCalls`; os pedidos de permissão do subagente passam pelo mesmo handler. A issue #2356 não se repetiu com um agente de `view`, `grep` e `glob`;
+    - *Cota.* O `assistant.usage.quotaSnapshots` (marcado `@internal` nos tipos, mas enviado) traz `premium_interactions` com `remainingPercentage` e `resetDate`: vira uma `JanelaDaCota` e, esgotada, o `liberaEm` da autorrecuperação. O limite de taxa (`rate_limit`) não traz horário. `copilotUsage.totalNanoAiu` dá o custo de cada chamada em créditos de IA;
+    - *Esforço e modelos.* `listModels` traz os esforços aceitos por modelo (de `low` a `max`, às vezes `none`) e o preço por milhão de tokens. Esforço num modelo que não o aceita falha no `createSession`; modelo ou esforço inexistente falha no primeiro turno (`session.error` com `errorType: "query"`);
+    - *Login.* Sem login, `getAuthStatus` diz `isAuthenticated: false`, o `listModels` falha ("Not authenticated") e o turno devolve `errorType: "query"` ("No GitHub OAuth token…"): vira `outro`, com a orientação de entrar. A issue #2369 diz que o orçamento esgotado aparece do mesmo jeito;
+    - *Vigia.* Qualquer evento do runtime é sinal de vida (`aoReceberLinha`), e o `assistant.reasoning_delta` vira `sinal_de_vida`. O pid do runtime só sai do campo privado `cliProcess` do cliente (frágil): a vigia segue por eventos, como já faz no Windows (ADR-36);
+    - *Pacote.* 1.0.31 (publicada em 10/11/2026, ainda a `latest`), com build CommonJS (`exports.require`). O `engines` pede Node `^20.19 || >=22.12`, mas a fachada compilada rodou no Node 20.18.3, o do Electron 33: **sem upgrade do Electron** (testado em Node puro; dentro do Electron ainda não). São 194,8 MB em disco no Windows (o runtime nativo `runtime.node` tem 139,6 MB), por isso é dependência de **desenvolvimento** nesta fase.
+  - **matriz de capacidades** (Claude e Copilot medidos; Codex só pela documentação):
+
+    | | Claude Code | Copilot SDK | Codex SDK |
+    |---|---|---|---|
+    | Subagentes | sim (`--agents`) | sim (`customAgents` + `task`, eventos com `agentId` e `totalTokens`) | não na 1ª versão |
+    | Plano (trava somente leitura) | sim (ferramentas) | sim (lista de ferramentas + handler; artefatos liberados) | `read-only`, sem artefatos |
+    | Cota | janelas de 5 h e 7 dias | `premium_interactions` mensal (`quotaSnapshots`, interno); sem horário no `rate_limit` | não |
+    | Retomada | `--resume`, id escolhido; instruções novas ignoradas | `resumeSession`, id escolhido; reenviar tudo; instruções novas valem; só a retomada fria troca as ferramentas | `resumeThread`, id devolvido pelo motor |
+    | Esforço | 7 níveis e `ultracode` | `low`…`max` por modelo (`listModels`) | `low`…`max` |
+    | Diagnóstico de processo | pid, CPU, filhos (fora do Windows) | só por eventos; pid por campo privado | só por eventos |
+    | Artefatos online | sim (claude.ai) | não | não |
+
+- *Consequências:*
+  - o domínio fica livre do nome "Claude" na Fase 1, e os dados antigos continuam válidos. Antes da primeira versão que grave `motor` ou modelos novos, uma versão anterior precisa ler tolerante: hoje um modelo desconhecido faz o `orquestrador.json` virar `.ilegivel.json` (o Orquestrador some da lista) e o `preferencias.json` perde a biblioteca de subagentes prontos;
+  - a tela fica condicional às capacidades. Os nomes de ferramenta do Copilot (`view`, `create`, `powershell`, `task`) não são os do Claude, e os ícones da tela dependem deles: a tradução é da Fase 1. O adaptador do spike deixa os nomes como o Copilot os escreve;
+  - mais binários: o Copilot soma ≈ 190 MB ao instalador e o Codex ≈ 500 MB. Empacotar o Copilot exige mover o SDK para `dependencies`, `asarUnpack` do pacote nativo da plataforma (um executável não roda de dentro do asar) e excluir os das outras plataformas, como já se faz com o `node-pty`;
+  - cada motor gasta a sua cobrança: AI Credits no Copilot (≈ 0,09 por turno simples com o modelo mais barato), assinatura ou API key no Codex;
+  - as regras de commit/push e de `.env` dependem do que cada motor deixa bloquear: no Copilot vale pelo handler; no Codex, sem garantia (o `read-only` lê tudo);
+  - o primeiro turno do Copilot leva ≈ 4 s até o primeiro texto e o seguinte, com a sessão viva, ≈ 0,9 s; a primeira ferramenta de terminal ≈ 7 s (o `pwsh` frio) e a retomada fria ≈ 2 s. Mudar o modo do turno (planejamento ↔ execução) muda as instruções e as ferramentas, e por isso força a retomada fria;
+  - o SDK é jovem (a 1.0.32 já está em preview): a versão fica exata em 1.0.31, e o `cliProcess` privado e o `quotaSnapshots` interno podem quebrar numa atualização. Os testes do adaptador com fixtures reais avisam;
+  - fica por validar: tarefas (`session.todos_changed` só avisa que mudou; a lista vem por RPC), endereços locais detectados, imagens e anexos, o Codex inteiro, o motor de chat e as chamadas curtas, e o SDK rodando de dentro do Electron empacotado.
 
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
