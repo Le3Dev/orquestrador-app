@@ -11,18 +11,22 @@ import type {
   EstadoDoChat,
   ListagemDaPasta,
   ListagemDeSkills,
+  ListagemDoCatalogo,
   ModeloClaude,
   ModoDoTurno,
   NavegacaoDePastas,
   NomeDaPredefinicao,
   NovoShell,
   OrigemDaPergunta,
+  OrigemDoCatalogo,
   PastaDeProjeto,
   PedidoDeClassificacaoDaEscuta,
   PedidoDeMelhoria,
+  PluginInstalado,
   PreferenciasDoChat,
   PreviaDoPrompt,
   PromptMelhorado,
+  ResultadoDaInstalacao,
   ResumoDoOrquestrador,
   SaudeDoServidor,
   SituacaoDoServidorLocal,
@@ -130,6 +134,15 @@ export interface NovoOrquestrador extends DadosDaConfiguracao {
 export interface AlteracaoDaNota {
   titulo?: string;
   texto?: string;
+}
+
+/** O que se pede ao catálogo de plugins; o que fica de fora usa o padrão do servidor (50 por página). */
+export interface ConsultaDoCatalogo {
+  busca?: string;
+  origem?: OrigemDoCatalogo;
+  limite?: number;
+  /** Quantos plugins pular: "carregar mais" pede a partir de quantos já chegaram. */
+  deslocamento?: number;
 }
 
 export const api = {
@@ -289,6 +302,50 @@ export const api = {
     requisitar<ListagemDeSkills>(
       orquestradorId === undefined ? "/skills" : `/skills?orquestrador=${encodeURIComponent(orquestradorId)}`,
     ),
+
+  // ---------------- Marketplace de plugins do Claude Code ----------------
+
+  /**
+   * O catálogo de plugins (oficial e diretório aberto). Falha com 503 sem internet e 504 com o tempo esgotado.
+   * Abortar o `sinal` cancela.
+   */
+  lerCatalogoDePlugins: (consulta: ConsultaDoCatalogo = {}, sinal?: AbortSignal) => {
+    const parametros = new URLSearchParams();
+    if (consulta.busca !== undefined && consulta.busca !== "") {
+      parametros.set("busca", consulta.busca);
+    }
+    if (consulta.origem !== undefined) {
+      parametros.set("origem", consulta.origem);
+    }
+    if (consulta.limite !== undefined) {
+      parametros.set("limite", String(consulta.limite));
+    }
+    if (consulta.deslocamento !== undefined && consulta.deslocamento > 0) {
+      parametros.set("deslocamento", String(consulta.deslocamento));
+    }
+    const texto = parametros.toString();
+    return requisitar<ListagemDoCatalogo>(`/plugins/catalogo${texto !== "" ? `?${texto}` : ""}`, {
+      ...(sinal ? { signal: sinal } : {}),
+    });
+  },
+
+  /** Os plugins instalados, com o que há dentro de cada um. */
+  lerPluginsInstalados: () => requisitar<{ plugins: PluginInstalado[] }>("/plugins/instalados"),
+
+  /**
+   * Instala um plugin do catálogo. Com hook, pasta bin ou inventário não verificado, ele chega desligado e `precisaConfirmar` é verdadeiro.
+   * Recusado com 409 (outra instalação em andamento), 502 (falha do Claude Code), 503 (sem internet) ou 504.
+   */
+  instalarPlugin: (id: string) =>
+    requisitar<ResultadoDaInstalacao>("/plugins/instalar", { method: "POST", body: JSON.stringify({ id }) }),
+
+  ligarPlugin: (id: string) =>
+    requisitar<{ plugin: PluginInstalado }>(`/plugins/${encodeURIComponent(id)}/ligar`, { method: "POST" }),
+
+  desligarPlugin: (id: string) =>
+    requisitar<{ plugin: PluginInstalado }>(`/plugins/${encodeURIComponent(id)}/desligar`, { method: "POST" }),
+
+  removerPlugin: (id: string) => requisitar<null>(`/plugins/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   lerPreferencias: () => requisitar<DadosDasPreferencias>("/preferencias"),
 

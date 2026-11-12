@@ -229,6 +229,67 @@ export interface ListagemDeSkills {
   liberadasNoNivel: boolean | null;
 }
 
+/** Onde procurar no catálogo de plugins: o marketplace oficial, o diretório aberto ou os dois. */
+export type OrigemDoCatalogo = "oficial" | "aberto" | "todos";
+
+/** Um plugin do catálogo (`GET /plugins/catalogo`), instalado ou não. */
+export interface PluginDoCatalogo {
+  /** "nome@marketplace": vai codificado na URL das ações. */
+  id: string;
+  nome: string;
+  descricao: string;
+  marketplace: string;
+  /** Do marketplace oficial da Anthropic. */
+  oficial: boolean;
+  instalacoes: number | null;
+  versao: string | null;
+  /** De onde o plugin vem (repositório); nulo quando o catálogo não informa. */
+  fonte: string | null;
+  instalado: boolean;
+  /**
+   * Skills avulsas e servidores MCP da conta do usuário com nome parecido com o do plugin (instalar pode
+   * duplicar o serviço). Vazio quando não há nada parecido; ausente em resposta de servidor antigo.
+   */
+  jaTem?: { skills: string[]; servidoresMcp: string[] };
+}
+
+/** Uma página do catálogo, com o total da busca e os totais de cada origem. */
+export interface ListagemDoCatalogo {
+  plugins: PluginDoCatalogo[];
+  total: number;
+  totais: { oficial: number; aberto: number };
+}
+
+/** O que há dentro de um plugin instalado. */
+export interface InventarioDoPlugin {
+  skills: { nome: string; descricao: string }[];
+  subagentes: number;
+  servidoresMcp: number;
+  hooks: number;
+  /** `false` quando alguma leitura falhou ou foi truncada: o resultado não prova a ausência de hooks. */
+  verificado: boolean;
+  /** O plugin traz uma pasta `bin/`, que entra no PATH do terminal dos agentes. */
+  temBin: boolean;
+}
+
+/** Um plugin instalado no Claude Code (`GET /plugins/instalados`). */
+export interface PluginInstalado {
+  id: string;
+  nome: string;
+  marketplace: string;
+  oficial: boolean;
+  versao: string | null;
+  ligado: boolean;
+  instaladoEm: string | null;
+  inventario: InventarioDoPlugin;
+}
+
+/** O resultado de instalar: com hook, pasta bin ou inventário não verificado, o plugin chega desligado e `precisaConfirmar` pede o ok do usuário. */
+export interface ResultadoDaInstalacao {
+  plugin: PluginInstalado;
+  precisaConfirmar: boolean;
+}
+
 export type SituacaoDoOrquestrador ="ocioso" | "trabalhando";
 export type SituacaoDoTurno = "em_andamento" | "concluido" | "cancelado" | "falhou" | "interrompido";
 

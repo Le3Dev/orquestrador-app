@@ -19,6 +19,8 @@ import {
   IconeSetaDireita,
   IconeTrabalhando,
 } from "./IconesDasIlhas";
+import { nomeAmigavel } from "./dadosDoPlugin";
+import { IconeExplorar } from "./IconesDoMarketplace";
 import "../../theme/ilhas.css";
 
 /** O submenu aberto ao lado do menu: a lista de orquestradores, a de subagentes prontos ou a de skills. */
@@ -72,8 +74,10 @@ export interface PropsDoMenuNovo {
   /** As skills do Claude Code (do usuário e de plugins). Nulo enquanto a lista não chegou. */
   skills: readonly DadosDaSkill[] | null;
   erroDasSkills: string | null;
-  /** Uma skill da lista e "Ver todas as skills": abrem o painel das skills do Claude Code (só leitura). */
+  /** Uma skill da lista e "Ver todas as skills": abrem o painel das skills do Claude Code, na aba Instaladas. */
   aoAbrirSkills: () => void;
+  /** "Explorar marketplace": abre o mesmo painel já na aba Explorar, o catálogo de plugins. */
+  aoExplorarMarketplace: () => void;
 }
 
 /** O texto de um orquestrador para o leitor de tela. */
@@ -92,7 +96,7 @@ function plural(total: number, singular: string, pluralDoTermo: string): string 
  * e divisores entre os grupos. Grupo 1: o que criar. Grupo 2: "Orquestradores ›",
  * "Subagentes ›" e "Skills ›", cada um com a quantidade à direita, que abrem um segundo
  * painel à direita (ao passar o mouse, clicar ou com →); escolher uma skill ou
- * "Ver todas as skills" abre o painel das skills. Grupo 3: busca e configurações.
+ * "Ver todas as skills" abre o painel das skills, e "Explorar marketplace" o abre no catálogo de plugins. Grupo 3: busca e configurações.
  *
  * Teclado: ↓ ou Enter no botão abrem; ↑/↓ (e Home/End) navegam; → entra no
  * submenu e ← (ou Esc) volta dele; Enter ativa; Esc, Tab e clique fora fecham.
@@ -113,6 +117,7 @@ export function MenuNovo({
   skills,
   erroDasSkills,
   aoAbrirSkills,
+  aoExplorarMarketplace,
 }: PropsDoMenuNovo) {
   const [aberto, setAberto] = useState(false);
   const [submenu, setSubmenu] = useState<IdDoSubmenu | null>(null);
@@ -200,7 +205,7 @@ export function MenuNovo({
         rotulo: "Skills",
         icone: <IconeSkills tamanho={18} />,
         contagem: skills?.length ?? null,
-        dica: "As skills do Claude Code: do usuário e de plugins (só leitura)",
+        dica: "As skills do Claude Code e o marketplace de plugins",
       },
     ];
     const outros: ItemDoMenu[] = [
@@ -295,6 +300,11 @@ export function MenuNovo({
     aoAbrirSkills();
   };
 
+  const explorarMarketplace = () => {
+    fechar(true);
+    aoExplorarMarketplace();
+  };
+
   /** Abre o submenu e, vindo do teclado, leva o foco ao primeiro item dele. */
   const abrirSubmenu = (id: IdDoSubmenu, comFoco: boolean) => {
     if (comFoco && submenu === id) {
@@ -333,7 +343,12 @@ export function MenuNovo({
     const lista = dentroDoSubmenu ? itensDoSubmenu.current : itensPrincipais.current;
     const itensDaLista = lista.filter((item): item is HTMLButtonElement => item !== null);
     const atual = itensDaLista.findIndex((item) => item === alvo);
-    const focar = (indice: number) => itensDaLista[indice]?.focus();
+    const focar = (indice: number) => {
+      const proximo = itensDaLista[indice];
+      proximo?.focus();
+      // Num submenu longo, o item some da área que rola; "nearest" o traz sem pular a lista.
+      proximo?.scrollIntoView?.({ block: "nearest" });
+    };
     switch (evento.key) {
       case "ArrowDown":
         evento.preventDefault();
@@ -410,49 +425,51 @@ export function MenuNovo({
               ? "carregando…"
               : `${plural(orquestradores.length, "orquestrador", "orquestradores")}${trabalhando > 0 ? `, ${trabalhando} trabalhando` : ""}`}
           </div>
-          {erroDosOrquestradores !== null && (
-            <div className="alert alert-error m-1" role="alert">
-              {erroDosOrquestradores}
-            </div>
-          )}
-          {orquestradores !== null && orquestradores.length === 0 && (
-            <p className="texto-do-submenu">Nenhum orquestrador ainda.</p>
-          )}
-          {(orquestradores ?? []).map((orquestrador) => {
-            const trabalhandoAgora = orquestrador.situacao === "trabalhando";
-            const abertoNoCanvas = noCanvas.has(orquestrador.id);
-            return (
-              <button
-                key={orquestrador.id}
-                ref={refDoItem()}
-                type="button"
-                role="menuitem"
-                tabIndex={-1}
-                className="item-de-lista-do-menu"
-                data-orquestrador={orquestrador.id}
-                aria-label={descreverOrquestrador(orquestrador, abertoNoCanvas)}
-                title={abertoNoCanvas ? "Ir até a janela dele" : "Abrir o terminal no canvas"}
-                onClick={() => escolherOrquestrador(orquestrador.id)}
-              >
-                <span className={`selo-do-item ${trabalhandoAgora ? "selo-do-item-ativo" : ""}`} aria-hidden="true">
-                  {trabalhandoAgora ? <IconeTrabalhando tamanho={16} /> : <IconeParado tamanho={12} />}
-                </span>
-                <span className="texto-do-item" aria-hidden="true">
-                  <strong>{orquestrador.nome}</strong>
-                  <span>
-                    {trabalhandoAgora ? "trabalhando" : "parado"}
-                    <span className="mono">· {orquestrador.nomeDaPasta}</span>
-                  </span>
-                </span>
-                <span
-                  className={`situacao-no-canvas ${abertoNoCanvas ? "situacao-no-canvas-aberto" : ""}`}
-                  aria-hidden="true"
+          <div className="lista-do-submenu custom-scrollbar">
+            {erroDosOrquestradores !== null && (
+              <div className="alert alert-error m-1" role="alert">
+                {erroDosOrquestradores}
+              </div>
+            )}
+            {orquestradores !== null && orquestradores.length === 0 && (
+              <p className="texto-do-submenu">Nenhum orquestrador ainda.</p>
+            )}
+            {(orquestradores ?? []).map((orquestrador) => {
+              const trabalhandoAgora = orquestrador.situacao === "trabalhando";
+              const abertoNoCanvas = noCanvas.has(orquestrador.id);
+              return (
+                <button
+                  key={orquestrador.id}
+                  ref={refDoItem()}
+                  type="button"
+                  role="menuitem"
+                  tabIndex={-1}
+                  className="item-de-lista-do-menu"
+                  data-orquestrador={orquestrador.id}
+                  aria-label={descreverOrquestrador(orquestrador, abertoNoCanvas)}
+                  title={abertoNoCanvas ? "Ir até a janela dele" : "Abrir o terminal no canvas"}
+                  onClick={() => escolherOrquestrador(orquestrador.id)}
                 >
-                  {abertoNoCanvas ? "no canvas" : "abrir"}
-                </span>
-              </button>
-            );
-          })}
+                  <span className={`selo-do-item ${trabalhandoAgora ? "selo-do-item-ativo" : ""}`} aria-hidden="true">
+                    {trabalhandoAgora ? <IconeTrabalhando tamanho={16} /> : <IconeParado tamanho={12} />}
+                  </span>
+                  <span className="texto-do-item" aria-hidden="true">
+                    <strong>{orquestrador.nome}</strong>
+                    <span>
+                      {trabalhandoAgora ? "trabalhando" : "parado"}
+                      <span className="mono">· {orquestrador.nomeDaPasta}</span>
+                    </span>
+                  </span>
+                  <span
+                    className={`situacao-no-canvas ${abertoNoCanvas ? "situacao-no-canvas-aberto" : ""}`}
+                    aria-hidden="true"
+                  >
+                    {abertoNoCanvas ? "no canvas" : "abrir"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
           <p className="rodape-do-submenu">Escolher leva até a janela dele no canvas.</p>
         </>
       );
@@ -463,43 +480,59 @@ export function MenuNovo({
           <div className="titulo-do-submenu">
             {skills === null ? "carregando…" : plural(skills.length, "skill", "skills")}
           </div>
-          {erroDasSkills !== null && (
-            <div className="alert alert-error m-1" role="alert">
-              {erroDasSkills}
-            </div>
-          )}
-          {skills !== null && skills.length === 0 && erroDasSkills === null && (
-            <p className="texto-do-submenu">Nenhuma skill encontrada.</p>
-          )}
-          {(skills ?? []).map((skill) => (
+          <div className="lista-do-submenu custom-scrollbar">
+            {erroDasSkills !== null && (
+              <div className="alert alert-error m-1" role="alert">
+                {erroDasSkills}
+              </div>
+            )}
+            {skills !== null && skills.length === 0 && erroDasSkills === null && (
+              <p className="texto-do-submenu">Nenhuma skill encontrada.</p>
+            )}
+            {(skills ?? []).map((skill) => (
+              <button
+                key={`${skill.origem}:${skill.plugin ?? ""}:${skill.nome}`}
+                ref={refDoItem()}
+                type="button"
+                role="menuitem"
+                tabIndex={-1}
+                className="item-de-lista-do-menu"
+                aria-label={skill.descricao === "" ? skill.nome : `${skill.nome}: ${skill.descricao}`}
+                title={skill.descricao === "" ? "Abrir o painel de skills" : skill.descricao}
+                onClick={abrirSkills}
+              >
+                <span className="selo-do-item" aria-hidden="true">
+                  <IconeSkills tamanho={16} />
+                </span>
+                <span className="texto-do-item" aria-hidden="true">
+                  <strong>{nomeAmigavel(skill)}</strong>
+                  <span>
+                    <span className="descricao-do-subagente">
+                      {skill.descricao === "" ? "Sem descrição." : skill.descricao}
+                    </span>
+                    {skill.origem === "plugin" && skill.plugin !== null && (
+                      <span className="mono plugin-da-skill">· {skill.plugin}</span>
+                    )}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+          <div className="acoes-do-submenu">
             <button
-              key={`${skill.origem}:${skill.plugin ?? ""}:${skill.nome}`}
               ref={refDoItem()}
               type="button"
               role="menuitem"
               tabIndex={-1}
-              className="item-de-lista-do-menu"
-              aria-label={skill.descricao === "" ? skill.nome : `${skill.nome}: ${skill.descricao}`}
-              title={skill.descricao === "" ? "Abrir o painel de skills" : skill.descricao}
-              onClick={abrirSkills}
+              className="item-do-menu-novo is-explorar"
+              title="Procurar e instalar plugins do Claude Code"
+              onClick={explorarMarketplace}
             >
-              <span className="selo-do-item" aria-hidden="true">
-                <IconeSkills tamanho={16} />
+              <span className="icone-do-menu-novo" aria-hidden="true">
+                <IconeExplorar tamanho={18} />
               </span>
-              <span className="texto-do-item" aria-hidden="true">
-                <strong>{skill.nome}</strong>
-                <span>
-                  <span className="descricao-do-subagente">
-                    {skill.descricao === "" ? "Sem descrição." : skill.descricao}
-                  </span>
-                  {skill.origem === "plugin" && skill.plugin !== null && (
-                    <span className="mono plugin-da-skill">· {skill.plugin}</span>
-                  )}
-                </span>
-              </span>
+              <span className="rotulo-do-menu-novo">Explorar marketplace</span>
             </button>
-          ))}
-          <div className="acoes-do-submenu">
             <button
               ref={refDoItem()}
               type="button"
@@ -522,32 +555,34 @@ export function MenuNovo({
         <div className="titulo-do-submenu">
           {subagentes === null ? "carregando…" : plural(subagentes.length, "subagente pronto", "subagentes prontos")}
         </div>
-        {subagentes !== null && subagentes.length === 0 && (
-          <p className="texto-do-submenu">Nenhum subagente pronto ainda.</p>
-        )}
-        {(subagentes ?? []).map((subagente) => (
-          <button
-            key={subagente.nome}
-            ref={refDoItem()}
-            type="button"
-            role="menuitem"
-            tabIndex={-1}
-            className="item-de-lista-do-menu"
-            aria-label={`${subagente.nome}: ${subagente.descricao}`}
-            title="Abrir o painel de subagentes prontos"
-            onClick={abrirSubagentes}
-          >
-            <span className="selo-do-item" aria-hidden="true">
-              <IconePessoas tamanho={16} />
-            </span>
-            <span className="texto-do-item" aria-hidden="true">
-              <strong>{subagente.nome}</strong>
-              <span>
-                <span className="descricao-do-subagente">{subagente.descricao}</span>
+        <div className="lista-do-submenu custom-scrollbar">
+          {subagentes !== null && subagentes.length === 0 && (
+            <p className="texto-do-submenu">Nenhum subagente pronto ainda.</p>
+          )}
+          {(subagentes ?? []).map((subagente) => (
+            <button
+              key={subagente.nome}
+              ref={refDoItem()}
+              type="button"
+              role="menuitem"
+              tabIndex={-1}
+              className="item-de-lista-do-menu"
+              aria-label={`${subagente.nome}: ${subagente.descricao}`}
+              title="Abrir o painel de subagentes prontos"
+              onClick={abrirSubagentes}
+            >
+              <span className="selo-do-item" aria-hidden="true">
+                <IconePessoas tamanho={16} />
               </span>
-            </span>
-          </button>
-        ))}
+              <span className="texto-do-item" aria-hidden="true">
+                <strong>{subagente.nome}</strong>
+                <span>
+                  <span className="descricao-do-subagente">{subagente.descricao}</span>
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
         <div className="acoes-do-submenu">
           <button
             ref={refDoItem()}
@@ -682,7 +717,7 @@ export function MenuNovo({
                         role="menu"
                         aria-label={item.rotulo}
                         data-submenu={item.id}
-                        className="submenu-novo custom-scrollbar nodrag nopan nowheel"
+                        className="submenu-novo nodrag nopan nowheel"
                       >
                         {conteudoDoSubmenu(item.id)}
                       </div>

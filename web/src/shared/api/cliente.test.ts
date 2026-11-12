@@ -191,3 +191,100 @@ describe("itens ligados no pedido", () => {
     expect(argumentosDoContexto([], ["http://localhost:5173"])).toEqual([[], ["http://localhost:5173"]]);
   });
 });
+
+describe("plugins do Claude Code", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const PLUGIN = {
+    id: "apollo-skills@claude-plugins-official",
+    nome: "apollo-skills",
+    marketplace: "claude-plugins-official",
+    oficial: true,
+    versao: "0.3.1",
+    ligado: false,
+    instaladoEm: null,
+    inventario: { skills: [], subagentes: 0, servidoresMcp: 1, hooks: 1, verificado: true, temBin: false },
+  };
+
+  it("lerCatalogoDePlugins sem consulta chama o catálogo puro, sem parâmetros", async () => {
+    const buscar = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      respostaJson({ plugins: [], total: 0, totais: { oficial: 317, aberto: 3662 } }),
+    );
+
+    await expect(api.lerCatalogoDePlugins()).resolves.toEqual({ plugins: [], total: 0, totais: { oficial: 317, aberto: 3662 } });
+
+    expect(buscar.mock.calls[0]?.[0]).toBe("/api/plugins/catalogo");
+  });
+
+  it("lerCatalogoDePlugins leva a busca, a origem, o limite e o deslocamento, e omite o que está vazio ou zerado", async () => {
+    const buscar = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      respostaJson({ plugins: [], total: 0, totais: { oficial: 0, aberto: 0 } }),
+    );
+
+    await api.lerCatalogoDePlugins({ busca: "banco de dados", origem: "aberto", limite: 20, deslocamento: 40 });
+    const url = new URL(String(buscar.mock.calls[0]?.[0]), "http://app.local");
+    expect(url.pathname).toBe("/api/plugins/catalogo");
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      busca: "banco de dados",
+      origem: "aberto",
+      limite: "20",
+      deslocamento: "40",
+    });
+
+    await api.lerCatalogoDePlugins({ busca: "", origem: "oficial", deslocamento: 0 });
+    expect(buscar.mock.calls[1]?.[0]).toBe("/api/plugins/catalogo?origem=oficial");
+  });
+
+  it("o erro do catálogo traz a mensagem pronta e o status (503 sem internet)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(respostaJson({ erro: "Sem conexão com a internet." }, 503));
+
+    const falha = await api.lerCatalogoDePlugins().catch((erro: unknown) => erro);
+
+    expect(falha).toBeInstanceOf(ErroDaApi);
+    expect(falha).toMatchObject({ message: "Sem conexão com a internet.", status: 503 });
+  });
+
+  it("lerPluginsInstalados lê a lista", async () => {
+    const buscar = vi.spyOn(globalThis, "fetch").mockResolvedValue(respostaJson({ plugins: [PLUGIN] }));
+
+    await expect(api.lerPluginsInstalados()).resolves.toEqual({ plugins: [PLUGIN] });
+
+    expect(buscar.mock.calls[0]?.[0]).toBe("/api/plugins/instalados");
+  });
+
+  it("instalarPlugin manda o id no corpo e devolve se precisa de confirmação", async () => {
+    const buscar = vi.spyOn(globalThis, "fetch").mockResolvedValue(respostaJson({ plugin: PLUGIN, precisaConfirmar: true }));
+
+    await expect(api.instalarPlugin(PLUGIN.id)).resolves.toEqual({ plugin: PLUGIN, precisaConfirmar: true });
+
+    expect(buscar.mock.calls[0]?.[0]).toBe("/api/plugins/instalar");
+    expect(buscar.mock.calls[0]?.[1]).toMatchObject({ method: "POST" });
+    expect(JSON.parse(String(buscar.mock.calls[0]?.[1]?.body))).toEqual({ id: "apollo-skills@claude-plugins-official" });
+  });
+
+  it("ligar, desligar e remover codificam o id (que tem @) na URL", async () => {
+    const buscar = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, opcoes) =>
+      opcoes?.method === "DELETE" ? new Response(null, { status: 204 }) : respostaJson({ plugin: PLUGIN }),
+    );
+
+    await api.ligarPlugin(PLUGIN.id);
+    await api.desligarPlugin(PLUGIN.id);
+    await expect(api.removerPlugin(PLUGIN.id)).resolves.toBeNull();
+
+    expect(buscar.mock.calls.map(([url, opcoes]) => [url, opcoes?.method])).toEqual([
+      ["/api/plugins/apollo-skills%40claude-plugins-official/ligar", "POST"],
+      ["/api/plugins/apollo-skills%40claude-plugins-official/desligar", "POST"],
+      ["/api/plugins/apollo-skills%40claude-plugins-official", "DELETE"],
+    ]);
+  });
+
+  it("a instalação recusada traz o status do servidor (409, 502, 503, 504)", async () => {
+    for (const status of [409, 502, 503, 504]) {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(respostaJson({ erro: `falha ${status}` }, status));
+      const falha = await api.instalarPlugin("x@y").catch((erro: unknown) => erro);
+      expect(falha).toMatchObject({ message: `falha ${status}`, status });
+    }
+  });
+});

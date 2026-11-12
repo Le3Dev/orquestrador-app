@@ -1,0 +1,511 @@
+/* ==========================================================================
+   Painel de Skills: abas Instaladas e Explorar (o marketplace de plugins)
+   ==========================================================================
+   Direção A do mockup aprovado (entregas/marketplace-de-skills-visual.html): lista em coluna
+   única, sem cartões. Só tokens do tema (index.css); o laranja (--active) é o único destaque:
+   aba e filtro ativos, "Instalar" no hover, CTA e foco. Hook e "pede confirmação" usam
+   --warning em tom baixo, sem vermelho. O erro leva ícone e uma saída, nunca só a cor. */
+
+.painel-de-skills { position: relative; width: 640px; }
+.painel-de-skills a.btn { text-decoration: none; }
+
+/* ---------- Cabeçalho e abas ---------- */
+.mk-cab {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex: none;
+  padding: 18px 14px 0 20px;
+}
+.mk-cab h2 { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600; }
+.mk-cab h2 svg { color: var(--active); }
+.mk-cab .sub { margin: 2px 0 0; font-size: 12px; color: var(--secondary); }
+.mk-abas {
+  display: flex;
+  gap: 24px;
+  flex: none;
+  padding: 0 20px;
+  margin-top: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.mk-aba {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: 500 12.5px var(--fonte-titulo);
+  color: var(--secondary);
+  cursor: pointer;
+  transition: color .15s;
+}
+.mk-aba:hover { color: var(--primary); }
+.mk-aba:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; border-radius: 4px; }
+.mk-aba[aria-selected="true"] { color: var(--primary); }
+.mk-aba[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--active);
+}
+.mk-aba .n { font: 500 11px var(--fonte-mono); color: var(--secondary); }
+
+/* O corpo de cada aba. `hidden` perde para o `display` daqui, então o atributo é reforçado. */
+.mk-corpo { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.mk-corpo[hidden] { display: none; }
+/* Explorar tem uma altura de partida, para o painel não pular entre a lista, o detalhe e os estados. */
+.mk-corpo-explorar { flex: 1 1 560px; }
+.mk-catalogo { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.mk-rodape {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: none;
+  padding: 10px 20px 12px;
+  font-size: 11.5px;
+  color: var(--secondary);
+}
+.mk-rodape span { display: inline-flex; align-items: center; gap: 6px; }
+.mk-rodape .mono { font-size: 11px; }
+
+/* ---------- Busca e filtros ---------- */
+.mk-busca { position: relative; flex: none; padding: 16px 20px 0; }
+.mk-busca-instaladas { padding-bottom: 4px; }
+.mk-busca input {
+  width: 100%;
+  height: 40px;
+  padding: 0 44px 0 40px;
+  border-radius: 10px;
+  border: 1px solid var(--border-forte);
+  background: var(--screen-bg);
+  color: var(--primary);
+  font: 13px var(--fonte-texto);
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.mk-busca input::placeholder { color: var(--placeholder); }
+.mk-busca input:focus {
+  border-color: var(--active);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--active) 22%, transparent);
+}
+.mk-busca .lupa { position: absolute; left: 33px; top: 28px; color: var(--secondary); pointer-events: none; }
+.mk-busca kbd {
+  position: absolute;
+  right: 32px;
+  top: 29px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: var(--surface-3);
+  color: var(--secondary);
+  font: 500 11px var(--fonte-mono);
+  pointer-events: none;
+}
+.mk-filtros { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: none; padding: 12px 20px 6px; }
+.mk-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.mk-seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  font: 500 12px var(--fonte-titulo);
+  color: var(--secondary);
+  cursor: pointer;
+  transition: background-color .15s, color .15s;
+}
+.mk-seg button:hover { color: var(--primary); }
+.mk-seg button:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
+.mk-seg button[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--active) 16%, var(--surface-3));
+  color: var(--primary);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--active) 50%, transparent);
+}
+.mk-seg .n { font: 500 10.5px var(--fonte-mono); color: var(--secondary); }
+.mk-ordem { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; font-size: 12px; color: var(--secondary); }
+.mk-aviso {
+  flex: none;
+  margin: 6px 20px 0;
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface));
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--caption);
+}
+.mk-aviso svg { flex: none; margin-top: 2px; color: var(--warning); }
+.mk-aviso b { font-weight: 600; color: var(--primary); }
+
+/* ---------- Lista do catálogo ---------- */
+.mk-lista { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 12px 12px; display: flex; flex-direction: column; gap: 2px; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+.mk-linha {
+  position: relative;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 14px 10px 15px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background-color .12s;
+}
+.mk-linha:hover { background: var(--surface-2); }
+/* O laranja no hover é só de quem não tem nada parecido: com "já tem", a ação desaconselhada não chama. */
+.mk-linha:not([data-ja-tem]):hover .mk-instalar { background: var(--active); border-color: var(--active); color: var(--claude-escuro); }
+.mk-linha .acao { align-self: center; min-width: 86px; display: flex; justify-content: flex-end; }
+/* "Instalar mesmo assim": contorno neutro, sem laranja nem no hover. */
+.btn-outline.mk-instalar-parecido { background: transparent; color: var(--secondary); white-space: nowrap; }
+.mk-linha[data-ja-tem] .mk-instalar-parecido:hover { background: var(--surface-3); border-color: var(--secondary); color: var(--primary); }
+.mk-titulo { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mk-nome {
+  font: 600 13.5px/1.3 var(--fonte-titulo);
+  color: var(--primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* O nome é um botão (o caminho do teclado para o detalhe) que parece texto. */
+.mk-nome-botao { padding: 0; border: 0; background: none; text-align: left; cursor: pointer; }
+.mk-nome-botao:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; border-radius: 4px; }
+.mk-desc {
+  margin: 3px 0 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--secondary);
+}
+.mk-meta { margin-top: 7px; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--secondary); }
+.mk-meta svg { flex: none; }
+.mk-meta.erro { color: var(--caption); }
+.mk-meta.erro svg { color: var(--error); }
+/* "Você já tem a skill x": o que o usuário já tem, escrito na linha (até duas linhas), com o ícone no topo. */
+.mk-meta.mk-ja-tem-meta { align-items: flex-start; line-height: 1.45; color: var(--caption); }
+.mk-meta.mk-ja-tem-meta svg { margin-top: 2px; color: var(--warning); }
+.mk-ja-tem-meta .mono { font-size: 11px; color: var(--primary); }
+.mk-buscando { margin: 0; padding: 0 10px 4px; }
+.mk-avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--s, 40px);
+  height: var(--s, 40px);
+  border-radius: calc(var(--s, 40px) * .27);
+  background: color-mix(in srgb, var(--c) 15%, var(--surface-2));
+  border: 1px solid color-mix(in srgb, var(--c) 24%, transparent);
+  color: var(--c);
+  font: 600 calc(var(--s, 40px) * .32) / 1 var(--fonte-titulo);
+  letter-spacing: .02em;
+  user-select: none;
+}
+.mk-selo {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 7px 0 5px;
+  border-radius: 9px;
+  background: var(--surface-3);
+  color: var(--caption);
+  font: 500 10.5px var(--fonte-titulo);
+  flex: none;
+}
+.mk-feito { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 4px; font: 500 12px var(--fonte-titulo); color: var(--success); }
+.mk-instalando { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 4px; font: 500 12px var(--fonte-titulo); color: var(--caption); }
+.mk-giro {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--active) 25%, transparent);
+  border-top-color: var(--active);
+  animation: mk-giro .8s linear infinite;
+}
+.mk-progresso { position: absolute; left: 64px; right: 12px; bottom: 5px; height: 2px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.mk-progresso::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 35%;
+  border-radius: 2px;
+  background: var(--active);
+  animation: mk-vai 1.4s ease-in-out infinite;
+}
+.mk-linha[data-estado="instalando"], .mk-linha[data-estado="instalando"]:hover { background: var(--surface-2); }
+.mk-mais { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 10px 0 2px; }
+@keyframes mk-giro { to { transform: rotate(360deg); } }
+@keyframes mk-vai { 0% { left: -35%; } 100% { left: 100%; } }
+
+/* ---------- Esqueleto de carregamento ---------- */
+.mk-esqueleto { cursor: default; pointer-events: none; }
+.mk-sk {
+  display: block;
+  border-radius: 6px;
+  background: linear-gradient(90deg, var(--surface-2) 0, var(--surface-3) 50%, var(--surface-2) 100%);
+  background-size: 200% 100%;
+  animation: mk-brilho 1.6s ease-in-out infinite;
+}
+.mk-sk-avatar { width: 40px; height: 40px; border-radius: 11px; }
+.mk-sk-botao { width: 70px; height: 28px; border-radius: 8px; align-self: center; }
+@keyframes mk-brilho { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+/* ---------- Estados vazios (sem internet, erro, busca sem resultado) ---------- */
+.mk-vazio {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 40px 40px 48px;
+  text-align: center;
+}
+.mk-vazio .tile {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 10px;
+  border-radius: 15px;
+  background: var(--surface-2);
+  color: var(--secondary);
+}
+.mk-vazio h3 { font-size: 14.5px; font-weight: 600; }
+.mk-vazio p { margin: 0; max-width: 340px; font-size: 12.5px; line-height: 1.55; color: var(--secondary); }
+.mk-vazio .botoes { display: flex; gap: 8px; margin-top: 14px; }
+
+/* ---------- Detalhe de um plugin ---------- */
+.mk-detalhe { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 20px 8px; }
+.mk-voltar { margin-left: -6px; }
+.mk-heroi { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 18px; margin-top: 14px; }
+.mk-heroi h3 { font-size: 21px; font-weight: 600; line-height: 1.2; }
+.mk-heroi .linha { display: flex; align-items: center; gap: 10px; margin-top: 6px; color: var(--secondary); }
+.mk-heroi p.d { margin: 12px 0 0; max-width: 520px; font-size: 14px; line-height: 1.6; color: var(--caption); }
+.mk-heroi .acoes { display: flex; align-items: center; gap: 8px; margin-top: 18px; }
+.mk-ficha {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px 24px;
+  margin: 26px 0 0;
+  padding-top: 22px;
+  border-top: 1px solid var(--border);
+}
+.mk-ficha dt { font: 500 10px var(--fonte-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--secondary); }
+.mk-ficha dd { margin: 4px 0 0; font: 500 14px var(--fonte-titulo); color: var(--primary); overflow-wrap: anywhere; }
+.mk-ficha dd.mono { font: 400 12px var(--fonte-mono); }
+.mk-ficha .largo { grid-column: 1 / -1; }
+.mk-antes { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--border); }
+.mk-antes h4 { margin: 0 0 12px; font: 600 12.5px var(--fonte-titulo); }
+.mk-antes ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 14px; }
+.mk-antes li { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; align-items: start; }
+.mk-antes .i { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--surface-2); color: var(--secondary); }
+.mk-antes b { display: block; font: 500 13px var(--fonte-titulo); color: var(--primary); }
+.mk-antes span.t { display: block; margin-top: 1px; font-size: 12.5px; line-height: 1.5; color: var(--secondary); }
+
+/* ---------- Confirmação para ligar um plugin com hook ---------- */
+.mk-vidro {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  overflow-y: auto;
+  background: color-mix(in srgb, black 62%, transparent);
+}
+.mk-dialogo {
+  width: 500px;
+  max-width: 100%;
+  padding: 24px 24px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border-forte);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px -24px rgba(0, 0, 0, .85);
+  animation: surgir-mola var(--tempo-de-surgir) var(--curva-de-mola) backwards;
+}
+.mk-dialogo .topo { display: flex; align-items: center; gap: 14px; }
+.mk-dialogo h3 { font-size: 17px; font-weight: 600; line-height: 1.3; }
+.mk-dialogo .calmo { margin: 3px 0 0; font-size: 13px; line-height: 1.5; color: var(--secondary); }
+.mk-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 20px; }
+.mk-tile { padding: 12px 14px; border-radius: 10px; background: var(--surface-2); }
+.mk-tile .v { font: 600 22px/1.1 var(--fonte-titulo); color: var(--primary); }
+.mk-tile .r { margin-top: 5px; font-size: 11.5px; color: var(--secondary); display: flex; align-items: center; gap: 4px; }
+.mk-tile.hook { background: color-mix(in srgb, var(--warning) 11%, var(--surface-2)); }
+.mk-tile.hook .v { color: var(--warning); }
+.mk-tile.hook .r { color: var(--caption); }
+.mk-explica {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warning) 7%, var(--surface));
+}
+.mk-explica svg { color: var(--warning); margin-top: 1px; }
+.mk-explica b { display: block; font: 600 13px var(--fonte-titulo); color: var(--primary); }
+.mk-explica p { margin: 4px 0 0; font-size: 12.5px; line-height: 1.6; color: var(--caption); }
+.mk-motivos { margin: 8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 9px; }
+.mk-motivos li { display: flex; flex-direction: column; gap: 2px; }
+.mk-motivos .m { font: 500 12.5px/1.45 var(--fonte-titulo); color: var(--primary); }
+.mk-motivos .e { font-size: 12px; line-height: 1.55; color: var(--caption); }
+.mk-notas { margin: 14px 2px 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; font-size: 12px; line-height: 1.5; color: var(--secondary); }
+.mk-notas li { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 9px; align-items: start; }
+.mk-notas svg { margin-top: 2px; }
+.mk-dialogo .pe { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 22px; }
+.mk-dialogo .pe .botoes { display: flex; gap: 8px; }
+.mk-ver-codigo { margin-left: -8px; }
+.mk-dialogo .depois { margin: 12px 0 0; text-align: right; font-size: 11.5px; color: var(--secondary); }
+
+/* ---------- Aba Instaladas ---------- */
+.mk-instaladas { flex: 1; min-height: 0; overflow-y: auto; padding: 0 0 4px; scrollbar-width: thin; scrollbar-color: var(--surface-3) transparent; }
+.mk-instaladas > .mk-vazio { min-height: 16rem; }
+.mk-carregando { display: block; padding: 18px 20px; }
+.mk-alerta { margin: 12px 20px; }
+.mk-grupo { padding: 6px 12px 0; }
+.mk-grupo + .mk-grupo { margin-top: 8px; }
+.mk-grupo > h3 { display: flex; align-items: baseline; gap: 8px; padding: 12px 10px 4px; font: 600 11.5px var(--fonte-titulo); color: var(--caption); }
+.mk-grupo > h3 .mono { color: var(--secondary); }
+.mk-grupo > h3 .nota { margin-left: auto; font: 400 11.5px var(--fonte-texto); color: var(--secondary); }
+.mk-plugin {
+  position: relative;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 10px;
+  border-radius: 12px;
+  transition: background-color .12s;
+}
+.mk-plugin:hover { background: var(--surface-2); }
+.mk-plugin .nome { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mk-plugin .conta { margin-top: 3px; display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--secondary); white-space: nowrap; }
+.mk-plugin .dir { display: flex; align-items: center; gap: 4px; }
+/* O interruptor com o trilho de 38 x 22, o mesmo das Configurações do app, e o rótulo "Ligado" ou "Desligado". */
+.mk-plugin .dir .interruptor { min-width: 104px; }
+.mk-plugin .interruptor[aria-disabled="true"] { opacity: .6; cursor: progress; }
+.mk-plugin .interruptor-trilho { width: 38px; height: 22px; border-radius: 999px; }
+.mk-plugin .interruptor-trilho::after { top: 3px; left: 3px; width: 16px; height: 16px; }
+.mk-plugin .interruptor[aria-checked="true"] .interruptor-trilho::after { left: 19px; }
+.mk-plugin .dir .rem { opacity: .55; transition: opacity .12s; }
+.mk-plugin:hover .dir .rem, .mk-plugin .dir .rem:focus-visible { opacity: 1; }
+.mk-plugin[data-ligado="false"] .mk-nome { color: var(--caption); }
+.mk-plugin[data-ligado="false"] .mk-avatar { filter: saturate(.45); opacity: .8; }
+.mk-chip { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px; border-radius: 9px; font: 500 10.5px var(--fonte-titulo); flex: none; }
+.mk-chip.hook, .mk-chip.espera { background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--warning); }
+/* Selo discreto: não conseguimos ler tudo o que vem no plugin. Sem cor de alerta, só um contorno. */
+.mk-chip.nao-verificado { background: transparent; box-shadow: inset 0 0 0 1px var(--border-forte); color: var(--caption); }
+/* "Você já tem": uma skill avulsa ou um servidor MCP com o nome do plugin. Âmbar baixo, só um aviso, nunca vermelho. */
+.mk-chip.mk-ja-tem { background: color-mix(in srgb, var(--warning) 12%, transparent); color: var(--caption); }
+.mk-ja-tem-nota {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  max-width: 520px;
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface));
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--caption);
+}
+.mk-ja-tem-nota svg { margin-top: 2px; color: var(--warning); }
+.mk-ja-tem-nota .mono { font-size: 11.5px; color: var(--primary); }
+.mk-plugin-motivos { margin: 0 10px 6px 64px; padding: 8px 12px 10px; list-style: none; display: flex; flex-direction: column; gap: 6px; border-radius: 10px; background: color-mix(in srgb, var(--warning) 7%, var(--surface)); font-size: 12px; line-height: 1.5; color: var(--secondary); }
+.mk-plugin-motivos li { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 8px; align-items: start; }
+.mk-plugin-motivos svg { margin-top: 2px; color: var(--warning); }
+/* Remover: a própria linha vira a pergunta, com um sim e um não. */
+.mk-plugin.confirmando { grid-template-columns: minmax(0, 1fr); background: color-mix(in srgb, var(--error) 7%, var(--surface)); }
+.mk-remover { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; }
+.mk-remover b { display: block; font: 500 13px var(--fonte-titulo); }
+.mk-remover span.t { display: block; margin-top: 1px; font-size: 12px; color: var(--secondary); }
+.mk-remover span.mk-erro-inline { color: var(--caption); }
+.mk-remover-botoes { display: flex; gap: 8px; }
+/* As skills de um plugin aberto, sob a linha dele, alinhadas ao nome. */
+.mk-plugin-skills { --col-nome: 140px; margin: 0 0 6px 64px; padding: 0 10px 0 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.mk-skills-lista { margin: 0; padding: 2px 0 0; list-style: none; display: flex; flex-direction: column; }
+.mk-skill-vazio { padding: 8px 10px 9px; font-size: 11.5px; line-height: 1.45; color: var(--secondary); }
+/* O nome do plugin é um botão que abre as skills: a seta diz isso e gira quando está aberto. */
+.mk-plugin .mk-nome-botao { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; }
+.mk-chev { flex: none; color: var(--secondary); transition: transform .12s; }
+.mk-plugin .mk-nome-botao[aria-expanded="true"] .mk-chev, .mk-skill-botao[aria-expanded="true"] .mk-chev { transform: rotate(90deg); }
+
+/* Uma skill numa linha: nome amigável, uma linha da descrição e a seta. Aberta, mostra o resto logo abaixo. */
+.mk-skill-linha { border-radius: 10px; }
+.mk-skill-linha[data-aberta="true"] { background: var(--surface-2); }
+.mk-skill-botao {
+  display: grid;
+  grid-template-columns: var(--col-nome, 188px) minmax(0, 1fr) 14px;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color .12s;
+}
+.mk-skill-botao:hover { background: var(--surface-2); }
+.mk-skill-linha[data-aberta="true"] .mk-skill-botao:hover { background: var(--surface-3); }
+/* O foco entra no botão (anel interno), para a rolagem da lista não cortar o contorno. */
+.mk-skill-botao:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--active); }
+.mk-skill-nome { min-width: 0; font: 600 13px/1.3 var(--fonte-titulo); color: var(--primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-skill-resumo { min-width: 0; font-size: 12.5px; line-height: 1.4; color: var(--secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-skill-corpo { padding: 2px 12px 12px 10px; }
+.mk-skill-texto { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--caption); }
+.mk-skill-ficha { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 6px 12px; align-items: center; margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--border); font-size: 11.5px; }
+.mk-skill-ficha dt { color: var(--secondary); }
+.mk-skill-ficha dd { display: flex; align-items: center; gap: 8px; min-width: 0; margin: 0; color: var(--caption); }
+.mk-skill-ficha .mono { min-width: 0; overflow-wrap: anywhere; font-size: 12px; color: var(--primary); }
+.btn.mk-copiar { height: 24px; padding: 0 8px; gap: 5px; font-size: 11px; }
+/* A palavra que a busca achou: destaque neutro, sem laranja. */
+mark.mk-achado { padding: 0 2px; border-radius: 3px; background: var(--surface-3); color: var(--primary); font-weight: 600; }
+.mk-skill-linha[data-aberta="true"] mark.mk-achado { box-shadow: 0 0 0 1px var(--border-forte); }
+/* Subtítulo discreto do pacote de skills da conta (o prefixo que saiu da linha de cada skill). */
+.mk-pacote { display: flex; align-items: baseline; gap: 8px; padding: 10px 10px 2px; font: 500 10.5px var(--fonte-mono); letter-spacing: .04em; color: var(--secondary); }
+.mk-contador { font: 500 11px var(--fonte-mono); color: var(--secondary); }
+.mk-skills-rodape { flex: none; padding: 9px 20px 12px; border-top: 1px solid var(--border); }
+.mk-skills-rodape .lin { display: flex; align-items: center; gap: 8px; font-size: 11.5px; line-height: 1.5; color: var(--secondary); }
+.mk-skills-rodape .lin svg { flex: none; }
+.mk-entenda { padding: 0; border: 0; border-radius: 3px; background: none; font: inherit; color: var(--caption); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.mk-entenda:hover { color: var(--primary); }
+.mk-entenda:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
+.mk-entenda-txt { margin: 6px 0 0 21px; font-size: 11.5px; line-height: 1.5; color: var(--caption); }
+
+/* ---------- Movimento reduzido: sem giro, brilho nem barra deslizante ---------- */
+@media (prefers-reduced-motion: reduce) {
+  .mk-giro, .mk-sk, .mk-dialogo, .mk-progresso::after { animation: none; }
+  .mk-progresso::after { width: 60%; left: 0; }
+  .mk-linha, .mk-plugin, .mk-aba, .mk-seg button, .mk-skill-botao, .mk-chev { transition: none; }
+}
