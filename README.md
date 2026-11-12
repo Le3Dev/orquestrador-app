@@ -116,7 +116,65 @@ O build de teste grava `"buildDeTeste": true` no `package.json` empacotado; serv
 
 **Nunca publique o build de teste** (`dist:win:teste`): ele abre sem licença e não deve chegar aos apps instalados.
 
-**Religar a licença:** mude `exigirLicenca` para `true` em `electron/config.js` e publique uma versão nova (passos acima). Todos os apps instalados passam a pedir a chave do Lemon Squeezy na versão nova, então **avise os testadores antes**.
+**Religar a licença:** só depois do checklist de *Serviço de licenças* abaixo. Mude `exigirLicenca` para `true` em `electron/config.js` e publique uma versão nova (passos acima). Todos os apps instalados passam a pedir a chave de licença na versão nova, então **avise os testadores antes**.
+
+**Proteção do app instalado (fuses do Electron, ADR-43).** O `electron-builder` 25.1.8 ainda não tem a opção `electronFuses`; por isso `build.afterPack` aponta para **`scripts/ligarFuses.cjs`**, que usa `@electron/fuses` (devDependency) para virar os fuses no executável empacotado (`dist:win`, `dist:win:teste` e `release:win`). Ligados:
+
+| Fuse | Valor | O que impede |
+|---|---|---|
+| `RunAsNode` | desligado | usar o `.exe` como um Node qualquer (`ELECTRON_RUN_AS_NODE`) para rodar JavaScript solto |
+| `EnableNodeOptionsEnvironmentVariable` | desligado | injetar código pela variável `NODE_OPTIONS` |
+| `EnableNodeCliInspectArguments` | desligado | abrir o depurador com `--inspect` e afins |
+| `OnlyLoadAppFromAsar` | ligado | carregar o app de uma pasta `app/` solta no lugar do `app.asar` |
+| `EnableEmbeddedAsarIntegrityValidation` | ligado | o Electron confere o hash do `app.asar` (gravado no `.exe` pelo electron-builder, que no Windows suporta a integridade com Electron 33) e **não abre** se o arquivo for editado |
+
+Não alterados: `GrantFileProtocolExtraPrivileges` (a janela de ativação é carregada por `file://`) e `EnableCookieEncryption`. O app não usa `ELECTRON_RUN_AS_NODE` para abrir processos (o servidor roda em `utilityProcess`; `node-pty`, `onnxruntime-node` e `sharp` ficam em `asarUnpack`). **Conferir** num build:
+
+```bash
+npx @electron/fuses read --app "dist_electron_teste/win-unpacked/Orquestrador de Agentes.exe"
+```
+
+Esperado: `RunAsNode`, `EnableNodeOptionsEnvironmentVariable` e `EnableNodeCliInspectArguments` *Disabled*; `OnlyLoadAppFromAsar` e `EnableEmbeddedAsarIntegrityValidation` *Enabled*. Isso dificulta editar o JavaScript do app instalado, mas não impede quem compila o código público (ver ADR-43).
+
+**Serviço de licenças** (`servicoDeLicencas/`, ADR-43; projeto Node próprio, com `package.json` e `wrangler.toml`). Na pasta dele:
+
+```bash
+npm install
+npm test             # vitest
+npm run typecheck    # tsc --noEmit
+npm run dev          # wrangler dev (local; copie .dev.vars.exemplo para .dev.vars)
+npm run migrar       # aplica as migrações no D1 (migracoes/0001_inicial.sql)
+npm run deploy       # wrangler deploy
+```
+
+Par de chaves da licença (uma vez; guarde a privada fora do repositório):
+
+```bash
+node servicoDeLicencas/scripts/gerarChaves.mjs
+```
+
+| Configuração | Tipo | Para quê |
+|---|---|---|
+| `STRIPE_SECRET_KEY` | secret (`wrangler secret put`) | chave secreta da API do Stripe |
+| `STRIPE_WEBHOOK_SECRET` | secret | segredo do endpoint de webhook (`whsec_...`) |
+| `CHAVE_PRIVADA_DA_LICENCA` | secret | chave privada Ed25519 que assina os tokens (a pública vai no `electron/config.js`) |
+| `RESEND_API_KEY` | secret | envio do e-mail com a chave |
+| `EMAIL_REMETENTE` | var (`wrangler.toml`) | remetente do e-mail (domínio verificado no Resend) |
+| `URL_DA_LANDING` | var | site de vendas (origem liberada no CORS da página de sucesso) |
+| `URL_DE_DOWNLOAD` | var | link de download do app, enviado no e-mail |
+| `URL_DO_PORTAL_DO_CLIENTE` | var | portal do cliente do Stripe, citado no e-mail |
+| `PRECO_MENSAL_ID`, `PRECO_ANUAL_ID` | var | ids dos preços (`price_...`) do Stripe, para reconhecer o plano |
+| `MAXIMO_DE_MAQUINAS` | var | máquinas por assinatura (padrão `1`) |
+
+**Checklist de lançamento da licença** (nesta ordem):
+1. Conta Stripe ativada com **CNPJ** (o Stripe não é Merchant of Record: a nota fiscal é nossa).
+2. Produto com dois preços recorrentes: **mensal R$ 19,90** e **anual R$ 199,00**; anote os ids em `PRECO_MENSAL_ID` e `PRECO_ANUAL_ID`.
+3. **Payment Links** dos dois planos, com redirecionamento após o pagamento para `https://SEU-SITE/sucesso.html?session_id={CHECKOUT_SESSION_ID}`.
+4. **Portal do cliente** do Stripe configurado (cancelar, trocar cartão, faturas); o link vai em `URL_DO_PORTAL_DO_CLIENTE` e no `urlDoPortalDoCliente` do app.
+5. `wrangler d1 create licencas`, ajustar o `database_id` no `wrangler.toml`, `npm run migrar`, gerar as chaves, `wrangler secret put` dos quatro segredos, ajustar as vars e `npm run deploy`.
+6. **Webhook** no Stripe apontando para `https://<serviço>/v1/webhooks/stripe` com os eventos `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid` e `invoice.payment_failed`; o segredo dele vai em `STRIPE_WEBHOOK_SECRET`.
+7. Preencher o `electron/config.js`: `urlDoServicoDeLicencas`, `chavePublicaDaLicenca`, `urlParaAssinar` e `urlDoPortalDoCliente`.
+8. Só então `exigirLicenca: true`, subir a versão e publicar a release (avisando os testadores).
 
 **Ícone do app** (ver ADR-27): o bixinho gota de óculos escuros; fica em `electron/icones/` e é versionado. O `icone.ico` (16, 20, 24, 32, 40, 48, 64, 128 e 256 px) vai na janela e na barra de tarefas do Windows, no `.exe` (`build.win.icon`) e no instalador e desinstalador (`build.nsis.installerIcon`/`uninstallerIcon`); o `icone.png` (512 × 512) vai na janela fora do Windows. Para regenerar depois de mudar o desenho ou as cores em `scripts/gerarIcones.cjs`:
 
@@ -408,7 +466,8 @@ Cada plugin do catálogo traz `jaTem: { skills, servidoresMcp }`: o catálogo ma
 
 ## Tecnologias
 
-- **Aplicativo desktop:** **Electron 33** (processo principal em `electron/`, servidor em `utilityProcess`), **electron-builder** (instalador NSIS para Windows x64, publicado nas Releases do GitHub) e **electron-updater** (atualização automática do instalado, ver ADR-29). Licença via Lemon Squeezy, só no instalado e hoje desligada (`exigirLicenca: false`, fase de testes).
+- **Aplicativo desktop:** **Electron 33** (processo principal em `electron/`, servidor em `utilityProcess`), **electron-builder** (instalador NSIS para Windows x64, publicado nas Releases do GitHub) e **electron-updater** (atualização automática do instalado, ver ADR-29). Licença por assinatura (ADR-43), só no instalado e hoje desligada (`exigirLicenca: false`, fase de testes); **fuses do Electron** ligados no empacotamento (`@electron/fuses`, `scripts/ligarFuses.cjs`).
+- **Serviço de licenças** (`servicoDeLicencas/`, ADR-43): **Cloudflare Workers + D1** (TypeScript, `wrangler`), **Stripe** (Billing, Payment Links e portal do cliente; SDK `stripe`), **Resend** (e-mail com a chave) e tokens **JWS EdDSA (Ed25519)**; testes com **vitest**.
 - **Node 22+ / TypeScript 6** (estrito, `exactOptionalPropertyTypes`), **Express 5**, **zod 4** (validação da API), **vitest**.
 - **Tela:** React 19, Vite 6, Tailwind 4, react-markdown com remark-gfm e **React Flow** (`@xyflow/react` 12) para o canvas (ver ADR-8). Tema escuro com a paleta da Anthropic (ver ADR-7). Fontes empacotadas via `@fontsource`, sem CDN: Poppins, Lora e JetBrains Mono.
 - **Claude Code 2.1.x** (`claude -p --output-format stream-json`) como motor dos agentes.
@@ -1008,6 +1067,7 @@ flowchart TD
   - mudar o limite é trocar uma constante.
 
 **ADR-19 — Só no aplicativo: servidor dentro do Electron e acesso por chave de sessão.**
+- *Licença do Lemon Squeezy: substituída pelo ADR-43* (assinatura no Stripe, serviço de licenças próprio e token assinado). Onde este ADR e o ADR-29 falam de chave do Lemon Squeezy, vale o ADR-43; o histórico abaixo fica como registro.
 - *Atualizado pelo ADR-29:* a licença passou a depender também da chave `exigirLicenca` do `electron/config.js` (hoje `false`, fase de testes): o app empacotado normal só pede a chave com ela `true`. O que abaixo diz que o app instalado exige a licença (e a loja do Lemon Squeezy configurada) vale só com a chave ligada. O app instalado normal também passa a se atualizar sozinho pelas Releases do GitHub; o `npm run desktop` e o build de teste, não.
 - *Contexto:*
   - o Orquestrador virou um produto desktop (instalador, licença), mas a tela também abria em `http://localhost:3200` em qualquer navegador da máquina, para qualquer um, sem licença;
@@ -1194,7 +1254,7 @@ flowchart TD
   - os eventos já gravados no `eventos.jsonl` continuam com os campos na `configuracao` (o histórico não é reescrito); a tela os ignora;
   - não há mais como pedir "delegue tudo": para o Orquestrador não fazer nada sozinho, só pedindo no texto; para garantir plano com trava real, continua o Plan Mode (Shift+Tab, ADR-9).
 
-**ADR-29 — Atualização automática pelo electron-updater com GitHub Releases, e licença desligada na fase de testes.** Atualiza o ADR-19.
+**ADR-29 — Atualização automática pelo electron-updater com GitHub Releases, e licença desligada na fase de testes.** Atualiza o ADR-19. *(A parte da chave do Lemon Squeezy foi substituída pelo ADR-43; a atualização automática e o `exigirLicenca: false` continuam valendo.)*
 - *Contexto:*
   - dois desenvolvedores vão testar e validar o app instalado no dia a dia, enquanto ele continua mudando. Mandar um `.exe` novo a cada correção e pedir para reinstalar à mão é inviável: alguém sempre fica numa versão velha, e o retorno dos testes perde valor;
   - o app não tem certificado de assinatura de código (ADR-19), e o instalador NSIS é por usuário, sem administrador;
@@ -1472,6 +1532,38 @@ flowchart TD
   - o campo só recebe teclas depois do primeiro clique nele (ou do `Ctrl+Shift+Space`); Tab e foco por teclado não valem para a janela não focável;
   - com uma janela cobrindo o monitor, a captura de cliques depende do `data-area-clicavel`: esquecê-lo numa peça nova a deixa "transparente" ao clique.
 
+**ADR-43 — Assinatura no Stripe com serviço de licenças próprio e licença assinada (Ed25519) presa à máquina.** Substitui a licença do Lemon Squeezy dos ADR-19 e ADR-29 (o resto desses ADRs continua valendo). *(O pedido original chamava este registro de "ADR-30", número já usado pelas instruções personalizadas; por isso ADR-43.)*
+- *Contexto:*
+  - a venda será por **assinatura mensal e anual, no Brasil, por cartão** (PIX Automático depois). O Stripe e o Mercado Pago cobram, mas **não geram chave de licença**: alguém precisa emitir, guardar e conferir;
+  - o arquivo de licença antigo era **texto puro**: copiá-lo para outro PC funcionava, editar a data dava offline infinito, e a licença só era conferida ao abrir o app;
+  - o repositório é **público** (ADR-29): nada secreto pode ir no app, e quem quiser pode ler a checagem.
+- *Decisão:*
+  - **Stripe Billing + Payment Links** para a cobrança (planos mensal e anual, portal do cliente do Stripe para trocar cartão e cancelar);
+  - **serviço de licenças próprio**, em `servicoDeLicencas/` (**Cloudflare Workers + D1**, banco `licencas`). Recebe o webhook do Stripe, cria a licença com uma chave `ORQ-XXXX-XXXX-XXXX-XXXX`, envia a chave por e-mail (**Resend**) e a mostra na página de sucesso da landing. O Stripe fica atrás de uma **camada anticorrupção** (`src/stripe/`: `ServicoDeCobranca` na linguagem do domínio, `AdaptadorDeEventosDoStripe` que converte os eventos, `FachadaDoStripe` como único ponto de contato com o SDK); o domínio (`src/licencas/`: `Licenca`, `Plano`, `ChaveDeLicenca`, `ServicoDeLicencas`, `RepositorioDeLicencas` com versões D1 e em memória) não conhece o Stripe. O webhook valida a `Stripe-Signature` e é idempotente;
+  - **licença assinada:** o serviço devolve um **token JWS EdDSA (Ed25519)** com `{ v, licenca, maquina, plano, pagaAte, emitidoEm, expiraEm }` e `expiraEm = min(pagaAte + 3 dias, emitidoEm + 7 dias)`. A chave privada é segredo do serviço (`CHAVE_PRIVADA_DA_LICENCA`); o app leva só a pública (`chavePublicaDaLicenca`);
+  - **presa à máquina:** o id da máquina é o **sha256 do MachineGuid** do Windows (no Mac, de hostname e MAC); o token só vale na máquina para a qual foi emitido. **1 máquina por assinatura** (variável `MAXIMO_DE_MAQUINAS`, padrão 1); trocar de PC é *Desativar nesta máquina* e ativar no novo;
+  - **revalidação:** o app chama `validar` ao abrir e **a cada 24 h** (`intervaloDeRevalidacaoMs`); cancelamento ou falta de pagamento derrubam a licença na próxima renovação do token, e offline o app vale por no máximo 7 dias;
+  - **fuses do Electron** ligados no empacotamento (`scripts/ligarFuses.cjs`, ver *Como rodar → Proteção do app instalado*) para dificultar editar o JavaScript do app instalado.
+- *Consequências:*
+  - é preciso **CNPJ e nota fiscal**: o Stripe **não é Merchant of Record** (quem vende é a empresa, que emite a nota e recolhe os impostos);
+  - **quem compilar o código público consegue tirar a checagem** (`exigirLicenca: false` ou removendo a verificação): risco aceito. A licença e os fuses protegem o app instalado das nossas releases, não o código-fonte;
+  - o serviço é uma peça nova a manter (deploy, secrets, D1, monitoramento do webhook) e passa a ser ponto de falha: com ele fora do ar, os apps seguem pelo token vigente (até 7 dias) e depois pedem conexão;
+  - a licença continua **desligada** (`exigirLicenca: false`) até o lançamento; o checklist está em *Como rodar → Serviço de licenças*.
+
+```mermaid
+flowchart LR
+  C[Cliente] -->|escolhe o plano| L[Landing]
+  L -->|Payment Link| S[Stripe Checkout]
+  S -->|webhook assinado<br/>checkout.session.completed, invoice.paid...| W[Serviço de licenças<br/>Workers + D1]
+  W -->|cria a licença| D[(D1)]
+  W -->|e-mail com a chave| E[Resend]
+  S -->|redireciona com session_id| P[Página de sucesso]
+  P -->|GET /v1/checkout/sessoes/:id| W
+  A[App Electron] -->|ativar / validar a cada 24 h<br/>chave + id da máquina| W
+  W -->|token JWS EdDSA| A
+  A -->|confere a assinatura<br/>com a chave pública| A
+```
+
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
 - `modelUsage` acumula a sessão, então o consumo do turno vem de `model_usage_since_last_result`;
@@ -1728,6 +1820,20 @@ Passageiros (sem id, fora do histórico): `event: trecho` com `data: { mensagemI
 Estado: `{ situacao, versaoAtual, versaoNova, progresso, mensagemDeErro }`.
 - `situacao`: `indisponivel` (não é o app instalado normal: `npm run desktop`, `desktop:dev` ou build de teste), `verificando`, `em-dia`, `baixando`, `pronta` (baixada; instala ao fechar o app ou com *Reiniciar agora*) ou `erro`.
 - `versaoAtual`: a versão instalada; `versaoNova`: a encontrada na release; `progresso`: de 0 a 100, durante o download; `mensagemDeErro`: o motivo, em `erro`.
+
+### API do serviço de licenças
+
+Serviço **separado do app** (pasta `servicoDeLicencas/`, Cloudflare Workers + D1; ver ADR-43). Todas as rotas respondem JSON. Erros vêm como `{ "erro": "mensagem", "motivo": "codigo" }`. `chave` tem o formato `ORQ-XXXX-XXXX-XXXX-XXXX`; `maquina.id` é o sha256 do MachineGuid do Windows.
+
+| Rota | Entrada | Respostas |
+|---|---|---|
+| `POST /v1/licencas/ativar` | `{ "chave", "maquina": { "id", "nome" } }` | **200** `{ "token" }`; **400** `pedido-invalido`; **403** `chave-invalida`, `assinatura-inativa` ou `limite-de-maquinas` |
+| `POST /v1/licencas/validar` | `{ "chave", "maquina": { "id" } }` | **200** `{ "token" }` (renovado); **403** `chave-invalida`, `assinatura-inativa` ou `maquina-nao-ativada` |
+| `POST /v1/licencas/desativar` | `{ "chave", "maquina": { "id" } }` | **200** `{ "ok": true }` |
+| `POST /v1/webhooks/stripe` | evento do Stripe; cabeçalho `Stripe-Signature` (validado) | **200**; idempotente (o mesmo evento reenviado não repete efeitos). Usado só pelo Stripe |
+| `GET /v1/checkout/sessoes/:sessionId` | — (CORS liberado só para a landing) | **200** `{ "chave", "plano", "email" }` (e-mail mascarado); **202** `{ "pendente": true }` (webhook ainda não chegou: a página tenta de novo); **404** `sessao-nao-encontrada` |
+
+**Token:** JWS compacto assinado com **EdDSA (Ed25519)**. Payload `{ "v": 1, "licenca", "maquina", "plano", "pagaAte", "emitidoEm", "expiraEm" }`, datas em epoch ms. `expiraEm = min(pagaAte + 3 dias, emitidoEm + 7 dias)`. O app confere a assinatura com a chave pública (`chavePublicaDaLicenca` em `electron/config.js`), a máquina e a validade.
 
 ### Guia do usuário
 
@@ -1999,3 +2105,15 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 - *"O áudio do computador não veio na captura."* ou *"A captura do áudio do computador terminou…"*: a captura subiu sem som ou parou sozinha. Retome no indicador; se repetir, confira se há um dispositivo de saída de áudio ativo no Windows.
 - *"A escuta não conseguiu avaliar a pergunta: …"*: a confirmação pelo Haiku falhou (limite de uso, Claude Code fora do ar, resposta fora do formato ou mais de 30 s). A escuta continua; a próxima frase candidata tenta de novo.
 - *"Não foi possível baixar o modelo de voz da escuta…"*: sem internet no primeiro uso; a escuta tenta de novo no próximo trecho.
+
+### Licença e assinatura (guia do usuário)
+
+Vale quando a licença estiver ligada (`exigirLicenca: true`, ver ADR-43); na fase de testes o app instalado abre sem pedir chave.
+
+- **Assinar:** na tela de ativação, clique em **Assinar** (abre a página de planos da landing: mensal R$ 19,90 ou anual R$ 199,00, pagamento por cartão no Stripe). Ao pagar, você volta à página de sucesso, que mostra a **chave de licença** (formato `ORQ-XXXX-XXXX-XXXX-XXXX`); a mesma chave chega por e-mail, com o link de download.
+- **Ativar:** abra o app, cole a chave na tela de ativação e confirme. O app liga a licença a este computador e guarda o resultado em `%APPDATA%\Orquestrador de Agentes\licenca.json` (a chave e um token assinado).
+- **Uso diário:** o app confere a licença ao abrir e a cada 24 horas. Se a assinatura estiver em dia, nada muda para você.
+- **Sem internet:** a licença vale offline por até **7 dias** desde a última conferência (e, se um pagamento atrasar, por até 3 dias depois da data paga). Passado isso, o app pede conexão para revalidar.
+- **Trocar de computador:** por padrão, **1 computador por assinatura**. No computador antigo, abra a tela de ativação e use **Desativar nesta máquina**; depois ative a mesma chave no novo.
+- **Cancelar ou trocar o cartão:** em **Gerenciar assinatura** (portal do cliente do Stripe). Ao cancelar, o acesso segue até o fim do período pago.
+- **Mensagens comuns:** *chave inválida* (confira a digitação), *assinatura inativa* (pagamento pendente ou cancelada; regularize no portal), *limite de computadores* (desative o outro, como acima).

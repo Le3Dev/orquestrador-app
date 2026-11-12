@@ -1,0 +1,6 @@
+# Copie para .dev.vars (ignorado pelo git) e preencha so localmente.
+# Em producao use: wrangler secret put <NOME>
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+CHAVE_PRIVADA_DA_LICENCA=
+RESEND_API_KEY=

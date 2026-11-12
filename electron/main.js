@@ -753,7 +753,11 @@ function focar(janela) {
   janela.focus();
 }
 
-function abrirJanelaAtivacao() {
+// Mensagem do último bloqueio, lida pela tela de ativação (licenca:bloqueio).
+let mensagemDeBloqueioDaLicenca = null;
+
+function abrirJanelaAtivacao(mensagem = null) {
+  mensagemDeBloqueioDaLicenca = mensagem;
   if (janelaAtivacao) return focar(janelaAtivacao);
   janelaAtivacao = criarJanela({ width: 520, height: 560, resizable: false });
   janelaAtivacao.loadFile(path.join(__dirname, "ativacao.html"));
@@ -873,18 +877,35 @@ async function seguirAposLicenca() {
   await abrirJanelaPrincipal();
 }
 
+// Com a licença exigida, revalida de tempos em tempos com o app aberto; se
+// bloquear, fecha a janela principal e volta à tela de ativação.
+function ligarRevalidacaoDaLicenca() {
+  licenca.iniciarRevalidacaoPeriodica({
+    aoBloquear: (detalhe) => {
+      registrarNoLog("app", `Licença bloqueada com o app aberto (${detalhe?.motivo || "desconhecido"}).`);
+      abrirJanelaAtivacao(detalhe?.mensagem || null);
+      if (janelaPrincipal && !janelaPrincipal.isDestroyed()) janelaPrincipal.close();
+    },
+  });
+}
+
 async function abrirConformeEstado() {
   if (EXIGE_LICENCA) {
     let liberado = false;
+    let mensagem = null;
     try {
-      ({ liberado } = await licenca.liberadoParaAbrir());
+      const resultado = await licenca.liberadoParaAbrir();
+      liberado = resultado.liberado;
+      mensagem = resultado.detalhe?.mensagem || null;
     } catch (erro) {
       registrarNoLog("app", `Falha ao verificar a licença: ${erro.message || erro}`);
     }
     if (!liberado) {
-      abrirJanelaAtivacao();
+      // Sem licença ainda (primeira abertura) não é erro: não mostra mensagem.
+      abrirJanelaAtivacao(mensagem);
       return;
     }
+    ligarRevalidacaoDaLicenca();
   }
   await seguirAposLicenca();
 }
@@ -922,14 +943,30 @@ const maximizacoes = new WeakMap();
 ipcMain.handle("licenca:activate", async (_e, chave) => {
   const resultado = await licenca.activate(chave);
   if (resultado.ok) {
+    ligarRevalidacaoDaLicenca();
     await seguirAposLicenca();
     if (janelaAtivacao) janelaAtivacao.close();
   }
   return resultado;
 });
-ipcMain.handle("licenca:validate", () => licenca.validate());
-ipcMain.handle("licenca:deactivate", () => licenca.deactivate());
+ipcMain.handle("licenca:validate", () => licenca.validar());
+ipcMain.handle("licenca:deactivate", async () => {
+  licenca.pararRevalidacao();
+  return licenca.desativar();
+});
 ipcMain.handle("licenca:status", () => licenca.status());
+ipcMain.handle("licenca:bloqueio", () => mensagemDeBloqueioDaLicenca);
+// Links da tela de ativação: só os endereços do config.js (nunca texto vindo da tela).
+ipcMain.handle("licenca:abrir-link", (_e, qual) => {
+  const url = qual === "assinar" ? config.urlParaAssinar : qual === "portal" ? config.urlDoPortalDoCliente : null;
+  if (!url) return false;
+  abrirNoNavegador(url);
+  return true;
+});
+ipcMain.handle("licenca:links", () => ({
+  assinar: Boolean(config.urlParaAssinar),
+  portal: Boolean(config.urlDoPortalDoCliente),
+}));
 
 // ──────────────────────────────────────────────────────────────────────────
 // Vista nativa da prévia (electron/vistaDaPrevia.js): endereços externos num
@@ -1461,7 +1498,7 @@ if (!conseguiuLock) {
     mac.carregarPathDoShell();
     // No Mac o ícone da janela não vale: o do Dock vem daqui fora do app empacotado.
     if (mac.ehMac && app.dock) app.dock.setIcon(path.join(__dirname, "icones", "icone.png"));
-    licenca.iniciar(pastaDoUsuario());
+    licenca.iniciar(pastaDoUsuario(), { log: registrarNoLog });
     // Antes de abrir a janela principal (a sessão só existe depois do ready).
     registrarEscutaDoModoInvisivel();
     // Ctrl+\ (alternar o modo invisível) vale do ready até o will-quit.

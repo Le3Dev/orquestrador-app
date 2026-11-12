@@ -66,6 +66,11 @@
       .msg { margin-top: 16px; font-size: 13px; line-height: 1.5; min-height: 20px; }
       .msg.erro { color: var(--erro); }
       .msg.ok { color: var(--ok); }
+      .estado { font-size: 13px; line-height: 1.5; margin-bottom: 16px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+      .estado.aviso { border-color: var(--laranja); color: var(--laranja); }
+      .links { margin-top: 16px; display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; }
+      .links a { color: var(--laranja); text-decoration: none; }
+      .links a:hover { text-decoration: underline; }
       .rodape { margin-top: 24px; font-size: 11px; color: var(--muted); line-height: 1.5; }
     </style>
   </head>
@@ -73,12 +78,18 @@
     <div class="barra"></div>
     <div class="conteudo">
       <h1>Orquestrador de Agentes</h1>
-      <p class="sub">Cole a sua chave de licença para ativar este computador. A ativação precisa de internet apenas desta vez.</p>
+      <p class="sub">Cole a chave de licença da sua assinatura para ativar este computador. A ativação e a renovação precisam de internet.</p>
+      <div id="estado" class="estado" hidden></div>
       <label for="chave">Chave de licença</label>
-      <input id="chave" type="text" placeholder="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX" autocomplete="off" spellcheck="false" />
+      <input id="chave" type="text" placeholder="ORQ-XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" />
       <button id="ativar">Ativar</button>
       <div id="msg" class="msg"></div>
-      <div class="rodape">Sua licença permite ativar um número limitado de computadores. Para trocar de máquina, desative a licença nas configurações antes.</div>
+      <div class="links">
+        <a href="#" id="assinar" hidden>Assinar</a>
+        <a href="#" id="portal" hidden>Gerenciar assinatura</a>
+        <a href="#" id="desativar" hidden>Desativar nesta máquina</a>
+      </div>
+      <div class="rodape">Sua licença permite ativar um número limitado de computadores. Para trocar de computador, use "Desativar nesta máquina" antes de ativar no novo.</div>
     </div>
 
     <script>
@@ -114,11 +125,69 @@
         }
       }
 
+      const estado = document.getElementById("estado");
+      const linkAssinar = document.getElementById("assinar");
+      const linkPortal = document.getElementById("portal");
+      const linkDesativar = document.getElementById("desativar");
+      const UM_DIA = 24 * 60 * 60 * 1000;
+
+      // Formata a chave enquanto digita: maiúsculas, sem espaços.
+      input.addEventListener("input", () => {
+        input.value = input.value.toUpperCase().replace(/\s+/g, "");
+      });
+
+      linkAssinar.addEventListener("click", (e) => {
+        e.preventDefault();
+        window.electron.licenca.abrirLink("assinar");
+      });
+      linkPortal.addEventListener("click", (e) => {
+        e.preventDefault();
+        window.electron.licenca.abrirLink("portal");
+      });
+      linkDesativar.addEventListener("click", async (e) => {
+        e.preventDefault();
+        try {
+          const r = await window.electron.licenca.deactivate();
+          mostrar((r && r.mensagem) || "Licença desativada.", "ok");
+          estado.hidden = true;
+          linkDesativar.hidden = true;
+        } catch (erro) {
+          mostrar("Erro ao desativar: " + (erro && erro.message ? erro.message : erro), "erro");
+        }
+      });
+
+      // Estado inicial: motivo do bloqueio, links e situação da licença guardada.
+      async function carregar() {
+        try {
+          const lic = window.electron.licenca;
+          const [bloqueio, links, st] = await Promise.all([lic.bloqueio(), lic.links(), lic.status()]);
+          if (bloqueio) mostrar(bloqueio, "erro");
+          linkAssinar.hidden = !(links && links.assinar);
+          linkPortal.hidden = !(links && links.portal);
+          if (st && st.ativada) {
+            linkDesativar.hidden = false;
+            const venceEm = st.expiraEm ? st.expiraEm - Date.now() : null;
+            const plano = st.plano ? "Plano " + st.plano + ". " : "";
+            estado.hidden = false;
+            if (venceEm !== null && venceEm < 2 * UM_DIA) {
+              estado.className = "estado aviso";
+              estado.textContent = plano + "Sem conexão com o servidor de licenças e a licença guardada vence em breve. Conecte-se à internet para renová-la.";
+            } else {
+              estado.className = "estado";
+              estado.textContent = plano + "Este computador (" + (st.nomeDaMaquina || "sem nome") + ") tem uma licença ativada.";
+            }
+          }
+        } catch {
+          /* sem estado: a tela segue só com o campo da chave */
+        }
+      }
+
       botao.addEventListener("click", ativar);
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") ativar();
       });
       input.focus();
+      carregar();
     </script>
   </body>
 </html>
