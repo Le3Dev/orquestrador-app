@@ -702,8 +702,8 @@ describe("ChatRapido · modo invisível", () => {
 
     const desligado = screen.getByRole("button", { name: "Modo invisível" });
     expect(desligado).toHaveAttribute("aria-pressed", "false");
-    // O rótulo "Fantasma" fica à vista, ao lado do ícone.
-    expect(desligado).toHaveTextContent("Fantasma");
+    // Só o ícone: sem o rótulo "Fantasma".
+    expect(desligado).not.toHaveTextContent("Fantasma");
     expect(desligado.querySelector("svg circle")).not.toBeNull();
     expect(desligado.querySelector('svg path[d="m4 4 16 16"]')).toBeNull();
     expect(desligado.querySelector(".ponto-tela-vista")).toBeNull();
@@ -711,7 +711,7 @@ describe("ChatRapido · modo invisível", () => {
     ativar();
     const ligado = screen.getByRole("button", { name: "Modo invisível" });
     expect(ligado).toHaveAttribute("aria-pressed", "true");
-    expect(ligado).toHaveTextContent("Fantasma");
+    expect(ligado).not.toHaveTextContent("Fantasma");
     expect(ligado).toHaveAttribute("title", expect.stringContaining("Ctrl+Shift+I"));
     expect(ligado.querySelector("svg circle")).toBeNull();
     expect(ligado.querySelector('svg path[d="m4 4 16 16"]')).not.toBeNull();
@@ -991,25 +991,56 @@ describe("ChatRapido · modo invisível", () => {
         expect(within(andamento).getByText("orçamento de")).toHaveClass("painel-transcricao-parcial");
       });
 
-      it("abre sozinho ao ligar a escuta; o × fecha, o botão Transcrição reabre, e a escolha fica gravada", () => {
+      it("abre sozinho ao ligar o modo fantasma, mesmo com o painel fechado e gravado; o × fecha", () => {
+        localStorage.setItem(CHAVE_DAS_PREFERENCIAS_DA_TELA, JSON.stringify({ transcricaoAberta: false }));
         const { ativar } = ponteAtiva(undefined, true);
         renderizar();
         expect(screen.queryByRole("region", { name: "Transcrição" })).not.toBeInTheDocument();
-        const botao = screen.getByRole("button", { name: "Transcrição" });
-        expect(botao).toHaveAttribute("aria-pressed", "false");
 
         ativar();
         expect(painel()).toBeInTheDocument();
         expect(guardado().transcricaoAberta).toBe(true);
-        expect(screen.getByRole("button", { name: "Transcrição" })).toHaveAttribute("aria-pressed", "true");
 
         fireEvent.click(screen.getByRole("button", { name: "Fechar a transcrição" }));
         expect(screen.queryByRole("region", { name: "Transcrição" })).not.toBeInTheDocument();
         expect(guardado().transcricaoAberta).toBe(false);
+        // O indicador da escuta continua na barra com o painel fechado.
+        expect(indicador()).toBeInTheDocument();
+      });
 
-        fireEvent.click(screen.getByRole("button", { name: "Transcrição" }));
+      it("o botão só com ícone reabre o painel fechado pelo × e o fecha de novo", () => {
+        localStorage.setItem(CHAVE_DAS_PREFERENCIAS_DA_TELA, JSON.stringify({ transcricaoAberta: false }));
+        const { ativar } = ponteAtiva(undefined, true);
+        renderizar();
+        const botao = () => screen.getByRole("button", { name: "Transcrição" });
+        expect(botao().textContent).toBe("");
+        expect(botao()).toHaveAttribute("aria-pressed", "false");
+
+        ativar();
+        expect(botao()).toHaveAttribute("aria-pressed", "true");
+        fireEvent.click(screen.getByRole("button", { name: "Fechar a transcrição" }));
+        expect(screen.queryByRole("region", { name: "Transcrição" })).not.toBeInTheDocument();
+        expect(botao()).toHaveAttribute("aria-pressed", "false");
+
+        fireEvent.click(botao());
         expect(painel()).toBeInTheDocument();
         expect(guardado().transcricaoAberta).toBe(true);
+        expect(botao()).toHaveAttribute("aria-pressed", "true");
+
+        fireEvent.click(botao());
+        expect(screen.queryByRole("region", { name: "Transcrição" })).not.toBeInTheDocument();
+        expect(guardado().transcricaoAberta).toBe(false);
+      });
+
+      it("abre sozinho ao ligar a escuta manual (fones)", async () => {
+        localStorage.setItem(CHAVE_DAS_PREFERENCIAS_DA_TELA, JSON.stringify({ transcricaoAberta: false }));
+        const { modoInvisivel } = ponteAtiva(undefined, true);
+        Object.assign(modoInvisivel, { definirEscutaLigada: vi.fn().mockResolvedValue(undefined) });
+        renderizar();
+        expect(screen.queryByRole("region", { name: "Transcrição" })).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole("button", { name: "Escuta do áudio" }));
+        expect(await screen.findByRole("region", { name: "Transcrição" })).toBeInTheDocument();
       });
 
       it("sem a escuta disponível, não há botão nem painel", () => {

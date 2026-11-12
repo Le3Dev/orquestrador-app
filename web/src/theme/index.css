@@ -2925,9 +2925,6 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
 .painel-da-transcricao-no-chat { display: flex; flex-direction: column; flex: 0 1 auto; min-height: 0; }
 .painel-da-transcricao-no-chat > .painel-transcricao { max-height: min(240px, 34vh); }
 .chat-lateral .painel-da-transcricao-no-chat { margin: 8px 0 0; }
-.linha-do-composer .botao-da-transcricao { flex-shrink: 0; color: var(--secondary); }
-.linha-do-composer .botao-da-transcricao[aria-pressed="true"] { color: var(--info); background: color-mix(in srgb, var(--info) 13%, transparent); }
-.chat-lateral .linha-do-composer > .btn.botao-da-transcricao { margin-left: 0; }
 
 /* O menu ⋯ da barra: abre para cima, encostado à direita, como o do modelo. */
 .menu-de-mais-acoes { position: relative; flex-shrink: 0; }
@@ -3262,29 +3259,29 @@ html.modo-invisivel .barra-de-titulo * {
 }
 /* O olho do composer: único botão do modo invisível (liga e desliga). Traço fino; ligado (olho cortado),
  * ganha fundo e contorno de destaque, o mesmo das ferramentas ligadas das ilhas. */
-.linha-do-composer .botao-de-escuta-manual { position: relative; width: 32px; height: 32px; }
-/* O botão do modo fantasma tem o rótulo à vista ("Fantasma"): ícone + texto, na altura dos outros botões da barra. */
+.linha-do-composer .botao-de-escuta-manual,
+.linha-do-composer .botao-da-transcricao { position: relative; width: 32px; height: 32px; }
+/* O botão do modo fantasma é só o ícone do olho, no tamanho dos outros botões da barra. */
 .linha-do-composer .botao-entrar-modo-invisivel {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
   flex-shrink: 0;
+  width: 32px;
   height: 32px;
-  padding: 0 10px 0 8px;
+  padding: 0;
   border-radius: 8px;
   color: var(--secondary);
-  font-size: 12px;
-  white-space: nowrap;
   cursor: pointer;
 }
 .linha-do-composer .botao-entrar-modo-invisivel:hover { background: var(--surface-3); color: var(--primary); }
 .linha-do-composer .botao-entrar-modo-invisivel:focus-visible { outline: 2px solid var(--active); outline-offset: 1px; }
-.rotulo-do-modo-invisivel { line-height: 1; }
-/* O ponto que pulsa, agora no canto do ícone (e não do botão inteiro). */
-.linha-do-composer .botao-entrar-modo-invisivel .ponto-tela-vista { top: 6px; right: auto; left: 17px; }
+/* O ponto que pulsa, no canto do ícone. */
+.linha-do-composer .botao-entrar-modo-invisivel .ponto-tela-vista { top: 6px; right: auto; left: 20px; }
 .linha-do-composer .botao-entrar-modo-invisivel[aria-pressed="true"],
-.linha-do-composer .botao-de-escuta-manual[aria-pressed="true"] {
+.linha-do-composer .botao-de-escuta-manual[aria-pressed="true"],
+.linha-do-composer .botao-da-transcricao[aria-pressed="true"] {
   background: color-mix(in srgb, var(--active) 18%, transparent);
   color: var(--active);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--active) 55%, transparent) inset;

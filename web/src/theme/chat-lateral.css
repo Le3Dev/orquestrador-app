@@ -124,7 +124,8 @@
 /* O microfone e o escudo, um pouco menores, para a linha caber na coluna de 360 px. */
 .chat-lateral .linha-do-composer .ditado .botao-icone { width: 28px; height: 28px; }
 .chat-lateral .selo-de-autorizacao { width: 28px; height: 28px; }
-.chat-lateral .linha-do-composer .botao-de-escuta-manual { width: 32px; height: 32px; border-radius: 8px; }
+.chat-lateral .linha-do-composer .botao-de-escuta-manual,
+.chat-lateral .linha-do-composer .botao-da-transcricao { width: 32px; height: 32px; border-radius: 8px; }
 .chat-lateral .botao-do-seletor { height: 28px; gap: 5px; padding: 0 6px; font-size: 12px; }
 /* Se a linha de ícones quebrar (várias coisas ligadas ao mesmo tempo), modelo e enviar vão para a direita. */
 .chat-lateral .seletor-de-modelo { min-width: 0; margin-left: auto; }

@@ -351,6 +351,16 @@ function IconeFones() {
   );
 }
 
+/** Painel da transcrição: um balão de fala com linhas de texto. */
+function IconeTranscricao() {
+  return (
+    <IconeDaBarra>
+      <path d="M4.5 5.5h15a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4.5 3.5v-3.5h-1a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" />
+      <path d="M7.5 9.5h9M7.5 12.5h5.5" />
+    </IconeDaBarra>
+  );
+}
+
 /** Alterações autorizadas: um escudo com o visto. */
 function IconeEscudo() {
   return (
@@ -993,9 +1003,10 @@ export function ChatRapido({
   const comEscuta = escutaDisponivel && (modoAtivo || escutaManualLigada);
 
   // A transcrição não entra na conversa: tem painel próprio (PainelDaTranscricao), com "Responder agora".
-  // Abre sozinho ao ligar a escuta; o botão "Transcrição" da barra abre e fecha, e a escolha fica gravada.
+  // Abre sozinho ao ligar a escuta ou o modo fantasma (mesmo que tenha sido fechado antes); o × do painel fecha.
+  // O ref nasce false: ao entrar no modo o chat sai do painel fixo para o flutuante e é remontado já com o modo ligado.
   const transcricaoAberta = escutaDisponivel && preferencias.transcricaoAberta;
-  const escutaLigadaAntes = useRef(comEscuta);
+  const escutaLigadaAntes = useRef(false);
   useEffect(() => {
     if (comEscuta && !escutaLigadaAntes.current && !preferencias.transcricaoAberta) {
       mudarPreferencias({ transcricaoAberta: true });
@@ -1955,9 +1966,6 @@ export function ChatRapido({
                 onClick={() => void (modoAtivo ? sairDoModo() : entrarNoModo())}
               >
                 <IconeOlho cortado={modoAtivo} />
-                <span className="rotulo-do-modo-invisivel" aria-hidden="true">
-                  Fantasma
-                </span>
                 {modoAtivo && <span className="ponto-tela-vista" aria-hidden="true" />}
               </button>
             )}
@@ -1982,7 +1990,8 @@ export function ChatRapido({
             {escutaDisponivel && (
               <button
                 type="button"
-                className="btn btn-sm btn-ghost botao-da-transcricao"
+                className="botao-icone botao-da-transcricao"
+                aria-label="Transcrição"
                 aria-pressed={transcricaoAberta}
                 title={
                   transcricaoAberta
@@ -1991,7 +2000,7 @@ export function ChatRapido({
                 }
                 onClick={() => mudarPreferencias({ transcricaoAberta: !transcricaoAberta })}
               >
-                Transcrição
+                <IconeTranscricao />
               </button>
             )}
             <SeletorDeModelo
