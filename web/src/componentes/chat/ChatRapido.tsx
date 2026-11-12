@@ -351,6 +351,16 @@ function IconeFones() {
   );
 }
 
+/** Painel da transcrição: um balão de fala com linhas de texto. */
+function IconeTranscricao() {
+  return (
+    <IconeDaBarra>
+      <path d="M4.5 5.5h15a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H10l-4.5 3.5v-3.5h-1a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" />
+      <path d="M7.5 9.5h9M7.5 12.5h5.5" />
+    </IconeDaBarra>
+  );
+}
+
 /** Alterações autorizadas: um escudo com o visto. */
 function IconeEscudo() {
   return (
@@ -1963,6 +1973,22 @@ export function ChatRapido({
             )}
             {/* Com o painel da transcrição aberto, o indicador mora no cabeçalho dele. */}
             {comEscuta && !transcricaoAberta && indicadorDaEscuta}
+            {escutaDisponivel && (
+              <button
+                type="button"
+                className="botao-icone botao-da-transcricao"
+                aria-label="Transcrição"
+                aria-pressed={transcricaoAberta}
+                title={
+                  transcricaoAberta
+                    ? "Fechar o painel da transcrição"
+                    : "Abrir o painel da transcrição: o que o áudio do computador está dizendo, com Responder agora (Ctrl+Shift+Enter)"
+                }
+                onClick={() => mudarPreferencias({ transcricaoAberta: !transcricaoAberta })}
+              >
+                <IconeTranscricao />
+              </button>
+            )}
             <SeletorDeModelo
               preferencias={chat.preferencias}
               modeloUsado={ultimoModeloUsado(chat)}

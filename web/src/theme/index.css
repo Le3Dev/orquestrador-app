@@ -3259,7 +3259,8 @@ html.modo-invisivel .barra-de-titulo * {
 }
 /* O olho do composer: único botão do modo invisível (liga e desliga). Traço fino; ligado (olho cortado),
  * ganha fundo e contorno de destaque, o mesmo das ferramentas ligadas das ilhas. */
-.linha-do-composer .botao-de-escuta-manual { position: relative; width: 32px; height: 32px; }
+.linha-do-composer .botao-de-escuta-manual,
+.linha-do-composer .botao-da-transcricao { position: relative; width: 32px; height: 32px; }
 /* O botão do modo fantasma é só o ícone do olho, no tamanho dos outros botões da barra. */
 .linha-do-composer .botao-entrar-modo-invisivel {
   position: relative;
@@ -3279,7 +3280,8 @@ html.modo-invisivel .barra-de-titulo * {
 /* O ponto que pulsa, no canto do ícone. */
 .linha-do-composer .botao-entrar-modo-invisivel .ponto-tela-vista { top: 6px; right: auto; left: 20px; }
 .linha-do-composer .botao-entrar-modo-invisivel[aria-pressed="true"],
-.linha-do-composer .botao-de-escuta-manual[aria-pressed="true"] {
+.linha-do-composer .botao-de-escuta-manual[aria-pressed="true"],
+.linha-do-composer .botao-da-transcricao[aria-pressed="true"] {
   background: color-mix(in srgb, var(--active) 18%, transparent);
   color: var(--active);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--active) 55%, transparent) inset;

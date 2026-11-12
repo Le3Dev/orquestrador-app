@@ -991,23 +991,45 @@ describe("ChatRapido · modo invisível", () => {
         expect(within(andamento).getByText("orçamento de")).toHaveClass("painel-transcricao-parcial");
       });
 
-      it("abre sozinho ao ligar o modo fantasma, mesmo com o painel fechado e gravado; o × fecha; não há botão Transcrição", () => {
+      it("abre sozinho ao ligar o modo fantasma, mesmo com o painel fechado e gravado; o × fecha", () => {
         localStorage.setItem(CHAVE_DAS_PREFERENCIAS_DA_TELA, JSON.stringify({ transcricaoAberta: false }));
         const { ativar } = ponteAtiva(undefined, true);
         renderizar();
         expect(screen.queryByRole("region", { name: "Transcrição" })).not.toBeInTheDocument();
-        expect(screen.queryByRole("button", { name: "Transcrição" })).not.toBeInTheDocument();
 
         ativar();
         expect(painel()).toBeInTheDocument();
         expect(guardado().transcricaoAberta).toBe(true);
-        expect(screen.queryByRole("button", { name: "Transcrição" })).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole("button", { name: "Fechar a transcrição" }));
         expect(screen.queryByRole("region", { name: "Transcrição" })).not.toBeInTheDocument();
         expect(guardado().transcricaoAberta).toBe(false);
         // O indicador da escuta continua na barra com o painel fechado.
         expect(indicador()).toBeInTheDocument();
+      });
+
+      it("o botão só com ícone reabre o painel fechado pelo × e o fecha de novo", () => {
+        localStorage.setItem(CHAVE_DAS_PREFERENCIAS_DA_TELA, JSON.stringify({ transcricaoAberta: false }));
+        const { ativar } = ponteAtiva(undefined, true);
+        renderizar();
+        const botao = () => screen.getByRole("button", { name: "Transcrição" });
+        expect(botao().textContent).toBe("");
+        expect(botao()).toHaveAttribute("aria-pressed", "false");
+
+        ativar();
+        expect(botao()).toHaveAttribute("aria-pressed", "true");
+        fireEvent.click(screen.getByRole("button", { name: "Fechar a transcrição" }));
+        expect(screen.queryByRole("region", { name: "Transcrição" })).not.toBeInTheDocument();
+        expect(botao()).toHaveAttribute("aria-pressed", "false");
+
+        fireEvent.click(botao());
+        expect(painel()).toBeInTheDocument();
+        expect(guardado().transcricaoAberta).toBe(true);
+        expect(botao()).toHaveAttribute("aria-pressed", "true");
+
+        fireEvent.click(botao());
+        expect(screen.queryByRole("region", { name: "Transcrição" })).not.toBeInTheDocument();
+        expect(guardado().transcricaoAberta).toBe(false);
       });
 
       it("abre sozinho ao ligar a escuta manual (fones)", async () => {
