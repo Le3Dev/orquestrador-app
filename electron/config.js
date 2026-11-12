@@ -3,46 +3,36 @@
 // Configuração do app desktop (Electron) e da ativação por licença.
 //
 // ──────────────────────────────────────────────────────────────────────────
-// LEMON SQUEEZY — onde o DONO do produto preenche os valores
+// MODELO ATUAL — checkout via Stripe + backend próprio de licenças
 // ──────────────────────────────────────────────────────────────────────────
-// A ativação usa a API PÚBLICA de licenças do Lemon Squeezy. Ela NÃO exige um
-// backend próprio nem uma API key secreta: os três endpoints de licença
-// (activate/validate/deactivate) se autenticam apenas com a própria
-// `license_key` que o cliente digita. Portanto NADA secreto fica neste arquivo.
+// A venda (landing + checkout Stripe) e o backend de licenciamento (emissão,
+// ativação, validação e desativação de license keys) vivem num projeto
+// SEPARADO deste repositório. O Stripe não tem conceito nativo de "license
+// key com ativações" como o Lemon Squeezy tinha, então esse outro projeto
+// expõe os próprios endpoints HTTP (contrato documentado em
+// `electron/licenca.js`) e este app só precisa saber onde eles estão.
 //
-// Passos no painel do Lemon Squeezy (https://app.lemonsqueezy.com):
-//   1. Crie uma Store e um Product (ex.: "Orquestrador de Agentes").
-//   2. No Product, habilite "License keys" (licenciamento).
-//   3. Em "License key options", defina o nº máximo de ativações por chave.
-//      Para 1 máquina por licença: maxActivations = 1. (Isso é configurado LÁ,
-//      no painel — não aqui. O endpoint de activate retorna erro quando o
-//      limite é atingido; o app apenas mostra a mensagem.)
-//   4. (Opcional) Anote o Store ID e o Product/Variant ID só para conferência;
-//      eles NÃO são necessários para os endpoints de licença, mas deixamos
-//      campos abaixo caso você queira validar/filtrar no futuro.
+// Aqui configuramos apenas a `baseUrl` desse backend. Os endpoints de
+// ativar/validar/desativar são montados a partir dela.
 //
-// Os endpoints abaixo são fixos da Lemon Squeezy e normalmente não mudam.
+// TODO: preencher `baseUrl` com a URL real quando o outro projeto (landing +
+// backend de licenças) for publicado. Até lá, o valor abaixo é só um
+// placeholder de desenvolvimento local.
+const baseUrl = process.env.ORQUESTRADOR_LICENCA_API_URL || "http://localhost:0000"; // placeholder — TODO preencher com a URL publicada
 
 module.exports = {
-  // Endpoints públicos da API de licenças do Lemon Squeezy.
+  // Endpoints do backend próprio de licenças, montados a partir da baseUrl.
   endpoints: {
-    activate: "https://api.lemonsqueezy.com/v1/licenses/activate",
-    validate: "https://api.lemonsqueezy.com/v1/licenses/validate",
-    deactivate: "https://api.lemonsqueezy.com/v1/licenses/deactivate",
+    activate: `${baseUrl}/ativar`,
+    validate: `${baseUrl}/validar`,
+    deactivate: `${baseUrl}/desativar`,
   },
-
-  // ⇩ PREENCHA (opcional) — apenas conferência. Deixe null se não for usar.
-  // Se você preencher expectedStoreId / expectedProductId, a ativação passa a
-  // EXIGIR que a licença pertença a essa loja/produto (defesa extra contra uso
-  // de chaves de outro produto). Com null, qualquer chave válida é aceita.
-  expectedStoreId: null, // ex.: 123456
-  expectedProductId: null, // ex.: 654321
 
   // Dias que o app continua abrindo OFFLINE após a última validação bem
   // sucedida. Passado esse prazo sem conseguir validar online, bloqueia.
   gracePeriodDays: 14,
 
-  // Tempo máximo (ms) de espera nas chamadas HTTP à Lemon Squeezy.
+  // Tempo máximo (ms) de espera nas chamadas HTTP ao backend de licenças.
   requestTimeoutMs: 15000,
 
   // Identidade do app desktop (também usada pelo electron-builder).

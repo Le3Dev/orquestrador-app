@@ -25,7 +25,7 @@ O motor é o próprio **Claude Code em modo headless**, usando o login da sua as
 
 **Pré-requisito em qualquer modo:** o Claude Code instalado e logado (`claude` funcionando no terminal). Para rodar a partir do código-fonte, também Node 22+.
 
-**Usuário final (instalador):** instale o `.exe` gerado por `npm run dist:win` (sai em `dist_electron/`). O instalador é por usuário, sem pedir administrador, e deixa escolher a pasta. Sem certificado de assinatura, o Windows SmartScreen avisa na primeira execução (*Mais informações → Executar assim mesmo*). O app instalado pede a **chave de licença** (Lemon Squeezy) antes de abrir.
+**Usuário final (instalador):** instale o `.exe` gerado por `npm run dist:win` (sai em `dist_electron/`). O instalador é por usuário, sem pedir administrador, e deixa escolher a pasta. Sem certificado de assinatura, o Windows SmartScreen avisa na primeira execução (*Mais informações → Executar assim mesmo*). O app instalado pede a **chave de licença** (emitida pelo backend de licenciamento, após a compra no site de venda) antes de abrir.
 
 **Dia a dia, a partir do código-fonte:** dê dois cliques em **`iniciar-desktop.cmd`**. Na primeira vez ele instala as dependências e gera o build; depois roda `npm run desktop` (`electron .`), que abre a janela do aplicativo. Rodando assim (não empacotado), **não há licença**. Depois de atualizar o código, rode `npm run build` (o `.cmd` só gera o build quando falta `dist/` ou `web/dist/`).
 
@@ -230,7 +230,7 @@ Casos de teste do **canvas: paleta, notas em lista, bixinhos e entrega**:
 
 ## Tecnologias
 
-- **Aplicativo desktop:** **Electron 33** (processo principal em `electron/`, servidor em `utilityProcess`) e **electron-builder** (instalador NSIS para Windows x64). Licença via Lemon Squeezy, só no instalado.
+- **Aplicativo desktop:** **Electron 33** (processo principal em `electron/`, servidor em `utilityProcess`) e **electron-builder** (instalador NSIS para Windows x64). Licença via backend próprio (checkout por Stripe num projeto separado), só no instalado.
 - **Node 22+ / TypeScript 6** (estrito, `exactOptionalPropertyTypes`), **Express 5**, **zod 4** (validação da API), **vitest**.
 - **Tela:** React 19, Vite 6, Tailwind 4, react-markdown com remark-gfm e **React Flow** (`@xyflow/react` 12) para o canvas (ver ADR-8). Tema escuro com a paleta da Anthropic (ver ADR-7). Fontes empacotadas via `@fontsource`, sem CDN: Poppins, Lora e JetBrains Mono.
 - **Claude Code 2.1.x** (`claude -p --output-format stream-json`) como motor dos agentes.
@@ -714,7 +714,7 @@ flowchart TD
   - acabou o uso pelo navegador e o `iniciar-orquestrador.cmd`; o atalho do código-fonte é o `iniciar-desktop.cmd`, e o desenvolvimento passa a ser `npm run desktop:dev` (navegador só com a trava desligada);
   - a trava evita o acesso casual pelo navegador, não um atacante na mesma máquina: quem roda código como o usuário consegue ler a memória ou o ambiente do processo;
   - worktrees antigos continuam na pasta antiga (`<dados antigos>\worktrees`); os novos nascem em `%APPDATA%\Orquestrador de Agentes\dados\worktrees`;
-  - o app instalado exige a loja do Lemon Squeezy configurada; o build de teste pula a licença e **não pode ser distribuído**;
+  - o app instalado exige o backend de licenciamento (do projeto da landing) configurado; o build de teste pula a licença e **não pode ser distribuído**;
   - sem certificado de assinatura, o SmartScreen avisa ao instalar e na primeira execução.
 
 **ADR-20 — Barra de título própria, larguras da janela, porta fixa e pasta de dados única.**
@@ -823,6 +823,18 @@ flowchart TD
   - a autorização vale para editar **e** rodar comandos ao mesmo tempo, até o `/clear` ou o ✕: não dá para liberar só um dos dois;
   - a resposta que pede autorização para no primeiro bloqueio; o Claude retoma a partir da pergunta "Autorizado. Continue de onde parou.", o que custa mais uma pergunta (e cota);
   - "Agora não" só esconde o cartão nesta tela: recarregar a página mostra de novo o pedido da última resposta.
+
+**ADR-26 — Licenciamento migrado de Lemon Squeezy (API pública) para backend próprio com Stripe.**
+- *Contexto:*
+  - a venda passa a usar **Stripe** para pagamento; o Stripe não tem conceito nativo de "license key com ativações" como o Lemon Squeezy tinha;
+  - a landing de venda passa a viver num projeto **separado** deste repositório.
+- *Decisão:*
+  - a landing, o checkout (Stripe) e o backend de licenciamento (emissão, ativação, validação e desativação de license keys) passam a viver no outro projeto;
+  - `electron/licenca.js` chama uma `baseUrl` genérica (configurada em `electron/config.js`) com os endpoints `/ativar`, `/validar` e `/desativar` — o contrato HTTP esperado está documentado no próprio `licenca.js`;
+  - a pasta `site/` (landing antiga via Lemon Squeezy) foi removida deste repositório.
+- *Consequências:*
+  - a ativação de licença fica pendente até o outro projeto publicar o backend e a `baseUrl` ser preenchida em `electron/config.js`;
+  - perde-se a integração "pronta" do Lemon Squeezy (sem precisar de backend), mas ganha-se liberdade total sobre preço e fluxo de pagamento via Stripe.
 
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;

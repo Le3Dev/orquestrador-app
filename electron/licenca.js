@@ -1,11 +1,23 @@
 "use strict";
 
-// Ativação ONLINE de licença via API pública do Lemon Squeezy, com GRACE
+// Ativação ONLINE de licença via backend próprio de licenciamento, com GRACE
 // PERIOD offline. Roda no processo MAIN do Electron (tem acesso a Node, rede e
 // ao disco do usuário). O preload expõe estas funções à SPA via IPC.
 //
-// Não há backend próprio nem API secreta: os endpoints de licença da Lemon
-// Squeezy se autenticam com a própria license_key digitada pelo usuário.
+// O backend de licenças mora no outro projeto (landing + checkout Stripe) e é
+// chamado a partir da `baseUrl` configurada em `electron/config.js`. Contrato
+// esperado (a implementar/manter naquele projeto):
+//
+//   POST {baseUrl}/ativar    body { license_key, instance_name }
+//     sucesso → { activated: true, instance: { id }, meta? }
+//     erro    → { error: "mensagem" }
+//
+//   POST {baseUrl}/validar   body { license_key, instance_id }
+//     sucesso → { valid: true, meta? }
+//     erro    → { error: "mensagem" }
+//
+//   POST {baseUrl}/desativar body { license_key, instance_id }
+//     resposta → { deactivated: true }
 
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -58,7 +70,7 @@ function fingerprintDaMaquina() {
   return crypto.createHash("sha256").update(sinais).digest("hex");
 }
 
-// Nome amigável + fingerprint para o instance_name no Lemon Squeezy.
+// Nome amigável + fingerprint para o instance_name enviado ao backend.
 function instanceName() {
   return `${os.hostname()}-${fingerprintDaMaquina().slice(0, 12)}`;
 }
@@ -88,9 +100,9 @@ function apagarCache() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// HTTP para a Lemon Squeezy (fetch nativo do Node 18+/Electron).
+// HTTP para o backend de licenças (fetch nativo do Node 18+/Electron).
 // ──────────────────────────────────────────────────────────────────────────
-async function postLemon(url, campos) {
+async function postApi(url, campos) {
   const corpo = new URLSearchParams(campos).toString();
   const controlador = new AbortController();
   const limite = setTimeout(() => controlador.abort(), config.requestTimeoutMs);
@@ -111,18 +123,6 @@ async function postLemon(url, campos) {
   }
 }
 
-// Confere, quando configurado, que a licença é da loja/produto esperados.
-function pertenceAoProduto(json) {
-  const meta = json && json.meta ? json.meta : {};
-  if (config.expectedStoreId != null && Number(meta.store_id) !== Number(config.expectedStoreId)) {
-    return false;
-  }
-  if (config.expectedProductId != null && Number(meta.product_id) !== Number(config.expectedProductId)) {
-    return false;
-  }
-  return true;
-}
-
 // ──────────────────────────────────────────────────────────────────────────
 // activate — vincula esta máquina à chave e guarda o instance_id localmente.
 // ──────────────────────────────────────────────────────────────────────────
@@ -134,7 +134,7 @@ async function activate(licenseKey) {
 
   let resposta;
   try {
-    resposta = await postLemon(config.endpoints.activate, {
+    resposta = await postApi(config.endpoints.activate, {
       license_key: key,
       instance_name: instanceName(),
     });
@@ -147,16 +147,6 @@ async function activate(licenseKey) {
   if (!resposta.ok || json.activated !== true || !json.instance || !json.instance.id) {
     const mensagem = json.error || "Não foi possível ativar essa chave. Confira a chave e o limite de ativações.";
     return { ok: false, motivo: "recusada", mensagem };
-  }
-
-  if (!pertenceAoProduto(json)) {
-    // Desfaz a ativação indevida para não gastar um slot da chave.
-    try {
-      await postLemon(config.endpoints.deactivate, { license_key: key, instance_id: json.instance.id });
-    } catch {
-      /* ignora: nada a fazer offline */
-    }
-    return { ok: false, motivo: "produto-incorreto", mensagem: "Essa chave não pertence a este produto." };
   }
 
   gravarCache({
@@ -181,7 +171,7 @@ async function validate() {
 
   let resposta;
   try {
-    resposta = await postLemon(config.endpoints.validate, {
+    resposta = await postApi(config.endpoints.validate, {
       license_key: cache.licenseKey,
       instance_id: cache.instanceId,
     });
@@ -226,7 +216,7 @@ async function deactivate() {
   }
 
   try {
-    await postLemon(config.endpoints.deactivate, {
+    await postApi(config.endpoints.deactivate, {
       license_key: cache.licenseKey,
       instance_id: cache.instanceId,
     });
