@@ -42,7 +42,12 @@ function resposta(status, json) {
   return { status, json: async () => json };
 }
 
-describe("serviço de licença", () => {
+const cifrado = (t) => `cifrado:${Buffer.from(t).toString("base64")}`;
+const semRede = () => {
+  throw new Error("sem rede");
+};
+
+describe("serviço de licença (login por e-mail)", () => {
   let pasta;
   let agoraMs;
   let chamadas;
@@ -51,7 +56,7 @@ describe("serviço de licença", () => {
   function criar(opcoes = {}) {
     return criarServicoDeLicenca({
       fetch: async (url, init) => {
-        const rota = url.split("/v1/licencas/")[1];
+        const rota = url.split("licencas.exemplo.test")[1];
         const corpo = JSON.parse(init.body);
         chamadas.push({ rota, corpo, url });
         return respostaDoServidor(rota, corpo);
@@ -60,6 +65,8 @@ describe("serviço de licença", () => {
       pastaDoUsuario: pasta,
       urlDoServicoDeLicencas: "https://licencas.exemplo.test/",
       chavePublicaDaLicenca: chavePublica,
+      cifrar: cifrado,
+      decifrar: (t) => Buffer.from(t.replace(/^cifrado:/, ""), "base64").toString("utf8"),
       lerMachineGuid: () => "guid-desta-maquina",
       nomeDoComputador: () => "PC-DO-LEANDRO",
       intervaloDeRevalidacaoMs: DIA,
@@ -75,214 +82,245 @@ describe("serviço de licença", () => {
     pasta = fs.mkdtempSync(path.join(os.tmpdir(), "licenca-"));
     agoraMs = INICIO;
     chamadas = [];
-    respostaDoServidor = () => resposta(200, { token: emitirToken() });
+    respostaDoServidor = (rota) => {
+      if (rota === "/v1/entrar/codigo") return resposta(200, { ok: true });
+      if (rota === "/v1/entrar/confirmar") {
+        return resposta(200, { token: emitirToken(), sessao: "sessao-secreta", plano: "mensal", email: "a@b.com" });
+      }
+      if (rota === "/v1/licencas/validar") return resposta(200, { token: emitirToken() });
+      if (rota === "/v1/sair") return resposta(200, { ok: true });
+      return resposta(404, {});
+    };
   });
 
   afterEach(() => {
     fs.rmSync(pasta, { recursive: true, force: true });
   });
 
-  it("ativar com sucesso grava chave, token e ultimaHoraVista", async () => {
-    const servico = criar();
-    const r = await servico.ativar("orq-aaaa-bbbb-cccc-dddd");
+  const conectar = (servico) => servico.entrar({ email: "a@b.com", codigo: "123456" });
+
+  it("pedirCodigo normaliza o e-mail e chama o serviço", async () => {
+    const r = await criar().pedirCodigo("  Ana@Exemplo.COM ");
     expect(r.ok).toBe(true);
-    expect(chamadas[0].url).toBe("https://licencas.exemplo.test/v1/licencas/ativar");
+    expect(chamadas[0].url).toBe("https://licencas.exemplo.test/v1/entrar/codigo");
+    expect(chamadas[0].corpo).toEqual({ email: "ana@exemplo.com" });
+  });
+
+  it("pedirCodigo repassa o erro do servidor", async () => {
+    respostaDoServidor = () => resposta(429, { erro: "Aguarde um pouco.", motivo: "muitas-tentativas" });
+    const r = await criar().pedirCodigo("a@b.com");
+    expect(r).toMatchObject({ ok: false, motivo: "muitas-tentativas", mensagem: "Aguarde um pouco." });
+  });
+
+  it("entrar com sucesso grava a sessão cifrada, nunca em claro", async () => {
+    const servico = criar();
+    const r = await servico.entrar({ email: " A@B.com ", codigo: "123 456" });
+    expect(r.ok).toBe(true);
+    expect(chamadas[0].url).toBe("https://licencas.exemplo.test/v1/entrar/confirmar");
     expect(chamadas[0].corpo).toEqual({
-      chave: "ORQ-AAAA-BBBB-CCCC-DDDD",
+      email: "a@b.com",
+      codigo: "123456",
       maquina: { id: ID_DESTA_MAQUINA, nome: "PC-DO-LEANDRO" },
     });
     const gravado = lerArquivo();
-    expect(gravado.chave).toBe("ORQ-AAAA-BBBB-CCCC-DDDD");
+    expect(gravado.email).toBe("a@b.com");
+    expect(gravado.sessao).toBe(cifrado("sessao-secreta"));
+    expect(fs.readFileSync(arquivo(), "utf8")).not.toContain('"sessao-secreta"');
     expect(gravado.token).toBeTruthy();
     expect(gravado.ultimaHoraVista).toBe(INICIO);
-    expect(servico.status()).toMatchObject({ ativada: true, plano: "mensal", nomeDaMaquina: "PC-DO-LEANDRO" });
+    expect(servico.status()).toMatchObject({ conectado: true, email: "a@b.com", plano: "mensal", nomeDaMaquina: "PC-DO-LEANDRO" });
+    expect(servico.status().diasRestantesDoTeste).toBeUndefined();
   });
 
-  it("ativar recusada por limite de máquinas devolve a mensagem do servidor e não grava", async () => {
-    respostaDoServidor = () => resposta(403, { erro: "Limite de computadores atingido.", motivo: "limite-de-maquinas" });
-    const r = await criar().ativar("ORQ-AAAA-BBBB-CCCC-DDDD");
-    expect(r).toMatchObject({ ok: false, motivo: "limite-de-maquinas", mensagem: "Limite de computadores atingido." });
-    expect(fs.existsSync(arquivo())).toBe(false);
-  });
-
-  it("ativar rejeita token de outra máquina ou assinado com outra chave", async () => {
-    respostaDoServidor = () => resposta(200, { token: emitirToken({ maquina: "outra" }) });
-    expect((await criar().ativar("ORQ-A")).ok).toBe(false);
-    const outra = crypto.generateKeyPairSync("ed25519");
-    respostaDoServidor = () => resposta(200, { token: emitirToken({}, outra.privateKey) });
-    expect((await criar().ativar("ORQ-A")).ok).toBe(false);
-    expect(fs.existsSync(arquivo())).toBe(false);
-  });
-
-  it("arquivo copiado de outra máquina (token com outro maquina) bloqueia", async () => {
-    gravarArquivo({ chave: "ORQ-A", token: emitirToken({ maquina: "f".repeat(64) }), ultimaHoraVista: INICIO });
-    respostaDoServidor = () => {
-      throw new Error("sem rede");
-    };
-    const r = await criar().validar();
-    expect(r).toMatchObject({ ok: false, motivo: "outra-maquina" });
-  });
-
-  it("token adulterado (expiraEm maior no payload) bloqueia", async () => {
-    const [cab, corpo, assinatura] = emitirToken().split(".");
-    const payload = JSON.parse(Buffer.from(corpo, "base64url").toString());
-    payload.expiraEm += 365 * DIA;
-    gravarArquivo({ chave: "ORQ-A", token: `${cab}.${b64(payload)}.${assinatura}`, ultimaHoraVista: INICIO });
-    respostaDoServidor = () => {
-      throw new Error("sem rede");
-    };
-    const r = await criar().validar();
-    expect(r).toMatchObject({ ok: false, motivo: "token-invalido" });
-  });
-
-  it("arquivo corrompido é tratado como sem licença", async () => {
-    fs.writeFileSync(arquivo(), "{ lixo", "utf8");
-    const r = await criar().validar();
-    expect(r).toMatchObject({ ok: false, motivo: "sem-licenca" });
-  });
-
-  it("online: validar grava o token novo", async () => {
-    gravarArquivo({ chave: "ORQ-A", token: emitirToken(), ultimaHoraVista: INICIO });
-    agoraMs = INICIO + 2 * DIA;
-    const novo = emitirToken({ emitidoEm: agoraMs, expiraEm: agoraMs + 7 * DIA });
-    respostaDoServidor = () => resposta(200, { token: novo });
-    const r = await criar().validar();
-    expect(r).toMatchObject({ ok: true, online: true });
-    expect(lerArquivo().token).toBe(novo);
-    expect(lerArquivo().ultimaHoraVista).toBe(agoraMs);
-  });
-
-  it("offline com token válido libera", async () => {
-    gravarArquivo({ chave: "ORQ-A", token: emitirToken(), ultimaHoraVista: INICIO });
-    respostaDoServidor = () => {
-      throw new Error("sem rede");
-    };
-    agoraMs = INICIO + 3 * DIA;
-    const r = await criar().validar();
-    expect(r).toMatchObject({ ok: true, online: false });
-    expect(lerArquivo().ultimaHoraVista).toBe(agoraMs);
-  });
-
-  it("servidor com 5xx também usa o token guardado", async () => {
-    gravarArquivo({ chave: "ORQ-A", token: emitirToken(), ultimaHoraVista: INICIO });
-    respostaDoServidor = () => resposta(503, {});
-    expect((await criar().validar()).ok).toBe(true);
-  });
-
-  it("offline com token vencendo avisa para conectar", async () => {
-    gravarArquivo({ chave: "ORQ-A", token: emitirToken(), ultimaHoraVista: INICIO });
-    respostaDoServidor = () => {
-      throw new Error("sem rede");
-    };
-    agoraMs = INICIO + 6.5 * DIA;
-    const r = await criar().validar();
-    expect(r.ok).toBe(true);
-    expect(r.avisoOffline).toBeTruthy();
-  });
-
-  it("offline com token vencido bloqueia", async () => {
-    gravarArquivo({ chave: "ORQ-A", token: emitirToken(), ultimaHoraVista: INICIO });
-    respostaDoServidor = () => {
-      throw new Error("sem rede");
-    };
-    agoraMs = INICIO + 8 * DIA;
-    const r = await criar().validar();
-    expect(r).toMatchObject({ ok: false, motivo: "token-expirado" });
-  });
-
-  it("relógio que voltou bloqueia (e pequenas diferenças são toleradas)", async () => {
-    gravarArquivo({ chave: "ORQ-A", token: emitirToken(), ultimaHoraVista: INICIO + 2 * DIA });
-    respostaDoServidor = () => {
-      throw new Error("sem rede");
-    };
-    agoraMs = INICIO + 2 * DIA - 11 * 60 * 1000;
-    expect(await criar().validar()).toMatchObject({ ok: false, motivo: "relogio-alterado" });
-    agoraMs = INICIO + 2 * DIA - 5 * 60 * 1000;
-    expect((await criar().validar()).ok).toBe(true);
-  });
-
-  it("403 assinatura-inativa bloqueia e apaga o token mantendo a chave", async () => {
-    gravarArquivo({ chave: "ORQ-A", token: emitirToken(), ultimaHoraVista: INICIO });
-    respostaDoServidor = () => resposta(403, { erro: "Assinatura cancelada.", motivo: "assinatura-inativa" });
+  it("código inválido não grava nada", async () => {
+    respostaDoServidor = () => resposta(403, { erro: "Código incorreto.", motivo: "codigo-invalido" });
     const servico = criar();
-    const r = await servico.validar();
-    expect(r).toMatchObject({ ok: false, motivo: "assinatura-inativa", mensagem: "Assinatura cancelada." });
-    expect(lerArquivo()).toMatchObject({ chave: "ORQ-A", token: null });
-    expect(servico.status().ativada).toBe(false);
-    // Mesmo offline depois, não volta a liberar.
-    respostaDoServidor = () => {
-      throw new Error("sem rede");
-    };
-    expect((await servico.validar()).ok).toBe(false);
+    const r = await servico.entrar({ email: "a@b.com", codigo: "000000" });
+    expect(r).toMatchObject({ ok: false, motivo: "codigo-invalido", mensagem: "Código incorreto." });
+    expect(fs.existsSync(arquivo())).toBe(false);
+    expect(servico.status().conectado).toBe(false);
   });
 
-  it("desativar avisa o servidor e apaga o arquivo; falha de rede não impede", async () => {
-    gravarArquivo({ chave: "ORQ-A", token: emitirToken(), ultimaHoraVista: INICIO });
-    respostaDoServidor = () => resposta(200, { ok: true });
-    await criar().desativar();
-    expect(chamadas[0]).toMatchObject({ rota: "desativar", corpo: { chave: "ORQ-A", maquina: { id: ID_DESTA_MAQUINA } } });
+  it("limite-de-maquinas devolve outraMaquina e o reenvio com substituir funciona", async () => {
+    const outra = { nome: "NOTEBOOK", ultimoUsoEm: INICIO - DIA };
+    const normal = respostaDoServidor;
+    respostaDoServidor = (rota, corpo) =>
+      rota === "/v1/entrar/confirmar" && !corpo.substituirOutraMaquina
+        ? resposta(403, { erro: "Em uso.", motivo: "limite-de-maquinas", outraMaquina: outra })
+        : normal(rota, corpo);
+    const servico = criar();
+    const primeira = await conectar(servico);
+    expect(primeira).toMatchObject({ ok: false, motivo: "limite-de-maquinas", outraMaquina: outra });
     expect(fs.existsSync(arquivo())).toBe(false);
-
-    gravarArquivo({ chave: "ORQ-A", token: emitirToken(), ultimaHoraVista: INICIO });
-    respostaDoServidor = () => {
-      throw new Error("sem rede");
-    };
-    const r = await criar().desativar();
-    expect(r.ok).toBe(true);
-    expect(fs.existsSync(arquivo())).toBe(false);
+    const segunda = await servico.entrar({ email: "a@b.com", codigo: "123456", substituirOutraMaquina: true });
+    expect(segunda.ok).toBe(true);
+    expect(chamadas[1].corpo.substituirOutraMaquina).toBe(true);
   });
 
-  it("sem chave pública ou URL configuradas bloqueia (fail closed)", async () => {
-    gravarArquivo({ chave: "ORQ-A", token: emitirToken(), ultimaHoraVista: INICIO });
-    const logs = [];
-    const semChave = criar({ chavePublicaDaLicenca: null, log: (o, t) => logs.push(t) });
-    expect(await semChave.validar()).toMatchObject({ ok: false, motivo: "sem-configuracao" });
-    expect((await semChave.ativar("ORQ-A")).ok).toBe(false);
-    expect(logs.length).toBeGreaterThan(0);
-    const semUrl = criar({ urlDoServicoDeLicencas: "" });
-    expect((await semUrl.liberadoParaAbrir()).liberado).toBe(false);
+  it("no teste, status informa os dias restantes", async () => {
+    respostaDoServidor = (rota) =>
+      rota === "/v1/entrar/confirmar"
+        ? resposta(200, {
+            token: emitirToken({ plano: "teste", pagaAte: INICIO + 5 * DIA - HORA }),
+            sessao: "sessao-secreta",
+            plano: "teste",
+            email: "a@b.com",
+          })
+        : resposta(404, {});
+    const servico = criar();
+    await conectar(servico);
+    expect(servico.status()).toMatchObject({ conectado: true, plano: "teste", diasRestantesDoTeste: 5 });
+  });
+
+  it("entrar sem configuração bloqueia", async () => {
+    const r = await criar({ urlDoServicoDeLicencas: null }).entrar({ email: "a@b.com", codigo: "123456" });
+    expect(r).toMatchObject({ ok: false, motivo: "sem-configuracao" });
     expect(chamadas).toHaveLength(0);
   });
 
-  it("id da máquina sem MachineGuid usa hostname e MAC", () => {
-    const servico = criar({ lerMachineGuid: () => "", lerMacFisico: () => "aa:bb:cc:dd:ee:ff" });
-    const esperado = crypto.createHash("sha256").update("PC-DO-LEANDRO::aa:bb:cc:dd:ee:ff").digest("hex");
-    expect(servico.idDaMaquina()).toBe(esperado);
+  it("validar usa a sessão (decifrada) e guarda o novo token", async () => {
+    const servico = criar();
+    await conectar(servico);
+    agoraMs = INICIO + 2 * DIA;
+    respostaDoServidor = () => resposta(200, { token: emitirToken({ expiraEm: INICIO + 9 * DIA }) });
+    const r = await servico.validar();
+    expect(r).toMatchObject({ ok: true, online: true, plano: "mensal" });
+    const ultima = chamadas[chamadas.length - 1];
+    expect(ultima.url).toBe("https://licencas.exemplo.test/v1/licencas/validar");
+    expect(ultima.corpo).toEqual({ sessao: "sessao-secreta", maquina: { id: ID_DESTA_MAQUINA } });
+    expect(lerArquivo().ultimaHoraVista).toBe(INICIO + 2 * DIA);
   });
 
-  it("revalidação periódica chama aoBloquear quando a licença é recusada e pode ser parada", async () => {
-    gravarArquivo({ chave: "ORQ-A", token: emitirToken(), ultimaHoraVista: INICIO });
+  it.each([
+    ["teste-expirado", "Seu teste grátis terminou. Assine com o mesmo e-mail para continuar."],
+    ["maquina-substituida", "Sua conta foi usada em outro computador. Entre de novo para usar aqui."],
+    ["assinatura-inativa", null],
+    ["sessao-invalida", null],
+  ])("403 %s bloqueia e apaga token e sessão mantendo o e-mail", async (motivo, mensagem) => {
+    const servico = criar();
+    await conectar(servico);
+    respostaDoServidor = () => resposta(403, { motivo });
+    const r = await servico.validar();
+    expect(r).toMatchObject({ ok: false, motivo, online: true });
+    if (mensagem) expect(r.mensagem).toBe(mensagem);
+    expect(r.mensagem).toBeTruthy();
+    const gravado = lerArquivo();
+    expect(gravado.email).toBe("a@b.com");
+    expect(gravado.sessao).toBeNull();
+    expect(gravado.token).toBeNull();
+    expect(servico.status()).toMatchObject({ conectado: false, email: "a@b.com" });
+    expect((await servico.validar()).motivo).toBe("sem-licenca");
+  });
+
+  it("offline com token válido libera e avisa perto do vencimento", async () => {
+    const servico = criar();
+    await conectar(servico);
+    respostaDoServidor = semRede;
+    agoraMs = INICIO + 1 * DIA;
+    expect(await servico.validar()).toMatchObject({ ok: true, online: false, motivo: "offline" });
+    agoraMs = INICIO + 7 * DIA - HORA;
+    const perto = await servico.validar();
+    expect(perto.ok).toBe(true);
+    expect(perto.avisoOffline).toBeTruthy();
+  });
+
+  it("5xx cai no token guardado", async () => {
+    const servico = criar();
+    await conectar(servico);
+    respostaDoServidor = () => resposta(503, {});
+    expect(await servico.validar()).toMatchObject({ ok: true, online: false });
+  });
+
+  it("token de outra máquina bloqueia offline", async () => {
+    const servico = criar();
+    await conectar(servico);
+    gravarArquivo({ ...lerArquivo(), token: emitirToken({ maquina: "outra" }) });
+    respostaDoServidor = semRede;
+    expect(await servico.validar()).toMatchObject({ ok: false, motivo: "outra-maquina" });
+  });
+
+  it("token de outra chave ou adulterado bloqueia offline", async () => {
+    const servico = criar();
+    await conectar(servico);
+    const dados = lerArquivo();
+    respostaDoServidor = semRede;
+    const outraChave = crypto.generateKeyPairSync("ed25519").privateKey;
+    gravarArquivo({ ...dados, token: emitirToken({}, outraChave) });
+    expect(await servico.validar()).toMatchObject({ ok: false, motivo: "token-invalido" });
+    const [c, , a] = dados.token.split(".");
+    const corpoFalso = b64({ v: 1, maquina: ID_DESTA_MAQUINA, plano: "anual", expiraEm: INICIO + 900 * DIA });
+    gravarArquivo({ ...dados, token: `${c}.${corpoFalso}.${a}` });
+    expect(await servico.validar()).toMatchObject({ ok: false, motivo: "token-invalido" });
+  });
+
+  it("token vencido bloqueia offline", async () => {
+    const servico = criar();
+    await conectar(servico);
+    respostaDoServidor = semRede;
+    agoraMs = INICIO + 8 * DIA;
+    expect(await servico.validar()).toMatchObject({ ok: false, motivo: "token-expirado" });
+  });
+
+  it("relógio voltado bloqueia offline, mas tolera pequenos ajustes", async () => {
+    const servico = criar();
+    await conectar(servico);
+    agoraMs = INICIO + 3 * DIA;
+    await servico.validar();
+    respostaDoServidor = semRede;
+    agoraMs = INICIO + 3 * DIA - 5 * 60 * 1000;
+    expect((await servico.validar()).ok).toBe(true);
+    agoraMs = INICIO + 1 * DIA;
+    expect(await servico.validar()).toMatchObject({ ok: false, motivo: "relogio-alterado" });
+  });
+
+  it("sair chama /v1/sair e apaga o arquivo, mesmo offline", async () => {
+    const servico = criar();
+    await conectar(servico);
+    await servico.sair();
+    const ultima = chamadas[chamadas.length - 1];
+    expect(ultima.url).toBe("https://licencas.exemplo.test/v1/sair");
+    expect(ultima.corpo).toEqual({ sessao: "sessao-secreta", maquina: { id: ID_DESTA_MAQUINA } });
+    expect(fs.existsSync(arquivo())).toBe(false);
+
+    await conectar(servico);
+    respostaDoServidor = semRede;
+    expect((await servico.sair()).ok).toBe(true);
+    expect(fs.existsSync(arquivo())).toBe(false);
+  });
+
+  it("arquivo antigo com chave = não conectado", async () => {
+    gravarArquivo({ chave: "ORQ-AAAA", token: emitirToken(), ultimaHoraVista: INICIO });
+    const servico = criar();
+    expect(servico.status().conectado).toBe(false);
+    expect(await servico.validar()).toMatchObject({ ok: false, motivo: "sem-licenca" });
+    expect(chamadas).toHaveLength(0);
+  });
+
+  it("sem URL ou sem chave pública bloqueia", async () => {
+    for (const opcoes of [{ urlDoServicoDeLicencas: "" }, { chavePublicaDaLicenca: null }]) {
+      const servico = criar(opcoes);
+      expect(await servico.validar()).toMatchObject({ ok: false, motivo: "sem-configuracao" });
+      expect(await servico.pedirCodigo("a@b.com")).toMatchObject({ ok: false, motivo: "sem-configuracao" });
+      expect(servico.status().conectado).toBe(false);
+    }
+    expect(chamadas).toHaveLength(0);
+  });
+
+  it("revalidação periódica bloqueia e chama aoBloquear", async () => {
     let tarefa = null;
-    let intervalo = null;
-    let cancelado = false;
     const servico = criar({
-      agendar: (fn, ms) => {
+      agendar: (fn) => {
         tarefa = fn;
-        intervalo = ms;
-        return { unref() {} };
+        return 1;
       },
-      cancelarAgendamento: () => {
-        cancelado = true;
-      },
+      cancelarAgendamento: () => {},
     });
+    await conectar(servico);
     const bloqueios = [];
     servico.iniciarRevalidacaoPeriodica({ aoBloquear: (d) => bloqueios.push(d) });
-    expect(intervalo).toBe(DIA);
-
-    await tarefa(); // servidor ainda aceita
-    expect(bloqueios).toHaveLength(0);
-
-    respostaDoServidor = () => resposta(403, { erro: "Assinatura cancelada.", motivo: "assinatura-inativa" });
+    respostaDoServidor = () => resposta(403, { motivo: "maquina-substituida" });
     await tarefa();
     expect(bloqueios).toHaveLength(1);
-    expect(bloqueios[0].motivo).toBe("assinatura-inativa");
-    expect(cancelado).toBe(true);
-  });
-
-  it("o temporizador real não segura o processo (unref)", () => {
-    const servico = criar({ intervaloDeRevalidacaoMs: 60_000 });
-    const parar = servico.iniciarRevalidacaoPeriodica({ aoBloquear: () => {} });
-    parar();
-    expect(typeof parar).toBe("function");
+    expect(bloqueios[0].motivo).toBe("maquina-substituida");
   });
 });

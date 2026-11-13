@@ -26,7 +26,7 @@ O motor é o próprio **Claude Code em modo headless**, usando o login da sua as
 
 **Pré-requisito em qualquer modo:** o Claude Code instalado e logado (`claude` funcionando no terminal). Para rodar a partir do código-fonte, também Node 22+.
 
-**Usuário final (instalador):** baixe o `.exe` da última versão em **https://github.com/Le3Dev/orquestrador-app/releases/latest** e instale. O instalador é por usuário, sem pedir administrador, e deixa escolher a pasta. Sem certificado de assinatura, o Windows SmartScreen avisa na primeira instalação (*Mais informações → Executar assim mesmo*). O Claude Code precisa estar instalado e logado (pré-requisito acima). **Por enquanto o app não pede chave de licença:** é a fase de testes (`exigirLicenca: false` em `electron/config.js`; ver ADR-29). Depois de instalado, as **atualizações chegam sozinhas**: o app baixa a versão nova em segundo plano e avisa na barra de título para reiniciar (ver *Guia do usuário*, item 15). A atualização não mexe na configuração nem nos dados (`%APPDATA%\Orquestrador de Agentes`).
+**Usuário final (instalador):** baixe o `.exe` da última versão em **https://github.com/Le3Dev/orquestrador-app/releases/latest** e instale. O instalador é por usuário, sem pedir administrador, e deixa escolher a pasta. Sem certificado de assinatura, o Windows SmartScreen avisa na primeira instalação (*Mais informações → Executar assim mesmo*). O Claude Code precisa estar instalado e logado (pré-requisito acima). **Por enquanto o app não pede login:** é a fase de testes (`exigirLicenca: false` em `electron/config.js`; ver ADR-29). Depois de instalado, as **atualizações chegam sozinhas**: o app baixa a versão nova em segundo plano e avisa na barra de título para reiniciar (ver *Guia do usuário*, item 15). A atualização não mexe na configuração nem nos dados (`%APPDATA%\Orquestrador de Agentes`).
 
 **Dia a dia, a partir do código-fonte:** dê dois cliques em **`iniciar-desktop.cmd`**. Na primeira vez ele instala as dependências e gera o build; depois roda `npm run desktop` (`electron .`), que abre a janela do aplicativo. Rodando assim (não empacotado), **não há licença nem atualização automática**. Depois de atualizar o código, rode `npm run build` (o `.cmd` só gera o build quando falta `dist/` ou `web/dist/`).
 
@@ -116,7 +116,7 @@ O build de teste grava `"buildDeTeste": true` no `package.json` empacotado; serv
 
 **Nunca publique o build de teste** (`dist:win:teste`): ele abre sem licença e não deve chegar aos apps instalados.
 
-**Religar a licença:** só depois do checklist de *Serviço de licenças* abaixo. Mude `exigirLicenca` para `true` em `electron/config.js` e publique uma versão nova (passos acima). Todos os apps instalados passam a pedir a chave de licença na versão nova, então **avise os testadores antes**.
+**Religar a licença:** só depois do checklist de *Serviço de licenças* abaixo. Mude `exigirLicenca` para `true` em `electron/config.js` e publique uma versão nova (passos acima). Todos os apps instalados passam a pedir o login por e-mail na versão nova, então **avise os testadores antes**.
 
 **Proteção do app instalado (fuses do Electron, ADR-43).** O `electron-builder` 25.1.8 ainda não tem a opção `electronFuses`; por isso `build.afterPack` aponta para **`scripts/ligarFuses.cjs`**, que usa `@electron/fuses` (devDependency) para virar os fuses no executável empacotado (`dist:win`, `dist:win:teste` e `release:win`). Ligados:
 
@@ -136,45 +136,18 @@ npx @electron/fuses read --app "dist_electron_teste/win-unpacked/Orquestrador de
 
 Esperado: `RunAsNode`, `EnableNodeOptionsEnvironmentVariable` e `EnableNodeCliInspectArguments` *Disabled*; `OnlyLoadAppFromAsar` e `EnableEmbeddedAsarIntegrityValidation` *Enabled*. Isso dificulta editar o JavaScript do app instalado, mas não impede quem compila o código público (ver ADR-43).
 
-**Serviço de licenças** (`servicoDeLicencas/`, ADR-43; projeto Node próprio, com `package.json` e `wrangler.toml`). Na pasta dele:
-
-```bash
-npm install
-npm test             # vitest
-npm run typecheck    # tsc --noEmit
-npm run dev          # wrangler dev (local; copie .dev.vars.exemplo para .dev.vars)
-npm run migrar       # aplica as migrações no D1 (migracoes/0001_inicial.sql)
-npm run deploy       # wrangler deploy
-```
-
-Par de chaves da licença (uma vez; guarde a privada fora do repositório):
-
-```bash
-node servicoDeLicencas/scripts/gerarChaves.mjs
-```
-
-| Configuração | Tipo | Para quê |
-|---|---|---|
-| `STRIPE_SECRET_KEY` | secret (`wrangler secret put`) | chave secreta da API do Stripe |
-| `STRIPE_WEBHOOK_SECRET` | secret | segredo do endpoint de webhook (`whsec_...`) |
-| `CHAVE_PRIVADA_DA_LICENCA` | secret | chave privada Ed25519 que assina os tokens (a pública vai no `electron/config.js`) |
-| `RESEND_API_KEY` | secret | envio do e-mail com a chave |
-| `EMAIL_REMETENTE` | var (`wrangler.toml`) | remetente do e-mail (domínio verificado no Resend) |
-| `URL_DA_LANDING` | var | site de vendas (origem liberada no CORS da página de sucesso) |
-| `URL_DE_DOWNLOAD` | var | link de download do app, enviado no e-mail |
-| `URL_DO_PORTAL_DO_CLIENTE` | var | portal do cliente do Stripe, citado no e-mail |
-| `PRECO_MENSAL_ID`, `PRECO_ANUAL_ID` | var | ids dos preços (`price_...`) do Stripe, para reconhecer o plano |
-| `MAXIMO_DE_MAQUINAS` | var | máquinas por assinatura (padrão `1`) |
+**Serviço de licenças** (ADR-44): vive em um **repositório privado e separado**, `Le3Dev/orquestrador-licencas` (este repositório é público; o serviço guarda e-mails, códigos e sessões, e é publicado na Cloudflare, não no GitHub Releases). Como rodar, testar, migrar o banco, gerar as chaves, configurar segredos e publicar o serviço está no **README daquele repositório**. O contrato da API está resumido em *Manuais e APIs → API do serviço de licenças*.
 
 **Checklist de lançamento da licença** (nesta ordem):
 1. Conta Stripe ativada com **CNPJ** (o Stripe não é Merchant of Record: a nota fiscal é nossa).
-2. Produto com dois preços recorrentes: **mensal R$ 19,90** e **anual R$ 199,00**; anote os ids em `PRECO_MENSAL_ID` e `PRECO_ANUAL_ID`.
+2. Produto com dois preços recorrentes: **mensal R$ 19,90** e **anual R$ 199,00**.
 3. **Payment Links** dos dois planos, com redirecionamento após o pagamento para `https://SEU-SITE/sucesso.html?session_id={CHECKOUT_SESSION_ID}`.
-4. **Portal do cliente** do Stripe configurado (cancelar, trocar cartão, faturas); o link vai em `URL_DO_PORTAL_DO_CLIENTE` e no `urlDoPortalDoCliente` do app.
-5. `wrangler d1 create licencas`, ajustar o `database_id` no `wrangler.toml`, `npm run migrar`, gerar as chaves, `wrangler secret put` dos quatro segredos, ajustar as vars e `npm run deploy`.
-6. **Webhook** no Stripe apontando para `https://<serviço>/v1/webhooks/stripe` com os eventos `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid` e `invoice.payment_failed`; o segredo dele vai em `STRIPE_WEBHOOK_SECRET`.
-7. Preencher o `electron/config.js`: `urlDoServicoDeLicencas`, `chavePublicaDaLicenca`, `urlParaAssinar` e `urlDoPortalDoCliente`.
-8. Só então `exigirLicenca: true`, subir a versão e publicar a release (avisando os testadores).
+4. **Portal do cliente** do Stripe configurado (cancelar, trocar cartão, faturas).
+5. **Webhook** no Stripe apontando para o serviço (`/v1/webhooks/stripe`).
+6. **Domínio próprio verificado no Resend**: sem ele o código de acesso não chega.
+7. **Publicar o serviço** (passos no README de `Le3Dev/orquestrador-licencas`).
+8. Preencher o `electron/config.js`: `urlDoServicoDeLicencas`, `chavePublicaDaLicenca`, `urlParaAssinar` e `urlDoPortalDoCliente`.
+9. Só então `exigirLicenca: true`, subir a versão e publicar a release (avisando os testadores).
 
 **Ícone do app** (ver ADR-27): o bixinho gota de óculos escuros; fica em `electron/icones/` e é versionado. O `icone.ico` (16, 20, 24, 32, 40, 48, 64, 128 e 256 px) vai na janela e na barra de tarefas do Windows, no `.exe` (`build.win.icon`) e no instalador e desinstalador (`build.nsis.installerIcon`/`uninstallerIcon`); o `icone.png` (512 × 512) vai na janela fora do Windows. Para regenerar depois de mudar o desenho ou as cores em `scripts/gerarIcones.cjs`:
 
@@ -467,7 +440,7 @@ Cada plugin do catálogo traz `jaTem: { skills, servidoresMcp }`: o catálogo ma
 ## Tecnologias
 
 - **Aplicativo desktop:** **Electron 33** (processo principal em `electron/`, servidor em `utilityProcess`), **electron-builder** (instalador NSIS para Windows x64, publicado nas Releases do GitHub) e **electron-updater** (atualização automática do instalado, ver ADR-29). Licença por assinatura (ADR-43), só no instalado e hoje desligada (`exigirLicenca: false`, fase de testes); **fuses do Electron** ligados no empacotamento (`@electron/fuses`, `scripts/ligarFuses.cjs`).
-- **Serviço de licenças** (`servicoDeLicencas/`, ADR-43): **Cloudflare Workers + D1** (TypeScript, `wrangler`), **Stripe** (Billing, Payment Links e portal do cliente; SDK `stripe`), **Resend** (e-mail com a chave) e tokens **JWS EdDSA (Ed25519)**; testes com **vitest**.
+- **Serviço de licenças** (repositório privado próprio `Le3Dev/orquestrador-licencas`, ADR-44): **Cloudflare Workers + D1** (TypeScript, `wrangler`), **Stripe** (Billing, Payment Links e portal do cliente), **Resend** (envia o código de acesso e as boas-vindas) e tokens **JWS EdDSA (Ed25519)**. No app, a sessão é cifrada com `safeStorage` do Electron.
 - **Node 22+ / TypeScript 6** (estrito, `exactOptionalPropertyTypes`), **Express 5**, **zod 4** (validação da API), **vitest**.
 - **Tela:** React 19, Vite 6, Tailwind 4, react-markdown com remark-gfm e **React Flow** (`@xyflow/react` 12) para o canvas (ver ADR-8). Tema escuro com a paleta da Anthropic (ver ADR-7). Fontes empacotadas via `@fontsource`, sem CDN: Poppins, Lora e JetBrains Mono.
 - **Claude Code 2.1.x** (`claude -p --output-format stream-json`) como motor dos agentes.
@@ -1533,6 +1506,8 @@ flowchart TD
   - com uma janela cobrindo o monitor, a captura de cliques depende do `data-area-clicavel`: esquecê-lo numa peça nova a deixa "transparente" ao clique.
 
 **ADR-43 — Assinatura no Stripe com serviço de licenças próprio e licença assinada (Ed25519) presa à máquina.** Substitui a licença do Lemon Squeezy dos ADR-19 e ADR-29 (o resto desses ADRs continua valendo). *(O pedido original chamava este registro de "ADR-30", número já usado pelas instruções personalizadas; por isso ADR-43.)*
+*Atualizado pelo ADR-44:* a chave `ORQ-…` deu lugar ao login por e-mail (código de 6 dígitos, com teste grátis), e o serviço saiu deste repositório para o repositório privado `Le3Dev/orquestrador-licencas`. O resto vale como histórico.
+
 - *Contexto:*
   - a venda será por **assinatura mensal e anual, no Brasil, por cartão** (PIX Automático depois). O Stripe e o Mercado Pago cobram, mas **não geram chave de licença**: alguém precisa emitir, guardar e conferir;
   - o arquivo de licença antigo era **texto puro**: copiá-lo para outro PC funcionava, editar a data dava offline infinito, e a licença só era conferida ao abrir o app;
@@ -1563,6 +1538,23 @@ flowchart LR
   W -->|token JWS EdDSA| A
   A -->|confere a assinatura<br/>com a chave pública| A
 ```
+
+**ADR-44 — Login por e-mail, teste grátis de 7 dias e serviço de licenças em repositório privado.** Atualiza o ADR-43 (chave `ORQ-…` e serviço dentro deste repositório).
+- *Contexto:*
+  - chave de licença não é o padrão para assinatura: o mercado usa conta e login. A chave podia ser perdida ou repassada, e um PC quebrado prendia a vaga da assinatura;
+  - queremos um teste grátis sem cartão, o que exige identificar a pessoa antes da compra;
+  - este repositório é **público**, e o serviço guarda e-mails, códigos e sessões; além disso tem ciclo de publicação próprio (Cloudflare), separado do app (GitHub Releases).
+- *Decisão:*
+  - **login por código de e-mail:** a pessoa digita o e-mail, recebe um código de 6 dígitos (válido 10 min) e entra. O app guarda uma **sessão revogável** (segredo cifrado com `safeStorage` do Electron, DPAPI no Windows) mais o **token assinado** (JWS EdDSA, até 7 dias) para uso offline; revalida ao abrir e a cada 24 h;
+  - **teste grátis de 7 dias sem cartão**, criado pelo serviço no primeiro login: **1 por e-mail e 1 por computador**. Perto do fim o app avisa (no máximo 1 notificação por dia) e, ao acabar, volta à tela Entrar;
+  - **compra no Stripe (Payment Links) com o mesmo e-mail**: a compra converte o teste em assinatura na próxima revalidação, sem novo login;
+  - **troca de computador por autoatendimento:** 1 computador por assinatura; ao entrar num PC novo, após provar o e-mail, a pessoa confirma e o outro recebe `maquina-substituida` na próxima validação. *Sair deste computador* libera a vaga;
+  - o serviço foi movido para o repositório privado **`Le3Dev/orquestrador-licencas`**; como rodar, publicar e configurar ficam no README dele. O contrato da API é versionado em `/v1` e documentado nos dois repositórios (ver *API do serviço de licenças*).
+- *Consequências:*
+  - o **e-mail vira peça crítica**: é preciso domínio próprio verificado no Resend (sem ele o código não chega) e o plano grátis limita a 100 e-mails por dia (Pro, cerca de US$ 20/mês, quando crescer);
+  - o abuso do teste com e-mails novos é **reduzido** pelo limite por computador, não eliminado;
+  - offline, o computador substituído ainda abre até o token vencer (no máximo 7 dias);
+  - mudar o contrato exige atualizar os dois repositórios (app e serviço) em conjunto.
 
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
@@ -1823,17 +1815,18 @@ Estado: `{ situacao, versaoAtual, versaoNova, progresso, mensagemDeErro }`.
 
 ### API do serviço de licenças
 
-Serviço **separado do app** (pasta `servicoDeLicencas/`, Cloudflare Workers + D1; ver ADR-43). Todas as rotas respondem JSON. Erros vêm como `{ "erro": "mensagem", "motivo": "codigo" }`. `chave` tem o formato `ORQ-XXXX-XXXX-XXXX-XXXX`; `maquina.id` é o sha256 do MachineGuid do Windows.
+Serviço **separado do app**, em repositório privado próprio (`Le3Dev/orquestrador-licencas`, Cloudflare Workers + D1; ver ADR-44). O contrato abaixo é versionado em `/v1` e documentado também no README daquele repositório. Todas as rotas respondem JSON; erros vêm como `{ "erro": "mensagem", "motivo": "codigo" }`. `maquina.id` é o sha256 do MachineGuid do Windows. O app usa os IPC `licenca:pedir-codigo`, `licenca:entrar`, `licenca:sair`, `licenca:status`, `licenca:bloqueio`, `licenca:links` e `licenca:abrir-link`.
 
 | Rota | Entrada | Respostas |
 |---|---|---|
-| `POST /v1/licencas/ativar` | `{ "chave", "maquina": { "id", "nome" } }` | **200** `{ "token" }`; **400** `pedido-invalido`; **403** `chave-invalida`, `assinatura-inativa` ou `limite-de-maquinas` |
-| `POST /v1/licencas/validar` | `{ "chave", "maquina": { "id" } }` | **200** `{ "token" }` (renovado); **403** `chave-invalida`, `assinatura-inativa` ou `maquina-nao-ativada` |
-| `POST /v1/licencas/desativar` | `{ "chave", "maquina": { "id" } }` | **200** `{ "ok": true }` |
-| `POST /v1/webhooks/stripe` | evento do Stripe; cabeçalho `Stripe-Signature` (validado) | **200**; idempotente (o mesmo evento reenviado não repete efeitos). Usado só pelo Stripe |
-| `GET /v1/checkout/sessoes/:sessionId` | — (CORS liberado só para a landing) | **200** `{ "chave", "plano", "email" }` (e-mail mascarado); **202** `{ "pendente": true }` (webhook ainda não chegou: a página tenta de novo); **404** `sessao-nao-encontrada` |
+| `POST /v1/entrar/codigo` | `{ "email" }` | **200** `{ "ok" }`; **400** `email-invalido`; **429** `muitas-tentativas` |
+| `POST /v1/entrar/confirmar` | `{ "email", "codigo", "maquina": { "id", "nome" }, "substituirOutraMaquina"? }` | **200** `{ "token", "sessao", "plano": "mensal"\|"anual"\|"teste", "email" }`; **403** `codigo-invalido`, `codigo-expirado`, `teste-ja-usado`, `assinatura-inativa` ou `limite-de-maquinas` (com `outraMaquina`) |
+| `POST /v1/licencas/validar` | `{ "sessao", "maquina": { "id" } }` | **200** `{ "token" }` (renovado); **403** `sessao-invalida`, `assinatura-inativa`, `teste-expirado` ou `maquina-substituida` |
+| `POST /v1/sair` | `{ "sessao", "maquina": { "id" } }` | **200** |
+| `POST /v1/webhooks/stripe` | evento do Stripe; cabeçalho `Stripe-Signature` (validado) | **200**; idempotente. Usado só pelo Stripe |
+| `GET /v1/checkout/sessoes/:id` | — (CORS liberado só para a landing) | **200** `{ "email" (mascarado), "plano" }`; **202** (webhook ainda não chegou: a página tenta de novo); **404** |
 
-**Token:** JWS compacto assinado com **EdDSA (Ed25519)**. Payload `{ "v": 1, "licenca", "maquina", "plano", "pagaAte", "emitidoEm", "expiraEm" }`, datas em epoch ms. `expiraEm = min(pagaAte + 3 dias, emitidoEm + 7 dias)`. O app confere a assinatura com a chave pública (`chavePublicaDaLicenca` em `electron/config.js`), a máquina e a validade.
+**Token:** JWS compacto assinado com **EdDSA (Ed25519)**. Payload `{ "v": 1, "licenca", "maquina", "plano", "pagaAte", "emitidoEm", "expiraEm" }`, datas em epoch ms. O app confere a assinatura com a chave pública (`chavePublicaDaLicenca` em `electron/config.js`), a máquina e a validade (no máximo 7 dias).
 
 ### Guia do usuário
 
@@ -2108,12 +2101,14 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 
 ### Licença e assinatura (guia do usuário)
 
-Vale quando a licença estiver ligada (`exigirLicenca: true`, ver ADR-43); na fase de testes o app instalado abre sem pedir chave.
+Vale quando a licença estiver ligada (`exigirLicenca: true`, ver ADR-44); na fase de testes o app instalado abre sem pedir login.
 
-- **Assinar:** na tela de ativação, clique em **Assinar** (abre a página de planos da landing: mensal R$ 19,90 ou anual R$ 199,00, pagamento por cartão no Stripe). Ao pagar, você volta à página de sucesso, que mostra a **chave de licença** (formato `ORQ-XXXX-XXXX-XXXX-XXXX`); a mesma chave chega por e-mail, com o link de download.
-- **Ativar:** abra o app, cole a chave na tela de ativação e confirme. O app liga a licença a este computador e guarda o resultado em `%APPDATA%\Orquestrador de Agentes\licenca.json` (a chave e um token assinado).
-- **Uso diário:** o app confere a licença ao abrir e a cada 24 horas. Se a assinatura estiver em dia, nada muda para você.
-- **Sem internet:** a licença vale offline por até **7 dias** desde a última conferência (e, se um pagamento atrasar, por até 3 dias depois da data paga). Passado isso, o app pede conexão para revalidar.
-- **Trocar de computador:** por padrão, **1 computador por assinatura**. No computador antigo, abra a tela de ativação e use **Desativar nesta máquina**; depois ative a mesma chave no novo.
+- **Entrar:** na tela **Entrar**, digite seu e-mail. Você recebe um **código de 6 dígitos** (válido por 10 minutos); digite-o e o app abre. Não existe mais chave de licença.
+- **Teste grátis de 7 dias, sem cartão:** criado no primeiro login, com **1 teste por e-mail e 1 por computador**. Durante o teste o app avisa *Teste grátis: faltam N dias* (notificação, no máximo 1 por dia) com atalho para assinar. Quando acaba, o app volta à tela Entrar com *Seu teste grátis terminou. Assine com o mesmo e-mail*.
+- **Assinar:** clique em **Assinar** (abre a página de planos: mensal R$ 19,90 ou anual R$ 199,00, cartão no Stripe) e use **o mesmo e-mail** do app. A compra converte o teste em assinatura sem você entrar de novo (na próxima revalidação do app).
+- **Uso diário:** o app guarda uma sessão e um token assinado, confere ao abrir e a cada 24 horas. Se a assinatura estiver em dia, nada muda para você.
+- **Sem internet:** abre enquanto o token valer (até **7 dias** desde a última conferência). Passado isso, pede conexão.
+- **Trocar de computador:** **1 computador por assinatura**. Ao entrar num PC novo, o app mostra *Este e-mail já está em uso em <nome>. Usar neste computador?*; confirmando, o outro é desconectado (na próxima validação ele recebe `maquina-substituida`; offline ainda abre até o token vencer, no máximo 7 dias).
+- **Sair:** **Sair deste computador** encerra a sessão e libera a vaga para outro PC.
 - **Cancelar ou trocar o cartão:** em **Gerenciar assinatura** (portal do cliente do Stripe). Ao cancelar, o acesso segue até o fim do período pago.
-- **Mensagens comuns:** *chave inválida* (confira a digitação), *assinatura inativa* (pagamento pendente ou cancelada; regularize no portal), *limite de computadores* (desative o outro, como acima).
+- **Mensagens comuns:** *código inválido* ou *expirado* (peça outro), *muitas tentativas* (aguarde), *teste já usado* (assine com o mesmo e-mail), *assinatura inativa* (pagamento pendente ou cancelada; regularize no portal). Se o código não chegar, olhe o spam.

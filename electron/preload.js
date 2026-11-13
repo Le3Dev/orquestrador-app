@@ -4,7 +4,7 @@
 // contextIsolation ligado, a página só enxerga o que for exposto aqui.
 // Exposto em window.electron:
 //   - janela: controles min/max/fechar (barra de título customizada).
-//   - licenca: ativar/validar/desativar/status e links (assinar/portal) da tela de ativação.
+//   - licenca: pedirCodigo/entrar/sair/status e links (assinar/portal) da tela de entrada.
 //   - configuracao: ler a configuração local e abrir a janela de ajustes.
 //   - atualizacao: estado da atualização automática (obter/verificar), instalar
 //     a versão já baixada (instalarAgora, só da janela principal e só na
@@ -38,9 +38,10 @@ contextBridge.exposeInMainWorld("electron", {
   },
 
   licenca: {
-    activate: (chave) => ipcRenderer.invoke("licenca:activate", chave),
-    validate: () => ipcRenderer.invoke("licenca:validate"),
-    deactivate: () => ipcRenderer.invoke("licenca:deactivate"),
+    pedirCodigo: (email) => ipcRenderer.invoke("licenca:pedir-codigo", email),
+    // { email, codigo, substituirOutraMaquina? }
+    entrar: (dados) => ipcRenderer.invoke("licenca:entrar", dados),
+    sair: () => ipcRenderer.invoke("licenca:sair"),
     status: () => ipcRenderer.invoke("licenca:status"),
     bloqueio: () => ipcRenderer.invoke("licenca:bloqueio"),
     links: () => ipcRenderer.invoke("licenca:links"),
