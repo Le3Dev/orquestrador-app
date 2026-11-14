@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { Profiler, type ReactNode } from "react";
 
-import { apiDosArtefatos, type ResumoDoArtefato } from "../../shared/api/artefatos";
+import { apiDosArtefatos, type DesenhoGravado, type ResumoDoArtefato, type TracoGravado } from "../../shared/api/artefatos";
 import { ErroDaApi } from "../../shared/api/cliente";
 import {
   type AcoesDosArtefatos,
@@ -13,6 +13,13 @@ import {
   ProvedorDosArtefatos,
 } from "../../shared/canvas/artefatos";
 import type { NoArtefato as TipoDoNo } from "../../shared/canvas/nos";
+import { ATRASO_DA_GRAVACAO_MS } from "../../shared/desenhoDoArtefato";
+import {
+  ESCALA_MINIMA_DA_PAGINA,
+  escalaDaPagina,
+  type EstadoDoDesenho,
+  TAG_DO_SCRIPT_DO_DESENHO,
+} from "../../shared/desenhoNaPagina";
 import { TAG_DO_SCRIPT_DE_NAVEGACAO } from "../../shared/navegacaoDoArtefato";
 import {
   CONFIRMACAO_PARA_APAGAR_O_ARTEFATO,
@@ -21,8 +28,8 @@ import {
   POLITICA_DO_ARTEFATO,
 } from "./NoArtefato";
 
-/** A política de segurança e o script de voltar e avançar, que entram juntos no começo da página. */
-const META = `<meta http-equiv="Content-Security-Policy" content="${POLITICA_DO_ARTEFATO}">${TAG_DO_SCRIPT_DE_NAVEGACAO}`;
+/** A política de segurança, o script de voltar e avançar e o do desenho, que entram juntos no começo da página. */
+const META = `<meta http-equiv="Content-Security-Policy" content="${POLITICA_DO_ARTEFATO}">${TAG_DO_SCRIPT_DE_NAVEGACAO}${TAG_DO_SCRIPT_DO_DESENHO}`;
 
 function versao(numero: number, tamanho = 2150) {
   return { numero, criadaEm: `2026-11-0${numero}T12:00:00Z`, tamanho };
@@ -108,6 +115,11 @@ function lerBlob(blob: Blob): Promise<string> {
 }
 
 describe("NoArtefato", () => {
+  // O desenho de cada versão vem do servidor: sem nada desenhado, por padrão.
+  beforeEach(() => {
+    vi.spyOn(apiDosArtefatos, "lerDesenho").mockResolvedValue({ tracos: [], largura: null });
+    vi.spyOn(apiDosArtefatos, "salvarDesenho").mockResolvedValue(undefined);
+  });
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -558,7 +570,7 @@ describe("NoArtefato", () => {
     expect(screen.getByTestId("fundo-da-tela-cheia")).toHaveStyle({ top: "0px" });
   });
 
-  describe("desenho na tela cheia", () => {
+  describe("desenho sobre a página", () => {
     // O jsdom não tem PointerEvent: sem ele, o fireEvent manda um Event sem botão, clientX nem pointerId.
     class EventoDePonteiroFalso extends MouseEvent {
       readonly pointerId: number;
@@ -573,46 +585,74 @@ describe("NoArtefato", () => {
       localStorage.clear();
     });
 
-    async function abrirEmTelaCheia(id = "a1") {
-      vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("<p>x</p>");
-      const { tela } = preparar(artefato(id));
-      render(tela(<NoArtefato {...propsDoNo(id)} />));
-      await iframe();
-      fireEvent.click(screen.getByRole("button", { name: "Ampliar o artefato" }));
-      return screen.getByRole("dialog", { name: "Relatório de vendas" });
+    function seta(id: string, alteracoes: Partial<TracoGravado> = {}): TracoGravado {
+      return {
+        id,
+        tipo: "seta",
+        cor: "azul",
+        espessura: 3,
+        pontos: [{ x: 10, y: 10 }, { x: 80, y: 10 }],
+        ancora: { conteiner: [], elemento: [1, 0] },
+        ...alteracoes,
+      };
     }
 
-    const caneta = () => screen.getByRole("button", { name: "Desenhar sobre a página" });
-    const camada = () => screen.getByTestId("desenho-da-tela-cheia");
-    const paginaDoModal = () => screen.getByTitle("Conteúdo do artefato: Relatório de vendas");
+    const caneta = () => screen.getByTestId("botao-desenhar-na-tela-cheia");
     const barra = () => screen.queryByRole("toolbar", { name: "Desenho" });
+    const lerDesenho = () => vi.mocked(apiDosArtefatos.lerDesenho);
+    const salvarDesenho = () => vi.mocked(apiDosArtefatos.salvarDesenho);
 
-    function arrastar(pontos: readonly [number, number][]) {
-      const [primeiro, ...resto] = pontos;
-      const svg = camada().querySelector("svg") as SVGSVGElement;
-      fireEvent.pointerDown(svg, { button: 0, pointerId: 1, clientX: primeiro?.[0], clientY: primeiro?.[1] });
-      for (const [x, y] of resto) {
-        fireEvent.pointerMove(svg, { pointerId: 1, clientX: x, clientY: y });
-      }
-      const ultimo = resto.at(-1) ?? primeiro;
-      fireEvent.pointerUp(svg, { pointerId: 1, clientX: ultimo?.[0], clientY: ultimo?.[1] });
+    async function abrir(alteracoes: Partial<ResumoDoArtefato> = {}) {
+      vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("<p>x</p>");
+      const preparado = preparar(artefato("a1", alteracoes));
+      render(preparado.tela(<NoArtefato {...propsDoNo("a1")} />));
+      const pagina = (await iframe()) as HTMLIFrameElement;
+      return { ...preparado, pagina };
     }
 
-    it("o botão da caneta existe só na tela cheia e liga e desliga o modo, com a barrinha de ferramentas", async () => {
-      vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("<p>x</p>");
-      const { tela } = preparar(artefato("a1"));
-      render(tela(<NoArtefato {...propsDoNo("a1")} />));
-      await iframe();
-      expect(screen.queryByRole("button", { name: "Desenhar sobre a página" })).not.toBeInTheDocument();
-
+    /** Abre a tela cheia e espera o desenho da versão chegar (a caneta só liga depois). */
+    async function ampliar() {
       fireEvent.click(screen.getByRole("button", { name: "Ampliar o artefato" }));
+      const modal = screen.getByRole("dialog", { name: "Relatório de vendas" });
+      await waitFor(() => expect(caneta()).toBeEnabled());
+      return { modal, pagina: within(modal).queryByTitle("Conteúdo do artefato: Relatório de vendas") as HTMLIFrameElement };
+    }
+
+    /** O último estado que o app mandou à página (o carregar do iframe pede o de agora). */
+    function espiar(pagina: HTMLIFrameElement): () => EstadoDoDesenho | undefined {
+      const enviar = vi.spyOn(pagina.contentWindow as Window, "postMessage").mockImplementation(() => undefined);
+      return () => {
+        fireEvent.load(pagina);
+        return enviar.mock.calls
+          .map(([dados]) => dados as { acao?: string; estado?: EstadoDoDesenho })
+          .filter((dados) => dados.acao === "desenho")
+          .at(-1)?.estado;
+      };
+    }
+
+    /** A mensagem chega à janela do app como a da camada da página (`source` é a janela do iframe). */
+    function daPagina(de: Window | null, dados: Record<string, unknown>): void {
+      act(() => {
+        window.dispatchEvent(new MessageEvent("message", { data: { origem: "orquestrador-artefato", ...dados }, source: de }));
+      });
+    }
+
+    it("o botão da caneta existe só na tela cheia e liga e desliga o modo na página, que continua com o ponteiro", async () => {
+      await abrir();
+      expect(screen.queryByTestId("botao-desenhar-na-tela-cheia")).not.toBeInTheDocument();
+
+      const { pagina } = await ampliar();
+      const estado = espiar(pagina);
       expect(caneta()).toHaveAttribute("aria-pressed", "false");
+      expect(caneta()).toHaveAccessibleName("Desenhar sobre a página");
       expect(barra()).not.toBeInTheDocument();
-      expect(camada()).toHaveAttribute("data-ligado", "false");
+      expect(estado()).toMatchObject({ ligado: false, tracos: [] });
 
       fireEvent.click(caneta());
       expect(caneta()).toHaveAttribute("aria-pressed", "true");
-      expect(camada()).toHaveAttribute("data-ligado", "true");
+      expect(estado()).toMatchObject({ ligado: true, ferramenta: "caneta", cor: "laranja", espessura: 3 });
+      // O traço é segurado dentro da página: ela não perde o ponteiro (a roda continua rolando).
+      expect(pagina).not.toHaveStyle({ pointerEvents: "none" });
       const ferramentas = within(barra() as HTMLElement);
       for (const nome of ["Caneta", "Seta", "Retângulo", "Texto", "Borracha", "Desfazer"]) {
         expect(ferramentas.getByRole("button", { name: nome })).toBeInTheDocument();
@@ -620,131 +660,403 @@ describe("NoArtefato", () => {
       expect(ferramentas.getAllByRole("button", { name: /^Cor / })).toHaveLength(6);
       expect(ferramentas.queryByRole("button", { name: "Marca-texto" })).not.toBeInTheDocument();
 
+      fireEvent.click(ferramentas.getByRole("button", { name: "Seta" }));
+      fireEvent.click(ferramentas.getByRole("button", { name: "Cor azul" }));
+      expect(estado()).toMatchObject({ ligado: true, ferramenta: "seta", cor: "azul" });
+
       fireEvent.click(caneta());
       expect(barra()).not.toBeInTheDocument();
-      expect(camada()).toHaveAttribute("data-ligado", "false");
+      expect(estado()).toMatchObject({ ligado: false });
 
-      // O fechar da barrinha também desliga.
+      // Religar volta para a caneta; o fechar da barrinha também desliga.
       fireEvent.click(caneta());
+      expect(estado()).toMatchObject({ ligado: true, ferramenta: "caneta" });
       fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Desligar o desenho" }));
       expect(barra()).not.toBeInTheDocument();
     });
 
-    it("o traço feito aparece, fica visível com o modo desligado e o Desfazer o tira", async () => {
-      await abrirEmTelaCheia();
-      fireEvent.click(caneta());
-
-      arrastar([[10, 10], [50, 30], [90, 20]]);
-      expect(camada().querySelectorAll('[data-traco="caneta"]')).toHaveLength(1);
-
-      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Seta" }));
-      arrastar([[20, 80], [120, 80]]);
-      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Retângulo" }));
-      arrastar([[30, 30], [100, 70]]);
-      expect(camada().querySelectorAll("[data-traco]")).toHaveLength(3);
-
-      fireEvent.click(caneta());
-      expect(camada().querySelectorAll("[data-traco]")).toHaveLength(3);
-
-      fireEvent.click(caneta());
-      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Desfazer" }));
-      expect(camada().querySelector('[data-traco="retangulo"]')).not.toBeInTheDocument();
-      expect(camada().querySelectorAll("[data-traco]")).toHaveLength(2);
-    });
-
-    it("o texto solto vira traço com Enter", async () => {
-      await abrirEmTelaCheia();
-      fireEvent.click(caneta());
-      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Texto" }));
-      fireEvent.pointerDown(camada().querySelector("svg") as SVGSVGElement, { button: 0, pointerId: 1, clientX: 40, clientY: 50 });
-      const campo = screen.getByRole("textbox", { name: "Texto solto" });
-      fireEvent.change(campo, { target: { value: "Ver aqui" } });
-      fireEvent.keyDown(campo, { key: "Enter" });
-      expect(camada().querySelector("text")).toHaveTextContent("Ver aqui");
-    });
-
-    it("grava por artefato e, ao reabrir a tela cheia, os traços voltam (os de outro artefato não)", async () => {
-      await abrirEmTelaCheia("a1");
-      fireEvent.click(caneta());
-      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Seta" }));
-      arrastar([[20, 80], [120, 80]]);
-
-      const salvo = JSON.parse(localStorage.getItem("orquestrador-agentes:canvas:v1:desenho-da-tela-cheia") ?? "{}") as Record<
-        string,
-        { tipo: string; pontos: { x: number; y: number }[] }[]
-      >;
-      expect(Object.keys(salvo)).toEqual(["a1"]);
-      expect(salvo.a1?.[0]).toMatchObject({ tipo: "seta", pontos: [{ x: 20, y: 80 }, { x: 120, y: 80 }] });
-      // O desenho do canvas não é tocado.
-      expect(localStorage.getItem("orquestrador-agentes:canvas:v1")).toBeNull();
-
-      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Fechar a tela cheia" }));
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-
+    it("enquanto o desenho da versão não chega, a caneta fica desabilitada", async () => {
+      let entregar: (desenho: DesenhoGravado) => void = () => undefined;
+      lerDesenho().mockReturnValue(new Promise((resolver) => (entregar = resolver)));
+      await abrir();
       fireEvent.click(screen.getByRole("button", { name: "Ampliar o artefato" }));
-      expect(camada().querySelectorAll('[data-traco="seta"]')).toHaveLength(1);
-      // Reaberta, começa desligada.
-      expect(camada()).toHaveAttribute("data-ligado", "false");
-      expect(barra()).not.toBeInTheDocument();
+      expect(caneta()).toBeDisabled();
+
+      await act(async () => entregar({ tracos: [], largura: null }));
+      expect(caneta()).toBeEnabled();
     });
 
-    it("um desenho corrompido no armazenamento é descartado, sem derrubar a tela cheia", async () => {
-      localStorage.setItem("orquestrador-agentes:canvas:v1:desenho-da-tela-cheia", "{isso não é json");
-      await abrirEmTelaCheia();
-      expect(camada().querySelectorAll("[data-traco]")).toHaveLength(0);
+    it("o traço que a página devolve entra no desenho, volta à página e é gravado uma vez, juntando os passos", async () => {
+      await abrir();
+      const { pagina } = await ampliar();
+      const estado = espiar(pagina);
+      fireEvent.click(caneta());
+
+      daPagina(pagina.contentWindow, { desenho: "traco", traco: seta("t1") });
+      daPagina(pagina.contentWindow, {
+        desenho: "traco",
+        traco: { ...seta("t2"), tipo: "caneta", pontos: [{ x: 0, y: 0 }, { x: 5, y: 0.1 }, { x: 10, y: 0 }] },
+      });
+      // Um clique sem arrastar não vira seta de tamanho zero.
+      daPagina(pagina.contentWindow, { desenho: "traco", traco: seta("t3", { pontos: [{ x: 4, y: 4 }, { x: 4, y: 4 }] }) });
+
+      const esperados = [seta("t1"), { ...seta("t2"), tipo: "caneta", pontos: [{ x: 0, y: 0 }, { x: 10, y: 0 }] }];
+      expect(estado()?.tracos).toEqual(esperados);
+      expect(salvarDesenho()).not.toHaveBeenCalled();
+
+      await waitFor(() => expect(salvarDesenho()).toHaveBeenCalledTimes(1));
+      expect(salvarDesenho()).toHaveBeenCalledWith("a1", 3, esperados, null);
+      expect(ATRASO_DA_GRAVACAO_MS).toBe(300);
     });
 
-    it("Esc com o desenho ligado só o desliga; desligado, fecha a tela cheia", async () => {
-      await abrirEmTelaCheia();
+    it("o que vem de outra janela, malformado ou com o modo desligado não entra", async () => {
+      await abrir();
+      const { pagina } = await ampliar();
+      const estado = espiar(pagina);
+
+      daPagina(pagina.contentWindow, { desenho: "traco", traco: seta("desligado") });
+      fireEvent.click(caneta());
+      daPagina(window, { desenho: "traco", traco: seta("de-fora") });
+      daPagina(null, { desenho: "traco", traco: seta("sem-janela") });
+      daPagina(pagina.contentWindow, { desenho: "traco", traco: { ...seta("ruim"), tipo: "estrela" } });
+      daPagina(pagina.contentWindow, { desenho: "traco", traco: { ...seta("sem-ancora-valida"), ancora: "body" } });
+      daPagina(pagina.contentWindow, { origem: "outra", desenho: "traco", traco: seta("outra-origem") });
+
+      expect(estado()?.tracos).toEqual([]);
+    });
+
+    it("borracha, Desfazer da barrinha e Ctrl/Cmd+Z (no app ou repassado pela página)", async () => {
+      lerDesenho().mockResolvedValue({ tracos: [seta("t1"), seta("t2")], largura: null });
+      await abrir();
+      const { pagina } = await ampliar();
+      const estado = espiar(pagina);
+      const ids = () => estado()?.tracos.map(({ id }) => id);
+      fireEvent.click(caneta());
+
+      daPagina(pagina.contentWindow, { desenho: "apagar", ids: ["t1"] });
+      expect(ids()).toEqual(["t2"]);
+      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Desfazer" }));
+      expect(ids()).toEqual(["t1", "t2"]);
+
+      daPagina(pagina.contentWindow, { desenho: "traco", traco: seta("t3") });
+      expect(ids()).toEqual(["t1", "t2", "t3"]);
+      daPagina(pagina.contentWindow, { desenho: "tecla", tecla: "desfazer" });
+      expect(ids()).toEqual(["t1", "t2"]);
+
+      daPagina(pagina.contentWindow, { desenho: "traco", traco: seta("t4") });
+      fireEvent.keyDown(window, { key: "z", code: "KeyZ", metaKey: true });
+      expect(ids()).toEqual(["t1", "t2"]);
+    });
+
+    it("Esc com o modo ligado só o desliga; desligado, fecha; o Esc repassado pela página desliga e devolve o foco ao app", async () => {
+      await abrir();
+      await ampliar();
       fireEvent.click(caneta());
 
       fireEvent.keyDown(window, { key: "Escape" });
       expect(screen.getByRole("dialog")).toBeInTheDocument();
       expect(caneta()).toHaveAttribute("aria-pressed", "false");
       expect(barra()).not.toBeInTheDocument();
-
       fireEvent.keyDown(window, { key: "Escape" });
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    });
 
-    it("Esc com um texto em edição desliga o desenho, descarta o texto e não fecha a tela cheia", async () => {
-      await abrirEmTelaCheia();
+      const { pagina } = await ampliar();
       fireEvent.click(caneta());
-      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Texto" }));
-      fireEvent.pointerDown(camada().querySelector("svg") as SVGSVGElement, { button: 0, pointerId: 1, clientX: 40, clientY: 50 });
-      fireEvent.change(screen.getByRole("textbox", { name: "Texto solto" }), { target: { value: "rascunho" } });
-
-      fireEvent.keyDown(screen.getByRole("textbox", { name: "Texto solto" }), { key: "Escape" });
-
+      daPagina(pagina.contentWindow, { desenho: "tecla", tecla: "Escape" });
+      expect(caneta()).toHaveAttribute("aria-pressed", "false");
+      expect(caneta()).toHaveFocus();
       expect(screen.getByRole("dialog")).toBeInTheDocument();
-      expect(screen.queryByRole("textbox", { name: "Texto solto" })).not.toBeInTheDocument();
-      expect(camada().querySelector("text")).not.toBeInTheDocument();
-      expect(barra()).not.toBeInTheDocument();
     });
 
-    it("a página fica sem ponteiro só com o modo ligado", async () => {
-      await abrirEmTelaCheia();
-      expect(paginaDoModal()).not.toHaveStyle({ pointerEvents: "none" });
-
+    it("fechar a tela cheia grava na hora; reaberta, começa desligada e com os traços", async () => {
+      await abrir();
+      const { pagina } = await ampliar();
       fireEvent.click(caneta());
-      expect(paginaDoModal()).toHaveStyle({ pointerEvents: "none" });
-      expect(camada()).toHaveClass("camada-de-desenho-ativa");
+      daPagina(pagina.contentWindow, { desenho: "traco", traco: seta("t1") });
 
-      fireEvent.click(caneta());
-      expect(paginaDoModal()).not.toHaveStyle({ pointerEvents: "none" });
-      expect(camada()).not.toHaveClass("camada-de-desenho-ativa");
+      fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Fechar a tela cheia" }));
+      // Sem esperar o atraso: só a vez na fila de gravações (um microtask).
+      await act(async () => undefined);
+      expect(salvarDesenho()).toHaveBeenCalledWith("a1", 3, [seta("t1")], null);
+
+      const reaberta = await ampliar();
+      expect(espiar(reaberta.pagina)()).toMatchObject({ ligado: false, tracos: [seta("t1")] });
+      expect(caneta()).toHaveAttribute("aria-pressed", "false");
     });
 
-    it("sem o modo ligado, a camada não tem como pegar o mouse (o CSS é lido do arquivo)", () => {
+    it("cada versão tem o seu desenho: o traço fica na versão em que foi feito, o seletor mostra os da versão e a versão nova começa limpa", async () => {
+      lerDesenho().mockImplementation(async (_id, numero) => ({ tracos: numero === 2 ? [seta("da-v2")] : [], largura: null }));
+      const { loja } = await abrir();
+      const { pagina } = await ampliar();
+      fireEvent.click(caneta());
+      daPagina(pagina.contentWindow, { desenho: "traco", traco: seta("da-v3") });
+
+      // Troca para a v2 antes do atraso: o traço vai já, para a v3.
+      fireEvent.click(screen.getByRole("button", { name: /Versão 3 de 3/ }));
+      fireEvent.click(screen.getByRole("menuitemradio", { name: /v2/ }));
+      await act(async () => undefined);
+      expect(salvarDesenho()).toHaveBeenCalledWith("a1", 3, [seta("da-v3")], null);
+      // A versão carregada de novo vem num iframe novo.
+      const paginaDaVersao = () => within(screen.getByRole("dialog")).findByTitle("Conteúdo do artefato: Relatório de vendas");
+      const estadoDaV2 = espiar((await paginaDaVersao()) as HTMLIFrameElement);
+      await waitFor(() => expect(estadoDaV2()?.tracos).toEqual([seta("da-v2")]));
+      expect(lerDesenho()).toHaveBeenCalledWith("a1", 2);
+
+      act(() =>
+        loja.publicar({
+          lista: [artefato("a1", { versaoAtual: 4, versoes: [versao(1), versao(2), versao(3), versao(4)] })],
+          carregada: true,
+          erro: null,
+        }),
+      );
+      await waitFor(() => expect(lerDesenho()).toHaveBeenCalledWith("a1", 4));
+      await waitFor(() => expect(screen.getByRole("dialog")).toHaveTextContent("v4"));
+      const estadoDaV4 = espiar((await paginaDaVersao()) as HTMLIFrameElement);
+      await waitFor(() => expect(estadoDaV4()?.tracos).toEqual([]));
+      expect(salvarDesenho()).toHaveBeenCalledTimes(1);
+    });
+
+    it("se a gravação falha, o desenho fica na tela e o aviso aparece", async () => {
+      salvarDesenho().mockRejectedValue(new ErroDaApi("O desenho é grande demais.", 413));
+      await abrir();
+      const { pagina, modal } = await ampliar();
+      const estado = espiar(pagina);
+      fireEvent.click(caneta());
+      daPagina(pagina.contentWindow, { desenho: "traco", traco: seta("t1") });
+
+      expect(await within(modal).findByTestId("aviso-do-desenho")).toHaveTextContent(
+        "Não foi possível gravar o desenho: O desenho é grande demais.",
+      );
+      expect(estado()?.tracos).toEqual([seta("t1")]);
+    });
+
+    describe("migração do desenho guardado no navegador", () => {
+      const CHAVE_ANTIGA = "orquestrador-agentes:canvas:v1:desenho-da-tela-cheia";
+      const antigo = { id: "velho", tipo: "retangulo", cor: "verde", espessura: 3, pontos: [{ x: 1, y: 2 }, { x: 50, y: 60 }] };
+
+      it("sem desenho no servidor, o antigo vai para a versão atual sem âncora e sai do navegador", async () => {
+        localStorage.setItem(CHAVE_ANTIGA, JSON.stringify({ a1: [antigo], a2: [antigo] }));
+        const { pagina } = await abrir();
+        const estado = espiar(pagina);
+
+        await waitFor(() => expect(salvarDesenho()).toHaveBeenCalledWith("a1", 3, [{ ...antigo, ancora: null }], null));
+        await waitFor(() => expect(JSON.parse(localStorage.getItem(CHAVE_ANTIGA) ?? "{}")).toEqual({ a2: [antigo] }));
+        expect(estado()?.tracos).toEqual([{ ...antigo, ancora: null }]);
+      });
+
+      it("com desenho no servidor (ou se a gravação falhar), o antigo fica onde está", async () => {
+        localStorage.setItem(CHAVE_ANTIGA, JSON.stringify({ a1: [antigo] }));
+        lerDesenho().mockResolvedValue({ tracos: [seta("do-servidor")], largura: 1500 });
+        const { pagina } = await abrir();
+        await waitFor(() => expect(espiar(pagina)()?.tracos).toEqual([seta("do-servidor")]));
+        expect(salvarDesenho()).not.toHaveBeenCalled();
+        expect(localStorage.getItem(CHAVE_ANTIGA)).not.toBeNull();
+      });
+
+      it("se a gravação da migração falhar, o antigo continua no navegador", async () => {
+        localStorage.setItem(CHAVE_ANTIGA, JSON.stringify({ a1: [antigo] }));
+        salvarDesenho().mockRejectedValue(new ErroDaApi("Falhou.", 500));
+        await abrir();
+        await waitFor(() => expect(salvarDesenho()).toHaveBeenCalled());
+        await act(async () => undefined);
+        expect(JSON.parse(localStorage.getItem(CHAVE_ANTIGA) ?? "{}")).toEqual({ a1: [antigo] });
+      });
+
+      it("numa versão que não é a atual, não migra", async () => {
+        localStorage.setItem(CHAVE_ANTIGA, JSON.stringify({ a1: [antigo] }));
+        await abrir();
+        await waitFor(() => expect(salvarDesenho()).toHaveBeenCalledTimes(1));
+        salvarDesenho().mockClear();
+        fireEvent.click(screen.getByRole("button", { name: /Versão 3 de 3/ }));
+        fireEvent.click(screen.getByRole("menuitemradio", { name: /v2/ }));
+        await waitFor(() => expect(lerDesenho()).toHaveBeenCalledWith("a1", 2));
+        expect(salvarDesenho()).not.toHaveBeenCalled();
+      });
+    });
+
+    it("na janela do canvas os traços aparecem só para ver: a página recebe o modo desligado e o que ela manda não entra", async () => {
+      lerDesenho().mockResolvedValue({ tracos: [seta("t1")], largura: null });
+      const { pagina } = await abrir();
+      const estado = espiar(pagina);
+      await waitFor(() => expect(estado()).toMatchObject({ ligado: false, tracos: [seta("t1")] }));
+
+      daPagina(pagina.contentWindow, { desenho: "traco", traco: seta("t2") });
+      daPagina(pagina.contentWindow, { desenho: "apagar", ids: ["t1"] });
+      expect(estado()?.tracos).toEqual([seta("t1")]);
+      expect(salvarDesenho()).not.toHaveBeenCalled();
+    });
+
+    describe("Markdown", () => {
+      function medir(elemento: Element, left: number, top: number) {
+        Object.defineProperty(elemento, "getBoundingClientRect", {
+          configurable: true,
+          value: () => ({ left, top, width: 0, height: 0, x: left, y: top, right: left, bottom: top, toJSON: () => ({}) }),
+        });
+      }
+
+      async function abrirMarkdown() {
+        vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("# Plano\n\nparágrafo um");
+        const preparado = preparar(artefato("a1", { formato: "markdown", arquivo: "plano.md" }));
+        render(preparado.tela(<NoArtefato {...propsDoNo("a1")} />));
+        await screen.findByRole("heading", { name: "Plano" });
+      }
+
+      function riscar(alvo: Element, pontos: readonly [number, number][]) {
+        const [primeiro, ...resto] = pontos;
+        fireEvent.pointerDown(alvo, { button: 0, pointerId: 1, clientX: primeiro?.[0], clientY: primeiro?.[1] });
+        for (const [x, y] of resto) {
+          fireEvent.pointerMove(alvo, { pointerId: 1, clientX: x, clientY: y });
+        }
+        const ultimo = resto.at(-1) ?? primeiro;
+        fireEvent.pointerUp(alvo, { pointerId: 1, clientX: ultimo?.[0], clientY: ultimo?.[1] });
+      }
+
+      it("no canvas, a camada mora na div que rola e só mostra os traços", async () => {
+        lerDesenho().mockResolvedValue({ tracos: [seta("t1", { ancora: null })], largura: null });
+        await abrirMarkdown();
+        const documento = screen.getByTestId("documento-do-artefato");
+        await waitFor(() => expect(documento.querySelector('[data-testid="desenho-na-pagina"] [data-traco-id="t1"]')).not.toBeNull());
+
+        riscar(screen.getByText("parágrafo um"), [[10, 10], [80, 40]]);
+        await act(async () => undefined);
+        expect(documento.querySelectorAll("[data-traco-id]")).toHaveLength(1);
+        expect(salvarDesenho()).not.toHaveBeenCalled();
+      });
+
+      it("na tela cheia, com a caneta, o traço fica preso ao parágrafo e é gravado", async () => {
+        await abrirMarkdown();
+        const { modal } = await ampliar();
+        fireEvent.click(caneta());
+        const paragrafo = within(modal).getByText("parágrafo um");
+        medir(paragrafo, 20, 100);
+
+        riscar(paragrafo, [[30, 110], [60, 115], [90, 130]]);
+
+        const documento = within(modal).getByTestId("documento-do-artefato");
+        expect(documento.querySelectorAll('[data-testid="desenho-na-pagina"] [data-traco="caneta"]')).toHaveLength(1);
+        await waitFor(() => expect(salvarDesenho()).toHaveBeenCalledTimes(1));
+        const [, numero, tracos] = salvarDesenho().mock.calls[0] ?? [];
+        expect(numero).toBe(3);
+        expect(tracos?.[0]).toMatchObject({
+          tipo: "caneta",
+          cor: "laranja",
+          pontos: [{ x: 10, y: 10 }, { x: 40, y: 15 }, { x: 70, y: 30 }],
+          // A div do Markdown é a raiz: o parágrafo é o 2º filho do bloco formatado.
+          ancora: { conteiner: [], elemento: [0, 1] },
+        });
+      });
+    });
+
+    describe("página na largura do desenho", () => {
+      /** O jsdom não tem layout: o contêiner da página "mede" a área disponível. */
+      let area = { largura: 840, altura: 600 };
+      const medida = (eixo: "largura" | "altura") =>
+        function (this: HTMLElement) {
+          return this.classList.contains("pagina-na-largura-do-desenho") ? area[eixo] : 0;
+        };
+      beforeEach(() => {
+        area = { largura: 840, altura: 600 };
+        Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: medida("largura") });
+        Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get: medida("altura") });
+      });
+      afterEach(() => {
+        // Sem o getter daqui, volta o do jsdom (em Element.prototype).
+        Reflect.deleteProperty(HTMLElement.prototype, "clientWidth");
+        Reflect.deleteProperty(HTMLElement.prototype, "clientHeight");
+      });
+
+      const conteinerDe = (pagina: Element) => pagina.closest('[data-testid="pagina-na-largura-do-desenho"]') as HTMLElement;
+
+      it("a escala cabe a largura do desenho na disponível, nunca abaixo do mínimo; sem largura ou medida, nenhuma", () => {
+        expect(escalaDaPagina(1500, 840)).toBeCloseTo(0.56, 10);
+        expect(escalaDaPagina(840, 1400)).toBeCloseTo(1.667, 3);
+        expect(escalaDaPagina(1500, 300)).toBe(ESCALA_MINIMA_DA_PAGINA);
+        expect(ESCALA_MINIMA_DA_PAGINA).toBe(0.4);
+        expect(escalaDaPagina(null, 840)).toBeNull();
+        expect(escalaDaPagina(1500, 0)).toBeNull();
+      });
+
+      it("no canvas, a página com desenho de 1500 px vai montada em 1500 e reduzida para 0,56, enchendo a altura", async () => {
+        lerDesenho().mockResolvedValue({ tracos: [seta("t1")], largura: 1500 });
+        const { pagina } = await abrir();
+        await waitFor(() => expect(conteinerDe(pagina)).toHaveAttribute("data-escala", "0.56"));
+
+        expect(conteinerDe(pagina)).toHaveAttribute("data-largura-do-desenho", "1500");
+        expect(pagina.style.width).toBe("1500px");
+        expect(Number.parseFloat(pagina.style.height)).toBeCloseTo(600 / 0.56, 2);
+        expect(pagina.style.transform).toBe(`scale(${840 / 1500})`);
+        expect(pagina.style.transformOrigin).toBe("0 0");
+        // A camada de ativar continua valendo: inativa, a página não pega o mouse.
+        expect(pagina).toHaveStyle({ pointerEvents: "none" });
+        const moldura = pagina.parentElement as HTMLElement;
+        expect(moldura.style.width).toBe("840px");
+        expect(moldura.style.height).toBe("600px");
+      });
+
+      it("abaixo do mínimo, fica em 0,4 e a moldura passa da largura (o contêiner rola de lado)", async () => {
+        area = { largura: 300, altura: 400 };
+        lerDesenho().mockResolvedValue({ tracos: [seta("t1")], largura: 1500 });
+        const { pagina } = await abrir();
+        await waitFor(() => expect(conteinerDe(pagina)).toHaveAttribute("data-escala", "0.4"));
+        expect(conteinerDe(pagina)).toHaveClass("pagina-na-largura-do-desenho-escalada");
+        expect((pagina.parentElement as HTMLElement).style.width).toBe("600px");
+        expect(pagina.style.height).toBe("1000px");
+      });
+
+      it("sem largura (nada desenhado ou desenho migrado), a página flui: sem largura fixa nem transform", async () => {
+        lerDesenho().mockResolvedValue({ tracos: [seta("t1")], largura: null });
+        const { pagina } = await abrir();
+        await act(async () => undefined);
+        expect(conteinerDe(pagina)).not.toHaveAttribute("data-escala");
+        expect(pagina.style.transform).toBe("");
+        expect(pagina.style.width).toBe("");
+      });
+
+      it("na tela cheia, o primeiro traço fixa a largura que a página informou (mesmo iframe, sem recarregar); apagar tudo solta", async () => {
+        area = { largura: 1200, altura: 700 };
+        await abrir();
+        const { pagina } = await ampliar();
+        expect(conteinerDe(pagina)).not.toHaveAttribute("data-escala");
+        fireEvent.click(caneta());
+
+        daPagina(pagina.contentWindow, { desenho: "traco", traco: seta("t1"), largura: 1200 });
+        await waitFor(() => expect(conteinerDe(pagina)).toHaveAttribute("data-escala", "1"));
+        expect(within(screen.getByRole("dialog")).getByTitle("Conteúdo do artefato: Relatório de vendas")).toBe(pagina);
+        expect(pagina.style.width).toBe("1200px");
+        await waitFor(() => expect(salvarDesenho()).toHaveBeenCalledWith("a1", 3, [seta("t1")], 1200));
+
+        // O traço seguinte não muda a largura do desenho.
+        daPagina(pagina.contentWindow, { desenho: "traco", traco: seta("t2"), largura: 900 });
+        expect(conteinerDe(pagina)).toHaveAttribute("data-largura-do-desenho", "1200");
+
+        daPagina(pagina.contentWindow, { desenho: "apagar", ids: ["t1", "t2"] });
+        await waitFor(() => expect(conteinerDe(pagina)).not.toHaveAttribute("data-escala"));
+        expect(pagina.style.transform).toBe("");
+        await waitFor(() => expect(salvarDesenho()).toHaveBeenLastCalledWith("a1", 3, [], null));
+      });
+
+      it("Markdown: a div do documento é montada na largura do desenho e reduzida, e continua rolando por dentro", async () => {
+        lerDesenho().mockResolvedValue({ tracos: [seta("t1", { ancora: null })], largura: 1500 });
+        vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("# Plano\n\nparágrafo um");
+        const preparado = preparar(artefato("a1", { formato: "markdown", arquivo: "plano.md" }));
+        render(preparado.tela(<NoArtefato {...propsDoNo("a1")} />));
+        const documento = await screen.findByTestId("documento-do-artefato");
+
+        await waitFor(() => expect(conteinerDe(documento)).toHaveAttribute("data-escala", "0.56"));
+        expect(documento.style.width).toBe("1500px");
+        expect(documento.style.transform).toBe(`scale(${840 / 1500})`);
+        expect(documento.style.transformOrigin).toBe("0 0");
+        // A rolagem vertical é a da própria div (a classe com overflow-y continua nela).
+        expect(documento).toHaveClass("corpo-do-artefato-markdown");
+      });
+    });
+
+    it("a div do Markdown é posicionada: a camada fica no canto do conteúdo e rola junto (o CSS é lido do arquivo)", () => {
       const css = readFileSync(resolve(__dirname, "../../theme/index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-      const regras = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, seletores = "", corpo = ""]) => ({
-        seletores: seletores.split(",").map((seletor) => seletor.trim()),
-        corpo,
-      }));
-      const base = regras.find(({ seletores }) => seletores.includes(".camada-de-desenho"));
-      const ativa = regras.find(({ seletores }) => seletores.includes(".camada-de-desenho-ativa .camada-de-desenho-svg"));
-      expect(base?.corpo).toMatch(/pointer-events:\s*none/);
-      expect(ativa?.corpo).toMatch(/pointer-events:\s*auto/);
+      const regra = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find(([, seletores = ""]) =>
+        seletores.split(",").map((seletor) => seletor.trim()).includes(".corpo-do-artefato-markdown"),
+      );
+      expect(regra?.[2]).toMatch(/position:\s*relative/);
     });
   });
 

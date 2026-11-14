@@ -12,7 +12,11 @@ import {
 import {
   caminhoDaMaoLivre,
   caminhoDaSeta,
+  DISTANCIA_MINIMA_ENTRE_PONTOS_PX,
   type FerramentaDeDesenho,
+  LIMITE_DO_DESFAZER,
+  RAIO_DA_BORRACHA_PX,
+  TOLERANCIA_DA_SIMPLIFICACAO_PX,
   larguraDoTraco,
   pontosEntre,
   retanguloEntre,
@@ -30,15 +34,6 @@ import {
   type TracoDoDesenho,
 } from "../../shared/canvas/layout";
 import { BarraDeDesenho } from "./BarraDeDesenho";
-
-/** Distância mínima, em pixels da tela, entre dois pontos seguidos da mão livre. */
-export const DISTANCIA_MINIMA_ENTRE_PONTOS_PX = 2;
-/** Quanto a mão livre pode se desviar (em pixels da tela) ao simplificar os pontos no fim do traço. */
-export const TOLERANCIA_DA_SIMPLIFICACAO_PX = 0.8;
-/** O raio da borracha, em pixels da tela. */
-export const RAIO_DA_BORRACHA_PX = 8;
-/** Quantos passos o desfazer guarda. */
-export const LIMITE_DO_DESFAZER = 100;
 
 /** Foco num campo de texto (o texto solto, um terminal, uma nota): a tecla é do campo, não do desenho. */
 function focoEmCampoDeTexto(alvo: EventTarget | null): boolean {

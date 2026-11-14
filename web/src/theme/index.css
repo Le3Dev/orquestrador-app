@@ -1500,6 +1500,36 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   min-height: 0;
 }
 
+/* A página na largura do desenho (NoArtefato.tsx, PaginaNaLarguraDoDesenho). Sem desenho, o contêiner
+ * e a moldura só passam o espaço adiante. Com desenho, a página (iframe ou div do Markdown) vem com a
+ * largura, a altura e o transform no estilo; a moldura tem o tamanho dela já escalada e, abaixo da
+ * escala mínima, passa da largura disponível: aí o contêiner rola de lado. */
+.pagina-na-largura-do-desenho {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.pagina-na-largura-do-desenho-escalada {
+  align-items: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.moldura-da-pagina-escalada {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.pagina-na-largura-do-desenho-escalada > .moldura-da-pagina-escalada {
+  flex: none;
+  overflow: hidden;
+}
+
 /* A página: fundo claro e esquema claro (sem isso, o navegador pintaria o
  * fundo de branco opaco por cima, ou o texto escuro ficaria sobre o escuro). */
 .corpo-do-artefato-html {
@@ -1518,7 +1548,9 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
  * dela, mesmo que ela estivesse ativa (usar a página) quando a caneta foi escolhida pelo teclado. */
 .react-flow:has(.camada-de-desenho-ativa) .corpo-do-artefato-html { pointer-events: none; }
 
+/* `position: relative`: a camada de desenho (desenhoNaPagina.ts) mora no canto dela e rola junto com o texto. */
 .corpo-do-artefato-markdown {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -1575,10 +1607,9 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   min-height: 0;
 }
 .corpo-da-tela-cheia > .vista-nativa-da-previa { flex: 1; }
-/* O desenho sobre a página do artefato em tela cheia: a camada (a mesma classe do canvas) cobre o corpo.
- * Desligado, os traços se veem mas a camada não pega o mouse (a regra `.camada-de-desenho`). A barrinha
- * fica no alto, centrada; o wrapper leva o transform, para a animação da barra não o sobrescrever. */
-.desenho-da-tela-cheia { outline: none; }
+/* O desenho sobre a página do artefato em tela cheia mora dentro da própria página (desenhoNaPagina.ts):
+ * aqui fica só a barrinha, no alto, centrada; o wrapper leva o transform, para a animação da barra
+ * não o sobrescrever. */
 .barra-do-desenho-da-tela-cheia {
   position: absolute;
   top: 10px;
