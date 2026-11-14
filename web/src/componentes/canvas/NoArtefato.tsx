@@ -3,9 +3,11 @@ import {
   type CSSProperties,
   type KeyboardEvent as EventoDeTecladoDoReact,
   memo,
+  type ReactNode,
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -24,14 +26,26 @@ import {
   useErroAoCarregarArtefatos,
   useListaDeArtefatosCarregada,
 } from "../../shared/canvas/artefatos";
-import { TAMANHO_MINIMO_DO_ARTEFATO } from "../../shared/canvas/layout";
+import { type CorDoDesenho, TAMANHO_MINIMO_DO_ARTEFATO } from "../../shared/canvas/layout";
 import { ALCA_DO_ARTEFATO, type NoArtefato as TipoDoNo } from "../../shared/canvas/nos";
+import { useDesenhoDoArtefato } from "../../shared/desenhoDoArtefato";
+import {
+  escalaDaPagina,
+  type EstadoDoDesenho,
+  type FerramentaNaPagina,
+  lerAparenciaDoDesenho,
+  MARCA_DO_DESENHO,
+  type MensagemDoDesenho,
+  TAG_DO_SCRIPT_DO_DESENHO,
+  useDesenhoNoDocumento,
+  useDesenhoNoQuadro,
+} from "../../shared/desenhoNaPagina";
 import { TAG_DO_SCRIPT_DE_NAVEGACAO, useNavegacaoDoQuadro } from "../../shared/navegacaoDoArtefato";
 import { IconeCaneta } from "../Icones";
 import { TextoFormatado } from "../TextoFormatado";
 import { BotoesDeNavegacao } from "./BotoesDeNavegacao";
 import { ControlesDoNo } from "./ControlesDoNo";
-import { DesenhoDaTelaCheia } from "./DesenhoDaTelaCheia";
+import { DesenhoDaTelaCheia, ESPESSURA_DA_TELA_CHEIA } from "./DesenhoDaTelaCheia";
 import { JanelaEmTelaCheia } from "./JanelaEmTelaCheia";
 import { QuadroAtivavel } from "./NoPrevia";
 
@@ -60,8 +74,9 @@ const EXTENSAO: Readonly<Record<FormatoDoArtefato, string>> = { html: "html", ma
 const ESPERA_PARA_LIBERAR_O_DOWNLOAD_MS = 1_000;
 
 /**
- * A página com a política de segurança e o script de voltar e avançar
- * (`navegacaoDoArtefato.ts`) no começo do `<head>`; sem `<head>`,
+ * A página com a política de segurança, o script de voltar e avançar
+ * (`navegacaoDoArtefato.ts`) e o da camada de desenho (`desenhoNaPagina.ts`)
+ * no começo do `<head>`; sem `<head>`,
  * no começo do documento (depois do `<!DOCTYPE>`, para não cair no modo de
  * compatibilidade) — o navegador cria o `<head>` em volta dela.
  */
@@ -69,7 +84,7 @@ function comPoliticaDeSeguranca(html: string): string {
   const head = /<head(?:\s[^>]*)?>/i.exec(html);
   const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
   const ponto = head !== null ? head.index + head[0].length : (doctype?.[0].length ?? 0);
-  return `${html.slice(0, ponto)}${META_DA_POLITICA}${TAG_DO_SCRIPT_DE_NAVEGACAO}${html.slice(ponto)}`;
+  return `${html.slice(0, ponto)}${META_DA_POLITICA}${TAG_DO_SCRIPT_DE_NAVEGACAO}${TAG_DO_SCRIPT_DO_DESENHO}${html.slice(ponto)}`;
 }
 
 /** O nome do arquivo baixado: o do artefato; numa versão antiga, com "-v2" antes da extensão. */
@@ -221,52 +236,143 @@ function useConteudoDaVersao(
 }
 
 /**
- * A página (num iframe isolado) ou o documento (Markdown formatado).
+ * Com desenho, a página é montada sempre na largura dele e escalada para caber:
+ * na janela do canvas fica uma miniatura fiel (não reflui, e o desenho bate);
+ * na tela cheia, ocupa a largura toda. Sem largura, ela flui como sempre.
+ *
+ * O contêiner mede a área disponível (em px do layout: o zoom do canvas compõe
+ * por fora); a moldura tem o tamanho que a página ocupa depois da escala (é ela
+ * que dá a rolagem lateral abaixo da escala mínima); a página (`children`) leva a
+ * largura do desenho, a altura que, escalada, enche a área e o `transform`.
+ * A estrutura não muda com ou sem escala: o iframe não é recriado (a página não
+ * recarrega) quando o primeiro traço chega ou o último sai.
+ */
+function PaginaNaLarguraDoDesenho({
+  largura,
+  children,
+}: {
+  largura: number | null;
+  children: (estilo: CSSProperties | undefined) => ReactNode;
+}) {
+  const [conteiner, setConteiner] = useState<HTMLDivElement | null>(null);
+  const [area, setArea] = useState({ largura: 0, altura: 0 });
+
+  useLayoutEffect(() => {
+    if (conteiner === null) {
+      return;
+    }
+    const medir = () => {
+      const nova = { largura: conteiner.clientWidth, altura: conteiner.clientHeight };
+      setArea((atual) => (atual.largura === nova.largura && atual.altura === nova.altura ? atual : nova));
+    };
+    medir();
+    const observador = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(medir);
+    observador?.observe(conteiner);
+    return () => observador?.disconnect();
+  }, [conteiner]);
+
+  const escala = escalaDaPagina(largura, area.largura);
+  const reduzida = escala !== null && largura !== null;
+  return (
+    <div
+      ref={setConteiner}
+      className={`pagina-na-largura-do-desenho nodrag nowheel ${reduzida ? "pagina-na-largura-do-desenho-escalada" : ""}`}
+      data-testid="pagina-na-largura-do-desenho"
+      data-largura-do-desenho={reduzida ? largura : undefined}
+      data-escala={reduzida ? Math.round(escala * 1000) / 1000 : undefined}
+    >
+      <div
+        className="moldura-da-pagina-escalada"
+        // Arredondada e nunca menor que a área: a sobra da conta em ponto flutuante não abre rolagem lateral.
+        style={reduzida ? { width: Math.max(area.largura, Math.round(largura * escala)), height: area.altura } : undefined}
+      >
+        {children(
+          reduzida
+            ? {
+                width: largura,
+                height: area.altura / escala,
+                flex: "none",
+                transform: `scale(${escala})`,
+                transformOrigin: "0 0",
+              }
+            : undefined,
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A página (num iframe isolado) ou o documento (Markdown formatado), na largura
+ * do desenho quando há (`PaginaNaLarguraDoDesenho`).
  * Memorizado: o mesmo texto não recria o iframe nem re-analisa o Markdown.
  *
  * No canvas, a página fica atrás da camada de ativar (`QuadroAtivavel`): a roda
  * e a pinça em cima dela movem o canvas até um clique. Em tela cheia, não.
+ *
+ * O desenho mora dentro do documento: na página HTML, pelo script injetado; no
+ * Markdown, num hospedeiro vazio no fim da div que rola (`ligarHospedeiro`).
  */
 const CorpoPronto = memo(function CorpoPronto({
   formato,
   titulo,
   texto,
   noCanvas,
-  semPonteiro,
+  largura,
   ligarQuadro,
   aoCarregarQuadro,
+  ligarDocumento,
+  ligarHospedeiro,
 }: {
   formato: FormatoDoArtefato;
   titulo: string;
   texto: string;
   noCanvas: boolean;
-  /** Com o desenho da tela cheia ligado, a página não pega o mouse: o traço passa por cima dela. */
-  semPonteiro: boolean;
-  /** `ref` e `onLoad` do iframe: o histórico da página (voltar e avançar) vem dele. */
+  /** A largura do desenho da versão: com ela, a página é montada nessa largura e escalada. */
+  largura: number | null;
+  /** `ref` e `onLoad` do iframe: o histórico da página (voltar e avançar) e o desenho vêm dele. */
   ligarQuadro: (quadro: HTMLIFrameElement | null) => void;
   aoCarregarQuadro: () => void;
+  /** `ref` da div do Markdown (a raiz do desenho) e do hospedeiro da camada dentro dela. */
+  ligarDocumento: (documento: HTMLDivElement | null) => void;
+  ligarHospedeiro: (hospedeiro: HTMLDivElement | null) => void;
 }) {
   const pagina = useMemo(() => (formato === "html" ? comPoliticaDeSeguranca(texto) : ""), [formato, texto]);
   if (formato === "html") {
     const quadro = (estilo?: CSSProperties) => (
-      <iframe
-        ref={ligarQuadro}
-        onLoad={aoCarregarQuadro}
-        title={`Conteúdo do artefato: ${titulo}`}
-        className="corpo-do-artefato-html nodrag nowheel"
-        style={estilo}
-        // Sem `allow-same-origin`: a página roda numa origem opaca, sem acesso ao app.
-        sandbox="allow-scripts"
-        referrerPolicy="no-referrer"
-        srcDoc={pagina}
-      />
+      <PaginaNaLarguraDoDesenho largura={largura}>
+        {(naLargura) => (
+          <iframe
+            ref={ligarQuadro}
+            onLoad={aoCarregarQuadro}
+            title={`Conteúdo do artefato: ${titulo}`}
+            className="corpo-do-artefato-html nodrag nowheel"
+            style={estilo === undefined && naLargura === undefined ? undefined : { ...naLargura, ...estilo }}
+            // Sem `allow-same-origin`: a página roda numa origem opaca, sem acesso ao app.
+            sandbox="allow-scripts"
+            referrerPolicy="no-referrer"
+            srcDoc={pagina}
+          />
+        )}
+      </PaginaNaLarguraDoDesenho>
     );
-    return noCanvas ? <QuadroAtivavel>{quadro}</QuadroAtivavel> : quadro(semPonteiro ? { pointerEvents: "none" } : undefined);
+    // Em tela cheia, a página pega o mouse sempre: com o desenho ligado, quem segura o traço é a própria página.
+    return noCanvas ? <QuadroAtivavel>{quadro}</QuadroAtivavel> : quadro();
   }
   return (
-    <div className="corpo-do-artefato-markdown custom-scrollbar nodrag nowheel" data-testid="documento-do-artefato">
-      <TextoFormatado texto={texto} />
-    </div>
+    <PaginaNaLarguraDoDesenho largura={largura}>
+      {(naLargura) => (
+        <div
+          ref={ligarDocumento}
+          className="corpo-do-artefato-markdown custom-scrollbar nodrag nowheel"
+          data-testid="documento-do-artefato"
+          style={naLargura}
+        >
+          <TextoFormatado texto={texto} />
+          <div ref={ligarHospedeiro} {...{ [MARCA_DO_DESENHO]: "" }} aria-hidden="true" />
+        </div>
+      )}
+    </PaginaNaLarguraDoDesenho>
   );
 });
 
@@ -277,9 +383,11 @@ function CorpoDoArtefato({
   aoTentarDeNovo,
   aoVerAtual,
   noCanvas,
-  semPonteiro,
+  largura,
   ligarQuadro,
   aoCarregarQuadro,
+  ligarDocumento,
+  ligarHospedeiro,
 }: {
   artefato: ResumoDoArtefato;
   numero: number;
@@ -288,10 +396,11 @@ function CorpoDoArtefato({
   aoVerAtual: () => void;
   /** Na janela do canvas (e não em tela cheia): a página só pega o mouse depois de ativada. */
   noCanvas: boolean;
-  /** Em tela cheia, com o desenho ligado: a página fica sem o mouse (ver `CorpoPronto`). */
-  semPonteiro: boolean;
+  largura: number | null;
   ligarQuadro: (quadro: HTMLIFrameElement | null) => void;
   aoCarregarQuadro: () => void;
+  ligarDocumento: (documento: HTMLDivElement | null) => void;
+  ligarHospedeiro: (hospedeiro: HTMLDivElement | null) => void;
 }) {
   switch (conteudo.situacao) {
     case "carregando":
@@ -323,9 +432,11 @@ function CorpoDoArtefato({
           titulo={artefato.titulo}
           texto={conteudo.texto}
           noCanvas={noCanvas}
-          semPonteiro={semPonteiro}
+          largura={largura}
           ligarQuadro={ligarQuadro}
           aoCarregarQuadro={aoCarregarQuadro}
+          ligarDocumento={ligarDocumento}
+          ligarHospedeiro={ligarHospedeiro}
         />
       );
   }
@@ -536,6 +647,14 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
   const [ampliado, setAmpliado] = useState(false);
   // O modo de desenho da tela cheia: vale por abertura (fechar a tela cheia o desliga; os traços ficam salvos).
   const [desenhando, setDesenhando] = useState(false);
+  const [ferramenta, setFerramenta] = useState<FerramentaNaPagina>("caneta");
+  const [cor, setCor] = useState<CorDoDesenho>("laranja");
+  const [aparencia] = useState(lerAparenciaDoDesenho);
+  // Onde o desenho mora: o iframe da página HTML, ou a div do Markdown e o hospedeiro dentro dela.
+  const [quadro, setQuadro] = useState<HTMLIFrameElement | null>(null);
+  const [documento, setDocumento] = useState<HTMLDivElement | null>(null);
+  const [hospedeiro, setHospedeiro] = useState<HTMLDivElement | null>(null);
+  const botaoDaCaneta = useRef<HTMLButtonElement>(null);
   const [apagando, setApagando] = useState(false);
   const [problema, setProblema] = useState<string | null>(null);
 
@@ -559,6 +678,7 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
 
   const existe = artefato.versoes.some((versao) => versao.numero === escolhida);
   const { conteudo, tentarDeNovo } = useConteudoDaVersao(artefato.id, escolhida, existe);
+  const desenho = useDesenhoDoArtefato(artefato.id, escolhida, { existe, ehAtual: escolhida === artefato.versaoAtual });
   const titulo = tituloPendente ?? artefato.titulo;
   const pronto = conteudo.situacao === "pronto";
   const historico = useNavegacaoDoQuadro();
@@ -572,11 +692,58 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
         aoAvancar={historico.avancar}
       />
     ) : null;
+  const { acrescentar, apagar: apagarTracos, desfazer, gravarJa } = desenho;
   const fecharAmpliado = useCallback(() => {
     setAmpliado(false);
     setDesenhando(false);
-  }, []);
+    gravarJa();
+  }, [gravarJa]);
   const desligarODesenho = useCallback(() => setDesenhando(false), []);
+  // Só com o desenho da versão já lido dá para mexer nele (senão a gravação apagaria o do servidor).
+  const desenhoPronto = desenho.situacao === "pronto";
+  const ligadoNaPagina = ampliado && desenhando && desenhoPronto;
+  const estadoDoDesenho = useMemo<EstadoDoDesenho>(
+    () => ({ tracos: desenho.tracos, ligado: ligadoNaPagina, ferramenta, cor, espessura: ESPESSURA_DA_TELA_CHEIA, ...aparencia }),
+    [desenho.tracos, ligadoNaPagina, ferramenta, cor, aparencia],
+  );
+  // O que vem da página só vale com o modo ligado (os scripts dela falam no mesmo canal).
+  const aoMensagemDoDesenho = useCallback(
+    (mensagem: MensagemDoDesenho) => {
+      if (!ligadoNaPagina) {
+        return;
+      }
+      switch (mensagem.tipo) {
+        case "traco":
+          acrescentar(mensagem.traco, mensagem.largura);
+          return;
+        case "apagar":
+          apagarTracos(mensagem.ids);
+          return;
+        case "tecla":
+          if (mensagem.tecla === "desfazer") {
+            desfazer();
+          } else {
+            // O Esc dentro da página desliga o modo; o foco volta ao app, e o próximo Esc fecha.
+            setDesenhando(false);
+            botaoDaCaneta.current?.focus({ preventScroll: true });
+          }
+          return;
+        case "pronto":
+          return;
+      }
+    },
+    [ligadoNaPagina, acrescentar, apagarTracos, desfazer],
+  );
+  const ligarQuadroDoHistorico = historico.ligarQuadro;
+  const ligarQuadro = useCallback(
+    (novo: HTMLIFrameElement | null) => {
+      ligarQuadroDoHistorico(novo);
+      setQuadro(novo);
+    },
+    [ligarQuadroDoHistorico],
+  );
+  useDesenhoNoQuadro(quadro, estadoDoDesenho, aoMensagemDoDesenho);
+  useDesenhoNoDocumento(documento, hospedeiro, estadoDoDesenho, aoMensagemDoDesenho);
   // Esc com o desenho ligado só o desliga; desligado, fecha a tela cheia.
   const aoApertarEscNaTelaCheia = useCallback(() => {
     if (!desenhando) {
@@ -639,6 +806,27 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
     ampliarDesabilitado: !pronto,
   };
 
+  const dicaDaCaneta =
+    desenho.situacao === "carregando"
+      ? "Carregando o desenho da página…"
+      : desenho.situacao === "erro"
+        ? "O desenho desta versão não carregou"
+        : desenhando
+          ? "Desligar o desenho sobre a página (Esc)"
+          : "Desenhar sobre a página";
+  // O desenho que não carregou ou não gravou: o aviso fica no pé (da janela ou da tela cheia).
+  const avisoDoDesenho =
+    desenho.problema !== null && pronto ? (
+      <div className="rodape-do-artefato text-error" role="alert" data-testid="aviso-do-desenho">
+        <span>{desenho.problema}</span>
+        {desenho.situacao === "erro" && (
+          <button type="button" className="botao-de-texto nodrag" onClick={desenho.tentarDeNovo}>
+            tentar de novo
+          </button>
+        )}
+      </div>
+    ) : null;
+
   const corpo = (noCanvas: boolean) => (
     <CorpoDoArtefato
       artefato={artefato}
@@ -647,9 +835,11 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
       aoTentarDeNovo={tentarDeNovo}
       aoVerAtual={verAtual}
       noCanvas={noCanvas}
-      semPonteiro={desenhando}
-      ligarQuadro={historico.ligarQuadro}
+      largura={desenho.largura}
+      ligarQuadro={ligarQuadro}
       aoCarregarQuadro={historico.aoCarregarQuadro}
+      ligarDocumento={setDocumento}
+      ligarHospedeiro={setHospedeiro}
     />
   );
 
@@ -706,6 +896,7 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
           {problema}
         </div>
       )}
+      {!ampliado && avisoDoDesenho}
 
       {ampliado && (
         <JanelaEmTelaCheia
@@ -715,12 +906,21 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
           navegacao={navegacao}
           acoes={
             <button
+              ref={botaoDaCaneta}
               type="button"
               className="botao-icone"
-              title={desenhando ? "Desligar o desenho sobre a página (Esc)" : "Desenhar sobre a página"}
+              title={dicaDaCaneta}
               aria-label="Desenhar sobre a página"
               aria-pressed={desenhando}
-              onClick={() => setDesenhando((atual) => !atual)}
+              data-testid="botao-desenhar-na-tela-cheia"
+              disabled={!desenhoPronto}
+              onClick={() => {
+                // Ligar deixa a caneta na mão.
+                if (!desenhando) {
+                  setFerramenta("caneta");
+                }
+                setDesenhando(!desenhando);
+              }}
             >
               <IconeCaneta />
             </button>
@@ -729,7 +929,18 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
           aoFechar={fecharAmpliado}
         >
           {corpo(false)}
-          <DesenhoDaTelaCheia artefatoId={artefato.id} ligado={desenhando} aoDesligar={desligarODesenho} />
+          {ligadoNaPagina && (
+            <DesenhoDaTelaCheia
+              ferramenta={ferramenta}
+              cor={cor}
+              podeDesfazer={desenho.podeDesfazer}
+              aoEscolherFerramenta={setFerramenta}
+              aoEscolherCor={setCor}
+              aoDesfazer={desfazer}
+              aoDesligar={desligarODesenho}
+            />
+          )}
+          {avisoDoDesenho}
         </JanelaEmTelaCheia>
       )}
     </div>

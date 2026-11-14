@@ -10,6 +10,7 @@ import { SubagentesDoChat } from "./chat/SubagentesDoChat";
 import { acessoSoPeloApp } from "./controllers/acessoSoPeloApp";
 import { criarAlteracoesRoutes } from "./controllers/alteracoesRoutes";
 import { criarArquivosRoutes } from "./controllers/arquivosRoutes";
+import { temCorpoComLimiteProprio } from "./controllers/artefatosRoutes";
 import { CanalDoChat, criarChatRoutes } from "./controllers/chatRoutes";
 import { criarEscutaRoutes } from "./controllers/escutaRoutes";
 import { criarNotasRoutes } from "./controllers/notasRoutes";
@@ -99,7 +100,15 @@ export function montarAplicacao(
     );
   }
   // Mensagens podem levar até 10 anexos e 100 MB no total, em base64 (4/3 do tamanho).
-  aplicacao.use(express.json({ limit: "150mb" }));
+  // Rotas com limite próprio (o desenho de um artefato, 1 MB) leem o corpo elas mesmas.
+  const lerCorpoJson = express.json({ limit: "150mb" });
+  aplicacao.use((requisicao, resposta, proximo) => {
+    if (temCorpoComLimiteProprio(requisicao.path)) {
+      proximo();
+      return;
+    }
+    lerCorpoJson(requisicao, resposta, proximo);
+  });
 
   registrarRotas(aplicacao);
 

@@ -1,7 +1,8 @@
-import { Response, Router } from "express";
+import express, { NextFunction, Request, Response, Router } from "express";
 import { z } from "zod";
 
 import { DadosDoArtefato, FormatoDoArtefato } from "../artefatos/Artefato";
+import { esquemaDoArquivoDoDesenho, MENSAGEM_DE_DESENHO_INVALIDO } from "../artefatos/DesenhoDoArtefato";
 import {
   ErroDeArtefato,
   MENSAGEM_DE_TITULO_INVALIDO,
@@ -95,6 +96,39 @@ const TIPO_DO_CONTEUDO: Readonly<Record<FormatoDoArtefato, string>> = {
 /** Número de versão na URL: inteiro positivo, sem sinal nem zeros à esquerda. */
 const NUMERO_DE_VERSAO = /^[1-9]\d{0,8}$/;
 
+const MENSAGEM_DE_NUMERO_DE_VERSAO_INVALIDO = "Número de versão inválido.";
+const MENSAGEM_DE_DESENHO_GRANDE_DEMAIS = "O desenho passa de 1 MB.";
+
+/** O corpo do PUT do desenho: bem abaixo dos 150 MB do leitor geral, que vale para as mensagens com anexos. */
+export const LIMITE_DO_CORPO_DO_DESENHO = "1mb";
+const CAMINHO_DO_DESENHO = /^\/api\/artefatos\/[^/]+\/versoes\/[^/]+\/desenho\/?$/i;
+
+/**
+ * Caminhos cujo corpo JSON a própria rota lê, com limite próprio: o leitor
+ * geral do app (`montarAplicacao`) os pula. Se ele lesse antes, o da rota
+ * não leria de novo e o limite não valeria.
+ */
+export function temCorpoComLimiteProprio(caminho: string): boolean {
+  return CAMINHO_DO_DESENHO.test(caminho);
+}
+
+const leitorDoCorpoDoDesenho = express.json({ limit: LIMITE_DO_CORPO_DO_DESENHO });
+
+/** Erro ao ler o corpo vira JSON: o tratador padrão do Express responderia em HTML, com a pilha. */
+function lerCorpoDoDesenho(requisicao: Request, resposta: Response, proximo: NextFunction): void {
+  leitorDoCorpoDoDesenho(requisicao, resposta, (erro?: unknown) => {
+    if (erro === undefined || erro === null) {
+      proximo();
+      return;
+    }
+    if ((erro as { status?: unknown }).status === 413) {
+      resposta.status(413).json({ erro: MENSAGEM_DE_DESENHO_GRANDE_DEMAIS });
+      return;
+    }
+    resposta.status(400).json({ erro: MENSAGEM_DE_DESENHO_INVALIDO });
+  });
+}
+
 /** Aqui só se confere o formato do corpo; o tamanho do título é regra do próprio Artefato. */
 const esquemaDoTitulo = z.object(
   { titulo: z.string({ error: MENSAGEM_DE_TITULO_INVALIDO }) },
@@ -128,6 +162,15 @@ function formatarEvento(evento: EventoDeArtefato): string {
  */
 export function criarArtefatosRoutes({ servico, canal }: Dependencias): Router {
   const rotas = Router();
+
+  /** O número da versão na URL (400 se não for número), depois de garantir que o artefato existe (404). */
+  function numeroDaVersao(id: string, numero: string): number {
+    servico.buscar(id);
+    if (!NUMERO_DE_VERSAO.test(numero)) {
+      throw new ErroDeArtefato("dados_invalidos", MENSAGEM_DE_NUMERO_DE_VERSAO_INVALIDO);
+    }
+    return Number(numero);
+  }
 
   rotas.get(
     "/artefatos",
@@ -188,6 +231,32 @@ export function criarArtefatosRoutes({ servico, canal }: Dependencias): Router {
         "X-Content-Type-Options": "nosniff",
       });
       resposta.send(conteudo);
+    }),
+  );
+
+  /** O desenho feito sobre uma versão; `{ tracos: [], largura: null }` quando ela não tem desenho. */
+  rotas.get(
+    "/artefatos/:id/versoes/:numero/desenho",
+    rota<{ id: string; numero: string }>(async (requisicao, resposta) => {
+      const { id, numero } = requisicao.params;
+      const { tracos, largura } = await servico.lerDesenho(id, numeroDaVersao(id, numero));
+      resposta.set("Cache-Control", "no-store").json({ tracos, largura });
+    }),
+  );
+
+  /**
+   * Troca o desenho inteiro da versão; `tracos: []` apaga. `largura` ausente
+   * vale `null`. Corpo de até 1 MB.
+   */
+  rotas.put(
+    "/artefatos/:id/versoes/:numero/desenho",
+    lerCorpoDoDesenho,
+    rota<{ id: string; numero: string }>(async (requisicao, resposta) => {
+      const { id, numero } = requisicao.params;
+      const numeroValido = numeroDaVersao(id, numero);
+      const desenho = esquemaDoArquivoDoDesenho.parse(requisicao.body);
+      await servico.salvarDesenho(id, numeroValido, desenho);
+      resposta.status(204).end();
     }),
   );
 
