@@ -9,6 +9,7 @@ import { ConfiguracaoDoOrquestrador } from "../../orquestracao/ConfiguracaoDoOrq
 import { EventoRegistrado } from "../../orquestracao/EventoDeOrquestracao";
 import { DadosDoOrquestrador, Orquestrador } from "../../orquestracao/Orquestrador";
 import { PastaDeTrabalho } from "../../orquestracao/PastaDeTrabalho";
+import { PedidoNaFila } from "../../orquestracao/PedidoNaFila";
 import { RepositorioDeOrquestradoresEmArquivo } from "./RepositorioDeOrquestradoresEmArquivo";
 
 const agora = new Date("2026-10-28T12:00:00Z");
@@ -58,6 +59,20 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
     // Lembra que a conversa de "a" já recebeu instruções: apagá-las depois revoga as antigas.
     expect(reaberto.buscarPorId("a")?.registrarInstrucoesDoPedido(false)).toEqual({ revogarAnteriores: true });
     expect(reaberto.buscarPorId("b")?.registrarInstrucoesDoPedido(false)).toEqual({ revogarAnteriores: false });
+  });
+
+  it("reabre a origem dos pedidos que vieram de um vinculado, e os do usuário seguem sem ela", async () => {
+    const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+    const orquestrador = novoOrquestrador("a");
+    const origem = { orquestradorId: "b", nome: "Orquestrador b", saltos: 2 };
+    orquestrador.enfileirarPedido(PedidoNaFila.criar({ id: "p1", texto: "de vínculo", modo: "execucao", enfileiradoEm: agora, origem }));
+    orquestrador.enfileirarPedido(PedidoNaFila.criar({ id: "p2", texto: "do usuário", modo: "execucao", enfileiradoEm: agora }));
+    await repositorio.salvar(orquestrador);
+    await repositorio.aguardarGravacoes();
+
+    const reaberto = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+
+    expect(reaberto.buscarPorId("a")?.fila.map((pedido) => pedido.origem)).toEqual([origem, null]);
   });
 
   it("reabre a escolha dos subagentes prontos de cada orquestrador", async () => {

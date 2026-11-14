@@ -17,6 +17,28 @@ function capturarErro(acao: () => unknown): ErroDeOrquestracao {
   throw new Error("Era esperado um ErroDeOrquestracao.");
 }
 
+describe("PedidoNaFila e a origem de vínculo", () => {
+  it("guarda de quem veio, leva no paraDados e no reconstituir, e sem origem o campo nem aparece", () => {
+    const origem = { orquestradorId: "o1", nome: "API", saltos: 2 };
+    const pedido = PedidoNaFila.criar({ id: "p1", texto: "oi", modo: "execucao", enfileiradoEm, origem });
+
+    expect(pedido.origem).toEqual(origem);
+    expect(Object.isFrozen(pedido.origem)).toBe(true);
+    expect(pedido.paraDados().origem).toEqual(origem);
+    expect(PedidoNaFila.reconstituir(pedido.paraDados()).origem).toEqual(origem);
+
+    const doUsuario = PedidoNaFila.criar({ id: "p2", texto: "oi", modo: "execucao", enfileiradoEm });
+    expect(doUsuario.origem).toBeNull();
+    expect(doUsuario.paraDados()).not.toHaveProperty("origem");
+  });
+
+  it("reconstitui pedidos gravados antes dos vínculos (sem origem)", () => {
+    const antigo = PedidoNaFila.reconstituir({ id: "p", texto: "t", modo: "execucao", enfileiradoEm: enfileiradoEm.toISOString() });
+
+    expect(antigo.origem).toBeNull();
+  });
+});
+
 describe("PedidoNaFila", () => {
   it("guarda o texto aparado, o modo e o instante em que entrou na fila", () => {
     const pedido = PedidoNaFila.criar({ id: "p1", texto: "  rode os testes  ", modo: "planejamento", enfileiradoEm });

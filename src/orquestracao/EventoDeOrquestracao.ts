@@ -210,7 +210,13 @@ export type EventoDeOrquestracao =
    * Um pedido saiu da fila: `removido` pelo usuário, ou `enviado` — então vem
    * logo antes do `turno_iniciado` do turno que o atende.
    */
-  | { tipo: "pedido_retirado_da_fila"; pedidoId: string; motivo: MotivoDaRetiradaDaFila };
+  | { tipo: "pedido_retirado_da_fila"; pedidoId: string; motivo: MotivoDaRetiradaDaFila }
+  /**
+   * Algo que este Orquestrador tentou fazer com um vinculado não valeu (bloco
+   * inválido, destino sem vínculo, limite de saltos): aviso para o histórico
+   * do remetente. Não pertence a nenhum turno.
+   */
+  | { tipo: "aviso_de_vinculo"; mensagem: string };
 
 /** Evento já gravado no histórico, com a posição na sequência e o instante. */
 export type EventoRegistrado = EventoDeOrquestracao & { sequencia: number; em: string };

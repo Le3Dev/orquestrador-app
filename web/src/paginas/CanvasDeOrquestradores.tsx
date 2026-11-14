@@ -38,6 +38,8 @@ import {
 import { IconeMinimapa, IconeOrquestrador } from "../componentes/Icones";
 import { ChatRapido, TIPO_DA_RESPOSTA_DO_CHAT } from "../componentes/chat/ChatRapido";
 import { ArestaDoBixinho } from "../componentes/canvas/ArestaDoBixinho";
+import { ArestaDoVinculo } from "../componentes/canvas/ArestaDoVinculo";
+import { PainelDoVinculo } from "../componentes/canvas/PainelDoVinculo";
 import { BarraDoGrupo } from "../componentes/canvas/BarraDoGrupo";
 import { CamadaDeDesenho } from "../componentes/canvas/CamadaDeDesenho";
 import { NoArtefato } from "../componentes/canvas/NoArtefato";
@@ -185,6 +187,13 @@ import { useConversas } from "../shared/hooks/useConversas";
 import { useMovimentoDoCanvas } from "../shared/hooks/useMovimentoDoCanvas";
 import { useNotas } from "../shared/hooks/useNotas";
 import { useOrquestradores } from "../shared/hooks/useOrquestradores";
+import { useVinculos } from "../shared/hooks/useVinculos";
+import {
+  type AcoesDosVinculos,
+  arestasDosVinculos,
+  lerIdDaArestaDoVinculo,
+  ProvedorDosVinculos,
+} from "../shared/canvas/vinculos";
 import { usePreferenciasDaTela } from "../shared/hooks/usePreferenciasDaTela";
 import { mesmoConteudo, useReaproveitado } from "../shared/hooks/useReaproveitado";
 import { useRodaDoCanvas } from "../shared/hooks/useRodaDoCanvas";
@@ -253,7 +262,7 @@ const TIPOS_DE_NO = {
   shell: NoShell,
 } satisfies NodeTypes;
 // A linha de um item ligado é a curva padrão, com a pele em `.aresta-ligacao`; a do bixinho, a própria.
-const TIPOS_DE_ARESTA = { bixinho: ArestaDoBixinho, ligacao: BezierEdge } satisfies EdgeTypes;
+const TIPOS_DE_ARESTA = { bixinho: ArestaDoBixinho, ligacao: BezierEdge, vinculo: ArestaDoVinculo } satisfies EdgeTypes;
 // Enquadrar nunca passa de 100% (o texto dos terminais só fica nítido em zoom
 // inteiro) nem desce de 60% (ver `escolherEnquadramento`).
 /** Folga do enquadramento ao abrir o canvas. */
@@ -634,10 +643,50 @@ function Canvas() {
   // As linhas dos itens ligados acompanham o lado de cada item a cada quadro (são poucas); a
   // reaproveitada só muda quando alguma delas troca de lado, nasce, some ou é selecionada.
   const [ligacaoSelecionada, setLigacaoSelecionada] = useState<string | null>(null);
+  // Os vínculos entre orquestradores: uma linha entre os dois terminais; clicar nela abre o painel do vínculo.
+  const vinculosDoCanvas = useVinculos();
+  const { vinculos, criar: criarVinculo, desfazer: desfazerVinculo } = vinculosDoCanvas;
+  const [vinculoAberto, setVinculoAberto] = useState<string | null>(null);
   const arestas = useReaproveitado(
-    [...arestasCalculadas, ...arestasDasLigacoes(nos, ligacaoSelecionada)],
+    [
+      ...arestasCalculadas,
+      ...arestasDasLigacoes(nos, ligacaoSelecionada),
+      ...arestasDosVinculos(nos, vinculos, vinculoAberto),
+    ],
     reaproveitarArestas,
   );
+  const acoesDosVinculos = useMemo<AcoesDosVinculos>(
+    () => ({ vinculos, criar: criarVinculo }),
+    [vinculos, criarVinculo],
+  );
+  const aoClicarNaAresta = useCallback((_evento: unknown, aresta: ArestaDoCanvas) => {
+    const vinculoId = lerIdDaArestaDoVinculo(aresta.id);
+    if (vinculoId !== null) {
+      setVinculoAberto(vinculoId);
+    }
+  }, []);
+  const fecharVinculo = useCallback(() => setVinculoAberto(null), []);
+  // O painel do vínculo só existe com os dois orquestradores ainda na lista (removido, some da tela).
+  const painelDoVinculo = useMemo(() => {
+    const vinculo = vinculos.find((candidato) => candidato.id === vinculoAberto);
+    const a = orquestradores?.find((candidato) => candidato.id === vinculo?.orquestradorAId);
+    const b = orquestradores?.find((candidato) => candidato.id === vinculo?.orquestradorBId);
+    if (vinculo === undefined || a === undefined || b === undefined) {
+      return null;
+    }
+    return (
+      <PainelDoVinculo
+        key={vinculo.id}
+        vinculo={vinculo}
+        a={{ id: a.id, nome: a.nome, projeto: a.nomeDaPasta }}
+        b={{ id: b.id, nome: b.nome, projeto: b.nomeDaPasta }}
+        aoFechar={fecharVinculo}
+        aoSalvarNotas={(texto) => vinculosDoCanvas.salvarNotas(vinculo.id, texto)}
+        aoEnviarMensagem={(de, texto) => vinculosDoCanvas.enviarMensagem(vinculo.id, de, texto)}
+        aoDesfazer={() => desfazerVinculo(vinculo.id)}
+      />
+    );
+  }, [vinculos, vinculoAberto, orquestradores, fecharVinculo, vinculosDoCanvas, desfazerVinculo]);
 
   // Puxar a linha de uma nota, prévia ou artefato até um terminal os liga; repetida, nada muda.
   const aoLigar = useCallback((conexao: Connection) => setNos((atuais) => ligarItem(atuais, conexao)), [setNos]);
@@ -2078,6 +2127,7 @@ function Canvas() {
       <ProvedorDasNotas valor={notas.valor}>
         <ProvedorDosArtefatos valor={valorDosArtefatos}>
           <ProvedorDosShells valor={valorDosShells}>
+           <ProvedorDosVinculos valor={acoesDosVinculos}>
             {/* App desktop: faixa invisível que arrasta a janela; antes de tudo no DOM para o no-drag dos demais recortá-la. */}
             {desktop && <FaixaDeArrasto />}
             <div
@@ -2094,6 +2144,7 @@ function Canvas() {
                     edgeTypes={TIPOS_DE_ARESTA}
                     onNodesChange={aoMudarNosEReacomodar}
                     onEdgesChange={aoMudarArestas}
+                    onEdgeClick={aoClicarNaAresta}
                     onConnect={aoLigar}
                     isValidConnection={ligacaoValida}
                     onNodeDragStart={aoComecarArrasteDosNos}
@@ -2135,6 +2186,7 @@ function Canvas() {
                     {barraDoGrupo}
                     {painelDoChat}
                   </ReactFlow>
+                  {painelDoVinculo}
                   {/* As Configurações se posicionam sozinhas à direita da área do canvas, abaixo das notificações. */}
                   <div className="camada-das-configuracoes">
                     <ConfiguracoesDoApp
@@ -2166,6 +2218,7 @@ function Canvas() {
             {escolhendoPastaDoShell && (
               <NavegadorDePastas aoEscolher={abrirShellNaPasta} aoFechar={fecharEscolhaDaPastaDoShell} />
             )}
+           </ProvedorDosVinculos>
           </ProvedorDosShells>
         </ProvedorDosArtefatos>
       </ProvedorDasNotas>
