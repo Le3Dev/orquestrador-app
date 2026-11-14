@@ -2,6 +2,7 @@ import path from "node:path";
 
 import { separarPerguntasDoApp } from "../perguntas/PerguntaDoApp";
 import { separarPreviasDoApp } from "../previas/PreviaDoApp";
+import { separarBlocosDeVinculo, VinculadoNoPrompt } from "../vinculos/BlocosDeVinculo";
 import { Anexo } from "./Anexo";
 import { ArmazemDeAnexos } from "./ArmazemDeAnexos";
 import {
@@ -28,7 +29,7 @@ import { ModoDoTurno } from "./ModoDoTurno";
 import { ABORTO_POR_SILENCIO, CausaDaFalha, MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "./MotorDeAgentes";
 import { DadosDaRetomadaPendente, Orquestrador, TAMANHO_MAXIMO_DA_MENSAGEM } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
-import { PedidoNaFila } from "./PedidoNaFila";
+import { OrigemDoPedido, PedidoNaFila } from "./PedidoNaFila";
 import { predefinicaoPorNome } from "./PredefinicaoDeConfiguracao";
 import { GerenciadorDeWorktrees } from "./PreparoDeWorktree";
 import {
@@ -45,6 +46,7 @@ import { RepositorioDeOrquestradores } from "./RepositorioDeOrquestradores";
 import { RepositorioDePreferencias } from "./RepositorioDePreferencias";
 import { DadosDoSubagentePronto, subagentesProntosSelecionados } from "./SubagentesProntos";
 import { AgendadorDeTarefas, agendadorDoRelogio, VigiaDoTurno } from "./VigiaDoTurno";
+import { VinculosDoOrquestrador } from "./VinculosDoOrquestrador";
 
 export interface DependenciasDoServico {
   repositorio: RepositorioDeOrquestradores;
@@ -82,6 +84,11 @@ export interface DependenciasDoServico {
    * log e a remoção vale do mesmo jeito.
    */
   aoRemover?: ((orquestradorId: string) => Promise<void>) | undefined;
+  /**
+   * Os vínculos entre Orquestradores: contexto no prompt, mensagens e notas
+   * escritas pelos agentes e limpeza ao remover. Sem ele, ninguém tem vínculos.
+   */
+  vinculos?: VinculosDoOrquestrador | undefined;
 }
 
 /** O esforço que cada papel herda da máquina quando a configuração está em "Padrão". */
@@ -198,6 +205,12 @@ export class ServicoDeOrquestracao {
   private readonly tentativas = new Map<string, Map<CausaDaRecuperacao, number>>();
   /** No máximo uma por Orquestrador. */
   private readonly retomadas = new Map<string, RetomadaAgendada>();
+  /**
+   * De quem veio o pedido de cada turno em andamento que nasceu de uma
+   * mensagem de vínculo: o turno herda os saltos dela ao enviar as suas.
+   * Só em memória: some quando o turno termina.
+   */
+  private readonly origensDosTurnos = new Map<string, OrigemDoPedido>();
 
   constructor(private readonly dependencias: DependenciasDoServico) {}
 
@@ -350,6 +363,7 @@ export class ServicoDeOrquestracao {
     modo: ModoDoTurno = "execucao",
     itensLigados: readonly ItemLigado[] = [],
     previasAbertas: readonly string[] = [],
+    origem: OrigemDoPedido | null = null,
   ): Promise<PedidoEnfileirado> {
     const { repositorio, gerarId, agora } = this.dependencias;
     const orquestrador = this.buscar(id);
@@ -360,10 +374,39 @@ export class ServicoDeOrquestracao {
       enfileiradoEm: agora(),
       itensLigados: this.itensComCaminhos(orquestrador, itensLigados),
       previasAbertas,
+      origem,
     });
     this.publicar(orquestrador, orquestrador.enfileirarPedido(pedido));
     await repositorio.salvar(orquestrador);
     return { pedidoId: pedido.id };
+  }
+
+  /**
+   * Recebe a mensagem de um Orquestrador vinculado: entra direto na fila deste,
+   * sem aprovação, marcada com quem enviou. Se ele está livre (sem turno, sem
+   * fila, sem Plano esperando decisão nem retomada marcada), o pedido já sai
+   * como turno; senão espera a vez, como qualquer pedido da fila.
+   */
+  async receberDeVinculado(id: string, texto: string, origem: OrigemDoPedido): Promise<void> {
+    const orquestrador = this.buscar(id);
+    const livre =
+      orquestrador.turnoEmAndamento === null &&
+      orquestrador.fila.length === 0 &&
+      orquestrador.turnoComPlanoPendente === null &&
+      orquestrador.retomadaPendente === null;
+    const { pedidoId } = await this.enfileirarPedido(id, texto, "execucao", [], [], origem);
+    if (!livre) {
+      return;
+    }
+    try {
+      await this.enviarDaFila(id, pedidoId);
+    } catch (falha) {
+      // O pedido segue na fila: o usuário o envia quando quiser.
+      console.warn(
+        `[orquestracao] Mensagem de vínculo mantida na fila do orquestrador ${id}:`,
+        descreverErro(falha),
+      );
+    }
   }
 
   async removerDaFila(id: string, pedidoId: string): Promise<void> {
@@ -444,6 +487,10 @@ export class ServicoDeOrquestracao {
       }),
     );
     const aceito = orquestrador.iniciarTurno(turnoId, texto, agora(), anexosDoTurno, modo);
+    const origemDoPedido = pedidoDaFila?.origem ?? null;
+    if (origemDoPedido !== null) {
+      this.origensDosTurnos.set(turnoId, { ...origemDoPedido });
+    }
     const inicio: EventoDeOrquestracao =
       retomada !== null && aceito.tipo === "turno_iniciado" ? { ...aceito, retomada } : aceito;
     if (retomada === null) {
@@ -484,7 +531,12 @@ export class ServicoDeOrquestracao {
       subagentesProntos: this.subagentesProntosPara(configuracaoDoTurno),
       itensLigados,
       previasAbertas,
-    }).finally(() => execucoes.encerrar(orquestrador.id));
+      vinculados: this.vinculadosDe(orquestrador),
+      origemDaMensagem: origemDoPedido,
+    }).finally(() => {
+      this.origensDosTurnos.delete(turnoId);
+      execucoes.encerrar(orquestrador.id);
+    });
     const conclusao = execucao.then(() => undefined);
     // Em segundo plano, depois do fim do turno: não segura a resposta nem o
     // próximo pedido, e o evento do consumo sempre vem depois do de fim.
@@ -613,6 +665,8 @@ export class ServicoDeOrquestracao {
     this.tentativas.delete(id);
     await this.dependencias.repositorio.remover(id);
     await this.dependencias.anexos.removerTodos(id);
+    // Sem o Orquestrador, os vínculos dele não têm mais outro lado.
+    await this.dependencias.vinculos?.removerDoOrquestrador(id);
     this.dependencias
       .aoRemover?.(id)
       .catch((erro: unknown) => console.warn(`[orquestracao] Falha ao encerrar o que era de "${orquestrador.nome}":`, erro));
@@ -709,7 +763,13 @@ export class ServicoDeOrquestracao {
     configuracaoDoTurno: ConfiguracaoDoOrquestrador,
     instrucoesDoTurno: Pick<
       PedidoDeTurno,
-      "instrucoes" | "revogarInstrucoesAnteriores" | "subagentesProntos" | "itensLigados" | "previasAbertas"
+      | "instrucoes"
+      | "revogarInstrucoesAnteriores"
+      | "subagentesProntos"
+      | "itensLigados"
+      | "previasAbertas"
+      | "vinculados"
+      | "origemDaMensagem"
     >,
   ): Promise<TurnoEncerrado | null> {
     const { motor, repositorio, anexos, worktrees, pastaDeArtefatos, agora } = this.dependencias;
@@ -842,7 +902,9 @@ export class ServicoDeOrquestracao {
         // de execução (no planejamento, o turno já termina em Plano).
         // O bloco das prévias a fechar também sai sempre; não tem aviso, o turno nunca quebra por ele.
         const semPrevias = separarPreviasDoApp(semPerguntas.texto);
-        const { resposta, planoProposto } = separarPropostaDePlano(semPrevias.texto);
+        // Os blocos de vínculo também saem sempre; só valem num turno de execução sem Plano pendente.
+        const semVinculos = separarBlocosDeVinculo(semPrevias.texto);
+        const { resposta, planoProposto } = separarPropostaDePlano(semVinculos.texto);
         const planoPendente = planoProposto && configuracaoDoTurno.propoePlanoEmPedidosGrandes(modo);
         this.publicar(
           orquestrador,
@@ -856,6 +918,9 @@ export class ServicoDeOrquestracao {
             semPrevias.previasParaFechar,
           ),
         );
+        if (modo === "execucao" && !planoPendente) {
+          await this.encaminharBlocosDeVinculo(orquestrador, turnoId, semVinculos);
+        }
       } else {
         encerrado.falha =
           resultado !== null && !resultado.sucesso
@@ -1214,6 +1279,45 @@ export class ServicoDeOrquestracao {
       this.dependencias.repositorio
         .salvar(orquestrador)
         .catch((erro: unknown) => console.error("[orquestracao] Falha ao gravar a sessão:", erro));
+    }
+  }
+
+  /** Os vinculados do Orquestrador como o prompt os vê; vínculo com quem já não existe fica de fora. */
+  private vinculadosDe(orquestrador: Orquestrador): VinculadoNoPrompt[] {
+    const { vinculos, repositorio } = this.dependencias;
+    return (vinculos?.doOrquestrador(orquestrador.id) ?? []).flatMap((vinculo) => {
+      const parceiro = repositorio.buscarPorId(vinculo.parceiroId);
+      return parceiro === null
+        ? []
+        : [{ id: parceiro.id, nome: parceiro.nome, pasta: parceiro.pastaDeTrabalho.caminho, notas: vinculo.notas }];
+    });
+  }
+
+  /**
+   * Entrega as mensagens e grava as notas que o Orquestrador pediu no fim da
+   * resposta, e registra no histórico dele um aviso para cada bloco que não
+   * valeu. Nunca rejeita: o turno já terminou bem.
+   */
+  private async encaminharBlocosDeVinculo(
+    orquestrador: Orquestrador,
+    turnoId: string,
+    blocos: ReturnType<typeof separarBlocosDeVinculo>,
+  ): Promise<void> {
+    const { vinculos } = this.dependencias;
+    const avisos = [...blocos.avisos];
+    try {
+      if (vinculos !== undefined && (blocos.mensagens.length > 0 || blocos.notas.length > 0)) {
+        avisos.push(
+          ...(await vinculos.processarBlocos(orquestrador.id, blocos, this.origensDosTurnos.get(turnoId) ?? null)),
+        );
+      } else if (vinculos === undefined && (blocos.mensagens.length > 0 || blocos.notas.length > 0)) {
+        avisos.push("Blocos de vínculo ignorados: os vínculos não estão disponíveis.");
+      }
+    } catch (falha) {
+      avisos.push(`Não foi possível processar os blocos de vínculo: ${descreverErro(falha)}`);
+    }
+    for (const mensagem of avisos) {
+      this.publicar(orquestrador, { tipo: "aviso_de_vinculo", mensagem });
     }
   }
 

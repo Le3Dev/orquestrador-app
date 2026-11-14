@@ -30,6 +30,7 @@ import type {
   ResumoDoOrquestrador,
   SaudeDoServidor,
   SituacaoDoServidorLocal,
+  VinculoDto,
 } from "./tipos";
 
 function extrairMensagem(corpo: unknown): string | null {
@@ -491,4 +492,37 @@ export const api = {
     requisitar<ConteudoDoArquivo>(
       `/orquestradores/${encodeURIComponent(id)}/arquivos/conteudo?caminho=${encodeURIComponent(caminho)}`,
     ),
+
+  /** Os vínculos entre orquestradores (de quaisquer projetos). */
+  listarVinculos: async () => (await requisitar<{ vinculos: VinculoDto[] }>("/vinculos")).vinculos,
+
+  /** Liga dois orquestradores; recusado com 400, 404 ou 409 (já vinculados). */
+  criarVinculo: async (orquestradorAId: string, orquestradorBId: string) =>
+    (
+      await requisitar<{ vinculo: VinculoDto }>("/vinculos", {
+        method: "POST",
+        body: JSON.stringify({ orquestradorAId, orquestradorBId }),
+      })
+    ).vinculo,
+
+  desfazerVinculo: async (id: string): Promise<void> => {
+    await requisitar<null>(`/vinculos/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+
+  /** Troca as notas compartilhadas do vínculo (até `TAMANHO_MAXIMO_DAS_NOTAS_DO_VINCULO` caracteres). */
+  salvarNotasDoVinculo: async (id: string, texto: string) =>
+    (
+      await requisitar<{ vinculo: VinculoDto }>(`/vinculos/${encodeURIComponent(id)}/notas`, {
+        method: "PUT",
+        body: JSON.stringify({ texto }),
+      })
+    ).vinculo,
+
+  /** Põe na fila do orquestrador `de` (um dos dois lados) uma mensagem manual sobre o vínculo. */
+  enviarMensagemDoVinculo: async (id: string, de: string, texto: string): Promise<void> => {
+    await requisitar<{ enfileirada: boolean }>(`/vinculos/${encodeURIComponent(id)}/mensagens`, {
+      method: "POST",
+      body: JSON.stringify({ de, texto }),
+    });
+  },
 };

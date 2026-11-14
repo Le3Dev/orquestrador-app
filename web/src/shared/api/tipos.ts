@@ -451,6 +451,19 @@ export interface ResumoDoOrquestrador {
   planoPendente?: boolean;
 }
 
+/** Um vínculo entre dois orquestradores: notas compartilhadas e troca manual de mensagens. */
+export interface VinculoDto {
+  id: string;
+  orquestradorAId: string;
+  orquestradorBId: string;
+  notas: string;
+  criadoEm: string;
+  atualizadoEm: string;
+}
+
+/** O limite do servidor para as notas compartilhadas de um vínculo. */
+export const TAMANHO_MAXIMO_DAS_NOTAS_DO_VINCULO = 8_000;
+
 export interface PastaDeProjeto {
   nome: string;
   caminho: string;

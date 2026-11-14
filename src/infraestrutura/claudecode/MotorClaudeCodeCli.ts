@@ -122,6 +122,8 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
         this.plataforma,
         pedido.itensLigados ?? [],
         pedido.previasAbertas ?? [],
+        pedido.vinculados ?? [],
+        pedido.origemDaMensagem ?? null,
       );
 
       const adaptador = new AdaptadorDeEventosDoClaudeCode();

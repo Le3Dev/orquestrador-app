@@ -771,6 +771,11 @@ describe("NoTerminal", () => {
       ["cima", "top", true],
       ["direita", "right", true],
       ["esquerda", "left", true],
+      // Onde chegam as linhas dos vínculos entre orquestradores.
+      ["vinculo-baixo", "bottom", false],
+      ["vinculo-cima", "top", false],
+      ["vinculo-direita", "right", false],
+      ["vinculo-esquerda", "left", false],
       // Onde chega a linha puxada de uma nota, prévia ou artefato (cobre o terminal).
       ["chegada", "left", false],
     ];

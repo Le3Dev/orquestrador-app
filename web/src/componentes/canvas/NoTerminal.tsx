@@ -53,6 +53,7 @@ import {
   type NoPrevia,
   type NoTerminal as TipoDoNo,
 } from "../../shared/canvas/nos";
+import { ancoraDeChegadaDoVinculo } from "../../shared/canvas/vinculos";
 import { useNota } from "../../shared/canvas/notas";
 import { lerPedidoArrastado, temPedidoArrastado } from "../../shared/canvas/pedidoArrastado";
 import { registrarPromptDoTerminal } from "../../shared/canvas/promptsDosTerminais";
@@ -82,6 +83,7 @@ import { BotaoDeAlteracoes } from "./BotaoDeAlteracoes";
 import { BotaoDeArquivos } from "./BotaoDeArquivos";
 import { BotaoDeLimparBixinhos } from "./BotaoDeLimparBixinhos";
 import type { AcoesDoPlano } from "./CartaoDoPlano";
+import { BotaoDeVincular } from "./BotaoDeVincular";
 import { ControlesDoNo } from "./ControlesDoNo";
 import { FaixaDeServidores } from "./FaixaDeServidores";
 import { Rotulo } from "./LinhasDaConfiguracao";
@@ -691,6 +693,17 @@ const AncorasDoTerminal = memo(function AncorasDoTerminal() {
     <>
       {ANCORAS_DO_TERMINAL.map(({ id, posicao }) => (
         <Handle key={id} id={id} type="source" position={posicao} className="ancora" isConnectable={false} />
+      ))}
+      {/* Onde chegam as linhas dos vínculos (a ponta B), uma em cada lado: a saída usa as âncoras de cima. */}
+      {ANCORAS_DO_TERMINAL.map(({ id, posicao }) => (
+        <Handle
+          key={`vinculo-${id}`}
+          id={ancoraDeChegadaDoVinculo(id)}
+          type="target"
+          position={posicao}
+          className="ancora"
+          isConnectable={false}
+        />
       ))}
       {/* Onde chega a linha puxada de uma nota, prévia ou artefato: cobre o terminal
           inteiro e só recebe o mouse durante a ligação (daqui não se puxa nada). */}
@@ -1609,6 +1622,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
           <BotaoDeLimparBixinhos orquestradorId={orquestradorId} />
           <BotaoDeAlteracoes orquestradorId={orquestradorId} />
           <BotaoDeArquivos orquestradorId={orquestradorId} nomeDoOrquestrador={nome} />
+          <BotaoDeVincular orquestradorId={orquestradorId} />
           {acoesDosShells !== null && (
             <button
               type="button"
