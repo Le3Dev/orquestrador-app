@@ -14,6 +14,7 @@ import { temCorpoComLimiteProprio } from "./controllers/artefatosRoutes";
 import { CanalDoChat, criarChatRoutes } from "./controllers/chatRoutes";
 import { criarEscutaRoutes } from "./controllers/escutaRoutes";
 import { criarNotasRoutes } from "./controllers/notasRoutes";
+import { criarVinculosRoutes } from "./controllers/vinculosRoutes";
 import { criarOrquestradoresRoutes } from "./controllers/orquestradoresRoutes";
 import { criarPluginsRoutes } from "./controllers/pluginsRoutes";
 import { criarPromptsRoutes } from "./controllers/promptsRoutes";
@@ -30,6 +31,7 @@ import { ArmazemDeAnexosEmArquivo } from "./infraestrutura/arquivos/ArmazemDeAne
 import { PastaDeEntradaDosArtefatos } from "./infraestrutura/arquivos/ColetorDeArtefatosEmPasta";
 import { ExploradorDePastas } from "./infraestrutura/arquivos/ExploradorDePastas";
 import { RepositorioDeNotasEmArquivo } from "./infraestrutura/arquivos/RepositorioDeNotasEmArquivo";
+import { RepositorioDeVinculosEmArquivo } from "./infraestrutura/arquivos/RepositorioDeVinculosEmArquivo";
 import { RepositorioDeOrquestradoresEmArquivo } from "./infraestrutura/arquivos/RepositorioDeOrquestradoresEmArquivo";
 import { RepositorioDePreferenciasEmArquivo } from "./infraestrutura/arquivos/RepositorioDePreferenciasEmArquivo";
 import { RepositorioDoChatEmArquivo } from "./infraestrutura/arquivos/RepositorioDoChatEmArquivo";
@@ -61,6 +63,7 @@ import { encerrarAgentesOrfaos, RegistroDeProcessos } from "./infraestrutura/sis
 import { RegistroDeProcessosDeixados } from "./infraestrutura/sistema/RegistroDeProcessosDeixados";
 import { CanalDeEventos } from "./infraestrutura/sse/CanalDeEventos";
 import { ServicoDeNotas } from "./notas/ServicoDeNotas";
+import { ServicoDeVinculos } from "./vinculos/ServicoDeVinculos";
 import { Plataforma } from "./orquestracao/InstrucoesDoOrquestrador";
 import { ServicoDeAlteracoes } from "./orquestracao/ServicoDeAlteracoes";
 import { ServicoDeArquivos } from "./orquestracao/ServicoDeArquivos";
@@ -186,6 +189,7 @@ async function iniciar(): Promise<void> {
 
   const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(configuracao.pastaDeDados);
   const notas = await RepositorioDeNotasEmArquivo.abrir(configuracao.pastaDeDados);
+  const repositorioDeVinculos = await RepositorioDeVinculosEmArquivo.abrir(configuracao.pastaDeDados);
   const preferencias = await RepositorioDePreferenciasEmArquivo.abrir(configuracao.pastaDeDados);
   const repositorioDoChat = await RepositorioDoChatEmArquivo.abrir(configuracao.pastaDeDados, randomUUID);
 
@@ -235,7 +239,19 @@ async function iniciar(): Promise<void> {
   // Windows, PowerShell): lida uma vez aqui, o domínio só a recebe.
   const plataforma: Plataforma = process.platform === "win32" ? "windows" : "unix";
 
-  const servico = new ServicoDeOrquestracao({
+  // Vínculos entre Orquestradores. A mensagem entra direto na fila do destino
+  // pelo `servico` de orquestração, criado logo abaixo (que, por sua vez, usa
+  // os vínculos): a referência só é usada depois da montagem.
+  const vinculos = new ServicoDeVinculos({
+    repositorio: repositorioDeVinculos,
+    orquestradores: { nomeDe: (id) => repositorio.buscarPorId(id)?.nome ?? null },
+    entregar: (destinoId, texto, origem) => servico.receberDeVinculado(destinoId, texto, origem),
+    gerarId: randomUUID,
+    agora: () => new Date(),
+  });
+
+  const servico: ServicoDeOrquestracao = new ServicoDeOrquestracao({
+    vinculos,
     repositorio,
     motor: new MotorClaudeCodeCli(
       new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro, undefined, rastreador),
@@ -398,6 +414,7 @@ async function iniciar(): Promise<void> {
         servico: new ServicoDeNotas({ repositorio: notas, gerarId: randomUUID, agora: () => new Date() }),
       }),
     );
+    rotas.use("/api", criarVinculosRoutes({ servico: vinculos }));
     rotas.use("/api", criarPromptsRoutes({ servico: servicoDeMelhoria }));
     rotas.use("/api", criarEscutaRoutes({ servico: servicoDeEscuta }));
     // Faixa de servidores: confere se os endereços locais citados pelos agentes ainda respondem.

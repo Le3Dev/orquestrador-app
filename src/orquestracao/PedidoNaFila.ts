@@ -12,6 +12,18 @@ export const TAMANHO_MAXIMO_DA_MENSAGEM = 50_000;
 /** Por que um pedido saiu da fila: o usuário o tirou, ou ele virou um turno. */
 export type MotivoDaRetiradaDaFila = "removido" | "enviado";
 
+/**
+ * De quem veio um pedido que não é do usuário: a mensagem de um Orquestrador
+ * vinculado. `saltos` conta quantas mensagens de vínculo já encadearam até
+ * aqui (0 na primeira), para o anti-laço descartar as que passarem do limite.
+ * O nome é o do remetente quando a mensagem foi enviada.
+ */
+export interface OrigemDoPedido {
+  orquestradorId: string;
+  nome: string;
+  saltos: number;
+}
+
 export interface DadosDoPedidoNaFila {
   id: string;
   texto: string;
@@ -22,6 +34,8 @@ export interface DadosDoPedidoNaFila {
   itensLigados?: ItemLigado[] | undefined;
   /** Os endereços das prévias abertas no canvas quando o pedido entrou na fila. Ausente: nenhuma. */
   previasAbertas?: string[] | undefined;
+  /** Quem enviou, se veio de um Orquestrador vinculado. Ausente: o pedido é do usuário (e nos pedidos antigos). */
+  origem?: OrigemDoPedido | undefined;
 }
 
 export interface NovoPedidoNaFila {
@@ -31,6 +45,7 @@ export interface NovoPedidoNaFila {
   enfileiradoEm: Date;
   itensLigados?: readonly ItemLigado[] | undefined;
   previasAbertas?: readonly string[] | undefined;
+  origem?: OrigemDoPedido | null | undefined;
 }
 
 /**
@@ -52,6 +67,8 @@ export class PedidoNaFila {
     private readonly enfileiradoEmMs: number,
     public readonly itensLigados: readonly ItemLigado[],
     public readonly previasAbertas: readonly string[],
+    /** Nulo: pedido do usuário. */
+    public readonly origem: Readonly<OrigemDoPedido> | null = null,
   ) {
     Object.freeze(this);
   }
@@ -78,6 +95,7 @@ export class PedidoNaFila {
       novo.enfileiradoEm.getTime(),
       Object.freeze(itens),
       Object.freeze([...(novo.previasAbertas ?? [])]),
+      novo.origem === undefined || novo.origem === null ? null : Object.freeze({ ...novo.origem }),
     );
   }
 
@@ -91,6 +109,7 @@ export class PedidoNaFila {
       Date.parse(dados.enfileiradoEm),
       Object.freeze(itens),
       Object.freeze([...(dados.previasAbertas ?? [])]),
+      dados.origem === undefined ? null : Object.freeze({ ...dados.origem }),
     );
   }
 
@@ -108,6 +127,7 @@ export class PedidoNaFila {
       // Sem itens, o campo nem aparece: o `orquestrador.json` e a tela ficam como antes.
       ...(this.itensLigados.length === 0 ? {} : { itensLigados: this.itensLigados.map((item) => ({ ...item })) }),
       ...(this.previasAbertas.length === 0 ? {} : { previasAbertas: [...this.previasAbertas] }),
+      ...(this.origem === null ? {} : { origem: { ...this.origem } }),
     };
   }
 }

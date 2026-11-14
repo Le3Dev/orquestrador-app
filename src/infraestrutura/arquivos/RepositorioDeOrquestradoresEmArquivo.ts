@@ -138,6 +138,10 @@ const esquemaDoArquivo = z.object({
           .optional(),
         // Ausente nos pedidos sem prévias abertas (e nos gravados antes do campo).
         previasAbertas: z.array(z.string()).optional(),
+        // Ausente nos pedidos do usuário (e nos gravados antes dos vínculos).
+        origem: z
+          .object({ orquestradorId: z.string(), nome: z.string(), saltos: z.number().int().min(0) })
+          .optional(),
       }),
     )
     .default([]),

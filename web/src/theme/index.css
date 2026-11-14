@@ -2086,6 +2086,44 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
 .react-flow__edge.aresta-ligacao .react-flow__edge-path { stroke: color-mix(in srgb, var(--info) 55%, transparent); stroke-width: 1.5; }
 .react-flow__edge.aresta-ligacao:hover .react-flow__edge-path { stroke: color-mix(in srgb, var(--info) 80%, transparent); }
 .react-flow__edge.aresta-ligacao.selected .react-flow__edge-path { stroke: var(--info); stroke-width: 2.5; }
+
+/* ---------------- Vínculos entre orquestradores ----------------
+ * A linha mais grossa e quente (a cor de destaque), com um elo no meio. */
+.react-flow__edge.aresta-vinculo .react-flow__edge-path { stroke: var(--active); stroke-width: 2.5; stroke-dasharray: 10 5; opacity: .85; }
+.react-flow__edge.aresta-vinculo:hover .react-flow__edge-path,
+.react-flow__edge.aresta-vinculo.selected .react-flow__edge-path { opacity: 1; stroke-width: 3.5; }
+.react-flow__edge.aresta-vinculo { cursor: pointer; }
+.elo-do-vinculo { fill: var(--surface-2); stroke: var(--active); stroke-width: 2; pointer-events: none; }
+.item-de-vinculo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 12px;
+}
+.item-de-vinculo:hover:not(:disabled) { background: color-mix(in srgb, var(--active) 12%, transparent); }
+.item-de-vinculo:disabled { opacity: .6; }
+/* O painel do vínculo: no canto de cima à direita da área do canvas, por cima das janelas. */
+.painel-do-vinculo {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 26rem;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 24px);
+  padding: 12px 14px;
+  overflow-y: auto;
+}
+.painel-do-vinculo-cabecalho { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.canvas-modo-invisivel .painel-do-vinculo { display: none; }
 .itens-ligados {
   display: flex;
   flex-wrap: wrap;

@@ -134,7 +134,9 @@ export type ArestaDoBixinho = Edge<DadosDaArestaDoBixinho, "bixinho">;
 export type ArestaDaPrevia = Edge<Record<string, never>, "default">;
 /** A linha que o usuário puxou de uma nota, prévia ou artefato até o terminal: selecionável, para desligar. */
 export type ArestaDaLigacao = Edge<Record<string, never>, "ligacao">;
-export type ArestaDoCanvas = ArestaDoBixinho | ArestaDaPrevia | ArestaDaLigacao;
+/** A linha de um vínculo entre dois terminais (`shared/canvas/vinculos.ts`): o clique abre o painel do vínculo. */
+export type ArestaDoVinculo = Edge<Record<string, never>, "vinculo">;
+export type ArestaDoCanvas = ArestaDoBixinho | ArestaDaPrevia | ArestaDaLigacao | ArestaDoVinculo;
 
 /** O `id` de cada âncora das linhas: o lado do nó, no terminal e no bixinho. */
 export type Ancora = "cima" | "baixo" | "esquerda" | "direita";

@@ -1,3 +1,4 @@
+import type { VinculadoNoPrompt } from "../vinculos/BlocosDeVinculo";
 import { CategoriaDoAnexo } from "./Anexo";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
@@ -5,6 +6,7 @@ import { ItemLigado } from "./InstrucoesDoOrquestrador";
 import { InstrucoesAplicadas } from "./InstrucoesPersonalizadas";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
+import type { OrigemDoPedido } from "./PedidoNaFila";
 import { DadosDoSubagentePronto } from "./SubagentesProntos";
 
 /** Arquivo (imagem ou documento) anexado ao pedido, já guardado em disco. */
@@ -70,6 +72,14 @@ export interface PedidoDeTurno {
    * servem mais. Ausente ou vazio: nenhuma linha.
    */
   previasAbertas?: readonly string[] | undefined;
+  /**
+   * Os Orquestradores vinculados a este, com as notas compartilhadas, lidos
+   * quando o turno começou: vão no bloco `<vinculos>` da mensagem. Ausente ou
+   * vazio: nenhum.
+   */
+  vinculados?: readonly VinculadoNoPrompt[] | undefined;
+  /** De quem veio o pedido, quando é a mensagem de um Orquestrador vinculado. Ausente: do usuário. */
+  origemDaMensagem?: OrigemDoPedido | null | undefined;
 }
 
 /** Por que um turno falhou, quando dá para saber. */
