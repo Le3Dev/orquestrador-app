@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { Artefato, DadosDoArtefato } from "./Artefato";
+import { DesenhoGravado, desenhoVazio } from "./DesenhoDoArtefato";
 import { EntradaDeArtefatos } from "./EntradaDeArtefatos";
 import { ErroDeArtefato } from "./ErroDeArtefato";
 import { EventoDeArtefato } from "./EventoDeArtefato";
@@ -14,6 +15,7 @@ import { ArquivoColetado, ServicoDeArtefatos } from "./ServicoDeArtefatos";
 class RepositorioEmMemoria implements RepositorioDeArtefatos {
   readonly dados = new Map<string, DadosDoArtefato>();
   readonly conteudos = new Map<string, Buffer>();
+  readonly desenhos = new Map<string, DesenhoGravado>();
 
   todos(): readonly Artefato[] {
     return [...this.dados.values()].map((dados) => Artefato.reconstituir(dados));
@@ -33,6 +35,24 @@ class RepositorioEmMemoria implements RepositorioDeArtefatos {
   }
   async lerConteudo(id: string, numero: number): Promise<Buffer | null> {
     return this.conteudos.get(`${id}/${numero}`) ?? null;
+  }
+  async lerDesenho(id: string, numero: number): Promise<DesenhoGravado | null> {
+    if ((this.buscar(id)?.versao(numero) ?? null) === null) {
+      return null;
+    }
+    const desenho = this.desenhos.get(`${id}/${numero}`);
+    return desenho === undefined ? desenhoVazio() : { tracos: [...desenho.tracos], largura: desenho.largura };
+  }
+  async salvarDesenho(id: string, numero: number, { tracos, largura }: DesenhoGravado): Promise<boolean> {
+    if ((this.buscar(id)?.versao(numero) ?? null) === null) {
+      return false;
+    }
+    if (tracos.length === 0) {
+      this.desenhos.delete(`${id}/${numero}`);
+    } else {
+      this.desenhos.set(`${id}/${numero}`, { tracos: [...tracos], largura });
+    }
+    return true;
   }
   async remover(id: string): Promise<void> {
     this.dados.delete(id);

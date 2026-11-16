@@ -191,7 +191,11 @@ const CHAVE = "orquestrador-agentes:canvas:v1";
 /** Os nós que se ligam a um terminal (`ligados`), pelo prefixo do id: notas, prévias e artefatos. */
 const PREFIXOS_DOS_ITENS_LIGAVEIS = ["nota:", "previa:", "artefato:"] as const;
 const CHAVE_DOS_BIXINHOS_LIMPOS = `${CHAVE}:bixinhos-limpos`;
-/** O desenho sobre a página de cada artefato em tela cheia, por id do artefato (em px do corpo da tela cheia). */
+/**
+ * O desenho antigo sobre a página de cada artefato em tela cheia, por id do artefato (em px do corpo da
+ * tela cheia). Hoje o desenho fica no servidor, por versão; isto só é lido para levar o antigo para lá
+ * uma vez (`useDesenhoDoArtefato`), que então tira a entrada daqui.
+ */
 const CHAVE_DO_DESENHO_DA_TELA_CHEIA = `${CHAVE}:desenho-da-tela-cheia`;
 
 function ehNumero(valor: unknown): valor is number {
@@ -383,7 +387,7 @@ function quantidadeDePontosValida(tipo: TipoDoTraco, quantidade: number): boolea
 }
 
 /** Um traço salvo, só com os campos dele; nulo se algo estiver fora do esperado. */
-function interpretarTraco(valor: unknown): TracoDoDesenho | null {
+export function interpretarTraco(valor: unknown): TracoDoDesenho | null {
   if (typeof valor !== "object" || valor === null) {
     return null;
   }
@@ -525,7 +529,7 @@ export function interpretarDesenhosDasTelasCheias(texto: string | null): Map<str
   }
 }
 
-/** Os traços que o artefato tem na tela cheia (vazio se não há ou se o salvo estiver ilegível). */
+/** Os traços antigos que o artefato tem na tela cheia (vazio se não há ou se o salvo estiver ilegível). Só para a migração. */
 export function lerDesenhoDaTelaCheia(artefatoId: string): TracoDoDesenho[] {
   try {
     return interpretarDesenhosDasTelasCheias(localStorage.getItem(CHAVE_DO_DESENHO_DA_TELA_CHEIA)).get(artefatoId) ?? [];
@@ -534,7 +538,10 @@ export function lerDesenhoDaTelaCheia(artefatoId: string): TracoDoDesenho[] {
   }
 }
 
-/** Grava os traços do artefato na tela cheia, sem mexer no desenho dos outros; sem traço, o artefato sai do salvo. */
+/**
+ * Grava os traços do artefato na tela cheia, sem mexer no desenho dos outros; sem traço, o artefato sai
+ * do salvo. A migração chama com `[]` depois de levar o desenho para o servidor.
+ */
 export function salvarDesenhoDaTelaCheia(artefatoId: string, desenho: readonly TracoDoDesenho[]): void {
   try {
     const todos = interpretarDesenhosDasTelasCheias(localStorage.getItem(CHAVE_DO_DESENHO_DA_TELA_CHEIA));

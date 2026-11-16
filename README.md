@@ -698,6 +698,7 @@ dados/
     <id>/                      um artefato por pasta (ver ADR-26)
       artefato.json            título, formato, origem, nome do arquivo e versões (gravação atômica)
       v<N>.html | v<N>.md      o conteúdo de cada versão
+      v<N>.desenho.json        o desenho feito sobre a versão, se houver (gravação atômica; ver ADR-45)
     entrada/                   onde os agentes gravam; o servidor observa e coleta (nunca é um artefato)
       orquestradores/<id>/     artefatos de cada Orquestrador e dos Subagentes dele
       chat/                    artefatos do chat rápido
@@ -1566,6 +1567,23 @@ flowchart LR
   - o abuso do teste com e-mails novos é **reduzido** pelo limite por computador, não eliminado;
   - offline, o computador substituído ainda abre até o token vencer (no máximo 7 dias);
   - mudar o contrato exige atualizar os dois repositórios (app e serviço) em conjunto.
+
+**ADR-45 — O desenho sobre um artefato fica no servidor, por versão, ancorado no conteúdo.** Atualiza os ADR-8 e ADR-26.
+- *Contexto:*
+  - o desenho feito por cima de um artefato (setas, rabiscos, textos) ficava só no `localStorage` da tela, por artefato e sem versão: uma versão nova herdava traços que apontavam para um conteúdo que já não estava ali, e apagar o artefato deixava o desenho para trás;
+  - os pontos eram coordenadas da janela: rolar ou redimensionar o conteúdo desencontrava o traço do que ele marcava.
+- *Decisão:*
+  - o desenho é **por versão**, no arquivo `artefatos/<id>/v<N>.desenho.json`, ao lado de `v<N>.html` e do `artefato.json`, com a mesma gravação atômica e a mesma fila por artefato. Lista vazia apaga o arquivo; remover o artefato apaga a pasta inteira, desenhos inclusive;
+  - rotas `GET` e `PUT /api/artefatos/:id/versoes/:numero/desenho` (corpo `{ "tracos": [...], "largura": n | null }`; o PUT troca o desenho inteiro e responde 204). Valem a trava do aplicativo e o 404 do artefato antes do da versão; número de versão inválido é 400. O corpo tem **limite próprio de 1 MB** (413), lido pela rota: o leitor JSON geral de 150 MB pula esse caminho;
+  - cada traço é **ancorado no conteúdo**: `ancora.conteiner` é o caminho de índices de filhos, a partir do elemento raiz do documento, até o contêiner que rola, e `ancora.elemento` vai do contêiner até o elemento âncora (`null`: pontos em coordenadas do documento). Tipos, cores, espessuras e limites são os da tela (`src/artefatos/DesenhoDoArtefato.ts` espelha `web/src/shared/canvas/layout.ts`); até 2000 traços por versão e 64 índices por caminho; campos desconhecidos são descartados ao gravar;
+  - **versão nova começa limpa**: o desenho não passa de uma versão para a outra;
+  - a **largura da página** em que o primeiro traço foi feito é guardada por versão (`largura`, inteiro de 200 a 10000 pixels; ausente no `PUT` vale `null`). Enquanto houver traços, a tela monta a página nessa largura e escala para caber, e o desenho fica exato em qualquer janela; sem traços, a página volta ao normal. Arquivos antigos, sem largura (inclusive os que guardavam só a lista de traços), são lidos com `largura: null` e seguem sem escala;
+  - a **migração** do desenho antigo do `localStorage` é única e feita pela tela, pelo mesmo `PUT`; o servidor não lê o `localStorage` nem conhece o formato antigo.
+- *Consequências:*
+  - o desenho sobrevive a outro navegador e à limpeza do layout, e acompanha o artefato quando ele é apagado;
+  - mudar os tipos, as cores ou as espessuras na tela exige mudar também o módulo do servidor, senão o PUT responde 400;
+  - não há evento SSE do desenho: duas janelas abertas no mesmo artefato não se atualizam ao vivo, e a última gravação vence;
+  - um `v<N>.desenho.json` ilegível vale como desenho vazio (com aviso no log) até a próxima gravação.
 
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
