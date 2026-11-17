@@ -12,6 +12,10 @@
 //     instalado a situação é sempre "indisponivel".
 //   - previa: vista nativa da Prévia para endereços externos (sessão própria
 //     `persist:previa`); o main só aceita da janela principal e valida tudo.
+//   - rotinas: a bandeja do Windows (electron/bandeja.js). informarSituacao conta
+//     ao app as rotinas ativas e as execuções aguardando aprovação; aoPedirPainel
+//     avisa quando o usuário clica na notificação de aprovação. O main só aceita
+//     da janela principal.
 //   - primeiraAbertura: usado só pela tela electron/primeiraAbertura.html; o
 //     main recusa essas chamadas vindas de qualquer outra janela.
 
@@ -201,6 +205,34 @@ contextBridge.exposeInMainWorld("electron", {
       const ouvinte = (_evento, dados) => callback(dados);
       ipcRenderer.on("navegador-do-agente:ativado", ouvinte);
       return () => ipcRenderer.removeListener("navegador-do-agente:ativado", ouvinte);
+    },
+  },
+
+  // Rotinas e a bandeja do Windows (electron/bandeja.js). Só a janela principal fala com o app.
+  rotinas: {
+    // { ativas, aguardandoAprovacao, pendentes: [{ id, rotina }] }: `ativas` = rotinas ligadas (com pelo
+    // menos uma, fechar a janela esconde o app na bandeja); `pendentes` = execuções aguardando aprovação,
+    // com o id da execução e o nome da rotina (o app avisa uma vez por execução, com notificação do
+    // Windows). Reenviar a cada mudança; resolve depois que o app registrou.
+    informarSituacao: (situacao) => {
+      const dados = situacao !== null && typeof situacao === "object" ? situacao : {};
+      return ipcRenderer
+        .invoke("rotinas:informar-situacao", {
+          ativas: Number(dados.ativas),
+          aguardandoAprovacao: Number(dados.aguardandoAprovacao),
+          pendentes: Array.isArray(dados.pendentes)
+            ? dados.pendentes
+                .filter((pendente) => pendente !== null && typeof pendente === "object" && typeof pendente.id === "string")
+                .map((pendente) => ({ id: pendente.id, rotina: typeof pendente.rotina === "string" ? pendente.rotina : "" }))
+            : [],
+        })
+        .then(() => undefined);
+    },
+    // O usuário clicou na notificação de aprovação: a tela deve abrir o painel das rotinas. Devolve o cancelamento.
+    aoPedirPainel: (callback) => {
+      const ouvinte = () => callback();
+      ipcRenderer.on("rotinas:abrir-painel", ouvinte);
+      return () => ipcRenderer.removeListener("rotinas:abrir-painel", ouvinte);
     },
   },
 

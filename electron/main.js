@@ -37,6 +37,13 @@
 //      onnxruntime-node num segundo utilityProcess, sob demanda; a tela recebe
 //      uma porta ("transcricao:conectar") e o principal repassa as mensagens;
 //      modelos baixados com net.fetch.
+//   8. Bandeja do Windows (electron/bandeja.js): ícone com Abrir / Iniciar com o
+//      Windows / Sair. Com Rotinas ativas, fechar a janela a esconde na bandeja
+//      (o servidor segue rodando as rotinas); "Sair" encerra sempre. Aberto pelo
+//      login ("--na-bandeja"), a janela nasce escondida. A tela informa as
+//      rotinas ativas e as execuções aguardando aprovação ("rotinas:informar-
+//      situacao"), que viram notificação do Windows; o clique nela pede à tela o
+//      painel das rotinas ("rotinas:abrir-painel").
 //
 // Janela principal: titleBarStyle 'hidden' SEM titleBarOverlay — no Windows a
 // barra e os botões nativos somem ("otherwise no window controls will be
@@ -66,9 +73,12 @@ const {
   MessageChannelMain,
   // `net` do Node já é usado aqui (portas); o do Electron baixa os modelos.
   net: redeDoElectron,
+  nativeImage,
+  Notification,
   screen,
   session,
   shell,
+  Tray,
   utilityProcess,
   WebContentsView,
 } = require("electron");
@@ -100,6 +110,7 @@ const {
 const { importarHistorico, localizarHistoricoAntigo } = require("./importacaoDoHistorico");
 const { criarVistasDaPrevia } = require("./vistaDaPrevia");
 const { criarNavegadorDoAgente } = require("./navegadorDoAgente");
+const { criarArquivoDeEstado, criarBandeja } = require("./bandeja");
 const { baixarModelo, pastaDosModelos } = require("./modelosDaTranscricao");
 const {
   ARGUMENTO_DA_TRANSCRICAO_NATIVA,
@@ -753,6 +764,8 @@ function criarJanela({ botoesNativos = true, transparente = false, ...opcoes } =
 function focar(janela) {
   if (!janela || janela.isDestroyed()) return;
   if (janela.isMinimized()) janela.restore();
+  // Escondida na bandeja (ou aberta no login, ainda sem aparecer): um segundo lançamento a traz de volta.
+  if (!janela.isVisible()) janela.show();
   janela.focus();
 }
 
@@ -800,8 +813,13 @@ async function carregarTela(janela) {
   }
 }
 
+// A primeira janela principal desta abertura do app nasce escondida se o Windows abriu o app no login.
+let janelaPrincipalJaAbriu = false;
+
 async function abrirJanelaPrincipal() {
   if (janelaPrincipal) return focar(janelaPrincipal);
+  const abrirNaBandeja = !janelaPrincipalJaAbriu && bandeja.iniciadoNaBandeja();
+  janelaPrincipalJaAbriu = true;
   const janela = criarJanela({
     width: 1440,
     height: 900,
@@ -812,7 +830,14 @@ async function abrirJanelaPrincipal() {
     transparente: true,
   });
   janelaPrincipal = janela;
-  janela.on("close", () => sairDoModoInvisivel());
+  janela.on("close", (evento) => {
+    sairDoModoInvisivel();
+    // Com Rotinas ativas a janela só se esconde na bandeja; o app segue rodando (electron/bandeja.js).
+    bandeja.aoFecharJanela(evento, janela);
+  });
+  // Desligar o Windows ou encerrar a sessão não passa pelo before-quit: sem isto o
+  // fechamento escondido seguraria o desligamento.
+  janela.on("session-end", () => bandeja.marcarSaida());
   // Página recarregou/travou: o estado React volta a "normal", então o main
   // também precisa sair do modo invisível (senão o usuário fica preso).
   janela.webContents.on("did-start-navigation", (evento, _url, mesmoDoc, ehFramePrincipal) => {
@@ -861,6 +886,12 @@ async function abrirJanelaPrincipal() {
   });
 
   await carregarTela(janela);
+  // Aberto no login ("Iniciar com o Windows"): só o ícone da bandeja aparece, e a
+  // janela abre pelo menu dele. A primeira verificação de atualização não espera o "show".
+  if (abrirNaBandeja) {
+    if (servicoDeAtualizacao) servicoDeAtualizacao.iniciar();
+    return;
+  }
   if (!janela.isDestroyed()) janela.show();
 }
 
@@ -888,7 +919,8 @@ function ligarRevalidacaoDaLicenca() {
     aoBloquear: (detalhe) => {
       registrarNoLog("app", `Licença bloqueada com o app aberto (${detalhe?.motivo || "desconhecido"}).`);
       abrirJanelaAtivacao(detalhe?.mensagem || null);
-      if (janelaPrincipal && !janelaPrincipal.isDestroyed()) janelaPrincipal.close();
+      // Fecha de verdade (não esconde na bandeja): sem licença o app não pode seguir rodando as rotinas.
+      if (janelaPrincipal && !janelaPrincipal.isDestroyed()) bandeja.fecharDeVerdade(janelaPrincipal);
     },
   });
 }
@@ -913,6 +945,38 @@ async function abrirConformeEstado() {
   }
   await seguirAposLicenca();
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Bandeja do Windows (electron/bandeja.js): com Rotinas ativas, fechar a janela
+// a esconde na bandeja para elas continuarem rodando; menu Abrir / Iniciar com o
+// Windows / Sair; notificação do Windows quando uma execução aguarda aprovação.
+// A tela conta o que o app precisa saber por "rotinas:informar-situacao".
+// ──────────────────────────────────────────────────────────────────────────
+const bandeja = criarBandeja({
+  app,
+  Tray,
+  Menu,
+  Notification,
+  nativeImage,
+  caminhoDoIcone: path.join(__dirname, "icones", "icone.ico"),
+  nomeDoApp: config.productName,
+  // O login item abriria o Electron puro (sem o app) fora do app instalado, e o build de teste não pode se autoiniciar.
+  inicioComOWindowsDisponivel: app.isPackaged && !BUILD_DE_TESTE,
+  obterJanela: () => janelaPrincipal,
+  abrirJanela: () => {
+    abrirConformeEstado().catch((erro) => registrarNoLog("app", `Não foi possível abrir a janela: ${erro.message || erro}`));
+  },
+  sair: () => app.quit(),
+  lerEstado: () => criarArquivoDeEstado(path.join(pastaDoUsuario(), "bandeja.json"), fs).ler(),
+  gravarEstado: (estado) => criarArquivoDeEstado(path.join(pastaDoUsuario(), "bandeja.json"), fs).gravar(estado),
+  registrar: (texto) => registrarNoLog("bandeja", texto),
+});
+
+// Só a janela principal conta as rotinas: { ativas, aguardandoAprovacao, pendentes: [{ id, rotina }] }.
+ipcMain.handle("rotinas:informar-situacao", (evento, situacao) => {
+  exigirJanelaPrincipal(evento);
+  bandeja.informarSituacao(situacao);
+});
 
 // ──────────────────────────────────────────────────────────────────────────
 // IPC — controles de janela.
@@ -1289,6 +1353,8 @@ app.on("will-quit", () => {
   sairDoModoInvisivel();
   navegadorDoAgente.destruirTodas();
   globalShortcut.unregisterAll();
+  // Sem isto o ícone fica fantasma na bandeja até o mouse passar por cima.
+  bandeja.encerrar();
 });
 
 // Escuta no modo invisível (electron/escutaDoModoInvisivel.js): responde ao
@@ -1553,6 +1619,8 @@ if (!conseguiuLock) {
     } catch (erro) {
       registrarNoLog("atualizacao", `Falha ao preparar a atualização automática: ${erro.message || erro}`);
     }
+    // Só no Windows; sem o ícone (falha ou outra plataforma) o app se comporta como antes.
+    bandeja.iniciar();
     try {
       PORTA = await escolherPorta();
     } catch (erro) {
@@ -1584,6 +1652,8 @@ if (!conseguiuLock) {
   // janelas somem na hora. O "quit" fica como garantia.
   let servidorDesligado = false;
   app.on("before-quit", (evento) => {
+    // Daqui em diante fechar a janela encerra de verdade, mesmo com Rotinas ativas (senão o "close" cancelaria a saída).
+    bandeja.marcarSaida();
     if (servidorDesligado || !servidor.filho) {
       encerrarServidorAoFechar();
       return;
