@@ -9,9 +9,14 @@ import {
   rotuloCurtoDaCota,
 } from "../../shared/formatacao";
 import { useRelogio } from "../../shared/hooks/useRelogio";
+import { type FonteDeEventosDasRotinas, useRotinas } from "../../shared/hooks/useRotinas";
+import { useRotinasNoDesktop } from "../../shared/hooks/useRotinasNoDesktop";
 import type { EstadoDoServidor } from "../../shared/hooks/useServidor";
 import { nivelDaMemoria } from "../../shared/memoria";
 import { IconeFechar } from "../Icones";
+import { BotaoDasRotinas } from "../rotinas/BotaoDasRotinas";
+import type { OrquestradorEscolhivel } from "../rotinas/EditorDeRotina";
+import { PainelDeRotinas } from "../rotinas/PainelDeRotinas";
 import { ATRIBUTO_DO_GATILHO, COTA_ALTA, PopoverDoUso } from "./PopoverDoUso";
 
 /** Por quanto tempo o aviso de "reconectado" fica na tela. */
@@ -97,6 +102,49 @@ export function ErroDoCanvas({ erro, aoFechar, nivel = "erro" }: PropsDoErroDoCa
         <IconeFechar tamanho={14} />
       </button>
     </div>
+  );
+}
+
+interface PropsDasRotinasDoCanvas {
+  /** O servidor respondeu há pouco: a cada vez que ele volta, a lista das rotinas é lida de novo. */
+  servidorConectado: boolean;
+  /** Os orquestradores que existem (a tela já os tem): quem pode receber o pedido de cada etapa. Nulo enquanto não chegaram. */
+  orquestradores: readonly OrquestradorEscolhivel[] | null;
+  /** O painel está aberto. Quem monta decide (um painel da barra por vez): abrir um fecha o outro. */
+  aberto: boolean;
+  aoAbrir: () => void;
+  /** Esc, o X do painel ou um segundo clique no botão. */
+  aoFechar: () => void;
+  /** Só para testes: troca a conexão ao vivo. */
+  criarFonte?: (endereco: string) => FonteDeEventosDasRotinas | null;
+}
+
+/**
+ * Rotinas na barra do canvas: o botão "Rotinas" (com o selo das execuções
+ * aguardando aprovação) e, abaixo dele, o painel quando `aberto`. Fica montado
+ * mesmo com o painel fechado: é ele que mantém o selo em dia e avisa o app
+ * desktop quantas rotinas estão ativas (a janela fecha para a bandeja) e
+ * quando uma execução espera aprovação (notificação do Windows, cujo clique
+ * pede `aoAbrir`).
+ *
+ * Sem o servidor das rotinas (rota ainda não ligada, servidor fora), o painel
+ * mostra "Rotinas indisponíveis" e o canvas não quebra.
+ */
+export function RotinasDoCanvas({ servidorConectado, orquestradores, aberto, aoAbrir, aoFechar, criarFonte }: PropsDasRotinasDoCanvas) {
+  const rotinas = useRotinas(servidorConectado, criarFonte);
+  const aguardandoAprovacao = rotinas.aprovacoesPendentes.length;
+  useRotinasNoDesktop({
+    carregada: rotinas.carregada,
+    ativas: rotinas.ativas,
+    aprovacoesPendentes: rotinas.aprovacoesPendentes,
+    aoPedirPainel: aoAbrir,
+  });
+
+  return (
+    <>
+      <BotaoDasRotinas aberto={aberto} aguardandoAprovacao={aguardandoAprovacao} aoAlternar={aberto ? aoFechar : aoAbrir} />
+      {aberto && <PainelDeRotinas rotinas={rotinas} orquestradores={orquestradores} aoFechar={aoFechar} />}
+    </>
   );
 }
 
