@@ -22,11 +22,14 @@ export const FERRAMENTAS_DO_APP_POR_PADRAO: FerramentasDoAppNoTurno = (pedido) =
 
 /**
  * Os grupos do servidor MCP do app que um turno do Orquestrador liga, qualquer
- * que seja o motor: o navegador do agente, só com a opção ligada, no nível
- * "Editar e rodar comandos" e fora do planejamento (`permiteNavegador`). É o
- * `ferramentasDoTurno` que o `root.ts` dá ao Claude Code.
+ * que seja o motor: a delegação de subtarefas, quando o motor não lança
+ * subagentes sozinho (`precisaDeDelegacaoPeloApp`), e o navegador do agente,
+ * só com a opção ligada, no nível "Editar e rodar comandos" e fora do
+ * planejamento (`permiteNavegador`). É o `ferramentasDoTurno` que o `root.ts`
+ * dá ao Claude Code e a `montarMotores`.
  */
 export const FERRAMENTAS_DO_APP_NO_TURNO: FerramentasDoAppNoTurno = (pedido) => ({
+  ...FERRAMENTAS_DO_APP_POR_PADRAO(pedido),
   [NOME_DO_GRUPO_DO_NAVEGADOR]: pedido.configuracao.permiteNavegador(pedido.modo),
 });
 

@@ -51,9 +51,11 @@ import {
 import { ControleDeExecucoesEmMemoria } from "./infraestrutura/execucoes/ControleDeExecucoesEmMemoria";
 import { ExecutorDePedidosDaOrquestracao } from "./infraestrutura/ExecutorDePedidosDaOrquestracao";
 import { montarArtefatos, pastaDeEntradaDosArtefatos } from "./infraestrutura/montarArtefatos";
+import { NOMES_DAS_FERRAMENTAS_DO_NAVEGADOR } from "./infraestrutura/mcp/FerramentasDoNavegador";
 import { montarNavegador } from "./infraestrutura/montarNavegador";
 import { montarRotinas } from "./infraestrutura/montarRotinas";
 import { FERRAMENTAS_DO_APP_NO_TURNO } from "./infraestrutura/motores/ApoioDosMotores";
+import { caminhosDosMotoresDoAmbiente, montarMotores } from "./infraestrutura/motores/montarMotores";
 import { DiagnosticadorDoClaudeNoSistema } from "./infraestrutura/sistema/DiagnosticadorDoClaudeNoSistema";
 import { GerenciadorDeWorktreesGit } from "./infraestrutura/sistema/GerenciadorDeWorktreesGit";
 import { LeitorDeAlteracoesGit } from "./infraestrutura/sistema/LeitorDeAlteracoesGit";
@@ -64,7 +66,7 @@ import { encerrarAgentesOrfaos, RegistroDeProcessos } from "./infraestrutura/sis
 import { RegistroDeProcessosDeixados } from "./infraestrutura/sistema/RegistroDeProcessosDeixados";
 import { CanalDeEventos } from "./infraestrutura/sse/CanalDeEventos";
 import { ServicoDeNotas } from "./notas/ServicoDeNotas";
-import { Plataforma } from "./orquestracao/InstrucoesDoOrquestrador";
+import { FERRAMENTA_DE_DELEGACAO, Plataforma } from "./orquestracao/InstrucoesDoOrquestrador";
 import { ServicoDeAlteracoes } from "./orquestracao/ServicoDeAlteracoes";
 import { ServicoDeArquivos } from "./orquestracao/ServicoDeArquivos";
 import { ServicoDeOrquestracao } from "./orquestracao/ServicoDeOrquestracao";
@@ -239,15 +241,33 @@ async function iniciar(): Promise<void> {
   // ferramentas respondem que o navegador só existe no desktop.
   const navegador = montarNavegador({ portaDoProcessoPai: portaDoProcessoPai() });
 
-  const servico = new ServicoDeOrquestracao({
-    repositorio,
-    motor: new MotorClaudeCodeCli(
-      new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro, undefined, rastreador),
+  // Motores (ADR-46): o Claude Code, o Codex (`codex app-server`) e o GitHub Copilot CLI (ACP), e o
+  // roteador que manda cada turno ao motor do papel (com a reserva). O roteador é o único ponto de entrada
+  // do serviço. Os três compartilham o servidor MCP do app (o do navegador), onde o `montarMotores`
+  // registra a delegação de subtarefas; o navegador entra pelo `ferramentasDoTurno`.
+  const fachadaDoClaudeCode = new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro, undefined, rastreador);
+  const motores = montarMotores({
+    motorClaudeCode: new MotorClaudeCodeCli(
+      fachadaDoClaudeCode,
       sondarEnderecoLocal,
       plataforma,
       navegador.servidorMcp,
       FERRAMENTAS_DO_APP_NO_TURNO,
     ),
+    servidorMcp: navegador.servidorMcp,
+    fachadaClaudeCode: fachadaDoClaudeCode,
+    caminhos: caminhosDosMotoresDoAmbiente(process.env, configuracao.caminhoDoClaudeCode),
+    registro,
+    acompanhamento: rastreador,
+    sondar: sondarEnderecoLocal,
+    plataforma,
+    ferramentasDoApp: [FERRAMENTA_DE_DELEGACAO, ...NOMES_DAS_FERRAMENTAS_DO_NAVEGADOR],
+    ferramentasDoTurno: FERRAMENTAS_DO_APP_NO_TURNO,
+  });
+
+  const servico = new ServicoDeOrquestracao({
+    repositorio,
+    motor: motores.motor,
     execucoes,
     publicador: canal,
     anexos,
@@ -436,6 +456,8 @@ async function iniciar(): Promise<void> {
     rotas.use("/api", artefatos.rotas);
     // Rotinas agendadas: CRUD, execuções, aprovação e o SSE `/rotinas/eventos`.
     rotas.use("/api", rotinas.rotas);
+    // Motores instalados e logados (Claude Code, Codex, Copilot): `GET /api/motores`.
+    rotas.use("/api", motores.rotas);
     rotas.use(
       "/api",
       criarTerminaisRoutes({
@@ -449,12 +471,16 @@ async function iniciar(): Promise<void> {
   // Depois das rotas: inclui o que chegou na pasta de entrada com o servidor desligado.
   await artefatos.iniciar();
 
-  // O servidor MCP do app sobe antes de aceitar pedidos: um turno com o navegador liberado o registra.
-  // Se não subir, o app segue sem as ferramentas do app (o turno que as pedir falha com a causa).
+  // O servidor MCP do app sobe antes de aceitar pedidos: um turno com o navegador ou a delegação o registra.
+  // Se não subir, o app segue sem as ferramentas do app (o turno que as pedir falha com a causa). O mesmo
+  // `iniciar` aquece, em segundo plano, a consulta aos CLIs dos motores.
   try {
-    await navegador.iniciar();
+    await motores.iniciar();
   } catch (erro) {
-    console.warn("[mcp] Não foi possível iniciar o servidor MCP do app; os agentes ficam sem o navegador:", erro);
+    console.warn(
+      "[mcp] Não foi possível iniciar o servidor MCP do app; os agentes ficam sem o navegador e sem a delegação:",
+      erro,
+    );
   }
 
   // Só em 127.0.0.1: os agentes editam arquivos e rodam comandos com o login
@@ -500,8 +526,9 @@ async function iniciar(): Promise<void> {
     conexaoDosTerminais.encerrar();
     servidor.close();
     // Cancela os comandos do navegador em andamento, revoga os tokens e para o servidor MCP do app.
-    navegador
+    motores
       .encerrar()
+      .then(() => navegador.encerrar())
       .catch((erro: unknown) => console.warn("[mcp] Falha ao encerrar o servidor MCP do app:", erro));
     monitor.parar();
     rastreador.parar();

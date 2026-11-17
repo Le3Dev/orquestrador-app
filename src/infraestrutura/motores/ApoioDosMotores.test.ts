@@ -9,7 +9,12 @@ import { NivelDePermissao } from "../../orquestracao/NivelDePermissao";
 import { PastaDeTrabalho } from "../../orquestracao/PastaDeTrabalho";
 import { abrirTurnoNoServidorMcp, FERRAMENTAS_DO_APP_NO_TURNO, PonteParaOServidorMcp } from "./ApoioDosMotores";
 
-function pedido(opcoes: { navegadorDoAgente: boolean; nivel?: NivelDePermissao; modo?: ModoDoTurno }): PedidoDeTurno {
+function pedido(opcoes: {
+  navegadorDoAgente: boolean;
+  nivel?: NivelDePermissao;
+  modo?: ModoDoTurno;
+  motorDosSubagentes?: "claude-code" | "codex" | "copilot";
+}): PedidoDeTurno {
   return {
     orquestradorId: "o1",
     anexos: [],
@@ -27,7 +32,9 @@ function pedido(opcoes: { navegadorDoAgente: boolean; nivel?: NivelDePermissao; 
     pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
     configuracao: ConfiguracaoDoOrquestrador.de({
       modeloDoOrquestrador: "opus",
-      modeloDosSubagentes: "haiku",
+      ...(opcoes.motorDosSubagentes === undefined || opcoes.motorDosSubagentes === "claude-code"
+        ? { modeloDosSubagentes: "haiku" }
+        : { motorDosSubagentes: opcoes.motorDosSubagentes, modeloDosSubagentes: "padrao" }),
       quantidadeDeSubagentes: { modo: "automatica", limite: 2 },
       nivelDePermissao: opcoes.nivel ?? "edicao_e_comandos",
       navegadorDoAgente: opcoes.navegadorDoAgente,
@@ -37,13 +44,30 @@ function pedido(opcoes: { navegadorDoAgente: boolean; nivel?: NivelDePermissao; 
 
 describe("FERRAMENTAS_DO_APP_NO_TURNO", () => {
   it("liga o navegador só com a opção ligada, em Editar e rodar comandos e fora do planejamento", () => {
-    expect(FERRAMENTAS_DO_APP_NO_TURNO(pedido({ navegadorDoAgente: true }))).toEqual({ navegador: true });
-    expect(FERRAMENTAS_DO_APP_NO_TURNO(pedido({ navegadorDoAgente: false }))).toEqual({ navegador: false });
-    expect(FERRAMENTAS_DO_APP_NO_TURNO(pedido({ navegadorDoAgente: true, nivel: "edicao" }))).toEqual({ navegador: false });
-    expect(FERRAMENTAS_DO_APP_NO_TURNO(pedido({ navegadorDoAgente: true, nivel: "leitura" }))).toEqual({ navegador: false });
-    expect(FERRAMENTAS_DO_APP_NO_TURNO(pedido({ navegadorDoAgente: true, modo: "planejamento" }))).toEqual({
+    expect(FERRAMENTAS_DO_APP_NO_TURNO(pedido({ navegadorDoAgente: true }))).toEqual({
+      delegar_subtarefas: false,
+      navegador: true,
+    });
+    expect(FERRAMENTAS_DO_APP_NO_TURNO(pedido({ navegadorDoAgente: false }))).toMatchObject({ navegador: false });
+    expect(FERRAMENTAS_DO_APP_NO_TURNO(pedido({ navegadorDoAgente: true, nivel: "edicao" }))).toMatchObject({
       navegador: false,
     });
+    expect(FERRAMENTAS_DO_APP_NO_TURNO(pedido({ navegadorDoAgente: true, nivel: "leitura" }))).toMatchObject({
+      navegador: false,
+    });
+    expect(FERRAMENTAS_DO_APP_NO_TURNO(pedido({ navegadorDoAgente: true, modo: "planejamento" }))).toMatchObject({
+      navegador: false,
+    });
+  });
+
+  it("liga a delegação de subtarefas quando o motor não lança subagentes sozinho, e só então", () => {
+    expect(FERRAMENTAS_DO_APP_NO_TURNO(pedido({ navegadorDoAgente: false }))).toMatchObject({ delegar_subtarefas: false });
+    expect(
+      FERRAMENTAS_DO_APP_NO_TURNO(pedido({ navegadorDoAgente: false, motorDosSubagentes: "codex" })),
+    ).toEqual({ delegar_subtarefas: true, navegador: false });
+    expect(
+      FERRAMENTAS_DO_APP_NO_TURNO(pedido({ navegadorDoAgente: true, motorDosSubagentes: "copilot" })),
+    ).toEqual({ delegar_subtarefas: true, navegador: true });
   });
 });
 

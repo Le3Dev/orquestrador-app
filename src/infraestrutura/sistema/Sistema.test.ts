@@ -6,7 +6,15 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { comNovasTentativas, ErroAoIniciarProcesso, FachadaClaudeCodeCli } from "../claudecode/FachadaClaudeCodeCli";
-import { encerrarArvore, lerListaDeProcessos, lerTasklistCsv, listarProcessos, tempoDoPsEmMs } from "./Processos";
+import {
+  encerrarArvore,
+  lerIdentidadeDoPs,
+  lerIdentidadeDoWindows,
+  lerListaDeProcessos,
+  lerTasklistCsv,
+  listarProcessos,
+  tempoDoPsEmMs,
+} from "./Processos";
 import { ehAgenteDeixadoPorNos, RegistroDeProcessos } from "./RegistroDeProcessos";
 
 describe("lerTasklistCsv", () => {
@@ -40,6 +48,95 @@ describe("ehAgenteDeixadoPorNos", () => {
     expect(ehAgenteDeixadoPorNos(processo, "notepad.exe")).toBe(false);
     expect(ehAgenteDeixadoPorNos(processo, '"C:\\...\\claude.exe"')).toBe(false);
     expect(ehAgenteDeixadoPorNos(processo, null)).toBe(false);
+  });
+
+  describe("Codex (app-server) e Copilot (--acp)", () => {
+    const registrado = "2026-11-17T15:00:00.000Z";
+    const doCodex = { pid: 20, orquestradorId: "o1", sessaoId: "sessao-abc", iniciadoEm: registrado };
+    const aoRegistrar = new Date("2026-11-17T15:00:00.300Z");
+
+    it("reconhece o Codex e o Copilot que o app iniciou: a linha de comando e a hora de criação batem com o registro", () => {
+      expect(ehAgenteDeixadoPorNos(doCodex, "codex app-server", aoRegistrar)).toBe(true);
+      expect(ehAgenteDeixadoPorNos(doCodex, '"C:\\Users\\ana\\AppData\\Roaming\\npm\\codex.exe" app-server', aoRegistrar)).toBe(true);
+      // Windows: o `.cmd` do npm roda pelo `cmd.exe`.
+      expect(
+        ehAgenteDeixadoPorNos(doCodex, 'C:\\WINDOWS\\system32\\cmd.exe /d /s /c ""C:\\Users\\ana\\npm\\codex.cmd" app-server"', aoRegistrar),
+      ).toBe(true);
+      expect(
+        ehAgenteDeixadoPorNos(
+          doCodex,
+          "node /usr/lib/node_modules/@openai/codex/bin/codex.js app-server",
+          new Date("2026-11-17T14:59:50.000Z"),
+        ),
+      ).toBe(true);
+      expect(
+        ehAgenteDeixadoPorNos(
+          doCodex,
+          'copilot --acp --stdio --no-auto-update --no-ask-user --no-color --add-dir "C:\\dados\\artefatos\\entrada\\orquestradores\\o1"',
+          aoRegistrar,
+        ),
+      ).toBe(true);
+      expect(
+        ehAgenteDeixadoPorNos(doCodex, 'C:\\WINDOWS\\system32\\cmd.exe /d /s /c ""C:\\Users\\ana\\npm\\copilot.cmd" --acp --stdio"', aoRegistrar),
+      ).toBe(true);
+    });
+
+    it("sem a hora de criação, ou com ela longe da do registro, não é nosso: pode ser uma sessão do próprio usuário", () => {
+      // O Codex do VS Code e um editor com Copilot rodam exatamente estes comandos.
+      expect(ehAgenteDeixadoPorNos(doCodex, "codex app-server", null)).toBe(false);
+      expect(ehAgenteDeixadoPorNos(doCodex, "codex app-server")).toBe(false);
+      expect(ehAgenteDeixadoPorNos(doCodex, "codex app-server", new Date("2026-11-17T15:01:00.000Z"))).toBe(false);
+      expect(ehAgenteDeixadoPorNos(doCodex, "copilot --acp --stdio", new Date("2026-11-16T09:00:00.000Z"))).toBe(false);
+      expect(ehAgenteDeixadoPorNos({ ...doCodex, iniciadoEm: "" }, "codex app-server", aoRegistrar)).toBe(false);
+    });
+
+    it("não derruba outro programa que reaproveitou o PID, nem o Codex e o Copilot em outros usos", () => {
+      expect(ehAgenteDeixadoPorNos(doCodex, "notepad.exe", aoRegistrar)).toBe(false);
+      expect(ehAgenteDeixadoPorNos(doCodex, "codex", aoRegistrar)).toBe(false);
+      expect(ehAgenteDeixadoPorNos(doCodex, "codex exec fazer-algo", aoRegistrar)).toBe(false);
+      expect(ehAgenteDeixadoPorNos(doCodex, "copilot", aoRegistrar)).toBe(false);
+      expect(ehAgenteDeixadoPorNos(doCodex, "node servidor.js --acp", aoRegistrar)).toBe(false);
+      expect(ehAgenteDeixadoPorNos(doCodex, "app-server", aoRegistrar)).toBe(false);
+      expect(ehAgenteDeixadoPorNos(doCodex, null, aoRegistrar)).toBe(false);
+    });
+
+    it("a conferência do Claude Code não mudou: a sessão e o stream-json valem sem a hora de criação", () => {
+      expect(ehAgenteDeixadoPorNos(doCodex, "claude.exe -p --input-format stream-json --resume sessao-abc", null)).toBe(true);
+      expect(ehAgenteDeixadoPorNos(doCodex, "claude.exe -p --resume outra-sessao --input-format stream-json", aoRegistrar)).toBe(false);
+    });
+  });
+});
+
+describe("identidade de um processo (linha de comando e criação)", () => {
+  it("lê a saída do PowerShell: linha de comando e criação em ISO", () => {
+    const identidade = lerIdentidadeDoWindows('{"l":"codex app-server","c":"2026-11-17T15:00:00.1234567Z"}');
+
+    expect(identidade?.linhaDeComando).toBe("codex app-server");
+    expect(identidade?.criadoEm?.toISOString()).toBe("2026-11-17T15:00:00.123Z");
+  });
+
+  it("no PowerShell, sem criação ou com data inválida a criação fica nula; sem linha de comando ou texto estranho, nada", () => {
+    expect(lerIdentidadeDoWindows('{"l":"codex app-server","c":""}')).toEqual({ linhaDeComando: "codex app-server", criadoEm: null });
+    expect(lerIdentidadeDoWindows('{"l":"codex app-server","c":"ontem"}')?.criadoEm).toBeNull();
+    expect(lerIdentidadeDoWindows('{"l":null,"c":"2026-11-17T15:00:00Z"}')).toBeNull();
+    expect(lerIdentidadeDoWindows("")).toBeNull();
+    expect(lerIdentidadeDoWindows("erro qualquer")).toBeNull();
+  });
+
+  it("lê a saída do ps: o tempo de vida vira a criação (agora menos o tempo)", () => {
+    const agora = Date.parse("2026-11-17T15:00:30.000Z");
+
+    const identidade = lerIdentidadeDoPs("   00:30 copilot --acp --stdio --add-dir /tmp/x\n", agora);
+
+    expect(identidade?.linhaDeComando).toBe("copilot --acp --stdio --add-dir /tmp/x");
+    expect(identidade?.criadoEm?.toISOString()).toBe("2026-11-17T15:00:00.000Z");
+    expect(lerIdentidadeDoPs("1-02:03:04 codex app-server", agora)?.criadoEm?.toISOString()).toBe("2026-11-16T12:57:26.000Z");
+  });
+
+  it("no ps, tempo irreconhecível deixa a criação nula e a saída vazia não é um processo", () => {
+    expect(lerIdentidadeDoPs("??? codex app-server", Date.now())).toEqual({ linhaDeComando: "codex app-server", criadoEm: null });
+    expect(lerIdentidadeDoPs("", Date.now())).toBeNull();
+    expect(lerIdentidadeDoPs("00:10\n", Date.now())).toBeNull();
   });
 });
 

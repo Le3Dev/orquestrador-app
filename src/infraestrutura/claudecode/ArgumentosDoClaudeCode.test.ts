@@ -16,6 +16,7 @@ import {
   comandosProibidosDoTurno,
   configuracoesDaSessao,
   definicaoDosAgentes,
+  delegaPeloApp,
   FERRAMENTAS_POR_NIVEL,
   ferramentasDeSkill,
   ferramentasDoAppNoClaudeCode,
@@ -946,5 +947,77 @@ describe("ferramentas do app (servidor MCP) — navegador do agente", () => {
     expect(valoresDe(comOApp, "--tools")).toEqual(valoresDe(semOApp, "--tools"));
     expect(valoresDe(comOApp, "--disallowedTools")).toEqual(valoresDe(semOApp, "--disallowedTools"));
     expect(valoresDe(comOApp, "--allowedTools")).toEqual([...valoresDe(semOApp, "--allowedTools"), ...FERRAMENTAS_DO_NAVEGADOR]);
+  });
+});
+
+describe("delegação pelo app (subagentes no Codex ou no Copilot)", () => {
+  const DELEGACAO = { delegar_subtarefas: true };
+  const FERRAMENTA_DE_DELEGACAO_NO_CLAUDE = nomeDaFerramentaNoClaudeCode("delegar_subtarefas");
+  const FERRAMENTAS_DO_NAVEGADOR = NOMES_DAS_FERRAMENTAS_DO_NAVEGADOR.map(nomeDaFerramentaNoClaudeCode);
+
+  it("o nome da ferramenta é mcp__orquestrador__delegar_subtarefas, e delegaPeloApp só vale com o grupo ligado", () => {
+    expect(FERRAMENTA_DE_DELEGACAO_NO_CLAUDE).toBe("mcp__orquestrador__delegar_subtarefas");
+    expect(ferramentasDoAppNoClaudeCode(DELEGACAO)).toEqual([FERRAMENTA_DE_DELEGACAO_NO_CLAUDE]);
+    expect(ferramentasDoAppNoClaudeCode({ ...DELEGACAO, navegador: true })).toEqual([
+      ...FERRAMENTAS_DO_NAVEGADOR,
+      FERRAMENTA_DE_DELEGACAO_NO_CLAUDE,
+    ]);
+    expect(delegaPeloApp(DELEGACAO)).toBe(true);
+    expect(delegaPeloApp({ delegar_subtarefas: false })).toBe(false);
+    expect(delegaPeloApp({ navegador: true })).toBe(false);
+  });
+
+  it("passa --mcp-config e libera só a ferramenta de delegação, sem a Agent e sem --agents", () => {
+    const argumentos = montarArgumentos(pedido(false, "edicao_e_comandos"), arquivos, DELEGACAO);
+
+    expect(valoresDe(argumentos, "--mcp-config")).toEqual(["mcp.json"]);
+    expect(valoresDe(argumentos, "--allowedTools")).toContain(FERRAMENTA_DE_DELEGACAO_NO_CLAUDE);
+    expect(valoresDe(argumentos, "--tools")).not.toContain(FERRAMENTA_DE_DELEGACAO_NO_CLAUDE);
+    expect(valoresDe(argumentos, "--tools")).not.toContain("Agent");
+    expect(valoresDe(argumentos, "--allowedTools")).not.toContain("Agent");
+    expect(argumentos).not.toContain("--agents");
+    expect(argumentos).not.toContain("agentes.json");
+    expect(argumentos).toContain("--strict-mcp-config");
+    // `--disallowedTools` continua por último.
+    expect(argumentos.at(-1)).toBe(comandosProibidosDoTurno(pedido(false)).at(-1));
+  });
+
+  it("a delegação soma ao navegador: as duas famílias de ferramentas em --allowedTools, um só --mcp-config", () => {
+    const argumentos = montarArgumentos(pedido(false, "edicao_e_comandos"), arquivos, { ...DELEGACAO, navegador: true });
+
+    expect(argumentos.filter((argumento) => argumento === "--mcp-config")).toHaveLength(1);
+    expect(valoresDe(argumentos, "--allowedTools")).toEqual(
+      expect.arrayContaining([...FERRAMENTAS_DO_NAVEGADOR, FERRAMENTA_DE_DELEGACAO_NO_CLAUDE]),
+    );
+    expect(argumentos).not.toContain("--agents");
+  });
+
+  it("o Workflow do ultracode também sai: quem delega é a ferramenta do app, não os agentes do Claude Code", () => {
+    const turno = pedido(false, "edicao_e_comandos", "execucao", false, { esforcoDoOrquestrador: "ultracode" });
+
+    expect(valoresDe(montarArgumentos(turno, arquivos), "--tools")).toContain("Workflow");
+    expect(valoresDe(montarArgumentos(turno, arquivos, DELEGACAO), "--tools")).not.toContain("Workflow");
+    expect(valoresDe(montarArgumentos(turno, arquivos, DELEGACAO), "--allowedTools")).not.toContain("Workflow");
+    // O esforço em si continua valendo.
+    expect(valoresDe(montarArgumentos(turno, arquivos, DELEGACAO), "--effort")).toEqual(["ultracode"]);
+  });
+
+  it("sem a delegação, a Agent e o --agents seguem como sempre (a ferramenta do app não aparece)", () => {
+    const argumentos = montarArgumentos(pedido(false, "edicao_e_comandos"), arquivos, { delegar_subtarefas: false });
+
+    expect(valoresDe(argumentos, "--tools")).toContain("Agent");
+    expect(valoresDe(argumentos, "--agents")).toEqual(["agentes.json"]);
+    expect(argumentos).not.toContain("--mcp-config");
+    expect(argumentos.some((argumento) => argumento.includes("delegar_subtarefas"))).toBe(false);
+  });
+
+  it("o executor e os subagentes prontos nunca recebem a ferramenta de delegação (só o Orquestrador delega)", () => {
+    const turno = { ...pedido(false, "edicao_e_comandos"), subagentesProntos: [PRONTO] };
+
+    const agentes = definicaoDosAgentes(turno, "unix", { ...DELEGACAO, navegador: true });
+
+    expect(agentes.executor?.tools).not.toContain(FERRAMENTA_DE_DELEGACAO_NO_CLAUDE);
+    expect(agentes.revisor?.tools).not.toContain(FERRAMENTA_DE_DELEGACAO_NO_CLAUDE);
+    expect(agentes.executor?.tools).toEqual(expect.arrayContaining(FERRAMENTAS_DO_NAVEGADOR));
   });
 });

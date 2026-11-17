@@ -374,7 +374,7 @@ describe("MotorClaudeCodeCli — navegador do agente (servidor MCP do app)", () 
     const resultado = await montar(servidor, fachada).executarTurno(pedidoComNavegador("liberado"), () => undefined, new AbortController().signal);
 
     expect(resultado.sucesso).toBe(true);
-    expect(servidor.registrados).toEqual([{ orquestradorId: "o1", ferramentas: { navegador: true } }]);
+    expect(servidor.registrados).toEqual([{ orquestradorId: "o1", ferramentas: { delegar_subtarefas: false, navegador: true } }]);
     expect(fachada.mcp).toEqual({
       mcpServers: {
         orquestrador: { type: "http", url: "http://127.0.0.1:4321/mcp", headers: { Authorization: "Bearer token-do-turno" } },
@@ -490,26 +490,124 @@ describe("MotorClaudeCodeCli — navegador do agente (servidor MCP do app)", () 
   });
 });
 
-describe("MotorClaudeCodeCli e os outros motores", () => {
-  it.each<["codex" | "copilot", string]>([
-    ["codex", "O motor Codex ainda não está disponível nesta versão."],
-    ["copilot", "O motor GitHub Copilot CLI ainda não está disponível nesta versão."],
-  ])("o motor %s falha sem iniciar processo nem criar arquivos", async (motorDoPedido, motivo) => {
-    const fachada = new FachadaQueGuardaAEntrada();
-    const pastaDeArtefatos = path.join(pastaDoTeste, `artefatos-${motorDoPedido}`);
-    const motor = new MotorClaudeCodeCli(fachada as unknown as FachadaClaudeCodeCli);
+describe("MotorClaudeCodeCli — delegação pelo app (subagentes no Codex ou no Copilot)", () => {
+  /** Servidor MCP falso: guarda os turnos registrados e conta quantos foram encerrados. */
+  class ServidorMcpFalso implements PonteParaOServidorMcp {
+    registrados: Array<{ orquestradorId: string; ferramentas: Readonly<Record<string, boolean>> }> = [];
+    encerrados = 0;
 
-    const resultado = await motor.executarTurno(
-      { ...pedidoComInstrucoes(null), motor: motorDoPedido, pastaDeArtefatos },
-      () => undefined,
-      new AbortController().signal,
-    );
+    registrarTurno(pedidoDeTurno: { orquestradorId: string; ferramentas: Readonly<Record<string, boolean>> }) {
+      this.registrados.push(pedidoDeTurno);
+      return { url: "http://127.0.0.1:4321/mcp", token: "token-do-turno", encerrar: () => void (this.encerrados += 1) };
+    }
+  }
 
-    expect(resultado).toEqual({ sucesso: false, motivo, uso: null });
-    expect(fachada.execucao).toBeNull();
-    expect(existsSync(pastaDeArtefatos)).toBe(false);
+  /** Fachada sem processo: lê os arquivos temporários enquanto existem. */
+  class FachadaDaDelegacao {
+    argumentos: readonly string[] = [];
+    mcp: unknown = null;
+    instrucoes = "";
+    mensagem = "";
+    existiaOArquivoDosAgentes = false;
+
+    async executar(execucao: ExecucaoDoClaudeCode, aoReceberMensagem: (mensagem: unknown) => void): Promise<SaidaDoClaudeCode> {
+      this.argumentos = execucao.argumentos;
+      const valorDe = (opcao: string): string => execucao.argumentos[execucao.argumentos.indexOf(opcao) + 1] ?? "";
+      this.mcp = JSON.parse(readFileSync(valorDe("--mcp-config"), "utf8"));
+      this.instrucoes = readFileSync(valorDe("--append-system-prompt-file"), "utf8");
+      this.mensagem = (JSON.parse(execucao.entrada) as { message: { content: Array<{ text: string }> } }).message.content[0]?.text ?? "";
+      this.existiaOArquivoDosAgentes = execucao.argumentos.includes("--agents");
+      aoReceberMensagem(RESULTADO_OK);
+      return { codigoDeSaida: 0, erroPadrao: "" };
+    }
+  }
+
+  function pedidoDeDelegacao(sufixo: string, extra: { motorDosSubagentes?: "codex" | "copilot"; navegadorDoAgente?: boolean } = {}): PedidoDeTurno {
+    const base = pedido(path.join(pastaDoTeste, `artefatos-delegacao-${sufixo}`), "edicao_e_comandos");
+    return {
+      ...base,
+      configuracao: base.configuracao.com({
+        motorDosSubagentes: extra.motorDosSubagentes ?? "codex",
+        modeloDosSubagentes: "padrao",
+        navegadorDoAgente: extra.navegadorDoAgente ?? false,
+      }),
+    };
+  }
+
+  it("com os subagentes no Codex, registra o turno com delegar_subtarefas, passa --mcp-config e não lança subagentes do Claude", async () => {
+    const servidor = new ServidorMcpFalso();
+    const fachada = new FachadaDaDelegacao();
+    const motor = new MotorClaudeCodeCli(fachada as unknown as FachadaClaudeCodeCli, async () => false, "unix", servidor);
+
+    const resultado = await motor.executarTurno(pedidoDeDelegacao("codex"), () => undefined, new AbortController().signal);
+
+    expect(resultado.sucesso).toBe(true);
+    expect(servidor.registrados).toEqual([{ orquestradorId: "o1", ferramentas: { delegar_subtarefas: true, navegador: false } }]);
+    expect(fachada.mcp).toEqual({
+      mcpServers: {
+        orquestrador: { type: "http", url: "http://127.0.0.1:4321/mcp", headers: { Authorization: "Bearer token-do-turno" } },
+      },
+    });
+    const permitidas = fachada.argumentos.slice(fachada.argumentos.indexOf("--allowedTools") + 1, fachada.argumentos.indexOf("--disallowedTools"));
+    expect(permitidas).toContain("mcp__orquestrador__delegar_subtarefas");
+    expect(permitidas).not.toContain("Agent");
+    expect(fachada.argumentos).not.toContain("Agent");
+    expect(fachada.existiaOArquivoDosAgentes).toBe(false);
+    expect(servidor.encerrados).toBe(1);
   });
 
+  it("as instruções e a mensagem mandam delegar pela ferramenta do app, e o texto sem delegação não aparece", async () => {
+    const fachada = new FachadaDaDelegacao();
+    const motor = new MotorClaudeCodeCli(fachada as unknown as FachadaClaudeCodeCli, async () => false, "unix", new ServidorMcpFalso());
+
+    await motor.executarTurno(pedidoDeDelegacao("texto", { motorDosSubagentes: "copilot" }), () => undefined, new AbortController().signal);
+
+    expect(fachada.instrucoes).toContain("chame a ferramenta delegar_subtarefas");
+    expect(fachada.instrucoes).toContain("Não use outro mecanismo de subagentes do seu CLI.");
+    expect(fachada.mensagem).toContain("- Como delegar: chame a ferramenta delegar_subtarefas");
+    expect(fachada.mensagem).toContain("no GitHub Copilot CLI");
+  });
+
+  it("soma ao navegador do agente quando ele também está liberado", async () => {
+    const servidor = new ServidorMcpFalso();
+    const fachada = new FachadaDaDelegacao();
+    const motor = new MotorClaudeCodeCli(fachada as unknown as FachadaClaudeCodeCli, async () => false, "unix", servidor);
+
+    await motor.executarTurno(pedidoDeDelegacao("com-navegador", { navegadorDoAgente: true }), () => undefined, new AbortController().signal);
+
+    expect(servidor.registrados).toEqual([{ orquestradorId: "o1", ferramentas: { delegar_subtarefas: true, navegador: true } }]);
+    expect(fachada.argumentos.filter((argumento) => argumento === "--mcp-config")).toHaveLength(1);
+    expect(fachada.argumentos).toContain("mcp__orquestrador__delegar_subtarefas");
+    expect(fachada.argumentos).toContain("mcp__orquestrador__navegador_abrir");
+    // O navegador existe, mas os subagentes são do app: o Orquestrador sabe que só ele o tem.
+    expect(fachada.mensagem).toContain("Os subagentes não têm o navegador: use-o você mesmo.");
+  });
+
+  it("com Orquestrador e subagentes no Claude Code, nada muda: sem registro, sem MCP, com a Agent e o --agents", async () => {
+    const servidor = new ServidorMcpFalso();
+    const fachada = new FachadaFalsa();
+    const motor = new MotorClaudeCodeCli(fachada, async () => false, "unix", servidor);
+
+    await motor.executarTurno(pedido(path.join(pastaDoTeste, "artefatos-sem-delegacao"), "edicao_e_comandos"), () => undefined, new AbortController().signal);
+
+    expect(servidor.registrados).toEqual([]);
+    expect(fachada.gravado?.execucao.argumentos).toContain("Agent");
+    expect(fachada.gravado?.execucao.argumentos).toContain("--agents");
+    expect(fachada.gravado?.execucao.argumentos).not.toContain("--mcp-config");
+  });
+
+  it("sem servidor MCP (npm run dev sem o app), cai no comportamento de sempre em vez de ficar sem como delegar", async () => {
+    const fachada = new FachadaFalsa();
+    const motor = new MotorClaudeCodeCli(fachada);
+
+    await motor.executarTurno(pedidoDeDelegacao("sem-servidor"), () => undefined, new AbortController().signal);
+
+    expect(fachada.gravado?.execucao.argumentos).toContain("--agents");
+    expect(fachada.gravado?.execucao.argumentos).toContain("Agent");
+  });
+});
+
+describe("MotorClaudeCodeCli e os outros motores", () => {
   it("sem contexto da troca, a mensagem não ganha bloco", async () => {
     const fachada = new FachadaQueGuardaAEntrada();
     const motor = new MotorClaudeCodeCli(fachada as unknown as FachadaClaudeCodeCli);

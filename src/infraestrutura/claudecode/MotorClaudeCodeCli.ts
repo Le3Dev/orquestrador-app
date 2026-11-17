@@ -9,16 +9,7 @@ import {
   mensagemParaOOrquestrador,
   Plataforma,
 } from "../../orquestracao/InstrucoesDoOrquestrador";
-import { rotuloDoMotor } from "../../orquestracao/Motor";
 import { ABORTO_POR_SILENCIO, MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "../../orquestracao/MotorDeAgentes";
-import { AdaptadorDeEventosDoClaudeCode, falhaComCausa } from "./AdaptadorDeEventosDoClaudeCode";
-import {
-  configuracoesDaSessao,
-  definicaoDosAgentes,
-  linhaDeEntrada,
-  montarAmbiente,
-  montarArgumentos,
-} from "./ArgumentosDoClaudeCode";
 import { configuracaoMcpParaClaudeCode, RegistroDoTurnoMcp } from "../mcp/ServidorMcpDoApp";
 import {
   abrirTurnoNoServidorMcp,
@@ -27,6 +18,15 @@ import {
   mensagemDoErro,
   PonteParaOServidorMcp,
 } from "../motores/ApoioDosMotores";
+import { AdaptadorDeEventosDoClaudeCode, falhaComCausa } from "./AdaptadorDeEventosDoClaudeCode";
+import {
+  configuracoesDaSessao,
+  definicaoDosAgentes,
+  delegaPeloApp,
+  linhaDeEntrada,
+  montarAmbiente,
+  montarArgumentos,
+} from "./ArgumentosDoClaudeCode";
 import { FachadaClaudeCodeCli, SaidaDoClaudeCode } from "./FachadaClaudeCodeCli";
 import { SondaDeEndereco, sondarEnderecoLocal } from "./SondaDeEnderecoLocal";
 
@@ -80,10 +80,18 @@ function descreverSaidaSemResultado(saida: SaidaDoClaudeCode): string {
  * A `plataforma` do computador decide a sintaxe dos comandos ensinados aos
  * agentes (regra dos servidores).
  *
- * Com o `servidorMcp` do app, o turno que liga ferramentas dele (hoje o
- * navegador do agente; `ferramentasDoTurno` decide quais) é registrado no
- * servidor, ganha um `--mcp-config` num arquivo temporário e tem o registro
- * encerrado (token revogado) ao fim, inclusive em falha e cancelamento.
+ * Com o `servidorMcp` do app, o turno que liga ferramentas dele (o navegador
+ * do agente e a delegação de subtarefas; `ferramentasDoTurno` decide quais) é
+ * registrado no servidor, ganha um `--mcp-config` num arquivo temporário e tem
+ * o registro encerrado (token revogado) ao fim, inclusive em falha e
+ * cancelamento. Com a delegação pelo app (os subagentes são do Codex ou do
+ * Copilot), o Orquestrador não lança subagentes do Claude Code: sem `--agents`
+ * e sem a ferramenta `Agent`, e as instruções mandam delegar pela ferramenta
+ * `delegar_subtarefas`.
+ *
+ * Este motor só executa o Claude Code: o Codex e o Copilot têm o próprio motor
+ * (`montarMotores`), e o `RoteadorDeMotores` — o único ponto de entrada do
+ * `ServicoDeOrquestracao` — manda cada turno ao certo.
  */
 export class MotorClaudeCodeCli implements MotorDeAgentes {
   constructor(
@@ -100,18 +108,6 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
     sinal: AbortSignal,
     aoReceberLinha?: () => void,
   ): Promise<ResultadoDoTurno> {
-    // Este motor só executa o Claude Code: o Codex e o Copilot têm o próprio motor (`montarMotores`, em
-    // `infraestrutura/motores`), e o `RoteadorDeMotores` manda cada turno ao certo. A recusa fica como
-    // salvaguarda enquanto este motor ainda puder ser ligado direto ao serviço, sem o roteador; quando o
-    // roteador for o único ponto de entrada (o `root.ts` o usa), ela pode sair. Sem processo, sem arquivos.
-    if (pedidoRecebido.motor !== "claude-code") {
-      return {
-        sucesso: false,
-        motivo: `O motor ${rotuloDoMotor(pedidoRecebido.motor)} ainda não está disponível nesta versão.`,
-        uso: null,
-      };
-    }
-
     const pastaTemporaria = path.join(tmpdir(), "orquestrador-agentes", randomUUID());
     const arquivos = {
       agentes: path.join(pastaTemporaria, "agentes.json"),
@@ -143,12 +139,17 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
           mode: 0o600,
         });
       }
-      await writeFile(
-        arquivos.agentes,
-        JSON.stringify(definicaoDosAgentes(pedido, this.plataforma, ferramentasDoApp)),
-        "utf8",
-      );
-      await writeFile(arquivos.instrucoes, instrucoesDoOrquestrador(pedido.pastaDeTrabalho), "utf8");
+      // Os subagentes são do Codex ou do Copilot: o Orquestrador delega pela ferramenta do app e não lança
+      // subagentes do Claude Code (sem `--agents`, sem a ferramenta `Agent`).
+      const delegacao = delegaPeloApp(ferramentasDoApp);
+      if (!delegacao) {
+        await writeFile(
+          arquivos.agentes,
+          JSON.stringify(definicaoDosAgentes(pedido, this.plataforma, ferramentasDoApp)),
+          "utf8",
+        );
+      }
+      await writeFile(arquivos.instrucoes, instrucoesDoOrquestrador(pedido.pastaDeTrabalho, delegacao), "utf8");
       const configuracoes = configuracoesDaSessao(pedido);
       if (configuracoes !== null) {
         await writeFile(arquivos.configuracoes, JSON.stringify(configuracoes), "utf8");
@@ -176,6 +177,7 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
         pedido.itensLigados ?? [],
         pedido.previasAbertas ?? [],
         pedido.contextoDaTroca,
+        delegacao,
       );
 
       const adaptador = new AdaptadorDeEventosDoClaudeCode();

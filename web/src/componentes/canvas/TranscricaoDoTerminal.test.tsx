@@ -583,6 +583,72 @@ describe("TranscricaoDoTerminal", () => {
       ).toBeInTheDocument();
     });
 
+    describe("o aviso cita o motor do turno quando ele não é o Claude Code", () => {
+      const noMotor = (motor: "codex" | "copilot" | "claude-code") =>
+        aplicar(ESTADO_INICIAL, { tipo: "turno_iniciado", turnoId: "t1", texto: "rode os testes", configuracao, motor });
+
+      beforeEach(() => {
+        vi.spyOn(api, "lerPreferencias").mockResolvedValue({
+          instrucoesPadrao: "",
+          subagentesProntos: [],
+          autorrecuperacao: true,
+        });
+      });
+
+      it.each<["codex" | "copilot" | "claude-code", string]>([
+        ["codex", "Codex"],
+        ["copilot", "Copilot"],
+        ["claude-code", "Claude"],
+      ])("diagnóstico \"suspeito\" num turno no %s: sem notícias do %s", async (motor, nome) => {
+        render(
+          <Transcricao
+            conversa={noMotor(motor)}
+            sinal={{
+              turnoId: "t1",
+              em: "2026-10-28T12:00:05Z",
+              tokensPensando: 0,
+              diagnostico: { situacao: "suspeito", resumo: "sem saída há 3 min, sem CPU" },
+            }}
+          />,
+        );
+        await act(async () => undefined);
+
+        expect(
+          screen.getByText(`sem notícias do ${nome} há 6s: sem saída há 3 min, sem CPU. O app retoma sozinho se travar.`),
+        ).toBeInTheDocument();
+        if (motor !== "claude-code") {
+          expect(screen.queryByText(/sem notícias do Claude/)).not.toBeInTheDocument();
+        }
+      });
+
+      it("o silêncio longo sem diagnóstico também cita o motor", async () => {
+        vi.setSystemTime(new Date("2026-10-28T12:03:00Z"));
+        render(<Transcricao conversa={noMotor("codex")} />);
+        await act(async () => undefined);
+
+        expect(
+          screen.getByText("sem notícias do Codex há 3min 00s — pode ter travado. O app retoma sozinho se travar."),
+        ).toBeInTheDocument();
+      });
+
+      it("um turno gravado antes dos outros motores (sem o campo) segue falando do Claude", async () => {
+        render(
+          <Transcricao
+            conversa={emAndamento()}
+            sinal={{
+              turnoId: "t1",
+              em: "2026-10-28T12:00:05Z",
+              tokensPensando: 0,
+              diagnostico: { situacao: "suspeito", resumo: "sem saída há 3 min" },
+            }}
+          />,
+        );
+        await act(async () => undefined);
+
+        expect(screen.getByText(/^sem notícias do Claude há 6s/)).toBeInTheDocument();
+      });
+    });
+
     const aguardando = () =>
       aplicar(
         emAndamento(),

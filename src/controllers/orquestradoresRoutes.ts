@@ -19,6 +19,7 @@ import {
   MAXIMO_DE_ITENS_LIGADOS,
   mensagemParaOOrquestrador,
   Plataforma,
+  precisaDeDelegacaoPeloApp,
   TAMANHO_MAXIMO_DO_CONTEUDO_LIGADO,
   TAMANHO_MAXIMO_DO_ENDERECO_LIGADO,
   TAMANHO_MAXIMO_DO_TITULO_LIGADO,
@@ -635,8 +636,11 @@ export function criarOrquestradoresRoutes({
         pasta: pasta.caminho,
         nome: nomeInformado === "" ? "<nome do orquestrador>" : nomeInformado,
       });
+      // Com subagentes no Codex ou no Copilot (ou o Orquestrador num deles), o Orquestrador delega pela
+      // ferramenta do app: a prévia mostra o texto que ele receberia.
+      const delegacaoPeloApp = precisaDeDelegacaoPeloApp(configuracao);
       resposta.json({
-        instrucoesIniciais: instrucoesDoOrquestrador(pasta),
+        instrucoesIniciais: instrucoesDoOrquestrador(pasta, delegacaoPeloApp),
         mensagem: mensagemParaOOrquestrador(
           PEDIDO_DE_EXEMPLO,
           configuracao,
@@ -648,6 +652,10 @@ export function criarOrquestradoresRoutes({
           false,
           servico.subagentesProntosPara(configuracao),
           plataforma,
+          [],
+          [],
+          null,
+          delegacaoPeloApp,
         ),
         origemDasInstrucoes: instrucoes?.origem ?? null,
       });

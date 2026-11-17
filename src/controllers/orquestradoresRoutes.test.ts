@@ -1285,6 +1285,32 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(previa.instrucoesIniciais).toContain("Pasta de trabalho: <pasta de trabalho>");
     });
 
+    it("a prévia ensina a delegar pela ferramenta do app com subagentes no Codex, e o navegador quando liberado", async () => {
+      const comCodex = {
+        ...configuracaoBasica,
+        motorDosSubagentes: "codex",
+        modeloDosSubagentes: "padrao",
+        nivelDePermissao: "edicao_e_comandos",
+        navegadorDoAgente: true,
+      };
+
+      const resposta = await postar("/previa-do-prompt", { configuracao: comCodex });
+      const previa = (await resposta.json()) as { instrucoesIniciais: string; mensagem: string };
+      const semDelegacao = (await (await postar("/previa-do-prompt", { configuracao: configuracaoBasica })).json()) as {
+        instrucoesIniciais: string;
+        mensagem: string;
+      };
+
+      expect(resposta.status).toBe(200);
+      expect(previa.instrucoesIniciais).toContain("chame a ferramenta delegar_subtarefas");
+      expect(previa.mensagem).toContain("- Como delegar: chame a ferramenta delegar_subtarefas");
+      expect(previa.mensagem).toContain("- Navegador do agente: você tem um navegador próprio");
+      expect(previa.mensagem).toContain("Os subagentes não têm o navegador");
+      expect(semDelegacao.instrucoesIniciais).not.toContain("delegar_subtarefas");
+      expect(semDelegacao.mensagem).not.toContain("delegar_subtarefas");
+      expect(semDelegacao.mensagem).not.toContain("Navegador do agente");
+    });
+
     it("a prévia mostra {{pasta}} e {{nome}} com os valores informados", async () => {
       const resposta = await postar("/previa-do-prompt", {
         configuracao: { ...configuracaoBasica, instrucoesPersonalizadas: "Em {{pasta}}, como {{ nome }}. {{outra}}" },
