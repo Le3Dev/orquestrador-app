@@ -1122,6 +1122,9 @@ function definirFocavelDoModoInvisivel(focavel) {
       setImmediate(() => {
         if (modoInvisivel === atual && !janela.isDestroyed()) {
           janela.setSkipTaskbar(true);
+          // O ganho de foco também pode fazer a janela cair de nível (perder o "sempre no topo")
+          // momentaneamente; reforça junto com o skipTaskbar, no mesmo quadro seguinte.
+          janela.setAlwaysOnTop(true, "screen-saver");
           if (atual.janela.isFocusable() && !janela.isFocused()) {
             janela.focus();
             janela.webContents.focus();
