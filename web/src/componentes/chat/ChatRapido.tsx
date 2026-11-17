@@ -1190,7 +1190,7 @@ export function ChatRapido({
     }
   }
 
-  /** Enviou, apertou Esc ou saiu do chat: o teclado volta ao app de trás. */
+  /** Apertou Esc, clicou fora do chat ou saiu dele: o teclado volta ao app de trás. */
   function liberarFoco(): void {
     if (modoAtivo) {
       campo.current?.blur();
@@ -1325,7 +1325,6 @@ export function ChatRapido({
         origemDoComposer === null ? {} : { origem: origemDoComposer },
       );
       limparCampo();
-      liberarFoco();
       // Os enviados (e os que chegaram durante o envio, que também saem) liberam a miniatura.
       liberarAnexos(anexosAtuais.current);
       setAnexos([]);

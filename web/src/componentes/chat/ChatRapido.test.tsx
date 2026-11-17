@@ -294,7 +294,7 @@ describe("ChatRapido · modo invisível", () => {
         JSON.stringify({ chatNoModoInvisivel: { x: 100, y: 100, largura: 500, altura: 300 } }),
       );
 
-    it("clicar no campo deixa a janela focável e envio, Esc e perder o foco a devolvem", async () => {
+    it("clicar no campo deixa a janela focável; Esc e perder o foco o devolvem, mas enviar não", async () => {
       vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
       const { modoInvisivel, ativar } = ponteAtiva();
       const { campo } = renderizar();
@@ -310,7 +310,8 @@ describe("ChatRapido · modo invisível", () => {
       modoInvisivel.definirFocavel.mockClear();
       fireEvent.change(campo, { target: { value: "Oi" } });
       fireEvent.keyDown(campo, { key: "Enter" });
-      await waitFor(() => expect(modoInvisivel.definirFocavel).toHaveBeenCalledWith(false));
+      await waitFor(() => expect(api.perguntarNoChat).toHaveBeenCalled());
+      expect(modoInvisivel.definirFocavel).not.toHaveBeenCalledWith(false);
 
       modoInvisivel.definirFocavel.mockClear();
       fireEvent.blur(campo, { relatedTarget: document.body });
