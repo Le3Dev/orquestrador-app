@@ -53,7 +53,15 @@ export const MAXIMO_DE_TRECHOS_NA_TELA = 200;
  * provisório aparecer mais cedo, e como a passada só entra com o motor livre
  * (`passadasEmVoo === 0`) um motor lento apenas fica no ritmo dele, sem fila.
  */
-export const AUDIO_NOVO_PARA_PASSADA_MS = 700;
+export const AUDIO_NOVO_PARA_PASSADA_MS = 500;
+
+/**
+ * Passada parcial descartada (o motor estava ocupado, ex.: com o ditado): em
+ * vez de esperar outro `AUDIO_NOVO_PARA_PASSADA_MS` de áudio, tenta de novo
+ * com só isto de áudio novo. Sem isso, cada descarte atrasava o texto
+ * provisório em quase um segundo.
+ */
+export const REPETIR_PASSADA_DESCARTADA_MS = 200;
 
 /**
  * Ao sair do modo invisível, a captura espera isto antes de ser desligada (o
@@ -639,6 +647,12 @@ export class SessaoDaEscuta {
     const fala = this.fala;
     if (fala === null || !this.cortador.emAndamento) return;
     this.completarBuffer(fala, janelas.amostras, antesMs);
+    this.pedirPassadaParcialSePreciso(fala, geracao);
+  }
+
+  /** Dispara uma passada parcial se o motor está livre e já há áudio novo suficiente. */
+  private pedirPassadaParcialSePreciso(fala: FalaEmAndamento, geracao: number): void {
+    if (geracao !== this.geracao || this.fala !== fala || !this.cortador.emAndamento) return;
     if (this.passadasEmVoo === 0 && fala.buffer.fimMs - fala.fimDaUltimaPassadaMs >= AUDIO_NOVO_PARA_PASSADA_MS) {
       void this.passadaParcial(fala, geracao);
     }
@@ -703,6 +717,7 @@ export class SessaoDaEscuta {
     const audio = fala.buffer.audio();
     const inicioDoAudioMs = fala.buffer.inicioMs;
     const fimDoAudioMs = fala.buffer.fimMs;
+    const fimAnteriorMs = fala.fimDaUltimaPassadaMs;
     fala.fimDaUltimaPassadaMs = fimDoAudioMs;
     this.passadasEmVoo++;
     let resultado: ResultadoDaTranscricao | null = null;
@@ -713,17 +728,29 @@ export class SessaoDaEscuta {
         descartavel: true,
       });
     } catch (erro) {
-      // Descartada (chegou áudio mais novo na fila) é o esperado e fica quieta; falha de verdade
-      // é registrada. Em ambos os casos a passada final cuida do resto.
-      if (!(erro instanceof TranscricaoDescartada)) console.warn("Passada parcial da escuta falhou:", erro);
+      // Descartada (motor ocupado) é o esperado e fica quieta, e a próxima tentativa vem logo; falha
+      // de verdade é registrada. Em ambos os casos a passada final cuida do resto.
+      if (erro instanceof TranscricaoDescartada) {
+        const recuo = fimDoAudioMs - (AUDIO_NOVO_PARA_PASSADA_MS - REPETIR_PASSADA_DESCARTADA_MS);
+        fala.fimDaUltimaPassadaMs = Math.max(fimAnteriorMs, recuo);
+      } else {
+        console.warn("Passada parcial da escuta falhou:", erro);
+      }
     }
     if (geracao !== this.geracao) return;
     this.passadasEmVoo--;
     // Atrasada: a fala já fechou (a final vale por ela).
-    if (resultado === null || this.fala !== fala) return;
+    if (this.fala !== fala) return;
+    if (resultado === null) {
+      this.pedirPassadaParcialSePreciso(fala, geracao);
+      return;
+    }
 
     const texto = limparTexto(resultado.texto);
-    if (DetectorDePergunta.ehAlucinacaoConhecida(texto)) return;
+    if (DetectorDePergunta.ehAlucinacaoConhecida(texto)) {
+      this.pedirPassadaParcialSePreciso(fala, geracao);
+      return;
+    }
     this.lembrarIdioma(fala, resultado.idioma);
     const passada = fala.confirmador.comHipotese(texto);
     fala.confirmador = passada.confirmador;
@@ -738,6 +765,8 @@ export class SessaoDaEscuta {
     );
     this.aplicarNaLegenda(mudanca);
     this.emitir();
+    // O áudio que chegou enquanto o motor trabalhava já pode pedir a próxima passada, sem esperar o próximo lote.
+    this.pedirPassadaParcialSePreciso(fala, geracao);
   }
 
   /**

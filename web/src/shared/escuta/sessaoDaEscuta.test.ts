@@ -291,7 +291,7 @@ function montar(opcoes: OpcoesDoTeste = {}) {
    */
   const falarSemPausa = async (texto: string) => {
     motor.texto = texto;
-    await tocar(voz(1_000));
+    await tocar(voz(800)); // uma só passada parcial (a segunda só sairia com 500 ms a mais de áudio)
     await tocar(silencio(SILENCIO_DO_FIM_DA_FALA_MS));
   };
 
@@ -390,14 +390,14 @@ describe("SessaoDaEscuta", () => {
   });
 
   describe("passadas no motor", () => {
-    it("durante a fala, sai uma passada descartável a cada ~0,7 s de áudio novo", async () => {
+    it("durante a fala, sai uma passada descartável a cada ~0,5 s de áudio novo", async () => {
       const t = montar({ automatico: false });
       await t.entrar();
       t.motor.texto = "um dois três";
-      await t.tocar(voz(4_500));
+      await t.tocar(voz(3_300));
 
       const parciais = t.motor.parciais;
-      expect(parciais).toHaveLength(5);
+      expect(parciais).toHaveLength(6);
       expect(t.motor.finais).toHaveLength(0);
       for (const passada of parciais) {
         expect(passada.opcoes).toEqual({ origem: "escuta", idioma: "portuguese", descartavel: true });
@@ -425,6 +425,19 @@ describe("SessaoDaEscuta", () => {
       expect(duracaoMs(t.motor.parciais[1]?.audio ?? new Float32Array(0))).toBeGreaterThan(3_000);
     });
 
+    it("ao terminar uma passada, o áudio que já juntou pede a próxima na hora, sem esperar o próximo lote", async () => {
+      const t = montar({ automatico: false });
+      await t.entrar();
+      t.motor.roteiro = () => "esperar";
+      await t.tocar(voz(2_000));
+      expect(t.motor.parciais).toHaveLength(1);
+
+      // Sem tocar mais nada: resolver a passada basta para a seguinte sair.
+      t.motor.proximaEsperando().resolver(resultado("Hoje vamos", { fimS: 0.5 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.motor.parciais).toHaveLength(2);
+    });
+
     it("passada descartada ou com falha não muda nada nem mostra erro; a próxima sai normalmente", async () => {
       const t = montar({ automatico: false });
       await t.entrar();
@@ -432,11 +445,12 @@ describe("SessaoDaEscuta", () => {
       t.motor.roteiro = (passada) =>
         falhas.shift() ?? resultado("Hoje vamos falar", { fimS: duracaoMs(passada.audio) / 1000 });
 
-      await t.tocar(voz(1_600));
+      // A descartada é repetida logo (REPETIR_PASSADA_DESCARTADA_MS), não depois de outro meio segundo de áudio.
+      await t.tocar(voz(1_000));
       expect(t.motor.parciais).toHaveLength(2);
       expect(t.sessao.instantaneo()).toMatchObject({ erro: null, linhaProvisoria: null, legenda: { frases: [], emAndamento: null } });
 
-      await t.tocar(voz(1_000));
+      await t.tocar(voz(800));
       expect(t.motor.parciais).toHaveLength(3);
       expect(t.sessao.instantaneo()).toMatchObject({
         erro: null,
@@ -559,14 +573,14 @@ describe("SessaoDaEscuta", () => {
       await t.entrar();
       t.motor.idioma = "en";
       t.motor.texto = "We will talk about linked lists today";
-      await t.tocar(voz(2_500));
+      await t.tocar(voz(1_800));
       expect(t.motor.parciais.map((passada) => passada.opcoes.idioma)).toEqual(["automatico", "en", "en"]);
       await t.tocar(silencio(SILENCIO_DO_FIM_DA_FALA_MS));
       expect(t.motor.finais.map((passada) => passada.opcoes.idioma)).toEqual(["en"]);
 
       // Na fala seguinte, detecta de novo.
       const antes = t.motor.parciais.length;
-      await t.tocar(voz(1_200));
+      await t.tocar(voz(900));
       expect(t.motor.parciais.slice(antes).map((passada) => passada.opcoes.idioma)).toEqual(["automatico"]);
     });
 
@@ -680,14 +694,14 @@ describe("SessaoDaEscuta", () => {
       await t.tocar(silencio(PAUSA_DO_ENUNCIADO_MS + 500));
       let estado = t.sessao.instantaneo();
       expect(estado.legenda.frases).toEqual([]);
-      expect(estado.legenda.emAndamento).toMatchObject({ id: "enunciado-1", confirmado: "", parcial: "Bom dia a todos" });
+      expect(estado.legenda.emAndamento).toMatchObject({ id: "enunciado-1", confirmado: "Bom dia a todos", parcial: "" });
 
       final.resolver(resultado("Bom dia a todos."));
       await vi.advanceTimersByTimeAsync(0);
       estado = t.sessao.instantaneo();
-      expect(estado.legenda.frases).toMatchObject([{ id: "enunciado-1", texto: "Bom dia a todos." }]);
+      expect(estado.legenda.frases).toMatchObject([{ id: "enunciado-1", texto: "Bom dia a todos" }]);
       expect(estado.legenda.emAndamento).toBeNull();
-      expect(estado.linhas).toEqual(["Bom dia a todos."]);
+      expect(estado.linhas).toEqual(["Bom dia a todos"]);
     });
 
     it("fala contínua: as falas curtas (até 15 s, cada uma um trecho) ficam no mesmo enunciado até a duração máxima", async () => {
@@ -844,7 +858,7 @@ describe("SessaoDaEscuta", () => {
       t.motor.roteiro = (passada) =>
         resultado(hipoteses.shift() ?? "Qual a complexidade do quicksort? E o", { fimS: duracaoMs(passada.audio) / 1000 });
       // Duas passadas parciais: a segunda confirma até o "?" (o resto ainda é parcial).
-      await t.tocar(voz(2_300));
+      await t.tocar(voz(1_300));
 
       expect(t.classificar).not.toHaveBeenCalled();
       expect(t.enviar).toHaveBeenCalledTimes(1);
