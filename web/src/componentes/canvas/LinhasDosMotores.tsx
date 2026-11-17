@@ -378,7 +378,7 @@ export function LinhaDoNavegador({
       <Rotulo
         titulo="Navegador"
         dica="Um navegador que o agente controla."
-        explicacao={`Liga um navegador próprio deste orquestrador (um bloco no canvas, ao lado do terminal) que os agentes controlam para abrir sites, clicar, preencher e ler páginas. Você pode pausar e assumir o controle a qualquer momento. ${AVISO_DO_NAVEGADOR_DO_AGENTE} Só funciona no app desktop.`}
+        explicacao={`Liga um navegador próprio deste orquestrador (um bloco no canvas, ao lado do terminal) que os agentes controlam para abrir sites, clicar, preencher e ler páginas. Você pode pausar e assumir o controle a qualquer momento. ${AVISO_DO_NAVEGADOR_DO_AGENTE} Só vale no nível "Editar e rodar comandos" e fora do Plan Mode, e só funciona no app desktop.`}
         alinharAoTopo
       />
       <div className="flex min-w-0 flex-col gap-1">

@@ -11,6 +11,9 @@ import { ModoDoTurno } from "../../orquestracao/ModoDoTurno";
 import { PedidoDeTurno } from "../../orquestracao/MotorDeAgentes";
 import { NivelDePermissao } from "../../orquestracao/NivelDePermissao";
 import { PastaDeTrabalho } from "../../orquestracao/PastaDeTrabalho";
+import { NOMES_DAS_FERRAMENTAS_DO_NAVEGADOR } from "../mcp/FerramentasDoNavegador";
+import { nomeDaFerramentaNoClaudeCode } from "../mcp/ServidorMcpDoApp";
+import { PonteParaOServidorMcp } from "../motores/ApoioDosMotores";
 import { caminhoParaRegraDePermissao } from "./ArgumentosDoClaudeCode";
 import { ExecucaoDoClaudeCode, FachadaClaudeCodeCli, SaidaDoClaudeCode } from "./FachadaClaudeCodeCli";
 import { limitarAvisos, MOTIVO_DO_SILENCIO, MotorClaudeCodeCli } from "./MotorClaudeCodeCli";
@@ -288,6 +291,202 @@ describe("MotorClaudeCodeCli e as instruções personalizadas", () => {
 
     expect(textoDaEntrada(fachada)).not.toContain("instrucoes-do-usuario");
     expect(textoDaEntrada(fachada)).not.toContain("Instruções personalizadas");
+  });
+});
+
+describe("MotorClaudeCodeCli — navegador do agente (servidor MCP do app)", () => {
+  const FERRAMENTAS_DO_NAVEGADOR = NOMES_DAS_FERRAMENTAS_DO_NAVEGADOR.map(nomeDaFerramentaNoClaudeCode);
+
+  /** Servidor MCP falso: guarda os turnos registrados e conta quantos foram encerrados. */
+  class ServidorMcpFalso implements PonteParaOServidorMcp {
+    registrados: Array<{ orquestradorId: string; ferramentas: Readonly<Record<string, boolean>> }> = [];
+    encerrados = 0;
+    falhaAoRegistrar: Error | null = null;
+
+    registrarTurno(pedidoDeTurno: { orquestradorId: string; ferramentas: Readonly<Record<string, boolean>> }) {
+      if (this.falhaAoRegistrar !== null) throw this.falhaAoRegistrar;
+      this.registrados.push(pedidoDeTurno);
+      return {
+        url: "http://127.0.0.1:4321/mcp",
+        token: "token-do-turno",
+        encerrar: () => {
+          this.encerrados += 1;
+        },
+      };
+    }
+  }
+
+  /** Fachada sem processo: lê os arquivos temporários (`mcp.json`, `agentes.json`) enquanto existem. */
+  class FachadaDoNavegador {
+    argumentos: readonly string[] = [];
+    arquivoMcp: string | null = null;
+    mcp: unknown = null;
+    agentes: { executor: { tools: string[] } } | null = null;
+    mensagem = "";
+    encerradosDuranteOTurno = -1;
+
+    constructor(
+      private readonly servidor: ServidorMcpFalso,
+      private readonly roteiro: (sinal: AbortSignal) => SaidaDoClaudeCode | Promise<SaidaDoClaudeCode> = () => ({
+        codigoDeSaida: 0,
+        erroPadrao: "",
+      }),
+    ) {}
+
+    async executar(
+      execucao: ExecucaoDoClaudeCode,
+      aoReceberMensagem: (mensagem: unknown) => void,
+      sinal: AbortSignal,
+    ): Promise<SaidaDoClaudeCode> {
+      this.argumentos = execucao.argumentos;
+      const indiceDoMcp = execucao.argumentos.indexOf("--mcp-config");
+      if (indiceDoMcp !== -1) {
+        this.arquivoMcp = execucao.argumentos[indiceDoMcp + 1] ?? "";
+        this.mcp = JSON.parse(readFileSync(this.arquivoMcp, "utf8"));
+      }
+      this.agentes = JSON.parse(readFileSync(execucao.argumentos[execucao.argumentos.indexOf("--agents") + 1] ?? "", "utf8")) as {
+        executor: { tools: string[] };
+      };
+      this.mensagem = (JSON.parse(execucao.entrada) as { message: { content: Array<{ text: string }> } }).message.content[0]?.text ?? "";
+      this.encerradosDuranteOTurno = this.servidor.encerrados;
+      const saida = await this.roteiro(sinal);
+      if (saida.codigoDeSaida === 0) aoReceberMensagem(RESULTADO_OK);
+      return saida;
+    }
+  }
+
+  function pedidoComNavegador(
+    sufixo: string,
+    opcoes: { navegadorDoAgente?: boolean; nivel?: NivelDePermissao; modo?: ModoDoTurno } = {},
+  ): PedidoDeTurno {
+    const base = pedido(path.join(pastaDoTeste, `artefatos-navegador-${sufixo}`), opcoes.nivel ?? "edicao_e_comandos", opcoes.modo ?? "execucao");
+    return { ...base, configuracao: base.configuracao.com({ navegadorDoAgente: opcoes.navegadorDoAgente ?? true }) };
+  }
+
+  function montar(servidor: ServidorMcpFalso, fachada: FachadaDoNavegador): MotorClaudeCodeCli {
+    return new MotorClaudeCodeCli(fachada as unknown as FachadaClaudeCodeCli, async () => false, "unix", servidor);
+  }
+
+  it("com o navegador liberado, registra o turno, passa --mcp-config e libera as ferramentas ao Orquestrador e ao executor", async () => {
+    const servidor = new ServidorMcpFalso();
+    const fachada = new FachadaDoNavegador(servidor);
+
+    const resultado = await montar(servidor, fachada).executarTurno(pedidoComNavegador("liberado"), () => undefined, new AbortController().signal);
+
+    expect(resultado.sucesso).toBe(true);
+    expect(servidor.registrados).toEqual([{ orquestradorId: "o1", ferramentas: { navegador: true } }]);
+    expect(fachada.mcp).toEqual({
+      mcpServers: {
+        orquestrador: { type: "http", url: "http://127.0.0.1:4321/mcp", headers: { Authorization: "Bearer token-do-turno" } },
+      },
+    });
+    expect(FERRAMENTAS_DO_NAVEGADOR).toHaveLength(11);
+    const permitidas = fachada.argumentos.slice(fachada.argumentos.indexOf("--allowedTools") + 1, fachada.argumentos.indexOf("--disallowedTools"));
+    expect(permitidas).toEqual(expect.arrayContaining(FERRAMENTAS_DO_NAVEGADOR));
+    expect(fachada.agentes?.executor.tools).toEqual(expect.arrayContaining(FERRAMENTAS_DO_NAVEGADOR));
+    // Só estes servidores: o do app, e nenhum outro do usuário.
+    expect(fachada.argumentos).toContain("--strict-mcp-config");
+    // O Orquestrador é avisado do navegador na configuração do pedido.
+    expect(fachada.mensagem).toContain("- Navegador do agente: você tem um navegador próprio");
+  });
+
+  it("encerra o registro (revoga o token) ao fim do turno e apaga o arquivo com o token", async () => {
+    const servidor = new ServidorMcpFalso();
+    const fachada = new FachadaDoNavegador(servidor);
+
+    await montar(servidor, fachada).executarTurno(pedidoComNavegador("encerra"), () => undefined, new AbortController().signal);
+
+    expect(fachada.encerradosDuranteOTurno).toBe(0);
+    expect(servidor.encerrados).toBe(1);
+    expect(fachada.arquivoMcp).not.toBeNull();
+    expect(existsSync(fachada.arquivoMcp ?? "")).toBe(false);
+  });
+
+  it("encerra o registro também quando o Claude Code falha e quando o turno é cancelado", async () => {
+    const falho = new ServidorMcpFalso();
+    await montar(
+      falho,
+      new FachadaDoNavegador(falho, () => ({ codigoDeSaida: 1, erroPadrao: "quebrou" })),
+    ).executarTurno(pedidoComNavegador("falha"), () => undefined, new AbortController().signal);
+
+    const cancelado = new ServidorMcpFalso();
+    const controle = new AbortController();
+    await montar(
+      cancelado,
+      new FachadaDoNavegador(cancelado, () => {
+        controle.abort();
+        return { codigoDeSaida: null, erroPadrao: "" };
+      }),
+    ).executarTurno(pedidoComNavegador("cancelado"), () => undefined, controle.signal);
+
+    const lancou = new ServidorMcpFalso();
+    await expect(
+      montar(
+        lancou,
+        new FachadaDoNavegador(lancou, () => {
+          throw new Error("o processo não subiu");
+        }),
+      ).executarTurno(pedidoComNavegador("lancou"), () => undefined, new AbortController().signal),
+    ).rejects.toThrow("o processo não subiu");
+
+    expect(falho.encerrados).toBe(1);
+    expect(cancelado.encerrados).toBe(1);
+    expect(lancou.encerrados).toBe(1);
+  });
+
+  it.each<[string, { navegadorDoAgente?: boolean; nivel?: NivelDePermissao; modo?: ModoDoTurno }]>([
+    ["a opção desligada", { navegadorDoAgente: false }],
+    ["o nível Editar", { nivel: "edicao" }],
+    ["o nível Somente leitura", { nivel: "leitura" }],
+    ["o planejamento", { modo: "planejamento" }],
+  ])("com %s, não registra o turno nem passa --mcp-config", async (nome, opcoes) => {
+    const servidor = new ServidorMcpFalso();
+    const fachada = new FachadaDoNavegador(servidor);
+
+    await montar(servidor, fachada).executarTurno(
+      pedidoComNavegador(`sem-${nome.replace(/\W+/g, "-")}`, opcoes),
+      () => undefined,
+      new AbortController().signal,
+    );
+
+    expect(servidor.registrados).toEqual([]);
+    expect(servidor.encerrados).toBe(0);
+    expect(fachada.argumentos).not.toContain("--mcp-config");
+    expect(fachada.argumentos.some((argumento) => argumento.startsWith("mcp__"))).toBe(false);
+    expect(fachada.agentes?.executor.tools.some((ferramenta) => ferramenta.startsWith("mcp__"))).toBe(false);
+    expect(fachada.mensagem).not.toContain("Navegador do agente");
+  });
+
+  it("sem servidor MCP (npm run dev sem o app), o turno roda sem navegador, como sempre", async () => {
+    const fachada = new FachadaDoNavegador(new ServidorMcpFalso());
+
+    const resultado = await new MotorClaudeCodeCli(fachada as unknown as FachadaClaudeCodeCli).executarTurno(
+      pedidoComNavegador("sem-servidor"),
+      () => undefined,
+      new AbortController().signal,
+    );
+
+    expect(resultado.sucesso).toBe(true);
+    expect(fachada.argumentos).not.toContain("--mcp-config");
+  });
+
+  it("se o servidor MCP não registra o turno, falha com mensagem clara e sem iniciar o processo", async () => {
+    const servidor = new ServidorMcpFalso();
+    servidor.falhaAoRegistrar = new Error("O servidor MCP ainda não foi iniciado.");
+    const fachada = new FachadaDoNavegador(servidor);
+
+    const resultado = await montar(servidor, fachada).executarTurno(
+      pedidoComNavegador("sem-registro"),
+      () => undefined,
+      new AbortController().signal,
+    );
+
+    expect(resultado).toEqual({
+      sucesso: false,
+      motivo: "Não foi possível ligar as ferramentas do app a este turno: O servidor MCP ainda não foi iniciado.",
+      uso: null,
+    });
+    expect(fachada.argumentos).toEqual([]);
   });
 });
 

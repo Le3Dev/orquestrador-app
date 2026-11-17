@@ -315,6 +315,33 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
         ordemDeReserva: [],
       });
     });
+
+    it("reabre o navegador do agente como foi gravado; um arquivo antigo (sem o campo) vale desligado", async () => {
+      const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+      const orquestrador = Orquestrador.criar({
+        id: "navegador",
+        nome: "Com navegador",
+        pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "navegador"),
+        sessaoId: "sessao-navegador",
+        configuracao: ConfiguracaoDoOrquestrador.de({
+          modeloDoOrquestrador: "opus",
+          modeloDosSubagentes: "sonnet",
+          quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
+          nivelDePermissao: "edicao_e_comandos",
+          navegadorDoAgente: true,
+        }),
+        agora,
+      });
+      await repositorio.salvar(orquestrador);
+      await repositorio.aguardarGravacoes();
+      await gravarArquivo("antigo-sem-navegador", JSON.stringify({ ...arquivoAntigo(), id: "antigo-sem-navegador" }));
+
+      const reaberto = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+
+      expect(reaberto.buscarPorId("navegador")?.configuracao.navegadorDoAgente).toBe(true);
+      expect(reaberto.buscarPorId("antigo-sem-navegador")?.configuracao.navegadorDoAgente).toBe(false);
+    });
+
     it("reabre turnos com anexos: a imagem gravada sem categoria vale imagem; o documento mantém a dele", async () => {
       const antigo = arquivoAntigo();
       const [turno] = antigo.turnos as Record<string, unknown>[];

@@ -19,6 +19,14 @@ import {
   montarAmbiente,
   montarArgumentos,
 } from "./ArgumentosDoClaudeCode";
+import { configuracaoMcpParaClaudeCode, RegistroDoTurnoMcp } from "../mcp/ServidorMcpDoApp";
+import {
+  abrirTurnoNoServidorMcp,
+  FERRAMENTAS_DO_APP_NO_TURNO,
+  FerramentasDoAppNoTurno,
+  mensagemDoErro,
+  PonteParaOServidorMcp,
+} from "../motores/ApoioDosMotores";
 import { FachadaClaudeCodeCli, SaidaDoClaudeCode } from "./FachadaClaudeCodeCli";
 import { SondaDeEndereco, sondarEnderecoLocal } from "./SondaDeEnderecoLocal";
 
@@ -71,12 +79,19 @@ function descreverSaidaSemResultado(saida: SaidaDoClaudeCode): string {
  *
  * A `plataforma` do computador decide a sintaxe dos comandos ensinados aos
  * agentes (regra dos servidores).
+ *
+ * Com o `servidorMcp` do app, o turno que liga ferramentas dele (hoje o
+ * navegador do agente; `ferramentasDoTurno` decide quais) é registrado no
+ * servidor, ganha um `--mcp-config` num arquivo temporário e tem o registro
+ * encerrado (token revogado) ao fim, inclusive em falha e cancelamento.
  */
 export class MotorClaudeCodeCli implements MotorDeAgentes {
   constructor(
     private readonly fachada: FachadaClaudeCodeCli,
     private readonly sondar: SondaDeEndereco = sondarEnderecoLocal,
     private readonly plataforma: Plataforma = "unix",
+    private readonly servidorMcp: PonteParaOServidorMcp | null = null,
+    private readonly ferramentasDoTurno: FerramentasDoAppNoTurno = FERRAMENTAS_DO_APP_NO_TURNO,
   ) {}
 
   async executarTurno(
@@ -102,12 +117,37 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
       agentes: path.join(pastaTemporaria, "agentes.json"),
       instrucoes: path.join(pastaTemporaria, "instrucoes.txt"),
       configuracoes: path.join(pastaTemporaria, "configuracoes.json"),
+      mcp: path.join(pastaTemporaria, "mcp.json"),
     };
 
+    let registroMcp: RegistroDoTurnoMcp | null = null;
     try {
-      await mkdir(pastaTemporaria, { recursive: true });
+      // Só o dono lê a pasta: o `mcp.json` leva o token do turno.
+      await mkdir(pastaTemporaria, { recursive: true, mode: 0o700 });
       const pedido = { ...pedidoRecebido, pastaDeArtefatos: await prepararPastaDeArtefatos(pedidoRecebido.pastaDeArtefatos) };
-      await writeFile(arquivos.agentes, JSON.stringify(definicaoDosAgentes(pedido, this.plataforma)), "utf8");
+      const ligadasPeloApp = this.ferramentasDoTurno(pedido);
+      try {
+        registroMcp = abrirTurnoNoServidorMcp(this.servidorMcp, ligadasPeloApp, pedido.orquestradorId);
+      } catch (erro) {
+        return {
+          sucesso: false,
+          motivo: `Não foi possível ligar as ferramentas do app a este turno: ${mensagemDoErro(erro)}`,
+          uso: null,
+        };
+      }
+      // Sem registro (sem servidor ou nenhum grupo ligado): o turno segue sem MCP.
+      const ferramentasDoApp = registroMcp === null ? {} : ligadasPeloApp;
+      if (registroMcp !== null) {
+        await writeFile(arquivos.mcp, JSON.stringify(configuracaoMcpParaClaudeCode(registroMcp)), {
+          encoding: "utf8",
+          mode: 0o600,
+        });
+      }
+      await writeFile(
+        arquivos.agentes,
+        JSON.stringify(definicaoDosAgentes(pedido, this.plataforma, ferramentasDoApp)),
+        "utf8",
+      );
       await writeFile(arquivos.instrucoes, instrucoesDoOrquestrador(pedido.pastaDeTrabalho), "utf8");
       const configuracoes = configuracoesDaSessao(pedido);
       if (configuracoes !== null) {
@@ -170,7 +210,7 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
       const inicio = Date.now();
       const saida = await this.fachada.executar(
         {
-          argumentos: montarArgumentos(pedido, arquivos),
+          argumentos: montarArgumentos(pedido, arquivos, ferramentasDoApp),
           pasta: pedido.pastaDeTrabalho.caminho,
           ambiente: montarAmbiente(process.env, pedido),
           entrada: linhaDeEntrada(texto, imagens),
@@ -213,6 +253,8 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
         ? resultado
         : { ...resultado, uso: { ...resultado.uso, duracaoMs: Date.now() - inicio } };
     } finally {
+      // O token do turno deixa de valer, e o arquivo que o guardava é apagado.
+      registroMcp?.encerrar();
       await rm(pastaTemporaria, { recursive: true, force: true }).catch(() => undefined);
     }
   }

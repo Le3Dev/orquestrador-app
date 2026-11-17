@@ -18,6 +18,7 @@ Você cria **Orquestradores** — um por projeto, por exemplo — e conversa com
 - **Bloco de notas:** no mesmo canvas, ao lado dos terminais, você cria notas de texto para observações e coisas para fazer depois. O conteúdo fica salvo no servidor, com salvamento automático. No modo lista, os itens `[ ]` viram caixas de marcar, e uma linha (ou a nota inteira) arrastada até um terminal vira texto no prompt.
 - **Chat rápido:** uma caixa no centro, embaixo da tela, para perguntar algo ao Claude sem abrir um terminal: dúvidas rápidas, pesquisas na web, perguntas sobre os projetos e pequenas alterações. Para **editar arquivos e rodar comandos**, ele pede uma **autorização única** na primeira vez, que vale até o próximo `/clear`; commit e push, só quando você pedir. Ele também pode sugerir abrir um Orquestrador num projeto, já com um pedido, e criar ou editar um subagente pronto quando você pedir; a sugestão vira um cartão que só roda quando você clica.
 - **Artefatos:** peça a um Orquestrador ou ao chat uma página ou um relatório (*"crie um artefato com um gráfico das vendas por mês"*) e o resultado abre sozinho numa janela do canvas, ao lado do terminal de quem o criou (ou no centro, se veio do chat): uma página HTML interativa, isolada e sem acesso à internet, ou um documento Markdown formatado. Cada vez que o agente regrava o arquivo, nasce uma versão nova (`v1`, `v2`…); dá para ampliar, salvar como arquivo, renomear e apagar. Funciona em qualquer permissão, inclusive *Somente leitura* e Plan Mode (ver ADR-26).
+- **Navegador do agente:** cada Orquestrador pode ter um Chromium próprio, que o agente controla por ferramentas (abrir um site, ler a página, clicar, digitar, capturar a tela) e que você vê num nó do canvas, podendo assumi-lo no meio. Fica desligado por padrão e só vale em *Editar e rodar comandos*, fora do Plan Mode (ver ADR-44).
 - Modelos disponíveis: **Fable**, Opus, Sonnet e Haiku, tanto nos Orquestradores quanto no chat.
 
 O motor é o próprio **Claude Code em modo headless**, usando o login da sua assinatura — não precisa de API key.
@@ -471,6 +472,7 @@ Cada plugin do catálogo traz `jaTem: { skills, servidoresMcp }`: o catálogo ma
 - **Node 22+ / TypeScript 6** (estrito, `exactOptionalPropertyTypes`), **Express 5**, **zod 4** (validação da API), **vitest**.
 - **Tela:** React 19, Vite 6, Tailwind 4, react-markdown com remark-gfm e **React Flow** (`@xyflow/react` 12) para o canvas (ver ADR-8). Tema escuro com a paleta da Anthropic (ver ADR-7). Fontes empacotadas via `@fontsource`, sem CDN: Poppins, Lora e JetBrains Mono.
 - **Claude Code 2.1.x** (`claude -p --output-format stream-json`) como motor dos agentes.
+- **MCP (Model Context Protocol):** `@modelcontextprotocol/sdk` 1.32.x, num servidor Streamable HTTP do próprio app (só em `127.0.0.1`) que oferece ao Claude Code as ferramentas do app, hoje as do navegador do agente (ver ADR-44). O navegador usa o **`WebContentsView`** do Electron, comandado pelo `webContents.debugger` (Chrome DevTools Protocol).
 - **Tempo real:** Server-Sent Events. **Persistência:** arquivos JSON/JSONL.
 
 ## Arquitetura
@@ -584,6 +586,19 @@ flowchart LR
   SAR --> CAR -- "artefato_criado · versao_adicionada…" --> T
 ```
 
+**Navegador do agente** (ver ADR-44): o Chromium é do Electron, e o servidor só o comanda. O `MotorClaudeCodeCli` registra o turno no servidor MCP do app (`ServidorMcpDoApp`, em `127.0.0.1`, porta livre) e passa um `--mcp-config` com a URL e o token do turno; as ferramentas `mcp__orquestrador__navegador_*` chegam ao `ServicoDoNavegador`, que manda cada comando ao processo principal pelo `postMessage` do `utilityProcess`.
+
+```mermaid
+flowchart LR
+  CC["claude.exe -p<br/>--mcp-config (arquivo temporário)"] -- "MCP · HTTP · Bearer do turno<br/>navegador_abrir · ler_pagina · clicar…" --> MCP["ServidorMcpDoApp<br/>127.0.0.1:‹porta livre›/mcp"]
+  MCP --> SN[ServicoDoNavegador]
+  SN --> CTL[ControleDoNavegadorPeloElectron]
+  CTL -- "postMessage<br/>navegador:comando" --> MAIN["Electron · electron/navegadorDoAgente.js"]
+  MAIN --> WCV["WebContentsView por Orquestrador<br/>sessão persist:navegador-‹id› · CDP"]
+  WCV -. "estado e foto (IPC)" .-> NO["Nó do navegador<br/>no canvas"]
+  NO -. "Assumir · voltar · avançar · recarregar" .-> MAIN
+```
+
 Organização por contexto (DDD):
 
 ```
@@ -629,6 +644,8 @@ src/
     ErroDeArtefato.ts          dados_invalidos · nao_encontrado
     ServicoDeArtefatos.ts      casos de uso (stateless): coletar, listar, ler versão, renomear, remover
     RepositorioDeArtefatos.ts, EntradaDeArtefatos.ts   portas
+  navegador/                 domínio do navegador do agente — contexto próprio (ver ADR-44): comandos
+                             validados (ComandoDoNavegador), resultados, erros e o ServicoDoNavegador
   infraestrutura/
     claudecode/                camada anticorrupção: Fachada (processo), Adaptador
                                (stream-json → eventos do domínio), Argumentos, Motor,
@@ -641,6 +658,9 @@ src/
                                dos anexos (ArmazemDeAnexosEmArquivo) e o extrator de texto de
                                Word, Excel e PowerPoint (ExtratorDeTextoDeDocumentos, só node:zlib)
     montarArtefatos.ts         composição do contexto de artefatos (repositório, serviço, coletor, rotas)
+    mcp/                       servidor MCP do app (ServidorMcpDoApp) e os grupos de ferramentas (navegador)
+    navegador/                 ControleDoNavegadorPeloElectron (comandos pelo postMessage)
+    montarNavegador.ts         composição do navegador do agente (controle, serviço, servidor MCP)
     sse/, execucoes/           canal de eventos e controle de cancelamento
     sistema/                   worktrees git (Worktrees, GerenciadorDeWorktreesGit),
                                memória e processos do Claude
@@ -654,7 +674,9 @@ electron/                      aplicativo desktop (CommonJS): main.js (janelas, 
                                utilityProcess, religar, cookie), preload.js (window.electron),
                                licença, configuração local, primeira abertura, atualização
                                automática (atualizacao.js), modo invisível (mouseDoModoInvisivel.js,
-                               capturaDeTela.js) e a escuta (escutaDoModoInvisivel.js); testes *.test.js
+                               capturaDeTela.js), a escuta (escutaDoModoInvisivel.js) e o navegador do
+                               agente (navegadorDoAgente.js: a WebContentsView de cada Orquestrador);
+                               testes *.test.js
 web/src/
   paginas/CanvasDeOrquestradores.tsx   canvas (React Flow): nós, linhas, painéis, layout salvo
   componentes/canvas/                  NoTerminal (terminal do Orquestrador), NoRascunho (configuração),
@@ -731,6 +753,7 @@ dados/
    - **Subagentes prontos** (ver ADR-31): com subagentes prontos (botão *Subagentes* na barra do canvas), o bloco os lista (nome e quando usar) e o `agentes.json` os define ao lado do `executor`, com as mesmas ferramentas e esforço. Sem nenhum, nada muda.
    - **Servidores** (ver ADR-33): com *Editar e rodar comandos*, o bloco e as regras do `executor` mandam subir servidor de desenvolvimento desacoplado (com a saída num log fora do projeto), para o pedido não ficar preso, e não abrir o navegador do computador. Para conferir o servidor, `curl` sem citar o endereço na resposta: a prévia ao vivo só deve abrir quando o usuário pediu, quando é preciso mostrar algo a ele ou quando ele precisa fazer login (ver *Prévia ao vivo só quando necessária* na ADR-33).
    - Em `planejamento`, o Orquestrador e o `executor` recebem só as ferramentas de leitura, qualquer que seja o nível configurado, e o bloco pede um **plano** em vez da execução (ver ADR-9).
+   - **Navegador do agente** (ver ADR-44): com a opção ligada, em *Editar e rodar comandos* e fora do Plan Mode, o turno é registrado no servidor MCP do app, o `claude -p` recebe `--mcp-config` (um `mcp.json` temporário, com a URL e o token do turno) e as ferramentas `mcp__orquestrador__navegador_*` em `--allowedTools` (e no `tools` do `executor` e dos subagentes prontos), e o bloco ganha a regra do navegador. Sem isso, os argumentos e o bloco ficam como antes.
    - **Artefatos** (ver ADR-26): em qualquer nível e modo, a pasta de artefatos do Orquestrador vai em `--add-dir`, `Write`/`Edit` entram nas ferramentas (também no `executor`) e, onde o nível não libera a edição, ficam permitidos só nessa pasta. O bloco diz quando e como gravar um artefato.
    - Com **Commit e push por feature** ligada, num turno de `execucao`, o bloco manda commitar e dar push a cada feature pronta (ver ADR-40), e o `claude -p` sai sem o bloqueio de `git commit`/`git push` (ver ADR-10). Desligada, ou em `planejamento`, continua tudo proibido.
    - **Esforço** (ver ADR-12): com esforço escolhido para o Orquestrador, o `claude -p` recebe `--effort <low|medium|high|xhigh|max>` logo depois do `--model`; com esforço escolhido para os Subagentes, a definição do `executor` no `agentes.json` ganha o campo `"effort"`. Em `"padrao"` nada disso é enviado. Se algum dos dois papéis tiver esforço escolhido, a variável `CLAUDE_CODE_EFFORT_LEVEL` herdada do servidor é removida do ambiente do processo, porque ela venceria a escolha.
@@ -1564,6 +1587,22 @@ flowchart LR
   A -->|confere a assinatura<br/>com a chave pública| A
 ```
 
+**ADR-44 — Navegador do agente: uma `WebContentsView` por Orquestrador, comandada por CDP, com as ferramentas num servidor MCP do app.**
+- *Contexto:* os agentes testam telas e consultam sites só com `curl` e `WebFetch`: sem JavaScript, sem login, sem ver a página. O usuário quer que o agente use um navegador de verdade, que ele veja no canvas e possa assumir. A prévia ao vivo (ADR-33) continua sendo para mostrar algo ao usuário, e não para o agente operar.
+- *Decisão:*
+  - **um Chromium por Orquestrador**, uma `WebContentsView` (`electron/navegadorDoAgente.js`) comandada pelo `webContents.debugger` (CDP: ler a página, clicar, digitar, teclas, rolar e capturar a tela). Ela fica **sempre anexada à janela, por baixo da tela**, para continuar pintando (sem quadros a captura não termina) e sobe ao nó do canvas quando o usuário o abre (`mostrar`) e desce quando o fecha (`ocultar`); no modo fantasma, sai da janela. Até 8 navegadores abertos;
+  - **sessão própria** `persist:navegador-<id>`, separada da tela e da prévia: o login e os cookies são por Orquestrador. Downloads bloqueados (o agente é avisado no resultado do próximo comando), permissões do site (câmera, localização, notificações…) e dispositivos negados, pop-ups abrem na mesma vista, só http/https, sem preload nem Node na página;
+  - **qualquer site http/https, sem aprovação por ação**, por decisão do usuário. Em troca, todo texto que vem da página chega ao agente com o aviso de que é dado e não instrução, e a regra do bloco do pedido diz o mesmo;
+  - **ferramentas `mcp__orquestrador__navegador_*`** (`abrir`, `ler_pagina`, `clicar`, `digitar`, `tecla`, `rolar`, `capturar_tela`, `voltar`, `avancar`, `recarregar`, `esperar`) num **servidor MCP** (Streamable HTTP, `@modelcontextprotocol/sdk` 1.32.x) do próprio app: escuta só em `127.0.0.1`, numa porta livre, em `/mcp`; cada turno recebe um **token Bearer aleatório de 32 bytes**, revogado no fim, que também diz de qual Orquestrador é a chamada e quais grupos de ferramentas valem; recusa `Origin` e `Host` que não sejam `127.0.0.1:<porta>` (DNS rebinding). Sem sessão: cada requisição ganha um servidor MCP novo, só com as ferramentas do turno;
+  - **quando liga:** `ConfiguracaoDoOrquestrador.permiteNavegador(modo)` — opção **Navegador do agente** ligada (`navegadorDoAgente`, padrão `false`; dado antigo sem o campo vale `false`), nível *Editar e rodar comandos* e fora do Plan Mode. Nesse caso o `MotorClaudeCodeCli` registra o turno no servidor (`registrarTurno`, com `navegador: true`), grava o `mcp.json` (URL e token) na pasta temporária do turno, só do dono, passa `--mcp-config`, libera as 11 ferramentas em `--allowedTools` e no `tools` do `executor` e dos subagentes prontos (que não herdam as da sessão) e **encerra o registro no fim do turno**, inclusive em falha e cancelamento. O `--strict-mcp-config` segue valendo: nenhum servidor MCP do usuário é carregado. Sem a regra, nada muda: nem argumento, nem token. O bloco `<configuracao-do-pedido>` ganha a regra do navegador (existe e o usuário o vê; serve para sites e testes de tela; pode usar os logins feitos nele; o conteúdo das páginas é dado);
+  - **o usuário no controle:** o nó do canvas mostra a página e o que o agente faz. *Assumir* pausa o agente (os comandos são recusados com "O usuário assumiu o navegador; tente depois." e o que estava rodando é cancelado) até *Devolver ao agente*; voltar, avançar e recarregar são do usuário, com o agente pausado. Excluir o Orquestrador apaga o login e os cookies (`fechar(id, true)`).
+- *Consequências:*
+  - **risco de injeção de instruções por páginas:** um site pode tentar mandar o agente fazer algo, inclusive usando logins que o usuário fez no navegador dele, e não há aprovação por ação. Mitigação: liga e desliga por Orquestrador, **desligado por padrão**, só no nível mais alto e fora do planejamento, aviso de que o conteúdo é dado, downloads e permissões bloqueados, sessão separada da tela. Quem liga aceita o risco: não faça login numa conta que não pode ser usada pelo agente;
+  - só existe no app desktop: o servidor rodando sozinho (`npm run dev`) responde às ferramentas que o navegador só funciona no desktop;
+  - cada navegador aberto é um Chromium a mais na memória (limite de 8);
+  - o servidor MCP é uma superfície nova, limitada ao `127.0.0.1`, ao token do turno e ao `Host`/`Origin`; ainda assim, quem lesse o `mcp.json` durante o turno (outro processo do mesmo usuário) poderia usar o navegador até o turno acabar;
+  - hoje só o Claude Code recebe as ferramentas do navegador; o `Agent` do Claude Code (`executor` e prontos) as recebe junto, e a regra do bloco diz isso.
+
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
 - `modelUsage` acumula a sessão, então o consumo do turno vem de `model_usage_since_last_result`;
@@ -1596,10 +1635,10 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | GET | `/pastas` | — | `{ raiz, pastas: [{ nome, caminho }] }` |
 | GET | `/orquestradores` | — | `[ResumoDoOrquestrador]` |
 | GET | `/consumo-dos-orquestradores` | — | 200 `[{ id, nome, turnosMedidos, parcial, uso: { entrada, criacaoDeCache, leituraDeCache, saida }, indiceDeCusto }]`: a soma dos `consumo_do_turno_medido` da conversa atual de cada orquestrador (principal e Subagentes juntos), do maior índice para o menor; só entra quem tem turno medido. `parcial`: algum turno somado foi cancelado ou falhou. Usada pelo popover do uso |
-| POST | `/orquestradores` | `{ nome, pastaDeTrabalho, modeloDoOrquestrador, modeloDosSubagentes, quantidadeDeSubagentes: { modo: "fixa" \| "automatica", limite: 1–10 }, nivelDePermissao, permitirCommitEPush?: boolean, esforcoDoOrquestrador?, esforcoDosSubagentes?, instrucoesPersonalizadas?: string }` (mesmo esquema de configuração do PATCH; `permitirCommitEPush` ausente vale `false`; esforços ausentes valem `"padrao"`; `instrucoesPersonalizadas` ausente vale `""`; `permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes`, se mandados, são ignorados, com qualquer valor; ver ADR-28) | 201 + orquestrador com `turnos` (400 se algum campo for inválido, ex.: `permitirCommitEPush` não booleano, esforço fora da lista: `Esforço do orquestrador inválido.` / `Esforço dos subagentes inválido.`) |
+| POST | `/orquestradores` | `{ nome, pastaDeTrabalho, modeloDoOrquestrador, modeloDosSubagentes, quantidadeDeSubagentes: { modo: "fixa" \| "automatica", limite: 1–10 }, nivelDePermissao, permitirCommitEPush?: boolean, navegadorDoAgente?: boolean, esforcoDoOrquestrador?, esforcoDosSubagentes?, instrucoesPersonalizadas?: string }` (mesmo esquema de configuração do PATCH; `permitirCommitEPush` ausente vale `false`; `navegadorDoAgente` ausente vale `false` (ver ADR-44); esforços ausentes valem `"padrao"`; `instrucoesPersonalizadas` ausente vale `""`; `permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes`, se mandados, são ignorados, com qualquer valor; ver ADR-28) | 201 + orquestrador com `turnos` (400 se algum campo for inválido, ex.: `permitirCommitEPush` não booleano, esforço fora da lista: `Esforço do orquestrador inválido.` / `Esforço dos subagentes inválido.`) |
 | GET | `/orquestradores/:id` | — | orquestrador com `turnos` (resumo de cada Turno e seus Subagentes) |
 | PATCH | `/orquestradores/:id` | `{ nome: string }` | 200 + orquestrador com `turnos` (o mesmo corpo do GET), com o nome aparado. Vale também durante um pedido (só muda o que a tela mostra); o mesmo nome não grava nem gera evento. Registra `orquestrador_renomeado`. 400 `Dê um nome ao orquestrador.` (vazio depois de aparar, não texto ou ausente) / `O nome deve ter até 60 caracteres.`; 404 `Orquestrador não encontrado.` |
-| PATCH | `/orquestradores/:id/configuracao` | qualquer subconjunto dos campos de configuração, incluindo `permitirCommitEPush?: boolean`, `esforcoDoOrquestrador?`, `esforcoDosSubagentes?` e `instrucoesPersonalizadas?: string` (`""` apaga) (`permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes`, se mandados, são ignorados e os outros campos são aplicados; ver ADR-28) | 200 + resumo (vale a partir do próximo pedido; um pedido em andamento segue com a configuração com que começou; 400 se algum campo for inválido, com as mesmas mensagens do POST) |
+| PATCH | `/orquestradores/:id/configuracao` | qualquer subconjunto dos campos de configuração, incluindo `permitirCommitEPush?: boolean`, `navegadorDoAgente?: boolean` (400 `A opção "Navegador do agente" deve ser verdadeira ou falsa.`), `esforcoDoOrquestrador?`, `esforcoDosSubagentes?` e `instrucoesPersonalizadas?: string` (`""` apaga) (`permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes`, se mandados, são ignorados e os outros campos são aplicados; ver ADR-28) | 200 + resumo (vale a partir do próximo pedido; um pedido em andamento segue com a configuração com que começou; 400 se algum campo for inválido, com as mesmas mensagens do POST) |
 | GET | `/predefinicoes` | — | 200 `[DadosDaPredefinicao]`: `{ nome: "economico", rotulo: "Modo econômico", descricao, configuracao: { modeloDoOrquestrador, esforcoDoOrquestrador, modeloDosSubagentes, esforcoDosSubagentes, quantidadeDeSubagentes } }` (só os campos que a predefinição muda; ver ADR-21 e ADR-28) |
 | POST | `/orquestradores/:id/configuracao/predefinicao` | `{ predefinicao: "economico" }` | 200 + resumo (o mesmo corpo do `PATCH /configuracao`, com `predefinicaoCorrespondente: "economico"`). Registra `configuracao_alterada` com `predefinicao`. 400 `Predefinição desconhecida.` (nome fora da lista, não texto ou ausente); 404 `Orquestrador não encontrado.` |
 | GET | `/orquestradores/:id/esforco-herdado` | — | 200 `{ orquestrador: EsforcoHerdado \| null, subagentes: EsforcoHerdado \| null }` para os modelos da configuração atual (o do Orquestrador usa o modelo real do último consumo medido, se houver). `null` = nada definido na máquina (ou falha ao ler). 404 `Orquestrador não encontrado.` |
@@ -1820,6 +1859,17 @@ Passageiros (sem id, fora do histórico): `event: trecho` com `data: { mensagemI
 Estado: `{ situacao, versaoAtual, versaoNova, progresso, mensagemDeErro }`.
 - `situacao`: `indisponivel` (não é o app instalado normal: `npm run desktop`, `desktop:dev` ou build de teste), `verificando`, `em-dia`, `baixando`, `pronta` (baixada; instala ao fechar o app ou com *Reiniciar agora*) ou `erro`.
 - `versaoAtual`: a versão instalada; `versaoNova`: a encontrada na release; `progresso`: de 0 a 100, durante o download; `mensagemDeErro`: o motivo, em `erro`.
+
+**Ponte do aplicativo: navegador do agente** (`window.electron.navegadorDoAgente`; ver ADR-44). Também IPC, só no desktop e só da janela principal. Os comandos dos agentes **não** passam por aqui: vão do servidor ao processo principal pelo `postMessage` do `utilityProcess` (`navegador:comando`, com a resposta em `navegador:resposta`). `orquestradorId` identifica o navegador.
+
+| Função | O que faz |
+|---|---|
+| `posicionar(id, retangulo)` / `mostrar(id, retangulo)` / `ocultar(id)` | põe a vista nativa sobre o corpo do nó do canvas (`retangulo`: `{ x, y, largura, altura, zoom }`) e a devolve para baixo da tela, ainda pintando; `mostrar` e `ocultar` resolvem `false` se não há navegador aberto (ou no modo fantasma) |
+| `pausar(id)` / `retomar(id)` | *Assumir* e *Devolver ao agente*: pausado, os comandos do agente são recusados e o que estava rodando é cancelado |
+| `voltar(id)` / `avancar(id)` / `recarregar(id)` | navegação do usuário (os botões do nó, com o agente pausado); resolvem `false` sem navegador aberto ou, no voltar e no avançar, sem para onde ir |
+| `fechar(id, apagarDados?)` | fecha o navegador; com `apagarDados` (ao excluir o Orquestrador) apaga o login e os cookies da sessão |
+| `estados()` / `foto(id)` | os navegadores abertos (`{ orquestradorId, url, titulo, carregando, ultimaAcao, emUsoPeloAgente, pausado, podeVoltar, podeAvancar }`) e um data URI JPEG da página, para o nó mostrar enquanto a vista nativa está por baixo |
+| `aoMudar(callback)` / `aoAtivar(callback)` | o estado de um navegador mudou; o agente usou o navegador de um Orquestrador pela primeira vez (a tela abre o nó) |
 
 ### API do serviço de licenças
 
@@ -2079,12 +2129,20 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
     - **Com alterações autorizadas** (item 12): nada é enviado sozinho. A pergunta vai para o campo, com a nota *Pergunta da escuta: confira e aperte Enter*; você revisa, ajusta e envia. Se você estiver digitando algo, o campo não é trocado, e a pergunta fica só destacada no balão "ouvido" da conversa.
     - **Privacidade:** o áudio não é gravado e não sai do computador. Só os últimos 2 min de texto ficam na memória e são esquecidos ao sair do modo. Saem do computador só as falas candidatas (para o Haiku) e as perguntas enviadas ao chat, com o print.
     - Cada fala candidata usa um pouco de cota (uma chamada ao Haiku) e a transcrição usa a CPU enquanto há fala. O ditado (item 17) continua funcionando e passa na frente da escuta.
+21. **Navegador do agente** (ver ADR-44; só no app desktop): um navegador próprio de um Orquestrador, que o agente controla para abrir sites, ler a página, clicar, digitar e testar telas, e que você vê num bloco do canvas.
+    - **Ligar:** na configuração do Orquestrador (criação ou *⚙*), o interruptor **Navegador do agente**, desligado por padrão. Só vale no nível *Editar e rodar comandos* e fora do Plan Mode: nos outros, o agente não recebe as ferramentas. O aviso fica sempre à vista: o agente pode abrir **qualquer site, sem pedir aprovação a cada ação**, e usar os logins feitos nesse navegador. Ligue só em Orquestradores em que você confia.
+    - **O bloco no canvas:** abre sozinho quando o agente usa o navegador pela primeira vez, ao lado do terminal; mostra o título, o endereço (só leitura) e o que o agente está fazendo. Fechar o bloco não fecha o navegador: o agente continua podendo usá-lo.
+    - **Assumir:** *Assumir* pausa o agente (ele recebe "O usuário assumiu o navegador; tente depois.") e dá o teclado e o mouse a você; só então voltar, avançar e recarregar valem. *Devolver ao agente* o libera de novo.
+    - **Logins:** cada Orquestrador tem a sua sessão (`persist:navegador-<id>`), separada da tela do app e da prévia ao vivo: um login feito ali fica ali. **Excluir o Orquestrador apaga o login e os cookies dele.**
+    - **O que o navegador não faz:** downloads são bloqueados, as permissões do site (câmera, localização, notificações) são negadas e só abre `http` e `https`. O que a página diz é tratado pelo agente como dado, nunca como instrução, mas um site mal-intencionado ainda pode tentar enganá-lo: por isso é você quem liga.
+    - A prévia ao vivo continua sendo para o agente mostrar algo a você; o navegador é para ele operar.
 
 **Avisos que podem aparecer:**
 - *"orquestrador lendo …"*, *"orquestrador executando …"* (no log do terminal): não é erro. O Orquestrador está fazendo um trivial ele mesmo (ver ADR-14). Isso vale sempre e não tem opção para desligar (ver ADR-28); se quiser que ele delegue algo específico, peça no texto do pedido.
 - *"plano proposto · aguardando aprovação"*: o pedido foi considerado grande e nada foi alterado ainda (salvo desvio do modelo, ver ADR-15). Aprove, ajuste ou descarte no cartão.
 - *"bloqueado: …"*: um agente tentou algo fora do nível escolhido (por exemplo, editar em modo leitura, ou fazer `git commit` com a opção de commit e push desligada ou em Plan Mode).
 - *"turno interrompido"*: o servidor reiniciou durante o pedido. Envie de novo.
+- *"O navegador do agente só funciona no aplicativo desktop."* ou *"O usuário assumiu o navegador; tente depois."* (resposta de uma ferramenta do navegador): o servidor está rodando fora do app, ou você assumiu o navegador. Devolva-o ao agente no bloco do navegador (item 21).
 - *"fila pausada"* (acima do prompt): nenhum pedido está rodando e há pedidos à espera, porque o último foi cancelado, falhou, foi interrompido ou deixou um plano para aprovar. Use *enviar agora* no primeiro, tire os que não fazem mais sentido (✕) ou mande outro pedido (item 3). Logo depois de um pedido terminar bem, o aviso pode aparecer por um instante, até o próximo da fila começar.
 - *"A fila de … está cheia (máximo 10 pedidos)."*: espere a fila andar ou tire algum pedido dela.
 - *"A fila aceita só texto: envie os anexos quando o orquestrador estiver livre."* (e o aviso equivalente no prompt): o Enter durante um pedido não manda imagens nem documentos para a fila. Espere o pedido terminar ou remova os anexos.

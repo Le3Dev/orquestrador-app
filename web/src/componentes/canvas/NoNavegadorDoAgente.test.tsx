@@ -364,7 +364,7 @@ describe("NoNavegadorDoAgente", () => {
         await waitFor(() => expect(ponte.api.recarregar).toHaveBeenCalledWith("o1"));
       });
 
-      it("a ponte de hoje não traz esses comandos: ficam desabilitados mesmo com o navegador assumido", async () => {
+      it("a ponte de um app desktop antigo não traz esses comandos: ficam desabilitados mesmo com o navegador assumido", async () => {
         ligar([{ ...ESTADO, pausado: true, podeVoltar: true, podeAvancar: true }]);
         const semComandos = Object.fromEntries(
           Object.entries(ponte.api).filter(([nome]) => !["voltar", "avancar", "recarregar"].includes(nome)),

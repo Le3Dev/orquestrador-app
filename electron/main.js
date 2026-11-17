@@ -1069,8 +1069,9 @@ ipcMain.handle("previa:sair-das-contas", (evento) => vistasDaPrevia.aoSairDasCon
 // Navegador do agente (electron/navegadorDoAgente.js): um Chromium por
 // Orquestrador, controlado pelos agentes por ferramentas MCP. Os comandos
 // chegam do servidor (utilityProcess) por `navegador:comando`; os IPC abaixo
-// são da tela (posicionar o nó, mostrar, ocultar, pausar/assumir, fechar) e só
-// valem se vierem do quadro principal da janela principal.
+// são da tela (posicionar o nó, mostrar, ocultar, pausar/assumir, voltar,
+// avançar, recarregar, fechar) e só valem se vierem do quadro principal da
+// janela principal.
 // ──────────────────────────────────────────────────────────────────────────
 const navegadorDoAgente = criarNavegadorDoAgente({
   WebContentsView,
@@ -1091,6 +1092,9 @@ ipcMain.handle("navegador-do-agente:mostrar", (evento, dados) => navegadorDoAgen
 ipcMain.handle("navegador-do-agente:ocultar", (evento, dados) => navegadorDoAgente.aoOcultar(evento, dados));
 ipcMain.handle("navegador-do-agente:pausar", (evento, dados) => navegadorDoAgente.aoPausar(evento, dados));
 ipcMain.handle("navegador-do-agente:retomar", (evento, dados) => navegadorDoAgente.aoRetomar(evento, dados));
+ipcMain.handle("navegador-do-agente:voltar", (evento, dados) => navegadorDoAgente.aoVoltar(evento, dados));
+ipcMain.handle("navegador-do-agente:avancar", (evento, dados) => navegadorDoAgente.aoAvancar(evento, dados));
+ipcMain.handle("navegador-do-agente:recarregar", (evento, dados) => navegadorDoAgente.aoRecarregar(evento, dados));
 ipcMain.handle("navegador-do-agente:fechar", (evento, dados) => navegadorDoAgente.aoFechar(evento, dados));
 ipcMain.handle("navegador-do-agente:estados", (evento) => navegadorDoAgente.aoPedirEstados(evento));
 ipcMain.handle("navegador-do-agente:foto", (evento, dados) => navegadorDoAgente.aoPedirFoto(evento, dados));

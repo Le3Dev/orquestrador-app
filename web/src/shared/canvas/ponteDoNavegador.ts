@@ -45,8 +45,10 @@ export interface ApiDoNavegadorDoAgente {
   /** O agente usou o navegador de um Orquestrador pela primeira vez (ou de novo, depois de fechado): a tela abre o nó. */
   aoAtivar: (callback: (dados: { orquestradorId: string }) => void) => () => void;
   /**
-   * Voltar, avançar e recarregar a página: as pontes de hoje ainda não os trazem, então são opcionais. Sem eles, os
-   * botões do nó ficam desabilitados (o usuário navega dentro da página depois de assumir o controle).
+   * Voltar, avançar e recarregar a página, do usuário (os botões do nó, só com o agente pausado): resolvem false se
+   * não há para onde ir. O app desktop os traz desde que o navegador do agente foi ligado aos turnos; ficam opcionais
+   * por um app desktop antigo, que não os tem, e aí os botões do nó ficam desabilitados (o usuário navega dentro da
+   * página depois de assumir o controle).
    */
   voltar?: (orquestradorId: string) => Promise<boolean>;
   avancar?: (orquestradorId: string) => Promise<boolean>;

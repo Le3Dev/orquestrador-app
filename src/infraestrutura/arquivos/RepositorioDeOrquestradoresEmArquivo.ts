@@ -50,6 +50,7 @@ const esquemaDoArquivo = z.object({
     nivelDePermissao: z.enum(NIVEIS_DE_PERMISSAO),
     permitirCommitEPush: z.boolean().optional(),
     permitirArtefatosOnline: z.boolean().optional(),
+    navegadorDoAgente: z.boolean().optional(),
     esforcoDoOrquestrador: z.enum(ESFORCOS_DE_RACIOCINIO).optional(),
     esforcoDosSubagentes: z.enum(ESFORCOS_DE_RACIOCINIO).optional(),
     instrucoesPersonalizadas: z.string().optional(),

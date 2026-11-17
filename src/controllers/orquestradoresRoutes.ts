@@ -151,6 +151,11 @@ const objetoDaConfiguracao = z.object({
   permitirArtefatosOnline: z
     .boolean({ error: 'A opção "Publicar artefatos no claude.ai" deve ser verdadeira ou falsa.' })
     .optional(),
+  // Opcional também na criação: ausente vale `false` (desligado). Só liga as ferramentas no
+  // nível "Editar e rodar comandos" e fora do planejamento (`permiteNavegador`).
+  navegadorDoAgente: z
+    .boolean({ error: 'A opção "Navegador do agente" deve ser verdadeira ou falsa.' })
+    .optional(),
   // Opcionais também na criação: ausentes valem "padrao".
   esforcoDoOrquestrador: z
     .enum(ESFORCOS_DE_RACIOCINIO, { error: "Esforço do orquestrador inválido." })

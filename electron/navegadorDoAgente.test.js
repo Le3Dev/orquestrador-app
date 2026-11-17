@@ -1197,6 +1197,92 @@ describe("criarNavegadorDoAgente: IPC da tela", () => {
     expect(await navegador.aoPedirFoto(principal, { orquestradorId: "outro" })).toBeNull();
   });
 
+  describe("voltar, avançar e recarregar pelo usuário", () => {
+    it("só aceita do quadro principal da janela principal", () => {
+      const { navegador, intruso } = montar();
+
+      expect(() => navegador.aoVoltar(intruso, { orquestradorId: "orq-1" })).toThrow(/só na janela principal/);
+      expect(() => navegador.aoAvancar(intruso, { orquestradorId: "orq-1" })).toThrow(/só na janela principal/);
+      expect(() => navegador.aoRecarregar(intruso, { orquestradorId: "orq-1" })).toThrow(/só na janela principal/);
+    });
+
+    it("voltar e avançar andam no histórico da página e avisam a tela; sem para onde ir, resolvem false", async () => {
+      const { navegador, executar, principal, views, enviadoAATela } = montar();
+      await executar({ tipo: "abrir", url: "https://exemplo.com/a" });
+      await executar({ tipo: "abrir", url: "https://exemplo.com/b" });
+      const { navigationHistory } = views[0].webContents;
+
+      expect(navegador.aoAvancar(principal, { orquestradorId: "orq-1" })).toBe(false);
+      expect(navigationHistory.goForward).not.toHaveBeenCalled();
+
+      expect(navegador.aoVoltar(principal, { orquestradorId: "orq-1" })).toBe(true);
+      expect(navigationHistory.goBack).toHaveBeenCalledTimes(1);
+      expect(enviadoAATela("navegador-do-agente:mudou").at(-1)).toMatchObject({
+        url: "https://exemplo.com/a",
+        podeAvancar: true,
+      });
+
+      expect(navegador.aoAvancar(principal, { orquestradorId: "orq-1" })).toBe(true);
+      expect(navigationHistory.goForward).toHaveBeenCalledTimes(1);
+
+      // Gasta o histórico: no começo, voltar resolve false e não aciona nada.
+      for (let tentativa = 0; tentativa < 5 && navigationHistory.canGoBack(); tentativa += 1) {
+        navegador.aoVoltar(principal, { orquestradorId: "orq-1" });
+      }
+      const chamadas = navigationHistory.goBack.mock.calls.length;
+      expect(navegador.aoVoltar(principal, { orquestradorId: "orq-1" })).toBe(false);
+      expect(navigationHistory.goBack).toHaveBeenCalledTimes(chamadas);
+    });
+
+    it("recarregar recarrega a página do Orquestrador", async () => {
+      const { navegador, executar, principal, views } = montar();
+      await executar({ tipo: "abrir", url: "https://exemplo.com/a" });
+
+      expect(navegador.aoRecarregar(principal, { orquestradorId: "orq-1" })).toBe(true);
+
+      expect(views[0].webContents.reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("valem com o agente pausado (é para isso que servem) e não passam pela fila de comandos do agente", async () => {
+      const { navegador, executar, principal, views } = montar();
+      await executar({ tipo: "abrir", url: "https://exemplo.com/a" });
+      await executar({ tipo: "abrir", url: "https://exemplo.com/b" });
+      const execucao = executar({ tipo: "esperar", ms: 30_000 });
+      await new Promise((resolver) => setTimeout(resolver, 5));
+      navegador.aoPausar(principal, { orquestradorId: "orq-1" });
+      await expect(execucao).rejects.toMatchObject({ motivo: "pausado" });
+
+      expect(navegador.aoVoltar(principal, { orquestradorId: "orq-1" })).toBe(true);
+      expect(navegador.aoRecarregar(principal, { orquestradorId: "orq-1" })).toBe(true);
+
+      expect(views[0].webContents.navigationHistory.goBack).toHaveBeenCalledTimes(1);
+      expect(views[0].webContents.reload).toHaveBeenCalledTimes(1);
+      // O agente segue recusado enquanto o usuário não devolve.
+      await expect(executar({ tipo: "ler_pagina" })).rejects.toMatchObject({ motivo: "pausado" });
+    });
+
+    it("de um Orquestrador sem navegador, ou de um id inválido, resolvem false", () => {
+      const { navegador, principal } = montar();
+
+      expect(navegador.aoVoltar(principal, { orquestradorId: "orq-9" })).toBe(false);
+      expect(navegador.aoAvancar(principal, { orquestradorId: "orq-9" })).toBe(false);
+      expect(navegador.aoRecarregar(principal, { orquestradorId: "orq-9" })).toBe(false);
+      expect(navegador.aoRecarregar(principal, { orquestradorId: 42 })).toBe(false);
+      expect(navegador.aoRecarregar(principal, undefined)).toBe(false);
+    });
+
+    it("registram no log só um texto curto, sem o endereço da página", async () => {
+      const { navegador, executar, principal, registrar } = montar();
+      await executar({ tipo: "abrir", url: "https://exemplo.com/a?segredo=1" });
+
+      navegador.aoRecarregar(principal, { orquestradorId: "orq-1" });
+
+      const linhas = registrar.mock.calls.map(([texto]) => String(texto));
+      expect(linhas.some((linha) => linha.includes("o usuário usou recarregar"))).toBe(true);
+      expect(linhas.some((linha) => linha.includes("segredo"))).toBe(false);
+    });
+  });
+
   it("fechar remove a vista da janela, desliga o debugger, fecha a página e solta a pausa", async () => {
     const { navegador, executar, principal, views, janela } = montar();
     await executar({ tipo: "ler_pagina" });

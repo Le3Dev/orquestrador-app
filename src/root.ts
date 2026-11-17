@@ -50,6 +50,8 @@ import {
 } from "./infraestrutura/Configuracao";
 import { ControleDeExecucoesEmMemoria } from "./infraestrutura/execucoes/ControleDeExecucoesEmMemoria";
 import { montarArtefatos, pastaDeEntradaDosArtefatos } from "./infraestrutura/montarArtefatos";
+import { montarNavegador } from "./infraestrutura/montarNavegador";
+import { FERRAMENTAS_DO_APP_NO_TURNO } from "./infraestrutura/motores/ApoioDosMotores";
 import { DiagnosticadorDoClaudeNoSistema } from "./infraestrutura/sistema/DiagnosticadorDoClaudeNoSistema";
 import { GerenciadorDeWorktreesGit } from "./infraestrutura/sistema/GerenciadorDeWorktreesGit";
 import { LeitorDeAlteracoesGit } from "./infraestrutura/sistema/LeitorDeAlteracoesGit";
@@ -132,9 +134,13 @@ function isolarOrigem(_requisicao: express.Request, resposta: express.Response, 
   proximo();
 }
 
-/** A porta de mensagens do Electron (`utilityProcess`); nula fora do app (`npm run dev`). */
+/**
+ * A porta de mensagens do Electron (`utilityProcess`); nula fora do app (`npm run dev`).
+ * `postMessage` leva os comandos do navegador do agente ao Electron, que os executa.
+ */
 interface PortaDoProcessoPai {
   on(evento: "message", ouvinte: (mensagem: { data: unknown }) => void): void;
+  postMessage(mensagem: unknown): void;
 }
 
 function portaDoProcessoPai(): PortaDoProcessoPai | null {
@@ -226,12 +232,19 @@ async function iniciar(): Promise<void> {
   // Windows, PowerShell): lida uma vez aqui, o domínio só a recebe.
   const plataforma: Plataforma = process.platform === "win32" ? "windows" : "unix";
 
+  // Navegador do agente (ADR-44): o Chromium é do Electron; o servidor MCP do app (127.0.0.1) leva
+  // as ferramentas `navegador_*` ao Claude Code. Fora do app (`npm run dev`), a porta é nula e as
+  // ferramentas respondem que o navegador só existe no desktop.
+  const navegador = montarNavegador({ portaDoProcessoPai: portaDoProcessoPai() });
+
   const servico = new ServicoDeOrquestracao({
     repositorio,
     motor: new MotorClaudeCodeCli(
       new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro, undefined, rastreador),
       sondarEnderecoLocal,
       plataforma,
+      navegador.servidorMcp,
+      FERRAMENTAS_DO_APP_NO_TURNO,
     ),
     execucoes,
     publicador: canal,
@@ -425,6 +438,14 @@ async function iniciar(): Promise<void> {
   // Depois das rotas: inclui o que chegou na pasta de entrada com o servidor desligado.
   await artefatos.iniciar();
 
+  // O servidor MCP do app sobe antes de aceitar pedidos: um turno com o navegador liberado o registra.
+  // Se não subir, o app segue sem as ferramentas do app (o turno que as pedir falha com a causa).
+  try {
+    await navegador.iniciar();
+  } catch (erro) {
+    console.warn("[mcp] Não foi possível iniciar o servidor MCP do app; os agentes ficam sem o navegador:", erro);
+  }
+
   // Só em 127.0.0.1: os agentes editam arquivos e rodam comandos com o login
   // do usuário — ninguém mais na rede pode mandar mensagens para eles.
   const servidor = aplicacao.listen(configuracao.porta, "127.0.0.1", () => {
@@ -458,6 +479,10 @@ async function iniciar(): Promise<void> {
     terminais.encerrarTodos();
     conexaoDosTerminais.encerrar();
     servidor.close();
+    // Cancela os comandos do navegador em andamento, revoga os tokens e para o servidor MCP do app.
+    navegador
+      .encerrar()
+      .catch((erro: unknown) => console.warn("[mcp] Falha ao encerrar o servidor MCP do app:", erro));
     monitor.parar();
     rastreador.parar();
     artefatos

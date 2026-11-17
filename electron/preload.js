@@ -184,6 +184,11 @@ contextBridge.exposeInMainWorld("electron", {
     pausar: (orquestradorId) => ipcRenderer.invoke("navegador-do-agente:pausar", { orquestradorId }),
     // O usuário devolve o navegador ao agente.
     retomar: (orquestradorId) => ipcRenderer.invoke("navegador-do-agente:retomar", { orquestradorId }),
+    // Navegação do usuário (botões do nó, com o agente pausado); resolvem false se não há navegador aberto ou,
+    // no voltar e no avançar, não há para onde ir.
+    voltar: (orquestradorId) => ipcRenderer.invoke("navegador-do-agente:voltar", { orquestradorId }),
+    avancar: (orquestradorId) => ipcRenderer.invoke("navegador-do-agente:avancar", { orquestradorId }),
+    recarregar: (orquestradorId) => ipcRenderer.invoke("navegador-do-agente:recarregar", { orquestradorId }),
     // Fecha o navegador do Orquestrador; `apagarDados` (true ao excluir o Orquestrador) apaga também login e cookies.
     fechar: (orquestradorId, apagarDados = false) =>
       ipcRenderer.invoke("navegador-do-agente:fechar", { orquestradorId, apagarDados: apagarDados === true }),

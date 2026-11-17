@@ -33,6 +33,14 @@ export interface DadosDaConfiguracao {
    * preenche.
    */
   ordemDeReserva?: readonly Motor[] | undefined;
+  /**
+   * Se o Orquestrador tem um navegador próprio, que os agentes controlam e o
+   * usuário vê no canvas. Ausente nas configurações gravadas antes de a opção
+   * existir: vale `false`. `paraDados` sempre o preenche. Só liga as
+   * ferramentas no nível "Editar e rodar comandos" e fora do planejamento
+   * (`permiteNavegador`).
+   */
+  navegadorDoAgente?: boolean | undefined;
   quantidadeDeSubagentes: DadosDaQuantidade;
   nivelDePermissao: NivelDePermissao;
   /**
@@ -139,6 +147,7 @@ export class ConfiguracaoDoOrquestrador {
     public readonly motorDoOrquestrador: Motor,
     public readonly motorDosSubagentes: Motor,
     public readonly ordemDeReserva: readonly Motor[],
+    public readonly navegadorDoAgente: boolean,
   ) {}
 
   static de(dados: DadosDaConfiguracao): ConfiguracaoDoOrquestrador {
@@ -162,6 +171,13 @@ export class ConfiguracaoDoOrquestrador {
       throw new ErroDeOrquestracao(
         "dados_invalidos",
         'A opção "Publicar artefatos no claude.ai" deve ser verdadeira ou falsa.',
+      );
+    }
+    const navegadorDoAgente: unknown = dados.navegadorDoAgente ?? false;
+    if (typeof navegadorDoAgente !== "boolean") {
+      throw new ErroDeOrquestracao(
+        "dados_invalidos",
+        'A opção "Navegador do agente" deve ser verdadeira ou falsa.',
       );
     }
     const esforcoDoOrquestrador: unknown = dados.esforcoDoOrquestrador ?? ESFORCO_PADRAO;
@@ -193,6 +209,7 @@ export class ConfiguracaoDoOrquestrador {
       motorDoOrquestrador,
       motorDosSubagentes,
       ordemDeReserva,
+      navegadorDoAgente,
     );
   }
 
@@ -234,6 +251,7 @@ export class ConfiguracaoDoOrquestrador {
       motor,
       motor,
       [],
+      this.navegadorDoAgente,
     );
   }
 
@@ -255,6 +273,16 @@ export class ConfiguracaoDoOrquestrador {
    */
   permiteCommitEPush(modo: ModoDoTurno): boolean {
     return this.permitirCommitEPush && modo === "execucao";
+  }
+
+  /**
+   * Se as ferramentas do navegador do agente vão ao turno: com a opção ligada,
+   * no nível "Editar e rodar comandos" (um site pode levar a qualquer ação, e
+   * esse é o nível em que o usuário já aceitou que o agente aja sozinho) e num
+   * turno de execução — no planejamento nada é alterado nem aberto.
+   */
+  permiteNavegador(modo: ModoDoTurno): boolean {
+    return this.navegadorDoAgente && this.nivelDePermissao === "edicao_e_comandos" && modo === "execucao";
   }
 
   /**
@@ -292,6 +320,7 @@ export class ConfiguracaoDoOrquestrador {
       nivelDePermissao: alteracoes.nivelDePermissao ?? atual.nivelDePermissao,
       permitirCommitEPush: alteracoes.permitirCommitEPush ?? atual.permitirCommitEPush,
       permitirArtefatosOnline: alteracoes.permitirArtefatosOnline ?? atual.permitirArtefatosOnline,
+      navegadorDoAgente: alteracoes.navegadorDoAgente ?? atual.navegadorDoAgente,
       esforcoDoOrquestrador: alteracoes.esforcoDoOrquestrador ?? atual.esforcoDoOrquestrador,
       esforcoDosSubagentes: alteracoes.esforcoDosSubagentes ?? atual.esforcoDosSubagentes,
       // `""` limpa as instruções: só a ausência mantém as atuais.
@@ -311,6 +340,7 @@ export class ConfiguracaoDoOrquestrador {
       nivelDePermissao: this.nivelDePermissao,
       permitirCommitEPush: this.permitirCommitEPush,
       permitirArtefatosOnline: this.permitirArtefatosOnline,
+      navegadorDoAgente: this.navegadorDoAgente,
       esforcoDoOrquestrador: this.esforcoDoOrquestrador,
       esforcoDosSubagentes: this.esforcoDosSubagentes,
       instrucoesPersonalizadas: this.instrucoesPersonalizadas,

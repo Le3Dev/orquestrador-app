@@ -2045,6 +2045,39 @@ describe("rotas de orquestradores — vários motores", () => {
     expect(await invalida.json()).toEqual({ erro: "Modelo do orquestrador inválido." });
   });
 
+  it("o navegador do agente nasce desligado, é criado e alterado pela API e vai ao pedido de turno", async () => {
+    const criado = await criar();
+    expect(criado.configuracao).toMatchObject({ navegadorDoAgente: false });
+
+    const ligado = await alterar(criado.id, { navegadorDoAgente: true });
+    expect(ligado.status).toBe(200);
+    expect(((await ligado.json()) as { configuracao: unknown }).configuracao).toMatchObject({ navegadorDoAgente: true });
+    // Outro campo não o desliga.
+    const outro = await alterar(criado.id, { nivelDePermissao: "edicao_e_comandos" });
+    expect(((await outro.json()) as { configuracao: unknown }).configuracao).toMatchObject({
+      navegadorDoAgente: true,
+      nivelDePermissao: "edicao_e_comandos",
+    });
+
+    const comNavegador = await criar({ navegadorDoAgente: true });
+    expect(comNavegador.configuracao).toMatchObject({ navegadorDoAgente: true });
+    await requisitar("POST", `/orquestradores/${comNavegador.id}/mensagens`, { texto: "oi" });
+    await vi.waitFor(() => expect(repositorio.buscarPorId(comNavegador.id)?.situacao).toBe("ocioso"));
+    expect(motor.pedidos.at(-1)?.configuracao.navegadorDoAgente).toBe(true);
+  });
+
+  it("recusa, com mensagem clara, o navegador do agente que não é verdadeiro ou falso", async () => {
+    const criado = await criar();
+
+    const naCriacao = await requisitar("POST", "/orquestradores", { ...criacao, navegadorDoAgente: "sim" });
+    const naAlteracao = await alterar(criado.id, { navegadorDoAgente: 1 });
+
+    for (const resposta of [naCriacao, naAlteracao]) {
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: 'A opção "Navegador do agente" deve ser verdadeira ou falsa.' });
+    }
+  });
+
   it("o motor que o Orquestrador usa vai ao motor de agentes no pedido de turno", async () => {
     const criado = await criar({ motorDoOrquestrador: "codex", modeloDoOrquestrador: "padrao" });
 

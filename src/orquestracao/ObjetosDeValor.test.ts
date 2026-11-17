@@ -122,6 +122,8 @@ describe("ConfiguracaoDoOrquestrador", () => {
     motorDoOrquestrador: "claude-code",
     motorDosSubagentes: "claude-code",
     ordemDeReserva: [],
+    // E sem o navegador do agente.
+    navegadorDoAgente: false,
   } as const;
 
   it("nasce com commit e push desligados quando a opção não é informada", () => {
@@ -189,6 +191,47 @@ describe("ConfiguracaoDoOrquestrador", () => {
       const invalido = { ...dados, permitirArtefatosOnline: "sim" as unknown as boolean };
 
       expect(() => ConfiguracaoDoOrquestrador.de(invalido)).toThrow(ErroDeOrquestracao);
+    });
+  });
+
+  describe("navegador do agente", () => {
+    it("nasce desligado e dados antigos (sem o campo) valem false", () => {
+      expect(ConfiguracaoDoOrquestrador.de(dados).navegadorDoAgente).toBe(false);
+      expect(ConfiguracaoDoOrquestrador.de(dados).paraDados().navegadorDoAgente).toBe(false);
+    });
+
+    it("com() liga só ele, mantém o resto e a ausência mantém o valor atual", () => {
+      const ligado = ConfiguracaoDoOrquestrador.de({ ...dados, permitirCommitEPush: true }).com({
+        navegadorDoAgente: true,
+      });
+
+      expect(ligado.navegadorDoAgente).toBe(true);
+      expect(ligado.permitirCommitEPush).toBe(true);
+      expect(ligado.com({ nivelDePermissao: "edicao" }).navegadorDoAgente).toBe(true);
+      expect(ligado.com({ navegadorDoAgente: undefined }).navegadorDoAgente).toBe(true);
+      expect(ligado.com({ navegadorDoAgente: false }).navegadorDoAgente).toBe(false);
+    });
+
+    it("recusa valor que não é verdadeiro ou falso", () => {
+      const invalido = { ...dados, navegadorDoAgente: "sim" as unknown as boolean };
+
+      expect(() => ConfiguracaoDoOrquestrador.de(invalido)).toThrow(ErroDeOrquestracao);
+    });
+
+    it("um motor de reserva herda a opção", () => {
+      const ligado = ConfiguracaoDoOrquestrador.de({ ...dados, ordemDeReserva: ["codex"], navegadorDoAgente: true });
+
+      expect(ligado.paraMotor("codex").navegadorDoAgente).toBe(true);
+    });
+
+    it("só libera as ferramentas com a opção ligada, em Editar e rodar comandos e num turno de execução", () => {
+      const ligado = ConfiguracaoDoOrquestrador.de({ ...dados, navegadorDoAgente: true });
+
+      expect(ligado.permiteNavegador("execucao")).toBe(true);
+      expect(ligado.permiteNavegador("planejamento")).toBe(false);
+      expect(ligado.com({ nivelDePermissao: "edicao" }).permiteNavegador("execucao")).toBe(false);
+      expect(ligado.com({ nivelDePermissao: "leitura" }).permiteNavegador("execucao")).toBe(false);
+      expect(ligado.com({ navegadorDoAgente: false }).permiteNavegador("execucao")).toBe(false);
     });
   });
 
@@ -507,6 +550,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
           "modeloDosSubagentes",
           "motorDoOrquestrador",
           "motorDosSubagentes",
+          "navegadorDoAgente",
           "nivelDePermissao",
           "ordemDeReserva",
           "permitirArtefatosOnline",

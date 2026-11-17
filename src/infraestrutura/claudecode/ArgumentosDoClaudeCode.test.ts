@@ -10,12 +10,15 @@ import { PedidoDeTurno } from "../../orquestracao/MotorDeAgentes";
 import { NivelDePermissao } from "../../orquestracao/NivelDePermissao";
 import { PastaDeTrabalho } from "../../orquestracao/PastaDeTrabalho";
 import { SelecaoDeSubagentesProntos, subagentesProntosSelecionados } from "../../orquestracao/SubagentesProntos";
+import { NOMES_DAS_FERRAMENTAS_DO_NAVEGADOR } from "../mcp/FerramentasDoNavegador";
+import { nomeDaFerramentaNoClaudeCode } from "../mcp/ServidorMcpDoApp";
 import {
   comandosProibidosDoTurno,
   configuracoesDaSessao,
   definicaoDosAgentes,
   FERRAMENTAS_POR_NIVEL,
   ferramentasDeSkill,
+  ferramentasDoAppNoClaudeCode,
   ferramentasDoEsforco,
   ferramentasDoTurno,
   linhaDeEntrada,
@@ -28,7 +31,12 @@ import {
 
 const PRONTO = { nome: "revisor", descricao: "Revisa.", prompt: "Revise.", modelo: "herdar" as const };
 
-const arquivos = { agentes: "agentes.json", instrucoes: "instrucoes.txt", configuracoes: "configuracoes.json" };
+const arquivos = {
+  agentes: "agentes.json",
+  instrucoes: "instrucoes.txt",
+  configuracoes: "configuracoes.json",
+  mcp: "mcp.json",
+};
 
 const COMMIT_E_PUSH = ["PowerShell(git commit:*)", "PowerShell(git push:*)", "Bash(git commit:*)", "Bash(git push:*)"];
 
@@ -881,5 +889,62 @@ describe("modelos que o Claude Code recebe", () => {
     expect(definicaoDosAgentes(turno).executor?.model).toBe("sonnet");
     expect(definicaoDosAgentes({ ...turno, subagentesProntos: [PRONTO] }).revisor?.model).toBe("sonnet");
     expect(valoresDe(montarArgumentos(turno, arquivos), "--model")).toEqual(["opus"]);
+  });
+});
+describe("ferramentas do app (servidor MCP) — navegador do agente", () => {
+  const NAVEGADOR = { navegador: true };
+  const FERRAMENTAS_DO_NAVEGADOR = NOMES_DAS_FERRAMENTAS_DO_NAVEGADOR.map(nomeDaFerramentaNoClaudeCode);
+  const comProntos = (turno: PedidoDeTurno): PedidoDeTurno => ({ ...turno, subagentesProntos: [PRONTO] });
+
+  it("os nomes são os 11 do Claude Code (mcp__orquestrador__navegador_*) e só vêm com o grupo ligado", () => {
+    expect(FERRAMENTAS_DO_NAVEGADOR).toHaveLength(11);
+    expect(FERRAMENTAS_DO_NAVEGADOR.every((nome) => nome.startsWith("mcp__orquestrador__navegador_"))).toBe(true);
+    expect(ferramentasDoAppNoClaudeCode(NAVEGADOR)).toEqual(FERRAMENTAS_DO_NAVEGADOR);
+    expect(ferramentasDoAppNoClaudeCode({ navegador: false })).toEqual([]);
+    expect(ferramentasDoAppNoClaudeCode({})).toEqual([]);
+  });
+
+  it("com o navegador, passa --mcp-config e libera as ferramentas em --allowedTools, não em --tools", () => {
+    const argumentos = montarArgumentos(pedido(false, "edicao_e_comandos"), arquivos, NAVEGADOR);
+
+    expect(valoresDe(argumentos, "--mcp-config")).toEqual(["mcp.json"]);
+    expect(argumentos.indexOf("--mcp-config")).toBeLessThan(argumentos.indexOf("--strict-mcp-config"));
+    expect(valoresDe(argumentos, "--allowedTools")).toEqual(expect.arrayContaining(FERRAMENTAS_DO_NAVEGADOR));
+    expect(valoresDe(argumentos, "--tools")).not.toEqual(expect.arrayContaining(FERRAMENTAS_DO_NAVEGADOR));
+    // `--disallowedTools` é variádico: continua por último.
+    expect(argumentos.at(-1)).toBe(comandosProibidosDoTurno(pedido(false)).at(-1));
+  });
+
+  it("sem o navegador, os argumentos não mudam: nada de --mcp-config nem de ferramentas mcp__", () => {
+    const turno = pedido(false, "edicao_e_comandos");
+    const semOApp = montarArgumentos(turno, arquivos);
+
+    expect(montarArgumentos(turno, arquivos, {})).toEqual(semOApp);
+    expect(montarArgumentos(turno, arquivos, { navegador: false })).toEqual(semOApp);
+    expect(semOApp).not.toContain("--mcp-config");
+    expect(semOApp.some((argumento) => argumento.startsWith("mcp__"))).toBe(false);
+    expect(semOApp).toContain("--strict-mcp-config");
+  });
+
+  it("o executor e os subagentes prontos recebem as ferramentas do navegador; sem ele, nenhuma", () => {
+    const turno = comProntos(pedido(false, "edicao_e_comandos"));
+
+    const com = definicaoDosAgentes(turno, "unix", NAVEGADOR);
+    const sem = definicaoDosAgentes(turno);
+
+    expect(com.executor?.tools).toEqual(expect.arrayContaining(FERRAMENTAS_DO_NAVEGADOR));
+    expect(com.revisor?.tools).toEqual(expect.arrayContaining(FERRAMENTAS_DO_NAVEGADOR));
+    expect(sem.executor?.tools.some((ferramenta) => ferramenta.startsWith("mcp__"))).toBe(false);
+    expect(sem.revisor?.tools.some((ferramenta) => ferramenta.startsWith("mcp__"))).toBe(false);
+  });
+
+  it("não mexe nas demais ferramentas: as de cada nível, as de artefato e as regras de commit seguem iguais", () => {
+    const turno = pedido(false, "edicao_e_comandos");
+    const semOApp = montarArgumentos(turno, arquivos);
+    const comOApp = montarArgumentos(turno, arquivos, NAVEGADOR);
+
+    expect(valoresDe(comOApp, "--tools")).toEqual(valoresDe(semOApp, "--tools"));
+    expect(valoresDe(comOApp, "--disallowedTools")).toEqual(valoresDe(semOApp, "--disallowedTools"));
+    expect(valoresDe(comOApp, "--allowedTools")).toEqual([...valoresDe(semOApp, "--allowedTools"), ...FERRAMENTAS_DO_NAVEGADOR]);
   });
 });

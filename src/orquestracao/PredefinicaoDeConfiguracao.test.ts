@@ -54,6 +54,8 @@ describe("PredefinicaoDeConfiguracao", () => {
       motorDoOrquestrador: "claude-code",
       motorDosSubagentes: "claude-code",
       ordemDeReserva: [],
+      // Nem o navegador do agente.
+      navegadorDoAgente: false,
     });
     // A configuração de origem não muda (objeto de valor).
     expect(configuracao.modeloDoOrquestrador).toBe("fable");

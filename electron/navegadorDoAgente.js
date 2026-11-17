@@ -1466,6 +1466,38 @@ function criarNavegadorDoAgente({
     return true;
   }
 
+  /**
+   * O usuário navega pelos botões do nó (voltar, avançar e recarregar), com o agente pausado. Vai direto ao
+   * histórico da página, sem passar pela fila de comandos do agente. Resolve false se não há navegador aberto
+   * ou, no voltar e no avançar, não há para onde ir.
+   */
+  function navegarPeloUsuario(evento, dados, acao) {
+    exigirPrincipal(evento);
+    const vista = vistaDoPedido(dados);
+    if (!vista || vista.view.webContents.isDestroyed()) return false;
+    const conteudo = vista.view.webContents;
+    const historico = conteudo.navigationHistory;
+    if (acao === "voltar") {
+      if (!historico.canGoBack()) return false;
+      historico.goBack();
+    } else if (acao === "avancar") {
+      if (!historico.canGoForward()) return false;
+      historico.goForward();
+    } else {
+      conteudo.reload();
+    }
+    registrar(`Orquestrador ${curto(vista.id)}: o usuário usou ${acao} no navegador.`);
+    avisarMudanca(vista);
+    return true;
+  }
+
+  /** voltar({ orquestradorId }): o usuário volta uma página. */
+  const aoVoltar = (evento, dados) => navegarPeloUsuario(evento, dados, "voltar");
+  /** avancar({ orquestradorId }): o usuário avança uma página (depois de voltar). */
+  const aoAvancar = (evento, dados) => navegarPeloUsuario(evento, dados, "avancar");
+  /** recarregar({ orquestradorId }): o usuário recarrega a página. */
+  const aoRecarregar = (evento, dados) => navegarPeloUsuario(evento, dados, "recarregar");
+
   /** estados(): o estado de cada navegador aberto (a tela pede ao carregar, para reabrir os nós). */
   function aoPedirEstados(evento) {
     exigirPrincipal(evento);
@@ -1564,6 +1596,9 @@ function criarNavegadorDoAgente({
     aoOcultar,
     aoPausar,
     aoRetomar,
+    aoVoltar,
+    aoAvancar,
+    aoRecarregar,
     aoFechar,
     aoPedirEstados,
     aoPedirFoto,

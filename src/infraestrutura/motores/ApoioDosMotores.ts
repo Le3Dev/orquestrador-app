@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { UsoDoTurno } from "../../orquestracao/EventoDeOrquestracao";
 import { FERRAMENTA_DE_DELEGACAO, precisaDeDelegacaoPeloApp } from "../../orquestracao/InstrucoesDoOrquestrador";
 import { PedidoDeTurno, ResultadoDoTurno } from "../../orquestracao/MotorDeAgentes";
+import { NOME_DO_GRUPO_DO_NAVEGADOR } from "../mcp/FerramentasDoNavegador";
 import { FerramentasDoTurno, RegistroDoTurnoMcp } from "../mcp/ServidorMcpDoApp";
 import { RegistroDeTurnosDoApp } from "./RegistroDeTurnosDoApp";
 
@@ -17,6 +18,16 @@ export type FerramentasDoAppNoTurno = (pedido: PedidoDeTurno) => FerramentasDoTu
 /** Por padrão, só a delegação, e só quando o motor precisa dela (`precisaDeDelegacaoPeloApp`). */
 export const FERRAMENTAS_DO_APP_POR_PADRAO: FerramentasDoAppNoTurno = (pedido) => ({
   [FERRAMENTA_DE_DELEGACAO]: precisaDeDelegacaoPeloApp(pedido.configuracao),
+});
+
+/**
+ * Os grupos do servidor MCP do app que um turno do Orquestrador liga, qualquer
+ * que seja o motor: o navegador do agente, só com a opção ligada, no nível
+ * "Editar e rodar comandos" e fora do planejamento (`permiteNavegador`). É o
+ * `ferramentasDoTurno` que o `root.ts` dá ao Claude Code.
+ */
+export const FERRAMENTAS_DO_APP_NO_TURNO: FerramentasDoAppNoTurno = (pedido) => ({
+  [NOME_DO_GRUPO_DO_NAVEGADOR]: pedido.configuracao.permiteNavegador(pedido.modo),
 });
 
 /**
