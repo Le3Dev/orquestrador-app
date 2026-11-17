@@ -2509,8 +2509,9 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   align-items: stretch;
   gap: 8px;
   cursor: auto;
-  /* A opacidade do chat inteiro (fundo e texto), pela preferência; a coluna fixa não a define. */
-  opacity: var(--opacidade-do-chat, 1);
+  /* A opacidade pela preferência não se aplica ao elemento inteiro (deixaria o texto do campo
+   * ilegível em valores baixos): só ao fundo/sombra dos painéis (ver .conversa-do-chat.painel-flutuante
+   * e .moldura-do-composer) e, com piso de legibilidade, à cor do texto do campo. */
 }
 
 /* O controle deslizante da opacidade (no cabeçalho da conversa e na barra do chat móvel). */
@@ -2539,12 +2540,14 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   animation: subir .2s ease-out both;
 }
 .conversa-do-chat[hidden] { display: none; }
-/* Flutuante, a conversa tem a pele das ilhas do canvas: fundo, borda, raio 14 e a mesma sombra. */
+/* Flutuante, a conversa tem a pele das ilhas do canvas: fundo, borda, raio 14 e a mesma sombra.
+ * Só o fundo e a sombra seguem a opacidade da preferência; o texto fica com a sua própria regra
+ * (ver .campo-do-chat e .mensagem-do-usuario/.mensagem-do-claude) para continuar legível. */
 .conversa-do-chat.painel-flutuante {
   border-radius: 14px;
   border-color: var(--border-forte);
-  background: var(--surface);
-  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7);
+  background: color-mix(in srgb, var(--surface) calc(var(--opacidade-do-chat, 1) * 100%), transparent);
+  box-shadow: 0 calc(10px * var(--opacidade-do-chat, 1)) calc(30px * var(--opacidade-do-chat, 1)) -12px rgba(0, 0, 0, calc(.7 * var(--opacidade-do-chat, 1)));
 }
 @keyframes subir { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
@@ -2860,8 +2863,8 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   position: relative;
   padding: 1px;
   border-radius: 14px;
-  background: var(--border-forte);
-  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7);
+  background: color-mix(in srgb, var(--border-forte) calc(var(--opacidade-do-chat, 1) * 100%), transparent);
+  box-shadow: 0 calc(10px * var(--opacidade-do-chat, 1)) calc(30px * var(--opacidade-do-chat, 1)) -12px rgba(0, 0, 0, calc(.7 * var(--opacidade-do-chat, 1)));
 }
 .chat-rapido-respondendo .moldura-do-composer {
   background: color-mix(in srgb, var(--active) 70%, var(--border-forte));
@@ -2878,7 +2881,7 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   gap: 4px;
   padding: 5px 5px 5px 7px;
   border-radius: 13px;
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) calc(var(--opacidade-do-chat, 1) * 100%), transparent);
 }
 /* Sem `overflow: hidden` no composer: o menu do modelo sai por cima dele. */
 .composer-do-chat > .faixa-de-progresso { position: absolute; inset: 0 12px auto; }
@@ -2912,7 +2915,9 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   border: 0;
   outline: none;
   background: transparent;
-  color: var(--primary);
+  /* O texto do campo não acompanha a opacidade do painel até o fim: piso de 75%, senão fica
+   * ilegível nos valores baixos da preferência (--opacidade-do-chat). */
+  color: color-mix(in srgb, var(--primary) max(calc(var(--opacidade-do-chat, 1) * 100%), 75%), transparent);
   font-family: var(--fonte-texto);
   font-size: 13.5px;
   line-height: 20px;

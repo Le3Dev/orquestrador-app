@@ -1184,6 +1184,10 @@ export function ChatRapido({
       await definirFocavel(true);
     }
     campo.current?.focus();
+    if (modoAtivo) {
+      // Reforço: o processo principal às vezes só torna a janela focável no próximo quadro.
+      requestAnimationFrame(() => campo.current?.focus());
+    }
   }
 
   /** Enviou, apertou Esc ou saiu do chat: o teclado volta ao app de trás. */
@@ -1379,20 +1383,42 @@ export function ChatRapido({
     }
     if (evento.key === "Escape") {
       if (respondendo) {
+        // Cancela a resposta, mas o campo continua ativo: dá para escrever a próxima pergunta já.
         evento.preventDefault();
         void cancelar();
       } else if (!fixo && temMensagens && !oculta) {
+        // Sem resposta em andamento: o Esc oculta a conversa, e aí sim o teclado volta ao app de trás.
         evento.preventDefault();
         ocultar();
+        liberarFoco();
+      } else {
+        // Nada para cancelar nem para ocultar (ex.: campo vazio, sem mensagens): libera o foco normalmente.
+        liberarFoco();
       }
-      // No modo invisível o Esc também devolve o teclado ao app de trás.
-      liberarFoco();
     }
   }
 
   function receberDitado(ditado: string): void {
-    setTexto((atual) => juntarDitado(atual, ditado));
-    requestAnimationFrame(ajustarAltura);
+    const elemento = campo.current;
+    const anterior = elemento?.value ?? texto;
+    const selecao =
+      elemento !== null && elemento.selectionStart !== null && elemento.selectionEnd !== null
+        ? { inicio: elemento.selectionStart, fim: elemento.selectionEnd }
+        : undefined;
+    // `juntarDitado` aceita a posição do cursor para inserir o ditado ali em vez de sempre
+    // concatenar no fim; sem campo focado, chama na forma de 2 argumentos.
+    const novo = ditado.trim();
+    setTexto((atual) => (selecao !== undefined ? juntarDitado(atual, ditado, selecao) : juntarDitado(atual, ditado)));
+    requestAnimationFrame(() => {
+      ajustarAltura();
+      // Com inserção no meio do texto, o cursor fica logo depois do trecho ditado, não no fim do campo.
+      if (selecao !== undefined && elemento !== null && novo !== "" && selecao.inicio !== anterior.length) {
+        const antes = anterior.slice(0, selecao.inicio);
+        const precisaEspacoAntes = antes !== "" && !/\s$/.test(antes);
+        const posicao = selecao.inicio + (precisaEspacoAntes ? 1 : 0) + novo.length;
+        elemento.setSelectionRange(posicao, posicao);
+      }
+    });
     campo.current?.focus();
   }
 
@@ -1468,7 +1494,8 @@ export function ChatRapido({
       ? { left: geometria.x, top: geometria.y, width: geometria.largura, height: geometria.altura }
       : { left: geometria.x, bottom: area.altura - geometria.y - geometria.altura, width: geometria.largura };
   }
-  // A opacidade vale para o chat inteiro (fundo e texto) e só para o flutuante: a coluna fixa e o resto do app não mudam.
+  // A opacidade vale para o fundo/sombra dos painéis do chat (o texto tem piso próprio de legibilidade,
+  // ver .campo-do-chat em index.css) e só para o flutuante: a coluna fixa e o resto do app não mudam.
   const estiloDoChat: CSSProperties | undefined =
     opacidade === OPACIDADE_DO_CHAT.padrao
       ? estiloMovel
