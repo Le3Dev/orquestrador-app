@@ -1113,6 +1113,21 @@ function definirFocavelDoModoInvisivel(focavel) {
       janela.setFocusable(true);
       janela.focus();
       janela.webContents.focus();
+      // No Windows, focar (SetForegroundWindow) uma janela skipTaskbar às vezes faz o
+      // Explorer reinserir o ícone na barra de tarefas mesmo já tendo sido escondido
+      // ao entrar no modo; reforça aqui. E tirar o WS_EX_NOACTIVATE (setFocusable(true))
+      // às vezes só vale no próximo quadro: sem reforçar, o campo não ganha o teclado no
+      // primeiro clique (ver ADR-42, "falhas conhecidas do setFocusable em tempo de execução").
+      janela.setSkipTaskbar(true);
+      setImmediate(() => {
+        if (modoInvisivel === atual && !janela.isDestroyed()) {
+          janela.setSkipTaskbar(true);
+          if (atual.janela.isFocusable() && !janela.isFocused()) {
+            janela.focus();
+            janela.webContents.focus();
+          }
+        }
+      });
     } else {
       janela.setFocusable(false);
       if (janela.isFocused()) janela.blur();
