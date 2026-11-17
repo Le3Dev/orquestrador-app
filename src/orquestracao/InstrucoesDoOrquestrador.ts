@@ -7,6 +7,7 @@ import type { AnexoDoPedido } from "./MotorDeAgentes";
 import { ModeloClaude } from "./ModeloClaude";
 import { comoModeloClaude } from "./ModeloDoMotor";
 import { ModoDoTurno } from "./ModoDoTurno";
+import { rotuloDoMotor } from "./Motor";
 import { DESCRICAO_DO_NIVEL, NivelDePermissao, TRABALHO_DIRETO_NO_NIVEL } from "./NivelDePermissao";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { QuantidadeDeSubagentes } from "./QuantidadeDeSubagentes";
@@ -14,6 +15,25 @@ import { DadosDoSubagentePronto, linhasDaEspecialidade, linhasDosSubagentesPront
 
 /** Nome do papel de quem executa as subtarefas. */
 export const NOME_DO_SUBAGENTE = "executor";
+
+/**
+ * A ferramenta do app (servidor MCP `orquestrador`) com que um Orquestrador
+ * delega subtarefas quando o motor dele, ou o dos subagentes, não é o Claude
+ * Code: só o Claude Code lança subagentes sozinho (ferramenta `Agent`).
+ */
+export const FERRAMENTA_DE_DELEGACAO = "delegar_subtarefas";
+
+/**
+ * Se o app precisa oferecer a delegação de subtarefas neste turno: sempre,
+ * menos quando Orquestrador e Subagentes são o Claude Code, que delega pela
+ * ferramenta `Agent`. Cobre o Orquestrador no Codex ou no Copilot e o
+ * Orquestrador no Claude Code com subagentes em outro motor.
+ */
+export function precisaDeDelegacaoPeloApp(
+  configuracao: Pick<ConfiguracaoDoOrquestrador, "motorDoOrquestrador" | "motorDosSubagentes">,
+): boolean {
+  return !(configuracao.motorDoOrquestrador === "claude-code" && configuracao.motorDosSubagentes === "claude-code");
+}
 
 /**
  * Linha com que o Orquestrador encerra a resposta quando, num turno de
@@ -120,6 +140,11 @@ function regraDaQuantidade(quantidade: QuantidadeDeSubagentes): string {
     return `quando delegar, use exatamente ${quantidade.limite} ${plural} "${NOME_DO_SUBAGENTE}" — nem mais, nem menos.`;
   }
   return `quando delegar, decida quantos subagentes "${NOME_DO_SUBAGENTE}" usar conforme o tamanho do pedido, no máximo ${quantidade.limite}. Prefira poucos subagentes com subtarefas bem definidas a muitos com subtarefas pequenas; se um basta, use um.`;
+}
+
+/** Como delegar quando o app oferece a ferramenta `delegar_subtarefas` (ver `precisaDeDelegacaoPeloApp`). */
+function linhaDaDelegacaoPeloApp(configuracao: ConfiguracaoDoOrquestrador): string {
+  return `- Como delegar: chame a ferramenta ${FERRAMENTA_DE_DELEGACAO} (do servidor MCP "orquestrador") com a lista \`subtarefas\`; cada item tem \`descricao\` (curta), \`prompt\` (autocontido) e, para usar um subagente pronto, o nome dele em \`subagente\`. Cada subtarefa roda num subagente "${NOME_DO_SUBAGENTE}" no ${rotuloDoMotor(configuracao.motorDosSubagentes)}, em paralelo, na mesma pasta e com as mesmas permissões deste pedido, e a ferramenta devolve o relatório de cada uma. Até ${configuracao.quantidadeDeSubagentes.limite} subtarefas por chamada.`;
 }
 
 /**
@@ -249,15 +274,22 @@ function regrasDePedidosGrandes(): string[] {
  * Não leva a configuração: o Claude Code grava este texto junto da sessão e,
  * ao retomá-la, ignora um texto novo. Delegação, quantidade e permissões mudam
  * entre pedidos e vão em cada mensagem (`mensagemParaOOrquestrador`).
+ *
+ * Com `delegacaoPeloApp` (Orquestrador sem subagente próprio, ver
+ * `precisaDeDelegacaoPeloApp`), a regra 3 manda delegar pela ferramenta
+ * `delegar_subtarefas`; sem ela, o texto é exatamente o que o Claude Code recebe.
  */
-export function instrucoesDoOrquestrador(pasta: PastaDeTrabalho): string {
+export function instrucoesDoOrquestrador(pasta: PastaDeTrabalho, delegacaoPeloApp = false): string {
+  const regraDeParalelismo = delegacaoPeloApp
+    ? `3. Delegue em paralelo: chame a ferramenta ${FERRAMENTA_DE_DELEGACAO} (servidor MCP "orquestrador") UMA vez por leva, com todas as subtarefas independentes de uma só vez; ela as executa em paralelo, em primeiro plano, e devolve o relatório de cada uma. Não use outro mecanismo de subagentes do seu CLI.`
+    : "3. Lance os subagentes em paralelo: todas as chamadas de subagente na mesma mensagem, em primeiro plano (não use execução em segundo plano), e aguarde todos terminarem antes de responder.";
   return [
     "Você é o ORQUESTRADOR desta conversa. Seu papel é coordenar: entender o pedido, dividir o trabalho, delegar o que valer a pena e entregar a síntese.",
     "",
     "Regras:",
     `1. Coordene. Faça você mesmo o trivial quando o bloco <${MARCA_DA_CONFIGURACAO}> permitir; delegue a subagentes "${NOME_DO_SUBAGENTE}" quando valer a pena, em subtarefas independentes. Nunca edite arquivos você mesmo: toda alteração no projeto vai para um subagente. A exceção são os artefatos (páginas e relatórios para o usuário, gravados na pasta de artefatos que o bloco indica), que não são arquivos do projeto.`,
     `2. Cada mensagem do usuário começa com um bloco <${MARCA_DA_CONFIGURACAO}> com as regras de delegação, a quantidade de subagentes e as permissões daquele pedido. Siga sempre o bloco mais recente — ele prevalece sobre estas regras — e não o comente na resposta.`,
-    "3. Lance os subagentes em paralelo: todas as chamadas de subagente na mesma mensagem, em primeiro plano (não use execução em segundo plano), e aguarde todos terminarem antes de responder.",
+    regraDeParalelismo,
     `4. Cada subtarefa deve ser autocontida: diga ao subagente o objetivo, os arquivos e pastas relevantes (caminhos absolutos dentro de ${pasta.caminho}), o que ele pode ou não alterar e o formato da resposta esperada.`,
     "5. Nunca deixe dois subagentes alterarem o mesmo arquivo.",
     "6. Ao terminar, responda ao usuário com uma síntese: o que foi feito, o resultado de cada subagente (se houver) e o que ficou pendente.",
@@ -330,6 +362,9 @@ function linhasDoContextoDaTroca(contexto: string | null): string[] {
  * iniciais ainda falam da configuração antiga; por isso o bloco declara que
  * as substitui.
  *
+ * Com `delegacaoPeloApp` (ver `precisaDeDelegacaoPeloApp`), o bloco ensina a
+ * delegar pela ferramenta `delegar_subtarefas`; sem ela, o texto é o de sempre.
+ *
  * Com `pastaDeArtefatos`, o bloco diz quando e como gravar artefatos nela. Com
  * a opção de artefatos online ligada, diz também que pode publicá-los no
  * claude.ai (`REGRA_DE_ARTEFATOS_ONLINE`), menos no planejamento.
@@ -363,6 +398,7 @@ export function mensagemParaOOrquestrador(
   itensLigados: readonly ItemLigado[] = [],
   previasAbertas: readonly string[] = [],
   contextoDaTroca: string | null = null,
+  delegacaoPeloApp = false,
 ): string {
   const planejamento = modo === "planejamento";
   // No planejamento os agentes só leem (as ferramentas já vêm travadas
@@ -402,8 +438,14 @@ export function mensagemParaOOrquestrador(
     "Configuração vigente para este pedido, definida pelo usuário na tela. Ela substitui qualquer regra de delegação, quantidade de subagentes ou permissão mencionada antes nesta conversa, inclusive nas suas instruções iniciais.",
     ...regrasDeDelegacao(nivelDoPedido),
     `- Subagentes: ${regraDaQuantidade(configuracao.quantidadeDeSubagentes)}`,
+    ...(delegacaoPeloApp ? [linhaDaDelegacaoPeloApp(configuracao)] : []),
     ...linhasDosSubagentesProntos(subagentesProntos, NOME_DO_SUBAGENTE, MARCA_DA_CONFIGURACAO),
-    ...regrasDeRapidez(nivelDoPedido, commitEPushPermitidos, comoModeloClaude(configuracao.modeloDosSubagentes)),
+    // Com a delegação do app não há ferramenta `Agent` nem `model`: a sugestão do Sonnet não se aplica.
+    ...regrasDeRapidez(
+      nivelDoPedido,
+      commitEPushPermitidos,
+      delegacaoPeloApp ? "sonnet" : comoModeloClaude(configuracao.modeloDosSubagentes),
+    ),
     `- Permissões: ${DESCRICAO_DO_NIVEL[nivelDoPedido]}. ${regraDeCommitEPush}`,
     ...regrasDoPlanejamento,
     ...regrasDoTamanho,

@@ -85,7 +85,10 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
     sinal: AbortSignal,
     aoReceberLinha?: () => void,
   ): Promise<ResultadoDoTurno> {
-    // Este motor só executa o Claude Code: os outros têm o próprio motor. Sem processo, sem arquivos.
+    // Este motor só executa o Claude Code: o Codex e o Copilot têm o próprio motor (`montarMotores`, em
+    // `infraestrutura/motores`), e o `RoteadorDeMotores` manda cada turno ao certo. A recusa fica como
+    // salvaguarda enquanto este motor ainda puder ser ligado direto ao serviço, sem o roteador; quando o
+    // roteador for o único ponto de entrada (o `root.ts` o usa), ela pode sair. Sem processo, sem arquivos.
     if (pedidoRecebido.motor !== "claude-code") {
       return {
         sucesso: false,
