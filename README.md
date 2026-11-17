@@ -19,6 +19,7 @@ Você cria **Orquestradores** — um por projeto, por exemplo — e conversa com
 - **Chat rápido:** uma caixa no centro, embaixo da tela, para perguntar algo ao Claude sem abrir um terminal: dúvidas rápidas, pesquisas na web, perguntas sobre os projetos e pequenas alterações. Para **editar arquivos e rodar comandos**, ele pede uma **autorização única** na primeira vez, que vale até o próximo `/clear`; commit e push, só quando você pedir. Ele também pode sugerir abrir um Orquestrador num projeto, já com um pedido, e criar ou editar um subagente pronto quando você pedir; a sugestão vira um cartão que só roda quando você clica.
 - **Artefatos:** peça a um Orquestrador ou ao chat uma página ou um relatório (*"crie um artefato com um gráfico das vendas por mês"*) e o resultado abre sozinho numa janela do canvas, ao lado do terminal de quem o criou (ou no centro, se veio do chat): uma página HTML interativa, isolada e sem acesso à internet, ou um documento Markdown formatado. Cada vez que o agente regrava o arquivo, nasce uma versão nova (`v1`, `v2`…); dá para ampliar, salvar como arquivo, renomear e apagar. Funciona em qualquer permissão, inclusive *Somente leitura* e Plan Mode (ver ADR-26).
 - **Navegador do agente:** cada Orquestrador pode ter um Chromium próprio, que o agente controla por ferramentas (abrir um site, ler a página, clicar, digitar, capturar a tela) e que você vê num nó do canvas, podendo assumi-lo no meio. Fica desligado por padrão e só vale em *Editar e rodar comandos*, fora do Plan Mode (ver ADR-44).
+- **Rotinas:** fluxos agendados (todo dia, em dias da semana, a cada tantos minutos ou uma vez) de 1 a 10 etapas, que mandam pedidos a Orquestradores, esperam sua aprovação ou esperam um tempo. Rodam só com o app aberto: com uma rotina ativa, fechar a janela esconde o app na bandeja do Windows (ver ADR-45).
 - Modelos disponíveis: **Fable**, Opus, Sonnet e Haiku, tanto nos Orquestradores quanto no chat.
 
 O motor é o próprio **Claude Code em modo headless**, usando o login da sua assinatura — não precisa de API key.
@@ -599,6 +600,19 @@ flowchart LR
   NO -. "Assumir · voltar · avançar · recarregar" .-> MAIN
 ```
 
+**Rotinas** (contexto `rotinas`, ver ADR-45): um agendador de ~30 s dentro do servidor dispara as rotinas na hora e roda cada execução etapa por etapa. O contexto não conhece a orquestração: só a porta `ExecutorDePedidos` (executar um pedido, aprovar ou descartar o plano, saber se o Orquestrador existe), implementada pelo `ExecutorDePedidosDaOrquestracao` sobre o `ServicoDeOrquestracao` e os eventos de cada Orquestrador.
+
+```mermaid
+flowchart LR
+  AG["Agendador<br/>(~30 s, só com o app aberto)"] --> SR[ServicoDeRotinas]
+  T[Tela · painel Rotinas] -- "/api/rotinas… · SSE /rotinas/eventos" --> SR
+  SR --> RR[("dados/rotinas/‹id›.json<br/>rotinas/‹id›/execucoes/‹execId›.json")]
+  SR -- "ExecutorDePedidos" --> EX[ExecutorDePedidosDaOrquestracao]
+  EX -- "enviarMensagem · enfileirarPedido ·<br/>aprovarPlano · descartarPlano" --> SO[ServicoDeOrquestracao]
+  SO -- "eventos do turno (CanalDeEventos)" --> EX
+  T -. "situação: ativas e aprovações" .-> BJ["Electron · bandeja do Windows<br/>(esconder ao fechar · notificação)"]
+```
+
 Organização por contexto (DDD):
 
 ```
@@ -646,6 +660,12 @@ src/
     RepositorioDeArtefatos.ts, EntradaDeArtefatos.ts   portas
   navegador/                 domínio do navegador do agente — contexto próprio (ver ADR-44): comandos
                              validados (ComandoDoNavegador), resultados, erros e o ServicoDoNavegador
+  rotinas/                   domínio das rotinas — contexto próprio (ver ADR-45)
+    Rotina.ts                  raiz do agregado (nome, gatilho, 1 a 10 etapas, "se perder a hora")
+    EtapaDaRotina, Gatilho     objetos de valor (pedido, aprovação ou espera; diário, semanal, intervalo, uma vez)
+    ExecucaoDaRotina.ts        entidade (etapa a etapa, com a pendência de aprovação)
+    ServicoDeRotinas.ts        casos de uso (stateless): criar, alterar, executar, aprovar, recusar, cancelar
+    ExecutorDePedidos.ts, RepositorioDeRotinas.ts, RepositorioDeExecucoes.ts, Temporizador.ts   portas
   infraestrutura/
     claudecode/                camada anticorrupção: Fachada (processo), Adaptador
                                (stream-json → eventos do domínio), Argumentos, Motor,
@@ -661,6 +681,9 @@ src/
     mcp/                       servidor MCP do app (ServidorMcpDoApp) e os grupos de ferramentas (navegador)
     navegador/                 ControleDoNavegadorPeloElectron (comandos pelo postMessage)
     montarNavegador.ts         composição do navegador do agente (controle, serviço, servidor MCP)
+    agenda/                    Agendador das rotinas (laço de ~30 s); arquivos/RepositorioDeRotinasEmArquivo
+    montarRotinas.ts           composição do contexto de rotinas (repositório, serviço, canal, agendador, rotas)
+    ExecutorDePedidosDaOrquestracao.ts   adaptador: a porta ExecutorDePedidos sobre o ServicoDeOrquestracao
     sse/, execucoes/           canal de eventos e controle de cancelamento
     sistema/                   worktrees git (Worktrees, GerenciadorDeWorktreesGit),
                                memória e processos do Claude
@@ -675,8 +698,9 @@ electron/                      aplicativo desktop (CommonJS): main.js (janelas, 
                                licença, configuração local, primeira abertura, atualização
                                automática (atualizacao.js), modo invisível (mouseDoModoInvisivel.js,
                                capturaDeTela.js), a escuta (escutaDoModoInvisivel.js) e o navegador do
-                               agente (navegadorDoAgente.js: a WebContentsView de cada Orquestrador);
-                               testes *.test.js
+                               agente (navegadorDoAgente.js: a WebContentsView de cada Orquestrador) e a
+                               bandeja do Windows (bandeja.js: esconder ao fechar, notificação, iniciar
+                               com o Windows); testes *.test.js
 web/src/
   paginas/CanvasDeOrquestradores.tsx   canvas (React Flow): nós, linhas, painéis, layout salvo
   componentes/canvas/                  NoTerminal (terminal do Orquestrador), NoRascunho (configuração),
@@ -725,6 +749,8 @@ dados/
                                como <anexoId>.<extensão>; de .docx, .xlsx e .pptx o servidor grava ao lado
                                o texto extraído, <anexoId>.<extensão>.txt (ver ADR-41)
   notas/<id>.json              uma nota por arquivo
+  rotinas/<id>.json            uma rotina por arquivo (ver ADR-45)
+  rotinas/<id>/execucoes/<execId>.json   as execuções de cada rotina (as últimas 50)
   preferencias.json            instruções gerais, perfis de instruções, subagentes prontos e autorrecuperação (ver ADR-30, ADR-31 e ADR-36)
   chat/
     conversa.json              estado da conversa do chat (gravação atômica)
@@ -1603,6 +1629,23 @@ flowchart LR
   - o servidor MCP é uma superfície nova, limitada ao `127.0.0.1`, ao token do turno e ao `Host`/`Origin`; ainda assim, quem lesse o `mcp.json` durante o turno (outro processo do mesmo usuário) poderia usar o navegador até o turno acabar;
   - hoje só o Claude Code recebe as ferramentas do navegador; o `Agent` do Claude Code (`executor` e prontos) as recebe junto, e a regra do bloco diz isso.
 
+**ADR-45 — Rotinas: contexto próprio ligado aos Orquestradores só pela porta `ExecutorDePedidos`, com agendador de ~30 s dentro do servidor.**
+- *Contexto:* o usuário repete pedidos (um relatório toda manhã, uma checagem a cada hora) e quer que o app os mande sozinhos, com um ponto de decisão no meio quando for o caso (aprovar antes de seguir). Não há um serviço de fundo separado do app, e um agendador do sistema operacional (Agendador de Tarefas do Windows) exigiria outro processo, outra instalação e outro login do Claude.
+- *Decisão:*
+  - **contexto `rotinas` próprio** (`src/rotinas/`), com linguagem própria: `Rotina` (raiz: nome, gatilho, 1 a 10 etapas, "se perder a hora") e `ExecucaoDaRotina` (etapa a etapa). Uma etapa é um **pedido** (a um Orquestrador, em execução ou planejamento, até 20 mil caracteres), uma **aprovação** (mensagem de até mil caracteres) ou uma **espera** de 1 a 1440 minutos. O gatilho é diário, semanal (dias e hora), a cada N minutos (N ≥ 15) ou uma vez. Até 50 rotinas;
+  - **a única ligação com a orquestração é a porta `ExecutorDePedidos`** (`executar`, `aprovarPlano`, `descartarPlano`, `orquestradorExiste`), implementada na camada de composição por `ExecutorDePedidosDaOrquestracao` sobre o `ServicoDeOrquestracao`. A Rotina não conhece turnos, filas nem motores. O adaptador manda o pedido como uma mensagem; com o Orquestrador ocupado, o pedido **entra na fila dele** (até 10; cheia, a etapa falha com a mensagem da fila) e a etapa espera ele sair e terminar. Se um turno que não é do pedido para a fila (falhou, foi cancelado ou deixou um plano para aprovar), o pedido sai da fila e a etapa falha: mandá-lo assim mesmo passaria por cima de uma decisão do usuário. O fim do turno é lido dos **eventos do Orquestrador** (não de uma consulta periódica), seguindo o pedido pela reserva de motor e pela retomada automática (ADR-36); sem um sinal do app em 2 s depois de uma falha, a etapa falhou. A resposta da etapa fica resumida em até 4 mil caracteres (o texto inteiro continua na conversa do Orquestrador);
+  - **plano e aprovação:** um pedido que termina com plano para aprovar, ou uma etapa de aprovação, **para a execução** (`aguardando_aprovacao`) até o usuário aprovar ou recusar, com o cartão no painel, o selo no botão e uma notificação do Windows. Aprovar um plano manda "Plano aprovado" ao Orquestrador (como o cartão dele); recusar descarta o plano e encerra a execução;
+  - **uma execução por vez por rotina:** a hora que vence com uma execução em andamento ou esperando aprovação vira uma execução `pulada`;
+  - **agendador de ~30 s** (`Agendador`), só com o app aberto. Ao abrir, o que estava `em_andamento` vira `interrompida`, e a hora que passou com o app fechado segue o "se perder a hora" de cada rotina: **pular** (padrão) ou **executar ao abrir** (no máximo uma execução de recuperação por rotina). Hora que atrasou além de 5 minutos com o app aberto (o computador dormiu) conta como perdida;
+  - **dados** em `<dados>/rotinas/<id>.json` e `rotinas/<id>/execucoes/<execId>.json` (as últimas 50 de cada rotina);
+  - **bandeja do Windows** (`electron/bandeja.js`): com pelo menos uma rotina ativa, fechar a janela **esconde o app na bandeja** em vez de encerrá-lo (na primeira vez, uma notificação explica); o menu do ícone tem *Abrir*, *Iniciar com o Windows* (abre escondido, com `--na-bandeja`) e *Sair*, que encerra de verdade. Sem rotina ativa, fechar encerra, como sempre. Só no Windows.
+- *Consequências:*
+  - as rotinas **só rodam com o app aberto** (ou escondido na bandeja): com o app fechado, nada dispara. É isso que o "se perder a hora" decide;
+  - o computador dormindo ou desligado também perde a hora; o que estava rodando quando o app fechou fica `interrompida` e não retoma sozinho;
+  - o pedido da rotina entra na fila do Orquestrador e compete com os pedidos do usuário: se o usuário tem a fila parada por falha, a execução da rotina falha em vez de furar a fila;
+  - cada pedido da rotina usa a cota do usuário como um pedido digitado, sem ele por perto: rotinas frequentes custam cota (a cada 15 minutos é o mínimo, de propósito);
+  - a rotina manda pedidos pelo mesmo caminho da tela (o `ServicoDeOrquestracao`): vale o nível de permissão do Orquestrador escolhido, e uma rotina em *Editar e rodar comandos* roda comandos sozinha.
+
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
 - `modelUsage` acumula a sessão, então o consumo do turno vem de `model_usage_since_last_result`;
@@ -1686,6 +1729,17 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | PATCH | `/artefatos/:id` | `{ titulo: string }` | 200 `ResumoDoArtefato`, com o título aparado (o mesmo título não grava nem gera evento). 400 `Título inválido.` (vazio depois de aparar, mais de 120 caracteres, não texto, ausente ou corpo que não é objeto; nada é gravado); 404 `Artefato não encontrado.` |
 | DELETE | `/artefatos/:id` | — | 204: apaga o artefato, todas as versões e o arquivo dele na pasta de entrada. 404 `Artefato não encontrado.` |
 | GET | `/artefatos/eventos` | — | `text/event-stream` só ao vivo: `retry: 3000`, os eventos nomeados abaixo e o comentário `: ping` a cada 25 s. Sem `id:`, sem histórico e sem `Last-Event-ID`: ao (re)conectar, a tela relê `GET /artefatos` |
+| GET | `/rotinas` | — | 200 `[ResumoDaRotina]`: `{ id, nome, ativa, gatilho, etapas, aoPerder, criadaEm, ultimaExecucaoEm, proximaExecucaoEm, execucaoAtiva }`; `execucaoAtiva` é a execução em andamento ou aguardando aprovação, ou `null` (ver ADR-45) |
+| POST | `/rotinas` | `{ nome, gatilho, etapas, aoPerder?: "pular" \| "executar_ao_abrir", ativa?: boolean }`. `nome`: 1 a 100 caracteres. `gatilho`: `{ tipo: "diario", hora: "HH:MM" }`, `{ tipo: "semanal", dias: [0–6], hora }` (0 = domingo), `{ tipo: "intervalo", minutos: 15–525600 }` ou `{ tipo: "uma_vez", em: "<ISO 8601, no futuro>" }`. `etapas` (1 a 10): `{ tipo: "pedido", orquestradorId, texto (até 20.000 caracteres), modo: "execucao" \| "planejamento" }`, `{ tipo: "aprovacao", mensagem (1 a 1.000) }` ou `{ tipo: "espera", minutos: 1–1440 }`. `aoPerder` ausente vale `"pular"`; `ativa` ausente vale `true` | 201 + `ResumoDaRotina`. 400 com a mensagem do campo (ex.: `A rotina deve ter de 1 a 10 etapas.`, `O intervalo deve ser de 15 a 525600 minutos.`, `O orquestrador escolhido na etapa 1 não existe.`); 409 `Você pode ter até 50 rotinas. Remova alguma para criar outra.` |
+| GET | `/rotinas/eventos` | — | `text/event-stream` só ao vivo (registrada antes de `/rotinas/:id`): `retry: 3000`, eventos nomeados `rotina_criada`, `rotina_alterada`, `rotina_removida`, `execucao_iniciada`, `etapa_iniciada`, `etapa_concluida`, `aguardando_aprovacao` e `execucao_encerrada`, com `data:` JSON (`{ rotina }`, `{ id }` ou `{ execucao, indice?, situacao? }`), e o comentário `: ping` a cada 25 s. Sem `id:` e sem histórico: ao (re)conectar, a tela relê `GET /rotinas` |
+| GET | `/rotinas/:id` | — | 200 `ResumoDaRotina`; 404 `Rotina não encontrada.` |
+| PATCH | `/rotinas/:id` | qualquer subconjunto de `{ nome, gatilho, etapas, aoPerder, ativa }` (os mesmos formatos do `POST`; `ativa` liga e desliga) | 200 + `ResumoDaRotina`; 400 e 404 como acima |
+| DELETE | `/rotinas/:id` | — | 204: remove a rotina e as execuções dela; as que estão em curso são canceladas. 404 `Rotina não encontrada.` |
+| POST | `/rotinas/:id/executar` | — | **202** + a `DadosDaExecucao` que começou, sem esperar o fim (o andamento vem pelo SSE). 409 `Esta rotina já está em execução.` / `Esta rotina tem uma execução aguardando aprovação. Aprove, recuse ou cancele antes de executar de novo.`; 404 |
+| GET | `/rotinas/:id/execucoes` | — | 200 `[DadosDaExecucao]`, da mais recente para a mais antiga (as últimas 50): `{ id, rotinaId, rotinaNome, origem: "agendada" \| "manual" \| "perdida", situacao, etapaAtual, etapas, resultados, iniciadaEm, encerradaEm, motivo, pendencia }`; `situacao`: `em_andamento`, `aguardando_aprovacao`, `concluida`, `falhou`, `cancelada`, `recusada`, `interrompida` ou `pulada` (a hora venceu com outra execução em curso); `pendencia`: o plano ou a mensagem de aprovação esperando o usuário |
+| POST | `/rotinas/execucoes/:execucaoId/aprovar` | — | 200 + `DadosDaExecucao`: uma etapa de aprovação segue para a próxima; um plano é executado pelo Orquestrador (ver ADR-45). 404 `Execução não encontrada.`; 409 se a execução não está esperando aprovação |
+| POST | `/rotinas/execucoes/:execucaoId/recusar` | `{ motivo?: string }` (até 2.000 caracteres; padrão `Recusada pelo usuário.`) | 200 + `DadosDaExecucao` encerrada como `recusada`; um plano pendente é descartado no Orquestrador. 404 / 409 como acima |
+| POST | `/rotinas/execucoes/:execucaoId/cancelar` | — | 200 + `DadosDaExecucao` encerrada como `cancelada`: aborta a execução em andamento (o pedido sai da fila do Orquestrador ou o turno é cancelado). 404 / 409 |
 
 Valores aceitos:
 - **Modelos:** `fable`, `opus`, `sonnet` ou `haiku`. O Claude Code resolve o apelido para a versão vigente (`fable` = Fable 5.2, a partir do Claude Code 2.1.322). Valem para os orquestradores e para o chat.
@@ -2136,6 +2190,16 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
     - **Logins:** cada Orquestrador tem a sua sessão (`persist:navegador-<id>`), separada da tela do app e da prévia ao vivo: um login feito ali fica ali. **Excluir o Orquestrador apaga o login e os cookies dele.**
     - **O que o navegador não faz:** downloads são bloqueados, as permissões do site (câmera, localização, notificações) são negadas e só abre `http` e `https`. O que a página diz é tratado pelo agente como dado, nunca como instrução, mas um site mal-intencionado ainda pode tentar enganá-lo: por isso é você quem liga.
     - A prévia ao vivo continua sendo para o agente mostrar algo a você; o navegador é para ele operar.
+22. **Rotinas** (ver ADR-45): um fluxo que o app roda sozinho, na hora que você marcar, mandando pedidos aos seus Orquestradores.
+    - **Abrir:** o botão **Rotinas**, logo abaixo da ilha do canto superior esquerdo (o mesmo lugar dos painéis de *Subagentes* e *Skills*: um painel da barra por vez). Com execuções esperando você, um selo amarelo com o número aparece no botão, mesmo com o painel fechado.
+    - **Criar:** **+ Nova rotina**. Dê um nome e escolha *quando roda*: **Todo dia** (numa hora), **Em dias da semana**, **A cada tantos minutos** (mínimo 15) ou **Uma vez só** (numa data futura). Depois, de 1 a 10 **etapas**, na ordem: um **pedido** a um Orquestrador (*Executar*, ou *Só planejar*, em que o plano espera a sua aprovação), uma **aprovação** (uma pergunta que para a rotina até você decidir) ou uma **espera** de 1 a 1.440 minutos. Até 50 rotinas.
+    - **Se perder a hora:** *Pular essa execução* (padrão) ou *Executar assim que o app abrir*. Vale quando o app estava fechado (ou o computador dormindo) na hora marcada.
+    - **Aprovar:** quando um pedido volta com um plano, ou a rotina chega numa etapa de aprovação, ela **para** e um cartão aparece no painel, com um aviso (e uma notificação do Windows: clicar nela abre o painel). **Aprovar** segue a rotina (o plano é executado pelo Orquestrador); **Recusar** (com um motivo, se quiser) descarta o plano e encerra a execução.
+    - **Uma por vez:** cada rotina roda uma execução de cada vez. Se a hora vence com a anterior ainda rodando ou esperando aprovação, aquela execução aparece como **pulada**.
+    - **Orquestrador ocupado:** o pedido da rotina entra na fila dele (até 10) e roda quando chegar a vez. Se o pedido da frente falhou, foi cancelado ou deixou um plano para você aprovar, a fila para e a etapa da rotina falha, sem passar por cima do que você ainda tem a decidir.
+    - **Acompanhar:** abrir uma rotina mostra as etapas, o **Histórico** (as últimas 50 execuções, com o resultado de cada etapa, cortado em 4 mil caracteres: o texto inteiro está na conversa do Orquestrador), **Executar agora**, **Editar**, **Ativar** ou **Desativar** e a exclusão. **Cancelar execução** interrompe o pedido em curso (ele sai da fila ou o turno é cancelado).
+    - **Só com o app aberto:** o app confere as rotinas a cada ~30 s e **só no Windows** guarda um ícone na **bandeja**. Com pelo menos uma rotina ativa, **fechar a janela esconde o app na bandeja** em vez de encerrá-lo (na primeira vez, o app avisa); o menu do ícone tem **Abrir**, **Iniciar com o Windows** (no app instalado; abre já escondido) e **Sair**, que encerra de verdade. Sem rotina ativa, fechar encerra, como sempre. O que estava rodando quando o app fechou aparece como **interrompida**.
+    - **Cuidado:** cada pedido usa a sua cota e as permissões do Orquestrador escolhido, sem você por perto: uma rotina num Orquestrador em *Editar e rodar comandos* roda comandos sozinha.
 
 **Avisos que podem aparecer:**
 - *"orquestrador lendo …"*, *"orquestrador executando …"* (no log do terminal): não é erro. O Orquestrador está fazendo um trivial ele mesmo (ver ADR-14). Isso vale sempre e não tem opção para desligar (ver ADR-28); se quiser que ele delegue algo específico, peça no texto do pedido.

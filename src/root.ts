@@ -49,8 +49,10 @@ import {
   modoDeAcesso,
 } from "./infraestrutura/Configuracao";
 import { ControleDeExecucoesEmMemoria } from "./infraestrutura/execucoes/ControleDeExecucoesEmMemoria";
+import { ExecutorDePedidosDaOrquestracao } from "./infraestrutura/ExecutorDePedidosDaOrquestracao";
 import { montarArtefatos, pastaDeEntradaDosArtefatos } from "./infraestrutura/montarArtefatos";
 import { montarNavegador } from "./infraestrutura/montarNavegador";
+import { montarRotinas } from "./infraestrutura/montarRotinas";
 import { FERRAMENTAS_DO_APP_NO_TURNO } from "./infraestrutura/motores/ApoioDosMotores";
 import { DiagnosticadorDoClaudeNoSistema } from "./infraestrutura/sistema/DiagnosticadorDoClaudeNoSistema";
 import { GerenciadorDeWorktreesGit } from "./infraestrutura/sistema/GerenciadorDeWorktreesGit";
@@ -360,6 +362,13 @@ async function iniciar(): Promise<void> {
   // Artefatos: coleta o que os agentes gravam na pasta de entrada e serve na tela.
   const artefatos = await montarArtefatos({ pastaDeDados });
 
+  // Rotinas (ADR-45): contexto próprio, ligado aos Orquestradores só pela porta `ExecutorDePedidos`, que
+  // manda cada pedido pelo `ServicoDeOrquestracao` e lê o fim do turno nos eventos do canal.
+  const rotinas = await montarRotinas({
+    pastaDeDados,
+    executorDePedidos: new ExecutorDePedidosDaOrquestracao({ servico, repositorio, canal }),
+  });
+
   // A tela consulta /api/saude a cada poucos segundos para saber se o servidor
   // está no ar. O instante de início denuncia um reinício: os pedidos que
   // rodavam antes dele foram interrompidos.
@@ -425,6 +434,8 @@ async function iniciar(): Promise<void> {
     void catalogoDePlugins.reconciliar();
     rotas.use("/api", criarPluginsRoutes({ catalogo: catalogoDePlugins }));
     rotas.use("/api", artefatos.rotas);
+    // Rotinas agendadas: CRUD, execuções, aprovação e o SSE `/rotinas/eventos`.
+    rotas.use("/api", rotinas.rotas);
     rotas.use(
       "/api",
       criarTerminaisRoutes({
@@ -474,6 +485,15 @@ async function iniciar(): Promise<void> {
       return;
     }
     desligando = true;
+    // As Rotinas antes dos Orquestradores: marcam o que rodava como interrompido e abortam os pedidos
+    // (que saem da fila ou cancelam o turno) antes de os turnos serem cancelados aqui; senão a execução
+    // viraria "cancelada". Com um limite curto, para o app nunca ficar preso ao fechar.
+    const limiteDasRotinas = new Promise<void>((resolver) => setTimeout(resolver, 4_000));
+    void Promise.race([rotinas.encerrar(), limiteDasRotinas])
+      .catch((erro: unknown) => console.warn("[rotinas] Falha ao encerrar as rotinas:", erro))
+      .then(() => encerrarOServidor(sinal));
+  };
+  const encerrarOServidor = (sinal: string): void => {
     const cancelados = execucoes.cancelarTodas();
     console.log(`[${sinal}] Encerrando${cancelados > 0 ? ` e cancelando ${cancelados} turno(s)` : ""}.`);
     terminais.encerrarTodos();
@@ -522,6 +542,10 @@ async function iniciar(): Promise<void> {
   };
   process.once("uncaughtException", cair);
   process.once("unhandledRejection", cair);
+
+  // Com o servidor no ar: o que rodava quando o app fechou vira "interrompida", as horas perdidas seguem a
+  // regra de cada rotina e o agendador passa a olhar as rotinas a cada ~30 s (só com o app aberto).
+  rotinas.iniciar().catch((erro: unknown) => console.warn("[rotinas] Falha ao iniciar o agendador:", erro));
 }
 
 // Nos testes (vitest), só montarAplicacao é usada: importar não sobe o servidor.

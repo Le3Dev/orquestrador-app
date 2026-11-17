@@ -59,7 +59,7 @@ import {
 } from "../componentes/canvas/IlhasDoCanvas";
 import { type ControleDaPaleta, PaletaDeComandos } from "../componentes/canvas/PaletaDeComandos";
 import { rodandoNoDesktop, rodandoNoMac } from "../shared/ponteDoDesktop";
-import { AvisoDeConexao, ErroDoCanvas, StatusDoCanvas } from "../componentes/canvas/PaineisDoCanvas";
+import { AvisoDeConexao, ErroDoCanvas, RotinasDoCanvas, StatusDoCanvas } from "../componentes/canvas/PaineisDoCanvas";
 import { type AbaDoPainelDeSkills, PainelDeSkills } from "../componentes/canvas/PainelDeSkills";
 import { PainelDeSubagentes } from "../componentes/canvas/PainelDeSubagentes";
 import { api, ErroDaApi, mensagemDeErro } from "../shared/api/cliente";
@@ -272,7 +272,7 @@ const FOLGA_DO_ENQUADRAMENTO = 0.12;
 const LIMITES_DO_ZOOM = { minZoom: 0.1, maxZoom: 2 };
 const VIEWPORT_PADRAO: Viewport = { x: 0, y: 0, zoom: 1 };
 /** Os painéis que abrem logo abaixo da ilha do canto superior esquerdo; só um fica aberto por vez. */
-type PainelDaBarra = "subagentes" | "skills";
+type PainelDaBarra = "subagentes" | "skills" | "rotinas";
 /** Nome e dica do botão do minimapa, no canto inferior direito. */
 const DICA_DO_MINIMAPA = { mostrar: "Mostrar minimapa", esconder: "Esconder minimapa" } as const;
 /**
@@ -1839,6 +1839,13 @@ function Canvas() {
     [abrirTerminal],
   );
   const abrirPainelDeSubagentes = useCallback(() => abrirPainel("subagentes"), [abrirPainel]);
+  // As rotinas agendadas: quem pode receber o pedido de cada etapa são os orquestradores que existem (só id e nome).
+  // `abrirPainelDeRotinas` também é o que a notificação do Windows pede ao clicar (`aoPedirPainel`).
+  const orquestradoresParaRotinas = useMemo(
+    () => orquestradores?.map(({ id, nome }) => ({ id, nome })) ?? null,
+    [orquestradores],
+  );
+  const abrirPainelDeRotinas = useCallback(() => abrirPainel("rotinas"), [abrirPainel]);
   // O painel de skills abre em Instaladas (uma skill ou "Ver todas") ou em Explorar ("Explorar marketplace").
   // `abertura` muda a cada pedido: abrir de novo em outra aba reinicia o painel na aba pedida.
   const [aberturaDeSkills, setAberturaDeSkills] = useState<{ aba: AbaDoPainelDeSkills; abertura: number }>({
@@ -1888,6 +1895,14 @@ function Canvas() {
           aoAbrirSkills={abrirPainelDeSkills}
           aoExplorarMarketplace={explorarMarketplace}
         />
+        {/* Fica montado com o painel fechado: é ele que mantém o selo das aprovações e avisa o app desktop. */}
+        <RotinasDoCanvas
+          servidorConectado={servidor.conectado}
+          orquestradores={orquestradoresParaRotinas}
+          aberto={painelAberto === "rotinas"}
+          aoAbrir={abrirPainelDeRotinas}
+          aoFechar={fecharPainel}
+        />
         {painelAberto === "subagentes" && <PainelDeSubagentes aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />}
         {painelAberto === "skills" && (
           <PainelDeSkills
@@ -1923,6 +1938,9 @@ function Canvas() {
       focarOrquestrador,
       subagentesProntos,
       abrirPainelDeSubagentes,
+      servidor.conectado,
+      orquestradoresParaRotinas,
+      abrirPainelDeRotinas,
       skills,
       erroDasSkills,
       abrirPainelDeSkills,

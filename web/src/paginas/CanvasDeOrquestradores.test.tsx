@@ -4,6 +4,7 @@ import { act, createEvent, fireEvent, render, screen, waitFor, within } from "@t
 
 import { apiDosArtefatos, type EventoDeArtefato, type ResumoDoArtefato } from "../shared/api/artefatos";
 import { api } from "../shared/api/cliente";
+import { apiDasRotinas } from "../shared/api/rotinas";
 import type {
   DadosDaConfiguracao,
   DadosDaNota,
@@ -27,6 +28,7 @@ import type { ApiDoNavegadorDoAgente } from "../shared/canvas/ponteDoNavegador";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../shared/estado/aplicarEvento";
 import { ESTADO_INICIAL_DO_CHAT, type EstadoDoChatNaTela } from "../shared/estado/aplicarEventoDoChat";
 import type { ArtefatosAoVivo } from "../shared/hooks/useArtefatos";
+import type { PonteDasRotinas } from "../shared/hooks/useRotinasNoDesktop";
 import type { EstadoDaAtualizacao } from "../shared/ponteDoDesktop";
 import { ErroDaApi } from "../shared/api/cliente";
 import { avisarSubagentesProntosMudaram } from "../shared/subagentesProntos";
@@ -236,15 +238,113 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Gerenciar subagentes" }));
 
     const painel = await screen.findByRole("region", { name: "Subagentes prontos" });
-    // Flutua logo abaixo da ilha do nome, na mesma coluna.
+    // Flutua logo abaixo da ilha do nome, na mesma coluna (só o botão Rotinas fica entre os dois).
     expect(painel.parentElement).toHaveClass("coluna-da-ilha-esquerda");
-    expect(painel.previousElementSibling).toBe(screen.getByTestId("ilha-do-nome"));
+    expect(painel.previousElementSibling).toBe(screen.getByRole("button", { name: "Rotinas" }));
+    expect(screen.getByRole("button", { name: "Rotinas" }).previousElementSibling).toBe(screen.getByTestId("ilha-do-nome"));
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Seu canvas de agentes" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Fechar subagentes" }));
     expect(screen.queryByRole("region", { name: "Subagentes prontos" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Seu canvas de agentes" })).toBeInTheDocument();
+  });
+
+  describe("rotinas na coluna da esquerda", () => {
+    beforeEach(() => {
+      vi.spyOn(apiDasRotinas, "listar").mockResolvedValue([]);
+      vi.spyOn(apiDasRotinas, "listarExecucoes").mockResolvedValue([]);
+      vi.spyOn(api, "lerPreferencias").mockRejectedValue(new Error("sem servidor"));
+    });
+
+    afterEach(() => {
+      delete (window as unknown as { electron?: unknown }).electron;
+      simulados.orquestradores.orquestradores = [];
+    });
+
+    it("o botão Rotinas fica logo abaixo da ilha e abre e fecha o painel, que passa a ser o único da barra", async () => {
+      render(<CanvasDeOrquestradores />);
+      await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+
+      const botao = screen.getByRole("button", { name: "Rotinas" });
+      expect(botao.parentElement).toHaveClass("coluna-da-ilha-esquerda");
+      expect(botao.previousElementSibling).toBe(screen.getByTestId("ilha-do-nome"));
+      expect(botao).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByRole("region", { name: "Rotinas" })).not.toBeInTheDocument();
+
+      fireEvent.click(botao);
+      const painel = await screen.findByRole("region", { name: "Rotinas" });
+      expect(painel.parentElement).toHaveClass("coluna-da-ilha-esquerda");
+      expect(botao).toHaveAttribute("aria-expanded", "true");
+
+      fireEvent.click(screen.getByRole("button", { name: "Fechar rotinas" }));
+      expect(screen.queryByRole("region", { name: "Rotinas" })).not.toBeInTheDocument();
+    });
+
+    it("um painel da barra por vez: abrir as rotinas fecha os subagentes e abrir os subagentes fecha as rotinas", async () => {
+      render(<CanvasDeOrquestradores />);
+      await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+
+      fireEvent.click(screen.getByRole("button", { name: "Novo" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: /^Subagentes/ }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Gerenciar subagentes" }));
+      expect(await screen.findByRole("region", { name: "Subagentes prontos" })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Rotinas" }));
+      expect(await screen.findByRole("region", { name: "Rotinas" })).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Subagentes prontos" })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Novo" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: /^Subagentes/ }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Gerenciar subagentes" }));
+      expect(await screen.findByRole("region", { name: "Subagentes prontos" })).toBeInTheDocument();
+      expect(screen.queryByRole("region", { name: "Rotinas" })).not.toBeInTheDocument();
+    });
+
+    it("os orquestradores da tela (id e nome) vão ao painel, para escolher quem recebe cada etapa", async () => {
+      simulados.orquestradores.orquestradores = [orquestrador("o1"), orquestrador("o2")];
+      render(<CanvasDeOrquestradores />);
+      await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+
+      fireEvent.click(screen.getByRole("button", { name: "Rotinas" }));
+      await screen.findByRole("region", { name: "Rotinas" });
+      fireEvent.click(await screen.findByRole("button", { name: "+ Nova rotina" }));
+
+      expect(await screen.findByRole("option", { name: "Orquestrador o1" })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: "Orquestrador o2" })).toBeInTheDocument();
+    });
+
+    it("com o servidor fora, o painel diz que as rotinas estão indisponíveis, sem quebrar o canvas", async () => {
+      vi.spyOn(apiDasRotinas, "listar").mockRejectedValue(new ErroDaApi("O servidor respondeu com erro 404.", 404));
+      render(<CanvasDeOrquestradores />);
+      await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+
+      fireEvent.click(screen.getByRole("button", { name: "Rotinas" }));
+
+      expect(await screen.findByText("Rotinas indisponíveis")).toBeInTheDocument();
+      expect(screen.getByRole("textbox", { name: "Pergunta para o Claude" })).toBeInTheDocument();
+    });
+
+    it("no app desktop, o clique na notificação do Windows (aoPedirPainel) abre o painel de rotinas", async () => {
+      let pedirPainel: () => void = () => undefined;
+      (window as unknown as { electron: { desktop: boolean; rotinas: PonteDasRotinas } }).electron = {
+        desktop: true,
+        rotinas: {
+          informarSituacao: () => Promise.resolve(),
+          aoPedirPainel: (callback) => {
+            pedirPainel = callback;
+            return () => undefined;
+          },
+        },
+      };
+      render(<CanvasDeOrquestradores />);
+      await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+      expect(screen.queryByRole("region", { name: "Rotinas" })).not.toBeInTheDocument();
+
+      act(() => pedirPainel());
+
+      expect(await screen.findByRole("region", { name: "Rotinas" })).toBeInTheDocument();
+    });
   });
 
   it("com \"Chat fixo à esquerda\", o chat vira uma coluna ao lado do canvas; \"soltar\" o devolve ao pé", async () => {

@@ -15,7 +15,7 @@ export function BotaoDasRotinas({ aberto, aguardandoAprovacao, aoAlternar }: Pro
   return (
     <button
       type="button"
-      className="btn btn-sm btn-outline botao-de-painel self-start"
+      className="btn btn-sm btn-outline botao-de-painel mt-2 self-start"
       aria-expanded={aberto}
       aria-label={rotulo}
       title={aguardandoAprovacao > 0 ? "Há rotinas esperando sua aprovação" : "Rotinas agendadas"}
