@@ -159,6 +159,51 @@ contextBridge.exposeInMainWorld("electron", {
     },
   },
 
+  // Navegador do agente (electron/navegadorDoAgente.js): um Chromium por Orquestrador, que os agentes
+  // controlam por ferramentas MCP. A tela (próxima onda) mostra um nó do canvas por Orquestrador; `orquestradorId`
+  // identifica o navegador. A vista nativa fica POR BAIXO da tela, pintando, até o nó pedir `mostrar`.
+  //
+  // Fluxo da tela: `aoAtivar` avisa que o agente usou o navegador pela primeira vez (abra o nó); com o nó
+  // aberto, `mostrar` com o retângulo do corpo do nó e `posicionar` a cada mudança dele; ao fechar o nó,
+  // `ocultar` (a vista desce, o agente segue usando); "assumir" = `pausar` (o agente é recusado com "O usuário
+  // assumiu o navegador; tente depois." e a vista recebe o teclado) e "devolver" = `retomar`; ao excluir o
+  // Orquestrador, `fechar(id, true)`. Ao carregar, `estados()` devolve os navegadores já abertos.
+  navegadorDoAgente: {
+    // { x, y, largura, altura, zoom }: onde o corpo do nó está na tela (pixels CSS; zoom = escala do canvas).
+    // Só vale com a vista mostrada; enviar a cada quadro em que muda.
+    posicionar: (orquestradorId, retangulo) => ipcRenderer.send("navegador-do-agente:posicionar", { orquestradorId, retangulo }),
+    // Põe a vista sobre o nó (acima da tela). Resolve false se recusou (sem navegador aberto, modo invisível).
+    mostrar: (orquestradorId, retangulo) => ipcRenderer.invoke("navegador-do-agente:mostrar", { orquestradorId, retangulo }),
+    // Devolve a vista para baixo da tela; ela continua viva e o agente segue usando.
+    ocultar: (orquestradorId) => ipcRenderer.invoke("navegador-do-agente:ocultar", { orquestradorId }),
+    // O usuário assume: comandos do agente são recusados e o que está rodando é cancelado.
+    pausar: (orquestradorId) => ipcRenderer.invoke("navegador-do-agente:pausar", { orquestradorId }),
+    // O usuário devolve o navegador ao agente.
+    retomar: (orquestradorId) => ipcRenderer.invoke("navegador-do-agente:retomar", { orquestradorId }),
+    // Fecha o navegador do Orquestrador; `apagarDados` (true ao excluir o Orquestrador) apaga também login e cookies.
+    fechar: (orquestradorId, apagarDados = false) =>
+      ipcRenderer.invoke("navegador-do-agente:fechar", { orquestradorId, apagarDados: apagarDados === true }),
+    // Os navegadores abertos: [{ orquestradorId, url, titulo, carregando, ultimaAcao, emUsoPeloAgente, pausado, podeVoltar, podeAvancar }].
+    estados: () => ipcRenderer.invoke("navegador-do-agente:estados"),
+    // Data URI (JPEG, até 1000 px) da página, para o nó mostrar enquanto a vista nativa está por baixo; null se falhou.
+    foto: (orquestradorId) => ipcRenderer.invoke("navegador-do-agente:foto", { orquestradorId }),
+    // Mudanças: { orquestradorId, url, titulo, carregando, ultimaAcao, emUsoPeloAgente, pausado, podeVoltar, podeAvancar }
+    // (url e titulo atuais; ultimaAcao: texto curto do que o agente está fazendo ou fez, sem o texto digitado;
+    // emUsoPeloAgente: um comando está rodando). Só vem quando algo muda. Devolve a função que cancela a inscrição.
+    aoMudar: (callback) => {
+      const ouvinte = (_evento, estado) => callback(estado);
+      ipcRenderer.on("navegador-do-agente:mudou", ouvinte);
+      return () => ipcRenderer.removeListener("navegador-do-agente:mudou", ouvinte);
+    },
+    // O agente usou o navegador de um Orquestrador pela primeira vez (ou de novo, depois de fechado): { orquestradorId }.
+    // A tela abre o nó. Devolve a função que cancela a inscrição.
+    aoAtivar: (callback) => {
+      const ouvinte = (_evento, dados) => callback(dados);
+      ipcRenderer.on("navegador-do-agente:ativado", ouvinte);
+      return () => ipcRenderer.removeListener("navegador-do-agente:ativado", ouvinte);
+    },
+  },
+
   primeiraAbertura: {
     carregar: () => ipcRenderer.invoke("primeira-abertura:carregar"),
     escolherPasta: (atual) => ipcRenderer.invoke("primeira-abertura:escolher-pasta", atual),

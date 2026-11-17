@@ -99,6 +99,7 @@ const {
 } = require("./configuracaoLocal");
 const { importarHistorico, localizarHistoricoAntigo } = require("./importacaoDoHistorico");
 const { criarVistasDaPrevia } = require("./vistaDaPrevia");
+const { criarNavegadorDoAgente } = require("./navegadorDoAgente");
 const { baixarModelo, pastaDosModelos } = require("./modelosDaTranscricao");
 const {
   ARGUMENTO_DA_TRANSCRICAO_NATIVA,
@@ -406,6 +407,8 @@ function subirServidor() {
     serviceName: "Servidor do Orquestrador",
   });
   servidor.filho = filho;
+  // Comandos do navegador do agente (MCP): o servidor pede, o app executa e responde por este mesmo `filho`.
+  navegadorDoAgente.ligarAoServidor(filho);
 
   const saida = leitorDeLinhas("servidor");
   const erros = leitorDeLinhas("servidor:erro");
@@ -828,6 +831,7 @@ async function abrirJanelaPrincipal() {
     if (janelaPrincipal === janela) janelaPrincipal = null;
   });
   vistasDaPrevia.anexar(janela);
+  navegadorDoAgente.anexar(janela);
   maximizacoes.set(
     janela,
     criarMaximizacao(janela, screen, (maximizada) => {
@@ -998,6 +1002,36 @@ ipcMain.handle("previa:fechar", (evento, dados) => vistasDaPrevia.aoFechar(event
 ipcMain.handle("previa:sair-das-contas", (evento) => vistasDaPrevia.aoSairDasContas(evento));
 
 // ──────────────────────────────────────────────────────────────────────────
+// Navegador do agente (electron/navegadorDoAgente.js): um Chromium por
+// Orquestrador, controlado pelos agentes por ferramentas MCP. Os comandos
+// chegam do servidor (utilityProcess) por `navegador:comando`; os IPC abaixo
+// são da tela (posicionar o nó, mostrar, ocultar, pausar/assumir, fechar) e só
+// valem se vierem do quadro principal da janela principal.
+// ──────────────────────────────────────────────────────────────────────────
+const navegadorDoAgente = criarNavegadorDoAgente({
+  WebContentsView,
+  session,
+  janelaPrincipal: () => janelaPrincipal,
+  eDaJanelaPrincipal: (evento) =>
+    Boolean(janelaPrincipal) &&
+    !janelaPrincipal.isDestroyed() &&
+    evento.sender === janelaPrincipal.webContents &&
+    evento.senderFrame === janelaPrincipal.webContents.mainFrame,
+  bloqueada: () => modoInvisivel !== null,
+  nomeDoApp: app.getName(),
+  registrar: (texto) => registrarNoLog("navegador", texto),
+});
+
+ipcMain.on("navegador-do-agente:posicionar", (evento, dados) => navegadorDoAgente.aoPosicionar(evento, dados));
+ipcMain.handle("navegador-do-agente:mostrar", (evento, dados) => navegadorDoAgente.aoMostrar(evento, dados));
+ipcMain.handle("navegador-do-agente:ocultar", (evento, dados) => navegadorDoAgente.aoOcultar(evento, dados));
+ipcMain.handle("navegador-do-agente:pausar", (evento, dados) => navegadorDoAgente.aoPausar(evento, dados));
+ipcMain.handle("navegador-do-agente:retomar", (evento, dados) => navegadorDoAgente.aoRetomar(evento, dados));
+ipcMain.handle("navegador-do-agente:fechar", (evento, dados) => navegadorDoAgente.aoFechar(evento, dados));
+ipcMain.handle("navegador-do-agente:estados", (evento) => navegadorDoAgente.aoPedirEstados(evento));
+ipcMain.handle("navegador-do-agente:foto", (evento, dados) => navegadorDoAgente.aoPedirFoto(evento, dados));
+
+// ──────────────────────────────────────────────────────────────────────────
 // IPC — atualização automática (tela principal). Fora do app instalado,
 // obter/verificar devolvem situacao "indisponivel" com a versão atual.
 // ──────────────────────────────────────────────────────────────────────────
@@ -1139,6 +1173,8 @@ function entrarNoModoInvisivel() {
   modoInvisivel = { janela, anterior };
   // A vista nativa da prévia é uma camada por cima da tela: some no modo invisível.
   vistasDaPrevia.desativarTodas();
+  // O navegador do agente sai da janela (que fica transparente) e segue pintando fora dela.
+  navegadorDoAgente.reaplicarTodas();
   // Maximizada fica como está (cobre o monitor); os bounds só são restaurados se não estava.
   janela.setAlwaysOnTop(true, "screen-saver");
   janela.setContentProtection(true);
@@ -1166,6 +1202,8 @@ function sairDoModoInvisivel() {
   if (rastreio) rastreio.parar();
   atalhosDoModoInvisivel.desregistrarDoModo();
   if (janela.isDestroyed()) return;
+  // O navegador do agente volta para baixo da tela (a janela deixou de ser transparente).
+  navegadorDoAgente.reaplicarTodas();
   janela.setOpacity(1);
   try {
     janela.setFocusable(true);
@@ -1249,6 +1287,7 @@ ipcMain.handle("modo-invisivel:capturar-agora", (evento) => {
 });
 app.on("will-quit", () => {
   sairDoModoInvisivel();
+  navegadorDoAgente.destruirTodas();
   globalShortcut.unregisterAll();
 });
 
