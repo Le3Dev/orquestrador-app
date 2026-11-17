@@ -139,6 +139,9 @@ export function PainelDaTranscricao({
           }}
         >
           Responder agora
+          <span className="painel-transcricao-atalho" aria-hidden="true">
+            {ATALHO_DE_RESPONDER_AGORA}
+          </span>
         </button>
       </footer>
     </section>
