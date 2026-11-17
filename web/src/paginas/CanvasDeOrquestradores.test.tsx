@@ -18,10 +18,12 @@ import {
   TAMANHO_DA_PREVIA,
   TAMANHO_DO_ARTEFATO,
   TAMANHO_DO_BIXINHO,
+  TAMANHO_DO_NAVEGADOR,
   TAMANHO_DO_TERMINAL,
 } from "../shared/canvas/layout";
 import { AVISO_DO_LIMITE_DE_ORQUESTRADORES, LIMITE_DE_ORQUESTRADORES_ABERTOS } from "../shared/canvas/limiteDeTerminais";
-import { idDoBixinho, idDoNoDaPrevia, idDoNoDoArtefato } from "../shared/canvas/nos";
+import { idDoBixinho, idDoNoDaPrevia, idDoNoDoArtefato, idDoNoDoNavegador } from "../shared/canvas/nos";
+import type { ApiDoNavegadorDoAgente } from "../shared/canvas/ponteDoNavegador";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../shared/estado/aplicarEvento";
 import { ESTADO_INICIAL_DO_CHAT, type EstadoDoChatNaTela } from "../shared/estado/aplicarEventoDoChat";
 import type { ArtefatosAoVivo } from "../shared/hooks/useArtefatos";
@@ -1804,6 +1806,316 @@ describe("CanvasDeOrquestradores · prévias", () => {
     expect(previa).toMatchObject({ url: "http://localhost:5173", orquestradorId: "o1", y: 0 });
     expect(sobrepoe(previa ?? { x: 0, y: 0, largura: 0, altura: 0 }, { x: 0, y: 0, largura: 600, altura: 520 })).toBe(false);
     expect(previa?.x).toBeGreaterThan(600);
+  });
+});
+
+describe("CanvasDeOrquestradores · navegador do agente", () => {
+  const janelaComPonte = window as unknown as { electron?: unknown };
+  const CHAVE_DO_LAYOUT = "orquestrador-agentes:canvas:v1";
+  const nosDoNavegador = () => document.querySelectorAll(".react-flow__node-navegador");
+  const janelaDoNavegador = () => screen.findByRole("group", { name: /^Navegador do agente/ });
+  let ativar: (orquestradorId: string) => void;
+  let ponte: {
+    [K in keyof ApiDoNavegadorDoAgente]-?: ReturnType<typeof vi.fn>;
+  };
+
+  /** Um orquestrador com o terminal aberto em (0, 0); `comNavegador` liga o navegador do agente na configuração dele. */
+  function terminalAberto(comNavegador = false): void {
+    localStorage.setItem(
+      CHAVE_DO_LAYOUT,
+      JSON.stringify({ terminais: { o1: { x: 0, y: 0, largura: 600, altura: 520 } }, viewport: { x: 0, y: 0, zoom: 1 } }),
+    );
+    simulados.orquestradores.orquestradores = [
+      { ...orquestrador("o1"), configuracao: { ...configuracao, navegadorDoAgente: comNavegador } },
+    ];
+  }
+
+  beforeEach(() => {
+    vi.stubGlobal("ResizeObserver", ObservadorDeTamanhoFalso);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(api, "listarNotas").mockResolvedValue([]);
+    ativar = () => undefined;
+    ponte = {
+      posicionar: vi.fn(),
+      mostrar: vi.fn(async () => true),
+      ocultar: vi.fn(async () => true),
+      pausar: vi.fn(async () => true),
+      retomar: vi.fn(async () => true),
+      fechar: vi.fn(async () => true),
+      estados: vi.fn(async () => []),
+      foto: vi.fn(async () => null),
+      aoMudar: vi.fn(() => () => undefined),
+      aoAtivar: vi.fn((retorno: (dados: { orquestradorId: string }) => void) => {
+        ativar = (orquestradorId) => act(() => retorno({ orquestradorId }));
+        return () => {
+          ativar = () => undefined;
+        };
+      }),
+      voltar: vi.fn(async () => true),
+      avancar: vi.fn(async () => true),
+      recarregar: vi.fn(async () => true),
+    };
+    // Só a ponte do navegador do agente: sem `janela`, a tela não se acha no app desktop (sem barra de título própria).
+    janelaComPonte.electron = { desktop: true, navegadorDoAgente: ponte };
+  });
+
+  afterEach(() => {
+    delete janelaComPonte.electron;
+    simulados.orquestradores.orquestradores = [];
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
+
+  it("o agente usou o navegador pela primeira vez: o nó abre ao lado do terminal, num lugar livre, e vai para o layout", async () => {
+    terminalAberto();
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o1")).toBeInTheDocument());
+    await waitFor(() => expect(ponte.aoAtivar).toHaveBeenCalled());
+    expect(nosDoNavegador()).toHaveLength(0);
+
+    ativar("o1");
+
+    await janelaDoNavegador();
+    expect(noNaTela(idDoNoDoNavegador("o1"))).toBeInTheDocument();
+    await waitFor(() => expect(lerLayout().navegadores).toBeDefined());
+    const navegador = lerLayout().navegadores?.o1;
+    expect(navegador).toMatchObject({ largura: TAMANHO_DO_NAVEGADOR.largura, altura: TAMANHO_DO_NAVEGADOR.altura });
+    expect(sobrepoe(navegador ?? { x: 0, y: 0, largura: 0, altura: 0 }, { x: 0, y: 0, largura: 600, altura: 520 })).toBe(false);
+    expect(navegador?.x).toBeGreaterThan(600);
+  });
+
+  it("o nó fica ligado ao terminal por uma linha do mesmo jeito da prévia", async () => {
+    terminalAberto();
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(ponte.aoAtivar).toHaveBeenCalled());
+
+    ativar("o1");
+
+    await janelaDoNavegador();
+    const arestas = (simulados.propsDoFluxo?.edges ?? []) as { id: string; source: string; target: string; className?: string }[];
+    expect(arestas.find((aresta) => aresta.id === "aresta:navegador:o1")).toMatchObject({
+      source: "o1",
+      target: "navegador:o1",
+      className: "aresta-navegador",
+    });
+  });
+
+  it("com o nó já aberto, outro aviso do app não abre um segundo", async () => {
+    terminalAberto();
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(ponte.aoAtivar).toHaveBeenCalled());
+
+    ativar("o1");
+    await janelaDoNavegador();
+    ativar("o1");
+
+    expect(nosDoNavegador()).toHaveLength(1);
+    await waitFor(() => expect(Object.keys(lerLayout().navegadores ?? {})).toEqual(["o1"]));
+  });
+
+  it("ao carregar, os navegadores que o app já tem abertos reabrem os nós, sem mexer na seleção", async () => {
+    terminalAberto();
+    ponte.estados.mockResolvedValue([
+      {
+        orquestradorId: "o1",
+        url: "https://exemplo.com.br",
+        titulo: "Exemplo",
+        carregando: false,
+        ultimaAcao: null,
+        emUsoPeloAgente: false,
+        pausado: false,
+        podeVoltar: false,
+        podeAvancar: false,
+      },
+    ]);
+    render(<CanvasDeOrquestradores />);
+
+    await janelaDoNavegador();
+    expect(ponte.estados).toHaveBeenCalled();
+    expect(await screen.findByText("Exemplo")).toBeInTheDocument();
+    expect(noNaTela(idDoNoDoNavegador("o1"))).not.toHaveClass("selected");
+    await waitFor(() => expect(Object.keys(lerLayout().navegadores ?? {})).toEqual(["o1"]));
+  });
+
+  it("o nó salvo no layout volta ao carregar, com a posição e o tamanho de antes", async () => {
+    terminalAberto();
+    localStorage.setItem(
+      CHAVE_DO_LAYOUT,
+      JSON.stringify({
+        terminais: { o1: { x: 0, y: 0, largura: 600, altura: 520 } },
+        navegadores: { o1: { x: 900, y: 40, largura: 800, altura: 600 } },
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }),
+    );
+    render(<CanvasDeOrquestradores />);
+
+    await waitFor(() => expect(posicaoNaTela(idDoNoDoNavegador("o1"))).toEqual({ x: 900, y: 40 }));
+    expect(lerLayout().navegadores?.o1).toEqual({ x: 900, y: 40, largura: 800, altura: 600 });
+  });
+
+  it("fora do app desktop, não há o que ouvir: nenhum nó abre sozinho", async () => {
+    delete janelaComPonte.electron;
+    terminalAberto();
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o1")).toBeInTheDocument());
+
+    expect(nosDoNavegador()).toHaveLength(0);
+    expect(ponte.aoAtivar).not.toHaveBeenCalled();
+  });
+
+  it("um nó salvo no layout, fora do app desktop, mostra a mensagem clara no lugar da página", async () => {
+    delete janelaComPonte.electron;
+    terminalAberto();
+    localStorage.setItem(
+      CHAVE_DO_LAYOUT,
+      JSON.stringify({
+        terminais: { o1: { x: 0, y: 0, largura: 600, altura: 520 } },
+        navegadores: { o1: { x: 900, y: 40, largura: 760, altura: 560 } },
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }),
+    );
+    render(<CanvasDeOrquestradores />);
+
+    expect(await screen.findByText(/só funciona no aplicativo desktop/)).toBeInTheDocument();
+  });
+
+  it("o botão do terminal (com o navegador ligado) abre o nó ao lado dele e, de novo, só leva até ele", async () => {
+    terminalAberto(true);
+    render(<CanvasDeOrquestradores />);
+    const botao = await screen.findByRole("button", { name: "Abrir o navegador do agente" });
+
+    fireEvent.click(botao);
+    await janelaDoNavegador();
+    expect(noNaTela(idDoNoDoNavegador("o1"))).toHaveClass("selected");
+
+    fireEvent.click(botao);
+    expect(nosDoNavegador()).toHaveLength(1);
+    await waitFor(() => expect(Object.keys(lerLayout().navegadores ?? {})).toEqual(["o1"]));
+  });
+
+  it("sem o navegador ligado na configuração, o terminal não tem o botão", async () => {
+    terminalAberto(false);
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(noNaTela("o1")).toBeInTheDocument());
+
+    expect(screen.queryByRole("button", { name: "Abrir o navegador do agente" })).not.toBeInTheDocument();
+  });
+
+  it("o ✕ do nó tira só a janela (e do layout), sem fechar o navegador do app; ele reabre quando o agente o usa de novo", async () => {
+    terminalAberto();
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(ponte.aoAtivar).toHaveBeenCalled());
+    ativar("o1");
+    await janelaDoNavegador();
+
+    fireEvent.click(screen.getByRole("button", { name: "Fechar o navegador do agente" }));
+
+    await waitFor(() => expect(nosDoNavegador()).toHaveLength(0));
+    await waitFor(() => expect(lerLayout().navegadores).toBeUndefined());
+    expect(ponte.fechar).not.toHaveBeenCalled();
+
+    ativar("o1");
+    await janelaDoNavegador();
+    expect(nosDoNavegador()).toHaveLength(1);
+  });
+
+  it("fechar o terminal não fecha o navegador: o agente segue usando e o nó fica solto, sem a linha", async () => {
+    terminalAberto();
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(ponte.aoAtivar).toHaveBeenCalled());
+    ativar("o1");
+    await janelaDoNavegador();
+
+    fireEvent.click(screen.getByRole("button", { name: "Fechar o terminal" }));
+
+    await waitFor(() => expect(document.querySelector(".react-flow__node-terminal")).toBeNull());
+    expect(nosDoNavegador()).toHaveLength(1);
+    const arestas = (simulados.propsDoFluxo?.edges ?? []) as { id: string }[];
+    expect(arestas.some((aresta) => aresta.id === "aresta:navegador:o1")).toBe(false);
+  });
+
+  it("orquestrador excluído (por outra aba): o navegador dele fecha com os logins apagados, e o nó e o terminal saem", async () => {
+    terminalAberto();
+    const { rerender } = render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(ponte.aoAtivar).toHaveBeenCalled());
+    ativar("o1");
+    await janelaDoNavegador();
+
+    simulados.orquestradores.orquestradores = [];
+    rerender(<CanvasDeOrquestradores />);
+
+    await waitFor(() => expect(ponte.fechar).toHaveBeenCalledWith("o1", true));
+    await waitFor(() => expect(nosDoNavegador()).toHaveLength(0));
+    expect(document.querySelector(".react-flow__node-terminal")).toBeNull();
+    await waitFor(() => expect(lerLayout().navegadores).toBeUndefined());
+  });
+
+  it("um orquestrador que ainda existe não tem o navegador fechado quando a lista muda", async () => {
+    terminalAberto();
+    const { rerender } = render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(ponte.aoAtivar).toHaveBeenCalled());
+    ativar("o1");
+    await janelaDoNavegador();
+
+    simulados.orquestradores.orquestradores = [orquestrador("o1")];
+    rerender(<CanvasDeOrquestradores />);
+    await act(async () => new Promise((resolver) => setTimeout(resolver, 30)));
+
+    expect(ponte.fechar).not.toHaveBeenCalled();
+    expect(nosDoNavegador()).toHaveLength(1);
+  });
+
+  it("o Organizar leva o navegador para as colunas das notas, sem cobrir o terminal", async () => {
+    localStorage.setItem(
+      CHAVE_DO_LAYOUT,
+      JSON.stringify({
+        terminais: {
+          o1: { x: 0, y: 0, largura: 600, altura: 520 },
+          o2: { x: 1500, y: 0, largura: 600, altura: 520 },
+        },
+        navegadores: { o1: { x: 700, y: 0, largura: TAMANHO_DO_NAVEGADOR.largura, altura: TAMANHO_DO_NAVEGADOR.altura } },
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }),
+    );
+    simulados.orquestradores.orquestradores = [orquestrador("o1"), orquestrador("o2")];
+    render(<CanvasDeOrquestradores />);
+    await waitFor(() => expect(posicaoNaTela("o2")).toEqual({ x: 1500, y: 0 }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Organizar janelas" }));
+
+    const esperado = organizarComNotas(
+      [
+        { id: "o1", largura: 600, altura: 520 },
+        { id: "o2", largura: 600, altura: 520 },
+      ],
+      [{ id: "navegador:o1", ...TAMANHO_DO_NAVEGADOR }],
+    );
+    await waitFor(() => expect(posicaoNaTela("o2")).toEqual(esperado.o2));
+    expect(posicaoNaTela("o1")).toEqual(esperado.o1);
+    expect(posicaoNaTela(idDoNoDoNavegador("o1"))).toEqual(esperado["navegador:o1"]);
+  });
+
+  it("o Fechar da barra do grupo tira o navegador do canvas, como o ✕ dele", async () => {
+    terminalAberto();
+    localStorage.setItem(
+      CHAVE_DO_LAYOUT,
+      JSON.stringify({
+        terminais: { o1: { x: 0, y: 0, largura: 600, altura: 520 } },
+        navegadores: { o1: { x: 700, y: 0, largura: 760, altura: 560 } },
+        viewport: { x: 0, y: 0, zoom: 1 },
+      }),
+    );
+    render(<CanvasDeOrquestradores />);
+    await janelaDoNavegador();
+
+    fireEvent.keyDown(window, { key: "a", code: "KeyA", ctrlKey: true });
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const barra = await screen.findByRole("toolbar", { name: "Ações do grupo" });
+    fireEvent.click(within(barra).getByRole("button", { name: /^Fechar/ }));
+
+    await waitFor(() => expect(nosDoNavegador()).toHaveLength(0));
+    expect(ponte.fechar).not.toHaveBeenCalled();
   });
 });
 

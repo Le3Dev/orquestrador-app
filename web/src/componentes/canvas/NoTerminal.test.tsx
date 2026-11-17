@@ -151,6 +151,8 @@ describe("PainelDeConfiguracao", () => {
     vi.spyOn(api, "lerEsforcoHerdadoDoOrquestrador").mockReturnValue(new Promise(() => undefined));
     vi.spyOn(api, "lerEsforcoHerdado").mockReturnValue(new Promise(() => undefined));
     vi.spyOn(api, "lerPreferencias").mockReturnValue(new Promise(() => undefined));
+    // Idem os motores: sem a lista, nenhum é desabilitado.
+    vi.spyOn(api, "listarMotores").mockReturnValue(new Promise(() => undefined));
   });
 
   afterEach(() => vi.restoreAllMocks());
@@ -551,6 +553,134 @@ describe("PainelDeConfiguracao", () => {
     const alterar = vi.spyOn(api, "alterarConfiguracao");
     fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
     expect(alterar).not.toHaveBeenCalled();
+  });
+
+  describe("motores e navegador do agente", () => {
+    it("trocar o motor do orquestrador manda o motor e o modelo do motor novo, e só isso", async () => {
+      const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+      const { aoFechar } = renderizar(orquestrador());
+
+      fireEvent.change(screen.getByRole("combobox", { name: "Motor do orquestrador" }), { target: { value: "codex" } });
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+      await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+      expect(alterar).toHaveBeenCalledWith("o1", { motorDoOrquestrador: "codex", modeloDoOrquestrador: "padrao" });
+    });
+
+    it("carrega o motor, o modelo e a reserva salvos; a reserva só vai quando muda de verdade", async () => {
+      const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+      const { aoFechar } = renderizar(
+        orquestrador({
+          motorDoOrquestrador: "codex",
+          modeloDoOrquestrador: "gpt-5",
+          ordemDeReserva: ["claude-code", "copilot"],
+        }),
+      );
+
+      expect(screen.getByRole("combobox", { name: "Motor do orquestrador" })).toHaveValue("codex");
+      expect(screen.getByRole("textbox", { name: "Id do modelo do orquestrador" })).toHaveValue("gpt-5");
+      const reserva = within(screen.getByRole("group", { name: "Ordem de reserva" }));
+      expect(reserva.getAllByRole("checkbox").map((caixa) => caixa.closest("label")?.textContent)).toEqual([
+        "Claude Code",
+        "GitHub Copilot CLI",
+      ]);
+
+      // Marcar e desmarcar de volta não manda nada (o conteúdo é o mesmo).
+      fireEvent.click(reserva.getByRole("checkbox", { name: "GitHub Copilot CLI" }));
+      fireEvent.click(reserva.getByRole("checkbox", { name: "GitHub Copilot CLI" }));
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+      await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+      expect(alterar).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole("button", { name: "Subir GitHub Copilot CLI na reserva" }));
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+      await waitFor(() => expect(alterar).toHaveBeenCalledWith("o1", { ordemDeReserva: ["copilot", "claude-code"] }));
+    });
+
+    it("a configuração sem os campos novos (servidor antigo) vale Claude Code, e o motor padrão não vai ao salvar", async () => {
+      const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+      const { aoFechar } = renderizar(orquestrador());
+
+      expect(screen.getByRole("combobox", { name: "Motor do orquestrador" })).toHaveValue("claude-code");
+      // Escolher de novo o Claude Code não muda nada.
+      fireEvent.change(screen.getByRole("combobox", { name: "Motor do orquestrador" }), { target: { value: "claude-code" } });
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+      await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+      expect(alterar).not.toHaveBeenCalled();
+    });
+
+    it("o navegador do agente vai sozinho no PATCH, com o nome exato da configuração", async () => {
+      const alterar = vi.spyOn(api, "alterarConfiguracao").mockResolvedValue(orquestrador());
+      const { aoFechar } = renderizar(orquestrador());
+
+      const interruptor = screen.getByRole("switch", { name: "Navegador do agente" });
+      expect(interruptor).toHaveAttribute("aria-checked", "false");
+      fireEvent.click(interruptor);
+      fireEvent.click(screen.getByRole("button", { name: "Salvar" }));
+
+      await waitFor(() => expect(aoFechar).toHaveBeenCalledTimes(1));
+      expect(alterar).toHaveBeenCalledWith("o1", { navegadorDoAgente: true });
+    });
+
+    it("sem o id do modelo de outro motor, o Salvar fica desabilitado e o rodapé diz o que falta", () => {
+      renderizar(orquestrador({ motorDosSubagentes: "copilot", modeloDosSubagentes: "padrao" }));
+
+      fireEvent.change(screen.getByRole("combobox", { name: "Modelo dos subagentes" }), { target: { value: "outro" } });
+
+      expect(screen.getByRole("button", { name: "Salvar" })).toBeDisabled();
+      expect(screen.getByText("Informe o modelo dos subagentes (ou escolha o padrão do CLI).")).toBeInTheDocument();
+
+      fireEvent.change(screen.getByRole("textbox", { name: "Id do modelo dos subagentes" }), { target: { value: "gpt-5" } });
+      expect(screen.getByRole("button", { name: "Salvar" })).toBeEnabled();
+    });
+
+    it("o resumo do rodapé mostra o motor (quando não é o Claude Code) e a reserva", () => {
+      renderizar(orquestrador({ motorDoOrquestrador: "codex", modeloDoOrquestrador: "padrao", ordemDeReserva: ["claude-code"] }));
+
+      expect(screen.getByText(/Codex com até 3 subagentes Sonnet\. Reserva: Claude Code\./)).toBeInTheDocument();
+    });
+
+    it("excluir o orquestrador fecha o navegador do agente dele e apaga os logins guardados", async () => {
+      const fechar = vi.fn(async () => true);
+      const janela = window as unknown as { electron?: unknown };
+      janela.electron = { desktop: true, navegadorDoAgente: { fechar } };
+      try {
+        vi.spyOn(api, "removerOrquestrador").mockResolvedValue(null);
+        vi.spyOn(window, "confirm").mockReturnValue(true);
+        const { acoes } = renderizar(orquestrador());
+
+        fireEvent.click(screen.getByRole("button", { name: "Excluir orquestrador" }));
+
+        await waitFor(() => expect(acoes.fecharTerminal).toHaveBeenCalledWith("o1"));
+        expect(fechar).toHaveBeenCalledWith("o1", true);
+      } finally {
+        delete janela.electron;
+      }
+    });
+
+    it("excluir segue normalmente quando o app falha ao fechar o navegador", async () => {
+      const janela = window as unknown as { electron?: unknown };
+      janela.electron = {
+        desktop: true,
+        navegadorDoAgente: {
+          fechar: vi.fn(async () => {
+            throw new Error("sem resposta");
+          }),
+        },
+      };
+      try {
+        vi.spyOn(api, "removerOrquestrador").mockResolvedValue(null);
+        vi.spyOn(window, "confirm").mockReturnValue(true);
+        const { acoes } = renderizar(orquestrador());
+
+        fireEvent.click(screen.getByRole("button", { name: "Excluir orquestrador" }));
+
+        await waitFor(() => expect(acoes.fecharTerminal).toHaveBeenCalledWith("o1"));
+      } finally {
+        delete janela.electron;
+      }
+    });
   });
 });
 
@@ -2080,5 +2210,35 @@ describe("NoTerminal · previasAbertas no pedido", () => {
     fireEvent.keyDown(campo, { key: "Enter" });
 
     await waitFor(() => expect(enviar).toHaveBeenCalledWith("o1", "oi", [], "execucao"));
+  });
+});
+
+describe("NoTerminal · navegador do agente", () => {
+  function renderizarComNavegador(alteracoes: Partial<DadosDaConfiguracao>) {
+    const canvas = canvasDoTerminal(conversaOciosa(), orquestrador(alteracoes));
+    const abrirNavegador = vi.fn();
+    canvas.acoes = { ...canvas.acoes, abrirNavegador };
+    render(<Terminal canvas={canvas} no={propsDoNo()} />);
+    return { abrirNavegador };
+  }
+
+  it("com o navegador ligado, a barra tem o botão que abre ou leva até o bloco dele", () => {
+    const { abrirNavegador } = renderizarComNavegador({ navegadorDoAgente: true });
+
+    fireEvent.click(screen.getByRole("button", { name: "Abrir o navegador do agente" }));
+
+    expect(abrirNavegador).toHaveBeenCalledTimes(1);
+    expect(abrirNavegador).toHaveBeenCalledWith("o1");
+  });
+
+  it("desligado (ou sem o campo, num servidor antigo), não há o botão", () => {
+    const { rerender } = (() => {
+      const canvas = canvasDoTerminal(conversaOciosa(), orquestrador({ navegadorDoAgente: false }));
+      return render(<Terminal canvas={canvas} no={propsDoNo()} />);
+    })();
+    expect(screen.queryByRole("button", { name: "Abrir o navegador do agente" })).not.toBeInTheDocument();
+
+    rerender(<Terminal canvas={canvasDoTerminal(conversaOciosa(), orquestrador())} no={propsDoNo()} />);
+    expect(screen.queryByRole("button", { name: "Abrir o navegador do agente" })).not.toBeInTheDocument();
   });
 });

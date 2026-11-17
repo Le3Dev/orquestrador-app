@@ -1,14 +1,9 @@
 import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { medirCorpo } from "../../shared/canvas/medirCorpo";
 import type { ApiDaPrevia, RetanguloDaPrevia } from "../../shared/ponteDoDesktop";
-import {
-  calcularRetangulo,
-  type HistoricoDaVista,
-  mesmoRetangulo,
-  pontosDeAmostra,
-  SEM_HISTORICO,
-} from "../../shared/previaNativa";
+import { type HistoricoDaVista, mesmoRetangulo, SEM_HISTORICO } from "../../shared/previaNativa";
 
 /** Quanto o ponteiro pode andar entre apertar e soltar para ainda contar como clique (e não arraste). */
 const DISTANCIA_MAXIMA_DO_CLIQUE_PX = 5;
@@ -17,31 +12,6 @@ const DISTANCIA_MAXIMA_DO_CLIQUE_PX = 5;
 interface EstadoDaPagina {
   carregando: boolean;
   erro: string | null;
-}
-
-/**
- * Onde o corpo da prévia está agora e se algo está por cima dele: o retângulo
- * (cortado pela área do canvas) e se algum dos pontos de amostra cai em outro
- * elemento da tela (painel, menu, cabeçalho). Nulo: o corpo não está na tela.
- */
-function medirCorpo(corpo: HTMLElement): { retangulo: RetanguloDaPrevia; coberta: boolean } | null {
-  const area = corpo.closest(".react-flow")?.getBoundingClientRect() ?? {
-    left: 0,
-    top: 0,
-    width: window.innerWidth,
-    height: window.innerHeight,
-  };
-  const retangulo = calcularRetangulo(corpo.getBoundingClientRect(), area, corpo.offsetWidth);
-  if (retangulo === null) {
-    return null;
-  }
-  const coberta =
-    typeof document.elementFromPoint === "function" &&
-    pontosDeAmostra(retangulo).some(({ x, y }) => {
-      const elemento = document.elementFromPoint(x, y);
-      return elemento === null || !corpo.contains(elemento);
-    });
-  return { retangulo, coberta };
 }
 
 /**

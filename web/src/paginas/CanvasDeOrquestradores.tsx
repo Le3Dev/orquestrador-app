@@ -42,6 +42,7 @@ import { BarraDoGrupo } from "../componentes/canvas/BarraDoGrupo";
 import { CamadaDeDesenho } from "../componentes/canvas/CamadaDeDesenho";
 import { NoArtefato } from "../componentes/canvas/NoArtefato";
 import { NoBixinho } from "../componentes/canvas/NoBixinho";
+import { NoNavegadorDoAgente } from "../componentes/canvas/NoNavegadorDoAgente";
 import { NoNota } from "../componentes/canvas/NoNota";
 import { NoPrevia } from "../componentes/canvas/NoPrevia";
 import { NavegadorDePastas } from "../componentes/canvas/NavegadorDePastas";
@@ -102,6 +103,7 @@ import {
   TAMANHO_DA_NOTA,
   TAMANHO_DA_PREVIA,
   TAMANHO_DO_ARTEFATO,
+  TAMANHO_DO_NAVEGADOR,
   TAMANHO_DO_RASCUNHO,
   TAMANHO_DO_SHELL,
   TAMANHO_DO_TERMINAL,
@@ -116,6 +118,7 @@ import {
   arestasDasLigacoes,
   arestasDasPrevias,
   arestasDosBixinhos,
+  arestasDosNavegadores,
   arestasDosShells,
   comEscalaDaLetra,
   comItensLigadosJunto,
@@ -126,6 +129,7 @@ import {
   ehFechavelEmGrupo,
   ehItemLigavel,
   ehLigacaoValida,
+  ehNavegador,
   ehNota,
   ehPrevia,
   ehRascunho,
@@ -164,12 +168,14 @@ import {
   selecionarTodasAsTelas,
   semBixinhosNaSelecao,
   semLigacoesOrfas,
+  semNavegador,
   semTerminal,
   sincronizarBixinhos,
   subagentesVisiveis,
   telasSelecionadas,
 } from "../shared/canvas/nos";
 import { ProvedorDasNotas } from "../shared/canvas/notas";
+import { fecharNavegadorDoAgente } from "../shared/canvas/ponteDoNavegador";
 import {
   type AcoesDosShells,
   type OrigemDoShell,
@@ -183,6 +189,7 @@ import { useModoInvisivel } from "../shared/hooks/useModoInvisivel";
 import { useChat } from "../shared/hooks/useChat";
 import { useConversas } from "../shared/hooks/useConversas";
 import { useMovimentoDoCanvas } from "../shared/hooks/useMovimentoDoCanvas";
+import { useNavegadoresDoAgente } from "../shared/hooks/useNavegadoresDoAgente";
 import { useNotas } from "../shared/hooks/useNotas";
 import { useOrquestradores } from "../shared/hooks/useOrquestradores";
 import { usePreferenciasDaTela } from "../shared/hooks/usePreferenciasDaTela";
@@ -251,6 +258,7 @@ const TIPOS_DE_NO = {
   artefato: comAlcaDeLigacao(NoArtefato, true),
   previa: comAlcaDeLigacao(NoPrevia, false),
   shell: NoShell,
+  navegador: NoNavegadorDoAgente,
 } satisfies NodeTypes;
 // A linha de um item ligado é a curva padrão, com a pele em `.aresta-ligacao`; a do bixinho, a própria.
 const TIPOS_DE_ARESTA = { bixinho: ArestaDoBixinho, ligacao: BezierEdge } satisfies EdgeTypes;
@@ -322,6 +330,9 @@ function classeNoMinimapa(no: NoDoCanvas, trabalhando: ReadonlySet<string>): str
   }
   if (ehShell(no)) {
     return "minimapa-shell";
+  }
+  if (ehNavegador(no)) {
+    return "minimapa-navegador";
   }
   return ehTerminal(no) && trabalhando.has(no.data.orquestradorId)
     ? "minimapa-terminal minimapa-terminal-trabalhando"
@@ -431,7 +442,8 @@ function Canvas() {
         Object.keys(layoutInicial.notas).length +
         Object.keys(layoutInicial.artefatos).length +
         Object.keys(layoutInicial.previas).length +
-        Object.keys(layoutInicial.shells).length >
+        Object.keys(layoutInicial.shells).length +
+        Object.keys(layoutInicial.navegadores ?? {}).length >
         0,
   );
   const [nosIniciais] = useState(() => nosDoLayout(layoutInicial));
@@ -592,11 +604,30 @@ function Canvas() {
         criadosAgora.current.delete(id);
       }
     }
+    const semOrquestrador = (id: string): boolean => !existentes.has(id) && !criadosAgora.current.has(id);
+    // O navegador do agente de um orquestrador excluído (por outra aba, ou por esta) fecha com ele: a vista do
+    // app e o login guardado. Fora do app desktop, `fecharNavegadorDoAgente` não faz nada.
+    for (const id of new Set([
+      ...nosAtuais.current.filter(ehTerminal).map((terminal) => terminal.id),
+      ...nosAtuais.current.filter(ehNavegador).map((navegador) => navegador.data.orquestradorId),
+    ])) {
+      if (semOrquestrador(id)) {
+        void fecharNavegadorDoAgente(id, true);
+      }
+    }
     setNos((atuais) => {
-      const orfaos = atuais
-        .filter(ehTerminal)
-        .filter((terminal) => !existentes.has(terminal.id) && !criadosAgora.current.has(terminal.id));
-      return orfaos.length === 0 ? atuais : orfaos.reduce((restantes, terminal) => semTerminal(restantes, terminal.id), atuais);
+      const orfaos = atuais.filter(ehTerminal).filter((terminal) => semOrquestrador(terminal.id));
+      const semOsTerminais =
+        orfaos.length === 0 ? atuais : orfaos.reduce((restantes, terminal) => semTerminal(restantes, terminal.id), atuais);
+      const navegadoresOrfaos = semOsTerminais
+        .filter(ehNavegador)
+        .filter((navegador) => semOrquestrador(navegador.data.orquestradorId));
+      return navegadoresOrfaos.length === 0
+        ? semOsTerminais
+        : navegadoresOrfaos.reduce(
+            (restantes, navegador) => semNavegador(restantes, navegador.data.orquestradorId),
+            semOsTerminais,
+          );
     });
     // A limpeza de um orquestrador excluído não serve mais: sai do armazenamento.
     setBixinhosLimpos((atuais) => {
@@ -618,9 +649,10 @@ function Canvas() {
   // terminal ou passa para outro lado dele (as pontas seguem o lado), ou
   // quando chega um evento; e o React Flow só recebe um array novo quando
   // alguma linha mudou de fato. Arrastar sem trocar de lado não muda nenhuma.
-  // As prévias e os shells entram também: a linha tracejada do terminal até a janela que saiu dele.
+  // As prévias, os shells e os navegadores do agente entram também: a linha tracejada do terminal até a janela
+  // que saiu dele.
   const ligados = useReaproveitado(
-    nos.filter((no) => ehTerminal(no) || ehBixinho(no) || ehPrevia(no) || ehShell(no)),
+    nos.filter((no) => ehTerminal(no) || ehBixinho(no) || ehPrevia(no) || ehShell(no) || ehNavegador(no)),
     mesmasLigacoes,
   );
   const arestasCalculadas = useMemo(
@@ -628,6 +660,7 @@ function Canvas() {
       ...arestasDosBixinhos(ligados, conversas, bixinhosSaindo),
       ...arestasDasPrevias(ligados),
       ...arestasDosShells(ligados),
+      ...arestasDosNavegadores(ligados),
     ],
     [ligados, conversas, bixinhosSaindo],
   );
@@ -877,6 +910,15 @@ function Canvas() {
   useLayoutEffect(() => {
     nosAtuais.current = nos;
   }, [nos]);
+
+  // O navegador do agente (app desktop): abre sozinho quando o agente o usa e pelo botão do terminal.
+  const lerNos = useCallback(() => nosAtuais.current, []);
+  const { abrirNavegador, fecharNavegador } = useNavegadoresDoAgente({
+    setNos,
+    lerNos,
+    posicaoNoCentroVisivel,
+    enquadrarSemAproximar,
+  });
   const [avisoDoLimite, setAvisoDoLimite] = useState(false);
 
   /** Se cabe abrir o terminal pedido (nulo: um terminal novo). Ponto único da trava. */
@@ -1208,13 +1250,24 @@ function Canvas() {
   const organizar = useCallback(() => {
     setNos((atuais) => {
       const janelas = atuais
-        .filter((no) => !ehBixinho(no) && !ehNota(no) && !ehArtefato(no) && !ehPrevia(no) && !ehShell(no))
+        .filter(
+          (no) => !ehBixinho(no) && !ehNota(no) && !ehArtefato(no) && !ehPrevia(no) && !ehShell(no) && !ehNavegador(no),
+        )
         .map((no) => tamanhoParaOrganizar(no, TAMANHO_DO_TERMINAL));
-      // As prévias e os shells vão para as colunas das notas: também não têm bixinhos.
+      // As prévias, os shells e os navegadores do agente vão para as colunas das notas: também não têm bixinhos.
       const notasNoCanvas = atuais
-        .filter((no) => ehNota(no) || ehPrevia(no) || ehShell(no))
+        .filter((no) => ehNota(no) || ehPrevia(no) || ehShell(no) || ehNavegador(no))
         .map((no) =>
-          tamanhoParaOrganizar(no, ehNota(no) ? TAMANHO_DA_NOTA : ehShell(no) ? TAMANHO_DO_SHELL : TAMANHO_DA_PREVIA),
+          tamanhoParaOrganizar(
+            no,
+            ehNota(no)
+              ? TAMANHO_DA_NOTA
+              : ehShell(no)
+                ? TAMANHO_DO_SHELL
+                : ehNavegador(no)
+                  ? TAMANHO_DO_NAVEGADOR
+                  : TAMANHO_DA_PREVIA,
+          ),
         );
       const artefatosNoCanvas = atuais.filter(ehArtefato).map((no) => tamanhoParaOrganizar(no, TAMANHO_DO_ARTEFATO));
       const posicoes = organizarComNotas(janelas, notasNoCanvas, artefatosNoCanvas);
@@ -1282,9 +1335,11 @@ function Canvas() {
         fecharPrevia(no.data.previaId);
       } else if (ehShell(no)) {
         fecharShell(no.data.shellId);
+      } else if (ehNavegador(no)) {
+        fecharNavegador(no.data.orquestradorId);
       }
     }
-  }, [acoesDosArtefatos, fecharPrevia, fecharShell, fecharTerminal]);
+  }, [acoesDosArtefatos, fecharNavegador, fecharPrevia, fecharShell, fecharTerminal]);
 
   /** Zoom em 100% (texto nítido) sem sair do lugar: o Ctrl+0 e a paleta. */
   const zoomEmCemPorCento = useCallback(() => {
@@ -1541,6 +1596,8 @@ function Canvas() {
       lerPreviasAbertas,
       desligarItem: desligarItemDoTerminal,
       lerItensLigados,
+      abrirNavegador,
+      fecharNavegador,
     }),
     [
       abrirTerminal,
@@ -1561,6 +1618,8 @@ function Canvas() {
       lerPreviasAbertas,
       desligarItemDoTerminal,
       lerItensLigados,
+      abrirNavegador,
+      fecharNavegador,
     ],
   );
   // Os nós só leem do servidor a conexão e a memória por Orquestrador: a

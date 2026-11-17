@@ -129,6 +129,12 @@ export interface LayoutDoCanvas {
   previas: Record<string, RetanguloDaPrevia>;
   /** Terminais de shell no canvas, pelo id criado na tela. Layouts gravados antes deles não têm o campo: valem como nenhum. */
   shells: Record<string, RetanguloDoShell>;
+  /**
+   * Os navegadores do agente abertos no canvas, por id do Orquestrador (há um por Orquestrador). Só guarda onde
+   * a janela fica e o tamanho dela: a página vive no app desktop. Sem o campo ao ler, nenhum (layouts antigos); ao
+   * gravar sem navegadores, o campo nem vai.
+   */
+  navegadores?: Record<string, Retangulo>;
   viewport: Viewport | null;
   /**
    * Os traços do desenho, na ordem em que foram feitos. Sem o campo ao ler,
@@ -165,6 +171,9 @@ export const TAMANHO_MINIMO_DA_PREVIA = { largura: 360, altura: 240 } as const;
 export const ALTURA_DA_PREVIA_MINIMIZADA = ALTURA_DA_NOTA_MINIMIZADA;
 export const TAMANHO_DO_SHELL = { largura: 640, altura: 400 } as const;
 export const TAMANHO_MINIMO_DO_SHELL = { largura: 320, altura: 180 } as const;
+/** O navegador do agente: a barra, a faixa de controle, a página e a última ação (as faixas ficam fora do corpo). */
+export const TAMANHO_DO_NAVEGADOR = { largura: 760, altura: 560 } as const;
+export const TAMANHO_MINIMO_DO_NAVEGADOR = { largura: 380, altura: 300 } as const;
 export const TAMANHO_DO_ARTEFATO = { largura: 640, altura: 480 } as const;
 export const TAMANHO_MINIMO_DO_ARTEFATO = { largura: 320, altura: 200 } as const;
 
@@ -440,14 +449,17 @@ export function interpretarLayout(texto: string | null): LayoutDoCanvas {
     if (typeof salvo !== "object" || salvo === null) {
       return layoutVazio();
     }
-    const { terminais, notas, artefatos, previas, shells, viewport, desenho } = salvo as Record<string, unknown>;
+    const { terminais, notas, artefatos, previas, shells, navegadores, viewport, desenho } = salvo as Record<string, unknown>;
     const tracos = interpretarDesenho(desenho);
+    const navegadoresValidos = interpretarRetangulos(navegadores);
     return {
       terminais: interpretarTerminais(terminais),
       notas: interpretarNotas(notas),
       artefatos: interpretarRetangulos(artefatos),
       previas: interpretarPrevias(previas),
       shells: interpretarShells(shells),
+      // Sem navegadores, sem o campo, como nos layouts antigos.
+      ...(Object.keys(navegadoresValidos).length > 0 ? { navegadores: navegadoresValidos } : {}),
       viewport: ehViewport(viewport) ? viewport : null,
       // Sem traços, sem o campo, como nos layouts antigos.
       ...(tracos.length > 0 ? { desenho: tracos } : {}),
@@ -471,7 +483,7 @@ export function lerLayout(): LayoutDoCanvas {
  */
 export function salvarLayout(layout: LayoutDoCanvas): void {
   try {
-    const { terminais, notas, artefatos, previas, shells, viewport } = layout;
+    const { terminais, notas, artefatos, previas, shells, navegadores, viewport } = layout;
     const desenho = layout.desenho ?? interpretarLayout(localStorage.getItem(CHAVE)).desenho ?? [];
     localStorage.setItem(
       CHAVE,
@@ -481,6 +493,7 @@ export function salvarLayout(layout: LayoutDoCanvas): void {
         artefatos,
         previas,
         shells,
+        ...(navegadores !== undefined && Object.keys(navegadores).length > 0 ? { navegadores } : {}),
         viewport,
         ...(desenho.length > 0 ? { desenho } : {}),
       }),
