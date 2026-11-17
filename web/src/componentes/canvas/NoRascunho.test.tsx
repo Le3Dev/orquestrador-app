@@ -127,6 +127,8 @@ describe("NoRascunho", () => {
     vi.spyOn(api, "listarPredefinicoes").mockReturnValue(new Promise(() => undefined));
     vi.spyOn(api, "lerEsforcoHerdado").mockReturnValue(new Promise(() => undefined));
     vi.spyOn(api, "lerPreferencias").mockReturnValue(new Promise(() => undefined));
+    // Sem a lista de motores: nenhum é desabilitado.
+    vi.spyOn(api, "listarMotores").mockReturnValue(new Promise(() => undefined));
   });
 
   afterEach(() => {
@@ -146,8 +148,13 @@ describe("NoRascunho", () => {
     expect(screen.getByRole("switch", { name: "Commit e push por feature" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("switch", { name: "Publicar artefatos no claude.ai" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getByRole("textbox", { name: "Instruções" })).toBeInTheDocument();
-    expect(screen.getAllByRole("switch")).toHaveLength(2);
-    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Navegador do agente" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getAllByRole("switch")).toHaveLength(3);
+    // Os dois motores, no Claude Code; as únicas caixas são as da reserva (os outros dois motores), desmarcadas.
+    expect(screen.getByRole("combobox", { name: "Motor do orquestrador" })).toHaveValue("claude-code");
+    expect(screen.getByRole("combobox", { name: "Motor dos subagentes" })).toHaveValue("claude-code");
+    expect(within(screen.getByRole("group", { name: "Ordem de reserva" })).getAllByRole("checkbox")).toHaveLength(2);
+    expect(screen.getAllByRole("checkbox").every((caixa) => !(caixa as HTMLInputElement).checked)).toBe(true);
     expect(screen.getByText("Escolha uma pasta para começar.")).toBeInTheDocument();
     expect(botaoDeComecar()).toBeDisabled();
     expect(screen.getByText("novo orquestrador")).toBeInTheDocument();
@@ -310,10 +317,14 @@ describe("NoRascunho", () => {
     expect(payload).toEqual({
       nome: "app",
       pastaDeTrabalho: "/p/app",
+      motorDoOrquestrador: "claude-code",
       modeloDoOrquestrador: "opus",
       esforcoDoOrquestrador: "padrao",
+      motorDosSubagentes: "claude-code",
       modeloDosSubagentes: "haiku",
       esforcoDosSubagentes: "padrao",
+      ordemDeReserva: [],
+      navegadorDoAgente: false,
       quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
       nivelDePermissao: "leitura",
       permitirCommitEPush: false,
@@ -321,6 +332,76 @@ describe("NoRascunho", () => {
       instrucoesPersonalizadas: "Seja breve.",
     });
     await waitFor(() => expect(acoes.orquestradorCriado).toHaveBeenCalledWith("rascunho:1", criado));
+  });
+
+  it("o motor, o modelo, a reserva e o navegador do agente escolhidos vão no pedido de criação", async () => {
+    const criar = espiarCriacao();
+    await abrirComPasta();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Motor do orquestrador" }), { target: { value: "codex" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Modelo do orquestrador" }), { target: { value: "outro" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Id do modelo do orquestrador" }), { target: { value: "gpt-5" } });
+    fireEvent.click(within(screen.getByRole("group", { name: "Ordem de reserva" })).getByRole("checkbox", { name: "Claude Code" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Navegador do agente" }));
+
+    // O resumo mostra o motor no lugar do modelo, a reserva e o navegador.
+    expect(screen.getByText(/Codex \(gpt-5\) com até 3 subagentes Opus\. Reserva: Claude Code\. Navegador do agente ligado\./)).toBeInTheDocument();
+    expect(await criarEPegarPayload(criar)).toMatchObject({
+      motorDoOrquestrador: "codex",
+      modeloDoOrquestrador: "gpt-5",
+      motorDosSubagentes: "claude-code",
+      modeloDosSubagentes: "opus",
+      ordemDeReserva: ["claude-code"],
+      navegadorDoAgente: true,
+    });
+  });
+
+  it("um modelo de outro motor sem id (ou mal formado) impede de começar, com o motivo", async () => {
+    await abrirComPasta();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Motor dos subagentes" }), { target: { value: "copilot" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Modelo dos subagentes" }), { target: { value: "outro" } });
+
+    expect(screen.getByText("Informe o modelo dos subagentes (ou escolha o padrão do CLI).")).toBeInTheDocument();
+    expect(botaoDeComecar()).toBeDisabled();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Id do modelo dos subagentes" }), { target: { value: "gpt 5" } });
+    expect(screen.getByText(/O modelo dos subagentes só aceita letras, números/)).toBeInTheDocument();
+    expect(botaoDeComecar()).toBeDisabled();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Id do modelo dos subagentes" }), { target: { value: "gpt-5" } });
+    expect(botaoDeComecar()).toBeEnabled();
+  });
+
+  it("um motor que o servidor diz não estar instalado aparece desabilitado também na criação", async () => {
+    vi.spyOn(api, "listarMotores").mockResolvedValue([
+      { motor: "claude-code", rotulo: "Claude Code", instalado: true, versao: null, caminho: null, logado: null, mensagem: null },
+      { motor: "codex", rotulo: "Codex", instalado: false, versao: null, caminho: null, logado: null, mensagem: "Codex não encontrado no PATH." },
+      { motor: "copilot", rotulo: "GitHub Copilot CLI", instalado: true, versao: null, caminho: null, logado: true, mensagem: null },
+    ]);
+    abrir();
+
+    expect(await screen.findAllByRole("option", { name: "Codex (não instalado)" })).toHaveLength(2);
+    expect(screen.getByText("Codex: Codex não encontrado no PATH.")).toBeInTheDocument();
+  });
+
+  it("o Modo econômico volta os dois papéis ao Claude Code (as predefinições são de modelos do Claude)", async () => {
+    vi.spyOn(api, "listarPredefinicoes").mockResolvedValue([ECONOMICO]);
+    const criar = espiarCriacao();
+    await abrirComPasta();
+    fireEvent.change(screen.getByRole("combobox", { name: "Motor do orquestrador" }), { target: { value: "codex" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Motor dos subagentes" }), { target: { value: "copilot" } });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Modo econômico" }));
+
+    expect(screen.getByRole("combobox", { name: "Motor do orquestrador" })).toHaveValue("claude-code");
+    expect(screen.getByRole("combobox", { name: "Motor dos subagentes" })).toHaveValue("claude-code");
+    expect(await criarEPegarPayload(criar)).toMatchObject({
+      motorDoOrquestrador: "claude-code",
+      modeloDoOrquestrador: "sonnet",
+      motorDosSubagentes: "claude-code",
+      modeloDosSubagentes: "haiku",
+    });
   });
 
   it("o interruptor de artefatos online liga, aparece no resumo e vai no pedido de criação", async () => {

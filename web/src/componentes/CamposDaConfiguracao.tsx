@@ -13,19 +13,20 @@ import {
 import { type EscalaDaLetra, OPCOES_DA_ESCALA_DA_LETRA } from "../shared/canvas/layout";
 import {
   AJUDA_DOS_ARTEFATOS_ONLINE,
-  AVISO_DO_ULTRACODE,
   ROTULO_DOS_ARTEFATOS_ONLINE,
   ROTULOS_DAS_PERMISSOES,
 } from "../shared/formatacao";
 import {
   ajudaDaPredefinicao,
   useEsforcosHerdados,
+  useMotores,
   usePredefinicoes,
   usePreferencias,
 } from "../shared/hooks/useDadosDaConfiguracao";
 import { DICA_DAS_VARIAVEIS, tamanhoDasInstrucoes } from "../shared/instrucoes";
-import { AvisoDoEsforcoHerdado, IconeDaPermissao, Rotulo, SeletorDePerfil } from "./canvas/LinhasDaConfiguracao";
-import { MenuDeModelo } from "./canvas/MenuDeModelo";
+import { comPredefinicao } from "../shared/modelos";
+import { IconeDaPermissao, Rotulo, SeletorDePerfil } from "./canvas/LinhasDaConfiguracao";
+import { LinhaDaReserva, LinhaDoNavegador, LinhaDosPapeis } from "./canvas/LinhasDosMotores";
 import { QuantidadeDeSubagentes } from "./canvas/QuantidadeDeSubagentes";
 import { PreviaDoPromptFinal } from "./PreviaDoPromptFinal";
 
@@ -89,6 +90,8 @@ export function CamposDaConfiguracao({
   const idDaLetra = useId();
   const predefinicoes = usePredefinicoes();
   const herdados = useEsforcosHerdados(buscarEsforcoHerdado);
+  // Quais motores estão instalados; sem a resposta, nenhum é desabilitado.
+  const motores = useMotores();
   // Uma leitura só: a biblioteca de subagentes prontos e os perfis de instruções.
   const preferencias = usePreferencias();
   const biblioteca = preferencias?.subagentesProntos ?? null;
@@ -139,7 +142,8 @@ export function CamposDaConfiguracao({
   async function usarPredefinicao(predefinicao: DadosDaPredefinicao): Promise<void> {
     setErroDaPredefinicao(null);
     if (aplicarPredefinicao === undefined) {
-      aoMudar({ ...valor, ...predefinicao.configuracao });
+      // As predefinições falam em modelos do Claude: os dois papéis voltam ao Claude Code, como no servidor.
+      aoMudar(comPredefinicao(valor, predefinicao.configuracao));
       return;
     }
     setAplicando(true);
@@ -193,47 +197,9 @@ export function CamposDaConfiguracao({
         </div>
       </div>
 
-      <div className="linha-da-criacao">
-        <Rotulo
-          htmlFor={`${idDoCampo}-orquestrador`}
-          titulo="Orquestrador"
-          dica="Quem conversa com você."
-          explicacao="Ele entende o pedido, divide em tarefas e passa para os subagentes. Fable é para os desafios mais difíceis, Opus é o mais capaz no dia a dia, Sonnet equilibra e Haiku é rápido e gasta menos cota. O esforço é quanto ele pensa antes de responder; no automático, vale o padrão do Claude Code."
-          alinharAoTopo
-        />
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <MenuDeModelo
-            id={`${idDoCampo}-orquestrador`}
-            rotulo="Modelo do orquestrador"
-            modelo={valor.modeloDoOrquestrador}
-            esforco={valor.esforcoDoOrquestrador}
-            comUltracode
-            aoEscolherModelo={(modelo) => mudar("modeloDoOrquestrador", modelo)}
-            aoEscolherEsforco={(esforco) => mudar("esforcoDoOrquestrador", esforco)}
-          />
-          <AvisoDoEsforcoHerdado esforco={valor.esforcoDoOrquestrador} herdado={herdados?.orquestrador ?? null} />
-          {valor.esforcoDoOrquestrador === "ultracode" && <span className="hint-warning">{AVISO_DO_ULTRACODE}</span>}
-        </div>
+      <LinhaDosPapeis idDoCampo={idDoCampo} valor={valor} aoMudar={aoMudar} motores={motores} herdados={herdados} />
 
-        <Rotulo
-          htmlFor={`${idDoCampo}-subagentes`}
-          titulo="Subagentes"
-          dica="Ajudantes que trabalham em paralelo."
-          explicacao="O orquestrador lança um para cada tarefa, e eles aparecem como bixinhos ligados ao terminal. No padrão, ele decide quantos usar, até 3 ao mesmo tempo. Cada subagente consome a cota da sua assinatura do Claude."
-          alinharAoTopo
-        />
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <MenuDeModelo
-            id={`${idDoCampo}-subagentes`}
-            rotulo="Modelo dos subagentes"
-            modelo={valor.modeloDosSubagentes}
-            esforco={valor.esforcoDosSubagentes}
-            aoEscolherModelo={(modelo) => mudar("modeloDosSubagentes", modelo)}
-            aoEscolherEsforco={(esforco) => mudar("esforcoDosSubagentes", esforco)}
-          />
-          <AvisoDoEsforcoHerdado esforco={valor.esforcoDosSubagentes} herdado={herdados?.subagentes ?? null} />
-        </div>
-      </div>
+      <LinhaDaReserva valor={valor} aoMudar={aoMudar} motores={motores} />
 
       <div className="linha-da-criacao">
         <Rotulo
@@ -297,7 +263,7 @@ export function CamposDaConfiguracao({
         <Rotulo
           titulo="Opções"
           dica="Commit e push por feature; publicar artefatos online."
-          explicacao={`Commit e push por feature: ligado, cada feature ou correção pronta (testada, com lint e build ok) vira um commit próprio com push da branch em seguida, numa branch feature/, fix/, hotfix/ ou refactor/. PR e merge só quando você pedir. Precisa da permissão de rodar comandos. ${ROTULO_DOS_ARTEFATOS_ONLINE}: ${AJUDA_DOS_ARTEFATOS_ONLINE} O Modo econômico troca modelos e esforço por outros que gastam menos cota e já vale, sem o Salvar; os campos continuam editáveis.`}
+          explicacao={`Commit e push por feature: ligado, cada feature ou correção pronta (testada, com lint e build ok) vira um commit próprio com push da branch em seguida, numa branch feature/, fix/, hotfix/ ou refactor/. PR e merge só quando você pedir. Precisa da permissão de rodar comandos. ${ROTULO_DOS_ARTEFATOS_ONLINE}: ${AJUDA_DOS_ARTEFATOS_ONLINE} O Modo econômico troca modelos e esforço por outros que gastam menos cota e já vale, sem o Salvar; os campos continuam editáveis. Ele vale só para o Claude Code: com outro motor, os dois papéis voltam ao Claude Code.`}
           alinharAoTopo
         />
         <div className="flex min-w-0 flex-col gap-1">
@@ -347,6 +313,8 @@ export function CamposDaConfiguracao({
           )}
         </div>
       </div>
+
+      <LinhaDoNavegador valor={valor} aoMudar={aoMudar} />
 
       {tamanhoDaLetra !== undefined && (
         <div className="linha-da-criacao">

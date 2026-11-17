@@ -17,6 +17,45 @@ describe("api", () => {
     vi.unstubAllGlobals();
   });
 
+  it("listarMotores lê GET /api/motores", async () => {
+    const motores = [
+      { motor: "claude-code", rotulo: "Claude Code", instalado: true, versao: "2.1.0", caminho: "C:\\claude.exe", logado: true, mensagem: null },
+      { motor: "codex", rotulo: "Codex", instalado: false, versao: null, caminho: null, logado: null, mensagem: "Codex não encontrado." },
+    ];
+    const buscar = vi.fn<Buscar>(async () => respostaJson(motores));
+    vi.stubGlobal("fetch", buscar);
+
+    await expect(api.listarMotores()).resolves.toEqual(motores);
+
+    expect(buscar).toHaveBeenCalledWith("/api/motores", expect.anything());
+  });
+
+  it("listarMotores sem a rota (404) lança o erro da API, que a tela trata como 'não foi possível verificar'", async () => {
+    vi.stubGlobal("fetch", vi.fn<Buscar>(async () => respostaJson({ erro: "Rota não encontrada." }, 404)));
+
+    await expect(api.listarMotores()).rejects.toMatchObject({ status: 404, message: "Rota não encontrada." });
+  });
+
+  it("criar e alterar a configuração mandam o motor, a reserva e o navegador do agente com o nome exato", async () => {
+    const buscar = vi.fn<Buscar>(async () => respostaJson({ id: "o1" }));
+    vi.stubGlobal("fetch", buscar);
+
+    await api.alterarConfiguracao("o1", {
+      motorDoOrquestrador: "codex",
+      modeloDoOrquestrador: "padrao",
+      ordemDeReserva: ["claude-code"],
+      navegadorDoAgente: true,
+    });
+
+    expect(buscar).toHaveBeenCalledWith("/api/orquestradores/o1/configuracao", expect.objectContaining({ method: "PATCH" }));
+    expect(corpoEnviado(buscar)).toEqual({
+      motorDoOrquestrador: "codex",
+      modeloDoOrquestrador: "padrao",
+      ordemDeReserva: ["claude-code"],
+      navegadorDoAgente: true,
+    });
+  });
+
   it("perguntarNoChat sem origem: o corpo não leva o campo origem", async () => {
     const buscar = vi.fn<Buscar>(async () => respostaJson({ mensagemId: "m1" }));
     vi.stubGlobal("fetch", buscar);

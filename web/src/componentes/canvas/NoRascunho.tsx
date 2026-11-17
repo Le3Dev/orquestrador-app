@@ -17,23 +17,28 @@ import {
 import { ALCA_DO_TERMINAL, type NoRascunho as TipoDoNo } from "../../shared/canvas/nos";
 import {
   AJUDA_DOS_ARTEFATOS_ONLINE,
-  AVISO_DO_ULTRACODE,
   ROTULO_DOS_ARTEFATOS_ONLINE,
   ROTULOS_DAS_PERMISSOES,
 } from "../../shared/formatacao";
 import {
   ajudaDaPredefinicao,
   useEsforcosHerdados,
+  useMotores,
   usePredefinicoes,
   usePreferencias,
 } from "../../shared/hooks/useDadosDaConfiguracao";
 import { DICA_DAS_VARIAVEIS, tamanhoDasInstrucoes } from "../../shared/instrucoes";
-import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
+import {
+  comoModeloClaude,
+  comPredefinicao,
+  CONFIGURACAO_PADRAO_DO_ORQUESTRADOR,
+  problemaDoModeloDoMotor,
+} from "../../shared/modelos";
 import { resumoDaConfiguracao } from "../../shared/resumoDaConfiguracao";
 import { IconeAlerta, IconeFechar } from "../Icones";
 import { PreviaDoPromptFinal } from "../PreviaDoPromptFinal";
-import { AvisoDoEsforcoHerdado, IconeDaPermissao, Rotulo, SeletorDePerfil } from "./LinhasDaConfiguracao";
-import { MenuDeModelo } from "./MenuDeModelo";
+import { IconeDaPermissao, Rotulo, SeletorDePerfil } from "./LinhasDaConfiguracao";
+import { LinhaDaReserva, LinhaDoNavegador, LinhaDosPapeis } from "./LinhasDosMotores";
 import { NavegadorDePastas } from "./NavegadorDePastas";
 import { QuantidadeDeSubagentes } from "./QuantidadeDeSubagentes";
 
@@ -90,12 +95,20 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
   }, [carregou, servidor.conectado]);
 
   // O aviso de esforço depende dos modelos e da pasta escolhidos: a busca muda junto com eles.
+  // O aviso só vale para o Claude Code: um modelo de outro motor não vai para a consulta.
   const { modeloDoOrquestrador, modeloDosSubagentes } = configuracao;
   const buscarEsforcoHerdado = useCallback(
-    () => api.lerEsforcoHerdado(modeloDoOrquestrador, modeloDosSubagentes, pasta),
+    () =>
+      api.lerEsforcoHerdado(
+        comoModeloClaude(modeloDoOrquestrador, "opus"),
+        comoModeloClaude(modeloDosSubagentes, "sonnet"),
+        pasta,
+      ),
     [modeloDoOrquestrador, modeloDosSubagentes, pasta],
   );
   const herdados = useEsforcosHerdados(buscarEsforcoHerdado);
+  // Quais motores estão instalados; sem a resposta, nenhum é desabilitado.
+  const motores = useMotores();
 
   function mudar<Campo extends keyof DadosDaConfiguracao>(campo: Campo, novo: DadosDaConfiguracao[Campo]): void {
     setConfiguracao((atual) => ({ ...atual, [campo]: novo }));
@@ -142,6 +155,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
   const tamanho = tamanhoDasInstrucoes(configuracao.instrucoesPersonalizadas);
   const passouDoLimite = tamanho > TAMANHO_MAXIMO_DAS_INSTRUCOES;
 
+  const problemaDoModelo = problemaDoModeloDoMotor(configuracao);
   const motivoParaNaoComecar =
     pasta === ""
       ? "Escolha uma pasta para começar."
@@ -149,9 +163,11 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
         ? "Dê um nome ao orquestrador para começar."
         : passouDoLimite
           ? "Encurte as instruções para começar."
-          : !servidor.conectado
-            ? "Servidor desconectado."
-            : null;
+          : problemaDoModelo !== null
+            ? problemaDoModelo
+            : !servidor.conectado
+              ? "Servidor desconectado."
+              : null;
 
   /**
    * O usuário preencheu algo que daria trabalho refazer: um nome digitado, uma
@@ -322,49 +338,15 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
               </div>
             </div>
 
-            <div className="linha-da-criacao">
-              <Rotulo
-                htmlFor={`${idDoCampo}-orquestrador`}
-                titulo="Orquestrador"
-                dica="Quem conversa com você."
-                explicacao="Ele entende o pedido, divide em tarefas e passa para os subagentes. Fable é para os desafios mais difíceis, Opus é o mais capaz no dia a dia, Sonnet equilibra e Haiku é rápido e gasta menos cota. O esforço é quanto ele pensa antes de responder; no automático, vale o padrão do Claude Code."
-                alinharAoTopo
-              />
-              <div className="flex min-w-0 flex-col gap-1.5">
-                <MenuDeModelo
-                  id={`${idDoCampo}-orquestrador`}
-                  rotulo="Modelo do orquestrador"
-                  modelo={configuracao.modeloDoOrquestrador}
-                  esforco={configuracao.esforcoDoOrquestrador}
-                  comUltracode
-                  aoEscolherModelo={(modelo) => mudar("modeloDoOrquestrador", modelo)}
-                  aoEscolherEsforco={(esforco) => mudar("esforcoDoOrquestrador", esforco)}
-                />
-                <AvisoDoEsforcoHerdado esforco={configuracao.esforcoDoOrquestrador} herdado={herdados?.orquestrador ?? null} />
-                {configuracao.esforcoDoOrquestrador === "ultracode" && (
-                  <span className="hint-warning">{AVISO_DO_ULTRACODE}</span>
-                )}
-              </div>
+            <LinhaDosPapeis
+              idDoCampo={idDoCampo}
+              valor={configuracao}
+              aoMudar={setConfiguracao}
+              motores={motores}
+              herdados={herdados}
+            />
 
-              <Rotulo
-                htmlFor={`${idDoCampo}-subagentes`}
-                titulo="Subagentes"
-                dica="Ajudantes que trabalham em paralelo."
-                explicacao="O orquestrador lança um para cada tarefa, e eles aparecem como bixinhos ligados ao terminal. No padrão, ele decide quantos usar, até 3 ao mesmo tempo. Cada subagente consome a cota da sua assinatura do Claude."
-                alinharAoTopo
-              />
-              <div className="flex min-w-0 flex-col gap-1.5">
-                <MenuDeModelo
-                  id={`${idDoCampo}-subagentes`}
-                  rotulo="Modelo dos subagentes"
-                  modelo={configuracao.modeloDosSubagentes}
-                  esforco={configuracao.esforcoDosSubagentes}
-                  aoEscolherModelo={(modelo) => mudar("modeloDosSubagentes", modelo)}
-                  aoEscolherEsforco={(esforco) => mudar("esforcoDosSubagentes", esforco)}
-                />
-                <AvisoDoEsforcoHerdado esforco={configuracao.esforcoDosSubagentes} herdado={herdados?.subagentes ?? null} />
-              </div>
-            </div>
+            <LinhaDaReserva valor={configuracao} aoMudar={setConfiguracao} motores={motores} />
 
             <div className="linha-da-criacao">
               <Rotulo
@@ -383,7 +365,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
               <Rotulo
                 titulo="Opções"
                 dica="Commit e push por feature; publicar artefatos online."
-                explicacao={`Commit e push por feature: ligado, cada feature ou correção pronta (testada, com lint e build ok) vira um commit próprio com push da branch em seguida, numa branch feature/, fix/, hotfix/ ou refactor/. PR e merge só quando você pedir. Precisa da permissão de rodar comandos. ${ROTULO_DOS_ARTEFATOS_ONLINE}: ${AJUDA_DOS_ARTEFATOS_ONLINE} O Modo econômico troca modelos e esforço por outros que gastam menos cota; os campos continuam editáveis.`}
+                explicacao={`Commit e push por feature: ligado, cada feature ou correção pronta (testada, com lint e build ok) vira um commit próprio com push da branch em seguida, numa branch feature/, fix/, hotfix/ ou refactor/. PR e merge só quando você pedir. Precisa da permissão de rodar comandos. ${ROTULO_DOS_ARTEFATOS_ONLINE}: ${AJUDA_DOS_ARTEFATOS_ONLINE} O Modo econômico troca modelos e esforço por outros que gastam menos cota; os campos continuam editáveis. Ele vale só para o Claude Code: com outro motor, os dois papéis voltam ao Claude Code.`}
                 alinharAoTopo
               />
               <div className="flex min-w-0 flex-col gap-1">
@@ -414,7 +396,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                       type="button"
                       className="btn btn-sm btn-ghost ml-auto shrink-0"
                       title={ajudaDaPredefinicao(economico)}
-                      onClick={() => setConfiguracao((atual) => ({ ...atual, ...economico.configuracao }))}
+                      onClick={() => setConfiguracao((atual) => comPredefinicao(atual, economico.configuracao))}
                     >
                       Modo econômico
                     </button>
@@ -428,6 +410,8 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                 )}
               </div>
             </div>
+
+            <LinhaDoNavegador valor={configuracao} aoMudar={setConfiguracao} />
 
             <div className="linha-da-criacao">
               <Rotulo

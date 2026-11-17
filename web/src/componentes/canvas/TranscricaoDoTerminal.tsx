@@ -10,13 +10,17 @@ import {
   type LinhaDoLog,
   type RecuperacaoNaTela,
   SEM_AVISOS_DA_CONVERSA_NOVA,
+  textoDaTrocaDeMotor,
   type TipoDeLinhaDoLog,
+  type TrocaDeMotorNaTela,
   type TurnoNaTela,
 } from "../../shared/estado/aplicarEvento";
 import { faseDoTurno } from "../../shared/estado/faseDoTurno";
 import { type EstadoDeVida, estadoDeVida } from "../../shared/estado/sinalDeVida";
 import { useAutorrecuperacao } from "../../shared/hooks/useAutorrecuperacao";
 import "../../theme/recuperacao-do-turno.css";
+import "../../theme/motores.css";
+import { rotuloDoMotor } from "../../shared/modelos";
 import {
   descreverConfiguracao,
   formatarDuracao,
@@ -216,6 +220,19 @@ function CartaoDeRetomada({
   );
 }
 
+/**
+ * O pedido passou para outro motor porque o limite de uso (ou a sobrecarga) do principal o impediu de seguir:
+ * quem assumiu e por quê. Ex.: "Trocou para Codex: limite do Claude atingido (libera às 14:30)".
+ */
+function AvisoDeTrocaDeMotor({ troca }: { troca: TrocaDeMotorNaTela }) {
+  return (
+    <div className="aviso-de-troca-de-motor" role="status" aria-label="Troca de motor">
+      <IconeAlerta tamanho={13} />
+      <span className="min-w-0 texto-longo">{textoDaTrocaDeMotor(troca)}</span>
+    </div>
+  );
+}
+
 /** O app esgotou as tentativas: o diagnóstico e o que o usuário pode fazer. */
 function CartaoDeDesistencia({ recuperacao }: { recuperacao: RecuperacaoNaTela }) {
   return (
@@ -269,6 +286,7 @@ const Turno = memo(function Turno({
   const linhas = emAndamento ? turno.log : turno.log.filter((linha) => linha.tipo !== "ferramenta");
   const recuperacao = turno.recuperacao ?? null;
   const retomada = turno.retomada ?? null;
+  const motor = turno.motor ?? "claude-code";
   // Como o sinal de vida, o progresso só interessa enquanto o pedido roda.
   const tarefas = emAndamento ? (turno.tarefas ?? []) : [];
   // O papel de cada Subagente do pedido, para o nome na origem das linhas.
@@ -319,6 +337,19 @@ const Turno = memo(function Turno({
           )}
         </div>
       )}
+      {/* O motor só aparece quando não é o Claude Code (o padrão): quem executou o pedido. */}
+      {motor !== "claude-code" && (
+        <div className="linha-do-motor-do-turno">
+          <span
+            className="chip selo-do-motor-do-turno"
+            data-testid="selo-do-motor"
+            title={`Este pedido rodou no ${rotuloDoMotor(motor)}`}
+          >
+            {rotuloDoMotor(motor)}
+          </span>
+        </div>
+      )}
+      {turno.trocaDeMotor != null && <AvisoDeTrocaDeMotor troca={turno.trocaDeMotor} />}
       <div className="flex flex-col">
         {linhas.map((linha) => (
           <LinhaDoTerminal key={linha.sequencia} linha={linha} papel={papeis.get(linha.origem) ?? null} />

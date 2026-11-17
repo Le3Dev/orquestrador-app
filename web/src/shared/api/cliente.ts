@@ -9,6 +9,7 @@ import type {
   DadosDoShell,
   EsforcosHerdados,
   EstadoDoChat,
+  EstadoDoMotor,
   ListagemDaPasta,
   ListagemDeSkills,
   ListagemDoCatalogo,
@@ -187,6 +188,12 @@ export const api = {
     }),
 
   listarPredefinicoes: () => requisitar<DadosDaPredefinicao[]>("/predefinicoes"),
+
+  /**
+   * Os motores que o app conhece e se cada CLI está instalado, com a versão e o login. Servidor antigo (404) ou
+   * falha: quem chama trata como "não foi possível verificar".
+   */
+  listarMotores: () => requisitar<EstadoDoMotor[]>("/motores"),
 
   /** Aplica uma predefinição (ex.: modo econômico) à configuração; devolve o resumo atualizado. */
   aplicarPredefinicao: (id: string, predefinicao: NomeDaPredefinicao) =>

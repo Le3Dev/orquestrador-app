@@ -1,5 +1,6 @@
 import type {
   CausaDaRecuperacao,
+  CausaDaTrocaDeMotor,
   DadosDaConfiguracao,
   DadosDaRetomada,
   DadosDoAnexo,
@@ -9,6 +10,7 @@ import type {
   EventoRegistrado,
   JanelaDaCota,
   ModoDoTurno,
+  Motor,
   PerguntaDoApp,
   SituacaoDoSubagente,
   SituacaoDoTurno,
@@ -18,6 +20,7 @@ import type {
 import { CERCAS_DO_ORQUESTRADOR, semBlocosDoApp } from "../blocosDoApp";
 import { juntarEnderecos, normalizarEndereco } from "../enderecosLocais";
 import { formatarDuracao, formatarMomento, formatarTokens, idCurto } from "../formatacao";
+import { nomeCurtoDoMotor, rotuloDoMotor } from "../modelos";
 
 export interface SubagenteNaTela {
   id: string;
@@ -117,6 +120,26 @@ export interface TurnoNaTela {
    * quando o turno termina. Vazia, ou ausente, sem citação.
    */
   enderecosDaResposta?: string[];
+  /**
+   * O motor que executa o turno (`turno_iniciado`). Ausente, ou "claude-code", nos turnos gravados antes dos
+   * outros motores: o selo do motor só aparece quando não é o Claude Code.
+   */
+  motor?: Motor;
+  /**
+   * A última vez em que o pedido passou para outro motor (`motor_trocado`): o limite de uso ou a sobrecarga do
+   * motor principal. Nula, ou ausente, sem troca.
+   */
+  trocaDeMotor?: TrocaDeMotorNaTela | null;
+}
+
+/** O evento `motor_trocado` do turno, como a tela o mostra (`em` é a hora do evento). */
+export interface TrocaDeMotorNaTela {
+  de: Motor;
+  para: Motor;
+  causa: CausaDaTrocaDeMotor;
+  /** Quando o limite de `de` libera (ISO), se o motor informou. */
+  liberaEm?: string;
+  em: string;
 }
 
 /** O evento `recuperacao_do_turno` mais recente do turno, como a tela o mostra. */
@@ -460,6 +483,19 @@ function alteracaoDoTurno(evento: EventoRegistrado): AlteracaoDeTurno | null {
         },
       });
 
+    // O aviso da transcrição: o pedido segue em outro motor. A troca mais recente vale.
+    case "motor_trocado":
+      return (turno) => ({
+        ...turno,
+        trocaDeMotor: {
+          de: evento.de,
+          para: evento.para,
+          causa: evento.causa,
+          ...(evento.liberaEm === undefined ? {} : { liberaEm: evento.liberaEm }),
+          em: evento.em,
+        },
+      });
+
     default:
       return null;
   }
@@ -507,16 +543,23 @@ export function linhaDoLog(evento: EventoRegistrado, turno: TurnoNaTela): Omit<L
         quantidadeDeSubagentes.modo === "fixa" ? `${quantidadeDeSubagentes.limite}` : `≤${quantidadeDeSubagentes.limite}`;
       const modo = evento.modo === "planejamento" ? "plan mode · " : "";
       const retomada = evento.retomada === undefined ? "" : `retomada automática (tentativa ${evento.retomada.tentativa}) · `;
+      // Fora do Claude Code, o motor vem junto: os modelos sozinhos ("padrao") não dizem quem executa.
+      const motor =
+        evento.motor === undefined || evento.motor === "claude-code" ? "" : `${rotuloDoMotor(evento.motor)} · `;
       return {
         origem: "orquestrador",
         tipo: "sistema",
-        texto: `${retomada}${modo}turno iniciado · ${modeloDoOrquestrador} → ${modeloDosSubagentes} · ${quantidade} agentes`,
+        texto: `${retomada}${modo}turno iniciado · ${motor}${modeloDoOrquestrador} → ${modeloDosSubagentes} · ${quantidade} agentes`,
       };
     }
     case "recuperacao_do_turno":
       return { origem: "orquestrador", ...linhaDaRecuperacao(evento) };
     case "sessao_iniciada":
-      return { origem: "orquestrador", tipo: "sistema", texto: "sessão do claude code conectada" };
+      return {
+        origem: "orquestrador",
+        tipo: "sistema",
+        texto: `sessão do ${rotuloDoMotor(turno.motor ?? "claude-code").toLowerCase()} conectada`,
+      };
     case "texto_do_orquestrador": {
       // O bloco cru da pergunta não aparece no log: ela vira cartão no fim do turno.
       const texto = semBlocosDoOrquestrador(evento.texto);
@@ -583,52 +626,26 @@ export function linhaDoLog(evento: EventoRegistrado, turno: TurnoNaTela): Omit<L
       return { origem: "orquestrador", tipo: "fim", texto: "plano aprovado · execução iniciada" };
     case "plano_descartado":
       return { origem: "orquestrador", tipo: "sistema", texto: "plano descartado" };
+    // O pedido passou para outro motor (a reserva do Orquestrador): vem com o `turnoId` do turno que falhou, ou
+    // do que já começa no motor de reserva.
+    case "motor_trocado":
+      return { origem: "orquestrador", tipo: "sistema", texto: textoDaTrocaDeMotor(evento) };
     default:
-      return ehMotorTrocado(evento) ? { origem: "orquestrador", tipo: "sistema", texto: textoDaTrocaDeMotor(evento) } : null;
+      return null;
   }
 }
 
 /**
- * O pedido passou para outro motor (a reserva do Orquestrador) porque o limite
- * de uso do motor dele estourou ou a API dele ficou sobrecarregada. Vem com o
- * `turnoId` do turno que falhou, ou do que já começa no motor de reserva.
- * Fica de fora de `api/tipos`: a tela só o mostra como uma linha do log.
+ * O que a tela diz de uma troca de motor. Ex.: "Trocou para Codex: limite do Claude atingido (libera às 14:30)";
+ * por sobrecarga, "Trocou para Codex: Claude sobrecarregado". Sem horário do motor, não há "libera às".
  */
-interface EventoMotorTrocado {
-  tipo: "motor_trocado";
-  de: string;
-  para: string;
-  causa: string;
-  /** ISO; só quando o motor informou quando o limite libera. */
-  liberaEm?: string;
-  em: string;
-}
-
-function ehMotorTrocado(evento: { tipo: string }): evento is EventoMotorTrocado {
-  return evento.tipo === "motor_trocado";
-}
-
-const ROTULOS_DOS_MOTORES: Readonly<Record<string, string>> = {
-  "claude-code": "Claude Code",
-  codex: "Codex",
-  copilot: "GitHub Copilot CLI",
-};
-
-/** O motor numa frase curta: "o limite do Claude atingido". */
-const NOMES_CURTOS_DOS_MOTORES: Readonly<Record<string, string>> = {
-  "claude-code": "Claude",
-  codex: "Codex",
-  copilot: "Copilot",
-};
-
-/** Ex.: "Trocou para Codex: limite do Claude atingido (libera às 14:30)". */
-function textoDaTrocaDeMotor(evento: EventoMotorTrocado): string {
-  const para = ROTULOS_DOS_MOTORES[evento.para] ?? evento.para;
-  const de = NOMES_CURTOS_DOS_MOTORES[evento.de] ?? evento.de;
-  if (evento.causa === "sobrecarga") {
+export function textoDaTrocaDeMotor(troca: Pick<TrocaDeMotorNaTela, "de" | "para" | "causa" | "liberaEm" | "em">): string {
+  const para = rotuloDoMotor(troca.para);
+  const de = nomeCurtoDoMotor(troca.de);
+  if (troca.causa === "sobrecarga") {
     return `Trocou para ${para}: ${de} sobrecarregado`;
   }
-  const libera = evento.liberaEm === undefined ? "" : ` (libera às ${horaDaRetomada(evento.liberaEm, evento.em)})`;
+  const libera = troca.liberaEm === undefined ? "" : ` (libera às ${horaDaRetomada(troca.liberaEm, troca.em)})`;
   return `Trocou para ${para}: limite do ${de} atingido${libera}`;
 }
 
@@ -717,6 +734,9 @@ function novoTurno(evento: Extract<EventoRegistrado, { tipo: "turno_iniciado" }>
     log: [],
     recuperacao: null,
     retomada: evento.retomada ?? null,
+    // Os pedidos gravados antes dos outros motores rodaram no Claude Code.
+    motor: evento.motor ?? "claude-code",
+    trocaDeMotor: null,
   };
 }
 

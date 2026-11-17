@@ -1111,9 +1111,18 @@ describe("aplicarEvento", () => {
       sequencia: 1,
       em: local(14, 0),
     };
-    // O evento ainda não faz parte dos tipos da tela: ela só o mostra no log.
-    const troca = (sequencia: number, extra: Record<string, unknown>): EventoRegistrado =>
-      ({ tipo: "motor_trocado", turnoId: "t1", de: "claude-code", para: "codex", sequencia, em: local(14, 5), ...extra }) as unknown as EventoRegistrado;
+    const troca = (
+      sequencia: number,
+      extra: Partial<Extract<EventoRegistrado, { tipo: "motor_trocado" }>> & Pick<Extract<EventoRegistrado, { tipo: "motor_trocado" }>, "causa">,
+    ): EventoRegistrado => ({
+      tipo: "motor_trocado",
+      turnoId: "t1",
+      de: "claude-code",
+      para: "codex",
+      sequencia,
+      em: local(14, 5),
+      ...extra,
+    });
     const textosDoLog = (estado: EstadoDaConversa) => estado.turnos[0]?.log.map((linha) => [linha.tipo, linha.texto]);
 
     it("o limite de uso vira uma linha simples no log, com a hora em que libera", () => {
@@ -1131,6 +1140,80 @@ describe("aplicarEvento", () => {
       const estado = reproduzir([inicio, troca(2, { causa: "sobrecarga", de: "codex", para: "copilot" })]);
 
       expect(textosDoLog(estado)?.[1]).toEqual(["sistema", "Trocou para GitHub Copilot CLI: Codex sobrecarregado"]);
+    });
+
+    it("guarda a última troca no turno, para a transcrição mostrar o aviso", () => {
+      expect(reproduzir([inicio]).turnos[0]?.trocaDeMotor).toBeNull();
+
+      const estado = reproduzir([
+        inicio,
+        troca(2, { causa: "sobrecarga" }),
+        troca(3, { causa: "limite_de_uso", para: "copilot", liberaEm: local(18, 30) }),
+      ]);
+
+      // A troca mais recente vale; a hora do evento acompanha, para o "libera às".
+      expect(estado.turnos[0]?.trocaDeMotor).toEqual({
+        de: "claude-code",
+        para: "copilot",
+        causa: "limite_de_uso",
+        liberaEm: local(18, 30),
+        em: local(14, 5),
+      });
+    });
+
+    it("sem horário do motor, a troca não traz `liberaEm`", () => {
+      const estado = reproduzir([inicio, troca(2, { causa: "limite_de_uso" })]);
+      expect(estado.turnos[0]?.trocaDeMotor).not.toHaveProperty("liberaEm");
+    });
+
+    it("a troca é do turno do evento: o seguinte, no motor de reserva, começa sem ela", () => {
+      const estado = reproduzir([
+        inicio,
+        troca(2, { causa: "limite_de_uso" }),
+        { tipo: "turno_falhou", turnoId: "t1", motivo: "limite de uso", sequencia: 3, em: local(14, 6) },
+        { tipo: "turno_iniciado", turnoId: "t2", texto: "corrija o bug", configuracao, motor: "codex", sequencia: 4, em: local(14, 6) },
+      ]);
+
+      expect(estado.turnos[0]?.trocaDeMotor).not.toBeNull();
+      expect(estado.turnos[1]?.trocaDeMotor).toBeNull();
+      expect(estado.turnos[1]?.motor).toBe("codex");
+    });
+  });
+
+  describe("motor do turno", () => {
+    const iniciar = (extra: Partial<Extract<EventoDeOrquestracao, { tipo: "turno_iniciado" }>> = {}) =>
+      registrar([{ tipo: "turno_iniciado", turnoId: "t1", texto: "corrija o bug", configuracao, ...extra }]);
+
+    it("o turno guarda o motor do evento", () => {
+      expect(reproduzir(iniciar({ motor: "codex" })).turnos[0]?.motor).toBe("codex");
+      expect(reproduzir(iniciar({ motor: "copilot" })).turnos[0]?.motor).toBe("copilot");
+    });
+
+    it("o evento gravado antes dos outros motores valeu para o Claude Code", () => {
+      expect(reproduzir(iniciar()).turnos[0]?.motor).toBe("claude-code");
+    });
+
+    it("a linha do log diz o motor quando não é o Claude Code, e o texto de sempre quando é", () => {
+      expect(reproduzir(iniciar()).turnos[0]?.log[0]?.texto).toBe("turno iniciado · opus → sonnet · ≤3 agentes");
+      expect(reproduzir(iniciar({ motor: "claude-code" })).turnos[0]?.log[0]?.texto).toBe(
+        "turno iniciado · opus → sonnet · ≤3 agentes",
+      );
+      expect(
+        reproduzir(iniciar({ motor: "codex", configuracao: { ...configuracao, modeloDoOrquestrador: "padrao", modeloDosSubagentes: "padrao" } }))
+          .turnos[0]?.log[0]?.texto,
+      ).toBe("turno iniciado · Codex · padrao → padrao · ≤3 agentes");
+    });
+
+    it("a sessão conectada diz o motor do turno", () => {
+      const eventos = (motor: "claude-code" | "codex" | "copilot") =>
+        registrar([
+          { tipo: "turno_iniciado", turnoId: "t1", texto: "oi", configuracao, motor },
+          { tipo: "sessao_iniciada", turnoId: "t1" },
+        ]);
+
+      expect(reproduzir(eventos("claude-code")).turnos[0]?.log[1]?.texto).toBe("sessão do claude code conectada");
+      expect(reproduzir(eventos("codex")).turnos[0]?.log[1]?.texto).toBe("sessão do codex conectada");
+      expect(reproduzir(eventos("copilot")).turnos[0]?.log[1]?.texto).toBe("sessão do github copilot cli conectada");
     });
   });
 

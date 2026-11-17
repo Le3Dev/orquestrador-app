@@ -728,4 +728,85 @@ describe("TranscricaoDoTerminal", () => {
       /^o plano pendente foi descartado$/,
     );
   });
+
+  describe("motor do pedido", () => {
+    const iniciar = (motor?: "claude-code" | "codex" | "copilot") =>
+      aplicar(ESTADO_INICIAL, {
+        tipo: "turno_iniciado",
+        turnoId: "t1",
+        texto: "corrija o bug",
+        configuracao,
+        ...(motor === undefined ? {} : { motor }),
+      });
+
+    it("o pedido do Claude Code (ou gravado antes dos outros motores) não leva selo", () => {
+      const { rerender } = render(<Transcricao conversa={iniciar("claude-code")} />);
+      expect(screen.queryByTestId("selo-do-motor")).not.toBeInTheDocument();
+
+      rerender(<Transcricao conversa={iniciar()} />);
+      expect(screen.queryByTestId("selo-do-motor")).not.toBeInTheDocument();
+    });
+
+    it("o pedido de outro motor leva o selo com o nome dele", () => {
+      const { rerender } = render(<Transcricao conversa={iniciar("codex")} />);
+      expect(screen.getByTestId("selo-do-motor")).toHaveTextContent("Codex");
+
+      rerender(<Transcricao conversa={iniciar("copilot")} />);
+      expect(screen.getByTestId("selo-do-motor")).toHaveTextContent("GitHub Copilot CLI");
+    });
+
+    it("o selo acompanha o pedido, e não o terminal: o pedido seguinte volta ao Claude Code sem ele", () => {
+      const conversa = aplicar(
+        iniciar("codex"),
+        { tipo: "turno_concluido", turnoId: "t1", resposta: "pronto", uso: USO },
+        { tipo: "turno_iniciado", turnoId: "t2", texto: "agora o resto", configuracao, motor: "claude-code" },
+      );
+      render(<Transcricao conversa={conversa} />);
+
+      expect(screen.getAllByTestId("selo-do-motor")).toHaveLength(1);
+    });
+
+    it("o limite de uso vira um aviso visível, com a hora em que libera", () => {
+      // Na hora local do evento, para o "libera às" não depender do fuso de quem roda o teste.
+      const conversa = aplicarEvento(iniciar("claude-code"), {
+        tipo: "motor_trocado",
+        turnoId: "t1",
+        de: "claude-code",
+        para: "codex",
+        causa: "limite_de_uso",
+        liberaEm: new Date(2026, 9, 28, 18, 30).toISOString(),
+        sequencia: 2,
+        em: new Date(2026, 9, 28, 14, 5).toISOString(),
+      });
+      render(<Transcricao conversa={conversa} />);
+
+      const aviso = screen.getByRole("status", { name: "Troca de motor" });
+      expect(aviso).toHaveTextContent("Trocou para Codex: limite do Claude atingido (libera às 18:30)");
+    });
+
+    it("sem a hora, o aviso não inventa uma; por sobrecarga, diz que o motor ficou sobrecarregado", () => {
+      const troca = (causa: "limite_de_uso" | "sobrecarga") =>
+        aplicar(iniciar("claude-code"), {
+          tipo: "motor_trocado",
+          turnoId: "t1",
+          de: "claude-code",
+          para: "copilot",
+          causa,
+        });
+      const { rerender } = render(<Transcricao conversa={troca("limite_de_uso")} />);
+      expect(screen.getByRole("status", { name: "Troca de motor" })).toHaveTextContent(
+        /^Trocou para GitHub Copilot CLI: limite do Claude atingido$/,
+      );
+
+      rerender(<Transcricao conversa={troca("sobrecarga")} />);
+      expect(screen.getByRole("status", { name: "Troca de motor" })).toHaveTextContent(
+        /^Trocou para GitHub Copilot CLI: Claude sobrecarregado$/,
+      );
+    });
+
+    it("sem troca de motor, não há aviso", () => {
+      render(<Transcricao conversa={iniciar("codex")} />);
+      expect(screen.queryByRole("status", { name: "Troca de motor" })).not.toBeInTheDocument();
+    });
+  });
 });
