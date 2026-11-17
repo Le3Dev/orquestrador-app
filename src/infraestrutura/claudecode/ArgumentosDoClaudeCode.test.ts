@@ -61,6 +61,8 @@ function pedido(
     subagentesProntos: [],
     sessaoId: "sessao-1",
     sessaoIniciada,
+    motor: "claude-code",
+    contextoDaTroca: null,
     texto: "analise",
     modo,
     pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
@@ -854,5 +856,30 @@ describe("artefatos online no claude.ai", () => {
 
     expect(ambiente).not.toHaveProperty("CLAUDE_CODE_ARTIFACT");
     expect(ambiente).not.toHaveProperty("CLAUDE_CODE_ARTIFACT_AUTO_OPEN");
+  });
+});
+
+describe("modelos que o Claude Code recebe", () => {
+  it("com a configuração padrão, o orquestrador e os subagentes vão com o apelido configurado", () => {
+    const turno = pedido(false);
+
+    expect(valoresDe(montarArgumentos(turno, arquivos), "--model")).toEqual(["opus"]);
+    expect(definicaoDosAgentes(turno).executor?.model).toBe("haiku");
+    expect(definicaoDosAgentes({ ...turno, subagentesProntos: [PRONTO] }).revisor?.model).toBe("haiku");
+  });
+
+  it("um modelo de outro motor num dos papéis nunca vai ao Claude Code: cai no apelido de sempre", () => {
+    const configuracao = ConfiguracaoDoOrquestrador.de({
+      modeloDoOrquestrador: "opus",
+      motorDosSubagentes: "codex",
+      modeloDosSubagentes: "gpt-5.1-codex",
+      quantidadeDeSubagentes: { modo: "automatica", limite: 4 },
+      nivelDePermissao: "leitura",
+    });
+    const turno = { ...pedido(false), configuracao };
+
+    expect(definicaoDosAgentes(turno).executor?.model).toBe("sonnet");
+    expect(definicaoDosAgentes({ ...turno, subagentesProntos: [PRONTO] }).revisor?.model).toBe("sonnet");
+    expect(valoresDe(montarArgumentos(turno, arquivos), "--model")).toEqual(["opus"]);
   });
 });

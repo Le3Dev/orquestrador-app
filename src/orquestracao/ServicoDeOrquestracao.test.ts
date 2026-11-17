@@ -2312,3 +2312,497 @@ describe("ServicoDeOrquestracao e a autorrecuperação (ADR-36)", () => {
     });
   });
 });
+
+describe("ServicoDeOrquestracao e a reserva de motores", () => {
+  let repositorio: RepositorioEmMemoria;
+  let motor: MotorRoteirizado;
+  let relogio: RelogioFalso;
+  let diagnosticador: DiagnosticadorParado;
+  let medidor: MedidorFalso;
+  let esforco: EsforcoDaMaquinaFalso;
+  let armazem: ArmazemEmMemoria;
+  let preferencias: PreferenciasEmMemoria;
+  let sinais: SinalDeVida[];
+  let servico: ServicoDeOrquestracao;
+  let ids: number;
+
+  const comReserva: DadosDaConfiguracao = { ...configuracao, ordemDeReserva: ["codex", "copilot"] };
+  const noCodex: DadosDaConfiguracao = {
+    ...configuracao,
+    motorDoOrquestrador: "codex",
+    modeloDoOrquestrador: "padrao",
+    motorDosSubagentes: "codex",
+    modeloDosSubagentes: "padrao",
+  };
+
+  beforeEach(() => {
+    repositorio = new RepositorioEmMemoria();
+    motor = new MotorRoteirizado();
+    relogio = new RelogioFalso();
+    diagnosticador = new DiagnosticadorParado();
+    medidor = new MedidorFalso();
+    esforco = new EsforcoDaMaquinaFalso();
+    armazem = new ArmazemEmMemoria();
+    preferencias = new PreferenciasEmMemoria();
+    sinais = [];
+    ids = 0;
+    servico = new ServicoDeOrquestracao({
+      repositorio,
+      motor,
+      execucoes: new ControleDeExecucoesEmMemoria(),
+      publicador: { publicar: () => undefined, sinalizar: (_id, sinal) => sinais.push(sinal) },
+      anexos: armazem,
+      worktrees: new GerenciadorDeWorktreesFalso(),
+      pastaDeArtefatos: (orquestradorId) => `/dados/artefatos/entrada/orquestradores/${orquestradorId}`,
+      preferencias,
+      gerarId: () => `id${++ids}`,
+      agora: relogio.agora,
+      diagnosticador,
+      agendador: relogio,
+      medidor,
+      esforcoDaMaquina: esforco,
+    });
+  });
+
+  async function criar(dados: DadosDaConfiguracao = comReserva): Promise<Orquestrador> {
+    return servico.criarOrquestrador({
+      nome: "Painel",
+      pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
+      configuracao: dados,
+    });
+  }
+
+  // O consumo medido chega depois do fim do turno, em segundo plano: fica fora da ordem esperada.
+  const tipos = (): string[] => repositorio.eventos.map((evento) => evento.tipo).filter((tipo) => tipo !== "consumo_do_turno_medido");
+  const trocas = (): EventoRegistrado[] => repositorio.eventos.filter((evento) => evento.tipo === "motor_trocado");
+  const iniciados = (): EventoRegistrado[] => repositorio.eventos.filter((evento) => evento.tipo === "turno_iniciado");
+  const liberaEm = (minutos: number): string => new Date(relogio.agoraMs + minutos * MINUTO).toISOString();
+  const motoresDosPedidos = (): string[] => motor.pedidos.map((pedido) => pedido.motor);
+  const etapas = (): string[] =>
+    repositorio.eventos.flatMap((evento) =>
+      evento.tipo === "recuperacao_do_turno" ? [`${evento.etapa} ${evento.tentativa}/${evento.de}`] : [],
+    );
+  /** Espera o turno aberto pela reserva (ou pela retomada) terminar. */
+  async function esperarTurnos(orquestrador: Orquestrador, total: number): Promise<void> {
+    await vi.waitFor(() => {
+      expect(orquestrador.totalDeTurnos).toBe(total);
+      expect(orquestrador.turnoEmAndamento).toBeNull();
+    });
+  }
+
+  it("com a configuração padrão, tudo roda no Claude Code com a sessão do app, sem contexto e sem troca", async () => {
+    const orquestrador = await criar(configuracao);
+    motor.roteiro = [SUCESSO, SUCESSO];
+
+    await (await servico.enviarMensagem(orquestrador.id, "um")).conclusao;
+    await (await servico.enviarMensagem(orquestrador.id, "dois")).conclusao;
+
+    expect(motor.pedidos.map((pedido) => [pedido.motor, pedido.sessaoId, pedido.sessaoIniciada, pedido.contextoDaTroca])).toEqual([
+      ["claude-code", orquestrador.sessaoId, false, null],
+      ["claude-code", orquestrador.sessaoId, true, null],
+    ]);
+    expect(motor.pedidos[0]?.configuracao).toBe(orquestrador.configuracao);
+    expect(iniciados()).toMatchObject([{ motor: "claude-code" }, { motor: "claude-code" }]);
+    expect(trocas()).toEqual([]);
+  });
+
+  describe("quando o turno falha por limite de uso ou sobrecarga", () => {
+    it("limite de uso: grava o motor_trocado e reenvia o mesmo pedido ao Codex, com o contexto, sem esperar", async () => {
+      const orquestrador = await criar();
+      const libera = liberaEm(120);
+      motor.roteiro = [falhaPor("limite_de_uso", libera), { ...SUCESSO, sessaoDoMotor: "thread-1" }];
+
+      const primeiro = await servico.enviarMensagem(orquestrador.id, "faça o painel");
+      await primeiro.recuperacao;
+      await esperarTurnos(orquestrador, 2);
+
+      expect(tipos()).toEqual([
+        "turno_iniciado",
+        "sessao_iniciada",
+        "turno_falhou",
+        "motor_trocado",
+        "turno_iniciado",
+        "sessao_iniciada",
+        "turno_concluido",
+      ]);
+      expect(trocas()).toMatchObject([
+        { turnoId: primeiro.turnoId, de: "claude-code", para: "codex", causa: "limite_de_uso", liberaEm: libera },
+      ]);
+
+      const [doClaude, doCodex] = motor.pedidos;
+      expect(doClaude).toMatchObject({ motor: "claude-code", contextoDaTroca: null });
+      expect(doCodex).toMatchObject({ motor: "codex", texto: "faça o painel", sessaoId: "", sessaoIniciada: false });
+      expect(doCodex?.configuracao.paraDados()).toMatchObject({
+        motorDoOrquestrador: "codex",
+        modeloDoOrquestrador: "padrao",
+        ordemDeReserva: [],
+      });
+      expect(doCodex?.contextoDaTroca).toContain("[Pedido 1, atendido por Claude Code]");
+      expect(doCodex?.contextoDaTroca).toContain("faça o painel");
+      expect(doCodex?.contextoDaTroca).toContain("o turno falhou (falhou: limite_de_uso)");
+
+      expect(iniciados()).toMatchObject([
+        { motor: "claude-code", configuracao: { motorDoOrquestrador: "claude-code" } },
+        { motor: "codex", texto: "faça o painel", configuracao: { motorDoOrquestrador: "codex" } },
+      ]);
+      expect(orquestrador.paraDados().turnos.map((turno) => [turno.situacao, turno.motor])).toEqual([
+        ["falhou", "claude-code"],
+        ["concluido", "codex"],
+      ]);
+      // O limite do Claude fica no agregado, e a sessão que o Codex criou também.
+      expect(orquestrador.liberaEmDoMotor("claude-code")).toBe(libera);
+      expect(orquestrador.liberaEmDoMotor("codex")).toBeNull();
+      expect(orquestrador.sessaoDoMotor("codex")).toEqual({ id: "thread-1", iniciada: true });
+      expect(orquestrador.paraDados().sessoesDosMotores).toEqual({ codex: "thread-1" });
+      // Nada de espera nem de retomada: a reserva resolveu.
+      expect(etapas()).toEqual([]);
+      expect(relogio.pendentes).toBe(0);
+      expect(orquestrador.retomadaPendente).toBeNull();
+    });
+
+    it("sobrecarga: troca do mesmo jeito, mas sem liberaEm (e sem registrar limite)", async () => {
+      const orquestrador = await criar();
+      motor.roteiro = [falhaPor("sobrecarga"), SUCESSO];
+
+      await (await servico.enviarMensagem(orquestrador.id, "faça")).recuperacao;
+      await esperarTurnos(orquestrador, 2);
+
+      expect(trocas()).toMatchObject([{ de: "claude-code", para: "codex", causa: "sobrecarga" }]);
+      expect(trocas()[0]).not.toHaveProperty("liberaEm");
+      expect(orquestrador.liberaEmDoMotor("claude-code")).toBeNull();
+      expect(etapas()).toEqual([]);
+    });
+
+    it("segue a ordem da reserva: se o Codex também falha, o Copilot assume, e cada motor só é tentado uma vez", async () => {
+      const orquestrador = await criar();
+      motor.roteiro = [falhaPor("limite_de_uso", liberaEm(60)), falhaPor("sobrecarga"), SUCESSO];
+
+      await (await servico.enviarMensagem(orquestrador.id, "faça")).recuperacao;
+      await esperarTurnos(orquestrador, 3);
+
+      expect(motoresDosPedidos()).toEqual(["claude-code", "codex", "copilot"]);
+      expect(motor.pedidos.map((pedido) => pedido.texto)).toEqual(["faça", "faça", "faça"]);
+      expect(trocas().map((evento) => [(evento as { de: string }).de, (evento as { para: string }).para])).toEqual([
+        ["claude-code", "codex"],
+        ["codex", "copilot"],
+      ]);
+      expect(trocas()[1]).toMatchObject({ causa: "sobrecarga" });
+      // O Copilot recebe o que nenhuma sessão dele viu: os dois turnos que falharam.
+      expect(motor.pedidos[2]?.contextoDaTroca).toContain("atendido por Claude Code");
+      expect(motor.pedidos[2]?.contextoDaTroca).toContain("atendido por Codex");
+      expect(orquestrador.ultimoTurno?.situacao).toBe("concluido");
+    });
+
+    it("esgotada a reserva, volta o comportamento de sempre: espera até o liberaEm do último motor e retoma a sessão dele", async () => {
+      const orquestrador = await criar({ ...configuracao, ordemDeReserva: ["codex"] });
+      const libera = liberaEm(180);
+      motor.roteiro = [
+        falhaPor("limite_de_uso", liberaEm(120)),
+        { ...falhaPor("limite_de_uso", libera), sessaoDoMotor: "thread-1" },
+        SUCESSO,
+      ];
+
+      await (await servico.enviarMensagem(orquestrador.id, "faça")).recuperacao;
+      await vi.waitFor(() => expect(etapas()).toEqual(["aguardando 1/3"]));
+
+      expect(trocas()).toHaveLength(1);
+      expect(repositorio.eventos.filter((evento) => evento.tipo === "recuperacao_do_turno")[0]).toMatchObject({
+        turnoId: orquestrador.ultimoTurno?.id,
+        causa: "limite_de_uso",
+        retomaEm: new Date(Date.parse(libera) + MINUTO).toISOString(),
+      });
+
+      await relogio.avancar(180 * MINUTO);
+      expect(motor.pedidos).toHaveLength(2);
+      await relogio.avancar(MINUTO);
+      await esperarTurnos(orquestrador, 3);
+
+      // A retomada continua na sessão do Codex, o motor do turno que falhou por último.
+      expect(motor.pedidos[2]).toMatchObject({ motor: "codex", sessaoId: "thread-1", sessaoIniciada: true });
+      expect(motor.pedidos[2]?.texto).toContain("limite de uso da assinatura foi atingido");
+      expect(iniciados().at(-1)).toMatchObject({ motor: "codex", retomada: { tentativa: 1 } });
+      expect(trocas()).toHaveLength(1);
+    });
+
+    it("depois de esgotada, a retomada que falha de novo não volta a trocar de motor: segue as tentativas", async () => {
+      const orquestrador = await criar({ ...configuracao, ordemDeReserva: ["codex"] });
+      motor.roteiro = [
+        falhaPor("limite_de_uso", liberaEm(120)),
+        falhaPor("limite_de_uso", liberaEm(180)),
+        falhaPor("limite_de_uso", liberaEm(400)),
+      ];
+
+      await (await servico.enviarMensagem(orquestrador.id, "faça")).recuperacao;
+      await vi.waitFor(() => expect(etapas()).toEqual(["aguardando 1/3"]));
+      await relogio.avancar(181 * MINUTO);
+      await vi.waitFor(() => expect(etapas()).toEqual(["aguardando 1/3", "retomando 1/3", "aguardando 2/3"]));
+
+      expect(trocas()).toHaveLength(1);
+      expect(motoresDosPedidos()).toEqual(["claude-code", "codex", "codex"]);
+    });
+
+    it("sem reserva, a falha por limite de uso espera como sempre: sem troca e retomando no Claude Code", async () => {
+      const orquestrador = await criar(configuracao);
+      motor.roteiro = [falhaPor("limite_de_uso", liberaEm(30)), SUCESSO];
+
+      await (await servico.enviarMensagem(orquestrador.id, "faça")).recuperacao;
+      expect(etapas()).toEqual(["aguardando 1/3"]);
+      await relogio.avancar(31 * MINUTO);
+      await esperarTurnos(orquestrador, 2);
+
+      expect(trocas()).toEqual([]);
+      expect(motoresDosPedidos()).toEqual(["claude-code", "claude-code"]);
+      expect(motor.pedidos[1]).toMatchObject({ sessaoId: orquestrador.sessaoId, sessaoIniciada: true, contextoDaTroca: null });
+    });
+
+    it.each([["rede" as const], ["outro" as const]])(
+      "a causa %s não aciona a reserva: rede espera e retoma no mesmo motor; outro só falha",
+      async (causa) => {
+        const orquestrador = await criar();
+        motor.roteiro = [falhaPor(causa), SUCESSO];
+
+        await (await servico.enviarMensagem(orquestrador.id, "faça")).recuperacao;
+
+        expect(trocas()).toEqual([]);
+        if (causa === "rede") {
+          expect(etapas()).toEqual(["aguardando 1/3"]);
+          await relogio.avancar(MINUTO);
+          await esperarTurnos(orquestrador, 2);
+          expect(motoresDosPedidos()).toEqual(["claude-code", "claude-code"]);
+        } else {
+          expect(etapas()).toEqual([]);
+          expect(motor.pedidos).toHaveLength(1);
+        }
+      },
+    );
+
+    it("vale também com a autorrecuperação desligada: a reserva é uma escolha da configuração do Orquestrador", async () => {
+      preferencias.preferencias = PreferenciasGlobais.de({ autorrecuperacao: false });
+      const orquestrador = await criar();
+      motor.roteiro = [falhaPor("limite_de_uso", liberaEm(60)), SUCESSO];
+
+      await (await servico.enviarMensagem(orquestrador.id, "faça")).recuperacao;
+      await esperarTurnos(orquestrador, 2);
+
+      expect(motoresDosPedidos()).toEqual(["claude-code", "codex"]);
+      expect(trocas()).toHaveLength(1);
+    });
+
+    it("o pedido reenviado leva o modo e os mesmos anexos, sem gravá-los de novo", async () => {
+      const orquestrador = await criar();
+      const conteudo = new Uint8Array([1, 2, 3]);
+      motor.roteiro = [falhaPor("sobrecarga"), SUCESSO];
+
+      await (
+        await servico.enviarMensagem(orquestrador.id, "veja o print", [{ nome: "tela.png", tipoDeMidia: "image/png", conteudo }], "planejamento")
+      ).recuperacao;
+      await esperarTurnos(orquestrador, 2);
+
+      expect(motor.pedidos[1]).toMatchObject({ modo: "planejamento", texto: "veja o print" });
+      expect(motor.pedidos[1]?.anexos).toEqual(motor.pedidos[0]?.anexos);
+      expect(armazem.guardados.size).toBe(1);
+      expect([...armazem.guardados.values()][0]).toBe(conteudo);
+      expect(iniciados()[1]).toMatchObject({ modo: "planejamento", anexos: [{ nome: "tela.png" }] });
+    });
+  });
+
+  describe("o motor com que um pedido novo começa", () => {
+    it("com o limite do principal ainda de pé, começa direto na reserva e anuncia a troca antes do turno", async () => {
+      const orquestrador = await criar();
+      const libera = liberaEm(60);
+      motor.roteiro = [falhaPor("limite_de_uso", libera), { ...SUCESSO, sessaoDoMotor: "thread-1" }, SUCESSO];
+      await (await servico.enviarMensagem(orquestrador.id, "um")).recuperacao;
+      await esperarTurnos(orquestrador, 2);
+
+      const segundo = await servico.enviarMensagem(orquestrador.id, "dois");
+      await segundo.conclusao;
+
+      expect(motoresDosPedidos()).toEqual(["claude-code", "codex", "codex"]);
+      expect(trocas()[1]).toMatchObject({
+        turnoId: segundo.turnoId,
+        de: "claude-code",
+        para: "codex",
+        causa: "limite_de_uso",
+        liberaEm: libera,
+      });
+      const aposATroca = repositorio.eventos.slice(repositorio.eventos.indexOf(trocas()[1] as EventoRegistrado) + 1);
+      expect(aposATroca[0]).toMatchObject({ tipo: "turno_iniciado", turnoId: segundo.turnoId, motor: "codex", texto: "dois" });
+      // O Codex retoma a sessão que criou, e já viu tudo o que aconteceu na conversa dele.
+      expect(motor.pedidos[2]).toMatchObject({ sessaoId: "thread-1", sessaoIniciada: true, contextoDaTroca: null });
+    });
+
+    it("depois que o limite libera, volta ao motor principal, com o que a sessão dele não viu", async () => {
+      const orquestrador = await criar();
+      motor.roteiro = [falhaPor("limite_de_uso", liberaEm(60)), SUCESSO, SUCESSO, SUCESSO];
+      await (await servico.enviarMensagem(orquestrador.id, "um")).recuperacao;
+      await esperarTurnos(orquestrador, 2);
+      await (await servico.enviarMensagem(orquestrador.id, "dois")).conclusao;
+      expect(orquestrador.liberaEmDoMotor("claude-code")).not.toBeNull();
+
+      await relogio.avancar(61 * MINUTO);
+      const terceiro = await servico.enviarMensagem(orquestrador.id, "tres");
+      await terceiro.conclusao;
+
+      expect(motoresDosPedidos()).toEqual(["claude-code", "codex", "codex", "claude-code"]);
+      expect(trocas()).toHaveLength(2);
+      expect(motor.pedidos[3]).toMatchObject({ sessaoId: orquestrador.sessaoId, sessaoIniciada: true });
+      // O Claude não viu os dois turnos do Codex.
+      expect(motor.pedidos[3]?.contextoDaTroca).toContain("atendido por Codex");
+      expect(motor.pedidos[3]?.contextoDaTroca).toContain("dois");
+      // Respondeu bem: o limite que se conhecia dele já não vale.
+      expect(orquestrador.liberaEmDoMotor("claude-code")).toBeNull();
+    });
+
+    it("a execução de um Plano segue no motor que o propôs, mesmo com o principal já liberado", async () => {
+      const orquestrador = await criar();
+      motor.roteiro = [falhaPor("limite_de_uso", liberaEm(60)), { ...SUCESSO, sessaoDoMotor: "thread-1" }, SUCESSO];
+      await (await servico.enviarMensagem(orquestrador.id, "planeje", [], "planejamento")).recuperacao;
+      await esperarTurnos(orquestrador, 2);
+      expect(orquestrador.turnoComPlanoPendente?.motor).toBe("codex");
+
+      await relogio.avancar(61 * MINUTO);
+      await (await servico.aprovarPlano(orquestrador.id)).conclusao;
+
+      expect(motor.pedidos[2]).toMatchObject({ motor: "codex", modo: "execucao", sessaoId: "thread-1", sessaoIniciada: true });
+      // O principal já tinha liberado: não é uma troca por limite.
+      expect(trocas()).toHaveLength(1);
+    });
+
+    it("sem reserva, o limite conhecido não muda nada: o pedido segue para o principal e entra na espera de sempre", async () => {
+      const orquestrador = await criar(configuracao);
+      motor.roteiro = [falhaPor("limite_de_uso", liberaEm(60)), falhaPor("limite_de_uso", liberaEm(60))];
+      await (await servico.enviarMensagem(orquestrador.id, "um")).recuperacao;
+      await servico.cancelar(orquestrador.id);
+
+      await (await servico.enviarMensagem(orquestrador.id, "dois")).recuperacao;
+
+      expect(motoresDosPedidos()).toEqual(["claude-code", "claude-code"]);
+      expect(trocas()).toEqual([]);
+    });
+  });
+
+  describe("um Orquestrador que tem outro motor como principal", () => {
+    it("cada motor guarda a própria sessão: o id que ele devolve é o que volta no turno seguinte", async () => {
+      const orquestrador = await criar(noCodex);
+      motor.roteiro = [{ ...SUCESSO, sessaoDoMotor: "thread-7" }, SUCESSO];
+
+      await (await servico.enviarMensagem(orquestrador.id, "um")).conclusao;
+      await (await servico.enviarMensagem(orquestrador.id, "dois")).conclusao;
+
+      expect(motor.pedidos.map((pedido) => [pedido.motor, pedido.sessaoId, pedido.sessaoIniciada])).toEqual([
+        ["codex", "", false],
+        ["codex", "thread-7", true],
+      ]);
+      expect(motor.pedidos[0]?.configuracao.paraDados()).toMatchObject({ motorDoOrquestrador: "codex", modeloDoOrquestrador: "padrao" });
+      // A sessão do Claude Code não foi tocada.
+      expect(orquestrador.sessaoDoMotor("claude-code")).toEqual({ id: orquestrador.sessaoId, iniciada: false });
+    });
+
+    it("uma falha também devolve a sessão que o motor criou antes de falhar", async () => {
+      const orquestrador = await criar(noCodex);
+      motor.roteiro = [{ ...falhaPor("outro"), sessaoDoMotor: "thread-8" }, SUCESSO];
+
+      await (await servico.enviarMensagem(orquestrador.id, "um")).conclusao;
+      await (await servico.enviarMensagem(orquestrador.id, "dois")).conclusao;
+
+      expect(motor.pedidos[1]).toMatchObject({ sessaoId: "thread-8", sessaoIniciada: true });
+    });
+
+    it("a medição de consumo e a vigia de silêncio são só do Claude Code", async () => {
+      const orquestrador = await criar(noCodex);
+      motor.roteiro = [SUCESSO, "rodando"];
+
+      const primeiro = await servico.enviarMensagem(orquestrador.id, "um");
+      await primeiro.conclusao;
+      await primeiro.medicao;
+      expect(medidor.periodos).toEqual([]);
+
+      await servico.enviarMensagem(orquestrador.id, "dois");
+      await esvaziar();
+      await relogio.avancar(20 * MINUTO);
+      expect(orquestrador.situacao).toBe("trabalhando");
+      expect(sinais).toEqual([]);
+      expect(etapas()).toEqual([]);
+      await servico.cancelar(orquestrador.id);
+    });
+
+    it("com o Claude Code, a medição segue valendo", async () => {
+      const orquestrador = await criar(configuracao);
+      motor.roteiro = [SUCESSO];
+
+      const { conclusao, medicao } = await servico.enviarMensagem(orquestrador.id, "um");
+      await conclusao;
+      await medicao;
+
+      expect(medidor.periodos).toHaveLength(1);
+      expect(medidor.periodos[0]?.sessaoId).toBe(orquestrador.sessaoId);
+    });
+
+    it("trocar o motor com a conversa em curso: o novo motor recebe o que a sessão dele não viu", async () => {
+      const orquestrador = await criar(configuracao);
+      motor.roteiro = [SUCESSO, SUCESSO];
+      await (await servico.enviarMensagem(orquestrador.id, "primeiro, no Claude")).conclusao;
+
+      await servico.alterarConfiguracao(orquestrador.id, { motorDoOrquestrador: "codex" });
+      await (await servico.enviarMensagem(orquestrador.id, "segundo, no Codex")).conclusao;
+
+      expect(motor.pedidos[1]).toMatchObject({ motor: "codex", sessaoId: "", sessaoIniciada: false });
+      expect(motor.pedidos[1]?.contextoDaTroca).toContain("primeiro, no Claude");
+      expect(motor.pedidos[1]?.contextoDaTroca).toContain("atendido por Claude Code");
+    });
+  });
+
+  describe("o esforço herdado da máquina é do Claude Code", () => {
+    it("um papel em outro motor não consulta a máquina e volta nulo", async () => {
+      const orquestrador = await criar({ ...configuracao, motorDoOrquestrador: "codex", modeloDoOrquestrador: "padrao" });
+
+      const herdado = await servico.esforcoHerdadoDe(orquestrador.id);
+
+      expect(herdado.orquestrador).toBeNull();
+      expect(herdado.subagentes).toBeNull();
+      // Só os subagentes (Claude Code, haiku) foram consultados.
+      expect(esforco.consultas.map((consulta) => consulta.modelo)).toEqual(["haiku"]);
+    });
+
+    it("no formulário de criação, sem motor vale o Claude Code; com motor, só ele é consultado", async () => {
+      const antes = await servico.esforcoHerdadoPara({
+        modeloDoOrquestrador: "opus",
+        modeloDosSubagentes: "sonnet",
+        pastaDoProjeto: "/projetos/painel",
+      });
+      const depois = await servico.esforcoHerdadoPara({
+        motorDoOrquestrador: "copilot",
+        modeloDoOrquestrador: "padrao",
+        motorDosSubagentes: "claude-code",
+        modeloDosSubagentes: "opus",
+        pastaDoProjeto: "/projetos/painel",
+      });
+
+      expect(antes.orquestrador?.nivel).toBe("extra_alto");
+      expect(depois.orquestrador).toBeNull();
+      expect(depois.subagentes?.nivel).toBe("extra_alto");
+      expect(esforco.consultas.map((consulta) => consulta.modelo)).toEqual(["opus", "sonnet", "opus"]);
+    });
+  });
+
+  it("reiniciado o app, a retomada agendada continua no motor do turno que falhou", async () => {
+    const orquestrador = await criar(noCodex);
+    const turnoId = "t-codex";
+    orquestrador.iniciarTurno(turnoId, "faça", relogio.agora(), [], "execucao", "codex");
+    orquestrador.falharTurno(turnoId, "falhou", relogio.agora());
+    orquestrador.agendarRetomada({
+      deTurnoId: turnoId,
+      causa: "rede",
+      tentativa: 1,
+      retomarEm: new Date(relogio.agoraMs + MINUTO).toISOString(),
+    });
+    motor.roteiro = [SUCESSO];
+
+    expect(await servico.reagendarRetomadasPendentes()).toBe(1);
+    await relogio.avancar(2 * MINUTO);
+    await esperarTurnos(orquestrador, 2);
+
+    expect(motor.pedidos[0]).toMatchObject({ motor: "codex" });
+    expect(iniciados().at(-1)).toMatchObject({ motor: "codex", retomada: { deTurnoId: turnoId } });
+  });
+});

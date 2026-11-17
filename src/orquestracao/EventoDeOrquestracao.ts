@@ -3,6 +3,7 @@ import { DadosDoAnexo } from "./Anexo";
 import { DadosDaConfiguracao } from "./ConfiguracaoDoOrquestrador";
 import { DadosDoConsumoDoTurno } from "./ConsumoDoTurno";
 import { ModoDoTurno } from "./ModoDoTurno";
+import { Motor } from "./Motor";
 import { DadosDoPedidoNaFila, MotivoDaRetiradaDaFila } from "./PedidoNaFila";
 import { NomeDaPredefinicao } from "./PredefinicaoDeConfiguracao";
 
@@ -38,7 +39,13 @@ export interface TarefaDoOrquestrador {
 
 /** O que o motor observa enquanto executa um turno. */
 export type EventoDoMotor =
-  | { tipo: "sessao_iniciada" }
+  /**
+   * A sessão do motor existe. Os motores que criam a própria sessão (Codex,
+   * Copilot) já informam o id aqui, se o souberem, para a conversa poder ser
+   * retomada mesmo que o app caia no meio do turno. O Claude Code usa o id
+   * gerado pelo app e não o informa.
+   */
+  | { tipo: "sessao_iniciada"; sessaoDoMotor?: string }
   | { tipo: "texto_do_orquestrador"; texto: string }
   | { tipo: "ferramenta_do_orquestrador"; ferramenta: string; detalhe: string }
   | {
@@ -102,6 +109,9 @@ export type EtapaDaRecuperacao = "encerrado" | "aguardando" | "retomando" | "can
 /** Por que o turno precisou ser retomado: as causas de falha que o app sabe recuperar. */
 export type CausaDaRecuperacao = "silencio" | "limite_de_uso" | "sobrecarga" | "rede";
 
+/** Por que o app passou o pedido para outro motor: só o que a reserva resolve, sem esperar. */
+export type CausaDaTrocaDeMotor = Extract<CausaDaRecuperacao, "limite_de_uso" | "sobrecarga">;
+
 /** Marcos do ciclo de vida de um turno, decididos pelo domínio. */
 export type EventoDeTurno =
   | {
@@ -115,6 +125,11 @@ export type EventoDeTurno =
        * travou ou falhou (ver ADR-36). Ausente nos turnos normais.
        */
       retomada?: { deTurnoId: string; tentativa: number };
+      /**
+       * O motor que executa o turno. Ausente nos eventos gravados antes dos
+       * outros motores: vale `claude-code`.
+       */
+      motor?: Motor;
     }
   | {
       tipo: "turno_concluido";
@@ -172,6 +187,23 @@ export type EventoDeTurno =
       resumo: string;
       /** Em "aguardando": quando retoma (ISO). Nulo nas outras etapas. */
       retomaEm: string | null;
+    }
+  /**
+   * O pedido passou para outro motor, em vez de esperar o limite liberar. Duas
+   * situações: o turno `turnoId` falhou por `limite_de_uso` ou `sobrecarga` e o
+   * app reenvia o mesmo pedido ao próximo motor da reserva (um turno novo vem
+   * logo depois); ou o pedido novo já começa no motor de reserva porque o
+   * limite do principal ainda não liberou (`turnoId` é o do turno que começou).
+   */
+  | {
+      tipo: "motor_trocado";
+      /** O motor que ficou para trás. */
+      de: Motor;
+      /** O motor que assume o pedido. */
+      para: Motor;
+      causa: CausaDaTrocaDeMotor;
+      /** Quando o limite de `de` libera (ISO), se o motor informou. Ausente sem horário. */
+      liberaEm?: string;
     };
 
 /**

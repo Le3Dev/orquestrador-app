@@ -117,6 +117,12 @@ describe("ConfiguracaoDoOrquestrador", () => {
   const semInstrucoes = { instrucoesPersonalizadas: "" } as const;
   // Sem a escolha dos subagentes prontos, recebe todos (como antes da opção).
   const todosOsProntos = { subagentesProntos: "todos" } as const;
+  // Sem escolher o motor, tudo roda no Claude Code e sem reserva (como antes dos outros motores).
+  const motoresPadrao = {
+    motorDoOrquestrador: "claude-code",
+    motorDosSubagentes: "claude-code",
+    ordemDeReserva: [],
+  } as const;
 
   it("nasce com commit e push desligados quando a opção não é informada", () => {
     const configuracao = ConfiguracaoDoOrquestrador.de(dados);
@@ -129,6 +135,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
       ...esforcosPadrao,
       ...semInstrucoes,
       ...todosOsProntos,
+      ...motoresPadrao,
     });
   });
 
@@ -148,6 +155,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
       ...esforcosPadrao,
       ...semInstrucoes,
       ...todosOsProntos,
+      ...motoresPadrao,
     });
     expect(ligada.com({ nivelDePermissao: "edicao" }).permitirCommitEPush).toBe(true);
     expect(ligada.com({ permitirCommitEPush: undefined }).permitirCommitEPush).toBe(true);
@@ -293,6 +301,186 @@ describe("ConfiguracaoDoOrquestrador", () => {
     );
   });
 
+  describe("motor e modelo de cada papel, e a ordem de reserva", () => {
+    it("dados antigos, sem motor nem reserva, valem Claude Code nos dois papéis, com os mesmos modelos e sem reserva", () => {
+      const antiga = ConfiguracaoDoOrquestrador.de(JSON.parse(JSON.stringify(dados)) as typeof dados);
+
+      expect(antiga.motorDoOrquestrador).toBe("claude-code");
+      expect(antiga.motorDosSubagentes).toBe("claude-code");
+      expect(antiga.modeloDoOrquestrador).toBe("opus");
+      expect(antiga.modeloDosSubagentes).toBe("haiku");
+      expect(antiga.ordemDeReserva).toEqual([]);
+      expect(antiga.motoresEmOrdem).toEqual(["claude-code"]);
+    });
+
+    it("guarda e devolve o motor, o modelo e a reserva exatamente como vieram", () => {
+      const configuracao = ConfiguracaoDoOrquestrador.de({
+        ...dados,
+        motorDoOrquestrador: "codex",
+        modeloDoOrquestrador: "gpt-5.1-codex",
+        motorDosSubagentes: "copilot",
+        modeloDosSubagentes: "padrao",
+        ordemDeReserva: ["claude-code", "copilot"],
+      });
+
+      expect(configuracao.paraDados()).toMatchObject({
+        motorDoOrquestrador: "codex",
+        modeloDoOrquestrador: "gpt-5.1-codex",
+        motorDosSubagentes: "copilot",
+        modeloDosSubagentes: "padrao",
+        ordemDeReserva: ["claude-code", "copilot"],
+      });
+      expect(configuracao.motoresEmOrdem).toEqual(["codex", "claude-code", "copilot"]);
+      // Os dados que saem são cópia: mexer neles não muda a configuração.
+      (configuracao.paraDados().ordemDeReserva as unknown as string[]).push("codex");
+      expect(configuracao.ordemDeReserva).toEqual(["claude-code", "copilot"]);
+      expect(Object.isFrozen(configuracao.ordemDeReserva)).toBe(true);
+    });
+
+    it.each([
+      ["claude-code", "padrao"],
+      ["claude-code", "gpt-5"],
+      ["codex", ""],
+      ["codex", "gpt 5"],
+      ["copilot", "modelo/com/barra"],
+      ["codex", "a".repeat(65)],
+    ] as const)("recusa o modelo %s/%j: não serve ao motor", (motor, modelo) => {
+      expect(() =>
+        ConfiguracaoDoOrquestrador.de({ ...dados, motorDoOrquestrador: motor, modeloDoOrquestrador: modelo }),
+      ).toThrow(ErroDeOrquestracao);
+      expect(() =>
+        ConfiguracaoDoOrquestrador.de({ ...dados, motorDosSubagentes: motor, modeloDosSubagentes: modelo }),
+      ).toThrow(ErroDeOrquestracao);
+    });
+
+    it("aceita 'padrao' e ids com letras, números, ponto, dois-pontos, sublinhado e hífen nos motores novos", () => {
+      for (const modelo of ["padrao", "gpt-5.1", "claude-sonnet-4.5", "o3_mini", "provedor:modelo"]) {
+        expect(
+          ConfiguracaoDoOrquestrador.de({ ...dados, motorDoOrquestrador: "codex", modeloDoOrquestrador: modelo })
+            .modeloDoOrquestrador,
+        ).toBe(modelo);
+      }
+    });
+
+    it("recusa motor desconhecido, em qualquer papel e na reserva", () => {
+      const desconhecido = "gemini" as unknown as "codex";
+
+      expect(() => ConfiguracaoDoOrquestrador.de({ ...dados, motorDoOrquestrador: desconhecido })).toThrow(/Motor/);
+      expect(() => ConfiguracaoDoOrquestrador.de({ ...dados, motorDosSubagentes: desconhecido })).toThrow(/Motor/);
+      expect(() => ConfiguracaoDoOrquestrador.de({ ...dados, ordemDeReserva: [desconhecido] })).toThrow(/reserva/);
+    });
+
+    it("recusa reserva que repete motor, que traz o motor do orquestrador ou que não é uma lista", () => {
+      expect(() => ConfiguracaoDoOrquestrador.de({ ...dados, ordemDeReserva: ["codex", "codex"] })).toThrow(/repetir/);
+      expect(() => ConfiguracaoDoOrquestrador.de({ ...dados, ordemDeReserva: ["claude-code"] })).toThrow(
+        /motor do orquestrador/,
+      );
+      expect(() =>
+        ConfiguracaoDoOrquestrador.de({
+          ...dados,
+          motorDoOrquestrador: "codex",
+          modeloDoOrquestrador: "padrao",
+          ordemDeReserva: ["codex"],
+        }),
+      ).toThrow(ErroDeOrquestracao);
+      expect(() =>
+        ConfiguracaoDoOrquestrador.de({ ...dados, ordemDeReserva: "codex" as unknown as readonly "codex"[] }),
+      ).toThrow(/lista/);
+    });
+
+    it("com(): trocar o motor sem escolher o modelo volta ao modelo padrão do motor novo", () => {
+      const base = ConfiguracaoDoOrquestrador.de(dados);
+
+      const noCodex = base.com({ motorDoOrquestrador: "codex" });
+      expect(noCodex.motorDoOrquestrador).toBe("codex");
+      expect(noCodex.modeloDoOrquestrador).toBe("padrao");
+      // O outro papel não muda.
+      expect(noCodex.motorDosSubagentes).toBe("claude-code");
+      expect(noCodex.modeloDosSubagentes).toBe("haiku");
+
+      // De volta ao Claude Code: o padrão do papel (Opus para o orquestrador, Sonnet para os subagentes).
+      expect(noCodex.com({ motorDoOrquestrador: "claude-code" }).modeloDoOrquestrador).toBe("opus");
+      expect(base.com({ motorDosSubagentes: "copilot" }).com({ motorDosSubagentes: "claude-code" }).modeloDosSubagentes).toBe("sonnet");
+
+      // Escolhendo o modelo junto, vale o escolhido.
+      expect(base.com({ motorDoOrquestrador: "codex", modeloDoOrquestrador: "gpt-5" }).modeloDoOrquestrador).toBe("gpt-5");
+    });
+
+    it("com(): o modelo de um motor novo precisa servir a ele, e o motor atual é o que vale quando só o modelo muda", () => {
+      const noCodex = ConfiguracaoDoOrquestrador.de({ ...dados, motorDoOrquestrador: "codex", modeloDoOrquestrador: "padrao" });
+
+      expect(() => noCodex.com({ modeloDoOrquestrador: "gpt 5" })).toThrow(ErroDeOrquestracao);
+      expect(noCodex.com({ modeloDoOrquestrador: "gpt-5" }).modeloDoOrquestrador).toBe("gpt-5");
+      expect(() => ConfiguracaoDoOrquestrador.de(dados).com({ modeloDoOrquestrador: "gpt-5" })).toThrow(ErroDeOrquestracao);
+    });
+
+    it("com(): o motor que passa a ser o do orquestrador sai da reserva; sem informar a reserva, ela se mantém", () => {
+      const base = ConfiguracaoDoOrquestrador.de({ ...dados, ordemDeReserva: ["codex", "copilot"] });
+
+      expect(base.com({ nivelDePermissao: "edicao" }).ordemDeReserva).toEqual(["codex", "copilot"]);
+      expect(base.com({ motorDoOrquestrador: "codex" }).ordemDeReserva).toEqual(["copilot"]);
+      expect(base.com({ ordemDeReserva: [] }).ordemDeReserva).toEqual([]);
+      expect(base.com({ ordemDeReserva: undefined }).ordemDeReserva).toEqual(["codex", "copilot"]);
+    });
+
+    it("proximoMotorDeReserva: o primeiro da reserva que ainda não foi tentado, ou nenhum", () => {
+      const configuracao = ConfiguracaoDoOrquestrador.de({ ...dados, ordemDeReserva: ["codex", "copilot"] });
+
+      expect(configuracao.proximoMotorDeReserva(["claude-code"])).toBe("codex");
+      expect(configuracao.proximoMotorDeReserva(["claude-code", "codex"])).toBe("copilot");
+      expect(configuracao.proximoMotorDeReserva(["claude-code", "codex", "copilot"])).toBeNull();
+      expect(ConfiguracaoDoOrquestrador.de(dados).proximoMotorDeReserva(["claude-code"])).toBeNull();
+    });
+
+    it("paraMotor: no motor do orquestrador é a própria configuração; em outro, os dois papéis passam para ele com o modelo padrão", () => {
+      const configuracao = ConfiguracaoDoOrquestrador.de({
+        ...dados,
+        permitirCommitEPush: true,
+        esforcoDoOrquestrador: "alto",
+        ordemDeReserva: ["codex"],
+      });
+
+      expect(configuracao.paraMotor("claude-code")).toBe(configuracao);
+      const reserva = configuracao.paraMotor("codex");
+      expect(reserva.paraDados()).toMatchObject({
+        motorDoOrquestrador: "codex",
+        motorDosSubagentes: "codex",
+        modeloDoOrquestrador: "padrao",
+        modeloDosSubagentes: "padrao",
+        ordemDeReserva: [],
+        // O resto não muda.
+        nivelDePermissao: "edicao_e_comandos",
+        permitirCommitEPush: true,
+        quantidadeDeSubagentes: { modo: "fixa", limite: 2 },
+      });
+      // O Claude Code como reserva volta aos modelos de sempre de cada papel.
+      const noClaude = ConfiguracaoDoOrquestrador.de({
+        ...dados,
+        motorDoOrquestrador: "codex",
+        modeloDoOrquestrador: "padrao",
+        ordemDeReserva: ["claude-code"],
+      }).paraMotor("claude-code");
+      expect([noClaude.modeloDoOrquestrador, noClaude.modeloDosSubagentes]).toEqual(["opus", "sonnet"]);
+    });
+
+    it("o esforço só se aplica ao Claude Code: nos outros motores vale o padrão, e o valor guardado não se perde", () => {
+      const configuracao = ConfiguracaoDoOrquestrador.de({
+        ...dados,
+        esforcoDoOrquestrador: "alto",
+        esforcoDosSubagentes: "medio",
+      });
+
+      expect(configuracao.esforcoDoOrquestradorNo("claude-code")).toBe("alto");
+      expect(configuracao.esforcoDosSubagentesNo("claude-code")).toBe("medio");
+      expect(configuracao.esforcoDoOrquestradorNo("codex")).toBe("padrao");
+      expect(configuracao.esforcoDosSubagentesNo("copilot")).toBe("padrao");
+      expect(configuracao.paraMotor("codex").paraDados()).toMatchObject({
+        esforcoDoOrquestrador: "alto",
+        esforcoDosSubagentes: "medio",
+      });
+    });
+  });
+
   describe("trivial e plano em pedidos grandes, sempre ligados (ADR-28)", () => {
     /** Configuração gravada quando as duas ainda eram opções da tela. */
     function gravadosComAsOpcoesAntigas(trivial: unknown, plano: unknown): DadosDaConfiguracao {
@@ -317,7 +505,10 @@ describe("ConfiguracaoDoOrquestrador", () => {
           "instrucoesPersonalizadas",
           "modeloDoOrquestrador",
           "modeloDosSubagentes",
+          "motorDoOrquestrador",
+          "motorDosSubagentes",
           "nivelDePermissao",
+          "ordemDeReserva",
           "permitirArtefatosOnline",
           "permitirCommitEPush",
           "quantidadeDeSubagentes",
@@ -341,6 +532,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
         ...esforcosPadrao,
         ...semInstrucoes,
         ...todosOsProntos,
+        ...motoresPadrao,
       });
       expect(configuracao.paraDados()).not.toHaveProperty("permitirTrabalhoDireto");
       expect(configuracao.paraDados()).not.toHaveProperty("proporPlanoEmPedidosGrandes");

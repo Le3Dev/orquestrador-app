@@ -584,8 +584,52 @@ export function linhaDoLog(evento: EventoRegistrado, turno: TurnoNaTela): Omit<L
     case "plano_descartado":
       return { origem: "orquestrador", tipo: "sistema", texto: "plano descartado" };
     default:
-      return null;
+      return ehMotorTrocado(evento) ? { origem: "orquestrador", tipo: "sistema", texto: textoDaTrocaDeMotor(evento) } : null;
   }
+}
+
+/**
+ * O pedido passou para outro motor (a reserva do Orquestrador) porque o limite
+ * de uso do motor dele estourou ou a API dele ficou sobrecarregada. Vem com o
+ * `turnoId` do turno que falhou, ou do que já começa no motor de reserva.
+ * Fica de fora de `api/tipos`: a tela só o mostra como uma linha do log.
+ */
+interface EventoMotorTrocado {
+  tipo: "motor_trocado";
+  de: string;
+  para: string;
+  causa: string;
+  /** ISO; só quando o motor informou quando o limite libera. */
+  liberaEm?: string;
+  em: string;
+}
+
+function ehMotorTrocado(evento: { tipo: string }): evento is EventoMotorTrocado {
+  return evento.tipo === "motor_trocado";
+}
+
+const ROTULOS_DOS_MOTORES: Readonly<Record<string, string>> = {
+  "claude-code": "Claude Code",
+  codex: "Codex",
+  copilot: "GitHub Copilot CLI",
+};
+
+/** O motor numa frase curta: "o limite do Claude atingido". */
+const NOMES_CURTOS_DOS_MOTORES: Readonly<Record<string, string>> = {
+  "claude-code": "Claude",
+  codex: "Codex",
+  copilot: "Copilot",
+};
+
+/** Ex.: "Trocou para Codex: limite do Claude atingido (libera às 14:30)". */
+function textoDaTrocaDeMotor(evento: EventoMotorTrocado): string {
+  const para = ROTULOS_DOS_MOTORES[evento.para] ?? evento.para;
+  const de = NOMES_CURTOS_DOS_MOTORES[evento.de] ?? evento.de;
+  if (evento.causa === "sobrecarga") {
+    return `Trocou para ${para}: ${de} sobrecarregado`;
+  }
+  const libera = evento.liberaEm === undefined ? "" : ` (libera às ${horaDaRetomada(evento.liberaEm, evento.em)})`;
+  return `Trocou para ${para}: limite do ${de} atingido${libera}`;
 }
 
 /**

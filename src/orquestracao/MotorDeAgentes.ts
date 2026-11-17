@@ -4,6 +4,7 @@ import { EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
 import { ItemLigado } from "./InstrucoesDoOrquestrador";
 import { InstrucoesAplicadas } from "./InstrucoesPersonalizadas";
 import { ModoDoTurno } from "./ModoDoTurno";
+import { Motor } from "./Motor";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import { DadosDoSubagentePronto } from "./SubagentesProntos";
 
@@ -24,9 +25,26 @@ export interface AnexoDoPedido {
 
 export interface PedidoDeTurno {
   orquestradorId: string;
+  /**
+   * A sessão do motor em uso (`motor`). No Claude Code é o id que o app
+   * gerou; nos motores que criam a própria sessão, o id que eles devolveram
+   * (`ResultadoDoTurno.sessaoDoMotor`), ou `""` enquanto não criaram nenhuma.
+   */
   sessaoId: string;
   /** Falso no primeiro turno: o motor cria a sessão; verdadeiro nos seguintes: retoma. */
   sessaoIniciada: boolean;
+  /**
+   * O motor que executa o Orquestrador neste turno: o configurado ou, quando o
+   * principal bateu no limite, um da reserva. `configuracao` já vem com os
+   * papéis e os modelos desse motor (`ConfiguracaoDoOrquestrador.paraMotor`).
+   */
+  motor: Motor;
+  /**
+   * O que a sessão deste motor não viu da conversa (turnos de outro motor
+   * desde a última participação dele), para ele assumir sem perder o fio;
+   * nulo quando a sessão já sabe tudo. Ver `contextoDaTroca`.
+   */
+  contextoDaTroca: string | null;
   texto: string;
   configuracao: ConfiguracaoDoOrquestrador;
   /** No planejamento, os agentes só leem, seja qual for o nível da configuração. */
@@ -75,16 +93,23 @@ export interface PedidoDeTurno {
 /** Por que um turno falhou, quando dá para saber. */
 export type CausaDaFalha = "silencio" | "limite_de_uso" | "sobrecarga" | "rede" | "outro";
 
+/**
+ * `sessaoDoMotor`, em qualquer dos dois resultados: o id da sessão que o motor
+ * criou neste turno (Codex, Copilot), que o agregado guarda para retomá-la nos
+ * turnos seguintes desse motor. Ausente quando o motor não criou nenhuma; o
+ * Claude Code nunca o informa (usa o id gerado pelo app).
+ */
 export type ResultadoDoTurno =
-  | { sucesso: true; resposta: string; uso: UsoDoTurno }
+  | { sucesso: true; resposta: string; uso: UsoDoTurno; sessaoDoMotor?: string }
   | {
       sucesso: false;
       motivo: string;
       uso: UsoDoTurno | null;
       /** Ausente = "outro". */
       causa?: CausaDaFalha;
-      /** Só em "limite_de_uso", quando o Claude informa quando libera (ISO). */
+      /** Só em "limite_de_uso", quando o motor informa quando libera (ISO). */
       liberaEm?: string | null;
+      sessaoDoMotor?: string;
     };
 
 /** Razão do abort que pede ao motor um resultado de falha por silêncio (`causa: "silencio"`). */

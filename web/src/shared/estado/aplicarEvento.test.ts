@@ -1101,6 +1101,39 @@ describe("aplicarEvento", () => {
     });
   });
 
+  describe("troca de motor", () => {
+    const local = (hora: number, minuto: number) => new Date(2026, 9, 28, hora, minuto).toISOString();
+    const inicio: EventoRegistrado = {
+      tipo: "turno_iniciado",
+      turnoId: "t1",
+      texto: "corrija o bug",
+      configuracao,
+      sequencia: 1,
+      em: local(14, 0),
+    };
+    // O evento ainda não faz parte dos tipos da tela: ela só o mostra no log.
+    const troca = (sequencia: number, extra: Record<string, unknown>): EventoRegistrado =>
+      ({ tipo: "motor_trocado", turnoId: "t1", de: "claude-code", para: "codex", sequencia, em: local(14, 5), ...extra }) as unknown as EventoRegistrado;
+    const textosDoLog = (estado: EstadoDaConversa) => estado.turnos[0]?.log.map((linha) => [linha.tipo, linha.texto]);
+
+    it("o limite de uso vira uma linha simples no log, com a hora em que libera", () => {
+      const estado = reproduzir([inicio, troca(2, { causa: "limite_de_uso" }), troca(3, { causa: "limite_de_uso", liberaEm: local(18, 30) })]);
+
+      expect(textosDoLog(estado)?.slice(1)).toEqual([
+        ["sistema", "Trocou para Codex: limite do Claude atingido"],
+        ["sistema", "Trocou para Codex: limite do Claude atingido (libera às 18:30)"],
+      ]);
+      // Não muda a situação do turno.
+      expect(estado.turnos[0]?.situacao).toBe("em_andamento");
+    });
+
+    it("a sobrecarga e os outros motores usam o nome que o usuário conhece", () => {
+      const estado = reproduzir([inicio, troca(2, { causa: "sobrecarga", de: "codex", para: "copilot" })]);
+
+      expect(textosDoLog(estado)?.[1]).toEqual(["sistema", "Trocou para GitHub Copilot CLI: Codex sobrecarregado"]);
+    });
+  });
+
   describe("fila de pedidos", () => {
     function pedido(id: string, segundo: number, modo: ModoDoTurno = "execucao"): DadosDoPedidoNaFila {
       return { id, texto: `pedido ${id}`, modo, enfileiradoEm: `2026-10-28T12:00:0${segundo}.000Z` };

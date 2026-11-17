@@ -5,6 +5,7 @@ import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { desarmarMarcas, InstrucoesAplicadas, linhasDasInstrucoes } from "./InstrucoesPersonalizadas";
 import type { AnexoDoPedido } from "./MotorDeAgentes";
 import { ModeloClaude } from "./ModeloClaude";
+import { comoModeloClaude } from "./ModeloDoMotor";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { DESCRICAO_DO_NIVEL, NivelDePermissao, TRABALHO_DIRETO_NO_NIVEL } from "./NivelDePermissao";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
@@ -23,6 +24,8 @@ export const MARCADOR_DE_PLANO = "<plano-para-aprovacao/>";
 const MARCA_DA_CONFIGURACAO = "configuracao-do-pedido";
 
 const MARCA_DOS_ITENS_LIGADOS = "itens-ligados";
+
+const MARCA_DO_CONTEXTO_DA_TROCA = "contexto-da-troca";
 
 /** O que o usuário pode ligar a um Orquestrador no canvas (uma linha do item até o terminal). */
 export const TIPOS_DE_ITEM_LIGADO = ["nota", "previa", "artefato"] as const;
@@ -305,6 +308,20 @@ function linhasDosItensLigados(itens: readonly ItemLigado[]): string[] {
 }
 
 /**
+ * O bloco com o que a sessão não viu da conversa (turnos que outro motor
+ * atendeu), entre os itens ligados e o pedido. Sem contexto, nada. O texto vem
+ * de pedidos e respostas anteriores: entra como dado, sem poder fechar os
+ * blocos antes da hora.
+ */
+function linhasDoContextoDaTroca(contexto: string | null): string[] {
+  if (contexto === null) {
+    return [];
+  }
+  const marcas = [MARCA_DO_CONTEXTO_DA_TROCA, MARCA_DOS_ITENS_LIGADOS, MARCA_DA_CONFIGURACAO];
+  return ["", `<${MARCA_DO_CONTEXTO_DA_TROCA}>`, desarmarMarcas(contexto, marcas), `</${MARCA_DO_CONTEXTO_DA_TROCA}>`];
+}
+
+/**
  * A mensagem que o Orquestrador recebe num turno: a configuração vigente e o
  * pedido do usuário.
  *
@@ -345,6 +362,7 @@ export function mensagemParaOOrquestrador(
   plataforma: Plataforma = "unix",
   itensLigados: readonly ItemLigado[] = [],
   previasAbertas: readonly string[] = [],
+  contextoDaTroca: string | null = null,
 ): string {
   const planejamento = modo === "planejamento";
   // No planejamento os agentes só leem (as ferramentas já vêm travadas
@@ -385,7 +403,7 @@ export function mensagemParaOOrquestrador(
     ...regrasDeDelegacao(nivelDoPedido),
     `- Subagentes: ${regraDaQuantidade(configuracao.quantidadeDeSubagentes)}`,
     ...linhasDosSubagentesProntos(subagentesProntos, NOME_DO_SUBAGENTE, MARCA_DA_CONFIGURACAO),
-    ...regrasDeRapidez(nivelDoPedido, commitEPushPermitidos, configuracao.modeloDosSubagentes),
+    ...regrasDeRapidez(nivelDoPedido, commitEPushPermitidos, comoModeloClaude(configuracao.modeloDosSubagentes)),
     `- Permissões: ${DESCRICAO_DO_NIVEL[nivelDoPedido]}. ${regraDeCommitEPush}`,
     ...regrasDoPlanejamento,
     ...regrasDoTamanho,
@@ -402,6 +420,7 @@ export function mensagemParaOOrquestrador(
     ...linhasDasInstrucoes(instrucoes, MARCA_DA_CONFIGURACAO, revogarInstrucoesAnteriores),
     `</${MARCA_DA_CONFIGURACAO}>`,
     ...linhasDosItensLigados(itensLigados),
+    ...linhasDoContextoDaTroca(contextoDaTroca),
     "",
     texto,
   ].join("\n");

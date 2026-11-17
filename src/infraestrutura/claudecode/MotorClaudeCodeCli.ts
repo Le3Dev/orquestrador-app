@@ -9,6 +9,7 @@ import {
   mensagemParaOOrquestrador,
   Plataforma,
 } from "../../orquestracao/InstrucoesDoOrquestrador";
+import { rotuloDoMotor } from "../../orquestracao/Motor";
 import { ABORTO_POR_SILENCIO, MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "../../orquestracao/MotorDeAgentes";
 import { AdaptadorDeEventosDoClaudeCode, falhaComCausa } from "./AdaptadorDeEventosDoClaudeCode";
 import {
@@ -84,6 +85,15 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
     sinal: AbortSignal,
     aoReceberLinha?: () => void,
   ): Promise<ResultadoDoTurno> {
+    // Este motor só executa o Claude Code: os outros têm o próprio motor. Sem processo, sem arquivos.
+    if (pedidoRecebido.motor !== "claude-code") {
+      return {
+        sucesso: false,
+        motivo: `O motor ${rotuloDoMotor(pedidoRecebido.motor)} ainda não está disponível nesta versão.`,
+        uso: null,
+      };
+    }
+
     const pastaTemporaria = path.join(tmpdir(), "orquestrador-agentes", randomUUID());
     const arquivos = {
       agentes: path.join(pastaTemporaria, "agentes.json"),
@@ -122,6 +132,7 @@ export class MotorClaudeCodeCli implements MotorDeAgentes {
         this.plataforma,
         pedido.itensLigados ?? [],
         pedido.previasAbertas ?? [],
+        pedido.contextoDaTroca,
       );
 
       const adaptador = new AdaptadorDeEventosDoClaudeCode();

@@ -1,5 +1,6 @@
 import { EsforcoDeRaciocinio } from "../../orquestracao/EsforcoDeRaciocinio";
 import { instrucoesDoSubagente, NOME_DO_SUBAGENTE, Plataforma } from "../../orquestracao/InstrucoesDoOrquestrador";
+import { comoModeloClaude } from "../../orquestracao/ModeloDoMotor";
 import { PedidoDeTurno } from "../../orquestracao/MotorDeAgentes";
 import { NivelDePermissao } from "../../orquestracao/NivelDePermissao";
 import { modeloDoSubagentePronto } from "../../orquestracao/SubagentesProntos";
@@ -432,7 +433,7 @@ export function definicaoDosAgentes(
           plataforma,
         ),
         tools: ferramentasDoSubagente(pedido, false),
-        model: modeloDoSubagentePronto(subagente, pedido.configuracao.modeloDosSubagentes),
+        model: modeloDoSubagentePronto(subagente, comoModeloClaude(pedido.configuracao.modeloDosSubagentes)),
         ...(esforco === null ? {} : { effort: esforco }),
       },
     ]),
@@ -451,7 +452,7 @@ export function definicaoDosAgentes(
         publicaOnlineNoTurno(pedido),
       ),
       tools: ferramentasDoSubagente(pedido, true),
-      model: pedido.configuracao.modeloDosSubagentes,
+      model: comoModeloClaude(pedido.configuracao.modeloDosSubagentes),
       ...(esforco === null ? {} : { effort: esforco }),
     },
   };
@@ -521,7 +522,7 @@ export function montarArgumentos(pedido: PedidoDeTurno, arquivos: ArquivosDoTurn
     ...(pedido.pastaDosAnexos === null ? [] : ["--add-dir", pedido.pastaDosAnexos]),
     ...(pedido.sessaoIniciada ? ["--resume", pedido.sessaoId] : ["--session-id", pedido.sessaoId]),
     "--model",
-    pedido.configuracao.modeloDoOrquestrador,
+    comoModeloClaude(pedido.configuracao.modeloDoOrquestrador, "opus"),
     ...(esforco === null ? [] : ["--effort", esforco]),
     "--agents",
     arquivos.agentes,

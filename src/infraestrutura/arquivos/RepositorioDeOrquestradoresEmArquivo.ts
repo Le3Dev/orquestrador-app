@@ -7,8 +7,8 @@ import { CATEGORIAS_DO_ANEXO, categoriaPeloTipoDeMidia } from "../../orquestraca
 import { ESFORCOS_DE_RACIOCINIO } from "../../orquestracao/EsforcoDeRaciocinio";
 import { EventoDeOrquestracao, EventoRegistrado } from "../../orquestracao/EventoDeOrquestracao";
 import { TIPOS_DE_ITEM_LIGADO } from "../../orquestracao/InstrucoesDoOrquestrador";
-import { MODELOS_CLAUDE } from "../../orquestracao/ModeloClaude";
 import { MODOS_DO_TURNO } from "../../orquestracao/ModoDoTurno";
+import { MOTOR_PADRAO, MOTORES } from "../../orquestracao/Motor";
 import { NIVEIS_DE_PERMISSAO } from "../../orquestracao/NivelDePermissao";
 import { DadosDoOrquestrador, Orquestrador } from "../../orquestracao/Orquestrador";
 import {
@@ -39,8 +39,13 @@ const esquemaDoArquivo = z.object({
   sessaoIniciada: z.boolean(),
   criadoEm: dataIso,
   configuracao: z.object({
-    modeloDoOrquestrador: z.enum(MODELOS_CLAUDE),
-    modeloDosSubagentes: z.enum(MODELOS_CLAUDE),
+    // Ausentes nos arquivos gravados antes dos outros motores: valem Claude Code e nenhuma reserva.
+    motorDoOrquestrador: z.enum(MOTORES).optional(),
+    motorDosSubagentes: z.enum(MOTORES).optional(),
+    // Só o texto aqui: o agregado confere se o modelo serve ao motor do papel.
+    modeloDoOrquestrador: z.string(),
+    modeloDosSubagentes: z.string(),
+    ordemDeReserva: z.array(z.enum(MOTORES)).optional(),
     quantidadeDeSubagentes: z.object({ modo: z.enum(["fixa", "automatica"]), limite: z.number() }),
     nivelDePermissao: z.enum(NIVEIS_DE_PERMISSAO),
     permitirCommitEPush: z.boolean().optional(),
@@ -96,6 +101,8 @@ const esquemaDoArquivo = z.object({
         )
         .default([]),
       modo: z.enum(MODOS_DO_TURNO).default("execucao"),
+      // Turnos gravados antes dos outros motores rodaram no Claude Code.
+      motor: z.enum(MOTORES).default(MOTOR_PADRAO),
       decisaoDoPlano: z.enum(["pendente", "aprovado", "descartado"]).nullable().default(null),
       perguntas: z
         .array(
@@ -151,6 +158,10 @@ const esquemaDoArquivo = z.object({
     })
     .nullable()
     .default(null),
+  // As sessões que os motores (exceto o Claude Code, que usa `sessaoId`) criaram, e o último
+  // `liberaEm` do limite de uso de cada um. Ausentes nos arquivos antigos: nenhuma.
+  sessoesDosMotores: z.partialRecord(z.enum(MOTORES), z.string()).optional(),
+  liberaEmDosMotores: z.partialRecord(z.enum(MOTORES), dataIso).optional(),
 });
 
 async function lerSeExistir(caminho: string): Promise<string | null> {

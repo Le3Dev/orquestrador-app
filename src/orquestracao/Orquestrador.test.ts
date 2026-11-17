@@ -772,3 +772,277 @@ describe("Orquestrador e a retomada pendente (ADR-36)", () => {
     expect(orquestrador.retomadaPendente).toBeNull();
   });
 });
+
+describe("Orquestrador e os vários motores", () => {
+  const depois = (minutos: number) => new Date(agora.getTime() + minutos * 60_000);
+
+  function comReserva(motor: "claude-code" | "codex" = "claude-code"): Orquestrador {
+    return Orquestrador.criar({
+      id: "o1",
+      nome: "Painel",
+      pastaDeTrabalho: PastaDeTrabalho.dentroDe(raiz, "painel"),
+      sessaoId: "s1",
+      configuracao: ConfiguracaoDoOrquestrador.de({
+        modeloDoOrquestrador: motor === "codex" ? "padrao" : "opus",
+        modeloDosSubagentes: "sonnet",
+        quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
+        nivelDePermissao: "leitura",
+        motorDoOrquestrador: motor,
+        ordemDeReserva: motor === "codex" ? ["claude-code", "copilot"] : ["codex", "copilot"],
+      }),
+      agora,
+    });
+  }
+
+  it("o turno nasce no motor do Orquestrador, ou no que o pedido escolher, e o evento o registra com a configuração desse motor", () => {
+    const orquestrador = comReserva();
+
+    const evento = orquestrador.iniciarTurno("t1", "oi", agora);
+    expect(evento).toMatchObject({ tipo: "turno_iniciado", motor: "claude-code" });
+    expect(orquestrador.ultimoTurno?.motor).toBe("claude-code");
+    orquestrador.concluirTurno("t1", "ok", uso, agora);
+
+    const naReserva = orquestrador.iniciarTurno("t2", "e agora", agora, [], "execucao", "codex");
+    expect(naReserva).toMatchObject({
+      motor: "codex",
+      configuracao: { motorDoOrquestrador: "codex", motorDosSubagentes: "codex", modeloDoOrquestrador: "padrao", ordemDeReserva: [] },
+    });
+    expect(orquestrador.paraDados().turnos.map((turno) => turno.motor)).toEqual(["claude-code", "codex"]);
+  });
+
+  it("um Orquestrador do Codex abre o turno no Codex sem ninguém pedir", () => {
+    const orquestrador = comReserva("codex");
+
+    expect(orquestrador.iniciarTurno("t1", "oi", agora)).toMatchObject({ motor: "codex" });
+  });
+
+  it("turnos gravados antes dos outros motores (sem o campo) reabrem como Claude Code", () => {
+    const orquestrador = comReserva();
+    orquestrador.iniciarTurno("t1", "oi", agora);
+    orquestrador.concluirTurno("t1", "ok", uso, agora);
+    const dados = orquestrador.paraDados();
+    const antigos = { ...dados, turnos: dados.turnos.map(({ motor: _motor, ...turno }) => turno) };
+
+    expect(Orquestrador.reconstituir(antigos).ultimoTurno?.motor).toBe("claude-code");
+  });
+
+  describe("sessão de cada motor", () => {
+    it("o Claude Code usa a sessão que o app gerou, e só passa a existir quando ele avisa", () => {
+      const orquestrador = comReserva();
+      expect(orquestrador.sessaoDoMotor("claude-code")).toEqual({ id: "s1", iniciada: false });
+
+      orquestrador.iniciarTurno("t1", "oi", agora);
+      orquestrador.registrarDoMotor("t1", { tipo: "sessao_iniciada" });
+
+      expect(orquestrador.sessaoDoMotor("claude-code")).toEqual({ id: "s1", iniciada: true });
+      expect(orquestrador.sessaoIniciada).toBe(true);
+    });
+
+    it("os outros motores não têm sessão até devolverem o id da que criaram", () => {
+      const orquestrador = comReserva();
+
+      expect(orquestrador.sessaoDoMotor("codex")).toEqual({ id: "", iniciada: false });
+      orquestrador.registrarSessaoDoMotor("codex", "  thread-123  ");
+
+      expect(orquestrador.sessaoDoMotor("codex")).toEqual({ id: "thread-123", iniciada: true });
+      // A sessão de um motor não aparece em outro, nem mexe na do Claude Code.
+      expect(orquestrador.sessaoDoMotor("copilot")).toEqual({ id: "", iniciada: false });
+      expect(orquestrador.sessaoDoMotor("claude-code")).toEqual({ id: "s1", iniciada: false });
+    });
+
+    it("ignora id vazio e nunca grava sessão do Claude Code por aqui", () => {
+      const orquestrador = comReserva();
+
+      orquestrador.registrarSessaoDoMotor("codex", "   ");
+      orquestrador.registrarSessaoDoMotor("claude-code", "outra");
+
+      expect(orquestrador.sessaoDoMotor("codex").iniciada).toBe(false);
+      expect(orquestrador.sessaoDoMotor("claude-code").id).toBe("s1");
+      expect(orquestrador.paraDados().sessoesDosMotores).toEqual({});
+    });
+
+    it("o `sessao_iniciada` de um turno do Codex grava o id que ele traz, sem marcar a sessão do Claude Code", () => {
+      const orquestrador = comReserva();
+      orquestrador.iniciarTurno("t1", "oi", agora, [], "execucao", "codex");
+
+      orquestrador.registrarDoMotor("t1", { tipo: "sessao_iniciada", sessaoDoMotor: "thread-9" });
+
+      expect(orquestrador.sessaoDoMotor("codex")).toEqual({ id: "thread-9", iniciada: true });
+      expect(orquestrador.sessaoIniciada).toBe(false);
+    });
+
+    it("um `sessao_iniciada` do Codex sem id não cria sessão", () => {
+      const orquestrador = comReserva();
+      orquestrador.iniciarTurno("t1", "oi", agora, [], "execucao", "codex");
+
+      orquestrador.registrarDoMotor("t1", { tipo: "sessao_iniciada" });
+
+      expect(orquestrador.sessaoDoMotor("codex").iniciada).toBe(false);
+    });
+
+    it("sobrevive a gravar e reabrir; dados antigos (sem o campo) reabrem sem sessões; entradas inválidas são descartadas", () => {
+      const orquestrador = comReserva();
+      orquestrador.registrarSessaoDoMotor("codex", "thread-1");
+      orquestrador.registrarSessaoDoMotor("copilot", "sessao-2");
+
+      const dados = orquestrador.paraDados();
+      expect(dados.sessoesDosMotores).toEqual({ codex: "thread-1", copilot: "sessao-2" });
+      expect(Orquestrador.reconstituir(dados).sessaoDoMotor("copilot")).toEqual({ id: "sessao-2", iniciada: true });
+
+      const { sessoesDosMotores: _semOCampo, ...antigos } = dados;
+      expect(Orquestrador.reconstituir(antigos).sessaoDoMotor("codex").iniciada).toBe(false);
+
+      const lixo = {
+        ...dados,
+        sessoesDosMotores: { "claude-code": "x", gemini: "y", codex: "  " } as unknown as Record<string, string>,
+      };
+      expect(Orquestrador.reconstituir(lixo).paraDados().sessoesDosMotores).toEqual({});
+    });
+
+    it("a conversa limpa perde as sessões dos outros motores, e o app volta a gerar a do Claude Code", () => {
+      const orquestrador = comReserva();
+      orquestrador.registrarSessaoDoMotor("codex", "thread-1");
+      orquestrador.iniciarTurno("t1", "oi", agora);
+      orquestrador.registrarDoMotor("t1", { tipo: "sessao_iniciada" });
+      orquestrador.concluirTurno("t1", "ok", uso, agora);
+
+      orquestrador.limparConversa("s2");
+
+      expect(orquestrador.sessaoDoMotor("codex")).toEqual({ id: "", iniciada: false });
+      expect(orquestrador.sessaoDoMotor("claude-code")).toEqual({ id: "s2", iniciada: false });
+    });
+  });
+
+  describe("limite de uso de cada motor", () => {
+    it("guarda o liberaEm do motor, e só vale enquanto não passou", () => {
+      const orquestrador = comReserva();
+      expect(orquestrador.liberaEmDoMotor("claude-code")).toBeNull();
+
+      orquestrador.registrarLimiteDoMotor("claude-code", depois(90).toISOString());
+
+      expect(orquestrador.liberaEmDoMotor("claude-code")).toBe(depois(90).toISOString());
+      expect(orquestrador.limiteAtivoDoMotor("claude-code", depois(10))).toBe(depois(90).toISOString());
+      expect(orquestrador.limiteAtivoDoMotor("claude-code", depois(90))).toBeNull();
+      expect(orquestrador.limiteAtivoDoMotor("claude-code", depois(120))).toBeNull();
+      expect(orquestrador.limiteAtivoDoMotor("codex", depois(10))).toBeNull();
+    });
+
+    it("sem horário, ou com horário ilegível, não há o que guardar", () => {
+      const orquestrador = comReserva();
+
+      orquestrador.registrarLimiteDoMotor("claude-code", null);
+      orquestrador.registrarLimiteDoMotor("claude-code", "amanhã de manhã");
+
+      expect(orquestrador.liberaEmDoMotor("claude-code")).toBeNull();
+    });
+
+    it("um novo liberaEm substitui o anterior, e o motor que responde bem o limpa", () => {
+      const orquestrador = comReserva();
+      orquestrador.registrarLimiteDoMotor("claude-code", depois(30).toISOString());
+      orquestrador.registrarLimiteDoMotor("claude-code", depois(60).toISOString());
+      expect(orquestrador.liberaEmDoMotor("claude-code")).toBe(depois(60).toISOString());
+
+      orquestrador.liberarLimiteDoMotor("claude-code");
+      orquestrador.liberarLimiteDoMotor("codex");
+
+      expect(orquestrador.liberaEmDoMotor("claude-code")).toBeNull();
+    });
+
+    it("sobrevive a gravar e reabrir, e a conversa limpa não o apaga (o limite é da assinatura)", () => {
+      const orquestrador = comReserva();
+      orquestrador.registrarLimiteDoMotor("claude-code", depois(30).toISOString());
+
+      const reaberto = Orquestrador.reconstituir(orquestrador.paraDados());
+      expect(reaberto.liberaEmDoMotor("claude-code")).toBe(depois(30).toISOString());
+
+      reaberto.limparConversa("s2");
+      expect(reaberto.liberaEmDoMotor("claude-code")).toBe(depois(30).toISOString());
+
+      const { liberaEmDosMotores: _semOCampo, ...antigos } = orquestrador.paraDados();
+      expect(Orquestrador.reconstituir(antigos).liberaEmDoMotor("claude-code")).toBeNull();
+    });
+  });
+
+  describe("motorParaComecar", () => {
+    it("o do Orquestrador, enquanto o limite dele não é conhecido ou já liberou", () => {
+      const orquestrador = comReserva();
+      expect(orquestrador.motorParaComecar(agora)).toBe("claude-code");
+
+      orquestrador.registrarLimiteDoMotor("claude-code", depois(30).toISOString());
+      expect(orquestrador.motorParaComecar(depois(31))).toBe("claude-code");
+    });
+
+    it("com o limite do principal ainda de pé, começa direto no primeiro da reserva", () => {
+      const orquestrador = comReserva();
+      orquestrador.registrarLimiteDoMotor("claude-code", depois(30).toISOString());
+
+      expect(orquestrador.motorParaComecar(depois(5))).toBe("codex");
+    });
+
+    it("pula na reserva também os motores no limite, e com todos no limite volta ao principal (a espera de sempre)", () => {
+      const orquestrador = comReserva();
+      orquestrador.registrarLimiteDoMotor("claude-code", depois(30).toISOString());
+      orquestrador.registrarLimiteDoMotor("codex", depois(40).toISOString());
+      expect(orquestrador.motorParaComecar(depois(5))).toBe("copilot");
+
+      orquestrador.registrarLimiteDoMotor("copilot", depois(50).toISOString());
+      expect(orquestrador.motorParaComecar(depois(5))).toBe("claude-code");
+    });
+
+    it("sem reserva, sempre o principal, mesmo no limite", () => {
+      const orquestrador = novoOrquestrador();
+      orquestrador.registrarLimiteDoMotor("claude-code", depois(30).toISOString());
+
+      expect(orquestrador.motorParaComecar(depois(5))).toBe("claude-code");
+    });
+
+    it("o motor preferido (o que propôs o Plano) vale se está na ordem e fora do limite", () => {
+      const orquestrador = comReserva();
+      expect(orquestrador.motorParaComecar(agora, "codex")).toBe("codex");
+
+      orquestrador.registrarLimiteDoMotor("codex", depois(30).toISOString());
+      expect(orquestrador.motorParaComecar(depois(5), "codex")).toBe("claude-code");
+
+      const semGemini = novoOrquestrador();
+      expect(semGemini.motorParaComecar(agora, "codex")).toBe("claude-code");
+    });
+  });
+
+  describe("contextoDaTroca", () => {
+    function comHistorico(): Orquestrador {
+      const orquestrador = comReserva();
+      orquestrador.iniciarTurno("t1", "crie a tela", agora);
+      orquestrador.concluirTurno("t1", "Tela criada.", uso, agora);
+      orquestrador.iniciarTurno("t2", "ajuste a cor", agora, [], "execucao", "codex");
+      orquestrador.concluirTurno("t2", "Cor ajustada.", uso, agora);
+      return orquestrador;
+    }
+
+    it("traz os turnos que a sessão do motor não viu, e só depois da última participação dele", () => {
+      const orquestrador = comHistorico();
+
+      expect(orquestrador.contextoDaTroca("claude-code")).toContain("ajuste a cor");
+      expect(orquestrador.contextoDaTroca("claude-code")).not.toContain("crie a tela");
+      expect(orquestrador.contextoDaTroca("codex")).toBeNull();
+      const paraOCopilot = orquestrador.contextoDaTroca("copilot");
+      expect(paraOCopilot).toContain("crie a tela");
+      expect(paraOCopilot).toContain("Cor ajustada.");
+    });
+
+    it("o turno em andamento não entra, e conversa só do mesmo motor não tem contexto", () => {
+      const orquestrador = comHistorico();
+      orquestrador.iniciarTurno("t3", "pedido de agora", agora, [], "execucao", "copilot");
+
+      expect(orquestrador.contextoDaTroca("claude-code")).not.toContain("pedido de agora");
+      expect(novoOrquestrador().contextoDaTroca("claude-code")).toBeNull();
+    });
+
+    it("um turno que falhou entra, com o motivo, para o próximo motor saber que pode haver trabalho pela metade", () => {
+      const orquestrador = comReserva();
+      orquestrador.iniciarTurno("t1", "migre o banco", agora);
+      orquestrador.falharTurno("t1", "Limite de uso atingido", agora);
+
+      expect(orquestrador.contextoDaTroca("codex")).toContain("o turno falhou (Limite de uso atingido)");
+    });
+  });
+});
