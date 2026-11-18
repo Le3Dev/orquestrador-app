@@ -407,7 +407,16 @@ describe("ConfiguracoesDoApp", () => {
 
   describe("aba Atualização", () => {
     function estado(alteracoes: Partial<EstadoDaAtualizacao> = {}): EstadoDaAtualizacao {
-      return { situacao: "em-dia", versaoAtual: "0.3.0", versaoNova: null, progresso: null, mensagemDeErro: null, ...alteracoes };
+      return {
+        situacao: "em-dia",
+        versaoAtual: "0.3.0",
+        versaoNova: null,
+        progresso: null,
+        mensagemDeErro: null,
+        etapa: null,
+        orquestradoresTrabalhando: null,
+        ...alteracoes,
+      };
     }
 
     function instalarPonte(inicial: EstadoDaAtualizacao) {
@@ -463,6 +472,79 @@ describe("ConfiguracoesDoApp", () => {
       expect(screen.getByRole("alert")).toHaveTextContent("Há 2 pedidos em andamento; reiniciar agora vai cancelá-los.");
       fireEvent.click(screen.getByRole("button", { name: "Reiniciar mesmo assim" }));
       expect(ponte.instalarAgora).toHaveBeenCalledTimes(1);
+    });
+
+    /** A ponte do Mac: `instalarAgora` responde e há esperar e cancelar. */
+    function instalarPonteNova(inicial: EstadoDaAtualizacao, resposta = { iniciou: true, orquestradoresTrabalhando: 0 }) {
+      const atualizacao = {
+        obter: vi.fn(async () => inicial),
+        verificar: vi.fn(async () => inicial),
+        instalarAgora: vi.fn<(opcoes?: { forcar?: boolean }) => Promise<typeof resposta>>(async () => resposta),
+        instalarQuandoLivre: vi.fn(async () => undefined),
+        cancelarEspera: vi.fn(async () => undefined),
+        aoMudar: vi.fn(() => () => undefined),
+      };
+      janelaComPonte.electron = { desktop: true, atualizacao };
+      return atualizacao;
+    }
+
+    it("Mac baixando: a etapa na descrição e a barra indeterminada sem percentual", async () => {
+      instalarPonteNova(estado({ situacao: "baixando", versaoNova: "0.3.1", etapa: "Gerando o app" }));
+      renderizar({ abaInicial: "atualizacao" });
+      await esperar();
+
+      expect(screen.getByText("A versão 0.3.1 está sendo preparada. Gerando o app…")).toBeInTheDocument();
+      const barra = screen.getByRole("progressbar", { name: "Preparo da atualização" });
+      expect(barra).toHaveClass("medidor-indeterminado");
+      expect(barra).not.toHaveAttribute("aria-valuenow");
+    });
+
+    it("Mac pronta: o app recusa com orquestradores trabalhando e a aba oferece esperar ou forçar", async () => {
+      const ponte = instalarPonteNova(estado({ situacao: "pronta", versaoNova: "0.3.1" }), {
+        iniciou: false,
+        orquestradoresTrabalhando: 1,
+      });
+      renderizar({ abaInicial: "atualizacao" });
+      await esperar();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Reiniciar agora" }));
+      });
+      expect(ponte.instalarAgora).toHaveBeenLastCalledWith();
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "1 orquestrador trabalhando. Reiniciar agora interrompe o trabalho dele.",
+      );
+      expect(screen.queryByRole("button", { name: "Reiniciar agora" })).not.toBeInTheDocument();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Reiniciar mesmo assim" }));
+      });
+      expect(ponte.instalarAgora).toHaveBeenLastCalledWith({ forcar: true });
+      fireEvent.click(screen.getByRole("button", { name: "Reiniciar quando terminarem" }));
+      expect(ponte.instalarQuandoLivre).toHaveBeenCalledTimes(1);
+    });
+
+    it("Mac aguardando: a espera na descrição e \"Cancelar espera\"", async () => {
+      const ponte = instalarPonteNova(estado({ situacao: "aguardando", versaoNova: "0.3.1", orquestradoresTrabalhando: 3 }));
+      renderizar({ abaInicial: "atualizacao" });
+      await esperar();
+
+      expect(screen.getByText("A versão 0.3.1 está pronta. Reinicia quando 3 orquestradores terminarem.")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Procurar agora" })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Cancelar espera" }));
+      expect(ponte.cancelarEspera).toHaveBeenCalledTimes(1);
+    });
+
+    it("erro longo do Mac: a primeira linha na descrição e o log recolhido em \"Ver detalhes\"", async () => {
+      const log = "Falha ao gerar o app (código 1)\n> electron-builder --mac\n  ⨯ cannot find module\n  at Object.<anonymous>";
+      instalarPonteNova(estado({ situacao: "erro", mensagemDeErro: log }));
+      renderizar({ abaInicial: "atualizacao" });
+      await esperar();
+
+      expect(screen.getByText("Não foi possível verificar: Falha ao gerar o app (código 1)")).toBeInTheDocument();
+      const detalhes = screen.getByText("Ver detalhes").closest("details");
+      expect(detalhes).not.toHaveAttribute("open");
+      expect(detalhes?.querySelector("pre")).toHaveTextContent("cannot find module");
     });
   });
 

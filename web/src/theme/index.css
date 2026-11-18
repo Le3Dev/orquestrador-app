@@ -3448,7 +3448,35 @@ html.modo-invisivel .barra-de-titulo * {
 }
 .cartao-da-atualizacao:focus { outline: none; }
 .texto-do-cartao-da-atualizacao { margin: 0; line-height: 1.45; }
-.botoes-do-cartao-da-atualizacao { display: flex; justify-content: flex-end; gap: 6px; }
+.botoes-do-cartao-da-atualizacao { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+/* Mac sem percentual: o medidor vira uma faixa que varre (a mesma de "trabalhando"). */
+.medidor-indeterminado { position: relative; }
+.medidor-indeterminado > span { width: 35%; animation: varrer 1.4s ease-in-out infinite; }
+/* Aguardando os orquestradores: o aviso e "Cancelar espera" na mesma linha. */
+.aviso-da-espera { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 0; }
+.linha-da-espera { display: flex; align-items: center; gap: 8px; }
+/* Erro longo (no Mac, o fim do log): a primeira linha e o resto recolhido. */
+.erro-compacto { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.erro-compacto > p { margin: 0; overflow-wrap: anywhere; }
+.detalhes-do-erro { min-width: 0; font-size: 11.5px; color: var(--muted); }
+.detalhes-do-erro > summary { width: fit-content; cursor: pointer; border-radius: 4px; }
+.detalhes-do-erro > summary:hover { color: var(--primary); }
+.detalhes-do-erro > summary:focus-visible { outline: 2px solid var(--active); outline-offset: 2px; }
+.detalhes-do-erro > pre {
+  max-height: 140px;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-3);
+  color: var(--caption);
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
 
 /* ---------------- Status (situação, cotas, RAM) ---------------- */
 .status-do-canvas { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 16px; min-width: 0; }

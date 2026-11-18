@@ -721,4 +721,34 @@ describe("NotificacoesDoCanvas", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reiniciar agora" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Há 2 pedidos em andamento");
   });
+
+  it("aguardando os orquestradores (Mac), o aviso da espera entra na pilha com \"Cancelar espera\"", async () => {
+    const aguardando = {
+      situacao: "aguardando",
+      versaoAtual: "0.2.0",
+      versaoNova: "0.2.1",
+      progresso: null,
+      mensagemDeErro: null,
+      etapa: null,
+      orquestradoresTrabalhando: 2,
+    };
+    const cancelarEspera = vi.fn().mockResolvedValue(undefined);
+    janelaComPonte.electron = {
+      desktop: true,
+      atualizacao: {
+        obter: vi.fn().mockResolvedValue(aguardando),
+        verificar: vi.fn().mockResolvedValue(aguardando),
+        instalarAgora: vi.fn().mockResolvedValue({ iniciou: false, orquestradoresTrabalhando: 2 }),
+        instalarQuandoLivre: vi.fn().mockResolvedValue(undefined),
+        cancelarEspera,
+        aoMudar: vi.fn(() => () => undefined),
+      },
+    };
+    montar(memoria(10), null, 2);
+
+    const regiao = await screen.findByRole("region", { name: "Notificações" });
+    expect(await within(regiao).findByRole("status")).toHaveTextContent("Reinicia quando 2 orquestradores terminarem");
+    fireEvent.click(within(regiao).getByRole("button", { name: "Cancelar espera" }));
+    expect(cancelarEspera).toHaveBeenCalledTimes(1);
+  });
 });
