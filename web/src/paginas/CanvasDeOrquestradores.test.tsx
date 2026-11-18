@@ -4,7 +4,7 @@ import { act, createEvent, fireEvent, render, screen, waitFor, within } from "@t
 
 import { apiDosArtefatos, type EventoDeArtefato, type ResumoDoArtefato } from "../shared/api/artefatos";
 import { api } from "../shared/api/cliente";
-import { apiDasRotinas } from "../shared/api/rotinas";
+import { apiDasRotinas, type ResumoDaRotina } from "../shared/api/rotinas";
 import type {
   DadosDaConfiguracao,
   DadosDaNota,
@@ -238,10 +238,9 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Gerenciar subagentes" }));
 
     const painel = await screen.findByRole("region", { name: "Subagentes prontos" });
-    // Flutua logo abaixo da ilha do nome, na mesma coluna (só o botão Rotinas fica entre os dois).
+    // Flutua logo abaixo da ilha do nome, na mesma coluna (sem o antigo botão Rotinas entre os dois).
     expect(painel.parentElement).toHaveClass("coluna-da-ilha-esquerda");
-    expect(painel.previousElementSibling).toBe(screen.getByRole("button", { name: "Rotinas" }));
-    expect(screen.getByRole("button", { name: "Rotinas" }).previousElementSibling).toBe(screen.getByTestId("ilha-do-nome"));
+    expect(painel.previousElementSibling).toBe(screen.getByTestId("ilha-do-nome"));
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Seu canvas de agentes" })).not.toBeInTheDocument();
 
@@ -250,7 +249,37 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
     expect(screen.getByRole("heading", { name: "Seu canvas de agentes" })).toBeInTheDocument();
   });
 
-  describe("rotinas na coluna da esquerda", () => {
+  describe("rotinas no menu Novo", () => {
+    /** Uma rotina com uma execução parada à espera da aprovação do usuário. */
+    function rotinaAguardando(id: string): ResumoDaRotina {
+      const etapas = [{ tipo: "aprovacao" as const, mensagem: "Posso seguir?" }];
+      return {
+        id,
+        nome: `Rotina ${id}`,
+        ativa: true,
+        gatilho: { tipo: "diario", hora: "09:00" },
+        etapas,
+        aoPerder: "pular",
+        criadaEm: "2026-11-05T12:00:00Z",
+        ultimaExecucaoEm: null,
+        proximaExecucaoEm: null,
+        execucaoAtiva: {
+          id: `e-${id}`,
+          rotinaId: id,
+          rotinaNome: `Rotina ${id}`,
+          origem: "agendada",
+          situacao: "aguardando_aprovacao",
+          etapaAtual: 0,
+          etapas,
+          resultados: [],
+          iniciadaEm: "2026-11-17T12:00:00Z",
+          encerradaEm: null,
+          motivo: null,
+          pendencia: { tipo: "aprovacao", mensagem: "Posso seguir?" },
+        },
+      };
+    }
+
     beforeEach(() => {
       vi.spyOn(apiDasRotinas, "listar").mockResolvedValue([]);
       vi.spyOn(apiDasRotinas, "listarExecucoes").mockResolvedValue([]);
@@ -262,23 +291,59 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
       simulados.orquestradores.orquestradores = [];
     });
 
-    it("o botão Rotinas fica logo abaixo da ilha e abre e fecha o painel, que passa a ser o único da barra", async () => {
+    it("não há botão Rotinas solto: o item Rotinas do menu Novo abre o painel, sob a ilha, e o menu fecha", async () => {
       render(<CanvasDeOrquestradores />);
       await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
 
-      const botao = screen.getByRole("button", { name: "Rotinas" });
-      expect(botao.parentElement).toHaveClass("coluna-da-ilha-esquerda");
-      expect(botao.previousElementSibling).toBe(screen.getByTestId("ilha-do-nome"));
-      expect(botao).toHaveAttribute("aria-expanded", "false");
+      // Nada na coluna da esquerda além da ilha do nome: o botão solto saiu dali.
+      const ilha = screen.getByTestId("ilha-do-nome");
+      expect(screen.queryByRole("button", { name: /Rotinas/ })).not.toBeInTheDocument();
+      expect(ilha.parentElement).toHaveClass("coluna-da-ilha-esquerda");
+      expect(ilha.nextElementSibling).toBeNull();
       expect(screen.queryByRole("region", { name: "Rotinas" })).not.toBeInTheDocument();
 
-      fireEvent.click(botao);
+      fireEvent.click(screen.getByRole("button", { name: "Novo" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Rotinas" }));
+
       const painel = await screen.findByRole("region", { name: "Rotinas" });
       expect(painel.parentElement).toHaveClass("coluna-da-ilha-esquerda");
-      expect(botao).toHaveAttribute("aria-expanded", "true");
+      expect(painel.previousElementSibling).toBe(ilha);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
 
       fireEvent.click(screen.getByRole("button", { name: "Fechar rotinas" }));
       expect(screen.queryByRole("region", { name: "Rotinas" })).not.toBeInTheDocument();
+    });
+
+    it("as execuções aguardando aprovação viram um selo no Novo (menu fechado) e no item Rotinas, e o painel abre pelo item", async () => {
+      vi.spyOn(apiDasRotinas, "listar").mockResolvedValue([rotinaAguardando("r1"), rotinaAguardando("r2")]);
+      render(<CanvasDeOrquestradores />);
+
+      // Com o menu fechado e o painel fechado, o número já está à vista no botão.
+      const botaoNovo = await screen.findByRole("button", { name: "Novo, 2 rotinas aguardando aprovação" });
+      expect(within(botaoNovo).getByTestId("selo-do-botao-novo")).toHaveTextContent("2");
+      expect(screen.queryByRole("region", { name: "Rotinas" })).not.toBeInTheDocument();
+
+      fireEvent.click(botaoNovo);
+      const itemRotinas = screen.getByRole("menuitem", { name: "Rotinas, 2 rotinas aguardando aprovação" });
+      expect(within(itemRotinas).getByTestId("selo-das-rotinas")).toHaveTextContent("2");
+
+      fireEvent.click(itemRotinas);
+      const painel = await screen.findByRole("region", { name: "Rotinas" });
+      expect(await within(painel).findAllByTestId("cartao-de-aprovacao")).toHaveLength(2);
+      // O número continua no botão com o painel aberto: a pendência não some enquanto não for decidida.
+      expect(screen.getByTestId("selo-do-botao-novo")).toHaveTextContent("2");
+    });
+
+    it("sem aprovações pendentes, o Novo não tem selo nem o item Rotinas", async () => {
+      vi.spyOn(apiDasRotinas, "listar").mockResolvedValue([]);
+      render(<CanvasDeOrquestradores />);
+      await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
+
+      expect(screen.getByRole("button", { name: "Novo" })).toBeInTheDocument();
+      expect(screen.queryByTestId("selo-do-botao-novo")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Novo" }));
+      expect(screen.getByRole("menuitem", { name: "Rotinas" })).toBeInTheDocument();
+      expect(screen.queryByTestId("selo-das-rotinas")).not.toBeInTheDocument();
     });
 
     it("um painel da barra por vez: abrir as rotinas fecha os subagentes e abrir os subagentes fecha as rotinas", async () => {
@@ -290,7 +355,8 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
       fireEvent.click(screen.getByRole("menuitem", { name: "Gerenciar subagentes" }));
       expect(await screen.findByRole("region", { name: "Subagentes prontos" })).toBeInTheDocument();
 
-      fireEvent.click(screen.getByRole("button", { name: "Rotinas" }));
+      fireEvent.click(screen.getByRole("button", { name: "Novo" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Rotinas" }));
       expect(await screen.findByRole("region", { name: "Rotinas" })).toBeInTheDocument();
       expect(screen.queryByRole("region", { name: "Subagentes prontos" })).not.toBeInTheDocument();
 
@@ -306,7 +372,8 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
       render(<CanvasDeOrquestradores />);
       await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
 
-      fireEvent.click(screen.getByRole("button", { name: "Rotinas" }));
+      fireEvent.click(screen.getByRole("button", { name: "Novo" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Rotinas" }));
       await screen.findByRole("region", { name: "Rotinas" });
       fireEvent.click(await screen.findByRole("button", { name: "+ Nova rotina" }));
 
@@ -319,7 +386,8 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
       render(<CanvasDeOrquestradores />);
       await screen.findByRole("textbox", { name: "Pergunta para o Claude" });
 
-      fireEvent.click(screen.getByRole("button", { name: "Rotinas" }));
+      fireEvent.click(screen.getByRole("button", { name: "Novo" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Rotinas" }));
 
       expect(await screen.findByText("Rotinas indisponíveis")).toBeInTheDocument();
       expect(screen.getByRole("textbox", { name: "Pergunta para o Claude" })).toBeInTheDocument();
@@ -344,6 +412,8 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
       act(() => pedirPainel());
 
       expect(await screen.findByRole("region", { name: "Rotinas" })).toBeInTheDocument();
+      // Mesmo sem o botão solto, o painel segue sendo o único da barra.
+      expect(screen.queryByRole("region", { name: "Subagentes prontos" })).not.toBeInTheDocument();
     });
   });
 

@@ -10,7 +10,15 @@ import {
 } from "react";
 
 import type { DadosDaSkill, DadosDoSubagentePronto, ResumoDoOrquestrador } from "../../shared/api/tipos";
-import { IconeEngrenagem, IconeNavegador, IconeOrquestrador, IconePessoas, IconeShell, IconeSkills } from "../Icones";
+import {
+  IconeEngrenagem,
+  IconeNavegador,
+  IconeOrquestrador,
+  IconePessoas,
+  IconeRelogio,
+  IconeShell,
+  IconeSkills,
+} from "../Icones";
 import {
   IconeLista,
   IconeLupa,
@@ -36,6 +44,8 @@ interface ItemDeAcao {
   /** O mesmo atalho no formato do `aria-keyshortcuts`. */
   teclas?: string;
   dica: string;
+  /** Execuções de rotinas esperando o usuário aprovar ou recusar: com mais de zero, vira o selo à direita. */
+  aguardandoAprovacao?: number;
   executar: () => void;
 }
 
@@ -71,6 +81,13 @@ export interface PropsDoMenuNovo {
   subagentes: readonly DadosDoSubagentePronto[] | null;
   /** "Novo subagente", "Gerenciar subagentes" e um subagente da lista: todos abrem o painel de subagentes prontos. */
   aoAbrirSubagentes: () => void;
+  /** "Rotinas": abre o painel das rotinas agendadas (um painel da barra por vez, como os outros). */
+  aoAbrirRotinas: () => void;
+  /**
+   * Execuções de rotinas aguardando aprovação: o número vira um selo no item "Rotinas" e, com mais de zero,
+   * também no botão `+ Novo`, para a pendência não passar batido com o menu fechado.
+   */
+  rotinasAguardandoAprovacao: number;
   /** As skills do Claude Code (do usuário e de plugins). Nulo enquanto a lista não chegou. */
   skills: readonly DadosDaSkill[] | null;
   erroDasSkills: string | null;
@@ -90,13 +107,40 @@ function plural(total: number, singular: string, pluralDoTermo: string): string 
   return `${total} ${total === 1 ? singular : pluralDoTermo}`;
 }
 
+/** "2 rotinas aguardando aprovação": o texto do selo para o leitor de tela e para a dica. */
+function descreverAprovacoes(total: number): string {
+  return plural(total, "rotina aguardando aprovação", "rotinas aguardando aprovação");
+}
+
+interface PropsDoSeloDeAprovacoes {
+  total: number;
+  /** Só o posicionamento de quem usa o selo. */
+  className?: string;
+  testId: string;
+}
+
+/** O selo amarelo com o número de execuções aguardando aprovação; o texto acessível fica no botão que o carrega. */
+function SeloDeAprovacoes({ total, className = "", testId }: PropsDoSeloDeAprovacoes) {
+  return (
+    <span
+      className={`inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-warning px-1 text-[10px] font-semibold leading-none text-surface ${className}`}
+      data-testid={testId}
+      aria-hidden="true"
+    >
+      {total}
+    </span>
+  );
+}
+
 /**
  * O botão `+ Novo` da ilha do canto superior esquerdo e o menu dele, no estilo
  * do menu do Excalidraw: cai para baixo, com ícone, rótulo e atalho à direita
  * e divisores entre os grupos. Grupo 1: o que criar. Grupo 2: "Orquestradores ›",
  * "Subagentes ›" e "Skills ›", cada um com a quantidade à direita, que abrem um segundo
  * painel à direita (ao passar o mouse, clicar ou com →); escolher uma skill ou
- * "Ver todas as skills" abre o painel das skills, e "Explorar marketplace" o abre no catálogo de plugins. Grupo 3: busca e configurações.
+ * "Ver todas as skills" abre o painel das skills, e "Explorar marketplace" o abre no catálogo de plugins.
+ * "Rotinas" (entre Subagentes e Skills) não tem submenu: abre o painel das rotinas e leva o selo das execuções
+ * aguardando aprovação, que também aparece no `+ Novo` enquanto houver pendência. Grupo 3: busca e configurações.
  *
  * Teclado: ↓ ou Enter no botão abrem; ↑/↓ (e Home/End) navegam; → entra no
  * submenu e ← (ou Esc) volta dele; Enter ativa; Esc, Tab e clique fora fecham.
@@ -114,6 +158,8 @@ export function MenuNovo({
   aoEscolherOrquestrador,
   subagentes,
   aoAbrirSubagentes,
+  aoAbrirRotinas,
+  rotinasAguardandoAprovacao,
   skills,
   erroDasSkills,
   aoAbrirSkills,
@@ -200,6 +246,18 @@ export function MenuNovo({
         dica: "Ajudantes prontos que todo orquestrador pode chamar",
       },
       {
+        tipo: "acao",
+        id: "rotinas",
+        rotulo: "Rotinas",
+        icone: <IconeRelogio tamanho={18} />,
+        dica:
+          rotinasAguardandoAprovacao > 0
+            ? "Há rotinas esperando sua aprovação"
+            : "Rotinas agendadas: pedidos que o app manda sozinho, na hora marcada",
+        aguardandoAprovacao: rotinasAguardandoAprovacao,
+        executar: aoAbrirRotinas,
+      },
+      {
         tipo: "submenu",
         id: "skills",
         rotulo: "Skills",
@@ -238,6 +296,8 @@ export function MenuNovo({
     aoAbrirConfiguracoes,
     orquestradores,
     subagentes,
+    aoAbrirRotinas,
+    rotinasAguardandoAprovacao,
     skills,
   ]);
   const itens = useMemo(() => grupos.flat(), [grupos]);
@@ -617,6 +677,7 @@ export function MenuNovo({
 
   itensPrincipais.current = [];
   let posicao = 0;
+  const temAprovacoes = rotinasAguardandoAprovacao > 0;
 
   return (
     <div ref={ancora} className="ancora-do-menu-novo no-drag">
@@ -624,16 +685,23 @@ export function MenuNovo({
         ref={botao}
         type="button"
         className="botao-novo"
-        aria-label="Novo"
+        aria-label={temAprovacoes ? `Novo, ${descreverAprovacoes(rotinasAguardandoAprovacao)}` : "Novo"}
         aria-haspopup="menu"
         aria-expanded={aberto}
         aria-controls={aberto ? idDoMenu : undefined}
-        title="Novo orquestrador (Ctrl+N), nota (Ctrl+Shift+N), terminal ou prévia"
+        title={
+          temAprovacoes
+            ? `${descreverAprovacoes(rotinasAguardandoAprovacao)}: abra o menu e escolha Rotinas`
+            : "Novo orquestrador (Ctrl+N), nota (Ctrl+Shift+N), terminal ou prévia"
+        }
         onClick={() => (aberto ? fechar(false) : abrir(0))}
         onKeyDown={aoTeclarNoBotao}
       >
         <IconeMais tamanho={14} className="icone-do-botao-novo" />
         Novo
+        {temAprovacoes && (
+          <SeloDeAprovacoes total={rotinasAguardandoAprovacao} className="ring-2 ring-surface" testId="selo-do-botao-novo" />
+        )}
       </button>
       {aberto && (
         <div
@@ -656,6 +724,7 @@ export function MenuNovo({
                   }
                 };
                 if (item.tipo === "acao") {
+                  const aguardando = item.aguardandoAprovacao ?? 0;
                   return (
                     <button
                       key={item.id}
@@ -667,6 +736,7 @@ export function MenuNovo({
                       tabIndex={-1}
                       className="item-do-menu-novo"
                       aria-keyshortcuts={item.teclas}
+                      aria-label={aguardando > 0 ? `${item.rotulo}, ${descreverAprovacoes(aguardando)}` : undefined}
                       title={item.dica}
                       onMouseEnter={aoPassarOMouse}
                       onClick={() => executar(item)}
@@ -675,6 +745,7 @@ export function MenuNovo({
                         {item.icone}
                       </span>
                       <span className="rotulo-do-menu-novo">{item.rotulo}</span>
+                      {aguardando > 0 && <SeloDeAprovacoes total={aguardando} testId="selo-das-rotinas" />}
                       {item.atalho !== undefined && (
                         <kbd className="atalho-do-menu-novo" aria-hidden="true">
                           {item.atalho}

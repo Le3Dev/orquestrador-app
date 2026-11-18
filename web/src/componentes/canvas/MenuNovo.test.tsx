@@ -43,6 +43,7 @@ function acoes() {
     aoAbrirConfiguracoes: vi.fn(),
     aoEscolherOrquestrador: vi.fn(),
     aoAbrirSubagentes: vi.fn(),
+    aoAbrirRotinas: vi.fn(),
     aoAbrirSkills: vi.fn(),
     aoExplorarMarketplace: vi.fn(),
   };
@@ -62,6 +63,7 @@ function montar(extras: Partial<PropsDoMenuNovo> = {}) {
     erroDosOrquestradores: null,
     noCanvas: new Set(["o1"]),
     subagentes: SUBAGENTES,
+    rotinasAguardandoAprovacao: 0,
     skills: SKILLS,
     erroDasSkills: null,
     ...extras,
@@ -103,6 +105,7 @@ describe("MenuNovo", () => {
       "Prévia",
       "Orquestradores",
       "Subagentes",
+      "Rotinas",
       "Skills",
       "Buscar",
       "Configurações",
@@ -123,6 +126,7 @@ describe("MenuNovo", () => {
     expect(item("Nota")).toHaveAttribute("aria-keyshortcuts", "Control+Shift+N");
     expect(item("Buscar")).toHaveAttribute("aria-keyshortcuts", "Control+K");
     expect(item("Skills")).not.toHaveAttribute("aria-keyshortcuts");
+    expect(item("Rotinas")).not.toHaveAttribute("aria-keyshortcuts");
     expect(item("Terminal")).not.toHaveAttribute("aria-keyshortcuts");
     expect(item("Prévia")).not.toHaveAttribute("aria-keyshortcuts");
     expect(item("Configurações")).not.toHaveAttribute("aria-keyshortcuts");
@@ -140,6 +144,7 @@ describe("MenuNovo", () => {
     ["Nota", "aoCriarNota"],
     ["Terminal", "aoCriarShell"],
     ["Prévia", "aoCriarPrevia"],
+    ["Rotinas", "aoAbrirRotinas"],
     ["Buscar", "aoBuscar"],
     ["Configurações", "aoAbrirConfiguracoes"],
   ] as const)("clicar em %s chama %s, fecha o menu e devolve o foco ao botão", (rotulo, acao) => {
@@ -232,6 +237,116 @@ describe("MenuNovo", () => {
 
     expect(item("Skills").querySelector(".contagem-do-menu-novo")).toBeNull();
     expect(item("Skills").querySelector(".seta-do-menu-novo")).not.toBeNull();
+  });
+
+  describe("item Rotinas", () => {
+    it("vem logo depois de Subagentes, é uma ação (sem submenu, quantidade nem seta) e fecha o submenu aberto ao passar o mouse", () => {
+      montar();
+      fireEvent.click(botao());
+      const rotulos = within(menu())
+        .getAllByRole("menuitem")
+        .map((elemento) => elemento.querySelector(".rotulo-do-menu-novo")?.textContent);
+      expect(rotulos.indexOf("Rotinas")).toBe(rotulos.indexOf("Subagentes") + 1);
+      const rotinas = item("Rotinas");
+      expect(rotinas).not.toHaveAttribute("aria-haspopup");
+      expect(rotinas.querySelector(".contagem-do-menu-novo")).toBeNull();
+      expect(rotinas.querySelector(".seta-do-menu-novo")).toBeNull();
+      expect(rotinas.querySelector("svg")).not.toBeNull();
+
+      fireEvent.mouseEnter(item(/^Subagentes/).parentElement!);
+      expect(screen.getByRole("menu", { name: "Subagentes" })).toBeInTheDocument();
+      fireEvent.mouseEnter(rotinas);
+      expect(screen.queryByRole("menu", { name: "Subagentes" })).not.toBeInTheDocument();
+    });
+
+    it("↑/↓ chegam a ele a partir de Subagentes e Enter abre o painel, fecha o menu e devolve o foco ao botão", () => {
+      const chamadas = montar();
+      fireEvent.click(botao());
+      item(/^Subagentes/).focus();
+
+      fireEvent.keyDown(item(/^Subagentes/), { key: "ArrowDown" });
+      expect(item("Rotinas")).toHaveFocus();
+      fireEvent.keyDown(item("Rotinas"), { key: "ArrowDown" });
+      expect(item(/^Skills/)).toHaveFocus();
+      fireEvent.keyDown(item(/^Skills/), { key: "ArrowUp" });
+      expect(item("Rotinas")).toHaveFocus();
+
+      fireEvent.keyDown(item("Rotinas"), { key: "Enter" });
+
+      expect(chamadas.aoAbrirRotinas).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(botao()).toHaveFocus();
+    });
+
+    it("→ nele não abre submenu nenhum", () => {
+      montar();
+      fireEvent.click(botao());
+      item("Rotinas").focus();
+
+      fireEvent.keyDown(item("Rotinas"), { key: "ArrowRight" });
+
+      expect(screen.getAllByRole("menu")).toHaveLength(1);
+      expect(item("Rotinas")).toHaveFocus();
+    });
+
+    it("sem execuções aguardando aprovação, não há selo no item nem no botão Novo, e os nomes ficam os mesmos", () => {
+      montar({ rotinasAguardandoAprovacao: 0 });
+
+      expect(screen.queryByTestId("selo-do-botao-novo")).not.toBeInTheDocument();
+      expect(botao()).toHaveAccessibleName("Novo");
+      fireEvent.click(botao());
+
+      expect(screen.queryByTestId("selo-das-rotinas")).not.toBeInTheDocument();
+      expect(item("Rotinas")).toHaveAccessibleName("Rotinas");
+    });
+
+    it("com execuções aguardando, o número aparece no item Rotinas, com o texto acessível, e o menu fecha ao escolher", () => {
+      const chamadas = montar({ rotinasAguardandoAprovacao: 2 });
+      // Com pendências o nome do botão acrescenta o aviso ("Novo, 2 rotinas aguardando aprovação").
+      fireEvent.click(screen.getByRole("button", { name: /^Novo/ }));
+
+      const rotinas = item("Rotinas, 2 rotinas aguardando aprovação");
+      expect(within(rotinas).getByTestId("selo-das-rotinas")).toHaveTextContent("2");
+      // O selo usa os tokens do selo antigo do botão Rotinas (amarelo de aviso, texto da superfície), sem cor solta.
+      expect(within(rotinas).getByTestId("selo-das-rotinas")).toHaveClass("bg-warning", "text-surface", "rounded-full");
+      expect(within(rotinas).getByTestId("selo-das-rotinas")).toHaveAttribute("aria-hidden", "true");
+
+      fireEvent.click(rotinas);
+
+      expect(chamadas.aoAbrirRotinas).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    });
+
+    it("com pendências, o botão Novo ganha um selo pequeno mesmo com o menu fechado, com o texto acessível no singular e no plural", () => {
+      const propriedades = (aguardando: number): PropsDoMenuNovo => ({
+        ...acoes(),
+        orquestradores: [],
+        erroDosOrquestradores: null,
+        noCanvas: new Set<string>(),
+        subagentes: SUBAGENTES,
+        rotinasAguardandoAprovacao: aguardando,
+        skills: SKILLS,
+        erroDasSkills: null,
+      });
+      const { rerender } = render(<MenuNovo {...propriedades(1)} />);
+
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(screen.getByTestId("selo-do-botao-novo")).toHaveTextContent("1");
+      expect(screen.getByTestId("selo-do-botao-novo")).toHaveClass("bg-warning", "text-surface", "rounded-full");
+      expect(screen.getByRole("button", { name: "Novo, 1 rotina aguardando aprovação" })).toBe(
+        screen.getByTestId("selo-do-botao-novo").closest("button"),
+      );
+
+      rerender(<MenuNovo {...propriedades(3)} />);
+
+      expect(screen.getByTestId("selo-do-botao-novo")).toHaveTextContent("3");
+      expect(screen.getByRole("button", { name: "Novo, 3 rotinas aguardando aprovação" })).toBeInTheDocument();
+
+      rerender(<MenuNovo {...propriedades(0)} />);
+
+      expect(screen.queryByTestId("selo-do-botao-novo")).not.toBeInTheDocument();
+      expect(botao()).toHaveAccessibleName("Novo");
+    });
   });
 
   describe("submenu Orquestradores", () => {

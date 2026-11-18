@@ -64,7 +64,7 @@ describe("ErroDoCanvas", () => {
   });
 });
 
-describe("RotinasDoCanvas (botão Rotinas e painel)", () => {
+describe("RotinasDoCanvas (painel e aprovações pendentes)", () => {
   const ORQUESTRADORES = [{ id: "o1", nome: "Backend" }];
 
   function rotina(id: string, execucaoAtiva: DadosDaExecucao | null = null): ResumoDaRotina {
@@ -99,20 +99,33 @@ describe("RotinasDoCanvas (botão Rotinas e painel)", () => {
     };
   }
 
-  /** Quem monta o canvas decide quando o painel está aberto (um painel da barra por vez). */
+  /**
+   * Quem monta o canvas decide quando o painel está aberto (um painel da barra por vez), abre-o pelo item
+   * "Rotinas" do menu `+ Novo` e mostra o selo das aprovações. Aqui, um botão e um `output` fazem esse papel.
+   */
   function Canvas({ aberturaInicial = false }: { aberturaInicial?: boolean }) {
     const [aberto, setAberto] = useState(aberturaInicial);
+    const [aguardando, setAguardando] = useState<number | null>(null);
     return (
-      <RotinasDoCanvas
-        servidorConectado
-        orquestradores={ORQUESTRADORES}
-        aberto={aberto}
-        aoAbrir={() => setAberto(true)}
-        aoFechar={() => setAberto(false)}
-        criarFonte={() => null}
-      />
+      <>
+        <button type="button" onClick={() => setAberto(true)}>
+          Abrir o painel (teste)
+        </button>
+        <output data-testid="aguardando-aprovacao">{aguardando ?? "nada informado"}</output>
+        <RotinasDoCanvas
+          servidorConectado
+          orquestradores={ORQUESTRADORES}
+          aberto={aberto}
+          aoAbrir={() => setAberto(true)}
+          aoFechar={() => setAberto(false)}
+          aoMudarAguardandoAprovacao={setAguardando}
+          criarFonte={() => null}
+        />
+      </>
     );
   }
+
+  const abrirPainel = () => fireEvent.click(screen.getByRole("button", { name: "Abrir o painel (teste)" }));
 
   async function montar(aberturaInicial = false) {
     await act(async () => {
@@ -129,7 +142,7 @@ describe("RotinasDoCanvas (botão Rotinas e painel)", () => {
     vi.restoreAllMocks();
   });
 
-  it("o selo do botão conta as execuções aguardando aprovação, com o painel fechado", async () => {
+  it("informa quantas execuções aguardam aprovação, com o painel fechado, e não desenha botão nem selo", async () => {
     vi.spyOn(apiDasRotinas, "listar").mockResolvedValue([
       rotina("r1", aguardando("e1", "r1")),
       rotina("r2", aguardando("e2", "r2")),
@@ -138,37 +151,49 @@ describe("RotinasDoCanvas (botão Rotinas e painel)", () => {
 
     await montar();
 
-    const botao = await screen.findByRole("button", { name: "Rotinas, 2 aguardando aprovação" });
-    expect(screen.getByTestId("selo-das-rotinas")).toHaveTextContent("2");
-    expect(botao).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => expect(screen.getByTestId("aguardando-aprovacao")).toHaveTextContent("2"));
+    // O botão solto e o selo dele deixaram de existir aqui: quem mostra o número é o menu `+ Novo`.
+    expect(screen.queryByRole("button", { name: /Rotinas/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("selo-das-rotinas")).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Rotinas" })).not.toBeInTheDocument();
   });
 
-  it("sem execuções aguardando, o botão fica sem selo", async () => {
+  it("sem execuções aguardando, informa zero", async () => {
     vi.spyOn(apiDasRotinas, "listar").mockResolvedValue([rotina("r1")]);
 
     await montar();
 
-    expect(screen.getByRole("button", { name: "Rotinas" })).toBeInTheDocument();
-    expect(screen.queryByTestId("selo-das-rotinas")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("aguardando-aprovacao")).toHaveTextContent("0"));
+    expect(screen.queryByRole("button", { name: /Rotinas/ })).not.toBeInTheDocument();
   });
 
-  it("o botão abre e fecha o painel; o Esc também fecha", async () => {
+  it("o painel abre quando quem monta pede; o X e o Esc fecham", async () => {
     vi.spyOn(apiDasRotinas, "listar").mockResolvedValue([rotina("r1")]);
     await montar();
+    expect(screen.queryByRole("region", { name: "Rotinas" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Rotinas" }));
+    abrirPainel();
     expect(await screen.findByRole("region", { name: "Rotinas" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Rotinas" })).toHaveAttribute("aria-expanded", "true");
     expect(await screen.findByRole("list", { name: "Lista de rotinas" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Rotinas" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fechar rotinas" }));
     expect(screen.queryByRole("region", { name: "Rotinas" })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Rotinas" }));
+    abrirPainel();
     expect(await screen.findByRole("region", { name: "Rotinas" })).toBeInTheDocument();
     fireEvent.keyDown(document.body, { key: "Escape" });
     expect(screen.queryByRole("region", { name: "Rotinas" })).not.toBeInTheDocument();
+  });
+
+  it("o número informado acompanha as aprovações com o painel fechado e com ele aberto", async () => {
+    vi.spyOn(apiDasRotinas, "listar").mockResolvedValue([rotina("r1", aguardando("e1", "r1"))]);
+    await montar();
+    await waitFor(() => expect(screen.getByTestId("aguardando-aprovacao")).toHaveTextContent("1"));
+
+    abrirPainel();
+    await screen.findByRole("region", { name: "Rotinas" });
+
+    expect(screen.getByTestId("aguardando-aprovacao")).toHaveTextContent("1");
   });
 
   it("o cartão de aprovação aparece no painel aberto, com Aprovar e Recusar", async () => {
@@ -180,22 +205,22 @@ describe("RotinasDoCanvas (botão Rotinas e painel)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Aprovar" }));
 
     await waitFor(() => expect(aprovar).toHaveBeenCalledWith("e1"));
-    // A aprovação devolveu a execução em andamento: o cartão e o selo saem.
+    // A aprovação devolveu a execução em andamento: o cartão sai e o número informado volta a zero.
     await waitFor(() => expect(screen.queryByTestId("cartao-de-aprovacao")).not.toBeInTheDocument());
-    expect(screen.queryByTestId("selo-das-rotinas")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("aguardando-aprovacao")).toHaveTextContent("0"));
   });
 
-  it("com a rota fora do ar (404), o botão segue de pé e o painel diz 'Rotinas indisponíveis'", async () => {
+  it("com a rota fora do ar (404), o painel diz 'Rotinas indisponíveis' e nenhuma aprovação é informada", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.spyOn(apiDasRotinas, "listar").mockRejectedValue(new ErroDaApi("O servidor respondeu com erro 404.", 404));
     try {
       await montar();
 
-      fireEvent.click(screen.getByRole("button", { name: "Rotinas" }));
+      abrirPainel();
 
       const aviso = await screen.findByText("Rotinas indisponíveis");
       expect(aviso.closest("[role=alert]")).toHaveTextContent("O servidor respondeu com erro 404.");
-      expect(screen.queryByTestId("selo-das-rotinas")).not.toBeInTheDocument();
+      expect(screen.getByTestId("aguardando-aprovacao")).toHaveTextContent("0");
       expect(screen.getByRole("button", { name: "Tentar de novo" })).toBeInTheDocument();
     } finally {
       vi.useRealTimers();

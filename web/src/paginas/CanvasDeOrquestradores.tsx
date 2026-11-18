@@ -1895,6 +1895,8 @@ function Canvas() {
     [orquestradores],
   );
   const abrirPainelDeRotinas = useCallback(() => abrirPainel("rotinas"), [abrirPainel]);
+  // Quantas execuções esperam aprovação: o `RotinasDoCanvas` (sempre montado) informa, e o `MenuNovo` mostra o selo.
+  const [rotinasAguardandoAprovacao, setRotinasAguardandoAprovacao] = useState(0);
   // O painel de skills abre em Instaladas (uma skill ou "Ver todas") ou em Explorar ("Explorar marketplace").
   // `abertura` muda a cada pedido: abrir de novo em outra aba reinicia o painel na aba pedida.
   const [aberturaDeSkills, setAberturaDeSkills] = useState<{ aba: AbaDoPainelDeSkills; abertura: number }>({
@@ -1939,18 +1941,21 @@ function Canvas() {
           aoEscolherOrquestrador={focarOrquestrador}
           subagentes={subagentesProntos}
           aoAbrirSubagentes={abrirPainelDeSubagentes}
+          aoAbrirRotinas={abrirPainelDeRotinas}
+          rotinasAguardandoAprovacao={rotinasAguardandoAprovacao}
           skills={skills}
           erroDasSkills={erroDasSkills}
           aoAbrirSkills={abrirPainelDeSkills}
           aoExplorarMarketplace={explorarMarketplace}
         />
-        {/* Fica montado com o painel fechado: é ele que mantém o selo das aprovações e avisa o app desktop. */}
+        {/* Sem botão: abre pelo item Rotinas do `+ Novo`. Fica montado com o painel fechado: é ele que mantém o selo das aprovações e avisa o app desktop. */}
         <RotinasDoCanvas
           servidorConectado={servidor.conectado}
           orquestradores={orquestradoresParaRotinas}
           aberto={painelAberto === "rotinas"}
           aoAbrir={abrirPainelDeRotinas}
           aoFechar={fecharPainel}
+          aoMudarAguardandoAprovacao={setRotinasAguardandoAprovacao}
         />
         {painelAberto === "subagentes" && <PainelDeSubagentes aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />}
         {painelAberto === "skills" && (
@@ -1990,6 +1995,7 @@ function Canvas() {
       servidor.conectado,
       orquestradoresParaRotinas,
       abrirPainelDeRotinas,
+      rotinasAguardandoAprovacao,
       skills,
       erroDasSkills,
       abrirPainelDeSkills,

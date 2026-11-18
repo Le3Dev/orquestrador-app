@@ -3642,10 +3642,6 @@ html.modo-invisivel .barra-de-titulo * {
  * Abrem logo abaixo da barra do canvas, um por vez. Mesmo visual da criação:
  * rótulo à esquerda em Poppins, campos escuros e separadores finos. A altura
  * fica presa à tela e só o miolo rola, para o rodapé com Salvar não sumir. */
-.botao-de-painel[aria-expanded="true"] {
-  background: var(--surface-3);
-  border-color: color-mix(in srgb, var(--active) 55%, transparent);
-}
 .painel-da-barra {
   display: flex;
   flex-direction: column;

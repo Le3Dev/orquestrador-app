@@ -40,6 +40,8 @@ describe("IlhaDoNome", () => {
       aoEscolherOrquestrador: vi.fn(),
       subagentes: [],
       aoAbrirSubagentes: vi.fn(),
+      aoAbrirRotinas: vi.fn(),
+      rotinasAguardandoAprovacao: 0,
       skills: [],
       erroDasSkills: null,
       aoAbrirSkills: vi.fn(),
@@ -78,6 +80,8 @@ describe("IlhaDoNome", () => {
         aoEscolherOrquestrador={vi.fn()}
         subagentes={[]}
         aoAbrirSubagentes={vi.fn()}
+        aoAbrirRotinas={vi.fn()}
+        rotinasAguardandoAprovacao={0}
         skills={[]}
         erroDasSkills={null}
         aoAbrirSkills={aoAbrirSkills}
