@@ -716,7 +716,8 @@ describe("troca do app", () => {
       },
     });
     expect(backup).toBe(path.join(pasta, "Orquestrador de Agentes (backup 2026-11-18-090507).app"));
-    expect(fs.statSync(script).mode & 0o111).not.toBe(0);
+    // O Windows não tem bit de execução, então só confere o modo em POSIX.
+    if (ehPosix) expect(fs.statSync(script).mode & 0o111).not.toBe(0);
     expect(chamadas).toEqual([
       {
         comando: "/usr/bin/nohup",
