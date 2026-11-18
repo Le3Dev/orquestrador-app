@@ -2,7 +2,7 @@ import http from "node:http";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { ComandoDoNavegador } from "../../navegador/ComandoDoNavegador";
@@ -224,6 +224,19 @@ describe("ServidorMcpDoApp", () => {
 
       expect(resposta.status).toBe(200);
       expect(JSON.parse(resposta.corpo)).toMatchObject({ result: { serverInfo: { name: "orquestrador" } } });
+    });
+
+    it("aquecer() carrega o SDK sem precisar de turno, pode ser repetido, e o servidor atende antes e depois dele", async () => {
+      // O SDK não é carregado no `import` do módulo (atrasava a subida): o primeiro pedido o carrega sozinho...
+      const { url, token } = turno("orq-1", { navegador: true });
+      const cabecalhos = { Authorization: `Bearer ${token}` };
+      expect((await requisitar({ url, cabecalhos, corpo: INICIALIZAR })).status).toBe(200);
+
+      // ...e `aquecer` o carrega antes, sem servidor iniciado nem turno.
+      const outro = new ServidorMcpDoApp();
+      await expect(outro.aquecer()).resolves.toBeUndefined();
+      await expect(outro.aquecer()).resolves.toBeUndefined();
+      expect((await requisitar({ url, cabecalhos, corpo: INICIALIZAR })).status).toBe(200);
     });
 
     it("só atende POST em /mcp (404 e 405)", async () => {
@@ -564,5 +577,40 @@ describe("ServidorMcpDoApp", () => {
         await outro.encerrar();
       }
     });
+  });
+});
+
+describe("ServidorMcpDoApp: o SDK do MCP não pesa na subida do servidor", () => {
+  afterEach(() => {
+    vi.doUnmock("@modelcontextprotocol/sdk/server/mcp.js");
+    vi.doUnmock("@modelcontextprotocol/sdk/server/streamableHttp.js");
+    vi.resetModules();
+  });
+
+  it("importar o módulo e iniciar o servidor não carrega o SDK; só o aquecer() (ou o primeiro turno) o carrega", async () => {
+    vi.resetModules();
+    const carregados: string[] = [];
+    vi.doMock("@modelcontextprotocol/sdk/server/mcp.js", async (importarOriginal) => {
+      carregados.push("mcp");
+      return await importarOriginal();
+    });
+    vi.doMock("@modelcontextprotocol/sdk/server/streamableHttp.js", async (importarOriginal) => {
+      carregados.push("streamableHttp");
+      return await importarOriginal();
+    });
+
+    const { ServidorMcpDoApp: ServidorNovo } = await import("./ServidorMcpDoApp");
+    const servidor = new ServidorNovo();
+    try {
+      await servidor.iniciar();
+      expect(carregados).toEqual([]);
+
+      await servidor.aquecer();
+      expect([...carregados].sort()).toEqual(["mcp", "streamableHttp"]);
+      await servidor.aquecer();
+      expect(carregados).toHaveLength(2);
+    } finally {
+      await servidor.encerrar();
+    }
   });
 });

@@ -80,8 +80,14 @@ export interface MotoresMontados {
   rotas: Router;
   catalogo: CatalogoDeMotores;
   turnos: RegistroDeTurnosDoApp;
-  /** Inicia o servidor MCP do app (se ainda não estiver) e aquece o catálogo de motores. */
+  /** Inicia o servidor MCP do app (se ainda não estiver). É o que um turno precisa de pé; o resto fica para `aquecer`. */
   iniciar(): Promise<void>;
+  /**
+   * Em segundo plano, sem esperar: carrega o SDK do MCP e consulta os CLIs dos motores (a primeira
+   * consulta leva alguns segundos, e iniciar os CLIs trava o processo por um tempo no Windows).
+   * Chame depois de o servidor HTTP já estar escutando: nada disso é pré-requisito do `listen`.
+   */
+  aquecer(): void;
   /** Solta o que o catálogo guardou. O servidor MCP, que o chamador possui, não é encerrado aqui. */
   encerrar(): Promise<void>;
 }
@@ -152,6 +158,11 @@ export function montarMotores(opcoes: OpcoesDeMontarMotores): MotoresMontados {
     turnos,
     async iniciar() {
       await opcoes.servidorMcp.iniciar();
+    },
+    aquecer() {
+      void opcoes.servidorMcp
+        .aquecer()
+        .catch((erro: unknown) => console.warn("[mcp] Não foi possível carregar o SDK do MCP:", erro));
       // Aquece o catálogo: a primeira consulta leva alguns segundos (cada CLI responde no seu tempo).
       void catalogo.listar().catch((erro: unknown) => console.warn("[motores] Não foi possível consultar os CLIs:", erro));
     },

@@ -2,8 +2,8 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import http, { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
 import {
@@ -17,6 +17,36 @@ export const NOME_DO_SERVIDOR_MCP = "orquestrador";
 export const CAMINHO_DO_SERVIDOR_MCP = "/mcp";
 export const ENDERECO_DO_SERVIDOR_MCP = "127.0.0.1";
 const TAMANHO_MAXIMO_DO_CORPO_EM_BYTES = 4 * 1024 * 1024;
+
+interface SdkDoMcp {
+  readonly McpServer: typeof McpServer;
+  readonly StreamableHTTPServerTransport: typeof StreamableHTTPServerTransport;
+}
+
+let sdkDoMcp: Promise<SdkDoMcp> | null = null;
+
+/**
+ * O SDK do MCP (e o que ele puxa: ajv, zod-to-json-schema...) são centenas de
+ * arquivos: carregá-los no `import` do módulo atrasava a subida do servidor
+ * (no Windows, cada arquivo novo custa o antivírus). Só se carregam aqui, na
+ * primeira vez que alguém precisa deles (`aquecer` logo depois do `listen`, ou
+ * o primeiro turno).
+ */
+function carregarSdkDoMcp(): Promise<SdkDoMcp> {
+  sdkDoMcp ??= Promise.all([
+    import("@modelcontextprotocol/sdk/server/mcp.js"),
+    import("@modelcontextprotocol/sdk/server/streamableHttp.js"),
+  ])
+    .then(([servidor, transporte]) => ({
+      McpServer: servidor.McpServer,
+      StreamableHTTPServerTransport: transporte.StreamableHTTPServerTransport,
+    }))
+    .catch((erro: unknown) => {
+      sdkDoMcp = null;
+      throw erro;
+    });
+  return sdkDoMcp;
+}
 
 /** Quais grupos de ferramentas o turno liga: a chave é o nome dado em `registrarGrupoDeFerramentas`. */
 export type FerramentasDoTurno = Readonly<Record<string, boolean>>;
@@ -121,6 +151,11 @@ export class ServidorMcpDoApp {
       });
     });
     return this.iniciando;
+  }
+
+  /** Carrega o SDK do MCP antes do primeiro turno que o usa (o `import` do módulo não o carrega). */
+  async aquecer(): Promise<void> {
+    await carregarSdkDoMcp();
   }
 
   /** Para de escutar, revoga todos os tokens e cancela as chamadas em andamento. */
@@ -229,9 +264,10 @@ export class ServidorMcpDoApp {
     resposta: ServerResponse,
     turno: TurnoRegistrado,
   ): Promise<void> {
-    const servidorMcp = this.criarServidorParaOTurno(turno);
+    const sdk = await carregarSdkDoMcp();
+    const servidorMcp = this.criarServidorParaOTurno(turno, sdk.McpServer);
     // Sem `sessionIdGenerator` o transporte fica sem sessão; `enableJsonResponse` responde JSON puro em vez de SSE.
-    const transporte = new StreamableHTTPServerTransport({ enableJsonResponse: true });
+    const transporte = new sdk.StreamableHTTPServerTransport({ enableJsonResponse: true });
     // Cliente que desiste (ou resposta já entregue): solta o transporte e aborta o que ainda roda.
     resposta.once("close", () => {
       void servidorMcp.close().catch(() => undefined);
@@ -240,8 +276,8 @@ export class ServidorMcpDoApp {
     await transporte.handleRequest(requisicao, resposta);
   }
 
-  private criarServidorParaOTurno(turno: TurnoRegistrado): McpServer {
-    const servidorMcp = new McpServer({ name: NOME_DO_SERVIDOR_MCP, version: this.versao });
+  private criarServidorParaOTurno(turno: TurnoRegistrado, ServidorDoSdk: typeof McpServer): McpServer {
+    const servidorMcp = new ServidorDoSdk({ name: NOME_DO_SERVIDOR_MCP, version: this.versao });
     for (const [nomeDoGrupo, ligado] of Object.entries(turno.ferramentas)) {
       const grupo = ligado ? this.grupos.get(nomeDoGrupo) : undefined;
       if (grupo === undefined) continue;

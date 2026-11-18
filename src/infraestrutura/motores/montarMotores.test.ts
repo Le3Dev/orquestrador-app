@@ -95,6 +95,24 @@ describe("montarMotores", () => {
     await montados.encerrar();
   });
 
+  it("iniciar() não consulta os CLIs (o listen não espera o aquecimento); aquecer() os consulta em segundo plano", async () => {
+    const executarComando = vi.fn(async (): Promise<SaidaCurta> => SEM_CLI);
+    // O próprio Node faz de CLI instalado nos três motores: o catálogo o acha no disco.
+    const caminhos = { "claude-code": process.execPath, codex: process.execPath, copilot: process.execPath };
+    const { montados, servidorMcp } = montar({ executarComando, caminhos });
+
+    await montados.iniciar();
+
+    // O servidor MCP, que um turno precisa de pé, já está; os CLIs ainda não foram tocados.
+    expect(servidorMcp.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
+    expect(executarComando).not.toHaveBeenCalled();
+
+    montados.aquecer();
+
+    await vi.waitFor(() => expect(executarComando).toHaveBeenCalledTimes(3));
+    expect(executarComando).toHaveBeenCalledWith(process.execPath, ["--version"], expect.anything());
+  });
+
   it("GET /motores responde com o catálogo, no formato que a tela espera", async () => {
     const respostas: Record<string, Partial<SaidaCurta>> = {
       "claude --version": { saida: "2.1.322 (Claude Code)" },

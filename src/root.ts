@@ -168,6 +168,9 @@ export function ehPedidoDeDesligar(mensagem: unknown): boolean {
   return typeof mensagem === "object" && mensagem !== null && (mensagem as { tipo?: unknown }).tipo === "desligar";
 }
 
+/** Folga entre o `listen` e o aquecimento dos motores: a tela faz as primeiras requisições antes de o processo travar iniciando os CLIs. */
+const ESPERA_ANTES_DE_AQUECER_OS_MOTORES_MS = 1_500;
+
 async function iniciar(): Promise<void> {
   const configuracao = lerConfiguracao();
 
@@ -498,8 +501,8 @@ async function iniciar(): Promise<void> {
   await artefatos.iniciar();
 
   // O servidor MCP do app sobe antes de aceitar pedidos: um turno com o navegador ou a delegação o registra.
-  // Se não subir, o app segue sem as ferramentas do app (o turno que as pedir falha com a causa). O mesmo
-  // `iniciar` aquece, em segundo plano, a consulta aos CLIs dos motores.
+  // Se não subir, o app segue sem as ferramentas do app (o turno que as pedir falha com a causa). A consulta
+  // aos CLIs dos motores e o carregamento do SDK do MCP não são pré-requisito: ficam para depois do `listen`.
   try {
     await motores.iniciar();
   } catch (erro) {
@@ -514,6 +517,9 @@ async function iniciar(): Promise<void> {
   const servidor = aplicacao.listen(configuracao.porta, "127.0.0.1", () => {
     console.log(`Orquestrador de agentes em http://localhost:${configuracao.porta}`);
     console.log(`Projetos em: ${configuracao.pastaRaizDosProjetos}`);
+    // Depois do `listen`, e com uma folga para as primeiras requisições da tela serem atendidas: iniciar os
+    // CLIs (`claude --version`...) trava o processo por segundos no Windows, e o SDK do MCP são centenas de arquivos.
+    setTimeout(() => motores.aquecer(), ESPERA_ANTES_DE_AQUECER_OS_MOTORES_MS).unref();
   });
 
   // WebSocket dos terminais: o upgrade não passa pelo Express, então a trava
