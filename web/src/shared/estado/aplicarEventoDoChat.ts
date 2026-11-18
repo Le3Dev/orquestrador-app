@@ -35,6 +35,8 @@ export interface EstadoDoChatNaTela {
   atividade: AtividadeDaResposta | null;
   /** O chat pode editar arquivos e rodar comandos sem perguntar, até o próximo `/clear`. */
   alteracoesAutorizadas: boolean;
+  /** Se a tela oferece pausar a resposta: falso no Windows e em servidores sem a pausa. */
+  podePausar: boolean;
 }
 
 export const ESTADO_INICIAL_DO_CHAT: EstadoDoChatNaTela = {
@@ -46,6 +48,7 @@ export const ESTADO_INICIAL_DO_CHAT: EstadoDoChatNaTela = {
   cota: null,
   atividade: null,
   alteracoesAutorizadas: false,
+  podePausar: false,
 };
 
 /**
@@ -56,6 +59,7 @@ export const ESTADO_INICIAL_DO_CHAT: EstadoDoChatNaTela = {
 function naTela(mensagem: MensagemDoChat): MensagemDoChatNaTela {
   const autorizacaoPendente = mensagem.autorizacaoPendente ?? null;
   const perguntas = mensagem.perguntas ?? [];
+  const pausadaDesde = mensagem.situacao === "respondendo" ? (mensagem.pausadaDesde ?? null) : null;
   if (mensagem.situacao === "falhou" && mensagem.avisos.length > 0) {
     return {
       ...mensagem,
@@ -63,9 +67,10 @@ function naTela(mensagem: MensagemDoChat): MensagemDoChatNaTela {
       motivoDaFalha: mensagem.avisos.at(-1) ?? null,
       autorizacaoPendente,
       perguntas,
+      pausadaDesde,
     };
   }
-  return { ...mensagem, motivoDaFalha: null, autorizacaoPendente, perguntas };
+  return { ...mensagem, motivoDaFalha: null, autorizacaoPendente, perguntas, pausadaDesde };
 }
 
 /** O estado do servidor (carga inicial ou recarga depois de uma queda) substitui o da tela. */
@@ -79,6 +84,7 @@ export function carregarEstadoDoChat(estado: EstadoDoChat): EstadoDoChatNaTela {
     cota: estado.cota,
     atividade: null,
     alteracoesAutorizadas: estado.alteracoesAutorizadas ?? false,
+    podePausar: estado.podePausar ?? false,
   };
 }
 
@@ -90,13 +96,18 @@ function alterarMensagem(
   return estado.mensagens.map((mensagem) => (mensagem.id === mensagemId ? alteracao(mensagem) : mensagem));
 }
 
-/** Fim da resposta: o chat volta a ficar ocioso e a atividade some. */
+/** Fim da resposta: o chat volta a ficar ocioso, a atividade some e a pausa (se havia) sai. */
 function encerrar(
   estado: EstadoDoChatNaTela,
   mensagemId: string,
   alteracao: (mensagem: MensagemDoChatNaTela) => MensagemDoChatNaTela,
 ): Omit<EstadoDoChatNaTela, "ultimaSequencia"> {
-  return { ...estado, situacao: "ocioso", atividade: null, mensagens: alterarMensagem(estado, mensagemId, alteracao) };
+  return {
+    ...estado,
+    situacao: "ocioso",
+    atividade: null,
+    mensagens: alterarMensagem(estado, mensagemId, (mensagem) => ({ ...alteracao(mensagem), pausadaDesde: null })),
+  };
 }
 
 /**
@@ -150,6 +161,21 @@ export function aplicarEventoDoChat(estado: EstadoDoChatNaTela, evento: EventoDo
       return {
         ...encerrar(estado, evento.mensagemId, (mensagem) => ({ ...mensagem, situacao: "cancelada" })),
         ultimaSequencia,
+      };
+    case "resposta_pausada":
+      // Continua "respondendo": só a pausa entra (a conversa segue em andamento).
+      return {
+        ...estado,
+        ultimaSequencia,
+        mensagens: alterarMensagem(estado, evento.mensagemId, (mensagem) =>
+          mensagem.situacao === "respondendo" ? { ...mensagem, pausadaDesde: evento.desde } : mensagem,
+        ),
+      };
+    case "resposta_continuada":
+      return {
+        ...estado,
+        ultimaSequencia,
+        mensagens: alterarMensagem(estado, evento.mensagemId, (mensagem) => ({ ...mensagem, pausadaDesde: null })),
       };
     case "conversa_limpa":
       // O `/clear` também desfaz a autorização de alterações.
@@ -233,6 +259,11 @@ export function pedidoDeAutorizacaoAtual(estado: EstadoDoChatNaTela): PedidoDeAu
     }
   }
   return null;
+}
+
+/** A resposta em andamento, se está pausada (o botão vira ▶ e o rótulo, "pausado"). */
+export function respostaPausada(estado: EstadoDoChatNaTela): boolean {
+  return estado.mensagens.some((mensagem) => mensagem.situacao === "respondendo" && (mensagem.pausadaDesde ?? null) !== null);
 }
 
 /** O modelo usado na última resposta que informou, para o rótulo do seletor. */

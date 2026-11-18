@@ -59,6 +59,11 @@ export interface DadosDaMensagemDoChat {
    * nas digitadas, nas respostas e nas mensagens gravadas antes do campo.
    */
   origem?: OrigemDaPergunta;
+  /**
+   * Desde quando a resposta em andamento está pausada (processo congelado),
+   * em ISO. Só existe enquanto a pausa dura: ausente nas demais mensagens.
+   */
+  pausadaDesde?: string;
 }
 
 /**
@@ -83,6 +88,8 @@ export class MensagemDoChat {
     private autorizacaoPendenteAtual: AutorizacaoPendente | null,
     /** De onde veio a pergunta, quando não foi digitada; ausente nas demais mensagens. */
     public readonly origem?: OrigemDaPergunta,
+    /** Desde quando a resposta está pausada (ms); nulo fora da pausa. */
+    private pausadaDesdeMs: number | null = null,
   ) {}
 
   static pergunta(
@@ -128,6 +135,9 @@ export class MensagemDoChat {
       copiarAutorizacaoPendente(dados.autorizacaoPendente ?? null),
       // O arquivo pode trazer qualquer coisa: só uma origem conhecida sobrevive.
       ehOrigemDaPergunta(dados.origem) ? dados.origem : undefined,
+      dados.situacao === "respondendo" && typeof dados.pausadaDesde === "string"
+        ? Date.parse(dados.pausadaDesde)
+        : null,
     );
   }
 
@@ -143,6 +153,11 @@ export class MensagemDoChat {
     return this.situacaoAtual === "respondendo";
   }
 
+  /** Se a resposta em andamento está pausada (o processo do Claude Code congelado). */
+  get pausada(): boolean {
+    return this.respondendo && this.pausadaDesdeMs !== null;
+  }
+
   get autorizacaoPendente(): AutorizacaoPendente | null {
     return this.autorizacaoPendenteAtual;
   }
@@ -153,6 +168,14 @@ export class MensagemDoChat {
 
   acrescentar(trecho: string): void {
     this.textoAtual += trecho;
+  }
+
+  pausar(agora: Date): void {
+    this.pausadaDesdeMs = agora.getTime();
+  }
+
+  continuar(): void {
+    this.pausadaDesdeMs = null;
   }
 
   concluir(
@@ -170,6 +193,7 @@ export class MensagemDoChat {
     this.usoAtual = uso;
     this.autorizacaoPendenteAtual = copiarAutorizacaoPendente(autorizacaoPendente);
     this.situacaoAtual = "concluida";
+    this.pausadaDesdeMs = null;
   }
 
   /** Guarda o texto que chegou até a falha; o motivo vira aviso, para a tela mostrar. */
@@ -177,10 +201,12 @@ export class MensagemDoChat {
     this.avisosAtuais = [...this.avisosAtuais, motivo];
     this.usoAtual = uso;
     this.situacaoAtual = "falhou";
+    this.pausadaDesdeMs = null;
   }
 
   cancelar(): void {
     this.situacaoAtual = "cancelada";
+    this.pausadaDesdeMs = null;
   }
 
   paraDados(): DadosDaMensagemDoChat {
@@ -198,6 +224,8 @@ export class MensagemDoChat {
       autorizacaoPendente: this.autorizacaoPendenteAtual === null ? null : { ...this.autorizacaoPendenteAtual },
       // Só quando existe: as mensagens sem origem continuam com o mesmo formato de antes.
       ...(this.origem === undefined ? {} : { origem: this.origem }),
+      // Idem: só durante a pausa, as demais mensagens ficam como antes.
+      ...(this.pausadaDesdeMs === null ? {} : { pausadaDesde: new Date(this.pausadaDesdeMs).toISOString() }),
     };
   }
 }

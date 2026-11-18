@@ -1442,6 +1442,81 @@ describe("ChatRapido", () => {
     expect(await screen.findByRole("button", { name: "cancelando…" })).toBeDisabled();
   });
 
+  describe("pausa da resposta", () => {
+    const PAUSAVEL: EstadoDoChatNaTela = { ...RESPONDENDO, podePausar: true };
+    const PAUSADO: EstadoDoChatNaTela = {
+      ...PAUSAVEL,
+      mensagens: PAUSAVEL.mensagens.map((item) =>
+        item.situacao === "respondendo" ? { ...item, pausadaDesde: "2026-11-04T12:01:00Z" } : item,
+      ),
+    };
+
+    it("respondendo: o botão só com o ícone ⏸ fica ao lado do cancelar e pede a pausa", async () => {
+      const pausar = vi.spyOn(api, "pausarRespostaDoChat").mockResolvedValue({ pausada: true });
+      renderizar(PAUSAVEL);
+
+      const botao = screen.getByRole("button", { name: "Pausar resposta" });
+      expect(botao).toHaveTextContent("⏸");
+      expect(botao).toHaveAttribute("title", "Pausar resposta");
+      expect(botao).toHaveClass("botao-de-pausa");
+      expect(botao.nextElementSibling).toBe(screen.getByRole("button", { name: "cancelar" }));
+
+      fireEvent.click(botao);
+      expect(pausar).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(screen.getByRole("button", { name: "Pausar resposta" })).toBeEnabled());
+    });
+
+    it("pausado: ▶ continua, o rótulo vira pausado, a faixa para e o Esc ainda cancela", async () => {
+      const continuar = vi.spyOn(api, "continuarRespostaDoChat").mockResolvedValue({ continuada: true });
+      const cancelar = vi.spyOn(api, "cancelarRespostaDoChat").mockResolvedValue({ cancelando: true });
+      const { campo } = renderizar(PAUSADO);
+
+      const botao = screen.getByRole("button", { name: "Continuar resposta" });
+      expect(botao).toHaveTextContent("▶");
+      expect(screen.getByText("pausado", { selector: ".etiqueta" })).toBeInTheDocument();
+      expect(screen.queryByText("respondendo…")).not.toBeInTheDocument();
+      expect(document.querySelector(".composer-do-chat .faixa-de-progresso-pausada")).not.toBeNull();
+      expect(document.querySelector(".texto-respondendo")).toBeNull();
+      expect(campo).toHaveAttribute("placeholder", "Pausado… esc cancela");
+      // Enviar continua bloqueado: a resposta segue em andamento.
+      expect(screen.queryByRole("button", { name: /enviar/ })).not.toBeInTheDocument();
+
+      fireEvent.click(botao);
+      expect(continuar).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(screen.getByRole("button", { name: "Continuar resposta" })).toBeEnabled());
+
+      fireEvent.keyDown(campo, { key: "Escape" });
+      expect(cancelar).toHaveBeenCalledTimes(1);
+      expect(await screen.findByRole("button", { name: "cancelando…" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Continuar resposta" })).toBeDisabled();
+    });
+
+    it("pausar recusado pelo servidor mostra o erro", async () => {
+      vi.spyOn(api, "pausarRespostaDoChat").mockRejectedValue(new Error("Não dá para pausar a resposta agora."));
+      renderizar(PAUSAVEL);
+
+      fireEvent.click(screen.getByRole("button", { name: "Pausar resposta" }));
+
+      expect(
+        await screen.findByText("Não foi possível pausar a resposta: Não dá para pausar a resposta agora."),
+      ).toBeInTheDocument();
+    });
+
+    it("no Windows (sem como congelar) o botão não aparece", () => {
+      renderizar({ ...RESPONDENDO, podePausar: false });
+
+      expect(screen.getByRole("button", { name: "cancelar" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Pausar resposta" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Continuar resposta" })).not.toBeInTheDocument();
+    });
+
+    it("ocioso não mostra o botão de pausa", () => {
+      renderizar({ ...OCIOSO, podePausar: true });
+
+      expect(screen.queryByRole("button", { name: "Pausar resposta" })).not.toBeInTheDocument();
+    });
+  });
+
   it("ocioso: botão enviar e sem as animações da resposta", () => {
     renderizar();
 

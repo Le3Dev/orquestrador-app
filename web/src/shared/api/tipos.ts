@@ -810,6 +810,11 @@ export interface MensagemDoChat {
   /** Só nas perguntas enviadas sozinhas (ex.: pela escuta); falta nas digitadas e nas antigas. */
   origem?: OrigemDaPergunta;
 }
+  /**
+   * Desde quando (ISO) a resposta em andamento está pausada, com o processo
+   * congelado. Só existe durante a pausa; a situação continua "respondendo".
+   */
+  pausadaDesde?: string | null;
 
 /** O trecho transcrito pela escuta e, opcionalmente, o que veio logo antes, para dar sentido a ele. */
 export interface PedidoDeClassificacaoDaEscuta {
@@ -839,6 +844,11 @@ export interface EstadoDoChat {
    */
   alteracoesAutorizadas?: boolean;
 }
+  /**
+   * Se dá para pausar a resposta (congelar o processo): falso no Windows.
+   * Falta em servidores anteriores à pausa (vale `false`).
+   */
+  podePausar?: boolean;
 
 export type EventoDoChat =
   | { tipo: "pergunta_enviada"; mensagemDoUsuario: MensagemDoChat; mensagemDoClaude: MensagemDoChat }
@@ -857,6 +867,9 @@ export type EventoDoChat =
   | { tipo: "resposta_falhou"; mensagemId: string; motivo: string; uso: UsoDaResposta | null }
   | { tipo: "resposta_cancelada"; mensagemId: string }
   // O `/clear` também desfaz a autorização de alterações.
+  // A resposta em andamento foi pausada (processo congelado) e depois continuou de onde parou.
+  | { tipo: "resposta_pausada"; mensagemId: string; desde: string }
+  | { tipo: "resposta_continuada"; mensagemId: string }
   | { tipo: "conversa_limpa" }
   | { tipo: "preferencias_alteradas"; preferencias: PreferenciasDoChat }
   | { tipo: "uso_da_cota"; janelas: JanelaDaCota[] }

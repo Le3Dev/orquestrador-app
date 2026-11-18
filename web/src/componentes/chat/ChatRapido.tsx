@@ -47,6 +47,7 @@ import {
   type MensagemDoChatNaTela,
   pedidoDeAutorizacaoAtual,
   textoParaMostrar,
+  respostaPausada,
   ultimoModeloUsado,
 } from "../../shared/estado/aplicarEventoDoChat";
 import { EVENTO_PARA_FOCAR_O_CHAT } from "../../shared/focarChat";
@@ -627,18 +628,18 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
   const respondendo = mensagem.situacao === "respondendo";
   const texto = textoParaMostrar(mensagem.texto, respondendo);
   // Só a resposta pronta, com texto, vai para o canvas.
+  const pausada = respondendo && (mensagem.pausadaDesde ?? null) !== null;
   const arrastavel = mensagem.situacao === "concluida" && texto !== "";
   return (
     <article className="mensagem-do-claude" aria-busy={respondendo}>
       {texto !== "" && (
-        <div className={respondendo ? "texto-respondendo" : undefined}>
+        // Pausada, o cursor de digitação some: nada está chegando.
+        <div className={respondendo && !pausada ? "texto-respondendo" : undefined}>
           <TextoFormatado texto={texto} className="markdown-compacto" />
         </div>
       )}
       {respondendo && texto === "" && (
-        <p className="mono text-muted">
-          pensando<span className="cursor" />
-        </p>
+        <p className="mono text-muted">{pausada ? "pausado" : <>pensando<span className="cursor" /></>}</p>
       )}
       {respondendo && atividade !== null && atividade.mensagemId === mensagem.id && (
         <p className="mono truncate text-secondary" title={atividade.detalhe}>
@@ -764,6 +765,8 @@ export function ChatRapido({
   // Assinatura da última mensagem quando a conversa foi ocultada; nula = visível.
   const [ocultaEm, setOcultaEm] = useState<string | null>(() =>
     comecaOculto && !fixo ? assinaturaDaUltima(chat) : null,
+  // Pausar ou continuar a resposta à espera do servidor: o botão fica desabilitado até o evento chegar.
+  const [alternandoPausa, setAlternandoPausa] = useState(false);
   );
   const [revogando, setRevogando] = useState(false);
   // De onde veio o texto do composer: "escuta" quando a escuta o pôs ali (chat com alterações autorizadas).
@@ -804,6 +807,8 @@ export function ChatRapido({
   // Fixo, a conversa nunca se oculta.
   const oculta = !fixo && ocultaEm !== null;
   const novidadeOculta = oculta && ocultaEm !== assinaturaDaUltima(chat);
+  // A resposta segue "em andamento" pausada: enviar continua bloqueado e o Esc ainda cancela.
+  const pausada = respondendo && respostaPausada(chat);
   // A captura do modo invisível segue para o Claude, mas nunca aparece entre os pendentes (só visual).
   const anexosVisiveis = anexos.filter((anexo) => !ehCapturaDeTela(anexo.nome));
   const temConteudo = texto.trim() !== "" || anexos.length > 0;
@@ -1379,6 +1384,22 @@ export function ChatRapido({
     setOcultaEm(assinaturaDaUltima(chat));
   }
 
+  /** Pausa (congela o processo) ou continua a resposta; quem confirma é o evento do servidor. */
+  async function alternarPausa(): Promise<void> {
+    if (!respondendo || alternandoPausa || cancelando || desconectado) {
+      return;
+    }
+    setErro(null);
+    setAlternandoPausa(true);
+    try {
+      await (pausada ? api.continuarRespostaDoChat() : api.pausarRespostaDoChat());
+    } catch (falha) {
+      setErro(`Não foi possível ${pausada ? "continuar" : "pausar"} a resposta: ${mensagemDeErro(falha)}`);
+    } finally {
+      setAlternandoPausa(false);
+    }
+  }
+
   function aoTeclar(evento: KeyboardEvent<HTMLTextAreaElement>): void {
     // Tab completa o comando começado ("/cl" → "/clear"); fora disso, segue o padrão.
     const completo = evento.key === "Tab" && !evento.shiftKey ? completarComando(texto) : null;
@@ -1444,15 +1465,19 @@ export function ChatRapido({
   // Textos curtos: o campo da barra é estreito e o placeholder fica numa linha só.
   const placeholder = desconectado
     ? "Servidor desconectado"
-    : respondendo
-      ? "Respondendo… esc cancela"
-      : "Pergunte ao Claude";
+    : pausada
+      ? "Pausado… esc cancela"
+      : respondendo
+        ? "Respondendo… esc cancela"
+        : "Pergunte ao Claude";
   // O que o placeholder curto não diz: a dica no balão do campo.
   const dicaDoCampo = desconectado
     ? "Servidor desconectado: dá para escrever, o envio volta quando ele voltar"
-    : respondendo
-      ? "Respondendo: esc cancela, e já dá para escrever a próxima pergunta"
-      : "Enter envia, Shift+Enter quebra a linha, / para comandos";
+    : pausada
+      ? "Resposta pausada: ▶ continua de onde parou, esc cancela"
+      : respondendo
+        ? "Respondendo: esc cancela, e já dá para escrever a próxima pergunta"
+        : "Enter envia, Shift+Enter quebra a linha, / para comandos";
 
   // O indicador da escuta (estado, motor, pausar e o menu de idioma): na barra, ou no cabeçalho do painel da transcrição.
   const indicadorDaEscuta = (
@@ -1691,7 +1716,11 @@ export function ChatRapido({
           )}
           <header className="cabecalho-do-chat">
             <span className="rotulo-tecnico">chat rápido</span>
-            {respondendo && <span className="etiqueta etiqueta-ativa etiqueta-pulso">respondendo…</span>}
+            {pausada ? (
+              <span className="etiqueta etiqueta-warning">pausado</span>
+            ) : (
+              respondendo && <span className="etiqueta etiqueta-ativa etiqueta-pulso">respondendo…</span>
+            )}
             <span className="flex-1" />
             {!fixo && !movel && (
               <ControleDeOpacidade valor={opacidade} aoMudar={(valor) => mudarPreferencias({ opacidadeDoChat: valor })} />
@@ -1891,7 +1920,10 @@ export function ChatRapido({
             void focarCampo();
           }}
         >
-          {respondendo && !desconectado && <div className="faixa-de-progresso" />}
+          {respondendo && !desconectado && (
+            // Pausada, a faixa para no meio, esmaecida (como a do orquestrador pausado).
+            <div className={pausada ? "faixa-de-progresso faixa-de-progresso-pausada" : "faixa-de-progresso"} />
+          )}
           {anexosVisiveis.length > 0 && (
             <div className="miniaturas-do-prompt">
               {anexosVisiveis.map((anexo) => {
@@ -2059,6 +2091,20 @@ export function ChatRapido({
               <button
                 type="button"
                 className="btn btn-sm btn-danger"
+            {/* Só o ícone (⏸ / ▶), como o do terminal; no Windows não há como congelar, e o botão não aparece. */}
+            {respondendo && chat.podePausar && (
+              <button
+                type="button"
+                className="btn btn-sm btn-outline botao-de-pausa"
+                title={pausada ? "Continuar resposta" : "Pausar resposta"}
+                aria-label={pausada ? "Continuar resposta" : "Pausar resposta"}
+                aria-busy={alternandoPausa}
+                onClick={() => void alternarPausa()}
+                disabled={alternandoPausa || cancelando || desconectado}
+              >
+                <span aria-hidden="true">{pausada ? "▶" : "⏸"}</span>
+              </button>
+            )}
                 onClick={() => void cancelar()}
                 disabled={cancelando || desconectado}
               >

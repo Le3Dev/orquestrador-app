@@ -467,6 +467,12 @@ export const api = {
 
   cancelarRespostaDoChat: () => requisitar<{ cancelando: boolean }>("/chat/cancelar", { method: "POST" }),
 
+  /** Congela a resposta em andamento; o servidor confirma com `resposta_pausada`. 409 sem o que pausar (ou no Windows). */
+  pausarRespostaDoChat: () => requisitar<{ pausada: boolean }>("/chat/pausar", { method: "POST" }),
+
+  /** A resposta pausada segue de onde parou; o servidor confirma com `resposta_continuada`. */
+  continuarRespostaDoChat: () => requisitar<{ continuada: boolean }>("/chat/continuar", { method: "POST" }),
+
   /** Conversa nova ("/clear"): o servidor confirma com o evento `conversa_limpa`. Recusado (409) durante a resposta. */
   limparChat: () => requisitar<unknown>("/chat/limpar", { method: "POST" }),
 

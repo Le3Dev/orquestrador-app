@@ -40,6 +40,11 @@ export interface DependenciasDoServicoDeChat {
   pastaDeArtefatos: string;
   gerarId: () => string;
   agora: () => Date;
+  /**
+   * Se a resposta pode ser pausada (congelando o processo). Sem o campo, vale
+   * fora do Windows: lá não há como congelar.
+   */
+  podePausar?: boolean;
 }
 
 /** Arquivo (imagem ou documento) como chega do usuário, antes de ser guardado. */
@@ -74,6 +79,8 @@ export interface EstadoDoChat {
   mensagens: DadosDaMensagemDoChat[];
   ultimaSequencia: number;
   cota: JanelaDaCota[] | null;
+  /** Se a tela oferece pausar a resposta: falso no Windows, onde não há como congelar o processo. */
+  podePausar: boolean;
 }
 
 function descreverErro(erro: unknown): string {
@@ -101,7 +108,12 @@ export class ServicoDeChat {
       mensagens: conversa.mensagens,
       ultimaSequencia: repositorio.ultimaSequencia(),
       cota: repositorio.ultimaCota(),
+      podePausar: this.podePausar,
     };
+  }
+
+  private get podePausar(): boolean {
+    return this.dependencias.podePausar ?? process.platform !== "win32";
   }
 
   eventosDepoisDe(sequencia: number): readonly EventoDoChatRegistrado[] {
@@ -148,6 +160,7 @@ export class ServicoDeChat {
       }
       await repositorio.salvar(conversa);
     } catch (erro) {
+      execucoes.descongelar(ID_DO_CHAT);
       execucoes.encerrar(ID_DO_CHAT);
       this.publicar(conversa.falhar(`Não foi possível gravar a pergunta: ${descreverErro(erro)}`, null));
       await repositorio.salvar(conversa).catch(() => undefined);
@@ -162,10 +175,47 @@ export class ServicoDeChat {
       alteracoesAutorizadas,
       sinal,
       pergunta.previasAbertas ?? [],
-    ).finally(() => execucoes.encerrar(ID_DO_CHAT));
+    ).finally(() => {
+      // Sempre: um dono ainda congelado congelaria na hora o processo da próxima pergunta.
+      execucoes.descongelar(ID_DO_CHAT);
+      execucoes.encerrar(ID_DO_CHAT);
+    });
     return { mensagemId, conclusao };
   }
 
+  /**
+   * Pausa a resposta em andamento congelando o processo do Claude Code
+   * (SIGSTOP); continuar segue exatamente de onde parou. Sem processo para
+   * congelar (ainda abrindo, já terminando, ou Windows), é recusado: não há
+   * plano B.
+   */
+  async pausar(): Promise<{ pausada: true }> {
+    const { repositorio, execucoes, agora } = this.dependencias;
+    const conversa = repositorio.conversa();
+    if (conversa.respostaEmAndamento === null) {
+      throw new ErroDoChat("sem_resposta_em_andamento", "Não há resposta em andamento.");
+    }
+    conversa.conferirPausa();
+    if (!this.podePausar || !execucoes.congelar(ID_DO_CHAT)) {
+      throw new ErroDoChat("pausa_indisponivel", "Não dá para pausar a resposta agora.");
+    }
+    this.publicar(conversa.pausar(agora()));
+    await repositorio.salvar(conversa);
+    return { pausada: true };
+  }
+
+  /** Descongela o processo (SIGCONT) e a resposta segue de onde parou. */
+  async continuar(): Promise<{ continuada: true }> {
+    const { repositorio, execucoes } = this.dependencias;
+    const conversa = repositorio.conversa();
+    const evento = conversa.continuar();
+    execucoes.descongelar(ID_DO_CHAT);
+    this.publicar(evento);
+    await repositorio.salvar(conversa);
+    return { continuada: true };
+  }
+
+  /** Também com a resposta pausada: o controle descongela antes de pedir a parada. */
   async cancelar(): Promise<void> {
     const { repositorio, execucoes } = this.dependencias;
     const conversa = repositorio.conversa();
@@ -308,6 +358,9 @@ export class ServicoDeChat {
     } catch (falha) {
       erro = falha;
     }
+
+    // O processo terminou (ou nem abriu): nada pode ficar congelado em nome do chat.
+    this.dependencias.execucoes.descongelar(ID_DO_CHAT);
 
     try {
       if (sinal.aborted) {

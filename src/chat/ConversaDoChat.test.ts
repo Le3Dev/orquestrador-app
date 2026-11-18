@@ -387,6 +387,90 @@ describe("ConversaDoChat — origem da pergunta", () => {
   });
 });
 
+describe("ConversaDoChat — pausa da resposta", () => {
+  const depois = new Date("2026-11-04T12:05:00Z");
+
+  it("pausar marca a resposta, que continua em andamento e bloqueia outra pergunta", () => {
+    const conversa = ConversaDoChat.nova("s1");
+    conversa.perguntar(pergunta());
+
+    expect(conversa.pausar(depois)).toEqual({ tipo: "resposta_pausada", mensagemId: "c1", desde: depois.toISOString() });
+    expect(conversa.respostaPausada).toBe(true);
+    expect(conversa.situacao).toBe("respondendo");
+    expect(conversa.mensagens[1]).toMatchObject({ situacao: "respondendo", pausadaDesde: depois.toISOString() });
+    expect(() => conversa.perguntar(pergunta("outra", { mensagemDoUsuarioId: "u2", mensagemDoClaudeId: "c2" }))).toThrow(
+      ErroDoChat,
+    );
+    expect(() => conversa.limpar("s2")).toThrow(ErroDoChat);
+  });
+
+  it("os trechos que chegam pausados ainda entram na resposta", () => {
+    const conversa = ConversaDoChat.nova("s1");
+    conversa.perguntar(pergunta());
+    conversa.pausar(depois);
+
+    expect(conversa.acrescentarTrecho("já saiu")).toBe(true);
+    expect(conversa.mensagens[1]?.texto).toBe("já saiu");
+  });
+
+  it("continuar tira a pausa; sem pausa é recusado", () => {
+    const conversa = ConversaDoChat.nova("s1");
+    expect(() => conversa.continuar()).toThrow(expect.objectContaining({ motivo: "sem_pausa" }));
+    conversa.perguntar(pergunta());
+    expect(() => conversa.continuar()).toThrow(expect.objectContaining({ motivo: "sem_pausa" }));
+
+    conversa.pausar(depois);
+    expect(conversa.continuar()).toEqual({ tipo: "resposta_continuada", mensagemId: "c1" });
+    expect(conversa.respostaPausada).toBe(false);
+    expect(conversa.mensagens[1]).not.toHaveProperty("pausadaDesde");
+  });
+
+  it("pausar duas vezes ou sem resposta é recusado", () => {
+    const conversa = ConversaDoChat.nova("s1");
+    expect(() => conversa.pausar(depois)).toThrow(expect.objectContaining({ motivo: "sem_resposta_em_andamento" }));
+    conversa.perguntar(pergunta());
+    conversa.pausar(depois);
+    expect(() => conversa.pausar(depois)).toThrow(expect.objectContaining({ motivo: "ja_pausada" }));
+  });
+
+  it("cancelar, concluir e falhar tiram a pausa", () => {
+    for (const encerrar of [
+      (conversa: ConversaDoChat) => conversa.cancelar(),
+      (conversa: ConversaDoChat) => conversa.concluir("pronto", [], [], uso),
+      (conversa: ConversaDoChat) => conversa.falhar("caiu", null),
+    ]) {
+      const conversa = ConversaDoChat.nova("s1");
+      conversa.perguntar(pergunta());
+      conversa.pausar(depois);
+      encerrar(conversa);
+      expect(conversa.respostaPausada).toBe(false);
+      expect(conversa.mensagens[1]).not.toHaveProperty("pausadaDesde");
+    }
+  });
+
+  it("a pausa é gravada; ao subir o servidor, a resposta pausada vira interrompida", () => {
+    const conversa = ConversaDoChat.nova("s1");
+    conversa.perguntar(pergunta());
+    conversa.pausar(depois);
+
+    const reaberta = ConversaDoChat.reconstituir(conversa.paraDados());
+    expect(reaberta.respostaPausada).toBe(true);
+    expect(reaberta.interromperRespostaEmAndamento()).toMatchObject({ tipo: "resposta_falhou", motivo: MOTIVO_DA_INTERRUPCAO });
+    expect(reaberta.mensagens[1]).toMatchObject({ situacao: "falhou" });
+    expect(reaberta.mensagens[1]).not.toHaveProperty("pausadaDesde");
+  });
+
+  it("pausadaDesde numa mensagem que não está respondendo é ignorado ao reabrir", () => {
+    const conversa = ConversaDoChat.nova("s1");
+    conversa.perguntar(pergunta());
+    conversa.concluir("pronto", [], [], uso);
+    const dados = conversa.paraDados();
+    dados.mensagens[1] = { ...dados.mensagens[1]!, pausadaDesde: depois.toISOString() };
+
+    expect(ConversaDoChat.reconstituir(dados).mensagens[1]).not.toHaveProperty("pausadaDesde");
+  });
+});
+
 describe("PreferenciasDoChat", () => {
   it("nasce com sonnet e esforço médio", () => {
     expect(PreferenciasDoChat.padrao().paraDados()).toEqual({
