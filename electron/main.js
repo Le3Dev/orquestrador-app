@@ -206,6 +206,16 @@ if (PASTA_DO_USUARIO_TROCADA) {
 // ao servidor. Nunca aceito no app empacotado (não carregaria a tela de fora).
 const URL_DA_TELA_DE_DESENVOLVIMENTO = !app.isPackaged ? process.env.ORQUESTRADOR_URL_DA_TELA || null : null;
 
+// Cópia de teste: instância de desenvolvimento identificável. Com
+// ORQUESTRADOR_COPIA_DE_TESTE=<nome> fora do app empacotado, o título das
+// janelas vira "Cópia de teste: <nome>" e o preload expõe o nome
+// (window.electron.copiaDeTeste). No app instalado é sempre null.
+const NOME_DA_COPIA_DE_TESTE = app.isPackaged
+  ? null
+  : String(process.env.ORQUESTRADOR_COPIA_DE_TESTE || "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 60) || null;
+const TITULO_DA_COPIA_DE_TESTE = NOME_DA_COPIA_DE_TESTE ? `Cópia de teste: ${NOME_DA_COPIA_DE_TESTE}` : null;
+const ARGUMENTOS_DA_COPIA_DE_TESTE = NOME_DA_COPIA_DE_TESTE ? [`--copia-de-teste=${NOME_DA_COPIA_DE_TESTE}`] : [];
+
 // Valores fixos desta abertura do app: a mesma porta e a mesma chave valem até
 // fechar, inclusive quando o servidor é religado.
 const CHAVE_DE_ACESSO = crypto.randomBytes(32).toString("hex");
@@ -692,16 +702,6 @@ function enviarEstadoDaAtualizacao(estado) {
   janela.webContents.send("atualizacao:estado", estado);
 }
 
-// O electron-updater só é carregado no app instalado normal; fora dele o
-// serviço fica inativo ("indisponivel").
-function prepararAtualizacaoDoElectronUpdater(aoMudar) {
-  let atualizador = null;
-  if (ATUALIZACAO_ATIVA) {
-    try {
-      ({ autoUpdater: atualizador } = require("electron-updater"));
-      atualizador.logger = {
-        info: (texto) => registrarNoLog("atualizacao", texto),
-        warn: (texto) => registrarNoLog("atualizacao", `aviso: ${texto}`),
 // Serviço de dentro (o do electron-updater, ou o do Mac) e a espera pelos
 // orquestradores que o envolve: `servicoDeAtualizacao` é a espera.
 let servicoDeDentroDaAtualizacao = null;
@@ -761,6 +761,16 @@ function trocarAppDoMac({ appGerado, reabrir = true }) {
   if (reabrir) setImmediate(() => app.quit());
 }
 
+// O electron-updater só é carregado no app instalado normal; fora dele o
+// serviço fica inativo ("indisponivel").
+function prepararAtualizacaoDoElectronUpdater(aoMudar) {
+  let atualizador = null;
+  if (ATUALIZACAO_ATIVA) {
+    try {
+      ({ autoUpdater: atualizador } = require("electron-updater"));
+      atualizador.logger = {
+        info: (texto) => registrarNoLog("atualizacao", texto),
+        warn: (texto) => registrarNoLog("atualizacao", `aviso: ${texto}`),
         error: (texto) => registrarNoLog("atualizacao", `erro: ${texto}`),
       };
       atualizador.autoDownload = true; // baixa sozinho em segundo plano
@@ -827,7 +837,7 @@ function abrirNoNavegador(url) {
 // No Mac todas usam as bolinhas nativas (mac.ajustarOpcoesDaJanela).
 function criarJanela({ botoesNativos = true, transparente = false, ...opcoes } = {}) {
   const janela = new BrowserWindow(mac.ajustarOpcoesDaJanela({
-    title: config.productName,
+    title: TITULO_DA_COPIA_DE_TESTE || config.productName,
     // A principal é transparente desde a criação (o Windows não aceita mudar
     // depois); o fundo opaco do modo normal vem do CSS.
     ...(transparente ? { transparent: true, backgroundColor: "#00000000" } : { backgroundColor: COR_BARRA }),
@@ -848,12 +858,14 @@ function criarJanela({ botoesNativos = true, transparente = false, ...opcoes } =
       nodeIntegration: false,
       spellcheck: false,
       sandbox: true,
-      additionalArguments: TRANSCRICAO_NATIVA_DISPONIVEL ? [ARGUMENTO_DA_TRANSCRICAO_NATIVA] : [],
+      additionalArguments: [...(TRANSCRICAO_NATIVA_DISPONIVEL ? [ARGUMENTO_DA_TRANSCRICAO_NATIVA] : []), ...ARGUMENTOS_DA_COPIA_DE_TESTE],
     },
     // Mascote do app (gerado por `npm run icones`); sem ele, aparece o átomo do Electron.
     icon: path.join(__dirname, "icones", process.platform === "win32" ? "icone.ico" : "icone.png"),
     ...opcoes,
   }, !botoesNativos));
+  // Cópia de teste: o <title> da página não tira o nome da cópia do título da janela.
+  if (TITULO_DA_COPIA_DE_TESTE) janela.on("page-title-updated", (evento) => evento.preventDefault());
   // Links externos abrem no navegador do sistema, não dentro do app.
   janela.webContents.setWindowOpenHandler(({ url }) => {
     abrirNoNavegador(url);
@@ -1832,6 +1844,10 @@ if (!conseguiuLock) {
   app.on("before-quit", (evento) => {
     // Daqui em diante fechar a janela encerra de verdade, mesmo com Rotinas ativas (senão o "close" cancelaria a saída).
     bandeja.marcarSaida();
+    // Mac com a versão em "pronta"/"aguardando": troca o app sem reabrir (a
+    // tela promete "instala quando você fechar o app"). Uma vez só: o serviço
+    // ignora o segundo before-quit e a saída do "Reiniciar agora".
+    if (servicoDeAtualizacao) servicoDeAtualizacao.instalarAoFechar();
     if (servidorDesligado || !servidor.filho) {
       encerrarServidorAoFechar();
       return;
@@ -1844,8 +1860,4 @@ if (!conseguiuLock) {
     });
   });
   app.on("quit", encerrarServidorAoFechar);
-    // Mac com a versão em "pronta"/"aguardando": troca o app sem reabrir (a
-    // tela promete "instala quando você fechar o app"). Uma vez só: o serviço
-    // ignora o segundo before-quit e a saída do "Reiniciar agora".
-    if (servicoDeAtualizacao) servicoDeAtualizacao.instalarAoFechar();
 }

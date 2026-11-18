@@ -19,6 +19,7 @@ import {
 } from "./IconesDasIlhas";
 import { MenuNovo, type PropsDoMenuNovo } from "./MenuNovo";
 import { COTA_ALTA } from "./PopoverDoUso";
+import { SeloDaCopiaDeTeste } from "./SeloDaCopiaDeTeste";
 import { nomeLegivelDaCota } from "./usoDoSistema";
 import "../../theme/ilhas.css";
 
@@ -50,6 +51,7 @@ export function IlhaDoNome(menu: PropsDoMenuNovo) {
         </span>
         <h1>Orquestrador de Agentes</h1>
       </span>
+      <SeloDaCopiaDeTeste />
       <span className="divisor-da-ilha" aria-hidden="true" />
       <MenuNovo {...menu} />
     </header>
