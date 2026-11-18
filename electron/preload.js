@@ -12,6 +12,10 @@
 //     instalado a situação é sempre "indisponivel".
 //   - previa: vista nativa da Prévia para endereços externos (sessão própria
 //     `persist:previa`); o main só aceita da janela principal e valida tudo.
+//   - rotinas: a bandeja do Windows (electron/bandeja.js). informarSituacao conta
+//     ao app as rotinas ativas e as execuções aguardando aprovação; aoPedirPainel
+//     avisa quando o usuário clica na notificação de aprovação. O main só aceita
+//     da janela principal.
 //   - primeiraAbertura: usado só pela tela electron/primeiraAbertura.html; o
 //     main recusa essas chamadas vindas de qualquer outra janela.
 
@@ -157,6 +161,84 @@ contextBridge.exposeInMainWorld("electron", {
       const ouvinte = (_evento, evento) => callback(evento);
       ipcRenderer.on("previa:evento", ouvinte);
       return () => ipcRenderer.removeListener("previa:evento", ouvinte);
+    },
+  },
+
+  // Navegador do agente (electron/navegadorDoAgente.js): um Chromium por Orquestrador, que os agentes
+  // controlam por ferramentas MCP. A tela (próxima onda) mostra um nó do canvas por Orquestrador; `orquestradorId`
+  // identifica o navegador. A vista nativa fica POR BAIXO da tela, pintando, até o nó pedir `mostrar`.
+  //
+  // Fluxo da tela: `aoAtivar` avisa que o agente usou o navegador pela primeira vez (abra o nó); com o nó
+  // aberto, `mostrar` com o retângulo do corpo do nó e `posicionar` a cada mudança dele; ao fechar o nó,
+  // `ocultar` (a vista desce, o agente segue usando); "assumir" = `pausar` (o agente é recusado com "O usuário
+  // assumiu o navegador; tente depois." e a vista recebe o teclado) e "devolver" = `retomar`; ao excluir o
+  // Orquestrador, `fechar(id, true)`. Ao carregar, `estados()` devolve os navegadores já abertos.
+  navegadorDoAgente: {
+    // { x, y, largura, altura, zoom }: onde o corpo do nó está na tela (pixels CSS; zoom = escala do canvas).
+    // Só vale com a vista mostrada; enviar a cada quadro em que muda.
+    posicionar: (orquestradorId, retangulo) => ipcRenderer.send("navegador-do-agente:posicionar", { orquestradorId, retangulo }),
+    // Põe a vista sobre o nó (acima da tela). Resolve false se recusou (sem navegador aberto, modo invisível).
+    mostrar: (orquestradorId, retangulo) => ipcRenderer.invoke("navegador-do-agente:mostrar", { orquestradorId, retangulo }),
+    // Devolve a vista para baixo da tela; ela continua viva e o agente segue usando.
+    ocultar: (orquestradorId) => ipcRenderer.invoke("navegador-do-agente:ocultar", { orquestradorId }),
+    // O usuário assume: comandos do agente são recusados e o que está rodando é cancelado.
+    pausar: (orquestradorId) => ipcRenderer.invoke("navegador-do-agente:pausar", { orquestradorId }),
+    // O usuário devolve o navegador ao agente.
+    retomar: (orquestradorId) => ipcRenderer.invoke("navegador-do-agente:retomar", { orquestradorId }),
+    // Navegação do usuário (botões do nó, com o agente pausado); resolvem false se não há navegador aberto ou,
+    // no voltar e no avançar, não há para onde ir.
+    voltar: (orquestradorId) => ipcRenderer.invoke("navegador-do-agente:voltar", { orquestradorId }),
+    avancar: (orquestradorId) => ipcRenderer.invoke("navegador-do-agente:avancar", { orquestradorId }),
+    recarregar: (orquestradorId) => ipcRenderer.invoke("navegador-do-agente:recarregar", { orquestradorId }),
+    // Fecha o navegador do Orquestrador; `apagarDados` (true ao excluir o Orquestrador) apaga também login e cookies.
+    fechar: (orquestradorId, apagarDados = false) =>
+      ipcRenderer.invoke("navegador-do-agente:fechar", { orquestradorId, apagarDados: apagarDados === true }),
+    // Os navegadores abertos: [{ orquestradorId, url, titulo, carregando, ultimaAcao, emUsoPeloAgente, pausado, podeVoltar, podeAvancar }].
+    estados: () => ipcRenderer.invoke("navegador-do-agente:estados"),
+    // Data URI (JPEG, até 1000 px) da página, para o nó mostrar enquanto a vista nativa está por baixo; null se falhou.
+    foto: (orquestradorId) => ipcRenderer.invoke("navegador-do-agente:foto", { orquestradorId }),
+    // Mudanças: { orquestradorId, url, titulo, carregando, ultimaAcao, emUsoPeloAgente, pausado, podeVoltar, podeAvancar }
+    // (url e titulo atuais; ultimaAcao: texto curto do que o agente está fazendo ou fez, sem o texto digitado;
+    // emUsoPeloAgente: um comando está rodando). Só vem quando algo muda. Devolve a função que cancela a inscrição.
+    aoMudar: (callback) => {
+      const ouvinte = (_evento, estado) => callback(estado);
+      ipcRenderer.on("navegador-do-agente:mudou", ouvinte);
+      return () => ipcRenderer.removeListener("navegador-do-agente:mudou", ouvinte);
+    },
+    // O agente usou o navegador de um Orquestrador pela primeira vez (ou de novo, depois de fechado): { orquestradorId }.
+    // A tela abre o nó. Devolve a função que cancela a inscrição.
+    aoAtivar: (callback) => {
+      const ouvinte = (_evento, dados) => callback(dados);
+      ipcRenderer.on("navegador-do-agente:ativado", ouvinte);
+      return () => ipcRenderer.removeListener("navegador-do-agente:ativado", ouvinte);
+    },
+  },
+
+  // Rotinas e a bandeja do Windows (electron/bandeja.js). Só a janela principal fala com o app.
+  rotinas: {
+    // { ativas, aguardandoAprovacao, pendentes: [{ id, rotina }] }: `ativas` = rotinas ligadas (com pelo
+    // menos uma, fechar a janela esconde o app na bandeja); `pendentes` = execuções aguardando aprovação,
+    // com o id da execução e o nome da rotina (o app avisa uma vez por execução, com notificação do
+    // Windows). Reenviar a cada mudança; resolve depois que o app registrou.
+    informarSituacao: (situacao) => {
+      const dados = situacao !== null && typeof situacao === "object" ? situacao : {};
+      return ipcRenderer
+        .invoke("rotinas:informar-situacao", {
+          ativas: Number(dados.ativas),
+          aguardandoAprovacao: Number(dados.aguardandoAprovacao),
+          pendentes: Array.isArray(dados.pendentes)
+            ? dados.pendentes
+                .filter((pendente) => pendente !== null && typeof pendente === "object" && typeof pendente.id === "string")
+                .map((pendente) => ({ id: pendente.id, rotina: typeof pendente.rotina === "string" ? pendente.rotina : "" }))
+            : [],
+        })
+        .then(() => undefined);
+    },
+    // O usuário clicou na notificação de aprovação: a tela deve abrir o painel das rotinas. Devolve o cancelamento.
+    aoPedirPainel: (callback) => {
+      const ouvinte = () => callback();
+      ipcRenderer.on("rotinas:abrir-painel", ouvinte);
+      return () => ipcRenderer.removeListener("rotinas:abrir-painel", ouvinte);
     },
   },
 

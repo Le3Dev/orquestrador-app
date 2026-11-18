@@ -3,13 +3,17 @@ import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../estado/
 import {
   arestasDasPrevias,
   arestasDosBixinhos,
+  arestasDosNavegadores,
   bixinhosParaLimpar,
+  comNavegadorAberto,
   comPosicoes,
   ehFechavelEmGrupo,
+  ehNavegador,
   ehNota,
   fecharPreviasDoAgente,
   idDoBixinho,
   idDoNoDaNota,
+  idDoNoDoNavegador,
   janelaVisivel,
   ladoDoBixinho,
   layoutDosNos,
@@ -18,10 +22,12 @@ import {
   mesmasLigacoes,
   minimizarOuRestaurar,
   minimizarOuRestaurarTelas,
+  navegadorAberto,
   type NoBixinho,
   type NoDoCanvas,
   novaNota,
   novaPrevia,
+  novoNavegador,
   novoNoDeArtefato,
   novoShell,
   nosDoLayout,
@@ -35,13 +41,21 @@ import {
   resumirGrupo,
   selecionarTodasAsTelas,
   semBixinhosNaSelecao,
+  semNavegador,
   semTerminal,
   sincronizarBixinhos,
   sincronizarNotas,
   subagentesVisiveis,
   telasSelecionadas,
 } from "./nos";
-import { ALTURA_DA_NOTA_MINIMIZADA, type BixinhosLimpos, type Retangulo, sobrepoe, TAMANHO_DO_BIXINHO } from "./layout";
+import {
+  ALTURA_DA_NOTA_MINIMIZADA,
+  type BixinhosLimpos,
+  type Retangulo,
+  sobrepoe,
+  TAMANHO_DO_BIXINHO,
+  TAMANHO_DO_NAVEGADOR,
+} from "./layout";
 
 const configuracao: DadosDaConfiguracao = {
   modeloDoOrquestrador: "opus",
@@ -808,6 +822,139 @@ describe("prévias no canvas", () => {
       sobrepoe({ ...(posicao ?? { x: 0, y: 0 }), largura: 720, altura: 520 }, { x: 660, y: 0, largura: 600, altura: 500 }),
     ).toBe(false);
     expect(posicaoDaPreviaDoTerminal([vizinho], "o1", { largura: 720, altura: 520 })).toBeNull();
+  });
+});
+
+describe("navegador do agente no canvas", () => {
+  const terminal = novoTerminal("o1", { x: 0, y: 0 }, 600, 500);
+  const navegador = novoNavegador("o1", { x: 700, y: 0 });
+  const centro = (): { x: number; y: number } => ({ x: 5000, y: 5000 });
+
+  it("o nó tem o id do Orquestrador no dado e um id com prefixo, que não coincide com o do terminal", () => {
+    expect(navegador).toMatchObject({
+      id: "navegador:o1",
+      type: "navegador",
+      data: { orquestradorId: "o1" },
+      dragHandle: ".alca-do-navegador",
+      width: TAMANHO_DO_NAVEGADOR.largura,
+      height: TAMANHO_DO_NAVEGADOR.altura,
+    });
+    expect(idDoNoDoNavegador("o1")).not.toBe(terminal.id);
+    expect(ehNavegador(navegador)).toBe(true);
+    expect(ehNavegador(terminal)).toBe(false);
+  });
+
+  it("uma linha tracejada do terminal até o navegador dele, do lado voltado para ele", () => {
+    expect(arestasDosNavegadores([terminal, navegador])).toEqual([
+      expect.objectContaining({
+        id: "aresta:navegador:o1",
+        type: "default",
+        source: "o1",
+        sourceHandle: "direita",
+        target: "navegador:o1",
+        targetHandle: "esquerda",
+        className: "aresta-navegador",
+      }),
+    ]);
+    // Do outro lado, a linha acompanha.
+    const aEsquerda = novoNavegador("o1", { x: -900, y: 0 });
+    expect(arestasDosNavegadores([terminal, aEsquerda])[0]).toMatchObject({ sourceHandle: "esquerda", targetHandle: "direita" });
+  });
+
+  it("sem o terminal no canvas, o navegador fica sem linha; o de outro Orquestrador liga ao dele", () => {
+    expect(arestasDosNavegadores([navegador])).toEqual([]);
+    const outro = novoTerminal("o2", { x: 0, y: 900 }, 600, 500);
+    expect(arestasDosNavegadores([terminal, outro, novoNavegador("o2", { x: 700, y: 900 })])).toEqual([
+      expect.objectContaining({ source: "o2", target: "navegador:o2" }),
+    ]);
+  });
+
+  it("as linhas só mudam quando o navegador troca de lado do terminal", () => {
+    const anteriores = [terminal, navegador];
+    const moveu = [terminal, { ...navegador, position: { x: 800, y: 40 } }];
+    const foiParaBaixo = [terminal, { ...navegador, position: { x: 0, y: 700 } }];
+
+    expect(mesmasLigacoes(anteriores, moveu)).toBe(anteriores);
+    expect(mesmasLigacoes(anteriores, foiParaBaixo)).toBe(foiParaBaixo);
+  });
+
+  it("vai para o layout (posição e tamanho, por Orquestrador) e volta dele; sem navegadores, o campo nem aparece", () => {
+    const grande = { ...novoNavegador("o1", { x: 700.4, y: 12.6 }, 800, 600) };
+
+    const layout = layoutDosNos([terminal, grande], null);
+    expect(layout.navegadores).toEqual({ o1: { x: 700, y: 13, largura: 800, altura: 600 } });
+
+    const volta = nosDoLayout(layout).filter(ehNavegador);
+    expect(volta).toHaveLength(1);
+    expect(volta[0]).toMatchObject({ id: "navegador:o1", position: { x: 700, y: 13 }, width: 800, height: 600 });
+
+    expect(layoutDosNos([terminal], null)).not.toHaveProperty("navegadores");
+  });
+
+  it("o tamanho do nó sem medida é o padrão do navegador", () => {
+    const semTamanho: NoDoCanvas = { ...navegador, width: undefined, height: undefined };
+    expect(janelaVisivel(semTamanho)).toMatchObject({ largura: TAMANHO_DO_NAVEGADOR.largura, altura: TAMANHO_DO_NAVEGADOR.altura });
+  });
+
+  it("fecha em grupo (só tira a janela do canvas) e conta como tela do grupo", () => {
+    expect(ehFechavelEmGrupo(navegador)).toBe(true);
+    const resumo = resumirGrupo([{ ...navegador, selected: true }, { ...terminal, selected: true }]);
+    expect(resumo).toMatchObject({ fechaveis: 2, minimizaveis: 1, shells: 0 });
+  });
+
+  describe("abrir e fechar", () => {
+    it("abre ao lado do terminal, selecionado, longe das outras janelas", () => {
+      const vizinho = novoTerminal("o2", { x: 660, y: 0 }, 600, 500);
+
+      const nos = comNavegadorAberto([terminal, vizinho], "o1", centro, true);
+
+      const aberto = nos.find(ehNavegador);
+      expect(aberto).toMatchObject({ id: "navegador:o1", selected: true });
+      expect(
+        sobrepoe({ ...(aberto?.position ?? { x: 0, y: 0 }), ...TAMANHO_DO_NAVEGADOR }, { x: 660, y: 0, largura: 600, altura: 500 }),
+      ).toBe(false);
+      expect(navegadorAberto(nos, "o1")).toBe(true);
+    });
+
+    it("sem o terminal no canvas, abre onde a posição de reserva mandar", () => {
+      const nos = comNavegadorAberto([], "o1", centro, true);
+      expect(nos.find(ehNavegador)?.position).toEqual(centro());
+    });
+
+    it("abrir só tira a seleção das outras telas quando é para selecionar", () => {
+      const selecionado = { ...terminal, selected: true };
+
+      const silencioso = comNavegadorAberto([selecionado], "o1", centro, false);
+      expect(silencioso.find((no) => no.id === "o1")?.selected).toBe(true);
+      expect(silencioso.find(ehNavegador)?.selected).not.toBe(true);
+
+      const selecionando = comNavegadorAberto([selecionado], "o1", centro, true);
+      expect(selecionando.find((no) => no.id === "o1")?.selected).toBe(false);
+      expect(selecionando.find(ehNavegador)?.selected).toBe(true);
+      expect(selecionando.find(ehNavegador)?.selected).toBe(true);
+    });
+
+    it("já aberto, não abre outro: sem selecionar, devolve o mesmo array; selecionando, só o seleciona", () => {
+      const nos = comNavegadorAberto([terminal], "o1", centro, false);
+
+      expect(comNavegadorAberto(nos, "o1", centro, false)).toBe(nos);
+      const selecionado = comNavegadorAberto(nos, "o1", centro, true);
+      expect(selecionado.filter(ehNavegador)).toHaveLength(1);
+      expect(selecionado.find(ehNavegador)?.selected).toBe(true);
+      expect(selecionado.find((no) => no.id === "o1")?.selected).not.toBe(true);
+    });
+
+    it("fechar tira só o navegador daquele Orquestrador, e sem ele devolve o mesmo array", () => {
+      const nos: NoDoCanvas[] = [terminal, navegador, novoNavegador("o2", { x: 0, y: 900 })];
+
+      const sem = semNavegador(nos, "o1");
+      expect(sem.map((no) => no.id)).toEqual(["o1", "navegador:o2"]);
+      expect(semNavegador(sem, "o1")).toBe(sem);
+    });
+
+    it("fechar o terminal não fecha o navegador (o agente segue usando)", () => {
+      expect(semTerminal([terminal, navegador], "o1").map((no) => no.id)).toEqual(["navegador:o1"]);
+    });
   });
 });
 

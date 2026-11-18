@@ -17,6 +17,7 @@ import { EsforcoDaMaquina } from "./EsforcoDaMaquina";
 import { EsforcoHerdado } from "./EsforcoHerdado";
 import {
   CausaDaRecuperacao,
+  CausaDaTrocaDeMotor,
   EtapaDaRecuperacao,
   EventoDeOrquestracao,
   EventoDoMotor,
@@ -24,8 +25,9 @@ import {
 import { ItemLigado, mensagemDeAprovacaoDoPlano, separarPropostaDePlano } from "./InstrucoesDoOrquestrador";
 import { aplicarVariaveis, InstrucoesAplicadas, resolverInstrucoes } from "./InstrucoesPersonalizadas";
 import { MedidorDeConsumo, PeriodoDoTurno } from "./MedidorDeConsumo";
-import { ModeloClaude } from "./ModeloClaude";
+import { comoModeloClaude, ModeloDoMotor } from "./ModeloDoMotor";
 import { ModoDoTurno } from "./ModoDoTurno";
+import { Motor } from "./Motor";
 import { ABORTO_POR_SILENCIO, CausaDaFalha, MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "./MotorDeAgentes";
 import { DadosDaRetomadaPendente, Orquestrador, TAMANHO_MAXIMO_DA_MENSAGEM } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
@@ -97,10 +99,15 @@ export interface EsforcoHerdadoDosPapeis {
   subagentes: EsforcoHerdado | null;
 }
 
-/** Os modelos e a pasta de um Orquestrador ainda não criado (formulário de criação). */
+/**
+ * Os motores, os modelos e a pasta de um Orquestrador ainda não criado
+ * (formulário de criação). Sem motor: Claude Code, o único que herda esforço.
+ */
 export interface ConsultaDeEsforcoDosPapeis {
-  modeloDoOrquestrador: ModeloClaude;
-  modeloDosSubagentes: ModeloClaude;
+  motorDoOrquestrador?: Motor | undefined;
+  motorDosSubagentes?: Motor | undefined;
+  modeloDoOrquestrador: ModeloDoMotor;
+  modeloDosSubagentes: ModeloDoMotor;
   pastaDoProjeto: string;
 }
 
@@ -112,11 +119,57 @@ interface FalhaDoTurno {
   motivo: string;
 }
 
+/**
+ * O pedido como foi enviado ao motor: o que a reserva reenvia a outro motor
+ * quando o turno falha por limite de uso ou sobrecarga. Os anexos já estão
+ * guardados (o pedido reenviado usa os mesmos arquivos).
+ */
+interface PedidoEnviado {
+  texto: string;
+  modo: ModoDoTurno;
+  anexos: readonly Anexo[];
+  itensLigados: readonly ItemLigado[];
+  previasAbertas: readonly string[];
+  /** De quem veio, se for uma mensagem de vínculo: a reserva a reenvia com a mesma origem (e os mesmos saltos). */
+  origem: OrigemDoPedido | null;
+}
+
+/** O motor que executa um turno e por onde o pedido já passou. */
+interface DestinoDoTurno {
+  motor: Motor;
+  /**
+   * Os motores já tentados neste pedido, na ordem, o do turno por último: a
+   * reserva só recorre a um motor que não está aqui.
+   */
+  motoresTentados: readonly Motor[];
+  /**
+   * O pedido passou para `motor` por causa de um limite: vira o evento
+   * `motor_trocado`, publicado antes do `turno_iniciado`. `turnoId` é o do
+   * turno que falhou; sem ele, o do turno que começa.
+   */
+  troca?: {
+    turnoId?: string;
+    de: Motor;
+    causa: CausaDaTrocaDeMotor;
+    liberaEm: string | null;
+  };
+  /** O pedido reenviado: os anexos do pedido original, já guardados, em vez de os recebidos agora. */
+  anexosGuardados?: readonly Anexo[];
+  /** O pedido reenviado: a origem (vínculo) do pedido original, que não vem da fila desta vez. */
+  origem?: OrigemDoPedido | null;
+}
+
 /** O que a medição e a autorrecuperação precisam saber do turno que acabou de terminar. */
 interface TurnoEncerrado {
   turnoId: string;
   periodo: PeriodoDoTurno;
   modo: ModoDoTurno;
+  /** O motor que executou o turno. */
+  motor: Motor;
+  /** Os motores já tentados neste pedido (ver `DestinoDoTurno`). */
+  motoresTentados: readonly Motor[];
+  /** Para a reserva reenviar o pedido a outro motor. */
+  pedido: PedidoEnviado;
   /** Nula quando o turno foi concluído ou cancelado. */
   falha: FalhaDoTurno | null;
 }
@@ -129,6 +182,9 @@ interface RetomadaAgendada {
   tentativa: number;
   de: number;
   modo: ModoDoTurno;
+  /** A retomada continua a sessão do motor do turno que falhou. */
+  motor: Motor;
+  motoresTentados: readonly Motor[];
   desmarcar: () => void;
 }
 
@@ -303,11 +359,17 @@ export class ServicoDeOrquestracao {
     const pastaDoProjeto = orquestrador.pastaDeTrabalho.caminho;
     const [doOrquestrador, dosSubagentes] = await Promise.all([
       this.esforcoHerdado({
+        motor: configuracao.motorDoOrquestrador,
         modelo: configuracao.modeloDoOrquestrador,
         pastaDoProjeto,
         modeloReal: this.ultimoModeloMedido(orquestrador.id),
       }),
-      this.esforcoHerdado({ modelo: configuracao.modeloDosSubagentes, pastaDoProjeto, modeloReal: null }),
+      this.esforcoHerdado({
+        motor: configuracao.motorDosSubagentes,
+        modelo: configuracao.modeloDosSubagentes,
+        pastaDoProjeto,
+        modeloReal: null,
+      }),
     ]);
     return { orquestrador: doOrquestrador, subagentes: dosSubagentes };
   }
@@ -316,11 +378,13 @@ export class ServicoDeOrquestracao {
   async esforcoHerdadoPara(consulta: ConsultaDeEsforcoDosPapeis): Promise<EsforcoHerdadoDosPapeis> {
     const [doOrquestrador, dosSubagentes] = await Promise.all([
       this.esforcoHerdado({
+        motor: consulta.motorDoOrquestrador ?? "claude-code",
         modelo: consulta.modeloDoOrquestrador,
         pastaDoProjeto: consulta.pastaDoProjeto,
         modeloReal: null,
       }),
       this.esforcoHerdado({
+        motor: consulta.motorDosSubagentes ?? "claude-code",
         modelo: consulta.modeloDosSubagentes,
         pastaDoProjeto: consulta.pastaDoProjeto,
         modeloReal: null,
@@ -464,6 +528,10 @@ export class ServicoDeOrquestracao {
    *
    * `previasAbertas`: os endereços das prévias ao vivo abertas no canvas
    * quando o pedido saiu; também só na mensagem deste turno ao motor.
+   *
+   * `destino`: o motor do turno e por onde o pedido já passou. Sem ele, é um
+   * pedido novo: começa no motor do Orquestrador, ou no da reserva se o limite
+   * de uso do principal ainda não liberou (`destinoDoPedidoNovo`).
    */
   private async iniciarTurno(
     orquestrador: Orquestrador,
@@ -474,20 +542,25 @@ export class ServicoDeOrquestracao {
     retomada: { deTurnoId: string; tentativa: number } | null = null,
     itensLigados: readonly ItemLigado[] = [],
     previasAbertas: readonly string[] = [],
+    destinoEscolhido: DestinoDoTurno | null = null,
   ): Promise<MensagemEnviada> {
     const { repositorio, execucoes, anexos, gerarId, agora } = this.dependencias;
     const turnoId = gerarId();
+    const destino = destinoEscolhido ?? this.destinoDoPedidoNovo(orquestrador);
 
-    const anexosDoTurno = anexosRecebidos.map((recebido) =>
-      Anexo.de({
-        id: gerarId(),
-        nome: recebido.nome,
-        tipoDeMidia: recebido.tipoDeMidia,
-        tamanhoEmBytes: recebido.conteudo.byteLength,
-      }),
-    );
-    const aceito = orquestrador.iniciarTurno(turnoId, texto, agora(), anexosDoTurno, modo);
-    const origemDoPedido = pedidoDaFila?.origem ?? null;
+    const anexosDoTurno: readonly Anexo[] =
+      destino.anexosGuardados ??
+      anexosRecebidos.map((recebido) =>
+        Anexo.de({
+          id: gerarId(),
+          nome: recebido.nome,
+          tipoDeMidia: recebido.tipoDeMidia,
+          tamanhoEmBytes: recebido.conteudo.byteLength,
+        }),
+      );
+    const aceito = orquestrador.iniciarTurno(turnoId, texto, agora(), anexosDoTurno, modo, destino.motor);
+    // De quem veio o pedido (uma mensagem de vínculo): na fila, ou, no pedido reenviado a outro motor, a do original.
+    const origemDoPedido = pedidoDaFila?.origem ?? destino.origem ?? null;
     if (origemDoPedido !== null) {
       this.origensDosTurnos.set(turnoId, { ...origemDoPedido });
     }
@@ -499,8 +572,9 @@ export class ServicoDeOrquestracao {
     }
     const retirada = pedidoDaFila === null ? null : orquestrador.retirarDaFila(pedidoDaFila.id, "enviado");
     // A mesma do evento `turno_iniciado`: o turno segue com ela até o fim,
-    // mesmo que o usuário altere a configuração enquanto ele roda.
-    const configuracaoDoTurno = orquestrador.configuracao;
+    // mesmo que o usuário altere a configuração enquanto ele roda. Num motor
+    // de reserva, com os papéis e os modelos dele.
+    const configuracaoDoTurno = orquestrador.configuracao.paraMotor(destino.motor);
     // Resolvidas agora, junto com a configuração: mudar o padrão global com o
     // turno rodando também só vale a partir do próximo.
     const instrucoesDoTurno = this.instrucoesPara(configuracaoDoTurno);
@@ -512,11 +586,26 @@ export class ServicoDeOrquestracao {
     if (retirada !== null) {
       this.publicar(orquestrador, retirada);
     }
+    // A troca de motor aparece antes do turno que ela abre.
+    if (destino.troca !== undefined) {
+      const { turnoId: turnoDaTroca, de, causa, liberaEm } = destino.troca;
+      this.publicar(orquestrador, {
+        tipo: "motor_trocado",
+        turnoId: turnoDaTroca ?? turnoId,
+        de,
+        para: destino.motor,
+        causa,
+        ...(liberaEm === null ? {} : { liberaEm }),
+      });
+    }
     this.publicar(orquestrador, inicio);
 
     try {
-      for (const [indice, anexo] of anexosDoTurno.entries()) {
-        await anexos.guardar(orquestrador.id, anexo, anexosRecebidos[indice]?.conteudo ?? new Uint8Array());
+      // Os anexos do pedido reenviado já estão guardados: gravar de novo os esvaziaria.
+      if (destino.anexosGuardados === undefined) {
+        for (const [indice, anexo] of anexosDoTurno.entries()) {
+          await anexos.guardar(orquestrador.id, anexo, anexosRecebidos[indice]?.conteudo ?? new Uint8Array());
+        }
       }
       await repositorio.salvar(orquestrador);
     } catch (erro) {
@@ -525,15 +614,31 @@ export class ServicoDeOrquestracao {
       throw erro;
     }
 
-    const execucao = this.executar(orquestrador, turnoId, sinal, configuracaoDoTurno, {
-      instrucoes: instrucoesDoTurno,
-      revogarInstrucoesAnteriores: revogarAnteriores,
-      subagentesProntos: this.subagentesProntosPara(configuracaoDoTurno),
+    const pedido: PedidoEnviado = {
+      texto,
+      modo,
+      anexos: anexosDoTurno,
       itensLigados,
       previasAbertas,
-      vinculados: this.vinculadosDe(orquestrador),
-      origemDaMensagem: origemDoPedido,
-    }).finally(() => {
+      origem: origemDoPedido,
+    };
+    const execucao = this.executar(
+      orquestrador,
+      turnoId,
+      sinal,
+      configuracaoDoTurno,
+      {
+        instrucoes: instrucoesDoTurno,
+        revogarInstrucoesAnteriores: revogarAnteriores,
+        subagentesProntos: this.subagentesProntosPara(configuracaoDoTurno),
+        itensLigados,
+        previasAbertas,
+        vinculados: this.vinculadosDe(orquestrador),
+        origemDaMensagem: origemDoPedido,
+      },
+      destino,
+      pedido,
+    ).finally(() => {
       this.origensDosTurnos.delete(turnoId);
       execucoes.encerrar(orquestrador.id);
     });
@@ -553,13 +658,35 @@ export class ServicoDeOrquestracao {
       // A execução falhou por fora do turno (a medição já avisa no log): a fila pausa.
       () => undefined,
     );
-    // Também depois do `encerrar`: a retomada abre outro turno, que registra a
-    // própria execução. Turno que nem foi gravado como encerrado não é retomado.
+    // Também depois do `encerrar`: a reserva e a retomada abrem outro turno, que
+    // registra a própria execução. Turno que nem foi gravado como encerrado não é retomado.
     const recuperacao = execucao.then(
-      (encerrado) => (encerrado === null ? undefined : this.decidirRecuperacao(orquestrador.id, encerrado)),
+      (encerrado) => (encerrado === null ? undefined : this.recuperar(orquestrador.id, encerrado)),
       () => undefined,
     );
     return { turnoId, conclusao, medicao, envioDaFila, recuperacao };
+  }
+
+  /**
+   * O destino de um pedido novo: o motor do Orquestrador e, se o limite de uso
+   * dele ainda não liberou, o primeiro da reserva que pode atender (a troca é
+   * anunciada com o horário em que o principal libera). `preferido` é o motor
+   * em que a conversa deste pedido está (a execução de um Plano).
+   */
+  private destinoDoPedidoNovo(orquestrador: Orquestrador, preferido?: Motor): DestinoDoTurno {
+    const instante = this.dependencias.agora();
+    const { configuracao } = orquestrador;
+    const principal = configuracao.motorDoOrquestrador;
+    const motor = orquestrador.motorParaComecar(instante, preferido);
+    const ordem = configuracao.motoresEmOrdem;
+    const liberaEm = orquestrador.limiteAtivoDoMotor(principal, instante);
+    return {
+      motor,
+      motoresTentados: ordem.slice(0, ordem.indexOf(motor) + 1),
+      ...(motor !== principal && liberaEm !== null
+        ? { troca: { de: principal, causa: "limite_de_uso" as const, liberaEm } }
+        : {}),
+    };
   }
 
   /**
@@ -589,7 +716,8 @@ export class ServicoDeOrquestracao {
 
   /**
    * Aprova o Plano pendente e já abre o turno que o executa, na mesma sessão
-   * do Claude Code — é ela que guarda o Plano da resposta anterior.
+   * do motor que o propôs (o Claude Code, ou o de reserva que o assumiu) — é
+   * ela que guarda o Plano da resposta anterior.
    *
    * `commitarAoFinal` põe na mensagem o pedido de commit ao final (pela regra por feature), só
    * se a configuração libera commit e o nível tem terminal
@@ -610,9 +738,20 @@ export class ServicoDeOrquestracao {
       );
     }
 
+    const motorDoPlano = orquestrador.turnoComPlanoPendente?.motor;
     this.publicar(orquestrador, orquestrador.aprovarPlano());
-    // `enviarMensagem` grava o Orquestrador, já com a decisão registrada.
-    return this.enviarMensagem(id, texto, [], "execucao");
+    // `iniciarTurno` grava o Orquestrador, já com a decisão registrada.
+    return this.iniciarTurno(
+      orquestrador,
+      texto,
+      [],
+      "execucao",
+      null,
+      null,
+      [],
+      [],
+      this.destinoDoPedidoNovo(orquestrador, motorDoPlano),
+    );
   }
 
   async descartarPlano(id: string): Promise<void> {
@@ -742,7 +881,8 @@ export class ServicoDeOrquestracao {
             resumo: `retomada reagendada após o reinício do app; retoma às ${formatarHora(retomaEm)}`,
             retomaEm: retomada.retomarEm,
           });
-          this.marcarRetomada(orquestrador.id, retomada, turno.modo, espera);
+          // Depois do reinício, o pedido recomeça a contar os motores tentados: só o do turno que falhou.
+          this.marcarRetomada(orquestrador.id, retomada, turno.modo, espera, turno.motor, [turno.motor]);
           reagendadas += 1;
         }
         await repositorio.salvar(orquestrador);
@@ -771,13 +911,20 @@ export class ServicoDeOrquestracao {
       | "vinculados"
       | "origemDaMensagem"
     >,
+    destino: DestinoDoTurno,
+    pedidoEnviado: PedidoEnviado,
   ): Promise<TurnoEncerrado | null> {
     const { motor, repositorio, anexos, worktrees, pastaDeArtefatos, agora } = this.dependencias;
+    const motorDoTurno = destino.motor;
     const turno = orquestrador.turnoEmAndamento;
     const anexosDoTurno = turno?.anexos ?? [];
     const modo = turno?.modo ?? "execucao";
-    // Capturados no início: a conversa pode ser limpa (outra sessão) antes de a medição rodar.
-    const sessaoDoTurno = orquestrador.sessaoId;
+    // Capturada no início: a conversa pode ser limpa (outra sessão) antes de a medição rodar.
+    // A do motor do turno: a que o app gerou (Claude Code) ou a que o próprio motor criou.
+    const sessaoDoMotor = orquestrador.sessaoDoMotor(motorDoTurno);
+    const sessaoDoTurno = sessaoDoMotor.id;
+    // O que a sessão deste motor não viu da conversa; o turno que roda agora não conta.
+    const contextoDaTroca = orquestrador.contextoDaTroca(motorDoTurno);
     const inicioDoTurno = turno?.iniciadoEm ?? agora();
 
     // Worktree isolado por turno: se a pasta for repo git com HEAD, o turno
@@ -800,7 +947,7 @@ export class ServicoDeOrquestracao {
     let erro: unknown = null;
     // O resumo do diagnóstico, se a vigia encerrou o turno por silêncio.
     const travamento: { resumo: string | null } = { resumo: null };
-    const vigia = this.vigiarTurno(orquestrador, turnoId, sessaoDoTurno, pastaDoTurno.caminho, (resumo) => {
+    const vigia = this.vigiarTurno(orquestrador, turnoId, motorDoTurno, sessaoDoTurno, pastaDoTurno.caminho, (resumo) => {
       travamento.resumo = resumo;
     });
     vigia?.ligar();
@@ -809,8 +956,10 @@ export class ServicoDeOrquestracao {
       resultado = await motor.executarTurno(
         {
           orquestradorId: orquestrador.id,
-          sessaoId: orquestrador.sessaoId,
-          sessaoIniciada: orquestrador.sessaoIniciada,
+          sessaoId: sessaoDoMotor.id,
+          sessaoIniciada: sessaoDoMotor.iniciada,
+          motor: motorDoTurno,
+          contextoDaTroca,
           texto: turno?.texto ?? "",
           configuracao: configuracaoDoTurno,
           modo,
@@ -851,6 +1000,7 @@ export class ServicoDeOrquestracao {
       vigia?.desligar();
       this.dependencias.diagnosticador?.esquecer(orquestrador.id);
     }
+    this.guardarOQueOMotorInformou(orquestrador, motorDoTurno, resultado);
 
     // Auto-cleanup no espírito do CLI: worktree sem alterações é removido;
     // com trabalho, fica e deixa de estar "ativo" até o próximo turno.
@@ -874,6 +1024,9 @@ export class ServicoDeOrquestracao {
         fim: fimDoTurno,
       },
       modo,
+      motor: motorDoTurno,
+      motoresTentados: destino.motoresTentados,
+      pedido: pedidoEnviado,
       falha: null,
     };
     // Abortado pela vigia (ADR-36) é falha, não cancelamento: o turno pode ser retomado.
@@ -937,20 +1090,45 @@ export class ServicoDeOrquestracao {
   }
 
   /**
+   * O que o motor informou ao fim do turno, para o agregado guardar: a sessão
+   * que ele criou (para retomá-la nos turnos seguintes dele) e o estado do
+   * limite de uso dele — o horário em que libera, ou nenhum se respondeu bem.
+   */
+  private guardarOQueOMotorInformou(
+    orquestrador: Orquestrador,
+    motorDoTurno: Motor,
+    resultado: ResultadoDoTurno | null,
+  ): void {
+    if (resultado === null) {
+      return;
+    }
+    if (resultado.sessaoDoMotor !== undefined) {
+      orquestrador.registrarSessaoDoMotor(motorDoTurno, resultado.sessaoDoMotor);
+    }
+    if (resultado.sucesso) {
+      orquestrador.liberarLimiteDoMotor(motorDoTurno);
+    } else if (resultado.causa === "limite_de_uso") {
+      orquestrador.registrarLimiteDoMotor(motorDoTurno, resultado.liberaEm ?? null);
+    }
+  }
+
+  /**
    * A vigia do turno (ver ADR-36), ou `null` sem diagnosticador. Durante o
    * silêncio publica o diagnóstico como sinal de vida; se o turno travar e a
    * autorrecuperação estiver ligada, publica a etapa "encerrado" e aborta a
-   * execução com o motivo "silencio".
+   * execução com o motivo "silencio". Só o Claude Code é vigiado: o
+   * diagnóstico lê as transcrições dele.
    */
   private vigiarTurno(
     orquestrador: Orquestrador,
     turnoId: string,
+    motorDoTurno: Motor,
     sessaoId: string,
     pastaDoTurno: string,
     aoTravar: (resumo: string) => void,
   ): VigiaDoTurno | null {
     const { diagnosticador, agendador, preferencias, publicador, execucoes, agora } = this.dependencias;
-    if (diagnosticador === undefined) {
+    if (diagnosticador === undefined || motorDoTurno !== "claude-code") {
       return null;
     }
     return new VigiaDoTurno({
@@ -984,6 +1162,76 @@ export class ServicoDeOrquestracao {
 
   private tentativasFeitas(orquestradorId: string, causa: CausaDaRecuperacao): number {
     return this.tentativas.get(orquestradorId)?.get(causa) ?? 0;
+  }
+
+  /**
+   * O que fazer com um turno que terminou: se falhou por limite de uso ou
+   * sobrecarga e a reserva tem um motor que ainda não foi tentado neste
+   * pedido, o pedido passa para ele em vez de esperar; senão, a
+   * autorrecuperação de sempre (`decidirRecuperacao`). Nunca rejeita.
+   */
+  private async recuperar(orquestradorId: string, encerrado: TurnoEncerrado): Promise<void> {
+    if (await this.passarParaOProximoMotor(orquestradorId, encerrado)) {
+      return;
+    }
+    this.decidirRecuperacao(orquestradorId, encerrado);
+  }
+
+  /**
+   * A reserva automática: reenvia o mesmo pedido, com o contexto do que o novo
+   * motor não viu, ao próximo motor da `ordemDeReserva` que ainda não foi
+   * tentado neste pedido (o `motor_trocado` sai antes do turno novo). Vale
+   * mesmo com a autorrecuperação desligada: a reserva é uma escolha explícita
+   * da configuração do Orquestrador. Devolve se o pedido passou para outro
+   * motor; se não, nada foi feito e a autorrecuperação decide.
+   */
+  private async passarParaOProximoMotor(orquestradorId: string, encerrado: TurnoEncerrado): Promise<boolean> {
+    const { falha } = encerrado;
+    if (falha === null || (falha.causa !== "limite_de_uso" && falha.causa !== "sobrecarga")) {
+      return false;
+    }
+    try {
+      const orquestrador = this.dependencias.repositorio.buscarPorId(orquestradorId);
+      // Excluído, ou o usuário já abriu outro turno: o pedido é dele agora.
+      if (orquestrador === null || orquestrador.ultimoTurno?.id !== encerrado.turnoId) {
+        return false;
+      }
+      const para = orquestrador.configuracao.proximoMotorDeReserva(encerrado.motoresTentados);
+      if (para === null) {
+        return false;
+      }
+      const { pedido } = encerrado;
+      await this.iniciarTurno(
+        orquestrador,
+        pedido.texto,
+        [],
+        pedido.modo,
+        null,
+        null,
+        pedido.itensLigados,
+        pedido.previasAbertas,
+        {
+          motor: para,
+          motoresTentados: [...encerrado.motoresTentados, para],
+          troca: {
+            turnoId: encerrado.turnoId,
+            de: encerrado.motor,
+            causa: falha.causa,
+            liberaEm: falha.liberaEm,
+          },
+          anexosGuardados: pedido.anexos,
+          origem: pedido.origem,
+        },
+      );
+      return true;
+    } catch (erro) {
+      // Sem o novo turno, vale o que a autorrecuperação decidir.
+      console.warn(
+        `[orquestracao] Não foi possível passar o pedido do turno ${encerrado.turnoId} para outro motor:`,
+        descreverErro(erro),
+      );
+      return false;
+    }
   }
 
   /**
@@ -1052,7 +1300,7 @@ export class ServicoDeOrquestracao {
       repositorio
         .salvar(orquestrador)
         .catch((erro: unknown) => console.error("[orquestracao] Falha ao gravar a retomada agendada:", erro));
-      this.marcarRetomada(orquestradorId, retomada, encerrado.modo, espera);
+      this.marcarRetomada(orquestradorId, retomada, encerrado.modo, espera, encerrado.motor, encerrado.motoresTentados);
     } catch (falha) {
       console.warn(
         `[orquestracao] Não foi possível decidir a autorrecuperação do turno ${encerrado.turnoId}:`,
@@ -1088,6 +1336,7 @@ export class ServicoDeOrquestracao {
         resumo: `retomando a mesma sessão (tentativa ${tentativa} de ${de})`,
         retomaEm: null,
       });
+      // Na sessão do motor do turno que falhou, com o que o pedido já tentou.
       await this.iniciarTurno(
         orquestrador,
         mensagemDeRetomada(causa, orquestrador.worktree !== null),
@@ -1095,6 +1344,9 @@ export class ServicoDeOrquestracao {
         modo,
         null,
         { deTurnoId: turnoId, tentativa },
+        [],
+        [],
+        { motor: agendada.motor, motoresTentados: agendada.motoresTentados },
       );
     } catch (falha) {
       console.warn(
@@ -1125,6 +1377,8 @@ export class ServicoDeOrquestracao {
     retomada: DadosDaRetomadaPendente,
     modo: ModoDoTurno,
     espera: number,
+    motor: Motor,
+    motoresTentados: readonly Motor[],
   ): void {
     const desmarcar = (this.dependencias.agendador ?? agendadorDoRelogio).agendar(espera, () => {
       void this.retomar(orquestradorId);
@@ -1135,6 +1389,8 @@ export class ServicoDeOrquestracao {
       tentativa: retomada.tentativa,
       de: maximoDeTentativas(retomada.causa),
       modo,
+      motor,
+      motoresTentados,
       desmarcar,
     });
   }
@@ -1201,7 +1457,8 @@ export class ServicoDeOrquestracao {
    */
   private async medirConsumo(orquestrador: Orquestrador, encerrado: TurnoEncerrado): Promise<void> {
     const { medidor, repositorio } = this.dependencias;
-    if (medidor === undefined) {
+    // O medidor lê as transcrições do Claude Code: os outros motores não têm medição.
+    if (medidor === undefined || encerrado.motor !== "claude-code") {
       return;
     }
     try {
@@ -1220,17 +1477,20 @@ export class ServicoDeOrquestracao {
     }
   }
 
+  /** O esforço que o papel herda da máquina: só o Claude Code o tem; os outros motores, `null`. */
   private async esforcoHerdado(consulta: {
-    modelo: ModeloClaude;
+    motor: Motor;
+    modelo: ModeloDoMotor;
     pastaDoProjeto: string;
     modeloReal: string | null;
   }): Promise<EsforcoHerdado | null> {
     const { esforcoDaMaquina } = this.dependencias;
-    if (esforcoDaMaquina === undefined) {
+    if (esforcoDaMaquina === undefined || consulta.motor !== "claude-code") {
       return null;
     }
+    const { modelo, pastaDoProjeto, modeloReal } = consulta;
     try {
-      return await esforcoDaMaquina.herdadoPara(consulta);
+      return await esforcoDaMaquina.herdadoPara({ modelo: comoModeloClaude(modelo), pastaDoProjeto, modeloReal });
     } catch (falha) {
       // Só um aviso na tela depende disso: melhor não avisar do que quebrar.
       console.warn(

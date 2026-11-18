@@ -58,6 +58,13 @@ export interface AcoesDoCanvas {
   desligarItem?: (orquestradorId: string, itemId: string) => void;
   /** Os itens ligados ao terminal agora, como vão no próximo pedido (enviar ou pôr na fila). */
   lerItensLigados?: (orquestradorId: string) => ItemLigadoParaEnvio[];
+  /**
+   * Abre o navegador do agente deste Orquestrador (o botão da barra do terminal): ao lado do terminal, num lugar
+   * livre; já aberto, só o seleciona e leva a câmera até ele.
+   */
+  abrirNavegador?: (orquestradorId: string) => void;
+  /** Fecha a janela do navegador do agente no canvas: a vista desce, e o agente segue podendo usá-lo. */
+  fecharNavegador?: (orquestradorId: string) => void;
 }
 
 /**

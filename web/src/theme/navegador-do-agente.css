@@ -1,0 +1,159 @@
+/* ---------------- Navegador do agente (nó do canvas) ----------------
+ * A moldura da prévia, no azul de informação. O corpo mostra a foto da página enquanto a vista nativa do app
+ * está por baixo (arrastando, coberta por um painel); com ela por cima, a página é a do Chromium do agente.
+ * As faixas (controle e última ação) ficam FORA do corpo: a vista nativa cobre só o corpo. */
+
+.react-flow__node-navegador { background: transparent; border: 0; padding: 0; }
+.react-flow__minimap-node.minimapa-navegador { fill: color-mix(in srgb, var(--info) 40%, var(--surface-3)); }
+
+/* Linha do terminal até o navegador do agente: como a da prévia, discreta e tracejada. */
+.react-flow__edge.aresta-navegador .react-flow__edge-path {
+  stroke: color-mix(in srgb, var(--info) 45%, transparent);
+  stroke-dasharray: 5 6;
+}
+
+.janela-navegador {
+  --cor-do-navegador: var(--info);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--cor-do-navegador) 35%, var(--border-forte));
+  box-shadow: 0 18px 44px -22px rgba(0, 0, 0, .85);
+  transition: border-color .2s, box-shadow .25s ease-out;
+}
+.react-flow__node.selected .janela-navegador {
+  border-color: var(--cor-do-navegador);
+  box-shadow:
+    0 18px 44px -22px rgba(0, 0, 0, .85),
+    0 0 0 2px color-mix(in srgb, var(--cor-do-navegador) 75%, transparent),
+    0 0 28px 2px color-mix(in srgb, var(--cor-do-navegador) 55%, transparent),
+    0 0 70px -6px color-mix(in srgb, var(--cor-do-navegador) 35%, transparent);
+}
+/* O agente está usando o navegador agora: a borda acende no laranja da ação. */
+.janela-navegador-em-uso { border-color: var(--active); }
+/* O usuário assumiu: a borda vai para o âmbar de atenção, para não esquecer o agente pausado. */
+.janela-navegador-pausada { border-color: var(--warning); }
+
+.barra-do-navegador {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  height: 38px;
+  padding: 0 6px 0 12px;
+  border-radius: 11px 11px 0 0;
+  background: color-mix(in srgb, var(--cor-do-navegador) 12%, var(--surface-2));
+  border-bottom: 1px solid color-mix(in srgb, var(--cor-do-navegador) 22%, var(--border));
+  cursor: grab;
+}
+.barra-do-navegador:active { cursor: grabbing; }
+.barra-do-navegador > svg { margin-right: 4px; }
+.barra-do-navegador .botao-icone { width: 28px; height: 28px; }
+.barra-do-navegador .botao-icone:disabled { opacity: .4; cursor: not-allowed; }
+.barra-do-navegador .botao-icone:disabled:hover { background: transparent; color: var(--secondary); }
+
+.titulo-do-navegador {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 34%;
+  font-family: var(--fonte-titulo);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+/* O endereço é só de leitura: quem navega é o agente (ou o usuário, dentro da página, depois de assumir). */
+.endereco-do-navegador {
+  flex: 1 1 8rem;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--secondary);
+  font-family: var(--fonte-mono);
+  font-size: 11.5px;
+  outline: none;
+  cursor: default;
+  text-overflow: ellipsis;
+}
+.endereco-do-navegador:focus { border-color: var(--cor-do-navegador); }
+
+.botao-de-assumir { flex-shrink: 0; height: 26px; padding: 0 10px; font-size: 11.5px; }
+
+/* A faixa de quem está no controle: sempre à vista (a altura não muda), logo abaixo da barra. */
+.faixa-do-navegador {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  min-height: 24px;
+  padding: 3px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.faixa-do-navegador-agente {
+  color: var(--active);
+  background: color-mix(in srgb, var(--active) 10%, var(--surface));
+  border-bottom-color: color-mix(in srgb, var(--active) 35%, var(--border));
+  font-weight: 600;
+}
+.faixa-do-navegador-voce {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+  border-bottom-color: color-mix(in srgb, var(--warning) 35%, var(--border));
+  font-weight: 600;
+}
+.pulso-do-agente {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulso-do-agente 1.2s ease-in-out infinite;
+}
+@keyframes pulso-do-agente { 50% { opacity: .3; } }
+
+/* Onde a vista nativa do app se encaixa; vazio por baixo dela, com a foto da página enquanto ela está por baixo. */
+.corpo-do-navegador {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface);
+}
+.foto-do-navegador {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top left;
+  user-select: none;
+}
+
+.rodape-do-navegador {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  min-height: 26px;
+  padding: 3px 12px;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 11px 11px;
+  background: var(--surface-2);
+  font-family: var(--fonte-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.rodape-do-navegador > .texto-da-acao { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--secondary); }
+
+@media (prefers-reduced-motion: reduce) {
+  .janela-navegador { transition: none !important; }
+  .pulso-do-agente { animation: none; }
+}

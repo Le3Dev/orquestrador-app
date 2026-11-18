@@ -123,6 +123,16 @@ export function IconeSkills({ tamanho = 18, className = "" }: PropsDoIcone) {
   );
 }
 
+/** Um relógio: as rotinas, que o app roda sozinho na hora marcada. */
+export function IconeRelogio({ tamanho = 18, className = "" }: PropsDoIcone) {
+  return (
+    <svg width={tamanho} height={tamanho} viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <circle cx="12" cy="12" r="8.2" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M12 7.6V12l3 1.9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // Ícones de ação e de situação. Traço de 1.8 num quadro de 24, para ficarem
 // nítidos de 12 a 18 px. No lugar de emojis, que cada sistema desenha de um

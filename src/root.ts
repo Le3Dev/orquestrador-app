@@ -52,7 +52,13 @@ import {
   modoDeAcesso,
 } from "./infraestrutura/Configuracao";
 import { ControleDeExecucoesEmMemoria } from "./infraestrutura/execucoes/ControleDeExecucoesEmMemoria";
+import { ExecutorDePedidosDaOrquestracao } from "./infraestrutura/ExecutorDePedidosDaOrquestracao";
 import { montarArtefatos, pastaDeEntradaDosArtefatos } from "./infraestrutura/montarArtefatos";
+import { NOMES_DAS_FERRAMENTAS_DO_NAVEGADOR } from "./infraestrutura/mcp/FerramentasDoNavegador";
+import { montarNavegador } from "./infraestrutura/montarNavegador";
+import { montarRotinas } from "./infraestrutura/montarRotinas";
+import { FERRAMENTAS_DO_APP_NO_TURNO } from "./infraestrutura/motores/ApoioDosMotores";
+import { caminhosDosMotoresDoAmbiente, montarMotores } from "./infraestrutura/motores/montarMotores";
 import { DiagnosticadorDoClaudeNoSistema } from "./infraestrutura/sistema/DiagnosticadorDoClaudeNoSistema";
 import { GerenciadorDeWorktreesGit } from "./infraestrutura/sistema/GerenciadorDeWorktreesGit";
 import { LeitorDeAlteracoesGit } from "./infraestrutura/sistema/LeitorDeAlteracoesGit";
@@ -63,8 +69,7 @@ import { encerrarAgentesOrfaos, RegistroDeProcessos } from "./infraestrutura/sis
 import { RegistroDeProcessosDeixados } from "./infraestrutura/sistema/RegistroDeProcessosDeixados";
 import { CanalDeEventos } from "./infraestrutura/sse/CanalDeEventos";
 import { ServicoDeNotas } from "./notas/ServicoDeNotas";
-import { ServicoDeVinculos } from "./vinculos/ServicoDeVinculos";
-import { Plataforma } from "./orquestracao/InstrucoesDoOrquestrador";
+import { FERRAMENTA_DE_DELEGACAO, Plataforma } from "./orquestracao/InstrucoesDoOrquestrador";
 import { ServicoDeAlteracoes } from "./orquestracao/ServicoDeAlteracoes";
 import { ServicoDeArquivos } from "./orquestracao/ServicoDeArquivos";
 import { ServicoDeOrquestracao } from "./orquestracao/ServicoDeOrquestracao";
@@ -75,6 +80,7 @@ import { arquivoDeConfiguracaoDoClaude, criarLeitorDeNomesDoUsuario } from "./pl
 import { ServicoDeMelhoriaDePrompt } from "./prompts/ServicoDeMelhoriaDePrompt";
 import { LeitorDeSkills } from "./skills/LeitorDeSkills";
 import { ServicoDeTerminais } from "./terminais/ServicoDeTerminais";
+import { ServicoDeVinculos } from "./vinculos/ServicoDeVinculos";
 
 type ConfiguracaoDaMontagem = Pick<
   Configuracao,
@@ -144,9 +150,13 @@ function isolarOrigem(_requisicao: express.Request, resposta: express.Response, 
   proximo();
 }
 
-/** A porta de mensagens do Electron (`utilityProcess`); nula fora do app (`npm run dev`). */
+/**
+ * A porta de mensagens do Electron (`utilityProcess`); nula fora do app (`npm run dev`).
+ * `postMessage` leva os comandos do navegador do agente ao Electron, que os executa.
+ */
 interface PortaDoProcessoPai {
   on(evento: "message", ouvinte: (mensagem: { data: unknown }) => void): void;
+  postMessage(mensagem: unknown): void;
 }
 
 function portaDoProcessoPai(): PortaDoProcessoPai | null {
@@ -157,6 +167,9 @@ function portaDoProcessoPai(): PortaDoProcessoPai | null {
 export function ehPedidoDeDesligar(mensagem: unknown): boolean {
   return typeof mensagem === "object" && mensagem !== null && (mensagem as { tipo?: unknown }).tipo === "desligar";
 }
+
+/** Folga entre o `listen` e o aquecimento dos motores: a tela faz as primeiras requisições antes de o processo travar iniciando os CLIs. */
+const ESPERA_ANTES_DE_AQUECER_OS_MOTORES_MS = 1_500;
 
 async function iniciar(): Promise<void> {
   const configuracao = lerConfiguracao();
@@ -239,6 +252,35 @@ async function iniciar(): Promise<void> {
   // Windows, PowerShell): lida uma vez aqui, o domínio só a recebe.
   const plataforma: Plataforma = process.platform === "win32" ? "windows" : "unix";
 
+  // Navegador do agente (ADR-46): o Chromium é do Electron; o servidor MCP do app (127.0.0.1) leva
+  // as ferramentas `navegador_*` ao Claude Code. Fora do app (`npm run dev`), a porta é nula e as
+  // ferramentas respondem que o navegador só existe no desktop.
+  const navegador = montarNavegador({ portaDoProcessoPai: portaDoProcessoPai() });
+
+  // Motores (ADR-48): o Claude Code, o Codex (`codex app-server`) e o GitHub Copilot CLI (ACP), e o
+  // roteador que manda cada turno ao motor do papel (com a reserva). O roteador é o único ponto de entrada
+  // do serviço. Os três compartilham o servidor MCP do app (o do navegador), onde o `montarMotores`
+  // registra a delegação de subtarefas; o navegador entra pelo `ferramentasDoTurno`.
+  const fachadaDoClaudeCode = new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro, undefined, rastreador);
+  const motores = montarMotores({
+    motorClaudeCode: new MotorClaudeCodeCli(
+      fachadaDoClaudeCode,
+      sondarEnderecoLocal,
+      plataforma,
+      navegador.servidorMcp,
+      FERRAMENTAS_DO_APP_NO_TURNO,
+    ),
+    servidorMcp: navegador.servidorMcp,
+    fachadaClaudeCode: fachadaDoClaudeCode,
+    caminhos: caminhosDosMotoresDoAmbiente(process.env, configuracao.caminhoDoClaudeCode),
+    registro,
+    acompanhamento: rastreador,
+    sondar: sondarEnderecoLocal,
+    plataforma,
+    ferramentasDoApp: [FERRAMENTA_DE_DELEGACAO, ...NOMES_DAS_FERRAMENTAS_DO_NAVEGADOR],
+    ferramentasDoTurno: FERRAMENTAS_DO_APP_NO_TURNO,
+  });
+
   // Vínculos entre Orquestradores. A mensagem entra direto na fila do destino
   // pelo `servico` de orquestração, criado logo abaixo (que, por sua vez, usa
   // os vínculos): a referência só é usada depois da montagem.
@@ -253,11 +295,7 @@ async function iniciar(): Promise<void> {
   const servico: ServicoDeOrquestracao = new ServicoDeOrquestracao({
     vinculos,
     repositorio,
-    motor: new MotorClaudeCodeCli(
-      new FachadaClaudeCodeCli(configuracao.caminhoDoClaudeCode, registro, undefined, rastreador),
-      sondarEnderecoLocal,
-      plataforma,
-    ),
+    motor: motores.motor,
     execucoes,
     publicador: canal,
     anexos,
@@ -372,6 +410,13 @@ async function iniciar(): Promise<void> {
   // Artefatos: coleta o que os agentes gravam na pasta de entrada e serve na tela.
   const artefatos = await montarArtefatos({ pastaDeDados });
 
+  // Rotinas (ADR-47): contexto próprio, ligado aos Orquestradores só pela porta `ExecutorDePedidos`, que
+  // manda cada pedido pelo `ServicoDeOrquestracao` e lê o fim do turno nos eventos do canal.
+  const rotinas = await montarRotinas({
+    pastaDeDados,
+    executorDePedidos: new ExecutorDePedidosDaOrquestracao({ servico, repositorio, canal }),
+  });
+
   // A tela consulta /api/saude a cada poucos segundos para saber se o servidor
   // está no ar. O instante de início denuncia um reinício: os pedidos que
   // rodavam antes dele foram interrompidos.
@@ -438,6 +483,10 @@ async function iniciar(): Promise<void> {
     void catalogoDePlugins.reconciliar();
     rotas.use("/api", criarPluginsRoutes({ catalogo: catalogoDePlugins }));
     rotas.use("/api", artefatos.rotas);
+    // Rotinas agendadas: CRUD, execuções, aprovação e o SSE `/rotinas/eventos`.
+    rotas.use("/api", rotinas.rotas);
+    // Motores instalados e logados (Claude Code, Codex, Copilot): `GET /api/motores`.
+    rotas.use("/api", motores.rotas);
     rotas.use(
       "/api",
       criarTerminaisRoutes({
@@ -451,11 +500,26 @@ async function iniciar(): Promise<void> {
   // Depois das rotas: inclui o que chegou na pasta de entrada com o servidor desligado.
   await artefatos.iniciar();
 
+  // O servidor MCP do app sobe antes de aceitar pedidos: um turno com o navegador ou a delegação o registra.
+  // Se não subir, o app segue sem as ferramentas do app (o turno que as pedir falha com a causa). A consulta
+  // aos CLIs dos motores e o carregamento do SDK do MCP não são pré-requisito: ficam para depois do `listen`.
+  try {
+    await motores.iniciar();
+  } catch (erro) {
+    console.warn(
+      "[mcp] Não foi possível iniciar o servidor MCP do app; os agentes ficam sem o navegador e sem a delegação:",
+      erro,
+    );
+  }
+
   // Só em 127.0.0.1: os agentes editam arquivos e rodam comandos com o login
   // do usuário — ninguém mais na rede pode mandar mensagens para eles.
   const servidor = aplicacao.listen(configuracao.porta, "127.0.0.1", () => {
     console.log(`Orquestrador de agentes em http://localhost:${configuracao.porta}`);
     console.log(`Projetos em: ${configuracao.pastaRaizDosProjetos}`);
+    // Depois do `listen`, e com uma folga para as primeiras requisições da tela serem atendidas: iniciar os
+    // CLIs (`claude --version`...) trava o processo por segundos no Windows, e o SDK do MCP são centenas de arquivos.
+    setTimeout(() => motores.aquecer(), ESPERA_ANTES_DE_AQUECER_OS_MOTORES_MS).unref();
   });
 
   // WebSocket dos terminais: o upgrade não passa pelo Express, então a trava
@@ -479,11 +543,25 @@ async function iniciar(): Promise<void> {
       return;
     }
     desligando = true;
+    // As Rotinas antes dos Orquestradores: marcam o que rodava como interrompido e abortam os pedidos
+    // (que saem da fila ou cancelam o turno) antes de os turnos serem cancelados aqui; senão a execução
+    // viraria "cancelada". Com um limite curto, para o app nunca ficar preso ao fechar.
+    const limiteDasRotinas = new Promise<void>((resolver) => setTimeout(resolver, 4_000));
+    void Promise.race([rotinas.encerrar(), limiteDasRotinas])
+      .catch((erro: unknown) => console.warn("[rotinas] Falha ao encerrar as rotinas:", erro))
+      .then(() => encerrarOServidor(sinal));
+  };
+  const encerrarOServidor = (sinal: string): void => {
     const cancelados = execucoes.cancelarTodas();
     console.log(`[${sinal}] Encerrando${cancelados > 0 ? ` e cancelando ${cancelados} turno(s)` : ""}.`);
     terminais.encerrarTodos();
     conexaoDosTerminais.encerrar();
     servidor.close();
+    // Cancela os comandos do navegador em andamento, revoga os tokens e para o servidor MCP do app.
+    motores
+      .encerrar()
+      .then(() => navegador.encerrar())
+      .catch((erro: unknown) => console.warn("[mcp] Falha ao encerrar o servidor MCP do app:", erro));
     monitor.parar();
     rastreador.parar();
     artefatos
@@ -523,6 +601,10 @@ async function iniciar(): Promise<void> {
   };
   process.once("uncaughtException", cair);
   process.once("unhandledRejection", cair);
+
+  // Com o servidor no ar: o que rodava quando o app fechou vira "interrompida", as horas perdidas seguem a
+  // regra de cada rotina e o agendador passa a olhar as rotinas a cada ~30 s (só com o app aberto).
+  rotinas.iniciar().catch((erro: unknown) => console.warn("[rotinas] Falha ao iniciar o agendador:", erro));
 }
 
 // Nos testes (vitest), só montarAplicacao é usada: importar não sobe o servidor.

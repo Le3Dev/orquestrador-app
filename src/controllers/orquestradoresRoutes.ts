@@ -19,6 +19,7 @@ import {
   MAXIMO_DE_ITENS_LIGADOS,
   mensagemParaOOrquestrador,
   Plataforma,
+  precisaDeDelegacaoPeloApp,
   TAMANHO_MAXIMO_DO_CONTEUDO_LIGADO,
   TAMANHO_MAXIMO_DO_ENDERECO_LIGADO,
   TAMANHO_MAXIMO_DO_TITULO_LIGADO,
@@ -29,8 +30,9 @@ import {
   InstrucoesAplicadas,
   TAMANHO_MAXIMO_DAS_INSTRUCOES,
 } from "../orquestracao/InstrucoesPersonalizadas";
-import { MODELOS_CLAUDE } from "../orquestracao/ModeloClaude";
+import { ehModeloDoMotor } from "../orquestracao/ModeloDoMotor";
 import { MODOS_DO_TURNO } from "../orquestracao/ModoDoTurno";
+import { Motor, MOTOR_PADRAO, MOTORES } from "../orquestracao/Motor";
 import { NIVEIS_DE_PERMISSAO } from "../orquestracao/NivelDePermissao";
 import {
   ErroDeFilaCheia,
@@ -74,9 +76,65 @@ function esquemaDeInstrucoes(rotulo: string) {
     });
 }
 
-const esquemaDaConfiguracao = z.object({
-  modeloDoOrquestrador: z.enum(MODELOS_CLAUDE, { error: "Modelo do orquestrador inválido." }),
-  modeloDosSubagentes: z.enum(MODELOS_CLAUDE, { error: "Modelo dos subagentes inválido." }),
+/**
+ * O modelo de cada papel: só a forma aqui (um texto de id de modelo). Se serve
+ * ao motor do papel (`conferirModelosDosMotores`) e o que cada motor aceita
+ * além disso é conferido depois, junto com o motor.
+ */
+function esquemaDoModelo(papel: string) {
+  return z
+    .string({ error: `Modelo ${papel} inválido.` })
+    .regex(/^[A-Za-z0-9._:-]{1,64}$/, { error: `Modelo ${papel} inválido.` });
+}
+
+function esquemaDoMotor(papel: string) {
+  return z.enum(MOTORES, { error: `Motor ${papel} inválido. Use ${MOTORES.join(", ")}.` });
+}
+
+interface DadosDeMotorEModelo {
+  motorDoOrquestrador?: Motor | undefined;
+  motorDosSubagentes?: Motor | undefined;
+  modeloDoOrquestrador?: string | undefined;
+  modeloDosSubagentes?: string | undefined;
+}
+
+/**
+ * Cada modelo tem de servir ao motor do papel dele: um apelido do Claude no
+ * Claude Code; `padrao` ou um id nos outros. Sem motor informado vale
+ * `motorPadrao` — o Claude Code, ao criar; ao alterar, `undefined`: quem decide
+ * é o domínio, com o motor que o Orquestrador já tem. As mensagens são as de
+ * sempre ("Modelo do orquestrador inválido.").
+ */
+function conferirModelosDosMotores(motorPadrao: Motor | undefined) {
+  return (
+    dados: DadosDeMotorEModelo,
+    contexto: { addIssue(problema: { code: "custom"; message: string; path: string[] }): void },
+  ): void => {
+    const papeis = [
+      { motor: dados.motorDoOrquestrador, modelo: dados.modeloDoOrquestrador, campo: "modeloDoOrquestrador", nome: "do orquestrador" },
+      { motor: dados.motorDosSubagentes, modelo: dados.modeloDosSubagentes, campo: "modeloDosSubagentes", nome: "dos subagentes" },
+    ];
+    for (const { motor, modelo, campo, nome } of papeis) {
+      const motorDoPapel = motor ?? motorPadrao;
+      if (motorDoPapel !== undefined && modelo !== undefined && !ehModeloDoMotor(motorDoPapel, modelo)) {
+        contexto.addIssue({ code: "custom", message: `Modelo ${nome} inválido.`, path: [campo] });
+      }
+    }
+  };
+}
+
+const objetoDaConfiguracao = z.object({
+  // Opcionais também na criação: ausentes valem Claude Code (`claude-code`).
+  motorDoOrquestrador: esquemaDoMotor("do orquestrador").optional(),
+  motorDosSubagentes: esquemaDoMotor("dos subagentes").optional(),
+  modeloDoOrquestrador: esquemaDoModelo("do orquestrador"),
+  modeloDosSubagentes: esquemaDoModelo("dos subagentes"),
+  // Opcional também na criação: ausente vale [] (sem reserva). Repetidos e o motor do
+  // orquestrador são recusados pelo domínio, com a mensagem para o usuário.
+  ordemDeReserva: z
+    .array(esquemaDoMotor("de reserva"), { error: "A ordem de reserva deve ser uma lista de motores." })
+    .max(MOTORES.length, { error: "A ordem de reserva tem motores demais." })
+    .optional(),
   quantidadeDeSubagentes: z.object({
     modo: z.enum(["fixa", "automatica"], { error: "Modo da quantidade inválido." }),
     limite: z
@@ -93,6 +151,11 @@ const esquemaDaConfiguracao = z.object({
   // Opcional também na criação: ausente vale `false` (desligada).
   permitirArtefatosOnline: z
     .boolean({ error: 'A opção "Publicar artefatos no claude.ai" deve ser verdadeira ou falsa.' })
+    .optional(),
+  // Opcional também na criação: ausente vale `false` (desligado). Só liga as ferramentas no
+  // nível "Editar e rodar comandos" e fora do planejamento (`permiteNavegador`).
+  navegadorDoAgente: z
+    .boolean({ error: 'A opção "Navegador do agente" deve ser verdadeira ou falsa.' })
     .optional(),
   // Opcionais também na criação: ausentes valem "padrao".
   esforcoDoOrquestrador: z
@@ -118,18 +181,28 @@ const esquemaDaConfiguracao = z.object({
     .optional(),
 });
 
+/** A configuração inteira, como na criação: sem motor, vale o Claude Code. */
+const esquemaDaConfiguracao = objetoDaConfiguracao.superRefine(conferirModelosDosMotores(MOTOR_PADRAO));
+
+/** Só os campos que mudam: sem motor, o domínio confere o modelo com o motor atual do Orquestrador. */
+const esquemaDaAlteracaoDaConfiguracao = objetoDaConfiguracao
+  .partial()
+  .superRefine(conferirModelosDosMotores(undefined));
+
 const esquemaDoNome = z
   .string({ error: "Dê um nome ao orquestrador." })
   .trim()
   .min(1, { error: "Dê um nome ao orquestrador." })
   .max(TAMANHO_MAXIMO_DO_NOME, { error: `O nome deve ter até ${TAMANHO_MAXIMO_DO_NOME} caracteres.` });
 
-const esquemaDeCriacao = esquemaDaConfiguracao.extend({
-  nome: esquemaDoNome,
-  pastaDeTrabalho: z.string({ error: "Escolha a pasta de trabalho." }).min(1, {
-    error: "Escolha a pasta de trabalho.",
-  }),
-});
+const esquemaDeCriacao = objetoDaConfiguracao
+  .extend({
+    nome: esquemaDoNome,
+    pastaDeTrabalho: z.string({ error: "Escolha a pasta de trabalho." }).min(1, {
+      error: "Escolha a pasta de trabalho.",
+    }),
+  })
+  .superRefine(conferirModelosDosMotores(MOTOR_PADRAO));
 
 /**
  * Forma de cada subagente pronto. Nome, tamanhos, nomes repetidos e modelo
@@ -276,11 +349,15 @@ const esquemaDaPredefinicao = z.object({
   predefinicao: z.string({ error: "Predefinição desconhecida." }),
 });
 
-const esquemaDaConsultaDeEsforco = z.object({
-  modeloDoOrquestrador: z.enum(MODELOS_CLAUDE, { error: "Modelo do orquestrador inválido." }),
-  modeloDosSubagentes: z.enum(MODELOS_CLAUDE, { error: "Modelo dos subagentes inválido." }),
-  pasta: z.string({ error: "Escolha a pasta de trabalho." }).min(1, { error: "Escolha a pasta de trabalho." }),
-});
+const esquemaDaConsultaDeEsforco = z
+  .object({
+    motorDoOrquestrador: esquemaDoMotor("do orquestrador").optional(),
+    motorDosSubagentes: esquemaDoMotor("dos subagentes").optional(),
+    modeloDoOrquestrador: esquemaDoModelo("do orquestrador"),
+    modeloDosSubagentes: esquemaDoModelo("dos subagentes"),
+    pasta: z.string({ error: "Escolha a pasta de trabalho." }).min(1, { error: "Escolha a pasta de trabalho." }),
+  })
+  .superRefine(conferirModelosDosMotores(MOTOR_PADRAO));
 
 function responderErro(resposta: Response, erro: unknown): void {
   if (erro instanceof ErroDeOrquestracao) {
@@ -506,7 +583,7 @@ export function criarOrquestradoresRoutes({
   rotas.patch(
     "/orquestradores/:id/configuracao",
     rota(async (requisicao, resposta) => {
-      const alteracoes = esquemaDaConfiguracao.partial().parse(requisicao.body);
+      const alteracoes = esquemaDaAlteracaoDaConfiguracao.parse(requisicao.body);
       const orquestrador = await servico.alterarConfiguracao(requisicao.params.id, alteracoes);
       resposta.json(resumo(orquestrador));
     }),
@@ -559,8 +636,11 @@ export function criarOrquestradoresRoutes({
         pasta: pasta.caminho,
         nome: nomeInformado === "" ? "<nome do orquestrador>" : nomeInformado,
       });
+      // Com subagentes no Codex ou no Copilot (ou o Orquestrador num deles), o Orquestrador delega pela
+      // ferramenta do app: a prévia mostra o texto que ele receberia.
+      const delegacaoPeloApp = precisaDeDelegacaoPeloApp(configuracao);
       resposta.json({
-        instrucoesIniciais: instrucoesDoOrquestrador(pasta),
+        instrucoesIniciais: instrucoesDoOrquestrador(pasta, delegacaoPeloApp),
         mensagem: mensagemParaOOrquestrador(
           PEDIDO_DE_EXEMPLO,
           configuracao,
@@ -572,6 +652,10 @@ export function criarOrquestradoresRoutes({
           false,
           servico.subagentesProntosPara(configuracao),
           plataforma,
+          [],
+          [],
+          null,
+          delegacaoPeloApp,
         ),
         origemDasInstrucoes: instrucoes?.origem ?? null,
       });
@@ -614,6 +698,8 @@ export function criarOrquestradoresRoutes({
         throw new ErroDeOrquestracao("dados_invalidos", `A pasta "${pasta.caminho}" não existe.`);
       }
       const herdado = await servico.esforcoHerdadoPara({
+        motorDoOrquestrador: consulta.motorDoOrquestrador,
+        motorDosSubagentes: consulta.motorDosSubagentes,
         modeloDoOrquestrador: consulta.modeloDoOrquestrador,
         modeloDosSubagentes: consulta.modeloDosSubagentes,
         pastaDoProjeto: pasta.caminho,

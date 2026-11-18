@@ -6,9 +6,11 @@ import {
   DadosDaConfiguracao,
 } from "./ConfiguracaoDoOrquestrador";
 import { ConsumoDoTurno } from "./ConsumoDoTurno";
+import { contextoDaTroca as montarContextoDaTroca } from "./ContextoDaConversa";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { CausaDaRecuperacao, EventoDeOrquestracao, EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
 import { ModoDoTurno } from "./ModoDoTurno";
+import { ehMotor, Motor, MOTOR_PADRAO } from "./Motor";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
 import {
   DadosDoPedidoNaFila,
@@ -44,6 +46,23 @@ function nomeValido(nome: string): string {
     );
   }
   return aparado;
+}
+
+/**
+ * Os textos gravados por motor, só os de motor conhecido (`serve`) e com
+ * conteúdo: um `orquestrador.json` editado à mão não pode derrubar a leitura.
+ */
+function textosPorMotor(
+  gravados: Partial<Record<Motor, string>> | undefined,
+  serve: (motor: Motor) => boolean,
+): Partial<Record<Motor, string>> {
+  const validos: Partial<Record<Motor, string>> = {};
+  for (const [motor, texto] of Object.entries(gravados ?? {})) {
+    if (ehMotor(motor) && serve(motor) && typeof texto === "string" && texto.trim() !== "") {
+      validos[motor] = texto;
+    }
+  }
+  return validos;
 }
 
 /**
@@ -90,7 +109,9 @@ export interface DadosDoOrquestrador {
   id: string;
   nome: string;
   pastaDeTrabalho: string;
+  /** A sessão do Claude Code: o id gerado pelo app. As dos outros motores ficam em `sessoesDosMotores`. */
   sessaoId: string;
+  /** Se a sessão do Claude Code já existe. */
   sessaoIniciada: boolean;
   criadoEm: string;
   configuracao: DadosDaConfiguracao;
@@ -105,6 +126,18 @@ export interface DadosDoOrquestrador {
   instrucoesNaConversa?: boolean | undefined;
   /** Ausente nos dados gravados antes de a retomada ser gravada: vale nenhuma. */
   retomadaPendente?: DadosDaRetomadaPendente | null | undefined;
+  /**
+   * As sessões que os motores diferentes do Claude Code criaram nesta
+   * conversa: o id que cada um devolveu. Ausente nos dados gravados antes dos
+   * outros motores: vale nenhuma.
+   */
+  sessoesDosMotores?: Partial<Record<Motor, string>> | undefined;
+  /**
+   * O último `liberaEm` conhecido do limite de uso de cada motor (ISO): enquanto
+   * não passa, um pedido novo não começa nesse motor. Ausente nos dados gravados
+   * antes dos outros motores: vale nenhum.
+   */
+  liberaEmDosMotores?: Partial<Record<Motor, string>> | undefined;
 }
 
 export interface NovoOrquestrador {
@@ -145,6 +178,9 @@ export class Orquestrador {
     private filaAtual: PedidoNaFila[],
     private instrucoesJaEnviadas: boolean,
     private retomadaAtual: DadosDaRetomadaPendente | null,
+    /** As sessões criadas pelos motores que não são o Claude Code (o Claude usa `sessaoAtual`). */
+    private sessoesDosOutrosMotores: Partial<Record<Motor, string>>,
+    private liberaEmPorMotor: Partial<Record<Motor, string>>,
   ) {}
 
   static criar(novo: NovoOrquestrador): Orquestrador {
@@ -161,6 +197,8 @@ export class Orquestrador {
       [],
       false,
       null,
+      {},
+      {},
     );
   }
 
@@ -180,6 +218,9 @@ export class Orquestrador {
       (dados.fila ?? []).map((pedido) => PedidoNaFila.reconstituir(pedido)),
       dados.instrucoesNaConversa ?? false,
       dados.retomadaPendente === undefined || dados.retomadaPendente === null ? null : { ...dados.retomadaPendente },
+      // A sessão do Claude Code vive em `sessaoId`: uma entrada dele aqui não vale.
+      textosPorMotor(dados.sessoesDosMotores, (motor) => motor !== MOTOR_PADRAO),
+      textosPorMotor(dados.liberaEmDosMotores, () => true),
     );
   }
 
@@ -238,6 +279,100 @@ export class Orquestrador {
    */
   get sessaoIniciada(): boolean {
     return this.sessaoJaIniciada;
+  }
+
+  /**
+   * A sessão que `motor` guarda da conversa atual. No Claude Code, o id
+   * gerado pelo app. Nos outros, o que o próprio motor criou; sem sessão ainda,
+   * `id` vazio e `iniciada` falsa: o próximo turno dele cria uma.
+   */
+  sessaoDoMotor(motor: Motor): { id: string; iniciada: boolean } {
+    if (motor === "claude-code") {
+      return { id: this.sessaoAtual, iniciada: this.sessaoJaIniciada };
+    }
+    const id = this.sessoesDosOutrosMotores[motor];
+    return id === undefined ? { id: "", iniciada: false } : { id, iniciada: true };
+  }
+
+  /**
+   * Guarda a sessão que um motor criou (o id que ele devolveu). Vazio não vale,
+   * e o Claude Code não entra aqui: a sessão dele é a que o app gerou.
+   */
+  registrarSessaoDoMotor(motor: Motor, sessaoId: string): void {
+    const id = sessaoId.trim();
+    if (motor === "claude-code" || id === "") {
+      return;
+    }
+    this.sessoesDosOutrosMotores = { ...this.sessoesDosOutrosMotores, [motor]: id };
+  }
+
+  /** O último `liberaEm` conhecido do limite de uso do motor (ISO), ou `null`. */
+  liberaEmDoMotor(motor: Motor): string | null {
+    return this.liberaEmPorMotor[motor] ?? null;
+  }
+
+  /**
+   * Guarda quando o limite de uso do motor libera. Sem horário (ou ilegível),
+   * não há o que guardar: o pedido seguinte tenta o motor de novo.
+   */
+  registrarLimiteDoMotor(motor: Motor, liberaEm: string | null): void {
+    if (liberaEm === null || Number.isNaN(Date.parse(liberaEm))) {
+      return;
+    }
+    this.liberaEmPorMotor = { ...this.liberaEmPorMotor, [motor]: liberaEm };
+  }
+
+  /** O motor respondeu bem: o limite que se conhecia dele já não vale. */
+  liberarLimiteDoMotor(motor: Motor): void {
+    if (this.liberaEmPorMotor[motor] === undefined) {
+      return;
+    }
+    const restantes = { ...this.liberaEmPorMotor };
+    delete restantes[motor];
+    this.liberaEmPorMotor = restantes;
+  }
+
+  /**
+   * O motor com que um pedido novo começa: o do Orquestrador, salvo se o
+   * limite de uso dele ainda não liberou — então o primeiro da reserva cujo
+   * limite já liberou. Com todos no limite, o principal: o pedido tenta e entra
+   * na espera de sempre.
+   *
+   * `preferido`: o motor que o pedido pede para continuar (a execução de um
+   * Plano segue no motor que o propôs, que guarda a conversa dele); vale se
+   * está na ordem do Orquestrador e fora do limite.
+   */
+  motorParaComecar(agora: Date, preferido?: Motor): Motor {
+    const ordem = this.configuracaoAtual.motoresEmOrdem;
+    const livre = (motor: Motor): boolean => this.limiteAtivoDoMotor(motor, agora) === null;
+    if (preferido !== undefined && ordem.includes(preferido) && livre(preferido)) {
+      return preferido;
+    }
+    return ordem.find(livre) ?? this.configuracaoAtual.motorDoOrquestrador;
+  }
+
+  /** Quando o limite de uso do motor libera (ISO), se ainda não liberou em `agora`; senão `null`. */
+  limiteAtivoDoMotor(motor: Motor, agora: Date): string | null {
+    const liberaEm = this.liberaEmPorMotor[motor];
+    return liberaEm !== undefined && Date.parse(liberaEm) > agora.getTime() ? liberaEm : null;
+  }
+
+  /**
+   * O que a sessão de `motor` não viu da conversa, para ele assumir o pedido
+   * sem perder o fio (ver `contextoDaTroca`). Um turno em andamento não entra:
+   * é o pedido que vai rodar agora.
+   */
+  contextoDaTroca(motor: Motor): string | null {
+    return montarContextoDaTroca(
+      this.turnos.map((turno) => ({
+        texto: turno.texto,
+        resposta: turno.resposta,
+        situacao: turno.situacao,
+        motivoDaFalha: turno.motivoDaFalha,
+        motor: turno.motor,
+      })),
+      motor,
+    );
   }
 
   get criadoEm(): Date {
@@ -381,7 +516,9 @@ export class Orquestrador {
    * do agregado (o histórico anterior é arquivado pelo repositório) e o
    * próximo turno abre outra sessão do Claude Code, sem memória da anterior.
    * Nome, pasta, configuração, worktree e a fila de pedidos continuam os mesmos;
-   * uma retomada marcada sai junto com o turno que ela retomaria.
+   * uma retomada marcada sai junto com o turno que ela retomaria. As sessões
+   * dos outros motores também se perdem (cada um abre outra); o limite de uso
+   * de cada motor é da assinatura, não da conversa, e fica.
    *
    * Um Plano pendente é descartado junto. `worktreeComAlteracoes` avisa que o
    * worktree segue com trabalho: worktrees sem alterações são removidos ao
@@ -403,16 +540,23 @@ export class Orquestrador {
     this.retomadaAtual = null;
     this.sessaoAtual = novaSessaoId;
     this.sessaoJaIniciada = false;
+    this.sessoesDosOutrosMotores = {};
     this.instrucoesJaEnviadas = false;
     return { tipo: "conversa_limpa", turnosAnteriores, planoDescartado, worktreeComAlteracoes };
   }
 
+  /**
+   * `motor`: quem executa o turno; sem ele, o motor do Orquestrador. Num motor
+   * de reserva, o turno roda com a configuração dele (`paraMotor`), e é essa a
+   * que o evento registra.
+   */
   iniciarTurno(
     turnoId: string,
     texto: string,
     agora: Date,
     anexos: readonly Anexo[] = [],
     modo: ModoDoTurno = "execucao",
+    motor: Motor = this.configuracaoAtual.motorDoOrquestrador,
   ): EventoDeOrquestracao {
     const mensagem = texto.trim();
     if (mensagem === "") {
@@ -436,16 +580,17 @@ export class Orquestrador {
     }
 
     const dadosDosAnexos = anexos.map((anexo) => anexo.paraDados());
-    this.turnos.push(Turno.iniciar(turnoId, mensagem, agora, dadosDosAnexos, modo));
+    this.turnos.push(Turno.iniciar(turnoId, mensagem, agora, dadosDosAnexos, modo, motor));
     // Seja a própria retomada ou um pedido do usuário, a marcada deixa de valer.
     this.retomadaAtual = null;
     return {
       tipo: "turno_iniciado",
       turnoId,
       texto: mensagem,
-      configuracao: this.configuracaoAtual.paraDados(),
+      configuracao: this.configuracaoAtual.paraMotor(motor).paraDados(),
       anexos: dadosDosAnexos,
       modo,
+      motor,
     };
   }
 
@@ -476,9 +621,19 @@ export class Orquestrador {
     return { tipo: "plano_descartado", turnoId: turno.id };
   }
 
+  /**
+   * A sessão que o turno anuncia (`sessao_iniciada`) é a do motor que o
+   * executa: no Claude Code, a que o app gerou passa a existir; nos outros, o
+   * id que o evento traz, se trouxer.
+   */
   registrarDoMotor(turnoId: string, evento: EventoDoMotor): EventoDeOrquestracao {
     if (evento.tipo === "sessao_iniciada") {
-      this.sessaoJaIniciada = true;
+      const motor = this.turnos.find((turno) => turno.id === turnoId)?.motor ?? MOTOR_PADRAO;
+      if (motor === "claude-code") {
+        this.sessaoJaIniciada = true;
+      } else if (evento.sessaoDoMotor !== undefined) {
+        this.registrarSessaoDoMotor(motor, evento.sessaoDoMotor);
+      }
     }
     this.turnoAtivo(turnoId).registrar(evento);
     return { ...evento, turnoId };
@@ -553,6 +708,8 @@ export class Orquestrador {
       fila: this.filaAtual.map((pedido) => pedido.paraDados()),
       instrucoesNaConversa: this.instrucoesJaEnviadas,
       retomadaPendente: this.retomadaAtual === null ? null : { ...this.retomadaAtual },
+      sessoesDosMotores: { ...this.sessoesDosOutrosMotores },
+      liberaEmDosMotores: { ...this.liberaEmPorMotor },
     };
   }
 

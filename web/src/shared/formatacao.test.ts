@@ -131,4 +131,42 @@ describe("formatacao", () => {
       descreverConfiguracao({ ...configuracao, esforcoDoOrquestrador: "maximo", esforcoDosSubagentes: "extra_alto" }),
     ).toBe("Opus (esforço máximo) → Sonnet (esforço extra alto) · 2 subagentes · Editar e rodar comandos");
   });
+
+  it("fora do Claude Code, mostra o motor (e o modelo, se escolhido) e ignora o esforço, que não vale lá", () => {
+    expect(
+      descreverConfiguracao({
+        ...configuracao,
+        motorDoOrquestrador: "codex",
+        modeloDoOrquestrador: "padrao",
+        esforcoDoOrquestrador: "maximo",
+        motorDosSubagentes: "copilot",
+        modeloDosSubagentes: "gpt-5",
+      }),
+    ).toBe("Codex → GitHub Copilot CLI gpt-5 · 2 subagentes · Editar e rodar comandos");
+  });
+
+  it("a reserva e o navegador do agente entram no fim, na ordem", () => {
+    expect(
+      descreverConfiguracao({ ...configuracao, ordemDeReserva: ["codex", "copilot"], navegadorDoAgente: true }),
+    ).toBe(
+      "Opus → Sonnet · 2 subagentes · Editar e rodar comandos · reserva: Codex, GitHub Copilot CLI · navegador do agente",
+    );
+    expect(descreverConfiguracao({ ...configuracao, ordemDeReserva: [], navegadorDoAgente: false })).not.toContain("reserva");
+  });
+
+  it("descreve o motor e o modelo de uma configuração parcial, com o nome do motor", () => {
+    expect(
+      descreverAlteracoesDaConfiguracao({
+        motorDoOrquestrador: "codex",
+        modeloDoOrquestrador: "padrao",
+        motorDosSubagentes: "copilot",
+        modeloDosSubagentes: "gpt-5",
+      }),
+    ).toEqual([
+      "Motor do orquestrador: Codex",
+      "Modelo do orquestrador: padrao",
+      "Motor dos subagentes: GitHub Copilot CLI",
+      "Modelo dos subagentes: gpt-5",
+    ]);
+  });
 });

@@ -583,6 +583,72 @@ describe("TranscricaoDoTerminal", () => {
       ).toBeInTheDocument();
     });
 
+    describe("o aviso cita o motor do turno quando ele não é o Claude Code", () => {
+      const noMotor = (motor: "codex" | "copilot" | "claude-code") =>
+        aplicar(ESTADO_INICIAL, { tipo: "turno_iniciado", turnoId: "t1", texto: "rode os testes", configuracao, motor });
+
+      beforeEach(() => {
+        vi.spyOn(api, "lerPreferencias").mockResolvedValue({
+          instrucoesPadrao: "",
+          subagentesProntos: [],
+          autorrecuperacao: true,
+        });
+      });
+
+      it.each<["codex" | "copilot" | "claude-code", string]>([
+        ["codex", "Codex"],
+        ["copilot", "Copilot"],
+        ["claude-code", "Claude"],
+      ])("diagnóstico \"suspeito\" num turno no %s: sem notícias do %s", async (motor, nome) => {
+        render(
+          <Transcricao
+            conversa={noMotor(motor)}
+            sinal={{
+              turnoId: "t1",
+              em: "2026-10-28T12:00:05Z",
+              tokensPensando: 0,
+              diagnostico: { situacao: "suspeito", resumo: "sem saída há 3 min, sem CPU" },
+            }}
+          />,
+        );
+        await act(async () => undefined);
+
+        expect(
+          screen.getByText(`sem notícias do ${nome} há 6s: sem saída há 3 min, sem CPU. O app retoma sozinho se travar.`),
+        ).toBeInTheDocument();
+        if (motor !== "claude-code") {
+          expect(screen.queryByText(/sem notícias do Claude/)).not.toBeInTheDocument();
+        }
+      });
+
+      it("o silêncio longo sem diagnóstico também cita o motor", async () => {
+        vi.setSystemTime(new Date("2026-10-28T12:03:00Z"));
+        render(<Transcricao conversa={noMotor("codex")} />);
+        await act(async () => undefined);
+
+        expect(
+          screen.getByText("sem notícias do Codex há 3min 00s — pode ter travado. O app retoma sozinho se travar."),
+        ).toBeInTheDocument();
+      });
+
+      it("um turno gravado antes dos outros motores (sem o campo) segue falando do Claude", async () => {
+        render(
+          <Transcricao
+            conversa={emAndamento()}
+            sinal={{
+              turnoId: "t1",
+              em: "2026-10-28T12:00:05Z",
+              tokensPensando: 0,
+              diagnostico: { situacao: "suspeito", resumo: "sem saída há 3 min" },
+            }}
+          />,
+        );
+        await act(async () => undefined);
+
+        expect(screen.getByText(/^sem notícias do Claude há 6s/)).toBeInTheDocument();
+      });
+    });
+
     const aguardando = () =>
       aplicar(
         emAndamento(),
@@ -727,5 +793,86 @@ describe("TranscricaoDoTerminal", () => {
     expect(screen.getByRole("note", { name: "Avisos da conversa nova" })).toHaveTextContent(
       /^o plano pendente foi descartado$/,
     );
+  });
+
+  describe("motor do pedido", () => {
+    const iniciar = (motor?: "claude-code" | "codex" | "copilot") =>
+      aplicar(ESTADO_INICIAL, {
+        tipo: "turno_iniciado",
+        turnoId: "t1",
+        texto: "corrija o bug",
+        configuracao,
+        ...(motor === undefined ? {} : { motor }),
+      });
+
+    it("o pedido do Claude Code (ou gravado antes dos outros motores) não leva selo", () => {
+      const { rerender } = render(<Transcricao conversa={iniciar("claude-code")} />);
+      expect(screen.queryByTestId("selo-do-motor")).not.toBeInTheDocument();
+
+      rerender(<Transcricao conversa={iniciar()} />);
+      expect(screen.queryByTestId("selo-do-motor")).not.toBeInTheDocument();
+    });
+
+    it("o pedido de outro motor leva o selo com o nome dele", () => {
+      const { rerender } = render(<Transcricao conversa={iniciar("codex")} />);
+      expect(screen.getByTestId("selo-do-motor")).toHaveTextContent("Codex");
+
+      rerender(<Transcricao conversa={iniciar("copilot")} />);
+      expect(screen.getByTestId("selo-do-motor")).toHaveTextContent("GitHub Copilot CLI");
+    });
+
+    it("o selo acompanha o pedido, e não o terminal: o pedido seguinte volta ao Claude Code sem ele", () => {
+      const conversa = aplicar(
+        iniciar("codex"),
+        { tipo: "turno_concluido", turnoId: "t1", resposta: "pronto", uso: USO },
+        { tipo: "turno_iniciado", turnoId: "t2", texto: "agora o resto", configuracao, motor: "claude-code" },
+      );
+      render(<Transcricao conversa={conversa} />);
+
+      expect(screen.getAllByTestId("selo-do-motor")).toHaveLength(1);
+    });
+
+    it("o limite de uso vira um aviso visível, com a hora em que libera", () => {
+      // Na hora local do evento, para o "libera às" não depender do fuso de quem roda o teste.
+      const conversa = aplicarEvento(iniciar("claude-code"), {
+        tipo: "motor_trocado",
+        turnoId: "t1",
+        de: "claude-code",
+        para: "codex",
+        causa: "limite_de_uso",
+        liberaEm: new Date(2026, 9, 28, 18, 30).toISOString(),
+        sequencia: 2,
+        em: new Date(2026, 9, 28, 14, 5).toISOString(),
+      });
+      render(<Transcricao conversa={conversa} />);
+
+      const aviso = screen.getByRole("status", { name: "Troca de motor" });
+      expect(aviso).toHaveTextContent("Trocou para Codex: limite do Claude atingido (libera às 18:30)");
+    });
+
+    it("sem a hora, o aviso não inventa uma; por sobrecarga, diz que o motor ficou sobrecarregado", () => {
+      const troca = (causa: "limite_de_uso" | "sobrecarga") =>
+        aplicar(iniciar("claude-code"), {
+          tipo: "motor_trocado",
+          turnoId: "t1",
+          de: "claude-code",
+          para: "copilot",
+          causa,
+        });
+      const { rerender } = render(<Transcricao conversa={troca("limite_de_uso")} />);
+      expect(screen.getByRole("status", { name: "Troca de motor" })).toHaveTextContent(
+        /^Trocou para GitHub Copilot CLI: limite do Claude atingido$/,
+      );
+
+      rerender(<Transcricao conversa={troca("sobrecarga")} />);
+      expect(screen.getByRole("status", { name: "Troca de motor" })).toHaveTextContent(
+        /^Trocou para GitHub Copilot CLI: Claude sobrecarregado$/,
+      );
+    });
+
+    it("sem troca de motor, não há aviso", () => {
+      render(<Transcricao conversa={iniciar("codex")} />);
+      expect(screen.queryByRole("status", { name: "Troca de motor" })).not.toBeInTheDocument();
+    });
   });
 });

@@ -21,6 +21,7 @@ import {
   TAMANHO_DA_PREVIA,
   TAMANHO_DO_ARTEFATO,
   TAMANHO_DO_BIXINHO,
+  TAMANHO_DO_NAVEGADOR,
   TAMANHO_DO_RASCUNHO,
   TAMANHO_DO_SHELL,
   TAMANHO_DO_TERMINAL,
@@ -106,6 +107,12 @@ export type DadosDoNoDoShell = {
  */
 export type DadosDoNoDoArtefato = { artefatoId: string };
 
+/**
+ * O navegador do agente (um Chromium por Orquestrador, no app desktop): o nó guarda só o id do Orquestrador, que
+ * também identifica o navegador na ponte do app. Título, endereço e controle ficam no estado que o app avisa.
+ */
+export type DadosDoNoDoNavegador = { orquestradorId: string };
+
 export type NoTerminal = Node<DadosDoTerminal, "terminal">;
 export type NoRascunho = Node<DadosDoRascunho, "rascunho">;
 export type NoBixinho = Node<DadosDoBixinho, "bixinho">;
@@ -113,9 +120,18 @@ export type NoNota = Node<DadosDoNoDaNota, "nota">;
 export type NoPrevia = Node<DadosDaPrevia, "previa">;
 export type NoArtefato = Node<DadosDoNoDoArtefato, "artefato">;
 export type NoShell = Node<DadosDoNoDoShell, "shell">;
-export type NoDoCanvas = NoTerminal | NoRascunho | NoBixinho | NoNota | NoArtefato | NoPrevia | NoShell;
-/** As janelas ligadas a um terminal por uma linha discreta: a prévia e o shell que saíram dele. */
-type NoLigadoAoTerminal = NoPrevia | NoShell;
+export type NoNavegadorDoAgente = Node<DadosDoNoDoNavegador, "navegador">;
+export type NoDoCanvas =
+  | NoTerminal
+  | NoRascunho
+  | NoBixinho
+  | NoNota
+  | NoArtefato
+  | NoPrevia
+  | NoShell
+  | NoNavegadorDoAgente;
+/** As janelas ligadas a um terminal por uma linha discreta: a prévia, o shell e o navegador do agente que saíram dele. */
+type NoLigadoAoTerminal = NoPrevia | NoShell | NoNavegadorDoAgente;
 
 /**
  * O que a linha do terminal a um bixinho leva: a situação do Subagente, para
@@ -161,6 +177,8 @@ export const ALCA_DA_PREVIA = "alca-da-previa";
 export const ALCA_DO_ARTEFATO = "alca-do-artefato";
 /** Idem para o shell: no corpo, o mouse seleciona o texto do terminal. */
 export const ALCA_DO_SHELL = "alca-do-shell";
+/** Idem para o navegador do agente: no corpo, o mouse é da página (quando o usuário assume). */
+export const ALCA_DO_NAVEGADOR = "alca-do-navegador";
 /** A alça de onde se puxa a linha que liga uma nota, prévia ou artefato a um terminal. */
 export const ALCA_DE_LIGACAO = "ligacao";
 /** Onde essa linha chega: uma alça que cobre o terminal inteiro, para soltar em qualquer ponto dele. */
@@ -199,6 +217,71 @@ export function ehArtefato(no: NoDoCanvas): no is NoArtefato {
 
 export function ehShell(no: NoDoCanvas): no is NoShell {
   return no.type === "shell";
+}
+
+export function ehNavegador(no: NoDoCanvas): no is NoNavegadorDoAgente {
+  return no.type === "navegador";
+}
+
+/** O id do nó do navegador do agente de um Orquestrador; com prefixo, para nunca coincidir com o do terminal. */
+export function idDoNoDoNavegador(orquestradorId: string): string {
+  return `navegador:${orquestradorId}`;
+}
+
+export function novoNavegador(
+  orquestradorId: string,
+  posicao: Ponto,
+  largura: number = TAMANHO_DO_NAVEGADOR.largura,
+  altura: number = TAMANHO_DO_NAVEGADOR.altura,
+): NoNavegadorDoAgente {
+  return {
+    id: idDoNoDoNavegador(orquestradorId),
+    type: "navegador",
+    position: posicao,
+    width: largura,
+    height: altura,
+    dragHandle: `.${ALCA_DO_NAVEGADOR}`,
+    data: { orquestradorId },
+  };
+}
+
+/** O Orquestrador já tem o nó do navegador no canvas? */
+export function navegadorAberto(nos: readonly NoDoCanvas[], orquestradorId: string): boolean {
+  return nos.some((no) => ehNavegador(no) && no.data.orquestradorId === orquestradorId);
+}
+
+/** Tira do canvas o nó do navegador de um Orquestrador (o app segue com a vista; só fecha a janela). */
+export function semNavegador(nos: NoDoCanvas[], orquestradorId: string): NoDoCanvas[] {
+  return navegadorAberto(nos, orquestradorId)
+    ? nos.filter((no) => !ehNavegador(no) || no.data.orquestradorId !== orquestradorId)
+    : nos;
+}
+
+/**
+ * Abre o navegador do agente de um Orquestrador: ao lado do terminal dele, longe das outras janelas e dos
+ * bixinhos; sem o terminal no canvas, onde `posicaoDeReserva` mandar. Com `selecionar`, a janela nova (ou a que
+ * já estava aberta) fica selecionada e as outras não. Já aberto e sem `selecionar`, devolve o mesmo array.
+ * Os bixinhos que ficaram por baixo da janela nova saem de lá.
+ */
+export function comNavegadorAberto(
+  nos: NoDoCanvas[],
+  orquestradorId: string,
+  posicaoDeReserva: (atuais: readonly NoDoCanvas[]) => Ponto,
+  selecionar: boolean,
+): NoDoCanvas[] {
+  const seleciona = (no: NoDoCanvas, selecionado: boolean): NoDoCanvas =>
+    (no.selected === true) === selecionado ? no : { ...no, selected: selecionado };
+  if (navegadorAberto(nos, orquestradorId)) {
+    return selecionar ? nos.map((no) => seleciona(no, ehNavegador(no) && no.data.orquestradorId === orquestradorId)) : nos;
+  }
+  const posicao =
+    posicaoDaPreviaDoTerminal(nos, orquestradorId, TAMANHO_DO_NAVEGADOR) ?? posicaoDeReserva(nos);
+  const navegador = novoNavegador(orquestradorId, posicao);
+  return reacomodarBixinhos(
+    selecionar
+      ? [...nos.map((no) => seleciona(no, false)), { ...navegador, selected: true }]
+      : [...nos, navegador],
+  );
 }
 
 /** O id do nó de uma nota; com prefixo, para nunca coincidir com o de um terminal. */
@@ -463,7 +546,11 @@ export function nosDoLayout(layout: LayoutDoCanvas): NoDoCanvas[] {
       retangulo.altura,
     ),
   );
-  return [...terminais, ...notas, ...artefatos, ...previas, ...shells];
+  // O app desktop reabre o navegador de cada Orquestrador sozinho; o nó só guarda onde fica a janela.
+  const navegadores = Object.entries(layout.navegadores ?? {}).map(([orquestradorId, retangulo]) =>
+    novoNavegador(orquestradorId, { x: retangulo.x, y: retangulo.y }, retangulo.largura, retangulo.altura),
+  );
+  return [...terminais, ...notas, ...artefatos, ...previas, ...shells, ...navegadores];
 }
 
 export function layoutDosNos(nos: readonly NoDoCanvas[], viewport: LayoutDoCanvas["viewport"]): LayoutDoCanvas {
@@ -530,7 +617,25 @@ export function layoutDosNos(nos: readonly NoDoCanvas[], viewport: LayoutDoCanva
       orquestradorId: no.data.orquestradorId,
     };
   }
-  return { terminais, notas, artefatos, previas, shells, viewport };
+  const navegadores: Record<string, Retangulo> = {};
+  for (const no of nos.filter(ehNavegador)) {
+    navegadores[no.data.orquestradorId] = {
+      x: Math.round(no.position.x),
+      y: Math.round(no.position.y),
+      largura: Math.round(no.width ?? no.measured?.width ?? TAMANHO_DO_NAVEGADOR.largura),
+      altura: Math.round(no.height ?? no.measured?.height ?? TAMANHO_DO_NAVEGADOR.altura),
+    };
+  }
+  // Sem navegadores, sem o campo, como nos layouts antigos.
+  return {
+    terminais,
+    notas,
+    artefatos,
+    previas,
+    shells,
+    ...(Object.keys(navegadores).length > 0 ? { navegadores } : {}),
+    viewport,
+  };
 }
 
 /** Remove um terminal e os bixinhos dele (filhos não podem ficar sem o pai no React Flow). */
@@ -607,9 +712,11 @@ function tamanhoDoNo(no: NoDoCanvas): { largura: number; altura: number } {
           ? TAMANHO_DA_PREVIA
           : ehShell(no)
             ? TAMANHO_DO_SHELL
-            : no.type === "rascunho"
-              ? TAMANHO_DO_RASCUNHO
-              : TAMANHO_DO_TERMINAL;
+            : ehNavegador(no)
+              ? TAMANHO_DO_NAVEGADOR
+              : no.type === "rascunho"
+                ? TAMANHO_DO_RASCUNHO
+                : TAMANHO_DO_TERMINAL;
   return {
     largura: no.width ?? no.measured?.width ?? padrao.largura,
     altura: no.height ?? no.measured?.height ?? padrao.altura,
@@ -728,7 +835,7 @@ export function minimizarOuRestaurarTelas(nos: NoDoCanvas[], ids: ReadonlySet<st
  * também (descartar perderia o que foi preenchido).
  */
 export function ehFechavelEmGrupo(no: NoDoCanvas): boolean {
-  return ehTerminal(no) || ehArtefato(no) || ehPrevia(no) || ehShell(no);
+  return ehTerminal(no) || ehArtefato(no) || ehPrevia(no) || ehShell(no) || ehNavegador(no);
 }
 
 /** O que a barra do grupo precisa saber da seleção: só muda quando a seleção (ou o minimizar) muda, não ao arrastar. */
@@ -1100,6 +1207,14 @@ export function arestasDosShells(nos: readonly NoDoCanvas[]): ArestaDoCanvas[] {
   return arestasAoTerminal(nos.filter(ehShell), terminaisPorId(nos), "aresta-shell");
 }
 
+/**
+ * Uma linha discreta do terminal ao navegador do agente do Orquestrador dele, como a da prévia. Navegador cujo
+ * terminal não está no canvas fica sem linha.
+ */
+export function arestasDosNavegadores(nos: readonly NoDoCanvas[]): ArestaDoCanvas[] {
+  return arestasAoTerminal(nos.filter(ehNavegador), terminaisPorId(nos), "aresta-navegador");
+}
+
 function arestasAoTerminal(
   ligados: readonly NoLigadoAoTerminal[],
   terminais: ReadonlyMap<string, NoTerminal>,
@@ -1129,7 +1244,7 @@ function arestasAoTerminal(
 }
 
 /**
- * Os nós anteriores (terminais, bixinhos, prévias e shells) enquanto as linhas não mudam: nenhum
+ * Os nós anteriores (terminais, bixinhos, prévias, shells e navegadores) enquanto as linhas não mudam: nenhum
  * bixinho nasce, some ou troca de terminal, e nenhum passa para outro lado do
  * terminal. Fora isso, a posição e o tamanho não importam — arrastar ou
  * redimensionar sem trocar de lado não recalcula as linhas.
@@ -1148,7 +1263,11 @@ export function mesmasLigacoes<T extends NoDoCanvas>(anteriores: T[], novos: T[]
     if (novo === undefined || anterior.id !== novo.id || anterior.type !== novo.type || anterior.parentId !== novo.parentId) {
       return false;
     }
-    if ((ehPrevia(anterior) && ehPrevia(novo)) || (ehShell(anterior) && ehShell(novo))) {
+    if (
+      (ehPrevia(anterior) && ehPrevia(novo)) ||
+      (ehShell(anterior) && ehShell(novo)) ||
+      (ehNavegador(anterior) && ehNavegador(novo))
+    ) {
       return (
         anterior.data.orquestradorId === novo.data.orquestradorId &&
         ladoDaPreviaNoTerminal(anterior, terminaisAnteriores) === ladoDaPreviaNoTerminal(novo, terminaisNovos)

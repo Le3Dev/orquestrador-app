@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ControleDeExecucoesEmMemoria } from "../infraestrutura/execucoes/ControleDeExecucoesEmMemoria";
 import { RepositorioDeVinculos } from "../vinculos/RepositorioDeVinculos";
@@ -83,6 +83,20 @@ class MotorQueResponde implements MotorDeAgentes {
       resposta: this.responder(pedido, indice),
       uso: { duracaoMs: 1, tokensDeEntrada: 1, tokensDeSaida: 1, subagentesLancados: 0 },
     };
+  }
+}
+
+/**
+ * Como o `MotorQueResponde`, mas o Claude Code bate no limite de uso nos pedidos
+ * que vieram de um vínculo: só o motor da reserva (Codex) os atende.
+ */
+class MotorComLimiteNoClaudeCodeParaVinculados extends MotorQueResponde {
+  override async executarTurno(pedido: PedidoDeTurno, aoObservar: (evento: EventoDoMotor) => void): Promise<ResultadoDoTurno> {
+    const resultado = await super.executarTurno(pedido, aoObservar);
+    if (pedido.motor === "claude-code" && pedido.origemDaMensagem != null) {
+      return { sucesso: false, motivo: "limite de uso atingido", uso: null, causa: "limite_de_uso", liberaEm: null };
+    }
+    return resultado;
   }
 }
 
@@ -198,6 +212,41 @@ describe("ServicoDeOrquestracao e os vínculos", () => {
     expect(front.fila).toEqual([]);
   });
 
+  it("a reserva de motor reenvia a mensagem de vínculo com a mesma origem, nos saltos e no contexto de vínculo", async () => {
+    const motor = new MotorComLimiteNoClaudeCodeParaVinculados((pedido) =>
+      pedido.orquestradorId === "id1" ? `Pronto.\n${BLOCO("Front", "A API está em /v1")}` : "Recebido.",
+    );
+    servicoAtual = montar(motor);
+    const comReserva = { ...configuracao, ordemDeReserva: ["codex" as const] };
+    const api = await servicoAtual.criarOrquestrador({
+      nome: "API",
+      pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "api"),
+      configuracao: comReserva,
+    });
+    const front = await servicoAtual.criarOrquestrador({
+      nome: "Front",
+      pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "front"),
+      configuracao: comReserva,
+    });
+    await vinculos.vincular(api.id, front.id);
+
+    await (await servicoAtual.enviarMensagem(api.id, "publique a API")).conclusao;
+    await vi.waitFor(() => {
+      expect(motor.pedidos).toHaveLength(3);
+      expect(front.turnoEmAndamento).toBeNull();
+    });
+
+    const [doApi, doFrontNoClaude, doFrontNoCodex] = motor.pedidos;
+    expect(doApi?.motor).toBe("claude-code");
+    expect(doFrontNoClaude).toMatchObject({ motor: "claude-code", texto: "A API está em /v1" });
+    expect(doFrontNoCodex).toMatchObject({ motor: "codex", orquestradorId: front.id, texto: "A API está em /v1" });
+    expect(doFrontNoCodex?.origemDaMensagem).toEqual({ orquestradorId: api.id, nome: "API", saltos: 0 });
+    expect(doFrontNoCodex?.vinculados).toEqual([
+      { id: api.id, nome: "API", pasta: api.pastaDeTrabalho.caminho, notas: "" },
+    ]);
+    expect(front.ultimoTurno?.resposta).toBe("Recebido.");
+  });
+
   it("com o destino ocupado, a mensagem espera na fila com a origem gravada", async () => {
     const motor = new MotorQueResponde(() => "ok");
     servicoAtual = montar(motor);
@@ -293,7 +342,7 @@ describe("ServicoDeOrquestracao e os vínculos", () => {
 describe("mensagemParaOOrquestrador e os vínculos", () => {
   const config = ConfiguracaoDoOrquestrador.de(configuracao);
   const montarMensagem = (...args: Partial<Parameters<typeof mensagemParaOOrquestrador>>): string =>
-    mensagemParaOOrquestrador("faça isso", config, [], "execucao", null, null, false, [], "unix", [], [], ...(args as []));
+    mensagemParaOOrquestrador("faça isso", config, [], "execucao", null, null, false, [], "unix", [], [], null, false, ...(args as []));
 
   it("sem vínculos a mensagem fica como antes", () => {
     const mensagem = montarMensagem();
@@ -304,7 +353,7 @@ describe("mensagemParaOOrquestrador e os vínculos", () => {
 
   it("injeta a seção de vínculos com parceiro, pasta, notas e os dois blocos", () => {
     const mensagem = mensagemParaOOrquestrador(
-      "faça isso", config, [], "execucao", null, null, false, [], "unix", [], [],
+      "faça isso", config, [], "execucao", null, null, false, [], "unix", [], [], null, false,
       [{ id: "o2", nome: "Front", pasta: "C:\\projetos\\front", notas: "API em /v1" }],
     );
 
@@ -319,7 +368,7 @@ describe("mensagemParaOOrquestrador e os vínculos", () => {
 
   it("abre o pedido com a linha de quem enviou e o salto", () => {
     const mensagem = mensagemParaOOrquestrador(
-      "rode os testes", config, [], "execucao", null, null, false, [], "unix", [], [], [],
+      "rode os testes", config, [], "execucao", null, null, false, [], "unix", [], [], null, false, [],
       { orquestradorId: "o1", nome: "API", saltos: 3 },
     );
 

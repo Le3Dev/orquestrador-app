@@ -30,6 +30,7 @@ import {
   type DadosDaConfiguracao,
   type DadosDoPedidoNaFila,
   type ModoDoTurno,
+  type Motor,
   type NomeDaPredefinicao,
   type ResumoDoOrquestrador,
   type SituacaoDoSubagente,
@@ -67,6 +68,15 @@ import {
 } from "../../shared/estado/aplicarEvento";
 import { mesmoConteudo, useReaproveitado } from "../../shared/hooks/useReaproveitado";
 import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
+import {
+  comoModeloClaude,
+  ehMotor,
+  motorDoOrquestradorDe,
+  motorDosSubagentesDe,
+  ordemDeReservaDe,
+  problemaDoModeloDoMotor,
+} from "../../shared/modelos";
+import { fecharNavegadorDoAgente } from "../../shared/canvas/ponteDoNavegador";
 import { resumoDaConfiguracao } from "../../shared/resumoDaConfiguracao";
 import { CamposDaConfiguracao } from "../CamposDaConfiguracao";
 import { EtiquetaDeWorktree } from "../EtiquetaDeWorktree";
@@ -295,12 +305,23 @@ function camposAlterados(antes: DadosDaConfiguracao, depois: DadosDaConfiguracao
           antes.quantidadeDeSubagentes.limite === depois.quantidadeDeSubagentes.limite
         : campo === "subagentesProntos"
           ? JSON.stringify(antes.subagentesProntos ?? "todos") === JSON.stringify(depois.subagentesProntos ?? "todos")
-          : antes[campo] === depois[campo];
+          : campo === "ordemDeReserva"
+            ? JSON.stringify(ordemDeReservaDe(antes)) === JSON.stringify(ordemDeReservaDe(depois))
+            : campo === "motorDoOrquestrador" || campo === "motorDosSubagentes"
+              ? motorDoCampo(antes, campo) === motorDoCampo(depois, campo)
+              : campo === "navegadorDoAgente"
+                ? (antes.navegadorDoAgente ?? false) === (depois.navegadorDoAgente ?? false)
+                : antes[campo] === depois[campo];
     if (!igual) {
       Object.assign(alterados, { [campo]: depois[campo] });
     }
   }
   return alterados;
+}
+
+/** O motor de um papel, com o padrão (Claude Code) na ausência: a configuração sem o campo e com o padrão são iguais. */
+function motorDoCampo(configuracao: DadosDaConfiguracao, campo: "motorDoOrquestrador" | "motorDosSubagentes"): Motor {
+  return campo === "motorDoOrquestrador" ? motorDoOrquestradorDe(configuracao) : motorDosSubagentesDe(configuracao);
 }
 
 function palavras(texto: string): string[] {
@@ -389,7 +410,12 @@ export function PainelDeConfiguracao({
     () =>
       modelosSalvos
         ? api.lerEsforcoHerdadoDoOrquestrador(orquestradorId)
-        : api.lerEsforcoHerdado(modeloDoOrquestrador, modeloDosSubagentes, pastaDeTrabalho),
+        : api.lerEsforcoHerdado(
+            // O aviso só vale para o Claude Code: um modelo de outro motor não vai para a consulta.
+            comoModeloClaude(modeloDoOrquestrador, "opus"),
+            comoModeloClaude(modeloDosSubagentes, "sonnet"),
+            pastaDeTrabalho,
+          ),
     [modelosSalvos, orquestradorId, modeloDoOrquestrador, modeloDosSubagentes, pastaDeTrabalho],
   );
 
@@ -457,6 +483,8 @@ export function PainelDeConfiguracao({
     }
     try {
       await api.removerOrquestrador(orquestrador.id);
+      // O navegador do agente some com ele: fecha a vista e apaga os logins e cookies guardados.
+      await fecharNavegadorDoAgente(orquestrador.id, true);
       acoes.fecharTerminal(orquestrador.id);
       await acoes.recarregar();
     } catch (falha) {
@@ -499,6 +527,8 @@ export function PainelDeConfiguracao({
   }
 
   const passouDoLimite = tamanhoDasInstrucoes(configuracao.instrucoesPersonalizadas) > TAMANHO_MAXIMO_DAS_INSTRUCOES;
+  // O id de um modelo fora do Claude Code vazio ou mal formado: o servidor o recusaria.
+  const problemaDoModelo = problemaDoModeloDoMotor(configuracao);
   const sugerirConversaNova =
     conversaComTurnos &&
     instrucoesMudaramMuito(configuracaoDeOrigem.instrucoesPersonalizadas, configuracao.instrucoesPersonalizadas);
@@ -585,6 +615,11 @@ export function PainelDeConfiguracao({
               <IconeAlerta tamanho={15} className="shrink-0" />
               Encurte as instruções para salvar.
             </span>
+          ) : problemaDoModelo !== null ? (
+            <span className="flex items-center gap-2 text-[12.5px] text-warning">
+              <IconeAlerta tamanho={15} className="shrink-0" />
+              {problemaDoModelo}
+            </span>
           ) : sugerirConversaNova ? (
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <span
@@ -621,7 +656,7 @@ export function PainelDeConfiguracao({
           type="button"
           className="btn btn-cta shrink-0"
           onClick={() => void salvar()}
-          disabled={salvando || passouDoLimite || nomeVazio}
+          disabled={salvando || passouDoLimite || problemaDoModelo !== null || nomeVazio}
         >
           {salvando ? "Salvando…" : "Salvar"}
         </button>
@@ -646,13 +681,22 @@ function useConfiguracaoEstavel(atual: DadosDaConfiguracao): DadosDaConfiguracao
     permitirArtefatosOnline,
     instrucoesPersonalizadas,
   } = atual;
+  const motorDoOrquestrador = motorDoOrquestradorDe(atual);
+  const motorDosSubagentes = motorDosSubagentesDe(atual);
+  const navegadorDoAgente = atual.navegadorDoAgente === true;
+  // A reserva é uma lista: a chave de texto a mantém estável enquanto o conteúdo não muda.
+  const reserva = ordemDeReservaDe(atual).join(",");
   const { modo, limite } = atual.quantidadeDeSubagentes;
   return useMemo<DadosDaConfiguracao>(
     () => ({
+      motorDoOrquestrador,
       modeloDoOrquestrador,
       esforcoDoOrquestrador,
+      motorDosSubagentes,
       modeloDosSubagentes,
       esforcoDosSubagentes,
+      ordemDeReserva: reserva.split(",").filter(ehMotor),
+      navegadorDoAgente,
       quantidadeDeSubagentes: { modo, limite },
       nivelDePermissao,
       permitirCommitEPush,
@@ -660,10 +704,14 @@ function useConfiguracaoEstavel(atual: DadosDaConfiguracao): DadosDaConfiguracao
       instrucoesPersonalizadas,
     }),
     [
+      motorDoOrquestrador,
       modeloDoOrquestrador,
       esforcoDoOrquestrador,
+      motorDosSubagentes,
       modeloDosSubagentes,
       esforcoDosSubagentes,
+      reserva,
+      navegadorDoAgente,
       modo,
       limite,
       nivelDePermissao,
@@ -1632,6 +1680,18 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
               onClick={() => acoesDosShells.abrirShell({ orquestradorId })}
             >
               <IconeShell tamanho={16} />
+            </button>
+          )}
+          {/* Com o navegador do agente ligado: abre o bloco dele ao lado do terminal, ou leva até ele se já aberto. */}
+          {orquestrador.configuracao.navegadorDoAgente === true && (
+            <button
+              type="button"
+              className="botao-icone nodrag"
+              title="Abrir o navegador do agente (abre ou leva até o bloco dele no canvas)"
+              aria-label="Abrir o navegador do agente"
+              onClick={() => acoes.abrirNavegador?.(orquestradorId)}
+            >
+              <IconeNavegador tamanho={16} />
             </button>
           )}
           <button
