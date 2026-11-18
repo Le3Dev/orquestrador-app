@@ -134,26 +134,30 @@ describe("PromptDoTerminal", () => {
     it("trabalhando, mostra o pausar ao lado do cancelar e o clique pausa", () => {
       const { aoPausar, aoCancelar } = renderizar({ trabalhando: true });
 
-      fireEvent.click(screen.getByRole("button", { name: "pausar ⏸" }));
+      const pausar = screen.getByRole("button", { name: "Pausar orquestrador" });
+      // Só o ícone, sem texto; o nome fica no aria-label e na dica (title).
+      expect(pausar).toHaveTextContent(/^⏸$/);
+      expect(pausar).toHaveAttribute("title", "Pausar orquestrador");
+      fireEvent.click(pausar);
 
       expect(aoPausar).toHaveBeenCalledTimes(1);
       expect(aoCancelar).not.toHaveBeenCalled();
       expect(screen.getByRole("button", { name: "cancelar" })).toBeEnabled();
-      expect(screen.queryByRole("button", { name: "continuar ▶" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Continuar orquestrador" })).toBeNull();
     });
 
     it("parado, não há pausar nem continuar", () => {
       renderizar();
 
-      expect(screen.queryByRole("button", { name: "pausar ⏸" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "continuar ▶" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Pausar orquestrador" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Continuar orquestrador" })).toBeNull();
     });
 
     it("pausado (congelado, o turno segue em andamento): o pausar vira continuar e o cancelar continua", () => {
       const { aoContinuar, aoCancelar, campo } = renderizar({ trabalhando: true, pausado: true });
 
-      expect(screen.queryByRole("button", { name: "pausar ⏸" })).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "continuar ▶" }));
+      expect(screen.queryByRole("button", { name: "Pausar orquestrador" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Continuar orquestrador" }));
       expect(aoContinuar).toHaveBeenCalledTimes(1);
       expect(campo).toHaveAttribute(
         "placeholder",
@@ -177,7 +181,7 @@ describe("PromptDoTerminal", () => {
     it("pausado na retomada (o turno já terminou): continuar, cancelar e enviar ficam à mão", () => {
       renderizar({ trabalhando: false, pausado: true });
 
-      expect(screen.getByRole("button", { name: "continuar ▶" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Continuar orquestrador" })).toBeEnabled();
       expect(screen.getByRole("button", { name: "cancelar" })).toBeEnabled();
       expect(screen.getByRole("button", { name: "enviar ⏎" })).toBeDisabled();
     });

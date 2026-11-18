@@ -483,26 +483,31 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
         >
           <IconeAnexo />
         </button>
+        {/* Só o ícone (⏸ / ▶), quadrado e da altura do cancelar; o nome vem do aria-label. */}
         {comPedido &&
           (pausado ? (
             <button
               type="button"
-              className="btn btn-sm btn-outline"
-              title="Continuar o pedido de onde parou"
+              className="btn btn-sm btn-outline botao-de-pausa"
+              title="Continuar orquestrador"
+              aria-label="Continuar orquestrador"
+              aria-busy={alternandoPausa}
               onClick={aoContinuar}
               disabled={alternandoPausa || cancelando || desconectado}
             >
-              {alternandoPausa ? "continuando…" : "continuar ▶"}
+              <span aria-hidden="true">▶</span>
             </button>
           ) : (
             <button
               type="button"
-              className="btn btn-sm btn-outline"
-              title="Pausar sem perder onde estava: o Continuar segue de onde parou"
+              className="btn btn-sm btn-outline botao-de-pausa"
+              title="Pausar orquestrador"
+              aria-label="Pausar orquestrador"
+              aria-busy={alternandoPausa}
               onClick={aoPausar}
               disabled={alternandoPausa || cancelando || desconectado}
             >
-              {alternandoPausa ? "pausando…" : "pausar ⏸"}
+              <span aria-hidden="true">⏸</span>
             </button>
           ))}
         {comPedido && (

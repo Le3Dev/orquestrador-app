@@ -1285,7 +1285,7 @@ describe("NoTerminal · pausa do orquestrador", () => {
     render(<Terminal canvas={canvasDoTerminal(conversaDoTerminal())} no={propsDoNo()} />);
 
     expect(screen.queryByText(/pausado há/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "pausar ⏸" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pausar orquestrador" }));
 
     expect(pausar).toHaveBeenCalledWith("o1");
   });
@@ -1305,7 +1305,7 @@ describe("NoTerminal · pausa do orquestrador", () => {
     });
     expect(screen.getByText("⏸ pausado há 4 min")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "continuar ▶" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continuar orquestrador" }));
     expect(continuar).toHaveBeenCalledWith("o1");
     expect(screen.getByRole("button", { name: "cancelar" })).toBeEnabled();
   });
@@ -1318,7 +1318,7 @@ describe("NoTerminal · pausa do orquestrador", () => {
       "title",
       expect.stringContaining("o Continuar segue pela conversa") as string,
     );
-    expect(screen.getByRole("button", { name: "continuar ▶" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Continuar orquestrador" })).toBeEnabled();
   });
 });
 
