@@ -361,6 +361,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
               />
             </div>
 
+
             <div className="linha-da-criacao">
               <Rotulo
                 titulo="Opções"

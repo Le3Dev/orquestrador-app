@@ -635,6 +635,20 @@ export function linhaDeEntrada(texto: string, imagens: readonly ImagemEmBase64[]
   return `${JSON.stringify({ type: "user", message: { role: "user", content: conteudo } })}\n`;
 }
 
+export const VARIAVEL_DO_LIMITE_DA_SAIDA_DO_BASH = "BASH_MAX_OUTPUT_LENGTH";
+export const LIMITE_DA_SAIDA_DO_BASH = "15000";
+
+/**
+ * Limita a saída do Bash a 15 mil caracteres, salvo se o ambiente já define o
+ * limite (ADR-44). Os subagentes rodam no mesmo processo e herdam o ambiente.
+ */
+export function limitarSaidaDoBash(ambiente: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (!ambiente[VARIAVEL_DO_LIMITE_DA_SAIDA_DO_BASH]) {
+    ambiente[VARIAVEL_DO_LIMITE_DA_SAIDA_DO_BASH] = LIMITE_DA_SAIDA_DO_BASH;
+  }
+  return ambiente;
+}
+
 /**
  * Ambiente do processo do turno. Uma `CLAUDE_CODE_EFFORT_LEVEL` herdada do
  * servidor venceria o `--effort` e o `effort` do executor e anularia o esforço
@@ -650,5 +664,6 @@ export function montarAmbiente(base: NodeJS.ProcessEnv, pedido: PedidoDeTurno): 
   ambiente.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS = String(
     pedido.configuracao.quantidadeDeSubagentes.limite,
   );
+  limitarSaidaDoBash(ambiente);
   return comVariaveisDeArtefatoOnline(ambiente, publicaOnlineNoTurno(pedido));
 }

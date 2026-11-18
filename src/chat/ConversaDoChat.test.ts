@@ -388,10 +388,10 @@ describe("ConversaDoChat — origem da pergunta", () => {
 });
 
 describe("PreferenciasDoChat", () => {
-  it("nasce com opus e esforço alto", () => {
+  it("nasce com sonnet e esforço médio", () => {
     expect(PreferenciasDoChat.padrao().paraDados()).toEqual({
-      modelo: "opus",
-      esforco: "alto",
+      modelo: "sonnet",
+      esforco: "medio",
       permitirArtefatosOnline: false,
     });
   });
@@ -402,10 +402,10 @@ describe("PreferenciasDoChat", () => {
 
     expect(alterada.paraDados()).toEqual({
       modelo: "fable",
-      esforco: "alto",
+      esforco: "medio",
       permitirArtefatosOnline: false,
     });
-    expect(original.modelo).toBe("opus");
+    expect(original.modelo).toBe("sonnet");
     expect(Object.isFrozen(original)).toBe(true);
   });
 
@@ -416,7 +416,7 @@ describe("PreferenciasDoChat", () => {
 
   it("aceita o esforço ultracode", () => {
     expect(PreferenciasDoChat.padrao().com({ esforco: "ultracode" }).paraDados()).toEqual({
-      modelo: "opus",
+      modelo: "sonnet",
       esforco: "ultracode",
       permitirArtefatosOnline: false,
     });

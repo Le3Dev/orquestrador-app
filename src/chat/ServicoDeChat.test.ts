@@ -190,8 +190,8 @@ describe("ServicoDeChat", () => {
       pastaDaSessao: "/dados/chat/sessao",
       pastaDosProjetos: raiz,
       pastaDeArtefatos: "/dados/artefatos/entrada/chat",
-      modelo: "opus",
-      esforco: "alto",
+      modelo: "sonnet",
+      esforco: "medio",
       anexos: [],
       pastaDosAnexos: null,
     });
@@ -511,7 +511,7 @@ describe("ServicoDeChat", () => {
     const estado = servico.estado();
     expect(estado.sessaoId).not.toBe("sessao-1");
     expect(estado.mensagens).toEqual([]);
-    expect(estado.preferencias).toEqual({ modelo: "fable", esforco: "alto", permitirArtefatosOnline: false });
+    expect(estado.preferencias).toEqual({ modelo: "fable", esforco: "medio", permitirArtefatosOnline: false });
     expect(estado.alteracoesAutorizadas).toBe(false);
   });
 
@@ -525,7 +525,7 @@ describe("ServicoDeChat", () => {
 
   it("alterarPreferencias publica o evento e vale para a próxima pergunta", async () => {
     expect(await servico.alterarPreferencias({ esforco: "maximo" })).toEqual({
-      modelo: "opus",
+      modelo: "sonnet",
       esforco: "maximo",
       permitirArtefatosOnline: false,
     });

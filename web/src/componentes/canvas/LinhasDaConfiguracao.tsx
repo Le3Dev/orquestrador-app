@@ -6,7 +6,9 @@ import type {
   NivelDePermissao,
   PerfilDeInstrucoes,
 } from "../../shared/api/tipos";
-import { ROTULOS_DOS_ESFORCOS } from "../../shared/formatacao";
+import {
+  ROTULOS_DOS_ESFORCOS,
+} from "../../shared/formatacao";
 import { Dica } from "../Dica";
 
 /*

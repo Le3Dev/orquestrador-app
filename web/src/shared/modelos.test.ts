@@ -112,13 +112,13 @@ describe("motores", () => {
         motorDoOrquestrador: "codex",
         modeloDoOrquestrador: "padrao",
         motorDosSubagentes: "claude-code",
-        modeloDosSubagentes: "opus",
+        modeloDosSubagentes: "sonnet",
       });
       expect(comMotorDoPapel(configuracao, "subagentes", "copilot")).toMatchObject({
         motorDosSubagentes: "copilot",
         modeloDosSubagentes: "padrao",
         motorDoOrquestrador: "claude-code",
-        modeloDoOrquestrador: "opus",
+        modeloDoOrquestrador: "sonnet",
       });
     });
 

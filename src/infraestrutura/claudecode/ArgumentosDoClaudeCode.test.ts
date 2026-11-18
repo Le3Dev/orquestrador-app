@@ -13,6 +13,7 @@ import { SelecaoDeSubagentesProntos, subagentesProntosSelecionados } from "../..
 import { NOMES_DAS_FERRAMENTAS_DO_NAVEGADOR } from "../mcp/FerramentasDoNavegador";
 import { nomeDaFerramentaNoClaudeCode } from "../mcp/ServidorMcpDoApp";
 import {
+  limitarSaidaDoBash,
   comandosProibidosDoTurno,
   configuracoesDaSessao,
   definicaoDosAgentes,
@@ -507,6 +508,20 @@ describe("definicaoDosAgentes", () => {
 });
 
 describe("montarAmbiente", () => {
+  it("limita a saída do Bash a 15 mil e não grava a janela de contexto", () => {
+    const ambiente = montarAmbiente({ PATH: "x" }, pedido(false));
+
+    expect(ambiente.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
+    expect(ambiente.BASH_MAX_OUTPUT_LENGTH).toBe("15000");
+  });
+
+  it("respeita BASH_MAX_OUTPUT_LENGTH herdado do ambiente", () => {
+    expect(montarAmbiente({ PATH: "x", BASH_MAX_OUTPUT_LENGTH: "40000" }, pedido(false)).BASH_MAX_OUTPUT_LENGTH).toBe(
+      "40000",
+    );
+    expect(limitarSaidaDoBash({ BASH_MAX_OUTPUT_LENGTH: "40000" }).BASH_MAX_OUTPUT_LENGTH).toBe("40000");
+  });
+
   it("remove as variáveis da sessão pai e limita a concorrência ao teto configurado", () => {
     const ambiente = montarAmbiente(
       { PATH: "x", CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: "pai", CLAUDE_CODE_USE_FOUNDRY: "1" },

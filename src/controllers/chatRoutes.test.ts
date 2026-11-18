@@ -130,7 +130,7 @@ describe("rotas do chat", () => {
       sessaoId: "sessao-1",
       situacao: "ocioso",
       alteracoesAutorizadas: false,
-      preferencias: { modelo: "opus", esforco: "alto", permitirArtefatosOnline: false },
+      preferencias: { modelo: "sonnet", esforco: "medio", permitirArtefatosOnline: false },
       mensagens: [],
       ultimaSequencia: 0,
       cota: null,
@@ -334,7 +334,7 @@ describe("rotas do chat", () => {
   it("PATCH /chat/preferencias altera e valida", async () => {
     const ok = await enviar("/chat/preferencias", "PATCH", { modelo: "fable" });
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ modelo: "fable", esforco: "alto", permitirArtefatosOnline: false });
+    expect(await ok.json()).toEqual({ modelo: "fable", esforco: "medio", permitirArtefatosOnline: false });
 
     const modelo = await enviar("/chat/preferencias", "PATCH", { modelo: "gpt" });
     expect(modelo.status).toBe(400);
@@ -348,13 +348,13 @@ describe("rotas do chat", () => {
   it("PATCH /chat/preferencias liga e desliga os artefatos online, mantém o resto e recusa o que não é booleano", async () => {
     const ligar = await enviar("/chat/preferencias", "PATCH", { permitirArtefatosOnline: true });
     expect(ligar.status).toBe(200);
-    expect(await ligar.json()).toEqual({ modelo: "opus", esforco: "alto", permitirArtefatosOnline: true });
+    expect(await ligar.json()).toEqual({ modelo: "sonnet", esforco: "medio", permitirArtefatosOnline: true });
 
     const outroCampo = await enviar("/chat/preferencias", "PATCH", { modelo: "fable" });
-    expect(await outroCampo.json()).toEqual({ modelo: "fable", esforco: "alto", permitirArtefatosOnline: true });
+    expect(await outroCampo.json()).toEqual({ modelo: "fable", esforco: "medio", permitirArtefatosOnline: true });
 
     const desligar = await enviar("/chat/preferencias", "PATCH", { permitirArtefatosOnline: false });
-    expect(await desligar.json()).toEqual({ modelo: "fable", esforco: "alto", permitirArtefatosOnline: false });
+    expect(await desligar.json()).toEqual({ modelo: "fable", esforco: "medio", permitirArtefatosOnline: false });
 
     for (const valor of ["sim", 1, null]) {
       const invalido = await enviar("/chat/preferencias", "PATCH", { permitirArtefatosOnline: valor });

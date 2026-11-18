@@ -7,13 +7,13 @@ import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "./modelos";
 describe("resumoDaConfiguracao", () => {
   it("resume permissão, modelos e subagentes, sem falar de artefatos online com a opção desligada", () => {
     expect(resumoDaConfiguracao(CONFIGURACAO_PADRAO_DO_ORQUESTRADOR)).toBe(
-      "Somente leitura, Opus (esforço automático) com até 3 subagentes Opus.",
+      "Somente leitura, Sonnet (esforço médio) com até 3 subagentes Sonnet (esforço médio).",
     );
   });
 
   it("com a publicação de artefatos online ligada, avisa no fim", () => {
     expect(resumoDaConfiguracao({ ...CONFIGURACAO_PADRAO_DO_ORQUESTRADOR, permitirArtefatosOnline: true })).toBe(
-      "Somente leitura, Opus (esforço automático) com até 3 subagentes Opus. Artefatos online ligados.",
+      "Somente leitura, Sonnet (esforço médio) com até 3 subagentes Sonnet (esforço médio). Artefatos online ligados.",
     );
   });
 
@@ -53,7 +53,7 @@ describe("resumoDaConfiguracao", () => {
           motorDoOrquestrador: "codex",
           modeloDoOrquestrador: "gpt-5",
         }),
-      ).toBe("Somente leitura, Codex (gpt-5) com até 3 subagentes Opus.");
+      ).toBe("Somente leitura, Codex (gpt-5) com até 3 subagentes Sonnet (esforço médio).");
     });
 
     it("cada papel no seu motor: o Claude Code mantém modelo e esforço, o outro mostra só o motor", () => {
@@ -64,7 +64,7 @@ describe("resumoDaConfiguracao", () => {
           motorDosSubagentes: "codex",
           modeloDosSubagentes: "padrao",
         }),
-      ).toBe("Somente leitura, Opus (esforço alto) com até 3 subagentes Codex.");
+      ).toBe("Somente leitura, Sonnet (esforço alto) com até 3 subagentes Codex.");
     });
 
     it("lista a reserva na ordem, e o navegador do agente, no fim", () => {
@@ -76,7 +76,7 @@ describe("resumoDaConfiguracao", () => {
           navegadorDoAgente: true,
         }),
       ).toBe(
-        "Somente leitura, Opus (esforço automático) com até 3 subagentes Opus. Reserva: Codex, GitHub Copilot CLI. Artefatos online ligados. Navegador do agente ligado.",
+        "Somente leitura, Sonnet (esforço médio) com até 3 subagentes Sonnet (esforço médio). Reserva: Codex, GitHub Copilot CLI. Artefatos online ligados. Navegador do agente ligado.",
       );
     });
   });

@@ -34,8 +34,8 @@ export const ESFORCOS_DO_CHAT: readonly { esforco: EsforcoDeRaciocinio; rotulo: 
 ];
 
 export const PREFERENCIAS_PADRAO_DO_CHAT: PreferenciasDoChat = {
-  modelo: "opus",
-  esforco: "alto",
+  modelo: "sonnet",
+  esforco: "medio",
   permitirArtefatosOnline: false,
 };
 
@@ -45,11 +45,11 @@ export const PREFERENCIAS_PADRAO_DO_CHAT: PreferenciasDoChat = {
  */
 export const CONFIGURACAO_PADRAO_DO_ORQUESTRADOR: DadosDaConfiguracao = {
   motorDoOrquestrador: "claude-code",
-  modeloDoOrquestrador: "opus",
-  esforcoDoOrquestrador: "padrao",
+  modeloDoOrquestrador: "sonnet",
+  esforcoDoOrquestrador: "medio",
   motorDosSubagentes: "claude-code",
-  modeloDosSubagentes: "opus",
-  esforcoDosSubagentes: "padrao",
+  modeloDosSubagentes: "sonnet",
+  esforcoDosSubagentes: "medio",
   ordemDeReserva: [],
   navegadorDoAgente: false,
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },

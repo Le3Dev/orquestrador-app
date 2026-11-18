@@ -45,6 +45,7 @@ export interface DadosDaQuantidade {
   limite: number;
 }
 
+
 export interface DadosDaConfiguracao {
   /** O motor de cada papel. Ausentes (servidores e eventos anteriores aos outros motores): valem "claude-code". */
   motorDoOrquestrador?: Motor;

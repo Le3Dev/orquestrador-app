@@ -11,7 +11,7 @@ export interface DadosDasPreferenciasDoChat {
 
 export type AlteracoesDasPreferenciasDoChat = Partial<DadosDasPreferenciasDoChat>;
 
-const PADRAO: DadosDasPreferenciasDoChat = { modelo: "opus", esforco: "alto", permitirArtefatosOnline: false };
+const PADRAO: DadosDasPreferenciasDoChat = { modelo: "sonnet", esforco: "medio", permitirArtefatosOnline: false };
 
 /**
  * Modelo e esforço com que o chat responde. Objeto de valor: para alterar,

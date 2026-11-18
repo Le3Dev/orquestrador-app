@@ -150,7 +150,7 @@ export function separarPerguntasDoApp(resposta: string): RespostaSemPerguntas {
 /** O exemplo de bloco que vai na regra. */
 const EXEMPLO_DO_BLOCO = [
   "```" + MARCA_DA_PERGUNTA,
-  '{"perguntas":[{"pergunta":"Qual banco usar?","opcoes":[{"rotulo":"Postgres","descricao":"já usado no projeto"},"SQLite"],"multipla":false}]}',
+  '{"perguntas":[{"pergunta":"Qual banco?","opcoes":[{"rotulo":"Postgres","descricao":"já usado"},"SQLite"]}]}',
   "```",
 ];
 
@@ -161,10 +161,8 @@ const EXEMPLO_DO_BLOCO = [
  */
 export function linhasDaRegraDasPerguntas(): string[] {
   return [
-    `Perguntas com opções: quando precisar que o usuário decida entre opções claras (qual abordagem, qual biblioteca, qual escopo), não pergunte só no texto; inclua um bloco \`\`\`${MARCA_DA_PERGUNTA}, que o app mostra como botões clicáveis. Não use o bloco para perguntas abertas, que pedem resposta livre: essas vão no texto normal.`,
-    `Formato: JSON com "perguntas" (de 1 a ${MAXIMO_DE_PERGUNTAS}); cada uma com "pergunta", "opcoes" (de ${MINIMO_DE_OPCOES} a ${MAXIMO_DE_OPCOES}; cada opção é um texto curto ou {"rotulo","descricao"}, com a descrição opcional) e "multipla" (true quando dá para escolher mais de uma; padrão false). Exemplo:`,
+    `Perguntas com opções: para decisões entre opções claras, inclua um bloco \`\`\`${MARCA_DA_PERGUNTA} (o app mostra botões); perguntas abertas vão no texto. JSON com "perguntas" (1 a ${MAXIMO_DE_PERGUNTAS}), cada uma com "pergunta", "opcoes" (${MINIMO_DE_OPCOES} a ${MAXIMO_DE_OPCOES}; texto ou {"rotulo","descricao"}) e "multipla" (padrão false). Exemplo:`,
     ...EXEMPLO_DO_BLOCO,
-    'Não repita a pergunta nem as opções no texto fora do bloco. O app já mostra um campo "Outro" para resposta livre: não inclua "Outro" nas opções.',
-    'Depois do bloco, encerre a resposta e espere: a escolha do usuário chega como a próxima mensagem, uma linha por pergunta, no formato "pergunta → escolha".',
+    'Não repita a pergunta nem as opções fora do bloco, nem inclua "Outro" (o app o mostra). Encerre a resposta no bloco: a escolha chega na próxima mensagem, uma linha por pergunta, no formato "pergunta → escolha".',
   ];
 }

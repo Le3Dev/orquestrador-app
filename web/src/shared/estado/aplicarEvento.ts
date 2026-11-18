@@ -713,6 +713,7 @@ function novoTurno(evento: Extract<EventoRegistrado, { tipo: "turno_iniciado" }>
       permitirCommitEPush: evento.configuracao.permitirCommitEPush ?? false,
       // Os anteriores à opção de artefatos online rodaram sem as ferramentas de publicação.
       permitirArtefatosOnline: evento.configuracao.permitirArtefatosOnline ?? false,
+      // Os anteriores ao teto de contexto rodaram com o contexto econômico.
       esforcoDoOrquestrador: evento.configuracao.esforcoDoOrquestrador ?? "padrao",
       esforcoDosSubagentes: evento.configuracao.esforcoDosSubagentes ?? "padrao",
       // Os anteriores às instruções personalizadas rodaram sem elas.
