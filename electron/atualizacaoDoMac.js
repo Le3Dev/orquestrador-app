@@ -14,7 +14,8 @@
 //      commit e que a branch avança direto (fast-forward); senão "erro" e nada
 //      é alterado. Depois "baixando", com as etapas "Baixando o código" (merge
 //      --ff-only, ou checkout --detach com o HEAD destacado), "Instalando
-//      dependências" (npm install e npm --prefix web install) e "Gerando o app"
+//      dependências" (npm ci e npm --prefix web ci, que seguem o
+//      package-lock.json sem reescrevê-lo) e "Gerando o app"
 //      (npm run dist:mac). Concluído → "pronta".
 //   3. Instalar: um script desacoplado (trocarAppDoMac.sh) espera o app
 //      fechar, guarda o .app atual num backup na pasta temporária, copia o novo
@@ -457,8 +458,8 @@ function criarServicoDeAtualizacaoDoMac({
     await etapa(ETAPA_CODIGO, "git", branch ? ["merge", "--ff-only", `${remoto}/main`] : ["checkout", "--detach", `${remoto}/main`], TEMPO_DO_GIT_MS);
 
     definir({ situacao: "baixando", versaoNova, etapa: ETAPA_DEPENDENCIAS });
-    await etapa(ETAPA_DEPENDENCIAS, "npm", ["install"], TEMPO_DAS_DEPENDENCIAS_MS);
-    await etapa(ETAPA_DEPENDENCIAS, "npm", ["--prefix", "web", "install"], TEMPO_DAS_DEPENDENCIAS_MS);
+    await etapa(ETAPA_DEPENDENCIAS, "npm", ["ci"], TEMPO_DAS_DEPENDENCIAS_MS);
+    await etapa(ETAPA_DEPENDENCIAS, "npm", ["--prefix", "web", "ci"], TEMPO_DAS_DEPENDENCIAS_MS);
 
     definir({ situacao: "baixando", versaoNova, etapa: ETAPA_APP });
     await etapa(ETAPA_APP, "npm", ["run", "dist:mac"], TEMPO_DA_GERACAO_MS);

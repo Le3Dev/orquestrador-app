@@ -234,7 +234,7 @@ describe("serviço do Mac: verificar", () => {
     expect(mudancas.every((estado) => estado.progresso === null && estado.orquestradoresTrabalhando === null)).toBe(true);
     expect(servico.obter()).toMatchObject({ situacao: "pronta", versaoNova: "bbbbbbb", versaoAtual: "0.2.2 (aaaaaaa)" });
     const linhas = executor.linhas();
-    const ordem = ["git fetch upstream main", "git merge --ff-only upstream/main", "npm install", "npm --prefix web install", "npm run dist:mac"];
+    const ordem = ["git fetch upstream main", "git merge --ff-only upstream/main", "npm ci", "npm --prefix web ci", "npm run dist:mac"];
     expect(ordem.map((linha) => linhas.indexOf(linha))).toEqual([...ordem.map((linha) => linhas.indexOf(linha))].sort((a, b) => a - b));
     expect(ordem.every((linha) => linhas.includes(linha))).toBe(true);
     expect(executor.chamadas.every((chamada) => chamada.cwd === PASTA)).toBe(true);
@@ -305,8 +305,8 @@ describe("serviço do Mac: verificar", () => {
 
   it.each([
     ["git merge --ff-only upstream/main", ETAPA_CODIGO],
-    ["npm install", ETAPA_DEPENDENCIAS],
-    ["npm --prefix web install", ETAPA_DEPENDENCIAS],
+    ["npm ci", ETAPA_DEPENDENCIAS],
+    ["npm --prefix web ci", ETAPA_DEPENDENCIAS],
     ["npm run dist:mac", ETAPA_APP],
   ])("falha em %s → erro com a etapa e o fim do log (mesmo automático)", async (linha, nomeDaEtapa) => {
     const { servico, executor } = criarServicoDoMac({
@@ -637,7 +637,7 @@ describe.skipIf(!temGit || !ehPosix)("integração com git de verdade", () => {
     await segundo.servico.emAndamento();
     expect(segundo.servico.obter()).toMatchObject({ situacao: "pronta", versaoNova: novo.slice(0, 7) });
     expect(rodarGit(codigo, "rev-parse", "HEAD")).toBe(novo);
-    expect(segundo.npm).toEqual(["npm install", "npm --prefix web install", "npm run dist:mac"]);
+    expect(segundo.npm).toEqual(["npm ci", "npm --prefix web ci", "npm run dist:mac"]);
   }, 60_000);
 
   it("pasta suja: erro e o HEAD não muda", async () => {

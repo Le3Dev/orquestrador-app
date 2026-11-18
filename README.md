@@ -1739,12 +1739,12 @@ flowchart LR
   - o `dist:mac` grava no `package.json` empacotado a pasta do código (`repositorioDoMac`) e o commit; sem essa pasta, ou se ela não for mais um repositório git, a atualização fica indisponível, como antes;
   - **verificar:** `git fetch` do remoto `upstream` (ou `origin`, sem ele) e compara a `main` do remoto com o commit do app. Mesma verificação automática do Windows (~10 s depois da janela e a cada 4 h); erro na busca automática só vai para o log;
   - **antes de mexer:** recusa a pasta com alterações rastreadas sem commit e a branch que não avança direto (fast-forward). Nesses casos nada é alterado;
-  - **gerar:** avança o código, roda `npm install` (raiz e `web/`) e `npm run dist:mac`, com as etapas mostradas na tela. Uma geração por vez;
+  - **gerar:** avança o código, roda `npm ci` (raiz e `web/`, seguindo o `package-lock.json` sem reescrevê-lo; com `npm install` o lockfile mudava e a pasta deixava de estar limpa na verificação seguinte) e `npm run dist:mac`, com as etapas mostradas na tela. Uma geração por vez;
   - **reiniciar:** antes, confere o registro `processos-em-execucao.json`. Com orquestradores trabalhando, oferece esperar eles terminarem (situação "aguardando", com a contagem); sem ninguém, reinicia. Um script desacoplado espera o app fechar, guarda o `.app` atual num backup na pasta temporária, copia o novo com `ditto` e o abre; se a cópia falhar, o backup volta para o lugar.
 - *Consequências:*
   - no Windows nada muda no caminho da atualização (`electron-updater` e Releases do GitHub). A espera pelos orquestradores antes de reiniciar é a mesma tela nos dois sistemas;
   - o Mac atualiza a partir da pasta do código de quem gerou o app: ela precisa continuar existindo, limpa e com acesso ao remoto;
-  - a geração leva minutos e usa memória (npm install e build com o app aberto). O app segue usável enquanto isso;
+  - a geração leva minutos e usa memória (npm ci e build com o app aberto). O app segue usável enquanto isso;
   - o backup do `.app` fica na pasta temporária, que o sistema limpa sozinho com o tempo.
 
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
