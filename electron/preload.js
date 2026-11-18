@@ -23,10 +23,18 @@
 
 const { contextBridge, ipcRenderer } = require("electron");
 
+// Cópia de teste: o nome da instância de desenvolvimento, que o main passa
+// como argumento da janela (--copia-de-teste=<nome>, nunca no app instalado).
+const ARGUMENTO_DA_COPIA_DE_TESTE = "--copia-de-teste=";
+const argumentoDaCopiaDeTeste = process.argv.find((argumento) => argumento.startsWith(ARGUMENTO_DA_COPIA_DE_TESTE));
+const copiaDeTeste = argumentoDaCopiaDeTeste ? argumentoDaCopiaDeTeste.slice(ARGUMENTO_DA_COPIA_DE_TESTE.length) || null : null;
+
 contextBridge.exposeInMainWorld("electron", {
   // Marca para a SPA detectar que está rodando dentro do app desktop.
   desktop: true,
   plataforma: process.platform,
+  // Cópia de teste: string com o nome da cópia, ou null (sempre null no app instalado).
+  copiaDeTeste,
 
   janela: {
     minimizar: () => ipcRenderer.invoke("janela:minimizar"),
