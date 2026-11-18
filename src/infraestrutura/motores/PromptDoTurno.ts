@@ -16,8 +16,9 @@ export const MARCA_DAS_REGRAS_DO_SUBAGENTE = "regras-do-subagente";
 
 /**
  * A mensagem do turno do Orquestrador: o bloco `<configuracao-do-pedido>`, os
- * itens ligados, o contexto da troca de motor e o pedido do usuário — o mesmo
- * texto que o Claude Code recebe.
+ * itens ligados, o contexto da troca de motor, os vinculados e o pedido do
+ * usuário (ou a mensagem do vinculado que o enviou) — o mesmo texto que o
+ * Claude Code recebe.
  */
 export function mensagemDoTurno(pedido: PedidoDeTurno, plataforma: Plataforma): string {
   return mensagemParaOOrquestrador(
@@ -34,6 +35,8 @@ export function mensagemDoTurno(pedido: PedidoDeTurno, plataforma: Plataforma): 
     pedido.previasAbertas ?? [],
     pedido.contextoDaTroca,
     precisaDeDelegacaoPeloApp(pedido.configuracao),
+    pedido.vinculados ?? [],
+    pedido.origemDaMensagem ?? null,
   );
 }
 

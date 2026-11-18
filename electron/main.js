@@ -75,6 +75,7 @@ const {
   net: redeDoElectron,
   nativeImage,
   Notification,
+  safeStorage,
   screen,
   session,
   shell,
@@ -893,6 +894,39 @@ async function abrirJanelaPrincipal() {
     return;
   }
   if (!janela.isDestroyed()) janela.show();
+  avisarDoTesteGratis();
+}
+
+// Teste grátis: uma Notification por dia ("faltam N dias") ao abrir a janela
+// principal; o clique abre a página de planos. A data do último aviso fica num
+// arquivo simples na pasta do usuário.
+function avisarDoTesteGratis() {
+  if (!EXIGE_LICENCA) return;
+  try {
+    const st = licenca.status();
+    if (!st.conectado || st.plano !== "teste" || !Notification.isSupported()) return;
+    const hoje = new Date().toISOString().slice(0, 10);
+    const arquivo = path.join(pastaDoUsuario(), "aviso-do-teste.txt");
+    let ultimo = "";
+    try {
+      ultimo = fs.readFileSync(arquivo, "utf8").trim();
+    } catch {
+      /* nunca avisou */
+    }
+    if (ultimo === hoje) return;
+    const dias = st.diasRestantesDoTeste ?? 0;
+    const aviso = new Notification({
+      title: config.productName,
+      body: `Teste grátis: faltam ${dias} ${dias === 1 ? "dia" : "dias"}. Clique para assinar.`,
+    });
+    aviso.on("click", () => {
+      if (config.urlParaAssinar) abrirNoNavegador(config.urlParaAssinar);
+    });
+    aviso.show();
+    fs.writeFileSync(arquivo, hoje, "utf8");
+  } catch (erro) {
+    registrarNoLog("app", `Não foi possível avisar do teste grátis: ${erro.message || erro}`);
+  }
 }
 
 // Depois da licença: primeira abertura, ajustes (se a pasta dos projetos ou o
@@ -1008,8 +1042,13 @@ const maximizacoes = new WeakMap();
 // ──────────────────────────────────────────────────────────────────────────
 // IPC — licença. Após ativar com sucesso, segue para a configuração/tela.
 // ──────────────────────────────────────────────────────────────────────────
-ipcMain.handle("licenca:activate", async (_e, chave) => {
-  const resultado = await licenca.activate(chave);
+ipcMain.handle("licenca:pedir-codigo", (_e, email) => licenca.pedirCodigo(email));
+ipcMain.handle("licenca:entrar", async (_e, dados) => {
+  const resultado = await licenca.entrar({
+    email: dados?.email,
+    codigo: dados?.codigo,
+    substituirOutraMaquina: dados?.substituirOutraMaquina === true,
+  });
   if (resultado.ok) {
     ligarRevalidacaoDaLicenca();
     await seguirAposLicenca();
@@ -1017,10 +1056,9 @@ ipcMain.handle("licenca:activate", async (_e, chave) => {
   }
   return resultado;
 });
-ipcMain.handle("licenca:validate", () => licenca.validar());
-ipcMain.handle("licenca:deactivate", async () => {
+ipcMain.handle("licenca:sair", async () => {
   licenca.pararRevalidacao();
-  return licenca.desativar();
+  return licenca.sair();
 });
 ipcMain.handle("licenca:status", () => licenca.status());
 ipcMain.handle("licenca:bloqueio", () => mensagemDeBloqueioDaLicenca);
@@ -1176,6 +1214,24 @@ function definirFocavelDoModoInvisivel(focavel) {
       janela.setFocusable(true);
       janela.focus();
       janela.webContents.focus();
+      // No Windows, focar (SetForegroundWindow) uma janela skipTaskbar às vezes faz o
+      // Explorer reinserir o ícone na barra de tarefas mesmo já tendo sido escondido
+      // ao entrar no modo; reforça aqui. E tirar o WS_EX_NOACTIVATE (setFocusable(true))
+      // às vezes só vale no próximo quadro: sem reforçar, o campo não ganha o teclado no
+      // primeiro clique (ver ADR-42, "falhas conhecidas do setFocusable em tempo de execução").
+      janela.setSkipTaskbar(true);
+      setImmediate(() => {
+        if (modoInvisivel === atual && !janela.isDestroyed()) {
+          janela.setSkipTaskbar(true);
+          // O ganho de foco também pode fazer a janela cair de nível (perder o "sempre no topo")
+          // momentaneamente; reforça junto com o skipTaskbar, no mesmo quadro seguinte.
+          janela.setAlwaysOnTop(true, "screen-saver");
+          if (atual.janela.isFocusable() && !janela.isFocused()) {
+            janela.focus();
+            janela.webContents.focus();
+          }
+        }
+      });
     } else {
       janela.setFocusable(false);
       if (janela.isFocused()) janela.blur();
@@ -1607,7 +1663,20 @@ if (!conseguiuLock) {
     mac.carregarPathDoShell();
     // No Mac o ícone da janela não vale: o do Dock vem daqui fora do app empacotado.
     if (mac.ehMac && app.dock) app.dock.setIcon(path.join(__dirname, "icones", "icone.png"));
-    licenca.iniciar(pastaDoUsuario(), { log: registrarNoLog });
+    // A sessão da licença é um segredo: cifrada com o cofre do sistema.
+    const cifraDisponivel = safeStorage.isEncryptionAvailable();
+    if (!cifraDisponivel) {
+      registrarNoLog("licenca", "Cofre do sistema (safeStorage) indisponível: a sessão da licença ficará sem cifra.");
+    }
+    licenca.iniciar(pastaDoUsuario(), {
+      log: registrarNoLog,
+      ...(cifraDisponivel
+        ? {
+            cifrar: (texto) => safeStorage.encryptString(texto).toString("base64"),
+            decifrar: (texto) => safeStorage.decryptString(Buffer.from(texto, "base64")),
+          }
+        : {}),
+    });
     // Antes de abrir a janela principal (a sessão só existe depois do ready).
     registrarEscutaDoModoInvisivel();
     // Ctrl+\ (alternar o modo invisível) vale do ready até o will-quit.

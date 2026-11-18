@@ -347,7 +347,20 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
   }
 
   function receberDitado(ditado: string): void {
-    setTexto((atual) => juntarDitado(atual, ditado));
+    const elemento = campo.current;
+    const selecao =
+      elemento === null ? undefined : { inicio: elemento.selectionStart, fim: elemento.selectionEnd };
+    setTexto((atual) => {
+      const novo = juntarDitado(atual, ditado, selecao);
+      if (elemento !== null && selecao !== undefined && selecao.inicio !== atual.length) {
+        const posicao = novo.length - (atual.length - selecao.fim);
+        requestAnimationFrame(() => {
+          elemento.setSelectionRange(posicao, posicao);
+          ajustarAltura();
+        });
+      }
+      return novo;
+    });
     requestAnimationFrame(ajustarAltura);
     campo.current?.focus();
   }

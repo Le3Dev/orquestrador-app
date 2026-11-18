@@ -10,9 +10,11 @@ import { SubagentesDoChat } from "./chat/SubagentesDoChat";
 import { acessoSoPeloApp } from "./controllers/acessoSoPeloApp";
 import { criarAlteracoesRoutes } from "./controllers/alteracoesRoutes";
 import { criarArquivosRoutes } from "./controllers/arquivosRoutes";
+import { temCorpoComLimiteProprio } from "./controllers/artefatosRoutes";
 import { CanalDoChat, criarChatRoutes } from "./controllers/chatRoutes";
 import { criarEscutaRoutes } from "./controllers/escutaRoutes";
 import { criarNotasRoutes } from "./controllers/notasRoutes";
+import { criarVinculosRoutes } from "./controllers/vinculosRoutes";
 import { criarOrquestradoresRoutes } from "./controllers/orquestradoresRoutes";
 import { criarPluginsRoutes } from "./controllers/pluginsRoutes";
 import { criarPromptsRoutes } from "./controllers/promptsRoutes";
@@ -29,6 +31,7 @@ import { ArmazemDeAnexosEmArquivo } from "./infraestrutura/arquivos/ArmazemDeAne
 import { PastaDeEntradaDosArtefatos } from "./infraestrutura/arquivos/ColetorDeArtefatosEmPasta";
 import { ExploradorDePastas } from "./infraestrutura/arquivos/ExploradorDePastas";
 import { RepositorioDeNotasEmArquivo } from "./infraestrutura/arquivos/RepositorioDeNotasEmArquivo";
+import { RepositorioDeVinculosEmArquivo } from "./infraestrutura/arquivos/RepositorioDeVinculosEmArquivo";
 import { RepositorioDeOrquestradoresEmArquivo } from "./infraestrutura/arquivos/RepositorioDeOrquestradoresEmArquivo";
 import { RepositorioDePreferenciasEmArquivo } from "./infraestrutura/arquivos/RepositorioDePreferenciasEmArquivo";
 import { RepositorioDoChatEmArquivo } from "./infraestrutura/arquivos/RepositorioDoChatEmArquivo";
@@ -77,6 +80,7 @@ import { arquivoDeConfiguracaoDoClaude, criarLeitorDeNomesDoUsuario } from "./pl
 import { ServicoDeMelhoriaDePrompt } from "./prompts/ServicoDeMelhoriaDePrompt";
 import { LeitorDeSkills } from "./skills/LeitorDeSkills";
 import { ServicoDeTerminais } from "./terminais/ServicoDeTerminais";
+import { ServicoDeVinculos } from "./vinculos/ServicoDeVinculos";
 
 type ConfiguracaoDaMontagem = Pick<
   Configuracao,
@@ -105,7 +109,15 @@ export function montarAplicacao(
     );
   }
   // Mensagens podem levar até 10 anexos e 100 MB no total, em base64 (4/3 do tamanho).
-  aplicacao.use(express.json({ limit: "150mb" }));
+  // Rotas com limite próprio (o desenho de um artefato, 1 MB) leem o corpo elas mesmas.
+  const lerCorpoJson = express.json({ limit: "150mb" });
+  aplicacao.use((requisicao, resposta, proximo) => {
+    if (temCorpoComLimiteProprio(requisicao.path)) {
+      proximo();
+      return;
+    }
+    lerCorpoJson(requisicao, resposta, proximo);
+  });
 
   registrarRotas(aplicacao);
 
@@ -187,6 +199,7 @@ async function iniciar(): Promise<void> {
 
   const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(configuracao.pastaDeDados);
   const notas = await RepositorioDeNotasEmArquivo.abrir(configuracao.pastaDeDados);
+  const repositorioDeVinculos = await RepositorioDeVinculosEmArquivo.abrir(configuracao.pastaDeDados);
   const preferencias = await RepositorioDePreferenciasEmArquivo.abrir(configuracao.pastaDeDados);
   const repositorioDoChat = await RepositorioDoChatEmArquivo.abrir(configuracao.pastaDeDados, randomUUID);
 
@@ -236,12 +249,12 @@ async function iniciar(): Promise<void> {
   // Windows, PowerShell): lida uma vez aqui, o domínio só a recebe.
   const plataforma: Plataforma = process.platform === "win32" ? "windows" : "unix";
 
-  // Navegador do agente (ADR-44): o Chromium é do Electron; o servidor MCP do app (127.0.0.1) leva
+  // Navegador do agente (ADR-46): o Chromium é do Electron; o servidor MCP do app (127.0.0.1) leva
   // as ferramentas `navegador_*` ao Claude Code. Fora do app (`npm run dev`), a porta é nula e as
   // ferramentas respondem que o navegador só existe no desktop.
   const navegador = montarNavegador({ portaDoProcessoPai: portaDoProcessoPai() });
 
-  // Motores (ADR-46): o Claude Code, o Codex (`codex app-server`) e o GitHub Copilot CLI (ACP), e o
+  // Motores (ADR-48): o Claude Code, o Codex (`codex app-server`) e o GitHub Copilot CLI (ACP), e o
   // roteador que manda cada turno ao motor do papel (com a reserva). O roteador é o único ponto de entrada
   // do serviço. Os três compartilham o servidor MCP do app (o do navegador), onde o `montarMotores`
   // registra a delegação de subtarefas; o navegador entra pelo `ferramentasDoTurno`.
@@ -265,7 +278,19 @@ async function iniciar(): Promise<void> {
     ferramentasDoTurno: FERRAMENTAS_DO_APP_NO_TURNO,
   });
 
-  const servico = new ServicoDeOrquestracao({
+  // Vínculos entre Orquestradores. A mensagem entra direto na fila do destino
+  // pelo `servico` de orquestração, criado logo abaixo (que, por sua vez, usa
+  // os vínculos): a referência só é usada depois da montagem.
+  const vinculos = new ServicoDeVinculos({
+    repositorio: repositorioDeVinculos,
+    orquestradores: { nomeDe: (id) => repositorio.buscarPorId(id)?.nome ?? null },
+    entregar: (destinoId, texto, origem) => servico.receberDeVinculado(destinoId, texto, origem),
+    gerarId: randomUUID,
+    agora: () => new Date(),
+  });
+
+  const servico: ServicoDeOrquestracao = new ServicoDeOrquestracao({
+    vinculos,
     repositorio,
     motor: motores.motor,
     execucoes,
@@ -382,7 +407,7 @@ async function iniciar(): Promise<void> {
   // Artefatos: coleta o que os agentes gravam na pasta de entrada e serve na tela.
   const artefatos = await montarArtefatos({ pastaDeDados });
 
-  // Rotinas (ADR-45): contexto próprio, ligado aos Orquestradores só pela porta `ExecutorDePedidos`, que
+  // Rotinas (ADR-47): contexto próprio, ligado aos Orquestradores só pela porta `ExecutorDePedidos`, que
   // manda cada pedido pelo `ServicoDeOrquestracao` e lê o fim do turno nos eventos do canal.
   const rotinas = await montarRotinas({
     pastaDeDados,
@@ -431,6 +456,7 @@ async function iniciar(): Promise<void> {
         servico: new ServicoDeNotas({ repositorio: notas, gerarId: randomUUID, agora: () => new Date() }),
       }),
     );
+    rotas.use("/api", criarVinculosRoutes({ servico: vinculos }));
     rotas.use("/api", criarPromptsRoutes({ servico: servicoDeMelhoria }));
     rotas.use("/api", criarEscutaRoutes({ servico: servicoDeEscuta }));
     // Faixa de servidores: confere se os endereços locais citados pelos agentes ainda respondem.

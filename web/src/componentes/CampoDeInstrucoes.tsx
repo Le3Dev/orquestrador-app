@@ -1,4 +1,4 @@
-import { type ReactNode, useId } from "react";
+import { type ReactNode, useId, useRef } from "react";
 
 import { TAMANHO_MAXIMO_DAS_INSTRUCOES } from "../shared/api/tipos";
 import { juntarDitado } from "../shared/ditado/texto";
@@ -25,8 +25,24 @@ interface Props {
 export function CampoDeInstrucoes({ rotulo, ajuda, valor, aoMudar, placeholder, dica, linhas = 4 }: Props) {
   const id = useId();
   const idDaAjuda = useId();
+  const campo = useRef<HTMLTextAreaElement>(null);
   const tamanho = tamanhoDasInstrucoes(valor);
   const passou = tamanho > TAMANHO_MAXIMO_DAS_INSTRUCOES;
+
+  function receberDitado(ditado: string): void {
+    const elemento = campo.current;
+    const selecao =
+      elemento === null ? undefined : { inicio: elemento.selectionStart, fim: elemento.selectionEnd };
+    const novo = juntarDitado(valor, ditado, selecao);
+    aoMudar(novo);
+    if (elemento !== null && selecao !== undefined && selecao.inicio !== valor.length) {
+      const posicao = novo.length - (valor.length - selecao.fim);
+      requestAnimationFrame(() => {
+        elemento.focus();
+        elemento.setSelectionRange(posicao, posicao);
+      });
+    }
+  }
 
   return (
     <div className="field">
@@ -44,12 +60,13 @@ export function CampoDeInstrucoes({ rotulo, ajuda, valor, aoMudar, placeholder, 
           <BotaoDeDitado
             destino="as instruções"
             className="ditado-abaixo"
-            aoTranscrever={(ditado) => aoMudar(juntarDitado(valor, ditado))}
+            aoTranscrever={receberDitado}
           />
         </span>
       </div>
       <textarea
         id={id}
+        ref={campo}
         className="textarea textarea-instrucoes custom-scrollbar"
         rows={linhas}
         value={valor}

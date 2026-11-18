@@ -5,6 +5,7 @@ import { setTimeout as esperar } from "node:timers/promises";
 import { z } from "zod";
 
 import { Artefato, DadosDoArtefato, EXTENSAO_DO_FORMATO, FORMATOS_DE_ARTEFATO } from "../../artefatos/Artefato";
+import { DesenhoGravado, desenhoVazio, esquemaDoArquivoDoDesenho } from "../../artefatos/DesenhoDoArtefato";
 import { IDENTIDADE_DE_ORQUESTRADOR_VALIDA, OrigemDoArtefato } from "../../artefatos/OrigemDoArtefato";
 import { ConteudoDaVersao, RepositorioDeArtefatos } from "../../artefatos/RepositorioDeArtefatos";
 import { HASH_VALIDO } from "../../artefatos/VersaoDoArtefato";
@@ -13,6 +14,8 @@ export const PASTA_DOS_ARTEFATOS = "artefatos";
 /** Subpasta de `artefatos/` onde os agentes entregam os arquivos: nunca é um Artefato. */
 export const PASTA_DE_ENTRADA = "entrada";
 const ARQUIVO_DO_ARTEFATO = "artefato.json";
+/** `v<N>.desenho.json`: o desenho feito sobre a versão N, ao lado do conteúdo dela. */
+const SUFIXO_DO_DESENHO = ".desenho.json";
 
 /** Só identidades geradas por nós: nada de "..\" escapando da pasta dos artefatos. */
 const IDENTIDADE_VALIDA = /^[A-Za-z0-9_-]{1,100}$/;
@@ -73,6 +76,7 @@ function compararPorAtualizacao(a: DadosDoArtefato, b: DadosDoArtefato): number 
  *
  * dados/artefatos/<id>/artefato.json   o agregado (título, origem, versões)
  * dados/artefatos/<id>/v<N>.html|md    o conteúdo de cada versão
+ * dados/artefatos/<id>/v<N>.desenho.json  o desenho sobre a versão (só se houver traços)
  *
  * (`dados/artefatos/entrada/` é a pasta de entrada dos agentes, e não um Artefato.)
  *
@@ -153,6 +157,51 @@ export class RepositorioDeArtefatosEmArquivo implements RepositorioDeArtefatos {
     }
   }
 
+  async lerDesenho(id: string, numero: number): Promise<DesenhoGravado | null> {
+    const dados = this.artefatos.get(id);
+    if (dados === undefined || !dados.versoes.some((versao) => versao.numero === numero)) {
+      return null;
+    }
+    // Um desenho recém-salvo pode ainda estar a caminho do disco.
+    await this.filasDeGravacao.get(id);
+    let conteudo: string;
+    try {
+      conteudo = await readFile(path.join(this.pastaDo(id), this.nomeDoDesenho(numero)), "utf8");
+    } catch (erro) {
+      if ((erro as NodeJS.ErrnoException).code === "ENOENT") {
+        return desenhoVazio();
+      }
+      throw erro;
+    }
+    try {
+      const gravado: unknown = JSON.parse(conteudo);
+      // Formato antigo: a lista de traços pura, sem largura.
+      return esquemaDoArquivoDoDesenho.parse(Array.isArray(gravado) ? { tracos: gravado } : gravado);
+    } catch (erro) {
+      // Desenho ilegível vale como vazio (e fica no disco até o próximo salvamento).
+      const detalhe = erro instanceof Error ? erro.message : String(erro);
+      console.warn(`[artefatos] Desenho da versão ${numero} do artefato "${id}" ignorado: ilegível (${detalhe}).`);
+      return desenhoVazio();
+    }
+  }
+
+  async salvarDesenho(id: string, numero: number, { tracos, largura }: DesenhoGravado): Promise<boolean> {
+    const dados = this.artefatos.get(id);
+    if (dados === undefined || !dados.versoes.some((versao) => versao.numero === numero)) {
+      return false;
+    }
+    const caminho = path.join(this.pastaDo(id), this.nomeDoDesenho(numero));
+    const estado = JSON.stringify({ tracos, largura });
+    // Na mesma fila do Artefato: uma remoção pedida depois apaga também este desenho.
+    await this.enfileirar(id, () =>
+      tracos.length === 0
+        ? rm(caminho, { force: true, maxRetries: 5, retryDelay: 50 })
+        : gravarAtomicamente(caminho, estado),
+    );
+    return true;
+  }
+
+  /** Apaga a pasta inteira: o artefato.json, o conteúdo e o desenho de cada versão. */
   remover(id: string): Promise<void> {
     const pastaDoArtefato = this.pastaDo(id);
     this.artefatos.delete(id);
@@ -191,6 +240,10 @@ export class RepositorioDeArtefatosEmArquivo implements RepositorioDeArtefatos {
 
   private nomeDaVersao(dados: DadosDoArtefato, numero: number): string {
     return `v${numero}.${EXTENSAO_DO_FORMATO[dados.formato]}`;
+  }
+
+  private nomeDoDesenho(numero: number): string {
+    return `v${numero}${SUFIXO_DO_DESENHO}`;
   }
 
   /** Um Artefato ilegível é pulado (e mantido no disco), para não impedir que os outros abram. */

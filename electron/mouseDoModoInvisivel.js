@@ -5,6 +5,12 @@
 // nem sempre repassa os movimentos à tela (sem mouseenter, o botão "Voltar ao
 // modo normal" nunca recebia o clique); por isso o main compara a posição do
 // cursor com o retângulo do chat a cada instante, sem depender do renderer.
+// O polling roda a ~60Hz (intervaloMs = 16): se o usuário clicar nos ~16ms
+// (+ o round-trip assíncrono do executeJavaScript) entre o cursor entrar na
+// área e o próximo tick aplicar setIgnoreMouseEvents(false), o clique ainda
+// atravessa para a janela por trás. É uma mitigação que reduz bastante a
+// janela de risco, não uma garantia absoluta — eliminar a corrida de vez
+// exigiria um hook nativo de mouse (fora do escopo deste módulo).
 // Lógica sem Electron: janela e screen são injetados para permitir teste.
 
 const SELETOR_DA_AREA = ".chat-rapido";
@@ -34,7 +40,7 @@ function dentroDoRetangulo(x, y, retangulo) {
   return Array.isArray(retangulo) && x >= retangulo[0] && x <= retangulo[2] && y >= retangulo[1] && y <= retangulo[3];
 }
 
-function iniciarRastreioDoMouse({ janela, screen, intervaloMs = 50, agendar = setInterval, cancelar = clearInterval }) {
+function iniciarRastreioDoMouse({ janela, screen, intervaloMs = 16, agendar = setInterval, cancelar = clearInterval }) {
   let capturando = null; // null = ainda não decidido
   let consultando = false;
   let parado = false;

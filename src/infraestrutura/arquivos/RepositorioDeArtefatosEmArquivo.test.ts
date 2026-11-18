@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Artefato } from "../../artefatos/Artefato";
+import { TracoGravado } from "../../artefatos/DesenhoDoArtefato";
 import { OrigemDoArtefato } from "../../artefatos/OrigemDoArtefato";
 import { RepositorioDeArtefatosEmArquivo } from "./RepositorioDeArtefatosEmArquivo";
 
@@ -133,6 +134,131 @@ describe("RepositorioDeArtefatosEmArquivo", () => {
     expect(aviso).toHaveBeenCalledTimes(3);
     expect(String(aviso.mock.calls[0]?.[0])).toMatch(/^\[artefatos\] Artefato ".+artefato\.json" ignorado/);
     expect((await readdir(pastaDosArtefatos)).sort()).toEqual(["bom", "entrada", "quebrado", "sem-versoes", "trocado"]);
+  });
+
+  describe("desenho de cada versão", () => {
+    const traco: TracoGravado = {
+      id: "t1",
+      tipo: "seta",
+      cor: "laranja",
+      espessura: 3,
+      pontos: [
+        { x: 1, y: 2 },
+        { x: 30.5, y: -4 },
+      ],
+      ancora: { conteiner: [1, 0], elemento: [2] },
+    };
+    const texto: TracoGravado = {
+      id: "t2",
+      tipo: "texto",
+      cor: "azul",
+      espessura: 2,
+      pontos: [{ x: 5, y: 5 }],
+      texto: "olha aqui",
+      ancora: null,
+    };
+
+    async function comDuasVersoes(): Promise<RepositorioDeArtefatosEmArquivo> {
+      const repositorio = await RepositorioDeArtefatosEmArquivo.abrir(pasta);
+      const v1 = Buffer.from("<p>1</p>");
+      const v2 = Buffer.from("<p>2</p>");
+      const artefato = novoArtefato("a1", "a.html", v1);
+      await repositorio.salvar(artefato, { numero: 1, conteudo: v1 });
+      artefato.adicionarVersao(hashDe(v2), v2.length, new Date("2026-11-05T12:10:00Z"));
+      await repositorio.salvar(artefato, { numero: 2, conteudo: v2 });
+      return repositorio;
+    }
+
+    it("grava { tracos, largura } em v<N>.desenho.json ao lado do conteúdo, por versão, e reabre igual", async () => {
+      const repositorio = await comDuasVersoes();
+
+      expect(await repositorio.salvarDesenho("a1", 1, { tracos: [traco, texto], largura: 1280 })).toBe(true);
+      const reaberto = await RepositorioDeArtefatosEmArquivo.abrir(pasta);
+
+      expect((await readdir(path.join(pastaDosArtefatos, "a1"))).sort()).toEqual([
+        "artefato.json",
+        "v1.desenho.json",
+        "v1.html",
+        "v2.html",
+      ]);
+      expect(JSON.parse(await readFile(path.join(pastaDosArtefatos, "a1", "v1.desenho.json"), "utf8"))).toEqual({
+        tracos: [traco, texto],
+        largura: 1280,
+      });
+      expect(await reaberto.lerDesenho("a1", 1)).toEqual({ tracos: [traco, texto], largura: 1280 });
+      expect(await repositorio.lerDesenho("a1", 1)).toEqual({ tracos: [traco, texto], largura: 1280 });
+      expect(await reaberto.lerDesenho("a1", 2)).toEqual({ tracos: [], largura: null });
+    });
+
+    it("largura null é gravada e lida como null", async () => {
+      const repositorio = await comDuasVersoes();
+
+      await repositorio.salvarDesenho("a1", 1, { tracos: [traco], largura: null });
+
+      expect(JSON.parse(await readFile(path.join(pastaDosArtefatos, "a1", "v1.desenho.json"), "utf8"))).toEqual({
+        tracos: [traco],
+        largura: null,
+      });
+      expect(await repositorio.lerDesenho("a1", 1)).toEqual({ tracos: [traco], largura: null });
+    });
+
+    it.each<[string, unknown]>([
+      ["lista pura de traços", [traco, texto]],
+      ["objeto sem largura", { tracos: [traco, texto] }],
+    ])("arquivo antigo (%s) é lido com largura null", async (_caso, gravado) => {
+      const repositorio = await comDuasVersoes();
+      await writeFile(path.join(pastaDosArtefatos, "a1", "v1.desenho.json"), JSON.stringify(gravado), "utf8");
+
+      expect(await repositorio.lerDesenho("a1", 1)).toEqual({ tracos: [traco, texto], largura: null });
+    });
+
+    it("salvar troca o desenho inteiro, e sem traços apaga o arquivo, qualquer que seja a largura", async () => {
+      const repositorio = await comDuasVersoes();
+      await repositorio.salvarDesenho("a1", 2, { tracos: [traco, texto], largura: 900 });
+
+      await repositorio.salvarDesenho("a1", 2, { tracos: [texto], largura: 1024 });
+      expect(await repositorio.lerDesenho("a1", 2)).toEqual({ tracos: [texto], largura: 1024 });
+
+      expect(await repositorio.salvarDesenho("a1", 2, { tracos: [], largura: 1024 })).toBe(true);
+      expect(await repositorio.lerDesenho("a1", 2)).toEqual({ tracos: [], largura: null });
+      expect((await readdir(path.join(pastaDosArtefatos, "a1"))).sort()).toEqual(["artefato.json", "v1.html", "v2.html"]);
+      // Apagar o que não existe não é erro.
+      expect(await repositorio.salvarDesenho("a1", 1, { tracos: [], largura: null })).toBe(true);
+    });
+
+    it("artefato ou versão inexistente: ler dá null e salvar dá false, sem gravar nada", async () => {
+      const repositorio = await comDuasVersoes();
+
+      expect(await repositorio.lerDesenho("a1", 3)).toBeNull();
+      expect(await repositorio.lerDesenho("nao-existe", 1)).toBeNull();
+      expect(await repositorio.salvarDesenho("a1", 3, { tracos: [traco], largura: 800 })).toBe(false);
+      expect(await repositorio.salvarDesenho("nao-existe", 1, { tracos: [traco], largura: 800 })).toBe(false);
+      expect((await readdir(path.join(pastaDosArtefatos, "a1"))).sort()).toEqual(["artefato.json", "v1.html", "v2.html"]);
+      expect(await readdir(pastaDosArtefatos)).toEqual(["a1"]);
+    });
+
+    it("remover o artefato leva os desenhos junto", async () => {
+      const repositorio = await comDuasVersoes();
+      await repositorio.salvarDesenho("a1", 1, { tracos: [traco], largura: 800 });
+      await repositorio.salvarDesenho("a1", 2, { tracos: [texto], largura: null });
+
+      await repositorio.remover("a1");
+
+      expect(await readdir(pastaDosArtefatos)).toEqual([]);
+      expect(await repositorio.lerDesenho("a1", 1)).toBeNull();
+    });
+
+    it("desenho ilegível vale como vazio, com aviso no log, e fica no disco", async () => {
+      const aviso = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const repositorio = await comDuasVersoes();
+      const caminho = path.join(pastaDosArtefatos, "a1", "v1.desenho.json");
+      await writeFile(caminho, '{"tracos":[{"id":', "utf8");
+
+      expect(await repositorio.lerDesenho("a1", 1)).toEqual({ tracos: [], largura: null });
+      expect(aviso).toHaveBeenCalledTimes(1);
+      expect(String(aviso.mock.calls[0]?.[0])).toMatch(/^\[artefatos\] Desenho da versão 1 do artefato "a1" ignorado/);
+      expect(await readFile(caminho, "utf8")).toBe('{"tracos":[{"id":');
+    });
   });
 
   it("recusa identidade que escaparia da pasta ou que é a pasta de entrada", async () => {

@@ -1,4 +1,5 @@
 import { Artefato } from "./Artefato";
+import { DesenhoGravado } from "./DesenhoDoArtefato";
 import { OrigemDoArtefato } from "./OrigemDoArtefato";
 
 /** O conteúdo de uma versão nova, gravado junto com o Artefato. */
@@ -32,6 +33,17 @@ export interface RepositorioDeArtefatos {
   salvar(artefato: Artefato, novaVersao?: ConteudoDaVersao): Promise<void>;
   /** O conteúdo bruto de uma versão; `null` se o Artefato ou a versão não existirem. */
   lerConteudo(id: string, numero: number): Promise<Buffer | null>;
-  /** Remove o Artefato com todas as versões. */
+  /**
+   * O desenho feito sobre uma versão; sem traços e com largura `null` se a
+   * versão não tem desenho, e `null` se o Artefato ou a versão não existirem.
+   */
+  lerDesenho(id: string, numero: number): Promise<DesenhoGravado | null>;
+  /**
+   * Troca o desenho inteiro da versão (sem traços, apaga, e a largura não
+   * conta). Resolve com `false`, sem gravar nada, se o Artefato ou a versão
+   * não existirem.
+   */
+  salvarDesenho(id: string, numero: number, desenho: DesenhoGravado): Promise<boolean>;
+  /** Remove o Artefato com todas as versões (e os desenhos delas). */
   remover(id: string): Promise<void>;
 }

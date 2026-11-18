@@ -1,5 +1,6 @@
 import { linhasDaRegraDasPerguntas } from "../perguntas/PerguntaDoApp";
 import { linhasDaRegraDaPrevia, linhasDasPreviasAbertas, REGRA_DA_PREVIA_NO_SUBAGENTE } from "../previas/PreviaDoApp";
+import { linhaDaMensagemRecebida, linhasDosVinculos, VinculadoNoPrompt } from "../vinculos/BlocosDeVinculo";
 import { linhasDosDocumentosAnexados } from "./ArquivosAnexados";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { desarmarMarcas, InstrucoesAplicadas, linhasDasInstrucoes } from "./InstrucoesPersonalizadas";
@@ -10,6 +11,7 @@ import { ModoDoTurno } from "./ModoDoTurno";
 import { rotuloDoMotor } from "./Motor";
 import { DESCRICAO_DO_NIVEL, NivelDePermissao, TRABALHO_DIRETO_NO_NIVEL } from "./NivelDePermissao";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
+import type { OrigemDoPedido } from "./PedidoNaFila";
 import { QuantidadeDeSubagentes } from "./QuantidadeDeSubagentes";
 import { DadosDoSubagentePronto, linhasDaEspecialidade, linhasDosSubagentesProntos } from "./SubagentesProntos";
 
@@ -401,6 +403,11 @@ function linhasDoContextoDaTroca(contexto: string | null): string[] {
  * As prévias ao vivo abertas no canvas (`previasAbertas`) viram uma linha no
  * fim da configuração, para o Orquestrador fechar as desnecessárias antes de
  * encerrar; sem prévias abertas, nenhuma linha.
+ *
+ * Os Orquestradores vinculados (`vinculados`) vão num bloco `<vinculos>`
+ * depois dos itens ligados, com as notas compartilhadas e como falar com
+ * eles. Se o pedido veio de um deles (`origemDaMensagem`), a linha "Mensagem
+ * do orquestrador X (salto n):" abre o texto.
  */
 export function mensagemParaOOrquestrador(
   texto: string,
@@ -416,6 +423,8 @@ export function mensagemParaOOrquestrador(
   previasAbertas: readonly string[] = [],
   contextoDaTroca: string | null = null,
   delegacaoPeloApp = false,
+  vinculados: readonly VinculadoNoPrompt[] = [],
+  origemDaMensagem: OrigemDoPedido | null = null,
 ): string {
   const planejamento = modo === "planejamento";
   // No planejamento os agentes só leem (as ferramentas já vêm travadas
@@ -481,7 +490,12 @@ export function mensagemParaOOrquestrador(
     `</${MARCA_DA_CONFIGURACAO}>`,
     ...linhasDosItensLigados(itensLigados),
     ...linhasDoContextoDaTroca(contextoDaTroca),
+    ...linhasDosVinculos(vinculados, [MARCA_DA_CONFIGURACAO, MARCA_DOS_ITENS_LIGADOS]),
     "",
+    // Pedido que veio de um vinculado: a linha diz de quem, para o Orquestrador responder a quem pediu.
+    ...(origemDaMensagem === null
+      ? []
+      : [linhaDaMensagemRecebida(origemDaMensagem, [MARCA_DA_CONFIGURACAO, MARCA_DOS_ITENS_LIGADOS])]),
     texto,
   ].join("\n");
 }

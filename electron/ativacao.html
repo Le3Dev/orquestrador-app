@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
-    <title>Ativar licença</title>
+    <title>Entrar</title>
     <style>
       :root {
         --bg: #141413;
@@ -42,13 +42,14 @@
         width: 100%;
         padding: 12px 14px;
         font-size: 14px;
-        font-family: ui-monospace, "Cascadia Mono", monospace;
+        font-family: inherit;
         background: var(--surface-2);
         border: 1px solid var(--border);
         border-radius: 8px;
         color: var(--texto);
         outline: none;
       }
+      input.codigo { font-family: ui-monospace, "Cascadia Mono", monospace; letter-spacing: 0.3em; font-size: 18px; text-align: center; }
       input:focus { border-color: var(--laranja); }
       button {
         margin-top: 18px;
@@ -62,131 +63,271 @@
         color: #141413;
         cursor: pointer;
       }
+      button.secundario { background: transparent; color: var(--texto); border: 1px solid var(--border); margin-top: 10px; }
       button:disabled { opacity: 0.6; cursor: default; }
+      button:focus-visible, a:focus-visible { outline: 2px solid var(--texto); outline-offset: 2px; }
+      .linha { display: flex; gap: 10px; }
+      .linha button { margin-top: 10px; }
       .msg { margin-top: 16px; font-size: 13px; line-height: 1.5; min-height: 20px; }
       .msg.erro { color: var(--erro); }
       .msg.ok { color: var(--ok); }
       .estado { font-size: 13px; line-height: 1.5; margin-bottom: 16px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
       .estado.aviso { border-color: var(--laranja); color: var(--laranja); }
+      .confirma { font-size: 13px; line-height: 1.5; margin-top: 16px; padding: 12px; border: 1px solid var(--laranja); border-radius: 8px; background: var(--surface); }
+      .acoes { display: flex; gap: 10px; }
+      .acoes button { margin-top: 12px; }
       .links { margin-top: 16px; display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; }
       .links a { color: var(--laranja); text-decoration: none; }
       .links a:hover { text-decoration: underline; }
+      .links a.botao { background: var(--laranja); color: #141413; font-weight: 600; padding: 10px 18px; border-radius: 8px; }
+      .links a.botao:hover { text-decoration: none; }
       .rodape { margin-top: 24px; font-size: 11px; color: var(--muted); line-height: 1.5; }
+      [hidden] { display: none !important; }
     </style>
   </head>
   <body>
     <div class="barra"></div>
-    <div class="conteudo">
+    <main class="conteudo">
       <h1>Orquestrador de Agentes</h1>
-      <p class="sub">Cole a chave de licença da sua assinatura para ativar este computador. A ativação e a renovação precisam de internet.</p>
+      <p class="sub" id="sub">Sem conta? Entre com seu e-mail e ganhe 7 dias grátis, sem cartão.</p>
       <div id="estado" class="estado" hidden></div>
-      <label for="chave">Chave de licença</label>
-      <input id="chave" type="text" placeholder="ORQ-XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" />
-      <button id="ativar">Ativar</button>
-      <div id="msg" class="msg"></div>
+
+      <!-- Conectado -->
+      <section id="conectado" hidden>
+        <div id="dadosDaConta" class="estado"></div>
+        <button id="sair" class="secundario" type="button">Sair deste computador</button>
+      </section>
+
+      <!-- Passo 1: e-mail -->
+      <form id="passo1" novalidate>
+        <label for="email">E-mail</label>
+        <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="voce@exemplo.com" spellcheck="false" />
+        <button id="enviar" type="submit">Enviar código</button>
+      </form>
+
+      <!-- Passo 2: código -->
+      <form id="passo2" novalidate hidden>
+        <label for="codigo">Código de 6 dígitos enviado para <span id="emailEnviado"></span></label>
+        <input id="codigo" class="codigo" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000" />
+        <button id="entrar" type="submit">Entrar</button>
+        <div class="linha">
+          <button id="reenviar" class="secundario" type="button" disabled>Reenviar código</button>
+          <button id="trocar" class="secundario" type="button">Trocar e-mail</button>
+        </div>
+        <div id="confirma" class="confirma" role="alertdialog" aria-labelledby="textoConfirma" hidden>
+          <div id="textoConfirma"></div>
+          <div class="acoes">
+            <button id="usarAqui" type="button">Usar aqui</button>
+            <button id="cancelar" class="secundario" type="button">Cancelar</button>
+          </div>
+        </div>
+      </form>
+
+      <div id="msg" class="msg" role="status" aria-live="polite"></div>
       <div class="links">
         <a href="#" id="assinar" hidden>Assinar</a>
         <a href="#" id="portal" hidden>Gerenciar assinatura</a>
-        <a href="#" id="desativar" hidden>Desativar nesta máquina</a>
       </div>
-      <div class="rodape">Sua licença permite ativar um número limitado de computadores. Para trocar de computador, use "Desativar nesta máquina" antes de ativar no novo.</div>
-    </div>
+      <div class="rodape">O código vale por poucos minutos. Cada conta usa um computador por vez: ao entrar em outro, este é desconectado.</div>
+    </main>
 
     <script>
-      const input = document.getElementById("chave");
-      const botao = document.getElementById("ativar");
-      const msg = document.getElementById("msg");
+      const $ = (id) => document.getElementById(id);
+      const lic = window.electron.licenca;
+      const UM_DIA = 24 * 60 * 60 * 1000;
+      const ESPERA_REENVIO_S = 30;
+      let emailAtual = "";
+      let contagem = null;
 
       function mostrar(texto, tipo) {
-        msg.textContent = texto;
-        msg.className = "msg" + (tipo ? " " + tipo : "");
+        $("msg").textContent = texto;
+        $("msg").className = "msg" + (tipo ? " " + tipo : "");
       }
 
-      async function ativar() {
-        const chave = input.value.trim();
-        if (!chave) {
-          mostrar("Informe a chave de licença.", "erro");
+      function dataLegivel(ms) {
+        if (!ms) return "data desconhecida";
+        try {
+          return new Date(ms).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+        } catch {
+          return String(ms);
+        }
+      }
+
+      function irParaPasso(n) {
+        $("passo1").hidden = n !== 1;
+        $("passo2").hidden = n !== 2;
+        $("confirma").hidden = true;
+        if (n === 1) $("email").focus();
+        else $("codigo").focus();
+      }
+
+      function iniciarEsperaDoReenvio() {
+        clearInterval(contagem);
+        let restante = ESPERA_REENVIO_S;
+        const botao = $("reenviar");
+        botao.disabled = true;
+        botao.textContent = "Reenviar código (" + restante + "s)";
+        contagem = setInterval(() => {
+          restante -= 1;
+          if (restante <= 0) {
+            clearInterval(contagem);
+            botao.disabled = false;
+            botao.textContent = "Reenviar código";
+          } else {
+            botao.textContent = "Reenviar código (" + restante + "s)";
+          }
+        }, 1000);
+      }
+
+      async function enviarCodigo(reenvio) {
+        const email = $("email").value.trim().toLowerCase();
+        if (!email) {
+          mostrar("Informe seu e-mail.", "erro");
           return;
         }
-        botao.disabled = true;
-        mostrar("Ativando…", "");
+        $("enviar").disabled = true;
+        $("reenviar").disabled = true;
+        mostrar("Enviando o código…", "");
         try {
-          const r = await window.electron.licenca.activate(chave);
+          const r = await lic.pedirCodigo(email);
           if (r && r.ok) {
-            mostrar("Licença ativada. Abrindo o app…", "ok");
-            // O main troca para a janela principal e fecha esta.
+            emailAtual = email;
+            $("emailEnviado").textContent = email;
+            $("codigo").value = "";
+            irParaPasso(2);
+            iniciarEsperaDoReenvio();
+            mostrar(reenvio ? "Enviamos um novo código." : "Código enviado. Confira seu e-mail (e o spam).", "ok");
           } else {
-            mostrar((r && r.mensagem) || "Não foi possível ativar.", "erro");
-            botao.disabled = false;
+            mostrar((r && r.mensagem) || "Não foi possível enviar o código.", "erro");
+            if (reenvio) $("reenviar").disabled = false;
           }
         } catch (e) {
-          mostrar("Erro ao ativar: " + (e && e.message ? e.message : e), "erro");
-          botao.disabled = false;
+          mostrar("Erro ao enviar o código: " + (e && e.message ? e.message : e), "erro");
+          if (reenvio) $("reenviar").disabled = false;
+        } finally {
+          $("enviar").disabled = false;
         }
       }
 
-      const estado = document.getElementById("estado");
-      const linkAssinar = document.getElementById("assinar");
-      const linkPortal = document.getElementById("portal");
-      const linkDesativar = document.getElementById("desativar");
-      const UM_DIA = 24 * 60 * 60 * 1000;
-
-      // Formata a chave enquanto digita: maiúsculas, sem espaços.
-      input.addEventListener("input", () => {
-        input.value = input.value.toUpperCase().replace(/\s+/g, "");
-      });
-
-      linkAssinar.addEventListener("click", (e) => {
-        e.preventDefault();
-        window.electron.licenca.abrirLink("assinar");
-      });
-      linkPortal.addEventListener("click", (e) => {
-        e.preventDefault();
-        window.electron.licenca.abrirLink("portal");
-      });
-      linkDesativar.addEventListener("click", async (e) => {
-        e.preventDefault();
+      async function entrar(substituirOutraMaquina) {
+        const codigo = $("codigo").value.replace(/\D/g, "");
+        if (codigo.length !== 6) {
+          mostrar("Informe o código de 6 dígitos.", "erro");
+          return;
+        }
+        $("entrar").disabled = true;
+        $("usarAqui").disabled = true;
+        mostrar("Entrando…", "");
         try {
-          const r = await window.electron.licenca.deactivate();
-          mostrar((r && r.mensagem) || "Licença desativada.", "ok");
-          estado.hidden = true;
-          linkDesativar.hidden = true;
-        } catch (erro) {
-          mostrar("Erro ao desativar: " + (erro && erro.message ? erro.message : erro), "erro");
+          const r = await lic.entrar({ email: emailAtual, codigo, substituirOutraMaquina: substituirOutraMaquina === true });
+          if (r && r.ok) {
+            mostrar("Pronto! Abrindo o app…", "ok");
+            return; // o main troca para a janela principal e fecha esta
+          }
+          if (r && r.motivo === "limite-de-maquinas") {
+            const o = r.outraMaquina || {};
+            $("textoConfirma").textContent =
+              "Este e-mail já está em uso em " + (o.nome || "outro computador") +
+              " (último uso em " + dataLegivel(o.ultimoUsoEm) + "). Usar neste computador? O outro será desconectado.";
+            $("confirma").hidden = false;
+            $("usarAqui").focus();
+            mostrar("", "");
+          } else {
+            $("confirma").hidden = true;
+            mostrar((r && r.mensagem) || "Não foi possível entrar.", "erro");
+            if (r && (r.motivo === "teste-ja-usado" || r.motivo === "assinatura-inativa")) $("assinar").hidden = $("assinar").dataset.ok !== "1";
+          }
+        } catch (e) {
+          mostrar("Erro ao entrar: " + (e && e.message ? e.message : e), "erro");
+        }
+        $("entrar").disabled = false;
+        $("usarAqui").disabled = false;
+      }
+
+      $("passo1").addEventListener("submit", (e) => {
+        e.preventDefault();
+        enviarCodigo(false);
+      });
+      $("passo2").addEventListener("submit", (e) => {
+        e.preventDefault();
+        entrar(false);
+      });
+      $("codigo").addEventListener("input", () => {
+        $("codigo").value = $("codigo").value.replace(/\D/g, "").slice(0, 6);
+      });
+      $("reenviar").addEventListener("click", () => enviarCodigo(true));
+      $("trocar").addEventListener("click", () => {
+        clearInterval(contagem);
+        mostrar("", "");
+        irParaPasso(1);
+      });
+      $("usarAqui").addEventListener("click", () => entrar(true));
+      $("cancelar").addEventListener("click", () => {
+        $("confirma").hidden = true;
+        mostrar("Entrada cancelada. Este computador não foi conectado.", "");
+        $("codigo").focus();
+      });
+
+      $("assinar").addEventListener("click", (e) => {
+        e.preventDefault();
+        lic.abrirLink("assinar");
+      });
+      $("portal").addEventListener("click", (e) => {
+        e.preventDefault();
+        lic.abrirLink("portal");
+      });
+      $("sair").addEventListener("click", async () => {
+        try {
+          const r = await lic.sair();
+          $("conectado").hidden = true;
+          $("estado").hidden = true;
+          $("sub").hidden = false;
+          irParaPasso(1);
+          mostrar((r && r.mensagem) || "Você saiu deste computador.", "ok");
+        } catch (e) {
+          mostrar("Erro ao sair: " + (e && e.message ? e.message : e), "erro");
         }
       });
 
-      // Estado inicial: motivo do bloqueio, links e situação da licença guardada.
+      // Estado inicial: motivo do bloqueio, links e situação da conta guardada.
       async function carregar() {
         try {
-          const lic = window.electron.licenca;
           const [bloqueio, links, st] = await Promise.all([lic.bloqueio(), lic.links(), lic.status()]);
-          if (bloqueio) mostrar(bloqueio, "erro");
-          linkAssinar.hidden = !(links && links.assinar);
-          linkPortal.hidden = !(links && links.portal);
-          if (st && st.ativada) {
-            linkDesativar.hidden = false;
-            const venceEm = st.expiraEm ? st.expiraEm - Date.now() : null;
-            const plano = st.plano ? "Plano " + st.plano + ". " : "";
-            estado.hidden = false;
-            if (venceEm !== null && venceEm < 2 * UM_DIA) {
-              estado.className = "estado aviso";
-              estado.textContent = plano + "Sem conexão com o servidor de licenças e a licença guardada vence em breve. Conecte-se à internet para renová-la.";
-            } else {
-              estado.className = "estado";
-              estado.textContent = plano + "Este computador (" + (st.nomeDaMaquina || "sem nome") + ") tem uma licença ativada.";
+          $("assinar").dataset.ok = links && links.assinar ? "1" : "";
+          $("assinar").hidden = !(links && links.assinar);
+          $("portal").hidden = !(links && links.portal);
+          if (bloqueio) {
+            mostrar(bloqueio, "erro");
+            $("assinar").classList.add("botao");
+          }
+          if (st && st.email) $("email").value = st.email;
+          if (st && st.conectado) {
+            $("passo1").hidden = true;
+            $("conectado").hidden = false;
+            $("sub").hidden = true;
+            const partes = ["Conta: " + st.email];
+            if (st.plano === "teste") {
+              const d = st.diasRestantesDoTeste;
+              partes.push("Plano: teste grátis. " + (d === 1 ? "Falta 1 dia." : "Faltam " + d + " dias."));
+            } else if (st.plano) {
+              partes.push("Plano: " + st.plano + ".");
             }
+            partes.push("Computador: " + (st.nomeDaMaquina || "sem nome") + ".");
+            $("dadosDaConta").textContent = partes.join(" ");
+            const venceEm = st.expiraEm ? st.expiraEm - Date.now() : null;
+            if (venceEm !== null && venceEm < 2 * UM_DIA) {
+              $("estado").hidden = false;
+              $("estado").className = "estado aviso";
+              $("estado").textContent = "Sem conexão com o servidor de licenças e a licença guardada vence em breve. Conecte-se à internet para renová-la.";
+            }
+          } else {
+            $("email").focus();
           }
         } catch {
-          /* sem estado: a tela segue só com o campo da chave */
+          /* sem estado: a tela segue só com o campo do e-mail */
         }
       }
 
-      botao.addEventListener("click", ativar);
-      input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") ativar();
-      });
-      input.focus();
       carregar();
     </script>
   </body>
