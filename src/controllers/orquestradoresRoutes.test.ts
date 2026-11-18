@@ -519,6 +519,38 @@ describe("rotas de orquestradores — modo de planejamento", () => {
     });
   });
 
+  describe("teto de contexto", () => {
+    async function alterarConfiguracao(corpo: unknown): Promise<Response> {
+      return fetch(`${base}/orquestradores/${orquestrador.id}/configuracao`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(corpo),
+      });
+    }
+
+    it("nasce econômico, o PATCH muda para estendido e um PATCH sem o campo o mantém", async () => {
+      const inicial = await fetch(`${base}/orquestradores/${orquestrador.id}`);
+      const estender = await alterarConfiguracao({ tetoDeContexto: "estendido" });
+      const outroCampo = await alterarConfiguracao({ nivelDePermissao: "edicao" });
+
+      expect(((await inicial.json()) as { configuracao: unknown }).configuracao).toMatchObject({
+        tetoDeContexto: "economico",
+      });
+      expect(estender.status).toBe(200);
+      expect(((await outroCampo.json()) as { configuracao: unknown }).configuracao).toMatchObject({
+        tetoDeContexto: "estendido",
+      });
+    });
+
+    it.each([["enorme"], [1], [null]])("recusa %j com 400", async (valor) => {
+      const resposta = await alterarConfiguracao({ tetoDeContexto: valor });
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: 'O teto de contexto deve ser "economico" ou "estendido".' });
+      expect(orquestrador.configuracao.tetoDeContexto).toBe("economico");
+    });
+  });
+
   describe("esforço de raciocínio", () => {
     async function alterarConfiguracao(corpo: unknown): Promise<Response> {
       return fetch(`${base}/orquestradores/${orquestrador.id}/configuracao`, {
@@ -1478,6 +1510,7 @@ describe("rotas de orquestradores — economia de tokens", () => {
           modeloDosSubagentes: "sonnet",
           esforcoDosSubagentes: "medio",
           quantidadeDeSubagentes: { modo: "automatica", limite: 1 },
+          tetoDeContexto: "economico",
         },
       },
     ]);

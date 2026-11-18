@@ -27,8 +27,8 @@ export const ESFORCOS_DO_CHAT: readonly { esforco: EsforcoDeRaciocinio; rotulo: 
 ];
 
 export const PREFERENCIAS_PADRAO_DO_CHAT: PreferenciasDoChat = {
-  modelo: "opus",
-  esforco: "alto",
+  modelo: "sonnet",
+  esforco: "medio",
   permitirArtefatosOnline: false,
 };
 
@@ -37,14 +37,15 @@ export const PREFERENCIAS_PADRAO_DO_CHAT: PreferenciasDoChat = {
  * criação (`NoRascunho`) e a usada quando o chat abre um Orquestrador novo.
  */
 export const CONFIGURACAO_PADRAO_DO_ORQUESTRADOR: DadosDaConfiguracao = {
-  modeloDoOrquestrador: "opus",
-  esforcoDoOrquestrador: "padrao",
-  modeloDosSubagentes: "opus",
-  esforcoDosSubagentes: "padrao",
+  modeloDoOrquestrador: "sonnet",
+  esforcoDoOrquestrador: "medio",
+  modeloDosSubagentes: "sonnet",
+  esforcoDosSubagentes: "medio",
   quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
   permitirArtefatosOnline: false,
+  tetoDeContexto: "economico",
   instrucoesPersonalizadas: "",
 };
 

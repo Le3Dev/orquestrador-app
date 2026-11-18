@@ -44,6 +44,7 @@ function turno(
       nivelDePermissao: "leitura",
       permitirCommitEPush: false,
       permitirArtefatosOnline: false,
+      tetoDeContexto: "economico",
       instrucoesPersonalizadas: "",
     },
     modo,

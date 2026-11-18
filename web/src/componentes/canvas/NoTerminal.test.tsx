@@ -70,6 +70,7 @@ const configuracao: DadosDaConfiguracao = {
   nivelDePermissao: "edicao_e_comandos",
   permitirCommitEPush: false,
   permitirArtefatosOnline: false,
+  tetoDeContexto: "economico",
   instrucoesPersonalizadas: "",
 };
 

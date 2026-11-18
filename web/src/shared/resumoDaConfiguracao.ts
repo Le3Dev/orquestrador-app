@@ -23,6 +23,7 @@ export function resumoDaConfiguracao(configuracao: DadosDaConfiguracao): string 
     `${ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome}, ` +
     `${modeloComEsforco(configuracao.modeloDoOrquestrador, configuracao.esforcoDoOrquestrador)} ` +
     `com ${contagem} ${subagentes} ${modeloDosSubagentes}.` +
-    (configuracao.permitirArtefatosOnline ? " Artefatos online ligados." : "")
+    (configuracao.permitirArtefatosOnline ? " Artefatos online ligados." : "") +
+    (configuracao.tetoDeContexto === "estendido" ? " Contexto estendido (1 milhão)." : "")
   );
 }

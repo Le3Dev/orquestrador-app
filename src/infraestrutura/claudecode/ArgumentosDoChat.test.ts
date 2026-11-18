@@ -314,6 +314,14 @@ describe("caminhoParaRegraDePermissao", () => {
 });
 
 describe("montarAmbienteDoChat", () => {
+  it("usa sempre o teto econômico: janela de 200 mil tokens e saída do Bash de 15 mil", () => {
+    const ambiente = montarAmbienteDoChat({ PATH: "x" }, "padrao");
+
+    expect(ambiente.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe("200000");
+    expect(ambiente.BASH_MAX_OUTPUT_LENGTH).toBe("15000");
+    expect(montarAmbienteDoChat({ BASH_MAX_OUTPUT_LENGTH: "40000" }, "padrao").BASH_MAX_OUTPUT_LENGTH).toBe("40000");
+  });
+
   const base = {
     PATH: "x",
     CLAUDECODE: "1",

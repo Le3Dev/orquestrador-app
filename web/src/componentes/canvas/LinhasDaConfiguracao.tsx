@@ -1,12 +1,17 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useId } from "react";
 
 import type {
   DadosDoEsforcoHerdado,
   EsforcoDeRaciocinio,
   NivelDePermissao,
   PerfilDeInstrucoes,
+  TetoDeContexto,
 } from "../../shared/api/tipos";
-import { ROTULOS_DOS_ESFORCOS } from "../../shared/formatacao";
+import {
+  AJUDA_DO_TETO_DE_CONTEXTO,
+  ROTULOS_DO_TETO_DE_CONTEXTO,
+  ROTULOS_DOS_ESFORCOS,
+} from "../../shared/formatacao";
 import { Dica } from "../Dica";
 
 /*
@@ -155,5 +160,34 @@ export function IconeDaPermissao({ nivel }: { nivel: NivelDePermissao }) {
         </>
       )}
     </svg>
+  );
+}
+
+const TETOS_DE_CONTEXTO: readonly TetoDeContexto[] = ["economico", "estendido"];
+
+/** A linha "Contexto" (econômico ou estendido), igual na criação e na ⚙ do terminal. */
+export function LinhaDoContexto({ valor, aoMudar }: { valor: TetoDeContexto; aoMudar: (teto: TetoDeContexto) => void }) {
+  const id = useId();
+  return (
+    <div className="linha-da-criacao">
+      <Rotulo
+        id={id}
+        titulo="Contexto"
+        dica="Até onde a conversa cresce."
+        explicacao={AJUDA_DO_TETO_DE_CONTEXTO}
+        alinharAoTopo
+      />
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <div className="permissoes-da-criacao w-fit" role="radiogroup" aria-labelledby={id}>
+          {TETOS_DE_CONTEXTO.map((teto) => (
+            <label key={teto} className="opcao-da-permissao">
+              <input type="radio" name={`${id}-teto`} value={teto} checked={valor === teto} onChange={() => aoMudar(teto)} />
+              {ROTULOS_DO_TETO_DE_CONTEXTO[teto]}
+            </label>
+          ))}
+        </div>
+        <span className="text-[12px] text-secondary">{AJUDA_DO_TETO_DE_CONTEXTO}</span>
+      </div>
+    </div>
   );
 }

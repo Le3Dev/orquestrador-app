@@ -20,6 +20,7 @@ function orquestrador(id: string, situacao: ResumoDoOrquestrador["situacao"] = "
       nivelDePermissao: "leitura",
       permitirCommitEPush: false,
       permitirArtefatosOnline: false,
+      tetoDeContexto: "economico",
       instrucoesPersonalizadas: "",
     },
     instrucoesAtivas: null,

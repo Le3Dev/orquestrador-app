@@ -4,6 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 
 import { CATEGORIAS_DO_ANEXO, categoriaPeloTipoDeMidia } from "../../orquestracao/Anexo";
+import { TETOS_DE_CONTEXTO } from "../../orquestracao/ConfiguracaoDoOrquestrador";
 import { ESFORCOS_DE_RACIOCINIO } from "../../orquestracao/EsforcoDeRaciocinio";
 import { EventoDeOrquestracao, EventoRegistrado } from "../../orquestracao/EventoDeOrquestracao";
 import { TIPOS_DE_ITEM_LIGADO } from "../../orquestracao/InstrucoesDoOrquestrador";
@@ -45,6 +46,7 @@ const esquemaDoArquivo = z.object({
     nivelDePermissao: z.enum(NIVEIS_DE_PERMISSAO),
     permitirCommitEPush: z.boolean().optional(),
     permitirArtefatosOnline: z.boolean().optional(),
+    tetoDeContexto: z.enum(TETOS_DE_CONTEXTO).optional(),
     esforcoDoOrquestrador: z.enum(ESFORCOS_DE_RACIOCINIO).optional(),
     esforcoDosSubagentes: z.enum(ESFORCOS_DE_RACIOCINIO).optional(),
     instrucoesPersonalizadas: z.string().optional(),

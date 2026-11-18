@@ -1,4 +1,4 @@
-import type { DadosDaConfiguracao, EsforcoDeRaciocinio, ModeloClaude, NivelDePermissao } from "./api/tipos";
+import type { DadosDaConfiguracao, EsforcoDeRaciocinio, ModeloClaude, NivelDePermissao, TetoDeContexto } from "./api/tipos";
 
 export const ROTULOS_DOS_MODELOS: Readonly<Record<ModeloClaude, { nome: string; descricao: string }>> = {
   fable: { nome: "Fable", descricao: "Desafios mais difíceis" },
@@ -66,6 +66,14 @@ export const ROTULOS_DAS_PERMISSOES: Readonly<Record<NivelDePermissao, { nome: s
   },
 };
 
+export const ROTULOS_DO_TETO_DE_CONTEXTO: Record<TetoDeContexto, string> = {
+  economico: "Econômico (200 mil)",
+  estendido: "Estendido (1 milhão)",
+};
+
+export const AJUDA_DO_TETO_DE_CONTEXTO =
+  "Econômico compacta a conversa perto de 200 mil tokens e gasta bem menos. Estendido deixa o contexto crescer até 1 milhão, para tarefas longas que precisam lembrar de tudo, mas cada chamada relê o contexto inteiro.";
+
 /** Ex.: "Opus" ou, com um esforço escolhido, "Opus (esforço alto)". */
 function descreverModelo(modelo: ModeloClaude, esforco: EsforcoDeRaciocinio): string {
   const nome = ROTULOS_DOS_MODELOS[modelo].nome;
@@ -89,6 +97,7 @@ export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string
     ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome,
     ...(configuracao.permitirCommitEPush ? ["commit/push por feature"] : []),
     ...(configuracao.permitirArtefatosOnline ? ["artefatos online"] : []),
+    ...(configuracao.tetoDeContexto === "estendido" ? ["contexto estendido"] : []),
     ...(configuracao.instrucoesPersonalizadas.trim() === "" ? [] : ["instruções próprias"]),
   ].join(" · ");
 }
@@ -127,6 +136,9 @@ export function descreverAlteracoesDaConfiguracao(alteracoes: Partial<DadosDaCon
   }
   if (alteracoes.permitirArtefatosOnline !== undefined) {
     itens.push(`Artefatos online no claude.ai: ${ligado(alteracoes.permitirArtefatosOnline)}`);
+  }
+  if (alteracoes.tetoDeContexto !== undefined) {
+    itens.push(`Contexto: ${ROTULOS_DO_TETO_DE_CONTEXTO[alteracoes.tetoDeContexto]}`);
   }
   return itens;
 }

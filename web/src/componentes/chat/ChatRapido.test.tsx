@@ -1505,7 +1505,7 @@ describe("ChatRapido", () => {
     it("o modelo mostra o nome em cinza, o esforço em destaque e a seta como SVG", () => {
       renderizar();
       const modelo = screen.getByRole("button", { name: /^Modelo:/ });
-      expect(modelo.querySelector("b")).toHaveTextContent("Alto");
+      expect(modelo.querySelector("b")).toHaveTextContent("Médio");
       expect(modelo.querySelector("svg")).not.toBeNull();
       expect(modelo).not.toHaveTextContent("⌃");
     });

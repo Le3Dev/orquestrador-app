@@ -1,6 +1,7 @@
 import { EsforcoDeRaciocinio } from "../../orquestracao/EsforcoDeRaciocinio";
 import { instrucoesDoSubagente, NOME_DO_SUBAGENTE, Plataforma } from "../../orquestracao/InstrucoesDoOrquestrador";
 import { PedidoDeTurno } from "../../orquestracao/MotorDeAgentes";
+import { TetoDeContexto } from "../../orquestracao/ConfiguracaoDoOrquestrador";
 import { NivelDePermissao } from "../../orquestracao/NivelDePermissao";
 import { modeloDoSubagentePronto } from "../../orquestracao/SubagentesProntos";
 
@@ -561,6 +562,31 @@ export function linhaDeEntrada(texto: string, imagens: readonly ImagemEmBase64[]
   return `${JSON.stringify({ type: "user", message: { role: "user", content: conteudo } })}\n`;
 }
 
+/** Janela de contexto do teto econômico, em tokens (ADR-44). */
+export const JANELA_DO_TETO_ECONOMICO = "200000";
+export const VARIAVEL_DA_JANELA_DE_CONTEXTO = "CLAUDE_CODE_AUTO_COMPACT_WINDOW";
+export const VARIAVEL_DO_LIMITE_DA_SAIDA_DO_BASH = "BASH_MAX_OUTPUT_LENGTH";
+export const LIMITE_DA_SAIDA_DO_BASH = "15000";
+
+/**
+ * Aplica o teto de contexto no ambiente: `economico` compacta a conversa aos
+ * 200 mil tokens (a janela de 1M nunca compactava); `estendido` apaga a
+ * variável herdada, valendo a janela de 1M. Nos dois casos limita a saída do
+ * Bash a 15 mil caracteres, salvo se o ambiente já define o limite. Os
+ * subagentes rodam no mesmo processo e herdam o ambiente.
+ */
+export function aplicarTetoDeContexto(ambiente: NodeJS.ProcessEnv, teto: TetoDeContexto): NodeJS.ProcessEnv {
+  if (teto === "economico") {
+    ambiente[VARIAVEL_DA_JANELA_DE_CONTEXTO] = JANELA_DO_TETO_ECONOMICO;
+  } else {
+    delete ambiente[VARIAVEL_DA_JANELA_DE_CONTEXTO];
+  }
+  if (!ambiente[VARIAVEL_DO_LIMITE_DA_SAIDA_DO_BASH]) {
+    ambiente[VARIAVEL_DO_LIMITE_DA_SAIDA_DO_BASH] = LIMITE_DA_SAIDA_DO_BASH;
+  }
+  return ambiente;
+}
+
 /**
  * Ambiente do processo do turno. Uma `CLAUDE_CODE_EFFORT_LEVEL` herdada do
  * servidor venceria o `--effort` e o `effort` do executor e anularia o esforço
@@ -576,5 +602,6 @@ export function montarAmbiente(base: NodeJS.ProcessEnv, pedido: PedidoDeTurno): 
   ambiente.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS = String(
     pedido.configuracao.quantidadeDeSubagentes.limite,
   );
+  aplicarTetoDeContexto(ambiente, pedido.configuracao.tetoDeContexto);
   return comVariaveisDeArtefatoOnline(ambiente, publicaOnlineNoTurno(pedido));
 }

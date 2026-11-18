@@ -138,9 +138,9 @@ describe("NoRascunho", () => {
 
     expect(await screen.findByRole("option", { name: "todos os projetos (pasta raiz)" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Somente leitura" })).toBeChecked();
-    expect(menuDoModelo("do orquestrador")).toHaveTextContent("Opus 5.5");
-    expect(menuDoModelo("dos subagentes")).toHaveTextContent("Opus 5.5");
-    expect(menuDoModelo("do orquestrador")).toHaveTextContent("esforço padrão");
+    expect(menuDoModelo("do orquestrador")).toHaveTextContent("Sonnet 5.5");
+    expect(menuDoModelo("dos subagentes")).toHaveTextContent("Sonnet 5.5");
+    expect(menuDoModelo("do orquestrador")).toHaveTextContent("esforço médio");
     expect(screen.getByRole("radio", { name: /Automática/ })).toBeChecked();
     expect(screen.getByLabelText("Máximo")).toHaveValue(3);
     expect(screen.getByRole("switch", { name: "Commit e push por feature" })).toHaveAttribute("aria-checked", "false");
@@ -151,6 +151,18 @@ describe("NoRascunho", () => {
     expect(screen.getByText("Escolha uma pasta para começar.")).toBeInTheDocument();
     expect(botaoDeComecar()).toBeDisabled();
     expect(screen.getByText("novo orquestrador")).toBeInTheDocument();
+  });
+
+  it("o seletor Contexto começa no econômico e o estendido vai no que é criado", async () => {
+    const criar = espiarCriacao();
+    await abrirComPasta();
+
+    expect(screen.getByRole("radio", { name: "Econômico (200 mil)" })).toBeChecked();
+    fireEvent.click(screen.getByRole("radio", { name: "Estendido (1 milhão)" }));
+
+    expect(screen.getByRole("radio", { name: "Estendido (1 milhão)" })).toBeChecked();
+    expect(screen.getByText(/contexto estendido/)).toBeInTheDocument();
+    expect(await criarEPegarPayload(criar)).toMatchObject({ tetoDeContexto: "estendido" });
   });
 
   it("os menus de modelo têm Fable, Opus, Sonnet e Haiku", async () => {
@@ -179,7 +191,7 @@ describe("NoRascunho", () => {
     expect(screen.getByText("novo orquestrador · app")).toBeInTheDocument();
     expect(botaoDeComecar()).toHaveTextContent("Começar em app");
     expect(botaoDeComecar()).toBeEnabled();
-    expect(screen.getByText("Somente leitura, Opus (esforço automático) com até 3 subagentes Opus.")).toBeInTheDocument();
+    expect(screen.getByText("Somente leitura, Sonnet (esforço médio) com até 3 subagentes Sonnet (esforço médio).")).toBeInTheDocument();
     expect(screen.getByText("/p/app · instruções gerais")).toBeInTheDocument();
   });
 
@@ -282,6 +294,9 @@ describe("NoRascunho", () => {
     } as Awaited<ReturnType<typeof api.lerEsforcoHerdado>>);
     abrir();
     await screen.findByRole("option", { name: "app" });
+    // O padrão agora é o esforço médio: o aviso só existe no automático.
+    escolherEsforco("do orquestrador", "Padrão");
+    fireEvent.keyDown(document, { key: "Escape" });
     // A troca de pasta busca o esforço de novo: a resposta chega dentro do act.
     await act(async () => {
       fireEvent.change(campoDaPasta(), { target: { value: "/p/app" } });
@@ -292,7 +307,7 @@ describe("NoRascunho", () => {
     expect(aviso).toHaveTextContent("Máximo");
     expect(aviso).toHaveTextContent("~/.claude/settings.json");
     expect(screen.getAllByText(/No automático, o Claude Code usa/)).toHaveLength(1);
-    expect(ler).toHaveBeenLastCalledWith("opus", "opus", "/p/app");
+    expect(ler).toHaveBeenLastCalledWith("sonnet", "sonnet", "/p/app");
 
     escolherEsforco("do orquestrador", "Alto");
     expect(screen.queryByText(/No automático, o Claude Code usa/)).not.toBeInTheDocument();
@@ -310,14 +325,15 @@ describe("NoRascunho", () => {
     expect(payload).toEqual({
       nome: "app",
       pastaDeTrabalho: "/p/app",
-      modeloDoOrquestrador: "opus",
-      esforcoDoOrquestrador: "padrao",
+      modeloDoOrquestrador: "sonnet",
+      esforcoDoOrquestrador: "medio",
       modeloDosSubagentes: "haiku",
-      esforcoDosSubagentes: "padrao",
+      esforcoDosSubagentes: "medio",
       quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
       nivelDePermissao: "leitura",
       permitirCommitEPush: false,
       permitirArtefatosOnline: false,
+      tetoDeContexto: "economico",
       instrucoesPersonalizadas: "Seja breve.",
     });
     await waitFor(() => expect(acoes.orquestradorCriado).toHaveBeenCalledWith("rascunho:1", criado));
@@ -434,7 +450,7 @@ describe("NoRascunho", () => {
     const menu = screen.getByRole("menu", { name: "Esforço" });
     expect(within(menu).getAllByRole("menuitemradio")).toHaveLength(7);
     expect(within(menu).getAllByRole("menuitemradio").at(-1)).toHaveTextContent("Ultracode");
-    expect(within(menu).getByRole("menuitemradio", { name: "Padrão" })).toHaveAttribute("aria-checked", "true");
+    expect(within(menu).getByRole("menuitemradio", { name: "Médio" })).toHaveAttribute("aria-checked", "true");
     fireEvent.click(within(menu).getByRole("menuitemradio", { name: "Alto" }));
 
     // Voltou para a vista raiz, ainda aberto.
@@ -443,7 +459,7 @@ describe("NoRascunho", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     expect(menuDoModelo("do orquestrador")).toHaveFocus();
     expect(menuDoModelo("do orquestrador")).toHaveTextContent("esforço alto");
-    expect(screen.getByText("Somente leitura, Opus (esforço alto) com até 3 subagentes Opus.")).toBeInTheDocument();
+    expect(screen.getByText("Somente leitura, Sonnet (esforço alto) com até 3 subagentes Sonnet (esforço médio).")).toBeInTheDocument();
 
     escolherEsforco("dos subagentes", "Máximo");
     fireEvent.keyDown(document, { key: "Escape" });
@@ -466,7 +482,7 @@ describe("NoRascunho", () => {
 
     expect(menuDoModelo("do orquestrador")).toHaveTextContent("esforço ultracode");
     expect(screen.getByText(/Ultracode dispara workflows com vários agentes em paralelo/)).toHaveClass("hint-warning");
-    expect(await criarEPegarPayload(criar)).toMatchObject({ esforcoDoOrquestrador: "ultracode", esforcoDosSubagentes: "padrao" });
+    expect(await criarEPegarPayload(criar)).toMatchObject({ esforcoDoOrquestrador: "ultracode", esforcoDosSubagentes: "medio" });
   });
 
   it("Esc e clique fora fecham o menu, e escolher o modelo também", async () => {

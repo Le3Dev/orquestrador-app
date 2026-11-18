@@ -126,6 +126,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
       ...dados,
       permitirCommitEPush: false,
       permitirArtefatosOnline: false,
+      tetoDeContexto: "economico",
       ...esforcosPadrao,
       ...semInstrucoes,
       ...todosOsProntos,
@@ -145,6 +146,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
       ...dados,
       permitirCommitEPush: true,
       permitirArtefatosOnline: false,
+      tetoDeContexto: "economico",
       ...esforcosPadrao,
       ...semInstrucoes,
       ...todosOsProntos,
@@ -157,6 +159,30 @@ describe("ConfiguracaoDoOrquestrador", () => {
     const invalido = { ...dados, permitirCommitEPush: "sim" as unknown as boolean };
 
     expect(() => ConfiguracaoDoOrquestrador.de(invalido)).toThrow(ErroDeOrquestracao);
+  });
+
+  describe("teto de contexto", () => {
+    it("ausente (também em dados já gravados) vale economico", () => {
+      expect(ConfiguracaoDoOrquestrador.de(dados).tetoDeContexto).toBe("economico");
+      expect(ConfiguracaoDoOrquestrador.de({ ...dados, tetoDeContexto: undefined }).paraDados().tetoDeContexto).toBe(
+        "economico",
+      );
+    });
+
+    it("com() muda só o teto e a ausência mantém o valor atual", () => {
+      const estendida = ConfiguracaoDoOrquestrador.de(dados).com({ tetoDeContexto: "estendido" });
+
+      expect(estendida.tetoDeContexto).toBe("estendido");
+      expect(estendida.com({ nivelDePermissao: "edicao" }).tetoDeContexto).toBe("estendido");
+      expect(estendida.com({ tetoDeContexto: undefined }).tetoDeContexto).toBe("estendido");
+      expect(estendida.com({ tetoDeContexto: "economico" }).tetoDeContexto).toBe("economico");
+    });
+
+    it("recusa valor inválido com mensagem clara", () => {
+      const invalido = { ...dados, tetoDeContexto: "enorme" as unknown as "economico" };
+
+      expect(() => ConfiguracaoDoOrquestrador.de(invalido)).toThrow("teto de contexto");
+    });
   });
 
   describe("publicar artefatos online no claude.ai", () => {
@@ -320,6 +346,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
           "nivelDePermissao",
           "permitirArtefatosOnline",
           "permitirCommitEPush",
+          "tetoDeContexto",
           "quantidadeDeSubagentes",
           "subagentesProntos",
         ].sort(),
@@ -338,6 +365,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
         ...dados,
         permitirCommitEPush: true,
         permitirArtefatosOnline: false,
+        tetoDeContexto: "economico",
         ...esforcosPadrao,
         ...semInstrucoes,
         ...todosOsProntos,

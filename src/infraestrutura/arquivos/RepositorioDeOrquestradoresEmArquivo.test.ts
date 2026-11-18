@@ -254,6 +254,21 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
       expect(repositorio.buscarPorId("antigo")?.paraDados().configuracao.permitirArtefatosOnline).toBe(true);
     });
 
+    it("reabre o teto de contexto gravado e trata a ausência como economico", async () => {
+      const antigo = arquivoAntigo();
+      await gravarArquivo("antigo", JSON.stringify(antigo));
+      expect((await RepositorioDeOrquestradoresEmArquivo.abrir(pasta)).buscarPorId("antigo")?.configuracao.tetoDeContexto).toBe(
+        "economico",
+      );
+      await gravarArquivo(
+        "antigo",
+        JSON.stringify({ ...antigo, configuracao: { ...(antigo.configuracao as object), tetoDeContexto: "estendido" } }),
+      );
+      expect((await RepositorioDeOrquestradoresEmArquivo.abrir(pasta)).buscarPorId("antigo")?.configuracao.tetoDeContexto).toBe(
+        "estendido",
+      );
+    });
+
     it("reabre a retomada automática pendente gravada antes do reinício", async () => {
       const retomadaPendente = {
         deTurnoId: "t0",

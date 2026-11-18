@@ -642,6 +642,7 @@ function useConfiguracaoEstavel(atual: DadosDaConfiguracao): DadosDaConfiguracao
     nivelDePermissao,
     permitirCommitEPush,
     permitirArtefatosOnline,
+    tetoDeContexto,
     instrucoesPersonalizadas,
   } = atual;
   const { modo, limite } = atual.quantidadeDeSubagentes;
@@ -655,6 +656,7 @@ function useConfiguracaoEstavel(atual: DadosDaConfiguracao): DadosDaConfiguracao
       nivelDePermissao,
       permitirCommitEPush,
       permitirArtefatosOnline,
+      tetoDeContexto,
       instrucoesPersonalizadas,
     }),
     [
@@ -667,6 +669,7 @@ function useConfiguracaoEstavel(atual: DadosDaConfiguracao): DadosDaConfiguracao
       nivelDePermissao,
       permitirCommitEPush,
       permitirArtefatosOnline,
+      tetoDeContexto,
       instrucoesPersonalizadas,
     ],
   );

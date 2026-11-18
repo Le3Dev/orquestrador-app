@@ -42,8 +42,8 @@ describe("RepositorioDoChatEmArquivo", () => {
     expect(repositorio.conversa().sessaoId).toBe("sessao-1");
     expect(repositorio.conversa().totalDeMensagens).toBe(0);
     expect(repositorio.preferencias().paraDados()).toEqual({
-      modelo: "opus",
-      esforco: "alto",
+      modelo: "sonnet",
+      esforco: "medio",
       permitirArtefatosOnline: false,
     });
     expect(repositorio.ultimaSequencia()).toBe(0);
@@ -189,7 +189,7 @@ describe("RepositorioDoChatEmArquivo", () => {
     const repositorio = await RepositorioDoChatEmArquivo.abrir(pasta, gerarSessao);
 
     expect(repositorio.conversa().sessaoId).toBe("sessao-1");
-    expect(repositorio.preferencias().modelo).toBe("opus");
+    expect(repositorio.preferencias().modelo).toBe("sonnet");
     expect(repositorio.ultimaSequencia()).toBe(7);
     expect(aviso).toHaveBeenCalledTimes(2);
     const arquivos = await readdir(pastaDoChat);

@@ -75,6 +75,7 @@ const ECONOMICO = new PredefinicaoDeConfiguracao(
     modeloDosSubagentes: "sonnet",
     esforcoDosSubagentes: "medio",
     quantidadeDeSubagentes: { modo: "automatica", limite: 1 },
+    tetoDeContexto: "economico",
   },
 );
 

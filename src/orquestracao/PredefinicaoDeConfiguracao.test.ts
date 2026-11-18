@@ -46,6 +46,7 @@ describe("PredefinicaoDeConfiguracao", () => {
       permitirCommitEPush: true,
       // Nem os artefatos online: seguem como estavam.
       permitirArtefatosOnline: false,
+      tetoDeContexto: "economico",
       // As instruções personalizadas não fazem parte da predefinição: ficam como estavam.
       instrucoesPersonalizadas: "",
       // Nem a escolha dos subagentes prontos.
@@ -66,6 +67,7 @@ describe("PredefinicaoDeConfiguracao", () => {
         "modeloDoOrquestrador",
         "modeloDosSubagentes",
         "quantidadeDeSubagentes",
+        "tetoDeContexto",
       ].sort(),
     );
     expect(predefinicao.descricao).not.toMatch(/plano|trivial/i);

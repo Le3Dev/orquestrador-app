@@ -15,6 +15,7 @@ const configuracao: DadosDaConfiguracao = {
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
   permitirArtefatosOnline: false,
+  tetoDeContexto: "economico",
   instrucoesPersonalizadas: "",
 };
 

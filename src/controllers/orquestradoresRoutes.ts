@@ -6,7 +6,7 @@ import { z } from "zod";
 import { ArmazemDeAnexosEmArquivo, ehNomeDeAnexoValido } from "../infraestrutura/arquivos/ArmazemDeAnexosEmArquivo";
 import { ErroDeCaminho, ExploradorDePastas } from "../infraestrutura/arquivos/ExploradorDePastas";
 import { CanalDeEventos } from "../infraestrutura/sse/CanalDeEventos";
-import { ConfiguracaoDoOrquestrador } from "../orquestracao/ConfiguracaoDoOrquestrador";
+import { ConfiguracaoDoOrquestrador, TETOS_DE_CONTEXTO } from "../orquestracao/ConfiguracaoDoOrquestrador";
 import { ErroDeOrquestracao } from "../orquestracao/ErroDeOrquestracao";
 import {
   ESFORCOS_DE_RACIOCINIO,
@@ -93,6 +93,10 @@ const esquemaDaConfiguracao = z.object({
   // Opcional também na criação: ausente vale `false` (desligada).
   permitirArtefatosOnline: z
     .boolean({ error: 'A opção "Publicar artefatos no claude.ai" deve ser verdadeira ou falsa.' })
+    .optional(),
+  // Opcional também na criação: ausente vale "economico".
+  tetoDeContexto: z
+    .enum(TETOS_DE_CONTEXTO, { error: 'O teto de contexto deve ser "economico" ou "estendido".' })
     .optional(),
   // Opcionais também na criação: ausentes valem "padrao".
   esforcoDoOrquestrador: z

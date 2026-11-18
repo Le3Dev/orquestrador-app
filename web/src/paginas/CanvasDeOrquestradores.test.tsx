@@ -184,7 +184,7 @@ describe("CanvasDeOrquestradores · chat rápido", () => {
     const painel = campo.closest(".react-flow__panel");
     expect(painel).toHaveClass("bottom", "center", "painel-do-chat");
     expect(screen.getByTestId("chat-rapido")).toHaveClass("nodrag", "nowheel", "nopan");
-    expect(screen.getByRole("button", { name: /Modelo: Opus 5\.5, esforço alto/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Modelo: Sonnet 5\.5, esforço médio/ })).toBeInTheDocument();
   });
 
   it("o quadro do canvas vazio fica abaixo do chat: dentro do React Flow, na camada 4, antes do painel do chat", async () => {
@@ -517,6 +517,7 @@ const configuracao: DadosDaConfiguracao = {
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
   permitirArtefatosOnline: false,
+  tetoDeContexto: "economico",
   instrucoesPersonalizadas: "",
 };
 

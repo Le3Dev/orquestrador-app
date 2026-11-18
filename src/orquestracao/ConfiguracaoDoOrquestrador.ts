@@ -32,6 +32,12 @@ export interface DadosDaConfiguracao {
    */
   permitirArtefatosOnline?: boolean | undefined;
   /**
+   * Teto da janela de contexto do `claude -p`: `economico` (200 mil tokens) ou
+   * `estendido` (1 milhão). Ausente (inclusive nas configurações já gravadas):
+   * vale `economico` (ADR-44). `paraDados` sempre o preenche.
+   */
+  tetoDeContexto?: TetoDeContexto | undefined;
+  /**
    * Esforço de raciocínio de cada papel. Ausentes nas configurações gravadas
    * antes de a opção existir: vale `padrao`. `paraDados` sempre os preenche.
    */
@@ -56,6 +62,14 @@ export interface DadosDaConfiguracao {
   subagentesProntos?: SelecaoDeSubagentesProntos | undefined;
 }
 
+export const TETOS_DE_CONTEXTO = ["economico", "estendido"] as const;
+export type TetoDeContexto = (typeof TETOS_DE_CONTEXTO)[number];
+export const TETO_DE_CONTEXTO_PADRAO: TetoDeContexto = "economico";
+
+function ehTetoDeContexto(valor: unknown): valor is TetoDeContexto {
+  return TETOS_DE_CONTEXTO.some((teto) => teto === valor);
+}
+
 /** Só os campos informados mudam; os ausentes mantêm o valor atual. */
 export type AlteracoesDaConfiguracao = {
   [Campo in keyof DadosDaConfiguracao]?: DadosDaConfiguracao[Campo] | undefined;
@@ -76,6 +90,7 @@ export class ConfiguracaoDoOrquestrador {
     public readonly nivelDePermissao: NivelDePermissao,
     public readonly permitirCommitEPush: boolean,
     public readonly permitirArtefatosOnline: boolean,
+    public readonly tetoDeContexto: TetoDeContexto,
     public readonly esforcoDoOrquestrador: EsforcoDeRaciocinio,
     public readonly esforcoDosSubagentes: EsforcoDeRaciocinio,
     public readonly instrucoesPersonalizadas: string,
@@ -103,6 +118,13 @@ export class ConfiguracaoDoOrquestrador {
         'A opção "Publicar artefatos no claude.ai" deve ser verdadeira ou falsa.',
       );
     }
+    const tetoDeContexto: unknown = dados.tetoDeContexto ?? TETO_DE_CONTEXTO_PADRAO;
+    if (!ehTetoDeContexto(tetoDeContexto)) {
+      throw new ErroDeOrquestracao(
+        "dados_invalidos",
+        'O teto de contexto deve ser "economico" ou "estendido".',
+      );
+    }
     const esforcoDoOrquestrador: unknown = dados.esforcoDoOrquestrador ?? ESFORCO_PADRAO;
     if (!ehEsforcoDeRaciocinio(esforcoDoOrquestrador)) {
       throw new ErroDeOrquestracao("dados_invalidos", "Esforço do orquestrador inválido.");
@@ -125,6 +147,7 @@ export class ConfiguracaoDoOrquestrador {
       dados.nivelDePermissao,
       permitirCommitEPush,
       permitirArtefatosOnline,
+      tetoDeContexto,
       esforcoDoOrquestrador,
       esforcoDosSubagentes,
       instrucoesPersonalizadas,
@@ -160,6 +183,7 @@ export class ConfiguracaoDoOrquestrador {
       nivelDePermissao: alteracoes.nivelDePermissao ?? atual.nivelDePermissao,
       permitirCommitEPush: alteracoes.permitirCommitEPush ?? atual.permitirCommitEPush,
       permitirArtefatosOnline: alteracoes.permitirArtefatosOnline ?? atual.permitirArtefatosOnline,
+      tetoDeContexto: alteracoes.tetoDeContexto ?? atual.tetoDeContexto,
       esforcoDoOrquestrador: alteracoes.esforcoDoOrquestrador ?? atual.esforcoDoOrquestrador,
       esforcoDosSubagentes: alteracoes.esforcoDosSubagentes ?? atual.esforcoDosSubagentes,
       // `""` limpa as instruções: só a ausência mantém as atuais.
@@ -176,6 +200,7 @@ export class ConfiguracaoDoOrquestrador {
       nivelDePermissao: this.nivelDePermissao,
       permitirCommitEPush: this.permitirCommitEPush,
       permitirArtefatosOnline: this.permitirArtefatosOnline,
+      tetoDeContexto: this.tetoDeContexto,
       esforcoDoOrquestrador: this.esforcoDoOrquestrador,
       esforcoDosSubagentes: this.esforcoDosSubagentes,
       instrucoesPersonalizadas: this.instrucoesPersonalizadas,
