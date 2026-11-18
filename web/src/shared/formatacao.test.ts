@@ -1,5 +1,4 @@
 import type { DadosDaConfiguracao } from "./api/tipos";
-import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "./modelos";
 import {
   descreverAlteracoesDaConfiguracao,
   descreverConfiguracao,
@@ -19,7 +18,6 @@ const configuracao: DadosDaConfiguracao = {
   nivelDePermissao: "edicao_e_comandos",
   permitirCommitEPush: false,
   permitirArtefatosOnline: false,
-  tetoDeContexto: "economico",
   instrucoesPersonalizadas: "",
 };
 
@@ -62,14 +60,6 @@ describe("formatacao", () => {
       "Artefatos online no claude.ai: ligado",
     ]);
     expect(descreverAlteracoesDaConfiguracao({})).toEqual([]);
-  });
-
-  it("lista o contexto escolhido nas alterações e só menciona o estendido na descrição", () => {
-    expect(descreverAlteracoesDaConfiguracao({ tetoDeContexto: "economico" })).toEqual(["Contexto: Econômico (200 mil)"]);
-    expect(descreverAlteracoesDaConfiguracao({ tetoDeContexto: "estendido" })).toEqual(["Contexto: Estendido (1 milhão)"]);
-    const base = { ...CONFIGURACAO_PADRAO_DO_ORQUESTRADOR };
-    expect(descreverConfiguracao(base)).not.toContain("contexto");
-    expect(descreverConfiguracao({ ...base, tetoDeContexto: "estendido" })).toContain("contexto estendido");
   });
 
   it("formata a utilização da cota como percentual", () => {

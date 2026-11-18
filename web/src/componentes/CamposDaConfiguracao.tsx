@@ -24,7 +24,7 @@ import {
   usePreferencias,
 } from "../shared/hooks/useDadosDaConfiguracao";
 import { DICA_DAS_VARIAVEIS, tamanhoDasInstrucoes } from "../shared/instrucoes";
-import { AvisoDoEsforcoHerdado, IconeDaPermissao, LinhaDoContexto, Rotulo, SeletorDePerfil } from "./canvas/LinhasDaConfiguracao";
+import { AvisoDoEsforcoHerdado, IconeDaPermissao, Rotulo, SeletorDePerfil } from "./canvas/LinhasDaConfiguracao";
 import { MenuDeModelo } from "./canvas/MenuDeModelo";
 import { QuantidadeDeSubagentes } from "./canvas/QuantidadeDeSubagentes";
 import { PreviaDoPromptFinal } from "./PreviaDoPromptFinal";
@@ -248,7 +248,6 @@ export function CamposDaConfiguracao({
         />
       </div>
 
-      <LinhaDoContexto valor={valor.tetoDeContexto} aoMudar={(teto) => mudar("tetoDeContexto", teto)} />
 
       <div className="linha-da-criacao">
         <Rotulo

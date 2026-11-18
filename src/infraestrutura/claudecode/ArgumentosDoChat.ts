@@ -1,7 +1,7 @@
 import type { PerguntaAoMotorDeChat } from "../../chat/MotorDeChat";
 import type { EsforcoDeRaciocinio } from "../../orquestracao/EsforcoDeRaciocinio";
 import {
-  aplicarTetoDeContexto,
+  limitarSaidaDoBash,
   ambienteSemSessaoPai,
   comVariaveisDeArtefatoOnline,
   caminhoParaRegraDePermissao,
@@ -200,6 +200,6 @@ export function montarAmbienteDoChat(
   if (esforco !== "padrao") {
     delete ambiente[VARIAVEL_DE_ESFORCO];
   }
-  aplicarTetoDeContexto(ambiente, "economico");
+  limitarSaidaDoBash(ambiente);
   return comVariaveisDeArtefatoOnline(ambiente, permitirArtefatosOnline);
 }

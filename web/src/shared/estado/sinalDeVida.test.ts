@@ -23,7 +23,6 @@ function turno(ultimaAtividadeEm: string, subagentes: SituacaoDoSubagente[] = []
       nivelDePermissao: "leitura",
       permitirCommitEPush: false,
       permitirArtefatosOnline: false,
-      tetoDeContexto: "economico",
       instrucoesPersonalizadas: "",
     },
     modo: "execucao",

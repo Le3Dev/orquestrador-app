@@ -10,12 +10,6 @@ describe("resumoDaConfiguracao", () => {
     );
   });
 
-  it("só fala do contexto quando o estendido está escolhido", () => {
-    expect(resumoDaConfiguracao({ ...CONFIGURACAO_PADRAO_DO_ORQUESTRADOR, tetoDeContexto: "estendido" })).toMatch(
-      / Contexto estendido \(1 milhão\)\.$/,
-    );
-  });
-
   it("com a publicação de artefatos online ligada, avisa no fim", () => {
     expect(resumoDaConfiguracao({ ...CONFIGURACAO_PADRAO_DO_ORQUESTRADOR, permitirArtefatosOnline: true })).toBe(
       "Somente leitura, Sonnet (esforço médio) com até 3 subagentes Sonnet (esforço médio). Artefatos online ligados.",

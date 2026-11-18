@@ -254,19 +254,17 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
       expect(repositorio.buscarPorId("antigo")?.paraDados().configuracao.permitirArtefatosOnline).toBe(true);
     });
 
-    it("reabre o teto de contexto gravado e trata a ausência como economico", async () => {
+    it("reabre sem erro um arquivo gravado com o campo tetoDeContexto, já retirado", async () => {
       const antigo = arquivoAntigo();
-      await gravarArquivo("antigo", JSON.stringify(antigo));
-      expect((await RepositorioDeOrquestradoresEmArquivo.abrir(pasta)).buscarPorId("antigo")?.configuracao.tetoDeContexto).toBe(
-        "economico",
-      );
       await gravarArquivo(
         "antigo",
-        JSON.stringify({ ...antigo, configuracao: { ...(antigo.configuracao as object), tetoDeContexto: "estendido" } }),
+        JSON.stringify({ ...antigo, configuracao: { ...(antigo.configuracao as object), tetoDeContexto: "economico" } }),
       );
-      expect((await RepositorioDeOrquestradoresEmArquivo.abrir(pasta)).buscarPorId("antigo")?.configuracao.tetoDeContexto).toBe(
-        "estendido",
-      );
+
+      const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+
+      expect(repositorio.buscarPorId("antigo")).toBeDefined();
+      expect(repositorio.buscarPorId("antigo")?.paraDados().configuracao).not.toHaveProperty("tetoDeContexto");
     });
 
     it("reabre a retomada automática pendente gravada antes do reinício", async () => {

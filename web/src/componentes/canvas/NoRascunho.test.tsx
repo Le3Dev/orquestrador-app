@@ -153,18 +153,6 @@ describe("NoRascunho", () => {
     expect(screen.getByText("novo orquestrador")).toBeInTheDocument();
   });
 
-  it("o seletor Contexto começa no econômico e o estendido vai no que é criado", async () => {
-    const criar = espiarCriacao();
-    await abrirComPasta();
-
-    expect(screen.getByRole("radio", { name: "Econômico (200 mil)" })).toBeChecked();
-    fireEvent.click(screen.getByRole("radio", { name: "Estendido (1 milhão)" }));
-
-    expect(screen.getByRole("radio", { name: "Estendido (1 milhão)" })).toBeChecked();
-    expect(screen.getByText(/contexto estendido/)).toBeInTheDocument();
-    expect(await criarEPegarPayload(criar)).toMatchObject({ tetoDeContexto: "estendido" });
-  });
-
   it("os menus de modelo têm Fable, Opus, Sonnet e Haiku", async () => {
     abrir();
     await screen.findByRole("option", { name: "app" });
@@ -333,7 +321,6 @@ describe("NoRascunho", () => {
       nivelDePermissao: "leitura",
       permitirCommitEPush: false,
       permitirArtefatosOnline: false,
-      tetoDeContexto: "economico",
       instrucoesPersonalizadas: "Seja breve.",
     });
     await waitFor(() => expect(acoes.orquestradorCriado).toHaveBeenCalledWith("rascunho:1", criado));

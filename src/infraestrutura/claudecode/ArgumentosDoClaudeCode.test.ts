@@ -11,7 +11,7 @@ import { NivelDePermissao } from "../../orquestracao/NivelDePermissao";
 import { PastaDeTrabalho } from "../../orquestracao/PastaDeTrabalho";
 import { SelecaoDeSubagentesProntos, subagentesProntosSelecionados } from "../../orquestracao/SubagentesProntos";
 import {
-  aplicarTetoDeContexto,
+  limitarSaidaDoBash,
   comandosProibidosDoTurno,
   configuracoesDaSessao,
   definicaoDosAgentes,
@@ -497,19 +497,8 @@ describe("definicaoDosAgentes", () => {
 });
 
 describe("montarAmbiente", () => {
-  it("teto econômico limita a janela a 200 mil tokens e a saída do Bash a 15 mil", () => {
+  it("limita a saída do Bash a 15 mil e não grava a janela de contexto", () => {
     const ambiente = montarAmbiente({ PATH: "x" }, pedido(false));
-
-    expect(ambiente.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBe("200000");
-    expect(ambiente.BASH_MAX_OUTPUT_LENGTH).toBe("15000");
-  });
-
-  it("teto estendido apaga a janela herdada, mas mantém o limite da saída do Bash", () => {
-    const estendido = pedido(false);
-    const ambiente = montarAmbiente(
-      { PATH: "x", CLAUDE_CODE_AUTO_COMPACT_WINDOW: "200000" },
-      { ...estendido, configuracao: estendido.configuracao.com({ tetoDeContexto: "estendido" }) },
-    );
 
     expect(ambiente.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
     expect(ambiente.BASH_MAX_OUTPUT_LENGTH).toBe("15000");
@@ -519,7 +508,7 @@ describe("montarAmbiente", () => {
     expect(montarAmbiente({ PATH: "x", BASH_MAX_OUTPUT_LENGTH: "40000" }, pedido(false)).BASH_MAX_OUTPUT_LENGTH).toBe(
       "40000",
     );
-    expect(aplicarTetoDeContexto({ BASH_MAX_OUTPUT_LENGTH: "40000" }, "estendido").BASH_MAX_OUTPUT_LENGTH).toBe("40000");
+    expect(limitarSaidaDoBash({ BASH_MAX_OUTPUT_LENGTH: "40000" }).BASH_MAX_OUTPUT_LENGTH).toBe("40000");
   });
 
   it("remove as variáveis da sessão pai e limita a concorrência ao teto configurado", () => {

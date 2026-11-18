@@ -32,7 +32,7 @@ import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
 import { resumoDaConfiguracao } from "../../shared/resumoDaConfiguracao";
 import { IconeAlerta, IconeFechar } from "../Icones";
 import { PreviaDoPromptFinal } from "../PreviaDoPromptFinal";
-import { AvisoDoEsforcoHerdado, IconeDaPermissao, LinhaDoContexto, Rotulo, SeletorDePerfil } from "./LinhasDaConfiguracao";
+import { AvisoDoEsforcoHerdado, IconeDaPermissao, Rotulo, SeletorDePerfil } from "./LinhasDaConfiguracao";
 import { MenuDeModelo } from "./MenuDeModelo";
 import { NavegadorDePastas } from "./NavegadorDePastas";
 import { QuantidadeDeSubagentes } from "./QuantidadeDeSubagentes";
@@ -379,7 +379,6 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
               />
             </div>
 
-            <LinhaDoContexto valor={configuracao.tetoDeContexto} aoMudar={(teto) => mudar("tetoDeContexto", teto)} />
 
             <div className="linha-da-criacao">
               <Rotulo
@@ -556,7 +555,6 @@ function detalhes(configuracao: DadosDaConfiguracao, pasta: string): string {
     pasta,
     ...(configuracao.permitirCommitEPush && configuracao.nivelDePermissao === "edicao_e_comandos" ? ["commit e push"] : []),
     ...(configuracao.permitirArtefatosOnline ? ["artefatos online"] : []),
-    ...(configuracao.tetoDeContexto === "estendido" ? ["contexto estendido"] : []),
     configuracao.instrucoesPersonalizadas.trim() === "" ? "instruções gerais" : "instruções próprias",
   ].join(" · ");
 }

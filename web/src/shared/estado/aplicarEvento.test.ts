@@ -17,7 +17,6 @@ const configuracao: DadosDaConfiguracao = {
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
   permitirArtefatosOnline: false,
-  tetoDeContexto: "economico",
   instrucoesPersonalizadas: "",
 };
 
@@ -308,7 +307,6 @@ describe("aplicarEvento", () => {
       ...configuracaoAntiga,
       permitirCommitEPush: false,
       permitirArtefatosOnline: false,
-      tetoDeContexto: "economico",
       esforcoDoOrquestrador: "padrao",
       esforcoDosSubagentes: "padrao",
       instrucoesPersonalizadas: "",

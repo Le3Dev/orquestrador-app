@@ -45,7 +45,6 @@ export const CONFIGURACAO_PADRAO_DO_ORQUESTRADOR: DadosDaConfiguracao = {
   nivelDePermissao: "leitura",
   permitirCommitEPush: false,
   permitirArtefatosOnline: false,
-  tetoDeContexto: "economico",
   instrucoesPersonalizadas: "",
 };
 

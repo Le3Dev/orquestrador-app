@@ -20,7 +20,6 @@ export interface DadosDaQuantidade {
   limite: number;
 }
 
-export type TetoDeContexto = "economico" | "estendido";
 
 export interface DadosDaConfiguracao {
   modeloDoOrquestrador: ModeloClaude;
@@ -35,8 +34,6 @@ export interface DadosDaConfiguracao {
   permitirCommitEPush: boolean;
   /** O orquestrador e os subagentes podem publicar artefatos online no claude.ai. Desligado por padrão. */
   permitirArtefatosOnline: boolean;
-  /** Até onde o contexto da conversa cresce: "economico" compacta perto de 200 mil tokens; "estendido" vai a 1 milhão. */
-  tetoDeContexto: TetoDeContexto;
   /**
    * Instruções do usuário acrescentadas ao fim do bloco de cada pedido. Vazias
    * por padrão: aí vale o padrão global (`DadosDasPreferencias.instrucoesPadrao`), se houver.
@@ -123,7 +120,6 @@ export interface PreviaDoPrompt {
 type CamposPosterioresDaConfiguracao =
   | "permitirCommitEPush"
   | "permitirArtefatosOnline"
-  | "tetoDeContexto"
   | "esforcoDoOrquestrador"
   | "esforcoDosSubagentes"
   | "instrucoesPersonalizadas";
