@@ -83,6 +83,36 @@ npm run desktop:dev
 
 O script (`scripts/desktop-dev.cjs`) compila o backend uma vez, sobe o Vite em http://localhost:5173 (com `/api` repassado à porta 3201) e abre o Electron com `ORQUESTRADOR_URL_DA_TELA=http://localhost:5173` e `PORTA=3201`. Mudanças em `web/` recarregam na janela; mudanças no backend pedem fechar e rodar de novo. Fechar a janela ou Ctrl+C encerra tudo.
 
+**Cópia de teste** (ver ADR-50): um segundo app (Electron) rodando o código de uma pasta, para testar a feature de uma branch sem tocar no app instalado. Pode ficar aberta ao lado dele.
+
+```bash
+node scripts/copiaDeTeste.cjs abrir  [--pasta <caminho>] [--sem-build]   # padrão: a pasta atual
+node scripts/copiaDeTeste.cjs listar                                     # cópias abertas: branch, pid, porta, pastas
+node scripts/copiaDeTeste.cjs fechar [--pasta <caminho> | --todas]
+```
+
+No Mac, dois cliques em **`copia-de-teste.command`** (na raiz) abrem a cópia daquela pasta; com ela já aberta, o mesmo arquivo oferece fechar.
+
+O `abrir`:
+1. compila o backend (`tsc -p tsconfig.build.json`, para `dist/`) e gera a tela (`vite build`, para `web/dist/`, sem o typecheck da tela). Com `--sem-build` e os dois já gerados, pula essa etapa. Não há Vite no ar: o servidor da cópia serve `web/dist`, e só o Electron fica rodando;
+2. cria a pasta de dados isolada `<tmp>/orquestrador-copia-de-teste-<slug-da-branch>` (no Mac, `os.tmpdir()` fica em `/var/folders/...`). Na primeira vez grava nela um `config.json` com **só** a pasta raiz dos projetos e o caminho do Claude Code do app instalado, para a cópia não parar na tela de primeira abertura;
+3. abre o Electron desacoplado (`detached`, grupo de processos próprio), com `ORQUESTRADOR_PASTA_DO_USUARIO` apontando para a pasta isolada e `ORQUESTRADOR_COPIA_DE_TESTE=<branch>` (destacada, o commit curto): a janela ganha o título "Cópia de teste: <branch>" e a tela, um selo com o nome. A saída vai para `/tmp/copia-de-teste-<slug>.log`;
+4. espera a cópia sortear e gravar a porta dela e o servidor responder (sem o cookie do app ele responde 403, o que basta para saber que subiu), grava pid e porta em `<pasta isolada>/copia-de-teste.json` e imprime nome, pasta de dados, porta, pid, log e o comando para fechar. Se a cópia da mesma branch já estiver aberta, avisa e não abre outra.
+
+O `fechar` manda SIGTERM ao pid gravado (o Electron sai pelo `before-quit`, que desliga o servidor e os agentes), espera até 20 s, encerra com SIGKILL o que sobrar do grupo de processos e confirma que nada ficou. No Windows usa `taskkill /t /f`.
+
+Garantias de isolamento:
+- **pasta de dados própria:** histórico, notas, chat, worktrees, logs, `processos-em-execucao.json` e a trava de instância única ficam na pasta isolada. O script recusa abrir se `ORQUESTRADOR_PASTA_DO_USUARIO` apontar para a pasta do app instalado (ou para dentro dela), e confere de novo a pasta que ele mesmo calculou;
+- **porta própria:** a porta é por instalação, e a pasta isolada não herda a do app instalado; `PORTA` do ambiente é removida antes de abrir;
+- **nada do histórico nem dos segredos:** do `config.json` do app instalado vêm só os dois campos; porta, histórico importado, licença e chave nunca. A cópia abre com o canvas vazio;
+- **ambiente limpo:** saem as variáveis herdadas de quem chamou (`PORTA`, `PASTA_*`, `ORQUESTRADOR_*`, `CLAUDECODE`, `CLAUDE_CODE_*`, `ELECTRON_RUN_AS_NODE`), para um agente dentro do app instalado poder abrir a cópia sem desviá-la para os dados dele;
+- **Chaveiro intocado (Mac):** o Electron abre com `--use-mock-keychain`. Sem isso, o `safeStorage` (cifra da sessão da licença) pede acesso ao Chaveiro e a abertura fica parada no aviso do sistema;
+- **o app instalado não é fechado nem tocado:** o `fechar` mira só o pid gravado e o grupo dele (e confere que o pid é de um Electron, para não acertar um pid reaproveitado).
+
+A pasta isolada fica entre aberturas (a cópia da mesma branch reabre com os dados e a porta de antes); para começar do zero, apague-a com a cópia fechada. Feature só de tela continua podendo ser testada pelo servidor da branch numa porta própria (`desktop:dev` ou o modo navegador abaixo).
+
+> Agente que abre a cópia: prefira rodar o comando fora do sandbox do terminal (é um app com janela). Na abertura feita dentro do sandbox, em 18/11, o Electron não respondeu ao SIGTERM e o `fechar` precisou do SIGKILL. Como o Electron nasce em sessão própria, o Claude Code não o encerra junto com os processos em segundo plano dele.
+
 **Desenvolvimento no navegador (só com a trava desligada):** o servidor recusa o navegador e nem sobe sem a chave do aplicativo. Para depurar a API e a tela no navegador, ligue `ORQUESTRADOR_PERMITIR_NAVEGADOR=1` (no `.env`, a partir do `.env.example`) e use dois terminais:
 
 ```bash
@@ -178,6 +208,7 @@ npm run icones   # grava electron/icones/icone.ico e icone.png
 | `ORQUESTRADOR_URL_DE_DOWNLOAD` | servidor (opcional) | — (o app passa o `urlDeDownload` do `electron/config.js`: `https://github.com/Le3Dev/orquestrador-app/releases/latest`) | Link para baixar o aplicativo, mostrado na página "roda só no aplicativo" |
 | `ORQUESTRADOR_URL_DA_TELA` | aplicativo | — | Carrega a tela desta URL (o Vite, em `desktop:dev`) em vez da servida pelo servidor |
 | `ORQUESTRADOR_PASTA_DO_USUARIO` | aplicativo | `%APPDATA%\Orquestrador de Agentes` | Troca a pasta do usuário do app (configuração, dados, log, licença). Só não empacotado ou no build de teste; usada nos testes de ponta a ponta. Com ela, a cópia da pasta antiga não acontece |
+| `ORQUESTRADOR_COPIA_DE_TESTE` | aplicativo | — | Só não empacotado: nome da cópia de teste (título "Cópia de teste: <nome>" e selo na tela). Definida pelo `scripts/copiaDeTeste.cjs` com a branch da pasta |
 | `PORTA_DA_API` | Vite (`web/`) | `3200` | Porta para onde o Vite repassa o `/api` |
 | `GH_TOKEN` | electron-builder, só no `npm run release:win` | — | Token *fine-grained* do GitHub (só no repositório `orquestrador-app`, **Contents: Read and write**) para publicar a release. Só na sessão de quem publica (`$env:GH_TOKEN = "..."`); nunca em arquivo do projeto. Os apps instalados não precisam dele (ver ADR-29) |
 
@@ -1732,6 +1763,34 @@ flowchart LR
   - cada motor gasta a cota da assinatura dele, e o login é do usuário em cada CLI (o app não guarda credenciais); o Copilot também precisa de `includeCoAuthoredBy: false` (ver *Como rodar*);
   - com os subagentes fora do Claude Code, só o Orquestrador tem o navegador do agente (ADR-46);
   - a suíte exercita o Codex e o Copilot com servidores `app-server` e ACP falsos: o comportamento com o login real de cada CLI depende da versão instalada.
+
+**ADR-49 — Atualização pelo botão no Mac: o app instalado se gera de novo a partir do código.**
+- *Contexto:* no Mac o `electron-updater` fica desligado (ADR-34): sem assinatura da Apple ele baixa a versão nova, mas não a instala. O app do Mac é gerado na máquina pelo `npm run dist:mac`, a partir de uma pasta do código, e sem atualização ele ficava parado na versão do dia em que foi gerado.
+- *Decisão:* o app instalado se atualiza pelo código (`electron/atualizacaoDoMac.js`, com a troca em `electron/trocarAppDoMac.sh`):
+  - o `dist:mac` grava no `package.json` empacotado a pasta do código (`repositorioDoMac`) e o commit; sem essa pasta, ou se ela não for mais um repositório git, a atualização fica indisponível, como antes;
+  - **verificar:** `git fetch` do remoto `upstream` (ou `origin`, sem ele) e compara a `main` do remoto com o commit do app. Mesma verificação automática do Windows (~10 s depois da janela e a cada 4 h); erro na busca automática só vai para o log;
+  - **antes de mexer:** recusa a pasta com alterações rastreadas sem commit e a branch que não avança direto (fast-forward). Nesses casos nada é alterado;
+  - **gerar:** avança o código, roda `npm ci` (raiz e `web/`, seguindo o `package-lock.json` sem reescrevê-lo; com `npm install` o lockfile mudava e a pasta deixava de estar limpa na verificação seguinte) e `npm run dist:mac`, com as etapas mostradas na tela. Uma geração por vez;
+  - **reiniciar:** antes, confere o registro `processos-em-execucao.json`. Com orquestradores trabalhando, oferece esperar eles terminarem (situação "aguardando", com a contagem); sem ninguém, reinicia. Um script desacoplado espera o app fechar, guarda o `.app` atual num backup na pasta temporária, copia o novo com `ditto` e o abre; se a cópia falhar, o backup volta para o lugar.
+- *Consequências:*
+  - no Windows nada muda no caminho da atualização (`electron-updater` e Releases do GitHub). A espera pelos orquestradores antes de reiniciar é a mesma tela nos dois sistemas;
+  - o Mac atualiza a partir da pasta do código de quem gerou o app: ela precisa continuar existindo, limpa e com acesso ao remoto;
+  - a geração leva minutos e usa memória (npm ci e build com o app aberto). O app segue usável enquanto isso;
+  - o backup do `.app` fica na pasta temporária, que o sistema limpa sozinho com o tempo.
+
+**ADR-50 — Cópia de teste: um segundo app com pasta de dados isolada, aberto por script.**
+- *Contexto:* para testar a feature de uma branch no app de verdade (Electron, servidor e tela juntos), o caminho era trocar o app instalado, que está sempre em uso pelos orquestradores. Abrir `electron .` sem cuidado usa a mesma pasta de dados do instalado (`<appData>/Orquestrador de Agentes`), com o mesmo histórico e a mesma trava de instância única.
+- *Decisão:* `scripts/copiaDeTeste.cjs` (`abrir`, `fechar`, `listar`; ver *Cópia de teste* em *Como rodar*):
+  - pasta de dados isolada por branch no tmp, via `ORQUESTRADOR_PASTA_DO_USUARIO` (que o app só aceita fora do empacotado), semeada só com a pasta dos projetos e o Claude Code do instalado;
+  - tela servida pelo próprio servidor da cópia (`vite build`), sem Vite no ar: um processo pesado a menos e nada de porta fixa (a `desktop:dev` usa 3201 e 5173, que colidiriam entre cópias);
+  - o Electron nasce desacoplado, em grupo de processos próprio, com pid e porta gravados num arquivo de estado; fechar mira esse pid e esse grupo;
+  - identificação pela env `ORQUESTRADOR_COPIA_DE_TESTE` (título da janela e selo na tela, ligados só fora do app empacotado);
+  - no Mac, `--use-mock-keychain`: sem ele a abertura fica parada no aviso do Chaveiro pedido pelo `safeStorage`.
+- *Consequências:*
+  - dá para ter o app instalado e uma ou mais cópias (de branches diferentes) abertos ao mesmo tempo, cada um na sua porta;
+  - a cópia não tem licença nem atualização (roda fora do empacotado) e não traz o histórico: o teste começa do canvas vazio;
+  - a sessão da licença da cópia fica num Chaveiro falso (só no Mac), descartada ao fechar;
+  - a pasta isolada persiste entre aberturas da mesma branch; para zerar, apaga-se a pasta com a cópia fechada.
 
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;

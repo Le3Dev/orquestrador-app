@@ -141,6 +141,10 @@
 
 /* Atualização. */
 .cfgapp-progresso { padding: 0 14px 12px; }
+/* O medidor é um span: fora de um flex, sem display block ele some (largura e altura 0). */
+.cfgapp-progresso .medidor { display: block; }
+/* A barra fica logo abaixo do texto da linha, sem o divisor entre os dois. */
+.cfgapp-linha:has(+ .cfgapp-progresso) { border-bottom: 0; }
 .cfgapp-confirmacao {
   padding: 10px 14px 12px;
   border-top: 1px solid var(--border);
