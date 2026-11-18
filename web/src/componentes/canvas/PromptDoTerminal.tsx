@@ -158,6 +158,15 @@ interface Props {
   aoLimparConversa: () => Promise<boolean>;
   aoCancelar: () => void;
   /**
+   * O Orquestrador está pausado (congelado ou à espera da retomada). Enviar
+   * volta a valer: tira da pausa e manda a mensagem junto. Padrão: falso.
+   */
+  pausado?: boolean;
+  /** Pausar ou continuar já foi pedido e o servidor ainda não respondeu. Padrão: falso. */
+  alternandoPausa?: boolean;
+  aoPausar: () => void;
+  aoContinuar: () => void;
+  /**
    * O texto com que o campo nasce: o que estava escrito quando o terminal
    * entrou ou saiu da tela cheia (o prompt é montado de novo). Só vale na
    * montagem. Padrão: vazio.
@@ -172,7 +181,8 @@ interface Props {
  * Continua editável durante o trabalho: aí o Enter põe o pedido na fila (com
  * o modo; anexos não entram), que sai sozinha quando o pedido atual termina
  * bem. "/clear" sozinho começa uma conversa nova (Tab completa o comando). O
- * microfone dita o pedido por voz. O ✨ reescreve o pedido para ficar mais
+ * Pausado, o botão Pausar vira Continuar e o Enter envia normalmente (o
+ * servidor tira da pausa e manda junto). O microfone dita o pedido por voz. O ✨ reescreve o pedido para ficar mais
  * claro (não envia; "desfazer" volta o texto) e só fica livre sem pedido rodando.
  *
  * Memorizado: novidades de outros terminais não o re-renderizam (o terminal
@@ -198,6 +208,10 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
   aoEnviarDaFila,
   aoLimparConversa,
   aoCancelar,
+  pausado = false,
+  alternandoPausa = false,
+  aoPausar,
+  aoContinuar,
   textoInicial = "",
 }: Props) {
   const [texto, setTexto] = useState(textoInicial);
@@ -207,9 +221,13 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
   // Tentou pôr anexos na fila; some quando eles saem ou o pedido acaba.
   const [avisoDosAnexos, setAvisoDosAnexos] = useState(false);
   // O aviso é do pedido em andamento: começou ou acabou um pedido, ele sai.
-  const [trabalhandoAntes, setTrabalhandoAntes] = useState(trabalhando);
-  if (trabalhando !== trabalhandoAntes) {
-    setTrabalhandoAntes(trabalhando);
+  // Pausado, o pedido não roda: o Enter envia em vez de pôr na fila.
+  const rodando = trabalhando && !pausado;
+  // Pausado ainda há um pedido pela metade: o /clear e o Esc valem como durante o trabalho.
+  const comPedido = trabalhando || pausado;
+  const [rodandoAntes, setRodandoAntes] = useState(rodando);
+  if (rodando !== rodandoAntes) {
+    setRodandoAntes(rodando);
     setAvisoDosAnexos(false);
   }
   const seletor = useRef<HTMLInputElement>(null);
@@ -217,7 +235,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
   const planejando = modo === "planejamento";
   const enviandoProximoDaFila = !trabalhando && fila.length > 0 && proximoDaFilaACaminho;
   const filaPausada = !trabalhando && fila.length > 0 && !enviandoProximoDaFila;
-  const dica = dicaDeComando(texto, trabalhando) ?? dicaDePedidoGrande(texto, modo);
+  const dica = dicaDeComando(texto, comPedido) ?? dicaDePedidoGrande(texto, modo);
 
   const ajustarAltura = useCallback((): void => {
     const elemento = campo.current;
@@ -262,7 +280,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
 
   async function limparConversa(): Promise<void> {
     // Durante um pedido o servidor recusaria: a dica já avisa, então nada acontece.
-    if (trabalhando || enviando || desconectado) {
+    if (comPedido || enviando || desconectado) {
       return;
     }
     setEnviando(true);
@@ -306,7 +324,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
     if (!temConteudo || enviando || desconectado || melhoria.melhorando) {
       return;
     }
-    if (trabalhando) {
+    if (rodando) {
       await enfileirar();
       return;
     }
@@ -340,7 +358,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
       evento.preventDefault();
       void enviar();
     }
-    if (evento.key === "Escape" && trabalhando && !cancelando && !desconectado) {
+    if (evento.key === "Escape" && comPedido && !cancelando && !desconectado) {
       evento.preventDefault();
       aoCancelar();
     }
@@ -430,7 +448,9 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
           placeholder={
             desconectado
               ? "servidor desconectado — dá para escrever, o envio volta quando ele voltar"
-              : trabalhando
+              : pausado
+                ? "Orquestrador pausado: enviar continua e manda a mensagem junto · esc cancela"
+                : trabalhando
                 ? "trabalhando… escreva o próximo e enter põe na fila · esc cancela"
                 : planejando
                   ? "descreva o que planejar — nada é alterado até você aprovar"
@@ -451,7 +471,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
         />
         <BotaoDeMelhorar
           melhoria={melhoria}
-          desabilitado={texto.trim() === "" || desconectado || trabalhando || enviando}
+          desabilitado={texto.trim() === "" || desconectado || rodando || enviando}
         />
         <BotaoDeDitado destino="a mensagem" aoTranscrever={receberDitado} />
         <button
@@ -463,7 +483,29 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
         >
           <IconeAnexo />
         </button>
-        {trabalhando ? (
+        {comPedido &&
+          (pausado ? (
+            <button
+              type="button"
+              className="btn btn-sm btn-outline"
+              title="Continuar o pedido de onde parou"
+              onClick={aoContinuar}
+              disabled={alternandoPausa || cancelando || desconectado}
+            >
+              {alternandoPausa ? "continuando…" : "continuar ▶"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-sm btn-outline"
+              title="Pausar sem perder onde estava: o Continuar segue de onde parou"
+              onClick={aoPausar}
+              disabled={alternandoPausa || cancelando || desconectado}
+            >
+              {alternandoPausa ? "pausando…" : "pausar ⏸"}
+            </button>
+          ))}
+        {comPedido && (
           <button
             type="button"
             className="btn btn-sm btn-danger"
@@ -472,7 +514,8 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
           >
             {cancelando ? "cancelando…" : "cancelar"}
           </button>
-        ) : (
+        )}
+        {!rodando && (
           <button
             type="button"
             className="btn btn-sm btn-cta"
@@ -483,7 +526,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
           </button>
         )}
       </div>
-      {avisoDosAnexos && trabalhando && anexos.length > 0 && (
+      {avisoDosAnexos && rodando && anexos.length > 0 && (
         <p className="mono hint-warning px-[14px] pb-0.5" role="alert">
           {AVISO_DOS_ANEXOS}
         </p>

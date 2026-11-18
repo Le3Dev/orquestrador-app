@@ -6,7 +6,14 @@ import type {
   EventoRegistrado,
   ModoDoTurno,
 } from "../api/tipos";
-import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa, filaDePedidos } from "./aplicarEvento";
+import {
+  aplicarEvento,
+  ESTADO_INICIAL,
+  type EstadoDaConversa,
+  filaDePedidos,
+  pausaDoOrquestrador,
+  subagentePausado,
+} from "./aplicarEvento";
 
 const configuracao: DadosDaConfiguracao = {
   modeloDoOrquestrador: "opus",
@@ -1335,5 +1342,93 @@ describe("aplicarEvento", () => {
       const abertoDepois = reproduzir(registrar([limpa]));
       expect(filaDePedidos(abertoDepois, [b])).toEqual([b]);
     });
+  });
+});
+
+describe("pausa do orquestrador", () => {
+  const CONGELADO = { desde: "2026-10-28T12:00:09Z", modo: "congelado" } as const;
+  const RETOMADA = { desde: "2026-10-28T12:00:09Z", modo: "retomada" } as const;
+  const pausar = (pausa: typeof CONGELADO | typeof RETOMADA): EventoDeOrquestracao => ({
+    tipo: "orquestrador_pausado",
+    orquestradorId: "o1",
+    turnoId: "t1",
+    pausa,
+  });
+
+  it("congelado: o turno segue em andamento e os subagentes que executavam não são cancelados", () => {
+    const estado = reproduzir(registrar([...historico, pausar(CONGELADO)]));
+    const turno = estado.turnos[0];
+
+    expect(estado.pausa).toEqual(CONGELADO);
+    expect(turno?.situacao).toBe("em_andamento");
+    expect(turno?.subagentes.map((subagente) => subagente.situacao)).toEqual(["concluido", "executando"]);
+    expect(turno?.log.at(-1)).toMatchObject({ tipo: "sistema", texto: "orquestrador pausado · congelado, continua de onde parou" });
+    expect(turno?.subagentes[1] && subagentePausado(estado, turno.subagentes[1])).toBe(true);
+    expect(turno?.subagentes[0] && subagentePausado(estado, turno.subagentes[0])).toBe(false);
+  });
+
+  it("congelado e continuado: a pausa sai e o turno segue de onde estava", () => {
+    const estado = reproduzir(
+      registrar([...historico, pausar(CONGELADO), { tipo: "orquestrador_continuado", orquestradorId: "o1", modo: "congelado" }]),
+    );
+
+    expect(estado.pausa).toBeNull();
+    expect(estado.turnos[0]?.situacao).toBe("em_andamento");
+    expect(estado.turnos[0]?.subagentes[1]?.situacao).toBe("executando");
+    expect(estado.turnos[0]?.log.at(-1)?.texto).toBe("orquestrador continuado · de onde parou");
+  });
+
+  it("retomada: o turno termina como pausado e os subagentes que executavam viram cancelados", () => {
+    const estado = reproduzir(registrar([...historico, pausar(RETOMADA)]));
+    const turno = estado.turnos[0];
+
+    expect(estado.pausa).toEqual(RETOMADA);
+    expect(turno?.situacao).toBe("pausado");
+    expect(turno?.encerradoEm).not.toBeNull();
+    expect(turno?.subagentes.map((subagente) => subagente.situacao)).toEqual(["concluido", "cancelado"]);
+  });
+
+  it("um congelado que vira retomada (o processo caiu) encerra o turno", () => {
+    const estado = reproduzir(registrar([...historico, pausar(CONGELADO), pausar(RETOMADA)]));
+
+    expect(estado.pausa?.modo).toBe("retomada");
+    expect(estado.turnos[0]?.situacao).toBe("pausado");
+  });
+
+  it("um turno novo, ou o cancelamento, tira da pausa", () => {
+    const comTurnoNovo = reproduzir(
+      registrar([
+        ...historico,
+        pausar(RETOMADA),
+        { tipo: "turno_iniciado", turnoId: "t2", texto: "continue de onde parou", configuracao },
+      ]),
+    );
+    const cancelado = reproduzir(
+      registrar([
+        ...historico,
+        pausar(CONGELADO),
+        { tipo: "orquestrador_continuado", orquestradorId: "o1", modo: "congelado", cancelado: true },
+        { tipo: "turno_cancelado", turnoId: "t1" },
+      ]),
+    );
+    const soOCancelamento = reproduzir(registrar([...historico, pausar(CONGELADO), { tipo: "turno_cancelado", turnoId: "t1" }]));
+
+    expect(comTurnoNovo.pausa).toBeNull();
+    expect(comTurnoNovo.turnos.map((turno) => turno.situacao)).toEqual(["pausado", "em_andamento"]);
+    expect(cancelado.pausa).toBeNull();
+    expect(cancelado.turnos[0]?.situacao).toBe("cancelado");
+    // A saída por cancelamento não repete a linha: o "turno cancelado" já conta.
+    expect(cancelado.turnos[0]?.log.filter((linha) => linha.texto.startsWith("orquestrador continuado"))).toEqual([]);
+    expect(soOCancelamento.pausa).toBeNull();
+  });
+
+  it("pausaDoOrquestrador: sem eventos de pausa vale o resumo; com eles, o evento (e o modo novo do resumo, se é a mesma pausa)", () => {
+    expect(pausaDoOrquestrador(ESTADO_INICIAL, CONGELADO)).toEqual(CONGELADO);
+    expect(pausaDoOrquestrador(ESTADO_INICIAL, undefined)).toBeNull();
+    // Continuou: o resumo ainda não sabe.
+    expect(pausaDoOrquestrador({ ...ESTADO_INICIAL, pausa: null }, CONGELADO)).toBeNull();
+    // Pausou: o resumo ainda não sabe.
+    expect(pausaDoOrquestrador({ ...ESTADO_INICIAL, pausa: CONGELADO }, null)).toEqual(CONGELADO);
+    expect(pausaDoOrquestrador({ ...ESTADO_INICIAL, pausa: CONGELADO }, RETOMADA)).toEqual(RETOMADA);
   });
 });

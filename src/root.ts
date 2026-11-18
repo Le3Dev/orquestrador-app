@@ -232,7 +232,8 @@ async function iniciar(): Promise<void> {
   monitor.iniciar();
 
   const canal = new CanalDeEventos();
-  const execucoes = new ControleDeExecucoesEmMemoria();
+  // O registro congela e descongela os processos de um Orquestrador pausado (ADR-49).
+  const execucoes = new ControleDeExecucoesEmMemoria(registro);
   const anexos = new ArmazemDeAnexosEmArquivo(path.join(configuracao.pastaDeDados, "anexos"));
   const worktrees = new GerenciadorDeWorktreesGit(configuracao.pastaDeDados);
 

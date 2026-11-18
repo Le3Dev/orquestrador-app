@@ -4,6 +4,7 @@ import { DadosDaConfiguracao } from "./ConfiguracaoDoOrquestrador";
 import { DadosDoConsumoDoTurno } from "./ConsumoDoTurno";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { Motor } from "./Motor";
+import { DadosDaPausa, ModoDaPausa } from "./Pausa";
 import { DadosDoPedidoNaFila, MotivoDaRetiradaDaFila } from "./PedidoNaFila";
 import { NomeDaPredefinicao } from "./PredefinicaoDeConfiguracao";
 
@@ -237,7 +238,16 @@ export type EventoDeOrquestracao =
    * Um pedido entrou no fim da fila do Orquestrador. Não pertence a nenhum
    * turno: espera a vez, com ou sem um turno em andamento.
    */
-  | { tipo: "pedido_enfileirado"; pedido: DadosDoPedidoNaFila }
+  | {
+      tipo: "pedido_enfileirado";
+      pedido: DadosDoPedidoNaFila;
+      /**
+       * O pedido entrou na frente da fila, e não no fim: a mensagem que o
+       * usuário mandou com o Orquestrador congelado (ver ADR-49). Ausente no
+       * caso normal.
+       */
+      naFrente?: true;
+    }
   /**
    * Um pedido saiu da fila: `removido` pelo usuário, ou `enviado` — então vem
    * logo antes do `turno_iniciado` do turno que o atende.
@@ -248,7 +258,20 @@ export type EventoDeOrquestracao =
    * inválido, destino sem vínculo, limite de saltos): aviso para o histórico
    * do remetente. Não pertence a nenhum turno.
    */
-  | { tipo: "aviso_de_vinculo"; mensagem: string };
+  | { tipo: "aviso_de_vinculo"; mensagem: string }
+  /**
+   * O usuário pausou o Orquestrador, ou a pausa mudou de modo (o processo
+   * congelado morreu, ou o app fechou com ele congelado: vira `retomada`).
+   * `turnoId`: o turno pausado; no modo `retomada` ele terminou `pausado`.
+   * Ver ADR-49.
+   */
+  | { tipo: "orquestrador_pausado"; orquestradorId: string; turnoId: string; pausa: DadosDaPausa }
+  /**
+   * O Orquestrador saiu da pausa: `congelado` seguiu o mesmo turno (SIGCONT);
+   * `retomada` abriu um turno novo na mesma sessão (o `turno_iniciado` vem
+   * logo depois). `cancelado`: saiu da pausa porque o usuário cancelou.
+   */
+  | { tipo: "orquestrador_continuado"; orquestradorId: string; modo: ModoDaPausa; cancelado?: true };
 
 /** Evento já gravado no histórico, com a posição na sequência e o instante. */
 export type EventoRegistrado = EventoDeOrquestracao & { sequencia: number; em: string };

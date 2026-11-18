@@ -12,7 +12,7 @@ export interface ProjetoDoChat {
 export interface OrquestradorExistente {
   nome: string;
   pasta: string;
-  situacao: "ocioso" | "trabalhando";
+  situacao: "ocioso" | "trabalhando" | "pausado";
   /** O texto do pedido em andamento (o bloco de contexto corta em 100 caracteres); nulo quando ocioso. */
   pedidoAtual: string | null;
   /** Quando o pedido em andamento começou; nulo quando ocioso. */

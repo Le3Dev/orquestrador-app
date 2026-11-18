@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
-import { encerrarArvore, identidadeDoProcesso } from "./Processos";
+import { CongeladorDeProcessos } from "../execucoes/ControleDeExecucoesEmMemoria";
+import { encerrarArvore, identidadeDoProcesso, sinalizarGrupo } from "./Processos";
 
 export interface ProcessoDeAgente {
   pid: number;
@@ -24,8 +25,14 @@ function ehProcessoDeAgente(valor: unknown): valor is ProcessoDeAgente {
  * processos continuam vivos (no Windows, filhos não morrem com o pai) e o
  * próximo servidor precisa saber quais eram para encerrá-los.
  */
-export class RegistroDeProcessos {
+export class RegistroDeProcessos implements CongeladorDeProcessos {
   private readonly processos = new Map<number, ProcessoDeAgente>();
+  /**
+   * Os grupos congelados (SIGSTOP) de cada Orquestrador pausado (ver ADR-49).
+   * Guardados à parte do registro: um processo que termina sai dele, mas o
+   * grupo pode seguir com filhos parados, que precisam do SIGCONT.
+   */
+  private readonly congelados = new Map<string, Set<number>>();
 
   constructor(private readonly arquivo: string | null = null) {
     this.gravar();
@@ -34,6 +41,43 @@ export class RegistroDeProcessos {
   registrar(processo: ProcessoDeAgente): void {
     this.processos.set(processo.pid, processo);
     this.gravar();
+    // Nasceu durante a pausa (ex.: uma subtarefa que o app já estava abrindo): congela junto.
+    const grupos = this.congelados.get(processo.orquestradorId);
+    if (grupos !== undefined && sinalizarGrupo(processo.pid, "SIGSTOP")) {
+      grupos.add(processo.pid);
+    }
+  }
+
+  /**
+   * Congela os grupos de processos de um Orquestrador: o agente do turno e os
+   * de outros motores que o app abriu para ele, cada um líder do próprio grupo.
+   * Falso se não havia nenhum vivo (ou no Windows): a pausa vira retomada.
+   */
+  congelar(orquestradorId: string): boolean {
+    const grupos = this.congelados.get(orquestradorId) ?? new Set<number>();
+    for (const processo of this.processos.values()) {
+      if (processo.orquestradorId === orquestradorId && sinalizarGrupo(processo.pid, "SIGSTOP")) {
+        grupos.add(processo.pid);
+      }
+    }
+    if (grupos.size === 0) {
+      return false;
+    }
+    this.congelados.set(orquestradorId, grupos);
+    return true;
+  }
+
+  /** Descongela (SIGCONT) o que `congelar` parou; falso se nada estava congelado. */
+  descongelar(orquestradorId: string): boolean {
+    const grupos = this.congelados.get(orquestradorId);
+    if (grupos === undefined) {
+      return false;
+    }
+    this.congelados.delete(orquestradorId);
+    for (const grupo of grupos) {
+      sinalizarGrupo(grupo, "SIGCONT");
+    }
+    return true;
   }
 
   remover(pid: number): void {

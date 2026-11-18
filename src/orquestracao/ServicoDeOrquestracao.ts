@@ -31,6 +31,7 @@ import { Motor } from "./Motor";
 import { ABORTO_POR_SILENCIO, CausaDaFalha, MotorDeAgentes, PedidoDeTurno, ResultadoDoTurno } from "./MotorDeAgentes";
 import { DadosDaRetomadaPendente, Orquestrador, TAMANHO_MAXIMO_DA_MENSAGEM } from "./Orquestrador";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
+import { DadosDaPausa, mensagemDeContinuacao, ModoDaPausa } from "./Pausa";
 import { OrigemDoPedido, PedidoNaFila } from "./PedidoNaFila";
 import { predefinicaoPorNome } from "./PredefinicaoDeConfiguracao";
 import { GerenciadorDeWorktrees } from "./PreparoDeWorktree";
@@ -188,6 +189,17 @@ interface RetomadaAgendada {
   desmarcar: () => void;
 }
 
+/** Uma mensagem (ou um pedido da fila enviado agora) que chega com o Orquestrador pausado. */
+interface MensagemDuranteAPausa {
+  texto: string;
+  anexosRecebidos: readonly AnexoRecebido[];
+  modo: ModoDoTurno;
+  itensLigados: readonly ItemLigado[];
+  previasAbertas: readonly string[];
+  /** O pedido da fila, no "enviar agora"; nulo numa mensagem. */
+  pedidoDaFila: PedidoNaFila | null;
+}
+
 /**
  * Retomada vencida durante o reinício: espera ao menos isto, multiplicado
  * pela ordem dela, para várias não abrirem o Claude ao mesmo tempo.
@@ -228,6 +240,12 @@ export interface MensagemEnviada {
    * espera a retomada em si. Nunca rejeita. Ninguém precisa esperá-la.
    */
   recuperacao: Promise<void>;
+  /**
+   * Só na mensagem mandada com o Orquestrador congelado (ver ADR-49): ela
+   * entrou na frente da fila com este id e sai assim que o turno em andamento
+   * (`turnoId`) terminar. As promessas são as desse turno.
+   */
+  pedidoId?: string;
 }
 
 export interface PedidoEnfileirado {
@@ -267,6 +285,16 @@ export class ServicoDeOrquestracao {
    * Só em memória: some quando o turno termina.
    */
   private readonly origensDosTurnos = new Map<string, OrigemDoPedido>();
+  /** A vigia do turno em andamento de cada Orquestrador: fica parada enquanto ele está congelado (ADR-49). */
+  private readonly vigias = new Map<string, VigiaDoTurno>();
+  /** O turno em andamento de cada Orquestrador, para esperar o fim dele (pausa no modo retomada). */
+  private readonly turnosEmExecucao = new Map<string, MensagemEnviada>();
+  /**
+   * A mensagem mandada com o Orquestrador congelado, por Orquestrador: sai da
+   * fila assim que o turno `turnoId` terminar, mesmo que a fila normalmente
+   * parasse (ver ADR-49). Só em memória.
+   */
+  private readonly prioridadesDaFila = new Map<string, { turnoId: string; pedidoId: string }>();
 
   constructor(private readonly dependencias: DependenciasDoServico) {}
 
@@ -412,6 +440,9 @@ export class ServicoDeOrquestracao {
   ): Promise<MensagemEnviada> {
     const orquestrador = this.buscar(id);
     const itens = this.itensComCaminhos(orquestrador, itensLigados);
+    if (orquestrador.pausa !== null) {
+      return this.enviarDuranteAPausa(orquestrador, { texto, anexosRecebidos, modo, itensLigados: itens, previasAbertas, pedidoDaFila: null });
+    }
     return this.iniciarTurno(orquestrador, texto, anexosRecebidos, modo, null, null, itens, previasAbertas);
   }
 
@@ -454,6 +485,7 @@ export class ServicoDeOrquestracao {
   async receberDeVinculado(id: string, texto: string, origem: OrigemDoPedido): Promise<void> {
     const orquestrador = this.buscar(id);
     const livre =
+      orquestrador.pausa === null &&
       orquestrador.turnoEmAndamento === null &&
       orquestrador.fila.length === 0 &&
       orquestrador.turnoComPlanoPendente === null &&
@@ -487,7 +519,158 @@ export class ServicoDeOrquestracao {
   async enviarDaFila(id: string, pedidoId: string): Promise<MensagemEnviada> {
     const orquestrador = this.buscar(id);
     const pedido = orquestrador.pedidoDaFila(pedidoId);
+    if (orquestrador.pausa !== null) {
+      return this.enviarDuranteAPausa(orquestrador, {
+        texto: pedido.texto,
+        anexosRecebidos: [],
+        modo: pedido.modo,
+        itensLigados: pedido.itensLigados,
+        previasAbertas: pedido.previasAbertas,
+        pedidoDaFila: pedido,
+      });
+    }
     return this.iniciarTurno(orquestrador, pedido.texto, [], pedido.modo, pedido, null, pedido.itensLigados, pedido.previasAbertas);
+  }
+
+  /**
+   * Pausa o turno em andamento (ver ADR-49). No Mac e no Linux, congela os
+   * processos (SIGSTOP) e a vigia do turno para: continuar segue exatamente de
+   * onde parou. Sem processo para congelar (Windows, ou nenhum vivo agora), a
+   * pausa é `retomada`: o processo é encerrado com o motivo "pausa", o turno
+   * termina `pausado` e continuar abre outro na mesma sessão.
+   */
+  async pausar(id: string): Promise<DadosDaPausa> {
+    const { repositorio, execucoes, agora } = this.dependencias;
+    const orquestrador = this.buscar(id);
+    orquestrador.conferirPausa();
+    const turno = orquestrador.turnoEmAndamento as NonNullable<Orquestrador["turnoEmAndamento"]>;
+
+    const congelado = execucoes.congelar(id);
+    if (congelado) {
+      this.vigias.get(id)?.desligar();
+    }
+    this.publicar(orquestrador, orquestrador.pausar(congelado ? "congelado" : "retomada", agora()));
+    const pausa = orquestrador.pausa as DadosDaPausa;
+    if (!congelado && !execucoes.cancelar(id, "pausa")) {
+      // Turno marcado como em andamento sem processo por trás: já termina pausado.
+      orquestrador.encerrarTurnoPausado(turno.id, agora());
+    }
+    await repositorio.salvar(orquestrador);
+    return pausa;
+  }
+
+  /**
+   * Tira o Orquestrador da pausa (ver ADR-49). `congelado`: SIGCONT nos
+   * processos e a vigia volta do zero. `retomada`: abre um turno novo na mesma
+   * sessão, pedindo para conferir a pasta e continuar de onde parou. A fila
+   * volta a andar quando esse turno concluir.
+   */
+  async continuar(id: string): Promise<{ modo: ModoDaPausa }> {
+    const orquestrador = this.buscar(id);
+    const pausa = orquestrador.pausa;
+    if (pausa === null) {
+      throw new ErroDeOrquestracao("sem_pausa", `"${orquestrador.nome}" não está pausado.`);
+    }
+    if (pausa.modo === "congelado") {
+      await this.continuarCongelado(orquestrador);
+      return { modo: "congelado" };
+    }
+    await this.continuarRetomada(orquestrador, null);
+    return { modo: "retomada" };
+  }
+
+  /** SIGCONT nos processos do turno congelado, a vigia volta do zero, e a pausa sai. */
+  private async continuarCongelado(orquestrador: Orquestrador): Promise<void> {
+    this.dependencias.execucoes.descongelar(orquestrador.id);
+    this.vigias.get(orquestrador.id)?.ligar();
+    this.publicar(orquestrador, orquestrador.continuar());
+    await this.dependencias.repositorio.salvar(orquestrador);
+  }
+
+  /**
+   * Abre o turno que continua uma pausa no modo retomada, na sessão do motor do
+   * turno pausado. `mensagem`: o que o usuário mandou junto (vai no mesmo
+   * texto, depois da nota de continuação); com ela vêm o modo, os anexos e os
+   * itens dela. Se o processo do turno pausado ainda está terminando, espera.
+   */
+  private async continuarRetomada(orquestrador: Orquestrador, mensagem: MensagemDuranteAPausa | null): Promise<MensagemEnviada> {
+    const emAndamento = this.turnosEmExecucao.get(orquestrador.id);
+    if (orquestrador.turnoEmAndamento !== null && emAndamento !== undefined) {
+      await emAndamento.conclusao;
+    }
+    const pausa = orquestrador.pausa;
+    if (pausa === null) {
+      throw new ErroDeOrquestracao("sem_pausa", `"${orquestrador.nome}" não está pausado.`);
+    }
+    const pausado = orquestrador.ultimoTurno;
+    const motor = pausado?.situacao === "pausado" ? pausado.motor : orquestrador.configuracao.motorDoOrquestrador;
+    // Sem a sessão do motor iniciada, o motor nunca viu o pedido: ele vai de novo, em vez da nota.
+    const sessaoIniciada = orquestrador.sessaoDoMotor(motor).iniciada;
+    const base =
+      pausado?.situacao === "pausado" && !sessaoIniciada
+        ? pausado.texto
+        : mensagemDeContinuacao(orquestrador.worktree !== null);
+    const extra = mensagem?.texto.trim() ?? "";
+    const texto = extra === "" ? base : `${base}\n\nMensagem do usuário ao continuar:\n${extra}`;
+    return this.iniciarTurno(
+      orquestrador,
+      texto,
+      mensagem?.anexosRecebidos ?? [],
+      mensagem?.modo ?? (pausado?.situacao === "pausado" ? pausado.modo : "execucao"),
+      mensagem?.pedidoDaFila ?? null,
+      null,
+      mensagem?.itensLigados ?? [],
+      mensagem?.previasAbertas ?? [],
+      this.destinoDoPedidoNovo(orquestrador, motor),
+      pausa,
+    );
+  }
+
+  /**
+   * Uma mensagem (ou "enviar agora" de um pedido da fila) com o Orquestrador
+   * pausado: tira da pausa e manda junto (ver ADR-49). Congelado: SIGCONT, e a
+   * mensagem entra na frente da fila (o pedido da fila fica onde está), para
+   * sair assim que o turno em andamento terminar. Retomada: abre o turno de
+   * continuação com a nota e a mensagem no mesmo texto.
+   */
+  private async enviarDuranteAPausa(orquestrador: Orquestrador, mensagem: MensagemDuranteAPausa): Promise<MensagemEnviada> {
+    const pausa = orquestrador.pausa as DadosDaPausa;
+    if (pausa.modo === "retomada") {
+      return this.continuarRetomada(orquestrador, mensagem);
+    }
+    const turno = orquestrador.turnoEmAndamento;
+    const emExecucao = this.turnosEmExecucao.get(orquestrador.id);
+    if (turno === null || emExecucao === undefined) {
+      // Congelado sem turno rodando: não deveria acontecer; segue como retomada.
+      return this.continuarRetomada(orquestrador, mensagem);
+    }
+    if (mensagem.anexosRecebidos.length > 0) {
+      throw new ErroDeOrquestracao(
+        "dados_invalidos",
+        "Com o orquestrador pausado no meio do pedido, a mensagem espera na fila, e a fila não leva anexos. " +
+          "Continue o orquestrador e mande os anexos quando ele terminar.",
+      );
+    }
+    let pedidoId: string;
+    if (mensagem.pedidoDaFila !== null) {
+      pedidoId = mensagem.pedidoDaFila.id;
+    } else {
+      const { gerarId, agora } = this.dependencias;
+      const pedido = PedidoNaFila.criar({
+        id: gerarId(),
+        texto: mensagem.texto,
+        modo: mensagem.modo,
+        enfileiradoEm: agora(),
+        itensLigados: mensagem.itensLigados,
+        previasAbertas: mensagem.previasAbertas,
+        origem: null,
+      });
+      this.publicar(orquestrador, orquestrador.enfileirarPedido(pedido, true));
+      pedidoId = pedido.id;
+    }
+    this.prioridadesDaFila.set(orquestrador.id, { turnoId: turno.id, pedidoId });
+    await this.continuarCongelado(orquestrador);
+    return { ...emExecucao, pedidoId };
   }
 
   /**
@@ -532,6 +715,10 @@ export class ServicoDeOrquestracao {
    * `destino`: o motor do turno e por onde o pedido já passou. Sem ele, é um
    * pedido novo: começa no motor do Orquestrador, ou no da reserva se o limite
    * de uso do principal ainda não liberou (`destinoDoPedidoNovo`).
+   *
+   * `pausaContinuada`: o turno continua uma pausa no modo retomada (ver
+   * ADR-49). O agregado tira a pausa ao aceitar o turno, e o
+   * `orquestrador_continuado` sai logo antes do `turno_iniciado`.
    */
   private async iniciarTurno(
     orquestrador: Orquestrador,
@@ -543,6 +730,7 @@ export class ServicoDeOrquestracao {
     itensLigados: readonly ItemLigado[] = [],
     previasAbertas: readonly string[] = [],
     destinoEscolhido: DestinoDoTurno | null = null,
+    pausaContinuada: DadosDaPausa | null = null,
   ): Promise<MensagemEnviada> {
     const { repositorio, execucoes, anexos, gerarId, agora } = this.dependencias;
     const turnoId = gerarId();
@@ -558,7 +746,15 @@ export class ServicoDeOrquestracao {
           tamanhoEmBytes: recebido.conteudo.byteLength,
         }),
       );
-    const aceito = orquestrador.iniciarTurno(turnoId, texto, agora(), anexosDoTurno, modo, destino.motor);
+    const aceito = orquestrador.iniciarTurno(
+      turnoId,
+      texto,
+      agora(),
+      anexosDoTurno,
+      modo,
+      destino.motor,
+      pausaContinuada !== null,
+    );
     // De quem veio o pedido (uma mensagem de vínculo): na fila, ou, no pedido reenviado a outro motor, a do original.
     const origemDoPedido = pedidoDaFila?.origem ?? destino.origem ?? null;
     if (origemDoPedido !== null) {
@@ -585,6 +781,13 @@ export class ServicoDeOrquestracao {
     // A tela vê o pedido sair da fila antes de o turno dele aparecer.
     if (retirada !== null) {
       this.publicar(orquestrador, retirada);
+    }
+    if (pausaContinuada !== null) {
+      this.publicar(orquestrador, {
+        tipo: "orquestrador_continuado",
+        orquestradorId: orquestrador.id,
+        modo: pausaContinuada.modo,
+      });
     }
     // A troca de motor aparece antes do turno que ela abre.
     if (destino.troca !== undefined) {
@@ -664,7 +867,14 @@ export class ServicoDeOrquestracao {
       (encerrado) => (encerrado === null ? undefined : this.recuperar(orquestrador.id, encerrado)),
       () => undefined,
     );
-    return { turnoId, conclusao, medicao, envioDaFila, recuperacao };
+    const enviada: MensagemEnviada = { turnoId, conclusao, medicao, envioDaFila, recuperacao };
+    this.turnosEmExecucao.set(orquestrador.id, enviada);
+    void conclusao.then(() => {
+      if (this.turnosEmExecucao.get(orquestrador.id) === enviada) {
+        this.turnosEmExecucao.delete(orquestrador.id);
+      }
+    });
+    return enviada;
   }
 
   /**
@@ -768,6 +978,19 @@ export class ServicoDeOrquestracao {
     const { repositorio, execucoes, agora } = this.dependencias;
     const orquestrador = this.buscar(id);
     const turno = orquestrador.turnoEmAndamento;
+
+    // Cancelar durante a pausa (ver ADR-49) tira a pausa. Congelado: o
+    // controle descongela antes de encerrar, e o turno é cancelado como sempre;
+    // retomada: o turno já terminou pausado, só a pausa sai.
+    const saidaDaPausa = orquestrador.limparPausa(true);
+    if (saidaDaPausa !== null) {
+      this.prioridadesDaFila.delete(id);
+      this.publicar(orquestrador, saidaDaPausa);
+      if (turno === null) {
+        await repositorio.salvar(orquestrador);
+        return;
+      }
+    }
 
     if (turno === null) {
       if (this.cancelarRetomada(orquestrador, "o usuário cancelou")) {
@@ -951,6 +1174,9 @@ export class ServicoDeOrquestracao {
       travamento.resumo = resumo;
     });
     vigia?.ligar();
+    if (vigia !== null) {
+      this.vigias.set(orquestrador.id, vigia);
+    }
 
     try {
       resultado = await motor.executarTurno(
@@ -998,6 +1224,9 @@ export class ServicoDeOrquestracao {
       erro = falha;
     } finally {
       vigia?.desligar();
+      if (vigia !== null && this.vigias.get(orquestrador.id) === vigia) {
+        this.vigias.delete(orquestrador.id);
+      }
       this.dependencias.diagnosticador?.esquecer(orquestrador.id);
     }
     this.guardarOQueOMotorInformou(orquestrador, motorDoTurno, resultado);
@@ -1031,9 +1260,21 @@ export class ServicoDeOrquestracao {
     };
     // Abortado pela vigia (ADR-36) é falha, não cancelamento: o turno pode ser retomado.
     const encerradoPorSilencio = sinal.aborted && sinal.reason === ABORTO_POR_SILENCIO;
+    // Pausado (ADR-49): sem sucesso, o turno termina pausado, seja pela pausa
+    // sem congelamento, pelo processo congelado que morreu ou pelo app que
+    // fechou com ele congelado. Com sucesso (concluiu antes de a pausa valer),
+    // conclui e a pausa sai. O cancelamento do usuário já tirou a pausa.
+    const pausaNoFim = orquestrador.pausa;
+    const concluiuNaPausa = pausaNoFim !== null && resultado !== null && resultado.sucesso;
 
     try {
-      if (sinal.aborted && !encerradoPorSilencio) {
+      if (pausaNoFim !== null && !concluiuNaPausa) {
+        this.dependencias.execucoes.descongelar(orquestrador.id);
+        const mudouDeModo = orquestrador.encerrarTurnoPausado(turnoId, agora());
+        if (mudouDeModo !== null) {
+          this.publicar(orquestrador, mudouDeModo);
+        }
+      } else if (sinal.aborted && !encerradoPorSilencio && !concluiuNaPausa) {
         this.publicar(orquestrador, orquestrador.cancelarTurno(turnoId, agora()));
       } else if (encerradoPorSilencio) {
         const diagnostico = travamento.resumo ?? "sem saída";
@@ -1071,6 +1312,13 @@ export class ServicoDeOrquestracao {
             semPrevias.previasParaFechar,
           ),
         );
+        if (concluiuNaPausa) {
+          this.dependencias.execucoes.descongelar(orquestrador.id);
+          const saida = orquestrador.limparPausa(false);
+          if (saida !== null) {
+            this.publicar(orquestrador, saida);
+          }
+        }
         if (modo === "execucao" && !planoPendente) {
           await this.encaminharBlocosDeVinculo(orquestrador, turnoId, semVinculos);
         }
@@ -1438,6 +1686,25 @@ export class ServicoDeOrquestracao {
     try {
       // Excluído enquanto o turno terminava: nada a enviar.
       const orquestrador = this.dependencias.repositorio.buscarPorId(orquestradorId);
+      const prioridade = this.prioridadesDaFila.get(orquestradorId);
+      if (prioridade !== undefined && prioridade.turnoId === turnoId) {
+        this.prioridadesDaFila.delete(orquestradorId);
+        // A mensagem mandada com o Orquestrador congelado (ADR-49) sai mesmo
+        // que a fila parasse; não se o usuário cancelou, pausou de novo ou já
+        // abriu outro turno, nem se o pedido saiu da fila.
+        const ultimo = orquestrador?.ultimoTurno ?? null;
+        if (
+          orquestrador !== null &&
+          orquestrador !== undefined &&
+          orquestrador.pausa === null &&
+          ultimo?.id === turnoId &&
+          ultimo.situacao !== "cancelado" &&
+          orquestrador.fila.some((pedido) => pedido.id === prioridade.pedidoId)
+        ) {
+          await this.enviarDaFila(orquestradorId, prioridade.pedidoId);
+          return;
+        }
+      }
       const proximo = orquestrador?.proximoDaFilaApos(turnoId) ?? null;
       if (proximo === null) {
         return;

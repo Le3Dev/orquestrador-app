@@ -259,6 +259,8 @@ function descreverEstado(orquestrador: OrquestradorExistente, agora: Date): stri
     const ha = orquestrador.turnoIniciadoEm === null ? "" : ` há ${descreverDuracao(orquestrador.turnoIniciadoEm, agora)}`;
     const pedido = orquestrador.pedidoAtual === null ? "" : ` em "${resumirPedido(orquestrador.pedidoAtual)}"`;
     partes.push(`trabalhando${ha}${pedido}`);
+  } else if (orquestrador.situacao === "pausado") {
+    partes.push("pausado pelo usuário");
   } else if (orquestrador.planoPendente) {
     partes.push("aguardando aprovação do plano");
   } else {

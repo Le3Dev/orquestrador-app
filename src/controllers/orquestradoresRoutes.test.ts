@@ -2137,3 +2137,119 @@ describe("rotas de orquestradores — vários motores", () => {
     expect(await resposta.json()).toEqual({ erro: mensagem });
   });
 });
+/** Motor que fica trabalhando até ser abortado. */
+class MotorQueNaoTermina implements MotorDeAgentes {
+  async executarTurno(_pedido: PedidoDeTurno, aoObservar: (evento: EventoDoMotor) => void, sinal: AbortSignal): Promise<ResultadoDoTurno> {
+    aoObservar({ tipo: "sessao_iniciada" });
+    return new Promise((resolver) => {
+      sinal.addEventListener("abort", () => resolver({ sucesso: false, motivo: "parado", uso: null }));
+    });
+  }
+}
+
+describe("rotas de orquestradores — pausar e continuar (ADR-49)", () => {
+  const raiz = path.resolve("/projetos");
+  let servidor: Server;
+  let base: string;
+  let servico: ServicoDeOrquestracao;
+  let execucoes: ControleDeExecucoesEmMemoria;
+  let ids = 0;
+
+  beforeAll(async () => {
+    const repositorio = new RepositorioEmMemoria();
+    const anexos = new ArmazemDeAnexosEmArquivo(path.join(tmpdir(), "orquestrador-rotas-teste"));
+    const preferencias = new PreferenciasEmMemoria();
+    const congelados = new Set<string>();
+    execucoes = new ControleDeExecucoesEmMemoria({
+      congelar: (id) => congelados.add(id) !== undefined,
+      descongelar: (id) => congelados.delete(id),
+    });
+    servico = new ServicoDeOrquestracao({
+      repositorio,
+      motor: new MotorQueNaoTermina(),
+      execucoes,
+      publicador: { publicar: () => undefined, sinalizar: () => undefined },
+      anexos,
+      worktrees: {
+        preparar: async (_id, pastaDeTrabalho) => ({ cwd: pastaDeTrabalho, worktree: null }),
+        concluir: async () => false,
+      },
+      pastaDeArtefatos: (orquestradorId) => path.join(tmpdir(), "orquestrador-rotas-teste-artefatos", orquestradorId),
+      preferencias,
+      gerarId: () => `p${++ids}`,
+      agora: () => new Date("2026-11-18T12:00:00Z"),
+    });
+    const aplicacao = express();
+    aplicacao.use(express.json());
+    aplicacao.use(
+      "/api",
+      criarOrquestradoresRoutes({
+        servico,
+        repositorio,
+        canal: new CanalDeEventos(),
+        explorador: new ExploradorDePastas(raiz),
+        anexos,
+        preferencias,
+        pastaRaiz: raiz,
+      }),
+    );
+    servidor = aplicacao.listen(0, "127.0.0.1");
+    await once(servidor, "listening");
+    base = `http://127.0.0.1:${(servidor.address() as AddressInfo).port}/api`;
+  });
+
+  afterAll(async () => {
+    execucoes.cancelarTodas();
+    servidor.close();
+    await once(servidor, "close");
+  });
+
+  async function postar(caminho: string, corpo?: unknown): Promise<Response> {
+    return fetch(`${base}${caminho}`, {
+      method: "POST",
+      headers: corpo === undefined ? {} : { "Content-Type": "application/json" },
+      ...(corpo === undefined ? {} : { body: JSON.stringify(corpo) }),
+    });
+  }
+
+  it("pausar e continuar respondem 202 com a pausa e o modo; fora de hora, 409", async () => {
+    const orquestrador = await servico.criarOrquestrador({
+      nome: "Painel",
+      pastaDeTrabalho: PastaDeTrabalho.dentroDe(raiz, "painel"),
+      configuracao: {
+        modeloDoOrquestrador: "opus",
+        modeloDosSubagentes: "sonnet",
+        quantidadeDeSubagentes: { modo: "automatica", limite: 2 },
+        nivelDePermissao: "edicao",
+      },
+    });
+    const id = orquestrador.id;
+    expect((await postar(`/orquestradores/${id}/pausar`)).status).toBe(409);
+    expect((await postar(`/orquestradores/${id}/continuar`)).status).toBe(409);
+
+    const mensagem = await postar(`/orquestradores/${id}/mensagens`, { texto: "faça" });
+    const { turnoId } = (await mensagem.json()) as { turnoId: string };
+
+    const pausar = await postar(`/orquestradores/${id}/pausar`);
+    expect(pausar.status).toBe(202);
+    expect(await pausar.json()).toEqual({ pausa: { desde: "2026-11-18T12:00:00.000Z", modo: "congelado" } });
+    expect((await postar(`/orquestradores/${id}/pausar`)).status).toBe(409);
+
+    const detalhe = (await (await fetch(`${base}/orquestradores/${id}`)).json()) as { situacao: string; pausa: unknown };
+    expect(detalhe).toMatchObject({ situacao: "pausado", pausa: { modo: "congelado" } });
+
+    const continuar = await postar(`/orquestradores/${id}/continuar`);
+    expect(continuar.status).toBe(202);
+    expect(await continuar.json()).toEqual({ modo: "congelado" });
+    expect((await postar(`/orquestradores/${id}/continuar`)).status).toBe(409);
+
+    // Mensagem com o orquestrador congelado: tira da pausa, entra na frente da fila e vem o pedidoId.
+    await postar(`/orquestradores/${id}/pausar`);
+    const durante = await postar(`/orquestradores/${id}/mensagens`, { texto: "e mais isto" });
+    expect(durante.status).toBe(202);
+    const corpo = (await durante.json()) as { turnoId: string; pedidoId: string };
+    expect(corpo.turnoId).toBe(turnoId);
+    expect(orquestrador.fila[0]?.id).toBe(corpo.pedidoId);
+    expect(orquestrador.situacao).toBe("trabalhando");
+  });
+});

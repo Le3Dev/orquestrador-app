@@ -15,6 +15,7 @@ interface Opcoes {
   fila?: readonly DadosDoPedidoNaFila[];
   proximoDaFilaACaminho?: boolean;
   enfileiramentoAceito?: boolean;
+  pausado?: boolean;
 }
 
 const FILA: readonly DadosDoPedidoNaFila[] = [
@@ -65,6 +66,7 @@ function renderizar({
   fila = [],
   proximoDaFilaACaminho = false,
   enfileiramentoAceito = true,
+  pausado = false,
 }: Opcoes = {}) {
   const aoAlternarModo = vi.fn();
   const aoRemoverAnexo = vi.fn();
@@ -74,6 +76,9 @@ function renderizar({
   const aoRemoverDaFila = vi.fn();
   const aoEnviarDaFila = vi.fn();
   const aoLimparConversa = vi.fn(async () => limpezaAceita);
+  const aoCancelar = vi.fn();
+  const aoPausar = vi.fn();
+  const aoContinuar = vi.fn();
   const controle = createRef<ControleDoPrompt>();
   const campo = createRef<HTMLTextAreaElement>();
   render(
@@ -96,7 +101,10 @@ function renderizar({
       aoRemoverDaFila={aoRemoverDaFila}
       aoEnviarDaFila={aoEnviarDaFila}
       aoLimparConversa={aoLimparConversa}
-      aoCancelar={vi.fn()}
+      aoCancelar={aoCancelar}
+      pausado={pausado}
+      aoPausar={aoPausar}
+      aoContinuar={aoContinuar}
     />,
   );
   return {
@@ -108,6 +116,9 @@ function renderizar({
     aoRemoverDaFila,
     aoEnviarDaFila,
     aoLimparConversa,
+    aoCancelar,
+    aoPausar,
+    aoContinuar,
     controle,
     campo: screen.getByRole("textbox", { name: "Mensagem para o orquestrador" }),
   };
@@ -119,6 +130,67 @@ function digitarEEnviar(campo: HTMLElement, texto: string): void {
 }
 
 describe("PromptDoTerminal", () => {
+  describe("pausa do orquestrador", () => {
+    it("trabalhando, mostra o pausar ao lado do cancelar e o clique pausa", () => {
+      const { aoPausar, aoCancelar } = renderizar({ trabalhando: true });
+
+      fireEvent.click(screen.getByRole("button", { name: "pausar ⏸" }));
+
+      expect(aoPausar).toHaveBeenCalledTimes(1);
+      expect(aoCancelar).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "cancelar" })).toBeEnabled();
+      expect(screen.queryByRole("button", { name: "continuar ▶" })).toBeNull();
+    });
+
+    it("parado, não há pausar nem continuar", () => {
+      renderizar();
+
+      expect(screen.queryByRole("button", { name: "pausar ⏸" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "continuar ▶" })).toBeNull();
+    });
+
+    it("pausado (congelado, o turno segue em andamento): o pausar vira continuar e o cancelar continua", () => {
+      const { aoContinuar, aoCancelar, campo } = renderizar({ trabalhando: true, pausado: true });
+
+      expect(screen.queryByRole("button", { name: "pausar ⏸" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "continuar ▶" }));
+      expect(aoContinuar).toHaveBeenCalledTimes(1);
+      expect(campo).toHaveAttribute(
+        "placeholder",
+        "Orquestrador pausado: enviar continua e manda a mensagem junto · esc cancela",
+      );
+
+      fireEvent.keyDown(campo, { key: "Escape" });
+      expect(aoCancelar).toHaveBeenCalledTimes(1);
+    });
+
+    it("pausado, o Enter envia normalmente (não põe na fila): o servidor tira da pausa e manda junto", async () => {
+      const { aoEnviar, aoEnfileirar, campo } = renderizar({ trabalhando: true, pausado: true });
+
+      digitarEEnviar(campo, "siga, mas sem mexer no README");
+
+      await waitFor(() => expect(campo).toHaveValue(""));
+      expect(aoEnviar).toHaveBeenCalledWith("siga, mas sem mexer no README");
+      expect(aoEnfileirar).not.toHaveBeenCalled();
+    });
+
+    it("pausado na retomada (o turno já terminou): continuar, cancelar e enviar ficam à mão", () => {
+      renderizar({ trabalhando: false, pausado: true });
+
+      expect(screen.getByRole("button", { name: "continuar ▶" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "cancelar" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "enviar ⏎" })).toBeDisabled();
+    });
+
+    it("pausado, o /clear não limpa: ainda há um pedido pela metade", () => {
+      const { aoLimparConversa, campo } = renderizar({ pausado: true });
+
+      digitarEEnviar(campo, "/clear");
+
+      expect(aoLimparConversa).not.toHaveBeenCalled();
+    });
+  });
+
   it("Shift+Tab alterna o modo sem enviar nem tirar o foco do campo", () => {
     const { aoAlternarModo, aoEnviar, campo } = renderizar();
     fireEvent.change(campo, { target: { value: "planeje a migração" } });

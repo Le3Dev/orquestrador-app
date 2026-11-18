@@ -4,6 +4,7 @@ import type {
   ConteudoDoArquivo,
   DadosDaConfiguracao,
   DadosDaNota,
+  DadosDaPausa,
   DadosDaPredefinicao,
   DadosDasPreferencias,
   DadosDoShell,
@@ -14,6 +15,7 @@ import type {
   ListagemDeSkills,
   ListagemDoCatalogo,
   ModeloClaude,
+  ModoDaPausa,
   ModoDoTurno,
   NavegacaoDePastas,
   NomeDaPredefinicao,
@@ -280,6 +282,14 @@ export const api = {
 
   cancelar: (id: string) =>
     requisitar<{ cancelando: boolean }>(`/orquestradores/${encodeURIComponent(id)}/cancelar`, { method: "POST" }),
+
+  /** Pausa o pedido em andamento sem perder onde estava. Recusado (409) sem pedido rodando ou já pausado. */
+  pausar: (id: string) =>
+    requisitar<{ pausa: DadosDaPausa }>(`/orquestradores/${encodeURIComponent(id)}/pausar`, { method: "POST" }),
+
+  /** Tira da pausa: congelado, segue de onde parou; na retomada, abre um turno novo na mesma conversa. 409 sem pausa. */
+  continuar: (id: string) =>
+    requisitar<{ modo: ModoDaPausa }>(`/orquestradores/${encodeURIComponent(id)}/continuar`, { method: "POST" }),
 
   removerOrquestrador: (id: string) =>
     requisitar<null>(`/orquestradores/${encodeURIComponent(id)}`, { method: "DELETE" }),

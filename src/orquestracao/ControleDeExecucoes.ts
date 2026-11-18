@@ -2,11 +2,12 @@ import { EventoRegistrado, SinalDeVida } from "./EventoDeOrquestracao";
 
 /**
  * Por que uma execução foi interrompida, e o `reason` do `AbortSignal`: o
- * usuário cancelou, ou a vigia do turno a encerrou porque o Claude ficou em
- * silêncio (ver ADR-36). Um abort sem motivo (ex.: o desligamento do
+ * usuário cancelou, a vigia do turno a encerrou porque o Claude ficou em
+ * silêncio (ver ADR-36), ou o usuário pausou sem ter como congelar o processo
+ * (Windows; ver ADR-49). Um abort sem motivo (ex.: o desligamento do
  * servidor) vale como cancelamento.
  */
-export type MotivoDoCancelamento = "usuario" | "silencio";
+export type MotivoDoCancelamento = "usuario" | "silencio" | "pausa";
 
 /**
  * Os turnos rodando agora, por Orquestrador, e o meio de interrompê-los.
@@ -22,6 +23,13 @@ export interface ControleDeExecucoes {
    */
   cancelar(orquestradorId: string, motivo?: MotivoDoCancelamento): boolean;
   encerrar(orquestradorId: string): void;
+  /**
+   * Congela os processos da execução em andamento (pausa, ver ADR-49). Falso
+   * se não há o que congelar: sem execução, sem processo vivo ou no Windows.
+   */
+  congelar(orquestradorId: string): boolean;
+  /** Descongela o que `congelar` parou; falso se nada estava congelado. */
+  descongelar(orquestradorId: string): boolean;
 }
 
 /** Quem recebe os eventos à medida que acontecem (a tela, via SSE). */

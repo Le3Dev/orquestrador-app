@@ -6,7 +6,12 @@ import { DecisaoDoPlano, ModoDoTurno } from "./ModoDoTurno";
 import { Motor, MOTOR_PADRAO } from "./Motor";
 import { DadosDoSubagente, Subagente } from "./Subagente";
 
-export type SituacaoDoTurno = "em_andamento" | "concluido" | "cancelado" | "falhou" | "interrompido";
+/**
+ * `pausado`: o usuário pausou e o processo não pôde ficar congelado (Windows,
+ * app fechado, processo morto durante a pausa); o trabalho continua num turno
+ * novo, na mesma sessão, quando ele mandar continuar (ver ADR-49).
+ */
+export type SituacaoDoTurno = "em_andamento" | "concluido" | "cancelado" | "falhou" | "interrompido" | "pausado";
 
 export interface DadosDoTurno {
   id: string;
@@ -195,6 +200,11 @@ export class Turno {
   falhar(motivo: string, agora: Date): void {
     this.motivo = motivo;
     this.encerrar("falhou", agora);
+  }
+
+  /** Pausado sem processo vivo para continuar: segue num turno novo, na mesma sessão (ver ADR-49). */
+  pausar(agora: Date): void {
+    this.encerrar("pausado", agora);
   }
 
   /** O servidor parou no meio do turno; o processo do Claude Code já não existe. */

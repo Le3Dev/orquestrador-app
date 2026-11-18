@@ -68,11 +68,13 @@ function Transcricao({
   sinal,
   desconectado = false,
   aoResponderPergunta = semResposta,
+  pausado = false,
 }: {
   conversa: EstadoDaConversa;
   sinal?: SinalDeVida;
   desconectado?: boolean;
   aoResponderPergunta?: (texto: string) => Promise<void>;
+  pausado?: boolean;
 }) {
   return (
     <TranscricaoDoTerminal
@@ -87,6 +89,7 @@ function Transcricao({
       desconectado={desconectado}
       acoesDoPlano={acoesDoPlano}
       aoResponderPergunta={aoResponderPergunta}
+      pausado={pausado}
     />
   );
 }
@@ -102,6 +105,21 @@ describe("TranscricaoDoTerminal", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("pausado (congelado), o pedido em andamento troca o sinal de vida pela linha da pausa, sem aviso de travado", () => {
+    const conversa = aplicar(
+      ESTADO_INICIAL,
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija o bug", configuracao },
+      { tipo: "orquestrador_pausado", orquestradorId: "o1", pausa: { desde: "2026-10-28T12:00:00Z", modo: "congelado" } },
+    );
+    // Dez minutos de silêncio: sem a pausa, viraria o aviso de que pode ter travado.
+    vi.setSystemTime(new Date("2026-10-28T12:10:00Z"));
+    render(<Transcricao conversa={conversa} pausado />);
+
+    expect(screen.getByText("Orquestrador pausado · o Continuar segue de onde parou")).toBeInTheDocument();
+    expect(screen.queryByText(/último sinal/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/pode ter travado/)).not.toBeInTheDocument();
   });
 
   it("linha nova de log e sinal de vida não re-analisam as respostas antigas", () => {

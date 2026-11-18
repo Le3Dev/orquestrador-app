@@ -64,9 +64,9 @@ function maisRecente(daPasta: readonly ResumoDoOrquestrador[]): ResumoDoOrquestr
   return escolhido;
 }
 
-/** Trabalhando ou com um Plano à espera da aprovação: um pedido novo não roda agora. */
+/** Trabalhando, pausado ou com um Plano à espera da aprovação: um pedido novo não roda agora. */
 function estaOcupado(orquestrador: ResumoDoOrquestrador): boolean {
-  return orquestrador.situacao === "trabalhando" || orquestrador.planoPendente === true;
+  return orquestrador.situacao !== "ocioso" || orquestrador.planoPendente === true;
 }
 
 /**
@@ -97,6 +97,8 @@ function descreverEstado(orquestrador: ResumoDoOrquestrador, agora: Date): strin
         ? "trabalhando"
         : `trabalhando há ${formatarDecorrido(turno.iniciadoEm, null, agora)} em “${turno.texto}”`,
     );
+  } else if (orquestrador.situacao === "pausado") {
+    partes.push("pausado");
   } else if (orquestrador.planoPendente === true) {
     partes.push("aguardando aprovação do plano");
   } else {

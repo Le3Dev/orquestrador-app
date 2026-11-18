@@ -1046,3 +1046,97 @@ describe("Orquestrador e os vários motores", () => {
     });
   });
 });
+
+describe("Orquestrador e a pausa (ADR-49)", () => {
+  it("pausa congelada: situação pausado, o turno segue em andamento e a pausa vai para os dados", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "faça", agora);
+
+    const evento = orquestrador.pausar("congelado", agora);
+
+    expect(evento).toEqual({
+      tipo: "orquestrador_pausado",
+      orquestradorId: "o1",
+      turnoId: "t1",
+      pausa: { desde: agora.toISOString(), modo: "congelado" },
+    });
+    expect(orquestrador.situacao).toBe("pausado");
+    expect(orquestrador.turnoEmAndamento?.id).toBe("t1");
+    const reaberto = Orquestrador.reconstituir(orquestrador.paraDados());
+    expect(reaberto.pausa).toEqual({ desde: agora.toISOString(), modo: "congelado" });
+    expect(Orquestrador.reconstituir({ ...orquestrador.paraDados(), pausa: undefined }).pausa).toBeNull();
+  });
+
+  it("recusa pausar sem turno em andamento ou já pausado, e continuar sem pausa", () => {
+    const orquestrador = novoOrquestrador();
+    expect(capturarErro(() => orquestrador.pausar("congelado", agora)).motivo).toBe("sem_turno_em_andamento");
+    expect(capturarErro(() => orquestrador.continuar()).motivo).toBe("sem_pausa");
+
+    orquestrador.iniciarTurno("t1", "faça", agora);
+    orquestrador.pausar("congelado", agora);
+    expect(capturarErro(() => orquestrador.pausar("retomada", agora)).motivo).toBe("orquestrador_pausado");
+  });
+
+  it("o turno pausado sem processo termina pausado; vindo do congelado, a pausa vira retomada com evento", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "faça", agora);
+    orquestrador.pausar("congelado", agora);
+
+    const evento = orquestrador.encerrarTurnoPausado("t1", new Date("2026-10-28T12:05:00Z"));
+
+    expect(evento).toMatchObject({ tipo: "orquestrador_pausado", turnoId: "t1", pausa: { modo: "retomada", desde: agora.toISOString() } });
+    expect(orquestrador.ultimoTurno?.situacao).toBe("pausado");
+    expect(orquestrador.situacao).toBe("pausado");
+    expect(orquestrador.proximoDaFilaApos("t1")).toBeNull();
+  });
+
+  it("pausado, só o turno de continuação começa, e ele tira a pausa; limpar a conversa é recusado", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "faça", agora);
+    orquestrador.pausar("retomada", agora);
+    expect(orquestrador.encerrarTurnoPausado("t1", agora)).toBeNull();
+
+    expect(capturarErro(() => orquestrador.iniciarTurno("t2", "outro", agora)).motivo).toBe("orquestrador_pausado");
+    expect(capturarErro(() => orquestrador.limparConversa("s2")).motivo).toBe("orquestrador_pausado");
+
+    orquestrador.iniciarTurno("t2", "continue", agora, [], "execucao", "claude-code", true);
+    expect(orquestrador.pausa).toBeNull();
+    expect(orquestrador.situacao).toBe("trabalhando");
+  });
+
+  it("ao reabrir, o turno congelado não vira interrompido: termina pausado, com a pausa em retomada", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "faça", agora);
+    orquestrador.pausar("congelado", agora);
+    const reaberto = Orquestrador.reconstituir(orquestrador.paraDados());
+
+    const evento = reaberto.interromperTurnoEmAndamento(agora);
+
+    expect(evento).toMatchObject({ tipo: "orquestrador_pausado", pausa: { modo: "retomada" } });
+    expect(reaberto.ultimoTurno?.situacao).toBe("pausado");
+  });
+
+  it("cancelar durante a pausa: sai da pausa com o evento marcado como cancelado", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "faça", agora);
+    orquestrador.pausar("congelado", agora);
+
+    expect(orquestrador.limparPausa(true)).toEqual({
+      tipo: "orquestrador_continuado",
+      orquestradorId: "o1",
+      modo: "congelado",
+      cancelado: true,
+    });
+    expect(orquestrador.limparPausa(true)).toBeNull();
+    expect(orquestrador.situacao).toBe("trabalhando");
+  });
+
+  it("um pedido pode entrar na frente da fila", () => {
+    const orquestrador = novoOrquestrador();
+    const pedido = (id: string): PedidoNaFila => PedidoNaFila.criar({ id, texto: id, modo: "execucao", enfileiradoEm: agora });
+    orquestrador.enfileirarPedido(pedido("p1"));
+
+    expect(orquestrador.enfileirarPedido(pedido("p2"), true)).toMatchObject({ tipo: "pedido_enfileirado", naFrente: true });
+    expect(orquestrador.fila.map((item) => item.id)).toEqual(["p2", "p1"]);
+  });
+});

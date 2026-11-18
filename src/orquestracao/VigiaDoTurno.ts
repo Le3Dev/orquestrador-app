@@ -79,7 +79,10 @@ export class VigiaDoTurno {
       return;
     }
     this.ligada = true;
+    // Ligar de novo (depois da pausa, ADR-49) recomeça os relógios e as contagens do zero.
     this.ultimaLinhaEm = this.agoraMs();
+    this.parados = 0;
+    this.semProcesso = 0;
     this.agendar(SILENCIO_ANTES_DO_DIAGNOSTICO_MS);
   }
 
