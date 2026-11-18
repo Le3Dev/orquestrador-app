@@ -16,10 +16,19 @@
  * - `editar_subagente`: trocar campos de um subagente pronto existente, pelo
  *   nome; os campos nulos ficam como estão.
  *
+ * - `pausar_orquestrador` e `continuar_orquestrador`: pausar o pedido em
+ *   andamento de um Orquestrador existente, ou tirá-lo da pausa. Ele é
+ *   identificado pelo nome e pela pasta, já conferidos pelo servidor; o
+ *   estado (trabalhando, pausado) a tela confere de novo no clique.
+ *
  * As duas de subagente não são conferidas aqui contra a biblioteca: a tela
  * relê a lista no clique e o servidor valida ao gravar.
  */
-export type AcaoDoApp = AcaoDeAbrirOrquestrador | AcaoDeCriarSubagente | AcaoDeEditarSubagente;
+export type AcaoDoApp =
+  | AcaoDeAbrirOrquestrador
+  | AcaoDeCriarSubagente
+  | AcaoDeEditarSubagente
+  | AcaoDePausaDoOrquestrador;
 
 export interface AcaoDeAbrirOrquestrador {
   readonly tipo: "abrir_orquestrador";
@@ -62,6 +71,20 @@ export interface AcaoDeEditarSubagente {
   readonly descricao: string | null;
   readonly prompt: string | null;
   readonly modelo: ModeloDoSubagenteNoChat | null;
+}
+
+export interface AcaoDePausaDoOrquestrador {
+  readonly tipo: "pausar_orquestrador" | "continuar_orquestrador";
+  /** O nome real e a pasta de trabalho de um Orquestrador existente. */
+  readonly orquestrador: { readonly nome: string; readonly pasta: string };
+}
+
+export function pausaDoOrquestrador(
+  tipo: AcaoDePausaDoOrquestrador["tipo"],
+  nome: string,
+  pasta: string,
+): AcaoDePausaDoOrquestrador {
+  return Object.freeze({ tipo, orquestrador: Object.freeze({ nome, pasta }) });
 }
 
 export function abrirOrquestrador(

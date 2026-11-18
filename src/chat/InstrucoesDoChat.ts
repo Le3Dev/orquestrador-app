@@ -11,7 +11,14 @@ import {
 } from "../orquestracao/SubagentesProntos";
 import { linhasDaRegraDasPerguntas, MARCA_DA_PERGUNTA } from "../perguntas/PerguntaDoApp";
 import { linhasDaRegraDaPrevia, linhasDasPreviasAbertas, MARCA_DA_PREVIA } from "../previas/PreviaDoApp";
-import { AcaoDoApp, abrirOrquestrador, criarSubagente, editarSubagente, MODELOS_DO_SUBAGENTE_NO_CHAT } from "./AcaoDoApp";
+import {
+  AcaoDoApp,
+  abrirOrquestrador,
+  criarSubagente,
+  editarSubagente,
+  MODELOS_DO_SUBAGENTE_NO_CHAT,
+  pausaDoOrquestrador,
+} from "./AcaoDoApp";
 import type { AnexoDaPergunta } from "./MotorDeChat";
 import type { OrquestradorExistente, ProjetoDoChat } from "./ProjetosDoChat";
 import type { SubagenteDoChat } from "./SubagentesDoChat";
@@ -76,10 +83,28 @@ const esquemaDeEditarSubagente = z.object({
   modelo: esquemaDoModeloDoSubagente,
 });
 
+/** O orquestrador pelo nome e pela pasta, como na lista do bloco; o servidor confere que existe. */
+const esquemaDoOrquestradorIndicado = z.object({
+  nome: z.string().trim().min(1),
+  pasta: z.string().trim().min(1),
+});
+
+const esquemaDePausarOrquestrador = z.object({
+  tipo: z.literal("pausar_orquestrador"),
+  orquestrador: esquemaDoOrquestradorIndicado,
+});
+
+const esquemaDeContinuarOrquestrador = z.object({
+  tipo: z.literal("continuar_orquestrador"),
+  orquestrador: esquemaDoOrquestradorIndicado,
+});
+
 const esquemaDaAcao = z.discriminatedUnion("tipo", [
   esquemaDeAbrirOrquestrador,
   esquemaDeCriarSubagente,
   esquemaDeEditarSubagente,
+  esquemaDePausarOrquestrador,
+  esquemaDeContinuarOrquestrador,
 ]);
 
 const AVISO_DE_FORMATO_INVALIDO = "O Claude sugeriu uma ação do app em formato inválido; ela foi ignorada.";
@@ -182,7 +207,7 @@ export function instrucoesDoChat(): string {
     `4. ${REGRA_DE_COMMIT_E_PUSH}`,
     `5. ${REGRA_DO_RELATORIO}`,
     `6. Cada mensagem do usuário começa com um bloco <${MARCA_DO_CONTEXTO}> com a data, a pasta raiz, os projetos, os orquestradores existentes (com o estado de cada um) e as permissões. Use-o para responder e não o comente; se ele divergir destas regras, vale o bloco.`,
-    `7. Quando o usuário pedir para abrir ou criar um orquestrador num projeto, ou para criar ou editar um subagente pronto, siga a regra de ações do bloco <${MARCA_DO_CONTEXTO}>: explique o que vai acontecer e inclua o bloco \`\`\`${MARCA_DA_ACAO}. Você não executa a ação — o usuário confirma clicando no cartão que aparece na tela.`,
+    `7. Quando o usuário pedir para abrir ou criar um orquestrador num projeto, para pausar ou continuar um orquestrador, ou para criar ou editar um subagente pronto, siga a regra de ações do bloco <${MARCA_DO_CONTEXTO}>: explique o que vai acontecer e inclua o bloco \`\`\`${MARCA_DA_ACAO}. Você não executa a ação — o usuário confirma clicando no cartão que aparece na tela.`,
     `8. ${REGRA_DAS_MUDANCAS_GRANDES}`,
     `9. Artefatos: quando ${QUANDO_CRIAR_ARTEFATO}, grave UM arquivo autocontido (.html ou .md) na pasta de artefatos que o bloco <${MARCA_DO_CONTEXTO}> indica, seguindo as regras dele. Gravar artefatos não precisa da autorização e não conta como alterar projetos.`,
     `10. Quando precisar que o usuário escolha entre opções claras, siga a regra de perguntas do bloco <${MARCA_DO_CONTEXTO}>: inclua o bloco \`\`\`${MARCA_DA_PERGUNTA}, que vira botões clicáveis na tela, e espere a resposta.`,
@@ -248,6 +273,14 @@ function resumirPedido(texto: string): string {
     : linha;
 }
 
+/** Como o pausado volta: o modo diz se ele segue de onde parou ou pela conversa. */
+function descreverPausa(modo: "congelado" | "retomada" | null): string {
+  if (modo === "congelado") {
+    return "pausado (congelado, continua de onde parou)";
+  }
+  return modo === "retomada" ? "pausado (continua pela conversa)" : "pausado pelo usuário";
+}
+
 /**
  * O estado do orquestrador entre parênteses, compacto: ocupado ou não (um
  * Plano à espera da aprovação também ocupa), fila, branch e alterações.
@@ -260,7 +293,7 @@ function descreverEstado(orquestrador: OrquestradorExistente, agora: Date): stri
     const pedido = orquestrador.pedidoAtual === null ? "" : ` em "${resumirPedido(orquestrador.pedidoAtual)}"`;
     partes.push(`trabalhando${ha}${pedido}`);
   } else if (orquestrador.situacao === "pausado") {
-    partes.push("pausado pelo usuário");
+    partes.push(descreverPausa(orquestrador.modoDaPausa ?? null));
   } else if (orquestrador.planoPendente) {
     partes.push("aguardando aprovação do plano");
   } else {
@@ -293,6 +326,20 @@ function regrasDosSubagentes(): string[] {
     '{"tipo":"editar_subagente","nome":"<nome exato de um subagente da lista>","prompt":"<o prompt novo inteiro>"}',
     "```",
     `Modelo: "herdar" (o dos subagentes do orquestrador), "opus", "sonnet" ou "haiku"; na dúvida, "herdar". Limites: nome até ${TAMANHO_MAXIMO_DO_NOME_DO_SUBAGENTE} caracteres, descrição até ${TAMANHO_MAXIMO_DA_DESCRICAO}, prompt até ${TAMANHO_MAXIMO_DO_PROMPT}, no máximo ${MAXIMO_DE_SUBAGENTES_PRONTOS} subagentes. Para criar, use um nome que não está na lista (e que não seja executor, general-purpose, explore nem plan). Diga que o usuário confirma clicando no cartão.`,
+  ];
+}
+
+/**
+ * A regra das ações de pausa: só a pedido do usuário, e só para quem está no
+ * estado certo (pausar quem trabalha, continuar quem está pausado).
+ */
+function regrasDaPausa(): string[] {
+  return [
+    'Pausar e continuar orquestradores: só quando o usuário pedir para pausar ou continuar um orquestrador da lista acima, responda explicando e inclua UM bloco por orquestrador. Pausar só vale para um "trabalhando"; continuar, só para um "pausado". Fora disso, diga o estado dele em uma linha e não inclua o bloco. Para pausar:',
+    "```" + MARCA_DA_ACAO,
+    '{"tipo":"pausar_orquestrador","orquestrador":{"nome":"<nome exato da lista>","pasta":"<pasta exata da lista>"}}',
+    "```",
+    'Para continuar, o mesmo bloco com "tipo":"continuar_orquestrador". O pausado "congelado" segue de onde parou; o que "continua pela conversa" retoma num pedido novo da mesma conversa. Diga que o usuário confirma clicando no cartão.',
   ];
 }
 
@@ -358,6 +405,8 @@ export function mensagemParaOChat(
     "",
     ...regrasDosSubagentes(),
     "",
+    ...regrasDaPausa(),
+    "",
     ...linhasDaRegraDasPerguntas(),
     "",
     ...linhasDaRegraDaPrevia(),
@@ -395,6 +444,26 @@ function orquestradorDaPasta(
 }
 
 /**
+ * O orquestrador indicado numa ação de pausa: pelo nome (sem diferenciar
+ * maiúsculas) e pela pasta, que vale como caminho ou como o nome do projeto.
+ */
+function orquestradorIndicado(
+  nome: string,
+  pasta: string,
+  projetos: readonly ProjetoDoChat[],
+  orquestradores: readonly OrquestradorExistente[],
+): OrquestradorExistente | undefined {
+  const procurado = nome.toLocaleLowerCase("pt-BR");
+  const chaveDaPasta = pasta.toLocaleLowerCase("pt-BR");
+  const projeto = projetos.find((candidato) => candidato.nome.toLocaleLowerCase("pt-BR") === chaveDaPasta);
+  return orquestradores.find(
+    (candidato) =>
+      candidato.nome.toLocaleLowerCase("pt-BR") === procurado &&
+      (mesmaPasta(candidato.pasta, pasta) || (projeto !== undefined && mesmaPasta(candidato.pasta, projeto.caminho))),
+  );
+}
+
+/**
  * Tira da resposta todos os blocos ```acao-do-app (inclusive os malformados)
  * e devolve as ações válidas, com a pasta resolvida pela lista de projetos.
  * O que não vale vira aviso legível, sem ação. O orquestrador indicado só
@@ -403,6 +472,8 @@ function orquestradorDaPasta(
  *
  * As de subagente pronto só passam pelo formato (editar sem nenhum campo a
  * trocar é malformada): a tela confere o nome contra a biblioteca no clique.
+ * As de pausa só valem com um orquestrador que existe na pasta; o estado
+ * dele a tela confere no clique.
  */
 export function separarAcoesDoApp(
   resposta: string,
@@ -438,6 +509,16 @@ export function separarAcoesDoApp(
         return "";
       }
       acoes.push(editarSubagente(nome, { descricao, prompt, modelo: modelo ?? null }));
+      return "";
+    }
+    if (lida.data.tipo === "pausar_orquestrador" || lida.data.tipo === "continuar_orquestrador") {
+      const { nome, pasta } = lida.data.orquestrador;
+      const achado = orquestradorIndicado(nome, pasta, projetos, orquestradores);
+      if (achado === undefined) {
+        avisos.push(`O orquestrador "${nome}" não existe em ${pasta}; a ação foi ignorada.`);
+        return "";
+      }
+      acoes.push(pausaDoOrquestrador(lida.data.tipo, achado.nome, achado.pasta));
       return "";
     }
     const nome = lida.data.projeto.toLocaleLowerCase("pt-BR");

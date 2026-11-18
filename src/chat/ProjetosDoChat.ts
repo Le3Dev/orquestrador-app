@@ -13,6 +13,11 @@ export interface OrquestradorExistente {
   nome: string;
   pasta: string;
   situacao: "ocioso" | "trabalhando" | "pausado";
+  /**
+   * Como ele volta da pausa, quando pausado: "congelado" segue de onde parou,
+   * "retomada" continua pela conversa. Nulo ou ausente fora da pausa.
+   */
+  modoDaPausa?: "congelado" | "retomada" | null;
   /** O texto do pedido em andamento (o bloco de contexto corta em 100 caracteres); nulo quando ocioso. */
   pedidoAtual: string | null;
   /** Quando o pedido em andamento começou; nulo quando ocioso. */

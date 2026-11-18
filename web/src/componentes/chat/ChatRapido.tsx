@@ -29,6 +29,7 @@ import {
   TEXTO_PADRAO_DOS_ANEXOS,
   TIPOS_ACEITOS_NO_SELETOR,
 } from "../../shared/anexos";
+import { ehAcaoDePausaDoOrquestrador } from "../../shared/api/acaoDePausa";
 import { type AnexoParaEnvio, api, mensagemDeErro } from "../../shared/api/cliente";
 import type {
   AnexoDaMensagemDoChat,
@@ -46,8 +47,8 @@ import {
   type EstadoDoChatNaTela,
   type MensagemDoChatNaTela,
   pedidoDeAutorizacaoAtual,
-  textoParaMostrar,
   respostaPausada,
+  textoParaMostrar,
   ultimoModeloUsado,
 } from "../../shared/estado/aplicarEventoDoChat";
 import { EVENTO_PARA_FOCAR_O_CHAT } from "../../shared/focarChat";
@@ -79,6 +80,7 @@ import { TextoFormatado } from "../TextoFormatado";
 import { AvisoDaEscuta } from "./AvisoDaEscuta";
 import { CartaoDeAcao, type PropsDasAcoesDoChat } from "./CartaoDeAcao";
 import { CartaoDeAutorizacao } from "./CartaoDeAutorizacao";
+import { CartaoDePausaDoOrquestrador } from "./CartaoDePausaDoOrquestrador";
 import { CartaoDePergunta } from "./CartaoDePergunta";
 import { CartaoDeSubagente } from "./CartaoDeSubagente";
 import { HoraDaMensagem } from "./HoraDaMensagem";
@@ -626,9 +628,9 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
   }
 
   const respondendo = mensagem.situacao === "respondendo";
+  const pausada = respondendo && (mensagem.pausadaDesde ?? null) !== null;
   const texto = textoParaMostrar(mensagem.texto, respondendo);
   // Só a resposta pronta, com texto, vai para o canvas.
-  const pausada = respondendo && (mensagem.pausadaDesde ?? null) !== null;
   const arrastavel = mensagem.situacao === "concluida" && texto !== "";
   return (
     <article className="mensagem-do-claude" aria-busy={respondendo}>
@@ -668,6 +670,8 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
             aoAtualizarOrquestradores={aoAtualizarOrquestradores}
             orquestradores={orquestradores}
           />
+        ) : ehAcaoDePausaDoOrquestrador(acao) ? (
+          <CartaoDePausaDoOrquestrador key={`${acao.tipo}:${indice}`} acao={acao} orquestradores={orquestradores} aoAtualizarOrquestradores={aoAtualizarOrquestradores} />
         ) : (
           <CartaoDeSubagente key={`${acao.tipo}:${indice}`} acao={acao} />
         ),
@@ -761,12 +765,12 @@ export function ChatRapido({
   const [enviando, setEnviando] = useState(false);
   const [quantasMensagens, setQuantasMensagens] = useState(MENSAGENS_POR_PAGINA);
   const [pedidoDeCancelar, setPedidoDeCancelar] = useState(false);
+  // Pausar ou continuar a resposta à espera do servidor: o botão fica desabilitado até o evento chegar.
+  const [alternandoPausa, setAlternandoPausa] = useState(false);
   const [arrastando, setArrastando] = useState(false);
   // Assinatura da última mensagem quando a conversa foi ocultada; nula = visível.
   const [ocultaEm, setOcultaEm] = useState<string | null>(() =>
     comecaOculto && !fixo ? assinaturaDaUltima(chat) : null,
-  // Pausar ou continuar a resposta à espera do servidor: o botão fica desabilitado até o evento chegar.
-  const [alternandoPausa, setAlternandoPausa] = useState(false);
   );
   const [revogando, setRevogando] = useState(false);
   // De onde veio o texto do composer: "escuta" quando a escuta o pôs ali (chat com alterações autorizadas).
@@ -803,12 +807,12 @@ export function ChatRapido({
 
   const respondendo = chat.situacao === "respondendo";
   const cancelando = pedidoDeCancelar && respondendo;
+  // A resposta segue "em andamento" pausada: enviar continua bloqueado e o Esc ainda cancela.
+  const pausada = respondendo && respostaPausada(chat);
   const temMensagens = chat.mensagens.length > 0;
   // Fixo, a conversa nunca se oculta.
   const oculta = !fixo && ocultaEm !== null;
   const novidadeOculta = oculta && ocultaEm !== assinaturaDaUltima(chat);
-  // A resposta segue "em andamento" pausada: enviar continua bloqueado e o Esc ainda cancela.
-  const pausada = respondendo && respostaPausada(chat);
   // A captura do modo invisível segue para o Claude, mas nunca aparece entre os pendentes (só visual).
   const anexosVisiveis = anexos.filter((anexo) => !ehCapturaDeTela(anexo.nome));
   const temConteudo = texto.trim() !== "" || anexos.length > 0;
@@ -1380,10 +1384,6 @@ export function ChatRapido({
     }
   }
 
-  function ocultar(): void {
-    setOcultaEm(assinaturaDaUltima(chat));
-  }
-
   /** Pausa (congela o processo) ou continua a resposta; quem confirma é o evento do servidor. */
   async function alternarPausa(): Promise<void> {
     if (!respondendo || alternandoPausa || cancelando || desconectado) {
@@ -1398,6 +1398,10 @@ export function ChatRapido({
     } finally {
       setAlternandoPausa(false);
     }
+  }
+
+  function ocultar(): void {
+    setOcultaEm(assinaturaDaUltima(chat));
   }
 
   function aoTeclar(evento: KeyboardEvent<HTMLTextAreaElement>): void {
@@ -1836,7 +1840,7 @@ export function ChatRapido({
                   aoAtualizarOrquestradores={aoAtualizarOrquestradores}
                   // Só quem tem cartões de abrir orquestrador acompanha a lista: as outras não re-renderizam a cada consulta.
                   orquestradores={
-                    mensagem.acoes.some((acao) => acao.tipo === "abrir_orquestrador") ? orquestradores : SEM_ORQUESTRADORES
+                    mensagem.acoes.some((acao) => acao.tipo === "abrir_orquestrador" || ehAcaoDePausaDoOrquestrador(acao)) ? orquestradores : SEM_ORQUESTRADORES
                   }
                 />
                 {/* Fora da mensagem memorizada: o cartão depende do estado do chat, não só da mensagem. */}
@@ -2087,10 +2091,6 @@ export function ChatRapido({
               aoAlterar={aoMudarPreferencias}
               aoFalhar={setErro}
             />
-            {respondendo ? (
-              <button
-                type="button"
-                className="btn btn-sm btn-danger"
             {/* Só o ícone (⏸ / ▶), como o do terminal; no Windows não há como congelar, e o botão não aparece. */}
             {respondendo && chat.podePausar && (
               <button
@@ -2105,6 +2105,10 @@ export function ChatRapido({
                 <span aria-hidden="true">{pausada ? "▶" : "⏸"}</span>
               </button>
             )}
+            {respondendo ? (
+              <button
+                type="button"
+                className="btn btn-sm btn-danger"
                 onClick={() => void cancelar()}
                 disabled={cancelando || desconectado}
               >

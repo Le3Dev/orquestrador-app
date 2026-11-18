@@ -347,6 +347,7 @@ async function iniciar(): Promise<void> {
           nome: orquestrador.nome,
           pasta: orquestrador.pastaDeTrabalho.caminho,
           situacao: orquestrador.situacao,
+          modoDaPausa: orquestrador.pausa?.modo ?? null,
           pedidoAtual: turno?.texto ?? null,
           turnoIniciadoEm: turno?.iniciadoEm ?? null,
           tamanhoDaFila: orquestrador.fila.length,
