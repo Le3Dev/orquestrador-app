@@ -7,8 +7,8 @@ import { describe, expect, it, vi } from "vitest";
 const {
   PREFIXO_DA_PARTICAO,
   LIMITE_DE_VISTAS,
-  TAMANHO_OCULTO,
-  POSICAO_FORA_DA_JANELA,
+  LIMITES_OCULTOS,
+  RAIO_OCULTO,
   MENSAGEM_PAUSADO,
   ErroDoNavegadorDoAgente,
   particaoDoOrquestrador,
@@ -360,6 +360,9 @@ function montar({ bloqueada = false, tempos = {} } = {}) {
     setBounds(b) {
       this.bounds = b;
     }
+    setBorderRadius(raio) {
+      this.raio = raio;
+    }
     setVisible(v) {
       this.visivel = v;
     }
@@ -428,6 +431,23 @@ function montar({ bloqueada = false, tempos = {} } = {}) {
 
 const eventosDoCdp = (view, metodo) => view.comandosCdp.filter((comando) => comando.metodo === metodo).map((comando) => comando.parametros);
 
+/**
+ * A vista escondida não pode cobrir nenhum pixel da tela do app: fica nos limites ocultos (1280x800), com só
+ * 1 DIP dentro da área da janela (o Chromium só a mantém viva se algo dela estiver dentro) e o canto cortado
+ * pelo raio, que apaga esse pixel. Inteira fora, ele a esconde de vez (0x0, sem pintar, captura trava).
+ */
+function esperarEscondida(vista, [largura, altura] = [1440, 900]) {
+  expect(vista.bounds).toEqual(LIMITES_OCULTOS);
+  expect(vista.bounds.width).toBe(1280);
+  expect(vista.bounds.height).toBe(800);
+  const dentroX = Math.min(vista.bounds.x + vista.bounds.width, largura) - Math.max(vista.bounds.x, 0);
+  const dentroY = Math.min(vista.bounds.y + vista.bounds.height, altura) - Math.max(vista.bounds.y, 0);
+  expect([dentroX, dentroY]).toEqual([1, 1]);
+  // O canto de 1 DIP some se o raio passa de ~3,4 DIP.
+  expect(vista.raio).toBe(RAIO_OCULTO);
+  expect(RAIO_OCULTO).toBeGreaterThanOrEqual(4);
+  expect(vista.visivel).toBe(true);
+}
 describe("criarNavegadorDoAgente: a vista de cada Orquestrador", () => {
   it("só cria a vista no primeiro comando, com as preferências seguras e a sessão persist:navegador-<id>", async () => {
     const { navegador, executar, views, session, sessoes } = montar();
@@ -473,15 +493,14 @@ describe("criarNavegadorDoAgente: a vista de cada Orquestrador", () => {
     expect(enviadoAATela("navegador-do-agente:ativado")).toEqual([{ orquestradorId: "orq-1" }, { orquestradorId: "orq-2" }]);
   });
 
-  it("fica anexada por baixo da tela (índice 0), 'visível' para o Chromium e no tamanho padrão, para pintar com o nó fechado", async () => {
+  it("fica anexada fora da área da janela (sem cobrir a tela), 'visível' para o Chromium e em 1280x800, para pintar com o nó fechado", async () => {
     const { executar, views, janela } = montar();
 
     await executar({ tipo: "abrir", url: "https://exemplo.com" });
 
     const [vista] = views;
     expect(janela.contentView.addChildView).toHaveBeenCalledWith(vista, 0);
-    expect(vista.visivel).toBe(true);
-    expect(vista.bounds).toEqual(TAMANHO_OCULTO);
+    esperarEscondida(vista);
     expect(vista.webContents.setZoomFactor).toHaveBeenLastCalledWith(1);
     // Nunca fica desanexada: o `removeChildView` vem sempre seguido, na hora, do `addChildView(vista, 0)`
     // (a vista solta da janela trava a captura e a pintura).
@@ -1116,6 +1135,8 @@ describe("criarNavegadorDoAgente: IPC da tela", () => {
     expect(vista.webContents.setZoomFactor).toHaveBeenLastCalledWith(0.5);
     expect(janela.contentView.addChildView).toHaveBeenLastCalledWith(vista);
     expect(vista.visivel).toBe(true);
+    // Sem o raio do canto da vista escondida.
+    expect(vista.raio).toBe(0);
   });
 
   it("posicionar acompanha o nó enquanto está mostrada, e é ignorado enquanto está oculta", async () => {
@@ -1124,7 +1145,7 @@ describe("criarNavegadorDoAgente: IPC da tela", () => {
     const [vista] = views;
 
     navegador.aoPosicionar(principal, { orquestradorId: "orq-1", retangulo: { x: 5, y: 5, largura: 100, altura: 100, zoom: 1 } });
-    expect(vista.bounds).toEqual(TAMANHO_OCULTO);
+    esperarEscondida(vista);
 
     navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo: { x: 10, y: 20, largura: 300, altura: 200, zoom: 1 } });
     navegador.aoPosicionar(principal, { orquestradorId: "orq-1", retangulo: { x: 40, y: 50, largura: 300, altura: 200, zoom: 1 } });
@@ -1134,20 +1155,35 @@ describe("criarNavegadorDoAgente: IPC da tela", () => {
     expect(vista.bounds).toEqual({ x: 40, y: 50, width: 300, height: 200 });
   });
 
-  it("ocultar devolve a vista para baixo da tela, no tamanho padrão e zoom 1, ainda visível para o Chromium", async () => {
+  it("ocultar devolve a vista para fora da área da janela, em 1280x800 e zoom 1, ainda visível para o Chromium", async () => {
     const { navegador, executar, principal, retangulo, views, janela } = montar();
     await executar({ tipo: "ler_pagina" });
     navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo });
     const [vista] = views;
+    expect(vista.bounds).not.toEqual(LIMITES_OCULTOS);
 
     expect(navegador.aoOcultar(principal, { orquestradorId: "orq-1" })).toBe(true);
 
-    expect(vista.bounds).toEqual(TAMANHO_OCULTO);
+    esperarEscondida(vista);
     expect(vista.webContents.setZoomFactor).toHaveBeenLastCalledWith(1);
-    expect(vista.visivel).toBe(true);
     expect(janela.contentView.addChildView).toHaveBeenLastCalledWith(vista, 0);
     // O agente segue usando com o nó fechado.
     await expect(executar({ tipo: "capturar_tela" })).resolves.toMatchObject({ imagem: expect.any(Object) });
+  });
+
+  it("mostrar e ocultar de novo, várias vezes, sempre termina escondida fora da janela (e mostrada no retângulo)", async () => {
+    const { navegador, executar, principal, retangulo, views } = montar();
+    await executar({ tipo: "ler_pagina" });
+    const [vista] = views;
+
+    for (let i = 0; i < 3; i += 1) {
+      navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo });
+      expect(vista.bounds).toEqual({ x: 100, y: 100, width: 600, height: 400 });
+      expect(vista.raio).toBe(0);
+
+      navegador.aoOcultar(principal, { orquestradorId: "orq-1" });
+      esperarEscondida(vista);
+    }
   });
 
   it("mostrar e ocultar de um Orquestrador sem navegador resolvem false", () => {
@@ -1158,7 +1194,7 @@ describe("criarNavegadorDoAgente: IPC da tela", () => {
     expect(navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo: { x: 1 } })).toBe(false);
   });
 
-  it("modo invisível: não mostra, e a vista escondida sai da janela transparente (e volta ao sair do modo)", async () => {
+  it("modo invisível: não mostra, e a vista escondida segue fora da área da janela transparente (e volta ao sair do modo)", async () => {
     const { navegador, executar, principal, retangulo, views, estado, janela } = montar();
     await executar({ tipo: "ler_pagina" });
     navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo });
@@ -1166,14 +1202,16 @@ describe("criarNavegadorDoAgente: IPC da tela", () => {
     estado.bloqueada = true;
     navegador.reaplicarTodas();
 
-    expect(views[0].bounds).toEqual(POSICAO_FORA_DA_JANELA);
+    esperarEscondida(views[0]);
     expect(navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo })).toBe(false);
     await expect(executar({ tipo: "capturar_tela" })).resolves.toBeDefined();
 
     estado.bloqueada = false;
     navegador.reaplicarTodas();
-    expect(views[0].bounds).toEqual(TAMANHO_OCULTO);
+    esperarEscondida(views[0]);
     expect(janela.contentView.addChildView).toHaveBeenLastCalledWith(views[0], 0);
+    expect(navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo })).toBe(true);
+    expect(views[0].bounds).toEqual({ x: 100, y: 100, width: 600, height: 400 });
   });
 
   it("estados devolve o estado de cada navegador aberto", async () => {
@@ -1332,8 +1370,9 @@ describe("criarNavegadorDoAgente: janela principal", () => {
     await executar({ tipo: "ler_pagina" });
     navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo });
 
+    expect(views[0].bounds).not.toEqual(LIMITES_OCULTOS);
     ouvintesDoConteudoDaJanela["did-start-navigation"]({ isMainFrame: true, isSameDocument: false });
-    expect(views[0].bounds).toEqual(TAMANHO_OCULTO);
+    esperarEscondida(views[0]);
     expect(navegador.total()).toBe(1);
 
     ouvintesDoConteudoDaJanela["did-start-navigation"]({ isMainFrame: false, isSameDocument: false });

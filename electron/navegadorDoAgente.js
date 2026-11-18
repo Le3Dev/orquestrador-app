@@ -15,14 +15,16 @@
 // sandbox.
 //
 // Como a vista funciona com o nó do canvas fechado: o WebContentsView fica
-// sempre anexado à janela principal e "visível" para o Chromium, mas POR BAIXO
-// da tela (índice 0 da contentView, tamanho 1280x800), onde a página continua
-// pintando (requestAnimationFrame, transições, IntersectionObserver). Visível
-// de verdade só quando a tela manda `mostrar` com o retângulo do nó. No modo
-// invisível (janela transparente) ela vai para fora da janela, para não
-// aparecer por transparência; aí a página pinta devagar, mas os comandos e a
-// captura seguem funcionando. Desanexar a vista da janela trava captura e
-// pintura: por isso nunca se remove sem fechar.
+// sempre anexado à janela principal e "visível" para o Chromium, mas FORA da
+// área da janela (`LIMITES_OCULTOS`: 1280x800, com só 1 DIP dentro, no canto
+// superior esquerdo, e o canto cortado por `RAIO_OCULTO`: nenhum pixel da tela
+// é coberto), onde a página continua pintando (requestAnimationFrame,
+// transições, IntersectionObserver). Não existe "por baixo da tela": a vista
+// anexada é filha da tela e sempre é desenhada por cima dela, qualquer que seja
+// o índice; dentro da área da janela ela a cobriria. Visível de verdade só
+// quando a tela manda `mostrar` com o retângulo do nó. O mesmo lugar vale no
+// modo invisível (janela transparente). Desanexar a vista da janela trava
+// captura e pintura: por isso nunca se remove sem fechar.
 //
 // Os comandos usam o `webContents.debugger` (protocolo do Chrome): cliques,
 // teclas e rolagem são eventos de entrada reais (`isTrusted`), em pixels CSS
@@ -42,10 +44,16 @@ const LIMITE_DE_VISTAS = 8;
 
 const TAMANHO_MAXIMO_DA_URL = 2048;
 
-/** Tamanho da vista quando o nó do canvas não está aberto: o layout que o agente enxerga. */
-const TAMANHO_OCULTO = { x: 0, y: 0, width: 1280, height: 800 };
-/** No modo invisível a vista sai da janela (a janela fica transparente). */
-const POSICAO_FORA_DA_JANELA = { x: -10_000, y: -10_000, width: 1280, height: 800 };
+/**
+ * Limites da vista quando o nó do canvas não está aberto (ou no modo invisível): 1280x800, o layout que o
+ * agente enxerga, fora da janela e com só 1 DIP dentro dela, no canto superior esquerdo. A vista anexada é
+ * filha da tela e sempre desenhada por cima dela, qualquer que seja o índice: "por baixo" não existe, e
+ * dentro da área da janela ela a cobriria. Mas inteira fora (ex.: -10000,-10000) o Chromium a trata como
+ * escondida: nasce sem tamanho (0x0), não pinta e a captura trava. Com 1 DIP dentro ele a mantém visível.
+ */
+const LIMITES_OCULTOS = { x: 1 - 1280, y: 1 - 800, width: 1280, height: 800 };
+/** Raio que corta o canto da vista escondida: o pixel que sobra dentro da janela não é desenhado. */
+const RAIO_OCULTO = 10;
 
 const NOME_DO_MUNDO_ISOLADO = "orquestrador-do-agente";
 
@@ -753,8 +761,8 @@ function criarNavegadorDoAgente({
   }
 
   /**
-   * Visível de verdade (sobre o nó do canvas) ou "escondida": por baixo da tela
-   * e ainda pintando. Nunca desanexa.
+   * Visível de verdade (sobre o nó do canvas) ou "escondida": fora da área da janela
+   * (`LIMITES_OCULTOS`, sem desenhar pixel algum da tela) e ainda pintando. Nunca desanexa.
    */
   function aplicar(vista) {
     const janela = janelaValida();
@@ -766,13 +774,15 @@ function criarNavegadorDoAgente({
         ? calcularLimites(vista.retangulo, janela.webContents.getZoomFactor(), areaDaJanela(janela))
         : null;
     if (limites && janela.isVisible() && !janela.isMinimized()) {
+      view.setBorderRadius(0);
       view.setBounds(limites.bounds);
       conteudo.setZoomFactor(limites.zoomDaPagina);
       // Adicionar de novo põe a vista no topo (acima da tela).
       janela.contentView.addChildView(view);
     } else {
       conteudo.setZoomFactor(1);
-      view.setBounds(bloqueada() ? POSICAO_FORA_DA_JANELA : TAMANHO_OCULTO);
+      view.setBorderRadius(RAIO_OCULTO);
+      view.setBounds(LIMITES_OCULTOS);
       try {
         janela.contentView.removeChildView(view);
       } catch {
@@ -858,7 +868,7 @@ function criarNavegadorDoAgente({
     });
 
     vistas.set(id, vista);
-    view.setBounds(bloqueada() ? POSICAO_FORA_DA_JANELA : TAMANHO_OCULTO);
+    view.setBounds(LIMITES_OCULTOS);
     aplicar(vista);
     // A primeira vez que o agente usa o navegador deste Orquestrador: a tela abre o nó.
     enviarParaATela("navegador-do-agente:ativado", { orquestradorId: id });
@@ -1580,7 +1590,7 @@ function criarNavegadorDoAgente({
     }
   }
 
-  /** O modo invisível ligou ou desligou: a vista escondida troca de lugar (por baixo da tela ou fora da janela). */
+  /** O modo invisível ligou ou desligou: o que estava mostrado desce para fora da janela (ou volta a poder subir). */
   function reaplicarTodas() {
     if (bloqueada()) {
       for (const vista of vistas.values()) vista.mostrando = false;
@@ -1613,8 +1623,8 @@ function criarNavegadorDoAgente({
 module.exports = {
   PREFIXO_DA_PARTICAO,
   LIMITE_DE_VISTAS,
-  TAMANHO_OCULTO,
-  POSICAO_FORA_DA_JANELA,
+  LIMITES_OCULTOS,
+  RAIO_OCULTO,
   MENSAGEM_PAUSADO,
   ErroDoNavegadorDoAgente,
   particaoDoOrquestrador,
