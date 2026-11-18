@@ -1,6 +1,13 @@
 import { type KeyboardEvent as EventoDeTeclado, type ReactNode, useEffect, useId, useRef, useState } from "react";
 
-import { avisoDosPedidosEmAndamento, percentualDoDownload } from "../../shared/atualizacao";
+import {
+  avisoDosOrquestradoresTrabalhando,
+  avisoDosPedidosEmAndamento,
+  percentualDoDownload,
+  resumirMensagem,
+  textoDaEspera,
+  textoDaEtapa,
+} from "../../shared/atualizacao";
 import type { JanelaDaCota, LeituraDeMemoria, SituacaoDoOrquestrador } from "../../shared/api/tipos";
 import type { AjustesDoAplicativo } from "../../shared/hooks/useAjustesDoAplicativo";
 import { useAtualizacao } from "../../shared/hooks/useAtualizacao";
@@ -13,6 +20,7 @@ import { IconeFechar } from "../Icones";
 import { AbaDaConta } from "./AbaDaConta";
 import { AbaDePadroesDasConfiguracoes } from "./AbaDePadroesDasConfiguracoes";
 import { AbaDoSistema } from "./AbaDoSistema";
+import { DetalhesDoErro, ErroCompacto } from "./AvisoDeAtualizacao";
 import {
   InterruptorDaConfiguracao,
   LinhaDaConfiguracao,
@@ -250,10 +258,17 @@ function semPrefixo(versao: string): string {
 }
 
 function AbaDeAtualizacao({ pedidosEmAndamento }: { pedidosEmAndamento: number }) {
-  const { estado, erroAoInstalar, verificar, instalarAgora } = useAtualizacao();
+  const { estado, erroAoInstalar, suportaEspera, verificar, instalarAgora, instalarQuandoLivre, cancelarEspera } =
+    useAtualizacao();
   const [confirmando, setConfirmando] = useState(false);
+  /** Ponte nova: quantos orquestradores fizeram o app recusar o reinício (null: não recusou). */
+  const [trabalhando, setTrabalhando] = useState<number | null>(null);
   // Se os pedidos terminam com a confirmação na tela, ela some e reiniciar fica direto.
   const pedirConfirmacao = confirmando && pedidosEmAndamento > 0;
+  if (trabalhando !== null && estado?.situacao !== "pronta") {
+    // Ajuste durante o render: saiu de "pronta" (reiniciou, passou a aguardar…), a pergunta some.
+    setTrabalhando(null);
+  }
 
   if (estado === null) {
     return (
@@ -270,7 +285,10 @@ function AbaDeAtualizacao({ pedidosEmAndamento }: { pedidosEmAndamento: number }
   const titulo = versaoAtual === "" ? "Versão do app" : `Versão ${versaoAtual}`;
   const versaoNova = estado.versaoNova === null ? "A nova versão" : `A versão ${semPrefixo(estado.versaoNova)}`;
   const percentual = percentualDoDownload(estado.progresso);
+  const etapa = textoDaEtapa(estado.etapa);
   const podeVerificar = estado.situacao === "em-dia" || estado.situacao === "erro";
+  // No Mac a mensagem de erro pode ser o fim do log: a descrição leva só a primeira linha.
+  const erro = estado.situacao === "erro" && estado.mensagemDeErro !== null ? resumirMensagem(estado.mensagemDeErro) : null;
 
   let descricao: ReactNode;
   switch (estado.situacao) {
@@ -278,24 +296,52 @@ function AbaDeAtualizacao({ pedidosEmAndamento }: { pedidosEmAndamento: number }
       descricao = "As atualizações só funcionam no app instalado.";
       break;
     case "verificando":
-      descricao = "Procurando atualizações…";
+      descricao = etapa ?? "Procurando atualizações…";
       break;
     case "em-dia":
       descricao = "Você está na versão mais recente.";
       break;
     case "baixando":
-      descricao = `${versaoNova} está sendo baixada${percentual === null ? "" : ` (${percentual}%)`} e será instalada quando você fechar o app.`;
+      descricao =
+        etapa === null
+          ? `${versaoNova} está sendo baixada${percentual === null ? "" : ` (${percentual}%)`} e será instalada quando você fechar o app.`
+          : `${versaoNova} está sendo preparada. ${etapa}${percentual === null ? "" : ` (${percentual}%)`}`;
       break;
     case "pronta":
       descricao = `${versaoNova} foi baixada. Ela será instalada quando você fechar o app, ou reinicie agora.`;
       break;
+    case "aguardando":
+      descricao = `${versaoNova} está pronta. ${textoDaEspera(estado.orquestradoresTrabalhando)}.`;
+      break;
     case "erro":
       descricao =
-        estado.mensagemDeErro === null || estado.mensagemDeErro.trim() === ""
-          ? "Não foi possível verificar."
-          : `Não foi possível verificar: ${estado.mensagemDeErro.trim()}`;
+        erro === null || erro.resumo === "" ? "Não foi possível verificar." : `Não foi possível verificar: ${erro.resumo}`;
       break;
   }
+
+  const reiniciarAgora = async () => {
+    if (!suportaEspera) {
+      // Ponte antiga: o app reinicia sem perguntar, então a tela confirma antes.
+      if (pedidosEmAndamento > 0) {
+        setConfirmando(true);
+      } else {
+        void instalarAgora();
+      }
+      return;
+    }
+    const resultado = await instalarAgora();
+    if (resultado !== null && !resultado.iniciou && resultado.orquestradoresTrabalhando > 0) {
+      setTrabalhando(resultado.orquestradoresTrabalhando);
+    }
+  };
+
+  const reiniciarQuandoTerminarem = () => {
+    setTrabalhando(null);
+    void instalarQuandoLivre();
+  };
+
+  // Mostra a barra no download do Windows com percentual e, no Mac, em toda etapa (indeterminada sem percentual).
+  const mostrarBarra = estado.situacao === "baixando" && (percentual !== null || etapa !== null);
 
   return (
     <div className="cfgapp-cartao">
@@ -305,21 +351,56 @@ function AbaDeAtualizacao({ pedidosEmAndamento }: { pedidosEmAndamento: number }
             {estado.situacao === "erro" ? "Tentar de novo" : "Procurar agora"}
           </button>
         )}
-        {estado.situacao === "pronta" && !pedirConfirmacao && (
-          <button
-            type="button"
-            className="btn btn-sm btn-cta"
-            onClick={() => (pedidosEmAndamento > 0 ? setConfirmando(true) : void instalarAgora())}
-          >
+        {estado.situacao === "pronta" && !pedirConfirmacao && trabalhando === null && (
+          <button type="button" className="btn btn-sm btn-cta" onClick={() => void reiniciarAgora()}>
             Reiniciar agora
           </button>
         )}
+        {estado.situacao === "aguardando" && (
+          <button type="button" className="btn btn-sm btn-outline" onClick={() => void cancelarEspera()}>
+            Cancelar espera
+          </button>
+        )}
       </LinhaDaConfiguracao>
-      {estado.situacao === "baixando" && percentual !== null && (
+      {erro !== null && erro.detalhes !== null && (
+        <div className="cfgapp-erro-solto">
+          <DetalhesDoErro texto={erro.detalhes} />
+        </div>
+      )}
+      {mostrarBarra && (
         <div className="cfgapp-progresso">
-          <span className="medidor medidor-largo" role="progressbar" aria-label="Download da atualização" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percentual}>
-            <span style={{ width: `${percentual}%` }} />
-          </span>
+          {percentual === null ? (
+            <span className="medidor medidor-largo medidor-indeterminado" role="progressbar" aria-label="Preparo da atualização">
+              <span />
+            </span>
+          ) : (
+            <span
+              className="medidor medidor-largo"
+              role="progressbar"
+              aria-label={etapa === null ? "Download da atualização" : "Preparo da atualização"}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={percentual}
+            >
+              <span style={{ width: `${percentual}%` }} />
+            </span>
+          )}
+        </div>
+      )}
+      {estado.situacao === "pronta" && trabalhando !== null && (
+        <div className="cfgapp-confirmacao">
+          <p role="alert">{avisoDosOrquestradoresTrabalhando(trabalhando)}</p>
+          <div className="cfgapp-confirmacao-botoes">
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setTrabalhando(null)}>
+              Voltar
+            </button>
+            <button type="button" className="btn btn-sm btn-cta" onClick={reiniciarQuandoTerminarem}>
+              Reiniciar quando terminarem
+            </button>
+            <button type="button" className="btn btn-sm btn-danger" onClick={() => void instalarAgora({ forcar: true })}>
+              Reiniciar mesmo assim
+            </button>
+          </div>
         </div>
       )}
       {estado.situacao === "pronta" && pedirConfirmacao && (
@@ -336,9 +417,9 @@ function AbaDeAtualizacao({ pedidosEmAndamento }: { pedidosEmAndamento: number }
         </div>
       )}
       {erroAoInstalar !== null && (
-        <p className="hint-error cfgapp-erro-solto" role="alert">
-          {erroAoInstalar}
-        </p>
+        <div className="cfgapp-erro-solto">
+          <ErroCompacto mensagem={erroAoInstalar} />
+        </div>
       )}
     </div>
   );

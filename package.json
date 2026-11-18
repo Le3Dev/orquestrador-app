@@ -18,7 +18,7 @@
     "dist:win": "npm run build && electron-builder --win --publish never",
     "dist:win:teste": "npm run build && electron-builder --win --publish never -c.extraMetadata.buildDeTeste=true -c.directories.output=dist_electron_teste",
     "release:win": "npm run build && electron-builder --win --publish always",
-    "dist:mac": "node scripts/permissaoDoPty.cjs && npm run build && electron-builder --mac dir --arm64 --publish never -c.extraMetadata.repositorioDoMac=\"$PWD\" && codesign --force --deep --sign - \"dist_electron/mac-arm64/Orquestrador de Agentes.app\"",
+    "dist:mac": "node scripts/permissaoDoPty.cjs && npm run build && electron-builder --mac dir --arm64 --publish never -c.extraMetadata.repositorioDoMac=\"$PWD\" -c.extraMetadata.commitDoMac=\"$(git rev-parse HEAD)\" && codesign --force --deep --sign - \"dist_electron/mac-arm64/Orquestrador de Agentes.app\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

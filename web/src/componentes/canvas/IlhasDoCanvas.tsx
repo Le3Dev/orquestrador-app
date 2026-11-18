@@ -451,8 +451,8 @@ interface PropsDasNotificacoes {
 
 /**
  * As notificações do canto superior direito, logo abaixo da ilha da direita:
- * memória baixa ou crítica, cota alta e a atualização do app (baixando ou
- * pronta). Cada aviso fica até o "Entendi" enquanto o motivo valer; se a
+ * memória baixa ou crítica, cota alta e a atualização do app (baixando,
+ * pronta ou aguardando os orquestradores). Cada aviso fica até o "Entendi" enquanto o motivo valer; se a
  * memória piorar (baixa para crítica) ou normalizar e apertar de novo, ele
  * volta. Não somem com um menu aberto: ficam do lado oposto ao do `+ Novo`.
  */
@@ -499,7 +499,10 @@ export function NotificacoesDoCanvas({
   const avisoDaMemoria =
     nivel === "normal" || memoriaDispensada === "critica" || memoriaDispensada === nivel ? null : nivel;
   const avisosDaCota = cotasAltas.filter((janela) => !cotasDispensadas.has(janela.nome));
-  const atualizacao = estado?.situacao === "baixando" || (estado?.situacao === "pronta" && !avisoDispensado);
+  const atualizacao =
+    estado?.situacao === "baixando" ||
+    estado?.situacao === "aguardando" ||
+    (estado?.situacao === "pronta" && !avisoDispensado);
 
   if (avisoDaMemoria === null && avisosDaCota.length === 0 && !atualizacao) {
     return null;

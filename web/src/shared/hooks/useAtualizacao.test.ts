@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 
-import type { EstadoDaAtualizacao } from "../ponteDoDesktop";
+import type { EstadoDaAtualizacao, ResultadoDoReinicio } from "../ponteDoDesktop";
 import { useAtualizacao } from "./useAtualizacao";
 
 type AoMudar = (estado: EstadoDaAtualizacao) => void;
@@ -12,6 +12,8 @@ function estado(alteracoes: Partial<EstadoDaAtualizacao> = {}): EstadoDaAtualiza
     versaoNova: null,
     progresso: null,
     mensagemDeErro: null,
+    etapa: null,
+    orquestradoresTrabalhando: null,
     ...alteracoes,
   };
 }
@@ -36,7 +38,9 @@ describe("useAtualizacao", () => {
     inicial?: EstadoDaAtualizacao;
     obter?: () => Promise<EstadoDaAtualizacao>;
     verificar?: () => Promise<EstadoDaAtualizacao>;
-    instalarAgora?: () => Promise<void>;
+    instalarAgora?: (opcoes?: { forcar?: boolean }) => Promise<ResultadoDoReinicio | void>;
+    /** A ponte nova: com `instalarQuandoLivre` e `cancelarEspera`. */
+    comEspera?: boolean;
   }
 
   function instalarPonte({
@@ -44,6 +48,7 @@ describe("useAtualizacao", () => {
     obter = vi.fn(async () => inicial),
     verificar = vi.fn(async () => inicial),
     instalarAgora = vi.fn(async () => undefined),
+    comEspera = false,
   }: OpcoesDaPonte = {}) {
     const ouvintes: AoMudar[] = [];
     const cancelar = vi.fn();
@@ -55,6 +60,9 @@ describe("useAtualizacao", () => {
         ouvintes.push(callback);
         return cancelar;
       }),
+      ...(comEspera
+        ? { instalarQuandoLivre: vi.fn(async () => undefined), cancelarEspera: vi.fn(async () => undefined) }
+        : {}),
     };
     janelaComPonte.electron = { desktop: true, atualizacao };
     const avisar = (novo: EstadoDaAtualizacao) => act(() => ouvintes.forEach((ouvinte) => ouvinte(novo)));
@@ -157,6 +165,8 @@ describe("useAtualizacao", () => {
         versaoNova: null,
         progresso: null,
         mensagemDeErro: "sem IPC",
+        etapa: null,
+        orquestradoresTrabalhando: null,
       }),
     );
 
@@ -179,5 +189,105 @@ describe("useAtualizacao", () => {
     await act(() => result.current.verificar());
 
     expect(result.current.estado).toMatchObject({ situacao: "pronta", versaoNova: "0.2.1" });
+  });
+
+  it("ponte antiga sem `etapa` e `orquestradoresTrabalhando`: os campos ausentes valem null", async () => {
+    const antigo = { situacao: "baixando", versaoAtual: "0.2.0", versaoNova: "0.2.1", progresso: 10, mensagemDeErro: null };
+    janelaComPonte.electron = {
+      desktop: true,
+      atualizacao: {
+        obter: vi.fn(async () => antigo),
+        verificar: vi.fn(async () => antigo),
+        instalarAgora: vi.fn(async () => undefined),
+        aoMudar: vi.fn(() => () => undefined),
+      },
+    };
+    const { result } = renderHook(() => useAtualizacao());
+
+    await waitFor(() =>
+      expect(result.current.estado).toEqual({ ...antigo, etapa: null, orquestradoresTrabalhando: null }),
+    );
+    expect(result.current.suportaEspera).toBe(false);
+
+    // Sem resposta, reiniciar vale como "iniciou"; esperar e cancelar não fazem nada.
+    let resultado: ResultadoDoReinicio | null = null;
+    await act(async () => {
+      resultado = await result.current.instalarAgora();
+    });
+    expect(resultado).toEqual({ iniciou: true, orquestradoresTrabalhando: 0 });
+    await act(() => result.current.instalarQuandoLivre());
+    await act(() => result.current.cancelarEspera());
+    expect(result.current.erroAoInstalar).toBeNull();
+  });
+
+  it("ponte nova: devolve a recusa com os orquestradores trabalhando e repassa forcar, esperar e cancelar", async () => {
+    const instalarAgora = vi.fn(async (opcoes?: { forcar?: boolean }) =>
+      opcoes?.forcar === true ? { iniciou: true, orquestradoresTrabalhando: 2 } : { iniciou: false, orquestradoresTrabalhando: 2 },
+    );
+    const { atualizacao, avisar } = instalarPonte({
+      inicial: estado({ situacao: "pronta", versaoNova: "0.2.1" }),
+      instalarAgora,
+      comEspera: true,
+    });
+    const { result } = renderHook(() => useAtualizacao());
+    await waitFor(() => expect(result.current.estado?.situacao).toBe("pronta"));
+    expect(result.current.suportaEspera).toBe(true);
+
+    let resultado: ResultadoDoReinicio | null = null;
+    await act(async () => {
+      resultado = await result.current.instalarAgora();
+    });
+    expect(instalarAgora).toHaveBeenLastCalledWith();
+    expect(resultado).toEqual({ iniciou: false, orquestradoresTrabalhando: 2 });
+
+    await act(async () => {
+      resultado = await result.current.instalarAgora({ forcar: true });
+    });
+    expect(instalarAgora).toHaveBeenLastCalledWith({ forcar: true });
+    expect(resultado).toEqual({ iniciou: true, orquestradoresTrabalhando: 2 });
+
+    await act(() => result.current.instalarQuandoLivre());
+    expect(atualizacao.instalarQuandoLivre).toHaveBeenCalledTimes(1);
+    avisar(estado({ situacao: "aguardando", versaoNova: "0.2.1", orquestradoresTrabalhando: 2 }));
+    expect(result.current.estado).toMatchObject({ situacao: "aguardando", orquestradoresTrabalhando: 2 });
+
+    await act(() => result.current.cancelarEspera());
+    expect(atualizacao.cancelarEspera).toHaveBeenCalledTimes(1);
+  });
+
+  it("acompanha a etapa do Mac e a falha da verificação não esconde a espera", async () => {
+    const { avisar } = instalarPonte({
+      inicial: estado({ situacao: "baixando", versaoNova: "0.2.1", etapa: "Instalando dependências" }),
+      verificar: vi.fn().mockRejectedValue(new Error("sem internet")),
+      comEspera: true,
+    });
+    const { result } = renderHook(() => useAtualizacao());
+    await waitFor(() => expect(result.current.estado?.etapa).toBe("Instalando dependências"));
+
+    avisar(estado({ situacao: "baixando", versaoNova: "0.2.1", etapa: "Gerando o app" }));
+    expect(result.current.estado).toMatchObject({ etapa: "Gerando o app", progresso: null });
+
+    avisar(estado({ situacao: "aguardando", versaoNova: "0.2.1", orquestradoresTrabalhando: 1 }));
+    await act(() => result.current.verificar());
+    expect(result.current.estado).toMatchObject({ situacao: "aguardando", orquestradoresTrabalhando: 1 });
+  });
+
+  it("falhas ao esperar ou cancelar viram a mensagem de erro, sem quebrar", async () => {
+    const atualizacao = {
+      obter: vi.fn(async () => estado({ situacao: "pronta", versaoNova: "0.2.1" })),
+      verificar: vi.fn(async () => estado()),
+      instalarAgora: vi.fn(async () => ({ iniciou: false, orquestradoresTrabalhando: 1 })),
+      instalarQuandoLivre: vi.fn().mockRejectedValue(new Error("sem IPC")),
+      cancelarEspera: vi.fn().mockRejectedValue(new Error("sem IPC")),
+      aoMudar: vi.fn(() => () => undefined),
+    };
+    janelaComPonte.electron = { desktop: true, atualizacao };
+    const { result } = renderHook(() => useAtualizacao());
+    await waitFor(() => expect(result.current.estado?.situacao).toBe("pronta"));
+
+    await act(() => result.current.instalarQuandoLivre());
+    expect(result.current.erroAoInstalar).toBe("Não foi possível agendar o reinício: sem IPC");
+    await act(() => result.current.cancelarEspera());
+    expect(result.current.erroAoInstalar).toBe("Não foi possível cancelar a espera: sem IPC");
   });
 });

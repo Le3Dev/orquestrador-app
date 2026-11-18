@@ -30,7 +30,11 @@
 //      4 h, procura versão nova nas Releases públicas do GitHub
 //      (Le3Dev/orquestrador-app), baixa em segundo plano e avisa a tela
 //      (canal "atualizacao:estado"). A tela pergunta se reinicia agora; se
-//      não, a versão baixada é instalada quando o app fecha.
+//      não, a versão baixada é instalada quando o app fecha. No Mac (electron/
+//      atualizacaoDoMac.js), o app se gera de novo a partir da pasta do código
+//      (git fetch, npm install, npm run dist:mac) e se troca ao reiniciar.
+//      Nos dois, reiniciar com orquestradores trabalhando pede confirmação ou
+//      espera eles terminarem (situação "aguardando").
 //   6. Ao fechar o app, derruba a árvore inteira do servidor (os claude.exe
 //      dos agentes morrem junto).
 //   7. Motor nativo de transcrição (electron/transcricaoNativa.js): Whisper no
@@ -59,8 +63,8 @@
 // macOS (electron/mac.js, tudo atrás de process.platform === "darwin"): menu
 // nativo (Cmd+C/V/Z/Q), PATH do shell de login (aberto pelo Finder ou pelo
 // Dock), as 3 bolinhas nativas no lugar do overlay (na principal, flutuando no
-// canto superior esquerdo, centradas com as ilhas do topo), o `claude` do PATH na primeira abertura e nada de
-// atualização automática (sem assinatura da Apple ela não funciona).
+// canto superior esquerdo, centradas com as ilhas do topo), o `claude` do PATH na primeira abertura e a
+// atualização pelo botão no lugar do electron-updater (sem assinatura da Apple ele não instala).
 
 const {
   app,
@@ -97,6 +101,18 @@ const os = require("node:os");
 const path = require("node:path");
 
 const { criarServicoDeAtualizacao, estadoInicial: estadoInicialDaAtualizacao } = require("./atualizacao");
+const {
+  completarEstado: completarEstadoDaAtualizacao,
+  contarOrquestradoresTrabalhando,
+  criarEsperaDosOrquestradores,
+  criarExecutorDeComandos,
+  criarServicoDeAtualizacaoDoMac,
+  ehRepositorioGit,
+  iniciarTrocaDoApp,
+  lerProcessosEmExecucao,
+  pastaDoAppPeloExecutavel,
+  pastaDoCodigoDoMac,
+} = require("./atualizacaoDoMac");
 const config = require("./config");
 const licenca = require("./licenca");
 const {
@@ -163,6 +179,12 @@ const EXIGE_LICENCA = app.isPackaged && !BUILD_DE_TESTE && config.exigirLicenca 
 // versão publicada. No Mac fica desligada: sem assinatura da Apple o
 // electron-updater não instala a versão nova.
 const ATUALIZACAO_ATIVA = app.isPackaged && !BUILD_DE_TESTE && !mac.ehMac;
+// No Mac, a atualização pelo botão: o app instalado normal gerado pelo
+// `npm run dist:mac`, com a pasta do código gravada (repositorioDoMac) e ainda
+// um repositório git. Sem isso, "indisponivel" como antes.
+const PASTA_DO_CODIGO_DO_MAC =
+  app.isPackaged && !BUILD_DE_TESTE && mac.ehMac ? pastaDoCodigoDoMac(lerPacoteDoApp(), ehRepositorioGit) : null;
+const ATUALIZACAO_DO_MAC_ATIVA = Boolean(PASTA_DO_CODIGO_DO_MAC);
 
 // Pasta do usuário trocável só fora do app instalado normal (testes isolados).
 // No instalado, ignorar evita que uma variável de ambiente esquecida desvie os
@@ -658,7 +680,8 @@ async function mostrarErro(janela, titulo, detalhe) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Atualização automática (electron/atualizacao.js + electron-updater).
+// Atualização automática (electron/atualizacao.js + electron-updater; no Mac,
+// electron/atualizacaoDoMac.js).
 // ──────────────────────────────────────────────────────────────────────────
 // Releases públicas do GitHub (build.publish no package.json → app-update.yml
 // dentro do app instalado). Sem assinatura digital: sem `publisherName` no
@@ -671,7 +694,7 @@ function enviarEstadoDaAtualizacao(estado) {
 
 // O electron-updater só é carregado no app instalado normal; fora dele o
 // serviço fica inativo ("indisponivel").
-function prepararAtualizacao() {
+function prepararAtualizacaoDoElectronUpdater(aoMudar) {
   let atualizador = null;
   if (ATUALIZACAO_ATIVA) {
     try {
@@ -679,6 +702,65 @@ function prepararAtualizacao() {
       atualizador.logger = {
         info: (texto) => registrarNoLog("atualizacao", texto),
         warn: (texto) => registrarNoLog("atualizacao", `aviso: ${texto}`),
+// Serviço de dentro (o do electron-updater, ou o do Mac) e a espera pelos
+// orquestradores que o envolve: `servicoDeAtualizacao` é a espera.
+let servicoDeDentroDaAtualizacao = null;
+const arquivoDosProcessosEmExecucao = () => path.join(pastaDeDados(), "processos-em-execucao.json");
+const arquivoDoLogDaAtualizacaoDoMac = () => path.join(pastaDoUsuario(), "logs", "atualizacao-do-mac.log");
+
+function prepararAtualizacao() {
+  const espera = criarEsperaDosOrquestradores({
+    contarTrabalhando: () => contarOrquestradoresTrabalhando(lerProcessosEmExecucao(arquivoDosProcessosEmExecucao())),
+    instalar: instalarAtualizacaoAgora,
+    registrar: (texto) => registrarNoLog("atualizacao", texto),
+    aoMudar: enviarEstadoDaAtualizacao,
+  });
+  servicoDeDentroDaAtualizacao = ATUALIZACAO_DO_MAC_ATIVA
+    ? prepararAtualizacaoDoMac(espera.aoMudarDoServico)
+    : prepararAtualizacaoDoElectronUpdater(espera.aoMudarDoServico);
+  espera.ligar(servicoDeDentroDaAtualizacao);
+  servicoDeAtualizacao = espera;
+}
+
+// Mac: o app se gera de novo a partir da pasta do código (repositorioDoMac) e
+// se troca por um script desacoplado (electron/atualizacaoDoMac.js).
+function prepararAtualizacaoDoMac(aoMudar) {
+  const pacote = lerPacoteDoApp() || {};
+  const registrar = (texto) => registrarNoLog("atualizacao", texto);
+  registrarNoLog("atualizacao", `Atualização pelo botão no Mac a partir de ${PASTA_DO_CODIGO_DO_MAC}.`);
+  return criarServicoDeAtualizacaoDoMac({
+    pastaDoCodigo: PASTA_DO_CODIGO_DO_MAC,
+    commitDoApp: typeof pacote.commitDoMac === "string" ? pacote.commitDoMac : null,
+    versaoDoApp: app.getVersion(),
+    nomeDoApp: config.productName,
+    executar: criarExecutorDeComandos({ arquivoDeLog: arquivoDoLogDaAtualizacaoDoMac() }),
+    arquivoDoLog: arquivoDoLogDaAtualizacaoDoMac(),
+    instalarApp: trocarAppDoMac,
+    registrar,
+    aoMudar,
+  });
+}
+
+// Deixa o script de troca rodando (ele espera este processo sair) e fecha o app.
+// reabrir: false → o app já está fechando (before-quit): só troca, sem abrir.
+function trocarAppDoMac({ appGerado, reabrir = true }) {
+  const appAtual = pastaDoAppPeloExecutavel(process.execPath);
+  if (!appAtual) throw new Error(`não achei o .app em ${process.execPath}`);
+  const { backup } = iniciarTrocaDoApp({
+    pid: process.pid,
+    appAtual,
+    appNovo: appGerado,
+    nomeDoApp: config.productName,
+    arquivoDeLog: arquivoDoLogDaAtualizacaoDoMac(),
+    reabrir,
+  });
+  registrarNoLog(
+    "atualizacao",
+    `Trocando ${appAtual} pela versão gerada (backup em ${backup}); ${reabrir ? "o app fecha agora e reabre" : "sem reabrir"}.`,
+  );
+  if (reabrir) setImmediate(() => app.quit());
+}
+
         error: (texto) => registrarNoLog("atualizacao", `erro: ${texto}`),
       };
       atualizador.autoDownload = true; // baixa sozinho em segundo plano
@@ -692,17 +774,35 @@ function prepararAtualizacao() {
       atualizador = null;
     }
   }
-  servicoDeAtualizacao = criarServicoDeAtualizacao({
+  return criarServicoDeAtualizacao({
     atualizador,
     versaoAtual: app.getVersion(),
     ativo: atualizador !== null,
     registrar: (texto) => registrarNoLog("atualizacao", texto),
-    aoMudar: enviarEstadoDaAtualizacao,
+    aoMudar,
   });
 }
 
 function estadoDaAtualizacao() {
-  return servicoDeAtualizacao ? servicoDeAtualizacao.obter() : estadoInicialDaAtualizacao(app.getVersion(), false);
+  return servicoDeAtualizacao
+    ? servicoDeAtualizacao.obter()
+    : completarEstadoDaAtualizacao(estadoInicialDaAtualizacao(app.getVersion(), false));
+}
+
+// Instala a versão pronta agora (a espera já conferiu os orquestradores):
+// encerra o servidor e dispara a instalação; se ela não começar, religa o
+// servidor. Devolve true se começou.
+async function instalarAtualizacaoAgora() {
+  if (!servicoDeDentroDaAtualizacao) return false;
+  let servidorEncerrado = false;
+  const disparou = servicoDeDentroDaAtualizacao.instalarAgora({
+    antesDeInstalar: () => {
+      servidorEncerrado = true;
+      encerrarServidorAoFechar();
+    },
+  });
+  if (!disparou && servidorEncerrado) await retomarAposFalhaNaInstalacao();
+  return disparou;
 }
 
 // Se a instalação não chegou a disparar depois de o servidor ser encerrado,
@@ -1158,19 +1258,24 @@ ipcMain.handle("atualizacao:verificar", () => {
     return estadoDaAtualizacao();
   }
 });
-// Só na situação "pronta": encerra o servidor e instala em silêncio, reabrindo
-// o app depois. Em qualquer outra situação não faz nada.
-ipcMain.handle("atualizacao:instalar-agora", async (evento) => {
+// Só na situação "pronta" (ou "aguardando"): encerra o servidor e instala,
+// reabrindo o app depois. `{ forcar }`: sem ele e com orquestradores
+// trabalhando, não reinicia. Devolve { iniciou, orquestradoresTrabalhando }.
+ipcMain.handle("atualizacao:instalar-agora", async (evento, opcoes) => {
   exigirJanelaPrincipal(evento);
-  if (!servicoDeAtualizacao) return;
-  let servidorEncerrado = false;
-  const disparou = servicoDeAtualizacao.instalarAgora({
-    antesDeInstalar: () => {
-      servidorEncerrado = true;
-      encerrarServidorAoFechar();
-    },
-  });
-  if (!disparou && servidorEncerrado) await retomarAposFalhaNaInstalacao();
+  if (!servicoDeAtualizacao) return { iniciou: false, orquestradoresTrabalhando: 0 };
+  const forcar = Boolean(opcoes && typeof opcoes === "object" && opcoes.forcar === true);
+  return servicoDeAtualizacao.instalarAgora({ forcar });
+});
+// Espera os orquestradores terminarem ("aguardando") e então instala.
+ipcMain.handle("atualizacao:instalar-quando-livre", (evento) => {
+  exigirJanelaPrincipal(evento);
+  return servicoDeAtualizacao ? servicoDeAtualizacao.instalarQuandoLivre() : estadoDaAtualizacao();
+});
+// Desiste da espera: volta para "pronta".
+ipcMain.handle("atualizacao:cancelar-espera", (evento) => {
+  exigirJanelaPrincipal(evento);
+  return servicoDeAtualizacao ? servicoDeAtualizacao.cancelarEspera() : estadoDaAtualizacao();
 });
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1739,4 +1844,8 @@ if (!conseguiuLock) {
     });
   });
   app.on("quit", encerrarServidorAoFechar);
+    // Mac com a versão em "pronta"/"aguardando": troca o app sem reabrir (a
+    // tela promete "instala quando você fechar o app"). Uma vez só: o serviço
+    // ignora o segundo before-quit e a saída do "Reiniciar agora".
+    if (servicoDeAtualizacao) servicoDeAtualizacao.instalarAoFechar();
 }

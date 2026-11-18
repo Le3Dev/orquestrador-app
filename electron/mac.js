@@ -18,7 +18,9 @@
 //      Esta é a única que vale também no Linux, que procura ainda em
 //      ~/.local/bin e /usr/local/bin (o app aberto pelo menu do sistema pode
 //      vir com um PATH sem o ~/.local/bin).
-//   5. Sem atualização automática: sem assinatura da Apple ela não funciona.
+//   5. Sem o electron-updater (sem assinatura da Apple ele não instala): a
+//      atualização é pelo botão, gerando o app de novo a partir da pasta do
+//      código (electron/atualizacaoDoMac.js).
 
 const { execFileSync } = require("node:child_process");
 const os = require("node:os");

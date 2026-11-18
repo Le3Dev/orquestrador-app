@@ -31,30 +31,67 @@ export interface ApiDaConfiguracao {
 
 /**
  * Onde está a atualização automática do app: "indisponivel" fora do app
- * instalado (navegador ou desenvolvimento).
+ * instalado (navegador ou desenvolvimento) e, no Mac, sem a pasta do código.
+ * "aguardando": a versão está pronta e o app espera os orquestradores
+ * terminarem para reiniciar.
  */
-export type SituacaoDaAtualizacao = "indisponivel" | "verificando" | "em-dia" | "baixando" | "pronta" | "erro";
+export type SituacaoDaAtualizacao =
+  | "indisponivel"
+  | "verificando"
+  | "em-dia"
+  | "baixando"
+  | "pronta"
+  | "aguardando"
+  | "erro";
 
 export interface EstadoDaAtualizacao {
   situacao: SituacaoDaAtualizacao;
   versaoAtual: string;
   /** Preenchida em "baixando" e "pronta". */
   versaoNova: string | null;
-  /** 0–100 (inteiro), só em "baixando". */
+  /** 0–100 (inteiro), só em "baixando". No Mac pode ser null (progresso indeterminado). */
   progresso: number | null;
-  /** Só em "erro". */
+  /** Só em "erro". No Mac pode trazer o fim do log, com várias linhas. */
   mensagemDeErro: string | null;
+  /**
+   * No Mac, o texto da etapa em "verificando" e "baixando" (ex.: "Gerando o
+   * app"); null no Windows.
+   */
+  etapa: string | null;
+  /** Só em "aguardando": quantos orquestradores o reinício está esperando. */
+  orquestradoresTrabalhando: number | null;
+}
+
+/** O estado como chega da ponte: a ponte antiga não manda `etapa` nem `orquestradoresTrabalhando`. */
+export type EstadoDaAtualizacaoNaPonte = Omit<EstadoDaAtualizacao, "etapa" | "orquestradoresTrabalhando"> &
+  Partial<Pick<EstadoDaAtualizacao, "etapa" | "orquestradoresTrabalhando">>;
+
+/**
+ * A resposta de `instalarAgora`: `iniciou` false quando há orquestradores
+ * trabalhando e o pedido não era forçado (o app segue aberto).
+ */
+export interface ResultadoDoReinicio {
+  iniciou: boolean;
+  orquestradoresTrabalhando: number;
 }
 
 /** A atualização automática do app desktop (baixa sozinha; instala ao fechar ou ao reiniciar). */
 export interface ApiDaAtualizacao {
-  obter: () => Promise<EstadoDaAtualizacao>;
+  obter: () => Promise<EstadoDaAtualizacaoNaPonte>;
   /** Verificação manual. */
-  verificar: () => Promise<EstadoDaAtualizacao>;
-  /** Fecha o app, instala e reabre; só faz efeito em "pronta". */
-  instalarAgora: () => Promise<void>;
+  verificar: () => Promise<EstadoDaAtualizacaoNaPonte>;
+  /**
+   * Fecha o app, instala e reabre; só faz efeito em "pronta". Com
+   * orquestradores trabalhando, só reinicia com `forcar`. A ponte antiga não
+   * devolve nada (e sempre reinicia).
+   */
+  instalarAgora: (opcoes?: { forcar?: boolean }) => Promise<ResultadoDoReinicio | void>;
+  /** Reinicia sozinho quando os orquestradores terminarem (vai para "aguardando"). Ausente na ponte antiga. */
+  instalarQuandoLivre?: () => Promise<void>;
+  /** Desiste de "aguardando" e volta para "pronta". Ausente na ponte antiga. */
+  cancelarEspera?: () => Promise<void>;
   /** Avisa a cada mudança; devolve a função que cancela o aviso. */
-  aoMudar: (callback: (estado: EstadoDaAtualizacao) => void) => () => void;
+  aoMudar: (callback: (estado: EstadoDaAtualizacaoNaPonte) => void) => () => void;
 }
 
 /** Foto da tela (JPEG reduzido) do monitor onde está a janela. */
