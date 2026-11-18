@@ -65,19 +65,58 @@ export function encerrarArvore(pid: number | undefined, esperaAntesDoSigkillMs =
   }, esperaAntesDoSigkillMs).unref();
 }
 
-/** Linha de comando de um processo, ou nulo se ele não existe mais. */
-export async function linhaDeComandoDe(pid: number): Promise<string | null> {
+/** O que se sabe de um processo vivo: a linha de comando e quando ele nasceu (nulo se não deu para ler). */
+export interface IdentidadeDoProcesso {
+  linhaDeComando: string;
+  criadoEm: Date | null;
+}
+
+function identidadeNoWindows(pid: number): string {
+  return (
+    "[Console]::OutputEncoding = [Text.Encoding]::UTF8; " +
+    `$p = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; ` +
+    "if ($p) { [pscustomobject]@{ l = $p.CommandLine; " +
+    "c = $(if ($p.CreationDate) { $p.CreationDate.ToUniversalTime().ToString('o') } else { '' }) } | ConvertTo-Json -Compress }"
+  );
+}
+
+/** A saída do PowerShell de `identidadeDoProcesso` (`{"l": linha, "c": criação em ISO}`); nulo sem linha de comando. */
+export function lerIdentidadeDoWindows(texto: string): IdentidadeDoProcesso | null {
   try {
-    const saida =
-      process.platform === "win32"
-        ? await executar("powershell", [
-            "-NoProfile",
-            "-Command",
-            `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`,
-          ])
-        : await executar("ps", ["-o", "args=", "-p", String(pid)]);
-    const linha = saida.trim();
-    return linha === "" ? null : linha;
+    const dados = JSON.parse(texto) as { l?: unknown; c?: unknown };
+    if (typeof dados.l !== "string" || dados.l.trim() === "") {
+      return null;
+    }
+    const criacao = typeof dados.c === "string" && dados.c !== "" ? new Date(dados.c) : null;
+    return {
+      linhaDeComando: dados.l.trim(),
+      criadoEm: criacao !== null && Number.isFinite(criacao.getTime()) ? criacao : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** A saída de `ps -o etime=,args= -p <pid>`: há quanto tempo roda e a linha de comando; a criação é `agora - etime`. */
+export function lerIdentidadeDoPs(texto: string, agora: number): IdentidadeDoProcesso | null {
+  const campos = /^\s*(\S+)\s+(\S.*)$/m.exec(texto);
+  const linhaDeComando = campos?.[2]?.trim() ?? "";
+  if (campos === null || linhaDeComando === "") {
+    return null;
+  }
+  const haMs = tempoDoPsEmMs(campos[1] ?? "");
+  return { linhaDeComando, criadoEm: haMs === null ? null : new Date(agora - haMs) };
+}
+
+/** A linha de comando e a hora de criação de um processo, ou nulo se ele não existe mais (ou não deu para ler). */
+export async function identidadeDoProcesso(pid: number): Promise<IdentidadeDoProcesso | null> {
+  try {
+    if (process.platform === "win32") {
+      return lerIdentidadeDoWindows(
+        await executar("powershell", ["-NoProfile", "-NonInteractive", "-Command", identidadeNoWindows(pid)]),
+      );
+    }
+    return lerIdentidadeDoPs(await executar("ps", ["-o", "etime=,args=", "-p", String(pid)]), Date.now());
   } catch {
     return null;
   }

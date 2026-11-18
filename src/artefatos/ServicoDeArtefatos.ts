@@ -1,4 +1,5 @@
 import { Artefato, FormatoDoArtefato } from "./Artefato";
+import { DesenhoGravado } from "./DesenhoDoArtefato";
 import { EntradaDeArtefatos } from "./EntradaDeArtefatos";
 import {
   ErroDeArtefato,
@@ -85,15 +86,33 @@ export class ServicoDeArtefatos {
   }
 
   async lerVersao(id: string, numero: number): Promise<ConteudoDaVersaoLida> {
-    const artefato = this.buscar(id);
-    if (artefato.versao(numero) === null) {
-      throw new ErroDeArtefato("nao_encontrado", MENSAGEM_DE_VERSAO_NAO_ENCONTRADA);
-    }
+    const artefato = this.buscarVersao(id, numero);
     const conteudo = await this.dependencias.repositorio.lerConteudo(id, numero);
     if (conteudo === null) {
       throw new ErroDeArtefato("nao_encontrado", MENSAGEM_DE_VERSAO_NAO_ENCONTRADA);
     }
     return { formato: artefato.formato, conteudo };
+  }
+
+  /** O desenho sobre a versão; sem traços e com largura `null` se ela não tem desenho. */
+  async lerDesenho(id: string, numero: number): Promise<DesenhoGravado> {
+    this.buscarVersao(id, numero);
+    const desenho = await this.dependencias.repositorio.lerDesenho(id, numero);
+    if (desenho === null) {
+      throw new ErroDeArtefato("nao_encontrado", MENSAGEM_DE_VERSAO_NAO_ENCONTRADA);
+    }
+    return desenho;
+  }
+
+  /**
+   * Troca o desenho inteiro da versão (sem traços, apaga). Não avisa as
+   * telas: o desenho é de quem o está fazendo, e cada versão tem o seu.
+   */
+  async salvarDesenho(id: string, numero: number, desenho: DesenhoGravado): Promise<void> {
+    this.buscarVersao(id, numero);
+    if (!(await this.dependencias.repositorio.salvarDesenho(id, numero, desenho))) {
+      throw new ErroDeArtefato("nao_encontrado", MENSAGEM_DE_VERSAO_NAO_ENCONTRADA);
+    }
   }
 
   /** Trocar pelo mesmo título não grava nem avisa as telas. */
@@ -123,5 +142,14 @@ export class ServicoDeArtefatos {
     }
     await repositorio.remover(id);
     publicador.publicar({ tipo: "artefato_removido", id });
+  }
+
+  /** O Artefato, se ele e a versão existirem (404 do artefato antes do da versão). */
+  private buscarVersao(id: string, numero: number): Artefato {
+    const artefato = this.buscar(id);
+    if (artefato.versao(numero) === null) {
+      throw new ErroDeArtefato("nao_encontrado", MENSAGEM_DE_VERSAO_NAO_ENCONTRADA);
+    }
+    return artefato;
   }
 }

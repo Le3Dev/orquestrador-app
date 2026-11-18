@@ -35,12 +35,14 @@ import {
   type TracoDoDesenho,
 } from "./layout";
 import {
+  ehNavegador,
   ehNota,
   ehPrevia,
   ehShell,
   ehTerminal,
   idDoNoDaNota,
   idDoNoDaPrevia,
+  idDoNoDoNavegador,
   idDoNoDoShell,
   layoutDosNos,
   minimizarOuRestaurar,
@@ -48,6 +50,7 @@ import {
   nosDoLayout,
   novaNota,
   novaPrevia,
+  novoNavegador,
   novoShell,
   novoTerminal,
   sincronizarNotas,
@@ -723,6 +726,66 @@ describe("shells no layout", () => {
       bom: { x: 0, y: 0, largura: 640, altura: 400, terminalId: "t1", pasta: "/p", orquestradorId: null },
     });
     expect(interpretarLayout(JSON.stringify({ shells: 5 })).shells).toEqual({});
+  });
+});
+
+describe("navegadores do agente no layout", () => {
+  afterEach(() => localStorage.clear());
+
+  it("grava e lê de volta posição e tamanho, por Orquestrador; o nó volta com os dois", () => {
+    const terminal = novoTerminal("o1", { x: 0, y: 0 }, 600, 500);
+    const navegador = novoNavegador("o1", { x: 700.4, y: 20.6 }, 800, 600);
+
+    salvarLayout(layoutDosNos([terminal, navegador], { x: 5, y: 6, zoom: 1 }));
+    const lido = lerLayout();
+
+    expect(lido.navegadores).toEqual({ o1: { x: 700, y: 21, largura: 800, altura: 600 } });
+    const volta = nosDoLayout(lido).filter(ehNavegador);
+    expect(volta).toHaveLength(1);
+    expect(volta[0]).toMatchObject({
+      id: idDoNoDoNavegador("o1"),
+      data: { orquestradorId: "o1" },
+      position: { x: 700, y: 21 },
+      width: 800,
+      height: 600,
+    });
+  });
+
+  it("fechar o último navegador tira o campo do layout salvo", () => {
+    salvarLayout(layoutDosNos([novoNavegador("o1", { x: 0, y: 0 })], null));
+    expect(lerLayout().navegadores).toBeDefined();
+
+    salvarLayout(layoutDosNos([], null));
+    expect(lerLayout()).not.toHaveProperty("navegadores");
+    expect(JSON.parse(localStorage.getItem("orquestrador-agentes:canvas:v1") ?? "{}")).not.toHaveProperty("navegadores");
+  });
+
+  it("um layout antigo, sem o campo, vale como nenhum navegador, e o layout vazio segue como era", () => {
+    const antigo = JSON.stringify({ terminais: {}, previas: {} });
+
+    expect(interpretarLayout(antigo).navegadores).toBeUndefined();
+    expect(nosDoLayout(interpretarLayout(antigo)).filter(ehNavegador)).toEqual([]);
+    expect(interpretarLayout(null)).toEqual({ terminais: {}, notas: {}, artefatos: {}, previas: {}, shells: {}, viewport: null });
+  });
+
+  it("descarta só os retângulos corrompidos", () => {
+    const texto = JSON.stringify({
+      navegadores: {
+        bom: { x: 0, y: 0, largura: 760, altura: 560 },
+        torto: { x: "a", y: 0, largura: 760, altura: 560 },
+      },
+    });
+
+    expect(interpretarLayout(texto).navegadores).toEqual({ bom: { x: 0, y: 0, largura: 760, altura: 560 } });
+    expect(interpretarLayout(JSON.stringify({ navegadores: 5 })).navegadores).toBeUndefined();
+  });
+
+  it("gravar o desenho não apaga os navegadores salvos", () => {
+    salvarLayout(layoutDosNos([novoNavegador("o1", { x: 10, y: 10 })], null));
+
+    salvarDesenho([{ id: "t1", tipo: "linha", cor: "azul", espessura: 2, pontos: [{ x: 0, y: 0 }, { x: 5, y: 5 }] }]);
+
+    expect(lerLayout().navegadores).toEqual({ o1: { x: 10, y: 10, largura: 760, altura: 560 } });
   });
 });
 

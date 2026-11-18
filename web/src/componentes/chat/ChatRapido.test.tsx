@@ -294,7 +294,7 @@ describe("ChatRapido · modo invisível", () => {
         JSON.stringify({ chatNoModoInvisivel: { x: 100, y: 100, largura: 500, altura: 300 } }),
       );
 
-    it("clicar no campo deixa a janela focável e envio, Esc e perder o foco a devolvem", async () => {
+    it("clicar no campo deixa a janela focável; Esc e perder o foco a devolvem; enviar mantém o teclado no campo", async () => {
       vi.spyOn(api, "perguntarNoChat").mockResolvedValue({ mensagemId: "m1" });
       const { modoInvisivel, ativar } = ponteAtiva();
       const { campo } = renderizar();
@@ -307,14 +307,35 @@ describe("ChatRapido · modo invisível", () => {
       fireEvent.keyDown(campo, { key: "Escape" });
       expect(modoInvisivel.definirFocavel).toHaveBeenLastCalledWith(false);
 
+      // Enviar a primeira mensagem não pode tirar a janela do foco: dá para continuar digitando.
+      fireEvent.pointerDown(campo);
+      await waitFor(() => expect(campo).toHaveFocus());
       modoInvisivel.definirFocavel.mockClear();
       fireEvent.change(campo, { target: { value: "Oi" } });
       fireEvent.keyDown(campo, { key: "Enter" });
-      await waitFor(() => expect(modoInvisivel.definirFocavel).toHaveBeenCalledWith(false));
+      await waitFor(() => expect(api.perguntarNoChat).toHaveBeenCalled());
+      await waitFor(() => expect(modoInvisivel.definirFocavel).toHaveBeenCalledWith(true));
+      expect(modoInvisivel.definirFocavel).not.toHaveBeenCalledWith(false);
+      await waitFor(() => expect(campo).toHaveFocus());
 
+      // Clicar fora (blur) passada a tolerância devolve o teclado ao app de trás.
+      const agora = Date.now();
+      const relogio = vi.spyOn(Date, "now").mockReturnValue(agora + 5000);
       modoInvisivel.definirFocavel.mockClear();
       fireEvent.blur(campo, { relatedTarget: document.body });
       expect(modoInvisivel.definirFocavel).toHaveBeenCalledWith(false);
+      relogio.mockRestore();
+    });
+
+    it("um blur logo depois de pedir o foco (troca de foco da janela) não torna a janela não focável", async () => {
+      const { modoInvisivel, ativar } = ponteAtiva();
+      const { campo } = renderizar();
+      ativar();
+      fireEvent.pointerDown(campo);
+      await waitFor(() => expect(campo).toHaveFocus());
+      modoInvisivel.definirFocavel.mockClear();
+      fireEvent.blur(campo, { relatedTarget: null });
+      expect(modoInvisivel.definirFocavel).not.toHaveBeenCalledWith(false);
     });
 
     it("fora do modo invisível o foco nunca mexe na janela", () => {

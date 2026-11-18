@@ -18,15 +18,24 @@ Você cria **Orquestradores** — um por projeto, por exemplo — e conversa com
 - **Bloco de notas:** no mesmo canvas, ao lado dos terminais, você cria notas de texto para observações e coisas para fazer depois. O conteúdo fica salvo no servidor, com salvamento automático. No modo lista, os itens `[ ]` viram caixas de marcar, e uma linha (ou a nota inteira) arrastada até um terminal vira texto no prompt.
 - **Chat rápido:** uma caixa no centro, embaixo da tela, para perguntar algo ao Claude sem abrir um terminal: dúvidas rápidas, pesquisas na web, perguntas sobre os projetos e pequenas alterações. Para **editar arquivos e rodar comandos**, ele pede uma **autorização única** na primeira vez, que vale até o próximo `/clear`; commit e push, só quando você pedir. Ele também pode sugerir abrir um Orquestrador num projeto, já com um pedido, e criar ou editar um subagente pronto quando você pedir; a sugestão vira um cartão que só roda quando você clica.
 - **Artefatos:** peça a um Orquestrador ou ao chat uma página ou um relatório (*"crie um artefato com um gráfico das vendas por mês"*) e o resultado abre sozinho numa janela do canvas, ao lado do terminal de quem o criou (ou no centro, se veio do chat): uma página HTML interativa, isolada e sem acesso à internet, ou um documento Markdown formatado. Cada vez que o agente regrava o arquivo, nasce uma versão nova (`v1`, `v2`…); dá para ampliar, salvar como arquivo, renomear e apagar. Funciona em qualquer permissão, inclusive *Somente leitura* e Plan Mode (ver ADR-26).
+- **Navegador do agente:** cada Orquestrador pode ter um Chromium próprio, que o agente controla por ferramentas (abrir um site, ler a página, clicar, digitar, capturar a tela) e que você vê num nó do canvas, podendo assumi-lo no meio. Fica desligado por padrão e só vale em *Editar e rodar comandos*, fora do Plan Mode (ver ADR-46).
+- **Motores:** cada papel (o Orquestrador e os Subagentes) roda no **Claude Code**, no **Codex** ou no **GitHub Copilot CLI**, à sua escolha, e cada Orquestrador pode ter uma **ordem de reserva**: se o motor dele bate o limite de uso ou fica sobrecarregado, o mesmo pedido continua no próximo da lista, sem perder a conversa (ver ADR-48).
+- **Rotinas:** fluxos agendados (todo dia, em dias da semana, a cada tantos minutos ou uma vez) de 1 a 10 etapas, que mandam pedidos a Orquestradores, esperam sua aprovação ou esperam um tempo. Rodam só com o app aberto: com uma rotina ativa, fechar a janela esconde o app na bandeja do Windows (ver ADR-47).
 - Modelos disponíveis: **Fable**, Opus, Sonnet e Haiku, tanto nos Orquestradores quanto no chat.
 
-O motor é o próprio **Claude Code em modo headless**, usando o login da sua assinatura — não precisa de API key.
+O motor padrão é o próprio **Claude Code em modo headless**, usando o login da sua assinatura — não precisa de API key. O **Codex** e o **GitHub Copilot CLI** também funcionam, com o login deles (ver *Motores*, no Guia do usuário).
 
 ## Como rodar
 
 **Pré-requisito em qualquer modo:** o Claude Code instalado e logado (`claude` funcionando no terminal). Para rodar a partir do código-fonte, também Node 22+.
 
-**Usuário final (instalador):** baixe o `.exe` da última versão em **https://github.com/Le3Dev/orquestrador-app/releases/latest** e instale. O instalador é por usuário, sem pedir administrador, e deixa escolher a pasta. Sem certificado de assinatura, o Windows SmartScreen avisa na primeira instalação (*Mais informações → Executar assim mesmo*). O Claude Code precisa estar instalado e logado (pré-requisito acima). **Por enquanto o app não pede chave de licença:** é a fase de testes (`exigirLicenca: false` em `electron/config.js`; ver ADR-29). Depois de instalado, as **atualizações chegam sozinhas**: o app baixa a versão nova em segundo plano e avisa na barra de título para reiniciar (ver *Guia do usuário*, item 15). A atualização não mexe na configuração nem nos dados (`%APPDATA%\Orquestrador de Agentes`).
+**Opcional, para os outros motores** (ver ADR-48; só se você for escolhê-los na configuração de um Orquestrador):
+- **Codex:** `npm i -g @openai/codex` e depois `codex login`;
+- **GitHub Copilot CLI:** `npm i -g @github/copilot` e depois `copilot login`. **Desligue o `includeCoAuthoredBy`** em `~/.copilot/settings.json` (`"includeCoAuthoredBy": false`): por padrão o Copilot põe a linha `Co-authored-by` nos commits, que a política de commits do app proíbe (ADR-40), e esse ajuste é do próprio CLI;
+- os CLIs são procurados no `PATH` a cada turno (instalar com o app aberto não exige reiniciá-lo). Para usar outro caminho, defina `CODEX_BIN` ou `COPILOT_BIN` (como o `CLAUDE_CODE_BIN`);
+- a tela mostra, ao lado de cada motor, se ele está instalado e logado (`GET /api/motores`).
+
+**Usuário final (instalador):** baixe o `.exe` da última versão em **https://github.com/Le3Dev/orquestrador-app/releases/latest** e instale. O instalador é por usuário, sem pedir administrador, e deixa escolher a pasta. Sem certificado de assinatura, o Windows SmartScreen avisa na primeira instalação (*Mais informações → Executar assim mesmo*). O Claude Code precisa estar instalado e logado (pré-requisito acima). **Por enquanto o app não pede login:** é a fase de testes (`exigirLicenca: false` em `electron/config.js`; ver ADR-29). Depois de instalado, as **atualizações chegam sozinhas**: o app baixa a versão nova em segundo plano e avisa na barra de título para reiniciar (ver *Guia do usuário*, item 15). A atualização não mexe na configuração nem nos dados (`%APPDATA%\Orquestrador de Agentes`).
 
 **Dia a dia, a partir do código-fonte:** dê dois cliques em **`iniciar-desktop.cmd`**. Na primeira vez ele instala as dependências e gera o build; depois roda `npm run desktop` (`electron .`), que abre a janela do aplicativo. Rodando assim (não empacotado), **não há licença nem atualização automática**. Depois de atualizar o código, rode `npm run build` (o `.cmd` só gera o build quando falta `dist/` ou `web/dist/`).
 
@@ -62,7 +71,7 @@ No Linux, `~/.config` vale quando `$XDG_CONFIG_HOME` não está definida; defini
 
 Antes, o `npm run desktop` usava `%APPDATA%\orquestrador-agentes-app`. Na primeira abertura com a pasta nova (sem `config.json` nela), o app **copia** de lá o `config.json` e a pasta `dados\` e registra no log; a pasta antiga não é apagada nem alterada, e caches do Chromium, logs e layout antigo não vêm junto.
 
-O aplicativo sobe o servidor sozinho, numa **porta fixa desta instalação** (sorteada na primeira abertura e gravada no `config.json`; se ela estiver ocupada, o app escolhe outra, grava e registra no log), e o **religa se ele cair**. Fechar a janela desliga o servidor e cancela os pedidos em andamento. Ao subir, o servidor encerra os processos do Claude que tenham sobrado da queda anterior; antes, confere a linha de comando de cada um, para nunca derrubar uma sessão do Claude Code sua.
+O aplicativo sobe o servidor sozinho, numa **porta fixa desta instalação** (sorteada na primeira abertura e gravada no `config.json`; se ela estiver ocupada, o app escolhe outra, grava e registra no log), e o **religa se ele cair**. Fechar a janela desliga o servidor e cancela os pedidos em andamento. Ao subir, o servidor encerra os processos do Claude, do Codex e do Copilot que tenham sobrado da queda anterior; antes, confere a linha de comando de cada um (e, no Codex e no Copilot, a hora em que nasceram), para nunca derrubar uma sessão sua.
 
 > **Não abra o aplicativo pedindo a uma sessão do Claude Code.** Lá ele roda em segundo plano, e o Claude Code encerra processos em segundo plano quando a memória do computador fica baixa. Foi o que derrubou três orquestradores ao mesmo tempo em 28/10. Use o `.cmd`, o atalho do instalado ou um terminal próprio. Se o servidor cair mesmo assim, a tela mostra o aviso **Servidor desconectado** e reconecta sozinha quando o app o religar.
 
@@ -116,7 +125,7 @@ O build de teste grava `"buildDeTeste": true` no `package.json` empacotado; serv
 
 **Nunca publique o build de teste** (`dist:win:teste`): ele abre sem licença e não deve chegar aos apps instalados.
 
-**Religar a licença:** só depois do checklist de *Serviço de licenças* abaixo. Mude `exigirLicenca` para `true` em `electron/config.js` e publique uma versão nova (passos acima). Todos os apps instalados passam a pedir a chave de licença na versão nova, então **avise os testadores antes**.
+**Religar a licença:** só depois do checklist de *Serviço de licenças* abaixo. Mude `exigirLicenca` para `true` em `electron/config.js` e publique uma versão nova (passos acima). Todos os apps instalados passam a pedir o login por e-mail na versão nova, então **avise os testadores antes**.
 
 **Proteção do app instalado (fuses do Electron, ADR-43).** O `electron-builder` 25.1.8 ainda não tem a opção `electronFuses`; por isso `build.afterPack` aponta para **`scripts/ligarFuses.cjs`**, que usa `@electron/fuses` (devDependency) para virar os fuses no executável empacotado (`dist:win`, `dist:win:teste` e `release:win`). Ligados:
 
@@ -136,45 +145,18 @@ npx @electron/fuses read --app "dist_electron_teste/win-unpacked/Orquestrador de
 
 Esperado: `RunAsNode`, `EnableNodeOptionsEnvironmentVariable` e `EnableNodeCliInspectArguments` *Disabled*; `OnlyLoadAppFromAsar` e `EnableEmbeddedAsarIntegrityValidation` *Enabled*. Isso dificulta editar o JavaScript do app instalado, mas não impede quem compila o código público (ver ADR-43).
 
-**Serviço de licenças** (`servicoDeLicencas/`, ADR-43; projeto Node próprio, com `package.json` e `wrangler.toml`). Na pasta dele:
-
-```bash
-npm install
-npm test             # vitest
-npm run typecheck    # tsc --noEmit
-npm run dev          # wrangler dev (local; copie .dev.vars.exemplo para .dev.vars)
-npm run migrar       # aplica as migrações no D1 (migracoes/0001_inicial.sql)
-npm run deploy       # wrangler deploy
-```
-
-Par de chaves da licença (uma vez; guarde a privada fora do repositório):
-
-```bash
-node servicoDeLicencas/scripts/gerarChaves.mjs
-```
-
-| Configuração | Tipo | Para quê |
-|---|---|---|
-| `STRIPE_SECRET_KEY` | secret (`wrangler secret put`) | chave secreta da API do Stripe |
-| `STRIPE_WEBHOOK_SECRET` | secret | segredo do endpoint de webhook (`whsec_...`) |
-| `CHAVE_PRIVADA_DA_LICENCA` | secret | chave privada Ed25519 que assina os tokens (a pública vai no `electron/config.js`) |
-| `RESEND_API_KEY` | secret | envio do e-mail com a chave |
-| `EMAIL_REMETENTE` | var (`wrangler.toml`) | remetente do e-mail (domínio verificado no Resend) |
-| `URL_DA_LANDING` | var | site de vendas (origem liberada no CORS da página de sucesso) |
-| `URL_DE_DOWNLOAD` | var | link de download do app, enviado no e-mail |
-| `URL_DO_PORTAL_DO_CLIENTE` | var | portal do cliente do Stripe, citado no e-mail |
-| `PRECO_MENSAL_ID`, `PRECO_ANUAL_ID` | var | ids dos preços (`price_...`) do Stripe, para reconhecer o plano |
-| `MAXIMO_DE_MAQUINAS` | var | máquinas por assinatura (padrão `1`) |
+**Serviço de licenças** (ADR-44): vive em um **repositório privado e separado**, `Le3Dev/orquestrador-licencas` (este repositório é público; o serviço guarda e-mails, códigos e sessões, e é publicado na Cloudflare, não no GitHub Releases). Como rodar, testar, migrar o banco, gerar as chaves, configurar segredos e publicar o serviço está no **README daquele repositório**. O contrato da API está resumido em *Manuais e APIs → API do serviço de licenças*.
 
 **Checklist de lançamento da licença** (nesta ordem):
 1. Conta Stripe ativada com **CNPJ** (o Stripe não é Merchant of Record: a nota fiscal é nossa).
-2. Produto com dois preços recorrentes: **mensal R$ 19,90** e **anual R$ 199,00**; anote os ids em `PRECO_MENSAL_ID` e `PRECO_ANUAL_ID`.
+2. Produto com dois preços recorrentes: **mensal R$ 19,90** e **anual R$ 199,00**.
 3. **Payment Links** dos dois planos, com redirecionamento após o pagamento para `https://SEU-SITE/sucesso.html?session_id={CHECKOUT_SESSION_ID}`.
-4. **Portal do cliente** do Stripe configurado (cancelar, trocar cartão, faturas); o link vai em `URL_DO_PORTAL_DO_CLIENTE` e no `urlDoPortalDoCliente` do app.
-5. `wrangler d1 create licencas`, ajustar o `database_id` no `wrangler.toml`, `npm run migrar`, gerar as chaves, `wrangler secret put` dos quatro segredos, ajustar as vars e `npm run deploy`.
-6. **Webhook** no Stripe apontando para `https://<serviço>/v1/webhooks/stripe` com os eventos `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid` e `invoice.payment_failed`; o segredo dele vai em `STRIPE_WEBHOOK_SECRET`.
-7. Preencher o `electron/config.js`: `urlDoServicoDeLicencas`, `chavePublicaDaLicenca`, `urlParaAssinar` e `urlDoPortalDoCliente`.
-8. Só então `exigirLicenca: true`, subir a versão e publicar a release (avisando os testadores).
+4. **Portal do cliente** do Stripe configurado (cancelar, trocar cartão, faturas).
+5. **Webhook** no Stripe apontando para o serviço (`/v1/webhooks/stripe`).
+6. **Domínio próprio verificado no Resend**: sem ele o código de acesso não chega.
+7. **Publicar o serviço** (passos no README de `Le3Dev/orquestrador-licencas`).
+8. Preencher o `electron/config.js`: `urlDoServicoDeLicencas`, `chavePublicaDaLicenca`, `urlParaAssinar` e `urlDoPortalDoCliente`.
+9. Só então `exigirLicenca: true`, subir a versão e publicar a release (avisando os testadores).
 
 **Ícone do app** (ver ADR-27): o bixinho gota de óculos escuros; fica em `electron/icones/` e é versionado. O `icone.ico` (16, 20, 24, 32, 40, 48, 64, 128 e 256 px) vai na janela e na barra de tarefas do Windows, no `.exe` (`build.win.icon`) e no instalador e desinstalador (`build.nsis.installerIcon`/`uninstallerIcon`); o `icone.png` (512 × 512) vai na janela fora do Windows. Para regenerar depois de mudar o desenho ou as cores em `scripts/gerarIcones.cjs`:
 
@@ -464,13 +446,26 @@ Cada plugin do catálogo traz `jaTem: { skills, servidoresMcp }`: o catálogo ma
 - **Segurança do inventário:** lido do disco só dentro de `~/.claude/plugins` (ou `CLAUDE_CONFIG_DIR`), sem seguir links simbólicos que saem do plugin, com limite de tamanho e sem devolver o corpo das skills nem caminhos.
 - **Verificado no Claude Code 2.1.322:** o `plugin enable` aceita até um id que não existe e grava a chave em `enabledPlugins`; por isso ligar, desligar e remover só chamam o CLI para plugins que a lista do usuário já mostra.
 
+## Vínculos entre orquestradores
+
+O usuário liga dois Orquestradores quaisquer (inclusive de projetos diferentes) para eles trocarem mensagens e dividirem um bloco de notas. Cada Orquestrador pode ter vários vínculos; não se vincula a si mesmo nem se repete o par (em qualquer ordem), e os vínculos de um Orquestrador somem quando ele é removido. Código: `src/vinculos/` (entidade `Vinculo`, `ServicoDeVinculos`, `BlocosDeVinculo`), `RepositorioDeVinculosEmArquivo` (`<PASTA_DADOS>/vinculos/<id>.json`, como as notas) e `src/controllers/vinculosRoutes.ts`.
+
+- **Mensagem direta:** o Orquestrador escreve, no fim da resposta final, um bloco ` ```mensagem-para-vinculado ` com `{"para":"<nome ou id>","texto":"..."}`. A mensagem entra direto na fila do destino, sem aprovação, marcada com quem enviou (`origem` do `PedidoNaFila`), e o destino a recebe com a linha "Mensagem do orquestrador X (salto n):". Com o destino livre (sem turno, fila vazia, sem Plano pendente nem retomada marcada), ela já vira turno; senão espera a vez na fila.
+- **Notas compartilhadas:** um bloco ` ```notas-do-vinculo ` com `{"com":"<nome ou id>","texto":"..."}` substitui as notas do vínculo (até 8.000 caracteres). As notas, o nome e a pasta de cada vinculado, e a explicação dos dois blocos vão no bloco `<vinculos>` da mensagem de todo turno.
+- **Blocos inválidos:** JSON fora do formato (zod estrito), campo a mais, destino que não é vinculado ou nome ambíguo são ignorados e viram um evento `aviso_de_vinculo` no histórico do remetente. Os blocos saem do texto da resposta; só valem em turno de execução sem Plano pendente.
+- **Anti-laço:** cada mensagem carrega `saltos`. A enviada por um turno que nasceu de mensagem de vínculo herda `saltos + 1`; a primeira (turno do usuário) e a enviada à mão pelo usuário têm 0. Acima de `LIMITE_DE_SALTOS = 6` a mensagem é descartada, com aviso. A origem do turno só vive em memória: uma retomada automática começa a contar de novo. Já a troca para um motor de reserva (ADR-48) reenvia o pedido com a mesma origem, e o bloco `<vinculos>` e os dois blocos de resposta valem nos três motores (Claude Code, Codex e Copilot).
+
+API (ver também a tabela de endpoints): `GET /vinculos`, `POST /vinculos`, `DELETE /vinculos/:id`, `PUT /vinculos/:id/notas` e `POST /vinculos/:id/mensagens` (envio manual, 202).
+
 ## Tecnologias
 
 - **Aplicativo desktop:** **Electron 33** (processo principal em `electron/`, servidor em `utilityProcess`), **electron-builder** (instalador NSIS para Windows x64, publicado nas Releases do GitHub) e **electron-updater** (atualização automática do instalado, ver ADR-29). Licença por assinatura (ADR-43), só no instalado e hoje desligada (`exigirLicenca: false`, fase de testes); **fuses do Electron** ligados no empacotamento (`@electron/fuses`, `scripts/ligarFuses.cjs`).
-- **Serviço de licenças** (`servicoDeLicencas/`, ADR-43): **Cloudflare Workers + D1** (TypeScript, `wrangler`), **Stripe** (Billing, Payment Links e portal do cliente; SDK `stripe`), **Resend** (e-mail com a chave) e tokens **JWS EdDSA (Ed25519)**; testes com **vitest**.
+- **Serviço de licenças** (repositório privado próprio `Le3Dev/orquestrador-licencas`, ADR-44): **Cloudflare Workers + D1** (TypeScript, `wrangler`), **Stripe** (Billing, Payment Links e portal do cliente), **Resend** (envia o código de acesso e as boas-vindas) e tokens **JWS EdDSA (Ed25519)**. No app, a sessão é cifrada com `safeStorage` do Electron.
 - **Node 22+ / TypeScript 6** (estrito, `exactOptionalPropertyTypes`), **Express 5**, **zod 4** (validação da API), **vitest**.
 - **Tela:** React 19, Vite 6, Tailwind 4, react-markdown com remark-gfm e **React Flow** (`@xyflow/react` 12) para o canvas (ver ADR-8). Tema escuro com a paleta da Anthropic (ver ADR-7). Fontes empacotadas via `@fontsource`, sem CDN: Poppins, Lora e JetBrains Mono.
 - **Claude Code 2.1.x** (`claude -p --output-format stream-json`) como motor dos agentes.
+- **Codex** (`codex app-server`, protocolo JSON-RPC por stdio, **experimental** na OpenAI) e **GitHub Copilot CLI** (`copilot --acp --stdio`, o Agent Client Protocol, o CLI está em **preview**), como motores opcionais: o app fala com os dois por um cliente JSON-RPC próprio (`ProcessoJsonRpc`), sem SDK (ver ADR-48).
+- **MCP (Model Context Protocol):** `@modelcontextprotocol/sdk` 1.32.x, num servidor Streamable HTTP do próprio app (só em `127.0.0.1`) que oferece ao Claude Code as ferramentas do app, hoje as do navegador do agente (ver ADR-46). O navegador usa o **`WebContentsView`** do Electron, comandado pelo `webContents.debugger` (Chrome DevTools Protocol).
 - **Tempo real:** Server-Sent Events. **Persistência:** arquivos JSON/JSONL.
 
 ## Arquitetura
@@ -584,6 +579,51 @@ flowchart LR
   SAR --> CAR -- "artefato_criado · versao_adicionada…" --> T
 ```
 
+**Navegador do agente** (ver ADR-46): o Chromium é do Electron, e o servidor só o comanda. O `MotorClaudeCodeCli` registra o turno no servidor MCP do app (`ServidorMcpDoApp`, em `127.0.0.1`, porta livre) e passa um `--mcp-config` com a URL e o token do turno; as ferramentas `mcp__orquestrador__navegador_*` chegam ao `ServicoDoNavegador`, que manda cada comando ao processo principal pelo `postMessage` do `utilityProcess`.
+
+```mermaid
+flowchart LR
+  CC["claude.exe -p<br/>--mcp-config (arquivo temporário)"] -- "MCP · HTTP · Bearer do turno<br/>navegador_abrir · ler_pagina · clicar…" --> MCP["ServidorMcpDoApp<br/>127.0.0.1:‹porta livre›/mcp"]
+  MCP --> SN[ServicoDoNavegador]
+  SN --> CTL[ControleDoNavegadorPeloElectron]
+  CTL -- "postMessage<br/>navegador:comando" --> MAIN["Electron · electron/navegadorDoAgente.js"]
+  MAIN --> WCV["WebContentsView por Orquestrador<br/>sessão persist:navegador-‹id› · CDP"]
+  WCV -. "estado e foto (IPC)" .-> NO["Nó do navegador<br/>no canvas"]
+  NO -. "Assumir · voltar · avançar · recarregar" .-> MAIN
+```
+
+**Motores** (ver ADR-48): o `ServicoDeOrquestracao` fala só com o `RoteadorDeMotores`, que manda cada turno ao motor do pedido (`pedido.motor`): o `MotorClaudeCodeCli` (um `claude -p` por turno), o `MotorCodex` (um `codex app-server` por turno, JSON-RPC) ou o `MotorAcp` (um `copilot --acp --stdio` por turno). Quando o Orquestrador ou os subagentes não são do Claude Code, o Orquestrador delega pela ferramenta MCP `delegar_subtarefas` do servidor MCP do app, que roda cada subtarefa no motor dos subagentes. Se o motor bate o limite de uso, o serviço reenvia o pedido ao próximo da ordem de reserva.
+
+```mermaid
+flowchart LR
+  S[ServicoDeOrquestracao] --> RT["RoteadorDeMotores<br/>(pedido.motor)"]
+  RT --> MC[MotorClaudeCodeCli] --> CC["claude -p"]
+  RT --> MX[MotorCodex] --> CX["codex app-server<br/>(JSON-RPC)"]
+  RT --> MA["MotorAcp (Copilot)"] --> CP["copilot --acp --stdio<br/>(ACP)"]
+  CC -- "MCP · delegar_subtarefas" --> MCP["ServidorMcpDoApp<br/>127.0.0.1"]
+  CX -- "MCP" --> MCP
+  CP -- "MCP" --> MCP
+  MCP --> DE["Delegação<br/>(ExecutorDeSubtarefas)"]
+  DE --> CC
+  DE --> CX
+  DE --> CP
+  S -. "limite de uso ou sobrecarga:<br/>motor_trocado + mesmo pedido" .-> RT
+  T[Tela] -- "GET /api/motores" --> CAT[CatalogoDeMotores]
+```
+
+**Rotinas** (contexto `rotinas`, ver ADR-47): um agendador de ~30 s dentro do servidor dispara as rotinas na hora e roda cada execução etapa por etapa. O contexto não conhece a orquestração: só a porta `ExecutorDePedidos` (executar um pedido, aprovar ou descartar o plano, saber se o Orquestrador existe), implementada pelo `ExecutorDePedidosDaOrquestracao` sobre o `ServicoDeOrquestracao` e os eventos de cada Orquestrador.
+
+```mermaid
+flowchart LR
+  AG["Agendador<br/>(~30 s, só com o app aberto)"] --> SR[ServicoDeRotinas]
+  T[Tela · painel Rotinas] -- "/api/rotinas… · SSE /rotinas/eventos" --> SR
+  SR --> RR[("dados/rotinas/‹id›.json<br/>rotinas/‹id›/execucoes/‹execId›.json")]
+  SR -- "ExecutorDePedidos" --> EX[ExecutorDePedidosDaOrquestracao]
+  EX -- "enviarMensagem · enfileirarPedido ·<br/>aprovarPlano · descartarPlano" --> SO[ServicoDeOrquestracao]
+  SO -- "eventos do turno (CanalDeEventos)" --> EX
+  T -. "situação: ativas e aprovações" .-> BJ["Electron · bandeja do Windows<br/>(esconder ao fechar · notificação)"]
+```
+
 Organização por contexto (DDD):
 
 ```
@@ -629,6 +669,14 @@ src/
     ErroDeArtefato.ts          dados_invalidos · nao_encontrado
     ServicoDeArtefatos.ts      casos de uso (stateless): coletar, listar, ler versão, renomear, remover
     RepositorioDeArtefatos.ts, EntradaDeArtefatos.ts   portas
+  navegador/                 domínio do navegador do agente — contexto próprio (ver ADR-46): comandos
+                             validados (ComandoDoNavegador), resultados, erros e o ServicoDoNavegador
+  rotinas/                   domínio das rotinas — contexto próprio (ver ADR-47)
+    Rotina.ts                  raiz do agregado (nome, gatilho, 1 a 10 etapas, "se perder a hora")
+    EtapaDaRotina, Gatilho     objetos de valor (pedido, aprovação ou espera; diário, semanal, intervalo, uma vez)
+    ExecucaoDaRotina.ts        entidade (etapa a etapa, com a pendência de aprovação)
+    ServicoDeRotinas.ts        casos de uso (stateless): criar, alterar, executar, aprovar, recusar, cancelar
+    ExecutorDePedidos.ts, RepositorioDeRotinas.ts, RepositorioDeExecucoes.ts, Temporizador.ts   portas
   infraestrutura/
     claudecode/                camada anticorrupção: Fachada (processo), Adaptador
                                (stream-json → eventos do domínio), Argumentos, Motor,
@@ -641,6 +689,16 @@ src/
                                dos anexos (ArmazemDeAnexosEmArquivo) e o extrator de texto de
                                Word, Excel e PowerPoint (ExtratorDeTextoDeDocumentos, só node:zlib)
     montarArtefatos.ts         composição do contexto de artefatos (repositório, serviço, coletor, rotas)
+    mcp/                       servidor MCP do app (ServidorMcpDoApp) e os grupos de ferramentas (navegador e delegação)
+    motores/                   montarMotores (compõe os motores), RoteadorDeMotores, CatalogoDeMotores (GET /motores),
+                               ExecutorDeSubtarefas e a delegação, ProcessoJsonRpc (cliente JSON-RPC) e ClassificadorDeFalhasDosMotores
+    codex/                     camada anticorrupção do Codex: MotorCodex, FachadaCodex (`codex app-server`), AdaptadorDeEventosDoCodex
+    acp/                       camada anticorrupção do Copilot: MotorAcp, FachadaAcp (`copilot --acp`), PerfilDoCopilot
+    navegador/                 ControleDoNavegadorPeloElectron (comandos pelo postMessage)
+    montarNavegador.ts         composição do navegador do agente (controle, serviço, servidor MCP)
+    agenda/                    Agendador das rotinas (laço de ~30 s); arquivos/RepositorioDeRotinasEmArquivo
+    montarRotinas.ts           composição do contexto de rotinas (repositório, serviço, canal, agendador, rotas)
+    ExecutorDePedidosDaOrquestracao.ts   adaptador: a porta ExecutorDePedidos sobre o ServicoDeOrquestracao
     sse/, execucoes/           canal de eventos e controle de cancelamento
     sistema/                   worktrees git (Worktrees, GerenciadorDeWorktreesGit),
                                memória e processos do Claude
@@ -654,7 +712,10 @@ electron/                      aplicativo desktop (CommonJS): main.js (janelas, 
                                utilityProcess, religar, cookie), preload.js (window.electron),
                                licença, configuração local, primeira abertura, atualização
                                automática (atualizacao.js), modo invisível (mouseDoModoInvisivel.js,
-                               capturaDeTela.js) e a escuta (escutaDoModoInvisivel.js); testes *.test.js
+                               capturaDeTela.js), a escuta (escutaDoModoInvisivel.js) e o navegador do
+                               agente (navegadorDoAgente.js: a WebContentsView de cada Orquestrador) e a
+                               bandeja do Windows (bandeja.js: esconder ao fechar, notificação, iniciar
+                               com o Windows); testes *.test.js
 web/src/
   paginas/CanvasDeOrquestradores.tsx   canvas (React Flow): nós, linhas, painéis, layout salvo
   componentes/canvas/                  NoTerminal (terminal do Orquestrador), NoRascunho (configuração),
@@ -703,6 +764,8 @@ dados/
                                como <anexoId>.<extensão>; de .docx, .xlsx e .pptx o servidor grava ao lado
                                o texto extraído, <anexoId>.<extensão>.txt (ver ADR-41)
   notas/<id>.json              uma nota por arquivo
+  rotinas/<id>.json            uma rotina por arquivo (ver ADR-47)
+  rotinas/<id>/execucoes/<execId>.json   as execuções de cada rotina (as últimas 50)
   preferencias.json            instruções gerais, perfis de instruções, subagentes prontos e autorrecuperação (ver ADR-30, ADR-31 e ADR-36)
   chat/
     conversa.json              estado da conversa do chat (gravação atômica)
@@ -714,6 +777,7 @@ dados/
     <id>/                      um artefato por pasta (ver ADR-26)
       artefato.json            título, formato, origem, nome do arquivo e versões (gravação atômica)
       v<N>.html | v<N>.md      o conteúdo de cada versão
+      v<N>.desenho.json        o desenho feito sobre a versão, se houver (gravação atômica; ver ADR-45)
     entrada/                   onde os agentes gravam; o servidor observa e coleta (nunca é um artefato)
       orquestradores/<id>/     artefatos de cada Orquestrador e dos Subagentes dele
       chat/                    artefatos do chat rápido
@@ -731,6 +795,7 @@ dados/
    - **Subagentes prontos** (ver ADR-31): com subagentes prontos (botão *Subagentes* na barra do canvas), o bloco os lista (nome e quando usar) e o `agentes.json` os define ao lado do `executor`, com as mesmas ferramentas e esforço. Sem nenhum, nada muda.
    - **Servidores** (ver ADR-33): com *Editar e rodar comandos*, o bloco e as regras do `executor` mandam subir servidor de desenvolvimento desacoplado (com a saída num log fora do projeto), para o pedido não ficar preso, e não abrir o navegador do computador. Para conferir o servidor, `curl` sem citar o endereço na resposta: a prévia ao vivo só deve abrir quando o usuário pediu, quando é preciso mostrar algo a ele ou quando ele precisa fazer login (ver *Prévia ao vivo só quando necessária* na ADR-33).
    - Em `planejamento`, o Orquestrador e o `executor` recebem só as ferramentas de leitura, qualquer que seja o nível configurado, e o bloco pede um **plano** em vez da execução (ver ADR-9).
+   - **Navegador do agente** (ver ADR-46): com a opção ligada, em *Editar e rodar comandos* e fora do Plan Mode, o turno é registrado no servidor MCP do app, o `claude -p` recebe `--mcp-config` (um `mcp.json` temporário, com a URL e o token do turno) e as ferramentas `mcp__orquestrador__navegador_*` em `--allowedTools` (e no `tools` do `executor` e dos subagentes prontos), e o bloco ganha a regra do navegador. Sem isso, os argumentos e o bloco ficam como antes.
    - **Artefatos** (ver ADR-26): em qualquer nível e modo, a pasta de artefatos do Orquestrador vai em `--add-dir`, `Write`/`Edit` entram nas ferramentas (também no `executor`) e, onde o nível não libera a edição, ficam permitidos só nessa pasta. O bloco diz quando e como gravar um artefato.
    - Com **Commit e push por feature** ligada, num turno de `execucao`, o bloco manda commitar e dar push a cada feature pronta (ver ADR-40), e o `claude -p` sai sem o bloqueio de `git commit`/`git push` (ver ADR-10). Desligada, ou em `planejamento`, continua tudo proibido.
    - **Esforço** (ver ADR-12): com esforço escolhido para o Orquestrador, o `claude -p` recebe `--effort <low|medium|high|xhigh|max>` logo depois do `--model`; com esforço escolhido para os Subagentes, a definição do `executor` no `agentes.json` ganha o campo `"effort"`. Em `"padrao"` nada disso é enviado. Se algum dos dois papéis tiver esforço escolhido, a variável `CLAUDE_CODE_EFFORT_LEVEL` herdada do servidor é removida do ambiente do processo, porque ela venceria a escolha.
@@ -795,7 +860,7 @@ flowchart TD
 **Painel de alterações** (`ServicoDeAlteracoes`, atrás da porta `LeitorDeAlteracoes`, ver ADR-24): só lê o worktree, nunca altera. `GET /alteracoes` devolve o objeto de valor `AlteracoesDoWorktree`: `sem_git` (a pasta não é repositório com HEAD), `sem_worktree` (repositório, mas o último pedido não deixou alterações) ou `com_worktree`, com a branch, se há um pedido rodando nele (`emUso`), quantos commits da branch ainda não estão no HEAD da pasta original e os arquivos não commitados (alterações em relação ao HEAD do worktree mais os não rastreados, até 500). `GET /alteracoes/diff` só monta o diff de um caminho que está, exatamente igual, na lista atual (nunca monta caminho a partir do que veio na URL), cortado em ~200 KB. A implementação (`LeitorDeAlteracoesGit`) roda o git com tempo limite de 15 s; qualquer falha vira 500 com mensagem pronta e o motivo no log.
 
 **Processos dos agentes** (`src/infraestrutura/sistema/`, ver ADR-2 e ADR-38):
-- **Claude Code em execução:** cada `claude.exe` iniciado pela `FachadaClaudeCodeCli` vai para o `RegistroDeProcessos` (`<PASTA_DADOS>/processos-em-execucao.json`). Cancelar derruba a árvore (`taskkill /T /F`; no Mac/Linux, o grupo). Ao subir, `encerrarAgentesOrfaos` encerra os que um servidor que caiu deixou rodando, conferindo a sessão na linha de comando.
+- **Claude Code em execução:** cada `claude.exe` iniciado pela `FachadaClaudeCodeCli` vai para o `RegistroDeProcessos` (`<PASTA_DADOS>/processos-em-execucao.json`); o `codex app-server` e o `copilot --acp` (`ProcessoJsonRpc`) também. Cancelar derruba a árvore (`taskkill /T /F`; no Mac/Linux, o grupo). Ao subir, `encerrarAgentesOrfaos` encerra os que um servidor que caiu deixou rodando, conferindo a linha de comando (`identidadeDoProcesso`): no Claude, a sessão e o `stream-json`; no Codex (`app-server`) e no Copilot (`--acp`), que não levam a sessão na linha, o comando **e** a hora de criação perto da do registro (15 s; sem a hora, nunca é nosso: o Codex do VS Code e um editor com Copilot rodam o mesmo comando).
 - **Processos deixados pelos agentes** (`RastreadorDeProcessosDeixados`): o que os comandos de um turno deixam rodando (`nohup npm run dev &`, `Start-Process`, watch, Playwright) sai da árvore do Claude Code quando o shell intermediário termina. O rastreador lista a árvore (`listarArvore`: pid, ppid, criação, nome e linha de comando; no Windows um `Get-CimInstance Win32_Process`, de 1 a 2 s; no Mac/Linux o `ps`, com o grupo) quando chega o `result` (o Claude ainda vivo, no máximo uma vez a cada 10 s), 2 s depois que o Claude sai e a cada 30 s enquanto há turno rodando (5 s no Mac/Linux). Os descendentes (`descendentesVivos`) são ligados pelo ppid, sempre com o filho nascido depois do pai, inclusive pelos pais já mortos vistos numa listagem anterior; no Mac/Linux também pelo grupo do Claude Code; e, se o pai morreu sem ser visto, por **adoção**: árvore nascida durante o turno, de pai morto, em que algum processo cita a pasta do turno (`C:/…` ou `/c/…`), desde que a pasta não seja curta demais (raiz do disco, pasta do usuário) e o pai não seja um shell dos terminais do canvas.
 - **Registro:** os sobreviventes vão para `<PASTA_DADOS>/processos-deixados-pelos-agentes.json` (`RegistroDeProcessosDeixados`) com pid, criação, nome, linha de comando e o Orquestrador dono (ou `chat`). Quem morre sozinho sai na listagem seguinte.
 - **Encerramento** (`encerrarDoOrquestrador`/`encerrarTodos`): uma listagem nova; só é encerrado o pid que ainda for o **mesmo processo** (mesma criação, com folga de 2 s, e mesma linha de comando), mais os filhos que ele abriu depois; um a um (`taskkill /PID /F`, sem `/T`, que segue ppid de PID reaproveitado; no Mac/Linux, SIGTERM). Nunca: o servidor, o Electron, nenhum `claude.exe` em execução. Sem conseguir listar, nada é encerrado. Acontece ao **excluir o Orquestrador** (porta `aoRemover` do `ServicoDeOrquestracao`, ligada no `root.ts`, que também fecha os terminais do canvas ligados a ele), ao **fechar o app** (`desligar` do `root.ts`, com limite de 5 s) e, como reserva para quando o servidor caiu, na **subida seguinte**, junto do `encerrarAgentesOrfaos` (sem nada registrado, nem lista).
@@ -1431,7 +1496,7 @@ flowchart TD
 - *Decisão:*
   - **captura loopback pelo processo principal** (`electron/escutaDoModoInvisivel.js`): `session.defaultSession.setDisplayMediaRequestHandler(..., { useSystemPicker: false })` responde ao `getDisplayMedia` com a fonte `screen` do monitor da janela e `audio: "loopback"` (o som continua saindo; `loopbackWithMute` deixaria o usuário sem som), **só** quando três coisas valem ao mesmo tempo: o modo invisível está ativo, a plataforma é Windows e o pedido vem do frame principal da janela principal (comparado por `processId` + `routingId`). Qualquer outro pedido, ou um erro, é recusado com `responder(null)`, e o motivo vai para o log (`[escuta]`). A tela **descarta o vídeo** na hora e passa o áudio por um `AudioContext` a 16 kHz com um `AudioWorklet` inline, num Blob (`capturaDoAudio.ts`);
   - **ponte:** o preload expõe `escutaDisponivel` (`process.platform === "win32"`) e `estaAtivo()`, pelo IPC novo `modo-invisivel:consultar`. O `useModoInvisivel` consulta o estado ao montar: o chat rápido remonta ao alternar entre fixo e flutuante e, antes, "esquecia" o modo;
-  - **transcrição contínua com o Whisper do ditado** (`web/src/shared/ditado/transcritor.ts`): o mesmo worker da tela toda, agora com **fila serial** (um pedido por vez, porque pedidos simultâneos disputam a CPU). O ditado passa na frente dos pedidos da escuta que ainda não começaram, e a escuta guarda no máximo 2 esperando; o mais antigo é descartado em silêncio. O **cortador de falas** (`CortadorDeFala.ts`, que substituiu o antigo cortador de trechos por energia) usa as probabilidades de voz do Silero em janelas de 32 ms: a fala curta termina depois de **500 ms** de silêncio (`SILENCIO_PARA_FIM_MS`; era 350 ms) e **nunca passa de 8 s** (`DURACAO_MAXIMA_DA_FALA_MS`; era 25 s): ao passar disso, é cortada no vale de probabilidade dos últimos 2 s e a seguinte começa ali, sem perder áudio. Fala curta faz a passada final chegar logo, mesmo com alguém falando sem pausa. A fala curta só serve ao motor: **o que se ouve é o enunciado** (`LegendaDaEscuta.ts`), a fala completa entre pausas. As falas curtas seguidas entram no mesmo enunciado enquanto a próxima começa até **1,2 s** depois do fim da anterior (`PAUSA_DO_ENUNCIADO_MS`), com o texto confirmado unido por espaço. O enunciado não se divide por pontuação nem por tempo; ele fecha quando passa 1,2 s do fim da última fala sem fala nova (temporizador da `sessaoDaEscuta`, que espera a passada final da última fala chegar), quando chega a **20 s** desde o começo no fim de uma fala (`DURACAO_MAXIMA_DO_ENUNCIADO_MS`; com falas de até 8 s, nunca passa de uns 28 s), ou quando a escuta pausa, para ou sai do modo. O id (`enunciado-<n>`) nasce quando ele abre e é o mesmo no `emAndamento` e no enunciado fechado. Assim a pergunta não é cortada no meio nem vira várias mensagens;
+  - **transcrição contínua com o Whisper do ditado** (`web/src/shared/ditado/transcritor.ts`): o mesmo worker da tela toda, agora com **fila serial** (um pedido por vez, porque pedidos simultâneos disputam a CPU). O ditado passa na frente dos pedidos da escuta que ainda não começaram, e a escuta guarda no máximo 2 esperando; o mais antigo é descartado em silêncio. O **cortador de falas** (`CortadorDeFala.ts`, que substituiu o antigo cortador de trechos por energia) usa as probabilidades de voz do Silero em janelas de 32 ms: a fala curta termina depois de **500 ms** de silêncio (`SILENCIO_PARA_FIM_MS`; era 350 ms) e **nunca passa de 8 s** (`DURACAO_MAXIMA_DA_FALA_MS`; era 25 s): ao passar disso, é cortada no vale de probabilidade dos últimos 2 s e a seguinte começa ali, sem perder áudio. Fala curta faz a passada final chegar logo, mesmo com alguém falando sem pausa. **Texto ao vivo:** durante a fala, uma passada parcial (descartável) sai a cada **500 ms** de áudio novo (`AUDIO_NOVO_PARA_PASSADA_MS`; era 700 ms) sempre que o motor está livre, e ao terminar uma passada o áudio que já juntou pede a próxima na hora, sem esperar o próximo lote de 100 ms; uma passada descartada por motor ocupado é repetida com só 200 ms de áudio novo (`REPETIR_PASSADA_DESCARTADA_MS`), em vez de esperar outro ciclo inteiro. O que ainda não foi confirmado por duas passadas seguidas aparece em cinza (parcial) no painel. A fala curta só serve ao motor: **o que se ouve é o enunciado** (`LegendaDaEscuta.ts`), a fala completa entre pausas. As falas curtas seguidas entram no mesmo enunciado enquanto a próxima começa até **1,2 s** depois do fim da anterior (`PAUSA_DO_ENUNCIADO_MS`), com o texto confirmado unido por espaço. O enunciado não se divide por pontuação nem por tempo; ele fecha quando passa 1,2 s do fim da última fala sem fala nova (temporizador da `sessaoDaEscuta`, que espera a passada final da última fala chegar), quando chega a **20 s** desde o começo no fim de uma fala (`DURACAO_MAXIMA_DO_ENUNCIADO_MS`; com falas de até 8 s, nunca passa de uns 28 s), ou quando a escuta pausa, para ou sai do modo. O id (`enunciado-<n>`) nasce quando ele abre e é o mesmo no `emAndamento` e no enunciado fechado. Assim a pergunta não é cortada no meio nem vira várias mensagens;
   - **idioma detectado à mão** no worker, só na escuta: o transformers.js 4.3.1 não detecta o idioma do Whisper e, sem `language`, força o inglês. Um passo do decodificador, só com `<|startoftranscript|>`, escolhe o token de idioma mais provável; se falhar, vale o português. O ditado continua em português fixo. **O idioma padrão da escuta é o português**; o *Automático* (detectar a cada fala) é opcional, no menu do selo. Ele chegou a ser o padrão, mas detectava errado e fala em português saía em inglês. Por isso a versão 3 das preferências (`VERSAO_DAS_PREFERENCIAS_DA_ESCUTA`) lê registros de versão anterior com o idioma em português e o *Automático* do 🎧 ligado, porque esses valores eram só o padrão da época; a partir da 3, vale o que estiver gravado;
   - **detecção em duas etapas:**
     1. a **regra local** (`DetectorDePergunta.ts`) marca como candidato o texto que termina em `?`, tem uma expressão de pedido (*como faço*, *explique*, *can you*…), um termo técnico (*lista ligada*, *two sum*…) ou, com ao menos 4 palavras, uma **palavra interrogativa em qualquer posição** (*qual*, *quando*, *onde*, *what*, *how*…, como palavra inteira; motivo `interrogativa`), e descarta as alucinações conhecidas do Whisper (*Obrigado.*, *Legendas pela comunidade Amara.org*…). Ela prefere deixar passar a mais: o Whisper quase não pontua fala corrida, e a pergunta costuma vir no meio (*pessoal, eu queria saber qual a melhor forma…*). O **sinal forte** (vira pergunta sem o servidor) continua exigindo `?` no fim **e** a interrogativa no começo. A regra olha o **texto inteiro do enunciado**: avalia ao fechar ou, antes, assim que o confirmado passa a terminar em `?` (sem repetir no fechamento; se o enunciado continua, só avalia de novo se o texto novo também terminar em `?`);
@@ -1525,7 +1590,7 @@ flowchart TD
 - *Decisão:*
   - **a janela continua cobrindo o monitor inteiro e transparente** (sem recriar a janela, como no ADR-37); o chat se posiciona e se redimensiona **por CSS dentro dela** (`left/top/width/height` numa camada que ocupa a janela toda), e a posição e o tamanho ficam em `chatNoModoInvisivel` nas preferências da tela (`orquestrador.preferenciasDaTela`; nulo = centralizado no rodapé). Mover e redimensionar são só pelo chat (alça de cima e canto de baixo, com ponteiro capturado), limitados à janela, e reajustam quando ela muda de tamanho;
   - **áreas clicáveis marcadas:** cada peça sólida do chat (alça, conversa, campo e sua barra, painéis, avisos, o modal da imagem, as alças) leva `data-area-clicavel`. O processo principal (`electron/mouseDoModoInvisivel.js`) consulta `elementFromPoint` + `closest` e só captura o mouse sobre elas; nos vãos transparentes o clique passa ao app de trás. Durante um arraste, uma camada transparente marcada cobre a tela, para o chat não escapar do mouse. Menus e listas que abrem por cima do campo ficam dentro da moldura do campo no DOM, então já valem; um portal novo precisa levar o atributo;
-  - **janela não focável:** no modo a janela é `setFocusable(false)`: recebe cliques, mas não o teclado nem o foco do sistema. A tela pede `definirFocavel(true)` ao apertar o mouse no campo (e no Ctrl+Shift+Space, pelo processo principal) e `definirFocavel(false)` ao enviar, no Esc e quando o foco sai do chat. Os atalhos globais (`Ctrl+\`, `Ctrl+Shift+Enter/Space/S/I`, `Ctrl+Alt+setas/PageUp/PageDown/+/-`) chegam pelo processo principal (`aoAtalho`), porque a janela não tem o foco para receber teclas.
+  - **janela não focável:** no modo a janela é `setFocusable(false)`: recebe cliques, mas não o teclado nem o foco do sistema. A tela pede `definirFocavel(true)` ao apertar o mouse no campo (e no Ctrl+Shift+Space, pelo processo principal) e `definirFocavel(false)` no Esc e quando o foco sai do chat. Enviar uma mensagem mantém (e refaz) o foco do campo, para continuar digitando; um blur até 400 ms depois de pedir o foco (troca de foco da janela no Windows) é ignorado, senão a janela voltava a ficar não focável. Os atalhos globais (`Ctrl+\`, `Ctrl+Shift+Enter/Space/S/I`, `Ctrl+Alt+setas/PageUp/PageDown/+/-`) chegam pelo processo principal (`aoAtalho`), porque a janela não tem o foco para receber teclas.
 - *Consequências:*
   - o usuário posiciona o chat onde não atrapalha, e o app de trás continua recebendo cliques fora dele e teclado enquanto ele não digita no chat;
   - `setFocusable` em tempo de execução tem falhas conhecidas no Windows: o processo principal é defensivo (`try/catch` com log), e se falhar o chat continua funcionando, só pode roubar o foco ao clicar;
@@ -1533,6 +1598,8 @@ flowchart TD
   - com uma janela cobrindo o monitor, a captura de cliques depende do `data-area-clicavel`: esquecê-lo numa peça nova a deixa "transparente" ao clique.
 
 **ADR-43 — Assinatura no Stripe com serviço de licenças próprio e licença assinada (Ed25519) presa à máquina.** Substitui a licença do Lemon Squeezy dos ADR-19 e ADR-29 (o resto desses ADRs continua valendo). *(O pedido original chamava este registro de "ADR-30", número já usado pelas instruções personalizadas; por isso ADR-43.)*
+*Atualizado pelo ADR-44:* a chave `ORQ-…` deu lugar ao login por e-mail (código de 6 dígitos, com teste grátis), e o serviço saiu deste repositório para o repositório privado `Le3Dev/orquestrador-licencas`. O resto vale como histórico.
+
 - *Contexto:*
   - a venda será por **assinatura mensal e anual, no Brasil, por cartão** (PIX Automático depois). O Stripe e o Mercado Pago cobram, mas **não geram chave de licença**: alguém precisa emitir, guardar e conferir;
   - o arquivo de licença antigo era **texto puro**: copiá-lo para outro PC funcionava, editar a data dava offline infinito, e a licença só era conferida ao abrir o app;
@@ -1580,6 +1647,92 @@ flowchart LR
   A -->|confere a assinatura<br/>com a chave pública| A
 ```
 
+**ADR-44 — Login por e-mail, teste grátis de 7 dias e serviço de licenças em repositório privado.** Atualiza o ADR-43 (chave `ORQ-…` e serviço dentro deste repositório).
+- *Contexto:*
+  - chave de licença não é o padrão para assinatura: o mercado usa conta e login. A chave podia ser perdida ou repassada, e um PC quebrado prendia a vaga da assinatura;
+  - queremos um teste grátis sem cartão, o que exige identificar a pessoa antes da compra;
+  - este repositório é **público**, e o serviço guarda e-mails, códigos e sessões; além disso tem ciclo de publicação próprio (Cloudflare), separado do app (GitHub Releases).
+- *Decisão:*
+  - **login por código de e-mail:** a pessoa digita o e-mail, recebe um código de 6 dígitos (válido 10 min) e entra. O app guarda uma **sessão revogável** (segredo cifrado com `safeStorage` do Electron, DPAPI no Windows) mais o **token assinado** (JWS EdDSA, até 7 dias) para uso offline; revalida ao abrir e a cada 24 h;
+  - **teste grátis de 7 dias sem cartão**, criado pelo serviço no primeiro login: **1 por e-mail e 1 por computador**. Perto do fim o app avisa (no máximo 1 notificação por dia) e, ao acabar, volta à tela Entrar;
+  - **compra no Stripe (Payment Links) com o mesmo e-mail**: a compra converte o teste em assinatura na próxima revalidação, sem novo login;
+  - **troca de computador por autoatendimento:** 1 computador por assinatura; ao entrar num PC novo, após provar o e-mail, a pessoa confirma e o outro recebe `maquina-substituida` na próxima validação. *Sair deste computador* libera a vaga;
+  - o serviço foi movido para o repositório privado **`Le3Dev/orquestrador-licencas`**; como rodar, publicar e configurar ficam no README dele. O contrato da API é versionado em `/v1` e documentado nos dois repositórios (ver *API do serviço de licenças*).
+- *Consequências:*
+  - o **e-mail vira peça crítica**: é preciso domínio próprio verificado no Resend (sem ele o código não chega) e o plano grátis limita a 100 e-mails por dia (Pro, cerca de US$ 20/mês, quando crescer);
+  - o abuso do teste com e-mails novos é **reduzido** pelo limite por computador, não eliminado;
+  - offline, o computador substituído ainda abre até o token vencer (no máximo 7 dias);
+  - mudar o contrato exige atualizar os dois repositórios (app e serviço) em conjunto.
+
+**ADR-45 — O desenho sobre um artefato fica no servidor, por versão, ancorado no conteúdo.** Atualiza os ADR-8 e ADR-26.
+- *Contexto:*
+  - o desenho feito por cima de um artefato (setas, rabiscos, textos) ficava só no `localStorage` da tela, por artefato e sem versão: uma versão nova herdava traços que apontavam para um conteúdo que já não estava ali, e apagar o artefato deixava o desenho para trás;
+  - os pontos eram coordenadas da janela: rolar ou redimensionar o conteúdo desencontrava o traço do que ele marcava.
+- *Decisão:*
+  - o desenho é **por versão**, no arquivo `artefatos/<id>/v<N>.desenho.json`, ao lado de `v<N>.html` e do `artefato.json`, com a mesma gravação atômica e a mesma fila por artefato. Lista vazia apaga o arquivo; remover o artefato apaga a pasta inteira, desenhos inclusive;
+  - rotas `GET` e `PUT /api/artefatos/:id/versoes/:numero/desenho` (corpo `{ "tracos": [...], "largura": n | null }`; o PUT troca o desenho inteiro e responde 204). Valem a trava do aplicativo e o 404 do artefato antes do da versão; número de versão inválido é 400. O corpo tem **limite próprio de 1 MB** (413), lido pela rota: o leitor JSON geral de 150 MB pula esse caminho;
+  - cada traço é **ancorado no conteúdo**: `ancora.conteiner` é o caminho de índices de filhos, a partir do elemento raiz do documento, até o contêiner que rola, e `ancora.elemento` vai do contêiner até o elemento âncora (`null`: pontos em coordenadas do documento). Tipos, cores, espessuras e limites são os da tela (`src/artefatos/DesenhoDoArtefato.ts` espelha `web/src/shared/canvas/layout.ts`); até 2000 traços por versão e 64 índices por caminho; campos desconhecidos são descartados ao gravar;
+  - **versão nova começa limpa**: o desenho não passa de uma versão para a outra;
+  - a **largura da página** em que o primeiro traço foi feito é guardada por versão (`largura`, inteiro de 200 a 10000 pixels; ausente no `PUT` vale `null`). Enquanto houver traços, a tela monta a página nessa largura e escala para caber, e o desenho fica exato em qualquer janela; sem traços, a página volta ao normal. Arquivos antigos, sem largura (inclusive os que guardavam só a lista de traços), são lidos com `largura: null` e seguem sem escala;
+  - a **migração** do desenho antigo do `localStorage` é única e feita pela tela, pelo mesmo `PUT`; o servidor não lê o `localStorage` nem conhece o formato antigo.
+- *Consequências:*
+  - o desenho sobrevive a outro navegador e à limpeza do layout, e acompanha o artefato quando ele é apagado;
+  - mudar os tipos, as cores ou as espessuras na tela exige mudar também o módulo do servidor, senão o PUT responde 400;
+  - não há evento SSE do desenho: duas janelas abertas no mesmo artefato não se atualizam ao vivo, e a última gravação vence;
+  - um `v<N>.desenho.json` ilegível vale como desenho vazio (com aviso no log) até a próxima gravação.
+
+**ADR-46 — Navegador do agente: uma `WebContentsView` por Orquestrador, comandada por CDP, com as ferramentas num servidor MCP do app.**
+- *Contexto:* os agentes testam telas e consultam sites só com `curl` e `WebFetch`: sem JavaScript, sem login, sem ver a página. O usuário quer que o agente use um navegador de verdade, que ele veja no canvas e possa assumir. A prévia ao vivo (ADR-33) continua sendo para mostrar algo ao usuário, e não para o agente operar.
+- *Decisão:*
+  - **um Chromium por Orquestrador**, uma `WebContentsView` (`electron/navegadorDoAgente.js`) comandada pelo `webContents.debugger` (CDP: ler a página, clicar, digitar, teclas, rolar e capturar a tela). Ela fica **sempre anexada à janela, fora da área dela** (1280x800 com só 1 DIP dentro, no canto superior esquerdo, e o canto cortado por `setBorderRadius`: nenhum pixel da tela é coberto; "por baixo" não existe, a vista é filha da tela e sempre é desenhada por cima; e inteira fora o Chromium a esconde: sem tamanho, sem pintar, captura trava), para continuar pintando (sem quadros a captura não termina) e sobe ao nó do canvas quando o usuário o abre (`mostrar`) e desce quando o fecha (`ocultar`); no modo fantasma, fica no mesmo lugar. Até 8 navegadores abertos;
+  - **sessão própria** `persist:navegador-<id>`, separada da tela e da prévia: o login e os cookies são por Orquestrador. Downloads bloqueados (o agente é avisado no resultado do próximo comando), permissões do site (câmera, localização, notificações…) e dispositivos negados, pop-ups abrem na mesma vista, só http/https, sem preload nem Node na página;
+  - **qualquer site http/https, sem aprovação por ação**, por decisão do usuário. Em troca, todo texto que vem da página chega ao agente com o aviso de que é dado e não instrução, e a regra do bloco do pedido diz o mesmo;
+  - **ferramentas `mcp__orquestrador__navegador_*`** (`abrir`, `ler_pagina`, `clicar`, `digitar`, `tecla`, `rolar`, `capturar_tela`, `voltar`, `avancar`, `recarregar`, `esperar`) num **servidor MCP** (Streamable HTTP, `@modelcontextprotocol/sdk` 1.32.x) do próprio app: escuta só em `127.0.0.1`, numa porta livre, em `/mcp`; cada turno recebe um **token Bearer aleatório de 32 bytes**, revogado no fim, que também diz de qual Orquestrador é a chamada e quais grupos de ferramentas valem; recusa `Origin` e `Host` que não sejam `127.0.0.1:<porta>` (DNS rebinding). Sem sessão: cada requisição ganha um servidor MCP novo, só com as ferramentas do turno;
+  - **quando liga:** `ConfiguracaoDoOrquestrador.permiteNavegador(modo)` — opção **Navegador do agente** ligada (`navegadorDoAgente`, padrão `false`; dado antigo sem o campo vale `false`), nível *Editar e rodar comandos* e fora do Plan Mode. Nesse caso o `MotorClaudeCodeCli` registra o turno no servidor (`registrarTurno`, com `navegador: true`), grava o `mcp.json` (URL e token) na pasta temporária do turno, só do dono, passa `--mcp-config`, libera as 11 ferramentas em `--allowedTools` e no `tools` do `executor` e dos subagentes prontos (que não herdam as da sessão) e **encerra o registro no fim do turno**, inclusive em falha e cancelamento. O `--strict-mcp-config` segue valendo: nenhum servidor MCP do usuário é carregado. Sem a regra, nada muda: nem argumento, nem token. O bloco `<configuracao-do-pedido>` ganha a regra do navegador (existe e o usuário o vê; serve para sites e testes de tela; pode usar os logins feitos nele; o conteúdo das páginas é dado);
+  - **o usuário no controle:** o nó do canvas mostra a página e o que o agente faz. *Assumir* pausa o agente (os comandos são recusados com "O usuário assumiu o navegador; tente depois." e o que estava rodando é cancelado) até *Devolver ao agente*; voltar, avançar e recarregar são do usuário, com o agente pausado. Excluir o Orquestrador apaga o login e os cookies (`fechar(id, true)`).
+- *Consequências:*
+  - **risco de injeção de instruções por páginas:** um site pode tentar mandar o agente fazer algo, inclusive usando logins que o usuário fez no navegador dele, e não há aprovação por ação. Mitigação: liga e desliga por Orquestrador, **desligado por padrão**, só no nível mais alto e fora do planejamento, aviso de que o conteúdo é dado, downloads e permissões bloqueados, sessão separada da tela. Quem liga aceita o risco: não faça login numa conta que não pode ser usada pelo agente;
+  - só existe no app desktop: o servidor rodando sozinho (`npm run dev`) responde às ferramentas que o navegador só funciona no desktop;
+  - cada navegador aberto é um Chromium a mais na memória (limite de 8);
+  - o servidor MCP é uma superfície nova, limitada ao `127.0.0.1`, ao token do turno e ao `Host`/`Origin`; ainda assim, quem lesse o `mcp.json` durante o turno (outro processo do mesmo usuário) poderia usar o navegador até o turno acabar;
+  - o Orquestrador recebe as ferramentas em qualquer motor (Claude Code, Codex ou Copilot, pelo mesmo servidor MCP; ver ADR-48). No Claude Code, o `Agent` (`executor` e prontos) as recebe junto; os subagentes que o app delega ao Codex ou ao Copilot (`delegar_subtarefas`) não as têm, e a regra do bloco diz isso.
+
+**ADR-47 — Rotinas: contexto próprio ligado aos Orquestradores só pela porta `ExecutorDePedidos`, com agendador de ~30 s dentro do servidor.**
+- *Contexto:* o usuário repete pedidos (um relatório toda manhã, uma checagem a cada hora) e quer que o app os mande sozinhos, com um ponto de decisão no meio quando for o caso (aprovar antes de seguir). Não há um serviço de fundo separado do app, e um agendador do sistema operacional (Agendador de Tarefas do Windows) exigiria outro processo, outra instalação e outro login do Claude.
+- *Decisão:*
+  - **contexto `rotinas` próprio** (`src/rotinas/`), com linguagem própria: `Rotina` (raiz: nome, gatilho, 1 a 10 etapas, "se perder a hora") e `ExecucaoDaRotina` (etapa a etapa). Uma etapa é um **pedido** (a um Orquestrador, em execução ou planejamento, até 20 mil caracteres), uma **aprovação** (mensagem de até mil caracteres) ou uma **espera** de 1 a 1440 minutos. O gatilho é diário, semanal (dias e hora), a cada N minutos (N ≥ 15) ou uma vez. Até 50 rotinas;
+  - **a única ligação com a orquestração é a porta `ExecutorDePedidos`** (`executar`, `aprovarPlano`, `descartarPlano`, `orquestradorExiste`), implementada na camada de composição por `ExecutorDePedidosDaOrquestracao` sobre o `ServicoDeOrquestracao`. A Rotina não conhece turnos, filas nem motores. O adaptador manda o pedido como uma mensagem; com o Orquestrador ocupado, o pedido **entra na fila dele** (até 10; cheia, a etapa falha com a mensagem da fila) e a etapa espera ele sair e terminar. Se um turno que não é do pedido para a fila (falhou, foi cancelado ou deixou um plano para aprovar), o pedido sai da fila e a etapa falha: mandá-lo assim mesmo passaria por cima de uma decisão do usuário. O fim do turno é lido dos **eventos do Orquestrador** (não de uma consulta periódica), seguindo o pedido pela reserva de motor (ADR-48) e pela retomada automática (ADR-36); sem um sinal do app em 2 s depois de uma falha, a etapa falhou. A resposta da etapa fica resumida em até 4 mil caracteres (o texto inteiro continua na conversa do Orquestrador);
+  - **plano e aprovação:** um pedido que termina com plano para aprovar, ou uma etapa de aprovação, **para a execução** (`aguardando_aprovacao`) até o usuário aprovar ou recusar, com o cartão no painel, o selo no botão **+ Novo** e no item *Rotinas* do menu e uma notificação do Windows. Aprovar um plano manda "Plano aprovado" ao Orquestrador (como o cartão dele); recusar descarta o plano e encerra a execução;
+  - **uma execução por vez por rotina:** a hora que vence com uma execução em andamento ou esperando aprovação vira uma execução `pulada`;
+  - **agendador de ~30 s** (`Agendador`), só com o app aberto. Ao abrir, o que estava `em_andamento` vira `interrompida`, e a hora que passou com o app fechado segue o "se perder a hora" de cada rotina: **pular** (padrão) ou **executar ao abrir** (no máximo uma execução de recuperação por rotina). Hora que atrasou além de 5 minutos com o app aberto (o computador dormiu) conta como perdida;
+  - **dados** em `<dados>/rotinas/<id>.json` e `rotinas/<id>/execucoes/<execId>.json` (as últimas 50 de cada rotina);
+  - **bandeja do Windows** (`electron/bandeja.js`): com pelo menos uma rotina ativa, fechar a janela **esconde o app na bandeja** em vez de encerrá-lo (na primeira vez, uma notificação explica); o menu do ícone tem *Abrir*, *Iniciar com o Windows* (abre escondido, com `--na-bandeja`) e *Sair*, que encerra de verdade. Sem rotina ativa, fechar encerra, como sempre. Só no Windows.
+- *Consequências:*
+  - as rotinas **só rodam com o app aberto** (ou escondido na bandeja): com o app fechado, nada dispara. É isso que o "se perder a hora" decide;
+  - o computador dormindo ou desligado também perde a hora; o que estava rodando quando o app fechou fica `interrompida` e não retoma sozinho;
+  - o pedido da rotina entra na fila do Orquestrador e compete com os pedidos do usuário: se o usuário tem a fila parada por falha, a execução da rotina falha em vez de furar a fila;
+  - cada pedido da rotina usa a cota do usuário como um pedido digitado, sem ele por perto: rotinas frequentes custam cota (a cada 15 minutos é o mínimo, de propósito);
+  - a rotina manda pedidos pelo mesmo caminho da tela (o `ServicoDeOrquestracao`): vale o nível de permissão do Orquestrador escolhido, e uma rotina em *Editar e rodar comandos* roda comandos sozinha.
+
+**ADR-48 — Motores: Codex (`app-server`) e GitHub Copilot CLI (ACP) ao lado do Claude Code, com a delegação de subtarefas pelo app e a reserva automática.**
+- *Contexto:* o app só falava com o Claude Code. O usuário tem outras assinaturas (Codex e GitHub Copilot) e quer escolher o motor de cada papel, continuar o pedido em outro motor quando o limite de uso do principal acaba (sem perder a conversa) e usar subagentes de um motor diferente do Orquestrador. Só o Claude Code lança subagentes sozinho (a ferramenta `Agent`); os outros dois CLIs não têm um equivalente que o app consiga acompanhar.
+- *Decisão:*
+  - **cada motor atrás da porta `MotorDeAgentes`**: o Claude Code (como era), o Codex pelo protocolo dele (`codex app-server`, JSON-RPC por stdio) e o Copilot pelo Agent Client Protocol (`copilot --acp --stdio`). Os termos do Codex e do ACP ficam na camada anticorrupção (`infraestrutura/codex`, `infraestrutura/acp`), com um cliente JSON-RPC próprio (`ProcessoJsonRpc`) em vez de um SDK: nenhum deles entra em `src/orquestracao/`. Um **`RoteadorDeMotores` é o único ponto de entrada** do `ServicoDeOrquestracao` (o `root.ts` não liga mais o `MotorClaudeCodeCli` direto; a recusa provisória de outro motor saiu dele) e manda cada turno ao motor do `pedido.motor`;
+  - **configuração:** `motorDoOrquestrador` e `motorDosSubagentes` (`claude-code`, `codex` ou `copilot`; padrão `claude-code`), os modelos de cada papel (`fable`, `opus`, `sonnet` ou `haiku` no Claude Code; `padrao`, o modelo do próprio CLI, ou um id de modelo nos outros) e `ordemDeReserva` (sem repetidos e sem o motor do Orquestrador). O esforço de raciocínio só vale no Claude Code. Trocar o motor de um papel sem escolher o modelo volta ao padrão do motor novo. O nível de permissão, o Plan Mode e a regra de commit e push valem igual nos três, aplicados por uma política do app;
+  - **delegação pelo app** (ferramenta MCP `delegar_subtarefas`, um grupo do servidor MCP do ADR-46): com o Orquestrador no Codex ou no Copilot, ou com os subagentes num motor diferente do Orquestrador, ele delega por essa ferramenta, e não pelo `Agent`. Cada subtarefa (`descricao`, `prompt` e, se for o caso, o `subagente` pronto) roda num subagente do motor dos subagentes, em paralelo, na mesma pasta e com as mesmas permissões do pedido, até o limite de subagentes por turno; a ferramenta devolve o relatório de cada uma, e a tela recebe os mesmos eventos de subagente (os bixinhos aparecem como sempre). Com o **Claude Code como Orquestrador** e subagentes em outro motor, o `claude -p` **perde a `Agent` e o `--agents`** (e o `Workflow` do `ultracode`) e ganha `mcp__orquestrador__delegar_subtarefas` no `--mcp-config`; as instruções (`delegacaoPeloApp`) mandam usar só ela;
+  - **reserva automática:** quando o motor do Orquestrador falha por **limite de uso** ou **sobrecarga** (classificados pela saída do CLI, `ClassificadorDeFalhasDosMotores`), o serviço anuncia `motor_trocado` e reenvia o **mesmo pedido** ao próximo motor da `ordemDeReserva`, com o resumo dos turnos que esse motor ainda não viu (`contextoDaTroca`); nesse turno os dois papéis passam para o motor de reserva, cada um com o modelo padrão dele. O limite fica anotado, com a hora em que libera, se o CLI a informar, e um pedido novo já começa no motor de reserva enquanto o principal não libera. Esgotada a reserva, vale a espera de sempre (a autorrecuperação do ADR-36). O que o app trocou aparece na transcrição ("Trocou para Codex: limite do Claude atingido (libera às 14:30)");
+  - **`GET /api/motores`:** quais CLIs estão instalados (caminho e versão) e se estão logados, com cache de 60 s (`?atualizar=1` ignora o cache). Os caminhos vêm de `CODEX_BIN` e `COPILOT_BIN` ou do `PATH`, procurados a cada turno;
+  - os processos do Codex e do Copilot entram no mesmo registro dos processos do Claude (memória, cancelamento, limpeza ao subir, ADR-38);
+  - **subida do servidor:** o `listen` só espera o que um pedido precisa de pé (o servidor MCP do app, que escuta em 127.0.0.1 e leva uns milissegundos). O que é lento fica para depois do `listen` (`motores.aquecer()`, com 1,5 s de folga): a consulta aos CLIs (`claude --version`, `codex login status`... — no Windows, iniciar um CLI trava o processo por segundos, e a primeira consulta leva uns 10 s) e o carregamento do SDK do MCP (centenas de arquivos, que o `import` do módulo não carrega mais; o primeiro turno o carrega sozinho se o aquecimento ainda não terminou). No Windows, cada arquivo novo custa o antivírus, então o servidor logo depois de um `npm run build` chegou a levar mais de 40 s para escutar, e o Electron desiste em ~60 s.
+- *Consequências:*
+  - o **Copilot CLI está em preview** e o **`codex app-server` é experimental**: protocolos, campos e mensagens podem mudar entre versões, e uma versão nova pode quebrar um motor sem aviso. O cliente tolera o que não conhece, mas não adivinha;
+  - o **uso de tokens pode vir vazio ou parcial** nesses motores (o CLI nem sempre informa): o consumo e o tempo do turno ficam incompletos;
+  - o **limite do Copilot é detectado por texto** (o ACP não traz um código estável): uma mudança de redação pode passar despercebida, e a reserva não é acionada;
+  - o **índice de custo** (ADR-21) só existe no Claude Code: o medidor lê as transcrições do Claude, então turnos no Codex e no Copilot não têm custo medido;
+  - cada motor gasta a cota da assinatura dele, e o login é do usuário em cada CLI (o app não guarda credenciais); o Copilot também precisa de `includeCoAuthoredBy: false` (ver *Como rodar*);
+  - com os subagentes fora do Claude Code, só o Orquestrador tem o navegador do agente (ADR-46);
+  - a suíte exercita o Codex e o Copilot com servidores `app-server` e ACP falsos: o comportamento com o login real de cada CLI depende da versão instalada.
+
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
 - `modelUsage` acumula a sessão, então o consumo do turno vem de `model_usage_since_last_result`;
@@ -1612,10 +1765,10 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | GET | `/pastas` | — | `{ raiz, pastas: [{ nome, caminho }] }` |
 | GET | `/orquestradores` | — | `[ResumoDoOrquestrador]` |
 | GET | `/consumo-dos-orquestradores` | — | 200 `[{ id, nome, turnosMedidos, parcial, uso: { entrada, criacaoDeCache, leituraDeCache, saida }, indiceDeCusto }]`: a soma dos `consumo_do_turno_medido` da conversa atual de cada orquestrador (principal e Subagentes juntos), do maior índice para o menor; só entra quem tem turno medido. `parcial`: algum turno somado foi cancelado ou falhou. Usada pelo popover do uso |
-| POST | `/orquestradores` | `{ nome, pastaDeTrabalho, modeloDoOrquestrador, modeloDosSubagentes, quantidadeDeSubagentes: { modo: "fixa" \| "automatica", limite: 1–10 }, nivelDePermissao, permitirCommitEPush?: boolean, esforcoDoOrquestrador?, esforcoDosSubagentes?, instrucoesPersonalizadas?: string }` (mesmo esquema de configuração do PATCH; `permitirCommitEPush` ausente vale `false`; esforços ausentes valem `"padrao"`; `instrucoesPersonalizadas` ausente vale `""`; `permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes`, se mandados, são ignorados, com qualquer valor; ver ADR-28) | 201 + orquestrador com `turnos` (400 se algum campo for inválido, ex.: `permitirCommitEPush` não booleano, esforço fora da lista: `Esforço do orquestrador inválido.` / `Esforço dos subagentes inválido.`) |
+| POST | `/orquestradores` | `{ nome, pastaDeTrabalho, motorDoOrquestrador?, motorDosSubagentes?, ordemDeReserva?, modeloDoOrquestrador, modeloDosSubagentes, quantidadeDeSubagentes: { modo: "fixa" \| "automatica", limite: 1–10 }, nivelDePermissao, permitirCommitEPush?: boolean, navegadorDoAgente?: boolean, esforcoDoOrquestrador?, esforcoDosSubagentes?, instrucoesPersonalizadas?: string }` (mesmo esquema de configuração do PATCH; `motorDoOrquestrador` e `motorDosSubagentes` ausentes valem `"claude-code"` e `ordemDeReserva` ausente vale `[]` (ver ADR-48); `permitirCommitEPush` ausente vale `false`; `navegadorDoAgente` ausente vale `false` (ver ADR-46); esforços ausentes valem `"padrao"`; `instrucoesPersonalizadas` ausente vale `""`; `permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes`, se mandados, são ignorados, com qualquer valor; ver ADR-28) | 201 + orquestrador com `turnos` (400 se algum campo for inválido, ex.: `permitirCommitEPush` não booleano, esforço fora da lista: `Esforço do orquestrador inválido.` / `Esforço dos subagentes inválido.`) |
 | GET | `/orquestradores/:id` | — | orquestrador com `turnos` (resumo de cada Turno e seus Subagentes) |
 | PATCH | `/orquestradores/:id` | `{ nome: string }` | 200 + orquestrador com `turnos` (o mesmo corpo do GET), com o nome aparado. Vale também durante um pedido (só muda o que a tela mostra); o mesmo nome não grava nem gera evento. Registra `orquestrador_renomeado`. 400 `Dê um nome ao orquestrador.` (vazio depois de aparar, não texto ou ausente) / `O nome deve ter até 60 caracteres.`; 404 `Orquestrador não encontrado.` |
-| PATCH | `/orquestradores/:id/configuracao` | qualquer subconjunto dos campos de configuração, incluindo `permitirCommitEPush?: boolean`, `esforcoDoOrquestrador?`, `esforcoDosSubagentes?` e `instrucoesPersonalizadas?: string` (`""` apaga) (`permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes`, se mandados, são ignorados e os outros campos são aplicados; ver ADR-28) | 200 + resumo (vale a partir do próximo pedido; um pedido em andamento segue com a configuração com que começou; 400 se algum campo for inválido, com as mesmas mensagens do POST) |
+| PATCH | `/orquestradores/:id/configuracao` | qualquer subconjunto dos campos de configuração, incluindo `motorDoOrquestrador?`, `motorDosSubagentes?`, `ordemDeReserva?`, `permitirCommitEPush?: boolean`, `navegadorDoAgente?: boolean` (400 `A opção "Navegador do agente" deve ser verdadeira ou falsa.`), `esforcoDoOrquestrador?`, `esforcoDosSubagentes?` e `instrucoesPersonalizadas?: string` (`""` apaga) (`permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes`, se mandados, são ignorados e os outros campos são aplicados; ver ADR-28) | 200 + resumo (vale a partir do próximo pedido; um pedido em andamento segue com a configuração com que começou; 400 se algum campo for inválido, com as mesmas mensagens do POST) |
 | GET | `/predefinicoes` | — | 200 `[DadosDaPredefinicao]`: `{ nome: "economico", rotulo: "Modo econômico", descricao, configuracao: { modeloDoOrquestrador, esforcoDoOrquestrador, modeloDosSubagentes, esforcoDosSubagentes, quantidadeDeSubagentes } }` (só os campos que a predefinição muda; ver ADR-21 e ADR-28) |
 | POST | `/orquestradores/:id/configuracao/predefinicao` | `{ predefinicao: "economico" }` | 200 + resumo (o mesmo corpo do `PATCH /configuracao`, com `predefinicaoCorrespondente: "economico"`). Registra `configuracao_alterada` com `predefinicao`. 400 `Predefinição desconhecida.` (nome fora da lista, não texto ou ausente); 404 `Orquestrador não encontrado.` |
 | GET | `/orquestradores/:id/esforco-herdado` | — | 200 `{ orquestrador: EsforcoHerdado \| null, subagentes: EsforcoHerdado \| null }` para os modelos da configuração atual (o do Orquestrador usa o modelo real do último consumo medido, se houver). `null` = nada definido na máquina (ou falha ao ler). 404 `Orquestrador não encontrado.` |
@@ -1647,6 +1800,11 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | POST | `/notas` | `{ titulo?: string, texto?: string }` (corpo vazio vale; ausentes: `"Nova nota"` e `""`) | 201 + `DadosDaNota` (400 com as mensagens abaixo) |
 | PATCH | `/notas/:id` | `{ titulo?: string, texto?: string }` (só o enviado muda) | 200 + `DadosDaNota`; `atualizadaEm` só muda se o conteúdo mudar. Com algum campo inválido, 400 e nada é gravado (404 `Nota não encontrada.`) |
 | DELETE | `/notas/:id` | — | 204 (404 `Nota não encontrada.`) |
+| GET | `/vinculos` | — | 200 `{ vinculos: [VinculoDto] }`, por `criadoEm` crescente. `VinculoDto`: `{ id, orquestradorAId, orquestradorBId, notas, criadoEm, atualizadoEm }` |
+| POST | `/vinculos` | `{ orquestradorAId, orquestradorBId }` | 201 `{ vinculo }`; 404 `Orquestrador não encontrado.`; 409 `Esses orquestradores já estão vinculados.` (em qualquer ordem); 400 se forem o mesmo orquestrador |
+| DELETE | `/vinculos/:id` | — | 204 (404 `Vínculo não encontrado.`) |
+| PUT | `/vinculos/:id/notas` | `{ texto: string }` (até 8.000 caracteres) | 200 `{ vinculo }`; o texto substitui as notas inteiras. 400 se passar do limite |
+| POST | `/vinculos/:id/mensagens` | `{ de: string (id de um dos dois orquestradores), texto: string }` | 202 `{ enfileirada: true }`: vai direto para a fila do outro lado, com origem `de` e 0 saltos. 400 (remetente de fora do vínculo, texto vazio), 404, 409 (fila do destino cheia) |
 | GET | `/chat` | — | `{ sessaoId, situacao: "ocioso" \| "respondendo", alteracoesAutorizadas: boolean, preferencias: { modelo, esforco }, mensagens: [MensagemDoChat], ultimaSequencia, cota: [{ nome, utilizacao, renovaEm, situacao }] \| null }`. A resposta em andamento já traz o texto parcial acumulado; use `ultimaSequencia` no `?desde=` do SSE. `alteracoesAutorizadas`: o chat pode editar arquivos e rodar comandos até o próximo `/clear` (ver ADR-25) |
 | GET | `/chat/eventos` | cabeçalho opcional `Last-Event-ID` ou `?desde=` | `text/event-stream`: eventos gravados da conversa atual desde a sequência (sem nenhum dos dois, todos) + novos; `trecho` e `atividade` como eventos nomeados, sem id |
 | POST | `/chat/mensagens` | `{ texto: string, anexos?: [{ nome, tipoDeMidia?, base64 }], origem?: "escuta", previasAbertas?: string[] }` (`anexos` e os limites como em `/orquestradores/:id/mensagens`; `previasAbertas` como lá, ver ADR-33; texto pode ser vazio se houver anexo; `origem` só nas perguntas que não foram digitadas: `"escuta"` = detectada pela escuta no modo invisível, ver ADR-38) | 202 `{ mensagemId }` — o id da **resposta do Claude**, que recebe os trechos. 409 `Já há uma resposta em andamento.`; 400 `Escreva uma mensagem ou anexe um arquivo.`, `Origem da mensagem inválida.` (qualquer outra origem) e os erros de anexo da linha acima |
@@ -1663,12 +1821,28 @@ Todos sob `/api`. Erros vêm como `{ "erro": "mensagem para o usuário" }`, com 
 | PATCH | `/artefatos/:id` | `{ titulo: string }` | 200 `ResumoDoArtefato`, com o título aparado (o mesmo título não grava nem gera evento). 400 `Título inválido.` (vazio depois de aparar, mais de 120 caracteres, não texto, ausente ou corpo que não é objeto; nada é gravado); 404 `Artefato não encontrado.` |
 | DELETE | `/artefatos/:id` | — | 204: apaga o artefato, todas as versões e o arquivo dele na pasta de entrada. 404 `Artefato não encontrado.` |
 | GET | `/artefatos/eventos` | — | `text/event-stream` só ao vivo: `retry: 3000`, os eventos nomeados abaixo e o comentário `: ping` a cada 25 s. Sem `id:`, sem histórico e sem `Last-Event-ID`: ao (re)conectar, a tela relê `GET /artefatos` |
+| GET | `/motores` | `?atualizar=1` (ou `true`): ignora a resposta guardada | 200 `[SituacaoDoMotor]`, um item por motor (`claude-code`, `codex`, `copilot`): `{ motor, rotulo, instalado, versao, caminho, logado, mensagem }`. `logado` é `null` quando não dá para saber sem gastar cota (ou o CLI não está instalado); `mensagem` diz o que fazer (instalar, entrar: `codex login`, `copilot login`) ou é `null`. Cada CLI é consultado com tempo limite, e a resposta fica guardada por 60 s (ver ADR-48) |
+| GET | `/rotinas` | — | 200 `[ResumoDaRotina]`: `{ id, nome, ativa, gatilho, etapas, aoPerder, criadaEm, ultimaExecucaoEm, proximaExecucaoEm, execucaoAtiva }`; `execucaoAtiva` é a execução em andamento ou aguardando aprovação, ou `null` (ver ADR-47) |
+| POST | `/rotinas` | `{ nome, gatilho, etapas, aoPerder?: "pular" \| "executar_ao_abrir", ativa?: boolean }`. `nome`: 1 a 100 caracteres. `gatilho`: `{ tipo: "diario", hora: "HH:MM" }`, `{ tipo: "semanal", dias: [0–6], hora }` (0 = domingo), `{ tipo: "intervalo", minutos: 15–525600 }` ou `{ tipo: "uma_vez", em: "<ISO 8601, no futuro>" }`. `etapas` (1 a 10): `{ tipo: "pedido", orquestradorId, texto (até 20.000 caracteres), modo: "execucao" \| "planejamento" }`, `{ tipo: "aprovacao", mensagem (1 a 1.000) }` ou `{ tipo: "espera", minutos: 1–1440 }`. `aoPerder` ausente vale `"pular"`; `ativa` ausente vale `true` | 201 + `ResumoDaRotina`. 400 com a mensagem do campo (ex.: `A rotina deve ter de 1 a 10 etapas.`, `O intervalo deve ser de 15 a 525600 minutos.`, `O orquestrador escolhido na etapa 1 não existe.`); 409 `Você pode ter até 50 rotinas. Remova alguma para criar outra.` |
+| GET | `/rotinas/eventos` | — | `text/event-stream` só ao vivo (registrada antes de `/rotinas/:id`): `retry: 3000`, eventos nomeados `rotina_criada`, `rotina_alterada`, `rotina_removida`, `execucao_iniciada`, `etapa_iniciada`, `etapa_concluida`, `aguardando_aprovacao` e `execucao_encerrada`, com `data:` JSON (`{ rotina }`, `{ id }` ou `{ execucao, indice?, situacao? }`), e o comentário `: ping` a cada 25 s. Sem `id:` e sem histórico: ao (re)conectar, a tela relê `GET /rotinas` |
+| GET | `/rotinas/:id` | — | 200 `ResumoDaRotina`; 404 `Rotina não encontrada.` |
+| PATCH | `/rotinas/:id` | qualquer subconjunto de `{ nome, gatilho, etapas, aoPerder, ativa }` (os mesmos formatos do `POST`; `ativa` liga e desliga) | 200 + `ResumoDaRotina`; 400 e 404 como acima |
+| DELETE | `/rotinas/:id` | — | 204: remove a rotina e as execuções dela; as que estão em curso são canceladas. 404 `Rotina não encontrada.` |
+| POST | `/rotinas/:id/executar` | — | **202** + a `DadosDaExecucao` que começou, sem esperar o fim (o andamento vem pelo SSE). 409 `Esta rotina já está em execução.` / `Esta rotina tem uma execução aguardando aprovação. Aprove, recuse ou cancele antes de executar de novo.`; 404 |
+| GET | `/rotinas/:id/execucoes` | — | 200 `[DadosDaExecucao]`, da mais recente para a mais antiga (as últimas 50): `{ id, rotinaId, rotinaNome, origem: "agendada" \| "manual" \| "perdida", situacao, etapaAtual, etapas, resultados, iniciadaEm, encerradaEm, motivo, pendencia }`; `situacao`: `em_andamento`, `aguardando_aprovacao`, `concluida`, `falhou`, `cancelada`, `recusada`, `interrompida` ou `pulada` (a hora venceu com outra execução em curso); `pendencia`: o plano ou a mensagem de aprovação esperando o usuário |
+| POST | `/rotinas/execucoes/:execucaoId/aprovar` | — | 200 + `DadosDaExecucao`: uma etapa de aprovação segue para a próxima; um plano é executado pelo Orquestrador (ver ADR-47). 404 `Execução não encontrada.`; 409 se a execução não está esperando aprovação |
+| POST | `/rotinas/execucoes/:execucaoId/recusar` | `{ motivo?: string }` (até 2.000 caracteres; padrão `Recusada pelo usuário.`) | 200 + `DadosDaExecucao` encerrada como `recusada`; um plano pendente é descartado no Orquestrador. 404 / 409 como acima |
+| POST | `/rotinas/execucoes/:execucaoId/cancelar` | — | 200 + `DadosDaExecucao` encerrada como `cancelada`: aborta a execução em andamento (o pedido sai da fila do Orquestrador ou o turno é cancelado). 404 / 409 |
 
 Valores aceitos:
 - **Modelos:** `fable`, `opus`, `sonnet` ou `haiku`. O Claude Code resolve o apelido para a versão vigente (`fable` = Fable 5.2, a partir do Claude Code 2.1.322). Valem para os orquestradores e para o chat.
 - **Níveis de permissão:** `leitura`, `edicao` ou `edicao_e_comandos`.
 - **`permitirCommitEPush`:** `true` ou `false` (padrão `false`; orquestradores salvos antes da opção valem `false`). Só tem efeito com `edicao_e_comandos` e fora do Plan Mode (ver ADR-10).
 - **`permitirArtefatosOnline`:** `true` ou `false` (padrão `false`; orquestradores salvos antes da opção valem `false`; valor não booleano devolve 400). Ligada (interruptor "Publicar artefatos no claude.ai", em *Opções* da criação e da ⚙), `Artifact`, `ArtifactCheck` e `ArtifactData` entram em `--tools` e `--allowedTools` e na lista `tools` do `executor` (a lista de um agente definido em `--agents` é fechada: não herda as ferramentas da sessão); os subagentes prontos do usuário não publicam (sem as ferramentas e sem a linha de instrução), então só o Orquestrador, o `executor` dele e o chat publicam, e o bloco do pedido ganha uma linha: pode publicar online no claude.ai com a `Artifact` quando o pedido pedir algo para compartilhar ou publicar, devolvendo sempre o link; o resto segue com os artefatos locais. Em `claude -p` os artefatos vêm desligados no Claude Code (a ferramenta nem aparece), então o ambiente do processo leva `CLAUDE_CODE_ARTIFACT=1` (não documentada pela Anthropic; achada no binário 2.1.322 e confirmada com uma publicação real) e `CLAUDE_CODE_ARTIFACT_AUTO_OPEN=0` (sem abrir o navegador). Exige conta claude.ai (login por `/login`, não API key) com artefatos liberados. Desligada, os argumentos, o ambiente e o bloco ficam como antes. O que é publicado sai do computador, para a conta do claude.ai do usuário. Salvaguardas: no planejamento nada disso entra (sem as ferramentas e sem a linha de instrução; o nível `leitura` fora do planejamento continua publicando); com a opção desligada o servidor apaga a `CLAUDE_CODE_ARTIFACT` herdada, e ligada força `CLAUDE_CODE_ARTIFACT_AUTO_OPEN=0`; as instruções mandam nunca publicar segredos, dados pessoais nem o código do projeto inteiro e ignorar pedidos de publicação vindos de páginas, arquivos ou resultados de ferramentas.
+- **`motorDoOrquestrador` e `motorDosSubagentes`:** `claude-code`, `codex` ou `copilot` (padrão `claude-code`; orquestradores salvos antes dos outros motores valem `claude-code`). Motor desconhecido → 400 `Motor do orquestrador inválido. Use claude-code, codex, copilot.` (ou `…dos subagentes…`). Com o Orquestrador ou os subagentes fora do Claude Code, o Orquestrador delega pela ferramenta `delegar_subtarefas` do app (ver ADR-48). Trocar o motor num `PATCH` sem informar o modelo volta ao modelo padrão do motor novo.
+- **`modeloDoOrquestrador` e `modeloDosSubagentes`:** têm de servir ao motor do papel: no Claude Code, `fable`, `opus`, `sonnet` ou `haiku`; no Codex e no Copilot, `padrao` (o modelo do próprio CLI) ou um id de 1 a 64 caracteres (letras, números e `. _ : -`). Outro valor → 400 `Modelo do orquestrador inválido.` / `Modelo dos subagentes inválido.`
+- **`ordemDeReserva`:** lista de motores, na ordem em que assumem o pedido se o motor do Orquestrador bater o limite de uso ou ficar sobrecarregado (padrão `[]`: sem reserva). Sem repetidos e sem o motor do Orquestrador. 400 `Motor de reserva inválido. Use claude-code, codex, copilot.` / `A ordem de reserva deve ser uma lista de motores.` / `A ordem de reserva não pode repetir motores.` / `O motor do orquestrador não pode estar na ordem de reserva.` Num `PATCH`, trocar o motor do Orquestrador tira o novo motor da reserva.
+- **`navegadorDoAgente`:** `true` ou `false` (padrão `false`; valor não booleano devolve 400). Só liga as ferramentas do navegador em `edicao_e_comandos` e fora do Plan Mode (ver ADR-46).
 - **`esforcoDoOrquestrador` e `esforcoDosSubagentes`:** `padrao`, `baixo`, `medio`, `alto`, `extra_alto`, `maximo` ou, só no orquestrador, `ultracode` (padrão `"padrao"`; orquestradores salvos antes da opção valem `"padrao"`). `"padrao"` não envia nada ao Claude Code: vale o `settings.json` do Claude Code da máquina ou, sem ele, o padrão do modelo. Os outros viram `low`, `medium`, `high`, `xhigh`, `max` e `ultracode` (ver ADR-12). `ultracode` nos subagentes → 400 com a mensagem do ADR-12.
 - **`permitirTrabalhoDireto` e `proporPlanoEmPedidosGrandes`:** não existem mais (ver ADR-28). O Orquestrador sempre faz o trivial sozinho (ADR-14) e sempre propõe plano em pedidos grandes nos turnos de execução (ADR-15). Se um `POST` ou `PATCH` ainda mandar esses campos, com qualquer valor, eles são ignorados, sem erro; `orquestrador.json` antigos que os tenham são lidos normalmente e os perdem no próximo salvamento.
 - **`instrucoesPersonalizadas`:** texto livre de até 4.000 caracteres depois de normalizado (padrão `""`; orquestradores salvos antes do campo valem `""`). 400 `As instruções personalizadas devem ter até 4000 caracteres (hoje têm N).` Vazio usa as *Instruções gerais*, se houver (ver ADR-30).
@@ -1753,6 +1927,7 @@ Erros 400 das notas:
 | `turno_concluido` | `resposta` (já sem o marcador `<plano-para-aprovacao/>`), `uso: { duracaoMs, tokensDeEntrada, tokensDeSaida, subagentesLancados }`, `planoPendente: boolean` (`true` num planejamento, ou numa execução em que o Orquestrador propôs um plano com a opção ligada; ausente nos eventos gravados antes do campo, que a tela deduz pelo modo), `perguntas: PerguntaDoApp[]` (blocos ` ```pergunta-do-app ` da resposta final, já fora de `resposta`; ausente nos eventos gravados antes do campo, vale `[]`; ver ADR-35), `previasParaFechar?: string[]` (endereços do bloco ` ```previa-do-app ` da resposta final, normalizados, até 10, já fora de `resposta`; ausente quando não houver; ver ADR-33) | fim com sucesso |
 | `turno_cancelado` · `turno_falhou` (`motivo`) · `turno_interrompido` | — | outros finais |
 | `recuperacao_do_turno` | `etapa` (`encerrado` · `aguardando` · `retomando` · `cancelada` · `desistiu`), `causa` (`silencio` · `limite_de_uso` · `sobrecarga` · `rede`), `tentativa` (1 na primeira), `de` (máximo da causa), `resumo` (texto pronto para o log; em `desistiu`, o diagnóstico completo), `retomaEm` (ISO em `aguardando`, senão `null`) | um passo da autorrecuperação, sempre com o `turnoId` do turno que travou ou falhou (ver ADR-36) |
+| `motor_trocado` | `de` e `para` (`claude-code` · `codex` · `copilot`), `causa` (`limite_de_uso` · `sobrecarga`), `liberaEm` (ISO, se o motor informou) | o pedido passou para o motor de reserva: o `turnoId` é o do turno que falhou ou, num pedido novo que já começa no motor de reserva, o do turno que começa; o turno novo (`turno_iniciado` com o `motor`) vem logo depois (ver ADR-48) |
 | `plano_aprovado` | — | o usuário aprovou o plano pendente; em seguida vem o `turno_iniciado` do turno de execução |
 | `plano_descartado` | — | o usuário descartou o plano pendente |
 | `consumo_do_turno_medido` | `consumo: { principal, subagentes, subagentesMedidos, parcial, indiceDeCusto, modeloDoPrincipal }`; `principal` e `subagentes` são `{ entrada, criacaoDeCache, leituraDeCache, saida }` | depois do fim de um turno (concluído, com falha ou cancelado), quando há transcrição para medir; sempre depois do evento de fim. `parcial: true` em turno que não terminou com sucesso (ver ADR-21) |
@@ -1837,19 +2012,31 @@ Estado: `{ situacao, versaoAtual, versaoNova, progresso, mensagemDeErro }`.
 - `situacao`: `indisponivel` (não é o app instalado normal: `npm run desktop`, `desktop:dev` ou build de teste), `verificando`, `em-dia`, `baixando`, `pronta` (baixada; instala ao fechar o app ou com *Reiniciar agora*) ou `erro`.
 - `versaoAtual`: a versão instalada; `versaoNova`: a encontrada na release; `progresso`: de 0 a 100, durante o download; `mensagemDeErro`: o motivo, em `erro`.
 
+**Ponte do aplicativo: navegador do agente** (`window.electron.navegadorDoAgente`; ver ADR-46). Também IPC, só no desktop e só da janela principal. Os comandos dos agentes **não** passam por aqui: vão do servidor ao processo principal pelo `postMessage` do `utilityProcess` (`navegador:comando`, com a resposta em `navegador:resposta`). `orquestradorId` identifica o navegador.
+
+| Função | O que faz |
+|---|---|
+| `posicionar(id, retangulo)` / `mostrar(id, retangulo)` / `ocultar(id)` | põe a vista nativa sobre o corpo do nó do canvas (`retangulo`: `{ x, y, largura, altura, zoom }`) e a devolve para baixo da tela, ainda pintando; `mostrar` e `ocultar` resolvem `false` se não há navegador aberto (ou no modo fantasma) |
+| `pausar(id)` / `retomar(id)` | *Assumir* e *Devolver ao agente*: pausado, os comandos do agente são recusados e o que estava rodando é cancelado |
+| `voltar(id)` / `avancar(id)` / `recarregar(id)` | navegação do usuário (os botões do nó, com o agente pausado); resolvem `false` sem navegador aberto ou, no voltar e no avançar, sem para onde ir |
+| `fechar(id, apagarDados?)` | fecha o navegador; com `apagarDados` (ao excluir o Orquestrador) apaga o login e os cookies da sessão |
+| `estados()` / `foto(id)` | os navegadores abertos (`{ orquestradorId, url, titulo, carregando, ultimaAcao, emUsoPeloAgente, pausado, podeVoltar, podeAvancar }`) e um data URI JPEG da página, para o nó mostrar enquanto a vista nativa está por baixo |
+| `aoMudar(callback)` / `aoAtivar(callback)` | o estado de um navegador mudou; o agente usou o navegador de um Orquestrador pela primeira vez (a tela abre o nó) |
+
 ### API do serviço de licenças
 
-Serviço **separado do app** (pasta `servicoDeLicencas/`, Cloudflare Workers + D1; ver ADR-43). Todas as rotas respondem JSON. Erros vêm como `{ "erro": "mensagem", "motivo": "codigo" }`. `chave` tem o formato `ORQ-XXXX-XXXX-XXXX-XXXX`; `maquina.id` é o sha256 do MachineGuid do Windows.
+Serviço **separado do app**, em repositório privado próprio (`Le3Dev/orquestrador-licencas`, Cloudflare Workers + D1; ver ADR-44). O contrato abaixo é versionado em `/v1` e documentado também no README daquele repositório. Todas as rotas respondem JSON; erros vêm como `{ "erro": "mensagem", "motivo": "codigo" }`. `maquina.id` é o sha256 do MachineGuid do Windows. O app usa os IPC `licenca:pedir-codigo`, `licenca:entrar`, `licenca:sair`, `licenca:status`, `licenca:bloqueio`, `licenca:links` e `licenca:abrir-link`.
 
 | Rota | Entrada | Respostas |
 |---|---|---|
-| `POST /v1/licencas/ativar` | `{ "chave", "maquina": { "id", "nome" } }` | **200** `{ "token" }`; **400** `pedido-invalido`; **403** `chave-invalida`, `assinatura-inativa` ou `limite-de-maquinas` |
-| `POST /v1/licencas/validar` | `{ "chave", "maquina": { "id" } }` | **200** `{ "token" }` (renovado); **403** `chave-invalida`, `assinatura-inativa` ou `maquina-nao-ativada` |
-| `POST /v1/licencas/desativar` | `{ "chave", "maquina": { "id" } }` | **200** `{ "ok": true }` |
-| `POST /v1/webhooks/stripe` | evento do Stripe; cabeçalho `Stripe-Signature` (validado) | **200**; idempotente (o mesmo evento reenviado não repete efeitos). Usado só pelo Stripe |
-| `GET /v1/checkout/sessoes/:sessionId` | — (CORS liberado só para a landing) | **200** `{ "chave", "plano", "email" }` (e-mail mascarado); **202** `{ "pendente": true }` (webhook ainda não chegou: a página tenta de novo); **404** `sessao-nao-encontrada` |
+| `POST /v1/entrar/codigo` | `{ "email" }` | **200** `{ "ok" }`; **400** `email-invalido`; **429** `muitas-tentativas` |
+| `POST /v1/entrar/confirmar` | `{ "email", "codigo", "maquina": { "id", "nome" }, "substituirOutraMaquina"? }` | **200** `{ "token", "sessao", "plano": "mensal"\|"anual"\|"teste", "email" }`; **403** `codigo-invalido`, `codigo-expirado`, `teste-ja-usado`, `assinatura-inativa` ou `limite-de-maquinas` (com `outraMaquina`) |
+| `POST /v1/licencas/validar` | `{ "sessao", "maquina": { "id" } }` | **200** `{ "token" }` (renovado); **403** `sessao-invalida`, `assinatura-inativa`, `teste-expirado` ou `maquina-substituida` |
+| `POST /v1/sair` | `{ "sessao", "maquina": { "id" } }` | **200** |
+| `POST /v1/webhooks/stripe` | evento do Stripe; cabeçalho `Stripe-Signature` (validado) | **200**; idempotente. Usado só pelo Stripe |
+| `GET /v1/checkout/sessoes/:id` | — (CORS liberado só para a landing) | **200** `{ "email" (mascarado), "plano" }`; **202** (webhook ainda não chegou: a página tenta de novo); **404** |
 
-**Token:** JWS compacto assinado com **EdDSA (Ed25519)**. Payload `{ "v": 1, "licenca", "maquina", "plano", "pagaAte", "emitidoEm", "expiraEm" }`, datas em epoch ms. `expiraEm = min(pagaAte + 3 dias, emitidoEm + 7 dias)`. O app confere a assinatura com a chave pública (`chavePublicaDaLicenca` em `electron/config.js`), a máquina e a validade.
+**Token:** JWS compacto assinado com **EdDSA (Ed25519)**. Payload `{ "v": 1, "licenca", "maquina", "plano", "pagaAte", "emitidoEm", "expiraEm" }`, datas em epoch ms. O app confere a assinatura com a chave pública (`chavePublicaDaLicenca` em `electron/config.js`), a máquina e a validade (no máximo 7 dias).
 
 ### Guia do usuário
 
@@ -2096,12 +2283,38 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
     - **Com alterações autorizadas** (item 12): nada é enviado sozinho. A pergunta vai para o campo, com a nota *Pergunta da escuta: confira e aperte Enter*; você revisa, ajusta e envia. Se você estiver digitando algo, o campo não é trocado, e a pergunta fica só destacada no balão "ouvido" da conversa.
     - **Privacidade:** o áudio não é gravado e não sai do computador. Só os últimos 2 min de texto ficam na memória e são esquecidos ao sair do modo. Saem do computador só as falas candidatas (para o Haiku) e as perguntas enviadas ao chat, com o print.
     - Cada fala candidata usa um pouco de cota (uma chamada ao Haiku) e a transcrição usa a CPU enquanto há fala. O ditado (item 17) continua funcionando e passa na frente da escuta.
+21. **Navegador do agente** (ver ADR-46; só no app desktop): um navegador próprio de um Orquestrador, que o agente controla para abrir sites, ler a página, clicar, digitar e testar telas, e que você vê num bloco do canvas.
+    - **Ligar:** na configuração do Orquestrador (criação ou *⚙*), o interruptor **Navegador do agente**, desligado por padrão. Só vale no nível *Editar e rodar comandos* e fora do Plan Mode: nos outros, o agente não recebe as ferramentas. O aviso fica sempre à vista: o agente pode abrir **qualquer site, sem pedir aprovação a cada ação**, e usar os logins feitos nesse navegador. Ligue só em Orquestradores em que você confia.
+    - **O bloco no canvas:** abre sozinho quando o agente usa o navegador pela primeira vez, ao lado do terminal; mostra o título, o endereço (só leitura) e o que o agente está fazendo. Fechar o bloco não fecha o navegador: o agente continua podendo usá-lo.
+    - **Assumir:** *Assumir* pausa o agente (ele recebe "O usuário assumiu o navegador; tente depois.") e dá o teclado e o mouse a você; só então voltar, avançar e recarregar valem. *Devolver ao agente* o libera de novo.
+    - **Logins:** cada Orquestrador tem a sua sessão (`persist:navegador-<id>`), separada da tela do app e da prévia ao vivo: um login feito ali fica ali. **Excluir o Orquestrador apaga o login e os cookies dele.**
+    - **O que o navegador não faz:** downloads são bloqueados, as permissões do site (câmera, localização, notificações) são negadas e só abre `http` e `https`. O que a página diz é tratado pelo agente como dado, nunca como instrução, mas um site mal-intencionado ainda pode tentar enganá-lo: por isso é você quem liga.
+    - A prévia ao vivo continua sendo para o agente mostrar algo a você; o navegador é para ele operar.
+22. **Rotinas** (ver ADR-47): um fluxo que o app roda sozinho, na hora que você marcar, mandando pedidos aos seus Orquestradores.
+    - **Abrir:** no menu **+ Novo** (canto superior esquerdo) → **Rotinas**, logo depois de *Subagentes*. O painel abre logo abaixo da ilha, no mesmo lugar dos painéis de *Subagentes* e *Skills* (um painel da barra por vez). Com execuções esperando você, um selo amarelo com o número aparece no item **Rotinas** e também no botão **+ Novo**, mesmo com o menu e o painel fechados (o leitor de tela ouve, por exemplo, "2 rotinas aguardando aprovação").
+    - **Criar:** **+ Nova rotina**. Dê um nome e escolha *quando roda*: **Todo dia** (numa hora), **Em dias da semana**, **A cada tantos minutos** (mínimo 15) ou **Uma vez só** (numa data futura). Depois, de 1 a 10 **etapas**, na ordem: um **pedido** a um Orquestrador (*Executar*, ou *Só planejar*, em que o plano espera a sua aprovação), uma **aprovação** (uma pergunta que para a rotina até você decidir) ou uma **espera** de 1 a 1.440 minutos. Até 50 rotinas.
+    - **Se perder a hora:** *Pular essa execução* (padrão) ou *Executar assim que o app abrir*. Vale quando o app estava fechado (ou o computador dormindo) na hora marcada.
+    - **Aprovar:** quando um pedido volta com um plano, ou a rotina chega numa etapa de aprovação, ela **para** e um cartão aparece no painel, com um aviso (e uma notificação do Windows: clicar nela abre o painel). **Aprovar** segue a rotina (o plano é executado pelo Orquestrador); **Recusar** (com um motivo, se quiser) descarta o plano e encerra a execução.
+    - **Uma por vez:** cada rotina roda uma execução de cada vez. Se a hora vence com a anterior ainda rodando ou esperando aprovação, aquela execução aparece como **pulada**.
+    - **Orquestrador ocupado:** o pedido da rotina entra na fila dele (até 10) e roda quando chegar a vez. Se o pedido da frente falhou, foi cancelado ou deixou um plano para você aprovar, a fila para e a etapa da rotina falha, sem passar por cima do que você ainda tem a decidir.
+    - **Acompanhar:** abrir uma rotina mostra as etapas, o **Histórico** (as últimas 50 execuções, com o resultado de cada etapa, cortado em 4 mil caracteres: o texto inteiro está na conversa do Orquestrador), **Executar agora**, **Editar**, **Ativar** ou **Desativar** e a exclusão. **Cancelar execução** interrompe o pedido em curso (ele sai da fila ou o turno é cancelado).
+    - **Só com o app aberto:** o app confere as rotinas a cada ~30 s e **só no Windows** guarda um ícone na **bandeja**. Com pelo menos uma rotina ativa, **fechar a janela esconde o app na bandeja** em vez de encerrá-lo (na primeira vez, o app avisa); o menu do ícone tem **Abrir**, **Iniciar com o Windows** (no app instalado; abre já escondido) e **Sair**, que encerra de verdade. Sem rotina ativa, fechar encerra, como sempre. O que estava rodando quando o app fechou aparece como **interrompida**.
+    - **Cuidado:** cada pedido usa a sua cota e as permissões do Orquestrador escolhido, sem você por perto: uma rotina num Orquestrador em *Editar e rodar comandos* roda comandos sozinha.
+23. **Motores: Claude Code, Codex e GitHub Copilot CLI** (ver ADR-48): cada papel do Orquestrador roda no motor que você escolher, e dá para ter uma reserva.
+    - **Instalar:** o Claude Code é o padrão e já vem pronto. Para o **Codex**, `npm i -g @openai/codex` e `codex login`; para o **Copilot**, `npm i -g @github/copilot`, `copilot login` e `"includeCoAuthoredBy": false` em `~/.copilot/settings.json` (senão ele acrescenta a linha `Co-authored-by` nos commits). Os CLIs são achados no `PATH` (ou por `CODEX_BIN` e `COPILOT_BIN`); com o app aberto não precisa reiniciar.
+    - **Escolher:** na configuração do Orquestrador (criação ou *⚙*), as linhas **Orquestrador** e **Subagentes** têm, cada uma, o **motor** e o **modelo**. No Claude Code, Fable, Opus, Sonnet ou Haiku e o esforço de raciocínio; no Codex e no Copilot, o modelo do próprio CLI (*Padrão do CLI*) ou o id que você digitar, e o esforço é o do CLI. Um motor não instalado aparece como *(não instalado)*, e o aviso diz como instalar ou entrar. O Orquestrador e os subagentes podem ser de motores diferentes (por exemplo, o Claude pensando e o Codex executando).
+    - **Delegação:** com o Orquestrador no Codex ou no Copilot, ou com subagentes num motor diferente dele, o Orquestrador delega pela ferramenta `delegar_subtarefas` do app, que roda cada subtarefa num subagente do motor escolhido, em paralelo, na mesma pasta e com as mesmas permissões. Os bixinhos aparecem como sempre. O nível de permissão, o Plan Mode e a regra de commit e push valem iguais nos três motores.
+    - **Reserva:** na linha **Reserva**, marque os motores que podem assumir e use as setas para escolher quem vem primeiro (o motor do Orquestrador não entra; cada um precisa estar instalado e logado). Se o motor do Orquestrador bater o **limite de uso** ou ficar **sobrecarregado** no meio de um pedido, o app avisa *Trocou para …* na transcrição e manda o **mesmo pedido** ao próximo da lista, com um resumo do que ele ainda não viu. Esgotada a reserva, vale a espera de sempre (a retomada automática, ADR-36). Enquanto o limite do principal não libera, os pedidos novos já começam no motor de reserva.
+    - **O que muda fora do Claude Code:** o esforço de raciocínio é o do CLI; o **custo** do pedido (índice de custo) só é medido no Claude Code; o uso de tokens pode vir vazio ou incompleto; e o Copilot está em *preview* e o `app-server` do Codex é *experimental*, então uma atualização deles pode quebrar algo. Cada motor gasta a cota da assinatura dele.
 
 **Avisos que podem aparecer:**
 - *"orquestrador lendo …"*, *"orquestrador executando …"* (no log do terminal): não é erro. O Orquestrador está fazendo um trivial ele mesmo (ver ADR-14). Isso vale sempre e não tem opção para desligar (ver ADR-28); se quiser que ele delegue algo específico, peça no texto do pedido.
 - *"plano proposto · aguardando aprovação"*: o pedido foi considerado grande e nada foi alterado ainda (salvo desvio do modelo, ver ADR-15). Aprove, ajuste ou descarte no cartão.
 - *"bloqueado: …"*: um agente tentou algo fora do nível escolhido (por exemplo, editar em modo leitura, ou fazer `git commit` com a opção de commit e push desligada ou em Plan Mode).
 - *"turno interrompido"*: o servidor reiniciou durante o pedido. Envie de novo.
+- *"Trocou para Codex: limite do Claude atingido (libera às 14:30)"* (aviso na transcrição): a reserva assumiu o pedido (item 23). Não é erro: o mesmo pedido segue no outro motor. Em *sem notícias do Codex há 3min…*, o nome é o do motor do turno.
+- *"(não instalado)"* ao lado de um motor, ou o aviso *Instale o Codex (npm install -g @openai/codex) e rode `codex login` para entrar.*: o CLI não está no `PATH` ou você ainda não fez o login. Faça o que o aviso diz e escolha o motor de novo (a lista se atualiza em até 1 minuto).
+- *"O navegador do agente só funciona no aplicativo desktop."* ou *"O usuário assumiu o navegador; tente depois."* (resposta de uma ferramenta do navegador): o servidor está rodando fora do app, ou você assumiu o navegador. Devolva-o ao agente no bloco do navegador (item 21).
 - *"fila pausada"* (acima do prompt): nenhum pedido está rodando e há pedidos à espera, porque o último foi cancelado, falhou, foi interrompido ou deixou um plano para aprovar. Use *enviar agora* no primeiro, tire os que não fazem mais sentido (✕) ou mande outro pedido (item 3). Logo depois de um pedido terminar bem, o aviso pode aparecer por um instante, até o próximo da fila começar.
 - *"A fila de … está cheia (máximo 10 pedidos)."*: espere a fila andar ou tire algum pedido dela.
 - *"A fila aceita só texto: envie os anexos quando o orquestrador estiver livre."* (e o aviso equivalente no prompt): o Enter durante um pedido não manda imagens nem documentos para a fila. Espere o pedido terminar ou remova os anexos.
@@ -2125,12 +2338,14 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 
 ### Licença e assinatura (guia do usuário)
 
-Vale quando a licença estiver ligada (`exigirLicenca: true`, ver ADR-43); na fase de testes o app instalado abre sem pedir chave.
+Vale quando a licença estiver ligada (`exigirLicenca: true`, ver ADR-44); na fase de testes o app instalado abre sem pedir login.
 
-- **Assinar:** na tela de ativação, clique em **Assinar** (abre a página de planos da landing: mensal R$ 19,90 ou anual R$ 199,00, pagamento por cartão no Stripe). Ao pagar, você volta à página de sucesso, que mostra a **chave de licença** (formato `ORQ-XXXX-XXXX-XXXX-XXXX`); a mesma chave chega por e-mail, com o link de download.
-- **Ativar:** abra o app, cole a chave na tela de ativação e confirme. O app liga a licença a este computador e guarda o resultado em `%APPDATA%\Orquestrador de Agentes\licenca.json` (a chave e um token assinado).
-- **Uso diário:** o app confere a licença ao abrir e a cada 24 horas. Se a assinatura estiver em dia, nada muda para você.
-- **Sem internet:** a licença vale offline por até **7 dias** desde a última conferência (e, se um pagamento atrasar, por até 3 dias depois da data paga). Passado isso, o app pede conexão para revalidar.
-- **Trocar de computador:** por padrão, **1 computador por assinatura**. No computador antigo, abra a tela de ativação e use **Desativar nesta máquina**; depois ative a mesma chave no novo.
+- **Entrar:** na tela **Entrar**, digite seu e-mail. Você recebe um **código de 6 dígitos** (válido por 10 minutos); digite-o e o app abre. Não existe mais chave de licença.
+- **Teste grátis de 7 dias, sem cartão:** criado no primeiro login, com **1 teste por e-mail e 1 por computador**. Durante o teste o app avisa *Teste grátis: faltam N dias* (notificação, no máximo 1 por dia) com atalho para assinar. Quando acaba, o app volta à tela Entrar com *Seu teste grátis terminou. Assine com o mesmo e-mail*.
+- **Assinar:** clique em **Assinar** (abre a página de planos: mensal R$ 19,90 ou anual R$ 199,00, cartão no Stripe) e use **o mesmo e-mail** do app. A compra converte o teste em assinatura sem você entrar de novo (na próxima revalidação do app).
+- **Uso diário:** o app guarda uma sessão e um token assinado, confere ao abrir e a cada 24 horas. Se a assinatura estiver em dia, nada muda para você.
+- **Sem internet:** abre enquanto o token valer (até **7 dias** desde a última conferência). Passado isso, pede conexão.
+- **Trocar de computador:** **1 computador por assinatura**. Ao entrar num PC novo, o app mostra *Este e-mail já está em uso em <nome>. Usar neste computador?*; confirmando, o outro é desconectado (na próxima validação ele recebe `maquina-substituida`; offline ainda abre até o token vencer, no máximo 7 dias).
+- **Sair:** **Sair deste computador** encerra a sessão e libera a vaga para outro PC.
 - **Cancelar ou trocar o cartão:** em **Gerenciar assinatura** (portal do cliente do Stripe). Ao cancelar, o acesso segue até o fim do período pago.
-- **Mensagens comuns:** *chave inválida* (confira a digitação), *assinatura inativa* (pagamento pendente ou cancelada; regularize no portal), *limite de computadores* (desative o outro, como acima).
+- **Mensagens comuns:** *código inválido* ou *expirado* (peça outro), *muitas tentativas* (aguarde), *teste já usado* (assine com o mesmo e-mail), *assinatura inativa* (pagamento pendente ou cancelada; regularize no portal). Se o código não chegar, olhe o spam.

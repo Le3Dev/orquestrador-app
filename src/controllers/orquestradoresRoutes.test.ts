@@ -1285,6 +1285,32 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(previa.instrucoesIniciais).toContain("Pasta de trabalho: <pasta de trabalho>");
     });
 
+    it("a prévia ensina a delegar pela ferramenta do app com subagentes no Codex, e o navegador quando liberado", async () => {
+      const comCodex = {
+        ...configuracaoBasica,
+        motorDosSubagentes: "codex",
+        modeloDosSubagentes: "padrao",
+        nivelDePermissao: "edicao_e_comandos",
+        navegadorDoAgente: true,
+      };
+
+      const resposta = await postar("/previa-do-prompt", { configuracao: comCodex });
+      const previa = (await resposta.json()) as { instrucoesIniciais: string; mensagem: string };
+      const semDelegacao = (await (await postar("/previa-do-prompt", { configuracao: configuracaoBasica })).json()) as {
+        instrucoesIniciais: string;
+        mensagem: string;
+      };
+
+      expect(resposta.status).toBe(200);
+      expect(previa.instrucoesIniciais).toContain("chame a ferramenta delegar_subtarefas");
+      expect(previa.mensagem).toContain("- Como delegar: chame a ferramenta delegar_subtarefas");
+      expect(previa.mensagem).toContain("- Navegador do agente: você tem um navegador próprio");
+      expect(previa.mensagem).toContain("Os subagentes não têm o navegador");
+      expect(semDelegacao.instrucoesIniciais).not.toContain("delegar_subtarefas");
+      expect(semDelegacao.mensagem).not.toContain("delegar_subtarefas");
+      expect(semDelegacao.mensagem).not.toContain("Navegador do agente");
+    });
+
     it("a prévia mostra {{pasta}} e {{nome}} com os valores informados", async () => {
       const resposta = await postar("/previa-do-prompt", {
         configuracao: { ...configuracaoBasica, instrucoesPersonalizadas: "Em {{pasta}}, como {{ nome }}. {{outra}}" },
@@ -1816,5 +1842,298 @@ describe("rotas de orquestradores — eventos de vários orquestradores numa con
       expect(resposta.status).toBe(200);
       expect(await resposta.json()).toEqual([]);
     });
+  });
+});
+
+describe("rotas de orquestradores — vários motores", () => {
+  const raiz = path.resolve("/projetos");
+  let servidor: Server;
+  let base: string;
+  let repositorio: RepositorioEmMemoria;
+  let motor: MotorImediato;
+  let servico: ServicoDeOrquestracao;
+  const consultas: ConsultaDeEsforcoHerdado[] = [];
+  let ids = 0;
+
+  beforeAll(async () => {
+    repositorio = new RepositorioEmMemoria();
+    motor = new MotorImediato();
+    const explorador = new ExploradorDePastas(raiz);
+    vi.spyOn(explorador, "existe").mockResolvedValue(true);
+    const anexos = new ArmazemDeAnexosEmArquivo(path.join(tmpdir(), "orquestrador-rotas-motores-teste"));
+    const preferencias = new PreferenciasEmMemoria();
+    servico = new ServicoDeOrquestracao({
+      repositorio,
+      motor,
+      execucoes: new ControleDeExecucoesEmMemoria(),
+      publicador: { publicar: () => undefined, sinalizar: () => undefined },
+      anexos,
+      worktrees: {
+        preparar: async (_id, pastaDeTrabalho) => ({ cwd: pastaDeTrabalho, worktree: null }),
+        concluir: async () => false,
+      },
+      pastaDeArtefatos: (orquestradorId) => path.join(tmpdir(), "orquestrador-rotas-motores-artefatos", orquestradorId),
+      preferencias,
+      gerarId: () => `m${++ids}`,
+      agora: () => new Date("2026-10-28T12:00:00Z"),
+      esforcoDaMaquina: {
+        herdadoPara: async (consulta: ConsultaDeEsforcoHerdado) => {
+          consultas.push(consulta);
+          return EsforcoHerdado.criar({ nivel: "maximo", origem: "CLAUDE_CODE_EFFORT_LEVEL", modelo: null });
+        },
+      },
+    });
+
+    const aplicacao = express();
+    aplicacao.use(express.json());
+    aplicacao.use(
+      "/api",
+      criarOrquestradoresRoutes({
+        servico,
+        repositorio,
+        canal: new CanalDeEventos(),
+        explorador,
+        anexos,
+        preferencias,
+        pastaRaiz: raiz,
+      }),
+    );
+    servidor = aplicacao.listen(0, "127.0.0.1");
+    await once(servidor, "listening");
+    base = `http://127.0.0.1:${(servidor.address() as AddressInfo).port}/api`;
+  });
+
+  afterAll(async () => {
+    vi.restoreAllMocks();
+    servidor.close();
+    await once(servidor, "close");
+  });
+
+  beforeEach(() => {
+    consultas.length = 0;
+  });
+
+  const criacao = {
+    nome: "Novo",
+    pastaDeTrabalho: raiz,
+    modeloDoOrquestrador: "opus",
+    modeloDosSubagentes: "haiku",
+    quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
+    nivelDePermissao: "leitura",
+  };
+
+  async function requisitar(metodo: string, caminho: string, corpo?: unknown): Promise<Response> {
+    return fetch(`${base}${caminho}`, {
+      method: metodo,
+      headers: { "Content-Type": "application/json" },
+      ...(corpo === undefined ? {} : { body: JSON.stringify(corpo) }),
+    });
+  }
+
+  async function criar(extra: Record<string, unknown> = {}): Promise<{ id: string; configuracao: Record<string, unknown> }> {
+    const resposta = await requisitar("POST", "/orquestradores", { ...criacao, ...extra });
+    expect(resposta.status).toBe(201);
+    return (await resposta.json()) as { id: string; configuracao: Record<string, unknown> };
+  }
+
+  const alterar = (id: string, corpo: unknown) => requisitar("PATCH", `/orquestradores/${id}/configuracao`, corpo);
+
+  const padroes = { motorDoOrquestrador: "claude-code", motorDosSubagentes: "claude-code", ordemDeReserva: [] };
+
+  it("o POST sem os campos novos cria como sempre: Claude Code nos dois papéis, os mesmos modelos e sem reserva", async () => {
+    const criado = await criar();
+
+    expect(criado.configuracao).toMatchObject({ ...padroes, modeloDoOrquestrador: "opus", modeloDosSubagentes: "haiku" });
+    const detalhe = (await (await fetch(`${base}/orquestradores/${criado.id}`)).json()) as { configuracao: unknown };
+    expect(detalhe.configuracao).toMatchObject(padroes);
+    const lista = (await (await fetch(`${base}/orquestradores`)).json()) as Array<{ id: string; configuracao: unknown }>;
+    expect(lista.find((item) => item.id === criado.id)?.configuracao).toMatchObject(padroes);
+  });
+
+  it("o POST aceita o motor de cada papel, modelos do motor e a ordem de reserva, e os devolve", async () => {
+    const criado = await criar({
+      motorDoOrquestrador: "codex",
+      modeloDoOrquestrador: "gpt-5.1-codex",
+      motorDosSubagentes: "copilot",
+      modeloDosSubagentes: "padrao",
+      ordemDeReserva: ["claude-code", "copilot"],
+    });
+
+    expect(criado.configuracao).toMatchObject({
+      motorDoOrquestrador: "codex",
+      modeloDoOrquestrador: "gpt-5.1-codex",
+      motorDosSubagentes: "copilot",
+      modeloDosSubagentes: "padrao",
+      ordemDeReserva: ["claude-code", "copilot"],
+    });
+    expect(repositorio.buscarPorId(criado.id)?.configuracao.motoresEmOrdem).toEqual(["codex", "claude-code", "copilot"]);
+  });
+
+  it.each<[string, Record<string, unknown>, string]>([
+    ["motor do orquestrador desconhecido", { motorDoOrquestrador: "gemini" }, "Motor do orquestrador inválido. Use claude-code, codex, copilot."],
+    ["motor dos subagentes que não é texto", { motorDosSubagentes: 3 }, "Motor dos subagentes inválido. Use claude-code, codex, copilot."],
+    ["reserva com motor desconhecido", { ordemDeReserva: ["gemini"] }, "Motor de reserva inválido. Use claude-code, codex, copilot."],
+    ["reserva que não é uma lista", { ordemDeReserva: "codex" }, "A ordem de reserva deve ser uma lista de motores."],
+    ["reserva com motor repetido", { ordemDeReserva: ["codex", "codex"] }, "A ordem de reserva não pode repetir motores."],
+    ["reserva com o motor do orquestrador", { ordemDeReserva: ["claude-code"] }, "O motor do orquestrador não pode estar na ordem de reserva."],
+    ["modelo que não serve ao Claude Code", { modeloDoOrquestrador: "gpt-5" }, "Modelo do orquestrador inválido."],
+    ["modelo com caracteres proibidos", { motorDoOrquestrador: "codex", modeloDoOrquestrador: "gpt 5; rm" }, "Modelo do orquestrador inválido."],
+    ["'padrao' no Claude Code", { modeloDosSubagentes: "padrao" }, "Modelo dos subagentes inválido."],
+  ])("o POST recusa %s com 400", async (_nome, extra, mensagem) => {
+    const total = repositorio.listar().length;
+
+    const resposta = await requisitar("POST", "/orquestradores", { ...criacao, ...extra });
+
+    expect(resposta.status).toBe(400);
+    expect(await resposta.json()).toEqual({ erro: mensagem });
+    expect(repositorio.listar()).toHaveLength(total);
+  });
+
+  it("o PATCH troca o motor e a reserva; trocar o motor sem escolher o modelo volta ao modelo padrão dele", async () => {
+    const criado = await criar();
+
+    const resposta = await alterar(criado.id, { motorDoOrquestrador: "codex", ordemDeReserva: ["claude-code"] });
+
+    expect(resposta.status).toBe(200);
+    expect(((await resposta.json()) as { configuracao: unknown }).configuracao).toMatchObject({
+      motorDoOrquestrador: "codex",
+      modeloDoOrquestrador: "padrao",
+      // O outro papel não muda.
+      motorDosSubagentes: "claude-code",
+      modeloDosSubagentes: "haiku",
+      ordemDeReserva: ["claude-code"],
+    });
+    expect(repositorio.eventos.at(-1)).toMatchObject({
+      tipo: "configuracao_alterada",
+      configuracao: { motorDoOrquestrador: "codex", ordemDeReserva: ["claude-code"] },
+    });
+  });
+
+  it("o PATCH aceita o motor junto com o modelo, e só o modelo vale para o motor que o Orquestrador já tem", async () => {
+    const criado = await criar();
+
+    const noCodex = await alterar(criado.id, { motorDoOrquestrador: "codex", modeloDoOrquestrador: "gpt-5" });
+    const soOModelo = await alterar(criado.id, { modeloDoOrquestrador: "o3-mini" });
+    const invalido = await alterar(criado.id, { modeloDoOrquestrador: "modelo/com/barra" });
+
+    expect(((await noCodex.json()) as { configuracao: unknown }).configuracao).toMatchObject({
+      motorDoOrquestrador: "codex",
+      modeloDoOrquestrador: "gpt-5",
+    });
+    expect(((await soOModelo.json()) as { configuracao: unknown }).configuracao).toMatchObject({ modeloDoOrquestrador: "o3-mini" });
+    expect(invalido.status).toBe(400);
+    expect(await invalido.json()).toEqual({ erro: "Modelo do orquestrador inválido." });
+  });
+
+  it("o PATCH sem os campos novos mantém o motor e a reserva, e outro campo não os desfaz", async () => {
+    const criado = await criar({ ordemDeReserva: ["codex"] });
+
+    const resposta = await alterar(criado.id, { nivelDePermissao: "edicao" });
+
+    expect(((await resposta.json()) as { configuracao: unknown }).configuracao).toMatchObject({
+      ...padroes,
+      ordemDeReserva: ["codex"],
+      nivelDePermissao: "edicao",
+    });
+  });
+
+  it("o PATCH recusa, com mensagem clara, reserva e modelo que não servem ao motor atual", async () => {
+    const criado = await criar();
+    const recusas: Array<[Record<string, unknown>, string]> = [
+      [{ modeloDoOrquestrador: "gpt-5" }, "Modelo inválido. Use opus, sonnet ou haiku."],
+      [{ ordemDeReserva: ["claude-code"] }, "O motor do orquestrador não pode estar na ordem de reserva."],
+      [{ ordemDeReserva: ["codex", "codex"] }, "A ordem de reserva não pode repetir motores."],
+      [{ motorDoOrquestrador: "gemini" }, "Motor do orquestrador inválido. Use claude-code, codex, copilot."],
+      [{ ordemDeReserva: [1] }, "Motor de reserva inválido. Use claude-code, codex, copilot."],
+    ];
+
+    for (const [corpo, mensagem] of recusas) {
+      const resposta = await alterar(criado.id, corpo);
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: mensagem });
+    }
+    expect(repositorio.buscarPorId(criado.id)?.configuracao.paraDados()).toMatchObject({
+      ...padroes,
+      modeloDoOrquestrador: "opus",
+    });
+  });
+
+  it("a prévia do prompt aceita a configuração com os campos novos (e sem eles)", async () => {
+    const sem = await requisitar("POST", "/previa-do-prompt", { configuracao: criacao });
+    const com = await requisitar("POST", "/previa-do-prompt", {
+      configuracao: { ...criacao, motorDoOrquestrador: "codex", modeloDoOrquestrador: "padrao", ordemDeReserva: ["claude-code"] },
+    });
+    const invalida = await requisitar("POST", "/previa-do-prompt", { configuracao: { ...criacao, modeloDoOrquestrador: "turbo" } });
+
+    expect(sem.status).toBe(200);
+    expect(com.status).toBe(200);
+    expect(invalida.status).toBe(400);
+    expect(await invalida.json()).toEqual({ erro: "Modelo do orquestrador inválido." });
+  });
+
+  it("o navegador do agente nasce desligado, é criado e alterado pela API e vai ao pedido de turno", async () => {
+    const criado = await criar();
+    expect(criado.configuracao).toMatchObject({ navegadorDoAgente: false });
+
+    const ligado = await alterar(criado.id, { navegadorDoAgente: true });
+    expect(ligado.status).toBe(200);
+    expect(((await ligado.json()) as { configuracao: unknown }).configuracao).toMatchObject({ navegadorDoAgente: true });
+    // Outro campo não o desliga.
+    const outro = await alterar(criado.id, { nivelDePermissao: "edicao_e_comandos" });
+    expect(((await outro.json()) as { configuracao: unknown }).configuracao).toMatchObject({
+      navegadorDoAgente: true,
+      nivelDePermissao: "edicao_e_comandos",
+    });
+
+    const comNavegador = await criar({ navegadorDoAgente: true });
+    expect(comNavegador.configuracao).toMatchObject({ navegadorDoAgente: true });
+    await requisitar("POST", `/orquestradores/${comNavegador.id}/mensagens`, { texto: "oi" });
+    await vi.waitFor(() => expect(repositorio.buscarPorId(comNavegador.id)?.situacao).toBe("ocioso"));
+    expect(motor.pedidos.at(-1)?.configuracao.navegadorDoAgente).toBe(true);
+  });
+
+  it("recusa, com mensagem clara, o navegador do agente que não é verdadeiro ou falso", async () => {
+    const criado = await criar();
+
+    const naCriacao = await requisitar("POST", "/orquestradores", { ...criacao, navegadorDoAgente: "sim" });
+    const naAlteracao = await alterar(criado.id, { navegadorDoAgente: 1 });
+
+    for (const resposta of [naCriacao, naAlteracao]) {
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: 'A opção "Navegador do agente" deve ser verdadeira ou falsa.' });
+    }
+  });
+
+  it("o motor que o Orquestrador usa vai ao motor de agentes no pedido de turno", async () => {
+    const criado = await criar({ motorDoOrquestrador: "codex", modeloDoOrquestrador: "padrao" });
+
+    const resposta = await requisitar("POST", `/orquestradores/${criado.id}/mensagens`, { texto: "oi" });
+
+    expect(resposta.status).toBe(202);
+    await vi.waitFor(() => expect(repositorio.buscarPorId(criado.id)?.situacao).toBe("ocioso"));
+    expect(motor.pedidos.at(-1)).toMatchObject({ motor: "codex", contextoDaTroca: null, sessaoId: "", sessaoIniciada: false });
+  });
+
+  it("GET /esforco-herdado: só o Claude Code herda esforço; com motor novo no papel, ele vem nulo", async () => {
+    const resposta = await fetch(
+      `${base}/esforco-herdado?motorDoOrquestrador=codex&modeloDoOrquestrador=padrao&modeloDosSubagentes=opus&pasta=painel`,
+    );
+
+    expect(resposta.status).toBe(200);
+    expect(await resposta.json()).toEqual({
+      orquestrador: null,
+      subagentes: { nivel: "maximo", origem: "CLAUDE_CODE_EFFORT_LEVEL", modelo: null, deveAvisar: true },
+    });
+    expect(consultas.map((consulta) => consulta.modelo)).toEqual(["opus"]);
+  });
+
+  it.each<[string, string]>([
+    ["motorDoOrquestrador=gemini&modeloDoOrquestrador=opus&modeloDosSubagentes=opus&pasta=painel", "Motor do orquestrador inválido. Use claude-code, codex, copilot."],
+    ["modeloDoOrquestrador=gpt-5&modeloDosSubagentes=opus&pasta=painel", "Modelo do orquestrador inválido."],
+  ])("GET /esforco-herdado recusa %s com 400", async (query, mensagem) => {
+    const resposta = await fetch(`${base}/esforco-herdado?${query}`);
+
+    expect(resposta.status).toBe(400);
+    expect(await resposta.json()).toEqual({ erro: mensagem });
   });
 });

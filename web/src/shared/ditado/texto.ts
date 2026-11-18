@@ -1,12 +1,30 @@
 /** Menos que isto (0,3 s) é clique sem fala: nem vale transcrever. */
 export const AMOSTRAS_MINIMAS = 4_800;
 
-/** Junta o texto ditado ao que já estava no campo, com um espaço entre os dois. */
-export function juntarDitado(atual: string, ditado: string): string {
+/**
+ * Junta o texto ditado ao que já estava no campo, com um espaço entre os dois.
+ * Sem `selecao`, ou com o cursor já no fim do texto, o ditado é concatenado ao
+ * final. Com o cursor no meio (ou uma seleção), o trecho selecionado é
+ * substituído pelo ditado, com espaços adicionados dos dois lados quando
+ * necessário para não colar palavras.
+ */
+export function juntarDitado(
+  atual: string,
+  ditado: string,
+  selecao?: { inicio: number; fim: number },
+): string {
   const novo = ditado.trim();
   if (novo === "") return atual;
   if (atual.trim() === "") return novo;
-  return /\s$/.test(atual) ? `${atual}${novo}` : `${atual} ${novo}`;
+
+  if (selecao === undefined || selecao.inicio === atual.length) {
+    return /\s$/.test(atual) ? `${atual}${novo}` : `${atual} ${novo}`;
+  }
+
+  const antes = atual.slice(0, selecao.inicio);
+  const depois = atual.slice(selecao.fim);
+  const comEspacoAntes = antes !== "" && !/\s$/.test(antes) ? `${antes} ${novo}` : `${antes}${novo}`;
+  return depois !== "" && !/^\s/.test(depois) ? `${comEspacoAntes} ${depois}` : `${comEspacoAntes}${depois}`;
 }
 
 /** Aviso quando o microfone fica sem som por alguns segundos. */

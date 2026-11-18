@@ -1,3 +1,4 @@
+import type { TracoDoDesenho } from "../canvas/layout";
 import { ErroDaApi } from "./cliente";
 
 /**
@@ -32,6 +33,36 @@ export interface ResumoDoArtefato {
   atualizadoEm: string;
   versaoAtual: number;
   versoes: VersaoDoArtefato[];
+}
+
+/**
+ * Onde o traço feito sobre a página está preso: o contêiner que rola (caminho
+ * de índices dos filhos elemento, a partir da raiz do documento) e o elemento
+ * dentro dele (caminho a partir do contêiner). Ver `desenhoNaPagina.ts`.
+ */
+export interface AncoraDoTraco {
+  conteiner: number[];
+  elemento: number[];
+}
+
+/**
+ * Um traço do desenho sobre a página de uma versão do artefato, como o servidor
+ * guarda: os campos do traço do canvas, com os pontos relativos ao canto
+ * superior esquerdo do elemento âncora; sem âncora (`null`), em coordenadas
+ * do documento.
+ */
+export interface TracoGravado extends TracoDoDesenho {
+  ancora: AncoraDoTraco | null;
+}
+
+/**
+ * O desenho de uma versão: os traços e a largura da página (em px CSS do
+ * documento) quando o primeiro traço foi feito. Com largura, a página é sempre
+ * montada nela e reduzida (ou ampliada) para caber; nula, a página flui como sempre.
+ */
+export interface DesenhoGravado {
+  tracos: TracoGravado[];
+  largura: number | null;
 }
 
 /** Os eventos ao vivo de `GET /api/artefatos/eventos` (sem histórico). */
@@ -79,6 +110,8 @@ async function requisitarJson<Resposta>(caminho: string, opcoes: RequestInit = {
 }
 
 const caminhoDoArtefato = (id: string) => `/artefatos/${encodeURIComponent(id)}`;
+const caminhoDaVersao = (id: string, numero: number) =>
+  `${caminhoDoArtefato(id)}/versoes/${encodeURIComponent(String(numero))}`;
 
 export const apiDosArtefatos = {
   /** Todos, do mais recente (`atualizadoEm`) para o mais antigo. */
@@ -88,8 +121,39 @@ export const apiDosArtefatos = {
 
   /** O conteúdo bruto (HTML ou Markdown) de uma versão; 404 se ela não existe. */
   lerVersao: async (id: string, numero: number): Promise<string> => {
-    const resposta = await chamar(`${caminhoDoArtefato(id)}/versoes/${encodeURIComponent(String(numero))}`);
+    const resposta = await chamar(caminhoDaVersao(id, numero));
     return resposta.text();
+  },
+
+  /**
+   * Os traços desenhados sobre a versão (vazio se ninguém desenhou) e a largura
+   * da página quando o desenho começou (nula se não veio número); 404 se a
+   * versão não existe. Vêm como o servidor mandou: quem usa valida cada traço e a largura.
+   */
+  lerDesenho: async (id: string, numero: number): Promise<DesenhoGravado> => {
+    const corpo = await requisitarJson<{ tracos?: unknown; largura?: unknown } | null>(
+      `${caminhoDaVersao(id, numero)}/desenho`,
+    );
+    return {
+      tracos: Array.isArray(corpo?.tracos) ? (corpo.tracos as TracoGravado[]) : [],
+      largura: typeof corpo?.largura === "number" ? corpo.largura : null,
+    };
+  },
+
+  /**
+   * Troca o desenho da versão inteiro, com a largura da página (204). Lista vazia
+   * apaga o desenho. Recusado com 400 (traço ou largura inválidos), 404 ou 413 (grande demais).
+   */
+  salvarDesenho: async (
+    id: string,
+    numero: number,
+    tracos: readonly TracoGravado[],
+    largura: number | null,
+  ): Promise<void> => {
+    await requisitarJson<null>(`${caminhoDaVersao(id, numero)}/desenho`, {
+      method: "PUT",
+      body: JSON.stringify({ tracos, largura }),
+    });
   },
 
   /** Recusado (400, "Título inválido.") com o título em branco ou longo demais. */

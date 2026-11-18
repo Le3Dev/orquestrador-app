@@ -1,0 +1,46 @@
+/* ---------------- Motores (Claude Code, Codex e GitHub Copilot CLI) ----------------
+ * O motor e o modelo de cada papel, a ordem de reserva, o selo do motor no pedido e o aviso de quando o
+ * pedido passa para outro motor. As linhas do formulário usam as classes da criação (`.linha-da-criacao`). */
+
+/* Dois seletores de classe: ganham do `.select-compacto` (largura fixa) sem depender da ordem dos arquivos. */
+.select-compacto.select-do-motor { width: auto; min-width: 11rem; }
+.select-compacto.select-do-modelo-do-cli { width: auto; min-width: 9.5rem; }
+.input.campo-escuro.campo-do-id-do-modelo { width: 12rem; min-width: 0; max-width: 100%; height: 32px; font-size: 12px; }
+.input.campo-escuro.campo-do-id-do-modelo[aria-invalid="true"] { border-color: var(--error); }
+
+/* A ordem de reserva: uma linha por motor, com a caixa, a posição e as setas de ordenar. */
+.lista-da-reserva { display: flex; flex-direction: column; gap: 4px; }
+.item-da-reserva {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 6px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--screen-bg);
+}
+.item-da-reserva > label { flex: 1; min-width: 0; cursor: pointer; }
+.ordem-da-reserva { flex-shrink: 0; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.botao-da-reserva { width: 26px; height: 26px; }
+.botao-da-reserva:disabled { opacity: .35; cursor: not-allowed; }
+.botao-da-reserva:disabled:hover { background: transparent; color: var(--secondary); }
+
+/* O motor que executa o pedido, quando não é o Claude Code (no terminal, junto do pedido). */
+.linha-do-motor-do-turno { display: flex; align-items: center; gap: 6px; margin-left: 18px; }
+.selo-do-motor-do-turno { color: var(--info); border-color: color-mix(in srgb, var(--info) 40%, var(--border)); }
+
+/* O pedido continuou em outro motor: o limite de uso ou a sobrecarga do principal. */
+.aviso-de-troca-de-motor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+  background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--primary);
+}
+.aviso-de-troca-de-motor > svg { flex-shrink: 0; color: var(--warning); }

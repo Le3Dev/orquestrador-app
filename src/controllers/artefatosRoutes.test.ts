@@ -6,13 +6,14 @@ import { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import express from "express";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { TracoGravado } from "../artefatos/DesenhoDoArtefato";
 import { OrigemDoArtefato } from "../artefatos/OrigemDoArtefato";
 import { ServicoDeArtefatos } from "../artefatos/ServicoDeArtefatos";
 import { PastaDeEntradaDosArtefatos } from "../infraestrutura/arquivos/ColetorDeArtefatosEmPasta";
 import { RepositorioDeArtefatosEmArquivo } from "../infraestrutura/arquivos/RepositorioDeArtefatosEmArquivo";
+import { montarAplicacao } from "../root";
 import { CanalDosArtefatos, criarArtefatosRoutes, ResumoDoArtefato } from "./artefatosRoutes";
 
 const CSP =
@@ -44,9 +45,13 @@ describe("rotas de artefatos", () => {
       agora: () => relogio,
     });
 
-    const aplicacao = express();
-    aplicacao.use(express.json({ limit: "40mb" }));
-    aplicacao.use("/api", criarArtefatosRoutes({ servico, canal }));
+    // A montagem do app de verdade: o limite do corpo do desenho depende do leitor geral pulá-lo.
+    const aplicacao = montarAplicacao(
+      { chaveDeAcesso: null, permitirNavegador: true, urlDeDownload: null, pastaDaTela: path.join(pasta, "sem-tela") },
+      (rotas) => {
+        rotas.use("/api", criarArtefatosRoutes({ servico, canal }));
+      },
+    );
     servidor = aplicacao.listen(0, "127.0.0.1");
     await once(servidor, "listening");
     base = `http://127.0.0.1:${(servidor.address() as AddressInfo).port}/api`;
@@ -224,6 +229,204 @@ describe("rotas de artefatos", () => {
 
     expect(resposta.status).toBe(404);
     expect(await resposta.json()).toEqual({ erro: "Artefato não encontrado." });
+  });
+
+  describe("desenho de cada versão", () => {
+    const seta: TracoGravado = {
+      id: "t1",
+      tipo: "seta",
+      cor: "vermelho",
+      espessura: 6,
+      pontos: [
+        { x: 0, y: 0 },
+        { x: 10, y: 20 },
+      ],
+      ancora: { conteiner: [], elemento: [1, 3] },
+    };
+    const texto: TracoGravado = {
+      id: "t2",
+      tipo: "texto",
+      cor: "claro",
+      espessura: 2,
+      pontos: [{ x: 4, y: 4 }],
+      texto: "aqui",
+      ancora: null,
+    };
+    const pastaDoArtefato = (): string => path.join(pasta, "artefatos", "art-1");
+
+    function enviarTexto(metodo: string, caminho: string, corpo: string): Promise<Response> {
+      return fetch(`${base}${caminho}`, { method: metodo, headers: { "Content-Type": "application/json" }, body: corpo });
+    }
+
+    it("GET sem desenho responde 200 com lista vazia", async () => {
+      await entregar("a.html", "<p>1</p>");
+
+      const resposta = await fetch(`${base}/artefatos/art-1/versoes/1/desenho`);
+
+      expect(resposta.status).toBe(200);
+      expect(resposta.headers.get("cache-control")).toBe("no-store");
+      expect(await resposta.json()).toEqual({ tracos: [], largura: null });
+    });
+
+    it("PUT responde 204, grava v<N>.desenho.json e o GET devolve só os campos conhecidos", async () => {
+      await entregar("a.html", "<p>1</p>");
+      await entregar("a.html", "<p>2</p>");
+
+      const resposta = await enviar("PUT", "/artefatos/art-1/versoes/1/desenho", {
+        tracos: [
+          { ...seta, texto: "some: não é texto", extra: true },
+          { ...texto, ancora: { conteiner: [0], elemento: [], outro: 1 } },
+        ],
+        largura: 1280,
+        desconhecido: "x",
+      });
+
+      expect(resposta.status).toBe(204);
+      expect(await resposta.text()).toBe("");
+      expect((await readdir(pastaDoArtefato())).sort()).toEqual(["artefato.json", "v1.desenho.json", "v1.html", "v2.html"]);
+      expect(await (await fetch(`${base}/artefatos/art-1/versoes/1/desenho`)).json()).toEqual({
+        tracos: [seta, { ...texto, ancora: { conteiner: [0], elemento: [] } }],
+        largura: 1280,
+      });
+      // A versão nova começa limpa.
+      expect(await (await fetch(`${base}/artefatos/art-1/versoes/2/desenho`)).json()).toEqual({ tracos: [], largura: null });
+    });
+
+    it.each<[string, Record<string, unknown>]>([
+      ["largura null", { largura: null }],
+      ["sem largura (formato anterior)", {}],
+    ])("PUT com %s grava largura null e o GET a devolve", async (_caso, largura) => {
+      await entregar("a.html", "<p>1</p>");
+
+      const resposta = await enviar("PUT", "/artefatos/art-1/versoes/1/desenho", { tracos: [seta], ...largura });
+
+      expect(resposta.status).toBe(204);
+      expect(await (await fetch(`${base}/artefatos/art-1/versoes/1/desenho`)).json()).toEqual({ tracos: [seta], largura: null });
+    });
+
+    it.each([[200], [10000]])("PUT com largura %j (limite) é aceito", async (largura) => {
+      await entregar("a.html", "<p>1</p>");
+
+      const resposta = await enviar("PUT", "/artefatos/art-1/versoes/1/desenho", { tracos: [seta], largura });
+
+      expect(resposta.status).toBe(204);
+      expect(await (await fetch(`${base}/artefatos/art-1/versoes/1/desenho`)).json()).toEqual({ tracos: [seta], largura });
+    });
+
+    it("PUT com lista vazia apaga o desenho da versão", async () => {
+      await entregar("a.html", "<p>1</p>");
+      await enviar("PUT", "/artefatos/art-1/versoes/1/desenho", { tracos: [seta] });
+
+      const resposta = await enviar("PUT", "/artefatos/art-1/versoes/1/desenho", { tracos: [], largura: 900 });
+
+      expect(resposta.status).toBe(204);
+      expect((await readdir(pastaDoArtefato())).sort()).toEqual(["artefato.json", "v1.html"]);
+      expect(await (await fetch(`${base}/artefatos/art-1/versoes/1/desenho`)).json()).toEqual({ tracos: [], largura: null });
+    });
+
+    it("DELETE do artefato leva o desenho junto", async () => {
+      await entregar("a.html", "<p>1</p>");
+      await enviar("PUT", "/artefatos/art-1/versoes/1/desenho", { tracos: [seta] });
+
+      await enviar("DELETE", "/artefatos/art-1");
+      await repositorio.aguardarGravacoes();
+
+      expect(await readdir(path.join(pasta, "artefatos"))).toEqual(["entrada"]);
+      expect((await fetch(`${base}/artefatos/art-1/versoes/1/desenho`)).status).toBe(404);
+    });
+
+    it.each<[string, string, string]>([
+      ["GET", "nao-existe", "1"],
+      ["PUT", "nao-existe", "1"],
+      ["GET", "nao-existe", "abc"],
+    ])("%s do desenho de artefato inexistente é 404 do artefato", async (metodo, id, numero) => {
+      const resposta = await enviar(metodo, `/artefatos/${id}/versoes/${numero}/desenho`, metodo === "PUT" ? { tracos: [] } : undefined);
+
+      expect(resposta.status).toBe(404);
+      expect(await resposta.json()).toEqual({ erro: "Artefato não encontrado." });
+    });
+
+    it.each([["GET"], ["PUT"]])("%s do desenho de versão inexistente é 404 da versão", async (metodo) => {
+      await entregar("a.html", "<p>1</p>");
+
+      const resposta = await enviar(metodo, "/artefatos/art-1/versoes/2/desenho", metodo === "PUT" ? { tracos: [seta] } : undefined);
+
+      expect(resposta.status).toBe(404);
+      expect(await resposta.json()).toEqual({ erro: "Versão não encontrada." });
+      expect((await readdir(pastaDoArtefato())).sort()).toEqual(["artefato.json", "v1.html"]);
+    });
+
+    it.each([["0"], ["abc"], ["01"], ["-1"], ["1.5"]])("número de versão %j é 400", async (numero) => {
+      await entregar("a.html", "<p>1</p>");
+
+      const leitura = await fetch(`${base}/artefatos/art-1/versoes/${numero}/desenho`);
+      const gravacao = await enviar("PUT", `/artefatos/art-1/versoes/${numero}/desenho`, { tracos: [] });
+
+      expect(leitura.status).toBe(400);
+      expect(await leitura.json()).toEqual({ erro: "Número de versão inválido." });
+      expect(gravacao.status).toBe(400);
+      expect(await gravacao.json()).toEqual({ erro: "Número de versão inválido." });
+    });
+
+    it.each<[string, unknown]>([
+      ["sem tracos", {}],
+      ["tracos que não é lista", { tracos: { 0: seta } }],
+      ["corpo que é lista", [seta]],
+      ["traço que não é objeto", { tracos: ["x"] }],
+      ["tipo desconhecido", { tracos: [{ ...seta, tipo: "circulo" }] }],
+      ["cor desconhecida", { tracos: [{ ...seta, cor: "#ff0000" }] }],
+      ["espessura desconhecida", { tracos: [{ ...seta, espessura: 4 }] }],
+      ["espessura em texto", { tracos: [{ ...seta, espessura: "3" }] }],
+      ["id vazio", { tracos: [{ ...seta, id: "" }] }],
+      ["id longo demais", { tracos: [{ ...seta, id: "x".repeat(65) }] }],
+      ["id que não é texto", { tracos: [{ ...seta, id: 1 }] }],
+      ["sem pontos", { tracos: [{ ...seta, pontos: [] }] }],
+      ["pontos demais", { tracos: [{ ...seta, tipo: "caneta", pontos: Array.from({ length: 5001 }, () => ({ x: 1, y: 1 })) }] }],
+      ["ponto com coordenada em texto", { tracos: [{ ...seta, pontos: [{ x: "1", y: 2 }] }] }],
+      ["ponto sem y", { tracos: [{ ...seta, pontos: [{ x: 1 }] }] }],
+      ["texto longo demais", { tracos: [{ ...texto, texto: "x".repeat(501) }] }],
+      ["texto que não é texto", { tracos: [{ ...texto, texto: 42 }] }],
+      ["sem âncora", { tracos: [{ ...texto, ancora: undefined }] }],
+      ["âncora sem elemento", { tracos: [{ ...seta, ancora: { conteiner: [] } }] }],
+      ["índice negativo", { tracos: [{ ...seta, ancora: { conteiner: [-1], elemento: [] } }] }],
+      ["índice fracionário", { tracos: [{ ...seta, ancora: { conteiner: [], elemento: [1.5] } }] }],
+      ["caminho longo demais", { tracos: [{ ...seta, ancora: { conteiner: Array.from({ length: 65 }, () => 0), elemento: [] } }] }],
+      ["traços demais", { tracos: Array.from({ length: 2001 }, (_, indice) => ({ ...texto, id: `t${indice}` })) }],
+      ["largura abaixo de 200", { tracos: [seta], largura: 199 }],
+      ["largura acima de 10000", { tracos: [seta], largura: 10001 }],
+      ["largura fracionária", { tracos: [seta], largura: 1.5 }],
+      ["largura em texto", { tracos: [seta], largura: "800" }],
+    ])("PUT com %s responde 400 e não grava nada", async (_caso, corpo) => {
+      await entregar("a.html", "<p>1</p>");
+
+      const resposta = await enviar("PUT", "/artefatos/art-1/versoes/1/desenho", corpo);
+
+      expect(resposta.status).toBe(400);
+      expect(((await resposta.json()) as { erro: string }).erro).toMatch(/^Desenho inválido\./);
+      expect((await readdir(pastaDoArtefato())).sort()).toEqual(["artefato.json", "v1.html"]);
+    });
+
+    it("PUT com JSON malformado responde 400 em JSON, sem a pilha", async () => {
+      await entregar("a.html", "<p>1</p>");
+
+      const resposta = await enviarTexto("PUT", "/artefatos/art-1/versoes/1/desenho", '{"tracos": [');
+
+      expect(resposta.status).toBe(400);
+      expect(await resposta.json()).toEqual({ erro: "Desenho inválido." });
+    });
+
+    it("PUT com corpo acima de 1 MB responde 413 em JSON, e o limite geral continua valendo nas outras rotas", async () => {
+      await entregar("a.html", "<p>1</p>");
+      const grande = { tracos: [], enchimento: "x".repeat(1024 * 1024) };
+
+      const resposta = await enviar("PUT", "/artefatos/art-1/versoes/1/desenho", grande);
+      const outraRota = await enviar("PATCH", "/artefatos/art-1", { titulo: "Grande", enchimento: "x".repeat(1024 * 1024) });
+
+      expect(resposta.status).toBe(413);
+      expect(await resposta.json()).toEqual({ erro: "O desenho passa de 1 MB." });
+      expect(outraRota.status).toBe(200);
+      expect((await readdir(pastaDoArtefato())).sort()).toEqual(["artefato.json", "v1.html"]);
+    });
   });
 
   it("SSE /artefatos/eventos entrega os eventos ao vivo, nomeados e com o resumo", async () => {

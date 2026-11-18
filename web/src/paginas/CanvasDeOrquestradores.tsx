@@ -38,10 +38,13 @@ import {
 import { IconeMinimapa, IconeOrquestrador } from "../componentes/Icones";
 import { ChatRapido, TIPO_DA_RESPOSTA_DO_CHAT } from "../componentes/chat/ChatRapido";
 import { ArestaDoBixinho } from "../componentes/canvas/ArestaDoBixinho";
+import { ArestaDoVinculo } from "../componentes/canvas/ArestaDoVinculo";
+import { PainelDoVinculo } from "../componentes/canvas/PainelDoVinculo";
 import { BarraDoGrupo } from "../componentes/canvas/BarraDoGrupo";
 import { CamadaDeDesenho } from "../componentes/canvas/CamadaDeDesenho";
 import { NoArtefato } from "../componentes/canvas/NoArtefato";
 import { NoBixinho } from "../componentes/canvas/NoBixinho";
+import { NoNavegadorDoAgente } from "../componentes/canvas/NoNavegadorDoAgente";
 import { NoNota } from "../componentes/canvas/NoNota";
 import { NoPrevia } from "../componentes/canvas/NoPrevia";
 import { NavegadorDePastas } from "../componentes/canvas/NavegadorDePastas";
@@ -58,7 +61,7 @@ import {
 } from "../componentes/canvas/IlhasDoCanvas";
 import { type ControleDaPaleta, PaletaDeComandos } from "../componentes/canvas/PaletaDeComandos";
 import { rodandoNoDesktop, rodandoNoMac } from "../shared/ponteDoDesktop";
-import { AvisoDeConexao, ErroDoCanvas, StatusDoCanvas } from "../componentes/canvas/PaineisDoCanvas";
+import { AvisoDeConexao, ErroDoCanvas, RotinasDoCanvas, StatusDoCanvas } from "../componentes/canvas/PaineisDoCanvas";
 import { type AbaDoPainelDeSkills, PainelDeSkills } from "../componentes/canvas/PainelDeSkills";
 import { PainelDeSubagentes } from "../componentes/canvas/PainelDeSubagentes";
 import { api, ErroDaApi, mensagemDeErro } from "../shared/api/cliente";
@@ -102,6 +105,7 @@ import {
   TAMANHO_DA_NOTA,
   TAMANHO_DA_PREVIA,
   TAMANHO_DO_ARTEFATO,
+  TAMANHO_DO_NAVEGADOR,
   TAMANHO_DO_RASCUNHO,
   TAMANHO_DO_SHELL,
   TAMANHO_DO_TERMINAL,
@@ -116,6 +120,7 @@ import {
   arestasDasLigacoes,
   arestasDasPrevias,
   arestasDosBixinhos,
+  arestasDosNavegadores,
   arestasDosShells,
   comEscalaDaLetra,
   comItensLigadosJunto,
@@ -126,6 +131,7 @@ import {
   ehFechavelEmGrupo,
   ehItemLigavel,
   ehLigacaoValida,
+  ehNavegador,
   ehNota,
   ehPrevia,
   ehRascunho,
@@ -164,12 +170,14 @@ import {
   selecionarTodasAsTelas,
   semBixinhosNaSelecao,
   semLigacoesOrfas,
+  semNavegador,
   semTerminal,
   sincronizarBixinhos,
   subagentesVisiveis,
   telasSelecionadas,
 } from "../shared/canvas/nos";
 import { ProvedorDasNotas } from "../shared/canvas/notas";
+import { fecharNavegadorDoAgente } from "../shared/canvas/ponteDoNavegador";
 import {
   type AcoesDosShells,
   type OrigemDoShell,
@@ -183,8 +191,16 @@ import { useModoInvisivel } from "../shared/hooks/useModoInvisivel";
 import { useChat } from "../shared/hooks/useChat";
 import { useConversas } from "../shared/hooks/useConversas";
 import { useMovimentoDoCanvas } from "../shared/hooks/useMovimentoDoCanvas";
+import { useNavegadoresDoAgente } from "../shared/hooks/useNavegadoresDoAgente";
 import { useNotas } from "../shared/hooks/useNotas";
 import { useOrquestradores } from "../shared/hooks/useOrquestradores";
+import { useVinculos } from "../shared/hooks/useVinculos";
+import {
+  type AcoesDosVinculos,
+  arestasDosVinculos,
+  lerIdDaArestaDoVinculo,
+  ProvedorDosVinculos,
+} from "../shared/canvas/vinculos";
 import { usePreferenciasDaTela } from "../shared/hooks/usePreferenciasDaTela";
 import { mesmoConteudo, useReaproveitado } from "../shared/hooks/useReaproveitado";
 import { useRodaDoCanvas } from "../shared/hooks/useRodaDoCanvas";
@@ -251,9 +267,10 @@ const TIPOS_DE_NO = {
   artefato: comAlcaDeLigacao(NoArtefato, true),
   previa: comAlcaDeLigacao(NoPrevia, false),
   shell: NoShell,
+  navegador: NoNavegadorDoAgente,
 } satisfies NodeTypes;
 // A linha de um item ligado é a curva padrão, com a pele em `.aresta-ligacao`; a do bixinho, a própria.
-const TIPOS_DE_ARESTA = { bixinho: ArestaDoBixinho, ligacao: BezierEdge } satisfies EdgeTypes;
+const TIPOS_DE_ARESTA = { bixinho: ArestaDoBixinho, ligacao: BezierEdge, vinculo: ArestaDoVinculo } satisfies EdgeTypes;
 // Enquadrar nunca passa de 100% (o texto dos terminais só fica nítido em zoom
 // inteiro) nem desce de 60% (ver `escolherEnquadramento`).
 /** Folga do enquadramento ao abrir o canvas. */
@@ -264,7 +281,7 @@ const FOLGA_DO_ENQUADRAMENTO = 0.12;
 const LIMITES_DO_ZOOM = { minZoom: 0.1, maxZoom: 2 };
 const VIEWPORT_PADRAO: Viewport = { x: 0, y: 0, zoom: 1 };
 /** Os painéis que abrem logo abaixo da ilha do canto superior esquerdo; só um fica aberto por vez. */
-type PainelDaBarra = "subagentes" | "skills";
+type PainelDaBarra = "subagentes" | "skills" | "rotinas";
 /** Nome e dica do botão do minimapa, no canto inferior direito. */
 const DICA_DO_MINIMAPA = { mostrar: "Mostrar minimapa", esconder: "Esconder minimapa" } as const;
 /**
@@ -322,6 +339,9 @@ function classeNoMinimapa(no: NoDoCanvas, trabalhando: ReadonlySet<string>): str
   }
   if (ehShell(no)) {
     return "minimapa-shell";
+  }
+  if (ehNavegador(no)) {
+    return "minimapa-navegador";
   }
   return ehTerminal(no) && trabalhando.has(no.data.orquestradorId)
     ? "minimapa-terminal minimapa-terminal-trabalhando"
@@ -431,7 +451,8 @@ function Canvas() {
         Object.keys(layoutInicial.notas).length +
         Object.keys(layoutInicial.artefatos).length +
         Object.keys(layoutInicial.previas).length +
-        Object.keys(layoutInicial.shells).length >
+        Object.keys(layoutInicial.shells).length +
+        Object.keys(layoutInicial.navegadores ?? {}).length >
         0,
   );
   const [nosIniciais] = useState(() => nosDoLayout(layoutInicial));
@@ -592,11 +613,30 @@ function Canvas() {
         criadosAgora.current.delete(id);
       }
     }
+    const semOrquestrador = (id: string): boolean => !existentes.has(id) && !criadosAgora.current.has(id);
+    // O navegador do agente de um orquestrador excluído (por outra aba, ou por esta) fecha com ele: a vista do
+    // app e o login guardado. Fora do app desktop, `fecharNavegadorDoAgente` não faz nada.
+    for (const id of new Set([
+      ...nosAtuais.current.filter(ehTerminal).map((terminal) => terminal.id),
+      ...nosAtuais.current.filter(ehNavegador).map((navegador) => navegador.data.orquestradorId),
+    ])) {
+      if (semOrquestrador(id)) {
+        void fecharNavegadorDoAgente(id, true);
+      }
+    }
     setNos((atuais) => {
-      const orfaos = atuais
-        .filter(ehTerminal)
-        .filter((terminal) => !existentes.has(terminal.id) && !criadosAgora.current.has(terminal.id));
-      return orfaos.length === 0 ? atuais : orfaos.reduce((restantes, terminal) => semTerminal(restantes, terminal.id), atuais);
+      const orfaos = atuais.filter(ehTerminal).filter((terminal) => semOrquestrador(terminal.id));
+      const semOsTerminais =
+        orfaos.length === 0 ? atuais : orfaos.reduce((restantes, terminal) => semTerminal(restantes, terminal.id), atuais);
+      const navegadoresOrfaos = semOsTerminais
+        .filter(ehNavegador)
+        .filter((navegador) => semOrquestrador(navegador.data.orquestradorId));
+      return navegadoresOrfaos.length === 0
+        ? semOsTerminais
+        : navegadoresOrfaos.reduce(
+            (restantes, navegador) => semNavegador(restantes, navegador.data.orquestradorId),
+            semOsTerminais,
+          );
     });
     // A limpeza de um orquestrador excluído não serve mais: sai do armazenamento.
     setBixinhosLimpos((atuais) => {
@@ -618,9 +658,10 @@ function Canvas() {
   // terminal ou passa para outro lado dele (as pontas seguem o lado), ou
   // quando chega um evento; e o React Flow só recebe um array novo quando
   // alguma linha mudou de fato. Arrastar sem trocar de lado não muda nenhuma.
-  // As prévias e os shells entram também: a linha tracejada do terminal até a janela que saiu dele.
+  // As prévias, os shells e os navegadores do agente entram também: a linha tracejada do terminal até a janela
+  // que saiu dele.
   const ligados = useReaproveitado(
-    nos.filter((no) => ehTerminal(no) || ehBixinho(no) || ehPrevia(no) || ehShell(no)),
+    nos.filter((no) => ehTerminal(no) || ehBixinho(no) || ehPrevia(no) || ehShell(no) || ehNavegador(no)),
     mesmasLigacoes,
   );
   const arestasCalculadas = useMemo(
@@ -628,16 +669,57 @@ function Canvas() {
       ...arestasDosBixinhos(ligados, conversas, bixinhosSaindo),
       ...arestasDasPrevias(ligados),
       ...arestasDosShells(ligados),
+      ...arestasDosNavegadores(ligados),
     ],
     [ligados, conversas, bixinhosSaindo],
   );
   // As linhas dos itens ligados acompanham o lado de cada item a cada quadro (são poucas); a
   // reaproveitada só muda quando alguma delas troca de lado, nasce, some ou é selecionada.
   const [ligacaoSelecionada, setLigacaoSelecionada] = useState<string | null>(null);
+  // Os vínculos entre orquestradores: uma linha entre os dois terminais; clicar nela abre o painel do vínculo.
+  const vinculosDoCanvas = useVinculos();
+  const { vinculos, criar: criarVinculo, desfazer: desfazerVinculo } = vinculosDoCanvas;
+  const [vinculoAberto, setVinculoAberto] = useState<string | null>(null);
   const arestas = useReaproveitado(
-    [...arestasCalculadas, ...arestasDasLigacoes(nos, ligacaoSelecionada)],
+    [
+      ...arestasCalculadas,
+      ...arestasDasLigacoes(nos, ligacaoSelecionada),
+      ...arestasDosVinculos(nos, vinculos, vinculoAberto),
+    ],
     reaproveitarArestas,
   );
+  const acoesDosVinculos = useMemo<AcoesDosVinculos>(
+    () => ({ vinculos, criar: criarVinculo }),
+    [vinculos, criarVinculo],
+  );
+  const aoClicarNaAresta = useCallback((_evento: unknown, aresta: ArestaDoCanvas) => {
+    const vinculoId = lerIdDaArestaDoVinculo(aresta.id);
+    if (vinculoId !== null) {
+      setVinculoAberto(vinculoId);
+    }
+  }, []);
+  const fecharVinculo = useCallback(() => setVinculoAberto(null), []);
+  // O painel do vínculo só existe com os dois orquestradores ainda na lista (removido, some da tela).
+  const painelDoVinculo = useMemo(() => {
+    const vinculo = vinculos.find((candidato) => candidato.id === vinculoAberto);
+    const a = orquestradores?.find((candidato) => candidato.id === vinculo?.orquestradorAId);
+    const b = orquestradores?.find((candidato) => candidato.id === vinculo?.orquestradorBId);
+    if (vinculo === undefined || a === undefined || b === undefined) {
+      return null;
+    }
+    return (
+      <PainelDoVinculo
+        key={vinculo.id}
+        vinculo={vinculo}
+        a={{ id: a.id, nome: a.nome, projeto: a.nomeDaPasta }}
+        b={{ id: b.id, nome: b.nome, projeto: b.nomeDaPasta }}
+        aoFechar={fecharVinculo}
+        aoSalvarNotas={(texto) => vinculosDoCanvas.salvarNotas(vinculo.id, texto)}
+        aoEnviarMensagem={(de, texto) => vinculosDoCanvas.enviarMensagem(vinculo.id, de, texto)}
+        aoDesfazer={() => desfazerVinculo(vinculo.id)}
+      />
+    );
+  }, [vinculos, vinculoAberto, orquestradores, fecharVinculo, vinculosDoCanvas, desfazerVinculo]);
 
   // Puxar a linha de uma nota, prévia ou artefato até um terminal os liga; repetida, nada muda.
   const aoLigar = useCallback((conexao: Connection) => setNos((atuais) => ligarItem(atuais, conexao)), [setNos]);
@@ -877,6 +959,15 @@ function Canvas() {
   useLayoutEffect(() => {
     nosAtuais.current = nos;
   }, [nos]);
+
+  // O navegador do agente (app desktop): abre sozinho quando o agente o usa e pelo botão do terminal.
+  const lerNos = useCallback(() => nosAtuais.current, []);
+  const { abrirNavegador, fecharNavegador } = useNavegadoresDoAgente({
+    setNos,
+    lerNos,
+    posicaoNoCentroVisivel,
+    enquadrarSemAproximar,
+  });
   const [avisoDoLimite, setAvisoDoLimite] = useState(false);
 
   /** Se cabe abrir o terminal pedido (nulo: um terminal novo). Ponto único da trava. */
@@ -1208,13 +1299,24 @@ function Canvas() {
   const organizar = useCallback(() => {
     setNos((atuais) => {
       const janelas = atuais
-        .filter((no) => !ehBixinho(no) && !ehNota(no) && !ehArtefato(no) && !ehPrevia(no) && !ehShell(no))
+        .filter(
+          (no) => !ehBixinho(no) && !ehNota(no) && !ehArtefato(no) && !ehPrevia(no) && !ehShell(no) && !ehNavegador(no),
+        )
         .map((no) => tamanhoParaOrganizar(no, TAMANHO_DO_TERMINAL));
-      // As prévias e os shells vão para as colunas das notas: também não têm bixinhos.
+      // As prévias, os shells e os navegadores do agente vão para as colunas das notas: também não têm bixinhos.
       const notasNoCanvas = atuais
-        .filter((no) => ehNota(no) || ehPrevia(no) || ehShell(no))
+        .filter((no) => ehNota(no) || ehPrevia(no) || ehShell(no) || ehNavegador(no))
         .map((no) =>
-          tamanhoParaOrganizar(no, ehNota(no) ? TAMANHO_DA_NOTA : ehShell(no) ? TAMANHO_DO_SHELL : TAMANHO_DA_PREVIA),
+          tamanhoParaOrganizar(
+            no,
+            ehNota(no)
+              ? TAMANHO_DA_NOTA
+              : ehShell(no)
+                ? TAMANHO_DO_SHELL
+                : ehNavegador(no)
+                  ? TAMANHO_DO_NAVEGADOR
+                  : TAMANHO_DA_PREVIA,
+          ),
         );
       const artefatosNoCanvas = atuais.filter(ehArtefato).map((no) => tamanhoParaOrganizar(no, TAMANHO_DO_ARTEFATO));
       const posicoes = organizarComNotas(janelas, notasNoCanvas, artefatosNoCanvas);
@@ -1282,9 +1384,11 @@ function Canvas() {
         fecharPrevia(no.data.previaId);
       } else if (ehShell(no)) {
         fecharShell(no.data.shellId);
+      } else if (ehNavegador(no)) {
+        fecharNavegador(no.data.orquestradorId);
       }
     }
-  }, [acoesDosArtefatos, fecharPrevia, fecharShell, fecharTerminal]);
+  }, [acoesDosArtefatos, fecharNavegador, fecharPrevia, fecharShell, fecharTerminal]);
 
   /** Zoom em 100% (texto nítido) sem sair do lugar: o Ctrl+0 e a paleta. */
   const zoomEmCemPorCento = useCallback(() => {
@@ -1541,6 +1645,8 @@ function Canvas() {
       lerPreviasAbertas,
       desligarItem: desligarItemDoTerminal,
       lerItensLigados,
+      abrirNavegador,
+      fecharNavegador,
     }),
     [
       abrirTerminal,
@@ -1561,6 +1667,8 @@ function Canvas() {
       lerPreviasAbertas,
       desligarItemDoTerminal,
       lerItensLigados,
+      abrirNavegador,
+      fecharNavegador,
     ],
   );
   // Os nós só leem do servidor a conexão e a memória por Orquestrador: a
@@ -1780,6 +1888,15 @@ function Canvas() {
     [abrirTerminal],
   );
   const abrirPainelDeSubagentes = useCallback(() => abrirPainel("subagentes"), [abrirPainel]);
+  // As rotinas agendadas: quem pode receber o pedido de cada etapa são os orquestradores que existem (só id e nome).
+  // `abrirPainelDeRotinas` também é o que a notificação do Windows pede ao clicar (`aoPedirPainel`).
+  const orquestradoresParaRotinas = useMemo(
+    () => orquestradores?.map(({ id, nome }) => ({ id, nome })) ?? null,
+    [orquestradores],
+  );
+  const abrirPainelDeRotinas = useCallback(() => abrirPainel("rotinas"), [abrirPainel]);
+  // Quantas execuções esperam aprovação: o `RotinasDoCanvas` (sempre montado) informa, e o `MenuNovo` mostra o selo.
+  const [rotinasAguardandoAprovacao, setRotinasAguardandoAprovacao] = useState(0);
   // O painel de skills abre em Instaladas (uma skill ou "Ver todas") ou em Explorar ("Explorar marketplace").
   // `abertura` muda a cada pedido: abrir de novo em outra aba reinicia o painel na aba pedida.
   const [aberturaDeSkills, setAberturaDeSkills] = useState<{ aba: AbaDoPainelDeSkills; abertura: number }>({
@@ -1824,10 +1941,21 @@ function Canvas() {
           aoEscolherOrquestrador={focarOrquestrador}
           subagentes={subagentesProntos}
           aoAbrirSubagentes={abrirPainelDeSubagentes}
+          aoAbrirRotinas={abrirPainelDeRotinas}
+          rotinasAguardandoAprovacao={rotinasAguardandoAprovacao}
           skills={skills}
           erroDasSkills={erroDasSkills}
           aoAbrirSkills={abrirPainelDeSkills}
           aoExplorarMarketplace={explorarMarketplace}
+        />
+        {/* Sem botão: abre pelo item Rotinas do `+ Novo`. Fica montado com o painel fechado: é ele que mantém o selo das aprovações e avisa o app desktop. */}
+        <RotinasDoCanvas
+          servidorConectado={servidor.conectado}
+          orquestradores={orquestradoresParaRotinas}
+          aberto={painelAberto === "rotinas"}
+          aoAbrir={abrirPainelDeRotinas}
+          aoFechar={fecharPainel}
+          aoMudarAguardandoAprovacao={setRotinasAguardandoAprovacao}
         />
         {painelAberto === "subagentes" && <PainelDeSubagentes aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />}
         {painelAberto === "skills" && (
@@ -1864,6 +1992,10 @@ function Canvas() {
       focarOrquestrador,
       subagentesProntos,
       abrirPainelDeSubagentes,
+      servidor.conectado,
+      orquestradoresParaRotinas,
+      abrirPainelDeRotinas,
+      rotinasAguardandoAprovacao,
       skills,
       erroDasSkills,
       abrirPainelDeSkills,
@@ -2078,6 +2210,7 @@ function Canvas() {
       <ProvedorDasNotas valor={notas.valor}>
         <ProvedorDosArtefatos valor={valorDosArtefatos}>
           <ProvedorDosShells valor={valorDosShells}>
+           <ProvedorDosVinculos valor={acoesDosVinculos}>
             {/* App desktop: faixa invisível que arrasta a janela; antes de tudo no DOM para o no-drag dos demais recortá-la. */}
             {desktop && <FaixaDeArrasto />}
             <div
@@ -2094,6 +2227,7 @@ function Canvas() {
                     edgeTypes={TIPOS_DE_ARESTA}
                     onNodesChange={aoMudarNosEReacomodar}
                     onEdgesChange={aoMudarArestas}
+                    onEdgeClick={aoClicarNaAresta}
                     onConnect={aoLigar}
                     isValidConnection={ligacaoValida}
                     onNodeDragStart={aoComecarArrasteDosNos}
@@ -2135,6 +2269,7 @@ function Canvas() {
                     {barraDoGrupo}
                     {painelDoChat}
                   </ReactFlow>
+                  {painelDoVinculo}
                   {/* As Configurações se posicionam sozinhas à direita da área do canvas, abaixo das notificações. */}
                   <div className="camada-das-configuracoes">
                     <ConfiguracoesDoApp
@@ -2166,6 +2301,7 @@ function Canvas() {
             {escolhendoPastaDoShell && (
               <NavegadorDePastas aoEscolher={abrirShellNaPasta} aoFechar={fecharEscolhaDaPastaDoShell} />
             )}
+           </ProvedorDosVinculos>
           </ProvedorDosShells>
         </ProvedorDosArtefatos>
       </ProvedorDasNotas>

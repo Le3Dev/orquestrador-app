@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api/cliente";
-import type { DadosDaPredefinicao, DadosDasPreferencias, EsforcosHerdados } from "../api/tipos";
+import type { DadosDaPredefinicao, DadosDasPreferencias, EsforcosHerdados, EstadoDoMotor, Motor } from "../api/tipos";
 import { descreverAlteracoesDaConfiguracao } from "../formatacao";
+import { rotuloDoMotor } from "../modelos";
 
 // Usados pela ⚙ do terminal (CamposDaConfiguracao) e pela criação (NoRascunho).
 
@@ -30,6 +31,72 @@ export function usePredefinicoes(): DadosDaPredefinicao[] {
     };
   }, []);
   return predefinicoes;
+}
+
+/** Os motores como a tela os conhece: a lista do servidor, ou nada quando não foi possível verificar. */
+export interface SituacaoDosMotores {
+  /** Nulo enquanto carrega ou se a verificação falhou. */
+  motores: readonly EstadoDoMotor[] | null;
+  /** A rota não existe (servidor antigo) ou deu erro: nenhum motor é desabilitado, e a tela avisa. */
+  naoVerificou: boolean;
+}
+
+/**
+ * Se os CLIs dos motores estão instalados (`GET /api/motores`), lido uma vez ao abrir. Com a rota ausente ou
+ * falhando, a tela segue: nenhum motor é desabilitado e aparece "não foi possível verificar os motores".
+ */
+export function useMotores(): SituacaoDosMotores {
+  const [situacao, setSituacao] = useState<SituacaoDosMotores>({ motores: null, naoVerificou: false });
+  useEffect(() => {
+    let ativo = true;
+    api
+      .listarMotores()
+      .then((motores) => {
+        if (ativo) {
+          setSituacao({ motores: Array.isArray(motores) ? motores : null, naoVerificou: !Array.isArray(motores) });
+        }
+      })
+      .catch(() => {
+        if (ativo) {
+          setSituacao({ motores: null, naoVerificou: true });
+        }
+      });
+    return () => {
+      ativo = false;
+    };
+  }, []);
+  return situacao;
+}
+
+/** O estado de um motor na lista; nulo sem a lista (ainda não carregou ou não foi possível verificar). */
+export function estadoDoMotor(situacao: SituacaoDosMotores, motor: Motor): EstadoDoMotor | null {
+  return situacao.motores?.find((candidato) => candidato.motor === motor) ?? null;
+}
+
+/**
+ * Por que o motor não pode ser escolhido, para a dica: só um motor que o servidor diz não estar instalado é
+ * recusado. Sem a lista, nada é recusado.
+ */
+export function motivoDoMotorIndisponivel(situacao: SituacaoDosMotores, motor: Motor): string | null {
+  const estado = estadoDoMotor(situacao, motor);
+  if (estado === null || estado.instalado) {
+    return null;
+  }
+  return estado.mensagem ?? `${estado.rotulo || rotuloDoMotor(motor)} não está instalado neste computador.`;
+}
+
+/**
+ * Um aviso sobre um motor que está instalado mas pode falhar (sem login); nulo quando está tudo certo ou não se sabe.
+ */
+export function avisoDoMotor(situacao: SituacaoDosMotores, motor: Motor): string | null {
+  const estado = estadoDoMotor(situacao, motor);
+  if (estado === null || !estado.instalado) {
+    return null;
+  }
+  if (estado.logado === false) {
+    return estado.mensagem ?? `Faça login no ${estado.rotulo || rotuloDoMotor(motor)} antes de usar.`;
+  }
+  return null;
 }
 
 /**

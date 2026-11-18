@@ -10,13 +10,17 @@ import { PedidoDeTurno } from "../../orquestracao/MotorDeAgentes";
 import { NivelDePermissao } from "../../orquestracao/NivelDePermissao";
 import { PastaDeTrabalho } from "../../orquestracao/PastaDeTrabalho";
 import { SelecaoDeSubagentesProntos, subagentesProntosSelecionados } from "../../orquestracao/SubagentesProntos";
+import { NOMES_DAS_FERRAMENTAS_DO_NAVEGADOR } from "../mcp/FerramentasDoNavegador";
+import { nomeDaFerramentaNoClaudeCode } from "../mcp/ServidorMcpDoApp";
 import {
   limitarSaidaDoBash,
   comandosProibidosDoTurno,
   configuracoesDaSessao,
   definicaoDosAgentes,
+  delegaPeloApp,
   FERRAMENTAS_POR_NIVEL,
   ferramentasDeSkill,
+  ferramentasDoAppNoClaudeCode,
   ferramentasDoEsforco,
   ferramentasDoTurno,
   linhaDeEntrada,
@@ -29,7 +33,12 @@ import {
 
 const PRONTO = { nome: "revisor", descricao: "Revisa.", prompt: "Revise.", modelo: "herdar" as const };
 
-const arquivos = { agentes: "agentes.json", instrucoes: "instrucoes.txt", configuracoes: "configuracoes.json" };
+const arquivos = {
+  agentes: "agentes.json",
+  instrucoes: "instrucoes.txt",
+  configuracoes: "configuracoes.json",
+  mcp: "mcp.json",
+};
 
 const COMMIT_E_PUSH = ["PowerShell(git commit:*)", "PowerShell(git push:*)", "Bash(git commit:*)", "Bash(git push:*)"];
 
@@ -62,6 +71,8 @@ function pedido(
     subagentesProntos: [],
     sessaoId: "sessao-1",
     sessaoIniciada,
+    motor: "claude-code",
+    contextoDaTroca: null,
     texto: "analise",
     modo,
     pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
@@ -869,5 +880,159 @@ describe("artefatos online no claude.ai", () => {
 
     expect(ambiente).not.toHaveProperty("CLAUDE_CODE_ARTIFACT");
     expect(ambiente).not.toHaveProperty("CLAUDE_CODE_ARTIFACT_AUTO_OPEN");
+  });
+});
+
+describe("modelos que o Claude Code recebe", () => {
+  it("com a configuração padrão, o orquestrador e os subagentes vão com o apelido configurado", () => {
+    const turno = pedido(false);
+
+    expect(valoresDe(montarArgumentos(turno, arquivos), "--model")).toEqual(["opus"]);
+    expect(definicaoDosAgentes(turno).executor?.model).toBe("haiku");
+    expect(definicaoDosAgentes({ ...turno, subagentesProntos: [PRONTO] }).revisor?.model).toBe("haiku");
+  });
+
+  it("um modelo de outro motor num dos papéis nunca vai ao Claude Code: cai no apelido de sempre", () => {
+    const configuracao = ConfiguracaoDoOrquestrador.de({
+      modeloDoOrquestrador: "opus",
+      motorDosSubagentes: "codex",
+      modeloDosSubagentes: "gpt-5.1-codex",
+      quantidadeDeSubagentes: { modo: "automatica", limite: 4 },
+      nivelDePermissao: "leitura",
+    });
+    const turno = { ...pedido(false), configuracao };
+
+    expect(definicaoDosAgentes(turno).executor?.model).toBe("sonnet");
+    expect(definicaoDosAgentes({ ...turno, subagentesProntos: [PRONTO] }).revisor?.model).toBe("sonnet");
+    expect(valoresDe(montarArgumentos(turno, arquivos), "--model")).toEqual(["opus"]);
+  });
+});
+describe("ferramentas do app (servidor MCP) — navegador do agente", () => {
+  const NAVEGADOR = { navegador: true };
+  const FERRAMENTAS_DO_NAVEGADOR = NOMES_DAS_FERRAMENTAS_DO_NAVEGADOR.map(nomeDaFerramentaNoClaudeCode);
+  const comProntos = (turno: PedidoDeTurno): PedidoDeTurno => ({ ...turno, subagentesProntos: [PRONTO] });
+
+  it("os nomes são os 11 do Claude Code (mcp__orquestrador__navegador_*) e só vêm com o grupo ligado", () => {
+    expect(FERRAMENTAS_DO_NAVEGADOR).toHaveLength(11);
+    expect(FERRAMENTAS_DO_NAVEGADOR.every((nome) => nome.startsWith("mcp__orquestrador__navegador_"))).toBe(true);
+    expect(ferramentasDoAppNoClaudeCode(NAVEGADOR)).toEqual(FERRAMENTAS_DO_NAVEGADOR);
+    expect(ferramentasDoAppNoClaudeCode({ navegador: false })).toEqual([]);
+    expect(ferramentasDoAppNoClaudeCode({})).toEqual([]);
+  });
+
+  it("com o navegador, passa --mcp-config e libera as ferramentas em --allowedTools, não em --tools", () => {
+    const argumentos = montarArgumentos(pedido(false, "edicao_e_comandos"), arquivos, NAVEGADOR);
+
+    expect(valoresDe(argumentos, "--mcp-config")).toEqual(["mcp.json"]);
+    expect(argumentos.indexOf("--mcp-config")).toBeLessThan(argumentos.indexOf("--strict-mcp-config"));
+    expect(valoresDe(argumentos, "--allowedTools")).toEqual(expect.arrayContaining(FERRAMENTAS_DO_NAVEGADOR));
+    expect(valoresDe(argumentos, "--tools")).not.toEqual(expect.arrayContaining(FERRAMENTAS_DO_NAVEGADOR));
+    // `--disallowedTools` é variádico: continua por último.
+    expect(argumentos.at(-1)).toBe(comandosProibidosDoTurno(pedido(false)).at(-1));
+  });
+
+  it("sem o navegador, os argumentos não mudam: nada de --mcp-config nem de ferramentas mcp__", () => {
+    const turno = pedido(false, "edicao_e_comandos");
+    const semOApp = montarArgumentos(turno, arquivos);
+
+    expect(montarArgumentos(turno, arquivos, {})).toEqual(semOApp);
+    expect(montarArgumentos(turno, arquivos, { navegador: false })).toEqual(semOApp);
+    expect(semOApp).not.toContain("--mcp-config");
+    expect(semOApp.some((argumento) => argumento.startsWith("mcp__"))).toBe(false);
+    expect(semOApp).toContain("--strict-mcp-config");
+  });
+
+  it("o executor e os subagentes prontos recebem as ferramentas do navegador; sem ele, nenhuma", () => {
+    const turno = comProntos(pedido(false, "edicao_e_comandos"));
+
+    const com = definicaoDosAgentes(turno, "unix", NAVEGADOR);
+    const sem = definicaoDosAgentes(turno);
+
+    expect(com.executor?.tools).toEqual(expect.arrayContaining(FERRAMENTAS_DO_NAVEGADOR));
+    expect(com.revisor?.tools).toEqual(expect.arrayContaining(FERRAMENTAS_DO_NAVEGADOR));
+    expect(sem.executor?.tools.some((ferramenta) => ferramenta.startsWith("mcp__"))).toBe(false);
+    expect(sem.revisor?.tools.some((ferramenta) => ferramenta.startsWith("mcp__"))).toBe(false);
+  });
+
+  it("não mexe nas demais ferramentas: as de cada nível, as de artefato e as regras de commit seguem iguais", () => {
+    const turno = pedido(false, "edicao_e_comandos");
+    const semOApp = montarArgumentos(turno, arquivos);
+    const comOApp = montarArgumentos(turno, arquivos, NAVEGADOR);
+
+    expect(valoresDe(comOApp, "--tools")).toEqual(valoresDe(semOApp, "--tools"));
+    expect(valoresDe(comOApp, "--disallowedTools")).toEqual(valoresDe(semOApp, "--disallowedTools"));
+    expect(valoresDe(comOApp, "--allowedTools")).toEqual([...valoresDe(semOApp, "--allowedTools"), ...FERRAMENTAS_DO_NAVEGADOR]);
+  });
+});
+
+describe("delegação pelo app (subagentes no Codex ou no Copilot)", () => {
+  const DELEGACAO = { delegar_subtarefas: true };
+  const FERRAMENTA_DE_DELEGACAO_NO_CLAUDE = nomeDaFerramentaNoClaudeCode("delegar_subtarefas");
+  const FERRAMENTAS_DO_NAVEGADOR = NOMES_DAS_FERRAMENTAS_DO_NAVEGADOR.map(nomeDaFerramentaNoClaudeCode);
+
+  it("o nome da ferramenta é mcp__orquestrador__delegar_subtarefas, e delegaPeloApp só vale com o grupo ligado", () => {
+    expect(FERRAMENTA_DE_DELEGACAO_NO_CLAUDE).toBe("mcp__orquestrador__delegar_subtarefas");
+    expect(ferramentasDoAppNoClaudeCode(DELEGACAO)).toEqual([FERRAMENTA_DE_DELEGACAO_NO_CLAUDE]);
+    expect(ferramentasDoAppNoClaudeCode({ ...DELEGACAO, navegador: true })).toEqual([
+      ...FERRAMENTAS_DO_NAVEGADOR,
+      FERRAMENTA_DE_DELEGACAO_NO_CLAUDE,
+    ]);
+    expect(delegaPeloApp(DELEGACAO)).toBe(true);
+    expect(delegaPeloApp({ delegar_subtarefas: false })).toBe(false);
+    expect(delegaPeloApp({ navegador: true })).toBe(false);
+  });
+
+  it("passa --mcp-config e libera só a ferramenta de delegação, sem a Agent e sem --agents", () => {
+    const argumentos = montarArgumentos(pedido(false, "edicao_e_comandos"), arquivos, DELEGACAO);
+
+    expect(valoresDe(argumentos, "--mcp-config")).toEqual(["mcp.json"]);
+    expect(valoresDe(argumentos, "--allowedTools")).toContain(FERRAMENTA_DE_DELEGACAO_NO_CLAUDE);
+    expect(valoresDe(argumentos, "--tools")).not.toContain(FERRAMENTA_DE_DELEGACAO_NO_CLAUDE);
+    expect(valoresDe(argumentos, "--tools")).not.toContain("Agent");
+    expect(valoresDe(argumentos, "--allowedTools")).not.toContain("Agent");
+    expect(argumentos).not.toContain("--agents");
+    expect(argumentos).not.toContain("agentes.json");
+    expect(argumentos).toContain("--strict-mcp-config");
+    // `--disallowedTools` continua por último.
+    expect(argumentos.at(-1)).toBe(comandosProibidosDoTurno(pedido(false)).at(-1));
+  });
+
+  it("a delegação soma ao navegador: as duas famílias de ferramentas em --allowedTools, um só --mcp-config", () => {
+    const argumentos = montarArgumentos(pedido(false, "edicao_e_comandos"), arquivos, { ...DELEGACAO, navegador: true });
+
+    expect(argumentos.filter((argumento) => argumento === "--mcp-config")).toHaveLength(1);
+    expect(valoresDe(argumentos, "--allowedTools")).toEqual(
+      expect.arrayContaining([...FERRAMENTAS_DO_NAVEGADOR, FERRAMENTA_DE_DELEGACAO_NO_CLAUDE]),
+    );
+    expect(argumentos).not.toContain("--agents");
+  });
+
+  it("o Workflow do ultracode também sai: quem delega é a ferramenta do app, não os agentes do Claude Code", () => {
+    const turno = pedido(false, "edicao_e_comandos", "execucao", false, { esforcoDoOrquestrador: "ultracode" });
+
+    expect(valoresDe(montarArgumentos(turno, arquivos), "--tools")).toContain("Workflow");
+    expect(valoresDe(montarArgumentos(turno, arquivos, DELEGACAO), "--tools")).not.toContain("Workflow");
+    expect(valoresDe(montarArgumentos(turno, arquivos, DELEGACAO), "--allowedTools")).not.toContain("Workflow");
+    // O esforço em si continua valendo.
+    expect(valoresDe(montarArgumentos(turno, arquivos, DELEGACAO), "--effort")).toEqual(["ultracode"]);
+  });
+
+  it("sem a delegação, a Agent e o --agents seguem como sempre (a ferramenta do app não aparece)", () => {
+    const argumentos = montarArgumentos(pedido(false, "edicao_e_comandos"), arquivos, { delegar_subtarefas: false });
+
+    expect(valoresDe(argumentos, "--tools")).toContain("Agent");
+    expect(valoresDe(argumentos, "--agents")).toEqual(["agentes.json"]);
+    expect(argumentos).not.toContain("--mcp-config");
+    expect(argumentos.some((argumento) => argumento.includes("delegar_subtarefas"))).toBe(false);
+  });
+
+  it("o executor e os subagentes prontos nunca recebem a ferramenta de delegação (só o Orquestrador delega)", () => {
+    const turno = { ...pedido(false, "edicao_e_comandos"), subagentesProntos: [PRONTO] };
+
+    const agentes = definicaoDosAgentes(turno, "unix", { ...DELEGACAO, navegador: true });
+
+    expect(agentes.executor?.tools).not.toContain(FERRAMENTA_DE_DELEGACAO_NO_CLAUDE);
+    expect(agentes.revisor?.tools).not.toContain(FERRAMENTA_DE_DELEGACAO_NO_CLAUDE);
+    expect(agentes.executor?.tools).toEqual(expect.arrayContaining(FERRAMENTAS_DO_NAVEGADOR));
   });
 });

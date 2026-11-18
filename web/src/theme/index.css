@@ -1500,6 +1500,36 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   min-height: 0;
 }
 
+/* A página na largura do desenho (NoArtefato.tsx, PaginaNaLarguraDoDesenho). Sem desenho, o contêiner
+ * e a moldura só passam o espaço adiante. Com desenho, a página (iframe ou div do Markdown) vem com a
+ * largura, a altura e o transform no estilo; a moldura tem o tamanho dela já escalada e, abaixo da
+ * escala mínima, passa da largura disponível: aí o contêiner rola de lado. */
+.pagina-na-largura-do-desenho {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.pagina-na-largura-do-desenho-escalada {
+  align-items: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.moldura-da-pagina-escalada {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.pagina-na-largura-do-desenho-escalada > .moldura-da-pagina-escalada {
+  flex: none;
+  overflow: hidden;
+}
+
 /* A página: fundo claro e esquema claro (sem isso, o navegador pintaria o
  * fundo de branco opaco por cima, ou o texto escuro ficaria sobre o escuro). */
 .corpo-do-artefato-html {
@@ -1518,7 +1548,9 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
  * dela, mesmo que ela estivesse ativa (usar a página) quando a caneta foi escolhida pelo teclado. */
 .react-flow:has(.camada-de-desenho-ativa) .corpo-do-artefato-html { pointer-events: none; }
 
+/* `position: relative`: a camada de desenho (desenhoNaPagina.ts) mora no canto dela e rola junto com o texto. */
 .corpo-do-artefato-markdown {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -1575,10 +1607,9 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   min-height: 0;
 }
 .corpo-da-tela-cheia > .vista-nativa-da-previa { flex: 1; }
-/* O desenho sobre a página do artefato em tela cheia: a camada (a mesma classe do canvas) cobre o corpo.
- * Desligado, os traços se veem mas a camada não pega o mouse (a regra `.camada-de-desenho`). A barrinha
- * fica no alto, centrada; o wrapper leva o transform, para a animação da barra não o sobrescrever. */
-.desenho-da-tela-cheia { outline: none; }
+/* O desenho sobre a página do artefato em tela cheia mora dentro da própria página (desenhoNaPagina.ts):
+ * aqui fica só a barrinha, no alto, centrada; o wrapper leva o transform, para a animação da barra
+ * não o sobrescrever. */
 .barra-do-desenho-da-tela-cheia {
   position: absolute;
   top: 10px;
@@ -2055,6 +2086,44 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
 .react-flow__edge.aresta-ligacao .react-flow__edge-path { stroke: color-mix(in srgb, var(--info) 55%, transparent); stroke-width: 1.5; }
 .react-flow__edge.aresta-ligacao:hover .react-flow__edge-path { stroke: color-mix(in srgb, var(--info) 80%, transparent); }
 .react-flow__edge.aresta-ligacao.selected .react-flow__edge-path { stroke: var(--info); stroke-width: 2.5; }
+
+/* ---------------- Vínculos entre orquestradores ----------------
+ * A linha mais grossa e quente (a cor de destaque), com um elo no meio. */
+.react-flow__edge.aresta-vinculo .react-flow__edge-path { stroke: var(--active); stroke-width: 2.5; stroke-dasharray: 10 5; opacity: .85; }
+.react-flow__edge.aresta-vinculo:hover .react-flow__edge-path,
+.react-flow__edge.aresta-vinculo.selected .react-flow__edge-path { opacity: 1; stroke-width: 3.5; }
+.react-flow__edge.aresta-vinculo { cursor: pointer; }
+.elo-do-vinculo { fill: var(--surface-2); stroke: var(--active); stroke-width: 2; pointer-events: none; }
+.item-de-vinculo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 12px;
+}
+.item-de-vinculo:hover:not(:disabled) { background: color-mix(in srgb, var(--active) 12%, transparent); }
+.item-de-vinculo:disabled { opacity: .6; }
+/* O painel do vínculo: no canto de cima à direita da área do canvas, por cima das janelas. */
+.painel-do-vinculo {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 26rem;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 24px);
+  padding: 12px 14px;
+  overflow-y: auto;
+}
+.painel-do-vinculo-cabecalho { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.canvas-modo-invisivel .painel-do-vinculo { display: none; }
 .itens-ligados {
   display: flex;
   flex-wrap: wrap;
@@ -2440,8 +2509,9 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   align-items: stretch;
   gap: 8px;
   cursor: auto;
-  /* A opacidade do chat inteiro (fundo e texto), pela preferência; a coluna fixa não a define. */
-  opacity: var(--opacidade-do-chat, 1);
+  /* A opacidade pela preferência não se aplica ao elemento inteiro (deixaria o texto do campo
+   * ilegível em valores baixos): só ao fundo/sombra dos painéis (ver .conversa-do-chat.painel-flutuante
+   * e .moldura-do-composer) e, com piso de legibilidade, à cor do texto do campo. */
 }
 
 /* O controle deslizante da opacidade (no cabeçalho da conversa e na barra do chat móvel). */
@@ -2470,12 +2540,14 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   animation: subir .2s ease-out both;
 }
 .conversa-do-chat[hidden] { display: none; }
-/* Flutuante, a conversa tem a pele das ilhas do canvas: fundo, borda, raio 14 e a mesma sombra. */
+/* Flutuante, a conversa tem a pele das ilhas do canvas: fundo, borda, raio 14 e a mesma sombra.
+ * Só o fundo e a sombra seguem a opacidade da preferência; o texto fica com a sua própria regra
+ * (ver .campo-do-chat e .mensagem-do-usuario/.mensagem-do-claude) para continuar legível. */
 .conversa-do-chat.painel-flutuante {
   border-radius: 14px;
   border-color: var(--border-forte);
-  background: var(--surface);
-  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7);
+  background: color-mix(in srgb, var(--surface) calc(var(--opacidade-do-chat, 1) * 100%), transparent);
+  box-shadow: 0 calc(10px * var(--opacidade-do-chat, 1)) calc(30px * var(--opacidade-do-chat, 1)) -12px rgba(0, 0, 0, calc(.7 * var(--opacidade-do-chat, 1)));
 }
 @keyframes subir { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
@@ -2791,8 +2863,8 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   position: relative;
   padding: 1px;
   border-radius: 14px;
-  background: var(--border-forte);
-  box-shadow: 0 10px 30px -12px rgba(0, 0, 0, .7);
+  background: color-mix(in srgb, var(--border-forte) calc(var(--opacidade-do-chat, 1) * 100%), transparent);
+  box-shadow: 0 calc(10px * var(--opacidade-do-chat, 1)) calc(30px * var(--opacidade-do-chat, 1)) -12px rgba(0, 0, 0, calc(.7 * var(--opacidade-do-chat, 1)));
 }
 .chat-rapido-respondendo .moldura-do-composer {
   background: color-mix(in srgb, var(--active) 70%, var(--border-forte));
@@ -2809,7 +2881,7 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   gap: 4px;
   padding: 5px 5px 5px 7px;
   border-radius: 13px;
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) calc(var(--opacidade-do-chat, 1) * 100%), transparent);
 }
 /* Sem `overflow: hidden` no composer: o menu do modelo sai por cima dele. */
 .composer-do-chat > .faixa-de-progresso { position: absolute; inset: 0 12px auto; }
@@ -2843,7 +2915,9 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   border: 0;
   outline: none;
   background: transparent;
-  color: var(--primary);
+  /* O texto do campo não acompanha a opacidade do painel até o fim: piso de 75%, senão fica
+   * ilegível nos valores baixos da preferência (--opacidade-do-chat). */
+  color: color-mix(in srgb, var(--primary) max(calc(var(--opacidade-do-chat, 1) * 100%), 75%), transparent);
   font-family: var(--fonte-texto);
   font-size: 13.5px;
   line-height: 20px;
@@ -3568,10 +3642,6 @@ html.modo-invisivel .barra-de-titulo * {
  * Abrem logo abaixo da barra do canvas, um por vez. Mesmo visual da criação:
  * rótulo à esquerda em Poppins, campos escuros e separadores finos. A altura
  * fica presa à tela e só o miolo rola, para o rodapé com Salvar não sumir. */
-.botao-de-painel[aria-expanded="true"] {
-  background: var(--surface-3);
-  border-color: color-mix(in srgb, var(--active) 55%, transparent);
-}
 .painel-da-barra {
   display: flex;
   flex-direction: column;

@@ -50,9 +50,41 @@ describe("PredefinicaoDeConfiguracao", () => {
       instrucoesPersonalizadas: "",
       // Nem a escolha dos subagentes prontos.
       subagentesProntos: "todos",
+      // Num orquestrador que já era do Claude Code, o motor e a reserva seguem como estavam.
+      motorDoOrquestrador: "claude-code",
+      motorDosSubagentes: "claude-code",
+      ordemDeReserva: [],
+      // Nem o navegador do agente.
+      navegadorDoAgente: false,
     });
     // A configuração de origem não muda (objeto de valor).
     expect(configuracao.modeloDoOrquestrador).toBe("fable");
+  });
+
+  it("os modelos dela são do Claude: aplicada sobre outro motor, traz os dois papéis de volta ao Claude Code", () => {
+    const noCodex = configuracao.com({
+      motorDoOrquestrador: "codex",
+      motorDosSubagentes: "copilot",
+      ordemDeReserva: ["claude-code", "copilot"],
+    });
+
+    const aplicada = economico().aplicarEm(noCodex);
+
+    expect(aplicada.paraDados()).toMatchObject({
+      motorDoOrquestrador: "claude-code",
+      motorDosSubagentes: "claude-code",
+      modeloDoOrquestrador: "opus",
+      modeloDosSubagentes: "sonnet",
+      // O Claude Code saiu da reserva por ser agora o motor principal.
+      ordemDeReserva: ["copilot"],
+    });
+  });
+
+  it("uma configuração com os papéis em outro motor não corresponde a ela, mesmo com os mesmos campos", () => {
+    const aplicada = economico().aplicarEm(configuracao);
+
+    expect(economico().correspondeA(aplicada.com({ motorDoOrquestrador: "codex", modeloDoOrquestrador: "opus" }))).toBe(false);
+    expect(economico().correspondeA(aplicada.com({ motorDosSubagentes: "copilot", modeloDosSubagentes: "sonnet" }))).toBe(false);
   });
 
   it("não mexe no trivial nem no plano em pedidos grandes, que valem sempre (ADR-28)", () => {

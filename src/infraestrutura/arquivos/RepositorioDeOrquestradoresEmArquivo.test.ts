@@ -9,6 +9,7 @@ import { ConfiguracaoDoOrquestrador } from "../../orquestracao/ConfiguracaoDoOrq
 import { EventoRegistrado } from "../../orquestracao/EventoDeOrquestracao";
 import { DadosDoOrquestrador, Orquestrador } from "../../orquestracao/Orquestrador";
 import { PastaDeTrabalho } from "../../orquestracao/PastaDeTrabalho";
+import { PedidoNaFila } from "../../orquestracao/PedidoNaFila";
 import { RepositorioDeOrquestradoresEmArquivo } from "./RepositorioDeOrquestradoresEmArquivo";
 
 const agora = new Date("2026-10-28T12:00:00Z");
@@ -58,6 +59,20 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
     // Lembra que a conversa de "a" já recebeu instruções: apagá-las depois revoga as antigas.
     expect(reaberto.buscarPorId("a")?.registrarInstrucoesDoPedido(false)).toEqual({ revogarAnteriores: true });
     expect(reaberto.buscarPorId("b")?.registrarInstrucoesDoPedido(false)).toEqual({ revogarAnteriores: false });
+  });
+
+  it("reabre a origem dos pedidos que vieram de um vinculado, e os do usuário seguem sem ela", async () => {
+    const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+    const orquestrador = novoOrquestrador("a");
+    const origem = { orquestradorId: "b", nome: "Orquestrador b", saltos: 2 };
+    orquestrador.enfileirarPedido(PedidoNaFila.criar({ id: "p1", texto: "de vínculo", modo: "execucao", enfileiradoEm: agora, origem }));
+    orquestrador.enfileirarPedido(PedidoNaFila.criar({ id: "p2", texto: "do usuário", modo: "execucao", enfileiradoEm: agora }));
+    await repositorio.salvar(orquestrador);
+    await repositorio.aguardarGravacoes();
+
+    const reaberto = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+
+    expect(reaberto.buscarPorId("a")?.fila.map((pedido) => pedido.origem)).toEqual([origem, null]);
   });
 
   it("reabre a escolha dos subagentes prontos de cada orquestrador", async () => {
@@ -191,11 +206,21 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
           instrucoesPersonalizadas: "",
           // Gravado antes da escolha dos subagentes prontos: recebe todos, como antes.
           subagentesProntos: "todos",
+          // Gravado antes dos outros motores: tudo no Claude Code, com os mesmos modelos e sem reserva.
+          motorDoOrquestrador: "claude-code",
+          motorDosSubagentes: "claude-code",
+          modeloDoOrquestrador: "opus",
+          modeloDosSubagentes: "sonnet",
+          ordemDeReserva: [],
         },
       });
+      // A sessão do Claude Code é a gravada; os outros motores não têm nenhuma, nem limite de uso.
+      expect(dados).toMatchObject({ sessaoId: "sessao-antiga", sessoesDosMotores: {}, liberaEmDosMotores: {} });
       expect(dados?.turnos[0]).toMatchObject({
         anexos: [],
         modo: "execucao",
+        // Rodou antes dos outros motores: foi no Claude Code.
+        motor: "claude-code",
         decisaoDoPlano: null,
         perguntas: [],
         subagentes: [{ id: "s1", resumo: "lido" }],
@@ -203,6 +228,133 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
       expect(dados).not.toHaveProperty("campoQueNaoExisteMais");
       expect(dados?.configuracao).not.toHaveProperty("proporPlanoEmPedidosGrandes");
       expect(existsSync(path.join(pastaDo("antigo"), "orquestrador.ilegivel.json"))).toBe(false);
+    });
+
+    it("um arquivo antigo, ao ser gravado de novo, ganha os campos dos motores e continua abrindo igual", async () => {
+      await gravarArquivo("antigo", JSON.stringify(arquivoAntigo()));
+      const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+      const antigo = repositorio.buscarPorId("antigo");
+      if (antigo === null) {
+        throw new Error("o orquestrador antigo deveria ter aberto");
+      }
+
+      await repositorio.salvar(antigo);
+      await repositorio.aguardarGravacoes();
+
+      const gravado = JSON.parse(await readFile(path.join(pastaDo("antigo"), "orquestrador.json"), "utf8")) as {
+        configuracao: Record<string, unknown>;
+        turnos: Array<Record<string, unknown>>;
+      };
+      expect(gravado.configuracao).toMatchObject({
+        motorDoOrquestrador: "claude-code",
+        motorDosSubagentes: "claude-code",
+        modeloDoOrquestrador: "opus",
+        modeloDosSubagentes: "sonnet",
+        ordemDeReserva: [],
+      });
+      expect(gravado.turnos[0]).toMatchObject({ motor: "claude-code" });
+      const reaberto = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+      expect(reaberto.buscarPorId("antigo")?.paraDados()).toEqual(antigo.paraDados());
+    });
+
+    it("reabre o motor de cada papel, os modelos, a reserva, as sessões, os limites e o motor de cada turno", async () => {
+      const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+      const orquestrador = Orquestrador.criar({
+        id: "multi",
+        nome: "Multi",
+        pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "multi"),
+        sessaoId: "sessao-claude",
+        configuracao: ConfiguracaoDoOrquestrador.de({
+          motorDoOrquestrador: "codex",
+          modeloDoOrquestrador: "gpt-5.1-codex",
+          motorDosSubagentes: "copilot",
+          modeloDosSubagentes: "padrao",
+          ordemDeReserva: ["claude-code", "copilot"],
+          quantidadeDeSubagentes: { modo: "fixa", limite: 2 },
+          nivelDePermissao: "edicao",
+        }),
+        agora,
+      });
+      orquestrador.iniciarTurno("t1", "no codex", agora);
+      orquestrador.concluirTurno("t1", "feito", { duracaoMs: 1, tokensDeEntrada: 1, tokensDeSaida: 1, subagentesLancados: 0 }, agora);
+      orquestrador.iniciarTurno("t2", "no claude", agora, [], "execucao", "claude-code");
+      orquestrador.falharTurno("t2", "Limite de uso atingido", agora);
+      orquestrador.registrarSessaoDoMotor("codex", "thread-1");
+      orquestrador.registrarSessaoDoMotor("copilot", "sessao-copilot");
+      orquestrador.registrarLimiteDoMotor("claude-code", "2026-10-28T15:00:00.000Z");
+      await repositorio.salvar(orquestrador);
+      await repositorio.aguardarGravacoes();
+
+      const reaberto = (await RepositorioDeOrquestradoresEmArquivo.abrir(pasta)).buscarPorId("multi");
+
+      expect(reaberto?.paraDados()).toEqual(orquestrador.paraDados());
+      expect(reaberto?.configuracao.paraDados()).toMatchObject({
+        motorDoOrquestrador: "codex",
+        modeloDoOrquestrador: "gpt-5.1-codex",
+        motorDosSubagentes: "copilot",
+        modeloDosSubagentes: "padrao",
+        ordemDeReserva: ["claude-code", "copilot"],
+      });
+      expect(reaberto?.paraDados().turnos.map((turno) => turno.motor)).toEqual(["codex", "claude-code"]);
+      expect(reaberto?.sessaoDoMotor("codex")).toEqual({ id: "thread-1", iniciada: true });
+      expect(reaberto?.sessaoDoMotor("copilot")).toEqual({ id: "sessao-copilot", iniciada: true });
+      expect(reaberto?.sessaoDoMotor("claude-code")).toEqual({ id: "sessao-claude", iniciada: false });
+      expect(reaberto?.liberaEmDoMotor("claude-code")).toBe("2026-10-28T15:00:00.000Z");
+      // O que a sessão do Claude não viu: o turno do Codex.
+      expect(reaberto?.contextoDaTroca("claude-code")).toBeNull();
+      expect(reaberto?.contextoDaTroca("copilot")).toContain("no codex");
+    });
+
+    it("um arquivo gravado só com o motor de um papel completa o outro com o Claude Code", async () => {
+      const antigo = arquivoAntigo();
+      await gravarArquivo(
+        "meio",
+        JSON.stringify({
+          ...antigo,
+          id: "meio",
+          configuracao: {
+            ...(antigo.configuracao as object),
+            motorDoOrquestrador: "codex",
+            modeloDoOrquestrador: "padrao",
+          },
+        }),
+      );
+
+      const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+
+      expect(repositorio.buscarPorId("meio")?.configuracao.paraDados()).toMatchObject({
+        motorDoOrquestrador: "codex",
+        modeloDoOrquestrador: "padrao",
+        motorDosSubagentes: "claude-code",
+        modeloDosSubagentes: "sonnet",
+        ordemDeReserva: [],
+      });
+    });
+
+    it("reabre o navegador do agente como foi gravado; um arquivo antigo (sem o campo) vale desligado", async () => {
+      const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+      const orquestrador = Orquestrador.criar({
+        id: "navegador",
+        nome: "Com navegador",
+        pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "navegador"),
+        sessaoId: "sessao-navegador",
+        configuracao: ConfiguracaoDoOrquestrador.de({
+          modeloDoOrquestrador: "opus",
+          modeloDosSubagentes: "sonnet",
+          quantidadeDeSubagentes: { modo: "fixa", limite: 1 },
+          nivelDePermissao: "edicao_e_comandos",
+          navegadorDoAgente: true,
+        }),
+        agora,
+      });
+      await repositorio.salvar(orquestrador);
+      await repositorio.aguardarGravacoes();
+      await gravarArquivo("antigo-sem-navegador", JSON.stringify({ ...arquivoAntigo(), id: "antigo-sem-navegador" }));
+
+      const reaberto = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+
+      expect(reaberto.buscarPorId("navegador")?.configuracao.navegadorDoAgente).toBe(true);
+      expect(reaberto.buscarPorId("antigo-sem-navegador")?.configuracao.navegadorDoAgente).toBe(false);
     });
 
     it("reabre turnos com anexos: a imagem gravada sem categoria vale imagem; o documento mantém a dele", async () => {
@@ -343,14 +495,40 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
         }),
       );
 
+      const comConfiguracao = (extra: Record<string, unknown>) =>
+        JSON.stringify({ ...arquivoAntigo(), configuracao: { ...(arquivoAntigo().configuracao as object), ...extra } });
+      await gravarArquivo("motor-desconhecido", comConfiguracao({ motorDoOrquestrador: "gemini" }));
+      await gravarArquivo("modelo-sem-motor", comConfiguracao({ modeloDoOrquestrador: "gpt-5" }));
+      await gravarArquivo("modelo-invalido", comConfiguracao({ motorDosSubagentes: "codex", modeloDosSubagentes: "gpt 5" }));
+      await gravarArquivo("reserva-repetida", comConfiguracao({ ordemDeReserva: ["codex", "codex"] }));
+      await gravarArquivo("reserva-com-o-principal", comConfiguracao({ ordemDeReserva: ["claude-code"] }));
+      await gravarArquivo(
+        "turno-com-motor-errado",
+        JSON.stringify({
+          ...arquivoAntigo(),
+          turnos: [{ ...(arquivoAntigo().turnos as Record<string, unknown>[])[0], motor: "gemini" }],
+        }),
+      );
+
       const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
 
       expect(repositorio.listar()).toEqual([]);
-      for (const id of ["sem-turnos", "tipo-errado", "prontos-errados", "limite-errado"]) {
+      for (const id of [
+        "sem-turnos",
+        "tipo-errado",
+        "prontos-errados",
+        "limite-errado",
+        "motor-desconhecido",
+        "modelo-sem-motor",
+        "modelo-invalido",
+        "reserva-repetida",
+        "reserva-com-o-principal",
+        "turno-com-motor-errado",
+      ]) {
         expect(existsSync(path.join(pastaDo(id), "orquestrador.json"))).toBe(false);
         expect(existsSync(path.join(pastaDo(id), "orquestrador.ilegivel.json"))).toBe(true);
       }
-      expect(avisos).toHaveBeenCalledTimes(4);
+      expect(avisos).toHaveBeenCalledTimes(10);
       avisos.mockRestore();
 
       // O arquivo renomeado não é lido de novo: reabrir não repete o aviso.

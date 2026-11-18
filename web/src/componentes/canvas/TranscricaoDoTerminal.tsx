@@ -10,13 +10,17 @@ import {
   type LinhaDoLog,
   type RecuperacaoNaTela,
   SEM_AVISOS_DA_CONVERSA_NOVA,
+  textoDaTrocaDeMotor,
   type TipoDeLinhaDoLog,
+  type TrocaDeMotorNaTela,
   type TurnoNaTela,
 } from "../../shared/estado/aplicarEvento";
 import { faseDoTurno } from "../../shared/estado/faseDoTurno";
 import { type EstadoDeVida, estadoDeVida } from "../../shared/estado/sinalDeVida";
 import { useAutorrecuperacao } from "../../shared/hooks/useAutorrecuperacao";
 import "../../theme/recuperacao-do-turno.css";
+import "../../theme/motores.css";
+import { nomeCurtoDoMotor, rotuloDoMotor } from "../../shared/modelos";
 import {
   descreverConfiguracao,
   formatarDuracao,
@@ -81,8 +85,8 @@ const LinhaDoTerminal = memo(function LinhaDoTerminal({ linha, papel }: { linha:
 });
 
 /**
- * O Claude pode ter travado (pelo diagnóstico do servidor ou só pelo tempo de
- * silêncio). Com a autorrecuperação ligada, o app retoma sozinho; desligada,
+ * O motor do turno pode ter travado (pelo diagnóstico do servidor ou só pelo
+ * tempo de silêncio). Com a autorrecuperação ligada, o app retoma sozinho; desligada,
  * ou quando o servidor não vê os processos (`semRetomada`), vale a orientação
  * de cancelar e reenviar. A preferência só é lida aqui, com o aviso na tela.
  */
@@ -94,8 +98,11 @@ function AvisoDeSuspeita({ aviso, semRetomada = false }: { aviso: string; semRet
   return <>{`${aviso} ${orientacao}`}</>;
 }
 
-/** O texto do sinal de vida: o diagnóstico do servidor, quando há, ou o tempo de silêncio. */
-function TextoDoSinal({ vida }: { vida: EstadoDeVida }) {
+/**
+ * O texto do sinal de vida: o diagnóstico do servidor, quando há, ou o tempo de
+ * silêncio. `motor` é o nome curto de quem executa o turno ("Claude", "Codex" ou "Copilot").
+ */
+function TextoDoSinal({ vida, motor }: { vida: EstadoDeVida; motor: string }) {
   if (vida.diagnostico?.situacao === "trabalhando") {
     // Calado, mas trabalhando (um comando longo): sem tom de alarme.
     return <>{vida.diagnostico.resumo}</>;
@@ -103,14 +110,14 @@ function TextoDoSinal({ vida }: { vida: EstadoDeVida }) {
   if (vida.diagnostico?.situacao === "suspeito") {
     return (
       <AvisoDeSuspeita
-        aviso={`sem notícias do Claude há ${formatarDuracao(vida.ultimoSinalHaMs)}: ${vida.diagnostico.resumo}.`}
+        aviso={`sem notícias do ${motor} há ${formatarDuracao(vida.ultimoSinalHaMs)}: ${vida.diagnostico.resumo}.`}
         semRetomada={vida.diagnostico.semRetomadaAutomatica === true}
       />
     );
   }
   if (vida.preocupante) {
     // Sem diagnóstico do servidor: só o tempo de silêncio, com a mesma orientação.
-    return <AvisoDeSuspeita aviso={`sem notícias do Claude há ${formatarDuracao(vida.ultimoSinalHaMs)} — pode ter travado.`} />;
+    return <AvisoDeSuspeita aviso={`sem notícias do ${motor} há ${formatarDuracao(vida.ultimoSinalHaMs)} — pode ter travado.`} />;
   }
   return (
     <>
@@ -121,13 +128,16 @@ function TextoDoSinal({ vida }: { vida: EstadoDeVida }) {
 
 /**
  * O que mostra que o turno está vivo: a fase, o tempo total, o último sinal
- * do Claude (com os tokens de raciocínio, quando ele está pensando) e, se o
+ * do motor (com os tokens de raciocínio, quando ele está pensando) e, se o
  * silêncio passar do normal, o aviso de que pode ter travado. Com o
- * diagnóstico do servidor, a mensagem explica o silêncio.
+ * diagnóstico do servidor, a mensagem explica o silêncio. O aviso cita o
+ * motor do turno quando ele não é o Claude Code ("sem notícias do Codex…").
  */
 function SinalDoTurno({ turno, sinal }: { turno: TurnoNaTela; sinal: SinalDeVida | undefined }) {
   const agora = useRelogio(true);
   const vida = estadoDeVida(turno, sinal, agora);
+  // Os turnos gravados antes dos outros motores não trazem o motor: rodaram no Claude Code.
+  const motor = nomeCurtoDoMotor(turno.motor ?? "claude-code");
 
   return (
     <>
@@ -140,12 +150,12 @@ function SinalDoTurno({ turno, sinal }: { turno: TurnoNaTela; sinal: SinalDeVida
       </div>
       <div className={`linha-do-terminal ${vida.preocupante ? "linha-erro" : "linha-sistema"}`}>
         <span />
-        {/* A chave muda a cada sinal: o coração pulsa de novo cada vez que o Claude dá notícia. */}
+        {/* A chave muda a cada sinal: o coração pulsa de novo cada vez que o motor dá notícia. */}
         <span key={sinal?.em ?? turno.ultimaAtividadeEm} className="linha-simbolo batimento">
           {vida.preocupante ? <IconeAlerta tamanho={12} className="inline-block align-[-1px]" /> : <IconeCoracao className="inline-block align-[-1px]" />}
         </span>
         <span className="linha-texto col-span-2">
-          <TextoDoSinal vida={vida} />
+          <TextoDoSinal vida={vida} motor={motor} />
         </span>
       </div>
     </>
@@ -216,6 +226,19 @@ function CartaoDeRetomada({
   );
 }
 
+/**
+ * O pedido passou para outro motor porque o limite de uso (ou a sobrecarga) do principal o impediu de seguir:
+ * quem assumiu e por quê. Ex.: "Trocou para Codex: limite do Claude atingido (libera às 14:30)".
+ */
+function AvisoDeTrocaDeMotor({ troca }: { troca: TrocaDeMotorNaTela }) {
+  return (
+    <div className="aviso-de-troca-de-motor" role="status" aria-label="Troca de motor">
+      <IconeAlerta tamanho={13} />
+      <span className="min-w-0 texto-longo">{textoDaTrocaDeMotor(troca)}</span>
+    </div>
+  );
+}
+
 /** O app esgotou as tentativas: o diagnóstico e o que o usuário pode fazer. */
 function CartaoDeDesistencia({ recuperacao }: { recuperacao: RecuperacaoNaTela }) {
   return (
@@ -269,6 +292,7 @@ const Turno = memo(function Turno({
   const linhas = emAndamento ? turno.log : turno.log.filter((linha) => linha.tipo !== "ferramenta");
   const recuperacao = turno.recuperacao ?? null;
   const retomada = turno.retomada ?? null;
+  const motor = turno.motor ?? "claude-code";
   // Como o sinal de vida, o progresso só interessa enquanto o pedido roda.
   const tarefas = emAndamento ? (turno.tarefas ?? []) : [];
   // O papel de cada Subagente do pedido, para o nome na origem das linhas.
@@ -319,6 +343,19 @@ const Turno = memo(function Turno({
           )}
         </div>
       )}
+      {/* O motor só aparece quando não é o Claude Code (o padrão): quem executou o pedido. */}
+      {motor !== "claude-code" && (
+        <div className="linha-do-motor-do-turno">
+          <span
+            className="chip selo-do-motor-do-turno"
+            data-testid="selo-do-motor"
+            title={`Este pedido rodou no ${rotuloDoMotor(motor)}`}
+          >
+            {rotuloDoMotor(motor)}
+          </span>
+        </div>
+      )}
+      {turno.trocaDeMotor != null && <AvisoDeTrocaDeMotor troca={turno.trocaDeMotor} />}
       <div className="flex flex-col">
         {linhas.map((linha) => (
           <LinhaDoTerminal key={linha.sequencia} linha={linha} papel={papeis.get(linha.origem) ?? null} />

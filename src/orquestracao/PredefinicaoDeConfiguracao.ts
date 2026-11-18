@@ -35,12 +35,23 @@ export class PredefinicaoDeConfiguracao {
     Object.freeze(this);
   }
 
+  /**
+   * As predefinições falam em modelos do Claude (Opus, Sonnet): aplicada sobre
+   * uma configuração com outro motor, ela traz os dois papéis de volta ao
+   * Claude Code, para os modelos dela fazerem sentido.
+   */
   aplicarEm(configuracao: ConfiguracaoDoOrquestrador): ConfiguracaoDoOrquestrador {
-    return configuracao.com(this.alteracoes);
+    return configuracao.com({ motorDoOrquestrador: "claude-code", motorDosSubagentes: "claude-code", ...this.alteracoes });
   }
 
-  /** Se todos os campos da predefinição estão com o valor dela nesta configuração. */
+  /**
+   * Se todos os campos da predefinição estão com o valor dela nesta
+   * configuração, e os dois papéis no Claude Code (os modelos dela são dele).
+   */
   correspondeA(configuracao: ConfiguracaoDoOrquestrador): boolean {
+    if (configuracao.motorDoOrquestrador !== "claude-code" || configuracao.motorDosSubagentes !== "claude-code") {
+      return false;
+    }
     const atual = configuracao.paraDados();
     return (Object.keys(this.alteracoes) as Array<keyof DadosDaConfiguracao>).every((campo) => {
       const esperado = this.alteracoes[campo];

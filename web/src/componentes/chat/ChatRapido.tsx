@@ -88,6 +88,9 @@ import { SeletorDeModelo } from "./SeletorDeModelo";
 import "../../theme/chat-lateral.css";
 import "../../theme/controles-de-janela.css";
 
+/** Um blur até este tempo depois de pedir o foco é da troca de foco da janela, não de o usuário sair do chat. */
+const TOLERANCIA_DO_BLUR_APOS_FOCAR_MS = 400;
+/** Altura máxima do campo (px). */
 const ALTURA_MAXIMA_DO_CAMPO = 140;
 /** A altura (px) que o chat móvel assume ao ser movido pela primeira vez, sem conversa à vista. */
 const ALTURA_PADRAO_DO_CHAT_MOVEL = 420;
@@ -1178,15 +1181,23 @@ export function ChatRapido({
     mudarPreferencias({ chatNoModoInvisivel: null });
   }
 
+  /** Quando o foco do campo foi pedido pela última vez (ms), para tolerar o blur da troca de foco da janela. */
+  const pedidoDeFocoEm = useRef(0);
+
   /** Deixa a janela focável (a pedido do clique no campo) e leva o teclado ao campo. */
   async function focarCampo(): Promise<void> {
     if (modoAtivo) {
+      pedidoDeFocoEm.current = Date.now();
       await definirFocavel(true);
     }
     campo.current?.focus();
+    if (modoAtivo) {
+      // Reforço: o processo principal às vezes só torna a janela focável no próximo quadro.
+      requestAnimationFrame(() => campo.current?.focus());
+    }
   }
 
-  /** Enviou, apertou Esc ou saiu do chat: o teclado volta ao app de trás. */
+  /** Apertou Esc, clicou fora do chat ou saiu dele: o teclado volta ao app de trás. */
   function liberarFoco(): void {
     if (modoAtivo) {
       campo.current?.blur();
@@ -1321,7 +1332,11 @@ export function ChatRapido({
         origemDoComposer === null ? {} : { origem: origemDoComposer },
       );
       limparCampo();
-      liberarFoco();
+      // No modo invisível o teclado fica no campo: o botão "enviar" (que tinha o foco e agora está
+      // desabilitado) e a janela não focável não podem deixar o usuário sem conseguir digitar.
+      if (modoAtivo) {
+        void focarCampo();
+      }
       // Os enviados (e os que chegaram durante o envio, que também saem) liberam a miniatura.
       liberarAnexos(anexosAtuais.current);
       setAnexos([]);
@@ -1379,20 +1394,42 @@ export function ChatRapido({
     }
     if (evento.key === "Escape") {
       if (respondendo) {
+        // Cancela a resposta, mas o campo continua ativo: dá para escrever a próxima pergunta já.
         evento.preventDefault();
         void cancelar();
       } else if (!fixo && temMensagens && !oculta) {
+        // Sem resposta em andamento: o Esc oculta a conversa, e aí sim o teclado volta ao app de trás.
         evento.preventDefault();
         ocultar();
+        liberarFoco();
+      } else {
+        // Nada para cancelar nem para ocultar (ex.: campo vazio, sem mensagens): libera o foco normalmente.
+        liberarFoco();
       }
-      // No modo invisível o Esc também devolve o teclado ao app de trás.
-      liberarFoco();
     }
   }
 
   function receberDitado(ditado: string): void {
-    setTexto((atual) => juntarDitado(atual, ditado));
-    requestAnimationFrame(ajustarAltura);
+    const elemento = campo.current;
+    const anterior = elemento?.value ?? texto;
+    const selecao =
+      elemento !== null && elemento.selectionStart !== null && elemento.selectionEnd !== null
+        ? { inicio: elemento.selectionStart, fim: elemento.selectionEnd }
+        : undefined;
+    // `juntarDitado` aceita a posição do cursor para inserir o ditado ali em vez de sempre
+    // concatenar no fim; sem campo focado, chama na forma de 2 argumentos.
+    const novo = ditado.trim();
+    setTexto((atual) => (selecao !== undefined ? juntarDitado(atual, ditado, selecao) : juntarDitado(atual, ditado)));
+    requestAnimationFrame(() => {
+      ajustarAltura();
+      // Com inserção no meio do texto, o cursor fica logo depois do trecho ditado, não no fim do campo.
+      if (selecao !== undefined && elemento !== null && novo !== "" && selecao.inicio !== anterior.length) {
+        const antes = anterior.slice(0, selecao.inicio);
+        const precisaEspacoAntes = antes !== "" && !/\s$/.test(antes);
+        const posicao = selecao.inicio + (precisaEspacoAntes ? 1 : 0) + novo.length;
+        elemento.setSelectionRange(posicao, posicao);
+      }
+    });
     campo.current?.focus();
   }
 
@@ -1468,7 +1505,8 @@ export function ChatRapido({
       ? { left: geometria.x, top: geometria.y, width: geometria.largura, height: geometria.altura }
       : { left: geometria.x, bottom: area.altura - geometria.y - geometria.altura, width: geometria.largura };
   }
-  // A opacidade vale para o chat inteiro (fundo e texto) e só para o flutuante: a coluna fixa e o resto do app não mudam.
+  // A opacidade vale para o fundo/sombra dos painéis do chat (o texto tem piso próprio de legibilidade,
+  // ver .campo-do-chat em index.css) e só para o flutuante: a coluna fixa e o resto do app não mudam.
   const estiloDoChat: CSSProperties | undefined =
     opacidade === OPACIDADE_DO_CHAT.padrao
       ? estiloMovel
@@ -1487,7 +1525,13 @@ export function ChatRapido({
       {...mouseDaArea}
       onBlur={(evento) => {
         // O foco saiu do chat (clicou fora, trocou de app): o teclado volta ao app de trás.
-        if (modoAtivo && !evento.currentTarget.contains(evento.relatedTarget as Node | null)) {
+        // Blur espúrio logo após pedir o foco (a janela ainda trocando de estado no Windows) é ignorado:
+        // senão a janela voltava a ficar não focável e o campo parava de receber o teclado.
+        if (
+          modoAtivo &&
+          Date.now() - pedidoDeFocoEm.current > TOLERANCIA_DO_BLUR_APOS_FOCAR_MS &&
+          !evento.currentTarget.contains(evento.relatedTarget as Node | null)
+        ) {
           void definirFocavel(false);
         }
       }}

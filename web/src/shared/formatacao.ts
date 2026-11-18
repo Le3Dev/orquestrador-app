@@ -1,4 +1,12 @@
-import type { DadosDaConfiguracao, EsforcoDeRaciocinio, ModeloClaude, NivelDePermissao } from "./api/tipos";
+import type { DadosDaConfiguracao, EsforcoDeRaciocinio, ModeloClaude, ModeloDoMotor, Motor, NivelDePermissao } from "./api/tipos";
+import {
+  ehModeloClaude,
+  MODELO_PADRAO_DO_CLI,
+  motorDoOrquestradorDe,
+  motorDosSubagentesDe,
+  ordemDeReservaDe,
+  rotuloDoMotor,
+} from "./modelos";
 
 export const ROTULOS_DOS_MODELOS: Readonly<Record<ModeloClaude, { nome: string; descricao: string }>> = {
   fable: { nome: "Fable", descricao: "Desafios mais difíceis" },
@@ -66,9 +74,20 @@ export const ROTULOS_DAS_PERMISSOES: Readonly<Record<NivelDePermissao, { nome: s
   },
 };
 
-/** Ex.: "Opus" ou, com um esforço escolhido, "Opus (esforço alto)". */
-function descreverModelo(modelo: ModeloClaude, esforco: EsforcoDeRaciocinio): string {
-  const nome = ROTULOS_DOS_MODELOS[modelo].nome;
+/** O nome do modelo sem versão: "Opus" no Claude Code; nos outros motores, o próprio id. */
+function nomeDoModelo(modelo: ModeloDoMotor): string {
+  return ehModeloClaude(modelo) ? ROTULOS_DOS_MODELOS[modelo].nome : modelo;
+}
+
+/**
+ * Ex.: "Opus" ou, com um esforço escolhido, "Opus (esforço alto)". Nos outros motores, o motor e o modelo
+ * ("Codex" com o modelo do CLI; "Codex gpt-5" com um escolhido), sem esforço: só o Claude Code o aplica.
+ */
+function descreverModelo(motor: Motor, modelo: ModeloDoMotor, esforco: EsforcoDeRaciocinio): string {
+  if (motor !== "claude-code") {
+    return modelo === MODELO_PADRAO_DO_CLI ? rotuloDoMotor(motor) : `${rotuloDoMotor(motor)} ${modelo}`;
+  }
+  const nome = nomeDoModelo(modelo);
   return esforco === "padrao" ? nome : `${nome} (esforço ${ROTULOS_DOS_ESFORCOS[esforco].toLowerCase()})`;
 }
 
@@ -81,14 +100,25 @@ export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string
   const { modo, limite } = configuracao.quantidadeDeSubagentes;
   const plural = limite === 1 ? "subagente" : "subagentes";
   const quantidade = modo === "fixa" ? `${limite} ${plural}` : `até ${limite} ${plural}`;
-  const orquestrador = descreverModelo(configuracao.modeloDoOrquestrador, configuracao.esforcoDoOrquestrador);
-  const subagentes = descreverModelo(configuracao.modeloDosSubagentes, configuracao.esforcoDosSubagentes);
+  const orquestrador = descreverModelo(
+    motorDoOrquestradorDe(configuracao),
+    configuracao.modeloDoOrquestrador,
+    configuracao.esforcoDoOrquestrador,
+  );
+  const subagentes = descreverModelo(
+    motorDosSubagentesDe(configuracao),
+    configuracao.modeloDosSubagentes,
+    configuracao.esforcoDosSubagentes,
+  );
+  const reserva = ordemDeReservaDe(configuracao);
   return [
     `${orquestrador} → ${subagentes}`,
     quantidade,
     ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome,
+    ...(reserva.length > 0 ? [`reserva: ${reserva.map(rotuloDoMotor).join(", ")}`] : []),
     ...(configuracao.permitirCommitEPush ? ["commit/push por feature"] : []),
     ...(configuracao.permitirArtefatosOnline ? ["artefatos online"] : []),
+    ...(configuracao.navegadorDoAgente === true ? ["navegador do agente"] : []),
     ...(configuracao.instrucoesPersonalizadas.trim() === "" ? [] : ["instruções próprias"]),
   ].join(" · ");
 }
@@ -103,14 +133,20 @@ function ligado(valor: boolean): string {
  */
 export function descreverAlteracoesDaConfiguracao(alteracoes: Partial<DadosDaConfiguracao>): string[] {
   const itens: string[] = [];
+  if (alteracoes.motorDoOrquestrador !== undefined) {
+    itens.push(`Motor do orquestrador: ${rotuloDoMotor(alteracoes.motorDoOrquestrador)}`);
+  }
   if (alteracoes.modeloDoOrquestrador !== undefined) {
-    itens.push(`Modelo do orquestrador: ${ROTULOS_DOS_MODELOS[alteracoes.modeloDoOrquestrador].nome}`);
+    itens.push(`Modelo do orquestrador: ${nomeDoModelo(alteracoes.modeloDoOrquestrador)}`);
   }
   if (alteracoes.esforcoDoOrquestrador !== undefined) {
     itens.push(`Esforço do orquestrador: ${ROTULOS_DOS_ESFORCOS[alteracoes.esforcoDoOrquestrador]}`);
   }
+  if (alteracoes.motorDosSubagentes !== undefined) {
+    itens.push(`Motor dos subagentes: ${rotuloDoMotor(alteracoes.motorDosSubagentes)}`);
+  }
   if (alteracoes.modeloDosSubagentes !== undefined) {
-    itens.push(`Modelo dos subagentes: ${ROTULOS_DOS_MODELOS[alteracoes.modeloDosSubagentes].nome}`);
+    itens.push(`Modelo dos subagentes: ${nomeDoModelo(alteracoes.modeloDosSubagentes)}`);
   }
   if (alteracoes.esforcoDosSubagentes !== undefined) {
     itens.push(`Esforço dos subagentes: ${ROTULOS_DOS_ESFORCOS[alteracoes.esforcoDosSubagentes]}`);

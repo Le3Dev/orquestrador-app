@@ -2,16 +2,18 @@
 
 // Configuração do app desktop (Electron) e da licença por assinatura.
 //
-// A licença é emitida por um SERVIÇO DE LICENÇAS próprio (pasta
-// `servicoDeLicencas/`), que assina um token com Ed25519. O app só guarda a
-// chave PÚBLICA: nada secreto fica neste arquivo (o repositório é público).
+// A licença é emitida por um SERVIÇO DE LICENÇAS próprio (repositório privado
+// `Le3Dev/orquestrador-licencas`), que assina um token com Ed25519. O acesso é
+// por e-mail + código de 6 dígitos (teste grátis de 7 dias no primeiro login).
+// O app só guarda a chave PÚBLICA: nada secreto fica neste arquivo (o
+// repositório é público); a privada fica só no serviço.
 
 module.exports = {
   // Exigir licença no app instalado. false durante a fase de testes com os
-  // devs: o app instalado abre sem pedir chave (a tela de ativação e o módulo
+  // devs: o app instalado abre sem pedir login (a tela de entrada e o módulo
   // de licença continuam no app, só não são usados). Para religar: mudar para
   // true e publicar uma versão nova — a atualização automática a leva a todos
-  // os apps instalados, que passam a pedir a chave na abertura seguinte.
+  // os apps instalados, que passam a pedir o e-mail na abertura seguinte.
   exigirLicenca: false,
 
   // ⇩ PREENCHA antes de ligar `exigirLicenca`. Com qualquer um destes dois
@@ -23,11 +25,12 @@ module.exports = {
   urlDoServicoDeLicencas: null,
 
   // Chave PÚBLICA Ed25519 (formato SPKI PEM, "-----BEGIN PUBLIC KEY-----...").
-  // Gerada junto com a privada por `servicoDeLicencas/scripts/gerarChaves.mjs`;
-  // cole aqui só a pública. A privada vai apenas como segredo do serviço.
+  // Gerada junto com a privada pelo script de chaves do repositório privado
+  // `Le3Dev/orquestrador-licencas`; cole aqui só a pública. A privada vai
+  // apenas como segredo do serviço.
   chavePublicaDaLicenca: null,
 
-  // Página de planos da landing, aberta pelo link "Assinar" da tela de ativação.
+  // Página de planos da landing, aberta pelo link "Assinar" da tela de entrada.
   urlParaAssinar: null,
 
   // Portal do cliente do Stripe (trocar cartão, cancelar, ver faturas), aberto

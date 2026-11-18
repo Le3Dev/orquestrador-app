@@ -3,6 +3,7 @@ import { categoriaPeloTipoDeMidia, DadosDoAnexo } from "./Anexo";
 import { ErroDeOrquestracao } from "./ErroDeOrquestracao";
 import { EventoDoMotor, UsoDoTurno } from "./EventoDeOrquestracao";
 import { DecisaoDoPlano, ModoDoTurno } from "./ModoDoTurno";
+import { Motor, MOTOR_PADRAO } from "./Motor";
 import { DadosDoSubagente, Subagente } from "./Subagente";
 
 export type SituacaoDoTurno = "em_andamento" | "concluido" | "cancelado" | "falhou" | "interrompido";
@@ -23,6 +24,8 @@ export interface DadosDoTurno {
   decisaoDoPlano?: DecisaoDoPlano | null;
   /** Perguntas com opções da resposta final. Ausente em turnos gravados antes do campo: vale []. */
   perguntas?: PerguntaDoApp[];
+  /** O motor que executou o turno. Ausente em turnos gravados antes dos outros motores: valem `claude-code`. */
+  motor?: Motor;
 }
 
 /**
@@ -49,6 +52,8 @@ export class Turno {
     public readonly modo: ModoDoTurno,
     private decisao: DecisaoDoPlano | null,
     private perguntasDaResposta: readonly PerguntaDoApp[],
+    /** O motor que executa o turno (o do Orquestrador, ou o de reserva que assumiu o pedido). */
+    public readonly motor: Motor,
   ) {}
 
   static iniciar(
@@ -57,8 +62,9 @@ export class Turno {
     agora: Date,
     anexos: readonly DadosDoAnexo[] = [],
     modo: ModoDoTurno = "execucao",
+    motor: Motor = MOTOR_PADRAO,
   ): Turno {
-    return new Turno(id, texto, agora.getTime(), null, "em_andamento", "", null, null, [], anexos, modo, null, []);
+    return new Turno(id, texto, agora.getTime(), null, "em_andamento", "", null, null, [], anexos, modo, null, [], motor);
   }
 
   static reconstituir(dados: DadosDoTurno): Turno {
@@ -82,6 +88,8 @@ export class Turno {
       dados.modo ?? "execucao",
       dados.decisaoDoPlano ?? null,
       (dados.perguntas ?? []).map(copiarPergunta),
+      // Nem os gravados antes dos outros motores: rodaram no Claude Code.
+      dados.motor ?? MOTOR_PADRAO,
     );
   }
 
@@ -209,6 +217,7 @@ export class Turno {
       modo: this.modo,
       decisaoDoPlano: this.decisao,
       perguntas: this.perguntasDaResposta.map(copiarPergunta),
+      motor: this.motor,
     };
   }
 

@@ -1,8 +1,16 @@
 import { EsforcoDeRaciocinio } from "../../orquestracao/EsforcoDeRaciocinio";
-import { instrucoesDoSubagente, NOME_DO_SUBAGENTE, Plataforma } from "../../orquestracao/InstrucoesDoOrquestrador";
+import {
+  FERRAMENTA_DE_DELEGACAO,
+  instrucoesDoSubagente,
+  NOME_DO_SUBAGENTE,
+  Plataforma,
+} from "../../orquestracao/InstrucoesDoOrquestrador";
+import { comoModeloClaude } from "../../orquestracao/ModeloDoMotor";
 import { PedidoDeTurno } from "../../orquestracao/MotorDeAgentes";
 import { NivelDePermissao } from "../../orquestracao/NivelDePermissao";
 import { modeloDoSubagentePronto } from "../../orquestracao/SubagentesProntos";
+import { NOME_DO_GRUPO_DO_NAVEGADOR, NOMES_DAS_FERRAMENTAS_DO_NAVEGADOR } from "../mcp/FerramentasDoNavegador";
+import { FerramentasDoTurno, nomeDaFerramentaNoClaudeCode } from "../mcp/ServidorMcpDoApp";
 
 /** Ferramenta do Claude Code que lança subagentes (aparece como `Task` em versões antigas). */
 export const FERRAMENTA_DE_SUBAGENTES = "Agent";
@@ -279,6 +287,39 @@ export const COMANDOS_DE_PUSH_FORCADO: readonly string[] = ["PowerShell", "Bash"
   PADROES_DE_PUSH_FORCADO.map((padrao) => `${ferramenta}(${padrao})`),
 );
 
+/**
+ * As ferramentas do navegador do agente, com os nomes que o Claude Code lhes dá
+ * (`mcp__orquestrador__navegador_*`), se o turno ligou esse grupo do servidor
+ * MCP do app. Valem para o Orquestrador e para o executor e os subagentes
+ * prontos: o `tools` de um agente é uma lista fechada.
+ */
+export function ferramentasDoNavegadorNoClaudeCode(ferramentasDoApp: FerramentasDoTurno): readonly string[] {
+  return ferramentasDoApp[NOME_DO_GRUPO_DO_NAVEGADOR] === true
+    ? NOMES_DAS_FERRAMENTAS_DO_NAVEGADOR.map(nomeDaFerramentaNoClaudeCode)
+    : [];
+}
+
+/**
+ * O Orquestrador delega pela ferramenta `delegar_subtarefas` do app (servidor
+ * MCP) em vez de lançar subagentes do Claude Code: o turno ligou esse grupo
+ * (`precisaDeDelegacaoPeloApp`: os subagentes são do Codex ou do Copilot).
+ */
+export function delegaPeloApp(ferramentasDoApp: FerramentasDoTurno): boolean {
+  return ferramentasDoApp[FERRAMENTA_DE_DELEGACAO] === true;
+}
+
+/**
+ * Todas as ferramentas do servidor MCP do app que o turno liga, com os nomes
+ * do Claude Code: as do navegador e a `delegar_subtarefas`. Sem nenhuma, o
+ * turno roda sem `--mcp-config`.
+ */
+export function ferramentasDoAppNoClaudeCode(ferramentasDoApp: FerramentasDoTurno): readonly string[] {
+  return [
+    ...ferramentasDoNavegadorNoClaudeCode(ferramentasDoApp),
+    ...(delegaPeloApp(ferramentasDoApp) ? [nomeDaFerramentaNoClaudeCode(FERRAMENTA_DE_DELEGACAO)] : []),
+  ];
+}
+
 /** O que vai em `--disallowedTools` neste turno. */
 export function comandosProibidosDoTurno(pedido: PedidoDeTurno): readonly string[] {
   return pedido.configuracao.permiteCommitEPush(pedido.modo) ? COMANDOS_DE_PUSH_FORCADO : COMANDOS_DE_COMMIT_E_PUSH;
@@ -351,8 +392,15 @@ export function ambienteSemSessaoPai(base: NodeJS.ProcessEnv): NodeJS.ProcessEnv
 }
 
 export interface ArquivosDoTurno {
+  /** Gravado só quando o Orquestrador lança subagentes do Claude Code (sem a delegação pelo app); vai em `--agents`. */
   agentes: string;
   instrucoes: string;
+  /**
+   * Gravado só quando o turno liga ferramentas do servidor MCP do app
+   * (`ferramentasDoAppNoClaudeCode` não vazio); vai em `--mcp-config`. Leva o
+   * token do turno: só o dono lê.
+   */
+  mcp: string;
   /** Gravado só quando `configuracoesDaSessao` não é nulo; vai em `--settings`. */
   configuracoes: string;
 }
@@ -394,11 +442,16 @@ export function ferramentasDoTurno(pedido: PedidoDeTurno): readonly string[] {
  * precisam estar aqui porque o `tools` de um agente definido em `--agents` é
  * uma lista fechada: o subagente não herda as ferramentas da sessão.
  */
-function ferramentasDoSubagente(pedido: PedidoDeTurno, podePublicarOnline: boolean): string[] {
+function ferramentasDoSubagente(
+  pedido: PedidoDeTurno,
+  podePublicarOnline: boolean,
+  ferramentasDoApp: FerramentasDoTurno,
+): string[] {
   return [
     ...comFerramentasDeArtefato(ferramentasDoTurno(pedido)),
     ...ferramentasDeSkill(pedido),
     ...ferramentasDeArtefatoOnline(podePublicarOnline && publicaOnlineNoTurno(pedido)),
+    ...ferramentasDoNavegadorNoClaudeCode(ferramentasDoApp),
   ];
 }
 
@@ -409,10 +462,13 @@ function ferramentasDoSubagente(pedido: PedidoDeTurno, podePublicarOnline: boole
  * O `Workflow` do `ultracode` nunca entra no `tools` deles. Só o `executor`
  * publica artefato online; os prontos não (nem ferramenta, nem instrução).
  * A `plataforma` decide a sintaxe da regra dos servidores de todos eles.
+ * Com o navegador do agente ligado no turno (`ferramentasDoApp`), o executor e
+ * os prontos recebem as ferramentas `mcp__orquestrador__navegador_*`.
  */
 export function definicaoDosAgentes(
   pedido: PedidoDeTurno,
   plataforma: Plataforma = "unix",
+  ferramentasDoApp: FerramentasDoTurno = {},
 ): Record<string, DefinicaoDeAgente> {
   const esforco = nivelDeEsforcoDosSubagentes(
     pedido.configuracao.esforcoDosSubagentes,
@@ -431,8 +487,8 @@ export function definicaoDosAgentes(
           subagente,
           plataforma,
         ),
-        tools: ferramentasDoSubagente(pedido, false),
-        model: modeloDoSubagentePronto(subagente, pedido.configuracao.modeloDosSubagentes),
+        tools: ferramentasDoSubagente(pedido, false, ferramentasDoApp),
+        model: modeloDoSubagentePronto(subagente, comoModeloClaude(pedido.configuracao.modeloDosSubagentes)),
         ...(esforco === null ? {} : { effort: esforco }),
       },
     ]),
@@ -450,8 +506,8 @@ export function definicaoDosAgentes(
         plataforma,
         publicaOnlineNoTurno(pedido),
       ),
-      tools: ferramentasDoSubagente(pedido, true),
-      model: pedido.configuracao.modeloDosSubagentes,
+      tools: ferramentasDoSubagente(pedido, true, ferramentasDoApp),
+      model: comoModeloClaude(pedido.configuracao.modeloDosSubagentes),
       ...(esforco === null ? {} : { effort: esforco }),
     },
   };
@@ -495,18 +551,36 @@ export function definicaoDosAgentes(
  * Com a opção de artefatos online ligada, `Artifact`, `ArtifactCheck` e
  * `ArtifactData` entram nas duas listas (`ferramentasDeArtefatoOnline`), menos
  * no planejamento (`publicaOnlineNoTurno`).
+ *
+ * Com ferramentas do servidor MCP do app ligadas no turno (`ferramentasDoApp`:
+ * o navegador do agente e a `delegar_subtarefas`), `--mcp-config` aponta para
+ * o arquivo com a URL e o token do turno, e as ferramentas
+ * `mcp__orquestrador__*` entram só em `--allowedTools` (não são ferramentas
+ * embutidas, que `--tools` define). O `--strict-mcp-config` segue valendo:
+ * nenhum outro servidor MCP é carregado.
+ *
+ * Com a delegação pelo app (`delegaPeloApp`: os subagentes são do Codex ou do
+ * Copilot), o Orquestrador não lança subagentes do Claude Code: sem a
+ * ferramenta `Agent` (nem o `Workflow`, que lança agentes) e sem `--agents`.
  */
-export function montarArgumentos(pedido: PedidoDeTurno, arquivos: ArquivosDoTurno): string[] {
+export function montarArgumentos(
+  pedido: PedidoDeTurno,
+  arquivos: ArquivosDoTurno,
+  ferramentasDoApp: FerramentasDoTurno = {},
+): string[] {
+  const doApp = ferramentasDoAppNoClaudeCode(ferramentasDoApp);
+  const delegacao = delegaPeloApp(ferramentasDoApp);
   const doNivel = [
     ...ferramentasDoTurno(pedido),
-    FERRAMENTA_DE_SUBAGENTES,
-    ...ferramentasDoEsforco(pedido.configuracao.esforcoDoOrquestrador),
+    ...(delegacao ? [] : [FERRAMENTA_DE_SUBAGENTES]),
+    ...(delegacao ? [] : ferramentasDoEsforco(pedido.configuracao.esforcoDoOrquestrador)),
     ...ferramentasDeSkill(pedido),
     ...ferramentasDeArtefatoOnline(publicaOnlineNoTurno(pedido)),
   ];
   const ferramentas = comFerramentasDeArtefato(doNivel);
-  const liberadas = liberadasComArtefatos(doNivel, pedido.pastaDeArtefatos);
+  const liberadas = [...liberadasComArtefatos(doNivel, pedido.pastaDeArtefatos), ...doApp];
   const configuracoes = configuracoesDaSessao(pedido) === null ? [] : ["--settings", arquivos.configuracoes];
+  const mcp = doApp.length === 0 ? [] : ["--mcp-config", arquivos.mcp];
   const esforco = nivelDeEsforcoDoClaudeCode(pedido.configuracao.esforcoDoOrquestrador);
 
   return [
@@ -521,12 +595,12 @@ export function montarArgumentos(pedido: PedidoDeTurno, arquivos: ArquivosDoTurn
     ...(pedido.pastaDosAnexos === null ? [] : ["--add-dir", pedido.pastaDosAnexos]),
     ...(pedido.sessaoIniciada ? ["--resume", pedido.sessaoId] : ["--session-id", pedido.sessaoId]),
     "--model",
-    pedido.configuracao.modeloDoOrquestrador,
+    comoModeloClaude(pedido.configuracao.modeloDoOrquestrador, "opus"),
     ...(esforco === null ? [] : ["--effort", esforco]),
-    "--agents",
-    arquivos.agentes,
+    ...(delegacao ? [] : ["--agents", arquivos.agentes]),
     "--append-system-prompt-file",
     arquivos.instrucoes,
+    ...mcp,
     "--strict-mcp-config",
     ...configuracoes,
     "--permission-mode",

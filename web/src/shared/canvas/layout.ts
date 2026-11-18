@@ -129,6 +129,12 @@ export interface LayoutDoCanvas {
   previas: Record<string, RetanguloDaPrevia>;
   /** Terminais de shell no canvas, pelo id criado na tela. Layouts gravados antes deles não têm o campo: valem como nenhum. */
   shells: Record<string, RetanguloDoShell>;
+  /**
+   * Os navegadores do agente abertos no canvas, por id do Orquestrador (há um por Orquestrador). Só guarda onde
+   * a janela fica e o tamanho dela: a página vive no app desktop. Sem o campo ao ler, nenhum (layouts antigos); ao
+   * gravar sem navegadores, o campo nem vai.
+   */
+  navegadores?: Record<string, Retangulo>;
   viewport: Viewport | null;
   /**
    * Os traços do desenho, na ordem em que foram feitos. Sem o campo ao ler,
@@ -165,6 +171,9 @@ export const TAMANHO_MINIMO_DA_PREVIA = { largura: 360, altura: 240 } as const;
 export const ALTURA_DA_PREVIA_MINIMIZADA = ALTURA_DA_NOTA_MINIMIZADA;
 export const TAMANHO_DO_SHELL = { largura: 640, altura: 400 } as const;
 export const TAMANHO_MINIMO_DO_SHELL = { largura: 320, altura: 180 } as const;
+/** O navegador do agente: a barra, a faixa de controle, a página e a última ação (as faixas ficam fora do corpo). */
+export const TAMANHO_DO_NAVEGADOR = { largura: 760, altura: 560 } as const;
+export const TAMANHO_MINIMO_DO_NAVEGADOR = { largura: 380, altura: 300 } as const;
 export const TAMANHO_DO_ARTEFATO = { largura: 640, altura: 480 } as const;
 export const TAMANHO_MINIMO_DO_ARTEFATO = { largura: 320, altura: 200 } as const;
 
@@ -191,7 +200,11 @@ const CHAVE = "orquestrador-agentes:canvas:v1";
 /** Os nós que se ligam a um terminal (`ligados`), pelo prefixo do id: notas, prévias e artefatos. */
 const PREFIXOS_DOS_ITENS_LIGAVEIS = ["nota:", "previa:", "artefato:"] as const;
 const CHAVE_DOS_BIXINHOS_LIMPOS = `${CHAVE}:bixinhos-limpos`;
-/** O desenho sobre a página de cada artefato em tela cheia, por id do artefato (em px do corpo da tela cheia). */
+/**
+ * O desenho antigo sobre a página de cada artefato em tela cheia, por id do artefato (em px do corpo da
+ * tela cheia). Hoje o desenho fica no servidor, por versão; isto só é lido para levar o antigo para lá
+ * uma vez (`useDesenhoDoArtefato`), que então tira a entrada daqui.
+ */
 const CHAVE_DO_DESENHO_DA_TELA_CHEIA = `${CHAVE}:desenho-da-tela-cheia`;
 
 function ehNumero(valor: unknown): valor is number {
@@ -383,7 +396,7 @@ function quantidadeDePontosValida(tipo: TipoDoTraco, quantidade: number): boolea
 }
 
 /** Um traço salvo, só com os campos dele; nulo se algo estiver fora do esperado. */
-function interpretarTraco(valor: unknown): TracoDoDesenho | null {
+export function interpretarTraco(valor: unknown): TracoDoDesenho | null {
   if (typeof valor !== "object" || valor === null) {
     return null;
   }
@@ -440,14 +453,17 @@ export function interpretarLayout(texto: string | null): LayoutDoCanvas {
     if (typeof salvo !== "object" || salvo === null) {
       return layoutVazio();
     }
-    const { terminais, notas, artefatos, previas, shells, viewport, desenho } = salvo as Record<string, unknown>;
+    const { terminais, notas, artefatos, previas, shells, navegadores, viewport, desenho } = salvo as Record<string, unknown>;
     const tracos = interpretarDesenho(desenho);
+    const navegadoresValidos = interpretarRetangulos(navegadores);
     return {
       terminais: interpretarTerminais(terminais),
       notas: interpretarNotas(notas),
       artefatos: interpretarRetangulos(artefatos),
       previas: interpretarPrevias(previas),
       shells: interpretarShells(shells),
+      // Sem navegadores, sem o campo, como nos layouts antigos.
+      ...(Object.keys(navegadoresValidos).length > 0 ? { navegadores: navegadoresValidos } : {}),
       viewport: ehViewport(viewport) ? viewport : null,
       // Sem traços, sem o campo, como nos layouts antigos.
       ...(tracos.length > 0 ? { desenho: tracos } : {}),
@@ -471,7 +487,7 @@ export function lerLayout(): LayoutDoCanvas {
  */
 export function salvarLayout(layout: LayoutDoCanvas): void {
   try {
-    const { terminais, notas, artefatos, previas, shells, viewport } = layout;
+    const { terminais, notas, artefatos, previas, shells, navegadores, viewport } = layout;
     const desenho = layout.desenho ?? interpretarLayout(localStorage.getItem(CHAVE)).desenho ?? [];
     localStorage.setItem(
       CHAVE,
@@ -481,6 +497,7 @@ export function salvarLayout(layout: LayoutDoCanvas): void {
         artefatos,
         previas,
         shells,
+        ...(navegadores !== undefined && Object.keys(navegadores).length > 0 ? { navegadores } : {}),
         viewport,
         ...(desenho.length > 0 ? { desenho } : {}),
       }),
@@ -525,7 +542,7 @@ export function interpretarDesenhosDasTelasCheias(texto: string | null): Map<str
   }
 }
 
-/** Os traços que o artefato tem na tela cheia (vazio se não há ou se o salvo estiver ilegível). */
+/** Os traços antigos que o artefato tem na tela cheia (vazio se não há ou se o salvo estiver ilegível). Só para a migração. */
 export function lerDesenhoDaTelaCheia(artefatoId: string): TracoDoDesenho[] {
   try {
     return interpretarDesenhosDasTelasCheias(localStorage.getItem(CHAVE_DO_DESENHO_DA_TELA_CHEIA)).get(artefatoId) ?? [];
@@ -534,7 +551,10 @@ export function lerDesenhoDaTelaCheia(artefatoId: string): TracoDoDesenho[] {
   }
 }
 
-/** Grava os traços do artefato na tela cheia, sem mexer no desenho dos outros; sem traço, o artefato sai do salvo. */
+/**
+ * Grava os traços do artefato na tela cheia, sem mexer no desenho dos outros; sem traço, o artefato sai
+ * do salvo. A migração chama com `[]` depois de levar o desenho para o servidor.
+ */
 export function salvarDesenhoDaTelaCheia(artefatoId: string, desenho: readonly TracoDoDesenho[]): void {
   try {
     const todos = interpretarDesenhosDasTelasCheias(localStorage.getItem(CHAVE_DO_DESENHO_DA_TELA_CHEIA));

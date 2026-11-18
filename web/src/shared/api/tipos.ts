@@ -6,6 +6,31 @@
 
 export type ModeloClaude = "fable" | "opus" | "sonnet" | "haiku";
 
+/** Quem executa um papel da orquestração: cada motor é um CLI com o próprio login e a própria sessão. */
+export type Motor = "claude-code" | "codex" | "copilot";
+
+/**
+ * O modelo de um papel, válido para o motor dele: no `claude-code`, um `ModeloClaude`; no `codex` e no
+ * `copilot`, "padrao" (o modelo que o próprio CLI já usa) ou o id de um modelo (`/^[A-Za-z0-9._:-]{1,64}$/`).
+ */
+export type ModeloDoMotor = string;
+
+/** Por que o app passou o pedido para outro motor: só o que a reserva resolve, sem esperar. */
+export type CausaDaTrocaDeMotor = "limite_de_uso" | "sobrecarga";
+
+/** Um motor como `GET /api/motores` o descreve: se o CLI está instalado, a versão e se há login. */
+export interface EstadoDoMotor {
+  motor: Motor;
+  rotulo: string;
+  instalado: boolean;
+  versao: string | null;
+  caminho: string | null;
+  /** Nulo quando não deu para saber. */
+  logado: boolean | null;
+  /** O motivo, quando não está pronto (ex.: "Codex não encontrado no PATH."). */
+  mensagem: string | null;
+}
+
 export type NivelDePermissao = "leitura" | "edicao" | "edicao_e_comandos";
 
 /**
@@ -22,12 +47,25 @@ export interface DadosDaQuantidade {
 
 
 export interface DadosDaConfiguracao {
-  modeloDoOrquestrador: ModeloClaude;
-  /** "padrao" por padrão. */
+  /** O motor de cada papel. Ausentes (servidores e eventos anteriores aos outros motores): valem "claude-code". */
+  motorDoOrquestrador?: Motor;
+  motorDosSubagentes?: Motor;
+  modeloDoOrquestrador: ModeloDoMotor;
+  /** "padrao" por padrão. Só o Claude Code o aplica: nos outros motores o valor fica guardado e o CLI usa o dele. */
   esforcoDoOrquestrador: EsforcoDeRaciocinio;
-  modeloDosSubagentes: ModeloClaude;
-  /** "padrao" por padrão. */
+  modeloDosSubagentes: ModeloDoMotor;
+  /** "padrao" por padrão. Só o Claude Code o aplica. */
   esforcoDosSubagentes: EsforcoDeRaciocinio;
+  /**
+   * Os motores a que o app recorre, na ordem, quando o motor do Orquestrador bate no limite de uso ou fica
+   * sobrecarregado: sem repetidos e sem o motor do Orquestrador. Ausente: nenhuma reserva.
+   */
+  ordemDeReserva?: Motor[];
+  /**
+   * O agente pode usar um navegador próprio (um Chromium por Orquestrador, que aparece como um bloco no
+   * canvas), sem pedir aprovação a cada ação. Desligado por padrão; ausente: desligado.
+   */
+  navegadorDoAgente?: boolean;
   quantidadeDeSubagentes: DadosDaQuantidade;
   nivelDePermissao: NivelDePermissao;
   /** Libera `git commit`/`git push` só quando o usuário pede na mensagem. Desligado por padrão. */
@@ -452,6 +490,19 @@ export interface ResumoDoOrquestrador {
   planoPendente?: boolean;
 }
 
+/** Um vínculo entre dois orquestradores: notas compartilhadas e troca manual de mensagens. */
+export interface VinculoDto {
+  id: string;
+  orquestradorAId: string;
+  orquestradorBId: string;
+  notas: string;
+  criadoEm: string;
+  atualizadoEm: string;
+}
+
+/** O limite do servidor para as notas compartilhadas de um vínculo. */
+export const TAMANHO_MAXIMO_DAS_NOTAS_DO_VINCULO = 8_000;
+
 export interface PastaDeProjeto {
   nome: string;
   caminho: string;
@@ -562,7 +613,13 @@ type EventoDeTurno =
       modo?: ModoDoTurno;
       // Só nos turnos que o app abriu sozinho para retomar um que travou ou falhou; `texto` é a mensagem de retomada.
       retomada?: DadosDaRetomada;
+      // O motor que executa o turno; ausente nos eventos gravados antes dos outros motores (vale "claude-code").
+      motor?: Motor;
     }
+  // O pedido passou para outro motor, em vez de esperar o limite liberar: o turno `turnoId` falhou por
+  // `limite_de_uso` ou `sobrecarga` e o app reenvia o mesmo pedido ao próximo da reserva (um turno novo vem logo
+  // depois), ou o pedido novo já começa no motor de reserva. `liberaEm` (ISO) só quando o motor informou.
+  | { tipo: "motor_trocado"; de: Motor; para: Motor; causa: CausaDaTrocaDeMotor; liberaEm?: string }
   // Autorrecuperação do turno travado ou que falhou por limite de uso, sobrecarga ou rede.
   // `tentativa` começa em 1 e `de` é o máximo para a causa; `resumo` vem pronto em pt-BR (em "desistiu",
   // o diagnóstico completo); `retomaEm` (ISO) só em "aguardando".
