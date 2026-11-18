@@ -117,10 +117,9 @@ const EXEMPLO_DO_BLOCO = ["```" + MARCA_DA_PREVIA, '{"fechar":["http://localhost
  */
 export function linhasDaRegraDaPrevia(): string[] {
   return [
-    "Prévia ao vivo: o app abre uma prévia (um navegador dentro do canvas) quando a sua resposta final cita um endereço local completo (http://localhost:PORTA). Cite esse endereço só quando o usuário pediu para ver a página, quando você precisa mostrar algo a ele ou quando ele precisa fazer login. Nunca o cite para validar endpoint, resposta de API ou outra verificação técnica: use curl e diga só a porta (ex.: \"a API na porta 3000 respondeu 200\").",
-    `Feche as prévias que você abriu quando não forem mais necessárias, com um bloco \`\`\`${MARCA_DA_PREVIA} no fim da resposta, com a lista "fechar" (endereços completos, no máximo ${MAXIMO_DE_PREVIAS_PARA_FECHAR}). Exemplo:`,
+    "Prévia ao vivo: o app abre uma prévia quando a sua resposta final cita um endereço local completo (http://localhost:PORTA). Cite-o só se o usuário pediu para ver a página, precisa ver algo ou fazer login; para verificação técnica use curl e diga só a porta (ex.: \"a API na porta 3000 respondeu 200\").",
+    `Feche as prévias desnecessárias com um bloco \`\`\`${MARCA_DA_PREVIA} no fim da resposta, com a lista "fechar" (endereços completos, no máximo ${MAXIMO_DE_PREVIAS_PARA_FECHAR}), sem repeti-los no texto. Antes de encerrar, feche as prévias abertas do pedido que não servem mais, salvo pedido do usuário para mantê-las. Exemplo:`,
     ...EXEMPLO_DO_BLOCO,
-    "Antes de encerrar a tarefa, confira as prévias abertas listadas no pedido e feche as desnecessárias, exceto se o usuário pediu para mantê-las abertas. Não repita no texto os endereços do bloco.",
   ];
 }
 
@@ -146,4 +145,4 @@ export function linhasDasPreviasAbertas(abertas: readonly string[], marcasDoBloc
  * relatório deles também abriria uma.
  */
 export const REGRA_DA_PREVIA_NO_SUBAGENTE =
-  "Não cite endereços locais (http://localhost:PORTA) no relatório para verificação técnica: diga só a porta (ex.: \"a API na porta 3000 respondeu 200\"). O app abre uma prévia ao vivo para cada endereço local citado.";
+  "Não cite endereços locais (http://localhost:PORTA) no relatório para verificação técnica: diga só a porta (ex.: \"a API na porta 3000 respondeu 200\"); cada endereço citado abre uma prévia ao vivo.";

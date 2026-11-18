@@ -435,7 +435,7 @@ describe("mensagemParaOOrquestrador", () => {
       REGRA_DOS_SERVIDORES_UNIX,
     );
     expect(mensagemParaOOrquestrador("suba o site", soLeitura)).not.toContain(REGRA_DOS_SERVIDORES_UNIX);
-    expect(REGRA_DOS_SERVIDORES_UNIX).toContain("Não abra o navegador do computador");
+    expect(REGRA_DOS_SERVIDORES_UNIX).toContain("Não abra o navegador");
   });
 
   it("no Windows explica a subida pelo PowerShell, e não a do unix", () => {
@@ -470,7 +470,7 @@ describe("mensagemParaOOrquestrador", () => {
 
     expect(texto).toMatch(/^<configuracao-do-pedido>/);
     expect(texto).toContain(
-      "Ela substitui qualquer regra de delegação, quantidade de subagentes ou permissão mencionada antes nesta conversa, inclusive nas suas instruções iniciais.",
+      "substitui as regras anteriores de delegação, quantidade de subagentes e permissão.",
     );
     expect(texto).toContain("só podem ler arquivos");
     expect(texto).toContain("a única exceção é gravar artefatos na pasta de artefatos do pedido");
@@ -512,7 +512,7 @@ describe("mensagemParaOOrquestrador", () => {
   describe("regra de commit e push", () => {
     const PROIBIDOS = "Commits e push são sempre proibidos.";
     const POR_FEATURE =
-      "Commits e push: por feature. Ao terminar CADA feature ou correção (testada, com lint e build ok), faça um commit só dela e dê push da branch logo em seguida (git push -u no primeiro). Um commit por feature: não misture features e adicione só os arquivos dela, um a um (nunca git add -A nem git add . às cegas). Antes do primeiro commit, crie ou use uma branch feature/, fix/, hotfix/ ou refactor/ com nome descritivo. Nunca commitar na main, nunca push forçado, nunca a linha Co-authored-by. Mensagem em Conventional Commits, em português. Com subagentes em paralelo, só um faz os commits (você ou um subagente designado na subtarefa), uma feature de cada vez. Abrir PR e mergear continuam proibidos sem pedido explícito do usuário.";
+      "Commits e push: por feature. Ao fim de CADA feature ou correção (testada, com lint e build ok), um commit só dela, com os arquivos adicionados um a um (nunca git add -A nem git add .), e push da branch (git push -u no primeiro). Branch feature/, fix/, hotfix/ ou refactor/; nunca main, push forçado nem Co-authored-by. Conventional Commits, em português. Em paralelo, só um commita. PR e merge: proibidos sem pedido explícito.";
 
     function bloco(permitirCommitEPush: boolean, modo: "execucao" | "planejamento"): string {
       const configuracao = ConfiguracaoDoOrquestrador.de({
@@ -543,25 +543,25 @@ describe("mensagemParaOOrquestrador", () => {
     it("com a opção ligada, um commit por feature, push em seguida e sem git add às cegas", () => {
       const texto = bloco(true, "execucao");
 
-      expect(texto).toContain("Ao terminar CADA feature ou correção (testada, com lint e build ok)");
-      expect(texto).toContain("um commit só dela e dê push da branch logo em seguida");
-      expect(texto).toContain("Um commit por feature: não misture features");
-      expect(texto).toContain("um a um (nunca git add -A nem git add . às cegas)");
+      expect(texto).toContain("Ao fim de CADA feature ou correção (testada, com lint e build ok)");
+      expect(texto).toContain("um commit só dela");
+      expect(texto).toContain("e push da branch (git push -u no primeiro)");
+      expect(texto).toContain("um a um (nunca git add -A nem git add .)");
     });
 
     it("com a opção ligada, só um commita com subagentes em paralelo", () => {
       const texto = bloco(true, "execucao");
 
-      expect(texto).toContain("Com subagentes em paralelo, só um faz os commits");
-      expect(texto).toContain("uma feature de cada vez");
+      expect(texto).toContain("Em paralelo, só um commita");
+
     });
 
     it("com a opção ligada, mantém branch, main, push forçado e Co-authored-by proibidos, e PR e merge só a pedido", () => {
       const texto = bloco(true, "execucao");
 
       expect(texto).toContain("feature/, fix/, hotfix/ ou refactor/");
-      expect(texto).toContain("Nunca commitar na main, nunca push forçado, nunca a linha Co-authored-by");
-      expect(texto).toContain("Abrir PR e mergear continuam proibidos sem pedido explícito do usuário");
+      expect(texto).toContain("nunca main, push forçado nem Co-authored-by");
+      expect(texto).toContain("PR e merge: proibidos sem pedido explícito");
     });
 
     it("com a opção ligada, no planejamento continua proibindo", () => {
@@ -599,12 +599,14 @@ describe("mensagemParaOOrquestrador: delegação e pedidos grandes", () => {
 
       expect(texto).toContain(`- Faça você mesmo o trivial: ${TRABALHO_DIRETO_NO_NIVEL.edicao_e_comandos}.`);
       expect(texto).toContain("rodar um comando curto (ex.: git status, listar pasta)");
-      expect(texto).toContain("Cada subagente custa dezenas de milhares de tokens só para começar.");
+      expect(texto).toContain("Cada subagente custa dezenas de milhares de tokens.");
       expect(texto).toContain(
-        '- Delegue a subagentes "executor" quando houver alteração de arquivos, quando o trabalho exigir ler muitos arquivos ou rodar comandos demorados (build, testes), ou quando der para dividir em partes paralelas.',
+        '- Delegue a "executor" para alterar arquivos, ler muitos, rodar comandos demorados ou partes paralelas; nunca para conferir seu trabalho.',
       );
-      expect(texto).toContain("Não use subagente para conferir o próprio trabalho.");
-      expect(texto).toContain("- Você não edita arquivos: toda alteração no projeto vai para um subagente");
+      expect(texto).toContain("Uma área ou feature por subagente: nunca várias features numa subtarefa só.");
+      expect(texto).toContain("- Confie nos relatórios dos subagentes: não releia arquivos nem refaça verificações já relatadas");
+
+      expect(texto).toContain("Você não edita arquivos (exceto artefatos).");
       expect(texto).not.toContain(REGRA_ESTRITA_ANTIGA);
     });
 
@@ -620,7 +622,7 @@ describe("mensagemParaOOrquestrador: delegação e pedidos grandes", () => {
       const texto = bloco("edicao_e_comandos", "planejamento");
 
       expect(texto).toContain(`- Faça você mesmo o trivial: ${TRABALHO_DIRETO_NO_NIVEL.leitura}.`);
-      expect(texto).toContain("  Investigue (você mesmo, se for rápido, ou delegando) e responda com um PLANO, sem executá-lo:");
+      expect(texto).toContain("  Investigue (você, se for rápido, ou delegando) e responda com um PLANO, sem executá-lo:");
       expect(texto).not.toContain("Delegue a investigação");
       expect(texto).not.toContain(REGRA_ESTRITA_ANTIGA);
     });
@@ -637,9 +639,9 @@ describe("mensagemParaOOrquestrador: delegação e pedidos grandes", () => {
       const texto = blocoDe(antiga);
 
       expect(texto).toContain(`- Faça você mesmo o trivial: ${TRABALHO_DIRETO_NO_NIVEL.edicao_e_comandos}.`);
-      expect(texto).toContain("- Você não edita arquivos:");
-      expect(texto).toContain("investigue só lendo (você ou subagentes com subtarefas só de leitura)");
-      expect(texto).toContain(`termine a resposta com a linha ${MARCADOR_DE_PLANO}.`);
+      expect(texto).toContain("Você não edita arquivos (exceto artefatos).");
+      expect(texto).toContain("Investigue só lendo e responda com um PLANO");
+      expect(texto).toContain(`terminando com a linha ${MARCADOR_DE_PLANO};`);
       expect(texto).not.toContain(REGRA_ESTRITA_ANTIGA);
       expect(texto).toBe(bloco());
     });
@@ -655,27 +657,26 @@ describe("mensagemParaOOrquestrador: delegação e pedidos grandes", () => {
       (nivel) => {
         const texto = bloco(nivel);
 
-        expect(texto).toContain("- Pedidos grandes: antes de alterar qualquer coisa, avalie o tamanho.");
-        expect(texto).toContain("investigue só lendo (você ou subagentes com subtarefas só de leitura)");
-        expect(texto).toContain(`termine a resposta com a linha ${MARCADOR_DE_PLANO}.`);
+        expect(texto).toContain("- Pedidos grandes (");
+        expect(texto).toContain("Investigue só lendo e responda com um PLANO");
+        expect(texto).toContain(`terminando com a linha ${MARCADOR_DE_PLANO};`);
       },
     );
 
     it("o texto da regra: limiar, investigação só lendo, marcador e pedido pequeno", () => {
       const texto = bloco();
 
-      expect(texto).toContain("- Pedidos grandes: antes de alterar qualquer coisa, avalie o tamanho.");
-      expect(texto).toContain("mais de cerca de 3 arquivos, mudar contratos, dados ou arquitetura");
-      expect(texto).toContain("investigue só lendo (você ou subagentes com subtarefas só de leitura)");
-      expect(texto).toContain(`termine a resposta com a linha ${MARCADOR_DE_PLANO}.`);
-      expect(texto).toContain("- Pedido pequeno, ou plano já aprovado");
+      expect(texto).toContain("- Pedidos grandes (mais de ~3 arquivos, contratos, dados, arquitetura ou ambiguidade): NÃO execute.");
+      expect(texto).toContain("Investigue só lendo e responda com um PLANO");
+      expect(texto).toContain(`terminando com a linha ${MARCADOR_DE_PLANO};`);
+      expect(texto).toContain("Pedido pequeno ou mensagem iniciada por");
       expect(texto).toContain("execute direto, sem o marcador.");
     });
 
     it("deixa executar sem novo marcador a mensagem que aprova o plano", () => {
       const aprovacao = mensagemDeAprovacaoDoPlano("");
 
-      expect(bloco()).toContain(`(mensagem que começa com "${aprovacao.slice(0, aprovacao.indexOf(".") + 1)}")`);
+      expect(bloco()).toContain(`mensagem iniciada por "${aprovacao.slice(0, aprovacao.indexOf(".") + 1)}"`);
     });
 
     it("a investigação nunca fica só com subagentes", () => {
@@ -696,9 +697,8 @@ describe("mensagemParaOOrquestrador: delegação e pedidos grandes", () => {
 
 describe("regraDosServidores", () => {
   it("no unix é o texto de sempre, com nohup e /tmp", () => {
-    expect(regraDosServidores("unix")).toBe(
-      "Servidor que deve continuar no ar (npm run dev, vite, next dev e afins): não use a execução em segundo plano da ferramenta (run_in_background), que prende o pedido até o servidor parar. Suba desacoplado, com a saída num log fora do projeto, e mostre o começo do log para o endereço aparecer, por exemplo: `nohup npm run dev > /tmp/servidor-<nome>.log 2>&1 & sleep 4; tail -n 20 /tmp/servidor-<nome>.log`. Ele continua rodando depois do pedido; para parar, use kill no processo. Não abra o navegador do computador (open, xdg-open, start): o aplicativo mostra a página numa prévia ao vivo só quando a resposta final cita o endereço; para conferir, use curl e não cite o endereço na resposta, a não ser que o usuário deva ver a página.",
-    );
+    expect(regraDosServidores("unix")).toContain("nohup npm run dev > /tmp/servidor-<nome>.log 2>&1 & sleep 4; tail -n 20 /tmp/servidor-<nome>.log");
+    expect(regraDosServidores("unix")).toContain("nunca com run_in_background");
     expect(regraDosServidores("unix")).toBe(REGRA_DOS_SERVIDORES_UNIX);
   });
 
@@ -710,9 +710,9 @@ describe("regraDosServidores", () => {
     expect(regra).toContain(String.raw`$env:TEMP\servidor-<nome>.log`);
     expect(regra).toContain("taskkill /PID <PID> /T /F");
     expect(regra).toContain("-NoNewWindow");
-    expect(regra).toContain("curl.exe e não cite o endereço na resposta, a não ser que o usuário deva ver a página");
+    expect(regra).toContain("curl.exe e cite o endereço só se o usuário deva ver a página");
     expect(regra).not.toContain("cite o endereço completo");
-    expect(regra).toContain("Não abra o navegador do computador");
+    expect(regra).toContain("Não abra o navegador");
     expect(regra).not.toContain("nohup");
     expect(regra).not.toContain("/tmp");
   });

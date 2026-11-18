@@ -108,10 +108,10 @@ describe("linhasDaRegraDaPrevia", () => {
   it("diz quando citar, quando nunca citar, como fechar e a conferência antes de encerrar", () => {
     const regra = linhasDaRegraDaPrevia().join("\n");
 
-    expect(regra).toContain("quando o usuário pediu para ver a página");
-    expect(regra).toContain("quando ele precisa fazer login");
+    expect(regra).toContain("se o usuário pediu para ver a página");
+    expect(regra).toContain("precisa ver algo ou fazer login");
     expect(regra).toContain("use curl e diga só a porta");
     expect(regra).toContain('```previa-do-app\n{"fechar":["http://localhost:5173"]}\n```');
-    expect(regra).toContain("Antes de encerrar a tarefa, confira as prévias abertas listadas no pedido");
+    expect(regra).toContain("Antes de encerrar, feche as prévias abertas do pedido que não servem mais");
   });
 });

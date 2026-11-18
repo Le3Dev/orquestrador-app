@@ -30,7 +30,7 @@ describe("separarPerguntasDoApp", () => {
       "Antes de seguir, preciso de uma decisão.",
       "",
       bloco(
-        '{"perguntas":[{"pergunta":"Qual banco usar?","opcoes":[{"rotulo":"Postgres","descricao":"já usado no projeto"},"SQLite"],"multipla":false}]}',
+        '{"perguntas":[{"pergunta":"Qual banco usar?","opcoes":[{"rotulo":"Postgres","descricao":"já usado no projeto"},"SQLite"]}]}',
       ),
     ].join("\n");
 
@@ -175,16 +175,16 @@ describe("linhasDaRegraDasPerguntas", () => {
   const regra = linhasDaRegraDasPerguntas().join("\n");
 
   it("diz quando usar e quando não usar o bloco", () => {
-    expect(regra).toContain("quando precisar que o usuário decida entre opções claras");
-    expect(regra).toContain("Não use o bloco para perguntas abertas");
+    expect(regra).toContain("para decisões entre opções claras");
+    expect(regra).toContain("perguntas abertas vão no texto");
   });
 
   it("traz o formato, os limites e o exemplo do contrato", () => {
-    expect(regra).toContain('"perguntas" (de 1 a 4)');
-    expect(regra).toContain('"opcoes" (de 2 a 6');
+    expect(regra).toContain('"perguntas" (1 a 4)');
+    expect(regra).toContain('"opcoes" (2 a 6');
     expect(regra).toContain(
       "```pergunta-do-app\n" +
-        '{"perguntas":[{"pergunta":"Qual banco usar?","opcoes":[{"rotulo":"Postgres","descricao":"já usado no projeto"},"SQLite"],"multipla":false}]}\n' +
+        '{"perguntas":[{"pergunta":"Qual banco?","opcoes":[{"rotulo":"Postgres","descricao":"já usado"},"SQLite"]}]}\n' +
         "```",
     );
   });
@@ -194,8 +194,8 @@ describe("linhasDaRegraDasPerguntas", () => {
   });
 
   it("não repetir a pergunta, sem \"Outro\" nas opções e como chega a resposta", () => {
-    expect(regra).toContain("Não repita a pergunta nem as opções no texto fora do bloco.");
-    expect(regra).toContain('não inclua "Outro" nas opções');
-    expect(regra).toContain('a escolha do usuário chega como a próxima mensagem, uma linha por pergunta, no formato "pergunta → escolha"');
+    expect(regra).toContain("Não repita a pergunta nem as opções fora do bloco");
+    expect(regra).toContain('nem inclua "Outro"');
+    expect(regra).toContain('a escolha chega na próxima mensagem, uma linha por pergunta, no formato "pergunta → escolha"');
   });
 });
