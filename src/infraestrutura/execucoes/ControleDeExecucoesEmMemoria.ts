@@ -2,7 +2,7 @@ import { ControleDeExecucoes, MotivoDoCancelamento } from "../../orquestracao/Co
 
 /**
  * Quem congela e descongela os processos de um Orquestrador (o registro dos
- * processos, ver ADR-49). Sem ele, nada é congelado e a pausa vira retomada.
+ * processos, ver ADR-51). Sem ele, nada é congelado e a pausa vira retomada.
  */
 export interface CongeladorDeProcessos {
   congelar(orquestradorId: string): boolean;

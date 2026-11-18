@@ -32,7 +32,7 @@ export const TAMANHO_MAXIMO_DO_NOME = 60;
 /** Quantos pedidos cabem na fila de um Orquestrador. */
 export const LIMITE_DA_FILA = 10;
 
-/** `pausado`: sempre que há uma pausa (ver ADR-49), com o turno congelado ou já encerrado como `pausado`. */
+/** `pausado`: sempre que há uma pausa (ver ADR-51), com o turno congelado ou já encerrado como `pausado`. */
 export type SituacaoDoOrquestrador = "ocioso" | "trabalhando" | "pausado";
 
 /** O nome aparado, de 1 a `TAMANHO_MAXIMO_DO_NOME` caracteres: vale ao criar e ao renomear. */
@@ -140,7 +140,7 @@ export interface DadosDoOrquestrador {
    * antes dos outros motores: vale nenhum.
    */
   liberaEmDosMotores?: Partial<Record<Motor, string>> | undefined;
-  /** A pausa pedida pelo usuário (ver ADR-49). Ausente nos dados gravados antes dela: vale nenhuma. */
+  /** A pausa pedida pelo usuário (ver ADR-51). Ausente nos dados gravados antes dela: vale nenhuma. */
   pausa?: DadosDaPausa | null | undefined;
 }
 
@@ -397,7 +397,7 @@ export class Orquestrador {
     return this.turnoEmAndamento === null ? "ocioso" : "trabalhando";
   }
 
-  /** A pausa pedida pelo usuário, ou `null` sem nenhuma (ver ADR-49). */
+  /** A pausa pedida pelo usuário, ou `null` sem nenhuma (ver ADR-51). */
   get pausa(): DadosDaPausa | null {
     return this.pausaAtual === null ? null : { ...this.pausaAtual };
   }
@@ -514,7 +514,7 @@ export class Orquestrador {
       throw new ErroDeFilaCheia(`A fila de "${this.nome}" está cheia (máximo ${LIMITE_DA_FILA} pedidos).`);
     }
     if (naFrente) {
-      // A mensagem mandada com o Orquestrador congelado (ver ADR-49): sai antes das outras.
+      // A mensagem mandada com o Orquestrador congelado (ver ADR-51): sai antes das outras.
       this.filaAtual.unshift(pedido);
       return { tipo: "pedido_enfileirado", pedido: pedido.paraDados(), naFrente: true };
     }
@@ -647,7 +647,7 @@ export class Orquestrador {
     anexos: readonly Anexo[] = [],
     modo: ModoDoTurno = "execucao",
     motor: Motor = this.configuracaoAtual.motorDoOrquestrador,
-    /** O turno continua a pausa (ver ADR-49): só ele começa com o Orquestrador pausado, e a pausa sai. */
+    /** O turno continua a pausa (ver ADR-51): só ele começa com o Orquestrador pausado, e a pausa sai. */
     continuandoPausa = false,
   ): EventoDeOrquestracao {
     const mensagem = texto.trim();
@@ -788,7 +788,7 @@ export class Orquestrador {
   /**
    * Usado ao reabrir o histórico: um turno que estava rodando quando o servidor parou.
    * Pausado, ele não é interrompido: termina `pausado` e a pausa passa a
-   * `retomada` (o processo congelado morreu junto com o servidor; ver ADR-49).
+   * `retomada` (o processo congelado morreu junto com o servidor; ver ADR-51).
    */
   interromperTurnoEmAndamento(agora: Date): EventoDeOrquestracao | null {
     const turno = this.turnoEmAndamento;

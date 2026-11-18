@@ -28,7 +28,7 @@ function ehProcessoDeAgente(valor: unknown): valor is ProcessoDeAgente {
 export class RegistroDeProcessos implements CongeladorDeProcessos {
   private readonly processos = new Map<number, ProcessoDeAgente>();
   /**
-   * Os grupos congelados (SIGSTOP) de cada Orquestrador pausado (ver ADR-49).
+   * Os grupos congelados (SIGSTOP) de cada Orquestrador pausado (ver ADR-51).
    * Guardados à parte do registro: um processo que termina sai dele, mas o
    * grupo pode seguir com filhos parados, que precisam do SIGCONT.
    */

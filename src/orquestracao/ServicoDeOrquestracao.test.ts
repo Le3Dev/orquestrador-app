@@ -2828,7 +2828,7 @@ class CongeladorFalso implements CongeladorDeProcessos {
   }
 }
 
-describe("ServicoDeOrquestracao e a pausa (ADR-49)", () => {
+describe("ServicoDeOrquestracao e a pausa (ADR-51)", () => {
   let repositorio: RepositorioEmMemoria;
   let motor: MotorFalso;
   let congelador: CongeladorFalso;

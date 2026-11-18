@@ -2147,7 +2147,7 @@ class MotorQueNaoTermina implements MotorDeAgentes {
   }
 }
 
-describe("rotas de orquestradores — pausar e continuar (ADR-49)", () => {
+describe("rotas de orquestradores — pausar e continuar (ADR-51)", () => {
   const raiz = path.resolve("/projetos");
   let servidor: Server;
   let base: string;

@@ -79,7 +79,7 @@ export class VigiaDoTurno {
       return;
     }
     this.ligada = true;
-    // Ligar de novo (depois da pausa, ADR-49) recomeça os relógios e as contagens do zero.
+    // Ligar de novo (depois da pausa, ADR-51) recomeça os relógios e as contagens do zero.
     this.ultimaLinhaEm = this.agoraMs();
     this.parados = 0;
     this.semProcesso = 0;

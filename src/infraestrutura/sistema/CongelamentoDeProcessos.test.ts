@@ -26,7 +26,7 @@ function iniciarGrupo(): { pid: number; linhas: () => string[]; fim: Promise<num
   return { pid: processo.pid as number, linhas: () => [...lidas], fim };
 }
 
-describe.skipIf(process.platform === "win32")("congelamento real de um grupo de processos (ADR-49)", () => {
+describe.skipIf(process.platform === "win32")("congelamento real de um grupo de processos (ADR-51)", () => {
   it("SIGSTOP para o grupo inteiro, SIGCONT retoma, e encerrar um grupo congelado funciona", async () => {
     const grupo = iniciarGrupo();
     const registro = new RegistroDeProcessos();

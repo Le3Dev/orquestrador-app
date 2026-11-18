@@ -9,7 +9,7 @@ import { DadosDoSubagente, Subagente } from "./Subagente";
 /**
  * `pausado`: o usuário pausou e o processo não pôde ficar congelado (Windows,
  * app fechado, processo morto durante a pausa); o trabalho continua num turno
- * novo, na mesma sessão, quando ele mandar continuar (ver ADR-49).
+ * novo, na mesma sessão, quando ele mandar continuar (ver ADR-51).
  */
 export type SituacaoDoTurno = "em_andamento" | "concluido" | "cancelado" | "falhou" | "interrompido" | "pausado";
 
@@ -202,7 +202,7 @@ export class Turno {
     this.encerrar("falhou", agora);
   }
 
-  /** Pausado sem processo vivo para continuar: segue num turno novo, na mesma sessão (ver ADR-49). */
+  /** Pausado sem processo vivo para continuar: segue num turno novo, na mesma sessão (ver ADR-51). */
   pausar(agora: Date): void {
     this.encerrar("pausado", agora);
   }

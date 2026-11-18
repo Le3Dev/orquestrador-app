@@ -241,7 +241,7 @@ export interface MensagemEnviada {
    */
   recuperacao: Promise<void>;
   /**
-   * Só na mensagem mandada com o Orquestrador congelado (ver ADR-49): ela
+   * Só na mensagem mandada com o Orquestrador congelado (ver ADR-51): ela
    * entrou na frente da fila com este id e sai assim que o turno em andamento
    * (`turnoId`) terminar. As promessas são as desse turno.
    */
@@ -285,14 +285,14 @@ export class ServicoDeOrquestracao {
    * Só em memória: some quando o turno termina.
    */
   private readonly origensDosTurnos = new Map<string, OrigemDoPedido>();
-  /** A vigia do turno em andamento de cada Orquestrador: fica parada enquanto ele está congelado (ADR-49). */
+  /** A vigia do turno em andamento de cada Orquestrador: fica parada enquanto ele está congelado (ADR-51). */
   private readonly vigias = new Map<string, VigiaDoTurno>();
   /** O turno em andamento de cada Orquestrador, para esperar o fim dele (pausa no modo retomada). */
   private readonly turnosEmExecucao = new Map<string, MensagemEnviada>();
   /**
    * A mensagem mandada com o Orquestrador congelado, por Orquestrador: sai da
    * fila assim que o turno `turnoId` terminar, mesmo que a fila normalmente
-   * parasse (ver ADR-49). Só em memória.
+   * parasse (ver ADR-51). Só em memória.
    */
   private readonly prioridadesDaFila = new Map<string, { turnoId: string; pedidoId: string }>();
 
@@ -533,7 +533,7 @@ export class ServicoDeOrquestracao {
   }
 
   /**
-   * Pausa o turno em andamento (ver ADR-49). No Mac e no Linux, congela os
+   * Pausa o turno em andamento (ver ADR-51). No Mac e no Linux, congela os
    * processos (SIGSTOP) e a vigia do turno para: continuar segue exatamente de
    * onde parou. Sem processo para congelar (Windows, ou nenhum vivo agora), a
    * pausa é `retomada`: o processo é encerrado com o motivo "pausa", o turno
@@ -560,7 +560,7 @@ export class ServicoDeOrquestracao {
   }
 
   /**
-   * Tira o Orquestrador da pausa (ver ADR-49). `congelado`: SIGCONT nos
+   * Tira o Orquestrador da pausa (ver ADR-51). `congelado`: SIGCONT nos
    * processos e a vigia volta do zero. `retomada`: abre um turno novo na mesma
    * sessão, pedindo para conferir a pasta e continuar de onde parou. A fila
    * volta a andar quando esse turno concluir.
@@ -628,7 +628,7 @@ export class ServicoDeOrquestracao {
 
   /**
    * Uma mensagem (ou "enviar agora" de um pedido da fila) com o Orquestrador
-   * pausado: tira da pausa e manda junto (ver ADR-49). Congelado: SIGCONT, e a
+   * pausado: tira da pausa e manda junto (ver ADR-51). Congelado: SIGCONT, e a
    * mensagem entra na frente da fila (o pedido da fila fica onde está), para
    * sair assim que o turno em andamento terminar. Retomada: abre o turno de
    * continuação com a nota e a mensagem no mesmo texto.
@@ -717,7 +717,7 @@ export class ServicoDeOrquestracao {
    * de uso do principal ainda não liberou (`destinoDoPedidoNovo`).
    *
    * `pausaContinuada`: o turno continua uma pausa no modo retomada (ver
-   * ADR-49). O agregado tira a pausa ao aceitar o turno, e o
+   * ADR-51). O agregado tira a pausa ao aceitar o turno, e o
    * `orquestrador_continuado` sai logo antes do `turno_iniciado`.
    */
   private async iniciarTurno(
@@ -979,7 +979,7 @@ export class ServicoDeOrquestracao {
     const orquestrador = this.buscar(id);
     const turno = orquestrador.turnoEmAndamento;
 
-    // Cancelar durante a pausa (ver ADR-49) tira a pausa. Congelado: o
+    // Cancelar durante a pausa (ver ADR-51) tira a pausa. Congelado: o
     // controle descongela antes de encerrar, e o turno é cancelado como sempre;
     // retomada: o turno já terminou pausado, só a pausa sai.
     const saidaDaPausa = orquestrador.limparPausa(true);
@@ -1260,7 +1260,7 @@ export class ServicoDeOrquestracao {
     };
     // Abortado pela vigia (ADR-36) é falha, não cancelamento: o turno pode ser retomado.
     const encerradoPorSilencio = sinal.aborted && sinal.reason === ABORTO_POR_SILENCIO;
-    // Pausado (ADR-49): sem sucesso, o turno termina pausado, seja pela pausa
+    // Pausado (ADR-51): sem sucesso, o turno termina pausado, seja pela pausa
     // sem congelamento, pelo processo congelado que morreu ou pelo app que
     // fechou com ele congelado. Com sucesso (concluiu antes de a pausa valer),
     // conclui e a pausa sai. O cancelamento do usuário já tirou a pausa.
@@ -1689,7 +1689,7 @@ export class ServicoDeOrquestracao {
       const prioridade = this.prioridadesDaFila.get(orquestradorId);
       if (prioridade !== undefined && prioridade.turnoId === turnoId) {
         this.prioridadesDaFila.delete(orquestradorId);
-        // A mensagem mandada com o Orquestrador congelado (ADR-49) sai mesmo
+        // A mensagem mandada com o Orquestrador congelado (ADR-51) sai mesmo
         // que a fila parasse; não se o usuário cancelou, pausou de novo ou já
         // abriu outro turno, nem se o pedido saiu da fila.
         const ultimo = orquestrador?.ultimoTurno ?? null;

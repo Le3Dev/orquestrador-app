@@ -4,7 +4,7 @@ export type MotivoDoErro =
   | "turno_em_andamento"
   | "sem_turno_em_andamento"
   | "sem_plano_pendente"
-  /** Pausar um Orquestrador já pausado, ou mexer na conversa de um pausado (ver ADR-49). */
+  /** Pausar um Orquestrador já pausado, ou mexer na conversa de um pausado (ver ADR-51). */
   | "orquestrador_pausado"
   /** Continuar um Orquestrador que não está pausado. */
   | "sem_pausa";

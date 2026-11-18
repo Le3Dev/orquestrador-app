@@ -727,7 +727,7 @@ export function criarOrquestradoresRoutes({
         itensLigados,
         previasAbertas,
       );
-      // Com o Orquestrador congelado (ADR-49), a mensagem entra na frente da fila: vem o `pedidoId` dela.
+      // Com o Orquestrador congelado (ADR-51), a mensagem entra na frente da fila: vem o `pedidoId` dela.
       resposta.status(202).json({ turnoId, ...(pedidoId === undefined ? {} : { pedidoId }) });
     }),
   );
@@ -807,7 +807,7 @@ export function criarOrquestradoresRoutes({
   );
 
   /**
-   * Pausa o pedido em andamento (ADR-49): congela os processos no Mac e no
+   * Pausa o pedido em andamento (ADR-51): congela os processos no Mac e no
    * Linux; no Windows, encerra e continua depois numa retomada. 409 sem pedido
    * em andamento ou já pausado.
    */

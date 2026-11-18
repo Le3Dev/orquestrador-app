@@ -56,7 +56,7 @@ export function encerrarArvore(pid: number | undefined, esperaAntesDoSigkillMs =
     sinalizar(pid, "SIGTERM");
     return;
   }
-  // Um grupo pausado (SIGSTOP, ver ADR-49) não trata o SIGTERM até continuar:
+  // Um grupo pausado (SIGSTOP, ver ADR-51) não trata o SIGTERM até continuar:
   // o SIGCONT logo depois faz o sinal valer agora. Num grupo rodando, não muda nada.
   sinalizar(-pid, "SIGCONT");
   // `unref`: a espera não segura o servidor que está desligando. O id do
@@ -71,7 +71,7 @@ export function encerrarArvore(pid: number | undefined, esperaAntesDoSigkillMs =
 /**
  * Congela (`SIGSTOP`) ou descongela (`SIGCONT`) o grupo de processos liderado
  * por `pid`: o agente e tudo o que ele abriu (subagentes, comandos). Falso se
- * o grupo não existe mais, ou no Windows, que não tem esses sinais (ver ADR-49).
+ * o grupo não existe mais, ou no Windows, que não tem esses sinais (ver ADR-51).
  */
 export function sinalizarGrupo(pid: number, sinal: "SIGSTOP" | "SIGCONT"): boolean {
   if (process.platform === "win32") {

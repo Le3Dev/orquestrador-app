@@ -1,5 +1,5 @@
 /**
- * Como o Orquestrador está pausado (ver ADR-49):
+ * Como o Orquestrador está pausado (ver ADR-51):
  * - `congelado`: os processos do turno estão parados (SIGSTOP) e o turno
  *   segue em andamento; continuar (SIGCONT) segue exatamente de onde parou;
  * - `retomada`: não há processo vivo para continuar (Windows, app fechado,

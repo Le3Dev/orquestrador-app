@@ -1047,7 +1047,7 @@ describe("Orquestrador e os vários motores", () => {
   });
 });
 
-describe("Orquestrador e a pausa (ADR-49)", () => {
+describe("Orquestrador e a pausa (ADR-51)", () => {
   it("pausa congelada: situação pausado, o turno segue em andamento e a pausa vai para os dados", () => {
     const orquestrador = novoOrquestrador();
     orquestrador.iniciarTurno("t1", "faça", agora);

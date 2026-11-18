@@ -243,7 +243,7 @@ export type EventoDeOrquestracao =
       pedido: DadosDoPedidoNaFila;
       /**
        * O pedido entrou na frente da fila, e não no fim: a mensagem que o
-       * usuário mandou com o Orquestrador congelado (ver ADR-49). Ausente no
+       * usuário mandou com o Orquestrador congelado (ver ADR-51). Ausente no
        * caso normal.
        */
       naFrente?: true;
@@ -263,7 +263,7 @@ export type EventoDeOrquestracao =
    * O usuário pausou o Orquestrador, ou a pausa mudou de modo (o processo
    * congelado morreu, ou o app fechou com ele congelado: vira `retomada`).
    * `turnoId`: o turno pausado; no modo `retomada` ele terminou `pausado`.
-   * Ver ADR-49.
+   * Ver ADR-51.
    */
   | { tipo: "orquestrador_pausado"; orquestradorId: string; turnoId: string; pausa: DadosDaPausa }
   /**
