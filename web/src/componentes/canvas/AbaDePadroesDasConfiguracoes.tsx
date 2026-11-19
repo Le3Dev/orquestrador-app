@@ -8,6 +8,8 @@ import {
   TAMANHO_MAXIMO_DO_NOME_DO_PERFIL,
 } from "../../shared/api/tipos";
 import { DICA_DAS_VARIAVEIS, tamanhoDasInstrucoes } from "../../shared/instrucoes";
+import { idiomaAtual, localeDoIdioma, textosAtuais, useTextos } from "../../shared/idioma/idioma";
+import { textosDeConfiguracoes } from "../../shared/idioma/textos/configuracoes";
 import { CampoDeInstrucoes } from "../CampoDeInstrucoes";
 import { Dica } from "../Dica";
 
@@ -26,24 +28,25 @@ function comChaves(lista: readonly PerfilDeInstrucoes[]): PerfilEmEdicao[] {
 
 /** Como o servidor compara os nomes: numa linha, aparado e sem diferenciar maiúsculas. */
 function chaveDoNome(nome: string): string {
-  return nome.replace(/\s+/g, " ").trim().toLocaleLowerCase("pt-BR");
+  return nome.replace(/\s+/g, " ").trim().toLocaleLowerCase(localeDoIdioma(idiomaAtual()));
 }
 
 /** O que impede salvar este perfil (em minúscula, para seguir "Para salvar,"), na ordem em que o servidor confere. */
 function problemaDo(perfil: PerfilEmEdicao, todos: readonly PerfilEmEdicao[]): string | null {
+  const t = textosAtuais(textosDeConfiguracoes).padroes;
   const nome = chaveDoNome(perfil.nome);
   if (nome === "") {
-    return "dê um nome.";
+    return t.daUmNome;
   }
   if (todos.some((outro) => outro.chave !== perfil.chave && chaveDoNome(outro.nome) === nome)) {
-    return `troque o nome: já existe um "${perfil.nome.trim()}".`;
+    return t.trocarNome(perfil.nome.trim());
   }
   const tamanho = tamanhoDasInstrucoes(perfil.texto);
   if (tamanho === 0) {
-    return "escreva o texto.";
+    return t.escrevaTexto;
   }
   if (tamanho > TAMANHO_MAXIMO_DAS_INSTRUCOES) {
-    return `encurte o texto para até ${TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString("pt-BR")} caracteres.`;
+    return t.encurteTexto(TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString(localeDoIdioma(idiomaAtual())));
   }
   return null;
 }
@@ -63,6 +66,7 @@ interface Props {
  * orquestrador, não como configuração global.
  */
 export function AbaDePadroesDasConfiguracoes({ aoSalvar }: Props) {
+  const t = useTextos(textosDeConfiguracoes).padroes;
   const [salvas, setSalvas] = useState<string | null>(null);
   const [instrucoes, setInstrucoes] = useState("");
   const [perfisSalvos, setPerfisSalvos] = useState<PerfilDeInstrucoes[]>([]);
@@ -164,26 +168,23 @@ export function AbaDePadroesDasConfiguracoes({ aoSalvar }: Props) {
   }
 
   if (salvas === null) {
-    return erro === null ? <span className="hint">carregando…</span> : <div className="alert alert-error">{erro}</div>;
+    return erro === null ? <span className="hint">{t.carregando}</span> : <div className="alert alert-error">{erro}</div>;
   }
 
   return (
     <div ref={raiz} className="cfgapp-padroes">
-      <p className="alert alert-info cfgapp-nota">
-        Valem para todo orquestrador. Cada um pode mudar os seus, na engrenagem da própria janela.
-      </p>
+      <p className="alert alert-info cfgapp-nota">{t.nota}</p>
 
       <CampoDeInstrucoes
-        rotulo="Instruções gerais"
-        ajuda={`Valem a partir do próximo pedido de cada orquestrador. ${DICA_DAS_VARIAVEIS}`}
-        placeholder="Ex.: Responda sempre em português, com tópicos curtos."
+        rotulo={t.instrucoesGerais}
+        ajuda={t.ajudaDasGerais(DICA_DAS_VARIAVEIS)}
+        placeholder={t.placeholderGerais}
         valor={instrucoes}
         aoMudar={editarInstrucoes}
         linhas={8}
         dica={
-          <Dica sobre="Instruções gerais" titulo="Valem para todos os orquestradores.">
-            Entram no prompt de todo orquestrador que não tem instruções próprias. As instruções de um orquestrador
-            substituem estas. Valem a partir do próximo pedido.
+          <Dica sobre={t.instrucoesGerais} titulo={t.dicaGeraisTitulo}>
+            {t.dicaGeraisTexto}
           </Dica>
         }
       />
@@ -192,15 +193,13 @@ export function AbaDePadroesDasConfiguracoes({ aoSalvar }: Props) {
         <div className="flex flex-col gap-0.5">
           <span className="flex items-center gap-1.5">
             <h3 id={idDosPerfis} className="label">
-              Perfis de instruções
+              {t.perfis}
             </h3>
-            <Dica sobre="Perfis de instruções" titulo="Textos prontos para reaproveitar.">
-              Aparecem em &quot;Aplicar perfil…&quot;, junto das instruções de cada orquestrador (na engrenagem do
-              terminal e na criação). Aplicar copia o texto para as instruções dele: editar ou apagar o perfil depois não
-              muda quem já o usou.
+            <Dica sobre={t.perfis} titulo={t.dicaPerfisTitulo}>
+              {t.dicaPerfisTexto}
             </Dica>
           </span>
-          <span className="text-support">Instruções que você usa em mais de um orquestrador, para aplicar sem copiar.</span>
+          <span className="text-support">{t.perfisSuporte}</span>
         </div>
 
         {perfis.map((perfil, indice) => {
@@ -209,38 +208,38 @@ export function AbaDePadroesDasConfiguracoes({ aoSalvar }: Props) {
             <fieldset
               key={perfil.chave}
               className="flex flex-col gap-2 rounded-md border border-border p-3"
-              aria-label={`Perfil ${indice + 1}`}
+              aria-label={t.perfilN(indice + 1)}
             >
               <div className="flex items-center gap-2">
                 <input
                   data-perfil={perfil.chave}
                   className="input campo-escuro min-w-0 flex-1"
-                  aria-label="Nome do perfil"
+                  aria-label={t.nomeDoPerfil}
                   value={perfil.nome}
-                  placeholder="Ex.: Backend com testes"
+                  placeholder={t.placeholderDoNome}
                   maxLength={TAMANHO_MAXIMO_DO_NOME_DO_PERFIL}
                   onChange={(evento) => alterarPerfil(perfil.chave, { nome: evento.target.value })}
                 />
                 <button type="button" className="btn btn-sm btn-danger shrink-0" onClick={() => removerPerfil(perfil.chave)}>
-                  Apagar
+                  {t.apagar}
                 </button>
               </div>
               <CampoDeInstrucoes
-                rotulo="Texto do perfil"
+                rotulo={t.textoDoPerfil}
                 ajuda={DICA_DAS_VARIAVEIS}
-                placeholder="Ex.: Use Jest nos testes e rode o lint antes de concluir."
+                placeholder={t.placeholderDoTexto}
                 valor={perfil.texto}
                 aoMudar={(texto) => alterarPerfil(perfil.chave, { texto })}
                 linhas={4}
               />
-              {problema !== null && <span className="text-[11px] text-warning">Para salvar, {problema}</span>}
+              {problema !== null && <span className="text-[11px] text-warning">{t.paraSalvar(problema)}</span>}
             </fieldset>
           );
         })}
 
         <div className="flex items-center gap-2">
           <button type="button" className="btn btn-sm btn-outline" disabled={cheia} onClick={novoPerfil}>
-            + Novo perfil
+            {t.novoPerfil}
           </button>
           <span className={`mono ${cheia ? "text-warning" : "text-muted"}`}>
             {perfis.length} / {MAXIMO_DE_PERFIS_DE_INSTRUCOES}
@@ -253,11 +252,11 @@ export function AbaDePadroesDasConfiguracoes({ aoSalvar }: Props) {
       {/* Sempre no fim da aba, colada à base da rolagem; sem mudança, só os botões somem (o espaço fica). */}
       <div className="cfgapp-acoes">
         <span className="hint" role="status">
-          {recemSalvo && !alterado ? "Alterações salvas." : ""}
+          {recemSalvo && !alterado ? t.salvas : ""}
         </span>
         <div className="cfgapp-acoes-botoes" data-oculto={alterado ? undefined : ""}>
           <button type="button" className="btn btn-sm btn-ghost" onClick={descartar}>
-            Descartar
+            {t.descartar}
           </button>
           <button
             type="button"
@@ -266,7 +265,7 @@ export function AbaDePadroesDasConfiguracoes({ aoSalvar }: Props) {
             onClick={() => void salvar()}
             disabled={salvando || algumProblema}
           >
-            {salvando ? "Salvando…" : "Salvar"}
+            {salvando ? t.salvando : t.salvar}
           </button>
         </div>
       </div>

@@ -5,21 +5,11 @@ import type { LeituraDeMemoria } from "../../shared/api/tipos";
 import { LIMITE_DE_ORQUESTRADORES_ABERTOS } from "../../shared/canvas/limiteDeTerminais";
 import type { AjustesDoAplicativo } from "../../shared/hooks/useAjustesDoAplicativo";
 import { definirAutorrecuperacao, useValorDaAutorrecuperacao } from "../../shared/hooks/useAutorrecuperacao";
-import { type NivelDaMemoria, nivelDaMemoria } from "../../shared/memoria";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeConfiguracoes } from "../../shared/idioma/textos/configuracoes";
+import { nivelDaMemoria } from "../../shared/memoria";
 import { InterruptorDaConfiguracao, LinhaDaConfiguracao } from "./ControlesDasConfiguracoes";
 import { type OrquestradorDaTabela, formatarGb, formatarMb, ordenarOrquestradores } from "./usoDoSistema";
-
-const TITULO_DO_NIVEL: Record<NivelDaMemoria, string> = {
-  normal: "Memória tranquila",
-  baixa: "Memória baixa",
-  critica: "Memória crítica",
-};
-
-const FRASE_DO_NIVEL: Record<NivelDaMemoria, string> = {
-  normal: "Dá para abrir mais orquestradores.",
-  baixa: "Pedidos novos podem deixar o computador lento.",
-  critica: "Espere os pedidos terminarem ou feche programas antes de pedir mais.",
-};
 
 const RAIO = 40;
 const TRACO = 7;
@@ -32,6 +22,7 @@ function limitar(fracao: number): number {
 
 /** O cartão do topo: anel de uso, nível, GB livres e a barra empilhada. */
 function CartaoDaMemoria({ memoria }: { memoria: LeituraDeMemoria }) {
+  const t = useTextos(textosDeConfiguracoes).sistema;
   const nivel = nivelDaMemoria(memoria);
   const usadaBytes = Math.max(0, memoria.totalBytes - memoria.livreBytes);
   const usada = limitar(memoria.totalBytes > 0 ? usadaBytes / memoria.totalBytes : 0);
@@ -41,8 +32,8 @@ function CartaoDaMemoria({ memoria }: { memoria: LeituraDeMemoria }) {
   const outros = Math.max(0, usadaBytes - agentes - app);
   const parte = (bytes: number) => `${limitar(memoria.totalBytes > 0 ? bytes / memoria.totalBytes : 0) * 100}%`;
   const livreTexto = formatarGb(memoria.livreBytes);
-  const rotuloDoAnel = `${percentual}% da memória em uso. ${TITULO_DO_NIVEL[nivel]}.`;
-  const rotuloDaBarra = `Agentes ${formatarGb(agentes)}, app ${formatarGb(app)}, outros programas ${formatarGb(outros)}, livre ${livreTexto}`;
+  const rotuloDoAnel = t.anelAria(percentual, t.memoria[nivel]);
+  const rotuloDaBarra = t.barraAria(formatarGb(agentes), formatarGb(app), formatarGb(outros), livreTexto);
 
   return (
     <div className={`cfgapp-cartao cfgapp-memoria-cartao ${nivel === "critica" ? "cfgapp-critico" : ""}`} data-testid="cartao-de-memoria">
@@ -63,13 +54,13 @@ function CartaoDaMemoria({ memoria }: { memoria: LeituraDeMemoria }) {
             />
           </svg>
           <b aria-hidden="true">
-            {percentual}%<small>em uso</small>
+            {percentual}%<small>{t.emUso}</small>
           </b>
         </div>
         <div className="cfgapp-memoria-texto">
-          <h4 className={nivel === "critica" ? "cfgapp-critico-titulo" : undefined}>{TITULO_DO_NIVEL[nivel]}</h4>
+          <h4 className={nivel === "critica" ? "cfgapp-critico-titulo" : undefined}>{t.memoria[nivel]}</h4>
           <p>
-            {livreTexto} {livreTexto === "1 GB" ? "livre" : "livres"} de {formatarGb(memoria.totalBytes)}. {FRASE_DO_NIVEL[nivel]}
+            {t.livreDe(livreTexto, formatarGb(memoria.totalBytes), livreTexto === "1 GB", t.fraseDoNivel[nivel])}
           </p>
           <div className="cfgapp-empilhada" role="img" aria-label={rotuloDaBarra}>
             <i className="cfgapp-agentes" style={{ width: parte(agentes) }} />
@@ -79,15 +70,15 @@ function CartaoDaMemoria({ memoria }: { memoria: LeituraDeMemoria }) {
           <div className="cfgapp-legenda">
             <span>
               <i className="cfgapp-agentes" aria-hidden="true" />
-              Agentes {formatarGb(agentes)}
+              {t.legendaAgentes(formatarGb(agentes))}
             </span>
             <span>
               <i className="cfgapp-app" aria-hidden="true" />
-              App {formatarGb(app)}
+              {t.legendaApp(formatarGb(app))}
             </span>
             <span>
               <i className="cfgapp-outros" aria-hidden="true" />
-              Outros {formatarGb(outros)}
+              {t.legendaOutros(formatarGb(outros))}
             </span>
           </div>
         </div>
@@ -103,20 +94,21 @@ function TabelaDeUso({
   orquestradores: readonly OrquestradorDaTabela[];
   porOrquestrador: Record<string, number>;
 }) {
+  const t = useTextos(textosDeConfiguracoes).sistema;
   const linhas = ordenarOrquestradores(orquestradores, porOrquestrador);
   return (
     <div className="cfgapp-cartao">
       {linhas.length === 0 ? (
-        <p className="cfgapp-vazio">Nenhum orquestrador ainda.</p>
+        <p className="cfgapp-vazio">{t.nenhumOrquestrador}</p>
       ) : (
         <table className="cfgapp-tabela">
-          <caption className="sr-only">Memória usada por orquestrador</caption>
+          <caption className="sr-only">{t.legendaDaTabela}</caption>
           <thead>
             <tr>
-              <th scope="col">Orquestrador</th>
-              <th scope="col">Situação</th>
+              <th scope="col">{t.colunaOrquestrador}</th>
+              <th scope="col">{t.colunaSituacao}</th>
               <th scope="col" className="cfgapp-numero">
-                Memória
+                {t.colunaMemoria}
               </th>
             </tr>
           </thead>
@@ -124,7 +116,7 @@ function TabelaDeUso({
             {linhas.map((linha) => (
               <tr key={linha.id}>
                 <td className="cfgapp-tabela-nome">{linha.nome}</td>
-                <td>{linha.situacao === "trabalhando" ? "trabalhando" : "parado"}</td>
+                <td>{linha.situacao === "trabalhando" ? t.trabalhando : t.parado}</td>
                 <td className="cfgapp-numero">{formatarMb(linha.bytes)}</td>
               </tr>
             ))}
@@ -134,8 +126,6 @@ function TabelaDeUso({
     </div>
   );
 }
-
-const DICA_DA_AUTORRECUPERACAO = "Retoma sozinho quando o Claude trava ou a API falha.";
 
 interface Props {
   /** Os Ajustes do app desktop (pastas e Claude Code). */
@@ -155,6 +145,7 @@ interface Props {
  */
 export function AbaDoSistema({ ajustes, memoria = null, orquestradores, sistema }: Props) {
   // A autorrecuperação vale para todos os orquestradores: fica no servidor, não no navegador.
+  const t = useTextos(textosDeConfiguracoes).sistema;
   const autorrecuperacao = useValorDaAutorrecuperacao();
   const [lendo, setLendo] = useState(true);
   const [gravando, setGravando] = useState(false);
@@ -209,23 +200,23 @@ export function AbaDoSistema({ ajustes, memoria = null, orquestradores, sistema 
   };
 
   const situacao =
-    erro ?? (autorrecuperacao === null ? (lendo ? "Carregando…" : "Não deu para ler.") : DICA_DA_AUTORRECUPERACAO);
+    erro ?? (autorrecuperacao === null ? (lendo ? t.carregando : t.naoDeuParaLer) : t.autorrecuperacaoDica);
 
   return (
     <>
       {memoria !== null ? <CartaoDaMemoria memoria={memoria} /> : sistema}
       {orquestradores !== undefined && (
         <>
-          <h3 className="cfgapp-titulo">Uso por orquestrador</h3>
+          <h3 className="cfgapp-titulo">{t.usoPorOrquestrador}</h3>
           <TabelaDeUso orquestradores={orquestradores} porOrquestrador={memoria?.porOrquestrador ?? {}} />
         </>
       )}
       <h3 className="cfgapp-titulo" id={idDosProcessos}>
-        Processos
+        {t.processos}
       </h3>
       <div className="cfgapp-cartao" role="group" aria-labelledby={idDosProcessos}>
         <InterruptorDaConfiguracao
-          titulo="Autorrecuperação"
+          titulo={t.autorrecuperacao}
           descricao={situacao}
           comErro={erro !== null}
           ligado={autorrecuperacao ?? false}
@@ -234,15 +225,15 @@ export function AbaDoSistema({ ajustes, memoria = null, orquestradores, sistema 
           aoAlternar={alternarAutorrecuperacao}
         />
         <LinhaDaConfiguracao
-          titulo="Abertos ao mesmo tempo"
-          descricao="Acima disso, feche um orquestrador antes de abrir outro."
+          titulo={t.abertosTitulo}
+          descricao={t.abertosDescricao}
         >
-          <span className="cfgapp-valor">Até {LIMITE_DE_ORQUESTRADORES_ABERTOS}</span>
+          <span className="cfgapp-valor">{t.ate(LIMITE_DE_ORQUESTRADORES_ABERTOS)}</span>
         </LinhaDaConfiguracao>
         {ajustes.disponivel && (
-          <LinhaDaConfiguracao titulo="Pastas e Claude Code" descricao="Pasta dos projetos e o executável do Claude Code.">
+          <LinhaDaConfiguracao titulo={t.pastasTitulo} descricao={t.pastasDescricao}>
             <button type="button" className="btn btn-sm btn-outline" onClick={() => void ajustes.abrir()}>
-              Pastas e Claude Code…
+              {t.pastasBotao}
             </button>
           </LinhaDaConfiguracao>
         )}

@@ -9,47 +9,40 @@ import {
   type LadoDoChatFixo,
   usePreferenciasDaTela,
 } from "../../shared/hooks/usePreferenciasDaTela";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeConfiguracoes } from "../../shared/idioma/textos/configuracoes";
 import "../../theme/preferencias-da-tela.css";
-
-const DICA_DA_AUTORRECUPERACAO = "retoma sozinho quando o Claude trava ou a API falha";
 
 /** As preferências da tela que viram interruptor na seção "Tela". */
 type ChaveDoInterruptor = "chatFixoNaEsquerda" | "visualizadorDeCodigo" | "manterBixinhosAteLimpar";
 
-/** `dicaVisivel`: a dica aparece também embaixo do rótulo, não só no title. */
-type Interruptor = { chave: ChaveDoInterruptor; rotulo: string; dica: string; dicaVisivel?: boolean };
+/** `dicaVisivel`: a dica aparece também embaixo do rótulo, não só no title. O rótulo e a dica vêm dos textos, pela chave. */
+type Interruptor = { chave: ChaveDoInterruptor; dicaVisivel?: boolean };
 
-const INTERRUPTOR_DO_CHAT_FIXO: Interruptor = {
-  chave: "chatFixoNaEsquerda",
-  rotulo: "Chat fixo",
-  dica: "O chat rápido vira uma coluna ao lado do canvas, sempre aberta",
-};
+const INTERRUPTOR_DO_CHAT_FIXO: Interruptor = { chave: "chatFixoNaEsquerda" };
 
 /** Os dois lados do chat fixo, na ordem do controle segmentado (logo abaixo do "Chat fixo"). */
 const LADOS_DO_CHAT_FIXO: readonly LadoDoChatFixo[] = ["esquerda", "direita"];
 
 /** Os interruptores da seção "Tela" depois do lado do chat, na ordem. */
 const OUTROS_INTERRUPTORES_DA_TELA: readonly Interruptor[] = [
-  {
-    chave: "visualizadorDeCodigo",
-    rotulo: "Visualizador de código",
-    dica: "mostra o botão Arquivos nos terminais",
-    dicaVisivel: true,
-  },
-  {
-    chave: "manterBixinhosAteLimpar",
-    rotulo: "Manter bixinhos até limpar à mão",
-    dica: "desligado, os que terminam saem sozinhos do canvas",
-    dicaVisivel: true,
-  },
+  { chave: "visualizadorDeCodigo", dicaVisivel: true },
+  { chave: "manterBixinhosAteLimpar", dicaVisivel: true },
 ];
 
 /** Os estilos dos controles das janelas do canvas, na ordem do controle segmentado (o último item da seção "Tela"). */
-const ESTILOS_DOS_CONTROLES: readonly { estilo: EstiloDosControlesDasJanelas; rotulo: string; dica: string }[] = [
-  { estilo: "automatico", rotulo: "Automático", dica: "Os controles das janelas seguem o sistema" },
-  { estilo: "mac", rotulo: "Estilo Mac", dica: "Bolinhas à esquerda do cabeçalho das janelas" },
-  { estilo: "windows", rotulo: "Estilo Windows", dica: "Botões à direita do cabeçalho das janelas" },
+const ESTILOS_DOS_CONTROLES: readonly { estilo: EstiloDosControlesDasJanelas }[] = [
+  { estilo: "automatico" },
+  { estilo: "mac" },
+  { estilo: "windows" },
 ];
+
+/** O rótulo e a dica de cada interruptor da seção "Tela", pela chave. */
+const TEXTO_DO_INTERRUPTOR = {
+  chatFixoNaEsquerda: "chatFixo",
+  visualizadorDeCodigo: "visualizador",
+  manterBixinhosAteLimpar: "bixinhos",
+} as const satisfies Record<ChaveDoInterruptor, "chatFixo" | "visualizador" | "bixinhos">;
 
 /**
  * A ordem da navegação por teclado: "Chat fixo" (0), os dois lados (1 e 2),
@@ -88,6 +81,8 @@ export function PainelDeConfiguracoesDoApp({
   alinhamento,
   classeDaAncora = "",
 }: PropsDoPainelDeConfiguracoes) {
+  const t = useTextos(textosDeConfiguracoes).painelDaBarra;
+  const estilosDosControles = useTextos(textosDeConfiguracoes).estilosDosControles;
   const { preferencias, mudarPreferencias } = usePreferenciasDaTela();
   const total = INDICE_DA_AUTORRECUPERACAO + 1 + (ajustes.disponivel ? 1 : 0);
 
@@ -179,7 +174,7 @@ export function PainelDeConfiguracoesDoApp({
 
   const indisponivel = autorrecuperacao === null || gravando;
   const situacaoDaAutorrecuperacao =
-    erro ?? (autorrecuperacao === null ? (lendo ? "carregando…" : "não deu para ler") : DICA_DA_AUTORRECUPERACAO);
+    erro ?? (autorrecuperacao === null ? (lendo ? t.carregando : t.naoDeuParaLer) : t.autorrecuperacaoDica);
 
   return (
     <div ref={menu.ancora} className={`ancora-do-menu ${classeDaAncora}`.trim()}>
@@ -187,8 +182,8 @@ export function PainelDeConfiguracoesDoApp({
         {...menu.propsDoBotao}
         type="button"
         className={classeDoBotao}
-        aria-label="Configurações"
-        title="Configurações: tela, pastas e Claude Code"
+        aria-label={t.botaoAria}
+        title={t.botaoDica}
       >
         {conteudoDoBotao}
       </button>
@@ -196,15 +191,17 @@ export function PainelDeConfiguracoesDoApp({
         <div
           id={menu.idDoMenu}
           role="menu"
-          aria-label="Configurações"
+          aria-label={t.botaoAria}
           className={`menu-do-novo painel-de-configuracoes painel-de-configuracoes-${alinhamento} painel-flutuante surgir surgir-do-topo no-drag`}
           onKeyDown={menu.aoTeclarNoMenu}
         >
           <div role="group" aria-labelledby={`${menu.idDoMenu}-tela`}>
             <span id={`${menu.idDoMenu}-tela`} className="rotulo-tecnico titulo-da-secao-de-configuracoes">
-              Tela
+              {t.tela}
             </span>
-            {[INTERRUPTOR_DO_CHAT_FIXO, ...OUTROS_INTERRUPTORES_DA_TELA].map((item, posicao) => (
+            {[INTERRUPTOR_DO_CHAT_FIXO, ...OUTROS_INTERRUPTORES_DA_TELA].map((item, posicao) => {
+              const texto = t[TEXTO_DO_INTERRUPTOR[item.chave]];
+              return (
               <Fragment key={item.chave}>
                 <button
                   ref={menu.refDoItem(posicao === 0 ? 0 : INDICE_DOS_OUTROS_INTERRUPTORES + posicao - 1)}
@@ -213,12 +210,12 @@ export function PainelDeConfiguracoesDoApp({
                   tabIndex={-1}
                   className="item-do-menu interruptor"
                   aria-checked={preferencias[item.chave]}
-                  title={item.dica}
+                  title={texto.dica}
                   onClick={() => alternar(item.chave)}
                 >
                   <span className="flex min-w-0 flex-col items-start leading-tight">
-                    <span>{item.rotulo}</span>
-                    {item.dicaVisivel === true && <span className="mono text-muted">{item.dica}</span>}
+                    <span>{texto.rotulo}</span>
+                    {item.dicaVisivel === true && <span className="mono text-muted">{texto.dica}</span>}
                   </span>
                   <span className="interruptor-trilho" aria-hidden="true" />
                 </button>
@@ -229,7 +226,7 @@ export function PainelDeConfiguracoesDoApp({
                     aria-labelledby={`${menu.idDoMenu}-lado`}
                     className={`lado-do-chat-fixo ${preferencias.chatFixoNaEsquerda ? "" : "lado-do-chat-solto"}`}
                   >
-                    <span id={`${menu.idDoMenu}-lado`}>Lado</span>
+                    <span id={`${menu.idDoMenu}-lado`}>{t.lado}</span>
                     <div className="segmentado-do-menu">
                       {LADOS_DO_CHAT_FIXO.map((lado, indice) => (
                         <button
@@ -239,20 +236,21 @@ export function PainelDeConfiguracoesDoApp({
                           role="menuitemradio"
                           tabIndex={-1}
                           aria-checked={preferencias.ladoDoChatFixo === lado}
-                          title={`O chat fixo fica à ${lado} do canvas`}
+                          title={lado === "esquerda" ? t.ladoEsquerdaDica : t.ladoDireitaDica}
                           onClick={() => escolherLado(lado)}
                         >
-                          {lado}
+                          {lado === "esquerda" ? t.ladoEsquerda : t.ladoDireita}
                         </button>
                       ))}
                     </div>
                   </div>
                 )}
               </Fragment>
-            ))}
+              );
+            })}
             {/* Como as janelas do canvas desenham fechar, minimizar e ampliar; troca na hora, em todas. */}
             <div role="group" aria-labelledby={`${menu.idDoMenu}-controles`} className="controles-das-janelas">
-              <span id={`${menu.idDoMenu}-controles`}>Controles das janelas</span>
+              <span id={`${menu.idDoMenu}-controles`}>{t.controlesDasJanelas}</span>
               <div className="segmentado-do-menu">
                 {ESTILOS_DOS_CONTROLES.map((item, indice) => (
                   <button
@@ -262,10 +260,10 @@ export function PainelDeConfiguracoesDoApp({
                     role="menuitemradio"
                     tabIndex={-1}
                     aria-checked={preferencias.controlesDasJanelas === item.estilo}
-                    title={item.dica}
+                    title={estilosDosControles[item.estilo].dica}
                     onClick={() => escolherEstilo(item.estilo)}
                   >
-                    {item.rotulo}
+                    {estilosDosControles[item.estilo].rotulo}
                   </button>
                 ))}
               </div>
@@ -274,7 +272,7 @@ export function PainelDeConfiguracoesDoApp({
           <hr className="separador-do-menu" />
           <div role="group" aria-labelledby={`${menu.idDoMenu}-orquestradores`}>
             <span id={`${menu.idDoMenu}-orquestradores`} className="rotulo-tecnico titulo-da-secao-de-configuracoes">
-              Orquestradores
+              {t.orquestradores}
             </span>
             {/* aria-disabled, não disabled: lendo ou gravando, o item continua na navegação por teclado. */}
             <button
@@ -286,11 +284,11 @@ export function PainelDeConfiguracoesDoApp({
               aria-checked={autorrecuperacao ?? false}
               aria-disabled={indisponivel}
               aria-busy={lendo || gravando}
-              title={DICA_DA_AUTORRECUPERACAO}
+              title={t.autorrecuperacaoDica}
               onClick={alternarAutorrecuperacao}
             >
               <span className="flex min-w-0 flex-col items-start leading-tight">
-                <span>Autorrecuperação</span>
+                <span>{t.autorrecuperacao}</span>
                 <span className={`mono ${erro === null ? "text-muted" : "text-error"}`}>{situacaoDaAutorrecuperacao}</span>
               </span>
               <span className="interruptor-trilho" aria-hidden="true" />
@@ -305,10 +303,10 @@ export function PainelDeConfiguracoesDoApp({
                 role="menuitem"
                 tabIndex={-1}
                 className="item-do-menu"
-                title="Abre os ajustes: pasta dos projetos e Claude Code"
+                title={t.ajustesDica}
                 onClick={abrirAjustes}
               >
-                Pastas e Claude Code…
+                {t.ajustesRotulo}
               </button>
             </>
           )}

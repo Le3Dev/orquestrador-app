@@ -7,26 +7,34 @@ import {
   ordemDeReservaDe,
   rotuloDoMotor,
 } from "./modelos";
+import { idiomaAtual, localeDoIdioma, textosAtuais } from "./idioma/idioma";
+import { textosDeConfiguracoes } from "./idioma/textos/configuracoes";
 
-export const ROTULOS_DOS_MODELOS: Readonly<Record<ModeloClaude, { nome: string; descricao: string }>> = {
-  fable: { nome: "Fable", descricao: "Desafios mais difíceis" },
-  opus: { nome: "Opus", descricao: "Mais capaz" },
-  sonnet: { nome: "Sonnet", descricao: "Equilibrado" },
-  haiku: { nome: "Haiku", descricao: "Rápido, menos cota" },
-};
+const textos = () => textosAtuais(textosDeConfiguracoes);
 
-export const ROTULOS_DOS_ESFORCOS: Readonly<Record<EsforcoDeRaciocinio, string>> = {
-  // "padrao" não força nada: vale o settings.json do Claude Code da máquina ou, sem ele, o padrão do modelo.
-  padrao: "Padrão (Claude Code)",
-  baixo: "Baixo",
-  medio: "Médio",
-  alto: "Alto",
-  extra_alto: "Extra alto",
-  maximo: "Máximo",
-  ultracode: "Ultracode",
-};
+/** Um Record cujos valores acompanham o idioma atual (lidos a cada acesso), sem mudar a API de constante. */
+function rotulosDinamicos<C extends string, V>(chaves: readonly C[], ler: (chave: C) => V): Readonly<Record<C, V>> {
+  const objeto = {} as Record<C, V>;
+  for (const chave of chaves) {
+    Object.defineProperty(objeto, chave, { enumerable: true, get: () => ler(chave) });
+  }
+  return objeto;
+}
 
-/** Mostrado perto do esforço quando "ultracode" está escolhido (orquestrador e chat). */
+export const ROTULOS_DOS_MODELOS: Readonly<Record<ModeloClaude, { nome: string; descricao: string }>> =
+  rotulosDinamicos(["fable", "opus", "sonnet", "haiku"], (modelo) => textos().modelos[modelo]);
+
+// "padrao" não força nada: vale o settings.json do Claude Code da máquina ou, sem ele, o padrão do modelo.
+export const ROTULOS_DOS_ESFORCOS: Readonly<Record<EsforcoDeRaciocinio, string>> = rotulosDinamicos(
+  ["padrao", "baixo", "medio", "alto", "extra_alto", "maximo", "ultracode"],
+  (esforco) => textos().esforcos[esforco],
+);
+
+/**
+ * Os avisos e rótulos abaixo são constantes em pt-BR (quem os importa não acompanha o idioma):
+ * para traduzir, use `textos().avisos` (`useTextos(textosDeConfiguracoes).avisos`).
+ * Mostrado perto do esforço quando "ultracode" está escolhido (orquestrador e chat).
+ */
 export const AVISO_DO_ULTRACODE =
   "Ultracode dispara workflows com vários agentes em paralelo: custa bem mais e pesa na memória. Num teste, uma tarefa pequena custou US$ 3,24 em 4,5 min.";
 
@@ -39,7 +47,7 @@ export const AJUDA_DOS_ARTEFATOS_ONLINE_DO_CHAT =
 
 /** Na criação, "padrao" se chama Automático: o app não força nada e vale o padrão do Claude Code. */
 export function rotuloDoEsforcoNaCriacao(esforco: EsforcoDeRaciocinio): string {
-  return esforco === "padrao" ? "Automático" : ROTULOS_DOS_ESFORCOS[esforco];
+  return esforco === "padrao" ? textos().esforcos.automaticoNaCriacao : ROTULOS_DOS_ESFORCOS[esforco];
 }
 
 /** Identificador curto de um Subagente, para caber em chips e no terminal. */
@@ -55,24 +63,11 @@ export function formatarDecorrido(inicio: string, fim: string | null, agora: Dat
 
 /** Ex.: "≤3 agentes" (automática) ou "2 agentes" (fixa). */
 export function descreverQuantidade({ modo, limite }: DadosDaConfiguracao["quantidadeDeSubagentes"]): string {
-  const plural = limite === 1 ? "agente" : "agentes";
-  return modo === "fixa" ? `${limite} ${plural}` : `≤${limite} ${plural}`;
+  return textos().descricoes.agentes(limite, modo === "fixa");
 }
 
-export const ROTULOS_DAS_PERMISSOES: Readonly<Record<NivelDePermissao, { nome: string; descricao: string }>> = {
-  leitura: {
-    nome: "Somente leitura",
-    descricao: "Lê arquivos e pesquisa na web. Não altera nada.",
-  },
-  edicao: {
-    nome: "Ler e editar arquivos",
-    descricao: "Cria e altera arquivos na pasta. Não executa comandos.",
-  },
-  edicao_e_comandos: {
-    nome: "Editar e rodar comandos",
-    descricao: "Também executa comandos no terminal (testes, builds). Commit e push por feature só com a opção abaixo ligada.",
-  },
-};
+export const ROTULOS_DAS_PERMISSOES: Readonly<Record<NivelDePermissao, { nome: string; descricao: string }>> =
+  rotulosDinamicos(["leitura", "edicao", "edicao_e_comandos"], (nivel) => textos().permissoes[nivel]);
 
 /** O nome do modelo sem versão: "Opus" no Claude Code; nos outros motores, o próprio id. */
 function nomeDoModelo(modelo: ModeloDoMotor): string {
@@ -88,7 +83,7 @@ function descreverModelo(motor: Motor, modelo: ModeloDoMotor, esforco: EsforcoDe
     return modelo === MODELO_PADRAO_DO_CLI ? rotuloDoMotor(motor) : `${rotuloDoMotor(motor)} ${modelo}`;
   }
   const nome = nomeDoModelo(modelo);
-  return esforco === "padrao" ? nome : `${nome} (esforço ${ROTULOS_DOS_ESFORCOS[esforco].toLowerCase()})`;
+  return esforco === "padrao" ? nome : textos().descricoes.esforcoDoModelo(nome, ROTULOS_DOS_ESFORCOS[esforco].toLowerCase());
 }
 
 /**
@@ -98,8 +93,8 @@ function descreverModelo(motor: Motor, modelo: ModeloDoMotor, esforco: EsforcoDe
  */
 export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string {
   const { modo, limite } = configuracao.quantidadeDeSubagentes;
-  const plural = limite === 1 ? "subagente" : "subagentes";
-  const quantidade = modo === "fixa" ? `${limite} ${plural}` : `até ${limite} ${plural}`;
+  const d = textos().descricoes;
+  const quantidade = d.quantidade(limite, modo === "fixa");
   const orquestrador = descreverModelo(
     motorDoOrquestradorDe(configuracao),
     configuracao.modeloDoOrquestrador,
@@ -115,16 +110,12 @@ export function descreverConfiguracao(configuracao: DadosDaConfiguracao): string
     `${orquestrador} → ${subagentes}`,
     quantidade,
     ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome,
-    ...(reserva.length > 0 ? [`reserva: ${reserva.map(rotuloDoMotor).join(", ")}`] : []),
-    ...(configuracao.permitirCommitEPush ? ["commit/push por feature"] : []),
-    ...(configuracao.permitirArtefatosOnline ? ["artefatos online"] : []),
-    ...(configuracao.navegadorDoAgente === true ? ["navegador do agente"] : []),
-    ...(configuracao.instrucoesPersonalizadas.trim() === "" ? [] : ["instruções próprias"]),
+    ...(reserva.length > 0 ? [d.reserva(reserva.map(rotuloDoMotor).join(", "))] : []),
+    ...(configuracao.permitirCommitEPush ? [d.commitEPush] : []),
+    ...(configuracao.permitirArtefatosOnline ? [d.artefatosOnline] : []),
+    ...(configuracao.navegadorDoAgente === true ? [d.navegadorDoAgente] : []),
+    ...(configuracao.instrucoesPersonalizadas.trim() === "" ? [] : [d.instrucoesProprias]),
   ].join(" · ");
-}
-
-function ligado(valor: boolean): string {
-  return valor ? "ligado" : "desligado";
 }
 
 /**
@@ -133,36 +124,37 @@ function ligado(valor: boolean): string {
  */
 export function descreverAlteracoesDaConfiguracao(alteracoes: Partial<DadosDaConfiguracao>): string[] {
   const itens: string[] = [];
+  const d = textos().descricoes;
   if (alteracoes.motorDoOrquestrador !== undefined) {
-    itens.push(`Motor do orquestrador: ${rotuloDoMotor(alteracoes.motorDoOrquestrador)}`);
+    itens.push(d.motorDoOrquestrador(rotuloDoMotor(alteracoes.motorDoOrquestrador)));
   }
   if (alteracoes.modeloDoOrquestrador !== undefined) {
-    itens.push(`Modelo do orquestrador: ${nomeDoModelo(alteracoes.modeloDoOrquestrador)}`);
+    itens.push(d.modeloDoOrquestrador(nomeDoModelo(alteracoes.modeloDoOrquestrador)));
   }
   if (alteracoes.esforcoDoOrquestrador !== undefined) {
-    itens.push(`Esforço do orquestrador: ${ROTULOS_DOS_ESFORCOS[alteracoes.esforcoDoOrquestrador]}`);
+    itens.push(d.esforcoDoOrquestrador(ROTULOS_DOS_ESFORCOS[alteracoes.esforcoDoOrquestrador]));
   }
   if (alteracoes.motorDosSubagentes !== undefined) {
-    itens.push(`Motor dos subagentes: ${rotuloDoMotor(alteracoes.motorDosSubagentes)}`);
+    itens.push(d.motorDosSubagentes(rotuloDoMotor(alteracoes.motorDosSubagentes)));
   }
   if (alteracoes.modeloDosSubagentes !== undefined) {
-    itens.push(`Modelo dos subagentes: ${nomeDoModelo(alteracoes.modeloDosSubagentes)}`);
+    itens.push(d.modeloDosSubagentes(nomeDoModelo(alteracoes.modeloDosSubagentes)));
   }
   if (alteracoes.esforcoDosSubagentes !== undefined) {
-    itens.push(`Esforço dos subagentes: ${ROTULOS_DOS_ESFORCOS[alteracoes.esforcoDosSubagentes]}`);
+    itens.push(d.esforcoDosSubagentes(ROTULOS_DOS_ESFORCOS[alteracoes.esforcoDosSubagentes]));
   }
   if (alteracoes.quantidadeDeSubagentes !== undefined) {
     const { modo, limite } = alteracoes.quantidadeDeSubagentes;
-    itens.push(`Quantidade de subagentes: ${modo === "fixa" ? "fixa" : "automática"}, ${descreverQuantidade({ modo, limite })}`);
+    itens.push(d.quantidadeDeSubagentes(modo === "fixa", descreverQuantidade({ modo, limite })));
   }
   if (alteracoes.nivelDePermissao !== undefined) {
-    itens.push(`Permissões: ${ROTULOS_DAS_PERMISSOES[alteracoes.nivelDePermissao].nome}`);
+    itens.push(d.permissoes(ROTULOS_DAS_PERMISSOES[alteracoes.nivelDePermissao].nome));
   }
   if (alteracoes.permitirCommitEPush !== undefined) {
-    itens.push(`Commit e push por feature: ${ligado(alteracoes.permitirCommitEPush)}`);
+    itens.push(d.commitEPushPorFeature(alteracoes.permitirCommitEPush));
   }
   if (alteracoes.permitirArtefatosOnline !== undefined) {
-    itens.push(`Artefatos online no claude.ai: ${ligado(alteracoes.permitirArtefatosOnline)}`);
+    itens.push(d.artefatosOnlineNoClaude(alteracoes.permitirArtefatosOnline));
   }
   return itens;
 }
@@ -176,10 +168,24 @@ export function formatarDuracao(milissegundos: number): string {
   return `${minutos}min ${String(segundos % 60).padStart(2, "0")}s`;
 }
 
-const numeroCompacto = new Intl.NumberFormat("pt-BR", { notation: "compact", maximumFractionDigits: 1 });
+/** Um formatador por idioma, criado na primeira vez (o idioma muda em tempo de execução). */
+function porIdioma<F>(criar: (locale: string) => F): () => F {
+  const cache = new Map<string, F>();
+  return () => {
+    const locale = localeDoIdioma(idiomaAtual());
+    let formatador = cache.get(locale);
+    if (formatador === undefined) {
+      formatador = criar(locale);
+      cache.set(locale, formatador);
+    }
+    return formatador;
+  };
+}
+
+const numeroCompacto = porIdioma((locale) => new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }));
 
 export function formatarTokens(tokens: number): string {
-  return numeroCompacto.format(tokens);
+  return numeroCompacto().format(tokens);
 }
 
 /** Ex.: "480 MB", "1,9 GB". */
@@ -188,7 +194,7 @@ export function formatarBytes(bytes: number): string {
   if (mega < 1024) {
     return `${Math.round(mega)} MB`;
   }
-  return `${(mega / 1024).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} GB`;
+  return `${(mega / 1024).toLocaleString(localeDoIdioma(idiomaAtual()), { maximumFractionDigits: 1 })} GB`;
 }
 
 export function formatarPercentual(fracao: number): string {
@@ -201,24 +207,23 @@ export function rotuloCurtoDaCota(nome: string): string {
   return numero === undefined || letra === undefined ? nome : `${numero}${letra.toLowerCase()}`;
 }
 
-const horario = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" });
-const horarioComSegundos = new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const horario = porIdioma((locale) => new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" }));
+const horarioComSegundos = porIdioma(
+  (locale) => new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+);
 
 /** Ex.: "16:31:27" — para o terminal de eventos. */
 export function formatarHora(iso: string): string {
-  return horarioComSegundos.format(new Date(iso));
+  return horarioComSegundos().format(new Date(iso));
 }
-const dataEHora = new Intl.DateTimeFormat("pt-BR", {
-  day: "2-digit",
-  month: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-});
+const dataEHora = porIdioma(
+  (locale) => new Intl.DateTimeFormat(locale, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }),
+);
 
 /** Só o horário para hoje; data e horário para dias anteriores. */
 export function formatarMomento(iso: string, agora: Date = new Date()): string {
   const momento = new Date(iso);
-  return momento.toDateString() === agora.toDateString() ? horario.format(momento) : dataEHora.format(momento);
+  return momento.toDateString() === agora.toDateString() ? horario().format(momento) : dataEHora().format(momento);
 }
 
 /**
@@ -228,16 +233,16 @@ export function formatarMomento(iso: string, agora: Date = new Date()): string {
 export function descreverRenovacao(iso: string, agora: Date): string {
   const faltaMs = new Date(iso).getTime() - agora.getTime();
   if (faltaMs <= 0) {
-    return "já renovou: o uso atualiza no próximo pedido";
+    return textos().renovacao.jaRenovou;
   }
   const minutos = Math.ceil(faltaMs / 60_000);
   if (minutos < 60) {
-    return `renova em ${minutos} min`;
+    return textos().renovacao.emMinutos(minutos);
   }
   const horas = Math.floor(minutos / 60);
   if (horas < 24) {
     const resto = minutos % 60;
-    return `renova em ${horas} h${resto > 0 ? ` ${resto} min` : ""}`;
+    return textos().renovacao.emHoras(horas, resto);
   }
-  return `renova em ${formatarMomento(iso, agora)}`;
+  return textos().renovacao.emMomento(formatarMomento(iso, agora));
 }

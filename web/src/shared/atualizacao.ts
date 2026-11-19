@@ -1,3 +1,5 @@
+import { textosAtuais } from "./idioma/idioma";
+import { textosDeConfiguracoes } from "./idioma/textos/configuracoes";
 import type { EstadoDaAtualizacao } from "./ponteDoDesktop";
 
 /**
@@ -19,24 +21,21 @@ function primeiraMaiuscula(texto: string): string {
 
 /** O resultado da última verificação, em minúsculas (vai depois da versão). */
 function resultado(estado: EstadoDaAtualizacao): string {
-  const versaoNova = estado.versaoNova ?? "a nova versão";
+  const d = textosAtuais(textosDeConfiguracoes).atualizacaoCurta;
+  const versaoNova = estado.versaoNova ?? d.versaoNovaPadrao;
   switch (estado.situacao) {
     case "indisponivel":
-      return "atualizações só no app instalado";
+      return d.indisponivel;
     case "verificando":
-      return "procurando atualizações…";
+      return d.verificando;
     case "em-dia":
-      return "você está na versão mais recente";
-    case "baixando": {
-      const percentual = percentualDoDownload(estado.progresso);
-      return `baixando ${versaoNova}…${percentual === null ? "" : ` ${percentual}%`}`;
-    }
+      return d.emDia;
+    case "baixando":
+      return d.baixando(versaoNova, percentualDoDownload(estado.progresso));
     case "pronta":
-      return `${versaoNova} pronta: será instalada ao fechar o app`;
+      return d.pronta(versaoNova);
     case "erro":
-      return estado.mensagemDeErro === null || estado.mensagemDeErro.trim() === ""
-        ? "não foi possível verificar"
-        : `não foi possível verificar: ${estado.mensagemDeErro.trim()}`;
+      return d.erro(estado.mensagemDeErro?.trim() ?? "");
   }
 }
 
@@ -49,12 +48,10 @@ export function descreverAtualizacao(estado: EstadoDaAtualizacao): string {
   if (estado.situacao === "indisponivel" || estado.versaoAtual.trim() === "") {
     return primeiraMaiuscula(resultado(estado));
   }
-  return `Versão ${estado.versaoAtual.trim()} — ${resultado(estado)}`;
+  return textosAtuais(textosDeConfiguracoes).atualizacaoCurta.versaoEResultado(estado.versaoAtual.trim(), resultado(estado));
 }
 
 /** "Há 1 pedido em andamento; reiniciar agora vai cancelá-lo." (ou "N pedidos … cancelá-los"). */
 export function avisoDosPedidosEmAndamento(quantidade: number): string {
-  return quantidade === 1
-    ? "Há 1 pedido em andamento; reiniciar agora vai cancelá-lo."
-    : `Há ${quantidade} pedidos em andamento; reiniciar agora vai cancelá-los.`;
+  return textosAtuais(textosDeConfiguracoes).atualizacaoCurta.avisoDosPedidos(quantidade);
 }

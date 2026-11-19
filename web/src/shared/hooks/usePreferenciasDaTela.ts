@@ -2,6 +2,9 @@ import { useSyncExternalStore } from "react";
 
 import { type GeometriaDoChat, interpretarGeometriaDoChat } from "../geometriaDoChat";
 
+/** O idioma da interface (o módulo `shared/idioma/idioma.ts` reexporta e usa este tipo). */
+export type Idioma = "pt-BR" | "en";
+
 /** De que lado do canvas fica o chat fixo. */
 export type LadoDoChatFixo = "esquerda" | "direita";
 
@@ -56,6 +59,8 @@ export type PreferenciasDaTela = {
   alturaDaConversaDoChat: number | null;
   /** O painel da transcrição (o que o áudio do computador diz, com "Responder agora") está aberto no chat. Padrão: fechado. */
   transcricaoAberta: boolean;
+  /** O idioma da interface; preferências antigas, sem o campo, ou com valor inválido valem "pt-BR". */
+  idioma: Idioma;
 };
 
 export const CHAVE_DAS_PREFERENCIAS_DA_TELA = "orquestrador.preferenciasDaTela";
@@ -75,6 +80,7 @@ const PADRAO: PreferenciasDaTela = {
   opacidadeDoChat: 1,
   alturaDaConversaDoChat: null,
   transcricaoAberta: false,
+  idioma: "pt-BR",
 };
 
 /** A opacidade do chat: mínima, máxima, passo e padrão. */
@@ -170,6 +176,8 @@ function interpretar(bruto: string | null): PreferenciasDaTela {
         ? limitarOpacidadeDoChat(registro.opacidadeDoChat)
         : PADRAO.opacidadeDoChat,
     transcricaoAberta: booleano("transcricaoAberta"),
+    // Só "en" muda o idioma: ausente ou outro valor vale o português.
+    idioma: registro.idioma === "en" ? "en" : PADRAO.idioma,
     alturaDaConversaDoChat:
       typeof registro.alturaDaConversaDoChat === "number"
         ? limitarAlturaDaConversaDoChat(registro.alturaDaConversaDoChat)
@@ -177,7 +185,8 @@ function interpretar(bruto: string | null): PreferenciasDaTela {
   };
 }
 
-function lerPreferencias(): PreferenciasDaTela {
+/** Leitura síncrona das preferências, para código fora do React. */
+export function lerPreferencias(): PreferenciasDaTela {
   const bruto = lerBruto();
   if (ultimaLeitura !== null && ultimaLeitura.bruto === bruto) {
     return ultimaLeitura.valor;
@@ -220,7 +229,8 @@ function mesmaGeometria(a: GeometriaDoChat | null, b: GeometriaDoChat | null): b
   return a.x === b.x && a.y === b.y && a.largura === b.largura && a.altura === b.altura;
 }
 
-function mudar(parcial: Partial<PreferenciasDaTela>): void {
+/** Muda preferências (e avisa quem usa o hook), para código fora do React. */
+export function mudarPreferenciasDaTela(parcial: Partial<PreferenciasDaTela>): void {
   const atuais = lerPreferencias();
   const novas: PreferenciasDaTela = { ...atuais, ...parcial };
   novas.larguraDoChatFixo = limitarLarguraDoChatFixo(novas.larguraDoChatFixo);
@@ -237,7 +247,8 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
     mesmaGeometria(novas.chatNoModoInvisivel, atuais.chatNoModoInvisivel) &&
     novas.opacidadeDoChat === atuais.opacidadeDoChat &&
     novas.alturaDaConversaDoChat === atuais.alturaDaConversaDoChat &&
-    novas.transcricaoAberta === atuais.transcricaoAberta
+    novas.transcricaoAberta === atuais.transcricaoAberta &&
+    novas.idioma === atuais.idioma
   ) {
     return;
   }
@@ -265,5 +276,5 @@ export function usePreferenciasDaTela(): {
 } {
   const preferencias = useSyncExternalStore(assinar, lerPreferencias, () => PADRAO);
   // Função do módulo: a mesma em todo render (estável como um setState).
-  return { preferencias, mudarPreferencias: mudar };
+  return { preferencias, mudarPreferencias: mudarPreferenciasDaTela };
 }

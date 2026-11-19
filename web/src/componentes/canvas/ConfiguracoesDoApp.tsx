@@ -8,6 +8,8 @@ import {
   type EstiloDosControlesDasJanelas,
   usePreferenciasDaTela,
 } from "../../shared/hooks/usePreferenciasDaTela";
+import { OPCOES_DE_IDIOMA, definirIdioma, useIdioma, useTextos } from "../../shared/idioma/idioma";
+import { textosDeConfiguracoes } from "../../shared/idioma/textos/configuracoes";
 import "../../theme/configuracoes-do-app.css";
 import { IconeFechar } from "../Icones";
 import { AbaDaConta } from "./AbaDaConta";
@@ -22,13 +24,13 @@ import {
 
 export type AbaDasConfiguracoes = "padroes" | "sistema" | "conta" | "atualizacao" | "aparencia";
 
-/** As abas, na ordem do protótipo. */
-const ABAS: readonly { aba: AbaDasConfiguracoes; rotulo: string }[] = [
-  { aba: "padroes", rotulo: "Padrões" },
-  { aba: "sistema", rotulo: "Sistema" },
-  { aba: "conta", rotulo: "Conta" },
-  { aba: "atualizacao", rotulo: "Atualização" },
-  { aba: "aparencia", rotulo: "Aparência" },
+/** As abas, na ordem do protótipo (o rótulo vem dos textos, pela chave). */
+const ABAS: readonly { aba: AbaDasConfiguracoes }[] = [
+  { aba: "padroes" },
+  { aba: "sistema" },
+  { aba: "conta" },
+  { aba: "atualizacao" },
+  { aba: "aparencia" },
 ];
 
 /** O topo do painel por padrão: logo abaixo da ilha da direita (topo 16 + altura 42 + respiro de 8). */
@@ -80,6 +82,7 @@ function PainelAberto({
   aoSalvarInstrucoes,
   topo = TOPO_PADRAO,
 }: Props) {
+  const t = useTextos(textosDeConfiguracoes);
   const [aba, setAba] = useState<AbaDasConfiguracoes>(() =>
     ABAS.some((item) => item.aba === abaInicial) ? (abaInicial as AbaDasConfiguracoes) : "padroes",
   );
@@ -147,21 +150,21 @@ function PainelAberto({
     <section
       ref={painel}
       tabIndex={-1}
-      aria-label="Configurações"
+      aria-label={t.painel.titulo}
       className="configuracoes-do-app painel-flutuante surgir no-drag"
       style={{ top: topo, maxHeight: `calc(100% - ${topo + 16}px)` }}
     >
       <header className="configuracoes-do-app-cabecalho">
         <div className="min-w-0">
-          <span className="text-support">Computador e app</span>
-          <h2 className="text-[16px]">Configurações</h2>
+          <span className="text-support">{t.painel.sobretitulo}</span>
+          <h2 className="text-[16px]">{t.painel.titulo}</h2>
         </div>
-        <button type="button" className="botao-icone shrink-0" aria-label="Fechar Configurações" title="Fechar (Esc)" onClick={aoFechar}>
+        <button type="button" className="botao-icone shrink-0" aria-label={t.painel.fechar} title={t.painel.fecharDica} onClick={aoFechar}>
           <IconeFechar tamanho={16} />
         </button>
       </header>
 
-      <div className="configuracoes-do-app-abas" role="tablist" aria-label="Seções de Configurações">
+      <div className="configuracoes-do-app-abas" role="tablist" aria-label={t.painel.secoes}>
         {ABAS.map((item, indice) => (
           <button
             key={item.aba}
@@ -181,7 +184,7 @@ function PainelAberto({
             onClick={() => setAba(item.aba)}
             onKeyDown={(evento) => aoTeclarNasAbas(evento, indice)}
           >
-            {item.rotulo}
+            {t.abas[item.aba]}
           </button>
         ))}
       </div>
@@ -250,6 +253,7 @@ function semPrefixo(versao: string): string {
 }
 
 function AbaDeAtualizacao({ pedidosEmAndamento }: { pedidosEmAndamento: number }) {
+  const t = useTextos(textosDeConfiguracoes).atualizacao;
   const { estado, erroAoInstalar, verificar, instalarAgora } = useAtualizacao();
   const [confirmando, setConfirmando] = useState(false);
   // Se os pedidos terminam com a confirmação na tela, ela some e reiniciar fica direto.
@@ -259,41 +263,38 @@ function AbaDeAtualizacao({ pedidosEmAndamento }: { pedidosEmAndamento: number }
     return (
       <div className="cfgapp-cartao">
         <LinhaDaConfiguracao
-          titulo="Atualizações automáticas"
-          descricao="Funcionam só no app instalado. Aqui, no navegador, não há o que verificar."
+          titulo={t.automaticas}
+          descricao={t.soNoInstalado}
         />
       </div>
     );
   }
 
   const versaoAtual = semPrefixo(estado.versaoAtual);
-  const titulo = versaoAtual === "" ? "Versão do app" : `Versão ${versaoAtual}`;
-  const versaoNova = estado.versaoNova === null ? "A nova versão" : `A versão ${semPrefixo(estado.versaoNova)}`;
+  const titulo = versaoAtual === "" ? t.versaoDoApp : t.versao(versaoAtual);
+  const versaoNova = estado.versaoNova === null ? null : semPrefixo(estado.versaoNova);
   const percentual = percentualDoDownload(estado.progresso);
   const podeVerificar = estado.situacao === "em-dia" || estado.situacao === "erro";
 
   let descricao: ReactNode;
   switch (estado.situacao) {
     case "indisponivel":
-      descricao = "As atualizações só funcionam no app instalado.";
+      descricao = t.indisponivel;
       break;
     case "verificando":
-      descricao = "Procurando atualizações…";
+      descricao = t.verificando;
       break;
     case "em-dia":
-      descricao = "Você está na versão mais recente.";
+      descricao = t.emDia;
       break;
     case "baixando":
-      descricao = `${versaoNova} está sendo baixada${percentual === null ? "" : ` (${percentual}%)`} e será instalada quando você fechar o app.`;
+      descricao = t.baixando(versaoNova, percentual);
       break;
     case "pronta":
-      descricao = `${versaoNova} foi baixada. Ela será instalada quando você fechar o app, ou reinicie agora.`;
+      descricao = t.pronta(versaoNova);
       break;
     case "erro":
-      descricao =
-        estado.mensagemDeErro === null || estado.mensagemDeErro.trim() === ""
-          ? "Não foi possível verificar."
-          : `Não foi possível verificar: ${estado.mensagemDeErro.trim()}`;
+      descricao = t.erro(estado.mensagemDeErro?.trim() ?? "");
       break;
   }
 
@@ -302,7 +303,7 @@ function AbaDeAtualizacao({ pedidosEmAndamento }: { pedidosEmAndamento: number }
       <LinhaDaConfiguracao titulo={titulo} descricao={descricao}>
         {podeVerificar && (
           <button type="button" className="btn btn-sm btn-outline" onClick={() => void verificar()}>
-            {estado.situacao === "erro" ? "Tentar de novo" : "Procurar agora"}
+            {estado.situacao === "erro" ? t.tentarDeNovo : t.procurarAgora}
           </button>
         )}
         {estado.situacao === "pronta" && !pedirConfirmacao && (
@@ -311,13 +312,13 @@ function AbaDeAtualizacao({ pedidosEmAndamento }: { pedidosEmAndamento: number }
             className="btn btn-sm btn-cta"
             onClick={() => (pedidosEmAndamento > 0 ? setConfirmando(true) : void instalarAgora())}
           >
-            Reiniciar agora
+            {t.reiniciarAgora}
           </button>
         )}
       </LinhaDaConfiguracao>
       {estado.situacao === "baixando" && percentual !== null && (
         <div className="cfgapp-progresso">
-          <span className="medidor medidor-largo" role="progressbar" aria-label="Download da atualização" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percentual}>
+          <span className="medidor medidor-largo" role="progressbar" aria-label={t.downloadAria} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percentual}>
             <span style={{ width: `${percentual}%` }} />
           </span>
         </div>
@@ -327,10 +328,10 @@ function AbaDeAtualizacao({ pedidosEmAndamento }: { pedidosEmAndamento: number }
           <p role="alert">{avisoDosPedidosEmAndamento(pedidosEmAndamento)}</p>
           <div className="cfgapp-confirmacao-botoes">
             <button type="button" className="btn btn-sm btn-ghost" onClick={() => setConfirmando(false)}>
-              Voltar
+              {t.voltar}
             </button>
             <button type="button" className="btn btn-sm btn-danger" onClick={() => void instalarAgora()}>
-              Reiniciar mesmo assim
+              {t.reiniciarMesmoAssim}
             </button>
           </div>
         </div>
@@ -349,20 +350,23 @@ function AbaDeAtualizacao({ pedidosEmAndamento }: { pedidosEmAndamento: number }
 /** Onde o chat rápido fica: no pé do canvas ou como coluna fixa de um dos lados. */
 type PosicaoDoChat = "embaixo" | "esquerda" | "direita";
 
-const POSICOES_DO_CHAT: readonly OpcaoDoSegmentado<PosicaoDoChat>[] = [
-  { valor: "embaixo", rotulo: "Embaixo", dica: "O chat rápido flutua no pé do canvas" },
-  { valor: "esquerda", rotulo: "Esquerda", dica: "O chat rápido vira uma coluna fixa à esquerda do canvas" },
-  { valor: "direita", rotulo: "Direita", dica: "O chat rápido vira uma coluna fixa à direita do canvas" },
-];
-
-const ESTILOS_DOS_CONTROLES: readonly OpcaoDoSegmentado<EstiloDosControlesDasJanelas>[] = [
-  { valor: "automatico", rotulo: "Automático", dica: "Os controles das janelas seguem o sistema" },
-  { valor: "mac", rotulo: "Estilo Mac", dica: "Bolinhas à esquerda do cabeçalho das janelas" },
-  { valor: "windows", rotulo: "Estilo Windows", dica: "Botões à direita do cabeçalho das janelas" },
-];
+const ESTILOS_DOS_CONTROLES: readonly EstiloDosControlesDasJanelas[] = ["automatico", "mac", "windows"];
 
 function AbaDeAparencia() {
+  const t = useTextos(textosDeConfiguracoes);
+  const a = t.aparencia;
+  const idioma = useIdioma();
   const { preferencias, mudarPreferencias } = usePreferenciasDaTela();
+  const posicoes: readonly OpcaoDoSegmentado<PosicaoDoChat>[] = [
+    { valor: "embaixo", rotulo: a.embaixo, dica: a.embaixoDica },
+    { valor: "esquerda", rotulo: a.esquerda, dica: a.esquerdaDica },
+    { valor: "direita", rotulo: a.direita, dica: a.direitaDica },
+  ];
+  const estilos: readonly OpcaoDoSegmentado<EstiloDosControlesDasJanelas>[] = ESTILOS_DOS_CONTROLES.map((estilo) => ({
+    valor: estilo,
+    rotulo: t.estilosDosControles[estilo].rotulo,
+    dica: t.estilosDosControles[estilo].dica,
+  }));
   const posicao: PosicaoDoChat = preferencias.chatFixoNaEsquerda ? preferencias.ladoDoChatFixo : "embaixo";
 
   // "Embaixo" solta o chat e guarda o último lado: voltar a fixar lembra de onde estava.
@@ -374,28 +378,35 @@ function AbaDeAparencia() {
   return (
     <div className="cfgapp-cartao">
       <SegmentadoDaConfiguracao
-        titulo="Posição do chat"
-        descricao="Barra no pé do canvas ou coluna fixa ao lado."
-        opcoes={POSICOES_DO_CHAT}
+        titulo={a.idiomaTitulo}
+        descricao={a.idiomaDescricao}
+        opcoes={OPCOES_DE_IDIOMA}
+        valor={idioma}
+        aoEscolher={definirIdioma}
+      />
+      <SegmentadoDaConfiguracao
+        titulo={a.posicaoTitulo}
+        descricao={a.posicaoDescricao}
+        opcoes={posicoes}
         valor={posicao}
         aoEscolher={escolherPosicao}
       />
       <InterruptorDaConfiguracao
-        titulo="Visualizador de código"
-        descricao="Mostra o botão Arquivos nos terminais."
+        titulo={a.visualizadorTitulo}
+        descricao={a.visualizadorDescricao}
         ligado={preferencias.visualizadorDeCodigo}
         aoAlternar={() => mudarPreferencias({ visualizadorDeCodigo: !preferencias.visualizadorDeCodigo })}
       />
       <InterruptorDaConfiguracao
-        titulo="Manter bixinhos até limpar à mão"
-        descricao="Desligado, os que terminam saem sozinhos do canvas."
+        titulo={a.bixinhosTitulo}
+        descricao={a.bixinhosDescricao}
         ligado={preferencias.manterBixinhosAteLimpar}
         aoAlternar={() => mudarPreferencias({ manterBixinhosAteLimpar: !preferencias.manterBixinhosAteLimpar })}
       />
       <SegmentadoDaConfiguracao
-        titulo="Controles das janelas"
-        descricao="Como as janelas do canvas desenham fechar, minimizar e ampliar."
-        opcoes={ESTILOS_DOS_CONTROLES}
+        titulo={a.controlesTitulo}
+        descricao={a.controlesDescricao}
+        opcoes={estilos}
         valor={preferencias.controlesDasJanelas}
         aoEscolher={(estilo) => mudarPreferencias({ controlesDasJanelas: estilo })}
       />

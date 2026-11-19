@@ -1733,6 +1733,16 @@ flowchart LR
   - com os subagentes fora do Claude Code, só o Orquestrador tem o navegador do agente (ADR-46);
   - a suíte exercita o Codex e o Copilot com servidores `app-server` e ACP falsos: o comportamento com o login real de cada CLI depende da versão instalada.
 
+**ADR-49 — Tradução da interface sem biblioteca (dicionários tipados por área).**
+- *Contexto:* todo texto da tela estava em português escrito direto no JSX, e o app passa a ter também a interface em inglês. Uma biblioteca de i18n (ex.: `i18next`) traria dependência, catálogos em JSON sem tipagem e chaves em texto solto, para um app com dois idiomas e textos que quase sempre são frases curtas com variáveis.
+- *Decisão:* **dicionários tipados por área, mais um hook**, sem dependência nova. Cada área tem um arquivo `web/src/shared/idioma/textos/<area>.ts` que exporta `textosDe<Area>`, criado com `definirTextos({ "pt-BR": {...}, en: {...} })`; o pt-BR é a fonte do formato e o TypeScript recusa um `en` com chaves ou assinaturas diferentes (`NoInfer`). Textos com variáveis são funções (ex.: `subagentes: (n: number) => ...`), o que resolve plural e ordem das palavras por idioma. Os componentes usam `useTextos(textosDeArea)` (re-renderiza ao trocar) e o código fora do React usa `textosAtuais(textosDeArea)`; `localeDoIdioma(idiomaAtual())` entrega `pt-BR` ou `en-US` para `Intl` e `toLocale*`. O idioma é o campo `idioma` das *preferências da tela* (localStorage, chave `orquestrador.preferenciasDaTela`; padrão `pt-BR`; ausente ou inválido vale `pt-BR`), troca na hora e mantém `<html lang>` em dia. Escolha em *Configurações → Aparência → Idioma*.
+- *Consequências:*
+  - a escolha fica **por computador** (localStorage), não por conta nem no servidor: outra máquina, ou outro perfil do navegador, começa em português;
+  - o que vem do servidor continua **em português por ora**: mensagens de erro da API e as respostas do Orquestrador (o idioma delas segue as instruções de cada Orquestrador, não a interface);
+  - o **reconhecimento de voz** (idioma e frases do ditado) e os **marcadores de protocolo** (blocos como `<configuracao-do-pedido>`, nomes de eventos e valores enviados à API) **não são traduzidos**;
+  - uma tela nova precisa dos dois idiomas no mesmo arquivo de textos (o compilador cobra), mas o texto fica longe do JSX e não há extração automática de chaves;
+  - constantes de texto exportadas (ex.: `AVISO_DO_ULTRACODE`) não acompanham a troca: quem as usa deve ler do dicionário.
+
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;
 - `modelUsage` acumula a sessão, então o consumo do turno vem de `model_usage_since_last_result`;
@@ -2081,7 +2091,8 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 
   **↑/↓** escolhem, **Enter** executa, **Esc** ou um clique fora fecham (o cursor volta para onde estava), e **Ctrl+K** de novo também fecha;
 - o minimapa no canto inferior direito mostra onde cada coisa está (as notas e os artefatos têm cor própria; os artefatos, azul-ciano). O terminal de um Orquestrador trabalhando **brilha** no minimapa (contorno laranja que pulsa), para achar quem está ocupado num canvas grande; o pulso para com o reduzir movimento do sistema, durante o arraste e com o servidor desconectado;
-- enquanto você arrasta um terminal/bixinho ou move o canvas, as animações dos nós pausam e a bolinha das linhas some (para o movimento ficar leve); tudo volta ao soltar.
+- enquanto você arrasta um terminal/bixinho ou move o canvas, as animações dos nós pausam e a bolinha das linhas some (para o movimento ficar leve); tudo volta ao soltar;
+- **idioma da interface:** em **Configurações → Aparência → Idioma**, escolha *Português* ou *English*. A troca vale na hora, sem recarregar, e fica guardada neste computador (ver ADR-49). Mensagens de erro do servidor e as respostas do Orquestrador continuam em português por ora.
 
 1. **Criar um Orquestrador:** clique no botão laranja **`+ Novo ▾`** (canto superior esquerdo) e escolha *Orquestrador*, ou aperte **Ctrl+N** (com o canvas vazio, também há o *+ Novo orquestrador* no meio da tela). No menu, ↑/↓ escolhem, Enter confirma e Esc ou um clique fora fecham. Abre um terminal de configuração: escolha a **pasta** do projeto (o nome é sugerido a partir dela). Depois defina:
    - **Modelos:** o do Orquestrador planeja e sintetiza; o dos Subagentes executa. Opus é o mais capaz; Haiku é rápido e gasta menos cota.

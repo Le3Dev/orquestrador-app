@@ -1,12 +1,15 @@
 import type { JanelaDaCota } from "../../shared/api/tipos";
 import { descreverRenovacao } from "../../shared/formatacao";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeConfiguracoes } from "../../shared/idioma/textos/configuracoes";
 import { COTA_ALTA } from "./PopoverDoUso";
 import { nomeLegivelDaCota } from "./usoDoSistema";
 
 function LinhaDaCota({ janela, agora }: { janela: JanelaDaCota; agora: Date }) {
+  const t = useTextos(textosDeConfiguracoes).conta;
   const percentual = Math.min(100, Math.max(0, Math.round(janela.utilizacao * 100)));
   const nome = nomeLegivelDaCota(janela.nome);
-  const renovacao = janela.renovaEm === null ? "sem horário de renovação" : descreverRenovacao(janela.renovaEm, agora);
+  const renovacao = janela.renovaEm === null ? t.semHorario : descreverRenovacao(janela.renovaEm, agora);
   const alta = janela.utilizacao >= COTA_ALTA;
   return (
     <div className="cfgapp-linha">
@@ -19,12 +22,12 @@ function LinhaDaCota({ janela, agora }: { janela: JanelaDaCota; agora: Date }) {
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={percentual}
-          aria-valuetext={`${percentual}% usada`}
+          aria-valuetext={t.usada(percentual)}
         >
           <i style={{ width: `${percentual}%` }} />
         </span>
         <span>
-          {percentual}% usada · {janela.situacao === "rejected" && <em className="cfgapp-no-limite">no limite · </em>}
+          {t.usada(percentual)} · {janela.situacao === "rejected" && <em className="cfgapp-no-limite">{t.noLimite} · </em>}
           {renovacao}
         </span>
       </div>
@@ -45,13 +48,14 @@ interface Props {
  * nem troca de conta: só o que o servidor lê do Claude.
  */
 export function AbaDaConta({ cota, agora = new Date() }: Props) {
+  const t = useTextos(textosDeConfiguracoes).conta;
   if (cota === null || cota.length === 0) {
     return (
       <div className="cfgapp-cartao">
         <div className="cfgapp-linha">
           <div className="cfgapp-linha-texto">
-            <b>Cota do Claude</b>
-            <span>O uso aparece depois do primeiro pedido.</span>
+            <b>{t.cotaTitulo}</b>
+            <span>{t.cotaVazia}</span>
           </div>
         </div>
       </div>

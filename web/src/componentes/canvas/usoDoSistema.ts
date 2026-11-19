@@ -1,16 +1,18 @@
 import type { SituacaoDoOrquestrador } from "../../shared/api/tipos";
+import { idiomaAtual, localeDoIdioma, textosAtuais } from "../../shared/idioma/idioma";
+import { textosDeConfiguracoes } from "../../shared/idioma/textos/configuracoes";
 
 const MB = 1024 ** 2;
 const GB = 1024 ** 3;
 
 /** "1,9 GB", "16 GB" (uma casa decimal só quando faz diferença). */
 export function formatarGb(bytes: number): string {
-  return `${(bytes / GB).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} GB`;
+  return `${(bytes / GB).toLocaleString(localeDoIdioma(idiomaAtual()), { maximumFractionDigits: 1 })} GB`;
 }
 
 /** "820 MB", "1.230 MB": a memória de cada orquestrador, sempre em MB. */
 export function formatarMb(bytes: number): string {
-  return `${Math.round(bytes / MB).toLocaleString("pt-BR")} MB`;
+  return `${Math.round(bytes / MB).toLocaleString(localeDoIdioma(idiomaAtual()))} MB`;
 }
 
 export interface OrquestradorDaTabela {
@@ -30,7 +32,7 @@ export function ordenarOrquestradores(
       (a, b) =>
         Number(b.situacao === "trabalhando") - Number(a.situacao === "trabalhando") ||
         b.bytes - a.bytes ||
-        a.nome.localeCompare(b.nome, "pt-BR"),
+        a.nome.localeCompare(b.nome, localeDoIdioma(idiomaAtual())),
     );
 }
 
@@ -43,11 +45,12 @@ export function nomeLegivelDaCota(nome: string): string {
   const limpo = nome.trim();
   const modelo = /\(([^)]+)\)\s*$/.exec(limpo)?.[1];
   const sufixo = modelo === undefined ? "" : ` (${modelo})`;
+  const d = textosAtuais(textosDeConfiguracoes).conta;
   if (/^5\s*horas?\b/i.test(limpo)) {
-    return `Cota da sessão${sufixo}`;
+    return d.sessao(sufixo);
   }
   if (/^7\s*dias?\b/i.test(limpo)) {
-    return `Cota da semana${sufixo}`;
+    return d.semana(sufixo);
   }
-  return limpo === "" ? "Cota" : `Cota de ${limpo}`;
+  return limpo === "" ? d.cota : d.de(limpo);
 }
