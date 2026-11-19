@@ -4,8 +4,8 @@ import {
   CODIGO_DO_PROCESSADOR,
   type DependenciasDaCaptura,
   iniciarCapturaDoAudio,
-  MENSAGEM_CAPTURA_ENCERRADA,
-  MENSAGEM_SEM_AUDIO,
+  mensagemCapturaEncerrada,
+  mensagemSemAudio,
   mensagemDoErroDeCaptura,
   NOME_DO_PROCESSADOR,
 } from "./capturaDoAudio";
@@ -128,14 +128,14 @@ describe("iniciarCapturaDoAudio", () => {
     const t = montar();
     await iniciarCapturaDoAudio(t.ouvintes, t.dependencias);
     t.audio.terminar();
-    expect(t.ouvintes.aoEncerrar).toHaveBeenCalledWith(MENSAGEM_CAPTURA_ENCERRADA);
+    expect(t.ouvintes.aoEncerrar).toHaveBeenCalledWith(mensagemCapturaEncerrada());
     expect(t.contexto.close).toHaveBeenCalled();
   });
 
   it("sem trilha de áudio, para tudo e lança erro claro", async () => {
     const video = new TrilhaFalsa("video");
     const t = montar({ trilhas: [video] });
-    await expect(iniciarCapturaDoAudio(t.ouvintes, t.dependencias)).rejects.toThrow(MENSAGEM_SEM_AUDIO);
+    await expect(iniciarCapturaDoAudio(t.ouvintes, t.dependencias)).rejects.toThrow(mensagemSemAudio());
     expect(video.stop).toHaveBeenCalled();
     expect(t.dependencias.criarContexto).not.toHaveBeenCalled();
   });

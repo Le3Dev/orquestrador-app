@@ -2,6 +2,8 @@ import { type KeyboardEvent, useId, useRef, useState } from "react";
 
 import { mensagemDeErro } from "../../shared/api/cliente";
 import type { PerguntaDoApp } from "../../shared/api/tipos";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeChat } from "../../shared/idioma/textos/chat";
 
 interface Props {
   perguntas: readonly PerguntaDoApp[];
@@ -63,6 +65,7 @@ function textoDaResposta(perguntas: readonly PerguntaDoApp[], escolhas: readonly
  * vai como a próxima mensagem do usuário, e o cartão trava em seguida.
  */
 export function CartaoDePergunta({ perguntas, respondida, desabilitado, aoResponder }: Props) {
+  const t = useTextos(textosDeChat).pergunta;
   const id = useId();
   const [escolhas, setEscolhas] = useState<readonly Escolha[]>(() => perguntas.map(() => SEM_ESCOLHA));
   const [rascunhos, setRascunhos] = useState<readonly string[]>(() => perguntas.map(() => ""));
@@ -141,21 +144,20 @@ export function CartaoDePergunta({ perguntas, respondida, desabilitado, aoRespon
     }
   }
 
-  const situacao =
-    etapa.tipo === "enviando" ? " · enviando…" : travado ? " · respondida" : "";
+  const situacao = etapa.tipo === "enviando" ? ` · ${t.enviando}` : travado ? ` · ${t.respondida}` : "";
 
   return (
     <div
       className={`cartao-de-pergunta ${travado ? "cartao-de-pergunta-respondida" : ""}`}
       role="group"
-      aria-label={perguntas.length === 1 ? "Pergunta do Claude" : "Perguntas do Claude"}
+      aria-label={perguntas.length === 1 ? t.perguntaDoClaude : t.perguntasDoClaude}
     >
       <div className="cabecalho-do-cartao">
         <span className="icone-do-cartao" aria-hidden="true">
           <IconePergunta />
         </span>
         <span className="rotulo-tecnico">
-          {perguntas.length === 1 ? "pergunta do claude" : `${perguntas.length} perguntas do claude`}
+          {perguntas.length === 1 ? t.rotuloUma : t.rotuloVarias(perguntas.length)}
           {situacao}
         </span>
       </div>
@@ -173,7 +175,7 @@ export function CartaoDePergunta({ perguntas, respondida, desabilitado, aoRespon
             <p id={idDaPergunta} className="texto-da-pergunta texto-longo">
               {pergunta.pergunta}
             </p>
-            {pergunta.multipla && <p className="hint">escolha uma ou mais</p>}
+            {pergunta.multipla && <p className="hint">{t.umaOuMais}</p>}
             <div className="opcoes-da-pergunta">
               {pergunta.opcoes.map((opcao, posicao) => {
                 const marcada = escolha.opcoes.includes(opcao.rotulo);
@@ -202,14 +204,14 @@ export function CartaoDePergunta({ perguntas, respondida, desabilitado, aoRespon
                 <button
                   type="button"
                   className="opcao-da-pergunta opcao-marcada"
-                  aria-label={`Outro: ${escolha.outro}`}
+                  aria-label={t.outroEscolhido(escolha.outro)}
                   aria-pressed
-                  title="Clique para desmarcar"
+                  title={t.cliqueParaDesmarcar}
                   disabled={bloqueado}
                   onClick={() => trocarEscolha(indice, { ...escolha, outro: null })}
                 >
                   <span className="rotulo-da-opcao">{escolha.outro}</span>
-                  <span className="descricao-da-opcao">outra resposta</span>
+                  <span className="descricao-da-opcao">{t.outraResposta}</span>
                 </button>
               )}
             </div>
@@ -218,8 +220,8 @@ export function CartaoDePergunta({ perguntas, respondida, desabilitado, aoRespon
                 <input
                   type="text"
                   className="input campo-do-outro"
-                  placeholder="Outro…"
-                  aria-label={`Outra resposta para: ${pergunta.pergunta}`}
+                  placeholder={t.outro}
+                  aria-label={t.outraRespostaPara(pergunta.pergunta)}
                   value={rascunho}
                   disabled={bloqueado}
                   onChange={(evento) => {
@@ -234,7 +236,7 @@ export function CartaoDePergunta({ perguntas, respondida, desabilitado, aoRespon
                   disabled={bloqueado || rascunho.trim() === ""}
                   onClick={() => usarOutro(indice)}
                 >
-                  {imediata ? "enviar" : "usar"}
+                  {imediata ? t.enviar : t.usar}
                 </button>
               </div>
             )}
@@ -247,16 +249,16 @@ export function CartaoDePergunta({ perguntas, respondida, desabilitado, aoRespon
             type="button"
             className="btn btn-sm btn-cta"
             disabled={bloqueado || !completa}
-            title={completa ? undefined : "Escolha uma resposta para cada pergunta"}
+            title={completa ? undefined : t.escolhaUmaPorPergunta}
             onClick={() => void enviar(escolhas)}
           >
-            Responder
+            {t.responder}
           </button>
         </div>
       )}
       {etapa.tipo === "erro" && (
         <span className="hint-error texto-longo" role="alert">
-          Não foi possível enviar a resposta: {etapa.mensagem}
+          {t.falhaAoEnviar(etapa.mensagem)}
         </span>
       )}
     </div>

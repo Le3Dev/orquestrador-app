@@ -2,6 +2,8 @@ import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 
 import type { IdiomaDaEscuta, PrioridadeDoMotor } from "../../shared/escuta/preferenciasDaEscuta";
 import type { EscutaNaTela, SituacaoDaEscuta } from "../../shared/escuta/useEscuta";
+import { type TextosDe, useTextos } from "../../shared/idioma/idioma";
+import { textosDeChat } from "../../shared/idioma/textos/chat";
 import {
   type DownloadDoModelo,
   explicacaoDoMotor,
@@ -27,22 +29,30 @@ type Props = Pick<
   | "mudarPrioridadeDoMotor"
 >;
 
-/** O modelo "base" erra bastante em português: o indicador avisa, de leve. */
-const AVISO_DE_PRECISAO_BAIXA =
-  "Precisão baixa: o modelo base erra mais em português. Em Precisão, no menu da escuta, o motor tenta um modelo maior";
+type TextosDoIndicador = TextosDe<typeof textosDeChat>["indicador"];
 
 /** Situações em que não há escuta para indicar (fora do modo, recusada ou com o aviso na tela). */
 const SEM_INDICADOR: ReadonlySet<SituacaoDaEscuta> = new Set(["indisponivel", "desligada", "aguardando-aviso"]);
 
-const IDIOMAS: readonly { readonly valor: IdiomaDaEscuta; readonly rotulo: string; readonly explicacao: string }[] = [
-  { valor: "portuguese", rotulo: "Português", explicacao: "Transcreve sempre em português (acerta mais nas falas em português)" },
-  { valor: "automatico", rotulo: "Automático", explicacao: "Detecta o idioma de cada fala" },
-];
+interface OpcaoDoMenu<V> {
+  readonly valor: V;
+  readonly rotulo: string;
+  readonly explicacao: string;
+}
 
-const PRIORIDADES: readonly { readonly valor: PrioridadeDoMotor; readonly rotulo: string; readonly explicacao: string }[] = [
-  { valor: "velocidade", rotulo: "Velocidade", explicacao: "Modelo mais leve: a transcrição chega mais rápido" },
-  { valor: "precisao", rotulo: "Precisão", explicacao: "Modelo maior: acerta mais, com um pouco mais de atraso" },
-];
+function idiomasDaEscuta(t: TextosDoIndicador): readonly OpcaoDoMenu<IdiomaDaEscuta>[] {
+  return [
+    { valor: "portuguese", rotulo: t.idiomaPortugues, explicacao: t.idiomaPortuguesDica },
+    { valor: "automatico", rotulo: t.idiomaAutomatico, explicacao: t.idiomaAutomaticoDica },
+  ];
+}
+
+function prioridadesDoMotor(t: TextosDoIndicador): readonly OpcaoDoMenu<PrioridadeDoMotor>[] {
+  return [
+    { valor: "velocidade", rotulo: t.velocidade, explicacao: t.velocidadeDica },
+    { valor: "precisao", rotulo: t.precisao, explicacao: t.precisaoDica },
+  ];
+}
 
 /** O download com o total, quando a sessão o informa; sem ele, só a porcentagem. */
 function downloadDe({ download, progressoDoDownload }: Pick<Props, "download" | "progressoDoDownload">): DownloadDoModelo | null {
@@ -79,39 +89,43 @@ function IconeDoIndicador({ tipo }: { tipo: "pausar" | "retomar" | "repetir" }) 
 }
 
 /** O rótulo curto ao lado do ponto. */
-function rotuloDa(situacao: SituacaoDaEscuta, download: DownloadDoModelo | null): string {
+function rotuloDa(situacao: SituacaoDaEscuta, download: DownloadDoModelo | null, t: TextosDoIndicador): string {
   switch (situacao) {
     case "escutando":
-      return "escutando";
+      return t.escutando;
     case "pausada":
-      return "pausada";
+      return t.pausada;
     case "baixando-modelo":
-      return download === null ? "baixando o modelo…" : textoDoDownload(download);
+      return download === null ? t.baixandoOModelo : textoDoDownload(download);
     case "iniciando":
-      return "iniciando…";
+      return t.iniciando;
     case "erro":
-      return "escuta com erro";
+      return t.comErro;
     default:
       return "";
   }
 }
 
 /** A explicação no balão (title) do indicador. */
-function explicacaoDa(situacao: SituacaoDaEscuta, erro: string | null, download: DownloadDoModelo | null): string {
+function explicacaoDa(
+  situacao: SituacaoDaEscuta,
+  erro: string | null,
+  download: DownloadDoModelo | null,
+  t: TextosDoIndicador,
+): string {
   switch (situacao) {
     case "escutando":
-      return "Escutando o áudio do computador: a transcrição fica só neste computador";
+      return t.dicaEscutando;
     case "pausada":
-      return "Escuta pausada: nada do áudio é transcrito até retomar";
+      return t.dicaPausada;
     case "baixando-modelo": {
       const totalMb = download?.totalMb ?? null;
-      const total = totalMb !== null && Number.isFinite(totalMb) && totalMb > 0 ? `, ${Math.round(totalMb)} MB` : "";
-      return `Baixando o modelo de transcrição (só na primeira vez${total})`;
+      return t.dicaBaixando(totalMb !== null && Number.isFinite(totalMb) && totalMb > 0 ? Math.round(totalMb) : null);
     }
     case "iniciando":
-      return "Começando a escutar o áudio do computador";
+      return t.dicaIniciando;
     case "erro":
-      return erro === null ? "A escuta parou com erro" : `A escuta parou: ${erro}`;
+      return erro === null ? t.dicaErro : t.dicaErroComMotivo(erro);
     default:
       return "";
   }
@@ -128,27 +142,24 @@ function MenuDaEscuta({
 }: Pick<Props, "automatico" | "alternarAutomatico" | "preferenciasDaTela" | "mudarIdioma" | "mudarPrioridadeDoMotor"> & {
   readonly id: string;
 }) {
+  const t = useTextos(textosDeChat).indicador;
   const nomeDoGrupo = useId();
   return (
-    <div id={id} className="menu-da-escuta" role="group" aria-label="Controles da escuta">
+    <div id={id} className="menu-da-escuta" role="group" aria-label={t.controles}>
       <button
         type="button"
         role="switch"
         className="interruptor interruptor-da-escuta"
         aria-checked={automatico}
-        title={
-          automatico
-            ? "Automático: a pergunta detectada vai sozinha ao chat"
-            : "Automático desligado: a escuta só transcreve, nada é enviado"
-        }
+        title={automatico ? t.automaticoLigadoDica : t.automaticoDesligadoDica}
         onClick={alternarAutomatico}
       >
         <span className="interruptor-trilho" aria-hidden="true" />
-        Automático
+        {t.automatico}
       </button>
       <fieldset className="grupo-do-menu-da-escuta">
-        <legend className="rotulo-tecnico">idioma</legend>
-        {IDIOMAS.map(({ valor, rotulo, explicacao }) => (
+        <legend className="rotulo-tecnico">{t.idioma}</legend>
+        {idiomasDaEscuta(t).map(({ valor, rotulo, explicacao }) => (
           <label key={valor} className="opcao-do-menu-da-escuta" title={explicacao}>
             <input
               type="radio"
@@ -162,8 +173,8 @@ function MenuDaEscuta({
         ))}
       </fieldset>
       <fieldset className="grupo-do-menu-da-escuta">
-        <legend className="rotulo-tecnico">prioridade do motor</legend>
-        {PRIORIDADES.map(({ valor, rotulo, explicacao }) => (
+        <legend className="rotulo-tecnico">{t.prioridadeDoMotor}</legend>
+        {prioridadesDoMotor(t).map(({ valor, rotulo, explicacao }) => (
           <label key={valor} className="opcao-do-menu-da-escuta" title={explicacao}>
             <input
               type="radio"
@@ -204,6 +215,7 @@ export function IndicadorDaEscuta({
   mudarIdioma,
   mudarPrioridadeDoMotor,
 }: Props) {
+  const t = useTextos(textosDeChat).indicador;
   const [aberto, setAberto] = useState(false);
   const raiz = useRef<HTMLSpanElement>(null);
   const botao = useRef<HTMLButtonElement>(null);
@@ -250,8 +262,8 @@ export function IndicadorDaEscuta({
         ref={botao}
         type="button"
         className="abrir-menu-da-escuta"
-        title={explicacaoDa(situacao, erro, baixando)}
-        aria-label="Controles da escuta"
+        title={explicacaoDa(situacao, erro, baixando, t)}
+        aria-label={t.controles}
         aria-haspopup="true"
         aria-expanded={aberto}
         aria-controls={aberto ? idDoMenu : undefined}
@@ -259,7 +271,7 @@ export function IndicadorDaEscuta({
       >
         <span className="ponto-da-escuta" aria-hidden="true" />
         <span className="rotulo-da-escuta" aria-live="polite">
-          {rotuloDa(situacao, baixando)}
+          {rotuloDa(situacao, baixando, t)}
         </span>
         {motor !== null && (
           <span
@@ -274,8 +286,8 @@ export function IndicadorDaEscuta({
           <span
             className="aviso-de-precisao-baixa"
             style={{ color: "var(--warning)" }}
-            title={AVISO_DE_PRECISAO_BAIXA}
-            aria-label={AVISO_DE_PRECISAO_BAIXA}
+            title={t.precisaoBaixa}
+            aria-label={t.precisaoBaixa}
             role="img"
             data-testid="aviso-de-precisao-baixa"
           >
@@ -287,9 +299,9 @@ export function IndicadorDaEscuta({
         <button
           type="button"
           className="botao-da-escuta"
-          aria-label="Pausar a escuta"
+          aria-label={t.pausarEscuta}
           aria-pressed={pausada}
-          title={pausada ? "Retomar a escuta" : "Pausar a escuta"}
+          title={pausada ? t.retomarEscuta : t.pausarEscuta}
           onClick={pausada ? retomar : pausar}
         >
           <IconeDoIndicador tipo={pausada ? "retomar" : "pausar"} />
@@ -299,8 +311,8 @@ export function IndicadorDaEscuta({
         <button
           type="button"
           className="botao-da-escuta"
-          aria-label="Tentar escutar de novo"
-          title="Tentar escutar de novo"
+          aria-label={t.tentarDeNovo}
+          title={t.tentarDeNovo}
           onClick={retomar}
         >
           <IconeDoIndicador tipo="repetir" />

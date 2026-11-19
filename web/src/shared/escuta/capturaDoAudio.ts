@@ -1,3 +1,5 @@
+import { textosAtuais } from "../idioma/idioma";
+import { textosDeVoz } from "../idioma/textos/voz";
 import { TAXA_DE_AMOSTRAGEM } from "./DetectorDeVoz";
 
 /** Quem recebe o áudio capturado e o aviso de que a captura acabou sozinha. */
@@ -27,9 +29,8 @@ export const NOME_DO_PROCESSADOR = "processador-da-escuta";
 /** O worklet junta ~100 ms (1.600 amostras a 16 kHz) antes de mandar à thread da tela. */
 export const AMOSTRAS_POR_PEDACO = TAXA_DE_AMOSTRAGEM / 10;
 
-export const MENSAGEM_SEM_AUDIO = "O áudio do computador não veio na captura.";
-export const MENSAGEM_CAPTURA_ENCERRADA =
-  "A captura do áudio do computador terminou. Clique em retomar no indicador da escuta.";
+export const mensagemSemAudio = (): string => textosAtuais(textosDeVoz).captura.semAudio;
+export const mensagemCapturaEncerrada = (): string => textosAtuais(textosDeVoz).captura.encerrada;
 
 /**
  * Código do AudioWorklet, carregado de um Blob: funciona igual no dev e no
@@ -72,23 +73,24 @@ function nomeDoErro(erro: unknown): string {
 
 /** Mensagem para a pessoa a partir de uma falha ao pedir ou montar a captura. */
 export function mensagemDoErroDeCaptura(erro: unknown): string {
+  const t = textosAtuais(textosDeVoz).captura;
   switch (nomeDoErro(erro)) {
     case "NotAllowedError":
     case "SecurityError":
-      return "A captura do áudio não foi liberada. Clique em retomar no indicador da escuta.";
+      return t.naoLiberada;
     case "InvalidStateError":
-      return "A captura do áudio precisa de um clique. Clique em retomar no indicador da escuta.";
+      return t.precisaDeUmClique;
     case "NotSupportedError":
-      return "Este computador não oferece a captura do áudio do sistema. A escuta só funciona no app desktop, no Windows.";
+      return t.semSuporte;
     case "NotFoundError":
-      return "Nenhuma fonte de áudio do computador foi encontrada para capturar.";
+      return t.semFonte;
     case "NotReadableError":
     case "AbortError":
-      return "O áudio do computador não pôde ser lido. Clique em retomar no indicador da escuta para tentar de novo.";
+      return t.naoPodeSerLido;
     default: {
       const mensagem = erro instanceof Error ? erro.message : String(erro);
-      if (mensagem === MENSAGEM_SEM_AUDIO || mensagem === MENSAGEM_CAPTURA_ENCERRADA) return mensagem;
-      return `A captura do áudio do computador falhou: ${mensagem}`;
+      if (mensagem === mensagemSemAudio() || mensagem === mensagemCapturaEncerrada()) return mensagem;
+      return t.falhou(mensagem);
     }
   }
 }
@@ -133,7 +135,7 @@ export async function iniciarCapturaDoAudio(
   const trilhasDeAudio = fluxo.getAudioTracks();
   if (trilhasDeAudio.length === 0) {
     for (const trilha of fluxo.getTracks()) trilha.stop();
-    throw new Error(MENSAGEM_SEM_AUDIO);
+    throw new Error(mensagemSemAudio());
   }
 
   let parada = false;
@@ -147,7 +149,7 @@ export async function iniciarCapturaDoAudio(
   const aoTerminarTrilha = (): void => {
     if (parada) return;
     parar();
-    if (montada) ouvintes.aoEncerrar(MENSAGEM_CAPTURA_ENCERRADA);
+    if (montada) ouvintes.aoEncerrar(mensagemCapturaEncerrada());
   };
 
   function parar(): void {
@@ -179,7 +181,7 @@ export async function iniciarCapturaDoAudio(
     contexto = dependencias.criarContexto({ sampleRate: TAXA_DE_AMOSTRAGEM });
     url = dependencias.criarUrl(new Blob([CODIGO_DO_PROCESSADOR], { type: "text/javascript" }));
     await contexto.audioWorklet.addModule(url);
-    if (parada) throw new Error(MENSAGEM_CAPTURA_ENCERRADA);
+    if (parada) throw new Error(mensagemCapturaEncerrada());
     origem = contexto.createMediaStreamSource(fluxo);
     // Sem saídas: o nó só consome (nada volta aos alto-falantes) e o navegador o processa mesmo assim.
     no = dependencias.criarNoDoProcessador(contexto, NOME_DO_PROCESSADOR, {
@@ -195,7 +197,7 @@ export async function iniciarCapturaDoAudio(
     origem.connect(no);
     if (contexto.state === "suspended") await contexto.resume();
     if (parada || trilhasDeAudio.every((trilha) => trilha.readyState === "ended")) {
-      throw new Error(MENSAGEM_CAPTURA_ENCERRADA);
+      throw new Error(mensagemCapturaEncerrada());
     }
   } catch (erro) {
     parar();

@@ -1,5 +1,8 @@
 import { type KeyboardEvent as EventoDeTecla, type RefObject, useEffect, useId, useRef, useState } from "react";
 
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeChat } from "../../shared/idioma/textos/chat";
+
 /** Uma ação secundária da barra do chat (melhorar o pedido, fixar ao lado…). */
 export interface ItemDoMenuDeMaisAcoes {
   readonly id: string;
@@ -33,6 +36,7 @@ function IconeMaisAcoes() {
  * andam pelos itens; Esc ou um clique fora fecham.
  */
 export function MenuDeMaisAcoes({ itens, campo }: Props) {
+  const t = useTextos(textosDeChat).menuDeMaisAcoes;
   const [aberto, setAberto] = useState(false);
   const idDoMenu = useId();
   const raiz = useRef<HTMLDivElement>(null);
@@ -106,8 +110,8 @@ export function MenuDeMaisAcoes({ itens, campo }: Props) {
         ref={botao}
         type="button"
         className="botao-icone botao-de-mais-acoes"
-        aria-label="Mais ações"
-        title="Mais ações"
+        aria-label={t.maisAcoes}
+        title={t.maisAcoes}
         aria-haspopup="menu"
         aria-expanded={aberto}
         aria-controls={aberto ? idDoMenu : undefined}
@@ -125,7 +129,7 @@ export function MenuDeMaisAcoes({ itens, campo }: Props) {
         <div
           id={idDoMenu}
           role="menu"
-          aria-label="Mais ações"
+          aria-label={t.maisAcoes}
           className="lista-de-mais-acoes menu-do-seletor painel-flutuante"
           onKeyDown={andarPelosItens}
         >

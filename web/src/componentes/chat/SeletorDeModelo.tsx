@@ -2,11 +2,9 @@ import { type RefObject, useEffect, useId, useRef, useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { PreferenciasDoChat } from "../../shared/api/tipos";
-import {
-  AJUDA_DOS_ARTEFATOS_ONLINE_DO_CHAT,
-  AVISO_DO_ULTRACODE,
-  ROTULO_DOS_ARTEFATOS_ONLINE,
-} from "../../shared/formatacao";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeChat } from "../../shared/idioma/textos/chat";
+import { textosDeConfiguracoes } from "../../shared/idioma/textos/configuracoes";
 import { ESFORCOS_DO_CHAT, MODELOS_DO_CHAT, nomeComVersao, rotuloDoEsforco } from "../../shared/modelos";
 
 interface Props {
@@ -38,6 +36,8 @@ export function SeletorDeModelo({
   aoFalhar,
   aoAlternarMenu,
 }: Props) {
+  const t = useTextos(textosDeChat).seletor;
+  const avisos = useTextos(textosDeConfiguracoes).avisos;
   const [aberto, setAberto] = useState(false);
   const [esforcoAberto, setEsforcoAberto] = useState(false);
   const [salvando, setSalvando] = useState(false);
@@ -101,7 +101,7 @@ export function SeletorDeModelo({
     try {
       aoAlterar(await api.alterarPreferenciasDoChat(alteracao));
     } catch (falha) {
-      aoFalhar(`Não foi possível salvar a escolha: ${mensagemDeErro(falha)}`);
+      aoFalhar(t.falhaAoSalvar(mensagemDeErro(falha)));
     } finally {
       setSalvando(false);
     }
@@ -115,7 +115,7 @@ export function SeletorDeModelo({
         aria-haspopup="menu"
         aria-expanded={aberto}
         aria-controls={aberto ? idDoMenu : undefined}
-        aria-label={`Modelo: ${nomeDoModelo}, esforço ${esforco.toLowerCase()}`}
+        aria-label={t.rotuloDoBotao(nomeDoModelo, esforco.toLowerCase())}
         disabled={desabilitado || salvando}
         onClick={() => (aberto ? fechar() : setAberto(true))}
       >
@@ -138,7 +138,7 @@ export function SeletorDeModelo({
       </button>
 
       {aberto && (
-        <div id={idDoMenu} role="menu" aria-label="Modelo do chat" className="menu-do-seletor painel-flutuante">
+        <div id={idDoMenu} role="menu" aria-label={t.modeloDoChat} className="menu-do-seletor painel-flutuante">
           {MODELOS_DO_CHAT.map((item) => {
             const escolhido = item.modelo === preferencias.modelo;
             return (
@@ -172,13 +172,13 @@ export function SeletorDeModelo({
               className="item-do-menu"
               onClick={() => setEsforcoAberto((atual) => !atual)}
             >
-              <span className="font-titulo text-[12.5px] font-medium text-primary">Esforço</span>
+              <span className="font-titulo text-[12.5px] font-medium text-primary">{t.esforco}</span>
               <span className="text-secondary">
                 {esforco} <span aria-hidden="true">›</span>
               </span>
             </button>
             {esforcoAberto && (
-              <div role="menu" aria-label="Esforço" className="submenu-do-seletor painel-flutuante">
+              <div role="menu" aria-label={t.esforco} className="submenu-do-seletor painel-flutuante">
                 {ESFORCOS_DO_CHAT.map((item) => {
                   const escolhido = item.esforco === preferencias.esforco;
                   return (
@@ -198,7 +198,7 @@ export function SeletorDeModelo({
                   );
                 })}
                 {preferencias.esforco === "ultracode" && (
-                  <p className="hint-warning px-2.5 pt-1.5 pb-1 leading-snug">{AVISO_DO_ULTRACODE}</p>
+                  <p className="hint-warning px-2.5 pt-1.5 pb-1 leading-snug">{avisos.ultracode}</p>
                 )}
               </div>
             )}
@@ -208,13 +208,13 @@ export function SeletorDeModelo({
             type="button"
             role="menuitemcheckbox"
             aria-checked={preferencias.permitirArtefatosOnline}
-            title={AJUDA_DOS_ARTEFATOS_ONLINE_DO_CHAT}
+            title={avisos.artefatosOnlineAjudaDoChat}
             className="item-do-menu"
             onClick={() => void escolher({ permitirArtefatosOnline: !preferencias.permitirArtefatosOnline })}
           >
             <span className="flex min-w-0 flex-col">
-              <span className="font-titulo text-[12.5px] font-medium text-primary">{ROTULO_DOS_ARTEFATOS_ONLINE}</span>
-              <span className="text-[11px] text-secondary">Publica páginas na sua conta e devolve o link.</span>
+              <span className="font-titulo text-[12.5px] font-medium text-primary">{avisos.artefatosOnlineRotulo}</span>
+              <span className="text-[11px] text-secondary">{t.publicaPaginas}</span>
             </span>
             <span aria-hidden="true" className="marca-do-item">
               {preferencias.permitirArtefatosOnline ? "✓" : ""}

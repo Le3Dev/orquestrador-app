@@ -1,5 +1,7 @@
 import { memo } from "react";
 
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeChat } from "../../shared/idioma/textos/chat";
 import { HoraDaMensagem } from "./HoraDaMensagem";
 
 export interface PropsDoBalaoOuvido {
@@ -33,6 +35,7 @@ export const BalaoOuvido = memo(function BalaoOuvido({
   pergunta,
   aberto,
 }: PropsDoBalaoOuvido) {
+  const t = useTextos(textosDeChat).balao;
   const confirmado = texto.trim();
   const cauda = aberto ? parcial.trim() : "";
   const momentoMs = fimMs ?? inicioMs;
@@ -51,13 +54,13 @@ export const BalaoOuvido = memo(function BalaoOuvido({
       <span className="marcas-da-mensagem-ouvida">
         <span
           className="marca-ouvida"
-          title={aberto ? "Frase sendo ouvida agora pela escuta do áudio" : "Frase ouvida pela escuta do áudio"}
+          title={aberto ? t.fraseAgora : t.fraseOuvida}
         >
-          {aberto ? "ouvindo" : "ouvido"}
+          {aberto ? t.ouvindo : t.ouvido}
         </span>
         {pergunta && (
-          <span className="marca-da-pergunta-ouvida" role="img" aria-label="Pergunta detectada na escuta">
-            pergunta
+          <span className="marca-da-pergunta-ouvida" role="img" aria-label={t.perguntaDetectada}>
+            {t.pergunta}
           </span>
         )}
       </span>

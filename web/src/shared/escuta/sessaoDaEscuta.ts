@@ -8,6 +8,8 @@ import {
   type ResultadoDaTranscricao,
   TranscricaoDescartada,
 } from "../ditado/motor";
+import { textosAtuais } from "../idioma/idioma";
+import { textosDeVoz } from "../idioma/textos/voz";
 import { BufferDaFala } from "./BufferDaFala";
 import { type CapturaDoAudio, iniciarCapturaDoAudio, type OuvintesDaCaptura } from "./capturaDoAudio";
 import { ConfirmadorDeTranscricao, fimDoUltimoSegmentoConfirmado } from "./ConfirmadorDeTranscricao";
@@ -177,12 +179,13 @@ function mensagemDe(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro);
 }
 
-function mensagemDoErroDeTranscricao(erro: unknown, prefixo = "A transcrição da escuta falhou"): string {
+function mensagemDoErroDeTranscricao(erro: unknown, aoPreparar = false): string {
+  const t = textosAtuais(textosDeVoz).escuta;
   const mensagem = mensagemDe(erro);
   if (/fetch|network|Failed to load|download/i.test(mensagem)) {
-    return "Não foi possível baixar o modelo de voz da escuta. Confira a internet; a escuta tenta de novo na próxima fala.";
+    return t.erroDownloadDoModelo;
   }
-  return `${prefixo}: ${mensagem}`;
+  return aoPreparar ? t.motorNaoPreparado(mensagem) : t.transcricaoFalhou(mensagem);
 }
 
 /** O download como a tela mostra: null quando acabou (100%) ou não há. */
@@ -547,7 +550,7 @@ export class SessaoDaEscuta {
       (erro: unknown) => {
         // Parada, pausada ou já com erro (ex.: a captura falhou), a mensagem do motor não substitui a da tela.
         if (preparo !== this.preparo || (this.fase !== "iniciando" && this.fase !== "escutando")) return;
-        this.erro = mensagemDoErroDeTranscricao(erro, "O motor de transcrição da escuta não pôde ser preparado");
+        this.erro = mensagemDoErroDeTranscricao(erro, true);
         this.emitir();
       },
     );
@@ -627,7 +630,7 @@ export class SessaoDaEscuta {
     if (geracao !== this.geracao) return;
     this.pararCaptura();
     this.fase = "erro";
-    this.erro = `O detector de voz da escuta falhou: ${mensagemDe(erro)}`;
+    this.erro = textosAtuais(textosDeVoz).escuta.detectorFalhou(mensagemDe(erro));
     this.emitir();
   }
 
@@ -1012,7 +1015,7 @@ export class SessaoDaEscuta {
       if (controlador.signal.aborted || geracao !== this.geracao) return;
       falhou = true;
       const detalhe = erro instanceof ErroDaApi ? erro.message : mensagemDe(erro);
-      this.erro = `A escuta não conseguiu avaliar a pergunta: ${detalhe}`;
+      this.erro = textosAtuais(textosDeVoz).escuta.avaliacaoFalhou(detalhe);
       this.emitir();
     } finally {
       if (this.classificacao === controlador) {
@@ -1081,7 +1084,7 @@ export class SessaoDaEscuta {
       try {
         opcoes.preencherComposer(texto);
       } catch (erro) {
-        this.erro = `A pergunta da escuta não foi para o campo de mensagem: ${mensagemDe(erro)}`;
+        this.erro = textosAtuais(textosDeVoz).escuta.perguntaNaoFoiParaOCampo(mensagemDe(erro));
         this.emitir();
       }
       return;
@@ -1096,7 +1099,7 @@ export class SessaoDaEscuta {
         this.devolverAPendente(pergunta, enviadaEmMs);
         return;
       }
-      this.erro = `A pergunta da escuta não foi enviada: ${mensagemDe(erro)}`;
+      this.erro = textosAtuais(textosDeVoz).escuta.perguntaNaoEnviada(mensagemDe(erro));
       this.emitir();
     }
   }

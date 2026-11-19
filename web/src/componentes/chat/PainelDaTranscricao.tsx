@@ -2,6 +2,8 @@ import { type ReactNode, useEffect, useMemo, useRef } from "react";
 
 import { montarPedidoDeResposta } from "../../shared/escuta/pedidoDeResposta";
 import type { EstadoDaEscuta } from "../../shared/escuta/sessaoDaEscuta";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeChat } from "../../shared/idioma/textos/chat";
 
 import "./PainelDaTranscricao.css";
 
@@ -50,6 +52,7 @@ export function PainelDaTranscricao({
   aoFechar,
   indicador,
 }: PropsDoPainelDaTranscricao) {
+  const t = useTextos(textosDeChat).transcricao;
   const lista = useRef<HTMLDivElement>(null);
   const noFim = useRef(true);
   const { frases, emAndamento } = legenda;
@@ -77,15 +80,15 @@ export function PainelDaTranscricao({
   const desabilitado = respondendo || pedido === null;
 
   return (
-    <section className="painel-transcricao" data-area-clicavel aria-label="Transcrição">
+    <section className="painel-transcricao" data-area-clicavel aria-label={t.titulo}>
       <header className="painel-transcricao-cabecalho">
-        <h2 className="painel-transcricao-titulo">Transcrição</h2>
+        <h2 className="painel-transcricao-titulo">{t.titulo}</h2>
         {indicador}
         <button
           type="button"
           className="painel-transcricao-fechar"
-          aria-label="Fechar a transcrição"
-          title="Fechar a transcrição"
+          aria-label={t.fechar}
+          title={t.fechar}
           onClick={aoFechar}
         >
           ×
@@ -97,12 +100,12 @@ export function PainelDaTranscricao({
         className="painel-transcricao-lista"
         role="log"
         aria-live="polite"
-        aria-label="Falas ouvidas"
+        aria-label={t.falasOuvidas}
         onScroll={aoRolar}
       >
         {vazio && (
           <p className="painel-transcricao-vazio">
-            {escutando ? "Ouvindo… nada falado ainda." : "Ligue a escuta para ver a transcrição aqui."}
+            {escutando ? t.ouvindoNada : t.ligueAEscuta}
           </p>
         )}
         {frases.map((frase) => (
@@ -113,7 +116,7 @@ export function PainelDaTranscricao({
           >
             <Hora momentoMs={frase.inicioMs} />
             <span className="painel-transcricao-texto">{frase.texto.trim()}</span>
-            {frase.pergunta && <span className="painel-transcricao-marca">pergunta</span>}
+            {frase.pergunta && <span className="painel-transcricao-marca">{t.pergunta}</span>}
           </p>
         ))}
         {emAndamento !== null && (confirmado !== "" || parcial !== "") && (
@@ -132,13 +135,13 @@ export function PainelDaTranscricao({
         <button
           type="button"
           className="painel-transcricao-responder"
-          title={`Responder agora (${ATALHO_DE_RESPONDER_AGORA})`}
+          title={`${t.responderAgora} (${ATALHO_DE_RESPONDER_AGORA})`}
           disabled={desabilitado}
           onClick={() => {
             if (pedido !== null) aoResponderAgora(pedido);
           }}
         >
-          Responder agora
+          {t.responderAgora}
           <span className="painel-transcricao-atalho" aria-hidden="true">
             {ATALHO_DE_RESPONDER_AGORA}
           </span>

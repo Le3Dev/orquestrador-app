@@ -7,9 +7,13 @@ import type {
   DadosDoSubagentePronto,
   ModeloDoSubagentePronto,
 } from "../../shared/api/tipos";
+import { localeDoIdioma, type TextosDe, useIdioma, useTextos } from "../../shared/idioma/idioma";
+import { textosDeChat } from "../../shared/idioma/textos/chat";
 import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
 import { avisarSubagentesProntosMudaram } from "../../shared/subagentesProntos";
 import { IconePessoas } from "../Icones";
+
+type TextosDoCartao = TextosDe<typeof textosDeChat>["subagente"];
 
 interface Props {
   acao: AcaoDeCriarSubagente | AcaoDeEditarSubagente;
@@ -18,25 +22,26 @@ interface Props {
 type Etapa = { tipo: "pronto" } | { tipo: "executando" } | { tipo: "feito" } | { tipo: "erro"; mensagem: string };
 
 /** Como o painel Subagentes mostra o modelo no chip. */
-function rotuloDoModelo(modelo: ModeloDoSubagentePronto): string {
-  return modelo === "herdar" ? "herda" : modelo;
+function rotuloDoModelo(modelo: ModeloDoSubagentePronto, t: TextosDoCartao): string {
+  return modelo === "herdar" ? t.herda : modelo;
 }
 
 /** A lista com a ação aplicada, ou a mensagem de por que ela não vale contra a lista atual. */
 function aplicar(
   acao: AcaoDeCriarSubagente | AcaoDeEditarSubagente,
   lista: readonly DadosDoSubagentePronto[],
+  t: TextosDoCartao,
 ): DadosDoSubagentePronto[] | string {
   const existente = lista.find((subagente) => subagente.nome === acao.nome);
   if (acao.tipo === "criar_subagente") {
     if (existente !== undefined) {
-      return `Já existe um subagente pronto chamado "${acao.nome}". Peça ao chat para editar esse ou para usar outro nome.`;
+      return t.jaExiste(acao.nome);
     }
     const { nome, descricao, prompt, modelo } = acao;
     return [...lista, { nome, descricao, prompt, modelo }];
   }
   if (existente === undefined) {
-    return `Não existe um subagente pronto chamado "${acao.nome}". Confira o nome no botão Subagentes.`;
+    return t.naoExiste(acao.nome);
   }
   return lista.map((subagente) =>
     subagente === existente
@@ -62,6 +67,8 @@ function aplicar(
  * depois de cada campo trocado; sem ela, mostra só o valor novo.
  */
 export function CartaoDeSubagente({ acao }: Props) {
+  const t = useTextos(textosDeChat).subagente;
+  const locale = localeDoIdioma(useIdioma());
   const [etapa, setEtapa] = useState<Etapa>({ tipo: "pronto" });
   const [antes, setAntes] = useState<DadosDoSubagentePronto | null>(null);
   const editar = acao.tipo === "editar_subagente";
@@ -91,7 +98,7 @@ export function CartaoDeSubagente({ acao }: Props) {
     setEtapa({ tipo: "executando" });
     try {
       const { subagentesProntos } = await api.lerPreferencias();
-      const lista = aplicar(acao, subagentesProntos);
+      const lista = aplicar(acao, subagentesProntos, t);
       if (typeof lista === "string") {
         setEtapa({ tipo: "erro", mensagem: lista });
         return;
@@ -113,19 +120,21 @@ export function CartaoDeSubagente({ acao }: Props) {
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="titulo-do-cartao">
-          {editar ? "Editar subagente pronto" : "Novo subagente pronto"}
+          {editar ? t.editarTitulo : t.novoTitulo}
         </span>
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="mono truncate text-secondary" title={acao.nome}>
             {acao.nome}
           </span>
-          {modelo !== null && <span className="chip-de-modelo">{rotuloDoModelo(modelo)}</span>}
+          {modelo !== null && <span className="chip-de-modelo">{rotuloDoModelo(modelo, t)}</span>}
         </span>
         {acao.tipo === "criar_subagente" ? (
           <>
-            <span className="texto-longo text-[12px] text-secondary">quando usar: {acao.descricao}</span>
+            <span className="texto-longo text-[12px] text-secondary">
+              {t.quandoUsar}: {acao.descricao}
+            </span>
             <details className="prompt-do-subagente">
-              <summary>prompt ({tamanhoDasInstrucoes(acao.prompt).toLocaleString("pt-BR")} caracteres)</summary>
+              <summary>{t.promptComTamanho(tamanhoDasInstrucoes(acao.prompt).toLocaleString(locale))}</summary>
               <p className="texto-longo">{acao.prompt}</p>
             </details>
           </>
@@ -133,7 +142,7 @@ export function CartaoDeSubagente({ acao }: Props) {
           <div className="flex flex-col gap-0.5 text-[12px]" data-testid="o-que-muda">
             {acao.descricao !== null && (
               <span className="texto-longo text-secondary">
-                quando usar:{" "}
+                {t.quandoUsar}:{" "}
                 {antes !== null && antes.descricao !== acao.descricao && (
                   <>
                     <del className="text-muted">{antes.descricao}</del> →{" "}
@@ -144,18 +153,18 @@ export function CartaoDeSubagente({ acao }: Props) {
             )}
             {acao.modelo !== null && (
               <span className="mono text-[11.5px] text-secondary">
-                modelo: {antes !== null && <>{rotuloDoModelo(antes.modelo)} → </>}
-                {rotuloDoModelo(acao.modelo)}
+                {t.modelo}: {antes !== null && <>{rotuloDoModelo(antes.modelo, t)} → </>}
+                {rotuloDoModelo(acao.modelo, t)}
               </span>
             )}
             {acao.prompt !== null && (
               <details className="prompt-do-subagente">
-                <summary>prompt novo ({tamanhoDasInstrucoes(acao.prompt).toLocaleString("pt-BR")} caracteres)</summary>
+                <summary>{t.promptNovoComTamanho(tamanhoDasInstrucoes(acao.prompt).toLocaleString(locale))}</summary>
                 {antes !== null && (
                   <>
-                    <span className="rotulo-do-prompt">antes</span>
+                    <span className="rotulo-do-prompt">{t.antes}</span>
                     <p className="texto-longo text-muted">{antes.prompt}</p>
-                    <span className="rotulo-do-prompt">depois</span>
+                    <span className="rotulo-do-prompt">{t.depois}</span>
                   </>
                 )}
                 <p className="texto-longo">{acao.prompt}</p>
@@ -176,16 +185,16 @@ export function CartaoDeSubagente({ acao }: Props) {
         onClick={() => void executar()}
       >
         {etapa.tipo === "executando"
-          ? "salvando…"
+          ? t.salvando
           : etapa.tipo === "feito"
             ? editar
-              ? "alterado ✓"
-              : "criado ✓"
+              ? t.alterado
+              : t.criado
             : etapa.tipo === "erro"
-              ? "tentar de novo"
+              ? t.tentarDeNovo
               : editar
-                ? "aplicar"
-                : "criar"}
+                ? t.aplicar
+                : t.criar}
       </button>
     </div>
   );

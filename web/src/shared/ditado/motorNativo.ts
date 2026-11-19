@@ -28,6 +28,8 @@ import type {
   ResultadoDaTranscricao,
   SegmentoTranscrito,
 } from "./motor";
+import { textosAtuais } from "../idioma/idioma";
+import { textosDeVoz } from "../idioma/textos/voz";
 import { apiDaTranscricaoNativa } from "../ponteDoDesktop";
 
 /** O `data.tipo` da mensagem com que o app entrega a porta (window.postMessage do preload). */
@@ -177,7 +179,7 @@ export function lerMensagemDoUtilitario(dados: unknown): MensagemDoUtilitario | 
       return {
         tipo: "erro",
         id: numeroFinito(dados.id),
-        mensagem: typeof dados.mensagem === "string" ? dados.mensagem : "A transcrição nativa falhou.",
+        mensagem: typeof dados.mensagem === "string" ? dados.mensagem : textosAtuais(textosDeVoz).motorNativo.falhou,
         descartado: dados.descartado === true,
         indisponivel: dados.indisponivel === true,
       };
@@ -213,7 +215,7 @@ export function conexaoPelaJanela(janela: Window = window): ConexaoDaTranscricao
   return {
     conectar() {
       const api = apiDaTranscricaoNativa();
-      if (api === null) return Promise.reject(new Error("O app não oferece a transcrição nativa."));
+      if (api === null) return Promise.reject(new Error(textosAtuais(textosDeVoz).motorNativo.semOApp));
       return api.conectar();
     },
     aoReceberPorta(ouvinte) {
@@ -314,7 +316,7 @@ export function criarMotorNativo(conexao: ConexaoDaTranscricaoNativa): MotorNati
     pronto: () => portaPronta() !== null,
     iniciar: (pedido: PedidoDaFila) => {
       const destino = portaPronta();
-      if (destino === null) throw new Error("A transcrição nativa não está conectada.");
+      if (destino === null) throw new Error(textosAtuais(textosDeVoz).motorNativo.naoConectada);
       // Origem preparada antes (talvez noutro utilitário): o preparo vai na frente, com a prioridade dela.
       const prioridade = prioridades.get(pedido.origem);
       if (prioridade !== undefined && !preparadasNaPorta.has(pedido.origem)) {
@@ -447,7 +449,7 @@ export function criarMotorNativo(conexao: ConexaoDaTranscricaoNativa): MotorNati
     fila.devolverEmAndamento();
     for (const origem of [...baixando]) informarDownload(origem, null);
     if (perdeuTrabalho && ++quedas >= MAXIMO_DE_QUEDAS_DO_MOTOR_NATIVO) {
-      falhar(new FalhaDoMotorNativo("A transcrição nativa caiu duas vezes; seguindo no navegador."));
+      falhar(new FalhaDoMotorNativo(textosAtuais(textosDeVoz).motorNativo.caiuDuasVezes));
       return;
     }
     // Com trabalho esperando, reconecta já; senão, no próximo uso.
@@ -467,13 +469,13 @@ export function criarMotorNativo(conexao: ConexaoDaTranscricaoNativa): MotorNati
       rejeitar = rejeitarPromessa;
     });
     const cronometro = setTimeout(() => {
-      falhar(new FalhaDoMotorNativo("A transcrição nativa não respondeu: a porta não chegou."));
+      falhar(new FalhaDoMotorNativo(textosAtuais(textosDeVoz).motorNativo.semPorta));
     }, TEMPO_PARA_RECEBER_A_PORTA_MS);
     tentativa = { promessa, resolver, rejeitar, cronometro };
     Promise.resolve()
       .then(() => conexao.conectar())
       .catch((erro: unknown) => {
-        falhar(new FalhaDoMotorNativo(`Não foi possível conectar à transcrição nativa: ${mensagemDe(erro)}`));
+        falhar(new FalhaDoMotorNativo(textosAtuais(textosDeVoz).motorNativo.naoConectou(mensagemDe(erro))));
       });
     return promessa;
   }
@@ -509,12 +511,12 @@ export function criarMotorNativo(conexao: ConexaoDaTranscricaoNativa): MotorNati
       }
       case "erro": {
         if (mensagem.indisponivel) {
-          falhar(new FalhaDoMotorNativo(`A transcrição nativa foi desligada: ${mensagem.mensagem}`));
+          falhar(new FalhaDoMotorNativo(textosAtuais(textosDeVoz).motorNativo.desligada(mensagem.mensagem)));
           return;
         }
         if (mensagem.id === null) {
           // Erro fora de um pedido: o preparo (carregar o modelo) falhou. Sem preparo esperando, não há quem avisar.
-          if (haPreparos()) falhar(new FalhaDoMotorNativo(`A transcrição nativa não carregou: ${mensagem.mensagem}`));
+          if (haPreparos()) falhar(new FalhaDoMotorNativo(textosAtuais(textosDeVoz).motorNativo.naoCarregou(mensagem.mensagem)));
           return;
         }
         const atual = fila.atual;

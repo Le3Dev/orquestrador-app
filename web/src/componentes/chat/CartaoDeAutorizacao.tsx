@@ -2,6 +2,8 @@ import { useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { AutorizacaoPendente } from "../../shared/api/tipos";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeChat } from "../../shared/idioma/textos/chat";
 import { IconeAlerta } from "../Icones";
 
 /** A pergunta que vai depois de autorizar, para o Claude retomar o que parou. */
@@ -31,6 +33,7 @@ type Etapa =
  * continuar. "Agora não" só esconde o cartão.
  */
 export function CartaoDeAutorizacao({ autorizacao, autorizado, desabilitado, aoEnviarPergunta }: Props) {
+  const t = useTextos(textosDeChat).autorizacao;
   const [etapa, setEtapa] = useState<Etapa>({ tipo: "pronto" });
 
   async function autorizar(): Promise<void> {
@@ -58,22 +61,19 @@ export function CartaoDeAutorizacao({ autorizacao, autorizado, desabilitado, aoE
   }
 
   const autorizando = etapa.tipo === "autorizando";
-  const verbo = autorizacao.acao === "editar" ? "editar" : "rodar";
+  const verbo = autorizacao.acao === "editar" ? t.editar : t.rodar;
 
   return (
-    <div className="cartao-de-autorizacao" role="group" aria-label="Pedido de autorização do chat">
+    <div className="cartao-de-autorizacao" role="group" aria-label={t.rotuloDoGrupo}>
       <div className="flex min-w-0 items-start gap-2.5">
         <span className="icone-do-cartao" aria-hidden="true">
           <IconeAlerta tamanho={15} />
         </span>
         <div className="flex min-w-0 flex-col gap-1">
           <span className="titulo-do-cartao">
-            O chat quer {verbo} <code className="detalhe-da-autorizacao">{autorizacao.detalhe}</code>
+            {t.queroPrefixo} {verbo} <code className="detalhe-da-autorizacao">{autorizacao.detalhe}</code>
           </span>
-          <span className="texto-longo text-[12px] text-secondary">
-            Autorizando, ele poderá editar arquivos e rodar comandos nos projetos sem perguntar de novo, até o próximo
-            /clear.
-          </span>
+          <span className="texto-longo text-[12px] text-secondary">{t.explicacao}</span>
           {etapa.tipo === "erro" && (
             <span className="hint-error texto-longo" role="alert">
               {etapa.mensagem}
@@ -89,10 +89,10 @@ export function CartaoDeAutorizacao({ autorizacao, autorizado, desabilitado, aoE
           onClick={() => void autorizar()}
         >
           {autorizando
-            ? "autorizando…"
+            ? t.autorizando
             : etapa.tipo === "erro"
-              ? "tentar de novo"
-              : "Autorizar até o /clear e continuar"}
+              ? t.tentarDeNovo
+              : t.autorizar}
         </button>
         <button
           type="button"
@@ -100,7 +100,7 @@ export function CartaoDeAutorizacao({ autorizacao, autorizado, desabilitado, aoE
           disabled={autorizando}
           onClick={() => setEtapa({ tipo: "dispensado" })}
         >
-          Agora não
+          {t.agoraNao}
         </button>
       </div>
     </div>

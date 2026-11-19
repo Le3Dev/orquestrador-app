@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
 import { LIMIAR_DE_SILENCIO, TEMPO_PARA_AVISAR_SILENCIO_MS } from "../shared/ditado/gravacao";
-import { formatarCronometro, TEXTO_DO_SILENCIO } from "../shared/ditado/texto";
+import { formatarCronometro } from "../shared/ditado/texto";
 import type { FaseDoDitado } from "../shared/ditado/useDitado";
+import { useTextos } from "../shared/idioma/idioma";
+import { textosDeVoz } from "../shared/idioma/textos/voz";
 
 /** Quantas barras a onda tem; cada uma é um instante da voz, e a mais nova fica à direita. */
 const BARRAS_DA_ONDA = 28;
@@ -30,6 +32,7 @@ interface PropsDaGravacao {
  * Ao desmontar (concluir, descartar ou sair da tela) o laço para.
  */
 function PainelGravando({ lerNivel, aoConcluir, aoDescartar }: PropsDaGravacao) {
+  const t = useTextos(textosDeVoz).ditado;
   const barras = useRef<Array<HTMLSpanElement | null>>([]);
   const [segundos, setSegundos] = useState(0);
   const [semSom, setSemSom] = useState(false);
@@ -94,15 +97,15 @@ function PainelGravando({ lerNivel, aoConcluir, aoDescartar }: PropsDaGravacao) 
           ))}
         </span>
         <button type="button" className="botao-do-ditado botao-do-ditado-principal" onClick={aoConcluir}>
-          Concluir
+          {t.concluir}
         </button>
         <button type="button" className="botao-do-ditado" onClick={aoDescartar}>
-          Descartar
+          {t.descartar}
         </button>
       </div>
-      <span className="dica-do-ditado">Enter conclui, Esc descarta</span>
+      <span className="dica-do-ditado">{t.dicaDeTeclas}</span>
       <span className="aviso-de-silencio-do-ditado" role="status" aria-live="polite">
-        {semSom ? TEXTO_DO_SILENCIO : ""}
+        {semSom ? t.silencio : ""}
       </span>
     </>
   );
@@ -125,6 +128,7 @@ interface Props {
  * de que o texto entrou. Fora disso não renderiza nada.
  */
 export function PainelDoDitado({ fase, baixando, segundosDeAudio, lerNivel, inserido, aoConcluir, aoDescartar }: Props) {
+  const t = useTextos(textosDeVoz).ditado;
   if (fase === "parado" && !inserido) return null;
 
   let conteudo;
@@ -133,9 +137,9 @@ export function PainelDoDitado({ fase, baixando, segundosDeAudio, lerNivel, inse
       <>
         <div className="linha-do-ditado">
           <span className="girador-do-ditado" aria-hidden="true" />
-          <strong className="titulo-do-ditado">Permita o acesso ao microfone</strong>
+          <strong className="titulo-do-ditado">{t.permitaOMicrofone}</strong>
         </div>
-        <span className="dica-do-ditado">O pedido aparece na tela. O áudio fica só neste computador.</span>
+        <span className="dica-do-ditado">{t.dicaDoPedido}</span>
       </>
     );
   } else if (fase === "gravando") {
@@ -144,7 +148,7 @@ export function PainelDoDitado({ fase, baixando, segundosDeAudio, lerNivel, inse
     conteudo = (
       <>
         <div className="linha-do-ditado">
-          <strong className="titulo-do-ditado">Baixando o modelo de voz</strong>
+          <strong className="titulo-do-ditado">{t.baixandoOModelo}</strong>
           <span className="mono porcentagem-do-ditado" data-testid="porcentagem-do-ditado">
             {baixando}%
           </span>
@@ -152,14 +156,14 @@ export function PainelDoDitado({ fase, baixando, segundosDeAudio, lerNivel, inse
         <div
           className="trilho-do-ditado"
           role="progressbar"
-          aria-label="Download do modelo de voz"
+          aria-label={t.downloadDoModelo}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={baixando}
         >
           <span className="barra-do-download-do-ditado" style={{ width: `${baixando}%` }} />
         </div>
-        <span className="dica-do-ditado">Só na primeira vez, uns 250 MB. Depois fica salvo neste computador.</span>
+        <span className="dica-do-ditado">{t.dicaDoDownload}</span>
       </>
     );
   } else if (fase === "transcrevendo") {
@@ -168,7 +172,7 @@ export function PainelDoDitado({ fase, baixando, segundosDeAudio, lerNivel, inse
         <div className="linha-do-ditado">
           <span className="girador-do-ditado" aria-hidden="true" />
           <strong className="titulo-do-ditado">
-            {segundosDeAudio === null ? "Preparando o áudio" : `Transcrevendo ${segundosDeAudio} s de áudio`}
+            {segundosDeAudio === null ? t.preparandoOAudio : t.transcrevendoSegundos(segundosDeAudio)}
           </strong>
         </div>
         <span className="esqueleto-do-ditado" aria-hidden="true">
@@ -183,7 +187,7 @@ export function PainelDoDitado({ fase, baixando, segundosDeAudio, lerNivel, inse
         <span className="visto-do-ditado" aria-hidden="true">
           ✓
         </span>
-        <strong className="titulo-do-ditado">Texto adicionado ao campo</strong>
+        <strong className="titulo-do-ditado">{t.textoAdicionado}</strong>
       </div>
     );
   }

@@ -1,3 +1,5 @@
+import { textosAtuais } from "../idioma/idioma";
+import { textosDeVoz } from "../idioma/textos/voz";
 import {
   CronometroDeDescarga,
   FilaDeTranscricao,
@@ -196,7 +198,7 @@ export function criarTranscritor(criarTrabalhador: () => TrabalhadorDoTranscrito
     };
     novo.onerror = (evento) => {
       // O worker nem subiu (ex.: falha ao carregar o script): ninguém espera para sempre.
-      const erro = new Error(evento.message || "O reconhecimento de voz falhou ao iniciar.");
+      const erro = new Error(evento.message || textosAtuais(textosDeVoz).motorNativo.reconhecimentoFalhou);
       descarga.parar();
       novo.terminate();
       if (trabalhador === novo) trabalhador = null;

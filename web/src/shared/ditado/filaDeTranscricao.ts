@@ -4,6 +4,8 @@
  * (worker do Whisper) e o motor nativo (utilitário do Electron). Cada um diz só
  * como começar um pedido; a ordem e os descartes são decididos aqui.
  */
+import { textosAtuais } from "../idioma/idioma";
+import { textosDeVoz } from "../idioma/textos/voz";
 import type { OrigemDaTranscricao, ResultadoDaTranscricao } from "./motor";
 
 /** A escuta deixa no máximo isto de pedidos esperando; o mais antigo sai quando chega outro. */
@@ -22,7 +24,7 @@ export const TEMPO_PARA_DESCARREGAR_O_DITADO_MS = 3 * 60_000;
  */
 export class TranscricaoDescartada extends Error {
   constructor() {
-    super("A transcrição foi descartada: chegaram trechos mais novos da escuta.");
+    super(textosAtuais(textosDeVoz).motorNativo.descartada);
     this.name = "TranscricaoDescartada";
   }
 }

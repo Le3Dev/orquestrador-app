@@ -2,6 +2,8 @@ import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from "re
 
 import { anuncioDoDitado } from "../shared/ditado/texto";
 import { useDitado } from "../shared/ditado/useDitado";
+import { useTextos } from "../shared/idioma/idioma";
+import { textosDeVoz } from "../shared/idioma/textos/voz";
 import { IconeFechar, IconeMicrofone } from "./Icones";
 import { PainelDoDitado } from "./PainelDoDitado";
 
@@ -33,6 +35,7 @@ interface Props {
  * fica `aria-disabled` e o clique é ignorado.
  */
 export function BotaoDeDitado({ aoTranscrever, destino, className = "" }: Props) {
+  const t = useTextos(textosDeVoz).ditado;
   const [inserido, setInserido] = useState(false);
   const raiz = useRef<HTMLSpanElement>(null);
   const botao = useRef<HTMLButtonElement>(null);
@@ -48,12 +51,12 @@ export function BotaoDeDitado({ aoTranscrever, destino, className = "" }: Props)
   const ocupado = fase === "pedindo-microfone" || fase === "transcrevendo";
 
   const titulo = gravando
-    ? "Gravando: clique para transformar em texto (Esc descarta)"
+    ? t.tituloGravando
     : baixando !== null
-      ? `Baixando o modelo de voz: ${baixando}% (só na primeira vez, uns 250 MB)`
+      ? t.tituloBaixando(baixando)
       : fase === "transcrevendo"
-        ? "Transformando a fala em texto…"
-        : `Ditar ${destino} por voz (roda no seu computador, o áudio não sai dele)`;
+        ? t.tituloTranscrevendo
+        : t.tituloParado(destino);
 
   // O aviso de "texto adicionado" some sozinho.
   useEffect(() => {
@@ -94,7 +97,7 @@ export function BotaoDeDitado({ aoTranscrever, destino, className = "" }: Props)
         type="button"
         className={`botao-icone ${gravando ? "botao-ditado-gravando" : ""}`}
         title={titulo}
-        aria-label={gravando ? "Parar e transformar em texto" : `Ditar ${destino} por voz`}
+        aria-label={gravando ? t.rotuloParar : t.rotuloDitar(destino)}
         aria-pressed={gravando}
         aria-busy={ocupado}
         aria-disabled={ocupado}
@@ -121,7 +124,7 @@ export function BotaoDeDitado({ aoTranscrever, destino, className = "" }: Props)
       {erro !== null && (
         <span className="balao-do-ditado balao-do-ditado-erro" role="alert">
           <span className="flex-1">{erro}</span>
-          <button type="button" className="botao-icone shrink-0" aria-label="Fechar aviso do ditado" onClick={fecharErro}>
+          <button type="button" className="botao-icone shrink-0" aria-label={t.fecharAviso} onClick={fecharErro}>
             <IconeFechar tamanho={12} />
           </button>
         </span>

@@ -51,6 +51,8 @@ import {
 } from "../../shared/estado/aplicarEventoDoChat";
 import { EVENTO_PARA_FOCAR_O_CHAT } from "../../shared/focarChat";
 import { formatarBytes, formatarDuracao } from "../../shared/formatacao";
+import { type TextosDe, textosAtuais, useTextos } from "../../shared/idioma/idioma";
+import { textosDeChat } from "../../shared/idioma/textos/chat";
 import {
   type AreaVisivel,
   type GeometriaDoChat,
@@ -87,6 +89,8 @@ import { PainelDaTranscricao } from "./PainelDaTranscricao";
 import { SeletorDeModelo } from "./SeletorDeModelo";
 import "../../theme/chat-lateral.css";
 import "../../theme/controles-de-janela.css";
+
+type TextosDaMensagem = TextosDe<typeof textosDeChat>["mensagem"];
 
 /** Um blur até este tempo depois de pedir o foco é da troca de foco da janela, não de o usuário sair do chat. */
 const TOLERANCIA_DO_BLUR_APOS_FOCAR_MS = 400;
@@ -177,6 +181,7 @@ interface PropsDaAlca {
  * dois cliques voltam aos 360.
  */
 function AlcaDaLargura({ largura, aoMudar, lado }: PropsDaAlca) {
+  const t = useTextos(textosDeChat).alcas;
   // À direita, levar a borda para a esquerda alarga a coluna.
   const sentido = lado === "direita" ? -1 : 1;
   // Durante o arraste: a largura ao vivo (para o aria-valuenow); nula, a gravada.
@@ -260,12 +265,12 @@ function AlcaDaLargura({ largura, aoMudar, lado }: PropsDaAlca) {
     <div
       role="separator"
       aria-orientation="vertical"
-      aria-label="Largura do chat"
+      aria-label={t.largura}
       aria-valuenow={aoVivo ?? largura}
       aria-valuemin={LARGURA_DO_CHAT_FIXO.minima}
       aria-valuemax={LARGURA_DO_CHAT_FIXO.maxima}
       tabIndex={0}
-      title="Arraste para mudar a largura do chat · dois cliques voltam ao padrão"
+      title={t.larguraDica}
       className={`alca-do-chat-lateral alca-do-chat-lateral-${lado} nodrag nopan nowheel ${aoVivo === null ? "" : "alca-arrastando"}`}
       onPointerDown={aoApertar}
       onPointerMove={aoMover}
@@ -439,13 +444,14 @@ function IconeOpacidade() {
 
 /** O controle deslizante da opacidade do chat inteiro (de 20% a 100%, de 10 em 10). */
 function ControleDeOpacidade({ valor, aoMudar }: { valor: number; aoMudar: (opacidade: number) => void }) {
+  const t = useTextos(textosDeChat).alcas;
   return (
-    <label className="controle-de-opacidade" title="Opacidade (Ctrl+Alt+ + / −)">
+    <label className="controle-de-opacidade" title={t.opacidadeDica}>
       <IconeOpacidade />
       <input
         type="range"
         className="controle-de-opacidade-faixa"
-        aria-label="Opacidade do chat"
+        aria-label={t.opacidade}
         aria-valuetext={`${Math.round(valor * 100)}%`}
         min={OPACIDADE_DO_CHAT.minima}
         max={OPACIDADE_DO_CHAT.maxima}
@@ -457,45 +463,33 @@ function ControleDeOpacidade({ valor, aoMudar }: { valor: number; aoMudar: (opac
   );
 }
 
-/** Verbos seguidos direto do alvo, sem dois-pontos ("lendo README.md…", "chamando o subagente coach…"). */
-const VERBOS_DE_ARQUIVO: ReadonlySet<string> = new Set([
-  "lendo",
-  "editando",
-  "escrevendo",
-  "chamando o subagente",
-]);
-
-/** O que aparece quando a ferramenta chega sem detalhe e o verbo sozinho não faz sentido. */
-const ATIVIDADES_SEM_DETALHE: Readonly<Record<string, string>> = {
-  Agent: "chamando um subagente",
-};
-
 /**
  * Ex.: "pesquisando na web: clima em BH…", "lendo README.md…", "rodando: npm test…",
- * "chamando o subagente adhd-study-coach…".
+ * "chamando o subagente adhd-study-coach…". Leitura, edição, escrita e subagente
+ * levam o alvo direto, sem dois-pontos.
  */
-function descreverAtividade({ ferramenta, detalhe }: AtividadeDaResposta): string {
-  const verbos: Readonly<Record<string, string>> = {
-    WebSearch: "pesquisando na web",
-    WebFetch: "abrindo página",
-    Read: "lendo",
-    Grep: "procurando",
-    Glob: "listando arquivos",
-    Edit: "editando",
-    NotebookEdit: "editando",
-    Write: "escrevendo",
-    PowerShell: "rodando",
-    Bash: "rodando",
-    Agent: "chamando o subagente",
+function descreverAtividade({ ferramenta, detalhe }: AtividadeDaResposta, t: TextosDaMensagem["atividade"]): string {
+  const verbos: Readonly<Record<string, { readonly verbo: string; readonly direto: boolean }>> = {
+    WebSearch: { verbo: t.pesquisandoNaWeb, direto: false },
+    WebFetch: { verbo: t.abrindoPagina, direto: false },
+    Read: { verbo: t.lendo, direto: true },
+    Grep: { verbo: t.procurando, direto: false },
+    Glob: { verbo: t.listandoArquivos, direto: false },
+    Edit: { verbo: t.editando, direto: true },
+    NotebookEdit: { verbo: t.editando, direto: true },
+    Write: { verbo: t.escrevendo, direto: true },
+    PowerShell: { verbo: t.rodando, direto: false },
+    Bash: { verbo: t.rodando, direto: false },
+    Agent: { verbo: t.chamandoOSubagente, direto: true },
   };
-  const verbo = verbos[ferramenta];
-  if (verbo === undefined) {
+  const item = verbos[ferramenta];
+  if (item === undefined) {
     return `${ferramenta}${detalhe === "" ? "" : `: ${detalhe}`}…`;
   }
   if (detalhe === "") {
-    return `${ATIVIDADES_SEM_DETALHE[ferramenta] ?? verbo}…`;
+    return `${ferramenta === "Agent" ? t.chamandoUmSubagente : item.verbo}…`;
   }
-  return VERBOS_DE_ARQUIVO.has(verbo) ? `${verbo} ${detalhe}…` : `${verbo}: ${detalhe}…`;
+  return item.direto ? `${item.verbo} ${detalhe}…` : `${item.verbo}: ${detalhe}…`;
 }
 
 /**
@@ -524,6 +518,7 @@ function IconeArrastar() {
  * navegador do sistema não tem acesso ao servidor.
  */
 function ImagemAmpliada({ imagem, aoFechar }: { imagem: AnexoDaMensagemDoChat; aoFechar: () => void }) {
+  const t = useTextos(textosDeChat).imagemAmpliada;
   const fechar = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -551,7 +546,7 @@ function ImagemAmpliada({ imagem, aoFechar }: { imagem: AnexoDaMensagemDoChat; a
         <img src={api.enderecoDoAnexoDoChat(imagem.arquivo)} alt={imagem.nome} />
         <figcaption>
           <span className="truncate">{imagem.nome}</span>
-          <button ref={fechar} type="button" className="botao-icone" title="Fechar (Esc)" aria-label="Fechar" onClick={aoFechar}>
+          <button ref={fechar} type="button" className="botao-icone" title={t.fecharDica} aria-label={t.fechar} onClick={aoFechar}>
             ✕
           </button>
         </figcaption>
@@ -575,6 +570,7 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
   aoAtualizarOrquestradores,
   orquestradores,
 }: PropsDaMensagem) {
+  const t = useTextos(textosDeChat).mensagem;
   // A imagem anexada aberta em tamanho maior; nula, nenhuma.
   const [ampliada, setAmpliada] = useState<AnexoDaMensagemDoChat | null>(null);
 
@@ -594,8 +590,8 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
                   key={anexo.arquivo}
                   type="button"
                   className="miniatura-do-anexo"
-                  title={`${anexo.nome} · clique para ampliar`}
-                  aria-label={`Ampliar ${anexo.nome}`}
+                  title={t.cliqueParaAmpliar(anexo.nome)}
+                  aria-label={t.ampliar(anexo.nome)}
                   onClick={() => setAmpliada(anexo)}
                 >
                   <img src={api.enderecoDoAnexoDoChat(anexo.arquivo)} alt={anexo.nome} />
@@ -614,8 +610,8 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
         )}
         {textoVisivel !== "" && <p className="texto-longo">{textoVisivel}</p>}
         {mensagem.origem === "escuta" && (
-          <span className="selo-da-escuta" title="Pergunta detectada pela escuta do áudio, no modo invisível">
-            escuta
+          <span className="selo-da-escuta" title={t.seloDaEscutaDica}>
+            {t.seloDaEscuta}
           </span>
         )}
         <HoraDaMensagem criadaEm={mensagem.criadaEm} />
@@ -637,12 +633,13 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
       )}
       {respondendo && texto === "" && (
         <p className="mono text-muted">
-          pensando<span className="cursor" />
+          {t.pensando}
+          <span className="cursor" />
         </p>
       )}
       {respondendo && atividade !== null && atividade.mensagemId === mensagem.id && (
         <p className="mono truncate text-secondary" title={atividade.detalhe}>
-          <span className="text-active">·</span> {descreverAtividade(atividade)}
+          <span className="text-active">·</span> {descreverAtividade(atividade, t.atividade)}
         </p>
       )}
       {mensagem.avisos.map((aviso) => (
@@ -652,10 +649,10 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
       ))}
       {mensagem.situacao === "falhou" && (
         <div className="alert alert-error" role="alert">
-          A resposta falhou{mensagem.motivoDaFalha === null ? "." : `: ${mensagem.motivoDaFalha}`}
+          {t.respostaFalhou(mensagem.motivoDaFalha)}
         </div>
       )}
-      {mensagem.situacao === "cancelada" && <p className="mono text-muted">resposta cancelada</p>}
+      {mensagem.situacao === "cancelada" && <p className="mono text-muted">{t.respostaCancelada}</p>}
       {/* Um cartão por ação, pelo tipo; a posição na resposta é a chave (as de subagente não têm pasta). */}
       {mensagem.acoes.map((acao, indice) =>
         acao.tipo === "abrir_orquestrador" ? (
@@ -683,7 +680,7 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
           <span
             className="alca-da-resposta"
             draggable
-            title="Arraste para o canvas: a resposta vira uma nota onde for solta"
+            title={t.arrastarParaOCanvas}
             onDragStart={(evento) => {
               evento.dataTransfer.setData(TIPO_DA_RESPOSTA_DO_CHAT, texto);
               evento.dataTransfer.setData("text/plain", texto);
@@ -691,7 +688,7 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
             }}
           >
             <IconeArrastar />
-            arrastar
+            {t.arrastar}
           </span>
         )}
       </footer>
@@ -753,6 +750,7 @@ export function ChatRapido({
   largura = LARGURA_DO_CHAT_FIXO.padrao,
   aoMudarLargura,
 }: Props) {
+  const t = useTextos(textosDeChat).chat;
   const { preferencias, mudarPreferencias } = usePreferenciasDaTela();
   const [texto, setTexto] = useState("");
   const [anexos, setAnexos] = useState<AnexoPendente[]>([]);
@@ -863,7 +861,7 @@ export function ChatRapido({
     try {
       quadro = imagemDaCaptura(captura);
     } catch (falha) {
-      setErro(`Não foi possível guardar o quadro: ${mensagemDeErro(falha)}`);
+      setErro(textosAtuais(textosDeChat).chat.falhaAoGuardarOQuadro(mensagemDeErro(falha)));
       return;
     }
     const problema = problemaDoAnexo(
@@ -872,7 +870,7 @@ export function ChatRapido({
     );
     if (problema !== null) {
       liberarAnexos([quadro]);
-      setErro(`${problema} O quadro não foi guardado.`);
+      setErro(textosAtuais(textosDeChat).chat.quadroNaoGuardado(problema));
       return;
     }
     anexosAtuais.current = [...anexosAtuais.current, quadro];
@@ -900,7 +898,7 @@ export function ChatRapido({
       limparCampo();
       setOcultaEm(null);
     } catch (falha) {
-      setErro(`Não foi possível limpar a conversa: ${mensagemDeErro(falha)}`);
+      setErro(t.falhaAoLimpar(mensagemDeErro(falha)));
     } finally {
       setEnviando(false);
     }
@@ -929,20 +927,16 @@ export function ChatRapido({
             (anexo) => categoriaDoArquivo({ name: anexo.nome, type: anexo.tipoDeMidia }) === "imagem",
           ).length;
           if (imagensAnexadas >= MAXIMO_DE_IMAGENS) {
-            throw new Error(
-              `No modo invisível a tela ocupa uma das ${MAXIMO_DE_IMAGENS} imagens: remova uma imagem anexada.`,
-            );
+            throw new Error(textosAtuais(textosDeChat).chat.telaOcupaUmaImagem(MAXIMO_DE_IMAGENS));
           }
           if (anexos.length >= MAXIMO_DE_ANEXOS) {
-            throw new Error(
-              `No modo invisível a tela ocupa um dos ${MAXIMO_DE_ANEXOS} anexos: remova um arquivo anexado.`,
-            );
+            throw new Error(textosAtuais(textosDeChat).chat.telaOcupaUmAnexo(MAXIMO_DE_ANEXOS));
           }
           let captura: CapturaDeTela;
           try {
             captura = await capturarTela();
           } catch (falha) {
-            throw new Error(`Não foi possível capturar a tela: ${mensagemDeErro(falha)}. A pergunta não foi enviada.`);
+            throw new Error(textosAtuais(textosDeChat).chat.falhaAoCapturarATela(mensagemDeErro(falha)));
           }
           todosOsAnexos = [
             ...anexos,
@@ -1032,11 +1026,11 @@ export function ChatRapido({
   /** "Responder agora": o pedido (as falas recentes) vai como uma mensagem sua, pelo fluxo normal (no modo, com o print). */
   async function responderAgora(pedido: string): Promise<void> {
     if (respondendo || enviando) {
-      setAviso("Já há uma resposta em andamento.");
+      setAviso(t.jaHaUmaResposta);
       return;
     }
     if (desconectado) {
-      setErro("Servidor desconectado: o pedido não foi enviado.");
+      setErro(t.servidorDesconectadoPedido);
       return;
     }
     setErro(null);
@@ -1051,7 +1045,7 @@ export function ChatRapido({
   function responderAgoraPeloAtalho(): void {
     const pedido = montarPedidoDeResposta(escuta.legenda.frases, escuta.legenda.emAndamento, Date.now());
     if (pedido === null) {
-      setAviso("Nada transcrito ainda.");
+      setAviso(t.nadaTranscrito);
       return;
     }
     void responderAgora(pedido);
@@ -1355,7 +1349,7 @@ export function ChatRapido({
     try {
       await api.autorizarAlteracoesDoChat(false);
     } catch (falha) {
-      setErro(`Não foi possível revogar a autorização: ${mensagemDeErro(falha)}`);
+      setErro(t.falhaAoRevogar(mensagemDeErro(falha)));
     } finally {
       setRevogando(false);
     }
@@ -1370,7 +1364,7 @@ export function ChatRapido({
     try {
       await api.cancelarRespostaDoChat();
     } catch (falha) {
-      setErro(`Não foi possível cancelar: ${mensagemDeErro(falha)}`);
+      setErro(t.falhaAoCancelar(mensagemDeErro(falha)));
       setPedidoDeCancelar(false);
     }
   }
@@ -1442,17 +1436,13 @@ export function ChatRapido({
   }
 
   // Textos curtos: o campo da barra é estreito e o placeholder fica numa linha só.
-  const placeholder = desconectado
-    ? "Servidor desconectado"
-    : respondendo
-      ? "Respondendo… esc cancela"
-      : "Pergunte ao Claude";
+  const placeholder = desconectado ? t.placeholderDesconectado : respondendo ? t.placeholderRespondendo : t.placeholder;
   // O que o placeholder curto não diz: a dica no balão do campo.
   const dicaDoCampo = desconectado
-    ? "Servidor desconectado: dá para escrever, o envio volta quando ele voltar"
+    ? t.dicaDesconectado
     : respondendo
-      ? "Respondendo: esc cancela, e já dá para escrever a próxima pergunta"
-      : "Enter envia, Shift+Enter quebra a linha, / para comandos";
+      ? t.dicaRespondendo
+      : t.dicaDoCampo;
 
   // O indicador da escuta (estado, motor, pausar e o menu de idioma): na barra, ou no cabeçalho do painel da transcrição.
   const indicadorDaEscuta = (
@@ -1476,8 +1466,8 @@ export function ChatRapido({
   const itensDoMenu: ItemDoMenuDeMaisAcoes[] = [
     {
       id: "melhorar",
-      rotulo: "Melhorar o pedido",
-      titulo: "Reescreve o texto do campo num pedido mais claro (dá para desfazer)",
+      rotulo: t.melhorarOPedido,
+      titulo: t.melhorarOPedidoDica,
       desabilitado: texto.trim() === "" || desconectado || respondendo || enviando,
       aoEscolher: melhoria.melhorar,
     },
@@ -1485,8 +1475,8 @@ export function ChatRapido({
   if (!fixo && !movel && aoAlternarFixo !== undefined) {
     itensDoMenu.push({
       id: "fixar",
-      rotulo: `Fixar o chat à ${lado}`,
-      titulo: `Fixar o chat à ${lado}: uma coluna ao lado do canvas, sempre aberta`,
+      rotulo: t.fixarAoLado(lado),
+      titulo: t.fixarAoLadoDica(lado),
       aoEscolher: () => aoAlternarFixo(true),
     });
   }
@@ -1519,7 +1509,7 @@ export function ChatRapido({
         raiz.current = elemento;
       }}
       className={`chat-rapido nodrag nowheel nopan ${fixo ? `chat-lateral chat-lateral-${lado}` : ""} ${classeDoMovel} ${respondendo ? "chat-rapido-respondendo" : ""}`}
-      aria-label={fixo ? "Chat rápido" : undefined}
+      aria-label={fixo ? t.chatRapido : undefined}
       style={fixo ? { width: `${largura}px` } : estiloDoChat}
       data-testid="chat-rapido"
       {...mouseDaArea}
@@ -1568,8 +1558,8 @@ export function ChatRapido({
           <button
             type="button"
             className="alca-de-mover-o-chat"
-            aria-label="Mover o chat"
-            title="Arraste para mover o chat (Ctrl+Alt+setas movem 40 px)"
+            aria-label={t.moverOChat}
+            title={t.moverOChatDica}
             onPointerDown={(evento) => comecarGesto("mover", evento)}
             onPointerMove={andarNoGesto}
             onPointerUp={() => terminarGesto(true)}
@@ -1596,17 +1586,17 @@ export function ChatRapido({
             <button
               type="button"
               className="btn btn-sm btn-ghost"
-              aria-label="Voltar ao lugar padrão"
-              title="Voltar ao lugar padrão: centralizado no rodapé, com o tamanho de sempre"
+              aria-label={t.voltarAoLugarPadrao}
+              title={t.voltarAoLugarPadraoDica}
               onClick={voltarAoLugarPadrao}
             >
-              lugar padrão
+              {t.lugarPadrao}
             </button>
           )}
         </div>
       )}
       {gestoDoChat !== null && <div className="camada-de-gesto-do-chat" data-area-clicavel />}
-      {arrastando && <div className="soltar-imagens" data-area-clicavel>solte para anexar os arquivos à pergunta</div>}
+      {arrastando && <div className="soltar-imagens" data-area-clicavel>{t.solteParaAnexar}</div>}
       {fixo && aoMudarLargura !== undefined && <AlcaDaLargura largura={largura} aoMudar={aoMudarLargura} lado={lado} />}
 
       {/* Oculta, a conversa continua montada: os cartões de ação lembram o que já fizeram. */}
@@ -1634,18 +1624,18 @@ export function ChatRapido({
               : undefined
           }
           hidden={oculta}
-          aria-label="Conversa com o Claude"
+          aria-label={t.conversaComOClaude}
         >
           {!fixo && !movel && (
             <div
               role="separator"
               aria-orientation="horizontal"
-              aria-label="Altura da conversa"
+              aria-label={t.alturaDaConversa}
               aria-valuenow={alturaDaConversaAgora()}
               aria-valuemin={ALTURA_DA_CONVERSA_DO_CHAT.minima}
               aria-valuemax={Math.round(window.innerHeight * FRACAO_MAXIMA_DA_CONVERSA)}
               tabIndex={0}
-              title="Arraste para mudar a altura da conversa · dois cliques voltam ao padrão"
+              title={t.alturaDaConversaDica}
               className={`alca-da-altura-da-conversa nodrag nopan nowheel ${alturaAoVivo === null ? "" : "alca-arrastando"}`}
               onPointerDown={(evento) => {
                 if (evento.button !== 0) {
@@ -1690,24 +1680,24 @@ export function ChatRapido({
             />
           )}
           <header className="cabecalho-do-chat">
-            <span className="rotulo-tecnico">chat rápido</span>
-            {respondendo && <span className="etiqueta etiqueta-ativa etiqueta-pulso">respondendo…</span>}
+            <span className="rotulo-tecnico">{t.rotuloChatRapido}</span>
+            {respondendo && <span className="etiqueta etiqueta-ativa etiqueta-pulso">{t.respondendo}</span>}
             <span className="flex-1" />
             {!fixo && !movel && (
               <ControleDeOpacidade valor={opacidade} aoMudar={(valor) => mudarPreferencias({ opacidadeDoChat: valor })} />
             )}
             {fixo ? (
-              <span className="controles-do-chat" role="group" aria-label="Controles do chat">
+              <span className="controles-do-chat" role="group" aria-label={t.controlesDoChat}>
                 <button
                   type="button"
                   className="botao-do-no"
-                  aria-label="Limpar conversa"
+                  aria-label={t.limparConversa}
                   title={
                     respondendo
-                      ? "Cancele a resposta antes de limpar."
+                      ? t.cancelePrimeiro
                       : chat.alteracoesAutorizadas
-                        ? "Limpar conversa: começa uma nova (/clear) e desfaz a autorização de alterações"
-                        : "Limpar conversa: começa uma nova (/clear)"
+                        ? t.limparConversaDicaComAutorizacao
+                        : t.limparConversaDica
                   }
                   disabled={respondendo || enviando || desconectado}
                   onClick={() => void limparConversa()}
@@ -1717,8 +1707,8 @@ export function ChatRapido({
                 <button
                   type="button"
                   className="botao-do-no"
-                  aria-label={`Mover o chat para a ${outroLado}`}
-                  title={`Mover o chat para a ${outroLado}`}
+                  aria-label={t.moverParaOLado(outroLado)}
+                  title={t.moverParaOLado(outroLado)}
                   onClick={() => mudarPreferencias({ ladoDoChatFixo: outroLado })}
                 >
                   <IconeMover />
@@ -1728,8 +1718,8 @@ export function ChatRapido({
                     <button
                       type="button"
                       className="botao-do-no"
-                      aria-label="Soltar embaixo"
-                      title="Soltar embaixo: o chat sai da coluna e passa a flutuar no centro de baixo do canvas, ainda aberto"
+                      aria-label={t.soltarEmbaixo}
+                      title={t.soltarEmbaixoDica}
                       onClick={() => aoAlternarFixo(false)}
                     >
                       <IconeSoltar />
@@ -1738,8 +1728,8 @@ export function ChatRapido({
                     <button
                       type="button"
                       className="botao-do-no"
-                      aria-label="Ocultar o chat"
-                      title="Ocultar o chat: ele sai da coluna e, ao mostrar de novo, volta embaixo"
+                      aria-label={t.ocultarOChat}
+                      title={t.ocultarOChatDica}
                       onClick={() => aoAlternarFixo(false, true)}
                     >
                       <IconeOcultar />
@@ -1756,16 +1746,16 @@ export function ChatRapido({
                   disabled={respondendo || enviando || desconectado}
                   title={
                     respondendo
-                      ? "Cancele a resposta antes de limpar."
+                      ? t.cancelePrimeiro
                       : chat.alteracoesAutorizadas
-                        ? "Começa uma conversa nova (/clear) e desfaz a autorização de alterações"
-                        : "Começa uma conversa nova (/clear)"
+                        ? t.novaConversaDicaComAutorizacao
+                        : t.novaConversaDica
                   }
                 >
-                  limpar
+                  {t.limpar}
                 </button>
-                <button type="button" className="btn btn-sm btn-ghost" onClick={ocultar} title="Ocultar a conversa (esc)">
-                  ocultar
+                <button type="button" className="btn btn-sm btn-ghost" onClick={ocultar} title={t.ocultarAConversaDica}>
+                  {t.ocultar}
                 </button>
               </>
             )}
@@ -1782,9 +1772,7 @@ export function ChatRapido({
             }}
           >
             {!temMensagens && (
-              <p className="vazio-do-chat-lateral text-support">
-                Pergunte qualquer coisa ao Claude: a conversa aparece aqui, ao lado do canvas.
-              </p>
+              <p className="vazio-do-chat-lateral text-support">{t.vazio}</p>
             )}
             {primeiraVisivel > 0 && (
               <button
@@ -1792,7 +1780,7 @@ export function ChatRapido({
                 className="btn btn-sm btn-outline"
                 onClick={() => setQuantasMensagens((atual) => atual + MENSAGENS_POR_PAGINA)}
               >
-                {`Mostrar ${Math.min(primeiraVisivel, MENSAGENS_POR_PAGINA)} anteriores`}
+                {t.mostrarAnteriores(Math.min(primeiraVisivel, MENSAGENS_POR_PAGINA))}
               </button>
             )}
             {chat.mensagens.slice(primeiraVisivel).map((mensagem, posicao) => {
@@ -1846,7 +1834,7 @@ export function ChatRapido({
           }}
         >
           {novidadeOculta && <span className="ponto-de-status ponto-de-status-ativo" aria-hidden="true" />}
-          {novidadeOculta ? "resposta nova · mostrar conversa" : "mostrar conversa"} ({chat.mensagens.length})
+          {novidadeOculta ? t.respostaNovaMostrarConversa : t.mostrarConversa} ({chat.mensagens.length})
         </button>
       )}
 
@@ -1854,7 +1842,7 @@ export function ChatRapido({
         <p className="hint-error texto-longo" role="alert" data-area-clicavel>
           {erroDoModo}{" "}
           <button type="button" className="btn btn-sm btn-ghost" onClick={descartarErroDoModo}>
-            fechar
+            {t.fechar}
           </button>
         </p>
       )}
@@ -1868,7 +1856,7 @@ export function ChatRapido({
         <p className="hint-error texto-longo erro-da-escuta" role="alert" data-testid="erro-da-escuta" data-area-clicavel>
           {escuta.erro}{" "}
           <button type="button" className="btn btn-sm btn-ghost" onClick={escuta.descartarErro}>
-            fechar
+            {t.fechar}
           </button>
         </p>
       )}
@@ -1906,7 +1894,7 @@ export function ChatRapido({
                     title={`${anexo.nome} · ${formatarBytes(anexo.tamanhoEmBytes)}`}
                   >
                     <img src={anexo.previa} alt={anexo.nome} />
-                    <button type="button" className="miniatura-remover" aria-label={`Remover ${anexo.nome}`} onClick={remover}>
+                    <button type="button" className="miniatura-remover" aria-label={t.remover(anexo.nome)} onClick={remover}>
                       ✕
                     </button>
                   </figure>
@@ -1939,8 +1927,8 @@ export function ChatRapido({
             <button
               type="button"
               className="botao-icone botao-de-anexar"
-              aria-label="Anexar arquivos"
-              title="Anexar arquivos (também dá para colar com Ctrl+V ou arrastar para o chat)"
+              aria-label={t.anexarArquivos}
+              title={t.anexarArquivosDica}
               onClick={() => seletorDeArquivos.current?.click()}
             >
               <IconeAnexar />
@@ -1970,24 +1958,24 @@ export function ChatRapido({
               onPaste={aoColar}
               placeholder={placeholder}
               title={dicaDoCampo}
-              aria-label="Pergunta para o Claude"
+              aria-label={t.perguntaParaOClaude}
             />
             {/* Melhorando, o "cancelar" fica à vista; o "melhorar" mora no menu ⋯. */}
             {melhoria.melhorando && <BotaoDeMelhorar melhoria={melhoria} desabilitado={false} />}
-            <BotaoDeDitado destino="a mensagem" className="ditado-a-direita" aoTranscrever={receberDitado} />
+            <BotaoDeDitado destino={t.destinoDoDitado}className="ditado-a-direita" aoTranscrever={receberDitado} />
             {chat.alteracoesAutorizadas && (
               <span
                 className="selo-de-autorizacao"
                 role="group"
-                aria-label="Alterações autorizadas"
-                title="Alterações autorizadas até o /clear: o chat edita arquivos e roda comandos sem perguntar"
+                aria-label={t.alteracoesAutorizadas}
+                title={t.alteracoesAutorizadasDica}
               >
                 <IconeEscudo />
                 <button
                   type="button"
                   className="revogar-autorizacao"
-                  aria-label="Revogar a autorização de alterações"
-                  title="Revogar: o chat volta a pedir autorização antes de editar ou rodar comandos"
+                  aria-label={t.revogarAutorizacao}
+                  title={t.revogarAutorizacaoDica}
                   disabled={revogando || desconectado}
                   onClick={() => void revogarAutorizacao()}
                 >
@@ -2000,13 +1988,9 @@ export function ChatRapido({
               <button
                 type="button"
                 className="botao-entrar-modo-invisivel"
-                aria-label="Modo invisível"
+                aria-label={t.modoInvisivel}
                 aria-pressed={modoAtivo}
-                title={
-                  modoAtivo
-                    ? "Tela sendo vista: clique para voltar ao modo normal (Ctrl+\\ oculta ou mostra o chat; Ctrl+Shift+I sai)"
-                    : "Modo invisível (fantasma): janela transparente, só o chat rápido; o Claude vê a tela a cada pergunta (Ctrl+\\ entra e alterna; Ctrl+Shift+I sai)"
-                }
+                title={modoAtivo ? t.modoInvisivelAtivoDica : t.modoInvisivelDica}
                 onClick={() => void (modoAtivo ? sairDoModo() : entrarNoModo())}
               >
                 <IconeOlho cortado={modoAtivo} />
@@ -2017,13 +2001,9 @@ export function ChatRapido({
               <button
                 type="button"
                 className="botao-icone botao-de-escuta-manual"
-                aria-label="Escuta do áudio"
+                aria-label={t.escutaDoAudio}
                 aria-pressed={escutaManualLigada}
-                title={
-                  escutaManualLigada
-                    ? "Escutando o áudio do sistema: clique para parar"
-                    : "Escutar o áudio do sistema: transcreve o que toca no computador e mostra na conversa (nada é gravado)"
-                }
+                title={escutaManualLigada ? t.escutaLigadaDica : t.escutaDesligadaDica}
                 onClick={() => void alternarEscutaManual()}
               >
                 <IconeFones />
@@ -2035,13 +2015,9 @@ export function ChatRapido({
               <button
                 type="button"
                 className="botao-icone botao-da-transcricao"
-                aria-label="Transcrição"
+                aria-label={t.transcricao}
                 aria-pressed={transcricaoAberta}
-                title={
-                  transcricaoAberta
-                    ? "Fechar o painel da transcrição"
-                    : "Abrir o painel da transcrição: o que o áudio do computador está dizendo, com Responder agora (Ctrl+Shift+Enter)"
-                }
+                title={transcricaoAberta ? t.fecharTranscricaoDica : t.abrirTranscricaoDica}
                 onClick={() => mudarPreferencias({ transcricaoAberta: !transcricaoAberta })}
               >
                 <IconeTranscricao />
@@ -2062,7 +2038,7 @@ export function ChatRapido({
                 onClick={() => void cancelar()}
                 disabled={cancelando || desconectado}
               >
-                {cancelando ? "cancelando…" : "cancelar"}
+                {cancelando ? t.cancelando : t.cancelar}
               </button>
             ) : (
               <button
@@ -2071,7 +2047,7 @@ export function ChatRapido({
                 onClick={() => void enviar()}
                 disabled={!temConteudo || enviando || desconectado || melhoria.melhorando}
               >
-                {enviando ? "…" : "enviar ⏎"}
+                {enviando ? "…" : t.enviar}
               </button>
             )}
             {/* O menu ⋯, no fim da barra: as ações menos usadas (a coluna tem os controles no cabeçalho). */}
@@ -2084,7 +2060,7 @@ export function ChatRapido({
           )}
           {origemDoComposer === "escuta" && (
             <p className="hint nota-da-escuta px-3" data-testid="nota-da-escuta">
-              Pergunta da escuta: confira e aperte Enter
+              {t.perguntaDaEscuta}
             </p>
           )}
           <AvisoDaMelhoria melhoria={melhoria} className="px-3" />
@@ -2095,7 +2071,7 @@ export function ChatRapido({
           )}
           {(erro ?? erroAoCarregar) !== null && (
             <p className="hint-error texto-longo px-3" role="alert">
-              {erro ?? `Não foi possível carregar o chat: ${erroAoCarregar}`}
+              {erro ?? t.falhaAoCarregar(erroAoCarregar ?? "")}
             </p>
           )}
         </div>
@@ -2105,8 +2081,8 @@ export function ChatRapido({
           type="button"
           className="alca-de-redimensionar-do-chat"
           data-area-clicavel
-          aria-label="Redimensionar o chat"
-          title="Arraste para mudar o tamanho do chat"
+          aria-label={t.redimensionarOChat}
+          title={t.redimensionarOChatDica}
           onPointerDown={(evento) => comecarGesto("redimensionar", evento)}
           onPointerMove={andarNoGesto}
           onPointerUp={() => terminarGesto(true)}

@@ -1,3 +1,6 @@
+import { textosAtuais } from "../idioma/idioma";
+import { textosDeVoz } from "../idioma/textos/voz";
+
 /** Menos que isto (0,3 s) é clique sem fala: nem vale transcrever. */
 export const AMOSTRAS_MINIMAS = 4_800;
 
@@ -28,7 +31,9 @@ export function juntarDitado(
 }
 
 /** Aviso quando o microfone fica sem som por alguns segundos. */
-export const TEXTO_DO_SILENCIO = "Não estou ouvindo nada, confira o microfone";
+export function textoDoSilencio(): string {
+  return textosAtuais(textosDeVoz).ditado.silencio;
+}
 
 /** O que o leitor de tela anuncia a cada mudança de fase do ditado (região educada, sempre presente). */
 export function anuncioDoDitado(
@@ -36,12 +41,13 @@ export function anuncioDoDitado(
   baixando: number | null,
   inserido: boolean,
 ): string {
-  if (fase === "pedindo-microfone") return "Permita o acesso ao microfone.";
-  if (fase === "gravando") return "Gravando. Enter conclui, Esc descarta.";
+  const t = textosAtuais(textosDeVoz).ditado;
+  if (fase === "pedindo-microfone") return t.anuncioPermita;
+  if (fase === "gravando") return t.anuncioGravando;
   if (fase === "transcrevendo") {
-    return baixando !== null ? "Baixando o modelo de voz, só na primeira vez." : "Transcrevendo o áudio.";
+    return baixando !== null ? t.anuncioBaixando : t.anuncioTranscrevendo;
   }
-  return inserido ? "Texto adicionado ao campo." : "";
+  return inserido ? t.anuncioInserido : "";
 }
 
 /** Segundos de gravação como "mm:ss" (ex.: 65 vira "01:05"). */
@@ -53,23 +59,24 @@ export function formatarCronometro(segundos: number): string {
 
 /** Mensagem para a pessoa a partir do erro do microfone ou do modelo. */
 export function mensagemDoErroDeDitado(erro: unknown): string {
+  const t = textosAtuais(textosDeVoz).ditado;
   const nome = erro instanceof DOMException ? erro.name : "";
   if (nome === "NotAllowedError" || nome === "SecurityError") {
-    return "O acesso ao microfone foi negado. No Mac, libere em Ajustes do Sistema › Privacidade e Segurança › Microfone (ative este app) e tente de novo.";
+    return t.erroAcessoNegado;
   }
   if (nome === "NotFoundError" || nome === "OverconstrainedError") {
-    return "Nenhum microfone encontrado.";
+    return t.erroSemMicrofone;
   }
   if (nome === "NotReadableError") {
-    return "O microfone está ocupado por outro programa.";
+    return t.erroMicrofoneOcupado;
   }
   if (nome === "NotSupportedError" || nome === "AbortError") {
-    return "O ditado falhou: este navegador não deu acesso ao microfone.";
+    return t.erroNavegadorSemAcesso;
   }
   const mensagem = erro instanceof Error ? erro.message : String(erro);
   if (/fetch|network|Failed to load|download/i.test(mensagem)) {
-    return "Não foi possível baixar o modelo de voz. Confira a internet e tente de novo.";
+    return t.erroDownloadDoModelo;
   }
   // O resto vem do navegador ou do Whisper, em inglês: não vale mostrar cru.
-  return "O ditado falhou. Tente de novo ou digite o texto.";
+  return t.erroGenerico;
 }

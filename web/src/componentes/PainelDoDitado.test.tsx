@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 
-import { TEXTO_DO_SILENCIO } from "../shared/ditado/texto";
+import { textoDoSilencio } from "../shared/ditado/texto";
 import { PainelDoDitado } from "./PainelDoDitado";
 
 type Props = Parameters<typeof PainelDoDitado>[0];
@@ -88,14 +88,14 @@ describe("PainelDoDitado", () => {
       expect(aviso()).toBeEmptyDOMElement();
 
       avancar(2_800);
-      expect(screen.queryByText(TEXTO_DO_SILENCIO)).not.toBeInTheDocument();
+      expect(screen.queryByText(textoDoSilencio())).not.toBeInTheDocument();
       avancar(400);
-      expect(screen.getByText(TEXTO_DO_SILENCIO)).toBeInTheDocument();
+      expect(screen.getByText(textoDoSilencio())).toBeInTheDocument();
       expect(aviso()).toHaveAttribute("aria-live", "polite");
 
       nivel = 0.6;
       avancar(100);
-      expect(screen.queryByText(TEXTO_DO_SILENCIO)).not.toBeInTheDocument();
+      expect(screen.queryByText(textoDoSilencio())).not.toBeInTheDocument();
     });
 
     it("voz de vez em quando reinicia a contagem do silêncio", () => {
@@ -106,15 +106,15 @@ describe("PainelDoDitado", () => {
       avancar(100);
       nivel = 0.01;
       avancar(2_500);
-      expect(screen.queryByText(TEXTO_DO_SILENCIO)).not.toBeInTheDocument();
+      expect(screen.queryByText(textoDoSilencio())).not.toBeInTheDocument();
       avancar(700);
-      expect(screen.getByText(TEXTO_DO_SILENCIO)).toBeInTheDocument();
+      expect(screen.getByText(textoDoSilencio())).toBeInTheDocument();
     });
 
     it("sem como medir o nível (null), não acusa silêncio", () => {
       render(<PainelDoDitado {...painel({ lerNivel: () => null })} />);
       avancar(10_000);
-      expect(screen.queryByText(TEXTO_DO_SILENCIO)).not.toBeInTheDocument();
+      expect(screen.queryByText(textoDoSilencio())).not.toBeInTheDocument();
       expect(screen.getByTestId("cronometro-do-ditado")).toHaveTextContent("00:10");
     });
 

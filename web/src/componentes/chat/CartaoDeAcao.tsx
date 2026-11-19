@@ -5,8 +5,12 @@ import { type AcaoDeAbrirOrquestrador, LIMITE_DA_FILA, type ResumoDoOrquestrador
 import { AVISO_DO_LIMITE_DE_ORQUESTRADORES } from "../../shared/canvas/limiteDeTerminais";
 import { formatarDecorrido } from "../../shared/formatacao";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
+import { type TextosDe, useTextos } from "../../shared/idioma/idioma";
+import { textosDeChat } from "../../shared/idioma/textos/chat";
 import { nomeLivre } from "../../shared/nomeLivre";
 import { IconeOrquestrador } from "../Icones";
+
+type TextosDoCartao = TextosDe<typeof textosDeChat>["acao"];
 
 export interface PropsDasAcoesDoChat {
   /** Abre (ou foca) o terminal do Orquestrador no canvas. */
@@ -88,32 +92,26 @@ function escolher(
  * alterações são aproximadas: um worktree que ficou com o orquestrador parado
  * (o fim do turno remove os limpos).
  */
-function descreverEstado(orquestrador: ResumoDoOrquestrador, agora: Date): string[] {
+function descreverEstado(orquestrador: ResumoDoOrquestrador, agora: Date, t: TextosDoCartao): string[] {
   const partes: string[] = [];
   if (orquestrador.situacao === "trabalhando") {
     const turno = orquestrador.ultimoTurno;
     partes.push(
-      turno === null
-        ? "trabalhando"
-        : `trabalhando há ${formatarDecorrido(turno.iniciadoEm, null, agora)} em “${turno.texto}”`,
+      turno === null ? t.trabalhando : t.trabalhandoHa(formatarDecorrido(turno.iniciadoEm, null, agora), turno.texto),
     );
   } else if (orquestrador.planoPendente === true) {
-    partes.push("aguardando aprovação do plano");
+    partes.push(t.aguardandoPlano);
   } else {
-    partes.push("ocioso");
+    partes.push(t.ocioso);
   }
   const fila = orquestrador.fila?.length ?? 0;
   if (fila > 0) {
-    partes.push(`${fila} na fila`);
+    partes.push(t.naFila(fila));
   }
   if (orquestrador.situacao === "ocioso" && orquestrador.worktree !== null) {
-    partes.push("alterações sem commit");
+    partes.push(t.semCommit);
   }
   return partes;
-}
-
-function avisoDeFilaCheia(nome: string): string {
-  return `A fila de "${nome}" está cheia (máximo ${LIMITE_DA_FILA} pedidos). Crie outro orquestrador ou espere a fila andar.`;
 }
 
 /**
@@ -131,6 +129,7 @@ function avisoDeFilaCheia(nome: string): string {
  * refeita no clique com a lista do servidor, não com a da resposta do chat.
  */
 export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOrquestradores, orquestradores }: Props) {
+  const t = useTextos(textosDeChat).acao;
   const [etapa, setEtapa] = useState<Etapa>({ tipo: "pronto" });
   const novo = acao.novo === true;
   const pedido = acao.pedido !== null && acao.pedido.trim() !== "" ? acao.pedido : null;
@@ -186,7 +185,7 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
       // Só entra na fila quem segue ocupado; se ele ficou livre, o pedido vai direto.
       const enfileirar = modo === "fila" && orquestrador !== undefined && estaOcupado(orquestrador);
       if (enfileirar && orquestrador !== undefined && (orquestrador.fila?.length ?? 0) >= LIMITE_DA_FILA) {
-        setEtapa({ tipo: "erro", mensagem: avisoDeFilaCheia(orquestrador.nome) });
+        setEtapa({ tipo: "erro", mensagem: t.filaCheia(orquestrador.nome, LIMITE_DA_FILA) });
         return;
       }
       // Confere a vaga antes de criar: sem ela, nada é criado nem enviado.
@@ -209,7 +208,8 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
             await api.enfileirarPedido(orquestrador.id, pedido);
           } catch (falha) {
             const cheia = falha instanceof ErroDaApi && falha.status === 409;
-            setEtapa({ tipo: "erro", mensagem: cheia ? avisoDeFilaCheia(orquestrador.nome) : mensagemDeErro(falha) });
+            setEtapa({ tipo: "erro", mensagem: cheia ? t.filaCheia(orquestrador.nome, LIMITE_DA_FILA) : mensagemDeErro(falha),
+            });
             return;
           }
         } else {
@@ -229,21 +229,21 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="titulo-do-cartao">
-          {novo ? "Novo orquestrador em" : "Abrir orquestrador em"} {acao.projeto}
+          {novo ? t.novoEm : t.abrirEm} {acao.projeto}
         </span>
         <span className="mono truncate text-muted" title={acao.pasta}>
           {acao.pasta}
         </span>
-        {pedido !== null && <span className="texto-longo text-[12px] text-secondary">pedido: {pedido}</span>}
+        {pedido !== null && <span className="texto-longo text-[12px] text-secondary">{t.pedido}: {pedido}</span>}
         {(escolhido === undefined || oferecerFila) && etapa.tipo !== "feito" && (
           <span className="mono truncate text-[11.5px] text-secondary" title={nomeSugerido} data-testid="nome-sugerido">
-            {oferecerFila ? "se criar outro" : "nome"}: {nomeSugerido}
+            {oferecerFila ? t.seCriarOutro : t.nome}: {nomeSugerido}
           </span>
         )}
         {/* Quebra de linha em vez de cortar: a fila e as alterações sem commit nunca somem; cada uma cabe inteira numa linha. */}
         {escolhido !== undefined && etapa.tipo !== "feito" && (
           <span className="mono texto-longo text-[11.5px] text-secondary" data-testid="estado-do-escolhido">
-            {escolhido.nome}: {descreverEstado(escolhido, new Date()).map((parte, indice) =>
+            {escolhido.nome}: {descreverEstado(escolhido, new Date(), t).map((parte, indice) =>
               indice === 0 ? (
                 parte
               ) : (
@@ -269,7 +269,7 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
             disabled={etapa.tipo === "executando"}
             onClick={() => void executar("fila")}
           >
-            {etapa.tipo === "executando" && etapa.modo === "fila" ? "enfileirando…" : "Colocar na fila"}
+            {etapa.tipo === "executando" && etapa.modo === "fila" ? t.enfileirando : t.colocarNaFila}
           </button>
           <button
             type="button"
@@ -277,7 +277,7 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
             disabled={etapa.tipo === "executando"}
             onClick={() => void executar("criar")}
           >
-            {etapa.tipo === "executando" && etapa.modo === "criar" ? "criando…" : "Criar outro"}
+            {etapa.tipo === "executando" && etapa.modo === "criar" ? t.criando : t.criarOutro}
           </button>
         </div>
       ) : (
@@ -289,17 +289,17 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
         >
           {etapa.tipo === "executando"
             ? novo
-              ? "criando…"
-              : "abrindo…"
+              ? t.criando
+              : t.abrindo
             : etapa.tipo === "feito"
               ? etapa.enfileirado
-                ? "na fila ✓"
-                : "aberto ✓"
+                ? t.naFilaFeito
+                : t.abertoFeito
               : etapa.tipo === "erro"
-                ? "tentar de novo"
+                ? t.tentarDeNovo
                 : novo
-                  ? "criar"
-                  : "abrir"}
+                  ? t.criar
+                  : t.abrir}
         </button>
       )}
     </div>

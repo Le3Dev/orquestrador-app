@@ -1,5 +1,8 @@
 import { type KeyboardEvent, useEffect, useId, useRef } from "react";
 
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeChat } from "../../shared/idioma/textos/chat";
+
 interface Props {
   /** "Começar a escutar": só então a captura do áudio começa. */
   aoConfirmar: () => void;
@@ -13,6 +16,7 @@ interface Props {
  * usuário confirma.
  */
 export function AvisoDaEscuta({ aoConfirmar, aoRecusar }: Props) {
+  const t = useTextos(textosDeChat).aviso;
   const idDoTitulo = useId();
   const idDaExplicacao = useId();
   const cartao = useRef<HTMLDivElement>(null);
@@ -42,24 +46,21 @@ export function AvisoDaEscuta({ aoConfirmar, aoRecusar }: Props) {
       onKeyDown={aoTeclar}
     >
       <p id={idDoTitulo} className="titulo-do-aviso-da-escuta">
-        Escutar o áudio do computador?
+        {t.titulo}
       </p>
       <ul id={idDaExplicacao} className="itens-do-aviso-da-escuta">
-        <li>O áudio do computador (vídeo, chamada) é transcrito aqui mesmo, no seu computador, e não é gravado.</li>
-        <li>Só os últimos 2 min de texto ficam guardados.</li>
-        <li>Trechos com cara de pergunta vão ao Claude (Haiku), que confirma se são mesmo uma pergunta.</li>
-        <li>
-          A pergunta vai sozinha ao chat, com o print da tela. Com alterações autorizadas, ela vai para o campo, para
-          você conferir antes de enviar.
-        </li>
-        <li>Dá para pausar no indicador ao lado do olho e desligar o automático na faixa da transcrição.</li>
+        <li>{t.item1}</li>
+        <li>{t.item2}</li>
+        <li>{t.item3}</li>
+        <li>{t.item4}</li>
+        <li>{t.item5}</li>
       </ul>
       <div className="botoes-do-aviso-da-escuta">
         <button type="button" className="btn btn-sm btn-ghost" onClick={aoRecusar}>
-          Agora não
+          {t.agoraNao}
         </button>
         <button type="button" className="btn btn-sm btn-cta" onClick={aoConfirmar}>
-          Começar a escutar
+          {t.comecar}
         </button>
       </div>
     </div>

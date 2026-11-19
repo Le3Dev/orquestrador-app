@@ -3,6 +3,9 @@
  * mostra, desacoplados da sessão (o estado dela cabe nestes tipos).
  */
 
+import { textosAtuais } from "../../shared/idioma/idioma";
+import { textosDeChat } from "../../shared/idioma/textos/chat";
+
 export type DispositivoDaEscuta = "webgpu" | "wasm" | "cpu" | "dml";
 
 /** Onde e com qual modelo a transcrição está rodando. */
@@ -43,8 +46,12 @@ export function rotuloDoMotor(motor: MotorDaEscuta): string {
 
 /** O balão (title) do selo, com o modelo e a precisão completos. */
 export function explicacaoDoMotor(motor: MotorDaEscuta): string {
-  const precisao = motor.precisao.trim() === "" ? "" : `, precisão ${motor.precisao.trim()}`;
-  return `Modelo ${motor.modelo}${precisao}, rodando em ${tipoDoDispositivo(motor.dispositivo)} (${motor.dispositivo})`;
+  return textosAtuais(textosDeChat).motor.explicacao(
+    motor.modelo,
+    motor.precisao.trim(),
+    tipoDoDispositivo(motor.dispositivo),
+    motor.dispositivo,
+  );
 }
 
 /** O progresso do download preso entre 0 e 100, inteiro. */
@@ -55,9 +62,9 @@ function progressoInteiro(download: DownloadDoModelo): number {
 
 /** "baixando o modelo 45% de 199 MB" (sem o total: "baixando o modelo 45%"). */
 export function textoDoDownload(download: DownloadDoModelo): string {
-  const total =
+  const totalMb =
     download.totalMb === null || !Number.isFinite(download.totalMb) || download.totalMb <= 0
-      ? ""
-      : ` de ${Math.round(download.totalMb)} MB`;
-  return `baixando o modelo ${progressoInteiro(download)}%${total}`;
+      ? null
+      : Math.round(download.totalMb);
+  return textosAtuais(textosDeChat).motor.download(progressoInteiro(download), totalMb);
 }

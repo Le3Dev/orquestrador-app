@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { textosAtuais } from "../idioma/idioma";
+import { textosDeVoz } from "../idioma/textos/voz";
 import { type ApiDoModoInvisivel, apiDoModoInvisivel, type CapturaDeTela } from "../ponteDoDesktop";
 
 export interface MouseDaArea {
@@ -141,7 +143,7 @@ export function useModoInvisivel(): ModoInvisivel {
         await api.capturarMouse(true);
       }
     } catch (falha) {
-      setErro(`Não foi possível entrar no modo invisível: ${falha instanceof Error ? falha.message : String(falha)}`);
+      setErro(textosAtuais(textosDeVoz).modoInvisivel.falhaAoEntrar(falha instanceof Error ? falha.message : String(falha)));
     }
   }, [api]);
 
@@ -153,7 +155,7 @@ export function useModoInvisivel(): ModoInvisivel {
     try {
       await api.sair();
     } catch (falha) {
-      setErro(`Não foi possível sair do modo invisível: ${falha instanceof Error ? falha.message : String(falha)}`);
+      setErro(textosAtuais(textosDeVoz).modoInvisivel.falhaAoSair(falha instanceof Error ? falha.message : String(falha)));
     }
   }, [api]);
 
@@ -169,14 +171,14 @@ export function useModoInvisivel(): ModoInvisivel {
 
   const capturarTela = useCallback(async () => {
     if (api === null) {
-      throw new Error("a captura de tela só existe no aplicativo desktop");
+      throw new Error(textosAtuais(textosDeVoz).modoInvisivel.capturaSoNoDesktop);
     }
     return api.capturarTela();
   }, [api]);
 
   const capturarAgora = useCallback(async () => {
     if (api === null) {
-      throw new Error("a captura de tela só existe no aplicativo desktop");
+      throw new Error(textosAtuais(textosDeVoz).modoInvisivel.capturaSoNoDesktop);
     }
     return api.capturarAgora();
   }, [api]);
@@ -194,7 +196,7 @@ export function useModoInvisivel(): ModoInvisivel {
     try {
       await api.alternar();
     } catch (falha) {
-      setErro(`Não foi possível alternar o modo invisível: ${falha instanceof Error ? falha.message : String(falha)}`);
+      setErro(textosAtuais(textosDeVoz).modoInvisivel.falhaAoAlternar(falha instanceof Error ? falha.message : String(falha)));
     }
   }, [api]);
 
@@ -245,7 +247,7 @@ export function useModoInvisivel(): ModoInvisivel {
         await api.definirEscutaLigada(false);
       }
     } catch (falha) {
-      setErro(`Não foi possível ${ligar ? "ligar" : "desligar"} a escuta: ${falha instanceof Error ? falha.message : String(falha)}`);
+      setErro(textosAtuais(textosDeVoz).modoInvisivel.falhaNaEscuta(ligar, falha instanceof Error ? falha.message : String(falha)));
     }
   }, [api, escutaManualLigada]);
 
