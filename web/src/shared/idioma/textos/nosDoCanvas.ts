@@ -25,6 +25,7 @@ export const textosDeNosDoCanvas = definirTextos({
       dica: "Clique para ver a tarefa e o relatório",
       fechar: (nome: string) => `Fechar subagente ${nome}`,
       fecharDica: "Fechar subagente (o histórico continua no terminal)",
+      icones: { lupa: "lendo", lapis: "editando", engrenagem: "rodando comando", globo: "pesquisando na web" },
     },
     plano: {
       sufixos: { pendente: "", aprovado: " · aprovado", descartado: " · descartado" },
@@ -144,6 +145,7 @@ export const textosDeNosDoCanvas = definirTextos({
       dica: "Click to see the task and the report",
       fechar: (nome: string) => `Close subagent ${nome}`,
       fecharDica: "Close subagent (the history stays in the terminal)",
+      icones: { lupa: "reading", lapis: "editing", engrenagem: "running a command", globo: "searching the web" },
     },
     plano: {
       sufixos: { pendente: "", aprovado: " · approved", descartado: " · discarded" },

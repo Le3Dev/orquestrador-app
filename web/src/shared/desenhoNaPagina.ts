@@ -1230,12 +1230,9 @@ function configuracaoBase(): Omit<ConfiguracaoDoDesenhoNaPagina, "teclas"> {
  * iframe: só aceita mensagens da janela pai (o app), no formato do app; o que
  * manda de volta leva a marca da página.
  */
-/** O script no idioma de agora; `SCRIPT_DO_DESENHO` abaixo é a versão fixa em português. */
+/** O script no idioma de agora. */
 export function scriptDoDesenho(): string {
-  return montarScriptDoDesenho(configuracaoBase());
-}
-
-function montarScriptDoDesenho(base: Omit<ConfiguracaoDoDesenhoNaPagina, "teclas">): string {
+  const base = configuracaoBase();
   return `(function () {
   var pai = window.parent;
   if (!pai || pai === window) { return; }
@@ -1260,13 +1257,7 @@ function montarScriptDoDesenho(base: Omit<ConfiguracaoDoDesenhoNaPagina, "teclas
 })();`;
 }
 
-/** Constante em português (quem a importa ainda não troca de idioma); veja `scriptDoDesenho`. */
-export const SCRIPT_DO_DESENHO = montarScriptDoDesenho({ ...configuracaoBase(), textos: undefined });
-
-/** `<script>` com a camada de desenho: vai logo depois do de navegação, no começo do HTML. */
-export const TAG_DO_SCRIPT_DO_DESENHO = `<script>${SCRIPT_DO_DESENHO}</script>`;
-
-/** `<script>` da camada de desenho no idioma de agora. */
+/** `<script>` da camada de desenho no idioma de agora: vai logo depois do de navegação, no começo do HTML. */
 export function tagDoScriptDoDesenho(): string {
   return `<script>${scriptDoDesenho()}</script>`;
 }

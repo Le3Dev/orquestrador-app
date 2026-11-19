@@ -10,7 +10,7 @@ import {
   type SelecaoDeSubagentesProntos,
   TAMANHO_MAXIMO_DAS_INSTRUCOES,
 } from "../shared/api/tipos";
-import { type EscalaDaLetra, OPCOES_DA_ESCALA_DA_LETRA } from "../shared/canvas/layout";
+import { type EscalaDaLetra, opcoesDaEscalaDaLetra } from "../shared/canvas/layout";
 import { ROTULOS_DAS_PERMISSOES } from "../shared/formatacao";
 import {
   ajudaDaPredefinicao,
@@ -34,11 +34,6 @@ const PERMISSOES: readonly NivelDePermissao[] = ["leitura", "edicao", "edicao_e_
 type ModoDosProntos = "todos" | "nenhum" | "escolher";
 
 const MODOS_DOS_PRONTOS: readonly ModoDosProntos[] = ["todos", "nenhum", "escolher"];
-
-/** O título da escala da letra no idioma atual (as opções vêm do layout, só com o valor). */
-function tituloDaEscala(valor: EscalaDaLetra, titulos: { normal: string; grande: string; maior: string }): string {
-  return valor === 1 ? titulos.normal : valor === 1.15 ? titulos.grande : titulos.maior;
-}
 
 interface Props {
   valor: DadosDaConfiguracao;
@@ -329,7 +324,7 @@ export function CamposDaConfiguracao({
             explicacao={t.tamanhoDaLetraExplicacao}
           />
           <div className="permissoes-da-criacao w-fit" role="radiogroup" aria-labelledby={idDaLetra}>
-            {OPCOES_DA_ESCALA_DA_LETRA.map((opcao) => (
+            {opcoesDaEscalaDaLetra().map((opcao) => (
               <label key={opcao.valor} className="opcao-da-permissao">
                 <input
                   type="radio"
@@ -338,7 +333,7 @@ export function CamposDaConfiguracao({
                   checked={tamanhoDaLetra.valor === opcao.valor}
                   onChange={() => tamanhoDaLetra.aoMudar(opcao.valor)}
                 />
-                {tituloDaEscala(opcao.valor, t.escalaDaLetra)}
+                {opcao.titulo}
               </label>
             ))}
           </div>

@@ -18,10 +18,10 @@ import {
   ESCALA_MINIMA_DA_PAGINA,
   escalaDaPagina,
   type EstadoDoDesenho,
-  TAG_DO_SCRIPT_DO_DESENHO,
+  tagDoScriptDoDesenho,
 } from "../../shared/desenhoNaPagina";
 import { TAG_DO_SCRIPT_DE_NAVEGACAO } from "../../shared/navegacaoDoArtefato";
-import { textosAtuais } from "../../shared/idioma/idioma";
+import { definirIdioma, textosAtuais } from "../../shared/idioma/idioma";
 import { textosDeArtefato } from "../../shared/idioma/textos/artefato";
 import {
   DURACAO_DO_DESTAQUE_MS,
@@ -30,7 +30,8 @@ import {
 } from "./NoArtefato";
 
 /** A política de segurança, o script de voltar e avançar e o do desenho, que entram juntos no começo da página. */
-const META = `<meta http-equiv="Content-Security-Policy" content="${POLITICA_DO_ARTEFATO}">${TAG_DO_SCRIPT_DE_NAVEGACAO}${TAG_DO_SCRIPT_DO_DESENHO}`;
+const metaDaPagina = () =>
+  `<meta http-equiv="Content-Security-Policy" content="${POLITICA_DO_ARTEFATO}">${TAG_DO_SCRIPT_DE_NAVEGACAO}${tagDoScriptDoDesenho()}`;
 
 function versao(numero: number, tamanho = 2150) {
   return { numero, criadaEm: `2026-11-0${numero}T12:00:00Z`, tamanho };
@@ -140,9 +141,26 @@ describe("NoArtefato", () => {
     expect(pagina.getAttribute("sandbox")).not.toContain("allow-same-origin");
     expect(pagina).toHaveClass("nodrag", "nowheel");
     expect(pagina.getAttribute("srcdoc")).toBe(
-      `<!DOCTYPE html><html><head>${META}<title>x</title></head><body><script>alert(1)</script></body></html>`,
+      `<!DOCTYPE html><html><head>${metaDaPagina()}<title>x</title></head><body><script>alert(1)</script></body></html>`,
     );
     expect(screen.getByRole("img", { name: "Página HTML" })).toBeInTheDocument();
+  });
+
+  describe("com a interface em inglês", () => {
+    beforeEach(() => definirIdioma("en"));
+    afterEach(() => definirIdioma("pt-BR"));
+
+    it("o script do desenho injetado na página leva os textos em inglês", async () => {
+      vi.spyOn(apiDosArtefatos, "lerVersao").mockResolvedValue("<p>x</p>");
+      const { tela } = preparar(artefato("a1"));
+      render(tela(<NoArtefato {...propsDoNo("a1")} />));
+
+      const pagina = await screen.findByTitle("Artifact content: Relatório de vendas");
+      const srcdoc = pagina.getAttribute("srcdoc") ?? "";
+      expect(srcdoc).toContain(tagDoScriptDoDesenho());
+      expect(srcdoc).toContain("Type and press Enter");
+      expect(srcdoc).toContain('"textoSolto":"Free text"');
+    });
   });
 
   it("no canvas, a página fica atrás da camada de ativar: clique ou Enter ativa; pointerdown fora e Esc desativam", async () => {
@@ -287,8 +305,8 @@ describe("NoArtefato", () => {
       ),
     );
 
-    expect((await iframe()).getAttribute("srcdoc")).toBe(`<!doctype html>${META}<p>oi</p>`);
-    expect((await iframe("Outro")).getAttribute("srcdoc")).toBe(`${META}<p>sem doctype</p><header>não é head</header>`);
+    expect((await iframe()).getAttribute("srcdoc")).toBe(`<!doctype html>${metaDaPagina()}<p>oi</p>`);
+    expect((await iframe("Outro")).getAttribute("srcdoc")).toBe(`${metaDaPagina()}<p>sem doctype</p><header>não é head</header>`);
   });
 
   it("Markdown é renderizado formatado, com rolagem, sem iframe", async () => {

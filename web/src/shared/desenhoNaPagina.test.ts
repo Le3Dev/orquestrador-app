@@ -19,7 +19,7 @@ import {
   lerMensagemDoDesenho,
   MARCA_DO_DESENHO,
   MAXIMO_DO_CAMINHO_DA_ANCORA,
-  SCRIPT_DO_DESENHO,
+  scriptDoDesenho,
 } from "./desenhoNaPagina";
 
 // O jsdom não tem PointerEvent: sem ele, o fireEvent manda um Event sem botão, clientX nem pointerId.
@@ -443,7 +443,7 @@ describe("lerMensagemDoDesenho", () => {
   });
 });
 
-describe("SCRIPT_DO_DESENHO", () => {
+describe("scriptDoDesenho", () => {
   afterEach(() => {
     document.documentElement.querySelectorAll(`:scope > [${MARCA_DO_DESENHO}]`).forEach((elemento) => elemento.remove());
   });
@@ -460,7 +460,7 @@ describe("SCRIPT_DO_DESENHO", () => {
       setTimeout: window.setTimeout.bind(window),
       clearTimeout: window.clearTimeout.bind(window),
     };
-    new Function("window", SCRIPT_DO_DESENHO)(janela);
+    new Function("window", scriptDoDesenho())(janela);
     const receber = (dados: unknown, source: unknown) => {
       const evento = new Event("message");
       Object.assign(evento, { data: dados, source });

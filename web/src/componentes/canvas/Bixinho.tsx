@@ -2,7 +2,8 @@ import { memo } from "react";
 
 import type { SituacaoDoSubagente } from "../../shared/api/tipos";
 import type { AparenciaDoBixinho } from "../../shared/canvas/bixinhos";
-import { type IconeDeFerramenta, ROTULO_DO_ICONE } from "../../shared/canvas/iconesDeFerramenta";
+import { type IconeDeFerramenta, rotuloDoIcone } from "../../shared/canvas/iconesDeFerramenta";
+import { useIdioma } from "../../shared/idioma/idioma";
 import {
   ACESSORIOS_DESENHADOS,
   COLUNAS,
@@ -99,7 +100,8 @@ const TAMANHO_DO_ICONE_NA_TELA = 12;
  * bixinho.
  */
 export const IconeDaFerramenta = memo(function IconeDaFerramenta({ icone }: { icone: IconeDeFerramenta }) {
-  const rotulo = ROTULO_DO_ICONE[icone];
+  useIdioma();
+  const rotulo = rotuloDoIcone(icone);
   return (
     <span className={`icone-da-ferramenta icone-da-ferramenta-${icone}`} role="img" aria-label={rotulo} title={rotulo}>
       <svg

@@ -1,16 +1,16 @@
+import { textosAtuais } from "../idioma/idioma";
+import { textosDeNosDoCanvas } from "../idioma/textos/nosDoCanvas";
+
 /**
  * O ícone que o bixinho mostra enquanto trabalha: o tipo da ferramenta que o
  * Subagente usou por último (ler, editar, rodar comando, pesquisar na web).
  */
 export type IconeDeFerramenta = "lupa" | "lapis" | "engrenagem" | "globo";
 
-/** O que o Subagente está fazendo, em palavras: a dica do ícone. */
-export const ROTULO_DO_ICONE: Readonly<Record<IconeDeFerramenta, string>> = {
-  lupa: "lendo",
-  lapis: "editando",
-  engrenagem: "rodando comando",
-  globo: "pesquisando na web",
-};
+/** O que o Subagente está fazendo, em palavras (a dica do ícone), no idioma de agora. */
+export function rotuloDoIcone(icone: IconeDeFerramenta): string {
+  return textosAtuais(textosDeNosDoCanvas).bixinho.icones[icone];
+}
 
 /**
  * Ferramentas do Claude Code por ícone, em minúsculas. Um `Map`, e não um

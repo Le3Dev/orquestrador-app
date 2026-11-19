@@ -1,4 +1,5 @@
-import { iconeDaFerramenta, ROTULO_DO_ICONE } from "./iconesDeFerramenta";
+import { definirIdioma } from "../idioma/idioma";
+import { iconeDaFerramenta, rotuloDoIcone } from "./iconesDeFerramenta";
 
 describe("iconeDaFerramenta", () => {
   it.each([
@@ -36,11 +37,17 @@ describe("iconeDaFerramenta", () => {
   });
 
   it("cada ícone tem a dica do que o Subagente está fazendo", () => {
-    expect(ROTULO_DO_ICONE).toEqual({
-      lupa: "lendo",
-      lapis: "editando",
-      engrenagem: "rodando comando",
-      globo: "pesquisando na web",
+    const icones = ["lupa", "lapis", "engrenagem", "globo"] as const;
+    expect(icones.map(rotuloDoIcone)).toEqual(["lendo", "editando", "rodando comando", "pesquisando na web"]);
+  });
+
+  describe("em inglês", () => {
+    beforeEach(() => definirIdioma("en"));
+    afterEach(() => definirIdioma("pt-BR"));
+
+    it("a dica do ícone segue o idioma", () => {
+      expect(rotuloDoIcone("lupa")).toBe("reading");
+      expect(rotuloDoIcone("globo")).toBe("searching the web");
     });
   });
 });

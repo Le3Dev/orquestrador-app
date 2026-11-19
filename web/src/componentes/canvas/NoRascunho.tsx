@@ -11,7 +11,7 @@ import {
 import { useCanvas } from "../../shared/canvas/contexto";
 import {
   ESCALA_DA_LETRA_PADRAO,
-  OPCOES_DA_ESCALA_DA_LETRA,
+  opcoesDaEscalaDaLetra,
   TAMANHO_MINIMO_DO_TERMINAL,
 } from "../../shared/canvas/layout";
 import { ALCA_DO_TERMINAL, type NoRascunho as TipoDoNo } from "../../shared/canvas/nos";
@@ -425,7 +425,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                 explicacao={t.tamanhoDaLetraExplicacao}
               />
               <div className="permissoes-da-criacao w-fit" role="radiogroup" aria-labelledby={idDaLetra}>
-                {OPCOES_DA_ESCALA_DA_LETRA.map((opcao) => (
+                {opcoesDaEscalaDaLetra().map((opcao) => (
                   <label key={opcao.valor} className="opcao-da-permissao">
                     <input
                       type="radio"
@@ -434,7 +434,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                       checked={escalaDaLetra === opcao.valor}
                       onChange={() => acoes.mudarEscalaDaLetra(id, opcao.valor)}
                     />
-                    {opcao.valor === 1 ? c.escalaDaLetra.normal : opcao.valor === 1.15 ? c.escalaDaLetra.grande : c.escalaDaLetra.maior}
+                    {opcao.titulo}
                   </label>
                 ))}
               </div>

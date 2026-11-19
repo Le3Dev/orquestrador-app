@@ -22,7 +22,7 @@ import {
   TAMANHO_DO_NAVEGADOR,
   TAMANHO_DO_TERMINAL,
 } from "../shared/canvas/layout";
-import { AVISO_DO_LIMITE_DE_ORQUESTRADORES, LIMITE_DE_ORQUESTRADORES_ABERTOS } from "../shared/canvas/limiteDeTerminais";
+import { avisoDoLimiteDeOrquestradores, LIMITE_DE_ORQUESTRADORES_ABERTOS } from "../shared/canvas/limiteDeTerminais";
 import { idDoBixinho, idDoNoDaPrevia, idDoNoDoArtefato, idDoNoDoNavegador } from "../shared/canvas/nos";
 import type { ApiDoNavegadorDoAgente } from "../shared/canvas/ponteDoNavegador";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../shared/estado/aplicarEvento";
@@ -992,7 +992,7 @@ describe("CanvasDeOrquestradores · abrir orquestrador pelo chat", () => {
 
 // Vários terminais no jsdom: sob a carga da suíte inteira, passam dos 5 s padrão.
 describe("CanvasDeOrquestradores · limite de orquestradores abertos", { timeout: 20_000 }, () => {
-  const AVISO = AVISO_DO_LIMITE_DE_ORQUESTRADORES;
+  const AVISO = avisoDoLimiteDeOrquestradores();
   const LIMITE = LIMITE_DE_ORQUESTRADORES_ABERTOS;
   /** Os terminais abertos no começo de cada teste: o canvas cheio. */
   const ABERTOS = Array.from({ length: LIMITE }, (_, indice) => `o${indice + 1}`);
@@ -1863,14 +1863,14 @@ describe("CanvasDeOrquestradores · artefatos", { timeout: 20_000 }, () => {
     // Um terminal a menos que o limite + 2 artefatos: ainda cabe o formulário de um orquestrador novo.
     escolherNoNovo("Orquestrador");
     await waitFor(() => expect(document.querySelectorAll(".react-flow__node-rascunho")).toHaveLength(1));
-    expect(screen.queryByText(AVISO_DO_LIMITE_DE_ORQUESTRADORES)).not.toBeInTheDocument();
+    expect(screen.queryByText(avisoDoLimiteDeOrquestradores())).not.toBeInTheDocument();
 
     // Com todas as vagas ocupadas, um artefato novo continua abrindo.
     const novo = artefato("a3", { origem: { tipo: "orquestrador", id: "o2" } });
     comArtefatos([novo, artefato("a1"), artefato("a2")], [{ tipo: "artefato_criado", artefato: novo }]);
     rerender(<CanvasDeOrquestradores />);
     await waitFor(() => expect(noNaTela(idDoNoDoArtefato("a3"))).toBeInTheDocument());
-    expect(screen.queryByText(AVISO_DO_LIMITE_DE_ORQUESTRADORES)).not.toBeInTheDocument();
+    expect(screen.queryByText(avisoDoLimiteDeOrquestradores())).not.toBeInTheDocument();
   });
 
   it("a paleta (Ctrl+K) lista os artefatos; escolher um fechado abre a janela", async () => {

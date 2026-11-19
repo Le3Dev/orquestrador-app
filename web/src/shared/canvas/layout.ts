@@ -35,13 +35,6 @@ export function opcoesDaEscalaDaLetra(): readonly { valor: EscalaDaLetra; titulo
   ];
 }
 
-/** As mesmas opções em português (para quem ainda não troca de idioma; prefira `opcoesDaEscalaDaLetra`). */
-export const OPCOES_DA_ESCALA_DA_LETRA: readonly { valor: EscalaDaLetra; titulo: string }[] = [
-  { valor: 1, titulo: "Normal" },
-  { valor: 1.15, titulo: "Grande" },
-  { valor: 1.3, titulo: "Maior" },
-];
-
 export function ehEscalaDaLetra(valor: unknown): valor is EscalaDaLetra {
   return ESCALAS_DA_LETRA.some((escala) => escala === valor);
 }

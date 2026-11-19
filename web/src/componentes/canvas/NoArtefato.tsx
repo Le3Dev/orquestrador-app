@@ -36,12 +36,12 @@ import {
   lerAparenciaDoDesenho,
   MARCA_DO_DESENHO,
   type MensagemDoDesenho,
-  TAG_DO_SCRIPT_DO_DESENHO,
+  tagDoScriptDoDesenho,
   useDesenhoNoDocumento,
   useDesenhoNoQuadro,
 } from "../../shared/desenhoNaPagina";
 import { TAG_DO_SCRIPT_DE_NAVEGACAO, useNavegacaoDoQuadro } from "../../shared/navegacaoDoArtefato";
-import { idiomaAtual, localeDoIdioma, useTextos } from "../../shared/idioma/idioma";
+import { idiomaAtual, localeDoIdioma, useIdioma, useTextos } from "../../shared/idioma/idioma";
 import { textosDeArtefato } from "../../shared/idioma/textos/artefato";
 import { IconeCaneta } from "../Icones";
 import { TextoFormatado } from "../TextoFormatado";
@@ -81,7 +81,7 @@ function comPoliticaDeSeguranca(html: string): string {
   const head = /<head(?:\s[^>]*)?>/i.exec(html);
   const doctype = /^\s*<!doctype[^>]*>/i.exec(html);
   const ponto = head !== null ? head.index + head[0].length : (doctype?.[0].length ?? 0);
-  return `${html.slice(0, ponto)}${META_DA_POLITICA}${TAG_DO_SCRIPT_DE_NAVEGACAO}${TAG_DO_SCRIPT_DO_DESENHO}${html.slice(ponto)}`;
+  return `${html.slice(0, ponto)}${META_DA_POLITICA}${TAG_DO_SCRIPT_DE_NAVEGACAO}${tagDoScriptDoDesenho()}${html.slice(ponto)}`;
 }
 
 /** O nome do arquivo baixado: o do artefato; numa versão antiga, com "-v2" antes da extensão. */
@@ -336,7 +336,10 @@ const CorpoPronto = memo(function CorpoPronto({
   ligarHospedeiro: (hospedeiro: HTMLDivElement | null) => void;
 }) {
   const t = useTextos(textosDeArtefato);
-  const pagina = useMemo(() => (formato === "html" ? comPoliticaDeSeguranca(texto) : ""), [formato, texto]);
+  const idioma = useIdioma();
+  // `idioma` entra nas dependências: o script do desenho leva os textos do idioma de agora.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const pagina = useMemo(() => (formato === "html" ? comPoliticaDeSeguranca(texto) : ""), [formato, texto, idioma]);
   if (formato === "html") {
     const quadro = (estilo?: CSSProperties) => (
       <PaginaNaLarguraDoDesenho largura={largura}>

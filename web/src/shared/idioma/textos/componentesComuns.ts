@@ -59,7 +59,6 @@ export const textosDeComponentesComuns = definirTextos({
     },
     configuracao: {
       prontos: { todos: "Todos", nenhum: "Nenhum", escolher: "Escolher" },
-      escalaDaLetra: { normal: "Normal", grande: "Grande", maior: "Maior" },
       naoAplicou: (predefinicao: string, detalhe: string) => `Não foi possível aplicar o ${predefinicao}: ${detalhe}`,
       permissao: "Permissão",
       permissaoDica: "O que ele pode fazer na pasta.",
@@ -152,7 +151,6 @@ export const textosDeComponentesComuns = definirTextos({
     },
     configuracao: {
       prontos: { todos: "All", nenhum: "None", escolher: "Choose" },
-      escalaDaLetra: { normal: "Normal", grande: "Large", maior: "Larger" },
       naoAplicou: (predefinicao: string, detalhe: string) => `Could not apply ${predefinicao}: ${detalhe}`,
       permissao: "Permission",
       permissaoDica: "What it can do in the folder.",

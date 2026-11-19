@@ -1,13 +1,7 @@
 import { textosAtuais } from "./idioma/idioma";
 import { textosDeApoioDosNos } from "./idioma/textos/nos";
 
-/**
- * As variáveis que o servidor troca nas instruções a cada pedido (`aplicarVariaveis`).
- * @deprecated Fixa em pt-BR; use `dicaDasVariaveis()`, que acompanha o idioma atual.
- */
-export const DICA_DAS_VARIAVEIS = "Use {{pasta}} e {{nome}} para a pasta e o nome do orquestrador.";
-
-/** A dica das variáveis das instruções, no idioma atual. */
+/** A dica das variáveis que o servidor troca nas instruções a cada pedido (`aplicarVariaveis`), no idioma atual. */
 export function dicaDasVariaveis(): string {
   return textosAtuais(textosDeApoioDosNos).instrucoes.dicaDasVariaveis;
 }

@@ -2,7 +2,7 @@ import { Fragment, useState } from "react";
 
 import { api, ErroDaApi, mensagemDeErro } from "../../shared/api/cliente";
 import { type AcaoDeAbrirOrquestrador, LIMITE_DA_FILA, type ResumoDoOrquestrador } from "../../shared/api/tipos";
-import { AVISO_DO_LIMITE_DE_ORQUESTRADORES } from "../../shared/canvas/limiteDeTerminais";
+import { avisoDoLimiteDeOrquestradores } from "../../shared/canvas/limiteDeTerminais";
 import { formatarDecorrido } from "../../shared/formatacao";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
 import { type TextosDe, useTextos } from "../../shared/idioma/idioma";
@@ -159,7 +159,7 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
     // Já feito: só reabre o terminal, sem criar outro nem reenviar o pedido.
     if (etapa.tipo === "feito") {
       if (!temVagaPara(etapa.orquestradorId)) {
-        setEtapa({ tipo: "erro", mensagem: AVISO_DO_LIMITE_DE_ORQUESTRADORES });
+        setEtapa({ tipo: "erro", mensagem: avisoDoLimiteDeOrquestradores() });
         return;
       }
       aoAbrirTerminal(etapa.orquestradorId);
@@ -190,7 +190,7 @@ export function CartaoDeAcao({ acao, aoAbrirTerminal, temVagaPara, aoAtualizarOr
       }
       // Confere a vaga antes de criar: sem ela, nada é criado nem enviado.
       if (!temVagaPara(orquestrador?.id ?? null)) {
-        setEtapa({ tipo: "erro", mensagem: AVISO_DO_LIMITE_DE_ORQUESTRADORES });
+        setEtapa({ tipo: "erro", mensagem: avisoDoLimiteDeOrquestradores() });
         return;
       }
       if (orquestrador === undefined) {

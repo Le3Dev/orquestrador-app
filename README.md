@@ -1741,7 +1741,7 @@ flowchart LR
   - o que vem do servidor continua **em português por ora**: mensagens de erro da API e as respostas do Orquestrador (o idioma delas segue as instruções de cada Orquestrador, não a interface);
   - o **reconhecimento de voz** (idioma e frases do ditado) e os **marcadores de protocolo** (blocos como `<configuracao-do-pedido>`, nomes de eventos e valores enviados à API) **não são traduzidos**;
   - uma tela nova precisa dos dois idiomas no mesmo arquivo de textos (o compilador cobra), mas o texto fica longe do JSX e não há extração automática de chaves;
-  - constantes de texto exportadas (ex.: `AVISO_DO_ULTRACODE`) não acompanham a troca: quem as usa deve ler do dicionário.
+  - constantes de texto exportadas no módulo não acompanham a troca (são avaliadas uma vez, em pt-BR): textos visíveis devem vir de função (ex.: `avisoDoLimiteDeOrquestradores()`, `opcoesDaEscalaDaLetra()`, `tagDoScriptDoDesenho()`) ou do dicionário via `useTextos`/`textosAtuais`.
 
 Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 - no Windows, a ferramenta de terminal é `PowerShell`;

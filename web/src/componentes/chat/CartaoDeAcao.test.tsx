@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 
 import { api, ErroDaApi } from "../../shared/api/cliente";
 import type { AcaoDeAbrirOrquestrador, ResumoDoOrquestrador } from "../../shared/api/tipos";
-import { AVISO_DO_LIMITE_DE_ORQUESTRADORES } from "../../shared/canvas/limiteDeTerminais";
+import { avisoDoLimiteDeOrquestradores } from "../../shared/canvas/limiteDeTerminais";
 import { CONFIGURACAO_PADRAO_DO_ORQUESTRADOR } from "../../shared/modelos";
 import { CartaoDeAcao } from "./CartaoDeAcao";
 
@@ -137,7 +137,7 @@ describe("CartaoDeAcao", () => {
     fireEvent.click(screen.getByRole("button", { name: "abrir" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      AVISO_DO_LIMITE_DE_ORQUESTRADORES,
+      avisoDoLimiteDeOrquestradores(),
     );
     expect(temVagaPara).toHaveBeenCalledWith(null);
     expect(criar).not.toHaveBeenCalled();
@@ -407,7 +407,7 @@ describe("CartaoDeAcao", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Criar outro" }));
 
-      expect(await screen.findByRole("alert")).toHaveTextContent(AVISO_DO_LIMITE_DE_ORQUESTRADORES);
+      expect(await screen.findByRole("alert")).toHaveTextContent(avisoDoLimiteDeOrquestradores());
       expect(criar).not.toHaveBeenCalled();
     });
 
@@ -527,7 +527,7 @@ describe("CartaoDeAcao", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "criar" }));
 
-      expect(await screen.findByRole("alert")).toHaveTextContent(AVISO_DO_LIMITE_DE_ORQUESTRADORES);
+      expect(await screen.findByRole("alert")).toHaveTextContent(avisoDoLimiteDeOrquestradores());
       expect(temVagaPara).toHaveBeenCalledWith(null);
       expect(criar).not.toHaveBeenCalled();
       expect(aoAbrirTerminal).not.toHaveBeenCalled();

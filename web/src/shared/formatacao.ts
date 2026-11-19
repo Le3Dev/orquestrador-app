@@ -30,21 +30,6 @@ export const ROTULOS_DOS_ESFORCOS: Readonly<Record<EsforcoDeRaciocinio, string>>
   (esforco) => textos().esforcos[esforco],
 );
 
-/**
- * Os avisos e rótulos abaixo são constantes em pt-BR (quem os importa não acompanha o idioma):
- * para traduzir, use `textos().avisos` (`useTextos(textosDeConfiguracoes).avisos`).
- * Mostrado perto do esforço quando "ultracode" está escolhido (orquestrador e chat).
- */
-export const AVISO_DO_ULTRACODE =
-  "Ultracode dispara workflows com vários agentes em paralelo: custa bem mais e pesa na memória. Num teste, uma tarefa pequena custou US$ 3,24 em 4,5 min.";
-
-/** Nome e ajuda do interruptor que liga a publicação de artefatos online (orquestrador e chat). */
-export const ROTULO_DOS_ARTEFATOS_ONLINE = "Publicar artefatos no claude.ai";
-export const AJUDA_DOS_ARTEFATOS_ONLINE =
-  "O orquestrador e o executor dele podem publicar páginas online e devolver o link. A publicação fica na sua conta do claude.ai e o conteúdo sai do computador; não vale no planejamento. Deixe desligado em projetos com dados sensíveis.";
-export const AJUDA_DOS_ARTEFATOS_ONLINE_DO_CHAT =
-  "O chat pode publicar páginas online e devolver o link. A publicação fica na sua conta do claude.ai e o conteúdo sai do computador. Deixe desligado em projetos com dados sensíveis.";
-
 /** Na criação, "padrao" se chama Automático: o app não força nada e vale o padrão do Claude Code. */
 export function rotuloDoEsforcoNaCriacao(esforco: EsforcoDeRaciocinio): string {
   return esforco === "padrao" ? textos().esforcos.automaticoNaCriacao : ROTULOS_DOS_ESFORCOS[esforco];

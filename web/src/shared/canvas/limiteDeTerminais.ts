@@ -17,9 +17,6 @@ export function avisoDoLimiteDeOrquestradores(): string {
   return textosAtuais(textosDePaginaDoCanvas).avisoDoLimite(LIMITE_DE_ORQUESTRADORES_ABERTOS);
 }
 
-/** O mesmo aviso em português (para quem ainda não troca de idioma; prefira `avisoDoLimiteDeOrquestradores`). */
-export const AVISO_DO_LIMITE_DE_ORQUESTRADORES = `Limite de ${LIMITE_DE_ORQUESTRADORES_ABERTOS} orquestradores abertos. Feche um dos orquestradores (✕ na barra do terminal) antes de iniciar outro.`;
-
 /**
  * Se cabe abrir o terminal pedido. Um Orquestrador que já está aberto sempre
  * cabe (só ganha o foco); `pedido` nulo é um terminal novo (rascunho ou

@@ -1,5 +1,6 @@
+import { definirIdioma } from "../idioma/idioma";
 import {
-  AVISO_DO_LIMITE_DE_ORQUESTRADORES,
+  avisoDoLimiteDeOrquestradores,
   cabeOutroTerminal,
   LIMITE_DE_ORQUESTRADORES_ABERTOS,
 } from "./limiteDeTerminais";
@@ -12,9 +13,19 @@ describe("limite de orquestradores abertos", () => {
 
   it("o limite é 20 e o aviso usa o número da constante", () => {
     expect(LIMITE).toBe(20);
-    expect(AVISO_DO_LIMITE_DE_ORQUESTRADORES).toBe(
+    expect(avisoDoLimiteDeOrquestradores()).toBe(
       "Limite de 20 orquestradores abertos. Feche um dos orquestradores (✕ na barra do terminal) antes de iniciar outro.",
     );
+  });
+
+  it("em inglês, o aviso sai em inglês", () => {
+    definirIdioma("en");
+    try {
+      expect(avisoDoLimiteDeOrquestradores()).not.toContain("orquestradores");
+      expect(avisoDoLimiteDeOrquestradores()).toContain("20");
+    } finally {
+      definirIdioma("pt-BR");
+    }
   });
 
   it("com um a menos que o limite, cabe outro", () => {
