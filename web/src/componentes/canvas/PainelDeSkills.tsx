@@ -2,6 +2,8 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { PluginInstalado } from "../../shared/api/tipos";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineis } from "../../shared/idioma/textos/paineis";
 import { IconeFechar, IconeSkills } from "../Icones";
 import { CatalogoDePlugins } from "./CatalogoDePlugins";
 import { ConfirmacaoDeHook } from "./ConfirmacaoDeHook";
@@ -45,6 +47,7 @@ export function PainelDeSkills({
   aoFechar,
 }: Props) {
   const idBase = useId();
+  const t = useTextos(textosDePaineis).skills;
   const [aba, setAba] = useState<AbaDoPainelDeSkills>(abaInicial);
   // Cada aba só abre na primeira visita (o catálogo não vai à rede à toa) e depois fica montada, para não
   // perder uma instalação em andamento ao trocar de aba.
@@ -116,25 +119,23 @@ export function PainelDeSkills({
   const idDoCorpo = (nome: AbaDoPainelDeSkills) => `${idBase}-corpo-${nome}`;
 
   return (
-    <section ref={painel} className="painel-flutuante painel-da-barra painel-de-skills mt-2" aria-label="Skills do Claude Code">
+    <section ref={painel} className="painel-flutuante painel-da-barra painel-de-skills mt-2" aria-label={t.rotulo}>
       <header className="mk-cab">
         <div className="min-w-0">
           <h2>
             <IconeSkills tamanho={18} />
-            Skills
+            {t.titulo}
           </h2>
           <p className="sub">
-            {aba === "explorar"
-              ? "Habilidades extras que seus agentes carregam sozinhos, pelo pedido."
-              : "O que o Claude Code tem cadastrado. Os agentes carregam a skill certa pelo pedido."}
+            {aba === "explorar" ? t.subExplorar : t.subInstaladas}
           </p>
         </div>
-        <button type="button" className="botao-icone shrink-0" aria-label="Fechar skills" onClick={aoFechar}>
+        <button type="button" className="botao-icone shrink-0" aria-label={t.fechar} onClick={aoFechar}>
           <IconeFechar tamanho={16} />
         </button>
       </header>
 
-      <div className="mk-abas" role="tablist" aria-label="Skills">
+      <div className="mk-abas" role="tablist" aria-label={t.titulo}>
         <button
           type="button"
           id={idDaAba("instaladas")}
@@ -144,7 +145,7 @@ export function PainelDeSkills({
           aria-controls={idDoCorpo("instaladas")}
           onClick={() => escolherAba("instaladas")}
         >
-          Instaladas
+          {t.instaladas}
           {quantidadeDeSkills !== null && <span className="n">{quantidadeDeSkills}</span>}
         </button>
         <button
@@ -156,7 +157,7 @@ export function PainelDeSkills({
           aria-controls={idDoCorpo("explorar")}
           onClick={() => escolherAba("explorar")}
         >
-          Explorar
+          {t.explorar}
         </button>
       </div>
 

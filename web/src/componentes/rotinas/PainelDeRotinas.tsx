@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { RotinasAoVivo } from "../../shared/hooks/useRotinas";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeRotinas } from "../../shared/idioma/textos/rotinas";
 import { IconeFechar } from "../Icones";
 import { CartaoDeAprovacao } from "./CartaoDeAprovacao";
 import { DetalheDaRotina } from "./DetalheDaRotina";
@@ -26,6 +28,7 @@ type Modo = "detalhe" | "nova" | "editar";
  * "Rotinas indisponíveis" e o resto do canvas segue de pé.
  */
 export function PainelDeRotinas({ rotinas, orquestradores, aoFechar }: Props) {
+  const t = useTextos(textosDeRotinas).painel;
   const { lista, carregada, indisponivel, erro, aprovacoesPendentes } = rotinas;
   const [selecionadaId, setSelecionadaId] = useState<string | null>(null);
   const [modo, setModo] = useState<Modo>("detalhe");
@@ -77,15 +80,13 @@ export function PainelDeRotinas({ rotinas, orquestradores, aoFechar }: Props) {
   const editando = modo === "nova" || (modo === "editar" && escolhida !== null);
 
   return (
-    <section ref={painel} className="painel-flutuante painel-da-barra mt-2 w-[760px]" aria-label="Rotinas">
+    <section ref={painel} className="painel-flutuante painel-da-barra mt-2 w-[760px]" aria-label={t.rotulo}>
       <header className="painel-da-barra-cabecalho">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <h2 className="text-[14px]">Rotinas</h2>
-          <span className="text-support">
-            Fluxos que rodam sozinhos na hora marcada: pedidos aos orquestradores, aprovações e esperas.
-          </span>
+          <h2 className="text-[14px]">{t.titulo}</h2>
+          <span className="text-support">{t.descricao}</span>
         </div>
-        <button type="button" className="botao-icone shrink-0" aria-label="Fechar rotinas" onClick={aoFechar}>
+        <button type="button" className="botao-icone shrink-0" aria-label={t.fechar} onClick={aoFechar}>
           <IconeFechar tamanho={16} />
         </button>
       </header>
@@ -93,27 +94,24 @@ export function PainelDeRotinas({ rotinas, orquestradores, aoFechar }: Props) {
       {indisponivel ? (
         <div className="painel-da-barra-corpo" role="alert">
           <div className="alert alert-warning flex flex-col gap-2">
-            <strong className="font-titulo text-[13px] text-primary">Rotinas indisponíveis</strong>
-            <span>
-              Não foi possível carregar as rotinas{erro !== null ? `: ${erro}` : "."} O resto do Orquestrador segue funcionando;
-              a tela tenta de novo sozinha.
-            </span>
+            <strong className="font-titulo text-[13px] text-primary">{t.indisponiveis}</strong>
+            <span>{t.naoCarregou(erro)}</span>
             <span>
               <button type="button" className="btn btn-sm btn-outline" onClick={rotinas.recarregar}>
-                Tentar de novo
+                {t.tentarDeNovo}
               </button>
             </span>
           </div>
         </div>
       ) : !carregada ? (
         <div className="painel-da-barra-corpo">
-          <span className="hint">carregando…</span>
+          <span className="hint">{t.carregando}</span>
         </div>
       ) : (
         <>
           {erro !== null && (
             <div className="alert alert-warning mx-4 mt-3" role="status">
-              Sem resposta do servidor: o que aparece pode estar desatualizado. Tentando de novo…
+              {t.semResposta}
             </div>
           )}
 
@@ -121,7 +119,7 @@ export function PainelDeRotinas({ rotinas, orquestradores, aoFechar }: Props) {
             <div
               className="custom-scrollbar flex max-h-[45vh] shrink-0 flex-col gap-2 overflow-y-auto border-b border-border p-3"
               role="region"
-              aria-label="Aprovações pendentes"
+              aria-label={t.aprovacoesPendentes}
             >
               {aprovacoesPendentes.map(({ execucao }) => (
                 <CartaoDeAprovacao key={execucao.id} execucao={execucao} aoAprovar={rotinas.aprovar} aoRecusar={rotinas.recusar} />
@@ -131,19 +129,16 @@ export function PainelDeRotinas({ rotinas, orquestradores, aoFechar }: Props) {
 
           {lista.length === 0 && modo !== "nova" ? (
             <div className="subagentes-vazio">
-              <strong className="font-titulo text-[13px]">Nenhuma rotina ainda</strong>
-              <span className="text-support max-w-sm">
-                Crie uma rotina para um orquestrador trabalhar sozinho, por exemplo: todo dia às 09:00, pedir um resumo do que mudou
-                no projeto e esperar sua aprovação antes de seguir.
-              </span>
+              <strong className="font-titulo text-[13px]">{t.nenhuma}</strong>
+              <span className="text-support max-w-sm">{t.nenhumaAjuda}</span>
               <button type="button" className="btn btn-sm btn-outline" onClick={() => setModo("nova")}>
-                + Nova rotina
+                {t.nova}
               </button>
             </div>
           ) : (
             <div className="subagentes-corpo">
               <div className="subagentes-lista">
-                <ul className="custom-scrollbar" aria-label="Lista de rotinas">
+                <ul className="custom-scrollbar" aria-label={t.lista}>
                   {lista.map((rotina) => (
                     <li key={rotina.id}>
                       <button
@@ -155,7 +150,7 @@ export function PainelDeRotinas({ rotinas, orquestradores, aoFechar }: Props) {
                         <span className="truncate text-[12.5px] font-medium text-primary">{rotina.nome}</span>
                         <span className="truncate text-[11.5px] text-muted">{descreverGatilho(rotina.gatilho)}</span>
                         <span className="truncate text-[11px] text-muted">
-                          {rotina.ativa ? `Ativa · ${descreverProximaExecucao(rotina)}` : "Desativada"}
+                          {rotina.ativa ? t.ativaCom(descreverProximaExecucao(rotina)) : t.desativada}
                         </span>
                         {rotina.execucaoAtiva !== null && (
                           <span className="mt-0.5 self-start">
@@ -168,7 +163,7 @@ export function PainelDeRotinas({ rotinas, orquestradores, aoFechar }: Props) {
                 </ul>
                 <div className="flex flex-col gap-1.5 border-t border-border p-2">
                   <button type="button" className="btn btn-sm btn-ghost" onClick={() => setModo("nova")}>
-                    + Nova rotina
+                    {t.nova}
                   </button>
                 </div>
               </div>
@@ -176,7 +171,7 @@ export function PainelDeRotinas({ rotinas, orquestradores, aoFechar }: Props) {
               {editando ? (
                 <EditorDeRotina
                   key={modo === "nova" ? "nova" : escolhida?.id}
-                  titulo={modo === "nova" ? "Nova rotina" : "Editar rotina"}
+                  titulo={modo === "nova" ? t.tituloNova : t.tituloEditar}
                   inicial={modo === "nova" || escolhida === null ? rotinaNova : emEdicao(escolhida)}
                   {...(modo === "editar" && escolhida !== null ? { gatilhoSalvo: escolhida.gatilho } : {})}
                   orquestradores={orquestradores}

@@ -1,5 +1,7 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineis } from "../../shared/idioma/textos/paineis";
 import { acharNoTexto, linhaCurta } from "./dadosDoPlugin";
 import { IconeSetaDireita } from "./IconesDasIlhas";
 import { IconeConfirmar, IconeCopiar } from "./IconesDoMarketplace";
@@ -44,6 +46,7 @@ function comDestaque(texto: string, termo: string, margem?: number): ReactNode {
  */
 export function ItemDeSkill({ nome, nomeCompleto, descricao, origem, termo = "" }: Props) {
   const id = useId();
+  const t = useTextos(textosDePaineis).itemDeSkill;
   const [aberta, setAberta] = useState(false);
   const [copiado, setCopiado] = useState(false);
   const temporizador = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -54,7 +57,7 @@ export function ItemDeSkill({ nome, nomeCompleto, descricao, origem, termo = "" 
   const semDescricao = descricaoLimpa === "";
   const casouNoNome = acharNoTexto(nome, termo) !== null;
   const resumo = semDescricao
-    ? "Sem descrição."
+    ? t.semDescricao
     : !casouNoNome && acharNoTexto(descricaoLimpa, termo, MARGEM_DO_TRECHO) !== null
       ? comDestaque(descricaoLimpa, termo, MARGEM_DO_TRECHO)
       : linhaCurta(nome, descricao);
@@ -91,18 +94,18 @@ export function ItemDeSkill({ nome, nomeCompleto, descricao, origem, termo = "" 
         <div id={`${id}-corpo`} className="mk-skill-corpo" role="region" aria-labelledby={`${id}-botao`}>
           {!semDescricao && <p className="mk-skill-texto">{comDestaque(descricaoLimpa, termo)}</p>}
           <dl className="mk-skill-ficha">
-            <dt>Nome completo</dt>
+            <dt>{t.nomeCompleto}</dt>
             <dd>
               <span className="mono">{nomeCompleto}</span>
               <button type="button" className="btn btn-ghost mk-copiar" onClick={copiar}>
                 {copiado ? <IconeConfirmar tamanho={13} /> : <IconeCopiar tamanho={13} />}
-                {copiado ? "Copiado" : "Copiar"}
+                {copiado ? t.copiado : t.copiar}
               </button>
               <span className="sr-only" role="status">
-                {copiado ? "Nome copiado" : ""}
+                {copiado ? t.nomeCopiado : ""}
               </span>
             </dd>
-            <dt>Origem</dt>
+            <dt>{t.origem}</dt>
             <dd>{origem}</dd>
           </dl>
         </div>

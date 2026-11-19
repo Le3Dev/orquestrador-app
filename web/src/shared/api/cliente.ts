@@ -33,6 +33,9 @@ import type {
   SituacaoDoServidorLocal,
   VinculoDto,
 } from "./tipos";
+import { textosAtuais } from "../idioma/idioma";
+import { textosDePaineis } from "../idioma/textos/paineis";
+
 
 function extrairMensagem(corpo: unknown): string | null {
   if (typeof corpo === "object" && corpo !== null && "erro" in corpo && typeof corpo.erro === "string") {
@@ -64,12 +67,12 @@ async function requisitar<Resposta>(caminho: string, opcoes: RequestInit = {}): 
       headers: { "Content-Type": "application/json", ...opcoes.headers },
     });
   } catch {
-    throw new Error("Não foi possível falar com o servidor. Feche e abra o Orquestrador de novo.");
+    throw new Error(textosAtuais(textosDePaineis).api.falhaDeConexao);
   }
 
   const corpo: unknown = resposta.status === 204 ? null : await resposta.json().catch(() => null);
   if (!resposta.ok) {
-    throw new ErroDaApi(extrairMensagem(corpo) ?? `O servidor respondeu com erro ${resposta.status}.`, resposta.status);
+    throw new ErroDaApi(extrairMensagem(corpo) ?? textosAtuais(textosDePaineis).api.servidorRespondeuComErro(resposta.status), resposta.status);
   }
   return corpo as Resposta;
 }

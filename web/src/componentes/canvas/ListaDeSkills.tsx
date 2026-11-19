@@ -2,6 +2,8 @@ import { Fragment, useEffect, useId, useMemo, useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { DadosDaSkill, ListagemDeSkills, PluginInstalado } from "../../shared/api/tipos";
+import { textosAtuais, useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineis } from "../../shared/idioma/textos/paineis";
 import { IconeSkills } from "../Icones";
 import { contar, nomeAmigavel, normalizarParaBusca as normalizar } from "./dadosDoPlugin";
 import { IconeInfo, IconeLupa } from "./IconesDasIlhas";
@@ -16,15 +18,14 @@ export interface OrquestradorParaSkills {
 
 /** A linha do rodapé: quais orquestradores abertos estão num nível que desliga as skills. */
 function avisoCurtoDeSkillsDesligadas(nomes: readonly string[]): string {
-  return nomes.length === 1
-    ? `Desligadas em ${nomes[0] ?? ""}, que está em só leitura.`
-    : `Desligadas em ${nomes.length} orquestradores (só leitura).`;
+  const t = textosAtuais(textosDePaineis).listaDeSkills;
+  return nomes.length === 1 ? t.desligadasEmUm(nomes[0] ?? "") : t.desligadasEmVarios(nomes.length);
 }
 
 /** O resto do aviso, que abre em "Entenda". */
 function explicacaoDeSkillsDesligadas(nomes: readonly string[]): string {
-  const onde = nomes.length === 1 ? "Nesse nível" : `Nestes orquestradores (${nomes.join(", ")})`;
-  return `${onde} o agente não usa skills. Elas valem nos níveis com edição, fora do planejamento.`;
+  const t = textosAtuais(textosDePaineis).listaDeSkills;
+  return t.explicacao(nomes.length === 1 ? t.nesseNivel : t.nestesOrquestradores(nomes.join(", ")));
 }
 
 /** Os pacotes de skills da conta, em ordem, cada um com as skills dele em ordem alfabética. */
@@ -85,6 +86,7 @@ interface Props {
  */
 export function ListaDeSkills({ orquestradores, versao, aoMudarPlugins, aoPedirConfirmacao }: Props) {
   const id = useId();
+  const t = useTextos(textosDePaineis).listaDeSkills;
   const [busca, setBusca] = useState("");
   const [entenda, setEntenda] = useState(false);
   const [leitura, setLeitura] = useState<Leitura | null>(null);
@@ -168,25 +170,25 @@ export function ListaDeSkills({ orquestradores, versao, aoMudarPlugins, aoPedirC
       if (skills.length > 0) {
         doProjeto.push({
           chave: `projeto:${orquestrador.id}`,
-          titulo: `Do projeto ${orquestrador.nome}`,
-          origem: `Do projeto ${orquestrador.nome}`,
+          titulo: t.doProjeto(orquestrador.nome),
+          origem: t.doProjeto(orquestrador.nome),
           skills,
         });
       }
     }
     const completos: Grupo[] = [
-      { chave: "usuario", titulo: "Suas skills", origem: "Da pasta de skills do Claude Code", skills: doUsuario },
+      { chave: "usuario", titulo: t.suasSkills, origem: t.origemDoUsuario, skills: doUsuario },
       ...doProjeto,
       {
         chave: "conta",
-        titulo: "Da sua conta Claude",
-        nota: "Sincronizadas pela conta, só leitura",
-        origem: "Da sua conta Claude, só leitura",
+        titulo: t.daConta,
+        nota: t.notaDaConta,
+        origem: t.origemDaConta,
         skills: daConta,
       },
     ].filter((grupo) => grupo.skills.length > 0);
     return { grupos: completos, desligadosEm: desligados };
-  }, [lida, orquestradores]);
+  }, [lida, orquestradores, t]);
 
   const plugins = lida?.plugins ?? [];
   const pluginsVisiveis = plugins.filter(pluginCombina);
@@ -204,7 +206,7 @@ export function ListaDeSkills({ orquestradores, versao, aoMudarPlugins, aoPedirC
       <span className="mono">{visiveisNoGrupo}</span>
     ) : (
       <span className="mk-contador">
-        {visiveisNoGrupo} de {totalDoGrupo}
+        {t.contador(visiveisNoGrupo, totalDoGrupo)}
       </span>
     );
 
@@ -234,8 +236,8 @@ export function ListaDeSkills({ orquestradores, versao, aoMudarPlugins, aoPedirC
         </span>
         <input
           type="search"
-          aria-label="Buscar skill por nome ou descrição"
-          placeholder="Buscar por nome ou descrição (em inglês)"
+          aria-label={t.buscarRotulo}
+          placeholder={t.buscarExemplo}
           value={busca}
           spellCheck={false}
           onChange={(evento) => setBusca(evento.target.value)}
@@ -245,7 +247,7 @@ export function ListaDeSkills({ orquestradores, versao, aoMudarPlugins, aoPedirC
 
       <div className="mk-instaladas custom-scrollbar" aria-live="polite" aria-busy={atual === null}>
         {atual === null ? (
-          <span className="hint mk-carregando">carregando…</span>
+          <span className="hint mk-carregando">{t.carregando}</span>
         ) : erro !== null ? (
           <div className="alert alert-error mk-alerta">{erro}</div>
         ) : total === 0 && erroDosPlugins === null ? (
@@ -253,29 +255,29 @@ export function ListaDeSkills({ orquestradores, versao, aoMudarPlugins, aoPedirC
             <span className="tile">
               <IconeSkills tamanho={24} />
             </span>
-            <h3>Nenhuma skill encontrada</h3>
-            <p>As skills ficam na pasta do Claude Code do usuário, na do projeto e nos plugins instalados.</p>
+            <h3>{t.nenhumaTitulo}</h3>
+            <p>{t.nenhumaTexto}</p>
           </div>
         ) : pluginsVisiveis.length === 0 && visiveis.length === 0 && erroDosPlugins === null ? (
           <div className="mk-vazio">
-            <h3>Nenhuma skill combina com “{termoDigitado}”</h3>
-            <p>As descrições estão em inglês: tente spreadsheet no lugar de planilha.</p>
+            <h3>{t.nenhumaCombina(termoDigitado)}</h3>
+            <p>{t.dicaDeBusca}</p>
           </div>
         ) : (
           <>
             {erroDosPlugins !== null && (
               <section className="mk-grupo">
                 <div className="alert alert-error" role="alert">
-                  Não deu para ler os plugins instalados. {erroDosPlugins}
+                  {t.naoLeuPlugins(erroDosPlugins)}
                 </div>
               </section>
             )}
             {pluginsVisiveis.length > 0 && (
               <section className="mk-grupo" aria-labelledby={`${id}-plugins`}>
                 <h3 id={`${id}-plugins`}>
-                  <span className="truncate">Plugins</span>
+                  <span className="truncate">{t.plugins}</span>
                   {contadorDoGrupo(pluginsVisiveis.length, plugins.length)}
-                  <span className="nota">Valem no app e no terminal</span>
+                  <span className="nota">{t.valemNoApp}</span>
                 </h3>
                 {pluginsVisiveis.map((plugin) => (
                   <LinhaDoPluginInstalado
@@ -310,7 +312,7 @@ export function ListaDeSkills({ orquestradores, versao, aoMudarPlugins, aoPedirC
                           <span>{skills.length}</span>
                         </div>
                       )}
-                      <ul className="mk-skills-lista" aria-label={pacote === "" ? undefined : `Skills do pacote ${pacote}`}>
+                      <ul className="mk-skills-lista" aria-label={pacote === "" ? undefined : t.skillsDoPacote(pacote)}>
                         {skills.map((skill) => itemDaLista(skill, grupo.origem))}
                       </ul>
                     </Fragment>
@@ -325,7 +327,7 @@ export function ListaDeSkills({ orquestradores, versao, aoMudarPlugins, aoPedirC
       </div>
       {termoDigitado !== "" && atual !== null && erro === null && (
         <p className="sr-only" role="status">
-          {contar(pluginsVisiveis.length + totalVisivelDeSkills, "resultado encontrado", "resultados encontrados")}
+          {contar(pluginsVisiveis.length + totalVisivelDeSkills, t.resultado.um, t.resultado.varios)}
         </p>
       )}
 
@@ -341,7 +343,7 @@ export function ListaDeSkills({ orquestradores, versao, aoMudarPlugins, aoPedirC
               aria-controls={entenda ? `${id}-entenda` : undefined}
               onClick={() => setEntenda((aberto) => !aberto)}
             >
-              Entenda
+              {t.entenda}
             </button>
           </div>
           {entenda && (

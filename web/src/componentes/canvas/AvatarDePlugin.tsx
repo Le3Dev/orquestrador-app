@@ -1,5 +1,7 @@
 import type { CSSProperties } from "react";
 
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineis } from "../../shared/idioma/textos/paineis";
 import { iniciaisDe } from "./dadosDoPlugin";
 import { IconeSeloOficial } from "./IconesDoMarketplace";
 
@@ -27,10 +29,11 @@ export function AvatarDePlugin({ nome, tamanho = 40 }: { nome: string; tamanho?:
 
 /** O selo de plugin do marketplace oficial da Anthropic. */
 export function SeloOficial() {
+  const t = useTextos(textosDePaineis).catalogo;
   return (
-    <span className="mk-selo" title="Do marketplace oficial da Anthropic">
+    <span className="mk-selo" title={t.seloOficialDica}>
       <IconeSeloOficial />
-      Oficial
+      {t.oficial}
     </span>
   );
 }

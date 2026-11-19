@@ -8,6 +8,8 @@ import {
   type DadosDoSubagentePronto,
   type ModeloDoSubagentePronto,
 } from "../../shared/api/tipos";
+import { idiomaAtual, localeDoIdioma, textosAtuais, useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineis } from "../../shared/idioma/textos/paineis";
 import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
 import { nomeDeSubagente } from "../../shared/subagentesProntos";
 import { Dica } from "../Dica";
@@ -16,12 +18,13 @@ import { IconeFechar, IconePessoas } from "../Icones";
 /** Como o servidor confere (`TAMANHO_MAXIMO_DO_NOME_DO_SUBAGENTE`). */
 const TAMANHO_MAXIMO_DO_NOME = 40;
 
-const MODELOS: { valor: ModeloDoSubagentePronto; rotulo: string; curto: string }[] = [
-  { valor: "herdar", rotulo: "Herdar do orquestrador", curto: "herda" },
-  { valor: "opus", rotulo: "Opus", curto: "opus" },
-  { valor: "sonnet", rotulo: "Sonnet", curto: "sonnet" },
-  { valor: "haiku", rotulo: "Haiku", curto: "haiku" },
-];
+const MODELOS = ["herdar", "opus", "sonnet", "haiku"] as const;
+type ModeloListado = (typeof MODELOS)[number];
+
+/** Um modelo fora da lista (ex.: vindo de um servidor mais novo) aparece como "herdar", como antes. */
+const modeloListado = (modelo: ModeloDoSubagentePronto): ModeloListado => MODELOS.find((opcao) => opcao === modelo) ?? "herdar";
+
+const numero = (valor: number): string => valor.toLocaleString(localeDoIdioma(idiomaAtual()));
 
 /** Um subagente na edição, com uma chave estável para a lista e a seleção. */
 interface SubagenteEmEdicao extends DadosDoSubagentePronto {
@@ -38,24 +41,25 @@ function semChave({ nome, descricao, prompt, modelo }: SubagenteEmEdicao): Dados
  * mensagem exata.
  */
 function problemaDo(subagente: SubagenteEmEdicao, todos: readonly SubagenteEmEdicao[]): string | null {
+  const p = textosAtuais(textosDePaineis).subagentes.problemas;
   if (subagente.nome === "") {
-    return "dê um nome.";
+    return p.deUmNome;
   }
   if (!/^[a-z]/.test(subagente.nome)) {
-    return "comece o nome por uma letra.";
+    return p.comeceComLetra;
   }
   if (todos.some((outro) => outro.chave !== subagente.chave && outro.nome === subagente.nome)) {
-    return `troque o nome: já existe um "${subagente.nome}".`;
+    return p.nomeRepetido(subagente.nome);
   }
   if (subagente.descricao.trim() === "") {
-    return "diga quando usar.";
+    return p.digaQuandoUsar;
   }
   const prompt = tamanhoDasInstrucoes(subagente.prompt);
   if (prompt === 0) {
-    return "escreva o prompt.";
+    return p.escrevaOPrompt;
   }
   if (prompt > TAMANHO_MAXIMO_DO_PROMPT_DO_SUBAGENTE) {
-    return `encurte o prompt para até ${TAMANHO_MAXIMO_DO_PROMPT_DO_SUBAGENTE.toLocaleString("pt-BR")} caracteres.`;
+    return p.encurteOPrompt(numero(TAMANHO_MAXIMO_DO_PROMPT_DO_SUBAGENTE));
   }
   return null;
 }
@@ -71,15 +75,16 @@ interface PropsDoEditor {
 /** O lado direito: os campos do subagente escolhido, com o rótulo à esquerda. */
 function EditorDoSubagente({ subagente, problema, aoMudar, aoRemover, campoDoNome }: PropsDoEditor) {
   const id = useId();
+  const t = useTextos(textosDePaineis).subagentes;
   const tamanhoDoPrompt = tamanhoDasInstrucoes(subagente.prompt);
   const passouDoPrompt = tamanhoDoPrompt > TAMANHO_MAXIMO_DO_PROMPT_DO_SUBAGENTE;
   return (
     <div className="subagentes-editor custom-scrollbar">
       <div className="linha-de-campo">
         <span className="rotulo-de-campo">
-          <label htmlFor={`${id}-nome`}>Nome</label>
-          <Dica sobre="Nome" titulo="Como o orquestrador chama este ajudante.">
-            Minúsculas e hífen, por exemplo revisor-de-codigo.
+          <label htmlFor={`${id}-nome`}>{t.nome}</label>
+          <Dica sobre={t.nome} titulo={t.nomeDicaTitulo}>
+            {t.nomeDicaTexto}
           </Dica>
         </span>
         <input
@@ -87,7 +92,7 @@ function EditorDoSubagente({ subagente, problema, aoMudar, aoRemover, campoDoNom
           id={`${id}-nome`}
           className="input campo-escuro mono"
           value={subagente.nome}
-          placeholder="revisor-de-codigo"
+          placeholder={t.nomeExemplo}
           maxLength={TAMANHO_MAXIMO_DO_NOME}
           spellCheck={false}
           onChange={(evento) => aoMudar({ nome: nomeDeSubagente(evento.target.value) })}
@@ -95,9 +100,9 @@ function EditorDoSubagente({ subagente, problema, aoMudar, aoRemover, campoDoNom
       </div>
       <div className="linha-de-campo">
         <span className="rotulo-de-campo">
-          <label htmlFor={`${id}-modelo`}>Modelo</label>
-          <Dica sobre="Modelo" titulo="Qual Claude ele usa.">
-            Herdar usa o mesmo modelo dos subagentes do orquestrador.
+          <label htmlFor={`${id}-modelo`}>{t.modelo}</label>
+          <Dica sobre={t.modelo} titulo={t.modeloDicaTitulo}>
+            {t.modeloDicaTexto}
           </Dica>
         </span>
         <select
@@ -107,33 +112,33 @@ function EditorDoSubagente({ subagente, problema, aoMudar, aoRemover, campoDoNom
           onChange={(evento) => aoMudar({ modelo: evento.target.value as ModeloDoSubagentePronto })}
         >
           {MODELOS.map((modelo) => (
-            <option key={modelo.valor} value={modelo.valor}>
-              {modelo.rotulo}
+            <option key={modelo} value={modelo}>
+              {t.modelos[modelo].rotulo}
             </option>
           ))}
         </select>
       </div>
       <div className="linha-de-campo">
         <span className="rotulo-de-campo">
-          <label htmlFor={`${id}-descricao`}>Quando usar</label>
-          <Dica sobre="Quando usar" titulo="Quando o orquestrador deve chamar.">
-            O orquestrador lê esta frase para decidir se usa este ajudante num pedido. Seja específico.
+          <label htmlFor={`${id}-descricao`}>{t.quandoUsar}</label>
+          <Dica sobre={t.quandoUsar} titulo={t.quandoUsarDicaTitulo}>
+            {t.quandoUsarDicaTexto}
           </Dica>
         </span>
         <input
           id={`${id}-descricao`}
           className="input campo-escuro"
           value={subagente.descricao}
-          placeholder="Ex.: depois de mudar código, para revisar o diff procurando bugs"
+          placeholder={t.quandoUsarExemplo}
           maxLength={TAMANHO_MAXIMO_DA_DESCRICAO_DO_SUBAGENTE}
           onChange={(evento) => aoMudar({ descricao: evento.target.value })}
         />
       </div>
       <div className="linha-de-campo">
         <span className="rotulo-de-campo">
-          <label htmlFor={`${id}-prompt`}>Prompt</label>
-          <Dica sobre="Prompt" titulo="O que ele faz e como.">
-            As instruções deste ajudante. Ele roda com as mesmas permissões do orquestrador no pedido.
+          <label htmlFor={`${id}-prompt`}>{t.prompt}</label>
+          <Dica sobre={t.prompt} titulo={t.promptDicaTitulo}>
+            {t.promptDicaTexto}
           </Dica>
         </span>
         <div className="flex flex-col gap-1">
@@ -142,20 +147,20 @@ function EditorDoSubagente({ subagente, problema, aoMudar, aoRemover, campoDoNom
             className="textarea campo-escuro textarea-instrucoes textarea-do-subagente custom-scrollbar"
             rows={9}
             value={subagente.prompt}
-            placeholder="Ex.: Leia o diff inteiro, aponte bugs com arquivo e linha e não altere nada."
+            placeholder={t.promptExemplo}
             aria-invalid={passouDoPrompt}
             onChange={(evento) => aoMudar({ prompt: evento.target.value })}
           />
           <span className={`font-mono self-end text-[10.5px] ${passouDoPrompt ? "text-error" : "text-muted"}`} aria-live="polite">
-            {tamanhoDoPrompt.toLocaleString("pt-BR")} / {TAMANHO_MAXIMO_DO_PROMPT_DO_SUBAGENTE.toLocaleString("pt-BR")}
+            {numero(tamanhoDoPrompt)} / {numero(TAMANHO_MAXIMO_DO_PROMPT_DO_SUBAGENTE)}
           </span>
         </div>
       </div>
       <div className="flex items-center gap-3 border-t border-border pt-3">
         <button type="button" className="btn btn-sm btn-danger" onClick={aoRemover}>
-          Remover
+          {t.remover}
         </button>
-        {problema !== null && <span className="text-[11px] text-warning">Para salvar, {problema}</span>}
+        {problema !== null && <span className="text-[11px] text-warning">{t.paraSalvar(problema)}</span>}
       </div>
     </div>
   );
@@ -174,6 +179,7 @@ interface Props {
  * `subagentesProntos` (a lista troca inteira no servidor).
  */
 export function PainelDeSubagentes({ aoFechar, aoSalvar }: Props) {
+  const t = useTextos(textosDePaineis).subagentes;
   const [salvos, setSalvos] = useState<DadosDoSubagentePronto[] | null>(null);
   const [subagentes, setSubagentes] = useState<SubagenteEmEdicao[]>([]);
   const [escolhido, setEscolhido] = useState<string | null>(null);
@@ -276,41 +282,36 @@ export function PainelDeSubagentes({ aoFechar, aoSalvar }: Props) {
   }
 
   return (
-    <section ref={painel} className="painel-flutuante painel-da-barra painel-de-subagentes mt-2" aria-label="Subagentes prontos">
+    <section ref={painel} className="painel-flutuante painel-da-barra painel-de-subagentes mt-2" aria-label={t.rotulo}>
       <header className="painel-da-barra-cabecalho">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <h2 className="text-[14px]">Subagentes prontos</h2>
-          <span className="text-support">
-            Todo orquestrador recebe esta lista e chama o ajudante certo pela frase de quando usar.
-          </span>
+          <h2 className="text-[14px]">{t.titulo}</h2>
+          <span className="text-support">{t.descricao}</span>
         </div>
-        <button type="button" className="botao-icone shrink-0" aria-label="Fechar subagentes" onClick={aoFechar}>
+        <button type="button" className="botao-icone shrink-0" aria-label={t.fechar} onClick={aoFechar}>
           <IconeFechar tamanho={16} />
         </button>
       </header>
 
       {salvos === null ? (
         <div className="painel-da-barra-corpo">
-          {erro === null ? <span className="hint">carregando…</span> : <div className="alert alert-error">{erro}</div>}
+          {erro === null ? <span className="hint">{t.carregando}</span> : <div className="alert alert-error">{erro}</div>}
         </div>
       ) : subagentes.length === 0 ? (
         <div className="subagentes-vazio">
           <IconePessoas tamanho={22} className="text-muted" />
-          <strong className="font-titulo text-[13px]">Nenhum subagente pronto</strong>
-          <span className="text-support max-w-sm">
-            Crie ajudantes com uma especialidade (revisar código, escrever testes, documentar). Sem nenhum, o orquestrador
-            usa subagentes genéricos quando precisa.
-          </span>
+          <strong className="font-titulo text-[13px]">{t.nenhum}</strong>
+          <span className="text-support max-w-sm">{t.nenhumAjuda}</span>
           <button type="button" className="btn btn-sm btn-outline" onClick={novo}>
-            + Novo subagente
+            {t.novo}
           </button>
         </div>
       ) : (
         <div className="subagentes-corpo">
           <div className="subagentes-lista">
-            <ul className="custom-scrollbar" aria-label="Lista de subagentes">
+            <ul className="custom-scrollbar" aria-label={t.lista}>
               {subagentes.map((subagente) => {
-                const modelo = MODELOS.find((opcao) => opcao.valor === subagente.modelo) ?? MODELOS[0];
+                const modelo = t.modelos[modeloListado(subagente.modelo)];
                 return (
                   <li key={subagente.chave}>
                     <button
@@ -321,15 +322,15 @@ export function PainelDeSubagentes({ aoFechar, aoSalvar }: Props) {
                     >
                       <span className="flex items-center gap-1.5">
                         <span className={`mono truncate ${subagente.nome === "" ? "text-muted italic" : "text-primary"}`}>
-                          {subagente.nome === "" ? "sem-nome" : subagente.nome}
+                          {subagente.nome === "" ? t.semNome : subagente.nome}
                         </span>
                         {problemas.get(subagente.chave) !== null && (
                           <span className="ponto-de-status ponto-pendente" title={problemas.get(subagente.chave) ?? undefined} />
                         )}
-                        <span className="chip-de-modelo ml-auto">{modelo?.curto}</span>
+                        <span className="chip-de-modelo ml-auto">{modelo.curto}</span>
                       </span>
                       <span className="truncate text-[11.5px] text-muted">
-                        {subagente.descricao.trim() === "" ? "Descreva quando usar" : subagente.descricao}
+                        {subagente.descricao.trim() === "" ? t.descrevaQuandoUsar : subagente.descricao}
                       </span>
                     </button>
                   </li>
@@ -345,7 +346,7 @@ export function PainelDeSubagentes({ aoFechar, aoSalvar }: Props) {
                   aria-describedby={cheia ? idDoLimite : undefined}
                   onClick={novo}
                 >
-                  + Novo subagente
+                  {t.novo}
                 </button>
                 <span className={`mono ${cheia ? "text-warning" : "text-muted"}`}>
                   {subagentes.length} / {MAXIMO_DE_SUBAGENTES_PRONTOS}
@@ -353,7 +354,7 @@ export function PainelDeSubagentes({ aoFechar, aoSalvar }: Props) {
               </div>
               {cheia && (
                 <span id={idDoLimite} className="text-center text-[11px] text-muted">
-                  Limite de {MAXIMO_DE_SUBAGENTES_PRONTOS} atingido.
+                  {t.limite(MAXIMO_DE_SUBAGENTES_PRONTOS)}
                 </span>
               )}
             </div>
@@ -373,9 +374,9 @@ export function PainelDeSubagentes({ aoFechar, aoSalvar }: Props) {
 
       {salvos !== null && erro !== null && <div className="alert alert-error mx-4 mb-1">{erro}</div>}
       <div className="painel-da-barra-rodape">
-        <span className="mr-auto text-support">Rodam com as mesmas permissões do orquestrador que os chamar.</span>
+        <span className="mr-auto text-support">{t.permissoes}</span>
         <button type="button" className="btn btn-sm btn-ghost" onClick={aoFechar}>
-          Cancelar
+          {t.cancelar}
         </button>
         <button
           type="button"
@@ -383,7 +384,7 @@ export function PainelDeSubagentes({ aoFechar, aoSalvar }: Props) {
           onClick={() => void salvar()}
           disabled={salvando || !alterado || algumProblema}
         >
-          {salvando ? "Salvando…" : "Salvar"}
+          {salvando ? t.salvando : t.salvar}
         </button>
       </div>
     </section>

@@ -1,6 +1,8 @@
 import { type KeyboardEvent as EventoDeTecladoDoReact, useEffect, useId, useRef } from "react";
 
 import type { PluginInstalado } from "../../shared/api/tipos";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineis } from "../../shared/idioma/textos/paineis";
 import { AvatarDePlugin } from "./AvatarDePlugin";
 import { contar, linkDaFonte, motivosDeConfirmacao } from "./dadosDoPlugin";
 import { IconeConfirmar, IconeHook, IconeLinkExterno } from "./IconesDoMarketplace";
@@ -28,6 +30,9 @@ interface Props {
  */
 export function ConfirmacaoDeHook({ plugin, fonte, recemInstalado, ocupado, erro, aoLigar, aoManterDesligado }: Props) {
   const idBase = useId();
+  const textos = useTextos(textosDePaineis);
+  const t = textos.confirmacaoDeHook;
+  const unidades = textos.plugin.unidades;
   const idDoTitulo = `${idBase}-titulo`;
   const idDaDescricao = `${idBase}-descricao`;
   const dialogo = useRef<HTMLDivElement>(null);
@@ -82,32 +87,32 @@ export function ConfirmacaoDeHook({ plugin, fonte, recemInstalado, ocupado, erro
           <AvatarDePlugin nome={plugin.nome} tamanho={48} />
           <div>
             <h3 id={idDoTitulo}>
-              {plugin.nome} {recemInstalado ? "foi instalado e está desligado" : "está desligado"}
+              {recemInstalado ? t.tituloInstalado(plugin.nome) : t.tituloDesligado(plugin.nome)}
             </h3>
             <p className="calmo" id={idDaDescricao}>
-              Ele espera o seu ok antes de rodar.
+              {t.espera}
             </p>
           </div>
         </div>
 
-        <div className="mk-tiles" role="group" aria-label="O que vem dentro">
+        <div className="mk-tiles" role="group" aria-label={t.oQueVem}>
           <div className="mk-tile">
             <div className="v">{skills}</div>
-            <div className="r">{skills === 1 ? "skill" : "skills"}</div>
+            <div className="r">{skills === 1 ? unidades.skill.um : unidades.skill.varios}</div>
           </div>
           <div className="mk-tile">
             <div className="v">{inventario.subagentes}</div>
-            <div className="r">{inventario.subagentes === 1 ? "subagente" : "subagentes"}</div>
+            <div className="r">{inventario.subagentes === 1 ? unidades.subagente.um : unidades.subagente.varios}</div>
           </div>
           <div className="mk-tile">
             <div className="v">{inventario.servidoresMcp}</div>
-            <div className="r">{inventario.servidoresMcp === 1 ? "servidor MCP" : "servidores MCP"}</div>
+            <div className="r">{inventario.servidoresMcp === 1 ? unidades.servidorMcp.um : unidades.servidorMcp.varios}</div>
           </div>
           <div className={inventario.hooks > 0 ? "mk-tile hook" : "mk-tile"}>
             <div className="v">{inventario.hooks}</div>
             <div className="r">
               {inventario.hooks > 0 && <IconeHook tamanho={12} />}
-              {inventario.hooks === 1 ? "hook" : "hooks"}
+              {inventario.hooks === 1 ? unidades.hook.um : unidades.hook.varios}
             </div>
           </div>
         </div>
@@ -116,8 +121,8 @@ export function ConfirmacaoDeHook({ plugin, fonte, recemInstalado, ocupado, erro
           <div className="mk-explica">
             {inventario.hooks > 0 ? <IconeHook tamanho={18} /> : <IconeInfo tamanho={18} />}
             <div>
-              <b>Por que ele espera o seu ok</b>
-              <ul className="mk-motivos" aria-label="Motivos para confirmar">
+              <b>{t.porQueEspera}</b>
+              <ul className="mk-motivos" aria-label={t.motivos}>
                 {motivos.map((motivo) => (
                   <li key={motivo.chave} data-motivo={motivo.chave}>
                     <span className="m">{motivo.titulo}</span>
@@ -125,7 +130,7 @@ export function ConfirmacaoDeHook({ plugin, fonte, recemInstalado, ocupado, erro
                   </li>
                 ))}
               </ul>
-              <p>Ligue se você confia em quem publicou.</p>
+              <p>{t.confie}</p>
             </div>
           </div>
         )}
@@ -135,8 +140,7 @@ export function ConfirmacaoDeHook({ plugin, fonte, recemInstalado, ocupado, erro
             <li>
               <IconeConfirmar tamanho={14} />
               <span>
-                {skills === 1 ? "A skill vale" : `As ${contar(skills, "skill", "skills")} valem`} nos orquestradores com
-                nível de edição.
+                {skills === 1 ? t.umaSkillVale : t.skillsValem(contar(skills, unidades.skill.um, unidades.skill.varios))}
               </span>
             </li>
           )}
@@ -144,9 +148,7 @@ export function ConfirmacaoDeHook({ plugin, fonte, recemInstalado, ocupado, erro
             <li>
               <IconeInfo tamanho={14} />
               <span>
-                {inventario.servidoresMcp === 1
-                  ? "O servidor MCP só funciona no terminal. Os orquestradores do app não o usam."
-                  : "Os servidores MCP só funcionam no terminal. Os orquestradores do app não os usam."}
+                {inventario.servidoresMcp === 1 ? t.umMcp : t.variosMcp}
               </span>
             </li>
           )}
@@ -161,7 +163,7 @@ export function ConfirmacaoDeHook({ plugin, fonte, recemInstalado, ocupado, erro
         <div className="pe">
           {link !== null ? (
             <a className="btn btn-ghost mk-ver-codigo" href={link.url} target="_blank" rel="noopener noreferrer">
-              Ver o código
+              {textos.plugin.verOCodigo}
               <IconeLinkExterno />
             </a>
           ) : (
@@ -169,14 +171,14 @@ export function ConfirmacaoDeHook({ plugin, fonte, recemInstalado, ocupado, erro
           )}
           <div className="botoes">
             <button ref={manter} type="button" className="btn btn-outline" disabled={ocupado} onClick={aoManterDesligado}>
-              Manter desligado
+              {t.manterDesligado}
             </button>
             <button type="button" className="btn btn-cta" disabled={ocupado} aria-busy={ocupado} onClick={aoLigar}>
-              {ocupado ? "Ligando…" : "Ligar o plugin"}
+              {ocupado ? t.ligando : t.ligarOPlugin}
             </button>
           </div>
         </div>
-        <p className="depois">Você pode ligar ou desligar quando quiser, em Instaladas.</p>
+        <p className="depois">{t.depois}</p>
       </div>
     </div>
   );

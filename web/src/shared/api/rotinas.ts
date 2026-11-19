@@ -1,3 +1,5 @@
+import { textosAtuais } from "../idioma/idioma";
+import { textosDePaineis } from "../idioma/textos/paineis";
 import { ErroDaApi } from "./cliente";
 
 /**
@@ -148,8 +150,6 @@ export function execucaoEstaAtiva(execucao: Pick<DadosDaExecucao, "situacao">): 
   return execucao.situacao === "em_andamento" || execucao.situacao === "aguardando_aprovacao";
 }
 
-const FALHA_DE_CONEXAO = "Não foi possível falar com o servidor. Feche e abra o Orquestrador de novo.";
-
 function mensagemDoCorpo(corpo: unknown): string | null {
   if (typeof corpo === "object" && corpo !== null && "erro" in corpo && typeof corpo.erro === "string") {
     return corpo.erro;
@@ -165,11 +165,11 @@ async function requisitar<Resposta>(caminho: string, opcoes: RequestInit = {}): 
       headers: { "Content-Type": "application/json", ...opcoes.headers },
     });
   } catch {
-    throw new Error(FALHA_DE_CONEXAO);
+    throw new Error(textosAtuais(textosDePaineis).api.falhaDeConexao);
   }
   const corpo: unknown = resposta.status === 204 ? null : await resposta.json().catch(() => null);
   if (!resposta.ok) {
-    throw new ErroDaApi(mensagemDoCorpo(corpo) ?? `O servidor respondeu com erro ${resposta.status}.`, resposta.status);
+    throw new ErroDaApi(mensagemDoCorpo(corpo) ?? textosAtuais(textosDePaineis).api.servidorRespondeuComErro(resposta.status), resposta.status);
   }
   return corpo as Resposta;
 }

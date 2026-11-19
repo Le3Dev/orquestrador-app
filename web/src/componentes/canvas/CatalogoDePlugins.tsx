@@ -10,6 +10,8 @@ import {
 
 import { api, ErroDaApi, mensagemDeErro } from "../../shared/api/cliente";
 import type { OrigemDoCatalogo, PluginDoCatalogo, PluginInstalado } from "../../shared/api/tipos";
+import { idiomaAtual, localeDoIdioma, textosAtuais, useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineis } from "../../shared/idioma/textos/paineis";
 import { AvatarDePlugin, SeloOficial } from "./AvatarDePlugin";
 import { linkDaFonte } from "./dadosDoPlugin";
 import { IconeInfo, IconeLista, IconeLupa } from "./IconesDasIlhas";
@@ -33,12 +35,12 @@ function normalizar(texto: string): string {
 }
 
 function formatar(numero: number): string {
-  return numero.toLocaleString("pt-BR");
+  return numero.toLocaleString(localeDoIdioma(idiomaAtual()));
 }
 
 /** "dd/mm" de hoje: o dia em que o catálogo foi lido. */
 function diaDoCatalogo(): string {
-  return new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  return new Date().toLocaleDateString(localeDoIdioma(idiomaAtual()), { day: "2-digit", month: "2-digit" });
 }
 
 /** Como está a instalação de um plugin que o usuário mandou instalar agora. */
@@ -61,7 +63,7 @@ interface Props {
 /** A frase de erro de uma instalação: o 503 fala de internet, o resto traz a mensagem do servidor. */
 function mensagemDaInstalacao(falha: unknown): string {
   if (falha instanceof ErroDaApi && falha.status === 503) {
-    return "Não deu para baixar: sem conexão com a internet.";
+    return textosAtuais(textosDePaineis).catalogo.semInternetAoInstalar;
   }
   return mensagemDeErro(falha);
 }
@@ -73,6 +75,7 @@ function mensagemDaInstalacao(falha: unknown): string {
  * instalado. As instalações vão uma de cada vez, em fila.
  */
 export function CatalogoDePlugins({ aoMudar, aoPedirConfirmacao, aoVerInstaladas }: Props) {
+  const t = useTextos(textosDePaineis).catalogo;
   const [origem, setOrigem] = useState<Exclude<OrigemDoCatalogo, "todos">>("oficial");
   const [busca, setBusca] = useState("");
   const [buscaEfetiva, setBuscaEfetiva] = useState("");
@@ -205,7 +208,7 @@ export function CatalogoDePlugins({ aoMudar, aoPedirConfirmacao, aoVerInstaladas
       <span className="mono">{direita}</span>
     </footer>
   );
-  const catalogoDe = dia === null ? "carregando…" : `Catálogo de ${dia}`;
+  const catalogoDe = dia === null ? t.carregando : t.catalogoDe(dia);
 
   if (detalhe !== null) {
     return (
@@ -220,7 +223,7 @@ export function CatalogoDePlugins({ aoMudar, aoPedirConfirmacao, aoVerInstaladas
           catalogoDe,
           <span>
             <IconeSemInternet tamanho={13} />
-            Precisa de internet para instalar.
+            {t.precisaDeInternet}
           </span>,
         )}
       </div>
@@ -236,33 +239,30 @@ export function CatalogoDePlugins({ aoMudar, aoPedirConfirmacao, aoVerInstaladas
           </span>
           {comFalha.semInternet ? (
             <>
-              <h3>Sem conexão com a internet</h3>
-              <p>
-                Não deu para falar com o marketplace. Confira a rede e tente de novo. O que já está instalado continua
-                funcionando.
-              </p>
+              <h3>{t.semConexao}</h3>
+              <p>{t.semConexaoTexto}</p>
             </>
           ) : (
             <>
-              <h3>Não deu para abrir o catálogo</h3>
+              <h3>{t.naoAbriu}</h3>
               <p>{comFalha.erro}</p>
             </>
           )}
           <div className="botoes">
             <button type="button" className="btn btn-outline" onClick={tentarDeNovo}>
               <IconeTentarDeNovo />
-              Tentar de novo
+              {t.tentarDeNovo}
             </button>
             <button type="button" className="btn btn-ghost" onClick={aoVerInstaladas}>
-              Ver instaladas
+              {t.verInstaladas}
             </button>
           </div>
         </div>
         {rodape(
-          "sem catálogo",
+          t.semCatalogo,
           <span>
             <IconeInfo tamanho={13} />
-            Instalar e buscar precisam de internet.
+            {t.instalarEBuscarPrecisam}
           </span>,
         )}
       </div>
@@ -272,11 +272,11 @@ export function CatalogoDePlugins({ aoMudar, aoPedirConfirmacao, aoVerInstaladas
   const placeholder =
     totais === null
       ? origem === "oficial"
-        ? "Buscar plugins oficiais"
-        : "Buscar plugins do diretório"
+        ? t.buscarOficiais
+        : t.buscarDoDiretorio
       : origem === "oficial"
-        ? `Buscar entre ${formatar(totais.oficial)} plugins oficiais`
-        : `Buscar entre ${formatar(totais.aberto)} plugins do diretório`;
+        ? t.buscarEntreOficiais(formatar(totais.oficial))
+        : t.buscarEntreDoDiretorio(formatar(totais.aberto));
 
   return (
     <div className="mk-catalogo">
@@ -288,7 +288,7 @@ export function CatalogoDePlugins({ aoMudar, aoPedirConfirmacao, aoVerInstaladas
           ref={campoDeBusca}
           type="search"
           placeholder={placeholder}
-          aria-label="Buscar plugin"
+          aria-label={t.buscarPlugin}
           value={busca}
           spellCheck={false}
           onChange={(evento) => setBusca(evento.target.value)}
@@ -297,17 +297,17 @@ export function CatalogoDePlugins({ aoMudar, aoPedirConfirmacao, aoVerInstaladas
       </div>
 
       <div className="mk-filtros">
-        <div className="mk-seg" role="group" aria-label="Onde procurar">
+        <div className="mk-seg" role="group" aria-label={t.ondeProcurar}>
           <button type="button" aria-pressed={origem === "oficial"} onClick={() => trocarOrigem("oficial")}>
-            Oficial {totais !== null && <span className="n">{formatar(totais.oficial)}</span>}
+            {t.oficial} {totais !== null && <span className="n">{formatar(totais.oficial)}</span>}
           </button>
           <button type="button" aria-pressed={origem === "aberto"} onClick={() => trocarOrigem("aberto")}>
-            Diretório aberto {totais !== null && <span className="n">{formatar(totais.aberto)}</span>}
+            {t.diretorioAberto} {totais !== null && <span className="n">{formatar(totais.aberto)}</span>}
           </button>
         </div>
         <span className="mk-ordem">
           <IconeOrdem />
-          Mais instalados
+          {t.maisInstalados}
         </span>
       </div>
 
@@ -315,14 +315,14 @@ export function CatalogoDePlugins({ aoMudar, aoPedirConfirmacao, aoVerInstaladas
         <div className="mk-aviso" role="note">
           <IconeInfo tamanho={15} />
           <span>
-            <b>Aqui qualquer pessoa publica.</b> A Anthropic não revisa estes plugins. Olhe a fonte antes de instalar.
+            <b>{t.avisoAbertoNegrito}</b> {t.avisoAbertoResto}
           </span>
         </div>
       )}
 
       {comLista === null ? (
         <div className="mk-lista" aria-busy="true" aria-live="polite">
-          <p className="mk-meta mk-buscando">Buscando o catálogo de plugins…</p>
+          <p className="mk-meta mk-buscando">{t.buscando}</p>
           {[148, 126, 164, 138].map((largura, indice) => (
             <div key={indice} className="mk-linha mk-esqueleto" aria-hidden="true">
               <span className="mk-sk mk-sk-avatar" />
@@ -342,32 +342,30 @@ export function CatalogoDePlugins({ aoMudar, aoPedirConfirmacao, aoVerInstaladas
           </span>
           {comLista.busca === "" ? (
             <>
-              <h3>Nenhum plugin por aqui</h3>
-              <p>O catálogo não trouxe plugins agora. Tente de novo daqui a pouco.</p>
+              <h3>{t.nenhumPlugin}</h3>
+              <p>{t.nenhumPluginTexto}</p>
               <div className="botoes">
                 <button type="button" className="btn btn-outline" onClick={tentarDeNovo}>
                   <IconeTentarDeNovo />
-                  Tentar de novo
+                  {t.tentarDeNovo}
                 </button>
               </div>
             </>
           ) : (
             <>
-              <h3>
-                Nada para “{busca.trim()}” {comLista.origem === "oficial" ? "no oficial" : "no diretório aberto"}
-              </h3>
+              <h3>{t.nadaPara(busca.trim(), comLista.origem === "oficial")}</h3>
               <p>
-                Tente uma palavra só, ou em inglês, como o catálogo (por exemplo, spreadsheet).
-                {comLista.origem === "oficial" ? " Também dá para procurar no diretório aberto." : ""}
+                {t.dicaDaBusca}
+                {comLista.origem === "oficial" ? ` ${t.tambemNoAberto}` : ""}
               </p>
               <div className="botoes">
                 {comLista.origem === "oficial" && (
                   <button type="button" className="btn btn-outline" onClick={() => trocarOrigem("aberto")}>
-                    Procurar no diretório aberto
+                    {t.procurarNoAberto}
                   </button>
                 )}
                 <button type="button" className="btn btn-ghost" onClick={limparBusca}>
-                  Limpar busca
+                  {t.limparBusca}
                 </button>
               </div>
             </>
@@ -393,25 +391,24 @@ export function CatalogoDePlugins({ aoMudar, aoPedirConfirmacao, aoVerInstaladas
                 </span>
               )}
               <button type="button" className="btn btn-sm btn-ghost" disabled={carregandoMais} onClick={carregarMais}>
-                {carregandoMais
-                  ? "Carregando…"
-                  : `Mostrar mais (${formatar(comLista.plugins.length)} de ${formatar(comLista.total)})`}
+                {carregandoMais ? t.carregandoMais : t.mostrarMais(formatar(comLista.plugins.length), formatar(comLista.total))}
               </button>
             </div>
           )}
         </div>
       )}
 
-      {rodape(comLista === null ? "carregando…" : catalogoDe)}
+      {rodape(comLista === null ? t.carregando : catalogoDe)}
     </div>
   );
 }
 
 function ExplicacaoDoRodape() {
+  const t = useTextos(textosDePaineis).catalogo;
   return (
     <span>
       <IconeInfo tamanho={13} />
-      Plugins instalam no Claude Code e valem também no seu terminal.
+      {t.explicacaoDoRodape}
     </span>
   );
 }
@@ -432,12 +429,13 @@ function AcaoDeInstalar({
   aoInstalar: () => void;
   idDaExplicacao?: string;
 }) {
+  const t = useTextos(textosDePaineis).catalogo;
   const parecido = idDaExplicacao !== undefined;
   if (situacao?.tipo === "instalando") {
     return (
       <span className="mk-instalando" role="status">
         <i className="mk-giro" />
-        Instalando…
+        {t.instalando}
       </span>
     );
   }
@@ -445,7 +443,7 @@ function AcaoDeInstalar({
     return (
       <span className="mk-feito">
         <IconeConfirmar />
-        Instalado
+        {t.instalado}
       </span>
     );
   }
@@ -454,13 +452,13 @@ function AcaoDeInstalar({
       <button
         type="button"
         className="btn btn-sm btn-outline"
-        aria-label={`Tentar instalar ${plugin.nome} de novo`}
+        aria-label={t.tentarInstalarDeNovo(plugin.nome)}
         onClick={(evento) => {
           evento.stopPropagation();
           aoInstalar();
         }}
       >
-        Tentar de novo
+        {t.tentarDeNovo}
       </button>
     );
   }
@@ -468,14 +466,14 @@ function AcaoDeInstalar({
     <button
       type="button"
       className={`btn btn-sm btn-outline mk-instalar${parecido ? " mk-instalar-parecido" : ""}`}
-      aria-label={parecido ? `Instalar ${plugin.nome} mesmo assim` : `Instalar ${plugin.nome}`}
+      aria-label={parecido ? t.instalarMesmoAssimNome(plugin.nome) : t.instalarNome(plugin.nome)}
       aria-describedby={idDaExplicacao}
       onClick={(evento) => {
         evento.stopPropagation();
         aoInstalar();
       }}
     >
-      {parecido ? "Instalar mesmo assim" : "Instalar"}
+      {parecido ? t.instalarMesmoAssim : t.instalar}
     </button>
   );
 }
@@ -487,9 +485,10 @@ function jaTemDe(plugin: PluginDoCatalogo): { skills: string[]; servidoresMcp: s
 
 /** "a, b e c": vírgulas e um "e" antes do último. */
 function juntarNomes(nomes: string[]): ReactNode {
+  const e = textosAtuais(textosDePaineis).catalogo.e;
   return nomes.map((nome, indice) => (
     <Fragment key={nome}>
-      {indice === 0 ? "" : indice === nomes.length - 1 ? " e " : ", "}
+      {indice === 0 ? "" : indice === nomes.length - 1 ? ` ${e} ` : ", "}
       <span className="mono">{nome}</span>
     </Fragment>
   ));
@@ -500,12 +499,13 @@ function juntarNomes(nomes: string[]): ReactNode {
  * Nulo quando não há nada parecido.
  */
 function oQueJaTem(plugin: PluginDoCatalogo): ReactNode {
+  const t = textosAtuais(textosDePaineis).catalogo;
   const { skills, servidoresMcp } = jaTemDe(plugin);
   const partes: ReactNode[] = [];
   if (skills.length > 0) {
     partes.push(
       <Fragment key="skills">
-        {skills.length === 1 ? "a skill " : "as skills "}
+        {skills.length === 1 ? t.umaSkill : t.variasSkills}
         {juntarNomes(skills)}
       </Fragment>,
     );
@@ -513,7 +513,7 @@ function oQueJaTem(plugin: PluginDoCatalogo): ReactNode {
   if (servidoresMcp.length > 0) {
     partes.push(
       <Fragment key="mcp">
-        {servidoresMcp.length === 1 ? "o servidor MCP " : "os servidores MCP "}
+        {servidoresMcp.length === 1 ? t.umMcp : t.variosMcp}
         {juntarNomes(servidoresMcp)}
       </Fragment>,
     );
@@ -525,7 +525,7 @@ function oQueJaTem(plugin: PluginDoCatalogo): ReactNode {
     partes[0]
   ) : (
     <>
-      {partes[0]} e {partes[1]}
+      {partes[0]} {t.e} {partes[1]}
     </>
   );
 }
@@ -535,10 +535,11 @@ function oQueJaTem(plugin: PluginDoCatalogo): ReactNode {
  * (a meta), e é essa meta que o botão de instalar aponta com `aria-describedby`.
  */
 function EtiquetaJaTem() {
+  const t = useTextos(textosDePaineis).catalogo;
   return (
     <span className="mk-chip mk-ja-tem">
       <IconeInfo tamanho={10} />
-      Já tem algo parecido
+      {t.jaTemAlgoParecido}
     </span>
   );
 }
@@ -559,6 +560,7 @@ function LinhaDoCatalogo({
   aoAbrir: () => void;
   aoInstalar: () => void;
 }) {
+  const t = useTextos(textosDePaineis).catalogo;
   const estado = situacao?.tipo ?? "padrao";
   const jaInstalado = situacao?.tipo === "instalado" || (situacao === null && plugin.instalado);
   const idDaExplicacao = useId();
@@ -577,7 +579,7 @@ function LinhaDoCatalogo({
       <AvatarDePlugin nome={plugin.nome} />
       <div className="min-w-0">
         <div className="mk-titulo">
-          <button type="button" className="mk-nome mk-nome-botao" title="Ver o detalhe do plugin">
+          <button type="button" className="mk-nome mk-nome-botao" title={t.verDetalhe}>
             {plugin.nome}
           </button>
           {plugin.oficial && <SeloOficial />}
@@ -585,13 +587,11 @@ function LinhaDoCatalogo({
         </div>
         <p className="mk-desc">{plugin.descricao}</p>
         {situacao?.tipo === "instalando" ? (
-          <div className="mk-meta">Baixando do GitHub e preparando…</div>
+          <div className="mk-meta">{t.baixando}</div>
         ) : situacao?.tipo === "instalado" ? (
           <div className="mk-meta">
             <IconeConfirmar tamanho={12} />
-            {oQueJaTem(plugin) === null
-              ? "Pronto. Ele já aparece em Instaladas."
-              : "Pronto. Ele já aparece em Instaladas. Você agora tem os dois."}
+            {oQueJaTem(plugin) === null ? t.pronto : t.prontoOsDois}
           </div>
         ) : situacao?.tipo === "erro" ? (
           <div className="mk-meta erro" role="alert">
@@ -601,12 +601,15 @@ function LinhaDoCatalogo({
         ) : jaInstalado ? (
           <div className="mk-meta">
             <IconeConfirmar tamanho={12} />
-            Está em Instaladas.
+            {t.estaEmInstaladas}
           </div>
         ) : jaTem !== null ? (
           <div id={idDaExplicacao} className="mk-meta mk-ja-tem-meta">
             <IconeInfo tamanho={12} />
-            <span>Você já tem {jaTem}.</span>
+            <span>
+              {t.voceJaTem}
+              {jaTem}.
+            </span>
           </div>
         ) : (
           (plugin.instalacoes !== null || (!plugin.oficial && plugin.fonte !== null)) && (
@@ -614,7 +617,7 @@ function LinhaDoCatalogo({
               {plugin.instalacoes !== null && (
                 <>
                   <IconeBaixar tamanho={12} />
-                  {formatar(plugin.instalacoes)} {plugin.instalacoes === 1 ? "instalação" : "instalações"}
+                  {formatar(plugin.instalacoes)} {plugin.instalacoes === 1 ? t.instalacaoUma : t.instalacoesVarias}
                 </>
               )}
               {!plugin.oficial && plugin.fonte !== null && (
@@ -652,6 +655,7 @@ function DetalheDoPlugin({
   aoVoltar: () => void;
   aoInstalar: () => void;
 }) {
+  const t = useTextos(textosDePaineis).catalogo;
   const voltar = useRef<HTMLButtonElement>(null);
   const link = linkDaFonte(plugin.fonte);
   const instalado = situacao?.tipo === "instalado" || (situacao === null && plugin.instalado);
@@ -666,7 +670,7 @@ function DetalheDoPlugin({
     <div className="mk-detalhe custom-scrollbar">
       <button ref={voltar} type="button" className="btn btn-sm btn-ghost mk-voltar" onClick={aoVoltar}>
         <IconeVoltar />
-        Explorar
+        {t.explorar}
       </button>
       <div className="mk-heroi">
         <AvatarDePlugin nome={plugin.nome} tamanho={64} />
@@ -681,7 +685,9 @@ function DetalheDoPlugin({
             <p id={idDoAviso} className="mk-ja-tem-nota" role="note">
               <IconeInfo tamanho={15} />
               <span>
-                Você já tem {jaTem}. Este plugin parece trazer o mesmo serviço, e instalar pode duplicar.
+                {t.voceJaTem}
+                {jaTem}
+                {t.jaTemDetalhe}
               </span>
             </p>
           )}
@@ -689,12 +695,12 @@ function DetalheDoPlugin({
             {situacao?.tipo === "instalando" ? (
               <span className="mk-instalando" role="status">
                 <i className="mk-giro" />
-                Instalando…
+                {t.instalando}
               </span>
             ) : instalado ? (
               <span className="mk-feito">
                 <IconeConfirmar />
-                Instalado
+                {t.instalado}
               </span>
             ) : (
               // Com algo parecido já instalado, o botão perde o laranja: a ação segue ao alcance, sem ser a principal.
@@ -705,7 +711,7 @@ function DetalheDoPlugin({
                 onClick={aoInstalar}
               >
                 <IconeBaixar tamanho={15} />
-                {situacao?.tipo === "erro" ? "Tentar de novo" : jaTem !== null ? "Instalar mesmo assim" : "Instalar"}
+                {situacao?.tipo === "erro" ? t.tentarDeNovo : jaTem !== null ? t.instalarMesmoAssim : t.instalar}
               </button>
             )}
             {link !== null && (
@@ -724,7 +730,7 @@ function DetalheDoPlugin({
           {situacao?.tipo === "instalado" && (
             <div className="mk-meta">
               <IconeConfirmar tamanho={12} />
-              Pronto. Ele já aparece em Instaladas.
+              {t.pronto}
             </div>
           )}
         </div>
@@ -733,38 +739,38 @@ function DetalheDoPlugin({
       <dl className="mk-ficha">
         {plugin.instalacoes !== null && (
           <div>
-            <dt>Instalações</dt>
+            <dt>{t.instalacoes}</dt>
             <dd>{formatar(plugin.instalacoes)}</dd>
           </div>
         )}
         {plugin.versao !== null && (
           <div>
-            <dt>Versão</dt>
+            <dt>{t.versao}</dt>
             <dd>{plugin.versao}</dd>
           </div>
         )}
         <div>
-          <dt>Marketplace</dt>
-          <dd>{plugin.oficial ? "Oficial" : plugin.marketplace}</dd>
+          <dt>{t.marketplace}</dt>
+          <dd>{plugin.oficial ? t.oficial : plugin.marketplace}</dd>
         </div>
         {plugin.fonte !== null && (
           <div className="largo">
-            <dt>Fonte</dt>
+            <dt>{t.fonte}</dt>
             <dd className="mono">{fonteCurta(plugin.fonte)}</dd>
           </div>
         )}
       </dl>
 
       <section className="mk-antes">
-        <h4>Antes de instalar</h4>
+        <h4>{t.antesDeInstalar}</h4>
         <ul>
           <li>
             <span className="i">
               <IconeBaixar tamanho={16} />
             </span>
             <div>
-              <b>Instala no Claude Code, não só aqui</b>
-              <span className="t">O plugin também aparece no seu terminal.</span>
+              <b>{t.antes1Titulo}</b>
+              <span className="t">{t.antes1Texto}</span>
             </div>
           </li>
           <li>
@@ -772,10 +778,8 @@ function DetalheDoPlugin({
               <IconeLista />
             </span>
             <div>
-              <b>O que vem dentro, você vê depois</b>
-              <span className="t">
-                Só com o plugin instalado dá para contar skills, subagentes, servidores MCP e hooks.
-              </span>
+              <b>{t.antes2Titulo}</b>
+              <span className="t">{t.antes2Texto}</span>
             </div>
           </li>
           <li>
@@ -783,10 +787,8 @@ function DetalheDoPlugin({
               <IconeHook tamanho={16} />
             </span>
             <div>
-              <b>Se pedir cuidado, ele chega desligado</b>
-              <span className="t">
-                Hooks, programas próprios (pasta bin) ou algo que não deu para ler: você revisa e decide se liga.
-              </span>
+              <b>{t.antes3Titulo}</b>
+              <span className="t">{t.antes3Texto}</span>
             </div>
           </li>
         </ul>

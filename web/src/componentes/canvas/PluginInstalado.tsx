@@ -2,6 +2,8 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { PluginInstalado } from "../../shared/api/tipos";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineis } from "../../shared/idioma/textos/paineis";
 import { AvatarDePlugin } from "./AvatarDePlugin";
 import { motivosDeConfirmacao, precisaDeConfirmacao, resumoDoInventario } from "./dadosDoPlugin";
 import { IconeHook, IconeLixeira } from "./IconesDoMarketplace";
@@ -28,6 +30,9 @@ interface Props {
  */
 export function LinhaDoPluginInstalado({ plugin, aoAlterar, aoRemovido, aoPedirConfirmacao, termo = "" }: Props) {
   const idDasSkills = useId();
+  const textos = useTextos(textosDePaineis);
+  const t = textos.pluginInstalado;
+  const unidades = textos.plugin.unidades;
   const [aberto, setAberto] = useState(false);
   const [confirmando, setConfirmando] = useState(false);
   const [ocupado, setOcupado] = useState<"alternando" | "removendo" | null>(null);
@@ -91,10 +96,10 @@ export function LinhaDoPluginInstalado({ plugin, aoAlterar, aoRemovido, aoPedirC
     <div className="mk-plugin-bloco">
       <div className={`mk-plugin ${confirmando ? "confirmando" : ""}`} data-ligado={plugin.ligado} data-nome={plugin.nome}>
         {confirmando ? (
-          <div className="mk-remover" role="alertdialog" aria-label={`Remover ${plugin.nome}`}>
+          <div className="mk-remover" role="alertdialog" aria-label={t.remover(plugin.nome)}>
             <div>
-              <b>Remover {plugin.nome}?</b>
-              <span className="t">Ele sai também do seu terminal. Dá para instalar de novo depois.</span>
+              <b>{t.removerPergunta(plugin.nome)}</b>
+              <span className="t">{t.removerAviso}</span>
               {erro !== null && (
                 <span className="t mk-erro-inline" role="alert">
                   {erro}
@@ -109,7 +114,7 @@ export function LinhaDoPluginInstalado({ plugin, aoAlterar, aoRemovido, aoPedirC
                 disabled={ocupado === "removendo"}
                 onClick={cancelarRemocao}
               >
-                Cancelar
+                {t.cancelar}
               </button>
               <button
                 type="button"
@@ -118,7 +123,7 @@ export function LinhaDoPluginInstalado({ plugin, aoAlterar, aoRemovido, aoPedirC
                 aria-busy={ocupado === "removendo"}
                 onClick={remover}
               >
-                {ocupado === "removendo" ? "Removendo…" : "Remover"}
+                {ocupado === "removendo" ? t.removendo : t.removerBotao}
               </button>
             </div>
           </div>
@@ -132,24 +137,24 @@ export function LinhaDoPluginInstalado({ plugin, aoAlterar, aoRemovido, aoPedirC
                   className="mk-nome mk-nome-botao"
                   aria-expanded={aberto}
                   aria-controls={aberto ? idDasSkills : undefined}
-                  title={aberto ? "Esconder as skills do plugin" : "Ver as skills do plugin"}
+                  title={aberto ? t.esconderSkills : t.verSkills}
                   onClick={() => setAberto((atual) => !atual)}
                 >
                   <span className="truncate">{plugin.nome}</span>
                   <IconeSetaDireita tamanho={13} className="mk-chev" />
                 </button>
                 {comHook && (
-                  <span className="mk-chip hook" title="Comando que roda sozinho em toda sessão">
+                  <span className="mk-chip hook" title={t.hookDica}>
                     <IconeHook tamanho={10} />
-                    {inventario.hooks} {inventario.hooks === 1 ? "hook" : "hooks"}
+                    {inventario.hooks} {inventario.hooks === 1 ? unidades.hook.um : unidades.hook.varios}
                   </span>
                 )}
                 {!inventario.verificado && (
-                  <span className="mk-chip nao-verificado" title="Não conseguimos ler tudo o que vem neste plugin">
-                    Não verificado
+                  <span className="mk-chip nao-verificado" title={t.naoVerificadoDica}>
+                    {t.naoVerificado}
                   </span>
                 )}
-                {espera && <span className="mk-chip espera">Pede sua confirmação</span>}
+                {espera && <span className="mk-chip espera">{t.pedeConfirmacao}</span>}
               </div>
               <div className="conta">
                 <span>{resumoDoInventario(inventario)}</span>
@@ -164,7 +169,7 @@ export function LinhaDoPluginInstalado({ plugin, aoAlterar, aoRemovido, aoPedirC
             <div className="dir">
               {espera ? (
                 <button type="button" className="btn btn-sm btn-outline" onClick={() => aoPedirConfirmacao(plugin)}>
-                  Revisar e ligar
+                  {t.revisarELigar}
                 </button>
               ) : (
                 <button
@@ -172,20 +177,20 @@ export function LinhaDoPluginInstalado({ plugin, aoAlterar, aoRemovido, aoPedirC
                   className="interruptor"
                   role="switch"
                   aria-checked={plugin.ligado}
-                  aria-label={`${plugin.ligado ? "Desligar" : "Ligar"} ${plugin.nome}`}
+                  aria-label={plugin.ligado ? t.desligar(plugin.nome) : t.ligar(plugin.nome)}
                   aria-disabled={ocupado !== null}
                   onClick={alternar}
                 >
                   <span className="interruptor-trilho" />
-                  <span>{plugin.ligado ? "Ligado" : "Desligado"}</span>
+                  <span>{plugin.ligado ? t.ligado : t.desligado}</span>
                 </button>
               )}
               <button
                 ref={lixeira}
                 type="button"
                 className="botao-icone botao-icone-perigo rem"
-                aria-label={`Remover ${plugin.nome}`}
-                title="Remover"
+                aria-label={t.remover(plugin.nome)}
+                title={t.removerBotao}
                 onClick={() => setConfirmando(true)}
               >
                 <IconeLixeira tamanho={16} />
@@ -196,7 +201,7 @@ export function LinhaDoPluginInstalado({ plugin, aoAlterar, aoRemovido, aoPedirC
       </div>
 
       {aberto && !confirmando && motivos.length > 0 && (
-        <ul className="mk-plugin-motivos" aria-label={`Por que ${plugin.nome} pede confirmação`}>
+        <ul className="mk-plugin-motivos" aria-label={t.porQuePede(plugin.nome)}>
           {motivos.map((motivo) => (
             <li key={motivo.chave} data-motivo={motivo.chave}>
               {motivo.chave === "hooks" ? <IconeHook tamanho={14} /> : <IconeInfo tamanho={14} />}
@@ -207,9 +212,9 @@ export function LinhaDoPluginInstalado({ plugin, aoAlterar, aoRemovido, aoPedirC
       )}
 
       {aberto && !confirmando && (
-        <ul id={idDasSkills} className="mk-plugin-skills" aria-label={`Skills de ${plugin.nome}`}>
+        <ul id={idDasSkills} className="mk-plugin-skills" aria-label={t.skillsDe(plugin.nome)}>
           {inventario.skills.length === 0 ? (
-            <li className="mk-skill-vazio">Este plugin não traz skills.</li>
+            <li className="mk-skill-vazio">{t.semSkills}</li>
           ) : (
             inventario.skills.map((skill) => (
               // Dentro do plugin a skill já vem sem prefixo; o nome completo é o que o Claude Code chama.
@@ -218,7 +223,7 @@ export function LinhaDoPluginInstalado({ plugin, aoAlterar, aoRemovido, aoPedirC
                 nome={skill.nome}
                 nomeCompleto={`${plugin.nome}:${skill.nome}`}
                 descricao={skill.descricao}
-                origem={`Do plugin ${plugin.nome}`}
+                origem={t.origem(plugin.nome)}
                 termo={termo}
               />
             ))

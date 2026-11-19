@@ -8,6 +8,8 @@ import {
   type ModoDoPedido,
   type TipoDeGatilho,
 } from "../../shared/api/rotinas";
+import { idiomaAtual, localeDoIdioma, useTextos } from "../../shared/idioma/idioma";
+import { textosDeRotinas } from "../../shared/idioma/textos/rotinas";
 import { Dica } from "../Dica";
 import {
   type EtapaEmEdicao,
@@ -17,7 +19,7 @@ import {
   problemaDaRotina,
   type RotinaEmEdicao,
 } from "./edicao";
-import { descreverGatilho, ROTULOS_DOS_TIPOS_DE_ETAPA } from "./textos";
+import { descreverGatilho, rotuloDoTipoDeEtapa } from "./textos";
 
 /** Um orquestrador que um pedido pode receber (a tela tem a lista toda; aqui só o id e o nome importam). */
 export interface OrquestradorEscolhivel {
@@ -25,35 +27,14 @@ export interface OrquestradorEscolhivel {
   nome: string;
 }
 
-const OPCOES_DE_GATILHO: { valor: TipoDeGatilho; rotulo: string }[] = [
-  { valor: "diario", rotulo: "Todo dia" },
-  { valor: "semanal", rotulo: "Em dias da semana" },
-  { valor: "intervalo", rotulo: "A cada tantos minutos" },
-  { valor: "uma_vez", rotulo: "Uma vez só" },
-];
+const TIPOS_DE_GATILHO: readonly TipoDeGatilho[] = ["diario", "semanal", "intervalo", "uma_vez"];
 
 /** Na ordem em que a semana aparece (começa na segunda); o número é o do servidor (0 = domingo). */
-const DIAS_DA_SEMANA: { numero: number; curto: string; completo: string }[] = [
-  { numero: 1, curto: "Seg", completo: "segunda" },
-  { numero: 2, curto: "Ter", completo: "terça" },
-  { numero: 3, curto: "Qua", completo: "quarta" },
-  { numero: 4, curto: "Qui", completo: "quinta" },
-  { numero: 5, curto: "Sex", completo: "sexta" },
-  { numero: 6, curto: "Sáb", completo: "sábado" },
-  { numero: 0, curto: "Dom", completo: "domingo" },
-];
+const DIAS_DA_SEMANA = [1, 2, 3, 4, 5, 6, 0] as const;
+const VALORES_DE_AO_PERDER: readonly AoPerder[] = ["pular", "executar_ao_abrir"];
+const VALORES_DE_MODO: readonly ModoDoPedido[] = ["execucao", "planejamento"];
 
-const OPCOES_DE_AO_PERDER: { valor: AoPerder; rotulo: string }[] = [
-  { valor: "pular", rotulo: "Pular essa execução (padrão)" },
-  { valor: "executar_ao_abrir", rotulo: "Executar assim que o app abrir" },
-];
-
-const OPCOES_DE_MODO: { valor: ModoDoPedido; rotulo: string }[] = [
-  { valor: "execucao", rotulo: "Executar" },
-  { valor: "planejamento", rotulo: "Só planejar (o plano espera sua aprovação)" },
-];
-
-const formatoDeInteiro = new Intl.NumberFormat("pt-BR");
+const formatoDeInteiro = { format: (numero: number): string => new Intl.NumberFormat(localeDoIdioma(idiomaAtual())).format(numero) };
 
 interface PropsDoGatilho {
   gatilho: GatilhoEmEdicao;
@@ -63,6 +44,8 @@ interface PropsDoGatilho {
 /** Os campos do "Quando": o tipo e, conforme ele, a hora, os dias, o intervalo ou a data. */
 function CamposDoGatilho({ gatilho, aoMudar }: PropsDoGatilho) {
   const id = useId();
+  const textos = useTextos(textosDeRotinas);
+  const t = textos.editor;
   const alternarDia = (dia: number) =>
     aoMudar({ dias: gatilho.dias.includes(dia) ? gatilho.dias.filter((outro) => outro !== dia) : [...gatilho.dias, dia] });
   const convertido: DadosDoGatilho | null = gatilhoParaOServidor(gatilho);
@@ -73,23 +56,23 @@ function CamposDoGatilho({ gatilho, aoMudar }: PropsDoGatilho) {
         <select
           id={`${id}-tipo`}
           className="select campo-escuro select-do-subagente"
-          aria-label="Quando a rotina roda"
+          aria-label={t.quandoARotinaRoda}
           value={gatilho.tipo}
           onChange={(evento) => aoMudar({ tipo: evento.target.value as TipoDeGatilho })}
         >
-          {OPCOES_DE_GATILHO.map((opcao) => (
-            <option key={opcao.valor} value={opcao.valor}>
-              {opcao.rotulo}
+          {TIPOS_DE_GATILHO.map((tipo) => (
+            <option key={tipo} value={tipo}>
+              {t.opcoesDeGatilho[tipo]}
             </option>
           ))}
         </select>
         {(gatilho.tipo === "diario" || gatilho.tipo === "semanal") && (
           <label className="flex items-center gap-2 text-[12px] text-secondary">
-            às
+            {t.as}
             <input
               type="time"
               className="input campo-escuro mono w-auto!"
-              aria-label="Hora da rotina"
+              aria-label={t.horaDaRotina}
               value={gatilho.hora}
               onChange={(evento) => aoMudar({ hora: evento.target.value })}
             />
@@ -97,44 +80,44 @@ function CamposDoGatilho({ gatilho, aoMudar }: PropsDoGatilho) {
         )}
         {gatilho.tipo === "intervalo" && (
           <label className="flex items-center gap-2 text-[12px] text-secondary">
-            a cada
+            {t.aCada}
             <input
               type="number"
               className="input campo-escuro mono w-24!"
-              aria-label="Intervalo em minutos"
+              aria-label={t.intervaloEmMinutos}
               min={LIMITES_DAS_ROTINAS.minimoDeMinutosDoIntervalo}
               max={LIMITES_DAS_ROTINAS.maximoDeMinutosDoIntervalo}
               step={1}
               value={gatilho.minutos}
               onChange={(evento) => aoMudar({ minutos: evento.target.value })}
             />
-            minutos
+            {t.minutosRotulo}
           </label>
         )}
         {gatilho.tipo === "uma_vez" && (
           <input
             type="datetime-local"
             className="input campo-escuro mono w-auto!"
-            aria-label="Data e hora da execução"
+            aria-label={t.dataEHora}
             value={gatilho.em}
             onChange={(evento) => aoMudar({ em: evento.target.value })}
           />
         )}
       </div>
       {gatilho.tipo === "semanal" && (
-        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Dias da semana">
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label={t.diasDaSemana}>
           {DIAS_DA_SEMANA.map((dia) => {
-            const marcado = gatilho.dias.includes(dia.numero);
+            const marcado = gatilho.dias.includes(dia);
             return (
               <button
-                key={dia.numero}
+                key={dia}
                 type="button"
                 className={`btn btn-sm ${marcado ? "btn-cta" : "btn-outline"}`}
                 aria-pressed={marcado}
-                aria-label={dia.completo}
-                onClick={() => alternarDia(dia.numero)}
+                aria-label={textos.nomesDosDias[dia]}
+                onClick={() => alternarDia(dia)}
               >
-                {dia.curto}
+                {t.diasCurtos[dia]}
               </button>
             );
           })}
@@ -144,7 +127,7 @@ function CamposDoGatilho({ gatilho, aoMudar }: PropsDoGatilho) {
         <span className="hint">{descreverGatilho(convertido)}</span>
       ) : gatilho.tipo === "intervalo" ? (
         <span className="hint">
-          De {LIMITES_DAS_ROTINAS.minimoDeMinutosDoIntervalo} a {formatoDeInteiro.format(LIMITES_DAS_ROTINAS.maximoDeMinutosDoIntervalo)} minutos.
+          {t.deAte(LIMITES_DAS_ROTINAS.minimoDeMinutosDoIntervalo, formatoDeInteiro.format(LIMITES_DAS_ROTINAS.maximoDeMinutosDoIntervalo))}
         </span>
       ) : null}
     </div>
@@ -164,19 +147,20 @@ interface PropsDaEtapa {
 /** Uma etapa: o cabeçalho com subir, descer e remover, e os campos do tipo dela. */
 function CamposDaEtapa({ etapa, numero, total, orquestradores, aoMudar, aoMover, aoRemover }: PropsDaEtapa) {
   const id = useId();
+  const t = useTextos(textosDeRotinas).editor;
   const mudar = (alteracao: Record<string, unknown>) => aoMudar(alteracao as Partial<EtapaEmEdicao>);
   return (
-    <li className="flex flex-col gap-2 rounded-[var(--radius-card)] border border-border bg-surface-2 p-3" aria-label={`Etapa ${numero}`}>
+    <li className="flex flex-col gap-2 rounded-[var(--radius-card)] border border-border bg-surface-2 p-3" aria-label={t.etapaN(numero)}>
       <div className="flex items-center gap-2">
         <span className="font-titulo text-[12.5px] font-medium text-primary">
-          Etapa {numero} · {ROTULOS_DOS_TIPOS_DE_ETAPA[etapa.tipo]}
+          {t.etapaTipo(numero, rotuloDoTipoDeEtapa(etapa.tipo))}
         </span>
         <span className="ml-auto flex items-center gap-1">
           <button
             type="button"
             className="btn btn-sm btn-ghost"
-            aria-label={`Subir etapa ${numero}`}
-            title="Subir"
+            aria-label={t.subirEtapa(numero)}
+            title={t.subir}
             disabled={numero === 1}
             onClick={() => aoMover(-1)}
           >
@@ -185,15 +169,15 @@ function CamposDaEtapa({ etapa, numero, total, orquestradores, aoMudar, aoMover,
           <button
             type="button"
             className="btn btn-sm btn-ghost"
-            aria-label={`Descer etapa ${numero}`}
-            title="Descer"
+            aria-label={t.descerEtapa(numero)}
+            title={t.descer}
             disabled={numero === total}
             onClick={() => aoMover(1)}
           >
             ↓
           </button>
-          <button type="button" className="btn btn-sm btn-danger" aria-label={`Remover etapa ${numero}`} onClick={aoRemover}>
-            Remover
+          <button type="button" className="btn btn-sm btn-danger" aria-label={t.removerEtapa(numero)} onClick={aoRemover}>
+            {t.remover}
           </button>
         </span>
       </div>
@@ -203,12 +187,12 @@ function CamposDaEtapa({ etapa, numero, total, orquestradores, aoMudar, aoMover,
           <div className="flex flex-wrap items-center gap-2">
             <select
               className="select campo-escuro select-do-subagente"
-              aria-label={`Orquestrador da etapa ${numero}`}
+              aria-label={t.orquestradorDaEtapa(numero)}
               value={etapa.orquestradorId}
               disabled={orquestradores === null}
               onChange={(evento) => mudar({ orquestradorId: evento.target.value })}
             >
-              <option value="">{orquestradores === null ? "carregando…" : "Escolha o orquestrador…"}</option>
+              <option value="">{orquestradores === null ? t.carregando : t.escolhaOOrquestrador}</option>
               {(orquestradores ?? []).map((orquestrador) => (
                 <option key={orquestrador.id} value={orquestrador.id}>
                   {orquestrador.nome}
@@ -217,18 +201,18 @@ function CamposDaEtapa({ etapa, numero, total, orquestradores, aoMudar, aoMover,
               {orquestradores !== null &&
                 etapa.orquestradorId !== "" &&
                 !orquestradores.some((orquestrador) => orquestrador.id === etapa.orquestradorId) && (
-                  <option value={etapa.orquestradorId}>orquestrador removido</option>
+                  <option value={etapa.orquestradorId}>{t.orquestradorRemovido}</option>
                 )}
             </select>
             <select
               className="select campo-escuro select-do-subagente"
-              aria-label={`Modo da etapa ${numero}`}
+              aria-label={t.modoDaEtapa(numero)}
               value={etapa.modo}
               onChange={(evento) => mudar({ modo: evento.target.value as ModoDoPedido })}
             >
-              {OPCOES_DE_MODO.map((opcao) => (
-                <option key={opcao.valor} value={opcao.valor}>
-                  {opcao.rotulo}
+              {VALORES_DE_MODO.map((modo) => (
+                <option key={modo} value={modo}>
+                  {t.opcoesDeModo[modo]}
                 </option>
               ))}
             </select>
@@ -238,8 +222,8 @@ function CamposDaEtapa({ etapa, numero, total, orquestradores, aoMudar, aoMover,
               id={`${id}-texto`}
               className="textarea campo-escuro textarea-instrucoes custom-scrollbar"
               rows={4}
-              aria-label={`Pedido da etapa ${numero}`}
-              placeholder="Ex.: Rode os testes e me conte o que falhou."
+              aria-label={t.pedidoDaEtapa(numero)}
+              placeholder={t.pedidoExemplo}
               aria-invalid={etapa.texto.length > LIMITES_DAS_ROTINAS.tamanhoDoTextoDoPedido}
               value={etapa.texto}
               onChange={(evento) => mudar({ texto: evento.target.value })}
@@ -260,29 +244,29 @@ function CamposDaEtapa({ etapa, numero, total, orquestradores, aoMudar, aoMover,
             className="textarea campo-escuro custom-scrollbar"
             rows={2}
             maxLength={LIMITES_DAS_ROTINAS.tamanhoDaMensagemDeAprovacao}
-            aria-label={`Mensagem da etapa ${numero}`}
-            placeholder="Ex.: Posso publicar a nova versão?"
+            aria-label={t.mensagemDaEtapa(numero)}
+            placeholder={t.mensagemExemplo}
             value={etapa.mensagem}
             onChange={(evento) => mudar({ mensagem: evento.target.value })}
           />
-          <span className="hint">A rotina para aqui e só segue quando você aprovar. Se recusar, ela termina.</span>
+          <span className="hint">{t.aprovacaoAjuda}</span>
         </div>
       )}
 
       {etapa.tipo === "espera" && (
         <label className="flex items-center gap-2 text-[12px] text-secondary">
-          Esperar
+          {t.esperar}
           <input
             type="number"
             className="input campo-escuro mono w-24!"
-            aria-label={`Minutos da espera da etapa ${numero}`}
+            aria-label={t.minutosDaEspera(numero)}
             min={1}
             max={LIMITES_DAS_ROTINAS.maximoDeMinutosDaEspera}
             step={1}
             value={etapa.minutos}
             onChange={(evento) => mudar({ minutos: evento.target.value })}
           />
-          minutos antes de seguir
+          {t.minutosAntesDeSeguir}
         </label>
       )}
     </li>
@@ -308,6 +292,7 @@ interface Props {
  */
 export function EditorDeRotina({ titulo, inicial, gatilhoSalvo, orquestradores, aoSalvar, aoCancelar }: Props) {
   const id = useId();
+  const t = useTextos(textosDeRotinas).editor;
   const [rotina, setRotina] = useState<RotinaEmEdicao>(inicial);
   const [erro, setErro] = useState<string | null>(null);
   const [salvando, setSalvando] = useState(false);
@@ -378,24 +363,23 @@ export function EditorDeRotina({ titulo, inicial, gatilhoSalvo, orquestradores, 
       <div className="subagentes-editor custom-scrollbar">
         <div className="linha-de-campo">
           <span className="rotulo-de-campo">
-            <label htmlFor={`${id}-nome`}>Nome</label>
+            <label htmlFor={`${id}-nome`}>{t.nome}</label>
           </span>
           <input
             id={`${id}-nome`}
             className="input campo-escuro"
             value={rotina.nome}
             maxLength={LIMITES_DAS_ROTINAS.tamanhoDoNome}
-            placeholder="Ex.: Relatório da manhã"
+            placeholder={t.nomeExemplo}
             onChange={(evento) => setRotina((atual) => ({ ...atual, nome: evento.target.value }))}
           />
         </div>
 
         <div className="linha-de-campo">
           <span className="rotulo-de-campo">
-            Quando
-            <Dica sobre="Quando" titulo="Quando a rotina roda sozinha.">
-              A rotina só roda com o Orquestrador aberto (ou escondido na bandeja do Windows). Se a hora passar com ele
-              fechado, vale a opção "Se perder a hora".
+            {t.quando}
+            <Dica sobre={t.quando} titulo={t.quandoTitulo}>
+              {t.quandoAjuda}
             </Dica>
           </span>
           <CamposDoGatilho gatilho={rotina.gatilho} aoMudar={mudarGatilho} />
@@ -403,14 +387,13 @@ export function EditorDeRotina({ titulo, inicial, gatilhoSalvo, orquestradores, 
 
         <div className="linha-de-campo">
           <span className="rotulo-de-campo">
-            Etapas
-            <Dica sobre="Etapas" titulo="O que a rotina faz, em ordem.">
-              Pedido: manda um texto a um orquestrador. Aprovação: para e espera você. Espera: aguarda alguns minutos. De 1
-              a {LIMITES_DAS_ROTINAS.maximoDeEtapas} etapas.
+            {t.etapas}
+            <Dica sobre={t.etapas} titulo={t.etapasTitulo}>
+              {t.etapasAjuda(LIMITES_DAS_ROTINAS.maximoDeEtapas)}
             </Dica>
           </span>
           <div className="flex min-w-0 flex-col gap-2">
-            <ol className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Etapas da rotina">
+            <ol className="m-0 flex list-none flex-col gap-2 p-0" aria-label={t.etapasDaRotina}>
               {rotina.etapas.map((etapa, indice) => (
                 <CamposDaEtapa
                   key={etapa.chave}
@@ -428,13 +411,13 @@ export function EditorDeRotina({ titulo, inicial, gatilhoSalvo, orquestradores, 
             </ol>
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" className="btn btn-sm btn-outline" disabled={cheia} onClick={() => adicionarEtapa("pedido")}>
-                + Pedido
+                {t.maisPedido}
               </button>
               <button type="button" className="btn btn-sm btn-outline" disabled={cheia} onClick={() => adicionarEtapa("aprovacao")}>
-                + Aprovação
+                {t.maisAprovacao}
               </button>
               <button type="button" className="btn btn-sm btn-outline" disabled={cheia} onClick={() => adicionarEtapa("espera")}>
-                + Espera
+                {t.maisEspera}
               </button>
               <span className={`mono ml-auto ${cheia ? "text-warning" : "text-muted"}`}>
                 {rotina.etapas.length} / {LIMITES_DAS_ROTINAS.maximoDeEtapas}
@@ -445,9 +428,9 @@ export function EditorDeRotina({ titulo, inicial, gatilhoSalvo, orquestradores, 
 
         <div className="linha-de-campo">
           <span className="rotulo-de-campo">
-            <label htmlFor={`${id}-ao-perder`}>Se perder a hora</label>
-            <Dica sobre="Se perder a hora" titulo="Quando o app estava fechado na hora marcada.">
-              Pular é o mais seguro: cada execução gasta sua cota e age com as permissões do orquestrador.
+            <label htmlFor={`${id}-ao-perder`}>{t.sePerderAHora}</label>
+            <Dica sobre={t.sePerderAHora} titulo={t.sePerderTitulo}>
+              {t.sePerderAjuda}
             </Dica>
           </span>
           <select
@@ -456,9 +439,9 @@ export function EditorDeRotina({ titulo, inicial, gatilhoSalvo, orquestradores, 
             value={rotina.aoPerder}
             onChange={(evento) => setRotina((atual) => ({ ...atual, aoPerder: evento.target.value as AoPerder }))}
           >
-            {OPCOES_DE_AO_PERDER.map((opcao) => (
-              <option key={opcao.valor} value={opcao.valor}>
-                {opcao.rotulo}
+            {VALORES_DE_AO_PERDER.map((valor) => (
+              <option key={valor} value={valor}>
+                {t.opcoesDeAoPerder[valor]}
               </option>
             ))}
           </select>
@@ -471,12 +454,12 @@ export function EditorDeRotina({ titulo, inicial, gatilhoSalvo, orquestradores, 
         </div>
       )}
       <div className="painel-da-barra-rodape">
-        {problema !== null && <span className="mr-auto text-[11px] text-warning">Para salvar, {problema}</span>}
+        {problema !== null && <span className="mr-auto text-[11px] text-warning">{t.paraSalvar(problema)}</span>}
         <button type="button" className="btn btn-sm btn-ghost" onClick={aoCancelar}>
-          Cancelar
+          {t.cancelar}
         </button>
         <button type="submit" className="btn btn-sm btn-cta" disabled={salvando || problema !== null}>
-          {salvando ? "Salvando…" : "Salvar"}
+          {salvando ? t.salvando : t.salvar}
         </button>
       </div>
     </form>

@@ -8,6 +8,8 @@ import {
   formatarPercentual,
   rotuloCurtoDaCota,
 } from "../../shared/formatacao";
+import { textosAtuais, useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineis } from "../../shared/idioma/textos/paineis";
 import { useRelogio } from "../../shared/hooks/useRelogio";
 import { type FonteDeEventosDasRotinas, useRotinas } from "../../shared/hooks/useRotinas";
 import { useRotinasNoDesktop } from "../../shared/hooks/useRotinasNoDesktop";
@@ -26,6 +28,7 @@ const DURACAO_DO_AVISO_DE_VOLTA_MS = 10_000;
  * quando ele volta. Sem ela, a tela congelada parece um sistema travado.
  */
 export function AvisoDeConexao({ servidor }: { servidor: EstadoDoServidor }) {
+  const t = useTextos(textosDePaineis).canvas;
   const agora = useRelogio(!servidor.conectado);
   const [mostrarVolta, setMostrarVolta] = useState(false);
 
@@ -45,14 +48,10 @@ export function AvisoDeConexao({ servidor }: { servidor: EstadoDoServidor }) {
         <span className="ponto-de-status ponto-de-status-erro" />
         <div className="flex flex-col gap-0.5">
           <strong className="font-titulo text-[13px]">
-            Servidor desconectado · há {formatarDuracao(foraHa)}
+            {t.desconectado(formatarDuracao(foraHa))}
           </strong>
-          <span>
-            Os orquestradores pararam de responder. A tela reconecta sozinha assim que o servidor voltar.
-          </span>
-          <span className="mono text-muted">
-            o aplicativo religa o servidor sozinho; se não voltar, feche e abra o Orquestrador de novo
-          </span>
+          <span>{t.desconectadoAjuda}</span>
+          <span className="mono text-muted">{t.desconectadoReligar}</span>
         </div>
       </div>
     );
@@ -63,15 +62,10 @@ export function AvisoDeConexao({ servidor }: { servidor: EstadoDoServidor }) {
       <div className="aviso-de-conexao aviso-reconectado" role="status">
         <span className="ponto-de-status ponto-de-status-ok" />
         <div className="flex flex-col gap-0.5">
-          <strong className="font-titulo text-[13px]">Servidor reconectado</strong>
-          {servidor.reiniciou && (
-            <span>
-              Ele foi reiniciado: pedidos que estavam rodando aparecem como interrompidos. Reenvie se precisar — os
-              orquestradores lembram da conversa.
-            </span>
-          )}
+          <strong className="font-titulo text-[13px]">{t.reconectado}</strong>
+          {servidor.reiniciou && <span>{t.reiniciado}</span>}
         </div>
-        <button type="button" className="botao-icone" title="Fechar aviso" onClick={() => setMostrarVolta(false)}>
+        <button type="button" className="botao-icone" title={t.fecharAviso} onClick={() => setMostrarVolta(false)}>
           <IconeFechar tamanho={14} />
         </button>
       </div>
@@ -91,13 +85,14 @@ interface PropsDoErroDoCanvas {
 
 /** Falha ou recusa numa ação do canvas (ex.: criar uma nota), logo abaixo da barra. */
 export function ErroDoCanvas({ erro, aoFechar, nivel = "erro" }: PropsDoErroDoCanvas) {
+  const t = useTextos(textosDePaineis).canvas;
   return (
     <div
       className={`alert ${nivel === "aviso" ? "alert-warning" : "alert-error"} mt-2 flex max-w-md items-start gap-2`}
       role="alert"
     >
       <span className="flex-1">{erro}</span>
-      <button type="button" className="botao-icone shrink-0" title="Fechar aviso" onClick={aoFechar}>
+      <button type="button" className="botao-icone shrink-0" title={t.fecharAviso} onClick={aoFechar}>
         <IconeFechar tamanho={14} />
       </button>
     </div>
@@ -167,11 +162,17 @@ interface PropsDoStatus {
 
 
 function descreverMemoria(memoria: LeituraDeMemoria): string {
-  return `Livre: ${formatarBytes(memoria.livreBytes)} de ${formatarBytes(memoria.totalBytes)}. Agentes: ${formatarBytes(memoria.agentesBytes)}. Servidor: ${formatarBytes(memoria.servidorBytes)}.`;
+  return textosAtuais(textosDePaineis).canvas.descreverMemoria(
+    formatarBytes(memoria.livreBytes),
+    formatarBytes(memoria.totalBytes),
+    formatarBytes(memoria.agentesBytes),
+    formatarBytes(memoria.servidorBytes),
+  );
 }
 
 /** RAM livre do computador e quanto os agentes estão usando, com alerta quando aperta. */
 function MedidorDeMemoria({ memoria }: { memoria: LeituraDeMemoria }) {
+  const t = useTextos(textosDePaineis).canvas;
   const nivel = nivelDaMemoria(memoria);
   const usada = 1 - memoria.livreBytes / memoria.totalBytes;
   return (
@@ -183,9 +184,9 @@ function MedidorDeMemoria({ memoria }: { memoria: LeituraDeMemoria }) {
       <span className={`medidor ${nivel === "normal" ? "" : "medidor-alto"}`}>
         <span style={{ width: `${Math.round(usada * 100)}%` }} />
       </span>
-      {formatarBytes(memoria.livreBytes)} livres
+      {t.livres(formatarBytes(memoria.livreBytes))}
       {memoria.agentesBytes > 0 && (
-        <span className="status-extra text-muted">· agentes {formatarBytes(memoria.agentesBytes)}</span>
+        <span className="status-extra text-muted">{t.agentesMemoria(formatarBytes(memoria.agentesBytes))}</span>
       )}
     </span>
   );
@@ -227,11 +228,12 @@ function ResumoDoStatus({
   memoria,
   gatilho,
 }: Omit<PropsDoStatus, "trabalhando"> & { gatilho: GatilhoDoUso }) {
+  const t = useTextos(textosDePaineis).canvas;
   const leituras: LeituraDoResumo[] = (cota ?? []).map((janela) => ({
     rotulo: rotuloCurtoDaCota(janela.nome),
     uso: janela.utilizacao,
     alto: janela.utilizacao >= COTA_ALTA,
-    linha: `${janela.nome}: ${formatarPercentual(janela.utilizacao)}${janela.renovaEm ? ` (renova ${formatarMomento(janela.renovaEm)})` : ""}`,
+    linha: `${janela.nome}: ${formatarPercentual(janela.utilizacao)}${janela.renovaEm ? ` ${t.renovaEntreParenteses(formatarMomento(janela.renovaEm))}` : ""}`,
   }));
   if (memoria !== null) {
     leituras.push({
@@ -249,18 +251,18 @@ function ResumoDoStatus({
     null,
   );
   const dica = [
-    ...(bixinhosAtivos > 0 ? [`${bixinhosAtivos} ${bixinhosAtivos === 1 ? "agente ativo" : "agentes ativos"}`] : []),
+    ...(bixinhosAtivos > 0 ? [t.agentesAtivos(bixinhosAtivos)] : []),
     ...leituras.map((leitura) => leitura.linha),
   ].join("\n");
   return (
     <button
       {...propsDoGatilho(gatilho)}
       className={`status-resumo items-center gap-1.5 mono whitespace-nowrap ${leituras.some((leitura) => leitura.alto) ? "text-error" : "text-muted"}`}
-      title={`${dica}\nClique para ver o uso`}
+      title={`${dica}\n${t.cliqueParaVerOUso}`}
       aria-label={dica}
       data-testid="resumo-do-status"
     >
-      {bixinhosAtivos > 0 && <span className="text-active">{bixinhosAtivos} ativos ·</span>}
+      {bixinhosAtivos > 0 && <span className="text-active">{t.ativosCurto(bixinhosAtivos)}</span>}
       {principal !== null && (
         <>
           {principal.rotulo}
@@ -280,6 +282,7 @@ function ResumoDoStatus({
  * cota ainda, um "cota —" faz o mesmo papel.
  */
 function ConteudoDoStatus({ trabalhando, bixinhosAtivos, cota, memoria }: PropsDoStatus) {
+  const t = useTextos(textosDePaineis).canvas;
   // O botão que abriu o popover; nulo com ele fechado. Um clique em qualquer gatilho fecha.
   const [gatilhoAberto, setGatilhoAberto] = useState<HTMLElement | null>(null);
   const idDoPopover = `${useId()}-uso`;
@@ -296,11 +299,11 @@ function ConteudoDoStatus({ trabalhando, bixinhosAtivos, cota, memoria }: PropsD
   return (
     <>
       <span className={`etiqueta shrink-0 ${trabalhando > 0 ? "etiqueta-ativa etiqueta-pulso" : ""}`}>
-        {trabalhando > 0 ? `${trabalhando} trabalhando` : "todos ociosos"}
+        {trabalhando > 0 ? t.trabalhando(trabalhando) : t.todosOciosos}
       </span>
       {bixinhosAtivos > 0 && (
         <span className="status-detalhe mono text-active whitespace-nowrap">
-          {bixinhosAtivos} {bixinhosAtivos === 1 ? "agente ativo" : "agentes ativos"}
+          {t.agentesAtivos(bixinhosAtivos)}
         </span>
       )}
       {cota !== null && cota.length > 0 ? (
@@ -309,8 +312,8 @@ function ConteudoDoStatus({ trabalhando, bixinhosAtivos, cota, memoria }: PropsD
             key={janela.nome}
             {...propsDoGatilho(gatilho)}
             className="status-detalhe status-da-cota flex items-center gap-1.5 mono text-muted whitespace-nowrap"
-            aria-label={`Cota de ${janela.nome}: ${formatarPercentual(janela.utilizacao)}`}
-            title={`${janela.renovaEm ? `Renova ${formatarMomento(janela.renovaEm)} · ` : ""}Clique para ver o uso`}
+            aria-label={t.cotaDe(janela.nome, formatarPercentual(janela.utilizacao))}
+            title={`${janela.renovaEm ? `${t.renova(formatarMomento(janela.renovaEm))} · ` : ""}${t.cliqueParaVerOUso}`}
           >
             <span className="rotulo-completo">{janela.nome}</span>
             <span className="rotulo-curto">{rotuloCurtoDaCota(janela.nome)}</span>
@@ -324,10 +327,10 @@ function ConteudoDoStatus({ trabalhando, bixinhosAtivos, cota, memoria }: PropsD
         <button
           {...propsDoGatilho(gatilho)}
           className="status-detalhe status-da-cota flex items-center gap-1.5 mono text-muted whitespace-nowrap"
-          aria-label="Cota: ainda sem dados"
-          title="A cota aparece depois do primeiro pedido · Clique para ver o uso"
+          aria-label={t.cotaSemDados}
+          title={`${t.cotaAparece} · ${t.cliqueParaVerOUso}`}
         >
-          cota —
+          {t.cotaTraco}
         </button>
       )}
       {memoria !== null && <MedidorDeMemoria memoria={memoria} />}

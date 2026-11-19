@@ -1,4 +1,8 @@
 import type { InventarioDoPlugin } from "../../shared/api/tipos";
+import { idiomaAtual, localeDoIdioma, textosAtuais } from "../../shared/idioma/idioma";
+import { textosDePaineis } from "../../shared/idioma/textos/paineis";
+
+const textos = () => textosAtuais(textosDePaineis).plugin;
 
 /** "frontend-design" vira "FD"; um nome de uma palavra só usa as duas primeiras letras. */
 export function iniciaisDe(nome: string): string {
@@ -38,12 +42,12 @@ export function linkDaFonte(fonte: string | null): LinkDaFonte | null {
     return null;
   }
   const noGitHub = /^https?:\/\/(www\.)?github\.com\//i.test(url);
-  return { url, rotulo: noGitHub ? "Ver no GitHub" : "Ver o código" };
+  return { url, rotulo: noGitHub ? textos().verNoGitHub : textos().verOCodigo };
 }
 
 /** "3 skills", "1 subagente": o singular quando for 1. */
 export function contar(total: number, singular: string, plural: string): string {
-  return `${total.toLocaleString("pt-BR")} ${total === 1 ? singular : plural}`;
+  return `${total.toLocaleString(localeDoIdioma(idiomaAtual()))} ${total === 1 ? singular : plural}`;
 }
 
 /** O plugin espera o ok do usuário antes de ligar: hooks, pasta `bin/` ou inventário que não deu para provar. Igual ao do servidor. */
@@ -60,27 +64,20 @@ export interface MotivoDeConfirmacao {
 
 /** Os motivos que valem para este plugin (vazio quando ele liga direto). */
 export function motivosDeConfirmacao(inventario: InventarioDoPlugin): MotivoDeConfirmacao[] {
+  const t = textos();
   const motivos: MotivoDeConfirmacao[] = [];
   if (inventario.hooks > 0) {
     motivos.push({
       chave: "hooks",
-      titulo: `Roda comandos sozinho ao abrir sessões (${contar(inventario.hooks, "hook", "hooks")})`,
-      explicacao: "Eles disparam em toda sessão do Claude Code, no app e no seu terminal, sem pedir licença a cada vez.",
+      titulo: t.motivoHooks.titulo(contar(inventario.hooks, t.unidades.hook.um, t.unidades.hook.varios)),
+      explicacao: t.motivoHooks.explicacao,
     });
   }
   if (inventario.temBin) {
-    motivos.push({
-      chave: "bin",
-      titulo: "Traz programas próprios que o terminal dos agentes pode chamar (pasta bin)",
-      explicacao: "Eles ficam ao alcance do terminal enquanto o plugin estiver ligado.",
-    });
+    motivos.push({ chave: "bin", titulo: t.motivoBin.titulo, explicacao: t.motivoBin.explicacao });
   }
   if (!inventario.verificado) {
-    motivos.push({
-      chave: "naoVerificado",
-      titulo: "Não conseguimos ler tudo o que vem nele",
-      explicacao: "Por isso a contagem pode estar incompleta e pode haver algo que não aparece aqui.",
-    });
+    motivos.push({ chave: "naoVerificado", titulo: t.motivoNaoVerificado.titulo, explicacao: t.motivoNaoVerificado.explicacao });
   }
   return motivos;
 }
@@ -166,12 +163,13 @@ export function acharNoTexto(texto: string, termo: string, margem = Number.POSIT
 
 /** A linha de resumo do que há dentro de um plugin instalado. Os hooks aparecem no selo, não aqui. */
 export function resumoDoInventario(inventario: InventarioDoPlugin): string {
+  const { unidades } = textos();
   const partes = [
-    contar(inventario.skills.length, "skill", "skills"),
-    contar(inventario.subagentes, "subagente", "subagentes"),
+    contar(inventario.skills.length, unidades.skill.um, unidades.skill.varios),
+    contar(inventario.subagentes, unidades.subagente.um, unidades.subagente.varios),
   ];
   if (inventario.servidoresMcp > 0) {
-    partes.push(contar(inventario.servidoresMcp, "servidor MCP", "servidores MCP"));
+    partes.push(contar(inventario.servidoresMcp, unidades.servidorMcp.um, unidades.servidorMcp.varios));
   }
   return partes.join(" · ");
 }

@@ -3,6 +3,8 @@ import { useState } from "react";
 import { mensagemDeErro } from "../../shared/api/cliente";
 import type { ResumoDaRotina } from "../../shared/api/rotinas";
 import { formatarMomento } from "../../shared/formatacao";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeRotinas } from "../../shared/idioma/textos/rotinas";
 import { EtiquetaDaSituacao } from "./EtiquetaDaSituacao";
 import { HistoricoDeExecucoes } from "./HistoricoDeExecucoes";
 import { descreverEtapa, descreverGatilho, descreverProximaExecucao } from "./textos";
@@ -16,11 +18,6 @@ interface Props {
   aoApagar: (id: string) => Promise<unknown>;
   aoCancelarExecucao: (execucaoId: string) => Promise<unknown>;
 }
-
-const TEXTO_DO_AO_PERDER = {
-  pular: "pula essa execução",
-  executar_ao_abrir: "executa assim que o app abrir",
-} as const;
 
 /**
  * A rotina escolhida: quando roda, as etapas, os botões (executar agora,
@@ -37,6 +34,7 @@ export function DetalheDaRotina({
   aoApagar,
   aoCancelarExecucao,
 }: Props) {
+  const t = useTextos(textosDeRotinas).detalhe;
   const [ocupado, setOcupado] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [confirmandoApagar, setConfirmandoApagar] = useState(false);
@@ -55,21 +53,21 @@ export function DetalheDaRotina({
   }
 
   return (
-    <div className="subagentes-editor custom-scrollbar gap-3" role="region" aria-label={`Rotina ${rotina.nome}`}>
+    <div className="subagentes-editor custom-scrollbar gap-3" role="region" aria-label={t.rotulo(rotina.nome)}>
       <div className="flex flex-wrap items-center gap-2 pt-2">
         <h3 className="font-titulo min-w-0 break-words text-[14px] font-medium text-primary">{rotina.nome}</h3>
-        <span className={`etiqueta ${rotina.ativa ? "etiqueta-success" : ""}`}>{rotina.ativa ? "Ativa" : "Desativada"}</span>
+        <span className={`etiqueta ${rotina.ativa ? "etiqueta-success" : ""}`}>{rotina.ativa ? t.ativa : t.desativada}</span>
       </div>
 
       <dl className="m-0 grid grid-cols-[8.5rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-[12.5px]">
-        <dt className="text-muted">Quando</dt>
+        <dt className="text-muted">{t.quando}</dt>
         <dd className="m-0 text-primary">{descreverGatilho(rotina.gatilho)}</dd>
-        <dt className="text-muted">Próxima execução</dt>
+        <dt className="text-muted">{t.proximaExecucao}</dt>
         <dd className="m-0 text-primary">{descreverProximaExecucao(rotina)}</dd>
-        <dt className="text-muted">Última execução</dt>
-        <dd className="m-0 text-primary">{rotina.ultimaExecucaoEm === null ? "nunca rodou" : formatarMomento(rotina.ultimaExecucaoEm)}</dd>
-        <dt className="text-muted">Se perder a hora</dt>
-        <dd className="m-0 text-primary">{TEXTO_DO_AO_PERDER[rotina.aoPerder]}</dd>
+        <dt className="text-muted">{t.ultimaExecucao}</dt>
+        <dd className="m-0 text-primary">{rotina.ultimaExecucaoEm === null ? t.nuncaRodou : formatarMomento(rotina.ultimaExecucaoEm)}</dd>
+        <dt className="text-muted">{t.sePerderAHora}</dt>
+        <dd className="m-0 text-primary">{t.aoPerder[rotina.aoPerder]}</dd>
       </dl>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -77,10 +75,10 @@ export function DetalheDaRotina({
           type="button"
           className="btn btn-sm btn-cta"
           disabled={ocupado || execucaoAtiva !== null}
-          title={execucaoAtiva !== null ? "Já há uma execução em curso." : "Roda agora, sem esperar a hora marcada"}
+          title={execucaoAtiva !== null ? t.jaHaExecucao : t.rodaAgora}
           onClick={() => void fazer(() => aoExecutarAgora(rotina.id))}
         >
-          Executar agora
+          {t.executarAgora}
         </button>
         <button
           type="button"
@@ -88,10 +86,10 @@ export function DetalheDaRotina({
           disabled={ocupado}
           onClick={() => void fazer(() => aoAlterarAtiva(rotina.id, !rotina.ativa))}
         >
-          {rotina.ativa ? "Desativar" : "Ativar"}
+          {rotina.ativa ? t.desativar : t.ativar}
         </button>
         <button type="button" className="btn btn-sm btn-outline" disabled={ocupado} onClick={aoEditar}>
-          Editar
+          {t.editar}
         </button>
         <button
           type="button"
@@ -99,18 +97,16 @@ export function DetalheDaRotina({
           disabled={ocupado}
           onClick={() => setConfirmandoApagar(true)}
         >
-          Apagar
+          {t.apagar}
         </button>
       </div>
 
       {confirmandoApagar && (
-        <div className="alert alert-warning flex flex-col gap-2" role="alertdialog" aria-label="Confirmar exclusão da rotina">
-          <span>
-            Apagar a rotina “{rotina.nome}” e o histórico dela? Uma execução em curso será cancelada. Isso não pode ser desfeito.
-          </span>
+        <div className="alert alert-warning flex flex-col gap-2" role="alertdialog" aria-label={t.confirmarExclusao}>
+          <span>{t.avisoDeExclusao(rotina.nome)}</span>
           <span className="flex justify-end gap-2">
             <button type="button" className="btn btn-sm btn-ghost" onClick={() => setConfirmandoApagar(false)}>
-              Manter
+              {t.manter}
             </button>
             <button
               type="button"
@@ -118,7 +114,7 @@ export function DetalheDaRotina({
               disabled={ocupado}
               onClick={() => void fazer(() => aoApagar(rotina.id))}
             >
-              Apagar de vez
+              {t.apagarDeVez}
             </button>
           </span>
         </div>
@@ -135,8 +131,8 @@ export function DetalheDaRotina({
           <EtiquetaDaSituacao situacao={execucaoAtiva.situacao} />
           <span className="text-[12.5px] text-primary">
             {execucaoAtiva.etapaAtual === null
-              ? "Encerrando…"
-              : `Etapa ${execucaoAtiva.etapaAtual + 1} de ${execucaoAtiva.etapas.length}`}
+              ? t.encerrando
+              : t.etapaDe(execucaoAtiva.etapaAtual + 1, execucaoAtiva.etapas.length)}
           </span>
           <button
             type="button"
@@ -144,13 +140,13 @@ export function DetalheDaRotina({
             disabled={ocupado}
             onClick={() => void fazer(() => aoCancelarExecucao(execucaoAtiva.id))}
           >
-            Cancelar execução
+            {t.cancelarExecucao}
           </button>
         </div>
       )}
 
-      <section className="flex flex-col gap-1.5" aria-label="Etapas">
-        <h3 className="font-titulo text-[12.5px] font-medium text-primary">Etapas</h3>
+      <section className="flex flex-col gap-1.5" aria-label={t.etapas}>
+        <h3 className="font-titulo text-[12.5px] font-medium text-primary">{t.etapas}</h3>
         <ol className="m-0 flex list-none flex-col gap-1 p-0 text-[12.5px] text-secondary">
           {rotina.etapas.map((etapa, indice) => (
             <li key={indice} className="flex gap-2">

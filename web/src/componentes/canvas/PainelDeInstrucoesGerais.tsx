@@ -7,7 +7,9 @@ import {
   TAMANHO_MAXIMO_DAS_INSTRUCOES,
   TAMANHO_MAXIMO_DO_NOME_DO_PERFIL,
 } from "../../shared/api/tipos";
-import { DICA_DAS_VARIAVEIS, tamanhoDasInstrucoes } from "../../shared/instrucoes";
+import { idiomaAtual, localeDoIdioma, textosAtuais, useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineis } from "../../shared/idioma/textos/paineis";
+import { dicaDasVariaveis, tamanhoDasInstrucoes } from "../../shared/instrucoes";
 import { CampoDeInstrucoes } from "../CampoDeInstrucoes";
 import { Dica } from "../Dica";
 
@@ -30,19 +32,20 @@ function chaveDoNome(nome: string): string {
  * na mesma ordem em que o servidor confere.
  */
 function problemaDo(perfil: PerfilEmEdicao, todos: readonly PerfilEmEdicao[]): string | null {
+  const p = textosAtuais(textosDePaineis).instrucoes.problemas;
   const nome = chaveDoNome(perfil.nome);
   if (nome === "") {
-    return "dê um nome.";
+    return p.deUmNome;
   }
   if (todos.some((outro) => outro.chave !== perfil.chave && chaveDoNome(outro.nome) === nome)) {
-    return `troque o nome: já existe um "${perfil.nome.trim()}".`;
+    return p.nomeRepetido(perfil.nome.trim());
   }
   const tamanho = tamanhoDasInstrucoes(perfil.texto);
   if (tamanho === 0) {
-    return "escreva o texto.";
+    return p.escrevaOTexto;
   }
   if (tamanho > TAMANHO_MAXIMO_DAS_INSTRUCOES) {
-    return `encurte o texto para até ${TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString("pt-BR")} caracteres.`;
+    return p.encurteOTexto(TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString(localeDoIdioma(idiomaAtual())));
   }
   return null;
 }
@@ -61,6 +64,7 @@ interface Props {
  * mudou); os subagentes prontos têm o painel deles.
  */
 export function PainelDeInstrucoesGerais({ aoFechar, aoSalvar }: Props) {
+  const t = useTextos(textosDePaineis).instrucoes;
   const [salvas, setSalvas] = useState<string | null>(null);
   const [instrucoes, setInstrucoes] = useState("");
   const [perfisSalvos, setPerfisSalvos] = useState<PerfilDeInstrucoes[]>([]);
@@ -159,23 +163,22 @@ export function PainelDeInstrucoesGerais({ aoFechar, aoSalvar }: Props) {
   }
 
   return (
-    <section ref={painel} className="painel-flutuante painel-da-barra mt-2 w-[40rem]" aria-label="Instruções gerais">
+    <section ref={painel} className="painel-flutuante painel-da-barra mt-2 w-[40rem]" aria-label={t.rotulo}>
       <div className="painel-da-barra-corpo custom-scrollbar">
         {salvas === null && erro === null ? (
-          <span className="hint">carregando…</span>
+          <span className="hint">{t.carregando}</span>
         ) : (
           <>
             <CampoDeInstrucoes
-              rotulo="Instruções gerais"
-              ajuda={`Valem a partir do próximo pedido de cada orquestrador. ${DICA_DAS_VARIAVEIS}`}
-              placeholder="Ex.: Responda sempre em português, com tópicos curtos."
+              rotulo={t.rotulo}
+              ajuda={t.ajudaDasGerais(dicaDasVariaveis())}
+              placeholder={t.exemploDasGerais}
               valor={instrucoes}
               aoMudar={setInstrucoes}
               linhas={10}
               dica={
-                <Dica sobre="Instruções gerais" titulo="Valem para todos os orquestradores.">
-                  Entram no prompt de todo orquestrador que não tem instruções próprias. As instruções de um orquestrador
-                  substituem estas. Valem a partir do próximo pedido.
+                <Dica sobre={t.rotulo} titulo={t.dicaTitulo}>
+                  {t.dicaTexto}
                 </Dica>
               }
             />
@@ -184,15 +187,13 @@ export function PainelDeInstrucoesGerais({ aoFechar, aoSalvar }: Props) {
               <div className="flex flex-col gap-0.5">
                 <span className="flex items-center gap-1.5">
                   <h3 id={idDosPerfis} className="label">
-                    Perfis de instruções
+                    {t.perfis}
                   </h3>
-                  <Dica sobre="Perfis de instruções" titulo="Textos prontos para reaproveitar.">
-                    Aparecem em &quot;Aplicar perfil…&quot;, junto das instruções de cada orquestrador (na engrenagem do
-                    terminal e na criação). Aplicar copia o texto para as instruções dele: editar ou apagar o perfil
-                    depois não muda quem já o usou.
+                  <Dica sobre={t.perfis} titulo={t.perfisDicaTitulo}>
+                    {t.perfisDicaTexto}
                   </Dica>
                 </span>
-                <span className="text-support">Instruções que você usa em mais de um orquestrador, para aplicar sem copiar.</span>
+                <span className="text-support">{t.perfisAjuda}</span>
               </div>
 
               {perfis.map((perfil, indice) => {
@@ -201,38 +202,38 @@ export function PainelDeInstrucoesGerais({ aoFechar, aoSalvar }: Props) {
                   <fieldset
                     key={perfil.chave}
                     className="flex flex-col gap-2 rounded-md border border-border p-3"
-                    aria-label={`Perfil ${indice + 1}`}
+                    aria-label={t.perfilN(indice + 1)}
                   >
                     <div className="flex items-center gap-2">
                       <input
                         data-perfil={perfil.chave}
                         className="input campo-escuro min-w-0 flex-1"
-                        aria-label="Nome do perfil"
+                        aria-label={t.nomeDoPerfil}
                         value={perfil.nome}
-                        placeholder="Ex.: Backend com testes"
+                        placeholder={t.nomeExemplo}
                         maxLength={TAMANHO_MAXIMO_DO_NOME_DO_PERFIL}
                         onChange={(evento) => alterarPerfil(perfil.chave, { nome: evento.target.value })}
                       />
                       <button type="button" className="btn btn-sm btn-danger shrink-0" onClick={() => removerPerfil(perfil.chave)}>
-                        Apagar
+                        {t.apagar}
                       </button>
                     </div>
                     <CampoDeInstrucoes
-                      rotulo="Texto do perfil"
-                      ajuda={DICA_DAS_VARIAVEIS}
-                      placeholder="Ex.: Use Jest nos testes e rode o lint antes de concluir."
+                      rotulo={t.textoDoPerfil}
+                      ajuda={dicaDasVariaveis()}
+                      placeholder={t.textoExemplo}
                       valor={perfil.texto}
                       aoMudar={(texto) => alterarPerfil(perfil.chave, { texto })}
                       linhas={5}
                     />
-                    {problema !== null && <span className="text-[11px] text-warning">Para salvar, {problema}</span>}
+                    {problema !== null && <span className="text-[11px] text-warning">{t.paraSalvar(problema)}</span>}
                   </fieldset>
                 );
               })}
 
               <div className="flex items-center gap-2">
                 <button type="button" className="btn btn-sm btn-outline" disabled={cheia} onClick={novoPerfil}>
-                  + Novo perfil
+                  {t.novoPerfil}
                 </button>
                 <span className={`mono ${cheia ? "text-warning" : "text-muted"}`}>
                   {perfis.length} / {MAXIMO_DE_PERFIS_DE_INSTRUCOES}
@@ -245,7 +246,7 @@ export function PainelDeInstrucoesGerais({ aoFechar, aoSalvar }: Props) {
       </div>
       <div className="painel-da-barra-rodape">
         <button type="button" className="btn btn-sm btn-ghost" onClick={aoFechar}>
-          Cancelar
+          {t.cancelar}
         </button>
         <button
           type="button"
@@ -253,7 +254,7 @@ export function PainelDeInstrucoesGerais({ aoFechar, aoSalvar }: Props) {
           onClick={() => void salvar()}
           disabled={salvando || !(instrucoesAlteradas || perfisAlterados) || algumProblema}
         >
-          {salvando ? "Salvando…" : "Salvar"}
+          {salvando ? t.salvando : t.salvar}
         </button>
       </div>
     </section>

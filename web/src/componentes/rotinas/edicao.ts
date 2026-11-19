@@ -10,6 +10,8 @@ import {
   type NovaRotina,
   type TipoDeGatilho,
 } from "../../shared/api/rotinas";
+import { idiomaAtual, localeDoIdioma, textosAtuais } from "../../shared/idioma/idioma";
+import { textosDeRotinas } from "../../shared/idioma/textos/rotinas";
 import { mesmoConteudo } from "../../shared/hooks/useReaproveitado";
 
 /**
@@ -159,7 +161,8 @@ function etapaParaOServidor(etapa: EtapaEmEdicao): DadosDaEtapa {
   }
 }
 
-const formatoDeInteiro = new Intl.NumberFormat("pt-BR");
+const formatoDeInteiro = { format: (numero: number): string => new Intl.NumberFormat(localeDoIdioma(idiomaAtual())).format(numero) };
+const problemas = () => textosAtuais(textosDeRotinas).problemas;
 
 interface OpcoesDaConferencia {
   /** Os ids dos orquestradores que existem; nulo enquanto a lista não chegou (não dá para conferir). */
@@ -171,57 +174,61 @@ interface OpcoesDaConferencia {
 
 function problemaDoGatilho(gatilho: GatilhoEmEdicao, { gatilhoSalvo, agora = new Date() }: OpcoesDaConferencia): string | null {
   if ((gatilho.tipo === "diario" || gatilho.tipo === "semanal") && !FORMATO_DA_HORA.test(gatilho.hora)) {
-    return "escolha a hora da rotina.";
+    return problemas().escolhaAHora;
   }
   if (gatilho.tipo === "semanal" && gatilho.dias.length === 0) {
-    return "escolha ao menos um dia da semana.";
+    return problemas().escolhaUmDia;
   }
   if (gatilho.tipo === "intervalo" && gatilhoParaOServidor(gatilho) === null) {
-    return `o intervalo deve ser de ${LIMITES_DAS_ROTINAS.minimoDeMinutosDoIntervalo} a ${formatoDeInteiro.format(LIMITES_DAS_ROTINAS.maximoDeMinutosDoIntervalo)} minutos.`;
+    return problemas().intervalo(
+      LIMITES_DAS_ROTINAS.minimoDeMinutosDoIntervalo,
+      formatoDeInteiro.format(LIMITES_DAS_ROTINAS.maximoDeMinutosDoIntervalo),
+    );
   }
   if (gatilho.tipo === "uma_vez") {
     const convertido = gatilhoParaOServidor(gatilho);
     if (convertido === null || convertido.tipo !== "uma_vez") {
-      return "escolha a data e a hora da execução única.";
+      return problemas().escolhaDataEHora;
     }
     const igualAoSalvo = gatilhoSalvo?.tipo === "uma_vez" && Date.parse(gatilhoSalvo.em) === Date.parse(convertido.em);
     if (!igualAoSalvo && Date.parse(convertido.em) <= agora.getTime()) {
-      return "escolha um horário futuro para a execução única.";
+      return problemas().escolhaFuturo;
     }
   }
   return null;
 }
 
 function problemaDaEtapa(etapa: EtapaEmEdicao, numero: number, { orquestradoresExistentes }: OpcoesDaConferencia): string | null {
-  const prefixo = `etapa ${numero}:`;
+  const p = problemas();
+  const comEtapa = (problema: string) => p.etapa(numero, problema);
   switch (etapa.tipo) {
     case "pedido":
       if (etapa.orquestradorId === "") {
-        return `${prefixo} escolha o orquestrador que recebe o pedido.`;
+        return comEtapa(p.escolhaOrquestrador);
       }
       if (orquestradoresExistentes !== null && !orquestradoresExistentes.has(etapa.orquestradorId)) {
-        return `${prefixo} o orquestrador escolhido não existe mais; escolha outro.`;
+        return comEtapa(p.orquestradorNaoExiste);
       }
       if (etapa.texto.trim() === "") {
-        return `${prefixo} escreva o pedido.`;
+        return comEtapa(p.escrevaOPedido);
       }
       if (etapa.texto.length > LIMITES_DAS_ROTINAS.tamanhoDoTextoDoPedido) {
-        return `${prefixo} encurte o pedido para até ${formatoDeInteiro.format(LIMITES_DAS_ROTINAS.tamanhoDoTextoDoPedido)} caracteres.`;
+        return comEtapa(p.encurtePedido(formatoDeInteiro.format(LIMITES_DAS_ROTINAS.tamanhoDoTextoDoPedido)));
       }
       return null;
     case "aprovacao":
       if (etapa.mensagem.trim() === "") {
-        return `${prefixo} escreva a mensagem que pede a aprovação.`;
+        return comEtapa(p.escrevaAMensagem);
       }
       if (etapa.mensagem.trim().length > LIMITES_DAS_ROTINAS.tamanhoDaMensagemDeAprovacao) {
-        return `${prefixo} encurte a mensagem para até ${formatoDeInteiro.format(LIMITES_DAS_ROTINAS.tamanhoDaMensagemDeAprovacao)} caracteres.`;
+        return comEtapa(p.encurteMensagem(formatoDeInteiro.format(LIMITES_DAS_ROTINAS.tamanhoDaMensagemDeAprovacao)));
       }
       return null;
     case "espera": {
       const minutos = inteiroDoCampo(etapa.minutos);
       return minutos >= 1 && minutos <= LIMITES_DAS_ROTINAS.maximoDeMinutosDaEspera
         ? null
-        : `${prefixo} a espera deve ser de 1 a ${formatoDeInteiro.format(LIMITES_DAS_ROTINAS.maximoDeMinutosDaEspera)} minutos.`;
+        : comEtapa(p.espera(formatoDeInteiro.format(LIMITES_DAS_ROTINAS.maximoDeMinutosDaEspera)));
     }
   }
 }
@@ -234,20 +241,20 @@ function problemaDaEtapa(etapa: EtapaEmEdicao, numero: number, { orquestradoresE
 export function problemaDaRotina(rotina: RotinaEmEdicao, opcoes: OpcoesDaConferencia): string | null {
   const nome = rotina.nome.trim();
   if (nome === "") {
-    return "dê um nome à rotina.";
+    return problemas().deUmNome;
   }
   if (nome.length > LIMITES_DAS_ROTINAS.tamanhoDoNome) {
-    return `encurte o nome para até ${LIMITES_DAS_ROTINAS.tamanhoDoNome} caracteres.`;
+    return problemas().encurteNome(LIMITES_DAS_ROTINAS.tamanhoDoNome);
   }
   const doGatilho = problemaDoGatilho(rotina.gatilho, opcoes);
   if (doGatilho !== null) {
     return doGatilho;
   }
   if (rotina.etapas.length < LIMITES_DAS_ROTINAS.minimoDeEtapas) {
-    return "adicione ao menos uma etapa.";
+    return problemas().umaEtapa;
   }
   if (rotina.etapas.length > LIMITES_DAS_ROTINAS.maximoDeEtapas) {
-    return `use no máximo ${LIMITES_DAS_ROTINAS.maximoDeEtapas} etapas.`;
+    return problemas().maxEtapas(LIMITES_DAS_ROTINAS.maximoDeEtapas);
   }
   for (const [indice, etapa] of rotina.etapas.entries()) {
     const problema = problemaDaEtapa(etapa, indice + 1, opcoes);
@@ -262,7 +269,7 @@ export function problemaDaRotina(rotina: RotinaEmEdicao, opcoes: OpcoesDaConfere
 export function paraNovaRotina(rotina: RotinaEmEdicao): NovaRotina {
   const gatilho = gatilhoParaOServidor(rotina.gatilho);
   if (gatilho === null) {
-    throw new Error("O gatilho da rotina está incompleto.");
+    throw new Error(problemas().gatilhoIncompleto);
   }
   return {
     nome: rotina.nome.trim(),
