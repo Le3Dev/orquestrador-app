@@ -1,6 +1,8 @@
 import type { FormatoDoArtefato, OrigemDoArtefato } from "./api/artefatos";
 import type { ResumoDoOrquestrador } from "./api/tipos";
 import { descreverAtualizacao } from "./atualizacao";
+import { textosAtuais } from "./idioma/idioma";
+import { textosDePaleta } from "./idioma/textos/canvasPaleta";
 import type { TurnoNaTela } from "./estado/aplicarEvento";
 import type { EstadoDaAtualizacao } from "./ponteDoDesktop";
 
@@ -125,20 +127,12 @@ const ORDEM_DOS_TIPOS: Readonly<Record<TipoDeItemDaPaleta, number>> = {
   pedido: 4,
 };
 
-export const ROTULOS_DOS_TIPOS: Readonly<Record<TipoDeItemDaPaleta, string>> = {
-  acao: "Ações",
-  orquestrador: "Orquestradores",
-  nota: "Notas",
-  artefato: "Artefatos",
-  pedido: "Pedidos",
-};
-
 const ROTULOS_DOS_FORMATOS: Readonly<Record<FormatoDoArtefato, string>> = { html: "HTML", markdown: "Markdown" };
 /** Palavras a mais que a busca considera para cada formato (ex.: "md", "pagina"). */
-const BUSCA_DOS_FORMATOS: Readonly<Record<FormatoDoArtefato, string>> = {
-  html: "pagina web",
-  markdown: "md documento",
-};
+function buscaDosFormatos(formato: FormatoDoArtefato): string {
+  const t = textosAtuais(textosDePaleta);
+  return formato === "html" ? t.buscaHtml : t.buscaMarkdown;
+}
 
 /** Sem acentos e em minúsculas: "Ação" e "acao" casam. */
 export function normalizar(texto: string): string {
@@ -157,13 +151,14 @@ function primeiraLinha(texto: string): string {
 
 /** "Procurar atualizações" (só com a ponte do app desktop): o detalhe traz a versão e o resultado. */
 function acaoDeAtualizacao(estado: EstadoDaAtualizacao): ItemDeAcao {
+  const t = textosAtuais(textosDePaleta);
   return {
     tipo: "acao",
     id: "acao:procurar-atualizacoes",
     acao: "procurar-atualizacoes",
-    titulo: "Procurar atualizações",
+    titulo: t.procurarAtualizacoes,
     detalhe: descreverAtualizacao(estado),
-    busca: "atualizar atualizacao versao nova update",
+    busca: t.buscaProcurarAtualizacoes,
     atalho: null,
     mantemAPaletaAberta: true,
   };
@@ -175,86 +170,87 @@ function acoes(
   atualizacao: EstadoDaAtualizacao | null,
   podeEntrarNoModoFantasma: boolean,
 ): ItemDeAcao[] {
+  const t = textosAtuais(textosDePaleta);
   const todas: ItemDeAcao[] = [
     {
       tipo: "acao",
       id: "acao:novo-orquestrador",
       acao: "novo-orquestrador",
-      titulo: "Novo orquestrador",
-      detalhe: "Abre o formulário de um terminal novo",
-      busca: "criar terminal",
+      titulo: t.novoOrquestrador,
+      detalhe: t.novoOrquestradorDetalhe,
+      busca: t.novoOrquestradorBusca,
       atalho: "Ctrl+N",
     },
     {
       tipo: "acao",
       id: "acao:nova-nota",
       acao: "nova-nota",
-      titulo: "Nova nota",
-      detalhe: "Cria uma nota no centro da tela",
-      busca: "criar notas bloco",
+      titulo: t.novaNota,
+      detalhe: t.novaNotaDetalhe,
+      busca: t.novaNotaBusca,
       atalho: "Ctrl+Shift+N",
     },
     {
       tipo: "acao",
       id: "acao:nova-previa",
       acao: "nova-previa",
-      titulo: "Nova prévia",
-      detalhe: "Abre um navegador no canvas para ver o site rodando",
-      busca: "criar previa navegador site localhost",
+      titulo: t.novaPrevia,
+      detalhe: t.novaPreviaDetalhe,
+      busca: t.novaPreviaBusca,
       atalho: null,
     },
     {
       tipo: "acao",
       id: "acao:organizar",
       acao: "organizar",
-      titulo: "Organizar",
-      detalhe: "Terminais lado a lado; notas e artefatos em colunas à direita",
-      busca: "arrumar grade",
+      titulo: t.organizar,
+      detalhe: t.organizarDetalhe,
+      busca: t.organizarBusca,
       atalho: null,
     },
     {
       tipo: "acao",
       id: "acao:zoom-100",
       acao: "zoom-100",
-      titulo: "Zoom 100%",
-      detalhe: "Volta o zoom para 100% sem sair do lugar (texto nítido)",
-      busca: "cem por cento",
+      titulo: t.zoom100,
+      detalhe: t.zoom100Detalhe,
+      busca: t.zoom100Busca,
       atalho: "Ctrl+0",
     },
     {
       tipo: "acao",
       id: "acao:enquadrar-tudo",
       acao: "enquadrar-tudo",
-      titulo: "Enquadrar tudo",
-      detalhe: "Mostra tudo o que está no canvas, sem passar de 100%",
-      busca: "ver tudo ajustar zoom",
+      titulo: t.enquadrarTudo,
+      detalhe: t.enquadrarTudoDetalhe,
+      busca: t.enquadrarTudoBusca,
       atalho: null,
     },
     {
       tipo: "acao",
       id: "acao:focar-chat",
       acao: "focar-chat",
-      titulo: "Focar o chat rápido",
-      detalhe: "Leva o cursor ao campo do chat (mostra a conversa, se estiver oculta)",
-      busca: "chat conversa perguntar claude escrever mensagem campo",
+      titulo: t.focarChat,
+      detalhe: t.focarChatDetalhe,
+      busca: t.focarChatBusca,
       atalho: "Ctrl+J",
     },
     {
       tipo: "acao",
       id: "acao:entrar-modo-fantasma",
       acao: "entrar-modo-fantasma",
-      titulo: "Entrar no modo fantasma",
-      detalhe: "Janela transparente com só o chat rápido; o Claude vê a tela a cada pergunta (Ctrl+Shift+I sai)",
-      busca: "invisivel transparente tela escuta espiar",
+      titulo: t.modoFantasma,
+      detalhe: t.modoFantasmaDetalhe,
+      busca: t.modoFantasmaBusca,
       atalho: "Ctrl+\\",
     },
     {
       tipo: "acao",
       id: "acao:ajustes-do-aplicativo",
       acao: "ajustes-do-aplicativo",
-      titulo: "Pastas e Claude Code",
-      detalhe: "Abre os ajustes: pasta dos projetos e Claude Code",
-      busca: "ajustes configuracao pasta projetos claude code engrenagem",
+      titulo: t.ajustes,
+      detalhe: t.ajustesDetalhe,
+      busca: t.ajustesBusca,
       atalho: null,
     },
   ];
@@ -269,11 +265,12 @@ function acoes(
 
 /** De onde o artefato veio, para o detalhe: "de <Orquestrador>" ou "do chat rápido". */
 function origemDoArtefato(origem: OrigemDoArtefato, nomes: ReadonlyMap<string, string>): string {
+  const t = textosAtuais(textosDePaleta);
   if (origem.tipo === "chat") {
-    return "do chat rápido";
+    return t.origemChat;
   }
   const nome = origem.id === null ? undefined : nomes.get(origem.id);
-  return nome === undefined ? "de um orquestrador" : `de ${nome}`;
+  return nome === undefined ? t.origemOrquestradorSemNome : t.origemOrquestrador(nome);
 }
 
 /**
@@ -283,6 +280,7 @@ function origemDoArtefato(origem: OrigemDoArtefato, nomes: ReadonlyMap<string, s
  * texto) ficam de fora.
  */
 export function montarItensDaPaleta(fonte: FonteDaPaleta): ItemDaPaleta[] {
+  const t = textosAtuais(textosDePaleta);
   const nomes = new Map(fonte.orquestradores.map((orquestrador) => [orquestrador.id, orquestrador.nome]));
 
   const orquestradores = fonte.orquestradores.map((orquestrador): ItemDeOrquestrador => {
@@ -293,7 +291,7 @@ export function montarItensDaPaleta(fonte: FonteDaPaleta): ItemDaPaleta[] {
       id: `orquestrador:${orquestrador.id}`,
       orquestradorId: orquestrador.id,
       titulo: orquestrador.nome,
-      detalhe: [orquestrador.nomeDaPasta, ...(trabalhando ? ["trabalhando"] : []), aberto ? "no canvas" : "abrir"].join(" · "),
+      detalhe: [orquestrador.nomeDaPasta, ...(trabalhando ? [t.trabalhando] : []), aberto ? t.noCanvas : t.abrirItem].join(" · "),
       busca: "",
       trabalhando,
       aberto,
@@ -305,8 +303,8 @@ export function montarItensDaPaleta(fonte: FonteDaPaleta): ItemDaPaleta[] {
       tipo: "nota",
       id: `nota:${nota.notaId}`,
       notaId: nota.notaId,
-      titulo: nota.titulo.trim() === "" ? "Nota sem título" : nota.titulo.trim(),
-      detalhe: nota.texto.trim() === "" ? "nota vazia" : primeiraLinha(nota.texto),
+      titulo: nota.titulo.trim() === "" ? t.notaSemTitulo : nota.titulo.trim(),
+      detalhe: nota.texto.trim() === "" ? t.notaVazia : primeiraLinha(nota.texto),
       busca: nota.texto.slice(0, TAMANHO_MAXIMO_DA_BUSCA),
     }),
   );
@@ -316,13 +314,13 @@ export function montarItensDaPaleta(fonte: FonteDaPaleta): ItemDaPaleta[] {
       tipo: "artefato",
       id: `artefato:${artefato.artefatoId}`,
       artefatoId: artefato.artefatoId,
-      titulo: artefato.titulo.trim() === "" ? "Artefato sem título" : artefato.titulo.trim(),
+      titulo: artefato.titulo.trim() === "" ? t.artefatoSemTitulo : artefato.titulo.trim(),
       detalhe: [
         ROTULOS_DOS_FORMATOS[artefato.formato],
         origemDoArtefato(artefato.origem, nomes),
-        artefato.aberto ? "no canvas" : "abrir",
+        artefato.aberto ? t.noCanvas : t.abrirItem,
       ].join(" · "),
-      busca: `artefato ${BUSCA_DOS_FORMATOS[artefato.formato]}`,
+      busca: `${t.artefatoBusca} ${buscaDosFormatos(artefato.formato)}`,
       formato: artefato.formato,
       aberto: artefato.aberto,
     }),
@@ -343,7 +341,7 @@ export function montarItensDaPaleta(fonte: FonteDaPaleta): ItemDaPaleta[] {
         orquestradorId,
         turnoId: turno.id,
         titulo: trecho(turno.texto, TAMANHO_DO_TRECHO),
-        detalhe: nomes.get(orquestradorId) ?? "Orquestrador",
+        detalhe: nomes.get(orquestradorId) ?? t.orquestradorGenerico,
         busca: turno.texto.slice(0, TAMANHO_MAXIMO_DA_BUSCA),
       }),
     );
@@ -444,5 +442,5 @@ export function agruparPorTipo(itens: readonly ItemDaPaleta[]): GrupoDaPaleta[] 
       grupo.push(item);
     }
   }
-  return [...grupos].map(([tipo, doGrupo]) => ({ tipo, rotulo: ROTULOS_DOS_TIPOS[tipo], itens: doGrupo }));
+  return [...grupos].map(([tipo, doGrupo]) => ({ tipo, rotulo: textosAtuais(textosDePaleta).tipos[tipo], itens: doGrupo }));
 }

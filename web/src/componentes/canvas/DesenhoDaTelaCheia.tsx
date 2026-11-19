@@ -3,16 +3,14 @@ import { memo, useEffect } from "react";
 import type { FerramentaDeDesenho } from "../../shared/canvas/desenho";
 import type { CorDoDesenho, EspessuraDoDesenho } from "../../shared/canvas/layout";
 import type { FerramentaNaPagina } from "../../shared/desenhoNaPagina";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineisDoCanvas } from "../../shared/idioma/textos/canvasPaineis";
 import { BarraDeDesenho } from "./BarraDeDesenho";
 
 /** As ferramentas da barra compacta da tela cheia. */
 const FERRAMENTAS_DA_TELA_CHEIA: readonly FerramentaDeDesenho[] = ["caneta", "seta", "retangulo", "texto", "borracha"];
 /** A espessura fica na média: a barra compacta não oferece a escolha. */
 export const ESPESSURA_DA_TELA_CHEIA: EspessuraDoDesenho = 3;
-const FECHAR_DA_TELA_CHEIA = {
-  nome: "Desligar o desenho",
-  dica: "Desligar o desenho (Esc); os traços continuam na página",
-};
 
 /** Foco num campo de texto: a tecla é do campo, não do desenho. */
 function focoEmCampoDeTexto(alvo: EventTarget | null): boolean {
@@ -51,6 +49,7 @@ export const DesenhoDaTelaCheia = memo(function DesenhoDaTelaCheia({
   aoDesfazer,
   aoDesligar,
 }: Props) {
+  const t = useTextos(textosDePaineisDoCanvas);
   useEffect(() => {
     const aoApertarTecla = (evento: KeyboardEvent) => {
       if (evento.defaultPrevented || focoEmCampoDeTexto(evento.target)) {
@@ -84,7 +83,7 @@ export const DesenhoDaTelaCheia = memo(function DesenhoDaTelaCheia({
         aoFechar={aoDesligar}
         ferramentas={FERRAMENTAS_DA_TELA_CHEIA}
         comEspessura={false}
-        fechar={FECHAR_DA_TELA_CHEIA}
+        fechar={{ nome: t.desligarNome, dica: t.desligarDica }}
       />
     </div>
   );

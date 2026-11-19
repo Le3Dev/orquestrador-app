@@ -111,7 +111,7 @@ import {
   TAMANHO_DO_TERMINAL,
   type Viewport,
 } from "../shared/canvas/layout";
-import { AVISO_DO_LIMITE_DE_ORQUESTRADORES, cabeOutroTerminal } from "../shared/canvas/limiteDeTerminais";
+import { avisoDoLimiteDeOrquestradores, cabeOutroTerminal } from "../shared/canvas/limiteDeTerminais";
 import {
   ALCA_DE_LIGACAO,
   ALCA_DO_TERMINAL,
@@ -206,6 +206,8 @@ import { mesmoConteudo, useReaproveitado } from "../shared/hooks/useReaproveitad
 import { useRodaDoCanvas } from "../shared/hooks/useRodaDoCanvas";
 import { useSaidaDosBixinhos } from "../shared/hooks/useSaidaDosBixinhos";
 import { useServidor } from "../shared/hooks/useServidor";
+import { textosAtuais, useTextos } from "../shared/idioma/idioma";
+import { textosDePaginaDoCanvas } from "../shared/idioma/textos/canvasPagina";
 import { pedirFocoDoChat } from "../shared/focarChat";
 import { markdownParaTexto } from "../shared/markdownParaTexto";
 import type { AcaoDaPaleta, FonteDaPaleta, ItemDaPaleta } from "../shared/paletaDeComandos";
@@ -226,6 +228,7 @@ const ANCORAS_DO_ITEM_LIGADO: readonly { id: Ancora; posicao: Position }[] = [
  * arraste não a re-renderiza a cada quadro.
  */
 const AlcaDeLigacao = memo(function AlcaDeLigacao({ comAncoras }: { comAncoras: boolean }) {
+  const t = useTextos(textosDePaginaDoCanvas);
   return (
     <>
       {comAncoras &&
@@ -238,7 +241,7 @@ const AlcaDeLigacao = memo(function AlcaDeLigacao({ comAncoras }: { comAncoras: 
         position={Position.Right}
         className="alca-de-ligacao"
         isConnectableEnd={false}
-        title="Arraste até um terminal para ligar a ele (vai como contexto no próximo pedido)"
+        title={t.ligarAoTerminal}
       />
     </>
   );
@@ -282,8 +285,6 @@ const LIMITES_DO_ZOOM = { minZoom: 0.1, maxZoom: 2 };
 const VIEWPORT_PADRAO: Viewport = { x: 0, y: 0, zoom: 1 };
 /** Os painéis que abrem logo abaixo da ilha do canto superior esquerdo; só um fica aberto por vez. */
 type PainelDaBarra = "subagentes" | "skills" | "rotinas";
-/** Nome e dica do botão do minimapa, no canto inferior direito. */
-const DICA_DO_MINIMAPA = { mostrar: "Mostrar minimapa", esconder: "Esconder minimapa" } as const;
 /**
  * Quanto do pé da área do canvas o chat rápido ocupa (compacto, com a
  * margem): a janela de um artefato aberta "no centro" fica acima dele.
@@ -403,6 +404,7 @@ const ESPERA_PARA_MEDIR_MS = 80;
  * de empilhamento próprio, o quadro cobria todos eles.
  */
 function CanvasVazio({ aoCriar }: { aoCriar: () => void }) {
+  const t = useTextos(textosDePaginaDoCanvas);
   return (
     <div className="camada-do-canvas-vazio canvas-vazio pointer-events-none absolute inset-0 z-[4] grid place-items-center">
       <div className="painel-flutuante pointer-events-auto flex max-w-md flex-col items-center gap-4 px-8 py-7 text-center">
@@ -410,17 +412,12 @@ function CanvasVazio({ aoCriar }: { aoCriar: () => void }) {
           <IconeOrquestrador tamanho={26} />
         </div>
         <div className="flex flex-col gap-1.5">
-          <h2 className="text-[17px]">Seu canvas de agentes</h2>
-          <p className="text-secondary">
-            Cada orquestrador é um terminal: você conversa com ele, e cada subagente que ele instancia aparece como um
-            bixinho ligado ao terminal. Arraste pela barra de título, redimensione pelas bordas e espalhe quantos quiser.
-          </p>
+          <h2 className="text-[17px]">{t.vazioTitulo}</h2>
+          <p className="text-secondary">{t.vazioTexto}</p>
         </div>
-        <p className="mono text-muted">
-          arrastar o fundo move o canvas · shift + arrastar seleciona · ctrl + roda dá zoom
-        </p>
+        <p className="mono text-muted">{t.vazioAtalhos}</p>
         <button type="button" className="btn btn-cta" onClick={aoCriar}>
-          + Novo orquestrador
+          {t.vazioCriar}
         </button>
       </div>
     </div>
@@ -428,6 +425,7 @@ function CanvasVazio({ aoCriar }: { aoCriar: () => void }) {
 }
 
 function Canvas() {
+  const t = useTextos(textosDePaginaDoCanvas);
   const { orquestradores, erro, recarregar } = useOrquestradores();
   const [layoutInicial] = useState(lerLayout);
   // Enquadra só ao abrir com terminais (notas, artefatos ou prévias) salvos e sem posição de
@@ -576,9 +574,9 @@ function Canvas() {
 
   // A aba do navegador também avisa: o canvas pode estar atrás de outra janela.
   useEffect(() => {
-    const titulo = "Orquestrador de Agentes";
-    document.title = servidor.conectado ? titulo : `⚠ Desconectado · ${titulo}`;
-  }, [servidor.conectado]);
+    const titulo = t.tituloDaJanela;
+    document.title = servidor.conectado ? titulo : t.desconectado(titulo);
+  }, [servidor.conectado, t]);
   const porId = useMemo(
     () => new Map((orquestradores ?? []).map((orquestrador) => [orquestrador.id, orquestrador])),
     [orquestradores],
@@ -801,7 +799,7 @@ function Canvas() {
       evento.preventDefault();
       void criarNota(
         // A nota guarda até 100.000 caracteres.
-        { titulo: "Resposta do chat", texto: markdownParaTexto(texto).slice(0, 100_000) },
+        { titulo: textosAtuais(textosDePaginaDoCanvas).respostaDoChat, texto: markdownParaTexto(texto).slice(0, 100_000) },
         fluxo.screenToFlowPosition({ x: evento.clientX, y: evento.clientY }),
       );
     },
@@ -1969,7 +1967,7 @@ function Canvas() {
           />
         )}
         {avisoDoLimite && (
-          <ErroDoCanvas erro={AVISO_DO_LIMITE_DE_ORQUESTRADORES} aoFechar={fecharAvisoDoLimite} nivel="aviso" />
+          <ErroDoCanvas erro={avisoDoLimiteDeOrquestradores()} aoFechar={fecharAvisoDoLimite} nivel="aviso" />
         )}
         {erroDasNotas !== null && <ErroDoCanvas erro={erroDasNotas} aoFechar={descartarErroDasNotas} />}
         {erroDosAjustes !== null && <ErroDoCanvas erro={erroDosAjustes} aoFechar={descartarErroDosAjustes} />}
@@ -2038,7 +2036,7 @@ function Canvas() {
     [mudarPreferenciasDaTela, minimapaVisivel],
   );
   const minimapa = useMemo(() => {
-    const dica = minimapaVisivel ? DICA_DO_MINIMAPA.esconder : DICA_DO_MINIMAPA.mostrar;
+    const dica = minimapaVisivel ? t.esconderMinimapa : t.mostrarMinimapa;
     return (
       <>
         {minimapaVisivel && (
@@ -2053,7 +2051,7 @@ function Canvas() {
         <Controls
           position="bottom-right"
           className="controles-do-minimapa"
-          aria-label="Minimapa"
+          aria-label={t.minimapa}
           showZoom={false}
           showFitView={false}
           showInteractive={false}
@@ -2064,7 +2062,7 @@ function Canvas() {
         </Controls>
       </>
     );
-  }, [minimapaVisivel, classeDoMinimapa, alternarMinimapa]);
+  }, [minimapaVisivel, classeDoMinimapa, alternarMinimapa, t]);
   // A ilha do canto superior direito e as notificações abaixo dela.
   const ilhaDaDireita = useMemo(
     () => (

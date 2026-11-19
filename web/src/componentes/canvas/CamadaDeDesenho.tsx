@@ -33,6 +33,8 @@ import {
   salvarDesenho,
   type TracoDoDesenho,
 } from "../../shared/canvas/layout";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineisDoCanvas } from "../../shared/idioma/textos/canvasPaineis";
 import { BarraDeDesenho } from "./BarraDeDesenho";
 
 /** Foco num campo de texto (o texto solto, um terminal, uma nota): a tecla é do campo, não do desenho. */
@@ -145,6 +147,7 @@ interface Props {
  * layout salvo (`salvarDesenho`).
  */
 export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar, tracosIniciais = [] }: Props) {
+  const t = useTextos(textosDePaineisDoCanvas);
   const fluxo = useReactFlow();
   const { x, y, zoom } = useViewport();
   const [ferramentaEscolhida, setFerramentaEscolhida] = useState<FerramentaDeDesenho>("caneta");
@@ -415,7 +418,7 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
           ref={svg}
           className="camada-de-desenho-svg"
           role={ativa ? "application" : undefined}
-          aria-label={ativa ? "Área de desenho" : undefined}
+          aria-label={ativa ? t.areaDeDesenho : undefined}
           aria-hidden={ativa ? undefined : true}
           onPointerDown={aoApertar}
           onPointerMove={aoMover}
@@ -434,8 +437,8 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
             // Abre já com o foco: o clique que o criou não o tira (preventDefault no ponteiro).
             autoFocus
             className={`campo-do-texto-solto traco-cor-${textoEmEdicao.cor}`}
-            aria-label="Texto solto"
-            placeholder="Digite e tecle Enter"
+            aria-label={t.textoSolto}
+            placeholder={t.digiteETecleEnter}
             maxLength={MAXIMO_DE_CARACTERES_NO_TEXTO}
             value={textoEmEdicao.valor}
             style={{

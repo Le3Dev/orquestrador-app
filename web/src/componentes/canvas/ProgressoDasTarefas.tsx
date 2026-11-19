@@ -1,17 +1,13 @@
 import { useId, useState } from "react";
 
 import type { SituacaoDaTarefa, TarefaDoOrquestrador } from "../../shared/api/tipos";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineisDoCanvas } from "../../shared/idioma/textos/canvasPaineis";
 
 const MARCAS: Readonly<Record<SituacaoDaTarefa, string>> = {
   concluida: "✓",
   em_andamento: "▸",
   pendente: "○",
-};
-
-const SITUACOES_LEGIVEIS: Readonly<Record<SituacaoDaTarefa, string>> = {
-  concluida: "concluída",
-  em_andamento: "em andamento",
-  pendente: "pendente",
 };
 
 /**
@@ -21,11 +17,12 @@ const SITUACOES_LEGIVEIS: Readonly<Record<SituacaoDaTarefa, string>> = {
  * marcada por situação; o `title` mostra a mesma lista ao passar o mouse.
  */
 export function ProgressoDasTarefas({ tarefas }: { tarefas: readonly TarefaDoOrquestrador[] }) {
+  const t = useTextos(textosDePaineisDoCanvas);
   const [aberta, setAberta] = useState(false);
   const idDaLista = useId();
   const concluidas = tarefas.filter((tarefa) => tarefa.situacao === "concluida").length;
   const emAndamento = tarefas.find((tarefa) => tarefa.situacao === "em_andamento") ?? null;
-  const contagem = `${concluidas} de ${tarefas.length} tarefas`;
+  const contagem = t.tarefasContagem(concluidas, tarefas.length);
   const lista = tarefas.map((tarefa) => `${MARCAS[tarefa.situacao]} ${tarefa.texto}`).join("\n");
 
   return (
@@ -44,7 +41,7 @@ export function ProgressoDasTarefas({ tarefas }: { tarefas: readonly TarefaDoOrq
           <span
             className="medidor"
             role="progressbar"
-            aria-label="Tarefas concluídas"
+            aria-label={t.tarefasConcluidas}
             aria-valuemin={0}
             aria-valuemax={tarefas.length}
             aria-valuenow={concluidas}
@@ -56,14 +53,14 @@ export function ProgressoDasTarefas({ tarefas }: { tarefas: readonly TarefaDoOrq
         </button>
       </div>
       {aberta && (
-        <ul id={idDaLista} className="progresso-das-tarefas-lista" aria-label="Tarefas do orquestrador">
+        <ul id={idDaLista} className="progresso-das-tarefas-lista" aria-label={t.tarefasDoOrquestrador}>
           {tarefas.map((tarefa, indice) => (
             <li key={indice} className={`tarefa-${tarefa.situacao}`}>
               <span className="tarefa-marca" aria-hidden="true">
                 {MARCAS[tarefa.situacao]}
               </span>
               <span>{tarefa.texto}</span>
-              <span className="sr-only"> ({SITUACOES_LEGIVEIS[tarefa.situacao]})</span>
+              <span className="sr-only"> ({t.situacoes[tarefa.situacao]})</span>
             </li>
           ))}
         </ul>

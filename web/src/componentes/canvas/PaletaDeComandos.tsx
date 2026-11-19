@@ -11,6 +11,8 @@ import {
   useState,
 } from "react";
 
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePaleta } from "../../shared/idioma/textos/canvasPaleta";
 import {
   agruparPorTipo,
   buscarNaPaleta,
@@ -54,6 +56,7 @@ function ehAtalhoDaPaleta(evento: KeyboardEvent): boolean {
  * Fechada, não renderiza nada; as props do canvas são estáveis (`memo`).
  */
 function Paleta({ lerFonte, aoExecutar, controle }: PropsDaPaleta) {
+  const t = useTextos(textosDePaleta);
   const [aberta, setAberta] = useState(false);
   const [itens, setItens] = useState<readonly ItemDaPaleta[]>([]);
   const [consulta, setConsulta] = useState("");
@@ -128,6 +131,7 @@ function Paleta({ lerFonte, aoExecutar, controle }: PropsDaPaleta) {
   }, [aberta, fechar]);
 
   const resultados = useMemo(() => buscarNaPaleta(itens, consulta), [itens, consulta]);
+  // `t` muda com o idioma: os rótulos dos grupos são calculados de novo.
   const grupos = useMemo(() => agruparPorTipo(resultados), [resultados]);
   // A ordem da navegação é a da lista na tela: grupo a grupo.
   const ordem = useMemo(() => grupos.flatMap((grupo) => grupo.itens), [grupos]);
@@ -198,7 +202,7 @@ function Paleta({ lerFonte, aoExecutar, controle }: PropsDaPaleta) {
         ref={caixa}
         role="dialog"
         aria-modal="true"
-        aria-label="Paleta de comandos"
+        aria-label={t.caixa}
         className="painel-flutuante surgir surgir-do-topo flex w-full max-w-[560px] flex-col overflow-hidden"
       >
         <div className="border-b border-border p-2.5">
@@ -206,12 +210,12 @@ function Paleta({ lerFonte, aoExecutar, controle }: PropsDaPaleta) {
             className="input"
             type="text"
             role="combobox"
-            aria-label="Buscar ações, orquestradores, notas, artefatos e pedidos"
+            aria-label={t.campo}
             aria-expanded="true"
             aria-controls={idDaLista}
             aria-autocomplete="list"
             aria-activedescendant={idSelecionado}
-            placeholder="Buscar ações, orquestradores, notas, artefatos e pedidos…"
+            placeholder={t.campoPlaceholder}
             autoComplete="off"
             spellCheck={false}
             autoFocus
@@ -223,13 +227,13 @@ function Paleta({ lerFonte, aoExecutar, controle }: PropsDaPaleta) {
             onKeyDown={aoTeclarNoCampo}
           />
         </div>
-        <div id={idDaLista} role="listbox" aria-label="Resultados" className="custom-scrollbar max-h-[55vh] overflow-y-auto p-1.5">
+        <div id={idDaLista} role="listbox" aria-label={t.resultados} className="custom-scrollbar max-h-[55vh] overflow-y-auto p-1.5">
           {grupos.map((grupo) => {
             const idDoRotulo = `${idBase}-grupo-${grupo.tipo}`;
             return (
               <div key={grupo.tipo} role="group" aria-labelledby={idDoRotulo}>
                 <div id={idDoRotulo} role="presentation" className="rotulo-tecnico px-2.5 pt-2 pb-1">
-                  {grupo.rotulo}
+                  {t.tipos[grupo.tipo]}
                 </div>
                 {grupo.itens.map((item) => {
                   const indice = posicoes.get(item.id) ?? -1;
@@ -275,13 +279,13 @@ function Paleta({ lerFonte, aoExecutar, controle }: PropsDaPaleta) {
         </div>
         {ordem.length === 0 && (
           <p className="text-support px-4 pb-3" role="status">
-            Nada encontrado.
+            {t.nadaEncontrado}
           </p>
         )}
         <div className="mono flex gap-3 border-t border-border px-3 py-1.5 text-muted" aria-hidden="true">
-          <span>↑↓ navegar</span>
-          <span>enter abrir</span>
-          <span>esc fechar</span>
+          <span>{t.navegar}</span>
+          <span>{t.abrir}</span>
+          <span>{t.fechar}</span>
         </div>
       </div>
     </div>

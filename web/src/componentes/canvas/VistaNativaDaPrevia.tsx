@@ -2,6 +2,8 @@ import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { medirCorpo } from "../../shared/canvas/medirCorpo";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePrevia } from "../../shared/idioma/textos/canvasPrevia";
 import type { ApiDaPrevia, RetanguloDaPrevia } from "../../shared/ponteDoDesktop";
 import { type HistoricoDaVista, mesmoRetangulo, SEM_HISTORICO } from "../../shared/previaNativa";
 
@@ -59,6 +61,7 @@ export function VistaNativaDaPrevia({
   /** Se dá para voltar e avançar, a cada navegação; sem histórico ao desmontar. */
   aoMudarHistorico: (historico: HistoricoDaVista) => void;
 }) {
+  const t = useTextos(textosDePrevia);
   const raiz = useRef<HTMLDivElement>(null);
   const inicioDoClique = useRef<{ x: number; y: number } | null>(null);
   const [ativa, setAtiva] = useState(false);
@@ -179,28 +182,28 @@ export function VistaNativaDaPrevia({
   const vista = (
     <div ref={raiz} className="vista-nativa-da-previa">
       {foto !== null ? (
-        <img className="foto-da-previa" src={foto} alt={`Foto de ${url}`} draggable={false} />
+        <img className="foto-da-previa" src={foto} alt={t.fotoDe(url)} draggable={false} />
       ) : (
         <p className="mensagem-da-previa">
           {pagina.erro !== null
-            ? `Não foi possível abrir ${url}: ${pagina.erro}`
+            ? t.naoFoiPossivelAbrir(url, pagina.erro)
             : pagina.carregando
-              ? "Carregando a página…"
-              : "Clique para usar a página."}
+              ? t.carregandoAPagina
+              : t.cliqueParaUsarFrase}
         </p>
       )}
       {!ativa && (
         <button
           type="button"
           className="camada-de-ativar"
-          aria-label="Usar a página"
+          aria-label={t.usarAPagina}
           onMouseDown={(evento) => {
             inicioDoClique.current = { x: evento.clientX, y: evento.clientY };
           }}
           onClick={aoClicar}
         >
           <span className="dica-da-camada" aria-hidden="true">
-            clique para usar a página (clique fora ou Shift+Esc para voltar ao canvas)
+            {t.cliqueParaUsarComSaida}
           </span>
         </button>
       )}

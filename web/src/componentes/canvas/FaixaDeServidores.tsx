@@ -3,6 +3,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../shared/api/cliente";
 import { lerServidoresTirados, salvarServidoresTirados, type ServidoresTirados } from "../../shared/canvas/layout";
 import { enderecoCurto } from "../../shared/enderecosLocais";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeBarrasDoCanvas } from "../../shared/idioma/textos/canvasBarras";
 import {
   CHIPS_A_VISTA,
   INTERVALO_DA_CONSULTA_MS,
@@ -32,27 +34,28 @@ interface PropsDoChip {
 }
 
 function Chip({ url, situacao, aoAbrir, aoTirar }: PropsDoChip) {
+  const t = useTextos(textosDeBarrasDoCanvas);
   const parado = situacao === "parado";
   return (
     <span className="faixa-chip" data-situacao={situacao}>
       <button
         type="button"
         className="faixa-chip-abrir"
-        title={`Abre ${url} numa prévia ao vivo no canvas`}
-        aria-label={parado ? `Abrir prévia de ${url} (servidor parado)` : `Abrir prévia de ${url}`}
+        title={t.abreUmaPrevia(url)}
+        aria-label={t.abrirPrevia(url, parado)}
         onClick={() => aoAbrir(url)}
       >
         <span className="faixa-chip-ponto" aria-hidden="true" />
         <span className="faixa-chip-endereco" title={url}>
           {enderecoCurto(url)}
         </span>
-        <span className="faixa-chip-acao">{parado ? "parado" : "abrir"}</span>
+        <span className="faixa-chip-acao">{parado ? t.parado : t.abrir}</span>
       </button>
       <button
         type="button"
         className="faixa-chip-tirar"
-        title="Tirar da lista"
-        aria-label={`Tirar ${url} da lista`}
+        title={t.tirarDaLista}
+        aria-label={t.tirarUrl(url)}
         onClick={() => aoTirar(url)}
       >
         <span aria-hidden="true">×</span>
@@ -73,6 +76,7 @@ function Chip({ url, situacao, aoAbrir, aoTirar }: PropsDoChip) {
  * endereço o traz de volta.
  */
 export const FaixaDeServidores = memo(function FaixaDeServidores({ orquestradorId, enderecos, sequencias, aoAbrir }: Props) {
+  const t = useTextos(textosDeBarrasDoCanvas);
   const [tirados, setTirados] = useState<ServidoresTirados>(() => lerServidoresTirados(orquestradorId));
   const [noAr, setNoAr] = useState<Readonly<Record<string, boolean>>>({});
   const [aberta, setAberta] = useState(false);
@@ -177,9 +181,9 @@ export const FaixaDeServidores = memo(function FaixaDeServidores({ orquestradorI
     <div
       className={mostrarRestantes ? "faixa-de-servidores faixa-de-servidores-aberta nodrag" : "faixa-de-servidores nodrag"}
       role="group"
-      aria-label="Servidores locais"
+      aria-label={t.servidoresLocais}
     >
-      <span className="faixa-de-servidores-rotulo">Servidores</span>
+      <span className="faixa-de-servidores-rotulo">{t.servidores}</span>
       {aVista.map(chip)}
       {mostrarRestantes && restantes.map(chip)}
       {restantes.length > 0 && (
@@ -187,20 +191,20 @@ export const FaixaDeServidores = memo(function FaixaDeServidores({ orquestradorI
           type="button"
           className="faixa-de-servidores-mais"
           aria-expanded={mostrarRestantes}
-          aria-label={mostrarRestantes ? "Mostrar menos servidores" : `Mostrar mais ${restantes.length} servidores`}
+          aria-label={mostrarRestantes ? t.mostrarMenos : t.mostrarMais(restantes.length)}
           onClick={() => setAberta((atual) => !atual)}
         >
-          {mostrarRestantes ? "menos" : `+${restantes.length}`}
+          {mostrarRestantes ? t.menos : `+${restantes.length}`}
         </button>
       )}
       <button
         type="button"
         className="faixa-de-servidores-limpar"
-        title="Tirar todos da lista"
-        aria-label="Tirar todos os servidores da lista"
+        title={t.tirarTodos}
+        aria-label={t.tirarTodosRotulo}
         onClick={() => tirar(visiveis)}
       >
-        Limpar
+        {t.limpar}
       </button>
     </div>
   );

@@ -1,5 +1,7 @@
 import { type KeyboardEvent as EventoDeTecladoDoReact, useEffect, useId, useRef, useState } from "react";
 
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeBarrasDoCanvas } from "../../shared/idioma/textos/canvasBarras";
 import type { ApiDaPrevia } from "../../shared/ponteDoDesktop";
 
 type SituacaoDoSair = "pronto" | "confirmando" | "saindo" | "feito" | "erro";
@@ -21,6 +23,7 @@ export function MenuDaPrevia({
 }) {
   const raiz = useRef<HTMLDivElement>(null);
   const idDoMenu = useId();
+  const t = useTextos(textosDeBarrasDoCanvas);
   const [situacao, setSituacao] = useState<SituacaoDoSair>("pronto");
 
   // Clique fora fecha.
@@ -67,11 +70,11 @@ export function MenuDaPrevia({
   }
 
   const rotulos: Record<SituacaoDoSair, string> = {
-    pronto: "Sair das contas",
-    confirmando: "Confirmar: sair de todas as contas",
-    saindo: "Saindo das contas…",
-    feito: "Sair das contas",
-    erro: "Tentar sair das contas de novo",
+    pronto: t.sairDasContas,
+    confirmando: t.confirmarSair,
+    saindo: t.saindoDasContas,
+    feito: t.sairDasContas,
+    erro: t.tentarSairDeNovo,
   };
 
   return (
@@ -79,17 +82,17 @@ export function MenuDaPrevia({
       <button
         type="button"
         className="botao-icone nodrag"
-        aria-label="Menu da prévia"
+        aria-label={t.menuDaPrevia}
         aria-haspopup="menu"
         aria-expanded={aberto}
         aria-controls={aberto ? idDoMenu : undefined}
-        title="Menu da prévia"
+        title={t.menuDaPrevia}
         onClick={alternar}
       >
         ⋯
       </button>
       {aberto && (
-        <div id={idDoMenu} role="menu" aria-label="Menu da prévia" className="menu-da-previa painel-flutuante nowheel">
+        <div id={idDoMenu} role="menu" aria-label={t.menuDaPrevia} className="menu-da-previa painel-flutuante nowheel">
           <button
             type="button"
             role="menuitem"
@@ -101,12 +104,12 @@ export function MenuDaPrevia({
           </button>
           <p className="aviso-do-menu-da-previa" role="status">
             {situacao === "confirmando"
-              ? "Apaga o login e os dados dos sites abertos nas prévias externas. Clique de novo para confirmar."
+              ? t.avisoConfirmando
               : situacao === "feito"
-                ? "Pronto: as prévias externas foram recarregadas sem login."
+                ? t.avisoFeito
                 : situacao === "erro"
-                  ? "Não foi possível limpar a sessão."
-                  : "O login dos sites externos fica salvo nesta sessão, separada do resto do app."}
+                  ? t.avisoErro
+                  : t.avisoPadrao}
           </p>
         </div>
       )}

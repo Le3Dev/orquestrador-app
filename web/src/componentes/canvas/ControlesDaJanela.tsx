@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeIlhasDoCanvas } from "../../shared/idioma/textos/canvasIlhas";
 import { apiDaJanela } from "../../shared/ponteDoDesktop";
 
 /*
@@ -26,6 +28,7 @@ const PROPS_DO_ICONE = {
  * Fora do desktop não renderiza nada.
  */
 export function ControlesDaJanela() {
+  const t = useTextos(textosDeIlhasDoCanvas);
   const [api] = useState(apiDaJanela);
   const [maximizada, setMaximizada] = useState(false);
 
@@ -49,7 +52,7 @@ export function ControlesDaJanela() {
 
   if (!api) return null;
 
-  const rotuloDoMeio = maximizada ? "Restaurar" : "Maximizar";
+  const rotuloDoMeio = maximizada ? t.restaurar : t.maximizar;
   const executar = (acao: () => Promise<void>) => () => {
     acao().catch(() => {
       /* a janela pode ter fechado no meio; não há o que avisar */
@@ -57,12 +60,12 @@ export function ControlesDaJanela() {
   };
 
   return (
-    <div className="controles-da-janela no-drag" role="group" aria-label="Controles da janela">
+    <div className="controles-da-janela no-drag" role="group" aria-label={t.controlesDaJanela}>
       <button
         type="button"
         className="botao-da-janela"
-        title="Minimizar"
-        aria-label="Minimizar"
+        title={t.minimizar}
+        aria-label={t.minimizar}
         onClick={executar(api.minimizar)}
       >
         <svg {...PROPS_DO_ICONE}>
@@ -91,8 +94,8 @@ export function ControlesDaJanela() {
       <button
         type="button"
         className="botao-da-janela botao-da-janela-fechar"
-        title="Fechar"
-        aria-label="Fechar"
+        title={t.fechar}
+        aria-label={t.fechar}
         onClick={executar(api.fechar)}
       >
         <svg {...PROPS_DO_ICONE}>

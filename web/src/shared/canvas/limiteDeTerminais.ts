@@ -1,3 +1,6 @@
+import { textosAtuais } from "../idioma/idioma";
+import { textosDePaginaDoCanvas } from "../idioma/textos/canvasPagina";
+
 /**
  * Quantos terminais de Orquestrador podem ficar abertos no canvas ao mesmo
  * tempo — o formulário de "Novo orquestrador" (rascunho) conta como um.
@@ -9,7 +12,12 @@
  */
 export const LIMITE_DE_ORQUESTRADORES_ABERTOS = 20;
 
-/** O aviso mostrado quando alguém tenta abrir mais um terminal sem vaga. */
+/** O aviso, no idioma de agora, mostrado quando alguém tenta abrir mais um terminal sem vaga. */
+export function avisoDoLimiteDeOrquestradores(): string {
+  return textosAtuais(textosDePaginaDoCanvas).avisoDoLimite(LIMITE_DE_ORQUESTRADORES_ABERTOS);
+}
+
+/** O mesmo aviso em português (para quem ainda não troca de idioma; prefira `avisoDoLimiteDeOrquestradores`). */
 export const AVISO_DO_LIMITE_DE_ORQUESTRADORES = `Limite de ${LIMITE_DE_ORQUESTRADORES_ABERTOS} orquestradores abertos. Feche um dos orquestradores (✕ na barra do terminal) antes de iniciar outro.`;
 
 /**

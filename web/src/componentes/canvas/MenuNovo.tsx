@@ -27,6 +27,8 @@ import {
   IconeSetaDireita,
   IconeTrabalhando,
 } from "./IconesDasIlhas";
+import { type TextosDe, useTextos } from "../../shared/idioma/idioma";
+import { textosDeMenuNovo } from "../../shared/idioma/textos/canvasMenuNovo";
 import { nomeAmigavel } from "./dadosDoPlugin";
 import { IconeExplorar } from "./IconesDoMarketplace";
 import "../../theme/ilhas.css";
@@ -98,18 +100,10 @@ export interface PropsDoMenuNovo {
 }
 
 /** O texto de um orquestrador para o leitor de tela. */
-function descreverOrquestrador(orquestrador: ResumoDoOrquestrador, noCanvas: boolean): string {
-  const situacao = orquestrador.situacao === "trabalhando" ? "trabalhando" : "parado";
-  return `${orquestrador.nome}, ${situacao}, pasta ${orquestrador.nomeDaPasta}, ${noCanvas ? "aberto no canvas" : "fechado, abre ao escolher"}`;
-}
+type Textos = TextosDe<typeof textosDeMenuNovo>;
 
-function plural(total: number, singular: string, pluralDoTermo: string): string {
-  return `${total} ${total === 1 ? singular : pluralDoTermo}`;
-}
-
-/** "2 rotinas aguardando aprovação": o texto do selo para o leitor de tela e para a dica. */
-function descreverAprovacoes(total: number): string {
-  return plural(total, "rotina aguardando aprovação", "rotinas aguardando aprovação");
+function descreverOrquestrador(orquestrador: ResumoDoOrquestrador, noCanvas: boolean, t: Textos): string {
+  return t.descreverOrquestrador(orquestrador.nome, orquestrador.situacao === "trabalhando", orquestrador.nomeDaPasta, noCanvas);
 }
 
 interface PropsDoSeloDeAprovacoes {
@@ -165,6 +159,8 @@ export function MenuNovo({
   aoAbrirSkills,
   aoExplorarMarketplace,
 }: PropsDoMenuNovo) {
+  const t = useTextos(textosDeMenuNovo);
+  const descreverAprovacoes = t.aprovacoes;
   const [aberto, setAberto] = useState(false);
   const [submenu, setSubmenu] = useState<IdDoSubmenu | null>(null);
   const ancora = useRef<HTMLDivElement>(null);
@@ -190,21 +186,21 @@ export function MenuNovo({
       {
         tipo: "acao",
         id: "orquestrador",
-        rotulo: "Novo orquestrador",
+        rotulo: t.novoOrquestrador,
         icone: <IconeOrquestrador tamanho={18} />,
         atalho: "Ctrl+N",
         teclas: "Control+N",
-        dica: "Abre o formulário de um terminal novo",
+        dica: t.novoOrquestradorDica,
         executar: aoCriar,
       },
       {
         tipo: "acao",
         id: "nota",
-        rotulo: "Nota",
+        rotulo: t.nota,
         icone: <span className="glifo-do-menu">✎</span>,
         atalho: "Ctrl+Shift+N",
         teclas: "Control+Shift+N",
-        dica: "Cria uma nota no centro da tela (bloco de notas, salvo automaticamente)",
+        dica: t.notaDica,
         executar: aoCriarNota,
       },
       ...(aoCriarShell === undefined
@@ -213,18 +209,18 @@ export function MenuNovo({
             {
               tipo: "acao" as const,
               id: "terminal",
-              rotulo: "Terminal",
+              rotulo: t.terminal,
               icone: <IconeShell tamanho={18} />,
-              dica: "Abre um terminal de verdade (o shell do computador) numa pasta escolhida",
+              dica: t.terminalDica,
               executar: aoCriarShell,
             },
           ]),
       {
         tipo: "acao",
         id: "previa",
-        rotulo: "Prévia",
+        rotulo: t.previa,
         icone: <IconeNavegador tamanho={18} />,
-        dica: "Abre uma prévia ao vivo: um navegador no canvas para ver o site que os agentes estão fazendo",
+        dica: t.previaDica,
         executar: aoCriarPrevia,
       },
     ];
@@ -232,57 +228,57 @@ export function MenuNovo({
       {
         tipo: "submenu",
         id: "orquestradores",
-        rotulo: "Orquestradores",
+        rotulo: t.orquestradoresRotulo,
         icone: <IconeLista tamanho={18} />,
         contagem: orquestradores?.length ?? null,
-        dica: "Os orquestradores: escolher um leva até a janela dele",
+        dica: t.orquestradoresDica,
       },
       {
         tipo: "submenu",
         id: "subagentes",
-        rotulo: "Subagentes",
+        rotulo: t.subagentesRotulo,
         icone: <IconePessoas tamanho={18} />,
         contagem: subagentes?.length ?? null,
-        dica: "Ajudantes prontos que todo orquestrador pode chamar",
+        dica: t.subagentesDica,
       },
       {
         tipo: "acao",
         id: "rotinas",
-        rotulo: "Rotinas",
+        rotulo: t.rotinas,
         icone: <IconeRelogio tamanho={18} />,
         dica:
           rotinasAguardandoAprovacao > 0
-            ? "Há rotinas esperando sua aprovação"
-            : "Rotinas agendadas: pedidos que o app manda sozinho, na hora marcada",
+            ? t.rotinasPendentesDica
+            : t.rotinasDica,
         aguardandoAprovacao: rotinasAguardandoAprovacao,
         executar: aoAbrirRotinas,
       },
       {
         tipo: "submenu",
         id: "skills",
-        rotulo: "Skills",
+        rotulo: t.skillsRotulo,
         icone: <IconeSkills tamanho={18} />,
         contagem: skills?.length ?? null,
-        dica: "As skills do Claude Code e o marketplace de plugins",
+        dica: t.skillsDica,
       },
     ];
     const outros: ItemDoMenu[] = [
       {
         tipo: "acao",
         id: "buscar",
-        rotulo: "Buscar",
+        rotulo: t.buscar,
         icone: <IconeLupa tamanho={18} />,
         atalho: "Ctrl+K",
         teclas: "Control+K",
-        dica: "Paleta de comandos: ações, orquestradores, notas e pedidos",
+        dica: t.buscarDica,
         executar: aoBuscar,
       },
       {
         tipo: "acao",
         id: "configuracoes",
-        rotulo: "Configurações",
+        rotulo: t.configuracoes,
         icone: <IconeEngrenagem tamanho={18} />,
-        dica: "Padrões, sistema, conta, atualização e aparência",
+        dica: t.configuracoesDica,
         executar: aoAbrirConfiguracoes,
       },
     ];
@@ -299,6 +295,7 @@ export function MenuNovo({
     aoAbrirRotinas,
     rotinasAguardandoAprovacao,
     skills,
+    t,
   ]);
   const itens = useMemo(() => grupos.flat(), [grupos]);
 
@@ -482,8 +479,8 @@ export function MenuNovo({
         <>
           <div className="titulo-do-submenu">
             {orquestradores === null
-              ? "carregando…"
-              : `${plural(orquestradores.length, "orquestrador", "orquestradores")}${trabalhando > 0 ? `, ${trabalhando} trabalhando` : ""}`}
+              ? t.carregando
+              : `${t.orquestradores(orquestradores.length)}${trabalhando > 0 ? t.trabalhandoNaLista(trabalhando) : ""}`}
           </div>
           <div className="lista-do-submenu custom-scrollbar">
             {erroDosOrquestradores !== null && (
@@ -492,7 +489,7 @@ export function MenuNovo({
               </div>
             )}
             {orquestradores !== null && orquestradores.length === 0 && (
-              <p className="texto-do-submenu">Nenhum orquestrador ainda.</p>
+              <p className="texto-do-submenu">{t.nenhumOrquestrador}</p>
             )}
             {(orquestradores ?? []).map((orquestrador) => {
               const trabalhandoAgora = orquestrador.situacao === "trabalhando";
@@ -506,8 +503,8 @@ export function MenuNovo({
                   tabIndex={-1}
                   className="item-de-lista-do-menu"
                   data-orquestrador={orquestrador.id}
-                  aria-label={descreverOrquestrador(orquestrador, abertoNoCanvas)}
-                  title={abertoNoCanvas ? "Ir até a janela dele" : "Abrir o terminal no canvas"}
+                  aria-label={descreverOrquestrador(orquestrador, abertoNoCanvas, t)}
+                  title={abertoNoCanvas ? t.irAteAJanela : t.abrirOTerminal}
                   onClick={() => escolherOrquestrador(orquestrador.id)}
                 >
                   <span className={`selo-do-item ${trabalhandoAgora ? "selo-do-item-ativo" : ""}`} aria-hidden="true">
@@ -516,7 +513,7 @@ export function MenuNovo({
                   <span className="texto-do-item" aria-hidden="true">
                     <strong>{orquestrador.nome}</strong>
                     <span>
-                      {trabalhandoAgora ? "trabalhando" : "parado"}
+                      {trabalhandoAgora ? t.situacaoTrabalhando : t.situacaoParado}
                       <span className="mono">· {orquestrador.nomeDaPasta}</span>
                     </span>
                   </span>
@@ -524,13 +521,13 @@ export function MenuNovo({
                     className={`situacao-no-canvas ${abertoNoCanvas ? "situacao-no-canvas-aberto" : ""}`}
                     aria-hidden="true"
                   >
-                    {abertoNoCanvas ? "no canvas" : "abrir"}
+                    {abertoNoCanvas ? t.noCanvas : t.abrir}
                   </span>
                 </button>
               );
             })}
           </div>
-          <p className="rodape-do-submenu">Escolher leva até a janela dele no canvas.</p>
+          <p className="rodape-do-submenu">{t.rodapeDosOrquestradores}</p>
         </>
       );
     }
@@ -538,7 +535,7 @@ export function MenuNovo({
       return (
         <>
           <div className="titulo-do-submenu">
-            {skills === null ? "carregando…" : plural(skills.length, "skill", "skills")}
+            {skills === null ? t.carregando : t.skills(skills.length)}
           </div>
           <div className="lista-do-submenu custom-scrollbar">
             {erroDasSkills !== null && (
@@ -547,7 +544,7 @@ export function MenuNovo({
               </div>
             )}
             {skills !== null && skills.length === 0 && erroDasSkills === null && (
-              <p className="texto-do-submenu">Nenhuma skill encontrada.</p>
+              <p className="texto-do-submenu">{t.nenhumaSkill}</p>
             )}
             {(skills ?? []).map((skill) => (
               <button
@@ -558,7 +555,7 @@ export function MenuNovo({
                 tabIndex={-1}
                 className="item-de-lista-do-menu"
                 aria-label={skill.descricao === "" ? skill.nome : `${skill.nome}: ${skill.descricao}`}
-                title={skill.descricao === "" ? "Abrir o painel de skills" : skill.descricao}
+                title={skill.descricao === "" ? t.abrirPainelDeSkills : skill.descricao}
                 onClick={abrirSkills}
               >
                 <span className="selo-do-item" aria-hidden="true">
@@ -568,7 +565,7 @@ export function MenuNovo({
                   <strong>{nomeAmigavel(skill)}</strong>
                   <span>
                     <span className="descricao-do-subagente">
-                      {skill.descricao === "" ? "Sem descrição." : skill.descricao}
+                      {skill.descricao === "" ? t.semDescricao : skill.descricao}
                     </span>
                     {skill.origem === "plugin" && skill.plugin !== null && (
                       <span className="mono plugin-da-skill">· {skill.plugin}</span>
@@ -585,13 +582,13 @@ export function MenuNovo({
               role="menuitem"
               tabIndex={-1}
               className="item-do-menu-novo is-explorar"
-              title="Procurar e instalar plugins do Claude Code"
+              title={t.procurarPlugins}
               onClick={explorarMarketplace}
             >
               <span className="icone-do-menu-novo" aria-hidden="true">
                 <IconeExplorar tamanho={18} />
               </span>
-              <span className="rotulo-do-menu-novo">Explorar marketplace</span>
+              <span className="rotulo-do-menu-novo">{t.explorarMarketplace}</span>
             </button>
             <button
               ref={refDoItem()}
@@ -604,7 +601,7 @@ export function MenuNovo({
               <span className="icone-do-menu-novo" aria-hidden="true">
                 <IconeLista tamanho={18} />
               </span>
-              <span className="rotulo-do-menu-novo">Ver todas as skills</span>
+              <span className="rotulo-do-menu-novo">{t.verTodasAsSkills}</span>
             </button>
           </div>
         </>
@@ -613,11 +610,11 @@ export function MenuNovo({
     return (
       <>
         <div className="titulo-do-submenu">
-          {subagentes === null ? "carregando…" : plural(subagentes.length, "subagente pronto", "subagentes prontos")}
+          {subagentes === null ? t.carregando : t.subagentesProntos(subagentes.length)}
         </div>
         <div className="lista-do-submenu custom-scrollbar">
           {subagentes !== null && subagentes.length === 0 && (
-            <p className="texto-do-submenu">Nenhum subagente pronto ainda.</p>
+            <p className="texto-do-submenu">{t.nenhumSubagente}</p>
           )}
           {(subagentes ?? []).map((subagente) => (
             <button
@@ -628,7 +625,7 @@ export function MenuNovo({
               tabIndex={-1}
               className="item-de-lista-do-menu"
               aria-label={`${subagente.nome}: ${subagente.descricao}`}
-              title="Abrir o painel de subagentes prontos"
+              title={t.abrirPainelDeSubagentes}
               onClick={abrirSubagentes}
             >
               <span className="selo-do-item" aria-hidden="true">
@@ -655,7 +652,7 @@ export function MenuNovo({
             <span className="icone-do-menu-novo" aria-hidden="true">
               <IconeMais tamanho={18} />
             </span>
-            <span className="rotulo-do-menu-novo">Novo subagente</span>
+            <span className="rotulo-do-menu-novo">{t.novoSubagente}</span>
           </button>
           <button
             ref={refDoItem()}
@@ -668,7 +665,7 @@ export function MenuNovo({
             <span className="icone-do-menu-novo" aria-hidden="true">
               <IconeEngrenagem tamanho={18} />
             </span>
-            <span className="rotulo-do-menu-novo">Gerenciar subagentes</span>
+            <span className="rotulo-do-menu-novo">{t.gerenciarSubagentes}</span>
           </button>
         </div>
       </>
@@ -685,20 +682,20 @@ export function MenuNovo({
         ref={botao}
         type="button"
         className="botao-novo"
-        aria-label={temAprovacoes ? `Novo, ${descreverAprovacoes(rotinasAguardandoAprovacao)}` : "Novo"}
+        aria-label={temAprovacoes ? t.novoComAprovacoes(descreverAprovacoes(rotinasAguardandoAprovacao)) : t.novo}
         aria-haspopup="menu"
         aria-expanded={aberto}
         aria-controls={aberto ? idDoMenu : undefined}
         title={
           temAprovacoes
-            ? `${descreverAprovacoes(rotinasAguardandoAprovacao)}: abra o menu e escolha Rotinas`
-            : "Novo orquestrador (Ctrl+N), nota (Ctrl+Shift+N), terminal ou prévia"
+            ? t.novoTituloComAprovacoes(descreverAprovacoes(rotinasAguardandoAprovacao))
+            : t.novoTitulo
         }
         onClick={() => (aberto ? fechar(false) : abrir(0))}
         onKeyDown={aoTeclarNoBotao}
       >
         <IconeMais tamanho={14} className="icone-do-botao-novo" />
-        Novo
+        {t.novo}
         {temAprovacoes && (
           <SeloDeAprovacoes total={rotinasAguardandoAprovacao} className="ring-2 ring-surface" testId="selo-do-botao-novo" />
         )}
@@ -707,7 +704,7 @@ export function MenuNovo({
         <div
           id={idDoMenu}
           role="menu"
-          aria-label="Novo"
+          aria-label={t.novo}
           className="menu-novo nodrag nopan nowheel"
           onKeyDown={aoTeclarNoMenu}
         >
@@ -736,7 +733,7 @@ export function MenuNovo({
                       tabIndex={-1}
                       className="item-do-menu-novo"
                       aria-keyshortcuts={item.teclas}
-                      aria-label={aguardando > 0 ? `${item.rotulo}, ${descreverAprovacoes(aguardando)}` : undefined}
+                      aria-label={aguardando > 0 ? t.itemComAprovacoes(item.rotulo, descreverAprovacoes(aguardando)) : undefined}
                       title={item.dica}
                       onMouseEnter={aoPassarOMouse}
                       onClick={() => executar(item)}

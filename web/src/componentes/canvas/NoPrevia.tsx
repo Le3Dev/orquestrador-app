@@ -23,6 +23,8 @@ import {
   mudouDeDominio,
   SEM_HISTORICO,
 } from "../../shared/previaNativa";
+import { textosAtuais, useTextos } from "../../shared/idioma/idioma";
+import { textosDePrevia } from "../../shared/idioma/textos/canvasPrevia";
 import { Dica } from "../Dica";
 import { IconeAbrirFora, IconeNavegador, IconeRecarregar } from "../Icones";
 import { BotoesDeNavegacao } from "./BotoesDeNavegacao";
@@ -31,7 +33,7 @@ import { JanelaEmTelaCheia } from "./JanelaEmTelaCheia";
 import { MenuDaPrevia } from "./MenuDaPrevia";
 import { VistaNativaDaPrevia } from "./VistaNativaDaPrevia";
 
-export const ENDERECO_INVALIDO = "Endereço inválido: use http ou https (ex.: localhost:5173).";
+export const enderecoInvalido = (): string => textosAtuais(textosDePrevia).enderecoInvalido;
 
 /** As alças de redimensionar. Memorizadas: o arraste não as re-renderiza a cada quadro. */
 const RedimensionadorDaPrevia = memo(function RedimensionadorDaPrevia({ visivel }: { visivel: boolean }) {
@@ -99,6 +101,7 @@ interface PropsDoCampo {
 
 /** A barra de endereço: Enter navega (só http e https), Esc volta ao endereço aberto. */
 function CampoDoEndereco({ url, focarAoAbrir, aoNavegar, aoDigitar }: PropsDoCampo) {
+  const t = useTextos(textosDePrevia);
   const [texto, setTexto] = useState(url);
   const [invalido, setInvalido] = useState(false);
   const [focarNaMontagem] = useState(focarAoAbrir);
@@ -140,9 +143,9 @@ function CampoDoEndereco({ url, focarAoAbrir, aoNavegar, aoDigitar }: PropsDoCam
     <input
       ref={campo}
       className={`campo-do-endereco nodrag ${invalido ? "campo-do-endereco-invalido" : ""}`}
-      aria-label="Endereço da prévia"
+      aria-label={t.enderecoDaPrevia}
       aria-invalid={invalido}
-      title={invalido ? ENDERECO_INVALIDO : "Digite o endereço e pressione Enter"}
+      title={invalido ? t.enderecoInvalido : t.digiteOEndereco}
       placeholder="localhost:5173"
       spellCheck={false}
       autoComplete="off"
@@ -185,6 +188,7 @@ export function QuadroAtivavel({
   /** O usuário ativou a página (clique, Enter ou Espaço): a prévia do agente passa a ser dele. */
   aoAtivar?: () => void;
 }) {
+  const t = useTextos(textosDePrevia);
   const [ativo, setAtivo] = useState(false);
   const raiz = useRef<HTMLDivElement>(null);
   const inicioDoClique = useRef<{ x: number; y: number } | null>(null);
@@ -236,7 +240,7 @@ export function QuadroAtivavel({
         <button
           type="button"
           className="camada-de-ativar"
-          aria-label="Usar a página"
+          aria-label={t.usarAPagina}
           onMouseDown={(evento) => {
             inicioDoClique.current = { x: evento.clientX, y: evento.clientY };
           }}
@@ -250,7 +254,7 @@ export function QuadroAtivavel({
           }}
         >
           <span className="dica-da-camada" aria-hidden="true">
-            clique para usar a página
+            {t.cliqueParaUsar}
           </span>
         </button>
       )}
@@ -286,6 +290,7 @@ const QuadroDoSite = memo(function QuadroDoSite({
   versao: number;
   estilo: CSSProperties | undefined;
 }) {
+  const t = useTextos(textosDePrevia);
   const ligar = useCallback(
     (iframe: HTMLIFrameElement | null) => {
       if (iframe !== null) {
@@ -300,7 +305,7 @@ const QuadroDoSite = memo(function QuadroDoSite({
     <iframe
       key={versao}
       ref={ligar}
-      title={`Prévia de ${url}`}
+      title={t.tituloDoQuadro(url)}
       className="quadro-da-previa nodrag nowheel"
       style={estilo}
     />
@@ -454,9 +459,10 @@ const VOLTA_DO_ANEL = 2 * Math.PI * RAIO_DO_ANEL;
  * desliza por um segundo inteiro (CSS), e o anel parece andar sem parar.
  */
 function AnelDaContagem({ segundos }: { segundos: number }) {
+  const t = useTextos(textosDePrevia);
   const falta = segundos / (TEMPO_ATE_FECHAR_SEM_SERVIDOR_MS / 1000);
   return (
-    <div className="anel-da-contagem" role="timer" aria-label={`A prévia fecha em ${segundos} segundos`}>
+    <div className="anel-da-contagem" role="timer" aria-label={t.fechaEm(segundos)}>
       <svg viewBox="0 0 48 48" width="48" height="48" aria-hidden="true">
         <circle className="trilho-do-anel" cx="24" cy="24" r={RAIO_DO_ANEL} />
         <circle
@@ -482,6 +488,7 @@ interface PropsDaJanela {
 }
 
 const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada, focarAoAbrir }: PropsDaJanela) {
+  const t = useTextos(textosDePrevia);
   const acoes = useAcoesDoCanvas();
   const [versao, setVersao] = useState(0);
   const [menuAberto, setMenuAberto] = useState(false);
@@ -526,7 +533,7 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
 
   // Sem endereço, fora do ar ou "abrir em nova aba" não há site para mostrar em tela cheia.
   const controlesDaJanela = {
-    objeto: "a prévia",
+    objeto: t.objetoPrevia,
     aoMinimizar: () => acoes.minimizarOuRestaurarPrevia(previaId),
     minimizada,
     aoFechar: () => acoes.fecharPrevia(previaId),
@@ -545,10 +552,10 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
         role="note"
         title={
           outroDominio
-            ? `A página agora está em ${hostAtual}, outro site em relação ao endereço aberto (${url}). Confira antes de digitar senhas.`
-            : `Página aberta agora: ${hostAtual}`
+            ? t.hostMudouTitulo(hostAtual, url)
+            : t.hostAtualTitulo(hostAtual)
         }
-        aria-label={outroDominio ? `Atenção: a página mudou para outro site, ${hostAtual}` : `Página aberta agora: ${hostAtual}`}
+        aria-label={outroDominio ? t.hostMudouRotulo(hostAtual) : t.hostAtualTitulo(hostAtual)}
       >
         {outroDominio && <span aria-hidden="true">⚠ </span>}
         {hostAtual}
@@ -568,22 +575,22 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
     <div className="mensagem-da-previa mensagem-fora-do-ar">
       {segundos !== null && <AnelDaContagem segundos={segundos} />}
       {segundos !== null ? (
-        <p>Nada respondendo em {url}. A prévia fecha sozinha se o servidor não subir.</p>
+        <p>{t.nadaRespondendoComPrazo(url)}</p>
       ) : (
-        <p>Nada respondendo em {url}.</p>
+        <p>{t.nadaRespondendo(url)}</p>
       )}
       {segundos !== null ? (
         <button type="button" className="btn btn-outline btn-sm nodrag" onClick={servidor.manterAberta}>
-          manter aberta
+          {t.manterAberta}
         </button>
       ) : (
         <button type="button" className="btn btn-outline btn-sm nodrag" onClick={fechar}>
-          fechar
+          {t.fechar}
         </button>
       )}
     </div>
   );
-  const avisoDeTelaCheia = <p className="mensagem-da-previa">Aberta em tela cheia.</p>;
+  const avisoDeTelaCheia = <p className="mensagem-da-previa">{t.abertaEmTelaCheia}</p>;
 
   return (
     <div className={`janela-previa ${minimizada ? "janela-previa-minimizada" : ""}`}>
@@ -597,8 +604,8 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
           <span
             className="contagem-na-barra"
             role="timer"
-            aria-label={`A prévia fecha em ${segundos} segundos`}
-            title="Nada respondendo: a prévia fecha sozinha se o servidor não subir"
+            aria-label={t.fechaEm(segundos)}
+            title={t.nadaRespondendoDica}
           >
             {segundos}
           </span>
@@ -607,8 +614,8 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
         <button
           type="button"
           className="botao-icone nodrag"
-          title="Recarregar a página"
-          aria-label="Recarregar a página"
+          title={t.recarregar}
+          aria-label={t.recarregar}
           disabled={semEndereco}
           onClick={recarregarPeloUsuario}
         >
@@ -618,8 +625,8 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
           <button
             type="button"
             className="botao-icone nodrag"
-            title="Abrir no navegador"
-            aria-label="Abrir no navegador"
+            title={t.abrirNoNavegador}
+            aria-label={t.abrirNoNavegador}
             disabled
           >
             <IconeAbrirFora />
@@ -630,17 +637,16 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
             href={url}
             target="_blank"
             rel="noopener noreferrer"
-            title="Abrir no navegador"
-            aria-label="Abrir no navegador"
+            title={t.abrirNoNavegador}
+            aria-label={t.abrirNoNavegador}
           >
             <IconeAbrirFora />
           </a>
         )}
         {modo === "iframe" && (
           <span className="nodrag flex">
-            <Dica sobre="a prévia" titulo="Ficou em branco?">
-              Alguns sites não aceitam abrir dentro de outra página; use abrir no navegador. Login com cookie também
-              pode não manter a sessão aqui.
+            <Dica sobre={t.sobrePrevia} titulo={t.ficouEmBranco}>
+              {t.ficouEmBrancoTexto}
             </Dica>
           </span>
         )}
@@ -651,7 +657,7 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
       <div className="corpo-da-previa" hidden={minimizada}>
         {semEndereco ? (
           <p className="mensagem-da-previa">
-            Digite acima o endereço do servidor de desenvolvimento (por exemplo, localhost:5173) e pressione Enter.
+            {t.digiteAcima}
           </p>
         ) : modo === "vista-nativa" && apiNativa !== null ? (
           // Trocar o endereço ou recarregar recria a vista (key): ela é destruída e aberta de novo.
@@ -675,14 +681,14 @@ const JanelaDaPrevia = memo(function JanelaDaPrevia({ previaId, url, minimizada,
           avisoForaDoAr
         ) : modo === "nova-aba" ? (
           <div className="mensagem-da-previa mensagem-fora-do-ar">
-            <p>Sites com login (Google Sheets, Docs, Notion) não abrem dentro de outra página no navegador.</p>
+            <p>{t.sitesComLogin}</p>
             <a
               className="btn btn-outline btn-sm nodrag"
               href={url}
               target="_blank"
               rel="noopener noreferrer"
             >
-              abrir em nova aba
+              {t.abrirEmNovaAba}
             </a>
           </div>
         ) : (

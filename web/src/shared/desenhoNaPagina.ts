@@ -19,6 +19,8 @@ import {
   TIPOS_DE_TRACO,
   type TipoDoTraco,
 } from "./canvas/layout";
+import { textosAtuais } from "./idioma/idioma";
+import { textosDePaineisDoCanvas } from "./idioma/textos/canvasPaineis";
 
 /*
  * O desenho sobre a página de um artefato. A camada mora DENTRO do documento
@@ -117,6 +119,8 @@ export interface ConfiguracaoDoDesenhoNaPagina {
   raioDaBorracha: number;
   /** Repassa Esc e Ctrl/Cmd+Z ao app (na página HTML, que é outro documento). */
   teclas: boolean;
+  /** Os textos do campo de texto solto, no idioma da interface (a função roda noutro documento e não importa o dicionário). */
+  textos?: { textoSolto: string; digiteETecleEnter: string };
 }
 
 export interface OpcoesDoDesenhoNaPagina {
@@ -908,10 +912,10 @@ export function instalarDesenho(
     const cor = estado.cores[estado.cor] ?? "currentColor";
     const tamanho = contas.tamanhoDoTexto(estado.espessura as EspessuraDoDesenho);
     campo.setAttribute(MARCA, "");
-    campo.setAttribute("aria-label", "Texto solto");
+    campo.setAttribute("aria-label", configuracao.textos?.textoSolto ?? "Texto solto");
     campo.setAttribute("data-testid", "texto-solto-na-pagina");
     campo.setAttribute("autocomplete", "off");
-    campo.placeholder = "Digite e tecle Enter";
+    campo.placeholder = configuracao.textos?.digiteETecleEnter ?? "Digite e tecle Enter";
     campo.maxLength = configuracao.maximoDeCaracteres;
     campo.spellcheck = false;
     // Cor e fonte passaram pela validação (sem ";"): não dá para escapar da regra.
@@ -1200,28 +1204,39 @@ export function instalarDesenho(
 
 // ---------------- O script da página HTML ----------------
 
-const CONFIGURACAO_BASE: Omit<ConfiguracaoDoDesenhoNaPagina, "teclas"> = {
-  marca: MARCA_DO_DESENHO,
-  tipos: TIPOS_DE_TRACO,
-  cores: CORES_DO_DESENHO,
-  espessuras: ESPESSURAS_DO_DESENHO,
-  ferramentas: FERRAMENTAS_NA_PAGINA,
-  maximoDeTracos: MAXIMO_DE_TRACOS_NO_DESENHO,
-  maximoDePontos: MAXIMO_DE_PONTOS_NO_TRACO,
-  maximoDeCaracteres: MAXIMO_DE_CARACTERES_NO_TEXTO,
-  maximoDoCaminho: MAXIMO_DO_CAMINHO_DA_ANCORA,
-  maiorIndice: MAIOR_INDICE_DO_CAMINHO,
-  maximoDoId: MAXIMO_DO_ID,
-  distanciaMinima: DISTANCIA_MINIMA_ENTRE_PONTOS_PX,
-  raioDaBorracha: RAIO_DA_BORRACHA_PX,
-};
+/** O vocabulário e os limites, com os textos no idioma de agora (lido na hora de montar a camada ou o script). */
+function configuracaoBase(): Omit<ConfiguracaoDoDesenhoNaPagina, "teclas"> {
+  const t = textosAtuais(textosDePaineisDoCanvas);
+  return {
+    textos: { textoSolto: t.textoSolto, digiteETecleEnter: t.digiteETecleEnter },
+    marca: MARCA_DO_DESENHO,
+    tipos: TIPOS_DE_TRACO,
+    cores: CORES_DO_DESENHO,
+    espessuras: ESPESSURAS_DO_DESENHO,
+    ferramentas: FERRAMENTAS_NA_PAGINA,
+    maximoDeTracos: MAXIMO_DE_TRACOS_NO_DESENHO,
+    maximoDePontos: MAXIMO_DE_PONTOS_NO_TRACO,
+    maximoDeCaracteres: MAXIMO_DE_CARACTERES_NO_TEXTO,
+    maximoDoCaminho: MAXIMO_DO_CAMINHO_DA_ANCORA,
+    maiorIndice: MAIOR_INDICE_DO_CAMINHO,
+    maximoDoId: MAXIMO_DO_ID,
+    distanciaMinima: DISTANCIA_MINIMA_ENTRE_PONTOS_PX,
+    raioDaBorracha: RAIO_DA_BORRACHA_PX,
+  };
+}
 
 /**
  * O script injetado no HTML do artefato, junto do de navegação. Roda dentro do
  * iframe: só aceita mensagens da janela pai (o app), no formato do app; o que
  * manda de volta leva a marca da página.
  */
-export const SCRIPT_DO_DESENHO = `(function () {
+/** O script no idioma de agora; `SCRIPT_DO_DESENHO` abaixo é a versão fixa em português. */
+export function scriptDoDesenho(): string {
+  return montarScriptDoDesenho(configuracaoBase());
+}
+
+function montarScriptDoDesenho(base: Omit<ConfiguracaoDoDesenhoNaPagina, "teclas">): string {
+  return `(function () {
   var pai = window.parent;
   if (!pai || pai === window) { return; }
   var contas = (${criarContasDoDesenho.toString()})();
@@ -1235,7 +1250,7 @@ export const SCRIPT_DO_DESENHO = `(function () {
       mensagem.origem = "${ORIGEM_DA_PAGINA}";
       try { pai.postMessage(mensagem, "*"); } catch (erro) {}
     },
-    configuracao: ${JSON.stringify({ ...CONFIGURACAO_BASE, teclas: true })}
+    configuracao: ${JSON.stringify({ ...base, teclas: true })}
   }, contas, ancoras);
   window.addEventListener("message", function (evento) {
     var dados = evento.data;
@@ -1243,9 +1258,18 @@ export const SCRIPT_DO_DESENHO = `(function () {
     desenho.receber(dados.estado);
   });
 })();`;
+}
+
+/** Constante em português (quem a importa ainda não troca de idioma); veja `scriptDoDesenho`. */
+export const SCRIPT_DO_DESENHO = montarScriptDoDesenho({ ...configuracaoBase(), textos: undefined });
 
 /** `<script>` com a camada de desenho: vai logo depois do de navegação, no começo do HTML. */
 export const TAG_DO_SCRIPT_DO_DESENHO = `<script>${SCRIPT_DO_DESENHO}</script>`;
+
+/** `<script>` da camada de desenho no idioma de agora. */
+export function tagDoScriptDoDesenho(): string {
+  return `<script>${scriptDoDesenho()}</script>`;
+}
 
 // ---------------- Do lado do app ----------------
 
@@ -1450,7 +1474,7 @@ export function useDesenhoNoDocumento(
           setPedidos((anterior) => anterior + 1);
         },
         // As teclas, no app, quem trata é a tela cheia (Esc) e a barra (Ctrl/Cmd+Z).
-        configuracao: { ...CONFIGURACAO_BASE, teclas: false },
+        configuracao: { ...configuracaoBase(), teclas: false },
       },
       criarContasDoDesenho(),
       criarFuncoesDeAncora(MARCA_DO_DESENHO, MAXIMO_DO_CAMINHO_DA_ANCORA),

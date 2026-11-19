@@ -12,15 +12,15 @@ import {
   type EstadoDoNavegadorDoAgente,
 } from "../../shared/canvas/ponteDoNavegador";
 import { mesmoRetangulo, type RetanguloDaVista } from "../../shared/previaNativa";
+import { textosAtuais, useTextos } from "../../shared/idioma/idioma";
+import { textosDePrevia } from "../../shared/idioma/textos/canvasPrevia";
 import { IconeNavegador, IconeRecarregar } from "../Icones";
 import { BotoesDeNavegacao } from "./BotoesDeNavegacao";
 import { ControlesDoNo } from "./ControlesDoNo";
 import "../../theme/navegador-do-agente.css";
 
-export const MENSAGEM_SEM_O_APP_DESKTOP =
-  "O navegador do agente só funciona no aplicativo desktop. Abra o Orquestrador de Agentes pelo aplicativo para ver e controlar o navegador.";
-export const MENSAGEM_SEM_NAVEGADOR_ABERTO =
-  "O navegador ainda não foi aberto. O agente o abre sozinho quando precisar de um site.";
+export const mensagemSemOAppDesktop = (): string => textosAtuais(textosDePrevia).semODesktop;
+export const mensagemSemNavegadorAberto = (): string => textosAtuais(textosDePrevia).semNavegadorAberto;
 
 /** Espera depois de uma mudança na página até tirar a foto (só com a vista nativa por baixo). */
 export const ESPERA_DA_FOTO_MS = 200;
@@ -258,6 +258,7 @@ interface PropsDaJanela {
 }
 
 const JanelaDoNavegador = memo(function JanelaDoNavegador({ orquestradorId, arrastando }: PropsDaJanela) {
+  const t = useTextos(textosDePrevia);
   const acoes = useAcoesDoCanvas();
   const nomeDoOrquestrador = useSeletorDoCanvas((canvas) => canvas.orquestradores.get(orquestradorId)?.nome);
   const [api] = useState(apiDoNavegadorDoAgente);
@@ -294,9 +295,7 @@ const JanelaDoNavegador = memo(function JanelaDoNavegador({ orquestradorId, arra
         await api.pausar(orquestradorId);
       }
     } catch (falha) {
-      setErro(
-        `${pausado ? "Não foi possível devolver o navegador ao agente" : "Não foi possível assumir o navegador"}: ${mensagemDeErro(falha)}`,
-      );
+      setErro(pausado ? t.naoDevolveu(mensagemDeErro(falha)) : t.naoAssumiu(mensagemDeErro(falha)));
     } finally {
       setTrocandoDeMao(false);
     }
@@ -311,7 +310,7 @@ const JanelaDoNavegador = memo(function JanelaDoNavegador({ orquestradorId, arra
     try {
       await comando(orquestradorId);
     } catch (falha) {
-      setErro(`Não foi possível navegar: ${mensagemDeErro(falha)}`);
+      setErro(t.naoNavegou(mensagemDeErro(falha)));
     }
   }
 
@@ -323,28 +322,28 @@ const JanelaDoNavegador = memo(function JanelaDoNavegador({ orquestradorId, arra
   const podeRecarregar = podeNavegar && url !== "" && api.recarregar !== undefined;
 
   const controlesDaJanela = {
-    objeto: "o navegador do agente",
+    objeto: t.objetoNavegador,
     aoFechar: fechar,
-    dicaDoFechar: "Fechar o navegador no canvas (o agente continua podendo usá-lo)",
+    dicaDoFechar: t.fecharNavegador,
   };
 
   const faixa = pausado ? (
     <div className="faixa-do-navegador faixa-do-navegador-voce" role="status">
-      Você assumiu o controle · o agente está pausado
+      {t.vocePausou}
     </div>
   ) : emUso ? (
     <div className="faixa-do-navegador faixa-do-navegador-agente" role="status">
       <span className="pulso-do-agente" aria-hidden="true" />
-      Agente no controle
-      {estado?.carregando === true && <span className="font-normal text-secondary">· carregando a página…</span>}
+      {t.agenteNoControle}
+      {estado?.carregando === true && <span className="font-normal text-secondary">{t.carregandoPontilhado}</span>}
     </div>
   ) : (
     <div className="faixa-do-navegador" role="status">
       {api === null
-        ? "Indisponível fora do aplicativo desktop"
+        ? t.indisponivel
         : aberto
-          ? `Agente em espera${estado.carregando ? " · carregando a página…" : ""}`
-          : "Aguardando o agente"}
+          ? `${t.agenteEmEspera}${estado.carregando ? ` ${t.carregandoPontilhado}` : ""}`
+          : t.aguardandoOAgente}
     </div>
   );
 
@@ -352,20 +351,20 @@ const JanelaDoNavegador = memo(function JanelaDoNavegador({ orquestradorId, arra
     <div
       className={`janela-navegador ${emUso && !pausado ? "janela-navegador-em-uso" : ""} ${pausado ? "janela-navegador-pausada" : ""}`}
       role="group"
-      aria-label={`Navegador do agente${nomeDoOrquestrador === undefined ? "" : ` de ${nomeDoOrquestrador}`}`}
+      aria-label={nomeDoOrquestrador === undefined ? t.navegadorDoAgente : t.navegadorDoAgenteDe(nomeDoOrquestrador)}
     >
       <div className={`barra-do-navegador ${ALCA_DO_NAVEGADOR}`}>
         <ControlesDoNo lado="inicio" {...controlesDaJanela} />
         <IconeNavegador className="shrink-0 text-info" />
         <strong className="titulo-do-navegador truncate" title={titulo === "" ? undefined : titulo}>
-          {titulo === "" ? "Navegador do agente" : titulo}
+          {titulo === "" ? t.navegadorDoAgente : titulo}
         </strong>
         <input
           readOnly
           className="endereco-do-navegador nodrag"
-          aria-label="Endereço da página"
-          title={url === "" ? "Quem navega é o agente" : `${url} · quem navega é o agente`}
-          placeholder="sem página aberta"
+          aria-label={t.enderecoDaPagina}
+          title={url === "" ? t.quemNavegaEOAgente : t.quemNavegaComUrl(url)}
+          placeholder={t.semPaginaAberta}
           spellCheck={false}
           value={url}
         />
@@ -378,8 +377,8 @@ const JanelaDoNavegador = memo(function JanelaDoNavegador({ orquestradorId, arra
         <button
           type="button"
           className="botao-icone nodrag"
-          title={pausado ? "Recarregar a página" : "Assuma o controle para recarregar a página"}
-          aria-label="Recarregar a página"
+          title={pausado ? t.recarregar : t.assumaParaRecarregar}
+          aria-label={t.recarregar}
           disabled={!podeRecarregar}
           onClick={() => void comandar(api?.recarregar)}
         >
@@ -390,14 +389,14 @@ const JanelaDoNavegador = memo(function JanelaDoNavegador({ orquestradorId, arra
           className={`btn btn-sm nodrag botao-de-assumir ${pausado ? "btn-cta" : "btn-outline"}`}
           title={
             pausado
-              ? "O agente volta a poder usar o navegador"
-              : "Pausa o agente e deixa o navegador com você: ele recusa os comandos até você devolver"
+              ? t.agenteVolta
+              : t.pausaOAgente
           }
           disabled={!aberto || trocandoDeMao}
           aria-busy={trocandoDeMao}
           onClick={() => void trocarDeMao()}
         >
-          {pausado ? "Devolver ao agente" : "Assumir"}
+          {pausado ? t.devolver : t.assumir}
         </button>
         <ControlesDoNo lado="fim" {...controlesDaJanela} />
       </div>
@@ -407,13 +406,13 @@ const JanelaDoNavegador = memo(function JanelaDoNavegador({ orquestradorId, arra
       {/* Aqui a vista nativa se encaixa; a foto (ou a mensagem) fica por baixo dela. */}
       <div ref={corpo} className="corpo-do-navegador">
         {api === null ? (
-          <p className="mensagem-da-previa">{MENSAGEM_SEM_O_APP_DESKTOP}</p>
+          <p className="mensagem-da-previa">{t.semODesktop}</p>
         ) : !aberto ? (
-          <p className="mensagem-da-previa">{MENSAGEM_SEM_NAVEGADOR_ABERTO}</p>
+          <p className="mensagem-da-previa">{t.semNavegadorAberto}</p>
         ) : foto !== null ? (
-          <img className="foto-do-navegador" src={foto} alt={`Foto da página ${titulo === "" ? url : titulo}`} draggable={false} />
+          <img className="foto-do-navegador" src={foto} alt={t.fotoDaPagina(titulo === "" ? url : titulo)} draggable={false} />
         ) : (
-          <p className="mensagem-da-previa">{estado.carregando ? "Carregando a página…" : "Sem página aberta."}</p>
+          <p className="mensagem-da-previa">{estado.carregando ? t.carregandoAPagina : t.semPaginaAbertaFrase}</p>
         )}
       </div>
 
@@ -424,9 +423,9 @@ const JanelaDoNavegador = memo(function JanelaDoNavegador({ orquestradorId, arra
           </span>
         ) : (
           <>
-            <span className="shrink-0">última ação</span>
+            <span className="shrink-0">{t.ultimaAcao}</span>
             <span className="texto-da-acao" title={estado?.ultimaAcao ?? undefined}>
-              {estado?.ultimaAcao ?? "nenhuma ainda"}
+              {estado?.ultimaAcao ?? t.nenhumaAinda}
             </span>
           </>
         )}

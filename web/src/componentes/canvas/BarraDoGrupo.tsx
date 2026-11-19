@@ -2,6 +2,8 @@ import { memo, type ReactNode } from "react";
 
 import type { Alinhamento, EixoDaDistribuicao } from "../../shared/canvas/layout";
 import type { ResumoDoGrupo } from "../../shared/canvas/nos";
+import { textosAtuais, useTextos } from "../../shared/idioma/idioma";
+import { textosDeBarrasDoCanvas } from "../../shared/idioma/textos/canvasBarras";
 import { IconeFechar, IconeGrade, IconeMinimizar, IconeRestaurar } from "../Icones";
 
 /** Um ícone de 24 × 24 em traço, na cor do botão. */
@@ -84,42 +86,21 @@ const ICONES_DA_DISTRIBUICAO: Readonly<Record<EixoDaDistribuicao, ReactNode>> = 
   ),
 };
 
-const ROTULOS_DO_ALINHAMENTO: Readonly<Record<Alinhamento, string>> = {
-  esquerda: "Alinhar à esquerda",
-  centro: "Alinhar ao centro",
-  direita: "Alinhar à direita",
-  topo: "Alinhar ao topo",
-  meio: "Alinhar ao meio",
-  base: "Alinhar à base",
-};
-
-const ROTULOS_DA_DISTRIBUICAO: Readonly<Record<EixoDaDistribuicao, string>> = {
-  horizontal: "Distribuir na horizontal",
-  vertical: "Distribuir na vertical",
-};
-
 const ALINHAMENTOS_NA_HORIZONTAL: readonly Alinhamento[] = ["esquerda", "centro", "direita"];
 const ALINHAMENTOS_NA_VERTICAL: readonly Alinhamento[] = ["topo", "meio", "base"];
-
-function plural(quantidade: number, singular: string, varias: string): string {
-  return `${quantidade} ${quantidade === 1 ? singular : varias}`;
-}
 
 /**
  * A pergunta do "Fechar" do grupo: quantas telas saem, que os orquestradores
  * continuam salvos, que os shells são encerrados e o que fica no canvas.
  */
 function textoParaFecharOGrupo(resumo: ResumoDoGrupo): string {
-  const partes = [
-    `Fechar ${plural(resumo.fechaveis, "tela", "telas")}? Os orquestradores continuam salvos e voltam pela Doca.`,
-  ];
+  const t = textosAtuais(textosDeBarrasDoCanvas);
+  const partes = [t.perguntaDeFechar(resumo.fechaveis)];
   if (resumo.shells > 0) {
-    partes.push(
-      resumo.shells === 1 ? "O terminal de shell é encerrado." : `Os ${resumo.shells} terminais de shell são encerrados.`,
-    );
+    partes.push(resumo.shells === 1 ? t.shellEncerrado : t.shellsEncerrados(resumo.shells));
   }
   if (resumo.fechaveis < resumo.ids.length) {
-    partes.push("Notas e rascunhos ficam no canvas.");
+    partes.push(t.notasFicam);
   }
   return partes.join(" ");
 }
@@ -176,6 +157,7 @@ export const BarraDoGrupo = memo(function BarraDoGrupo({
   aoMinimizar,
   aoFechar,
 }: PropsDaBarraDoGrupo) {
+  const t = useTextos(textosDeBarrasDoCanvas);
   const quantidade = resumo.ids.length;
   const fechar = () => {
     if (!window.confirm(textoParaFecharOGrupo(resumo))) {
@@ -183,23 +165,23 @@ export const BarraDoGrupo = memo(function BarraDoGrupo({
     }
     aoFechar();
   };
-  const rotuloDoMinimizar = resumo.todasMinimizadas ? "Restaurar" : "Minimizar";
+  const rotuloDoMinimizar = resumo.todasMinimizadas ? t.restaurar : t.minimizar;
 
   return (
     <div
       role="toolbar"
-      aria-label="Ações do grupo"
+      aria-label={t.acoesDoGrupo}
       className="barra-do-grupo painel-flutuante nodrag nopan nowheel"
     >
-      <span className="contagem-do-grupo mono">{plural(quantidade, "tela", "telas")}</span>
+      <span className="contagem-do-grupo mono">{t.telas(quantidade)}</span>
       <span className="separador-da-barra" aria-hidden="true" />
       {ALINHAMENTOS_NA_HORIZONTAL.map((como) => (
-        <BotaoDoGrupo key={como} rotulo={ROTULOS_DO_ALINHAMENTO[como]} aoClicar={() => aoAlinhar(como)}>
+        <BotaoDoGrupo key={como} rotulo={t.alinhamento[como]} aoClicar={() => aoAlinhar(como)}>
           {ICONES_DO_ALINHAMENTO[como]}
         </BotaoDoGrupo>
       ))}
       {ALINHAMENTOS_NA_VERTICAL.map((como) => (
-        <BotaoDoGrupo key={como} rotulo={ROTULOS_DO_ALINHAMENTO[como]} aoClicar={() => aoAlinhar(como)}>
+        <BotaoDoGrupo key={como} rotulo={t.alinhamento[como]} aoClicar={() => aoAlinhar(como)}>
           {ICONES_DO_ALINHAMENTO[como]}
         </BotaoDoGrupo>
       ))}
@@ -207,15 +189,15 @@ export const BarraDoGrupo = memo(function BarraDoGrupo({
       {(["horizontal", "vertical"] as const).map((eixo) => (
         <BotaoDoGrupo
           key={eixo}
-          rotulo={ROTULOS_DA_DISTRIBUICAO[eixo]}
-          dica={quantidade < 3 ? `${ROTULOS_DA_DISTRIBUICAO[eixo]}: selecione 3 ou mais telas` : undefined}
+          rotulo={t.distribuicao[eixo]}
+          dica={quantidade < 3 ? t.distribuirDica(t.distribuicao[eixo]) : undefined}
           desabilitado={quantidade < 3}
           aoClicar={() => aoDistribuir(eixo)}
         >
           {ICONES_DA_DISTRIBUICAO[eixo]}
         </BotaoDoGrupo>
       ))}
-      <BotaoDoGrupo rotulo="Lado a lado" dica="Lado a lado: as telas numa grade, com margem" aoClicar={aoPorLadoALado}>
+      <BotaoDoGrupo rotulo={t.ladoALado} dica={t.ladoALadoDica} aoClicar={aoPorLadoALado}>
         <IconeGrade tamanho={13} />
       </BotaoDoGrupo>
       <span className="separador-da-barra" aria-hidden="true" />
@@ -223,8 +205,8 @@ export const BarraDoGrupo = memo(function BarraDoGrupo({
         rotulo={rotuloDoMinimizar}
         dica={
           resumo.minimizaveis === 0
-            ? "Minimizar: só notas, prévias e terminais se minimizam"
-            : `${rotuloDoMinimizar} ${plural(resumo.minimizaveis, "tela", "telas")} (notas, prévias e terminais)`
+            ? t.minimizarSemTelas
+            : t.minimizarDica(rotuloDoMinimizar, t.telas(resumo.minimizaveis))
         }
         desabilitado={resumo.minimizaveis === 0}
         aoClicar={aoMinimizar}
@@ -232,11 +214,11 @@ export const BarraDoGrupo = memo(function BarraDoGrupo({
         {resumo.todasMinimizadas ? <IconeRestaurar tamanho={13} /> : <IconeMinimizar tamanho={14} />}
       </BotaoDoGrupo>
       <BotaoDoGrupo
-        rotulo="Fechar"
+        rotulo={t.fechar}
         dica={
           resumo.fechaveis === 0
-            ? "Fechar: notas e rascunhos não fecham em grupo"
-            : `Fechar ${plural(resumo.fechaveis, "tela", "telas")} (notas e rascunhos ficam)`
+            ? t.fecharSemTelas
+            : t.fecharDica(t.telas(resumo.fechaveis))
         }
         desabilitado={resumo.fechaveis === 0}
         perigo

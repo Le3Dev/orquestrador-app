@@ -4,6 +4,8 @@ import { createPortal } from "react-dom";
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { ConsumoDoOrquestrador, JanelaDaCota } from "../../shared/api/tipos";
 import { descreverRenovacao, formatarPercentual, formatarTokens } from "../../shared/formatacao";
+import { idiomaAtual, textosAtuais, useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineisDoCanvas } from "../../shared/idioma/textos/canvasPaineis";
 
 /** A partir daqui o medidor da cota fica vermelho. */
 export const COTA_ALTA = 0.8;
@@ -14,20 +16,21 @@ export const COTA_ALTA = 0.8;
  */
 export const ATRIBUTO_DO_GATILHO = "data-abre-o-uso";
 
-const EXPLICACAO_DO_CONSUMO =
-  "Soma dos pedidos medidos na conversa atual de cada orquestrador (recomeça ao limpar a conversa). Índice de custo = " +
-  "entrada + 1,25 × criação de cache + 0,1 × leitura de cache + 5 × saída, em tokens de entrada equivalentes: " +
-  "compara os orquestradores, não é preço nem porcentagem da cota.";
-
 /** "7 dias (Opus)" → janela de um modelo só. */
 const JANELA_DE_MODELO = /\([^)]+\)\s*$/;
 
 /** "5 horas" → "Limite de 5 horas"; nomes desconhecidos ficam como vieram. */
 function nomeLegivel(nome: string): string {
-  return /^\d+\s+(horas?|dias?)\b/.test(nome) ? `Limite de ${nome}` : nome;
+  if (!/^\d+\s+(horas?|dias?)\b/.test(nome)) {
+    return nome;
+  }
+  // O Claude manda a unidade em português ("5 horas"); em inglês ela vira "5 hours".
+  const unidade = idiomaAtual() === "en" ? nome.replace(/\bhoras?\b/, "hours").replace(/\bdias?\b/, "days") : nome;
+  return textosAtuais(textosDePaineisDoCanvas).limiteDe(unidade);
 }
 
 function LinhaDaCota({ janela, agora }: { janela: JanelaDaCota; agora: Date }) {
+  const t = useTextos(textosDePaineisDoCanvas);
   const percentual = Math.min(100, Math.round(janela.utilizacao * 100));
   const nome = nomeLegivel(janela.nome);
   return (
@@ -49,31 +52,31 @@ function LinhaDaCota({ janela, agora }: { janela: JanelaDaCota; agora: Date }) {
         <span style={{ width: `${percentual}%` }} />
       </span>
       <span className="mono text-muted">
-        {janela.situacao === "rejected" && <span className="text-error">no limite · </span>}
-        {janela.renovaEm === null ? "sem horário de renovação" : descreverRenovacao(janela.renovaEm, agora)}
+        {janela.situacao === "rejected" && <span className="text-error">{t.noLimite}</span>}
+        {janela.renovaEm === null ? t.semHorarioDeRenovacao : descreverRenovacao(janela.renovaEm, agora)}
       </span>
     </div>
   );
 }
 
 function LinhaDoConsumo({ consumo, total }: { consumo: ConsumoDoOrquestrador; total: number }) {
+  const t = useTextos(textosDePaineisDoCanvas);
   const parte = total > 0 ? consumo.indiceDeCusto / total : 0;
   const { entrada, criacaoDeCache, leituraDeCache, saida } = consumo.uso;
   return (
     <div
       className="linha-do-uso"
-      title={`Tokens: entrada ${formatarTokens(entrada)} · criação de cache ${formatarTokens(criacaoDeCache)} · leitura de cache ${formatarTokens(leituraDeCache)} · saída ${formatarTokens(saida)}`}
+      title={t.tokens(formatarTokens(entrada), formatarTokens(criacaoDeCache), formatarTokens(leituraDeCache), formatarTokens(saida))}
     >
       <div className="cabeca-da-linha-do-uso">
         <span className="truncate">{consumo.nome}</span>
-        <span className="mono shrink-0">índice {formatarTokens(consumo.indiceDeCusto)}</span>
+        <span className="mono shrink-0">{t.indiceDe(formatarTokens(consumo.indiceDeCusto))}</span>
       </div>
       <span className="medidor medidor-largo" aria-hidden="true">
         <span style={{ width: `${Math.round(parte * 100)}%` }} />
       </span>
       <span className="mono text-muted">
-        {consumo.turnosMedidos} {consumo.turnosMedidos === 1 ? "pedido medido" : "pedidos medidos"} ·{" "}
-        {formatarPercentual(parte)} do total{consumo.parcial ? " · parcial" : ""}
+        {t.pedidosMedidos(consumo.turnosMedidos, formatarPercentual(parte), consumo.parcial)}
       </span>
     </div>
   );
@@ -101,6 +104,7 @@ interface PropsDoPopoverDoUso {
  * Esc, com clique fora ou no próprio medidor.
  */
 export function PopoverDoUso({ id, cota, gatilho, aoFechar }: PropsDoPopoverDoUso) {
+  const t = useTextos(textosDePaineisDoCanvas);
   const painel = useRef<HTMLDivElement>(null);
   const [posicao, setPosicao] = useState(() => posicaoAbaixoDe(gatilho));
   const [agora] = useState(() => new Date());
@@ -167,16 +171,16 @@ export function PopoverDoUso({ id, cota, gatilho, aoFechar }: PropsDoPopoverDoUs
       ref={painel}
       id={id}
       role="dialog"
-      aria-label="Uso da assinatura"
+      aria-label={t.usoDaAssinatura}
       tabIndex={-1}
       className="popover-do-uso painel-flutuante no-drag"
       style={{ top: posicao.top, right: posicao.right }}
     >
-      <section className="secao-do-uso" aria-label="Cotas da assinatura">
-        <span className="rotulo-tecnico">cotas da assinatura</span>
+      <section className="secao-do-uso" aria-label={t.cotasDaAssinatura}>
+        <span className="rotulo-tecnico">{t.cotasRotulo}</span>
         {janelas.length === 0 ? (
           <p className="nota-do-uso">
-            A cota aparece depois do primeiro pedido: o Claude informa o uso a cada resposta.
+            {t.cotaAposPrimeiroPedido}
           </p>
         ) : (
           <>
@@ -185,7 +189,7 @@ export function PopoverDoUso({ id, cota, gatilho, aoFechar }: PropsDoPopoverDoUs
             ))}
             {porModelo.length > 0 && (
               <>
-                <span className="rotulo-tecnico">por modelo</span>
+                <span className="rotulo-tecnico">{t.porModelo}</span>
                 {porModelo.map((janela) => (
                   <LinhaDaCota key={janela.nome} janela={janela} agora={agora} />
                 ))}
@@ -195,23 +199,23 @@ export function PopoverDoUso({ id, cota, gatilho, aoFechar }: PropsDoPopoverDoUs
         )}
       </section>
       <hr className="separador-do-menu" />
-      <section className="secao-do-uso" aria-label="Consumo por orquestrador">
-        <span className="rotulo-tecnico" title={EXPLICACAO_DO_CONSUMO}>
-          consumo por orquestrador · conversa atual
+      <section className="secao-do-uso" aria-label={t.consumoPorOrquestrador}>
+        <span className="rotulo-tecnico" title={t.explicacaoDoConsumo}>
+          {t.consumoRotulo}
         </span>
         {erro !== null ? (
           <p className="nota-do-uso text-error" role="alert">
             {erro}
           </p>
         ) : consumos === null ? (
-          <p className="nota-do-uso">carregando…</p>
+          <p className="nota-do-uso">{t.carregando}</p>
         ) : consumos.length === 0 ? (
-          <p className="nota-do-uso">Nenhum pedido medido ainda nas conversas atuais.</p>
+          <p className="nota-do-uso">{t.nenhumPedidoMedido}</p>
         ) : (
           consumos.map((consumo) => <LinhaDoConsumo key={consumo.id} consumo={consumo} total={total} />)
         )}
         <p className="nota-do-uso">
-          Índice de custo em tokens de entrada equivalentes: compara os orquestradores, não é preço nem % da cota.
+          {t.rodapeDoIndice}
         </p>
       </section>
     </div>,

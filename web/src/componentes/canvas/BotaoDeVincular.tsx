@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { mensagemDeErro } from "../../shared/api/cliente";
 import { useCanvas } from "../../shared/canvas/contexto";
 import { candidatosAoVinculo, useVinculosSeHouver } from "../../shared/canvas/vinculos";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineisDoCanvas } from "../../shared/idioma/textos/canvasPaineis";
 
 /** Dois elos de corrente: o ícone do vínculo. */
 function IconeDeVinculo() {
@@ -25,6 +27,7 @@ function IconeDeVinculo() {
  * um cria o vínculo, que aparece como uma linha entre os dois terminais.
  */
 export function BotaoDeVincular({ orquestradorId }: { orquestradorId: string }) {
+  const t = useTextos(textosDePaineisDoCanvas);
   const vinculos = useVinculosSeHouver();
   const { orquestradores } = useCanvas();
   const [aberto, setAberto] = useState(false);
@@ -78,10 +81,10 @@ export function BotaoDeVincular({ orquestradorId }: { orquestradorId: string }) 
       <button
         type="button"
         className="botao-icone"
-        aria-label="Vincular a…"
+        aria-label={t.vincularA}
         aria-haspopup="menu"
         aria-expanded={aberto}
-        title="Vincular a outro orquestrador: notas compartilhadas e mensagens entre os dois"
+        title={t.vincularDica}
         onClick={() => {
           setErro(null);
           setAberto((atual) => !atual);
@@ -90,9 +93,9 @@ export function BotaoDeVincular({ orquestradorId }: { orquestradorId: string }) 
         <IconeDeVinculo />
       </button>
       {aberto && (
-        <div role="menu" aria-label="Vincular a" className="menu-da-barra-do-terminal painel-flutuante">
+        <div role="menu" aria-label={t.vincularMenu} className="menu-da-barra-do-terminal painel-flutuante">
           {candidatos.length === 0 ? (
-            <span className="text-support px-1.5 py-1">Nenhum outro orquestrador para vincular.</span>
+            <span className="text-support px-1.5 py-1">{t.nenhumParaVincular}</span>
           ) : (
             candidatos.map((outro) => (
               <button

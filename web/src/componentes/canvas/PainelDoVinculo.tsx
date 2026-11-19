@@ -2,6 +2,8 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { mensagemDeErro } from "../../shared/api/cliente";
 import { TAMANHO_MAXIMO_DAS_NOTAS_DO_VINCULO, type VinculoDto } from "../../shared/api/tipos";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineisDoCanvas } from "../../shared/idioma/textos/canvasPaineis";
 
 /** Como o painel mostra um lado do vínculo: o nome do orquestrador e o projeto (a pasta). */
 export interface LadoDoVinculo {
@@ -30,6 +32,7 @@ function rotuloDoLado({ nome, projeto }: LadoDoVinculo): string {
  * dos lados e "Desfazer vínculo" (com confirmação). Não é modal: Esc fecha.
  */
 export function PainelDoVinculo({ vinculo, a, b, aoFechar, aoSalvarNotas, aoEnviarMensagem, aoDesfazer }: Props) {
+  const t = useTextos(textosDePaineisDoCanvas);
   const idDoTitulo = useId();
   const painel = useRef<HTMLElement>(null);
   const [notas, setNotas] = useState(vinculo.notas);
@@ -91,23 +94,23 @@ export function PainelDoVinculo({ vinculo, a, b, aoFechar, aoSalvarNotas, aoEnvi
     >
       <header className="painel-do-vinculo-cabecalho">
         <h3 id={idDoTitulo} className="label truncate" title={`${rotuloDoLado(a)} ↔ ${rotuloDoLado(b)}`}>
-          Vínculo: {a.nome} ↔ {b.nome}
+          {t.vinculoTitulo(a.nome, b.nome)}
         </h3>
-        <button type="button" className="botao-icone" aria-label="Fechar" title="Fechar" onClick={aoFechar}>
+        <button type="button" className="botao-icone" aria-label={t.fechar} title={t.fechar} onClick={aoFechar}>
           ×
         </button>
       </header>
       <p className="text-support">
-        {rotuloDoLado(a)} e {rotuloDoLado(b)} compartilham estas notas.
+        {t.compartilhamNotas(rotuloDoLado(a), rotuloDoLado(b))}
       </p>
 
       <label className="flex flex-col gap-1">
-        <span className="label">Notas compartilhadas</span>
+        <span className="label">{t.notasCompartilhadas}</span>
         <textarea
           className="input campo-escuro custom-scrollbar"
           rows={6}
           value={notas}
-          placeholder="Combinados entre os dois orquestradores: contratos, decisões, pendências…"
+          placeholder={t.notasPlaceholder}
           onChange={(evento) => setNotas(evento.target.value)}
         />
       </label>
@@ -116,9 +119,9 @@ export function PainelDoVinculo({ vinculo, a, b, aoFechar, aoSalvarNotas, aoEnvi
           type="button"
           className="btn btn-sm btn-cta"
           disabled={ocupado || !notasAlteradas || longas}
-          onClick={() => void executar(() => aoSalvarNotas(notas).then(() => setNotasSalvas(notas)), "Notas salvas.")}
+          onClick={() => void executar(() => aoSalvarNotas(notas).then(() => setNotasSalvas(notas)), t.notasSalvas)}
         >
-          Salvar notas
+          {t.salvarNotas}
         </button>
         <span className={`mono ${longas ? "text-warning" : "text-muted"}`}>
           {notas.length} / {TAMANHO_MAXIMO_DAS_NOTAS_DO_VINCULO}
@@ -126,10 +129,10 @@ export function PainelDoVinculo({ vinculo, a, b, aoFechar, aoSalvarNotas, aoEnvi
       </div>
 
       <div className="flex flex-col gap-2 border-t border-border pt-3">
-        <span className="label">Enviar mensagem</span>
+        <span className="label">{t.enviarMensagem}</span>
         <label className="flex items-center gap-2">
-          <span className="text-support">De</span>
-          <select className="input campo-escuro min-w-0 flex-1" aria-label="De" value={de} onChange={(evento) => setDe(evento.target.value)}>
+          <span className="text-support">{t.de}</span>
+          <select className="input campo-escuro min-w-0 flex-1" aria-label={t.de} value={de} onChange={(evento) => setDe(evento.target.value)}>
             <option value={a.id}>{rotuloDoLado(a)}</option>
             <option value={b.id}>{rotuloDoLado(b)}</option>
           </select>
@@ -137,9 +140,9 @@ export function PainelDoVinculo({ vinculo, a, b, aoFechar, aoSalvarNotas, aoEnvi
         <textarea
           className="input campo-escuro custom-scrollbar"
           rows={3}
-          aria-label="Mensagem"
+          aria-label={t.mensagem}
           value={mensagem}
-          placeholder={`Vai para a fila de ${destino.nome}, no nome de ${de === a.id ? a.nome : b.nome}…`}
+          placeholder={t.mensagemPlaceholder(destino.nome, de === a.id ? a.nome : b.nome)}
           onChange={(evento) => setMensagem(evento.target.value)}
         />
         <div>
@@ -151,10 +154,10 @@ export function PainelDoVinculo({ vinculo, a, b, aoFechar, aoSalvarNotas, aoEnvi
               void executar(async () => {
                 await aoEnviarMensagem(de, mensagem.trim());
                 setMensagem("");
-              }, "Mensagem enviada.")
+              }, t.mensagemEnviada)
             }
           >
-            Enviar
+            {t.enviar}
           </button>
         </div>
       </div>
@@ -162,9 +165,9 @@ export function PainelDoVinculo({ vinculo, a, b, aoFechar, aoSalvarNotas, aoEnvi
       <div className="flex items-center gap-2 border-t border-border pt-3">
         {confirmando ? (
           <>
-            <span className="text-support flex-1">Desfazer este vínculo? As notas dele se perdem.</span>
+            <span className="text-support flex-1">{t.desfazerVinculoPergunta}</span>
             <button type="button" className="btn btn-sm btn-ghost" onClick={() => setConfirmando(false)}>
-              Cancelar
+              {t.cancelar}
             </button>
             <button
               type="button"
@@ -181,12 +184,12 @@ export function PainelDoVinculo({ vinculo, a, b, aoFechar, aoSalvarNotas, aoEnvi
                 })
               }
             >
-              Confirmar
+              {t.confirmar}
             </button>
           </>
         ) : (
           <button type="button" className="btn btn-sm btn-danger" disabled={ocupado} onClick={() => setConfirmando(true)}>
-            Desfazer vínculo
+            {t.desfazerVinculo}
           </button>
         )}
       </div>

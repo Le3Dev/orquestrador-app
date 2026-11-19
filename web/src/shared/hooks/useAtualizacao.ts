@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { textosAtuais } from "../idioma/idioma";
+import { textosDePaginaDoCanvas } from "../idioma/textos/canvasPagina";
 import { apiDaAtualizacao, type EstadoDaAtualizacao } from "../ponteDoDesktop";
 
 export interface Atualizacao {
@@ -134,7 +136,7 @@ export function useAtualizacao(): Atualizacao {
     try {
       await api.instalarAgora();
     } catch (falha) {
-      setErroAoInstalar(`Não foi possível reiniciar para instalar: ${motivoDa(falha)}`);
+      setErroAoInstalar(textosAtuais(textosDePaginaDoCanvas).naoReiniciou(motivoDa(falha)));
     }
   }, [api]);
 

@@ -1,5 +1,7 @@
 import { useCallback, useState } from "react";
 
+import { textosAtuais } from "../idioma/idioma";
+import { textosDePaginaDoCanvas } from "../idioma/textos/canvasPagina";
 import { apiDaConfiguracao } from "../ponteDoDesktop";
 
 export interface AjustesDoAplicativo {
@@ -29,7 +31,7 @@ export function useAjustesDoAplicativo(): AjustesDoAplicativo {
       await configuracao.abrirAjustes();
     } catch (falha) {
       const motivo = falha instanceof Error ? falha.message : String(falha);
-      setErro(`Não foi possível abrir os ajustes de pastas: ${motivo}`);
+      setErro(textosAtuais(textosDePaginaDoCanvas).naoAbriuOsAjustes(motivo));
     }
   }, [configuracao]);
 

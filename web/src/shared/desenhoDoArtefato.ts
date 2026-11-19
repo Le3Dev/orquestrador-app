@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { apiDosArtefatos, type TracoGravado } from "./api/artefatos";
 import { ErroDaApi, mensagemDeErro } from "./api/cliente";
+import { textosAtuais } from "./idioma/idioma";
+import { textosDePaineisDoCanvas } from "./idioma/textos/canvasPaineis";
 import {
   DISTANCIA_MINIMA_ENTRE_PONTOS_PX,
   LIMITE_DO_DESFAZER,
@@ -142,7 +144,7 @@ export function useDesenhoDoArtefato(
           return true;
         },
         (falha: unknown) => {
-          setProblemaAoGravar(`Não foi possível gravar o desenho: ${mensagemDeErro(falha)}`);
+          setProblemaAoGravar(textosAtuais(textosDePaineisDoCanvas).naoGravouODesenho(mensagemDeErro(falha)));
           return false;
         },
       ),
@@ -213,7 +215,7 @@ export function useDesenhoDoArtefato(
           return;
         }
         trocar({ chave, situacao: "erro", tracos: [], largura: null, passados: [] });
-        setProblemaAoLer({ chave, mensagem: `Não foi possível carregar o desenho: ${mensagemDeErro(falha)}` });
+        setProblemaAoLer({ chave, mensagem: textosAtuais(textosDePaineisDoCanvas).naoCarregouODesenho(mensagemDeErro(falha)) });
       },
     );
     return () => {

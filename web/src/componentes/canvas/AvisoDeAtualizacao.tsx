@@ -2,6 +2,8 @@ import { type KeyboardEvent as EventoDeTecladoDoReact, useCallback, useEffect, u
 
 import { avisoDosPedidosEmAndamento, percentualDoDownload } from "../../shared/atualizacao";
 import { useAtualizacao } from "../../shared/hooks/useAtualizacao";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeBarrasDoCanvas } from "../../shared/idioma/textos/canvasBarras";
 
 interface PropsDoAviso {
   /** Pedidos rodando agora (Orquestradores trabalhando e o chat respondendo): reiniciar os cancela. */
@@ -21,6 +23,7 @@ function semPrefixo(versao: string): string {
  * (e sem a ponte) não desenha nada: o resultado da verificação fica na paleta.
  */
 export function AvisoDeAtualizacao({ pedidosEmAndamento }: PropsDoAviso) {
+  const t = useTextos(textosDeBarrasDoCanvas);
   const atualizacao = useAtualizacao();
   const { estado, avisoDispensado, erroAoInstalar, instalarAgora, dispensarAviso } = atualizacao;
   const [aberto, setAberto] = useState(false);
@@ -75,14 +78,14 @@ export function AvisoDeAtualizacao({ pedidosEmAndamento }: PropsDoAviso) {
 
   if (estado.situacao === "baixando") {
     const percentual = percentualDoDownload(estado.progresso);
-    const versao = estado.versaoNova === null ? "A nova versão" : `A versão ${semPrefixo(estado.versaoNova)}`;
+    const versao = estado.versaoNova === null ? t.novaVersao : t.versaoNumerada(semPrefixo(estado.versaoNova));
     return (
       <span
         className="aviso-de-atualizacao mono no-drag"
         role="status"
-        title={`${versao} está sendo baixada; ela será instalada quando você fechar o app.`}
+        title={t.baixandoTitulo(versao)}
       >
-        {percentual === null ? "Baixando atualização…" : `Baixando atualização ${percentual}%`}
+        {percentual === null ? t.baixando : t.baixandoPercentual(percentual)}
         {percentual !== null && (
           <span className="medidor medidor-curto" aria-hidden="true">
             <span style={{ width: `${percentual}%` }} />
@@ -97,7 +100,7 @@ export function AvisoDeAtualizacao({ pedidosEmAndamento }: PropsDoAviso) {
   }
 
   const versaoNova = estado.versaoNova === null ? null : semPrefixo(estado.versaoNova);
-  const rotulo = versaoNova === null ? "Atualização pronta" : `Atualização pronta (v${versaoNova})`;
+  const rotulo = versaoNova === null ? t.atualizacaoPronta : t.atualizacaoProntaVersao(versaoNova);
 
   const aoTeclar = (evento: EventoDeTecladoDoReact<HTMLDivElement>) => {
     if (evento.key === "Escape" && cartaoAberto) {
@@ -129,7 +132,7 @@ export function AvisoDeAtualizacao({ pedidosEmAndamento }: PropsDoAviso) {
         aria-haspopup="dialog"
         aria-expanded={cartaoAberto}
         aria-controls={cartaoAberto ? idDoCartao : undefined}
-        title="Uma nova versão do app foi baixada"
+        title={t.atualizacaoProntaDica}
         onClick={() => (cartaoAberto ? fechar(false) : setAberto(true))}
       >
         {rotulo}
@@ -139,7 +142,7 @@ export function AvisoDeAtualizacao({ pedidosEmAndamento }: PropsDoAviso) {
           ref={cartao}
           id={idDoCartao}
           role="dialog"
-          aria-label="Atualização pronta"
+          aria-label={t.atualizacaoPronta}
           tabIndex={-1}
           className="cartao-da-atualizacao painel-flutuante no-drag"
         >
@@ -150,25 +153,24 @@ export function AvisoDeAtualizacao({ pedidosEmAndamento }: PropsDoAviso) {
               </p>
               <div className="botoes-do-cartao-da-atualizacao">
                 <button type="button" className="btn btn-sm btn-ghost" onClick={() => setConfirmando(false)}>
-                  Voltar
+                  {t.voltar}
                 </button>
                 <button type="button" className="btn btn-sm btn-danger" onClick={() => void instalarAgora()}>
-                  Reiniciar mesmo assim
+                  {t.reiniciarMesmoAssim}
                 </button>
               </div>
             </>
           ) : (
             <>
               <p className="texto-do-cartao-da-atualizacao">
-                {versaoNova === null ? "A nova versão" : `A versão ${versaoNova}`} foi baixada. Ela será instalada
-                quando você fechar o app, ou reinicie agora.
+                {t.foiBaixada(versaoNova === null ? t.novaVersao : t.versaoNumerada(versaoNova))}
               </p>
               <div className="botoes-do-cartao-da-atualizacao">
                 <button type="button" className="btn btn-sm btn-ghost" onClick={depois}>
-                  Depois
+                  {t.depois}
                 </button>
                 <button type="button" className="btn btn-sm btn-cta" onClick={reiniciarAgora}>
-                  Reiniciar agora
+                  {t.reiniciarAgora}
                 </button>
               </div>
             </>

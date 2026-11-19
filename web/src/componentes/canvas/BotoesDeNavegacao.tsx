@@ -3,6 +3,9 @@
  * quando não há para onde ir. `nodrag`: clicar neles não arrasta o nó.
  */
 
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeIlhasDoCanvas } from "../../shared/idioma/textos/canvasIlhas";
+
 function Seta({ sentido }: { sentido: "voltar" | "avancar" }) {
   return (
     <svg width={14} height={14} viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -28,13 +31,14 @@ export function BotoesDeNavegacao({
   aoVoltar: () => void;
   aoAvancar: () => void;
 }) {
+  const t = useTextos(textosDeIlhasDoCanvas);
   return (
     <>
       <button
         type="button"
         className="botao-icone nodrag"
-        title="Voltar"
-        aria-label="Voltar"
+        title={t.voltar}
+        aria-label={t.voltar}
         disabled={!podeVoltar}
         onClick={aoVoltar}
       >
@@ -43,8 +47,8 @@ export function BotoesDeNavegacao({
       <button
         type="button"
         className="botao-icone nodrag"
-        title="Avançar"
-        aria-label="Avançar"
+        title={t.avancar}
+        aria-label={t.avancar}
         disabled={!podeAvancar}
         onClick={aoAvancar}
       >

@@ -7,6 +7,8 @@ import {
   ESPESSURAS_DO_DESENHO,
   type EspessuraDoDesenho,
 } from "../../shared/canvas/layout";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineisDoCanvas } from "../../shared/idioma/textos/canvasPaineis";
 import {
   IconeBorracha,
   IconeCaneta,
@@ -20,63 +22,17 @@ import {
   IconeTexto,
 } from "../Icones";
 
-/** As ferramentas, na ordem da barra: o nome (leitor de tela), a dica e o ícone. */
-const FERRAMENTAS: readonly { ferramenta: FerramentaDeDesenho; nome: string; dica: string; icone: ReactNode }[] = [
-  {
-    ferramenta: "selecionar",
-    nome: "Selecionar",
-    dica: "Selecionar: o canvas volta a funcionar como sempre (Esc)",
-    icone: <IconeSelecionar />,
-  },
-  { ferramenta: "caneta", nome: "Caneta", dica: "Caneta: desenho à mão livre", icone: <IconeCaneta /> },
-  {
-    ferramenta: "marca-texto",
-    nome: "Marca-texto",
-    dica: "Marca-texto: traço largo e translúcido",
-    icone: <IconeMarcaTexto />,
-  },
-  { ferramenta: "linha", nome: "Linha", dica: "Linha reta: arraste do começo ao fim", icone: <IconeLinha /> },
-  { ferramenta: "seta", nome: "Seta", dica: "Seta: arraste do começo até onde ela aponta", icone: <IconeSeta /> },
-  {
-    ferramenta: "retangulo",
-    nome: "Retângulo",
-    dica: "Retângulo: arraste de um canto ao canto oposto",
-    icone: <IconeRetangulo />,
-  },
-  {
-    ferramenta: "texto",
-    nome: "Texto",
-    dica: "Texto solto: clique onde ele começa, digite e tecle Enter",
-    icone: <IconeTexto />,
-  },
-  {
-    ferramenta: "borracha",
-    nome: "Borracha",
-    dica: "Borracha: apaga o traço inteiro que tocar",
-    icone: <IconeBorracha />,
-  },
+/** As ferramentas, na ordem da barra: o ícone (o nome e a dica vêm do dicionário). */
+const FERRAMENTAS: readonly { ferramenta: FerramentaDeDesenho; icone: ReactNode }[] = [
+  { ferramenta: "selecionar", icone: <IconeSelecionar /> },
+  { ferramenta: "caneta", icone: <IconeCaneta /> },
+  { ferramenta: "marca-texto", icone: <IconeMarcaTexto /> },
+  { ferramenta: "linha", icone: <IconeLinha /> },
+  { ferramenta: "seta", icone: <IconeSeta /> },
+  { ferramenta: "retangulo", icone: <IconeRetangulo /> },
+  { ferramenta: "texto", icone: <IconeTexto /> },
+  { ferramenta: "borracha", icone: <IconeBorracha /> },
 ];
-
-/** O nome de cada cor, para a dica e o leitor de tela. */
-const NOMES_DAS_CORES: Readonly<Record<CorDoDesenho, string>> = {
-  laranja: "Laranja",
-  claro: "Branco",
-  azul: "Azul",
-  verde: "Verde",
-  kraft: "Areia",
-  vermelho: "Vermelho",
-};
-
-const NOMES_DAS_ESPESSURAS: Readonly<Record<EspessuraDoDesenho, string>> = {
-  2: "Fina",
-  3: "Média",
-  6: "Grossa",
-};
-
-const FECHAR_DO_CANVAS = {
-  nome: "Fechar a barra de desenho",
-  dica: "Fechar a barra de desenho (o desenho continua no canvas)",
-};
 
 interface Props {
   ferramenta: FerramentaDeDesenho;
@@ -112,20 +68,22 @@ export function BarraDeDesenho({
   aoFechar,
   ferramentas,
   comEspessura = true,
-  fechar = FECHAR_DO_CANVAS,
+  fechar,
 }: Props) {
+  const t = useTextos(textosDePaineisDoCanvas);
+  const fecharDaBarra = fechar ?? { nome: t.fecharDoCanvasNome, dica: t.fecharDoCanvasDica };
   const itens = ferramentas === undefined ? FERRAMENTAS : FERRAMENTAS.filter((item) => ferramentas.includes(item.ferramenta));
   return (
-    <div className="barra-de-desenho painel-flutuante" role="toolbar" aria-label="Desenho">
-      <div className="grupo-da-barra-de-desenho" role="group" aria-label="Ferramenta">
+    <div className="barra-de-desenho painel-flutuante" role="toolbar" aria-label={t.desenho}>
+      <div className="grupo-da-barra-de-desenho" role="group" aria-label={t.grupoFerramenta}>
         {itens.map((item) => (
           <button
             key={item.ferramenta}
             type="button"
             className="botao-icone"
-            aria-label={item.nome}
+            aria-label={t.ferramentas[item.ferramenta].nome}
             aria-pressed={ferramenta === item.ferramenta}
-            title={item.dica}
+            title={t.ferramentas[item.ferramenta].dica}
             onClick={() => aoEscolherFerramenta(item.ferramenta)}
           >
             {item.icone}
@@ -133,15 +91,15 @@ export function BarraDeDesenho({
         ))}
       </div>
       <span className="separador-da-barra" aria-hidden="true" />
-      <div className="grupo-da-barra-de-desenho" role="group" aria-label="Cor">
+      <div className="grupo-da-barra-de-desenho" role="group" aria-label={t.grupoCor}>
         {CORES_DO_DESENHO.map((opcao) => (
           <button
             key={opcao}
             type="button"
             className="botao-icone botao-de-cor"
-            aria-label={`Cor ${NOMES_DAS_CORES[opcao].toLowerCase()}`}
+            aria-label={t.corRotulo(t.cores[opcao])}
             aria-pressed={cor === opcao}
-            title={NOMES_DAS_CORES[opcao]}
+            title={t.cores[opcao]}
             onClick={() => aoEscolherCor(opcao)}
           >
             <span className={`amostra-de-cor traco-cor-${opcao}`} aria-hidden="true" />
@@ -151,15 +109,15 @@ export function BarraDeDesenho({
       {comEspessura && (
         <>
           <span className="separador-da-barra" aria-hidden="true" />
-          <div className="grupo-da-barra-de-desenho" role="group" aria-label="Espessura">
+          <div className="grupo-da-barra-de-desenho" role="group" aria-label={t.grupoEspessura}>
             {ESPESSURAS_DO_DESENHO.map((opcao) => (
               <button
                 key={opcao}
                 type="button"
                 className="botao-icone"
-                aria-label={`Espessura ${NOMES_DAS_ESPESSURAS[opcao].toLowerCase()} (${opcao} pt)`}
+                aria-label={t.espessuraRotulo(t.espessuras[opcao], opcao)}
                 aria-pressed={espessura === opcao}
-                title={`${NOMES_DAS_ESPESSURAS[opcao]} (${opcao} pt)`}
+                title={t.espessuraTitulo(t.espessuras[opcao], opcao)}
                 onClick={() => aoEscolherEspessura(opcao)}
               >
                 <span className="amostra-de-espessura" style={{ height: opcao }} aria-hidden="true" />
@@ -172,9 +130,9 @@ export function BarraDeDesenho({
       <button
         type="button"
         className="botao-icone"
-        aria-label="Desfazer"
+        aria-label={t.desfazer}
         aria-keyshortcuts="Control+Z Meta+Z"
-        title="Desfazer o último traço (Ctrl+Z ou ⌘Z)"
+        title={t.desfazerDica}
         disabled={!podeDesfazer}
         onClick={aoDesfazer}
       >
@@ -183,8 +141,8 @@ export function BarraDeDesenho({
       <button
         type="button"
         className="botao-icone"
-        aria-label={fechar.nome}
-        title={fechar.dica}
+        aria-label={fecharDaBarra.nome}
+        title={fecharDaBarra.dica}
         onClick={aoFechar}
       >
         <IconeFechar tamanho={14} />

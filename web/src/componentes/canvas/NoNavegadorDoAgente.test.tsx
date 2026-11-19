@@ -8,8 +8,8 @@ import type { ResumoDoOrquestrador } from "../../shared/api/tipos";
 import {
   ESPERA_DA_FOTO_MS,
   INTERVALO_DA_COBERTURA_MS,
-  MENSAGEM_SEM_NAVEGADOR_ABERTO,
-  MENSAGEM_SEM_O_APP_DESKTOP,
+  mensagemSemNavegadorAberto,
+  mensagemSemOAppDesktop,
   NoNavegadorDoAgente,
 } from "./NoNavegadorDoAgente";
 
@@ -149,7 +149,7 @@ describe("NoNavegadorDoAgente", () => {
     it("diz com clareza que o navegador só funciona no aplicativo desktop, sem botões que fariam algo", () => {
       renderizar();
 
-      expect(screen.getByText(MENSAGEM_SEM_O_APP_DESKTOP)).toBeInTheDocument();
+      expect(screen.getByText(mensagemSemOAppDesktop())).toBeInTheDocument();
       expect(screen.getByRole("status")).toHaveTextContent("Indisponível fora do aplicativo desktop");
       expect(screen.getByRole("button", { name: "Assumir" })).toBeDisabled();
       expect(screen.getByRole("button", { name: "Voltar" })).toBeDisabled();
@@ -162,7 +162,7 @@ describe("NoNavegadorDoAgente", () => {
       janela.electron = { desktop: true, janela: {} };
       renderizar();
 
-      expect(screen.getByText(MENSAGEM_SEM_O_APP_DESKTOP)).toBeInTheDocument();
+      expect(screen.getByText(mensagemSemOAppDesktop())).toBeInTheDocument();
     });
 
     it("o ✕ fecha a janela mesmo assim", () => {
@@ -267,7 +267,7 @@ describe("NoNavegadorDoAgente", () => {
         ligar([]);
         renderizar();
 
-        expect(await screen.findByText(MENSAGEM_SEM_NAVEGADOR_ABERTO)).toBeInTheDocument();
+        expect(await screen.findByText(mensagemSemNavegadorAberto())).toBeInTheDocument();
         expect(screen.getByRole("status")).toHaveTextContent("Aguardando o agente");
         expect(screen.getByRole("button", { name: "Assumir" })).toBeDisabled();
         // E não tenta mostrar uma vista que não existe.
@@ -278,7 +278,7 @@ describe("NoNavegadorDoAgente", () => {
       it("o navegador abre depois de o nó existir: o primeiro aviso do app já mostra a janela", async () => {
         ligar([]);
         renderizar();
-        await screen.findByText(MENSAGEM_SEM_NAVEGADOR_ABERTO);
+        await screen.findByText(mensagemSemNavegadorAberto());
 
         ponte.enviarMudanca({ titulo: "Primeira página" });
 
@@ -449,7 +449,7 @@ describe("NoNavegadorDoAgente", () => {
       it("fechada antes de mostrar a vista, não manda ocultar nada", async () => {
         ligar([]);
         const { tela } = renderizar();
-        await screen.findByText(MENSAGEM_SEM_NAVEGADOR_ABERTO);
+        await screen.findByText(mensagemSemNavegadorAberto());
 
         tela.unmount();
 

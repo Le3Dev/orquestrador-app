@@ -10,6 +10,8 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeBarrasDoCanvas } from "../../shared/idioma/textos/canvasBarras";
 import { ControlesDoNo } from "./ControlesDoNo";
 
 /** Eventos do modal não sobem até o nó: o React Flow não arrasta nem seleciona por baixo. */
@@ -64,6 +66,7 @@ export function JanelaEmTelaCheia({
   corpoRef?: Ref<HTMLDivElement>;
   children: ReactNode;
 }) {
+  const t = useTextos(textosDeBarrasDoCanvas);
   const caixa = useRef<HTMLDivElement>(null);
   const idDoTitulo = useId();
   const [topo] = useState(topoDaTelaCheia);
@@ -117,7 +120,7 @@ export function JanelaEmTelaCheia({
         className="painel-flutuante surgir janela-em-tela-cheia outline-none"
       >
         <div className="barra-da-tela-cheia">
-          <ControlesDoNo lado="inicio" objeto="a tela cheia" aoFechar={aoFechar} dicaDoFechar="Fechar a tela cheia (Esc)" />
+          <ControlesDoNo lado="inicio" objeto={t.objetoTelaCheia} aoFechar={aoFechar} dicaDoFechar={t.fecharTelaCheia} />
           {icone}
           <h2 id={idDoTitulo} className="titulo-do-artefato" title={titulo}>
             {titulo}
@@ -126,7 +129,7 @@ export function JanelaEmTelaCheia({
           <span className="flex-1" />
           {navegacao}
           {acoes}
-          <ControlesDoNo lado="fim" objeto="a tela cheia" aoFechar={aoFechar} dicaDoFechar="Fechar a tela cheia (Esc)" />
+          <ControlesDoNo lado="fim" objeto={t.objetoTelaCheia} aoFechar={aoFechar} dicaDoFechar={t.fecharTelaCheia} />
         </div>
         <div ref={corpoRef} className="corpo-da-tela-cheia">
           {children}

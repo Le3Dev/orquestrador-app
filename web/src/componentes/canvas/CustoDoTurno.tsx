@@ -2,6 +2,8 @@ import { useId, useState } from "react";
 
 import type { DadosDoConsumoDoTurno, DadosDoUso } from "../../shared/api/tipos";
 import { formatarTokens } from "../../shared/formatacao";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineisDoCanvas } from "../../shared/idioma/textos/canvasPaineis";
 
 /** Pesos do índice de custo, em tokens de entrada equivalentes (os mesmos do servidor). */
 const PESO_DA_CRIACAO_DE_CACHE = 1.25;
@@ -26,12 +28,6 @@ function somar(a: DadosDoUso, b: DadosDoUso): DadosDoUso {
   };
 }
 
-const EXPLICACAO_DO_INDICE =
-  "Índice de custo = entrada + 1,25 × criação de cache + 0,1 × leitura de cache + 5 × saída, em tokens de entrada " +
-  "equivalentes. Serve para comparar pedidos; não é preço.";
-
-const EXPLICACAO_DO_PARCIAL = "Parcial: o pedido foi cancelado ou falhou; o custo é o que houve até parar.";
-
 function LinhaDoUso({ rotulo, uso, indice }: { rotulo: string; uso: DadosDoUso; indice: number }) {
   return (
     <tr>
@@ -50,6 +46,7 @@ function LinhaDoUso({ rotulo, uso, indice }: { rotulo: string; uso: DadosDoUso; 
  * ao abrir, a tabela por trecho: Orquestrador (principal), Subagentes e total.
  */
 export function CustoDoTurno({ consumo }: { consumo: DadosDoConsumoDoTurno }) {
+  const t = useTextos(textosDePaineisDoCanvas);
   const [aberto, setAberto] = useState(false);
   const idDaTabela = useId();
   const total = somar(consumo.principal, consumo.subagentes);
@@ -61,35 +58,35 @@ export function CustoDoTurno({ consumo }: { consumo: DadosDoConsumoDoTurno }) {
         className="custo-do-turno-resumo mono"
         aria-expanded={aberto}
         aria-controls={idDaTabela}
-        title={consumo.parcial ? `${EXPLICACAO_DO_INDICE}\n${EXPLICACAO_DO_PARCIAL}` : EXPLICACAO_DO_INDICE}
+        title={consumo.parcial ? `${t.explicacaoDoIndice}\n${t.explicacaoDoParcial}` : t.explicacaoDoIndice}
         onClick={() => setAberto((atual) => !atual)}
       >
-        {`≈ custo do turno · índice ${formatarTokens(consumo.indiceDeCusto)}${consumo.parcial ? " · parcial" : ""}`}
+        {t.custoResumo(formatarTokens(consumo.indiceDeCusto), consumo.parcial)}
       </button>
       {aberto && (
         <table id={idDaTabela} className="custo-do-turno-tabela mono">
           <thead>
             <tr>
               <th scope="col">
-                <span className="sr-only">Trecho</span>
+                <span className="sr-only">{t.trecho}</span>
               </th>
-              <th scope="col">Entrada</th>
-              <th scope="col">Criação de cache</th>
-              <th scope="col">Leitura de cache</th>
-              <th scope="col">Saída</th>
-              <th scope="col">Índice</th>
+              <th scope="col">{t.entrada}</th>
+              <th scope="col">{t.criacaoDeCache}</th>
+              <th scope="col">{t.leituraDeCache}</th>
+              <th scope="col">{t.saida}</th>
+              <th scope="col">{t.indice}</th>
             </tr>
           </thead>
           <tbody>
-            <LinhaDoUso rotulo="Principal" uso={consumo.principal} indice={indiceDe(consumo.principal)} />
+            <LinhaDoUso rotulo={t.principal} uso={consumo.principal} indice={indiceDe(consumo.principal)} />
             <LinhaDoUso
-              rotulo={`Subagentes (${consumo.subagentesMedidos})`}
+              rotulo={t.subagentes(consumo.subagentesMedidos)}
               uso={consumo.subagentes}
               indice={indiceDe(consumo.subagentes)}
             />
           </tbody>
           <tfoot>
-            <LinhaDoUso rotulo="Total" uso={total} indice={consumo.indiceDeCusto} />
+            <LinhaDoUso rotulo={t.total} uso={total} indice={consumo.indiceDeCusto} />
           </tfoot>
         </table>
       )}

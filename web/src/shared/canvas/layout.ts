@@ -4,6 +4,9 @@
  * Orquestradores continua no servidor.
  */
 
+import { textosAtuais } from "../idioma/idioma";
+import { textosDePaginaDoCanvas } from "../idioma/textos/canvasPagina";
+
 export interface Ponto {
   x: number;
   y: number;
@@ -22,7 +25,17 @@ export interface Retangulo extends Ponto {
 export const ESCALAS_DA_LETRA = [1, 1.15, 1.3] as const;
 export type EscalaDaLetra = (typeof ESCALAS_DA_LETRA)[number];
 export const ESCALA_DA_LETRA_PADRAO: EscalaDaLetra = 1;
-/** As opções do campo "Tamanho da letra", na criação e no ⚙ do terminal. */
+/** As opções do campo "Tamanho da letra" no idioma de agora, na criação e no ⚙ do terminal. */
+export function opcoesDaEscalaDaLetra(): readonly { valor: EscalaDaLetra; titulo: string }[] {
+  const t = textosAtuais(textosDePaginaDoCanvas).escalasDaLetra;
+  return [
+    { valor: 1, titulo: t.normal },
+    { valor: 1.15, titulo: t.grande },
+    { valor: 1.3, titulo: t.maior },
+  ];
+}
+
+/** As mesmas opções em português (para quem ainda não troca de idioma; prefira `opcoesDaEscalaDaLetra`). */
 export const OPCOES_DA_ESCALA_DA_LETRA: readonly { valor: EscalaDaLetra; titulo: string }[] = [
   { valor: 1, titulo: "Normal" },
   { valor: 1.15, titulo: "Grande" },

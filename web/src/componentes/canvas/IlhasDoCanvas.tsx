@@ -4,6 +4,8 @@ import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from "
 import type { JanelaDaCota, LeituraDeMemoria } from "../../shared/api/tipos";
 import { descreverRenovacao, formatarMomento, formatarPercentual } from "../../shared/formatacao";
 import { useAtualizacao } from "../../shared/hooks/useAtualizacao";
+import { type TextosDe, useTextos } from "../../shared/idioma/idioma";
+import { textosDeIlhasDoCanvas } from "../../shared/idioma/textos/canvasIlhas";
 import { nivelDaMemoria, type NivelDaMemoria } from "../../shared/memoria";
 import { IconeAlerta, IconeDesenhar, IconeEngrenagem, IconeGrade, IconeOrquestrador } from "../Icones";
 import { AvisoDeAtualizacao } from "./AvisoDeAtualizacao";
@@ -19,12 +21,9 @@ import {
 } from "./IconesDasIlhas";
 import { MenuNovo, type PropsDoMenuNovo } from "./MenuNovo";
 import { COTA_ALTA } from "./PopoverDoUso";
-import { nomeLegivelDaCota } from "./usoDoSistema";
 import "../../theme/ilhas.css";
 
-/** Nome e dica do "Organizar" e do "Desenhar" na ilha de ferramentas (os mesmos dos antigos controles). */
-export const DICA_DO_ORGANIZAR = "Organizar: terminais lado a lado; notas e artefatos à direita";
-export const DICA_DO_DESENHAR = "Desenhar: caneta, marca-texto, formas e texto por cima do canvas";
+type Textos = TextosDe<typeof textosDeIlhasDoCanvas>;
 
 /**
  * App desktop: a faixa invisível de 36 px no topo da janela, de ponta a ponta, que a arrasta (e, com
@@ -105,12 +104,12 @@ function AnelDeMemoria({ memoria }: { memoria: LeituraDeMemoria | null }) {
   );
 }
 
-const TEXTO_DO_NIVEL: Record<NivelDaMemoria, string> = { normal: "", baixa: "Memória baixa", critica: "Memória crítica" };
+const textoDoNivel = (t: Textos): Record<NivelDaMemoria, string> => ({ normal: "", baixa: t.memoriaBaixa, critica: t.memoriaCritica });
 
 type NivelDaCota = "normal" | "alta" | "critica";
 /** Daqui para cima a cota está no limite (a partir de `COTA_ALTA`, que é o aviso, ela está alta). */
 const COTA_NO_LIMITE = 0.95;
-const TEXTO_DO_NIVEL_DA_COTA: Record<NivelDaCota, string> = { normal: "", alta: "Cota alta", critica: "Cota no limite" };
+const textoDoNivelDaCota = (t: Textos): Record<NivelDaCota, string> => ({ normal: "", alta: t.cotaAlta, critica: t.cotaNoLimite });
 const PESO_DO_NIVEL_DA_COTA: Record<NivelDaCota, number> = { normal: 0, alta: 1, critica: 2 };
 
 function nivelDaJanela(janela: JanelaDaCota): NivelDaCota {
@@ -131,11 +130,23 @@ interface ResumoDaCota {
   rotulo: string;
 }
 
-/** "Cota da semana" vira "semana"; "Cota de 30 dias" vira "30 dias". */
-const nomeCurtoDaJanela = (nome: string) => nomeLegivelDaCota(nome).replace(/^Cota (?:da|de) /, "");
+/** O nome do Claude ("5 horas", "7 dias", "30 dias (Opus)") sem o prefixo "Cota": "sessão de 5 h", "semana", "30 dias". */
+function nomeCurtoDaJanela(nome: string, t: Textos): string {
+  const limpo = nome.trim();
+  const modelo = /\(([^)]+)\)\s*$/.exec(limpo)?.[1];
+  const sufixo = modelo === undefined ? "" : ` (${modelo})`;
+  if (/^5\s*horas?\b/i.test(limpo)) {
+    return `${t.sessaoDe5h}${sufixo}`;
+  }
+  if (/^7\s*dias?\b/i.test(limpo)) {
+    return `${t.semana}${sufixo}`;
+  }
+  return limpo;
+}
 
-const ehDaSessao = (janela: JanelaDaCota) => nomeLegivelDaCota(janela.nome).startsWith("Cota da sessão");
-const ehDaSemana = (janela: JanelaDaCota) => nomeLegivelDaCota(janela.nome).startsWith("Cota da semana");
+const ehDaSessao = (janela: JanelaDaCota) => /^5\s*horas?\b/i.test(janela.nome.trim());
+const ehDaSemana = (janela: JanelaDaCota) => /^7\s*dias?\b/i.test(janela.nome.trim());
+const ehDaSemanaGeral = (janela: JanelaDaCota) => /^7\s*dias?\s*$/i.test(janela.nome.trim());
 
 /** A janela mais usada entre as que passam no filtro; nulo se nenhuma passa. */
 function maisUsada(janelas: JanelaDaCota[], filtro: (janela: JanelaDaCota) => boolean): JanelaDaCota | null {
@@ -148,20 +159,20 @@ function maisUsada(janelas: JanelaDaCota[], filtro: (janela: JanelaDaCota) => bo
  * "semana 38%, renova em 16/11, 12:00"; "semana (Opus) 55%". A sessão de 5 horas, se um dia voltar a vir,
  * só aparece aqui (e na cor de alerta): o anel nunca a desenha.
  */
-function trechoDaJanela(janela: JanelaDaCota, agora: Date, comRenovacao: boolean): string {
-  const [, base = "", modelo] = /^(.*?)(?: \((.+)\))?$/.exec(nomeCurtoDaJanela(janela.nome)) ?? [];
-  const nome = base === "sessão" ? "sessão de 5 h" : base;
+function trechoDaJanela(janela: JanelaDaCota, agora: Date, comRenovacao: boolean, t: Textos): string {
+  const [, base = "", modelo] = /^(.*?)(?: \((.+)\))?$/.exec(nomeCurtoDaJanela(janela.nome, t)) ?? [];
+  const nome = base;
   const renovacao = !comRenovacao || janela.renovaEm === null ? "" : `, ${descreverRenovacao(janela.renovaEm, agora)}`;
   return `${nome}${modelo === undefined ? "" : ` (${modelo})`} ${aPercentual(janela.utilizacao)}%${renovacao}`;
 }
 
-function resumirCota(cota: JanelaDaCota[] | null, agora: Date): ResumoDaCota {
+function resumirCota(cota: JanelaDaCota[] | null, agora: Date, t: Textos): ResumoDaCota {
   const janelas = cota ?? [];
   if (janelas.length === 0) {
-    return { principal: null, nivel: "normal", rotulo: "Uso do Claude: sem leitura ainda. Abrir Configurações, Conta" };
+    return { principal: null, nivel: "normal", rotulo: t.cotaSemLeitura };
   }
   const principal =
-    janelas.find((janela) => nomeLegivelDaCota(janela.nome) === "Cota da semana") ??
+    janelas.find(ehDaSemanaGeral) ??
     maisUsada(janelas, ehDaSemana) ??
     maisUsada(janelas, (janela) => !ehDaSessao(janela));
   const nivel = janelas.reduce<NivelDaCota>((pior, janela) => {
@@ -169,11 +180,11 @@ function resumirCota(cota: JanelaDaCota[] | null, agora: Date): ResumoDaCota {
     return PESO_DO_NIVEL_DA_COTA[dela] > PESO_DO_NIVEL_DA_COTA[pior] ? dela : pior;
   }, "normal");
   const partes = [
-    ...(principal === null ? [] : [trechoDaJanela(principal, agora, true)]),
-    ...janelas.filter((janela) => janela !== principal).map((janela) => trechoDaJanela(janela, agora, false)),
+    ...(principal === null ? [] : [trechoDaJanela(principal, agora, true, t)]),
+    ...janelas.filter((janela) => janela !== principal).map((janela) => trechoDaJanela(janela, agora, false, t)),
   ];
-  const aviso = nivel === "normal" ? "" : ` ${TEXTO_DO_NIVEL_DA_COTA[nivel]}.`;
-  return { principal, nivel, rotulo: `Uso do Claude: ${partes.join("; ")}.${aviso} Abrir Configurações, Conta` };
+  const aviso = nivel === "normal" ? "" : ` ${textoDoNivelDaCota(t)[nivel]}.`;
+  return { principal, nivel, rotulo: t.cotaRotulo(partes.join("; "), aviso) };
 }
 
 /**
@@ -227,24 +238,22 @@ export function IlhaDaDireita({
   abaAberta,
   controlesDaJanela = false,
 }: PropsDaIlhaDaDireita) {
+  const t = useTextos(textosDeIlhasDoCanvas);
   const nivel = memoria === null ? "normal" : nivelDaMemoria(memoria);
   const percentual = memoria === null ? null : Math.round((1 - memoria.livreBytes / memoria.totalBytes) * 100);
-  const texto = TEXTO_DO_NIVEL[nivel];
-  const resumoDaCota = resumirCota(cota, new Date());
-  const textoDaCota = TEXTO_DO_NIVEL_DA_COTA[resumoDaCota.nivel];
-  const rotuloDoAnel =
-    percentual === null
-      ? "Memória do computador: sem leitura ainda. Abrir Configurações, Sistema"
-      : `Memória do computador: ${percentual}% em uso${texto === "" ? "" : `, ${texto.toLowerCase()}`}. Abrir Configurações, Sistema`;
+  const texto = textoDoNivel(t)[nivel];
+  const resumoDaCota = resumirCota(cota, new Date(), t);
+  const textoDaCota = textoDoNivelDaCota(t)[resumoDaCota.nivel];
+  const rotuloDoAnel = percentual === null ? t.memoriaSemLeitura : t.memoriaRotulo(percentual, texto);
   return (
-    <div className="ilha ilha-arrasta ilha-da-direita nodrag nopan nowheel" role="group" aria-label="Busca, status e configurações">
+    <div className="ilha ilha-arrasta ilha-da-direita nodrag nopan nowheel" role="group" aria-label={t.grupoDaDireita}>
       <button
         type="button"
         className="botao-da-ilha no-drag"
         onClick={aoBuscar}
-        aria-label="Buscar (Ctrl+K)"
+        aria-label={t.buscar}
         aria-keyshortcuts="Control+K"
-        title="Paleta de comandos: ações, orquestradores, notas e pedidos (Ctrl+K)"
+        title={t.buscarTitulo}
       >
         <IconeLupa tamanho={18} />
       </button>
@@ -252,14 +261,14 @@ export function IlhaDaDireita({
         <span
           className="contador-da-ilha no-drag"
           role="status"
-          aria-label={`${trabalhando} trabalhando agora`}
-          title={`${trabalhando} trabalhando agora`}
+          aria-label={t.trabalhandoAgora(trabalhando)}
+          title={t.trabalhandoAgora(trabalhando)}
           data-testid="contador-trabalhando"
         >
           <IconeTrabalhando tamanho={14} className="giro-do-contador" />
           <span aria-hidden="true">{trabalhando}</span>
           <span className="texto-do-contador" aria-hidden="true">
-            trabalhando
+            {t.trabalhando}
           </span>
         </span>
       )}
@@ -280,7 +289,7 @@ export function IlhaDaDireita({
         className={`anel-da-ilha anel-da-ilha-${nivel} no-drag`}
         aria-pressed={configuracoesAbertas && abaAberta === "sistema"}
         aria-label={rotuloDoAnel}
-        title={percentual === null ? "Memória: sem leitura ainda. Abre Configurações, Sistema" : `Memória ${percentual}% em uso. Abre Configurações, Sistema`}
+        title={percentual === null ? t.memoriaTituloSemLeitura : t.memoriaTitulo(percentual)}
         data-testid="anel-de-memoria"
         onClick={() => aoAlternarConfiguracoes("sistema")}
       >
@@ -291,8 +300,8 @@ export function IlhaDaDireita({
         type="button"
         className="botao-da-ilha no-drag"
         aria-pressed={configuracoesAbertas && abaAberta !== "sistema" && abaAberta !== "conta"}
-        aria-label="Configurações"
-        title="Configurações"
+        aria-label={t.configuracoes}
+        title={t.configuracoes}
         onClick={() => aoAlternarConfiguracoes()}
       >
         <IconeEngrenagem tamanho={18} />
@@ -327,6 +336,7 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
   aoAlternarDesenho,
   desenhoAberto,
 }: PropsDaIlhaDeFerramentas) {
+  const t = useTextos(textosDeIlhasDoCanvas);
   const fluxo = useReactFlow();
   // Só os limites mudam o resultado: o zoom contínuo não re-renderiza a ilha.
   const noMaximo = useStore((estado) => estado.transform[2] >= estado.maxZoom);
@@ -335,7 +345,7 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
     <div
       className="ilha ilha-de-ferramentas nodrag nopan nowheel"
       role="group"
-      aria-label="Ferramentas do canvas"
+      aria-label={t.ferramentas}
       data-testid="ilha-de-ferramentas"
     >
       <button
@@ -343,8 +353,8 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
         className="botao-da-ilha-vertical"
         onClick={() => void fluxo.zoomIn({ duration: 200 })}
         disabled={noMaximo}
-        aria-label="Aproximar"
-        title="Aproximar"
+        aria-label={t.aproximar}
+        title={t.aproximar}
       >
         <IconeMais tamanho={15} />
       </button>
@@ -353,8 +363,8 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
         className="botao-da-ilha-vertical"
         onClick={() => void fluxo.zoomOut({ duration: 200 })}
         disabled={noMinimo}
-        aria-label="Afastar"
-        title="Afastar"
+        aria-label={t.afastar}
+        title={t.afastar}
       >
         <IconeMenos tamanho={15} />
       </button>
@@ -362,8 +372,8 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
         type="button"
         className="botao-da-ilha-vertical"
         onClick={aoEnquadrar}
-        aria-label="Ajustar à tela"
-        title="Ajustar à tela: mostra tudo o que está no canvas"
+        aria-label={t.ajustar}
+        title={t.ajustarTitulo}
       >
         <IconeEnquadrar tamanho={14} />
       </button>
@@ -372,8 +382,8 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
         className="botao-da-ilha-vertical"
         onClick={aoOrganizar}
         disabled={!podeOrganizar}
-        aria-label="Organizar janelas"
-        title={DICA_DO_ORGANIZAR}
+        aria-label={t.organizar}
+        title={t.organizarDica}
       >
         <IconeGrade tamanho={14} />
       </button>
@@ -382,8 +392,8 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
         className="botao-da-ilha-vertical botao-de-desenhar"
         onClick={aoAlternarDesenho}
         aria-pressed={desenhoAberto}
-        aria-label="Desenhar"
-        title={DICA_DO_DESENHAR}
+        aria-label={t.desenhar}
+        title={t.desenharDica}
       >
         <IconeDesenhar tamanho={14} />
       </button>
@@ -394,11 +404,6 @@ export const IlhaDeFerramentas = memo(function IlhaDeFerramentas({
 /** Onde a pilha de notificações começa: abaixo da ilha da direita (16 de margem, 42 de altura e 8 de respiro). */
 const TOPO_DAS_NOTIFICACOES_PX = 66;
 
-const AVISO_DA_MEMORIA = {
-  baixa: "Memória baixa: novos pedidos (sobretudo com Opus nos subagentes) podem deixar o computador lento.",
-  critica:
-    "Memória quase esgotada: espere os pedidos em andamento terminarem, feche programas ou use Haiku/Sonnet nos subagentes.",
-} as const;
 
 interface PropsDaNotificacao {
   /** A cor e o papel do aviso: memória baixa, crítica ou cota. */
@@ -412,6 +417,7 @@ interface PropsDaNotificacao {
 }
 
 function Notificacao({ tom, icone, titulo, children, aoVerSistema, aoEntendi, rotuloDoEntendi }: PropsDaNotificacao) {
+  const t = useTextos(textosDeIlhasDoCanvas);
   return (
     <div className={`notificacao notificacao-${tom}`} role={tom === "critica" ? "alert" : "status"}>
       <span className="icone-da-notificacao" aria-hidden="true">
@@ -424,10 +430,10 @@ function Notificacao({ tom, icone, titulo, children, aoVerSistema, aoEntendi, ro
         </p>
         <div className="acoes-da-notificacao">
           <button type="button" className="botao-da-notificacao" onClick={aoVerSistema}>
-            Ver Sistema
+            {t.verSistema}
           </button>
           <button type="button" className="botao-da-notificacao" onClick={aoEntendi} aria-label={rotuloDoEntendi}>
-            Entendi
+            {t.entendi}
           </button>
         </div>
       </div>
@@ -463,6 +469,7 @@ export function NotificacoesDoCanvas({
   pedidosEmAndamento,
   aoMedirTopoLivre,
 }: PropsDasNotificacoes) {
+  const t = useTextos(textosDeIlhasDoCanvas);
   const aoMedirRef = useRef(aoMedirTopoLivre);
   useEffect(() => {
     aoMedirRef.current = aoMedirTopoLivre;
@@ -505,16 +512,16 @@ export function NotificacoesDoCanvas({
     return null;
   }
   return (
-    <div ref={medirAPilha} className="notificacoes-do-canvas nodrag nopan nowheel" role="region" aria-label="Notificações">
+    <div ref={medirAPilha} className="notificacoes-do-canvas nodrag nopan nowheel" role="region" aria-label={t.notificacoes}>
       {avisoDaMemoria !== null && (
         <Notificacao
           tom={avisoDaMemoria}
           icone={<IconeAlerta tamanho={18} />}
           aoVerSistema={aoVerSistema}
           aoEntendi={() => setMemoriaDispensada(avisoDaMemoria)}
-          rotuloDoEntendi="Entendi: memória"
+          rotuloDoEntendi={t.entendiMemoria}
         >
-          {AVISO_DA_MEMORIA[avisoDaMemoria]}
+          {avisoDaMemoria === "baixa" ? t.avisoMemoriaBaixa : t.avisoMemoriaCritica}
         </Notificacao>
       )}
       {avisosDaCota.map((janela) => (
@@ -522,13 +529,13 @@ export function NotificacoesDoCanvas({
           key={janela.nome}
           tom="cota"
           icone={<IconeInfo tamanho={18} />}
-          titulo={`Cota (${janela.nome}) em ${formatarPercentual(janela.utilizacao)}.`}
+          titulo={t.cotaTitulo(janela.nome, formatarPercentual(janela.utilizacao))}
           aoVerSistema={aoVerSistema}
           aoEntendi={() => setCotasDispensadas((atuais) => new Set(atuais).add(janela.nome))}
-          rotuloDoEntendi={`Entendi: cota ${janela.nome}`}
+          rotuloDoEntendi={t.entendiCota(janela.nome)}
         >
-          Passou do limite de aviso ({formatarPercentual(COTA_ALTA)}).
-          {janela.renovaEm ? ` Renova ${formatarMomento(janela.renovaEm)}.` : ""}
+          {t.cotaPassou(formatarPercentual(COTA_ALTA))}
+          {janela.renovaEm ? t.cotaRenova(formatarMomento(janela.renovaEm)) : ""}
         </Notificacao>
       ))}
       {atualizacao && (

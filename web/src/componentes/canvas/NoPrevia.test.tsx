@@ -4,7 +4,7 @@ import { type NodeProps, ReactFlowProvider } from "@xyflow/react";
 import { type AcoesDoCanvas, ProvedorDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
 import type { DadosDaPrevia, NoPrevia as TipoDoNo } from "../../shared/canvas/nos";
 import type { ApiDaPrevia, EventoDaPrevia } from "../../shared/ponteDoDesktop";
-import { ENDERECO_INVALIDO, INTERVALO_DA_VERIFICACAO_MS, NoPrevia, TEMPO_ATE_FECHAR_SEM_SERVIDOR_MS } from "./NoPrevia";
+import { enderecoInvalido, INTERVALO_DA_VERIFICACAO_MS, NoPrevia, TEMPO_ATE_FECHAR_SEM_SERVIDOR_MS } from "./NoPrevia";
 
 function acoesDoCanvas(): AcoesDoCanvas {
   return {
@@ -192,7 +192,7 @@ describe("NoPrevia", () => {
     fireEvent.keyDown(campo, { key: "Enter" });
     expect(acoes.navegarPrevia).toHaveBeenCalledTimes(1);
     expect(campo).toHaveAttribute("aria-invalid", "true");
-    expect(campo).toHaveAttribute("title", ENDERECO_INVALIDO);
+    expect(campo).toHaveAttribute("title", enderecoInvalido());
 
     fireEvent.keyDown(campo, { key: "Escape" });
     expect(campo).toHaveValue("http://localhost:5173");
