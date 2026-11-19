@@ -7,7 +7,7 @@ import {
   TAMANHO_MAXIMO_DAS_INSTRUCOES,
   TAMANHO_MAXIMO_DO_NOME_DO_PERFIL,
 } from "../../shared/api/tipos";
-import { DICA_DAS_VARIAVEIS, tamanhoDasInstrucoes } from "../../shared/instrucoes";
+import { dicaDasVariaveis, tamanhoDasInstrucoes } from "../../shared/instrucoes";
 import { idiomaAtual, localeDoIdioma, textosAtuais, useTextos } from "../../shared/idioma/idioma";
 import { textosDeConfiguracoes } from "../../shared/idioma/textos/configuracoes";
 import { CampoDeInstrucoes } from "../CampoDeInstrucoes";
@@ -177,7 +177,7 @@ export function AbaDePadroesDasConfiguracoes({ aoSalvar }: Props) {
 
       <CampoDeInstrucoes
         rotulo={t.instrucoesGerais}
-        ajuda={t.ajudaDasGerais(DICA_DAS_VARIAVEIS)}
+        ajuda={t.ajudaDasGerais(dicaDasVariaveis())}
         placeholder={t.placeholderGerais}
         valor={instrucoes}
         aoMudar={editarInstrucoes}
@@ -226,7 +226,7 @@ export function AbaDePadroesDasConfiguracoes({ aoSalvar }: Props) {
               </div>
               <CampoDeInstrucoes
                 rotulo={t.textoDoPerfil}
-                ajuda={DICA_DAS_VARIAVEIS}
+                ajuda={dicaDasVariaveis()}
                 placeholder={t.placeholderDoTexto}
                 valor={perfil.texto}
                 aoMudar={(texto) => alterarPerfil(perfil.chave, { texto })}

@@ -1,13 +1,12 @@
 import { useId } from "react";
 
 import type { DadosDaQuantidade } from "../../shared/api/tipos";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeNosDoCanvas } from "../../shared/idioma/textos/nosDoCanvas";
 
 const LIMITE_DE_SUBAGENTES = 10;
 
-const MODOS: readonly { modo: DadosDaQuantidade["modo"]; titulo: string; descricao: string }[] = [
-  { modo: "automatica", titulo: "Automática", descricao: "Ele decide, até o máximo" },
-  { modo: "fixa", titulo: "Fixa", descricao: "Sempre essa quantidade" },
-];
+const MODOS: readonly DadosDaQuantidade["modo"][] = ["automatica", "fixa"];
 
 interface Props {
   valor: DadosDaQuantidade;
@@ -16,6 +15,7 @@ interface Props {
 
 /** Quantos subagentes ao mesmo tempo: ele decide até um máximo, ou sempre o mesmo número. */
 export function QuantidadeDeSubagentes({ valor, aoMudar }: Props) {
+  const t = useTextos(textosDeNosDoCanvas).quantidade;
   const idDoGrupo = useId();
   const idDoNumero = useId();
   const { modo, limite } = valor;
@@ -29,29 +29,31 @@ export function QuantidadeDeSubagentes({ valor, aoMudar }: Props) {
 
   return (
     <div className="quantidade-de-subagentes">
-      <div className="quantidade-de-subagentes-modos" role="radiogroup" aria-label="Quantidade de subagentes">
+      <div className="quantidade-de-subagentes-modos" role="radiogroup" aria-label={t.grupo}>
         {MODOS.map((opcao) => (
-          <label key={opcao.modo} className="quantidade-de-subagentes-opcao">
+          <label key={opcao} className="quantidade-de-subagentes-opcao">
             <input
               type="radio"
               name={`${idDoGrupo}-modo`}
-              value={opcao.modo}
-              checked={modo === opcao.modo}
-              onChange={() => aoMudar({ modo: opcao.modo, limite })}
+              value={opcao}
+              checked={modo === opcao}
+              onChange={() => aoMudar({ modo: opcao, limite })}
             />
-            <span className="quantidade-de-subagentes-titulo">{opcao.titulo}</span>
-            <span className="quantidade-de-subagentes-descricao">{opcao.descricao}</span>
+            <span className="quantidade-de-subagentes-titulo">{opcao === "automatica" ? t.automatica : t.fixa}</span>
+            <span className="quantidade-de-subagentes-descricao">
+              {opcao === "automatica" ? t.automaticaDescricao : t.fixaDescricao}
+            </span>
           </label>
         ))}
       </div>
       <div className="quantidade-de-subagentes-passo">
         <label htmlFor={idDoNumero} className="quantidade-de-subagentes-rotulo">
-          {modo === "automatica" ? "Máximo" : "Quantidade"}
+          {modo === "automatica" ? t.maximo : t.quantidade}
         </label>
         <button
           type="button"
           className="btn btn-sm btn-outline"
-          aria-label="Diminuir"
+          aria-label={t.diminuir}
           disabled={limite <= 1}
           onClick={() => mudarLimite(limite - 1)}
         >
@@ -74,7 +76,7 @@ export function QuantidadeDeSubagentes({ valor, aoMudar }: Props) {
         <button
           type="button"
           className="btn btn-sm btn-outline"
-          aria-label="Aumentar"
+          aria-label={t.aumentar}
           disabled={limite >= LIMITE_DE_SUBAGENTES}
           onClick={() => mudarLimite(limite + 1)}
         >

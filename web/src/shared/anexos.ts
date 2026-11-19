@@ -1,5 +1,9 @@
 import type { AnexoParaEnvio } from "./api/cliente";
 import type { CategoriaDoAnexo, TipoDeImagem } from "./api/tipos";
+import { textosAtuais } from "./idioma/idioma";
+import { textosDeApoioDosNos } from "./idioma/textos/nos";
+
+const textos = () => textosAtuais(textosDeApoioDosNos).anexos;
 
 /**
  * Mesmos limites do servidor: imagem até 5 MB (limite do Claude) e no máximo 5 por mensagem,
@@ -25,14 +29,29 @@ export interface FormatoDeDocumento {
 export const FORMATOS_DE_DOCUMENTO: Readonly<Record<string, FormatoDeDocumento>> = {
   pdf: { rotulo: "PDF", legado: false },
   docx: { rotulo: "Word", legado: false },
-  doc: { rotulo: "Word (formato antigo)", legado: true },
+  doc: {
+    get rotulo() {
+      return textos().formatoAntigoDoc;
+    },
+    legado: true,
+  },
   xlsx: { rotulo: "Excel", legado: false },
-  xls: { rotulo: "Excel (formato antigo)", legado: true },
+  xls: {
+    get rotulo() {
+      return textos().formatoAntigoXls;
+    },
+    legado: true,
+  },
   csv: { rotulo: "CSV", legado: false },
   pptx: { rotulo: "PowerPoint", legado: false },
   html: { rotulo: "HTML", legado: false },
   htm: { rotulo: "HTML", legado: false },
-  txt: { rotulo: "Texto", legado: false },
+  txt: {
+    get rotulo() {
+      return textos().texto;
+    },
+    legado: false,
+  },
   md: { rotulo: "Markdown", legado: false },
   json: { rotulo: "JSON", legado: false },
   xml: { rotulo: "XML", legado: false },
@@ -48,11 +67,9 @@ export const TIPOS_ACEITOS_NO_SELETOR: string = [
 ].join(",");
 
 /** Por que um .doc/.xls é aceito mas pouco útil: aparece no selo "formato antigo" do anexo. */
-export const AVISO_DO_FORMATO_ANTIGO =
-  "Formato antigo: o Claude não lê .doc e .xls direto. Salve como .docx ou .xlsx e anexe de novo para ele ler o conteúdo.";
-
-const FORMATOS_ACEITOS =
-  "Dá para anexar imagens (PNG, JPEG, GIF ou WebP) e documentos (PDF, Word, Excel, CSV, PowerPoint, HTML, TXT, MD, JSON, XML, YAML ou LOG).";
+export function avisoDoFormatoAntigo(): string {
+  return textos().avisoDoFormatoAntigo;
+}
 
 /** Extensões de imagem que o nome pode trazer quando o navegador manda o tipo vazio (o servidor faz o mesmo). */
 const IMAGEM_PELA_EXTENSAO: ReadonlySet<string> = new Set(["png", "jpg", "jpeg", "gif", "webp"]);
@@ -149,26 +166,26 @@ export function problemaDoAnexo(
 ): string | null {
   const categoria = categoriaDoArquivo(arquivo);
   if (categoria === null) {
-    return `"${arquivo.name || "O arquivo"}" tem um formato que não dá para anexar. ${FORMATOS_ACEITOS}`;
+    return textos().formatoNaoAnexavel(arquivo.name || textos().arquivo, textos().formatosAceitos);
   }
   if (arquivo.size <= 0) {
-    return `"${arquivo.name}" está vazio.`;
+    return textos().vazio(arquivo.name);
   }
   if (categoria === "imagem" && arquivo.size > TAMANHO_MAXIMO_DA_IMAGEM) {
-    return `"${arquivo.name}" passa de ${megabytes(TAMANHO_MAXIMO_DA_IMAGEM)} MB, o limite do Claude por imagem.`;
+    return textos().imagemGrande(arquivo.name, megabytes(TAMANHO_MAXIMO_DA_IMAGEM));
   }
   if (categoria === "documento" && arquivo.size > TAMANHO_MAXIMO_DO_DOCUMENTO) {
-    return `"${arquivo.name}" passa de ${megabytes(TAMANHO_MAXIMO_DO_DOCUMENTO)} MB, o limite por documento.`;
+    return textos().documentoGrande(arquivo.name, megabytes(TAMANHO_MAXIMO_DO_DOCUMENTO));
   }
   if (jaAnexados.length >= MAXIMO_DE_ANEXOS) {
-    return `Dá para anexar até ${MAXIMO_DE_ANEXOS} arquivos por mensagem.`;
+    return textos().maximoDeAnexos(MAXIMO_DE_ANEXOS);
   }
   if (categoria === "imagem" && jaAnexados.filter((anexo) => anexo.categoria === "imagem").length >= MAXIMO_DE_IMAGENS) {
-    return `Dá para anexar até ${MAXIMO_DE_IMAGENS} imagens por mensagem.`;
+    return textos().maximoDeImagens(MAXIMO_DE_IMAGENS);
   }
   const somaDosAnexados = jaAnexados.reduce((soma, anexo) => soma + anexo.tamanhoEmBytes, 0);
   if (somaDosAnexados + arquivo.size > TAMANHO_MAXIMO_DOS_ANEXOS) {
-    return `Os anexos de uma mensagem somam no máximo ${megabytes(TAMANHO_MAXIMO_DOS_ANEXOS)} MB.`;
+    return textos().somaMaxima(megabytes(TAMANHO_MAXIMO_DOS_ANEXOS));
   }
   return null;
 }
@@ -176,20 +193,20 @@ export function problemaDoAnexo(
 export function lerAnexo(arquivo: File): Promise<AnexoPendente> {
   const categoria = categoriaDoArquivo(arquivo);
   if (categoria === null) {
-    return Promise.reject(new Error(`"${arquivo.name}" não é um formato aceito.`));
+    return Promise.reject(new Error(textos().formatoNaoAceito(arquivo.name)));
   }
   try {
     if (categoria === "imagem") {
       return Promise.resolve({
         id: crypto.randomUUID(),
         // Imagens coladas chegam como "image.png"; o nome serve só de rótulo.
-        nome: arquivo.name || "imagem colada",
+        nome: arquivo.name || textos().imagemColada,
         categoria,
         tipoDeMidia: arquivo.type,
         tamanhoEmBytes: arquivo.size,
         arquivo,
         previa: URL.createObjectURL(arquivo),
-        rotulo: "Imagem",
+        rotulo: textos().imagem,
         legado: false,
       });
     }
@@ -202,11 +219,11 @@ export function lerAnexo(arquivo: File): Promise<AnexoPendente> {
       tamanhoEmBytes: arquivo.size,
       arquivo,
       previa: null,
-      rotulo: formato?.rotulo ?? "Documento",
+      rotulo: formato?.rotulo ?? textos().documento,
       legado: formato?.legado ?? false,
     });
   } catch {
-    return Promise.reject(new Error(`Não foi possível ler "${arquivo.name}".`));
+    return Promise.reject(new Error(textos().naoFoiPossivelLer(arquivo.name)));
   }
 }
 
@@ -239,7 +256,7 @@ export function imagemDaCaptura(captura: { nome: string; tipoDeMidia: TipoDeImag
 export function base64DoArquivo(arquivo: Blob, nome: string): Promise<string> {
   return new Promise((resolver, rejeitar) => {
     const leitor = new FileReader();
-    leitor.onerror = () => rejeitar(new Error(`Não foi possível ler "${nome}".`));
+    leitor.onerror = () => rejeitar(new Error(textos().naoFoiPossivelLer(nome)));
     leitor.onload = () => {
       const endereco = String(leitor.result);
       resolver(endereco.slice(endereco.indexOf(",") + 1));

@@ -8,6 +8,8 @@ import { type Ancora, type NoBixinho as TipoDoNo, subagentesVisiveis } from "../
 import type { SubagenteNaTela } from "../../shared/estado/aplicarEvento";
 import { formatarDecorrido, formatarTokens, idCurto } from "../../shared/formatacao";
 import { useRelogio } from "../../shared/hooks/useRelogio";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeNosDoCanvas } from "../../shared/idioma/textos/nosDoCanvas";
 import { Etiqueta } from "../Etiqueta";
 import { IconeFechar } from "../Icones";
 import { TextoFormatado } from "../TextoFormatado";
@@ -29,6 +31,7 @@ function Ficha({
   papelNoTitulo: string | null;
   agora: Date;
 }) {
+  const t = useTextos(textosDeNosDoCanvas).bixinho;
   const executando = subagente.situacao === "executando";
   const conteudo = subagente.resultado || subagente.textos.join("\n\n") || subagente.resumo;
 
@@ -38,24 +41,24 @@ function Ficha({
         <span className="font-titulo min-w-0 truncate text-[13px] font-semibold">
           {papelNoTitulo ?? nomeDoBicho}{" "}
           <span className="mono text-muted">
-            {papelNoTitulo === null ? (subagente.papel ?? "executor") : nomeDoBicho}#{idCurto(subagente.id)}
+            {papelNoTitulo === null ? (subagente.papel ?? t.executor) : nomeDoBicho}#{idCurto(subagente.id)}
           </span>
         </span>
         <Etiqueta situacao={subagente.situacao} />
       </div>
-      <p className="font-titulo text-[12.5px] font-medium">{subagente.descricao || "Subagente"}</p>
+      <p className="font-titulo text-[12.5px] font-medium">{subagente.descricao || t.subagente}</p>
       <p className="mono text-muted">
         {formatarDecorrido(subagente.iniciadoEm, subagente.encerradoEm, agora)} · {subagente.ferramentasUsadas}{" "}
-        {subagente.ferramentasUsadas === 1 ? "ferramenta" : "ferramentas"} · {formatarTokens(subagente.tokens)} tokens
+        {subagente.ferramentasUsadas === 1 ? t.ferramenta : t.ferramentas} · {formatarTokens(subagente.tokens)} {t.tokens}
       </p>
       <div className="flex flex-col gap-1">
-        <span className="rotulo-tecnico">tarefa recebida do orquestrador</span>
+        <span className="rotulo-tecnico">{t.tarefaRecebida}</span>
         <p className="custom-scrollbar mono texto-longo max-h-32 overflow-y-auto text-caption">{subagente.tarefa || "—"}</p>
       </div>
       <div className="flex flex-col gap-1">
-        <span className="rotulo-tecnico">{executando ? "até agora" : "relatório"}</span>
+        <span className="rotulo-tecnico">{executando ? t.ateAgora : t.relatorio}</span>
         <div className="custom-scrollbar max-h-72 overflow-y-auto pr-1">
-          <TextoFormatado texto={conteudo || "Ainda sem resultado."} className="markdown-compacto" />
+          <TextoFormatado texto={conteudo || t.semResultado} className="markdown-compacto" />
         </div>
       </div>
     </div>
@@ -98,18 +101,19 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
   selecionado,
   saindo = false,
 }: PropsDoConteudo) {
+  const t = useTextos(textosDeNosDoCanvas).bixinho;
   const executando = subagente.situacao === "executando";
   const agora = useRelogio(executando);
   const aparencia = aparenciaDoBixinho(subagente.id);
   // Só enquanto trabalha: parado, a última ferramenta não diz nada.
   const icone = executando ? iconeDaFerramenta(subagente.ultimaFerramenta) : null;
   const fala = executando
-    ? subagente.atividade || "pensando…"
+    ? subagente.atividade || t.pensando
     : subagente.situacao === "concluido"
-      ? "pronto!"
+      ? t.pronto
       : subagente.situacao === "falhou"
-        ? "deu ruim…"
-        : "zzz";
+        ? t.falhou
+        : t.parado;
   // Um subagente pronto (ou outro tipo com papel) dá o nome ao bixinho, no
   // lugar do nome do bicho; o desenho continua o mesmo. O workflow segue com o
   // bicho e o papel ao lado; o executor comum, que é a maioria, só no tooltip e
@@ -117,7 +121,7 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
   const papelQueDaNome = papelQueNomeia(subagente.papel);
   const papelNoRotulo =
     papelQueDaNome === null && subagente.papel !== null && subagente.papel !== "executor" ? subagente.papel : null;
-  const dica = "Clique para ver a tarefa e o relatório";
+  const dica = t.dica;
   const nomeParaFechar = papelQueDaNome ?? aparencia.nome;
 
   return (
@@ -146,8 +150,8 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
           <button
             type="button"
             className="fechar-do-bixinho nodrag"
-            aria-label={`Fechar subagente ${nomeParaFechar}`}
-            title="Fechar subagente (o histórico continua no terminal)"
+            aria-label={t.fechar(nomeParaFechar)}
+            title={t.fecharDica}
             onClick={(evento) => {
               evento.stopPropagation();
               aoFechar(orquestradorId, subagente.id);
@@ -167,7 +171,7 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
           <span className="mono ml-1 shrink-0 font-normal text-muted">#{idCurto(subagente.id)}</span>
         </span>
         <span className="mono text-muted">
-          {formatarDecorrido(subagente.iniciadoEm, subagente.encerradoEm, agora)} · {formatarTokens(subagente.tokens)} tok
+          {formatarDecorrido(subagente.iniciadoEm, subagente.encerradoEm, agora)} · {formatarTokens(subagente.tokens)} {t.tok}
         </span>
       </div>
     </>

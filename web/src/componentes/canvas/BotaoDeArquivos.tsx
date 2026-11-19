@@ -1,6 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 
 import { usePreferenciasDaTela } from "../../shared/hooks/usePreferenciasDaTela";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineisDosNos } from "../../shared/idioma/textos/paineisDosNos";
 import { VisualizadorDeArquivos } from "./VisualizadorDeArquivos";
 
 /** Sinais de código (`< >`) sobre uma folha: o ícone dos arquivos. */
@@ -30,6 +32,7 @@ function IconeDeArquivos({ className = "" }: { className?: string }) {
  * "visualizador de código" ligada (painel Configurações, aberto pelo ⚙).
  */
 export function BotaoDeArquivos({ orquestradorId, nomeDoOrquestrador }: { orquestradorId: string; nomeDoOrquestrador?: string }) {
+  const t = useTextos(textosDePaineisDosNos).arquivos;
   const { preferencias } = usePreferenciasDaTela();
   const [aberto, setAberto] = useState(false);
   const botao = useRef<HTMLButtonElement>(null);
@@ -49,10 +52,10 @@ export function BotaoDeArquivos({ orquestradorId, nomeDoOrquestrador }: { orques
         ref={botao}
         type="button"
         className="botao-icone nodrag"
-        aria-label="Arquivos"
+        aria-label={t.botao}
         aria-haspopup="dialog"
         aria-expanded={aberto}
-        title="Arquivos: navegar e ler o código da pasta deste orquestrador (só leitura)"
+        title={t.botaoDica}
         onClick={() => setAberto(true)}
       >
         <IconeDeArquivos />

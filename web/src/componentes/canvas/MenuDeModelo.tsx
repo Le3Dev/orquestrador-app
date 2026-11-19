@@ -2,6 +2,8 @@ import { type KeyboardEvent, useEffect, useId, useLayoutEffect, useRef, useState
 import { createPortal } from "react-dom";
 
 import type { EsforcoDeRaciocinio, ModeloClaude } from "../../shared/api/tipos";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeNosDoCanvas } from "../../shared/idioma/textos/nosDoCanvas";
 import { ESFORCOS_DO_CHAT, MODELOS_DO_CHAT, nomeComVersao, rotuloDoEsforco } from "../../shared/modelos";
 
 interface Props {
@@ -34,6 +36,7 @@ function ehFolha(): boolean {
  * num portal no body (o canvas tem transformações e corta o que vaza).
  */
 export function MenuDeModelo({ id, rotulo, modelo, esforco, comUltracode = false, aoEscolherModelo, aoEscolherEsforco }: Props) {
+  const t = useTextos(textosDeNosDoCanvas).modelo;
   const [aberto, setAberto] = useState(false);
   const [vista, setVista] = useState<Vista>("raiz");
   const [folha, setFolha] = useState(false);
@@ -150,12 +153,12 @@ export function MenuDeModelo({ id, rotulo, modelo, esforco, comUltracode = false
         aria-haspopup="menu"
         aria-expanded={aberto}
         aria-controls={aberto ? idDoMenu : undefined}
-        aria-label={`${rotulo}: ${nome}, esforço ${nomeDoEsforco.toLowerCase()}`}
+        aria-label={t.botao(rotulo, nome, nomeDoEsforco.toLowerCase())}
         onClick={() => (aberto ? fechar() : abrir())}
       >
         <span className="menu-de-modelo-nome">{nome}</span>
         <span className={`menu-de-modelo-detalhe ${esforco !== "padrao" ? "menu-de-modelo-detalhe-personalizado" : ""}`}>
-          · esforço {nomeDoEsforco.toLowerCase()}
+          {t.esforcoNoBotao(nomeDoEsforco.toLowerCase())}
         </span>
         <svg
           className="menu-de-modelo-seta"
@@ -179,7 +182,7 @@ export function MenuDeModelo({ id, rotulo, modelo, esforco, comUltracode = false
             ref={lista}
             id={idDoMenu}
             role="menu"
-            aria-label={vista === "raiz" ? rotulo : "Esforço"}
+            aria-label={vista === "raiz" ? rotulo : t.esforco}
             className={`menu-de-modelo-lista nodrag nowheel ${folha ? "menu-de-modelo-folha" : ""}`}
             style={estiloFinal}
             onKeyDown={aoTeclarNaLista}
@@ -220,7 +223,7 @@ export function MenuDeModelo({ id, rotulo, modelo, esforco, comUltracode = false
                   className="menu-de-modelo-item"
                   onClick={() => setVista("esforco")}
                 >
-                  <span className="menu-de-modelo-titulo">Esforço</span>
+                  <span className="menu-de-modelo-titulo">{t.esforco}</span>
                   <span className="menu-de-modelo-valor">
                     {nomeDoEsforco} <span aria-hidden="true">›</span>
                   </span>
@@ -229,10 +232,10 @@ export function MenuDeModelo({ id, rotulo, modelo, esforco, comUltracode = false
             ) : (
               <>
                 <div className="menu-de-modelo-cabecalho">
-                  <button type="button" className="menu-de-modelo-voltar" aria-label="Voltar" onClick={() => setVista("raiz")}>
+                  <button type="button" className="menu-de-modelo-voltar" aria-label={t.voltar} onClick={() => setVista("raiz")}>
                     <span aria-hidden="true">‹</span>
                   </button>
-                  <span className="menu-de-modelo-titulo">Esforço</span>
+                  <span className="menu-de-modelo-titulo">{t.esforco}</span>
                 </div>
                 {esforcos.map((item) => {
                   const escolhido = item.esforco === esforco;

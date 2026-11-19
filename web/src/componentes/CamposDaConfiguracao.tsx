@@ -11,11 +11,7 @@ import {
   TAMANHO_MAXIMO_DAS_INSTRUCOES,
 } from "../shared/api/tipos";
 import { type EscalaDaLetra, OPCOES_DA_ESCALA_DA_LETRA } from "../shared/canvas/layout";
-import {
-  AJUDA_DOS_ARTEFATOS_ONLINE,
-  ROTULO_DOS_ARTEFATOS_ONLINE,
-  ROTULOS_DAS_PERMISSOES,
-} from "../shared/formatacao";
+import { ROTULOS_DAS_PERMISSOES } from "../shared/formatacao";
 import {
   ajudaDaPredefinicao,
   useEsforcosHerdados,
@@ -23,7 +19,10 @@ import {
   usePredefinicoes,
   usePreferencias,
 } from "../shared/hooks/useDadosDaConfiguracao";
-import { DICA_DAS_VARIAVEIS, tamanhoDasInstrucoes } from "../shared/instrucoes";
+import { localeDoIdioma, textosAtuais, useIdioma, useTextos } from "../shared/idioma/idioma";
+import { textosDeComponentesComuns } from "../shared/idioma/textos/componentesComuns";
+import { textosDeConfiguracoes } from "../shared/idioma/textos/configuracoes";
+import { dicaDasVariaveis, tamanhoDasInstrucoes } from "../shared/instrucoes";
 import { comPredefinicao } from "../shared/modelos";
 import { IconeDaPermissao, Rotulo, SeletorDePerfil } from "./canvas/LinhasDaConfiguracao";
 import { LinhaDaReserva, LinhaDoNavegador, LinhaDosPapeis } from "./canvas/LinhasDosMotores";
@@ -34,11 +33,12 @@ const PERMISSOES: readonly NivelDePermissao[] = ["leitura", "edicao", "edicao_e_
 
 type ModoDosProntos = "todos" | "nenhum" | "escolher";
 
-const MODOS_DOS_PRONTOS: readonly { valor: ModoDosProntos; titulo: string }[] = [
-  { valor: "todos", titulo: "Todos" },
-  { valor: "nenhum", titulo: "Nenhum" },
-  { valor: "escolher", titulo: "Escolher" },
-];
+const MODOS_DOS_PRONTOS: readonly ModoDosProntos[] = ["todos", "nenhum", "escolher"];
+
+/** O título da escala da letra no idioma atual (as opções vêm do layout, só com o valor). */
+function tituloDaEscala(valor: EscalaDaLetra, titulos: { normal: string; grande: string; maior: string }): string {
+  return valor === 1 ? titulos.normal : valor === 1.15 ? titulos.grande : titulos.maior;
+}
 
 interface Props {
   valor: DadosDaConfiguracao;
@@ -85,6 +85,9 @@ export function CamposDaConfiguracao({
   nome,
   tamanhoDaLetra,
 }: Props) {
+  const t = useTextos(textosDeComponentesComuns).configuracao;
+  const avisos = useTextos(textosDeConfiguracoes).avisos;
+  const locale = localeDoIdioma(useIdioma());
   const idDoCampo = useId();
   const idDaPermissao = useId();
   const idDaLetra = useId();
@@ -150,7 +153,7 @@ export function CamposDaConfiguracao({
     try {
       aoMudar(await aplicarPredefinicao(predefinicao.nome));
     } catch (falha) {
-      setErroDaPredefinicao(`Não foi possível aplicar o ${predefinicao.rotulo.toLowerCase()}: ${mensagemDeErro(falha)}`);
+      setErroDaPredefinicao(t.naoAplicou(predefinicao.rotulo.toLowerCase(), mensagemDeErro(falha)));
     } finally {
       setAplicando(false);
     }
@@ -161,9 +164,9 @@ export function CamposDaConfiguracao({
       <div className="linha-da-criacao">
         <Rotulo
           id={idDaPermissao}
-          titulo="Permissão"
-          dica="O que ele pode fazer na pasta."
-          explicacao={`Vale para o orquestrador e para os subagentes. Libere ${ROTULOS_DAS_PERMISSOES.edicao_e_comandos.nome} só quando precisar instalar, testar ou compilar.`}
+          titulo={t.permissao}
+          dica={t.permissaoDica}
+          explicacao={t.permissaoExplicacao(ROTULOS_DAS_PERMISSOES.edicao_e_comandos.nome)}
           alinharAoTopo
         />
         <div className="flex min-w-0 flex-col gap-1.5">
@@ -191,7 +194,7 @@ export function CamposDaConfiguracao({
           </div>
           <span className={`text-[12px] ${comandos ? "text-warning" : "text-secondary"}`}>
             {comandos
-              ? "Edita, instala, testa e compila. Use só em pastas que você confia."
+              ? t.avisoDeComandos
               : ROTULOS_DAS_PERMISSOES[valor.nivelDePermissao].descricao}
           </span>
         </div>
@@ -203,9 +206,9 @@ export function CamposDaConfiguracao({
 
       <div className="linha-da-criacao">
         <Rotulo
-          titulo="Quantidade"
-          dica="Quantos ao mesmo tempo."
-          explicacao="Automática: o orquestrador decide quantos subagentes usar, até o máximo escolhido (no padrão, até 3 ao mesmo tempo). Fixa: ele usa sempre essa quantidade. Cada subagente consome a cota da sua assinatura do Claude."
+          titulo={t.quantidade}
+          dica={t.quantidadeDica}
+          explicacao={t.quantidadeExplicacao}
           alinharAoTopo
         />
         <QuantidadeDeSubagentes
@@ -218,32 +221,32 @@ export function CamposDaConfiguracao({
       <div className="linha-da-criacao">
         <Rotulo
           id={idDosProntos}
-          titulo="Subagentes prontos"
-          dica="Quais ele pode usar."
-          explicacao="Os subagentes prontos são criados no botão Subagentes da barra. Todos inclui os que você criar depois; Nenhum deixa só o subagente padrão; Escolher libera só os marcados. Vale já no próximo pedido."
+          titulo={t.subagentesProntos}
+          dica={t.subagentesProntosDica}
+          explicacao={t.subagentesProntosExplicacao}
           alinharAoTopo
         />
         <div className="flex min-w-0 flex-col gap-1.5">
           <div className="permissoes-da-criacao w-fit" role="radiogroup" aria-labelledby={idDosProntos}>
             {MODOS_DOS_PRONTOS.map((opcao) => (
-              <label key={opcao.valor} className="opcao-da-permissao">
+              <label key={opcao} className="opcao-da-permissao">
                 <input
                   type="radio"
                   name={`${idDosProntos}-modo`}
-                  value={opcao.valor}
-                  checked={modoDosProntos === opcao.valor}
-                  onChange={() => mudarModoDosProntos(opcao.valor)}
+                  value={opcao}
+                  checked={modoDosProntos === opcao}
+                  onChange={() => mudarModoDosProntos(opcao)}
                 />
-                {opcao.titulo}
+                {t.prontos[opcao]}
               </label>
             ))}
           </div>
           {biblioteca !== null && biblioteca.length === 0 ? (
-            <span className="text-[12px] text-secondary">Nenhum subagente pronto criado ainda.</span>
+            <span className="text-[12px] text-secondary">{t.nenhumPronto}</span>
           ) : (
             Array.isArray(prontos) &&
             biblioteca !== null && (
-              <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1" role="group" aria-label="Subagentes prontos escolhidos">
+              <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1" role="group" aria-label={t.prontosEscolhidos}>
                 {biblioteca.map((subagente) => (
                   <label key={subagente.nome} className="flex min-w-0 items-center gap-1.5 text-[12.5px]" title={subagente.descricao}>
                     <input
@@ -262,9 +265,9 @@ export function CamposDaConfiguracao({
 
       <div className="linha-da-criacao">
         <Rotulo
-          titulo="Opções"
-          dica="Commit e push por feature; publicar artefatos online."
-          explicacao={`Commit e push por feature: ligado, cada feature ou correção pronta (testada, com lint e build ok) vira um commit próprio com push da branch em seguida, numa branch feature/, fix/, hotfix/ ou refactor/. PR e merge só quando você pedir. Precisa da permissão de rodar comandos. ${ROTULO_DOS_ARTEFATOS_ONLINE}: ${AJUDA_DOS_ARTEFATOS_ONLINE} O Modo econômico troca modelos e esforço por outros que gastam menos cota e já vale, sem o Salvar; os campos continuam editáveis. Ele vale só para o Claude Code: com outro motor, os dois papéis voltam ao Claude Code.`}
+          titulo={t.opcoes}
+          dica={t.opcoesDica}
+          explicacao={t.opcoesExplicacao(avisos.artefatosOnlineRotulo, avisos.artefatosOnlineAjuda)}
           alinharAoTopo
         />
         <div className="flex min-w-0 flex-col gap-1">
@@ -277,18 +280,18 @@ export function CamposDaConfiguracao({
               onClick={() => mudar("permitirCommitEPush", !valor.permitirCommitEPush)}
             >
               <span className={`interruptor-trilho ${commitSemComandos ? "interruptor-sem-efeito" : ""}`} aria-hidden="true" />
-              Commit e push por feature
+              {t.commitEPush}
             </button>
             <button
               type="button"
               role="switch"
               className="interruptor"
-              title={AJUDA_DOS_ARTEFATOS_ONLINE}
+              title={avisos.artefatosOnlineAjuda}
               aria-checked={valor.permitirArtefatosOnline}
               onClick={() => mudar("permitirArtefatosOnline", !valor.permitirArtefatosOnline)}
             >
               <span className="interruptor-trilho" aria-hidden="true" />
-              {ROTULO_DOS_ARTEFATOS_ONLINE}
+              {avisos.artefatosOnlineRotulo}
             </button>
             {economico !== undefined && (
               <button
@@ -299,13 +302,13 @@ export function CamposDaConfiguracao({
                 aria-busy={aplicando}
                 onClick={() => void usarPredefinicao(economico)}
               >
-                {aplicando ? "Aplicando…" : "Modo econômico"}
+                {aplicando ? t.aplicando : t.modoEconomico}
               </button>
             )}
           </div>
           {/* Os avisos ficam embaixo: o Modo econômico não muda de lugar quando eles aparecem. */}
           {commitSemComandos && (
-            <span className="text-[11.5px] text-warning">Só vale com {ROTULOS_DAS_PERMISSOES.edicao_e_comandos.nome}.</span>
+            <span className="text-[11.5px] text-warning">{t.soValeCom(ROTULOS_DAS_PERMISSOES.edicao_e_comandos.nome)}</span>
           )}
           {erroDaPredefinicao !== null && (
             <span role="alert" className="hint-error">
@@ -321,9 +324,9 @@ export function CamposDaConfiguracao({
         <div className="linha-da-criacao">
           <Rotulo
             id={idDaLetra}
-            titulo="Tamanho da letra"
-            dica="Só deste orquestrador, no canvas."
-            explicacao="Aumenta a letra do cartão inteiro, na configuração e na conversa, e o cartão cresce junto. Vale na hora, sem o Salvar, e fica guardado neste navegador."
+            titulo={t.tamanhoDaLetra}
+            dica={t.tamanhoDaLetraDica}
+            explicacao={t.tamanhoDaLetraExplicacao}
           />
           <div className="permissoes-da-criacao w-fit" role="radiogroup" aria-labelledby={idDaLetra}>
             {OPCOES_DA_ESCALA_DA_LETRA.map((opcao) => (
@@ -335,7 +338,7 @@ export function CamposDaConfiguracao({
                   checked={tamanhoDaLetra.valor === opcao.valor}
                   onChange={() => tamanhoDaLetra.aoMudar(opcao.valor)}
                 />
-                {opcao.titulo}
+                {tituloDaEscala(opcao.valor, t.escalaDaLetra)}
               </label>
             ))}
           </div>
@@ -345,9 +348,9 @@ export function CamposDaConfiguracao({
       <div className="linha-da-criacao linha-instrucoes">
         <Rotulo
           htmlFor={`${idDoCampo}-instrucoes`}
-          titulo="Instruções"
-          dica="Regras só deste orquestrador."
-          explicacao="Entram no prompt dele, por exemplo o jeito de responder ou o que rodar antes de concluir, e valem já no próximo pedido, inclusive nesta conversa. Vazio, valem as Instruções gerais (botão na barra). Aplicar perfil copia um texto pronto, criado no mesmo botão. Não ampliam a permissão acima."
+          titulo={t.instrucoes}
+          dica={t.instrucoesDica}
+          explicacao={t.instrucoesExplicacao}
           alinharAoTopo
         />
         <div className="flex min-w-0 flex-col gap-1.5">
@@ -360,24 +363,23 @@ export function CamposDaConfiguracao({
             id={`${idDoCampo}-instrucoes`}
             className="textarea instrucoes-da-criacao custom-scrollbar"
             value={valor.instrucoesPersonalizadas}
-            placeholder="Opcional. Ex.: Responda em tópicos curtos. Rode os testes antes de concluir."
+            placeholder={t.instrucoesPlaceholder}
             aria-invalid={passouDoLimite}
             spellCheck
             onChange={(evento) => mudar("instrucoesPersonalizadas", evento.target.value)}
           />
-          <span className="hint">{DICA_DAS_VARIAVEIS}</span>
+          <span className="hint">{dicaDasVariaveis()}</span>
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <PreviaDoPromptFinal configuracao={valor} pastaDeTrabalho={pastaDeTrabalho} nome={nome} comoLink />
             </div>
             <span className={`mono shrink-0 text-[11px] ${passouDoLimite ? "text-error" : "text-muted"}`} aria-live="polite">
-              {tamanho.toLocaleString("pt-BR")} / {TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString("pt-BR")}
+              {tamanho.toLocaleString(locale)} / {TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString(locale)}
             </span>
           </div>
           {passouDoLimite && (
             <span className="text-[11px] text-error" role="alert">
-              Passou do limite de {TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString("pt-BR")} caracteres: encurte o texto
-              para conseguir salvar.
+              {textosAtuais(textosDeComponentesComuns).instrucoes.passouDoLimite(TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString(locale))}
             </span>
           )}
         </div>

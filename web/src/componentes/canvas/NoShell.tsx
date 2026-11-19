@@ -19,6 +19,8 @@ import {
   textoParaOOrquestrador,
   useAcoesDosShells,
 } from "../../shared/canvas/shells";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeShell } from "../../shared/idioma/textos/promptEShell";
 import { IconeFechar, IconeOrquestrador, IconePasta, IconeShell } from "../Icones";
 
 /**
@@ -135,6 +137,7 @@ interface PropsDaJanela {
 }
 
 const JanelaDoShell = memo(function JanelaDoShell({ shellId, terminalId, pasta, orquestradorId }: PropsDaJanela) {
+  const t = useTextos(textosDeShell);
   const acoesDoCanvas = useAcoesDoCanvas();
   const acoes = useAcoesDosShells();
   const quadro = useRef<HTMLDivElement>(null);
@@ -325,21 +328,21 @@ const JanelaDoShell = memo(function JanelaDoShell({ shellId, terminalId, pasta, 
     <div className="janela-shell">
       <div className={`barra-do-shell ${ALCA_DO_SHELL}`}>
         <IconeShell className="shrink-0 text-success" />
-        <strong className="font-titulo text-[12.5px] font-semibold">Terminal</strong>
+        <strong className="font-titulo text-[12.5px] font-semibold">{t.terminal}</strong>
         <span className="flex min-w-0 items-center gap-1 mono text-muted" title={pasta}>
           <IconePasta className="shrink-0" />
           <span className="truncate">{nomeCurtoDaPasta(pasta)}</span>
         </span>
         <span className="flex-1" />
-        {situacao.tipo === "conectando" && <span className="mono shrink-0 text-muted">conectando…</span>}
-        {situacao.tipo === "reconectando" && <span className="mono shrink-0 text-error">reconectando…</span>}
-        {encerrado && <span className="chip shrink-0">encerrado</span>}
+        {situacao.tipo === "conectando" && <span className="mono shrink-0 text-muted">{t.conectando}</span>}
+        {situacao.tipo === "reconectando" && <span className="mono shrink-0 text-error">{t.reconectando}</span>}
+        {encerrado && <span className="chip shrink-0">{t.encerrado}</span>}
         {orquestradorId !== null && (
           <button
             type="button"
             className="botao-icone nodrag"
-            title={`Enviar ao orquestrador: a seleção (ou as últimas ${LINHAS_PARA_O_ORQUESTRADOR} linhas) vai para o prompt dele, sem enviar`}
-            aria-label="Enviar ao orquestrador"
+            title={t.enviarDica(LINHAS_PARA_O_ORQUESTRADOR)}
+            aria-label={t.enviar}
             onClick={enviarAoOrquestrador}
           >
             <IconeOrquestrador tamanho={15} />
@@ -348,8 +351,8 @@ const JanelaDoShell = memo(function JanelaDoShell({ shellId, terminalId, pasta, 
         <button
           type="button"
           className="botao-icone nodrag"
-          title="Fechar o terminal (encerra o shell)"
-          aria-label="Fechar este terminal"
+          title={t.fecharDica}
+          aria-label={t.fechar}
           onClick={() => acoes.fecharShell(shellId)}
         >
           <IconeFechar tamanho={14} />
@@ -361,10 +364,10 @@ const JanelaDoShell = memo(function JanelaDoShell({ shellId, terminalId, pasta, 
         {encerrado && (
           <div className="aviso-do-shell nodrag" role="status">
             <span className="mono">
-              {situacao.codigo === null ? "o shell encerrou" : `o shell encerrou (código ${situacao.codigo})`}
+              {t.shellEncerrou(situacao.codigo)}
             </span>
             <button type="button" className="btn btn-sm btn-outline" onClick={() => acoes.reabrirShell(shellId)}>
-              abrir de novo
+              {t.abrirDeNovo}
             </button>
           </div>
         )}

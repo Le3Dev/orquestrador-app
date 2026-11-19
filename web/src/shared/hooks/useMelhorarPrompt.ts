@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api, mensagemDeErro } from "../api/cliente";
+import { textosAtuais } from "../idioma/idioma";
+import { textosDeApoioDosNos } from "../idioma/textos/nos";
 import type { OndeDoPrompt } from "../api/tipos";
 
 /**
@@ -82,7 +84,7 @@ export function useMelhorarPrompt({ texto, aoTrocarTexto, onde, pasta }: Opcoes)
           return;
         }
         if (resposta.texto.trim() === "") {
-          setEstado({ fase: "erro", mensagem: "A melhoria voltou vazia; o texto ficou como estava.", texto: original });
+          setEstado({ fase: "erro", mensagem: textosAtuais(textosDeApoioDosNos).melhoria.vazia, texto: original });
           return;
         }
         // Algo entrou no campo enquanto melhorava (ex.: ditado): não troca por cima.
@@ -101,7 +103,7 @@ export function useMelhorarPrompt({ texto, aoTrocarTexto, onde, pasta }: Opcoes)
         if (!atual.signal.aborted) {
           setEstado({
             fase: "erro",
-            mensagem: `Não foi possível melhorar o pedido: ${mensagemDeErro(falha)}`,
+            mensagem: textosAtuais(textosDeApoioDosNos).melhoria.naoMelhorou(mensagemDeErro(falha)),
             texto: original,
           });
         }

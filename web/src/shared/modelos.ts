@@ -6,6 +6,10 @@ import type {
   Motor,
   PreferenciasDoChat,
 } from "./api/tipos";
+import { textosAtuais } from "./idioma/idioma";
+import { textosDeApoioDosNos } from "./idioma/textos/nos";
+
+const textos = () => textosAtuais(textosDeApoioDosNos).modelos;
 
 /** Um modelo do Claude como aparece no seletor do chat. */
 export interface ModeloNoSeletor {
@@ -16,21 +20,43 @@ export interface ModeloNoSeletor {
   descricao: string;
 }
 
+/** A descrição acompanha o idioma atual: é lida a cada acesso (getter). */
+function modeloDoSeletor(modelo: ModeloClaude, nome: string, versao: string): ModeloNoSeletor {
+  return {
+    modelo,
+    nome,
+    versao,
+    get descricao() {
+      return textos().descricoes[modelo];
+    },
+  };
+}
+
 export const MODELOS_DO_CHAT: readonly ModeloNoSeletor[] = [
-  { modelo: "fable", nome: "Fable", versao: "5.2", descricao: "Para seus desafios mais difíceis" },
-  { modelo: "opus", nome: "Opus", versao: "5.5", descricao: "Para trabalhos complexos e tarefas do dia a dia" },
-  { modelo: "sonnet", nome: "Sonnet", versao: "5.5", descricao: "Mais eficiente para tarefas mais simples" },
-  { modelo: "haiku", nome: "Haiku", versao: "5.5", descricao: "Mais rápido para respostas rápidas" },
+  modeloDoSeletor("fable", "Fable", "5.2"),
+  modeloDoSeletor("opus", "Opus", "5.5"),
+  modeloDoSeletor("sonnet", "Sonnet", "5.5"),
+  modeloDoSeletor("haiku", "Haiku", "5.5"),
 ];
 
+/** O rótulo acompanha o idioma atual: é lido a cada acesso (getter). */
+function esforcoDoSeletor(esforco: EsforcoDeRaciocinio): { esforco: EsforcoDeRaciocinio; rotulo: string } {
+  return {
+    esforco,
+    get rotulo() {
+      return textos().esforcos[esforco];
+    },
+  };
+}
+
 export const ESFORCOS_DO_CHAT: readonly { esforco: EsforcoDeRaciocinio; rotulo: string }[] = [
-  { esforco: "padrao", rotulo: "Padrão" },
-  { esforco: "baixo", rotulo: "Baixo" },
-  { esforco: "medio", rotulo: "Médio" },
-  { esforco: "alto", rotulo: "Alto" },
-  { esforco: "extra_alto", rotulo: "Extra alto" },
-  { esforco: "maximo", rotulo: "Máximo" },
-  { esforco: "ultracode", rotulo: "Ultracode" },
+  esforcoDoSeletor("padrao"),
+  esforcoDoSeletor("baixo"),
+  esforcoDoSeletor("medio"),
+  esforcoDoSeletor("alto"),
+  esforcoDoSeletor("extra_alto"),
+  esforcoDoSeletor("maximo"),
+  esforcoDoSeletor("ultracode"),
 ];
 
 export const PREFERENCIAS_PADRAO_DO_CHAT: PreferenciasDoChat = {
@@ -95,7 +121,10 @@ export function nomeCurtoDoMotor(motor: string): string {
 
 /** O modelo que o próprio CLI usa quando nenhum é pedido (codex e copilot). */
 export const MODELO_PADRAO_DO_CLI = "padrao";
-export const ROTULO_DO_MODELO_PADRAO_DO_CLI = "Padrão do CLI";
+/** O rótulo do modelo padrão do CLI no idioma atual. */
+export function rotuloDoModeloPadraoDoCli(): string {
+  return textos().padraoDoCli;
+}
 /** Letras, números e `. _ : -`, de 1 a 64 caracteres: como o servidor confere o id de um modelo. */
 export const PADRAO_DO_ID_DE_MODELO = /^[A-Za-z0-9._:-]{1,64}$/;
 
@@ -127,14 +156,14 @@ export function modeloServeAoMotor(motor: Motor, modelo: string): boolean {
  */
 export function problemaDoModeloDoMotor(configuracao: DadosDaConfiguracao): string | null {
   const papeis: readonly { nome: string; motor: Motor; modelo: string }[] = [
-    { nome: "do orquestrador", motor: motorDoOrquestradorDe(configuracao), modelo: configuracao.modeloDoOrquestrador },
-    { nome: "dos subagentes", motor: motorDosSubagentesDe(configuracao), modelo: configuracao.modeloDosSubagentes },
+    { nome: textos().doOrquestrador, motor: motorDoOrquestradorDe(configuracao), modelo: configuracao.modeloDoOrquestrador },
+    { nome: textos().dosSubagentes, motor: motorDosSubagentesDe(configuracao), modelo: configuracao.modeloDosSubagentes },
   ];
   for (const { nome, motor, modelo } of papeis) {
     if (motor !== "claude-code" && !PADRAO_DO_ID_DE_MODELO.test(modelo)) {
       return modelo.trim() === ""
-        ? `Informe o modelo ${nome} (ou escolha o padrão do CLI).`
-        : `O modelo ${nome} só aceita letras, números, ponto, hífen, sublinhado e dois-pontos (até 64 caracteres).`;
+        ? textos().informeOModelo(nome)
+        : textos().modeloInvalido(nome);
     }
   }
   return null;
@@ -216,7 +245,7 @@ export function nomeDoModeloDoMotor(motor: Motor, modelo: ModeloDoMotor, modeloU
   if (motor === "claude-code") {
     return ehModeloClaude(modelo) ? nomeComVersao(modelo, modeloUsado) : modelo;
   }
-  return modelo === MODELO_PADRAO_DO_CLI ? ROTULO_DO_MODELO_PADRAO_DO_CLI : modelo;
+  return modelo === MODELO_PADRAO_DO_CLI ? rotuloDoModeloPadraoDoCli() : modelo;
 }
 
 export function modeloNoSeletor(modelo: ModeloClaude): ModeloNoSeletor {

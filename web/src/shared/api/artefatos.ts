@@ -1,5 +1,9 @@
 import type { TracoDoDesenho } from "../canvas/layout";
+import { textosAtuais } from "../idioma/idioma";
+import { textosDeApoioDosNos } from "../idioma/textos/nos";
 import { ErroDaApi } from "./cliente";
+
+const textos = () => textosAtuais(textosDeApoioDosNos).alteracoes;
 
 /**
  * Artefatos: páginas HTML ou documentos Markdown criados pelos agentes. O
@@ -81,8 +85,6 @@ export const TIPOS_DE_EVENTO_DE_ARTEFATO: readonly TipoDeEventoDeArtefato[] = [
   "artefato_removido",
 ];
 
-const FALHA_DE_CONEXAO = "Não foi possível falar com o servidor. Feche e abra o Orquestrador de novo.";
-
 function mensagemDoCorpo(corpo: unknown): string | null {
   if (typeof corpo === "object" && corpo !== null && "erro" in corpo && typeof corpo.erro === "string") {
     return corpo.erro;
@@ -95,11 +97,11 @@ async function chamar(caminho: string, opcoes: RequestInit = {}): Promise<Respon
   try {
     resposta = await fetch(`/api${caminho}`, opcoes);
   } catch {
-    throw new Error(FALHA_DE_CONEXAO);
+    throw new Error(textos().semConexao);
   }
   if (!resposta.ok) {
     const corpo: unknown = await resposta.json().catch(() => null);
-    throw new ErroDaApi(mensagemDoCorpo(corpo) ?? `O servidor respondeu com erro ${resposta.status}.`, resposta.status);
+    throw new ErroDaApi(mensagemDoCorpo(corpo) ?? textos().erroDoServidor(resposta.status), resposta.status);
   }
   return resposta;
 }

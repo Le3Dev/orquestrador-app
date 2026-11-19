@@ -1,4 +1,6 @@
 import type { ModoDoTurno } from "./api/tipos";
+import { textosAtuais } from "./idioma/idioma";
+import { textosDeEstadoDoTerminal } from "./idioma/textos/terminais";
 
 /** Comandos que o prompt do terminal entende, como no Claude Code. */
 export type ComandoDoPrompt = "limpar";
@@ -47,12 +49,13 @@ export function dicaDeComando(texto: string, trabalhando: boolean): string | nul
   if (!digitandoComando(texto)) {
     return null;
   }
+  const textos = textosAtuais(textosDeEstadoDoTerminal);
   if (trabalhando) {
-    return `${COMANDO_DE_LIMPAR} — indisponível durante um pedido · esc cancela`;
+    return textos.comandos.indisponivel(COMANDO_DE_LIMPAR);
   }
   // Incompleto, o Enter enviaria o texto como pedido: a dica oferece o Tab.
-  const atalho = comandoDoPrompt(texto) === null ? "tab completa" : "enter";
-  return `${COMANDO_DE_LIMPAR} — começar uma conversa nova · ${atalho}`;
+  const atalho = comandoDoPrompt(texto) === null ? textos.comandos.tabCompleta : textos.comandos.enter;
+  return textos.comandos.novaConversa(COMANDO_DE_LIMPAR, atalho);
 }
 
 /** Pedido longo ou com uma lista de vários itens: provavelmente uma mudança grande. */
@@ -69,6 +72,6 @@ export function pedidoGrande(texto: string): boolean {
  */
 export function dicaDePedidoGrande(texto: string, modo: ModoDoTurno): string | null {
   return modo === "execucao" && comandoDoPrompt(texto) === null && pedidoGrande(texto)
-    ? "pedido grande? shift+tab para planejar antes"
+    ? textosAtuais(textosDeEstadoDoTerminal).comandos.pedidoGrande
     : null;
 }

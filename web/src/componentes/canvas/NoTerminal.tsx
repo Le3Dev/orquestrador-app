@@ -67,6 +67,8 @@ import {
   type TurnoNaTela,
 } from "../../shared/estado/aplicarEvento";
 import { mesmoConteudo, useReaproveitado } from "../../shared/hooks/useReaproveitado";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeTerminal } from "../../shared/idioma/textos/terminal";
 import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
 import {
   comoModeloClaude,
@@ -162,6 +164,7 @@ const TAMANHO_MAXIMO_DO_NOME = 60;
 
 /** Campo do nome na barra, aberto no clique duplo (como o título do artefato). Enter confirma; Esc desiste. */
 function CampoDoNome({ nome, aoConcluir }: { nome: string; aoConcluir: (novo: string | null) => void }) {
+  const t = useTextos(textosDeTerminal);
   const campo = useRef<HTMLInputElement>(null);
   const desistiu = useRef(false);
 
@@ -175,7 +178,7 @@ function CampoDoNome({ nome, aoConcluir }: { nome: string; aoConcluir: (novo: st
     <input
       ref={campo}
       className="campo-do-titulo-do-artefato nodrag"
-      aria-label="Nome do orquestrador"
+      aria-label={t.nomeDoOrquestrador}
       defaultValue={nome}
       maxLength={TAMANHO_MAXIMO_DO_NOME}
       onKeyDown={(evento) => {
@@ -384,6 +387,8 @@ export function PainelDeConfiguracao({
   tamanhoDaLetra,
   nome: nomeAtual = orquestrador.nome,
 }: PropsDaConfiguracao) {
+  const t = useTextos(textosDeTerminal);
+  const p = t.painel;
   const { acoes } = useCanvas();
   const idDoNome = useId();
   const [configuracao, setConfiguracao] = useState(orquestrador.configuracao);
@@ -445,7 +450,7 @@ export function PainelDeConfiguracao({
       try {
         await api.renomearOrquestrador(orquestradorId, nomeAparado);
       } catch (falha) {
-        throw new Error(`Não foi possível renomear: ${mensagemDeErro(falha)}`, { cause: falha });
+        throw new Error(t.naoRenomeou(mensagemDeErro(falha)), { cause: falha });
       }
       setNomeDeOrigem(nomeAparado);
     }
@@ -478,7 +483,7 @@ export function PainelDeConfiguracao({
   }
 
   async function excluir(): Promise<void> {
-    if (!window.confirm(`Excluir "${orquestrador.nome}" e todo o histórico desta conversa?`)) {
+    if (!window.confirm(p.confirmarExcluir(orquestrador.nome))) {
       return;
     }
     try {
@@ -493,7 +498,7 @@ export function PainelDeConfiguracao({
   }
 
   async function novaConversa(): Promise<void> {
-    if (!window.confirm("Começar uma conversa nova? A conversa atual será arquivada.")) {
+    if (!window.confirm(p.confirmarNovaConversa)) {
       return;
     }
     setErro(null);
@@ -510,7 +515,7 @@ export function PainelDeConfiguracao({
    * Nova conversa (confirmação antes de tudo; recusada, nada é salvo).
    */
   async function salvarEComecarConversaNova(): Promise<void> {
-    if (nomeVazio || !window.confirm("Salvar e começar uma conversa nova? A conversa atual será arquivada.")) {
+    if (nomeVazio || !window.confirm(p.confirmarSalvarENova)) {
       return;
     }
     setErro(null);
@@ -537,14 +542,14 @@ export function PainelDeConfiguracao({
   return (
     <div className="painel-da-configuracao nodrag">
       <div className="corpo-do-terminal corpo-da-criacao corpo-da-configuracao custom-scrollbar nodrag nowheel">
-        <span className="rotulo-tecnico">configuração · vale a partir do próximo pedido</span>
+        <span className="rotulo-tecnico">{p.rotulo}</span>
         <div className="linhas-da-configuracao mt-2.5">
           <div className="linha-da-criacao">
             <Rotulo
               htmlFor={idDoNome}
-              titulo="Nome"
-              dica="Como ele aparece no canvas."
-              explicacao={`Até ${TAMANHO_MAXIMO_DO_NOME} caracteres. Muda na barra, na doca e nos avisos; a conversa e a pasta continuam as mesmas. Também dá para renomear com clique duplo no nome da barra.`}
+              titulo={p.nome}
+              dica={p.nomeDica}
+              explicacao={p.nomeExplicacao(TAMANHO_MAXIMO_DO_NOME)}
             />
             <input
               id={idDoNome}
@@ -552,7 +557,7 @@ export function PainelDeConfiguracao({
               value={nome}
               maxLength={TAMANHO_MAXIMO_DO_NOME}
               onChange={(evento) => setNome(evento.target.value)}
-              placeholder="Ex.: Painel de salas"
+              placeholder={p.nomePlaceholder}
               spellCheck={false}
             />
           </div>
@@ -567,9 +572,9 @@ export function PainelDeConfiguracao({
           />
           <div className="linha-da-criacao">
             <Rotulo
-              titulo="Conversa"
-              dica="Começar de novo ou excluir."
-              explicacao="Nova conversa arquiva a conversa atual e começa outra do zero (o mesmo que /clear no prompt). Excluir apaga o orquestrador e todo o histórico. Os dois pedem confirmação e esperam o pedido em andamento acabar."
+              titulo={p.conversa}
+              dica={p.conversaDica}
+              explicacao={p.conversaExplicacao}
             />
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <button
@@ -577,22 +582,18 @@ export function PainelDeConfiguracao({
                 className="btn btn-sm btn-outline"
                 onClick={() => void novaConversa()}
                 disabled={trabalhando}
-                title={
-                  trabalhando
-                    ? "Cancele o pedido em andamento antes de começar uma conversa nova."
-                    : "Arquiva a conversa atual e começa outra do zero (o mesmo que /clear no prompt)."
-                }
+                title={trabalhando ? p.cancelePrimeiro : p.novaConversaDica}
               >
-                Nova conversa
+                {p.novaConversa}
               </button>
               <button
                 type="button"
                 className="btn btn-sm btn-danger"
                 onClick={() => void excluir()}
                 disabled={trabalhando}
-                title={trabalhando ? "Cancele o pedido em andamento antes de excluir." : undefined}
+                title={trabalhando ? p.excluirDicaTrabalhando : undefined}
               >
-                Excluir orquestrador
+                {p.excluir}
               </button>
             </div>
           </div>
@@ -608,12 +609,12 @@ export function PainelDeConfiguracao({
           ) : nomeVazio ? (
             <span className="flex items-center gap-2 text-[12.5px] text-warning">
               <IconeAlerta tamanho={15} className="shrink-0" />
-              Dê um nome ao orquestrador para salvar.
+              {p.deUmNome}
             </span>
           ) : passouDoLimite ? (
             <span className="flex items-center gap-2 text-[12.5px] text-warning">
               <IconeAlerta tamanho={15} className="shrink-0" />
-              Encurte as instruções para salvar.
+              {p.encurte}
             </span>
           ) : problemaDoModelo !== null ? (
             <span className="flex items-center gap-2 text-[12.5px] text-warning">
@@ -624,23 +625,19 @@ export function PainelDeConfiguracao({
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <span
                 className="flex min-w-0 items-center gap-1.5 text-[12px] text-warning"
-                title="O Claude ainda vê no histórico desta conversa as instruções de antes. Numa conversa nova, só valem as novas."
+                title={p.instrucoesAntigasDica}
               >
                 <IconeAlerta tamanho={14} className="shrink-0" />
-                <span className="truncate">As instruções antigas seguem no histórico.</span>
+                <span className="truncate">{p.instrucoesAntigas}</span>
               </span>
               <button
                 type="button"
                 className="btn btn-sm btn-outline shrink-0"
                 onClick={() => void salvarEComecarConversaNova()}
                 disabled={salvando || trabalhando}
-                title={
-                  trabalhando
-                    ? "Cancele o pedido em andamento antes de começar uma conversa nova."
-                    : "Salva a configuração e arquiva a conversa atual (o mesmo que /clear no prompt)."
-                }
+                title={trabalhando ? p.cancelePrimeiro : p.salvarENovaDica}
               >
-                Salvar e começar conversa nova
+                {p.salvarENova}
               </button>
             </div>
           ) : (
@@ -650,7 +647,7 @@ export function PainelDeConfiguracao({
           )}
         </div>
         <button type="button" className="btn btn-ghost shrink-0" onClick={aoFechar}>
-          Voltar
+          {p.voltar}
         </button>
         <button
           type="button"
@@ -658,7 +655,7 @@ export function PainelDeConfiguracao({
           onClick={() => void salvar()}
           disabled={salvando || passouDoLimite || problemaDoModelo !== null || nomeVazio}
         >
-          {salvando ? "Salvando…" : "Salvar"}
+          {salvando ? p.salvando : p.salvar}
         </button>
       </div>
     </div>
@@ -768,12 +765,6 @@ const AncorasDoTerminal = memo(function AncorasDoTerminal() {
 
 type TipoDoItemLigado = "nota" | "previa" | "artefato";
 
-const ROTULO_DO_ITEM_LIGADO: Readonly<Record<TipoDoItemLigado, string>> = {
-  nota: "a nota",
-  previa: "a prévia",
-  artefato: "o artefato",
-};
-
 /** O ícone do chip: a folha da nota, o navegador da prévia e o documento do artefato. */
 function IconeDoItemLigado({ tipo }: { tipo: TipoDoItemLigado }) {
   if (tipo === "previa") {
@@ -813,6 +804,7 @@ function ChipDoItemLigado({
   dica: string;
   aoDesligar: () => void;
 }) {
+  const t = useTextos(textosDeTerminal).ligados;
   return (
     <span className={`chip chip-item-ligado chip-item-ligado-${tipo}`} title={dica}>
       <IconeDoItemLigado tipo={tipo} />
@@ -820,8 +812,8 @@ function ChipDoItemLigado({
       <button
         type="button"
         className="desligar-item-ligado nodrag"
-        aria-label={`Desligar ${ROTULO_DO_ITEM_LIGADO[tipo]} ${titulo}`}
-        title="Desligar deste orquestrador"
+        aria-label={t.desligar(t.tipos[tipo], titulo)}
+        title={t.desligarDica}
         onClick={aoDesligar}
       >
         <IconeFechar tamanho={10} />
@@ -831,38 +823,41 @@ function ChipDoItemLigado({
 }
 
 function ChipDaNotaLigada({ notaId, aoDesligar }: { notaId: string; aoDesligar: () => void }) {
+  const t = useTextos(textosDeTerminal).ligados;
   const nota = useNota(notaId);
-  const titulo = nota?.titulo ?? "nota";
+  const titulo = nota?.titulo ?? t.nota;
   return (
     <ChipDoItemLigado
       tipo="nota"
       titulo={titulo}
-      dica={`Nota "${titulo}": o texto vai como contexto no próximo pedido`}
+      dica={t.notaDica(titulo)}
       aoDesligar={aoDesligar}
     />
   );
 }
 
 function ChipDaPreviaLigada({ itemId, aoDesligar }: { itemId: string; aoDesligar: () => void }) {
+  const t = useTextos(textosDeTerminal).ligados;
   const url = useNodesData<NoPrevia>(itemId)?.data.url ?? "";
   return (
     <ChipDoItemLigado
       tipo="previa"
-      titulo={url === "" ? "prévia sem endereço" : enderecoCurto(url).replace(/\/$/, "")}
-      dica={url === "" ? "Prévia sem endereço: não vai no pedido" : `Prévia ${url}: o endereço vai no próximo pedido`}
+      titulo={url === "" ? t.previaSemEndereco : enderecoCurto(url).replace(/\/$/, "")}
+      dica={url === "" ? t.previaSemEnderecoDica : t.previaDica(url)}
       aoDesligar={aoDesligar}
     />
   );
 }
 
 function ChipDoArtefatoLigado({ artefatoId, aoDesligar }: { artefatoId: string; aoDesligar: () => void }) {
+  const t = useTextos(textosDeTerminal).ligados;
   const artefato = useArtefato(artefatoId);
-  const titulo = artefato?.titulo ?? "artefato";
+  const titulo = artefato?.titulo ?? t.artefato;
   return (
     <ChipDoItemLigado
       tipo="artefato"
       titulo={titulo}
-      dica={`Artefato "${titulo}": o caminho do arquivo vai no próximo pedido`}
+      dica={t.artefatoDica(titulo)}
       aoDesligar={aoDesligar}
     />
   );
@@ -880,12 +875,13 @@ const ItensLigados = memo(function ItensLigados({
   ligados: readonly string[];
   aoDesligar: (itemId: string) => void;
 }) {
+  const t = useTextos(textosDeTerminal).ligados;
   if (ligados.length === 0) {
     return null;
   }
   return (
-    <div className="itens-ligados nodrag" role="group" aria-label="Itens ligados a este orquestrador">
-      <span className="text-muted">ligados</span>
+    <div className="itens-ligados nodrag" role="group" aria-label={t.grupo}>
+      <span className="text-muted">{t.rotulo}</span>
       {ligados.map((itemId) => {
         const desligar = () => aoDesligar(itemId);
         if (itemId.startsWith("nota:")) {
@@ -963,6 +959,7 @@ interface ItemDaBarra {
  * encostado à direita. Clique fora e Esc fecham.
  */
 function MaisDaBarra({ itens }: { itens: readonly ItemDaBarra[] }) {
+  const t = useTextos(textosDeTerminal).barra;
   const [aberto, setAberto] = useState(false);
   const raiz = useRef<HTMLDivElement>(null);
   const idDoMenu = useId();
@@ -994,17 +991,17 @@ function MaisDaBarra({ itens }: { itens: readonly ItemDaBarra[] }) {
       <button
         type="button"
         className="botao-icone nodrag"
-        aria-label="Mais da barra"
+        aria-label={t.mais}
         aria-haspopup="true"
         aria-expanded={aberto}
         aria-controls={aberto ? idDoMenu : undefined}
-        title="O que não coube na barra deste terminal"
+        title={t.maisDica}
         onClick={() => setAberto((anterior) => !anterior)}
       >
         ⋯
       </button>
       {aberto && (
-        <div id={idDoMenu} role="group" aria-label="O que não coube na barra" className="menu-da-barra-do-terminal painel-flutuante">
+        <div id={idDoMenu} role="group" aria-label={t.maisGrupo} className="menu-da-barra-do-terminal painel-flutuante">
           {itens.map((item) => (
             <div key={item.id} className="item-da-barra-no-menu">
               {item.elemento}
@@ -1039,6 +1036,7 @@ function TerminalEmTelaCheia({
   aoSair: () => void;
   children: ReactNode;
 }) {
+  const t = useTextos(textosDeTerminal).barra;
   // Esc com o foco fora de qualquer campo (no corpo da página) também volta.
   useEffect(() => {
     const aoTeclar = (evento: KeyboardEvent) => {
@@ -1079,7 +1077,7 @@ function TerminalEmTelaCheia({
       onKeyDown={aoTeclar}
       onKeyUp={naoPropagar}
     >
-      <div role="dialog" aria-label={`${nome} em tela cheia`} className="painel-flutuante surgir terminal-em-tela-cheia">
+      <div role="dialog" aria-label={t.emTelaCheiaAria(nome)} className="painel-flutuante surgir terminal-em-tela-cheia">
         {children}
       </div>
     </div>,
@@ -1097,6 +1095,7 @@ function TerminalEmTelaCheia({
  * em `JanelaDoTerminal`, memorizada, que não recebe nada disso.
  */
 export function NoTerminal({ data, selected }: NodeProps<TipoDoNo>) {
+  const t = useTextos(textosDeTerminal).barra;
   const { orquestradores } = useCanvas();
   const orquestrador = orquestradores.get(data.orquestradorId);
 
@@ -1105,7 +1104,7 @@ export function NoTerminal({ data, selected }: NodeProps<TipoDoNo>) {
     return (
       <>
         <AncorasDoTerminal />
-        <div className="janela-terminal grid place-items-center mono text-muted">carregando orquestrador…</div>
+        <div className="janela-terminal grid place-items-center mono text-muted">{t.carregando}</div>
       </>
     );
   }
@@ -1150,6 +1149,8 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   /** Os ids dos nós ligados a este terminal (`DadosDoTerminal.ligados`). */
   ligados: readonly string[];
 }) {
+  const t = useTextos(textosDeTerminal);
+  const b = t.barra;
   const { conversas, conexoes, sinais, servidor, acoes } = useCanvas();
   const orquestradorId = orquestrador.id;
   const conversa = conversas.get(orquestradorId) ?? ESTADO_INICIAL;
@@ -1442,7 +1443,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
       await api.renomearOrquestrador(orquestradorId, aparado);
       await recarregar();
     } catch (falha) {
-      setErro(`Não foi possível renomear: ${mensagemDeErro(falha)}`);
+      setErro(t.naoRenomeou(mensagemDeErro(falha)));
     } finally {
       setNomePendente(null);
     }
@@ -1563,8 +1564,8 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
     chipsDaDireita.push({
       id: "reconectando",
       elemento: (
-        <span className="min-w-0 truncate mono text-error" title="Reconectando à conversa deste orquestrador">
-          reconectando…
+        <span className="min-w-0 truncate mono text-error" title={b.reconectandoDica}>
+          {b.reconectando}
         </span>
       ),
     });
@@ -1585,9 +1586,9 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   };
 
   const controlesDaJanela = {
-    objeto: "o terminal",
+    objeto: b.objeto,
     aoFechar: () => acoes.fecharTerminal(orquestradorId),
-    dicaDoFechar: "Fechar o terminal (o orquestrador e o histórico continuam salvos)",
+    dicaDoFechar: b.dicaDoFechar,
     aoMinimizar: minimizarOuRestaurar,
     minimizada,
     aoAmpliar: alternarTelaCheia,
@@ -1632,10 +1633,10 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
       }}
     >
       {arraste === "anexos" && (
-        <div className="soltar-imagens">solte para anexar os arquivos a este orquestrador</div>
+        <div className="soltar-imagens">{b.soltarAnexos}</div>
       )}
       {arraste === "pedido" && (
-        <div className="soltar-imagens">solte para escrever no prompt — nada é enviado até você apertar enter</div>
+        <div className="soltar-imagens">{b.soltarPedido}</div>
       )}
       <div
         ref={barra}
@@ -1651,7 +1652,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
           // Minimizado, o clique duplo é da barra (restaurar), e não do renomear.
           <strong
             className="truncate font-titulo text-[12.5px] font-semibold"
-            title={escondido ? `${nome} · clique duplo para restaurar` : `${nome} · clique duplo para renomear`}
+            title={escondido ? b.restaurar(nome) : b.renomear(nome)}
             onDoubleClick={escondido ? undefined : () => setEditandoNome(true)}
           >
             {nome}
@@ -1675,8 +1676,8 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
             <button
               type="button"
               className="botao-icone nodrag"
-              title="Abrir um terminal na pasta deste orquestrador"
-              aria-label="Abrir terminal"
+              title={b.abrirTerminalDica}
+              aria-label={b.abrirTerminal}
               onClick={() => acoesDosShells.abrirShell({ orquestradorId })}
             >
               <IconeShell tamanho={16} />
@@ -1687,8 +1688,8 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
             <button
               type="button"
               className="botao-icone nodrag"
-              title="Abrir o navegador do agente (abre ou leva até o bloco dele no canvas)"
-              aria-label="Abrir o navegador do agente"
+              title={b.abrirNavegadorDica}
+              aria-label={b.abrirNavegador}
               onClick={() => acoes.abrirNavegador?.(orquestradorId)}
             >
               <IconeNavegador tamanho={16} />
@@ -1697,8 +1698,8 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
           <button
             type="button"
             className="botao-icone nodrag"
-            title="Configurar"
-            aria-label="Configurar"
+            title={b.configurar}
+            aria-label={b.configurar}
             aria-pressed={configurando}
             onClick={() => {
               // Minimizado, o ⚙ restaura o terminal e já abre a configuração.
@@ -1798,7 +1799,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   // Em tela cheia, o nó fica no canvas só como o lugar para onde a janela volta.
   return (
     <>
-      <div className="janela-terminal grid place-items-center mono text-muted">em tela cheia · Esc volta</div>
+      <div className="janela-terminal grid place-items-center mono text-muted">{b.emTelaCheia}</div>
       <TerminalEmTelaCheia nome={nome} alvo={telaCheiaEm} aoSair={sairDaTelaCheia}>
         {janela}
       </TerminalEmTelaCheia>

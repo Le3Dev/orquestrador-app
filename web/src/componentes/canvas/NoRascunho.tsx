@@ -15,11 +15,7 @@ import {
   TAMANHO_MINIMO_DO_TERMINAL,
 } from "../../shared/canvas/layout";
 import { ALCA_DO_TERMINAL, type NoRascunho as TipoDoNo } from "../../shared/canvas/nos";
-import {
-  AJUDA_DOS_ARTEFATOS_ONLINE,
-  ROTULO_DOS_ARTEFATOS_ONLINE,
-  ROTULOS_DAS_PERMISSOES,
-} from "../../shared/formatacao";
+import { ROTULOS_DAS_PERMISSOES } from "../../shared/formatacao";
 import {
   ajudaDaPredefinicao,
   useEsforcosHerdados,
@@ -27,7 +23,11 @@ import {
   usePredefinicoes,
   usePreferencias,
 } from "../../shared/hooks/useDadosDaConfiguracao";
-import { DICA_DAS_VARIAVEIS, tamanhoDasInstrucoes } from "../../shared/instrucoes";
+import { localeDoIdioma, textosAtuais, useIdioma, useTextos } from "../../shared/idioma/idioma";
+import { textosDeComponentesComuns } from "../../shared/idioma/textos/componentesComuns";
+import { textosDeConfiguracoes } from "../../shared/idioma/textos/configuracoes";
+import { textosDeRascunho } from "../../shared/idioma/textos/rascunho";
+import { dicaDasVariaveis, tamanhoDasInstrucoes } from "../../shared/instrucoes";
 import {
   comoModeloClaude,
   comPredefinicao,
@@ -44,7 +44,6 @@ import { QuantidadeDeSubagentes } from "./QuantidadeDeSubagentes";
 
 const TAMANHO_MAXIMO_DO_NOME = 60;
 const PERMISSOES: readonly NivelDePermissao[] = ["leitura", "edicao", "edicao_e_comandos"];
-export const CONFIRMACAO_PARA_DESCARTAR_O_RASCUNHO = "Descartar este rascunho? O que você preencheu será perdido.";
 
 /** Nome exibido para um caminho: a última parte da pasta. */
 function nomeDaPasta(caminho: string): string {
@@ -58,6 +57,10 @@ function nomeDaPasta(caminho: string): string {
  * vira o terminal do Orquestrador no mesmo lugar.
  */
 export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
+  const t = useTextos(textosDeRascunho);
+  const c = useTextos(textosDeComponentesComuns).configuracao;
+  const avisos = useTextos(textosDeConfiguracoes).avisos;
+  const locale = localeDoIdioma(useIdioma());
   const { acoes, servidor } = useCanvas();
   const idDoCampo = useId();
   const idDaPermissao = useId();
@@ -158,15 +161,15 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
   const problemaDoModelo = problemaDoModeloDoMotor(configuracao);
   const motivoParaNaoComecar =
     pasta === ""
-      ? "Escolha uma pasta para começar."
+      ? t.escolhaUmaPasta
       : nome.trim() === ""
-        ? "Dê um nome ao orquestrador para começar."
+        ? t.deUmNome
         : passouDoLimite
-          ? "Encurte as instruções para começar."
+          ? t.encurteAsInstrucoes
           : problemaDoModelo !== null
             ? problemaDoModelo
             : !servidor.conectado
-              ? "Servidor desconectado."
+              ? t.servidorDesconectado
               : null;
 
   /**
@@ -182,7 +185,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
 
   /** Sem nada preenchido, descarta direto; com algo, confirma antes de perder. */
   function descartar(): void {
-    if (preenchido && !window.confirm(CONFIRMACAO_PARA_DESCARTAR_O_RASCUNHO)) {
+    if (preenchido && !window.confirm(t.confirmarDescartar)) {
       return;
     }
     acoes.descartarRascunho(id);
@@ -223,14 +226,14 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
             <i />
           </span>
           <strong className="font-titulo min-w-0 truncate text-[12.5px] font-semibold">
-            {nome.trim() === "" ? "novo orquestrador" : `novo orquestrador · ${nome.trim()}`}
+            {nome.trim() === "" ? t.novoOrquestrador : t.novoOrquestradorNome(nome.trim())}
           </strong>
           <span className="flex-1" />
           <button
             type="button"
             className="botao-icone nodrag"
-            title="Descartar"
-            aria-label="Descartar rascunho"
+            title={t.descartar}
+            aria-label={t.descartarRascunho}
             onClick={descartar}
           >
             <IconeFechar tamanho={16} />
@@ -239,14 +242,14 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
 
         <div className="conteudo-do-cartao" style={{ zoom: escalaDaLetra }}>
           <div className="corpo-do-terminal corpo-da-criacao custom-scrollbar nodrag nowheel">
-            <section className="pasta-da-criacao" aria-label="Pasta e nome">
+            <section className="pasta-da-criacao" aria-label={t.pastaENome}>
               <div className="flex min-w-0 flex-col gap-1.5">
                 <Rotulo
                   htmlFor={`${idDoCampo}-pasta`}
-                  titulo="Pasta de trabalho"
+                  titulo={t.pastaDeTrabalho}
                   discreto
-                  dica="Onde ele trabalha."
-                  explicacao='A pasta do projeto que o orquestrador vai ler e mudar; os agentes só trabalham dentro dela. Use "procurar…" para uma pasta fora dos projetos.'
+                  dica={t.pastaDica}
+                  explicacao={t.pastaExplicacao}
                 />
                 <div className="flex min-w-0 items-stretch gap-2">
                   <select
@@ -257,35 +260,35 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                     onChange={(evento) => escolherPasta(evento.target.value)}
                   >
                     <option value="" disabled>
-                      {opcoes === null ? "carregando pastas…" : "escolha um projeto"}
+                      {opcoes === null ? t.carregandoPastas : t.escolhaUmProjeto}
                     </option>
                     {opcoes?.pastas.map((opcao) => (
                       <option key={opcao.caminho} value={opcao.caminho}>
                         {opcao.nome}
                       </option>
                     ))}
-                    {opcoes !== null && <option value={opcoes.raiz}>todos os projetos (pasta raiz)</option>}
+                    {opcoes !== null && <option value={opcoes.raiz}>{t.todosOsProjetos}</option>}
                     {pastaExterna !== null && (
-                      <option value={pastaExterna.caminho}>{pastaExterna.nome} (pasta do computador)</option>
+                      <option value={pastaExterna.caminho}>{t.pastaDoComputador(pastaExterna.nome)}</option>
                     )}
                   </select>
                   <button
                     type="button"
                     className="btn btn-outline botao-de-procurar shrink-0"
-                    title="Escolher uma pasta qualquer do computador"
+                    title={t.procurarDica}
                     onClick={() => setNavegando(true)}
                   >
-                    procurar…
+                    {t.procurar}
                   </button>
                 </div>
               </div>
               <div className="flex min-w-0 flex-col gap-1.5">
                 <Rotulo
                   htmlFor={`${idDoCampo}-nome`}
-                  titulo="Nome"
+                  titulo={t.nome}
                   discreto
-                  dica="Como ele aparece no canvas."
-                  explicacao="Vem da pasta escolhida; um nome digitado aqui não é trocado ao mudar de pasta."
+                  dica={t.nomeDica}
+                  explicacao={t.nomeExplicacao}
                 />
                 <input
                   id={`${idDoCampo}-nome`}
@@ -293,7 +296,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                   value={nome}
                   maxLength={TAMANHO_MAXIMO_DO_NOME}
                   onChange={(evento) => setNome(evento.target.value)}
-                  placeholder="Ex.: Painel de salas"
+                  placeholder={t.nomePlaceholder}
                   spellCheck={false}
                 />
               </div>
@@ -302,9 +305,9 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
             <div className="linha-da-criacao mt-3.5">
               <Rotulo
                 id={idDaPermissao}
-                titulo="Permissão"
-                dica="O que ele pode fazer na pasta."
-                explicacao={`Vale para o orquestrador e para os subagentes. Comece em ${ROTULOS_DAS_PERMISSOES.leitura.nome} e libere mais quando precisar: dá para mudar depois, na engrenagem do terminal.`}
+                titulo={c.permissao}
+                dica={c.permissaoDica}
+                explicacao={t.permissaoExplicacao(ROTULOS_DAS_PERMISSOES.leitura.nome)}
                 alinharAoTopo
               />
               <div className="flex min-w-0 flex-col gap-1.5">
@@ -332,7 +335,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                 </div>
                 <span className={`text-[12px] ${comandos ? "text-warning" : "text-secondary"}`}>
                   {comandos
-                    ? "Edita, instala, testa e compila. Use só em pastas que você confia."
+                    ? c.avisoDeComandos
                     : ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].descricao}
                 </span>
               </div>
@@ -350,9 +353,9 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
 
             <div className="linha-da-criacao">
               <Rotulo
-                titulo="Quantidade"
-                dica="Quantos ao mesmo tempo."
-                explicacao="Automática: o orquestrador decide quantos subagentes usar, até o máximo escolhido (no padrão, até 3 ao mesmo tempo). Fixa: ele usa sempre essa quantidade. Cada subagente consome a cota da sua assinatura do Claude."
+                titulo={c.quantidade}
+                dica={c.quantidadeDica}
+                explicacao={c.quantidadeExplicacao}
                 alinharAoTopo
               />
               <QuantidadeDeSubagentes
@@ -364,9 +367,9 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
 
             <div className="linha-da-criacao">
               <Rotulo
-                titulo="Opções"
-                dica="Commit e push por feature; publicar artefatos online."
-                explicacao={`Commit e push por feature: ligado, cada feature ou correção pronta (testada, com lint e build ok) vira um commit próprio com push da branch em seguida, numa branch feature/, fix/, hotfix/ ou refactor/. PR e merge só quando você pedir. Precisa da permissão de rodar comandos. ${ROTULO_DOS_ARTEFATOS_ONLINE}: ${AJUDA_DOS_ARTEFATOS_ONLINE} O Modo econômico troca modelos e esforço por outros que gastam menos cota; os campos continuam editáveis. Ele vale só para o Claude Code: com outro motor, os dois papéis voltam ao Claude Code.`}
+                titulo={c.opcoes}
+                dica={c.opcoesDica}
+                explicacao={t.opcoesExplicacao(avisos.artefatosOnlineRotulo, avisos.artefatosOnlineAjuda)}
                 alinharAoTopo
               />
               <div className="flex min-w-0 flex-col gap-1">
@@ -379,18 +382,18 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                     onClick={() => mudar("permitirCommitEPush", !configuracao.permitirCommitEPush)}
                   >
                     <span className={`interruptor-trilho ${commitSemComandos ? "interruptor-sem-efeito" : ""}`} aria-hidden="true" />
-                    Commit e push por feature
+                    {c.commitEPush}
                   </button>
                   <button
                     type="button"
                     role="switch"
                     className="interruptor"
-                    title={AJUDA_DOS_ARTEFATOS_ONLINE}
+                    title={avisos.artefatosOnlineAjuda}
                     aria-checked={configuracao.permitirArtefatosOnline}
                     onClick={() => mudar("permitirArtefatosOnline", !configuracao.permitirArtefatosOnline)}
                   >
                     <span className="interruptor-trilho" aria-hidden="true" />
-                    {ROTULO_DOS_ARTEFATOS_ONLINE}
+                    {avisos.artefatosOnlineRotulo}
                   </button>
                   {economico !== undefined && (
                     <button
@@ -399,14 +402,14 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                       title={ajudaDaPredefinicao(economico)}
                       onClick={() => setConfiguracao((atual) => comPredefinicao(atual, economico.configuracao))}
                     >
-                      Modo econômico
+                      {c.modoEconomico}
                     </button>
                   )}
                 </div>
                 {/* O aviso fica embaixo: o Modo econômico não muda de lugar quando ele aparece. */}
                 {commitSemComandos && (
                   <span className="text-[11.5px] text-warning">
-                    Só vale com {ROTULOS_DAS_PERMISSOES.edicao_e_comandos.nome}.
+                    {c.soValeCom(ROTULOS_DAS_PERMISSOES.edicao_e_comandos.nome)}
                   </span>
                 )}
               </div>
@@ -417,9 +420,9 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
             <div className="linha-da-criacao">
               <Rotulo
                 id={idDaLetra}
-                titulo="Tamanho da letra"
-                dica="Só deste orquestrador, no canvas."
-                explicacao="Aumenta a letra do cartão inteiro, na configuração e na conversa, e o cartão cresce junto. Fica guardado neste navegador; dá para mudar depois, na engrenagem do terminal."
+                titulo={c.tamanhoDaLetra}
+                dica={c.tamanhoDaLetraDica}
+                explicacao={t.tamanhoDaLetraExplicacao}
               />
               <div className="permissoes-da-criacao w-fit" role="radiogroup" aria-labelledby={idDaLetra}>
                 {OPCOES_DA_ESCALA_DA_LETRA.map((opcao) => (
@@ -431,7 +434,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                       checked={escalaDaLetra === opcao.valor}
                       onChange={() => acoes.mudarEscalaDaLetra(id, opcao.valor)}
                     />
-                    {opcao.titulo}
+                    {opcao.valor === 1 ? c.escalaDaLetra.normal : opcao.valor === 1.15 ? c.escalaDaLetra.grande : c.escalaDaLetra.maior}
                   </label>
                 ))}
               </div>
@@ -440,9 +443,9 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
             <div className="linha-da-criacao">
               <Rotulo
                 htmlFor={`${idDoCampo}-instrucoes`}
-                titulo="Instruções"
-                dica="Regras só deste orquestrador."
-                explicacao="Entram no prompt dele, por exemplo o jeito de responder ou o que rodar antes de concluir. Vazio, valem as Instruções gerais (botão na barra). Aplicar perfil copia um texto pronto, criado no mesmo botão. Não ampliam a permissão acima."
+                titulo={c.instrucoes}
+                dica={c.instrucoesDica}
+                explicacao={t.instrucoesExplicacao}
                 alinharAoTopo
               />
               <div className="flex min-w-0 flex-col gap-1.5">
@@ -456,12 +459,12 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                   className="textarea instrucoes-da-criacao custom-scrollbar"
                   rows={7}
                   value={configuracao.instrucoesPersonalizadas}
-                  placeholder="Opcional. Ex.: Responda em tópicos curtos. Rode os testes antes de concluir."
+                  placeholder={c.instrucoesPlaceholder}
                   aria-invalid={passouDoLimite}
                   spellCheck
                   onChange={(evento) => mudar("instrucoesPersonalizadas", evento.target.value)}
                 />
-                <span className="hint">{DICA_DAS_VARIAVEIS}</span>
+                <span className="hint">{dicaDasVariaveis()}</span>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <PreviaDoPromptFinal
@@ -472,13 +475,12 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
                     />
                   </div>
                   <span className={`mono shrink-0 text-[11px] ${passouDoLimite ? "text-error" : "text-muted"}`} aria-live="polite">
-                    {tamanho.toLocaleString("pt-BR")} / {TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString("pt-BR")}
+                    {tamanho.toLocaleString(locale)} / {TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString(locale)}
                   </span>
                 </div>
                 {passouDoLimite && (
                   <span className="text-[11px] text-error" role="alert">
-                    Passou do limite de {TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString("pt-BR")} caracteres: encurte o texto
-                    para conseguir começar.
+                    {t.passouDoLimite(TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString(locale))}
                   </span>
                 )}
               </div>
@@ -506,7 +508,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
               )}
             </div>
             <button type="button" className="btn btn-ghost shrink-0" onClick={descartar}>
-              Descartar
+              {t.descartar}
             </button>
             <button
               type="submit"
@@ -514,7 +516,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
               disabled={criando || motivoParaNaoComecar !== null}
             >
               <span className="truncate">
-                {criando ? "Começando…" : motivoParaNaoComecar === null ? `Começar em ${nome.trim()}` : "Começar"}
+                {criando ? t.comecando : motivoParaNaoComecar === null ? t.comecarEm(nome.trim()) : t.comecar}
               </span>
               <span aria-hidden="true">⏎</span>
             </button>
@@ -535,10 +537,11 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
 
 /** Ex.: "/p/meu-app · commit e push · instruções próprias". */
 function detalhes(configuracao: DadosDaConfiguracao, pasta: string): string {
+  const textos = textosAtuais(textosDeRascunho).detalhes;
   return [
     pasta,
-    ...(configuracao.permitirCommitEPush && configuracao.nivelDePermissao === "edicao_e_comandos" ? ["commit e push"] : []),
-    ...(configuracao.permitirArtefatosOnline ? ["artefatos online"] : []),
-    configuracao.instrucoesPersonalizadas.trim() === "" ? "instruções gerais" : "instruções próprias",
+    ...(configuracao.permitirCommitEPush && configuracao.nivelDePermissao === "edicao_e_comandos" ? [textos.commitEPush] : []),
+    ...(configuracao.permitirArtefatosOnline ? [textos.artefatosOnline] : []),
+    configuracao.instrucoesPersonalizadas.trim() === "" ? textos.instrucoesGerais : textos.instrucoesProprias,
   ].join(" · ");
 }

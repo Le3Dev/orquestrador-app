@@ -1,4 +1,6 @@
 import { formatarTokens } from "../shared/formatacao";
+import { useTextos } from "../shared/idioma/idioma";
+import { textosDeComponentesComuns } from "../shared/idioma/textos/componentesComuns";
 import type { MelhoriaDoPrompt } from "../shared/hooks/useMelhorarPrompt";
 import { IconeBrilho } from "./Icones";
 
@@ -10,16 +12,17 @@ interface PropsDoBotao {
 
 /** O ✨ ao lado do campo; melhorando, vira "cancelar". */
 export function BotaoDeMelhorar({ melhoria, desabilitado }: PropsDoBotao) {
+  const t = useTextos(textosDeComponentesComuns).melhoria;
   if (melhoria.melhorando) {
     return (
       <button
         type="button"
         className="btn btn-sm btn-ghost"
-        aria-label="Cancelar a melhoria do pedido"
-        title="Cancelar a melhoria (o texto fica como estava)"
+        aria-label={t.cancelarRotulo}
+        title={t.cancelarDica}
         onClick={melhoria.cancelar}
       >
-        cancelar
+        {t.cancelar}
       </button>
     );
   }
@@ -27,8 +30,8 @@ export function BotaoDeMelhorar({ melhoria, desabilitado }: PropsDoBotao) {
     <button
       type="button"
       className="botao-icone botao-de-melhorar"
-      aria-label="Melhorar o pedido"
-      title="Melhorar o pedido"
+      aria-label={t.melhorar}
+      title={t.melhorar}
       disabled={desabilitado}
       onClick={melhoria.melhorar}
     >
@@ -44,25 +47,27 @@ interface PropsDoAviso {
 
 /** A linha perto do campo: "melhorando…", "melhorado · ≈ índice X · desfazer" ou o erro. */
 export function AvisoDaMelhoria({ melhoria, className = "" }: PropsDoAviso) {
+  const t = useTextos(textosDeComponentesComuns).melhoria;
   const { estado } = melhoria;
   if (estado.fase === "melhorando") {
     return (
       <p className={`mono hint ${className}`} role="status">
-        melhorando o pedido…
+        {t.melhorando}
       </p>
     );
   }
   if (estado.fase === "melhorado") {
     return (
       <p className={`mono hint ${className}`} role="status">
-        melhorado · ≈ índice {formatarTokens(estado.indiceDeCusto)} ·{" "}
+        {t.melhorado}
+        {formatarTokens(estado.indiceDeCusto)} ·{" "}
         <button
           type="button"
           className="botao-de-texto"
-          title="Volta o texto de antes da melhoria"
+          title={t.desfazerDica}
           onClick={melhoria.desfazer}
         >
-          desfazer
+          {t.desfazer}
         </button>
       </p>
     );

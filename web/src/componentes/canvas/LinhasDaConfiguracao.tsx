@@ -9,6 +9,8 @@ import type {
 import {
   ROTULOS_DOS_ESFORCOS,
 } from "../../shared/formatacao";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeNosDoCanvas } from "../../shared/idioma/textos/nosDoCanvas";
 import { Dica } from "../Dica";
 
 /*
@@ -52,11 +54,6 @@ export function Rotulo({ titulo, dica, explicacao, htmlFor, id, alinharAoTopo = 
   );
 }
 
-/** Pergunta antes de trocar instruções já escritas pelo texto de um perfil. */
-function confirmacaoParaAplicarPerfil(nome: string): string {
-  return `Trocar as instruções deste orquestrador pelas do perfil "${nome}"? O texto atual será substituído.`;
-}
-
 /**
  * "Aplicar perfil…": copia o texto de um perfil de instruções para o campo
  * das instruções. Sem vínculo: editar o perfil depois não muda este campo.
@@ -71,14 +68,15 @@ export function SeletorDePerfil({
   textoAtual: string;
   aoAplicar: (texto: string) => void;
 }) {
+  const t = useTextos(textosDeNosDoCanvas).configuracao;
   if (perfis.length === 0) {
     return null;
   }
   return (
     <select
       className="select select-compacto select-do-perfil"
-      aria-label="Aplicar perfil de instruções"
-      title="Copia o texto de um perfil para as instruções. Os perfis ficam no botão Instruções da barra."
+      aria-label={t.aplicarPerfil}
+      title={t.aplicarPerfilDica}
       // Sempre no item "Aplicar perfil…": é uma ação, não uma escolha guardada.
       value=""
       onChange={(evento) => {
@@ -87,14 +85,14 @@ export function SeletorDePerfil({
           return;
         }
         const outroTexto = textoAtual.trim() !== "" && textoAtual.trim() !== perfil.texto.trim();
-        if (outroTexto && !window.confirm(confirmacaoParaAplicarPerfil(perfil.nome))) {
+        if (outroTexto && !window.confirm(t.confirmarPerfil(perfil.nome))) {
           return;
         }
         aoAplicar(perfil.texto);
       }}
     >
       <option value="" disabled>
-        Aplicar perfil…
+        {t.aplicarPerfilOpcao}
       </option>
       {perfis.map((perfil, indice) => (
         <option key={perfil.nome} value={indice}>
@@ -113,14 +111,17 @@ export function AvisoDoEsforcoHerdado({
   esforco: EsforcoDeRaciocinio;
   herdado: DadosDoEsforcoHerdado | null;
 }) {
+  const t = useTextos(textosDeNosDoCanvas).configuracao;
   if (esforco !== "padrao" || herdado === null || !herdado.deveAvisar) {
     return null;
   }
   return (
     <span className="hint-warning">
-      No automático, o Claude Code usa <strong>{ROTULOS_DOS_ESFORCOS[herdado.nivel]}</strong> para este modelo
-      (definido em <span className="mono">{herdado.origem}</span>). Isso gasta mais tokens; escolha um esforço no menu
-      para controlar.
+      {t.herdadoAntes}
+      <strong>{ROTULOS_DOS_ESFORCOS[herdado.nivel]}</strong>
+      {t.herdadoMeio}
+      <span className="mono">{herdado.origem}</span>
+      {t.herdadoDepois}
     </span>
   );
 }

@@ -8,6 +8,10 @@ import {
   ordemDeReservaDe,
   rotuloDoMotor,
 } from "./modelos";
+import { textosAtuais } from "./idioma/idioma";
+import { textosDeApoioDosNos } from "./idioma/textos/nos";
+
+const textos = () => textosAtuais(textosDeApoioDosNos).resumo;
 
 /** O nome do modelo do Claude sem versão; um modelo fora da lista volta como veio. */
 function nomeDoModeloClaude(modelo: ModeloDoMotor): string {
@@ -16,7 +20,7 @@ function nomeDoModeloClaude(modelo: ModeloDoMotor): string {
 
 /** Ex.: "Opus (esforço automático)". */
 export function modeloComEsforco(modelo: ModeloDoMotor, esforco: EsforcoDeRaciocinio): string {
-  return `${nomeDoModeloClaude(modelo)} (esforço ${rotuloDoEsforcoNaCriacao(esforco).toLowerCase()})`;
+  return textos().modeloComEsforco(nomeDoModeloClaude(modelo), rotuloDoEsforcoNaCriacao(esforco).toLowerCase());
 }
 
 /**
@@ -37,8 +41,8 @@ function motorComModelo(motor: Motor, modelo: ModeloDoMotor): string {
  */
 export function resumoDaConfiguracao(configuracao: DadosDaConfiguracao): string {
   const { quantidadeDeSubagentes: quantidade } = configuracao;
-  const contagem = quantidade.modo === "automatica" ? `até ${quantidade.limite}` : `sempre ${quantidade.limite}`;
-  const subagentes = quantidade.limite === 1 ? "subagente" : "subagentes";
+  const contagem = quantidade.modo === "automatica" ? textos().ate(quantidade.limite) : textos().sempre(quantidade.limite);
+  const subagentes = quantidade.limite === 1 ? textos().subagente : textos().subagentes;
   const motorDoOrquestrador = motorDoOrquestradorDe(configuracao);
   const motorDosSubagentes = motorDosSubagentesDe(configuracao);
   const doOrquestrador =
@@ -53,11 +57,15 @@ export function resumoDaConfiguracao(configuracao: DadosDaConfiguracao): string 
         : modeloComEsforco(configuracao.modeloDosSubagentes, configuracao.esforcoDosSubagentes);
   const reserva = ordemDeReservaDe(configuracao);
   return (
-    `${ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome}, ` +
-    `${doOrquestrador} ` +
-    `com ${contagem} ${subagentes} ${dosSubagentes}.` +
-    (reserva.length > 0 ? ` Reserva: ${reserva.map(rotuloDoMotor).join(", ")}.` : "") +
-    (configuracao.permitirArtefatosOnline ? " Artefatos online ligados." : "") +
-    (configuracao.navegadorDoAgente === true ? " Navegador do agente ligado." : "")
+    textos().frase(
+      ROTULOS_DAS_PERMISSOES[configuracao.nivelDePermissao].nome,
+      doOrquestrador,
+      contagem,
+      subagentes,
+      dosSubagentes,
+    ) +
+    (reserva.length > 0 ? textos().reserva(reserva.map(rotuloDoMotor).join(", ")) : "") +
+    (configuracao.permitirArtefatosOnline ? textos().artefatosOnline : "") +
+    (configuracao.navegadorDoAgente === true ? textos().navegador : "")
   );
 }

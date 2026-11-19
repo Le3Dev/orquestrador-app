@@ -9,11 +9,12 @@ import { useAcoesDasNotas, useErroAoCarregarNotas, useLojaDasNotas, useNota } fr
 import { escreverPedidoArrastado } from "../../shared/canvas/pedidoArrastado";
 import { alternarItem, linhasDaNota } from "../../shared/checklistDaNota";
 import { type SituacaoDoSalvamento, useEdicaoDaNota } from "../../shared/hooks/useEdicaoDaNota";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeNota } from "../../shared/idioma/textos/notas";
 import { rodandoNoDesktop } from "../../shared/ponteDoDesktop";
 import { IconeAlerta } from "../Icones";
 import { ControlesDoNo } from "./ControlesDoNo";
 
-export const CONFIRMACAO_PARA_APAGAR = "Apagar esta nota? Isso não pode ser desfeito.";
 const TAMANHO_MAXIMO_DO_TITULO = 120;
 const TAMANHO_MAXIMO_DO_TEXTO = 100_000;
 
@@ -85,12 +86,13 @@ function IconeDeArrastar() {
  * Em branco, não arrasta.
  */
 function AlcaDeArraste({ texto, notaId, rotulo, className = "" }: { texto: string; notaId: string; rotulo: string; className?: string }) {
+  const t = useTextos(textosDeNota);
   const temTexto = texto.trim() !== "";
   return (
     <span
       role="img"
       aria-label={rotulo}
-      title={temTexto ? `${rotulo}: solte num terminal` : rotulo}
+      title={temTexto ? t.soltarNumTerminal(rotulo) : rotulo}
       className={`alca-de-arraste nodrag nopan ${className}`}
       draggable={temTexto}
       onDragStart={(evento) => {
@@ -121,13 +123,14 @@ function ListaDaNota({
   notaId: string;
   aoAlternar: (indiceDaLinha: number) => void;
 }) {
+  const t = useTextos(textosDeNota);
   if (texto.trim() === "") {
     return (
-      <p className="lista-da-nota lista-da-nota-vazia nodrag nowheel nopan">Nota vazia. Clique em editar para escrever.</p>
+      <p className="lista-da-nota lista-da-nota-vazia nodrag nowheel nopan">{t.vazia}</p>
     );
   }
   return (
-    <ul className="lista-da-nota custom-scrollbar nodrag nowheel nopan" aria-label="Linhas da nota">
+    <ul className="lista-da-nota custom-scrollbar nodrag nowheel nopan" aria-label={t.linhas}>
       {linhasDaNota(texto).map((linha, indice) => {
         if (linha.tipo === "vazia") {
           // A posição na lista é o índice da linha no texto: é o que o checklist reescreve.
@@ -135,7 +138,7 @@ function ListaDaNota({
         }
         return (
           <li key={indice} className="linha-da-nota">
-            <AlcaDeArraste texto={linha.texto} notaId={notaId} rotulo="Arrastar esta linha como pedido" />
+            <AlcaDeArraste texto={linha.texto} notaId={notaId} rotulo={t.arrastarLinha} />
             {linha.tipo === "item" ? (
               <label className="item-da-nota">
                 <input type="checkbox" checked={linha.marcado} onChange={() => aoAlternar(indice)} />
@@ -187,6 +190,7 @@ interface PropsDaJanela {
 
 /** Espera o conteúdo da nota chegar do servidor; daí em diante, quem manda é o editor. */
 const JanelaDaNota = memo(function JanelaDaNota({ notaId, minimizada }: PropsDaJanela) {
+  const t = useTextos(textosDeNota);
   const nota = useNota(notaId);
   const erroAoCarregar = useErroAoCarregarNotas();
 
@@ -194,11 +198,11 @@ const JanelaDaNota = memo(function JanelaDaNota({ notaId, minimizada }: PropsDaJ
     return (
       <div className={`janela-nota ${minimizada ? "janela-nota-minimizada" : ""}`}>
         <div className={`barra-da-nota ${ALCA_DA_NOTA}`}>
-          <span className="titulo-da-nota text-muted">nota</span>
+          <span className="titulo-da-nota text-muted">{t.nota}</span>
         </div>
         {!minimizada && (
           <p className={`mono texto-longo px-3 py-2 ${erroAoCarregar === null ? "text-muted" : "text-error"}`}>
-            {erroAoCarregar === null ? "carregando nota…" : `✗ Não foi possível carregar a nota. ${erroAoCarregar}`}
+            {erroAoCarregar === null ? t.carregando : t.naoCarregou(erroAoCarregar)}
           </p>
         )}
       </div>
@@ -215,18 +219,20 @@ function IndicadorDeSalvamento({
   situacao: SituacaoDoSalvamento;
   aoTentarDeNovo: () => void;
 }) {
+  const t = useTextos(textosDeNota);
   if (situacao === "erro") {
     return (
       <button type="button" className="botao-de-texto text-error nodrag" onClick={aoTentarDeNovo}>
-        erro ao salvar — tentar de novo
+        {t.erroAoSalvarTentar}
       </button>
     );
   }
-  return <span className="text-muted">{situacao === "salvo" ? "salvo" : "salvando…"}</span>;
+  return <span className="text-muted">{situacao === "salvo" ? t.salvo : t.salvando}</span>;
 }
 
 /** Campo do título, aberto no clique duplo. Enter confirma; Esc desiste. */
 function CampoDoTitulo({ titulo, aoConcluir }: { titulo: string; aoConcluir: (novo: string | null) => void }) {
+  const t = useTextos(textosDeNota);
   const campo = useRef<HTMLInputElement>(null);
   const desistiu = useRef(false);
 
@@ -240,9 +246,9 @@ function CampoDoTitulo({ titulo, aoConcluir }: { titulo: string; aoConcluir: (no
     <input
       ref={campo}
       className="campo-do-titulo-da-nota nodrag"
-      aria-label="Título da nota"
+      aria-label={t.tituloDaNota}
       defaultValue={titulo}
-      placeholder="Sem título"
+      placeholder={t.semTitulo}
       maxLength={TAMANHO_MAXIMO_DO_TITULO}
       onKeyDown={(evento) => {
         if (evento.key === "Enter") {
@@ -270,6 +276,7 @@ interface PropsDoEditor {
  * os itens de checklist marcáveis e cada linha arrastável até um terminal).
  */
 function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
+  const t = useTextos(textosDeNota);
   const loja = useLojaDasNotas();
   const acoes = useAcoesDasNotas();
   const notaId = inicial.id;
@@ -334,7 +341,7 @@ function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
   }
 
   async function apagar(): Promise<void> {
-    if (!window.confirm(CONFIRMACAO_PARA_APAGAR)) {
+    if (!window.confirm(t.confirmarApagar)) {
       return;
     }
     setErroAoApagar(null);
@@ -344,7 +351,7 @@ function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
     } catch (falha) {
       // Já apagada (em outra aba, por exemplo): basta tirá-la do canvas.
       if (!(falha instanceof ErroDaApi && falha.status === 404)) {
-        setErroAoApagar(`Não foi possível apagar a nota: ${mensagemDeErro(falha)}`);
+        setErroAoApagar(t.naoApagou(mensagemDeErro(falha)));
         setApagando(false);
         return;
       }
@@ -353,11 +360,11 @@ function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
     acoes.notaApagada(notaId);
   }
 
-  const problema = edicao.situacao === "erro" ? `Erro ao salvar: ${edicao.erro ?? ""}` : erroAoApagar;
+  const problema = edicao.situacao === "erro" ? t.erroAoSalvar(edicao.erro ?? "") : erroAoApagar;
 
   // A nota só minimiza: apagar (a lixeira) é outra ação, e ela não tem tela cheia nem um "fechar" que a tire do canvas sem apagar.
   const controlesDaJanela = {
-    objeto: "a nota",
+    objeto: t.objeto,
     aoMinimizar: () => acoes.minimizarOuRestaurar(notaId),
     minimizada,
   };
@@ -371,10 +378,10 @@ function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
         ) : (
           <strong
             className="titulo-da-nota"
-            title="Clique duplo para renomear"
+            title={t.cliqueDuploParaRenomear}
             onDoubleClick={() => setEditandoTitulo(true)}
           >
-            {edicao.titulo || "Sem título"}
+            {edicao.titulo || t.semTitulo}
           </strong>
         )}
         {minimizada ? (
@@ -387,14 +394,14 @@ function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
             <AlcaDeArraste
               texto={edicao.texto}
               notaId={notaId}
-              rotulo="Arrastar a nota inteira como pedido"
+              rotulo={t.arrastarNota}
               className="alca-de-arraste-da-nota"
             />
             <button
               type="button"
               className="botao-icone nodrag"
-              title={modo === "editar" ? "Ver como lista (marcar itens e arrastar linhas)" : "Editar o texto"}
-              aria-label={modo === "editar" ? "Ver como lista" : "Editar o texto"}
+              title={modo === "editar" ? t.verComoListaDica : t.editarOTexto}
+              aria-label={modo === "editar" ? t.verComoLista : t.editarOTexto}
               onClick={() => setModo(modo === "editar" ? "lista" : "editar")}
             >
               {modo === "editar" ? <IconeLista /> : <IconeEditar />}
@@ -406,8 +413,8 @@ function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
           <button
             type="button"
             className="botao-icone nodrag text-error"
-            title={`${problema} Clique para abrir a nota.`}
-            aria-label="Ver o problema da nota"
+            title={t.problemaDica(problema)}
+            aria-label={t.verOProblema}
             onClick={() => acoes.minimizarOuRestaurar(notaId)}
           >
             <IconeAlerta tamanho={16} />
@@ -416,8 +423,8 @@ function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
         <button
           type="button"
           className="botao-icone botao-icone-perigo nodrag"
-          title="Apagar a nota"
-          aria-label="Apagar a nota"
+          title={t.apagar}
+          aria-label={t.apagar}
           disabled={apagando}
           onClick={() => void apagar()}
         >
@@ -432,8 +439,8 @@ function ConteudoDoEditor({ inicial, minimizada }: PropsDoEditor) {
             <textarea
               ref={campo}
               className="texto-da-nota custom-scrollbar nodrag nowheel nopan"
-              aria-label="Texto da nota"
-              placeholder="Escreva aqui…"
+              aria-label={t.textoDaNota}
+              placeholder={t.escrevaAqui}
               value={edicao.texto}
               maxLength={TAMANHO_MAXIMO_DO_TEXTO}
               onChange={(evento) => edicao.mudarTexto(evento.target.value)}

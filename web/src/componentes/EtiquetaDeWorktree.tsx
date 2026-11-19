@@ -1,4 +1,6 @@
 import type { DadosDoWorktree } from "../shared/api/tipos";
+import { useTextos } from "../shared/idioma/idioma";
+import { textosDeComponentesComuns } from "../shared/idioma/textos/componentesComuns";
 import { IconeBranch } from "./Icones";
 
 /**
@@ -18,6 +20,7 @@ export function EtiquetaDeWorktree({
   worktree: DadosDoWorktree | null;
   className?: string;
 }) {
+  const t = useTextos(textosDeComponentesComuns).worktree;
   if (worktree === null) {
     return null;
   }
@@ -25,7 +28,7 @@ export function EtiquetaDeWorktree({
   return (
     <span
       className={`chip ${ativo ? "chip-ativo" : "chip-inativo"} min-w-0 overflow-hidden ${className}`}
-      title={`Branch: ${branch}\nWorktree: ${caminho}${ativo ? " · em uso agora" : " · inativo"}`}
+      title={t.dica(branch, caminho, ativo)}
     >
       <IconeBranch tamanho={11} className="mr-1 shrink-0" />
       <span className="min-w-0 truncate">{branch}</span>

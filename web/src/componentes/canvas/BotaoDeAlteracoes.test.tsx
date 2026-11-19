@@ -3,8 +3,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   type AlteracoesDoWorktree,
   apiDeAlteracoes,
-  TEXTO_SEM_ALTERACOES,
-  TEXTO_SEM_GIT,
+  textoSemAlteracoes,
+  textoSemGit,
 } from "../../shared/api/alteracoes";
 import { ErroDaApi } from "../../shared/api/cliente";
 import type { DadosDaConfiguracao, EventoDeOrquestracao, EventoRegistrado } from "../../shared/api/tipos";
@@ -149,7 +149,7 @@ describe("BotaoDeAlteracoes", () => {
     );
     render(arvore(ESTADO_INICIAL));
 
-    await waitFor(() => expect(botao()).toHaveAttribute("title", TEXTO_SEM_ALTERACOES));
+    await waitFor(() => expect(botao()).toHaveAttribute("title", textoSemAlteracoes()));
     expect(botao()).toBeDisabled();
     expect(screen.queryByTestId("contagem-de-alteracoes")).not.toBeInTheDocument();
   });
@@ -160,7 +160,7 @@ describe("BotaoDeAlteracoes", () => {
     );
     render(arvore(ESTADO_INICIAL));
 
-    await waitFor(() => expect(botao()).toHaveAttribute("title", TEXTO_SEM_GIT));
+    await waitFor(() => expect(botao()).toHaveAttribute("title", textoSemGit()));
     expect(botao()).toBeDisabled();
   });
 

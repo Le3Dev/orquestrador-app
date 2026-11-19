@@ -5,7 +5,9 @@ import { api, ErroDaApi } from "../../shared/api/cliente";
 import type { DadosDaPredefinicao, ResumoDoOrquestrador } from "../../shared/api/tipos";
 import { ProvedorDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
 import type { NoRascunho as TipoDoNo } from "../../shared/canvas/nos";
-import { CONFIRMACAO_PARA_DESCARTAR_O_RASCUNHO, NoRascunho } from "./NoRascunho";
+import { textosAtuais } from "../../shared/idioma/idioma";
+import { textosDeRascunho } from "../../shared/idioma/textos/rascunho";
+import { NoRascunho } from "./NoRascunho";
 
 const PROPS: NodeProps<TipoDoNo> = {
   id: "rascunho:1",
@@ -686,7 +688,7 @@ describe("NoRascunho", () => {
     fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
 
     expect(confirmar).toHaveBeenCalledTimes(2);
-    expect(confirmar).toHaveBeenCalledWith(CONFIRMACAO_PARA_DESCARTAR_O_RASCUNHO);
+    expect(confirmar).toHaveBeenCalledWith(textosAtuais(textosDeRascunho).confirmarDescartar);
     expect(acoes.descartarRascunho).not.toHaveBeenCalled();
 
     confirmar.mockReturnValue(true);

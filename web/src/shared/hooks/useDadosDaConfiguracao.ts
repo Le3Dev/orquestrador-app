@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { api } from "../api/cliente";
 import type { DadosDaPredefinicao, DadosDasPreferencias, EsforcosHerdados, EstadoDoMotor, Motor } from "../api/tipos";
 import { descreverAlteracoesDaConfiguracao } from "../formatacao";
+import { textosAtuais } from "../idioma/idioma";
+import { textosDeApoioDosNos } from "../idioma/textos/nos";
 import { rotuloDoMotor } from "../modelos";
 
 // Usados pela ⚙ do terminal (CamposDaConfiguracao) e pela criação (NoRascunho).
@@ -82,7 +84,7 @@ export function motivoDoMotorIndisponivel(situacao: SituacaoDosMotores, motor: M
   if (estado === null || estado.instalado) {
     return null;
   }
-  return estado.mensagem ?? `${estado.rotulo || rotuloDoMotor(motor)} não está instalado neste computador.`;
+  return estado.mensagem ?? textosAtuais(textosDeApoioDosNos).configuracao.naoInstalado(estado.rotulo || rotuloDoMotor(motor));
 }
 
 /**
@@ -94,7 +96,7 @@ export function avisoDoMotor(situacao: SituacaoDosMotores, motor: Motor): string
     return null;
   }
   if (estado.logado === false) {
-    return estado.mensagem ?? `Faça login no ${estado.rotulo || rotuloDoMotor(motor)} antes de usar.`;
+    return estado.mensagem ?? textosAtuais(textosDeApoioDosNos).configuracao.faltaLogin(estado.rotulo || rotuloDoMotor(motor));
   }
   return null;
 }

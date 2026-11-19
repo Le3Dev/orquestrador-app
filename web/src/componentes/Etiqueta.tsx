@@ -1,19 +1,21 @@
 import type { SituacaoDoOrquestrador, SituacaoDoSubagente, SituacaoDoTurno } from "../shared/api/tipos";
+import { useTextos } from "../shared/idioma/idioma";
+import { textosDeComponentesComuns } from "../shared/idioma/textos/componentesComuns";
 
 type Situacao = SituacaoDoOrquestrador | SituacaoDoTurno | SituacaoDoSubagente;
 
-const APARENCIA: Readonly<Record<Situacao, { rotulo: string; classe: string }>> = {
-  ocioso: { rotulo: "Ocioso", classe: "" },
-  trabalhando: { rotulo: "Trabalhando", classe: "etiqueta-ativa etiqueta-pulso" },
-  em_andamento: { rotulo: "Em andamento", classe: "etiqueta-ativa etiqueta-pulso" },
-  executando: { rotulo: "Executando", classe: "etiqueta-ativa etiqueta-pulso" },
-  concluido: { rotulo: "Concluído", classe: "etiqueta-success" },
-  falhou: { rotulo: "Falhou", classe: "etiqueta-error" },
-  cancelado: { rotulo: "Cancelado", classe: "etiqueta-warning" },
-  interrompido: { rotulo: "Interrompido", classe: "etiqueta-warning" },
+const CLASSES: Readonly<Record<Situacao, string>> = {
+  ocioso: "",
+  trabalhando: "etiqueta-ativa etiqueta-pulso",
+  em_andamento: "etiqueta-ativa etiqueta-pulso",
+  executando: "etiqueta-ativa etiqueta-pulso",
+  concluido: "etiqueta-success",
+  falhou: "etiqueta-error",
+  cancelado: "etiqueta-warning",
+  interrompido: "etiqueta-warning",
 };
 
 export function Etiqueta({ situacao }: { situacao: Situacao }) {
-  const { rotulo, classe } = APARENCIA[situacao];
-  return <span className={`etiqueta ${classe}`}>{rotulo}</span>;
+  const t = useTextos(textosDeComponentesComuns).situacoes;
+  return <span className={`etiqueta ${CLASSES[situacao]}`}>{t[situacao]}</span>;
 }

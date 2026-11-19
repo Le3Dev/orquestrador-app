@@ -2,6 +2,9 @@ import { isValidElement, memo, type ReactNode, useEffect, useRef, useState } fro
 import Markdown, { type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { useTextos } from "../shared/idioma/idioma";
+import { textosDeComponentesComuns } from "../shared/idioma/textos/componentesComuns";
+
 // Constantes fora do componente: objetos novos a cada render não deixariam o
 // react-markdown (nem quem o envolve) reaproveitar nada.
 
@@ -13,12 +16,6 @@ const PLUGINS_DO_REMARK: Options["remarkPlugins"] = [[remarkGfm, { singleTilde: 
 const DURACAO_DO_AVISO_DE_COPIA_MS = 1500;
 
 type EstadoDaCopia = "pronto" | "copiado" | "falhou";
-
-const ROTULOS_DA_COPIA: Readonly<Record<EstadoDaCopia, string>> = {
-  pronto: "copiar",
-  copiado: "copiado",
-  falhou: "não copiou",
-};
 
 /** A linguagem da cerca (```ts vira a classe `language-ts` no `code`); sem ela, nula. */
 function linguagemDo(codigo: ReactNode): string | null {
@@ -34,6 +31,8 @@ function linguagemDo(codigo: ReactNode): string | null {
  * código (sem a quebra de linha final que o Markdown sempre deixa).
  */
 function BlocoDeCodigo({ children }: { children?: ReactNode }) {
+  const t = useTextos(textosDeComponentesComuns).codigo;
+  const rotulos: Readonly<Record<EstadoDaCopia, string>> = { pronto: t.copiar, copiado: t.copiado, falhou: t.naoCopiou };
   const pre = useRef<HTMLPreElement>(null);
   const [estado, setEstado] = useState<EstadoDaCopia>("pronto");
   const temporizador = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -69,16 +68,16 @@ function BlocoDeCodigo({ children }: { children?: ReactNode }) {
   return (
     <div className="bloco-de-codigo">
       <div className="faixa-do-codigo">
-        <span className="linguagem-do-codigo">{linguagemDo(children) ?? "código"}</span>
+        <span className="linguagem-do-codigo">{linguagemDo(children) ?? t.linguagemPadrao}</span>
         <button
           type="button"
           className="botao-de-copiar"
           data-estado={estado}
-          title="Copiar o código"
+          title={t.copiarDica}
           aria-live="polite"
           onClick={() => void copiar()}
         >
-          {ROTULOS_DA_COPIA[estado]}
+          {rotulos[estado]}
         </button>
       </div>
       <pre ref={pre}>{children}</pre>

@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 
 import { api, mensagemDeErro } from "../../shared/api/cliente";
 import type { NavegacaoDePastas } from "../../shared/api/tipos";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineisDosNos } from "../../shared/idioma/textos/paineisDosNos";
 import { IconeFechar, IconePasta, IconeSetaAcima } from "../Icones";
 
 interface Props {
@@ -23,6 +25,7 @@ interface Props {
  * ele não servir, a lista continua na pasta anterior e o erro aparece abaixo.
  */
 export function NavegadorDePastas({ caminhoInicial, aoEscolher, aoFechar }: Props) {
+  const t = useTextos(textosDePaineisDosNos).pastas;
   const [navegacao, setNavegacao] = useState<NavegacaoDePastas | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
@@ -75,7 +78,7 @@ export function NavegadorDePastas({ caminhoInicial, aoEscolher, aoFechar }: Prop
   /** Navega para o caminho digitado no campo. */
   function irParaODigitado(): Promise<NavegacaoDePastas | null> {
     if (texto.trim() === "") {
-      setErroDoCaminho("Digite o caminho de uma pasta.");
+      setErroDoCaminho(t.digiteOCaminho);
       campo.current?.focus();
       return Promise.resolve(null);
     }
@@ -137,12 +140,12 @@ export function NavegadorDePastas({ caminhoInicial, aoEscolher, aoFechar }: Prop
         onClick={(evento) => evento.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Escolher pasta do computador"
+        aria-label={t.escolherAria}
       >
         <div className="flex items-center gap-2 border-b border-border bg-surface-2 px-4 py-3">
-          <strong className="font-titulo text-[12.5px] font-semibold">escolher pasta do computador</strong>
+          <strong className="font-titulo text-[12.5px] font-semibold">{t.escolher}</strong>
           <span className="flex-1" />
-          <button type="button" className="botao-icone" title="Fechar" aria-label="Fechar" onClick={aoFechar}>
+          <button type="button" className="botao-icone" title={t.fechar} aria-label={t.fechar} onClick={aoFechar}>
             <IconeFechar tamanho={16} />
           </button>
         </div>
@@ -154,9 +157,9 @@ export function NavegadorDePastas({ caminhoInicial, aoEscolher, aoFechar }: Prop
               className="btn btn-sm btn-outline"
               disabled={carregando || navegacao?.pai == null}
               onClick={() => navegacao?.pai != null && void abrir(navegacao.pai)}
-              title="Subir uma pasta"
+              title={t.subir}
             >
-              <IconeSetaAcima tamanho={14} /> acima
+              <IconeSetaAcima tamanho={14} /> {t.acima}
             </button>
             <input
               ref={campo}
@@ -164,11 +167,11 @@ export function NavegadorDePastas({ caminhoInicial, aoEscolher, aoFechar }: Prop
               className={`mono h-7 min-w-0 flex-1 rounded-md border bg-transparent px-2 text-[12px] text-secondary outline-none transition-colors focus:bg-surface-2 focus:text-primary ${
                 erroDoCaminho !== null ? "border-error" : "border-transparent hover:border-border-forte focus:border-active"
               }`}
-              aria-label="Caminho da pasta"
+              aria-label={t.caminhoDaPasta}
               aria-invalid={erroDoCaminho !== null}
               aria-describedby={erroDoCaminho !== null ? idDoErro : undefined}
               title={texto}
-              placeholder={navegacao === null && carregando ? "…" : "/caminho/da/pasta"}
+              placeholder={navegacao === null && carregando ? "…" : t.caminhoPlaceholder}
               value={texto}
               spellCheck={false}
               autoCapitalize="off"
@@ -189,10 +192,10 @@ export function NavegadorDePastas({ caminhoInicial, aoEscolher, aoFechar }: Prop
         </div>
 
         <div className="custom-scrollbar min-h-32 flex-1 overflow-y-auto p-1.5">
-          {carregando && <p className="mono px-2 py-2 text-caption text-muted">carregando pastas…</p>}
+          {carregando && <p className="mono px-2 py-2 text-caption text-muted">{t.carregando}</p>}
           {erro !== null && <p className="mono texto-longo px-2 py-2 text-error">✗ {erro}</p>}
           {!carregando && erro === null && navegacao !== null && navegacao.pastas.length === 0 && (
-            <p className="mono px-2 py-2 text-caption text-muted">nenhuma subpasta aqui.</p>
+            <p className="mono px-2 py-2 text-caption text-muted">{t.nenhuma}</p>
           )}
           {!carregando &&
             erro === null &&
@@ -201,7 +204,7 @@ export function NavegadorDePastas({ caminhoInicial, aoEscolher, aoFechar }: Prop
                 key={pasta.caminho}
                 type="button"
                 className="mono flex w-full items-center gap-2 truncate rounded px-2 py-1.5 text-left text-[12.5px] text-primary hover:bg-surface-3"
-                title={`Abrir ${pasta.nome} (duplo clique escolhe)`}
+                title={t.abrir(pasta.nome)}
                 onClick={() => void abrir(pasta.caminho)}
                 onDoubleClick={() => aoEscolher(pasta.caminho)}
               >
@@ -212,10 +215,10 @@ export function NavegadorDePastas({ caminhoInicial, aoEscolher, aoFechar }: Prop
         </div>
 
         <div className="flex items-center justify-between gap-2 border-t border-border bg-surface-2 px-4 py-3">
-          <span className="hint">Digite o caminho ou navegue pela lista.</span>
+          <span className="hint">{t.dica}</span>
           <div className="flex shrink-0 gap-2">
             <button type="button" className="btn btn-sm btn-ghost" onClick={aoFechar}>
-              cancelar
+              {t.cancelar}
             </button>
             <button
               type="button"
@@ -223,7 +226,7 @@ export function NavegadorDePastas({ caminhoInicial, aoEscolher, aoFechar }: Prop
               disabled={navegacao === null && !alterado}
               onClick={() => void usarEstaPasta()}
             >
-              usar esta pasta ⏎
+              {t.usar}
             </button>
           </div>
         </div>

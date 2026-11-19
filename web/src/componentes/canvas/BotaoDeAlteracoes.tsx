@@ -3,14 +3,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   apiDeAlteracoes,
   type ConsultaDasAlteracoes,
-  TEXTO_SEM_ALTERACOES,
-  TEXTO_SEM_GIT,
   textoDosCommitsNaBranch,
+  textoSemAlteracoes,
+  textoSemGit,
 } from "../../shared/api/alteracoes";
 import { mensagemDeErro } from "../../shared/api/cliente";
 import type { ResumoDoOrquestrador } from "../../shared/api/tipos";
 import { useCanvas } from "../../shared/canvas/contexto";
 import type { EstadoDaConversa } from "../../shared/estado/aplicarEvento";
+import { textosAtuais, useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineisDosNos } from "../../shared/idioma/textos/paineisDosNos";
 import { PainelDeAlteracoes } from "./PainelDeAlteracoes";
 
 /**
@@ -53,22 +55,22 @@ function useAlteracoesDoWorktree(orquestradorId: string) {
 }
 
 function tituloDoBotao(consulta: ConsultaDasAlteracoes): string {
+  const t = textosAtuais(textosDePaineisDosNos).alteracoes;
   const { alteracoes, erro } = consulta;
   if (erro !== null) {
-    return `Alterações do worktree: ${erro} Clique para tentar de novo.`;
+    return t.comErro(erro);
   }
   if (alteracoes === null) {
-    return "Alterações do worktree: lendo…";
+    return t.lendo;
   }
   if (alteracoes.situacao === "sem_git") {
-    return TEXTO_SEM_GIT;
+    return textoSemGit();
   }
   const quantidade = alteracoes.arquivos.length;
   if (quantidade === 0) {
-    return [TEXTO_SEM_ALTERACOES, textoDosCommitsNaBranch(alteracoes)].filter((texto) => texto !== null).join(" ");
+    return [textoSemAlteracoes(), textoDosCommitsNaBranch(alteracoes)].filter((texto) => texto !== null).join(" ");
   }
-  const arquivos = quantidade === 1 ? "1 arquivo alterado" : `${quantidade} arquivos alterados`;
-  return `Alterações do worktree: ${arquivos} na branch ${alteracoes.branch ?? "?"} (ver a lista e o diff)`;
+  return t.resumo(quantidade, alteracoes.branch ?? "?");
 }
 
 /** Arquivo com linhas a mais e a menos: o ícone das alterações. */
@@ -97,6 +99,7 @@ function IconeDeAlteracoes({ className = "" }: { className?: string }) {
  * vai no `title`.
  */
 export function BotaoDeAlteracoes({ orquestradorId }: { orquestradorId: string }) {
+  const t = useTextos(textosDePaineisDosNos).alteracoes;
   const { conversas, orquestradores } = useCanvas();
   const resumo = orquestradores.get(orquestradorId);
   const trabalhando = estaTrabalhando(conversas.get(orquestradorId), resumo);
@@ -135,7 +138,7 @@ export function BotaoDeAlteracoes({ orquestradorId }: { orquestradorId: string }
         ref={botao}
         type="button"
         className="botao-icone nodrag relative"
-        aria-label="Alterações do worktree"
+        aria-label={t.botao}
         aria-haspopup="dialog"
         aria-expanded={aberto}
         title={tituloDoBotao(consulta)}

@@ -30,6 +30,8 @@ import {
   idCurto,
 } from "../../shared/formatacao";
 import { useRelogio } from "../../shared/hooks/useRelogio";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeTranscricao } from "../../shared/idioma/textos/transcricao";
 import { ChipDeAnexo } from "../ChipDeAnexo";
 import { IconeAlerta, IconeCoracao, IconeOrquestrador, IconeRaio } from "../Icones";
 import { CartaoDePergunta } from "../chat/CartaoDePergunta";
@@ -65,8 +67,9 @@ function Girador() {
  * dele, como o bixinho no canvas; os outros, pelo nome do bicho.
  */
 const LinhaDoTerminal = memo(function LinhaDoTerminal({ linha, papel }: { linha: LinhaDoLog; papel: string | null }) {
+  const t = useTextos(textosDeTranscricao);
   const doOrquestrador = linha.origem === "orquestrador";
-  const origem = doOrquestrador ? "orquestrador" : `${nomeDoBixinho(linha.origem, papel)}#${idCurto(linha.origem)}`;
+  const origem = doOrquestrador ? t.origemOrquestrador : `${nomeDoBixinho(linha.origem, papel)}#${idCurto(linha.origem)}`;
   return (
     <div className={`linha-do-terminal linha-${linha.tipo}`}>
       <span className="text-muted">{formatarHora(linha.em)}</span>
@@ -91,10 +94,9 @@ const LinhaDoTerminal = memo(function LinhaDoTerminal({ linha, papel }: { linha:
  * de cancelar e reenviar. A preferência só é lida aqui, com o aviso na tela.
  */
 function AvisoDeSuspeita({ aviso, semRetomada = false }: { aviso: string; semRetomada?: boolean }) {
+  const t = useTextos(textosDeTranscricao);
   const autorrecuperacao = useAutorrecuperacao();
-  const orientacao = autorrecuperacao && !semRetomada
-    ? "O app retoma sozinho se travar."
-    : "Se continuar assim, cancele (esc) e reenvie.";
+  const orientacao = autorrecuperacao && !semRetomada ? t.orientacaoRetoma : t.orientacaoCancelar;
   return <>{`${aviso} ${orientacao}`}</>;
 }
 
@@ -103,6 +105,7 @@ function AvisoDeSuspeita({ aviso, semRetomada = false }: { aviso: string; semRet
  * silêncio. `motor` é o nome curto de quem executa o turno ("Claude", "Codex" ou "Copilot").
  */
 function TextoDoSinal({ vida, motor }: { vida: EstadoDeVida; motor: string }) {
+  const t = useTextos(textosDeTranscricao);
   if (vida.diagnostico?.situacao === "trabalhando") {
     // Calado, mas trabalhando (um comando longo): sem tom de alarme.
     return <>{vida.diagnostico.resumo}</>;
@@ -110,18 +113,18 @@ function TextoDoSinal({ vida, motor }: { vida: EstadoDeVida; motor: string }) {
   if (vida.diagnostico?.situacao === "suspeito") {
     return (
       <AvisoDeSuspeita
-        aviso={`sem notícias do ${motor} há ${formatarDuracao(vida.ultimoSinalHaMs)}: ${vida.diagnostico.resumo}.`}
+        aviso={t.semNoticias(motor, formatarDuracao(vida.ultimoSinalHaMs), vida.diagnostico.resumo)}
         semRetomada={vida.diagnostico.semRetomadaAutomatica === true}
       />
     );
   }
   if (vida.preocupante) {
     // Sem diagnóstico do servidor: só o tempo de silêncio, com a mesma orientação.
-    return <AvisoDeSuspeita aviso={`sem notícias do ${motor} há ${formatarDuracao(vida.ultimoSinalHaMs)} — pode ter travado.`} />;
+    return <AvisoDeSuspeita aviso={t.semNoticiasTempo(motor, formatarDuracao(vida.ultimoSinalHaMs))} />;
   }
   return (
     <>
-      {`${vida.tokensPensando === null ? "" : `pensando · ~${formatarTokens(vida.tokensPensando)} tokens de raciocínio · `}último sinal há ${formatarDuracao(vida.ultimoSinalHaMs)}`}
+      {t.sinalDeVida(vida.tokensPensando === null ? null : formatarTokens(vida.tokensPensando), formatarDuracao(vida.ultimoSinalHaMs))}
     </>
   );
 }
@@ -181,11 +184,12 @@ function CartaoDeRetomada({
   recuperacao: RecuperacaoNaTela;
   desconectado: boolean;
 }) {
+  const t = useTextos(textosDeTranscricao);
   const agora = useRelogio(true);
   const [cancelando, setCancelando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const restanteMs = recuperacao.retomaEm === null ? 0 : Date.parse(recuperacao.retomaEm) - agora.getTime();
-  const tentativa = `(tentativa ${recuperacao.tentativa} de ${recuperacao.de})`;
+  const tentativa = t.retomada.tentativa(recuperacao.tentativa, recuperacao.de);
 
   const cancelar = async () => {
     setErro(null);
@@ -200,14 +204,15 @@ function CartaoDeRetomada({
 
   return (
     <div className="flex flex-col gap-1">
-      <div className="cartao-de-retomada" role="status" aria-label="Retomada automática">
+      <div className="cartao-de-retomada" role="status" aria-label={t.retomada.aria}>
         <span className="cartao-de-retomada-texto">
           {restanteMs > 0 ? (
             <>
-              Retomando em <span className="cartao-de-retomada-contagem">{formatarContagem(restanteMs)}</span>
+              {t.retomada.retomandoEm}
+              <span className="cartao-de-retomada-contagem">{formatarContagem(restanteMs)}</span>
             </>
           ) : (
-            "Retomando agora"
+            t.retomada.retomandoAgora
           )}{" "}
           {tentativa} · {recuperacao.resumo}
         </span>
@@ -216,9 +221,9 @@ function CartaoDeRetomada({
           className="btn btn-sm btn-outline"
           onClick={() => void cancelar()}
           disabled={cancelando || desconectado}
-          title={`Não retomar sozinho (${CAUSAS_LEGIVEIS[recuperacao.causa]})`}
+          title={t.retomada.naoRetomarSozinho(CAUSAS_LEGIVEIS[recuperacao.causa])}
         >
-          {cancelando ? "cancelando…" : "cancelar retomada"}
+          {cancelando ? t.retomada.cancelando : t.retomada.cancelar}
         </button>
       </div>
       {erro !== null && <p className="hint-error">{erro}</p>}
@@ -231,8 +236,9 @@ function CartaoDeRetomada({
  * quem assumiu e por quê. Ex.: "Trocou para Codex: limite do Claude atingido (libera às 14:30)".
  */
 function AvisoDeTrocaDeMotor({ troca }: { troca: TrocaDeMotorNaTela }) {
+  const t = useTextos(textosDeTranscricao);
   return (
-    <div className="aviso-de-troca-de-motor" role="status" aria-label="Troca de motor">
+    <div className="aviso-de-troca-de-motor" role="status" aria-label={t.trocaDeMotor}>
       <IconeAlerta tamanho={13} />
       <span className="min-w-0 texto-longo">{textoDaTrocaDeMotor(troca)}</span>
     </div>
@@ -241,17 +247,16 @@ function AvisoDeTrocaDeMotor({ troca }: { troca: TrocaDeMotorNaTela }) {
 
 /** O app esgotou as tentativas: o diagnóstico e o que o usuário pode fazer. */
 function CartaoDeDesistencia({ recuperacao }: { recuperacao: RecuperacaoNaTela }) {
+  const t = useTextos(textosDeTranscricao);
   return (
-    <div className="cartao-de-desistencia" role="group" aria-label="Retomada automática sem sucesso">
+    <div className="cartao-de-desistencia" role="group" aria-label={t.desistencia.aria}>
       <span className="cartao-de-desistencia-titulo">
         <IconeAlerta tamanho={12} />
-        Não consegui retomar sozinho ({CAUSAS_LEGIVEIS[recuperacao.causa]}, {recuperacao.tentativa} de {recuperacao.de}{" "}
-        tentativas)
+        {t.desistencia.titulo(CAUSAS_LEGIVEIS[recuperacao.causa], recuperacao.tentativa, recuperacao.de)}
       </span>
       <p className="cartao-de-desistencia-diagnostico">{recuperacao.resumo}</p>
       <p className="cartao-de-desistencia-orientacao">
-        Você decide o próximo passo: reenvie o pedido (se puder, em partes menores) ou confira o log acima para ver onde
-        ele parou.
+        {t.desistencia.orientacao}
       </p>
     </div>
   );
@@ -286,6 +291,7 @@ const Turno = memo(function Turno({
   acoesDoPlano,
   aoResponderPergunta,
 }: PropsDoTurno) {
+  const t = useTextos(textosDeTranscricao);
   const emAndamento = turno.situacao === "em_andamento";
   // Pedidos já encerrados mostram só os marcos: as centenas de ações dos
   // agentes interessam enquanto acontecem, não no histórico.
@@ -310,10 +316,10 @@ const Turno = memo(function Turno({
         <>
           <div className="prompt-registrado prompt-de-retomada">
             <span className="text-active">↻</span>
-            <span>{`retomada automática (tentativa ${retomada.tentativa})`}</span>
+            <span>{t.retomada.automatica(retomada.tentativa)}</span>
           </div>
           <details className="mensagem-de-retomada">
-            <summary>mensagem enviada ao Claude</summary>
+            <summary>{t.retomada.mensagemEnviada}</summary>
             <p className="texto-longo">{turno.texto}</p>
           </details>
         </>
@@ -327,7 +333,7 @@ const Turno = memo(function Turno({
                 href={api.enderecoDoAnexo(orquestradorId, anexo.arquivo)}
                 target="_blank"
                 rel="noreferrer"
-                title={`${anexo.nome} — abrir em tamanho real`}
+                title={t.abrirEmTamanhoReal(anexo.nome)}
               >
                 <img src={api.enderecoDoAnexo(orquestradorId, anexo.arquivo)} alt={anexo.nome} loading="lazy" />
               </a>
@@ -349,7 +355,7 @@ const Turno = memo(function Turno({
           <span
             className="chip selo-do-motor-do-turno"
             data-testid="selo-do-motor"
-            title={`Este pedido rodou no ${rotuloDoMotor(motor)}`}
+            title={t.pedidoRodouNo(rotuloDoMotor(motor))}
           >
             {rotuloDoMotor(motor)}
           </span>
@@ -371,7 +377,7 @@ const Turno = memo(function Turno({
             <span className="linha-simbolo">
               <IconeAlerta tamanho={12} className="inline-block align-[-1px]" />
             </span>
-            <span className="linha-texto col-span-2">sem conexão com o servidor — aguardando ele voltar</span>
+            <span className="linha-texto col-span-2">{t.semConexao}</span>
           </div>
         ) : (
           <SinalDoTurno turno={turno} sinal={sinal} />
@@ -461,13 +467,14 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
   acoesDoPlano,
   aoResponderPergunta,
 }: Props) {
+  const t = useTextos(textosDeTranscricao);
   const [quantosTurnos, setQuantosTurnos] = useState(TURNOS_POR_PAGINA);
   // Só os últimos turnos são desenhados (poupa memória); os demais continuam no estado.
   const primeiroVisivel = Math.max(0, turnos.length - quantosTurnos);
   const trabalhando = turnos.some((turno) => turno.situacao === "em_andamento");
   const avisos = [
-    avisosDaConversaNova.worktreeComAlteracoes ? "a worktree tem alterações da conversa anterior" : null,
-    avisosDaConversaNova.planoDescartado ? "o plano pendente foi descartado" : null,
+    avisosDaConversaNova.worktreeComAlteracoes ? t.worktreeComAlteracoes : null,
+    avisosDaConversaNova.planoDescartado ? t.planoDescartado : null,
   ].filter((aviso) => aviso !== null);
   return (
     <div className="flex flex-col gap-5">
@@ -477,30 +484,30 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
           <span className="font-titulo text-[13px] font-semibold text-primary">{nome}</span>
         </div>
         <p>
-          <span className="text-muted">pasta </span>
+          <span className="text-muted">{t.banner.pasta}</span>
           {pastaDeTrabalho}
         </p>
         <p>
-          <span className="text-muted">config </span>
+          <span className="text-muted">{t.banner.config}</span>
           {descreverConfiguracao(configuracao).toLowerCase()}
           {predefinicao === "economico" && (
-            <span className="chip ml-1.5" title="A configuração atual é a do modo econômico.">
-              econômico
+            <span className="chip ml-1.5" title={t.banner.economicoDica}>
+              {t.banner.economico}
             </span>
           )}
         </p>
         <p className="text-muted">
           {turnos.length === 0
-            ? "digite um pedido e pressione enter — o orquestrador divide o trabalho e instancia os agentes."
-            : `${turnos.length} ${turnos.length === 1 ? "pedido" : "pedidos"} nesta conversa · /clear começa uma nova`}
+            ? t.banner.vazio
+            : t.banner.pedidos(turnos.length)}
         </p>
       </div>
       {conversaIniciadaEm !== null && (
         <div className="flex flex-col gap-0.5">
-          <p className="mono hint text-center">{`— conversa nova iniciada às ${formatarMomento(conversaIniciadaEm)} —`}</p>
+          <p className="mono hint text-center">{t.conversaNova(formatarMomento(conversaIniciadaEm))}</p>
           {/* A conversa nova parte da worktree como ela está: sem o aviso, ninguém saberia de onde vieram as alterações. */}
           {avisos.length > 0 && (
-            <p className="mono hint-warning text-center" role="note" aria-label="Avisos da conversa nova">
+            <p className="mono hint-warning text-center" role="note" aria-label={t.avisosDaConversaNova}>
               {avisos.join(" · ")}
             </p>
           )}
@@ -512,7 +519,7 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
           className="btn btn-sm btn-outline self-center"
           onClick={() => setQuantosTurnos((atual) => atual + TURNOS_POR_PAGINA)}
         >
-          {`Mostrar ${Math.min(primeiroVisivel, TURNOS_POR_PAGINA)} anteriores`}
+          {t.mostrarAnteriores(Math.min(primeiroVisivel, TURNOS_POR_PAGINA))}
         </button>
       )}
       {turnos.slice(primeiroVisivel).map((turno, posicao) => {

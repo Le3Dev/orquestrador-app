@@ -41,6 +41,8 @@ import {
   useDesenhoNoQuadro,
 } from "../../shared/desenhoNaPagina";
 import { TAG_DO_SCRIPT_DE_NAVEGACAO, useNavegacaoDoQuadro } from "../../shared/navegacaoDoArtefato";
+import { idiomaAtual, localeDoIdioma, useTextos } from "../../shared/idioma/idioma";
+import { textosDeArtefato } from "../../shared/idioma/textos/artefato";
 import { IconeCaneta } from "../Icones";
 import { TextoFormatado } from "../TextoFormatado";
 import { BotoesDeNavegacao } from "./BotoesDeNavegacao";
@@ -49,7 +51,6 @@ import { DesenhoDaTelaCheia, ESPESSURA_DA_TELA_CHEIA } from "./DesenhoDaTelaChei
 import { JanelaEmTelaCheia } from "./JanelaEmTelaCheia";
 import { QuadroAtivavel } from "./NoPrevia";
 
-export const CONFIRMACAO_PARA_APAGAR_O_ARTEFATO = "Apagar este artefato? Isso não pode ser desfeito.";
 /**
  * A política de segurança injetada em toda página HTML: nada sai para a rede
  * (nem imagens, fontes ou scripts externos); só o que está no próprio arquivo
@@ -62,10 +63,6 @@ export const POLITICA_DO_ARTEFATO =
 export const DURACAO_DO_DESTAQUE_MS = 4_000;
 
 const META_DA_POLITICA = `<meta http-equiv="Content-Security-Policy" content="${POLITICA_DO_ARTEFATO}">`;
-const ROTULO_DO_FORMATO: Readonly<Record<FormatoDoArtefato, string>> = {
-  html: "Página HTML",
-  markdown: "Documento Markdown",
-};
 const TIPO_DO_ARQUIVO: Readonly<Record<FormatoDoArtefato, string>> = {
   html: "text/html;charset=utf-8",
   markdown: "text/markdown;charset=utf-8",
@@ -112,17 +109,18 @@ function baixar(texto: string, nome: string, tipo: string): void {
   setTimeout(() => URL.revokeObjectURL(endereco), ESPERA_PARA_LIBERAR_O_DOWNLOAD_MS);
 }
 
-const dataDaVersao = new Intl.DateTimeFormat("pt-BR", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
 function formatarDataDaVersao(iso: string): string {
   const data = new Date(iso);
-  return Number.isNaN(data.getTime()) ? "" : dataDaVersao.format(data);
+  if (Number.isNaN(data.getTime())) {
+    return "";
+  }
+  return new Intl.DateTimeFormat(localeDoIdioma(idiomaAtual()), {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(data);
 }
 
 /** Ex.: "830 B", "2,1 kB", "1,4 MB". */
@@ -130,11 +128,12 @@ function formatarTamanho(bytes: number): string {
   if (bytes < 1024) {
     return `${bytes} B`;
   }
+  const locale = localeDoIdioma(idiomaAtual());
   const quilo = bytes / 1024;
   if (quilo < 1024) {
-    return `${quilo.toLocaleString("pt-BR", { maximumFractionDigits: 1 })} kB`;
+    return `${quilo.toLocaleString(locale, { maximumFractionDigits: 1 })} kB`;
   }
-  return `${(quilo / 1024).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} MB`;
+  return `${(quilo / 1024).toLocaleString(locale, { maximumFractionDigits: 1 })} MB`;
 }
 
 // ---------------- Ícones ----------------
@@ -168,15 +167,14 @@ function IconeLixeira() {
 }
 
 function IconeDoFormato({ formato }: { formato: FormatoDoArtefato }) {
-  const rotulo = ROTULO_DO_FORMATO[formato];
+  const t = useTextos(textosDeArtefato);
+  const rotulo = formato === "html" ? t.formatoHtml : t.formatoMarkdown;
   return (
     <span role="img" aria-label={rotulo} title={rotulo} className={`icone-do-artefato icone-do-artefato-${formato}`}>
       {formato === "html" ? "</>" : "M↓"}
     </span>
   );
 }
-
-const DICA_DE_FECHAR_O_ARTEFATO = "Fechar (o artefato continua salvo; reabra pela paleta, Ctrl+K)";
 
 // ---------------- Conteúdo de uma versão ----------------
 
@@ -337,6 +335,7 @@ const CorpoPronto = memo(function CorpoPronto({
   ligarDocumento: (documento: HTMLDivElement | null) => void;
   ligarHospedeiro: (hospedeiro: HTMLDivElement | null) => void;
 }) {
+  const t = useTextos(textosDeArtefato);
   const pagina = useMemo(() => (formato === "html" ? comPoliticaDeSeguranca(texto) : ""), [formato, texto]);
   if (formato === "html") {
     const quadro = (estilo?: CSSProperties) => (
@@ -345,7 +344,7 @@ const CorpoPronto = memo(function CorpoPronto({
           <iframe
             ref={ligarQuadro}
             onLoad={aoCarregarQuadro}
-            title={`Conteúdo do artefato: ${titulo}`}
+            title={t.conteudoDoArtefato(titulo)}
             className="corpo-do-artefato-html nodrag nowheel"
             style={estilo === undefined && naLargura === undefined ? undefined : { ...naLargura, ...estilo }}
             // Sem `allow-same-origin`: a página roda numa origem opaca, sem acesso ao app.
@@ -402,25 +401,26 @@ function CorpoDoArtefato({
   ligarDocumento: (documento: HTMLDivElement | null) => void;
   ligarHospedeiro: (hospedeiro: HTMLDivElement | null) => void;
 }) {
+  const t = useTextos(textosDeArtefato);
   switch (conteudo.situacao) {
     case "carregando":
-      return <p className="estado-do-artefato text-muted">carregando v{numero}…</p>;
+      return <p className="estado-do-artefato text-muted">{t.carregandoVersao(numero)}</p>;
     case "erro":
       return (
         <div className="estado-do-artefato text-error" role="alert">
-          <span>✗ Não foi possível carregar a versão {numero}. {conteudo.mensagem}</span>
+          <span>{t.naoCarregouVersao(numero, conteudo.mensagem)}</span>
           <button type="button" className="botao-de-texto nodrag" onClick={aoTentarDeNovo}>
-            tentar de novo
+            {t.tentarDeNovo}
           </button>
         </div>
       );
     case "inexistente":
       return (
         <div className="estado-do-artefato text-warning" role="alert">
-          <span>A versão {numero} não existe mais.</span>
+          <span>{t.versaoNaoExiste(numero)}</span>
           {numero !== artefato.versaoAtual && (
             <button type="button" className="botao-de-texto nodrag" onClick={aoVerAtual}>
-              ver a versão atual (v{artefato.versaoAtual})
+              {t.verAtual(artefato.versaoAtual)}
             </button>
           )}
         </div>
@@ -446,6 +446,7 @@ function CorpoDoArtefato({
 
 /** Campo do título, aberto no clique duplo. Enter confirma; Esc desiste. */
 function CampoDoTitulo({ titulo, aoConcluir }: { titulo: string; aoConcluir: (novo: string | null) => void }) {
+  const t = useTextos(textosDeArtefato);
   const campo = useRef<HTMLInputElement>(null);
   const desistiu = useRef(false);
 
@@ -459,9 +460,9 @@ function CampoDoTitulo({ titulo, aoConcluir }: { titulo: string; aoConcluir: (no
     <input
       ref={campo}
       className="campo-do-titulo-do-artefato nodrag"
-      aria-label="Título do artefato"
+      aria-label={t.tituloDoArtefato}
       defaultValue={titulo}
-      placeholder="Sem título"
+      placeholder={t.semTitulo}
       onKeyDown={(evento) => {
         if (evento.key === "Enter") {
           evento.currentTarget.blur();
@@ -487,6 +488,7 @@ function SeletorDeVersao({
   atual: number;
   aoEscolher: (numero: number) => void;
 }) {
+  const t = useTextos(textosDeArtefato);
   const [aberto, setAberto] = useState(false);
   const raiz = useRef<HTMLDivElement>(null);
   const idDoMenu = useId();
@@ -523,14 +525,14 @@ function SeletorDeVersao({
         aria-haspopup="menu"
         aria-expanded={aberto}
         aria-controls={aberto ? idDoMenu : undefined}
-        aria-label={`Versão ${escolhida} de ${atual}: trocar de versão`}
-        title={antiga ? `Vendo a versão ${escolhida} (a atual é a ${atual})` : "Trocar de versão"}
+        aria-label={t.versaoBotao(escolhida, atual)}
+        title={antiga ? t.versaoVendo(escolhida, atual) : t.trocarDeVersao}
         onClick={() => setAberto((anterior) => !anterior)}
       >
         v{escolhida} ▾
       </button>
       {aberto && (
-        <div id={idDoMenu} role="menu" aria-label="Versões do artefato" className="menu-de-versoes painel-flutuante custom-scrollbar nowheel">
+        <div id={idDoMenu} role="menu" aria-label={t.versoesDoArtefato} className="menu-de-versoes painel-flutuante custom-scrollbar nowheel">
           {ordenadas.map((versao) => (
             <button
               key={versao.numero}
@@ -545,7 +547,7 @@ function SeletorDeVersao({
             >
               <span className="font-medium text-primary">
                 v{versao.numero}
-                {versao.numero === atual ? " · atual" : ""}
+                {versao.numero === atual ? t.atual : ""}
               </span>
               <span className="mono text-muted">
                 {formatarDataDaVersao(versao.criadaEm)} · {formatarTamanho(versao.tamanho)}
@@ -607,6 +609,7 @@ export const NoArtefato = memo(function NoArtefato({ data, selected }: NodeProps
 
 /** Espera o resumo do artefato chegar do servidor; se ele não existir mais, avisa. */
 const JanelaDoArtefato = memo(function JanelaDoArtefato({ artefatoId }: { artefatoId: string }) {
+  const t = useTextos(textosDeArtefato);
   const artefato = useArtefato(artefatoId);
   const carregada = useListaDeArtefatosCarregada();
   const erroAoCarregar = useErroAoCarregarArtefatos();
@@ -616,17 +619,17 @@ const JanelaDoArtefato = memo(function JanelaDoArtefato({ artefatoId }: { artefa
   if (artefato === undefined) {
     const mensagem =
       erroAoCarregar !== null
-        ? `✗ Não foi possível carregar o artefato. ${erroAoCarregar}`
+        ? t.naoCarregouOArtefato(erroAoCarregar)
         : carregada
-          ? "Este artefato não existe mais."
-          : "carregando artefato…";
+          ? t.naoExisteMais
+          : t.carregandoArtefato;
     return (
       <div className="janela-artefato">
         <div className={`barra-do-artefato ${ALCA_DO_ARTEFATO}`}>
-          <ControlesDoNo lado="inicio" objeto="o artefato" aoFechar={aoFecharVazio} dicaDoFechar={DICA_DE_FECHAR_O_ARTEFATO} />
-          <span className="titulo-do-artefato text-muted">artefato</span>
+          <ControlesDoNo lado="inicio" objeto={t.objeto} aoFechar={aoFecharVazio} dicaDoFechar={t.dicaDeFechar} />
+          <span className="titulo-do-artefato text-muted">{t.artefato}</span>
           <span className="flex-1" />
-          <ControlesDoNo lado="fim" objeto="o artefato" aoFechar={aoFecharVazio} dicaDoFechar={DICA_DE_FECHAR_O_ARTEFATO} />
+          <ControlesDoNo lado="fim" objeto={t.objeto} aoFechar={aoFecharVazio} dicaDoFechar={t.dicaDeFechar} />
         </div>
         <p className={`estado-do-artefato ${erroAoCarregar === null ? "text-muted" : "text-error"}`}>{mensagem}</p>
       </div>
@@ -637,6 +640,7 @@ const JanelaDoArtefato = memo(function JanelaDoArtefato({ artefatoId }: { artefa
 });
 
 function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
+  const t = useTextos(textosDeArtefato);
   const acoes = useAcoesDosArtefatos();
   // A versão vista: começa na atual e passa sozinha para cada versão nova.
   const [conhecida, setConhecida] = useState(artefato.versaoAtual);
@@ -766,14 +770,14 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
     try {
       await acoes.renomear(artefato.id, aparado);
     } catch (falha) {
-      setProblema(`Não foi possível renomear: ${mensagemDeErro(falha)}`);
+      setProblema(t.naoRenomeou(mensagemDeErro(falha)));
     } finally {
       setTituloPendente(null);
     }
   }
 
   async function apagar(): Promise<void> {
-    if (!window.confirm(CONFIRMACAO_PARA_APAGAR_O_ARTEFATO)) {
+    if (!window.confirm(t.confirmarApagar)) {
       return;
     }
     setProblema(null);
@@ -782,7 +786,7 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
       // Deu certo: o artefato sai da lista e o canvas tira esta janela.
       await acoes.apagar(artefato.id);
     } catch (falha) {
-      setProblema(`Não foi possível apagar o artefato: ${mensagemDeErro(falha)}`);
+      setProblema(t.naoApagou(mensagemDeErro(falha)));
       setApagando(false);
     }
   }
@@ -794,26 +798,26 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
     try {
       baixar(conteudo.texto, nomeParaSalvar(artefato, escolhida), TIPO_DO_ARQUIVO[artefato.formato]);
     } catch (falha) {
-      setProblema(`Não foi possível salvar o arquivo: ${mensagemDeErro(falha)}`);
+      setProblema(t.naoSalvou(mensagemDeErro(falha)));
     }
   }
 
   const controlesDaJanela = {
-    objeto: "o artefato",
+    objeto: t.objeto,
     aoFechar: () => acoes.fechar(artefato.id),
-    dicaDoFechar: DICA_DE_FECHAR_O_ARTEFATO,
+    dicaDoFechar: t.dicaDeFechar,
     aoAmpliar: () => setAmpliado(true),
     ampliarDesabilitado: !pronto,
   };
 
   const dicaDaCaneta =
     desenho.situacao === "carregando"
-      ? "Carregando o desenho da página…"
+      ? t.caneta.carregando
       : desenho.situacao === "erro"
-        ? "O desenho desta versão não carregou"
+        ? t.caneta.erro
         : desenhando
-          ? "Desligar o desenho sobre a página (Esc)"
-          : "Desenhar sobre a página";
+          ? t.caneta.desligar
+          : t.caneta.desenhar;
   // O desenho que não carregou ou não gravou: o aviso fica no pé (da janela ou da tela cheia).
   const avisoDoDesenho =
     desenho.problema !== null && pronto ? (
@@ -821,7 +825,7 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
         <span>{desenho.problema}</span>
         {desenho.situacao === "erro" && (
           <button type="button" className="botao-de-texto nodrag" onClick={desenho.tentarDeNovo}>
-            tentar de novo
+            {t.tentarDeNovo}
           </button>
         )}
       </div>
@@ -851,13 +855,13 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
         {editandoTitulo ? (
           <CampoDoTitulo titulo={titulo} aoConcluir={(novo) => void concluirTitulo(novo)} />
         ) : (
-          <strong className="titulo-do-artefato" title={`${titulo} · clique duplo para renomear`} onDoubleClick={() => setEditandoTitulo(true)}>
-            {titulo || "Sem título"}
+          <strong className="titulo-do-artefato" title={t.tituloComDica(titulo)} onDoubleClick={() => setEditandoTitulo(true)}>
+            {titulo || t.semTitulo}
           </strong>
         )}
         {destaque !== null && (
           <span className="destaque-de-versao-nova" role="status">
-            v{destaque} nova
+            {t.versaoNova(destaque)}
           </span>
         )}
         <span className="flex-1" />
@@ -866,8 +870,8 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
         <button
           type="button"
           className="botao-icone nodrag"
-          title="Salvar como…"
-          aria-label="Salvar o artefato como arquivo"
+          title={t.salvarComo}
+          aria-label={t.salvarOArquivo}
           disabled={!pronto}
           onClick={salvarComo}
         >
@@ -876,8 +880,8 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
         <button
           type="button"
           className="botao-icone botao-icone-perigo nodrag"
-          title="Apagar o artefato"
-          aria-label="Apagar o artefato"
+          title={t.apagar}
+          aria-label={t.apagar}
           disabled={apagando}
           onClick={() => void apagar()}
         >
@@ -888,7 +892,7 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
 
       {/* Em tela cheia, a página roda só no modal: duas cópias rodariam os scripts dela duas vezes. */}
       <div className="corpo-do-artefato">
-        {ampliado ? <p className="estado-do-artefato text-muted">Aberto em tela cheia.</p> : corpo(true)}
+        {ampliado ? <p className="estado-do-artefato text-muted">{t.emTelaCheia}</p> : corpo(true)}
       </div>
 
       {problema !== null && (
@@ -900,7 +904,7 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
 
       {ampliado && (
         <JanelaEmTelaCheia
-          titulo={artefato.titulo || "Sem título"}
+          titulo={artefato.titulo || t.semTitulo}
           icone={<IconeDoFormato formato={artefato.formato} />}
           selo={<span className="chip">v{escolhida}</span>}
           navegacao={navegacao}
@@ -910,7 +914,7 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
               type="button"
               className="botao-icone"
               title={dicaDaCaneta}
-              aria-label="Desenhar sobre a página"
+              aria-label={t.caneta.desenhar}
               aria-pressed={desenhando}
               data-testid="botao-desenhar-na-tela-cheia"
               disabled={!desenhoPronto}

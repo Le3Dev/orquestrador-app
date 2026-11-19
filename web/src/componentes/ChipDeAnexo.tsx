@@ -1,5 +1,7 @@
-import { AVISO_DO_FORMATO_ANTIGO, formatoDoDocumento } from "../shared/anexos";
+import { avisoDoFormatoAntigo, formatoDoDocumento } from "../shared/anexos";
 import { formatarBytes } from "../shared/formatacao";
+import { useTextos } from "../shared/idioma/idioma";
+import { textosDeComponentesComuns } from "../shared/idioma/textos/componentesComuns";
 import { IconeDocumento, IconeFechar } from "./Icones";
 
 interface Props {
@@ -17,12 +19,13 @@ interface Props {
 
 /** Etiqueta de um documento anexado (PDF, Word, Excel, texto...): ícone, nome, formato e tamanho. */
 export function ChipDeAnexo({ nome, rotulo, legado, tamanhoEmBytes, href, aoRemover }: Props) {
+  const t = useTextos(textosDeComponentesComuns).anexo;
   const formato = formatoDoDocumento(nome);
-  const rotuloDoFormato = rotulo ?? formato?.rotulo ?? "Documento";
+  const rotuloDoFormato = rotulo ?? formato?.rotulo ?? t.documento;
   const formatoAntigo = legado ?? formato?.legado ?? false;
   const tamanho = tamanhoEmBytes === undefined ? null : tamanhoLegivel(tamanhoEmBytes);
   const descricao = [rotuloDoFormato, tamanho].filter((parte) => parte !== null).join(" · ");
-  const titulo = [`${nome} (${descricao})`, formatoAntigo ? AVISO_DO_FORMATO_ANTIGO : null, href !== undefined ? "Clique para baixar." : null]
+  const titulo = [`${nome} (${descricao})`, formatoAntigo ? avisoDoFormatoAntigo() : null, href !== undefined ? t.cliqueParaBaixar : null]
     .filter((parte) => parte !== null)
     .join(" ");
 
@@ -33,7 +36,7 @@ export function ChipDeAnexo({ nome, rotulo, legado, tamanhoEmBytes, href, aoRemo
         <span className="chip-de-anexo-nome">{nome}</span>
         <span className="chip-de-anexo-detalhe">
           {formatoAntigo ? (
-            <span className="chip-de-anexo-selo" title={AVISO_DO_FORMATO_ANTIGO}>
+            <span className="chip-de-anexo-selo" title={avisoDoFormatoAntigo()}>
               {rotuloDoFormato}
             </span>
           ) : (
@@ -56,7 +59,7 @@ export function ChipDeAnexo({ nome, rotulo, legado, tamanhoEmBytes, href, aoRemo
     <span className="chip-de-anexo" title={titulo}>
       {conteudo}
       {aoRemover !== undefined && (
-        <button type="button" className="chip-de-anexo-remover" aria-label={`Remover ${nome}`} onClick={aoRemover}>
+        <button type="button" className="chip-de-anexo-remover" aria-label={t.remover(nome)} onClick={aoRemover}>
           <IconeFechar tamanho={10} />
         </button>
       )}

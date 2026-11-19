@@ -19,16 +19,18 @@ import {
   type ConsultaDasAlteracoes,
   type DiffDoArquivo,
   type SituacaoDoArquivo,
-  TEXTO_ARQUIVO_BINARIO,
-  TEXTO_DIFF_TRUNCADO,
-  TEXTO_DIFF_VAZIO,
-  TEXTO_EM_USO,
-  TEXTO_SEM_ALTERACOES,
-  TEXTO_SEM_GIT,
+  textoArquivoBinario,
+  textoDiffTruncado,
+  textoDiffVazio,
   textoDosCommitsNaBranch,
+  textoEmUso,
+  textoSemAlteracoes,
+  textoSemGit,
   type TipoDaLinhaDoDiff,
 } from "../../shared/api/alteracoes";
 import { mensagemDeErro } from "../../shared/api/cliente";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineisDosNos } from "../../shared/idioma/textos/paineisDosNos";
 import { IconeBranch } from "../Icones";
 
 interface PropsDoPainel {
@@ -42,12 +44,12 @@ interface PropsDoPainel {
   aoFechar: () => void;
 }
 
-const SITUACOES: Readonly<Record<SituacaoDoArquivo, { rotulo: string; letra: string; cor: string }>> = {
-  adicionado: { rotulo: "adicionado", letra: "A", cor: "text-success" },
-  modificado: { rotulo: "modificado", letra: "M", cor: "text-warning" },
-  removido: { rotulo: "removido", letra: "D", cor: "text-error" },
-  renomeado: { rotulo: "renomeado", letra: "R", cor: "text-info" },
-  nao_rastreado: { rotulo: "não rastreado", letra: "?", cor: "text-success" },
+const SITUACOES: Readonly<Record<SituacaoDoArquivo, { letra: string; cor: string }>> = {
+  adicionado: { letra: "A", cor: "text-success" },
+  modificado: { letra: "M", cor: "text-warning" },
+  removido: { letra: "D", cor: "text-error" },
+  renomeado: { letra: "R", cor: "text-info" },
+  nao_rastreado: { letra: "?", cor: "text-success" },
 };
 
 const CLASSES_DA_LINHA: Readonly<Record<TipoDaLinhaDoDiff, string>> = {
@@ -71,8 +73,9 @@ function ignorarArquivoSolto(evento: SyntheticEvent): void {
 }
 
 function ContagemDeLinhas({ arquivo }: { arquivo: ArquivoAlterado }) {
+  const t = useTextos(textosDePaineisDosNos).alteracoes;
   if (arquivo.binario) {
-    return <span>binário</span>;
+    return <span>{t.binario}</span>;
   }
   if (arquivo.adicoes === null && arquivo.remocoes === null) {
     return null;
@@ -94,6 +97,7 @@ function ItemDoArquivo({
   escolhido: boolean;
   aoEscolher: (caminho: string) => void;
 }) {
+  const t = useTextos(textosDePaineisDosNos).alteracoes;
   const situacao = SITUACOES[arquivo.situacao];
   return (
     <li>
@@ -110,7 +114,7 @@ function ItemDoArquivo({
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="mono truncate text-primary">{arquivo.caminho}</span>
           <span className="mono flex gap-2 text-muted">
-            <span>{situacao.rotulo}</span>
+            <span>{t.situacoes[arquivo.situacao]}</span>
             <ContagemDeLinhas arquivo={arquivo} />
           </span>
         </span>
@@ -126,6 +130,7 @@ type LeituraDoDiff =
 
 /** O diff do arquivo escolhido. É lido de novo a cada leitura nova da lista (o arquivo pode ter mudado). */
 function DiffDoArquivoEscolhido({ orquestradorId, arquivo }: { orquestradorId: string; arquivo: ArquivoAlterado }) {
+  const t = useTextos(textosDePaineisDosNos).alteracoes;
   const [leitura, setLeitura] = useState<LeituraDoDiff>({ estado: "carregando" });
   const [tentativa, setTentativa] = useState(0);
 
@@ -159,13 +164,13 @@ function DiffDoArquivoEscolhido({ orquestradorId, arquivo }: { orquestradorId: s
           {arquivo.caminho}
         </span>
         {arquivo.caminhoAnterior !== null && (
-          <span className="mono truncate text-muted">renomeado de {arquivo.caminhoAnterior}</span>
+          <span className="mono truncate text-muted">{t.renomeadoDe(arquivo.caminhoAnterior)}</span>
         )}
       </div>
 
       {leitura.estado === "carregando" && (
         <p role="status" className="text-support px-4 py-3">
-          Lendo o diff…
+          {t.lendoODiff}
         </p>
       )}
 
@@ -173,7 +178,7 @@ function DiffDoArquivoEscolhido({ orquestradorId, arquivo }: { orquestradorId: s
         <div className="alert alert-error m-4 flex items-center justify-between gap-3">
           <span>{leitura.mensagem}</span>
           <button type="button" className="btn btn-sm btn-outline" onClick={() => setTentativa((atual) => atual + 1)}>
-            tentar de novo
+            {t.tentarDeNovo}
           </button>
         </div>
       )}
@@ -182,13 +187,13 @@ function DiffDoArquivoEscolhido({ orquestradorId, arquivo }: { orquestradorId: s
         <div className="custom-scrollbar min-h-0 flex-1 overflow-auto">
           {(leitura.diff.binario || leitura.diff.truncado) && (
             <div className="flex flex-col gap-2 px-4 pt-3">
-              {leitura.diff.binario && <div className="alert alert-info">{TEXTO_ARQUIVO_BINARIO}</div>}
-              {leitura.diff.truncado && <div className="alert alert-warning">{TEXTO_DIFF_TRUNCADO}</div>}
+              {leitura.diff.binario && <div className="alert alert-info">{textoArquivoBinario()}</div>}
+              {leitura.diff.truncado && <div className="alert alert-warning">{textoDiffTruncado()}</div>}
             </div>
           )}
-          {!leitura.diff.binario && linhas.length === 0 && <p className="text-support px-4 py-3">{TEXTO_DIFF_VAZIO}</p>}
+          {!leitura.diff.binario && linhas.length === 0 && <p className="text-support px-4 py-3">{textoDiffVazio()}</p>}
           {linhas.length > 0 && (
-            <pre className="mono m-0 min-w-max py-2 leading-[1.6]" aria-label={`Diff de ${arquivo.caminho}`}>
+            <pre className="mono m-0 min-w-max py-2 leading-[1.6]" aria-label={t.diffDe(arquivo.caminho)}>
               {linhas.map((linha, indice) => (
                 <div key={indice} data-tipo={linha.tipo} className={`whitespace-pre px-4 ${CLASSES_DA_LINHA[linha.tipo]}`}>
                   {linha.texto === "" ? " " : linha.texto}
@@ -203,6 +208,7 @@ function DiffDoArquivoEscolhido({ orquestradorId, arquivo }: { orquestradorId: s
 }
 
 function ListaDeAlteracoes({ orquestradorId, alteracoes }: { orquestradorId: string; alteracoes: AlteracoesDoWorktree }) {
+  const t = useTextos(textosDePaineisDosNos).alteracoes;
   const [escolhido, setEscolhido] = useState<string | null>(null);
   // Uma leitura nova da lista pode tirar o arquivo escolhido dela.
   const arquivoEscolhido =
@@ -211,7 +217,7 @@ function ListaDeAlteracoes({ orquestradorId, alteracoes }: { orquestradorId: str
   return (
     <div className="flex min-h-0 flex-1">
       <ul
-        aria-label="Arquivos alterados"
+        aria-label={t.arquivosAlterados}
         className="custom-scrollbar m-0 flex w-[300px] shrink-0 list-none flex-col gap-0.5 overflow-y-auto border-r border-border p-1.5"
       >
         {alteracoes.arquivos.map((arquivo) => (
@@ -224,7 +230,7 @@ function ListaDeAlteracoes({ orquestradorId, alteracoes }: { orquestradorId: str
         ))}
       </ul>
       {arquivoEscolhido === null ? (
-        <p className="text-support m-0 flex-1 px-4 py-3">Escolha um arquivo para ver o diff.</p>
+        <p className="text-support m-0 flex-1 px-4 py-3">{t.escolhaUm}</p>
       ) : (
         <DiffDoArquivoEscolhido orquestradorId={orquestradorId} arquivo={arquivoEscolhido} />
       )}
@@ -241,6 +247,7 @@ function ConteudoDoPainel({
   consulta: ConsultaDasAlteracoes;
   aoAtualizar: () => void;
 }) {
+  const t = useTextos(textosDePaineisDosNos).alteracoes;
   const { alteracoes, carregando, erro } = consulta;
 
   if (erro !== null) {
@@ -249,7 +256,7 @@ function ConteudoDoPainel({
         <div className="alert alert-error flex items-center justify-between gap-3">
           <span>{erro}</span>
           <button type="button" className="btn btn-sm btn-outline" onClick={aoAtualizar} disabled={carregando}>
-            tentar de novo
+            {t.tentarDeNovo}
           </button>
         </div>
       </div>
@@ -259,7 +266,7 @@ function ConteudoDoPainel({
   if (alteracoes === null) {
     return (
       <p role="status" className="text-support m-0 p-4">
-        Lendo as alterações…
+        {t.lendoAsAlteracoes}
       </p>
     );
   }
@@ -267,7 +274,7 @@ function ConteudoDoPainel({
   if (alteracoes.situacao === "sem_git") {
     return (
       <div className="p-4">
-        <div className="alert alert-info">{TEXTO_SEM_GIT}</div>
+        <div className="alert alert-info">{textoSemGit()}</div>
       </div>
     );
   }
@@ -275,7 +282,7 @@ function ConteudoDoPainel({
   const commits = textoDosCommitsNaBranch(alteracoes);
   const avisos = (
     <>
-      {alteracoes.emUso && <div className="alert alert-warning">{TEXTO_EM_USO}</div>}
+      {alteracoes.emUso && <div className="alert alert-warning">{textoEmUso()}</div>}
       {commits !== null && <div className="alert alert-info">{commits}</div>}
     </>
   );
@@ -283,7 +290,7 @@ function ConteudoDoPainel({
   if (alteracoes.arquivos.length === 0) {
     return (
       <div className="flex flex-col gap-2 p-4">
-        <div className="alert">{TEXTO_SEM_ALTERACOES}</div>
+        <div className="alert">{textoSemAlteracoes()}</div>
         {avisos}
       </div>
     );
@@ -315,6 +322,7 @@ export const PainelDeAlteracoes = memo(function PainelDeAlteracoes({
   aoAtualizar,
   aoFechar,
 }: PropsDoPainel) {
+  const t = useTextos(textosDePaineisDosNos).alteracoes;
   const painel = useRef<HTMLDivElement>(null);
   const idDoTitulo = useId();
   const { alteracoes, carregando } = consulta;
@@ -364,7 +372,7 @@ export const PainelDeAlteracoes = memo(function PainelDeAlteracoes({
       >
         <div className="flex items-center gap-2.5 border-b border-border px-4 py-2.5">
           <h2 id={idDoTitulo} className="shrink-0">
-            Alterações do worktree
+            {t.titulo}
           </h2>
           {nomeDoOrquestrador !== undefined && <span className="truncate text-secondary">{nomeDoOrquestrador}</span>}
           {alteracoes !== null && alteracoes.branch !== null && (
@@ -374,11 +382,11 @@ export const PainelDeAlteracoes = memo(function PainelDeAlteracoes({
             </span>
           )}
           <span className="flex-1" />
-          <span className="text-support shrink-0">só leitura</span>
+          <span className="text-support shrink-0">{t.somenteLeitura}</span>
           <button type="button" className="btn btn-sm btn-ghost" onClick={aoAtualizar} disabled={carregando}>
-            {carregando ? "atualizando…" : "atualizar"}
+            {carregando ? t.atualizando : t.atualizar}
           </button>
-          <button type="button" className="botao-icone" title="Fechar (Esc)" aria-label="Fechar" onClick={aoFechar}>
+          <button type="button" className="botao-icone" title={t.fecharDica} aria-label={t.fechar} onClick={aoFechar}>
             ✕
           </button>
         </div>

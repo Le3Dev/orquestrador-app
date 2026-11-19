@@ -1,8 +1,10 @@
 import { memo, useState } from "react";
 
-import type { DadosDaConfiguracao, DecisaoDoPlano } from "../../shared/api/tipos";
+import type { DadosDaConfiguracao } from "../../shared/api/tipos";
 import type { TurnoNaTela } from "../../shared/estado/aplicarEvento";
 import { descreverConfiguracao } from "../../shared/formatacao";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeNosDoCanvas } from "../../shared/idioma/textos/nosDoCanvas";
 import { TextoFormatado } from "../TextoFormatado";
 
 /** O que o usuário pode fazer com o plano pendente. Os erros ficam a cargo de quem executa. */
@@ -13,12 +15,6 @@ export interface AcoesDoPlano {
   aoAjustar: () => void;
   aoDescartar: () => Promise<void>;
 }
-
-const SUFIXOS_DA_DECISAO: Readonly<Record<DecisaoDoPlano, string>> = {
-  pendente: "",
-  aprovado: " · aprovado",
-  descartado: " · descartado",
-};
 
 interface Props {
   turno: TurnoNaTela;
@@ -38,6 +34,7 @@ interface Props {
  * Memorizado: só re-renderiza quando o turno, a configuração ou as ações mudam.
  */
 export const CartaoDoPlano = memo(function CartaoDoPlano({ turno, configuracao, ultimo, desconectado, acoes }: Props) {
+  const t = useTextos(textosDeNosDoCanvas).plano;
   const [decidindo, setDecidindo] = useState<"aprovar" | "descartar" | null>(null);
   const [commitarAoFinal, setCommitarAoFinal] = useState(false);
   const pendente = turno.decisaoDoPlano === "pendente" && ultimo;
@@ -57,16 +54,16 @@ export const CartaoDoPlano = memo(function CartaoDoPlano({ turno, configuracao, 
   return (
     <div className="cartao-do-plano">
       <span className="rotulo-tecnico">
-        plano proposto{turno.decisaoDoPlano === null ? "" : SUFIXOS_DA_DECISAO[turno.decisaoDoPlano]}
+        {t.propostoRotulo}
+        {turno.decisaoDoPlano === null ? "" : t.sufixos[turno.decisaoDoPlano]}
       </span>
       <TextoFormatado texto={turno.resposta ?? ""} className="markdown-terminal" />
       {pendente && (
         <>
-          <p className="hint">Será executado com: {descreverConfiguracao(configuracao)}</p>
+          <p className="hint">{t.seraExecutado(descreverConfiguracao(configuracao))}</p>
           {configuracao.nivelDePermissao === "leitura" && (
             <div className="alert alert-warning">
-              As permissões estão em somente leitura: a execução não poderá alterar arquivos. Ajuste na engrenagem do terminal antes de
-              aprovar.
+              {t.somenteLeitura}
             </div>
           )}
           {podeCommitar && (
@@ -77,8 +74,8 @@ export const CartaoDoPlano = memo(function CartaoDoPlano({ turno, configuracao, 
                 onChange={(evento) => setCommitarAoFinal(evento.target.checked)}
                 disabled={bloqueado}
               />
-              Commitar ao final
-              <span className="hint">(commit na branch do worktree, pela regra por feature)</span>
+              {t.commitarAoFinal}
+              <span className="hint">{t.commitarAoFinalDica}</span>
             </label>
           )}
           <div className="flex flex-wrap gap-2">
@@ -88,10 +85,10 @@ export const CartaoDoPlano = memo(function CartaoDoPlano({ turno, configuracao, 
               onClick={() => void decidir("aprovar", () => acoes.aoAprovar(podeCommitar && commitarAoFinal))}
               disabled={bloqueado}
             >
-              {decidindo === "aprovar" ? "Aprovando…" : "Aprovar e executar"}
+              {decidindo === "aprovar" ? t.aprovando : t.aprovar}
             </button>
             <button type="button" className="btn btn-sm btn-outline" onClick={acoes.aoAjustar} disabled={bloqueado}>
-              Ajustar plano
+              {t.ajustar}
             </button>
             <button
               type="button"
@@ -99,7 +96,7 @@ export const CartaoDoPlano = memo(function CartaoDoPlano({ turno, configuracao, 
               onClick={() => void decidir("descartar", acoes.aoDescartar)}
               disabled={bloqueado}
             >
-              {decidindo === "descartar" ? "Descartando…" : "Descartar"}
+              {decidindo === "descartar" ? t.descartando : t.descartar}
             </button>
           </div>
         </>

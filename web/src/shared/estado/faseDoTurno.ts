@@ -1,4 +1,6 @@
 import type { TurnoNaTela } from "./aplicarEvento";
+import { textosAtuais } from "../idioma/idioma";
+import { textosDeEstadoDoTerminal } from "../idioma/textos/terminais";
 
 export type Fase = "planejar" | "delegar" | "executar" | "sintetizar";
 
@@ -42,7 +44,7 @@ function faseOndeParou(turno: TurnoNaTela): Fase {
 export function faseDoTurno(turno: TurnoNaTela): SituacaoDaFase {
   const total = turno.subagentes.length;
   const rodando = turno.subagentes.filter((subagente) => subagente.situacao === "executando").length;
-  const plural = total === 1 ? "agente" : "agentes";
+  const { fase } = textosAtuais(textosDeEstadoDoTerminal);
   // No Plan Mode o pedido só investiga: o que sai dele é um plano, não o trabalho feito.
   const planejamento = turno.modo === "planejamento";
 
@@ -52,11 +54,11 @@ export function faseDoTurno(turno: TurnoNaTela): SituacaoDaFase {
       const descricao =
         atual === "planejar"
           ? planejamento
-            ? "Investigando para montar o plano…"
-            : "Planejando as subtarefas…"
+            ? fase.investigando
+            : fase.planejando
           : atual === "executar"
-            ? `${rodando} de ${total} ${plural} em execução`
-            : "Sintetizando a resposta…";
+            ? fase.emExecucao(rodando, total)
+            : fase.sintetizando;
       return { atual, parado: false, descricao, direto: false };
     }
     case "concluido": {
@@ -66,18 +68,18 @@ export function faseDoTurno(turno: TurnoNaTela): SituacaoDaFase {
         atual: null,
         parado: false,
         descricao: entregouPlano
-          ? "Plano entregue"
+          ? fase.planoEntregue
           : total === 0
-            ? "Respondeu diretamente"
-            : `Concluído com ${total} ${plural}`,
+            ? fase.respondeuDiretamente
+            : fase.concluido(total),
         direto: total === 0,
       };
     }
     case "cancelado":
-      return { atual: faseOndeParou(turno), parado: true, descricao: "Cancelado", direto: false };
+      return { atual: faseOndeParou(turno), parado: true, descricao: fase.cancelado, direto: false };
     case "falhou":
-      return { atual: faseOndeParou(turno), parado: true, descricao: "Falhou", direto: false };
+      return { atual: faseOndeParou(turno), parado: true, descricao: fase.falhou, direto: false };
     case "interrompido":
-      return { atual: faseOndeParou(turno), parado: true, descricao: "Interrompido", direto: false };
+      return { atual: faseOndeParou(turno), parado: true, descricao: fase.interrompido, direto: false };
   }
 }

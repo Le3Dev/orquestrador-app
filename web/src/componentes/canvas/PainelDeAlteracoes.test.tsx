@@ -6,12 +6,12 @@ import {
   type ArquivoAlterado,
   type ConsultaDasAlteracoes,
   type DiffDoArquivo,
-  TEXTO_ARQUIVO_BINARIO,
-  TEXTO_DIFF_TRUNCADO,
-  TEXTO_DIFF_VAZIO,
-  TEXTO_EM_USO,
-  TEXTO_SEM_ALTERACOES,
-  TEXTO_SEM_GIT,
+  textoArquivoBinario,
+  textoDiffTruncado,
+  textoDiffVazio,
+  textoEmUso,
+  textoSemAlteracoes,
+  textoSemGit,
 } from "../../shared/api/alteracoes";
 import { PainelDeAlteracoes } from "./PainelDeAlteracoes";
 
@@ -124,7 +124,7 @@ describe("PainelDeAlteracoes", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /src\/app\.ts/ }));
 
-    expect(await screen.findByText(TEXTO_DIFF_TRUNCADO)).toBeInTheDocument();
+    expect(await screen.findByText(textoDiffTruncado())).toBeInTheDocument();
     expect(screen.getByText("+nova")).toBeInTheDocument();
   });
 
@@ -134,8 +134,8 @@ describe("PainelDeAlteracoes", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /logo\.png/ }));
 
-    expect(await screen.findByText(TEXTO_ARQUIVO_BINARIO)).toBeInTheDocument();
-    expect(screen.queryByText(TEXTO_DIFF_VAZIO)).not.toBeInTheDocument();
+    expect(await screen.findByText(textoArquivoBinario())).toBeInTheDocument();
+    expect(screen.queryByText(textoDiffVazio())).not.toBeInTheDocument();
   });
 
   it("mostra a falha do diff e tenta de novo", async () => {
@@ -189,7 +189,7 @@ describe("PainelDeAlteracoes", () => {
       pronta({ situacao: "sem_git", branch: null, caminho: null, emUso: false, commitsNaBranch: 0, arquivos: [] }),
     );
 
-    expect(screen.getByText(TEXTO_SEM_GIT)).toBeInTheDocument();
+    expect(screen.getByText(textoSemGit())).toBeInTheDocument();
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 
@@ -198,20 +198,20 @@ describe("PainelDeAlteracoes", () => {
       pronta({ situacao: "sem_worktree", branch: null, caminho: null, emUso: false, commitsNaBranch: 0, arquivos: [] }),
     );
 
-    expect(screen.getByText(TEXTO_SEM_ALTERACOES)).toBeInTheDocument();
+    expect(screen.getByText(textoSemAlteracoes())).toBeInTheDocument();
   });
 
   it("avisa os commits da branch e o pedido em andamento", () => {
     renderizar(pronta(comWorktree({ emUso: true, commitsNaBranch: 3 })));
 
     expect(screen.getByText("3 commits na branch orquestrador/o1 não aparecem aqui.")).toBeInTheDocument();
-    expect(screen.getByText(TEXTO_EM_USO)).toBeInTheDocument();
+    expect(screen.getByText(textoEmUso())).toBeInTheDocument();
   });
 
   it("avisa os commits da branch mesmo sem arquivos pendentes", () => {
     renderizar(pronta(comWorktree({ arquivos: [], commitsNaBranch: 2 })));
 
-    expect(screen.getByText(TEXTO_SEM_ALTERACOES)).toBeInTheDocument();
+    expect(screen.getByText(textoSemAlteracoes())).toBeInTheDocument();
     expect(screen.getByText("2 commits na branch orquestrador/o1 não aparecem aqui.")).toBeInTheDocument();
   });
 

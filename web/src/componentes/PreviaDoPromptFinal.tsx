@@ -2,14 +2,11 @@ import { useEffect, useState } from "react";
 
 import { api, mensagemDeErro } from "../shared/api/cliente";
 import type { DadosDaConfiguracao, PreviaDoPrompt } from "../shared/api/tipos";
+import { useTextos } from "../shared/idioma/idioma";
+import { textosDeComponentesComuns } from "../shared/idioma/textos/componentesComuns";
 
 /** Espera depois da última tecla antes de pedir a prévia de novo. */
 const ESPERA_PARA_ATUALIZAR_MS = 400;
-
-const ORIGEM: Readonly<Record<NonNullable<PreviaDoPrompt["origemDasInstrucoes"]>, string>> = {
-  orquestrador: "valem as instruções deste orquestrador",
-  padrao: "valem as instruções gerais",
-};
 
 interface Props {
   configuracao: DadosDaConfiguracao;
@@ -28,6 +25,7 @@ interface Props {
  * servidor, com a mesma função usada nos pedidos de verdade.
  */
 export function PreviaDoPromptFinal({ configuracao, pastaDeTrabalho, nome, comoLink = false }: Props) {
+  const t = useTextos(textosDeComponentesComuns).previa;
   const [aberta, setAberta] = useState(false);
   const [previa, setPrevia] = useState<PreviaDoPrompt | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -69,22 +67,22 @@ export function PreviaDoPromptFinal({ configuracao, pastaDeTrabalho, nome, comoL
         aria-expanded={aberta}
         onClick={() => setAberta((valor) => !valor)}
       >
-        {aberta ? "Esconder prompt final" : "Pré-visualizar prompt final"}
+        {aberta ? t.esconder : t.visualizar}
       </button>
       {aberta && (
         <div className="previa-do-prompt flex flex-col gap-2" aria-live="polite">
           {erro !== null && <div className="alert alert-error">{erro}</div>}
-          {previa === null && erro === null && <span className="hint">montando…</span>}
+          {previa === null && erro === null && <span className="hint">{t.montando}</span>}
           {previa !== null && (
             <>
               <span className="hint">
                 {previa.origemDasInstrucoes === null
-                  ? "Sem instruções personalizadas: o pedido vai exatamente como antes."
-                  : `Neste pedido ${ORIGEM[previa.origemDasInstrucoes]}.`}
+                  ? t.semInstrucoes
+                  : t.nestePedido(t.origem[previa.origemDasInstrucoes])}
               </span>
-              <span className="rotulo-tecnico">mensagem de cada pedido</span>
+              <span className="rotulo-tecnico">{t.mensagemDeCadaPedido}</span>
               <pre className="previa-do-prompt-texto custom-scrollbar">{previa.mensagem}</pre>
-              <span className="rotulo-tecnico">system prompt da conversa (fixo desde o 1º pedido)</span>
+              <span className="rotulo-tecnico">{t.systemPrompt}</span>
               <pre className="previa-do-prompt-texto custom-scrollbar">{previa.instrucoesIniciais}</pre>
             </>
           )}

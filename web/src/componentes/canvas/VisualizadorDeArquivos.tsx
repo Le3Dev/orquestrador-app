@@ -21,6 +21,8 @@ import {
   linhasDoTexto,
   precarregarDestaque,
 } from "../../shared/destaqueDeSintaxe";
+import { idiomaAtual, localeDoIdioma, textosAtuais, useIdioma, useTextos } from "../../shared/idioma/idioma";
+import { textosDePaineisDosNos } from "../../shared/idioma/textos/paineisDosNos";
 import { IconePasta } from "../Icones";
 import "../../theme/visualizador-de-arquivos.css";
 
@@ -41,13 +43,19 @@ type LeituraDoArquivo =
   | { estado: "pronta"; arquivo: ConteudoDoArquivo }
   | { estado: "erro"; titulo: string | null; mensagem: string; definitivo: boolean };
 
-/** Recusas do servidor que tentar de novo não resolve, com um título amigável. */
-const RECUSAS: Readonly<Record<number, string>> = {
-  403: "Arquivo bloqueado",
-  404: "Arquivo não encontrado",
-  413: "Arquivo grande demais",
-  415: "Arquivo binário",
-};
+/** Recusas do servidor que tentar de novo não resolve, com um título amigável (no idioma atual). */
+function recusaDe(status: number): string | null {
+  const recusas = textosAtuais(textosDePaineisDosNos).arquivos.recusas;
+  switch (status) {
+    case 403:
+    case 404:
+    case 413:
+    case 415:
+      return recusas[status];
+    default:
+      return null;
+  }
+}
 
 function caminhoDe(pasta: string, nome: string): string {
   return pasta === "" ? nome : `${pasta}/${nome}`;
@@ -57,7 +65,7 @@ function formatarTamanho(bytes: number): string {
   if (bytes < 1024) {
     return `${bytes} B`;
   }
-  return `${(bytes / 1024).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} KB`;
+  return `${(bytes / 1024).toLocaleString(localeDoIdioma(idiomaAtual()), { maximumFractionDigits: 1 })} KB`;
 }
 
 /** O painel fica fora do nó no DOM, mas não na árvore do React: os eventos não podem subir até o terminal. */
@@ -82,13 +90,14 @@ interface PropsDaArvore {
 
 /** Os itens de uma pasta já pedida; as subpastas abertas se desenham dentro, um nível mais fundo. */
 function ItensDaPasta({ caminho, nivel, ...arvore }: PropsDaArvore & { caminho: string; nivel: number }) {
+  const t = useTextos(textosDePaineisDosNos).arquivos;
   const leitura = arvore.pastas.get(caminho) ?? { estado: "carregando" };
   const recuo = { paddingLeft: `${8 + nivel * 14}px` };
 
   if (leitura.estado === "carregando") {
     return (
       <li role="status" className="aviso-da-arvore" style={recuo}>
-        lendo…
+        {t.lendo}
       </li>
     );
   }
@@ -97,7 +106,7 @@ function ItensDaPasta({ caminho, nivel, ...arvore }: PropsDaArvore & { caminho: 
       <li className="aviso-da-arvore text-error" style={recuo}>
         {leitura.mensagem}{" "}
         <button type="button" className="underline" onClick={() => arvore.aoRecarregarPasta(caminho)}>
-          tentar de novo
+          {textosAtuais(textosDePaineisDosNos).alteracoes.tentarDeNovo}
         </button>
       </li>
     );
@@ -105,7 +114,7 @@ function ItensDaPasta({ caminho, nivel, ...arvore }: PropsDaArvore & { caminho: 
   if (leitura.entradas.length === 0) {
     return (
       <li className="aviso-da-arvore" style={recuo}>
-        pasta vazia
+        {t.pastaVazia}
       </li>
     );
   }
@@ -158,7 +167,7 @@ function ItensDaPasta({ caminho, nivel, ...arvore }: PropsDaArvore & { caminho: 
       })}
       {leitura.truncada && (
         <li className="aviso-da-arvore" style={recuo}>
-          pasta com itens demais: só os primeiros aparecem
+          {t.pastaTruncada}
         </li>
       )}
     </>
@@ -170,6 +179,7 @@ function ItensDaPasta({ caminho, nivel, ...arvore }: PropsDaArvore & { caminho: 
  * destaque fica pronto, as mesmas linhas ganham as cores do tema.
  */
 const CodigoDoArquivo = memo(function CodigoDoArquivo({ arquivo }: { arquivo: ConteudoDoArquivo }) {
+  const t = useTextos(textosDePaineisDosNos).arquivos;
   const linhas = useMemo(() => linhasDoTexto(arquivo.conteudo), [arquivo.conteudo]);
   const [destaque, setDestaque] = useState<LinhaDestacada[] | null>(null);
 
@@ -198,7 +208,7 @@ const CodigoDoArquivo = memo(function CodigoDoArquivo({ arquivo }: { arquivo: Co
     <div
       className="codigo-do-visualizador custom-scrollbar"
       tabIndex={0}
-      aria-label={`Conteúdo de ${arquivo.caminho}`}
+      aria-label={t.conteudoDe(arquivo.caminho)}
       data-destacado={destaque !== null}
     >
       <pre>
@@ -236,6 +246,8 @@ const CodigoDoArquivo = memo(function CodigoDoArquivo({ arquivo }: { arquivo: Co
 
 /** O arquivo escolhido: caminho no topo e o código só leitura, com rolagem própria. */
 function ArquivoAberto({ orquestradorId, caminho }: { orquestradorId: string; caminho: string }) {
+  const t = useTextos(textosDePaineisDosNos).arquivos;
+  const locale = localeDoIdioma(useIdioma());
   const [leitura, setLeitura] = useState<LeituraDoArquivo>({ estado: "carregando" });
   const [tentativa, setTentativa] = useState(0);
 
@@ -250,7 +262,7 @@ function ArquivoAberto({ orquestradorId, caminho }: { orquestradorId: string; ca
       },
       (falha: unknown) => {
         if (valida) {
-          const titulo = falha instanceof ErroDaApi ? (RECUSAS[falha.status] ?? null) : null;
+          const titulo = falha instanceof ErroDaApi ? recusaDe(falha.status) : null;
           setLeitura({ estado: "erro", titulo, mensagem: mensagemDeErro(falha), definitivo: titulo !== null });
         }
       },
@@ -268,7 +280,7 @@ function ArquivoAberto({ orquestradorId, caminho }: { orquestradorId: string; ca
         </span>
         {leitura.estado === "pronta" && (
           <span className="text-support shrink-0">
-            {leitura.arquivo.linhas.toLocaleString("pt-BR")} {leitura.arquivo.linhas === 1 ? "linha" : "linhas"} ·{" "}
+            {leitura.arquivo.linhas.toLocaleString(locale)} {leitura.arquivo.linhas === 1 ? t.linha : t.linhas} ·{" "}
             {formatarTamanho(leitura.arquivo.tamanho)}
           </span>
         )}
@@ -276,7 +288,7 @@ function ArquivoAberto({ orquestradorId, caminho }: { orquestradorId: string; ca
 
       {leitura.estado === "carregando" && (
         <p role="status" className="text-support m-0 px-4 py-3">
-          Lendo o arquivo…
+          {t.lendoOArquivo}
         </p>
       )}
 
@@ -292,7 +304,7 @@ function ArquivoAberto({ orquestradorId, caminho }: { orquestradorId: string; ca
             </span>
             {!leitura.definitivo && (
               <button type="button" className="btn btn-sm btn-outline" onClick={() => setTentativa((atual) => atual + 1)}>
-                tentar de novo
+                {textosAtuais(textosDePaineisDosNos).alteracoes.tentarDeNovo}
               </button>
             )}
           </div>
@@ -316,6 +328,7 @@ export const VisualizadorDeArquivos = memo(function VisualizadorDeArquivos({
   nomeDoOrquestrador,
   aoFechar,
 }: PropsDoVisualizador) {
+  const t = useTextos(textosDePaineisDosNos).arquivos;
   const painel = useRef<HTMLDivElement>(null);
   const idDoTitulo = useId();
   const [pastas, setPastas] = useState<ReadonlyMap<string, LeituraDaPasta>>(new Map());
@@ -410,17 +423,17 @@ export const VisualizadorDeArquivos = memo(function VisualizadorDeArquivos({
       >
         <div className="flex items-center gap-2.5 border-b border-border px-4 py-2.5">
           <h2 id={idDoTitulo} className="shrink-0">
-            Arquivos
+            {t.titulo}
           </h2>
           {nomeDoOrquestrador !== undefined && <span className="truncate text-secondary">{nomeDoOrquestrador}</span>}
           <span className="flex-1" />
-          <span className="text-support shrink-0">só leitura</span>
-          <button type="button" className="botao-icone" title="Fechar (Esc)" aria-label="Fechar" onClick={aoFechar}>
+          <span className="text-support shrink-0">{t.somenteLeitura}</span>
+          <button type="button" className="botao-icone" title={textosAtuais(textosDePaineisDosNos).alteracoes.fecharDica} aria-label={textosAtuais(textosDePaineisDosNos).alteracoes.fechar} onClick={aoFechar}>
             ✕
           </button>
         </div>
         <div className="flex min-h-0 flex-1">
-          <ul aria-label="Arquivos da pasta" className="arvore-de-arquivos custom-scrollbar">
+          <ul aria-label={t.arquivosDaPasta} className="arvore-de-arquivos custom-scrollbar">
             <ItensDaPasta
               caminho=""
               nivel={0}
@@ -433,7 +446,7 @@ export const VisualizadorDeArquivos = memo(function VisualizadorDeArquivos({
             />
           </ul>
           {escolhido === null ? (
-            <p className="text-support m-0 flex-1 px-4 py-3">Escolha um arquivo para ver o conteúdo.</p>
+            <p className="text-support m-0 flex-1 px-4 py-3">{t.escolhaUm}</p>
           ) : (
             <ArquivoAberto key={escolhido} orquestradorId={orquestradorId} caminho={escolhido} />
           )}

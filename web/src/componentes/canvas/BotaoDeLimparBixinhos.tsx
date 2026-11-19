@@ -1,5 +1,7 @@
 import { useCanvas } from "../../shared/canvas/contexto";
 import { bixinhosParaLimpar } from "../../shared/canvas/nos";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeNosDoCanvas } from "../../shared/idioma/textos/nosDoCanvas";
 
 /**
  * "Limpar bixinhos", na barra do terminal: tira do canvas os bixinhos que já
@@ -9,6 +11,7 @@ import { bixinhosParaLimpar } from "../../shared/canvas/nos";
  * nenhum, não renderiza nada.
  */
 export function BotaoDeLimparBixinhos({ orquestradorId }: { orquestradorId: string }) {
+  const t = useTextos(textosDeNosDoCanvas).bixinho;
   const { conversas, bixinhosLimpos, acoes } = useCanvas();
   const quantidade = bixinhosParaLimpar(conversas.get(orquestradorId), bixinhosLimpos.get(orquestradorId)).length;
 
@@ -20,11 +23,11 @@ export function BotaoDeLimparBixinhos({ orquestradorId }: { orquestradorId: stri
     <button
       type="button"
       className="btn btn-sm btn-ghost nodrag"
-      aria-label="Limpar bixinhos"
-      title={`Limpar bixinhos: tira do canvas os ${quantidade} que não estão executando (o histórico continua no terminal)`}
+      aria-label={t.limpar}
+      title={t.limparDica(quantidade)}
       onClick={() => acoes.limparBixinhos(orquestradorId)}
     >
-      {`limpar (${quantidade})`}
+      {t.limparTexto(quantidade)}
     </button>
   );
 }

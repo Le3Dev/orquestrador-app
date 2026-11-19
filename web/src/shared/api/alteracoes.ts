@@ -1,4 +1,8 @@
+import { textosAtuais } from "../idioma/idioma";
+import { textosDeApoioDosNos } from "../idioma/textos/nos";
 import { ErroDaApi } from "./cliente";
+
+const textos = () => textosAtuais(textosDeApoioDosNos).alteracoes;
 
 /*
  * Painel de alterações do worktree (`/api/orquestradores/:id/alteracoes`):
@@ -69,12 +73,12 @@ async function ler<Resposta>(caminho: string): Promise<Resposta> {
   try {
     resposta = await fetch(`/api${caminho}`, { headers: { "Content-Type": "application/json" } });
   } catch {
-    throw new Error("Não foi possível falar com o servidor. Feche e abra o Orquestrador de novo.");
+    throw new Error(textos().semConexao);
   }
 
   const corpo: unknown = await resposta.json().catch(() => null);
   if (!resposta.ok) {
-    throw new ErroDaApi(extrairMensagem(corpo) ?? `O servidor respondeu com erro ${resposta.status}.`, resposta.status);
+    throw new ErroDaApi(extrairMensagem(corpo) ?? textos().erroDoServidor(resposta.status), resposta.status);
   }
   return corpo as Resposta;
 }
@@ -107,12 +111,13 @@ export interface ConsultaDasAlteracoes {
   readonly erro: string | null;
 }
 
-export const TEXTO_SEM_GIT = "Esta pasta não é um repositório git: os agentes alteram a pasta direto.";
-export const TEXTO_SEM_ALTERACOES = "Nenhuma alteração pendente no worktree.";
-export const TEXTO_EM_USO = "Um pedido está rodando: a lista pode mudar.";
-export const TEXTO_DIFF_TRUNCADO = "O diff é grande e foi cortado aqui: o resto está no arquivo, dentro do worktree.";
-export const TEXTO_ARQUIVO_BINARIO = "Arquivo binário: não há diff de texto para mostrar.";
-export const TEXTO_DIFF_VAZIO = "Sem diferenças de texto neste arquivo.";
+/** Os textos fixos do painel, no idioma atual (lidos a cada chamada). */
+export const textoSemGit = (): string => textos().semGit;
+export const textoSemAlteracoes = (): string => textos().semAlteracoes;
+export const textoEmUso = (): string => textos().emUso;
+export const textoDiffTruncado = (): string => textos().diffTruncado;
+export const textoArquivoBinario = (): string => textos().arquivoBinario;
+export const textoDiffVazio = (): string => textos().diffVazio;
 
 /** Aviso dos commits da branch, que o painel não lista; `null` quando não há. */
 export function textoDosCommitsNaBranch(alteracoes: AlteracoesDoWorktree): string | null {
@@ -120,9 +125,7 @@ export function textoDosCommitsNaBranch(alteracoes: AlteracoesDoWorktree): strin
   if (quantidade <= 0 || branch === null) {
     return null;
   }
-  return quantidade === 1
-    ? `1 commit na branch ${branch} não aparece aqui.`
-    : `${quantidade} commits na branch ${branch} não aparecem aqui.`;
+  return textos().commitsNaBranch(quantidade, branch);
 }
 
 /** Como uma linha do diff unificado é pintada. */

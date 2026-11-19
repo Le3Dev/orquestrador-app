@@ -16,15 +16,14 @@ import { juntarDitado } from "../../shared/ditado/texto";
 import { formatarBytes } from "../../shared/formatacao";
 import { useMelhorarPrompt } from "../../shared/hooks/useMelhorarPrompt";
 import { type AnexoPendente, arquivosColados, TIPOS_ACEITOS_NO_SELETOR } from "../../shared/anexos";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDePromptDoTerminal } from "../../shared/idioma/textos/promptEShell";
 import { BotaoDeDitado } from "../BotaoDeDitado";
 import { ChipDeAnexo } from "../ChipDeAnexo";
 import { IconeAnexo, IconeFechar } from "../Icones";
 import { AvisoDaMelhoria, BotaoDeMelhorar } from "../MelhoriaDoPrompt";
 
 const ALTURA_MAXIMA = 140;
-
-const AVISO_DOS_ANEXOS =
-  "anexos não entram na fila — envie quando o orquestrador estiver livre, ou remova os anexos para pôr só o texto na fila";
 
 /** O que o terminal pode fazer no prompt de fora dele. */
 export interface ControleDoPrompt {
@@ -63,23 +62,24 @@ interface PropsDaFila {
  * "enviar agora".
  */
 function FilaDePedidos({ fila, pausada, enviandoProximo, desconectado, aoRemover, aoEnviarAgora }: PropsDaFila) {
+  const t = useTextos(textosDePromptDoTerminal).fila;
   return (
-    <section className="flex flex-col gap-0.5 px-3 pt-2" aria-label="Fila de pedidos">
+    <section className="flex flex-col gap-0.5 px-3 pt-2" aria-label={t.aria}>
       <p className="mono flex items-center gap-1.5 text-muted">
         {pausada ? (
-          <span className="text-warning">fila pausada</span>
+          <span className="text-warning">{t.pausada}</span>
         ) : (
-          <span>{enviandoProximo ? "enviando o próximo…" : "na fila"}</span>
+          <span>{enviandoProximo ? t.enviandoOProximo : t.naFila}</span>
         )}
         <span>
           · {fila.length}/{LIMITE_DA_FILA}
         </span>
         <span className="truncate">
           {pausada
-            ? "· nenhum pedido rodando: envie o próximo ou remova"
+            ? t.nenhumRodando
             : enviandoProximo
-              ? "· o pedido anterior terminou bem"
-              : "· sai sozinha quando o pedido atual terminar bem"}
+              ? t.anteriorTerminou
+              : t.saiSozinha}
         </span>
       </p>
       <ol className="custom-scrollbar flex max-h-24 flex-col overflow-y-auto">
@@ -89,7 +89,7 @@ function FilaDePedidos({ fila, pausada, enviandoProximo, desconectado, aoRemover
             <li key={pedido.id} className="mono flex min-h-5 items-center gap-2 text-caption">
               <span className="w-4 shrink-0 text-right text-muted">{numero}</span>
               {pedido.modo === "planejamento" && (
-                <span className="shrink-0 rounded border border-border px-1 text-[10px] text-info">plan mode</span>
+                <span className="shrink-0 rounded border border-border px-1 text-[10px] text-info">{t.planMode}</span>
               )}
               <span className="min-w-0 flex-1 truncate" title={pedido.texto}>
                 {trechoDoPedido(pedido.texto)}
@@ -99,18 +99,18 @@ function FilaDePedidos({ fila, pausada, enviandoProximo, desconectado, aoRemover
                   type="button"
                   className="shrink-0 rounded px-1.5 text-active hover:bg-surface-3 disabled:opacity-50"
                   disabled={desconectado}
-                  title="Tira o pedido da fila e o envia agora"
+                  title={t.enviarAgoraDica}
                   onClick={() => aoEnviarAgora(pedido.id)}
                 >
-                  enviar agora
+                  {t.enviarAgora}
                 </button>
               )}
               <button
                 type="button"
                 className="grid h-5 w-5 shrink-0 place-items-center rounded text-muted hover:bg-surface-3 hover:text-error disabled:opacity-50"
                 disabled={desconectado}
-                aria-label={`Remover da fila o pedido ${numero}`}
-                title="Remover da fila"
+                aria-label={t.remover(numero)}
+                title={t.removerDica}
                 onClick={() => aoRemover(pedido.id)}
               >
                 <IconeFechar tamanho={11} />
@@ -200,6 +200,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
   aoCancelar,
   textoInicial = "",
 }: Props) {
+  const t = useTextos(textosDePromptDoTerminal);
   const [texto, setTexto] = useState(textoInicial);
   // Nasceu com texto: o campo já abre na altura dele.
   const [nasceuComTexto] = useState(textoInicial !== "");
@@ -394,7 +395,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
                 <button
                   type="button"
                   className="miniatura-remover"
-                  aria-label={`Remover ${anexo.nome}`}
+                  aria-label={t.remover(anexo.nome)}
                   onClick={() => aoRemoverAnexo(anexo.id)}
                 >
                   <IconeFechar tamanho={11} />
@@ -429,14 +430,14 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
           onPaste={aoColar}
           placeholder={
             desconectado
-              ? "servidor desconectado — dá para escrever, o envio volta quando ele voltar"
+              ? t.placeholder.desconectado
               : trabalhando
-                ? "trabalhando… escreva o próximo e enter põe na fila · esc cancela"
+                ? t.placeholder.trabalhando
                 : planejando
-                  ? "descreva o que planejar — nada é alterado até você aprovar"
-                  : "peça algo e pressione enter · cole ou arraste imagens e arquivos"
+                  ? t.placeholder.planejando
+                  : t.placeholder.padrao
           }
-          aria-label="Mensagem para o orquestrador"
+          aria-label={t.mensagem}
         />
         <input
           ref={seletor}
@@ -453,12 +454,12 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
           melhoria={melhoria}
           desabilitado={texto.trim() === "" || desconectado || trabalhando || enviando}
         />
-        <BotaoDeDitado destino="a mensagem" aoTranscrever={receberDitado} />
+        <BotaoDeDitado destino={t.ditarDestino} aoTranscrever={receberDitado} />
         <button
           type="button"
           className="botao-icone"
-          title="Anexar arquivos (também dá para colar com Ctrl+V ou arrastar para o terminal)"
-          aria-label="Anexar arquivos"
+          title={t.anexarDica}
+          aria-label={t.anexar}
           onClick={() => seletor.current?.click()}
         >
           <IconeAnexo />
@@ -470,7 +471,7 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
             onClick={aoCancelar}
             disabled={cancelando || desconectado}
           >
-            {cancelando ? "cancelando…" : "cancelar"}
+            {cancelando ? t.cancelando : t.cancelar}
           </button>
         ) : (
           <button
@@ -479,13 +480,13 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
             onClick={() => void enviar()}
             disabled={!temConteudo || enviando || desconectado || melhoria.melhorando}
           >
-            {enviando ? "…" : "enviar ⏎"}
+            {enviando ? "…" : t.enviar}
           </button>
         )}
       </div>
       {avisoDosAnexos && trabalhando && anexos.length > 0 && (
         <p className="mono hint-warning px-[14px] pb-0.5" role="alert">
-          {AVISO_DOS_ANEXOS}
+          {t.avisoDosAnexos}
         </p>
       )}
       <AvisoDaMelhoria melhoria={melhoria} className="px-[14px] pb-0.5" />
@@ -498,11 +499,11 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
         type="button"
         className={`selo-de-modo ${planejando ? "selo-de-modo-ativo" : ""}`}
         aria-pressed={planejando}
-        title="Alterna o modo do próximo pedido (Shift+Tab)"
+        title={t.modoDica}
         onClick={aoAlternarModo}
       >
-        {planejando ? "‖ plan mode ligado · só investiga e propõe um plano" : "› execução"}
-        <span className="text-muted"> · shift+tab alterna</span>
+        {planejando ? t.planejandoLigado : t.execucao}
+        <span className="text-muted">{t.shiftTab}</span>
       </button>
     </div>
   );

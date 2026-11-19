@@ -2,6 +2,8 @@ import { type ReactNode, useId, useRef } from "react";
 
 import { TAMANHO_MAXIMO_DAS_INSTRUCOES } from "../shared/api/tipos";
 import { juntarDitado } from "../shared/ditado/texto";
+import { useIdioma, useTextos, localeDoIdioma } from "../shared/idioma/idioma";
+import { textosDeComponentesComuns } from "../shared/idioma/textos/componentesComuns";
 import { tamanhoDasInstrucoes } from "../shared/instrucoes";
 import { BotaoDeDitado } from "./BotaoDeDitado";
 
@@ -23,6 +25,8 @@ interface Props {
  * só avisa, e o servidor recusa ao salvar com a mesma mensagem.
  */
 export function CampoDeInstrucoes({ rotulo, ajuda, valor, aoMudar, placeholder, dica, linhas = 4 }: Props) {
+  const t = useTextos(textosDeComponentesComuns).instrucoes;
+  const locale = localeDoIdioma(useIdioma());
   const id = useId();
   const idDaAjuda = useId();
   const campo = useRef<HTMLTextAreaElement>(null);
@@ -55,10 +59,10 @@ export function CampoDeInstrucoes({ rotulo, ajuda, valor, aoMudar, placeholder, 
         </span>
         <span className="flex items-center gap-1.5">
           <span className={`mono text-[10.5px] ${passou ? "text-error" : "text-muted"}`} aria-live="polite">
-            {tamanho.toLocaleString("pt-BR")} / {TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString("pt-BR")}
+            {tamanho.toLocaleString(locale)} / {TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString(locale)}
           </span>
           <BotaoDeDitado
-            destino="as instruções"
+            destino={t.ditarDestino}
             className="ditado-abaixo"
             aoTranscrever={receberDitado}
           />
@@ -81,8 +85,7 @@ export function CampoDeInstrucoes({ rotulo, ajuda, valor, aoMudar, placeholder, 
       </span>
       {passou && (
         <span className="text-[11px] text-error" role="alert">
-          Passou do limite de {TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString("pt-BR")} caracteres: encurte o texto para
-          conseguir salvar.
+          {t.passouDoLimite(TAMANHO_MAXIMO_DAS_INSTRUCOES.toLocaleString(locale))}
         </span>
       )}
     </div>

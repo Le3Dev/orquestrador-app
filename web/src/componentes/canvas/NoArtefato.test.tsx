@@ -21,8 +21,9 @@ import {
   TAG_DO_SCRIPT_DO_DESENHO,
 } from "../../shared/desenhoNaPagina";
 import { TAG_DO_SCRIPT_DE_NAVEGACAO } from "../../shared/navegacaoDoArtefato";
+import { textosAtuais } from "../../shared/idioma/idioma";
+import { textosDeArtefato } from "../../shared/idioma/textos/artefato";
 import {
-  CONFIRMACAO_PARA_APAGAR_O_ARTEFATO,
   DURACAO_DO_DESTAQUE_MS,
   NoArtefato,
   POLITICA_DO_ARTEFATO,
@@ -423,7 +424,7 @@ describe("NoArtefato", () => {
     const apagar = screen.getByRole("button", { name: "Apagar o artefato" });
 
     fireEvent.click(apagar);
-    expect(confirmar).toHaveBeenCalledWith(CONFIRMACAO_PARA_APAGAR_O_ARTEFATO);
+    expect(confirmar).toHaveBeenCalledWith(textosAtuais(textosDeArtefato).confirmarApagar);
     expect(remover).not.toHaveBeenCalled();
 
     await act(async () => {

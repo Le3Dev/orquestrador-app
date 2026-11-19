@@ -8,7 +8,9 @@ import type { NoNota as TipoDoNo } from "../../shared/canvas/nos";
 import { type AcoesDasNotas, criarLojaDasNotas, type LojaDasNotas, ProvedorDasNotas } from "../../shared/canvas/notas";
 import { lerPedidoArrastado, TIPO_DO_PEDIDO_ARRASTADO } from "../../shared/canvas/pedidoArrastado";
 import { ESPERA_PARA_SALVAR_A_NOTA_MS } from "../../shared/hooks/useEdicaoDaNota";
-import { CONFIRMACAO_PARA_APAGAR, NoNota } from "./NoNota";
+import { textosAtuais } from "../../shared/idioma/idioma";
+import { textosDeNota } from "../../shared/idioma/textos/notas";
+import { NoNota } from "./NoNota";
 
 function nota(id: string, alteracoes: Partial<DadosDaNota> = {}): DadosDaNota {
   return {
@@ -215,7 +217,7 @@ describe("NoNota", () => {
     const apagar = screen.getByRole("button", { name: "Apagar a nota" });
 
     fireEvent.click(apagar);
-    expect(confirmar).toHaveBeenCalledWith(CONFIRMACAO_PARA_APAGAR);
+    expect(confirmar).toHaveBeenCalledWith(textosAtuais(textosDeNota).confirmarApagar);
     expect(remover).not.toHaveBeenCalled();
 
     // Com um salvamento agendado: a nota apagada não recebe PATCH depois.

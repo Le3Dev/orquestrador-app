@@ -1,6 +1,8 @@
 import { type Dispatch, type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { type AlteracaoDaNota, api, mensagemDeErro } from "../api/cliente";
+import { textosAtuais } from "../idioma/idioma";
+import { textosDeApoioDosNos } from "../idioma/textos/nos";
 import type { DadosDaNota } from "../api/tipos";
 import { type Ponto, posicaoParaNovoTerminal, TAMANHO_DA_NOTA } from "../canvas/layout";
 import { ehNota, minimizarOuRestaurar, type NoDoCanvas, novaNota, sincronizarNotas } from "../canvas/nos";
@@ -97,7 +99,7 @@ export function useNotas(
         return [...anteriores, { ...novaNota(nota.id, onde), selected: true }];
       });
     } catch (falha) {
-      setErro(`Não foi possível criar a nota: ${mensagemDeErro(falha)}`);
+      setErro(textosAtuais(textosDeApoioDosNos).notas.naoCriou(mensagemDeErro(falha)));
     }
   }, [centroDaTela, loja, setNos]);
 

@@ -21,6 +21,10 @@ import { CERCAS_DO_ORQUESTRADOR, semBlocosDoApp } from "../blocosDoApp";
 import { juntarEnderecos, normalizarEndereco } from "../enderecosLocais";
 import { formatarDuracao, formatarMomento, formatarTokens, idCurto } from "../formatacao";
 import { nomeCurtoDoMotor, rotuloDoMotor } from "../modelos";
+import { textosAtuais } from "../idioma/idioma";
+import { textosDeEstadoDoTerminal } from "../idioma/textos/terminais";
+
+const textos = () => textosAtuais(textosDeEstadoDoTerminal);
 
 export interface SubagenteNaTela {
   id: string;
@@ -147,10 +151,18 @@ export type RecuperacaoNaTela = Omit<Extract<EventoRegistrado, { tipo: "recupera
 
 /** A causa da recuperação, para as linhas do log e os cartões. */
 export const CAUSAS_LEGIVEIS: Readonly<Record<CausaDaRecuperacao, string>> = {
-  silencio: "Claude em silêncio",
-  limite_de_uso: "limite de uso",
-  sobrecarga: "API sobrecarregada",
-  rede: "falha de rede",
+  get silencio() {
+    return textos().causas.silencio;
+  },
+  get limite_de_uso() {
+    return textos().causas.limite_de_uso;
+  },
+  get sobrecarga() {
+    return textos().causas.sobrecarga;
+  },
+  get rede() {
+    return textos().causas.rede;
+  },
 };
 
 export interface EstadoDaConversa {
@@ -323,19 +335,25 @@ function ficouComPlanoPendente(turno: TurnoNaTela, planoPendente: boolean | unde
 }
 
 /** O que o Orquestrador faz com cada ferramenta, no gerúndio, para o terminal. */
-const VERBOS_DAS_FERRAMENTAS: Readonly<Record<string, string>> = {
-  Read: "lendo",
-  Grep: "buscando",
-  Glob: "listando",
-  PowerShell: "executando",
-  Bash: "executando",
-  WebFetch: "abrindo",
-  WebSearch: "pesquisando",
-};
+function verboDaFerramenta(ferramenta: string): string {
+  const verbos = textos().verbos;
+  switch (ferramenta) {
+    case "Read":
+    case "Grep":
+    case "Glob":
+    case "PowerShell":
+    case "Bash":
+    case "WebFetch":
+    case "WebSearch":
+      return verbos[ferramenta];
+    default:
+      return verbos.usando(ferramenta);
+  }
+}
 
 /** Ex.: "lendo src/app.ts", "executando npm test", "usando TodoWrite". */
 function atividadeDoOrquestrador(ferramenta: string, detalhe: string): string {
-  const verbo = VERBOS_DAS_FERRAMENTAS[ferramenta] ?? `usando ${ferramenta}`;
+  const verbo = verboDaFerramenta(ferramenta);
   const alvo = primeiraLinha(detalhe);
   return alvo === "" ? verbo : `${verbo} ${alvo}`;
 }
@@ -510,23 +528,25 @@ function horaDaRetomada(retomaEm: string, em: string): string {
 function linhaDaRecuperacao(
   evento: Extract<EventoRegistrado, { tipo: "recuperacao_do_turno" }>,
 ): Pick<LinhaDoLog, "tipo" | "texto"> {
-  const tentativa = `tentativa ${evento.tentativa} de ${evento.de}`;
+  const { log } = textos();
+  const tentativa = log.tentativa(evento.tentativa, evento.de);
   const causa = CAUSAS_LEGIVEIS[evento.causa];
   switch (evento.etapa) {
     case "encerrado": {
-      const rotulo = evento.causa === "silencio" ? "travado" : causa;
-      return { tipo: "erro", texto: `${rotulo}: ${primeiraLinha(evento.resumo)} · encerrado (${tentativa})` };
+      const rotulo = evento.causa === "silencio" ? log.travado : causa;
+      return { tipo: "erro", texto: log.encerrado(rotulo, primeiraLinha(evento.resumo), tentativa) };
     }
     case "aguardando": {
-      const quando = evento.retomaEm === null ? "retoma em instantes" : `retoma às ${horaDaRetomada(evento.retomaEm, evento.em)}`;
-      return { tipo: "sistema", texto: `${quando} (${causa}) · ${tentativa}` };
+      const quando =
+        evento.retomaEm === null ? log.retomaEmInstantes : log.retomaAs(horaDaRetomada(evento.retomaEm, evento.em));
+      return { tipo: "sistema", texto: log.retomando(quando, causa, tentativa) };
     }
     case "retomando":
-      return { tipo: "sistema", texto: `retomando sozinho (${tentativa})` };
+      return { tipo: "sistema", texto: log.retomandoSozinho(tentativa) };
     case "cancelada":
-      return { tipo: "sistema", texto: "retomada cancelada" };
+      return { tipo: "sistema", texto: log.retomadaCancelada };
     case "desistiu":
-      return { tipo: "erro", texto: `não consegui retomar · ${primeiraLinha(evento.resumo)}` };
+      return { tipo: "erro", texto: log.naoConsegui(primeiraLinha(evento.resumo)) };
   }
 }
 
@@ -536,20 +556,21 @@ function linhaDaRecuperacao(
  * deixam linha.
  */
 export function linhaDoLog(evento: EventoRegistrado, turno: TurnoNaTela): Omit<LinhaDoLog, "sequencia" | "em"> | null {
+  const { log } = textos();
   switch (evento.tipo) {
     case "turno_iniciado": {
       const { modeloDoOrquestrador, modeloDosSubagentes, quantidadeDeSubagentes } = evento.configuracao;
       const quantidade =
         quantidadeDeSubagentes.modo === "fixa" ? `${quantidadeDeSubagentes.limite}` : `≤${quantidadeDeSubagentes.limite}`;
-      const modo = evento.modo === "planejamento" ? "plan mode · " : "";
-      const retomada = evento.retomada === undefined ? "" : `retomada automática (tentativa ${evento.retomada.tentativa}) · `;
+      const modo = evento.modo === "planejamento" ? log.planMode : "";
+      const retomada = evento.retomada === undefined ? "" : log.retomadaAutomatica(evento.retomada.tentativa);
       // Fora do Claude Code, o motor vem junto: os modelos sozinhos ("padrao") não dizem quem executa.
       const motor =
         evento.motor === undefined || evento.motor === "claude-code" ? "" : `${rotuloDoMotor(evento.motor)} · `;
       return {
         origem: "orquestrador",
         tipo: "sistema",
-        texto: `${retomada}${modo}turno iniciado · ${motor}${modeloDoOrquestrador} → ${modeloDosSubagentes} · ${quantidade} agentes`,
+        texto: log.turnoIniciado(`${retomada}${modo}`, motor, modeloDoOrquestrador, modeloDosSubagentes, quantidade),
       };
     }
     case "recuperacao_do_turno":
@@ -558,7 +579,7 @@ export function linhaDoLog(evento: EventoRegistrado, turno: TurnoNaTela): Omit<L
       return {
         origem: "orquestrador",
         tipo: "sistema",
-        texto: `sessão do ${rotuloDoMotor(turno.motor ?? "claude-code").toLowerCase()} conectada`,
+        texto: log.sessaoConectada(rotuloDoMotor(turno.motor ?? "claude-code").toLowerCase()),
       };
     case "texto_do_orquestrador": {
       // O bloco cru da pergunta não aparece no log: ela vira cartão no fim do turno.
@@ -577,7 +598,7 @@ export function linhaDoLog(evento: EventoRegistrado, turno: TurnoNaTela): Omit<L
     case "tarefas_atualizadas": {
       const concluidas = evento.tarefas.filter((tarefa) => tarefa.situacao === "concluida").length;
       const emAndamento = evento.tarefas.find((tarefa) => tarefa.situacao === "em_andamento");
-      const progresso = `tarefas: ${concluidas} de ${evento.tarefas.length} concluídas`;
+      const progresso = log.tarefas(concluidas, evento.tarefas.length);
       return {
         origem: "orquestrador",
         tipo: "ferramenta",
@@ -588,7 +609,7 @@ export function linhaDoLog(evento: EventoRegistrado, turno: TurnoNaTela): Omit<L
       return {
         origem: "orquestrador",
         tipo: "spawn",
-        texto: `instanciou ${evento.papel ?? "executor"}#${idCurto(evento.subagenteId)} · ${evento.descricao}`,
+        texto: log.instanciou(evento.papel ?? log.executor, idCurto(evento.subagenteId), evento.descricao),
       };
     case "progresso_do_subagente":
       return {
@@ -600,32 +621,32 @@ export function linhaDoLog(evento: EventoRegistrado, turno: TurnoNaTela): Omit<L
       return {
         origem: evento.subagenteId,
         tipo: evento.situacao === "concluido" ? "fim" : "erro",
-        texto: `${evento.situacao} em ${formatarDuracao(evento.duracaoMs)} · ${formatarTokens(evento.tokens)} tokens`,
+        texto: log.encerrou(evento.situacao, formatarDuracao(evento.duracaoMs), formatarTokens(evento.tokens)),
       };
     case "permissao_negada":
-      return { origem: "orquestrador", tipo: "erro", texto: `bloqueado: ${evento.ferramenta} · ${evento.detalhe}` };
+      return { origem: "orquestrador", tipo: "erro", texto: log.bloqueado(evento.ferramenta, evento.detalhe) };
     case "endereco_local_detectado":
-      return { origem: "orquestrador", tipo: "sistema", texto: `servidor no ar em ${evento.url}` };
+      return { origem: "orquestrador", tipo: "sistema", texto: log.servidorNoAr(evento.url) };
     case "turno_concluido": {
-      const uso = `${formatarDuracao(evento.uso.duracaoMs)} · ${formatarTokens(evento.uso.tokensDeEntrada + evento.uso.tokensDeSaida)} tokens`;
+      const uso = `${formatarDuracao(evento.uso.duracaoMs)} · ${formatarTokens(evento.uso.tokensDeEntrada + evento.uso.tokensDeSaida)} ${log.tokens}`;
       // Pedido de execução em que o Orquestrador preferiu propor um plano antes de alterar.
       const planoProposto = evento.planoPendente === true && turno.modo === "execucao";
       return {
         origem: "orquestrador",
         tipo: "fim",
-        texto: planoProposto ? `plano proposto · aguardando aprovação · ${uso}` : `síntese entregue · ${uso}`,
+        texto: planoProposto ? log.planoProposto(uso) : log.sinteseEntregue(uso),
       };
     }
     case "turno_cancelado":
-      return { origem: "orquestrador", tipo: "erro", texto: "turno cancelado pelo usuário" };
+      return { origem: "orquestrador", tipo: "erro", texto: log.turnoCancelado };
     case "turno_interrompido":
-      return { origem: "orquestrador", tipo: "erro", texto: "turno interrompido (servidor reiniciado)" };
+      return { origem: "orquestrador", tipo: "erro", texto: log.turnoInterrompido };
     case "turno_falhou":
-      return { origem: "orquestrador", tipo: "erro", texto: `falhou · ${primeiraLinha(evento.motivo)}` };
+      return { origem: "orquestrador", tipo: "erro", texto: log.falhou(primeiraLinha(evento.motivo)) };
     case "plano_aprovado":
-      return { origem: "orquestrador", tipo: "fim", texto: "plano aprovado · execução iniciada" };
+      return { origem: "orquestrador", tipo: "fim", texto: log.planoAprovado };
     case "plano_descartado":
-      return { origem: "orquestrador", tipo: "sistema", texto: "plano descartado" };
+      return { origem: "orquestrador", tipo: "sistema", texto: log.planoDescartado };
     // O pedido passou para outro motor (a reserva do Orquestrador): vem com o `turnoId` do turno que falhou, ou
     // do que já começa no motor de reserva.
     case "motor_trocado":
@@ -642,11 +663,12 @@ export function linhaDoLog(evento: EventoRegistrado, turno: TurnoNaTela): Omit<L
 export function textoDaTrocaDeMotor(troca: Pick<TrocaDeMotorNaTela, "de" | "para" | "causa" | "liberaEm" | "em">): string {
   const para = rotuloDoMotor(troca.para);
   const de = nomeCurtoDoMotor(troca.de);
+  const { log } = textos();
   if (troca.causa === "sobrecarga") {
-    return `Trocou para ${para}: ${de} sobrecarregado`;
+    return log.trocouPorSobrecarga(para, de);
   }
-  const libera = troca.liberaEm === undefined ? "" : ` (libera às ${horaDaRetomada(troca.liberaEm, troca.em)})`;
-  return `Trocou para ${para}: limite do ${de} atingido${libera}`;
+  const libera = troca.liberaEm === undefined ? "" : log.liberaAs(horaDaRetomada(troca.liberaEm, troca.em));
+  return log.trocouPorLimite(para, de, libera);
 }
 
 /**

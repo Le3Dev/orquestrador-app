@@ -1,5 +1,7 @@
 import { usePreferenciasDaTela } from "../../shared/hooks/usePreferenciasDaTela";
 import { rodandoNoMac } from "../../shared/ponteDoDesktop";
+import { useTextos } from "../../shared/idioma/idioma";
+import { textosDeNosDoCanvas } from "../../shared/idioma/textos/nosDoCanvas";
 import "../../theme/controles-de-janela.css";
 
 /*
@@ -109,6 +111,7 @@ export function ControlesDoNo({
   ampliada = false,
   ampliarDesabilitado = false,
 }: PropsDosControlesDoNo) {
+  const t = useTextos(textosDeNosDoCanvas).controles;
   const { preferencias } = usePreferenciasDaTela();
   // "Automático" segue o sistema; "Estilo Mac" e "Estilo Windows" ignoram-no.
   const noMac = preferencias.controlesDasJanelas === "automatico" ? rodandoNoMac() : preferencias.controlesDasJanelas === "mac";
@@ -120,7 +123,7 @@ export function ControlesDoNo({
   // como na janela do sistema: minimizar, maximizar, fechar.
   const botoes: { controle: Controle; rotulo: string; dica: string; alternado: boolean; desabilitado: boolean; aoClicar: () => void }[] = [];
   if (aoFechar !== undefined) {
-    const rotulo = `Fechar ${objeto}`;
+    const rotulo = t.fechar(objeto);
     botoes.push({
       controle: "fechar",
       rotulo,
@@ -131,14 +134,14 @@ export function ControlesDoNo({
     });
   }
   if (aoMinimizar !== undefined) {
-    const rotulo = `${minimizada ? "Restaurar" : "Minimizar"} ${objeto}`;
+    const rotulo = minimizada ? t.restaurar(objeto) : t.minimizar(objeto);
     botoes.push({ controle: "minimizar", rotulo, dica: rotulo, alternado: minimizada, desabilitado: false, aoClicar: aoMinimizar });
   }
   if (aoAmpliar !== undefined) {
     botoes.push({
       controle: "ampliar",
-      rotulo: ampliada ? "Sair da tela cheia" : `Ampliar ${objeto}`,
-      dica: ampliada ? "Sair da tela cheia (Esc)" : "Ampliar (tela cheia)",
+      rotulo: ampliada ? t.sairDaTelaCheia : t.ampliar(objeto),
+      dica: ampliada ? t.sairDaTelaCheiaDica : t.ampliarDica,
       alternado: ampliada,
       desabilitado: ampliarDesabilitado,
       aoClicar: aoAmpliar,
@@ -150,7 +153,7 @@ export function ControlesDoNo({
 
   if (noMac) {
     return (
-      <span className="controles-do-no controles-do-no-mac nodrag" role="group" aria-label="Controles da janela">
+      <span className="controles-do-no controles-do-no-mac nodrag" role="group" aria-label={t.grupo}>
         {botoes.map((botao) => (
           <button
             key={botao.controle}
@@ -170,7 +173,7 @@ export function ControlesDoNo({
 
   const ordemDoWindows: Readonly<Record<Controle, number>> = { minimizar: 0, ampliar: 1, fechar: 2 };
   return (
-    <span className="controles-do-no controles-do-no-windows nodrag" role="group" aria-label="Controles da janela">
+    <span className="controles-do-no controles-do-no-windows nodrag" role="group" aria-label={t.grupo}>
       <span className="separador-dos-controles-do-no" aria-hidden="true" />
       {[...botoes]
         .sort((a, b) => ordemDoWindows[a.controle] - ordemDoWindows[b.controle])
