@@ -7,26 +7,37 @@ import { mesmoConteudo } from "./useReaproveitado";
 
 export type { SituacaoDaConexao };
 
-type Acao = { tipo: "evento"; id: string; evento: EventoRegistrado } | { tipo: "esquecer"; id: string };
+type ItemDaFila = { tipo: "evento"; id: string; evento: EventoRegistrado } | { tipo: "esquecer"; id: string };
 
+/** Reserva da descarga quando o quadro não vem (janela oculta: o navegador não roda `requestAnimationFrame`). */
+export const RESERVA_DA_DESCARGA_MS = 50;
+
+/**
+ * Aplica o lote na ordem em que chegou, a partir do mesmo estado, e cria o
+ * mapa uma vez só (nenhum, se nada mudou).
+ */
 function reduzir(
   conversas: ReadonlyMap<string, EstadoDaConversa>,
-  acao: Acao,
+  lote: readonly ItemDaFila[],
 ): ReadonlyMap<string, EstadoDaConversa> {
-  if (acao.tipo === "esquecer") {
-    if (!conversas.has(acao.id)) {
-      return conversas;
+  let proximas: Map<string, EstadoDaConversa> | null = null;
+  for (const item of lote) {
+    const atuais = proximas ?? conversas;
+    if (item.tipo === "esquecer") {
+      if (atuais.has(item.id)) {
+        proximas ??= new Map(conversas);
+        proximas.delete(item.id);
+      }
+      continue;
     }
-    const restantes = new Map(conversas);
-    restantes.delete(acao.id);
-    return restantes;
+    const atual = atuais.get(item.id) ?? ESTADO_INICIAL;
+    const proximo = aplicarEvento(atual, item.evento);
+    if (proximo !== atual) {
+      proximas ??= new Map(conversas);
+      proximas.set(item.id, proximo);
+    }
   }
-  const atual = conversas.get(acao.id) ?? ESTADO_INICIAL;
-  const proximo = aplicarEvento(atual, acao.evento);
-  if (proximo === atual) {
-    return conversas;
-  }
-  return new Map(conversas).set(acao.id, proximo);
+  return proximas ?? conversas;
 }
 
 /**
@@ -59,13 +70,78 @@ export function useConversas(
   }, [conversas]);
 
   useEffect(() => {
+    // Os eventos e os sinais esperam numa fila e entram na tela uma vez por
+    // quadro, num commit só: ao abrir, o histórico chega em milhares de
+    // mensagens, e uma atualização por mensagem renderizava o canvas inteiro
+    // a cada uma. A ordem de chegada é mantida.
+    let fila: ItemDaFila[] = [];
+    let sinaisPendentes = new Map<string, SinalDeVida>();
+    let quadro: number | null = null;
+    let reserva: ReturnType<typeof setTimeout> | null = null;
+
+    const cancelarDescarga = () => {
+      if (quadro !== null) {
+        cancelAnimationFrame(quadro);
+        quadro = null;
+      }
+      if (reserva !== null) {
+        clearTimeout(reserva);
+        reserva = null;
+      }
+    };
+
+    const descarregar = () => {
+      cancelarDescarga();
+      if (fila.length > 0) {
+        const lote = fila;
+        fila = [];
+        despachar(lote);
+      }
+      if (sinaisPendentes.size > 0) {
+        const pendentes = sinaisPendentes;
+        sinaisPendentes = new Map();
+        setSinais((atuais) => {
+          let proximos: Map<string, SinalDeVida> | null = null;
+          for (const [id, sinal] of pendentes) {
+            if (!mesmoConteudo((proximos ?? atuais).get(id), sinal)) {
+              proximos ??= new Map(atuais);
+              proximos.set(id, sinal);
+            }
+          }
+          return proximos ?? atuais;
+        });
+      }
+    };
+
+    // O quadro e, de reserva, um timer: o primeiro que vier descarrega e cancela o outro.
+    const agendarDescarga = () => {
+      if (quadro === null && typeof requestAnimationFrame === "function") {
+        quadro = requestAnimationFrame(() => {
+          quadro = null;
+          descarregar();
+        });
+      }
+      reserva ??= setTimeout(() => {
+        reserva = null;
+        descarregar();
+      }, RESERVA_DA_DESCARGA_MS);
+    };
+
     const conexoesDeEventos = new ConexoesDeEventos({
-      aoReceber: (id, evento) => despachar({ tipo: "evento", id, evento }),
-      aoSinal: (id, sinal) =>
-        setSinais((atuais) => (mesmoConteudo(atuais.get(id), sinal) ? atuais : new Map(atuais).set(id, sinal))),
+      aoReceber: (id, evento) => {
+        fila.push({ tipo: "evento", id, evento });
+        agendarDescarga();
+      },
+      // Só o último sinal de cada um importa: é o que a tela mostra.
+      aoSinal: (id, sinal) => {
+        sinaisPendentes.set(id, sinal);
+        agendarDescarga();
+      },
       aoMudarSituacao: (id, situacao) => {
         if (situacao === null) {
-          despachar({ tipo: "esquecer", id });
+          // Esquecer vale na hora, como antes, e depois dos eventos que já chegaram dele.
+          fila.push({ tipo: "esquecer", id });
+          descarregar();
         }
         setConexoes((atuais) => {
           // Sem mudança (ex.: "reconectando" a cada nova tentativa), sem mapa novo.
@@ -81,10 +157,18 @@ export function useConversas(
           return proximas;
         });
       },
-      ultimaSequencia: (id) => conversasAtuais.current.get(id)?.ultimaSequencia ?? 0,
+      // Conta também o que ainda espera na fila, para não pedir de novo o que já chegou.
+      ultimaSequencia: (id) =>
+        fila.reduce(
+          (maior, item) => (item.tipo === "evento" && item.id === id ? Math.max(maior, item.evento.sequencia) : maior),
+          conversasAtuais.current.get(id)?.ultimaSequencia ?? 0,
+        ),
     });
     gerenciador.current = conexoesDeEventos;
     return () => {
+      cancelarDescarga();
+      fila = [];
+      sinaisPendentes = new Map();
       conexoesDeEventos.fecharTodas();
       gerenciador.current = null;
     };
