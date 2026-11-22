@@ -185,9 +185,12 @@ export class ServicoDeChat {
 
   /**
    * Pausa a resposta em andamento congelando o processo do Claude Code
-   * (SIGSTOP); continuar segue exatamente de onde parou. Sem processo para
-   * congelar (ainda abrindo, já terminando, ou Windows), é recusado: não há
-   * plano B.
+   * (SIGSTOP); numa pausa curta, continuar segue exatamente de onde parou.
+   * Numa pausa longa (mais de ~2 min; no QA de 22/11, 90 s seguiu e 180 s não)
+   * a conexão com a API cai e, ao continuar, o Claude Code refaz a chamada em
+   * andamento: a resposta pode recomeçar do zero (a tela avisa). Sem processo
+   * para congelar (ainda abrindo, já terminando, ou Windows), é recusado: não
+   * há plano B.
    */
   async pausar(): Promise<{ pausada: true }> {
     const { repositorio, execucoes, agora } = this.dependencias;

@@ -60,6 +60,15 @@
     <li>Tela: <code>web/src/shared/api/tipos.ts</code>, <code>web/src/shared/api/cliente.ts</code>, <code>web/src/shared/estado/aplicarEventoDoChat.ts</code> (<code>respostaPausada</code>), <code>web/src/componentes/chat/ChatRapido.tsx</code> (reusa <code>botao-de-pausa</code> e <code>faixa-de-progresso-pausada</code> do tema).</li>
   </ul>
 
+  <h2>Pausa longa</h2>
+  <p>Congelado por muito tempo, o processo perde a conexão com a API: ao continuar, o Claude Code refaz a chamada que estava em andamento e a resposta recomeça do zero. No QA de 22/11 (<code>qa-pausar-resposta-do-chat.html</code>, caso 6), 90 s seguiu de onde parou; 180 s e 5 min recomeçaram.</p>
+  <ul>
+    <li>Passados 2 min de pausa (<code>PAUSA_LONGA_MS</code>, em <code>web/src/shared/hooks/usePausaLonga.ts</code>, entre os 90 s e os 180 s do QA), aparece abaixo da barra do <strong>▶</strong>: <em>Pausada há mais de 2 min: ao continuar, a resposta pode recomeçar do zero.</em> Antes disso, nada muda.</li>
+    <li>A contagem é da tela, a partir de <code>pausadaDesde</code>, com um timer só: o aviso aparece sozinho, sem esperar evento do servidor.</li>
+    <li>No terminal do Orquestrador (mesmo mecanismo, ainda sem prova), o chip da pausa no modo congelado ganha <em>· ao continuar, o passo atual pode ser refeito</em>; no modo retomada não, porque o processo já foi encerrado.</li>
+    <li>Só aviso: o comportamento da pausa não mudou.</li>
+  </ul>
+
   <h2>Ressalvas</h2>
   <ul>
     <li><code>pausadaDesde</code> só aparece nos dados durante a pausa (ausente fora dela, como <code>origem</code>), para não mudar o formato das mensagens já gravadas.</li>

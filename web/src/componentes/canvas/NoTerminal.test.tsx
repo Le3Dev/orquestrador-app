@@ -1294,8 +1294,9 @@ describe("NoTerminal · pausa do orquestrador", () => {
     const continuar = vi.spyOn(api, "continuar").mockResolvedValue({ modo: "congelado" });
     const { container } = render(<Terminal canvas={canvasDoTerminal(conversaPausada("congelado"))} no={propsDoNo()} />);
 
-    const chip = screen.getByText("⏸ pausado há 3 min");
-    expect(chip).toHaveAttribute("title", expect.stringContaining("segue exatamente de onde parou") as string);
+    // Congelado há mais de 2 min: o chip leva o aviso da pausa longa.
+    const chip = screen.getByText("⏸ pausado há 3 min · ao continuar, o passo atual pode ser refeito");
+    expect(chip).toHaveAttribute("title", expect.stringContaining("congelado há mais de 2 min") as string);
     expect(container.querySelector(".janela-terminal-pausada")).not.toBeNull();
     expect(container.querySelector(".janela-terminal-ativa")).toBeNull();
     expect(container.querySelector(".faixa-de-progresso-pausada")).not.toBeNull();
@@ -1303,7 +1304,7 @@ describe("NoTerminal · pausa do orquestrador", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(60_000);
     });
-    expect(screen.getByText("⏸ pausado há 4 min")).toBeInTheDocument();
+    expect(screen.getByText("⏸ pausado há 4 min · ao continuar, o passo atual pode ser refeito")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Continuar orquestrador" }));
     expect(continuar).toHaveBeenCalledWith("o1");

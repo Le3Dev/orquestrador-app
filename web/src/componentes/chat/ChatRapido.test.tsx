@@ -1491,6 +1491,48 @@ describe("ChatRapido", () => {
       expect(screen.getByRole("button", { name: "Continuar resposta" })).toBeDisabled();
     });
 
+    describe("pausa longa", () => {
+      beforeEach(() => {
+        vi.useFakeTimers();
+        // A resposta foi pausada às 12:01:00: 1 min 50 s de pausa, ainda curta.
+        vi.setSystemTime(new Date("2026-11-04T12:02:50Z"));
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it("antes de 2 min nada muda; passados 2 min, a linha aparece sozinha junto do ▶ e some ao continuar", async () => {
+        const { rerender } = renderizar(PAUSADO);
+        expect(screen.queryByTestId("aviso-de-pausa-longa")).not.toBeInTheDocument();
+
+        // Exatamente 2 min ainda não é "mais de 2 min".
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(10_000);
+        });
+        expect(screen.queryByTestId("aviso-de-pausa-longa")).not.toBeInTheDocument();
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(100);
+        });
+        expect(screen.getByTestId("aviso-de-pausa-longa")).toHaveTextContent(
+          "Pausada há mais de 2 min: ao continuar, a resposta pode recomeçar do zero.",
+        );
+        expect(screen.getByRole("button", { name: "Continuar resposta" })).toBeInTheDocument();
+
+        rerender(PAUSAVEL);
+        expect(screen.queryByTestId("aviso-de-pausa-longa")).not.toBeInTheDocument();
+      });
+
+      it("respondendo sem pausa, o tempo não conta: sem aviso", async () => {
+        renderizar(PAUSAVEL);
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(5 * 60_000);
+        });
+        expect(screen.queryByTestId("aviso-de-pausa-longa")).not.toBeInTheDocument();
+      });
+    });
+
     it("pausar recusado pelo servidor mostra o erro", async () => {
       vi.spyOn(api, "pausarRespostaDoChat").mockRejectedValue(new Error("Não dá para pausar a resposta agora."));
       renderizar(PAUSAVEL);

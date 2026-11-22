@@ -62,6 +62,7 @@ import {
 } from "../../shared/geometriaDoChat";
 import { useMelhorarPrompt } from "../../shared/hooks/useMelhorarPrompt";
 import { useModoInvisivel } from "../../shared/hooks/useModoInvisivel";
+import { usePausaLonga } from "../../shared/hooks/usePausaLonga";
 import {
   ALTURA_DA_CONVERSA_DO_CHAT,
   LARGURA_DO_CHAT_FIXO,
@@ -710,6 +711,28 @@ function assinaturaDaUltima(chat: EstadoDoChatNaTela): string {
   return ultima === undefined ? "" : `${ultima.id}:${ultima.situacao}`;
 }
 
+/** Desde quando a resposta em andamento está pausada; nulo se não está. */
+function inicioDaPausa(chat: EstadoDoChatNaTela): string | null {
+  const pausada = chat.mensagens.find((mensagem) => mensagem.situacao === "respondendo" && (mensagem.pausadaDesde ?? null) !== null);
+  return pausada?.pausadaDesde ?? null;
+}
+
+/**
+ * Pausada há mais de 2 min, avisa que continuar pode recomeçar a resposta do
+ * zero (a conexão do processo congelado com a API cai). Antes disso, nada.
+ */
+function AvisoDePausaLonga({ desde }: { desde: string }) {
+  const longa = usePausaLonga(desde);
+  if (!longa) {
+    return null;
+  }
+  return (
+    <p className="hint-warning px-3" role="status" data-testid="aviso-de-pausa-longa">
+      Pausada há mais de 2 min: ao continuar, a resposta pode recomeçar do zero.
+    </p>
+  );
+}
+
 /**
  * O chat rápido com o Claude, no centro de baixo do canvas: um composer
  * (Enter envia, Shift+Enter quebra linha, Esc cancela ou oculta, "/clear"
@@ -809,6 +832,7 @@ export function ChatRapido({
   const cancelando = pedidoDeCancelar && respondendo;
   // A resposta segue "em andamento" pausada: enviar continua bloqueado e o Esc ainda cancela.
   const pausada = respondendo && respostaPausada(chat);
+  const pausadaDesde = pausada ? inicioDaPausa(chat) : null;
   const temMensagens = chat.mensagens.length > 0;
   // Fixo, a conversa nunca se oculta.
   const oculta = !fixo && ocultaEm !== null;
@@ -2127,6 +2151,8 @@ export function ChatRapido({
             {/* O menu ⋯, no fim da barra: as ações menos usadas (a coluna tem os controles no cabeçalho). */}
             <MenuDeMaisAcoes itens={itensDoMenu} campo={campo} />
           </div>
+          {/* Logo abaixo da barra do ▶: o risco de continuar depois de uma pausa longa. */}
+          {pausadaDesde !== null && <AvisoDePausaLonga desde={pausadaDesde} />}
           {dica !== null && (
             <p className="mono hint px-3" role="status">
               {dica}
