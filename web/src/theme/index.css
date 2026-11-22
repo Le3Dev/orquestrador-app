@@ -920,6 +920,19 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .linha-erro .linha-simbolo, .linha-erro .linha-texto { color: var(--error); }
 .linha-sistema .linha-texto { color: var(--muted); }
 
+/* O girador do pedido em andamento (TranscricaoDoTerminal): os dez quadros
+ * empilhados numa faixa que sobe uma linha a cada 90 ms, em `steps`. Anima o
+ * `transform` no compositor, sem render do React a cada quadro. `overflow: clip`,
+ * e não `hidden`, recorta a linha sem virar contêiner de rolagem: a linha de base
+ * segue a do quadro visível, alinhada às colunas vizinhas. */
+.girador-do-terminal { height: 1lh; overflow: clip; }
+.girador-do-terminal-quadros { display: block; white-space: pre; animation: girar-o-girador .9s steps(10) infinite; }
+@keyframes girar-o-girador { to { transform: translateY(-100%); } }
+/* Era um timer em JS, fora da regra geral do reduzir movimento: continua girando. */
+@media (prefers-reduced-motion: reduce) {
+  .girador-do-terminal-quadros { animation-duration: .9s !important; animation-iteration-count: infinite !important; }
+}
+
 /* Progresso das tarefas do pedido em andamento (TodoWrite): a barra, "3 de 7
  * tarefas" e a tarefa atual; o clique abre a lista. Sem animação. */
 .progresso-das-tarefas { display: flex; flex-direction: column; gap: 2px; }
@@ -2332,10 +2345,35 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
 .canvas-movendo .react-flow__node.dragging,
 .canvas-movendo .react-flow__node-bixinho { will-change: transform; }
 /* Tudo o que anima dentro dos nós para enquanto o canvas se move: cada
- * quadro animado repintaria a camada que o navegador está só deslocando. */
-.canvas-movendo .react-flow__node *,
-.canvas-movendo .react-flow__node *::before,
-.canvas-movendo .react-flow__node *::after { animation-play-state: paused !important; }
+ * quadro animado repintaria a camada que o navegador está só deslocando.
+ * A lista é explícita, e não `.react-flow__node *`: com o universal, ligar e
+ * desligar a classe recalculava o estilo de todos os elementos de todos os
+ * nós; assim, só o dos que animam. Um seletor por classe, sem `:is()`: cada
+ * regra fica no balde da própria classe e nem é testada nos outros elementos.
+ * Animação nova dentro de um nó entra aqui (os menus que surgem ficam de fora:
+ * eles terminam a entrada, ver `.surgir`). */
+.canvas-movendo .react-flow__node .no-bixinho,
+.canvas-movendo .react-flow__node .no-bixinho::after,
+.canvas-movendo .react-flow__node .bixinho-desenho,
+.canvas-movendo .react-flow__node .bixinho-olhos,
+.canvas-movendo .react-flow__node .bixinho-corpo-animado,
+.canvas-movendo .react-flow__node .cursor::after,
+.canvas-movendo .react-flow__node .etiqueta-pulso::before,
+.canvas-movendo .react-flow__node .faixa-de-progresso::after,
+.canvas-movendo .react-flow__node .janela-terminal-entrega,
+.canvas-movendo .react-flow__node .batimento,
+.canvas-movendo .react-flow__node .girador-do-terminal-quadros,
+.canvas-movendo .react-flow__node .destaque-de-versao-nova,
+.canvas-movendo .react-flow__node .ponto-de-status-ativo,
+.canvas-movendo .react-flow__node .ponto-de-status-erro,
+.canvas-movendo .react-flow__node .pulso-do-agente,
+.canvas-movendo .react-flow__node .xterm-cursor-blink,
+.canvas-movendo .react-flow__node .botao-ditado-gravando,
+.canvas-movendo .react-flow__node .girador-do-ditado,
+.canvas-movendo .react-flow__node .ponto-do-ditado,
+.canvas-movendo .react-flow__node .painel-do-ditado-inserido,
+.canvas-movendo .react-flow__node .esqueleto-do-ditado > span,
+.canvas-movendo .react-flow__node textarea[data-ditado] { animation-play-state: paused !important; }
 /* A bolinha é SMIL, que não obedece `animation-play-state`: some até o movimento acabar. */
 .canvas-movendo .bolinha-da-troca { display: none; }
 

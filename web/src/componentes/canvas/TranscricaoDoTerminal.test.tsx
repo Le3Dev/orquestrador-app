@@ -128,6 +128,20 @@ describe("TranscricaoDoTerminal", () => {
     expect(analises.total).toBe(2);
   });
 
+  it("o girador do pedido em andamento é a faixa de quadros da animação CSS, sem timer", () => {
+    const emAndamento = aplicar(ESTADO_INICIAL, { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija o bug", configuracao });
+    const { container } = render(<Transcricao conversa={emAndamento} />);
+
+    const girador = container.querySelector(".girador-do-terminal");
+    expect(girador).toHaveAttribute("aria-hidden", "true");
+    const quadros = girador?.querySelector(".girador-do-terminal-quadros");
+    expect(quadros?.textContent).toBe("⠋\n⠙\n⠹\n⠸\n⠼\n⠴\n⠦\n⠧\n⠇\n⠏");
+    // Os quadros trocam pelo CSS: o tempo passa e o React não mexe na faixa.
+    act(() => vi.advanceTimersByTime(900));
+    expect(container.querySelector(".girador-do-terminal-quadros")).toBe(quadros);
+    expect(quadros?.textContent).toBe("⠋\n⠙\n⠹\n⠸\n⠼\n⠴\n⠦\n⠧\n⠇\n⠏");
+  });
+
   describe("anexos do pedido", () => {
     const conversaComAnexos = (anexos: DadosDoAnexo[]) =>
       aplicar(ESTADO_INICIAL, { tipo: "turno_iniciado", turnoId: "t1", texto: "veja", configuracao, anexos });

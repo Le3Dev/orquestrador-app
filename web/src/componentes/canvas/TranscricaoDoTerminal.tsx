@@ -1,4 +1,4 @@
-import { memo, type ReactNode, useEffect, useState } from "react";
+import { memo, type ReactNode, useState } from "react";
 
 import { ehAnexoDeImagem } from "../../shared/anexos";
 import { api, mensagemDeErro } from "../../shared/api/cliente";
@@ -47,16 +47,19 @@ const SIMBOLOS: Readonly<Record<TipoDeLinhaDoLog, ReactNode>> = {
   erro: "✗",
 };
 
-const QUADROS_DO_GIRADOR = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const QUADROS_DO_GIRADOR = "⠋\n⠙\n⠹\n⠸\n⠼\n⠴\n⠦\n⠧\n⠇\n⠏";
 
-/** O "spinner" dos terminais. Só existe enquanto há trabalho em andamento. */
+/**
+ * O "spinner" dos terminais. Só existe enquanto há trabalho em andamento. Os
+ * quadros trocam por animação CSS (`.girador-do-terminal`, 90 ms cada), e não
+ * por timer: nada re-renderiza, e o giro pausa com o canvas em movimento.
+ */
 function Girador() {
-  const [quadro, setQuadro] = useState(0);
-  useEffect(() => {
-    const intervalo = setInterval(() => setQuadro((atual) => (atual + 1) % QUADROS_DO_GIRADOR.length), 90);
-    return () => clearInterval(intervalo);
-  }, []);
-  return <span className="text-active">{QUADROS_DO_GIRADOR[quadro]}</span>;
+  return (
+    <span className="text-active girador-do-terminal" aria-hidden="true">
+      <span className="girador-do-terminal-quadros">{QUADROS_DO_GIRADOR}</span>
+    </span>
+  );
 }
 
 /**
