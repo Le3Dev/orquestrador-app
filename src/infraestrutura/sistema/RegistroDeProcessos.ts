@@ -1,7 +1,8 @@
 import { readFileSync, writeFileSync } from "node:fs";
 
 import { CongeladorDeProcessos } from "../execucoes/ControleDeExecucoesEmMemoria";
-import { encerrarArvore, identidadeDoProcesso, sinalizarGrupo } from "./Processos";
+import { descendentesVivos, ProcessoNaArvore } from "./ArvoreDeProcessos";
+import { encerrarArvore, identidadeDoProcesso, listarArvore, sinalizarGrupo } from "./Processos";
 
 export interface ProcessoDeAgente {
   pid: number;
@@ -19,6 +20,32 @@ function ehProcessoDeAgente(valor: unknown): valor is ProcessoDeAgente {
 }
 
 /**
+ * Quantas vezes, no máximo, `congelar` relê a árvore atrás de um grupo novo de
+ * descendentes (um comando que abriu outro entre a leitura e o SIGSTOP).
+ */
+export const VOLTAS_DA_BUSCA_DE_GRUPOS = 5;
+
+export interface DependenciasDoRegistro {
+  /** Lista os processos da máquina; padrão: `listarArvore`. */
+  listar?: () => Promise<ProcessoNaArvore[]>;
+  /** Manda o sinal a um grupo; padrão: `sinalizarGrupo`. */
+  sinalizar?: (grupo: number, sinal: "SIGSTOP" | "SIGCONT") => boolean;
+  /** Processos cujo grupo nunca é congelado; padrão: o servidor e quem o iniciou (o Electron). */
+  protegidos?: readonly number[];
+}
+
+/** O que `congelar` parou num Orquestrador (ver ADR-51). */
+interface Congelamento {
+  /** Os grupos dos processos do registro (Claude Code, Codex, Copilot), cada um líder do próprio. */
+  lideres: Set<number>;
+  /**
+   * Os grupos próprios dos descendentes deles: o Claude Code abre o shell de
+   * cada `Bash` numa sessão e num grupo novos, fora do SIGSTOP do grupo dele.
+   */
+  descendentes: Set<number>;
+}
+
+/**
  * Os processos `claude.exe` que este servidor iniciou e ainda estão rodando.
  *
  * Gravado em disco a cada mudança: se o servidor cair de repente, os
@@ -32,9 +59,18 @@ export class RegistroDeProcessos implements CongeladorDeProcessos {
    * Guardados à parte do registro: um processo que termina sai dele, mas o
    * grupo pode seguir com filhos parados, que precisam do SIGCONT.
    */
-  private readonly congelados = new Map<string, Set<number>>();
+  private readonly congelados = new Map<string, Congelamento>();
+  private readonly listar: () => Promise<ProcessoNaArvore[]>;
+  private readonly sinalizar: (grupo: number, sinal: "SIGSTOP" | "SIGCONT") => boolean;
+  private readonly protegidos: ReadonlySet<number>;
 
-  constructor(private readonly arquivo: string | null = null) {
+  constructor(
+    private readonly arquivo: string | null = null,
+    dependencias: DependenciasDoRegistro = {},
+  ) {
+    this.listar = dependencias.listar ?? listarArvore;
+    this.sinalizar = dependencias.sinalizar ?? sinalizarGrupo;
+    this.protegidos = new Set(dependencias.protegidos ?? [process.pid, process.ppid]);
     this.gravar();
   }
 
@@ -42,42 +78,110 @@ export class RegistroDeProcessos implements CongeladorDeProcessos {
     this.processos.set(processo.pid, processo);
     this.gravar();
     // Nasceu durante a pausa (ex.: uma subtarefa que o app já estava abrindo): congela junto.
-    const grupos = this.congelados.get(processo.orquestradorId);
-    if (grupos !== undefined && sinalizarGrupo(processo.pid, "SIGSTOP")) {
-      grupos.add(processo.pid);
+    const congelamento = this.congelados.get(processo.orquestradorId);
+    if (congelamento !== undefined && this.sinalizar(processo.pid, "SIGSTOP")) {
+      congelamento.lideres.add(processo.pid);
+      void this.congelarDescendentes(processo.orquestradorId, congelamento);
     }
   }
 
   /**
-   * Congela os grupos de processos de um Orquestrador: o agente do turno e os
-   * de outros motores que o app abriu para ele, cada um líder do próprio grupo.
+   * Congela os grupos de processos de um Orquestrador: primeiro o do agente do
+   * turno e os de outros motores que o app abriu para ele, cada um líder do
+   * próprio grupo; logo depois, em segundo plano, os grupos próprios dos
+   * descendentes deles (ver `congelarDescendentes`).
    * Falso se não havia nenhum vivo (ou no Windows): a pausa vira retomada.
    */
   congelar(orquestradorId: string): boolean {
-    const grupos = this.congelados.get(orquestradorId) ?? new Set<number>();
+    const congelamento = this.congelados.get(orquestradorId) ?? { lideres: new Set(), descendentes: new Set() };
     for (const processo of this.processos.values()) {
-      if (processo.orquestradorId === orquestradorId && sinalizarGrupo(processo.pid, "SIGSTOP")) {
-        grupos.add(processo.pid);
+      if (processo.orquestradorId === orquestradorId && this.sinalizar(processo.pid, "SIGSTOP")) {
+        congelamento.lideres.add(processo.pid);
       }
     }
-    if (grupos.size === 0) {
+    if (congelamento.lideres.size === 0) {
       return false;
     }
-    this.congelados.set(orquestradorId, grupos);
+    this.congelados.set(orquestradorId, congelamento);
+    void this.congelarDescendentes(orquestradorId, congelamento);
     return true;
   }
 
-  /** Descongela (SIGCONT) o que `congelar` parou; falso se nada estava congelado. */
+  /**
+   * Descongela (SIGCONT) o que `congelar` parou, os descendentes antes dos
+   * líderes; falso se nada estava congelado. Grupos que já terminaram são ignorados.
+   */
   descongelar(orquestradorId: string): boolean {
-    const grupos = this.congelados.get(orquestradorId);
-    if (grupos === undefined) {
+    const congelamento = this.congelados.get(orquestradorId);
+    if (congelamento === undefined) {
       return false;
     }
     this.congelados.delete(orquestradorId);
-    for (const grupo of grupos) {
-      sinalizarGrupo(grupo, "SIGCONT");
+    for (const grupo of [...congelamento.descendentes, ...congelamento.lideres]) {
+      this.sinalizar(grupo, "SIGCONT");
     }
     return true;
+  }
+
+  /**
+   * SIGSTOP nos grupos próprios dos descendentes dos líderes congelados (os
+   * shells dos `Bash` do Claude Code, que nascem em sessão própria). Relê a
+   * árvore até não aparecer grupo novo, no máximo `VOLTAS_DA_BUSCA_DE_GRUPOS`
+   * vezes. Nunca sinaliza o grupo do servidor nem o do Electron (`protegidos`)
+   * nem os grupos 0 e 1. Para se o Orquestrador for descongelado no meio.
+   */
+  private async congelarDescendentes(orquestradorId: string, congelamento: Congelamento): Promise<void> {
+    const vistos = new Map<number, ProcessoNaArvore>();
+    for (let volta = 0; volta < VOLTAS_DA_BUSCA_DE_GRUPOS; volta++) {
+      let arvore: ProcessoNaArvore[];
+      try {
+        arvore = await this.listar();
+      } catch (erro) {
+        console.warn("[processos] Não foi possível ler os processos para congelar os comandos dos agentes:", erro);
+        return;
+      }
+      // Descongelado enquanto a árvore era lida: nada mais a congelar.
+      if (this.congelados.get(orquestradorId) !== congelamento) {
+        return;
+      }
+      const gruposProtegidos = new Set(
+        arvore.filter((processo) => this.protegidos.has(processo.pid)).map((processo) => processo.grupo),
+      );
+      let novos = 0;
+      for (const processo of this.processos.values()) {
+        const raiz = arvore.find((vivo) => vivo.pid === processo.pid);
+        if (processo.orquestradorId !== orquestradorId || !congelamento.lideres.has(processo.pid) || raiz === undefined) {
+          continue;
+        }
+        const descendentes = descendentesVivos({
+          raiz,
+          arvore,
+          vistos: [...vistos.values()],
+          protegidos: this.protegidos,
+          adocao: null,
+        });
+        for (const descendente of descendentes) {
+          vistos.set(descendente.pid, descendente);
+          const grupo = descendente.grupo;
+          if (
+            grupo === null ||
+            grupo <= 1 ||
+            gruposProtegidos.has(grupo) ||
+            congelamento.lideres.has(grupo) ||
+            congelamento.descendentes.has(grupo)
+          ) {
+            continue;
+          }
+          if (this.sinalizar(grupo, "SIGSTOP")) {
+            congelamento.descendentes.add(grupo);
+            novos += 1;
+          }
+        }
+      }
+      if (novos === 0) {
+        return;
+      }
+    }
   }
 
   remover(pid: number): void {
