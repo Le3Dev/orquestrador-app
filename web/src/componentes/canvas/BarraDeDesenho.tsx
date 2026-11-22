@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 
 import type { FerramentaDeDesenho } from "../../shared/canvas/desenho";
 import {
@@ -99,8 +99,10 @@ interface Props {
 /**
  * A barra de desenho, no alto do canvas: as ferramentas, a cor, a espessura,
  * o desfazer e o fechar. Só mostra e avisa; o estado é da `CamadaDeDesenho`.
+ * Memorizada: o rascunho em curso renderiza a camada a cada movimento, e a
+ * barra só precisa mudar quando as props dela mudam.
  */
-export function BarraDeDesenho({
+export const BarraDeDesenho = memo(function BarraDeDesenho({
   ferramenta,
   cor,
   espessura,
@@ -191,4 +193,4 @@ export function BarraDeDesenho({
       </button>
     </div>
   );
-}
+});
