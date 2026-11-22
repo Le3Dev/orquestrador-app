@@ -1,4 +1,12 @@
-import { type MouseEvent as EventoDeMouseDoReact, useCallback, useEffect, useId, useState } from "react";
+import {
+  lazy,
+  type MouseEvent as EventoDeMouseDoReact,
+  Suspense,
+  useCallback,
+  useEffect,
+  useId,
+  useState,
+} from "react";
 
 import type { JanelaDaCota, LeituraDeMemoria } from "../../shared/api/tipos";
 import {
@@ -15,8 +23,13 @@ import type { EstadoDoServidor } from "../../shared/hooks/useServidor";
 import { nivelDaMemoria } from "../../shared/memoria";
 import { IconeFechar } from "../Icones";
 import type { OrquestradorEscolhivel } from "../rotinas/EditorDeRotina";
-import { PainelDeRotinas } from "../rotinas/PainelDeRotinas";
 import { ATRIBUTO_DO_GATILHO, COTA_ALTA, PopoverDoUso } from "./PopoverDoUso";
+
+// O painel das rotinas fica fora do bundle principal: o código só é baixado na primeira vez que ele abre
+// (as rotinas em si, `useRotinas`, continuam sempre em dia). Enquanto chega, nada aparece no lugar.
+const PainelDeRotinas = lazy(() =>
+  import("../rotinas/PainelDeRotinas").then((modulo) => ({ default: modulo.PainelDeRotinas })),
+);
 
 /** Por quanto tempo o aviso de "reconectado" fica na tela. */
 const DURACAO_DO_AVISO_DE_VOLTA_MS = 10_000;
@@ -155,7 +168,11 @@ export function RotinasDoCanvas({
     aoMudarAguardandoAprovacao(aguardandoAprovacao);
   }, [aguardandoAprovacao, aoMudarAguardandoAprovacao]);
 
-  return aberto ? <PainelDeRotinas rotinas={rotinas} orquestradores={orquestradores} aoFechar={aoFechar} /> : null;
+  return aberto ? (
+    <Suspense fallback={null}>
+      <PainelDeRotinas rotinas={rotinas} orquestradores={orquestradores} aoFechar={aoFechar} />
+    </Suspense>
+  ) : null;
 }
 
 interface PropsDoStatus {
