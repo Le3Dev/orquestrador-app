@@ -368,16 +368,63 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .etiqueta-success { --cor-da-etiqueta: var(--success); }
 .etiqueta-error   { --cor-da-etiqueta: var(--error); }
 .etiqueta-warning { --cor-da-etiqueta: var(--warning); }
-.etiqueta-pulso::before { animation: pulso-ponto 1.4s ease-out infinite; }
+/* O pulso do ponto: um disco da cor do ponto, a 70%, que cresce até 7 px além
+ * da borda dele e se apaga. Só `transform` e `opacity`, que rodam no
+ * compositor: o anel de `box-shadow` animado de antes recalculava o estilo e
+ * repintava a cada quadro, 60 vezes por segundo, enquanto houvesse alguém
+ * trabalhando. A escala é a do anel no fim: (lado + 14) / lado. Na etiqueta, o
+ * ponto é o `::before`; o disco é o `::after`, posto sobre ele e, com o
+ * `isolation`, pintado logo acima do fundo da etiqueta e abaixo do ponto e do
+ * texto, como a sombra. */
+.etiqueta-pulso { position: relative; isolation: isolate; }
+.etiqueta-pulso::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 50%;
+  left: 8px;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--cor-da-etiqueta) 70%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  animation: pulso-ponto-da-etiqueta 1.4s ease-out infinite;
+}
 
+/* 6 px: (6 + 14) / 6. */
+@keyframes pulso-ponto-da-etiqueta {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(3.3333); }
+}
+/* 7 px: (7 + 14) / 7. */
 @keyframes pulso-ponto {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--cor-da-etiqueta, var(--active)) 70%, transparent); }
-  100% { box-shadow: 0 0 0 7px transparent; }
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(3); }
+}
+/* 10 px: (10 + 14) / 10. */
+@keyframes pulso-ponto-de-erro {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(2.4); }
 }
 
 .ponto-de-status { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--muted); }
-.ponto-de-status-ativo { background: var(--active); animation: pulso-ponto 1.4s ease-out infinite; }
-.ponto-de-status-erro { --cor-da-etiqueta: var(--error); width: 10px; height: 10px; background: var(--error); animation: pulso-ponto 1.2s ease-out infinite; }
+.ponto-de-status-ativo { position: relative; background: var(--active); }
+.ponto-de-status-erro { --cor-da-etiqueta: var(--error); position: relative; width: 10px; height: 10px; background: var(--error); }
+/* O disco fica por cima do próprio ponto: da mesma cor, não muda o miolo. */
+.ponto-de-status-ativo::after,
+.ponto-de-status-erro::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--cor-da-etiqueta, var(--active)) 70%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  animation: pulso-ponto 1.4s ease-out infinite;
+}
+.ponto-de-status-erro::after { animation: pulso-ponto-de-erro 1.2s ease-out infinite; }
 .ponto-de-status-ok { width: 10px; height: 10px; background: var(--success); }
 
 /* Faixa de conexão no topo do canvas: grande de propósito. Com o servidor
@@ -1140,12 +1187,25 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   pointer-events: none;
 }
 
-/* O coração do sinal de vida pulsa a cada notícia do Claude. */
-.batimento { display: inline-block; animation: bater .6s ease-out 1; }
+/* O coração do sinal de vida pulsa a cada notícia do Claude: cresce e volta
+ * (`transform`) e começa laranja. O laranja é uma cópia do ícone por cima
+ * (`.batimento-cor`, TranscricaoDoTerminal) que se apaga (`opacity`): animar a
+ * `color` tirava a animação inteira do compositor, e o coração, que recomeça a
+ * cada notícia, repintava quase o tempo todo durante a escrita. */
+.batimento { position: relative; display: inline-block; animation: bater .6s ease-out 1; }
 @keyframes bater {
-  0% { transform: scale(1.6); color: var(--active); }
+  0% { transform: scale(1.6); }
   100% { transform: scale(1); }
 }
+.batimento-cor {
+  position: absolute;
+  inset: 0;
+  color: var(--active);
+  opacity: 0;
+  pointer-events: none;
+  animation: bater-cor .6s ease-out 1;
+}
+@keyframes bater-cor { from { opacity: 1; } }
 
 /* Alerta de memória, abaixo do painel de status. */
 .aviso-de-memoria {
@@ -2358,14 +2418,15 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
 .canvas-movendo .react-flow__node .bixinho-olhos,
 .canvas-movendo .react-flow__node .bixinho-corpo-animado,
 .canvas-movendo .react-flow__node .cursor::after,
-.canvas-movendo .react-flow__node .etiqueta-pulso::before,
+.canvas-movendo .react-flow__node .etiqueta-pulso::after,
 .canvas-movendo .react-flow__node .faixa-de-progresso::after,
 .canvas-movendo .react-flow__node .janela-terminal-entrega,
 .canvas-movendo .react-flow__node .batimento,
+.canvas-movendo .react-flow__node .batimento-cor,
 .canvas-movendo .react-flow__node .girador-do-terminal-quadros,
 .canvas-movendo .react-flow__node .destaque-de-versao-nova,
-.canvas-movendo .react-flow__node .ponto-de-status-ativo,
-.canvas-movendo .react-flow__node .ponto-de-status-erro,
+.canvas-movendo .react-flow__node .ponto-de-status-ativo::after,
+.canvas-movendo .react-flow__node .ponto-de-status-erro::after,
 .canvas-movendo .react-flow__node .pulso-do-agente,
 .canvas-movendo .react-flow__node .xterm-cursor-blink,
 .canvas-movendo .react-flow__node .botao-ditado-gravando,

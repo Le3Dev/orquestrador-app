@@ -141,6 +141,7 @@ function SinalDoTurno({ turno, sinal }: { turno: TurnoNaTela; sinal: SinalDeVida
   const vida = estadoDeVida(turno, sinal, agora);
   // Os turnos gravados antes dos outros motores não trazem o motor: rodaram no Claude Code.
   const motor = nomeCurtoDoMotor(turno.motor ?? "claude-code");
+  const icone = vida.preocupante ? <IconeAlerta tamanho={12} className="inline-block align-[-1px]" /> : <IconeCoracao className="inline-block align-[-1px]" />;
 
   return (
     <>
@@ -153,9 +154,13 @@ function SinalDoTurno({ turno, sinal }: { turno: TurnoNaTela; sinal: SinalDeVida
       </div>
       <div className={`linha-do-terminal ${vida.preocupante ? "linha-erro" : "linha-sistema"}`}>
         <span />
-        {/* A chave muda a cada sinal: o coração pulsa de novo cada vez que o motor dá notícia. */}
+        {/* A chave muda a cada sinal: o coração pulsa de novo cada vez que o motor dá notícia.
+            A cópia por cima é o laranja do começo, que se apaga (`opacity`, no compositor). */}
         <span key={sinal?.em ?? turno.ultimaAtividadeEm} className="linha-simbolo batimento">
-          {vida.preocupante ? <IconeAlerta tamanho={12} className="inline-block align-[-1px]" /> : <IconeCoracao className="inline-block align-[-1px]" />}
+          {icone}
+          <span className="batimento-cor" aria-hidden="true">
+            {icone}
+          </span>
         </span>
         <span className="linha-texto col-span-2">
           <TextoDoSinal vida={vida} motor={motor} />
