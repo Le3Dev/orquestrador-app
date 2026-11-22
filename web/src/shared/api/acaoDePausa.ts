@@ -1,11 +1,13 @@
 /**
  * Ação sugerida pelo chat para pausar o pedido em andamento de um
- * Orquestrador, ou tirá-lo da pausa. Ele vem pelo nome e pela pasta de
- * trabalho, já conferidos pelo servidor; o estado é conferido de novo no clique.
+ * Orquestrador, ou tirá-lo da pausa. Ele vem pelo `id`, já conferido pelo
+ * servidor; nome e pasta vão para leitura, porque podem se repetir. O estado
+ * é conferido de novo no clique.
  */
 export interface AcaoDePausaDoOrquestrador {
   tipo: "pausar_orquestrador" | "continuar_orquestrador";
-  orquestrador: { nome: string; pasta: string };
+  /** Sem `id` só nas mensagens gravadas antes dele: aí vale o nome exato e único na pasta. */
+  orquestrador: { id?: string; nome: string; pasta: string };
 }
 
 export function ehAcaoDePausaDoOrquestrador(acao: { tipo: string }): acao is AcaoDePausaDoOrquestrador {

@@ -344,6 +344,7 @@ async function iniciar(): Promise<void> {
         const turno = orquestrador.turnoEmAndamento;
         const worktree = orquestrador.worktree;
         return {
+          id: orquestrador.id,
           nome: orquestrador.nome,
           pasta: orquestrador.pastaDeTrabalho.caminho,
           situacao: orquestrador.situacao,

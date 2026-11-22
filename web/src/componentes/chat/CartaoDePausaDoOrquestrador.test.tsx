@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 
 import type { AcaoDePausaDoOrquestrador } from "../../shared/api/acaoDePausa";
 import { ehAcaoDePausaDoOrquestrador } from "../../shared/api/acaoDePausa";
@@ -30,8 +30,19 @@ function orquestrador(campos: Partial<ResumoDoOrquestrador> = {}): ResumoDoOrque
 const PAUSADO = orquestrador({ situacao: "pausado", pausa: { desde: "2026-11-04T12:10:00Z", modo: "congelado" } });
 
 function acao(tipo: AcaoDePausaDoOrquestrador["tipo"]): AcaoDePausaDoOrquestrador {
-  // A pasta com a barra final e o nome em minúsculas ainda acham o mesmo orquestrador.
-  return { tipo, orquestrador: { nome: "painel", pasta: `${PASTA}/` } };
+  // Pelo id, a pasta com a barra final e o nome em outra caixa ainda acham o mesmo orquestrador.
+  return { tipo, orquestrador: { id: "o1", nome: "painel", pasta: `${PASTA}/` } };
+}
+
+/** Homônimos na mesma pasta: dois de nome idêntico e um que só muda nas maiúsculas. */
+const HOMONIMOS = [
+  orquestrador({ id: "e2a98ec1", nome: "QA pausa A" }),
+  orquestrador({ id: "1b0facc5", nome: "QA pausa A" }),
+  orquestrador({ id: "7c3d0f22", nome: "qa pausa a" }),
+];
+
+function pausarHomonimo(orquestradorDaAcao: AcaoDePausaDoOrquestrador["orquestrador"]): AcaoDePausaDoOrquestrador {
+  return { tipo: "pausar_orquestrador", orquestrador: orquestradorDaAcao };
 }
 
 describe("CartaoDePausaDoOrquestrador", () => {
@@ -123,5 +134,88 @@ describe("CartaoDePausaDoOrquestrador", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Sem conexão com o servidor.");
     expect(screen.getByRole("button", { name: "tentar de novo" })).toBeEnabled();
+  });
+
+  it("dois cliques no mesmo ciclo chamam a pausa uma vez só", async () => {
+    const listar = vi.spyOn(api, "listarOrquestradores").mockResolvedValue([orquestrador()]);
+    const pausar = vi.spyOn(api, "pausar").mockResolvedValue({ pausa: { desde: "2026-11-04T12:10:00Z", modo: "congelado" } });
+    render(<CartaoDePausaDoOrquestrador acao={acao("pausar_orquestrador")} orquestradores={[orquestrador()]} />);
+    const botao = screen.getByRole("button", { name: "⏸ Pausar painel" });
+
+    // No mesmo act, o segundo clique ainda vê a renderização de antes do primeiro.
+    act(() => {
+      botao.click();
+      botao.click();
+    });
+
+    expect(await screen.findByRole("button", { name: "pausado ✓" })).toBeDisabled();
+    expect(listar).toHaveBeenCalledTimes(1);
+    expect(pausar).toHaveBeenCalledTimes(1);
+  });
+
+  describe("homônimos na mesma pasta", () => {
+    it.each([
+      ["o segundo de nome idêntico", "1b0facc5", "QA pausa A"],
+      ["o que só muda nas maiúsculas", "7c3d0f22", "qa pausa a"],
+    ])("pelo id, pausa %s e não o primeiro da lista", async (_caso, id, nome) => {
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue(HOMONIMOS);
+      const pausar = vi.spyOn(api, "pausar").mockResolvedValue({ pausa: { desde: "2026-11-04T12:10:00Z", modo: "congelado" } });
+      render(<CartaoDePausaDoOrquestrador acao={pausarHomonimo({ id, nome, pasta: PASTA })} orquestradores={HOMONIMOS} />);
+
+      fireEvent.click(screen.getByRole("button", { name: `⏸ Pausar ${nome}` }));
+
+      expect(await screen.findByRole("button", { name: "pausado ✓" })).toBeDisabled();
+      expect(pausar).toHaveBeenCalledWith(id);
+    });
+
+    it("ação antiga sem id e nome exato único: pausa esse, sem cair no que só muda nas maiúsculas", async () => {
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue(HOMONIMOS);
+      const pausar = vi.spyOn(api, "pausar").mockResolvedValue({ pausa: { desde: "2026-11-04T12:10:00Z", modo: "congelado" } });
+      render(
+        <CartaoDePausaDoOrquestrador
+          acao={pausarHomonimo({ nome: "qa pausa a", pasta: PASTA })}
+          orquestradores={HOMONIMOS}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "⏸ Pausar qa pausa a" }));
+
+      expect(await screen.findByRole("button", { name: "pausado ✓" })).toBeDisabled();
+      expect(pausar).toHaveBeenCalledWith("7c3d0f22");
+    });
+
+    it("ação antiga sem id e nome ambíguo: avisa sem pausar nenhum", async () => {
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue(HOMONIMOS);
+      const pausar = vi.spyOn(api, "pausar");
+      render(
+        <CartaoDePausaDoOrquestrador
+          acao={pausarHomonimo({ nome: "QA pausa A", pasta: PASTA })}
+          orquestradores={HOMONIMOS}
+        />,
+      );
+
+      expect(screen.queryByTestId("estado-da-pausa")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "⏸ Pausar QA pausa A" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent('Há mais de um orquestrador chamado "QA pausa A" nesta pasta.');
+      expect(pausar).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "⏸ Pausar QA pausa A" })).toBeDisabled();
+    });
+
+    it("id que não existe: avisa sem pausar o homônimo", async () => {
+      vi.spyOn(api, "listarOrquestradores").mockResolvedValue(HOMONIMOS);
+      const pausar = vi.spyOn(api, "pausar");
+      render(
+        <CartaoDePausaDoOrquestrador
+          acao={pausarHomonimo({ id: "inventado", nome: "QA pausa A", pasta: PASTA })}
+          orquestradores={HOMONIMOS}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "⏸ Pausar QA pausa A" }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent('"QA pausa A" não existe mais nesta pasta.');
+      expect(pausar).not.toHaveBeenCalled();
+    });
   });
 });

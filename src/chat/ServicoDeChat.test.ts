@@ -175,6 +175,7 @@ describe("ServicoDeChat", () => {
         listarProjetos: async () => [{ nome: "painel-app", caminho: path.join(raiz, "painel-app") }],
         listarOrquestradores: async () => [
           {
+            id: "o1",
             nome: "Painel",
             pasta: path.join(raiz, "painel-app"),
             situacao: "trabalhando",

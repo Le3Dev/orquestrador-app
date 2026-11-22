@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { AcaoDePausaDoOrquestrador } from "../../shared/api/acaoDePausa";
 import { api, ErroDaApi, mensagemDeErro } from "../../shared/api/cliente";
@@ -25,15 +25,22 @@ function mesmaPasta(a: string, b: string): boolean {
   return normalizar(a) === normalizar(b);
 }
 
-/** O orquestrador da ação pelo nome (sem diferenciar maiúsculas) e pela pasta. */
-function resolver(
-  lista: readonly ResumoDoOrquestrador[],
-  acao: AcaoDePausaDoOrquestrador,
-): ResumoDoOrquestrador | undefined {
-  const nome = acao.orquestrador.nome.trim().toLowerCase();
-  return lista.find(
-    (item) => item.nome.trim().toLowerCase() === nome && mesmaPasta(item.pastaDeTrabalho, acao.orquestrador.pasta),
+type Resolucao = { tipo: "achado"; orquestrador: ResumoDoOrquestrador } | { tipo: "ausente" } | { tipo: "ambiguo" };
+
+/**
+ * O orquestrador da ação, como o servidor resolve: pelo `id`, na mesma pasta;
+ * sem ele (ações antigas), pelo nome exato e pela pasta, e só se houver um.
+ */
+function resolver(lista: readonly ResumoDoOrquestrador[], acao: AcaoDePausaDoOrquestrador): Resolucao {
+  const { id, nome, pasta } = acao.orquestrador;
+  const candidatos = lista.filter(
+    (item) => (id === undefined ? item.nome === nome : item.id === id) && mesmaPasta(item.pastaDeTrabalho, pasta),
   );
+  if (candidatos.length > 1) {
+    return { tipo: "ambiguo" };
+  }
+  const [achado] = candidatos;
+  return achado === undefined ? { tipo: "ausente" } : { tipo: "achado", orquestrador: achado };
 }
 
 function descreverModo(modo: ModoDaPausa): string {
@@ -68,31 +75,41 @@ function motivoDaRecusa(orquestrador: ResumoDoOrquestrador, pausar: boolean): st
 /**
  * Ação sugerida pelo Claude no chat: pausar o pedido em andamento de um
  * Orquestrador ou tirá-lo da pausa. Só acontece no clique: relê a lista do
- * servidor, acha o orquestrador pelo nome e pela pasta e confere o estado
- * antes de chamar a pausa. Se ele sumiu ou o estado já mudou (inclusive um
- * 409 do servidor), o cartão diz isso numa linha, sem repetir a ação.
+ * servidor, acha o orquestrador pelo id (ou, nas ações antigas, pelo nome
+ * exato e único na pasta) e confere o estado antes de chamar a pausa. Se ele
+ * sumiu, é ambíguo ou o estado já mudou (inclusive um 409 do servidor), o
+ * cartão diz isso numa linha, sem repetir a ação.
  */
 export function CartaoDePausaDoOrquestrador({ acao, orquestradores, aoAtualizarOrquestradores }: Props) {
   const [etapa, setEtapa] = useState<Etapa>({ tipo: "pronto" });
+  // Trava do clique: o estado só muda na próxima renderização, e dois cliques
+  // no mesmo ciclo veriam ambos "pronto". Fica presa depois de concluída.
+  const emAndamento = useRef(false);
   const pausar = acao.tipo === "pausar_orquestrador";
   const { nome, pasta } = acao.orquestrador;
   const naTela = resolver(orquestradores, acao);
 
   async function executar(): Promise<void> {
-    if (etapa.tipo === "executando" || etapa.tipo === "feito") {
+    if (emAndamento.current) {
       return;
     }
+    emAndamento.current = true;
+    let concluida = false;
     setEtapa({ tipo: "executando" });
     try {
-      const orquestrador = resolver(await api.listarOrquestradores(), acao);
-      if (orquestrador === undefined) {
+      const resolucao = resolver(await api.listarOrquestradores(), acao);
+      if (resolucao.tipo !== "achado") {
         setEtapa({
           tipo: "erro",
-          mensagem: `"${nome}" não existe mais nesta pasta.`,
+          mensagem:
+            resolucao.tipo === "ambiguo"
+              ? `Há mais de um orquestrador chamado "${nome}" nesta pasta.`
+              : `"${nome}" não existe mais nesta pasta.`,
           repetir: false,
         });
         return;
       }
+      const orquestrador = resolucao.orquestrador;
       const recusa = motivoDaRecusa(orquestrador, pausar);
       if (recusa !== null) {
         setEtapa({ tipo: "erro", mensagem: recusa, repetir: false });
@@ -101,6 +118,7 @@ export function CartaoDePausaDoOrquestrador({ acao, orquestradores, aoAtualizarO
       const modo = pausar
         ? (await api.pausar(orquestrador.id)).pausa.modo
         : (await api.continuar(orquestrador.id)).modo;
+      concluida = true;
       setEtapa({ tipo: "feito", modo });
       await aoAtualizarOrquestradores?.().catch(() => undefined);
     } catch (falha) {
@@ -111,6 +129,10 @@ export function CartaoDePausaDoOrquestrador({ acao, orquestradores, aoAtualizarO
         mensagem: mensagemDeErro(falha),
         repetir: !mudou,
       });
+    } finally {
+      if (!concluida) {
+        emAndamento.current = false;
+      }
     }
   }
 
@@ -131,9 +153,9 @@ export function CartaoDePausaDoOrquestrador({ acao, orquestradores, aoAtualizarO
             {pausar ? `${nome}: pausado (${descreverModo(etapa.modo)})` : `${nome}: continuando`}
           </span>
         ) : (
-          naTela !== undefined && (
+          naTela.tipo === "achado" && (
             <span className="mono texto-longo text-[11.5px] text-secondary" data-testid="estado-da-pausa">
-              {nome}: {descreverEstado(naTela)}
+              {nome}: {descreverEstado(naTela.orquestrador)}
             </span>
           )
         )}

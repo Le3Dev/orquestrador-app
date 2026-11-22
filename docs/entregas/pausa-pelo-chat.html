@@ -22,8 +22,8 @@ th{color:#9c9a92;font-weight:500} li{margin:4px 0}
 <ul>
 <li>O chat rápido agora pode propor <b>pausar</b> um orquestrador que está trabalhando ou <b>continuar</b> um que está pausado. Como as outras ações do app, nada roda sozinho: a proposta vira um cartão e só executa no clique.</li>
 <li>O bloco de contexto de cada mensagem mostra o modo da pausa: <code>pausado (congelado, continua de onde parou)</code> ou <code>pausado (continua pela conversa)</code>, e traz a regra nova com o exemplo do bloco <code>acao-do-app</code>.</li>
-<li>O servidor só aceita a ação se o orquestrador existe naquela pasta (nome sem diferenciar maiúsculas; a pasta vale como caminho ou nome do projeto). Senão, aviso curto e a ação some.</li>
-<li>O cartão relê a lista no clique, resolve por nome e pasta, confere o estado e chama <code>api.pausar</code> ou <code>api.continuar</code>. Estado já mudado (ou 409 do servidor) e orquestrador removido viram uma linha clara, sem botão de repetir; falha de rede deixa tentar de novo.</li>
+<li>O servidor só aceita a ação se o orquestrador existe naquela pasta (pelo <code>id</code>; a pasta vale como caminho ou nome do projeto). Senão, aviso curto e a ação some.</li>
+<li>O cartão relê a lista no clique, resolve pelo <code>id</code> e pela pasta, confere o estado e chama <code>api.pausar</code> ou <code>api.continuar</code>. Estado já mudado (ou 409 do servidor) e orquestrador removido viram uma linha clara, sem botão de repetir; falha de rede deixa tentar de novo.</li>
 </ul>
 
 <h2>Como fica</h2>
@@ -37,7 +37,7 @@ th{color:#9c9a92;font-weight:500} li{margin:4px 0}
 
 <h2>Contrato</h2>
 <pre>{ "tipo": "pausar_orquestrador" | "continuar_orquestrador",
-  "orquestrador": { "nome": "Correção da memória", "pasta": "/caminho/do/projeto" } }</pre>
+  "orquestrador": { "id": "e2a98ec1-…", "nome": "Correção da memória", "pasta": "/caminho/do/projeto" } }</pre>
 <p>O mesmo formato vale no bloco que o Claude escreve, na ação gravada na mensagem e na web (<code>AcaoDePausaDoOrquestrador</code> com o type guard <code>ehAcaoDePausaDoOrquestrador</code>).</p>
 
 <h2>Onde vive no código</h2>
@@ -49,6 +49,14 @@ th{color:#9c9a92;font-weight:500} li{margin:4px 0}
 <tr><td><code>web/src/shared/api/acaoDePausa.ts</code></td><td>tipo da web e type guard</td></tr>
 <tr><td><code>web/src/componentes/chat/CartaoDePausaDoOrquestrador.tsx</code></td><td>o cartão de um clique (e o teste ao lado)</td></tr>
 </table>
+
+<h2>Correção: identificar pelo id</h2>
+<p>O QA (<code>qa-pausa-pelo-chat.html</code>, caso 1) achou que a ação resolvia o orquestrador por nome sem diferenciar maiúsculas e pasta, ficando com o primeiro: com dois de mesmo nome na mesma pasta (ou <code>QA pausa A</code> e <code>qa pausa a</code>) o clique pausava o errado e o segundo nunca era alcançável. Agora:</p>
+<ul>
+<li>O bloco de contexto lista cada orquestrador com <code>· id &lt;id&gt;</code>, e o exemplo da ação pede o <code>id</code> (nome e pasta ficam para leitura).</li>
+<li>Servidor e cartão resolvem pelo <code>id</code>, que precisa existir naquela pasta; senão, aviso e a ação é ignorada. Sem <code>id</code> (ações antigas no histórico), valem o nome <b>exato</b> e a pasta, e só com um candidato: havendo mais de um, aviso "há mais de um orquestrador chamado X em Y" em vez de escolher.</li>
+<li>O cartão trava o clique com um <code>useRef</code>: dois cliques no mesmo ciclo chamam a API uma vez só.</li>
+</ul>
 
 <h2>Ressalvas</h2>
 <ul>

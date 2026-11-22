@@ -18,8 +18,10 @@
  *
  * - `pausar_orquestrador` e `continuar_orquestrador`: pausar o pedido em
  *   andamento de um Orquestrador existente, ou tirá-lo da pausa. Ele é
- *   identificado pelo nome e pela pasta, já conferidos pelo servidor; o
- *   estado (trabalhando, pausado) a tela confere de novo no clique.
+ *   identificado pelo `id`, já conferido pelo servidor (nome e pasta podem
+ *   se repetir e vão para leitura); o estado (trabalhando, pausado) a tela
+ *   confere de novo no clique. As gravadas antes do `id` não o têm: a tela
+ *   resolve essas pelo nome exato e pela pasta, e recusa se houver mais de um.
  *
  * As duas de subagente não são conferidas aqui contra a biblioteca: a tela
  * relê a lista no clique e o servidor valida ao gravar.
@@ -75,16 +77,17 @@ export interface AcaoDeEditarSubagente {
 
 export interface AcaoDePausaDoOrquestrador {
   readonly tipo: "pausar_orquestrador" | "continuar_orquestrador";
-  /** O nome real e a pasta de trabalho de um Orquestrador existente. */
-  readonly orquestrador: { readonly nome: string; readonly pasta: string };
+  /** O id, o nome real e a pasta de trabalho de um Orquestrador existente. */
+  readonly orquestrador: { readonly id: string; readonly nome: string; readonly pasta: string };
 }
 
 export function pausaDoOrquestrador(
   tipo: AcaoDePausaDoOrquestrador["tipo"],
+  id: string,
   nome: string,
   pasta: string,
 ): AcaoDePausaDoOrquestrador {
-  return Object.freeze({ tipo, orquestrador: Object.freeze({ nome, pasta }) });
+  return Object.freeze({ tipo, orquestrador: Object.freeze({ id, nome, pasta }) });
 }
 
 export function abrirOrquestrador(

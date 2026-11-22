@@ -14,8 +14,9 @@ const projetos: ProjetoDoChat[] = [
   { nome: "Financeiro", caminho: path.join(raiz, "Financeiro") },
 ];
 
-function ocioso(nome: string, pasta: string): OrquestradorExistente {
+function ocioso(nome: string, pasta: string, id = `${path.basename(pasta)}/${nome}`): OrquestradorExistente {
   return {
+    id,
     nome,
     pasta,
     situacao: "ocioso",
@@ -424,7 +425,8 @@ describe("mensagemParaOChat", () => {
     expect(mensagem).toContain(`- Recente → ${pasta} (trabalhando há menos de 1 min em "a")`);
     expect(mensagem).toContain(`- Plano → ${pasta} (aguardando aprovação do plano)`);
     expect(mensagem).toContain(`- Parado → ${pasta} (ocioso, branch orquestrador/def, alterações sem commit)`);
-    expect(mensagem).toContain("Orquestradores existentes (nome → pasta (estado)):");
+    expect(mensagem).toContain(`- Parado → ${pasta} (ocioso, branch orquestrador/def, alterações sem commit) · id painel-app/Parado`);
+    expect(mensagem).toContain("Orquestradores existentes (nome → pasta (estado) · id):");
   });
 
   it("regra de para onde vai o pedido: ocioso pelo nome, novo se todos ocupados, ocupado só quando depende dele", () => {
@@ -449,6 +451,7 @@ describe("mensagemParaOChat", () => {
   it("os exemplos dos blocos de ação no contexto são blocos válidos", () => {
     const exemplo = blocoDeContexto(false)
       .replace("<nome exato da pasta>", "painel-app")
+      .replace("<id exato da lista>", "painel-app/Painel")
       .replace("<nome exato da lista>", "Painel")
       .replace("<pasta exata da lista>", "painel-app");
 
@@ -723,11 +726,21 @@ describe("pausar e continuar orquestradores pelo chat", () => {
   };
   const outros: OrquestradorExistente[] = [painel, ocioso("Painel", path.join(raiz, "Financeiro"))];
 
-  it("extrai pausar e continuar com o nome real e a pasta do orquestrador", () => {
+  it("extrai pausar e continuar pelo id, com o nome real e a pasta do orquestrador", () => {
     const resposta = [
       "Vou pausar o Painel.",
-      bloco(JSON.stringify({ tipo: "pausar_orquestrador", orquestrador: { nome: "painel", pasta: pastaDoPainel } })),
-      bloco(JSON.stringify({ tipo: "continuar_orquestrador", orquestrador: { nome: "Painel", pasta: `${pastaDoPainel}/` } })),
+      bloco(
+        JSON.stringify({
+          tipo: "pausar_orquestrador",
+          orquestrador: { id: "painel-app/Painel", nome: "painel", pasta: pastaDoPainel },
+        }),
+      ),
+      bloco(
+        JSON.stringify({
+          tipo: "continuar_orquestrador",
+          orquestrador: { id: " painel-app/Painel ", nome: "Painel", pasta: `${pastaDoPainel}/` },
+        }),
+      ),
     ].join("\n");
 
     const { texto, acoes, avisos } = separarAcoesDoApp(resposta, projetos, outros);
@@ -735,21 +748,103 @@ describe("pausar e continuar orquestradores pelo chat", () => {
     expect(texto).toBe("Vou pausar o Painel.");
     expect(avisos).toEqual([]);
     expect(acoes).toEqual([
-      { tipo: "pausar_orquestrador", orquestrador: { nome: "Painel", pasta: pastaDoPainel } },
-      { tipo: "continuar_orquestrador", orquestrador: { nome: "Painel", pasta: pastaDoPainel } },
+      { tipo: "pausar_orquestrador", orquestrador: { id: "painel-app/Painel", nome: "Painel", pasta: pastaDoPainel } },
+      { tipo: "continuar_orquestrador", orquestrador: { id: "painel-app/Painel", nome: "Painel", pasta: pastaDoPainel } },
     ]);
   });
 
   it("aceita o nome do projeto no lugar da pasta e distingue orquestradores de mesmo nome por ela", () => {
     const { acoes } = separarAcoesDoApp(
-      bloco('{"tipo":"pausar_orquestrador","orquestrador":{"nome":"Painel","pasta":"financeiro"}}'),
+      bloco('{"tipo":"pausar_orquestrador","orquestrador":{"id":"Financeiro/Painel","nome":"Painel","pasta":"financeiro"}}'),
       projetos,
       outros,
     );
 
     expect(acoes).toEqual([
-      { tipo: "pausar_orquestrador", orquestrador: { nome: "Painel", pasta: path.join(raiz, "Financeiro") } },
+      {
+        tipo: "pausar_orquestrador",
+        orquestrador: { id: "Financeiro/Painel", nome: "Painel", pasta: path.join(raiz, "Financeiro") },
+      },
     ]);
+  });
+
+  describe("homônimos na mesma pasta", () => {
+    const pastaA = path.join(raiz, "painel-app");
+    const homonimos: OrquestradorExistente[] = [
+      ocioso("QA pausa A", pastaA, "e2a98ec1"),
+      ocioso("QA pausa A", pastaA, "1b0facc5"),
+      ocioso("qa pausa a", pastaA, "7c3d0f22"),
+    ];
+    const pausar = (orquestrador: Record<string, unknown>) =>
+      bloco(JSON.stringify({ tipo: "pausar_orquestrador", orquestrador }));
+
+    it("o id alcança cada um, inclusive o segundo de nome idêntico e o que só muda nas maiúsculas", () => {
+      const { acoes, avisos } = separarAcoesDoApp(
+        [
+          pausar({ id: "1b0facc5", nome: "QA pausa A", pasta: pastaA }),
+          pausar({ id: "e2a98ec1", nome: "QA pausa A", pasta: pastaA }),
+          pausar({ id: "7c3d0f22", nome: "qa pausa a", pasta: pastaA }),
+        ].join("\n"),
+        projetos,
+        homonimos,
+      );
+
+      expect(avisos).toEqual([]);
+      expect(acoes.map((acao) => (acao.tipo === "pausar_orquestrador" ? acao.orquestrador : null))).toEqual([
+        { id: "1b0facc5", nome: "QA pausa A", pasta: pastaA },
+        { id: "e2a98ec1", nome: "QA pausa A", pasta: pastaA },
+        { id: "7c3d0f22", nome: "qa pausa a", pasta: pastaA },
+      ]);
+    });
+
+    it("sem id (ação antiga): o nome exato e único vale, sem cair no que só muda nas maiúsculas", () => {
+      const { acoes, avisos } = separarAcoesDoApp(pausar({ nome: "qa pausa a", pasta: pastaA }), projetos, homonimos);
+
+      expect(avisos).toEqual([]);
+      expect(acoes).toEqual([
+        { tipo: "pausar_orquestrador", orquestrador: { id: "7c3d0f22", nome: "qa pausa a", pasta: pastaA } },
+      ]);
+    });
+
+    it("sem id e com mais de um de mesmo nome exato, a ação vira aviso em vez de escolher um", () => {
+      const { acoes, avisos } = separarAcoesDoApp(
+        [pausar({ nome: "QA pausa A", pasta: pastaA }), pausar({ id: null, nome: "QA pausa A", pasta: "painel-app" })].join(
+          "\n",
+        ),
+        projetos,
+        homonimos,
+      );
+
+      expect(acoes).toEqual([]);
+      expect(avisos).toEqual([
+        `Há mais de um orquestrador chamado "QA pausa A" em ${pastaA}; a ação foi ignorada.`,
+        'Há mais de um orquestrador chamado "QA pausa A" em painel-app; a ação foi ignorada.',
+      ]);
+    });
+
+    it("sem id, o nome em outra caixa não acha ninguém", () => {
+      const { acoes, avisos } = separarAcoesDoApp(pausar({ nome: "Qa Pausa A", pasta: pastaA }), projetos, homonimos);
+
+      expect(acoes).toEqual([]);
+      expect(avisos).toEqual([`O orquestrador "Qa Pausa A" não existe em ${pastaA}; a ação foi ignorada.`]);
+    });
+
+    it("id que não existe, ou de outra pasta, vira aviso mesmo com o nome certo", () => {
+      const { acoes, avisos } = separarAcoesDoApp(
+        [
+          pausar({ id: "inventado", nome: "QA pausa A", pasta: pastaA }),
+          pausar({ id: "e2a98ec1", nome: "QA pausa A", pasta: path.join(raiz, "Financeiro") }),
+        ].join("\n"),
+        projetos,
+        homonimos,
+      );
+
+      expect(acoes).toEqual([]);
+      expect(avisos).toEqual([
+        `O orquestrador "QA pausa A" não existe em ${pastaA}; a ação foi ignorada.`,
+        `O orquestrador "QA pausa A" não existe em ${path.join(raiz, "Financeiro")}; a ação foi ignorada.`,
+      ]);
+    });
   });
 
   it("ignora com aviso o orquestrador que não existe na pasta", () => {
@@ -807,8 +902,10 @@ describe("pausar e continuar orquestradores pelo chat", () => {
     );
     expect(mensagem).toContain('Pausar só vale para um "trabalhando"; continuar, só para um "pausado".');
     expect(mensagem).toContain(
-      '```acao-do-app\n{"tipo":"pausar_orquestrador","orquestrador":{"nome":"<nome exato da lista>","pasta":"<pasta exata da lista>"}}\n```',
+      '```acao-do-app\n{"tipo":"pausar_orquestrador","orquestrador":{"id":"<id exato da lista>","nome":"<nome exato da lista>","pasta":"<pasta exata da lista>"}}\n```',
     );
+    expect(mensagem).toContain('O "id" é o que identifica o orquestrador, porque nome e pasta podem se repetir: copie-o da lista.');
+    expect(mensagem).toContain(`- Congelado → ${pastaDoPainel} (pausado (congelado, continua de onde parou)) · id painel-app/Congelado`);
     expect(mensagem).toContain('"tipo":"continuar_orquestrador"');
   });
 

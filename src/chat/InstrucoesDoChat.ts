@@ -83,8 +83,19 @@ const esquemaDeEditarSubagente = z.object({
   modelo: esquemaDoModeloDoSubagente,
 });
 
-/** O orquestrador pelo nome e pela pasta, como na lista do bloco; o servidor confere que existe. */
+/**
+ * O orquestrador pelo id, com o nome e a pasta da lista para leitura; o
+ * servidor confere que existe. Sem id (vazio, nulo ou ausente), vale o nome exato.
+ */
 const esquemaDoOrquestradorIndicado = z.object({
+  id: z
+    .string()
+    .nullable()
+    .optional()
+    .transform((id) => {
+      const limpo = (id ?? "").trim();
+      return limpo === "" ? null : limpo;
+    }),
   nome: z.string().trim().min(1),
   pasta: z.string().trim().min(1),
 });
@@ -337,9 +348,9 @@ function regrasDaPausa(): string[] {
   return [
     'Pausar e continuar orquestradores: só quando o usuário pedir para pausar ou continuar um orquestrador da lista acima, responda explicando e inclua UM bloco por orquestrador. Pausar só vale para um "trabalhando"; continuar, só para um "pausado". Fora disso, diga o estado dele em uma linha e não inclua o bloco. Para pausar:',
     "```" + MARCA_DA_ACAO,
-    '{"tipo":"pausar_orquestrador","orquestrador":{"nome":"<nome exato da lista>","pasta":"<pasta exata da lista>"}}',
+    '{"tipo":"pausar_orquestrador","orquestrador":{"id":"<id exato da lista>","nome":"<nome exato da lista>","pasta":"<pasta exata da lista>"}}',
     "```",
-    'Para continuar, o mesmo bloco com "tipo":"continuar_orquestrador". O pausado "congelado" segue de onde parou; o que "continua pela conversa" retoma num pedido novo da mesma conversa. Diga que o usuário confirma clicando no cartão.',
+    'O "id" é o que identifica o orquestrador, porque nome e pasta podem se repetir: copie-o da lista. Para continuar, o mesmo bloco com "tipo":"continuar_orquestrador". O pausado "congelado" segue de onde parou; o que "continua pela conversa" retoma num pedido novo da mesma conversa. Diga que o usuário confirma clicando no cartão.',
   ];
 }
 
@@ -364,7 +375,7 @@ export function mensagemParaOChat(
       ? ["- (nenhum)"]
       : contexto.orquestradores.map(
           (orquestrador) =>
-            `- ${orquestrador.nome} → ${orquestrador.pasta} ${descreverEstado(orquestrador, contexto.agora)}`,
+            `- ${orquestrador.nome} → ${orquestrador.pasta} ${descreverEstado(orquestrador, contexto.agora)} · id ${orquestrador.id}`,
         );
   const subagentes =
     contexto.subagentesProntos.length === 0
@@ -384,7 +395,7 @@ export function mensagemParaOChat(
     `Pasta raiz dos projetos: ${contexto.pastaDosProjetos}`,
     "Projetos (nome da pasta):",
     ...projetos,
-    "Orquestradores existentes (nome → pasta (estado)):",
+    "Orquestradores existentes (nome → pasta (estado) · id):",
     ...orquestradores,
     "Subagentes prontos (nome · modelo: quando usar):",
     ...subagentes,
@@ -444,23 +455,33 @@ function orquestradorDaPasta(
 }
 
 /**
- * O orquestrador indicado numa ação de pausa: pelo nome (sem diferenciar
- * maiúsculas) e pela pasta, que vale como caminho ou como o nome do projeto.
+ * O orquestrador indicado numa ação de pausa, ou o aviso de por que ela não
+ * vale. Pelo id, que precisa existir na pasta (como caminho ou como o nome do
+ * projeto); sem id (blocos antigos), pelo nome exato e pela pasta, e só se
+ * houver um: com homônimos, escolher um pausaria o errado.
  */
 function orquestradorIndicado(
-  nome: string,
-  pasta: string,
+  indicado: { id: string | null; nome: string; pasta: string },
   projetos: readonly ProjetoDoChat[],
   orquestradores: readonly OrquestradorExistente[],
-): OrquestradorExistente | undefined {
-  const procurado = nome.toLocaleLowerCase("pt-BR");
+): { orquestrador: OrquestradorExistente } | { aviso: string } {
+  const { id, nome, pasta } = indicado;
   const chaveDaPasta = pasta.toLocaleLowerCase("pt-BR");
   const projeto = projetos.find((candidato) => candidato.nome.toLocaleLowerCase("pt-BR") === chaveDaPasta);
-  return orquestradores.find(
-    (candidato) =>
-      candidato.nome.toLocaleLowerCase("pt-BR") === procurado &&
-      (mesmaPasta(candidato.pasta, pasta) || (projeto !== undefined && mesmaPasta(candidato.pasta, projeto.caminho))),
-  );
+  const naPasta = (candidato: OrquestradorExistente) =>
+    mesmaPasta(candidato.pasta, pasta) || (projeto !== undefined && mesmaPasta(candidato.pasta, projeto.caminho));
+  const naoExiste = { aviso: `O orquestrador "${nome}" não existe em ${pasta}; a ação foi ignorada.` };
+
+  if (id !== null) {
+    const achado = orquestradores.find((candidato) => candidato.id === id);
+    return achado !== undefined && naPasta(achado) ? { orquestrador: achado } : naoExiste;
+  }
+  const candidatos = orquestradores.filter((candidato) => candidato.nome === nome && naPasta(candidato));
+  if (candidatos.length > 1) {
+    return { aviso: `Há mais de um orquestrador chamado "${nome}" em ${pasta}; a ação foi ignorada.` };
+  }
+  const [achado] = candidatos;
+  return achado === undefined ? naoExiste : { orquestrador: achado };
 }
 
 /**
@@ -472,8 +493,8 @@ function orquestradorIndicado(
  *
  * As de subagente pronto só passam pelo formato (editar sem nenhum campo a
  * trocar é malformada): a tela confere o nome contra a biblioteca no clique.
- * As de pausa só valem com um orquestrador que existe na pasta; o estado
- * dele a tela confere no clique.
+ * As de pausa só valem com um orquestrador que existe na pasta, pelo id ou,
+ * sem ele, por um nome exato sem homônimo; o estado dele a tela confere no clique.
  */
 export function separarAcoesDoApp(
   resposta: string,
@@ -512,13 +533,13 @@ export function separarAcoesDoApp(
       return "";
     }
     if (lida.data.tipo === "pausar_orquestrador" || lida.data.tipo === "continuar_orquestrador") {
-      const { nome, pasta } = lida.data.orquestrador;
-      const achado = orquestradorIndicado(nome, pasta, projetos, orquestradores);
-      if (achado === undefined) {
-        avisos.push(`O orquestrador "${nome}" não existe em ${pasta}; a ação foi ignorada.`);
+      const indicado = orquestradorIndicado(lida.data.orquestrador, projetos, orquestradores);
+      if ("aviso" in indicado) {
+        avisos.push(indicado.aviso);
         return "";
       }
-      acoes.push(pausaDoOrquestrador(lida.data.tipo, achado.nome, achado.pasta));
+      const { id, nome, pasta } = indicado.orquestrador;
+      acoes.push(pausaDoOrquestrador(lida.data.tipo, id, nome, pasta));
       return "";
     }
     const nome = lida.data.projeto.toLocaleLowerCase("pt-BR");

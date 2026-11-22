@@ -10,6 +10,8 @@ export interface ProjetoDoChat {
  * para o Claude saber quem está livre antes de sugerir para onde vai um pedido.
  */
 export interface OrquestradorExistente {
+  /** O que identifica o orquestrador: nome e pasta podem se repetir. */
+  id: string;
   nome: string;
   pasta: string;
   situacao: "ocioso" | "trabalhando" | "pausado";
