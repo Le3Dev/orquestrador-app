@@ -146,6 +146,8 @@ describe("rotas de orquestradores — modo de planejamento", () => {
   let orquestrador: Orquestrador;
 
   beforeEach(async () => {
+    // O repositório vale para o describe todo, e o nome é único por pasta.
+    repositorio.orquestradores.clear();
     orquestrador = await servico.criarOrquestrador({
       nome: "Painel",
       pastaDeTrabalho: PastaDeTrabalho.dentroDe(raiz, "painel"),
@@ -433,6 +435,38 @@ describe("rotas de orquestradores — modo de planejamento", () => {
       expect(resposta.status).toBe(404);
       expect(await resposta.json()).toEqual({ erro: "Orquestrador não encontrado." });
     });
+
+    it("responde 409 com o nome de outro da mesma pasta e mantém o nome", async () => {
+      const outro = await servico.criarOrquestrador({
+        nome: "Backlog",
+        pastaDeTrabalho: orquestrador.pastaDeTrabalho,
+        configuracao: orquestrador.configuracao,
+      });
+
+      const resposta = await renomear(outro.id, { nome: " painel " });
+
+      expect(resposta.status).toBe(409);
+      expect(await resposta.json()).toEqual({ erro: 'Já existe um orquestrador chamado "painel" nesta pasta.' });
+      expect(outro.nome).toBe("Backlog");
+    });
+  });
+
+  it("POST /orquestradores responde 409 com o nome de outro da mesma pasta, sem diferenciar maiúsculas", async () => {
+    // A pasta de trabalho do POST não existe no disco de quem roda os testes.
+    const existe = vi.spyOn(explorador, "existe").mockResolvedValue(true);
+    const resposta = await postar("/orquestradores", {
+      nome: "  PAINEL ",
+      pastaDeTrabalho: "painel",
+      modeloDoOrquestrador: "opus",
+      modeloDosSubagentes: "sonnet",
+      quantidadeDeSubagentes: { modo: "automatica", limite: 2 },
+      nivelDePermissao: "leitura",
+    });
+
+    expect(resposta.status).toBe(409);
+    expect(await resposta.json()).toEqual({ erro: 'Já existe um orquestrador chamado "PAINEL" nesta pasta.' });
+    expect(repositorio.listar()).toHaveLength(1);
+    existe.mockRestore();
   });
 
   describe("opção \"Permitir commit e push\"", () => {
@@ -1465,6 +1499,8 @@ describe("rotas de orquestradores — economia de tokens", () => {
 
   beforeEach(async () => {
     consultas.length = 0;
+    // O repositório vale para o describe todo, e o nome é único por pasta.
+    repositorio.orquestradores.clear();
     orquestrador = await servico.criarOrquestrador({
       nome: "Painel",
       pastaDeTrabalho: PastaDeTrabalho.dentroDe(raiz, "painel"),
@@ -1911,6 +1947,8 @@ describe("rotas de orquestradores — vários motores", () => {
 
   beforeEach(() => {
     consultas.length = 0;
+    // O repositório vale para o describe todo, e o nome é único por pasta.
+    repositorio.orquestradores.clear();
   });
 
   const criacao = {
@@ -2085,7 +2123,7 @@ describe("rotas de orquestradores — vários motores", () => {
       nivelDePermissao: "edicao_e_comandos",
     });
 
-    const comNavegador = await criar({ navegadorDoAgente: true });
+    const comNavegador = await criar({ nome: "Com navegador", navegadorDoAgente: true });
     expect(comNavegador.configuracao).toMatchObject({ navegadorDoAgente: true });
     await requisitar("POST", `/orquestradores/${comNavegador.id}/mensagens`, { texto: "oi" });
     await vi.waitFor(() => expect(repositorio.buscarPorId(comNavegador.id)?.situacao).toBe("ocioso"));

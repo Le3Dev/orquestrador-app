@@ -263,6 +263,17 @@ function descreverErro(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro);
 }
 
+/** Compara pastas sem diferenciar maiúsculas, separadores nem a barra final (o critério do chat). */
+function mesmaPasta(a: string, b: string): boolean {
+  const normalizar = (pasta: string) => path.resolve(pasta).replace(/\\/g, "/").toLocaleLowerCase("pt-BR");
+  return normalizar(a) === normalizar(b);
+}
+
+/** O nome como é comparado com o dos outros: aparado e sem diferenciar maiúsculas. */
+function chaveDoNome(nome: string): string {
+  return nome.trim().toLocaleLowerCase("pt-BR");
+}
+
 /**
  * Casos de uso da orquestração: criar Orquestradores, conversar com eles,
  * enfileirar pedidos, decidir os Planos que entregarem, limpar a conversa e
@@ -300,6 +311,7 @@ export class ServicoDeOrquestracao {
 
   async criarOrquestrador(pedido: NovoPedidoDeOrquestrador): Promise<Orquestrador> {
     const { repositorio, gerarId, agora } = this.dependencias;
+    this.garantirNomeLivre(pedido.nome, pedido.pastaDeTrabalho.caminho, null);
 
     const orquestrador = Orquestrador.criar({
       id: gerarId(),
@@ -347,10 +359,12 @@ export class ServicoDeOrquestracao {
 
   /**
    * Troca o nome do Orquestrador; vale também durante um turno. Trocar pelo
-   * mesmo nome não grava nem avisa as telas.
+   * mesmo nome não grava nem avisa as telas. O nome não pode ser o de outro
+   * Orquestrador da mesma pasta.
    */
   async renomear(id: string, nome: string): Promise<Orquestrador> {
     const orquestrador = this.buscar(id);
+    this.garantirNomeLivre(nome, orquestrador.pastaDeTrabalho.caminho, orquestrador.id);
     const evento = orquestrador.renomear(nome);
     if (evento === null) {
       return orquestrador;
@@ -1859,6 +1873,27 @@ export class ServicoDeOrquestracao {
   private publicar(orquestrador: Orquestrador, evento: EventoDeOrquestracao): void {
     const registrado = this.dependencias.repositorio.anexarEvento(orquestrador.id, evento);
     this.dependencias.publicador.publicar(orquestrador.id, registrado);
+  }
+
+  /**
+   * Recusa um nome já usado por outro Orquestrador da mesma pasta, sem
+   * diferenciar maiúsculas nem espaços nas pontas (`excetoId` é o que está
+   * sendo renomeado). Vale só ao criar e ao renomear: homônimos gravados antes
+   * da regra continuam carregando.
+   */
+  private garantirNomeLivre(nome: string, pasta: string, excetoId: string | null): void {
+    const chave = chaveDoNome(nome);
+    const repetido = this.dependencias.repositorio
+      .listar()
+      .some(
+        (outro) =>
+          outro.id !== excetoId &&
+          chaveDoNome(outro.nome) === chave &&
+          mesmaPasta(outro.pastaDeTrabalho.caminho, pasta),
+      );
+    if (repetido) {
+      throw new ErroDeOrquestracao("nome_repetido", `Já existe um orquestrador chamado "${nome.trim()}" nesta pasta.`);
+    }
   }
 
   private buscar(id: string): Orquestrador {

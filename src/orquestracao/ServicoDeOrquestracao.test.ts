@@ -209,9 +209,9 @@ describe("ServicoDeOrquestracao", () => {
     });
   });
 
-  async function criar(): Promise<Orquestrador> {
+  async function criar(nome = "Painel"): Promise<Orquestrador> {
     return servico.criarOrquestrador({
-      nome: "Painel",
+      nome,
       pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
       configuracao,
     });
@@ -330,7 +330,7 @@ describe("ServicoDeOrquestracao", () => {
       },
     });
     const primeiro = await criar();
-    const segundo = await criar();
+    const segundo = await criar("Outro");
 
     await servico.remover(segundo.id);
     await new Promise((resolver) => setTimeout(resolver, 0));
@@ -603,6 +603,91 @@ describe("ServicoDeOrquestracao", () => {
       await expect(servico.renomear(orquestrador.id, " ")).rejects.toMatchObject({ motivo: "dados_invalidos" });
       await expect(servico.renomear("nao-existe", "Outro")).rejects.toMatchObject({ motivo: "nao_encontrado" });
       expect(publicados).toEqual([]);
+    });
+  });
+
+  describe("nome único na pasta", () => {
+    function criarCom(nome: string, pasta = "painel"): Promise<Orquestrador> {
+      return servico.criarOrquestrador({
+        nome,
+        pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), pasta),
+        configuracao,
+      });
+    }
+
+    it.each([
+      ["o nome exato", "Painel"],
+      ["só com maiúsculas diferentes", "pAINEL"],
+      ["com espaços nas pontas", "  painel  "],
+    ])("recusa criar com %s de outro da mesma pasta, sem gravar", async (_caso, nome) => {
+      await criar();
+      const salvar = vi.spyOn(repositorio, "salvar");
+
+      await expect(criarCom(nome)).rejects.toMatchObject({
+        motivo: "nome_repetido",
+        message: `Já existe um orquestrador chamado "${nome.trim()}" nesta pasta.`,
+      });
+      expect(salvar).not.toHaveBeenCalled();
+      expect(repositorio.listar()).toHaveLength(1);
+    });
+
+    it("recusa a pasta escrita de outro jeito (maiúsculas e barra final)", async () => {
+      await criar();
+
+      await expect(
+        servico.criarOrquestrador({
+          nome: "Painel",
+          pastaDeTrabalho: PastaDeTrabalho.qualquer(`${path.resolve("/projetos", "PAINEL")}${path.sep}`),
+          configuracao,
+        }),
+      ).rejects.toMatchObject({ motivo: "nome_repetido" });
+    });
+
+    it("o mesmo nome em outra pasta pode", async () => {
+      await criar();
+
+      const outro = await criarCom("Painel", "site");
+
+      expect(outro.nome).toBe("Painel");
+      expect(repositorio.listar()).toHaveLength(2);
+    });
+
+    it("recusa renomear para o nome de outro da mesma pasta e mantém o nome", async () => {
+      await criar();
+      const segundo = await criarCom("Backlog");
+
+      await expect(servico.renomear(segundo.id, " PAINEL ")).rejects.toMatchObject({
+        motivo: "nome_repetido",
+        message: 'Já existe um orquestrador chamado "PAINEL" nesta pasta.',
+      });
+      expect(segundo.nome).toBe("Backlog");
+      expect(publicados).toEqual([]);
+    });
+
+    it("renomear para o próprio nome, mesmo mudando maiúsculas, pode", async () => {
+      const orquestrador = await criar();
+
+      await servico.renomear(orquestrador.id, "Painel");
+      const renomeado = await servico.renomear(orquestrador.id, "PAINEL");
+
+      expect(renomeado.nome).toBe("PAINEL");
+    });
+
+    it("homônimos gravados antes da regra continuam listados", async () => {
+      const primeiro = await criar();
+      // Gravado direto no repositório, como um homônimo que veio do disco.
+      const gravado = Orquestrador.criar({
+        id: "antigo",
+        nome: "painel",
+        pastaDeTrabalho: primeiro.pastaDeTrabalho,
+        sessaoId: "sessao-antiga",
+        configuracao: primeiro.configuracao,
+        agora: new Date("2026-10-28T12:00:00Z"),
+      });
+      await repositorio.salvar(gravado);
+
+      expect(repositorio.listar().map((item) => item.nome)).toEqual(["Painel", "painel"]);
+      await expect(servico.renomear(gravado.id, "Livre")).resolves.toMatchObject({ nome: "Livre" });
     });
   });
 
@@ -1360,7 +1445,7 @@ describe("ServicoDeOrquestracao", () => {
     it("não vazam de um orquestrador para outro", async () => {
       const comInstrucoes = await criar();
       await servico.alterarConfiguracao(comInstrucoes.id, { instrucoesPersonalizadas: "Só deste." });
-      const outro = await criar();
+      const outro = await criar("Outro");
 
       expect((await pedidoDoTurno(comInstrucoes.id)).instrucoes?.texto).toBe("Só deste.");
       expect((await pedidoDoTurno(outro.id)).instrucoes).toBeNull();
@@ -1867,9 +1952,9 @@ describe("ServicoDeOrquestracao e a autorrecuperação (ADR-36)", () => {
     });
   });
 
-  async function criar(): Promise<Orquestrador> {
+  async function criar(nome = "Painel"): Promise<Orquestrador> {
     return servico.criarOrquestrador({
-      nome: "Painel",
+      nome,
       pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
       configuracao,
     });
@@ -2194,7 +2279,8 @@ describe("ServicoDeOrquestracao e a autorrecuperação (ADR-36)", () => {
     async function comRetomadaGravada(
       retomada: Partial<{ deTurnoId: string; causa: "silencio" | "rede"; tentativa: number; retomarEm: string }> = {},
     ): Promise<Orquestrador> {
-      const orquestrador = await criar();
+      // Nome único: o teste grava mais de uma retomada na mesma pasta.
+      const orquestrador = await criar(`Painel ${repositorio.listar().length + 1}`);
       const turnoId = `t-${orquestrador.id}`;
       orquestrador.iniciarTurno(turnoId, "faça", relogio.agora());
       orquestrador.falharTurno(turnoId, "falhou", relogio.agora());
