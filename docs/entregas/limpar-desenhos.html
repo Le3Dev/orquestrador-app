@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Limpar todos os desenhos de uma vez</title>
+<style>
+  :root { --fundo:#16130f; --superficie:#211c16; --superficie-3:#2c251d; --borda:#3a3127; --texto:#efe6da; --mudo:#a89a88; --ativo:#ff8a3d; --ok:#7bc47f; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--fundo); color:var(--texto); font:15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 32px 24px 64px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 18px; margin: 34px 0 10px; color: var(--ativo); }
+  p.sub { color: var(--mudo); margin: 0 0 20px; }
+  code { font: 13px/1.4 ui-monospace, "JetBrains Mono", Menlo, monospace; background: var(--superficie-3); padding: 1px 5px; border-radius: 4px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--borda); }
+  th { color: var(--mudo); font-weight: 600; font-size: 13px; }
+  .cartao { background: var(--superficie); border: 1px solid var(--borda); border-radius: 12px; padding: 16px 18px; margin-top: 10px; }
+  .rotulo { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--mudo); margin-bottom: 8px; }
+  .barra { display: inline-flex; align-items: center; gap: 2px; height: 42px; padding: 5px 6px; border-radius: 12px; background: var(--superficie); border: 1px solid var(--borda); }
+  .botao { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border-radius: 7px; color: var(--texto); }
+  .botao.ativo { color: var(--ativo); background: color-mix(in srgb, var(--ativo) 16%, var(--superficie-3)); }
+  .botao.desab { opacity: .4; }
+  .botao.novo { outline: 2px dashed var(--ativo); outline-offset: 1px; }
+  .sep { width: 1px; height: 18px; margin: 0 2px; background: #4a4034; }
+  .cor { width: 14px; height: 14px; border-radius: 50%; }
+  .esp { width: 16px; border-radius: 999px; background: currentColor; }
+  .lado { display: grid; grid-template-columns: 1fr; gap: 14px; }
+  ul { margin: 6px 0; padding-left: 20px; }
+  li { margin: 4px 0; }
+  .ok { color: var(--ok); font-weight: 600; }
+  .nota { color: var(--mudo); font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Limpar todos os desenhos de uma vez</h1>
+  <p class="sub">Branch <code>feature/limpar-desenhos</code>, a partir de <code>upstream/main</code> 45b1b81. Sem commit (fica para o orquestrador).</p>
+
+  <h2>O que mudou</h2>
+  <ul>
+    <li>A barra de desenho ganhou o botão <strong>Limpar tudo</strong> (lixeira), logo depois do Desfazer, com <code>aria-label="Limpar todos os desenhos"</code> e a dica “Limpar tudo: apaga todos os traços de uma vez (o Desfazer traz todos de volta)”.</li>
+    <li>Fica <strong>desabilitado sem traço</strong>. Não há diálogo de confirmação: limpar é <strong>um passo só</strong> do histórico, e um Desfazer (botão, Ctrl+Z ou ⌘Z) traz todos os traços de volta.</li>
+    <li><strong>Canvas</strong>: o passo vai pelo mesmo <code>registrar</code> dos outros (guarda o antes, mostra vazio e grava no layout com <code>salvarDesenho([])</code>).</li>
+    <li><strong>Página do artefato (tela cheia)</strong>: o passo vai pelo mesmo <code>mudar</code> do hook <code>useDesenhoDoArtefato</code>; a largura guardada do primeiro traço volta a nula (a página flui de novo, como quando a borracha apaga o último) e a gravação no servidor vai com <code>{ tracos: [], largura: null }</code>, então a página reaberta não traz os traços de volta. O Desfazer restaura os traços <em>e</em> a largura.</li>
+    <li>A página do artefato não precisou de mensagem nova: o estado do desenho mora no app e a página recebe a lista inteira a cada mudança (<code>desenhoNaPagina.ts</code> segue igual). A mensagem <code>{ desenho: "tecla", tecla: "desfazer" }</code> continua só repassando o Ctrl+Z de dentro da página.</li>
+  </ul>
+
+  <h2>Antes e depois (barra do canvas)</h2>
+  <div class="lado">
+    <div class="cartao">
+      <div class="rotulo">Antes</div>
+      <div class="barra" aria-hidden="true" id="antes"></div>
+    </div>
+    <div class="cartao">
+      <div class="rotulo">Depois (botão novo tracejado; sem traço ele aparece apagado, como o Desfazer)</div>
+      <div class="barra" aria-hidden="true" id="depois"></div>
+    </div>
+  </div>
+  <p class="nota">Ilustração montada com os mesmos caminhos SVG dos ícones do app (Icones.tsx); não é captura de tela. A barrinha da tela cheia do artefato é a mesma <code>BarraDeDesenho</code> compacta (sem Selecionar, Marca-texto, Linha e espessura) e ganha o mesmo botão.</p>
+
+  <h2>Onde vive no código</h2>
+  <table>
+    <tr><th>Arquivo:linha</th><th>O quê</th></tr>
+    <tr><td><code>web/src/componentes/Icones.tsx:432</code></td><td><code>IconeLimparDesenho</code>, lixeira no traço 1.8 do quadro de 24 (mesmo desenho da lixeira do marketplace).</td></tr>
+    <tr><td><code>web/src/componentes/canvas/BarraDeDesenho.tsx:87</code>, <code>:93</code></td><td>Props novas <code>podeLimpar</code> e <code>aoLimpar</code>.</td></tr>
+    <tr><td><code>web/src/componentes/canvas/BarraDeDesenho.tsx:190</code></td><td>O botão “Limpar tudo”, entre o Desfazer e o fechar.</td></tr>
+    <tr><td><code>web/src/componentes/canvas/CamadaDeDesenho.tsx:203</code></td><td><code>limpar</code>: <code>registrar(antes, [])</code> quando há traço.</td></tr>
+    <tr><td><code>web/src/componentes/canvas/CamadaDeDesenho.tsx:467</code>, <code>:472</code></td><td><code>podeLimpar={tracos.length &gt; 0}</code> e <code>aoLimpar={limpar}</code>.</td></tr>
+    <tr><td><code>web/src/shared/desenhoDoArtefato.ts:40</code>, <code>:271</code>, <code>:294</code></td><td><code>limpar</code> no contrato do hook: <code>mudar(tracos =&gt; tracos.length === 0 ? null : [])</code>.</td></tr>
+    <tr><td><code>web/src/componentes/canvas/DesenhoDaTelaCheia.tsx:29</code>, <code>:33</code>, <code>:80</code>, <code>:89</code></td><td>Repassa <code>podeLimpar</code> e <code>aoLimpar</code> para a barra compacta.</td></tr>
+    <tr><td><code>web/src/componentes/canvas/NoArtefato.tsx:937</code>, <code>:941</code></td><td><code>podeLimpar={desenho.tracos.length &gt; 0}</code> e <code>aoLimpar={desenho.limpar}</code>.</td></tr>
+    <tr><td><code>web/src/theme/ilhas.css:396</code>, <code>:403</code></td><td>A barra ficou 32 px mais larga (botão de 30 + vão de 2): <code>--largura-da-barra-de-desenho</code> 641 → 673 px e o ponto em que o chat sobe 1360 → 1392 px (o chat ao lado mantém o mesmo espaço mínimo).</td></tr>
+  </table>
+
+  <h2>Testes e verificação</h2>
+  <table>
+    <tr><th>Comando</th><th>Resultado</th></tr>
+    <tr><td><code>npx vitest run --maxWorkers=1</code> em CamadaDeDesenho, desenhoDoArtefato e NoArtefato</td><td class="ok">3 arquivos, 65 testes passaram</td></tr>
+    <tr><td><code>npx tsc -b</code> (web)</td><td class="ok">sem erros</td></tr>
+    <tr><td><code>npx eslint</code> nos arquivos alterados</td><td class="ok">sem avisos</td></tr>
+    <tr><td><code>npm run build</code> (web)</td><td class="ok">ok (só o aviso antigo de chunk acima de 500 kB)</td></tr>
+  </table>
+  <p>Casos novos:</p>
+  <ul>
+    <li><code>CamadaDeDesenho.test.tsx:215</code>: desabilitado sem traço; limpar remove os dois traços da tela e do layout; o Desfazer traz os dois de volta, também no layout.</li>
+    <li><code>desenhoDoArtefato.test.ts:88</code>: limpar zera traços e largura e grava <code>([], null)</code>; sem traço não vira passo nem gravação; o Desfazer restaura traços e largura 1200 e regrava.</li>
+    <li><code>NoArtefato.test.tsx:751</code>: na tela cheia, o botão apaga tudo na página, fica desabilitado, grava vazio, e o Desfazer devolve os traços e regrava.</li>
+  </ul>
+
+  <h2>Ressalvas</h2>
+  <ul>
+    <li>Sem captura de tela: não há Playwright nem Puppeteer instalados e o canvas precisa do servidor; com outro orquestrador rodando no Mac de 16 GB, preferi não subir app e Chromium. A ilustração acima usa os ícones reais.</li>
+    <li>Os avisos de <code>act(...)</code> que aparecem na saída do NoArtefato.test são antigos; os testes novos não geram nenhum.</li>
+    <li>O desfazer do canvas guarda no máximo <code>LIMITE_DO_DESFAZER</code> passos, como já era; o limpar ocupa um só.</li>
+    <li>Não há outro lugar com desenho usando a barra: a prévia de site (navegador no canvas) não tem desenho próprio; o que aparece sobre ela é a camada do canvas, que já ganhou o botão.</li>
+    <li>README sem seção sobre a barra de desenho do canvas: nada acrescentado.</li>
+  </ul>
+</main>
+<script>
+  const T = 'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
+  const q = (p) => `<svg width="16" height="16" viewBox="0 0 24 24">${p}</svg>`;
+  const icones = {
+    selecionar: q(`<path d="M6 3.5 18.5 11l-5.6 1.4-2.7 5.6L6 3.5Z" ${T}/>`),
+    caneta: q(`<path d="M3.5 16.5c2.2-4.5 4.4-5 5.4-1.8s3 3.2 4.9-.6 3.6-5.4 6.7-3.6" ${T}/>`),
+    marca: q(`<path d="m14.5 3.5 5 5-7 7H8v-4.5l6.5-7.5Z" ${T}/><path d="M4 20.5h11" ${T} stroke-width="3" opacity=".55"/>`),
+    linha: q(`<path d="M5 19 19 5" ${T}/>`),
+    seta: q(`<path d="M5 19 19 5M10.5 5H19v8.5" ${T}/>`),
+    ret: q(`<rect x="4" y="6" width="16" height="12" rx="1.5" ${T}/>`),
+    texto: q(`<path d="M5.5 7V4.5h13V7M12 4.5v15M9 19.5h6" ${T}/>`),
+    borracha: q(`<path d="M9 19.5h10.5M5 14.6l8.6-8.6a2 2 0 0 1 2.8 0l2.6 2.6a2 2 0 0 1 0 2.8l-7.9 7.9H9.3L5 15.9a.9.9 0 0 1 0-1.3Z" ${T}/><path d="m9.6 10 5.4 5.4" ${T}/>`),
+    desfazer: q(`<path d="M9 14 4.5 9.5 9 5M4.5 9.5h10a5 5 0 0 1 0 10H11" ${T}/>`),
+    limpar: q(`<path d="M5 7h14M10 7V5h4v2M7 7l.8 12h8.4L17 7M10.5 11v5M13.5 11v5" ${T}/>`),
+    fechar: `<svg width="14" height="14" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" ${T}/></svg>`,
+  };
+  const cores = ["#ff8a3d", "#efe6da", "#6aa8ff", "#7bc47f", "#cdb48a", "#ef5a5a"];
+  function barra(comLimpar) {
+    const b = (i, c = "") => `<span class="botao ${c}">${i}</span>`;
+    let h = b(icones.selecionar) + b(icones.caneta, "ativo") + b(icones.marca) + b(icones.linha) + b(icones.seta) + b(icones.ret) + b(icones.texto) + b(icones.borracha);
+    h += '<span class="sep"></span>' + cores.map((c, i) => b(`<span class="cor" style="background:${c}"></span>`, i === 0 ? "ativo" : "")).join("");
+    h += '<span class="sep"></span>' + [2, 3, 6].map((e) => b(`<span class="esp" style="height:${e}px"></span>`, e === 3 ? "ativo" : "")).join("");
+    h += '<span class="sep"></span>' + b(icones.desfazer);
+    if (comLimpar) h += b(icones.limpar, "novo");
+    h += b(icones.fechar);
+    return h;
+  }
+  document.getElementById("antes").innerHTML = barra(false);
+  document.getElementById("depois").innerHTML = barra(true);
+</script>
+</body>
+</html>
