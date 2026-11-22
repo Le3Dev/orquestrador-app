@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { type NodeProps, ReactFlowProvider } from "@xyflow/react";
-import type { ComponentProps } from "react";
+import { type ComponentProps, Profiler } from "react";
 
 import { api, ErroDaApi } from "../../shared/api/cliente";
 import type {
@@ -11,7 +11,7 @@ import type {
   ResumoDoOrquestrador,
 } from "../../shared/api/tipos";
 import { criarLojaDosArtefatos, type AcoesDosArtefatos, ProvedorDosArtefatos } from "../../shared/canvas/artefatos";
-import { ContextoDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
+import { ProvedorDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
 import { DURACAO_DA_ENTREGA_MS, DURACAO_DO_PISCAR_MS } from "../../shared/canvas/entrega";
 import { novaPrevia, type NoTerminal as TipoDoNo } from "../../shared/canvas/nos";
 import { type AcoesDasNotas, criarLojaDasNotas, ProvedorDasNotas } from "../../shared/canvas/notas";
@@ -19,13 +19,30 @@ import { TIPO_DO_PEDIDO_ARRASTADO } from "../../shared/canvas/pedidoArrastado";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../../shared/estado/aplicarEvento";
 import { NoTerminal, PainelDeConfiguracao } from "./NoTerminal";
 
-const contagem = vi.hoisted(() => ({ analises: 0, transcricoes: 0 }));
+const contagem = vi.hoisted(() => ({ analises: 0, transcricoes: 0, leiturasDoCanvas: 0 }));
 // Fora do app desktop do Mac por padrão; os testes das bolinhas ligam.
 const ponte = vi.hoisted(() => ({ noMac: false }));
 
 vi.mock("../../shared/ponteDoDesktop", async (importOriginal) => {
   const original = await importOriginal<typeof import("../../shared/ponteDoDesktop")>();
   return { ...original, rodandoNoMac: () => ponte.noMac };
+});
+
+// Conta as leituras do canvas feitas pelos componentes (cada hook roda uma vez por render de quem o usa),
+// sem mudar o que elas devolvem: zero leituras é zero renders de quem lê o canvas.
+vi.mock("../../shared/canvas/contexto", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../shared/canvas/contexto")>();
+  type Seletor = Parameters<typeof original.useSeletorDoCanvas>[0];
+  const contar = () => {
+    contagem.leiturasDoCanvas += 1;
+  };
+  return {
+    ...original,
+    useCanvas: () => (contar(), original.useCanvas()),
+    useSeletorDoCanvas: (selecionar: Seletor) => (contar(), original.useSeletorDoCanvas(selecionar)),
+    useAcoesDoCanvas: () => (contar(), original.useAcoesDoCanvas()),
+    useConversaDoCanvas: (id: string) => (contar(), original.useConversaDoCanvas(id)),
+  };
 });
 
 // O botão de alterações tem testes próprios; aqui basta saber que ele está na barra, com o id certo.
@@ -116,7 +133,7 @@ function renderizar(resumo: ResumoDoOrquestrador, { trabalhando = false, convers
     },
   };
   render(
-    <ContextoDoCanvas.Provider value={canvas}>
+    <ProvedorDoCanvas valor={canvas}>
       <PainelDeConfiguracao
         orquestrador={resumo}
         trabalhando={trabalhando}
@@ -124,7 +141,7 @@ function renderizar(resumo: ResumoDoOrquestrador, { trabalhando = false, convers
         aoFechar={aoFechar}
         aoLimparConversa={aoLimparConversa}
       />
-    </ContextoDoCanvas.Provider>,
+    </ProvedorDoCanvas>,
   );
   return {
     aoFechar,
@@ -777,9 +794,9 @@ function propsDoNo(alteracoes: Partial<NodeProps<TipoDoNo>> = {}): NodeProps<Tip
 function Terminal({ canvas, no }: { canvas: ValorDoCanvas; no: NodeProps<TipoDoNo> }) {
   return (
     <ReactFlowProvider>
-      <ContextoDoCanvas.Provider value={canvas}>
+      <ProvedorDoCanvas valor={canvas}>
         <NoTerminal {...no} />
-      </ContextoDoCanvas.Provider>
+      </ProvedorDoCanvas>
     </ReactFlowProvider>
   );
 }
@@ -844,6 +861,53 @@ describe("NoTerminal", () => {
 
     expect(contagem.transcricoes).toBe(1);
     expect(contagem.analises).toBe(1);
+  });
+
+  it("a janela (barra, chips, controles e botões) não re-renderiza com eventos de outro orquestrador", async () => {
+    let commits = 0;
+    // O mesmo elemento a cada troca do valor: só re-renderiza o que a própria janela pedir.
+    const terminal = (
+      <Profiler id="terminal" onRender={() => (commits += 1)}>
+        <NoTerminal {...propsDoNo()} />
+      </Profiler>
+    );
+    const arvore = (valor: ValorDoCanvas) => (
+      <ReactFlowProvider>
+        <ProvedorDoCanvas valor={valor}>{terminal}</ProvedorDoCanvas>
+      </ReactFlowProvider>
+    );
+    const canvas = canvasDoTerminal(conversaDoTerminal());
+    const { rerender } = render(arvore(canvas));
+    // As medidas e leituras da montagem assentam antes de contar.
+    await act(async () => undefined);
+    commits = 0;
+    contagem.leiturasDoCanvas = 0;
+
+    const doOutro = aplicar(ESTADO_INICIAL, { tipo: "turno_iniciado", turnoId: "x1", texto: "outro", configuracao });
+    const comOutro: ValorDoCanvas = {
+      ...canvas,
+      conversas: new Map([...canvas.conversas, ["o2", doOutro]]),
+      conexoes: new Map([...canvas.conexoes, ["o2", "reconectando"]]),
+      sinais: new Map([["o2", { turnoId: "x1", em: "2026-10-28T12:00:05Z", tokensPensando: 10 }]]),
+      bixinhosLimpos: new Map([["o2", { turnoId: "x1", subagentes: [] }]]),
+      bixinhosSaindo: new Set(["o2:s1"]),
+      // A memória de outro Orquestrador mudou: o objeto do servidor é novo, a conexão é a mesma.
+      servidor: { ...canvas.servidor },
+    };
+    rerender(arvore(comOutro));
+    await act(async () => undefined);
+    expect(commits).toBe(0);
+    expect(contagem.leiturasDoCanvas).toBe(0);
+
+    // Um evento do próprio o1 re-renderiza, como antes.
+    const doProprio: ValorDoCanvas = {
+      ...comOutro,
+      conversas: new Map([...comOutro.conversas, ["o1", conversaOciosa()]]),
+    };
+    rerender(arvore(doProprio));
+    await act(async () => undefined);
+    expect(commits).toBeGreaterThan(0);
+    expect(contagem.leiturasDoCanvas).toBeGreaterThan(0);
   });
 
   it("novidade do próprio orquestrador re-renderiza a transcrição sem re-analisar a resposta antiga", () => {
@@ -2000,13 +2064,13 @@ describe("NoTerminal · itens ligados", () => {
     const previa = novaPrevia("p1", { x: 0, y: 600 }, { url: "http://localhost:5173/", orquestradorId: null });
     render(
       <ReactFlowProvider initialNodes={[previa]}>
-        <ContextoDoCanvas.Provider value={canvas}>
+        <ProvedorDoCanvas valor={canvas}>
           <ProvedorDasNotas valor={{ loja: lojaDasNotas, acoes: {} as AcoesDasNotas }}>
             <ProvedorDosArtefatos valor={{ loja: lojaDosArtefatos, acoes: {} as AcoesDosArtefatos }}>
               <NoTerminal {...propsDoNo({ data: { orquestradorId: "o1", ligados } })} />
             </ProvedorDosArtefatos>
           </ProvedorDasNotas>
-        </ContextoDoCanvas.Provider>
+        </ProvedorDoCanvas>
       </ReactFlowProvider>,
     );
     return { desligarItem, lerItensLigados };

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { mensagemDeErro } from "../../shared/api/cliente";
-import { useCanvas } from "../../shared/canvas/contexto";
+import { useSeletorDoCanvas } from "../../shared/canvas/contexto";
 import { candidatosAoVinculo, useVinculosSeHouver } from "../../shared/canvas/vinculos";
 
 /** Dois elos de corrente: o ícone do vínculo. */
@@ -26,7 +26,7 @@ function IconeDeVinculo() {
  */
 export function BotaoDeVincular({ orquestradorId }: { orquestradorId: string }) {
   const vinculos = useVinculosSeHouver();
-  const { orquestradores } = useCanvas();
+  const orquestradores = useSeletorDoCanvas((canvas) => canvas.orquestradores);
   const [aberto, setAberto] = useState(false);
   const [ocupado, setOcupado] = useState(false);
   const [erro, setErro] = useState<string | null>(null);

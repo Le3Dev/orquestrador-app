@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 
 import type { DadosDaConfiguracao, EventoDeOrquestracao, EventoRegistrado } from "../../shared/api/tipos";
 import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
-import { ContextoDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
+import { ProvedorDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
 import { idDoBixinho, type NoBixinho as TipoDoNo } from "../../shared/canvas/nos";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../../shared/estado/aplicarEvento";
 import { NoBixinho } from "./NoBixinho";
@@ -137,9 +137,9 @@ function tela(
   bixinhosSaindo?: ReadonlySet<string>,
 ) {
   return (
-    <ContextoDoCanvas.Provider value={valorDoCanvas(conversa, bixinhosSaindo)}>
+    <ProvedorDoCanvas valor={valorDoCanvas(conversa, bixinhosSaindo)}>
       <NoBixinho {...propsDoNo(subagenteId, selected, x)} />
-    </ContextoDoCanvas.Provider>
+    </ProvedorDoCanvas>
   );
 }
 
