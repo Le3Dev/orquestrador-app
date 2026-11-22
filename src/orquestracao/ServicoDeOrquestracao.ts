@@ -154,7 +154,7 @@ interface DestinoDoTurno {
     causa: CausaDaTrocaDeMotor;
     liberaEm: string | null;
   };
-  /** O pedido reenviado: os anexos do pedido original, já guardados, em vez de os recebidos agora. */
+  /** O pedido reenviado: os anexos do pedido original, já guardados; os recebidos agora vêm depois deles. */
   anexosGuardados?: readonly Anexo[];
   /** O pedido reenviado: a origem (vínculo) do pedido original, que não vem da fila desta vez. */
   origem?: OrigemDoPedido | null;
@@ -562,7 +562,8 @@ export class ServicoDeOrquestracao {
   /**
    * Tira o Orquestrador da pausa (ver ADR-51). `congelado`: SIGCONT nos
    * processos e a vigia volta do zero. `retomada`: abre um turno novo na mesma
-   * sessão, pedindo para conferir a pasta e continuar de onde parou. A fila
+   * sessão, pedindo para conferir a pasta e continuar de onde parou (ou com o
+   * pedido de novo, se ele não chegou ao motor; ver `continuarRetomada`). A fila
    * volta a andar quando esse turno concluir.
    */
   async continuar(id: string): Promise<{ modo: ModoDaPausa }> {
@@ -592,6 +593,11 @@ export class ServicoDeOrquestracao {
    * turno pausado. `mensagem`: o que o usuário mandou junto (vai no mesmo
    * texto, depois da nota de continuação); com ela vêm o modo, os anexos e os
    * itens dela. Se o processo do turno pausado ainda está terminando, espera.
+   *
+   * A nota só vale se o motor chegou a ver o pedido pausado: se a pausa veio
+   * antes de o processo nascer ou de ele anunciar a sessão neste turno, o
+   * pedido vai de novo (texto, modo e anexos dele), em vez da nota. Uma sessão
+   * iniciada em turnos anteriores não conta: ela não contém este pedido.
    */
   private async continuarRetomada(orquestrador: Orquestrador, mensagem: MensagemDuranteAPausa | null): Promise<MensagemEnviada> {
     const emAndamento = this.turnosEmExecucao.get(orquestrador.id);
@@ -602,26 +608,30 @@ export class ServicoDeOrquestracao {
     if (pausa === null) {
       throw new ErroDeOrquestracao("sem_pausa", `"${orquestrador.nome}" não está pausado.`);
     }
-    const pausado = orquestrador.ultimoTurno;
-    const motor = pausado?.situacao === "pausado" ? pausado.motor : orquestrador.configuracao.motorDoOrquestrador;
-    // Sem a sessão do motor iniciada, o motor nunca viu o pedido: ele vai de novo, em vez da nota.
-    const sessaoIniciada = orquestrador.sessaoDoMotor(motor).iniciada;
-    const base =
-      pausado?.situacao === "pausado" && !sessaoIniciada
-        ? pausado.texto
-        : mensagemDeContinuacao(orquestrador.worktree !== null);
+    const ultimo = orquestrador.ultimoTurno;
+    const pausado = ultimo?.situacao === "pausado" ? ultimo : null;
+    const motor = pausado?.motor ?? orquestrador.configuracao.motorDoOrquestrador;
+    // O pedido chegou ao motor se a sessão dele existe e foi anunciada no turno
+    // pausado. Turno gravado antes dessa marca (null): vale a sessão do motor.
+    const pedidoNaoChegou =
+      pausado !== null && !(orquestrador.sessaoDoMotor(motor).iniciada && (pausado.sessaoIniciada ?? true));
+    const base = pedidoNaoChegou ? pausado.texto : mensagemDeContinuacao(orquestrador.worktree !== null);
     const extra = mensagem?.texto.trim() ?? "";
     const texto = extra === "" ? base : `${base}\n\nMensagem do usuário ao continuar:\n${extra}`;
+    const destino = this.destinoDoPedidoNovo(orquestrador, motor);
     return this.iniciarTurno(
       orquestrador,
       texto,
       mensagem?.anexosRecebidos ?? [],
-      mensagem?.modo ?? (pausado?.situacao === "pausado" ? pausado.modo : "execucao"),
+      mensagem?.modo ?? pausado?.modo ?? "execucao",
       mensagem?.pedidoDaFila ?? null,
       null,
       mensagem?.itensLigados ?? [],
       mensagem?.previasAbertas ?? [],
-      this.destinoDoPedidoNovo(orquestrador, motor),
+      // O pedido reenviado leva os anexos dele, já guardados, antes dos da mensagem.
+      pedidoNaoChegou && pausado.anexos.length > 0
+        ? { ...destino, anexosGuardados: pausado.anexos.map((dados) => Anexo.reconstituir(dados)) }
+        : destino,
       pausa,
     );
   }
@@ -631,7 +641,8 @@ export class ServicoDeOrquestracao {
    * pausado: tira da pausa e manda junto (ver ADR-51). Congelado: SIGCONT, e a
    * mensagem entra na frente da fila (o pedido da fila fica onde está), para
    * sair assim que o turno em andamento terminar. Retomada: abre o turno de
-   * continuação com a nota e a mensagem no mesmo texto.
+   * continuação com a nota (ou o pedido pausado, se ele não chegou ao motor) e
+   * a mensagem no mesmo texto.
    */
   private async enviarDuranteAPausa(orquestrador: Orquestrador, mensagem: MensagemDuranteAPausa): Promise<MensagemEnviada> {
     const pausa = orquestrador.pausa as DadosDaPausa;
@@ -736,16 +747,15 @@ export class ServicoDeOrquestracao {
     const turnoId = gerarId();
     const destino = destinoEscolhido ?? this.destinoDoPedidoNovo(orquestrador);
 
-    const anexosDoTurno: readonly Anexo[] =
-      destino.anexosGuardados ??
-      anexosRecebidos.map((recebido) =>
-        Anexo.de({
-          id: gerarId(),
-          nome: recebido.nome,
-          tipoDeMidia: recebido.tipoDeMidia,
-          tamanhoEmBytes: recebido.conteudo.byteLength,
-        }),
-      );
+    const anexosNovos = anexosRecebidos.map((recebido) =>
+      Anexo.de({
+        id: gerarId(),
+        nome: recebido.nome,
+        tipoDeMidia: recebido.tipoDeMidia,
+        tamanhoEmBytes: recebido.conteudo.byteLength,
+      }),
+    );
+    const anexosDoTurno: readonly Anexo[] = [...(destino.anexosGuardados ?? []), ...anexosNovos];
     const aceito = orquestrador.iniciarTurno(
       turnoId,
       texto,
@@ -804,11 +814,9 @@ export class ServicoDeOrquestracao {
     this.publicar(orquestrador, inicio);
 
     try {
-      // Os anexos do pedido reenviado já estão guardados: gravar de novo os esvaziaria.
-      if (destino.anexosGuardados === undefined) {
-        for (const [indice, anexo] of anexosDoTurno.entries()) {
-          await anexos.guardar(orquestrador.id, anexo, anexosRecebidos[indice]?.conteudo ?? new Uint8Array());
-        }
+      // Só os recebidos agora: os do pedido reenviado já estão guardados, e gravar de novo os esvaziaria.
+      for (const [indice, anexo] of anexosNovos.entries()) {
+        await anexos.guardar(orquestrador.id, anexo, anexosRecebidos[indice]?.conteudo ?? new Uint8Array());
       }
       await repositorio.salvar(orquestrador);
     } catch (erro) {

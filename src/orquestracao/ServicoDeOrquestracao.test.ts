@@ -3002,6 +3002,100 @@ describe("ServicoDeOrquestracao e a pausa (ADR-51)", () => {
     expect(motor.pedidos[1]?.texto).toMatch(/^Você foi pausado pelo usuário[\s\S]*Mensagem do usuário ao continuar:\nuse a cor azul$/);
   });
 
+  describe("o pedido que não chegou ao motor vai de novo, em vez da nota", () => {
+    const NOTA = "Você foi pausado pelo usuário no meio do trabalho.";
+
+    async function novo(): Promise<Orquestrador> {
+      return servico.criarOrquestrador({
+        nome: "Painel",
+        pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
+        configuracao,
+      });
+    }
+
+    /** O app reabre o Orquestrador do disco: a marca da sessão do turno tem de sobreviver. */
+    function reaberto(orquestrador: Orquestrador): void {
+      repositorio.orquestradores.set(orquestrador.id, Orquestrador.reconstituir(orquestrador.paraDados()));
+    }
+
+    it("pausa antes de o processo nascer: reenvia o pedido com o modo e os anexos dele", async () => {
+      congelador.podeCongelar = false;
+      motor.eventos = [];
+      const orquestrador = await novo();
+      const primeiro = await servico.enviarMensagem(
+        orquestrador.id,
+        "crie a.txt",
+        [{ nome: "tela.png", tipoDeMidia: "image/png", conteudo: new Uint8Array([1]) }],
+        "planejamento",
+      );
+      await servico.pausar(orquestrador.id);
+      await primeiro.conclusao;
+      expect(orquestrador.ultimoTurno).toMatchObject({ situacao: "pausado", sessaoIniciada: false });
+      reaberto(orquestrador);
+
+      await servico.continuar(orquestrador.id);
+
+      const continuacao = motor.pedidos.at(-1);
+      expect(continuacao).toMatchObject({ texto: "crie a.txt", modo: "planejamento", sessaoIniciada: false });
+      expect(continuacao?.anexos.map((anexo) => anexo.nome)).toEqual(["tela.png"]);
+    });
+
+    it("pausa depois de a sessão ser anunciada no próprio turno: manda a nota", async () => {
+      congelador.podeCongelar = false;
+      const { orquestrador, primeiro } = await trabalhando();
+      await servico.pausar(orquestrador.id);
+      await primeiro.conclusao;
+      expect(orquestrador.ultimoTurno?.sessaoIniciada).toBe(true);
+      reaberto(orquestrador);
+
+      await servico.continuar(orquestrador.id);
+
+      expect(motor.pedidos.at(-1)?.texto).toContain(NOTA);
+      expect(motor.pedidos.at(-1)?.texto).not.toContain("faça o painel");
+    });
+
+    it("sessão iniciada em turnos anteriores, mas não no pausado: reenvia o pedido na mesma sessão", async () => {
+      const { orquestrador, primeiro } = await trabalhando();
+      motor.terminar();
+      await primeiro.conclusao;
+      expect(orquestrador.sessaoIniciada).toBe(true);
+
+      congelador.podeCongelar = false;
+      motor.eventos = [];
+      const segundo = await servico.enviarMensagem(orquestrador.id, "crie b.txt");
+      await servico.pausar(orquestrador.id);
+      await segundo.conclusao;
+
+      await servico.continuar(orquestrador.id);
+
+      expect(motor.pedidos.at(-1)).toMatchObject({
+        texto: "crie b.txt",
+        sessaoId: motor.pedidos[0]?.sessaoId,
+        sessaoIniciada: true,
+      });
+    });
+
+    it("mensagem durante a pausa: o pedido vai de novo com a mensagem, e os anexos dos dois", async () => {
+      congelador.podeCongelar = false;
+      motor.eventos = [];
+      const orquestrador = await novo();
+      const primeiro = await servico.enviarMensagem(orquestrador.id, "crie c.txt", [
+        { nome: "antes.png", tipoDeMidia: "image/png", conteudo: new Uint8Array([1]) },
+      ]);
+      await servico.pausar(orquestrador.id);
+      await primeiro.conclusao;
+
+      await servico.enviarMensagem(orquestrador.id, "use a cor azul", [
+        { nome: "depois.png", tipoDeMidia: "image/png", conteudo: new Uint8Array([2]) },
+      ]);
+
+      const continuacao = motor.pedidos.at(-1);
+      expect(continuacao?.texto).toBe("crie c.txt\n\nMensagem do usuário ao continuar:\nuse a cor azul");
+      expect(continuacao?.anexos.map((anexo) => anexo.nome)).toEqual(["antes.png", "depois.png"]);
+      expect(orquestrador.pausa).toBeNull();
+    });
+  });
+
   it("cancelar congelado descongela e cancela; cancelar em retomada só tira a pausa", async () => {
     const { orquestrador, primeiro } = await trabalhando();
     await servico.pausar(orquestrador.id);

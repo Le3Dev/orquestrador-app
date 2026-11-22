@@ -95,6 +95,22 @@ describe("Orquestrador", () => {
     expect(orquestrador.sessaoIniciada).toBe(true);
   });
 
+  it("o turno guarda se o motor anunciou a sessão nele; a marca sobrevive à gravação e falta (null) nos antigos", () => {
+    const orquestrador = novoOrquestrador();
+    orquestrador.iniciarTurno("t1", "oi", agora);
+    orquestrador.concluirTurno("t1", "pronto", uso, agora);
+    orquestrador.iniciarTurno("t2", "de novo", agora);
+    expect(orquestrador.ultimoTurno?.sessaoIniciada).toBe(false);
+
+    orquestrador.registrarDoMotor("t2", { tipo: "sessao_iniciada" });
+
+    const dados = orquestrador.paraDados();
+    expect(dados.turnos.map((turno) => turno.sessaoIniciada)).toEqual([false, true]);
+    expect(Orquestrador.reconstituir(dados).ultimoTurno?.sessaoIniciada).toBe(true);
+    const { sessaoIniciada: _semMarca, ...antigo } = dados.turnos[1] as NonNullable<(typeof dados.turnos)[1]>;
+    expect(Orquestrador.reconstituir({ ...dados, turnos: [antigo] }).ultimoTurno?.sessaoIniciada).toBeNull();
+  });
+
   it("ao cancelar, encerra o turno e os subagentes que ainda rodavam", () => {
     const orquestrador = novoOrquestrador();
     orquestrador.iniciarTurno("t1", "analise", agora);
