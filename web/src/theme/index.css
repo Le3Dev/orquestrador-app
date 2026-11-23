@@ -1255,7 +1255,16 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   border: 1px solid color-mix(in srgb, var(--cor-da-nota) 35%, var(--border-forte));
   box-shadow: 0 18px 44px -22px rgba(0, 0, 0, .85);
   transition: border-color .2s, box-shadow .25s ease-out;
+  /* O recorte arredondado (overflow + raio) em volta do campo de texto, que
+   * rola: sem um contexto de empilhamento aqui, o Chromium compunha cada campo
+   * como rolável próprio ao abrir a tela (umas 5 camadas por nota), e todo
+   * quadro fora do compositor pagava ~15 ms de Layerize com 30 notas, até o
+   * primeiro pan refazer as camadas. Isolada, ~4 ms. Não muda o desenho. */
+  isolation: isolate;
 }
+/* Isolada, a janela pinta por cima das alças de redimensionar (vêm antes no
+ * nó e não têm z-index): elas sobem para continuar por cima, como antes. */
+.react-flow__node-nota .react-flow__resize-control { z-index: 1; }
 .react-flow__node.selected .janela-nota {
   border-color: var(--cor-da-nota);
   box-shadow:
