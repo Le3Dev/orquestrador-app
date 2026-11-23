@@ -293,7 +293,11 @@ export function montarItensDaPaleta(fonte: FonteDaPaleta): ItemDaPaleta[] {
       id: `orquestrador:${orquestrador.id}`,
       orquestradorId: orquestrador.id,
       titulo: orquestrador.nome,
-      detalhe: [orquestrador.nomeDaPasta, ...(trabalhando ? ["trabalhando"] : []), aberto ? "no canvas" : "abrir"].join(" · "),
+      detalhe: [
+        orquestrador.nomeDaPasta,
+        ...(trabalhando ? ["trabalhando"] : orquestrador.situacao === "pausado" ? ["pausado"] : []),
+        aberto ? "no canvas" : "abrir",
+      ].join(" · "),
       busca: "",
       trabalhando,
       aberto,

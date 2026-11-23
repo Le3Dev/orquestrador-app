@@ -56,6 +56,11 @@ export function encerrarArvore(pid: number | undefined, esperaAntesDoSigkillMs =
     sinalizar(pid, "SIGTERM");
     return;
   }
+  // Um grupo pausado (SIGSTOP, ver ADR-51) não trata o SIGTERM até continuar:
+  // o SIGCONT logo depois faz o sinal valer agora. Num grupo rodando, não muda nada.
+  // Os grupos próprios dos descendentes congelados (os shells do `Bash`) não são
+  // deste grupo: quem cancela os descongela antes (`ControleDeExecucoes.cancelar`).
+  sinalizar(-pid, "SIGCONT");
   // `unref`: a espera não segura o servidor que está desligando. O id do
   // grupo não é reaproveitado enquanto houver alguém nele.
   setTimeout(() => {
@@ -63,6 +68,20 @@ export function encerrarArvore(pid: number | undefined, esperaAntesDoSigkillMs =
       sinalizar(-pid, "SIGKILL");
     }
   }, esperaAntesDoSigkillMs).unref();
+}
+
+/**
+ * Congela (`SIGSTOP`) ou descongela (`SIGCONT`) o grupo de processos `grupo`
+ * (o pid de quem o lidera): só quem está nele. O que o processo abriu em
+ * sessão ou grupo próprios (o Claude Code abre assim o shell de cada `Bash`)
+ * fica de fora; `RegistroDeProcessos.congelar` sinaliza esses grupos um a um.
+ * Falso se o grupo não existe mais, ou no Windows, que não tem esses sinais (ver ADR-51).
+ */
+export function sinalizarGrupo(grupo: number, sinal: "SIGSTOP" | "SIGCONT"): boolean {
+  if (process.platform === "win32") {
+    return false;
+  }
+  return sinalizar(-grupo, sinal);
 }
 
 /** O que se sabe de um processo vivo: a linha de comando e quando ele nasceu (nulo se não deu para ler). */

@@ -170,6 +170,22 @@ function SinalDoTurno({ turno, sinal }: { turno: TurnoNaTela; sinal: SinalDeVida
   );
 }
 
+/**
+ * No lugar do sinal de vida enquanto o Orquestrador está pausado (o turno congelado):
+ * o silêncio é esperado, então nada de fase correndo nem de aviso de travamento.
+ */
+function LinhaDaPausa() {
+  return (
+    <div className="linha-do-terminal linha-sistema">
+      <span />
+      <span className="linha-simbolo text-warning">⏸</span>
+      <span className="linha-texto col-span-2 text-warning">
+        Orquestrador pausado · o Continuar segue de onde parou
+      </span>
+    </div>
+  );
+}
+
 /** Ex.: "02:05". */
 function formatarContagem(milissegundos: number): string {
   const segundos = Math.max(0, Math.ceil(milissegundos / 1000));
@@ -274,6 +290,8 @@ interface PropsDoTurno {
   desconectado: boolean;
   /** Algum pedido da conversa está rodando: as perguntas não podem ser respondidas agora. */
   trabalhando: boolean;
+  /** Este pedido está em andamento, mas congelado pela pausa: sem sinal de vida. */
+  pausado: boolean;
   acoesDoPlano: AcoesDoPlano;
   aoResponderPergunta: (texto: string) => Promise<void>;
 }
@@ -291,6 +309,7 @@ const Turno = memo(function Turno({
   sinal,
   desconectado,
   trabalhando,
+  pausado,
   acoesDoPlano,
   aoResponderPergunta,
 }: PropsDoTurno) {
@@ -381,6 +400,8 @@ const Turno = memo(function Turno({
             </span>
             <span className="linha-texto col-span-2">sem conexão com o servidor — aguardando ele voltar</span>
           </div>
+        ) : pausado ? (
+          <LinhaDaPausa />
         ) : (
           <SinalDoTurno turno={turno} sinal={sinal} />
         ))}
@@ -443,6 +464,8 @@ interface Props {
   acoesDoPlano: AcoesDoPlano;
   /** Envia a resposta às perguntas do último pedido como um pedido novo, pelo envio do prompt; lança se recusar. */
   aoResponderPergunta: (texto: string) => Promise<void>;
+  /** O Orquestrador está pausado: o pedido em andamento (congelado) não mostra o sinal de vida. Padrão: falso. */
+  pausado?: boolean;
 }
 
 /**
@@ -468,6 +491,7 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
   desconectado,
   acoesDoPlano,
   aoResponderPergunta,
+  pausado = false,
 }: Props) {
   const [quantosTurnos, setQuantosTurnos] = useState(TURNOS_POR_PAGINA);
   // Só os últimos turnos são desenhados (poupa memória); os demais continuam no estado.
@@ -537,6 +561,7 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
           sinal={turno.situacao === "em_andamento" ? sinal : undefined}
           desconectado={desconectado}
           trabalhando={trabalhando}
+          pausado={pausado && turno.situacao === "em_andamento"}
           acoesDoPlano={acoesDoPlano}
           aoResponderPergunta={aoResponderPergunta}
         />

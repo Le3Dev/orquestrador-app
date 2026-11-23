@@ -1327,6 +1327,66 @@ describe("NoTerminal · servidor no ar", () => {
   });
 });
 
+describe("NoTerminal · pausa do orquestrador", () => {
+  const DESDE = "2026-10-28T12:00:00Z";
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-28T12:03:10Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function conversaPausada(modo: "congelado" | "retomada"): EstadoDaConversa {
+    return aplicar(conversaDoTerminal(), { tipo: "orquestrador_pausado", orquestradorId: "o1", pausa: { desde: DESDE, modo } });
+  }
+
+  it("trabalhando, o pausar chama a rota e ainda não há chip de pausa", () => {
+    const pausar = vi.spyOn(api, "pausar").mockResolvedValue({ pausa: { desde: DESDE, modo: "congelado" } });
+    render(<Terminal canvas={canvasDoTerminal(conversaDoTerminal())} no={propsDoNo()} />);
+
+    expect(screen.queryByText(/pausado há/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pausar orquestrador" }));
+
+    expect(pausar).toHaveBeenCalledWith("o1");
+  });
+
+  it("congelado: chip com o tempo da pausa (atualiza por minuto), continuar e faixa parada", async () => {
+    const continuar = vi.spyOn(api, "continuar").mockResolvedValue({ modo: "congelado" });
+    const { container } = render(<Terminal canvas={canvasDoTerminal(conversaPausada("congelado"))} no={propsDoNo()} />);
+
+    // Congelado há mais de 2 min: o chip leva o aviso da pausa longa.
+    const chip = screen.getByText("⏸ pausado há 3 min · ao continuar, o passo atual pode ser refeito");
+    expect(chip).toHaveAttribute("title", expect.stringContaining("congelado há mais de 2 min") as string);
+    expect(container.querySelector(".janela-terminal-pausada")).not.toBeNull();
+    expect(container.querySelector(".janela-terminal-ativa")).toBeNull();
+    expect(container.querySelector(".faixa-de-progresso-pausada")).not.toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(screen.getByText("⏸ pausado há 4 min · ao continuar, o passo atual pode ser refeito")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Continuar orquestrador" }));
+    expect(continuar).toHaveBeenCalledWith("o1");
+    expect(screen.getByRole("button", { name: "cancelar" })).toBeEnabled();
+  });
+
+  it("retomada vinda só do resumo: o tooltip explica que continua pela conversa", () => {
+    const resumo: ResumoDoOrquestrador = { ...orquestrador(), situacao: "pausado", pausa: { desde: DESDE, modo: "retomada" } };
+    render(<Terminal canvas={canvasDoTerminal(conversaOciosa(), resumo)} no={propsDoNo()} />);
+
+    expect(screen.getByText("⏸ pausado há 3 min")).toHaveAttribute(
+      "title",
+      expect.stringContaining("o Continuar segue pela conversa") as string,
+    );
+    expect(screen.getByRole("button", { name: "Continuar orquestrador" })).toBeEnabled();
+  });
+});
+
 /** Deixa terminar as promessas já resolvidas (a API falsa) sem avançar o relógio falso. */
 async function concluirPromessas(): Promise<void> {
   await act(async () => {

@@ -223,6 +223,38 @@ export class ConversaDoChat {
     return { tipo: "resposta_falhou", mensagemId: resposta.id, motivo, uso };
   }
 
+  /** Se a resposta em andamento está pausada; ela continua "em andamento" (bloqueia outra pergunta). */
+  get respostaPausada(): boolean {
+    return this.respostaEmAndamento?.pausada ?? false;
+  }
+
+  /** Confere se dá para pausar agora, antes de congelar o processo: há resposta e ela não está pausada. */
+  conferirPausa(): void {
+    const resposta = this.respostaAtiva();
+    if (resposta.pausada) {
+      throw new ErroDoChat("ja_pausada", "A resposta já está pausada.");
+    }
+  }
+
+  /** Marca a resposta em andamento como pausada; o processo já foi congelado por quem chamou. */
+  pausar(agora: Date): EventoDoChat {
+    this.conferirPausa();
+    const resposta = this.respostaAtiva();
+    resposta.pausar(agora);
+    return { tipo: "resposta_pausada", mensagemId: resposta.id, desde: agora.toISOString() };
+  }
+
+  /** A resposta pausada volta a andar; sem pausa, é recusado. */
+  continuar(): EventoDoChat {
+    const resposta = this.respostaEmAndamento;
+    if (resposta === null || !resposta.pausada) {
+      throw new ErroDoChat("sem_pausa", "A resposta não está pausada.");
+    }
+    resposta.continuar();
+    return { tipo: "resposta_continuada", mensagemId: resposta.id };
+  }
+
+  /** Vale também com a resposta pausada: a pausa sai junto. */
   cancelar(): EventoDoChat {
     const resposta = this.respostaAtiva();
     resposta.cancelar();
@@ -249,7 +281,10 @@ export class ConversaDoChat {
     return { tipo: "conversa_limpa" };
   }
 
-  /** Usado ao subir o servidor: a resposta que rodava quando ele parou não tem mais processo. */
+  /**
+   * Usado ao subir o servidor: a resposta que rodava quando ele parou não tem
+   * mais processo. Pausada ou não, vira interrompida.
+   */
   interromperRespostaEmAndamento(): EventoDoChat | null {
     if (this.respostaEmAndamento === null) {
       return null;

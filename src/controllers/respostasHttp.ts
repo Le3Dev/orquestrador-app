@@ -10,6 +10,9 @@ export const STATUS_DA_ORQUESTRACAO: Readonly<Record<MotivoDoErro, number>> = {
   turno_em_andamento: 409,
   sem_turno_em_andamento: 409,
   sem_plano_pendente: 409,
+  orquestrador_pausado: 409,
+  sem_pausa: 409,
+  nome_repetido: 409,
 };
 
 /**

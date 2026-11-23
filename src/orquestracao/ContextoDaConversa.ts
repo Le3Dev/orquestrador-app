@@ -53,6 +53,8 @@ function resultadoDoTurno(turno: TurnoDoContexto): string {
       return `Resposta final: nenhuma, o usuário cancelou o turno. ${incompleto}`;
     case "interrompido":
       return `Resposta final: nenhuma, o turno foi interrompido (o app foi reiniciado). ${incompleto}`;
+    case "pausado":
+      return `Resposta final: nenhuma, o usuário pausou o turno. ${incompleto}`;
     case "em_andamento":
       return "Resposta final: nenhuma ainda.";
   }

@@ -175,6 +175,20 @@ describe("NoBixinho", () => {
     expect(simulados.desenhoDoBixinho.mock.calls.length).toBe(desenhos);
   });
 
+  it("orquestrador pausado (congelado): o bixinho que executava diz pausado, sem ícone, e a ficha também", () => {
+    const conversa = aplicar(doisTrabalhando(), progresso("s1", "Reading src/a.ts"), {
+      tipo: "orquestrador_pausado",
+      orquestradorId: "o1",
+      pausa: { desde: "2026-10-28T12:00:00Z", modo: "congelado" },
+    });
+    render(tela(conversa, "s1", true));
+
+    expect(screen.queryByText("Reading src/a.ts")).not.toBeInTheDocument();
+    expect(screen.getByText("pausado")).toBeInTheDocument();
+    expect(screen.getByText("Pausado")).toHaveClass("etiqueta-warning");
+    expect(screen.queryByRole("img", { name: "lendo" })).not.toBeInTheDocument();
+  });
+
   it("ferramenta desconhecida (ou de MCP): sem ícone", () => {
     const conversa = aplicar(doisTrabalhando(), progresso("s1", "consultando", "mcp__github__get_issue"));
     render(tela(conversa, "s1"));

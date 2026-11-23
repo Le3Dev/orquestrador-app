@@ -30,6 +30,26 @@ describe("api", () => {
     expect(buscar).toHaveBeenCalledWith("/api/motores", expect.anything());
   });
 
+  it("pausar e continuar fazem POST nas rotas do orquestrador e devolvem a pausa e o modo", async () => {
+    const pausa = { desde: "2026-11-18T10:00:00.000Z", modo: "congelado" };
+    const buscar = vi.fn<Buscar>(async (url) =>
+      respostaJson(url.endsWith("/pausar") ? { pausa } : { modo: "congelado" }, 202),
+    );
+    vi.stubGlobal("fetch", buscar);
+
+    await expect(api.pausar("o 1")).resolves.toEqual({ pausa });
+    await expect(api.continuar("o 1")).resolves.toEqual({ modo: "congelado" });
+
+    expect(buscar).toHaveBeenNthCalledWith(1, "/api/orquestradores/o%201/pausar", expect.objectContaining({ method: "POST" }));
+    expect(buscar).toHaveBeenNthCalledWith(2, "/api/orquestradores/o%201/continuar", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("pausar recusado (409) lança o erro com a mensagem do servidor", async () => {
+    vi.stubGlobal("fetch", vi.fn<Buscar>(async () => respostaJson({ erro: "O orquestrador já está pausado." }, 409)));
+
+    await expect(api.pausar("o1")).rejects.toMatchObject({ status: 409, message: "O orquestrador já está pausado." });
+  });
+
   it("listarMotores sem a rota (404) lança o erro da API, que a tela trata como 'não foi possível verificar'", async () => {
     vi.stubGlobal("fetch", vi.fn<Buscar>(async () => respostaJson({ erro: "Rota não encontrada." }, 404)));
 

@@ -368,7 +368,8 @@ export class ExecutorDePedidosDaOrquestracao implements ExecutorDePedidos {
       if (orquestrador === null) {
         return ORQUESTRADOR_INEXISTENTE;
       }
-      if (orquestrador.turnoEmAndamento === null) {
+      // Pausado (ADR-51), o pedido da rotina espera na fila: uma mensagem tiraria o Orquestrador da pausa.
+      if (orquestrador.turnoEmAndamento === null && orquestrador.pausa === null) {
         try {
           const enviada = await servico.enviarMensagem(orquestradorId, pedido.texto, [], pedido.modo);
           return { tipo: "turno" as const, turnoId: enviada.turnoId };
@@ -498,7 +499,7 @@ export class ExecutorDePedidosDaOrquestracao implements ExecutorDePedidos {
     if (orquestrador === null) {
       return ORQUESTRADOR_INEXISTENTE;
     }
-    if (orquestrador.turnoEmAndamento !== null || orquestrador.retomadaPendente !== null) {
+    if (orquestrador.turnoEmAndamento !== null || orquestrador.retomadaPendente !== null || orquestrador.pausa !== null) {
       return null;
     }
     try {

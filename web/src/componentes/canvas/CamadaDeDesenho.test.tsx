@@ -337,6 +337,36 @@ describe("CamadaDeDesenho", () => {
     expect(tracosNaTela()).toHaveLength(2);
   });
 
+  it("Limpar tudo: desabilitado sem traço; apaga todos num passo, grava, e o Desfazer traz todos de volta", () => {
+    render(<CanvasDeTeste />);
+    fireEvent.click(screen.getByRole("button", { name: "Desenhar" }));
+    const limpar = () => ferramenta("Limpar todos os desenhos");
+    expect(limpar()).toBeDisabled();
+    expect(limpar()).toHaveAttribute("title", expect.stringContaining("Desfazer"));
+
+    arrastar([
+      [10, 10],
+      [40, 34],
+    ]);
+    fireEvent.click(ferramenta("Seta"));
+    arrastar([
+      [100, 100],
+      [200, 160],
+    ]);
+    expect(tracosNaTela()).toHaveLength(2);
+    expect(limpar()).toBeEnabled();
+
+    fireEvent.click(limpar());
+    expect(tracosNaTela()).toHaveLength(0);
+    expect(lerLayout().desenho ?? []).toEqual([]);
+    expect(limpar()).toBeDisabled();
+
+    // Um passo só: o desfazer traz os dois de volta, também no layout.
+    fireEvent.click(ferramenta("Desfazer"));
+    expect(tracosNaTela().map((traco) => traco.getAttribute("data-traco"))).toEqual(["caneta", "seta"]);
+    expect(lerLayout().desenho?.map((traco) => traco.tipo)).toEqual(["caneta", "seta"]);
+  });
+
   it("o texto solto vira traço ao teclar Enter; vazio, não", () => {
     render(<CanvasDeTeste />);
     fireEvent.click(screen.getByRole("button", { name: "Desenhar" }));

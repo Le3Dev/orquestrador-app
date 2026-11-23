@@ -99,7 +99,7 @@ export interface PropsDoMenuNovo {
 
 /** O texto de um orquestrador para o leitor de tela. */
 function descreverOrquestrador(orquestrador: ResumoDoOrquestrador, noCanvas: boolean): string {
-  const situacao = orquestrador.situacao === "trabalhando" ? "trabalhando" : "parado";
+  const situacao = orquestrador.situacao === "ocioso" ? "parado" : orquestrador.situacao;
   return `${orquestrador.nome}, ${situacao}, pasta ${orquestrador.nomeDaPasta}, ${noCanvas ? "aberto no canvas" : "fechado, abre ao escolher"}`;
 }
 
@@ -520,7 +520,7 @@ export function MenuNovo({
                   <span className="texto-do-item" aria-hidden="true">
                     <strong>{orquestrador.nome}</strong>
                     <span>
-                      {trabalhandoAgora ? "trabalhando" : "parado"}
+                      {orquestrador.situacao === "ocioso" ? "parado" : orquestrador.situacao}
                       <span className="mono">· {orquestrador.nomeDaPasta}</span>
                     </span>
                   </span>

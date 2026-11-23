@@ -124,7 +124,7 @@ function TabelaDeUso({
             {linhas.map((linha) => (
               <tr key={linha.id}>
                 <td className="cfgapp-tabela-nome">{linha.nome}</td>
-                <td>{linha.situacao === "trabalhando" ? "trabalhando" : "parado"}</td>
+                <td>{linha.situacao === "ocioso" ? "parado" : linha.situacao}</td>
                 <td className="cfgapp-numero">{formatarMb(linha.bytes)}</td>
               </tr>
             ))}

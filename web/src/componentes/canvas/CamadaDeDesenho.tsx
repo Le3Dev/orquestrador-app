@@ -149,7 +149,7 @@ type Transformacao = ReactFlowState["transform"];
  * clique: o canvas funciona como sempre. Com outra ferramenta, ela pega o
  * ponteiro do canvas inteiro (o arraste desenha em vez de mover a tela); a
  * roda e a pinça seguem para o canvas. Esc volta para Selecionar e, de novo, fecha a barra; Ctrl/Cmd+Z
- * desfaz o último passo (traço, texto ou apagada). Cada mudança vai para o
+ * desfaz o último passo (traço, texto, apagada ou o limpar tudo). Cada mudança vai para o
  * layout salvo (`salvarDesenho`).
  */
 export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar, tracosIniciais = [] }: Props) {
@@ -259,6 +259,14 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
     trocarTracos(anterior);
     salvarDesenho(anterior);
   }, [passados, trocarTracos]);
+
+  /** Apaga todos os traços num passo só: o desfazer traz todos de volta. */
+  const limpar = useCallback(() => {
+    const antes = tracosAtuais.current;
+    if (antes.length > 0) {
+      registrar(antes, []);
+    }
+  }, [registrar]);
 
   const mudarEdicao = useCallback((edicao: TextoEmEdicao | null) => {
     edicaoAtual.current = edicao;
@@ -524,10 +532,12 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
             cor={cor}
             espessura={espessura}
             podeDesfazer={passados.length > 0}
+            podeLimpar={tracos.length > 0}
             aoEscolherFerramenta={escolherFerramenta}
             aoEscolherCor={setCor}
             aoEscolherEspessura={setEspessura}
             aoDesfazer={desfazer}
+            aoLimpar={limpar}
             aoFechar={fechar}
           />
         </Panel>

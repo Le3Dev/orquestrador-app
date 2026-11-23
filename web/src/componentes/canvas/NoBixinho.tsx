@@ -5,7 +5,7 @@ import { aparenciaDoBixinho, papelQueNomeia } from "../../shared/canvas/bixinhos
 import { type AcoesDoCanvas, useAcoesDoCanvas, useSeletorDoCanvas } from "../../shared/canvas/contexto";
 import { iconeDaFerramenta } from "../../shared/canvas/iconesDeFerramenta";
 import { type Ancora, type NoBixinho as TipoDoNo, subagentesVisiveis } from "../../shared/canvas/nos";
-import type { SubagenteNaTela } from "../../shared/estado/aplicarEvento";
+import { type SubagenteNaTela, subagentePausado } from "../../shared/estado/aplicarEvento";
 import { formatarDecorrido, formatarTokens, idCurto } from "../../shared/formatacao";
 import { useRelogio } from "../../shared/hooks/useRelogio";
 import { Etiqueta } from "../Etiqueta";
@@ -23,11 +23,13 @@ function Ficha({
   nomeDoBicho,
   papelNoTitulo,
   agora,
+  pausado,
 }: {
   subagente: SubagenteNaTela;
   nomeDoBicho: string;
   papelNoTitulo: string | null;
   agora: Date;
+  pausado: boolean;
 }) {
   const executando = subagente.situacao === "executando";
   const conteudo = subagente.resultado || subagente.textos.join("\n\n") || subagente.resumo;
@@ -41,7 +43,7 @@ function Ficha({
             {papelNoTitulo === null ? (subagente.papel ?? "executor") : nomeDoBicho}#{idCurto(subagente.id)}
           </span>
         </span>
-        <Etiqueta situacao={subagente.situacao} />
+        <Etiqueta situacao={pausado ? "pausado" : subagente.situacao} />
       </div>
       <p className="font-titulo text-[12.5px] font-medium">{subagente.descricao || "Subagente"}</p>
       <p className="mono text-muted">
@@ -83,6 +85,8 @@ interface PropsDoConteudo {
   selecionado: boolean;
   /** Saindo sozinho do canvas (o Subagente terminou): encolhe e some com fade. */
   saindo?: boolean;
+  /** Executava quando o Orquestrador foi pausado (congelado): parado com ele, não cancelado. Padrão: falso. */
+  pausado?: boolean;
 }
 
 /**
@@ -97,13 +101,17 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
   aoFechar,
   selecionado,
   saindo = false,
+  pausado = false,
 }: PropsDoConteudo) {
   const executando = subagente.situacao === "executando";
-  const agora = useRelogio(executando);
+  // Pausado, o relógio para onde estava.
+  const agora = useRelogio(executando && !pausado);
   const aparencia = aparenciaDoBixinho(subagente.id);
   // Só enquanto trabalha: parado, a última ferramenta não diz nada.
-  const icone = executando ? iconeDaFerramenta(subagente.ultimaFerramenta) : null;
-  const fala = executando
+  const icone = executando && !pausado ? iconeDaFerramenta(subagente.ultimaFerramenta) : null;
+  const fala = pausado
+    ? "pausado"
+    : executando
     ? subagente.atividade || "pensando…"
     : subagente.situacao === "concluido"
       ? "pronto!"
@@ -129,7 +137,13 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
           cada quadro de pan/zoom e varre todos os nós a cada atualização. */}
       {selecionado && (
         <NodeToolbar isVisible position={Position.Right} offset={14}>
-          <Ficha subagente={subagente} nomeDoBicho={aparencia.nome} papelNoTitulo={papelQueDaNome} agora={agora} />
+          <Ficha
+            subagente={subagente}
+            nomeDoBicho={aparencia.nome}
+            papelNoTitulo={papelQueDaNome}
+            agora={agora}
+            pausado={pausado}
+          />
         </NodeToolbar>
       )}
 
@@ -138,7 +152,7 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
         title={subagente.papel === null ? dica : `${subagente.papel} · ${dica.toLowerCase()}`}
       >
         <div className="balao-do-bixinho">
-          <span className={executando ? "cursor" : ""}>{fala}</span>
+          <span className={executando && !pausado ? "cursor" : ""}>{fala}</span>
         </div>
         {/* Quem ainda executa não fecha. Quem falhou fica até o usuário ver o erro e fechar; o clique não chega
             ao nó (não abre a ficha) e o `nodrag` impede o arraste. */}
@@ -191,6 +205,10 @@ export function NoBixinho({ id, data, selected }: NodeProps<TipoDoNo>) {
     ),
   );
   const saindo = useSeletorDoCanvas((canvas) => canvas.bixinhosSaindo?.has(id) === true);
+  // Só o sim ou não da pausa: outros eventos da conversa não re-renderizam o bixinho.
+  const pausado = useSeletorDoCanvas(
+    (canvas) => subagente !== undefined && subagentePausado(canvas.conversas.get(data.orquestradorId), subagente),
+  );
   const acoes = useAcoesDoCanvas();
 
   if (subagente === undefined) {
@@ -204,6 +222,7 @@ export function NoBixinho({ id, data, selected }: NodeProps<TipoDoNo>) {
       aoFechar={acoes.fecharBixinho}
       selecionado={selected}
       saindo={saindo}
+      pausado={pausado}
     />
   );
 }

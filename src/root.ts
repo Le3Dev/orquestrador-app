@@ -232,7 +232,8 @@ async function iniciar(): Promise<void> {
   monitor.iniciar();
 
   const canal = new CanalDeEventos();
-  const execucoes = new ControleDeExecucoesEmMemoria();
+  // O registro congela e descongela os processos de um Orquestrador pausado (ADR-51).
+  const execucoes = new ControleDeExecucoesEmMemoria(registro);
   const anexos = new ArmazemDeAnexosEmArquivo(path.join(configuracao.pastaDeDados, "anexos"));
   const worktrees = new GerenciadorDeWorktreesGit(configuracao.pastaDeDados);
 
@@ -343,9 +344,11 @@ async function iniciar(): Promise<void> {
         const turno = orquestrador.turnoEmAndamento;
         const worktree = orquestrador.worktree;
         return {
+          id: orquestrador.id,
           nome: orquestrador.nome,
           pasta: orquestrador.pastaDeTrabalho.caminho,
           situacao: orquestrador.situacao,
+          modoDaPausa: orquestrador.pausa?.modo ?? null,
           pedidoAtual: turno?.texto ?? null,
           turnoIniciadoEm: turno?.iniciadoEm ?? null,
           tamanhoDaFila: orquestrador.fila.length,

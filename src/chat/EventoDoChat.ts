@@ -40,6 +40,10 @@ export type EventoDoChat =
     }
   | { tipo: "resposta_falhou"; mensagemId: string; motivo: string; uso: UsoDaResposta | null }
   | { tipo: "resposta_cancelada"; mensagemId: string }
+  /** A resposta em andamento foi pausada: o processo do Claude Code está congelado desde `desde` (ISO). */
+  | { tipo: "resposta_pausada"; mensagemId: string; desde: string }
+  /** A resposta pausada voltou a andar de onde parou. */
+  | { tipo: "resposta_continuada"; mensagemId: string }
   /** Primeiro evento da conversa nova (que começa sem autorização); a sequência continua a da anterior. */
   | { tipo: "conversa_limpa" }
   /** O usuário autorizou o chat a editar arquivos e rodar comandos; vale a partir da próxima pergunta. */

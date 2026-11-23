@@ -4,6 +4,7 @@ import type {
   ConteudoDoArquivo,
   DadosDaConfiguracao,
   DadosDaNota,
+  DadosDaPausa,
   DadosDaPredefinicao,
   DadosDasPreferencias,
   DadosDoShell,
@@ -14,6 +15,7 @@ import type {
   ListagemDeSkills,
   ListagemDoCatalogo,
   ModeloClaude,
+  ModoDaPausa,
   ModoDoTurno,
   NavegacaoDePastas,
   NomeDaPredefinicao,
@@ -281,6 +283,14 @@ export const api = {
   cancelar: (id: string) =>
     requisitar<{ cancelando: boolean }>(`/orquestradores/${encodeURIComponent(id)}/cancelar`, { method: "POST" }),
 
+  /** Pausa o pedido em andamento sem perder onde estava. Recusado (409) sem pedido rodando ou já pausado. */
+  pausar: (id: string) =>
+    requisitar<{ pausa: DadosDaPausa }>(`/orquestradores/${encodeURIComponent(id)}/pausar`, { method: "POST" }),
+
+  /** Tira da pausa: congelado, segue de onde parou; na retomada, abre um turno novo na mesma conversa. 409 sem pausa. */
+  continuar: (id: string) =>
+    requisitar<{ modo: ModoDaPausa }>(`/orquestradores/${encodeURIComponent(id)}/continuar`, { method: "POST" }),
+
   removerOrquestrador: (id: string) =>
     requisitar<null>(`/orquestradores/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
@@ -456,6 +466,12 @@ export const api = {
     requisitar<{ autorizado: boolean }>("/chat/autorizacao", { method: "PATCH", body: JSON.stringify({ autorizado }) }),
 
   cancelarRespostaDoChat: () => requisitar<{ cancelando: boolean }>("/chat/cancelar", { method: "POST" }),
+
+  /** Congela a resposta em andamento; o servidor confirma com `resposta_pausada`. 409 sem o que pausar (ou no Windows). */
+  pausarRespostaDoChat: () => requisitar<{ pausada: boolean }>("/chat/pausar", { method: "POST" }),
+
+  /** A resposta pausada segue de onde parou; o servidor confirma com `resposta_continuada`. */
+  continuarRespostaDoChat: () => requisitar<{ continuada: boolean }>("/chat/continuar", { method: "POST" }),
 
   /** Conversa nova ("/clear"): o servidor confirma com o evento `conversa_limpa`. Recusado (409) durante a resposta. */
   limparChat: () => requisitar<unknown>("/chat/limpar", { method: "POST" }),

@@ -222,6 +222,8 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
         // Rodou antes dos outros motores: foi no Claude Code.
         motor: "claude-code",
         decisaoDoPlano: null,
+        // Gravado antes da marca da sessão do turno: não se sabe.
+        sessaoIniciada: null,
         perguntas: [],
         subagentes: [{ id: "s1", resumo: "lido" }],
       });
