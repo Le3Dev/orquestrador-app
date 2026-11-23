@@ -218,7 +218,6 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   color: var(--muted);
 }
 .selo-do-item-ativo { color: var(--active); }
-.selo-do-item-ativo svg { animation: giro-do-selo 1.6s linear infinite; }
 @keyframes giro-do-selo { to { transform: rotate(360deg); } }
 .texto-do-item { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .texto-do-item strong {

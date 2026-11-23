@@ -511,7 +511,11 @@ export function MenuNovo({
                   onClick={() => escolherOrquestrador(orquestrador.id)}
                 >
                   <span className={`selo-do-item ${trabalhandoAgora ? "selo-do-item-ativo" : ""}`} aria-hidden="true">
-                    {trabalhandoAgora ? <IconeTrabalhando tamanho={16} /> : <IconeParado tamanho={12} />}
+                    {trabalhandoAgora ? (
+                      <span className="giro-do-contador">
+                        <IconeTrabalhando tamanho={16} />
+                      </span>
+                    ) : <IconeParado tamanho={12} />}
                   </span>
                   <span className="texto-do-item" aria-hidden="true">
                     <strong>{orquestrador.nome}</strong>
