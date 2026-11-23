@@ -427,3 +427,12 @@ export function IconeDesfazer({ tamanho = 16, className = "" }: PropsDoIcone) {
     </Quadro>
   );
 }
+
+/** Lixeira: limpar todos os desenhos de uma vez. */
+export function IconeLimparDesenho({ tamanho = 16, className = "" }: PropsDoIcone) {
+  return (
+    <Quadro tamanho={tamanho} className={className}>
+      <path d="M5 7h14M10 7V5h4v2M7 7l.8 12h8.4L17 7M10.5 11v5M13.5 11v5" {...TRACO} />
+    </Quadro>
+  );
+}

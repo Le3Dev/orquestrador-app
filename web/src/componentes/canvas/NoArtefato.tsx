@@ -934,9 +934,11 @@ function ConteudoDaJanela({ artefato }: { artefato: ResumoDoArtefato }) {
               ferramenta={ferramenta}
               cor={cor}
               podeDesfazer={desenho.podeDesfazer}
+              podeLimpar={desenho.tracos.length > 0}
               aoEscolherFerramenta={setFerramenta}
               aoEscolherCor={setCor}
               aoDesfazer={desfazer}
+              aoLimpar={desenho.limpar}
               aoDesligar={desligarODesenho}
             />
           )}

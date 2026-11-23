@@ -85,6 +85,29 @@ describe("useDesenhoDoArtefato: a largura da página", () => {
     expect(hook.result.current.largura).toBe(900);
   });
 
+  it("limpar apaga todos num passo, zera a largura e grava vazio; o desfazer traz todos e a largura", async () => {
+    const hook = await abrir({ tracos: [seta("t1"), seta("t2")], largura: 1200 });
+
+    act(() => hook.result.current.limpar());
+    expect(hook.result.current.tracos).toEqual([]);
+    expect(hook.result.current.largura).toBeNull();
+    await gravarJa(hook);
+    expect(salvarDesenho()).toHaveBeenLastCalledWith("a1", 3, [], null);
+
+    // Sem traço, limpar não vira passo nem gravação.
+    const gravacoes = salvarDesenho().mock.calls.length;
+    act(() => hook.result.current.limpar());
+    await gravarJa(hook);
+    expect(salvarDesenho().mock.calls).toHaveLength(gravacoes);
+
+    act(() => hook.result.current.desfazer());
+    expect(hook.result.current.tracos).toEqual([seta("t1"), seta("t2")]);
+    expect(hook.result.current.largura).toBe(1200);
+    expect(hook.result.current.podeDesfazer).toBe(false);
+    await gravarJa(hook);
+    expect(salvarDesenho()).toHaveBeenLastCalledWith("a1", 3, [seta("t1"), seta("t2")], 1200);
+  });
+
   it("desfazer o primeiro traço zera a largura", async () => {
     const hook = await abrir();
     act(() => hook.result.current.acrescentar(seta("t1"), 1500));
