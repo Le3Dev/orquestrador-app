@@ -105,6 +105,8 @@ const esquemaDoArquivo = z.object({
       // Turnos gravados antes dos outros motores rodaram no Claude Code.
       motor: z.enum(MOTORES).default(MOTOR_PADRAO),
       decisaoDoPlano: z.enum(["pendente", "aprovado", "descartado"]).nullable().default(null),
+      // Turnos gravados antes da marca da sessão: não se sabe se o motor viu o pedido.
+      sessaoIniciada: z.boolean().nullable().default(null),
       perguntas: z
         .array(
           z.object({

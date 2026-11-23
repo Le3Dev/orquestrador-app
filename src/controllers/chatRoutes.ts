@@ -90,6 +90,9 @@ const STATUS_POR_MOTIVO: Readonly<Record<MotivoDoErroDoChat, number>> = {
   dados_invalidos: 400,
   em_andamento: 409,
   sem_resposta_em_andamento: 409,
+  ja_pausada: 409,
+  sem_pausa: 409,
+  pausa_indisponivel: 409,
 };
 
 function responderErro(resposta: Response, erro: unknown): void {
@@ -167,6 +170,22 @@ export function criarChatRoutes({ servico, canal, anexos }: Dependencias): Route
     rota(async (_requisicao, resposta) => {
       await servico.cancelar();
       resposta.status(202).json({ cancelando: true });
+    }),
+  );
+
+  /** Congela o processo da resposta em andamento; 409 se não há o que pausar (ou no Windows). */
+  rotas.post(
+    "/chat/pausar",
+    rota(async (_requisicao, resposta) => {
+      resposta.status(202).json(await servico.pausar());
+    }),
+  );
+
+  /** Descongela a resposta pausada, que segue de onde parou; 409 se não está pausada. */
+  rotas.post(
+    "/chat/continuar",
+    rota(async (_requisicao, resposta) => {
+      resposta.status(202).json(await servico.continuar());
     }),
   );
 

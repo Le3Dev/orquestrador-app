@@ -29,6 +29,7 @@ import {
   TEXTO_PADRAO_DOS_ANEXOS,
   TIPOS_ACEITOS_NO_SELETOR,
 } from "../../shared/anexos";
+import { ehAcaoDePausaDoOrquestrador } from "../../shared/api/acaoDePausa";
 import { type AnexoParaEnvio, api, mensagemDeErro } from "../../shared/api/cliente";
 import type {
   AnexoDaMensagemDoChat,
@@ -46,6 +47,7 @@ import {
   type EstadoDoChatNaTela,
   type MensagemDoChatNaTela,
   pedidoDeAutorizacaoAtual,
+  respostaPausada,
   textoParaMostrar,
   ultimoModeloUsado,
 } from "../../shared/estado/aplicarEventoDoChat";
@@ -60,6 +62,7 @@ import {
 } from "../../shared/geometriaDoChat";
 import { useMelhorarPrompt } from "../../shared/hooks/useMelhorarPrompt";
 import { useModoInvisivel } from "../../shared/hooks/useModoInvisivel";
+import { usePausaLonga } from "../../shared/hooks/usePausaLonga";
 import {
   ALTURA_DA_CONVERSA_DO_CHAT,
   LARGURA_DO_CHAT_FIXO,
@@ -78,6 +81,7 @@ import { TextoFormatado } from "../TextoFormatado";
 import { AvisoDaEscuta } from "./AvisoDaEscuta";
 import { CartaoDeAcao, type PropsDasAcoesDoChat } from "./CartaoDeAcao";
 import { CartaoDeAutorizacao } from "./CartaoDeAutorizacao";
+import { CartaoDePausaDoOrquestrador } from "./CartaoDePausaDoOrquestrador";
 import { CartaoDePergunta } from "./CartaoDePergunta";
 import { CartaoDeSubagente } from "./CartaoDeSubagente";
 import { HoraDaMensagem } from "./HoraDaMensagem";
@@ -625,20 +629,20 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
   }
 
   const respondendo = mensagem.situacao === "respondendo";
+  const pausada = respondendo && (mensagem.pausadaDesde ?? null) !== null;
   const texto = textoParaMostrar(mensagem.texto, respondendo);
   // Só a resposta pronta, com texto, vai para o canvas.
   const arrastavel = mensagem.situacao === "concluida" && texto !== "";
   return (
     <article className="mensagem-do-claude" aria-busy={respondendo}>
       {texto !== "" && (
-        <div className={respondendo ? "texto-respondendo" : undefined}>
+        // Pausada, o cursor de digitação some: nada está chegando.
+        <div className={respondendo && !pausada ? "texto-respondendo" : undefined}>
           <TextoFormatado texto={texto} className="markdown-compacto" />
         </div>
       )}
       {respondendo && texto === "" && (
-        <p className="mono text-muted">
-          pensando<span className="cursor" />
-        </p>
+        <p className="mono text-muted">{pausada ? "pausado" : <>pensando<span className="cursor" /></>}</p>
       )}
       {respondendo && atividade !== null && atividade.mensagemId === mensagem.id && (
         <p className="mono truncate text-secondary" title={atividade.detalhe}>
@@ -667,6 +671,8 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
             aoAtualizarOrquestradores={aoAtualizarOrquestradores}
             orquestradores={orquestradores}
           />
+        ) : ehAcaoDePausaDoOrquestrador(acao) ? (
+          <CartaoDePausaDoOrquestrador key={`${acao.tipo}:${indice}`} acao={acao} orquestradores={orquestradores} aoAtualizarOrquestradores={aoAtualizarOrquestradores} />
         ) : (
           <CartaoDeSubagente key={`${acao.tipo}:${indice}`} acao={acao} />
         ),
@@ -703,6 +709,28 @@ const MensagemNaConversa = memo(function MensagemNaConversa({
 function assinaturaDaUltima(chat: EstadoDoChatNaTela): string {
   const ultima = chat.mensagens.at(-1);
   return ultima === undefined ? "" : `${ultima.id}:${ultima.situacao}`;
+}
+
+/** Desde quando a resposta em andamento está pausada; nulo se não está. */
+function inicioDaPausa(chat: EstadoDoChatNaTela): string | null {
+  const pausada = chat.mensagens.find((mensagem) => mensagem.situacao === "respondendo" && (mensagem.pausadaDesde ?? null) !== null);
+  return pausada?.pausadaDesde ?? null;
+}
+
+/**
+ * Pausada há mais de 2 min, avisa que continuar pode recomeçar a resposta do
+ * zero (a conexão do processo congelado com a API cai). Antes disso, nada.
+ */
+function AvisoDePausaLonga({ desde }: { desde: string }) {
+  const longa = usePausaLonga(desde);
+  if (!longa) {
+    return null;
+  }
+  return (
+    <p className="hint-warning px-3" role="status" data-testid="aviso-de-pausa-longa">
+      Pausada há mais de 2 min: ao continuar, a resposta pode recomeçar do zero.
+    </p>
+  );
 }
 
 /**
@@ -760,6 +788,8 @@ export function ChatRapido({
   const [enviando, setEnviando] = useState(false);
   const [quantasMensagens, setQuantasMensagens] = useState(MENSAGENS_POR_PAGINA);
   const [pedidoDeCancelar, setPedidoDeCancelar] = useState(false);
+  // Pausar ou continuar a resposta à espera do servidor: o botão fica desabilitado até o evento chegar.
+  const [alternandoPausa, setAlternandoPausa] = useState(false);
   const [arrastando, setArrastando] = useState(false);
   // Assinatura da última mensagem quando a conversa foi ocultada; nula = visível.
   const [ocultaEm, setOcultaEm] = useState<string | null>(() =>
@@ -800,6 +830,9 @@ export function ChatRapido({
 
   const respondendo = chat.situacao === "respondendo";
   const cancelando = pedidoDeCancelar && respondendo;
+  // A resposta segue "em andamento" pausada: enviar continua bloqueado e o Esc ainda cancela.
+  const pausada = respondendo && respostaPausada(chat);
+  const pausadaDesde = pausada ? inicioDaPausa(chat) : null;
   const temMensagens = chat.mensagens.length > 0;
   // Fixo, a conversa nunca se oculta.
   const oculta = !fixo && ocultaEm !== null;
@@ -1375,6 +1408,22 @@ export function ChatRapido({
     }
   }
 
+  /** Pausa (congela o processo) ou continua a resposta; quem confirma é o evento do servidor. */
+  async function alternarPausa(): Promise<void> {
+    if (!respondendo || alternandoPausa || cancelando || desconectado) {
+      return;
+    }
+    setErro(null);
+    setAlternandoPausa(true);
+    try {
+      await (pausada ? api.continuarRespostaDoChat() : api.pausarRespostaDoChat());
+    } catch (falha) {
+      setErro(`Não foi possível ${pausada ? "continuar" : "pausar"} a resposta: ${mensagemDeErro(falha)}`);
+    } finally {
+      setAlternandoPausa(false);
+    }
+  }
+
   function ocultar(): void {
     setOcultaEm(assinaturaDaUltima(chat));
   }
@@ -1444,15 +1493,19 @@ export function ChatRapido({
   // Textos curtos: o campo da barra é estreito e o placeholder fica numa linha só.
   const placeholder = desconectado
     ? "Servidor desconectado"
-    : respondendo
-      ? "Respondendo… esc cancela"
-      : "Pergunte ao Claude";
+    : pausada
+      ? "Pausado… esc cancela"
+      : respondendo
+        ? "Respondendo… esc cancela"
+        : "Pergunte ao Claude";
   // O que o placeholder curto não diz: a dica no balão do campo.
   const dicaDoCampo = desconectado
     ? "Servidor desconectado: dá para escrever, o envio volta quando ele voltar"
-    : respondendo
-      ? "Respondendo: esc cancela, e já dá para escrever a próxima pergunta"
-      : "Enter envia, Shift+Enter quebra a linha, / para comandos";
+    : pausada
+      ? "Resposta pausada: ▶ continua de onde parou, esc cancela"
+      : respondendo
+        ? "Respondendo: esc cancela, e já dá para escrever a próxima pergunta"
+        : "Enter envia, Shift+Enter quebra a linha, / para comandos";
 
   // O indicador da escuta (estado, motor, pausar e o menu de idioma): na barra, ou no cabeçalho do painel da transcrição.
   const indicadorDaEscuta = (
@@ -1691,7 +1744,11 @@ export function ChatRapido({
           )}
           <header className="cabecalho-do-chat">
             <span className="rotulo-tecnico">chat rápido</span>
-            {respondendo && <span className="etiqueta etiqueta-ativa etiqueta-pulso">respondendo…</span>}
+            {pausada ? (
+              <span className="etiqueta etiqueta-warning">pausado</span>
+            ) : (
+              respondendo && <span className="etiqueta etiqueta-ativa etiqueta-pulso">respondendo…</span>
+            )}
             <span className="flex-1" />
             {!fixo && !movel && (
               <ControleDeOpacidade valor={opacidade} aoMudar={(valor) => mudarPreferencias({ opacidadeDoChat: valor })} />
@@ -1807,7 +1864,7 @@ export function ChatRapido({
                   aoAtualizarOrquestradores={aoAtualizarOrquestradores}
                   // Só quem tem cartões de abrir orquestrador acompanha a lista: as outras não re-renderizam a cada consulta.
                   orquestradores={
-                    mensagem.acoes.some((acao) => acao.tipo === "abrir_orquestrador") ? orquestradores : SEM_ORQUESTRADORES
+                    mensagem.acoes.some((acao) => acao.tipo === "abrir_orquestrador" || ehAcaoDePausaDoOrquestrador(acao)) ? orquestradores : SEM_ORQUESTRADORES
                   }
                 />
                 {/* Fora da mensagem memorizada: o cartão depende do estado do chat, não só da mensagem. */}
@@ -1891,7 +1948,10 @@ export function ChatRapido({
             void focarCampo();
           }}
         >
-          {respondendo && !desconectado && <div className="faixa-de-progresso" />}
+          {respondendo && !desconectado && (
+            // Pausada, a faixa para no meio, esmaecida (como a do orquestrador pausado).
+            <div className={pausada ? "faixa-de-progresso faixa-de-progresso-pausada" : "faixa-de-progresso"} />
+          )}
           {anexosVisiveis.length > 0 && (
             <div className="miniaturas-do-prompt">
               {anexosVisiveis.map((anexo) => {
@@ -2055,6 +2115,20 @@ export function ChatRapido({
               aoAlterar={aoMudarPreferencias}
               aoFalhar={setErro}
             />
+            {/* Só o ícone (⏸ / ▶), como o do terminal; no Windows não há como congelar, e o botão não aparece. */}
+            {respondendo && chat.podePausar && (
+              <button
+                type="button"
+                className="btn btn-sm btn-outline botao-de-pausa"
+                title={pausada ? "Continuar resposta" : "Pausar resposta"}
+                aria-label={pausada ? "Continuar resposta" : "Pausar resposta"}
+                aria-busy={alternandoPausa}
+                onClick={() => void alternarPausa()}
+                disabled={alternandoPausa || cancelando || desconectado}
+              >
+                <span aria-hidden="true">{pausada ? "▶" : "⏸"}</span>
+              </button>
+            )}
             {respondendo ? (
               <button
                 type="button"
@@ -2077,6 +2151,8 @@ export function ChatRapido({
             {/* O menu ⋯, no fim da barra: as ações menos usadas (a coluna tem os controles no cabeçalho). */}
             <MenuDeMaisAcoes itens={itensDoMenu} campo={campo} />
           </div>
+          {/* Logo abaixo da barra do ▶: o risco de continuar depois de uma pausa longa. */}
+          {pausadaDesde !== null && <AvisoDePausaLonga desde={pausadaDesde} />}
           {dica !== null && (
             <p className="mono hint px-3" role="status">
               {dica}

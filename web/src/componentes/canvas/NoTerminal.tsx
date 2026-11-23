@@ -63,6 +63,7 @@ import { abrirPreviaSozinha, enderecoCurto, eventoAoVivo } from "../../shared/en
 import {
   ESTADO_INICIAL,
   filaDePedidos,
+  pausaDoOrquestrador,
   type SubagenteNaTela,
   type TurnoNaTela,
 } from "../../shared/estado/aplicarEvento";
@@ -94,6 +95,7 @@ import { BotaoDeArquivos } from "./BotaoDeArquivos";
 import { BotaoDeLimparBixinhos } from "./BotaoDeLimparBixinhos";
 import type { AcoesDoPlano } from "./CartaoDoPlano";
 import { BotaoDeVincular } from "./BotaoDeVincular";
+import { ChipDaPausa } from "./ChipDaPausa";
 import { ControlesDoNo } from "./ControlesDoNo";
 import { FaixaDeServidores } from "./FaixaDeServidores";
 import { Rotulo } from "./LinhasDaConfiguracao";
@@ -1165,6 +1167,8 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   const [editandoNome, setEditandoNome] = useState(false);
   const [nomePendente, setNomePendente] = useState<string | null>(null);
   const [cancelamentoPedido, setCancelamentoPedido] = useState(false);
+  // Pausar ou continuar pedido: guarda se estava pausado ao pedir; quando a pausa muda, a espera acaba sozinha.
+  const [pausaPedidaQuando, setPausaPedidaQuando] = useState<boolean | null>(null);
   const [anexos, setAnexos] = useState<AnexoPendente[]>([]);
   // Os anexados agora, para liberar as miniaturas ao remover e ao desmontar.
   const anexosAtuais = useRef(anexos);
@@ -1187,7 +1191,11 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   const nome = nomePendente ?? conversa.nome ?? orquestrador.nome;
   const ultimoTurno = conversa.turnos.at(-1);
   const trabalhando = ultimoTurno?.situacao === "em_andamento";
-  const cancelando = cancelamentoPedido && trabalhando;
+  // Congelado, o turno segue "em_andamento"; na retomada, ele terminou como "pausado".
+  const pausa = pausaDoOrquestrador(conversa, orquestrador.pausa);
+  const pausado = pausa !== null;
+  const cancelando = cancelamentoPedido && (trabalhando || pausado);
+  const alternandoPausa = pausaPedidaQuando === pausado;
   const piscando = usePiscarNaEntrega(ultimoTurno?.subagentes ?? SEM_SUBAGENTES, servidor.conectado);
 
   // A fila vem do resumo do servidor, corrigida pelos eventos (ver `filaDePedidos`).
@@ -1220,7 +1228,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   );
   useEffect(() => {
     void recarregar();
-  }, [trabalhando, recarregar]);
+  }, [trabalhando, pausado, recarregar]);
 
   // As funções abaixo são estáveis (useCallback/useMemo): a transcrição e o
   // prompt são memorizados e só re-renderizam se alguma prop mudar de fato.
@@ -1353,6 +1361,24 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   }, [orquestradorId]);
 
   const aoCancelar = useCallback(() => void cancelar(), [cancelar]);
+
+  /** Pausar (sem perder onde estava) e continuar. A tela muda com os eventos do servidor. */
+  const alternarPausa = useCallback(
+    async (continuar: boolean): Promise<void> => {
+      setErro(null);
+      setPausaPedidaQuando(continuar);
+      try {
+        await (continuar ? api.continuar(orquestradorId) : api.pausar(orquestradorId));
+      } catch (falha) {
+        setErro(mensagemDeErro(falha));
+        setPausaPedidaQuando(null);
+      }
+    },
+    [orquestradorId],
+  );
+
+  const aoPausar = useCallback(() => void alternarPausa(false), [alternarPausa]);
+  const aoContinuar = useCallback(() => void alternarPausa(true), [alternarPausa]);
 
   /**
    * Conversa nova: a atual fica arquivada no servidor, que avisa pelo evento
@@ -1557,6 +1583,9 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
     });
   }
   const chipsDaDireita: ItemDaBarra[] = [];
+  if (pausa !== null) {
+    chipsDaDireita.push({ id: "pausa", elemento: <ChipDaPausa desde={pausa.desde} modo={pausa.modo} /> });
+  }
   // As instruções (do orquestrador e as gerais) não têm chip na barra: ficam na
   // engrenagem desta janela e em Configurações, aba Padrões.
   if (servidor.conectado && conexoes.get(orquestradorId) === "reconectando") {
@@ -1596,7 +1625,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
 
   const janela = (
     <div
-      className={`janela-terminal ${trabalhando ? "janela-terminal-ativa" : ""} ${modo === "planejamento" ? "janela-terminal-planejando" : ""} ${piscando ? "janela-terminal-entrega" : ""} ${escondido ? "janela-terminal-minimizada" : ""}`}
+      className={`janela-terminal ${trabalhando && !pausado ? "janela-terminal-ativa" : ""} ${pausado ? "janela-terminal-pausada" : ""} ${modo === "planejamento" ? "janela-terminal-planejando" : ""} ${piscando ? "janela-terminal-entrega" : ""} ${escondido ? "janela-terminal-minimizada" : ""}`}
       onDragOver={(evento) => {
         // Uma linha ou uma nota arrastada vira texto no prompt; arquivos, anexos (imagens e documentos).
         if (temPedidoArrastado(evento.dataTransfer)) {
@@ -1754,6 +1783,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
             desconectado={!servidor.conectado}
             acoesDoPlano={acoesDoPlano}
             aoResponderPergunta={responderPergunta}
+            pausado={pausado}
           />
           {erro !== null && <p className="mono texto-longo mt-3 text-error">✗ {erro}</p>}
         </div>
@@ -1785,10 +1815,17 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
           aoEnviarDaFila={aoEnviarDaFila}
           aoLimparConversa={limparConversa}
           aoCancelar={aoCancelar}
+          pausado={pausado}
+          alternandoPausa={alternandoPausa}
+          aoPausar={aoPausar}
+          aoContinuar={aoContinuar}
           textoInicial={textoDoPrompt}
         />
       </div>
-      {trabalhando && servidor.conectado && <div className="faixa-de-progresso" />}
+      {(trabalhando || pausado) && servidor.conectado && (
+        // Pausado, a faixa fica parada e esmaecida: há um pedido pela metade, mas nada roda.
+        <div className={`faixa-de-progresso ${pausado ? "faixa-de-progresso-pausada" : ""}`} />
+      )}
     </div>
   );
 

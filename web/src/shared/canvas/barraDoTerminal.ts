@@ -9,14 +9,15 @@
  * (cortado): os chips do menu não estão na barra para serem medidos.
  */
 
-export type ChipDaBarra = "pasta" | "branch" | "reconectando" | "memoria" | "situacao";
+export type ChipDaBarra = "pasta" | "branch" | "reconectando" | "memoria" | "situacao" | "pausa";
 
-/** Quem vai primeiro para o "⋯": a memória; por último, o aviso de reconexão. */
+/** Quem vai primeiro para o "⋯": a memória; por último, o aviso de reconexão (a pausa logo antes dele). */
 export const ORDEM_DE_SAIDA: readonly ChipDaBarra[] = [
   "memoria",
   "pasta",
   "branch",
   "situacao",
+  "pausa",
   "reconectando",
 ];
 
@@ -27,6 +28,7 @@ export const LARGURA_MINIMA_DO_CHIP: Readonly<Record<ChipDaBarra, number>> = {
   reconectando: 64,
   memoria: 56,
   situacao: 100,
+  pausa: 72,
 };
 
 /** O `gap` da barra (`.barra-do-terminal`). */
