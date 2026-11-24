@@ -1,7 +1,5 @@
-import "@xterm/xterm/css/xterm.css";
-
-import { FitAddon } from "@xterm/addon-fit";
-import { type ITheme, Terminal } from "@xterm/xterm";
+import type { FitAddon } from "@xterm/addon-fit";
+import type { ITheme, Terminal } from "@xterm/xterm";
 import { Handle, type NodeProps, NodeResizer, Position } from "@xyflow/react";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 
@@ -91,6 +89,29 @@ type SituacaoDoShell =
 
 const CONECTANDO: SituacaoDoShell = { tipo: "conectando" };
 
+interface ModulosDoXterm {
+  Terminal: typeof Terminal;
+  FitAddon: typeof FitAddon;
+}
+
+let carregamentoDoXterm: Promise<ModulosDoXterm> | null = null;
+
+/**
+ * O xterm, o ajuste ao tamanho e o CSS dele chegam só quando o primeiro shell
+ * abre: ficam fora do pacote principal. Os seguintes reaproveitam a mesma
+ * carga; se ela falhar, o próximo bloco tenta de novo.
+ */
+function carregarXterm(): Promise<ModulosDoXterm> {
+  carregamentoDoXterm ??= import("./xtermDoShell").then(
+    ({ Terminal: ClasseDoTerminal, FitAddon: ClasseDoAjuste }) => ({ Terminal: ClasseDoTerminal, FitAddon: ClasseDoAjuste }),
+    (erro: unknown) => {
+      carregamentoDoXterm = null;
+      throw erro;
+    },
+  );
+  return carregamentoDoXterm;
+}
+
 /** A fonte mono e as cores do app, lidas das variáveis do tema (com o valor delas como reserva). */
 function aparenciaDoApp(): { fonte: string; tema: ITheme } {
   const estilo = getComputedStyle(document.documentElement);
@@ -153,20 +174,11 @@ const JanelaDoShell = memo(function JanelaDoShell({ shellId, terminalId, pasta, 
     if (elemento === null) {
       return undefined;
     }
-    const { fonte, tema } = aparenciaDoApp();
-    const xterm = new Terminal({
-      fontFamily: fonte,
-      fontSize: 12,
-      lineHeight: 1.15,
-      cursorBlink: true,
-      scrollback: 5_000,
-      theme: tema,
-    });
-    const ajuste = new FitAddon();
-    xterm.loadAddon(ajuste);
-    xterm.open(elemento);
-    terminal.current = xterm;
-
+    // O xterm chega depois (import sob demanda) e a conexão abre já: até ele
+    // montar, o quadro fica vazio no fundo do bloco e a saída espera aqui.
+    let xterm: Terminal | null = null;
+    let ajuste: FitAddon | null = null;
+    let saidaPendente: string[] = [];
     let socket: WebSocket | null = null;
     let encerrado = false;
     let desmontado = false;
@@ -174,6 +186,8 @@ const JanelaDoShell = memo(function JanelaDoShell({ shellId, terminalId, pasta, 
     let tentativas = 0;
     let relogio: ReturnType<typeof setTimeout> | undefined;
     let quadroPendente: number | undefined;
+    let observador: ResizeObserver | null = null;
+    const assinaturas: { dispose(): void }[] = [];
 
     const enviar = (mensagem: MensagemParaOShell): void => {
       if (socket !== null && socket.readyState === WebSocket.OPEN) {
@@ -183,9 +197,17 @@ const JanelaDoShell = memo(function JanelaDoShell({ shellId, terminalId, pasta, 
 
     const ajustar = (): void => {
       try {
-        ajuste.fit();
+        ajuste?.fit();
       } catch {
         // Ainda sem tamanho (o bloco acabou de entrar na página): o próximo ajuste resolve.
+      }
+    };
+
+    /** O tamanho do terminal vai ao shell; sem o xterm ainda, vai quando ele montar. */
+    const enviarTamanho = (): void => {
+      if (xterm !== null) {
+        ajustar();
+        enviar({ tipo: "tamanho", colunas: xterm.cols, linhas: xterm.rows });
       }
     };
 
@@ -194,10 +216,6 @@ const JanelaDoShell = memo(function JanelaDoShell({ shellId, terminalId, pasta, 
       setSituacao({ tipo: "encerrado", codigo });
     };
 
-    // Uma tecla, um colar: vai para o shell. O tamanho novo (o bloco mudou) também.
-    const entrada = xterm.onData((dados) => enviar({ tipo: "entrada", dados }));
-    const redimensionamento = xterm.onResize(({ cols, rows }) => enviar({ tipo: "tamanho", colunas: cols, linhas: rows }));
-
     function conectar(): void {
       const conexao = new WebSocket(enderecoDoWebSocket(api.enderecoDaConexaoDoShell(terminalId), window.location));
       socket = conexao;
@@ -205,17 +223,21 @@ const JanelaDoShell = memo(function JanelaDoShell({ shellId, terminalId, pasta, 
         tentativas = 0;
         // Religando: o servidor reenvia o histórico recente, que já estava na tela.
         if (jaConectou) {
-          xterm.reset();
+          xterm?.reset();
+          saidaPendente = [];
         }
         jaConectou = true;
         setSituacao({ tipo: "conectado" });
-        ajustar();
-        enviar({ tipo: "tamanho", colunas: xterm.cols, linhas: xterm.rows });
+        enviarTamanho();
       };
       conexao.onmessage = (evento: MessageEvent) => {
         const mensagem = lerMensagemDoShell(evento.data);
         if (mensagem?.tipo === "saida") {
-          xterm.write(mensagem.dados);
+          if (xterm === null) {
+            saidaPendente.push(mensagem.dados);
+          } else {
+            xterm.write(mensagem.dados);
+          }
         } else if (mensagem?.tipo === "fim") {
           encerrar(mensagem.codigo);
         }
@@ -259,29 +281,79 @@ const JanelaDoShell = memo(function JanelaDoShell({ shellId, terminalId, pasta, 
       }, espera);
     }
 
-    // O bloco mudou de tamanho (redimensionar, minimizar a janela): o terminal acompanha.
-    const observador =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(() => {
-            if (quadroPendente !== undefined) {
-              cancelAnimationFrame(quadroPendente);
-            }
-            quadroPendente = requestAnimationFrame(() => {
-              quadroPendente = undefined;
-              ajustar();
-            });
-          });
-    observador?.observe(elemento);
-    // A fonte mono pode chegar depois: com ela, a medida das letras muda.
-    void document.fonts?.ready.then(() => {
-      if (!desmontado) {
-        ajustar();
-      }
-    });
+    /** Monta o xterm no quadro, escreve a saída que chegou antes e passa a acompanhar o tamanho do bloco. */
+    function montar({ Terminal: ClasseDoTerminal, FitAddon: ClasseDoAjuste }: ModulosDoXterm, quadroDoShell: HTMLElement): void {
+      const { fonte, tema } = aparenciaDoApp();
+      const novo = new ClasseDoTerminal({
+        fontFamily: fonte,
+        fontSize: 12,
+        lineHeight: 1.15,
+        cursorBlink: true,
+        scrollback: 5_000,
+        theme: tema,
+      });
+      ajuste = new ClasseDoAjuste();
+      novo.loadAddon(ajuste);
+      novo.open(quadroDoShell);
+      xterm = novo;
+      terminal.current = novo;
 
-    ajustar();
+      // Uma tecla, um colar: vai para o shell. O tamanho novo (o bloco mudou) também.
+      assinaturas.push(
+        novo.onData((dados) => enviar({ tipo: "entrada", dados })),
+        novo.onResize(({ cols, rows }) => enviar({ tipo: "tamanho", colunas: cols, linhas: rows })),
+      );
+
+      // O bloco mudou de tamanho (redimensionar, minimizar a janela): o terminal acompanha.
+      // No zoom do canvas só a escala muda; a medida em pixels CSS fica igual e não reajusta.
+      let tamanhoAjustado = "";
+      observador =
+        typeof ResizeObserver === "undefined"
+          ? null
+          : new ResizeObserver((entradas) => {
+              const caixa = entradas.at(-1)?.contentRect;
+              const tamanho = caixa === undefined ? "" : `${caixa.width}x${caixa.height}`;
+              if (tamanho !== "" && tamanho === tamanhoAjustado) {
+                return;
+              }
+              tamanhoAjustado = tamanho;
+              if (quadroPendente !== undefined) {
+                cancelAnimationFrame(quadroPendente);
+              }
+              quadroPendente = requestAnimationFrame(() => {
+                quadroPendente = undefined;
+                ajustar();
+              });
+            });
+      observador?.observe(quadroDoShell);
+      // A fonte mono pode chegar depois: com ela, a medida das letras muda.
+      void document.fonts?.ready.then(() => {
+        if (!desmontado) {
+          ajustar();
+        }
+      });
+
+      ajustar();
+      for (const dados of saidaPendente) {
+        novo.write(dados);
+      }
+      saidaPendente = [];
+      // A conexão abriu antes do xterm: o tamanho dele só vai agora.
+      if (socket?.readyState === WebSocket.OPEN) {
+        enviarTamanho();
+      }
+    }
+
     conectar();
+    carregarXterm()
+      .then((modulos) => {
+        if (!desmontado) {
+          montar(modulos, elemento);
+        }
+      })
+      .catch(() => {
+        // Sem o xterm (pacote não carregou): o quadro fica vazio; reabrir o bloco tenta de novo.
+      });
 
     return () => {
       desmontado = true;
@@ -290,12 +362,13 @@ const JanelaDoShell = memo(function JanelaDoShell({ shellId, terminalId, pasta, 
         cancelAnimationFrame(quadroPendente);
       }
       observador?.disconnect();
-      entrada.dispose();
-      redimensionamento.dispose();
+      for (const assinatura of assinaturas) {
+        assinatura.dispose();
+      }
       const aberta = socket;
       socket = null;
       aberta?.close();
-      xterm.dispose();
+      xterm?.dispose();
       terminal.current = null;
     };
   }, [terminalId]);

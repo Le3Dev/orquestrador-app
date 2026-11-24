@@ -218,7 +218,6 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   color: var(--muted);
 }
 .selo-do-item-ativo { color: var(--active); }
-.selo-do-item-ativo svg { animation: giro-do-selo 1.6s linear infinite; }
 @keyframes giro-do-selo { to { transform: rotate(360deg); } }
 .texto-do-item { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .texto-do-item strong {
@@ -272,7 +271,12 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   font: 600 12.5px/1 var(--fonte-mono);
   white-space: nowrap;
 }
-.giro-do-contador { animation: giro-do-selo 1.6s linear infinite; }
+/* O ícone que gira enquanto alguém trabalha. O giro é do span em volta do svg
+ * (do mesmo tamanho dele): no svg, o Chromium não leva a animação ao
+ * compositor (compositeFailed 1024, transform dependente da caixa) e ela pedia
+ * um quadro inteiro do main thread a cada vsync, com o Layerize da página toda,
+ * durante todo o streaming. No span, gira só no compositor. */
+.giro-do-contador { display: inline-flex; animation: giro-do-selo 1.6s linear infinite; }
 .texto-do-contador { font-weight: 500; font-size: 12px; }
 .anel-da-ilha {
   display: inline-flex;

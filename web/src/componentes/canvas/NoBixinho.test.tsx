@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 
 import type { DadosDaConfiguracao, EventoDeOrquestracao, EventoRegistrado } from "../../shared/api/tipos";
 import { aparenciaDoBixinho } from "../../shared/canvas/bixinhos";
-import { ContextoDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
+import { ProvedorDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
 import { idDoBixinho, type NoBixinho as TipoDoNo } from "../../shared/canvas/nos";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../../shared/estado/aplicarEvento";
 import { NoBixinho } from "./NoBixinho";
@@ -13,8 +13,8 @@ const simulados = vi.hoisted(() => ({
   // Chamado uma vez por renderização do conteúdo do bixinho: serve de contador.
   useRelogio: vi.fn(() => new Date("2026-10-28T12:00:05Z")),
   barraDoNo: vi.fn(),
-  // Chamado uma vez por desenho das células do bixinho.
-  pixelsDoCorpo: vi.fn(),
+  // Chamado uma vez por desenho do bixinho.
+  desenhoDoBixinho: vi.fn(),
   fecharBixinho: vi.fn(),
 }));
 
@@ -22,8 +22,8 @@ vi.mock("../../shared/hooks/useRelogio", () => ({ useRelogio: simulados.useRelog
 
 vi.mock("../../shared/canvas/sprites", async (importOriginal) => {
   const original = await importOriginal<typeof import("../../shared/canvas/sprites")>();
-  simulados.pixelsDoCorpo.mockImplementation(original.pixelsDoCorpo);
-  return { ...original, pixelsDoCorpo: simulados.pixelsDoCorpo };
+  simulados.desenhoDoBixinho.mockImplementation(original.desenhoDoBixinho);
+  return { ...original, desenhoDoBixinho: simulados.desenhoDoBixinho };
 });
 
 // Fora de um <ReactFlow> de verdade, as âncoras e a barra do nó não têm onde se
@@ -137,14 +137,14 @@ function tela(
   bixinhosSaindo?: ReadonlySet<string>,
 ) {
   return (
-    <ContextoDoCanvas.Provider value={valorDoCanvas(conversa, bixinhosSaindo)}>
+    <ProvedorDoCanvas valor={valorDoCanvas(conversa, bixinhosSaindo)}>
       <NoBixinho {...propsDoNo(subagenteId, selected, x)} />
-    </ContextoDoCanvas.Provider>
+    </ProvedorDoCanvas>
   );
 }
 
 describe("NoBixinho", () => {
-  // `clearAllMocks` limpa as chamadas, mas mantém a implementação original de `pixelsDoCorpo`.
+  // `clearAllMocks` limpa as chamadas, mas mantém a implementação original de `desenhoDoBixinho`.
   beforeEach(() => vi.clearAllMocks());
 
   it("executando, mostra o ícone da última ferramenta; trocar de ferramenta não redesenha o bixinho", () => {
@@ -156,7 +156,7 @@ describe("NoBixinho", () => {
     const lendo = aplicar(inicio, progresso("s1", "Reading src/a.ts", "Read"));
     rerender(tela(lendo, "s1"));
     expect(screen.getByRole("img", { name: "lendo" })).toHaveAttribute("title", "lendo");
-    const desenhos = simulados.pixelsDoCorpo.mock.calls.length;
+    const desenhos = simulados.desenhoDoBixinho.mock.calls.length;
     expect(desenhos).toBeGreaterThan(0);
 
     const rodando = aplicar(lendo, progresso("s1", "npm test", "Bash"));
@@ -172,7 +172,7 @@ describe("NoBixinho", () => {
     rerender(tela(pesquisando, "s1"));
     expect(screen.getByRole("img", { name: "pesquisando na web" })).toBeInTheDocument();
     // As células do bixinho não foram refeitas a cada evento.
-    expect(simulados.pixelsDoCorpo.mock.calls.length).toBe(desenhos);
+    expect(simulados.desenhoDoBixinho.mock.calls.length).toBe(desenhos);
   });
 
   it("orquestrador pausado (congelado): o bixinho que executava diz pausado, sem ícone, e a ficha também", () => {

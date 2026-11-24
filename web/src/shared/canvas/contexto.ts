@@ -101,6 +101,11 @@ export interface ValorDoCanvas {
 
 export const ContextoDoCanvas = createContext<ValorDoCanvas | null>(null);
 
+/**
+ * O valor inteiro do canvas: re-renderiza a cada mudança de qualquer parte.
+ * Os nós e os botões da barra do terminal não o usam; leem só o pedaço deles
+ * com `useSeletorDoCanvas`, `useConversaDoCanvas` e `useAcoesDoCanvas`.
+ */
 export function useCanvas(): ValorDoCanvas {
   const valor = useContext(ContextoDoCanvas);
   if (valor === null) {

@@ -2,7 +2,7 @@ import { Handle, type NodeProps, NodeToolbar, Position } from "@xyflow/react";
 import { memo } from "react";
 
 import { aparenciaDoBixinho, papelQueNomeia } from "../../shared/canvas/bixinhos";
-import { type AcoesDoCanvas, useCanvas } from "../../shared/canvas/contexto";
+import { type AcoesDoCanvas, useAcoesDoCanvas, useSeletorDoCanvas } from "../../shared/canvas/contexto";
 import { iconeDaFerramenta } from "../../shared/canvas/iconesDeFerramenta";
 import { type Ancora, type NoBixinho as TipoDoNo, subagentesVisiveis } from "../../shared/canvas/nos";
 import { type SubagenteNaTela, subagentePausado } from "../../shared/estado/aplicarEvento";
@@ -194,16 +194,22 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
  * relatório. Quando o Subagente conclui ou é cancelado, sai sozinho depois de
  * alguns segundos (`useSaidaDosBixinhos`), com a classe `no-bixinho-saindo`.
  *
- * Esta é só a casca: lê o contexto do canvas, que muda a cada evento de
- * qualquer conversa, e acha o próprio Subagente. O desenho fica no
- * `ConteudoDoBixinho`.
+ * Esta é só a casca: acha o próprio Subagente no canvas (o mesmo objeto
+ * enquanto ele não muda, então eventos de outros não a re-renderizam). O
+ * desenho fica no `ConteudoDoBixinho`.
  */
 export function NoBixinho({ id, data, selected }: NodeProps<TipoDoNo>) {
-  const { conversas, bixinhosSaindo, acoes } = useCanvas();
-  const conversa = conversas.get(data.orquestradorId);
-  const subagente = subagentesVisiveis(conversa).find(
-    (candidato) => candidato.id === data.subagenteId,
+  const subagente = useSeletorDoCanvas((canvas) =>
+    subagentesVisiveis(canvas.conversas.get(data.orquestradorId)).find(
+      (candidato) => candidato.id === data.subagenteId,
+    ),
   );
+  const saindo = useSeletorDoCanvas((canvas) => canvas.bixinhosSaindo?.has(id) === true);
+  // Só o sim ou não da pausa: outros eventos da conversa não re-renderizam o bixinho.
+  const pausado = useSeletorDoCanvas(
+    (canvas) => subagente !== undefined && subagentePausado(canvas.conversas.get(data.orquestradorId), subagente),
+  );
+  const acoes = useAcoesDoCanvas();
 
   if (subagente === undefined) {
     return null;
@@ -215,8 +221,8 @@ export function NoBixinho({ id, data, selected }: NodeProps<TipoDoNo>) {
       orquestradorId={data.orquestradorId}
       aoFechar={acoes.fecharBixinho}
       selecionado={selected}
-      saindo={bixinhosSaindo?.has(id) === true}
-      pausado={subagentePausado(conversa, subagente)}
+      saindo={saindo}
+      pausado={pausado}
     />
   );
 }

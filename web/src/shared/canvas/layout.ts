@@ -473,10 +473,46 @@ export function interpretarLayout(texto: string | null): LayoutDoCanvas {
   }
 }
 
+/**
+ * O último layout lido ou gravado por esta janela: o texto que está no
+ * armazenamento e os traços dele (com o JSON dos traços, feito uma vez só).
+ * Assim gravar as janelas (todo fim de pan) não relê nem revalida o layout
+ * inteiro para achar o desenho, e não regrava o mesmo texto. Nulo: não se
+ * sabe (nada lido ainda, ou outra janela mexeu no layout).
+ */
+interface LayoutGuardado {
+  texto: string | null;
+  desenho: TracoDoDesenho[];
+  desenhoEmJson: string | null;
+}
+let guardado: LayoutGuardado | null = null;
+
+// Outra janela ou aba (mesma origem) gravou ou limpou o layout: o guardado vale menos que o armazenamento.
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (evento) => {
+    if (evento.key === CHAVE || evento.key === null) {
+      guardado = null;
+    }
+  });
+}
+
+/** O layout guardado; sem ele, lê o armazenamento uma vez. */
+function layoutGuardado(): LayoutGuardado {
+  if (guardado === null) {
+    const texto = localStorage.getItem(CHAVE);
+    guardado = { texto, desenho: interpretarLayout(texto).desenho ?? [], desenhoEmJson: null };
+  }
+  return guardado;
+}
+
 export function lerLayout(): LayoutDoCanvas {
   try {
-    return interpretarLayout(localStorage.getItem(CHAVE));
+    const texto = localStorage.getItem(CHAVE);
+    const layout = interpretarLayout(texto);
+    guardado = { texto, desenho: layout.desenho ?? [], desenhoEmJson: null };
+    return layout;
   } catch {
+    guardado = null;
     return layoutVazio();
   }
 }
@@ -484,24 +520,34 @@ export function lerLayout(): LayoutDoCanvas {
 /**
  * Grava o layout. Sem o campo `desenho` (o layout das janelas, gravado a cada
  * arraste), mantém os traços que já estavam salvos; sem traços, o campo nem vai.
+ * O mesmo texto já gravado não é gravado de novo.
  */
 export function salvarLayout(layout: LayoutDoCanvas): void {
   try {
     const { terminais, notas, artefatos, previas, shells, navegadores, viewport } = layout;
-    const desenho = layout.desenho ?? interpretarLayout(localStorage.getItem(CHAVE)).desenho ?? [];
-    localStorage.setItem(
-      CHAVE,
-      JSON.stringify({
-        terminais,
-        notas,
-        artefatos,
-        previas,
-        shells,
-        ...(navegadores !== undefined && Object.keys(navegadores).length > 0 ? { navegadores } : {}),
-        viewport,
-        ...(desenho.length > 0 ? { desenho } : {}),
-      }),
-    );
+    const anterior = layout.desenho === undefined ? layoutGuardado() : null;
+    const desenho = layout.desenho ?? anterior?.desenho ?? [];
+    const janelas = JSON.stringify({
+      terminais,
+      notas,
+      artefatos,
+      previas,
+      shells,
+      ...(navegadores !== undefined && Object.keys(navegadores).length > 0 ? { navegadores } : {}),
+      viewport,
+    });
+    // O desenho vai por último, como `desenho` no fim do objeto: o mesmo texto do JSON.stringify do layout todo.
+    const desenhoEmJson =
+      desenho.length === 0 ? null : (anterior?.desenhoEmJson ?? JSON.stringify(desenho));
+    if (anterior !== null) {
+      anterior.desenhoEmJson = desenhoEmJson;
+    }
+    const texto = desenhoEmJson === null ? janelas : `${janelas.slice(0, -1)},"desenho":${desenhoEmJson}}`;
+    if (guardado !== null && guardado.texto === texto) {
+      return;
+    }
+    localStorage.setItem(CHAVE, texto);
+    guardado = { texto, desenho, desenhoEmJson };
   } catch {
     // Sem armazenamento: o canvas só não é lembrado no próximo acesso.
   }

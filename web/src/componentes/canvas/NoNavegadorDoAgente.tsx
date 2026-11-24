@@ -1,10 +1,10 @@
-import { Handle, type NodeProps, NodeResizer, Position } from "@xyflow/react";
+import { Handle, type NodeProps, NodeResizer, Position, useStoreApi } from "@xyflow/react";
 import { memo, type RefObject, useCallback, useEffect, useRef, useState } from "react";
 
 import { mensagemDeErro } from "../../shared/api/cliente";
 import { useAcoesDoCanvas, useSeletorDoCanvas } from "../../shared/canvas/contexto";
 import { TAMANHO_MINIMO_DO_NAVEGADOR } from "../../shared/canvas/layout";
-import { medirCorpo } from "../../shared/canvas/medirCorpo";
+import { acompanharCorpo } from "../../shared/canvas/medirCorpo";
 import { ALCA_DO_NAVEGADOR, type Ancora, type NoNavegadorDoAgente as TipoDoNo } from "../../shared/canvas/nos";
 import {
   type ApiDoNavegadorDoAgente,
@@ -26,8 +26,6 @@ export const MENSAGEM_SEM_NAVEGADOR_ABERTO =
 export const ESPERA_DA_FOTO_MS = 200;
 /** Depois de recusada, quanto esperar até pedir para mostrar a vista de novo. */
 const ESPERA_APOS_RECUSA_MS = 1500;
-/** De quanto em quanto tempo, com o corpo parado, confere se algo da tela está por cima da vista. */
-export const INTERVALO_DA_COBERTURA_MS = 120;
 
 /** As alças de redimensionar. Memorizadas: o arraste não as re-renderiza a cada quadro. */
 const RedimensionadorDoNavegador = memo(function RedimensionadorDoNavegador({ visivel }: { visivel: boolean }) {
@@ -123,7 +121,8 @@ function semFalhar(chamada: Promise<unknown>): void {
 
 /**
  * Mantém a vista nativa do app sobre o corpo do nó: mostra com o retângulo do corpo e o acompanha a cada quadro
- * (arrasto, zoom e pan do canvas, redimensionar). Ela desce (e o corpo passa a mostrar a foto) quando o nó
+ * enquanto algo se mexe (zoom e pan do canvas, redimensionar); parado, confere de tempos em tempos
+ * (`acompanharCorpo`). Ela desce (e o corpo passa a mostrar a foto) quando o nó
  * é arrastado, o corpo sai da tela ou algo (painel, menu, outra janela) cobre o corpo. Ao desmontar (o nó fecha),
  * a vista desce e o agente segue usando. Devolve se a vista está por cima agora.
  */
@@ -134,44 +133,27 @@ function useVistaNativaDoNavegador(
   ligada: boolean,
 ): boolean {
   const [mostrando, setMostrando] = useState(false);
+  const loja = useStoreApi();
   useEffect(() => {
     const elemento = corpo.current;
     if (api === null || elemento === null || !ligada) {
       return undefined;
     }
     let ativo = true;
-    let quadro = 0;
     let naTela = false;
     let ultimo: RetanguloDaVista | null = null;
     let recusadaAte = 0;
-    // O que o último teste de cobertura achou, e quando; o retângulo medido no quadro anterior.
-    let coberta = false;
-    let conferidaEm = Number.NEGATIVE_INFINITY;
-    let anterior: RetanguloDaVista | null = null;
 
     const descer = (): void => {
       naTela = false;
       ultimo = null;
       setMostrando(false);
     };
-    const passo = (): void => {
+    const pararDeAcompanhar = acompanharCorpo(elemento, loja, (medida) => {
       if (!ativo) {
         return;
       }
-      // O retângulo é medido a cada quadro (barato); o teste de cobertura (nove pontos na tela, mais caro) roda
-      // quando o corpo se mexe e, parado, de tempos em tempos: um menu ou painel por cima aparece parado.
-      const medida = medirCorpo(elemento, { conferirCobertura: false });
-      if (medida === null) {
-        anterior = null;
-      } else {
-        const agora = Date.now();
-        if (!mesmoRetangulo(anterior, medida.retangulo) || agora - conferidaEm >= INTERVALO_DA_COBERTURA_MS) {
-          coberta = medirCorpo(elemento)?.coberta ?? false;
-          conferidaEm = agora;
-        }
-        anterior = medida.retangulo;
-      }
-      if (medida === null || coberta) {
+      if (medida === null || medida.coberta) {
         if (naTela) {
           descer();
           semFalhar(api.ocultar(orquestradorId));
@@ -200,19 +182,17 @@ function useVistaNativaDoNavegador(
         ultimo = medida.retangulo;
         api.posicionar(orquestradorId, medida.retangulo);
       }
-      quadro = requestAnimationFrame(passo);
-    };
-    quadro = requestAnimationFrame(passo);
+    });
 
     return () => {
       ativo = false;
-      cancelAnimationFrame(quadro);
+      pararDeAcompanhar();
       if (naTela) {
         semFalhar(api.ocultar(orquestradorId));
       }
       setMostrando(false);
     };
-  }, [api, orquestradorId, corpo, ligada]);
+  }, [api, loja, orquestradorId, corpo, ligada]);
   return mostrando;
 }
 

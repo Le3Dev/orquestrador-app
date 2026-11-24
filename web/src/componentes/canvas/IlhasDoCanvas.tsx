@@ -258,7 +258,10 @@ export function IlhaDaDireita({
           title={`${trabalhando} trabalhando agora`}
           data-testid="contador-trabalhando"
         >
-          <IconeTrabalhando tamanho={14} className="giro-do-contador" />
+          {/* O giro fica no span, e não no svg: girar o próprio svg não vai para o compositor (ver ilhas.css). */}
+          <span className="giro-do-contador" aria-hidden="true">
+            <IconeTrabalhando tamanho={14} />
+          </span>
           <span aria-hidden="true">{trabalhando}</span>
           <span className="texto-do-contador" aria-hidden="true">
             trabalhando

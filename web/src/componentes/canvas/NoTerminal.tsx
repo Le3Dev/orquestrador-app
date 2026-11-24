@@ -37,7 +37,7 @@ import {
   TAMANHO_MAXIMO_DAS_INSTRUCOES,
 } from "../../shared/api/tipos";
 import { type ChipDaBarra, chipsParaOMenu } from "../../shared/canvas/barraDoTerminal";
-import { useCanvas } from "../../shared/canvas/contexto";
+import { useAcoesDoCanvas, useConversaDoCanvas, useSeletorDoCanvas } from "../../shared/canvas/contexto";
 import {
   DURACAO_DA_ENTREGA_MS,
   DURACAO_DO_PISCAR_MS,
@@ -386,7 +386,7 @@ export function PainelDeConfiguracao({
   tamanhoDaLetra,
   nome: nomeAtual = orquestrador.nome,
 }: PropsDaConfiguracao) {
-  const { acoes } = useCanvas();
+  const acoes = useAcoesDoCanvas();
   const idDoNome = useId();
   const [configuracao, setConfiguracao] = useState(orquestrador.configuracao);
   // A configuração com que o formulário abriu (ou a devolvida pela predefinição):
@@ -1099,8 +1099,8 @@ function TerminalEmTelaCheia({
  * em `JanelaDoTerminal`, memorizada, que não recebe nada disso.
  */
 export function NoTerminal({ data, selected }: NodeProps<TipoDoNo>) {
-  const { orquestradores } = useCanvas();
-  const orquestrador = orquestradores.get(data.orquestradorId);
+  // Só o resumo deste Orquestrador: a lista nova traz o mesmo objeto quando ele não mudou.
+  const orquestrador = useSeletorDoCanvas((canvas) => canvas.orquestradores.get(data.orquestradorId));
 
   // As âncoras das linhas existem desde a primeira medida, até carregando.
   if (orquestrador === undefined) {
@@ -1152,9 +1152,13 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   /** Os ids dos nós ligados a este terminal (`DadosDoTerminal.ligados`). */
   ligados: readonly string[];
 }) {
-  const { conversas, conexoes, sinais, servidor, acoes } = useCanvas();
   const orquestradorId = orquestrador.id;
-  const conversa = conversas.get(orquestradorId) ?? ESTADO_INICIAL;
+  // Cada pedaço do canvas lido à parte: um evento de outra conversa não re-renderiza esta janela.
+  const conversa = useConversaDoCanvas(orquestradorId) ?? ESTADO_INICIAL;
+  const conexao = useSeletorDoCanvas((canvas) => canvas.conexoes.get(orquestradorId));
+  const sinal = useSeletorDoCanvas((canvas) => canvas.sinais.get(orquestradorId));
+  const conectado = useSeletorDoCanvas((canvas) => canvas.servidor.conectado);
+  const acoes = useAcoesDoCanvas();
   // Onde a tela cheia é desenhada (a área do canvas); nulo fora dela.
   const [telaCheiaEm, setTelaCheiaEm] = useState<HTMLElement | null>(null);
   const emTelaCheia = telaCheiaEm !== null;
@@ -1196,7 +1200,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   const pausado = pausa !== null;
   const cancelando = cancelamentoPedido && (trabalhando || pausado);
   const alternandoPausa = pausaPedidaQuando === pausado;
-  const piscando = usePiscarNaEntrega(ultimoTurno?.subagentes ?? SEM_SUBAGENTES, servidor.conectado);
+  const piscando = usePiscarNaEntrega(ultimoTurno?.subagentes ?? SEM_SUBAGENTES, conectado);
 
   // A fila vem do resumo do servidor, corrigida pelos eventos (ver `filaDePedidos`).
   const fila = useReaproveitado<readonly DadosDoPedidoNaFila[]>(
@@ -1588,7 +1592,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   }
   // As instruções (do orquestrador e as gerais) não têm chip na barra: ficam na
   // engrenagem desta janela e em Configurações, aba Padrões.
-  if (servidor.conectado && conexoes.get(orquestradorId) === "reconectando") {
+  if (conectado && conexao === "reconectando") {
     chipsDaDireita.push({
       id: "reconectando",
       elemento: (
@@ -1779,8 +1783,8 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
             turnos={conversa.turnos}
             conversaIniciadaEm={conversa.conversaIniciadaEm}
             avisosDaConversaNova={conversa.avisosDaConversaNova}
-            sinal={sinais.get(orquestradorId)}
-            desconectado={!servidor.conectado}
+            sinal={sinal}
+            desconectado={!conectado}
             acoesDoPlano={acoesDoPlano}
             aoResponderPergunta={responderPergunta}
             pausado={pausado}
@@ -1797,7 +1801,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
         <ItensLigados ligados={ligados} aoDesligar={aoDesligarItem} />
         <PromptDoTerminal
           pasta={orquestrador.nomeDaPasta}
-          desconectado={!servidor.conectado}
+          desconectado={!conectado}
           trabalhando={trabalhando}
           cancelando={cancelando}
           modo={modo}
@@ -1822,7 +1826,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
           textoInicial={textoDoPrompt}
         />
       </div>
-      {(trabalhando || pausado) && servidor.conectado && (
+      {(trabalhando || pausado) && conectado && (
         // Pausado, a faixa fica parada e esmaecida: há um pedido pela metade, mas nada roda.
         <div className={`faixa-de-progresso ${pausado ? "faixa-de-progresso-pausada" : ""}`} />
       )}

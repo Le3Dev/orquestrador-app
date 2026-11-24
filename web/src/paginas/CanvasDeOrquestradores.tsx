@@ -1,6 +1,4 @@
 import {
-  Background,
-  BackgroundVariant,
   BezierEdge,
   ControlButton,
   Controls,
@@ -25,8 +23,10 @@ import {
   type ComponentType,
   type Dispatch,
   type DragEvent,
+  lazy,
   memo,
   type SetStateAction,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -42,6 +42,7 @@ import { ArestaDoVinculo } from "../componentes/canvas/ArestaDoVinculo";
 import { PainelDoVinculo } from "../componentes/canvas/PainelDoVinculo";
 import { BarraDoGrupo } from "../componentes/canvas/BarraDoGrupo";
 import { CamadaDeDesenho } from "../componentes/canvas/CamadaDeDesenho";
+import { FundoDoCanvas } from "../componentes/canvas/FundoDoCanvas";
 import { NoArtefato } from "../componentes/canvas/NoArtefato";
 import { NoBixinho } from "../componentes/canvas/NoBixinho";
 import { NoNavegadorDoAgente } from "../componentes/canvas/NoNavegadorDoAgente";
@@ -62,8 +63,7 @@ import {
 import { type ControleDaPaleta, PaletaDeComandos } from "../componentes/canvas/PaletaDeComandos";
 import { rodandoNoDesktop, rodandoNoMac } from "../shared/ponteDoDesktop";
 import { AvisoDeConexao, ErroDoCanvas, RotinasDoCanvas, StatusDoCanvas } from "../componentes/canvas/PaineisDoCanvas";
-import { type AbaDoPainelDeSkills, PainelDeSkills } from "../componentes/canvas/PainelDeSkills";
-import { PainelDeSubagentes } from "../componentes/canvas/PainelDeSubagentes";
+import type { AbaDoPainelDeSkills } from "../componentes/canvas/PainelDeSkills";
 import { api, ErroDaApi, mensagemDeErro } from "../shared/api/cliente";
 import type { ResumoDoArtefato } from "../shared/api/artefatos";
 import type { DadosDaSkill, DadosDoSubagentePronto, ResumoDoOrquestrador } from "../shared/api/tipos";
@@ -210,6 +210,16 @@ import { pedirFocoDoChat } from "../shared/focarChat";
 import { markdownParaTexto } from "../shared/markdownParaTexto";
 import type { AcaoDaPaleta, FonteDaPaleta, ItemDaPaleta } from "../shared/paletaDeComandos";
 import { aoMudarSubagentesProntos } from "../shared/subagentesProntos";
+
+// Os painéis do `+ Novo` (subagentes e skills) ficam fora do bundle principal: o código de cada um só é
+// baixado na primeira vez que ele abre. Enquanto chega, nada aparece no lugar (o painel é flutuante e
+// não empurra o layout); depois, abrir de novo é imediato.
+const PainelDeSkills = lazy(() =>
+  import("../componentes/canvas/PainelDeSkills").then((modulo) => ({ default: modulo.PainelDeSkills })),
+);
+const PainelDeSubagentes = lazy(() =>
+  import("../componentes/canvas/PainelDeSubagentes").then((modulo) => ({ default: modulo.PainelDeSubagentes })),
+);
 
 /** Onde chega a linha do terminal a uma nota ou artefato ligados: o meio de cada lado (a prévia já tem as dela). */
 const ANCORAS_DO_ITEM_LIGADO: readonly { id: Ancora; posicao: Position }[] = [
@@ -1957,16 +1967,22 @@ function Canvas() {
           aoFechar={fecharPainel}
           aoMudarAguardandoAprovacao={setRotinasAguardandoAprovacao}
         />
-        {painelAberto === "subagentes" && <PainelDeSubagentes aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />}
+        {painelAberto === "subagentes" && (
+          <Suspense fallback={null}>
+            <PainelDeSubagentes aoFechar={fecharPainel} aoSalvar={aoSalvarPainel} />
+          </Suspense>
+        )}
         {painelAberto === "skills" && (
-          <PainelDeSkills
-            key={aberturaDeSkills.abertura}
-            orquestradores={orquestradoresParaSkills}
-            abaInicial={aberturaDeSkills.aba}
-            quantidadeDeSkills={skills?.length ?? null}
-            aoMudarPlugins={recarregarSkills}
-            aoFechar={fecharPainel}
-          />
+          <Suspense fallback={null}>
+            <PainelDeSkills
+              key={aberturaDeSkills.abertura}
+              orquestradores={orquestradoresParaSkills}
+              abaInicial={aberturaDeSkills.aba}
+              quantidadeDeSkills={skills?.length ?? null}
+              aoMudarPlugins={recarregarSkills}
+              aoFechar={fecharPainel}
+            />
+          </Suspense>
         )}
         {avisoDoLimite && (
           <ErroDoCanvas erro={AVISO_DO_LIMITE_DE_ORQUESTRADORES} aoFechar={fecharAvisoDoLimite} nivel="aviso" />
@@ -2255,7 +2271,8 @@ function Canvas() {
                     onDragOver={aoArrastarSobreOCanvas}
                     onDrop={aoSoltarNoCanvas}
                   >
-                    <Background variant={BackgroundVariant.Dots} gap={24} size={1.4} />
+                    {/* Os pontos do fundo: seguem a câmera sem um render do React por quadro. */}
+                    <FundoDoCanvas />
                     {/* Por cima das janelas e abaixo dos painéis; a barra de desenho vem com ela. */}
                     <CamadaDeDesenho
                       aberta={desenhoAberto}

@@ -9,7 +9,7 @@ import {
 } from "../../shared/api/alteracoes";
 import { mensagemDeErro } from "../../shared/api/cliente";
 import type { ResumoDoOrquestrador } from "../../shared/api/tipos";
-import { useCanvas } from "../../shared/canvas/contexto";
+import { useSeletorDoCanvas } from "../../shared/canvas/contexto";
 import type { EstadoDaConversa } from "../../shared/estado/aplicarEvento";
 import { PainelDeAlteracoes } from "./PainelDeAlteracoes";
 
@@ -97,9 +97,11 @@ function IconeDeAlteracoes({ className = "" }: { className?: string }) {
  * vai no `title`.
  */
 export function BotaoDeAlteracoes({ orquestradorId }: { orquestradorId: string }) {
-  const { conversas, orquestradores } = useCanvas();
-  const resumo = orquestradores.get(orquestradorId);
-  const trabalhando = estaTrabalhando(conversas.get(orquestradorId), resumo);
+  const resumo = useSeletorDoCanvas((canvas) => canvas.orquestradores.get(orquestradorId));
+  // Só se está trabalhando (um booleano): os eventos da conversa não re-renderizam o botão.
+  const trabalhando = useSeletorDoCanvas((canvas) =>
+    estaTrabalhando(canvas.conversas.get(orquestradorId), canvas.orquestradores.get(orquestradorId)),
+  );
   const { consulta, atualizar } = useAlteracoesDoWorktree(orquestradorId);
   const [aberto, setAberto] = useState(false);
   const botao = useRef<HTMLButtonElement>(null);

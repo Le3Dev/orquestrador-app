@@ -8,7 +8,7 @@ import {
 } from "../../shared/api/alteracoes";
 import { ErroDaApi } from "../../shared/api/cliente";
 import type { DadosDaConfiguracao, EventoDeOrquestracao, EventoRegistrado } from "../../shared/api/tipos";
-import { ContextoDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
+import { ProvedorDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
 import { aplicarEvento, ESTADO_INICIAL, type EstadoDaConversa } from "../../shared/estado/aplicarEvento";
 import { BotaoDeAlteracoes } from "./BotaoDeAlteracoes";
 
@@ -90,9 +90,9 @@ function canvas(estado: EstadoDaConversa): ValorDoCanvas {
 
 function arvore(estado: EstadoDaConversa) {
   return (
-    <ContextoDoCanvas.Provider value={canvas(estado)}>
+    <ProvedorDoCanvas valor={canvas(estado)}>
       <BotaoDeAlteracoes orquestradorId="o1" />
-    </ContextoDoCanvas.Provider>
+    </ProvedorDoCanvas>
   );
 }
 

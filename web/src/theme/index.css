@@ -370,16 +370,63 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .etiqueta-success { --cor-da-etiqueta: var(--success); }
 .etiqueta-error   { --cor-da-etiqueta: var(--error); }
 .etiqueta-warning { --cor-da-etiqueta: var(--warning); }
-.etiqueta-pulso::before { animation: pulso-ponto 1.4s ease-out infinite; }
+/* O pulso do ponto: um disco da cor do ponto, a 70%, que cresce até 7 px além
+ * da borda dele e se apaga. Só `transform` e `opacity`, que rodam no
+ * compositor: o anel de `box-shadow` animado de antes recalculava o estilo e
+ * repintava a cada quadro, 60 vezes por segundo, enquanto houvesse alguém
+ * trabalhando. A escala é a do anel no fim: (lado + 14) / lado. Na etiqueta, o
+ * ponto é o `::before`; o disco é o `::after`, posto sobre ele e, com o
+ * `isolation`, pintado logo acima do fundo da etiqueta e abaixo do ponto e do
+ * texto, como a sombra. */
+.etiqueta-pulso { position: relative; isolation: isolate; }
+.etiqueta-pulso::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 50%;
+  left: 8px;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--cor-da-etiqueta) 70%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  animation: pulso-ponto-da-etiqueta 1.4s ease-out infinite;
+}
 
+/* 6 px: (6 + 14) / 6. */
+@keyframes pulso-ponto-da-etiqueta {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(3.3333); }
+}
+/* 7 px: (7 + 14) / 7. */
 @keyframes pulso-ponto {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--cor-da-etiqueta, var(--active)) 70%, transparent); }
-  100% { box-shadow: 0 0 0 7px transparent; }
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(3); }
+}
+/* 10 px: (10 + 14) / 10. */
+@keyframes pulso-ponto-de-erro {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(2.4); }
 }
 
 .ponto-de-status { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--muted); }
-.ponto-de-status-ativo { background: var(--active); animation: pulso-ponto 1.4s ease-out infinite; }
-.ponto-de-status-erro { --cor-da-etiqueta: var(--error); width: 10px; height: 10px; background: var(--error); animation: pulso-ponto 1.2s ease-out infinite; }
+.ponto-de-status-ativo { position: relative; background: var(--active); }
+.ponto-de-status-erro { --cor-da-etiqueta: var(--error); position: relative; width: 10px; height: 10px; background: var(--error); }
+/* O disco fica por cima do próprio ponto: da mesma cor, não muda o miolo. */
+.ponto-de-status-ativo::after,
+.ponto-de-status-erro::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--cor-da-etiqueta, var(--active)) 70%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  animation: pulso-ponto 1.4s ease-out infinite;
+}
+.ponto-de-status-erro::after { animation: pulso-ponto-de-erro 1.2s ease-out infinite; }
 .ponto-de-status-ok { width: 10px; height: 10px; background: var(--success); }
 
 /* Faixa de conexão no topo do canvas: grande de propósito. Com o servidor
@@ -931,6 +978,19 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .linha-erro .linha-simbolo, .linha-erro .linha-texto { color: var(--error); }
 .linha-sistema .linha-texto { color: var(--muted); }
 
+/* O girador do pedido em andamento (TranscricaoDoTerminal): os dez quadros
+ * empilhados numa faixa que sobe uma linha a cada 90 ms, em `steps`. Anima o
+ * `transform` no compositor, sem render do React a cada quadro. `overflow: clip`,
+ * e não `hidden`, recorta a linha sem virar contêiner de rolagem: a linha de base
+ * segue a do quadro visível, alinhada às colunas vizinhas. */
+.girador-do-terminal { height: 1lh; overflow: clip; }
+.girador-do-terminal-quadros { display: block; white-space: pre; animation: girar-o-girador .9s steps(10) infinite; }
+@keyframes girar-o-girador { to { transform: translateY(-100%); } }
+/* Era um timer em JS, fora da regra geral do reduzir movimento: continua girando. */
+@media (prefers-reduced-motion: reduce) {
+  .girador-do-terminal-quadros { animation-duration: .9s !important; animation-iteration-count: infinite !important; }
+}
+
 /* Progresso das tarefas do pedido em andamento (TodoWrite): a barra, "3 de 7
  * tarefas" e a tarefa atual; o clique abre a lista. Sem animação. */
 .progresso-das-tarefas { display: flex; flex-direction: column; gap: 2px; }
@@ -1138,12 +1198,25 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   pointer-events: none;
 }
 
-/* O coração do sinal de vida pulsa a cada notícia do Claude. */
-.batimento { display: inline-block; animation: bater .6s ease-out 1; }
+/* O coração do sinal de vida pulsa a cada notícia do Claude: cresce e volta
+ * (`transform`) e começa laranja. O laranja é uma cópia do ícone por cima
+ * (`.batimento-cor`, TranscricaoDoTerminal) que se apaga (`opacity`): animar a
+ * `color` tirava a animação inteira do compositor, e o coração, que recomeça a
+ * cada notícia, repintava quase o tempo todo durante a escrita. */
+.batimento { position: relative; display: inline-block; animation: bater .6s ease-out 1; }
 @keyframes bater {
-  0% { transform: scale(1.6); color: var(--active); }
+  0% { transform: scale(1.6); }
   100% { transform: scale(1); }
 }
+.batimento-cor {
+  position: absolute;
+  inset: 0;
+  color: var(--active);
+  opacity: 0;
+  pointer-events: none;
+  animation: bater-cor .6s ease-out 1;
+}
+@keyframes bater-cor { from { opacity: 1; } }
 
 /* Alerta de memória, abaixo do painel de status. */
 .aviso-de-memoria {
@@ -1193,7 +1266,16 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   border: 1px solid color-mix(in srgb, var(--cor-da-nota) 35%, var(--border-forte));
   box-shadow: 0 18px 44px -22px rgba(0, 0, 0, .85);
   transition: border-color .2s, box-shadow .25s ease-out;
+  /* O recorte arredondado (overflow + raio) em volta do campo de texto, que
+   * rola: sem um contexto de empilhamento aqui, o Chromium compunha cada campo
+   * como rolável próprio ao abrir a tela (umas 5 camadas por nota), e todo
+   * quadro fora do compositor pagava ~15 ms de Layerize com 30 notas, até o
+   * primeiro pan refazer as camadas. Isolada, ~4 ms. Não muda o desenho. */
+  isolation: isolate;
 }
+/* Isolada, a janela pinta por cima das alças de redimensionar (vêm antes no
+ * nó e não têm z-index): elas sobem para continuar por cima, como antes. */
+.react-flow__node-nota .react-flow__resize-control { z-index: 1; }
 .react-flow__node.selected .janela-nota {
   border-color: var(--cor-da-nota);
   box-shadow:
@@ -2343,10 +2425,36 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
 .canvas-movendo .react-flow__node.dragging,
 .canvas-movendo .react-flow__node-bixinho { will-change: transform; }
 /* Tudo o que anima dentro dos nós para enquanto o canvas se move: cada
- * quadro animado repintaria a camada que o navegador está só deslocando. */
-.canvas-movendo .react-flow__node *,
-.canvas-movendo .react-flow__node *::before,
-.canvas-movendo .react-flow__node *::after { animation-play-state: paused !important; }
+ * quadro animado repintaria a camada que o navegador está só deslocando.
+ * A lista é explícita, e não `.react-flow__node *`: com o universal, ligar e
+ * desligar a classe recalculava o estilo de todos os elementos de todos os
+ * nós; assim, só o dos que animam. Um seletor por classe, sem `:is()`: cada
+ * regra fica no balde da própria classe e nem é testada nos outros elementos.
+ * Animação nova dentro de um nó entra aqui (os menus que surgem ficam de fora:
+ * eles terminam a entrada, ver `.surgir`). */
+.canvas-movendo .react-flow__node .no-bixinho,
+.canvas-movendo .react-flow__node .no-bixinho::after,
+.canvas-movendo .react-flow__node .bixinho-desenho,
+.canvas-movendo .react-flow__node .bixinho-olhos,
+.canvas-movendo .react-flow__node .bixinho-corpo-animado,
+.canvas-movendo .react-flow__node .cursor::after,
+.canvas-movendo .react-flow__node .etiqueta-pulso::after,
+.canvas-movendo .react-flow__node .faixa-de-progresso::after,
+.canvas-movendo .react-flow__node .janela-terminal-entrega,
+.canvas-movendo .react-flow__node .batimento,
+.canvas-movendo .react-flow__node .batimento-cor,
+.canvas-movendo .react-flow__node .girador-do-terminal-quadros,
+.canvas-movendo .react-flow__node .destaque-de-versao-nova,
+.canvas-movendo .react-flow__node .ponto-de-status-ativo::after,
+.canvas-movendo .react-flow__node .ponto-de-status-erro::after,
+.canvas-movendo .react-flow__node .pulso-do-agente,
+.canvas-movendo .react-flow__node .xterm-cursor-blink,
+.canvas-movendo .react-flow__node .botao-ditado-gravando,
+.canvas-movendo .react-flow__node .girador-do-ditado,
+.canvas-movendo .react-flow__node .ponto-do-ditado,
+.canvas-movendo .react-flow__node .painel-do-ditado-inserido,
+.canvas-movendo .react-flow__node .esqueleto-do-ditado > span,
+.canvas-movendo .react-flow__node textarea[data-ditado] { animation-play-state: paused !important; }
 /* A bolinha é SMIL, que não obedece `animation-play-state`: some até o movimento acabar. */
 .canvas-movendo .bolinha-da-troca { display: none; }
 

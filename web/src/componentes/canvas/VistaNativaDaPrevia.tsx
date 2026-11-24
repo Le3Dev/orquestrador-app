@@ -1,7 +1,8 @@
+import { useStoreApi } from "@xyflow/react";
 import { type MouseEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { medirCorpo } from "../../shared/canvas/medirCorpo";
+import { acompanharCorpo, medirCorpo } from "../../shared/canvas/medirCorpo";
 import type { ApiDaPrevia, RetanguloDaPrevia } from "../../shared/ponteDoDesktop";
 import { type HistoricoDaVista, mesmoRetangulo, SEM_HISTORICO } from "../../shared/previaNativa";
 
@@ -22,8 +23,9 @@ interface EstadoDaPagina {
  * uso não há foto), e a roda e a pinça seguem movendo o
  * canvas, como nos mapas embutidos.
  *
- * Ativa, a vista acompanha o corpo da prévia a cada quadro (arrasto, zoom e
- * pan do canvas, redimensionar). Ela volta a ser foto quando: um clique cai
+ * Ativa, a vista acompanha o corpo da prévia a cada quadro só enquanto algo se
+ * mexe (arrasto, zoom e pan do canvas, redimensionar); parada, é conferida de
+ * tempos em tempos (`acompanharCorpo`). Ela volta a ser foto quando: um clique cai
  * fora do bloco, o corpo sai da tela ou é coberto por um painel ou menu, a
  * prévia é minimizada (`suspensa`), a janela do app minimiza, o modo invisível
  * liga ou o usuário aperta Shift+Esc dentro da página (o Esc sozinho é da
@@ -60,6 +62,7 @@ export function VistaNativaDaPrevia({
   aoMudarHistorico: (historico: HistoricoDaVista) => void;
 }) {
   const raiz = useRef<HTMLDivElement>(null);
+  const loja = useStoreApi();
   const inicioDoClique = useRef<{ x: number; y: number } | null>(null);
   const [ativa, setAtiva] = useState(false);
   const [foto, setFoto] = useState<string | null>(null);
@@ -72,7 +75,7 @@ export function VistaNativaDaPrevia({
 
   // Abre a vista (escondida) com o tamanho aproximado do corpo e a destrói ao sair.
   useEffect(() => {
-    const medida = raiz.current === null ? null : medirCorpo(raiz.current);
+    const medida = raiz.current === null ? null : medirCorpo(raiz.current, { conferirCobertura: false });
     void api.abrir(previaId, url, medida?.retangulo);
     return () => void api.fechar(previaId);
   }, [api, previaId, url]);
@@ -124,11 +127,14 @@ export function VistaNativaDaPrevia({
     if (!ativa || corpo === null) {
       return;
     }
-    let quadro = 0;
     let ultimo: RetanguloDaPrevia | null = null;
-    const passo = () => {
-      const medida = medirCorpo(corpo);
+    let desligada = false;
+    const pararDeAcompanhar = acompanharCorpo(corpo, loja, (medida) => {
+      if (desligada) {
+        return;
+      }
       if (medida === null || medida.coberta) {
+        desligada = true;
         setAtiva(false);
         return;
       }
@@ -142,9 +148,7 @@ export function VistaNativaDaPrevia({
         api.retangulo(previaId, medida.retangulo);
       }
       ultimo = medida.retangulo;
-      quadro = requestAnimationFrame(passo);
-    };
-    quadro = requestAnimationFrame(passo);
+    });
 
     // O bloco inteiro (barra incluída): clicar nele não desativa. Um clique fora dele
     // chega à tela mesmo com a vista ativa (a vista só cobre o corpo da prévia).
@@ -156,12 +160,12 @@ export function VistaNativaDaPrevia({
     };
     document.addEventListener("pointerdown", aoPressionar, true);
     return () => {
-      cancelAnimationFrame(quadro);
+      pararDeAcompanhar();
       document.removeEventListener("pointerdown", aoPressionar, true);
       void api.ativar(previaId, false);
     };
   // Trocar de corpo (ampliar, sair da tela cheia) refaz o acompanhamento no corpo novo.
-  }, [api, previaId, ativa, corpoAmpliado]);
+  }, [api, loja, previaId, ativa, corpoAmpliado]);
 
   function aoClicar(evento: MouseEvent<HTMLButtonElement>): void {
     const inicio = inicioDoClique.current;
