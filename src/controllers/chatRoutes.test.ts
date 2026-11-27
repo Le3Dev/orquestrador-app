@@ -54,8 +54,11 @@ describe("rotas do chat", () => {
   let motor: MotorDoTeste;
   let repositorio: RepositorioDoChatEmArquivo;
   let ids: number;
+  /** O congelador do teste congela só enquanto isto for verdadeiro (há processo vivo, fora do Windows). */
+  let podeCongelar: boolean;
 
   beforeEach(async () => {
+    podeCongelar = true;
     pasta = await mkdtemp(path.join(tmpdir(), "rotas-chat-teste-"));
     ids = 0;
     motor = new MotorDoTeste();
@@ -69,12 +72,13 @@ describe("rotas do chat", () => {
       subagentes: { listarSubagentesProntos: async () => [] },
       anexos,
       publicador: canal,
-      execucoes: new ControleDeExecucoesEmMemoria(),
+      execucoes: new ControleDeExecucoesEmMemoria({ congelar: () => podeCongelar, descongelar: () => true }),
       pastaDaSessao: repositorio.pastaDaSessao,
       pastaDosProjetos: pasta,
       pastaDeArtefatos: path.join(pasta, "artefatos", "entrada", "chat"),
       gerarId: () => `id${++ids}`,
       agora: () => new Date("2026-11-04T12:00:00Z"),
+      podePausar: true,
     });
 
     const aplicacao = express();
@@ -134,6 +138,7 @@ describe("rotas do chat", () => {
       mensagens: [],
       ultimaSequencia: 0,
       cota: null,
+      podePausar: true,
     });
   });
 
@@ -411,6 +416,57 @@ describe("rotas do chat", () => {
 
     const estado = (await (await fetch(`${base}/chat`)).json()) as { mensagens: { situacao: string }[] };
     expect(estado.mensagens[1]?.situacao).toBe("cancelada");
+  });
+
+  it("POST /chat/pausar e /chat/continuar: 202 na pausa e na volta, 409 fora de hora", async () => {
+    expect((await enviar("/chat/pausar", "POST")).status).toBe(409);
+    expect((await enviar("/chat/continuar", "POST")).status).toBe(409);
+
+    await enviar("/chat/mensagens", "POST", { texto: "oi" });
+    await expect.poll(() => motor.perguntas.length).toBe(1);
+    expect((await enviar("/chat/continuar", "POST")).status).toBe(409);
+
+    const pausa = await enviar("/chat/pausar", "POST");
+    expect(pausa.status).toBe(202);
+    expect(await pausa.json()).toEqual({ pausada: true });
+    const repetida = await enviar("/chat/pausar", "POST");
+    expect(repetida.status).toBe(409);
+    expect(await repetida.json()).toEqual({ erro: "A resposta já está pausada." });
+
+    const pausado = (await (await fetch(`${base}/chat`)).json()) as {
+      situacao: string;
+      podePausar: boolean;
+      mensagens: { situacao: string; pausadaDesde?: string }[];
+    };
+    expect(pausado).toMatchObject({ situacao: "respondendo", podePausar: true });
+    expect(pausado.mensagens[1]).toMatchObject({ situacao: "respondendo", pausadaDesde: "2026-11-04T12:00:00.000Z" });
+    expect((await enviar("/chat/mensagens", "POST", { texto: "outra" })).status).toBe(409);
+
+    expect((await enviar("/chat/continuar", "POST")).status).toBe(202);
+    expect((await enviar("/chat/continuar", "POST")).status).toBe(409);
+    motor.terminar(sucesso("pronto"));
+    await aguardarOcioso();
+
+    const recebido = await lerSse(`${base}/chat/eventos`, (texto) => texto.includes("resposta_concluida"));
+    expect(recebido).toContain('"tipo":"resposta_pausada"');
+    expect(recebido).toContain('"tipo":"resposta_continuada"');
+  });
+
+  it("POST /chat/pausar: 409 quando não há processo para congelar; cancelar vale com a resposta pausada", async () => {
+    podeCongelar = false;
+    await enviar("/chat/mensagens", "POST", { texto: "oi" });
+    await expect.poll(() => motor.perguntas.length).toBe(1);
+    const recusada = await enviar("/chat/pausar", "POST");
+    expect(recusada.status).toBe(409);
+    expect(await recusada.json()).toEqual({ erro: "Não dá para pausar a resposta agora." });
+
+    podeCongelar = true;
+    expect((await enviar("/chat/pausar", "POST")).status).toBe(202);
+    expect((await enviar("/chat/cancelar", "POST")).status).toBe(202);
+    await aguardarOcioso();
+    const estado = (await (await fetch(`${base}/chat`)).json()) as { mensagens: { situacao: string }[] };
+    expect(estado.mensagens[1]).toEqual(expect.objectContaining({ situacao: "cancelada" }));
+    expect(estado.mensagens[1]).not.toHaveProperty("pausadaDesde");
   });
 
   it("POST /chat/limpar: 409 durante a resposta, 200 com zero mensagens depois", async () => {

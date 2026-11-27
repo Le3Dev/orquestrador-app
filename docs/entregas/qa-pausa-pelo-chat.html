@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>QA: chat rápido propõe pausar e continuar orquestradores</title>
+<style>
+  :root { --bg:#fff; --fg:#1d1d1f; --mut:#666; --bd:#e3e3e3; --ok:#1a7f37; --okbg:#e7f6ec; --ko:#b42318; --kobg:#fdecea; --ob:#8a5a00; --obbg:#fff4dc; --code:#f5f5f7; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161618; --fg:#ececec; --mut:#9a9a9a; --bd:#333; --okbg:#12301c; --kobg:#3a1714; --obbg:#3a2c10; --code:#222226; --ok:#5ad17f; --ko:#ff7b6e; --ob:#f0b94a; } }
+  body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:var(--bg); color:var(--fg); max-width: 1100px; margin: 24px auto; padding: 0 20px; }
+  h1 { font-size: 22px; margin-bottom: 4px; } h2 { font-size: 17px; margin-top: 32px; border-bottom:1px solid var(--bd); padding-bottom:4px; }
+  .mut { color: var(--mut); }
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; }
+  th, td { border: 1px solid var(--bd); padding: 6px 8px; vertical-align: top; text-align: left; }
+  th { background: var(--code); font-weight: 600; }
+  code, pre { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: var(--code); border-radius: 4px; }
+  code { padding: 1px 4px; } pre { padding: 8px 10px; overflow-x: auto; white-space: pre-wrap; margin: 6px 0; }
+  .selo { display:inline-block; font-weight:700; font-size:12px; padding:2px 8px; border-radius: 10px; white-space: nowrap; }
+  .ok { color: var(--ok); background: var(--okbg); } .ko { color: var(--ko); background: var(--kobg); } .ob { color: var(--ob); background: var(--obbg); }
+  .resumo { display:flex; gap:12px; flex-wrap: wrap; margin: 12px 0; }
+  .resumo div { border:1px solid var(--bd); border-radius:8px; padding:8px 14px; }
+  .resumo b { font-size: 20px; display:block; }
+  .caso { border:1px solid var(--bd); border-radius:8px; padding: 10px 14px; margin: 12px 0; }
+  .caso h3 { margin: 0 0 6px; font-size: 15px; display:flex; gap:10px; align-items:center; }
+  dl { display:grid; grid-template-columns: 90px 1fr; gap: 4px 10px; margin: 0; } dt { font-weight:600; color: var(--mut); } dd { margin: 0; }
+</style>
+</head>
+<body>
+<h1>QA: o chat rápido propõe pausar e continuar orquestradores</h1>
+<p class="mut">Branch <code>feature/pausar-orquestrador</code>, commit <code>c2cbd4c</code>. Executado em 22/11/2026 na cópia de teste já aberta (pid 26209, servidor na porta 52684, dados isolados). Claude Code real no chat (Sonnet, esforço médio) e nos orquestradores (Haiku). Nenhum arquivo do projeto alterado além deste relatório.</p>
+
+<div class="resumo">
+  <div><b class="selo ok">21</b>casos passaram</div>
+  <div><b class="selo ko">2</b>casos falharam (mesmo bug)</div>
+  <div><b class="selo ob">3</b>observações</div>
+  <div><b>63/63</b>testes unitários da feature</div>
+</div>
+
+<h2>Como foi testado</h2>
+<ul>
+  <li><b>Chat:</b> <code>POST /api/chat/mensagens</code> com o texto em linguagem natural; espera até o chat ficar ocioso e lê <code>acoes</code> e <code>avisos</code> da mensagem do Claude. O estado de todos os orquestradores foi lido antes e depois de cada resposta (caso 7). Respostas entre 9 e 17 s.</li>
+  <li><b>Clique no cartão:</b> réplica fiel de <code>CartaoDePausaDoOrquestrador.executar()</code> (<code>tsx:23-66</code> e <code>81-115</code>): relê <code>GET /api/orquestradores</code>, resolve por nome sem diferenciar maiúsculas e pela pasta normalizada, aplica <code>motivoDaRecusa</code> e só então chama <code>POST /pausar</code> ou <code>/continuar</code>; 409/404 viram erro sem "tentar de novo". Cliques concorrentes rodam N execuções em paralelo (dois cartões ou duas janelas).</li>
+  <li><b>"Pelo terminal":</b> as mesmas rotas chamadas direto, como faz o botão do terminal.</li>
+  <li><b>Processos:</b> <code>ps</code> para conferir o estado <code>T</code> (congelado) e a volta para <code>S/R</code>.</li>
+  <li><b>Orquestradores:</b> <code>QA pausa A</code> (<code>/tmp/qa-pausa-orquestrador/a</code>), <code>QA pausa B</code> (<code>/tmp/qa-pausa-orquestrador/b</code>) e três criados para ambiguidade em <code>/tmp/qa-pausa-pelo-chat/a</code>: <code>QA pausa A</code> (e2a98ec1), <code>qa pausa a</code> (4c538b21) e outro <code>QA pausa A</code> (1b0facc5). O app aceitou criar os três na mesma pasta (HTTP 201). Pedido longo: "Rode no Bash exatamente: sleep 900…". No máximo dois rodando ao mesmo tempo.</li>
+</ul>
+
+<h2>Plano: critério, teste e tipo</h2>
+<table>
+<tr><th>Critério</th><th>Teste</th><th>Tipo</th><th>Resultado</th></tr>
+<tr><td>1. Linguagem natural gera a ação certa</td><td>1a a 1f</td><td>E2E com Claude real (API)</td><td><span class="selo ok">passou</span></td></tr>
+<tr><td>2. Nome ambíguo nunca pausa o errado</td><td>2a a 2d</td><td>E2E com Claude real + réplica do clique</td><td><span class="selo ko">falhou</span> (2b, 2c)</td></tr>
+<tr><td>3. Inexistente, ocioso, já pausado</td><td>3a a 3d</td><td>E2E + réplica + API</td><td><span class="selo ok">passou</span></td></tr>
+<tr><td>4. Estado muda entre proposta e clique</td><td>4a a 4d</td><td>réplica + API + ps</td><td><span class="selo ok">passou</span> (4d observação)</td></tr>
+<tr><td>5. Clique repetido: uma ação só</td><td>5a, 5b</td><td>réplica concorrente + teste de componente temporário</td><td><span class="selo ok">passou</span> (observação no 5b)</td></tr>
+<tr><td>6. Continuar em congelado e em retomada</td><td>6a a 6c</td><td>E2E + réplica + ps</td><td><span class="selo ok">passou</span></td></tr>
+<tr><td>7. O chat nunca executa sozinho</td><td>todas as 12 respostas</td><td>E2E (estado antes e depois)</td><td><span class="selo ok">passou</span></td></tr>
+<tr><td>8. Testes unitários da feature</td><td>InstrucoesDoChat.test.ts, CartaoDePausaDoOrquestrador.test.tsx</td><td>unitário, <code>--maxWorkers=1</code></td><td><span class="selo ok">passou</span></td></tr>
+</table>
+
+<h2>Bug encontrado</h2>
+<div class="caso">
+<h3><span class="selo ko">bug</span> Homônimos na mesma pasta: a ação e o clique sempre caem no primeiro da lista</h3>
+<dl>
+<dt>Passos</dt><dd>1. Criar dois orquestradores em <code>/tmp/qa-pausa-pelo-chat/a</code>: <code>QA pausa A</code> e <code>qa pausa a</code> (o app aceita; também aceita dois <code>QA pausa A</code> idênticos). 2. Deixar os dois trabalhando. 3. No chat: <i>pausa o "qa pausa a" (o de letras minúsculas) da pasta /tmp/qa-pausa-pelo-chat/a</i>. 4. Clicar no cartão.</dd>
+<dt>Esperado</dt><dd>Pausar o <code>qa pausa a</code> (4c538b21), ou o chat pedir para escolher; nunca pausar o outro.</dd>
+<dt>Obtido</dt><dd>O Claude entendeu o certo ("O "qa pausa a" (minúsculas)… está trabalhando"), mas a ação chegou à tela como <code>{"nome":"QA pausa A"}</code>; o clique pausou o <b>e2a98ec1 (QA pausa A)</b> e o pedido escolhido seguiu trabalhando. Com dois nomes idênticos, o segundo (1b0facc5) não é alcançável pelo chat: o cartão sempre resolve o primeiro e, já pausado este, responde "já está pausado".</dd>
+<dt>Causa</dt><dd><code>src/chat/InstrucoesDoChat.ts:456-462</code> (<code>orquestradorIndicado</code>) usa <code>find</code> com comparação sem maiúsculas e devolve o primeiro; <code>:521</code> grava <code>achado.nome</code>, trocando o nome que o Claude escreveu. No clique, <code>web/src/componentes/chat/CartaoDePausaDoOrquestrador.tsx:29-37</code> (<code>resolver</code>) repete o <code>find</code> sem maiúsculas. Raiz: a criação aceita nome repetido na mesma pasta (<code>POST /orquestradores</code> → <code>ServicoDeOrquestracao.criarOrquestrador</code>), então nome+pasta não identifica um orquestrador.</dd>
+<dt>Correção</dt><dd>Preferível: levar o <code>id</code> do orquestrador no bloco de contexto e na ação (o cartão resolve por id e só confere nome e pasta). Mínimo: no servidor e no cartão, casar primeiro o nome exato; se houver mais de um candidato (exato ou sem maiúsculas), ignorar a ação com aviso "há N orquestradores chamados X nessa pasta". Opcional: recusar na criação nome repetido (sem maiúsculas) na mesma pasta.</dd>
+<dt>Teste que falha</dt><dd>Unitário a acrescentar em <code>InstrucoesDoChat.test.ts</code>: com <code>QA pausa A</code> e <code>qa pausa a</code> na mesma pasta, <code>separarAcoesDoApp</code> de um bloco com <code>"nome":"qa pausa a"</code> deve devolver <code>qa pausa a</code> (hoje devolve <code>QA pausa A</code>). No cartão: lista com os dois, ação <code>qa pausa a</code>, o clique deve chamar <code>api.pausar</code> com o id do segundo (hoje chama o do primeiro). Reprodução real: casos 2b e 2c abaixo.</dd>
+</dl>
+</div>
+
+<h2>Casos</h2>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 1a. "pausa o QA pausa A" (três homônimos, só um trabalhando)</h3>
+<dl><dt>Esperado</dt><dd>Ação pausar para o que trabalha.</dd>
+<dt>Obtido</dt><dd>Escolheu o certo e explicou por que os outros ficaram de fora.</dd>
+<dt>Evidência</dt><dd><pre>RESPOSTA (13 s): O "QA pausa A" em `/tmp/qa-pausa-orquestrador/a` está trabalhando. Os outros dois com esse nome, em `/tmp/qa-pausa-pelo-chat/a`, estão ociosos…
+ACOES: [{"tipo":"pausar_orquestrador","orquestrador":{"nome":"QA pausa A","pasta":"/tmp/qa-pausa-orquestrador/a"}}]</pre>Detalhe menor: eram três na outra pasta (incluindo <code>qa pausa a</code>), ele disse "os outros dois".</dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 1b. "segura o orquestrador do projeto b" (B trabalhando)</h3>
+<dl><dt>Obtido</dt><dd><pre>RESPOSTA (13 s): O "QA pausa B" (`/tmp/qa-pausa-orquestrador/b`) está trabalhando, então dá para pausar. Confirme clicando no cartão.
+ACOES: [{"tipo":"pausar_orquestrador","orquestrador":{"nome":"QA pausa B","pasta":"/tmp/qa-pausa-orquestrador/b"}}]
+clique: [{"tipo":"feito","modo":"congelado","alvo":"4035bf7f"}]   ps: claude 13397 Ts</pre></dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 1c. "dá play no QA pausa A" (pausado congelado)</h3>
+<dl><dt>Obtido</dt><dd><pre>ACOES: [{"tipo":"continuar_orquestrador","orquestrador":{"nome":"QA pausa A","pasta":"/tmp/qa-pausa-orquestrador/a"}}]</pre>Ignorou os homônimos ociosos e disse "segue de onde parou".</dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 1d. "dá play no B" (pausado congelado)</h3>
+<dl><dt>Obtido</dt><dd><pre>ACOES: [{"tipo":"continuar_orquestrador","orquestrador":{"nome":"QA pausa B","pasta":"/tmp/qa-pausa-orquestrador/b"}}]
+clique: [{"tipo":"feito","modo":"congelado","alvo":"4035bf7f"}]   ps: claude 13397 Ts → Rs</pre></dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 1e. "pausa todos os orquestradores que estão trabalhando" (A e B)</h3>
+<dl><dt>Esperado</dt><dd>Um bloco por orquestrador.</dd>
+<dt>Obtido</dt><dd>Dois cartões, um para A e outro para B; os dois cliques pausaram (congelado).<pre>ACOES: [{"tipo":"pausar_orquestrador",…"QA pausa A"…"/tmp/qa-pausa-orquestrador/a"},{"tipo":"pausar_orquestrador",…"QA pausa B"…"/tmp/qa-pausa-orquestrador/b"}]</pre></dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 1f. "continua o QA pausa A, aquele da pasta qa-pausa-orquestrador" (retomada)</h3>
+<dl><dt>Obtido</dt><dd><pre>RESPOSTA (9 s): … está pausado no modo "continua pela conversa". Ao continuar, ele retoma num pedido novo dentro da mesma conversa…
+ACOES: [{"tipo":"continuar_orquestrador","orquestrador":{"nome":"QA pausa A","pasta":"/tmp/qa-pausa-orquestrador/a"}}]</pre></dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 2a. "pausa o orquestrador" sem nome, dois trabalhando</h3>
+<dl><dt>Obtido</dt><dd><pre>RESPOSTA (9 s): Pedido ambíguo: dois orquestradores estão trabalhando agora, e não sei qual você quer pausar.
+ACOES: []</pre>Sugestão (não é bug): citar os nomes ou usar o bloco de pergunta com as opções.</dd></dl></div>
+
+<div class="caso"><h3><span class="selo ko">falhou</span> 2b. Dois "QA pausa A" idênticos na mesma pasta, os dois trabalhando</h3>
+<dl><dt>Esperado</dt><dd>Perguntar qual ou recusar; nunca pausar o errado.</dd>
+<dt>Obtido</dt><dd>O Claude avisou que o cartão não distingue e mandou o bloco mesmo assim. O clique pausou e2a98ec1; o segundo clique respondeu "já está pausado" e 1b0facc5 seguiu trabalhando, sem forma de pausá-lo pelo chat.<pre>RESPOSTA: Há dois "QA pausa A" em `/tmp/qa-pausa-pelo-chat/a` e os dois estão trabalhando… Incluí um só, que vale para o que o app encontrar primeiro…
+clique 1: [{"tipo":"feito","modo":"congelado","alvo":"e2a98ec1"}]
+clique 2: [{"tipo":"erro","mensagem":"\"QA pausa A\" já está pausado.","alvo":"e2a98ec1"}]
+e2a98ec1 QA pausa A: pausado (congelado)   1b0facc5 QA pausa A: trabalhando</pre></dd></dl></div>
+
+<div class="caso"><h3><span class="selo ko">falhou</span> 2c. "QA pausa A" e "qa pausa a" na mesma pasta, pedido para o de minúsculas</h3>
+<dl><dt>Esperado</dt><dd>Pausar 4c538b21 (<code>qa pausa a</code>).</dd>
+<dt>Obtido</dt><dd>Pausou o outro (e2a98ec1). Ver "Bug encontrado".<pre>RESPOSTA: O "qa pausa a" (minúsculas) em `/tmp/qa-pausa-pelo-chat/a` está trabalhando, então dá para pausar.
+ACOES: [{"tipo":"pausar_orquestrador","orquestrador":{"nome":"QA pausa A","pasta":"/tmp/qa-pausa-pelo-chat/a"}}]
+clique: [{"tipo":"feito","modo":"congelado","alvo":"e2a98ec1"}]
+e2a98ec1 QA pausa A: pausado (congelado)   4c538b21 qa pausa a: trabalhando</pre></dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 2d. Mesmo nome em pastas diferentes</h3>
+<dl><dt>Obtido</dt><dd>Coberto por 1a e 1c: com <code>QA pausa A</code> em duas pastas, a ação sempre veio com a pasta do que estava no estado certo, e o clique atingiu e5c81318.</dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 3a. Inexistente: "pausa o orquestrador Zeta"</h3>
+<dl><dt>Obtido</dt><dd><pre>RESPOSTA (16 s): Não existe nenhum orquestrador chamado "Zeta" na lista… Por isso não incluí o cartão de pausa.
+ACOES: []   AVISOS: []
+cartão forçado: [{"tipo":"erro","mensagem":"\"Zeta\" não existe mais nesta pasta.","repetir":false}]
+API: POST /orquestradores/nao-existe/pausar → 404 {"erro":"Orquestrador não encontrado."}</pre></dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 3b. Ocioso: "pausa o QA pausa B" e "continua o QA pausa B"</h3>
+<dl><dt>Obtido</dt><dd><pre>RESPOSTA (9 s): O "QA pausa B" … está ocioso, e só dá para pausar um orquestrador que esteja trabalhando. Por isso não incluí o cartão de pausa.   ACOES: []
+RESPOSTA (17 s): … está ocioso, não pausado. Só dá para continuar um orquestrador pausado…   ACOES: []
+cartão pausar forçado:    "\"QA pausa B\" não está trabalhando em nenhum pedido."  (repetir: false, sem chamar a API de pausa)
+cartão continuar forçado: "\"QA pausa B\" não está pausado."                       (repetir: false)
+API direta: pausar → 409 mesma mensagem; continuar → 409 mesma mensagem</pre></dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 3c. Já pausado: "segura o orquestrador da pasta /tmp/qa-pausa-orquestrador/a"</h3>
+<dl><dt>Obtido</dt><dd><pre>RESPOSTA (9 s): O "QA pausa A" … já está pausado (congelado) e continua de onde parou quando for retomado. Não precisa de outra ação, então não incluí cartão.   ACOES: []</pre></dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 3d. Pergunta sobre os modos (contexto do chat)</h3>
+<dl><dt>Obtido</dt><dd>Com A em retomada e B trabalhando, o chat explicou os dois modos e disse que "QA pausa A" está como "continua pela conversa", sem cartão. Prova que <code>modoDaPausa</code> chega ao contexto.</dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 4a. Cartão de pausar proposto com o orquestrador rodando; pausado pelo terminal; clique</h3>
+<dl><dt>Obtido</dt><dd><pre>POST /pausar (terminal) → 202 {"pausa":{"modo":"congelado"}}   ps: claude 9443 Ts
+clique: [{"tipo":"erro","mensagem":"\"QA pausa A\" já está pausado.","repetir":false}]  (nenhuma chamada de pausa)</pre></dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 4b. Inverso: cartão de continuar proposto; continuado pelo terminal; clique</h3>
+<dl><dt>Obtido</dt><dd><pre>POST /continuar (terminal) → 202 {"modo":"congelado"}   ps: 9443 Ss
+clique: [{"tipo":"erro","mensagem":"\"QA pausa A\" não está pausado.","repetir":false}]</pre></dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 4c. Orquestrador termina antes do clique</h3>
+<dl><dt>Obtido</dt><dd>Pedido cancelado (o turno termina), depois clique no cartão de pausar: <code>"\"QA pausa A\" não está trabalhando em nenhum pedido."</code>, sem chamar a pausa; processo 9443 já não existia.</dd></dl></div>
+
+<div class="caso"><h3><span class="selo ob">observação</span> 4d. Cartão antigo continua valendo para um pedido novo</h3>
+<dl><dt>Obtido</dt><dd>O cartão "pausar QA pausa A" proposto para o pedido 808738f0 (cancelado) pausou, depois, o turno 22, que é outro pedido. A conversa guarda 10 mensagens com cartões de pausa e, ao recarregar a tela, a etapa volta a "pronto" e todos ficam clicáveis. A linha de estado mostra "trabalhando" antes do clique, então o usuário vê o estado atual, mas não qual pedido será pausado.</dd>
+<dt>Sugestão</dt><dd>Se a intenção for pausar só o pedido da proposta, levar o turno na ação (ou a data da proposta) e recusar quando o turno em andamento for outro.</dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 5a. Três cliques concorrentes (dois cartões, duas janelas)</h3>
+<dl><dt>Obtido</dt><dd>Em todos os casos, uma execução feita e duas recusadas com 409, sem turno duplicado:<pre>pausar:              [409 "já está pausado", feito congelado, 409 "já está pausado"]
+continuar congelado: [409 "não está pausado", feito congelado, 409 "não está pausado"]
+continuar retomada:  [409 "não está pausado", feito retomada, 409 "não está pausado"]  totalDeTurnos 21 → 22 (um turno novo só)</pre></dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 5b. Clique duplo no mesmo cartão (teste de componente temporário, apagado depois)</h3>
+<dl><dt>Obtido</dt><dd>Clique, clique, duplo clique e clique com a releitura pendente, e mais um clique no "pausado ✓": <code>listar</code> 1 vez, <code>pausar</code> 1 vez (passou). <span class="selo ob">observação</span> Dois <code>click()</code> no mesmo ciclo de eventos, sem renderização entre eles: <code>listar</code> 2, <code>pausar</code> 2 (falhou). No navegador o React renderiza entre dois eventos de clique reais, então não se reproduz com mouse; e o servidor responde 409 ao segundo. Ainda assim, a trava de <code>CartaoDePausaDoOrquestrador.tsx:82</code> lê o estado capturado no render; um <code>useRef</code> de "em andamento" fecharia o caso. A suíte do cartão não tem teste de clique repetido.</dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 6a. Continuar em pausa congelada</h3>
+<dl><dt>Obtido</dt><dd>Clique → <code>{"modo":"congelado"}</code>, processo de <code>Ts</code> para <code>Ss/Rs</code>, mesmo turno segue "em_andamento" (A e B).</dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 6b. Continuar em pausa retomada</h3>
+<dl><dt>Obtido</dt><dd>Pausa imediatamente após o envio (sem processo vivo) → <code>{"modo":"retomada"}</code>; o chat apresentou como "continua pela conversa"; o clique devolveu <code>{"modo":"retomada"}</code> e abriu o turno 22 "em_andamento".<pre>ultimoTurno.texto: "Você foi pausado pelo usuário no meio do trabalho. Confira o estado atual da pasta de trabalho, sem desfazer nada, e continue de onde parou."</pre></dd></dl></div>
+
+<div class="caso"><h3><span class="selo ob">observação</span> 6c. Bug conhecido (b) reapareceu</h3>
+<dl><dt>Obtido</dt><dd>Na retomada do 6b o pedido original ("sleep 900…") não foi reenviado: o turno novo só tem a nota de continuação, e o motor nunca tinha visto o pedido. É o bug já conhecido de <code>ServicoDeOrquestracao.ts:607-612</code>; não reinvestigado.</dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 7. O chat nunca executa a pausa sozinho</h3>
+<dl><dt>Obtido</dt><dd>Nas 12 respostas, o estado de todos os orquestradores depois da resposta era igual ao de antes (ex.: após propor pausar A, A seguia "trabalhando"; após propor continuar, seguia "pausado (congelado)"). As mudanças só ocorreram nos cliques.</dd></dl></div>
+
+<div class="caso"><h3><span class="selo ok">passou</span> 8. Testes unitários da feature (<code>--maxWorkers=1</code>)</h3>
+<dl><dt>Obtido</dt><dd><pre>src/chat/InstrucoesDoChat.test.ts                          56 passed (56)   683 ms
+web/src/componentes/chat/CartaoDePausaDoOrquestrador.test.tsx  7 passed (7)   4,86 s</pre>Lacunas: nenhum teste com homônimos que diferem só em maiúsculas (o teste "distingue orquestradores de mesmo nome" usa pastas diferentes) e nenhum de clique repetido no cartão.</dd></dl></div>
+
+<h2>Não testado</h2>
+<ul>
+  <li>Clique real no cartão dentro da janela do Electron e print de tela: evitado para poupar memória; o clique foi reproduzido com a mesma sequência de chamadas da API do <code>executar()</code>, e o render e as travas, pelos testes de componente.</li>
+  <li>Pausa no Windows (retomada nativa) e reinício do app com orquestrador pausado: fora desta máquina e desta instância.</li>
+  <li>Bug conhecido (a), shells fora do grupo congelado: não observado; nenhum <code>sleep 900</code> chegou a aparecer no <code>ps</code>.</li>
+  <li>Bug conhecido (c), lentidão de 2 a 5 min: não observado no chat (9 a 17 s por resposta).</li>
+</ul>
+
+<h2>Estado ao final</h2>
+<pre>e438b527 Teste de pausa @ /Users/pedro/projetos/teste: ocioso
+e5c81318 QA pausa A @ /tmp/qa-pausa-orquestrador/a: ocioso
+4035bf7f QA pausa B @ /tmp/qa-pausa-orquestrador/b: ocioso
+e2a98ec1 QA pausa A @ /tmp/qa-pausa-pelo-chat/a: ocioso
+4c538b21 qa pausa a @ /tmp/qa-pausa-pelo-chat/a: ocioso
+1b0facc5 QA pausa A @ /tmp/qa-pausa-pelo-chat/a: ocioso
+ps (estado T): nenhum   chat: ocioso</pre>
+<p class="mut">Os três homônimos de <code>/tmp/qa-pausa-pelo-chat/a</code> ficaram ociosos na cópia de teste para reproduzir o bug; podem ser removidos depois da correção.</p>
+</body>
+</html>

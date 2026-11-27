@@ -6,11 +6,11 @@ import { type AcoesDoCanvas, ProvedorDoCanvas, type ValorDoCanvas } from "../../
 import type { NoNavegadorDoAgente as TipoDoNo } from "../../shared/canvas/nos";
 import type { ApiDoNavegadorDoAgente, EstadoDoNavegadorDoAgente } from "../../shared/canvas/ponteDoNavegador";
 import type { ResumoDoOrquestrador } from "../../shared/api/tipos";
+import { INTERVALO_DA_COBERTURA_MS } from "../../shared/canvas/medirCorpo";
 import {
   ESPERA_APOS_MOVER_MS,
   ESPERA_DA_COBERTURA_LIVRE_MS,
   ESPERA_DA_FOTO_MS,
-  INTERVALO_DA_COBERTURA_MS,
   INTERVALO_DA_FOTO_MS,
   MENSAGEM_SEM_NAVEGADOR_ABERTO,
   MENSAGEM_SEM_O_APP_DESKTOP,
@@ -234,14 +234,25 @@ describe("NoNavegadorDoAgente", () => {
       await waitFor(() => expect(ponte.api.mostrar).toHaveBeenCalled());
     }
 
-    /** Deixa passar alguns quadros do laço que acompanha o corpo (o relógio manual não anda por isso). */
+    /** Deixa passar alguns quadros do acompanhamento do corpo (o relógio manual não anda por isso). */
     async function esperarQuadros(): Promise<void> {
       await act(async () => new Promise((resolver) => setTimeout(resolver, 60)));
     }
 
     /**
-     * Um relógio manual: o laço lê `Date.now()` para as esperas (depois de mover, cobertura livre), então o teste
-     * anda o tempo sem dormir e sem ficar sujeito à pressa da máquina.
+     * Pede uma medida do corpo com a cobertura já, como um clique ou tecla faz (o acompanhamento em repouso só mede
+     * a cada `INTERVALO_DA_COBERTURA_MS` de tempo real, que o relógio manual não anda), e deixa os quadros passarem.
+     */
+    async function conferirAgora(): Promise<void> {
+      act(() => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "k" }));
+      });
+      await esperarQuadros();
+    }
+
+    /**
+     * Um relógio manual: as esperas (depois de mover, cobertura livre) leem `Date.now()`, então o teste anda o
+     * tempo sem dormir e sem ficar sujeito à pressa da máquina.
      */
     function relogioManual(inicio = 1_000_000): { avancar: (ms: number) => void } {
       let agora = inicio;
@@ -623,6 +634,34 @@ describe("NoNavegadorDoAgente", () => {
         expect(consulta.mock.calls.length).toBeLessThanOrEqual(9 * 5);
       });
 
+      it("parada, não pede quadro nenhum; o pan mede por quadro, a vista volta uma vez no retângulo novo e para depois", async () => {
+        const quadros = vi.spyOn(window, "requestAnimationFrame");
+        renderizar();
+        await esperarAVista();
+        // Os quadros de folga do começo acabam e nada mais é pedido.
+        await act(async () => new Promise((resolver) => setTimeout(resolver, 150)));
+        quadros.mockClear();
+        await act(async () => new Promise((resolver) => setTimeout(resolver, INTERVALO_DA_COBERTURA_MS * 2)));
+        expect(quadros).not.toHaveBeenCalled();
+
+        // Pan: a câmera muda e o corpo vai junto. A vista desce na hora e sobe de novo, já no lugar novo.
+        vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ ...retanguloDoCorpo, left: 140 } as DOMRect);
+        moverACamera(40, 0);
+        expect(quadros).toHaveBeenCalled();
+        expect(ponte.api.ocultar).toHaveBeenCalledTimes(1);
+        await waitFor(() => expect(ponte.api.mostrar).toHaveBeenCalledTimes(2));
+        expect(ponte.api.mostrar).toHaveBeenLastCalledWith("o1", expect.objectContaining({ x: 140 }));
+
+        // Assentado, nada mais é pedido nem mandado.
+        await act(async () => new Promise((resolver) => setTimeout(resolver, 150)));
+        quadros.mockClear();
+        await act(async () => new Promise((resolver) => setTimeout(resolver, INTERVALO_DA_COBERTURA_MS * 2)));
+        expect(quadros).not.toHaveBeenCalled();
+        expect(ponte.api.posicionar).not.toHaveBeenCalled();
+        expect(ponte.api.mostrar).toHaveBeenCalledTimes(2);
+        expect(ponte.api.ocultar).toHaveBeenCalledTimes(1);
+      });
+
       it("fechar a janela (desmontar) devolve a vista para baixo da tela: o agente segue usando", async () => {
         const { tela } = renderizar();
         await esperarAVista();
@@ -765,31 +804,34 @@ describe("NoNavegadorDoAgente", () => {
         document.elementFromPoint = vi.fn(corpoDoNavegador);
         renderizar();
         await esperarAVista();
+        // Menos que a espera, para que dois passos livres seguidos ainda não bastem.
+        const passo = ESPERA_DA_COBERTURA_LIVRE_MS / 3;
 
         // Um painel cobre o corpo: a vista desce.
         document.elementFromPoint = vi.fn(() => painel);
-        relogio.avancar(INTERVALO_DA_COBERTURA_MS + 10);
-        await waitFor(() => expect(ponte.api.ocultar).toHaveBeenCalledTimes(1));
+        relogio.avancar(passo);
+        await conferirAgora();
+        expect(ponte.api.ocultar).toHaveBeenCalledTimes(1);
 
         // Livre, mas ainda não por 300 ms seguidos: continua embaixo (sem a histerese, subiria agora).
         document.elementFromPoint = vi.fn(corpoDoNavegador);
-        relogio.avancar(INTERVALO_DA_COBERTURA_MS + 10);
-        await esperarQuadros();
+        relogio.avancar(passo);
+        await conferirAgora();
         expect(ponte.api.mostrar).toHaveBeenCalledTimes(1);
 
         // Cobre de novo no meio da espera: ela recomeça do zero.
         document.elementFromPoint = vi.fn(() => painel);
-        relogio.avancar(INTERVALO_DA_COBERTURA_MS + 10);
-        await esperarQuadros();
+        relogio.avancar(passo);
+        await conferirAgora();
         document.elementFromPoint = vi.fn(corpoDoNavegador);
-        relogio.avancar(INTERVALO_DA_COBERTURA_MS + 10);
-        await esperarQuadros();
-        relogio.avancar(INTERVALO_DA_COBERTURA_MS + 10);
-        await esperarQuadros();
+        relogio.avancar(passo);
+        await conferirAgora();
+        relogio.avancar(passo);
+        await conferirAgora();
         expect(ponte.api.mostrar).toHaveBeenCalledTimes(1);
 
-        // Livre por mais que a espera, sem interrupção: a vista sobe.
-        relogio.avancar(ESPERA_DA_COBERTURA_LIVRE_MS + 10);
+        // Livre por mais que a espera, sem interrupção: a vista sobe (o temporizador mede de novo no fim da espera).
+        relogio.avancar(passo + 10);
         await waitFor(() => expect(ponte.api.mostrar).toHaveBeenCalledTimes(2));
         expect(ponte.api.ocultar).toHaveBeenCalledTimes(1);
         painel.remove();
@@ -806,11 +848,11 @@ describe("NoNavegadorDoAgente", () => {
 
         for (let rodada = 0; rodada < 4; rodada += 1) {
           document.elementFromPoint = vi.fn(() => document.querySelector(".corpo-do-navegador"));
-          relogio.avancar(INTERVALO_DA_COBERTURA_MS + 10);
-          await esperarQuadros();
+          relogio.avancar(ESPERA_DA_COBERTURA_LIVRE_MS / 3);
+          await conferirAgora();
           document.elementFromPoint = vi.fn(() => painel);
-          relogio.avancar(INTERVALO_DA_COBERTURA_MS + 10);
-          await esperarQuadros();
+          relogio.avancar(ESPERA_DA_COBERTURA_LIVRE_MS / 3);
+          await conferirAgora();
         }
 
         expect(ponte.api.mostrar).not.toHaveBeenCalled();

@@ -1,4 +1,4 @@
-import { memo, type ReactNode, useEffect, useState } from "react";
+import { memo, type ReactNode, useState } from "react";
 
 import { ehAnexoDeImagem } from "../../shared/anexos";
 import { api, mensagemDeErro } from "../../shared/api/cliente";
@@ -47,16 +47,19 @@ const SIMBOLOS: Readonly<Record<TipoDeLinhaDoLog, ReactNode>> = {
   erro: "✗",
 };
 
-const QUADROS_DO_GIRADOR = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const QUADROS_DO_GIRADOR = "⠋\n⠙\n⠹\n⠸\n⠼\n⠴\n⠦\n⠧\n⠇\n⠏";
 
-/** O "spinner" dos terminais. Só existe enquanto há trabalho em andamento. */
+/**
+ * O "spinner" dos terminais. Só existe enquanto há trabalho em andamento. Os
+ * quadros trocam por animação CSS (`.girador-do-terminal`, 90 ms cada), e não
+ * por timer: nada re-renderiza, e o giro pausa com o canvas em movimento.
+ */
 function Girador() {
-  const [quadro, setQuadro] = useState(0);
-  useEffect(() => {
-    const intervalo = setInterval(() => setQuadro((atual) => (atual + 1) % QUADROS_DO_GIRADOR.length), 90);
-    return () => clearInterval(intervalo);
-  }, []);
-  return <span className="text-active">{QUADROS_DO_GIRADOR[quadro]}</span>;
+  return (
+    <span className="text-active girador-do-terminal" aria-hidden="true">
+      <span className="girador-do-terminal-quadros">{QUADROS_DO_GIRADOR}</span>
+    </span>
+  );
 }
 
 /**
@@ -138,6 +141,7 @@ function SinalDoTurno({ turno, sinal }: { turno: TurnoNaTela; sinal: SinalDeVida
   const vida = estadoDeVida(turno, sinal, agora);
   // Os turnos gravados antes dos outros motores não trazem o motor: rodaram no Claude Code.
   const motor = nomeCurtoDoMotor(turno.motor ?? "claude-code");
+  const icone = vida.preocupante ? <IconeAlerta tamanho={12} className="inline-block align-[-1px]" /> : <IconeCoracao className="inline-block align-[-1px]" />;
 
   return (
     <>
@@ -150,15 +154,35 @@ function SinalDoTurno({ turno, sinal }: { turno: TurnoNaTela; sinal: SinalDeVida
       </div>
       <div className={`linha-do-terminal ${vida.preocupante ? "linha-erro" : "linha-sistema"}`}>
         <span />
-        {/* A chave muda a cada sinal: o coração pulsa de novo cada vez que o motor dá notícia. */}
+        {/* A chave muda a cada sinal: o coração pulsa de novo cada vez que o motor dá notícia.
+            A cópia por cima é o laranja do começo, que se apaga (`opacity`, no compositor). */}
         <span key={sinal?.em ?? turno.ultimaAtividadeEm} className="linha-simbolo batimento">
-          {vida.preocupante ? <IconeAlerta tamanho={12} className="inline-block align-[-1px]" /> : <IconeCoracao className="inline-block align-[-1px]" />}
+          {icone}
+          <span className="batimento-cor" aria-hidden="true">
+            {icone}
+          </span>
         </span>
         <span className="linha-texto col-span-2">
           <TextoDoSinal vida={vida} motor={motor} />
         </span>
       </div>
     </>
+  );
+}
+
+/**
+ * No lugar do sinal de vida enquanto o Orquestrador está pausado (o turno congelado):
+ * o silêncio é esperado, então nada de fase correndo nem de aviso de travamento.
+ */
+function LinhaDaPausa() {
+  return (
+    <div className="linha-do-terminal linha-sistema">
+      <span />
+      <span className="linha-simbolo text-warning">⏸</span>
+      <span className="linha-texto col-span-2 text-warning">
+        Orquestrador pausado · o Continuar segue de onde parou
+      </span>
+    </div>
   );
 }
 
@@ -266,6 +290,8 @@ interface PropsDoTurno {
   desconectado: boolean;
   /** Algum pedido da conversa está rodando: as perguntas não podem ser respondidas agora. */
   trabalhando: boolean;
+  /** Este pedido está em andamento, mas congelado pela pausa: sem sinal de vida. */
+  pausado: boolean;
   acoesDoPlano: AcoesDoPlano;
   aoResponderPergunta: (texto: string) => Promise<void>;
 }
@@ -283,6 +309,7 @@ const Turno = memo(function Turno({
   sinal,
   desconectado,
   trabalhando,
+  pausado,
   acoesDoPlano,
   aoResponderPergunta,
 }: PropsDoTurno) {
@@ -373,6 +400,8 @@ const Turno = memo(function Turno({
             </span>
             <span className="linha-texto col-span-2">sem conexão com o servidor — aguardando ele voltar</span>
           </div>
+        ) : pausado ? (
+          <LinhaDaPausa />
         ) : (
           <SinalDoTurno turno={turno} sinal={sinal} />
         ))}
@@ -435,6 +464,8 @@ interface Props {
   acoesDoPlano: AcoesDoPlano;
   /** Envia a resposta às perguntas do último pedido como um pedido novo, pelo envio do prompt; lança se recusar. */
   aoResponderPergunta: (texto: string) => Promise<void>;
+  /** O Orquestrador está pausado: o pedido em andamento (congelado) não mostra o sinal de vida. Padrão: falso. */
+  pausado?: boolean;
 }
 
 /**
@@ -460,6 +491,7 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
   desconectado,
   acoesDoPlano,
   aoResponderPergunta,
+  pausado = false,
 }: Props) {
   const [quantosTurnos, setQuantosTurnos] = useState(TURNOS_POR_PAGINA);
   // Só os últimos turnos são desenhados (poupa memória); os demais continuam no estado.
@@ -529,6 +561,7 @@ export const TranscricaoDoTerminal = memo(function TranscricaoDoTerminal({
           sinal={turno.situacao === "em_andamento" ? sinal : undefined}
           desconectado={desconectado}
           trabalhando={trabalhando}
+          pausado={pausado && turno.situacao === "em_andamento"}
           acoesDoPlano={acoesDoPlano}
           aoResponderPergunta={aoResponderPergunta}
         />

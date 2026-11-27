@@ -17,7 +17,7 @@ import {
 } from "./MotorDeChat";
 import { PreferenciasDoChat } from "./PreferenciasDoChat";
 import { ConversaDoChatArquivada, RepositorioDoChat } from "./RepositorioDoChat";
-import { ServicoDeChat } from "./ServicoDeChat";
+import { DependenciasDoServicoDeChat, ID_DO_CHAT, ServicoDeChat } from "./ServicoDeChat";
 import { SubagenteDoChat } from "./SubagentesDoChat";
 
 const raiz = path.resolve("/projetos");
@@ -125,7 +125,31 @@ class ArmazemFalso implements ArmazemDeAnexos {
   async removerTodos(): Promise<void> {}
 }
 
+/**
+ * Congelador do teste: finge congelar o processo do chat quando há um "vivo"
+ * e, como o RegistroDeProcessos, guarda o dono congelado até descongelar.
+ */
+class CongeladorFalso {
+  processoVivo = true;
+  readonly congelados = new Set<string>();
+  readonly chamadas: string[] = [];
+  congelar(id: string): boolean {
+    this.chamadas.push(`congelar:${id}`);
+    if (!this.processoVivo) {
+      return false;
+    }
+    this.congelados.add(id);
+    return true;
+  }
+  descongelar(id: string): boolean {
+    this.chamadas.push(`descongelar:${id}`);
+    return this.congelados.delete(id);
+  }
+}
+
 describe("ServicoDeChat", () => {
+  let congelador: CongeladorFalso;
+  let dependencias: DependenciasDoServicoDeChat;
   let repositorio: RepositorioDoChatEmMemoria;
   let motor: MotorFalso;
   let armazem: ArmazemFalso;
@@ -143,13 +167,15 @@ describe("ServicoDeChat", () => {
     sinais = [];
     ids = 0;
     listarSubagentes = async () => [{ nome: "revisor", descricao: "Revisa o diff procurando bugs", modelo: "herdar" }];
-    servico = new ServicoDeChat({
+    congelador = new CongeladorFalso();
+    dependencias = {
       repositorio,
       motor,
       projetos: {
         listarProjetos: async () => [{ nome: "painel-app", caminho: path.join(raiz, "painel-app") }],
         listarOrquestradores: async () => [
           {
+            id: "o1",
             nome: "Painel",
             pasta: path.join(raiz, "painel-app"),
             situacao: "trabalhando",
@@ -165,13 +191,15 @@ describe("ServicoDeChat", () => {
       subagentes: { listarSubagentesProntos: () => listarSubagentes() },
       anexos: armazem,
       publicador: { publicar: (evento) => publicados.push(evento), sinalizar: (sinal) => sinais.push(sinal) },
-      execucoes: new ControleDeExecucoesEmMemoria(),
+      execucoes: new ControleDeExecucoesEmMemoria(congelador),
       pastaDaSessao: "/dados/chat/sessao",
       pastaDosProjetos: raiz,
       pastaDeArtefatos: "/dados/artefatos/entrada/chat",
       gerarId: () => `id${++ids}`,
       agora: () => new Date("2026-11-04T12:00:00Z"),
-    });
+      podePausar: true,
+    };
+    servico = new ServicoDeChat(dependencias);
   });
 
   async function aguardarMotor(quantas = 1): Promise<void> {
@@ -379,6 +407,144 @@ describe("ServicoDeChat", () => {
 
   it("cancelar sem resposta em andamento é recusado", async () => {
     await expect(servico.cancelar()).rejects.toMatchObject({ motivo: "sem_resposta_em_andamento" });
+  });
+
+  describe("pausar e continuar a resposta", () => {
+    it("pausar congela o processo, marca a resposta e mantém a conversa em andamento", async () => {
+      const { mensagemId } = await servico.perguntar({ texto: "oi" });
+      await aguardarMotor();
+
+      await expect(servico.pausar()).resolves.toEqual({ pausada: true });
+
+      expect(congelador.congelados.has(ID_DO_CHAT)).toBe(true);
+      expect(publicados.at(-1)).toMatchObject({
+        tipo: "resposta_pausada",
+        mensagemId,
+        desde: "2026-11-04T12:00:00.000Z",
+      });
+      const estado = servico.estado();
+      expect(estado.situacao).toBe("respondendo");
+      expect(estado.mensagens[1]).toMatchObject({ situacao: "respondendo", pausadaDesde: "2026-11-04T12:00:00.000Z" });
+      await expect(servico.perguntar({ texto: "outra" })).rejects.toMatchObject({ motivo: "em_andamento" });
+    });
+
+    it("continuar descongela e a resposta segue até concluir", async () => {
+      const { mensagemId, conclusao } = await servico.perguntar({ texto: "oi" });
+      await aguardarMotor();
+      await servico.pausar();
+
+      await expect(servico.continuar()).resolves.toEqual({ continuada: true });
+
+      expect(congelador.congelados.size).toBe(0);
+      expect(publicados.at(-1)).toMatchObject({ tipo: "resposta_continuada", mensagemId });
+      expect(servico.estado().mensagens[1]).not.toHaveProperty("pausadaDesde");
+      motor.concluir(sucesso("pronto"));
+      await conclusao;
+      expect(servico.estado().mensagens[1]).toMatchObject({ situacao: "concluida", texto: "pronto" });
+    });
+
+    it("cancelar com a resposta pausada descongela e encerra como cancelada", async () => {
+      const { mensagemId, conclusao } = await servico.perguntar({ texto: "oi" });
+      await aguardarMotor();
+      await servico.pausar();
+
+      await servico.cancelar();
+      await conclusao;
+
+      expect(congelador.congelados.size).toBe(0);
+      expect(publicados.at(-1)).toMatchObject({ tipo: "resposta_cancelada", mensagemId });
+      expect(servico.estado().mensagens[1]).toMatchObject({ situacao: "cancelada" });
+      expect(servico.estado().mensagens[1]).not.toHaveProperty("pausadaDesde");
+      expect(servico.estado().situacao).toBe("ocioso");
+    });
+
+    it("descongela ao fim da resposta mesmo quando ela falha pausada", async () => {
+      const { conclusao } = await servico.perguntar({ texto: "oi" });
+      await aguardarMotor();
+      await servico.pausar();
+
+      // O processo congelado morreu por fora: o motor devolve falha sem passar pelo continuar.
+      motor.concluir({ sucesso: false, motivo: "O processo terminou.", uso: null });
+      await conclusao;
+
+      expect(congelador.congelados.size).toBe(0);
+      expect(servico.estado().mensagens[1]).toMatchObject({ situacao: "falhou" });
+      expect(servico.estado().mensagens[1]).not.toHaveProperty("pausadaDesde");
+      // A próxima pergunta nasce com o dono "chat" livre: nada a congelar de cara.
+      await servico.perguntar({ texto: "de novo" });
+      await aguardarMotor(2);
+      expect(congelador.congelados.size).toBe(0);
+    });
+
+    it("descongela ao fim mesmo quando o motor lança erro", async () => {
+      let derrubar: (erro: Error) => void = () => undefined;
+      motor.responder = (pergunta) => {
+        motor.perguntas.push(pergunta);
+        return new Promise((_resolver, rejeitar) => {
+          derrubar = rejeitar;
+        });
+      };
+      const { conclusao } = await servico.perguntar({ texto: "oi" });
+      await aguardarMotor();
+      await servico.pausar();
+
+      derrubar(new Error("motor caiu"));
+      await conclusao;
+
+      expect(congelador.congelados.size).toBe(0);
+      expect(servico.estado().mensagens[1]).toMatchObject({ situacao: "falhou" });
+    });
+
+    it("pausar sem resposta em andamento é recusado", async () => {
+      await expect(servico.pausar()).rejects.toMatchObject({ motivo: "sem_resposta_em_andamento" });
+      expect(congelador.chamadas).toEqual([]);
+    });
+
+    it("pausar de novo uma resposta pausada é recusado sem congelar outra vez", async () => {
+      await servico.perguntar({ texto: "oi" });
+      await aguardarMotor();
+      await servico.pausar();
+
+      await expect(servico.pausar()).rejects.toMatchObject({ motivo: "ja_pausada" });
+      expect(congelador.chamadas.filter((chamada) => chamada.startsWith("congelar"))).toHaveLength(1);
+    });
+
+    it("pausar sem processo para congelar é recusado e não marca a resposta", async () => {
+      congelador.processoVivo = false;
+      await servico.perguntar({ texto: "oi" });
+      await aguardarMotor();
+
+      await expect(servico.pausar()).rejects.toMatchObject({ motivo: "pausa_indisponivel" });
+      expect(servico.estado().mensagens[1]).not.toHaveProperty("pausadaDesde");
+      expect(publicados.some((evento) => evento.tipo === "resposta_pausada")).toBe(false);
+    });
+
+    it("no Windows (sem como congelar) o estado avisa e pausar é recusado sem tentar", async () => {
+      servico = new ServicoDeChat({ ...dependencias, podePausar: false });
+      await servico.perguntar({ texto: "oi" });
+      await aguardarMotor();
+
+      expect(servico.estado().podePausar).toBe(false);
+      await expect(servico.pausar()).rejects.toMatchObject({ motivo: "pausa_indisponivel" });
+      expect(congelador.chamadas.filter((chamada) => chamada.startsWith("congelar"))).toEqual([]);
+    });
+
+    it("continuar sem pausa é recusado", async () => {
+      await expect(servico.continuar()).rejects.toMatchObject({ motivo: "sem_pausa" });
+      await servico.perguntar({ texto: "oi" });
+      await aguardarMotor();
+      await expect(servico.continuar()).rejects.toMatchObject({ motivo: "sem_pausa" });
+    });
+
+    it("reinício com a resposta pausada a marca como interrompida", async () => {
+      await servico.perguntar({ texto: "oi" });
+      await aguardarMotor();
+      await servico.pausar();
+
+      await expect(servico.interromperRespostaPendente()).resolves.toBe(true);
+      expect(servico.estado().mensagens[1]).toMatchObject({ situacao: "falhou", avisos: ["interrompida"] });
+      expect(servico.estado().mensagens[1]).not.toHaveProperty("pausadaDesde");
+    });
   });
 
   it("falha do motor vira resposta_falhou com o motivo", async () => {

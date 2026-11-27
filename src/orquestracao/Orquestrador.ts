@@ -12,6 +12,7 @@ import { CausaDaRecuperacao, EventoDeOrquestracao, EventoDoMotor, UsoDoTurno } f
 import { ModoDoTurno } from "./ModoDoTurno";
 import { ehMotor, Motor, MOTOR_PADRAO } from "./Motor";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
+import { DadosDaPausa, ehDadosDaPausa, ModoDaPausa } from "./Pausa";
 import {
   DadosDoPedidoNaFila,
   MotivoDaRetiradaDaFila,
@@ -31,7 +32,8 @@ export const TAMANHO_MAXIMO_DO_NOME = 60;
 /** Quantos pedidos cabem na fila de um Orquestrador. */
 export const LIMITE_DA_FILA = 10;
 
-export type SituacaoDoOrquestrador = "ocioso" | "trabalhando";
+/** `pausado`: sempre que há uma pausa (ver ADR-51), com o turno congelado ou já encerrado como `pausado`. */
+export type SituacaoDoOrquestrador = "ocioso" | "trabalhando" | "pausado";
 
 /** O nome aparado, de 1 a `TAMANHO_MAXIMO_DO_NOME` caracteres: vale ao criar e ao renomear. */
 function nomeValido(nome: string): string {
@@ -138,6 +140,8 @@ export interface DadosDoOrquestrador {
    * antes dos outros motores: vale nenhum.
    */
   liberaEmDosMotores?: Partial<Record<Motor, string>> | undefined;
+  /** A pausa pedida pelo usuário (ver ADR-51). Ausente nos dados gravados antes dela: vale nenhuma. */
+  pausa?: DadosDaPausa | null | undefined;
 }
 
 export interface NovoOrquestrador {
@@ -181,6 +185,7 @@ export class Orquestrador {
     /** As sessões criadas pelos motores que não são o Claude Code (o Claude usa `sessaoAtual`). */
     private sessoesDosOutrosMotores: Partial<Record<Motor, string>>,
     private liberaEmPorMotor: Partial<Record<Motor, string>>,
+    private pausaAtual: DadosDaPausa | null,
   ) {}
 
   static criar(novo: NovoOrquestrador): Orquestrador {
@@ -199,6 +204,7 @@ export class Orquestrador {
       null,
       {},
       {},
+      null,
     );
   }
 
@@ -221,6 +227,7 @@ export class Orquestrador {
       // A sessão do Claude Code vive em `sessaoId`: uma entrada dele aqui não vale.
       textosPorMotor(dados.sessoesDosMotores, (motor) => motor !== MOTOR_PADRAO),
       textosPorMotor(dados.liberaEmDosMotores, () => true),
+      ehDadosDaPausa(dados.pausa) ? { desde: dados.pausa.desde, modo: dados.pausa.modo } : null,
     );
   }
 
@@ -384,7 +391,79 @@ export class Orquestrador {
   }
 
   get situacao(): SituacaoDoOrquestrador {
+    if (this.pausaAtual !== null) {
+      return "pausado";
+    }
     return this.turnoEmAndamento === null ? "ocioso" : "trabalhando";
+  }
+
+  /** A pausa pedida pelo usuário, ou `null` sem nenhuma (ver ADR-51). */
+  get pausa(): DadosDaPausa | null {
+    return this.pausaAtual === null ? null : { ...this.pausaAtual };
+  }
+
+  /**
+   * Confere se dá para pausar agora: só com um turno em andamento e sem outra
+   * pausa. Vem antes de congelar os processos, para não parar nada à toa.
+   */
+  conferirPausa(): void {
+    if (this.pausaAtual !== null) {
+      throw new ErroDeOrquestracao("orquestrador_pausado", `"${this.nome}" já está pausado.`);
+    }
+    if (this.turnoEmAndamento === null) {
+      throw new ErroDeOrquestracao("sem_turno_em_andamento", `"${this.nome}" não está trabalhando em nenhum pedido.`);
+    }
+  }
+
+  /**
+   * Pausa o turno em andamento. `congelado`: os processos já estão parados e
+   * o turno segue em andamento. `retomada`: o processo vai ser encerrado, e o
+   * turno termina `pausado` (`encerrarTurnoPausado`).
+   */
+  pausar(modo: ModoDaPausa, agora: Date): EventoDeOrquestracao {
+    this.conferirPausa();
+    const turno = this.turnoEmAndamento as Turno;
+    this.pausaAtual = { desde: agora.toISOString(), modo };
+    return { tipo: "orquestrador_pausado", orquestradorId: this.id, turnoId: turno.id, pausa: { ...this.pausaAtual } };
+  }
+
+  /**
+   * O turno pausado terminou sem processo para continuar: fica `pausado`, e a
+   * pausa passa a `retomada`. Se ela estava `congelado` (o processo morreu ou
+   * o app fechou), devolve o `orquestrador_pausado` do modo novo; senão `null`.
+   */
+  encerrarTurnoPausado(turnoId: string, agora: Date): EventoDeOrquestracao | null {
+    const turno = this.turnoAtivo(turnoId);
+    turno.pausar(agora);
+    const anterior = this.pausaAtual;
+    this.pausaAtual = { desde: anterior?.desde ?? agora.toISOString(), modo: "retomada" };
+    if (anterior !== null && anterior.modo === "retomada") {
+      return null;
+    }
+    return { tipo: "orquestrador_pausado", orquestradorId: this.id, turnoId, pausa: { ...this.pausaAtual } };
+  }
+
+  /** Sai da pausa; `sem_pausa` se não havia uma. */
+  continuar(): EventoDeOrquestracao {
+    if (this.pausaAtual === null) {
+      throw new ErroDeOrquestracao("sem_pausa", `"${this.nome}" não está pausado.`);
+    }
+    const { modo } = this.pausaAtual;
+    this.pausaAtual = null;
+    return { tipo: "orquestrador_continuado", orquestradorId: this.id, modo };
+  }
+
+  /**
+   * Sai da pausa porque o usuário cancelou, ou porque o turno concluiu antes
+   * de a pausa valer. Sem pausa, `null`.
+   */
+  limparPausa(cancelado: boolean): EventoDeOrquestracao | null {
+    if (this.pausaAtual === null) {
+      return null;
+    }
+    const { modo } = this.pausaAtual;
+    this.pausaAtual = null;
+    return { tipo: "orquestrador_continuado", orquestradorId: this.id, modo, ...(cancelado ? { cancelado: true as const } : {}) };
   }
 
   get ultimoTurno(): Turno | null {
@@ -430,9 +509,14 @@ export class Orquestrador {
    * Guarda um pedido no fim da fila. Vale com ou sem turno em andamento: sem
    * turno, o pedido espera até o usuário mandar enviar.
    */
-  enfileirarPedido(pedido: PedidoNaFila): EventoDeOrquestracao {
+  enfileirarPedido(pedido: PedidoNaFila, naFrente = false): EventoDeOrquestracao {
     if (this.filaAtual.length >= LIMITE_DA_FILA) {
       throw new ErroDeFilaCheia(`A fila de "${this.nome}" está cheia (máximo ${LIMITE_DA_FILA} pedidos).`);
+    }
+    if (naFrente) {
+      // A mensagem mandada com o Orquestrador congelado (ver ADR-51): sai antes das outras.
+      this.filaAtual.unshift(pedido);
+      return { tipo: "pedido_enfileirado", pedido: pedido.paraDados(), naFrente: true };
     }
     this.filaAtual.push(pedido);
     return { tipo: "pedido_enfileirado", pedido: pedido.paraDados() };
@@ -525,6 +609,12 @@ export class Orquestrador {
    * fim de cada turno, então um worktree registrado aqui é um que ficou.
    */
   limparConversa(novaSessaoId: string): EventoDeOrquestracao {
+    if (this.pausaAtual !== null) {
+      throw new ErroDeOrquestracao(
+        "orquestrador_pausado",
+        `"${this.nome}" está pausado. Continue ou cancele o pedido pausado antes de limpar a conversa.`,
+      );
+    }
     if (this.turnoEmAndamento !== null) {
       throw new ErroDeOrquestracao(
         "turno_em_andamento",
@@ -557,6 +647,8 @@ export class Orquestrador {
     anexos: readonly Anexo[] = [],
     modo: ModoDoTurno = "execucao",
     motor: Motor = this.configuracaoAtual.motorDoOrquestrador,
+    /** O turno continua a pausa (ver ADR-51): só ele começa com o Orquestrador pausado, e a pausa sai. */
+    continuandoPausa = false,
   ): EventoDeOrquestracao {
     const mensagem = texto.trim();
     if (mensagem === "") {
@@ -578,7 +670,16 @@ export class Orquestrador {
         `"${this.nome}" ainda está trabalhando no pedido anterior. Aguarde terminar ou cancele.`,
       );
     }
+    if (this.pausaAtual !== null && !continuandoPausa) {
+      throw new ErroDeOrquestracao(
+        "orquestrador_pausado",
+        `"${this.nome}" está pausado. Continue, mande uma mensagem ou cancele o pedido pausado.`,
+      );
+    }
 
+    if (continuandoPausa) {
+      this.pausaAtual = null;
+    }
     const dadosDosAnexos = anexos.map((anexo) => anexo.paraDados());
     this.turnos.push(Turno.iniciar(turnoId, mensagem, agora, dadosDosAnexos, modo, motor));
     // Seja a própria retomada ou um pedido do usuário, a marcada deixa de valer.
@@ -684,11 +785,22 @@ export class Orquestrador {
     return { tipo: "turno_falhou", turnoId, motivo };
   }
 
-  /** Usado ao reabrir o histórico: um turno que estava rodando quando o servidor parou. */
+  /**
+   * Usado ao reabrir o histórico: um turno que estava rodando quando o servidor parou.
+   * Pausado, ele não é interrompido: termina `pausado` e a pausa passa a
+   * `retomada` (o processo congelado morreu junto com o servidor; ver ADR-51).
+   */
   interromperTurnoEmAndamento(agora: Date): EventoDeOrquestracao | null {
     const turno = this.turnoEmAndamento;
     if (turno === null) {
+      if (this.pausaAtual?.modo === "congelado") {
+        // Pausa congelada sem turno: nada a seguir no mesmo processo.
+        this.pausaAtual = { ...this.pausaAtual, modo: "retomada" };
+      }
       return null;
+    }
+    if (this.pausaAtual !== null) {
+      return this.encerrarTurnoPausado(turno.id, agora);
     }
     turno.interromper(agora);
     return { tipo: "turno_interrompido", turnoId: turno.id };
@@ -710,6 +822,7 @@ export class Orquestrador {
       retomadaPendente: this.retomadaAtual === null ? null : { ...this.retomadaAtual },
       sessoesDosMotores: { ...this.sessoesDosOutrosMotores },
       liberaEmDosMotores: { ...this.liberaEmPorMotor },
+      pausa: this.pausaAtual === null ? null : { ...this.pausaAtual },
     };
   }
 

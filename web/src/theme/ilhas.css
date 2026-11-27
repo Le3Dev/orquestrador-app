@@ -218,7 +218,6 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   color: var(--muted);
 }
 .selo-do-item-ativo { color: var(--active); }
-.selo-do-item-ativo svg { animation: giro-do-selo 1.6s linear infinite; }
 @keyframes giro-do-selo { to { transform: rotate(360deg); } }
 .texto-do-item { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .texto-do-item strong {
@@ -272,7 +271,12 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
   font: 600 12.5px/1 var(--fonte-mono);
   white-space: nowrap;
 }
-.giro-do-contador { animation: giro-do-selo 1.6s linear infinite; }
+/* O ícone que gira enquanto alguém trabalha. O giro é do span em volta do svg
+ * (do mesmo tamanho dele): no svg, o Chromium não leva a animação ao
+ * compositor (compositeFailed 1024, transform dependente da caixa) e ela pedia
+ * um quadro inteiro do main thread a cada vsync, com o Layerize da página toda,
+ * durante todo o streaming. No span, gira só no compositor. */
+.giro-do-contador { display: inline-flex; animation: giro-do-selo 1.6s linear infinite; }
 .texto-do-contador { font-weight: 500; font-size: 12px; }
 .anel-da-ilha {
   display: inline-flex;
@@ -392,14 +396,15 @@ body > :not(#root) * { -webkit-app-region: no-drag; }
 
 /* Chat embaixo com o desenho ativo: a barra de chat sai da frente da ilha de desenho, para a direita. */
 .react-flow__panel.painel-do-chat.painel-do-chat-com-desenho.bottom.center {
-  --largura-da-barra-de-desenho: 641px;
+  /* 641 + 32 do "Limpar tudo" (botão de 30 + 2 de vão). */
+  --largura-da-barra-de-desenho: 673px;
   /* A margem de 15px do painel do React Flow completa o vão de 16px. */
   left: calc(66px + var(--largura-da-barra-de-desenho) + 1px);
   transform: none;
   width: min(720px, calc(100% - (66px + var(--largura-da-barra-de-desenho) + 16px) - 231px));
 }
 /* Sem espaço ao lado: o chat sobe, acima da ilha de desenho. */
-@media (width < 1360px) {
+@media (width < 1392px) {
   .react-flow__panel.painel-do-chat.painel-do-chat-com-desenho.bottom.center {
     left: 50%;
     transform: translateX(-50%);

@@ -2,6 +2,7 @@ import type {
   CausaDaRecuperacao,
   CausaDaTrocaDeMotor,
   DadosDaConfiguracao,
+  DadosDaPausa,
   DadosDaRetomada,
   DadosDoAnexo,
   DadosDoConsumoDoTurno,
@@ -204,6 +205,12 @@ export interface EstadoDaConversa {
    * poucos segundos). Não muda com o /clear: o nome é do Orquestrador.
    */
   nome: string | null;
+  /**
+   * A pausa segundo os eventos `orquestrador_pausado` e `orquestrador_continuado`
+   * (nula depois de continuar, cancelar ou começar outro pedido). Ausente sem
+   * nenhum desses eventos no histórico: vale a do resumo (ver `pausaDoOrquestrador`).
+   */
+  pausa?: DadosDaPausa | null;
 }
 
 export interface EnderecoDetectado {
@@ -228,6 +235,29 @@ export interface FimDeTurno {
 export interface AvisosDaConversaNova {
   worktreeComAlteracoes: boolean;
   planoDescartado: boolean;
+}
+
+/**
+ * A pausa que a tela mostra. O evento chega na hora e o resumo só na próxima
+ * consulta: vale o evento, se houver algum. Mas o resumo traz o modo mais novo
+ * da mesma pausa (a que era "congelado" vira "retomada" se o processo cai).
+ */
+export function pausaDoOrquestrador(
+  estado: EstadoDaConversa,
+  pausaDoResumo: DadosDaPausa | null | undefined,
+): DadosDaPausa | null {
+  if (estado.pausa === undefined) {
+    return pausaDoResumo ?? null;
+  }
+  if (estado.pausa !== null && pausaDoResumo?.desde === estado.pausa.desde) {
+    return pausaDoResumo;
+  }
+  return estado.pausa;
+}
+
+/** Os Subagentes que executavam quando o processo congelou: não foram cancelados, estão parados com ele. */
+export function subagentePausado(estado: EstadoDaConversa | undefined, subagente: SubagenteNaTela): boolean {
+  return subagente.situacao === "executando" && estado?.pausa?.modo === "congelado";
 }
 
 export const SEM_AVISOS_DA_CONVERSA_NOVA: AvisosDaConversaNova = { worktreeComAlteracoes: false, planoDescartado: false };
@@ -761,6 +791,9 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
   if (evento.tipo === "orquestrador_renomeado") {
     return { ...proximo, nome: evento.nome };
   }
+  if (evento.tipo === "orquestrador_pausado" || evento.tipo === "orquestrador_continuado") {
+    return aplicarPausa(proximo, evento);
+  }
   if (evento.tipo === "conversa_limpa") {
     // Conversa nova (/clear): os pedidos anteriores ficam arquivados no servidor
     // e saem da tela, e os servidores que eles subiram também. A cota fica: é da
@@ -814,6 +847,8 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
   }
 
   const turnos = evento.tipo === "turno_iniciado" ? [...estado.turnos, novoTurno(evento)] : estado.turnos;
+  // Um pedido novo, ou o cancelamento, tira da pausa (o servidor também avisa ao continuar).
+  const saiuDaPausa = (evento.tipo === "turno_iniciado" || evento.tipo === "turno_cancelado") && estado.pausa != null;
   const [detectado] = enderecosDoEvento(evento);
   // Só o endereço citado na resposta abre a prévia sozinho; sem `origem`, é de ferramenta.
   const citadoNaResposta = evento.tipo === "endereco_local_detectado" && evento.origem === "resposta";
@@ -822,6 +857,7 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
 
   return {
     ...proximo,
+    ...(saiuDaPausa ? { pausa: null } : {}),
     enderecosLocais,
     sequenciasDosEnderecos:
       detectado === undefined
@@ -846,5 +882,46 @@ export function aplicarEvento(estado: EstadoDaConversa, evento: EventoRegistrado
       }
       return { ...alterado, log: log.length > limite ? log.slice(-limite) : log };
     }),
+  };
+}
+
+/**
+ * Pausa e continuação. No modo "congelado" o turno segue em andamento (os
+ * Subagentes também: parados com o processo, não cancelados); no "retomada"
+ * ele termina como "pausado", com os Subagentes que executavam cancelados, e
+ * o Continuar abre um turno novo. A linha vai para o log do último turno.
+ */
+function aplicarPausa(
+  proximo: EstadoDaConversa,
+  evento: Extract<EventoRegistrado, { tipo: "orquestrador_pausado" | "orquestrador_continuado" }>,
+): EstadoDaConversa {
+  const pausa = evento.tipo === "orquestrador_pausado" ? evento.pausa : null;
+  // Saiu da pausa pelo cancelamento: o `turno_cancelado` já conta no log.
+  const texto =
+    evento.tipo === "orquestrador_continuado"
+      ? evento.cancelado === true
+        ? null
+        : evento.modo === "retomada"
+          ? "orquestrador continuado · segue pela conversa"
+          : "orquestrador continuado · de onde parou"
+      : evento.pausa.modo === "congelado"
+        ? "orquestrador pausado · congelado, continua de onde parou"
+        : "orquestrador pausado · o continuar segue pela conversa";
+  // O turno pausado vem no evento; sem ele, vale o último.
+  const turnoId = evento.tipo === "orquestrador_pausado" ? evento.turnoId : undefined;
+  const indice = turnoId === undefined ? proximo.turnos.length - 1 : proximo.turnos.findIndex((turno) => turno.id === turnoId);
+  const turno = proximo.turnos[indice];
+  if (turno === undefined || texto === null) {
+    return { ...proximo, pausa };
+  }
+  const encerrado =
+    pausa?.modo === "retomada" && turno.situacao === "em_andamento" ? encerrar(turno, "pausado", evento.em) : turno;
+  const linha: LinhaDoLog = { origem: "orquestrador", tipo: "sistema", texto, sequencia: evento.sequencia, em: evento.em };
+  return {
+    ...proximo,
+    pausa,
+    turnos: proximo.turnos.map((atual, posicao) =>
+      posicao === indice ? { ...encerrado, log: [...encerrado.log, linha] } : atual,
+    ),
   };
 }

@@ -147,6 +147,90 @@ export const ACESSORIOS_DESENHADOS: Readonly<
   broto: { escuro: [[2, 8]], destaque: [[0, 6], [0, 7], [1, 7], [1, 8], [0, 9], [0, 10], [1, 9]] },
 };
 
+/** Unidade da grade no viewBox do desenho (cada "pixel" é um quadrado deste lado). */
+export const TAMANHO_DO_PIXEL = 4;
+
+/**
+ * Um único caminho SVG para um conjunto de células: cada sequência horizontal
+ * de células vizinhas vira um retângulo (`M x y h n v 1 h -n z`, já no viewBox).
+ * As sequências não se sobrepõem, então o preenchimento é o mesmo de desenhar
+ * um `<rect>` por célula, com um elemento só no lugar de dezenas.
+ */
+export function caminhoDosPixels(pixels: readonly Pixel[]): string {
+  const colunasPorLinha = new Map<number, Set<number>>();
+  for (const [linha, coluna] of pixels) {
+    const colunas = colunasPorLinha.get(linha) ?? new Set<number>();
+    colunas.add(coluna);
+    colunasPorLinha.set(linha, colunas);
+  }
+  let caminho = "";
+  for (const linha of [...colunasPorLinha.keys()].sort((a, b) => a - b)) {
+    const y = linha * TAMANHO_DO_PIXEL;
+    const fechar = (inicio: number, fim: number) => {
+      const largura = (fim - inicio + 1) * TAMANHO_DO_PIXEL;
+      caminho += `M${inicio * TAMANHO_DO_PIXEL} ${y}h${largura}v${TAMANHO_DO_PIXEL}h-${largura}z`;
+    };
+    let inicio: number | null = null;
+    let anterior = 0;
+    for (const coluna of [...(colunasPorLinha.get(linha) ?? [])].sort((a, b) => a - b)) {
+      if (inicio !== null && coluna !== anterior + 1) {
+        fechar(inicio, anterior);
+        inicio = null;
+      }
+      inicio ??= coluna;
+      anterior = coluna;
+    }
+    if (inicio !== null) fechar(inicio, anterior);
+  }
+  return caminho;
+}
+
+/**
+ * Os caminhos de um bixinho, um por camada, na ordem em que são pintados.
+ * Vazio (`""`) quando a camada não tem células nessa combinação.
+ */
+export interface DesenhoDoBixinho {
+  readonly corpo: string;
+  readonly acessorioEscuro: string;
+  readonly acessorioDestaque: string;
+  readonly olhos: string;
+  readonly brilho: string;
+  readonly boca: string;
+  readonly bochechas: string;
+}
+
+const DESENHOS = new Map<string, DesenhoDoBixinho>();
+
+/**
+ * O desenho de uma combinação de forma, acessório e expressão, calculado uma
+ * vez e guardado: são poucas combinações, e a cor vem do CSS.
+ */
+export function desenhoDoBixinho(forma: FormaDoBixinho, acessorio: AcessorioDoBixinho, expressao: Expressao): DesenhoDoBixinho {
+  const chave = `${forma}|${acessorio}|${expressao}`;
+  const guardado = DESENHOS.get(chave);
+  if (guardado !== undefined) return guardado;
+
+  const corpo = pixelsDoCorpo(forma);
+  const rosto = ROSTOS[expressao];
+  const pecas = ACESSORIOS_DESENHADOS[acessorio];
+  // Acessórios encostam no topo da cabeça, que muda de altura conforme a forma.
+  const topoDaCabeca = Math.min(...corpo.map(([linha]) => linha));
+  const ajuste = topoDaCabeca - 3;
+  const noTopo = (pixels: readonly Pixel[]): Pixel[] => pixels.map(([linha, coluna]) => [linha + ajuste, coluna]);
+
+  const desenho: DesenhoDoBixinho = {
+    corpo: caminhoDosPixels(corpo),
+    acessorioEscuro: caminhoDosPixels(noTopo(pecas.escuro)),
+    acessorioDestaque: caminhoDosPixels(noTopo(pecas.destaque)),
+    olhos: caminhoDosPixels(rosto.olhos),
+    brilho: caminhoDosPixels(rosto.brilho),
+    boca: caminhoDosPixels(rosto.boca),
+    bochechas: caminhoDosPixels(rosto.bochechas),
+  };
+  DESENHOS.set(chave, desenho);
+  return desenho;
+}
+
 /** Os ícones de ferramenta, numa grade de 8 × 8, no mesmo estilo dos bixinhos. */
 export const LADO_DO_ICONE = 8;
 
@@ -199,6 +283,14 @@ export const PIXELS_DOS_ICONES: Readonly<Record<IconeDeFerramenta, readonly Pixe
   lapis: pixelsDaGrade(ICONES.lapis),
   engrenagem: pixelsDaGrade(ICONES.engrenagem),
   globo: pixelsDaGrade(ICONES.globo),
+};
+
+/** O caminho de cada ícone, também calculado uma vez. */
+export const CAMINHOS_DOS_ICONES: Readonly<Record<IconeDeFerramenta, string>> = {
+  lupa: caminhoDosPixels(PIXELS_DOS_ICONES.lupa),
+  lapis: caminhoDosPixels(PIXELS_DOS_ICONES.lapis),
+  engrenagem: caminhoDosPixels(PIXELS_DOS_ICONES.engrenagem),
+  globo: caminhoDosPixels(PIXELS_DOS_ICONES.globo),
 };
 
 /** Linhas de cada ícone, para conferir nos testes que a grade está íntegra. */

@@ -11,6 +11,7 @@ const APARENCIA: Readonly<Record<Situacao, { rotulo: string; classe: string }>> 
   falhou: { rotulo: "Falhou", classe: "etiqueta-error" },
   cancelado: { rotulo: "Cancelado", classe: "etiqueta-warning" },
   interrompido: { rotulo: "Interrompido", classe: "etiqueta-warning" },
+  pausado: { rotulo: "Pausado", classe: "etiqueta-warning" },
 };
 
 export function Etiqueta({ situacao }: { situacao: Situacao }) {

@@ -1378,6 +1378,8 @@ describe("CanvasDeOrquestradores · zoom e barra de título", () => {
       versaoNova: null,
       progresso: null,
       mensagemDeErro: null,
+      etapa: null,
+      orquestradoresTrabalhando: null,
       ...alteracoes,
     };
   }

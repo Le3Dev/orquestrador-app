@@ -102,17 +102,20 @@ const falsos = vi.hoisted(() => {
     }
   }
 
-  return { TerminalFalso, WebSocketFalso };
+  class AjusteFalso {
+    static ajustes = 0;
+    fit(): void {
+      AjusteFalso.ajustes++;
+    }
+  }
+
+  return { AjusteFalso, TerminalFalso, WebSocketFalso };
 });
 
 vi.mock("@xterm/xterm", () => ({ Terminal: falsos.TerminalFalso }));
-vi.mock("@xterm/addon-fit", () => ({
-  FitAddon: class {
-    fit(): void {}
-  },
-}));
+vi.mock("@xterm/addon-fit", () => ({ FitAddon: falsos.AjusteFalso }));
 
-const { TerminalFalso, WebSocketFalso } = falsos;
+const { AjusteFalso, TerminalFalso, WebSocketFalso } = falsos;
 
 function acoesDoCanvas(): AcoesDoCanvas {
   return {
@@ -168,7 +171,8 @@ function propsDoNo(dados: Partial<DadosDoNoDoShell> = {}): NodeProps<TipoDoNo> {
   };
 }
 
-function renderizar(dados: Partial<DadosDoNoDoShell> = {}) {
+/** Monta o bloco sem esperar o xterm, que chega por import dinâmico. */
+function renderizarSemEsperar(dados: Partial<DadosDoNoDoShell> = {}) {
   const canvas = acoesDoCanvas();
   const shells = acoesDosShells();
   const tela = render(
@@ -181,6 +185,13 @@ function renderizar(dados: Partial<DadosDoNoDoShell> = {}) {
     </ReactFlowProvider>,
   );
   return { canvas, shells, tela };
+}
+
+/** Monta o bloco e espera o xterm carregar e abrir no quadro. */
+async function renderizar(dados: Partial<DadosDoNoDoShell> = {}) {
+  const resultado = renderizarSemEsperar(dados);
+  await waitFor(() => expect(TerminalFalso.instancias).toHaveLength(1));
+  return resultado;
 }
 
 function ultimoSocket(): InstanceType<typeof WebSocketFalso> {
@@ -204,6 +215,7 @@ const VIVO: DadosDoShell = { id: "t1", pasta: "/projetos/meu-app", orquestradorI
 beforeEach(() => {
   TerminalFalso.instancias = [];
   WebSocketFalso.instancias = [];
+  AjusteFalso.ajustes = 0;
   vi.stubGlobal("WebSocket", WebSocketFalso);
 });
 
@@ -214,8 +226,8 @@ afterEach(() => {
 });
 
 describe("NoShell", () => {
-  it("a barra mostra Terminal, a pasta curta e o caminho inteiro na dica", () => {
-    renderizar();
+  it("a barra mostra Terminal, a pasta curta e o caminho inteiro na dica", async () => {
+    await renderizar();
 
     expect(screen.getByText("Terminal")).toBeInTheDocument();
     expect(screen.getByText("meu-app")).toBeInTheDocument();
@@ -223,8 +235,8 @@ describe("NoShell", () => {
     expect(screen.getByText("conectando…")).toBeInTheDocument();
   });
 
-  it("conecta na mesma origem, manda o tamanho ao abrir, mostra a saída e manda a entrada", () => {
-    renderizar();
+  it("conecta na mesma origem, manda o tamanho ao abrir, mostra a saída e manda a entrada", async () => {
+    await renderizar();
     const socket = ultimoSocket();
     expect(socket.url).toBe(`ws://${window.location.host}/api/terminais/t1/conexao`);
 
@@ -241,16 +253,16 @@ describe("NoShell", () => {
     expect(socket.enviadas).toContainEqual({ tipo: "tamanho", colunas: 100, linhas: 30 });
   });
 
-  it("a roda do mouse e o arraste dentro do terminal não mexem no canvas", () => {
-    renderizar();
+  it("a roda do mouse e o arraste dentro do terminal não mexem no canvas", async () => {
+    await renderizar();
 
     const quadro = ultimoTerminal().elemento;
     expect(quadro).toHaveClass("nowheel");
     expect(quadro).toHaveClass("nodrag");
   });
 
-  it("depois do fim, mostra encerrado e abre de novo na mesma pasta", () => {
-    const { shells } = renderizar();
+  it("depois do fim, mostra encerrado e abre de novo na mesma pasta", async () => {
+    const { shells } = await renderizar();
     const socket = ultimoSocket();
     act(() => socket.abrir());
 
@@ -264,7 +276,7 @@ describe("NoShell", () => {
 
   it("a conexão cai com o terminal vivo: religa e limpa a tela antes do histórico reenviado", async () => {
     const listar = vi.spyOn(api, "listarShells").mockResolvedValue([VIVO]);
-    renderizar();
+    await renderizar();
     act(() => ultimoSocket().abrir());
     act(() => ultimoSocket().receber({ tipo: "saida", dados: "antes" }));
 
@@ -280,7 +292,7 @@ describe("NoShell", () => {
 
   it("a conexão cai e o terminal não está mais no servidor (recarregou a página depois): encerrado", async () => {
     vi.spyOn(api, "listarShells").mockResolvedValue([{ ...VIVO, id: "outro" }]);
-    renderizar();
+    await renderizar();
 
     act(() => ultimoSocket().cair());
 
@@ -288,26 +300,101 @@ describe("NoShell", () => {
     expect(WebSocketFalso.instancias).toHaveLength(1);
   });
 
-  it("fechar pede ao canvas para encerrar o shell e tirar o bloco", () => {
-    const { shells } = renderizar();
+  it("fechar pede ao canvas para encerrar o shell e tirar o bloco", async () => {
+    const { shells } = await renderizar();
 
     fireEvent.click(screen.getByRole("button", { name: "Fechar este terminal" }));
 
     expect(shells.fecharShell).toHaveBeenCalledWith("s1");
   });
 
-  it("solto (aberto pela barra), não oferece enviar ao orquestrador", () => {
-    renderizar({ orquestradorId: null });
+  it("solto (aberto pela barra), não oferece enviar ao orquestrador", async () => {
+    await renderizar({ orquestradorId: null });
 
     expect(screen.queryByRole("button", { name: "Enviar ao orquestrador" })).not.toBeInTheDocument();
   });
 });
 
+describe("xterm sob demanda", () => {
+  it("a saída que chega antes do xterm carregar espera e é escrita quando ele monta, e o tamanho vai depois", async () => {
+    renderizarSemEsperar();
+    const socket = ultimoSocket();
+    expect(TerminalFalso.instancias).toHaveLength(0);
+
+    act(() => socket.abrir());
+    act(() => socket.receber({ tipo: "saida", dados: "cedo " }));
+    act(() => socket.receber({ tipo: "saida", dados: "e mais" }));
+    expect(socket.enviadas).toEqual([]);
+
+    await waitFor(() => expect(TerminalFalso.instancias).toHaveLength(1));
+    expect(ultimoTerminal().escrito).toBe("cedo e mais");
+    expect(screen.getByText("cedo e mais")).toBeInTheDocument();
+    expect(socket.enviadas).toContainEqual({ tipo: "tamanho", colunas: 80, linhas: 24 });
+
+    act(() => socket.receber({ tipo: "saida", dados: "!" }));
+    expect(ultimoTerminal().escrito).toBe("cedo e mais!");
+  });
+
+  it("enquanto carrega, o quadro fica no lugar, vazio", () => {
+    const { tela } = renderizarSemEsperar();
+
+    const quadro = tela.container.querySelector(".corpo-do-shell > .quadro-do-shell");
+    expect(quadro).toBeInTheDocument();
+    expect(quadro).toBeEmptyDOMElement();
+  });
+
+  it("desmontar antes do xterm carregar fecha a conexão e não cria terminal", async () => {
+    const { tela } = renderizarSemEsperar();
+    const socket = ultimoSocket();
+
+    tela.unmount();
+    await act(async () => {
+      await new Promise((resolver) => setTimeout(resolver, 0));
+    });
+
+    expect(socket.readyState).toBe(WebSocketFalso.CLOSED);
+    expect(TerminalFalso.instancias).toHaveLength(0);
+  });
+});
+
+describe("zoom do canvas", () => {
+  it("o observador só reajusta quando a medida em pixels CSS muda, não no zoom (só a escala muda)", async () => {
+    let avisar: ((entradas: { contentRect: { width: number; height: number } }[]) => void) | null = null;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(ouvinte: typeof avisar) {
+          avisar = ouvinte;
+        }
+        observe(): void {}
+        disconnect(): void {}
+      },
+    );
+    vi.stubGlobal("requestAnimationFrame", (chamar: FrameRequestCallback) => {
+      chamar(0);
+      return 1;
+    });
+    await renderizar();
+    const tamanho = (width: number, height: number) => [{ contentRect: { width, height } }];
+
+    act(() => avisar?.(tamanho(624, 370)));
+    const depoisDoPrimeiro = AjusteFalso.ajustes;
+    // Zoom: o transform do React Flow muda, a caixa do quadro continua com a mesma medida.
+    act(() => avisar?.(tamanho(624, 370)));
+    act(() => avisar?.(tamanho(624, 370)));
+    expect(AjusteFalso.ajustes).toBe(depoisDoPrimeiro);
+
+    // Redimensionar o bloco: aí sim reajusta.
+    act(() => avisar?.(tamanho(700, 400)));
+    expect(AjusteFalso.ajustes).toBe(depoisDoPrimeiro + 1);
+  });
+});
+
 describe("enviar ao orquestrador", () => {
-  it("sem seleção, leva as últimas linhas num bloco de código ao prompt, sem enviar", () => {
+  it("sem seleção, leva as últimas linhas num bloco de código ao prompt, sem enviar", async () => {
     const prompt = { acrescentarTexto: vi.fn() };
     registrarPromptDoTerminal("o1", prompt);
-    const { canvas } = renderizar();
+    const { canvas } = await renderizar();
     act(() => ultimoSocket().abrir());
     act(() => ultimoSocket().receber({ tipo: "saida", dados: "$ npm test\r\n1 falhou\r\n$ " }));
 
@@ -317,10 +404,10 @@ describe("enviar ao orquestrador", () => {
     expect(canvas.abrirTerminal).not.toHaveBeenCalled();
   });
 
-  it("com seleção, leva só a seleção", () => {
+  it("com seleção, leva só a seleção", async () => {
     const prompt = { acrescentarTexto: vi.fn() };
     registrarPromptDoTerminal("o1", prompt);
-    renderizar();
+    await renderizar();
     act(() => ultimoSocket().receber({ tipo: "saida", dados: "linha 1\r\nErro: falhou\r\n" }));
     ultimoTerminal().selecao = "Erro: falhou";
 
@@ -329,8 +416,8 @@ describe("enviar ao orquestrador", () => {
     expect(prompt.acrescentarTexto).toHaveBeenCalledWith("```\nErro: falhou\n```");
   });
 
-  it("com o terminal do orquestrador fechado, abre ele e o texto entra no prompt quando ele aparecer", () => {
-    const { canvas } = renderizar();
+  it("com o terminal do orquestrador fechado, abre ele e o texto entra no prompt quando ele aparecer", async () => {
+    const { canvas } = await renderizar();
     act(() => ultimoSocket().receber({ tipo: "saida", dados: "pronto" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Enviar ao orquestrador" }));

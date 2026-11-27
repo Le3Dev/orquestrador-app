@@ -1,10 +1,12 @@
-import { Panel, useReactFlow, useViewport } from "@xyflow/react";
+import { Panel, type ReactFlowState, useReactFlow, useStoreApi } from "@xyflow/react";
 import {
   type KeyboardEvent as EventoDeTeclaDoReact,
   memo,
   type PointerEvent as EventoDePonteiroDoReact,
   useCallback,
   useEffect,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -51,7 +53,7 @@ function distancia(a: Ponto, b: Ponto): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-/** Um traço desenhado. Memorizado: mover o canvas só troca a transformação do grupo, não cada traço. */
+/** Um traço desenhado. Memorizado: o caminho só é refeito quando o traço muda, não a cada traço novo. */
 export const TracoDesenhado = memo(function TracoDesenhado({ traco }: { traco: TracoDoDesenho }) {
   const classe = `traco traco-${traco.tipo} traco-cor-${traco.cor}`;
   const [de, ate] = traco.pontos;
@@ -130,10 +132,16 @@ interface Props {
   tracosIniciais?: readonly TracoDoDesenho[];
 }
 
+/** A câmera do canvas no React Flow: [x, y, zoom]. */
+type Transformacao = ReactFlowState["transform"];
+
 /**
  * O desenho sobre o canvas: traços em SVG, em coordenadas do canvas (a
  * transformação do grupo segue o viewport, então o desenho acompanha o zoom e
- * o arraste). Mora dentro do <ReactFlow>, na camada 4, logo depois das
+ * o arraste). A transformação vai direto no DOM, pela assinatura da loja do
+ * React Flow (como o viewport dele faz): mover a câmera não renderiza a
+ * camada. Com a barra fechada e sem traço nenhum, a camada nem é montada.
+ * Mora dentro do <ReactFlow>, na camada 4, logo depois das
  * janelas: o traço passa por cima de terminais e notas, e os painéis (barra
  * do topo, controles, chat) continuam por cima dele.
  *
@@ -141,12 +149,12 @@ interface Props {
  * clique: o canvas funciona como sempre. Com outra ferramenta, ela pega o
  * ponteiro do canvas inteiro (o arraste desenha em vez de mover a tela); a
  * roda e a pinça seguem para o canvas. Esc volta para Selecionar e, de novo, fecha a barra; Ctrl/Cmd+Z
- * desfaz o último passo (traço, texto ou apagada). Cada mudança vai para o
+ * desfaz o último passo (traço, texto, apagada ou o limpar tudo). Cada mudança vai para o
  * layout salvo (`salvarDesenho`).
  */
 export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar, tracosIniciais = [] }: Props) {
   const fluxo = useReactFlow();
-  const { x, y, zoom } = useViewport();
+  const loja = useStoreApi();
   const [ferramentaEscolhida, setFerramentaEscolhida] = useState<FerramentaDeDesenho>("caneta");
   const [cor, setCor] = useState<CorDoDesenho>("laranja");
   const [espessura, setEspessura] = useState<EspessuraDoDesenho>(3);
@@ -159,6 +167,8 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
   const gesto = useRef<Gesto | null>(null);
   const edicaoAtual = useRef<TextoEmEdicao | null>(null);
   const svg = useRef<SVGSVGElement>(null);
+  const grupo = useRef<SVGGElement>(null);
+  const campoDoTexto = useRef<HTMLInputElement>(null);
 
   // Abrir a barra já deixa a caneta na mão; fechar descarta o que estava pela metade.
   const [abertaAntes, setAbertaAntes] = useState(aberta);
@@ -174,6 +184,56 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
   }
   const ferramenta: FerramentaDeDesenho = aberta ? ferramentaEscolhida : "selecionar";
   const ativa = ferramenta !== "selecionar";
+  // Barra fechada e nada desenhado: sem SVG e sem acompanhar a câmera.
+  const montada = aberta || tracos.length > 0;
+
+  /** O zoom de agora, lido na hora do evento (a camada não renderiza a cada quadro). */
+  const zoomAtual = useCallback(() => loja.getState().transform[2], [loja]);
+
+  /** O campo do texto solto fica sobre o ponto do canvas, no tamanho do zoom. */
+  const posicionarCampoDoTexto = useCallback(([x, y, zoom]: Transformacao) => {
+    const edicao = edicaoAtual.current;
+    const campo = campoDoTexto.current;
+    if (edicao === null || campo === null) {
+      return;
+    }
+    campo.style.left = `${edicao.em.x * zoom + x}px`;
+    campo.style.top = `${edicao.em.y * zoom + y}px`;
+    campo.style.fontSize = `${tamanhoDoTexto(edicao.espessura) * zoom}px`;
+  }, []);
+
+  // A câmera vai direto no grupo do SVG e no campo do texto, sem render do React por quadro.
+  useLayoutEffect(() => {
+    if (!montada) {
+      return;
+    }
+    let anterior: Transformacao | null = null;
+    const acompanhar = () => {
+      const transformacao = loja.getState().transform;
+      // A loja avisa qualquer mudança: só mexe no DOM quando x, y ou zoom mudaram.
+      if (
+        anterior !== null &&
+        transformacao[0] === anterior[0] &&
+        transformacao[1] === anterior[1] &&
+        transformacao[2] === anterior[2]
+      ) {
+        return;
+      }
+      anterior = transformacao;
+      const [x, y, zoom] = transformacao;
+      grupo.current?.setAttribute("transform", `translate(${x} ${y}) scale(${zoom})`);
+      posicionarCampoDoTexto(transformacao);
+    };
+    acompanhar();
+    return loja.subscribe(acompanhar);
+  }, [loja, montada, posicionarCampoDoTexto]);
+
+  // O campo do texto solto recém aberto já nasce no lugar.
+  useLayoutEffect(() => {
+    if (textoEmEdicao !== null) {
+      posicionarCampoDoTexto(loja.getState().transform);
+    }
+  }, [loja, textoEmEdicao, posicionarCampoDoTexto]);
 
   const trocarTracos = useCallback((novos: TracoDoDesenho[]) => {
     tracosAtuais.current = novos;
@@ -199,6 +259,14 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
     trocarTracos(anterior);
     salvarDesenho(anterior);
   }, [passados, trocarTracos]);
+
+  /** Apaga todos os traços num passo só: o desfazer traz todos de volta. */
+  const limpar = useCallback(() => {
+    const antes = tracosAtuais.current;
+    if (antes.length > 0) {
+      registrar(antes, []);
+    }
+  }, [registrar]);
 
   const mudarEdicao = useCallback((edicao: TextoEmEdicao | null) => {
     edicaoAtual.current = edicao;
@@ -245,7 +313,7 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
   /** A borracha nos pontos dados: os traços tocados saem (o desfazer guarda o antes no fim do gesto). */
   const apagarEm = useCallback(
     (pontos: readonly Ponto[]) => {
-      const folga = RAIO_DA_BORRACHA_PX / zoom;
+      const folga = RAIO_DA_BORRACHA_PX / zoomAtual();
       const restantes = tracosAtuais.current.filter(
         (traco) => !pontos.some((ponto) => tracoTocado(traco, ponto, folga)),
       );
@@ -253,7 +321,7 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
         trocarTracos(restantes);
       }
     },
-    [trocarTracos, zoom],
+    [trocarTracos, zoomAtual],
   );
 
   const aoApertar = (evento: EventoDePonteiroDoReact<SVGSVGElement>) => {
@@ -291,6 +359,7 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
       return;
     }
     const ponto = noCanvas(evento);
+    const zoom = zoomAtual();
     if (atual.tipo === "borracha") {
       apagarEm(pontosEntre(atual.ultimo, ponto, RAIO_DA_BORRACHA_PX / zoom));
       atual.ultimo = ponto;
@@ -330,6 +399,7 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
     setRascunho(null);
     const { traco } = atual;
     const [de, ate] = traco.pontos;
+    const zoom = zoomAtual();
     if (ehMaoLivre(traco.tipo)) {
       registrar(atual.antes, [
         ...atual.antes,
@@ -392,6 +462,12 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
     return () => elemento.removeEventListener("wheel", aoRolar);
   }, [ativa]);
 
+  // Só a lista muda quando um traço entra ou sai: o rascunho em curso não refaz os elementos dos outros.
+  const desenhados = useMemo(
+    () => tracos.map((traco) => <TracoDesenhado key={traco.id} traco={traco} />),
+    [tracos],
+  );
+
   const aoTeclarNoTexto = (evento: EventoDeTeclaDoReact<HTMLInputElement>) => {
     if (evento.key === "Enter") {
       evento.preventDefault();
@@ -403,6 +479,10 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
       mudarEdicao(null);
     }
   };
+
+  if (!montada) {
+    return null;
+  }
 
   return (
     <>
@@ -422,10 +502,9 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
           onPointerUp={aoSoltar}
           onPointerCancel={aoSoltar}
         >
-          <g transform={`translate(${x} ${y}) scale(${zoom})`}>
-            {tracos.map((traco) => (
-              <TracoDesenhado key={traco.id} traco={traco} />
-            ))}
+          {/* A transformação (a câmera) é posta pela assinatura da loja, fora do render. */}
+          <g ref={grupo}>
+            {desenhados}
             {rascunho !== null && <TracoDesenhado traco={rascunho} />}
           </g>
         </svg>
@@ -433,16 +512,13 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
           <input
             // Abre já com o foco: o clique que o criou não o tira (preventDefault no ponteiro).
             autoFocus
+            ref={campoDoTexto}
             className={`campo-do-texto-solto traco-cor-${textoEmEdicao.cor}`}
             aria-label="Texto solto"
             placeholder="Digite e tecle Enter"
             maxLength={MAXIMO_DE_CARACTERES_NO_TEXTO}
             value={textoEmEdicao.valor}
-            style={{
-              left: textoEmEdicao.em.x * zoom + x,
-              top: textoEmEdicao.em.y * zoom + y,
-              fontSize: tamanhoDoTexto(textoEmEdicao.espessura) * zoom,
-            }}
+            // left, top e fontSize vêm de posicionarCampoDoTexto, que segue a câmera.
             onChange={(evento) => mudarEdicao({ ...textoEmEdicao, valor: evento.target.value })}
             onKeyDown={aoTeclarNoTexto}
             onBlur={confirmarTexto}
@@ -456,10 +532,12 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
             cor={cor}
             espessura={espessura}
             podeDesfazer={passados.length > 0}
+            podeLimpar={tracos.length > 0}
             aoEscolherFerramenta={escolherFerramenta}
             aoEscolherCor={setCor}
             aoEscolherEspessura={setEspessura}
             aoDesfazer={desfazer}
+            aoLimpar={limpar}
             aoFechar={fechar}
           />
         </Panel>

@@ -3,6 +3,7 @@
  * sincronia com `src/orquestracao/EventoDeOrquestracao.ts` e com os
  * apresentadores de `src/controllers/orquestradoresRoutes.ts`.
  */
+import type { AcaoDePausaDoOrquestrador } from "./acaoDePausa";
 
 export type ModeloClaude = "fable" | "opus" | "sonnet" | "haiku";
 
@@ -329,8 +330,24 @@ export interface ResultadoDaInstalacao {
   precisaConfirmar: boolean;
 }
 
-export type SituacaoDoOrquestrador ="ocioso" | "trabalhando";
-export type SituacaoDoTurno = "em_andamento" | "concluido" | "cancelado" | "falhou" | "interrompido";
+/** "pausado" sempre que o Orquestrador tem uma `pausa`. */
+export type SituacaoDoOrquestrador = "ocioso" | "trabalhando" | "pausado";
+/** "pausado": o turno foi encerrado pela pausa no modo "retomada" (no modo "congelado" ele segue "em_andamento"). */
+export type SituacaoDoTurno = "em_andamento" | "concluido" | "cancelado" | "falhou" | "interrompido" | "pausado";
+
+/**
+ * Como o Orquestrador volta da pausa. "congelado": o processo ficou parado e
+ * continua exatamente de onde estava (Mac). "retomada": não deu para congelar
+ * (Windows, app fechado, processo caiu); o Continuar abre um turno novo na
+ * mesma conversa pedindo para seguir de onde parou.
+ */
+export type ModoDaPausa = "congelado" | "retomada";
+
+export interface DadosDaPausa {
+  /** ISO 8601. */
+  desde: string;
+  modo: ModoDaPausa;
+}
 
 /**
  * "planejamento" é o Plan Mode: o pedido só investiga e a resposta é um plano,
@@ -488,6 +505,8 @@ export interface ResumoDoOrquestrador {
   fila?: DadosDoPedidoNaFila[];
   /** O último pedido terminou com um Plano à espera da decisão. Falta em servidores anteriores (vale false). */
   planoPendente?: boolean;
+  /** A pausa em curso (ver `ModoDaPausa`); nula sem pausa. Falta em servidores anteriores (vale nula). */
+  pausa?: DadosDaPausa | null;
 }
 
 /** Um vínculo entre dois orquestradores: notas compartilhadas e troca manual de mensagens. */
@@ -671,7 +690,13 @@ export type EventoDeOrquestracao =
   | { tipo: "pedido_enfileirado"; pedido: DadosDoPedidoNaFila }
   // Um pedido saiu da fila: `removido` pelo usuário, ou `enviado` — então vem logo antes do
   // `turno_iniciado` do turno que o atende.
-  | { tipo: "pedido_retirado_da_fila"; pedidoId: string; motivo: MotivoDaRetiradaDaFila };
+  | { tipo: "pedido_retirado_da_fila"; pedidoId: string; motivo: MotivoDaRetiradaDaFila }
+  // O usuário pausou o Orquestrador (`turnoId`: o turno pausado). No modo "retomada", ele termina como
+  // "pausado"; no "congelado", continua em andamento, parado. Pode vir de novo com outro modo (o processo caiu).
+  | { tipo: "orquestrador_pausado"; orquestradorId: string; turnoId?: string; pausa: DadosDaPausa }
+  // Saiu da pausa (Continuar, ou uma mensagem enviada durante ela); no modo "retomada" vem um `turno_iniciado`
+  // em seguida. `cancelado`: saiu porque o usuário cancelou.
+  | { tipo: "orquestrador_continuado"; orquestradorId: string; modo: ModoDaPausa; cancelado?: true };
 
 export type EventoRegistrado = EventoDeOrquestracao & { sequencia: number; em: string };
 
@@ -692,7 +717,7 @@ export interface PreferenciasDoChat {
  * Ação que o Claude sugere no app; só é executada quando o usuário clica.
  * As mensagens gravadas antes das ações de subagente só têm `abrir_orquestrador`.
  */
-export type AcaoDoApp = AcaoDeAbrirOrquestrador | AcaoDeCriarSubagente | AcaoDeEditarSubagente;
+export type AcaoDoApp = AcaoDeAbrirOrquestrador | AcaoDeCriarSubagente | AcaoDeEditarSubagente | AcaoDePausaDoOrquestrador;
 
 /** Os modelos que o chat sugere para um subagente pronto: os mesmos do painel Subagentes. */
 export type ModeloDoSubagenteNoChat = "herdar" | "opus" | "sonnet" | "haiku";
@@ -785,6 +810,11 @@ export interface MensagemDoChat {
   autorizacaoPendente?: AutorizacaoPendente | null;
   /** Só nas perguntas enviadas sozinhas (ex.: pela escuta); falta nas digitadas e nas antigas. */
   origem?: OrigemDaPergunta;
+  /**
+   * Desde quando (ISO) a resposta em andamento está pausada, com o processo
+   * congelado. Só existe durante a pausa; a situação continua "respondendo".
+   */
+  pausadaDesde?: string | null;
 }
 
 /** O trecho transcrito pela escuta e, opcionalmente, o que veio logo antes, para dar sentido a ele. */
@@ -814,6 +844,11 @@ export interface EstadoDoChat {
    * próximo `/clear`. Falta em servidores anteriores à autorização (vale `false`).
    */
   alteracoesAutorizadas?: boolean;
+  /**
+   * Se dá para pausar a resposta (congelar o processo): falso no Windows.
+   * Falta em servidores anteriores à pausa (vale `false`).
+   */
+  podePausar?: boolean;
 }
 
 export type EventoDoChat =
@@ -832,6 +867,9 @@ export type EventoDoChat =
     }
   | { tipo: "resposta_falhou"; mensagemId: string; motivo: string; uso: UsoDaResposta | null }
   | { tipo: "resposta_cancelada"; mensagemId: string }
+  // A resposta em andamento foi pausada (processo congelado) e depois continuou de onde parou.
+  | { tipo: "resposta_pausada"; mensagemId: string; desde: string }
+  | { tipo: "resposta_continuada"; mensagemId: string }
   // O `/clear` também desfaz a autorização de alterações.
   | { tipo: "conversa_limpa" }
   | { tipo: "preferencias_alteradas"; preferencias: PreferenciasDoChat }

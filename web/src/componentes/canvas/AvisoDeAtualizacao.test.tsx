@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 
-import type { EstadoDaAtualizacao, SituacaoDaAtualizacao } from "../../shared/ponteDoDesktop";
+import type { EstadoDaAtualizacao, ResultadoDoReinicio, SituacaoDaAtualizacao } from "../../shared/ponteDoDesktop";
 import { AvisoDeAtualizacao } from "./AvisoDeAtualizacao";
 
 type AoMudar = (estado: EstadoDaAtualizacao) => void;
@@ -12,6 +12,8 @@ function estado(alteracoes: Partial<EstadoDaAtualizacao> = {}): EstadoDaAtualiza
     versaoNova: null,
     progresso: null,
     mensagemDeErro: null,
+    etapa: null,
+    orquestradoresTrabalhando: null,
     ...alteracoes,
   };
 }
@@ -173,5 +175,114 @@ describe("AvisoDeAtualizacao", () => {
     expect(within(cartao).getByRole("alert")).toHaveTextContent(
       "Não foi possível reiniciar para instalar: arquivo em uso",
     );
+  });
+
+  describe("Mac (ponte nova)", () => {
+    function instalarPonteNova(
+      inicial: EstadoDaAtualizacao,
+      instalarAgora: (opcoes?: { forcar?: boolean }) => Promise<ResultadoDoReinicio> = vi.fn(async () => ({
+        iniciou: true,
+        orquestradoresTrabalhando: 0,
+      })),
+    ) {
+      const ouvintes: AoMudar[] = [];
+      const atualizacao = {
+        obter: vi.fn(async () => inicial),
+        verificar: vi.fn(async () => inicial),
+        instalarAgora,
+        instalarQuandoLivre: vi.fn(async () => undefined),
+        cancelarEspera: vi.fn(async () => undefined),
+        aoMudar: vi.fn((callback: AoMudar) => {
+          ouvintes.push(callback);
+          return () => undefined;
+        }),
+      };
+      janelaComPonte.electron = { desktop: true, atualizacao };
+      const avisar = (novo: EstadoDaAtualizacao) => act(() => ouvintes.forEach((ouvinte) => ouvinte(novo)));
+      return { atualizacao, avisar };
+    }
+
+    it("baixando com etapa: mostra a etapa e a barra indeterminada sem percentual", async () => {
+      const { avisar } = instalarPonteNova(estado({ situacao: "baixando", versaoNova: "0.2.1", etapa: "Gerando o app" }));
+      await renderizar();
+
+      const indicador = screen.getByRole("status");
+      expect(indicador).toHaveTextContent("Gerando o app…");
+      expect(indicador).toHaveAttribute("title", "A versão 0.2.1 está sendo preparada.");
+      expect(indicador.querySelector(".medidor")).toHaveClass("medidor-indeterminado");
+
+      avisar(estado({ situacao: "baixando", versaoNova: "0.2.1", etapa: "Instalando dependências", progresso: 60 }));
+      expect(screen.getByRole("status")).toHaveTextContent("Instalando dependências… 60%");
+      expect(screen.getByRole("status").querySelector(".medidor")).not.toHaveClass("medidor-indeterminado");
+      expect(screen.getByRole("status").querySelector(".medidor > span")).toHaveStyle({ width: "60%" });
+    });
+
+    it("pronta: reinicia direto pela ponte, sem a confirmação da tela, mesmo com pedidos em andamento", async () => {
+      const { atualizacao } = instalarPonteNova(PRONTA);
+      await renderizar(2);
+      const cartao = abrirCartao();
+
+      await act(async () => {
+        fireEvent.click(within(cartao).getByRole("button", { name: "Reiniciar agora" }));
+      });
+
+      expect(atualizacao.instalarAgora).toHaveBeenCalledTimes(1);
+      expect(atualizacao.instalarAgora).toHaveBeenLastCalledWith();
+      expect(within(cartao).queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("o app recusa com orquestradores trabalhando: oferece esperar ou reiniciar mesmo assim", async () => {
+      const instalarAgora = vi.fn(async () => ({ iniciou: false, orquestradoresTrabalhando: 2 }));
+      const { atualizacao, avisar } = instalarPonteNova(PRONTA, instalarAgora);
+      await renderizar();
+      const cartao = abrirCartao();
+
+      await act(async () => {
+        fireEvent.click(within(cartao).getByRole("button", { name: "Reiniciar agora" }));
+      });
+      expect(within(cartao).getByRole("alert")).toHaveTextContent(
+        "2 orquestradores trabalhando. Reiniciar agora interrompe o trabalho deles.",
+      );
+      expect(cartao).toHaveFocus();
+
+      await act(async () => {
+        fireEvent.click(within(cartao).getByRole("button", { name: "Reiniciar mesmo assim" }));
+      });
+      expect(instalarAgora).toHaveBeenLastCalledWith({ forcar: true });
+
+      fireEvent.click(within(cartao).getByRole("button", { name: "Reiniciar quando terminarem" }));
+      expect(atualizacao.instalarQuandoLivre).toHaveBeenCalledTimes(1);
+
+      // O app passa a aguardar: some a pílula e entra o aviso da espera.
+      avisar(estado({ situacao: "aguardando", versaoNova: "0.2.1", orquestradoresTrabalhando: 2 }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(screen.getByRole("status")).toHaveTextContent("Reinicia quando 2 orquestradores terminarem");
+    });
+
+    it("aguardando: mostra a espera e \"Cancelar espera\" chama a ponte", async () => {
+      const { atualizacao } = instalarPonteNova(
+        estado({ situacao: "aguardando", versaoNova: "0.2.1", orquestradoresTrabalhando: 1 }),
+      );
+      await renderizar();
+
+      expect(screen.getByRole("status")).toHaveTextContent("Reinicia quando 1 orquestrador terminar");
+      fireEvent.click(screen.getByRole("button", { name: "Cancelar espera" }));
+      expect(atualizacao.cancelarEspera).toHaveBeenCalledTimes(1);
+    });
+
+    it("erro longo ao reiniciar: só a primeira linha, o resto em \"Ver detalhes\"", async () => {
+      instalarPonteNova(PRONTA, vi.fn().mockRejectedValue(new Error("npm ci falhou\nnpm ERR! code 1\nnpm ERR! path /tmp")));
+      await renderizar();
+      const cartao = abrirCartao();
+
+      await act(async () => {
+        fireEvent.click(within(cartao).getByRole("button", { name: "Reiniciar agora" }));
+      });
+
+      expect(within(cartao).getByRole("alert")).toHaveTextContent(/^Não foi possível reiniciar para instalar: npm ci falhou$/);
+      const detalhes = within(cartao).getByText("Ver detalhes").closest("details");
+      expect(detalhes).not.toHaveAttribute("open");
+      expect(detalhes).toHaveTextContent("npm ERR! path /tmp");
+    });
   });
 });

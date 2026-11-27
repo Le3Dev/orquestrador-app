@@ -1,4 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import type {
   DadosDaConfiguracao,
@@ -68,11 +70,13 @@ function Transcricao({
   sinal,
   desconectado = false,
   aoResponderPergunta = semResposta,
+  pausado = false,
 }: {
   conversa: EstadoDaConversa;
   sinal?: SinalDeVida;
   desconectado?: boolean;
   aoResponderPergunta?: (texto: string) => Promise<void>;
+  pausado?: boolean;
 }) {
   return (
     <TranscricaoDoTerminal
@@ -87,6 +91,7 @@ function Transcricao({
       desconectado={desconectado}
       acoesDoPlano={acoesDoPlano}
       aoResponderPergunta={aoResponderPergunta}
+      pausado={pausado}
     />
   );
 }
@@ -102,6 +107,21 @@ describe("TranscricaoDoTerminal", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("pausado (congelado), o pedido em andamento troca o sinal de vida pela linha da pausa, sem aviso de travado", () => {
+    const conversa = aplicar(
+      ESTADO_INICIAL,
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija o bug", configuracao },
+      { tipo: "orquestrador_pausado", orquestradorId: "o1", pausa: { desde: "2026-10-28T12:00:00Z", modo: "congelado" } },
+    );
+    // Dez minutos de silêncio: sem a pausa, viraria o aviso de que pode ter travado.
+    vi.setSystemTime(new Date("2026-10-28T12:10:00Z"));
+    render(<Transcricao conversa={conversa} pausado />);
+
+    expect(screen.getByText("Orquestrador pausado · o Continuar segue de onde parou")).toBeInTheDocument();
+    expect(screen.queryByText(/último sinal/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/pode ter travado/)).not.toBeInTheDocument();
   });
 
   it("linha nova de log e sinal de vida não re-analisam as respostas antigas", () => {
@@ -126,6 +146,43 @@ describe("TranscricaoDoTerminal", () => {
     expect(screen.getByText("lendo o código")).toBeInTheDocument();
     expect(screen.getByText(/120 tokens de raciocínio/)).toBeInTheDocument();
     expect(analises.total).toBe(2);
+  });
+
+  it("o girador do pedido em andamento é a faixa de quadros da animação CSS, sem timer", () => {
+    const emAndamento = aplicar(ESTADO_INICIAL, { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija o bug", configuracao });
+    const { container } = render(<Transcricao conversa={emAndamento} />);
+
+    const girador = container.querySelector(".girador-do-terminal");
+    expect(girador).toHaveAttribute("aria-hidden", "true");
+    const quadros = girador?.querySelector(".girador-do-terminal-quadros");
+    expect(quadros?.textContent).toBe("⠋\n⠙\n⠹\n⠸\n⠼\n⠴\n⠦\n⠧\n⠇\n⠏");
+    // Os quadros trocam pelo CSS: o tempo passa e o React não mexe na faixa.
+    act(() => vi.advanceTimersByTime(900));
+    expect(container.querySelector(".girador-do-terminal-quadros")).toBe(quadros);
+    expect(quadros?.textContent).toBe("⠋\n⠙\n⠹\n⠸\n⠼\n⠴\n⠦\n⠧\n⠇\n⠏");
+  });
+
+  it("o coração bate só com transform e opacity: o laranja do começo é uma cópia por cima, escondida do leitor de tela", () => {
+    const emAndamento = aplicar(ESTADO_INICIAL, { tipo: "turno_iniciado", turnoId: "t1", texto: "corrija o bug", configuracao });
+    const { container, rerender } = render(<Transcricao conversa={emAndamento} />);
+
+    const batimento = container.querySelector(".batimento");
+    const copia = batimento?.querySelector(":scope > .batimento-cor");
+    expect(copia).toHaveAttribute("aria-hidden", "true");
+    expect(batimento?.querySelectorAll("svg")).toHaveLength(2);
+    // Cada notícia monta o coração de novo: as duas animações recomeçam juntas.
+    rerender(<Transcricao conversa={emAndamento} sinal={{ turnoId: "t1", em: "2026-10-28T12:00:05Z", tokensPensando: 0 }} />);
+    expect(container.querySelector(".batimento")).not.toBe(batimento);
+
+    // O CSS é lido do arquivo (o jsdom não o aplica): nada que repinte a cada quadro.
+    const css = readFileSync(resolve(__dirname, "../../theme/index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const nome of ["bater", "bater-cor", "pulso-ponto", "pulso-ponto-da-etiqueta", "pulso-ponto-de-erro"]) {
+      const corpo = new RegExp(`@keyframes ${nome}\\s*\\{((?:[^{}]*\\{[^{}]*\\})*[^{}]*)\\}`).exec(css)?.[1];
+      expect(corpo, nome).toBeDefined();
+      const propriedades = [...(corpo ?? "").matchAll(/([a-z-]+)\s*:/g)].map(([, propriedade]) => propriedade);
+      expect(propriedades.length, nome).toBeGreaterThan(0);
+      expect(propriedades.filter((propriedade) => propriedade !== "transform" && propriedade !== "opacity"), nome).toEqual([]);
+    }
   });
 
   describe("anexos do pedido", () => {

@@ -1,0 +1,15 @@
+/* Selo "Cópia de teste: <branch>" na ilha do nome do app (SeloDaCopiaDeTeste.tsx).
+ * Usa a etiqueta de aviso, sem caixa alta, e corta branches longas com reticências.
+ * `.etiqueta.` na frente: este arquivo carrega antes do index.css, que define a etiqueta. */
+.etiqueta.selo-da-copia-de-teste {
+  margin-left: 8px;
+  max-width: 320px;
+  flex-shrink: 1;
+  min-width: 0;
+  font-size: 10.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: default;
+}
+.etiqueta.selo-da-copia-de-teste::before { flex-shrink: 0; }
+.selo-da-copia-de-teste-texto { min-width: 0; overflow: hidden; text-overflow: ellipsis; }

@@ -1112,6 +1112,43 @@ describe("desenho no layout", () => {
   it("um desenho que não é lista vale como nenhum", () => {
     expect(interpretarLayout(JSON.stringify({ desenho: { t1: caneta } })).desenho).toBeUndefined();
   });
+
+  it("gravar as janelas (todo fim de pan) não relê o armazenamento e pula o texto igual ao já gravado", () => {
+    lerLayout();
+    salvarDesenho([caneta, seta]);
+    const ler = vi.spyOn(Storage.prototype, "getItem");
+    const gravar = vi.spyOn(Storage.prototype, "setItem");
+    try {
+      const janelas = layoutDosNos([novoTerminal("o1", { x: 0, y: 0 }, 600, 500)], { x: 5, y: 6, zoom: 1 });
+      salvarLayout(janelas);
+      salvarLayout(layoutDosNos([novoTerminal("o1", { x: 0, y: 0 }, 600, 500)], { x: 5, y: 6, zoom: 1 }));
+
+      expect(ler).not.toHaveBeenCalled();
+      expect(gravar).toHaveBeenCalledTimes(1);
+      // O texto gravado é o mesmo do JSON do layout inteiro, com o desenho no fim.
+      expect(localStorage.getItem(CHAVE)).toBe(JSON.stringify({ ...janelas, desenho: [caneta, seta] }));
+
+      salvarLayout(layoutDosNos([novoTerminal("o1", { x: 0, y: 0 }, 600, 500)], { x: 50, y: 6, zoom: 1 }));
+      expect(gravar).toHaveBeenCalledTimes(2);
+      expect(lerLayout()).toMatchObject({ viewport: { x: 50, y: 6, zoom: 1 }, desenho: [caneta, seta] });
+    } finally {
+      ler.mockRestore();
+      gravar.mockRestore();
+    }
+  });
+
+  it("outra janela gravou o layout: o desenho dela é mantido ao gravar as janelas daqui", () => {
+    lerLayout();
+    salvarDesenho([caneta]);
+    const daOutraJanela = JSON.stringify({ terminais: {}, notas: {}, artefatos: {}, previas: {}, shells: {}, viewport: null, desenho: [seta] });
+    localStorage.setItem(CHAVE, daOutraJanela);
+    window.dispatchEvent(new StorageEvent("storage", { key: CHAVE, newValue: daOutraJanela }));
+
+    salvarLayout(layoutDosNos([novoTerminal("o1", { x: 0, y: 0 }, 600, 500)], null));
+
+    expect(lerLayout().desenho).toEqual([seta]);
+    expect(Object.keys(lerLayout().terminais)).toEqual(["o1"]);
+  });
 });
 
 describe("desenho da tela cheia no armazenamento", () => {

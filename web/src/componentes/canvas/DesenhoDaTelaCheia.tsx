@@ -26,9 +26,11 @@ interface Props {
   ferramenta: FerramentaNaPagina;
   cor: CorDoDesenho;
   podeDesfazer: boolean;
+  podeLimpar: boolean;
   aoEscolherFerramenta: (ferramenta: FerramentaNaPagina) => void;
   aoEscolherCor: (cor: CorDoDesenho) => void;
   aoDesfazer: () => void;
+  aoLimpar: () => void;
   /** O fechar da barrinha: desliga o modo (os traços ficam). */
   aoDesligar: () => void;
 }
@@ -36,7 +38,7 @@ interface Props {
 /**
  * A barrinha do desenho sobre a página de um artefato em tela cheia, no alto do
  * corpo. Só aparece com o modo ligado. O desenho em si mora dentro da página
- * (`desenhoNaPagina.ts`): a barra só escolhe ferramenta e cor, desfaz e desliga.
+ * (`desenhoNaPagina.ts`): a barra só escolhe ferramenta e cor, desfaz, limpa e desliga.
  *
  * Ctrl/Cmd+Z com o foco no app desfaz aqui; com o foco dentro da página, a
  * própria página repassa a tecla. O Esc quem trata é a `JanelaEmTelaCheia`
@@ -46,9 +48,11 @@ export const DesenhoDaTelaCheia = memo(function DesenhoDaTelaCheia({
   ferramenta,
   cor,
   podeDesfazer,
+  podeLimpar,
   aoEscolherFerramenta,
   aoEscolherCor,
   aoDesfazer,
+  aoLimpar,
   aoDesligar,
 }: Props) {
   useEffect(() => {
@@ -73,6 +77,7 @@ export const DesenhoDaTelaCheia = memo(function DesenhoDaTelaCheia({
         cor={cor}
         espessura={ESPESSURA_DA_TELA_CHEIA}
         podeDesfazer={podeDesfazer}
+        podeLimpar={podeLimpar}
         aoEscolherFerramenta={(nova) => {
           if (nova !== "selecionar") {
             aoEscolherFerramenta(nova);
@@ -81,6 +86,7 @@ export const DesenhoDaTelaCheia = memo(function DesenhoDaTelaCheia({
         aoEscolherCor={aoEscolherCor}
         aoEscolherEspessura={() => undefined}
         aoDesfazer={aoDesfazer}
+        aoLimpar={aoLimpar}
         aoFechar={aoDesligar}
         ferramentas={FERRAMENTAS_DA_TELA_CHEIA}
         comEspessura={false}

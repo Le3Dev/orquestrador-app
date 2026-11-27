@@ -7,6 +7,7 @@ import {
   ESTADO_INICIAL_DO_CHAT,
   type EstadoDoChatNaTela,
   pedidoDeAutorizacaoAtual,
+  respostaPausada,
   textoParaMostrar,
   ultimoModeloUsado,
 } from "./aplicarEventoDoChat";
@@ -249,6 +250,53 @@ describe("aplicarEventoDoChat", () => {
       expect(pedidoDeAutorizacaoAtual(depois)).toBeNull();
       expect(pedidoDeAutorizacaoAtual(ESTADO_INICIAL_DO_CHAT)).toBeNull();
     });
+  });
+});
+
+describe("pausa da resposta", () => {
+  const DESDE = "2026-11-04T12:01:00.000Z";
+  const pausada: EventoDoChat = { tipo: "resposta_pausada", mensagemId: "c1", desde: DESDE };
+
+  it("pausada marca a resposta, que segue respondendo; continuada tira a pausa", () => {
+    const naPausa = aplicar([pergunta, pausada]);
+    expect(naPausa.situacao).toBe("respondendo");
+    expect(naPausa.mensagens[1]).toMatchObject({ situacao: "respondendo", pausadaDesde: DESDE });
+    expect(respostaPausada(naPausa)).toBe(true);
+
+    const continuada = aplicar([pergunta, pausada, { tipo: "resposta_continuada", mensagemId: "c1" }]);
+    expect(continuada.mensagens[1]?.pausadaDesde).toBeNull();
+    expect(respostaPausada(continuada)).toBe(false);
+  });
+
+  it("cancelar, concluir ou falhar com a resposta pausada tira a pausa", () => {
+    const uso = { duracaoMs: 1, tokensDeEntrada: 1, tokensDeSaida: 1, modeloUsado: null };
+    const fins: EventoDoChat[] = [
+      { tipo: "resposta_cancelada", mensagemId: "c1" },
+      { tipo: "resposta_falhou", mensagemId: "c1", motivo: "interrompida", uso: null },
+      { tipo: "resposta_concluida", mensagemId: "c1", texto: "ok", acoes: [], avisos: [], uso },
+    ];
+    for (const fim of fins) {
+      const estado = aplicar([pergunta, pausada, fim]);
+      expect(estado.situacao).toBe("ocioso");
+      expect(estado.mensagens[1]?.pausadaDesde).toBeNull();
+      expect(respostaPausada(estado)).toBe(false);
+    }
+  });
+
+  it("vem do GET: a pausa da resposta e se dá para pausar; servidor antigo vale falso", () => {
+    const base = { sessaoId: "s", situacao: "respondendo" as const, preferencias: ESTADO_INICIAL_DO_CHAT.preferencias, ultimaSequencia: 3, cota: null };
+    const carregado = carregarEstadoDoChat({
+      ...base,
+      podePausar: true,
+      mensagens: [mensagem("c1", "claude", { pausadaDesde: DESDE })],
+    });
+    expect(carregado.podePausar).toBe(true);
+    expect(carregado.mensagens[0]?.pausadaDesde).toBe(DESDE);
+    expect(respostaPausada(carregado)).toBe(true);
+
+    const antigo = carregarEstadoDoChat({ ...base, mensagens: [mensagem("c1", "claude")] });
+    expect(antigo.podePausar).toBe(false);
+    expect(antigo.mensagens[0]?.pausadaDesde).toBeNull();
   });
 });
 

@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 
 import type { FerramentaDeDesenho } from "../../shared/canvas/desenho";
 import {
@@ -12,6 +12,7 @@ import {
   IconeCaneta,
   IconeDesfazer,
   IconeFechar,
+  IconeLimparDesenho,
   IconeLinha,
   IconeMarcaTexto,
   IconeRetangulo,
@@ -83,10 +84,14 @@ interface Props {
   cor: CorDoDesenho;
   espessura: EspessuraDoDesenho;
   podeDesfazer: boolean;
+  /** Há traço para limpar. */
+  podeLimpar: boolean;
   aoEscolherFerramenta: (ferramenta: FerramentaDeDesenho) => void;
   aoEscolherCor: (cor: CorDoDesenho) => void;
   aoEscolherEspessura: (espessura: EspessuraDoDesenho) => void;
   aoDesfazer: () => void;
+  /** Apaga todos os traços num passo só (sem confirmação: o desfazer traz todos de volta). */
+  aoLimpar: () => void;
   aoFechar: () => void;
   /** Só estas ferramentas, na ordem da barra (a tela cheia do artefato usa uma barra compacta). Sem isso, todas. */
   ferramentas?: readonly FerramentaDeDesenho[];
@@ -98,17 +103,21 @@ interface Props {
 
 /**
  * A barra de desenho, no alto do canvas: as ferramentas, a cor, a espessura,
- * o desfazer e o fechar. Só mostra e avisa; o estado é da `CamadaDeDesenho`.
+ * o desfazer, o limpar tudo e o fechar. Só mostra e avisa; o estado é da `CamadaDeDesenho`.
+ * Memorizada: o rascunho em curso renderiza a camada a cada movimento, e a
+ * barra só precisa mudar quando as props dela mudam.
  */
-export function BarraDeDesenho({
+export const BarraDeDesenho = memo(function BarraDeDesenho({
   ferramenta,
   cor,
   espessura,
   podeDesfazer,
+  podeLimpar,
   aoEscolherFerramenta,
   aoEscolherCor,
   aoEscolherEspessura,
   aoDesfazer,
+  aoLimpar,
   aoFechar,
   ferramentas,
   comEspessura = true,
@@ -183,6 +192,16 @@ export function BarraDeDesenho({
       <button
         type="button"
         className="botao-icone"
+        aria-label="Limpar todos os desenhos"
+        title="Limpar tudo: apaga todos os traços de uma vez (o Desfazer traz todos de volta)"
+        disabled={!podeLimpar}
+        onClick={aoLimpar}
+      >
+        <IconeLimparDesenho />
+      </button>
+      <button
+        type="button"
+        className="botao-icone"
         aria-label={fechar.nome}
         title={fechar.dica}
         onClick={aoFechar}
@@ -191,4 +210,4 @@ export function BarraDeDesenho({
       </button>
     </div>
   );
-}
+});

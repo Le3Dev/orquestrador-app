@@ -1,4 +1,4 @@
-import { useCanvas } from "../../shared/canvas/contexto";
+import { useAcoesDoCanvas, useSeletorDoCanvas } from "../../shared/canvas/contexto";
 import { bixinhosParaLimpar } from "../../shared/canvas/nos";
 
 /**
@@ -9,8 +9,11 @@ import { bixinhosParaLimpar } from "../../shared/canvas/nos";
  * nenhum, não renderiza nada.
  */
 export function BotaoDeLimparBixinhos({ orquestradorId }: { orquestradorId: string }) {
-  const { conversas, bixinhosLimpos, acoes } = useCanvas();
-  const quantidade = bixinhosParaLimpar(conversas.get(orquestradorId), bixinhosLimpos.get(orquestradorId)).length;
+  // Só a quantidade (um número): re-renderiza quando ela muda, não a cada evento.
+  const quantidade = useSeletorDoCanvas(
+    (canvas) => bixinhosParaLimpar(canvas.conversas.get(orquestradorId), canvas.bixinhosLimpos.get(orquestradorId)).length,
+  );
+  const acoes = useAcoesDoCanvas();
 
   if (quantidade === 0) {
     return null;
