@@ -116,14 +116,24 @@ export function criarContasDoDesenho() {
     };
   }
 
-  /** A caixa que o texto solto ocupa (estimada pela quantidade de letras), a partir do canto superior esquerdo. */
+  /** A altura de cada linha do texto solto (o campo de edição e o traço desenhado usam a mesma). */
+  function alturaDaLinhaDoTexto(espessura: EspessuraDoDesenho): number {
+    return tamanhoDoTexto(espessura) * PROPORCAO_DA_LETRA.altura;
+  }
+
+  /**
+   * A caixa que o texto solto ocupa, a partir do canto superior esquerdo: a
+   * largura vem da linha mais longa (estimada pela quantidade de letras) e a
+   * altura, da quantidade de linhas (o texto quebra a linha em "\n").
+   */
   function caixaDoTexto(em: Ponto, texto: string, espessura: EspessuraDoDesenho): Retangulo {
-    const tamanho = tamanhoDoTexto(espessura);
+    const linhas = texto.split("\n");
+    const letrasDaMaisLonga = Math.max(1, ...linhas.map((linha) => linha.length));
     return {
       x: em.x,
       y: em.y,
-      largura: Math.max(1, texto.length) * tamanho * PROPORCAO_DA_LETRA.largura,
-      altura: tamanho * PROPORCAO_DA_LETRA.altura,
+      largura: letrasDaMaisLonga * tamanhoDoTexto(espessura) * PROPORCAO_DA_LETRA.largura,
+      altura: linhas.length * alturaDaLinhaDoTexto(espessura),
     };
   }
 
@@ -254,6 +264,7 @@ export function criarContasDoDesenho() {
   return {
     larguraDoTraco,
     tamanhoDoTexto,
+    alturaDaLinhaDoTexto,
     caminhoDaMaoLivre,
     caminhoDaSeta,
     retanguloEntre,
@@ -271,6 +282,7 @@ export type ContasDoDesenho = ReturnType<typeof criarContasDoDesenho>;
 export const {
   larguraDoTraco,
   tamanhoDoTexto,
+  alturaDaLinhaDoTexto,
   caminhoDaMaoLivre,
   caminhoDaSeta,
   retanguloEntre,

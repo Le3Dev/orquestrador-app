@@ -585,7 +585,13 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
   color: var(--cor-do-traco);
   font-family: var(--fonte-titulo);
   font-weight: 500;
-  line-height: 1.1;
+  /* A mesma altura de linha do traço desenhado (PROPORCAO_DA_LETRA.altura, em shared/canvas/desenho.ts). */
+  line-height: 1.25;
+  /* Um textarea que cresce com as linhas e com a mais longa, sem rolagem nem quebra sozinha. */
+  field-sizing: content;
+  white-space: pre;
+  overflow: hidden;
+  resize: none;
 }
 .campo-do-texto-solto::placeholder { color: color-mix(in srgb, var(--cor-do-traco) 50%, transparent); }
 

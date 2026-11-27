@@ -1,4 +1,5 @@
 import {
+  alturaDaLinhaDoTexto,
   caixaDoTexto,
   caminhoDaMaoLivre,
   caminhoDaSeta,
@@ -167,6 +168,44 @@ describe("tracoTocado (a borracha)", () => {
     expect(caixa.altura).toBeGreaterThan(tamanhoDoTexto(3));
     expect(tracoTocado(solto, { x: 20, y: 20 }, 0)).toBe(true);
     expect(tracoTocado(solto, { x: caixa.x + caixa.largura + 10, y: 20 }, 0)).toBe(false);
+  });
+
+  it("o texto de várias linhas é tocado também nas linhas de baixo", () => {
+    const umaLinha = traco({ tipo: "texto", espessura: 3, pontos: [{ x: 10, y: 10 }], texto: "Banco" });
+    const duasLinhas = traco({ tipo: "texto", espessura: 3, pontos: [{ x: 10, y: 10 }], texto: "Banco\nde dados" });
+    const naSegundaLinha = { x: 20, y: 10 + alturaDaLinhaDoTexto(3) + 5 };
+
+    expect(tracoTocado(umaLinha, naSegundaLinha, 0)).toBe(false);
+    expect(tracoTocado(duasLinhas, naSegundaLinha, 0)).toBe(true);
+  });
+});
+
+describe("caixaDoTexto", () => {
+  it("uma linha: a largura vem das letras e a altura é a de uma linha", () => {
+    const caixa = caixaDoTexto({ x: 10, y: 20 }, "Banco", 3);
+
+    expect(caixa).toEqual({
+      x: 10,
+      y: 20,
+      largura: 5 * tamanhoDoTexto(3) * 0.6,
+      altura: alturaDaLinhaDoTexto(3),
+    });
+  });
+
+  it("várias linhas: a largura é a da linha mais longa e a altura cresce a cada linha, vazias inclusive", () => {
+    const uma = caixaDoTexto({ x: 0, y: 0 }, "Banco de dados", 3);
+    const varias = caixaDoTexto({ x: 0, y: 0 }, "Banco\n\nde dados do pedido", 3);
+
+    expect(varias.largura).toBe("de dados do pedido".length * tamanhoDoTexto(3) * 0.6);
+    expect(varias.altura).toBe(3 * alturaDaLinhaDoTexto(3));
+    expect(uma.altura).toBe(alturaDaLinhaDoTexto(3));
+  });
+
+  it("texto vazio ainda ocupa uma letra de largura e uma linha de altura", () => {
+    const caixa = caixaDoTexto({ x: 0, y: 0 }, "", 2);
+
+    expect(caixa.largura).toBe(tamanhoDoTexto(2) * 0.6);
+    expect(caixa.altura).toBe(alturaDaLinhaDoTexto(2));
   });
 });
 

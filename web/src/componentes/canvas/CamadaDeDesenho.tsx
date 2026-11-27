@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import {
+  alturaDaLinhaDoTexto,
   caminhoDaMaoLivre,
   caminhoDaSeta,
   DISTANCIA_MINIMA_ENTRE_PONTOS_PX,
@@ -93,7 +94,9 @@ export const TracoDesenhado = memo(function TracoDesenhado({ traco }: { traco: T
         />
       );
     }
-    case "texto":
+    case "texto": {
+      // Uma linha por tspan, cada uma com o y próprio: a linha vazia não perde o lugar (um tspan sem letras ignoraria o dy).
+      const alturaDaLinha = alturaDaLinhaDoTexto(traco.espessura);
       return (
         <text
           data-traco={traco.tipo}
@@ -103,9 +106,14 @@ export const TracoDesenhado = memo(function TracoDesenhado({ traco }: { traco: T
           fontSize={tamanhoDoTexto(traco.espessura)}
           dominantBaseline="hanging"
         >
-          {traco.texto}
+          {(traco.texto ?? "").split("\n").map((linha, indice) => (
+            <tspan key={indice} x={de.x} y={de.y + indice * alturaDaLinha}>
+              {linha}
+            </tspan>
+          ))}
         </text>
       );
+    }
   }
 });
 
@@ -392,17 +400,20 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
     return () => elemento.removeEventListener("wheel", aoRolar);
   }, [ativa]);
 
-  const aoTeclarNoTexto = (evento: EventoDeTeclaDoReact<HTMLInputElement>) => {
-    if (evento.key === "Enter") {
-      evento.preventDefault();
-      confirmarTexto();
-    } else if (evento.key === "Escape") {
-      // Esc no campo desiste do texto; a ferramenta continua a mesma.
+  // Como no Excalidraw: Enter e Shift+Enter quebram a linha (o padrão do campo); Esc e Ctrl/Cmd+Enter
+  // terminam o texto. O Esc não sobe: o atalho da camada trocaria a ferramenta ou fecharia a barra.
+  const aoTeclarNoTexto = (evento: EventoDeTeclaDoReact<HTMLTextAreaElement>) => {
+    if (evento.nativeEvent.isComposing) {
+      return;
+    }
+    if (evento.key === "Escape" || (evento.key === "Enter" && (evento.ctrlKey || evento.metaKey))) {
       evento.preventDefault();
       evento.stopPropagation();
-      mudarEdicao(null);
+      confirmarTexto();
     }
   };
+
+  const linhasDoCampo = (textoEmEdicao?.valor ?? "").split("\n");
 
   return (
     <>
@@ -430,13 +441,17 @@ export const CamadaDeDesenho = memo(function CamadaDeDesenho({ aberta, aoFechar,
           </g>
         </svg>
         {textoEmEdicao !== null && (
-          <input
+          <textarea
             // Abre já com o foco: o clique que o criou não o tira (preventDefault no ponteiro).
             autoFocus
             className={`campo-do-texto-solto traco-cor-${textoEmEdicao.cor}`}
             aria-label="Texto solto"
-            placeholder="Digite e tecle Enter"
+            placeholder="Digite; Enter quebra a linha, Esc termina"
             maxLength={MAXIMO_DE_CARACTERES_NO_TEXTO}
+            // Cresce com o conteúdo (o CSS usa field-sizing; rows e cols valem onde ele não existe) e não quebra linha sozinho.
+            wrap="off"
+            rows={linhasDoCampo.length}
+            cols={Math.max(1, ...linhasDoCampo.map((linha) => linha.length))}
             value={textoEmEdicao.valor}
             style={{
               left: textoEmEdicao.em.x * zoom + x,

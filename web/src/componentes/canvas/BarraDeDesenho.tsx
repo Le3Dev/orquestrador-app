@@ -46,7 +46,7 @@ const FERRAMENTAS: readonly { ferramenta: FerramentaDeDesenho; nome: string; dic
   {
     ferramenta: "texto",
     nome: "Texto",
-    dica: "Texto solto: clique onde ele começa, digite e tecle Enter",
+    dica: "Texto solto: clique onde ele começa e digite; Enter quebra a linha, Esc ou clicar fora termina",
     icone: <IconeTexto />,
   },
   {

@@ -212,24 +212,111 @@ describe("CamadaDeDesenho", () => {
     expect(tracosNaTela()).toHaveLength(2);
   });
 
-  it("o texto solto vira traço ao teclar Enter; vazio, não", () => {
-    render(<CanvasDeTeste />);
-    fireEvent.click(screen.getByRole("button", { name: "Desenhar" }));
-    fireEvent.click(ferramenta("Texto"));
+  describe("texto solto", () => {
+    /** Abre a barra, escolhe o Texto e clica em (x, y): o campo abre já com o foco. */
+    function abrirCampoDeTexto(x: number, y: number): HTMLElement {
+      render(<CanvasDeTeste />);
+      fireEvent.click(screen.getByRole("button", { name: "Desenhar" }));
+      fireEvent.click(ferramenta("Texto"));
+      return abrirOutroCampoDeTexto(x, y);
+    }
 
-    fireEvent.pointerDown(areaDeDesenho(), { button: 0, pointerId: 1, clientX: 40, clientY: 50 });
-    const campo = screen.getByRole("textbox", { name: "Texto solto" });
-    expect(campo).toHaveFocus();
-    fireEvent.change(campo, { target: { value: "Fila de pedidos" } });
-    fireEvent.keyDown(campo, { key: "Enter" });
+    function abrirOutroCampoDeTexto(x: number, y: number): HTMLElement {
+      fireEvent.pointerDown(areaDeDesenho(), { button: 0, pointerId: 1, clientX: x, clientY: y });
+      const campo = screen.getByRole("textbox", { name: "Texto solto" });
+      expect(campo).toHaveFocus();
+      return campo;
+    }
 
-    expect(screen.queryByRole("textbox", { name: "Texto solto" })).not.toBeInTheDocument();
-    expect(camada().querySelector("text")).toHaveTextContent("Fila de pedidos");
-    expect(lerLayout().desenho?.[0]).toMatchObject({ tipo: "texto", texto: "Fila de pedidos", pontos: [{ x: 40, y: 50 }] });
+    function campoAberto(): boolean {
+      return screen.queryByRole("textbox", { name: "Texto solto" }) !== null;
+    }
 
-    fireEvent.pointerDown(areaDeDesenho(), { button: 0, pointerId: 1, clientX: 90, clientY: 90 });
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "Texto solto" }), { key: "Enter" });
-    expect(camada().querySelectorAll("text")).toHaveLength(1);
+    function linhasNaTela(): string[] {
+      return [...camada().querySelectorAll("text tspan")].map((linha) => linha.textContent ?? "");
+    }
+
+    it("é um campo de várias linhas: Enter e Shift+Enter quebram a linha, sem terminar o texto", () => {
+      const campo = abrirCampoDeTexto(40, 50);
+
+      expect(campo.tagName).toBe("TEXTAREA");
+      // fireEvent devolve false quando o evento teve o padrão (a quebra de linha) cancelado.
+      expect(fireEvent.keyDown(campo, { key: "Enter" })).toBe(true);
+      expect(fireEvent.keyDown(campo, { key: "Enter", shiftKey: true })).toBe(true);
+      expect(campoAberto()).toBe(true);
+      expect(lerLayout().desenho ?? []).toHaveLength(0);
+    });
+
+    it("Ctrl+Enter (ou Cmd+Enter) termina: vira um traço com as linhas separadas por quebra, um tspan por linha", () => {
+      const campo = abrirCampoDeTexto(40, 50);
+      fireEvent.change(campo, { target: { value: "Fila de pedidos\n\n  segunda linha" } });
+      fireEvent.keyDown(campo, { key: "Enter", ctrlKey: true });
+
+      expect(campoAberto()).toBe(false);
+      expect(linhasNaTela()).toEqual(["Fila de pedidos", "", "  segunda linha"]);
+      expect(lerLayout().desenho?.[0]).toMatchObject({
+        tipo: "texto",
+        texto: "Fila de pedidos\n\n  segunda linha",
+        pontos: [{ x: 40, y: 50 }],
+      });
+
+      // Cada linha desce uma altura de linha, a linha vazia inclusive; todas começam no mesmo x.
+      const linhas = [...camada().querySelectorAll("text tspan")];
+      const [primeiro = 0, segundo = 0, terceiro = 0] = linhas.map((linha) => Number(linha.getAttribute("y")));
+      expect(primeiro).toBe(50);
+      expect(segundo - primeiro).toBeGreaterThan(0);
+      expect(terceiro - segundo).toBeCloseTo(segundo - primeiro);
+      expect(linhas.map((linha) => linha.getAttribute("x"))).toEqual(["40", "40", "40"]);
+
+      const outro = abrirOutroCampoDeTexto(90, 90);
+      fireEvent.change(outro, { target: { value: "Mac" } });
+      fireEvent.keyDown(outro, { key: "Enter", metaKey: true });
+      expect(camada().querySelectorAll("text")).toHaveLength(2);
+    });
+
+    it("Esc termina o texto (não descarta) e não troca a ferramenta nem fecha a barra", () => {
+      const campo = abrirCampoDeTexto(40, 50);
+      fireEvent.change(campo, { target: { value: "Fila" } });
+      // O Esc do campo não pode chegar ao atalho global da camada (que trocaria a ferramenta).
+      const noGlobal = vi.fn();
+      window.addEventListener("keydown", noGlobal);
+      fireEvent.keyDown(campo, { key: "Escape" });
+      window.removeEventListener("keydown", noGlobal);
+
+      expect(noGlobal).not.toHaveBeenCalled();
+      expect(campoAberto()).toBe(false);
+      expect(linhasNaTela()).toEqual(["Fila"]);
+      expect(lerLayout().desenho?.[0]).toMatchObject({ tipo: "texto", texto: "Fila" });
+      expect(barra()).toBeInTheDocument();
+      expect(ferramenta("Texto")).toHaveAttribute("aria-pressed", "true");
+
+      // Fora do campo, o Esc segue sendo da camada: volta para Selecionar.
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(ferramenta("Selecionar")).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("clicar fora (perder o foco) termina o texto, como antes", () => {
+      const campo = abrirCampoDeTexto(40, 50);
+      fireEvent.change(campo, { target: { value: "Fora" } });
+      fireEvent.blur(campo);
+
+      expect(campoAberto()).toBe(false);
+      expect(lerLayout().desenho?.[0]).toMatchObject({ tipo: "texto", texto: "Fora" });
+    });
+
+    it("texto vazio ou só com espaços e quebras some", () => {
+      const vazio = abrirCampoDeTexto(40, 50);
+      fireEvent.keyDown(vazio, { key: "Escape" });
+      expect(campoAberto()).toBe(false);
+
+      const soEspacos = abrirOutroCampoDeTexto(90, 90);
+      fireEvent.change(soEspacos, { target: { value: "  \n \n" } });
+      fireEvent.keyDown(soEspacos, { key: "Enter", ctrlKey: true });
+
+      expect(campoAberto()).toBe(false);
+      expect(camada().querySelectorAll("text")).toHaveLength(0);
+      expect(lerLayout().desenho ?? []).toHaveLength(0);
+    });
   });
 
   it("com uma ferramenta na mão, a página do artefato e da prévia fica sem o mouse (o CSS é lido do arquivo)", () => {
