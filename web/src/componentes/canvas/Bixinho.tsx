@@ -72,6 +72,17 @@ export const Bixinho = memo(function Bixinho({ aparencia, situacao }: Props) {
   );
 });
 
+/** Três faíscas que sobem do lápis enquanto o Subagente edita arquivos (decorativas). */
+export const FaiscasDaEdicao = memo(function FaiscasDaEdicao() {
+  return (
+    <span className="faiscas-da-edicao" aria-hidden="true">
+      <i />
+      <i />
+      <i />
+    </span>
+  );
+});
+
 /**
  * O selo de "concluído": um círculo verde com um check que se desenha (o
  * traço usa `pathLength` 1, então o CSS anima só o `stroke-dashoffset`). Ocupa o

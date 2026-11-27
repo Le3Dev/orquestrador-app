@@ -1,7 +1,7 @@
 import { Handle, type NodeProps, NodeToolbar, Position } from "@xyflow/react";
 import { type CSSProperties, memo } from "react";
 
-import { aparenciaDoBixinho, papelQueNomeia } from "../../shared/canvas/bixinhos";
+import { aparenciaDoBixinho, digitacaoDaFala, papelQueNomeia } from "../../shared/canvas/bixinhos";
 import { type AcoesDoCanvas, useAcoesDoCanvas, useSeletorDoCanvas } from "../../shared/canvas/contexto";
 import { iconeDaFerramenta } from "../../shared/canvas/iconesDeFerramenta";
 import { type Ancora, type NoBixinho as TipoDoNo, subagentesVisiveis } from "../../shared/canvas/nos";
@@ -11,7 +11,7 @@ import { useRelogio } from "../../shared/hooks/useRelogio";
 import { Etiqueta } from "../Etiqueta";
 import { IconeFechar } from "../Icones";
 import { TextoFormatado } from "../TextoFormatado";
-import { Bixinho, IconeDaFerramenta, SeloDeConcluido } from "./Bixinho";
+import { Bixinho, FaiscasDaEdicao, IconeDaFerramenta, SeloDeConcluido } from "./Bixinho";
 
 /**
  * A ficha do bixinho selecionado. Com um subagente pronto, o título é o nome
@@ -125,6 +125,11 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
   // lugar do nome do bicho; o desenho continua o mesmo. O workflow segue com o
   // bicho e o papel ao lado; o executor comum, que é a maioria, só no tooltip e
   // na ficha, para não repetir em todo bixinho.
+  // Trabalhando sem atividade ainda: pontinhos no lugar de "pensando…". Com atividade, a fala é digitada.
+  const trabalhando = executando && !pausado;
+  const pensando = trabalhando && !subagente.atividade;
+  const digitando = trabalhando && !pensando;
+  const { passos, duracaoMs } = digitacaoDaFala(fala);
   const papelQueDaNome = papelQueNomeia(subagente.papel);
   const papelNoRotulo =
     papelQueDaNome === null && subagente.papel !== null && subagente.papel !== "executor" ? subagente.papel : null;
@@ -151,12 +156,27 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
       )}
 
       <div
-        className={`no-bixinho no-bixinho-${subagente.situacao} ${selecionado ? "no-bixinho-selecionado" : ""} ${saindo ? "no-bixinho-saindo" : ""}`}
+        className={`no-bixinho no-bixinho-${subagente.situacao} ${icone === "lupa" ? "no-bixinho-lendo" : ""} ${selecionado ? "no-bixinho-selecionado" : ""} ${saindo ? "no-bixinho-saindo" : ""}`}
         title={subagente.papel === null ? dica : `${subagente.papel} · ${dica.toLowerCase()}`}
         style={entrada > 0 ? ({ "--i": entrada } as CSSProperties) : undefined}
       >
-        <div className="balao-do-bixinho">
-          <span className={executando && !pausado ? "cursor" : ""}>{fala}</span>
+        {/* `key` na fala: a cada fala nova o balão dá um "pop" e a fala é digitada de novo. */}
+        <div className="balao-do-bixinho" key={fala}>
+          {pensando ? (
+            <span className="pontinhos-do-balao">
+              <span className="sr-only">{fala}</span>
+              <i />
+              <i />
+              <i />
+            </span>
+          ) : (
+            <span
+              className={`fala-do-balao ${digitando ? "fala-digitada" : ""}`}
+              style={digitando ? ({ "--passos": passos, "--duracao": `${duracaoMs}ms` } as CSSProperties) : undefined}
+            >
+              <span className={executando && !pausado ? "cursor" : ""}>{fala}</span>
+            </span>
+          )}
         </div>
         {/* Quem ainda executa não fecha. Quem falhou fica até o usuário ver o erro e fechar; o clique não chega
             ao nó (não abre a ficha) e o `nodrag` impede o arraste. */}
@@ -174,7 +194,9 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
             <IconeFechar tamanho={10} />
           </button>
         )}
-        {icone !== null && <IconeDaFerramenta icone={icone} />}
+        {/* `key`: ao trocar de ferramenta o selo gira para entrar (a animação roda ao montar). */}
+        {icone !== null && <IconeDaFerramenta key={icone} icone={icone} />}
+        {icone === "lapis" && <FaiscasDaEdicao />}
         {subagente.situacao === "concluido" && <SeloDeConcluido />}
         <Bixinho aparencia={aparencia} situacao={subagente.situacao} />
         {/* Nome longo corta com reticências; o #id fica sempre visível (o nome inteiro, no tooltip). */}

@@ -2465,6 +2465,76 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
 .icone-da-ferramenta-engrenagem { --cor-do-icone: var(--active); }
 .icone-da-ferramenta-globo { --cor-do-icone: var(--success); }
 
+/* Bixinho e balão mais vivos. Tudo curto e só com transform/opacity. */
+/* O balão dá um "pop" a cada fala nova (a fala troca a `key`, e o balão é remontado). */
+.balao-do-bixinho { animation: pop-do-balao .18s ease-out; }
+@keyframes pop-do-balao { from { scale: .92; opacity: .4; } }
+/* A fala é digitada por uma cortina da cor do balão que recolhe letra a letra (transform, não largura). */
+.fala-do-balao { position: relative; }
+.fala-digitada::before {
+  content: "";
+  position: absolute;
+  inset: 0 -1px;
+  background: var(--surface-2);
+  transform-origin: 100% 50%;
+  animation: digitar var(--duracao, 300ms) steps(var(--passos, 12)) both;
+}
+@keyframes digitar { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+/* Pensando: três pontinhos que pulam em onda, no lugar de "pensando…". */
+.pontinhos-do-balao { display: inline-flex; gap: 3px; align-items: center; height: 10px; vertical-align: middle; }
+.pontinhos-do-balao i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--active);
+  animation: pulo-do-ponto .9s ease-in-out infinite;
+}
+.pontinhos-do-balao i:nth-child(3) { animation-delay: .15s; }
+.pontinhos-do-balao i:nth-child(4) { animation-delay: .3s; }
+@keyframes pulo-do-ponto {
+  0%, 60%, 100% { transform: translateY(0); opacity: .5; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+/* Trocou de ferramenta: o selo gira para entrar. */
+.icone-da-ferramenta { animation: troca-de-icone .22s var(--curva-de-mola); }
+@keyframes troca-de-icone { from { opacity: 0; transform: scale(.4) rotate(-40deg); } }
+/* Editando: faíscas sobem do lápis. */
+.faiscas-da-edicao {
+  --cor-do-icone: var(--warning);
+  position: absolute;
+  top: 44px;
+  left: calc(50% + 20px);
+  width: 30px;
+  height: 30px;
+  pointer-events: none;
+}
+.faiscas-da-edicao i {
+  position: absolute;
+  bottom: 0;
+  left: 6px;
+  width: 3px;
+  height: 3px;
+  background: var(--cor-do-icone);
+  opacity: 0;
+  animation: faisca-da-edicao 1.1s ease-out infinite;
+}
+.faiscas-da-edicao i:nth-child(2) { left: 14px; animation-delay: .35s; }
+.faiscas-da-edicao i:nth-child(3) { left: 22px; animation-delay: .7s; }
+@keyframes faisca-da-edicao {
+  0% { opacity: 0; transform: translateY(0); }
+  20% { opacity: 1; }
+  100% { opacity: 0; transform: translate(6px, -22px); }
+}
+/* Lendo: os olhos passeiam de um lado a outro (a piscada fica de fora enquanto lê). */
+.no-bixinho-lendo .bixinho-olhos { animation: olhar-a-leitura 1.8s ease-in-out infinite; }
+@keyframes olhar-a-leitura {
+  0%, 100% { transform: translateX(0); }
+  30% { transform: translateX(-4px); }
+  70% { transform: translateX(4px); }
+}
+/* Pseudo-elementos não entram no `*` de "sem servidor": ficam parados aqui. */
+.canvas-desconectado .fala-digitada::before { animation-play-state: paused !important; }
+
 /* Concluiu: o selo da ferramenta dá lugar a um check que se desenha (só o
  * `stroke-dashoffset`, curto) e um brilho verde que passa uma vez por trás do
  * bixinho (opacidade e escala). */
@@ -2537,6 +2607,11 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
 .canvas-movendo .react-flow__node .bixinho-desenho,
 .canvas-movendo .react-flow__node .bixinho-olhos,
 .canvas-movendo .react-flow__node .bixinho-corpo-animado,
+.canvas-movendo .react-flow__node .balao-do-bixinho,
+.canvas-movendo .react-flow__node .fala-digitada::before,
+.canvas-movendo .react-flow__node .pontinhos-do-balao i,
+.canvas-movendo .react-flow__node .icone-da-ferramenta,
+.canvas-movendo .react-flow__node .faiscas-da-edicao i,
 .canvas-movendo .react-flow__node .selo-de-concluido circle,
 .canvas-movendo .react-flow__node .selo-de-concluido path,
 .canvas-movendo .react-flow__node .bixinho-sprite::after,

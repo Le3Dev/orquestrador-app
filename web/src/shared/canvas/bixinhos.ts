@@ -83,6 +83,20 @@ export function papelQueNomeia(papel: string | null): string | null {
   return papel === null || papel === "executor" || papel === "workflow" ? null : papel;
 }
 
+/** A fala do balão "digita" no máximo isto, por mais longa que seja (o balão corta com reticências mesmo). */
+const DURACAO_MAXIMA_DA_DIGITACAO_MS = 400;
+const MS_POR_LETRA = 20;
+
+/**
+ * Como a fala do balão aparece digitada: quantos passos (letras) e quanto
+ * tempo. 20 ms por letra, no máximo 400 ms, para falas longas não demorarem.
+ * Sem texto, não há o que digitar (`passos` 0).
+ */
+export function digitacaoDaFala(texto: string): { passos: number; duracaoMs: number } {
+  const passos = [...texto].length;
+  return { passos, duracaoMs: Math.min(DURACAO_MAXIMA_DA_DIGITACAO_MS, passos * MS_POR_LETRA) };
+}
+
 /** O nome do bixinho no rótulo do nó e no log do terminal: o papel que nomeia ou o nome do bicho. */
 export function nomeDoBixinho(subagenteId: string, papel: string | null): string {
   return papelQueNomeia(papel) ?? aparenciaDoBixinho(subagenteId).nome;
