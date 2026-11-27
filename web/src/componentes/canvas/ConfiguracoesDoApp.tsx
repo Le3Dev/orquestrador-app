@@ -473,6 +473,12 @@ function AbaDeAparencia() {
         ligado={preferencias.manterBixinhosAteLimpar}
         aoAlternar={() => mudarPreferencias({ manterBixinhosAteLimpar: !preferencias.manterBixinhosAteLimpar })}
       />
+      <InterruptorDaConfiguracao
+        titulo="Som ao receber uma pergunta"
+        descricao="Um aviso curto e baixo quando o Claude pergunta e espera sua resposta. Desligado por padrão."
+        ligado={preferencias.somDaPergunta}
+        aoAlternar={() => mudarPreferencias({ somDaPergunta: !preferencias.somDaPergunta })}
+      />
       <SegmentadoDaConfiguracao
         titulo="Controles das janelas"
         descricao="Como as janelas do canvas desenham fechar, minimizar e ampliar."

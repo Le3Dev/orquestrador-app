@@ -619,6 +619,18 @@ describe("ConfiguracoesDoApp", () => {
       expect(lerLeitor()).toMatchObject({ visualizadorDeCodigo: true, manterBixinhosAteLimpar: true });
     });
 
+    it("Som ao receber uma pergunta: desligado por padrão; ligar grava só no front (localStorage)", async () => {
+      renderizar({ abaInicial: "aparencia" });
+      await esperar();
+      const som = screen.getByRole("switch", { name: "Som ao receber uma pergunta" });
+      expect(som).toHaveAttribute("aria-checked", "false");
+
+      fireEvent.click(som);
+
+      expect(som).toHaveAttribute("aria-checked", "true");
+      expect(lerLeitor()).toMatchObject({ somDaPergunta: true });
+    });
+
     it("Controles das janelas: Automático por padrão; escolher grava e reflete", async () => {
       renderizar({ abaInicial: "aparencia" });
       await esperar();

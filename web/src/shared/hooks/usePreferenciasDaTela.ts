@@ -56,6 +56,11 @@ export type PreferenciasDaTela = {
   alturaDaConversaDoChat: number | null;
   /** O painel da transcrição (o que o áudio do computador diz, com "Responder agora") está aberto no chat. Padrão: fechado. */
   transcricaoAberta: boolean;
+  /**
+   * Toca um aviso curto e baixo quando o Claude faz uma pergunta e espera resposta.
+   * Desligado (o padrão, e o valor das preferências antigas, sem o campo).
+   */
+  somDaPergunta: boolean;
 };
 
 export const CHAVE_DAS_PREFERENCIAS_DA_TELA = "orquestrador.preferenciasDaTela";
@@ -75,6 +80,7 @@ const PADRAO: PreferenciasDaTela = {
   opacidadeDoChat: 1,
   alturaDaConversaDoChat: null,
   transcricaoAberta: false,
+  somDaPergunta: false,
 };
 
 /** A opacidade do chat: mínima, máxima, passo e padrão. */
@@ -144,7 +150,7 @@ function interpretar(bruto: string | null): PreferenciasDaTela {
   }
   const registro = lido as Record<string, unknown>;
   const booleano = (
-    campo: "chatFixoNaEsquerda" | "visualizadorDeCodigo" | "manterBixinhosAteLimpar" | "minimapaVisivel" | "transcricaoAberta",
+    campo: "chatFixoNaEsquerda" | "visualizadorDeCodigo" | "manterBixinhosAteLimpar" | "minimapaVisivel" | "transcricaoAberta" | "somDaPergunta",
   ): boolean =>
     typeof registro[campo] === "boolean" ? (registro[campo] as boolean) : PADRAO[campo];
   const largura = registro.larguraDoChatFixo;
@@ -170,6 +176,7 @@ function interpretar(bruto: string | null): PreferenciasDaTela {
         ? limitarOpacidadeDoChat(registro.opacidadeDoChat)
         : PADRAO.opacidadeDoChat,
     transcricaoAberta: booleano("transcricaoAberta"),
+    somDaPergunta: booleano("somDaPergunta"),
     alturaDaConversaDoChat:
       typeof registro.alturaDaConversaDoChat === "number"
         ? limitarAlturaDaConversaDoChat(registro.alturaDaConversaDoChat)
@@ -237,7 +244,8 @@ function mudar(parcial: Partial<PreferenciasDaTela>): void {
     mesmaGeometria(novas.chatNoModoInvisivel, atuais.chatNoModoInvisivel) &&
     novas.opacidadeDoChat === atuais.opacidadeDoChat &&
     novas.alturaDaConversaDoChat === atuais.alturaDaConversaDoChat &&
-    novas.transcricaoAberta === atuais.transcricaoAberta
+    novas.transcricaoAberta === atuais.transcricaoAberta &&
+    novas.somDaPergunta === atuais.somDaPergunta
   ) {
     return;
   }
