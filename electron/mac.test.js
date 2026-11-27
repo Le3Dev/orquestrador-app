@@ -60,6 +60,7 @@ describe("electron/mac", () => {
 
   it("no Windows, não procura o claude do PATH (vale a detecção do claude.exe)", () => {
     expect(mac.claudeCodeDoPath(() => true, { PATH: "/b", HOME: "/home/eu" }, "win32")).toBeNull();
+    expect(mac.executavelDoPath("codex", (c) => c === "/b/codex", { PATH: "/a:/b" }, "darwin")).toBe("/b/codex");
   });
 
   it.skipIf(noMac)("fora do Mac, nada muda", () => {

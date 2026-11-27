@@ -176,6 +176,11 @@ function carregarPathDoShell() {
  * a primeira abertura segue com a detecção do Windows.
  */
 function claudeCodeDoPath(ehArquivo, ambiente = process.env, plataforma = process.platform) {
+  return executavelDoPath("claude", ehArquivo, ambiente, plataforma);
+}
+
+/** Mesma busca de `claudeCodeDoPath`, para qualquer CLI (codex, copilot, gemini). */
+function executavelDoPath(nome, ehArquivo, ambiente = process.env, plataforma = process.platform) {
   if (plataforma !== "darwin" && plataforma !== "linux") return null;
   const pastas = (ambiente.PATH || "").split(":");
   if (plataforma === "linux") {
@@ -185,7 +190,7 @@ function claudeCodeDoPath(ehArquivo, ambiente = process.env, plataforma = proces
   for (const pasta of pastas) {
     if (!pasta) continue;
     // Caminhos do Mac e do Linux: com "/" mesmo nos testes rodados no Windows.
-    const candidato = path.posix.join(pasta, "claude");
+    const candidato = path.posix.join(pasta, nome);
     if (ehArquivo(candidato)) return candidato;
   }
   return null;
@@ -210,6 +215,7 @@ module.exports = {
   menuDoApp,
   carregarPathDoShell,
   claudeCodeDoPath,
+  executavelDoPath,
   historicoDoRepositorio,
   // Expostos para teste.
   juntarPaths,

@@ -101,7 +101,7 @@
     <div class="barra"></div>
     <div class="conteudo">
       <h1 id="titulo">Bem-vindo ao Orquestrador de Agentes</h1>
-      <p class="sub" id="subtitulo">Antes de começar, diga onde ficam os seus projetos e onde está o Claude Code. Você pode mudar isso depois em Ajustes.</p>
+      <p class="sub" id="subtitulo">Antes de começar, diga onde ficam os seus projetos e quais IAs você vai usar. Você pode mudar isso depois em Ajustes.</p>
 
       <div class="campo">
         <label for="pasta">Pasta raiz dos projetos</label>
@@ -112,15 +112,45 @@
         <div class="dica">Os Orquestradores trabalham nas pastas dentro desta.</div>
       </div>
 
+      <h2 id="tituloMotores" style="font-size: 14px; margin: 22px 0 4px; font-weight: 600">Motores de IA</h2>
+      <p class="sub" style="margin-bottom: 14px">Escolha pelo menos um. O Claude Code é o padrão; os outros são opcionais.</p>
+
       <div class="campo">
         <label for="claude">Claude Code (claude.exe)</label>
         <div class="linha">
           <input id="claude" type="text" autocomplete="off" spellcheck="false" placeholder="não encontrado" />
-          <button id="escolherClaude" class="secundario" type="button">Escolher…</button>
+          <button id="escolherClaude" class="secundario" type="button" aria-label="Escolher o Claude Code">Escolher…</button>
         </div>
         <div id="dicaClaude" class="dica">
           Instale e faça login no Claude Code — <a href="https://code.claude.com/docs" target="_blank" rel="noreferrer">https://code.claude.com/docs</a>
         </div>
+      </div>
+
+      <div class="campo">
+        <label for="codex">Codex</label>
+        <div class="linha">
+          <input id="codex" type="text" autocomplete="off" spellcheck="false" placeholder="não encontrado" />
+          <button id="escolherCodex" class="secundario" type="button" aria-label="Escolher o Codex">Escolher…</button>
+        </div>
+        <div id="dicaCodex" class="dica">Instale com <code>npm i -g @openai/codex</code> e depois rode <code>codex login</code>.</div>
+      </div>
+
+      <div class="campo">
+        <label for="copilot">GitHub Copilot CLI</label>
+        <div class="linha">
+          <input id="copilot" type="text" autocomplete="off" spellcheck="false" placeholder="não encontrado" />
+          <button id="escolherCopilot" class="secundario" type="button" aria-label="Escolher o GitHub Copilot CLI">Escolher…</button>
+        </div>
+        <div id="dicaCopilot" class="dica">Instale com <code>npm i -g @github/copilot</code> e depois rode <code>copilot login</code>.</div>
+      </div>
+
+      <div class="campo">
+        <label for="gemini">Gemini CLI</label>
+        <div class="linha">
+          <input id="gemini" type="text" autocomplete="off" spellcheck="false" placeholder="não encontrado" />
+          <button id="escolherGemini" class="secundario" type="button" aria-label="Escolher o Gemini CLI">Escolher…</button>
+        </div>
+        <div id="dicaGemini" class="dica">Instale com <code>npm i -g @google/gemini-cli</code> e depois rode <code>gemini</code> para entrar.</div>
       </div>
 
       <label id="caixaImportar" class="importar oculto">
@@ -143,6 +173,9 @@
       const campoPasta = document.getElementById("pasta");
       const campoClaude = document.getElementById("claude");
       const dicaClaude = document.getElementById("dicaClaude");
+      const campoCodex = document.getElementById("codex");
+      const campoCopilot = document.getElementById("copilot");
+      const campoGemini = document.getElementById("gemini");
       const caixaImportar = document.getElementById("caixaImportar");
       const marcarImportar = document.getElementById("importar");
       const origemHistorico = document.getElementById("origemHistorico");
@@ -165,9 +198,22 @@
           const dados = await ponte.primeiraAbertura.carregar();
           campoPasta.value = dados.pastaRaizDosProjetos || "";
           campoClaude.value = dados.caminhoDoClaudeCode || "";
+          campoCodex.value = dados.caminhoDoCodex || "";
+          campoCopilot.value = dados.caminhoDoCopilot || "";
+          campoGemini.value = dados.caminhoDoGemini || "";
+          // Campo vazio = motor não usado: tom neutro; só vira erro ao salvar sem nenhum.
           if (!dados.caminhoDoClaudeCode) {
-            dicaClaude.firstChild.textContent = "Claude Code não encontrado. Instale e faça login no Claude Code — ";
-            dicaClaude.className = "dica erro";
+            dicaClaude.firstChild.textContent = "Não encontrado. Instale e faça login no Claude Code — ";
+          }
+          for (const [id, campo] of [
+            ["dicaCodex", campoCodex],
+            ["dicaCopilot", campoCopilot],
+            ["dicaGemini", campoGemini],
+          ]) {
+            if (!campo.value) {
+              const dica = document.getElementById(id);
+              dica.insertBefore(document.createTextNode("Não encontrado. "), dica.firstChild);
+            }
           }
           historicoAntigo = dados.historicoAntigo || null;
           if (historicoAntigo) {
@@ -201,6 +247,9 @@
         const dados = {
           pastaRaizDosProjetos: campoPasta.value.trim(),
           caminhoDoClaudeCode: campoClaude.value.trim(),
+          caminhoDoCodex: campoCodex.value.trim(),
+          caminhoDoCopilot: campoCopilot.value.trim(),
+          caminhoDoGemini: campoGemini.value.trim(),
           importarHistorico: Boolean(historicoAntigo) && marcarImportar.checked,
         };
         botaoSalvar.disabled = true;
@@ -225,6 +274,15 @@
       );
       document.getElementById("escolherClaude").addEventListener("click", () =>
         escolher(ponte.primeiraAbertura.escolherClaudeCode, campoClaude),
+      );
+      document.getElementById("escolherCodex").addEventListener("click", () =>
+        escolher(ponte.primeiraAbertura.escolherCodex, campoCodex),
+      );
+      document.getElementById("escolherCopilot").addEventListener("click", () =>
+        escolher(ponte.primeiraAbertura.escolherCopilot, campoCopilot),
+      );
+      document.getElementById("escolherGemini").addEventListener("click", () =>
+        escolher(ponte.primeiraAbertura.escolherGemini, campoGemini),
       );
       botaoSalvar.addEventListener("click", salvar);
       botaoCancelar.addEventListener("click", () => ponte.janela.fechar());

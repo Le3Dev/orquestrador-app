@@ -1,10 +1,12 @@
 "use strict";
 
 // Configuração local do app desktop, gravada em <userData>/config.json:
-//   { pastaRaizDosProjetos, caminhoDoClaudeCode, historicoImportadoDe, porta }
+//   { pastaRaizDosProjetos, caminhoDoClaudeCode, caminhoDoCodex, caminhoDoCopilot,
+//     caminhoDoGemini, historicoImportadoDe, porta }
+// (pelo menos um dos quatro caminhos de motor de IA deve estar preenchido)
 //
 // O processo principal repassa estes valores ao servidor (PASTA_RAIZ_PROJETOS,
-// CLAUDE_CODE_BIN e PORTA). As funções recebem o `fs`, o ambiente e o teste de
+// CLAUDE_CODE_BIN, CODEX_BIN, COPILOT_BIN, GEMINI_BIN e PORTA). As funções recebem o `fs`, o ambiente e o teste de
 // existência por parâmetro, para serem testadas sem tocar no disco real.
 
 const fs = require("node:fs");
@@ -30,6 +32,9 @@ function normalizar(dados) {
   return {
     pastaRaizDosProjetos: textoOuVazio(origem.pastaRaizDosProjetos).trim(),
     caminhoDoClaudeCode: textoOuVazio(origem.caminhoDoClaudeCode).trim(),
+    caminhoDoCodex: textoOuVazio(origem.caminhoDoCodex).trim(),
+    caminhoDoCopilot: textoOuVazio(origem.caminhoDoCopilot).trim(),
+    caminhoDoGemini: textoOuVazio(origem.caminhoDoGemini).trim(),
     historicoImportadoDe:
       typeof origem.historicoImportadoDe === "string" && origem.historicoImportadoDe !== ""
         ? origem.historicoImportadoDe
@@ -108,6 +113,32 @@ function detectarClaudeCode(ambiente, existe) {
   return null;
 }
 
+// Motores de IA além do Claude Code: nome do campo, nome do executável e rótulo.
+const MOTORES_OPCIONAIS = [
+  { campo: "caminhoDoCodex", executavel: "codex", rotulo: "Codex" },
+  { campo: "caminhoDoCopilot", executavel: "copilot", rotulo: "GitHub Copilot CLI" },
+  { campo: "caminhoDoGemini", executavel: "gemini", rotulo: "Gemini CLI" },
+];
+
+// No Windows, acha `<nome>.exe|.cmd|.bat` nas pastas do PATH e em %APPDATA%\npm
+// (onde o npm põe os atalhos .cmd). O servidor executa .cmd pelo cmd.exe, então
+// o atalho serve. Fora do Windows devolve null (o main usa a busca do mac.js).
+function detectarCliDoWindows(nome, ambiente, existe, plataforma = process.platform) {
+  if (plataforma !== "win32") return null;
+  const pastas = String(ambiente.PATH || ambiente.Path || "")
+    .split(";")
+    .map((pasta) => pasta.trim().replace(/^"|"$/g, ""))
+    .filter(Boolean);
+  if (ambiente.APPDATA) pastas.push(path.win32.join(ambiente.APPDATA, "npm"));
+  for (const pasta of pastas) {
+    for (const extensao of [".exe", ".cmd", ".bat"]) {
+      const candidato = path.win32.join(pasta, nome + extensao);
+      if (existe(candidato)) return candidato;
+    }
+  }
+  return null;
+}
+
 // %USERPROFILE%\projetos quando existe; senão, a própria pasta do usuário.
 function sugerirPastaDosProjetos(ambiente, existe) {
   const pastaPessoal = pastaDoUsuarioDoSistema(ambiente);
@@ -119,16 +150,25 @@ function sugerirPastaDosProjetos(ambiente, existe) {
 // Lista de mensagens de erro (vazia quando está tudo certo).
 function validarConfiguracao(dados, { ehPasta, ehArquivo }) {
   const erros = [];
-  const { pastaRaizDosProjetos, caminhoDoClaudeCode } = normalizar(dados);
+  const configuracao = normalizar(dados);
+  const { pastaRaizDosProjetos } = configuracao;
   if (!pastaRaizDosProjetos) {
     erros.push("Informe a pasta raiz dos projetos.");
   } else if (!path.isAbsolute(pastaRaizDosProjetos) || !ehPasta(pastaRaizDosProjetos)) {
     erros.push(`A pasta dos projetos não existe: ${pastaRaizDosProjetos}`);
   }
-  if (!caminhoDoClaudeCode) {
-    erros.push("Informe onde está o Claude Code (claude.exe).");
-  } else if (!path.isAbsolute(caminhoDoClaudeCode) || !ehArquivo(caminhoDoClaudeCode)) {
-    erros.push(`O Claude Code não foi encontrado em: ${caminhoDoClaudeCode}`);
+  const motores = [
+    { campo: "caminhoDoClaudeCode", rotulo: "O Claude Code" },
+    ...MOTORES_OPCIONAIS.map(({ campo, rotulo }) => ({ campo, rotulo: `O ${rotulo}` })),
+  ];
+  if (!motores.some(({ campo }) => configuracao[campo])) {
+    erros.push("Escolha pelo menos um motor de IA: Claude Code, Codex, GitHub Copilot CLI ou Gemini CLI.");
+  }
+  for (const { campo, rotulo } of motores) {
+    const caminho = configuracao[campo];
+    if (caminho && (!path.isAbsolute(caminho) || !ehArquivo(caminho))) {
+      erros.push(`${rotulo} não foi encontrado em: ${caminho}`);
+    }
   }
   return erros;
 }
@@ -191,6 +231,8 @@ module.exports = {
   lerConfiguracaoLocal,
   gravarConfiguracaoLocal,
   detectarClaudeCode,
+  detectarCliDoWindows,
+  MOTORES_OPCIONAIS,
   sugerirPastaDosProjetos,
   validarConfiguracao,
 };

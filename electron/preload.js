@@ -246,6 +246,9 @@ contextBridge.exposeInMainWorld("electron", {
     carregar: () => ipcRenderer.invoke("primeira-abertura:carregar"),
     escolherPasta: (atual) => ipcRenderer.invoke("primeira-abertura:escolher-pasta", atual),
     escolherClaudeCode: (atual) => ipcRenderer.invoke("primeira-abertura:escolher-claude-code", atual),
+    escolherCodex: (atual) => ipcRenderer.invoke("primeira-abertura:escolher-codex", atual),
+    escolherCopilot: (atual) => ipcRenderer.invoke("primeira-abertura:escolher-copilot", atual),
+    escolherGemini: (atual) => ipcRenderer.invoke("primeira-abertura:escolher-gemini", atual),
     salvar: (dados) => ipcRenderer.invoke("primeira-abertura:salvar", dados),
   },
 });

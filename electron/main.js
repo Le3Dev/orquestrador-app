@@ -102,6 +102,7 @@ const licenca = require("./licenca");
 const {
   copiarDaPastaAntiga,
   detectarClaudeCode,
+  detectarCliDoWindows,
   escolherPortaDaInstalacao,
   gravarConfiguracaoLocal,
   lerConfiguracaoLocal,
@@ -242,7 +243,14 @@ function lerConfiguracaoSegura() {
 }
 
 function configuracaoCompleta(configuracao) {
-  return Boolean(configuracao && configuracao.pastaRaizDosProjetos && configuracao.caminhoDoClaudeCode);
+  return Boolean(
+    configuracao &&
+      configuracao.pastaRaizDosProjetos &&
+      (configuracao.caminhoDoClaudeCode ||
+        configuracao.caminhoDoCodex ||
+        configuracao.caminhoDoCopilot ||
+        configuracao.caminhoDoGemini),
+  );
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -384,10 +392,19 @@ function ambienteDoServidor(configuracao) {
     PORTA: String(PORTA),
     PASTA_DADOS: pastaDeDados(),
     PASTA_RAIZ_PROJETOS: configuracao.pastaRaizDosProjetos,
-    CLAUDE_CODE_BIN: configuracao.caminhoDoClaudeCode,
     PASTA_DA_TELA: path.join(app.getAppPath(), "web", "dist"),
     ORQUESTRADOR_CHAVE_DE_ACESSO: CHAVE_DE_ACESSO,
   });
+  // Só os motores configurados; um caminho herdado do ambiente não vale sem o campo.
+  for (const [variavel, caminho] of [
+    ["CLAUDE_CODE_BIN", configuracao.caminhoDoClaudeCode],
+    ["CODEX_BIN", configuracao.caminhoDoCodex],
+    ["COPILOT_BIN", configuracao.caminhoDoCopilot],
+    ["GEMINI_BIN", configuracao.caminhoDoGemini],
+  ]) {
+    if (caminho) ambiente[variavel] = caminho;
+    else delete ambiente[variavel];
+  }
   // Só a URL do config.js vale; uma herdada do ambiente não é repassada.
   if (config.urlDeDownload) ambiente.ORQUESTRADOR_URL_DE_DOWNLOAD = config.urlDeDownload;
   else delete ambiente.ORQUESTRADOR_URL_DE_DOWNLOAD;
@@ -1487,6 +1504,9 @@ ipcMain.handle("configuracao:obter", () => {
   return {
     pastaRaizDosProjetos: atual ? atual.pastaRaizDosProjetos : "",
     caminhoDoClaudeCode: atual ? atual.caminhoDoClaudeCode : "",
+    caminhoDoCodex: atual ? atual.caminhoDoCodex : "",
+    caminhoDoCopilot: atual ? atual.caminhoDoCopilot : "",
+    caminhoDoGemini: atual ? atual.caminhoDoGemini : "",
   };
 });
 ipcMain.handle("configuracao:abrir-ajustes", () => {
@@ -1514,6 +1534,18 @@ function historicoParaImportar(atual) {
   return encontrado || (app.isPackaged ? mac.historicoDoRepositorio(lerPacoteDoApp(), ehPasta) : null);
 }
 
+// Caminho gravado; sem configuração gravada (primeira abertura), o CLI achado no PATH.
+function caminhoDoMotor(atual, campo, executavel) {
+  if (atual) return atual[campo] || "";
+  try {
+    return (
+      detectarCliDoWindows(executavel, process.env, ehArquivo) || mac.executavelDoPath(executavel, ehArquivo) || ""
+    );
+  } catch {
+    return "";
+  }
+}
+
 ipcMain.handle("primeira-abertura:carregar", (e) => {
   exigirJanelaDeConfiguracao(e);
   const atual = lerConfiguracaoSegura();
@@ -1523,6 +1555,10 @@ ipcMain.handle("primeira-abertura:carregar", (e) => {
     pastaRaizDosProjetos:
       (atual && atual.pastaRaizDosProjetos) || sugerirPastaDosProjetos(process.env, ehPasta) || "",
     caminhoDoClaudeCode: (atual && atual.caminhoDoClaudeCode) || detectarClaudeCode(process.env, ehArquivo) || mac.claudeCodeDoPath(ehArquivo) || "",
+    // Na reabertura em Ajustes, campo vazio significa "motor não usado": só detecta sem configuração gravada.
+    caminhoDoCodex: caminhoDoMotor(atual, "caminhoDoCodex", "codex"),
+    caminhoDoCopilot: caminhoDoMotor(atual, "caminhoDoCopilot", "copilot"),
+    caminhoDoGemini: caminhoDoMotor(atual, "caminhoDoGemini", "gemini"),
     historicoAntigo: historicoParaImportar(atual),
   };
 });
@@ -1537,23 +1573,44 @@ ipcMain.handle("primeira-abertura:escolher-pasta", async (e, atual) => {
   return resultado.canceled ? null : resultado.filePaths[0] || null;
 });
 
-ipcMain.handle("primeira-abertura:escolher-claude-code", async (e, atual) => {
-  exigirJanelaDeConfiguracao(e);
-  const resultado = await dialog.showOpenDialog(janelaConfiguracao, {
-    title: "Onde está o Claude Code (claude.exe)",
-    // No Mac o ~/.local/bin, onde o instalador põe o `claude`, é oculto.
-    properties: mac.ehMac ? ["openFile", "showHiddenFiles"] : ["openFile"],
-    defaultPath: typeof atual === "string" && ehArquivo(atual) ? atual : undefined,
-    filters:
-      process.platform === "win32"
-        ? [
-            { name: "Claude Code", extensions: ["exe"] },
-            { name: "Todos os arquivos", extensions: ["*"] },
-          ]
-        : [],
+function registrarEscolhaDeMotor(canal, titulo, nomeDoFiltro, extensoesDoWindows) {
+  ipcMain.handle(canal, async (e, atual) => {
+    exigirJanelaDeConfiguracao(e);
+    const resultado = await dialog.showOpenDialog(janelaConfiguracao, {
+      title: titulo,
+      // No Mac o ~/.local/bin, onde ficam os CLIs, é oculto.
+      properties: mac.ehMac ? ["openFile", "showHiddenFiles"] : ["openFile"],
+      defaultPath: typeof atual === "string" && ehArquivo(atual) ? atual : undefined,
+      filters:
+        process.platform === "win32"
+          ? [
+              { name: nomeDoFiltro, extensions: extensoesDoWindows },
+              { name: "Todos os arquivos", extensions: ["*"] },
+            ]
+          : [],
+    });
+    return resultado.canceled ? null : resultado.filePaths[0] || null;
   });
-  return resultado.canceled ? null : resultado.filePaths[0] || null;
-});
+}
+
+registrarEscolhaDeMotor(
+  "primeira-abertura:escolher-claude-code",
+  "Onde está o Claude Code (claude.exe)",
+  "Claude Code",
+  ["exe"],
+);
+registrarEscolhaDeMotor("primeira-abertura:escolher-codex", "Onde está o Codex", "Codex", ["exe", "cmd", "bat"]);
+registrarEscolhaDeMotor(
+  "primeira-abertura:escolher-copilot",
+  "Onde está o GitHub Copilot CLI",
+  "GitHub Copilot CLI",
+  ["exe", "cmd", "bat"],
+);
+registrarEscolhaDeMotor("primeira-abertura:escolher-gemini", "Onde está o Gemini CLI", "Gemini CLI", [
+  "exe",
+  "cmd",
+  "bat",
+]);
 
 ipcMain.handle("primeira-abertura:salvar", async (e, dados) => {
   exigirJanelaDeConfiguracao(e);
@@ -1589,6 +1646,9 @@ ipcMain.handle("primeira-abertura:salvar", async (e, dados) => {
     gravarConfiguracaoLocal(pastaDoUsuario(), {
       pastaRaizDosProjetos: entrada.pastaRaizDosProjetos,
       caminhoDoClaudeCode: entrada.caminhoDoClaudeCode,
+      caminhoDoCodex: entrada.caminhoDoCodex,
+      caminhoDoCopilot: entrada.caminhoDoCopilot,
+      caminhoDoGemini: entrada.caminhoDoGemini,
       historicoImportadoDe,
       porta: (anterior && anterior.porta) || portaDaInstalacao,
     });

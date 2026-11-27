@@ -10,6 +10,7 @@ const {
   caminhoDaConfiguracao,
   copiarDaPastaAntiga,
   detectarClaudeCode,
+  detectarCliDoWindows,
   escolherPortaDaInstalacao,
   gravarConfiguracaoLocal,
   lerConfiguracaoLocal,
@@ -81,11 +82,48 @@ describe("validarConfiguracao", () => {
     expect(
       validarConfiguracao({ pastaRaizDosProjetos: "projetos", caminhoDoClaudeCode: "claude.exe" }, verificadores),
     ).toHaveLength(2);
+    expect(validarConfiguracao({ pastaRaizDosProjetos: pasta }, verificadores)).toEqual([
+      "Escolha pelo menos um motor de IA: Claude Code, Codex, GitHub Copilot CLI ou Gemini CLI.",
+    ]);
     const erros = validarConfiguracao(
       { pastaRaizDosProjetos: pasta + "-x", caminhoDoClaudeCode: claude },
       verificadores,
     );
     expect(erros).toEqual([`A pasta dos projetos não existe: ${pasta}-x`]);
+  });
+
+  it("aceita qualquer motor sozinho, sem o Claude Code", () => {
+    const gemini = path.resolve(os.tmpdir(), "gemini.cmd");
+    const v = { ehPasta: existeSo(pasta), ehArquivo: existeSo(gemini) };
+    expect(validarConfiguracao({ pastaRaizDosProjetos: pasta, caminhoDoGemini: gemini }, v)).toEqual([]);
+  });
+
+  it("recusa um motor preenchido que não existe, nomeando-o", () => {
+    const erros = validarConfiguracao(
+      { pastaRaizDosProjetos: pasta, caminhoDoClaudeCode: claude, caminhoDoCodex: "codex.cmd" },
+      verificadores,
+    );
+    expect(erros).toEqual(["O Codex não foi encontrado em: codex.cmd"]);
+  });
+});
+
+describe("detectarCliDoWindows", () => {
+  const ambiente = { PATH: "C:\\bin;C:\\outra", APPDATA: "C:\\Users\\ana\\AppData\\Roaming" };
+
+  it("acha o atalho .cmd do npm em %APPDATA%\\npm", () => {
+    const cmd = "C:\\Users\\ana\\AppData\\Roaming\\npm\\codex.cmd";
+    expect(detectarCliDoWindows("codex", ambiente, existeSo(cmd), "win32")).toBe(cmd);
+  });
+
+  it("prefere .exe a .cmd e o PATH ao npm", () => {
+    expect(detectarCliDoWindows("gemini", ambiente, existeSo("C:\\bin\\gemini.exe", "C:\\bin\\gemini.cmd"), "win32")).toBe(
+      "C:\\bin\\gemini.exe",
+    );
+  });
+
+  it("devolve null fora do Windows ou sem o CLI", () => {
+    expect(detectarCliDoWindows("codex", ambiente, () => true, "linux")).toBeNull();
+    expect(detectarCliDoWindows("codex", ambiente, () => false, "win32")).toBeNull();
   });
 });
 
@@ -108,6 +146,9 @@ describe("lerConfiguracaoLocal / gravarConfiguracaoLocal", () => {
     const dados = {
       pastaRaizDosProjetos: "C:\\p",
       caminhoDoClaudeCode: "C:\\c.exe",
+      caminhoDoCodex: "C:\\codex.cmd",
+      caminhoDoCopilot: "",
+      caminhoDoGemini: "",
       historicoImportadoDe: null,
       porta: 51_234,
     };
@@ -122,6 +163,9 @@ describe("lerConfiguracaoLocal / gravarConfiguracaoLocal", () => {
     expect(lerConfiguracaoLocal(dentro)).toEqual({
       pastaRaizDosProjetos: "x",
       caminhoDoClaudeCode: "y",
+      caminhoDoCodex: "",
+      caminhoDoCopilot: "",
+      caminhoDoGemini: "",
       historicoImportadoDe: null,
       porta: null,
     });
@@ -135,6 +179,9 @@ describe("lerConfiguracaoLocal / gravarConfiguracaoLocal", () => {
     expect(lerConfiguracaoLocal(pastaDoUsuario)).toEqual({
       pastaRaizDosProjetos: "C:\\p",
       caminhoDoClaudeCode: "",
+      caminhoDoCodex: "",
+      caminhoDoCopilot: "",
+      caminhoDoGemini: "",
       historicoImportadoDe: null,
       porta: null,
     });
