@@ -7,11 +7,11 @@
 export type ModeloClaude = "fable" | "opus" | "sonnet" | "haiku";
 
 /** Quem executa um papel da orquestração: cada motor é um CLI com o próprio login e a própria sessão. */
-export type Motor = "claude-code" | "codex" | "copilot";
+export type Motor = "claude-code" | "codex" | "copilot" | "gemini";
 
 /**
  * O modelo de um papel, válido para o motor dele: no `claude-code`, um `ModeloClaude`; no `codex` e no
- * `copilot`, "padrao" (o modelo que o próprio CLI já usa) ou o id de um modelo (`/^[A-Za-z0-9._:-]{1,64}$/`).
+ * `copilot` e `gemini`, "padrao" (o modelo que o próprio CLI já usa) ou o id de um modelo (`/^[A-Za-z0-9._:-]{1,64}$/`).
  */
 export type ModeloDoMotor = string;
 

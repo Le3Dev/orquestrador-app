@@ -70,6 +70,16 @@ describe("falhaDoMotor", () => {
     expect(falha.motivo).toBe("Limite de uso do GitHub Copilot CLI atingido (Quota exceeded for premium requests).");
   });
 
+  it("reconhece o limite de uso do Gemini CLI (429 do ACP, RESOURCE_EXHAUSTED, capacidade esgotada)", () => {
+    for (const texto of [
+      "Rate limit exceeded. Try again later.",
+      "429 RESOURCE_EXHAUSTED",
+      "You have exhausted your capacity on this model.",
+    ]) {
+      expect(falhaDoMotor("gemini", texto, [], uso)).toMatchObject({ causa: "limite_de_uso" });
+    }
+  });
+
   it("só informa liberaEm no limite de uso", () => {
     expect(falhaDoMotor("codex", "usage limit", [], uso)).toHaveProperty("liberaEm");
     expect(falhaDoMotor("codex", "503 overloaded", [], uso)).not.toHaveProperty("liberaEm");

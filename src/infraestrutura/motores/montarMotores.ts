@@ -6,7 +6,9 @@ import { Motor } from "../../orquestracao/Motor";
 import { MotorDeAgentes } from "../../orquestracao/MotorDeAgentes";
 import { MotorAcp } from "../acp/MotorAcp";
 import { criarPerfilDoCopilot } from "../acp/PerfilDoCopilot";
+import { criarPerfilDoGemini } from "../acp/PerfilDoGemini";
 import { verificarLoginDoCopilot as verificadorPadraoDoCopilot } from "../acp/VerificadorDeLoginDoCopilot";
+import { verificarLoginDoGemini as verificadorPadraoDoGemini } from "../acp/VerificadorDeLoginDoGemini";
 import { FachadaClaudeCodeCli } from "../claudecode/FachadaClaudeCodeCli";
 import { SondaDeEndereco, sondarEnderecoLocal } from "../claudecode/SondaDeEnderecoLocal";
 import { MotorCodex } from "../codex/MotorCodex";
@@ -26,7 +28,7 @@ import { ExecutorDeSubtarefa } from "./SubtarefaDoApp";
 
 /**
  * Onde cada CLI está: o nome (procurado no `PATH`) ou o caminho. O do Codex e o
- * do Copilot podem ser trocados por `CODEX_BIN` e `COPILOT_BIN`; o do Claude
+ * do Copilot e o do Gemini podem ser trocados por `CODEX_BIN`, `COPILOT_BIN` e `GEMINI_BIN`; o do Claude
  * Code vem da configuração do app (`CLAUDE_CODE_BIN`), por `caminhoDoClaudeCode`.
  */
 export function caminhosDosMotoresDoAmbiente(
@@ -37,6 +39,7 @@ export function caminhosDosMotoresDoAmbiente(
     "claude-code": caminhoDoClaudeCode,
     codex: ambiente["CODEX_BIN"] || "codex",
     copilot: ambiente["COPILOT_BIN"] || "copilot",
+    gemini: ambiente["GEMINI_BIN"] || "gemini",
   };
 }
 
@@ -71,6 +74,7 @@ export interface OpcoesDeMontarMotores {
   /** Para testes: como o catálogo consulta os CLIs. */
   executarComando?: ExecutorDeComandoCurto | undefined;
   verificarLoginDoCopilot?: VerificadorDeLogin | undefined;
+  verificarLoginDoGemini?: VerificadorDeLogin | undefined;
 }
 
 export interface MotoresMontados {
@@ -94,7 +98,7 @@ export interface MotoresMontados {
 
 /**
  * Monta todos os motores: o do Claude Code (recebido), o Codex (protocolo
- * `app-server`) e o GitHub Copilot CLI (ACP), o roteador que escolhe entre eles
+ * `app-server`), o GitHub Copilot CLI e o Gemini CLI (ACP), o roteador que escolhe entre eles
  * pelo `pedido.motor`, a delegação de subtarefas (ferramenta MCP
  * `delegar_subtarefas`, registrada no servidor MCP recebido) e a rota `GET /motores`.
  */
@@ -124,10 +128,17 @@ export function montarMotores(opcoes: OpcoesDeMontarMotores): MotoresMontados {
     }),
     ...comuns,
   });
+  const motorGemini = new MotorAcp({
+    perfil: criarPerfilDoGemini(acharCli("gemini"), {
+      ferramentasDoApp: opcoes.ferramentasDoApp ?? [FERRAMENTA_DE_DELEGACAO],
+    }),
+    ...comuns,
+  });
 
   const executores: Partial<Record<Motor, ExecutorDeSubtarefa>> = {
     codex: motorCodex,
     copilot: motorCopilot,
+    gemini: motorGemini,
     ...(opcoes.fachadaClaudeCode === undefined
       ? {}
       : { "claude-code": new SubtarefaNoClaudeCode(opcoes.fachadaClaudeCode, plataforma) }),
@@ -145,12 +156,13 @@ export function montarMotores(opcoes: OpcoesDeMontarMotores): MotoresMontados {
     caminhos,
     ambiente,
     verificarLoginDoCopilot: opcoes.verificarLoginDoCopilot ?? verificadorPadraoDoCopilot,
+    verificarLoginDoGemini: opcoes.verificarLoginDoGemini ?? verificadorPadraoDoGemini,
     ...(opcoes.executarComando === undefined ? {} : { executar: opcoes.executarComando }),
   });
 
   return {
     motor: new RoteadorDeMotores({
-      motores: { "claude-code": opcoes.motorClaudeCode, codex: motorCodex, copilot: motorCopilot },
+      motores: { "claude-code": opcoes.motorClaudeCode, codex: motorCodex, copilot: motorCopilot, gemini: motorGemini },
       turnos,
     }),
     rotas: criarMotoresRoutes({ catalogo }),

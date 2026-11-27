@@ -583,6 +583,7 @@ describe("PainelDeConfiguracao", () => {
       expect(reserva.getAllByRole("checkbox").map((caixa) => caixa.closest("label")?.textContent)).toEqual([
         "Claude Code",
         "GitHub Copilot CLI",
+        "Gemini CLI",
       ]);
 
       // Marcar e desmarcar de volta não manda nada (o conteúdo é o mesmo).

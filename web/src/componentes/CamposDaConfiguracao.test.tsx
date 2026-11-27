@@ -110,8 +110,8 @@ describe("CamposDaConfiguracao", () => {
     expect(screen.queryByRole("textbox", { name: "Nome" })).not.toBeInTheDocument();
     // As únicas caixas são as da ordem de reserva (os outros dois motores); os interruptores são commit e push,
     // artefatos online e o navegador do agente.
-    expect(screen.getAllByRole("checkbox")).toHaveLength(2);
-    expect(within(screen.getByRole("group", { name: "Ordem de reserva" })).getAllByRole("checkbox")).toHaveLength(2);
+    expect(screen.getAllByRole("checkbox")).toHaveLength(3);
+    expect(within(screen.getByRole("group", { name: "Ordem de reserva" })).getAllByRole("checkbox")).toHaveLength(3);
     expect(screen.getAllByRole("switch")).toHaveLength(3);
   });
 
@@ -467,7 +467,7 @@ describe("CamposDaConfiguracao", () => {
       },
     ];
 
-    it("cada papel mostra o motor: no Claude Code por padrão (inclusive sem o campo), com os três para escolher", () => {
+    it("cada papel mostra o motor: no Claude Code por padrão (inclusive sem o campo), com os quatro para escolher", () => {
       renderizar();
 
       for (const dono of ["do orquestrador", "dos subagentes"] as const) {
@@ -476,6 +476,7 @@ describe("CamposDaConfiguracao", () => {
           "Claude Code",
           "Codex",
           "GitHub Copilot CLI",
+          "Gemini CLI",
         ]);
         expect(menuDoModelo(dono)).toBeInTheDocument();
       }
@@ -595,6 +596,7 @@ describe("CamposDaConfiguracao", () => {
         expect(within(reserva()).getAllByRole("checkbox").map((caixa) => caixa.closest("label")?.textContent)).toEqual([
           "Codex",
           "GitHub Copilot CLI",
+          "Gemini CLI",
         ]);
         expect(within(reserva()).getAllByRole("checkbox").every((caixa) => !(caixa as HTMLInputElement).checked)).toBe(true);
         expect(
@@ -615,6 +617,7 @@ describe("CamposDaConfiguracao", () => {
         expect(within(reserva()).getAllByRole("checkbox").map((caixa) => caixa.closest("label")?.textContent)).toEqual([
           "GitHub Copilot CLI",
           "Codex",
+          "Gemini CLI",
         ]);
 
         fireEvent.click(within(reserva()).getByRole("checkbox", { name: "GitHub Copilot CLI" }));
@@ -632,6 +635,7 @@ describe("CamposDaConfiguracao", () => {
         expect(within(reserva()).getAllByRole("checkbox").map((caixa) => caixa.closest("label")?.textContent)).toEqual([
           "GitHub Copilot CLI",
           "Codex",
+          "Gemini CLI",
         ]);
 
         fireEvent.click(screen.getByRole("button", { name: "Descer GitHub Copilot CLI na reserva" }));
@@ -648,6 +652,7 @@ describe("CamposDaConfiguracao", () => {
         expect(within(reserva()).getAllByRole("checkbox").map((caixa) => caixa.closest("label")?.textContent)).toEqual([
           "GitHub Copilot CLI",
           "Claude Code",
+          "Gemini CLI",
         ]);
         expect(within(reserva()).getByRole("checkbox", { name: "GitHub Copilot CLI" })).toBeChecked();
         expect(within(reserva()).getByRole("checkbox", { name: "Claude Code" })).not.toBeChecked();

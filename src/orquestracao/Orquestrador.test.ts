@@ -894,7 +894,7 @@ describe("Orquestrador e os vários motores", () => {
 
       const lixo = {
         ...dados,
-        sessoesDosMotores: { "claude-code": "x", gemini: "y", codex: "  " } as unknown as Record<string, string>,
+        sessoesDosMotores: { "claude-code": "x", grok: "y", codex: "  " } as unknown as Record<string, string>,
       };
       expect(Orquestrador.reconstituir(lixo).paraDados().sessoesDosMotores).toEqual({});
     });

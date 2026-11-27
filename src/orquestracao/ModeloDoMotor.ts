@@ -8,7 +8,7 @@ import { Motor, rotuloDoMotor } from "./Motor";
  * `modeloDoMotorValido`, que confere se ele serve ao motor.
  *
  * - `claude-code`: um apelido de `ModeloClaude` (fable, opus, sonnet, haiku).
- * - `codex` e `copilot`: `MODELO_PADRAO_DO_CLI` (o modelo que o próprio CLI já
+ * - `codex`, `copilot` e `gemini`: `MODELO_PADRAO_DO_CLI` (o modelo que o próprio CLI já
  *   tem configurado) ou o id de um modelo, repassado ao CLI como veio.
  */
 export type ModeloDoMotor = string;

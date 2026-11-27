@@ -49,7 +49,7 @@ describe("montarMotores", () => {
     const montados = montarMotores({
       motorClaudeCode,
       servidorMcp,
-      caminhos: { "claude-code": "claude", codex: inexistente, copilot: inexistente },
+      caminhos: { "claude-code": "claude", codex: inexistente, copilot: inexistente, gemini: inexistente },
       ...opcoes,
     });
     return { montados, servidorMcp, motorClaudeCode };
@@ -68,8 +68,10 @@ describe("montarMotores", () => {
     // Com os CLIs inexistentes, quem responde são os motores do Codex e do Copilot (cada um com o nome do seu CLI).
     const codex = await montados.motor.executarTurno(pedidoDeTeste(pastas, "codex"), aoObservar, sinal);
     const copilot = await montados.motor.executarTurno(pedidoDeTeste(pastas, "copilot"), aoObservar, sinal);
+    const gemini = await montados.motor.executarTurno(pedidoDeTeste(pastas, "gemini"), aoObservar, sinal);
     expect(codex.sucesso === false && codex.motivo).toContain("O Codex não foi encontrado");
     expect(copilot.sucesso === false && copilot.motivo).toContain("O GitHub Copilot CLI não foi encontrado");
+    expect(gemini.sucesso === false && gemini.motivo).toContain("O Gemini CLI não foi encontrado");
     expect(motorClaudeCode.executarTurno).toHaveBeenCalledTimes(1);
   });
 
@@ -97,8 +99,8 @@ describe("montarMotores", () => {
 
   it("iniciar() não consulta os CLIs (o listen não espera o aquecimento); aquecer() os consulta em segundo plano", async () => {
     const executarComando = vi.fn(async (): Promise<SaidaCurta> => SEM_CLI);
-    // O próprio Node faz de CLI instalado nos três motores: o catálogo o acha no disco.
-    const caminhos = { "claude-code": process.execPath, codex: process.execPath, copilot: process.execPath };
+    // O próprio Node faz de CLI instalado nos quatro motores: o catálogo o acha no disco.
+    const caminhos = { "claude-code": process.execPath, codex: process.execPath, copilot: process.execPath, gemini: process.execPath };
     const { montados, servidorMcp } = montar({ executarComando, caminhos });
 
     await montados.iniciar();
@@ -109,7 +111,7 @@ describe("montarMotores", () => {
 
     montados.aquecer();
 
-    await vi.waitFor(() => expect(executarComando).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(executarComando).toHaveBeenCalledTimes(4));
     expect(executarComando).toHaveBeenCalledWith(process.execPath, ["--version"], expect.anything());
   });
 
@@ -126,7 +128,7 @@ describe("montarMotores", () => {
       falhaAoIniciar: null,
       ...respostas[`${executavel} ${argumentos.join(" ")}`],
     }));
-    const { montados } = montar({ executarComando, verificarLoginDoCopilot: async () => null });
+    const { montados } = montar({ executarComando, verificarLoginDoCopilot: async () => null, verificarLoginDoGemini: async () => null });
     // O "claude" vem do PATH: o catálogo o acha pelo `procurar` real, que aqui não existe; então usa o caminho absoluto desta máquina.
     const aplicacao = express();
     aplicacao.use("/api", montados.rotas);
@@ -138,18 +140,19 @@ describe("montarMotores", () => {
 
     expect(resposta.status).toBe(200);
     const motores = (await resposta.json()) as Array<{ motor: string; instalado: boolean; mensagem: string | null }>;
-    expect(motores.map((motor) => motor.motor)).toEqual(["claude-code", "codex", "copilot"]);
+    expect(motores.map((motor) => motor.motor)).toEqual(["claude-code", "codex", "copilot", "gemini"]);
     expect(motores.filter((motor) => motor.motor !== "claude-code").every((motor) => !motor.instalado && motor.mensagem !== null)).toBe(true);
   });
 });
 
 describe("caminhosDosMotoresDoAmbiente", () => {
   it("usa os nomes dos CLIs, e CODEX_BIN, COPILOT_BIN e o caminho do Claude Code quando informados", () => {
-    expect(caminhosDosMotoresDoAmbiente({})).toEqual({ "claude-code": "claude", codex: "codex", copilot: "copilot" });
-    expect(caminhosDosMotoresDoAmbiente({ CODEX_BIN: "/opt/codex", COPILOT_BIN: "/opt/copilot" }, "/opt/claude")).toEqual({
+    expect(caminhosDosMotoresDoAmbiente({})).toEqual({ "claude-code": "claude", codex: "codex", copilot: "copilot", gemini: "gemini" });
+    expect(caminhosDosMotoresDoAmbiente({ CODEX_BIN: "/opt/codex", COPILOT_BIN: "/opt/copilot", GEMINI_BIN: "/opt/gemini" }, "/opt/claude")).toEqual({
       "claude-code": "/opt/claude",
       codex: "/opt/codex",
       copilot: "/opt/copilot",
+      gemini: "/opt/gemini",
     });
   });
 });

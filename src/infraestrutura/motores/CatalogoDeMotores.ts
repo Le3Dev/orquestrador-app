@@ -24,8 +24,9 @@ export interface DependenciasDoCatalogo {
   ambiente?: NodeJS.ProcessEnv;
   executar?: ExecutorDeComandoCurto;
   procurar?: (nomeOuCaminho: string) => string | null;
-  /** Só o do Copilot: os outros dois têm comando de status. */
+  /** Só o do Copilot e o do Gemini: o Claude Code e o Codex têm comando de status. */
   verificarLoginDoCopilot?: VerificadorDeLogin;
+  verificarLoginDoGemini?: VerificadorDeLogin;
   /** Por quanto tempo uma consulta vale; as seguintes devolvem a mesma resposta. */
   validadeMs?: number;
   agora?: () => number;
@@ -38,12 +39,14 @@ const COMO_INSTALAR: Readonly<Record<Motor, string>> = {
   "claude-code": "Instale o Claude Code (npm install -g @anthropic-ai/claude-code) e rode `claude` uma vez para entrar.",
   codex: "Instale o Codex (npm install -g @openai/codex) e rode `codex login` para entrar.",
   copilot: "Instale o GitHub Copilot CLI (npm install -g @github/copilot) e rode `copilot login` para entrar.",
+  gemini: "Instale o Gemini CLI (npm install -g @google/gemini-cli) e rode `gemini` uma vez para entrar (login com o Google) ou defina GEMINI_API_KEY.",
 };
 
 const COMO_ENTRAR: Readonly<Record<Motor, string>> = {
   "claude-code": "Entre no Claude Code: rode `claude` no terminal e use /login.",
   codex: "Entre no Codex: rode `codex login` no terminal.",
   copilot: "Entre no GitHub Copilot CLI: rode `copilot login` no terminal.",
+  gemini: "Entre no Gemini CLI: rode `gemini` no terminal e escolha o login com o Google, ou defina GEMINI_API_KEY.",
 };
 
 /** O número de versão no que o `--version` escreve ("codex-cli 0.169.0", "GitHub Copilot CLI 1.0.83."). */
@@ -75,7 +78,7 @@ export class CatalogoDeMotores {
     this.agora = dependencias.agora ?? Date.now;
   }
 
-  /** A situação dos três motores, na ordem de `MOTORES`. `renovar` ignora a resposta guardada. */
+  /** A situação dos motores, na ordem de `MOTORES`. `renovar` ignora a resposta guardada. */
   async listar(renovar = false): Promise<SituacaoDoMotor[]> {
     if (!renovar && this.emCache !== null && this.agora() - this.emCache.em < this.validadeMs) {
       return this.emCache.situacoes;
@@ -179,6 +182,8 @@ export class CatalogoDeMotores {
       }
       case "copilot":
         return this.dependencias.verificarLoginDoCopilot === undefined ? null : this.dependencias.verificarLoginDoCopilot(caminho);
+      case "gemini":
+        return this.dependencias.verificarLoginDoGemini === undefined ? null : this.dependencias.verificarLoginDoGemini(caminho);
     }
   }
 }

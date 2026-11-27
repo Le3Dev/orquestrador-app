@@ -12,13 +12,15 @@ export interface FalhaClassificada {
  * Limite de uso ou de cota do plano: o Copilot fala em "Sorry, your request was
  * rate-limited", "user_weekly_rate_limited", "You have exceeded your premium
  * request allowance" e "AI credits" (textos vistos em relatos de usuários e na
- * documentação, sem lista oficial); o Codex diz o motivo pelo `codexErrorInfo`
+ * documentação, sem lista oficial); o Gemini CLI devolve o 429 do ACP ("Rate limit
+ * exceeded. Try again later.") e, da API, "RESOURCE_EXHAUSTED" e "You have exhausted
+ * your capacity on this model"; o Codex diz o motivo pelo `codexErrorInfo`
  * (`usageLimitExceeded`), tratado à parte, e em "usage limit"; ambos podem devolver
  * HTTP 429. É heurística sobre texto: o que não casar cai em "outro" e não
  * dispara a reserva.
  */
 const SINAIS_DE_LIMITE_DE_USO =
-  /usage limit|rate[ _-]?limit|limit (?:reached|exceeded)|(?:exceeded|reached|hit) (?:your |the )?(?:[\w'’-]+ )*(?:limit|quota|allowance)|\bquota\b|\ballowance\b|too many requests|\b429\b|insufficient[_ ]quota|out of (?:ai )?credits|credits? (?:exhausted|depleted)|premium requests?|ai credits|(?:monthly|weekly|session) (?:limit|quota)/i;
+  /usage limit|rate[ _-]?limit|limit (?:reached|exceeded)|(?:exceeded|reached|hit) (?:your |the )?(?:[\w'’-]+ )*(?:limit|quota|allowance)|\bquota\b|\ballowance\b|too many requests|\b429\b|insufficient[_ ]quota|out of (?:ai )?credits|credits? (?:exhausted|depleted)|premium requests?|ai credits|(?:monthly|weekly|session) (?:limit|quota)|resource[_ ]exhausted|exhausted your (?:[\w'’-]+ )*(?:capacity|quota)/i;
 
 /** Servidores do provedor sobrecarregados ou com erro interno (5xx, "overloaded", "at capacity"). */
 const SINAIS_DE_SOBRECARGA =

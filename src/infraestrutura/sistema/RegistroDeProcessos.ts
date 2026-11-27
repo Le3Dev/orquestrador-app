@@ -78,6 +78,8 @@ export const TOLERANCIA_DA_CRIACAO_EM_MS = 15_000;
 const LINHA_DO_CODEX_DO_APP = /\bcodex\b[\s\S]*\bapp-server\b/i;
 /** `copilot … --acp`: o GitHub Copilot CLI como servidor ACP (`MotorAcp`). */
 const LINHA_DO_COPILOT_DO_APP = /\bcopilot\b[\s\S]*--acp\b/i;
+/** `gemini … --acp`: o Gemini CLI como servidor ACP (`MotorAcp`); o CLI é Node, então a linha leva `node …\gemini.js --acp`. */
+const LINHA_DO_GEMINI_DO_APP = /\bgemini\b[\s\S]*--acp\b/i;
 
 /**
  * O Codex (`app-server`) e o Copilot (`--acp`) que o app iniciou: a linha de
@@ -97,7 +99,11 @@ function ehCliDeOutroMotorDeixadoPorNos(
   if (!Number.isFinite(registrado) || Math.abs(criadoEm.getTime() - registrado) > TOLERANCIA_DA_CRIACAO_EM_MS) {
     return false;
   }
-  return LINHA_DO_CODEX_DO_APP.test(linhaDeComando) || LINHA_DO_COPILOT_DO_APP.test(linhaDeComando);
+  return (
+    LINHA_DO_CODEX_DO_APP.test(linhaDeComando) ||
+    LINHA_DO_COPILOT_DO_APP.test(linhaDeComando) ||
+    LINHA_DO_GEMINI_DO_APP.test(linhaDeComando)
+  );
 }
 
 /**

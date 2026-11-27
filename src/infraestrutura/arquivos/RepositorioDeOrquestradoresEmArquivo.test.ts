@@ -497,7 +497,7 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
 
       const comConfiguracao = (extra: Record<string, unknown>) =>
         JSON.stringify({ ...arquivoAntigo(), configuracao: { ...(arquivoAntigo().configuracao as object), ...extra } });
-      await gravarArquivo("motor-desconhecido", comConfiguracao({ motorDoOrquestrador: "gemini" }));
+      await gravarArquivo("motor-desconhecido", comConfiguracao({ motorDoOrquestrador: "grok" }));
       await gravarArquivo("modelo-sem-motor", comConfiguracao({ modeloDoOrquestrador: "gpt-5" }));
       await gravarArquivo("modelo-invalido", comConfiguracao({ motorDosSubagentes: "codex", modeloDosSubagentes: "gpt 5" }));
       await gravarArquivo("reserva-repetida", comConfiguracao({ ordemDeReserva: ["codex", "codex"] }));
@@ -506,7 +506,7 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
         "turno-com-motor-errado",
         JSON.stringify({
           ...arquivoAntigo(),
-          turnos: [{ ...(arquivoAntigo().turnos as Record<string, unknown>[])[0], motor: "gemini" }],
+          turnos: [{ ...(arquivoAntigo().turnos as Record<string, unknown>[])[0], motor: "grok" }],
         }),
       );
 

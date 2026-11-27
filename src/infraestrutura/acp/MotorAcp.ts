@@ -80,6 +80,8 @@ interface ParametrosDaSessao {
   servidoresMcp: readonly ServidorMcpParaAcp[];
   /** Argumentos a mais para o CLI (o arquivo de configuração do MCP do app). */
   argumentosExtras?: readonly string[];
+  /** O servidor MCP do app, para o perfil que o passa por arquivo de configuração (`configuracaoPorArquivo`). */
+  servidorDoApp?: { nome: string; url: string; token: string };
   dono: { orquestradorId: string; sessaoId: string };
   aoObservar: (evento: EventoDoMotor) => void;
   sinal: AbortSignal;
@@ -154,9 +156,12 @@ export class MotorAcp implements MotorDeAgentes, ExecutorDeSubtarefa {
       );
       let servidoresMcp: ServidorMcpParaAcp[] = [];
       let argumentosDoMcp: string[] = [];
+      let servidorDoApp: { nome: string; url: string; token: string } | undefined;
       if (registroMcp !== null) {
         const porArquivo = this.perfil.mcpPorArquivo;
-        if (porArquivo === undefined) {
+        if (this.perfil.configuracaoPorArquivo !== undefined) {
+          servidorDoApp = { nome: NOME_DO_SERVIDOR_MCP, url: registroMcp.url, token: registroMcp.token };
+        } else if (porArquivo === undefined) {
           servidoresMcp = [paraServidorMcp(registroMcp)];
         } else {
           // O token vai num arquivo só do dono, apagado no fim do turno.
@@ -182,6 +187,7 @@ export class MotorAcp implements MotorDeAgentes, ExecutorDeSubtarefa {
         sessaoParaRetomar: pedido.sessaoIniciada && pedido.sessaoId !== "" ? pedido.sessaoId : null,
         servidoresMcp,
         argumentosExtras: argumentosDoMcp,
+        ...(servidorDoApp === undefined ? {} : { servidorDoApp }),
         dono: { orquestradorId: pedido.orquestradorId, sessaoId: pedido.sessaoId },
         aoObservar,
         sinal,
@@ -272,6 +278,29 @@ export class MotorAcp implements MotorDeAgentes, ExecutorDeSubtarefa {
       conferencia.conferirCitados();
     };
 
+    // A configuração por arquivo (perfil do Gemini): o token do servidor MCP do app vai num arquivo só do dono.
+    let pastaDaConfiguracao: string | null = null;
+    let ambienteDaConfiguracao: Record<string, string> = {};
+    const configuracaoPorArquivo = perfil.configuracaoPorArquivo;
+    if (configuracaoPorArquivo !== undefined) {
+      try {
+        pastaDaConfiguracao = path.join(tmpdir(), "orquestrador-agentes", randomUUID());
+        await mkdir(pastaDaConfiguracao, { recursive: true, mode: 0o700 });
+        const arquivo = path.join(pastaDaConfiguracao, "configuracao.json");
+        await writeFile(
+          arquivo,
+          JSON.stringify(configuracaoPorArquivo.conteudo({ contexto: parametros.contexto, servidor: parametros.servidorDoApp ?? null })),
+          { encoding: "utf8", mode: 0o600 },
+        );
+        ambienteDaConfiguracao = configuracaoPorArquivo.ambiente(arquivo);
+      } catch (erro) {
+        if (pastaDaConfiguracao !== null) {
+          await rm(pastaDaConfiguracao, { recursive: true, force: true }).catch(() => undefined);
+        }
+        return { sucesso: false, motivo: `Não foi possível preparar a configuração do ${perfil.nomeDoCli}: ${mensagemDe(erro)}`, uso: null };
+      }
+    }
+
     let carregando = false;
     let sessaoAtual: string | null = null;
     let promptEmAndamento = false;
@@ -285,7 +314,7 @@ export class MotorAcp implements MotorDeAgentes, ExecutorDeSubtarefa {
           ...(parametros.argumentosExtras ?? []),
         ],
         pasta: parametros.pedido.pastaDeTrabalho.caminho,
-        ambiente: perfil.ambiente(ambienteSemSessaoPai(process.env)),
+        ambiente: { ...perfil.ambiente(ambienteSemSessaoPai(process.env)), ...ambienteDaConfiguracao },
         dono: parametros.dono,
         nomeDoCli: perfil.nomeDoCli,
         informacoesDoCliente: { nome: "orquestrador-de-agentes", versao: this.dependencias.versaoDoApp ?? "1.0.0" },
@@ -395,6 +424,9 @@ export class MotorAcp implements MotorDeAgentes, ExecutorDeSubtarefa {
         }
       }
       await fachada.encerrarComCalma();
+      if (pastaDaConfiguracao !== null) {
+        await rm(pastaDaConfiguracao, { recursive: true, force: true }).catch(() => undefined);
+      }
     }
   }
 

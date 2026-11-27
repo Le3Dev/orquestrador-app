@@ -406,7 +406,7 @@ describe("ConfiguracaoDoOrquestrador", () => {
     });
 
     it("recusa motor desconhecido, em qualquer papel e na reserva", () => {
-      const desconhecido = "gemini" as unknown as "codex";
+      const desconhecido = "grok" as unknown as "codex";
 
       expect(() => ConfiguracaoDoOrquestrador.de({ ...dados, motorDoOrquestrador: desconhecido })).toThrow(/Motor/);
       expect(() => ConfiguracaoDoOrquestrador.de({ ...dados, motorDosSubagentes: desconhecido })).toThrow(/Motor/);

@@ -22,6 +22,14 @@ registrar({ tipo: "argv", argv: process.argv.slice(2), cwd: process.cwd(), ambie
   }
 }
 
+{
+  // O arquivo de configurações do sistema (Gemini CLI) também some no fim do turno.
+  const caminho = process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH;
+  if (caminho) {
+    registrar({ tipo: "configuracao-por-arquivo", conteudo: JSON.parse(fs.readFileSync(caminho, "utf8")) });
+  }
+}
+
 function enviar(objeto) {
   process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", ...objeto })}\n`);
 }

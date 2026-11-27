@@ -33,6 +33,18 @@ export interface PerfilAcp {
     conteudo(servidor: { nome: string; url: string; token: string }): unknown;
     argumentos(caminhoDoArquivo: string): string[];
   };
+  /**
+   * Opcional, para o CLI que só lê a configuração (servidor MCP com tempo limite e
+   * negações de ferramentas) de um arquivo apontado por variável de ambiente, como o
+   * Gemini CLI. Vale em toda sessão (a do Orquestrador e a dos Subagentes): o app grava
+   * o arquivo só para o dono, aponta o CLI para ele e o apaga no fim. Quando existe, o
+   * servidor MCP do app vai só por aqui (`servidor`), e não pelo `session/new`, que
+   * sobrescreveria o do arquivo (sem o tempo limite).
+   */
+  configuracaoPorArquivo?: {
+    conteudo(entrada: { contexto: ContextoDePermissao; servidor: { nome: string; url: string; token: string } | null }): unknown;
+    ambiente(caminhoDoArquivo: string): Record<string, string>;
+  };
   /** Se a falha do JSON-RPC é "não logado" (o CLI recusa abrir a sessão por falta de login). */
   ehFaltaDeLogin(mensagem: string, codigo: number): boolean;
   /** O que o usuário faz para entrar no CLI. */

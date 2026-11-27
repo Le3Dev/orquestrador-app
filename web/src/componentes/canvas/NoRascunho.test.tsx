@@ -150,10 +150,10 @@ describe("NoRascunho", () => {
     expect(screen.getByRole("textbox", { name: "Instruções" })).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Navegador do agente" })).toHaveAttribute("aria-checked", "false");
     expect(screen.getAllByRole("switch")).toHaveLength(3);
-    // Os dois motores, no Claude Code; as únicas caixas são as da reserva (os outros dois motores), desmarcadas.
+    // Os dois motores, no Claude Code; as únicas caixas são as da reserva (os outros três motores), desmarcadas.
     expect(screen.getByRole("combobox", { name: "Motor do orquestrador" })).toHaveValue("claude-code");
     expect(screen.getByRole("combobox", { name: "Motor dos subagentes" })).toHaveValue("claude-code");
-    expect(within(screen.getByRole("group", { name: "Ordem de reserva" })).getAllByRole("checkbox")).toHaveLength(2);
+    expect(within(screen.getByRole("group", { name: "Ordem de reserva" })).getAllByRole("checkbox")).toHaveLength(3);
     expect(screen.getAllByRole("checkbox").every((caixa) => !(caixa as HTMLInputElement).checked)).toBe(true);
     expect(screen.getByText("Escolha uma pasta para começar.")).toBeInTheDocument();
     expect(botaoDeComecar()).toBeDisabled();

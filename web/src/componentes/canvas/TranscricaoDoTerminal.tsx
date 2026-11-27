@@ -100,7 +100,7 @@ function AvisoDeSuspeita({ aviso, semRetomada = false }: { aviso: string; semRet
 
 /**
  * O texto do sinal de vida: o diagnóstico do servidor, quando há, ou o tempo de
- * silêncio. `motor` é o nome curto de quem executa o turno ("Claude", "Codex" ou "Copilot").
+ * silêncio. `motor` é o nome curto de quem executa o turno ("Claude", "Codex", "Copilot" ou "Gemini").
  */
 function TextoDoSinal({ vida, motor }: { vida: EstadoDeVida; motor: string }) {
   if (vida.diagnostico?.situacao === "trabalhando") {

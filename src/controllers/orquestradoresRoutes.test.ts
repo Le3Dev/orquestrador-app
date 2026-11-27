@@ -1970,9 +1970,9 @@ describe("rotas de orquestradores — vários motores", () => {
   });
 
   it.each<[string, Record<string, unknown>, string]>([
-    ["motor do orquestrador desconhecido", { motorDoOrquestrador: "gemini" }, "Motor do orquestrador inválido. Use claude-code, codex, copilot."],
-    ["motor dos subagentes que não é texto", { motorDosSubagentes: 3 }, "Motor dos subagentes inválido. Use claude-code, codex, copilot."],
-    ["reserva com motor desconhecido", { ordemDeReserva: ["gemini"] }, "Motor de reserva inválido. Use claude-code, codex, copilot."],
+    ["motor do orquestrador desconhecido", { motorDoOrquestrador: "grok" }, "Motor do orquestrador inválido. Use claude-code, codex, copilot, gemini."],
+    ["motor dos subagentes que não é texto", { motorDosSubagentes: 3 }, "Motor dos subagentes inválido. Use claude-code, codex, copilot, gemini."],
+    ["reserva com motor desconhecido", { ordemDeReserva: ["grok"] }, "Motor de reserva inválido. Use claude-code, codex, copilot, gemini."],
     ["reserva que não é uma lista", { ordemDeReserva: "codex" }, "A ordem de reserva deve ser uma lista de motores."],
     ["reserva com motor repetido", { ordemDeReserva: ["codex", "codex"] }, "A ordem de reserva não pode repetir motores."],
     ["reserva com o motor do orquestrador", { ordemDeReserva: ["claude-code"] }, "O motor do orquestrador não pode estar na ordem de reserva."],
@@ -2043,8 +2043,8 @@ describe("rotas de orquestradores — vários motores", () => {
       [{ modeloDoOrquestrador: "gpt-5" }, "Modelo inválido. Use opus, sonnet ou haiku."],
       [{ ordemDeReserva: ["claude-code"] }, "O motor do orquestrador não pode estar na ordem de reserva."],
       [{ ordemDeReserva: ["codex", "codex"] }, "A ordem de reserva não pode repetir motores."],
-      [{ motorDoOrquestrador: "gemini" }, "Motor do orquestrador inválido. Use claude-code, codex, copilot."],
-      [{ ordemDeReserva: [1] }, "Motor de reserva inválido. Use claude-code, codex, copilot."],
+      [{ motorDoOrquestrador: "grok" }, "Motor do orquestrador inválido. Use claude-code, codex, copilot, gemini."],
+      [{ ordemDeReserva: [1] }, "Motor de reserva inválido. Use claude-code, codex, copilot, gemini."],
     ];
 
     for (const [corpo, mensagem] of recusas) {
@@ -2128,7 +2128,7 @@ describe("rotas de orquestradores — vários motores", () => {
   });
 
   it.each<[string, string]>([
-    ["motorDoOrquestrador=gemini&modeloDoOrquestrador=opus&modeloDosSubagentes=opus&pasta=painel", "Motor do orquestrador inválido. Use claude-code, codex, copilot."],
+    ["motorDoOrquestrador=grok&modeloDoOrquestrador=opus&modeloDosSubagentes=opus&pasta=painel", "Motor do orquestrador inválido. Use claude-code, codex, copilot, gemini."],
     ["modeloDoOrquestrador=gpt-5&modeloDosSubagentes=opus&pasta=painel", "Modelo do orquestrador inválido."],
   ])("GET /esforco-herdado recusa %s com 400", async (query, mensagem) => {
     const resposta = await fetch(`${base}/esforco-herdado?${query}`);

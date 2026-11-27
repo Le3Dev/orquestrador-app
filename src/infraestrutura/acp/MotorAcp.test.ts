@@ -10,6 +10,7 @@ import { criarPastasDeTeste, configuracaoDeTeste, pedidoDeTeste, PastasDeTeste }
 import { MotorAcp } from "./MotorAcp";
 import { PerfilAcp } from "./PerfilAcp";
 import { criarPerfilDoCopilot } from "./PerfilDoCopilot";
+import { criarPerfilDoGemini } from "./PerfilDoGemini";
 
 const AGENTE_FALSO = path.join(__dirname, "fixtures", "agenteAcpFalso.cjs");
 
@@ -334,6 +335,52 @@ describe("MotorAcp com um agente ACP falso", () => {
       );
 
       expect(eventos).toContainEqual({ tipo: "endereco_local_detectado", url: "http://localhost:4000", origem: "resposta" });
+    });
+  });
+
+  describe("perfil com configuração por arquivo (Gemini CLI)", () => {
+    function motorDoGemini(servidorMcp?: PonteParaOServidorMcp): MotorAcp {
+      const gemini = criarPerfilDoGemini("gemini");
+      return new MotorAcp({
+        perfil: {
+          ...gemini,
+          comando: () => ({ executavel: process.execPath, argumentosIniciais: [AGENTE_FALSO] }),
+          ambiente: (base) => ({ ...gemini.ambiente(base), FALSO_LOG: arquivoDeLog }),
+        },
+        sondar: async () => false,
+        plataforma: "windows",
+        ...(servidorMcp === undefined ? {} : { servidorMcp }),
+      });
+    }
+
+    it("grava o servidor MCP e as negações num arquivo, não manda o servidor no session/new e apaga o arquivo no fim", async () => {
+      const registrarTurno = vi.fn(() => ({ url: "http://127.0.0.1:9999/mcp", token: "tok-123", encerrar: vi.fn() }));
+      const configuracao = configuracaoDeTeste({ nivelDePermissao: "edicao" });
+
+      const { resultado } = await executar(
+        pedidoDeTeste(pastas, "gemini", { texto: "Oi.", configuracao }),
+        motorDoGemini({ registrarTurno }),
+      );
+
+      expect(resultado.sucesso).toBe(true);
+      expect(recebidos("session/new")[0]?.params).toMatchObject({ mcpServers: [] });
+      const lido = lerLog().find((linha) => linha.tipo === "configuracao-por-arquivo") as { conteudo?: unknown } | undefined;
+      expect(lido?.conteudo).toMatchObject({
+        security: { disableYoloMode: true },
+        tools: { exclude: ["run_shell_command"] },
+        mcpServers: {
+          orquestrador: { httpUrl: "http://127.0.0.1:9999/mcp", headers: { Authorization: "Bearer tok-123" }, timeout: 3_600_000 },
+        },
+      });
+    });
+
+    it("numa subtarefa (sem servidor MCP), grava só as negações", async () => {
+      const { resultado } = await executar(pedidoDeTeste(pastas, "gemini", { texto: "Oi." }), motorDoGemini());
+
+      expect(resultado.sucesso).toBe(true);
+      const lido = lerLog().find((linha) => linha.tipo === "configuracao-por-arquivo") as { conteudo?: Record<string, unknown> } | undefined;
+      expect(lido?.conteudo).toBeDefined();
+      expect(lido?.conteudo).not.toHaveProperty("mcpServers");
     });
   });
 

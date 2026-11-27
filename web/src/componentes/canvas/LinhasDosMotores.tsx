@@ -23,7 +23,7 @@ import { AvisoDoEsforcoHerdado, Rotulo } from "./LinhasDaConfiguracao";
 import { MenuDeModelo } from "./MenuDeModelo";
 
 /*
- * As linhas da configuração que dependem do motor (Claude Code, Codex ou GitHub Copilot CLI): o motor e o modelo de
+ * As linhas da configuração que dependem do motor (Claude Code, Codex, GitHub Copilot CLI ou Gemini CLI): o motor e o modelo de
  * cada papel, a ordem de reserva e o navegador do agente. Usadas pela criação (NoRascunho) e pela ⚙ do terminal
  * (CamposDaConfiguracao), que mostram exatamente as mesmas linhas.
  */
@@ -172,7 +172,7 @@ export function LinhaDosPapeis({ idDoCampo, valor, aoMudar, motores, herdados }:
         htmlFor={`${idDoCampo}-orquestrador`}
         titulo="Orquestrador"
         dica="Quem conversa com você."
-        explicacao="Ele entende o pedido, divide em tarefas e passa para os subagentes. Escolha o motor (Claude Code, Codex ou GitHub Copilot CLI) e o modelo. No Claude Code, Fable é para os desafios mais difíceis, Opus é o mais capaz no dia a dia, Sonnet equilibra e Haiku é rápido e gasta menos cota; o esforço é quanto ele pensa antes de responder e, no automático, vale o padrão do Claude Code. No Codex e no Copilot, vale o modelo do próprio CLI ou o id que você digitar."
+        explicacao="Ele entende o pedido, divide em tarefas e passa para os subagentes. Escolha o motor (Claude Code, Codex, GitHub Copilot CLI ou Gemini CLI) e o modelo. No Claude Code, Fable é para os desafios mais difíceis, Opus é o mais capaz no dia a dia, Sonnet equilibra e Haiku é rápido e gasta menos cota; o esforço é quanto ele pensa antes de responder e, no automático, vale o padrão do Claude Code. No Codex, no Copilot e no Gemini, vale o modelo do próprio CLI ou o id que você digitar."
         alinharAoTopo
       />
       <div className="flex min-w-0 flex-col gap-1.5">

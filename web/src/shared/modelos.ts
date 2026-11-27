@@ -60,10 +60,10 @@ export const CONFIGURACAO_PADRAO_DO_ORQUESTRADOR: DadosDaConfiguracao = {
 };
 
 /* ---------------- Motores ----------------
- * Cada papel (Orquestrador e Subagentes) roda num motor: o Claude Code (o original e o padrão), o Codex ou o
- * GitHub Copilot CLI. Os modelos, a reserva e o esforço dependem do motor. */
+ * Cada papel (Orquestrador e Subagentes) roda num motor: o Claude Code (o original e o padrão), o Codex, o
+ * GitHub Copilot CLI ou o Gemini CLI. Os modelos, a reserva e o esforço dependem do motor. */
 
-export const MOTORES: readonly Motor[] = ["claude-code", "codex", "copilot"];
+export const MOTORES: readonly Motor[] = ["claude-code", "codex", "copilot", "gemini"];
 export const MOTOR_PADRAO: Motor = "claude-code";
 
 /** O nome do motor como o usuário o conhece. */
@@ -71,6 +71,7 @@ export const ROTULOS_DOS_MOTORES: Readonly<Record<Motor, string>> = {
   "claude-code": "Claude Code",
   codex: "Codex",
   copilot: "GitHub Copilot CLI",
+  gemini: "Gemini CLI",
 };
 
 /** O motor numa frase curta: "limite do Claude atingido". */
@@ -78,6 +79,7 @@ const NOMES_CURTOS_DOS_MOTORES: Readonly<Record<Motor, string>> = {
   "claude-code": "Claude",
   codex: "Codex",
   copilot: "Copilot",
+  gemini: "Gemini",
 };
 
 export function ehMotor(valor: unknown): valor is Motor {
@@ -93,7 +95,7 @@ export function nomeCurtoDoMotor(motor: string): string {
   return ehMotor(motor) ? NOMES_CURTOS_DOS_MOTORES[motor] : motor;
 }
 
-/** O modelo que o próprio CLI usa quando nenhum é pedido (codex e copilot). */
+/** O modelo que o próprio CLI usa quando nenhum é pedido (codex, copilot e gemini). */
 export const MODELO_PADRAO_DO_CLI = "padrao";
 export const ROTULO_DO_MODELO_PADRAO_DO_CLI = "Padrão do CLI";
 /** Letras, números e `. _ : -`, de 1 a 64 caracteres: como o servidor confere o id de um modelo. */

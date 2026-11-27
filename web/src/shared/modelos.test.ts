@@ -58,11 +58,11 @@ describe("motores", () => {
     expect(rotuloDoMotor("claude-code")).toBe("Claude Code");
     expect(rotuloDoMotor("codex")).toBe("Codex");
     expect(rotuloDoMotor("copilot")).toBe("GitHub Copilot CLI");
-    expect(rotuloDoMotor("gemini")).toBe("gemini");
+    expect(rotuloDoMotor("gemini")).toBe("Gemini CLI");
     expect(nomeCurtoDoMotor("claude-code")).toBe("Claude");
     expect(nomeCurtoDoMotor("copilot")).toBe("Copilot");
     expect(ehMotor("codex")).toBe(true);
-    expect(ehMotor("gemini")).toBe(false);
+    expect(ehMotor("gemini")).toBe(true);
     expect(ehMotor(undefined)).toBe(false);
   });
 
