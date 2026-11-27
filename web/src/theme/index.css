@@ -564,6 +564,21 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
 .camada-de-desenho-ativa[data-ferramenta="borracha"] .camada-de-desenho-svg {
   cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18'%3E%3Ccircle cx='9' cy='9' r='7.5' fill='none' stroke='%23faf9f5' stroke-width='1.5'/%3E%3C/svg%3E") 9 9, cell;
 }
+/* Selecionar com a barra aberta: o <svg> continua sem pegar o ponteiro, e o vazio passa para o canvas.
+ * Só a área de toque de cada traço (a forma dele, invisível e mais larga) o pega, com a mão de mover. */
+.camada-de-desenho-selecionando .camada-de-desenho-svg { touch-action: none; }
+.camada-de-desenho-selecionando .toque-do-traco {
+  fill: none;
+  stroke: transparent;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: stroke;
+  cursor: move;
+}
+/* O texto vale pela caixa inteira, não só pelas letras. */
+.camada-de-desenho-selecionando .toque-do-texto { fill: transparent; stroke: none; pointer-events: all; }
+/* O contorno do traço selecionado (em pixels da tela, fora do grupo do zoom). */
+.contorno-da-selecao { fill: none; stroke: var(--active); stroke-width: 1; stroke-dasharray: 5 4; pointer-events: none; }
 .traco { fill: none; stroke: var(--cor-do-traco); stroke-linecap: round; stroke-linejoin: round; }
 .traco-marca-texto { stroke-opacity: .38; }
 .traco-texto { fill: var(--cor-do-traco); stroke: none; font-family: var(--fonte-titulo); font-weight: 500; white-space: pre; }

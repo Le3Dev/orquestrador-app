@@ -1,10 +1,12 @@
 import {
   alturaDaLinhaDoTexto,
   caixaDoTexto,
+  caixaDoTraco,
   caminhoDaMaoLivre,
   caminhoDaSeta,
   distanciaAoSegmento,
   larguraDoTraco,
+  moverTraco,
   pontosEntre,
   retanguloEntre,
   simplificarPontos,
@@ -206,6 +208,113 @@ describe("caixaDoTexto", () => {
 
     expect(caixa.largura).toBe(tamanhoDoTexto(2) * 0.6);
     expect(caixa.altura).toBe(alturaDaLinhaDoTexto(2));
+  });
+});
+
+describe("moverTraco", () => {
+  it("desloca todos os pontos pelo delta e devolve um traço novo, sem mexer no original", () => {
+    const original = traco({
+      id: "r",
+      tipo: "retangulo",
+      cor: "azul",
+      espessura: 6,
+      pontos: [
+        { x: 10, y: 20 },
+        { x: 110, y: 80 },
+      ],
+    });
+
+    const movido = moverTraco(original, { x: 30, y: -5 });
+
+    expect(movido.pontos).toEqual([
+      { x: 40, y: 15 },
+      { x: 140, y: 75 },
+    ]);
+    expect(movido).toMatchObject({ id: "r", tipo: "retangulo", cor: "azul", espessura: 6 });
+    expect(movido).not.toBe(original);
+    expect(original.pontos[0]).toEqual({ x: 10, y: 20 });
+  });
+
+  it("o texto leva o texto junto e a mão livre, todos os pontos; os pontos saem com uma casa", () => {
+    const solto = traco({ tipo: "texto", pontos: [{ x: 1, y: 2 }], texto: "Banco\nde dados" });
+    const rabisco = traco({
+      pontos: [
+        { x: 0, y: 0 },
+        { x: 5, y: 5 },
+        { x: 9, y: 1 },
+      ],
+    });
+
+    expect(moverTraco(solto, { x: 10, y: 10 })).toMatchObject({ pontos: [{ x: 11, y: 12 }], texto: "Banco\nde dados" });
+    expect(moverTraco(rabisco, { x: 0.04, y: 1.26 }).pontos).toEqual([
+      { x: 0, y: 1.3 },
+      { x: 5, y: 6.3 },
+      { x: 9, y: 2.3 },
+    ]);
+  });
+});
+
+describe("caixaDoTraco (o contorno da seleção)", () => {
+  it("a mão livre: a caixa dos pontos, mais meia largura da linha de cada lado", () => {
+    const rabisco = traco({
+      espessura: 6,
+      pontos: [
+        { x: 10, y: 10 },
+        { x: 50, y: 30 },
+        { x: 30, y: 60 },
+      ],
+    });
+
+    expect(caixaDoTraco(rabisco)).toEqual({ x: 7, y: 7, largura: 46, altura: 56 });
+  });
+
+  it("o marca-texto, mais largo, tem a caixa maior", () => {
+    const pontos = [
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+    ];
+
+    expect(caixaDoTraco(traco({ tipo: "caneta", espessura: 2, pontos }))).toEqual({ x: -1, y: -1, largura: 102, altura: 2 });
+    expect(caixaDoTraco(traco({ tipo: "marca-texto", espessura: 2, pontos }))).toEqual({ x: -4, y: -4, largura: 108, altura: 8 });
+  });
+
+  it("o retângulo em qualquer direção do arraste, e um pingo só tem a largura da linha", () => {
+    const caixa = traco({
+      tipo: "retangulo",
+      espessura: 2,
+      pontos: [
+        { x: 100, y: 80 },
+        { x: 20, y: 30 },
+      ],
+    });
+
+    expect(caixaDoTraco(caixa)).toEqual({ x: 19, y: 29, largura: 82, altura: 52 });
+    expect(caixaDoTraco(traco({ espessura: 2, pontos: [{ x: 5, y: 5 }] }))).toEqual({ x: 4, y: 4, largura: 2, altura: 2 });
+  });
+
+  it("a seta inclui as abas da ponta, que passam da haste", () => {
+    const seta = traco({
+      tipo: "seta",
+      espessura: 3,
+      pontos: [
+        { x: 0, y: 0 },
+        { x: 100, y: 0 },
+      ],
+    });
+
+    const caixa = caixaDoTraco(seta);
+
+    expect(caixa?.x).toBe(-1.5);
+    expect(caixa?.largura).toBeCloseTo(103);
+    // As abas abrem para os dois lados da haste: a caixa é mais alta que a linha da haste.
+    expect(caixa?.altura).toBeGreaterThan(3);
+  });
+
+  it("o texto vale pela caixa dele; sem pontos, nulo", () => {
+    const solto = traco({ tipo: "texto", espessura: 3, pontos: [{ x: 10, y: 20 }], texto: "Banco\nde dados" });
+
+    expect(caixaDoTraco(solto)).toEqual(caixaDoTexto({ x: 10, y: 20 }, "Banco\nde dados", 3));
+    expect(caixaDoTraco(traco({ pontos: [] }))).toBeNull();
   });
 });
 

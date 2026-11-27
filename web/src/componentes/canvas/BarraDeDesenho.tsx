@@ -25,7 +25,7 @@ const FERRAMENTAS: readonly { ferramenta: FerramentaDeDesenho; nome: string; dic
   {
     ferramenta: "selecionar",
     nome: "Selecionar",
-    dica: "Selecionar: o canvas volta a funcionar como sempre (Esc)",
+    dica: "Selecionar: clique num desenho para movê-lo; Delete apaga; duplo clique edita o texto; no vazio o canvas funciona como sempre (Esc)",
     icone: <IconeSelecionar />,
   },
   { ferramenta: "caneta", nome: "Caneta", dica: "Caneta: desenho à mão livre", icone: <IconeCaneta /> },
