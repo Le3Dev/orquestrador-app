@@ -10,6 +10,7 @@ import type {
 import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
 import { avisarSubagentesProntosMudaram } from "../../shared/subagentesProntos";
 import { IconePessoas } from "../Icones";
+import "../../theme/animacao-sintese.css";
 
 interface Props {
   acao: AcaoDeCriarSubagente | AcaoDeEditarSubagente;
@@ -107,7 +108,7 @@ export function CartaoDeSubagente({ acao }: Props) {
   const modelo = acao.tipo === "criar_subagente" ? acao.modelo : (acao.modelo ?? antes?.modelo ?? null);
 
   return (
-    <div className="cartao-de-acao">
+    <div className="cartao-de-acao cartao-de-subagente-chega">
       <span className="icone-do-cartao" aria-hidden="true">
         <IconePessoas tamanho={16} />
       </span>

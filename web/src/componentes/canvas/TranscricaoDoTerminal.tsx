@@ -1,4 +1,4 @@
-import { memo, type ReactNode, useState } from "react";
+import { type CSSProperties, memo, type ReactNode, useState } from "react";
 
 import { ehAnexoDeImagem } from "../../shared/anexos";
 import { api, mensagemDeErro } from "../../shared/api/cliente";
@@ -20,6 +20,7 @@ import { type EstadoDeVida, estadoDeVida } from "../../shared/estado/sinalDeVida
 import { useAutorrecuperacao } from "../../shared/hooks/useAutorrecuperacao";
 import "../../theme/recuperacao-do-turno.css";
 import "../../theme/motores.css";
+import "../../theme/animacao-sintese.css";
 import { nomeCurtoDoMotor, rotuloDoMotor } from "../../shared/modelos";
 import {
   descreverConfiguracao,
@@ -36,6 +37,7 @@ import { CartaoDePergunta } from "../chat/CartaoDePergunta";
 import { TextoFormatado } from "../TextoFormatado";
 import { type AcoesDoPlano, CartaoDoPlano } from "./CartaoDoPlano";
 import { CustoDoTurno } from "./CustoDoTurno";
+import { FichasDaSintese } from "./FichasDaSintese";
 import { ProgressoDasTarefas } from "./ProgressoDasTarefas";
 
 const SIMBOLOS: Readonly<Record<TipoDeLinhaDoLog, ReactNode>> = {
@@ -314,6 +316,11 @@ const Turno = memo(function Turno({
   aoResponderPergunta,
 }: PropsDoTurno) {
   const emAndamento = turno.situacao === "em_andamento";
+  // A síntese só se monta animada se o pedido terminou com este terminal aberto: o histórico carregado não anima.
+  const [viuEmAndamento, setViuEmAndamento] = useState(emAndamento);
+  if (emAndamento && !viuEmAndamento) {
+    setViuEmAndamento(true);
+  }
   // Pedidos já encerrados mostram só os marcos: as centenas de ações dos
   // agentes interessam enquanto acontecem, não no histórico.
   const linhas = emAndamento ? turno.log : turno.log.filter((linha) => linha.tipo !== "ferramenta");
@@ -417,8 +424,14 @@ const Turno = memo(function Turno({
             acoes={acoesDoPlano}
           />
         ) : (
-          <div className="resposta-no-terminal">
-            <TextoFormatado texto={turno.resposta} className="markdown-terminal" />
+          <div
+            className={`flex flex-col${viuEmAndamento && turno.subagentes.length > 0 ? " sintese-monta" : ""}`}
+            style={{ "--fichas": turno.subagentes.length } as CSSProperties}
+          >
+            <FichasDaSintese subagentes={turno.subagentes} />
+            <div className="resposta-no-terminal">
+              <TextoFormatado texto={turno.resposta} className="markdown-terminal" />
+            </div>
           </div>
         ))}
       {/* Respondida quando já há um pedido depois deste: a escolha (ou outra mensagem) já foi enviada. */}
