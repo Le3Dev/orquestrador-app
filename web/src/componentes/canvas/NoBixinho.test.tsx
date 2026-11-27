@@ -229,6 +229,8 @@ describe("NoBixinho", () => {
 
     expect(screen.getByText("pronto!")).toBeInTheDocument();
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    // O selo de concluído (decorativo) entra no lugar do ícone, com o check por desenhar.
+    expect(document.querySelector(".selo-de-concluido path")).toHaveAttribute("pathLength", "1");
   });
 
   it("não redesenha o bixinho quando muda outro Subagente, só quando muda o próprio", () => {

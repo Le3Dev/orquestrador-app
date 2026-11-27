@@ -11,7 +11,7 @@ import { useRelogio } from "../../shared/hooks/useRelogio";
 import { Etiqueta } from "../Etiqueta";
 import { IconeFechar } from "../Icones";
 import { TextoFormatado } from "../TextoFormatado";
-import { Bixinho, IconeDaFerramenta } from "./Bixinho";
+import { Bixinho, IconeDaFerramenta, SeloDeConcluido } from "./Bixinho";
 
 /**
  * A ficha do bixinho selecionado. Com um subagente pronto, o título é o nome
@@ -175,6 +175,7 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
           </button>
         )}
         {icone !== null && <IconeDaFerramenta icone={icone} />}
+        {subagente.situacao === "concluido" && <SeloDeConcluido />}
         <Bixinho aparencia={aparencia} situacao={subagente.situacao} />
         {/* Nome longo corta com reticências; o #id fica sempre visível (o nome inteiro, no tooltip). */}
         <span className="font-titulo flex max-w-full items-baseline text-[12px] font-semibold leading-none">

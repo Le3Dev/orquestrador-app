@@ -2387,7 +2387,7 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
 .no-bixinho-cancelado .balao-do-bixinho { color: var(--muted); }
 
 /* Caixa do desenho: a sombra e o bixinho, dois SVGs empilhados (ver `Bixinho.tsx`). */
-.bixinho-sprite { display: grid; flex-shrink: 0; }
+.bixinho-sprite { display: grid; flex-shrink: 0; position: relative; }
 .bixinho-sprite > svg { grid-area: 1 / 1; overflow: visible; }
 
 /* Cores dos bixinhos: tokens da paleta da Anthropic. */
@@ -2465,6 +2465,54 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
 .icone-da-ferramenta-engrenagem { --cor-do-icone: var(--active); }
 .icone-da-ferramenta-globo { --cor-do-icone: var(--success); }
 
+/* Concluiu: o selo da ferramenta dá lugar a um check que se desenha (só o
+ * `stroke-dashoffset`, curto) e um brilho verde que passa uma vez por trás do
+ * bixinho (opacidade e escala). */
+.selo-de-concluido {
+  position: absolute;
+  top: 40px;
+  left: calc(50% + 30px);
+  width: 24px;
+  height: 24px;
+  pointer-events: none;
+}
+.selo-de-concluido svg { display: block; }
+.selo-de-concluido circle {
+  fill: var(--surface-2);
+  stroke: var(--success);
+  stroke-width: 1.6;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: selo-aparece .3s var(--curva-de-mola) backwards;
+}
+.selo-de-concluido path {
+  fill: none;
+  stroke: var(--success);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  animation: desenhar-check .32s cubic-bezier(.3, 0, .2, 1) .12s backwards;
+}
+@keyframes selo-aparece { from { transform: scale(.3); opacity: 0; } }
+@keyframes desenhar-check { from { stroke-dashoffset: 1; } }
+.no-bixinho-concluido .bixinho-sprite::after {
+  content: "";
+  position: absolute;
+  inset: -12px;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--success) 55%, transparent), transparent 65%);
+  opacity: 0;
+  pointer-events: none;
+  animation: brilho-de-conclusao .6s ease-out;
+}
+@keyframes brilho-de-conclusao {
+  0% { opacity: 0; transform: scale(.6); }
+  35% { opacity: .9; }
+  100% { opacity: 0; transform: scale(1.25); }
+}
+
 /* ---------------- Canvas em movimento ----------------
  * `canvas-movendo` fica no contêiner do canvas enquanto o usuário arrasta um
  * nó ou move/aproxima o canvas. */
@@ -2489,6 +2537,9 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
 .canvas-movendo .react-flow__node .bixinho-desenho,
 .canvas-movendo .react-flow__node .bixinho-olhos,
 .canvas-movendo .react-flow__node .bixinho-corpo-animado,
+.canvas-movendo .react-flow__node .selo-de-concluido circle,
+.canvas-movendo .react-flow__node .selo-de-concluido path,
+.canvas-movendo .react-flow__node .bixinho-sprite::after,
 .canvas-movendo .react-flow__node .cursor::after,
 .canvas-movendo .react-flow__node .etiqueta-pulso::after,
 .canvas-movendo .react-flow__node .faixa-de-progresso::after,
