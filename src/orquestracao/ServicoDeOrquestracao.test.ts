@@ -2,7 +2,7 @@ import path from "node:path";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ControleDeExecucoesEmMemoria } from "../infraestrutura/execucoes/ControleDeExecucoesEmMemoria";
+import { CongeladorDeProcessos, ControleDeExecucoesEmMemoria } from "../infraestrutura/execucoes/ControleDeExecucoesEmMemoria";
 import { Anexo } from "./Anexo";
 import { ArmazemDeAnexos } from "./ArmazemDeAnexos";
 import { DadosDaConfiguracao } from "./ConfiguracaoDoOrquestrador";
@@ -209,9 +209,9 @@ describe("ServicoDeOrquestracao", () => {
     });
   });
 
-  async function criar(): Promise<Orquestrador> {
+  async function criar(nome = "Painel"): Promise<Orquestrador> {
     return servico.criarOrquestrador({
-      nome: "Painel",
+      nome,
       pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
       configuracao,
     });
@@ -330,7 +330,7 @@ describe("ServicoDeOrquestracao", () => {
       },
     });
     const primeiro = await criar();
-    const segundo = await criar();
+    const segundo = await criar("Outro");
 
     await servico.remover(segundo.id);
     await new Promise((resolver) => setTimeout(resolver, 0));
@@ -603,6 +603,91 @@ describe("ServicoDeOrquestracao", () => {
       await expect(servico.renomear(orquestrador.id, " ")).rejects.toMatchObject({ motivo: "dados_invalidos" });
       await expect(servico.renomear("nao-existe", "Outro")).rejects.toMatchObject({ motivo: "nao_encontrado" });
       expect(publicados).toEqual([]);
+    });
+  });
+
+  describe("nome único na pasta", () => {
+    function criarCom(nome: string, pasta = "painel"): Promise<Orquestrador> {
+      return servico.criarOrquestrador({
+        nome,
+        pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), pasta),
+        configuracao,
+      });
+    }
+
+    it.each([
+      ["o nome exato", "Painel"],
+      ["só com maiúsculas diferentes", "pAINEL"],
+      ["com espaços nas pontas", "  painel  "],
+    ])("recusa criar com %s de outro da mesma pasta, sem gravar", async (_caso, nome) => {
+      await criar();
+      const salvar = vi.spyOn(repositorio, "salvar");
+
+      await expect(criarCom(nome)).rejects.toMatchObject({
+        motivo: "nome_repetido",
+        message: `Já existe um orquestrador chamado "${nome.trim()}" nesta pasta.`,
+      });
+      expect(salvar).not.toHaveBeenCalled();
+      expect(repositorio.listar()).toHaveLength(1);
+    });
+
+    it("recusa a pasta escrita de outro jeito (maiúsculas e barra final)", async () => {
+      await criar();
+
+      await expect(
+        servico.criarOrquestrador({
+          nome: "Painel",
+          pastaDeTrabalho: PastaDeTrabalho.qualquer(`${path.resolve("/projetos", "PAINEL")}${path.sep}`),
+          configuracao,
+        }),
+      ).rejects.toMatchObject({ motivo: "nome_repetido" });
+    });
+
+    it("o mesmo nome em outra pasta pode", async () => {
+      await criar();
+
+      const outro = await criarCom("Painel", "site");
+
+      expect(outro.nome).toBe("Painel");
+      expect(repositorio.listar()).toHaveLength(2);
+    });
+
+    it("recusa renomear para o nome de outro da mesma pasta e mantém o nome", async () => {
+      await criar();
+      const segundo = await criarCom("Backlog");
+
+      await expect(servico.renomear(segundo.id, " PAINEL ")).rejects.toMatchObject({
+        motivo: "nome_repetido",
+        message: 'Já existe um orquestrador chamado "PAINEL" nesta pasta.',
+      });
+      expect(segundo.nome).toBe("Backlog");
+      expect(publicados).toEqual([]);
+    });
+
+    it("renomear para o próprio nome, mesmo mudando maiúsculas, pode", async () => {
+      const orquestrador = await criar();
+
+      await servico.renomear(orquestrador.id, "Painel");
+      const renomeado = await servico.renomear(orquestrador.id, "PAINEL");
+
+      expect(renomeado.nome).toBe("PAINEL");
+    });
+
+    it("homônimos gravados antes da regra continuam listados", async () => {
+      const primeiro = await criar();
+      // Gravado direto no repositório, como um homônimo que veio do disco.
+      const gravado = Orquestrador.criar({
+        id: "antigo",
+        nome: "painel",
+        pastaDeTrabalho: primeiro.pastaDeTrabalho,
+        sessaoId: "sessao-antiga",
+        configuracao: primeiro.configuracao,
+        agora: new Date("2026-10-28T12:00:00Z"),
+      });
+      await repositorio.salvar(gravado);
+
+      expect(repositorio.listar().map((item) => item.nome)).toEqual(["Painel", "painel"]);
+      await expect(servico.renomear(gravado.id, "Livre")).resolves.toMatchObject({ nome: "Livre" });
     });
   });
 
@@ -1360,7 +1445,7 @@ describe("ServicoDeOrquestracao", () => {
     it("não vazam de um orquestrador para outro", async () => {
       const comInstrucoes = await criar();
       await servico.alterarConfiguracao(comInstrucoes.id, { instrucoesPersonalizadas: "Só deste." });
-      const outro = await criar();
+      const outro = await criar("Outro");
 
       expect((await pedidoDoTurno(comInstrucoes.id)).instrucoes?.texto).toBe("Só deste.");
       expect((await pedidoDoTurno(outro.id)).instrucoes).toBeNull();
@@ -1867,9 +1952,9 @@ describe("ServicoDeOrquestracao e a autorrecuperação (ADR-36)", () => {
     });
   });
 
-  async function criar(): Promise<Orquestrador> {
+  async function criar(nome = "Painel"): Promise<Orquestrador> {
     return servico.criarOrquestrador({
-      nome: "Painel",
+      nome,
       pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
       configuracao,
     });
@@ -2194,7 +2279,8 @@ describe("ServicoDeOrquestracao e a autorrecuperação (ADR-36)", () => {
     async function comRetomadaGravada(
       retomada: Partial<{ deTurnoId: string; causa: "silencio" | "rede"; tentativa: number; retomarEm: string }> = {},
     ): Promise<Orquestrador> {
-      const orquestrador = await criar();
+      // Nome único: o teste grava mais de uma retomada na mesma pasta.
+      const orquestrador = await criar(`Painel ${repositorio.listar().length + 1}`);
       const turnoId = `t-${orquestrador.id}`;
       orquestrador.iniciarTurno(turnoId, "faça", relogio.agora());
       orquestrador.falharTurno(turnoId, "falhou", relogio.agora());
@@ -2804,5 +2890,389 @@ describe("ServicoDeOrquestracao e a reserva de motores", () => {
 
     expect(motor.pedidos[0]).toMatchObject({ motor: "codex" });
     expect(iniciados().at(-1)).toMatchObject({ motor: "codex", retomada: { deTurnoId: turnoId } });
+  });
+});
+/** Congelador falso: registra as chamadas; `podeCongelar` falso imita o Windows (ou nenhum processo vivo). */
+class CongeladorFalso implements CongeladorDeProcessos {
+  podeCongelar = true;
+  readonly congelados = new Set<string>();
+  readonly chamadas: string[] = [];
+  congelar(orquestradorId: string): boolean {
+    this.chamadas.push("congelar");
+    if (!this.podeCongelar) {
+      return false;
+    }
+    this.congelados.add(orquestradorId);
+    return true;
+  }
+  descongelar(orquestradorId: string): boolean {
+    const havia = this.congelados.delete(orquestradorId);
+    if (havia) {
+      this.chamadas.push("descongelar");
+    }
+    return havia;
+  }
+}
+
+describe("ServicoDeOrquestracao e a pausa (ADR-51)", () => {
+  let repositorio: RepositorioEmMemoria;
+  let motor: MotorFalso;
+  let congelador: CongeladorFalso;
+  let execucoes: ControleDeExecucoesEmMemoria;
+  let servico: ServicoDeOrquestracao;
+  let ids: number;
+
+  beforeEach(() => {
+    repositorio = new RepositorioEmMemoria();
+    motor = new MotorFalso();
+    motor.eventos = [{ tipo: "sessao_iniciada" }];
+    congelador = new CongeladorFalso();
+    execucoes = new ControleDeExecucoesEmMemoria(congelador);
+    ids = 0;
+    servico = new ServicoDeOrquestracao({
+      repositorio,
+      motor,
+      execucoes,
+      publicador: { publicar: () => undefined, sinalizar: () => undefined },
+      anexos: new ArmazemEmMemoria(),
+      worktrees: new GerenciadorDeWorktreesFalso(),
+      pastaDeArtefatos: (orquestradorId) => `/dados/artefatos/entrada/orquestradores/${orquestradorId}`,
+      preferencias: new PreferenciasEmMemoria(),
+      gerarId: () => `id${++ids}`,
+      agora: () => new Date("2026-11-18T12:00:00Z"),
+    });
+  });
+
+  async function trabalhando(): Promise<{ orquestrador: Orquestrador; primeiro: MensagemEnviada }> {
+    const orquestrador = await servico.criarOrquestrador({
+      nome: "Painel",
+      pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
+      configuracao,
+    });
+    const primeiro = await servico.enviarMensagem(orquestrador.id, "faça o painel");
+    await vi.waitFor(() => expect(motor.pedidos).toHaveLength(1));
+    return { orquestrador, primeiro };
+  }
+
+  function tipos(): string[] {
+    return repositorio.eventos.map((evento) => evento.tipo);
+  }
+
+  it("congela e continua o mesmo turno: SIGSTOP, SIGCONT e o turno conclui normalmente", async () => {
+    const { orquestrador, primeiro } = await trabalhando();
+
+    const pausa = await servico.pausar(orquestrador.id);
+
+    expect(pausa).toEqual({ desde: "2026-11-18T12:00:00.000Z", modo: "congelado" });
+    expect(orquestrador.situacao).toBe("pausado");
+    expect(orquestrador.turnoEmAndamento?.id).toBe(primeiro.turnoId);
+    expect(repositorio.eventos.at(-1)).toMatchObject({ tipo: "orquestrador_pausado", turnoId: primeiro.turnoId, pausa });
+
+    expect(await servico.continuar(orquestrador.id)).toEqual({ modo: "congelado" });
+    expect(congelador.chamadas).toEqual(["congelar", "descongelar"]);
+    expect(repositorio.eventos.at(-1)).toMatchObject({ tipo: "orquestrador_continuado", modo: "congelado" });
+    motor.terminar();
+    await primeiro.conclusao;
+
+    expect(orquestrador.ultimoTurno?.situacao).toBe("concluido");
+    expect(orquestrador.situacao).toBe("ocioso");
+    expect(motor.pedidos).toHaveLength(1);
+  });
+
+  it("recusa pausar sem pedido em andamento ou já pausado, e continuar sem pausa (409)", async () => {
+    const orquestrador = await servico.criarOrquestrador({
+      nome: "Painel",
+      pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
+      configuracao,
+    });
+    await expect(servico.pausar(orquestrador.id)).rejects.toMatchObject({ motivo: "sem_turno_em_andamento" });
+    await expect(servico.continuar(orquestrador.id)).rejects.toMatchObject({ motivo: "sem_pausa" });
+
+    await servico.enviarMensagem(orquestrador.id, "faça");
+    await servico.pausar(orquestrador.id);
+    await expect(servico.pausar(orquestrador.id)).rejects.toMatchObject({ motivo: "orquestrador_pausado" });
+    expect(congelador.chamadas).toEqual(["congelar"]);
+  });
+
+  it("sem como congelar (Windows): encerra com o motivo pausa, o turno fica pausado e a fila não anda", async () => {
+    congelador.podeCongelar = false;
+    const { orquestrador, primeiro } = await trabalhando();
+    await servico.enfileirarPedido(orquestrador.id, "depois");
+
+    expect(await servico.pausar(orquestrador.id)).toMatchObject({ modo: "retomada" });
+    await primeiro.conclusao;
+    await primeiro.envioDaFila;
+    await primeiro.recuperacao;
+
+    expect(orquestrador.ultimoTurno?.situacao).toBe("pausado");
+    expect(orquestrador.pausa).toMatchObject({ modo: "retomada" });
+    expect(orquestrador.fila).toHaveLength(1);
+    expect(motor.pedidos).toHaveLength(1);
+    expect(tipos()).not.toContain("turno_cancelado");
+  });
+
+  it("continuar no modo retomada abre um turno na mesma sessão com a nota; a fila volta a andar depois", async () => {
+    congelador.podeCongelar = false;
+    const { orquestrador, primeiro } = await trabalhando();
+    await servico.enfileirarPedido(orquestrador.id, "depois");
+    await servico.pausar(orquestrador.id);
+    await primeiro.conclusao;
+
+    expect(await servico.continuar(orquestrador.id)).toEqual({ modo: "retomada" });
+
+    expect(orquestrador.pausa).toBeNull();
+    expect(motor.pedidos[1]).toMatchObject({ sessaoId: motor.pedidos[0]?.sessaoId, sessaoIniciada: true });
+    expect(motor.pedidos[1]?.texto).toContain("Você foi pausado pelo usuário no meio do trabalho.");
+    const continuado = tipos().lastIndexOf("orquestrador_continuado");
+    expect(continuado).toBeGreaterThan(0);
+    expect(tipos()[continuado + 1]).toBe("turno_iniciado");
+
+    // O primeiro término vai para o turno abortado (o motor falso os casa na ordem).
+    motor.terminar();
+    motor.terminar();
+    await vi.waitFor(() => expect(motor.pedidos).toHaveLength(3));
+    expect(motor.pedidos[2]?.texto).toBe("depois");
+  });
+
+  it("o processo congelado que morre vira retomada, com outro orquestrador_pausado", async () => {
+    const { orquestrador, primeiro } = await trabalhando();
+    await servico.pausar(orquestrador.id);
+
+    motor.resultado = { sucesso: false, motivo: "morto por fora", uso: null };
+    motor.terminar();
+    await primeiro.conclusao;
+    await primeiro.recuperacao;
+
+    expect(orquestrador.ultimoTurno?.situacao).toBe("pausado");
+    expect(orquestrador.pausa).toMatchObject({ modo: "retomada" });
+    const pausados = repositorio.eventos.filter((evento) => evento.tipo === "orquestrador_pausado");
+    expect(pausados.map((evento) => (evento.tipo === "orquestrador_pausado" ? evento.pausa.modo : null))).toEqual([
+      "congelado",
+      "retomada",
+    ]);
+    expect(tipos()).not.toContain("turno_falhou");
+    expect(tipos()).not.toContain("recuperacao_do_turno");
+  });
+
+  it("mensagem com o orquestrador congelado: SIGCONT, entra na frente da fila e sai mesmo que o turno falhe", async () => {
+    const { orquestrador, primeiro } = await trabalhando();
+    await servico.enfileirarPedido(orquestrador.id, "antiga");
+    await servico.pausar(orquestrador.id);
+
+    const enviada = await servico.enviarMensagem(orquestrador.id, "mude a cor para azul");
+
+    expect(enviada.turnoId).toBe(primeiro.turnoId);
+    expect(orquestrador.pausa).toBeNull();
+    expect(orquestrador.fila.map((pedido) => pedido.texto)).toEqual(["mude a cor para azul", "antiga"]);
+    expect(congelador.chamadas).toEqual(["congelar", "descongelar"]);
+    expect(tipos().slice(-2)).toEqual(["pedido_enfileirado", "orquestrador_continuado"]);
+    expect(repositorio.eventos.at(-2)).toMatchObject({ naFrente: true, pedido: { id: enviada.pedidoId } });
+
+    motor.resultado = { sucesso: false, motivo: "erro qualquer", uso: null };
+    motor.terminar();
+    await primeiro.envioDaFila;
+
+    expect(motor.pedidos[1]?.texto).toBe("mude a cor para azul");
+    expect(orquestrador.fila.map((pedido) => pedido.texto)).toEqual(["antiga"]);
+  });
+
+  it("mensagem com o orquestrador em retomada: o turno de continuação leva a nota e a mensagem", async () => {
+    congelador.podeCongelar = false;
+    const { orquestrador, primeiro } = await trabalhando();
+    await servico.pausar(orquestrador.id);
+    await primeiro.conclusao;
+
+    await servico.enviarMensagem(orquestrador.id, "use a cor azul");
+
+    expect(orquestrador.pausa).toBeNull();
+    expect(motor.pedidos[1]?.texto).toMatch(/^Você foi pausado pelo usuário[\s\S]*Mensagem do usuário ao continuar:\nuse a cor azul$/);
+  });
+
+  describe("o pedido que não chegou ao motor vai de novo, em vez da nota", () => {
+    const NOTA = "Você foi pausado pelo usuário no meio do trabalho.";
+
+    async function novo(): Promise<Orquestrador> {
+      return servico.criarOrquestrador({
+        nome: "Painel",
+        pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
+        configuracao,
+      });
+    }
+
+    /** O app reabre o Orquestrador do disco: a marca da sessão do turno tem de sobreviver. */
+    function reaberto(orquestrador: Orquestrador): void {
+      repositorio.orquestradores.set(orquestrador.id, Orquestrador.reconstituir(orquestrador.paraDados()));
+    }
+
+    it("pausa antes de o processo nascer: reenvia o pedido com o modo e os anexos dele", async () => {
+      congelador.podeCongelar = false;
+      motor.eventos = [];
+      const orquestrador = await novo();
+      const primeiro = await servico.enviarMensagem(
+        orquestrador.id,
+        "crie a.txt",
+        [{ nome: "tela.png", tipoDeMidia: "image/png", conteudo: new Uint8Array([1]) }],
+        "planejamento",
+      );
+      await servico.pausar(orquestrador.id);
+      await primeiro.conclusao;
+      expect(orquestrador.ultimoTurno).toMatchObject({ situacao: "pausado", sessaoIniciada: false });
+      reaberto(orquestrador);
+
+      await servico.continuar(orquestrador.id);
+
+      const continuacao = motor.pedidos.at(-1);
+      expect(continuacao).toMatchObject({ texto: "crie a.txt", modo: "planejamento", sessaoIniciada: false });
+      expect(continuacao?.anexos.map((anexo) => anexo.nome)).toEqual(["tela.png"]);
+    });
+
+    it("pausa depois de a sessão ser anunciada no próprio turno: manda a nota", async () => {
+      congelador.podeCongelar = false;
+      const { orquestrador, primeiro } = await trabalhando();
+      await servico.pausar(orquestrador.id);
+      await primeiro.conclusao;
+      expect(orquestrador.ultimoTurno?.sessaoIniciada).toBe(true);
+      reaberto(orquestrador);
+
+      await servico.continuar(orquestrador.id);
+
+      expect(motor.pedidos.at(-1)?.texto).toContain(NOTA);
+      expect(motor.pedidos.at(-1)?.texto).not.toContain("faça o painel");
+    });
+
+    it("sessão iniciada em turnos anteriores, mas não no pausado: reenvia o pedido na mesma sessão", async () => {
+      const { orquestrador, primeiro } = await trabalhando();
+      motor.terminar();
+      await primeiro.conclusao;
+      expect(orquestrador.sessaoIniciada).toBe(true);
+
+      congelador.podeCongelar = false;
+      motor.eventos = [];
+      const segundo = await servico.enviarMensagem(orquestrador.id, "crie b.txt");
+      await servico.pausar(orquestrador.id);
+      await segundo.conclusao;
+
+      await servico.continuar(orquestrador.id);
+
+      expect(motor.pedidos.at(-1)).toMatchObject({
+        texto: "crie b.txt",
+        sessaoId: motor.pedidos[0]?.sessaoId,
+        sessaoIniciada: true,
+      });
+    });
+
+    it("mensagem durante a pausa: o pedido vai de novo com a mensagem, e os anexos dos dois", async () => {
+      congelador.podeCongelar = false;
+      motor.eventos = [];
+      const orquestrador = await novo();
+      const primeiro = await servico.enviarMensagem(orquestrador.id, "crie c.txt", [
+        { nome: "antes.png", tipoDeMidia: "image/png", conteudo: new Uint8Array([1]) },
+      ]);
+      await servico.pausar(orquestrador.id);
+      await primeiro.conclusao;
+
+      await servico.enviarMensagem(orquestrador.id, "use a cor azul", [
+        { nome: "depois.png", tipoDeMidia: "image/png", conteudo: new Uint8Array([2]) },
+      ]);
+
+      const continuacao = motor.pedidos.at(-1);
+      expect(continuacao?.texto).toBe("crie c.txt\n\nMensagem do usuário ao continuar:\nuse a cor azul");
+      expect(continuacao?.anexos.map((anexo) => anexo.nome)).toEqual(["antes.png", "depois.png"]);
+      expect(orquestrador.pausa).toBeNull();
+    });
+  });
+
+  it("cancelar congelado descongela e cancela; cancelar em retomada só tira a pausa", async () => {
+    const { orquestrador, primeiro } = await trabalhando();
+    await servico.pausar(orquestrador.id);
+
+    await servico.cancelar(orquestrador.id);
+    await primeiro.conclusao;
+
+    expect(congelador.chamadas).toEqual(["congelar", "descongelar"]);
+    expect(orquestrador.ultimoTurno?.situacao).toBe("cancelado");
+    expect(orquestrador.pausa).toBeNull();
+    expect(repositorio.eventos.find((evento) => evento.tipo === "orquestrador_continuado")).toMatchObject({ cancelado: true });
+
+    congelador.podeCongelar = false;
+    const segundo = await servico.enviarMensagem(orquestrador.id, "outro");
+    await servico.pausar(orquestrador.id);
+    await segundo.conclusao;
+    await servico.cancelar(orquestrador.id);
+
+    expect(orquestrador.ultimoTurno?.situacao).toBe("pausado");
+    expect(orquestrador.situacao).toBe("ocioso");
+  });
+
+  it("fechar o app com o turno congelado: descongela, encerra e grava a pausa em retomada", async () => {
+    const { orquestrador, primeiro } = await trabalhando();
+    await servico.pausar(orquestrador.id);
+
+    execucoes.cancelarTodas();
+    await primeiro.conclusao;
+
+    expect(congelador.chamadas).toEqual(["congelar", "descongelar"]);
+    expect(orquestrador.ultimoTurno?.situacao).toBe("pausado");
+    expect(orquestrador.pausa).toMatchObject({ modo: "retomada" });
+  });
+
+  it("ao subir, o turno que ficou congelado vira pausado (retomada), não interrompido", async () => {
+    const { orquestrador } = await trabalhando();
+    await servico.pausar(orquestrador.id);
+    repositorio.orquestradores.set(orquestrador.id, Orquestrador.reconstituir(orquestrador.paraDados()));
+
+    expect(await servico.interromperTurnosPendentes()).toBe(1);
+
+    const reaberto = repositorio.buscarPorId(orquestrador.id);
+    expect(reaberto?.ultimoTurno?.situacao).toBe("pausado");
+    expect(reaberto?.pausa).toMatchObject({ modo: "retomada" });
+    expect(tipos()).not.toContain("turno_interrompido");
+  });
+});
+
+describe("ServicoDeOrquestracao, a pausa e a vigia do turno", () => {
+  it("a vigia fica parada durante o congelamento e recomeça do zero ao continuar", async () => {
+    const relogio = new RelogioFalso();
+    const motor = new MotorRoteirizado();
+    motor.roteiro = ["rodando"];
+    const congelador = new CongeladorFalso();
+    const repositorio = new RepositorioEmMemoria();
+    const preferencias = new PreferenciasEmMemoria();
+    let ids = 0;
+    const servico = new ServicoDeOrquestracao({
+      repositorio,
+      motor,
+      execucoes: new ControleDeExecucoesEmMemoria(congelador),
+      publicador: { publicar: () => undefined, sinalizar: () => undefined },
+      anexos: new ArmazemEmMemoria(),
+      worktrees: new GerenciadorDeWorktreesFalso(),
+      pastaDeArtefatos: (orquestradorId) => `/dados/artefatos/entrada/orquestradores/${orquestradorId}`,
+      preferencias,
+      gerarId: () => `id${++ids}`,
+      agora: relogio.agora,
+      diagnosticador: new DiagnosticadorParado(),
+      agendador: relogio,
+    });
+    const orquestrador = await servico.criarOrquestrador({
+      nome: "Painel",
+      pastaDeTrabalho: PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel"),
+      configuracao,
+    });
+    const turno = await servico.enviarMensagem(orquestrador.id, "faça");
+    await esvaziar();
+    await relogio.avancar(MINUTO);
+
+    await servico.pausar(orquestrador.id);
+    await relogio.avancar(30 * MINUTO);
+    expect(orquestrador.turnoEmAndamento?.id).toBe(turno.turnoId);
+
+    await servico.continuar(orquestrador.id);
+    // O silêncio conta de novo a partir do continuar: sem isso, 4 min já passariam dos 5 de antes.
+    await relogio.avancar(4 * MINUTO);
+    expect(orquestrador.turnoEmAndamento?.id).toBe(turno.turnoId);
+
+    await relogio.avancar(2 * MINUTO);
+    await turno.conclusao;
+    expect(orquestrador.paraDados().turnos[0]?.situacao).toBe("falhou");
   });
 });

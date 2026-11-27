@@ -4,6 +4,7 @@ import { type NodeProps, ReactFlowProvider } from "@xyflow/react";
 import { type AcoesDoCanvas, ProvedorDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
 import type { DadosDaPrevia, NoPrevia as TipoDoNo } from "../../shared/canvas/nos";
 import type { ApiDaPrevia, EventoDaPrevia } from "../../shared/ponteDoDesktop";
+import { INTERVALO_DA_COBERTURA_MS } from "../../shared/canvas/medirCorpo";
 import { ENDERECO_INVALIDO, INTERVALO_DA_VERIFICACAO_MS, NoPrevia, TEMPO_ATE_FECHAR_SEM_SERVIDOR_MS } from "./NoPrevia";
 
 function acoesDoCanvas(): AcoesDoCanvas {
@@ -880,6 +881,24 @@ describe("NoPrevia com endereço externo no app desktop", () => {
     await waitFor(() =>
       expect(api.retangulo).toHaveBeenCalledWith("p1", { x: 180, y: 150, largura: 720, altura: 480, zoom: 1 }),
     );
+  });
+
+  it("ativa e parada, não pede quadro a cada quadro; o retângulo mudado em repouso é mandado uma vez", async () => {
+    const quadros = vi.spyOn(window, "requestAnimationFrame");
+    renderizar({ url: SHEETS });
+    await ativar();
+    // Os quadros de folga do começo acabam e nada mais é pedido.
+    await act(async () => new Promise((resolver) => setTimeout(resolver, 150)));
+    quadros.mockClear();
+    await act(async () => new Promise((resolver) => setTimeout(resolver, INTERVALO_DA_COBERTURA_MS * 2)));
+    expect(quadros).not.toHaveBeenCalled();
+    expect(api.retangulo).not.toHaveBeenCalled();
+
+    // Uma mudança de layout que não avisa ninguém: a conferência lenta pega, e manda uma vez só.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ ...retanguloDoCorpo, top: 260 } as DOMRect);
+    await waitFor(() => expect(api.retangulo).toHaveBeenCalledWith("p1", expect.objectContaining({ y: 260 })));
+    await act(async () => new Promise((resolver) => setTimeout(resolver, INTERVALO_DA_COBERTURA_MS * 2)));
+    expect(api.retangulo).toHaveBeenCalledTimes(1);
   });
 
   it("clique fora do bloco desativa e esconde a vista; clique dentro dele não", async () => {

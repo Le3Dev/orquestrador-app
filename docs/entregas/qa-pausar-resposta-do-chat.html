@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>QA: pausar a resposta do chat rápido</title>
+<style>
+  :root { --ok:#1f7a3a; --falha:#b3261e; --ressalva:#a15c00; --borda:#ddd; --fundo:#fafafa; }
+  body { font: 15px/1.5 -apple-system, "Segoe UI", sans-serif; max-width: 1050px; margin: 2rem auto; padding: 0 1rem; color:#222; }
+  h1 { margin-bottom: .2rem; } .sub { color:#666; margin-top:0; }
+  .resumo { display:flex; gap:1rem; flex-wrap:wrap; margin:1rem 0 1.5rem; }
+  .resumo div { border:1px solid var(--borda); border-radius:8px; padding:.6rem 1rem; background:var(--fundo); }
+  .caso { border:1px solid var(--borda); border-radius:10px; padding:1rem 1.2rem; margin:1rem 0; }
+  .caso h2 { font-size:1.1rem; margin:.1rem 0 .6rem; display:flex; gap:.6rem; align-items:center; }
+  .selo { font-size:.75rem; font-weight:700; color:#fff; border-radius:999px; padding:.15rem .6rem; text-transform:uppercase; }
+  .passou { background:var(--ok); } .falhou { background:var(--falha); } .ressalva { background:var(--ressalva); }
+  dl { display:grid; grid-template-columns: 110px 1fr; gap:.3rem .8rem; margin:0; }
+  dt { font-weight:600; color:#555; } dd { margin:0; }
+  pre { background:#1e1e1e; color:#e6e6e6; padding:.7rem .9rem; border-radius:6px; overflow-x:auto; font-size:12.5px; line-height:1.4; }
+  code { background:#f0f0f0; padding:0 .25rem; border-radius:3px; }
+  pre code { background:none; padding:0; }
+  .bug { border-left:4px solid var(--falha); background:#fff5f4; padding:.6rem 1rem; margin:.6rem 0; }
+  .obs { border-left:4px solid var(--ressalva); background:#fff8ec; padding:.6rem 1rem; margin:.6rem 0; }
+  table { border-collapse:collapse; width:100%; } td, th { border:1px solid var(--borda); padding:.35rem .6rem; text-align:left; }
+</style>
+</head>
+<body>
+<h1>QA: pausar a resposta do chat rápido</h1>
+<p class="sub">Branch <code>feature/pausar-orquestrador</code>, commit <code>1ef4ed7</code>. Executado em 22/11/2026, 10:45 a 11:10, contra a cópia de teste já aberta (pid 26209, servidor na porta 52684, dados isolados), com o Claude Code real (<code>/opt/homebrew/bin/claude</code>, modelo sonnet). Evidência: respostas da API, <code>ps</code>, <code>eventos.jsonl</code> do chat e a transcrição da sessão do Claude Code. Sem print de tela (máquina com pouca memória).</p>
+
+<div class="resumo">
+  <div><b>13</b> verificações</div>
+  <div><span class="selo passou">passou</span> 11</div>
+  <div><span class="selo ressalva">ressalva</span> 1 (pausa longa)</div>
+  <div><span class="selo falhou">falhou</span> 1 (comando do Bash não congela)</div>
+  <div>Unitários da feature: <b>107 passaram</b>, 0 falharam (3 arquivos, 4,3 s)</div>
+</div>
+
+<h2>Como a API foi acessada</h2>
+<p>A chave do cookie <code>orquestrador_acesso</code> é gerada pelo <code>electron/main.js</code> (<code>CHAVE_DE_ACESSO</code>, linha 221) e passada ao servidor na variável <code>ORQUESTRADOR_CHAVE_DE_ACESSO</code> (linha 421). Ela foi lida do ambiente do processo do servidor (utility process 26231, o que escuta a porta) com <code>ps eww</code>, guardada em <code>/tmp/qa-chat-chave.txt</code> e usada em todas as chamadas <code>curl</code>. O processo do chat foi identificado pelo registro <code>processos-em-execucao.json</code> (dono <code>"chat"</code>).</p>
+
+<div class="caso">
+<h2>1. Pausar no meio de uma resposta longa <span class="selo passou">passou</span></h2>
+<dl>
+<dt>Passos</dt><dd>Pergunta pedindo lista de 1 a 80 animais terminando em <code>FIM-DA-LISTA</code>, sem ferramentas. Pausa com 2377 caracteres já recebidos, espera 15 s, segundo pausar, continuar.</dd>
+<dt>Esperado</dt><dd>Processo <code>claude</code> do chat em estado T, texto parado, segundo pausar 409, continuar retoma e a resposta termina inteira.</dd>
+<dt>Obtido</dt><dd>Grupo 46252 em <code>Ts</code>; texto ficou em 2377 caracteres por 15 s; segundo pausar 409 "A resposta já está pausada."; após continuar voltou a <code>Ss</code> e concluiu em 3 s com os 80 itens na ordem, sem buraco nem repetição, terminando em <code>FIM-DA-LISTA</code>. Eventos: <code>resposta_pausada</code> (16), <code>resposta_continuada</code> (17), <code>resposta_concluida</code> (19). A transcrição do Claude Code mostra uma única requisição à API: a resposta seguiu de fato de onde parou.</dd>
+</dl>
+<pre><code>[10:45:50] POST /chat/pausar -> {"pausada":true} HTTP202
+46252 46252 26231 Ts   /opt/homebrew/bin/claude -p --input-format stream-json ...
+[10:45:50] situacao=respondendo ... pausadaDesde=2026-11-22T13:45:50.454Z len(texto)=2377
+[10:46:05] situacao=respondendo ... pausadaDesde=2026-11-22T13:45:50.454Z len(texto)=2377
+[10:46:05] POST /chat/pausar -> {"erro":"A resposta já está pausada."} HTTP409
+[10:46:05] POST /chat/continuar -> {"continuada":true} HTTP202
+46252 46252 26231 Ss   /opt/homebrew/bin/claude -p ...
+[10:46:09] situacao=ocioso ... sit=concluida pausadaDesde=None len(texto)=3967
+itens 80 seq ok True fim True</code></pre>
+</div>
+
+<div class="caso">
+<h2>2a. Pausar durante um comando da ferramenta Bash <span class="selo falhou">falhou</span></h2>
+<dl>
+<dt>Passos</dt><dd>Autorização do chat ligada (<code>PATCH /chat/autorizacao</code>). Pergunta pedindo para rodar no Bash <code>for i in $(seq 1 30); do date +%s &gt;&gt; /tmp/qa-chat/tique.txt; sleep 1; done</code>. Com o laço rodando, pausar; medir o arquivo durante a pausa; esperar 30 s; continuar.</dd>
+<dt>Esperado</dt><dd>Tudo o que o chat abriu fica congelado: o arquivo para de crescer durante a pausa (é o que diz o comentário de <code>sinalizarGrupo</code>: "o agente e tudo o que ele abriu (subagentes, comandos)").</dd>
+<dt>Obtido</dt><dd>Só o <code>claude</code> congelou. O shell do Bash nasce em sessão e grupo próprios (<code>Ss</code>, pgid 48650 ≠ 48597) e seguiu rodando: o arquivo foi de 12 para 17 linhas em 6 s pausado e chegou às 30 linhas com o <code>claude</code> ainda em T (o shell terminou e virou zumbi). Ao continuar, a resposta concluiu normalmente com o resultado do comando.</dd>
+</dl>
+<pre><code>48597 48597 26231 Rs   /opt/homebrew/bin/claude -p ...           (pid, pgid, ppid)
+48650 48650 48597 Ss   /bin/zsh -c source ~/.claude/shell-snapshots/... (grupo próprio)
+48859 48650 48650 S    sleep 1
+[10:47:18] POST /chat/pausar -> {"pausada":true} HTTP202
+48597 48597 26231 Ts   /opt/homebrew/bin/claude -p ...
+48650 48650 48597 Ss   /bin/zsh -c ...          &lt;- não congelou
+[10:47:24] tique durante pausa: 12 -> 17 linhas em 6s
+(15 s depois) tique.txt = 30 linhas; 48597 Ts; 48650 Z &lt;defunct&gt;</code></pre>
+<div class="bug"><b>Bug.</b> Causa provável: <code>src/infraestrutura/sistema/RegistroDeProcessos.ts:56-67</code> (<code>congelar</code>) manda SIGSTOP só ao grupo liderado pelo pid registrado, via <code>src/infraestrutura/sistema/Processos.ts:76-81</code> (<code>sinalizarGrupo(pid)</code> = <code>kill(-pid)</code>). O Claude Code abre o shell do Bash com <code>setsid</code>, então ele fica fora desse grupo. Correção sugerida: ao congelar, ler a árvore de descendentes do pid (já existe <code>lerArvoreDoPs</code> em <code>ArvoreDeProcessos.ts:86</code>), mandar SIGSTOP a cada grupo distinto dos descendentes (ou a cada pid) e guardar esses grupos em <code>congelados</code>, para o SIGCONT do <code>descongelar</code> alcançá-los. Corrigir também o comentário de <code>Processos.ts:70-75</code>. O mesmo <code>congelar</code> é o da pausa dos Orquestradores, então o efeito provavelmente vale lá também (não testado aqui).</div>
+</div>
+
+<div class="caso">
+<h2>2b. Pausar antes do primeiro token <span class="selo passou">passou</span></h2>
+<dl>
+<dt>Passos</dt><dd>Enviar pergunta (1 a 40 por extenso) e chamar pausar logo em seguida, no mesmo segundo do 202.</dd>
+<dt>Esperado</dt><dd>202 se o processo já existe (ou 409 <code>pausa_indisponivel</code> se ainda não abriu); nenhuma resposta perdida.</dd>
+<dt>Obtido</dt><dd>Pausa aceita com 0 caracteres; processo em <code>Ts</code> por 14 s com texto vazio; ao continuar a resposta saiu completa (40 linhas mais <code>FIM-B</code>). A transcrição mostra que o pedido à API só saiu depois de continuar.</dd>
+</dl>
+<pre><code>[10:46:28] POST /chat/mensagens -> {"mensagemId":"cdc0d7cc-..."} HTTP202
+[10:46:28] POST /chat/pausar -> {"pausada":true} HTTP202
+47606 47606 26231 Ts   /opt/homebrew/bin/claude -p ...
+[10:46:36] situacao=respondendo ... pausadaDesde=2026-11-22T13:46:28.500Z len(texto)=0</code></pre>
+</div>
+
+<div class="caso">
+<h2>2c. Pausar durante WebSearch <span class="selo passou">passou</span></h2>
+<dl>
+<dt>Passos</dt><dd>Pergunta que obriga uma pesquisa (<code>WebSearch</code>); pausar 6 s depois de enviar, segurar 30 s, continuar.</dd>
+<dt>Esperado</dt><dd>Sem erro de ferramenta; resposta conclui.</dd>
+<dt>Obtido</dt><dd>Grupo 78434 em <code>Ts</code> (com um filho zumbi aguardando o pai); após continuar concluiu em 16 s com 626 caracteres e as fontes citadas.</dd>
+</dl>
+</div>
+
+<div class="caso">
+<h2>3. Pausar e continuar repetidas vezes; 409 sem resposta e sem pausa <span class="selo passou">passou</span></h2>
+<dl>
+<dt>Passos</dt><dd>(a) Sem resposta: pausar e continuar. (b) 10 ciclos pausar/continuar com 0,5 s a 0,7 s de intervalo. (c) 5 pausar em paralelo, depois 5 continuar em paralelo. (d) Rajada de 25 ciclos sem espera numa lista de 120 itens.</dd>
+<dt>Esperado</dt><dd>409 com mensagem clara fora do estado certo; exatamente uma pausa e uma continuação aceitas em paralelo; resposta íntegra.</dd>
+<dt>Obtido</dt><dd>(a) 409 "Não há resposta em andamento." e 409 "A resposta não está pausada.". (b) 5 ciclos aceitos com o processo em <code>Ts</code> em cada pausa; depois que a resposta terminou, 409 nos dois. (c) 1×202 e 4×409 em cada lote, processo <code>Ts</code> e depois <code>Ss</code>. (d) 24 ciclos 202/202 e o último 409/409 (resposta já concluída); 120 itens na ordem, <code>FIM-H</code> no fim.</dd>
+</dl>
+<pre><code>-- 5 pausar em paralelo:  1x {"pausada":true} 202, 4x {"erro":"A resposta já está pausada."} 409
+-- 5 continuar em paralelo: 1x {"continuada":true} 202, 4x {"erro":"A resposta não está pausada."} 409
+-- rajada: 202/202 x24, 409/409
+itens 120 seq ok True fim True</code></pre>
+</div>
+
+<div class="caso">
+<h2>4. Nova mensagem com a resposta pausada <span class="selo passou">passou</span></h2>
+<dl>
+<dt>Passos</dt><dd>Com a resposta do caso 2b pausada, <code>POST /chat/mensagens</code>.</dd>
+<dt>Esperado</dt><dd>Comportamento definido, sem duas respostas simultâneas nem perda.</dd>
+<dt>Obtido</dt><dd>409 "Já há uma resposta em andamento."; a conversa continuou com 12 mensagens, a mesma resposta pausada, e ela concluiu inteira depois. A tela diz o mesmo ("Pausado… esc cancela").</dd>
+</dl>
+</div>
+
+<div class="caso">
+<h2>5a. Limpar e cancelar com a resposta pausada (só texto) <span class="selo passou">passou</span></h2>
+<dl>
+<dt>Passos</dt><dd>Resposta pausada (pid 58960 em <code>Ts</code>); <code>POST /chat/limpar</code>; <code>POST /chat/cancelar</code>; conferir processo e registro.</dd>
+<dt>Esperado</dt><dd>Limpar recusado com a resposta em andamento; cancelar encerra; nenhum processo em T.</dd>
+<dt>Obtido</dt><dd>Limpar 409 "Aguarde a resposta terminar ou cancele antes de limpar a conversa."; cancelar 202; 1 s depois o processo já estava saindo (<code>?E</code>), em 6 s tinha sumido; registro sem dono "chat"; evento <code>resposta_cancelada</code>; <code>pausadaDesde</code> ausente.</dd>
+</dl>
+</div>
+
+<div class="caso">
+<h2>5b. Cancelar com a resposta pausada durante um comando do Bash <span class="selo passou">passou</span></h2>
+<dl>
+<dt>Passos</dt><dd>Laço de 40 s no Bash gravando <code>tique2.txt</code>; pausar; cancelar; conferir processos e o arquivo.</dd>
+<dt>Esperado</dt><dd>Nenhum órfão: nem o <code>claude</code> nem o shell do comando seguem vivos.</dd>
+<dt>Obtido</dt><dd>Nenhum processo restante (o <code>claude</code> derruba o próprio shell ao receber o SIGTERM); o arquivo parou em 3 linhas; resposta <code>cancelada</code>.</dd>
+</dl>
+</div>
+
+<div class="caso">
+<h2>6. Pausa longa (≥ 5 min) <span class="selo ressalva">ressalva</span></h2>
+<dl>
+<dt>Passos</dt><dd>Lista longa pausada no meio por 5 min 37 s (6a) e 5 min 32 s (6b); depois, para achar o limiar, 90 s (6c) e 180 s (6d). Comparado o texto exibido antes da pausa com o final e contadas as requisições à API na transcrição.</dd>
+<dt>Esperado</dt><dd>Nenhum timeout do app mata a resposta; ao continuar ela segue de onde parou.</dd>
+<dt>Obtido</dt><dd>Nenhum timeout do app: o chat não tem vigia de silêncio, o processo ficou em <code>Ts</code> o tempo todo e as respostas concluíram completas (100 itens, marcador final). Porém, acima de algo entre 90 s e 180 s, a conexão com a API morre durante o congelamento e o Claude Code faz uma <b>nova requisição</b> ao continuar: a resposta é gerada de novo do zero. Com 90 s o texto anterior é prefixo do final; com 180 s e 5 min não é.</dd>
+</dl>
+<table>
+<tr><th>Pausa</th><th>Requisições à API</th><th>Texto antes é prefixo do final</th><th>Conclusão</th></tr>
+<tr><td>15 s (caso 1)</td><td>1</td><td>sim</td><td>80/80</td></tr>
+<tr><td>90 s</td><td>1</td><td>sim</td><td>100 itens, FIM-F</td></tr>
+<tr><td>180 s</td><td>2</td><td>não</td><td>100 itens, FIM-G</td></tr>
+<tr><td>5 min 32 s</td><td>2 (13:55:51 e 14:01:27, 0,1 s depois do continuar)</td><td>não ("6. Rio Amarelo (Huang He)" virou "6. Rio Amarelo")</td><td>100 itens, FIM-E</td></tr>
+</table>
+<pre><code>transcrição da sessão do chat (6b):
+13:55:51.319Z api-request
+14:01:27.312Z api-request          &lt;- nova requisição logo após o continuar
+14:01:32.743Z assistant 735 end_turn '1. Amazonas\n2. Nilo\n3. Yangtzé...'</code></pre>
+<div class="obs"><b>Ressalva.</b> Não é defeito do app em si (é como o Claude Code se recupera de um stream que caiu), mas contradiz a promessa "a resposta segue de onde parou" (<code>docs/entregas/pausar-resposta-do-chat.html</code> e o comentário de <code>ServicoDeChat.ts:188-193</code>), gasta tokens de novo e troca na tela um texto parcial por outro diferente ao concluir. Durante a regeneração não houve texto duplicado na tela: o parcial ficou parado até o <code>resposta_concluida</code> trazer o texto novo. Sugestão: dizer na doc e na dica da tela que pausas acima de cerca de 2 min recomeçam a resposta; opcionalmente, ao continuar depois de 2 min, publicar um aviso na mensagem.</div>
+<div class="obs"><b>Observação menor.</b> O <code>uso.duracaoMs</code> conta o tempo pausado (6a: 360.821 ms para cerca de 20 s de trabalho), porque <code>MotorDeChatClaudeCodeCli.ts:105</code> mede <code>Date.now() - inicio</code>. Se a tela mostra "respondeu em X", vale descontar o tempo em pausa.</div>
+</div>
+
+<div class="caso">
+<h2>7. Estado depois de recarregar (GET e SSE) <span class="selo passou">passou</span></h2>
+<dl>
+<dt>Passos</dt><dd>Com a resposta pausada: <code>GET /chat</code> e <code>GET /chat/eventos?desde=N</code> (como faz a tela ao reconectar). Depois de concluir, <code>GET /chat</code> de novo.</dd>
+<dt>Esperado</dt><dd>Pausada: <code>situacao=respondendo</code>, <code>pausadaDesde</code> na mensagem do Claude, <code>podePausar=true</code>, <code>resposta_pausada</code> no histórico de eventos. Concluída: sem <code>pausadaDesde</code>.</dd>
+<dt>Obtido</dt><dd>Exatamente isso, nos dois momentos.</dd>
+</dl>
+<pre><code>situacao=respondendo podePausar=True ultimaSeq=55 | ult: sit=respondendo pausadaDesde=2026-11-22T13:55:54.960Z
+id: 55
+data: {"tipo":"resposta_pausada","mensagemId":"e6140203-...","desde":"2026-11-22T13:55:54.960Z","sequencia":55,...}
+(depois) situacao=ocioso ... sit=concluida pausadaDesde=None</code></pre>
+</div>
+
+<div class="caso">
+<h2>8. Windows (análise do código) <span class="selo passou">passou</span></h2>
+<dl>
+<dt>Passos</dt><dd>Leitura do caminho do servidor e da tela.</dd>
+<dt>Obtido</dt><dd>
+<code>ServicoDeChat.ts:115-117</code>: <code>podePausar</code> é <code>process.platform !== "win32"</code> (o <code>root.ts</code> não sobrescreve).
+<code>ServicoDeChat.ts:199</code>: sem <code>podePausar</code> lança <code>pausa_indisponivel</code>, que <code>chatRoutes.ts:95</code> mapeia para 409.
+<code>Processos.ts:77-79</code>: <code>sinalizarGrupo</code> devolve falso no Windows (segunda trava).
+<code>ChatRapido.tsx:2095</code>: o botão só aparece com <code>respondendo &amp;&amp; chat.podePausar</code>; não há atalho de teclado para pausar. Coberto por <code>ChatRapido.test.tsx:1506</code>.</dd>
+</dl>
+</div>
+
+<h2>Testes unitários rodados</h2>
+<pre><code>npx vitest run src/chat/ServicoDeChat.test.ts src/chat/ConversaDoChat.test.ts src/controllers/chatRoutes.test.ts --maxWorkers=1
+ Test Files  3 passed (3)
+      Tests  107 passed (107)
+   Duration  4.30s</code></pre>
+
+<h2>Estado final</h2>
+<p>Nenhum processo em estado T na máquina (<code>ps -A</code> filtrado por STAT começando com T: vazio); registro sem dono "chat"; chat <code>ocioso</code>, última resposta <code>concluida</code>, sem <code>pausadaDesde</code>. A autorização do chat, ligada para os casos 2a e 5b, foi desligada de novo. As conversas de QA ficaram no histórico do chat da cópia de teste (não limpei). Nada dos orquestradores do outro agente foi tocado.</p>
+
+<h2>Não testado</h2>
+<ul>
+<li>Windows de verdade: só análise de código.</li>
+<li>Reiniciar o servidor com a resposta pausada: não podia fechar a instância. Pelo código, <code>encerrarAgentesOrfaos</code> usa <code>encerrarArvore</code>, que manda SIGCONT logo após o SIGTERM, e <code>interromperRespostaEmAndamento</code> marca a resposta como interrompida.</li>
+<li>Corrida de pausar no instante entre o <code>result</code> chegar e o processo sair: janela curta demais para provocar de forma confiável.</li>
+<li>Tela (botão, rótulo "pausado", faixa esmaecida): sem print, para poupar memória; coberta pelos testes de componente já existentes.</li>
+</ul>
+</body>
+</html>

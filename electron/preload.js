@@ -8,8 +8,10 @@
 //   - configuracao: ler a configuração local e abrir a janela de ajustes.
 //   - atualizacao: estado da atualização automática (obter/verificar), instalar
 //     a versão já baixada (instalarAgora, só da janela principal e só na
-//     situação "pronta") e aoMudar (canal "atualizacao:estado"). Fora do app
-//     instalado a situação é sempre "indisponivel".
+//     situação "pronta"), esperar os orquestradores terminarem
+//     (instalarQuandoLivre/cancelarEspera) e aoMudar (canal
+//     "atualizacao:estado"). Fora do app instalado a situação é sempre
+//     "indisponivel".
 //   - previa: vista nativa da Prévia para endereços externos (sessão própria
 //     `persist:previa`); o main só aceita da janela principal e valida tudo.
 //   - rotinas: a bandeja do Windows (electron/bandeja.js). informarSituacao conta
@@ -21,10 +23,18 @@
 
 const { contextBridge, ipcRenderer } = require("electron");
 
+// Cópia de teste: o nome da instância de desenvolvimento, que o main passa
+// como argumento da janela (--copia-de-teste=<nome>, nunca no app instalado).
+const ARGUMENTO_DA_COPIA_DE_TESTE = "--copia-de-teste=";
+const argumentoDaCopiaDeTeste = process.argv.find((argumento) => argumento.startsWith(ARGUMENTO_DA_COPIA_DE_TESTE));
+const copiaDeTeste = argumentoDaCopiaDeTeste ? argumentoDaCopiaDeTeste.slice(ARGUMENTO_DA_COPIA_DE_TESTE.length) || null : null;
+
 contextBridge.exposeInMainWorld("electron", {
   // Marca para a SPA detectar que está rodando dentro do app desktop.
   desktop: true,
   plataforma: process.platform,
+  // Cópia de teste: string com o nome da cópia, ou null (sempre null no app instalado).
+  copiaDeTeste,
 
   janela: {
     minimizar: () => ipcRenderer.invoke("janela:minimizar"),
@@ -59,14 +69,23 @@ contextBridge.exposeInMainWorld("electron", {
   },
 
   // EstadoDaAtualizacao: { situacao: "indisponivel" | "verificando" | "em-dia" |
-  // "baixando" | "pronta" | "erro", versaoAtual, versaoNova, progresso,
-  // mensagemDeErro }
+  // "baixando" | "pronta" | "aguardando" | "erro", versaoAtual, versaoNova,
+  // progresso (no Mac, null em "baixando"), mensagemDeErro, etapa (texto da
+  // etapa no Mac; null no Windows), orquestradoresTrabalhando (só em
+  // "aguardando") }
   atualizacao: {
     obter: () => ipcRenderer.invoke("atualizacao:obter"),
     // Dispara a verificação e devolve o estado logo em seguida.
     verificar: () => ipcRenderer.invoke("atualizacao:verificar"),
-    // Reinicia o app instalando a versão baixada (só em "pronta").
-    instalarAgora: () => ipcRenderer.invoke("atualizacao:instalar-agora").then(() => undefined),
+    // Reinicia o app instalando a versão baixada (só em "pronta"). Sem
+    // `{ forcar: true }` e com orquestradores trabalhando, não reinicia.
+    // Resolve { iniciou, orquestradoresTrabalhando }.
+    instalarAgora: (opcoes) =>
+      ipcRenderer.invoke("atualizacao:instalar-agora", { forcar: Boolean(opcoes && opcoes.forcar === true) }),
+    // "aguardando": instala sozinho quando nenhum orquestrador estiver trabalhando.
+    instalarQuandoLivre: () => ipcRenderer.invoke("atualizacao:instalar-quando-livre"),
+    // Desiste da espera: volta para "pronta".
+    cancelarEspera: () => ipcRenderer.invoke("atualizacao:cancelar-espera"),
     // Chama `callback(estado)` a cada mudança; devolve a função que cancela.
     aoMudar: (callback) => {
       const ouvinte = (_evento, estado) => callback(estado);

@@ -8,7 +8,7 @@ import {
   type PastaDeProjeto,
   TAMANHO_MAXIMO_DAS_INSTRUCOES,
 } from "../../shared/api/tipos";
-import { useCanvas } from "../../shared/canvas/contexto";
+import { useAcoesDoCanvas, useSeletorDoCanvas } from "../../shared/canvas/contexto";
 import {
   ESCALA_DA_LETRA_PADRAO,
   OPCOES_DA_ESCALA_DA_LETRA,
@@ -58,7 +58,8 @@ function nomeDaPasta(caminho: string): string {
  * vira o terminal do Orquestrador no mesmo lugar.
  */
 export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
-  const { acoes, servidor } = useCanvas();
+  const acoes = useAcoesDoCanvas();
+  const conectado = useSeletorDoCanvas((canvas) => canvas.servidor.conectado);
   const idDoCampo = useId();
   const idDaPermissao = useId();
   const idDaLetra = useId();
@@ -82,7 +83,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
   // ficaria preso em "carregando pastas…".
   const carregou = opcoes !== null;
   useEffect(() => {
-    if (carregou || !servidor.conectado) {
+    if (carregou || !conectado) {
       return;
     }
     api
@@ -92,7 +93,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
         setErro(null);
       })
       .catch((falha: unknown) => setErro(mensagemDeErro(falha)));
-  }, [carregou, servidor.conectado]);
+  }, [carregou, conectado]);
 
   // O aviso de esforço depende dos modelos e da pasta escolhidos: a busca muda junto com eles.
   // O aviso só vale para o Claude Code: um modelo de outro motor não vai para a consulta.
@@ -165,7 +166,7 @@ export function NoRascunho({ id, data, selected }: NodeProps<TipoDoNo>) {
           ? "Encurte as instruções para começar."
           : problemaDoModelo !== null
             ? problemaDoModelo
-            : !servidor.conectado
+            : !conectado
               ? "Servidor desconectado."
               : null;
 

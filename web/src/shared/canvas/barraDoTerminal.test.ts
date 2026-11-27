@@ -1,6 +1,6 @@
 import { type ChipDaBarra, chipsParaOMenu, ORDEM_DE_SAIDA } from "./barraDoTerminal";
 
-const TODOS: readonly ChipDaBarra[] = ["pasta", "branch", "reconectando", "memoria", "situacao"];
+const TODOS: readonly ChipDaBarra[] = ["pasta", "branch", "reconectando", "memoria", "situacao", "pausa"];
 const COMUNS: readonly ChipDaBarra[] = ["pasta", "branch", "situacao"];
 const CONTROLES = 240;
 

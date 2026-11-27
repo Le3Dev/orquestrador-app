@@ -179,6 +179,8 @@ describe("PaletaDeComandos", () => {
       versaoNova: null,
       progresso: null,
       mensagemDeErro: null,
+      etapa: null,
+      orquestradoresTrabalhando: null,
     };
     let atual: FonteDaPaleta = { ...fonte(), atualizacao: emDia };
     const lerFonte = vi.fn(() => atual);

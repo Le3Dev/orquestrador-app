@@ -4,35 +4,24 @@ import type { SituacaoDoSubagente } from "../../shared/api/tipos";
 import type { AparenciaDoBixinho } from "../../shared/canvas/bixinhos";
 import { type IconeDeFerramenta, ROTULO_DO_ICONE } from "../../shared/canvas/iconesDeFerramenta";
 import {
-  ACESSORIOS_DESENHADOS,
+  CAMINHOS_DOS_ICONES,
   COLUNAS,
+  desenhoDoBixinho,
   expressaoPara,
   LADO_DO_ICONE,
   LINHAS,
-  type Pixel,
-  pixelsDoCorpo,
-  PIXELS_DOS_ICONES,
-  ROSTOS,
+  TAMANHO_DO_PIXEL,
 } from "../../shared/canvas/sprites";
 
-/** Unidade da grade no viewBox; na tela, o desenho é ampliado para `TAMANHO_NA_TELA`. */
-const TAMANHO_DO_PIXEL = 4;
+/** Na tela, o desenho (grade em unidades de `TAMANHO_DO_PIXEL`) é ampliado para `TAMANHO_NA_TELA`. */
 const TAMANHO_NA_TELA = 80;
 
-function Pixels({ pixels, className }: { pixels: readonly Pixel[]; className: string }) {
-  return (
-    <g className={className}>
-      {pixels.map(([linha, coluna]) => (
-        <rect
-          key={`${linha}-${coluna}`}
-          x={coluna * TAMANHO_DO_PIXEL}
-          y={linha * TAMANHO_DO_PIXEL}
-          width={TAMANHO_DO_PIXEL}
-          height={TAMANHO_DO_PIXEL}
-        />
-      ))}
-    </g>
-  );
+/**
+ * Uma camada de células da mesma cor num `<path>` só (ver `caminhoDosPixels`),
+ * em vez de um `<rect>` por célula. Sem células, não desenha nada.
+ */
+function Camada({ caminho, className }: { caminho: string; className: string }) {
+  return caminho === "" ? null : <path className={className} d={caminho} />;
 }
 
 interface Props {
@@ -53,13 +42,7 @@ const VIEWBOX = `0 0 ${COLUNAS * TAMANHO_DO_PIXEL} ${LINHAS * TAMANHO_DO_PIXEL}`
  * quadro.
  */
 export const Bixinho = memo(function Bixinho({ aparencia, situacao }: Props) {
-  const corpo = pixelsDoCorpo(aparencia.forma);
-  const rosto = ROSTOS[expressaoPara(situacao)];
-  const acessorio = ACESSORIOS_DESENHADOS[aparencia.acessorio];
-  // Acessórios encostam no topo da cabeça, que muda de altura conforme a forma.
-  const topoDaCabeca = Math.min(...corpo.map(([linha]) => linha));
-  const ajuste = topoDaCabeca - 3;
-  const noTopo = (pixels: readonly Pixel[]): Pixel[] => pixels.map(([linha, coluna]) => [linha + ajuste, coluna]);
+  const desenho = desenhoDoBixinho(aparencia.forma, aparencia.acessorio, expressaoPara(situacao));
 
   return (
     <span className={`bixinho-sprite bixinho-cor-${aparencia.cor}`} aria-hidden="true">
@@ -74,15 +57,15 @@ export const Bixinho = memo(function Bixinho({ aparencia, situacao }: Props) {
         shapeRendering="crispEdges"
       >
         <g className="bixinho-corpo-animado">
-          <Pixels pixels={corpo} className="bixinho-corpo" />
-          <Pixels pixels={noTopo(acessorio.escuro)} className="bixinho-escuro" />
-          <Pixels pixels={noTopo(acessorio.destaque)} className="bixinho-destaque" />
+          <Camada caminho={desenho.corpo} className="bixinho-corpo" />
+          <Camada caminho={desenho.acessorioEscuro} className="bixinho-escuro" />
+          <Camada caminho={desenho.acessorioDestaque} className="bixinho-destaque" />
           <g className="bixinho-olhos">
-            <Pixels pixels={rosto.olhos} className="bixinho-escuro" />
-            <Pixels pixels={rosto.brilho} className="bixinho-brilho" />
+            <Camada caminho={desenho.olhos} className="bixinho-escuro" />
+            <Camada caminho={desenho.brilho} className="bixinho-brilho" />
           </g>
-          <Pixels pixels={rosto.boca} className="bixinho-escuro" />
-          <Pixels pixels={rosto.bochechas} className="bixinho-bochecha" />
+          <Camada caminho={desenho.boca} className="bixinho-escuro" />
+          <Camada caminho={desenho.bochechas} className="bixinho-bochecha" />
         </g>
       </svg>
     </span>
@@ -95,8 +78,7 @@ const TAMANHO_DO_ICONE_NA_TELA = 12;
 /**
  * O ícone da ferramenta que o Subagente usa agora (lupa, lápis, engrenagem,
  * globo), num selo ao lado do bixinho. Fica fora do `Bixinho`, e é `memo`:
- * trocar de ferramenta redesenha só as poucas células do ícone, e não as do
- * bixinho.
+ * trocar de ferramenta redesenha só o caminho do ícone, e não o do bixinho.
  */
 export const IconeDaFerramenta = memo(function IconeDaFerramenta({ icone }: { icone: IconeDeFerramenta }) {
   const rotulo = ROTULO_DO_ICONE[icone];
@@ -109,7 +91,7 @@ export const IconeDaFerramenta = memo(function IconeDaFerramenta({ icone }: { ic
         shapeRendering="crispEdges"
         aria-hidden="true"
       >
-        <Pixels pixels={PIXELS_DOS_ICONES[icone]} className="icone-da-ferramenta-pixels" />
+        <Camada caminho={CAMINHOS_DOS_ICONES[icone]} className="icone-da-ferramenta-pixels" />
       </svg>
     </span>
   );

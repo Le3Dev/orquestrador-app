@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Nome único por pasta</title>
+<style>
+  body { font: 15px/1.55 system-ui, sans-serif; max-width: 760px; margin: 32px auto; padding: 0 20px; color: #1f2328; }
+  h1 { font-size: 22px; } h2 { font-size: 16px; margin-top: 24px; }
+  code { background: #f2f2f2; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+  li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<h1>Nome único de orquestrador por pasta</h1>
+
+<h2>O que mudou</h2>
+<ul>
+  <li>Criar ou renomear um orquestrador com o nome de outro da mesma pasta de trabalho agora é recusado com 409 e a mensagem <code>Já existe um orquestrador chamado "&lt;nome&gt;" nesta pasta.</code></li>
+  <li>O nome é comparado aparado e sem diferenciar maiúsculas ("QA pausa A" e " qa pausa a " são o mesmo). A pasta, com o critério do chat: caminho resolvido, sem diferenciar maiúsculas, separadores nem a barra final.</li>
+  <li>Renomear para o próprio nome (mesmo trocando maiúsculas) continua valendo. O mesmo nome em outra pasta também.</li>
+  <li>Homônimos gravados antes da regra continuam carregando: ela vale só ao criar e ao renomear.</li>
+</ul>
+
+<h2>Onde vive</h2>
+<ul>
+  <li><code>src/orquestracao/ServicoDeOrquestracao.ts</code>: <code>garantirNomeLivre</code>, chamado em <code>criarOrquestrador</code> e <code>renomear</code>. Os três caminhos de criação (cartão de criação do canvas, ação do chat rápido e API) passam pelo <code>POST /orquestradores</code>, que chama <code>criarOrquestrador</code>.</li>
+  <li><code>src/orquestracao/ErroDeOrquestracao.ts</code>: motivo novo <code>nome_repetido</code>.</li>
+  <li><code>src/controllers/respostasHttp.ts</code>: <code>nome_repetido</code> vira 409.</li>
+  <li>Tela: sem mudança. O cartão de criação, o renomear (clique duplo e configurações) e o cartão do chat rápido já mostram a mensagem do servidor.</li>
+</ul>
+
+<h2>Testes</h2>
+<ul>
+  <li>Serviço: nome exato, só maiúsculas, espaços nas pontas, pasta escrita de outro jeito, mesmo nome em outra pasta, renomear para o de outro, renomear para o próprio nome, homônimos antigos.</li>
+  <li>Rotas: 409 no <code>POST /orquestradores</code> e no <code>PATCH /orquestradores/:id</code>.</li>
+</ul>
+</body>
+</html>

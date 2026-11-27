@@ -107,6 +107,19 @@ describe("useChat", () => {
     expect(result.current.chat.ultimaSequencia).toBe(8);
   });
 
+  it("a pausa chega pelos eventos e o estado traz se dá para pausar", async () => {
+    vi.spyOn(api, "lerChat").mockResolvedValue({ ...estado(4), podePausar: true });
+    const { result } = renderHook(() => useChat(true, criarFonte));
+    await waitFor(() => expect(fontes).toHaveLength(1));
+    expect(result.current.chat.podePausar).toBe(true);
+
+    const em = "2026-11-04T12:00:02Z";
+    act(() => fontes[0]?.emitir({ tipo: "resposta_pausada", mensagemId: "c1", desde: em, sequencia: 5, em }));
+    expect(result.current.chat.mensagens[0]).toMatchObject({ situacao: "respondendo", pausadaDesde: em });
+    act(() => fontes[0]?.emitir({ tipo: "resposta_continuada", mensagemId: "c1", sequencia: 6, em }));
+    expect(result.current.chat.mensagens[0]?.pausadaDesde).toBeNull();
+  });
+
   it("quando o navegador abandona a conexão, recarrega o estado e assina de novo com ?desde=", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const ler = vi.spyOn(api, "lerChat").mockResolvedValueOnce(estado(3)).mockResolvedValueOnce(estado(9, "Olá de novo"));

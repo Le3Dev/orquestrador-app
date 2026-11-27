@@ -79,5 +79,8 @@ export function faseDoTurno(turno: TurnoNaTela): SituacaoDaFase {
       return { atual: faseOndeParou(turno), parado: true, descricao: "Falhou", direto: false };
     case "interrompido":
       return { atual: faseOndeParou(turno), parado: true, descricao: "Interrompido", direto: false };
+    // Pausa no modo "retomada": o Continuar segue numa mensagem nova da mesma conversa.
+    case "pausado":
+      return { atual: faseOndeParou(turno), parado: true, descricao: "Pausado", direto: false };
   }
 }

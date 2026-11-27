@@ -424,6 +424,7 @@ function apresentarResumo(orquestrador: Orquestrador, instrucoes: InstrucoesApli
     pastaDeTrabalho: orquestrador.pastaDeTrabalho.caminho,
     nomeDaPasta: orquestrador.pastaDeTrabalho.nome,
     situacao: orquestrador.situacao,
+    pausa: orquestrador.pausa,
     configuracao: orquestrador.configuracao.paraDados(),
     predefinicaoCorrespondente: orquestrador.predefinicaoCorrespondente,
     instrucoesAtivas: instrucoes?.origem ?? null,
@@ -714,7 +715,7 @@ export function criarOrquestradoresRoutes({
       const { texto, anexos: anexosRecebidos, modo, itensLigados, previasAbertas } = esquemaDeMensagem.parse(
         requisicao.body,
       );
-      const { turnoId } = await servico.enviarMensagem(
+      const { turnoId, pedidoId } = await servico.enviarMensagem(
         requisicao.params.id,
         texto,
         anexosRecebidos.map((anexo) => ({
@@ -726,7 +727,8 @@ export function criarOrquestradoresRoutes({
         itensLigados,
         previasAbertas,
       );
-      resposta.status(202).json({ turnoId });
+      // Com o Orquestrador congelado (ADR-51), a mensagem entra na frente da fila: vem o `pedidoId` dela.
+      resposta.status(202).json({ turnoId, ...(pedidoId === undefined ? {} : { pedidoId }) });
     }),
   );
 
@@ -761,8 +763,8 @@ export function criarOrquestradoresRoutes({
   rotas.post(
     "/orquestradores/:id/fila/:pedidoId/enviar",
     rota<{ id: string; pedidoId: string }>(async (requisicao, resposta) => {
-      const { turnoId } = await servico.enviarDaFila(requisicao.params.id, requisicao.params.pedidoId);
-      resposta.status(202).json({ turnoId });
+      const { turnoId, pedidoId } = await servico.enviarDaFila(requisicao.params.id, requisicao.params.pedidoId);
+      resposta.status(202).json({ turnoId, ...(pedidoId === undefined ? {} : { pedidoId }) });
     }),
   );
 
@@ -801,6 +803,28 @@ export function criarOrquestradoresRoutes({
     rota(async (requisicao, resposta) => {
       await servico.cancelar(requisicao.params.id);
       resposta.status(202).json({ cancelando: true });
+    }),
+  );
+
+  /**
+   * Pausa o pedido em andamento (ADR-51): congela os processos no Mac e no
+   * Linux; no Windows, encerra e continua depois numa retomada. 409 sem pedido
+   * em andamento ou já pausado.
+   */
+  rotas.post(
+    "/orquestradores/:id/pausar",
+    rota(async (requisicao, resposta) => {
+      const pausa = await servico.pausar(requisicao.params.id);
+      resposta.status(202).json({ pausa });
+    }),
+  );
+
+  /** Tira da pausa: segue o mesmo processo (congelado) ou abre o turno de continuação (retomada). 409 se não está pausado. */
+  rotas.post(
+    "/orquestradores/:id/continuar",
+    rota(async (requisicao, resposta) => {
+      const { modo } = await servico.continuar(requisicao.params.id);
+      resposta.status(202).json({ modo });
     }),
   );
 

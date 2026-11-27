@@ -150,6 +150,8 @@ describe("montarItensDaPaleta", () => {
       versaoNova: null,
       progresso: null,
       mensagemDeErro: null,
+      etapa: null,
+      orquestradoresTrabalhando: null,
     };
     const acoesNoDesktop = montarItensDaPaleta(fonte({ podeAbrirAjustes: true, atualizacao })).filter(
       (candidato) => candidato.tipo === "acao",

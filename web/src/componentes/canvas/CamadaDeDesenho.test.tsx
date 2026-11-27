@@ -1,35 +1,71 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
-import { ReactFlowProvider } from "@xyflow/react";
+import { type ReactFlowState, ReactFlowProvider, useStoreApi } from "@xyflow/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { useState } from "react";
+import { Profiler, useState } from "react";
 
 import { lerLayout, salvarDesenho, type TracoDoDesenho } from "../../shared/canvas/layout";
 import { CamadaDeDesenho } from "./CamadaDeDesenho";
 
+type Loja = ReturnType<typeof useStoreApi>;
+
+/** Entrega a loja do React Flow ao teste, para mover a câmera como o pan e o zoom movem. */
+function PegarLoja({ aoPegar }: { aoPegar: (loja: Loja) => void }) {
+  aoPegar(useStoreApi());
+  return null;
+}
+
 /**
- * O canvas no que importa aqui: o botão "Desenhar" dos controles e a camada. Com `aoApertarNoCanvas`, o
- * ponteiro que a camada deixa passar (o vazio, no navegador) chega a ele, como chegaria ao canvas de verdade.
+ * O canvas no que importa aqui: o botão "Desenhar" dos controles e a camada (com os renders dela contados).
+ * Com `aoApertarNoCanvas`, o ponteiro que a camada deixa passar (o vazio, no navegador) chega a ele, como
+ * chegaria ao canvas de verdade.
  */
 function CanvasDeTeste({
   tracosIniciais,
   aoApertarNoCanvas,
+  aoPegarLoja,
+  aoRenderizarACamada,
 }: {
   tracosIniciais?: TracoDoDesenho[];
   aoApertarNoCanvas?: () => void;
+  aoPegarLoja?: (loja: Loja) => void;
+  aoRenderizarACamada?: () => void;
 }) {
   const [aberta, setAberta] = useState(false);
   return (
     <ReactFlowProvider>
+      {aoPegarLoja !== undefined && <PegarLoja aoPegar={aoPegarLoja} />}
       <div onPointerDown={aoApertarNoCanvas}>
         <button type="button" aria-pressed={aberta} onClick={() => setAberta((atual) => !atual)}>
           Desenhar
         </button>
-        <CamadaDeDesenho aberta={aberta} aoFechar={() => setAberta(false)} tracosIniciais={tracosIniciais} />
+        <Profiler id="camada" onRender={() => aoRenderizarACamada?.()}>
+          <CamadaDeDesenho aberta={aberta} aoFechar={() => setAberta(false)} tracosIniciais={tracosIniciais} />
+        </Profiler>
       </div>
     </ReactFlowProvider>
   );
 }
+
+/** Move a câmera do canvas, quadro a quadro, como um pan ou zoom. */
+function moverACamera(loja: Loja, quadros: readonly ReactFlowState["transform"][]) {
+  act(() => {
+    for (const transform of quadros) {
+      loja.setState({ transform });
+    }
+  });
+}
+
+const LINHA: TracoDoDesenho = {
+  id: "l",
+  tipo: "linha",
+  cor: "azul",
+  espessura: 3,
+  pontos: [
+    { x: 0, y: 0 },
+    { x: 100, y: 0 },
+  ],
+};
 
 function barra(): HTMLElement {
   return screen.getByRole("toolbar", { name: "Desenho" });
@@ -168,11 +204,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   localStorage.clear();
+  // O layout guarda em memória o último texto gravado (e não regrava o mesmo): relê o armazenamento já vazio,
+  // senão o próximo teste que salvar os mesmos traços não gravaria nada.
+  lerLayout();
 });
 
 describe("CamadaDeDesenho", () => {
   it("o Desenhar abre a barra já com a caneta; o fechar da barra e o Desenhar de novo a fecham", () => {
-    render(<CanvasDeTeste />);
+    render(<CanvasDeTeste tracosIniciais={[LINHA]} />);
 
     expect(screen.queryByRole("toolbar", { name: "Desenho" })).not.toBeInTheDocument();
     expect(camada()).not.toHaveClass("camada-de-desenho-ativa");
@@ -188,6 +227,92 @@ describe("CamadaDeDesenho", () => {
     fireEvent.click(screen.getByRole("button", { name: "Desenhar" }));
     fireEvent.click(screen.getByRole("button", { name: "Desenhar" }));
     expect(screen.queryByRole("toolbar", { name: "Desenho" })).not.toBeInTheDocument();
+  });
+
+  it("sem traços e com a barra fechada, a camada não monta o SVG; abrir a barra monta, fechar sem desenhar desmonta", () => {
+    const { container } = render(<CanvasDeTeste />);
+
+    expect(screen.queryByTestId("camada-de-desenho")).not.toBeInTheDocument();
+    expect(container.querySelector("svg")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Desenhar" }));
+    expect(areaDeDesenho()).toBeInTheDocument();
+
+    fireEvent.click(ferramenta("Fechar a barra de desenho"));
+    expect(screen.queryByTestId("camada-de-desenho")).not.toBeInTheDocument();
+
+    // Com um traço feito, o desenho continua no canvas depois de fechar a barra.
+    fireEvent.click(screen.getByRole("button", { name: "Desenhar" }));
+    arrastar([
+      [10, 10],
+      [40, 40],
+    ]);
+    fireEvent.click(ferramenta("Fechar a barra de desenho"));
+    expect(tracosNaTela()).toHaveLength(1);
+  });
+
+  it("o pan e o zoom não renderizam a camada, com ou sem traços", () => {
+    let loja: Loja | undefined;
+    let renders = 0;
+    const { unmount } = render(
+      <CanvasDeTeste aoPegarLoja={(atual) => (loja = atual)} aoRenderizarACamada={() => (renders += 1)} />,
+    );
+    if (loja === undefined) {
+      throw new Error("sem a loja do React Flow");
+    }
+    const antesSemTracos = renders;
+    expect(antesSemTracos).toBeGreaterThan(0);
+    moverACamera(loja, [
+      [10, 0, 1],
+      [20, 5, 1.1],
+      [30, 10, 1.2],
+    ]);
+    expect(renders).toBe(antesSemTracos);
+    unmount();
+
+    render(
+      <CanvasDeTeste
+        tracosIniciais={[LINHA]}
+        aoPegarLoja={(atual) => (loja = atual)}
+        aoRenderizarACamada={() => (renders += 1)}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Desenhar" }));
+    const antesComTracos = renders;
+    moverACamera(loja, [
+      [10, 0, 1],
+      [20, 5, 1.1],
+      [30, 10, 1.2],
+      [40, 15, 0.8],
+    ]);
+    expect(renders).toBe(antesComTracos);
+  });
+
+  it("a transformação posta no grupo do SVG e o campo do texto solto acompanham a câmera", () => {
+    let loja: Loja | undefined;
+    render(<CanvasDeTeste tracosIniciais={[LINHA]} aoPegarLoja={(atual) => (loja = atual)} />);
+    if (loja === undefined) {
+      throw new Error("sem a loja do React Flow");
+    }
+    const grupo = areaDeDesenho().querySelector("g");
+    expect(grupo).toHaveAttribute("transform", "translate(0 0) scale(1)");
+
+    moverACamera(loja, [
+      [10, 10, 1],
+      [100, 50, 2],
+    ]);
+    expect(grupo).toHaveAttribute("transform", "translate(100 50) scale(2)");
+
+    // Sem domNode, o ponto da tela é o do canvas: o texto começa em (40, 50) do canvas.
+    fireEvent.click(screen.getByRole("button", { name: "Desenhar" }));
+    fireEvent.click(ferramenta("Texto"));
+    fireEvent.pointerDown(areaDeDesenho(), { button: 0, pointerId: 1, clientX: 40, clientY: 50 });
+    const campo = screen.getByRole("textbox", { name: "Texto solto" });
+    expect(campo.style).toMatchObject({ left: "180px", top: "150px", fontSize: "48px" });
+
+    moverACamera(loja, [[0, 0, 1]]);
+    expect(grupo).toHaveAttribute("transform", "translate(0 0) scale(1)");
+    expect(campo.style).toMatchObject({ left: "40px", top: "50px", fontSize: "24px" });
   });
 
   it("Esc volta para Selecionar: a camada para de pegar o ponteiro e a barra fica aberta", () => {
@@ -307,6 +432,59 @@ describe("CamadaDeDesenho", () => {
 
     fireEvent.click(ferramenta("Desfazer"));
     expect(tracosNaTela()).toHaveLength(2);
+  });
+
+  it("Limpar tudo: desabilitado sem traço; apaga todos num passo, grava, e o Desfazer traz todos de volta", () => {
+    render(<CanvasDeTeste />);
+    fireEvent.click(screen.getByRole("button", { name: "Desenhar" }));
+    const limpar = () => ferramenta("Limpar todos os desenhos");
+    expect(limpar()).toBeDisabled();
+    expect(limpar()).toHaveAttribute("title", expect.stringContaining("Desfazer"));
+
+    arrastar([
+      [10, 10],
+      [40, 34],
+    ]);
+    fireEvent.click(ferramenta("Seta"));
+    arrastar([
+      [100, 100],
+      [200, 160],
+    ]);
+    expect(tracosNaTela()).toHaveLength(2);
+    expect(limpar()).toBeEnabled();
+
+    fireEvent.click(limpar());
+    expect(tracosNaTela()).toHaveLength(0);
+    expect(lerLayout().desenho ?? []).toEqual([]);
+    expect(limpar()).toBeDisabled();
+
+    // Um passo só: o desfazer traz os dois de volta, também no layout.
+    fireEvent.click(ferramenta("Desfazer"));
+    expect(tracosNaTela().map((traco) => traco.getAttribute("data-traco"))).toEqual(["caneta", "seta"]);
+    expect(lerLayout().desenho?.map((traco) => traco.tipo)).toEqual(["caneta", "seta"]);
+  });
+
+  it("Limpar tudo também tira a seleção; o Desfazer traz os traços de volta, sem seleção", () => {
+    salvarDesenho(tracosDeExemplo());
+    render(<CanvasDeTeste tracosIniciais={lerLayout().desenho} />);
+    fireEvent.click(screen.getByRole("button", { name: "Desenhar" }));
+    fireEvent.click(ferramenta("Selecionar"));
+    fireEvent.pointerDown(toque("a"), { button: 0, pointerId: 1, clientX: 50, clientY: 0 });
+    fireEvent.pointerUp(toque("a"), { pointerId: 1, clientX: 50, clientY: 0 });
+    expect(contorno()).not.toBeNull();
+
+    fireEvent.click(ferramenta("Limpar todos os desenhos"));
+
+    expect(contorno()).toBeNull();
+    expect(toques()).toHaveLength(0);
+    expect(lerLayout().desenho ?? []).toEqual([]);
+    // Sem seleção, o Delete não faz nada (nem um passo a mais no desfazer).
+    fireEvent.keyDown(window, { key: "Delete" });
+
+    fireEvent.click(ferramenta("Desfazer"));
+    expect(toques().map((alvo) => alvo.getAttribute("data-toque"))).toEqual(["a", "b"]);
+    expect(contorno()).toBeNull();
+    expect(ferramenta("Desfazer")).toBeDisabled();
   });
 
   describe("texto solto", () => {
@@ -455,6 +633,51 @@ describe("CamadaDeDesenho", () => {
       fireEvent.pointerUp(toque("b"), { pointerId: 1, clientX: 50, clientY: 200 });
       expect(camada().querySelectorAll(".contorno-da-selecao")).toHaveLength(1);
       expect(contorno()).toHaveAttribute("y", "192.5");
+    });
+
+    it("o pan e o zoom não renderizam a camada nem com a seleção: o contorno e a transformação seguem a câmera pelo DOM", () => {
+      let loja: Loja | undefined;
+      let renders = 0;
+      salvarDesenho(tracosDeExemplo());
+      render(
+        <CanvasDeTeste
+          tracosIniciais={lerLayout().desenho}
+          aoPegarLoja={(atual) => (loja = atual)}
+          aoRenderizarACamada={() => (renders += 1)}
+        />,
+      );
+      if (loja === undefined) {
+        throw new Error("sem a loja do React Flow");
+      }
+      fireEvent.click(screen.getByRole("button", { name: "Desenhar" }));
+      fireEvent.click(ferramenta("Selecionar"));
+      fireEvent.pointerDown(toque("a"), { button: 0, pointerId: 1, clientX: 50, clientY: 0 });
+      fireEvent.pointerUp(toque("a"), { pointerId: 1, clientX: 50, clientY: 0 });
+      expect(contorno()).toHaveAttribute("x", "-7.5");
+
+      const antes = renders;
+      moverACamera(loja, [
+        [10, 0, 1.5],
+        [100, 50, 2],
+      ]);
+
+      expect(renders).toBe(antes);
+      expect(areaDeDesenho().querySelector("g")).toHaveAttribute("transform", "translate(100 50) scale(2)");
+      // Em pixels da tela: a caixa (de -1,5 e 103 de largura, no canvas) vai pelo zoom e ganha 6 px de folga de cada lado.
+      expect(contorno()).toHaveAttribute("x", "91");
+      expect(contorno()).toHaveAttribute("width", "218");
+    });
+
+    it("a área de toque tem uma faixa mínima em pixels da tela (traço fino ou grosso, em qualquer zoom)", () => {
+      abrirEmSelecionar();
+
+      const [doTraco, minima] = [...toque("a").children];
+      expect(toque("a").children).toHaveLength(2);
+      // A forma na espessura do traço cresce com o zoom; a mínima não (vector-effect), e vale LARGURA_DO_TOQUE_PX.
+      expect(doTraco).toHaveAttribute("stroke-width", "3");
+      expect(doTraco).not.toHaveAttribute("vector-effect");
+      expect(minima).toHaveAttribute("stroke-width", "10");
+      expect(minima).toHaveAttribute("vector-effect", "non-scaling-stroke");
     });
 
     it("clicar no vazio, Esc ou trocar de ferramenta tira a seleção; o Esc com seleção não troca a ferramenta", () => {

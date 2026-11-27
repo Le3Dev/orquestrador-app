@@ -37,6 +37,8 @@ export interface DesenhoDoArtefato {
   /** `largura`: a da página agora; só vale se o desenho estava vazio (é o primeiro traço). */
   acrescentar: (traco: TracoGravado, largura: number | null) => void;
   apagar: (ids: readonly string[]) => void;
+  /** Apaga todos os traços num passo só (a largura volta a nula); o desfazer traz todos de volta. */
+  limpar: () => void;
   desfazer: () => void;
   /** Grava agora o passo que estava esperando o atraso (ao fechar a tela cheia). */
   gravarJa: () => void;
@@ -96,7 +98,7 @@ function desenhoAntigo(artefatoId: string): TracoGravado[] {
 /**
  * O desenho sobre a página de uma versão do artefato, guardado no servidor. Cada
  * versão tem o seu: trocar de versão mostra os traços dela; versão nova começa
- * limpa. Cada passo (traço, borracha, desfazer) vai ao servidor depois de
+ * limpa. Cada passo (traço, borracha, limpar tudo, desfazer) vai ao servidor depois de
  * `ATRASO_DA_GRAVACAO_MS` sem outro passo; ao trocar de versão, ao fechar a janela
  * ou com `gravarJa`, vai na hora. As gravações saem uma de cada vez, na ordem.
  * Falhou: o desenho fica na tela e o próximo passo tenta de novo (grava tudo).
@@ -266,6 +268,8 @@ export function useDesenhoDoArtefato(
     [mudar],
   );
 
+  const limpar = useCallback(() => mudar((tracos) => (tracos.length === 0 ? null : [])), [mudar]);
+
   const desfazer = useCallback(() => {
     const atual = lidoAtual.current;
     const anterior = atual?.passados.at(-1);
@@ -287,6 +291,7 @@ export function useDesenhoDoArtefato(
     problema: (problemaAoLer?.chave === chave ? problemaAoLer.mensagem : null) ?? problemaAoGravar,
     acrescentar,
     apagar,
+    limpar,
     desfazer,
     gravarJa,
     tentarDeNovo,

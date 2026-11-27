@@ -1,13 +1,13 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { type NodeProps, ReactFlowProvider } from "@xyflow/react";
+import { type NodeProps, ReactFlowProvider, useStoreApi } from "@xyflow/react";
 
 import { type AcoesDoCanvas, ProvedorDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
 import type { NoNavegadorDoAgente as TipoDoNo } from "../../shared/canvas/nos";
 import type { ApiDoNavegadorDoAgente, EstadoDoNavegadorDoAgente } from "../../shared/canvas/ponteDoNavegador";
 import type { ResumoDoOrquestrador } from "../../shared/api/tipos";
+import { INTERVALO_DA_COBERTURA_MS } from "../../shared/canvas/medirCorpo";
 import {
   ESPERA_DA_FOTO_MS,
-  INTERVALO_DA_COBERTURA_MS,
   MENSAGEM_SEM_NAVEGADOR_ABERTO,
   MENSAGEM_SEM_O_APP_DESKTOP,
   NoNavegadorDoAgente,
@@ -80,9 +80,18 @@ function propsDoNo(alteracoes: Partial<NodeProps<TipoDoNo>> = {}): NodeProps<Tip
   };
 }
 
+/** A loja do React Flow em uso, para o teste mexer na câmera como o pan faz. */
+let lojaDoCanvas: ReturnType<typeof useStoreApi> | null = null;
+
+function GuardarLoja() {
+  lojaDoCanvas = useStoreApi();
+  return null;
+}
+
 function Navegador({ valor, no }: { valor: ValorDoCanvas; no: NodeProps<TipoDoNo> }) {
   return (
     <ReactFlowProvider>
+      <GuardarLoja />
       <ProvedorDoCanvas valor={valor}>
         <NoNavegadorDoAgente {...no} />
       </ProvedorDoCanvas>
@@ -434,6 +443,30 @@ describe("NoNavegadorDoAgente", () => {
 
         // No máximo um teste por intervalo (nove pontos cada), e não um por quadro (cerca de 22 quadros).
         expect(consulta.mock.calls.length).toBeLessThanOrEqual(9 * 5);
+      });
+
+      it("parada, não pede quadro nenhum; o pan mede por quadro, manda o retângulo novo uma vez e para depois", async () => {
+        const quadros = vi.spyOn(window, "requestAnimationFrame");
+        renderizar();
+        await esperarAVista();
+        // Os quadros de folga do começo acabam e nada mais é pedido.
+        await act(async () => new Promise((resolver) => setTimeout(resolver, 150)));
+        quadros.mockClear();
+        await act(async () => new Promise((resolver) => setTimeout(resolver, INTERVALO_DA_COBERTURA_MS * 2)));
+        expect(quadros).not.toHaveBeenCalled();
+
+        // Pan: a câmera muda e o corpo vai junto.
+        vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({ ...retanguloDoCorpo, left: 140 } as DOMRect);
+        act(() => lojaDoCanvas?.setState({ transform: [40, 0, 1] }));
+        expect(quadros).toHaveBeenCalled();
+        await waitFor(() => expect(ponte.api.posicionar).toHaveBeenCalledWith("o1", expect.objectContaining({ x: 140 })));
+
+        // Assentado, nada mais é pedido nem mandado.
+        await act(async () => new Promise((resolver) => setTimeout(resolver, 150)));
+        quadros.mockClear();
+        await act(async () => new Promise((resolver) => setTimeout(resolver, INTERVALO_DA_COBERTURA_MS * 2)));
+        expect(quadros).not.toHaveBeenCalled();
+        expect(ponte.api.posicionar).toHaveBeenCalledTimes(1);
       });
 
       it("fechar a janela (desmontar) devolve a vista para baixo da tela: o agente segue usando", async () => {

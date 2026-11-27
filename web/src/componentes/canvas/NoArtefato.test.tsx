@@ -748,6 +748,25 @@ describe("NoArtefato", () => {
       expect(ids()).toEqual(["t1", "t2"]);
     });
 
+    it("Limpar tudo da barrinha: apaga todos na página, grava vazio, e o Desfazer traz todos de volta", async () => {
+      lerDesenho().mockResolvedValue({ tracos: [seta("t1"), seta("t2")], largura: null });
+      await abrir();
+      const { pagina } = await ampliar();
+      const estado = espiar(pagina);
+      fireEvent.click(caneta());
+      const limpar = () => within(barra() as HTMLElement).getByRole("button", { name: "Limpar todos os desenhos" });
+      expect(limpar()).toBeEnabled();
+
+      fireEvent.click(limpar());
+      expect(estado()?.tracos).toEqual([]);
+      expect(limpar()).toBeDisabled();
+      await waitFor(() => expect(salvarDesenho()).toHaveBeenLastCalledWith("a1", 3, [], null));
+
+      fireEvent.click(within(barra() as HTMLElement).getByRole("button", { name: "Desfazer" }));
+      expect(estado()?.tracos.map(({ id }) => id)).toEqual(["t1", "t2"]);
+      await waitFor(() => expect(salvarDesenho()).toHaveBeenLastCalledWith("a1", 3, [seta("t1"), seta("t2")], null));
+    });
+
     it("Esc com o modo ligado só o desliga; desligado, fecha; o Esc repassado pela página desliga e devolve o foco ao app", async () => {
       await abrir();
       await ampliar();

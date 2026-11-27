@@ -6,7 +6,12 @@ import { DecisaoDoPlano, ModoDoTurno } from "./ModoDoTurno";
 import { Motor, MOTOR_PADRAO } from "./Motor";
 import { DadosDoSubagente, Subagente } from "./Subagente";
 
-export type SituacaoDoTurno = "em_andamento" | "concluido" | "cancelado" | "falhou" | "interrompido";
+/**
+ * `pausado`: o usuário pausou e o processo não pôde ficar congelado (Windows,
+ * app fechado, processo morto durante a pausa); o trabalho continua num turno
+ * novo, na mesma sessão, quando ele mandar continuar (ver ADR-51).
+ */
+export type SituacaoDoTurno = "em_andamento" | "concluido" | "cancelado" | "falhou" | "interrompido" | "pausado";
 
 export interface DadosDoTurno {
   id: string;
@@ -26,6 +31,12 @@ export interface DadosDoTurno {
   perguntas?: PerguntaDoApp[];
   /** O motor que executou o turno. Ausente em turnos gravados antes dos outros motores: valem `claude-code`. */
   motor?: Motor;
+  /**
+   * Se o motor anunciou a sessão neste turno (`sessao_iniciada`), ou seja, se
+   * chegou a receber o pedido. Ausente ou nulo em turnos gravados antes do
+   * campo: não se sabe (ver `Turno.sessaoIniciada`).
+   */
+  sessaoIniciada?: boolean | null;
 }
 
 /**
@@ -54,6 +65,7 @@ export class Turno {
     private perguntasDaResposta: readonly PerguntaDoApp[],
     /** O motor que executa o turno (o do Orquestrador, ou o de reserva que assumiu o pedido). */
     public readonly motor: Motor,
+    private sessaoAnunciada: boolean | null,
   ) {}
 
   static iniciar(
@@ -64,7 +76,7 @@ export class Turno {
     modo: ModoDoTurno = "execucao",
     motor: Motor = MOTOR_PADRAO,
   ): Turno {
-    return new Turno(id, texto, agora.getTime(), null, "em_andamento", "", null, null, [], anexos, modo, null, [], motor);
+    return new Turno(id, texto, agora.getTime(), null, "em_andamento", "", null, null, [], anexos, modo, null, [], motor, false);
   }
 
   static reconstituir(dados: DadosDoTurno): Turno {
@@ -90,6 +102,8 @@ export class Turno {
       (dados.perguntas ?? []).map(copiarPergunta),
       // Nem os gravados antes dos outros motores: rodaram no Claude Code.
       dados.motor ?? MOTOR_PADRAO,
+      // Nem os gravados antes da marca da sessão: não se sabe se o motor viu o pedido.
+      dados.sessaoIniciada ?? null,
     );
   }
 
@@ -130,6 +144,15 @@ export class Turno {
     return this.perguntasDaResposta;
   }
 
+  /**
+   * Se o motor anunciou a sessão neste turno (`sessao_iniciada`): só então o
+   * pedido chegou a ele. Falso enquanto o processo não nasceu ou não registrou
+   * a sessão; `null` em turnos gravados antes da marca (não se sabe).
+   */
+  get sessaoIniciada(): boolean | null {
+    return this.sessaoAnunciada;
+  }
+
   /** O Plano deste turno aguarda o usuário aprovar ou descartar. */
   get planoPendente(): boolean {
     return this.decisao === "pendente";
@@ -138,6 +161,9 @@ export class Turno {
   /** Aplica o que o motor observou. Eventos que não mudam o resumo do turno são ignorados. */
   registrar(evento: EventoDoMotor): void {
     switch (evento.tipo) {
+      case "sessao_iniciada":
+        this.sessaoAnunciada = true;
+        return;
       case "subagente_iniciado":
         if (!this.subagentes.some((subagente) => subagente.id === evento.subagenteId)) {
           this.subagentes.push(Subagente.iniciar(evento.subagenteId, evento.descricao));
@@ -197,6 +223,11 @@ export class Turno {
     this.encerrar("falhou", agora);
   }
 
+  /** Pausado sem processo vivo para continuar: segue num turno novo, na mesma sessão (ver ADR-51). */
+  pausar(agora: Date): void {
+    this.encerrar("pausado", agora);
+  }
+
   /** O servidor parou no meio do turno; o processo do Claude Code já não existe. */
   interromper(agora: Date): void {
     this.encerrar("interrompido", agora);
@@ -218,6 +249,7 @@ export class Turno {
       decisaoDoPlano: this.decisao,
       perguntas: this.perguntasDaResposta.map(copiarPergunta),
       motor: this.motor,
+      sessaoIniciada: this.sessaoAnunciada,
     };
   }
 

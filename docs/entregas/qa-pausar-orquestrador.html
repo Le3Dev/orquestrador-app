@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QA: pausar orquestrador (casos de borda com o Claude Code real)</title>
+<style>
+  :root { --fundo:#141413; --cartao:#1f1e1c; --borda:#34322e; --texto:#ecebe7; --sec:#a3a19a; --ok:#3fae6a; --falha:#e0533d; --aviso:#d9a531; --cod:#0f0f0e; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--fundo); color:var(--texto); font:15px/1.55 -apple-system, "Segoe UI", Arial, sans-serif; }
+  main { max-width: 1060px; margin: 0 auto; padding: 32px 22px 80px; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  h2 { font-size: 19px; margin: 40px 0 12px; border-bottom:1px solid var(--borda); padding-bottom:6px; }
+  h3 { font-size: 16px; margin: 0; }
+  p, li { color: var(--texto); }
+  .sec { color: var(--sec); }
+  .resumo { display:grid; grid-template-columns: repeat(auto-fill, minmax(230px,1fr)); gap:10px; margin:18px 0; }
+  .item { background:var(--cartao); border:1px solid var(--borda); border-radius:10px; padding:10px 12px; display:flex; justify-content:space-between; gap:8px; align-items:center; }
+  .selo { font-size:12px; font-weight:700; padding:3px 9px; border-radius:999px; white-space:nowrap; }
+  .passou { background: rgba(63,174,106,.18); color: var(--ok); border:1px solid var(--ok); }
+  .falhou { background: rgba(224,83,61,.18); color: var(--falha); border:1px solid var(--falha); }
+  .parcial { background: rgba(217,165,49,.18); color: var(--aviso); border:1px solid var(--aviso); }
+  .caso { background:var(--cartao); border:1px solid var(--borda); border-radius:12px; padding:16px 18px; margin:16px 0; }
+  .cab { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px; }
+  dl { display:grid; grid-template-columns: 110px 1fr; gap:6px 14px; margin: 8px 0 0; }
+  dt { color: var(--sec); font-weight:600; }
+  dd { margin:0; }
+  pre { background:var(--cod); border:1px solid var(--borda); border-radius:8px; padding:10px 12px; overflow:auto; font:12.5px/1.45 ui-monospace, Menlo, monospace; color:#d8d6cf; white-space:pre; }
+  code { font: 13px ui-monospace, Menlo, monospace; background: var(--cod); padding: 1px 5px; border-radius: 4px; }
+  .bug { border-left: 4px solid var(--falha); }
+  .obs { border-left: 4px solid var(--aviso); }
+  table { border-collapse: collapse; width:100%; font-size:14px; }
+  th, td { border:1px solid var(--borda); padding:6px 8px; text-align:left; vertical-align:top; }
+  th { background:#262522; }
+</style>
+</head>
+<body>
+<main>
+<h1>QA: pausar orquestrador (botão ⏸/▶ do terminal)</h1>
+<p class="sec">Branch <code>feature/pausar-orquestrador</code>, commit <code>c2cbd4c</code>. Testado em 22/11/2026, das 10:45 às 11:28 (horário local), na cópia de teste já aberta (Electron pid 26209, servidor 26231, porta 52684, dados isolados). Claude Code real (<code>/opt/homebrew/bin/claude</code>), orquestrador e subagentes em <code>haiku</code>, esforço baixo, nível "editar e rodar comandos". Dois orquestradores de teste: <b>QA pausa A</b> (<code>e5c81318</code>) e <b>QA pausa B</b> (<code>4035bf7f</code>), pastas em <code>/tmp/qa-pausa-orquestrador/</code>. Nenhum arquivo de código ou teste foi alterado; nada foi commitado.</p>
+
+<h2>Resumo</h2>
+<div class="resumo">
+  <div class="item"><span>1. Pausa durante Bash</span><span class="selo falhou">falhou</span></div>
+  <div class="item"><span>2. Pausa com subagente</span><span class="selo falhou">falhou</span></div>
+  <div class="item"><span>3. Pausar/continuar repetido</span><span class="selo passou">passou</span></div>
+  <div class="item"><span>4. Mensagem na pausa congelada</span><span class="selo passou">passou</span></div>
+  <div class="item"><span>5. Modo retomada</span><span class="selo falhou">falhou</span></div>
+  <div class="item"><span>6. Pausa longa e vigia</span><span class="selo passou">passou</span></div>
+  <div class="item"><span>7. Cancelar pausado</span><span class="selo passou">passou</span></div>
+  <div class="item"><span>8. Estado após recarregar</span><span class="selo passou">passou</span></div>
+  <div class="item"><span>9. Dois orquestradores</span><span class="selo passou">passou</span></div>
+</div>
+
+<h2>Bugs encontrados</h2>
+
+<div class="caso bug">
+<div class="cab"><h3>Bug 1 · Os comandos das ferramentas continuam rodando durante a pausa</h3><span class="selo falhou">alto</span></div>
+<p>O congelamento manda <code>SIGSTOP</code> só para o grupo do processo <code>claude</code> (<code>kill(-pid)</code>). O Claude Code abre o shell de cada chamada da ferramenta Bash (do orquestrador e dos subagentes, que rodam dentro do mesmo processo) como líder de um <b>grupo próprio</b>. Esse grupo nunca recebe o sinal: o <code>claude</code> fica em <code>T</code>, mas o <code>zsh</code> e os filhos dele seguem em <code>S</code>/<code>R</code>, escrevendo arquivos durante toda a pausa. Builds, testes e servidores longos não param.</p>
+<pre>PID   PPID  PGID  STAT COMMAND
+47092 26231 47092 Ts   /opt/homebrew/bin/claude -p ...        &lt;- congelado
+47684 47092 47684 Ss   /bin/zsh -c source ...snapshot-zsh...   &lt;- grupo próprio, segue rodando
+47685 47684 47684 S    sleep 90</pre>
+<p><b>Causa provável:</b> <code>src/infraestrutura/sistema/RegistroDeProcessos.ts:56-68</code> (<code>congelar</code>) e <code>:46</code> (<code>registrar</code>) sinalizam apenas <code>sinalizarGrupo(processo.pid)</code> (<code>src/infraestrutura/sistema/Processos.ts:76-81</code>), que cobre o grupo do <code>claude</code> e não os grupos dos descendentes.</p>
+<p><b>Correção sugerida:</b> ao congelar, listar a árvore (<code>ps -A -o pid=,ppid=,pgid=</code>, já existe <code>listarArvore</code> em <code>Processos.ts</code>), juntar os <code>pgid</code> de todos os descendentes de cada pid registrado e mandar <code>SIGSTOP</code> a cada grupo (o do <code>claude</code> por último não importa, mas congelar o <code>claude</code> primeiro evita que ele abra um shell novo no meio). Guardar esse conjunto em <code>congelados</code> para o <code>SIGCONT</code> em <code>descongelar</code>. Teste unitário: registro com árvore falsa onde o filho tem <code>pgid</code> diferente do pai deve sinalizar os dois grupos.</p>
+</div>
+
+<div class="caso bug">
+<div class="cab"><h3>Bug 2 · Retomada perde o pedido que o motor ainda não tinha recebido</h3><span class="selo falhou">alto</span></div>
+<p>Pausando logo depois de enviar (antes de o processo do Claude nascer) a pausa vira <code>retomada</code> e o turno termina <code>pausado</code> sem o motor ter visto o pedido. Ao continuar, como a <b>sessão</b> do motor já existia (turnos anteriores), o app manda só a nota "Você foi pausado... continue de onde parou" em vez do texto do pedido. O pedido some: reproduzido 2 vezes (<code>tique5.txt</code> e <code>r4.txt</code> nunca foram criados). Na segunda vez o modelo ainda "retomou" uma tarefa que o usuário tinha <b>cancelado</b> antes (<code>tique7c.txt</code>, refeito até 25 linhas).</p>
+<pre>turno 58529d88 pausado | texto: Teste de QA ... tique5.txt ...
+turno c9d58e2b concluido | texto: Você foi pausado pelo usuário no meio do trabalho...
+  resposta: "Não havia trabalho pendente. Todos os testes desta pasta estão concluídos..."
+ls tique5.txt  -&gt;  No such file or directory
+
+turno ce78ebcc pausado | texto: Teste de QA: crie o arquivo r4.txt ...
+turno ee146475 concluido | resposta: "Retomei de onde parou e concluí o trabalho desta pasta.
+  - tique7c.txt: 25 linhas, como pedido. A execução anterior havia sido interrompida..."
+ls r4.txt  -&gt;  No such file or directory</pre>
+<p><b>Causa provável:</b> <code>src/orquestracao/ServicoDeOrquestracao.ts:607-612</code> (<code>continuarRetomada</code>) decide entre reenviar o texto e mandar a nota por <code>orquestrador.sessaoDoMotor(motor).iniciada</code>, que diz se a <i>sessão</i> existe, não se o <i>turno pausado</i> chegou ao motor.</p>
+<p><b>Correção sugerida:</b> decidir pelo próprio turno pausado: se ele não registrou <code>sessao_iniciada</code> (nem nenhuma saída do motor), reenviar <code>pausado.texto</code> (com a mensagem do usuário anexada, se houver). Teste: turno com sessão já iniciada em turno anterior, pausado antes de <code>sessao_iniciada</code>, deve continuar com o texto original.</p>
+</div>
+
+<h2>Casos</h2>
+
+<div class="caso">
+<div class="cab"><h3>1. Pausar durante uma ferramenta (Bash com sleep longo)</h3><span class="selo falhou">falhou</span></div>
+<dl>
+<dt>Passos</dt><dd>A recebeu: "rode na ferramenta Bash, com timeout 600000 ms, <code>sleep 90 &amp;&amp; echo etapa1 &gt; etapa1.txt</code>; depois crie etapa2.txt". Pausa 10 s depois de o <code>sleep 90</code> aparecer (10:46:42), espera 100 s, continua (10:48:24).</dd>
+<dt>Esperado</dt><dd>Todos os processos do turno em <code>T</code>; nada avança na pausa; tudo volta ao continuar; tarefa termina certa.</dd>
+<dt>Obtido</dt><dd><code>claude</code> em <code>Ts</code>, mas o shell e o <code>sleep</code> em <code>S</code> (grupo próprio). O <code>sleep</code> terminou e <b><code>etapa1.txt</code> foi gravado às 10:48:03, com o orquestrador pausado</b>. Continuar: <code>202 {"modo":"congelado"}</code>, <code>claude</code> volta a <code>Ss</code>, o turno conclui com "FEITO", <code>etapa1</code> e <code>ok</code> corretos. Ver Bug 1.</dd>
+</dl>
+<pre>$ POST /api/orquestradores/e5c81318.../pausar      (10:46:42)
+{"pausa":{"desde":"2026-11-22T13:46:42.742Z","modo":"congelado"}}  HTTP 202
+$ ps -o pid,ppid,pgid,stat,etime,command
+47092 26231 47092 Ts  00:35 /opt/homebrew/bin/claude -p ...
+47684 47092 47684 Ss  00:10 /bin/zsh -c source ...
+47685 47684 47684 S   00:10 sleep 90
+# 85 s depois, ainda pausado:
+47092 26231 47092 Ts  02:05 /opt/homebrew/bin/claude -p ...
+47684 47092 47684 Z   01:40 &lt;defunct&gt;          &lt;- o comando já terminou
+-rw-r--r-- 7 Nov 22 10:48:03 2026 .../worktrees/e5c81318/etapa1.txt
+$ POST .../continuar (10:48:24)  -&gt;  {"modo":"congelado"} HTTP 202
+turno f3d08d42 concluido · resposta "FEITO" · etapa1.txt = etapa1 · etapa2.txt = ok
+eventos: 8 orquestrador_pausado (congelado) · 9 orquestrador_continuado · 13 turno_concluido</pre>
+</div>
+
+<div class="caso">
+<div class="cab"><h3>2. Pausar enquanto um subagente roda</h3><span class="selo falhou">falhou</span></div>
+<dl>
+<dt>Passos</dt><dd>A lança um subagente que roda em primeiro plano <code>for i in $(seq 1 18); do date +%T &gt;&gt; sub.txt; sleep 5; done</code>. Pausa às 10:50:12, continua às 10:50:44.</dd>
+<dt>Esperado</dt><dd>Subagente parado; nenhum carimbo novo em <code>sub.txt</code> entre 10:50:12 e 10:50:44.</dd>
+<dt>Obtido</dt><dd>O subagente do Claude Code roda dentro do mesmo processo <code>claude</code> (não há processo separado para congelar), e o shell dele tem grupo próprio. Os carimbos seguiram a cada 5 s durante a pausa. Continuar: o turno concluiu normalmente. Primeira tentativa invalidada: o subagente usou <code>run_in_background</code> e o turno terminou antes da pausa (pausar respondeu 409 "não está trabalhando").</dd>
+</dl>
+<pre>claude 52418 Ts · zsh 52585 (pgid 52585) Ss · sleep 5 S
+sub.txt: 10:49:58 10:50:03 10:50:08 [pausa 10:50:12] 10:50:13 10:50:18 10:50:23 10:50:28
+         10:50:33 10:50:38 10:50:43 [continuar 10:50:44] 10:50:48 ... 10:51:24
+turno c9539125 concluido</pre>
+</div>
+
+<div class="caso">
+<div class="cab"><h3>3. Pausar duas vezes, continuar duas vezes, continuar sem pausa</h3><span class="selo passou">passou</span></div>
+<dl>
+<dt>Passos</dt><dd>Durante o turno do caso 2: pausar, pausar, continuar, continuar. Também com A ocioso, e duas requisições <b>em paralelo</b> (pausar×2 no modo congelado; continuar×2 no congelado e no retomada).</dd>
+<dt>Esperado</dt><dd>Primeira 202, segunda 409, sem quebrar o turno; em paralelo só uma vale; na retomada só um turno de continuação.</dd>
+<dt>Obtido</dt><dd>Como esperado. O turno seguiu e concluiu. Em paralelo na retomada, só um turno novo (<code>ee146475</code>) foi aberto.</dd>
+</dl>
+<pre>pausar 1   -&gt; 202 {"pausa":{"desde":"2026-11-22T13:50:12.329Z","modo":"congelado"}}
+pausar 2   -&gt; 409 {"erro":"\"QA pausa A\" já está pausado."}
+continuar 1 -&gt; 202 {"modo":"congelado"}
+continuar 2 -&gt; 409 {"erro":"\"QA pausa A\" não está pausado."}
+ocioso: pausar -&gt; 409 "não está trabalhando em nenhum pedido." · continuar -&gt; 409 "não está pausado."
+paralelo pausar×2 (congelado): 202 + 409 "já está pausado."
+paralelo continuar×2 (congelado): 202 {"modo":"congelado"} + 409
+paralelo continuar×2 (retomada):  202 {"modo":"retomada"}  + 409 · 1 turno novo</pre>
+</div>
+
+<div class="caso">
+<div class="cab"><h3>4. Mensagem durante a pausa congelada</h3><span class="selo passou">passou</span></div>
+<dl>
+<dt>Passos</dt><dd>A roda um loop de 60 s (<code>tique4.txt</code>); um pedido vai para a fila (<code>fila1.txt</code>); pausa; mensagem com anexo; mensagem só texto (<code>msg.txt</code>).</dd>
+<dt>Esperado</dt><dd>Anexo recusado sem tirar a pausa; texto tira da pausa e entra na frente da fila; sai depois do turno atual e antes do pedido que já estava na fila.</dd>
+<dt>Obtido</dt><dd>Como esperado.</dd>
+</dl>
+<pre>mensagem com anexo -&gt; 400 {"erro":"Com o orquestrador pausado no meio do pedido, a mensagem espera na fila, e a fila não leva anexos. ..."}
+   estado: situacao=pausado (pausa mantida)
+mensagem texto     -&gt; 202 {"turnoId":"6b9bcc74...","pedidoId":"23fce47a..."}
+   estado: situacao=trabalhando pausa=null fila=[23fce47a msg.txt, faaa3093 fila1.txt]
+eventos: 53 orquestrador_pausado · 54 pedido_enfileirado 23fce47a · 55 orquestrador_continuado
+         58 turno_concluido FEITO-T · 59 pedido_retirado 23fce47a · 66 turno_concluido FEITO-M
+         67 pedido_retirado faaa3093 · 74 turno_concluido FEITO-F</pre>
+</div>
+
+<div class="caso">
+<div class="cab"><h3>5. Modo retomada (plano B)</h3><span class="selo falhou">falhou</span></div>
+<dl>
+<dt>Como forçar no Mac</dt><dd>(a) pausar no mesmo instante do envio, antes de o processo do Claude nascer (<code>congelar</code> devolve falso); (b) pausar congelado e matar o <code>claude</code> com <code>kill -9</code> (caminho "processo morto durante a pausa").</dd>
+<dt>Esperado</dt><dd>Pausa no modo <code>retomada</code>, turno <code>pausado</code>, nenhum processo vivo; continuar abre turno novo com <code>--resume</code> na mesma sessão; a mensagem enviada na pausa vai junto; o trabalho pedido é feito.</dd>
+<dt>Obtido</dt><dd>(b) passou: modo passou de congelado para retomada com o mesmo <code>desde</code>; a mensagem durante a pausa abriu o turno com <code>--resume 9a3774d6...</code> e o texto "nota + Mensagem do usuário ao continuar", e <code>extra5b.txt</code> foi criado. (a) falhou: o pedido se perdeu (Bug 2), reproduzido duas vezes.</dd>
+</dl>
+<pre># (a)
+POST mensagens -&gt; 202 · POST pausar -&gt; 202 {"pausa":{"desde":"2026-11-22T13:54:18.286Z","modo":"retomada"}}
+nenhum claude do orquestrador vivo depois (ps) · turno 58529d88 pausado
+POST continuar -&gt; 202 {"modo":"retomada"} · processo novo: --resume 9a3774d6-defa-4122-821b-e0db91bed15c
+turno_iniciado: "Você foi pausado pelo usuário no meio do trabalho. Confira o estado atual da pasta..."
+turno_concluido: "Não havia trabalho pendente..."  · tique5.txt nunca criado   &lt;- Bug 2
+# (b)
+pausar -&gt; congelado · claude 60089 Ts · kill -9 60089
+estado: situacao=pausado pausa={"desde":"2026-11-22T13:55:39.370Z","modo":"retomada"} · turno d7c00512 pausado
+eventos 91 e 92: orquestrador_pausado (congelado, depois retomada)
+POST mensagens "crie também extra5b.txt" -&gt; 202 · --resume 9a3774d6...
+turno_iniciado: "...continue de onde parou... | Mensagem do usuário ao continuar: | Ao terminar, crie também o arquivo extra5b.txt..."
+extra5b.txt: x</pre>
+<p class="sec">Observação em (b): o loop do Bash do processo morto ficou órfão (ppid 1) e continuou gravando <code>tique5b.txt</code> até acabar. Foi efeito do <code>kill -9</code> manual, mas é o mesmo cenário que o ADR chama de "processo morto durante a pausa" e soma com o Bug 1.</p>
+</div>
+
+<div class="caso">
+<div class="cab"><h3>6. Pausa longa (≥ 5 min) e o VigiaDoTurno</h3><span class="selo passou">passou</span></div>
+<dl>
+<dt>Passos</dt><dd>A pausado durante uma ferramenta por 5 min 51 s (11:12:48 a 11:18:39). B pausado por 5 min 02 s (11:21:13 a 11:26:15) ainda na inicialização do Claude, antes de <code>sessao_iniciada</code>.</dd>
+<dt>Esperado</dt><dd>Nenhuma falha por silêncio durante a pausa nem logo depois de continuar.</dd>
+<dt>Obtido</dt><dd>Nenhum evento de falha. A concluiu 6 s depois de continuar; B iniciou a sessão 2 s depois e concluiu a lista de 200 itens às 11:27:10.</dd>
+</dl>
+<pre>A: 128 14:12:48 orquestrador_pausado · 129 14:18:39 orquestrador_continuado
+   130 14:18:39 subagente_concluido · 132 14:18:45 turno_concluido "FEITO-6: tique6.txt tem 15 linhas."
+B: 19 14:21:13 orquestrador_pausado · 20 14:26:15 orquestrador_continuado · 21 14:26:17 sessao_iniciada
+   24 14:27:10 turno_concluido (16348 caracteres, termina em FIM-6B)</pre>
+<p class="sec">Não consegui pausar 5 min exatamente no meio do streaming da resposta da API (o Claude levou de 2 a 5 min para iniciar a sessão nesta janela, ver observações).</p>
+</div>
+
+<div class="caso">
+<div class="cab"><h3>7. Cancelar enquanto pausado</h3><span class="selo passou">passou</span></div>
+<dl>
+<dt>Passos</dt><dd>A roda loop de 100 s (<code>tique7c.txt</code>); pausa às 11:22:26; cancela às 11:22:32. Também testado cancelando um turno pausado ainda na inicialização.</dd>
+<dt>Esperado</dt><dd>Turno cancelado, pausa sai, nenhum processo do turno (nem em <code>T</code>, nem órfão).</dd>
+<dt>Obtido</dt><dd>Como esperado: o <code>claude</code> e o shell da ferramenta foram encerrados; o último carimbo é de 11:22:34.</dd>
+</dl>
+<pre>antes:  94009 Ts claude · 95035 Ss zsh (pgid 95035) · 95430 S sleep 4
+POST cancelar -&gt; 202 {"cancelando":true}
+estado: situacao=ocioso pausa=null · turno 4419e33e cancelado
+eventos: orquestrador_continuado {"modo":"congelado","cancelado":true} · turno_cancelado
+ps depois (11:22:43): nenhum processo de 94009, do zsh nem do loop
+tique7c.txt: 11:22:09 ... 11:22:30 11:22:34   (parou)</pre>
+</div>
+
+<div class="caso">
+<div class="cab"><h3>8. Estado após recarregar a interface</h3><span class="selo passou">passou</span></div>
+<dl>
+<dt>Passos</dt><dd>Com A pausado: <code>GET /api/orquestradores</code>, <code>GET /api/orquestradores/:id</code>, leitura de <code>orquestrador.json</code> no disco e replay do SSE <code>/api/eventos-dos-orquestradores?orquestradores=id:120</code> (o que a tela faz ao recarregar).</dd>
+<dt>Esperado</dt><dd><code>pausa</code> e situação <code>pausado</code> persistidas; eventos de pausa no histórico.</dd>
+<dt>Obtido</dt><dd>Como esperado. No modo retomada não há <code>turno_*</code> para o turno pausado, mas <code>aplicarPausa</code> (<code>web/src/shared/estado/aplicarEvento.ts:917-918</code>) encerra o turno como <code>pausado</code> a partir do <code>orquestrador_pausado</code>.</dd>
+</dl>
+<pre>lista: QA pausa A pausado {'desde': '2026-11-22T14:12:48.071Z', 'modo': 'congelado'}
+       QA pausa B trabalhando None
+disco: pausa= {'desde': '2026-11-22T14:12:48.071Z', 'modo': 'congelado'} · último turno 88cda195 em_andamento
+SSE:  "tipo":"orquestrador_pausado",...,"pausa":{"desd...
+      "tipo":"orquestrador_continuado",...,"modo":"congelado","sequencia":129
+      "tipo":"orquestrador_continuado",...,"modo":"congelado","cancelado":true,"sequencia":140
+      "tipo":"orquestrador_continuado",...,"modo":"retomada","sequencia":155</pre>
+</div>
+
+<div class="caso">
+<div class="cab"><h3>9. Dois orquestradores</h3><span class="selo passou">passou</span></div>
+<dl>
+<dt>Passos</dt><dd>A pausado enquanto B roda um loop de 4 min; depois B pausado e continuado com A ainda pausado.</dd>
+<dt>Esperado</dt><dd>Pausar um não mexe no outro.</dd>
+<dt>Obtido</dt><dd>Como esperado. B seguiu gravando a cada 4 s e concluiu; os dois ficaram em <code>T</code> ao mesmo tempo; continuar B não descongelou A.</dd>
+</dl>
+<pre>registro: 82880 e5c81318 (A) · 82883 4035bf7f (B)
+pausar A: 82880 Ts · 82883 Ss
+pausar B: 82880 Ts · 82883 Ts
+continuar B: 82880 Ts · 82883 Rs · A situacao=pausado · B situacao=trabalhando
+tique9.txt (B): 11:12:40 11:12:44 11:12:48 11:12:52 ... 11:14:01 11:14:05 ...</pre>
+</div>
+
+<h2>Observações</h2>
+<div class="caso obs">
+<ul>
+<li><b>Inicialização lenta do Claude nesta janela (sem relação com a pausa):</b> de 10:56 em diante, os processos do Claude abertos pelo servidor levaram de 2 a 5 min até <code>sessao_iniciada</code> (0 % de CPU, conexões abertas com a API). Aconteceu também no B recém criado, que nunca tinha sido pausado (turno <code>fc14c3a5</code>, 308 s para responder "OK"). Um <code>claude -p --model haiku</code> direto no terminal respondeu em 26 s. Não atribuí à feature, mas atrasou os testes e impediu acertar a pausa no meio do streaming.</li>
+<li><b>Duração do turno inclui o tempo pausado:</b> caso 1 mostrou <code>duracaoMs: 142935</code> com cerca de 100 s de pausa. Se a tela usa esse número como "tempo de trabalho", vale descontar a pausa.</li>
+<li><b>Fora do escopo da pausa:</b> parte das tarefas gravou arquivos em <code>/tmp/qa-pausa-orquestrador/a</code> (pasta original) e não na worktree, porque o orquestrador passou ao subagente "Diretório de trabalho: /private/tmp/qa-pausa-orquestrador/a".</li>
+<li>Durante o teste, outro agente de QA testava a pausa do <b>chat rápido</b> na mesma instância; os processos <code>claude</code> do chat em <code>T</code> que aparecem no período eram dele (<code>orquestradorId: "chat"</code>), não destes testes.</li>
+</ul>
+</div>
+
+<h2>Não testado</h2>
+<div class="caso obs">
+<ul>
+<li><b>Windows</b> (retomada nativa, com <code>execucoes.cancelar(id, "pausa")</code> encerrando um processo vivo): não há Windows nesta máquina; no Mac esse ramo só ocorre sem processo vivo.</li>
+<li><b>App fechado com o orquestrador congelado</b> (vira retomada ao abrir): exigiria fechar a cópia de teste, o que não estava liberado.</li>
+<li><b>Pausa de 5 min no meio do streaming da API</b>: ver observação sobre a inicialização lenta.</li>
+<li>Print da tela: não feito para não abrir outro Chromium com a máquina carregada; a evidência é <code>ps</code>, API e eventos.</li>
+</ul>
+</div>
+
+<h2>Limpeza</h2>
+<pre>A: situacao=ocioso pausa=null fila=[] · B: situacao=ocioso pausa=null fila=[]
+processos-em-execucao.json: []
+ps -A (STAT começando com T): nenhum
+ps -A | grep tique/qa-pausa/loops: nenhum</pre>
+<p class="sec">Os orquestradores QA pausa A e QA pausa B ficaram ociosos na cópia de teste, para consulta; as pastas de teste estão em <code>/tmp/qa-pausa-orquestrador/</code>.</p>
+</main>
+</body>
+</html>
