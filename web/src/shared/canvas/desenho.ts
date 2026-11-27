@@ -1,7 +1,8 @@
 /**
  * As contas do desenho sobre o canvas (`CamadaDeDesenho`) e sobre a página do
  * artefato (`desenhoNaPagina.ts`): o caminho SVG de cada traço, a
- * simplificação dos pontos da mão livre e o toque da borracha. Tudo nas
+ * simplificação dos pontos da mão livre, o toque da borracha e, no canvas, o
+ * deslocamento e a caixa do traço (Selecionar). Tudo nas
  * coordenadas do traço; os traços em si (tipos, leitura e gravação) moram no
  * layout (`layout.ts`).
  */
@@ -19,6 +20,12 @@ export const TOLERANCIA_DA_SIMPLIFICACAO_PX = 0.8;
 export const RAIO_DA_BORRACHA_PX = 8;
 /** Quantos passos o desfazer guarda. */
 export const LIMITE_DO_DESFAZER = 100;
+/** A largura, em pixels da tela, da área que pega o clique num traço (Selecionar): um traço fino ainda se acerta. */
+export const LARGURA_DO_TOQUE_PX = 10;
+/** Quanto o ponteiro precisa andar, em pixels da tela, para o clique virar arraste (antes disso, só seleciona). */
+export const DISTANCIA_MINIMA_PARA_MOVER_PX = 3;
+/** A folga, em pixels da tela, entre o traço selecionado e o contorno tracejado dele. */
+export const FOLGA_DO_CONTORNO_PX = 6;
 
 /**
  * As contas, todas dentro desta função e sem nada de fora dela: o script que
@@ -116,14 +123,24 @@ export function criarContasDoDesenho() {
     };
   }
 
-  /** A caixa que o texto solto ocupa (estimada pela quantidade de letras), a partir do canto superior esquerdo. */
+  /** A altura de cada linha do texto solto (o campo de edição e o traço desenhado usam a mesma). */
+  function alturaDaLinhaDoTexto(espessura: EspessuraDoDesenho): number {
+    return tamanhoDoTexto(espessura) * PROPORCAO_DA_LETRA.altura;
+  }
+
+  /**
+   * A caixa que o texto solto ocupa, a partir do canto superior esquerdo: a
+   * largura vem da linha mais longa (estimada pela quantidade de letras) e a
+   * altura, da quantidade de linhas (o texto quebra a linha em "\n").
+   */
   function caixaDoTexto(em: Ponto, texto: string, espessura: EspessuraDoDesenho): Retangulo {
-    const tamanho = tamanhoDoTexto(espessura);
+    const linhas = texto.split("\n");
+    const letrasDaMaisLonga = Math.max(1, ...linhas.map((linha) => linha.length));
     return {
       x: em.x,
       y: em.y,
-      largura: Math.max(1, texto.length) * tamanho * PROPORCAO_DA_LETRA.largura,
-      altura: tamanho * PROPORCAO_DA_LETRA.altura,
+      largura: letrasDaMaisLonga * tamanhoDoTexto(espessura) * PROPORCAO_DA_LETRA.largura,
+      altura: linhas.length * alturaDaLinhaDoTexto(espessura),
     };
   }
 
@@ -254,12 +271,14 @@ export function criarContasDoDesenho() {
   return {
     larguraDoTraco,
     tamanhoDoTexto,
+    alturaDaLinhaDoTexto,
     caminhoDaMaoLivre,
     caminhoDaSeta,
     retanguloEntre,
     caixaDoTexto,
     distanciaAoSegmento,
     simplificarPontos,
+    segmentosDoTraco,
     tracoTocado,
     pontosEntre,
   };
@@ -271,12 +290,53 @@ export type ContasDoDesenho = ReturnType<typeof criarContasDoDesenho>;
 export const {
   larguraDoTraco,
   tamanhoDoTexto,
+  alturaDaLinhaDoTexto,
   caminhoDaMaoLivre,
   caminhoDaSeta,
   retanguloEntre,
   caixaDoTexto,
   distanciaAoSegmento,
   simplificarPontos,
+  segmentosDoTraco,
   tracoTocado,
   pontosEntre,
 } = criarContasDoDesenho();
+
+/**
+ * O traço deslocado por `delta` (em coordenadas do canvas): todos os pontos
+ * andam junto, e o resto (id, cor, espessura, texto) fica. Os pontos saem
+ * arredondados a uma casa, como os que a mão livre grava. Devolve um traço novo.
+ */
+export function moverTraco(traco: TracoDoDesenho, delta: Ponto): TracoDoDesenho {
+  const arredondar = (valor: number): number => Math.round(valor * 10) / 10;
+  return { ...traco, pontos: traco.pontos.map(({ x, y }) => ({ x: arredondar(x + delta.x), y: arredondar(y + delta.y) })) };
+}
+
+/**
+ * A caixa que o traço ocupa, com a largura da linha: o contorno da seleção.
+ * O texto vale pela caixa dele; nos outros, os segmentos desenhados (a seta
+ * com as abas da ponta). Nulo se o traço não tem pontos.
+ */
+export function caixaDoTraco(traco: TracoDoDesenho): Retangulo | null {
+  const [primeiro] = traco.pontos;
+  if (primeiro === undefined) {
+    return null;
+  }
+  if (traco.tipo === "texto") {
+    return caixaDoTexto(primeiro, traco.texto ?? "", traco.espessura);
+  }
+  const desenhados = segmentosDoTraco(traco).flat();
+  const pontos = desenhados.length > 0 ? desenhados : traco.pontos;
+  const meia = larguraDoTraco(traco) / 2;
+  let minX = primeiro.x;
+  let maxX = primeiro.x;
+  let minY = primeiro.y;
+  let maxY = primeiro.y;
+  for (const { x, y } of pontos) {
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+  }
+  return { x: minX - meia, y: minY - meia, largura: maxX - minX + 2 * meia, altura: maxY - minY + 2 * meia };
+}

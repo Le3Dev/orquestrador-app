@@ -26,7 +26,7 @@ const FERRAMENTAS: readonly { ferramenta: FerramentaDeDesenho; nome: string; dic
   {
     ferramenta: "selecionar",
     nome: "Selecionar",
-    dica: "Selecionar: o canvas volta a funcionar como sempre (Esc)",
+    dica: "Selecionar: clique num desenho para movê-lo; Delete apaga; duplo clique edita o texto; no vazio o canvas funciona como sempre (Esc)",
     icone: <IconeSelecionar />,
   },
   { ferramenta: "caneta", nome: "Caneta", dica: "Caneta: desenho à mão livre", icone: <IconeCaneta /> },
@@ -47,7 +47,7 @@ const FERRAMENTAS: readonly { ferramenta: FerramentaDeDesenho; nome: string; dic
   {
     ferramenta: "texto",
     nome: "Texto",
-    dica: "Texto solto: clique onde ele começa, digite e tecle Enter",
+    dica: "Texto solto: clique onde ele começa e digite; Enter quebra a linha, Esc ou clicar fora termina",
     icone: <IconeTexto />,
   },
   {
