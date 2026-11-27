@@ -138,7 +138,8 @@ export const LADO_MINIMO_DA_VISTA_PX = 48;
  * por cima do que está fora dela. `larguraDoLayout` é a largura do corpo sem
  * escala (offsetWidth): a razão entre as duas é o zoom. Nulo se o corpo não
  * está na tela (minimizada, escondida, fora da área) ou sobra menos que
- * `LADO_MINIMO_DA_VISTA_PX`.
+ * `LADO_MINIMO_DA_VISTA_PX`. É o que a Prévia usa; o navegador do agente manda o
+ * retângulo inteiro (`calcularRetanguloSemCorte`).
  */
 export function calcularRetangulo(corpo: AreaNaTela, area: AreaNaTela, larguraDoLayout: number): RetanguloDaVista | null {
   if (!(larguraDoLayout > 0) || !(corpo.width > 0) || !(corpo.height > 0)) {
@@ -152,6 +153,64 @@ export function calcularRetangulo(corpo: AreaNaTela, area: AreaNaTela, larguraDo
     return null;
   }
   return { x: esquerda, y: topo, largura: direita - esquerda, altura: base - topo, zoom: corpo.width / larguraDoLayout };
+}
+
+/** Diferença, em pixels, até a qual duas bordas contam como a mesma (o layout arredonda). */
+const TOLERANCIA_DA_BORDA_PX = 1;
+
+/** O tamanho da janela do app, em pixels CSS (`window.innerWidth` e `innerHeight`). */
+export interface TamanhoDaJanela {
+  largura: number;
+  altura: number;
+}
+
+/** O que `calcularRetanguloSemCorte` mede. */
+export interface MedidaSemCorte {
+  /** O corpo inteiro, sem corte: `x` e `y` podem ser negativos e a caixa pode passar da borda da janela (a janela corta). */
+  retangulo: RetanguloDaVista;
+  /** Só a parte do corpo dentro da área do canvas (mesmo zoom): é onde se confere se algo cobre a vista. */
+  visivel: RetanguloDaVista;
+  /**
+   * O corpo passa de uma borda da área do canvas que não é a borda da janela (cabeçalho, painel lateral): a vista
+   * nativa, sempre por cima do DOM, desenharia sobre algo de fora do canvas. Quem chama trata como coberto.
+   */
+  passaDaAreaDoCanvas: boolean;
+}
+
+/**
+ * Onde a vista nativa fica quando o retângulo vai inteiro, sem o corte de `calcularRetangulo`: o corpo na tela
+ * (escalado pelo zoom e deslocado pelo pan) com o tamanho de verdade, para a página nunca ser espremida (o site
+ * re-organiza o layout a cada quadro) quando o nó sai em parte da tela. Nulo se a parte visível (a interseção com
+ * a área do canvas) tem menos que `LADO_MINIMO_DA_VISTA_PX`, ou se o corpo não está na tela.
+ */
+export function calcularRetanguloSemCorte(
+  corpo: AreaNaTela,
+  area: AreaNaTela,
+  larguraDoLayout: number,
+  janela: TamanhoDaJanela,
+): MedidaSemCorte | null {
+  const visivel = calcularRetangulo(corpo, area, larguraDoLayout);
+  if (visivel === null) {
+    return null;
+  }
+  const retangulo: RetanguloDaVista = {
+    x: corpo.left,
+    y: corpo.top,
+    largura: corpo.width,
+    altura: corpo.height,
+    zoom: visivel.zoom,
+  };
+  // Passar da borda da área só importa onde ela não é a da janela: a janela já corta o que passa dela.
+  const passaPor = (passou: boolean, bordaDaArea: number, bordaDaJanela: number): boolean =>
+    passou && Math.abs(bordaDaArea - bordaDaJanela) > TOLERANCIA_DA_BORDA_PX;
+  const direitaDaArea = area.left + area.width;
+  const baseDaArea = area.top + area.height;
+  const passaDaAreaDoCanvas =
+    passaPor(corpo.left < area.left - TOLERANCIA_DA_BORDA_PX, area.left, 0) ||
+    passaPor(corpo.top < area.top - TOLERANCIA_DA_BORDA_PX, area.top, 0) ||
+    passaPor(corpo.left + corpo.width > direitaDaArea + TOLERANCIA_DA_BORDA_PX, direitaDaArea, janela.largura) ||
+    passaPor(corpo.top + corpo.height > baseDaArea + TOLERANCIA_DA_BORDA_PX, baseDaArea, janela.altura);
+  return { retangulo, visivel, passaDaAreaDoCanvas };
 }
 
 /** Distância das amostras às bordas, para não cair nas alças de redimensionar nem nas bordas arredondadas. */
@@ -169,18 +228,19 @@ export function pontosDeAmostra(retangulo: RetanguloDaVista): { x: number; y: nu
   return ys.flatMap((y) => xs.map((x) => ({ x, y })));
 }
 
+/** Os dois retângulos têm o mesmo tamanho e zoom, até meio pixel? (muda no zoom e ao redimensionar, não no pan) */
+export function mesmoTamanho(a: RetanguloDaVista, b: RetanguloDaVista): boolean {
+  return (
+    Math.abs(a.largura - b.largura) < 0.5 && Math.abs(a.altura - b.altura) < 0.5 && Math.abs(a.zoom - b.zoom) < 0.002
+  );
+}
+
 /** Os dois retângulos são o mesmo, até meio pixel? (evita um IPC por quadro quando nada se move) */
 export function mesmoRetangulo(a: RetanguloDaVista | null, b: RetanguloDaVista | null): boolean {
   if (a === null || b === null) {
     return a === b;
   }
-  return (
-    Math.abs(a.x - b.x) < 0.5 &&
-    Math.abs(a.y - b.y) < 0.5 &&
-    Math.abs(a.largura - b.largura) < 0.5 &&
-    Math.abs(a.altura - b.altura) < 0.5 &&
-    Math.abs(a.zoom - b.zoom) < 0.002
-  );
+  return Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && mesmoTamanho(a, b);
 }
 
 /** Segundo nível comum sob um TLD de país (co.uk, com.br...): o domínio registrável tem um rótulo a mais. */
