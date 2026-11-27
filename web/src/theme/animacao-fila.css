@@ -1,0 +1,66 @@
+/* Fila viva (barra do terminal e lista acima do prompt). Só transform e opacity. */
+
+.chip-da-fila {
+  padding: 1px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--color-active);
+}
+
+.fila-item {
+  transition: color 0.2s;
+}
+
+.fila-item-novo {
+  animation: fila-entra 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.fila-item-saindo {
+  pointer-events: none;
+  animation: fila-sai 0.26s cubic-bezier(0.3, 0, 0.2, 1) both;
+}
+
+.fila-selo-proximo {
+  letter-spacing: 0.06em;
+  animation: fila-selo-chega 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.chip-da-fila-pulo {
+  animation: fila-pulo 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes fila-entra {
+  from { opacity: 0; transform: translateY(10px); }
+}
+@keyframes fila-sai {
+  to { opacity: 0; transform: translateY(-10px); }
+}
+@keyframes fila-selo-chega {
+  from { opacity: 0; transform: translateY(4px); }
+}
+@keyframes fila-pulo {
+  40% { transform: scale(1.14); }
+}
+
+.canvas-movendo .fila-item,
+.canvas-movendo .fila-selo-proximo,
+.canvas-movendo .chip-da-fila {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fila-item-novo,
+  .fila-selo-proximo,
+  .chip-da-fila-pulo {
+    animation: none;
+  }
+  .fila-item-saindo {
+    display: none;
+  }
+}
+
+.canvas-movendo .fila-item-saindo {
+  display: none;
+}

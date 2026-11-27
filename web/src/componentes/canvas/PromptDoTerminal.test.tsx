@@ -424,6 +424,14 @@ describe("PromptDoTerminal", () => {
       expect(screen.queryByRole("button", { name: "enviar agora" })).not.toBeInTheDocument();
     });
 
+    it("o primeiro da fila ganha o selo 'próximo' (só o primeiro) enquanto a fila anda sozinha", () => {
+      renderizar({ trabalhando: true, fila: FILA });
+      const itens = screen.getAllByRole("listitem");
+
+      expect(within(itens[0] as HTMLElement).getByText("próximo")).toBeInTheDocument();
+      expect(within(itens[1] as HTMLElement).queryByText("próximo")).not.toBeInTheDocument();
+    });
+
     it("sem pedidos à espera, a lista não aparece", () => {
       renderizar({ trabalhando: true });
 

@@ -95,6 +95,7 @@ import { BotaoDeArquivos } from "./BotaoDeArquivos";
 import { BotaoDeLimparBixinhos } from "./BotaoDeLimparBixinhos";
 import type { AcoesDoPlano } from "./CartaoDoPlano";
 import { BotaoDeVincular } from "./BotaoDeVincular";
+import { ChipDaFila } from "./ChipDaFila";
 import { ChipDaPausa } from "./ChipDaPausa";
 import { ControlesDoNo } from "./ControlesDoNo";
 import { FaixaDeServidores } from "./FaixaDeServidores";
@@ -1694,6 +1695,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
           <Fragment key={chip.id}>{chip.elemento}</Fragment>
         ))}
         <span className="flex-1" />
+        <ChipDaFila total={fila.length} />
         {chipsDaDireita.filter(naBarra).map((chip) => (
           <Fragment key={chip.id}>{chip.elemento}</Fragment>
         ))}

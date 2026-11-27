@@ -1474,7 +1474,13 @@ describe("NoTerminal · fila de pedidos", () => {
     render(<Terminal canvas={canvasDoTerminal(conversa, comFila(PEDIDO_A, PEDIDO_B))} no={propsDoNo()} />);
 
     const itens = within(screen.getByRole("region", { name: "Fila de pedidos" })).getAllByRole("listitem");
-    expect(itens.map((item) => item.textContent)).toEqual(["1plan modeatualize o README", "2revise o PR"]);
+    expect(itens.map((item) => item.textContent)).toEqual(["1plan modeatualize o READMEpróximo", "2revise o PR"]);
+  });
+
+  it("a barra do terminal conta os pedidos: '2 na fila'", () => {
+    render(<Terminal canvas={canvasDoTerminal(conversaDoTerminal(), comFila(PEDIDO_A, PEDIDO_B))} no={propsDoNo()} />);
+
+    expect(screen.getByText("2 na fila")).toBeInTheDocument();
   });
 
   it("o X tira o pedido da fila no servidor", async () => {

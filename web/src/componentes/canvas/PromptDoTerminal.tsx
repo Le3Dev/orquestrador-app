@@ -12,6 +12,7 @@ import {
 
 import { type DadosDoPedidoNaFila, LIMITE_DA_FILA, type ModoDoTurno } from "../../shared/api/tipos";
 import { comandoDoPrompt, completarComando, dicaDeComando, dicaDePedidoGrande } from "../../shared/comandosDoPrompt";
+import { useFilaAnimada } from "../../shared/canvas/filaAnimada";
 import { juntarDitado } from "../../shared/ditado/texto";
 import { formatarBytes } from "../../shared/formatacao";
 import { useMelhorarPrompt } from "../../shared/hooks/useMelhorarPrompt";
@@ -20,6 +21,7 @@ import { BotaoDeDitado } from "../BotaoDeDitado";
 import { ChipDeAnexo } from "../ChipDeAnexo";
 import { IconeAnexo, IconeFechar } from "../Icones";
 import { AvisoDaMelhoria, BotaoDeMelhorar } from "../MelhoriaDoPrompt";
+import "../../theme/animacao-fila.css";
 
 const ALTURA_MAXIMA = 140;
 
@@ -63,8 +65,13 @@ interface PropsDaFila {
  * "enviar agora".
  */
 function FilaDePedidos({ fila, pausada, enviandoProximo, desconectado, aoRemover, aoEnviarAgora }: PropsDaFila) {
+  const itens = useFilaAnimada(fila);
+  if (itens.length === 0) {
+    return null;
+  }
+  const proximo = itens.find((item) => !item.saindo);
   return (
-    <section className="flex flex-col gap-0.5 px-3 pt-2" aria-label="Fila de pedidos">
+    <section className="fila-de-pedidos flex flex-col gap-0.5 px-3 pt-2" aria-label="Fila de pedidos">
       <p className="mono flex items-center gap-1.5 text-muted">
         {pausada ? (
           <span className="text-warning">fila pausada</span>
@@ -83,10 +90,15 @@ function FilaDePedidos({ fila, pausada, enviandoProximo, desconectado, aoRemover
         </span>
       </p>
       <ol className="custom-scrollbar flex max-h-24 flex-col overflow-y-auto">
-        {fila.map((pedido, indice) => {
-          const numero = indice + 1;
+        {itens.map((item) => {
+          const { pedido, numero, saindo } = item;
+          const primeiro = item === proximo;
           return (
-            <li key={pedido.id} className="mono flex min-h-5 items-center gap-2 text-caption">
+            <li
+              key={pedido.id}
+              className={`fila-item mono flex min-h-5 items-center gap-2 text-caption ${item.novo ? "fila-item-novo" : ""} ${saindo ? "fila-item-saindo" : ""}`}
+              aria-hidden={saindo ? true : undefined}
+            >
               <span className="w-4 shrink-0 text-right text-muted">{numero}</span>
               {pedido.modo === "planejamento" && (
                 <span className="shrink-0 rounded border border-border px-1 text-[10px] text-info">plan mode</span>
@@ -94,11 +106,12 @@ function FilaDePedidos({ fila, pausada, enviandoProximo, desconectado, aoRemover
               <span className="min-w-0 flex-1 truncate" title={pedido.texto}>
                 {trechoDoPedido(pedido.texto)}
               </span>
-              {pausada && indice === 0 && (
+              {primeiro && !pausada && <span className="fila-selo-proximo shrink-0 text-[10px] uppercase text-active">próximo</span>}
+              {pausada && primeiro && (
                 <button
                   type="button"
                   className="shrink-0 rounded px-1.5 text-active hover:bg-surface-3 disabled:opacity-50"
-                  disabled={desconectado}
+                  disabled={desconectado || saindo}
                   title="Tira o pedido da fila e o envia agora"
                   onClick={() => aoEnviarAgora(pedido.id)}
                 >
@@ -108,7 +121,7 @@ function FilaDePedidos({ fila, pausada, enviandoProximo, desconectado, aoRemover
               <button
                 type="button"
                 className="grid h-5 w-5 shrink-0 place-items-center rounded text-muted hover:bg-surface-3 hover:text-error disabled:opacity-50"
-                disabled={desconectado}
+                disabled={desconectado || saindo}
                 aria-label={`Remover da fila o pedido ${numero}`}
                 title="Remover da fila"
                 onClick={() => aoRemover(pedido.id)}
@@ -393,16 +406,14 @@ export const PromptDoTerminal = memo(function PromptDoTerminal({
 
   return (
     <div className="area-do-prompt nodrag nowheel">
-      {fila.length > 0 && (
-        <FilaDePedidos
-          fila={fila}
-          pausada={filaPausada}
-          enviandoProximo={enviandoProximoDaFila}
-          desconectado={desconectado}
-          aoRemover={aoRemoverDaFila}
-          aoEnviarAgora={aoEnviarDaFila}
-        />
-      )}
+      <FilaDePedidos
+        fila={fila}
+        pausada={filaPausada}
+        enviandoProximo={enviandoProximoDaFila}
+        desconectado={desconectado}
+        aoRemover={aoRemoverDaFila}
+        aoEnviarAgora={aoEnviarDaFila}
+      />
       {anexos.length > 0 && (
         <div className="miniaturas-do-prompt">
           {anexos.map((anexo) =>
