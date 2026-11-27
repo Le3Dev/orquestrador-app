@@ -1,5 +1,5 @@
 import { Handle, type NodeProps, NodeToolbar, Position } from "@xyflow/react";
-import { memo } from "react";
+import { type CSSProperties, memo } from "react";
 
 import { aparenciaDoBixinho, papelQueNomeia } from "../../shared/canvas/bixinhos";
 import { type AcoesDoCanvas, useAcoesDoCanvas, useSeletorDoCanvas } from "../../shared/canvas/contexto";
@@ -87,6 +87,8 @@ interface PropsDoConteudo {
   saindo?: boolean;
   /** Executava quando o Orquestrador foi pausado (congelado): parado com ele, não cancelado. Padrão: falso. */
   pausado?: boolean;
+  /** Lugar na fila de quem nasceu junto (0 = primeiro): cada um entra ~110 ms depois do anterior. Padrão: 0. */
+  entrada?: number;
 }
 
 /**
@@ -102,6 +104,7 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
   selecionado,
   saindo = false,
   pausado = false,
+  entrada = 0,
 }: PropsDoConteudo) {
   const executando = subagente.situacao === "executando";
   // Pausado, o relógio para onde estava.
@@ -150,6 +153,7 @@ export const ConteudoDoBixinho = memo(function ConteudoDoBixinho({
       <div
         className={`no-bixinho no-bixinho-${subagente.situacao} ${selecionado ? "no-bixinho-selecionado" : ""} ${saindo ? "no-bixinho-saindo" : ""}`}
         title={subagente.papel === null ? dica : `${subagente.papel} · ${dica.toLowerCase()}`}
+        style={entrada > 0 ? ({ "--i": entrada } as CSSProperties) : undefined}
       >
         <div className="balao-do-bixinho">
           <span className={executando && !pausado ? "cursor" : ""}>{fala}</span>
@@ -223,6 +227,7 @@ export function NoBixinho({ id, data, selected }: NodeProps<TipoDoNo>) {
       selecionado={selected}
       saindo={saindo}
       pausado={pausado}
+      entrada={data.entrada}
     />
   );
 }

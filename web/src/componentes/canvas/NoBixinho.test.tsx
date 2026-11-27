@@ -175,6 +175,20 @@ describe("NoBixinho", () => {
     expect(simulados.desenhoDoBixinho.mock.calls.length).toBe(desenhos);
   });
 
+  it("quem nasce em fila leva o lugar dela (--i) para escalonar a entrada; o primeiro não leva", () => {
+    const conversa = doisTrabalhando();
+    const props = { ...propsDoNo("s2", false, 0), data: { orquestradorId: "o1", subagenteId: "s2", entrada: 2 } };
+    const { container } = render(
+      <ProvedorDoCanvas valor={valorDoCanvas(conversa)}>
+        <NoBixinho {...props} />
+      </ProvedorDoCanvas>,
+    );
+    expect(container.querySelector(".no-bixinho")).toHaveStyle("--i: 2");
+
+    const primeiro = render(tela(conversa, "s1"));
+    expect(primeiro.container.querySelector(".no-bixinho")).not.toHaveAttribute("style");
+  });
+
   it("orquestrador pausado (congelado): o bixinho que executava diz pausado, sem ícone, e a ficha também", () => {
     const conversa = aplicar(doisTrabalhando(), progresso("s1", "Reading src/a.ts"), {
       tipo: "orquestrador_pausado",

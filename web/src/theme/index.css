@@ -2278,7 +2278,7 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   height: 100%;
   padding-top: 34px;
   cursor: pointer;
-  animation: nascer .55s cubic-bezier(.2, 1.5, .4, 1) both;
+  animation: nascer .55s cubic-bezier(.2, 1.5, .4, 1) calc(var(--i, 0) * 110ms) both;
 }
 
 @keyframes nascer {
@@ -2299,7 +2299,7 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
   border: 2px solid var(--active);
   opacity: 0;
   pointer-events: none;
-  animation: puf .7s ease-out .1s 1;
+  animation: puf .7s ease-out calc(var(--i, 0) * 110ms + .1s) 1;
 }
 @keyframes puf {
   0% { opacity: .9; transform: scale(.3); }

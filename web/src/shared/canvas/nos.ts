@@ -45,7 +45,15 @@ export type DadosDoTerminal = {
   ligados?: readonly string[];
 };
 export type DadosDoRascunho = { escalaDaLetra?: EscalaDaLetra };
-export type DadosDoBixinho = { orquestradorId: string; subagenteId: string };
+export type DadosDoBixinho = {
+  orquestradorId: string;
+  subagenteId: string;
+  /** Posição na fila de quem nasceu junto (0 = primeiro, sem atraso): escalona a animação de entrada. */
+  entrada?: number;
+};
+
+/** A fila de entrada para de crescer aqui, para uma delegação grande não demorar a aparecer. */
+export const ENTRADA_MAXIMA_DO_BIXINHO = 8;
 /**
  * A nota no canvas guarda só o id e o que é de layout: título e texto ficam
  * na loja das notas, para digitar não mexer nos nós.
@@ -951,7 +959,11 @@ export function sincronizarBixinhos(
       ...outrasJanelas(janelas, terminal.id),
       ...bixinhosNoLugar,
     ]);
+    // Quem nasce junto entra em fila (a ordem vira o atraso da animação); quem já estava no canvas mantém a sua.
+    let novos = 0;
     for (const [indice, { id, subagenteId }] of membros.entries()) {
+      const anterior = atuais.get(id);
+      const entrada = anterior === undefined ? Math.min(novos++, ENTRADA_MAXIMA_DO_BIXINHO) : anterior.data.entrada;
       const bixinho: NoBixinho = {
         ...atuais.get(id),
         id,
@@ -960,7 +972,11 @@ export function sincronizarBixinhos(
         position: posicoes[indice] ?? { x: 0, y: retangulo.altura },
         width: TAMANHO_DO_BIXINHO.largura,
         height: TAMANHO_DO_BIXINHO.altura,
-        data: { orquestradorId: terminal.data.orquestradorId, subagenteId },
+        data: {
+          orquestradorId: terminal.data.orquestradorId,
+          subagenteId,
+          ...(entrada ? { entrada } : {}),
+        },
       };
       reposicionados.push(bixinho);
       bixinhosNoLugar.push(retanguloNoCanvas(bixinho, terminal.position));
