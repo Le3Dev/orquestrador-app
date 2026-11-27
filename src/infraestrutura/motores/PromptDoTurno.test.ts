@@ -26,7 +26,7 @@ describe("PromptDoTurno e os vínculos", () => {
     for (const motor of ["codex", "copilot"] as const) {
       const pedido = pedidoDeTeste(pastas, motor, {
         vinculados: [{ id: "o2", nome: "Front", pasta: "C:\\projetos\\front", notas: "API em /v1" }],
-        origemDaMensagem: { orquestradorId: "o2", nome: "Front", saltos: 2 },
+        origemDaMensagem: { orquestradorId: "o2", nome: "Front", saltos: 2, natureza: "pedido" },
       });
 
       const mensagem = mensagemDoTurno(pedido, "unix");

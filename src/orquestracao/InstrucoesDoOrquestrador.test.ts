@@ -16,6 +16,7 @@ import { ModeloClaude } from "./ModeloClaude";
 import { ModoDoTurno } from "./ModoDoTurno";
 import { NivelDePermissao } from "./NivelDePermissao";
 import { PastaDeTrabalho } from "./PastaDeTrabalho";
+import type { OrigemDoPedido } from "./PedidoNaFila";
 
 const pasta = PastaDeTrabalho.dentroDe(path.resolve("/projetos"), "painel");
 const PASTA_DE_ARTEFATOS = path.resolve("/dados/artefatos/entrada/orquestradores/o1");
@@ -583,11 +584,11 @@ describe("autonomia nos pedidos de orquestrador vinculado (ADR-49)", () => {
     quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
     nivelDePermissao: "edicao",
   });
-  const montar = (origem: { orquestradorId: string; nome: string; saltos: number } | null): string =>
+  const montar = (origem: OrigemDoPedido | null): string =>
     mensagemParaOOrquestrador("rode isso", configuracao, [], "execucao", null, null, false, [], "unix", [], [], null, false, [], origem);
 
   it("com origem, troca a regra de pedidos grandes pela de autonomia", () => {
-    const mensagem = montar({ orquestradorId: "o2", nome: "API", saltos: 0 });
+    const mensagem = montar({ orquestradorId: "o2", nome: "API", saltos: 0, natureza: "pedido" });
 
     expect(mensagem).not.toContain("Pedidos grandes");
     expect(mensagem).toContain("Pedido de um orquestrador vinculado: execute direto, sem propor plano");
@@ -599,5 +600,21 @@ describe("autonomia nos pedidos de orquestrador vinculado (ADR-49)", () => {
 
     expect(mensagem).toContain("Pedidos grandes");
     expect(mensagem).not.toContain("Pedido de um orquestrador vinculado");
+  });
+
+  it("consulta: só lê e responde, sem plano nem blocos de mensagem (ADR-50)", () => {
+    const mensagem = montar({ orquestradorId: "o2", nome: "API", saltos: 0, natureza: "consulta" });
+
+    expect(mensagem).not.toContain("Pedidos grandes");
+    expect(mensagem).toContain("Consulta de um orquestrador vinculado: só leia e pesquise");
+    expect(mensagem).toContain("Consulta do orquestrador API");
+  });
+
+  it("resposta da consulta: volta às regras de pedidos grandes, para propor o plano conjunto", () => {
+    const mensagem = montar({ orquestradorId: "o2", nome: "API", saltos: 1, natureza: "resposta_da_consulta" });
+
+    expect(mensagem).toContain("Pedidos grandes");
+    expect(mensagem).toContain("Resposta do orquestrador API à sua consulta");
+    expect(mensagem).not.toContain("Consulta de um orquestrador vinculado");
   });
 });

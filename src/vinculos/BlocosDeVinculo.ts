@@ -38,6 +38,8 @@ export interface MensagemParaVinculado {
   /** Nome ou identidade do vinculado, como o Orquestrador escreveu. */
   para: string;
   texto: string;
+  /** "consulta": o vinculado só lê e a resposta volta sozinha (ADR-50). Ausente: pedido normal. */
+  tipo?: "consulta" | undefined;
 }
 
 export interface NotasParaVinculo {
@@ -57,6 +59,7 @@ export interface RespostaSemBlocosDeVinculo {
 const esquemaDaMensagem = z.strictObject({
   para: z.string().trim().min(1),
   texto: z.string().trim().min(1),
+  tipo: z.literal("consulta").optional(),
 });
 
 /** O texto das notas pode ser vazio: é como se limpa o bloco de notas. */
@@ -99,7 +102,7 @@ export function separarBlocosDeVinculo(resposta: string): RespostaSemBlocosDeVin
     if (marca === MARCA_DA_MENSAGEM_PARA_VINCULADO) {
       const lido = esquemaDaMensagem.safeParse(dados);
       if (!lido.success) {
-        avisos.push(`Bloco ${marca} ignorado: use o JSON {"para":"<nome ou id>","texto":"<mensagem>"}, com os dois campos preenchidos.`);
+        avisos.push(`Bloco ${marca} ignorado: use o JSON {"para":"<nome ou id>","texto":"<mensagem>"} (e, opcionalmente, "tipo":"consulta"), com "para" e "texto" preenchidos.`);
       } else if (mensagens.length >= MAXIMO_DE_BLOCOS_POR_RESPOSTA) {
         avisos.push(`Bloco ${marca} ignorado: no máximo ${MAXIMO_DE_BLOCOS_POR_RESPOSTA} mensagens por resposta.`);
       } else {
@@ -151,6 +154,11 @@ export function passouDoLimiteDeSaltos(saltos: number): boolean {
 }
 
 const EXEMPLO_DA_MENSAGEM = ["```" + MARCA_DA_MENSAGEM_PARA_VINCULADO, '{"para":"Nome do vinculado","texto":"O pedido ou o resultado"}', "```"];
+const EXEMPLO_DA_CONSULTA = [
+  "```" + MARCA_DA_MENSAGEM_PARA_VINCULADO,
+  '{"para":"Nome do vinculado","tipo":"consulta","texto":"O que preciso saber do seu projeto para este pedido"}',
+  "```",
+];
 const EXEMPLO_DAS_NOTAS = ["```" + MARCA_DAS_NOTAS_DO_VINCULO, '{"com":"Nome do vinculado","texto":"Notas completas, que substituem as atuais"}', "```"];
 
 /**
@@ -180,7 +188,9 @@ export function linhasDosVinculos(vinculados: readonly VinculadoNoPrompt[], marc
     ...EXEMPLO_DA_MENSAGEM,
     `Para guardar contexto que vocês dois devem ter sempre à mão (decisões, contratos, combinados), reescreva as notas do vínculo com um bloco de código; o texto enviado substitui as notas inteiras (até ${TAMANHO_MAXIMO_DAS_NOTAS_DO_VINCULO} caracteres), então inclua o que deve ser mantido.`,
     ...EXEMPLO_DAS_NOTAS,
-    "Os dois tipos de bloco vão no fim da resposta e não precisam ser repetidos no texto.",
+    `Pedido grande que envolva o projeto de um vinculado: antes de propor o plano, consulte-o com um bloco de mensagem com "tipo":"consulta" (ele só lê e responde; a resposta dele volta sozinha para você, como uma nova mensagem) e termine a resposta SEM a linha do plano. Quando a resposta chegar, proponha o PLANO conjunto, com as subtarefas de cada lado; as do vinculado vão a ele numa mensagem normal (sem "tipo") depois da aprovação.`,
+    ...EXEMPLO_DA_CONSULTA,
+    "Os blocos vão no fim da resposta e não precisam ser repetidos no texto.",
     `</${MARCA_DOS_VINCULOS}>`,
   ];
 }
@@ -188,5 +198,12 @@ export function linhasDosVinculos(vinculados: readonly VinculadoNoPrompt[], marc
 /** A linha que abre o pedido quando ele veio de um Orquestrador vinculado. */
 export function linhaDaMensagemRecebida(origem: OrigemDoPedido, marcasDoBloco: readonly string[]): string {
   const nome = desarmarMarcas(origem.nome, [...marcasDoBloco, MARCA_DOS_VINCULOS]);
-  return `Mensagem do orquestrador ${nome} (salto ${origem.saltos}):`;
+  switch (origem.natureza) {
+    case "consulta":
+      return `Consulta do orquestrador ${nome} (salto ${origem.saltos}) — responda só lendo; sua resposta final volta automaticamente para ele:`;
+    case "resposta_da_consulta":
+      return `Resposta do orquestrador ${nome} à sua consulta (salto ${origem.saltos}) — use-a para propor o plano conjunto do pedido original:`;
+    case "pedido":
+      return `Mensagem do orquestrador ${nome} (salto ${origem.saltos}):`;
+  }
 }

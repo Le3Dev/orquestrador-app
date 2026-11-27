@@ -574,7 +574,13 @@ export class ServicoDeOrquestracao {
     // A mesma do evento `turno_iniciado`: o turno segue com ela até o fim,
     // mesmo que o usuário altere a configuração enquanto ele roda. Num motor
     // de reserva, com os papéis e os modelos dele.
-    const configuracaoDoTurno = orquestrador.configuracao.paraMotor(destino.motor);
+    const configuracaoDoMotor = orquestrador.configuracao.paraMotor(destino.motor);
+    // Consulta de vinculado só lê (ADR-50); vale também no pedido reenviado a motor de reserva,
+    // pois `origemDoPedido` já considera `destino.origem`.
+    const configuracaoDoTurno =
+      origemDoPedido?.natureza === "consulta"
+        ? configuracaoDoMotor.com({ nivelDePermissao: "leitura" })
+        : configuracaoDoMotor;
     // Resolvidas agora, junto com a configuração: mudar o padrão global com o
     // turno rodando também só vale a partir do próximo.
     const instrucoesDoTurno = this.instrucoesPara(configuracaoDoTurno);
@@ -1058,10 +1064,31 @@ export class ServicoDeOrquestracao {
         // Os blocos de vínculo também saem sempre; só valem num turno de execução sem Plano pendente.
         const semVinculos = separarBlocosDeVinculo(semPrevias.texto);
         const { resposta, planoProposto } = separarPropostaDePlano(semVinculos.texto);
-        // Pedido de vinculado nunca vira Plano pendente (ADR-49): a aprovação é a de quem pediu e,
-        // esperando o usuário deste lado, o resultado jamais voltaria ao remetente.
-        const deVinculado = this.origensDosTurnos.has(turnoId);
-        const planoPendente = planoProposto && !deVinculado && configuracaoDoTurno.propoePlanoEmPedidosGrandes(modo);
+        // Pedido e consulta de vinculado nunca viram Plano pendente (ADR-49/50): a aprovação é a de
+        // quem pediu e, esperando o usuário deste lado, o resultado jamais voltaria ao remetente.
+        // A resposta da consulta segue a regra normal, para quem consultou propor o plano conjunto.
+        // E uma resposta que consulta um vinculado ignora o marcador: o plano conjunto só vem
+        // depois da resposta dele, então propor um plano agora seria prematuro.
+        const origemDoTurno = this.origensDosTurnos.get(turnoId) ?? null;
+        const naturezaDoTurno = origemDoTurno?.natureza ?? null;
+        const deConsulta = naturezaDoTurno === "consulta";
+        const semPlanoPorOrigem = naturezaDoTurno === "pedido" || deConsulta;
+        const consultaOVinculado = semVinculos.mensagens.some((mensagem) => mensagem.tipo === "consulta");
+        const planoPendente =
+          planoProposto && !semPlanoPorOrigem && !consultaOVinculado && configuracaoDoTurno.propoePlanoEmPedidosGrandes(modo);
+        // Numa consulta a resposta volta sozinha: mensagens escritas por ela são ignoradas (notas valem).
+        const blocosDoTurno: ReturnType<typeof separarBlocosDeVinculo> = deConsulta
+          ? {
+              ...semVinculos,
+              mensagens: [],
+              avisos: [
+                ...semVinculos.avisos,
+                ...(semVinculos.mensagens.length > 0
+                  ? ["Mensagens ignoradas: numa consulta a sua resposta final volta sozinha para quem consultou."]
+                  : []),
+              ],
+            }
+          : semVinculos;
         this.publicar(
           orquestrador,
           orquestrador.concluirTurno(
@@ -1075,7 +1102,10 @@ export class ServicoDeOrquestracao {
           ),
         );
         if (modo === "execucao" && !planoPendente) {
-          await this.encaminharBlocosDeVinculo(orquestrador, turnoId, semVinculos);
+          await this.encaminharBlocosDeVinculo(orquestrador, turnoId, blocosDoTurno);
+          if (deConsulta && origemDoTurno !== null) {
+            await this.devolverRespostaDaConsulta(orquestrador, origemDoTurno, resposta);
+          }
         }
       } else {
         encerrado.falha =
@@ -1578,6 +1608,40 @@ export class ServicoDeOrquestracao {
       }
     } catch (falha) {
       avisos.push(`Não foi possível processar os blocos de vínculo: ${descreverErro(falha)}`);
+    }
+    for (const mensagem of avisos) {
+      this.publicar(orquestrador, { tipo: "aviso_de_vinculo", mensagem });
+    }
+  }
+
+  /**
+   * A resposta final de um turno de consulta volta sozinha a quem consultou
+   * (ADR-50), cortada no limite de uma mensagem. Resposta vazia vira uma frase
+   * dizendo isso. Nunca rejeita: os avisos viram eventos `aviso_de_vinculo`.
+   */
+  private async devolverRespostaDaConsulta(
+    orquestrador: Orquestrador,
+    origem: OrigemDoPedido,
+    resposta: string,
+  ): Promise<void> {
+    const { vinculos } = this.dependencias;
+    const avisos: string[] = [];
+    try {
+      if (vinculos === undefined) {
+        avisos.push("Resposta da consulta não devolvida: os vínculos não estão disponíveis.");
+      } else {
+        const corte = "\n[resposta cortada: passou do tamanho máximo de uma mensagem]";
+        const completa = resposta.trim();
+        const texto =
+          completa === ""
+            ? "O orquestrador consultado não respondeu nada."
+            : completa.length > TAMANHO_MAXIMO_DA_MENSAGEM
+              ? `${completa.slice(0, TAMANHO_MAXIMO_DA_MENSAGEM - corte.length)}${corte}`
+              : completa;
+        avisos.push(...(await vinculos.devolverRespostaDaConsulta(orquestrador.id, origem.orquestradorId, texto, origem)));
+      }
+    } catch (falha) {
+      avisos.push(`Não foi possível devolver a resposta da consulta: ${descreverErro(falha)}`);
     }
     for (const mensagem of avisos) {
       this.publicar(orquestrador, { tipo: "aviso_de_vinculo", mensagem });

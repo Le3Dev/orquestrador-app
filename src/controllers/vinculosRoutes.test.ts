@@ -155,7 +155,7 @@ describe("rotas de vínculos", () => {
     expect(resposta.status).toBe(202);
     expect(await resposta.json()).toEqual({ enfileirada: true });
     expect(entregas).toEqual([
-      { destinoId: "api", texto: "suba a API", origem: { orquestradorId: "front", nome: "Front", saltos: 0 } },
+      { destinoId: "api", texto: "suba a API", origem: { orquestradorId: "front", nome: "Front", saltos: 0, natureza: "pedido" } },
     ]);
   });
 

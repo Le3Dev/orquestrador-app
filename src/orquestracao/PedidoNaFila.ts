@@ -22,7 +22,21 @@ export interface OrigemDoPedido {
   orquestradorId: string;
   nome: string;
   saltos: number;
+  natureza: NaturezaDaMensagemDeVinculo;
 }
+
+/**
+ * O que a mensagem de vínculo é (ADR-50): "pedido" (executa direto), "consulta"
+ * (o vinculado só lê e a resposta volta sozinha) ou "resposta_da_consulta"
+ * (a resposta que volta, para quem consultou propor o plano conjunto).
+ */
+export const NATUREZAS_DA_MENSAGEM_DE_VINCULO = ["pedido", "consulta", "resposta_da_consulta"] as const;
+export type NaturezaDaMensagemDeVinculo = (typeof NATUREZAS_DA_MENSAGEM_DE_VINCULO)[number];
+
+/** A origem como é persistida: a natureza some quando é "pedido" (e ausente lê como "pedido"). */
+export type DadosDaOrigemDoPedido = Omit<OrigemDoPedido, "natureza"> & {
+  natureza?: NaturezaDaMensagemDeVinculo | undefined;
+};
 
 export interface DadosDoPedidoNaFila {
   id: string;
@@ -35,7 +49,7 @@ export interface DadosDoPedidoNaFila {
   /** Os endereços das prévias abertas no canvas quando o pedido entrou na fila. Ausente: nenhuma. */
   previasAbertas?: string[] | undefined;
   /** Quem enviou, se veio de um Orquestrador vinculado. Ausente: o pedido é do usuário (e nos pedidos antigos). */
-  origem?: OrigemDoPedido | undefined;
+  origem?: DadosDaOrigemDoPedido | undefined;
 }
 
 export interface NovoPedidoNaFila {
@@ -109,7 +123,7 @@ export class PedidoNaFila {
       Date.parse(dados.enfileiradoEm),
       Object.freeze(itens),
       Object.freeze([...(dados.previasAbertas ?? [])]),
-      dados.origem === undefined ? null : Object.freeze({ ...dados.origem }),
+      dados.origem === undefined ? null : Object.freeze({ ...dados.origem, natureza: dados.origem.natureza ?? "pedido" }),
     );
   }
 
@@ -127,7 +141,16 @@ export class PedidoNaFila {
       // Sem itens, o campo nem aparece: o `orquestrador.json` e a tela ficam como antes.
       ...(this.itensLigados.length === 0 ? {} : { itensLigados: this.itensLigados.map((item) => ({ ...item })) }),
       ...(this.previasAbertas.length === 0 ? {} : { previasAbertas: [...this.previasAbertas] }),
-      ...(this.origem === null ? {} : { origem: { ...this.origem } }),
+      ...(this.origem === null
+        ? {}
+        : {
+            origem: {
+              orquestradorId: this.origem.orquestradorId,
+              nome: this.origem.nome,
+              saltos: this.origem.saltos,
+              ...(this.origem.natureza === "pedido" ? {} : { natureza: this.origem.natureza }),
+            },
+          }),
     };
   }
 }

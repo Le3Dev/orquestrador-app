@@ -203,7 +203,7 @@ describe("ServicoDeOrquestracao e os vínculos", () => {
     expect(motor.pedidos.map((p) => p.orquestradorId)).toEqual([api.id, front.id]);
     const doFront = motor.pedidos[1];
     expect(doFront?.texto).toBe("A API está em /v1");
-    expect(doFront?.origemDaMensagem).toEqual({ orquestradorId: api.id, nome: "API", saltos: 0 });
+    expect(doFront?.origemDaMensagem).toEqual({ orquestradorId: api.id, nome: "API", saltos: 0, natureza: "pedido" });
     expect(doFront?.vinculados).toEqual([
       { id: api.id, nome: "API", pasta: api.pastaDeTrabalho.caminho, notas: "contrato: /v1" },
     ]);
@@ -240,7 +240,7 @@ describe("ServicoDeOrquestracao e os vínculos", () => {
     expect(doApi?.motor).toBe("claude-code");
     expect(doFrontNoClaude).toMatchObject({ motor: "claude-code", texto: "A API está em /v1" });
     expect(doFrontNoCodex).toMatchObject({ motor: "codex", orquestradorId: front.id, texto: "A API está em /v1" });
-    expect(doFrontNoCodex?.origemDaMensagem).toEqual({ orquestradorId: api.id, nome: "API", saltos: 0 });
+    expect(doFrontNoCodex?.origemDaMensagem).toEqual({ orquestradorId: api.id, nome: "API", saltos: 0, natureza: "pedido" });
     expect(doFrontNoCodex?.vinculados).toEqual([
       { id: api.id, nome: "API", pasta: api.pastaDeTrabalho.caminho, notas: "" },
     ]);
@@ -254,10 +254,10 @@ describe("ServicoDeOrquestracao e os vínculos", () => {
     const front = await criar(servicoAtual, "Front");
     await servicoAtual.enfileirarPedido(front.id, "tarefa antiga");
 
-    await servicoAtual.receberDeVinculado(front.id, "oi", { orquestradorId: api.id, nome: "API", saltos: 1 });
+    await servicoAtual.receberDeVinculado(front.id, "oi", { orquestradorId: api.id, nome: "API", saltos: 1, natureza: "pedido" });
 
     expect(front.fila.map((p) => p.texto)).toEqual(["tarefa antiga", "oi"]);
-    expect(front.fila[1]?.origem).toEqual({ orquestradorId: api.id, nome: "API", saltos: 1 });
+    expect(front.fila[1]?.origem).toEqual({ orquestradorId: api.id, nome: "API", saltos: 1, natureza: "pedido" });
     expect(motor.pedidos).toEqual([]);
   });
 
@@ -336,6 +336,35 @@ ${BLOCO("API", "terminei")}
     expect(motor.pedidos[2]).toMatchObject({ orquestradorId: api.id, texto: "terminei" });
   });
 
+  it("consulta e plano conjunto: A consulta B (só leitura), a resposta volta e A propõe o plano", async () => {
+    const CONSULTA = "```mensagem-para-vinculado\n" + JSON.stringify({ para: "Front", tipo: "consulta", texto: "o que existe?" }) + "\n```";
+    const motor = new MotorQueResponde((_pedido, indice) => {
+      if (indice === 0) return `Vou consultar.\n${CONSULTA}\n<plano-para-aprovacao/>`;
+      if (indice === 1) return `Existe o botão X.\n${BLOCO("API", "ignorada")}\n<plano-para-aprovacao/>`;
+      return `Plano conjunto.\n<plano-para-aprovacao/>`;
+    });
+    servicoAtual = montar(motor);
+    const api = await criar(servicoAtual, "API");
+    const front = await criar(servicoAtual, "Front");
+    await vinculos.vincular(api.id, front.id);
+
+    await (await servicoAtual.enviarMensagem(api.id, "algo grande")).conclusao;
+    await vi.waitFor(() => {
+      expect(motor.pedidos).toHaveLength(3);
+      expect(api.turnoEmAndamento).toBeNull();
+      expect(api.ultimoTurno?.resposta).toBe("Plano conjunto.");
+    });
+
+    expect(motor.pedidos[1]).toMatchObject({ orquestradorId: front.id, origemDaMensagem: { natureza: "consulta" } });
+    expect(motor.pedidos[1]?.configuracao.nivelDePermissao).toBe("leitura");
+    expect(front.ultimoTurno?.planoPendente).toBe(false);
+    expect(front.ultimoTurno?.resposta).toBe("Existe o botão X.");
+    expect(repositorio.avisosDe(front.id).some((aviso) => aviso.includes("ignoradas"))).toBe(true);
+    expect(motor.pedidos[2]).toMatchObject({ orquestradorId: api.id, origemDaMensagem: { natureza: "resposta_da_consulta" } });
+    expect(motor.pedidos[2]?.texto).toContain("Existe o botão X.");
+    expect(api.ultimoTurno?.planoPendente).toBe(true);
+  });
+
   it("turno do usuário com marcador de plano continua virando Plano pendente", async () => {
     const motor = new MotorQueResponde(() => `Plano.
 <plano-para-aprovacao/>`);
@@ -404,7 +433,7 @@ describe("mensagemParaOOrquestrador e os vínculos", () => {
   it("abre o pedido com a linha de quem enviou e o salto", () => {
     const mensagem = mensagemParaOOrquestrador(
       "rode os testes", config, [], "execucao", null, null, false, [], "unix", [], [], null, false, [],
-      { orquestradorId: "o1", nome: "API", saltos: 3 },
+      { orquestradorId: "o1", nome: "API", saltos: 3, natureza: "pedido" },
     );
 
     expect(mensagem.endsWith("\n\nMensagem do orquestrador API (salto 3):\nrode os testes")).toBe(true);

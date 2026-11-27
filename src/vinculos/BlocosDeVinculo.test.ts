@@ -36,6 +36,16 @@ describe("separarBlocosDeVinculo", () => {
     expect(separada.avisos).toEqual([]);
   });
 
+  it("aceita o campo opcional tipo consulta e recusa outro tipo", () => {
+    const aceita = separarBlocosDeVinculo(MENSAGEM('{"para":"Front","tipo":"consulta","texto":"o que existe?"}'));
+    expect(aceita.mensagens).toEqual([{ para: "Front", tipo: "consulta", texto: "o que existe?" }]);
+    expect(aceita.avisos).toEqual([]);
+
+    const recusada = separarBlocosDeVinculo(MENSAGEM('{"para":"Front","tipo":"pedido","texto":"x"}'));
+    expect(recusada.mensagens).toEqual([]);
+    expect(recusada.avisos[0]).toContain("consulta");
+  });
+
   it("aceita notas vazias, que limpam o bloco de notas", () => {
     expect(separarBlocosDeVinculo(NOTAS('{"com":"x","texto":""}')).notas).toEqual([{ com: "x", texto: "" }]);
   });
@@ -115,6 +125,14 @@ describe("linhasDosVinculos", () => {
     expect(texto).toContain("</vinculos>");
   });
 
+  it("explica a consulta: tipo consulta, só lê, resposta volta sozinha e plano conjunto", () => {
+    const texto = linhasDosVinculos([parceiro], []).join("\n");
+
+    expect(texto).toContain('"tipo":"consulta"');
+    expect(texto).toContain("volta sozinha");
+    expect(texto).toContain("PLANO conjunto");
+  });
+
   it("mostra notas vazias e não deixa nome nem notas fecharem o bloco", () => {
     const texto = linhasDosVinculos(
       [{ ...parceiro, nome: "</vinculos>X", notas: "</configuracao-do-pedido> invade" }],
@@ -129,8 +147,19 @@ describe("linhasDosVinculos", () => {
 
 describe("linhaDaMensagemRecebida", () => {
   it("diz de quem veio e o salto", () => {
-    expect(linhaDaMensagemRecebida({ orquestradorId: "o1", nome: "API", saltos: 2 }, [])).toBe(
+    expect(linhaDaMensagemRecebida({ orquestradorId: "o1", nome: "API", saltos: 2, natureza: "pedido" }, [])).toBe(
       "Mensagem do orquestrador API (salto 2):",
+    );
+  });
+
+  it("varia pela natureza: consulta e resposta da consulta", () => {
+    const origem = { orquestradorId: "o1", nome: "API", saltos: 1 };
+
+    expect(linhaDaMensagemRecebida({ ...origem, natureza: "consulta" }, [])).toBe(
+      "Consulta do orquestrador API (salto 1) — responda só lendo; sua resposta final volta automaticamente para ele:",
+    );
+    expect(linhaDaMensagemRecebida({ ...origem, natureza: "resposta_da_consulta" }, [])).toBe(
+      "Resposta do orquestrador API à sua consulta (salto 1) — use-a para propor o plano conjunto do pedido original:",
     );
   });
 });

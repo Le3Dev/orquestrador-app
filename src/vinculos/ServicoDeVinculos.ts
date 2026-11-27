@@ -94,7 +94,7 @@ export class ServicoDeVinculos implements VinculosDoOrquestrador {
     if (nome === null) {
       throw new ErroDeVinculo("nao_encontrado", "Orquestrador não encontrado.");
     }
-    await entregar(destinoId, texto, { orquestradorId: deOrquestradorId, nome, saltos: 0 });
+    await entregar(destinoId, texto, { orquestradorId: deOrquestradorId, nome, saltos: 0, natureza: "pedido" });
   }
 
   doOrquestrador(orquestradorId: string): readonly VinculoDoOrquestrador[] {
@@ -143,12 +143,48 @@ export class ServicoDeVinculos implements VinculosDoOrquestrador {
         continue;
       }
       try {
-        await entregar(alvo.parceiroId, bloco.texto, { orquestradorId: remetenteId, nome: nomeDoRemetente, saltos });
+        await entregar(alvo.parceiroId, bloco.texto, {
+          orquestradorId: remetenteId,
+          nome: nomeDoRemetente,
+          saltos,
+          natureza: bloco.tipo === "consulta" ? "consulta" : "pedido",
+        });
       } catch (erro) {
         avisos.push(`Mensagem para "${bloco.para}" não enviada: ${descreverErro(erro)}`);
       }
     }
     return avisos;
+  }
+
+  /**
+   * A resposta final de um turno de consulta volta a quem consultou, como
+   * "resposta_da_consulta". O vínculo pode ter sido desfeito no meio do caminho
+   * e o anti-laço também vale aqui; nunca lança: os problemas viram avisos.
+   */
+  async devolverRespostaDaConsulta(
+    remetenteId: string,
+    destinoId: string,
+    texto: string,
+    origemDoTurno: { saltos: number },
+  ): Promise<string[]> {
+    const { orquestradores, entregar } = this.dependencias;
+    const nomeDoRemetente = orquestradores.nomeDe(remetenteId);
+    if (nomeDoRemetente === null) {
+      return [];
+    }
+    if (!this.doOrquestrador(remetenteId).some((vinculo) => vinculo.parceiroId === destinoId)) {
+      return ["Resposta da consulta não devolvida: o vínculo com quem consultou não existe mais."];
+    }
+    const saltos = saltosDaMensagemEnviadaPor(origemDoTurno);
+    if (passouDoLimiteDeSaltos(saltos)) {
+      return [`Resposta da consulta descartada: a conversa entre vinculados passou do limite de ${LIMITE_DE_SALTOS} mensagens encadeadas.`];
+    }
+    try {
+      await entregar(destinoId, texto, { orquestradorId: remetenteId, nome: nomeDoRemetente, saltos, natureza: "resposta_da_consulta" });
+      return [];
+    } catch (erro) {
+      return [`Resposta da consulta não devolvida: ${descreverErro(erro)}`];
+    }
   }
 
   async removerDoOrquestrador(orquestradorId: string): Promise<void> {

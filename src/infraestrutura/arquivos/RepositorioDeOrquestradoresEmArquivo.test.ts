@@ -64,7 +64,7 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
   it("reabre a origem dos pedidos que vieram de um vinculado, e os do usuário seguem sem ela", async () => {
     const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
     const orquestrador = novoOrquestrador("a");
-    const origem = { orquestradorId: "b", nome: "Orquestrador b", saltos: 2 };
+    const origem = { orquestradorId: "b", nome: "Orquestrador b", saltos: 2, natureza: "pedido" as const };
     orquestrador.enfileirarPedido(PedidoNaFila.criar({ id: "p1", texto: "de vínculo", modo: "execucao", enfileiradoEm: agora, origem }));
     orquestrador.enfileirarPedido(PedidoNaFila.criar({ id: "p2", texto: "do usuário", modo: "execucao", enfileiradoEm: agora }));
     await repositorio.salvar(orquestrador);
@@ -73,6 +73,20 @@ describe("RepositorioDeOrquestradoresEmArquivo", () => {
     const reaberto = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
 
     expect(reaberto.buscarPorId("a")?.fila.map((pedido) => pedido.origem)).toEqual([origem, null]);
+  });
+
+  it("a natureza da origem persiste (consulta) e a ausente reabre como pedido", async () => {
+    const repositorio = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+    const orquestrador = novoOrquestrador("a");
+    const base = { orquestradorId: "b", nome: "Orquestrador b", saltos: 1 };
+    orquestrador.enfileirarPedido(PedidoNaFila.criar({ id: "p1", texto: "consulta", modo: "execucao", enfileiradoEm: agora, origem: { ...base, natureza: "consulta" } }));
+    orquestrador.enfileirarPedido(PedidoNaFila.criar({ id: "p2", texto: "pedido", modo: "execucao", enfileiradoEm: agora, origem: { ...base, natureza: "pedido" } }));
+    await repositorio.salvar(orquestrador);
+    await repositorio.aguardarGravacoes();
+
+    const reaberto = await RepositorioDeOrquestradoresEmArquivo.abrir(pasta);
+
+    expect(reaberto.buscarPorId("a")?.fila.map((pedido) => pedido.origem?.natureza)).toEqual(["consulta", "pedido"]);
   });
 
   it("reabre a escolha dos subagentes prontos de cada orquestrador", async () => {

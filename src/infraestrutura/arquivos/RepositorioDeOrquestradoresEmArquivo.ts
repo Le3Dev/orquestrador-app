@@ -148,7 +148,13 @@ const esquemaDoArquivo = z.object({
         previasAbertas: z.array(z.string()).optional(),
         // Ausente nos pedidos do usuário (e nos gravados antes dos vínculos).
         origem: z
-          .object({ orquestradorId: z.string(), nome: z.string(), saltos: z.number().int().min(0) })
+          .object({
+            orquestradorId: z.string(),
+            nome: z.string(),
+            saltos: z.number().int().min(0),
+            // Ausente nos pedidos normais ("pedido") e nos gravados antes da consulta.
+            natureza: z.enum(["pedido", "consulta", "resposta_da_consulta"]).optional(),
+          })
           .optional(),
       }),
     )

@@ -24,6 +24,17 @@ export interface VinculosDoOrquestrador {
     blocos: { mensagens: readonly MensagemParaVinculado[]; notas: readonly NotasParaVinculo[] },
     origemDoTurno: { saltos: number } | null,
   ): Promise<string[]>;
+  /**
+   * Devolve a resposta final de um turno de consulta a quem consultou (natureza
+   * "resposta_da_consulta"). Mesmo contrato de `processarBlocos`: devolve avisos
+   * e nunca rejeita (o vínculo pode ter sido desfeito).
+   */
+  devolverRespostaDaConsulta(
+    remetenteId: string,
+    destinoId: string,
+    texto: string,
+    origemDoTurno: { saltos: number },
+  ): Promise<string[]>;
   /** Desfaz os vínculos do Orquestrador removido. */
   removerDoOrquestrador(orquestradorId: string): Promise<void>;
 }

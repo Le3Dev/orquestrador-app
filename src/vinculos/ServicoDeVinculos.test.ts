@@ -120,7 +120,7 @@ describe("ServicoDeVinculos", () => {
       await servico.enviarMensagem(vinculo.id, "front", "suba o servidor");
 
       expect(entregas).toEqual([
-        { destinoId: "api", texto: "suba o servidor", origem: { orquestradorId: "front", nome: "Front", saltos: 0 } },
+        { destinoId: "api", texto: "suba o servidor", origem: { orquestradorId: "front", nome: "Front", saltos: 0, natureza: "pedido" } },
       ]);
     });
 
@@ -130,6 +130,40 @@ describe("ServicoDeVinculos", () => {
       await expect(servico.enviarMensagem(vinculo.id, "infra", "oi")).rejects.toMatchObject({ motivo: "dados_invalidos" });
       await expect(servico.enviarMensagem(vinculo.id, "api", "  ")).rejects.toMatchObject({ motivo: "dados_invalidos" });
       await expect(servico.enviarMensagem("x", "api", "oi")).rejects.toMatchObject({ motivo: "nao_encontrado" });
+      expect(entregas).toEqual([]);
+    });
+  });
+
+  describe("devolverRespostaDaConsulta", () => {
+    it("entrega como resposta_da_consulta, com os saltos da consulta mais um", async () => {
+      await servico.vincular("api", "front");
+
+      const avisos = await servico.devolverRespostaDaConsulta("front", "api", "existe /v1", { saltos: 0 });
+
+      expect(avisos).toEqual([]);
+      expect(entregas).toEqual([
+        { destinoId: "api", texto: "existe /v1", origem: { orquestradorId: "front", nome: "Front", saltos: 1, natureza: "resposta_da_consulta" } },
+      ]);
+    });
+
+    it("respeita o anti-laço", async () => {
+      await servico.vincular("api", "front");
+
+      const avisos = await servico.devolverRespostaDaConsulta("front", "api", "x", { saltos: 6 });
+
+      expect(avisos).toHaveLength(1);
+      expect(avisos[0]).toContain("limite de 6");
+      expect(entregas).toEqual([]);
+    });
+
+    it("avisa, sem lançar, quando o vínculo não existe mais ou a entrega falha", async () => {
+      const semVinculo = await servico.devolverRespostaDaConsulta("front", "api", "x", { saltos: 0 });
+      expect(semVinculo[0]).toContain("não existe mais");
+
+      await servico.vincular("api", "front");
+      falhaNaEntrega = new Error("fila cheia");
+      const comFalha = await servico.devolverRespostaDaConsulta("front", "api", "x", { saltos: 0 });
+      expect(comFalha[0]).toContain("fila cheia");
       expect(entregas).toEqual([]);
     });
   });
@@ -150,6 +184,18 @@ describe("ServicoDeVinculos", () => {
         ["front", "pronto", 0, "API"],
         ["infra", "deploy", 0, "API"],
       ]);
+    });
+
+    it("entrega com a natureza certa: consulta quando o bloco tem tipo consulta, senão pedido", async () => {
+      await servico.vincular("api", "front");
+
+      await servico.processarBlocos(
+        "api",
+        { mensagens: [{ para: "Front", texto: "o que existe?", tipo: "consulta" }, { para: "Front", texto: "faça" }], notas: [] },
+        null,
+      );
+
+      expect(entregas.map((e) => e.origem.natureza)).toEqual(["consulta", "pedido"]);
     });
 
     it("herda os saltos do turno de origem e soma um", async () => {

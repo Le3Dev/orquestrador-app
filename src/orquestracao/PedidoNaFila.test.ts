@@ -19,17 +19,29 @@ function capturarErro(acao: () => unknown): ErroDeOrquestracao {
 
 describe("PedidoNaFila e a origem de vínculo", () => {
   it("guarda de quem veio, leva no paraDados e no reconstituir, e sem origem o campo nem aparece", () => {
-    const origem = { orquestradorId: "o1", nome: "API", saltos: 2 };
+    const origem = { orquestradorId: "o1", nome: "API", saltos: 2, natureza: "pedido" as const };
     const pedido = PedidoNaFila.criar({ id: "p1", texto: "oi", modo: "execucao", enfileiradoEm, origem });
 
     expect(pedido.origem).toEqual(origem);
     expect(Object.isFrozen(pedido.origem)).toBe(true);
-    expect(pedido.paraDados().origem).toEqual(origem);
+    expect(pedido.paraDados().origem).toEqual({ orquestradorId: "o1", nome: "API", saltos: 2 });
     expect(PedidoNaFila.reconstituir(pedido.paraDados()).origem).toEqual(origem);
 
     const doUsuario = PedidoNaFila.criar({ id: "p2", texto: "oi", modo: "execucao", enfileiradoEm });
     expect(doUsuario.origem).toBeNull();
     expect(doUsuario.paraDados()).not.toHaveProperty("origem");
+  });
+
+  it("a natureza persiste, e pedido não grava o campo (ausente lê como pedido)", () => {
+    const consulta = { orquestradorId: "o1", nome: "API", saltos: 0, natureza: "consulta" as const };
+    const pedidoDeConsulta = PedidoNaFila.criar({ id: "p1", texto: "oi", modo: "execucao", enfileiradoEm, origem: consulta });
+    expect(pedidoDeConsulta.paraDados().origem).toEqual({ orquestradorId: "o1", nome: "API", saltos: 0, natureza: "consulta" });
+    expect(PedidoNaFila.reconstituir(pedidoDeConsulta.paraDados()).origem).toEqual(consulta);
+
+    const normal = PedidoNaFila.criar({ id: "p2", texto: "oi", modo: "execucao", enfileiradoEm, origem: { ...consulta, natureza: "pedido" } });
+    expect(normal.paraDados().origem).not.toHaveProperty("natureza");
+    const semNatureza = PedidoNaFila.reconstituir({ id: "p3", texto: "t", modo: "execucao", enfileiradoEm: enfileiradoEm.toISOString(), origem: { orquestradorId: "o1", nome: "API", saltos: 1 } });
+    expect(semNatureza.origem?.natureza).toBe("pedido");
   });
 
   it("reconstitui pedidos gravados antes dos vínculos (sem origem)", () => {

@@ -296,6 +296,17 @@ function regraDaAutonomiaDoVinculado(): string[] {
 }
 
 /**
+ * Consulta de um Orquestrador vinculado (ADR-50): quem consultou quer entender
+ * o projeto deste lado antes de propor o plano conjunto. O turno só lê, e a
+ * resposta final volta sozinha, então blocos de mensagem seriam ignorados.
+ */
+function regraDaConsultaDoVinculado(): string[] {
+  return [
+    `- Consulta de um orquestrador vinculado: só leia e pesquise, não altere nada e não proponha plano (nem a linha ${MARCADOR_DE_PLANO}). Responda de forma objetiva o que foi perguntado: o que existe, contratos, arquivos, impactos e o que precisaria mudar deste lado. Não use blocos ${MARCA_DA_MENSAGEM_PARA_VINCULADO}: a sua resposta final volta sozinha para quem consultou.`,
+  ];
+}
+
+/**
  * As regras fixas do Orquestrador: ele coordena, faz o trivial quando o pedido
  * permite e entrega toda alteração aos Subagentes.
  *
@@ -419,9 +430,12 @@ function linhasDoContextoDaTroca(contexto: string | null): string[] {
  * Os Orquestradores vinculados (`vinculados`) vão num bloco `<vinculos>`
  * depois dos itens ligados, com as notas compartilhadas e como falar com
  * eles. Se o pedido veio de um deles (`origemDaMensagem`), a linha "Mensagem
- * do orquestrador X (salto n):" abre o texto. Num turno de execução assim, a
- * regra dos pedidos grandes dá lugar à da autonomia: executa direto, sem
- * Plano, e devolve o resultado a quem pediu (ADR-49).
+ * do orquestrador X (salto n):" (varia pela natureza) abre o texto. Num turno
+ * de execução assim, a regra dos pedidos grandes dá lugar a outra, pela
+ * natureza: "pedido" → autonomia (executa direto, sem Plano, e devolve o
+ * resultado a quem pediu, ADR-49); "consulta" → só lê e responde, sem blocos
+ * de mensagem (ADR-50); "resposta_da_consulta" e sem origem → regras de
+ * pedidos grandes, para propor o plano conjunto.
  */
 export function mensagemParaOOrquestrador(
   texto: string,
@@ -453,12 +467,15 @@ export function mensagemParaOOrquestrador(
         `  Na execução valerá: ${DESCRICAO_DO_NIVEL[configuracao.nivelDePermissao]}. Planeje dentro disso; o usuário vai aprovar, ajustar ou descartar antes de qualquer execução.`,
       ]
     : [];
-  const deVinculado = origemDaMensagem !== null && !planejamento;
-  const regrasDoTamanho = deVinculado
-    ? regraDaAutonomiaDoVinculado()
-    : configuracao.propoePlanoEmPedidosGrandes(modo)
-      ? regrasDePedidosGrandes()
-      : [];
+  const naturezaDaOrigem = planejamento ? null : (origemDaMensagem?.natureza ?? null);
+  const regrasDoTamanho =
+    naturezaDaOrigem === "pedido"
+      ? regraDaAutonomiaDoVinculado()
+      : naturezaDaOrigem === "consulta"
+        ? regraDaConsultaDoVinculado()
+        : configuracao.propoePlanoEmPedidosGrandes(modo)
+          ? regrasDePedidosGrandes()
+          : [];
   // As imagens chegam junto com a mensagem para o Orquestrador; os
   // Subagentes não as recebem, então precisam dos caminhos para abri-las.
   const caminhosDasImagens = anexos.filter((anexo) => anexo.categoria === "imagem").map((anexo) => anexo.caminho);
