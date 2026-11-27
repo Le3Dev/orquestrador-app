@@ -418,7 +418,8 @@ describe("arestasDosBixinhos", () => {
 
     expect(arestas.map((aresta) => aresta.data)).toEqual([
       { situacao: "concluido", encerradoEm: "2026-10-28T12:00:00Z" },
-      { situacao: "executando", encerradoEm: null },
+      // O segundo da fila de entrada leva o lugar dele, para o pacote da tarefa partir depois de ele nascer.
+      { situacao: "executando", encerradoEm: null, entrada: 1 },
     ]);
   });
 

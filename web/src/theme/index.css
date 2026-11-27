@@ -723,6 +723,37 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--active); }
  * mas parada. A bolinha já mostra a troca, e o tracejado correndo
  * (`dashdraw`) repintava todas as linhas ativas a cada quadro. */
 .react-flow__edge.aresta-executando.animated path { animation: none; }
+/* A linha muda de cor com a situação (verde ao concluir, vermelha ao falhar) em vez de trocar de repente. */
+.react-flow__edge:is(.aresta-executando, .aresta-concluido, .aresta-falhou) .react-flow__edge-path { transition: stroke .25s ease-out; }
+
+/* Tracejado que corre do terminal ao bixinho enquanto ele trabalha: uma cópia da
+ * curva por cima da linha, só com o deslocamento do traço animado. Pausa com o
+ * canvas em movimento e sem servidor; com o reduzir movimento fica parado.
+ * (A regra acima zera a animação de qualquer `path` da linha: esta é mais específica.) */
+.react-flow__edge.aresta-executando .fio-correndo {
+  fill: none;
+  stroke: color-mix(in srgb, var(--active) 70%, var(--claude-claro));
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 5 9;
+  opacity: .85;
+  pointer-events: none;
+  animation: fio-correndo .7s linear infinite;
+}
+@keyframes fio-correndo { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -14; } }
+.canvas-movendo .fio-correndo,
+.canvas-desconectado .fio-correndo { animation-play-state: paused !important; }
+
+/* Pacote da tarefa (terminal → bixinho, uma vez). É SMIL: some, em vez de pausar,
+ * nos mesmos casos da bolinha e do envelope. */
+.pacote-da-tarefa { pointer-events: none; }
+.pacote-da-tarefa rect {
+  fill: var(--active);
+  stroke: color-mix(in srgb, var(--claude-escuro) 70%, transparent);
+  stroke-width: 1;
+}
+.canvas-desconectado .pacote-da-tarefa,
+.canvas-movendo .pacote-da-tarefa { display: none; }
 
 /* Bolinha que vai e volta na linha enquanto o bixinho trabalha. Núcleo claro
  * para destacar sobre a linha laranja; o halo é o próprio contorno, por baixo
@@ -3183,7 +3214,7 @@ a.chip-de-anexo:focus-visible { outline: 2px solid var(--active); outline-offset
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; }
   /* A bolinha e o envelope são SMIL, que ignora as regras de animação do CSS acima. */
-  .bolinha-da-troca, .envelope-da-entrega { display: none; }
+  .bolinha-da-troca, .envelope-da-entrega, .pacote-da-tarefa { display: none; }
   /* O terminal trabalhando fica destacado no minimapa, sem pulsar. */
   .react-flow__minimap-node.minimapa-terminal-trabalhando { animation: none; }
   /* A chegada do relatório não pisca a borda do terminal. */

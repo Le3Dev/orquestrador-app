@@ -151,6 +151,8 @@ export type DadosDaArestaDoBixinho = {
   encerradoEm: string | null;
   /** O bixinho está saindo sozinho do canvas: a linha se recolhe até o terminal. */
   saindo?: boolean;
+  /** Lugar do bixinho na fila de entrada (`DadosDoBixinho.entrada`): o pacote da tarefa só parte quando ele já nasceu. */
+  entrada?: number;
 };
 /** A linha do terminal a um bixinho; `animated` já diz se o Subagente trabalha. */
 export type ArestaDoBixinho = Edge<DadosDaArestaDoBixinho, "bixinho">;
@@ -1196,9 +1198,12 @@ export function arestasDosBixinhos(
         className: saindo.has(bixinho.id)
           ? `${CLASSE_DA_ARESTA[subagente.situacao]} aresta-bixinho-saindo`
           : CLASSE_DA_ARESTA[subagente.situacao],
-        data: saindo.has(bixinho.id)
-          ? { situacao: subagente.situacao, encerradoEm: subagente.encerradoEm, saindo: true }
-          : { situacao: subagente.situacao, encerradoEm: subagente.encerradoEm },
+        data: {
+          situacao: subagente.situacao,
+          encerradoEm: subagente.encerradoEm,
+          ...(saindo.has(bixinho.id) ? { saindo: true } : {}),
+          ...(bixinho.data.entrada ? { entrada: bixinho.data.entrada } : {}),
+        },
         selectable: false,
         focusable: false,
       },

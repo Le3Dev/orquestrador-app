@@ -1,4 +1,20 @@
-import { ENTREGA_AO_VIVO_MS, entregaRecente, houveEntrega } from "./entrega";
+import { atrasoDoPacote, ENTREGA_AO_VIVO_MS, entregaRecente, estadoDoFio, houveEntrega } from "./entrega";
+
+describe("fio do bixinho", () => {
+  it("o pacote parte 110 ms depois do anterior da fila", () => {
+    expect(atrasoDoPacote(0)).toBe(120);
+    expect(atrasoDoPacote(3) - atrasoDoPacote(2)).toBe(110);
+    expect(atrasoDoPacote(-1)).toBe(120);
+  });
+
+  it("o fio corre ao trabalhar, fica verde ao concluir e vermelho ao falhar", () => {
+    expect(estadoDoFio("executando")).toBe("correndo");
+    expect(estadoDoFio("concluido")).toBe("ok");
+    expect(estadoDoFio("falhou")).toBe("erro");
+    expect(estadoDoFio("cancelado")).toBe("parado");
+    expect(estadoDoFio(undefined)).toBe("parado");
+  });
+});
 
 describe("houveEntrega", () => {
   it("só executando → concluído entrega o relatório", () => {
