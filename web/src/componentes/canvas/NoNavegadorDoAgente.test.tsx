@@ -1,13 +1,17 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { type NodeProps, ReactFlowProvider } from "@xyflow/react";
+import { type NodeProps, ReactFlowProvider, useStoreApi } from "@xyflow/react";
+import { useEffect } from "react";
 
 import { type AcoesDoCanvas, ProvedorDoCanvas, type ValorDoCanvas } from "../../shared/canvas/contexto";
 import type { NoNavegadorDoAgente as TipoDoNo } from "../../shared/canvas/nos";
 import type { ApiDoNavegadorDoAgente, EstadoDoNavegadorDoAgente } from "../../shared/canvas/ponteDoNavegador";
 import type { ResumoDoOrquestrador } from "../../shared/api/tipos";
 import {
+  ESPERA_APOS_MOVER_MS,
+  ESPERA_DA_COBERTURA_LIVRE_MS,
   ESPERA_DA_FOTO_MS,
   INTERVALO_DA_COBERTURA_MS,
+  INTERVALO_DA_FOTO_MS,
   MENSAGEM_SEM_NAVEGADOR_ABERTO,
   MENSAGEM_SEM_O_APP_DESKTOP,
   NoNavegadorDoAgente,
@@ -80,9 +84,33 @@ function propsDoNo(alteracoes: Partial<NodeProps<TipoDoNo>> = {}): NodeProps<Tip
   };
 }
 
+/** O store do canvas (o do ReactFlowProvider em que o nó está): o teste move a vista (pan e zoom) por ele. */
+let storeDoCanvas: ReturnType<typeof useStoreApi> | null = null;
+
+function GuardaOStoreDoCanvas() {
+  const store = useStoreApi();
+  useEffect(() => {
+    storeDoCanvas = store;
+    return () => {
+      storeDoCanvas = null;
+    };
+  }, [store]);
+  return null;
+}
+
+/** Pan e zoom do canvas: o `transform` do React Flow muda, como quando o usuário arrasta o fundo ou gira o scroll. */
+function moverACamera(x: number, y: number, zoom = 1): void {
+  const store = storeDoCanvas;
+  if (store === null) {
+    throw new Error("o canvas de teste não está montado");
+  }
+  act(() => store.setState({ transform: [x, y, zoom] }));
+}
+
 function Navegador({ valor, no }: { valor: ValorDoCanvas; no: NodeProps<TipoDoNo> }) {
   return (
     <ReactFlowProvider>
+      <GuardaOStoreDoCanvas />
       <ProvedorDoCanvas valor={valor}>
         <NoNavegadorDoAgente {...no} />
       </ProvedorDoCanvas>
@@ -204,6 +232,25 @@ describe("NoNavegadorDoAgente", () => {
     /** Espera a vista ser mostrada (o estado do app chega pelo `estados()` e o corpo é medido no quadro seguinte). */
     async function esperarAVista(): Promise<void> {
       await waitFor(() => expect(ponte.api.mostrar).toHaveBeenCalled());
+    }
+
+    /** Deixa passar alguns quadros do laço que acompanha o corpo (o relógio manual não anda por isso). */
+    async function esperarQuadros(): Promise<void> {
+      await act(async () => new Promise((resolver) => setTimeout(resolver, 60)));
+    }
+
+    /**
+     * Um relógio manual: o laço lê `Date.now()` para as esperas (depois de mover, cobertura livre), então o teste
+     * anda o tempo sem dormir e sem ficar sujeito à pressa da máquina.
+     */
+    function relogioManual(inicio = 1_000_000): { avancar: (ms: number) => void } {
+      let agora = inicio;
+      vi.spyOn(Date, "now").mockImplementation(() => agora);
+      return {
+        avancar: (ms) => {
+          agora += ms;
+        },
+      };
     }
 
     describe("o que a janela mostra", () => {
@@ -393,25 +440,165 @@ describe("NoNavegadorDoAgente", () => {
     });
 
     describe("a vista nativa sobre o corpo", () => {
-      it("mostra a vista com o retângulo do corpo e o zoom do canvas; mover o corpo manda o retângulo novo", async () => {
+      it("mostra a vista com o retângulo do corpo e o zoom do canvas; mudar só a posição do corpo manda o retângulo novo", async () => {
         renderizar();
         await esperarAVista();
 
         expect(ponte.api.mostrar).toHaveBeenCalledWith("o1", { x: 100, y: 200, largura: 360, altura: 240, zoom: 0.5 });
         expect(ponte.api.mostrar).toHaveBeenCalledTimes(1);
 
-        // Pan e zoom do canvas: o corpo muda de lugar e de escala.
+        // O corpo muda de lugar com o mesmo tamanho (e o canvas não fez pan nem zoom): a vista o acompanha.
         vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
           ...retanguloDoCorpo,
           left: 180,
           top: 150,
-          width: 720,
-          height: 480,
         } as DOMRect);
         await waitFor(() =>
-          expect(ponte.api.posicionar).toHaveBeenCalledWith("o1", { x: 180, y: 150, largura: 720, altura: 480, zoom: 1 }),
+          expect(ponte.api.posicionar).toHaveBeenCalledWith("o1", { x: 180, y: 150, largura: 360, altura: 240, zoom: 0.5 }),
         );
         expect(ponte.api.mostrar).toHaveBeenCalledTimes(1);
+        expect(ponte.api.ocultar).not.toHaveBeenCalled();
+      });
+
+      it("o retângulo vai inteiro, sem corte: x negativo e caixa além da borda da janela não encolhem a vista", async () => {
+        // A janela do jsdom tem 1024x768: o corpo sai pela esquerda e por baixo.
+        vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+          ...retanguloDoCorpo,
+          left: -100,
+          top: 600,
+        } as DOMRect);
+        renderizar();
+        await esperarAVista();
+
+        expect(ponte.api.mostrar).toHaveBeenCalledWith("o1", { x: -100, y: 600, largura: 360, altura: 240, zoom: 0.5 });
+      });
+
+      it("o corpo quase todo fora da tela (sobra menos que o lado mínimo) não mostra a vista; fica a foto", async () => {
+        vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+          ...retanguloDoCorpo,
+          left: 1024 - 20,
+        } as DOMRect);
+        renderizar();
+
+        expect(await screen.findByRole("img", { name: /Foto da página/ })).toBeInTheDocument();
+        await esperarQuadros();
+        expect(ponte.api.mostrar).not.toHaveBeenCalled();
+      });
+
+      it("o corpo passando de uma borda do canvas que não é a da janela (o cabeçalho) fica na foto; livre dela, a vista sobe", async () => {
+        const area = { left: 0, top: 40, width: 1024, height: 728 };
+        let topoDoCorpo = 10;
+        vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+          return (this.classList.contains("react-flow") ? area : { ...retanguloDoCorpo, top: topoDoCorpo }) as DOMRect;
+        });
+        const { tela } = renderizar();
+        // O canvas é o contêiner: o corpo está sob o cabeçalho do canvas (top 10 < 40).
+        tela.container.classList.add("react-flow");
+
+        expect(await screen.findByRole("img", { name: /Foto da página/ })).toBeInTheDocument();
+        await esperarQuadros();
+        expect(ponte.api.mostrar).not.toHaveBeenCalled();
+
+        topoDoCorpo = 100;
+        await waitFor(() => expect(ponte.api.mostrar).toHaveBeenCalledTimes(1), { timeout: 2000 });
+        expect(ponte.api.mostrar).toHaveBeenCalledWith("o1", { x: 100, y: 100, largura: 360, altura: 240, zoom: 0.5 });
+      });
+
+      describe("pan, zoom e redimensionar", () => {
+        it("o pan do canvas desce a vista na hora, sem esperar o quadro, e a foto assume o corpo", async () => {
+          renderizar();
+          await esperarAVista();
+
+          moverACamera(40, 10);
+
+          // Sincrono: o aviso ao app sai antes de o quadro com o canvas deslocado ser desenhado.
+          expect(ponte.api.ocultar).toHaveBeenCalledTimes(1);
+          expect(ponte.api.ocultar).toHaveBeenCalledWith("o1");
+          expect(await screen.findByRole("img", { name: "Foto da página Pedidos · Exemplo" })).toHaveAttribute("src", FOTO);
+        });
+
+        it("a vista só volta ESPERA_APOS_MOVER_MS depois do último movimento, e cada movimento novo adia a volta", async () => {
+          const relogio = relogioManual();
+          renderizar();
+          await esperarAVista();
+
+          moverACamera(40, 10);
+          relogio.avancar(ESPERA_APOS_MOVER_MS - 50);
+          await esperarQuadros();
+          expect(ponte.api.mostrar).toHaveBeenCalledTimes(1);
+
+          // Outro movimento 100 ms depois do primeiro: a contagem recomeça (sem isso a vista subiria aos 150 ms).
+          moverACamera(80, 10);
+          relogio.avancar(ESPERA_APOS_MOVER_MS - 50);
+          await esperarQuadros();
+          expect(ponte.api.mostrar).toHaveBeenCalledTimes(1);
+
+          relogio.avancar(100);
+          await waitFor(() => expect(ponte.api.mostrar).toHaveBeenCalledTimes(2));
+          // Volta com `mostrar` (ela estava embaixo) e não manda posição a cada passo do pan; ocultar foi uma vez só.
+          expect(ponte.api.posicionar).not.toHaveBeenCalled();
+          expect(ponte.api.ocultar).toHaveBeenCalledTimes(1);
+        });
+
+        it("o zoom do canvas também desce a vista (o transform muda) e ela volta com o retângulo medido depois", async () => {
+          const relogio = relogioManual();
+          renderizar();
+          await esperarAVista();
+
+          moverACamera(0, 0, 2);
+          expect(ponte.api.ocultar).toHaveBeenCalledTimes(1);
+          // O corpo, depois do zoom, ocupa o dobro na tela.
+          vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+            ...retanguloDoCorpo,
+            width: 720,
+            height: 480,
+          } as DOMRect);
+          // Deixa o laço ver o tamanho novo (isso também conta como movimento) antes de andar o relógio.
+          await esperarQuadros();
+          relogio.avancar(ESPERA_APOS_MOVER_MS + 10);
+
+          await waitFor(() => expect(ponte.api.mostrar).toHaveBeenCalledTimes(2));
+          expect(ponte.api.mostrar).toHaveBeenLastCalledWith("o1", { x: 100, y: 200, largura: 720, altura: 480, zoom: 1 });
+          expect(ponte.api.posicionar).not.toHaveBeenCalled();
+        });
+
+        it("a mudança de tamanho do corpo (redimensionar o nó) desce a vista: uma só reorganização da página, ao parar", async () => {
+          const relogio = relogioManual();
+          renderizar();
+          await esperarAVista();
+
+          vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+            ...retanguloDoCorpo,
+            width: 500,
+            height: 300,
+          } as DOMRect);
+          await waitFor(() => expect(ponte.api.ocultar).toHaveBeenCalledWith("o1"));
+          expect(ponte.api.posicionar).not.toHaveBeenCalled();
+
+          relogio.avancar(ESPERA_APOS_MOVER_MS + 10);
+          await waitFor(() => expect(ponte.api.mostrar).toHaveBeenCalledTimes(2));
+          expect(ponte.api.mostrar).toHaveBeenLastCalledWith("o1", { x: 100, y: 200, largura: 500, altura: 300, zoom: 500 / 720 });
+        });
+
+        it("o movimento de um nó de navegador não ocupa o callback global de pan do canvas (outros nós e quem mais usar seguem recebendo)", async () => {
+          renderizar();
+          await esperarAVista();
+
+          expect(storeDoCanvas?.getState().onViewportChangeStart).toBeUndefined();
+          expect(storeDoCanvas?.getState().onViewportChangeEnd).toBeUndefined();
+        });
+
+        it("desmontar o nó para de escutar o canvas: um pan depois não manda nada", async () => {
+          const { tela } = renderizar();
+          await esperarAVista();
+          const store = storeDoCanvas;
+          tela.unmount();
+          expect(ponte.api.ocultar).toHaveBeenCalledTimes(1);
+
+          act(() => store?.setState({ transform: [90, 90, 1] }));
+
+          expect(ponte.api.ocultar).toHaveBeenCalledTimes(1);
+        });
       });
 
       it("parada, não manda retângulo a cada quadro", async () => {
@@ -471,13 +658,68 @@ describe("NoNavegadorDoAgente", () => {
         await waitFor(() => expect(ponte.api.mostrar).toHaveBeenCalledTimes(2));
       });
 
-      it("a foto não é pedida com a vista por cima (só com ela por baixo)", async () => {
+      it("com a vista por cima, a foto é tirada ao mostrar e renovada quando a página muda, sem tirar a vista do lugar", async () => {
         renderizar();
         await esperarAVista();
 
+        // A primeira foto sai logo depois de a vista subir: a que estará pronta quando ela precisar descer.
+        await waitFor(() => expect(ponte.api.foto).toHaveBeenCalledTimes(1));
+
+        ponte.enviarMudanca({ ultimaAcao: "rolou a página" });
+        await waitFor(() => expect(ponte.api.foto).toHaveBeenCalledTimes(2));
+
+        expect(ponte.api.mostrar).toHaveBeenCalledTimes(1);
+        expect(ponte.api.ocultar).not.toHaveBeenCalled();
+      });
+
+      it("com a vista por cima, a foto também é renovada de tempos em tempos, e não com a aba escondida", async () => {
+        let escondida = true;
+        vi.spyOn(document, "hidden", "get").mockImplementation(() => escondida);
+        renderizar();
+        await esperarAVista();
+        await waitFor(() => expect(ponte.api.foto).toHaveBeenCalledTimes(1));
+
+        // Aba escondida: passa um intervalo inteiro sem nova captura (a mudança da página, não).
+        await act(async () => new Promise((resolver) => setTimeout(resolver, INTERVALO_DA_FOTO_MS + 300)));
+        expect(ponte.api.foto).toHaveBeenCalledTimes(1);
+
+        // Visível de novo: o próximo intervalo renova a foto, com a página igual e a vista no mesmo lugar.
+        escondida = false;
+        await waitFor(() => expect(ponte.api.foto).toHaveBeenCalledTimes(2), { timeout: INTERVALO_DA_FOTO_MS + 1000 });
+        expect(ponte.api.mostrar).toHaveBeenCalledTimes(1);
+        expect(ponte.api.ocultar).not.toHaveBeenCalled();
+      }, 15000);
+
+      it("no máximo uma captura em andamento: o pedido que chega no meio dela espera e é refeito quando ela termina", async () => {
+        let terminar: (foto: string | null) => void = () => undefined;
+        ponte.api.foto.mockImplementationOnce(() => new Promise<string | null>((resolver) => (terminar = resolver)));
+        renderizar();
+        await esperarAVista();
+        await waitFor(() => expect(ponte.api.foto).toHaveBeenCalledTimes(1));
+
+        // A página muda com a primeira captura ainda em andamento: o pedido novo não dispara outra.
+        ponte.enviarMudanca({ ultimaAcao: "clicou em Salvar" });
+        await act(async () => new Promise((resolver) => setTimeout(resolver, ESPERA_DA_FOTO_MS * 2)));
+        expect(ponte.api.foto).toHaveBeenCalledTimes(1);
+
+        // Terminada a primeira, o pedido que ficou esperando sai, e a foto mostrada é a mais nova.
+        await act(async () => terminar(FOTO));
+        await waitFor(() => expect(ponte.api.foto).toHaveBeenCalledTimes(2));
+      });
+
+      it("subir a vista de novo, com a página igual, não tira outra foto", async () => {
+        const relogio = relogioManual();
+        renderizar();
+        await esperarAVista();
+        await waitFor(() => expect(ponte.api.foto).toHaveBeenCalledTimes(1));
+
+        // Pan curto (menos que a espera da foto): a vista desce e sobe antes de a foto da descida ser pedida.
+        moverACamera(30, 30);
+        relogio.avancar(ESPERA_APOS_MOVER_MS + 10);
+        await waitFor(() => expect(ponte.api.mostrar).toHaveBeenCalledTimes(2));
         await act(async () => new Promise((resolver) => setTimeout(resolver, ESPERA_DA_FOTO_MS * 2)));
 
-        expect(ponte.api.foto).not.toHaveBeenCalled();
+        expect(ponte.api.foto).toHaveBeenCalledTimes(1);
       });
 
       it("a foto é refeita quando a página muda com a vista por baixo, e o que o app falha em fotografar não derruba a janela", async () => {
@@ -505,13 +747,74 @@ describe("NoNavegadorDoAgente", () => {
         expect(ponte.api.mostrar).not.toHaveBeenCalled();
         expect(await screen.findByRole("img", { name: /Foto da página/ })).toBeInTheDocument();
 
-        // O painel sai: o corpo é o que está nos pontos de amostra.
+        // O painel sai: o corpo é o que está nos pontos de amostra (a vista sobe depois da espera de corpo livre).
         document.elementFromPoint = vi.fn(() => document.querySelector(".corpo-do-navegador"));
-        await waitFor(() => expect(ponte.api.mostrar).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(ponte.api.mostrar).toHaveBeenCalledTimes(1), { timeout: 2000 });
 
         // E volta a ser coberto: a vista desce.
         document.elementFromPoint = vi.fn(() => painel);
         await waitFor(() => expect(ponte.api.ocultar).toHaveBeenCalledWith("o1"));
+        painel.remove();
+      });
+
+      it("histerese: depois de descer por cobertura, só sobe com o corpo livre por ESPERA_DA_COBERTURA_LIVRE_MS seguidos", async () => {
+        const relogio = relogioManual();
+        const painel = document.createElement("div");
+        document.body.append(painel);
+        const corpoDoNavegador = (): Element | null => document.querySelector(".corpo-do-navegador");
+        document.elementFromPoint = vi.fn(corpoDoNavegador);
+        renderizar();
+        await esperarAVista();
+
+        // Um painel cobre o corpo: a vista desce.
+        document.elementFromPoint = vi.fn(() => painel);
+        relogio.avancar(INTERVALO_DA_COBERTURA_MS + 10);
+        await waitFor(() => expect(ponte.api.ocultar).toHaveBeenCalledTimes(1));
+
+        // Livre, mas ainda não por 300 ms seguidos: continua embaixo (sem a histerese, subiria agora).
+        document.elementFromPoint = vi.fn(corpoDoNavegador);
+        relogio.avancar(INTERVALO_DA_COBERTURA_MS + 10);
+        await esperarQuadros();
+        expect(ponte.api.mostrar).toHaveBeenCalledTimes(1);
+
+        // Cobre de novo no meio da espera: ela recomeça do zero.
+        document.elementFromPoint = vi.fn(() => painel);
+        relogio.avancar(INTERVALO_DA_COBERTURA_MS + 10);
+        await esperarQuadros();
+        document.elementFromPoint = vi.fn(corpoDoNavegador);
+        relogio.avancar(INTERVALO_DA_COBERTURA_MS + 10);
+        await esperarQuadros();
+        relogio.avancar(INTERVALO_DA_COBERTURA_MS + 10);
+        await esperarQuadros();
+        expect(ponte.api.mostrar).toHaveBeenCalledTimes(1);
+
+        // Livre por mais que a espera, sem interrupção: a vista sobe.
+        relogio.avancar(ESPERA_DA_COBERTURA_LIVRE_MS + 10);
+        await waitFor(() => expect(ponte.api.mostrar).toHaveBeenCalledTimes(2));
+        expect(ponte.api.ocultar).toHaveBeenCalledTimes(1);
+        painel.remove();
+      });
+
+      it("um painel que pisca por cima do corpo (um quadro livre entre dois cobertos) não faz a vista subir e descer", async () => {
+        const relogio = relogioManual();
+        const painel = document.createElement("div");
+        document.body.append(painel);
+        document.elementFromPoint = vi.fn(() => painel);
+        renderizar();
+        await screen.findByText("Pedidos · Exemplo");
+        await esperarQuadros();
+
+        for (let rodada = 0; rodada < 4; rodada += 1) {
+          document.elementFromPoint = vi.fn(() => document.querySelector(".corpo-do-navegador"));
+          relogio.avancar(INTERVALO_DA_COBERTURA_MS + 10);
+          await esperarQuadros();
+          document.elementFromPoint = vi.fn(() => painel);
+          relogio.avancar(INTERVALO_DA_COBERTURA_MS + 10);
+          await esperarQuadros();
+        }
+
+        expect(ponte.api.mostrar).not.toHaveBeenCalled();
+        expect(ponte.api.ocultar).not.toHaveBeenCalled();
         painel.remove();
       });
 

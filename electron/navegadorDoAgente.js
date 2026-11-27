@@ -16,15 +16,26 @@
 //
 // Como a vista funciona com o nó do canvas fechado: o WebContentsView fica
 // sempre anexado à janela principal e "visível" para o Chromium, mas FORA da
-// área da janela (`LIMITES_OCULTOS`: 1280x800, com só 1 DIP dentro, no canto
-// superior esquerdo, e o canto cortado por `RAIO_OCULTO`: nenhum pixel da tela
-// é coberto), onde a página continua pintando (requestAnimationFrame,
-// transições, IntersectionObserver). Não existe "por baixo da tela": a vista
-// anexada é filha da tela e sempre é desenhada por cima dela, qualquer que seja
-// o índice; dentro da área da janela ela a cobriria. Visível de verdade só
-// quando a tela manda `mostrar` com o retângulo do nó. O mesmo lugar vale no
-// modo invisível (janela transparente). Desanexar a vista da janela trava
-// captura e pintura: por isso nunca se remove sem fechar.
+// área da janela (`limitesOcultos`: do tamanho de layout do corpo do nó, com
+// só 1 DIP dentro, no canto superior esquerdo, e o canto cortado por
+// `RAIO_OCULTO`: nenhum pixel da tela é coberto), onde a página continua
+// pintando (requestAnimationFrame, transições, IntersectionObserver). Não
+// existe "por baixo da tela": a vista anexada é filha da tela e sempre é
+// desenhada por cima dela, qualquer que seja o índice; dentro da área da janela
+// ela a cobriria. Visível de verdade só quando a tela manda `mostrar` com o
+// retângulo do nó. O mesmo lugar vale no modo invisível (janela transparente).
+// Desanexar a vista da janela trava captura e pintura: por isso nunca se
+// remove sem fechar.
+//
+// Um layout só: o tamanho de layout da página é o do corpo do nó
+// (`tamanhoDeLayout`: largura/zoom x altura/zoom do último retângulo que a tela
+// mandou; 1280x800 até o primeiro). Escondida, a vista tem esse tamanho a zoom 1;
+// mostrada, ocupa o retângulo INTEIRO do nó (sem cortar pela janela, que corta
+// sozinha quando o nó sai em parte da tela) com o zoom do canvas, e o layout dá o
+// mesmo tamanho. Assim o site não refaz o layout ao subir e descer a vista nem ao
+// mover o canvas, e a foto e o `capturar_tela` saem no layout que o usuário vê.
+// Se o zoom da página necessário sair dos limites do Chromium, ou o nó sair todo
+// da janela, a vista fica escondida (a tela mostra a foto) em vez de mudar o layout.
 //
 // Os comandos usam o `webContents.debugger` (protocolo do Chrome): cliques,
 // teclas e rolagem são eventos de entrada reais (`isTrusted`), em pixels CSS
@@ -35,7 +46,7 @@
 // Pausar/assumir: com o navegador pausado, o usuário o controla e os comandos
 // do agente são recusados ("O usuário assumiu o navegador; tente depois.").
 
-const { calcularLimites, origemParaLog, userAgentDeNavegador, validarId, validarRetangulo } = require("./vistaDaPrevia");
+const { calcularLimitesSemCorte, origemParaLog, userAgentDeNavegador, validarId, validarRetangulo } = require("./vistaDaPrevia");
 
 const PREFIXO_DA_PARTICAO = "persist:navegador-";
 
@@ -44,14 +55,35 @@ const LIMITE_DE_VISTAS = 8;
 
 const TAMANHO_MAXIMO_DA_URL = 2048;
 
+/** O tamanho de layout (pixels CSS) da página antes de a tela mandar o primeiro retângulo: o que o agente sempre enxergou. */
+const LAYOUT_PADRAO = Object.freeze({ largura: 1280, altura: 800 });
+/** Faixa em que o tamanho de layout (largura/zoom e altura/zoom do corpo do nó) é aceito. */
+const LAYOUT_MINIMO = Object.freeze({ largura: 200, altura: 150 });
+const LAYOUT_MAXIMO = Object.freeze({ largura: 3840, altura: 2160 });
+
 /**
- * Limites da vista quando o nó do canvas não está aberto (ou no modo invisível): 1280x800, o layout que o
- * agente enxerga, fora da janela e com só 1 DIP dentro dela, no canto superior esquerdo. A vista anexada é
- * filha da tela e sempre desenhada por cima dela, qualquer que seja o índice: "por baixo" não existe, e
- * dentro da área da janela ela a cobriria. Mas inteira fora (ex.: -10000,-10000) o Chromium a trata como
- * escondida: nasce sem tamanho (0x0), não pinta e a captura trava. Com 1 DIP dentro ele a mantém visível.
+ * O tamanho de layout da página que o retângulo do corpo do nó dá: largura/zoom x altura/zoom (o zoom é o do
+ * canvas), arredondado e limitado a [LAYOUT_MINIMO, LAYOUT_MAXIMO]. Não muda com o pan nem com o zoom.
  */
-const LIMITES_OCULTOS = { x: 1 - 1280, y: 1 - 800, width: 1280, height: 800 };
+function tamanhoDeLayout(retangulo) {
+  const limitado = (valor, minimo, maximo) => Math.min(maximo, Math.max(minimo, Math.round(valor)));
+  return {
+    largura: limitado(retangulo.largura / retangulo.zoom, LAYOUT_MINIMO.largura, LAYOUT_MAXIMO.largura),
+    altura: limitado(retangulo.altura / retangulo.zoom, LAYOUT_MINIMO.altura, LAYOUT_MAXIMO.altura),
+  };
+}
+
+/**
+ * Limites da vista quando o nó do canvas não está aberto (ou no modo invisível): do tamanho de layout do corpo
+ * do nó (`tamanho`: 1280x800 até a tela mandar o primeiro retângulo), a zoom 1, fora da janela e com só 1 DIP
+ * dentro dela, no canto superior esquerdo. A vista anexada é filha da tela e sempre desenhada por cima dela,
+ * qualquer que seja o índice: "por baixo" não existe, e dentro da área da janela ela a cobriria. Mas inteira fora
+ * (ex.: -10000,-10000) o Chromium a trata como escondida: nasce sem tamanho (0x0), não pinta e a captura trava.
+ * Com 1 DIP dentro ele a mantém visível.
+ */
+function limitesOcultos({ largura, altura }) {
+  return { x: 1 - largura, y: 1 - altura, width: largura, height: altura };
+}
 /** Raio que corta o canto da vista escondida: o pixel que sobra dentro da janela não é desenhado. */
 const RAIO_OCULTO = 10;
 
@@ -761,8 +793,9 @@ function criarNavegadorDoAgente({
   }
 
   /**
-   * Visível de verdade (sobre o nó do canvas) ou "escondida": fora da área da janela
-   * (`LIMITES_OCULTOS`, sem desenhar pixel algum da tela) e ainda pintando. Nunca desanexa.
+   * Visível de verdade (sobre o nó do canvas, no retângulo inteiro, sem cortar pela janela) ou "escondida": fora
+   * da área da janela (`limitesOcultos`, sem desenhar pixel algum da tela) e ainda pintando. Nos dois estados a
+   * página tem o mesmo tamanho de layout (o do corpo do nó). Nunca desanexa.
    */
   function aplicar(vista) {
     const janela = janelaValida();
@@ -771,7 +804,7 @@ function criarNavegadorDoAgente({
     const { view } = vista;
     const limites =
       vista.mostrando && vista.retangulo && !bloqueada()
-        ? calcularLimites(vista.retangulo, janela.webContents.getZoomFactor(), areaDaJanela(janela))
+        ? calcularLimitesSemCorte(vista.retangulo, janela.webContents.getZoomFactor(), areaDaJanela(janela))
         : null;
     if (limites && janela.isVisible() && !janela.isMinimized()) {
       view.setBorderRadius(0);
@@ -782,7 +815,7 @@ function criarNavegadorDoAgente({
     } else {
       conteudo.setZoomFactor(1);
       view.setBorderRadius(RAIO_OCULTO);
-      view.setBounds(LIMITES_OCULTOS);
+      view.setBounds(limitesOcultos(vista.layout));
       try {
         janela.contentView.removeChildView(view);
       } catch {
@@ -828,6 +861,8 @@ function criarNavegadorDoAgente({
       view,
       mostrando: false,
       retangulo: null,
+      /** Tamanho de layout do corpo do nó (do último retângulo da tela); define o tamanho da vista escondida. */
+      layout: LAYOUT_PADRAO,
       ultimaAcao: "",
       emUso: 0,
       fila: Promise.resolve(),
@@ -868,7 +903,7 @@ function criarNavegadorDoAgente({
     });
 
     vistas.set(id, vista);
-    view.setBounds(LIMITES_OCULTOS);
+    view.setBounds(limitesOcultos(vista.layout));
     aplicar(vista);
     // A primeira vez que o agente usa o navegador deste Orquestrador: a tela abre o nó.
     enviarParaATela("navegador-do-agente:ativado", { orquestradorId: id });
@@ -1401,14 +1436,29 @@ function criarNavegadorDoAgente({
     return id === null ? undefined : vistas.get(id);
   }
 
-  /** posicionar({ orquestradorId, retangulo }): acompanha o corpo do nó na tela (enviado a cada quadro em que muda). */
+  /**
+   * Guarda o retângulo (inteiro, sem corte pela janela) e o tamanho de layout que ele dá. Resolve true se o
+   * tamanho de layout mudou, o que muda também o tamanho da vista escondida.
+   */
+  function guardarRetangulo(vista, retangulo) {
+    const layout = tamanhoDeLayout(retangulo);
+    const mudou = layout.largura !== vista.layout.largura || layout.altura !== vista.layout.altura;
+    vista.retangulo = retangulo;
+    vista.layout = layout;
+    return mudou;
+  }
+
+  /**
+   * posicionar({ orquestradorId, retangulo }): acompanha o corpo do nó na tela (enviado a cada quadro em que muda).
+   * O retângulo vem inteiro, mesmo com parte fora da janela. Escondida, só mexe na vista se o tamanho de layout mudou.
+   */
   function aoPosicionar(evento, dados) {
     if (!eDaJanelaPrincipal(evento)) return;
     const vista = vistaDoPedido(dados);
     const retangulo = validarRetangulo(dados?.retangulo);
     if (!vista || retangulo === null) return;
-    vista.retangulo = retangulo;
-    if (vista.mostrando) aplicar(vista);
+    const layoutMudou = guardarRetangulo(vista, retangulo);
+    if (vista.mostrando || layoutMudou) aplicar(vista);
   }
 
   /** mostrar({ orquestradorId, retangulo }): põe a vista sobre o nó do canvas. Resolve false se recusou. */
@@ -1417,7 +1467,7 @@ function criarNavegadorDoAgente({
     const vista = vistaDoPedido(dados);
     const retangulo = validarRetangulo(dados?.retangulo);
     if (!vista || retangulo === null || bloqueada()) return false;
-    vista.retangulo = retangulo;
+    guardarRetangulo(vista, retangulo);
     vista.mostrando = true;
     aplicar(vista);
     return true;
@@ -1623,13 +1673,17 @@ function criarNavegadorDoAgente({
 module.exports = {
   PREFIXO_DA_PARTICAO,
   LIMITE_DE_VISTAS,
-  LIMITES_OCULTOS,
+  LAYOUT_PADRAO,
+  LAYOUT_MINIMO,
+  LAYOUT_MAXIMO,
   RAIO_OCULTO,
   MENSAGEM_PAUSADO,
   ErroDoNavegadorDoAgente,
   particaoDoOrquestrador,
   enderecoPermitido,
   navegacaoPermitida,
+  tamanhoDeLayout,
+  limitesOcultos,
   resolverTecla,
   validarComando,
   descreverComando,

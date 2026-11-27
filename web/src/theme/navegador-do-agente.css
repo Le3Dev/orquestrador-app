@@ -128,12 +128,16 @@
   overflow: hidden;
   background: var(--surface);
 }
+/*
+ * O app mantém a página no tamanho de layout do corpo, então a foto tem a mesma proporção dele: `fill` a encaixa
+ * inteira, sem cortar (cover cortava) e sem borrar. Se o corpo mudou de tamanho há pouco (redimensionar), a foto
+ * se estica por uns instantes até a vista subir e a página refazer o layout.
+ */
 .foto-do-navegador {
   display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  object-position: top left;
+  object-fit: fill;
   user-select: none;
 }
 

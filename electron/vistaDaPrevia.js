@@ -223,6 +223,38 @@ function calcularLimites(retangulo, zoomDaJanela, areaDaJanela) {
   };
 }
 
+/** Folga numérica nas bordas do zoom da página (0,1 × 2,5 não dá exatamente 0,25 em ponto flutuante). */
+const FOLGA_DO_ZOOM = 1e-6;
+
+/**
+ * Como `calcularLimites`, mas SEM cortar pela área da janela (usado pelo navegador do agente): a vista tem o
+ * retângulo inteiro (× a escala da janela), mesmo com parte dele fora da tela, e a própria janela corta o que
+ * passa da borda. Assim o tamanho de layout da página (largura / zoom) só depende do tamanho do nó e nunca do
+ * pan. A largura e a altura são arredondadas sozinhas, não pelas bordas, para não variarem 1 pixel com o pan.
+ * Nulo se a caixa não tiver ao menos 1 pixel dentro da janela, ou se o zoom da página necessário (zoom do canvas ×
+ * escala) sair de [ZOOM_MINIMO_DA_PAGINA, ZOOM_MAXIMO_DA_PAGINA]: em vez de limitar o zoom (o que mudaria o
+ * layout), a vista fica escondida e a tela mostra a foto.
+ */
+function calcularLimitesSemCorte(retangulo, zoomDaJanela, areaDaJanela) {
+  const escala = Number.isFinite(zoomDaJanela) && zoomDaJanela > 0 ? zoomDaJanela : 1;
+  const zoomNecessario = retangulo.zoom * escala;
+  if (!(zoomNecessario >= ZOOM_MINIMO_DA_PAGINA - FOLGA_DO_ZOOM && zoomNecessario <= ZOOM_MAXIMO_DA_PAGINA + FOLGA_DO_ZOOM)) {
+    return null;
+  }
+  // `+ 0` troca o -0 de Math.round(-0.3) por 0.
+  const x = Math.round(retangulo.x * escala) + 0;
+  const y = Math.round(retangulo.y * escala) + 0;
+  const width = Math.max(1, Math.round(retangulo.largura * escala));
+  const height = Math.max(1, Math.round(retangulo.altura * escala));
+  const dentroX = Math.min(x + width, areaDaJanela.largura) - Math.max(x, 0);
+  const dentroY = Math.min(y + height, areaDaJanela.altura) - Math.max(y, 0);
+  if (dentroX < 1 || dentroY < 1) return null;
+  return {
+    bounds: { x, y, width, height },
+    zoomDaPagina: limitar(zoomNecessario, ZOOM_MINIMO_DA_PAGINA, ZOOM_MAXIMO_DA_PAGINA),
+  };
+}
+
 /**
  * A navegação que a página pode fazer: o quadro principal só vai para
  * http/https externo; quadros internos (anúncios, pagamentos, login) também
@@ -717,6 +749,7 @@ module.exports = {
   validarId,
   validarRetangulo,
   calcularLimites,
+  calcularLimitesSemCorte,
   navegacaoPermitida,
   descartarAboutBlankDoInicio,
   permissaoLiberada,

@@ -13,6 +13,7 @@ const {
   validarId,
   validarRetangulo,
   calcularLimites,
+  calcularLimitesSemCorte,
   navegacaoPermitida,
   descartarAboutBlankDoInicio,
   permissaoLiberada,
@@ -228,6 +229,87 @@ describe("calcularLimites", () => {
   it("zoom da janela inválido vale 1", () => {
     expect(calcularLimites({ x: 10, y: 10, largura: 100, altura: 100, zoom: 1 }, 0, area).bounds.width).toBe(100);
     expect(calcularLimites({ x: 10, y: 10, largura: 100, altura: 100, zoom: 1 }, Number.NaN, area).bounds.width).toBe(100);
+  });
+});
+
+describe("calcularLimitesSemCorte", () => {
+  const area = { largura: 1440, altura: 900 };
+
+  it("dentro da janela, devolve o retângulo e o zoom do canvas", () => {
+    const resultado = calcularLimitesSemCorte({ x: 100, y: 120, largura: 600, altura: 400, zoom: 0.5 }, 1, area);
+    expect(resultado).toEqual({ bounds: { x: 100, y: 120, width: 600, height: 400 }, zoomDaPagina: 0.5 });
+  });
+
+  it("multiplica a caixa e o zoom pelo zoom da própria tela do app", () => {
+    const resultado = calcularLimitesSemCorte({ x: 100, y: 100, largura: 200, altura: 100, zoom: 1 }, 1.5, area);
+    expect(resultado.bounds).toEqual({ x: 150, y: 150, width: 300, height: 150 });
+    expect(resultado.zoomDaPagina).toBe(1.5);
+  });
+
+  it("NÃO corta pela janela: caixa saindo pela direita, por baixo, pela esquerda e por cima fica inteira", () => {
+    expect(calcularLimitesSemCorte({ x: 1400, y: 880, largura: 200, altura: 100, zoom: 1 }, 1, area).bounds).toEqual({
+      x: 1400,
+      y: 880,
+      width: 200,
+      height: 100,
+    });
+    expect(calcularLimitesSemCorte({ x: -150, y: -60, largura: 200, altura: 100, zoom: 1 }, 1, area).bounds).toEqual({
+      x: -150,
+      y: -60,
+      width: 200,
+      height: 100,
+    });
+  });
+
+  it("o tamanho da caixa não muda com o pan (nem 1 pixel por arredondamento) e o zoom da página fica igual", () => {
+    const tamanhos = new Set();
+    const zooms = new Set();
+    for (let deslocamento = -300.9; deslocamento < 400; deslocamento += 0.37) {
+      const resultado = calcularLimitesSemCorte(
+        { x: deslocamento, y: deslocamento / 2, largura: 333.4, altura: 201.6, zoom: 0.8 },
+        1.25,
+        area,
+      );
+      tamanhos.add(`${resultado.bounds.width}x${resultado.bounds.height}`);
+      zooms.add(resultado.zoomDaPagina);
+    }
+    expect([...tamanhos]).toEqual(["417x252"]);
+    expect([...zooms]).toEqual([1]);
+  });
+
+  it("é nulo quando nada da caixa fica dentro da janela (encostar na borda não conta)", () => {
+    expect(calcularLimitesSemCorte({ x: 1440, y: 100, largura: 200, altura: 100, zoom: 1 }, 1, area)).toBeNull();
+    expect(calcularLimitesSemCorte({ x: 1500, y: 100, largura: 200, altura: 100, zoom: 1 }, 1, area)).toBeNull();
+    expect(calcularLimitesSemCorte({ x: -200, y: 100, largura: 200, altura: 100, zoom: 1 }, 1, area)).toBeNull();
+    expect(calcularLimitesSemCorte({ x: 100, y: 900, largura: 200, altura: 100, zoom: 1 }, 1, area)).toBeNull();
+    expect(calcularLimitesSemCorte({ x: 100, y: -100, largura: 200, altura: 100, zoom: 1 }, 1, area)).toBeNull();
+    // 1 pixel dentro já basta.
+    expect(calcularLimitesSemCorte({ x: -199, y: 100, largura: 200, altura: 100, zoom: 1 }, 1, area)).not.toBeNull();
+    expect(calcularLimitesSemCorte({ x: 1439, y: 899, largura: 200, altura: 100, zoom: 1 }, 1, area)).not.toBeNull();
+  });
+
+  it("é nulo (não limita o zoom) quando o zoom da página sai do que o Chromium aceita", () => {
+    expect(calcularLimitesSemCorte({ x: 0, y: 0, largura: 100, altura: 100, zoom: 0.1 }, 1, area)).toBeNull();
+    expect(calcularLimitesSemCorte({ x: 0, y: 0, largura: 100, altura: 100, zoom: 9 }, 1, area)).toBeNull();
+    // O zoom da janela entra na conta: 0,5 × 0,4 = 0,2 (< 0,25) e 4 × 1,5 = 6 (> 5).
+    expect(calcularLimitesSemCorte({ x: 0, y: 0, largura: 100, altura: 100, zoom: 0.5 }, 0.4, area)).toBeNull();
+    expect(calcularLimitesSemCorte({ x: 0, y: 0, largura: 100, altura: 100, zoom: 4 }, 1.5, area)).toBeNull();
+  });
+
+  it("aceita exatamente os extremos do zoom da página (0,25 e 5), mesmo com erro de ponto flutuante", () => {
+    expect(calcularLimitesSemCorte({ x: 0, y: 0, largura: 100, altura: 100, zoom: 0.25 }, 1, area).zoomDaPagina).toBe(0.25);
+    expect(calcularLimitesSemCorte({ x: 0, y: 0, largura: 100, altura: 100, zoom: 5 }, 1, area).zoomDaPagina).toBe(5);
+    expect(calcularLimitesSemCorte({ x: 0, y: 0, largura: 100, altura: 100, zoom: 0.1 }, 2.5, area).zoomDaPagina).toBe(0.25);
+  });
+
+  it("zoom da janela inválido vale 1", () => {
+    expect(calcularLimitesSemCorte({ x: 10, y: 10, largura: 100, altura: 100, zoom: 1 }, 0, area).bounds.width).toBe(100);
+    expect(calcularLimitesSemCorte({ x: 10, y: 10, largura: 100, altura: 100, zoom: 1 }, Number.NaN, area).bounds.width).toBe(100);
+  });
+
+  it("não devolve -0 e nunca zera a largura e a altura", () => {
+    const resultado = calcularLimitesSemCorte({ x: -0.2, y: -0.4, largura: 0.2, altura: 0.2, zoom: 1 }, 1, area);
+    expect(resultado.bounds).toEqual({ x: 0, y: 0, width: 1, height: 1 });
   });
 });
 

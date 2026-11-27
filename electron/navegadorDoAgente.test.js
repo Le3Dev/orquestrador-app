@@ -7,13 +7,17 @@ import { describe, expect, it, vi } from "vitest";
 const {
   PREFIXO_DA_PARTICAO,
   LIMITE_DE_VISTAS,
-  LIMITES_OCULTOS,
+  LAYOUT_PADRAO,
+  LAYOUT_MINIMO,
+  LAYOUT_MAXIMO,
   RAIO_OCULTO,
   MENSAGEM_PAUSADO,
   ErroDoNavegadorDoAgente,
   particaoDoOrquestrador,
   enderecoPermitido,
   navegacaoPermitida,
+  tamanhoDeLayout,
+  limitesOcultos,
   resolverTecla,
   validarComando,
   descreverComando,
@@ -294,7 +298,15 @@ function montar({ bloqueada = false, tempos = {} } = {}) {
           case "Page.createIsolatedWorld":
             return { executionContextId: 7 };
           case "Page.getLayoutMetrics":
-            return { cssVisualViewport: { pageX: 0, pageY: 0, clientWidth: 1280, clientHeight: 800 } };
+            // O layout que a página tem de verdade: o tamanho da vista (em DIP) dividido pelo zoom da página.
+            return {
+              cssVisualViewport: {
+                pageX: 0,
+                pageY: 0,
+                clientWidth: Math.round(this.bounds.width / (this.zoom ?? 1)),
+                clientHeight: Math.round(this.bounds.height / (this.zoom ?? 1)),
+              },
+            };
           case "Page.captureScreenshot":
             return this.respostaDaCaptura ? this.respostaDaCaptura() : { data: "QUJD" };
           case "Runtime.evaluate": {
@@ -431,15 +443,20 @@ function montar({ bloqueada = false, tempos = {} } = {}) {
 
 const eventosDoCdp = (view, metodo) => view.comandosCdp.filter((comando) => comando.metodo === metodo).map((comando) => comando.parametros);
 
+/** O tamanho de layout do `retangulo` padrão do `montar` (600x400 a zoom 1). */
+const LAYOUT_DO_RETANGULO = { largura: 600, altura: 400 };
+
 /**
- * A vista escondida não pode cobrir nenhum pixel da tela do app: fica nos limites ocultos (1280x800), com só
- * 1 DIP dentro da área da janela (o Chromium só a mantém viva se algo dela estiver dentro) e o canto cortado
- * pelo raio, que apaga esse pixel. Inteira fora, ele a esconde de vez (0x0, sem pintar, captura trava).
+ * A vista escondida não pode cobrir nenhum pixel da tela do app: fica nos limites ocultos (do tamanho de layout
+ * do último retângulo; 1280x800 até o primeiro), com só 1 DIP dentro da área da janela (o Chromium só a mantém
+ * viva se algo dela estiver dentro) e o canto cortado pelo raio, que apaga esse pixel. Inteira fora, ele a
+ * esconde de vez (0x0, sem pintar, captura trava). A zoom 1, para o layout ser o do tamanho dos limites.
  */
-function esperarEscondida(vista, [largura, altura] = [1440, 900]) {
-  expect(vista.bounds).toEqual(LIMITES_OCULTOS);
-  expect(vista.bounds.width).toBe(1280);
-  expect(vista.bounds.height).toBe(800);
+function esperarEscondida(vista, layout = LAYOUT_PADRAO, [largura, altura] = [1440, 900]) {
+  expect(vista.bounds).toEqual(limitesOcultos(layout));
+  expect(vista.bounds.width).toBe(layout.largura);
+  expect(vista.bounds.height).toBe(layout.altura);
+  expect(vista.webContents.getZoomFactor()).toBe(1);
   const dentroX = Math.min(vista.bounds.x + vista.bounds.width, largura) - Math.max(vista.bounds.x, 0);
   const dentroY = Math.min(vista.bounds.y + vista.bounds.height, altura) - Math.max(vista.bounds.y, 0);
   expect([dentroX, dentroY]).toEqual([1, 1]);
@@ -831,7 +848,9 @@ describe("criarNavegadorDoAgente: comandos", () => {
     expect(rodas).toEqual([{ type: "mouseWheel", x: 640, y: 400, deltaX: 0, deltaY: 0.85 * 800 }]);
     expect(resultado.mensagem).toBe("Rolei para baixo (posição vertical 680 de 3000 px).");
 
+    // Zoom 0,5 com a vista de 640x400 DIP: o layout continua 1280x800 (o falso deriva o layout dos limites e do zoom).
     views[0].webContents.setZoomFactor(0.5);
+    views[0].setBounds({ x: -639, y: -399, width: 640, height: 400 });
     pagina.respostas.posicaoDaRolagem = vi.fn().mockReturnValueOnce({ x: 0, y: 0, maxX: 2000, maxY: 0 }).mockReturnValue({ x: 100, y: 0, maxX: 2000, maxY: 0 });
     await executar({ tipo: "rolar", direcao: "esquerda", quantidade: 1 });
     const ultima = eventosDoCdp(views[0], "Input.dispatchMouseEvent").at(-1);
@@ -1139,13 +1158,15 @@ describe("criarNavegadorDoAgente: IPC da tela", () => {
     expect(vista.raio).toBe(0);
   });
 
-  it("posicionar acompanha o nó enquanto está mostrada, e é ignorado enquanto está oculta", async () => {
-    const { navegador, executar, principal, views } = montar();
+  it("posicionar acompanha o nó enquanto está mostrada; oculta, só atualiza o tamanho da vista escondida (nunca a traz para a tela)", async () => {
+    const { navegador, executar, principal, views, janela } = montar();
     await executar({ tipo: "ler_pagina" });
     const [vista] = views;
 
+    // Oculta: o tamanho de layout (100x100 sobe ao mínimo, 200x150) passa a valer para a vista escondida.
     navegador.aoPosicionar(principal, { orquestradorId: "orq-1", retangulo: { x: 5, y: 5, largura: 100, altura: 100, zoom: 1 } });
-    esperarEscondida(vista);
+    esperarEscondida(vista, LAYOUT_MINIMO);
+    expect(janela.contentView.addChildView).toHaveBeenLastCalledWith(vista, 0);
 
     navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo: { x: 10, y: 20, largura: 300, altura: 200, zoom: 1 } });
     navegador.aoPosicionar(principal, { orquestradorId: "orq-1", retangulo: { x: 40, y: 50, largura: 300, altura: 200, zoom: 1 } });
@@ -1155,16 +1176,16 @@ describe("criarNavegadorDoAgente: IPC da tela", () => {
     expect(vista.bounds).toEqual({ x: 40, y: 50, width: 300, height: 200 });
   });
 
-  it("ocultar devolve a vista para fora da área da janela, em 1280x800 e zoom 1, ainda visível para o Chromium", async () => {
+  it("ocultar devolve a vista para fora da área da janela, no tamanho de layout do nó e zoom 1, ainda visível para o Chromium", async () => {
     const { navegador, executar, principal, retangulo, views, janela } = montar();
     await executar({ tipo: "ler_pagina" });
     navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo });
     const [vista] = views;
-    expect(vista.bounds).not.toEqual(LIMITES_OCULTOS);
+    expect(vista.bounds).toEqual({ x: 100, y: 100, width: 600, height: 400 });
 
     expect(navegador.aoOcultar(principal, { orquestradorId: "orq-1" })).toBe(true);
 
-    esperarEscondida(vista);
+    esperarEscondida(vista, LAYOUT_DO_RETANGULO);
     expect(vista.webContents.setZoomFactor).toHaveBeenLastCalledWith(1);
     expect(janela.contentView.addChildView).toHaveBeenLastCalledWith(vista, 0);
     // O agente segue usando com o nó fechado.
@@ -1182,7 +1203,7 @@ describe("criarNavegadorDoAgente: IPC da tela", () => {
       expect(vista.raio).toBe(0);
 
       navegador.aoOcultar(principal, { orquestradorId: "orq-1" });
-      esperarEscondida(vista);
+      esperarEscondida(vista, LAYOUT_DO_RETANGULO);
     }
   });
 
@@ -1202,13 +1223,13 @@ describe("criarNavegadorDoAgente: IPC da tela", () => {
     estado.bloqueada = true;
     navegador.reaplicarTodas();
 
-    esperarEscondida(views[0]);
+    esperarEscondida(views[0], LAYOUT_DO_RETANGULO);
     expect(navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo })).toBe(false);
     await expect(executar({ tipo: "capturar_tela" })).resolves.toBeDefined();
 
     estado.bloqueada = false;
     navegador.reaplicarTodas();
-    esperarEscondida(views[0]);
+    esperarEscondida(views[0], LAYOUT_DO_RETANGULO);
     expect(janela.contentView.addChildView).toHaveBeenLastCalledWith(views[0], 0);
     expect(navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo })).toBe(true);
     expect(views[0].bounds).toEqual({ x: 100, y: 100, width: 600, height: 400 });
@@ -1363,6 +1384,214 @@ describe("criarNavegadorDoAgente: IPC da tela", () => {
   });
 });
 
+describe("tamanhoDeLayout e limitesOcultos", () => {
+  it("o layout é largura/zoom x altura/zoom do corpo do nó, arredondado", () => {
+    expect(tamanhoDeLayout({ x: 0, y: 0, largura: 600, altura: 400, zoom: 1 })).toEqual({ largura: 600, altura: 400 });
+    expect(tamanhoDeLayout({ x: 0, y: 0, largura: 600, altura: 400, zoom: 0.5 })).toEqual({ largura: 1200, altura: 800 });
+    expect(tamanhoDeLayout({ x: 0, y: 0, largura: 900, altura: 500, zoom: 1.5 })).toEqual({ largura: 600, altura: 333 });
+  });
+
+  it("não depende do pan (x e y), só do tamanho do corpo do nó e do zoom do canvas", () => {
+    const a = tamanhoDeLayout({ x: -500, y: 900, largura: 800, altura: 500, zoom: 0.8 });
+    const b = tamanhoDeLayout({ x: 300, y: -40, largura: 800, altura: 500, zoom: 0.8 });
+    expect(a).toEqual(b);
+  });
+
+  it("o mesmo nó dá o mesmo layout em qualquer zoom do canvas (largura e altura crescem com o zoom)", () => {
+    for (const zoom of [0.5, 0.8, 1, 1.25, 2]) {
+      expect(tamanhoDeLayout({ x: 0, y: 0, largura: 1000 * zoom, altura: 600 * zoom, zoom })).toEqual({ largura: 1000, altura: 600 });
+    }
+  });
+
+  it("limita a um intervalo sensato", () => {
+    expect(tamanhoDeLayout({ x: 0, y: 0, largura: 50, altura: 20, zoom: 1 })).toEqual(LAYOUT_MINIMO);
+    expect(tamanhoDeLayout({ x: 0, y: 0, largura: 20_000, altura: 20_000, zoom: 1 })).toEqual(LAYOUT_MAXIMO);
+    expect(LAYOUT_PADRAO).toEqual({ largura: 1280, altura: 800 });
+  });
+
+  it("a vista escondida tem esse tamanho com só 1 DIP dentro da janela, no canto superior esquerdo", () => {
+    expect(limitesOcultos({ largura: 1280, altura: 800 })).toEqual({ x: -1279, y: -799, width: 1280, height: 800 });
+    expect(limitesOcultos({ largura: 640, altura: 300 })).toEqual({ x: -639, y: -299, width: 640, height: 300 });
+  });
+});
+
+describe("criarNavegadorDoAgente: um layout só, mostrada ou escondida", () => {
+  /** O tamanho de layout que a página tem agora: o da vista (DIP) dividido pelo zoom da página. */
+  const layoutAtual = (vista) => ({
+    largura: Math.round(vista.bounds.width / vista.webContents.getZoomFactor()),
+    altura: Math.round(vista.bounds.height / vista.webContents.getZoomFactor()),
+  });
+
+  it("antes do primeiro retângulo a vista escondida tem 1280x800 a zoom 1", async () => {
+    const { executar, views } = montar();
+
+    await executar({ tipo: "abrir", url: "https://exemplo.com" });
+
+    esperarEscondida(views[0], { largura: 1280, altura: 800 });
+  });
+
+  it("escondida, usa o tamanho de layout do último retângulo recebido (e não mais 1280x800)", async () => {
+    const { navegador, executar, principal, views } = montar();
+    await executar({ tipo: "ler_pagina" });
+    const [vista] = views;
+
+    navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo: { x: 100, y: 100, largura: 900, altura: 600, zoom: 0.75 } });
+    navegador.aoOcultar(principal, { orquestradorId: "orq-1" });
+    esperarEscondida(vista, { largura: 1200, altura: 800 });
+
+    // Outro tamanho de nó (posicionar com a vista oculta): a escondida acompanha.
+    navegador.aoPosicionar(principal, { orquestradorId: "orq-1", retangulo: { x: 0, y: 0, largura: 500, altura: 700, zoom: 1 } });
+    esperarEscondida(vista, { largura: 500, altura: 700 });
+    expect(vista.webContents.setZoomFactor).toHaveBeenLastCalledWith(1);
+  });
+
+  it("o layout escondido é o mesmo do mostrado, em qualquer pan e em qualquer zoom do canvas ou da janela", async () => {
+    const { navegador, executar, principal, views, janelaWc } = montar();
+    await executar({ tipo: "ler_pagina" });
+    const [vista] = views;
+    const layoutDoNo = { largura: 1000, altura: 600 };
+
+    for (const zoomDaJanela of [1, 1.25, 0.8]) {
+      janelaWc.getZoomFactor = () => zoomDaJanela;
+      for (const zoom of [0.5, 0.8, 1, 1.5]) {
+        for (const [x, y] of [
+          [100, 80],
+          [-300, -120],
+          [900, 500],
+          [-1, 1],
+        ]) {
+          const retangulo = { x, y, largura: layoutDoNo.largura * zoom, altura: layoutDoNo.altura * zoom, zoom };
+          navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo });
+          // Mostrada: o layout (limites / zoom da página) é o do corpo do nó, com a vista inteira (sem corte).
+          expect(layoutAtual(vista)).toEqual(layoutDoNo);
+          expect(vista.bounds.width).toBe(Math.round(retangulo.largura * zoomDaJanela));
+          expect(vista.bounds.height).toBe(Math.round(retangulo.altura * zoomDaJanela));
+          expect(vista.webContents.getZoomFactor()).toBeCloseTo(zoom * zoomDaJanela, 6);
+          expect(vista.raio).toBe(0);
+
+          navegador.aoOcultar(principal, { orquestradorId: "orq-1" });
+          // Escondida: o mesmo layout.
+          esperarEscondida(vista, layoutDoNo);
+          expect(layoutAtual(vista)).toEqual(layoutDoNo);
+        }
+      }
+    }
+  });
+
+  it("o pan (posicionar) não muda o tamanho da vista mostrada: só x e y", async () => {
+    const { navegador, executar, principal, views } = montar();
+    await executar({ tipo: "ler_pagina" });
+    const [vista] = views;
+    navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo: { x: 100, y: 100, largura: 720, altura: 480, zoom: 0.9 } });
+    const tamanho = { width: vista.bounds.width, height: vista.bounds.height };
+    const zoomDaPagina = vista.webContents.getZoomFactor();
+
+    for (let x = 100.3; x > -500; x -= 37.7) {
+      navegador.aoPosicionar(principal, { orquestradorId: "orq-1", retangulo: { x, y: 100 - x / 3, largura: 720, altura: 480, zoom: 0.9 } });
+      expect({ width: vista.bounds.width, height: vista.bounds.height }).toEqual(tamanho);
+      expect(vista.webContents.getZoomFactor()).toBe(zoomDaPagina);
+    }
+  });
+
+  it("aceita a caixa em parte fora da janela (x e y negativos, passando da borda), sem cortar", async () => {
+    const { navegador, executar, principal, views, janela } = montar();
+    await executar({ tipo: "ler_pagina" });
+    const [vista] = views;
+    const [larguraDaJanela, alturaDaJanela] = janela.getContentSize();
+
+    // Saindo pela esquerda e por cima.
+    expect(navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo: { x: -200, y: -100, largura: 600, altura: 400, zoom: 1 } })).toBe(true);
+    expect(vista.bounds).toEqual({ x: -200, y: -100, width: 600, height: 400 });
+    expect(vista.raio).toBe(0);
+    expect(janela.contentView.addChildView).toHaveBeenLastCalledWith(vista);
+
+    // Saindo pela direita e por baixo.
+    navegador.aoPosicionar(principal, {
+      orquestradorId: "orq-1",
+      retangulo: { x: larguraDaJanela - 100, y: alturaDaJanela - 50, largura: 600, altura: 400, zoom: 1 },
+    });
+    expect(vista.bounds).toEqual({ x: larguraDaJanela - 100, y: alturaDaJanela - 50, width: 600, height: 400 });
+    expect(vista.webContents.getZoomFactor()).toBe(1);
+
+    // Só 1 pixel dentro já basta.
+    navegador.aoPosicionar(principal, { orquestradorId: "orq-1", retangulo: { x: -599, y: 10, largura: 600, altura: 400, zoom: 1 } });
+    expect(vista.bounds).toEqual({ x: -599, y: 10, width: 600, height: 400 });
+  });
+
+  it("com a caixa toda fora da janela fica escondida (a tela mostra a foto) e volta quando o nó reentra", async () => {
+    const { navegador, executar, principal, views } = montar();
+    await executar({ tipo: "ler_pagina" });
+    const [vista] = views;
+    const caixa = { largura: 600, altura: 400, zoom: 1 };
+    navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo: { x: 100, y: 100, ...caixa } });
+
+    for (const [x, y] of [
+      [1440, 100],
+      [2000, 100],
+      [-600, 100],
+      [100, 900],
+      [100, -400],
+    ]) {
+      navegador.aoPosicionar(principal, { orquestradorId: "orq-1", retangulo: { x, y, ...caixa } });
+      esperarEscondida(vista, { largura: 600, altura: 400 });
+    }
+
+    navegador.aoPosicionar(principal, { orquestradorId: "orq-1", retangulo: { x: -500, y: 100, ...caixa } });
+    expect(vista.bounds).toEqual({ x: -500, y: 100, width: 600, height: 400 });
+  });
+
+  it("com o zoom da página fora do que o Chromium aceita fica escondida, no layout do nó, em vez de mudar o layout", async () => {
+    const { navegador, executar, principal, views, janelaWc } = montar();
+    await executar({ tipo: "ler_pagina" });
+    const [vista] = views;
+
+    // Zoom do canvas abaixo de 0,25: o layout seria 3000x2000 e a vista não pode mostrá-lo sem trocar o zoom.
+    navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo: { x: 100, y: 100, largura: 600, altura: 400, zoom: 0.2 } });
+    esperarEscondida(vista, { largura: 3000, altura: 2000 });
+
+    // Acima de 5.
+    navegador.aoPosicionar(principal, { orquestradorId: "orq-1", retangulo: { x: 100, y: 100, largura: 3000, altura: 1800, zoom: 6 } });
+    esperarEscondida(vista, { largura: 500, altura: 300 });
+
+    // O zoom da janela entra na conta: 0,25 do canvas x 0,8 da janela = 0,2.
+    janelaWc.getZoomFactor = () => 0.8;
+    navegador.aoPosicionar(principal, { orquestradorId: "orq-1", retangulo: { x: 100, y: 100, largura: 300, altura: 200, zoom: 0.25 } });
+    esperarEscondida(vista, { largura: 1200, altura: 800 });
+
+    // De volta ao intervalo, volta a mostrar.
+    navegador.aoPosicionar(principal, { orquestradorId: "orq-1", retangulo: { x: 100, y: 100, largura: 600, altura: 400, zoom: 1 } });
+    expect(vista.bounds).toEqual({ x: 80, y: 80, width: 480, height: 320 });
+    expect(vista.webContents.getZoomFactor()).toBeCloseTo(0.8, 6);
+  });
+
+  it("a foto e o capturar_tela saem no mesmo layout do nó, mostrada ou escondida (sem presumir 1280x800)", async () => {
+    const { navegador, executar, principal, views, pagina } = montar();
+    await executar({ tipo: "ler_pagina" });
+    const [vista] = views;
+    const clipsDaCaptura = () => eventosDoCdp(vista, "Page.captureScreenshot").map((parametros) => parametros.clip);
+    // Nó de 2000x1000 de layout, no zoom 0,5 do canvas: 1000x500 na tela.
+    const retangulo = { x: 50, y: 50, largura: 1000, altura: 500, zoom: 0.5 };
+
+    // Escondida.
+    navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo });
+    navegador.aoOcultar(principal, { orquestradorId: "orq-1" });
+    await navegador.aoPedirFoto(principal, { orquestradorId: "orq-1" });
+    await executar({ tipo: "capturar_tela" });
+    // Mostrada (o devicePixelRatio da página acompanha o zoom dela).
+    navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo });
+    pagina.devicePixelRatio = 0.5;
+    await navegador.aoPedirFoto(principal, { orquestradorId: "orq-1" });
+
+    const clips = clipsDaCaptura();
+    expect(clips).toHaveLength(3);
+    for (const clip of clips) expect(clip).toMatchObject({ width: 2000, height: 1000 });
+    // A foto cabe em 1000 de largura e a captura do agente em 1280, a partir do layout real.
+    expect(clips[0].scale).toBeCloseTo(0.5, 6);
+    expect(clips[1].scale).toBeCloseTo(0.64, 6);
+    expect(clips[2].scale).toBeCloseTo(0.5, 6);
+  });
+});
+
 describe("criarNavegadorDoAgente: janela principal", () => {
   it("fecha todas as vistas quando a janela fecha e as desce quando a tela recarrega", async () => {
     const { navegador, executar, principal, retangulo, views, janelaWc, janela, ouvintesDaJanela, ouvintesDoConteudoDaJanela } = montar();
@@ -1370,9 +1599,9 @@ describe("criarNavegadorDoAgente: janela principal", () => {
     await executar({ tipo: "ler_pagina" });
     navegador.aoMostrar(principal, { orquestradorId: "orq-1", retangulo });
 
-    expect(views[0].bounds).not.toEqual(LIMITES_OCULTOS);
+    expect(views[0].bounds).toEqual({ x: 100, y: 100, width: 600, height: 400 });
     ouvintesDoConteudoDaJanela["did-start-navigation"]({ isMainFrame: true, isSameDocument: false });
-    esperarEscondida(views[0]);
+    esperarEscondida(views[0], LAYOUT_DO_RETANGULO);
     expect(navegador.total()).toBe(1);
 
     ouvintesDoConteudoDaJanela["did-start-navigation"]({ isMainFrame: false, isSameDocument: false });

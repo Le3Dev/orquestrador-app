@@ -1,11 +1,13 @@
 import {
   calcularRetangulo,
+  calcularRetanguloSemCorte,
   dominioRegistravel,
   ehEnderecoLocal,
   ehHostLocal,
   hostDaOrigem,
   LADO_MINIMO_DA_VISTA_PX,
   mesmoRetangulo,
+  mesmoTamanho,
   modoDaPrevia,
   mudouDeDominio,
   pontosDeAmostra,
@@ -192,6 +194,81 @@ describe("calcularRetangulo", () => {
   });
 });
 
+describe("calcularRetanguloSemCorte", () => {
+  // A janela tem 1440x900; o canvas começa abaixo de um cabeçalho de 40 px e vai até a borda direita e a de baixo.
+  const janela = { largura: 1440, altura: 900 };
+  const area = { left: 0, top: 40, width: 1440, height: 860 };
+
+  it("o corpo dentro da área: o retângulo inteiro, igual ao de calcularRetangulo", () => {
+    const corpo = { left: 100, top: 200, width: 700, height: 480 };
+    const medida = calcularRetanguloSemCorte(corpo, area, 700, janela);
+    expect(medida?.retangulo).toEqual({ x: 100, y: 200, largura: 700, altura: 480, zoom: 1 });
+    expect(medida?.retangulo).toEqual(calcularRetangulo(corpo, area, 700));
+    expect(medida?.visivel).toEqual(medida?.retangulo);
+    expect(medida?.passaDaAreaDoCanvas).toBe(false);
+  });
+
+  it("não corta: x e y negativos e a caixa além da borda da janela vão inteiros, com o zoom do corpo inteiro", () => {
+    const medida = calcularRetanguloSemCorte({ left: -150, top: 600, width: 700, height: 480 }, area, 1400, janela);
+    expect(medida?.retangulo).toEqual({ x: -150, y: 600, largura: 700, altura: 480, zoom: 0.5 });
+    // Só a parte dentro da área conta como visível (e é onde se confere a cobertura).
+    expect(medida?.visivel).toEqual({ x: 0, y: 600, largura: 550, altura: 300, zoom: 0.5 });
+    // A esquerda e a base da área são as da janela: a janela corta, nada de fora do canvas é coberto.
+    expect(medida?.passaDaAreaDoCanvas).toBe(false);
+  });
+
+  it("passar da borda da área que não é a da janela (o cabeçalho) conta como coberto", () => {
+    const sobOCabecalho = calcularRetanguloSemCorte({ left: 100, top: 10, width: 700, height: 480 }, area, 700, janela);
+    expect(sobOCabecalho?.retangulo).toMatchObject({ x: 100, y: 10, altura: 480 });
+    expect(sobOCabecalho?.passaDaAreaDoCanvas).toBe(true);
+  });
+
+  it("um painel lateral (a área não começa na borda da janela) vale para a esquerda e para a direita", () => {
+    const comPainel = { left: 260, top: 0, width: 1000, height: 900 };
+    expect(
+      calcularRetanguloSemCorte({ left: 200, top: 100, width: 700, height: 480 }, comPainel, 700, janela)?.passaDaAreaDoCanvas,
+    ).toBe(true);
+    expect(
+      calcularRetanguloSemCorte({ left: 700, top: 100, width: 700, height: 480 }, comPainel, 700, janela)?.passaDaAreaDoCanvas,
+    ).toBe(true);
+    expect(
+      calcularRetanguloSemCorte({ left: 300, top: 100, width: 700, height: 480 }, comPainel, 700, janela)?.passaDaAreaDoCanvas,
+    ).toBe(false);
+  });
+
+  it("até 1 px de diferença entre a área e a janela (ou do corpo para a área) é a mesma borda", () => {
+    const quaseDaJanela = { left: 0.6, top: 0, width: 1439, height: 900 };
+    expect(
+      calcularRetanguloSemCorte({ left: -200, top: 100, width: 700, height: 480 }, quaseDaJanela, 700, janela)?.passaDaAreaDoCanvas,
+    ).toBe(false);
+    expect(
+      calcularRetanguloSemCorte({ left: 99.5, top: 100, width: 700, height: 480 }, { ...area, left: 100 }, 700, janela)
+        ?.passaDaAreaDoCanvas,
+    ).toBe(false);
+  });
+
+  it("nulo quando a parte visível tem menos que o lado mínimo, mesmo com o corpo grande", () => {
+    const quaseFora = { left: 1440 - (LADO_MINIMO_DA_VISTA_PX - 1), top: 100, width: 700, height: 480 };
+    expect(calcularRetanguloSemCorte(quaseFora, area, 700, janela)).toBeNull();
+    const justo = { left: 1440 - LADO_MINIMO_DA_VISTA_PX, top: 100, width: 700, height: 480 };
+    expect(calcularRetanguloSemCorte(justo, area, 700, janela)).not.toBeNull();
+    expect(calcularRetanguloSemCorte({ left: 100, top: 40 - 479, width: 700, height: 480 }, area, 700, janela)).toBeNull();
+  });
+
+  it("nulo quando o corpo não está na tela: minimizado, escondido ou fora da área", () => {
+    expect(calcularRetanguloSemCorte({ left: 0, top: 0, width: 0, height: 0 }, area, 0, janela)).toBeNull();
+    expect(calcularRetanguloSemCorte({ left: 100, top: 100, width: 700, height: 480 }, area, 0, janela)).toBeNull();
+    expect(calcularRetanguloSemCorte({ left: 2000, top: 100, width: 700, height: 480 }, area, 700, janela)).toBeNull();
+  });
+
+  it("acompanha o pan sem mudar o tamanho: o mesmo corpo deslocado dá o retângulo deslocado", () => {
+    const antes = calcularRetanguloSemCorte({ left: 100, top: 200, width: 700, height: 480 }, area, 700, janela);
+    const depois = calcularRetanguloSemCorte({ left: -300, top: 150, width: 700, height: 480 }, area, 700, janela);
+    expect(depois?.retangulo).toMatchObject({ x: -300, y: 150, largura: antes?.retangulo.largura, altura: antes?.retangulo.altura });
+    expect(mesmoTamanho(antes!.retangulo, depois!.retangulo)).toBe(true);
+  });
+});
+
 describe("pontosDeAmostra", () => {
   it("nove pontos dentro do retângulo: cantos, meios e centro", () => {
     const pontos = pontosDeAmostra({ x: 100, y: 200, largura: 400, altura: 300, zoom: 1 });
@@ -218,5 +295,20 @@ describe("mesmoRetangulo", () => {
   it("nulos", () => {
     expect(mesmoRetangulo(null, null)).toBe(true);
     expect(mesmoRetangulo(base, null)).toBe(false);
+  });
+});
+
+describe("mesmoTamanho", () => {
+  const base = { x: 10, y: 10, largura: 300, altura: 200, zoom: 1 };
+
+  it("o pan (só x e y) não muda o tamanho; o redimensionar e o zoom mudam", () => {
+    expect(mesmoTamanho(base, { ...base, x: 500, y: -40 })).toBe(true);
+    expect(mesmoTamanho(base, { ...base, largura: 301 })).toBe(false);
+    expect(mesmoTamanho(base, { ...base, altura: 199 })).toBe(false);
+    expect(mesmoTamanho(base, { ...base, largura: 600, altura: 400, zoom: 2 })).toBe(false);
+  });
+
+  it("ignora diferenças abaixo de meio pixel", () => {
+    expect(mesmoTamanho(base, { ...base, largura: 300.3, altura: 199.8 })).toBe(true);
   });
 });
