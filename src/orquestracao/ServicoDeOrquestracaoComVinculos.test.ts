@@ -312,6 +312,41 @@ describe("ServicoDeOrquestracao e os vínculos", () => {
     expect(front.fila).toEqual([]);
   });
 
+  it("turno vindo de vinculado com marcador de plano conclui sem Plano pendente e devolve a mensagem ao remetente", async () => {
+    const motor = new MotorQueResponde((_pedido, indice) => {
+      if (indice === 0) return `Pronto.
+${BLOCO("Front", "faça o grande")}`;
+      if (indice === 1) return `Feito.
+${BLOCO("API", "terminei")}
+<plano-para-aprovacao/>`;
+      return "Obrigado.";
+    });
+    servicoAtual = montar(motor);
+    const api = await criar(servicoAtual, "API");
+    const front = await criar(servicoAtual, "Front");
+    await vinculos.vincular(api.id, front.id);
+
+    await (await servicoAtual.enviarMensagem(api.id, "comece")).conclusao;
+    await vi.waitFor(() => {
+      expect(motor.pedidos).toHaveLength(3);
+      expect(api.turnoEmAndamento).toBeNull();
+    });
+    expect(front.ultimoTurno?.planoPendente).toBe(false);
+    expect(front.ultimoTurno?.resposta).toBe("Feito.");
+    expect(motor.pedidos[2]).toMatchObject({ orquestradorId: api.id, texto: "terminei" });
+  });
+
+  it("turno do usuário com marcador de plano continua virando Plano pendente", async () => {
+    const motor = new MotorQueResponde(() => `Plano.
+<plano-para-aprovacao/>`);
+    servicoAtual = montar(motor);
+    const api = await criar(servicoAtual, "API");
+
+    await (await servicoAtual.enviarMensagem(api.id, "algo grande")).conclusao;
+
+    expect(api.ultimoTurno?.planoPendente).toBe(true);
+  });
+
   it("atualiza as notas do vínculo pelo bloco notas-do-vinculo", async () => {
     const motor = new MotorQueResponde(() => "ok\n```notas-do-vinculo\n" + JSON.stringify({ com: "Front", texto: "decisão X" }) + "\n```");
     servicoAtual = montar(motor);

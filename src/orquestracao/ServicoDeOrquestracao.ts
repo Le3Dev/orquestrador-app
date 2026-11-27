@@ -1058,7 +1058,10 @@ export class ServicoDeOrquestracao {
         // Os blocos de vínculo também saem sempre; só valem num turno de execução sem Plano pendente.
         const semVinculos = separarBlocosDeVinculo(semPrevias.texto);
         const { resposta, planoProposto } = separarPropostaDePlano(semVinculos.texto);
-        const planoPendente = planoProposto && configuracaoDoTurno.propoePlanoEmPedidosGrandes(modo);
+        // Pedido de vinculado nunca vira Plano pendente (ADR-49): a aprovação é a de quem pediu e,
+        // esperando o usuário deste lado, o resultado jamais voltaria ao remetente.
+        const deVinculado = this.origensDosTurnos.has(turnoId);
+        const planoPendente = planoProposto && !deVinculado && configuracaoDoTurno.propoePlanoEmPedidosGrandes(modo);
         this.publicar(
           orquestrador,
           orquestrador.concluirTurno(

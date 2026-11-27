@@ -575,3 +575,29 @@ describe("delegação pelo app (ferramenta delegar_subtarefas)", () => {
     expect(texto).not.toContain(MODELO_SONNET);
   });
 });
+
+describe("autonomia nos pedidos de orquestrador vinculado (ADR-49)", () => {
+  const configuracao = ConfiguracaoDoOrquestrador.de({
+    modeloDoOrquestrador: "opus",
+    modeloDosSubagentes: "haiku",
+    quantidadeDeSubagentes: { modo: "automatica", limite: 3 },
+    nivelDePermissao: "edicao",
+  });
+  const montar = (origem: { orquestradorId: string; nome: string; saltos: number } | null): string =>
+    mensagemParaOOrquestrador("rode isso", configuracao, [], "execucao", null, null, false, [], "unix", [], [], null, false, [], origem);
+
+  it("com origem, troca a regra de pedidos grandes pela de autonomia", () => {
+    const mensagem = montar({ orquestradorId: "o2", nome: "API", saltos: 0 });
+
+    expect(mensagem).not.toContain("Pedidos grandes");
+    expect(mensagem).toContain("Pedido de um orquestrador vinculado: execute direto, sem propor plano");
+    expect(mensagem).toContain("bloco mensagem-para-vinculado");
+  });
+
+  it("sem origem, mantém a regra de pedidos grandes", () => {
+    const mensagem = montar(null);
+
+    expect(mensagem).toContain("Pedidos grandes");
+    expect(mensagem).not.toContain("Pedido de um orquestrador vinculado");
+  });
+});

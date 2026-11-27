@@ -1,6 +1,11 @@
 import { linhasDaRegraDasPerguntas } from "../perguntas/PerguntaDoApp";
 import { linhasDaRegraDaPrevia, linhasDasPreviasAbertas, REGRA_DA_PREVIA_NO_SUBAGENTE } from "../previas/PreviaDoApp";
-import { linhaDaMensagemRecebida, linhasDosVinculos, VinculadoNoPrompt } from "../vinculos/BlocosDeVinculo";
+import {
+  linhaDaMensagemRecebida,
+  linhasDosVinculos,
+  MARCA_DA_MENSAGEM_PARA_VINCULADO,
+  VinculadoNoPrompt,
+} from "../vinculos/BlocosDeVinculo";
 import { linhasDosDocumentosAnexados } from "./ArquivosAnexados";
 import { ConfiguracaoDoOrquestrador } from "./ConfiguracaoDoOrquestrador";
 import { desarmarMarcas, InstrucoesAplicadas, linhasDasInstrucoes } from "./InstrucoesPersonalizadas";
@@ -279,6 +284,18 @@ function regrasDePedidosGrandes(): string[] {
 }
 
 /**
+ * Pedido de um Orquestrador vinculado (ADR-49): quem pediu já tem a aprovação
+ * do usuário do lado dele, então o turno executa direto. Propor Plano aqui
+ * travaria a colaboração, porque o Plano espera o usuário deste lado e os
+ * blocos de vínculo só valem sem Plano pendente.
+ */
+function regraDaAutonomiaDoVinculado(): string[] {
+  return [
+    `- Pedido de um orquestrador vinculado: execute direto, sem propor plano e sem a linha ${MARCADOR_DE_PLANO} (a aprovação já foi dada do lado de quem pediu). Siga as demais regras desta configuração (delegação, permissões, commits). Ao terminar, entregue o resultado a quem pediu com um bloco ${MARCA_DA_MENSAGEM_PARA_VINCULADO}.`,
+  ];
+}
+
+/**
  * As regras fixas do Orquestrador: ele coordena, faz o trivial quando o pedido
  * permite e entrega toda alteração aos Subagentes.
  *
@@ -402,7 +419,9 @@ function linhasDoContextoDaTroca(contexto: string | null): string[] {
  * Os Orquestradores vinculados (`vinculados`) vão num bloco `<vinculos>`
  * depois dos itens ligados, com as notas compartilhadas e como falar com
  * eles. Se o pedido veio de um deles (`origemDaMensagem`), a linha "Mensagem
- * do orquestrador X (salto n):" abre o texto.
+ * do orquestrador X (salto n):" abre o texto. Num turno de execução assim, a
+ * regra dos pedidos grandes dá lugar à da autonomia: executa direto, sem
+ * Plano, e devolve o resultado a quem pediu (ADR-49).
  */
 export function mensagemParaOOrquestrador(
   texto: string,
@@ -434,7 +453,12 @@ export function mensagemParaOOrquestrador(
         `  Na execução valerá: ${DESCRICAO_DO_NIVEL[configuracao.nivelDePermissao]}. Planeje dentro disso; o usuário vai aprovar, ajustar ou descartar antes de qualquer execução.`,
       ]
     : [];
-  const regrasDoTamanho = configuracao.propoePlanoEmPedidosGrandes(modo) ? regrasDePedidosGrandes() : [];
+  const deVinculado = origemDaMensagem !== null && !planejamento;
+  const regrasDoTamanho = deVinculado
+    ? regraDaAutonomiaDoVinculado()
+    : configuracao.propoePlanoEmPedidosGrandes(modo)
+      ? regrasDePedidosGrandes()
+      : [];
   // As imagens chegam junto com a mensagem para o Orquestrador; os
   // Subagentes não as recebem, então precisam dos caminhos para abri-las.
   const caminhosDasImagens = anexos.filter((anexo) => anexo.categoria === "imagem").map((anexo) => anexo.caminho);

@@ -450,9 +450,10 @@ Cada plugin do catálogo traz `jaTem: { skills, servidoresMcp }`: o catálogo ma
 
 O usuário liga dois Orquestradores quaisquer (inclusive de projetos diferentes) para eles trocarem mensagens e dividirem um bloco de notas. Cada Orquestrador pode ter vários vínculos; não se vincula a si mesmo nem se repete o par (em qualquer ordem), e os vínculos de um Orquestrador somem quando ele é removido. Código: `src/vinculos/` (entidade `Vinculo`, `ServicoDeVinculos`, `BlocosDeVinculo`), `RepositorioDeVinculosEmArquivo` (`<PASTA_DADOS>/vinculos/<id>.json`, como as notas) e `src/controllers/vinculosRoutes.ts`.
 
-- **Mensagem direta:** o Orquestrador escreve, no fim da resposta final, um bloco ` ```mensagem-para-vinculado ` com `{"para":"<nome ou id>","texto":"..."}`. A mensagem entra direto na fila do destino, sem aprovação, marcada com quem enviou (`origem` do `PedidoNaFila`), e o destino a recebe com a linha "Mensagem do orquestrador X (salto n):". Com o destino livre (sem turno, fila vazia, sem Plano pendente nem retomada marcada), ela já vira turno; senão espera a vez na fila.
+- **Mensagem direta:** o Orquestrador escreve, no fim da resposta final, um bloco ` ```mensagem-para-vinculado ` com `{"para":"<nome ou id>","texto":"..."}`. A mensagem entra direto na fila do destino, sem aprovação e sem Plano do lado de quem recebe, marcada com quem enviou (`origem` do `PedidoNaFila`), e o destino a recebe com a linha "Mensagem do orquestrador X (salto n):". Com o destino livre (sem turno, fila vazia, sem Plano pendente nem retomada marcada), ela já vira turno; senão espera a vez na fila.
 - **Notas compartilhadas:** um bloco ` ```notas-do-vinculo ` com `{"com":"<nome ou id>","texto":"..."}` substitui as notas do vínculo (até 8.000 caracteres). As notas, o nome e a pasta de cada vinculado, e a explicação dos dois blocos vão no bloco `<vinculos>` da mensagem de todo turno.
 - **Blocos inválidos:** JSON fora do formato (zod estrito), campo a mais, destino que não é vinculado ou nome ambíguo são ignorados e viram um evento `aviso_de_vinculo` no histórico do remetente. Os blocos saem do texto da resposta; só valem em turno de execução sem Plano pendente.
+- **Autonomia:** um turno que nasceu de mensagem de um vinculado (origem de vínculo) executa direto, **sem propor Plano**: o prompt troca a regra dos pedidos grandes pela da autonomia e, se o marcador de plano vier mesmo assim, ele é ignorado (não vira Plano pendente) e os blocos de vínculo seguem. O Orquestrador devolve o resultado a quem pediu com um bloco `mensagem-para-vinculado` (ver ADR-49).
 - **Anti-laço:** cada mensagem carrega `saltos`. A enviada por um turno que nasceu de mensagem de vínculo herda `saltos + 1`; a primeira (turno do usuário) e a enviada à mão pelo usuário têm 0. Acima de `LIMITE_DE_SALTOS = 6` a mensagem é descartada, com aviso. A origem do turno só vive em memória: uma retomada automática começa a contar de novo. Já a troca para um motor de reserva (ADR-48) reenvia o pedido com a mesma origem, e o bloco `<vinculos>` e os dois blocos de resposta valem nos três motores (Claude Code, Codex e Copilot).
 
 API (ver também a tabela de endpoints): `GET /vinculos`, `POST /vinculos`, `DELETE /vinculos/:id`, `PUT /vinculos/:id/notas` e `POST /vinculos/:id/mensagens` (envio manual, 202).
@@ -1746,6 +1747,14 @@ Detalhes observados no Claude Code 2.1.312 e tratados no adaptador:
 
 - A transcrição do terminal desenha só os últimos 20 pedidos, e o chat rápido só as últimas 100 mensagens; o botão "Mostrar N anteriores" revela mais 20 e 100 por clique. O estado (`turnos`, `chat.mensagens`) continua completo, então a paleta de comandos e a pesquisa enxergam tudo.
 - O `log` de cada pedido guarda até 300 linhas enquanto ele está em andamento e é encolhido para as últimas 50 quando o pedido termina (`aplicarEvento.ts`). Texto, resposta, uso e anexos não mudam.
+
+**ADR-49 — Vínculos: pedido de um Orquestrador vinculado executa direto, sem Plano.**
+- *Contexto:* o turno de execução sempre leva a regra dos pedidos grandes (ADR-15, ADR-28). Quando o Orquestrador B recebia um pedido grande de um vinculado A, B propunha um Plano e parava esperando o usuário na tela dele; como os blocos de vínculo só valem em turno de execução sem Plano pendente, B nunca devolvia o resultado a A e a colaboração travava.
+- *Decisão:* o turno com origem de vínculo não propõe Plano: o prompt (`mensagemParaOOrquestrador`) troca a regra dos pedidos grandes pela da autonomia (`regraDaAutonomiaDoVinculado`), e o `ServicoDeOrquestracao` nunca marca Plano pendente nesse turno (o marcador é descartado da resposta), então os blocos de vínculo são encaminhados. `ConfiguracaoDoOrquestrador.propoePlanoEmPedidosGrandes` não muda.
+- *Consequências:*
+  - o lado que recebe altera o projeto sem aprovação própria; a aprovação é a de quem pediu (o usuário é o mesmo);
+  - as demais regras da configuração (delegação, permissões, commits) continuam valendo;
+  - o `LIMITE_DE_SALTOS` continua protegendo contra laço entre os orquestradores.
 
 ## Manuais e APIs
 
