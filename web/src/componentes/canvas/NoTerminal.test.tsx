@@ -1474,7 +1474,35 @@ describe("NoTerminal · fila de pedidos", () => {
     render(<Terminal canvas={canvasDoTerminal(conversa, comFila(PEDIDO_A, PEDIDO_B))} no={propsDoNo()} />);
 
     const itens = within(screen.getByRole("region", { name: "Fila de pedidos" })).getAllByRole("listitem");
-    expect(itens.map((item) => item.textContent)).toEqual(["1plan modeatualize o README", "2revise o PR"]);
+    expect(itens.map((item) => item.textContent)).toEqual(["1plan modeatualize o READMEpróximo", "2revise o PR"]);
+  });
+
+  it("pergunta pendente do Claude: selo 'pergunta pendente' na barra e a borda do terminal marcada; respondida, some", () => {
+    const comPergunta = aplicar(
+      ESTADO_INICIAL,
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "decida", configuracao },
+      {
+        tipo: "turno_concluido",
+        turnoId: "t1",
+        resposta: "Qual caminho?",
+        uso: USO,
+        perguntas: [{ pergunta: "Qual?", opcoes: [{ rotulo: "A", descricao: null }, { rotulo: "B", descricao: null }], multipla: false }],
+      },
+    );
+    const { container, unmount } = render(<Terminal canvas={canvasDoTerminal(comPergunta)} no={propsDoNo()} />);
+
+    expect(screen.getByText("pergunta pendente")).toBeInTheDocument();
+    expect(container.querySelector(".janela-terminal-pergunta")).not.toBeNull();
+    unmount();
+
+    render(<Terminal canvas={canvasDoTerminal(conversaOciosa())} no={propsDoNo()} />);
+    expect(screen.queryByText("pergunta pendente")).not.toBeInTheDocument();
+  });
+
+  it("a barra do terminal conta os pedidos: '2 na fila'", () => {
+    render(<Terminal canvas={canvasDoTerminal(conversaDoTerminal(), comFila(PEDIDO_A, PEDIDO_B))} no={propsDoNo()} />);
+
+    expect(screen.getByText("2 na fila")).toBeInTheDocument();
   });
 
   it("o X tira o pedido da fila no servidor", async () => {

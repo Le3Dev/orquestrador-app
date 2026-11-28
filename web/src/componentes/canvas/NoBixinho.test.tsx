@@ -175,6 +175,41 @@ describe("NoBixinho", () => {
     expect(simulados.desenhoDoBixinho.mock.calls.length).toBe(desenhos);
   });
 
+  it("balão: pontinhos enquanto pensa, fala digitada com a atividade; lendo, os olhos passeiam; editando, faíscas", () => {
+    const inicio = doisTrabalhando();
+    const { container, rerender } = render(tela(inicio, "s1"));
+    // Sem atividade ainda: pontinhos (o texto "pensando…" fica para leitores de tela).
+    expect(container.querySelector(".pontinhos-do-balao")).toBeInTheDocument();
+    expect(screen.getByText("pensando…")).toHaveClass("sr-only");
+    expect(container.querySelector(".fala-digitada")).not.toBeInTheDocument();
+
+    const lendo = aplicar(inicio, progresso("s1", "Reading src/a.ts", "Read"));
+    rerender(tela(lendo, "s1"));
+    expect(container.querySelector(".pontinhos-do-balao")).not.toBeInTheDocument();
+    expect(container.querySelector(".fala-digitada")).toHaveStyle({ "--passos": "16", "--duracao": "320ms" });
+    expect(container.querySelector(".no-bixinho")).toHaveClass("no-bixinho-lendo");
+    expect(container.querySelector(".faiscas-da-edicao")).not.toBeInTheDocument();
+
+    const editando = aplicar(lendo, progresso("s1", "Editing src/a.ts", "edit"));
+    rerender(tela(editando, "s1"));
+    expect(container.querySelector(".no-bixinho")).not.toHaveClass("no-bixinho-lendo");
+    expect(container.querySelectorAll(".faiscas-da-edicao i")).toHaveLength(3);
+  });
+
+  it("quem nasce em fila leva o lugar dela (--i) para escalonar a entrada; o primeiro não leva", () => {
+    const conversa = doisTrabalhando();
+    const props = { ...propsDoNo("s2", false, 0), data: { orquestradorId: "o1", subagenteId: "s2", entrada: 2 } };
+    const { container } = render(
+      <ProvedorDoCanvas valor={valorDoCanvas(conversa)}>
+        <NoBixinho {...props} />
+      </ProvedorDoCanvas>,
+    );
+    expect(container.querySelector(".no-bixinho")).toHaveStyle("--i: 2");
+
+    const primeiro = render(tela(conversa, "s1"));
+    expect(primeiro.container.querySelector(".no-bixinho")).not.toHaveAttribute("style");
+  });
+
   it("orquestrador pausado (congelado): o bixinho que executava diz pausado, sem ícone, e a ficha também", () => {
     const conversa = aplicar(doisTrabalhando(), progresso("s1", "Reading src/a.ts"), {
       tipo: "orquestrador_pausado",
@@ -215,6 +250,8 @@ describe("NoBixinho", () => {
 
     expect(screen.getByText("pronto!")).toBeInTheDocument();
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
+    // O selo de concluído (decorativo) entra no lugar do ícone, com o check por desenhar.
+    expect(document.querySelector(".selo-de-concluido path")).toHaveAttribute("pathLength", "1");
   });
 
   it("não redesenha o bixinho quando muda outro Subagente, só quando muda o próprio", () => {

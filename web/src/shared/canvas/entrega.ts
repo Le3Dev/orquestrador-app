@@ -17,6 +17,24 @@ export const DURACAO_DO_PISCAR_MS = 700;
  */
 export const ENTREGA_AO_VIVO_MS = 10_000;
 
+/** Quanto o pacote da tarefa leva do terminal ao bixinho que acabou de nascer. */
+export const DURACAO_DO_PACOTE_MS = 520;
+/** O intervalo entre um bixinho e o próximo na fila de entrada (o mesmo do CSS de `.no-bixinho`). */
+export const INTERVALO_DA_ENTRADA_MS = 110;
+
+/** Quando o pacote da tarefa parte: depois de o bixinho nascer (`entrada` = lugar dele na fila). */
+export function atrasoDoPacote(entrada = 0): number {
+  return 120 + Math.max(0, entrada) * INTERVALO_DA_ENTRADA_MS;
+}
+
+/** Como a linha conta a situação do Subagente: correndo (trabalha), verde (concluiu), vermelha (falhou). */
+export function estadoDoFio(situacao: SituacaoDoSubagente | undefined): "correndo" | "ok" | "erro" | "parado" {
+  if (situacao === "executando") return "correndo";
+  if (situacao === "concluido") return "ok";
+  if (situacao === "falhou") return "erro";
+  return "parado";
+}
+
 /** Se o Subagente encerrou há menos de `ENTREGA_AO_VIVO_MS` de `agora` (ms): só aí a entrega anima. */
 export function entregaRecente(encerradoEm: string | null, agora: number): boolean {
   return encerradoEm !== null && agora - Date.parse(encerradoEm) < ENTREGA_AO_VIVO_MS;

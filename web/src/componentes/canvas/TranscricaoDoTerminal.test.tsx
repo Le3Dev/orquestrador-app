@@ -295,6 +295,48 @@ describe("TranscricaoDoTerminal", () => {
     expect(screen.queryByText("plano proposto")).not.toBeInTheDocument();
   });
 
+  describe("síntese que se monta", () => {
+    const comSubagentes = (...eventos: EventoDeOrquestracao[]) =>
+      aplicar(
+        ESTADO_INICIAL,
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "faça a parte", configuracao },
+        { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "sub-aaaa", descricao: "a", tarefa: "a", papel: "revisor" },
+        { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "sub-bbbb", descricao: "b", tarefa: "b" },
+        ...eventos,
+      );
+    const concluido: EventoDeOrquestracao = { tipo: "turno_concluido", turnoId: "t1", resposta: "Tudo certo.", uso: USO };
+
+    it("a resposta com subagentes ganha as fichas, uma por subagente, na ordem", () => {
+      const { container } = render(<Transcricao conversa={comSubagentes(concluido)} />);
+
+      const fichas = [...container.querySelectorAll(".ficha-da-sintese")].map((ficha) => ficha.textContent);
+      expect(fichas).toHaveLength(2);
+      expect(fichas[0]).toBe("revisor");
+    });
+
+    it("pedido sem subagentes não tem fichas nem animação", () => {
+      const conversa = aplicar(
+        ESTADO_INICIAL,
+        { tipo: "turno_iniciado", turnoId: "t1", texto: "oi", configuracao },
+        concluido,
+      );
+      const { container } = render(<Transcricao conversa={conversa} />);
+
+      expect(container.querySelector(".fichas-da-sintese")).toBeNull();
+      expect(container.querySelector(".sintese-monta")).toBeNull();
+    });
+
+    it("histórico já concluído ao abrir não anima; o que termina com o terminal aberto, sim", () => {
+      const aberto = render(<Transcricao conversa={comSubagentes(concluido)} />);
+      expect(aberto.container.querySelector(".sintese-monta")).toBeNull();
+      aberto.unmount();
+
+      const aoVivo = render(<Transcricao conversa={comSubagentes()} />);
+      aoVivo.rerender(<Transcricao conversa={comSubagentes(concluido)} />);
+      expect(aoVivo.container.querySelector(".sintese-monta .ficha-da-sintese")).not.toBeNull();
+    });
+  });
+
   it("no log, o subagente pronto aparece pelo nome dele; executor, workflow e evento antigo, pelo nome do bicho", () => {
     const concluiu = (subagenteId: string): EventoDeOrquestracao => ({
       tipo: "subagente_concluido",

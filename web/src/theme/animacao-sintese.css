@@ -1,0 +1,79 @@
+/* Síntese que se monta: fichas dos subagentes chegam em sequência e a resposta entra depois. Só transform e opacity. */
+
+.fichas-da-sintese {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rotulo-da-sintese {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.ficha-da-sintese {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--cor-da-ficha, var(--active)) 50%, transparent);
+  background: color-mix(in srgb, var(--cor-da-ficha, var(--active)) 12%, var(--surface-2));
+  font-size: 10.5px;
+  color: var(--caption);
+}
+
+.ficha-da-sintese i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cor-da-ficha, var(--active));
+}
+
+.ficha-da-sintese-resto {
+  --cor-da-ficha: var(--muted);
+}
+
+/* Só quando o pedido terminou com o terminal aberto: o histórico carregado não anima. */
+.sintese-monta .ficha-da-sintese {
+  animation: ficha-chega 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) calc(var(--i, 0) * 110ms) both;
+}
+
+.sintese-monta .resposta-no-terminal {
+  animation: resposta-chega 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) calc(var(--fichas, 0) * 110ms + 250ms) both;
+}
+
+@keyframes ficha-chega {
+  from { opacity: 0; transform: translateY(14px) scale(0.85); }
+}
+@keyframes resposta-chega {
+  from { opacity: 0; transform: translateY(8px); }
+}
+
+/* Cartão do subagente proposto no chat: chega deslizando; os vizinhos, em sequência. */
+.cartao-de-subagente-chega {
+  animation: resposta-chega 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.cartao-de-subagente-chega + .cartao-de-subagente-chega { animation-delay: 90ms; }
+.cartao-de-subagente-chega + .cartao-de-subagente-chega + .cartao-de-subagente-chega { animation-delay: 180ms; }
+
+.canvas-movendo .sintese-monta .ficha-da-sintese,
+.canvas-movendo .sintese-monta .resposta-no-terminal,
+.canvas-movendo .cartao-de-subagente-chega {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sintese-monta .ficha-da-sintese,
+  .sintese-monta .resposta-no-terminal,
+  .cartao-de-subagente-chega {
+    animation: none;
+  }
+}

@@ -2148,6 +2148,8 @@ A tela é um **canvas infinito**, como o Excalidraw: cada Orquestrador é uma ja
 
 **Modo fantasma (o modo invisível, em uso):** a janela fica transparente por cima de tudo, mas o chat rápido pode ser **movido** (arraste a alça no topo do chat, ou use Ctrl+Alt+setas, 40 px por vez) e **redimensionado** (arraste o canto de baixo à direita); ele nunca sai da tela, o lugar e o tamanho ficam gravados e o botão **lugar padrão** volta ao rodapé centralizado. Só o chat captura o mouse: nos vãos, o clique passa para o programa de trás. A janela **não rouba o teclado**: clique no campo para digitar (ao enviar, apertar Esc ou clicar fora, o teclado volta ao programa de trás) ou use **Ctrl+Shift+Space**, que foca o campo de qualquer lugar. **Opacidade:** o controle deslizante da barra do chat (no topo do chat móvel; no cabeçalho da conversa do chat flutuante, também fora do modo) deixa o chat **inteiro**, fundo e texto, de 20% a 100% opaco; só ele muda, o resto do app não. A escolha fica gravada (`opacidadeDoChat`, padrão 100%).
 
+**Pergunta pendente:** quando o Claude termina um pedido com uma pergunta e espera a sua resposta, o terminal ganha o selo kraft *pergunta pendente* na barra, a borda pulsa e o terminal balança uma vez. Em *Configurações → Aparência*, o interruptor **Som ao receber uma pergunta** (desligado por padrão) liga um aviso curto e baixo, gerado pelo navegador (Web Audio, sem arquivo de som) e tocado uma única vez por pergunta nova; a escolha fica só neste computador (`somDaPergunta`, no `localStorage`, junto das outras preferências da tela).
+
 | Atalho | O que faz |
 |---|---|
 | `Ctrl+\` | Entra no modo; dentro dele, oculta ou mostra o chat sem sair |

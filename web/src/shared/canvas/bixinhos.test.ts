@@ -1,4 +1,12 @@
-import { ACESSORIOS, aparenciaDoBixinho, CORES, FORMAS, nomeDoBixinho, papelQueNomeia } from "./bixinhos";
+import {
+  ACESSORIOS,
+  aparenciaDoBixinho,
+  CORES,
+  digitacaoDaFala,
+  FORMAS,
+  nomeDoBixinho,
+  papelQueNomeia,
+} from "./bixinhos";
 import type { IconeDeFerramenta } from "./iconesDeFerramenta";
 import {
   ACESSORIOS_DESENHADOS,
@@ -14,6 +22,14 @@ import {
 } from "./sprites";
 
 const ICONES: readonly IconeDeFerramenta[] = ["lupa", "lapis", "engrenagem", "globo"];
+
+describe("digitacaoDaFala", () => {
+  it("20 ms por letra, e no máximo 400 ms para falas longas", () => {
+    expect(digitacaoDaFala("Edit a.ts")).toEqual({ passos: 9, duracaoMs: 180 });
+    expect(digitacaoDaFala("x".repeat(60))).toEqual({ passos: 60, duracaoMs: 400 });
+    expect(digitacaoDaFala("")).toEqual({ passos: 0, duracaoMs: 0 });
+  });
+});
 
 describe("aparenciaDoBixinho", () => {
   it("é sempre a mesma para o mesmo subagente", () => {

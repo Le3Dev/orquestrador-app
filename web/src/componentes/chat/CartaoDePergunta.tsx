@@ -2,6 +2,7 @@ import { type KeyboardEvent, useId, useRef, useState } from "react";
 
 import { mensagemDeErro } from "../../shared/api/cliente";
 import type { PerguntaDoApp } from "../../shared/api/tipos";
+import "../../theme/animacao-pergunta.css";
 
 interface Props {
   perguntas: readonly PerguntaDoApp[];
@@ -146,7 +147,7 @@ export function CartaoDePergunta({ perguntas, respondida, desabilitado, aoRespon
 
   return (
     <div
-      className={`cartao-de-pergunta ${travado ? "cartao-de-pergunta-respondida" : ""}`}
+      className={`cartao-de-pergunta ${travado ? "cartao-de-pergunta-respondida" : "cartao-de-pergunta-pendente"}`}
       role="group"
       aria-label={perguntas.length === 1 ? "Pergunta do Claude" : "Perguntas do Claude"}
     >

@@ -130,6 +130,7 @@ describe("PainelDeConfiguracoesDoApp", () => {
       opacidadeDoChat: 1,
       alturaDaConversaDoChat: null,
       transcricaoAberta: false,
+      somDaPergunta: false,
     });
 
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Chat fixo" }));

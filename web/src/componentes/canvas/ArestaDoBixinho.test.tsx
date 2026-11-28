@@ -3,7 +3,7 @@ import { type EdgeProps, Position } from "@xyflow/react";
 import type { ReactNode } from "react";
 
 import type { SituacaoDoSubagente } from "../../shared/api/tipos";
-import { DURACAO_DA_ENTREGA_MS } from "../../shared/canvas/entrega";
+import { atrasoDoPacote, DURACAO_DA_ENTREGA_MS, DURACAO_DO_PACOTE_MS } from "../../shared/canvas/entrega";
 import type { ArestaDoBixinho as TipoDaAresta } from "../../shared/canvas/nos";
 import { ArestaDoBixinho } from "./ArestaDoBixinho";
 
@@ -73,6 +73,42 @@ describe("ArestaDoBixinho", () => {
     expect(controleX).toBe(0);
     expect(controleY).toBeLessThan(0);
     expect(controleDoDestinoY).toBeGreaterThan(-200);
+  });
+
+  it("executando, o tracejado corre por cima da mesma curva; concluído ou falhou, a linha só muda de estado", () => {
+    const { container, rerender } = desenhar(true);
+    const caminho = container.querySelector(".react-flow__edge-path")?.getAttribute("d");
+    expect(container.querySelector(".fio-correndo")?.getAttribute("d")).toBe(caminho);
+    expect(container.querySelector("[data-fio]")).toHaveAttribute("data-fio", "correndo");
+
+    rerender(linha("concluido"));
+    expect(container.querySelector(".fio-correndo")).not.toBeInTheDocument();
+    expect(container.querySelector("[data-fio]")).toHaveAttribute("data-fio", "ok");
+
+    rerender(linha("falhou"));
+    expect(container.querySelector("[data-fio]")).toHaveAttribute("data-fio", "erro");
+  });
+
+  it("nascendo com o Subagente trabalhando, o pacote da tarefa parte uma vez, depois de o bixinho nascer", () => {
+    vi.useFakeTimers();
+    const comecar = vi.fn();
+    Object.defineProperty(SVGElement.prototype, "beginElement", { value: comecar, configurable: true });
+    try {
+      const { container } = render(
+        linha("executando", { data: { situacao: "executando", encerradoEm: null, entrada: 2 } }),
+      );
+      expect(container.querySelector(".pacote-da-tarefa animateMotion")).toBeInTheDocument();
+      expect(comecar).not.toHaveBeenCalled();
+
+      act(() => void vi.advanceTimersByTime(atrasoDoPacote(2)));
+      expect(comecar).toHaveBeenCalledTimes(2);
+
+      act(() => void vi.advanceTimersByTime(DURACAO_DO_PACOTE_MS));
+      expect(container.querySelector(".pacote-da-tarefa")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+      Reflect.deleteProperty(SVGElement.prototype, "beginElement");
+    }
   });
 
   it("parado, só a linha, sem bolinha", () => {

@@ -67,6 +67,8 @@ import {
   type SubagenteNaTela,
   type TurnoNaTela,
 } from "../../shared/estado/aplicarEvento";
+import { perguntaPendenteDoTurno, useAvisoDaPergunta } from "../../shared/hooks/useAvisoDaPergunta";
+import { usePreferenciasDaTela } from "../../shared/hooks/usePreferenciasDaTela";
 import { mesmoConteudo, useReaproveitado } from "../../shared/hooks/useReaproveitado";
 import { tamanhoDasInstrucoes } from "../../shared/instrucoes";
 import {
@@ -95,6 +97,8 @@ import { BotaoDeArquivos } from "./BotaoDeArquivos";
 import { BotaoDeLimparBixinhos } from "./BotaoDeLimparBixinhos";
 import type { AcoesDoPlano } from "./CartaoDoPlano";
 import { BotaoDeVincular } from "./BotaoDeVincular";
+import { ChipDaFila } from "./ChipDaFila";
+import { ChipDaPergunta } from "./ChipDaPergunta";
 import { ChipDaPausa } from "./ChipDaPausa";
 import { ControlesDoNo } from "./ControlesDoNo";
 import { FaixaDeServidores } from "./FaixaDeServidores";
@@ -1201,6 +1205,10 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
   const cancelando = cancelamentoPedido && (trabalhando || pausado);
   const alternandoPausa = pausaPedidaQuando === pausado;
   const piscando = usePiscarNaEntrega(ultimoTurno?.subagentes ?? SEM_SUBAGENTES, conectado);
+  // O Claude perguntou e espera: selo kraft, borda pulsando e, uma vez por pergunta nova, o balanço e o som opcional.
+  const perguntaPendente = perguntaPendenteDoTurno(ultimoTurno);
+  const { preferencias: preferenciasDaTela } = usePreferenciasDaTela();
+  const aviso = useAvisoDaPergunta(perguntaPendente, preferenciasDaTela.somDaPergunta);
 
   // A fila vem do resumo do servidor, corrigida pelos eventos (ver `filaDePedidos`).
   const fila = useReaproveitado<readonly DadosDoPedidoNaFila[]>(
@@ -1629,7 +1637,7 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
 
   const janela = (
     <div
-      className={`janela-terminal ${trabalhando && !pausado ? "janela-terminal-ativa" : ""} ${pausado ? "janela-terminal-pausada" : ""} ${modo === "planejamento" ? "janela-terminal-planejando" : ""} ${piscando ? "janela-terminal-entrega" : ""} ${escondido ? "janela-terminal-minimizada" : ""}`}
+      className={`janela-terminal ${trabalhando && !pausado ? "janela-terminal-ativa" : ""} ${pausado ? "janela-terminal-pausada" : ""} ${modo === "planejamento" ? "janela-terminal-planejando" : ""} ${piscando ? "janela-terminal-entrega" : ""} ${perguntaPendente !== null ? "janela-terminal-pergunta" : ""} ${aviso.balancando ? "janela-terminal-balanca" : ""} ${escondido ? "janela-terminal-minimizada" : ""}`}
       onDragOver={(evento) => {
         // Uma linha ou uma nota arrastada vira texto no prompt; arquivos, anexos (imagens e documentos).
         if (temPedidoArrastado(evento.dataTransfer)) {
@@ -1694,6 +1702,8 @@ const JanelaDoTerminal = memo(function JanelaDoTerminal({
           <Fragment key={chip.id}>{chip.elemento}</Fragment>
         ))}
         <span className="flex-1" />
+        {perguntaPendente !== null && <ChipDaPergunta />}
+        <ChipDaFila total={fila.length} />
         {chipsDaDireita.filter(naBarra).map((chip) => (
           <Fragment key={chip.id}>{chip.elemento}</Fragment>
         ))}

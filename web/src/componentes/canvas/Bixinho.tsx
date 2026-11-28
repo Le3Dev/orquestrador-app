@@ -72,6 +72,33 @@ export const Bixinho = memo(function Bixinho({ aparencia, situacao }: Props) {
   );
 });
 
+/** Três faíscas que sobem do lápis enquanto o Subagente edita arquivos (decorativas). */
+export const FaiscasDaEdicao = memo(function FaiscasDaEdicao() {
+  return (
+    <span className="faiscas-da-edicao" aria-hidden="true">
+      <i />
+      <i />
+      <i />
+    </span>
+  );
+});
+
+/**
+ * O selo de "concluído": um círculo verde com um check que se desenha (o
+ * traço usa `pathLength` 1, então o CSS anima só o `stroke-dashoffset`). Ocupa o
+ * lugar do selo da ferramenta, que some quando o Subagente termina.
+ */
+export const SeloDeConcluido = memo(function SeloDeConcluido() {
+  return (
+    <span className="selo-de-concluido" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width={24} height={24}>
+        <circle cx={12} cy={12} r={10} />
+        <path pathLength={1} d="M7 12.5l3.2 3.2L17 9" />
+      </svg>
+    </span>
+  );
+});
+
 const VIEWBOX_DO_ICONE = `0 0 ${LADO_DO_ICONE * TAMANHO_DO_PIXEL} ${LADO_DO_ICONE * TAMANHO_DO_PIXEL}`;
 const TAMANHO_DO_ICONE_NA_TELA = 12;
 

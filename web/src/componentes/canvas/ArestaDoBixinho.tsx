@@ -2,8 +2,11 @@ import { BaseEdge, type EdgeProps, getBezierPath } from "@xyflow/react";
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import {
+  atrasoDoPacote,
   DURACAO_DA_ENTREGA_MS,
+  DURACAO_DO_PACOTE_MS,
   entregaRecente,
+  estadoDoFio,
   houveEntrega,
   prefereMovimentoReduzido,
 } from "../../shared/canvas/entrega";
@@ -82,6 +85,60 @@ function EnvelopeDaEntrega({ caminho, aoTerminar }: { caminho: string; aoTermina
 }
 
 /**
+ * O pacote da tarefa: um quadradinho laranja que sai do terminal e chega ao
+ * bixinho, uma vez, depois de ele nascer (`atrasoDoPacote`). Mesmo esquema do
+ * envelope: SMIL com `begin="indefinite"`, disparado por `beginElement()`.
+ */
+function PacoteDaTarefa({ caminho, entrada, aoTerminar }: { caminho: string; entrada: number; aoTerminar: () => void }) {
+  const pacote = useRef<SVGGElement>(null);
+  const percurso = useRef<SVGAnimationElement>(null);
+  const visibilidade = useRef<SVGAnimationElement>(null);
+
+  useLayoutEffect(() => {
+    if (pacote.current?.closest(".canvas-desconectado")) {
+      aoTerminar();
+      return undefined;
+    }
+    const atraso = atrasoDoPacote(entrada);
+    const partida = setTimeout(() => {
+      comecar(percurso.current);
+      comecar(visibilidade.current);
+    }, atraso);
+    const fim = setTimeout(aoTerminar, atraso + DURACAO_DO_PACOTE_MS);
+    return () => {
+      clearTimeout(partida);
+      clearTimeout(fim);
+    };
+  }, [aoTerminar, entrada]);
+
+  return (
+    <g ref={pacote} className="pacote-da-tarefa" opacity={0} aria-hidden="true">
+      <rect x={-3.5} y={-3.5} width={7} height={7} rx={1.5} />
+      <animateMotion
+        ref={percurso}
+        path={caminho}
+        begin="indefinite"
+        dur={`${DURACAO_DO_PACOTE_MS}ms`}
+        fill="freeze"
+        calcMode="spline"
+        keyPoints="0;1"
+        keyTimes="0;1"
+        keySplines="0.3 0 0.2 1"
+      />
+      <animate
+        ref={visibilidade}
+        attributeName="opacity"
+        begin="indefinite"
+        dur={`${DURACAO_DO_PACOTE_MS}ms`}
+        fill="freeze"
+        values="0;1;1;0"
+        keyTimes="0;0.1;0.85;1"
+      />
+    </g>
+  );
+}
+
+/**
  * A linha do terminal a um bixinho: a mesma curva da aresta padrão do React
  * Flow e, enquanto o Subagente trabalha, uma bolinha que vai até ele e volta
  * sem parar — a troca de informação com o Orquestrador. Ao terminar, some.
@@ -96,7 +153,11 @@ function EnvelopeDaEntrega({ caminho, aoTerminar }: { caminho: string; aoTermina
  * Quando o bixinho sai sozinho do canvas (`data.saindo`), a linha se recolhe
  * do bixinho até o terminal, junto com a saída dele.
  *
- * A bolinha e o envelope são SMIL (`animateMotion`), que segue o caminho da
+ * Quando a linha nasce com o Subagente trabalhando, um pacote (a tarefa) vai do
+ * terminal ao bixinho, e o tracejado corre por cima da linha enquanto ele
+ * trabalha. A linha fica verde ao concluir e vermelha ao falhar (CSS por situação).
+ *
+ * A bolinha, o pacote e o envelope são SMIL (`animateMotion`), que segue o caminho da
  * curva mesmo quando o terminal ou o bixinho são arrastados.
  *
  * `memo`: as arestas podem ser recriadas a cada evento de conversa, mas só as
@@ -125,6 +186,10 @@ export const ArestaDoBixinho = memo(function ArestaDoBixinho({
   const situacaoAnterior = useRef(situacao);
   const [entregando, setEntregando] = useState(false);
   const terminarEntrega = useCallback(() => setEntregando(false), []);
+  // O pacote da tarefa parte uma vez, quando a linha nasce com o Subagente trabalhando.
+  const [enviando, setEnviando] = useState(() => estadoDoFio(situacao) === "correndo" && !prefereMovimentoReduzido());
+  const terminarEnvio = useCallback(() => setEnviando(false), []);
+  const estado = estadoDoFio(situacao);
 
   useEffect(() => {
     const anterior = situacaoAnterior.current;
@@ -135,7 +200,7 @@ export const ArestaDoBixinho = memo(function ArestaDoBixinho({
   }, [situacao, encerradoEm]);
 
   return (
-    <>
+    <g data-fio={estado}>
       <BaseEdge
         path={caminho}
         pathLength={saindo ? 1 : undefined}
@@ -144,6 +209,9 @@ export const ArestaDoBixinho = memo(function ArestaDoBixinho({
         markerEnd={markerEnd}
         interactionWidth={interactionWidth}
       />
+      {/* Tracejado que corre do terminal ao bixinho enquanto ele trabalha (só o deslocamento do traço). */}
+      {estado === "correndo" && <path d={caminho} className="fio-correndo" aria-hidden="true" />}
+      {enviando && <PacoteDaTarefa caminho={caminho} entrada={data?.entrada ?? 0} aoTerminar={terminarEnvio} />}
       {animated && (
         <circle r={3.5} className="bolinha-da-troca" aria-hidden="true">
           <animateMotion
@@ -158,6 +226,6 @@ export const ArestaDoBixinho = memo(function ArestaDoBixinho({
         </circle>
       )}
       {entregando && <EnvelopeDaEntrega caminho={caminho} aoTerminar={terminarEntrega} />}
-    </>
+    </g>
   );
 });

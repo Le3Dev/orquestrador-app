@@ -7,6 +7,7 @@ import {
   bixinhosParaLimpar,
   comNavegadorAberto,
   comPosicoes,
+  ehBixinho,
   ehFechavelEmGrupo,
   ehNavegador,
   ehNota,
@@ -136,6 +137,22 @@ describe("sincronizarBixinhos", () => {
     expect(bixinhos.every((no) => no.parentId === "o1" && no.position.y > 500)).toBe(true);
     // O pai precisa vir antes dos filhos no array.
     expect(nos[0]?.id).toBe("o1");
+  });
+
+  it("escalona a entrada de quem nasce junto e preserva a de quem já estava", () => {
+    const nos = sincronizarBixinhos([terminal], new Map([["o1", doisSubagentes]]));
+    const entradas = nos.filter(ehBixinho).map((no) => no.data.entrada ?? 0);
+    expect(entradas).toEqual([0, 1]);
+
+    // Um terceiro chega sozinho depois: é o primeiro da fila dele e os outros não mudam.
+    const tres = conversa([
+      { tipo: "turno_iniciado", turnoId: "t1", texto: "analise", configuracao },
+      { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "s1", descricao: "A", tarefa: "" },
+      { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "s2", descricao: "B", tarefa: "" },
+      { tipo: "subagente_iniciado", turnoId: "t1", subagenteId: "s3", descricao: "C", tarefa: "" },
+    ]);
+    const depois = sincronizarBixinhos(nos, new Map([["o1", tres]]));
+    expect(depois.filter(ehBixinho).map((no) => no.data.entrada ?? 0)).toEqual([0, 1, 0]);
   });
 
   it("devolve o mesmo array quando nada mudou, e mantém a posição de quem foi arrastado", () => {
@@ -401,7 +418,8 @@ describe("arestasDosBixinhos", () => {
 
     expect(arestas.map((aresta) => aresta.data)).toEqual([
       { situacao: "concluido", encerradoEm: "2026-10-28T12:00:00Z" },
-      { situacao: "executando", encerradoEm: null },
+      // O segundo da fila de entrada leva o lugar dele, para o pacote da tarefa partir depois de ele nascer.
+      { situacao: "executando", encerradoEm: null, entrada: 1 },
     ]);
   });
 
